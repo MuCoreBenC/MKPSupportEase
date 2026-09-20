@@ -157,5 +157,5 @@
     - [x] 17.5: clippy 拦截（实测报 `disallowed method`）、路径穿越三判据（含符号链接）、原子写单测 —— 20 个 Rust 单测全绿
     - [x] 17.6: `tsc -b` / `eslint` / `stylelint` / `vite build` / `cargo fmt` / `cargo clippy -D warnings` / `cargo test` 全过（本地 + CI 两处）
     - [x] 17.7: git 拦截五条实测（main 直提 / push main（含 `--no-verify` 被服务端 `GH013` 拒）/ 分支名 / 3MB 文件 / CI 红时 `gh pr merge` 被 `base branch policy` 拒）
-    - [ ] 17.8: `npm run tauri build` 出 macOS 包 —— 已在跑
+    - [x] 17.8: `npm run tauri build` 出包成功：`SupportEase.app` + `SupportEase_0.0.0_aarch64.dmg`（4.8MB）。**打开它验一眼要你的手**
     - [ ] 17.9: 版本号已回填 doc §2.4；`npm run release` 发 `v0.1.0` 要交互输入，由你亲手跑（顺带验 Task 14）
