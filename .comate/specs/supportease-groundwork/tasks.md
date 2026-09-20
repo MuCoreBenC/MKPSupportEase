@@ -34,31 +34,36 @@
 
 ## 第二段：前端移植（v023 整体搬过来，不重写视觉）
 
-- [ ] Task 4: CI 工作流
+- [x] Task 4: CI 工作流
     - 4.1: 写 `.github/workflows/ci.yml`，`on: pull_request` + `push: [main]`
     - 4.2: `web` job：`npm ci` → `npm run lint` → `tsc -b` → `npm run build`
     - 4.3: `rust` job：`cargo fmt --check` → `cargo clippy -- -D warnings` → `cargo test`（Rust 侧还不存在时先允许跳过，Task 7 之后必须真跑）
     - 4.4: 缓存 `~/.cargo/registry` 与 `src-tauri/target`
     - 4.5: push 分支，确认 Actions 里两个 job 出现并跑完
 
-- [ ] Task 5: 搬共用前端层
-    - 5.1: 拷 `src/styles/`、`src/components/`（16 文件）、`src/hooks/`、`src/calib/`、`public/`、`index.html`
-    - 5.2: 拷 `eslint.config.js`、`.stylelintrc.json`、`tsconfig.json` / `tsconfig.app.json` / `tsconfig.node.json`（`tsconfig.tools.json` 不搬，工作台不在这个仓库）
-    - 5.3: `package.json` 补依赖（exact 版本）：react 18.3.1、react-dom 18.3.1、three 0.186.0、@types/three 0.186.0 + 现有工具链；**不装 playwright**
-    - 5.4: 补 scripts：`dev` / `build` / `preview` / `lint` / `lint:fix`
-    - 5.5: 写精简版 `vite.config.ts`：只留 `react()`，`port: 5178` + `strictPort: true` + `open: false`，`host: process.env.TAURI_DEV_HOST ?? false`，`clearScreen: false`
-    - 5.6: `tsc -b` + `npm run lint` 过
+> **Task 5 / 6 已按实测的依赖闭包重写（执行 Task 5 前）。** doc §2.3 原本写着"`v001..v022` 不搬"与"`src/mock/**` 不搬"，但 v023 实际 import `v003/TopTabs`、`v005/ui`、`v005/pages`（3 个）、`v005/report`、`v008/CopyAction`、`v014`（4 个模块）、`mock/mkpFull`（6 个符号）、`dev/devStore`（6 个文件在用）。v023 自身 30 文件 7246 行，外部闭包 35 文件 5920 行。三处决策见 doc §2.3 的补记。
+
+- [x] Task 5: 搬共用前端层（按 v023 的实际闭包搬，不整目录搬）
+    - 5.1: 拷 `src/styles/`（tokens.css / global.css）、`public/`（10M，无单文件 >2MB）、`index.html`（标题改 `SupportEase`）
+    - 5.2: 只拷 `src/components/Icon.tsx` + `Icon.module.css`、`src/hooks/{useDensity,usePlatform}.ts`、`src/calib/{precise,zoffset}-calibration.generated.ts` —— 另外 14 个组件（AxisPanel / Card / GlueSpeed / PrinterStage / QuickActions / RecentFiles / StatusBar 及其 CSS）与 `useStickyState` 只被 v001..v022 用，v023 闭包里零引用，搬过来是死代码，还会把 `src/mock/machine.ts` 一起拖进来
+    - 5.3: 拷 `eslint.config.js`（删掉 `tools/**` 那段 override）、`.stylelintrc.json`、`tsconfig.json`（去掉 `tsconfig.tools.json` 引用）、`tsconfig.app.json`、`tsconfig.node.json`
+    - 5.4: `package.json` 补 exact 依赖：react / react-dom 18.3.1、three 0.186.0、@types/three 0.186.0、@types/react 18.3.12、@types/react-dom 18.3.1、@vitejs/plugin-react 4.3.4、vite 5.4.11、typescript 5.6.3、eslint 9.14.0、@eslint/js 9.14.0、typescript-eslint 8.13.0、eslint-plugin-react-hooks 5.0.0、eslint-plugin-react-refresh 0.4.14、globals 15.12.0、stylelint 16.10.0、stylelint-config-standard 36.0.1；**不装 playwright**
+    - 5.5: 补 scripts：`dev` / `build` / `preview` / `lint` / `lint:fix`
+    - 5.6: 写精简版 `vite.config.ts`：只留 `react()`（去掉 `calibFs()` / `curvesFs()` 两个无鉴权写盘端点），`port: 5178` + `strictPort: true` + `open: false`，`host: process.env.TAURI_DEV_HOST ?? false`，`clearScreen: false`
+    - 5.7: `npm install` → `tsc -b` + `npm run lint` 过
 
 - [ ] Task 6: 把 v023 提升为唯一前端 `src/app/`
-    - 6.1: **先核实依赖边界**：读 `ExplodedHero.tsx` / `SlideDeck.tsx` / `HomeGuide.tsx`，确认是否 import `src/dev/devStore`，把结果记下来
-    - 6.2: 拷 `src/versions/v023/**` → `src/app/**`，文件名去 `V023` 后缀（`AppV023.tsx` → `App.tsx`、`PageMachineV023.tsx` → `pages/PageHome.tsx`、`PageCalibV023.tsx` → `pages/PageCalib.tsx`，CSS Module 同步改名）
-    - 6.3: 修所有 import 路径（原来指向 `../v005/...`、`../../components/...` 的一律重指）
-    - 6.4: 按 6.1 的结论处理 devStore：把当前生效的曲线值从 `src/dev/heroCurves.json` 固化成 `src/app/heroCurves.ts` 模块常量，删掉对 DevPanel / devStore 的引用
-    - 6.5: 搬 `src/api/{contract,mock,bridge,index,errors}.ts`，`mock.ts` 里内联最小假数据（替代不搬的 `src/mock/**`），保证浏览器模式能跑
-    - 6.6: 写 `src/main.tsx` 直接挂 `src/app/App.tsx`；**不搬** `src/versions/registry.ts` 与旧 `src/App.tsx` 预览器外壳
-    - 6.7: 处理 `TopTabs` 的页签来源：原来读 `src/mock/mkpFull.ts` 的 `tabs`，改成 `src/app/` 内的模块常量，并沿用 v023 的覆盖（`machine` → 「首页」+ home 图标、`settings` → gear 图标）
-    - 6.8: `npm run dev` + 浏览器 5178，**逐档比对 mini / compact / wide / ultra 四档与试验场是否一致**，不一致就修到一致
-    - 6.9: `tsc -b` / `lint` / `stylelint` / `build` 全过
+    - 6.1: 依赖边界（已核实，结论写进 doc §2.3 补记）：`ExplodedHero` **不碰** devStore（只用 three + GLTFLoader）；`HomeGuide` 零外部依赖；`SlideDeck` 用 `reportPage` / `useDevState`；`HeroFade` 用 14 个 devStore 符号（含 undo/redo/曲线编辑）；`usePreset` / `CalibHead` / `MachinePicker` / `PresetStack` / `PageMachineV023` 也各自用 devStore
+    - 6.2: 拷 `src/versions/v023/**` → `src/app/**`，去 `V023` 后缀（`AppV023.tsx` → `App.tsx`、`PageMachineV023.tsx` → `pages/PageHome.tsx`、`PageCalibV023.tsx` → `pages/PageCalib.tsx`，CSS Module 同步改名）
+    - 6.3: 跨稿闭包按"首页 + 校准页真正需要的"搬进 `src/app/`，不保留稿号目录名：`v003/TopTabs` → `src/app/components/TopTabs`、`v005/ui/{Controls,Modal}` → `src/app/ui/`、`v008/components/CopyAction` → `src/app/components/`、`v014/{plateLadder,heroArt,useArtLayers}` + `v014/components/CalibPlate` → `src/app/`
+    - 6.4: **不搬** `v005/pages/{PagePreset,PageParams,PageSettings}` 与 `v005/report/ReportView` → 这四处换成统一的 `PagePlaceholder`（写明"本版未接入"），页签结构不变
+    - 6.5: `heroArt.ts` 的 `Selection` 类型重指到 `src/app/components/MachinePicker`，从而不搬 `v014/components/MachinePicker`
+    - 6.6: devStore 拆分：纯求值（`evalFill` / `evalNudge` / `clamp` / `snapPct` / `NUDGE_LIMIT` + `heroCurves.json` 基线值）→ `src/app/heroCurves.ts`；编辑与上报（`undo` / `redo` / `commitTune` / `bumpCurveAt` / `setNudgeAt` / `resetNear` / `report*` / `setPresetPhase` / `useDevState`）全删，调用点改成固化常量
+    - 6.7: 数据分两层 —— 界面结构常量进 `src/app/constants/{tabs,machines,models,variants}.ts`；业务假数据（`presetIndex` / `report` / `calibModels` / `TEST_MODELS`）进 `src/api/mock.ts`。**不整坨搬 `mkpFull.ts`**（549 行），也不重写成最小集（会破坏 6.10 的逐档一致）
+    - 6.8: 搬 `src/api/{contract,mock,bridge,index,errors}.ts`；写 `src/main.tsx` 挂 `src/app/App.tsx`；**不搬** `registry.ts` 与旧 `src/App.tsx` 预览器外壳（`VersionProps` 是 type-only，删掉即可）
+    - 6.9: `TopTabs` 的页签来源改成 `src/app/constants/tabs.ts`，沿用 v023 的覆盖（`machine` → 「首页」+ home 图标、`settings` → gear 图标）
+    - 6.10: `npm run dev` + 浏览器 5178，**逐档比对 mini / compact / wide / ultra 四档与试验场是否一致**，不一致就修到一致
+    - 6.11: `tsc -b` / `lint` / `stylelint` / `build` 全过
 
 ---
 

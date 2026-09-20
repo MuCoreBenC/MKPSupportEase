@@ -127,6 +127,25 @@ MKPSupportEase/
 
 > 剥离过程中有两处"需核实"，执行阶段先读代码确认依赖边界再动手，不凭印象删。
 
+#### 2.3 补记：实测依赖闭包（Task 5 执行前测出，推翻了上表两行）
+
+上表写着"`v001..v022` 不搬"与"`src/mock/**` 不搬"。实测 v023 的 import 图证明这两条做不到：
+
+- v023 自身 30 文件 7246 行；**外部闭包 35 文件 5920 行**。
+- 跨稿依赖：`v003/TopTabs`、`v005/ui/{Controls,Modal}`、`v005/pages/{PagePreset,PageParams,PageSettings}`、`v005/report/ReportView`、`v008/components/CopyAction`、`v014/{plateLadder,heroArt,useArtLayers}`、`v014/components/{CalibPlate,MachinePicker}`。
+- `src/mock/mkpFull.ts`（549 行）被 6 处 import：`AppV023`（`report` / `tabs`）、`CalibHead`（`presetIndex`）、`MachinePicker`（`brands` / `models` / `variants` / `Option`）、三个 v005 页面、`ReportView`、`api/mock.ts`（`calibModels` / `presetIndex`）。
+- `src/dev/devStore.ts`（914 行）被 6 个 v023 文件 import。上表只要求核实 `ExplodedHero` / `SlideDeck` —— 实测 **`ExplodedHero` 根本不碰 devStore**（只用 three + GLTFLoader），真正深度耦合的是 `HeroFade`（14 个符号，含 `undo` / `redo` / `commitTune` / `bumpCurveAt` 这套曲线编辑）。
+
+据此定下三条（Task 5 / 6 已按此重写）：
+
+| 议题 | 结论 |
+| --- | --- |
+| 跨稿 UI | **只搬首页 + 校准页真正需要的**：`TopTabs`、`ui/{Controls,Modal}`、`CopyAction`、`v014` 四个模块，落位到 `src/app/` 内按职责命名的目录，不保留稿号。`v005` 的三个页面与 `ReportView` **不搬** —— Preset / Params / Settings / 报告四处先用统一占位组件，页签结构不变 |
+| mock 数据 | **拆两层**。界面结构数据（`tabs` / `brands` / `models` / `variants`）属于应用本身 → `src/app/constants/`；业务假数据（`presetIndex` / `report` / `calibModels` / `TEST_MODELS`）属于 API 的临时实现 → `src/api/mock.ts`。理由：以后 Rust 接管时替换的是 `mock.ts` → `rust.ts` 这一个文件，页面一行不动。mock 是临时实现，不该变成新的"数据层祖宗" |
+| devStore | **抽纯函数**：`evalFill` / `evalNudge` / `clamp` / `snapPct` / `NUDGE_LIMIT` + `heroCurves.json` 的基线值 → `src/app/heroCurves.ts`。编辑与上报（`undo` / `redo` / `commitTune` / `bumpCurveAt` / `setNudgeAt` / `resetNear` / `report*` / `setPresetPhase` / `useDevState`）全删，调用点改成固化常量。不留"只读替身"那层死代码 |
+
+同一个原则也用在共用层：`src/components/` 那 16 个文件里 **v023 只用 `Icon`**，其余 14 个（AxisPanel / Card / GlueSpeed / PrinterStage / QuickActions / RecentFiles / StatusBar + CSS）与 `hooks/useStickyState` 只被老稿使用，搬过来是死代码，而且会把 `src/mock/machine.ts` 一起拖进产品仓。只搬 `Icon` + `useDensity` + `usePlatform` + `calib/*.generated.ts`。
+
 ### 2.4 依赖
 
 前端保持极简，沿用试验场的 exact 版本钉法（`package.json` 里全是精确版本，不用 `^`）：

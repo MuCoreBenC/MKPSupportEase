@@ -1,0 +1,6 @@
+.icon {
+  width: var(--icon);
+  height: var(--icon);
+  flex-shrink: 0;
+  display: block;
+}

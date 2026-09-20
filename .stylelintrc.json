@@ -1,0 +1,57 @@
+{
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "declaration-property-value-disallowed-list": {
+      "scrollbar-width": ["auto"],
+      "overflow": ["overlay"],
+      "overflow-x": ["overlay"],
+      "overflow-y": ["overlay"]
+    },
+    "selector-class-pattern": null,
+    "custom-property-pattern": null,
+    "alpha-value-notation": null,
+    "color-function-notation": null,
+    "property-no-vendor-prefix": null,
+    "value-no-vendor-prefix": null,
+    "selector-no-vendor-prefix": null,
+    "at-rule-no-vendor-prefix": null,
+    "no-descending-specificity": null,
+    "comment-empty-line-before": null,
+    "declaration-empty-line-before": null,
+    "custom-property-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "number-max-precision": null,
+    "shorthand-property-no-redundant-values": null,
+    "declaration-block-no-redundant-longhand-properties": null,
+    "selector-pseudo-element-no-unknown": [
+      true,
+      {
+        "ignorePseudoElements": [
+          "-webkit-scrollbar",
+          "-webkit-scrollbar-thumb",
+          "-webkit-scrollbar-track",
+          "-webkit-scrollbar-corner",
+          "-webkit-scrollbar-button",
+          "-webkit-slider-runnable-track",
+          "-webkit-slider-thumb",
+          "-moz-range-track",
+          "-moz-range-progress",
+          "-moz-range-thumb"
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.module.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["/::-webkit-scrollbar/"],
+          {
+            "message": "滚动条样式统一在 src/styles/global.css 定义，组件内不要覆盖（幽灵滚动条约定）"
+          }
+        ]
+      }
+    }
+  ]
+}

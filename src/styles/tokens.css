@@ -1,0 +1,90 @@
+/* ============ MKP 设计变量 ============ */
+:root {
+  /* 底色 / 表面 */
+  --bg-1: #f7f9fa;
+  --bg-2: #eceff1;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-solid: #fff;
+  --surface-sunken: rgba(16, 24, 32, 0.035);
+
+  /*
+   * 卡片内部的表面色 —— 内容区就这一种白。
+   *
+   * 值取自向导那张卡原本硬编码的 #fbfcfd，所以长相没变，只是有了唯一出处：
+   * 以前首页的卡是 #fbfcfd、校准页干脆没有底色、板子自己又铺一层纯 #fff，
+   * 三种"白"拼在一起，切 tab 跳色、板子四周还有一道看得见的缝。
+   * 将来加深色套：这一条与 CalibPlate 的 --calib-bg 要一起换（板子已不自带底色）。
+   */
+  --card-face: #fbfcfd;
+
+  --line: rgba(16, 24, 32, 0.08);
+  --line-strong: rgba(16, 24, 32, 0.14);
+
+  /* 文本 */
+  --text-1: #1a2128;
+  --text-2: #6b7783;
+  --text-3: #9aa5b0;
+
+  /* 强调色（取自打印机绿色件） */
+  --accent: #20b25a;
+  --accent-deep: #17924a;
+  --accent-soft: rgba(32, 178, 90, 0.12);
+
+  /* 轴标色 */
+  --axis-x: #20b25a;
+  --axis-y: #3b82f6;
+  --axis-z: #8b5cf6;
+
+  /* 阴影 / 圆角 */
+  --shadow: 0 8px 28px rgba(20, 32, 45, 0.06);
+  --shadow-lift: 0 18px 50px rgba(20, 32, 45, 0.12);
+  --r-lg: 16px;
+  --r-md: 12px;
+  --r-sm: 8px;
+
+  /* 窗口 chrome 高度：两平台统一，不随密度变化 */
+  --titlebar-h: 44px;
+  --statusbar-h: 32px;
+
+  /* 随密度切换的量 */
+  --gap: 20px;
+  --pad: 18px;
+  --fs-metric: 26px;
+  --fs-label: 12px;
+  --fs-body: 13px;
+  --nav-w: 216px;
+  --card-r: var(--r-lg);
+  --icon: 18px;
+}
+
+[data-density='ultra'] {
+  --gap: 24px;
+  --pad: 22px;
+  --fs-metric: 30px;
+  --fs-label: 12.5px;
+  --fs-body: 14px;
+  --nav-w: 236px;
+  --icon: 19px;
+}
+
+[data-density='compact'] {
+  --gap: 14px;
+  --pad: 14px;
+  --fs-metric: 22px;
+  --fs-label: 11px;
+  --fs-body: 12.5px;
+  --nav-w: 64px;
+  --card-r: var(--r-md);
+  --icon: 17px;
+}
+
+[data-density='mini'] {
+  --gap: 10px;
+  --pad: 11px;
+  --fs-metric: 19px;
+  --fs-label: 10px;
+  --fs-body: 12px;
+  --nav-w: 0px;
+  --card-r: var(--r-md);
+  --icon: 16px;
+}
