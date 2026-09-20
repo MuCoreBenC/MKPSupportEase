@@ -12,11 +12,10 @@
  */
 import { execFileSync } from 'node:child_process'
 
-/* 必须通过的状态检查。
-   现在故意是空的：CI 工作流要到 Task 4 才存在，此刻就把 web / rust 列成必需，
-   第一个 PR 会永远停在"等待检查"—— 检查根本不会上报。
-   Task 16 会把它填成 ['web', 'rust'] 并重跑本脚本。 */
-const REQUIRED_CHECKS = []
+/* 必须通过的状态检查。名字与 .github/workflows/ci.yml 里两个 job 的 `name:` 逐字对应 ——
+   写错不会报错，只会永远等一个不存在的检查。
+   （建 ruleset 那一轮这里是空的：CI 还不存在，勾了第一个 PR 永远合不进去。） */
+const REQUIRED_CHECKS = ['web', 'rust']
 
 const MAIN_RULESET = 'main-pr-only'
 const TAG_RULESET = 'tags-v-no-delete'
