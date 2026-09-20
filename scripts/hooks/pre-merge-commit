@@ -1,0 +1,47 @@
+#!/bin/sh
+# 闸①b：拒绝合并进 main
+#
+# 这个钩子是实测出来的必需品，不是照抄文档：
+# git 2.53 实测 `git merge --no-ff` **完全不调用 pre-commit** —— 放一个 exit 1 的
+# pre-commit 进去，merge 照样成功（退出码 0，merge commit 照样生成）。
+# 只有 pre-merge-commit 会被调用并拦住（退出码 1，MERGE_HEAD 留在原地）。
+# 两个都放时只跑 pre-merge-commit。
+#
+# 也就是说在这个钩子存在之前，「合并进 main」这条路径是**完全没有闸门的**。
+#
+# 注意：合并遇冲突时，解冲突后的那次提交走的是 pre-commit（普通 commit 路径），
+# 所以两个钩子的判据必须一致，否则解完冲突反而提不上去。
+#
+# 逃生开关：ALLOW_COMMIT_ON_MAIN=1
+
+. "$(dirname "$0")/_lib.sh"
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
+
+[ "$branch" = "main" ] || exit 0
+
+if in_release; then
+  exit 0
+fi
+
+if [ "$ALLOW_COMMIT_ON_MAIN" = "1" ]; then
+  log_bypass ALLOW_COMMIT_ON_MAIN
+  exit 0
+fi
+
+echo "" >&2
+echo "  闸①b：拒绝手工合并进 main。" >&2
+echo "" >&2
+echo "  本仓库是 PR-only —— main 由 GitHub 上的 PR（squash）推进，本地不合 main：" >&2
+echo "    git push -u origin HEAD && gh pr create" >&2
+echo "" >&2
+echo "  发版把校验 / PR / 合并 / 打 tag 串成一个动作：" >&2
+echo "    npm run release" >&2
+echo "" >&2
+echo "  这么设计是因为：手工合并极容易在第 4 步分心，第 5 步的 tag 就没了。" >&2
+echo "  试验场 22 个设计稿只留下 12 个 tag，就是这么丢的。" >&2
+echo "" >&2
+echo "  确实要手工合（会留痕）：" >&2
+echo "    ALLOW_COMMIT_ON_MAIN=1 git merge --no-ff <branch>" >&2
+echo "" >&2
+exit 1

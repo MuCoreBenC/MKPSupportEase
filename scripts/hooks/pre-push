@@ -1,0 +1,140 @@
+#!/bin/sh
+# 闸②：拒绝对 main 的任何 push
+# 闸③：拒绝非快进（force）推送
+# 闸④：拒绝删除远端引用
+# 闸⑤：推 tag 时，tag 名必须等于 v<package.json version>、必须 annotated、必须在 main 上
+#
+# 逃生开关：ALLOW_PUSH_MAIN=1  ALLOW_FORCE_PUSH=1  ALLOW_DELETE_REMOTE=1  ALLOW_TAG_MISMATCH=1
+#
+# 闸②在本仓库是**无条件拦截**，与试验场不同。试验场的判据是「结果校验」——
+# 推 main 时看 tip 有没有对应版本号的 annotated tag，因为那边 main 由本地合并推进。
+# 这里改成 PR-only：main 的推进权整个交给 GitHub（PR + squash），本地任何时候都不该
+# push main，所以不必再看 tag，直接拦，报错指向"开 PR"。
+# tag 仍由本地打并推，判据留在闸⑤。
+
+. "$(dirname "$0")/_lib.sh"
+
+ZERO=0000000000000000000000000000000000000000
+
+push_main=0
+force=0
+delete=0
+tag_bad=0
+tag_msg=
+
+VER=$(pkg_version)
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$remote_ref" ] && continue
+
+  # 删远端引用：本地 sha 全零
+  if [ "$local_sha" = "$ZERO" ]; then
+    delete=1
+    continue
+  fi
+
+  # 非快进：远端已有的提交不是本地提交的祖先
+  if [ "$remote_sha" != "$ZERO" ]; then
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+      force=1
+    fi
+  fi
+
+  case "$remote_ref" in
+    refs/heads/main)
+      push_main=1
+      ;;
+    refs/tags/*)
+      name=${remote_ref#refs/tags/}
+
+      if [ -z "$VER" ]; then
+        tag_bad=1
+        tag_msg="读不到 package.json 的 version，无法判断 tag '$name' 对不对"
+      elif [ "$name" != "v$VER" ]; then
+        tag_bad=1
+        tag_msg="tag '$name' 与 package.json 的版本号不符，应该是 'v$VER'"
+      elif [ "$(git cat-file -t "$name" 2>/dev/null)" != "tag" ]; then
+        tag_bad=1
+        tag_msg="tag '$name' 是轻量 tag，发布 tag 必须是 annotated（git tag -a）"
+      elif ! git merge-base --is-ancestor "$name^{commit}" main 2>/dev/null; then
+        tag_bad=1
+        tag_msg="tag '$name' 指向的提交不在 main 上"
+      fi
+      ;;
+  esac
+done
+
+fail=0
+pending_bypass=
+
+if [ "$delete" = "1" ]; then
+  if [ "$ALLOW_DELETE_REMOTE" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_DELETE_REMOTE"
+  else
+    echo "" >&2
+    echo "  闸④：拒绝删除远端引用（不可逆）。" >&2
+    echo "  分支让 PR 顺手带走：gh pr merge --merge --delete-branch" >&2
+    echo "  确实要手删（会留痕）：ALLOW_DELETE_REMOTE=1 git push origin --delete <ref>" >&2
+    fail=1
+  fi
+fi
+
+if [ "$force" = "1" ]; then
+  if [ "$ALLOW_FORCE_PUSH" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_FORCE_PUSH"
+  else
+    echo "" >&2
+    echo "  闸③：拒绝非快进（force）推送。" >&2
+    echo "  这会改写别人已经拉到的历史。" >&2
+    echo "  确实要改写（会留痕）：ALLOW_FORCE_PUSH=1 git push --force-with-lease ..." >&2
+    fail=1
+  fi
+fi
+
+if [ "$tag_bad" = "1" ]; then
+  if [ "$ALLOW_TAG_MISMATCH" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_TAG_MISMATCH"
+  else
+    echo "" >&2
+    echo "  闸⑤：$tag_msg" >&2
+    echo "" >&2
+    echo "  发布 tag 由发版命令生成，不用手打：" >&2
+    echo "    npm run release" >&2
+    echo "" >&2
+    echo "  确实要推这个 tag（会留痕）：ALLOW_TAG_MISMATCH=1 git push origin <tag>" >&2
+    fail=1
+  fi
+fi
+
+if [ "$push_main" = "1" ]; then
+  if [ "$ALLOW_PUSH_MAIN" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_PUSH_MAIN"
+  else
+    echo "" >&2
+    echo "  闸②：拒绝 push main —— main 只能由 PR 推进。" >&2
+    echo "" >&2
+    echo "  本仓库是 PR-only：改动走分支 → PR → CI 绿 → squash 合并。" >&2
+    echo "  把当前分支推上去并开 PR：" >&2
+    echo "    git push -u origin HEAD && gh pr create" >&2
+    echo "" >&2
+    echo "  发版把校验 / PR / 合并 / 打 tag 串成一个动作：" >&2
+    echo "    npm run release" >&2
+    echo "" >&2
+    echo "  就算用 --no-verify 绕过这道本地闸，GitHub 的 main ruleset 也会拒。" >&2
+    echo "" >&2
+    echo "  确实要裸推 main（会留痕）：ALLOW_PUSH_MAIN=1 git push origin main" >&2
+    fail=1
+  fi
+fi
+
+if [ "$fail" = "1" ]; then
+  echo "" >&2
+  exit 1
+fi
+
+# push 确定会发生了，这时候写留痕才是真的（某道闸放行、另一道拦下时不该留假记录）
+for b in $pending_bypass; do
+  log_bypass "$b"
+done
+
+exit 0
