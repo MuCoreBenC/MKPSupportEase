@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "lint": "eslint . && stylelint \"src/**/*.css\"",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
