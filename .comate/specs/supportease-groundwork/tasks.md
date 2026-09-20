@@ -123,7 +123,7 @@
 
 ## 第四段：发版流程与文档
 
-- [ ] Task 14: `release.mjs` 重写为 PR-only
+- [x] Task 14: `release.mjs` 重写为 PR-only
     - 14.1: 前置检查沿用（不在 main / 工作区干净 / 闸门生效 / 复述 `bypass.log`），加一条：必须已配置 `origin`
     - 14.2: 校验链加 Rust：`lint` → `tsc -b` → `build` → `cargo clippy -D warnings` → `cargo test`
     - 14.3: 版本号三处一起改：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
@@ -132,9 +132,9 @@
     - 14.6: `git switch main && git pull` → 在 main 的 tip 打 annotated tag `v<ver>` → push tag
     - 14.7: 任何一步失败停住并打印精确回退命令；破坏性命令只打印不执行
 
-- [ ] Task 15: 三份文档就位
+- [x] Task 15: 三份文档就位
     - 15.1: `docs/ARCHITECTURE.md` —— 由 doc.md 的 §1.1 / §3 / §4 / §5 / §6 收口成常驻版，开头指认"产品规则见 PRESET-PRODUCT-RULES.md"
-    - 15.2: `docs/PRESET-PRODUCT-RULES.md` —— 原样落成产品规则：位置×类型两维度、本地字段与排序、MKP 应用唯一性、切片器无应用、云端三状态、更新提示、下载、更新与归档、发布时间作用户可见版本、SHA 与失效、云端原件只读、Finder 复制脱钩、用户修改副本、与云端更新完全脱钩、归档、外部导入 TOML 校验、外部删除、第一版不做、最终状态模型图
+    - 15.2: ⚠️ `docs/PRESET-PRODUCT-RULES.md` **只落了 19 节目录，正文空着** —— 规则的权威原文不在骨架 spec 里，凭印象补写会让实现照着错的条文做。等你把原文贴进来。原文要求：原样落成产品规则：位置×类型两维度、本地字段与排序、MKP 应用唯一性、切片器无应用、云端三状态、更新提示、下载、更新与归档、发布时间作用户可见版本、SHA 与失效、云端原件只读、Finder 复制脱钩、用户修改副本、与云端更新完全脱钩、归档、外部导入 TOML 校验、外部删除、第一版不做、最终状态模型图
     - 15.3: `docs/GIT-WORKFLOW.md` 重写：八道本地闸 + ruleset 清单 + 开局悖论那段 + 新发版流程 + **squash 会重写提交、tag 指向的 SHA 与分支不同**这条说明
     - 15.4: 搬 `docs/DESIGN-SPACING.md`、`docs/3D-ASSET-CONTRACT.md`
     - 15.5: 写 `README.md`：一句话定位、启动命令、三份文档的指路、以及"试验场在 mkp-adaptive-console"
