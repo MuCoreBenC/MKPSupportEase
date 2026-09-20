@@ -1,0 +1,223 @@
+/*
+ * 板子的缩放视口 + 它自己的标题行。
+ *
+ * 结构：
+ *   .box
+ *     .head      板名（左） + 缩放手柄（右）—— 手柄在标题行里，不压在板子上挡内容
+ *     .viewport  固定大小的窗口，overflow: hidden
+ *       .layer   放大期间"真的变宽"，位移只用 translate
+ *
+ * 为什么不是 transform: scale()：见 PlateZoom.tsx 里那段注释（scale 放大的是一张
+ * 按 ×1 分辨率栅格化的位图，字会发虚；改窗口尺寸迫使它重新栅格化才又清晰）。
+ */
+.box {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+
+/*
+ * 缩放手柄：这一套交互的唯一入口，所以常驻显示、不藏在 hover 后面。
+ * 光标用 ew-resize —— 明说"左右拖"。不换行、不收缩：窄窗里先截板名（上面那条 ellipsis）。
+ */
+.handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 70%);
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-label);
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.handle:hover,
+.handle[data-active='true'] {
+  border-color: var(--text-3);
+  color: var(--text-1);
+}
+
+/* 放大态：手柄自己也变成"有值"的样子，倍率就在上面 */
+.handle[data-on='true'] {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+
+.arrow {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---------- 视口 ---------- */
+
+/*
+ * 放大期间高度被内联钉在 ×1 时的值：内层真的变宽变高，不钉住的话板框会被顶开，
+ * 整页版面跟着动 —— 而"只放大它自己"要的正是版面一个像素都不动。
+ */
+.viewport {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 放大之后空白处可以拖着看别处；×1 时不改光标（格子上仍是 pointer） */
+.viewport[data-zoomed='true'] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.viewport[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+/*
+ * 位移层。只有 translate —— 纯位移不牵涉重采样，放大后的字仍是矢量渲染的。
+ * 刻意不写 will-change: transform：那会把这一层提成缓存位图，正是模糊的来源。
+ */
+.layer {
+  transform-origin: 0 0;
+}
+
+/*
+ * 放大期间：层宽由内联样式给（基准宽 × 倍率），里面那块板跟着层宽走。
+ *
+ * !important 是必要的：CalibPlate 自己写着 `width: min(100%, --plate-mm × --plate-scale)`，
+ * 那是 ×1 的尺寸规则；放大时得让位，而那份 CSS 被 v014–v021 共用，不能去改。
+ * margin-inline: auto 保留 —— 层比视口窄时仍居中（XY 板在宽窗就是这种情形）。
+ */
+.layer[data-wide='true'] {
+  margin-inline: auto;
+}
+
+.layer[data-wide='true'] > * {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* ---------- fill 模式（「校准」tab） ---------- */
+
+/*
+ * 一句话：框吃掉页面剩下的高度，板子再问"框还剩多少"要尺寸。
+ *
+ * 原来是 `--plate-scale: (100cqh − 205px) / 53.545` —— 那个 205 是"除板子以外的固定开销"，
+ * 页首少一行、字号一动就得重算，是个要人维护的常数。现在改成：
+ * 高度由 flex 分配（没有任何减法），板子取"高度这一头"和"宽度这一头"的较小值，
+ * 于是"尽量大且完整"，从 400 宽拖到 3440 都连续。
+ *
+ * 向导那两页不传 fill：它们的板子尺寸是另一套调死的公式，还牵着卡片落位动画。
+ */
+.box[data-fill='true'] {
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport[data-fill='true'] {
+  flex: 1;
+  min-height: 0;
+
+  /*
+   * 一圈呼吸：板子按 min(cqh/高, cqw/宽) 撑满，总有一头正好顶到边
+   * （XY 板是高度这一头，于是上下几乎没有空隙、左右反而很宽，看着就是"上面那条特别细"）。
+   * cq 单位问的是容器的**内容盒**，所以板子会在扣掉这一圈之后再撑满 —— 四周空隙一致。
+   */
+  padding: clamp(6px, 1.2vh, 14px);
+
+  /* 有了确定的宽高才能当 size 容器；下面那条 cq 单位就是问它 */
+  container-type: size;
+
+  /*
+   * 居中用 flex，**不能**用 grid + place-items: center。
+   * grid 那一版把层压成了 fit-content，而板子自己写着 `width: min(100%, mm × scale)` ——
+   * 那个 100% 于是要去问一个"还没定下来"的宽度，浏览器按 auto 处理，
+   * 最后落到 SVG 固有尺寸附近（实测框内宽 840 时板子只有 362）。
+   * flex + 下面那条 width: 100% 才让百分比有确定基准。
+   */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewport[data-fill='true'] .layer {
+  /*
+   * 不许收缩。视口是 flex，而 flex 子项默认 flex-shrink: 1 ——
+   * 放大时层的内联宽度是"基准宽 × 倍率"（×6 能到五千多像素），
+   * 层里那个 SVG 的最小内容宽又几乎是 0，于是浏览器把这个宽度一路压回容器宽，
+   * 无论几倍都停在"刚好一屏"，看着就是根本没放大。
+   */
+  flex: none;
+
+  /* 层吃满视口宽：板子的 min(100%, …) 因此问得到真实的可用宽度 */
+  width: 100%;
+
+  /*
+   * px/mm：三项取小 —— 高度这一头、宽度这一头、最长边的上限。
+   *
+   * 毫米尺寸由 PlateZoom 内联在**视口**上（--plate-mm-w / --plate-mm-h）。
+   * 默认值必须写在 var() 的第二参数里，**不能**在这条规则里另起一行 `--plate-mm-w: 100`：
+   * 自定义属性在元素自己的声明优先于从祖先继承来的值，那样写内联值会被整个盖掉
+   * （上一轮就是这么把两块板都按 100mm × 100mm 算的，Z 板因此小了三倍）。
+   *
+   * 上限是**相对量 + 一个天花板**：`min(100cqw, 1200px)`。
+   * 原来写死 900px，实测在 Wide（视口 1170）和 Ultra（1650）都提前生效 ——
+   * 板子停在 900、只占 77% / 55%，"尽量撑满"就没做到。改成跟容器宽走之后：
+   * 容器宽 ≤ 1200 时这一项不起作用（宽度那一头本来就更小），板子吃满；
+   * 超过 1200 才收住 —— Ultra 不会长成横贯整页的一条。
+   */
+  --plate-scale: min(
+    calc(100cqh / var(--plate-mm-h, 100)),
+    calc(100cqw / var(--plate-mm-w, 100)),
+    calc(
+      min(100cqw, var(--plate-cap, 1200px)) / max(var(--plate-mm-w, 100), var(--plate-mm-h, 100))
+    )
+  );
+}
+
+/*
+ * 板子不自带底色（CalibPlate 的 .wrap 在浅色套里是纯 #fff）。
+ *
+ * 两种模式都要抽掉，不只 fill：卡面是 --card-face（#fbfcfd），板子那层是 #fff，
+ * 两种白拼在一起、边界又是直线，看着就是一道缝 —— 首页那两张校准卡上同样有。
+ * 抽掉之后"bbox 里的空白"交给卡面，整块区域只有一种白。
+ *
+ * 板子的线与刻度是 SVG 的 path，不受影响；放大态也不会再拖着一块白跟着走。
+ * CalibPlate 那份 CSS 被 v014–v022 共用，不去改它，覆盖写在这边。
+ */
+.layer > * {
+  background: transparent;
+}
+

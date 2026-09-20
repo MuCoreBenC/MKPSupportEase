@@ -1,0 +1,236 @@
+.bar {
+  height: var(--titlebar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid rgb(16 24 32 / 7%);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 80%);
+  min-width: 0;
+
+  /* 标题栏就是窗口的抓手。按钮自带 cursor: pointer（global.css）会盖掉它，
+     于是「空白处抓手、按钮处小手」一眼可辨 */
+  cursor: grab;
+}
+
+/* macOS：高度与 Windows 一致，仅左上留给红绿灯、tab 靠右 */
+.bar[data-platform='macos'] {
+  gap: 16px;
+  padding: 0 16px 0 14px;
+}
+
+.bar[data-platform='macos'] .tabs,
+.bar[data-platform='macos'] .iconTabs {
+  flex: 0 1 auto;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+/* 迷你档中段让给拖动区，间距收一点 */
+.bar[data-density='mini'] {
+  gap: 12px;
+}
+
+.lights {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: filter 0.14s ease;
+}
+
+.light[data-kind='close'] {
+  background: #ff5f57;
+}
+
+.light[data-kind='min'] {
+  background: #febc2e;
+}
+
+.light[data-kind='zoom'] {
+  background: #28c840;
+}
+
+.lights:hover .light {
+  filter: brightness(0.94);
+}
+
+.logo {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-1);
+  flex-shrink: 0;
+}
+
+.tabs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* 扁平选中态：只有文字色 + 2px 下划线 */
+.tab {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: color 0.14s ease;
+}
+
+.tab:hover {
+  color: var(--text-2);
+}
+
+.tab[data-on='true'] {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.tab[data-on='true']::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.bar[data-density='compact'] .tab {
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.bar[data-density='compact'] .tab[data-on='true']::after {
+  left: 9px;
+  right: 9px;
+}
+
+/* 连续模式：页签内边距与字号随标题栏宽度平滑变化，抵消 compact 档位跳变 */
+.bar[data-fluid='true'] .tabs {
+  --tab-pad: clamp(9px, 1.1vw, 12px);
+  --tab-size: clamp(12px, 1.2vw, 13px);
+}
+
+.bar[data-fluid='true'] .tab {
+  padding: 0 var(--tab-pad);
+  font-size: var(--tab-size);
+}
+
+.bar[data-fluid='true'] .tab[data-on='true']::after {
+  left: var(--tab-pad);
+  right: var(--tab-pad);
+}
+
+@supports (width: 1cqw) {
+  .bar[data-fluid='true'] {
+    container-type: inline-size;
+  }
+
+  .bar[data-fluid='true'] .tabs {
+    --tab-pad: clamp(9px, 1.1cqw, 12px);
+    --tab-size: clamp(12px, 1.2cqw, 13px);
+  }
+}
+
+
+/* 迷你档：图标页签。不吃满宽度 —— 富余留给标题栏拖动。
+   窄到放不下时横向滑动；滚动条由 global.css 的幽灵滚动条统一隐藏，这里不重复覆盖 */
+.iconTabs {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+}
+
+/* 选中态与宽窗页签同一套：文字/图标色 + 2px 下划线，不另发明胶囊或描边 */
+.iconTab {
+  position: relative;
+  flex-shrink: 0;
+  width: 26px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  transition: color 0.14s ease;
+}
+
+.iconTab:hover {
+  color: var(--text-2);
+}
+
+.iconTab[data-on='true'] {
+  color: var(--text-1);
+}
+
+.iconTab[data-on='true']::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* 全屏子视图（报告）的标题：替代整条页签条 */
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+
+  /* 迷你档页签条不再撑满，靠它把窗口键钉在右端，中间空出来的就是拖动带 */
+  margin-left: auto;
+}
+
+.ctrl {
+  width: 30px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ctrl:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+.close:hover {
+  background: #e5484d;
+  color: #fff;
+}

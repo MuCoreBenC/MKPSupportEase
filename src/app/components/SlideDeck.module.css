@@ -1,0 +1,331 @@
+.deck {
+  --glide-ms: 720ms;
+
+  /*
+   * 露出比例。SlideDeck 按 deck 实测宽度算出来内联覆盖（520 起 0，640 满 0.2，每 6px 多 1%）。
+   * 这里的 0.2 是兜底值 —— 也正是老稿那个恒定的满量，所以就算 JS 没来得及下发，
+   * 第一帧也不会长得不一样。
+   */
+  --peek-ratio: 0.2;
+
+  /* 卡露出多少，就少平移多少：p = 0.2 时 = translateX(80%)，与老稿逐像素相同 */
+  --peek-shift: calc(100% - var(--peek-ratio) * 100%);
+
+  /*
+   * 卡面的缩放也得跟着 p 走。
+   * 老稿写死 scale(0.94)：上下左右各让出 3%，于是白卡左缘其实在 0.83W。
+   * 满量时这很合理（露 20% 看得见 17%），但刚露头那一档（p < 3%）让出的比露出的还多，
+   * 白卡宽度是负数 —— 等于拖到 538 之前什么都看不见，"连续出场"就断在起点。
+   * 0.3 这个系数让 p = 0.2 时正好回到 0.94，p → 0 时趋近 1。
+   */
+  --peek-face: calc(1 - 0.3 * var(--peek-ratio));
+
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  /* 内容区实色底：卡片与平面同色，滑动时不会互相透视。全站同一个卡面变量 */
+  background: var(--card-face);
+}
+
+
+
+/* 当前内容：平面，没有任何卡片外壳，也不参与动画 */
+.plane {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/*
+ * 卡片：本体只做位移，内容永远是最终尺寸、最终位置。
+ * 白底 / 圆角 / 阴影全在 .face 上，只有它缩放 —— 所以放大时内容一动不动。
+ */
+.card {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  transform: translateX(var(--peek-shift));
+  will-change: transform;
+}
+
+.face {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--card-face);
+  border-radius: var(--r-md);
+  transform: scale(var(--peek-face));
+  will-change: transform;
+}
+
+.face::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--line);
+  border-radius: inherit;
+  box-shadow:
+    -14px 0 40px rgb(20 32 45 / 12%),
+    0 1px 2px rgb(20 32 45 / 6%);
+}
+
+/* 补位时淡入，避免凭空出现 */
+.card[data-entering='true'] {
+  animation: card-enter 0.2s ease-out;
+}
+
+/*
+ * 推入：前 60% 只滑动，滑完内容就位；后面那一段是白底长大。
+ *
+ * 壳的收尾从 0.4×glide 压到 0.2×glide（v0.1.1 之后）：实测 glide=720 时，位移在 435ms 就停了，
+ * 而白底与边框一直长到 724ms —— 内容停住之后外壳还独自动了 289ms（全程 40%），
+ * 观感就是"还没彻底展开就接上了最终页"。压成 0.2 之后壳在 0.8G 长完，脱节缩到 144ms，
+ * 最后 0.2G 整个画面是静止的，再换层（换层时机本来就是对的：实测换层前最后一帧
+ * face.scale 已是 1.0000、边框 opacity 已是 0）。
+ */
+.card[data-phase='in'] {
+  /* 静态值与关键帧 0% 一致，避免动画启动前先按静止态画一帧 */
+  transform: translateX(var(--peek-shift));
+  animation: card-slide calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+}
+
+.card[data-phase='in'] .face {
+  transform: scale(var(--peek-face));
+
+  /* both：延迟期间就套用 0%，不依赖静态值刚好写对 */
+  animation: face-grow calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
+    calc(var(--glide-ms) * 0.6) both;
+}
+
+.card[data-phase='in'] .face::before {
+  opacity: 1;
+  animation: shell-out calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
+    calc(var(--glide-ms) * 0.6) both;
+}
+
+
+/* 返回：白底先缩小，再把卡片送回右边 */
+.card[data-phase='out'] {
+  /* 退出层挂载时就是全屏未缩小，否则首帧会先闪到右边缘的小卡片位置 */
+  transform: translateX(0);
+
+  /* both 是这里的关键：forwards 不管延迟期间，卡片会先跳到静态位置 */
+  animation: card-slide-out calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
+    calc(var(--glide-ms) * 0.45) both;
+}
+
+
+.card[data-phase='out'] .face {
+  transform: scale(1);
+  animation: face-shrink calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+}
+
+.card[data-phase='out'] .face::before {
+  opacity: 0;
+  animation: shell-in calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+}
+
+
+@keyframes card-slide {
+  0% {
+    transform: translateX(var(--peek-shift));
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes card-slide-out {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(var(--peek-shift));
+  }
+}
+
+@keyframes face-grow {
+  0% {
+    transform: scale(var(--peek-face));
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes face-shrink {
+  0% {
+    transform: scale(1);
+  }
+
+  100% {
+    transform: scale(var(--peek-face));
+  }
+}
+
+@keyframes shell-out {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes shell-in {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- 热区 ---------- */
+.zoneNext {
+  position: absolute;
+  z-index: 5;
+  inset-block: 0;
+  right: 0;
+
+  /* 与卡露出的那一条对齐；刚露头时那一条只有十几像素，给 28px 的下限保证点得到 */
+  width: max(28px, calc(var(--peek-ratio) * 100%));
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+
+.zonePrev {
+  position: absolute;
+  z-index: 5;
+  inset-block: 0;
+  left: 0;
+  width: clamp(24px, 2.8vw, 36px);
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+
+@supports (width: 1cqw) {
+  .zonePrev {
+    width: clamp(24px, 2.8cqw, 36px);
+  }
+}
+
+
+.zonePrev:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.zoneNext[data-show='true'],
+.zonePrev[data-show='true'] {
+  background: rgb(32 178 90 / 8%);
+  outline: 1px dashed rgb(32 178 90 / 45%);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 12px rgb(32 178 90 / 12%);
+}
+
+/* ---------- 页条：平时不可见，指针移到底部中间才淡出 ---------- */
+.railHit {
+  position: absolute;
+  z-index: 7;
+  bottom: 0;
+  left: 34%;
+  right: 34%;
+  height: clamp(20px, 2.6vh, 30px);
+  display: grid;
+  place-items: center;
+  user-select: none;
+}
+
+.rail {
+  display: flex;
+  gap: 3px;
+  width: min(220px, 100%);
+  height: 4px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.railHit:hover .rail,
+.rail[data-show='true'] {
+  opacity: 1;
+}
+
+.seg {
+  flex: 1;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgb(16 24 32 / 12%);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.seg:hover {
+  background: rgb(16 24 32 / 26%);
+}
+
+.seg[data-on='true'] {
+  background: var(--text-2);
+}
+
+@supports (height: 1cqh) {
+  .railHit {
+    height: clamp(20px, 2.6cqh, 30px);
+  }
+}
+
+/* ---------- 降级 ---------- */
+
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .card[data-phase='in'],
+  .card[data-phase='out'],
+  .card[data-phase='in'] .face,
+  .card[data-phase='out'] .face,
+  .card[data-phase='in'] .face::before,
+  .card[data-phase='out'] .face::before {
+    animation-duration: 0.16s;
+    animation-delay: 0s;
+  }
+
+  .rail {
+    transition-duration: 0.08s;
+  }
+}
+
+
+

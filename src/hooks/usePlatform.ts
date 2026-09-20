@@ -1,15 +1,16 @@
-/** 目标平台。预览器里跑，不做自动探测——探到的是本机而非目标平台。 */
+/**
+ * 目标平台。
+ *
+ * 试验场那份是给预览器用的常量（平台下拉 + 模拟窗口的圆角），因为在浏览器里"探到的是本机
+ * 而非目标平台"。产品里跑在真窗口里，本机就是目标平台，所以这里改成真探测。
+ *
+ * 用途只有一个：标题栏该把窗口按钮画在左边（macOS 交通灯）还是右边（Windows）。
+ * 将来接 `@tauri-apps/plugin-os` 可以拿到更准的值，但那要等 Rust 侧起来；
+ * UA 判断在这件事上够用，而且浏览器调试路径也能工作。
+ */
 export type Platform = 'windows' | 'macos'
 
-export const PLATFORMS: { id: Platform; label: string }[] = [
-  { id: 'windows', label: 'Windows' },
-  { id: 'macos', label: 'macOS' },
-]
-
-export const DEFAULT_PLATFORM: Platform = 'windows'
-
-/** 各平台的窗口圆角，供预览器的窗口框使用 */
-export const WINDOW_RADIUS: Record<Platform, number> = {
-  windows: 8,
-  macos: 10,
+export function detectPlatform(): Platform {
+  if (typeof navigator === 'undefined') return 'macos'
+  return /mac/i.test(navigator.userAgent) ? 'macos' : 'windows'
 }

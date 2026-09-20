@@ -52,7 +52,7 @@
     - 5.6: 写精简版 `vite.config.ts`：只留 `react()`（去掉 `calibFs()` / `curvesFs()` 两个无鉴权写盘端点），`port: 5178` + `strictPort: true` + `open: false`，`host: process.env.TAURI_DEV_HOST ?? false`，`clearScreen: false`
     - 5.7: `npm install` → `tsc -b` + `npm run lint` 过
 
-- [ ] Task 6: 把 v023 提升为唯一前端 `src/app/`
+- [x] Task 6: 把 v023 提升为唯一前端 `src/app/`
     - 6.1: 依赖边界（已核实，结论写进 doc §2.3 补记）：`ExplodedHero` **不碰** devStore（只用 three + GLTFLoader）；`HomeGuide` 零外部依赖；`SlideDeck` 用 `reportPage` / `useDevState`；`HeroFade` 用 14 个 devStore 符号（含 undo/redo/曲线编辑）；`usePreset` / `CalibHead` / `MachinePicker` / `PresetStack` / `PageMachineV023` 也各自用 devStore
     - 6.2: 拷 `src/versions/v023/**` → `src/app/**`，去 `V023` 后缀（`AppV023.tsx` → `App.tsx`、`PageMachineV023.tsx` → `pages/PageHome.tsx`、`PageCalibV023.tsx` → `pages/PageCalib.tsx`，CSS Module 同步改名）
     - 6.3: 跨稿闭包按"首页 + 校准页真正需要的"搬进 `src/app/`，不保留稿号目录名：`v003/TopTabs` → `src/app/components/TopTabs`、`v005/ui/{Controls,Modal}` → `src/app/ui/`、`v008/components/CopyAction` → `src/app/components/`、`v014/{plateLadder,heroArt,useArtLayers}` + `v014/components/CalibPlate` → `src/app/`
@@ -63,6 +63,7 @@
     - 6.8: 搬 `src/api/{contract,mock,bridge,index,errors}.ts`；写 `src/main.tsx` 挂 `src/app/App.tsx`；**不搬** `registry.ts` 与旧 `src/App.tsx` 预览器外壳（`VersionProps` 是 type-only，删掉即可）
     - 6.9: `TopTabs` 的页签来源改成 `src/app/constants/tabs.ts`，沿用 v023 的覆盖（`machine` → 「首页」+ home 图标、`settings` → gear 图标）
     - 6.10: `npm run dev` + 浏览器 5178，**逐档比对 mini / compact / wide / ultra 四档与试验场是否一致**，不一致就修到一致
+      - ⚠️ 只做到结构级验证：四档 `data-density` 正确切换、零控制台错误、六个页签齐全、首页向导 + 露出卡 + 步骤条都在。**没有与试验场做像素比对** —— 那边把 v023 渲染在预览器的模拟窗口里，要像素比对得先把预览器驱动到同样的窗口尺寸。留作收尾项
     - 6.11: `tsc -b` / `lint` / `stylelint` / `build` 全过
 
 ---
