@@ -139,7 +139,7 @@
     - 15.4: 搬 `docs/DESIGN-SPACING.md`、`docs/3D-ASSET-CONTRACT.md`
     - 15.5: 写 `README.md`：一句话定位、启动命令、三份文档的指路、以及"试验场在 mkp-adaptive-console"
 
-- [ ] Task 16: 补上 required status checks 并合掉第一个 PR
+- [x] Task 16: 补上 required status checks 并合掉第一个 PR
     - 16.1: `setup-ruleset.mjs` 加 required status checks（`web`、`rust`），重跑脚本
     - 16.2: 造一次故意失败的 CI（临时引入一个 lint 错误）→ 确认 `gh pr merge` 被拒 → 撤掉
     - 16.3: `feat/bootstrap-shell` 开 PR，等 CI 绿，`--squash` 合进 main
@@ -149,13 +149,13 @@
 
 ## 第五段：校验（逐条对 doc.md §8）
 
-- [ ] Task 17: 收口校验
-    - 17.1: `npm run tauri dev` 起原生窗口，标题 `SupportEase`，首页与校准页视觉与试验场四档逐档一致
-    - 17.2: `npm run dev` + 浏览器 5178 走 mock，路径不丢
-    - 17.3: Tauri 窗口里数据来自 Rust；摘 command → 报错带 traceId → 日志可查
-    - 17.4: `internal_root/logs/` 有按天日志；两个数据根首次启动自动建齐（先删掉再启一次验）
-    - 17.5: clippy 拦截、路径穿越拦截、原子写单测全绿
-    - 17.6: `tsc -b` / `eslint` / `stylelint` / `vite build` / `cargo build` / `cargo clippy` / `cargo test` 全过
-    - 17.7: git 拦截五条实测（main 直提 / push main / 分支名 / 大文件 / CI 失败不能合）
-    - 17.8: `npm run tauri build` 出一个 macOS 包并能打开
-    - 17.9: 回填实际依赖版本号到 `doc.md` §2.4，然后 `npm run release` 发 `v0.1.0`（这一步同时验证 Task 14 的新流程）
+- [ ] Task 17: 收口校验（4 条待你的手，其余已验）
+    - [ ] 17.1: 原生窗口四档逐档比对 —— **只做到结构级**（四档 data-density 切换正确、零控制台错误、六页签齐全）。像素比对要先把试验场的预览器驱动到同样窗口尺寸
+    - [x] 17.2: 浏览器 5178 走 mock，零控制台错误
+    - [ ] 17.3: Tauri 窗口里数据来自 Rust + 摘 command 看 traceId —— 窗口起得来、日志在写，但点按钮要 GUI 交互
+    - [x] 17.4: 按天日志文件已写出；两个数据根连子目录一次建齐（`cloud/ archive/ index/ logs/ run/` + `exports/ reports/ presets-mine/`）。"删掉再启一次"没做 —— 不想动你 Documents 下的目录
+    - [x] 17.5: clippy 拦截（实测报 `disallowed method`）、路径穿越三判据（含符号链接）、原子写单测 —— 20 个 Rust 单测全绿
+    - [x] 17.6: `tsc -b` / `eslint` / `stylelint` / `vite build` / `cargo fmt` / `cargo clippy -D warnings` / `cargo test` 全过（本地 + CI 两处）
+    - [x] 17.7: git 拦截五条实测（main 直提 / push main（含 `--no-verify` 被服务端 `GH013` 拒）/ 分支名 / 3MB 文件 / CI 红时 `gh pr merge` 被 `base branch policy` 拒）
+    - [ ] 17.8: `npm run tauri build` 出 macOS 包 —— 已在跑
+    - [ ] 17.9: 版本号已回填 doc §2.4；`npm run release` 发 `v0.1.0` 要交互输入，由你亲手跑（顺带验 Task 14）
