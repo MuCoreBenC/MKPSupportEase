@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "只给核心权限。前端不碰文件系统 —— 所有读写都经过 src-tauri 的命令，路径由 fsx::paths::resolve 夹在两个数据根内，所以这里既不需要 fs:default，也不需要逐条 fs 权限。将来真要用 plugin-fs（比如「在 Finder 里显示」），在这里按命令加，并把 scope 限到 internal_root 与 user_root。",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

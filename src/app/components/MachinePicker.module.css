@@ -1,0 +1,138 @@
+/*
+ * 分级揭示：版面钉死在「三组都在」那一版，从进卡片那一刻起一个像素都不动，
+ * 上游没选的那一组照样占位，只是不显形。--fade-ms 由 MachinePicker 从 DevPanel 注入。
+ *
+ * 为什么不再让整块上移：位移过程中眉标题那道 28×1px 的细线落在非整数像素上，
+ * 被反锯齿画成一会儿粗一会儿细，读起来是"版面在颤"而不是"内容出现了"。
+ * 位置固定之后也就不需要区分 grow / swap 两种出现方式了 —— 点哪一级都是同一次淡入。
+ *
+ * 眉标题（选择机型）也在这一块里：它与下面的组是一体的，中间那道间距就是这里的 gap。
+ */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 2.4vh, 26px);
+  min-width: 0;
+}
+
+
+
+/* 每组常驻占位、只切显形：位置由布局定死，可见性由 data-on 切。
+   visibility 一起过渡 —— 它是离散属性：转 visible 在起点立刻生效（淡入看得见），
+   转 hidden 到终点才生效（淡出能看完）。hidden 同时收掉点击与 Tab 焦点，
+   所以未解锁的那一组点不到、也跳不进去，不必再手写 pointer-events / tabIndex。
+   min-height 是给三组选项数量不同兜底的下限。 */
+.group {
+  min-width: 0;
+  min-height: 62px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--fade-ms, 300ms) ease-out, visibility var(--fade-ms, 300ms);
+}
+
+.group[data-on='true'] {
+  opacity: 1;
+  visibility: visible;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--text-3);
+}
+
+.groupHint {
+  font-size: 11px;
+  color: var(--text-3);
+  opacity: 0.75;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 60%);
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.option:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.option[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.optionLabel {
+  min-width: 0;
+}
+
+/*
+ * 折叠：只在扁窗里生效。
+ *
+ * 「折不折」是 TSX 的 state（data-collapsed），「折起来长什么样」全在这个容器查询里 ——
+ * 宽窗下 .toggle 不显示、data-collapsed 也没有任何视觉效果，所以 TSX 那边不需要读密度，
+ * 也就不会出现「JS 断点一套、CSS 断点另一套」这种两个阈值各走各路的老毛病。
+ *
+ * 容器是页面的 .page（container-name: home、container-type: size），所以这里问得到高度。
+ */
+.toggle {
+  display: none;
+  align-items: center;
+  padding: 7px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.toggle:hover {
+  color: var(--text-2);
+  border-color: var(--text-3);
+}
+
+@container home (max-height: 520px) {
+  /* 折叠态只留已选的那一颗。用 display: none 而不是 visibility：
+     这一档要的就是把高度收回来，留着占位等于没折 */
+  .options[data-collapsed] .option:not([data-on='true']) {
+    display: none;
+  }
+
+  .toggle {
+    display: flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group {
+    transition: none;
+  }
+}

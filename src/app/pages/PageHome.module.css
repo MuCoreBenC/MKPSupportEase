@@ -1,0 +1,1254 @@
+.page {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+
+  /* 大图按这个容器的宽高双约束 */
+  container-type: size;
+  container-name: home;
+}
+
+/* 卡片外壳（含 .pane 那一层、眉标题、左下角胶囊）在 CardFrame.module.css 里。
+   这一份只剩内容：列宽、读数条、板子、说明、参数行。 */
+
+.info {
+  position: relative;
+  z-index: 2;
+
+  /* 竖向居中靠 auto margin：外壳是 align-items: stretch，
+     有剩余空间就居中，没空间就从上内边距开始（不会压住眉标题） */
+  margin-block: auto;
+
+
+  /* 连续宽度，不再按档位分支 */
+  width: clamp(300px, 34vw, 480px);
+  max-width: 100%;
+  max-height: 100%;
+
+  /*
+   * 竖向可滚，横向仍不滚。
+   *
+   * 原来这里是 overflow: hidden —— 扁窗里 margin-block:auto 归零、内容从上内边距往下溢出，
+   * 直接被静默切掉（第一页看不到 Z 偏移与涂胶速度、第四页看不到板子下面那段说明）。
+   * 改成 hidden auto：有余量照旧居中，没余量就滚。
+   * 横向必须显式写 hidden：只写 overflow-y 的话浏览器会把 overflow-x 也提成 auto，
+   * 于是冒出一条谁都不想要的横条。横向溢出改在源头解决（.axes 折行 + peekSafe）。
+   */
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 8px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+/* 身份信息分组：机型名 / 版本 / 路径 / 复制按钮 */
+
+.ident {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* 选择器列：吃满内容区可用宽（100% 已经扣掉了 CardFrame 的内边距与露出卡让位），
+   上限只是防止超宽窗把一行胶囊拉成一条线。用 width:100% + max-width 而不是 width:clamp()：
+   后者会把列钉死在 640px，右边空一大片，版本行反而折行。 */
+.picker {
+  width: 100%;
+  max-width: clamp(300px, 92vw, 980px);
+
+  /* 顶对齐，不跟 .info 一起竖向居中：列高会随折行变化，居中会把上面所有行往上顶半行
+     —— 实测品牌标签的 y 在 400/480/640 三处各跳一次（307.7 → 324.2 → 340.7 → 380.7）。
+     顶对齐后每行的 y 只由「卡片上内边距 + 它前面的内容」决定，与列高、与窗口宽度无关 */
+  margin-block: 0;
+  overflow-y: auto;
+  gap: clamp(8px, 1.6vh, 20px);
+
+  /*
+   * 给底部那一圈胶囊留位置。
+   *
+   * 胶囊是绝对定位浮在内容上的（right/bottom 挂在 --chrome-x / --chrome-b 上），内容盒
+   * 并不知道它占了地方：内容一直铺到胶囊底下，却又没超过可视高 —— 实测三档窗口
+   * 「还能滚」都是 0，于是最后那块「预设文件 + 三轴」被压住且滚不出来。
+   * 留出「胶囊行高 + --chrome-b + 8px 呼吸」之后内容才真的超高，overflow-y: auto 接得住。
+   */
+  padding-bottom: calc(var(--chrome-b, 24px) + 52px);
+}
+
+/*
+ * 测试模型列（第五页）。
+ *
+ * 和 .picker 同一套理由：吃满内容区可用宽（走马灯要横向铺开），顶对齐不跟着竖向居中
+ * （卡片高度随文案长短变，居中会让标题行的 y 随内容跳），并且自己给底部胶囊行留位
+ * —— 胶囊是绝对定位的，内容盒不知道它占了地方，不留位圆点和页脚会被压在胶囊底下。
+ */
+.models {
+  width: 100%;
+  max-width: 100%;
+
+  /*
+   * 吃满可用高度，而不是让高度由内容决定。
+   *
+   * 这一行和 hero 槽的 flex: 1 1 0 是一对：列高由内容决定时，图槽的 basis 0 让它没有
+   * 可分配的剩余空间 —— 列高 = 文案 + 底部留位，槽恒为 0，图跟着 0，小窗里整张图直接消失。
+   * height: 100% 把可用高度变成确定值，槽才分得到高度，图也才有百分比上限可依。
+   * 撑不下时由 .info 自己的 overflow: hidden auto 接住滚动，不会被静默切掉。
+   */
+  height: 100%;
+  margin-block: 0;
+  gap: clamp(4px, 0.8vh, 10px);
+  padding-bottom: calc(var(--chrome-b, 24px) + 52px);
+}
+
+.modelsLead {
+  margin: 0 0 clamp(4px, 1vh, 12px);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* 渲染图居中槽：flex 撑满可用高度，居中放图，类似首页 .slot 的做法 */
+.modelsHero {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+
+  /*
+   * 这一行是图不被切掉的关键，不能省。
+   *
+   * 不写它就是隐式的单个 auto 行 —— auto 行的高度由内容决定，于是图上的
+   * max-height: 100% 找不到确定的基准，被当成 none 处理：图恒按 600px 宽算出
+   * 354px 高，槽只有 230px 高时照旧 354px，多出来的 124px 被下面的
+   * overflow: hidden 直接切断，整堆零件的最后一排齐齐少半截。
+   *
+   * minmax(0, 1fr) 让行高来自槽自己的确定高度（flex 已经算出来了），
+   * max-height: 100% 于是有了基准，矮窗里图会缩而不是被裁。
+   * 下界必须是 0 而不是 auto：auto 的最小值是内容高，那等于又把行撑回 354px。
+   */
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  overflow: hidden;
+}
+
+.modelsHeroImg {
+  max-width: min(90%, 600px);
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.modelsCaption {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+  letter-spacing: 0.01em;
+}
+
+/*
+ * 极扁窗（容器高 ≤ 470）：把这一行说明也收掉。
+ *
+ * 页级大标题已经不存在了（眉标题就是页名，写两遍是复读），现在只剩这一行
+ * 说明。这一档高度实在紧，图是主角，说明是第一个该让位的。卡片本身一行不少。
+ */
+@container home (max-height: 470px) {
+  .models > .modelsLead {
+    display: none;
+  }
+}
+/* 校准列：一页只放一块板，比信息列宽；整列靠左，与眉标题共用同一条左基线。
+   --plate-scale 是两块板共用的 px/mm（以 Z 板撑满列为基准），两块板同比才不会一粗一细 */
+.calib {
+  /* 列 = 内容区宽度：于是预设下拉、板块框、底部按钮组三条右缘落在同一条线上 */
+  --col-w: 100%;
+
+  /*
+   * 板子的宽度与文字列分开。真正的约束是高度（板子是等比 SVG，宽一寸高一寸），
+   * 所以主项跟容器高度走 —— 一条连续的斜线，没有断点、不会"像换了张图"。
+   * 系数由探针在「两页零滚动」的前提下搜出来（见 spec）。
+   *
+   * 板子宽度 = 「这一页除板子以外固定占掉的那 270px 之外，还剩多少高度」× 板子的宽高比。
+   * Z 板是 4:1，所以剩 1px 高就能多 4px 宽；宽度这一头由 CalibPlate 自己的
+   * width: min(100%, …) 截住 —— 于是高窗里板子直接吃满框内宽、右缘与下拉 / 按钮对齐，
+   * 矮窗里由高度说了算、连续变小，两段都没有断点。
+   * 扣除量这一轮从 300 降到 270：弹性垫片删掉之后列本身矮了一截，量出来还有 30px 余量。
+   * 为什么不是 250 —— 细扫到 1400×540 那一档会溢出 16px：宽窗里板子是被框内宽截住的
+   * （板宽 976 时高度就有 244），高度这一头的余量比窄窗小得多，扣除量得按最紧的那一档定。
+   */
+  --plate-w: clamp(240px, calc((100vh - var(--plate-fixed-vh, 270px)) * 4), 1400px);
+  --plate-scale: calc(var(--plate-w) / 136.219);
+
+  /* 这一列自己的行间距 */
+  --calib-gap: clamp(10px, 1.8vh, 16px);
+
+  /* min() 是必须的：这两页现在也传 peekSafe，内容盒被右内边距压窄之后
+     列宽必须跟着让，否则整列往左偏、左边缘的字被切 */
+  width: min(var(--col-w), 100%);
+
+  /*
+   * 靠左、不居中。原来是 margin-inline: auto + text-align: center，
+   * 而眉标题是 CardFrame 钉在 left: --chrome-x 的 —— 宽窗实测标题 x=171、列 x=296，
+   * 差 125px：标题在左、内容在中，读起来就是"每块各站一条基线"。
+   * 直排版面只留一条左基线：标题、预设行、三轴、板块、按钮行全部对齐它。
+   */
+  margin-inline: 0;
+
+  /*
+   * 竖向：贴顶，下面剩多少空多少。
+   *
+   * 原来是两条弹性垫片（上 1 份 / 下 3 份）想让大窗留一点呼吸，但垫片自己是 flex 子项：
+   * 剩余空间归零时它高度是 0、gap 却照收 —— 小窗里眉标题与预设行之间凭空多出一个 gap
+   * （实测 10-16px，就是那段"突然出现的空白"）。垫片删掉，改成只靠这一条 margin：
+   * 上贴顶（0）、下吃掉全部剩余（auto），于是任何窗高下上空白都只剩卡片的上内边距。
+   */
+  margin-top: 0;
+  margin-bottom: auto;
+  align-items: stretch;
+  text-align: left;
+  gap: var(--calib-gap);
+}
+/* 当前偏移：X / Y / Z 并排居中，一眼看完三个数。
+   旧值与圆点常驻占位 —— 改动只切换可见性，版面一动不动。
+
+   固定三列等宽（不再是不换行的 flex）：原来 .axis 有 128px 硬下限、gap 上界 44px，
+   最小内容宽就是 472px，而这一列只有 52cqw；再叠 justify-content: center，
+   溢出量被对称推到左右两侧一起切掉 —— 左边的「X」和右边的「mm」同时消失。
+   现在轨道下限是 0、字号跟着列宽 clamp，最窄的 360px 窗口里三列也只要约 97px 一列。
+   没用 auto-fit：它在某些宽度会多排一条塌成 0 的轨道，那条轨道的 gap 还占着，整条会偏左几像素。 */
+.axes {
+  /*
+   * 三个并列的数：按内容宽排、整行在列里居中。
+   * 原来是 width: 100% + 三等分铺满 + 左对齐 —— 这一页 X / Y 根本不会变，
+   * 把它们摊到最左、还把当前轴挤到卡片右缘切掉「mm」，是本末倒置。
+   */
+  width: fit-content;
+  max-width: 100%;
+  margin: 4px auto 0;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-items: center;
+  gap: clamp(10px, 1.6vh, 16px) clamp(14px, 2.4vw, 44px);
+}
+
+.axis {
+  /* grid 轨道已经给了下限，这里必须放开，否则轨道压不下去 */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+
+  /* 标签与数值左缘同一条：dd 不撑满格子，数值就落在标签正下方 */
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/*
+ * XY 板是方的（53.5×54.2mm），Z 板是扁的（136.2×34mm）。两块板共用一个 px/mm 时，
+ * XY 只有 Z 的 39% 宽 —— 实测 171px，线条根本点不中。
+ * 所以第四页单独给一个 px/mm：按容器高度连续放大（板子是方的，宽≈高，高度才是约束），
+ * 系数是探针在"零滚动"下搜出来的上限。
+ */
+.calib[data-plate='xy'] {
+  /*
+   * 板边长 = 这一页除板子以外还剩多少高度，换算到边长。
+   *
+   * 系数不是 1，也不是原来那个 0.6，实测是 0.79：每多 1px 窗高，只有 0.83px 落进内容盒
+   * （卡片的上下内边距 --chrome-y / --chrome-b / --chrome-pad 自己就按 7cqh / 5cqh / 2.8cqh 长），
+   * 落进来的这一段还要再分给「预设行 + 框头 + 两个内边距 + 两条 gap」（实测 98-110px，
+   * 跟着 cqh 微动），而板子是 53.5×54.2mm 的方板、高比宽还多 1.2%。三项叠起来：
+   *   可用高 ≈ 0.833cqh − 30    非板 ≈ 0.025cqh + 89    板高 = 边长 × 1.0122
+   *   ⇒ 边长 ≈ 0.798cqh − 117
+   * 取 0.79cqh − 122，比"最多能给"再收 8-12px（实测五档余量 8 / 8.4 / 10 / 10.4 / 12px）。
+   *
+   * 试过按 doc 写的系数 1（100cqh − 112px）：1400×900 那档边长 742、列高算出来 861，
+   * 而内容盒只有 681.7 —— 五档里有七处竖向溢出 23-179px，正是"系数不能是 1"的证据。
+   *
+   * 上限 760px 是唯一的"别再长了"（900 高那档函数值 553，还远没到）。
+   *
+   * 扣除量拆成变量，两种状态各一档（见下面 data-hint 那条）：
+   *   · 常驻 142px = 122（预设行 + 框头 + 内边距 + gap）+ 20（底部胶囊那一圈的呼吸）
+   *     那 20px 是补的：实测「列底到胶囊顶」在 684×420 是 −11.7、860×640 是 −4 ——
+   *     取到预设的正常路径上，内容本来就已经压在胶囊上了
+   *   · 没取到预设时再让 47px（提示行实测 39.1 + 框内 gap 8）
+   * `--xy-fixed-vh` 是 vh 兜底那一支的同一个量（真实视口比容器高一截，所以数值大 38px）。
+   */
+  --xy-floor: 120px;
+  --xy-fixed: 146px;
+  --xy-fixed-vh: 184px;
+
+  --xy-plate: clamp(var(--xy-floor), calc(100vh * 0.79 - var(--xy-fixed-vh)), 760px);
+  --plate-scale: calc(var(--xy-plate) / 53.545);
+
+  /* 板与读数之间那一段。原来是 column-gap，现在是轨道表里的一条显式轨道 —— 见下面的注释 */
+  --xy-col-gap: clamp(14px, 2.4vw, 40px);
+
+
+  /*
+   * 第四页：板子在左、读数在右。
+   *
+   * XY 板是方的，跟 Z 板那条 4:1 的横条不同 —— 上下排时它右边永远空着一大片，
+   * 而三个数正好能站进那一片里。于是这一页改成两列：左列是板块框，右列是三个数竖排。
+   * 预设行横跨两列，仍然是整页最上面那一条。
+   *
+   * 只给 data-plate='xy'：第三页那条横板本来就吃满列宽，右边没有空地可用。
+   * 行列位置全部写死、不靠 DOM 顺序 —— DOM 仍是「预设 / 读数 / 板」，
+   * 于是缝里那一档（下面的 display: flex 回退）不用换一套顺序，AxisBar 的 FLIP 也不受影响。
+   */
+  display: grid;
+
+  /*
+   * 左列上限跟着板边长走、右列只按内容宽，剩余宽度左右对半分。
+   *
+   * 上限必须是**确定值**：试过 `1fr`（让左列吃掉全部剩余宽），CalibPlate 的
+   * width: min(100%, …) 于是被框内宽 889 撑开，板子仍被高度支截在 552 —— 框里凭空空出
+   * 350px，读数被压到 64px 贴在卡片最右缘。也试过 `auto`（按内容宽）：框内宽变成不确定，
+   * 板子直接退回 SVG 的 300px 默认宽，反而缩小。
+   *
+   * 右列是 `max-content`（不是 `auto`）：`auto` 轨道会把剩余宽度全吃掉
+   * （实测 1400×900 轨道 507px，而三个数只要 64-150），三个数被钉在轨道左缘、离板子几百像素。
+   *
+   * 下限 `min(100%, 340px)`：扁窗里框头「XY 偏移校准板 + 打开模型」一行不折的量，
+   * 带 min(100%, …) 是为了列本身不足 340 时按列宽让、不横向溢出。
+   *
+   * 两头各一条 `minmax(0, 1fr)` 空轨道，是这一轮的改动（xy-row-center）。
+   * 原来只有右边一条 `1fr`，剩余宽全部堆在右侧 —— 实测左富余恒为 0、右富余 20-391px，
+   * 屏幕上就是"板和读数挤在左边、右边空一大片"。两条对称空轨道把同一段剩余宽对半分：
+   * 富余大就居中，富余归零时两条一起收到 0、整组自动回到 --chrome-x 那条左基线，
+   * 中间没有任何阈值（连续，符合"绝不按断点跳"这条）。
+   * 预设行仍是 `grid-column: 1 / -1`，`-1` 现在指第五条轨道的右缘 —— 两种状态下
+   * 都等于内容右缘，所以下拉与底部胶囊的右缘照旧同线（实测差 0）。
+   *
+   * 左列上限还带一条 `100% - 190px`：先把读数块要的位置留出来再给板子。190 = 读数块在最大
+   * 字号档的实测需求 146px + 间隙 40px 再取整。窄窗里下限 340 仍然优先（minmax 的规矩），
+   * 所以这一条只在"列宽不足、板子又想吃满"的中间地带生效。
+   */
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(min(100%, 340px), min(calc(var(--xy-plate) + 28px), calc(100% - 190px)))
+    var(--xy-col-gap)
+    max-content
+    minmax(0, 1fr);
+
+  /* 两行都按内容高：列本身贴顶，剩余空间留在下面（与第三页一致） */
+  grid-template-rows: auto auto;
+  align-content: start;
+
+  /*
+   * 横向间隙做成一条**显式轨道**（上面第三条），column-gap 必须同时归零。
+   *
+   * 五条轨道意味着 4 个 gap：留着 column-gap 的话，两条空轨道各自还要付一个 ——
+   * 富余归零时左边仍凭空内缩 14-40px（那就不是"回到左基线"了），可用宽还要再少两段。
+   * 而下面 519 那一档的注释记着实测：600 / 520 / 480 三档列横溢只有 1 / 3 / 39px，
+   * 再吃掉两个 gap 直接把读数夹断。间隙变成轨道之后，空轨道为 0 就是真的 0。
+   */
+  column-gap: 0;
+}
+
+
+/*
+ * 第三页也有那一行提示。它多数窗口不碍事（Z 板被框内宽截住，列底到胶囊顶还有 96-232px），
+ * 只有最扁的一档会顶出来：实测 684×420 未取预设时列溢出 13px、提示压胶囊 −20px。
+ * Z 板是 4:1 的横板，扣除量与"板高"是 1:1 —— 270 → 311 正好让出那 41px。
+ * 其余窗口这一改看不出来（函数值远大于框内宽，板宽仍由框内宽说话）。
+ */
+.calib[data-hint='true']:not([data-plate='xy']) {
+  --plate-fixed: 313px;
+  --plate-fixed-vh: 351px;
+}
+
+/*
+ * 没取到预设的那一路：板框里多一行「先回选择机型…」的提示（实测恒定 285.2×39.1）。
+ * 它一出现列就溢出 24-37px、提示文字压在底部胶囊上 —— 板子得为它让出 47px（行高 + 框内 gap 8）。
+ *
+ * 下限一起降到 100px：420 高那档让完之后函数值只有 106.5，还按 160 的下限反而又顶出溢出。
+ * 这一路点板子不产生读数（没有基准），板小一点不影响可用性。
+ */
+.calib[data-plate='xy'][data-hint='true'] {
+  --xy-floor: 100px;
+  --xy-fixed: 189px;
+  --xy-fixed-vh: 227px;
+}
+
+/* 预设行横跨全部轨道：`-1` 指最后一条空轨道的右缘，富余为 0 或对半分时都等于内容右缘，
+   所以下拉右缘与底部胶囊右缘照旧同线（实测差 0） */
+.calib[data-plate='xy'] > .calibPreset {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+/*
+ * 左列的框贴着板子：宽度由上面那条轨道定，这里只指位置。
+ * 第 1 条轨道是左侧空轨道，所以板块框从第 2 条开始。
+ */
+.calib[data-plate='xy'] > .step {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+/* 右列：三个数竖排，与左侧板块框一起竖直居中（行高 = 框高，所以 center 就落在框的中线上）。
+   第 3 条是显式间隙轨道，读数落在第 4 条 max-content 轨道上 —— 轨道宽就是内容宽，
+   于是读数紧贴着那一段间隙站在板子右边，剩余宽由两头的空轨道对半吃掉。
+   字号与横排是同一套，只换排布 */
+.calib[data-plate='xy'] > .axes {
+  grid-column: 4;
+  grid-row: 2;
+  align-self: center;
+  justify-self: center;
+
+  width: auto;
+  max-width: none;
+  margin: 0;
+  grid-template-columns: 1fr;
+  justify-items: start;
+  gap: clamp(10px, 1.8vh, 18px);
+  text-align: left;
+}
+
+/*
+ * 第四页的主读数放大一档。
+ *
+ * 原来跟着第三页横排走：实测值字号只有 14px（只有 1400×900 撞到 17px 的上限），
+ * 而右边还空着几百像素 —— 没有理由把这一页唯一的读数压这么小。
+ *
+ * 只作用在"当前页竖排"这一档：
+ *   · 第三页横排不动（三个数并排，放大会把最右那个「mm」挤出卡片）
+ *   · 缝里 data-orient='col' 不动（20% 宽的缝里 26px 会折行）
+ *   · 窄窗单列档（< 520）也不动 —— 那一档读数回到横排，26px 三个并排必切
+ */
+.calib[data-plate='xy'] > .axes:not([data-orient='col']) {
+  --axis-value: clamp(18px, 2.4cqw, 26px);
+  --axis-label: 12.5px;
+}
+
+/* 露出卡那条缝里的竖排：一列、靠左（不跟着上面那条居中走）。切到 row 的那一下由 AxisBar 的 FLIP 补间，
+   所以这里只管终点长什么样，不写任何过渡 */
+.axes[data-orient='col'] {
+  width: 100%;
+  margin-inline: 0;
+  grid-template-columns: 1fr;
+  justify-items: start;
+  gap: 5px;
+  text-align: left;
+}
+
+/* 缝里不显示原值：那条缝只够看三个数。
+   （注意：这一段本来是行内的，收掉它并不改行高 —— 实测三行一直都是 41px 等高。
+   真正让缝里显得松的是下面这两处 gap，所以在这一档一起压一档：行内 4 → 2、行间 7 → 5） */
+.axes[data-orient='col'] .axisFrom {
+  display: none;
+}
+
+.axes[data-orient='col'] .axis {
+  gap: 2px;
+}
+/* 校准页上方那一行「这是哪一份预设」。缝里不显形，所以这里按当前页的宽度排 */
+.calibPreset {
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * 头两行（预设 + 三轴读数）不参与任何弹性分配：列贴顶之后它们的 y 只由
+ * 「卡片上内边距 + 自己前面那一行」决定 —— 板块框变高变矮、甚至列开始滚动，
+ * 这两行都钉在预设行那个位置上。
+ */
+.calibPreset,
+.axes {
+  flex: 0 0 auto;
+}
+
+.presetLine {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+}
+
+.presetLineLabel {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+}
+
+/*
+ * 预设文件下拉：吃满这一行剩下的宽度，看起来就是一条输入框那样的"可改的位置"。
+ * 用原生 select —— 键盘、滚轮、长列表全是系统行为，自造弹层在扁窗里反而更难点。
+ * 字号不跟窗口缩：文件名本来就长，再缩就读不清。
+ */
+.presetSelect {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 70%);
+  color: var(--text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+.presetSelect:hover {
+  border-color: var(--text-3);
+  background: #fff;
+}
+
+/* 选择机型页列尾的预设块：常驻，选之前是横杠占位 —— 位置固定，取到之后不跳版 */
+.pickerPreset {
+  width: min(100%, 360px);
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* 原始值跟在标签右侧：改动时出现，但宽高常驻占位（只切 visibility），版面不动。
+   10.5px 灰字、tabular-nums —— 和 .axisLabel 是同一行（flex），不会把值行撑宽 */
+.axisFrom {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  visibility: hidden;
+}
+
+.axisFrom[data-on='true'] {
+  visibility: visible;
+}
+
+/* 值行的输入框：宽度固定、tabular-nums，位数变化不改宽度。
+   常态无边框（跟纯文本一样安静），hover / focus 才显边框 */
+.axisInput {
+  /*
+   * 宽度用 em 而不是 ch：ch 是"0 字形的宽度"，会跟着 font-weight 变 ——
+   * 改动那一轴要加粗，实测 6ch 从 84.1px 涨到 86.6px，值行又跟着动了 2.5px。
+   * 3.6em 按 tabular-nums 的数字宽（≈0.55em）算够放 `-12.34` 六位，还留一点余量。
+   */
+  width: 3.6em;
+  padding: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--axis-value, clamp(14px, 1.6vw, 17px));
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.axisInput::-webkit-inner-spin-button,
+.axisInput::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 只有能改的那个才给 hover / focus 反馈：缝里的露出卡、退出层、还没取到预设时都是
+   只读框，鼠标掠过不该亮边框（否则"看起来能改、其实不能"） */
+.axisInput:not([readonly]):hover {
+  border-color: var(--line-strong);
+}
+
+.axisInput:not([readonly]):focus {
+  border-color: var(--accent);
+  background: rgb(255 255 255 / 70%);
+}
+
+
+/*
+ * 只留一圈：global.css 里有一条全局 `input:focus-visible { outline: 2px solid var(--accent) }`，
+ * 与上面那圈 accent 边框叠起来就是两圈。global.css 跨版本共用（v001-v019 都吃它），不动它，
+ * 只在这个输入框上关掉外圈 —— 留边框那一圈：它在盒内，不会把旁边的「mm」往外推。
+ */
+.axisInput:focus-visible {
+  outline: none;
+}
+
+.axisInput[readonly] {
+  cursor: default;
+}
+
+
+@supports (width: 1cqw) {
+  .axisInput {
+    font-size: var(--axis-value, clamp(14px, 1.6cqw, 17px));
+  }
+}
+
+.axisLabel {
+  /* 字号走变量：第四页竖排那一档单独放大（见 .calib[data-plate='xy'] > .axes），
+     横排与缝里竖排用这里的默认值 */
+  font-size: var(--axis-label, 11px);
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  /* 标签行带 .axisFrom 之后要允许折行（缝里那 20% 宽的一列） */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.axisValue {
+  margin: 0;
+  font-size: var(--axis-value, clamp(14px, 1.6vw, 17px));
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * 当前轴的强调只靠颜色 —— 三个数一样大，也不再加左侧那条 2px 线。
+ * 试过「非当前轴压到 2/3」（字忽大忽小）与「当前轴加一条竖线」（一列里多一道竖笔画，
+ * 与板块框的边叠在一起显得杂），最后只留 label 的深色：右侧露出卡那条缝里也是这么区分的。
+ */
+.axis[data-minor='false'] .axisLabel {
+  color: var(--accent-deep);
+}
+
+/* 还没有值：一条横杠。宽度按数字那一格给，切到有值时不跳 */
+.axisBlank {
+  display: inline-block;
+  min-width: 3.4em;
+  color: var(--text-3);
+}
+/* 改过的那一轴：新值换色加粗（字号不变，否则行高会跳；宽度按 em 不随粗细变） */
+
+.axis[data-changed='true'] .axisInput {
+  font-weight: 600;
+  color: var(--accent-deep);
+}
+
+
+.dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 5px;
+  vertical-align: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  visibility: hidden;
+}
+
+.dot[data-on='true'] {
+  visibility: visible;
+}
+
+/*
+ * 板子这一块围起来：一条细边框把「标题 + 说明 + 板 + 刻度」收成一组。
+ * 直排之后全列都是左对齐的文字行，没有这个框，板子和上面的读数会糊成一片。
+ */
+.step {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+
+  /*
+   * 内边距压到 10-12px。高窗里板子是被**框内宽**截住的（实测 1400×900：板 989、框内宽 991），
+   * 所以这一档想让板子再大，唯一的来源就是这两侧的内边距 —— 16px 降到 12px 直接多 8px 宽。
+   */
+  padding: clamp(10px, 1.2vh, 12px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 55%);
+
+  /*
+   * 与下面那条板子 SVG 同一个道理，但针对的是**这一块自己**：卡片层里 .step 有 step-in 的
+   * opacity 淡入，opacity < 1 期间它是一个独立绘制层，动画一结束又退回普通绘制 ——
+   * 框里的标题、说明文字、提示行就在这次切换里被重新取整（肉眼指认："先回「选择机型」…"
+   * 那一行挪了）。常驻一个合成层，从头到尾走同一条路。translateZ(0) 不产生任何位移。
+   */
+  transform: translateZ(0);
+}
+
+
+/*
+ * 板子常驻一个合成层。
+ *
+ * 落位那一瞬看着"顿一下、往下挪一两像素"，实测不是版面在动：末帧与落位后的
+ * 眉标题 / 预设行 / 板框 / 读数 y 完全相同，把截图上下平移 ±2px 去配也是 dy=0 最优
+ * （SAD 315,725 vs dy±1 的 221 万）。真正变的是**绘制路径**：动画期间卡片层带着
+ * transform + will-change，整层被位图化一次；落位后换成没有任何 transform 的平面层，
+ * 同一批像素改回直接绘制。
+ *
+ * 逐像素分区统计指得很死：板框 7-12%、板 SVG 8-13% 的像素变了（最大灰度差 110-123），
+ * 而文字区只有 1.7-4.8%。板子是含十几条细线的 SVG，半像素上的细线在两种路径下
+ * 最容易粗一点 / 细一点 / 挪半格 —— 一整片线条同时变，就被读成"整块挪了一下"。
+ *
+ * translateZ(0) 而不是 will-change: transform：后者是提示、浏览器可以不理，前者是确定的层提升。
+ * 代价：静止态的板子从此走位图化那条路（与动画期一致），细线可能比原来糙半像素 ——
+ * 这是"统一到其中一种"的必然结果，反过来（让动画期也直接绘制）做不到。
+ * 只挂在 v021 的后代选择器上，CalibPlate 自己那份 CSS 被 v014-v020 共用，不碰。
+ */
+.step svg {
+  transform: translateZ(0);
+}
+
+
+.note {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 大图槽位：宽高由布局给出，图在其中自动适配 */
+.slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding-left: clamp(16px, 2vw, 32px);
+}
+
+@supports (width: 1cqw) {
+  .info {
+    width: clamp(300px, 34cqw, 480px);
+  }
+
+  .picker {
+    width: 100%;
+    max-width: clamp(300px, 92cqw, 980px);
+
+    /* 三组之间的间距也按容器高度走：扁窗里 8px 的下限刚好够「紧凑但不贴脸」 */
+    gap: clamp(8px, 1.6cqh, 20px);
+  }
+
+  .calib {
+    --plate-w: clamp(240px, calc((100cqh - var(--plate-fixed, 270px)) * 4), 1400px);
+    --calib-gap: clamp(10px, 1.8cqh, 16px);
+
+    /* width 要一起写：否则会被同特异度、在前面的 .info 那条 34cqw 盖回去 */
+    width: min(var(--col-w), 100%);
+  }
+
+  /* 同上：不重申 width 的话，第五页的列会被 .info 的 34cqw 压回 480px，
+     走马灯只剩不到两张卡的宽（实测轨道可视宽 475，卡宽 297） */
+  .models {
+    width: 100%;
+    gap: clamp(4px, 0.8cqh, 10px);
+  }
+
+  .calib[data-plate='xy'] {
+    --xy-plate: clamp(var(--xy-floor), calc(100cqh * 0.79 - var(--xy-fixed)), 760px);
+
+    /* 轨道表不用重申：间隙是一条 var(--xy-col-gap) 轨道，换掉变量就够 */
+    --xy-col-gap: clamp(14px, 2.4cqw, 40px);
+  }
+
+
+  .calib[data-plate='xy'] > .axes {
+    gap: clamp(10px, 1.8cqh, 18px);
+  }
+
+  /* 这两条原来漏了 cq 版本：列宽按模拟窗缩、gap 却跟着真实视口不缩，
+     窗口越窄比例越糟 —— 正是三轴读数被切的放大器 */
+  .axes {
+    gap: clamp(10px, 1.6cqh, 16px) clamp(14px, 2.4cqw, 44px);
+  }
+
+  .axisValue {
+    font-size: var(--axis-value, clamp(14px, 1.6cqw, 17px));
+  }
+
+  /* 框的内边距也按模拟窗的高度走：只写 vh 的话模拟窗里它跟着真实视口，一档都不缩 */
+  .step {
+    padding: clamp(10px, 1.2cqh, 12px);
+  }
+
+  .footer {
+    left: clamp(20px, 5cqw, 96px);
+    bottom: clamp(32px, 7.5cqh, 84px);
+  }
+
+  .slot {
+    padding-left: clamp(16px, 2cqw, 32px);
+  }
+}
+/* ---------- 首页未选机型：欢迎版面 ---------- */
+
+/* 占满内容区宽度，自己竖排：上半两列（文案 + 插图），下半横跨整宽的五步条。
+   声明成命名容器：五步条的合并断点按"它自己有多宽"判断，而不是按整个版面 */
+/*
+ * 竖向：中间偏上，且空间不够时不裁切。
+ *
+ * 不用 `margin-block: auto` —— 那是正中，偏不了。也不能靠固定的上/下留白去偏，
+ * 固定值在扁窗里照样占着高度，五步条就被裁掉了（首页不给滚动，裁掉即看不见）。
+ *
+ * 用两条只会「吃剩余空间」的弹性垫片：上垫 4 份、下垫 5 份，内容落在剩余空间的 4/9 处。
+ * 剩余空间越多偏得越明显；剩余空间为 0 时两条垫片一起归零、内容回到顶端 ——
+ * 扁窗里自动退回"能塞多少算多少"，绝不会为了偏上多吃一寸高度。
+ */
+.welcome {
+  container-type: inline-size;
+  container-name: welcome;
+  width: 100%;
+  min-width: 0;
+
+  /* 垫片压到 0 之后还是塞不下（很扁的窗）就让它滚，别把五步条切掉 */
+  max-height: 100%;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+
+.welcome::before {
+  content: '';
+  flex: 4 1 0;
+}
+
+.welcome::after {
+  content: '';
+  flex: 5 1 0;
+}
+
+/* 内容本身不参与压缩：要压先压垫片；压完了让它溢出到下边，别把字挤扁 */
+.welcomeTop,
+.welcome > ol {
+  flex: 0 0 auto;
+}
+
+.welcomeTop {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 48px);
+  min-width: 0;
+}
+.welcomeCopy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.welcomeArt {
+  flex: 1 1 320px;
+  max-width: 460px;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: clamp(22px, 3vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--text-1);
+}
+
+.heroLead {
+  margin: 0;
+  max-width: 40ch;
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: var(--text-3);
+}
+
+/* 主 CTA：深色实底，整页唯一的强按钮 */
+.cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text-1);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 0.14s ease;
+}
+
+.cta:hover {
+  opacity: 0.86;
+}
+/* 五步条与上半之间的细分隔线。上留白原来是 .welcome 的 gap，
+   现在 .welcome 有了两条垫片子元素，gap 会多算两次，所以改挂在这一格上 */
+.welcome > ol {
+  margin-top: clamp(20px, 3.4vh, 40px);
+  padding-top: clamp(14px, 2.4vh, 28px);
+  border-top: 1px solid var(--line);
+}
+
+/* 这一段必须排在上面那些 px/vw 兜底之后才盖得住：大标题与间距要按容器算，
+   用 vw 时它跟的是真实视口，模拟窗里字号根本不变（实测三档都是 40px） */
+@supports (width: 1cqw) {
+  .heroTitle {
+    font-size: clamp(20px, 3.2cqw, 40px);
+  }
+
+  .welcomeTop {
+    gap: clamp(16px, 3cqw, 48px);
+  }
+
+  .welcome > ol {
+    margin-top: clamp(16px, 3.4cqh, 40px);
+    padding-top: clamp(12px, 2.4cqh, 28px);
+  }
+}
+
+/*
+ * 扁窗（模拟窗 420 高上下）：欢迎页的两条弹性垫片已经压到 0，再要腾高度只能从
+ * 内容自己的间距里出。这里只压「上半与五步条之间」那一段与图文之间的横向 gap，
+ * 字号一个都不动 —— 扁窗里读不清比排得松更糟。
+ */
+@container home (max-height: 460px) {
+  .welcomeTop {
+    gap: 12px;
+  }
+
+  .welcome > ol {
+    margin-top: 12px;
+    padding-top: 8px;
+  }
+}
+
+/*
+ * 扁窗（模拟窗 520 高上下）：把板子那一块的内边距与列间距压一档。
+ * 说明文字这一轮已经删干净了（只剩"没取到预设"那一行，它必须一直可见），
+ * 所以这里不再有隐藏文案的规则。
+ */
+@container home (max-height: 520px) {
+  /* 分组框的内边距与列间距一起压：扁窗里这两处是最容易省的 */
+  .step {
+    padding: 10px;
+    gap: 6px;
+  }
+}
+
+/* 再扁一档（420 高上下）：行间距收到 6px，板子尺寸交给上面那条连续函数，不再在这里拐弯 */
+@container home (max-height: 460px) {
+  .calib {
+    --calib-gap: 6px;
+  }
+}
+/* 唯一保留的结构断点：窄到放不下大图时收起，信息列占满 */
+@container home (max-width: 620px) {
+  .slot {
+    display: none;
+  }
+
+  /* 大图收起之后右边没东西了，列本身要居中 —— 否则整页内容贴着左边，
+     右边空一大片。列内的文字仍然左对齐（正文居中更难读） */
+  .info {
+    width: 100%;
+    max-width: 560px;
+    margin-inline: auto;
+  }
+
+  /* 三轴读数：480px 的上限在这一档比列宽还大，最右那一列的「mm」会顶出卡片被切。
+     放开上限、横向 gap 一起压 —— 三个数各自留够 nowrap 的宽度 */
+  .axes {
+    max-width: 100%;
+    gap: clamp(6px, 1.2cqh, 16px) clamp(8px, 1.6cqw, 44px);
+  }
+
+  /*
+   * 第四页在这一档不回退成上下排。
+   *
+   * 原来这里把它收回单列（读数回到板上方），实测就是那一级台阶：容器宽跨过 620
+   * （模拟窗约 625）的一瞬间，读数 x 从 289 跳到 387、框宽从 556 跳到 260 —— 屏幕上
+   * 就是"读数忽然换了个位置又窄一次"。两列在这一档明明放得下：左列有
+   * minmax(min(100%, …), …) 兜底、右列按内容宽，窄下去两边一起让，不需要换版式。
+   */
+
+  /* 这一档没有露出卡（density mini 不渲染它），缝里那份预设块就不存在了。
+     选择机型页把它内联到列尾，否则"选完之后看不到选中了哪一份预设" */
+  .pickerPreset {
+    display: block;
+  }
+}
+
+/*
+ * 再窄一档（容器 < 520px）：第四页回到第三页那套「读数横排在上、板在下」的单列。
+ *
+ * 两列排布的最小需求是 左列下限 340 + column-gap 14 + 读数块约 101 ≈ 455px。容器窄下去之后
+ * 第三条 1fr 先被吃到 0，再窄就开始横向溢出（`overflow-x: hidden` 直接夹断）——
+ * 实测 600 / 520 / 480 三档列横溢 1 / 3 / 39，480 那档读数已经越过内容右缘 24.5px。
+ * 单列之后最小需求只剩板块框那一条（340），夹断与读数消失一起没了。
+ *
+ * 断点取 519 而不是 455：读数横排自己也要放得下（三列实测约 300px），留一段余量；
+ * 也与 620 / 640 两档拉开距离，缩窗时不会连着跳两次。
+ */
+@container home (max-width: 519px) {
+  /*
+   * 单列，并且同时把板子的固定扣减量抬上来。
+   *
+   * 单列之后板子吃满列宽、列跟着变高 —— 实测 520×800 / 480×760 两档列底压到胶囊上
+   * −10.9 / −12px（还伴随 16 / 11px 的竖向溢出）。这一档的板子要再让一段：
+   * 先试 180（列底到胶囊顶回到 +2.7 / +2.1，还差一点），最后定 190 —— 两档都 ≥8。
+   * 提示行那一路同步 +44（190 + 43 = 233）。
+   */
+  .calib[data-plate='xy'] {
+    display: flex;
+    flex-direction: column;
+    --xy-fixed: 190px;
+    --xy-fixed-vh: 228px;
+  }
+
+  /* 读数回到横排：三列、按内容宽、整条在列里居中，与第三页同一套 */
+  .calib[data-plate='xy'] > .axes {
+    width: fit-content;
+    max-width: 100%;
+    margin: 4px auto 0;
+    grid-template-columns: repeat(3, auto);
+    justify-items: center;
+    justify-self: auto;
+    align-self: auto;
+    gap: clamp(6px, 1.2cqh, 14px) clamp(8px, 1.6cqw, 28px);
+    text-align: left;
+  }
+
+  /* 字号回到横排那一套：26px 三个数并排在 340 的列里必切 */
+  .calib[data-plate='xy'] > .axes:not([data-orient='col']) {
+    --axis-value: clamp(14px, 1.6cqw, 17px);
+    --axis-label: 11px;
+  }
+
+  /* 单列里板块框吃满列宽（两列档那条 minmax 不再生效），板子仍由高度定尺寸 */
+  .calib[data-plate='xy'] > .step {
+    width: 100%;
+  }
+
+  /*
+   * 单列之后板子吃满列宽、列跟着变高 —— 实测 520×800 / 480×760 两档列底压到胶囊上
+   * −10.9 / −12px（还伴随 16 / 11px 的竖向溢出）。这一档的板子要再让一段：
+   * 先试 180（列底到胶囊顶回到 +2.7 / +2.1，还差一点），最后定 190 —— 两档都 ≥8。
+   * 提示行那一路同步 +44（190 + 43 = 233）。
+   */
+  .calib[data-plate='xy'][data-hint='true'] {
+    --xy-fixed: 233px;
+    --xy-fixed-vh: 271px;
+  }
+}
+
+/* ---------- 露出态 / 退出态：板子淡入淡出，读数改成竖排形变 ---------- */
+
+/*
+ * 板子有 720px，怎么挪都塞不进那条 20% 宽的缝，照旧等卡片滑向居中时淡进来。
+ *
+ * 三轴读数不消失：它换成竖排，正好落在缝里 —— 于是"第二页选完版本，右边就能看见
+ * 这一份预设的文件名与 XYZ"。来回两个方向都靠位移，不靠消失（往回折叠时
+ * 退出层拿 AxisBar 里的 LAST_ROW_POS 当起点）；折叠期间只是压暗，见下面的 axes-fold。
+ */
+[data-layer='card'] .calib .step,
+[data-layer='exit'][data-phase='out'] .calib .step {
+  opacity: 0;
+}
+
+[data-layer='card'][data-phase='in'] .calib .step {
+  animation: step-in calc(var(--glide-ms) * 0.4) ease-out calc(var(--glide-ms) * 0.25) both;
+}
+
+/*
+ * 退出时板子立刻退场。
+ *
+ * 原来这里是 step-out 0.4×glide 的对称淡出，但退回的第 0 帧列宽就已经塌到 200px
+ * （见下面那条窄列规则）：实测 1400×900 / glide 2000，t=4% 时 .step 已经是 198×157
+ * 的窄版、opacity 还有 0.95 —— 屏幕上就是「一整页被缩小成窄条」。
+ *
+ * 修法不是把板子按原列宽钉住（量过：那样 .calib 高度 313 → 444，三轴 FLIP 的终点
+ * 与露出卡静止态错开约 60px，退出层卸载那一帧会跳），而是别让那个窄版有被看清的机会。
+ * v0.0.20 起连那 0.14×glide 的收干动画也去掉了（原来起点是 0.3，扁窗里看得出
+ * 一层灰）：直接落回上面那条静态 opacity: 0，退出层从第 0 帧就是全透明。
+ * 布局一点没动，所以 FLIP 终点、露出卡静止态的竖向位置全部保持原样。
+ */
+
+/*
+ * 那一行预设文件名不跟到缝里去（在 20% 宽的缝里它会折成三四行）。
+ * 但也不能直接不渲染：脱离文档流就行 —— FLIP 的终点必须等于对应状态的真实版面。
+ *   · 缝里（露出卡静止态）：藏起来，不占高度
+ *   · 退回时：同样从第 0 帧就透明（与板子同一条静态规则）
+ */
+[data-layer='card']:not([data-phase='in']) .calibPreset,
+[data-layer='exit'] .calibPreset {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+/*
+ * 三轴读数：折叠的前 45% 它是**静止**的（位移要等 frame-tuck 的时间窗，见 flip.ts 的 delay）。
+ * 板子与文件名第一帧就没了，这段静止本来剩「一整片空白版面里唯一一块数字」，很跳。
+ * 所以这一段把它按住不动、并且全透明，等它真的开始往缝里走再一路回到实色。
+ *
+ * 终点必须是 1：退出层在 glideMs 那一刻卸载，露出卡在同一位置以 opacity 1 原地接手，
+ * 终点不是 1 就会闪一下 —— 所以只有起点归零，不能整条动画都压暗。
+ */
+[data-layer='exit'][data-phase='out'] .calib .axes {
+  animation: axes-fold var(--glide-ms) ease-out both;
+}
+
+/* 折叠退场时读数从全透明起步：那个「按缝宽重排过」的窄版一帧都不该被看清，
+   压暗的 0.3 也不留 —— 扁窗里那层灰看起来就是「上一页的残影」 */
+@keyframes axes-fold {
+  0%,
+  45% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 缝里的那一列：靠左、只占缝的宽度。20cqw 是露出卡盖住的那一段（SlideDeck 的 translateX(80%)），
+   再扣掉卡片自己的左内边距和一点呼吸。上限 200px 免得超宽窗里这一小块显得空旷；
+   下限只到 64px —— 再往上抬（比如 110px）在 700px 宽的窗口就会顶出缝外被切。
+
+   :not([data-phase='in']) 是关键：推入一开始就要恢复成"当前页的样子"。
+   漏掉它的话横排三列被塞在这 200px 里，FLIP 量到的终点根本不是最终位置，
+   卡片层换成平面层那一帧就会硬跳一下 —— 那就是"卡一下才显示"的来源。
+
+   退出层（phase 恒为 out）同样走这一档：往回折叠的终点就是缝里那个竖排。 */
+[data-layer='card']:not([data-phase='in']) .calib,
+[data-layer='exit'] .calib {
+  width: min(200px, max(64px, calc(20cqw - var(--chrome-x) - 12px)));
+  margin-inline: 0;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* 缝里没有两列可言（总共 200px）：第四页退回单列的 flex 流，与第三页一模一样。
+   grid 的行列指派在 flex 下自动失效，所以只需要换回 display 这一条 */
+[data-layer='card']:not([data-phase='in']) .calib[data-plate='xy'],
+[data-layer='exit'] .calib[data-plate='xy'] {
+  display: flex;
+}
+
+@keyframes step-in {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+/* 降级：与 SlideDeck 里卡片动画的 0.16s 保持同步，否则内容会比卡片慢一大截 */
+@media (prefers-reduced-motion: reduce) {
+  [data-layer='card'][data-phase='in'] .calib .axes,
+  [data-layer='card'][data-phase='in'] .calib .step,
+  [data-layer='exit'][data-phase='out'] .calib .axes {
+    animation-duration: 0.16s;
+    animation-delay: 0s;
+  }
+}
+
+/* ---------- 文字（眉标题在 CardFrame 里，这里只剩内容里的标题与正文） ---------- */
+.name {
+  margin: 0;
+  font-size: clamp(26px, 3.6vw, 48px);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text-1);
+}
+
+@supports (width: 1cqw) {
+  .name {
+    font-size: clamp(26px, 3.6cqw, 48px);
+  }
+}
+
+.variant {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.variant:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+.path {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 参数行 ---------- */
+.rows {
+  margin: 14px 0 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  min-width: 0;
+}
+.label {
+  flex: 0 0 clamp(74px, 7vw, 88px);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+@supports (width: 1cqw) {
+  .label {
+    flex-basis: clamp(74px, 7cqw, 88px);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,376 @@
+/* 首页未选机型时的引导：横排五步条 + 等轴线框插图。颜色全走现有变量，不引外部资源。 */
+
+/*
+ * 五步条有三档：
+ *   宽（容器 > 1200px）  五列，.pair 是 display: contents，两格各占一列
+ *   挤（620–1200px）     四列，.pair 自己占一格；第 4 步往右下错开半格，一条斜线相连
+ *   窄（≤ 620px）        两列三行，.pair 回到 contents
+ * 阈值按实测列宽定：五列时每列要 ≥ 150px，低于就该合并。
+ */
+.rail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 28px;
+  min-width: 0;
+}
+
+/*
+ * 宽档：两格直接参与网格。
+ *
+ * 对角档（四列）那套错位与折线的可调数值全在这里，一处改完两处生效。
+ * 标题位置与折线位置是**分开的两组** —— 想只挪折线就别碰 --pair-* ，反之同理。
+ */
+.pair {
+  /* 第 4 步相对第 3 步：往右错开多少、往下错开多少。改这两个会挪标题 */
+  --pair-shift: 22%;
+  --pair-lift: 3px;
+
+  /*
+   * 折线。坐标原点是第 4 步那一格的左上角：
+   *   --link-left  横段起点离序号左边多远（越大越往左伸）
+   *   --link-top   竖段顶端的纵向位置，负值在格子上方；**往下挪就把它调大**（-4 → -1）
+   *   --link-h     竖段落差。--link-top + --link-h 就是转角落在哪一行高度上，
+   *                标题行高 18px，落在 9~11px 时转角正对序号中线
+   *   --link-w     横段长度
+   *   --link-r     转角圆度
+   */
+  --link-left: 15px;
+  --link-top: -1px;
+  --link-h: 14px;
+  --link-w: 11px;
+  --link-r: 5px;
+
+  display: contents;
+}
+
+/* 列间那一下的"箭头感"：真箭头摆在 gap 里，绝对定位不占布局。
+   连线由 data-link 决定，与 DOM 兄弟关系无关 —— 合并之后兄弟关系会变 */
+.item {
+  position: relative;
+  min-width: 0;
+}
+
+.item[data-link='true']::before {
+  content: '→';
+  position: absolute;
+  left: -22px;
+  top: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--line-strong);
+}
+
+
+
+.cell {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.no {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.title {
+  font-size: 12.5px;
+  color: var(--text-1);
+  white-space: nowrap;
+  transition: color 0.14s ease;
+}
+
+/* hover 只变色，不位移、不加边框 */
+.cell[data-go='true']:hover .title {
+  color: var(--accent-deep);
+}
+
+.cell[data-go='true']:hover .no {
+  color: var(--accent);
+}
+
+.hint {
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+/* ---------- 三张小卡 + 线条小猫：未选机型时的插图 ---------- */
+
+/*
+ * 卡堆逐像素照抄抽卡页 13 号（`public/gacha/home.html` 的 `.stack`）：
+ * 250×210 的框、190 宽的卡、一层 62px、倾角 -4° / 0° / +3°，全部写死像素，不跟容器缩放。
+ * 猫站在第 1 张卡的上沿 —— 62px 的层间距正好等于卡高，卡 2 / 卡 3 的上沿被上一张压住，
+ * 没有给它走的地方，所以这一轮只在第 1 张卡上活动。
+ */
+.stage {
+  position: relative;
+  width: 250px;
+  height: 210px;
+}
+
+.slot {
+  position: absolute;
+}
+
+.slot[data-slot='1'] {
+  left: 0;
+  top: 0;
+  z-index: 3;
+  transform: rotate(-4deg);
+}
+
+.slot[data-slot='2'] {
+  left: 30px;
+  top: 62px;
+  z-index: 2;
+}
+
+.slot[data-slot='3'] {
+  left: 60px;
+  top: 124px;
+  z-index: 1;
+  transform: rotate(3deg);
+}
+
+/* 卡片本体：宽 190、内边距 14/16、13px 正文 —— 与抽卡页 `.stack div` 逐项一致 */
+.card {
+  display: block; /* 组件里是 span，得显式变块级，否则 width / padding 不生效 */
+  box-sizing: border-box;
+  width: 190px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: 0 8px 22px rgb(20 32 45 / 8%);
+  font-size: 13px;
+  line-height: 1.5; /* 抽卡页那边继承的是 body 的 14px/1.5，这里显式写上，卡高才是 68 */
+  color: var(--text-2);
+}
+
+/* 第 3 张是整块插图里唯一的彩色元素 */
+.slot[data-slot='3'] .card {
+  border-color: var(--accent);
+}
+
+.cardNo {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+}
+
+/* 待填的那一行。三张卡的条子长短不一，看着像三个还没填的空位，
+   而不是三条一样长的横线。高度按原来那行 13px 文字的视觉重量取 8px，卡高不变 */
+.cardBlank {
+  display: block;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: rgb(16 24 32 / 8%);
+}
+
+.slot[data-slot='1'] .cardBlank {
+  width: 66%;
+}
+
+.slot[data-slot='2'] .cardBlank {
+  width: 44%;
+}
+
+.slot[data-slot='3'] .cardBlank {
+  width: 54%;
+  background: var(--accent-soft);
+}
+
+
+
+
+/* 减少动态效果：卡片不做任何动画 */
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none;
+  }
+}
+
+
+
+
+/* 挤压档：四列，第 3、4 步上下叠进同一格 —— 序号都留着，中间一条横虚线分隔，
+   读起来是「3 / 4：Z / XY 校准」两行。
+   断点按五步条自己所在块（welcome 容器）的宽度判断：整个版面容器 home 还包含页边与
+   露出卡让位，用它会在宽而扁的窗口里误判成"挤" */
+@container welcome (max-width: 862px) {
+  .rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+
+    /* 合并那一格变高之后，其余四格仍与它顶部对齐 */
+    align-items: start;
+  }
+
+  /* 两步竖排成一列。子元素是 span，得靠 flex 让它们变块级；
+     行距不用 gap，交给第 4 步自己的 margin-top —— 它还要往右错位，一处写全好读 */
+  .pair {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* 挤到一起的那一下：下面那一步从上方落进来并淡入 */
+  .pair > .item {
+    animation: pair-squeeze 300ms cubic-bezier(0.32, 0.72, 0.24, 1) both;
+  }
+
+  /*
+   * 第 4 步不竖着叠在第 3 步正下方，而是往右下错开半格 —— 对角排布。
+   * 竖排读起来是「第 4 步掉下来了」；错开之后它落在第 3 与第 5 之间的空当里，
+   * 加上那条斜线，一眼就是「第 3、4 步是同一个校准阶段的两个动作」。
+   *
+   * `width: max-content` 是必须的：这一格只剩 60% 宽，不放开就会把标题折行。
+   * 它在流内（不是绝对定位），所以整行高度算得进去 —— 第 4 步不会再被裁掉。
+   */
+  .pair > .item[data-tight='true'] {
+    margin-top: var(--pair-lift);
+    margin-left: var(--pair-shift);
+    width: max-content;
+    animation-delay: 60ms;
+  }
+
+  /*
+   * 连接符：一条从第 3 步底下垂下来、圆角折向第 4 步序号的发丝线。
+   *
+   * 试过四种，选这个：
+   *   斜线 ／     —— 只是个分隔符，表达不出"从 3 分支出 4"，而且斜线两端都悬空
+   *   箭头字 ↳    —— 语义对，但字形比正文粗，在这一排最淡的层级里显得脏
+   *   斜箭头 ↘    —— 方向感有了，箭头指向的是空白而不是序号
+   *   什么都不放  —— 只靠缩进，挤窄时读者会以为第 4 步是被挤下来的
+   * 折线是唯一能同时说清"同一阶段"和"有先后"的：竖段说从属，横段指向第 4 步。
+   */
+  .pair > .item[data-tight='true']::before {
+    content: '';
+    left: calc(0px - var(--link-left));
+    top: var(--link-top);
+    width: var(--link-w);
+    height: var(--link-h);
+    border-left: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    border-bottom-left-radius: var(--link-r);
+  }
+
+  /*
+   * 对角这一档里，第 3、4 步不显示副标题。
+   *
+   * 只有这样这一格的高度才和别的格一致：两行标题 + 错位间距 ≈ 别人的标题 + 副标题。
+   * 留着副标题的话这一格会多出一行，整条五步条被它拉高，扁窗里又要顶到边。
+   * 宽档五列时两步各占一格、不挤，副标题照常显示。
+   */
+  .pair .hint {
+    display: none;
+  }
+}
+
+/* 宽档：分回五列时也给一次轻淡入，切回来不生硬 */
+@container welcome (min-width: 863px) {
+  .pair > .item {
+    animation: pair-spread 260ms ease-out both;
+  }
+}
+
+@keyframes pair-squeeze {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pair-spread {
+  0% {
+    opacity: 0.35;
+    transform: translateX(-6px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pair > .item {
+    animation: none;
+  }
+}
+
+
+/* 窄档：插图收起（与 .slot 同一个 home 断点）；五步条改两列三行、且不叠 3/4。
+   这一段必须重置合并态留下的边框与留白 —— 上一版只重置了 ::before，
+   小窗里那条横虚线就是它漏下的 */
+@container home (max-width: 620px) {
+  .stage {
+    display: none;
+  }
+}
+
+@container welcome (max-width: 619px) {
+  .rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 18px;
+  }
+
+  /* 这一档回到"每步各占一格"：.pair 让位给两列排布，连线与竖虚线都收掉 */
+  .pair {
+    display: contents;
+  }
+
+  .item[data-link='true']::before,
+  .pair > .item[data-tight='true']::before {
+    display: none;
+  }
+
+  /* 对角排布留下的错位与斜线也要清掉，否则两列档里第 4 步会歪在一边 */
+  .pair > .item[data-tight='true'] {
+    margin-top: 0;
+    margin-left: 0;
+    width: auto;
+  }
+
+  .pair > .item {
+    animation: none;
+  }
+
+
+  .title {
+    white-space: normal;
+  }
+
+
+  .hint {
+    display: none;
+  }
+}

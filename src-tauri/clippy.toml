@@ -1,0 +1,12 @@
+# 全仓只允许 fsx/atomic.rs 直接写盘。
+#
+# 为什么用 clippy 而不是"约定 + code review"：这条纪律的失效是静默的 ——
+# 某天顺手写一行 std::fs::write，一切正常，直到用户在保存时断电。
+# 机器拦得住的事情不该靠记性。
+#
+# 逃生口只有一个：fsx/atomic.rs 顶上的 #[allow(clippy::disallowed_methods)]。
+disallowed-methods = [
+  { path = "std::fs::write", reason = "会先把目标文件截断再写，崩溃时留半个文件。用 fsx::atomic::atomic_write" },
+  { path = "std::fs::File::create", reason = "同上。要写盘走 fsx::atomic" },
+  { path = "tokio::fs::write", reason = "同上。要写盘走 fsx::atomic" },
+]

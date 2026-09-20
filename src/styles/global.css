@@ -1,0 +1,96 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--text-1);
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizelegibility;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  margin: 0;
+  width: 100%;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* 数值等宽，避免跳动 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ============ 幽灵滚动条：完全不占布局空间 ============ */
+/*
+ * 原来是 10px 宽的透明条 —— 看不见但一直占位，会挤窄内容、打破居中。
+ * 浏览器原生做不到"看得见 + 不占位"（overflow: overlay 已被 Chromium 移除），
+ * 所以这里选择彻底零占位；滚轮 / 触控板 / 键盘 / 拖拽照常可用。
+ *
+ * v0.0.20 起连 [data-scroll] 那条"看得见的 6px 细条"例外也去掉了：
+ * 扁窗里那条细条本身就要占宽、还把内容挤得更窄，而卡片里真正需要的提示
+ * 是"内容压缩到放得下"，不是"告诉用户下面还有"。预览区外壳（App.module.css
+ * 的 .stage）有自己的一套滚动条规则，不受这里影响。
+ */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 老 Edge */
+}
+
+/* WebKit / Blink：Chrome、Edge、Safari、Electron、WebView2 */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+

@@ -1,0 +1,122 @@
+/*
+ * 预设文件小块。左对齐竖排，宽度吃满给它的槽 ——
+ * 露出卡那条缝只有版面的 20%，所以这里的每一行都必须能在窄槽里读完。
+ */
+.stack {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  text-align: left;
+}
+
+.head {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+}
+
+.name {
+  margin: 0;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.retry {
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10.5px;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.retry:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/* 下载中：一条不报百分比的细线。几十 KB 的文件报进度是假精确 */
+.progress {
+  position: relative;
+  width: min(160px, 100%);
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(16 24 32 / 8%);
+}
+
+.progress::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: sweep 0.9s ease-in-out infinite;
+}
+
+.axes {
+  width: 100%;
+  margin: 5px 0 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  min-width: 0;
+}
+
+.label {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.value {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress::after {
+    width: 100%;
+    animation: none;
+  }
+}

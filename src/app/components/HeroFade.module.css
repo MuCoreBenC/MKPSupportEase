@@ -1,0 +1,114 @@
+/* 包围盒：撑满槽位、不参与位移 */
+.box {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+
+  /* 大图可以比槽位大：溢出是曲线的合法结果，不在这里偷偷砍 */
+  overflow: visible;
+}
+
+/*
+ * 定尺盒子：宽高只由曲线决定，与"当前是哪张图"无关，也不被槽位夹。
+ * 基准固定 640px：曲线值 = 最终倍率（见 heroCurves.ts 的 HERO_BASE）。
+ * 只留一道安全上限：别让极端值把图撑到整页之外。
+ */
+.hero {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  aspect-ratio: 1303 / 942;
+  width: calc(640px * var(--hero-fill, 1));
+  max-width: min(300%, 100cqw);
+  transform: translate(calc(var(--nx, 0) * 1%), calc(var(--ny, 0) * 1%));
+  user-select: none;
+}
+
+/* 两层完全重合，contain 保证不同长宽比的图都在同一个盒子里居中 */
+.img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+
+  /* 静态终态：挂载时就在的那层不播动画，否则卡片位与退出层会跟着闪 */
+  opacity: 1;
+}
+
+/* 品牌 logo 是矢量标志，铺满盒子会很怪：往里收一圈，并压低到与整机图相近的浅灰观感 */
+.img[data-kind='logo'] {
+  padding: 22% 26%;
+  box-sizing: border-box;
+  opacity: 0.32;
+}
+
+/* 只有"换图"产生的新层才淡入 */
+.img[data-fresh='true'] {
+  animation: art-in var(--fade-ms, 260ms) ease-out both;
+}
+
+.img[data-kind='logo'][data-fresh='true'] {
+  animation: art-in-logo var(--fade-ms, 260ms) ease-out both;
+}
+
+.img[data-leaving='true'] {
+  z-index: 1;
+  animation: art-out var(--fade-ms, 260ms) ease-out both;
+}
+
+.img[data-kind='logo'][data-leaving='true'] {
+  animation: art-out-logo var(--fade-ms, 260ms) ease-out both;
+}
+
+@keyframes art-in {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+/* logo 的目标不透明度是 0.32，进出各用一条，避免先跳到 1 */
+@keyframes art-in-logo {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0.32;
+  }
+}
+
+@keyframes art-out-logo {
+  0% {
+    opacity: 0.32;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes art-out {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero {
+    --fade-ms: 0ms;
+  }
+}

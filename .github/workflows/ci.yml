@@ -1,0 +1,88 @@
+# CI —— 第一个 PR 之前就要存在的那层。
+#
+# 两个 job 的名字是 `web` 与 `rust`，必须和 scripts/setup-ruleset.mjs 里的
+# REQUIRED_CHECKS 逐字对上（Task 16 把它们挂成必需检查）。改名等于把闸门拆了。
+#
+# 早先这里有一段"探测 + 跳过"的逻辑，用来在前端 / Rust 侧还没搬进来的阶段放行。
+# 现在两边都在了，那段整个删掉 —— "允许跳过"与试验场那七道空转的闸是同一个失效模式，
+# 留着一天就有一天会骗过人。
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 同一分支连续 push 时取消上一次，省额度也省等待
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+
+      # npm ci 会触发 prepare（scripts/setup-hooks.mjs）。
+      # 那个脚本的第一条约束就是"任何情况下都不能让 npm install 失败"，这一步顺带天天在验它。
+      - run: npm ci
+
+      - name: eslint + stylelint
+        run: npm run lint
+
+      - name: 类型检查
+        run: npx tsc -b
+
+      - name: 构建
+        run: npm run build
+
+  rust:
+    name: rust
+    # macOS 而不是 ubuntu：Tauri 的 Rust 侧在 Linux 上要先装 libwebkit2gtk 等一串系统包，
+    # 而本产品只发 macOS。跑在目标平台上，CI 绿才等于"我这台机器上也能编"。
+    # 公开仓库的 macOS runner 不计费，所以这个选择不花钱。
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v5
+
+      # runner 自带 rustup，不引第三方 action —— 少一个供应链入口
+      - name: 准备工具链
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc -V && cargo -V
+
+      - name: 缓存 cargo registry 与 target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: 格式
+        run: cargo fmt --all -- --check
+
+      # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: 测试
+        run: cargo test

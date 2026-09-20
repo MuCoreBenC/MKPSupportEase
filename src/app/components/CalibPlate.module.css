@@ -1,0 +1,82 @@
+/* 底色由配色套给（浅色就是应用卡片的纯白），所以不用边框也不用圆角，板子直接与卡片连成一片。
+   宽度 = 这块板的 mm 宽 × 列上给的共用 px/mm —— 两块板同一个缩放比，线宽才一致 */
+.wrap {
+  background: var(--calib-bg);
+  width: min(100%, calc(var(--plate-mm, 100) * var(--plate-scale, 5px)));
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.plateSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.plate {
+  fill: var(--calib-plate-fill);
+  stroke: var(--calib-plate-stroke);
+  stroke-width: var(--calib-plate-width);
+}
+
+.pad {
+  fill: var(--calib-pad-fill);
+  stroke: var(--calib-pad-stroke);
+  stroke-width: var(--calib-pad-width);
+}
+
+.mark {
+  fill: var(--calib-mark-fill);
+  stroke: var(--calib-mark-stroke);
+  stroke-width: var(--calib-mark-width);
+}
+
+.glyph {
+  fill: var(--calib-glyph-fill);
+  stroke: var(--calib-glyph-stroke);
+  stroke-width: var(--calib-glyph-width);
+}
+
+/* ---------- 可点热区 ---------- */
+
+/* 命中层：产物里那层放大过的透明矩形，点击与悬停都落在它上面 */
+.hit {
+  fill: transparent;
+  stroke: none;
+  cursor: pointer;
+}
+
+/* 不要焦点环 —— Chrome 给可聚焦的 SVG 元素画的圈又粗又大，压在板子上很难看 */
+.hit:focus,
+.hit:focus-visible,
+.plateSvg path[role='button']:focus,
+.plateSvg path[role='button']:focus-visible {
+  outline: none;
+}
+
+/* 可见层一律不吃指针：指针事件全交给命中层（退回老路时下面那条会放开） */
+.plateSvg path {
+  pointer-events: none;
+}
+
+.plateSvg path[role='button'] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* 选中：走配色里的 --calib-sel-*（顺序在悬停之前，与导出 SVG 一致） */
+.plateSvg path[data-on='true'] {
+  fill: var(--calib-sel-fill);
+  stroke: var(--calib-sel-stroke);
+  stroke-width: var(--calib-sel-width);
+}
+
+/* 悬停只换描边，填充保持原样 —— 两套配色的 hoverKeepFill 都是开着的。
+   data-hover 由组件根据命中矩形的指针进出给到下面这条可见 path 上 */
+.plateSvg path[data-hover='true'],
+.plateSvg path[role='button']:hover {
+  stroke: var(--calib-hover-stroke);
+  stroke-width: var(--calib-hover-width);
+}
+
+

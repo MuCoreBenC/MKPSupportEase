@@ -1,0 +1,152 @@
+#!/bin/sh
+# 闸①：拒绝在 main 上直接提交
+# 闸⑥：拒绝没有合法前缀的分支名
+# 闸⑦：拒绝把密钥文件或超大文件提进库
+#
+# 逃生开关：ALLOW_COMMIT_ON_MAIN=1  ALLOW_ANY_BRANCH=1  ALLOW_BIG_OR_SECRET=1
+#
+# 三道闸各自判定、各自报错，最后一起决定退出码 —— 不能一道过了就 exit 0，
+# 否则 `ALLOW_COMMIT_ON_MAIN=1 git commit` 会连闸⑦一起放掉：
+# 逃生开关只应该放掉它自己那一道。
+#
+# 留痕也因此要延后到最后：闸①放行、闸⑦拦下时提交并没有发生，
+# 这时候往 bypass.log 写一行就是假记录 —— 而那份日志的全部价值在于它每条都是真的。
+
+. "$(dirname "$0")/_lib.sh"
+
+# detached HEAD / rebase 途中取不到分支名。这时候拦提交会把人锁死在 rebase 里，直接放过。
+branch=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
+
+fail=0
+pending_bypass=
+
+# ---------- 闸① / 闸⑥：提交位置 ----------
+
+if [ "$branch" = "main" ]; then
+  if in_release; then
+    :
+  elif [ "$ALLOW_COMMIT_ON_MAIN" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_COMMIT_ON_MAIN"
+  else
+    echo "" >&2
+    echo "  闸①：拒绝在 main 上直接提交。" >&2
+    echo "" >&2
+    echo "  一任务一分支。改动还在，带着切过去就行：" >&2
+    echo "    git switch -c feat/<task>" >&2
+    echo "" >&2
+    echo "  要把这些改动发成一个版本，走发版命令（它会开 PR + 合并 + 打 tag）：" >&2
+    echo "    npm run release" >&2
+    echo "" >&2
+    echo "  确实要提在 main 上（会留痕）：" >&2
+    echo "    ALLOW_COMMIT_ON_MAIN=1 git commit ..." >&2
+    fail=1
+  fi
+else
+  case "$branch" in
+    feat/*|fix/*|refactor/*|chore/*|docs/*|style/*) ;;
+    *)
+      if [ "$ALLOW_ANY_BRANCH" = "1" ]; then
+        pending_bypass="$pending_bypass ALLOW_ANY_BRANCH"
+      else
+        echo "" >&2
+        echo "  闸⑥：分支名 '$branch' 没有合法前缀。" >&2
+        echo "" >&2
+        echo "  合法前缀：feat/ fix/ refactor/ chore/ docs/ style/" >&2
+        echo "  改名（分支还没推过的话很安全）：" >&2
+        echo "    git branch -m feat/$branch" >&2
+        echo "" >&2
+        echo "  确实要用这个名字（会留痕）：" >&2
+        echo "    ALLOW_ANY_BRANCH=1 git commit ..." >&2
+        fail=1
+      fi
+      ;;
+  esac
+fi
+
+# ---------- 闸⑦：密钥与大文件 ----------
+#
+# 试验场没这道闸：那边只有设计稿，没有用户数据、没有签名密钥。产品仓两样都会碰。
+#
+# 判据只看**索引里这次要提交的内容**：
+#   - `--cached` 取索引而不是磁盘，`git add -p` 部分暂存时进库的是前者；
+#   - `--diff-filter=ACM` 排掉删除 —— 删掉一个大文件不该被拦；
+#   - 大小取 `git cat-file -s :<path>`（索引里 blob 的字节数），同理不看磁盘。
+#
+# `.env.example` / `.env.sample` / `.env.template` 放过：它们按约定只有键名没有值，
+# 而且是常规入库文件。为它们留一条 bypass 记录会稀释 bypass.log 的信号
+# —— 那份日志的价值全在"条数少到值得逐条念出来"。
+
+SIZE_LIMIT=2097152 # 2 MiB
+secret_hits=
+big_hits=
+
+saved_ifs=$IFS
+set -f # 关掉 glob，文件名里的 * ? [ ] 不能被展开
+IFS='
+'
+for f in $(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACM); do
+  base=${f##*/}
+
+  case "$base" in
+    .env.example|.env.sample|.env.template)
+      continue
+      ;;
+    .env*|*.pem|*.p12|id_rsa*)
+      secret_hits="$secret_hits  $f
+"
+      continue
+      ;;
+  esac
+
+  # 大文件判据放过 public/ —— 静态资产（模型、贴图）天生就大，那是它们该在的地方
+  case "$f" in
+    public/*) continue ;;
+  esac
+
+  size=$(git cat-file -s ":$f" 2>/dev/null) || size=
+  [ -z "$size" ] && size=0
+  if [ "$size" -gt "$SIZE_LIMIT" ]; then
+    big_hits="$big_hits  $f  （$((size / 1024)) KB）
+"
+  fi
+done
+IFS=$saved_ifs
+set +f
+
+if [ -n "$secret_hits" ] || [ -n "$big_hits" ]; then
+  if [ "$ALLOW_BIG_OR_SECRET" = "1" ]; then
+    pending_bypass="$pending_bypass ALLOW_BIG_OR_SECRET"
+  else
+    echo "" >&2
+    echo "  闸⑦：这次提交里有不该进库的文件。" >&2
+    if [ -n "$secret_hits" ]; then
+      echo "" >&2
+      echo "  疑似密钥 / 环境文件：" >&2
+      printf '%s' "$secret_hits" >&2
+      echo "  进了库就等于泄露 —— 删提交也没用，要换密钥。加进 .gitignore 吧。" >&2
+    fi
+    if [ -n "$big_hits" ]; then
+      echo "" >&2
+      echo "  超过 2 MB 且不在 public/ 下：" >&2
+      printf '%s' "$big_hits" >&2
+      echo "  git 历史里的大文件永远删不掉，每个 clone 都要拉一遍。" >&2
+      echo "  静态资产放 public/；构建产物应该在 .gitignore 里。" >&2
+    fi
+    echo "" >&2
+    echo "  取消暂存：git restore --staged <file>" >&2
+    echo "  确实要提（会留痕）：ALLOW_BIG_OR_SECRET=1 git commit ..." >&2
+    fail=1
+  fi
+fi
+
+if [ "$fail" = "1" ]; then
+  echo "" >&2
+  exit 1
+fi
+
+# 提交确定会发生了，这时候写留痕才是真的
+for b in $pending_bypass; do
+  log_bypass "$b"
+done
+
+exit 0

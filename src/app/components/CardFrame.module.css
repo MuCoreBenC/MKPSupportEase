@@ -1,0 +1,396 @@
+/*
+ * 卡片外壳的坐标系。全站只有这一份 —— 眉标题、徽标、左下角胶囊的位置都从这里出，
+ * 页面拿不到"自己发明位置"的机会（v0.0.14 / v0.0.15 早期就是每页一套数值，总差一点）。
+ *
+ * --chrome-x：左内边距。眉标题、胶囊、内容列共用同一条左基线。
+ * --chrome-y：眉标题的上边距。不贴顶，也不让内容压上来。
+ * --chrome-b：胶囊的下边距。
+ *
+ * 眉标题与胶囊都是绝对定位、不在内容流里；内容区靠 padding 把这两条带让出来，
+ * 于是内容怎么居中都不会压到它们。
+ */
+.frame {
+  --chrome-x: clamp(20px, 5vw, 96px);
+
+  /*
+   * 上下两条带子、以及它们与内容之间那段留白，全部按容器高度走，只留一个够小的下限。
+   *
+   * 原来是 clamp(56px, 13vh, 132px) 再加一段**固定** 46px：那 46px 不随高度缩，
+   * 扁窗里就是纯浪费 —— 合计 102px 上留白，内容被顶下去，底下反而容易被裁。
+   *
+   * v0.0.20 把三条比例各降一档（11→7 / 7→5 / 3.6→2.8，下限同步压）：
+   * 420h 的扁窗上留白 52→41px、下留白 44→33px，省下的高度全给内容；
+   * 900h 宽窗上留白 166→88px，仍够眉标题呼吸。
+   */
+  --chrome-y: clamp(24px, 7vh, 120px);
+  --chrome-b: clamp(20px, 5vh, 84px);
+  --chrome-pad: clamp(12px, 2.8vh, 46px);
+
+  /*
+   * 眉标题那一行本身的高度。它是绝对定位的，所以必须在内容的上内边距里显式让出来 ——
+   * 以前靠 --chrome-pad "顺便"盖住（眉标题约 15px、pad 最小 16px，刚好不撞），
+   * v0.0.20 把行盒钉成 22px、pad 下限压到 12px 之后就撞上了：扁窗里预设文件那一行
+   * 直接压在标题上。让位量与 .eyebrow 的 min-height 同源，改一处就够。
+   */
+  --chrome-head: 22px;
+
+  position: relative;
+
+  /* 内容层压在白底之上（白底是卡片里的 .face，z-index: 0） */
+  z-index: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+
+  /* 无条件限宽居中：页边随窗口连续变化，任何宽高比下都没有阈值跳变 */
+  max-width: 1400px;
+  margin-inline: auto;
+
+  /* 上下各让出 chrome 那两条带（上面还要加眉标题自己那一行），左右是页边 */
+  padding: calc(var(--chrome-y) + var(--chrome-head) + var(--chrome-pad)) var(--chrome-x)
+    calc(var(--chrome-b) + var(--chrome-pad));
+  display: flex;
+
+  /*
+   * 竖向居中交给内容自己的 auto margin（内容块上写 margin-block: auto）。
+   * 用 align-items: center 时，内容比可用高度还高就会朝上下同时溢出 ——
+   * 扁窗里大标题就压到眉标题上了（真踩过）。auto margin 只分配正的剩余空间，
+   * 没空间就从 padding 顶端开始，永远不往上溢。
+   */
+  align-items: stretch;
+}
+
+/*
+ * 没有眉标题的卡（欢迎态、机型概览、选择机型）：把上面那条带子收到极小。两个效果同时来：
+ *
+ *   1. 上带子比下带子窄了，内容居中的那个盒子整体偏上 —— 视觉上就是"中间偏上"，
+ *      不是把内容往上顶（顶上去会贴着窗口边，反而更难看）
+ *   2. 内容盒变高一大截，五步条与参数行在扁窗里不容易被裁
+ *
+ * 只收上带子、不动下带子，是因为下带子正是"偏上"这件事的支点：
+ * padding-bottom > padding-top，auto margin 居中之后内容自然落在卡片中线之上。
+ */
+.frame[data-bare-top='true'] {
+  --chrome-y: clamp(6px, 1.6vh, 28px);
+
+  /* 没有眉标题就不必让出那一行 */
+  --chrome-head: 0px;
+}
+
+/* 左下角没有胶囊的卡：下带子同样收掉。欢迎态两条带子都空着，
+   收回来的高度正好够五步条把第 4 步那一行完整摆开 */
+.frame[data-bare-bottom='true'] {
+  --chrome-b: clamp(12px, 3vh, 40px);
+}
+
+.eyebrow {
+  position: absolute;
+  left: var(--chrome-x);
+  top: var(--chrome-y);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  /*
+   * 行盒高度写死：徽标（10.5px 字 + 1px 上下内边距 + 1px 边框）比 11px 的标题文字高，
+   * 它一出现 flex 行就变高、居中的标题跟着往下挪 —— 实测 1.5px，看起来就是"标题抖一下"。
+   * 22px 比两者都高，于是有没有徽标，标题的 y 都由这一条决定。
+   */
+  min-height: 22px;
+  line-height: 22px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.eyebrow i {
+  width: 28px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+/*
+ * 眉标题行右侧那颗动作（校准两页的「打开模型」）。
+ *
+ * 高度必须 ≤ 行盒的 22px：这一行是 align-items: center 的 flex，
+ * 塞一颗更高的按钮进来，居中的标题就整体下移（与徽标那条注释同一个坑）。
+ * 所以不用共用的 Btn（它有 7px 上下内边距、约 30px 高），这里自己画一颗矮胶囊。
+ */
+.topBtn {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 70%);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.topBtn:hover {
+  border-color: var(--text-3);
+  background: #fff;
+  color: var(--text-1);
+}
+
+/* 徽标挂在标题右侧固定间距：不占位，出现消失都不动版面。
+   line-height 也要写死 —— 让整颗（含边框）矮于 .eyebrow 的 22px 行盒 */
+.tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  line-height: 16px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.tag[data-tone='accent'] {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.tag[data-tone='muted'] {
+  border: 1px solid var(--line-strong);
+  color: var(--text-3);
+}
+
+/*
+ * 左下角胶囊：第一格是导航胶囊，全站同一个 x / y。
+ * 状态胶囊追加在它右边、不预留空槽 —— 出现时只往右长，不推动任何已有元素。
+ */
+/*
+ * 底部那一条：横跨整张卡片。左端是导航（返回那颗全站同一个 x），右端是这一页的操作。
+ *
+ * v0.0.20 之前它只有 left，宽度由内容决定，所以四颗按钮全挤在左下角；中间那一版把操作
+ * 挪进内容列，结果两者不在同一层 —— 内容列会被卡片的 overflow: hidden 裁掉，按钮就被切了。
+ * 两端钉住 + space-between 之后，它还是那一个绝对定位的组件，只是变得很长。
+ */
+.pills {
+  position: absolute;
+  left: var(--chrome-x);
+
+  /* 右端要跟着"给露出卡让位"那一段一起退 —— 不退的话右边那一组会钻到露出卡底下去
+     （实测 1400×900：让位 385px，下一步跑到 x=1347，卡片右缘只到 1141）。
+     --chrome-peek 由下面 [data-peek] 那条规则给，所在层右边没有露出卡时取 0 */
+  right: calc(var(--chrome-x) + var(--chrome-peek, 0px));
+  bottom: var(--chrome-b);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 两端各自成组：组内从左到右排，组之间由 space-between 撑开。
+   右端那一组里不显形的胶囊照样占位（visibility: hidden），
+   所以「未保存」出现时最右那颗一个像素都不动 */
+.pillGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 60%);
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+
+  /* 不显形时点不到、Tab 也进不去（visibility 收掉命中与焦点） */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--fade-ms, 260ms) ease-out, visibility var(--fade-ms, 260ms),
+    color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.pill[data-on='true'] {
+  opacity: 1;
+  visibility: visible;
+}
+
+.pill:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+  background: #fff;
+}
+
+.pill[data-primary='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+@supports (width: 1cqw) {
+  .frame {
+    --chrome-x: clamp(20px, 5cqw, 96px);
+    --chrome-y: clamp(24px, 7cqh, 120px);
+    --chrome-b: clamp(20px, 5cqh, 84px);
+    --chrome-pad: clamp(12px, 2.8cqh, 46px);
+  }
+
+  .frame[data-bare-top='true'] {
+    --chrome-y: clamp(6px, 1.6cqh, 28px);
+  }
+
+  .frame[data-bare-bottom='true'] {
+    --chrome-b: clamp(12px, 3cqh, 40px);
+  }
+}
+
+/*
+ * 给右侧露出的那张卡让位（按需开启：只有传了 peekSafe 的卡才让）。
+ *
+ * 本稿把"露多少"收成了一个量：SlideDeck 按 deck 实测宽度算出 `--peek-ratio`
+ * （520 起 0、640 满 0.2，每 6px 多 1%）并下发。让位量因此直接由它算：
+ *
+ *   要让的 = 被卡盖住的那一段（p × 容器宽） − 一口呼吸
+ *
+ * 老稿这里是**两条手工拟合的斜坡**：有卡档 `(100cqw − 480) × 0.85`，
+ * 再加一条 mini 档的"提前让位" `(100cqw − 520) × 0.896`（0.896 = 107.52 / 120，
+ * 专门算出来让它在 640 处与有卡档接上）。那两个系数存在的唯一原因是
+ * 卡的出现是个布尔跳变、CSS 又问不到它 —— 现在卡自己连续出场，斜坡不用拟合了，
+ * 两个常数与那条 mini 专用规则一起删掉。
+ *
+ * 上限（cap）保留：被盖住的那 20% 里，内容盒在超宽窗已被 max-width: 1400 收窄的部分
+ * 不用再让；末项 3.2cqw（20-64px）是内容右缘与卡左缘之间的呼吸（实测四档落在 16-24px）。
+ *
+ * `data-peek` 仍是**按层**下发的（平面层看 sheets[index+1]，卡片层与退出层看 index+2）：
+ * 末页右边永远不会有卡，于是永远不让位，滑到位时内边距不变、内容不跳。
+ */
+[data-peek='true'] .frame[data-peek-safe='true'] {
+  --chrome-peek: clamp(
+    0px,
+    calc(var(--peek-ratio, 0) * 100vw - clamp(20px, 3.2vw, 64px)),
+    calc(
+      max(0px, 20vw - max(0px, (100vw - 1400px) / 2)) - clamp(20px, 3.2vw, 64px)
+    )
+  );
+
+  padding-right: calc(var(--chrome-x) + var(--chrome-peek));
+}
+
+/*
+ * 按容器算的版本必须排在上面那条 vw 兜底之后 —— 同特异度、源序在后者赢。
+ * 之前把它放在前面的 @supports 里，结果 vw 版本赢、让位量按真实视口算，
+ * 1440 / 1280 / 1100 三档实测余量是 −44.7 / −39.7 / −12.7（还是被盖住）。
+ */
+@supports (width: 1cqw) {
+  [data-peek='true'] .frame[data-peek-safe='true'] {
+    --chrome-peek: clamp(
+      0px,
+      calc(var(--peek-ratio, 0) * 100cqw - clamp(20px, 3.2cqw, 64px)),
+      calc(
+        max(0px, 20cqw - max(0px, (100cqw - 1400px) / 2)) - clamp(20px, 3.2cqw, 64px)
+      )
+    );
+  }
+}
+
+
+/* 窄到放不下大图时内容顶对齐（唯一保留的结构断点，容器名来自页面的 .page） */
+@container home (max-width: 620px) {
+  .frame {
+    align-items: flex-start;
+  }
+}
+
+/*
+ * 露出态：卡片只露出左边一条缝。内容盒整体左移到卡片左边缘，
+ * 动画终点 translateX(0) 精确等于就位时的位置。
+ * 眉标题与胶囊钉在这个盒子的内边距上，所以缝里露出的正好是它们 —— 不需要任何额外位移常量。
+ */
+[data-layer='card'] .frame,
+[data-layer='exit'][data-phase='out'] .frame {
+  --pane-shift: min(0px, (1400px - 100cqw) / 2);
+
+  transform: translateX(var(--pane-shift));
+}
+
+/*
+ * 平面层也要有一个 transform，但**只提升层、不位移**。
+ *
+ * 为什么要有：落位时同一棵 DOM 从"祖先带 transform 的卡片层"换到平面层，如果平面层这一层
+ * 没有 transform，整棵子树就从"合成层里位图化一次"变成"直接绘制"，落在小数坐标上的文字与
+ * 细线会被取整到不同的物理像素 —— 录屏实测那一帧整体挪了 (−1, +1)。标题栏不动，正是因为
+ * 它在 SlideDeck 之外、从来没搬过家。眉标题、预设行、读数、板框、提示行全都在 .frame 里，
+ * 所以只给 .plane 加层没有用，必须加在这一层。
+ *
+ * 为什么**不能**用 translateX(var(--pane-shift))：那个量在容器宽 ≥ 1400 时不是 0
+ * （Ultra 1760 档算出来是 −180px），平面层会被永久左移，落位那一下就是"从中间瞬移到左边"。
+ * 它是露出态专用的位移，只属于卡片层与退出层。
+ */
+[data-layer='plane'] .frame {
+  transform: translateZ(0);
+}
+
+
+
+[data-layer='card'][data-phase='in'] .frame {
+  animation: frame-settle calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+}
+
+/*
+ * both 是这里的关键：forwards 只管动画结束之后，延迟那一段会按静态值（已经在左边）画 ——
+ * 于是内容会先瞬跳再退出。both 让延迟期间就套用 0% 关键帧。
+ */
+[data-layer='exit'][data-phase='out'] .frame {
+  animation: frame-tuck calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
+    calc(var(--glide-ms) * 0.45) both;
+}
+
+@keyframes frame-settle {
+  0% {
+    transform: translateX(var(--pane-shift));
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes frame-tuck {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(var(--pane-shift));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill {
+    transition: none;
+  }
+
+  [data-layer='card'][data-phase='in'] .frame,
+  [data-layer='exit'][data-phase='out'] .frame {
+    animation-duration: 0.16s;
+    animation-delay: 0s;
+  }
+}
