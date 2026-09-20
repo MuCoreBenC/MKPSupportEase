@@ -1,5 +1,6 @@
 import type { PresetState } from '../usePreset'
 import Skeleton from './Skeleton'
+import TraceTag from './TraceTag'
 import s from './PresetStack.module.css'
 
 const AXIS_ROWS = [
@@ -70,6 +71,7 @@ export default function PresetStack({ state, axes, canAct = true, onRetry }: Pre
       {state.status === 'failed' && (
         <p className={s.note}>
           连接失败
+          {state.error && <TraceTag traceId={state.error.traceId} />}
           {canAct && onRetry && (
             <button type="button" className={s.retry} onClick={onRetry}>
               重试

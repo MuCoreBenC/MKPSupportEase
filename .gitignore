@@ -4,6 +4,9 @@ dist
 dist-ssr
 src-tauri/target
 
+# Tauri 生成物：权限 schema 由 build.rs 按 capabilities/ 重新生成，不入库
+src-tauri/gen/schemas
+
 # 本地覆盖
 *.local
 .env

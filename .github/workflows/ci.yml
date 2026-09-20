@@ -1,12 +1,11 @@
 # CI —— 第一个 PR 之前就要存在的那层。
 #
 # 两个 job 的名字是 `web` 与 `rust`，必须和 scripts/setup-ruleset.mjs 里的
-# REQUIRED_CHECKS 逐字对上（Task 16 会把它们挂成必需检查）。改名等于把闸门拆了。
+# REQUIRED_CHECKS 逐字对上（Task 16 把它们挂成必需检查）。改名等于把闸门拆了。
 #
-# 现在前端与 Rust 侧都还没搬进来，所以两个 job 各有一段"探测 + 跳过"的逻辑。
-# 这是本仓库最危险的一段配置 —— "允许跳过"和试验场那七道空转的闸是同一个失效模式：
-# 看起来绿，其实什么都没跑。所以跳过时必须**大声**：打 ::warning:: 注解 + 写进 job summary，
-# 让 PR 页面上看得见。Task 5 之后 web 不该再跳，Task 7.5 之后 rust 不该再跳。
+# 早先这里有一段"探测 + 跳过"的逻辑，用来在前端 / Rust 侧还没搬进来的阶段放行。
+# 现在两边都在了，那段整个删掉 —— "允许跳过"与试验场那七道空转的闸是同一个失效模式，
+# 留着一天就有一天会骗过人。
 
 name: ci
 
@@ -36,37 +35,16 @@ jobs:
           cache: npm
 
       # npm ci 会触发 prepare（scripts/setup-hooks.mjs）。
-      # 那个脚本的第一条约束就是"任何情况下都不能让 npm install 失败"，
-      # 这一步顺带天天在验它。
+      # 那个脚本的第一条约束就是"任何情况下都不能让 npm install 失败"，这一步顺带天天在验它。
       - run: npm ci
 
-      - name: 探测前端是否已就位
-        id: probe
-        run: |
-          has() { node -e "process.exit((require('./package.json').scripts||{})['$1']?0:1)"; }
-          for s in lint build; do
-            if has "$s"; then echo "$s=yes" >>"$GITHUB_OUTPUT"; else
-              echo "$s=no" >>"$GITHUB_OUTPUT"
-              echo "::warning::package.json 里没有 $s script，这一段跳过"
-              echo "- 跳过 \`npm run $s\`（script 不存在）" >>"$GITHUB_STEP_SUMMARY"
-            fi
-          done
-          if [ -f tsconfig.json ]; then echo "ts=yes" >>"$GITHUB_OUTPUT"; else
-            echo "ts=no" >>"$GITHUB_OUTPUT"
-            echo "::warning::没有 tsconfig.json，类型检查跳过"
-            echo "- 跳过 \`tsc -b\`（没有 tsconfig.json）" >>"$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: eslint + stylelint
-        if: steps.probe.outputs.lint == 'yes'
         run: npm run lint
 
       - name: 类型检查
-        if: steps.probe.outputs.ts == 'yes'
         run: npx tsc -b
 
       - name: 构建
-        if: steps.probe.outputs.build == 'yes'
         run: npm run build
 
   rust:
@@ -75,30 +53,20 @@ jobs:
     # 而本产品只发 macOS。跑在目标平台上，CI 绿才等于"我这台机器上也能编"。
     # 公开仓库的 macOS runner 不计费，所以这个选择不花钱。
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v5
 
-      - name: 探测 Rust 侧是否已就位
-        id: probe
-        run: |
-          if [ -f src-tauri/Cargo.toml ]; then
-            echo "rust=yes" >>"$GITHUB_OUTPUT"
-          else
-            echo "rust=no" >>"$GITHUB_OUTPUT"
-            echo "::warning::src-tauri/ 还不存在，Rust 校验整段跳过 —— Task 7.5 之后这条警告不该再出现"
-            echo "- 跳过全部 Rust 校验（还没有 src-tauri/Cargo.toml）" >>"$GITHUB_STEP_SUMMARY"
-          fi
-
       # runner 自带 rustup，不引第三方 action —— 少一个供应链入口
       - name: 准备工具链
-        if: steps.probe.outputs.rust == 'yes'
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
           rustc -V && cargo -V
 
       - name: 缓存 cargo registry 与 target
-        if: steps.probe.outputs.rust == 'yes'
         uses: actions/cache@v4
         with:
           path: |
@@ -110,16 +78,11 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: 格式
-        if: steps.probe.outputs.rust == 'yes'
-        working-directory: src-tauri
         run: cargo fmt --all -- --check
 
+      # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效
       - name: clippy
-        if: steps.probe.outputs.rust == 'yes'
-        working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
       - name: 测试
-        if: steps.probe.outputs.rust == 'yes'
-        working-directory: src-tauri
         run: cargo test

@@ -81,3 +81,39 @@ export interface MkpApi {
 
 /** 方法名，报错时用来指出是哪个口子没接 */
 export type MkpApiMethod = keyof MkpApi
+
+/* ---------- 错误模型：与 src-tauri/src/error.rs 逐字段对齐 ---------- */
+
+/**
+ * 错误分类。值与 Rust 侧的 `ErrorCode`（serde SCREAMING_SNAKE_CASE）一一对应，
+ * 那边有单元测试钉住字段名与取值 —— 两份声明之间没有编译器，只能靠测试对齐。
+ */
+export type ErrorCode =
+  | 'NOT_FOUND'
+  | 'PERMISSION_DENIED'
+  | 'INVALID_ARGUMENT'
+  | 'CORRUPTED'
+  | 'SHA_MISMATCH'
+  | 'IO'
+  | 'NOT_IMPLEMENTED'
+  | 'INTERNAL'
+
+/**
+ * 跨 IPC 边界的错误。
+ *
+ * `message` 可以直接显示给用户（中文）；`detail` 是给开发看的技术细节；
+ * `traceId` 是这次调用在日志里的编号 —— 界面要把它露出来，否则日志查不到人。
+ */
+export interface AppError {
+  code: ErrorCode
+  message: string
+  traceId: string
+  detail?: string
+}
+
+/** 运行时判断 reject 出来的东西是不是本结构。不是的话由 bridge 兜底成 INTERNAL */
+export function isAppError(v: unknown): v is AppError {
+  if (typeof v !== 'object' || v === null) return false
+  const e = v as Record<string, unknown>
+  return typeof e.code === 'string' && typeof e.message === 'string' && typeof e.traceId === 'string'
+}

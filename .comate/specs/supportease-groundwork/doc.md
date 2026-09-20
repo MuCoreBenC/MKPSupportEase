@@ -160,6 +160,30 @@ Rust 侧首批：`tauri` 2.x、`serde`、`serde_json`、`thiserror`、`tempfile`
 
 已核实的本机工具链：node v26.4.0、npm 11.17.0、rustc 1.97.1、cargo 1.97.1、Xcode CLT 就位、gh 2.93.0（已登录 `MuCoreBenC`，token 含 `repo` + `workflow` scope，够建仓和建 ruleset）。
 
+**实际装上的版本（Task 7 回填）：**
+
+| 包 | 版本 | 备注 |
+| --- | --- | --- |
+| react / react-dom | 18.3.1 | |
+| three / @types/three | 0.186.0 | |
+| vite | 5.4.11 | |
+| typescript | 5.6.3 | |
+| eslint / typescript-eslint | 9.14.0 / 8.13.0 | |
+| stylelint / stylelint-config-standard | 16.10.0 / 36.0.1 | |
+| @types/node | 22.9.0 | 新增：`vite.config.ts` 里读 `process.env.TAURI_DEV_HOST` 需要 |
+| @tauri-apps/api | 2.11.1 | |
+| @tauri-apps/cli | 2.11.5 | |
+| tauri（crate） | 2.11.6 | **npm 与 crate 的 major/minor 必须对齐**，否则 `tauri dev` 会报 version mismatch。第一次装成 2.9.x + 2.11.6 就撞上了 |
+| tauri-build | 2.5 | |
+| serde / serde_json | 1.0 | |
+| thiserror | 2 | |
+| tempfile | 3 | |
+| tracing / tracing-subscriber / tracing-appender | 0.1 / 0.3 / 0.2 | |
+| uuid | 1（features v7） | |
+
+`tauri-plugin-log` 与 `log` 两个脚手架默认依赖已删 —— 可观测性只走 tracing 一套，两套日志栈会各写一份、互相不知道。
+
+
 ---
 
 ### 2.5 git 纪律：两层拦截

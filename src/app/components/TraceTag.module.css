@@ -1,0 +1,16 @@
+.tag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface-sunken);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.tag:hover {
+  color: var(--text-2);
+  border-color: var(--line-strong);
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { Preset } from '../api/contract'
+import { isAppError, type AppError, type Preset } from '../api/contract'
 import type { Selection } from './components/MachinePicker'
 
 export type { Preset }
@@ -16,7 +16,7 @@ export type PresetState =
   | { status: 'idle' }
   | { status: 'waiting'; name: string }
   | { status: 'downloading'; name: string }
-  | { status: 'failed'; name: string }
+  | { status: 'failed'; name: string; error?: AppError }
   | { status: 'ready'; preset: Preset }
 
 /**
@@ -67,7 +67,12 @@ export function usePreset(sel: Selection): { state: PresetState; retry: () => vo
       (err: unknown) => {
         if (!alive) return
         console.error('[preset] 取预设失败', err)
-        setState({ status: 'failed', name: PENDING_NAME })
+        /* 带着 AppError 一起进状态：界面要能显示 traceId，否则日志里那条查不到人 */
+        setState({
+          status: 'failed',
+          name: PENDING_NAME,
+          error: isAppError(err) ? err : undefined,
+        })
       },
     )
 

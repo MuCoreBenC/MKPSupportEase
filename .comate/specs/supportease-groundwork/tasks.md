@@ -70,7 +70,7 @@
 
 ## 第三段：Rust 侧地基
 
-- [ ] Task 7: Tauri 2 脚手架跑通
+- [x] Task 7: Tauri 2 脚手架跑通
     - 7.1: 装 `@tauri-apps/cli`（devDep）与 `@tauri-apps/api`，`package.json` 加 `tauri` script
     - 7.2: `npx tauri init` 生成 `src-tauri/`，crate 名 `mkp-support-ease`
     - 7.3: `tauri.conf.json`：`identifier: com.mkpsupport.ease`、`productName: SupportEase`、窗口标题 `SupportEase`、`devUrl: http://localhost:5178`、`beforeDevCommand: npm run dev`、`beforeBuildCommand: npm run build`、`frontendDist: ../dist`
@@ -78,40 +78,40 @@
     - 7.5: 把 CI 的 `rust` job 从"允许跳过"改成真跑
     - 7.6: 回填实际装上的 Tauri / crate 版本号到 `doc.md` §2.4
 
-- [ ] Task 8: `error.rs` —— AppError 与 ErrorCode
+- [x] Task 8: `error.rs` —— AppError 与 ErrorCode
     - 8.1: 定义 `ErrorCode` 八个变体（`NotFound` / `PermissionDenied` / `InvalidArgument` / `Corrupted` / `ShaMismatch` / `Io` / `NotImplemented` / `Internal`），serde `SCREAMING_SNAKE_CASE`
     - 8.2: 定义 `AppError { code, message, trace_id, detail }`，serde `camelCase`
     - 8.3: 构造辅助：`AppError::not_found()` / `invalid_argument()` / `io()` 等，以及 `with_trace(&str)`
     - 8.4: `From<std::io::Error>`、`From<tempfile::PersistError>` 等转换，`message` 一律是可展示的中文，技术细节进 `detail`
     - 8.5: 单元测试：序列化结果的字段名与 `contract.ts` 的 `AppError` 逐字段对得上
 
-- [ ] Task 9: `obs/tracing.rs` —— 日志与 trace id
+- [x] Task 9: `obs/tracing.rs` —— 日志与 trace id
     - 9.1: `new_trace_id()` 用 uuid v7
     - 9.2: `init_tracing(log_dir)`：`tracing-appender` 的 `rolling::daily` + dev 下并输出 stderr
     - 9.3: 日志目录建不出来 / 写不进去时退到纯 stderr，**返回 Ok 不阻断启动**，但打一条 warn
     - 9.4: `lib.rs` 的 setup 里调用，日志目录取 `internal_root()/logs`
 
-- [ ] Task 10: `fsx/paths.rs` —— 两层根与防穿越
+- [x] Task 10: `fsx/paths.rs` —— 两层根与防穿越
     - 10.1: `internal_root()` = `appDataDir()`，首次 `create_dir_all` 建齐 `cloud/ archive/ index/ logs/ run/`
     - 10.2: `user_root()` = `documentDir()/SupportEase`，建齐 `exports/ reports/ presets-mine/`
     - 10.3: `enum Root { Internal, User }` + `resolve(root, rel) -> Result<PathBuf, AppError>`：拒绝绝对路径、拒绝 `..`、拼接后校验仍在根内，否则 `PermissionDenied`
     - 10.4: 单元测试：`../` 穿越、绝对路径、符号链接指向根外，三种都要被拒
     - 10.5: `capabilities/default.json` 按命令逐个授权 fs 权限 + scope 限到这两个根，**不使用 `fs:default`**
 
-- [ ] Task 11: `fsx/atomic.rs` —— 唯一写盘出口
+- [x] Task 11: `fsx/atomic.rs` —— 唯一写盘出口
     - 11.1: 实现 `atomic_write(path, bytes)`：`NamedTempFile::new_in(parent)` → `write_all` → `sync_all` → `persist` → fsync 父目录
     - 11.2: 写 `src-tauri/clippy.toml`，把 `std::fs::write` / `std::fs::File::create` / `tokio::fs::write` 列进 `disallowed-methods`
     - 11.3: `atomic.rs` 内部 `#[allow(clippy::disallowed_methods)]` 开唯一的洞
     - 11.4: 单元测试：写入后内容正确；目录不存在时自动建；临时文件不残留
     - 11.5: 验证拦截确实生效 —— 在 `ipc/` 里临时写一行 `std::fs::write`，`cargo clippy -- -D warnings` 必须报错，然后删掉
 
-- [ ] Task 12: `ipc/mod.rs` —— 五个 command 接上链路
+- [x] Task 12: `ipc/mod.rs` —— 五个 command 接上链路
     - 12.1: 一个 `traced_command!` 宏（或统一包装函数）：生成 trace id → 开 `info_span!` → 调 service → `map_err(with_trace)`
     - 12.2: 按 `contract.ts` 现有签名实现 `get_preset` / `save_offsets` / `get_calib_models` / `open_model` / `get_test_models`，**先返回硬编码值**，只为证明链路通
     - 12.3: `generate_handler!` 注册全部五个
     - 12.4: `save_offsets` 走 `atomic_write` 落到 `internal_root/index/offsets.json`，作为原子写的第一个真实调用点
 
-- [ ] Task 13: 前端接线（3 个文件 + contract 扩展）
+- [x] Task 13: 前端接线（3 个文件 + contract 扩展）
     - 13.1: `contract.ts` 增加 `ErrorCode` / `AppError` / `isAppError`，方法签名一个字节不动
     - 13.2: `bridge.ts` 内部换成 `invoke()`，加 `normalizeError`（非本结构的 reject 兜底成 `INTERNAL`，`traceId: '-'`，原值进 `detail`）
     - 13.3: `index.ts` 换成运行时探测 `'__TAURI_INTERNALS__' in window`，并把原注释改写说明"为什么不用 `import.meta.env.DEV`"

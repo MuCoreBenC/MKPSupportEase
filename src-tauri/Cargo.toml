@@ -1,0 +1,31 @@
+[package]
+name = "mkp-support-ease"
+version = "0.0.0"
+description = "SupportEase —— MKP 支撑辅助桌面端"
+authors = ["MuCoreBenC"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/MuCoreBenC/MKPSupportEase"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# 名字里的下划线是 crate 名规范；main.rs 按这个名字调 run()
+name = "mkp_support_ease_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.9.1", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+# 原子写盘：同目录临时文件 + persist（见 fsx/atomic.rs）
+tempfile = "3"
+# 可观测性走 tracing 一套，不再叠 tauri-plugin-log —— 两套日志栈会各写一份、互相不知道
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+# trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
+uuid = { version = "1", features = ["v7"] }
