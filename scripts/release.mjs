@@ -16,12 +16,18 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
-const ROOT = run('git', ['rev-parse', '--show-toplevel'])
+/*
+ * 仓库根。**必须是 let、且先有一个可用的初值**：下面 run() 的默认 cwd 就读它，
+ * 而第一次调用 run() 正是为了问出它自己 —— 写成 `const ROOT = run(...)` 会直接
+ * TDZ 崩（`Cannot access 'ROOT' before initialization`）。这个 bug 上线过一次：
+ * `node --check` 查语法查不出来，它是运行期错误，只有真跑一次才会暴露。
+ */
+let ROOT = process.cwd()
 
 /* ---------- 小工具 ---------- */
 
 function run(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: 'utf8', cwd: opts.cwd ?? ROOT ?? process.cwd() }).trim()
+  return execFileSync(cmd, args, { encoding: 'utf8', cwd: opts.cwd ?? ROOT }).trim()
 }
 
 /** 跑给人看的命令（输出直连终端） */
@@ -36,6 +42,8 @@ function tryRun(cmd, args, opts = {}) {
     return null
   }
 }
+
+ROOT = run('git', ['rev-parse', '--show-toplevel'])
 
 const step = (m) => console.log(`\n\u001b[36m▶ ${m}\u001b[0m`)
 const ok = (m) => console.log(`  \u001b[32mok\u001b[0m    ${m}`)
