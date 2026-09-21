@@ -38,15 +38,32 @@
   --peek-content: calc(1 - 0.25 * var(--peek-ratio));
 
   /*
-   * 露出卡内容的暗度。它点不动（SlideDeck 给露出层标了 inert），但视觉上和正式内容一样实，
-   * 于是露在缝里的那颗按钮看着像能点。压暗之后读作"下一页的预览"。
-   * 悬停时抬到 --peek-dim-hover，暗示"点开它"。
+   * 露出卡内容：**虚焦 + 压暗**。
+   *
+   * 它本来就点不动（SlideDeck 给露出层标了 inert），问题是视觉上太实 ——
+   * 光压暗到 0.5 仍然字字清楚，露在缝里的那颗按钮照样像是能点的。
+   * 加一层轻模糊之后读作"景深之外的下一页"，这是模糊比不透明度强的地方：
+   * 压暗只是"变淡的真按钮"，虚焦是"不在焦平面上的东西"。
+   * 所以暗度反而回调到 0.6（太暗会像禁用态，那又是另一种误导）。
+   *
+   * 悬停时模糊收小、亮度抬起来 —— "靠近它就醒过来"。
    */
-  --peek-dim: 0.5;
-  --peek-dim-hover: 0.72;
+  --peek-dim: 0.6;
+  --peek-dim-hover: 0.86;
+  --peek-blur: 2.4px;
+  --peek-blur-hover: 0.8px;
 
-  /* 悬停时露出卡往左探头的距离 */
+  /*
+   * 悬停探头量与"意图延迟"。
+   *
+   * 鼠标只是路过时不该有任何反应 —— 原来 0 延迟，擦一下卡片就动，读起来是抽动。
+   * 进场给 180ms 延迟（路过的话延迟还没走完就已经离开，动画根本不启动），
+   * 离场不延迟（手一走就该立刻退回，等 180ms 会显得黏）。
+   * 位移也从 12px 收到 10px、时长从 0.16s 放到 0.26s：要的是"呼吸"，不是"弹一下"。
+   */
   --peek-hover: 0px;
+  --peek-hover-in-delay: 180ms;
+  --peek-hover-dur: 0.26s;
 
   /* ---------- 时序与曲线：全在这里，两个文件共用 ----------
    *
@@ -156,12 +173,19 @@
  * 只在 idle 档生效 —— 推入/退回动画期间再叠一层位移会打架。
  */
 .card[data-phase='idle'] {
-  transition: transform 0.16s var(--scale-ease);
+  /* 延迟写在基态上是 0 —— 离场立刻退回；进场的延迟在下面那条 hover 规则里给 */
+  transition: transform var(--peek-hover-dur) var(--scale-ease) 0s;
 }
 
 .deck:has(.zoneNext:hover) .card {
-  --peek-hover: 12px;
+  --peek-hover: 10px;
   --peek-dim: var(--peek-dim-hover);
+  --peek-blur: var(--peek-blur-hover);
+
+  /* 内容层（CardFrame 的 .frame）读这个变量决定自己的过渡延迟 —— 两层同步进场 */
+  --peek-hover-delay: var(--peek-hover-in-delay);
+
+  transition-delay: var(--peek-hover-in-delay);
 }
 
 /*

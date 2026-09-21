@@ -339,9 +339,18 @@
    */
   transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
 
-  /* 压暗：露出卡是"下一页的预览"，不是能点的东西（它本来就被 inert 挡住了点击） */
+  /*
+   * 虚焦 + 压暗：露出卡是"下一页的预览"，不是能点的东西（它本来就被 inert 挡住了点击）。
+   * 模糊必须也写进下面两条关键帧 —— 关键帧里没提到的属性会退回这条静态值，
+   * 于是 forwards 之后内容会一直虚着。
+   * 过渡的延迟由 .card 那条 hover 规则通过变量下发（进场 180ms、离场 0），
+   * 所以这里的 transition 不写死延迟。
+   */
   opacity: var(--peek-dim, 1);
-  transition: opacity 0.16s var(--scale-ease);
+  filter: blur(var(--peek-blur, 0));
+  transition:
+    opacity var(--peek-hover-dur, 0.26s) var(--scale-ease) var(--peek-hover-delay, 0s),
+    filter var(--peek-hover-dur, 0.26s) var(--scale-ease) var(--peek-hover-delay, 0s);
 }
 
 /*
@@ -401,18 +410,21 @@
   0% {
     transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
     opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
     animation-timing-function: var(--move-ease);
   }
 
   70.6% {
     transform: translateX(0) scale(var(--peek-content, 1));
     opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
     animation-timing-function: var(--scale-ease);
   }
 
   100% {
     transform: translateX(0) scale(1);
     opacity: 1;
+    filter: blur(0);
   }
 }
 
@@ -421,18 +433,21 @@
   0% {
     transform: translateX(0) scale(1);
     opacity: 1;
+    filter: blur(0);
     animation-timing-function: var(--scale-ease);
   }
 
   45% {
     transform: translateX(0) scale(var(--peek-content, 1));
     opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
     animation-timing-function: var(--move-ease);
   }
 
   100% {
     transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
     opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
   }
 }
 
