@@ -30,9 +30,15 @@ function run(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: 'utf8', cwd: opts.cwd ?? ROOT }).trim()
 }
 
-/** 跑给人看的命令（输出直连终端） */
+/**
+ * 跑给人看的命令（输出直连终端）。
+ *
+ * stdin 给 'ignore' 而不是继承：校验链里的 npm / cargo 继承了 stdin 之后会把里面的内容
+ * 读掉（或直接读到 EOF），于是后面 readline 的提问永远等不到答案 ——
+ * 实测表现是 node 报 `Detected unsettled top-level await` 然后静默退出。
+ */
 function runLive(cmd, args, opts = {}) {
-  execFileSync(cmd, args, { stdio: 'inherit', cwd: opts.cwd ?? ROOT })
+  execFileSync(cmd, args, { stdio: ['ignore', 'inherit', 'inherit'], cwd: opts.cwd ?? ROOT })
 }
 
 function tryRun(cmd, args, opts = {}) {
@@ -111,23 +117,9 @@ if (existsSync(bypassLog)) {
   ok('没有绕过记录')
 }
 
-/* ---------- 2. 校验链 ---------- */
+/* ---------- 2. 版本号与说明（先问，再花几分钟校验 —— 不让人干等着被提问） ---------- */
 
-step('校验：前端')
-runLive('npm', ['run', 'lint'])
-runLive('npx', ['tsc', '-b'])
-runLive('npm', ['run', 'build'])
-ok('lint / tsc / build 过')
-
-step('校验：Rust')
 const tauriDir = `${ROOT}/src-tauri`
-runLive('cargo', ['fmt', '--all', '--', '--check'], { cwd: tauriDir })
-runLive('cargo', ['clippy', '--all-targets', '--', '-D', 'warnings'], { cwd: tauriDir })
-runLive('cargo', ['test'], { cwd: tauriDir })
-ok('fmt / clippy / test 过')
-
-/* ---------- 3. 版本号 ---------- */
-
 const pkgPath = `${ROOT}/package.json`
 const cargoPath = `${tauriDir}/Cargo.toml`
 const confPath = `${tauriDir}/tauri.conf.json`
@@ -136,10 +128,23 @@ const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
 const current = pkg.version
 
 step(`版本号（当前 ${current}）`)
-const rl = createInterface({ input, output })
-const version = (await rl.question(`  新版本号（不带 v，回车沿用 ${current}）: `)).trim() || current
-const summary = (await rl.question('  一句话说明（会成为 PR 标题）: ')).trim()
-rl.close()
+
+/* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
+   这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
+   只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
+const [argVersion, argSummary] = process.argv.slice(2)
+
+let version = argVersion?.trim()
+let summary = argSummary?.trim()
+
+if (!version || !summary) {
+  const rl = createInterface({ input, output })
+  version = version || (await rl.question(`  新版本号（不带 v，回车沿用 ${current}）: `)).trim() || current
+  summary = summary || (await rl.question('  一句话说明（会成为 PR 标题）: ')).trim()
+  rl.close()
+} else {
+  info(`版本 ${version}；说明「${summary}」（来自命令行参数）`)
+}
 
 if (!/^\d+\.\d+\.\d+$/.test(version)) die(`版本号格式不对：${version}（要 x.y.z）`)
 if (!summary) die('说明不能为空 —— 它是 PR 标题，也是以后 git log 上唯一能看到的东西')
@@ -147,6 +152,22 @@ if (!summary) die('说明不能为空 —— 它是 PR 标题，也是以后 git
 if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {
   die(`tag v${version} 已经存在。换一个版本号，或先确认那一版发到哪了`)
 }
+
+/* ---------- 3. 校验链 ---------- */
+
+step('校验：前端')
+runLive('npm', ['run', 'lint'])
+runLive('npx', ['tsc', '-b'])
+runLive('npm', ['run', 'build'])
+ok('lint / tsc / build 过')
+
+step('校验：Rust')
+runLive('cargo', ['fmt', '--all', '--', '--check'], { cwd: tauriDir })
+runLive('cargo', ['clippy', '--all-targets', '--', '-D', 'warnings'], { cwd: tauriDir })
+runLive('cargo', ['test'], { cwd: tauriDir })
+ok('fmt / clippy / test 过')
+
+/* ---------- 4. 落版本号 ---------- */
 
 /* 三处一起改。少改一处的后果是安装包版本与界面版本不一致，而且没人会发现 */
 writeFileSync(pkgPath, JSON.stringify({ ...pkg, version }, null, 2) + '\n')
@@ -172,7 +193,7 @@ runLive('git', ['add', 'package.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.
 runLive('git', ['commit', '-m', `chore: v${version}`])
 ok('版本号已提交')
 
-/* ---------- 4. PR ---------- */
+/* ---------- 5. PR ---------- */
 
 step('推分支并开 PR')
 runLive('git', ['push', '-u', 'origin', 'HEAD'])
@@ -186,7 +207,7 @@ if (existing) {
 const prNumber = run('gh', ['pr', 'view', '--json', 'number', '--jq', '.number'])
 ok(`PR #${prNumber}`)
 
-/* ---------- 5. 等 CI ---------- */
+/* ---------- 6. 等 CI ---------- */
 
 step('等 CI')
 info('轮询 gh pr checks，最多等 30 分钟')
@@ -218,7 +239,7 @@ while (Date.now() < deadline) {
 }
 if (!checksOk) die('等了 30 分钟 CI 还没结束。自己去看一眼：gh pr checks')
 
-/* ---------- 6. 合并 + 打 tag ---------- */
+/* ---------- 7. 合并 + 打 tag ---------- */
 
 step('合并进 main')
 runLive('gh', ['pr', 'merge', String(prNumber), '--squash', '--delete-branch'])
