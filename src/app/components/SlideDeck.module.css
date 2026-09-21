@@ -103,11 +103,16 @@
 
 
 
-/* 当前内容：平面，没有任何卡片外壳，也不参与动画 */
+/* 当前内容：平面，没有任何卡片外壳，也不参与动画。
+   will-change: transform 必须与 .card 一致 —— 否则卡片→平面那一刻
+   Chromium 会从"合成层位图化"切回"直接绘制"，同一批文字的亚像素取整
+   在两条路径下不同，肉眼看到 1-2px 的"定住之后跳一下"。
+   macOS 不受影响（Core Animation 两条路径的取整策略一致）。 */
 .plane {
   position: absolute;
   inset: 0;
   z-index: 1;
+  will-change: transform;
 }
 
 /*
