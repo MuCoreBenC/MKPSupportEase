@@ -78,11 +78,12 @@
   --move-ease: cubic-bezier(0.32, 0.68, 0.12, 1);
   --scale-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* 推入：先平移 0.6G，落位后 0.25G 才放大（内容那条总时长 0.85G = 0.6 + 0.25） */
+  /* 推入：先平移 0.6G，落位后 0.25G 放大，再留 0.15G 让 blur 消失
+     （内容那条总时长 1.0G = 0.6 + 0.25 + 0.15） */
   --in-move-dur: calc(var(--glide-ms) * 0.6);
   --in-scale-delay: calc(var(--glide-ms) * 0.6);
   --in-scale-dur: calc(var(--glide-ms) * 0.25);
-  --in-content-dur: calc(var(--glide-ms) * 0.85);
+  --in-content-dur: var(--glide-ms);
 
   /* 退回：第一帧就缩小 0.45G，然后滑回右边（内容那条总时长 1.0G） */
   --out-scale-dur: calc(var(--glide-ms) * 0.45);

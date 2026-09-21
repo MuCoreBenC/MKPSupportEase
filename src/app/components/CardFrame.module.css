@@ -373,13 +373,11 @@
 
 
 /*
- * 时长从 0.6G 拉到 0.85G：多出来的 0.25G 专门用来放大。
+ * 时长从 0.6G 拉到 1.0G：多出来的 0.25G 放大 + 0.15G 消模糊。
  *
- * 曲线不写在这里，写进关键帧里 —— 两段各自一条（见 frame-settle）。
+ * 曲线不写在这里，写进关键帧里 —— 三段各自一条（见 frame-settle）。
  * 原因：平移这一段必须与卡片的 card-slide 逐帧对齐，否则内容会相对卡框漂移；
- * 而放大要留到落位之后才发生。同一个 transform 属性没法给两个时长，
- * 但关键帧里的 animation-timing-function 可以按段给曲线 ——
- * 第一段 0→0.6G 用与卡片相同的那条，墙上时间与卡片完全一致。
+ * 而放大要留到落位之后才发生；模糊消失再晚一拍，遮住 Windows 合成层切换的文字跳变。
  */
 [data-layer='card'][data-phase='in'] .frame {
   animation: frame-settle var(--in-content-dur) forwards;
@@ -402,9 +400,16 @@
 }
 
 /*
- * 落位分两段，段界 70.6% = 0.6G / 0.85G：
- *   0 → 0.6G   平移回 0，缩放**不动**（与卡片 card-slide 同曲线同时长，逐帧对齐）
- *   0.6G → 0.85G  位置已经稳住，这时候才长回实尺 —— 放大落在最后那一下
+ * 落位分三段（总时长从 0.85G 拉到 1.0G）：
+ *   0 → 0.6G    平移回 0，缩放不动，blur 不动
+ *               （与卡片 card-slide 同曲线同时长，逐帧对齐）
+ *   0.6G → 0.85G 位置已稳住，放大到实尺 + opacity 归 1
+ *               blur 保持不变——遮住放大带来的亚像素重排
+ *   0.85G → 1.0G 一切都停了，blur 才从 2.4px 线性归零
+ *               Windows Chromium 合成层切换导致的文字重栅化
+ *               发生在这一段里，被最后一点残余模糊遮住
+ *
+ * 段界：60% = 0.6/1.0，85% = 0.85/1.0
  */
 @keyframes frame-settle {
   0% {
@@ -414,11 +419,18 @@
     animation-timing-function: var(--move-ease);
   }
 
-  70.6% {
+  60% {
     transform: translateX(0) scale(var(--peek-content, 1));
     opacity: var(--peek-dim, 1);
     filter: blur(var(--peek-blur, 0));
     animation-timing-function: var(--scale-ease);
+  }
+
+  85% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(var(--peek-blur, 0));
+    animation-timing-function: linear;
   }
 
   100% {
