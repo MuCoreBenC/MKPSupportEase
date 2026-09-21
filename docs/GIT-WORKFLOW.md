@@ -23,7 +23,7 @@
 | ①b | `pre-merge-commit` | 手工合并进 main | `ALLOW_COMMIT_ON_MAIN=1` |
 | ② | `pre-push` | **对 main 的任何 push** | `ALLOW_PUSH_MAIN=1` |
 | ③ | `pre-push` | 非快进（force）推送 | `ALLOW_FORCE_PUSH=1` |
-| ④ | `pre-push` | 删除远端引用 | `ALLOW_DELETE_REMOTE=1` |
+| ④ | `pre-push` | 删除远端的 `main` 或 `v*` tag（普通分支不拦） | `ALLOW_DELETE_REMOTE=1` |
 | ⑤ | `pre-push` | tag 名与 `package.json` 不符 / 是轻量 tag / 不在 main 上 | `ALLOW_TAG_MISMATCH=1` |
 | ⑥ | `pre-commit` | 分支名没有 `feat/ fix/ refactor/ chore/ docs/ style/` 前缀 | `ALLOW_ANY_BRANCH=1` |
 | ⑦ | `pre-commit` | `.env*`、私钥（`*.pem` / `*.p12` / `id_rsa*`）、>2MB 的非 `public/` 文件 | `ALLOW_BIG_OR_SECRET=1` |
@@ -35,6 +35,10 @@
 - **闸②在本仓库是无条件拦**，与试验场不同。那边的判据是"main 的 tip 有没有对应版本的 tag"，
   因为那边 main 由本地合并推进。这里 main 的推进权整个交给了 GitHub。
 - **逃生开关只放掉它自己那一道**。`ALLOW_COMMIT_ON_MAIN=1` 不会连带放过闸⑦。
+- **闸④只管 main 与 tag。** 一开始它拦所有远端删除（照试验场抄的），结果删一条已合并的
+  feature 分支都要动用 `ALLOW_DELETE_REMOTE=1`。而 main 与 `v*` tag 在服务端 ruleset 里
+  本来就禁删 —— 闸④对它们是第二道，对普通分支则是纯摩擦。**逃生开关变成日常工具的那一刻，
+  `bypass.log` 就失去了信号价值**，所以把它收窄到该管的两处。
 - **留痕延后到"提交确定发生"之后**才写 `.git/bypass.log`。闸①放行、闸⑦拦下时提交并没有发生，
   那种情况下写一行就是假记录 —— 而这份日志的全部价值在于每条都是真的（发版时要逐条念）。
 - `.env.example` / `.env.sample` / `.env.template` 不拦：它们按约定只有键名没有值，

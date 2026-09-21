@@ -1,7 +1,7 @@
 #!/bin/sh
 # 闸②：拒绝对 main 的任何 push
 # 闸③：拒绝非快进（force）推送
-# 闸④：拒绝删除远端引用
+# 闸④：拒绝删除 main 与 tag（普通分支放行）
 # 闸⑤：推 tag 时，tag 名必须等于 v<package.json version>、必须 annotated、必须在 main 上
 #
 # 逃生开关：ALLOW_PUSH_MAIN=1  ALLOW_FORCE_PUSH=1  ALLOW_DELETE_REMOTE=1  ALLOW_TAG_MISMATCH=1
@@ -19,6 +19,7 @@ ZERO=0000000000000000000000000000000000000000
 push_main=0
 force=0
 delete=0
+delete_ref=
 tag_bad=0
 tag_msg=
 
@@ -27,9 +28,17 @@ VER=$(pkg_version)
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -z "$remote_ref" ] && continue
 
-  # 删远端引用：本地 sha 全零
+  # 删远端引用：本地 sha 全零。
+  #
+  # 只有 main 与 tag 才拦（见闸④）。删已合并的 feature 分支是日常 Git 操作，
+  # 不该动用逃生开关 —— 逃生开关一旦变成日常工具，bypass.log 就失去信号价值。
   if [ "$local_sha" = "$ZERO" ]; then
-    delete=1
+    case "$remote_ref" in
+      refs/heads/main | refs/tags/*)
+        delete=1
+        delete_ref=$remote_ref
+        ;;
+    esac
     continue
   fi
 
@@ -72,9 +81,13 @@ if [ "$delete" = "1" ]; then
     pending_bypass="$pending_bypass ALLOW_DELETE_REMOTE"
   else
     echo "" >&2
-    echo "  闸④：拒绝删除远端引用（不可逆）。" >&2
-    echo "  分支让 PR 顺手带走：gh pr merge --merge --delete-branch" >&2
-    echo "  确实要手删（会留痕）：ALLOW_DELETE_REMOTE=1 git push origin --delete <ref>" >&2
+    echo "  闸④：拒绝删除 $delete_ref（不可逆）。" >&2
+    echo "" >&2
+    echo "  只有 main 与 tag 受这道闸保护 —— 服务端 ruleset 也禁了它们的删除，" >&2
+    echo "  这里是本地那一道，让你在 push 之前就停下来。" >&2
+    echo "  （普通 feature 分支的删除不拦，那是日常操作。）" >&2
+    echo "" >&2
+    echo "  确实要删（会留痕）：ALLOW_DELETE_REMOTE=1 git push origin --delete <ref>" >&2
     fail=1
   fi
 fi
