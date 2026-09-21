@@ -9,7 +9,7 @@
  * 指路径只有一份真相源，漂移问题从根上消失。
  */
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const HOOKS_DIR = 'scripts/hooks'
@@ -81,6 +81,29 @@ if (indexModes) {
     warn(`git 索引里这些钩子是 100644（不可执行）：${flat.join('、')}`)
     info(`修：git update-index --chmod=+x ${HOOKS_DIR}/* 然后提交。否则别的机器 clone 出来闸门是空的。`)
   }
+}
+
+/* 1c. 换行符。
+      这一步是给 Windows 那台机器准备的：Git for Windows 默认 core.autocrlf=true，
+      clone 时把 LF 换成 CRLF。钩子是 `#!/bin/sh` 脚本，一旦变成 CRLF，shebang 就成了
+      `/bin/sh\r` —— 内核找不到这个解释器，钩子**静默不执行**。
+      与"缺可执行位"是同一类失效，只是成因不同，所以同样交给机器查。
+      仓库根的 .gitattributes 已经把这几类文件钉成 eol=lf，这里是第二道确认：
+      万一有人手工改了 core.autocrlf 或绕过了 attributes，装钩子时就能看见。 */
+const crlf = []
+for (const n of EXPECTED.filter((n) => existsSync(join(root, HOOKS_DIR, n)))) {
+  try {
+    if (readFileSync(join(root, HOOKS_DIR, n), 'utf8').includes('\r\n')) crlf.push(n)
+  } catch {
+    /* 读不动就算了，这一步只是体检 */
+  }
+}
+if (crlf.length) {
+  warn(`这些钩子是 CRLF 换行：${crlf.join('、')}`)
+  info('shebang 会变成 /bin/sh\\r，git 会静默跳过 —— 闸门等于不存在。')
+  info(`修：git rm --cached -r . && git reset --hard（.gitattributes 会把它们重新取成 LF）`)
+} else {
+  ok('钩子换行符正常（LF）')
 }
 
 /* 2. 指路径。相对路径由 git 解析为「相对工作树根」，所以换机器也不用改 */

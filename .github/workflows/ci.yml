@@ -86,3 +86,43 @@ jobs:
 
       - name: 测试
         run: cargo test
+
+  # Windows 侧单独一个 job，**不并进 rust 的 matrix**：
+  # matrix 会把 job 名变成 `rust (macos-latest)`，而 ruleset 里的必需检查叫 `rust` ——
+  # 改名等于那条必需检查永远等不到，PR 再也合不进去。
+  #
+  # 存在的理由：`src-tauri/tauri.windows.conf.json`（decorations: false + 自绘窗口键）
+  # 与那几段 `#[cfg(not(target_os = "macos"))]` 在 macOS 上一行都不会被编译，
+  # 等于完全没验证过。开发会在 Windows 上进行，这一档就是那边的编译保险。
+  rust-windows:
+    name: rust-windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 准备工具链
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc -V
+          cargo -V
+
+      - name: 缓存 cargo registry 与 target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: 测试
+        run: cargo test

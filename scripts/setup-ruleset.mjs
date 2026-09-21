@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process'
 /* 必须通过的状态检查。名字与 .github/workflows/ci.yml 里两个 job 的 `name:` 逐字对应 ——
    写错不会报错，只会永远等一个不存在的检查。
    （建 ruleset 那一轮这里是空的：CI 还不存在，勾了第一个 PR 永远合不进去。） */
-const REQUIRED_CHECKS = ['web', 'rust']
+const REQUIRED_CHECKS = ['web', 'rust', 'rust-windows']
 
 const MAIN_RULESET = 'main-pr-only'
 const TAG_RULESET = 'tags-v-no-delete'
