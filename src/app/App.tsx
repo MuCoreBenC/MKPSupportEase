@@ -3,10 +3,12 @@ import { useRef, useState } from 'react'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import PagePlaceholder from './components/PagePlaceholder'
+import ResizeEdges from './components/ResizeEdges'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
 import PageCalib from './pages/PageCalib'
 import PageHome from './pages/PageHome'
+import { inTauri } from './window'
 import s from './App.module.css'
 
 /* 平台只影响标题栏把窗口按钮画在左边还是右边，一次探测就够，不必进 state */
@@ -56,6 +58,10 @@ export default function App() {
       />
 
       <main className={s.body}>{renderPage()}</main>
+
+      {/* Windows 的 decorations: false 之后系统 resize 边框在可见窗口之外，
+          补一圈内侧命中区让抓取带跨在边界上。macOS 不需要——系统管 resize */}
+      {inTauri && PLATFORM === 'windows' && <ResizeEdges />}
     </div>
   )
 }

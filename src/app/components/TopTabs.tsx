@@ -1,4 +1,6 @@
 import Icon from '../../components/Icon'
+import { useWindowMaximized } from '../../hooks/useWindowMaximized'
+import { useTitlebarDrag } from '../useTitlebarDrag'
 import { winClose, winMinimize, winToggleMaximize } from '../window'
 import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
@@ -60,9 +62,11 @@ export default function TopTabs({
 
   const isMini = density === 'mini'
   const isMac = platform === 'macos'
+  const maximized = useWindowMaximized()
+  const drag = useTitlebarDrag()
 
   const iconStrip = (
-    <nav className={s.iconTabs} aria-label="主页签" data-tauri-drag-region="deep">
+    <nav className={s.iconTabs} aria-label="主页签">
       {tabs.map((t) => {
         const on = t.id === active
         const icon = t.icon ?? TAB_ICONS[t.id]
@@ -85,7 +89,7 @@ export default function TopTabs({
   )
 
   const wideStrip = (
-    <nav className={s.tabs} aria-label="主页签" data-tauri-drag-region="deep">
+    <nav className={s.tabs} aria-label="主页签">
       {tabs.map((t) => {
         const on = t.id === active
         return (
@@ -106,7 +110,7 @@ export default function TopTabs({
 
   /* 有 title 时页签条整个不渲染：报告态标题栏只剩品牌 + 页名 + 窗口键，中段全是拖动区 */
   const tabStrip = title ? (
-    <span className={s.title} data-tauri-drag-region="deep">{title}</span>
+    <span className={s.title}>{title}</span>
   ) : isMini ? (
     iconStrip
   ) : (
@@ -116,7 +120,8 @@ export default function TopTabs({
   return (
     <header
       className={s.bar}
-      data-tauri-drag-region="deep"
+      onMouseDown={drag.onMouseDown}
+      onDoubleClick={drag.onDoubleClick}
       data-density={density}
       data-platform={platform}
       data-fluid={fluid ? 'true' : undefined}
@@ -127,23 +132,30 @@ export default function TopTabs({
           className={s.lightsInset}
           style={{ width: MAC_LIGHTS_INSET }}
           aria-hidden="true"
-          data-tauri-drag-region="deep"
         />}
 
-      <span className={s.logo} data-tauri-drag-region="deep">MKP</span>
+      <span className={s.logo}>MKP</span>
 
       {tabStrip}
 
+      {/* Windows 侧的窗口键：撑满标题栏全高、贴到右上角、彼此无缝。
+          按钮是 <button>，useTitlebarDrag 里 closest('button') 会跳过它们，
+          不会误把点击窗口键当成拖窗或双击缩放 */}
       {!isMac && (
-        <div className={s.controls} data-tauri-drag-region="deep">
+        <div className={s.controls}>
           <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
-            <Icon name="min" size={14} />
+            <Icon name="min" size={11} strokeWidth={1.5} />
           </button>
-          <button type="button" className={s.ctrl} aria-label="最大化" onClick={winToggleMaximize}>
-            <Icon name="max" size={12} />
+          <button
+            type="button"
+            className={s.ctrl}
+            aria-label={maximized ? '还原' : '最大化'}
+            onClick={winToggleMaximize}
+          >
+            <Icon name={maximized ? 'restore' : 'max'} size={11} strokeWidth={1.5} />
           </button>
           <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭" onClick={winClose}>
-            <Icon name="close" size={14} />
+            <Icon name="close" size={11} strokeWidth={1.5} />
           </button>
         </div>
       )}

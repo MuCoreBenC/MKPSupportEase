@@ -1,12 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "核心权限 + 拖动标题栏。前端不碰文件系统 —— 读写都经过 src-tauri 的命令，fsx::paths::resolve 把路径夹在两个数据根内，所以不需要 fs:default 也不需要逐条 fs 权限。core:window:allow-start-dragging 是 data-tauri-drag-region 能工作的前提：core:default 里不含它，缺了的表现就是整条标题栏拖不动、而且没有任何报错。",
+  "description": "核心权限 + 窗口拖动/改大小/动作。前端不碰文件系统 —— 读写都经过 src-tauri 的命令，fsx::paths::resolve 把路径夹在两个数据根内，所以不需要 fs:default 也不需要逐条 fs 权限。core:window:allow-start-dragging 是前端手动调 startDragging() 的前提（不再用 data-tauri-drag-region —— Tauri 的 drag.js 在 Windows 上会吞掉 mouseup 导致双击最大化极难触发，所以拖动由 useTitlebarDrag 自己接管）。core:window:allow-start-resize-dragging 是内侧 resize 命中区（ResizeEdges）调 startResizeDragging() 的前提 —— decorations: false 之后系统的 resize 边框在窗口之外，不补内侧就抓不到。core:default 包含的 core:window:default 全是只读查询（is-*、get-*），不含 minimize / maximize / close 等动作命令。macOS 上三颗键由系统交通灯接管不经 IPC，所以动作权限只在 Windows 上有实际意义。",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
   ]
 }

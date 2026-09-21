@@ -9,15 +9,22 @@
   box-shadow: 0 1px 0 rgb(255 255 255 / 80%);
   min-width: 0;
 
-  /* 标题栏就是窗口的抓手。按钮自带 cursor: pointer（global.css）会盖掉它，
-     于是「空白处抓手、按钮处小手」一眼可辨 */
-  cursor: grab;
+  /* 标题栏是窗口本体，不是可拖走的内容 —— 系统上其它软件这里都是普通箭头。
+     必须显式写 default：不写会落到浏览器的 auto，在「MKP」和页签文字上变 I 形光标。
+     按钮自带 cursor: pointer（global.css）会盖掉它 */
+  cursor: default;
 }
 
-/* macOS：高度与 Windows 一致，仅左上留给红绿灯、tab 靠右 */
+/* macOS：高度与默认一致（52，红绿灯要求），仅左上留给红绿灯、tab 靠右 */
 .bar[data-platform='macos'] {
   gap: 16px;
   padding: 0 16px 0 14px;
+}
+
+/* Windows：标题栏矮一档（38px），窗口键贴到右上角，右内衬归零 */
+.bar[data-platform='windows'] {
+  height: var(--titlebar-h-win);
+  padding-right: 0;
 }
 
 .bar[data-platform='macos'] .tabs,
@@ -181,31 +188,62 @@
 }
 
 .controls {
+  --winctrl-w: 46px;
+
   display: flex;
-  align-items: center;
-  gap: 2px;
+  align-self: stretch;
   flex-shrink: 0;
 
   /* 迷你档页签条不再撑满，靠它把窗口键钉在右端，中间空出来的就是拖动带 */
   margin-left: auto;
+
+  /* App.module.css 的 .shell::after 在 z-index 60 上画了一条
+     `inset 0 1px 0 rgb(255 255 255 / 90%)` 的顶部高光，它会盖在窗口键上 ——
+     表现就是关闭键悬停变红时顶边露出一条 1px 白缝。抬到 60 之上让按钮盖住它，
+     红色才真的贴到窗口最顶一行像素 */
+  position: relative;
+  z-index: 91;
+
+  /* 下边同理：.bar 的 1px border-bottom 吃掉了内容盒最后一行，
+     stretch 只能填到 37px。负外边距把 margin box 撑回 38px，
+     按钮盖住那条分隔线 —— 系统的窗口键底下也没有线 */
+  margin-bottom: -1px;
+}
+
+/* 迷你档窗口窄，46 会把页签挤掉，收到 40 */
+.bar[data-density='mini'] .controls {
+  --winctrl-w: 40px;
 }
 
 .ctrl {
-  width: 30px;
-  height: 26px;
+  width: var(--winctrl-w);
+  height: 100%;
   display: grid;
   place-items: center;
-  border-radius: 6px;
   color: var(--text-2);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+/* 贴边之后 global.css 那个外扩 2px 的焦点环会被窗口边缘裁掉，改成内描边 */
+.ctrl:focus-visible {
+  outline-offset: -2px;
 }
 
 .ctrl:hover {
-  background: var(--surface-sunken);
+  background: rgb(16 24 32 / 6%);
   color: var(--text-1);
+}
+
+.ctrl:active {
+  background: rgb(16 24 32 / 11%);
 }
 
 .close:hover {
   background: #e5484d;
+  color: #fff;
+}
+
+.close:active {
+  background: #cf3c41;
   color: #fff;
 }

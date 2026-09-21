@@ -19,6 +19,10 @@ body {
   background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizelegibility;
+
+  /* 桌面应用里装饰性文字不应被框选——选中一片蓝是网页感的最大来源。
+     真正需要选中的地方（输入框、可复制数值）用 user-select: text 打开 */
+  user-select: none;
 }
 
 button {
