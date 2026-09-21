@@ -75,6 +75,16 @@ const peekFor = (w: number) =>
  */
 const GLIDE_MS = 720
 
+/**
+ * 卡片推入时，内容（.frame）的动画比卡片本身长：多出来的尾段专门用来
+ * 让 blur 从 2.4px 线性归零，遮住 Windows Chromium 合成层切换时的文字跳变。
+ * JS 的 setPhase('idle') 定时器必须等到这段也播完，否则 data-phase 提前切走，
+ * CSS 动画被中断，blur 瞬间跳 0——改了等于没改。
+ *
+ * 0.15 = 1.0 - 0.85，对应 frame-settle 关键帧里 85%→100% 那段。
+ */
+const SETTLE_TAIL_MS = Math.round(GLIDE_MS * 0.15)
+
 /** 左右两侧翻页热区是否画出来：调试用，产品里恒为 false */
 const SHOW_HIT = false
 
@@ -164,9 +174,9 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
             setPhase('idle')
             setEntering(true)
             busy.current = false
-          }, GLIDE_MS),
+          }, GLIDE_MS + SETTLE_TAIL_MS),
         )
-        timers.current.push(window.setTimeout(() => setEntering(false), GLIDE_MS + ENTER_MS))
+        timers.current.push(window.setTimeout(() => setEntering(false), GLIDE_MS + SETTLE_TAIL_MS + ENTER_MS))
         return
       }
 

@@ -162,12 +162,18 @@ NSVisualEffectView。解法是 `window-vibrancy` 的 `apply_liquid_glass(...).co
 `UnsupportedPlatformVersion`，那时只打日志、**不退回毛玻璃**（毛玻璃会让界面变半透明，
 比直角更糟）。
 
-**③ `data-tauri-drag-region` 需要 `core:window:allow-start-dragging` 权限。**
-`core:default` 里**不含**它，缺了的表现是整条标题栏拖不动、**而且没有任何报错**。
-另外裸属性只认"直接点在这个元素上"，中段被页签 `<nav>` 铺满时点不到 header ——
-用 `data-tauri-drag-region="deep"`（整棵子树可拖，Tauri ≥ 2.11 支持）。
-双击缩放不用自己监听：Tauri 的 drag.js 已经在 `mouseup(detail === 2)` 时发
-`internal_toggle_maximize`。
+**③ 标题栏拖动与改大小由前端自己接管，不用 `data-tauri-drag-region`。**
+Tauri 注入的 `drag.js` 在 Windows 上第一次 `mousedown`（`detail === 1`）就立刻发
+`start_dragging`，系统随即进入模态拖窗循环，WebView2 收不到那次的 `mouseup`——
+Chromium 的连击计数被打断，双击最大化要点得极快才触发。
+`useTitlebarDrag` 把 `startDragging` 推迟到指针真的移动 4px 之后：
+没移动就什么都不发，点击序列完整闭合，原生 `dblclick` 正常触发，
+双击间隔等于系统的 `GetDoubleClickTime()`（和其它软件一致）。
+`decorations: false` 之后系统的 resize 边框在可见窗口**之外** 8px，
+`ResizeEdges` 在窗口**内侧**补一圈 5px 命中区（角 12px），
+`mousedown` 调 `startResizeDragging(dir)`，两圈一夹，
+抓取带跨在可见边界上。两个 API 都需要各自的 ACL 权限
+（`allow-start-dragging` / `allow-start-resize-dragging`）。
 
 ## 8. 前端约定
 
@@ -183,7 +189,8 @@ NSVisualEffectView。解法是 `window-vibrancy` 的 `apply_liquid_glass(...).co
 ## 9. 本轮明确没做
 
 - 预设管理、参数页、设置页、报告页 —— 四个页签在，内容是占位页（`PagePlaceholder`）；
-- 标题栏那三颗窗口按钮还是**装饰**：Tauri 窗口目前带系统装饰，那三颗是从试验场搬来的假控件，
-  尚未接 `getCurrentWindow().minimize()` 等真实动作；
+- 标题栏窗口按钮（最小化 / 最大化 / 关闭）已接通真实 IPC（`src/app/window.ts`），
+  Windows 上走自绘撑满式 caption button（`TopTabs`），macOS 上由系统交通灯接管。
+  Snap Layouts（悬停最大化键弹 Win11 布局菜单）尚未做，需要 Rust 侧接 `WM_NCHITTEST`；
 - 云端同步、SHA 校验、归档 —— 产品规则已经定稿（见 `PRESET-PRODUCT-RULES.md`），实现未开始；
 - 撤销重做栈：不做通用 command pattern，将来在需要的地方用「编辑前快照 + 单层撤销」。

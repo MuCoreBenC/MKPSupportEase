@@ -42,10 +42,13 @@
   --r-md: 12px;
   --r-sm: 8px;
 
-  /* 窗口 chrome 高度：两平台统一，不随密度变化。
-     52 不是随便定的 —— macOS 装了统一工具栏（见 src-tauri/src/chrome.rs）之后，
-     AppKit 把红绿灯圆心摆在 y=26，标题栏必须是 52 才让它竖直居中。 */
+  /* 窗口 chrome 高度，不随密度变化。
+     macOS：52 不是随便定的 —— 装了统一工具栏（见 src-tauri/src/chrome.rs）之后，
+     AppKit 把红绿灯圆心摆在 y=26，标题栏必须是 52 才让它竖直居中。
+     Windows：没有红绿灯约束，38 更接近 Win11 原生体感（系统 32、VS Code 35），
+     同时给页签文字留够行高。两个变量分开定义，TopTabs 按平台选用。 */
   --titlebar-h: 52px;
+  --titlebar-h-win: 38px;
   --statusbar-h: 32px;
 
   /* 随密度切换的量 */

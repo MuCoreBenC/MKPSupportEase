@@ -1,0 +1,73 @@
+/* 窗口内侧的 resize 命中区 —— 边 5px、角 12px。
+   加上系统给的那圈外侧 8px，实际抓取带约 13px 跨在可见边界上。
+
+   z-index 90：压过模态遮罩（ui.module.css 的 .scrim 是 80）—— 开着弹窗也该能改大小。
+   标题栏那三颗窗口键是 91，比这里高，不会被命中条抢掉点击 */
+.edge {
+  position: absolute;
+  z-index: 90;
+}
+
+.n {
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 5px;
+  cursor: ns-resize;
+}
+
+.s {
+  bottom: 0;
+  left: 12px;
+  right: 12px;
+  height: 5px;
+  cursor: ns-resize;
+}
+
+.w {
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+.e {
+  right: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+.nw {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.se {
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.ne {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.sw {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}

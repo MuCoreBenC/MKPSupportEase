@@ -25,6 +25,7 @@ export type IconName =
   | 'menu'
   | 'min'
   | 'max'
+  | 'restore'
   | 'close'
 
 const paths: Record<IconName, string> = {
@@ -64,6 +65,7 @@ const paths: Record<IconName, string> = {
   printer: 'M7 9V4h10v5M7 18H5a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2M7 14h10v6H7z',
   min: 'M5 12h14',
   max: 'M6 6h12v12H6z',
+  restore: 'M6 9h9v9H6zM9 9V6h9v9h-3',
   close: 'M6 6l12 12M18 6 6 18',
   menu: 'M4 7h16M4 12h16M4 17h16',
 }
