@@ -155,7 +155,7 @@ console.log(`
   ①b pre-merge-commit  合并进 main                  ALLOW_COMMIT_ON_MAIN=1
   ②  pre-push          对 main 的任何 push          ALLOW_PUSH_MAIN=1
   ③  pre-push          非快进（force）推送          ALLOW_FORCE_PUSH=1
-  ④  pre-push          删除远端分支                 ALLOW_DELETE_REMOTE=1
+  ④  pre-push          删除 main 或 tag              ALLOW_DELETE_REMOTE=1
   ⑤  pre-push          tag 名与 package.json 不符   ALLOW_TAG_MISMATCH=1
   ⑥  pre-commit        分支名没有合法前缀           ALLOW_ANY_BRANCH=1
   ⑦  pre-commit        密钥文件 / >2MB 非 public/   ALLOW_BIG_OR_SECRET=1
