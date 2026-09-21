@@ -20,6 +20,23 @@
    */
   --peek-face: calc(1 - 0.3 * var(--peek-ratio));
 
+  /*
+   * 内容的缩放 —— **本仓库自己加的**，试验场那份没有。
+   *
+   * DOM 是 `.card > [.face, 内容]`：`.face` 是个空 div，只画白底与边框，内容是它的**兄弟**。
+   * 所以 `--peek-face` 那个 scale 只缩白底，文字一直是原尺寸平移进来的 ——
+   * 观感就是"卡框在长、字没动"，放大这件事读不出来。
+   *
+   * 这一条让内容在露出态也小 5%（p = 0.2 时 0.95），推入时长回 1 ——
+   * 真正用它的地方在 `CardFrame.module.css`：`.frame` 的 transform 归那边管
+   * （它已经有一个 `translateX(--pane-shift)` 的左移补偿），缩放必须并进同一个
+   * transform 里，两个文件各写一条会打架。
+   * 系数 0.25 比 --peek-face 的 0.3 小：文字的缩放比白底醒目得多，
+   * 同样的幅度会显得过头；5% 是"看得出在放大"与"不像在抽搐"之间。
+   * p → 0 时同样趋近 1，"连续出场"那条性质不变。
+   */
+  --peek-content: calc(1 - 0.25 * var(--peek-ratio));
+
   position: relative;
   flex: 1;
   min-width: 0;
@@ -129,34 +146,6 @@
   animation: shell-in calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
-
-/*
- * 内容沉入 —— **本仓库自己加的一层**，试验场那份没有。
- *
- * 为什么加：卡面的 scale 只有 6%（0.94 → 1）且发生在平移停住之后的 144ms 里，
- * 肉眼读不出"在放大"，观感是"只有卡框在长、里面的字直接平移过去了"。
- * 加大幅度会改静止时露出卡的长相（试过 0.90，退回了），所以改成让**内容自己动一下**：
- * 卡片快落位时，内容从上方 6px 落下并淡入 —— 读起来是"内容沉进卡里"，
- * 而静止态一个像素都没变。
- *
- * 只作用在推入层。退回不做：那时内容应该跟着卡片整体走，额外位移会显得散。
- */
-.card[data-phase='in'] .face > * {
-  animation: content-settle calc(var(--glide-ms) * 0.34) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.5) both;
-}
-
-@keyframes content-settle {
-  0% {
-    transform: translateY(-6px);
-    opacity: 0.55;
-  }
-
-  100% {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
 
 @keyframes card-slide {
   0% {

@@ -328,7 +328,16 @@
 [data-layer='exit'][data-phase='out'] .frame {
   --pane-shift: min(0px, (1400px - 100cqw) / 2);
 
-  transform: translateX(var(--pane-shift));
+  /*
+   * 露出态的内容：左移补偿 + **跟着卡面一起缩 5%**（`--peek-content` 由 SlideDeck 下发）。
+   *
+   * 缩放这一项是本仓库加的。DOM 是 `.card > [.face, .frame]` —— `.face` 只是画白底的空 div，
+   * 内容在 `.frame` 里，是它的兄弟。所以 SlideDeck 那个 `--peek-face` 的 scale 只缩白底，
+   * 文字一直原尺寸平移进来，"放大"完全读不出来。
+   * 必须并进这一条 transform：`.frame` 的 transform 归本文件管，在别处再写一条 scale
+   * 会被这里覆盖（试过，那条规则是死的）。
+   */
+  transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
 }
 
 /*
@@ -363,23 +372,24 @@
     calc(var(--glide-ms) * 0.45) both;
 }
 
+/* 落位：一边回到 0、一边长回实尺。两项同一条 transform，合成层只提升一次 */
 @keyframes frame-settle {
   0% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
   }
 
   100% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes frame-tuck {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 
   100% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
   }
 }
 
