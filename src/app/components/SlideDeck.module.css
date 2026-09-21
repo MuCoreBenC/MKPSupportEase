@@ -130,6 +130,9 @@
    * 两个位移分开，才能一个立刻生效、一个慢慢过渡。
    */
   transform: translateX(var(--peek-shift));
+
+  /* 悬停探头量：对所有阶段都声明，各阶段只是过渡不同（见下面三条） */
+  translate: calc(-1 * var(--peek-hover)) 0;
   will-change: transform;
 }
 
@@ -173,6 +176,10 @@
   /* 静态值与关键帧 0% 一致，避免动画启动前先按静止态画一帧 */
   transform: translateX(var(--peek-shift));
   animation: card-slide var(--in-move-dur) var(--move-ease) forwards;
+
+  /* 探头量在滑行途中化掉（目标 0、时长与滑行相同）：落位精确，
+     那 10px 的回收藏在 960px 的行程里，看不出来 */
+  transition: translate var(--in-move-dur) var(--move-ease) 0s;
 }
 
 /*
@@ -189,22 +196,34 @@
  * 合成结果与写在一条 transform 里一样 —— 但它们各有各的 transition。
  * 于是拖窗宽时 transform 立刻跟上（无过渡），悬停时只有 translate 在动。
  *
- * 延迟写在基态上是 0 —— 离场立刻退回；进场的 180ms 在下面那条 hover 规则里给。
+ * **探头量对所有阶段都声明**，只是各阶段的过渡不同。早先只写在 idle 上，
+ * 跨阶段那一瞬属性直接失效，于是撞出两个 bug：
+ * - 点开时：探头量瞬间归零，卡片先弹一下再滑（读起来是"往左顿一下才回位"）；
+ * - 收起时：卡片先落到露出位，等 180ms 延迟走完才补那 10px —— 鼠标已经在右边等着了，
+ *   却要看它"停一下再挪过来"，而不是一次到位。
  */
+/* 静止：柔和过渡 + 进场延迟（延迟在下面那条 hover 规则里给，基态是 0 —— 离场立刻退回） */
 .card[data-phase='idle'] {
-  translate: calc(-1 * var(--peek-hover)) 0;
   transition: translate var(--peek-hover-dur) var(--scale-ease) 0s;
 }
 
-.deck:has(.zoneNext:hover) .card {
+/*
+ * `:not([data-phase='in'])` 不只是语义，也是特异度：`:has()` 取参数里最强的那一项，
+ * 这条整体是 0,5,0；要是另写一条 `.card[data-phase='in'] { --peek-hover: 0 }`（0,2,0）
+ * 去覆盖它，会输。
+ */
+.deck:has(.zoneNext:hover) .card:not([data-phase='in']) {
   --peek-hover: 10px;
   --peek-dim: var(--peek-dim-hover);
   --peek-blur: var(--peek-blur-hover);
 
   /* 内容层（CardFrame 的 .frame）读这个变量决定自己的过渡延迟 —— 两层同步进场 */
   --peek-hover-delay: var(--peek-hover-in-delay);
+}
 
-  /* 进场延迟：路过时延迟没走完就已经离开，动画根本不启动 */
+/* 进场延迟只给静止态：路过时延迟没走完就已经离开，动画根本不启动。
+   推入/退回期间不加延迟 —— 那两段要的是"跟着卡片走"，不是"等一下再走" */
+.deck:has(.zoneNext:hover) .card[data-phase='idle'] {
   transition-delay: var(--peek-hover-in-delay);
 }
 
