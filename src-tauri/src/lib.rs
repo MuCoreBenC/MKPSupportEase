@@ -9,10 +9,13 @@
 //! 启动顺序有讲究：**先建数据根，再装日志**（日志要写进 `internal_root/logs`），
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
+pub mod chrome;
 pub mod error;
 pub mod fsx;
 pub mod ipc;
 pub mod obs;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -36,6 +39,15 @@ pub fn run() {
                     obs::tracing::init_tracing(std::path::Path::new("/tmp/supportease-logs"));
                     tracing::warn!("内部数据根不可用：{e}");
                 }
+            }
+
+            /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
+            两件事都只在 macOS 上有意义，失败都只打日志 —— 外观问题不该挡启动 */
+            if let Some(win) = app.get_webview_window("main") {
+                chrome::install_unified_toolbar(&win);
+                chrome::apply_native_corners(&win);
+            } else {
+                eprintln!("[setup] 找不到 main 窗口，跳过窗口外观");
             }
 
             Ok(())
