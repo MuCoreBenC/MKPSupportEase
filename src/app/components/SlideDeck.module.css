@@ -118,8 +118,18 @@
   inset: 0;
   z-index: 2;
 
-  /* 减去悬停探头量（默认 0）。关键帧 0% 用的是同一个表达式，所以动画起手不会跳 */
-  transform: translateX(calc(var(--peek-shift) - var(--peek-hover)));
+  /*
+   * 露出位移。**这条不许带过渡。**
+   *
+   * `--peek-shift` 由 `--peek-ratio` 算出来，而 ratio 是 SlideDeck 按 deck 实测宽度
+   * 内联下发的 —— 拖窗宽时它每帧都在变。给 transform 加过渡的后果是每一次变化都要
+   * 花 260ms 去追新目标，而新目标还在继续变：卡片就会一边追一边被打断，看起来是
+   * 左右乱跳（实测过，幅度很大且无规律）。
+   *
+   * 悬停探头因此不写在这里，而是用独立的 `translate` 属性（见下面 idle 那条）——
+   * 两个位移分开，才能一个立刻生效、一个慢慢过渡。
+   */
+  transform: translateX(var(--peek-shift));
   will-change: transform;
 }
 
@@ -172,9 +182,18 @@
  * `~` 只能往后选。`:has()` 在 WKWebView（Safari 16.4+）上可用。
  * 只在 idle 档生效 —— 推入/退回动画期间再叠一层位移会打架。
  */
+/*
+ * 悬停探头走 `translate` 这个独立属性，不挤进上面那条 transform。
+ *
+ * CSS 的 translate / rotate / scale 是独立属性，按规范先于 transform 作用，
+ * 合成结果与写在一条 transform 里一样 —— 但它们各有各的 transition。
+ * 于是拖窗宽时 transform 立刻跟上（无过渡），悬停时只有 translate 在动。
+ *
+ * 延迟写在基态上是 0 —— 离场立刻退回；进场的 180ms 在下面那条 hover 规则里给。
+ */
 .card[data-phase='idle'] {
-  /* 延迟写在基态上是 0 —— 离场立刻退回；进场的延迟在下面那条 hover 规则里给 */
-  transition: transform var(--peek-hover-dur) var(--scale-ease) 0s;
+  translate: calc(-1 * var(--peek-hover)) 0;
+  transition: translate var(--peek-hover-dur) var(--scale-ease) 0s;
 }
 
 .deck:has(.zoneNext:hover) .card {
@@ -185,6 +204,7 @@
   /* 内容层（CardFrame 的 .frame）读这个变量决定自己的过渡延迟 —— 两层同步进场 */
   --peek-hover-delay: var(--peek-hover-in-delay);
 
+  /* 进场延迟：路过时延迟没走完就已经离开，动画根本不启动 */
   transition-delay: var(--peek-hover-in-delay);
 }
 
@@ -231,7 +251,7 @@
 
 @keyframes card-slide {
   0% {
-    transform: translateX(calc(var(--peek-shift) - var(--peek-hover)));
+    transform: translateX(var(--peek-shift));
   }
 
   100% {
