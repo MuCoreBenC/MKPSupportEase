@@ -114,6 +114,50 @@ gh pr merge --squash --delete-branch
 所以 tag 必须在 `git switch main && git pull` 之后、在 main 的 tip 上打，
 在分支上打的 tag 指向的是一个不在 main 历史里的提交（闸⑤的"tag 必须在 main 上"就是拦这个）。
 
+## 4b. 版本号什么时候才用
+
+**开发期不发版。** 版本号停在 `0.0.x`，改动靠 PR 进 main，不逐次 bump、不逐次打 tag。
+
+理由：版本号只有一个用途 —— **让人说清「我用的是哪一份代码」**。没有人拿这个包的阶段，
+它是纯仪式。而还原点你本来就有：main 上每个 squash 提交都是一个，
+`git switch -c fix/x <sha>` 就回去了。tag 只是给还原点起个好记的名字，不是还原能力本身。
+
+**什么时候开始用：第一次把包交给任何人的时候** —— 包括拷一个 `.dmg` 给自己另一台机器。
+从那一刻起规矩反过来：每个交出去的包都必须是 `npm run release` 发的，否则
+「用户说的 0.2.0」和「你手里的 0.2.0」可能不是同一份代码。
+
+**版本号住在四个地方**，`release.mjs` 一起改，别手工改其中任何一个：
+
+| 文件 | 字段 |
+| --- | --- |
+| `package.json` | `version` |
+| `src-tauri/Cargo.toml` | `[package] version` |
+| `src-tauri/Cargo.lock` | 本 crate 那一条的 `version`（漏了它下次 cargo 会自己改写，工作区凭空变脏） |
+| `src-tauri/tauri.conf.json` | `version` |
+
+---
+
+## 4c. 换到另一台机器（Windows）
+
+**先跑 `npm install`，再看它的输出。** 那个脚本会自检三件事，任何一条报警都别忽略：
+钩子是否齐全、是否可执行、**是否 LF 换行**。
+
+三个已知的坑：
+
+1. **CRLF 会让闸门静默失效。** Git for Windows 默认 `core.autocrlf=true`，clone 时把 LF 换成
+   CRLF；钩子是 `#!/bin/sh` 脚本，变成 CRLF 后 shebang 成了 `/bin/sh\r`，内核找不到解释器，
+   **git 静默跳过钩子**。仓库根的 `.gitattributes` 已经把这几类文件钉成 `eol=lf`，
+   `setup-hooks.mjs` 装钩子时还会再查一遍。
+2. **`core.hooksPath` 是 per-clone 配置**，不跟着仓库走 —— 新机器上不跑 `npm install` 就没有闸门。
+3. **CI 对 Windows 的覆盖是后加的。** `rust-windows` job 只跑 `clippy` 与 `cargo test`，
+   不出包。Windows 侧的窗口外观（`tauri.windows.conf.json` 的 `decorations: false` +
+   `TopTabs` 自绘的三颗窗口键）**目前只有编译验证，没有人在真窗口里看过**。
+
+工具链：Rust MSVC 工具链 + Visual Studio Build Tools（C++ 生成工具）+ WebView2
+（Win11 自带）。装完 `npm run tauri dev`，首次冷编译几分钟是正常的。
+
+---
+
 ## 5. 发版
 
 一条命令：`npm run release`（`scripts/release.mjs`）。它串起：

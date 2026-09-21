@@ -182,14 +182,29 @@ writeFileSync(cargoPath, cargoNext)
 const conf = JSON.parse(readFileSync(confPath, 'utf8'))
 writeFileSync(confPath, JSON.stringify({ ...conf, version }, null, 2) + '\n')
 
-ok(`版本号三处改成 ${version}`)
+/*
+ * 第四处：Cargo.lock。
+ *
+ * 它也记着本 crate 的版本号。漏掉的后果是下一次任何人跑 cargo 都会被它自动改写 ——
+ * 工作区凭空变脏，而且入库的 lock 与 manifest 不一致。v0.0.1 那次就是这么漏的。
+ * `--workspace --offline`：只刷新本 workspace 的条目，不去网络升级依赖。
+ */
+runLive('cargo', ['update', '--workspace', '--offline'], { cwd: tauriDir })
+
+ok(`版本号四处改成 ${version}（含 Cargo.lock）`)
 
 const rollback = [
   `git reset --hard HEAD   # 丢掉版本号提交（确认没有别的改动再跑）`,
   `git push origin --delete ${branch}   # 如果已经推上去了`,
 ]
 
-runLive('git', ['add', 'package.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json'])
+runLive('git', [
+  'add',
+  'package.json',
+  'src-tauri/Cargo.toml',
+  'src-tauri/Cargo.lock',
+  'src-tauri/tauri.conf.json',
+])
 runLive('git', ['commit', '-m', `chore: v${version}`])
 ok('版本号已提交')
 

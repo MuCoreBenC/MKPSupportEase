@@ -1846,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "mkp-support-ease"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "objc2",
  "objc2-app-kit",
