@@ -5,7 +5,11 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  /* 构建产物一律不扫。
+     src-tauri/target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
+     （压缩过的二进制字节），eslint 会在那上面报 Parsing error。本地一跑 build 就红，
+     CI 上因为 target 不入库反而看不见，是个只在本机出现的假故障。 */
+  { ignores: ['dist', 'node_modules', 'src-tauri/target', 'src-tauri/gen'] },
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

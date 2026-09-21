@@ -1,4 +1,5 @@
 import Icon from '../../components/Icon'
+import { winClose, winMinimize, winToggleMaximize } from '../window'
 import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
 import type { Platform } from '../../hooks/usePlatform'
@@ -28,11 +29,10 @@ interface TopTabsProps {
 }
 
 
-const lights = [
-  { id: 'close', label: '关闭' },
-  { id: 'min', label: '最小化' },
-  { id: 'zoom', label: '缩放' },
-]
+/* macOS 上交通灯由系统画在我们这条标题栏上（titleBarStyle: "Overlay"），
+   这里只留出它占的那块地，别让 MKP 字样压在下面。数字是 macOS 的固定布局：
+   三颗 12px + 两个 8px 间隙 + 左右各 ~20px 边距。 */
+const MAC_LIGHTS_INSET = 72
 
 /**
  * 迷你档用图标代替文字，好把标题栏中段的宽度还给「拖窗口」。
@@ -115,24 +115,14 @@ export default function TopTabs({
   return (
     <header
       className={s.bar}
+      data-tauri-drag-region
       data-density={density}
       data-platform={platform}
       data-fluid={fluid ? 'true' : undefined}
     >
 
-      {isMac && (
-        <div className={s.lights}>
-          {lights.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              className={s.light}
-              data-kind={l.id}
-              aria-label={l.label}
-            />
-          ))}
-        </div>
-      )}
+      {/* 系统交通灯的地盘：只占位，不画东西 —— 画的那三颗在系统那一层 */}
+      {isMac && <span className={s.lightsInset} style={{ width: MAC_LIGHTS_INSET }} aria-hidden="true" />}
 
       <span className={s.logo}>MKP</span>
 
@@ -140,13 +130,13 @@ export default function TopTabs({
 
       {!isMac && (
         <div className={s.controls}>
-          <button type="button" className={s.ctrl} aria-label="最小化">
+          <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
             <Icon name="min" size={14} />
           </button>
-          <button type="button" className={s.ctrl} aria-label="最大化">
+          <button type="button" className={s.ctrl} aria-label="最大化" onClick={winToggleMaximize}>
             <Icon name="max" size={12} />
           </button>
-          <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭">
+          <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭" onClick={winClose}>
             <Icon name="close" size={14} />
           </button>
         </div>
