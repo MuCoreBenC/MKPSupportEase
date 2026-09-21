@@ -87,46 +87,58 @@
  * 最后 0.2G 整个画面是静止的，再换层（换层时机本来就是对的：实测换层前最后一帧
  * face.scale 已是 1.0000、边框 opacity 已是 0）。
  */
+/*
+ * 时序：两段**同时起步**，两个方向同构。
+ *
+ * 原来是串行的：推入 = 平移 0→0.6G，然后卡面才从 0.94 长到 1（0.6G→0.8G）；
+ * 退回 = 先缩小 0→0.45G，再平移。实测（无头浏览器逐帧读 transform，glide=720）：
+ *   平移 960px→0 用掉 430ms，其间 scale 一直是 0.9400；430ms 之后画面已经静止，
+ *   scale 才在 140ms 内走完 0.94→1 —— 6% 的变化发生在没有其他运动的 140ms 里，读不出来。
+ * 两个方向的段序还正好相反（推入"先移后放"、退回"先缩后移"），所以来回一趟感觉是两套动作。
+ *
+ * 改成：位移与缩放同一时刻开始，缩放的尾巴略长于位移（0.78G vs 0.667G）——
+ * 于是"滑进来"与"长大"是同一个动作的两面，卡片落位之后还有 80ms 的收尾把内容撑到实尺。
+ * 退回是逐项镜像，不再换序。easing 沿用原来那条 ease-out（0.32, 0.68, 0.12, 1）：
+ * 起步快、尾部慢，两个方向都是。
+ *
+ * 末尾仍留 0.22G 的静止期再换层 —— 这条是原来验过的：换层前最后一帧 scale 已是 1.0000、
+ * 边框 opacity 已是 0，静止期没有就会看见"还没彻底展开就接上最终页"。
+ */
 .card[data-phase='in'] {
   /* 静态值与关键帧 0% 一致，避免动画启动前先按静止态画一帧 */
   transform: translateX(var(--peek-shift));
-  animation: card-slide calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: card-slide calc(var(--glide-ms) * 0.667) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
 .card[data-phase='in'] .face {
   transform: scale(var(--peek-face));
-
-  /* both：延迟期间就套用 0%，不依赖静态值刚好写对 */
-  animation: face-grow calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.6) both;
+  /* 缩放单独换一条：位移那条前 100ms 就走完 63%，缩放跟着它会把 6% 的幅度在前 150ms 用光，
+     于是"长大"依旧读不出来。这条前段不抢，变化摊在整段里 */
+  animation: face-grow calc(var(--glide-ms) * 0.78) cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .card[data-phase='in'] .face::before {
   opacity: 1;
-  animation: shell-out calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.6) both;
+  animation: shell-out calc(var(--glide-ms) * 0.58) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
 
-/* 返回：白底先缩小，再把卡片送回右边 */
+/* 返回：与推入逐项镜像 —— 同时起步，位移先到位，缩小的尾巴略长 */
 .card[data-phase='out'] {
   /* 退出层挂载时就是全屏未缩小，否则首帧会先闪到右边缘的小卡片位置 */
   transform: translateX(0);
-
-  /* both 是这里的关键：forwards 不管延迟期间，卡片会先跳到静态位置 */
-  animation: card-slide-out calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.45) both;
+  animation: card-slide-out calc(var(--glide-ms) * 0.667) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
 
 .card[data-phase='out'] .face {
   transform: scale(1);
-  animation: face-shrink calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: face-shrink calc(var(--glide-ms) * 0.78) cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .card[data-phase='out'] .face::before {
   opacity: 0;
-  animation: shell-in calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: shell-in calc(var(--glide-ms) * 0.58) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
 

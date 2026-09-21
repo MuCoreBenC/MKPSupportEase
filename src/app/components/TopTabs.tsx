@@ -61,7 +61,7 @@ export default function TopTabs({
   const isMac = platform === 'macos'
 
   const iconStrip = (
-    <nav className={s.iconTabs} aria-label="主页签">
+    <nav className={s.iconTabs} aria-label="主页签" data-tauri-drag-region>
       {tabs.map((t) => {
         const on = t.id === active
         const icon = t.icon ?? TAB_ICONS[t.id]
@@ -84,7 +84,7 @@ export default function TopTabs({
   )
 
   const wideStrip = (
-    <nav className={s.tabs} aria-label="主页签">
+    <nav className={s.tabs} aria-label="主页签" data-tauri-drag-region>
       {tabs.map((t) => {
         const on = t.id === active
         return (
@@ -105,7 +105,7 @@ export default function TopTabs({
 
   /* 有 title 时页签条整个不渲染：报告态标题栏只剩品牌 + 页名 + 窗口键，中段全是拖动区 */
   const tabStrip = title ? (
-    <span className={s.title}>{title}</span>
+    <span className={s.title} data-tauri-drag-region>{title}</span>
   ) : isMini ? (
     iconStrip
   ) : (
@@ -122,14 +122,19 @@ export default function TopTabs({
     >
 
       {/* 系统交通灯的地盘：只占位，不画东西 —— 画的那三颗在系统那一层 */}
-      {isMac && <span className={s.lightsInset} style={{ width: MAC_LIGHTS_INSET }} aria-hidden="true" />}
+      {isMac && <span
+          className={s.lightsInset}
+          style={{ width: MAC_LIGHTS_INSET }}
+          aria-hidden="true"
+          data-tauri-drag-region
+        />}
 
-      <span className={s.logo}>MKP</span>
+      <span className={s.logo} data-tauri-drag-region>MKP</span>
 
       {tabStrip}
 
       {!isMac && (
-        <div className={s.controls}>
+        <div className={s.controls} data-tauri-drag-region>
           <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
             <Icon name="min" size={14} />
           </button>
