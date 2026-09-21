@@ -110,17 +110,23 @@
   animation: card-slide calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
+/*
+ * 白底与内容必须**同窗口同曲线**，否则两者的缩放会错开 —— 实测过 0.2G + 前重曲线时
+ * 白底在 508ms 已经 0.979、内容还只有 0.956，看上去是"卡框先长、字后长"。
+ * 所以这里跟着 CardFrame 的 frame-settle 走：0.6G 起、0.25G 长、cubic-bezier(0.4, 0, 0.2, 1)。
+ * 改这三个数时两处要一起改。
+ */
 .card[data-phase='in'] .face {
   transform: scale(var(--peek-face));
 
   /* both：延迟期间就套用 0%，不依赖静态值刚好写对 */
-  animation: face-grow calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
+  animation: face-grow calc(var(--glide-ms) * 0.25) cubic-bezier(0.4, 0, 0.2, 1)
     calc(var(--glide-ms) * 0.6) both;
 }
 
 .card[data-phase='in'] .face::before {
   opacity: 1;
-  animation: shell-out calc(var(--glide-ms) * 0.2) cubic-bezier(0.32, 0.68, 0.12, 1)
+  animation: shell-out calc(var(--glide-ms) * 0.25) cubic-bezier(0.4, 0, 0.2, 1)
     calc(var(--glide-ms) * 0.6) both;
 }
 
@@ -136,14 +142,15 @@
 }
 
 
+/* 退回：0 → 0.45G 缩小，与 frame-tuck 的第一段同窗口同曲线 */
 .card[data-phase='out'] .face {
   transform: scale(1);
-  animation: face-shrink calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: face-shrink calc(var(--glide-ms) * 0.45) cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .card[data-phase='out'] .face::before {
   opacity: 0;
-  animation: shell-in calc(var(--glide-ms) * 0.45) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: shell-in calc(var(--glide-ms) * 0.45) cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 

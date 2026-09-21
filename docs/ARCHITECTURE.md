@@ -135,6 +135,40 @@ Rust 侧的字段名与 TS 那份靠 `error.rs` 里的单元测试钉住 —— 
 日志：`tracing` + `tracing-appender` 按天滚动，写进 `internal_root/logs/`；dev 下同时输出 stderr。
 日志目录不可用时退到只写 stderr，**不阻断启动**。用 `SUPPORTEASE_LOG` 环境变量调级别。
 
+## 7.5 窗口外观（macOS）：三个坑
+
+原生圆角与原生红绿灯都不是 CSS 能做的，`src-tauri/src/chrome.rs` 里那两个函数各对应一个坑。
+做法参考 `neteasemusicc`（同机另一个项目，这两点上是对的）。
+
+**① `trafficLightPosition` 在 `titleBarStyle: "Overlay"` 下不生效。**
+Overlay 只给窗口加了 `fullSizeContentView`，**没有**真正的 `NSToolbar`。AppKit 摆灯有两档：
+
+| 配置 | 标题栏高 | close 圆心 | min | zoom |
+| --- | --- | --- | --- | --- |
+| 只有 fullSizeContentView | 32 | (16, 16) | (39, 16) | (62, 16) |
+| 带 `NSToolbar` `.unified` | 52 | (26, 26) | (49, 26) | (72, 26) |
+
+所以装一个**空** `NSToolbar` + `NSWindowToolbarStyle::Unified`，把位置算回给系统；
+`--titlebar-h` 必须是 52 灯才竖直居中，左侧占位 77px（AppKit 量出来的：灯组右缘 79、
+第一个 toolbar item 左缘 97）。不要逐颗改 `standardWindowButton(...).frame` ——
+resize / 进出全屏 / 切外观时 AppKit 都会重摆，手动补摆每次都有一帧错位。
+
+**② 圆角是 tauri#14165。** 窗口的原生边框是圆的，但 WKWebView 没被裁 ——
+它把内容画到圆角外面，看上去就是直角。`windowEffects.radius` 只圆了底下那层
+NSVisualEffectView。解法是 `window-vibrancy` 的 `apply_liquid_glass(...).content_view(webview)`：
+把 webview 摘下来挂进玻璃视图，**圆角由 AppKit 裁**。必须 `opaque(true)`（系统菜单与
+系统窗口都是"不透明底 + 一层玻璃"，传 false 会让背后窗口的内容读进来）+ 窗口
+`transparent: true` + `macOSPrivateApi: true`。低于 macOS 26 时 crate 返回
+`UnsupportedPlatformVersion`，那时只打日志、**不退回毛玻璃**（毛玻璃会让界面变半透明，
+比直角更糟）。
+
+**③ `data-tauri-drag-region` 需要 `core:window:allow-start-dragging` 权限。**
+`core:default` 里**不含**它，缺了的表现是整条标题栏拖不动、**而且没有任何报错**。
+另外裸属性只认"直接点在这个元素上"，中段被页签 `<nav>` 铺满时点不到 header ——
+用 `data-tauri-drag-region="deep"`（整棵子树可拖，Tauri ≥ 2.11 支持）。
+双击缩放不用自己监听：Tauri 的 drag.js 已经在 `mouseup(detail === 2)` 时发
+`internal_toggle_maximize`。
+
 ## 8. 前端约定
 
 - **密度档**由容器宽度决定（`useDensity`），四档 `mini / compact / wide / ultra`，

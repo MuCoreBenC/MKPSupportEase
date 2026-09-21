@@ -376,10 +376,16 @@
  * both 是这里的关键：forwards 只管动画结束之后，延迟那一段会按静态值（已经在左边）画 ——
  * 于是内容会先瞬跳再退出。both 让延迟期间就套用 0% 关键帧。
  */
-/* 退回逐项镜像：先缩小（0.2G–0.45G），再跟着卡片滑回右边（0.45G–1.0G）。
-   段界同样落在 card-slide-out 的起点上，平移仍然与卡片对齐 */
+/*
+ * 退回：**第一帧就开始缩**（0 → 0.45G），然后跟着卡片滑回右边（0.45G → 1.0G）。
+ *
+ * 不加延迟是刻意的，两个原因：
+ * 1. 与白底的 face-shrink 同窗口同曲线 —— 否则就是"卡片先缩、文字后缩"；
+ * 2. 起手那一下必须有东西在动。早先白底 0 起、内容 0.2G 起，头 144ms 只有白底在缩，
+ *    读起来像卡了一下。
+ */
 [data-layer='exit'][data-phase='out'] .frame {
-  animation: frame-tuck calc(var(--glide-ms) * 0.8) calc(var(--glide-ms) * 0.2) both;
+  animation: frame-tuck var(--glide-ms) both;
 }
 
 /*
@@ -403,14 +409,14 @@
   }
 }
 
-/* 段界 31.25% = 0.25G / 0.8G，加上 0.2G 延迟正好落在 0.45G —— card-slide-out 的起点 */
+/* 段界 45% —— 正好是 card-slide-out 的起点（延迟 0.45G），平移段与卡片逐帧对齐 */
 @keyframes frame-tuck {
   0% {
     transform: translateX(0) scale(1);
     animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  31.25% {
+  45% {
     transform: translateX(0) scale(var(--peek-content, 1));
     animation-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
   }
