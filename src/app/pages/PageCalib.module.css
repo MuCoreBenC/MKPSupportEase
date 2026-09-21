@@ -12,7 +12,12 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
-  padding: var(--pad) clamp(14px, 2.4vw, 28px);
+  /*
+   * 三边一个值：原来是 `var(--pad) clamp(14px, 2.4vw, 28px)` —— 实测 1200 宽时
+   * 左右 28、下 18，板框离窗口的三条缝不一样宽，看着像没对齐。
+   * 统一用横向那条 clamp（跟着窗宽走），纵向跟着它，不再用密度档的 --pad。
+   */
+  padding: clamp(14px, 2.4vw, 28px);
 
   /*
    * 卡面：与首页那张卡同一个变量、同一个位置感（都是"标题栏以下的整块内容区"）。

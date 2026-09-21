@@ -338,6 +338,10 @@
    * 会被这里覆盖（试过，那条规则是死的）。
    */
   transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+
+  /* 压暗：露出卡是"下一页的预览"，不是能点的东西（它本来就被 inert 挡住了点击） */
+  opacity: var(--peek-dim, 1);
+  transition: opacity 0.16s var(--scale-ease);
 }
 
 /*
@@ -369,7 +373,7 @@
  * 第一段 0→0.6G 用与卡片相同的那条，墙上时间与卡片完全一致。
  */
 [data-layer='card'][data-phase='in'] .frame {
-  animation: frame-settle calc(var(--glide-ms) * 0.85) forwards;
+  animation: frame-settle var(--in-content-dur) forwards;
 }
 
 /*
@@ -385,7 +389,7 @@
  *    读起来像卡了一下。
  */
 [data-layer='exit'][data-phase='out'] .frame {
-  animation: frame-tuck var(--glide-ms) both;
+  animation: frame-tuck var(--out-content-dur) both;
 }
 
 /*
@@ -396,16 +400,19 @@
 @keyframes frame-settle {
   0% {
     transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
-    animation-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
+    opacity: var(--peek-dim, 1);
+    animation-timing-function: var(--move-ease);
   }
 
   70.6% {
     transform: translateX(0) scale(var(--peek-content, 1));
-    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: var(--peek-dim, 1);
+    animation-timing-function: var(--scale-ease);
   }
 
   100% {
     transform: translateX(0) scale(1);
+    opacity: 1;
   }
 }
 
@@ -413,16 +420,19 @@
 @keyframes frame-tuck {
   0% {
     transform: translateX(0) scale(1);
-    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 1;
+    animation-timing-function: var(--scale-ease);
   }
 
   45% {
     transform: translateX(0) scale(var(--peek-content, 1));
-    animation-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
+    opacity: var(--peek-dim, 1);
+    animation-timing-function: var(--move-ease);
   }
 
   100% {
     transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
   }
 }
 
