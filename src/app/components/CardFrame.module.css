@@ -359,23 +359,43 @@
 
 
 
+/*
+ * 时长从 0.6G 拉到 0.85G：多出来的 0.25G 专门用来放大。
+ *
+ * 曲线不写在这里，写进关键帧里 —— 两段各自一条（见 frame-settle）。
+ * 原因：平移这一段必须与卡片的 card-slide 逐帧对齐，否则内容会相对卡框漂移；
+ * 而放大要留到落位之后才发生。同一个 transform 属性没法给两个时长，
+ * 但关键帧里的 animation-timing-function 可以按段给曲线 ——
+ * 第一段 0→0.6G 用与卡片相同的那条，墙上时间与卡片完全一致。
+ */
 [data-layer='card'][data-phase='in'] .frame {
-  animation: frame-settle calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: frame-settle calc(var(--glide-ms) * 0.85) forwards;
 }
 
 /*
  * both 是这里的关键：forwards 只管动画结束之后，延迟那一段会按静态值（已经在左边）画 ——
  * 于是内容会先瞬跳再退出。both 让延迟期间就套用 0% 关键帧。
  */
+/* 退回逐项镜像：先缩小（0.2G–0.45G），再跟着卡片滑回右边（0.45G–1.0G）。
+   段界同样落在 card-slide-out 的起点上，平移仍然与卡片对齐 */
 [data-layer='exit'][data-phase='out'] .frame {
-  animation: frame-tuck calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.45) both;
+  animation: frame-tuck calc(var(--glide-ms) * 0.8) calc(var(--glide-ms) * 0.2) both;
 }
 
-/* 落位：一边回到 0、一边长回实尺。两项同一条 transform，合成层只提升一次 */
+/*
+ * 落位分两段，段界 70.6% = 0.6G / 0.85G：
+ *   0 → 0.6G   平移回 0，缩放**不动**（与卡片 card-slide 同曲线同时长，逐帧对齐）
+ *   0.6G → 0.85G  位置已经稳住，这时候才长回实尺 —— 放大落在最后那一下
+ */
 @keyframes frame-settle {
   0% {
     transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    animation-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
+  }
+
+  70.6% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   100% {
@@ -383,9 +403,16 @@
   }
 }
 
+/* 段界 31.25% = 0.25G / 0.8G，加上 0.2G 延迟正好落在 0.45G —— card-slide-out 的起点 */
 @keyframes frame-tuck {
   0% {
     transform: translateX(0) scale(1);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  31.25% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    animation-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
   }
 
   100% {
