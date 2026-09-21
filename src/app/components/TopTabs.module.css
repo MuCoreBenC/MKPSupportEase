@@ -32,35 +32,10 @@
   gap: 12px;
 }
 
-.lights {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 系统交通灯的占位块。宽度由 TSX 给（MAC_LIGHTS_INSET），
+   高度不用管 —— 灯是系统画在窗口图层上的，不在我们的 DOM 里 */
+.lightsInset {
   flex-shrink: 0;
-}
-
-.light {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: filter 0.14s ease;
-}
-
-.light[data-kind='close'] {
-  background: #ff5f57;
-}
-
-.light[data-kind='min'] {
-  background: #febc2e;
-}
-
-.light[data-kind='zoom'] {
-  background: #28c840;
-}
-
-.lights:hover .light {
-  filter: brightness(0.94);
 }
 
 .logo {

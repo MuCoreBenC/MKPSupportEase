@@ -42,8 +42,10 @@
   --r-md: 12px;
   --r-sm: 8px;
 
-  /* 窗口 chrome 高度：两平台统一，不随密度变化 */
-  --titlebar-h: 44px;
+  /* 窗口 chrome 高度：两平台统一，不随密度变化。
+     52 不是随便定的 —— macOS 装了统一工具栏（见 src-tauri/src/chrome.rs）之后，
+     AppKit 把红绿灯圆心摆在 y=26，标题栏必须是 52 才让它竖直居中。 */
+  --titlebar-h: 52px;
   --statusbar-h: 32px;
 
   /* 随密度切换的量 */

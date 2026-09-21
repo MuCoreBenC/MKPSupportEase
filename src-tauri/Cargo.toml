@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
-tauri = { version = "2.9.1", features = [] }
+tauri = { version = "2.9.1", features = ["macos-private-api"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2"
@@ -29,3 +29,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
+
+# 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+window-vibrancy = "0.8"

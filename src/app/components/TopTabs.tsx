@@ -1,4 +1,5 @@
 import Icon from '../../components/Icon'
+import { winClose, winMinimize, winToggleMaximize } from '../window'
 import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
 import type { Platform } from '../../hooks/usePlatform'
@@ -28,11 +29,11 @@ interface TopTabsProps {
 }
 
 
-const lights = [
-  { id: 'close', label: '关闭' },
-  { id: 'min', label: '最小化' },
-  { id: 'zoom', label: '缩放' },
-]
+/* macOS 上交通灯由系统画在我们这条标题栏上（titleBarStyle: "Overlay"），
+   这里只留出它占的那块地，别让 MKP 字样压在下面。
+   77 是 AppKit 量出来的：装了统一工具栏之后红绿灯整组右缘 79、第一个 toolbar item 左缘 97，
+   减掉标题栏自己的左内衬 16 与 gap 之后剩这么宽。60 / 72 都偏窄。 */
+const MAC_LIGHTS_INSET = 77
 
 /**
  * 迷你档用图标代替文字，好把标题栏中段的宽度还给「拖窗口」。
@@ -61,7 +62,7 @@ export default function TopTabs({
   const isMac = platform === 'macos'
 
   const iconStrip = (
-    <nav className={s.iconTabs} aria-label="主页签">
+    <nav className={s.iconTabs} aria-label="主页签" data-tauri-drag-region="deep">
       {tabs.map((t) => {
         const on = t.id === active
         const icon = t.icon ?? TAB_ICONS[t.id]
@@ -84,7 +85,7 @@ export default function TopTabs({
   )
 
   const wideStrip = (
-    <nav className={s.tabs} aria-label="主页签">
+    <nav className={s.tabs} aria-label="主页签" data-tauri-drag-region="deep">
       {tabs.map((t) => {
         const on = t.id === active
         return (
@@ -105,7 +106,7 @@ export default function TopTabs({
 
   /* 有 title 时页签条整个不渲染：报告态标题栏只剩品牌 + 页名 + 窗口键，中段全是拖动区 */
   const tabStrip = title ? (
-    <span className={s.title}>{title}</span>
+    <span className={s.title} data-tauri-drag-region="deep">{title}</span>
   ) : isMini ? (
     iconStrip
   ) : (
@@ -115,38 +116,33 @@ export default function TopTabs({
   return (
     <header
       className={s.bar}
+      data-tauri-drag-region="deep"
       data-density={density}
       data-platform={platform}
       data-fluid={fluid ? 'true' : undefined}
     >
 
-      {isMac && (
-        <div className={s.lights}>
-          {lights.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              className={s.light}
-              data-kind={l.id}
-              aria-label={l.label}
-            />
-          ))}
-        </div>
-      )}
+      {/* 系统交通灯的地盘：只占位，不画东西 —— 画的那三颗在系统那一层 */}
+      {isMac && <span
+          className={s.lightsInset}
+          style={{ width: MAC_LIGHTS_INSET }}
+          aria-hidden="true"
+          data-tauri-drag-region="deep"
+        />}
 
-      <span className={s.logo}>MKP</span>
+      <span className={s.logo} data-tauri-drag-region="deep">MKP</span>
 
       {tabStrip}
 
       {!isMac && (
-        <div className={s.controls}>
-          <button type="button" className={s.ctrl} aria-label="最小化">
+        <div className={s.controls} data-tauri-drag-region="deep">
+          <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
             <Icon name="min" size={14} />
           </button>
-          <button type="button" className={s.ctrl} aria-label="最大化">
+          <button type="button" className={s.ctrl} aria-label="最大化" onClick={winToggleMaximize}>
             <Icon name="max" size={12} />
           </button>
-          <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭">
+          <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭" onClick={winClose}>
             <Icon name="close" size={14} />
           </button>
         </div>

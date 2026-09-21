@@ -328,7 +328,29 @@
 [data-layer='exit'][data-phase='out'] .frame {
   --pane-shift: min(0px, (1400px - 100cqw) / 2);
 
-  transform: translateX(var(--pane-shift));
+  /*
+   * 露出态的内容：左移补偿 + **跟着卡面一起缩 5%**（`--peek-content` 由 SlideDeck 下发）。
+   *
+   * 缩放这一项是本仓库加的。DOM 是 `.card > [.face, .frame]` —— `.face` 只是画白底的空 div，
+   * 内容在 `.frame` 里，是它的兄弟。所以 SlideDeck 那个 `--peek-face` 的 scale 只缩白底，
+   * 文字一直原尺寸平移进来，"放大"完全读不出来。
+   * 必须并进这一条 transform：`.frame` 的 transform 归本文件管，在别处再写一条 scale
+   * 会被这里覆盖（试过，那条规则是死的）。
+   */
+  transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+
+  /*
+   * 虚焦 + 压暗：露出卡是"下一页的预览"，不是能点的东西（它本来就被 inert 挡住了点击）。
+   * 模糊必须也写进下面两条关键帧 —— 关键帧里没提到的属性会退回这条静态值，
+   * 于是 forwards 之后内容会一直虚着。
+   * 过渡的延迟由 .card 那条 hover 规则通过变量下发（进场 180ms、离场 0），
+   * 所以这里的 transition 不写死延迟。
+   */
+  opacity: var(--peek-dim, 1);
+  filter: blur(var(--peek-blur, 0));
+  transition:
+    opacity var(--peek-hover-dur, 0.26s) var(--scale-ease) var(--peek-hover-delay, 0s),
+    filter var(--peek-hover-dur, 0.26s) var(--scale-ease) var(--peek-hover-delay, 0s);
 }
 
 /*
@@ -350,36 +372,82 @@
 
 
 
+/*
+ * 时长从 0.6G 拉到 0.85G：多出来的 0.25G 专门用来放大。
+ *
+ * 曲线不写在这里，写进关键帧里 —— 两段各自一条（见 frame-settle）。
+ * 原因：平移这一段必须与卡片的 card-slide 逐帧对齐，否则内容会相对卡框漂移；
+ * 而放大要留到落位之后才发生。同一个 transform 属性没法给两个时长，
+ * 但关键帧里的 animation-timing-function 可以按段给曲线 ——
+ * 第一段 0→0.6G 用与卡片相同的那条，墙上时间与卡片完全一致。
+ */
 [data-layer='card'][data-phase='in'] .frame {
-  animation: frame-settle calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: frame-settle var(--in-content-dur) forwards;
 }
 
 /*
  * both 是这里的关键：forwards 只管动画结束之后，延迟那一段会按静态值（已经在左边）画 ——
  * 于是内容会先瞬跳再退出。both 让延迟期间就套用 0% 关键帧。
  */
+/*
+ * 退回：**第一帧就开始缩**（0 → 0.45G），然后跟着卡片滑回右边（0.45G → 1.0G）。
+ *
+ * 不加延迟是刻意的，两个原因：
+ * 1. 与白底的 face-shrink 同窗口同曲线 —— 否则就是"卡片先缩、文字后缩"；
+ * 2. 起手那一下必须有东西在动。早先白底 0 起、内容 0.2G 起，头 144ms 只有白底在缩，
+ *    读起来像卡了一下。
+ */
 [data-layer='exit'][data-phase='out'] .frame {
-  animation: frame-tuck calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.45) both;
+  animation: frame-tuck var(--out-content-dur) both;
 }
 
+/*
+ * 落位分两段，段界 70.6% = 0.6G / 0.85G：
+ *   0 → 0.6G   平移回 0，缩放**不动**（与卡片 card-slide 同曲线同时长，逐帧对齐）
+ *   0.6G → 0.85G  位置已经稳住，这时候才长回实尺 —— 放大落在最后那一下
+ */
 @keyframes frame-settle {
   0% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
+    animation-timing-function: var(--move-ease);
+  }
+
+  70.6% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
+    animation-timing-function: var(--scale-ease);
   }
 
   100% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
   }
 }
 
+/* 段界 45% —— 正好是 card-slide-out 的起点（延迟 0.45G），平移段与卡片逐帧对齐 */
 @keyframes frame-tuck {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    animation-timing-function: var(--scale-ease);
+  }
+
+  45% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
+    animation-timing-function: var(--move-ease);
   }
 
   100% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
   }
 }
 
