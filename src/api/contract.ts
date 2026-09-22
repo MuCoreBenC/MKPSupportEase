@@ -35,24 +35,6 @@ export interface CalibModel {
   ready: boolean
 }
 
-/** 测试模型清单里的一件。走马灯与第五页共用这一份形状 */
-export interface TestModel {
-  /** 盘号，同时是卡片右上角的水印数字 */
-  order: number
-  title: string
-  /** 英文名，大写小字号排在标题下面；最后两条产品侧就没给 */
-  subtitle?: string
-  description: string
-  /** public 下的绝对路径 */
-  image: string
-  /** 打印时长；产品侧未给的留空字符串，渲染时整行隐藏 */
-  time: string
-  /** 耗材用量，同上 */
-  weight: string
-  tag: { label: string; color: string }
-  isNew?: boolean
-}
-
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -74,9 +56,6 @@ export interface MkpApi {
    * 前端不碰文件系统，也不关心它是下载还是命中缓存 —— 那是壳的事。
    */
   openModel(modelId: string): Promise<void>
-
-  /** 测试模型清单 */
-  getTestModels(): Promise<TestModel[]>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

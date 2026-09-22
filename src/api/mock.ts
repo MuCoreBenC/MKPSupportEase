@@ -1,4 +1,4 @@
-import type { CalibModel, MkpApi, Preset, TestModel } from './contract'
+import type { CalibModel, MkpApi, Preset } from './contract'
 
 /**
  * mock 实现：同一套契约，数据写死在本文件里。
@@ -72,100 +72,6 @@ const calibModels: CalibModel[] = [
   { id: 'sup', name: '支撑测试', desc: '校准完打这个看支撑效果', size: '3.2 MB', ready: true },
 ]
 
-/**
- * 测试模型清单。
- *
- * 文案与时长/用量逐字取自产品侧的 model_copy 真相源；缩略图是从那个 3mf 的
- * `Metadata/plate_N.png` 里提出来的切片器盘面预览（512×512 透明底），order 即盘号。
- * 例外是 3 号「鱼尾曲面测试」—— 换成了 Blender 渲出的 hero_fishtail.webp，
- * 同一张图也兼作走马灯右下角的装饰底图。
- *
- * 8 个模型共用同一个 3mf —— 「打开测试模型」按钮对哪张卡都是同一个文件。
- */
-const testModels: TestModel[] = [
-  {
-    order: 1,
-    title: '平面Z轴测试',
-    subtitle: 'Z-Axis Calib',
-    description: '基础平面涂胶验证，检验涂胶笔基础功能与 Z 轴偏移精度，确认笔尖出胶状态与高度定位是否正常。',
-    image: '/models/plate_1.png',
-    time: '8m',
-    weight: '3.2g',
-    tag: { label: '基础验证', color: '#EF4444' },
-  },
-  {
-    order: 2,
-    title: '半圆XY校准',
-    subtitle: 'XY Calibration',
-    description: '高精度测试 X/Y/Z 轴基础偏移量，精确检测校准状态与笔尖质量，验证半圆弧面的涂胶轨迹精度。',
-    image: '/models/plate_2.png',
-    time: '12m',
-    weight: '4.5g',
-    tag: { label: '尺寸校准', color: '#F97316' },
-  },
-  {
-    order: 3,
-    title: '鱼尾曲面测试',
-    subtitle: 'Overhang Quality',
-    description: '进阶测试涂胶均匀性与小面积涂胶处理能力，检验鱼尾结构悬垂面的涂胶覆盖质量与边缘一致性。',
-    image: '/models/hero_fishtail.webp',
-    time: '18m',
-    weight: '6.2g',
-    tag: { label: '曲面质量', color: '#EAB308' },
-  },
-  {
-    order: 4,
-    title: '综合测试阵列',
-    subtitle: 'Multi Benchmark',
-    description: '多模型组合阵列测试，全面评估涂胶系统的各项核心指标与参数配合，综合检验不同结构间的涂胶衔接。',
-    image: '/models/plate_4.png',
-    time: '1h 5m',
-    weight: '21.7g',
-    tag: { label: '综合评估', color: '#22C55E' },
-  },
-  {
-    order: 5,
-    title: '无支撑大平面',
-    subtitle: 'No-Support Test',
-    description: '单支撑面与大面积涂胶专项测试，验证无辅助支撑条件下大平面涂胶的均匀性、边缘覆盖与胶量控制。',
-    image: '/models/plate_5.png',
-    time: '47m',
-    weight: '15.5g',
-    tag: { label: '进阶组合', color: '#06B6D4' },
-  },
-  {
-    order: 6,
-    title: '极限综合测试',
-    subtitle: 'Ultimate Clearance',
-    description: '全结构整合的极限测试，深度检验整体涂胶效果与长时间作业稳定性，评估系统在复杂工况下的性能边界。',
-    image: '/models/plate_6.png',
-    time: '35m',
-    weight: '11g',
-    tag: { label: '极限测试', color: '#3B82F6' },
-  },
-  {
-    order: 7,
-    title: 'BMCU冲刷测试',
-    subtitle: 'Flow Test',
-    description: '一个较高、支撑面较多的模型可以充分测试使用 BMCU 时是否冲刷。',
-    image: '/models/plate_7.png',
-    time: '',
-    weight: '',
-    tag: { label: '冲刷测试', color: '#8B5CF6' },
-    isNew: true,
-  },
-  {
-    order: 8,
-    title: '擦料塔测试',
-    description: '',
-    image: '/models/plate_8.png',
-    time: '',
-    weight: '',
-    tag: { label: '料塔测试', color: '#3B82F6' },
-    isNew: true,
-  },
-]
-
 export const mockApi: MkpApi = {
   async getPreset(variantId) {
     const row = presetIndex[variantId]
@@ -191,9 +97,5 @@ export const mockApi: MkpApi = {
 
   async openModel(modelId) {
     console.info('[mock] openModel', modelId)
-  },
-
-  async getTestModels() {
-    return testModels
   },
 }

@@ -57,7 +57,6 @@ pub fn run() {
             ipc::save_offsets,
             ipc::get_calib_models,
             ipc::open_model,
-            ipc::get_test_models,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 启动失败");

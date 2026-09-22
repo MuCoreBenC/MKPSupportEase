@@ -2,7 +2,7 @@ import { bridgeApi } from './bridge'
 import type { MkpApi } from './contract'
 import { mockApi } from './mock'
 
-export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset, TestModel } from './contract'
+export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset } from './contract'
 export { isAppError } from './contract'
 
 /**
