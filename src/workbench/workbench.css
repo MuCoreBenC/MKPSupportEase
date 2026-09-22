@@ -1,0 +1,347 @@
+/*
+ * 工作台样式。
+ *
+ * 刻意与客户端的 App.module.css 分开：客户端要好看（玻璃、渐变、动效），
+ * 工作台要**信息密度**（一屏看到尽量多的字段与状态）。把两套诉求塞进一套样式，
+ * 结果是两边都别扭。
+ *
+ * 色值取 src/styles/tokens.css 的变量 —— 那是设计系统层，两个窗口共用是对的；
+ * 布局与密度是业务层，各写各的。每处 var() 都带回退值：工作台不该因为某个 token
+ * 改了名就变成白底黑字。
+ */
+
+.wb-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: var(--text-1, #1c1c1e);
+  background: var(--bg-1, #f5f5f7);
+}
+
+/* ---------- 顶栏 ---------- */
+
+.wb-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
+  background: var(--bg-2, #fff);
+}
+
+.wb-brand {
+  font-weight: 600;
+}
+
+/* 这句提示常驻：工作台与客户端长得越像，越需要一眼能分清现在在哪一个窗口里 */
+.wb-hint {
+  color: var(--text-3, #8a8a8e);
+  font-size: 12px;
+}
+
+.wb-hint--ok {
+  color: #1a7f37;
+}
+
+.wb-hint--bad {
+  color: #b3261e;
+}
+
+/* 数据根常驻显示：出问题时第一句要问的就是"它在读哪个目录" */
+.wb-paths {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-3, #8a8a8e);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 横幅 ---------- */
+
+.wb-banner {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
+  background: #eef3fb;
+  line-height: 1.5;
+}
+
+/* 橙/黄 = "值变了 / 要留意"，**不是错误**。doc §6 明确要求不用红色表达这个意思 */
+.wb-banner--warn {
+  background: #fff6e5;
+}
+
+.wb-banner--bad {
+  background: #fdecea;
+}
+
+/* ---------- 主区 ---------- */
+
+.wb-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-tree {
+  flex: 0 0 220px;
+  overflow: auto;
+  padding: 8px;
+  border-right: 1px solid var(--line-1, rgb(0 0 0 / 10%));
+  background: var(--bg-2, #fff);
+}
+
+.wb-tree-group {
+  margin-bottom: 10px;
+}
+
+.wb-tree-machine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  color: var(--text-2, #5a5a5e);
+  font-weight: 600;
+}
+
+.wb-tree-empty {
+  padding: 2px 6px 2px 18px;
+  color: var(--text-3, #8a8a8e);
+  font-size: 12px;
+}
+
+.wb-tree-item {
+  display: block;
+  width: 100%;
+  padding: 4px 6px 4px 18px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-tree-item:hover {
+  background: rgb(0 0 0 / 5%);
+}
+
+.wb-tree-item--on {
+  background: #dbe7ff;
+}
+
+.wb-work {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
+  background: var(--bg-2, #fff);
+}
+
+.wb-tab {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2, #5a5a5e);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-tab--on {
+  border-bottom-color: #2f6fed;
+  color: var(--text-1, #1c1c1e);
+  font-weight: 600;
+}
+
+.wb-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.wb-placeholder {
+  margin: 0;
+  color: var(--text-2, #5a5a5e);
+}
+
+/* ---------- 布局小件 ---------- */
+
+.wb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wb-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-radio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 保存/放弃常驻在底部：字段表很长，滚到哪都要能提交 */
+.wb-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-1, rgb(0 0 0 / 10%));
+  background: var(--bg-1, #f5f5f7);
+}
+
+.wb-section-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3, #8a8a8e);
+}
+
+/* ---------- 控件 ---------- */
+
+.wb-input,
+.wb-textarea {
+  padding: 4px 7px;
+  border: 1px solid var(--line-2, rgb(0 0 0 / 18%));
+  border-radius: 5px;
+  background: var(--bg-2, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.wb-input--num {
+  width: 110px;
+}
+
+.wb-textarea {
+  width: 100%;
+  min-width: 320px;
+  resize: vertical;
+}
+
+.wb-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--line-2, rgb(0 0 0 / 18%));
+  border-radius: 5px;
+  background: var(--bg-2, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.wb-btn--primary {
+  border-color: #2f6fed;
+  background: #2f6fed;
+  color: #fff;
+}
+
+.wb-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2f6fed;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ---------- 表格 ---------- */
+
+.wb-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wb-table th,
+.wb-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 8%));
+  text-align: left;
+  vertical-align: top;
+}
+
+.wb-table th {
+  color: var(--text-3, #8a8a8e);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 该机型不适用的行：压暗但**不隐藏** —— 值还在文件里，藏起来只会让人以为丢了 */
+.wb-row--na {
+  opacity: 0.5;
+}
+
+/* 换机型预览里"值变了"的行。橙色，不是红色 —— 值变化不是错误 */
+.wb-row--warn {
+  background: #fff9ee;
+}
+
+.wb-mono {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+/* 矩阵可能很宽（一列一个版本），横向滚动而不是压缩列宽 */
+.wb-scroll-x {
+  overflow-x: auto;
+}
+
+/* ---------- 标签 ---------- */
+
+.wb-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: rgb(0 0 0 / 6%);
+  color: var(--text-2, #5a5a5e);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wb-tag--own {
+  background: #dbe7ff;
+  color: #1e4fb5;
+}
+
+/* 同上：橙色表示"要留意"，不表示错 */
+.wb-tag--warn {
+  background: #ffe9c2;
+  color: #8a5300;
+}
+
+.wb-tag--na {
+  background: rgb(0 0 0 / 4%);
+  color: var(--text-3, #8a8a8e);
+}

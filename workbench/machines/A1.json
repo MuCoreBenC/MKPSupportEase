@@ -1,0 +1,17 @@
+{
+  "id": "A1",
+  "displayName": "A1",
+  "base": {
+    "motion.accel": 10000,
+    "motion.travel_speed": 300,
+    "support.enable_brim": true,
+    "support.line_width": 0.42,
+    "toolhead.custom_mount_gcode": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+    "toolhead.custom_unmount_gcode": "G1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+    "toolhead.mkp_retract": -5,
+    "toolhead.offset_x": 256,
+    "toolhead.offset_y": -2,
+    "toolhead.z_offset": 0.1
+  },
+  "defaultBbs": []
+}

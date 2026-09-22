@@ -1,0 +1,17 @@
+{
+  "id": "P1",
+  "displayName": "P1S",
+  "base": {
+    "motion.accel": 8000,
+    "motion.travel_speed": 250,
+    "support.enable_brim": false,
+    "support.line_width": 0.45,
+    "toolhead.custom_mount_gcode": "L803\nG92 E0\nG1 E-10\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000\nG1 X1 F300\nG1 X20 Y7 F30000\nG1 F30000",
+    "toolhead.custom_unmount_gcode": "G92 E0\nG1 F30000\nG1 X246 Y0\nG1 X256 F6000\nG1 F30000\nL802\nG1 F1500\nG1 E10.7\nG1 F30000",
+    "toolhead.mkp_retract": -10,
+    "toolhead.offset_x": 20,
+    "toolhead.offset_y": 7,
+    "toolhead.z_offset": 0.08
+  },
+  "defaultBbs": []
+}

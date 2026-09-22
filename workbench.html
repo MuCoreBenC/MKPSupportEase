@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  后厨工作台的入口页。
+
+  它**只在 workbench 构建里存在**：vite.config.ts 的 rollupOptions.input 默认不含本文件，
+  所以 `npm run build` 的产物里根本没有这一页。给用户的包里搜不到它，不是藏起来，是没编进去。
+
+  标题里带「后厨」是刻意的 —— 两个窗口同时开着时，任务栏上要一眼能分清哪个是客户端。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SupportEase 后厨工作台</title>
+  </head>
+  <body>
+    <div id="workbench-root"></div>
+    <script type="module" src="/src/workbench/main.tsx"></script>
+  </body>
+</html>

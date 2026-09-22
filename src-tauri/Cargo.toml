@@ -16,6 +16,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 
+# 后厨工作台（B03）。**不在 default 里**是这一整套隔离的根：不带这个 feature 编译时，
+# src 下的 workbench 子树连编译都不会被碰，给用户的二进制里搜不到任何工作台命令名。
+#
+# 与 vite 那边的 `--mode workbench` 是**两道独立的闸**：一道管页面在不在产物里，
+# 一道管命令在不在二进制里。任一道漏了，另一道还挡得住。
+[features]
+default = []
+workbench = ["dep:sha2", "dep:time"]
+
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -29,6 +38,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
+
+# 只有 workbench feature 用得到的两个：产物指纹与发布时间戳。
+# optional = true 的意思是"默认构建里本 crate 用不上它们"。
+# 注意 sha2 本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的收益不是
+# "少编一个 crate"，而是**默认构建的代码里 `use sha2` 编不过** —— 隔离靠的是这个，不是包体积
+sha2 = { version = "0.10", optional = true }
+time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]

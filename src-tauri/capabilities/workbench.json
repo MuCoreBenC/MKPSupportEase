@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench",
+  "description": "后厨工作台窗口的权限。只给 core:default（其中的 window 权限全是只读查询），不给拖动/最大化/关闭那几个动作命令 —— 工作台用的是原生标题栏，那些动作由系统接管，不经 IPC。工作台自己的 wb_* 命令是应用内命令，不由 capability 管辖（capability 管的是 core/plugin 命令），所以这里不需要为它们逐条开权限。注意：这份声明在默认构建里是**惰性的** —— workbench 窗口只在 workbench feature 下才会被创建，标签匹配不上就永远不生效。",
+  "windows": [
+    "workbench"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
