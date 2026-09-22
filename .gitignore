@@ -4,6 +4,10 @@ dist
 dist-ssr
 src-tauri/target
 
+# tsc -b 的增量编译缓存。每次 build 都重写，内容含本机绝对路径 ——
+# 入库只会让每个人的每次构建都产生一条假改动。
+*.tsbuildinfo
+
 # Tauri 生成物：权限 schema 由 build.rs 按 capabilities/ 重新生成，不入库
 src-tauri/gen/schemas
 
