@@ -59,9 +59,11 @@ Task 1~5 是可逆的普通改动，随时可停。**Task 6 不可逆**，会单
     - 6.4: ~~重写历史~~ —— **放弃**，查下来既走不通也不值得：
         - `scripts/hooks/pre-push` 闸② 无条件拒绝 push main，注释写明 GitHub 侧还有 ruleset，本地逃生开关无效
         - tag `v0.0.1` 会被一起重写，重推要撞闸③+闸⑤，服务端也禁 tag 删除
-        - `origin/fix/win-caption-buttons` 还在远端且 tree 与 main 完全一致（PR #7 squash 合并的残留），旧 blob 从它仍可达 —— 就算 main 重写成功 GitHub 也不回收
         - 收益只有约 1 MB：`size-pack` 1.93 MiB，16 个待清 blob 合计 1066.7 KB（各 1 个版本）
         - 对比 machine-motion 那次 41.86 → 17.17 MiB（省 24 MB），这次为 1 MB 去拆自己装的保险不划算
+        - 决策时还列过第四条「`fix/win-caption-buttons` 还在远端、旧 blob 仍可达」—— **那条是错的**，
+          该分支在 GitHub 上早已不存在，我读到的是过期的 remote-tracking ref。详见 summary.md
+
 
 
 ---

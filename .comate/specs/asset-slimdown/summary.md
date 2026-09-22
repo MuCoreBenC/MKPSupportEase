@@ -114,24 +114,34 @@ PR：https://github.com/MuCoreBenC/MKPSupportEase/pull/8
 - `scripts/hooks/pre-push` 闸② **无条件**拒绝 push main，注释里自己写明
   「就算用 --no-verify 绕过这道本地闸，GitHub 的 main ruleset 也会拒」—— 服务端也拦
 - tag `v0.0.1` 会被一起重写，重推要撞闸③+闸⑤，而服务端同样禁 tag 删除
-- `origin/fix/win-caption-buttons` 还在远端，且 `git diff origin/main origin/fix/...`
-  输出为空（tree 完全一致，是 PR #7 squash 合并的残留）。旧 blob 从这个分支仍然可达 ——
-  **就算 main 重写成功，GitHub 一个字节都不会回收**
 - 收益只有约 1 MB：`size-pack` 1.93 MiB，16 个待清 blob 合计 1066.7 KB（每个只有 1 个版本）
 
 对比 machine-motion 那次重写（41.86 → 17.17 MiB，省 24 MB）—— 这次为 1 MB 去临时拆掉
 自己装的四道闸和服务端 ruleset，不划算。那 1 MB 留在历史里，工作区与以后的 clone 是干净的。
 
-将来真要做，前置条件是：你去 repo settings 临时放开 main 与 tag 的 ruleset、
-处理掉 `fix/win-caption-buttons`、并接受 GitHub 不会按需 gc（旧对象在它自己跑 gc 前
-仍可按 SHA 取到）。
+将来真要做，前置条件是：你去 repo settings 临时放开 main 与 tag 的 ruleset，
+并接受 GitHub 不会按需 gc（旧对象在它自己跑 gc 前仍可按 SHA 取到）。
+
+### 一条要撤回的判断
+
+决策当时我还列了第四条理由：「`origin/fix/win-caption-buttons` 还在远端，旧 blob 从它仍可达，
+就算 main 重写成功 GitHub 也不回收」。**这条是错的。**
+
+那个分支在 GitHub 上早就不存在了（大概是 PR #7 合并时被「自动删除 head 分支」清掉的），
+`git push origin --delete` 直接报 `remote ref does not exist`。我本地看到的
+`origin/fix/win-caption-buttons` 只是个**过期的 remote-tracking ref** ——
+`git fetch` 不带 `--prune` 永远不会清理它，于是它看起来像还在。`git fetch --prune` 之后
+远端就只剩 `main` 与 `chore/asset-slimdown`。
+
+结论不变（前三条理由足够），但这条判断作废，记在这里免得将来被当成事实引用。
+顺带一条教训：**判断远端分支是否存在，要先 `git fetch --prune`**，否则读到的是本地缓存。
 
 ### 顺带澄清一件事
 
-`origin/fix/win-caption-buttons` 不需要「合并回主分支」—— 它的内容**早就在 main 里了**。
-PR #7 是 squash 合并，所以那 4 个原始提交不出现在 main 的历史里
-（`git branch -r --merged main` 因此不列它），但两边的 tree 逐字节相同。
-它就是个合并完没删的残留分支，删掉是日常操作，`pre-push` 闸④ 明确放行普通 feature 分支。
+`origin/fix/win-caption-buttons` 也不需要「合并回主分支」—— 它的内容早就在 main 里。
+PR #7 是 squash 合并，所以那 4 个原始提交（`1f37246` / `65e0ccf` / `f4f3005` / `2d81cf5`）
+不出现在 main 的历史里（`git branch -r --merged main` 因此不列它），但两边的 tree
+逐字节相同（`git diff origin/main origin/fix/...` 输出为空）。
 
 ## 六、仍然挂着的两件
 
