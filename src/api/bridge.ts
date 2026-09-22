@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
 
 /**
- * IPC 桥：把契约里的五个方法映射到 Rust 侧的五个 command。
+ * IPC 桥：把契约里的四个方法映射到 Rust 侧的四个 command。
  *
  * 命名两套、映射在这一处：TS 侧是 `getPreset`（前端习惯），Rust 侧是 `get_preset`
  * （Rust 习惯）。Tauri 会把 JS 传进去的 camelCase 参数名转成 snake_case，
@@ -63,5 +63,4 @@ export const bridgeApi: MkpApi = {
   saveOffsets: (axes) => call('saveOffsets', 'save_offsets', { axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
-  getTestModels: () => call('getTestModels', 'get_test_models'),
 }
