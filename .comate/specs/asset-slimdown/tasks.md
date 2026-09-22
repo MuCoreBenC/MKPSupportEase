@@ -52,16 +52,17 @@ Task 1~5 是可逆的普通改动，随时可停。**Task 6 不可逆**，会单
     - 5.6: `npm run build` 通过；实跑一次，逐项确认：选 bambu 但不选机型 → 出黑色 logo；选 a1 / a1mini / p1s → 出对应整机图；a1mini 选了版本 → 出 `a1mini-variant.webp`；选 a2l / p2s / x1c → 回落到 logo
     - 5.7: 确认 console 无 404（`public/` 不经 Vite，改名漏改只有运行时才暴露）
 
-- [ ] Task 6: 提交与重写历史（不可逆，执行前单独确认）
-    - 6.1: `git status` 核对改动面，确认没夹带无关文件
-    - 6.2: 建分支提交 Task 1~5（按仓库既有 PR 流程走，不直接推 main）
-    - 6.3: `git bundle create ../MKPSupportEase-backup-20260922.bundle --all` 做兜底备份
-    - 6.4: `git count-objects -vH` 记下 `size-pack` 基线；`git tag -l` + `git branch -r` 清点会被一起重写的 ref
-    - 6.5: **停下来向你确认**：强推会改掉所有提交 SHA、覆盖 GitHub 上的 main、让 PR #1~#7 的 diff 变成 orphan，且**另一台机器必须删目录重新 clone**
-    - 6.6: `pip install git-filter-repo`
-    - 6.7: `git filter-repo --force --invert-paths` 清掉 16 个旧路径（3 张打印机图旧位置 + bambulab.svg + printer-hero.png + test_models.glb + hero_fishtail 两张 + plate_1~8）
-    - 6.8: `git remote add origin ...`（filter-repo 按设计会删掉 remote），`git count-objects -vH` 与基线对比
-    - 6.9: `git push --force origin main`
+- [x] Task 6: 提交（改为走 PR，**放弃重写历史**）
+    - 6.1: `git status` 核对改动面，确认没夹带无关文件 ✓
+    - 6.2: 建分支 `chore/asset-slimdown` 提交（f5ab307，33 files，+668/−732）✓
+    - 6.3: push 分支 + 开 PR → https://github.com/MuCoreBenC/MKPSupportEase/pull/8 ✓
+    - 6.4: ~~重写历史~~ —— **放弃**，查下来既走不通也不值得：
+        - `scripts/hooks/pre-push` 闸② 无条件拒绝 push main，注释写明 GitHub 侧还有 ruleset，本地逃生开关无效
+        - tag `v0.0.1` 会被一起重写，重推要撞闸③+闸⑤，服务端也禁 tag 删除
+        - `origin/fix/win-caption-buttons` 还在远端且 tree 与 main 完全一致（PR #7 squash 合并的残留），旧 blob 从它仍可达 —— 就算 main 重写成功 GitHub 也不回收
+        - 收益只有约 1 MB：`size-pack` 1.93 MiB，16 个待清 blob 合计 1066.7 KB（各 1 个版本）
+        - 对比 machine-motion 那次 41.86 → 17.17 MiB（省 24 MB），这次为 1 MB 去拆自己装的保险不划算
+
 
 ---
 

@@ -104,23 +104,43 @@ q82 可能出色带」—— 打开图才发现它是**线稿风格的透视图*
 
 ---
 
-## 五、Task 6 等你确认（不可逆）
+## 五、Task 6 结果：走了 PR，没重写历史
 
-改动已全部落在工作区，**还没提交**。`git status` 干净可读：17 个删除、8 个修改、
-2 个新增目录（`public/printers/`、`src/app/assets/`）。
+提交在 `chore/asset-slimdown`（f5ab307，33 files，+668/−732），
+PR：https://github.com/MuCoreBenC/MKPSupportEase/pull/8
 
-要真正回收已推送到 GitHub 的那些旧图，下一步是重写历史。执行前你要知道：
+**重写历史放弃了**，原因是查出来既走不通也不值得：
 
-- 所有提交 SHA 会变，GitHub 上的 `main` 被**强制覆盖**
-- PR #1~#7 的 diff 会变成 orphan（正文与评论留着，diff 可能显示异常）
-- **另一台机器必须删掉目录重新 clone**，`git pull` 会因为没有共同祖先而炸
-- 我会先 `git bundle` 全量备份，并在强推前把 `git count-objects -vH` 的前后数据摆给你看
+- `scripts/hooks/pre-push` 闸② **无条件**拒绝 push main，注释里自己写明
+  「就算用 --no-verify 绕过这道本地闸，GitHub 的 main ruleset 也会拒」—— 服务端也拦
+- tag `v0.0.1` 会被一起重写，重推要撞闸③+闸⑤，而服务端同样禁 tag 删除
+- `origin/fix/win-caption-buttons` 还在远端，且 `git diff origin/main origin/fix/...`
+  输出为空（tree 完全一致，是 PR #7 squash 合并的残留）。旧 blob 从这个分支仍然可达 ——
+  **就算 main 重写成功，GitHub 一个字节都不会回收**
+- 收益只有约 1 MB：`size-pack` 1.93 MiB，16 个待清 blob 合计 1066.7 KB（每个只有 1 个版本）
 
-另外两件要你定的小事：
+对比 machine-motion 那次重写（41.86 → 17.17 MiB，省 24 MB）—— 这次为 1 MB 去临时拆掉
+自己装的四道闸和服务端 ruleset，不划算。那 1 MB 留在历史里，工作区与以后的 clone 是干净的。
 
-- `tsconfig.app.tsbuildinfo` 是**被跟踪的构建产物**，每次 build 都会变脏。本轮照原样提交，
-  但它本该进 `.gitignore` —— 要不要顺手收拾？
-- `git status` 里还有两个**不是本轮**的未跟踪目录：`.comate/specs/win-chrome-interactions/`、
-  `.comate/specs/windows-caption-bar/`。我不会碰。
+将来真要做，前置条件是：你去 repo settings 临时放开 main 与 tag 的 ruleset、
+处理掉 `fix/win-caption-buttons`、并接受 GitHub 不会按需 gc（旧对象在它自己跑 gc 前
+仍可按 SHA 取到）。
 
-说「继续」我就走 Task 6；想先自己看一眼界面也行，改动都在工作区等着。
+### 顺带澄清一件事
+
+`origin/fix/win-caption-buttons` 不需要「合并回主分支」—— 它的内容**早就在 main 里了**。
+PR #7 是 squash 合并，所以那 4 个原始提交不出现在 main 的历史里
+（`git branch -r --merged main` 因此不列它），但两边的 tree 逐字节相同。
+它就是个合并完没删的残留分支，删掉是日常操作，`pre-push` 闸④ 明确放行普通 feature 分支。
+
+## 六、仍然挂着的两件
+
+**① 人眼过一遍首页六档**：品牌 logo / A1 / A1 mini / A1 mini+快拆版 / P1S / A2L 回落。
+这是唯一没被机器确认的环节（原因见第四节第 5 条）。
+
+**② 品牌 logo 要不要去掉**（你倾向去掉，本轮选了先不动）。补一条事实：logo 不是完全没用到。
+`PageHome.tsx:204` 的大图槽位只在 `sel.model` 有值时才挂出来，所以**只选品牌**永远看不到
+logo（你观察到的就是这个）；但选 **A2L / P2S / X1C** 这三个还没配图的机型时，槽位在、
+`MODEL_ART` 没条目，`pickArt` 会回落到 logo，那时它真会显示（32% 透明度、四周内缩，
+样式在 `HeroFade.module.css:44-67`）。所以去掉之前要先定那三个机型显示什么。
+
