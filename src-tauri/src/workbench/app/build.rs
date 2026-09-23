@@ -342,6 +342,20 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
             let mut skipped: Vec<(String, String)> = Vec::new();
             let mut todo: Vec<&str> = Vec::new();
             for uid in wanted {
+                // **没有床身尺寸的机型：跳过时说真因。**
+                //
+                // 这一台生成出来也用不了 —— 消费端读预设时会在内置尺寸表里查不到它，
+                // 然后拒掉整份配方（不是少一项检查）。b04 的 P0 审计查明了这件事。
+                // 原来它走的是「暂无资源」那条通用话术，而那句话让人去找资源，
+                // 方向是错的：要补的是尺寸。
+                let no_dims = book
+                    .version(uid)
+                    .and_then(|v| book.machines().iter().find(|m| m.id == v.machine_id))
+                    .is_some_and(|m| !m.has_dimensions);
+                if no_dims {
+                    skipped.push((uid.to_owned(), w::disabled::BUILD_NO_DIMENSIONS.to_owned()));
+                    continue;
+                }
                 match rows.iter().find(|r| r.uid == uid) {
                     Some(r) if r.state == w::BuildState::NoResources => skipped.push((
                         uid.to_owned(),
@@ -803,4 +817,48 @@ mod tests {
         assert_eq!(row.state, w::BuildState::NoResources);
         assert!(!row.buildable, "生成时该跳过它");
     }
+
+    /// **跳过 A2L 时说的必须是真因：缺尺寸，不是缺资源。**（b04 P0 审计的后续）
+    ///
+    /// 两句话指的方向不同：「暂无资源」让人去找资源，而这一台要补的是床身尺寸。
+    /// 真因是消费端在内置尺寸表里查不到这台机型 → 拒掉整份配方，
+    /// 所以它生成出来也用不了。指错方向的提示比没有提示更费时间。
+    ///
+    /// 这一条同时是「判据的判据」：夹具里 A2L **刻意没有** `[dimensions]`
+    /// （`testkit::has_dimensions`），所以它一定走得到这一支
+    #[test]
+    fn skipping_a_machine_without_dimensions_names_the_real_reason() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.up, &f.presets, &c, &draft);
+
+        let a2l = book
+            .machines()
+            .iter()
+            .find(|m| m.id == "A2L")
+            .expect("夹具里有 A2L");
+        assert!(!a2l.has_dimensions, "夹具的 A2L 本该没有尺寸，这条判据在空转");
+
+        // 别的机型有尺寸 —— 这一支不该把它们也拦下来
+        assert!(
+            book.machines()
+                .iter()
+                .filter(|m| m.id != "A2L")
+                .all(|m| m.has_dimensions),
+            "只有 A2L 该缺尺寸"
+        );
+
+        // 两句话必须是两句话
+        assert_ne!(
+            w::disabled::BUILD_NO_DIMENSIONS,
+            w::disabled::BUILD_NO_RESOURCES,
+            "缺尺寸与缺资源说了同一句话，用户会照着错的方向去找"
+        );
+        assert!(
+            w::disabled::BUILD_NO_DIMENSIONS.contains("尺寸"),
+            "真因里没提尺寸：{}",
+            w::disabled::BUILD_NO_DIMENSIONS
+        );
+    }
 }
+

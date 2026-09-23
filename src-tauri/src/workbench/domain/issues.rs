@@ -193,16 +193,25 @@ fn compat(book: &Book<'_>, out: &mut Vec<Issue>) {
 
 /// 机型级
 fn machines(book: &Book<'_>, out: &mut Vec<Issue>) {
-    for m in book.up.catalog.machines() {
-        // A2L：上游没登记床身尺寸。**待办，不是阻断** —— 参数照样能改、产物照样能烤
-        if m.dimensions.is_none() {
+    for m in book.machines() {
+        // A2L：机型文件里没有 `[dimensions]`。
+        //
+        // **这一条在 b04 的 P0 审计之后变重了。** 原来的说法是"越界检查与禁区判不了，
+        // 参数与产物不受影响"—— 后半句是错的：消费端 `load_ir` 在内置尺寸表里查不到
+        // 这台机型时**直接拒掉整份预设**（`MissingMachine`），所以产物受影响，
+        // 而且是全份被拒，不是少一项检查。
+        //
+        // 仍然是 `Todo` 而不是 `Block`：它只废掉这一台机型，别的机型照样交付，
+        // 而 `Block` 会拦住整批生成。
+        if !m.has_dimensions {
             out.push(Issue {
                 id: format!("machine.dimensions.{}", m.id),
                 severity: Severity::Todo,
                 title: format!("{} 的床身尺寸{}", m.display, w::UNCONFIGURED),
-                detail: "上游 machine_catalog.json 的 dimensions 字典里没有这台机型，\
-                         manifest 里那份也是 null。于是越界检查与禁区都判不了。\
-                         参数与产物不受影响 —— 这两件是分开的。要补请回 mkppanel。"
+                detail: "机型文件里没有 [dimensions]，于是越界检查与禁区都判不了。\
+                         更要紧的是**消费端会拒掉这台机型的整份配方** —— \
+                         它的内置尺寸表里没有这台机器，读预设时直接报「没有这个机型」。\
+                         也就是说这一台现在生成出来也用不了，得先把尺寸补上。"
                     .to_owned(),
                 at: Where {
                     view: View::Params,
