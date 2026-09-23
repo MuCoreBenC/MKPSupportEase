@@ -12,7 +12,26 @@
 # 我们**不跟**：那要把 `rust-version` 抬到 1.97，而 1.77.2 是 Tauri 那一侧定的下限。
 [workspace]
 resolver = "2"
+# **显式列成员，不用 `crates/*` 通配**：目录还不存在时 glob 会让 cargo 直接报
+# "failed to load manifest for workspace member `.../crates/*`"，
+# 而这个报错看起来像清单写错了，不像"目录还没建"。
 members = ["src-tauri"]
+
+# **为「原样复制」准备的一组字段。**
+#
+# 后处理内核那份 `Cargo.toml` 是**一个字节都不改**搬过来的（M2a 的搬运证据就是这个），
+# 而它写的是 `version.workspace = true` / `edition.workspace = true` /
+# `rust-version.workspace = true` —— 所以这几个字段必须在这里存在，
+# 取值与它原来那份**逐字一致**（源仓库根：0.2.0 / 2024 / 1.97 / 不发布）。
+#
+# **只对写 `x.workspace = true` 的成员生效**：`src-tauri` 自己写着
+# `edition = "2021"` 与 `rust-version = "1.77.2"`，不受这里影响 ——
+# 1.77.2 是 Tauri 那一侧定的下限，不能跟着抬。
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
 
 # 只有后处理内核（迁入后）会用 `[lints] workspace = true` 领这一组。
 #
