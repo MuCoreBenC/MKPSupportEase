@@ -34,8 +34,8 @@ export function StatusBar({ badges, focus, save, dirtyCount, snapshot, words }: 
       </span>
       <span className="wb-foot__right">
         <span className="wb-foot__counts">
-          {words.level.machine.label} {badges.baseItems} 项（自有 {badges.baseOwn}） ·{' '}
-          {words.level.version.label} {badges.overrideItems} 项（自有 {badges.overrideOwn}）
+          {words.level.machine.label} {badges.baseItems} 项 ·{' '}
+          {words.level.version.label} {badges.overrideItems} 项
         </span>
         {/* 快照只在没跟上的时候才占位置：跟上了是常态，常态不值得一直说 */}
         {snapshot !== 'current' && (

@@ -131,7 +131,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_trash,
         app::wb_ui,
         app::wb_save_ui,
-        app::wb_preview_move,
         app::wb_preview_bulk,
         app::wb_diff_draft,
         app::wb_apply_draft,

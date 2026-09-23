@@ -79,16 +79,49 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
 
 
 
-- [ ] Task 12: 删掉自造的 `workbench/machines|versions/*.json`（原 Task 11）
-    - 12.1: `storage::save` 的机型基底与版本覆盖两段改调 `Presets::set_variant` / `clear_variant`
-    - 12.2: `storage::load` 删掉 `MachineFile` / `VersionFile`
-      （**盘上那个目录是空的，不需要迁移**）
-    - 12.3: 归并的逆运算：值原来在机型基底、改完只属于某一版时，
-      键形状要从 `A1` 变成 `A1:FAST`。判据逐版本比改动前后的有效值，**只允许目标那一个变**
-    - 12.4: 按 `REPORT-2026-09-23.md` §7 的决定删掉清单类 patch
-      （改名归机型页 / 不做归档 / BBS 归套餐层 / 新建·克隆·移动·删除版本归机型页）
-    - 12.5: 撤销栈只服务值编辑；草稿与懒落盘那一套留用
-    - 12.6: 判据：「改一个参数值 → 保存 → 重开工作台，值还在」第一次真正走通
+- [x] Task 12: 删掉自造的 `workbench/machines|versions/*.json`（原 Task 11）
+    - 12.0: ✅ **批量写入口**：`Presets::apply_values(&[(key, owner, Option<值>)])` ——
+      先把 owner 与字段全查一遍，再改内存文档，最后**写一次**。
+      逐条写的代价不只是把 56 KB 写 N 遍，而是中途失败会留下
+      「改了前三条、没改后两条」的文件，而那种状态没有任何判据能描述它。
+      `set_variant` / `clear_variant` 现在都是它的单条壳子。三条判据：
+      一批一次落盘 / 一条不合法整批不写（盘与内存都一字未动）/ 空批次不碰 mtime
+    - 12.1: ✅ `storage::save` 的值改动合成一批 `plan_value_edits`，一次 `apply_values` 落盘。
+      剩下只写 `delivery.json` / `built.json` 与清草稿
+    - 12.2: ✅ `storage::load` 删掉 `MachineFile` / `VersionFile`
+      （**盘上那个目录本来就是空的，没做迁移**）
+    - 12.3: ✅ **归并的逆运算**。两条判据（`app::storage`）：
+      - `a_machine_level_edit_rewrites_the_promoted_version_keys` ——
+        归并会把「每个版本都写了同一个值」**上提**成机型基底。只写裸键 `P1S`
+        会被 `P1S:LITE` 那条更具体的键盖回去：**用户点了保存，值又变回去，全程没有一步报错**。
+        所以机型层的一刀要同时落到那一整组上提过的版本键上。
+        判定与 `digest` 共用 `variants::promoted_to_base`，不许各写一遍
+      - `a_version_level_edit_touches_only_its_own_key` —— 另一半：
+        版本层只写 `A1:STANDARD` 这一个键，**裸键 `A1` 要留着**，
+        `A1/FAST` 还靠它继承。顺手删掉它会让别的版本失去继承来的值
+    - 12.4: ✅ 按 `REPORT-2026-09-23.md` §7 删掉七种清单类 patch：
+      改名 / 归档 / 还原 / 挑 BBS / 新建 / 克隆 / 移动 / 删除版本。
+      `Patch` 只剩 `SetValue / SetVisibility / SetBundle / MarkBuilt`；
+      `MovePreview` 那一整组只读推演与 `wb_preview_move` 一起删了
+    - 12.5: ✅ **撤销栈只服务值编辑**。`Draft` 只剩 `values / visibility / bundles / built`，
+      草稿与懒落盘那一套留用
+    - 12.6: ✅ 判据「改一个参数值 → 保存 → 重开工作台，值还在」第一次真正走通
+      （`app::tests::a_value_edited_then_saved_survives_reopening_the_workbench`：
+      改值 → 保存 → `reload_from_disk` → 盘上 `machineVariants` 是 7.0 →
+      来源层是「版本」→ 产物指纹已变）
+    - 12.7: ✅ **`Layers` 五层确实退回三层了**（这一条是整个 Task 12 最重的部分）：
+      - `Layers::new(registry, machine_id, base, over)` 四个参数；`without_upstream` 合并进来
+      - 查找顺序从五档（我们的版本→表里版本→我们的机型→表里机型→出厂）
+        变成三档（版本→机型→出厂）
+      - `Book` 不再有 `digests`；`bases` / `overs` 现在是「`machineVariants` 归并结果 ⊕ 草稿」
+      - 翻掉的两条旧约定写进了 `layer.rs` 模块文档：**挂回继承现在逐层退**
+        （以前退的是"上游那一半"），以及"没法压回出厂默认"那条代价没有了
+      - 「每层有几项 / 其中自有几项」两个数是同一个了 —— 前端 DTO 收成一个 `items`
+      - 归档、`is_new`、版本自带 BBS 一并消失（`VersionIdentity` 只剩身份）
+
+  **验收**：Rust 264 绿（两种 feature）、`clippy --features workbench -D warnings` 零警告、
+  `npm run lint` 与 `npm run build` 都过。没改任何数据文件。
+
 
 - [ ] Task 13: **M1 + M2 —— 建 workspace，后处理内核迁进来**
     - 13.1: 新建 workspace 根 `Cargo.toml`，`src-tauri` 变成成员；

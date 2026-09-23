@@ -248,14 +248,13 @@ export function WorkbenchApp() {
       { count: b.versions, label: '版本' },
       {
         count: b.baseItems,
-        own: b.baseOwn,
         label: `${words.level.machine.label} 项`,
-        title: '这一层一共有几项非默认值；「自有」是我们自己写的那几项',
+        title: '机型层钉着几项值。以前这里还要分开数「自有几项」，那一半删掉了',
       },
       {
         count: b.overrideItems,
-        own: b.overrideOwn,
         label: `${words.level.version.label} 项`,
+        title: '版本层加起来钉着几项值',
       },
     ]
   }, [book, words])
@@ -449,9 +448,7 @@ export function WorkbenchApp() {
                       data-state={m.build === 'noResources' ? 'off' : m.build === 'built' ? 'ok' : 'warn'}>
                       {words?.build[m.build].label}
                     </span>
-                    <span className="wb-row__count">
-                      {m.total} 项 · 自有 {m.own}
-                    </span>
+                    <span className="wb-row__count">{m.items} 项</span>
                   </div>
 
                   {open &&
@@ -484,7 +481,6 @@ export function WorkbenchApp() {
                           }}
                         >
                           {v.name}
-                          {v.isNew && <i className="wb-row__new" title="新建，还没保存" />}
                         </button>
                         <span
                           className="wb-tag"
@@ -499,7 +495,7 @@ export function WorkbenchApp() {
                         >
                           {words?.build[v.build].label}
                         </span>
-                        <span className="wb-row__count">自有 {v.own}</span>
+                        <span className="wb-row__count">{v.items} 项</span>
                       </div>
                     ))}
                 </div>
@@ -519,9 +515,6 @@ export function WorkbenchApp() {
                 onClick={() => setMaintain((cur) => (cur === m.id ? null : m.id))}
               >
                 {m.label}
-                {m.id === 'trash' && book && book.archived.length > 0 && (
-                  <span className="wb-badge wb-badge--mini">{book.archived.length}</span>
-                )}
               </button>
             ))}
           </div>

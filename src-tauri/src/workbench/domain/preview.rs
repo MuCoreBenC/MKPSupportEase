@@ -1,21 +1,12 @@
-//! 只读推演：移动预览四组、批量影响范围（doc §8.4、tasks 7.7 / 7.8）。
+//! 只读推演：批量影响范围（doc §8.4、tasks 7.8）。
 //!
 //! 这一层**不写任何东西**。它回答的是"我按下去会发生什么"，
 //! 而这个问题必须在按下去之前有答案 —— 否则用户只能改完再看，
 //! 而"改完再看"对批量来说等于没有预览（一次盖掉十几列）。
 //!
-//! # 移动为什么需要四组而不是一句话
-//!
-//! 把一个版本从 A1 搬到 P1S，有四件**同时**发生的事，混成一句话说不清：
-//!
-//! | 组 | 发生了什么 | 为什么要单独说 |
-//! |---|---|---|
-//! | 保留的覆盖 | 我们写在这一版上的项跟着走 | uid 稳定，所以它们不会丢（doc §3.5） |
-//! | 继承值会变 | 没写过的项，继承的是新机型那一层 | **值真的变了**，而界面上那一格没有任何改动标记 |
-//! | 目标多出来的 | 新机型有、老机型没有的字段 | 这一版会突然多出几项能改的 |
-//! | 目标没有的 | 老机型有、新机型没有的字段 | 我们写在上面的值会变成**再也进不了产物**的孤儿 |
-//!
-//! 第二组和第四组是这个操作真正的风险，而它们都不会报错。
+//! 以前这里还有一整个"移动预览"（把某个版本搬到另一台机型前后有什么不同）。
+//! b04 Task 12 把「移动」连同那条 Conservative 清单类动作一起删掉了（REPORT §7），
+//! 于是那四组推演失去了对象 —— 版本搬到哪儿去现在是「机型与版本」页的事。
 //!
 //! # 批量：静默跳过两类目标
 //!
@@ -26,56 +17,13 @@
 //!
 //! G-code **拒绝批量**：一段多行脚本被整体盖掉是不可逆的误操作。
 
-use std::collections::BTreeSet;
-
 use serde::Serialize;
 use serde_json::Value;
 
 use super::derive::{Book, ColRef};
-use super::layer::{no_overrides, Layers, Level, Origin};
+use super::layer::Level;
 use super::visibility::{BlockedBy, Gate};
 use super::wording as w;
-
-/* ---------- 移动预览 ---------- */
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MovePreview {
-    pub uid: String,
-    pub from_machine: String,
-    pub to_machine: String,
-    /// 能不能移。目标机型不存在时为 false，并给出理由（doc §15：当没移）
-    pub allowed: bool,
-    pub blocked_reason: Option<String>,
-    /// 我们写在这一版上的项，跟着走
-    pub kept: Vec<String>,
-    /// 没写过、但继承来的值会变的项
-    pub inherited_changes: Vec<InheritedChange>,
-    /// 目标机型多出来的字段
-    pub gained: Vec<String>,
-    /// 目标机型没有的字段。**我们写在上面的值会变成孤儿**
-    pub lost: Vec<LostKey>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InheritedChange {
-    pub key: String,
-    pub label: String,
-    pub before: String,
-    pub after: String,
-    pub before_origin: Origin,
-    pub after_origin: Origin,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LostKey {
-    pub key: String,
-    pub label: String,
-    /// 我们在这一版写过它吗。为真时这个值会变成再也进不了产物的孤儿
-    pub had_own_value: bool,
-}
 
 /* ---------- 批量预览 ---------- */
 
@@ -140,104 +88,6 @@ pub struct BulkSkip {
 }
 
 impl Book<'_> {
-    /// 把 `uid` 搬到 `to_machine_id` 会发生什么。**不改任何东西**
-    pub fn preview_move(&self, uid: &str, to_machine_id: &str) -> Option<MovePreview> {
-        let v = self.version(uid)?;
-        let from = v.machine_id.clone();
-
-        let to_exists = self.machine(to_machine_id).is_some();
-        let mut out = MovePreview {
-            uid: uid.to_owned(),
-            from_machine: from.clone(),
-            to_machine: to_machine_id.to_owned(),
-            allowed: to_exists && from != to_machine_id,
-            blocked_reason: None,
-            kept: Vec::new(),
-            inherited_changes: Vec::new(),
-            gained: Vec::new(),
-            lost: Vec::new(),
-        };
-        if !to_exists {
-            // doc §15：当没移。让这个版本从树上整个消失比不动更糟
-            out.blocked_reason = Some(format!("机型 {to_machine_id} 不存在，不会移动"));
-            return Some(out);
-        }
-        if from == to_machine_id {
-            out.blocked_reason = Some("已经在这台机型下了".to_owned());
-            return Some(out);
-        }
-
-        let before = self.version_layers(uid)?;
-        let after = self.layers_as_if_moved(uid, to_machine_id)?;
-
-        let before_keys: BTreeSet<&str> = before.keys().into_iter().collect();
-        let after_keys: BTreeSet<&str> = after.keys().into_iter().collect();
-
-        for key in before_keys.intersection(&after_keys) {
-            if before.has_own(Level::Version, key) {
-                out.kept.push((*key).to_owned());
-                // 自有的项跟着走，值不变，所以不进"继承会变"那一组
-                continue;
-            }
-            let (Some(b), Some(a)) = (before.effective(key), after.effective(key)) else {
-                continue;
-            };
-            if b.value == a.value {
-                continue;
-            }
-            let Some(p) = self.presets.registry.param(key) else {
-                continue;
-            };
-            out.inherited_changes.push(InheritedChange {
-                key: (*key).to_owned(),
-                label: p.label.clone(),
-                before: w::value_text(p, b.value),
-                after: w::value_text(p, a.value),
-                before_origin: b.origin,
-                after_origin: a.origin,
-            });
-        }
-
-        for key in after_keys.difference(&before_keys) {
-            out.gained.push((*key).to_owned());
-        }
-        for key in before_keys.difference(&after_keys) {
-            let Some(p) = self.presets.registry.param(key) else {
-                continue;
-            };
-            out.lost.push(LostKey {
-                key: (*key).to_owned(),
-                label: p.label.clone(),
-                had_own_value: before.has_own(Level::Version, key),
-            });
-        }
-
-        out.kept.sort();
-        out.gained.sort();
-        Some(out)
-    }
-
-    /// 「假如搬到那台机型」的三层视图。
-    ///
-    /// 上游那张 `machineVariants` 的版本键是 `"A1:STANDARD"` 这种形状，
-    /// 搬到 P1S 之后 `"P1S:STANDARD"` 多半不存在 —— 所以版本那一半的上游差异会没了，
-    /// 改成继承 P1S 的机型差异。**这就是"继承值会变"的来处**
-    fn layers_as_if_moved(&self, uid: &str, to_machine_id: &str) -> Option<Layers<'_>> {
-        let v = self.version(uid)?;
-        let d = self.digests.get(to_machine_id)?;
-        let base = self.bases.get(to_machine_id)?;
-        let over = self.overs.get(uid)?;
-        let id = self.machine(to_machine_id)?.id.as_str();
-        Some(Layers::new(
-            &self.presets.registry,
-            id,
-            &d.base,
-            base,
-            d.versions.get(&v.version_id).unwrap_or(no_overrides()),
-            over,
-        ))
-    }
-
     /// 把 `key` 改成 `value` 会落到哪几列。
     ///
     /// 目标列由调用方给（= 树上勾了什么），**能落到哪几列由这里判**
@@ -350,16 +200,11 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared: true,
                     ..Default::default()
                 },
             );
         }
         Committed {
-            machines: ["A1", "A2L", "P1S"]
-                .into_iter()
-                .map(|m| (m.to_owned(), super::super::layer::Overrides::new()))
-                .collect(),
             versions,
             catalog: fixture_catalog(),
             ..Default::default()
@@ -375,122 +220,9 @@ mod tests {
             .collect()
     }
 
-    /// **四组都要说出来**。把 A1/STANDARD 搬到 P1S：
-    ///
-    /// - 继承值会变：`toolhead.offset.x` 从上游的 A1:STANDARD 覆盖（-1）
-    ///   变成 P1S 的机型基底（-25.9，由归并上提而来）
-    /// - 目标多出来的：`toolhead.only_p1s`（只给 P1S）
-    /// - 目标没有的：空（P1S 是 A1 的超集）
-    #[test]
-    fn moving_reports_all_four_groups() {
-        let f = Fixture::load();
-        let c = committed();
-        let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
-
-        let p = b.preview_move("A1/STANDARD", "P1S").unwrap();
-        assert!(p.allowed);
-        assert_eq!(p.from_machine, "A1");
-
-        let changed: Vec<&str> = p.inherited_changes.iter().map(|x| x.key.as_str()).collect();
-        assert!(
-            changed.contains(&"toolhead.offset.x"),
-            "继承值会变的那一组漏了：{changed:?}"
-        );
-        let ch = p
-            .inherited_changes
-            .iter()
-            .find(|x| x.key == "toolhead.offset.x")
-            .unwrap();
-        assert_eq!(ch.before, "-1 mm", "搬走前继承的是上游 A1:STANDARD 那一份");
-        assert_eq!(ch.after, "-25.9 mm", "搬过去继承 P1S 的机型基底");
-        assert_eq!(ch.before_origin, Origin::Version);
-        assert_eq!(ch.after_origin, Origin::Machine, "来源层也变了");
-
-        assert_eq!(p.gained, vec!["toolhead.only_p1s"]);
-        assert!(p.lost.is_empty());
-        assert!(p.kept.is_empty(), "这一版我们一项都没写过");
-    }
-
-    /// 我们写过的项**跟着走、值不变**，所以不进"继承会变"那一组
-    #[test]
-    fn our_own_overrides_travel_with_the_version() {
-        let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::SetValue {
-                level: Level::Version,
-                owner: "A1/STANDARD".to_owned(),
-                key: "wiping.child".to_owned(),
-                value: Some(serde_json::json!(77)),
-            }],
-        )
-        .unwrap();
-
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
-        let p = b.preview_move("A1/STANDARD", "P1S").unwrap();
-        assert_eq!(p.kept, vec!["wiping.child"]);
-        assert!(
-            !p.inherited_changes.iter().any(|x| x.key == "wiping.child"),
-            "自有的项值不变，不该出现在「继承会变」那一组里"
-        );
-    }
-
-    /// 搬到少字段的机型：我们写在那些字段上的值会变成**孤儿**，必须当场点名
-    #[test]
-    fn moving_to_a_machine_without_a_field_flags_the_value_that_becomes_an_orphan() {
-        let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::SetValue {
-                level: Level::Version,
-                owner: "P1S/LITE".to_owned(),
-                key: "toolhead.only_p1s".to_owned(),
-                value: Some(serde_json::json!(5)),
-            }],
-        )
-        .unwrap();
-
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
-        let p = b.preview_move("P1S/LITE", "A1").unwrap();
-        let lost = p
-            .lost
-            .iter()
-            .find(|x| x.key == "toolhead.only_p1s")
-            .expect("A1 没有这一项，该出现在「目标没有的」那一组里");
-        assert!(
-            lost.had_own_value,
-            "我们写过它 —— 搬过去之后这个值再也进不了产物，得说出来"
-        );
-    }
-
-    /// 目标机型不存在 → **当没移**，并给出理由（doc §15）
-    #[test]
-    fn moving_to_a_missing_machine_is_reported_as_a_no_op() {
-        let f = Fixture::load();
-        let c = committed();
-        let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
-
-        let p = b.preview_move("A1/STANDARD", "KOBRA").unwrap();
-        assert!(!p.allowed);
-        assert!(p.blocked_reason.unwrap().contains("KOBRA"));
-        assert!(p.inherited_changes.is_empty());
-
-        let same = b.preview_move("A1/STANDARD", "A1").unwrap();
-        assert!(!same.allowed);
-        assert!(same.blocked_reason.is_some());
-    }
-
-    /* ---------- 批量 ---------- */
+    // 移动预览那一整组测试删了（b04 Task 12）：`Patch::MoveVersion` 与
+    // `Book::preview_move` 一起没了 —— 版本搬到哪台机型下是「机型与版本」页的事，
+    // 清单就写在 `presets/machines/{机型}.toml` 里。
 
     /// 批量**静默跳过不适用与被关着的列**，但跳过要能查（tasks 7.8）
     #[test]
@@ -562,16 +294,30 @@ mod tests {
         let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let target = cols(&[("A1", Some("A1/STANDARD")), ("A1", Some("A1/FAST"))]);
 
-        // A1 两个版本在 offset.x 上有**上游**覆盖，但我们没写过 → 新增覆盖
+        // ① 这一层**没钉着**那个键 → 新增覆盖。`wiping.child` 在 `machineVariants`
+        //    里一条都没有，所以两个版本列都算脱钩
+        let p = b.preview_bulk("wiping.child", &serde_json::json!(8), &target);
+        assert!(
+            p.effects.iter().all(|e| e.kind == BulkKind::Detaching),
+            "{:#?}",
+            p.effects
+        );
+
+        // ② 这一层**钉着**那个键 → 改值。A1 的两个版本各有一条 `A1:xxx` 的版本键，
+        //    而版本层的值现在就是从那张表里读出来的，所以两列都算「自己写过」
         let p = b.preview_bulk("toolhead.offset.x", &serde_json::json!(8), &target);
-        assert!(p.effects.iter().all(|e| e.kind == BulkKind::Detaching));
+        assert!(
+            p.effects.iter().all(|e| e.kind == BulkKind::Changing),
+            "{:#?}",
+            p.effects
+        );
         assert_eq!(p.effects[0].before, "-1 mm");
         assert_eq!(p.effects[0].after, "8 mm");
 
-        // 落一个和现在一样的值 → 没有变化
+        // ③ 落一个和 A1/STANDARD 现在一样的值 → 那一列没有变化
         let p = b.preview_bulk("toolhead.offset.x", &serde_json::json!(-1), &target);
         assert_eq!(p.effects[0].kind, BulkKind::NoChange);
-        assert_eq!(p.effects[1].kind, BulkKind::Detaching, "另一版现在是 -0.7");
+        assert_eq!(p.effects[1].kind, BulkKind::Changing, "另一版现在是 -0.7");
     }
 
     /// 我们写过之后再批量 → 改值

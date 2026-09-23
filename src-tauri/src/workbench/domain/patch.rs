@@ -13,23 +13,28 @@
 //! 于是反向写成「设回 4」—— 而正确的反向是**删键**，让它重新继承。
 //! 两者的区别在下一次改机型基底时才会暴露：前者不跟着变，后者跟着变。
 //!
+//! # 这一层只管值（b04 Task 12 / REPORT §7）
+//!
+//! 曾经这里有 12 种动作，其中 8 种是**清单类**的：新建 / 克隆 / 改名 / 移动 /
+//! 归档 / 还原 / 删除版本 / 挑 BBS。它们现在全部没有对象了：
+//!
+//! | 动作 | 去了哪里 | 理由 |
+//! |---|---|---|
+//! | 改名 | 「机型与版本」页 | 版本名就是机型文件里的 `name`，那一页已经能改 |
+//! | 归档 / 还原 | **不做** | 源数据里没有这个概念，是我们自己发明的 SOP |
+//! | BBS | 套餐那一层 | 版本已经有 `recommendedBundle`，再存一份 asset id 是两处真相 |
+//! | 新建 / 克隆 / 移动 / 删除版本 | 「机型与版本」页 | 清单就是 `presets/machines/*.toml`，那一页直接写它 |
+//!
+//! 剩下 [`Patch::SetValue`]、[`Patch::SetVisibility`]、[`Patch::SetBundle`]、
+//! [`Patch::MarkBuilt`] 四种。**撤销栈因此只服务值编辑** ——
+//! 低频的结构操作一律即时落盘、没有一个蓄了半天才生效的第二副本。
+//!
 //! # 哪些手势不进撤销栈
 //!
 //! | 手势 | 可撤销 | 兜底 |
 //! |---|---|---|
-//! | 改值、改名、移动、归档、还原、新建、克隆、套餐、可见性、BBS | ✅ | —— |
-//! | [`Patch::PurgeVersion`] | ❌ | 二次确认 + 回收站（`.trash/`） |
+//! | 改值、套餐、可见性 | ✅ | —— |
 //! | [`Patch::MarkBuilt`] | ❌ | 它是生成的记录，不是编辑；撤销一条"生成过"没有意义 |
-//!
-//! 刻意**不做"有些删除能撤销、有些不能"**：草稿里新建还没保存的版本，删了确实能从
-//! 草稿里恢复；已落盘的不能。但"看情况"的撤销比"从来不能"更糟 ——
-//! 用户点撤销之前得先想清楚这个版本保存过没有。所以一条规则：**删除不进撤销栈**。
-//!
-//! # 应用顺序：先结构，再值
-//!
-//! 反过来的话，同一批里"新建一个版本 + 给它写三个值"会把那三个值丢掉 ——
-//! 写值的时候那个版本还不存在。[`tests::values_land_on_versions_created_in_the_same_batch`]
-//! 盯着这件事。
 //!
 //! # 非法 patch 拒绝整批
 //!
@@ -44,7 +49,7 @@ use serde_json::Value;
 use crate::error::AppError;
 use crate::workbench::presets::ParamRegistry as Registry;
 
-use super::layer::{Level, Overrides};
+use super::layer::Level;
 
 /// 交付物对客户可见吗（doc 的「菜单」与「仅归档」）。
 ///
@@ -78,17 +83,6 @@ pub struct BuiltRecord {
     pub fingerprint: String,
 }
 
-/// 草稿里新建的版本。没保存之前它只存在于草稿里
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DraftVersion {
-    pub uid: String,
-    pub machine_id: String,
-    /// 落盘用的 id（进文件名，所以只能是 ASCII）。**显示名是 `name`，中文在那里**
-    pub version_id: String,
-    pub name: String,
-}
-
 /// 写操作的载荷（doc §4.1）。
 ///
 /// 两条语义写死：
@@ -104,36 +98,6 @@ pub enum Patch {
         key: String,
         /// `None` = 删键 = 挂回继承
         value: Option<Value>,
-    },
-    CloneVersion {
-        from_uid: String,
-        name: String,
-    },
-    NewVersion {
-        machine_id: String,
-        name: String,
-    },
-    RenameVersion {
-        uid: String,
-        name: String,
-    },
-    MoveVersion {
-        uid: String,
-        to_machine_id: String,
-    },
-    ArchiveVersion {
-        uid: String,
-    },
-    RestoreVersion {
-        uid: String,
-    },
-    PurgeVersion {
-        uid: String,
-    },
-    /// `None` = 挂回继承机型默认；`Some` = 本版本独立一份
-    SetBbs {
-        uid: String,
-        list: Option<Vec<String>>,
     },
     SetVisibility {
         file_id: String,
@@ -155,12 +119,7 @@ pub enum Patch {
 impl Patch {
     /// 这条 patch 能不能进撤销栈。见模块文档那张表
     pub fn is_undoable(&self) -> bool {
-        !matches!(self, Patch::PurgeVersion { .. } | Patch::MarkBuilt { .. })
-    }
-
-    /// 是不是结构操作。**应用时结构先于值**
-    fn is_structural(&self) -> bool {
-        !matches!(self, Patch::SetValue { .. })
+        !matches!(self, Patch::MarkBuilt { .. })
     }
 }
 
@@ -174,32 +133,15 @@ pub struct Draft {
     /// `"m:A1:toolhead.offset.x"` / `"v:A1/STANDARD:toolhead.offset.x"`。
     /// **值为 `None` 表示"这一层的这个键被删了"**，与"没有这一条草稿"不同
     pub values: BTreeMap<String, Option<Value>>,
-    pub added: Vec<DraftVersion>,
-    pub renamed: BTreeMap<String, String>,
-    pub moved: BTreeMap<String, String>,
-    pub archived: BTreeMap<String, bool>,
-    pub purged: Vec<String>,
-    pub bbs: BTreeMap<String, Option<Vec<String>>>,
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
     pub built: BTreeMap<String, BuiltRecord>,
-    /// 新建版本的序号。只增不减 —— 减了会让新 uid 撞上旧 uid
-    pub seq: u64,
 }
 
 impl Draft {
-    /// 未保存的改动有几处。**结构操作各算一处** —— 它们和改一个值一样要被保存
+    /// 未保存的改动有几处
     pub fn dirty_count(&self) -> usize {
-        self.values.len()
-            + self.added.len()
-            + self.renamed.len()
-            + self.moved.len()
-            + self.archived.len()
-            + self.purged.len()
-            + self.bbs.len()
-            + self.visibility.len()
-            + self.bundles.len()
-            + self.built.len()
+        self.values.len() + self.visibility.len() + self.bundles.len() + self.built.len()
     }
 
     pub fn is_clean(&self) -> bool {
@@ -216,20 +158,11 @@ impl Draft {
     /// **不让整本草稿失效**：上游删掉一个版本之后，用户在别的九个版本上的改动
     /// 没有任何理由跟着一起没了。返回给界面的提示句
     pub fn prune(&mut self, committed: &Committed) -> Vec<String> {
-        let alive: BTreeSet<&str> = committed
-            .versions
-            .keys()
-            .map(String::as_str)
-            .chain(self.added.iter().map(|v| v.uid.as_str()))
-            .collect();
-        // added 里的 uid 也算活的，所以先复制一份再借
-        let alive: BTreeSet<String> = alive.into_iter().map(str::to_owned).collect();
-
         let mut gone: BTreeSet<String> = BTreeSet::new();
 
         self.values.retain(|k, _| match parse_value_key(k) {
             Some((Level::Version, owner, _)) => {
-                let ok = alive.contains(owner);
+                let ok = committed.has_version(owner);
                 if !ok {
                     gone.insert(owner.to_owned());
                 }
@@ -250,12 +183,8 @@ impl Draft {
         });
 
         // 闭包没法对值类型泛化，所以这里用一个自由函数（见本文件末尾的 `retain_alive`）
-        retain_alive(&mut self.renamed, &alive, &mut gone);
-        retain_alive(&mut self.moved, &alive, &mut gone);
-        retain_alive(&mut self.archived, &alive, &mut gone);
-        retain_alive(&mut self.bbs, &alive, &mut gone);
+        let alive: BTreeSet<String> = committed.versions.keys().cloned().collect();
         retain_alive(&mut self.built, &alive, &mut gone);
-        self.purged.retain(|uid| alive.contains(uid));
 
         gone.into_iter()
             .map(|uid| format!("草稿里有一条改动指向已经不存在的 {uid}，已丢弃"))
@@ -269,9 +198,8 @@ impl Draft {
 /// 掺进文件 IO 之后就只能靠建临时目录来测，而真正容易错的是「反向该写什么」
 #[derive(Debug, Clone, Default)]
 pub struct Committed {
-    /// 机型 id → 机型基底
-    pub machines: BTreeMap<String, Overrides>,
-    /// 版本 uid → 版本
+    /// 版本 uid → **身份**（属于哪台机型、叫什么、什么角标）。
+    /// 只有清单层面的东西，**一个值都没有** —— 值在 registry 的 `machineVariants` 里
     pub versions: BTreeMap<String, CommittedVersion>,
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
@@ -292,6 +220,25 @@ impl Committed {
     pub fn has_machine(&self, id: &str) -> bool {
         self.machine(id).is_some()
     }
+
+    pub fn version(&self, uid: &str) -> Option<&CommittedVersion> {
+        self.versions.get(uid)
+    }
+
+    pub fn has_version(&self, uid: &str) -> bool {
+        self.versions.contains_key(uid)
+    }
+}
+
+/// 清单里的一个版本。uid 的形状是 `"{机型}/{版本 id}"`（doc §3.5）
+#[derive(Debug, Clone, Default)]
+pub struct CommittedVersion {
+    pub machine_id: String,
+    pub version_id: String,
+    /// 显示名（中文）。来源是机型文件里的 `[[versions]].name`
+    pub name: String,
+    /// 版本卡上那个角标（`推荐` / `热门`）。来源同上
+    pub tag: Option<String>,
 }
 
 /// 清单里的一台机型。**只有清单，不含参数值** ——
@@ -311,26 +258,6 @@ pub struct CatalogMachine {
     pub version_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CommittedVersion {
-    pub machine_id: String,
-    pub version_id: String,
-    pub name: String,
-    pub overrides: Overrides,
-    pub archived: bool,
-    /// 版本卡上那个角标（`推荐` / `热门`）。来源是机型文件里的 `tag`
-    pub tag: Option<String>,
-    /// `None` = 继承机型默认的那一份 BBS
-    pub bbs: Option<Vec<String>>,
-    /// **清单里还有这一版吗**（`presets/machines/{机型}.toml` 的 `[[versions]]`）。
-    ///
-    /// 为 true 时[`Patch::PurgeVersion`]会被拒：这一层管的是**值**，
-    /// 删掉我们的覆盖文件只是"这一版没有自有改动了"，它照样出现在树上。
-    /// 那种情况下该做的是**归档**；真要从清单里去掉它，去「机型与版本」页删版本。
-    /// 不拦的话，用户点了删除、版本还在，而且没有任何提示说为什么
-    pub declared: bool,
-}
-
 /// 应用的结果
 #[derive(Debug, Clone)]
 pub struct Applied {
@@ -339,8 +266,6 @@ pub struct Applied {
     /// 能不能进撤销栈。**为 false 时界面不该给出撤销按钮** ——
     /// 给一个按下去没反应的按钮比没有按钮更糟
     pub undoable: bool,
-    /// 给界面的提示句（没改成任何东西的 patch 会在这里说明）
-    pub notices: Vec<String>,
 }
 
 /// 值改动在草稿里的键。`"m:A1:toolhead.offset.x"` / `"v:A1/STANDARD:toolhead.offset.x"`
@@ -390,18 +315,13 @@ pub fn apply(
     registry: &Registry,
     patches: &[Patch],
 ) -> Result<Applied, AppError> {
-    validate(draft, committed, registry, patches)?;
+    validate(committed, registry, patches)?;
 
     let undoable = patches.iter().all(Patch::is_undoable);
     let mut inverse: Vec<Patch> = Vec::new();
-    let mut notices: Vec<String> = Vec::new();
 
-    // 先结构 —— 否则同一批里"新建版本 + 给它写值"的值会掉在地上
-    for p in patches.iter().filter(|p| p.is_structural()) {
-        apply_one(draft, committed, p, &mut inverse, &mut notices);
-    }
-    for p in patches.iter().filter(|p| !p.is_structural()) {
-        apply_one(draft, committed, p, &mut inverse, &mut notices);
+    for p in patches {
+        apply_one(draft, committed, registry, p, &mut inverse);
     }
 
     // 反向要**倒着执行**才能回到原状：正向 A→B→C，反向是 C⁻¹→B⁻¹→A⁻¹
@@ -410,34 +330,17 @@ pub fn apply(
     Ok(Applied {
         inverse: if undoable { inverse } else { Vec::new() },
         undoable,
-        notices,
     })
 }
 
 /// 整批校验。这里只判"能不能做"，不改任何东西
 fn validate(
-    draft: &Draft,
     committed: &Committed,
     registry: &Registry,
     patches: &[Patch],
 ) -> Result<(), AppError> {
-    // 同一批里新建的版本也算存在 —— 否则"新建 + 立刻改名"会被自己拒掉
-    let mut will_exist: BTreeSet<String> = committed
-        .versions
-        .keys()
-        .cloned()
-        .chain(draft.added.iter().map(|v| v.uid.clone()))
-        .collect();
-    let mut seq = draft.seq;
-    for p in patches {
-        if matches!(p, Patch::NewVersion { .. } | Patch::CloneVersion { .. }) {
-            seq += 1;
-            will_exist.insert(new_uid(seq));
-        }
-    }
-
     let known_uid = |uid: &String| -> Result<(), AppError> {
-        if will_exist.contains(uid) {
+        if committed.has_version(uid) {
             Ok(())
         } else {
             Err(AppError::not_found(format!("版本 {uid} 不存在"))
@@ -467,41 +370,6 @@ fn validate(
                     Level::Version => known_uid(owner)?,
                 }
             }
-            Patch::NewVersion { machine_id, name } => {
-                known_machine(machine_id)?;
-                non_blank(name, "版本名")?;
-            }
-            Patch::CloneVersion { from_uid, name } => {
-                known_uid(from_uid)?;
-                non_blank(name, "版本名")?;
-            }
-            Patch::RenameVersion { uid, name } => {
-                known_uid(uid)?;
-                non_blank(name, "版本名")?;
-            }
-            // **移动到不存在的机型当没移**（doc §15）：那会让这个版本从树上整个消失，
-            // 比不动更糟。所以这里不拒绝整批，留给 apply_one 记一条提示
-            Patch::MoveVersion { uid, .. } => known_uid(uid)?,
-            // **删除只对「清单里已经没有的版本」与「草稿里新建的」开放。**
-            // 清单（`presets/machines/*.toml`）与这一层的值是两件事：
-            // 删掉我们的覆盖文件只是"这一版没有自有改动了"，它照样出现在树上。
-            // 那种情况下该做的是归档；真要从清单里去掉它，去「机型与版本」页删版本
-            Patch::PurgeVersion { uid } => {
-                known_uid(uid)?;
-                if committed.versions.get(uid).is_some_and(|v| v.declared) {
-                    return Err(AppError::invalid_argument(format!(
-                        "{uid} 还在机型清单里，删不掉"
-                    ))
-                    .with_detail(
-                        "这一页删的是「我们写的那些值」，删掉它这一版照样在树上。\
-                         不想交付这一版的话用「归档」；要把它从清单里去掉，\
-                         去「机型与版本」页删版本",
-                    ));
-                }
-            }
-            Patch::ArchiveVersion { uid }
-            | Patch::RestoreVersion { uid }
-            | Patch::SetBbs { uid, .. } => known_uid(uid)?,
             Patch::SetVisibility { file_id, .. } => non_blank(file_id, "文件 id")?,
             Patch::SetBundle { bundle_id, .. } => non_blank(bundle_id, "套餐 id")?,
             Patch::MarkBuilt { uids, .. } => {
@@ -522,16 +390,12 @@ fn non_blank(s: &str, what: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn new_uid(seq: u64) -> String {
-    format!("new-{seq}")
-}
-
 fn apply_one(
     draft: &mut Draft,
     committed: &Committed,
+    registry: &Registry,
     patch: &Patch,
     inverse: &mut Vec<Patch>,
-    notices: &mut Vec<String>,
 ) {
     match patch {
         Patch::SetValue {
@@ -540,14 +404,13 @@ fn apply_one(
             key,
             value,
         } => {
-            let before = own_value(draft, committed, *level, owner, key);
+            let before = own_value(draft, registry, *level, owner, key);
             if &before == value {
                 return; // 没变化：不记草稿、不产反向，脏计数也不该涨
             }
             let vk = value_key(*level, owner, key);
-            let saved = committed_own(committed, *level, owner, key);
-            if &saved == value {
-                // 改回了已落盘的那个值 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
+            if &at_rest(registry, *level, owner, key) == value {
+                // 改回了盘上那个值 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
                 // 否则"改了又改回来"会让保存按钮一直亮着
                 draft.values.remove(&vk);
             } else {
@@ -558,131 +421,6 @@ fn apply_one(
                 owner: owner.clone(),
                 key: key.clone(),
                 value: before,
-            });
-        }
-
-        Patch::NewVersion { machine_id, name } => {
-            draft.seq += 1;
-            let uid = new_uid(draft.seq);
-            draft.added.push(DraftVersion {
-                uid: uid.clone(),
-                machine_id: machine_id.clone(),
-                // 进文件名，所以是 ASCII；中文显示名在 name 里
-                version_id: format!("NEW{}", draft.seq),
-                name: name.clone(),
-            });
-            inverse.push(Patch::PurgeVersion { uid });
-        }
-
-        Patch::CloneVersion { from_uid, name } => {
-            draft.seq += 1;
-            let uid = new_uid(draft.seq);
-            let machine_id = machine_of(draft, committed, from_uid).unwrap_or_default();
-            draft.added.push(DraftVersion {
-                uid: uid.clone(),
-                machine_id,
-                version_id: format!("NEW{}", draft.seq),
-                name: name.clone(),
-            });
-            // 复制自有覆盖。**只复制"自有的"**，继承来的不复制 ——
-            // 复制了就等于把新版本和源版本一起从继承里摘出来
-            let src: Vec<(String, Value)> = own_overrides(draft, committed, from_uid);
-            for (k, v) in src {
-                draft
-                    .values
-                    .insert(value_key(Level::Version, &uid, &k), Some(v));
-            }
-            if let Some(list) = own_bbs(draft, committed, from_uid) {
-                draft.bbs.insert(uid.clone(), Some(list));
-            }
-            inverse.push(Patch::PurgeVersion { uid });
-        }
-
-        Patch::RenameVersion { uid, name } => {
-            let before = current_name(draft, committed, uid);
-            if before.as_deref() == Some(name.as_str()) {
-                return;
-            }
-            if let Some(v) = draft.added.iter_mut().find(|v| &v.uid == uid) {
-                v.name = name.clone();
-            } else if committed.versions.get(uid).map(|v| v.name.as_str()) == Some(name.as_str()) {
-                draft.renamed.remove(uid);
-            } else {
-                draft.renamed.insert(uid.clone(), name.clone());
-            }
-            if let Some(old) = before {
-                inverse.push(Patch::RenameVersion {
-                    uid: uid.clone(),
-                    name: old,
-                });
-            }
-        }
-
-        Patch::MoveVersion { uid, to_machine_id } => {
-            if !committed.has_machine(to_machine_id) {
-                // doc §15：当没移。整个版本从树上消失比不动更糟
-                notices.push(format!(
-                    "机型 {to_machine_id} 不存在，{uid} 没有移动"
-                ));
-                return;
-            }
-            let before = machine_of(draft, committed, uid);
-            if before.as_deref() == Some(to_machine_id.as_str()) {
-                return;
-            }
-            if let Some(v) = draft.added.iter_mut().find(|v| &v.uid == uid) {
-                v.machine_id = to_machine_id.clone();
-            } else if committed.versions.get(uid).map(|v| v.machine_id.as_str())
-                == Some(to_machine_id.as_str())
-            {
-                draft.moved.remove(uid);
-            } else {
-                draft.moved.insert(uid.clone(), to_machine_id.clone());
-            }
-            // **uid 不跟着变**（doc §3.5）—— 所以草稿里那些
-            // `v:{uid}:{key}` 一条都不用改名。上一版靠事后搬运，这一版从根上避免
-            if let Some(old) = before {
-                inverse.push(Patch::MoveVersion {
-                    uid: uid.clone(),
-                    to_machine_id: old,
-                });
-            }
-        }
-
-        Patch::ArchiveVersion { uid } => set_archived(draft, committed, uid, true, inverse),
-        Patch::RestoreVersion { uid } => set_archived(draft, committed, uid, false, inverse),
-
-        Patch::PurgeVersion { uid } => {
-            // 草稿里新建的：直接从草稿里拿掉，连它的值一起
-            if let Some(at) = draft.added.iter().position(|v| &v.uid == uid) {
-                draft.added.remove(at);
-                let prefix = format!("v:{uid}:");
-                draft.values.retain(|k, _| !k.starts_with(&prefix));
-                draft.bbs.remove(uid);
-                draft.renamed.remove(uid);
-                draft.moved.remove(uid);
-                draft.archived.remove(uid);
-                return;
-            }
-            if !draft.purged.contains(uid) {
-                draft.purged.push(uid.clone());
-            }
-        }
-
-        Patch::SetBbs { uid, list } => {
-            let before = own_bbs_slot(draft, committed, uid);
-            if &before == list {
-                return;
-            }
-            let saved = committed.versions.get(uid).and_then(|v| v.bbs.clone());
-            if &saved == list {
-                draft.bbs.remove(uid);
-            } else {
-                draft.bbs.insert(uid.clone(), list.clone());
-            }
-            inverse.push(Patch::SetBbs {
-                uid: uid.clone(),
-                list: before,
             });
         }
 
@@ -759,38 +497,22 @@ fn apply_one(
     }
 }
 
-fn set_archived(
-    draft: &mut Draft,
-    committed: &Committed,
-    uid: &str,
-    want: bool,
-    inverse: &mut Vec<Patch>,
-) {
-    let saved = committed.versions.get(uid).map(|v| v.archived).unwrap_or(false);
-    let before = draft.archived.get(uid).copied().unwrap_or(saved);
-    if before == want {
-        return;
+/// 草稿里的 owner → `machineVariants` 的键。
+///
+/// 机型层两边同形（`A1`）；版本层草稿用 uid（`A1/STANDARD`），
+/// registry 用冒号（`A1:STANDARD`）。**换算只在这里做一处** —— 散出去的话，
+/// 迟早有一个地方忘了替换那个斜杠，于是写出来的键 registry 永远认不出来
+pub fn variant_key(level: Level, owner: &str) -> String {
+    match level {
+        Level::Machine => owner.to_owned(),
+        Level::Version => owner.replace('/', ":"),
     }
-    if saved == want {
-        draft.archived.remove(uid);
-    } else {
-        draft.archived.insert(uid.to_owned(), want);
-    }
-    inverse.push(if before {
-        Patch::ArchiveVersion {
-            uid: uid.to_owned(),
-        }
-    } else {
-        Patch::RestoreVersion {
-            uid: uid.to_owned(),
-        }
-    });
 }
 
-/// 这一层**现在**自己写着什么（草稿优先）。`None` = 这一层没有这个键 = 继承
+/// 这一层**现在**这一项是什么值（草稿优先）。`None` = 这一层没钉着它 = 继承
 fn own_value(
     draft: &Draft,
-    committed: &Committed,
+    registry: &Registry,
     level: Level,
     owner: &str,
     key: &str,
@@ -798,75 +520,13 @@ fn own_value(
     if let Some(pending) = draft.values.get(&value_key(level, owner, key)) {
         return pending.clone();
     }
-    committed_own(committed, level, owner, key)
+    at_rest(registry, level, owner, key)
 }
 
-/// 这一层**已落盘**的那一份自有值
-fn committed_own(
-    committed: &Committed,
-    level: Level,
-    owner: &str,
-    key: &str,
-) -> Option<Value> {
-    match level {
-        Level::Machine => committed.machines.get(owner)?.get(key).cloned(),
-        Level::Version => committed.versions.get(owner)?.overrides.get(key).cloned(),
-    }
-}
-
-/// 一个版本现在的全部自有覆盖（草稿叠在落盘之上）
-fn own_overrides(draft: &Draft, committed: &Committed, uid: &str) -> Vec<(String, Value)> {
-    let mut out: Overrides = committed
-        .versions
-        .get(uid)
-        .map(|v| v.overrides.clone())
-        .unwrap_or_default();
-    let prefix = format!("v:{uid}:");
-    for (k, v) in &draft.values {
-        if let Some(key) = k.strip_prefix(&prefix) {
-            match v {
-                Some(val) => {
-                    out.insert(key.to_owned(), val.clone());
-                }
-                None => {
-                    out.remove(key);
-                }
-            }
-        }
-    }
-    out.into_iter().collect()
-}
-
-/// `Some(list)` = 这个版本自己有一份 BBS；`None` = 继承机型默认
-fn own_bbs(draft: &Draft, committed: &Committed, uid: &str) -> Option<Vec<String>> {
-    own_bbs_slot(draft, committed, uid)
-}
-
-fn own_bbs_slot(draft: &Draft, committed: &Committed, uid: &str) -> Option<Vec<String>> {
-    if let Some(pending) = draft.bbs.get(uid) {
-        return pending.clone();
-    }
-    committed.versions.get(uid).and_then(|v| v.bbs.clone())
-}
-
-fn current_name(draft: &Draft, committed: &Committed, uid: &str) -> Option<String> {
-    if let Some(v) = draft.added.iter().find(|v| v.uid == uid) {
-        return Some(v.name.clone());
-    }
-    if let Some(n) = draft.renamed.get(uid) {
-        return Some(n.clone());
-    }
-    committed.versions.get(uid).map(|v| v.name.clone())
-}
-
-fn machine_of(draft: &Draft, committed: &Committed, uid: &str) -> Option<String> {
-    if let Some(v) = draft.added.iter().find(|v| v.uid == uid) {
-        return Some(v.machine_id.clone());
-    }
-    if let Some(m) = draft.moved.get(uid) {
-        return Some(m.clone());
-    }
-    committed.versions.get(uid).map(|v| v.machine_id.clone())
+/// `machineVariants` 里**此刻写着**的那一个值 —— 这是这一层唯一的盘上真相
+fn at_rest(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<Value> {
+    let variant = variant_key(level, owner);
+    registry.param(key)?.machine_variants.get(&variant).cloned()
 }
 
 /// 只留下 uid 还活着的条目，被丢掉的记进 `gone`。
@@ -891,20 +551,28 @@ fn retain_alive<V>(
 mod tests {
     use super::*;
 
-    /// 两个参数的最小字段定义。patch 层只用它判"这个 key 存在吗"
+    /// 两个参数的最小字段定义。
+    ///
+    /// patch 层除了判"这个 key 存在吗"，还要知道"它此刻钉着什么"（[`at_rest`]）——
+    /// 而现在这一层的真相就在 `machineVariants` 里，所以夹具也要带上它：
+    /// `offset.z` 在机型层有值（`A1`），`offset.x` 在版本层有值（`A1:STANDARD`）
     fn registry() -> (tempfile::TempDir, Registry) {
         let d = tempfile::tempdir().unwrap();
-        let p = |key: &str, order: f64| {
+        let p = |key: &str, order: f64, variants: serde_json::Value| {
             serde_json::json!({
                 "key": key, "configKey": "X", "tomlKey": key, "jsonKey": key,
                 "label": key, "desc": "", "tomlComment": "",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 4,
                 "scope": "universal", "section": "toolhead",
-                "layout": { "order": order, "sectionId": "s1" }
+                "layout": { "order": order, "sectionId": "s1" },
+                "machineVariants": variants
             })
         };
         let params = serde_json::json!({
-            "params": [p("toolhead.offset.x", 1.0), p("toolhead.offset.z", 2.0)],
+            "params": [
+                p("toolhead.offset.x", 1.0, serde_json::json!({ "A1:STANDARD": -1 })),
+                p("toolhead.offset.z", 2.0, serde_json::json!({ "A1": 1.1 }))
+            ],
             "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
                        "sections": [{ "id": "s1", "label": "空间偏移", "order": 0 }] }],
             "updated": "2026-01-01 00:00:00"
@@ -924,47 +592,19 @@ mod tests {
         (d, r)
     }
 
-    /// A1 有基底（offset.z = 1.1）与两个版本：
-    /// `A1/STANDARD` 清单里还声明着，`A1/OLD` 是清单里已经没有的孤儿（只有它能被删）
+    /// 只有身份，一个值都没有 —— 值在 [`registry`] 那份 `machineVariants` 里
     fn committed() -> Committed {
-        let mut machines = BTreeMap::new();
-        machines.insert(
-            "A1".to_owned(),
-            [("toolhead.offset.z".to_owned(), serde_json::json!(1.1))]
-                .into_iter()
-                .collect::<Overrides>(),
-        );
-        machines.insert("P1S".to_owned(), Overrides::new());
-
-        let mut versions = BTreeMap::new();
-        versions.insert(
+        let versions = BTreeMap::from([(
             "A1/STANDARD".to_owned(),
             CommittedVersion {
                 machine_id: "A1".to_owned(),
                 version_id: "STANDARD".to_owned(),
                 name: "标准版".to_owned(),
-                overrides: [("toolhead.offset.x".to_owned(), serde_json::json!(-1))]
-                    .into_iter()
-                    .collect(),
-                archived: false,
                 tag: None,
-                bbs: None,
-                declared: true,
             },
-        );
-        versions.insert(
-            "A1/OLD".to_owned(),
-            CommittedVersion {
-                machine_id: "A1".to_owned(),
-                version_id: "OLD".to_owned(),
-                name: "清单里已经没有的老版本".to_owned(),
-                declared: false,
-                ..Default::default()
-            },
-        );
+        )]);
 
         Committed {
-            machines,
             versions,
             catalog: vec![
                 CatalogMachine {
@@ -1121,227 +761,6 @@ mod tests {
         assert_eq!(draft.dirty_count(), 0, "改回去就不该再算一处未保存改动");
     }
 
-    /// **先结构再值**：同一批里新建版本 + 给它写值，值不能掉在地上
-    #[test]
-    fn values_land_on_versions_created_in_the_same_batch() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        // 刻意把 SetValue 放在 NewVersion **前面**，证明顺序由实现保证，不靠调用方
-        let out = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[
-                set(Level::Version, "new-1", "toolhead.offset.x", Some(serde_json::json!(3))),
-                Patch::NewVersion {
-                    machine_id: "A1".to_owned(),
-                    name: "快速版".to_owned(),
-                },
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(draft.added.len(), 1);
-        assert_eq!(draft.added[0].uid, "new-1");
-        assert_eq!(
-            draft.pending(Level::Version, "new-1", "toolhead.offset.x"),
-            Some(&Some(serde_json::json!(3))),
-            "值要落在同一批里刚建出来的版本上"
-        );
-        assert_eq!(out.inverse.len(), 2);
-    }
-
-    /// 克隆**只复制自有覆盖**。继承来的不复制 ——
-    /// 复制了就等于把新版本从继承里摘出来，以后改机型基底它不跟着变
-    #[test]
-    fn cloning_copies_only_the_own_overrides() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::CloneVersion {
-                from_uid: "A1/STANDARD".to_owned(),
-                name: "标准版 副本".to_owned(),
-            }],
-        )
-        .unwrap();
-
-        let uid = draft.added[0].uid.clone();
-        assert_eq!(
-            draft.pending(Level::Version, &uid, "toolhead.offset.x"),
-            Some(&Some(serde_json::json!(-1))),
-            "自有的那一项要复制"
-        );
-        assert!(
-            draft
-                .pending(Level::Version, &uid, "toolhead.offset.z")
-                .is_none(),
-            "继承来的 offset.z 不该被复制成自有"
-        );
-    }
-
-    /// 移动之后 **uid 不变**，所以草稿里那些值一条都不用改名（doc §3.5）
-    #[test]
-    fn moving_keeps_the_uid_so_draft_values_stay_put() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[
-                set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(9))),
-                Patch::MoveVersion {
-                    uid: "A1/STANDARD".to_owned(),
-                    to_machine_id: "P1S".to_owned(),
-                },
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(draft.moved.get("A1/STANDARD"), Some(&"P1S".to_owned()));
-        assert_eq!(
-            draft.pending(Level::Version, "A1/STANDARD", "toolhead.offset.x"),
-            Some(&Some(serde_json::json!(9))),
-            "值还挂在同一个 uid 上"
-        );
-    }
-
-    /// 移到不存在的机型 = 当没移 + 一条提示（doc §15）。
-    /// 拒绝整批也不对 —— 那会让同一批里别的改动一起失败
-    #[test]
-    fn moving_to_a_missing_machine_is_a_no_op_with_a_notice() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        let out = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::MoveVersion {
-                uid: "A1/STANDARD".to_owned(),
-                to_machine_id: "KOBRA".to_owned(),
-            }],
-        )
-        .unwrap();
-
-        assert!(draft.moved.is_empty());
-        assert_eq!(out.notices.len(), 1);
-        assert!(out.notices[0].contains("KOBRA"));
-    }
-
-    /// 归档 / 还原互为反向
-    #[test]
-    fn archive_and_restore_are_inverses() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        let out = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::ArchiveVersion {
-                uid: "A1/STANDARD".to_owned(),
-            }],
-        )
-        .unwrap();
-        assert_eq!(draft.archived.get("A1/STANDARD"), Some(&true));
-        assert_eq!(
-            out.inverse,
-            vec![Patch::RestoreVersion {
-                uid: "A1/STANDARD".to_owned()
-            }]
-        );
-
-        apply(&mut draft, &c, &reg, &out.inverse).unwrap();
-        assert_eq!(draft.dirty_count(), 0, "还原之后回到干净");
-    }
-
-    /// **删除不可撤销**，而且不可撤销时不给出半截反向。
-    /// 只有上游已经删掉的那一版能被删（见 `committed()` 的 `A1/OLD`）
-    #[test]
-    fn purge_is_not_undoable_and_returns_no_inverse() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        let out = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::PurgeVersion {
-                uid: "A1/OLD".to_owned(),
-            }],
-        )
-        .unwrap();
-        assert!(!out.undoable);
-        assert!(out.inverse.is_empty(), "不该给一个按下去没反应的撤销");
-        assert_eq!(draft.purged, vec!["A1/OLD"]);
-    }
-
-    /// 上游还声明着的版本**删不掉**：版本清单是上游的，
-    /// 删掉我们的文件它照样在树上 —— 那种情况下该做的是归档
-    #[test]
-    fn purging_an_upstream_declared_version_is_refused() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-        let e = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::PurgeVersion {
-                uid: "A1/STANDARD".to_owned(),
-            }],
-        )
-        .unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.detail.unwrap_or_default().contains("归档"));
-        assert!(draft.is_clean(), "拒绝了就不许留下痕迹");
-    }
-
-    /// 删掉草稿里新建的版本，连它的值一起走干净 —— 留下孤儿值会让脏计数永远降不下来
-    #[test]
-    fn purging_a_draft_version_takes_its_values_with_it() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::NewVersion {
-                machine_id: "A1".to_owned(),
-                name: "新版".to_owned(),
-            }],
-        )
-        .unwrap();
-        let uid = draft.added[0].uid.clone();
-        apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[set(Level::Version, &uid, "toolhead.offset.x", Some(serde_json::json!(3)))],
-        )
-        .unwrap();
-        assert_eq!(draft.dirty_count(), 2);
-
-        apply(&mut draft, &c, &reg, &[Patch::PurgeVersion { uid }]).unwrap();
-        assert_eq!(draft.dirty_count(), 0, "版本和它的值都该走干净");
-        assert!(draft.purged.is_empty(), "它从没落盘，不用记进待删清单");
-    }
-
     /// 生成记录不产反向 —— 撤销一条「生成过」没有意义
     #[test]
     fn mark_built_is_recorded_but_not_undoable() {
@@ -1376,10 +795,6 @@ mod tests {
             set(Level::Version, "A1/STANDARD", "toolhead.made_up", Some(serde_json::json!(1))),
             set(Level::Version, "A1/NOPE", "toolhead.offset.x", Some(serde_json::json!(1))),
             set(Level::Machine, "KOBRA", "toolhead.offset.x", Some(serde_json::json!(1))),
-            Patch::RenameVersion {
-                uid: "A1/STANDARD".to_owned(),
-                name: "  ".to_owned(),
-            },
         ] {
             let mut draft = Draft::default();
             let good = set(
@@ -1401,33 +816,9 @@ mod tests {
         }
     }
 
-    /// 同一批里"新建 + 立刻改名"不该被自己的校验拒掉
-    #[test]
-    fn a_version_created_in_this_batch_can_be_referenced_by_later_patches() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[
-                Patch::NewVersion {
-                    machine_id: "A1".to_owned(),
-                    name: "新版".to_owned(),
-                },
-                Patch::RenameVersion {
-                    uid: "new-1".to_owned(),
-                    name: "改过名的新版".to_owned(),
-                },
-            ],
-        )
-        .unwrap();
-        assert_eq!(draft.added[0].name, "改过名的新版");
-    }
-
-    /// **apply 反向能回到原状**：值、结构、脏计数三项都回
+    /// **apply 反向能回到原状**：机型层与版本层的值、脏计数都回。
+    ///
+    /// 以前这一条还要回结构与身份（改名 / 归档），那些 layer 之外的东西现在不在这一层了
     #[test]
     fn applying_the_inverse_returns_to_the_original_state() {
         let (_d, reg) = registry();
@@ -1438,13 +829,6 @@ mod tests {
             set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(5))),
             set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(7))),
             set(Level::Version, "A1/STANDARD", "toolhead.offset.z", None),
-            Patch::RenameVersion {
-                uid: "A1/STANDARD".to_owned(),
-                name: "改了名".to_owned(),
-            },
-            Patch::ArchiveVersion {
-                uid: "A1/STANDARD".to_owned(),
-            },
         ];
         let out = apply(&mut draft, &c, &reg, &forward).unwrap();
         assert!(out.undoable);
@@ -1453,8 +837,6 @@ mod tests {
         apply(&mut draft, &c, &reg, &out.inverse).unwrap();
         assert_eq!(draft.dirty_count(), 0, "脏计数要回到 0");
         assert!(draft.values.is_empty(), "值要回到没改过：{:?}", draft.values);
-        assert!(draft.renamed.is_empty());
-        assert!(draft.archived.is_empty());
     }
 
     /// 反向要**倒着**执行才对：同一个键连改两次，反向顺序错了就回不去
@@ -1506,11 +888,8 @@ mod tests {
             "v:A1/GONE:toolhead.offset.x".to_owned(),
             Some(serde_json::json!(1)),
         );
-        draft
-            .renamed
-            .insert("A1/GONE".to_owned(), "改过名".to_owned());
         draft.values.insert("乱码键".to_owned(), None);
-        assert_eq!(draft.dirty_count(), 4);
+        assert_eq!(draft.dirty_count(), 3);
 
         let notices = draft.prune(&c);
         assert_eq!(draft.dirty_count(), 1, "只该剩 A1 基底那一处");
@@ -1524,7 +903,6 @@ mod tests {
         for (level, owner, key) in [
             (Level::Machine, "A1", "toolhead.offset.x"),
             (Level::Version, "A1/FASTV3.3", "wiping.glue_z_lift_height"),
-            (Level::Version, "new-7", "toolhead.custom_mount_gcode"),
         ] {
             let s = value_key(level, owner, key);
             assert_eq!(parse_value_key(&s), Some((level, owner, key)), "来回转不回去：{s}");
@@ -1532,5 +910,16 @@ mod tests {
         assert!(parse_value_key("x:A1:k").is_none());
         assert!(parse_value_key("m:A1").is_none());
         assert!(parse_value_key("m::k").is_none());
+    }
+
+    /// 草稿里的 owner → `machineVariants` 的键：版本层那道斜杠要换成冒号。
+    ///
+    /// 这两处的形状只差一个字符，写错了不会报错 —— `machineVariants` 里会多出一个
+    /// 永远查不到的键，而跨文件校验下一次加载才拦得住
+    #[test]
+    fn variant_key_turns_the_uid_into_a_machine_variant_key() {
+        assert_eq!(variant_key(Level::Machine, "A1"), "A1");
+        assert_eq!(variant_key(Level::Version, "A1/STANDARD"), "A1:STANDARD");
+        assert_eq!(variant_key(Level::Version, "A1/FASTV3.3"), "A1:FASTV3.3");
     }
 }

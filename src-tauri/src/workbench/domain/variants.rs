@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::workbench::presets::registry::ParamDef;
 use crate::workbench::presets::ParamRegistry as Registry;
 
 use super::layer::Overrides;
@@ -71,6 +72,25 @@ impl Digested {
     pub fn override_count(&self) -> usize {
         self.versions.values().map(BTreeMap::len).sum()
     }
+}
+
+/// 这一项现在是不是**被上提到了基底** = 这台机型的每个版本都写了同一个值。
+///
+/// 判定与 [`digest`] 里那一步共用同一份实现，**不许各写一遍**：
+/// 写回那边（[`crate::workbench::app::storage::plan_value_edits`]）要知道
+/// 一次机型层的改动该落到几个键上 —— 只写裸键会被这一组版本键盖住，
+/// 于是用户点了保存、值又变回去，而没有任何一步报错。
+pub fn promoted_to_base(param: &ParamDef, machine_id: &str, version_ids: &[String]) -> bool {
+    let table = &param.machine_variants;
+    if table.is_empty() || version_ids.is_empty() {
+        return false;
+    }
+    let per_version: Vec<Option<&Value>> = version_ids
+        .iter()
+        .map(|id| table.get(&format!("{machine_id}:{id}")))
+        .collect();
+    let first = per_version.first().copied().flatten();
+    per_version.iter().all(|v| v.is_some()) && per_version.iter().all(|v| *v == first)
 }
 
 /// 把一台机型的 `machineVariants` 消化成机型基底 + 版本覆盖。
@@ -103,18 +123,14 @@ pub fn digest(registry: &Registry, machine_id: &str, version_ids: &[String]) -> 
             out.base.insert(key.to_owned(), v.clone());
         }
 
-        // 第 2 步：版本键。`机型:版本` 就是上游 catalog 里那个 `machineKey`
+        // 第 2 步：版本键。`机型:版本` 就是 catalog 里那个 `machineKey`
         let per_version: Vec<Option<&Value>> = version_ids
             .iter()
             .map(|id| table.get(&format!("{machine_id}:{id}")))
             .collect();
 
         let first = per_version.first().copied().flatten();
-        let unanimous = !version_ids.is_empty()
-            && per_version.iter().all(|v| v.is_some())
-            && per_version.iter().all(|v| *v == first);
-
-        if unanimous {
+        if promoted_to_base(param, machine_id, version_ids) {
             // 上提。**刻意允许它盖掉第 1 步写下的纯机型值**：
             // 每个版本都有更具体的键，那个纯机型值本来就到不了任何版本，
             // 留着它反而会让基底显示一个没人在用的数
@@ -317,8 +333,7 @@ mod tests {
             for v in &m.versions {
                 let over = &d.versions[&v.id];
                 // 归并结果进的是「数据给的那一半」（doc §3.6）—— 它不落盘
-                let empty = Overrides::new();
-                let layers = Layers::new(&p.registry, &m.id, &d.base, &empty, over, &empty);
+                let layers = Layers::new(&p.registry, &m.id, &d.base, over);
                 for key in p.registry.visible_keys(&m.id) {
                     let param = p.registry.param(key).unwrap();
                     // 归并前这个 (机型, 版本, key) 本来该是什么值
@@ -399,7 +414,7 @@ mod tests {
 
         // 顺带验一件与 A2L 有关的事：参数**不缺**，全部落到出厂默认
         let empty = Overrides::new();
-        let layers = Layers::without_upstream(&p.registry, "A2L", &empty, &empty);
+        let layers = Layers::new(&p.registry, "A2L", &empty, &empty);
         let keys = p.registry.visible_keys("A2L");
         assert!(!keys.is_empty(), "A2L 一个参数都看不到就说明过滤过头了");
         for key in keys {

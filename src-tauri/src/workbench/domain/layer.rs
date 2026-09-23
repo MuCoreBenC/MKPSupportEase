@@ -2,33 +2,36 @@
 //!
 //! ```text
 //! 出厂默认（param_registry.defaultValue，全局单值）
-//!   ← 机型基底（上游机型差异 + workbench/machines/{机型}.json）
-//!     ← 版本覆盖（上游版本差异 + workbench/machines/{机型}/versions/{版本}.json）
+//!   ← 机型基底（machineVariants 的裸键，比如 `A1`）
+//!     ← 版本覆盖（machineVariants 的版本键，比如 `A1:FAST`）
 //! ```
 //!
-//! # 每一层有两半：上游给的，和我们写的（doc §3.6）
+//! # 一张表，不是一个加一个（b04 Task 12）
 //!
-//! `machineVariants` 的归并结果（[`super::variants`]）**不落盘**，它是派生的。
-//! 所以机型层与版本层各有两张表：
+//! 机型层与版本层的**唯一真源**是 `presets/registry/param_registry.toml` 里每个字段的
+//! `machineVariants`：裸键（`"A1"`）归机型层，带冒号（`"A1:FAST"`）归版本层。
+//! **工作台改出来的值回写进同一张表**，所以"看"和"改"是同一份东西。
 //!
-//! | | 上游给的那一半 | 我们写的那一半 |
-//! |---|---|---|
-//! | 机型层 | `digest.base`，派生 | `machines/{机型}.json` |
-//! | 版本层 | `digest.versions[版本]`，派生 | `versions/{版本}.json` |
+//! 在此之前还有第二处：我们自造的 `workbench/machines|versions/*.json`。
+//! 于是**每层各有两半**（上面这表里的 + 我们 json 里的），查找就得排五档：
 //!
-//! 界面上**仍然只有三档来源**（出厂 / 机型 / 版本）——同一层的两半算同一档。
-//! 由此定下三件事：
+//! ```text
+//!   我们的版本 → 表里的版本 → 我们的机型 → 表里的机型 → 出厂
+//! ```
 //!
-//! 1. [`Layers::has_own`] 与「挂回继承」**只看我们写的那两张表**。挂回继承 = 删掉我们的
-//!    那个键，露出上游的机型差异 —— 把 A1 的 X 轴偏移挂回继承应该回到 `-1`，
-//!    不该回到全局默认 `0`。
-//! 2. 我们的文件**只会多一个键，不会删一个键**，所以不需要删除标记。
-//! 3. 代价：**没法把某一项压回出厂默认**。想让 A1 的 `offset.x` 变成 `0`，只能显式写 `0`。
-//!    这个需求很少，而为它引入删除标记会让每一层都多一种状态。
+//! 那份 json 在[b04 Task 12]删掉（盘上本来一个文件都没有，见 REPORT §1.2），
+//! 五档于是退回三档。这一轮所有注释里的"那一半"都失去了对象。
 //!
-//! 换来的是：上游改了 `machineVariants`，**我们没动过的项自动跟着变**。
+//! ## 由此翻掉的两条旧约定
 //!
-//! # 稀疏：只记"这一层自己写过的"
+//! 1. **「挂回继承」现在一次退到出厂默认。** 以前它退的是"上游那一半"
+//!    （把 A1 的 X 轴偏移挂回继承会回到 `-1`），现在会回到全局默认 `0`。
+//!    `-1` 与 `0` 都是 registry 里的真值，区别只在于它记在哪一层；
+//!    这一层不再替任何人留一手。
+//! 2. **「没法把某一项压回出厂默认」这条代价没有了。** 它是上一层的第二那半
+//!    逼出来的：那一半写不了"删除"，只能写值。现在 `clear_variant` 直接删键。
+//!
+//! # 不适用 vs 看得见改不动
 //!
 //! 每层都是稀疏表，**键在不在就是脱钩的载体**。所以：
 //!
@@ -36,7 +39,7 @@
 //! - 删键 = 挂回继承（doc §4.1 那条 `value: None`）。
 //!
 //! 反过来说，**"这一层没有这个键"和"这一层把它设成了空值"是两件事**，不能混：
-//! 上游有两个字段（`toolhead.custom_mount_gcode` / `custom_unmount_gcode`）的出厂默认
+//! 有两个字段（`toolhead.custom_mount_gcode` / `custom_unmount_gcode`）的出厂默认
 //! 就是**空串**。把"空串"当成"没设过"，这两个字段会永远显示成继承，
 //! 用户改成空串（= 我不要这段 G-code）的动作就保存不下来。
 //!
@@ -50,9 +53,10 @@
 //!
 //! # 已经失效的键要说出来
 //!
-//! 上游删掉一个参数、或者把某台机型从 `machineFilter` 里摘掉之后，我们仓库里那个值
-//! **还在文件里，但再也不会进任何产物**。这是典型的静默失效：界面上什么都看不到，
-//! 而"我明明改过"这件事会一直是错的。[`Layers::orphan_keys`] 把它们列出来。
+//! 某个参数被标了 `deprecated`、或者这台机型被从某个参数的 `machineFilter` 里摘掉之后，
+//! `machineVariants` 里那个值**还在表里，但再也不会进任何产物**。这是典型的静默失效：
+//! 界面上什么都看不到，而"我明明改过"这件事会一直是错的。
+//! [`Layers::orphan_keys`] 把它们列出来。
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -66,13 +70,13 @@ use crate::workbench::presets::ParamRegistry as Registry;
 /// 指纹要按稳定顺序算，`HashMap` 每次进程的遍历顺序都不同
 pub type Overrides = BTreeMap<String, Value>;
 
-/// 空表的共享借用。给「这一层没有上游差异」用，免得每个调用点自己造一个再借
+/// 空表的共享借用。给「机型列没有版本层」用，免得每个调用点自己造一个再借
 pub fn no_overrides() -> &'static Overrides {
     static EMPTY: OnceLock<Overrides> = OnceLock::new();
     EMPTY.get_or_init(Overrides::new)
 }
 
-/// 可写的两层。出厂层不在这里：它是上游的，工作台改不了
+/// 可写的两层。出厂层不在这里：它是全局单值，不是某一台机器的东西
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Level {
@@ -97,18 +101,14 @@ pub struct ValueOrigin<'a> {
 
 /// 一个 `(机型, 版本)` 的三层视图。
 ///
-/// 借用而不持有：五张表分别属于上游、归并结果、机型文件、版本文件，
+/// 借用而不持有：两张负载分别属于 registry 的归并结果与其上的草稿合成结果，
 /// 复制一份进来就等于又造了一个"当前状态"的副本（doc §1 第四条铁律不许）
 pub struct Layers<'a> {
     registry: &'a Registry,
     machine_id: &'a str,
-    /// 机型层「上游给的那一半」：`variants::digest` 的 `base`
-    upstream_base: &'a Overrides,
-    /// 机型层「我们写的那一半」
+    /// 机型层：`machineVariants` 的裸键（`A1`）
     base: &'a Overrides,
-    /// 版本层「上游给的那一半」：`variants::digest` 的 `versions[版本]`
-    upstream_over: &'a Overrides,
-    /// 版本层「我们写的那一半」
+    /// 版本层：`machineVariants` 的版本键（`A1:FAST`）。只看机型那一列时是空表
     over: &'a Overrides,
 }
 
@@ -116,36 +116,15 @@ impl<'a> Layers<'a> {
     pub fn new(
         registry: &'a Registry,
         machine_id: &'a str,
-        upstream_base: &'a Overrides,
         base: &'a Overrides,
-        upstream_over: &'a Overrides,
         over: &'a Overrides,
     ) -> Self {
         Self {
             registry,
             machine_id,
-            upstream_base,
             base,
-            upstream_over,
             over,
         }
-    }
-
-    /// 上游没给这台机型任何差异时的简写（A2L 就是这种），也给单测用
-    pub fn without_upstream(
-        registry: &'a Registry,
-        machine_id: &'a str,
-        base: &'a Overrides,
-        over: &'a Overrides,
-    ) -> Self {
-        Self::new(
-            registry,
-            machine_id,
-            no_overrides(),
-            base,
-            no_overrides(),
-            over,
-        )
     }
 
     /// 这台机型看得见的字段，按 `layout.order` 升序。
@@ -176,17 +155,12 @@ impl<'a> Layers<'a> {
     ///
     /// **`None` 与"值是空串"严格分开**：前者是"这一项不存在"，后者是一个真实的值。
     ///
-    /// 查找顺序是五级，但报出来的来源只有三档（doc §3.6）
+    /// 查找顺序就是三档：版本 → 机型 → 出厂（doc §3.1）
     pub fn effective(&self, key: &str) -> Option<ValueOrigin<'a>> {
         if !self.applies(key) {
             return None;
         }
-        for (table, origin) in [
-            (self.over, Origin::Version),
-            (self.upstream_over, Origin::Version),
-            (self.base, Origin::Machine),
-            (self.upstream_base, Origin::Machine),
-        ] {
+        for (table, origin) in [(self.over, Origin::Version), (self.base, Origin::Machine)] {
             if let Some(v) = table.get(key) {
                 return Some(ValueOrigin { value: v, origin });
             }
@@ -197,13 +171,14 @@ impl<'a> Layers<'a> {
         })
     }
 
-    /// 这一层**我们自己写过**这个键吗 = 有没有脱钩。
+    /// 这一层有没有**自己钉着**这个键 = 「挂回继承」点得下去吗。
     ///
-    /// **只看我们写的那一张表**，不看上游的归并结果（doc §3.6 第一条）：
-    /// 「挂回继承」删掉的就是这一项，删完露出的是上游那一半。
+    /// 「自己钉着」就是 `machineVariants` 里真的有一条形如 `A1`（机型层）
+    /// 或 `A1:FAST`（版本层）的键。**注意连带：删掉它之后这个值是退到上一层** ——
+    /// 版本层删完有可能还落在机型层上，不是一步退到出厂默认。
     ///
-    /// 它和 `effective(...).origin` 不是一回事：版本覆盖存在时
-    /// `has_own(Machine, key)` 仍然可能为真（基底写过，只是被盖住了）
+    /// 它和 `effective(...).origin` 不是一回事：版本层钉着某个键时
+    /// `has_own(Machine, key)` 仍然可能为真（机型层写着，只是被盖住了）
     pub fn has_own(&self, level: Level, key: &str) -> bool {
         match level {
             Level::Machine => self.base.contains_key(key),
@@ -211,7 +186,9 @@ impl<'a> Layers<'a> {
         }
     }
 
-    /// 我们在这一层写了几项。界面上「N 项自有」那个徽章
+    /// 这一层钉着几项。以前这一列的台词是「N 项（自有 M 项）」——
+    /// 那时候每层有两半，得分开数。**现在每层只有一张表，钉着几项就是几项**，
+    /// 所以这一个数同时是界面上的「项数」和「自有项数」
     pub fn own_count(&self, level: Level) -> usize {
         let table = match level {
             Level::Machine => self.base,
@@ -228,13 +205,13 @@ impl<'a> Layers<'a> {
             .collect()
     }
 
-    /// **我们**写着、但再也不会进任何产物的键。
+    /// 写着、但再也不会进任何产物的键。
     ///
-    /// 三种来法：上游删了这个参数 / 上游把它标了 `deprecated` /
-    /// 上游把这台机型从 `machineFilter` 里摘掉了。
-    /// 三种的表现都一样 —— 文件里有值，产物里没有，界面上没人提。
+    /// 两种来法：这个参数被标了 `deprecated` /
+    /// 这台机型被从这个参数的 `machineFilter` 里摘掉了。
+    /// 两种的表现都一样 —— 表里有值，产物里没有，界面上没人提。
     ///
-    /// 只查我们写的那两张表：上游归并结果里的键是派生的，上游一改它自己就没了
+    /// 两种表的键都查：它们就是同一张 `machineVariants` 拆出来的
     pub fn orphan_keys(&self) -> Vec<&str> {
         let mut out: Vec<&str> = self
             .base
@@ -325,18 +302,18 @@ mod tests {
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
         let over = overrides(&[("toolhead.offset.x", serde_json::json!(2))]);
 
-        let l =         Layers::without_upstream(&reg, "A1", &base, &over);
+        let l =         Layers::new(&reg, "A1", &base, &over);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(2));
         assert_eq!(r.origin, Origin::Version);
 
         let empty = Overrides::new();
-        let l =         Layers::without_upstream(&reg, "A1", &base, &empty);
+        let l =         Layers::new(&reg, "A1", &base, &empty);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(1));
         assert_eq!(r.origin, Origin::Machine);
 
-        let l =         Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l =         Layers::new(&reg, "A1", &empty, &empty);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(0));
         assert_eq!(r.origin, Origin::Factory);
@@ -350,14 +327,14 @@ mod tests {
         let empty = Overrides::new();
 
         // 出厂默认本来就是空串 → 有值，来源出厂
-        let l =         Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l =         Layers::new(&reg, "A1", &empty, &empty);
         let r = l.effective("toolhead.custom_mount_gcode").unwrap();
         assert_eq!(*r.value, serde_json::json!(""));
         assert_eq!(r.origin, Origin::Factory);
 
         // 版本上显式写了空串 → 有值，来源版本，且 has_own 为真
         let over = overrides(&[("toolhead.custom_mount_gcode", serde_json::json!(""))]);
-        let l =         Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l =         Layers::new(&reg, "A1", &empty, &over);
         let r = l.effective("toolhead.custom_mount_gcode").unwrap();
         assert_eq!(r.origin, Origin::Version, "写了空串也是写过");
         assert!(l.has_own(Level::Version, "toolhead.custom_mount_gcode"));
@@ -369,7 +346,7 @@ mod tests {
         let (_d, reg) = registry();
         let empty = Overrides::new();
 
-        let a1 =         Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let a1 =         Layers::new(&reg, "A1", &empty, &empty);
         assert!(a1.effective("toolhead.only_p1s").is_none(), "不该退回出厂默认");
         assert!(!a1.applies("toolhead.only_p1s"));
         assert_eq!(a1.not_applicable(), vec!["toolhead.only_p1s"]);
@@ -377,7 +354,7 @@ mod tests {
             .effective_recipe()
             .contains_key("toolhead.only_p1s"));
 
-        let p1s =         Layers::without_upstream(&reg, "P1S", &empty, &empty);
+        let p1s =         Layers::new(&reg, "P1S", &empty, &empty);
         assert_eq!(*p1s.effective("toolhead.only_p1s").unwrap().value, serde_json::json!(9));
         assert!(p1s.not_applicable().is_empty());
     }
@@ -387,7 +364,7 @@ mod tests {
     fn unknown_key_is_none() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l =         Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l =         Layers::new(&reg, "A1", &empty, &empty);
         assert!(l.effective("toolhead.made_up").is_none());
         assert!(!l.applies("toolhead.made_up"));
     }
@@ -399,7 +376,7 @@ mod tests {
         let (_d, reg) = registry();
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
         let over = overrides(&[("toolhead.offset.x", serde_json::json!(2))]);
-        let l =         Layers::without_upstream(&reg, "A1", &base, &over);
+        let l =         Layers::new(&reg, "A1", &base, &over);
 
         assert_eq!(l.effective("toolhead.offset.x").unwrap().origin, Origin::Version);
         assert!(l.has_own(Level::Machine, "toolhead.offset.x"), "基底那一项还在");
@@ -417,7 +394,7 @@ mod tests {
             ("toolhead.deleted_upstream", serde_json::json!(7)), // 上游已删
         ]);
         let over = overrides(&[("toolhead.only_p1s", serde_json::json!(6))]);
-        let l =         Layers::without_upstream(&reg, "A1", &base, &over);
+        let l =         Layers::new(&reg, "A1", &base, &over);
 
         assert_eq!(
             l.orphan_keys(),
@@ -425,7 +402,7 @@ mod tests {
             "两层各出现一次的 only_p1s 只该报一次"
         );
         // 同一份数据在 P1S 上只剩真正被删的那个
-        let l =         Layers::without_upstream(&reg, "P1S", &base, &over);
+        let l =         Layers::new(&reg, "P1S", &base, &over);
         assert_eq!(l.orphan_keys(), vec!["toolhead.deleted_upstream"]);
     }
 
@@ -434,7 +411,7 @@ mod tests {
     fn effective_recipe_is_stable_and_filtered() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l =         Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l =         Layers::new(&reg, "A1", &empty, &empty);
         let keys: Vec<&str> = l.effective_recipe().into_keys().collect();
         assert_eq!(
             keys,
@@ -447,66 +424,62 @@ mod tests {
         );
     }
 
-    /// **上游给的那一半算同一档来源，但不算「自有」**（doc §3.6）。
+    /// 三级查找的完整顺序：版本 → 机型 → 出厂。
     ///
-    /// 这是整个 §3.6 的落点：挂回继承要露出上游那一半，而不是掉到出厂默认
+    /// b04 Task 12 之前这里是五档（每层各有"上游给的"与"我们写的"两半）。
+    /// 现在每层只有一张表，中间那两档连同它们的来源一起没有了
     #[test]
-    fn the_upstream_half_counts_as_the_same_origin_but_not_as_own() {
-        let (_d, reg) = registry();
-        let empty = Overrides::new();
-        // 上游给 A1 的机型差异：offset.x = -1
-        let up_base = overrides(&[("toolhead.offset.x", serde_json::json!(-1))]);
-
-        let l = Layers::new(&reg, "A1", &up_base, &empty, &empty, &empty);
-        let r = l.effective("toolhead.offset.x").unwrap();
-        assert_eq!(*r.value, serde_json::json!(-1));
-        assert_eq!(r.origin, Origin::Machine, "上游机型差异也是「机型」这一档");
-        assert!(
-            !l.has_own(Level::Machine, "toolhead.offset.x"),
-            "它不是我们写的，所以不算自有，「挂回继承」该禁用"
-        );
-        assert_eq!(l.own_count(Level::Machine), 0);
-
-        // 我们在机型基底上盖一个值 → 自有为真，挂回继承可点
-        let ours = overrides(&[("toolhead.offset.x", serde_json::json!(5))]);
-        let l = Layers::new(&reg, "A1", &up_base, &ours, &empty, &empty);
-        assert_eq!(*l.effective("toolhead.offset.x").unwrap().value, serde_json::json!(5));
-        assert!(l.has_own(Level::Machine, "toolhead.offset.x"));
-        assert_eq!(l.own_count(Level::Machine), 1);
-
-        // 挂回继承（删掉我们那一项）→ 回到上游的 -1，**不是**出厂的 0
-        let l = Layers::new(&reg, "A1", &up_base, &empty, &empty, &empty);
-        assert_eq!(
-            *l.effective("toolhead.offset.x").unwrap().value,
-            serde_json::json!(-1),
-            "挂回继承该露出上游那一半，不该掉到出厂默认"
-        );
-    }
-
-    /// 五级查找的完整顺序：我们的版本 → 上游版本 → 我们的机型 → 上游机型 → 出厂
-    #[test]
-    fn lookup_order_is_ours_then_upstream_within_each_layer() {
+    fn lookup_order_is_version_then_machine_then_factory() {
         let (_d, reg) = registry();
         let k = "toolhead.offset.x";
-        let up_base = overrides(&[(k, serde_json::json!(1))]);
-        let ours_base = overrides(&[(k, serde_json::json!(2))]);
-        let up_over = overrides(&[(k, serde_json::json!(3))]);
-        let ours_over = overrides(&[(k, serde_json::json!(4))]);
+        let base = overrides(&[(k, serde_json::json!(1))]);
+        let over = overrides(&[(k, serde_json::json!(2))]);
         let empty = Overrides::new();
 
-        let cases: [(&Overrides, &Overrides, &Overrides, &Overrides, i64, Origin); 5] = [
-            (&up_base, &ours_base, &up_over, &ours_over, 4, Origin::Version),
-            (&up_base, &ours_base, &up_over, &empty, 3, Origin::Version),
-            (&up_base, &ours_base, &empty, &empty, 2, Origin::Machine),
-            (&up_base, &empty, &empty, &empty, 1, Origin::Machine),
-            (&empty, &empty, &empty, &empty, 0, Origin::Factory),
+        let cases: [(&Overrides, &Overrides, i64, Origin); 3] = [
+            (&base, &over, 2, Origin::Version),
+            (&base, &empty, 1, Origin::Machine),
+            (&empty, &empty, 0, Origin::Factory),
         ];
-        for (ub, b, uo, o, want, origin) in cases {
-            let l = Layers::new(&reg, "A1", ub, b, uo, o);
+        for (b, o, want, origin) in cases {
+            let l = Layers::new(&reg, "A1", b, o);
             let r = l.effective(k).unwrap();
             assert_eq!(*r.value, serde_json::json!(want));
             assert_eq!(r.origin, origin);
         }
+    }
+
+    /// **挂回继承是逐层退的**：删掉版本层那一项，下面是机型层（不是出厂默认）；
+    /// 机型层也没有了才轮到出厂默认。
+    ///
+    /// 这一条钉的是 b04 Task 12 翻掉的那条旧约定：以前每层有两半，
+    /// 删掉"我们写的"会露出"上游给的"。现在删到空就是出厂默认
+    #[test]
+    fn detaching_falls_back_one_level_at_a_time() {
+        let (_d, reg) = registry();
+        let k = "toolhead.offset.x";
+        let empty = Overrides::new();
+        let base = overrides(&[(k, serde_json::json!(-1))]);
+        let over = overrides(&[(k, serde_json::json!(5))]);
+
+        // 两层都钉着 → 版本赢
+        let l = Layers::new(&reg, "A1", &base, &over);
+        assert_eq!(*l.effective(k).unwrap().value, serde_json::json!(5));
+        assert!(l.has_own(Level::Version, k));
+
+        // 删掉版本层那一项 → 露出机型层的 -1，**不是**出厂的 0
+        let l = Layers::new(&reg, "A1", &base, &empty);
+        assert_eq!(
+            *l.effective(k).unwrap().value,
+            serde_json::json!(-1),
+            "这一步是这整条判据存在的理由"
+        );
+        assert_eq!(l.effective(k).unwrap().origin, Origin::Machine);
+
+        // 机型层那一项也没了 → 才是出厂默认
+        let l = Layers::new(&reg, "A1", &empty, &empty);
+        assert_eq!(l.effective(k).unwrap().origin, Origin::Factory);
+        assert!(!l.has_own(Level::Machine, k), "没钉着就不该给出「挂回继承」");
     }
 
     /// `own_count` 不数已经失效的键 —— 界面上「N 项自有」不该把改不到产物的项算进去
@@ -518,9 +491,9 @@ mod tests {
             ("toolhead.offset.x", serde_json::json!(1)),
             ("toolhead.only_p1s", serde_json::json!(5)),
         ]);
-        let l = Layers::without_upstream(&reg, "A1", &base, &empty);
+        let l = Layers::new(&reg, "A1", &base, &empty);
         assert_eq!(l.own_count(Level::Machine), 1, "only_p1s 在 A1 上不适用");
-        let l = Layers::without_upstream(&reg, "P1S", &base, &empty);
+        let l = Layers::new(&reg, "P1S", &base, &empty);
         assert_eq!(l.own_count(Level::Machine), 2);
     }
 
@@ -529,21 +502,21 @@ mod tests {
     fn fingerprint_reacts_to_values_and_to_the_field_definitions() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let a =         Layers::without_upstream(&reg, "A1", &empty, &empty).fingerprint();
+        let a =         Layers::new(&reg, "A1", &empty, &empty).fingerprint();
 
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
-        let b =         Layers::without_upstream(&reg, "A1", &base, &empty).fingerprint();
+        let b =         Layers::new(&reg, "A1", &base, &empty).fingerprint();
         assert_ne!(a, b, "值变了指纹要变");
 
         // 同样的值换台机型也要变 —— 不同机型的产物是不同文件
-        let c =         Layers::without_upstream(&reg, "P1S", &base, &empty).fingerprint();
+        let c =         Layers::new(&reg, "P1S", &base, &empty).fingerprint();
         assert_ne!(b, c);
 
         // 只改字段定义（给 offset.x 换个 tomlKey），值一个没动
         let (_d2, reg2) = registry_with_toml_key("off_x_v2");
         let only_x = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
-        let changed_defs =         Layers::without_upstream(&reg2, "A1", &only_x, &empty).fingerprint();
-        let same_values =         Layers::without_upstream(&reg, "A1", &only_x, &empty).fingerprint();
+        let changed_defs =         Layers::new(&reg2, "A1", &only_x, &empty).fingerprint();
+        let same_values =         Layers::new(&reg, "A1", &only_x, &empty).fingerprint();
         assert_ne!(
             changed_defs, same_values,
             "改了 tomlKey 产出的 TOML 就不一样了，产物必须变成待生成"

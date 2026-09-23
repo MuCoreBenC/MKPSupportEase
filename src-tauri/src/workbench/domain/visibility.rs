@@ -475,7 +475,7 @@ mod tests {
     fn chain_is_open_when_every_condition_holds() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let g = Gate::new(&reg, &l);
         assert!(g.is_editable("a"));
         assert!(g.is_editable("b"), "a 默认 tower");
@@ -493,7 +493,7 @@ mod tests {
         let (_d, reg) = registry();
         let empty = Overrides::new();
         let over = overrides(&[("a", serde_json::json!("disk"))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         let g = Gate::new(&reg, &l);
 
         assert!(!g.is_editable("b"));
@@ -520,7 +520,7 @@ mod tests {
             ("a", serde_json::json!("disk")),
             ("b", serde_json::json!("sheath")),
         ]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         let chain = Gate::new(&reg, &l).blocked("c");
 
         assert_eq!(chain.len(), 2);
@@ -534,7 +534,7 @@ mod tests {
         let (_d, reg) = registry();
         let empty = Overrides::new();
         let over = overrides(&[("b", serde_json::json!("sheath"))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         let g = Gate::new(&reg, &l);
 
         assert!(g.is_editable("b"), "a 还是 tower");
@@ -549,7 +549,7 @@ mod tests {
     fn bool_conditions_read_as_on_and_off() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let g = Gate::new(&reg, &l);
 
         let chain = g.blocked("sw_child");
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(chain[0].label, "Z 补偿");
 
         let over = overrides(&[("sw", serde_json::json!(true))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         assert!(Gate::new(&reg, &l).is_editable("sw_child"));
     }
 
@@ -570,14 +570,14 @@ mod tests {
         let empty = Overrides::new();
 
         // lift 默认 0 → 不满足 gt 0
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let g = Gate::new(&reg, &l);
         assert!(!g.is_editable("lift_first"));
         assert_eq!(g.blocked("lift_first")[0].need, "大于 0");
 
         // 抬一点点就该通
         let over = overrides(&[("lift", serde_json::json!(0.2))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         assert!(
             Gate::new(&reg, &l).is_editable("lift_first"),
             "0.2 > \"0\" 要判得出来"
@@ -585,7 +585,7 @@ mod tests {
 
         // 值本身也可能是字符串（上游 JSON 混类型），一样要通
         let over = overrides(&[("lift", serde_json::json!("0.2"))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         assert!(Gate::new(&reg, &l).is_editable("lift_first"));
     }
 
@@ -624,11 +624,11 @@ mod tests {
     fn section_level_condition_gates_the_whole_group() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         assert!(Gate::new(&reg, &l).is_editable("in_gated_section"));
 
         let over = overrides(&[("a", serde_json::json!("disk"))]);
-        let l = Layers::without_upstream(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         let g = Gate::new(&reg, &l);
         let chain = g.blocked("in_gated_section");
         assert_eq!(chain.len(), 1, "这个字段自己没有条件，只有整组那一条");
@@ -670,7 +670,7 @@ mod tests {
         .unwrap();
 
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let g = Gate::new(&reg, &l);
 
         // 这一行的意义就是"它会返回" —— 没有环检测这里会转死
@@ -688,7 +688,7 @@ mod tests {
     fn no_cycles_in_a_healthy_chain() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         assert!(Gate::new(&reg, &l).cycles().is_empty());
     }
 
@@ -697,7 +697,7 @@ mod tests {
     fn unsatisfiable_condition_is_reported() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         assert!(
             Gate::new(&reg, &l).unsatisfiable().is_empty(),
             "夹具里的条件都指向真选项"
@@ -739,7 +739,7 @@ mod tests {
             &layout,
         )
         .unwrap();
-        let l = Layers::without_upstream(&reg2, "A1", &empty, &empty);
+        let l = Layers::new(&reg2, "A1", &empty, &empty);
         let bad = Gate::new(&reg2, &l).unsatisfiable();
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].key, "b");
@@ -761,7 +761,7 @@ mod tests {
         let vids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
         let d = crate::workbench::domain::digest(&p.registry, &m.id, &vids);
         let over = &d.versions[&vids[0]];
-        let l = Layers::without_upstream(&p.registry, &m.id, &d.base, over);
+        let l = Layers::new(&p.registry, &m.id, &d.base, over);
         let g = Gate::new(&p.registry, &l);
 
         assert!(g.cycles().is_empty(), "真数据里出现了 showWhen 环：{:?}", g.cycles());

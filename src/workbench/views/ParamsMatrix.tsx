@@ -323,7 +323,7 @@ export function ParamsMatrix({ cols, words, dirtyKey, focusKey, onApply }: Props
                             {on ? (
                               <i className="wb-mx__colflag">列编辑 · 再点退出</i>
                             ) : (
-                              `自有 ${c.own} · ${words.level[c.level].label}`
+                              `${c.items} 项 · ${words.level[c.level].label}`
                             )}
                           </span>
                         </button>

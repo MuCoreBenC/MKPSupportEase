@@ -584,9 +584,6 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
             let mut assets: Vec<DistAsset> = Vec::new();
 
             for v in book.versions() {
-                if v.archived {
-                    continue;
-                }
                 let Some(p) = &v.mkp_preset else {
                     continue; // 暂无资源：跳过，不报错
                 };
@@ -653,7 +650,6 @@ mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
-    use crate::workbench::domain::Overrides;
     use crate::workbench::store::Store;
 
     fn setup() -> (tempfile::TempDir, Fixture, Committed) {
@@ -674,16 +670,11 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared: true,
                     ..Default::default()
                 },
             );
         }
         let c = Committed {
-            machines: ["A1", "A2L", "P1S"]
-                .into_iter()
-                .map(|m| (m.to_owned(), Overrides::new()))
-                .collect(),
             versions,
             catalog: fixture_catalog(),
             ..Default::default()

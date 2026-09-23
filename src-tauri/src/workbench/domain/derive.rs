@@ -63,7 +63,7 @@ use crate::workbench::upstream::{Asset, ResourceType, Upstream};
 
 use super::layer::{no_overrides, Layers, Level, Origin, Overrides};
 use super::patch::{BuiltRecord, BundleEdit, CatalogMachine, Committed, Draft, Visibility};
-use super::variants::{digest, Digested};
+use super::variants::digest;
 use super::visibility::{BlockScope, BlockedBy, Gate};
 use super::wording as w;
 use super::wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState, SnapshotState};
@@ -75,17 +75,12 @@ use super::wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState,
 pub struct VersionIdentity {
     pub uid: String,
     pub machine_id: String,
-    /// 上游的版本 id（`STANDARD` / `FASTV3.3`），新建的是 `NEW{n}`
+    /// 清单里的版本 id（`STANDARD` / `FASTV3.3`）
     pub version_id: String,
     pub name: String,
     pub tag: Option<String>,
-    pub archived: bool,
-    /// 草稿里新建、还没落盘
-    pub is_new: bool,
-    /// 上游给的产物。新建的版本没有
+    /// 上游给的产物。清单里有、上游还没有对应文件的版本为 `None` = 未生成
     pub mkp_preset: Option<MkpPreset>,
-    /// 这一版自己挑的 BBS；`None` = 跟机型默认
-    pub own_bbs: Option<Vec<String>>,
 }
 
 /* ---------- 整本 ---------- */
@@ -101,14 +96,11 @@ pub struct Book<'a> {
     /// b04 Task 8 之前这里读的是 `up.catalog` —— 那是上游的构建产物，只读，
     /// 于是「加一个版本」保存之后它在树上看不见。现在清单是我们自己的数据
     pub(super) catalog: &'a [CatalogMachine],
-    /// 机型 id → 上游归并结果（派生，不落盘）。
-    /// `pub(super)` 是给同层的 `preview` 用的 —— 它要推演"假如搬到那台机型"
-    pub(super) digests: BTreeMap<String, Digested>,
-    /// 机型 id → 我们写的机型基底
+    /// 机型 id → 机型层的那张表（`machineVariants` 的裸键 ⊕ 草稿）
     pub(super) bases: BTreeMap<String, Overrides>,
-    /// uid → 我们写的版本覆盖
+    /// uid → 版本层的那张表（`machineVariants` 的版本键 ⊕ 草稿）
     pub(super) overs: BTreeMap<String, Overrides>,
-    /// 按机型顺序、机型内按清单顺序排好（新建的排在后面）
+    /// 按机型顺序、机型内按清单顺序排好
     versions: Vec<VersionIdentity>,
     built: BTreeMap<String, BuiltRecord>,
     visibility: BTreeMap<String, Visibility>,
@@ -122,60 +114,36 @@ impl<'a> Book<'a> {
         committed: &'a Committed,
         draft: &'a Draft,
     ) -> Self {
-        let digests: BTreeMap<String, Digested> = committed
-            .catalog
-            .iter()
-            .map(|m| {
-                (
-                    m.id.clone(),
-                    digest(&presets.registry, &m.id, &m.version_ids),
-                )
-            })
-            .collect();
-
+        // 两层的值都只有一个来源：`machineVariants` 归并出来的那两张表，
+        // 草稿里未落盘的改动叠在上面。以前这里读的是我们自造的 json，
+        // 于是每层各有"上游给的"与"我们写的"两张表（b04 Task 12 之前）
         let mut bases: BTreeMap<String, Overrides> = BTreeMap::new();
-        for m in &committed.catalog {
-            let mut own = committed.machines.get(&m.id).cloned().unwrap_or_default();
-            overlay(&mut own, draft, Level::Machine, &m.id);
-            bases.insert(m.id.clone(), own);
-        }
-
-        let purged: BTreeSet<&str> = draft.purged.iter().map(String::as_str).collect();
         let mut versions: Vec<VersionIdentity> = Vec::new();
         let mut overs: BTreeMap<String, Overrides> = BTreeMap::new();
 
         for m in &committed.catalog {
+            // 归并是派生的（`domain::variants`），每加载一次算一次，不落盘
+            let digested = digest(&presets.registry, &m.id, &m.version_ids);
+
+            let mut base = digested.base.clone();
+            overlay(&mut base, draft, Level::Machine, &m.id);
+            bases.insert(m.id.clone(), base);
+
             for vid in &m.version_ids {
                 let uid = format!("{}/{}", m.id, vid);
-                if purged.contains(uid.as_str()) {
-                    continue;
-                }
-                let c = committed.versions.get(&uid);
-                let mut own = c.map(|x| x.overrides.clone()).unwrap_or_default();
+                let declared = committed.versions.get(&uid);
+                let mut own = digested.versions.get(vid).cloned().unwrap_or_default();
                 overlay(&mut own, draft, Level::Version, &uid);
                 overs.insert(uid.clone(), own);
 
                 versions.push(VersionIdentity {
-                    machine_id: draft
-                        .moved
-                        .get(&uid)
-                        .cloned()
-                        .or_else(|| c.map(|x| x.machine_id.clone()))
-                        .unwrap_or_else(|| m.id.clone()),
+                    uid: uid.clone(),
+                    machine_id: m.id.clone(),
                     version_id: vid.clone(),
-                    name: draft
-                        .renamed
-                        .get(&uid)
-                        .cloned()
-                        .or_else(|| c.map(|x| x.name.clone()))
+                    name: declared
+                        .map(|x| x.name.clone())
                         .unwrap_or_else(|| vid.clone()),
-                    tag: c.and_then(|x| x.tag.clone()),
-                    archived: draft
-                        .archived
-                        .get(&uid)
-                        .copied()
-                        .unwrap_or_else(|| c.is_some_and(|x| x.archived)),
-                    is_new: false,
+                    tag: declared.and_then(|v| v.tag.clone()),
                     // 产物还在上游那一层（资源与套餐这一轮没搬，见 presets/mod.rs）。
                     // 清单里有、上游没有的版本 → `None` = 未生成，那是对的
                     mkp_preset: up
@@ -183,35 +151,8 @@ impl<'a> Book<'a> {
                         .machine(&m.id)
                         .and_then(|x| x.version(vid))
                         .and_then(|x| x.mkp_preset.clone()),
-                    own_bbs: draft
-                        .bbs
-                        .get(&uid)
-                        .cloned()
-                        .unwrap_or_else(|| c.and_then(|x| x.bbs.clone())),
-                    uid,
                 });
             }
-        }
-
-        // 草稿里新建的排在各机型后面。**它们没有上游产物**，所以状态只能是未生成
-        for v in &draft.added {
-            if purged.contains(v.uid.as_str()) {
-                continue;
-            }
-            let mut own = Overrides::new();
-            overlay(&mut own, draft, Level::Version, &v.uid);
-            overs.insert(v.uid.clone(), own);
-            versions.push(VersionIdentity {
-                uid: v.uid.clone(),
-                machine_id: v.machine_id.clone(),
-                version_id: v.version_id.clone(),
-                name: v.name.clone(),
-                tag: None,
-                archived: draft.archived.get(&v.uid).copied().unwrap_or(false),
-                is_new: true,
-                mkp_preset: None,
-                own_bbs: draft.bbs.get(&v.uid).cloned().flatten(),
-            });
         }
 
         let mut built = committed.built.clone();
@@ -226,7 +167,6 @@ impl<'a> Book<'a> {
             presets,
             draft,
             catalog: &committed.catalog,
-            digests,
             bases,
             overs,
             versions,
@@ -251,38 +191,21 @@ impl<'a> Book<'a> {
 
     /// 机型基底那一列的三层视图（版本层为空）
     pub fn machine_layers(&self, machine_id: &str) -> Option<Layers<'_>> {
-        let d = self.digests.get(machine_id)?;
         let base = self.bases.get(machine_id)?;
         let id = self.machine(machine_id)?.id.as_str();
-        Some(Layers::new(
-            &self.presets.registry,
-            id,
-            &d.base,
-            base,
-            no_overrides(),
-            no_overrides(),
-        ))
+        Some(Layers::new(&self.presets.registry, id, base, no_overrides()))
     }
 
     /// 一个版本的三层视图。
     ///
-    /// **移动过的版本走的是新机型的上游差异** —— 上游那张 `machineVariants` 的键是
-    /// `"A1:STANDARD"` 这种，搬到 P1S 之后 `"P1S:STANDARD"` 不存在，
-    /// 所以它会改成继承 P1S 的机型差异。这正是"移动会让继承值变"的来处（见 `preview`）
+    /// 机型层取它那台机型的裸键，版本层只取 `A1: FAST` 这一条 ——
+    /// 别的版本的键是别的版本的，不参与这一列的取值
     pub fn version_layers(&self, uid: &str) -> Option<Layers<'_>> {
         let v = self.version(uid)?;
-        let d = self.digests.get(&v.machine_id)?;
         let base = self.bases.get(&v.machine_id)?;
         let over = self.overs.get(uid)?;
         let id = self.machine(&v.machine_id)?.id.as_str();
-        Some(Layers::new(
-            &self.presets.registry,
-            id,
-            &d.base,
-            base,
-            d.versions.get(&v.version_id).unwrap_or(no_overrides()),
-            over,
-        ))
+        Some(Layers::new(&self.presets.registry, id, base, over))
     }
 
     pub fn version(&self, uid: &str) -> Option<&VersionIdentity> {
@@ -293,11 +216,12 @@ impl<'a> Book<'a> {
         &self.versions
     }
 
-    /// 某台机型下的版本，归档的排除
+    /// 某台机型下的版本。以前这里还要滤掉归档的，**归档这个概念本身没有了**
+    /// （REPORT §7.2：源数据里没这个字段，它是上一稿发明的 SOP）
     pub fn live_versions(&self, machine_id: &str) -> Vec<&VersionIdentity> {
         self.versions
             .iter()
-            .filter(|v| v.machine_id == machine_id && !v.archived)
+            .filter(|v| v.machine_id == machine_id)
             .collect()
     }
 
@@ -337,22 +261,22 @@ impl<'a> Book<'a> {
             .unwrap_or_default()
     }
 
-    /// 一个版本最终交付哪些 BBS
+    /// 一个版本最终交付哪些 BBS = 它那台机型的默认那一份。
+    ///
+    /// 「这一版自己挑一串曲线」这条路径删掉了（REPORT §7.3）：版本已经有
+    /// `recommendedBundle`，在版本上再存一份 asset id 就是两处真相。
+    /// 要换就换它指向哪个套餐 —— 那是「机型与资源」页的事（Task 21）
     pub fn effective_bbs(&self, uid: &str) -> Vec<String> {
         match self.version(uid) {
-            Some(v) => v
-                .own_bbs
-                .clone()
-                .unwrap_or_else(|| self.machine_default_bbs(&v.machine_id)),
+            Some(v) => self.machine_default_bbs(&v.machine_id),
             None => Vec::new(),
         }
     }
 
-    pub fn bbs_source(&self, uid: &str) -> BbsSource {
-        match self.version(uid).and_then(|v| v.own_bbs.as_ref()) {
-            Some(_) => BbsSource::Own,
-            None => BbsSource::InheritedFromMachine,
-        }
+    /// **现在只有一种来源。** 参数照收是为了不惊动调用方，但它已经不参与判断了 ——
+    /// 等「机型与资源」页把套餐换成那个入口（Task 21），这里才会重新有第二种答案
+    pub fn bbs_source(&self, _uid: &str) -> BbsSource {
+        BbsSource::InheritedFromMachine
     }
 
     /* ---------- 生成状态 ---------- */
@@ -381,22 +305,19 @@ impl<'a> Book<'a> {
         }
     }
 
-    /// 这一版有没有「配方」= 我们写过什么，或者上游给了这台机型/这一版差异。
+    /// 这一版有没有「配方」= 机型层或版本层在这一台/这一版上钉过值。
     ///
-    /// 全是出厂默认时为 false —— 那种情况下烤出来也只是一份全默认的 TOML
+    /// 全是出厂默认时为 false —— 那种情况下烤出来也只是一份全默认的 TOML。
+    ///
+    /// 以前这里要**分别**数"我们写的"与"上游给的"两张表，因为它们是两个文件；
+    /// 现在两张表合成了同一条 `machineVariants`，一个空就够了
     pub fn has_any_recipe(&self, uid: &str) -> bool {
         let Some(v) = self.version(uid) else {
             return false;
         };
-        let ours = self.overs.get(uid).is_some_and(|o| !o.is_empty())
-            || self.bases.get(&v.machine_id).is_some_and(|b| !b.is_empty());
-        let upstream = self.digests.get(&v.machine_id).is_some_and(|d| {
-            !d.base.is_empty()
-                || d.versions
-                    .get(&v.version_id)
-                    .is_some_and(|o| !o.is_empty())
-        });
-        ours || upstream
+        let base = self.bases.get(&v.machine_id).is_some_and(|b| !b.is_empty());
+        let over = self.overs.get(uid).is_some_and(|o| !o.is_empty());
+        base || over
     }
 
     /// 有效配方为空 = 「未配置」。**不占状态档**，单独一个布尔位（tasks 7.3）
@@ -416,43 +337,27 @@ impl<'a> Book<'a> {
 
     pub fn book_view(&self) -> BookView {
         let mut machines = Vec::new();
-        let mut archived = Vec::new();
         let mut base_items = 0usize;
-        let mut base_own = 0usize;
         let mut over_items = 0usize;
-        let mut over_own = 0usize;
-        let mut version_count = 0usize;
 
         for m in self.catalog {
-            let d = &self.digests[&m.id];
             let ml = self.machine_layers(&m.id);
-            let m_own = ml.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0);
-            let m_total = m_own + d.base.keys().filter(|k| !self.bases[&m.id].contains_key(*k)).count();
-            base_items += m_total;
-            base_own += m_own;
+            // 每层只有一张表，所以"这一层有几项"与"其中自己钉了几项"是同一个数。
+            // 以前每层有两半（见 `domain::layer` 的模块文档），才需要两个数
+            let base_count = ml.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0);
+            base_items += base_count;
 
             let mut nodes = Vec::new();
             for v in self.versions.iter().filter(|v| v.machine_id == m.id) {
                 let l = self.version_layers(&v.uid);
-                let own = l.as_ref().map(|x| x.own_count(Level::Version)).unwrap_or(0);
-                let up_extra = d
-                    .versions
-                    .get(&v.version_id)
-                    .map(|o| {
-                        o.keys()
-                            .filter(|k| !self.overs[&v.uid].contains_key(*k))
-                            .count()
-                    })
-                    .unwrap_or(0);
-                let node = VersionNode {
+                let over_count = l.as_ref().map(|x| x.own_count(Level::Version)).unwrap_or(0);
+                over_items += over_count;
+                nodes.push(VersionNode {
                     uid: v.uid.clone(),
                     version_id: v.version_id.clone(),
                     name: v.name.clone(),
                     tag: v.tag.clone(),
-                    is_new: v.is_new,
-                    archived: v.archived,
-                    own,
-                    total: own + up_extra,
+                    items: over_count,
                     build: self.build_state(&v.uid),
                     bbs_source: self.bbs_source(&v.uid),
                     bbs_count: self.effective_bbs(&v.uid).len(),
@@ -462,19 +367,7 @@ impl<'a> Book<'a> {
                         .as_ref()
                         .map(|x| x.orphan_keys().into_iter().map(str::to_owned).collect())
                         .unwrap_or_default(),
-                };
-                if v.archived {
-                    archived.push(VersionBrief {
-                        uid: node.uid.clone(),
-                        machine_id: m.id.clone(),
-                        name: node.name.clone(),
-                    });
-                } else {
-                    version_count += 1;
-                    over_items += node.total;
-                    over_own += node.own;
-                    nodes.push(node);
-                }
+                });
             }
 
             let live: Vec<BuildState> = self
@@ -487,9 +380,8 @@ impl<'a> Book<'a> {
                 id: m.id.clone(),
                 display: m.display.clone(),
                 icon: m.icon.clone(),
-                own: m_own,
-                total: m_total,
-                // 机型级：所有活着的版本都「暂无资源」才算这台机型暂无资源
+                items: base_count,
+                // 机型级：所有版本都「暂无资源」才算这台机型暂无资源
                 build: roll_up(live.into_iter()),
                 dimensions_missing: !m.has_dimensions,
                 versions: nodes,
@@ -499,21 +391,17 @@ impl<'a> Book<'a> {
         let states: Vec<BuildState> = self
             .versions
             .iter()
-            .filter(|v| !v.archived)
             .map(|v| self.build_state(&v.uid))
             .collect();
         let artifact = artifact_state(states.into_iter());
 
         BookView {
             machines,
-            archived,
             badges: Badges {
                 machines: self.catalog.len(),
-                versions: version_count,
+                versions: self.versions.len(),
                 base_items,
-                base_own,
                 override_items: over_items,
-                override_own: over_own,
             },
             dirty_count: self.draft.dirty_count(),
             save: if self.draft.is_clean() {
@@ -534,7 +422,6 @@ impl<'a> Book<'a> {
     pub fn build_rows(&self) -> Vec<BuildRow> {
         self.versions
             .iter()
-            .filter(|v| !v.archived)
             .map(|v| {
                 let state = self.build_state(&v.uid);
                 BuildRow {
@@ -577,7 +464,6 @@ impl<'a> Book<'a> {
         let assigned: BTreeSet<String> = self
             .versions
             .iter()
-            .filter(|v| !v.archived)
             .flat_map(|v| self.effective_bbs(&v.uid))
             .collect();
         let in_bundle: BTreeSet<&str> = self
@@ -761,14 +647,14 @@ impl<'a> Book<'a> {
                         level: Level::Machine,
                         machine: m.display.clone(),
                         label: w::level_label(Level::Machine).to_owned(),
-                        own: layers.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0),
+                        items: layers.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0),
                     },
                     machine_id: m.id.clone(),
                     level: Level::Machine,
                     layers,
                 });
             }
-            for v in self.versions.iter().filter(|v| v.machine_id == m.id && !v.archived) {
+            for v in self.versions.iter().filter(|v| v.machine_id == m.id) {
                 if !wanted.contains(&(m.id.as_str(), Some(v.uid.as_str()))) {
                     continue;
                 }
@@ -781,7 +667,7 @@ impl<'a> Book<'a> {
                         level: Level::Version,
                         machine: m.display.clone(),
                         label: v.name.clone(),
-                        own: layers.as_ref().map(|l| l.own_count(Level::Version)).unwrap_or(0),
+                        items: layers.as_ref().map(|l| l.own_count(Level::Version)).unwrap_or(0),
                     },
                     machine_id: m.id.clone(),
                     level: Level::Version,
@@ -1153,7 +1039,6 @@ fn artifact_state(states: impl Iterator<Item = BuildState>) -> ArtifactState {
 #[serde(rename_all = "camelCase")]
 pub struct BookView {
     pub machines: Vec<MachineNode>,
-    pub archived: Vec<VersionBrief>,
     pub badges: Badges,
     pub dirty_count: usize,
     pub save: SaveState,
@@ -1174,12 +1059,10 @@ pub struct BookView {
 pub struct Badges {
     pub machines: usize,
     pub versions: usize,
-    /// 机型层一共有几项值（含上游给的那一半）
+    /// 机型层一共有几项值
     pub base_items: usize,
-    /// 其中我们自己写了几项
-    pub base_own: usize,
+    /// 版本层加起来一共有几项值
     pub override_items: usize,
-    pub override_own: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1188,8 +1071,8 @@ pub struct MachineNode {
     pub id: String,
     pub display: String,
     pub icon: Option<String>,
-    pub own: usize,
-    pub total: usize,
+    /// 机型层钉着几项值
+    pub items: usize,
     pub build: BuildState,
     /// 上游没登记这台机型的床身尺寸（A2L）。**不是 0，是没登记**
     pub dimensions_missing: bool,
@@ -1203,12 +1086,8 @@ pub struct VersionNode {
     pub version_id: String,
     pub name: String,
     pub tag: Option<String>,
-    pub is_new: bool,
-    pub archived: bool,
-    /// 我们在这一版写了几项（「N 项自有」）
-    pub own: usize,
-    /// 这一层一共有几项值（含上游给的）
-    pub total: usize,
+    /// 版本层钉着几项值
+    pub items: usize,
     pub build: BuildState,
     pub bbs_source: BbsSource,
     pub bbs_count: usize,
@@ -1217,14 +1096,6 @@ pub struct VersionNode {
     pub last_build: Option<String>,
     /// 写着但再也进不了产物的键
     pub orphan_keys: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VersionBrief {
-    pub uid: String,
-    pub machine_id: String,
-    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1337,7 +1208,8 @@ pub struct Col {
     pub level: Level,
     pub machine: String,
     pub label: String,
-    pub own: usize,
+    /// 这一列那一层钉着几项值
+    pub items: usize,
 }
 
 struct ResolvedCol<'a> {
@@ -1461,37 +1333,71 @@ impl Cell {
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, CommittedVersion, Patch};
-    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture, FIXTURE_MACHINES};
 
+    /* ---------- 这一轮删掉的那几条，以及它们为什么不复存在 ----------
+     *
+     * 1. `draft_structure_changes_show_in_the_tree`（草稿里的改名 / 移动 / 新建 / 归档
+     *    要反映到树上）：`Patch` 现在只剩四种，**全都是值改动**。结构性操作写的是
+     *    `presets/machines/{机型}.toml`，由「机型与版本」那一页即时落盘 —— 草稿里再也没有
+     *    结构手势了（见 `patch.rs` 模块文档那张表）。
+     * 2. `an_upstream_version_can_only_be_archived_not_purged`：**归档这个概念整个删掉了**。
+     *    源数据里没有这个字段，它是上一稿自己发明的 SOP（REPORT §7.2）。
+     * 3. `a_version_can_own_its_bbs_list`：「这一版自己挑一串曲线」删掉了（REPORT §7.3）——
+     *    版本已经有 `recommendedBundle`，在版本上再存一份 asset id 是两处真相。
+     * 4. 「五档查找 / 每层两半」那几条（徽章分开数「一共几项」与「我们自己几项」）：
+     *    每层现在只有**一张**表（`Layers::new` 收四个参数），「归并出来的」与「我们写的」
+     *    是同一份东西，`own_count` 一个数就够 —— 那一整套取舍钉在 `domain::layer`
+     *    的单测里，这里不重复一遍。
+     */
+
+    /// 一份「已经落盘」的 [`Committed`]。
+    ///
+    /// **只有身份**：有哪些机型与版本、叫什么、什么角标，**一个值都没有** ——
+    /// 值在这一层的唯一去处是 registry 的 `machineVariants`。
+    /// 要造「已经写过的」用 [`saved_values`] 往那里写，不要往这里塞
     fn committed() -> Committed {
-        // 三台机型、四个版本，落盘的部分先全空 —— 干净仓库就是这个样子
         let mut versions = BTreeMap::new();
-        for (uid, machine, vid, name) in [
-            ("A1/STANDARD", "A1", "STANDARD", "标准版"),
-            ("A1/FAST", "A1", "FAST", "高速版"),
-            ("A2L/STANDARD", "A2L", "STANDARD", "标准版"),
-            ("P1S/LITE", "P1S", "LITE", "精简版"),
-        ] {
-            versions.insert(
-                uid.to_owned(),
-                CommittedVersion {
-                    machine_id: machine.to_owned(),
-                    version_id: vid.to_owned(),
-                    name: name.to_owned(),
-                    declared: true,
-                    ..Default::default()
-                },
-            );
+        for (id, _bundle, vids) in FIXTURE_MACHINES {
+            for (vid, name, tag) in *vids {
+                versions.insert(
+                    format!("{id}/{vid}"),
+                    CommittedVersion {
+                        machine_id: (*id).to_owned(),
+                        version_id: (*vid).to_owned(),
+                        name: (*name).to_owned(),
+                        // 夹具里的空 tag 表示「没写过这一行」，不是「写了个空串」
+                        tag: Some((*tag).to_owned()).filter(|t| !t.is_empty()),
+                    },
+                );
+            }
         }
         Committed {
-            machines: ["A1", "A2L", "P1S"]
-                .into_iter()
-                .map(|m| (m.to_owned(), Overrides::new()))
-                .collect(),
             versions,
             catalog: fixture_catalog(),
             ..Default::default()
         }
+    }
+
+    /// 造一批**已经落盘的值**，连同还活着的临时目录一起交出来。
+    ///
+    /// owner 机型层是 `"A1"`、版本层是 `"A1:STANDARD"` —— **冒号不是斜杠**：
+    /// `machineVariants` 的键就长这样（doc §3.3）。
+    ///
+    /// 必须走 [`Fixture::into_parts`]：这批值要写盘，而盘在那个临时目录里。
+    /// 目录被删之后再写的症状是一条八竿子打不着的「建不出文件」
+    fn saved_values(
+        edits: &[(&str, &str, serde_json::Value)],
+    ) -> (tempfile::TempDir, Upstream, Presets) {
+        let (dir, up, mut presets) = Fixture::load().into_parts();
+        let batch: Vec<(String, String, Option<serde_json::Value>)> = edits
+            .iter()
+            .map(|(key, owner, v)| ((*key).to_owned(), (*owner).to_owned(), Some(v.clone())))
+            .collect();
+        presets
+            .apply_values(&batch)
+            .expect("夹具的字段与 owner 都是真的");
+        (dir, up, presets)
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {
@@ -1503,7 +1409,9 @@ mod tests {
             .collect()
     }
 
-    /// 干净仓库的整本视图：机型树齐、徽章分得清「一共几项」与「我们写了几项」
+    /* ---------- 整本 ---------- */
+
+    /// 干净仓库的整本视图：机型树齐，徽章数的就是**合并后那一张表**里的项数
     #[test]
     fn a_clean_repo_derives_a_full_tree() {
         let f = Fixture::load();
@@ -1515,18 +1423,60 @@ mod tests {
         assert_eq!(view.badges.versions, 4);
         assert_eq!(view.dirty_count, 0);
         assert_eq!(view.save, SaveState::Saved);
-        assert_eq!(
-            view.badges.base_own, 0,
-            "干净仓库里我们一项都没写 —— 徽章要说真话"
-        );
-        assert!(
-            view.badges.base_items > 0,
-            "但机型层不是空的：上游那一半给了 P1S 的偏移（doc §3.6）"
-        );
+
+        // 每层只有一张表，所以这两个数就是「归并结果里那一层各有几项」：
+        // P1S 只有 LITE 一个版本写了 offset.x → 上提到机型基底（doc §3.3 第 2 步）；
+        // A1 的两个版本值不同 → 上提不成立，各留一条版本覆盖
+        assert_eq!(view.badges.base_items, 1, "只有 P1S 那一项进了基底");
+        assert_eq!(view.badges.override_items, 2, "A1 的两个版本各一条");
+
+        // 徽章与树上逐个数的必须是同一个数 —— 这两个数在界面上是两处地方，对不上没人发现
+        let per_machine: usize = view.machines.iter().map(|m| m.items).sum();
+        let per_version: usize = view
+            .machines
+            .iter()
+            .flat_map(|m| &m.versions)
+            .map(|v| v.items)
+            .sum();
+        assert_eq!(per_machine, view.badges.base_items);
+        assert_eq!(per_version, view.badges.override_items);
 
         let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
         assert_eq!(a1.versions.len(), 2);
         assert!(!a1.dimensions_missing);
+        assert_eq!(a1.items, 0, "A1 的两个版本值不同，上提不成立");
+        let p1s = view.machines.iter().find(|m| m.id == "P1S").unwrap();
+        assert_eq!(p1s.items, 1, "唯一版本的值被上提到了基底");
+    }
+
+    /// **写的地方就是看的地方**：值只进 `machineVariants`，树上立刻就是它，
+    /// 中间没有第二份自造 json 要同步 —— 这一层不再有第二副本
+    #[test]
+    fn a_value_saved_to_the_registry_shows_up_on_the_tree() {
+        let (_dir, up, presets) = saved_values(&[("wiping.child", "A1", serde_json::json!(33))]);
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&up, &presets, &c, &d);
+
+        let l = b.machine_layers("A1").unwrap();
+        assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(33));
+        assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Machine);
+
+        // 两个版本自己都没写过这一项，继承的是基底
+        for uid in ["A1/STANDARD", "A1/FAST"] {
+            let l = b.version_layers(uid).unwrap();
+            assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(33));
+            assert_eq!(
+                l.effective("wiping.child").unwrap().origin,
+                Origin::Machine,
+                "{uid} 自己没写过这一项，取到的是机型层"
+            );
+        }
+
+        let view = b.book_view();
+        let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
+        assert_eq!(a1.items, 1, "机型层数出来的就是这一项");
+        assert_eq!(view.badges.base_items, 2, "A1 这一项，加上 P1S 上提的那一项");
     }
 
     /// **A2L：参数侧与资源侧是两件事**（doc §11）。
@@ -1540,7 +1490,10 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
         assert_eq!(b.build_state("A2L/STANDARD"), BuildState::NoResources);
-        assert!(!b.has_any_recipe("A2L/STANDARD"), "上游给它 0 项机型差异");
+        assert!(
+            !b.has_any_recipe("A2L/STANDARD"),
+            "machineVariants 没给它任何机型差异"
+        );
         assert!(
             !b.recipe_empty("A2L/STANDARD"),
             "「未配置」是另一件事：它的有效配方不空，只是全是出厂默认"
@@ -1561,18 +1514,53 @@ mod tests {
         assert!(a2l.dimensions_missing, "上游没登记它的尺寸");
     }
 
-    /// 上游给了机型差异的机型，新建版本要显示「未生成」而不是「暂无资源」——
+    /// 有一份归并出来的机型基底的版本要显示「未生成」而不是「暂无资源」——
     /// 后者会让人以为没救了，而这一版点一下生成就有了
     #[test]
-    fn a_version_on_a_machine_with_upstream_diffs_is_never_built_not_no_resources() {
+    fn merged_base_makes_a_version_never_built_not_no_resources() {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
-        // P1S 的唯一版本：上游归并把偏移上提到了机型基底 → 有配方
+        // P1S 的唯一版本：`P1S:LITE` 那一条被上提成了机型基底 → 有配方
         assert!(b.has_any_recipe("P1S/LITE"));
         assert_eq!(b.build_state("P1S/LITE"), BuildState::NeverBuilt);
+    }
+
+    /// 树上的版本**照机型文件写下的顺序**，不是字典序。
+    ///
+    /// 顺序直接进界面，它是作者的话 —— 字典序会把 A1 的「标准版 / 高速版」换成对半翻转
+    #[test]
+    fn versions_keep_the_order_the_machine_file_wrote_them_in() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &f.presets, &c, &d);
+
+        let got: Vec<&str> = b
+            .live_versions("A1")
+            .iter()
+            .map(|v| v.version_id.as_str())
+            .collect();
+        assert_eq!(got, vec!["STANDARD", "FAST"]);
+        // 反空转：夹具的顺序若哪天改成字典序，这条就失去对象了
+        let mut sorted = got.clone();
+        sorted.sort_unstable();
+        assert_ne!(got, sorted, "夹具的顺序被改成字典序了，这条判据要重写");
+
+        // 树 = 机型照机型文件顺序，机型内照 `[[versions]]` 顺序
+        let uids: Vec<String> = b
+            .book_view()
+            .machines
+            .iter()
+            .flat_map(|m| &m.versions)
+            .map(|v| v.uid.clone())
+            .collect();
+        assert_eq!(
+            uids,
+            vec!["A1/STANDARD", "A1/FAST", "A2L/STANDARD", "P1S/LITE"]
+        );
     }
 
     /// 生成状态靠**指纹**，不靠文件时间
@@ -1622,10 +1610,10 @@ mod tests {
         );
     }
 
-    /// **改机型基底，跟着变的是没覆盖过的版本**（tasks 7.9）。
+    /// **改机型基底，跟着变的是没有自己覆盖的那些版本**（tasks 7.9）。
     ///
-    /// A1 的两个版本在 `offset.x` 上都有上游版本覆盖 → 都不跟着变；
-    /// `wiping.child` 两个版本都没覆盖 → 都跟着变。手算与派生要对上
+    /// A1 的两个版本在 `toolhead.offset.x` 上各有一条版本键（`A1:STANDARD` / `A1:FAST`）
+    /// → 都不跟着变；`wiping.child` 两个版本都没写过 → 都跟着变。手算与派生要对上
     #[test]
     fn changing_the_machine_base_moves_exactly_the_versions_without_an_override() {
         let f = Fixture::load();
@@ -1642,7 +1630,7 @@ mod tests {
             })
             .collect();
 
-        // ① 改一个两个版本都**有**上游覆盖的字段 → 谁都不该变
+        // ① 改一个两个版本都**有**版本键的字段 → 谁都不该变
         apply(
             &mut d,
             &c,
@@ -1660,20 +1648,24 @@ mod tests {
             assert_eq!(
                 b.version_layers(u).unwrap().fingerprint(),
                 before[i],
-                "{u} 在 offset.x 上有自己的覆盖，改基底不该影响它"
+                "{u} 在 offset.x 上有自己的那条键，改基底不该影响它"
             );
             assert_eq!(
-                *b.version_layers(u).unwrap().effective("toolhead.offset.x").unwrap().value,
+                *b.version_layers(u)
+                    .unwrap()
+                    .effective("toolhead.offset.x")
+                    .unwrap()
+                    .value,
                 if *u == "A1/STANDARD" {
                     serde_json::json!(-1)
                 } else {
                     serde_json::json!(-0.7)
                 },
-                "上游的版本差异要盖住我们写的机型基底"
+                "版本层的键盖住机型基底"
             );
         }
 
-        // ② 改一个两个版本都**没**覆盖的字段 → 两个都跟着变
+        // ② 改一个两个版本都**没**写过的字段 → 两个都跟着变
         apply(
             &mut d,
             &c,
@@ -1697,32 +1689,27 @@ mod tests {
             assert_eq!(*hit.value, serde_json::json!(44));
             assert_eq!(hit.origin, Origin::Machine, "值来自机型这一层");
         }
-        assert_eq!(moved, 2, "两个版本都没覆盖过它，所以两个都该跟着变");
+        assert_eq!(moved, 2, "两个版本都没写过它，所以两个都该跟着变");
     }
 
     /// 草稿里删键（挂回继承）**在保存之前就要看得出效果**
     #[test]
     fn a_pending_delete_shows_up_before_saving() {
-        let f = Fixture::load();
-        let mut c = committed();
-        c.versions.get_mut("A1/STANDARD").unwrap().overrides = [(
-            "wiping.child".to_owned(),
-            serde_json::json!(99),
-        )]
-        .into_iter()
-        .collect();
+        // 「已经写过的那一条」只能造在 registry 里 —— 值在这一层唯一的落盘处
+        let (_dir, up, presets) =
+            saved_values(&[("wiping.child", "A1:STANDARD", serde_json::json!(99))]);
+        let c = committed();
         let mut d = Draft::default();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
-        assert_eq!(
-            *b.version_layers("A1/STANDARD").unwrap().effective("wiping.child").unwrap().value,
-            serde_json::json!(99)
-        );
+        let b = Book::new(&up, &presets, &c, &d);
+        let l = b.version_layers("A1/STANDARD").unwrap();
+        assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(99));
+        assert!(l.has_own(Level::Version, "wiping.child"), "这一层自己钉着它");
 
         apply(
             &mut d,
             &c,
-            &f.presets.registry,
+            &presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -1732,95 +1719,18 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        // 挂回继承在这台机型上一路退到出厂默认：版本层删掉之后机型层那一项也不存在
+        // （有落差时它只退一层，见 `domain::layer` 的 detaching_falls_back_one_level_at_a_time）
+        let b = Book::new(&up, &presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(20));
         assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
         assert!(!l.has_own(Level::Version, "wiping.child"), "自有那一项该没了");
     }
 
-    /// 草稿里的改名 / 移动 / 归档要反映到树上
-    #[test]
-    fn draft_structure_changes_show_in_the_tree() {
-        let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
-
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[
-                Patch::RenameVersion {
-                    uid: "A1/FAST".to_owned(),
-                    name: "改过名的高速版".to_owned(),
-                },
-                Patch::MoveVersion {
-                    uid: "A1/FAST".to_owned(),
-                    to_machine_id: "P1S".to_owned(),
-                },
-                Patch::ArchiveVersion {
-                    uid: "A1/STANDARD".to_owned(),
-                },
-                Patch::NewVersion {
-                    machine_id: "A1".to_owned(),
-                    name: "新配方".to_owned(),
-                },
-            ],
-        )
-        .unwrap();
-
-        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
-        let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
-        let p1s = view.machines.iter().find(|m| m.id == "P1S").unwrap();
-
-        assert_eq!(a1.versions.len(), 1, "一个搬走了、一个归档了、新建了一个");
-        assert!(a1.versions[0].is_new);
-        assert_eq!(a1.versions[0].name, "新配方");
-        assert_eq!(view.archived.len(), 1);
-        assert_eq!(view.archived[0].uid, "A1/STANDARD");
-        assert_eq!(p1s.versions.len(), 2);
-        assert!(p1s.versions.iter().any(|v| v.name == "改过名的高速版"));
-    }
-
-    /// 上游还声明着的版本**删不掉**（版本清单是上游的），只能归档。
-    /// 归档之后它离开树、进归档清单
-    #[test]
-    fn an_upstream_version_can_only_be_archived_not_purged() {
-        let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
-
-        let e = apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::PurgeVersion {
-                uid: "A1/FAST".to_owned(),
-            }],
-        )
-        .unwrap_err();
-        assert!(e.detail.unwrap_or_default().contains("归档"));
-
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::ArchiveVersion {
-                uid: "A1/FAST".to_owned(),
-            }],
-        )
-        .unwrap();
-        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
-        let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
-        assert_eq!(a1.versions.len(), 1);
-        assert!(view.archived.iter().any(|v| v.uid == "A1/FAST"));
-    }
-
     /* ---------- 矩阵 ---------- */
 
-    /// **列序照配方本，不按勾选顺序**（tasks 7.5）。
-    /// 打乱输入，输出列序不变
+    /// **列序照配方本，不按勾选顺序**（tasks 7.5）。打乱输入，输出列序不变
     #[test]
     fn column_order_follows_the_recipe_book_not_the_click_order() {
         let f = Fixture::load();
@@ -1889,8 +1799,7 @@ mod tests {
         assert_eq!(row.cells[1].kind, CellKind::Value, "P1S 那一列是正常值");
     }
 
-    /// 行序按**组**聚在一起。判据是「同一个组名不许出现两次以上的连续段」——
-    /// 一个组名消失后又回来，就是两组被洗到一起了，也就是反馈里那种乱序
+    /// 行序按**组**聚在一起：一个组名消失后又回来，就是两组被洗到一起了
     #[test]
     fn rows_are_grouped_by_section_not_interleaved() {
         let f = Fixture::load();
@@ -1917,7 +1826,7 @@ mod tests {
             );
             seen.push(g);
         }
-        // fixture 的两组号段是**重叠**的，所以这个断言不是白跑的
+        // 夹具的两组号段是**重叠**的，所以这个断言不是白跑的
         assert_eq!(runs, vec!["空间偏移", "擦料方式"], "组序照 tab.order");
         assert!(m.rows.iter().all(|r| !r.section_label.is_empty()));
     }
@@ -1949,7 +1858,7 @@ mod tests {
         assert!(parent.parent_label.is_none());
     }
 
-    /// 同一份数据两次渲染的行序必须一字不差 —— 靠排序键最后那一段 key 兜底
+    /// 同一份数据两次渲染的行序必须一字不差
     #[test]
     fn row_order_is_stable_for_equal_keys() {
         let f = Fixture::load();
@@ -1958,13 +1867,22 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let want = &cols(&[("A1", None), ("P1S", None)]);
-        let a: Vec<String> = b.matrix(want, None, "").rows.into_iter().map(|r| r.key).collect();
-        let z: Vec<String> = b.matrix(want, None, "").rows.into_iter().map(|r| r.key).collect();
+        let a: Vec<String> = b
+            .matrix(want, None, "")
+            .rows
+            .into_iter()
+            .map(|r| r.key)
+            .collect();
+        let z: Vec<String> = b
+            .matrix(want, None, "")
+            .rows
+            .into_iter()
+            .map(|r| r.key)
+            .collect();
         assert_eq!(a, z);
     }
 
-    /// 排序键的哨兵不许回绕：`f64::MAX` 压成整数后要是 `i64::MAX`，
-    /// 而不是一个负数 —— 负数会把「上游没声明的组」顶到表头
+    /// 排序键的哨兵不许回绕：`f64::MAX` 压成整数后要是 `i64::MAX`，而不是一个负数
     #[test]
     fn unknown_order_saturates_instead_of_wrapping() {
         assert_eq!(milli(f64::MAX), i64::MAX);
@@ -2019,7 +1937,12 @@ mod tests {
 
         let b = Book::new(&f.up, &f.presets, &c, &d);
         let m = b.matrix(&cols(&[("A1", None)]), None, "");
-        let cell = &m.rows.iter().find(|r| r.key == "wiping.child").unwrap().cells[0];
+        let cell = &m
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.child")
+            .unwrap()
+            .cells[0];
 
         assert!(!cell.editable);
         let note = cell.blocked_note.as_deref().expect("灰了必须有一句");
@@ -2028,7 +1951,12 @@ mod tests {
         assert_eq!(cell.jump_to.as_deref(), Some("wiping.mode"), "得能跳过去");
 
         // 没被关着的格子不带这两样，否则界面上会多出一句空话
-        let mode = &m.rows.iter().find(|r| r.key == "wiping.mode").unwrap().cells[0];
+        let mode = &m
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.mode")
+            .unwrap()
+            .cells[0];
         assert!(mode.blocked_note.is_none() && mode.jump_to.is_none());
     }
 
@@ -2044,17 +1972,14 @@ mod tests {
 
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
 
-        // 两个组，顺序照 tab.order（空间偏移在擦料方式前面）
         let labels: Vec<&str> = desk.groups.iter().map(|g| g.label.as_str()).collect();
         assert_eq!(labels, vec!["空间偏移", "擦料方式"]);
 
-        // 每组自己数自己的项数，且与它装的行数一致
         for g in &desk.groups {
             let rows: usize = g.items.iter().map(|i| 1 + i.children.len()).sum();
             assert_eq!(g.count, rows, "组「{}」的计数与行数对不上", g.label);
         }
 
-        // 子项挂在父项下面，不再是平铺的两行
         let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
         let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
         assert_eq!(mode.children.len(), 1);
@@ -2084,11 +2009,9 @@ mod tests {
         let searched = b.desk("A1", Some("A1/STANDARD"), None, "擦料塔");
         assert_eq!(all.nav, searched.nav, "导航不该跟着搜索走");
 
-        // 但分组列表要跟着搜索走
         assert!(searched.groups.len() <= all.groups.len());
         assert!(searched.total > 0, "总数说的是过滤前");
 
-        // 这台机型一项都没有的组不列出来
         let a2l = b.desk("A2L", Some("A2L/STANDARD"), None, "");
         for t in &a2l.nav {
             assert!(t.count > 0);
@@ -2096,8 +2019,7 @@ mod tests {
         }
     }
 
-    /// 父项把下面那几项关掉时，**给一句话让界面能收起来** ——
-    /// 这是「矩阵里只能一格一行灰字」的替代
+    /// 父项把下面那几项关掉时，**给一句话让界面能收起来**
     #[test]
     fn a_closed_family_gets_one_sentence_instead_of_grey_cells() {
         let f = Fixture::load();
@@ -2127,7 +2049,8 @@ mod tests {
         assert!(note.contains('1'), "要说关掉了几项：{note}");
 
         // 没关的时候不给这一句，否则界面上多一条空话
-        let open = Book::new(&f.up, &f.presets, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
+        let open =
+            Book::new(&f.up, &f.presets, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
         let mode2 = open
             .groups
             .iter()
@@ -2159,7 +2082,6 @@ mod tests {
             .iter()
             .flat_map(|g| g.items.iter())
             .all(|i| i.children.is_empty()));
-        // 组名仍然说得出来（行上带着 sectionLabel）
         assert_eq!(desk.groups[0].label, "擦料方式");
     }
 
@@ -2281,7 +2203,11 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // A1 的 defaultBundle 里有那条 BBS → A1 的两个版本继承它 → 已分配
-        let row = b.stock_rows().into_iter().find(|r| r.id == "a1_bbs_04").unwrap();
+        let row = b
+            .stock_rows()
+            .into_iter()
+            .find(|r| r.id == "a1_bbs_04")
+            .unwrap();
         assert_eq!(row.assign, BbsAssign::Assigned);
         assert!(row.in_any_bundle);
         assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::InheritedFromMachine);
@@ -2310,29 +2236,49 @@ mod tests {
         assert!(row.in_any_bundle, "两个字段互不影响");
     }
 
-    /// 版本自己挑了一份 BBS → 来源变成「本版本单独一份」，改机型默认不再影响它
+    /// **一个版本交付哪几条曲线 = 它那台机型的默认套餐**（REPORT §7.3）。
+    ///
+    /// 「这一版自己挑一串」这条路径删掉了，所以改套餐会**同时**带动这台机型下的每一版 ——
+    /// 没有哪一版能偷偷留一份
     #[test]
-    fn a_version_can_own_its_bbs_list() {
+    fn every_version_of_a_machine_draws_from_the_same_bundle() {
         let f = Fixture::load();
         let c = committed();
         let mut d = Draft::default();
+        let b = Book::new(&f.up, &f.presets, &c, &d);
+
+        for uid in ["A1/STANDARD", "A1/FAST"] {
+            assert_eq!(
+                b.bbs_source(uid),
+                BbsSource::InheritedFromMachine,
+                "只有一种来源了"
+            );
+            assert_eq!(b.effective_bbs(uid), vec!["a1_bbs_04"]);
+        }
+
         apply(
             &mut d,
             &c,
             &f.presets.registry,
-            &[Patch::SetBbs {
-                uid: "A1/STANDARD".to_owned(),
-                list: Some(vec![]),
+            &[Patch::SetBundle {
+                bundle_id: "A1_default".to_owned(),
+                presets: Vec::new(),
+                bbs: vec!["a1_bbs_04".to_owned(), "a1_bbs_06".to_owned()],
             }],
         )
         .unwrap();
+
         let b = Book::new(&f.up, &f.presets, &c, &d);
-        assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::Own);
-        assert!(b.effective_bbs("A1/STANDARD").is_empty());
-        assert_eq!(
-            b.bbs_source("A1/FAST"),
-            BbsSource::InheritedFromMachine,
-            "另一版不受影响"
+        for uid in ["A1/STANDARD", "A1/FAST"] {
+            assert_eq!(
+                b.effective_bbs(uid),
+                vec!["a1_bbs_04", "a1_bbs_06"],
+                "{uid} 跟着套餐变 —— 它自己存不了第二份"
+            );
+        }
+        assert!(
+            b.effective_bbs("P1S/LITE").is_empty(),
+            "P1S 没有默认套餐，不受影响"
         );
     }
 
@@ -2382,12 +2328,7 @@ mod tests {
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
         let fps: BTreeMap<String, String> = uids
             .iter()
-            .map(|u| {
-                (
-                    (*u).to_owned(),
-                    b.version_layers(u).unwrap().fingerprint(),
-                )
-            })
+            .map(|u| ((*u).to_owned(), b.version_layers(u).unwrap().fingerprint()))
             .collect();
         drop(b);
         apply(

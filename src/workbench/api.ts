@@ -102,26 +102,27 @@ export interface Boot {
 
 /* ---------- 整本 ---------- */
 
-/** `derive::Badges`。`items` 含上游给的那一半，`own` 只算我们写的（doc §3.6） */
+/**
+ * `derive::Badges`。
+ *
+ * 以前这里要分开数「一共几项」与「其中我们自己写了几项」（`baseOwn` / `overrideOwn`）：
+ * 那时候每层各有两半。b04 Task 12 之后每层只有一张 `machineVariants` 拆出来的表，
+ * 两个数是同一个 —— 于是只留 `items`
+ */
 export interface Badges {
   machines: number
   versions: number
   baseItems: number
-  baseOwn: number
   overrideItems: number
-  overrideOwn: number
 }
 
-/** `derive::VersionNode` */
+/** `derive::VersionNode`。`items` = 版本层这一版钉着几项值 */
 export interface VersionNode {
   uid: string
   versionId: string
   name: string
   tag: string | null
-  isNew: boolean
-  archived: boolean
-  own: number
-  total: number
+  items: number
   build: BuildState
   bbsSource: BbsSource
   bbsCount: number
@@ -130,23 +131,15 @@ export interface VersionNode {
   orphanKeys: string[]
 }
 
-/** `derive::MachineNode` */
+/** `derive::MachineNode`。`items` = 机型层这台钉着几项值 */
 export interface MachineNode {
   id: string
   display: string
   icon: string | null
-  own: number
-  total: number
+  items: number
   build: BuildState
   dimensionsMissing: boolean
   versions: VersionNode[]
-}
-
-/** `derive::VersionBrief` */
-export interface VersionBrief {
-  uid: string
-  machineId: string
-  name: string
 }
 
 /** `derive::BuildRow` */
@@ -167,7 +160,6 @@ export interface BuildRow {
 /** `derive::BookView` */
 export interface BookView {
   machines: MachineNode[]
-  archived: VersionBrief[]
   badges: Badges
   dirtyCount: number
   save: SaveState
@@ -264,7 +256,8 @@ export interface Col {
   level: Level
   machine: string
   label: string
-  own: number
+  /** 这一列那一层钉着几项值 */
+  items: number
 }
 
 /** `visibility::BlockedBy` —— `need` 是后端拼好的整句 */
@@ -437,36 +430,9 @@ export interface TrashEntry {
 
 /* ---------- 预览 ---------- */
 
-/** `preview::InheritedChange` */
-export interface InheritedChange {
-  key: string
-  label: string
-  before: string
-  after: string
-  beforeOrigin: Origin
-  afterOrigin: Origin
-}
-
-/** `preview::LostKey` */
-export interface LostKey {
-  key: string
-  label: string
-  /** 为真时这个值搬过去会变成再也进不了产物的孤儿 */
-  hadOwnValue: boolean
-}
-
-/** `preview::MovePreview` —— 四组分开摆 */
-export interface MovePreview {
-  uid: string
-  fromMachine: string
-  toMachine: string
-  allowed: boolean
-  blockedReason: string | null
-  kept: string[]
-  inheritedChanges: InheritedChange[]
-  gained: string[]
-  lost: LostKey[]
-}
+/* 移动预览（`MovePreview` / `InheritedChange` / `LostKey`）整组删了（b04 Task 12）：
+   「把一个版本搬到另一台机型」现在归「机型与版本」页，`Patch::MoveVersion`
+   与 `wb_preview_move` 一起没有了。剩下的只读推演只有批量（`BulkPreview`）。 */
 
 /** `preview::BulkEffect` */
 export interface BulkEffect {
@@ -515,18 +481,14 @@ export interface DiffLine {
 /**
  * `domain::Patch`。**`value: null` = 删键 = 挂回继承**，不是「值设成空」。
  *
- * `kind` 是 serde 的内部标签，所以这里也用它做可辨识联合
+ * `kind` 是 serde 的内部标签，所以这里也用它做可辨识联合。
+ *
+ * b04 Task 12 之后**只剩这四种**：改名 / 归档 / 挑 BBS 与新建 / 克隆 / 移动 / 删除版本
+ * 全部归「机型与版本」页即时落盘（REPORT §7），草稿里因此不再有结构手势 ——
+ * **撤销栈只服务值编辑**
  */
 export type Patch =
   | { kind: 'setValue'; level: Level; owner: string; key: string; value: unknown | null }
-  | { kind: 'cloneVersion'; fromUid: string; name: string }
-  | { kind: 'newVersion'; machineId: string; name: string }
-  | { kind: 'renameVersion'; uid: string; name: string }
-  | { kind: 'moveVersion'; uid: string; toMachineId: string }
-  | { kind: 'archiveVersion'; uid: string }
-  | { kind: 'restoreVersion'; uid: string }
-  | { kind: 'purgeVersion'; uid: string }
-  | { kind: 'setBbs'; uid: string; list: string[] | null }
   | { kind: 'setVisibility'; fileId: string; visibility: Visibility }
   | { kind: 'setBundle'; bundleId: string; presets: string[]; bbs: string[] }
   | {
@@ -541,9 +503,8 @@ export interface ApplyResult {
   view: BookView
   /** 撤销这次操作要提交的 patches，**倒序**。为空时配合 `undoable=false` */
   inverse: Patch[]
-  /** 为 false 时界面**不给**撤销按钮 —— 删除与生成记录不进撤销栈 */
+  /** 为 false 时界面**不给**撤销按钮 —— 生成记录不进撤销栈 */
   undoable: boolean
-  notices: string[]
   /** 顺带带回来的那一页。**省掉 apply 之后再问一次**（一次手势一次派生） */
   desk: Desk | null
   matrix: Matrix | null
@@ -561,9 +522,11 @@ export type Refresh =
 /** `app::SaveResult` */
 export interface SaveResult {
   view: BookView
-  /** 旧 uid → 新 uid。**新建与移动都会改 uid**，选中与勾选列要据此修 */
+  /**
+   * 旧 uid → 新 uid。b04 Task 12 之后**永远是空的** —— 会改 uid 的那两条
+   * （新建、移动版本）都归「机型与版本」页了。留着是为了不动这个返回值的形状
+   */
   remap: Record<string, string>
-  notices: string[]
 }
 
 /* ---------- 校验三档 ---------- */
@@ -833,8 +796,6 @@ export const wb = {
   /** 默认视角：一个版本的分组列表 */
   desk: (machineId: string, uid: string | null, tab: string | null, query: string) =>
     invoke<Desk>('wb_desk', { machineId, uid, tab, query }),
-  previewMove: (uid: string, toMachineId: string) =>
-    invoke<MovePreview>('wb_preview_move', { uid, toMachineId }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
     invoke<BulkPreview>('wb_preview_bulk', { key, value, cols }),
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),

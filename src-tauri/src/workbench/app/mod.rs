@@ -50,7 +50,7 @@ use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix, StockRow};
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
-use crate::workbench::domain::preview::{BulkPreview, MovePreview};
+use crate::workbench::domain::preview::BulkPreview;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
@@ -603,18 +603,6 @@ pub fn wb_save_ui(ui: Value) -> Result<(), AppError> {
 /* ---------- 查（只读推演） ---------- */
 
 #[tauri::command]
-pub fn wb_preview_move(uid: String, to_machine_id: String) -> Result<MovePreview, AppError> {
-    traced("wb_preview_move", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            Book::new(&ctx.up, &ctx.presets, &c, &d)
-                .preview_move(&uid, &to_machine_id)
-                .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))
-        })
-    })
-}
-
-#[tauri::command]
 pub fn wb_preview_bulk(
     key: String,
     value: Value,
@@ -707,43 +695,6 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
     }
 
     // ② 结构改动。**各算一条** —— 它们和改一个值一样要被保存
-    for v in &draft.added {
-        out.push(structural(&v.machine_id, &v.name, "新建版本", "", &v.name));
-    }
-    for (uid, name) in &draft.renamed {
-        let old = committed
-            .versions
-            .get(uid)
-            .map(|c| c.name.clone())
-            .unwrap_or_default();
-        out.push(structural(uid, name, "改名", &old, name));
-    }
-    for (uid, to) in &draft.moved {
-        let from = committed
-            .versions
-            .get(uid)
-            .map(|c| c.machine_id.clone())
-            .unwrap_or_default();
-        out.push(structural(uid, uid, "移动", &from, to));
-    }
-    for (uid, archived) in &draft.archived {
-        let (b, a) = if *archived {
-            ("在树上", "归档")
-        } else {
-            ("归档", "在树上")
-        };
-        out.push(structural(uid, uid, "归档状态", b, a));
-    }
-    for uid in &draft.purged {
-        out.push(structural(uid, uid, "删除", "在树上", "回收站"));
-    }
-    for (uid, list) in &draft.bbs {
-        let a = match list {
-            Some(l) => format!("自己一份（{} 条）", l.len()),
-            None => w::BbsSource::InheritedFromMachine.label().to_owned(),
-        };
-        out.push(structural(uid, uid, "BBS 分配", "", &a));
-    }
     for (file_id, vis) in &draft.visibility {
         out.push(structural(file_id, file_id, "菜单可见性", "", w::visibility_label(*vis)));
     }
@@ -849,8 +800,7 @@ pub fn wb_apply_draft(
         with_ctx_mut(|ctx| {
             let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &patches)?;
             ctx.touch();
-            let mut notices = ctx.notices_now();
-            notices.extend(out.notices);
+            let notices = ctx.notices_now();
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
 
             // 一次派生，两份结果：整本视图 + 调用方要的那一页
@@ -900,9 +850,8 @@ pub fn wb_apply_draft(
 #[serde(rename_all = "camelCase")]
 pub struct SaveResult {
     pub view: BookView,
-    /// 旧 uid → 新 uid。**新建与移动都会改 uid**，前端要据此修选中与勾选列
+    /// 旧 uid → 新 uid（见 `storage` 模块文档那条 `remap 为什么还在`）
     pub remap: BTreeMap<String, String>,
-    pub notices: Vec<String>,
 }
 
 #[tauri::command]
@@ -915,16 +864,14 @@ pub fn wb_save() -> Result<SaveResult, AppError> {
             // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
             ctx.flush();
             let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
-            let mut notices = out.notices;
 
             // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
             ctx.reload_from_disk()?;
-            notices.extend(ctx.notices_now());
-            let view = view_of(ctx, &ctx.committed, &ctx.draft, notices.clone());
+            let notices = ctx.notices_now();
+            let view = view_of(ctx, &ctx.committed, &ctx.draft, notices);
             Ok(SaveResult {
                 view,
                 remap: out.remap,
-                notices,
             })
         })
     })
@@ -961,6 +908,8 @@ pub fn wb_open(app: tauri::AppHandle) -> Result<(), AppError> {
 mod tests {
     use super::*;
     use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::wording::BuildState;
+    use crate::workbench::domain::Origin;
 
     /// 造一个不碰真仓库、也不碰那个全局的 `Ctx`。
     ///
@@ -1230,7 +1179,10 @@ mod tests {
 
 
 
-    /// **差异清单要逐条说得出来**，不能只给一个数字
+    /// **差异清单要逐条说得出来**，不能只给一个数字。
+    ///
+    /// 以前这一条还要列出改名与归档那两行 —— 两种动作都删掉了（REPORT §7），
+    /// 于是**现在能进草稿的只有值改动**，这三行全是改值
     #[test]
     fn the_diff_lists_every_pending_change() {
         let (_d, _f, ctx) = ctx();
@@ -1246,12 +1198,17 @@ mod tests {
                     key: "toolhead.offset.x".to_owned(),
                     value: Some(serde_json::json!(7)),
                 },
-                Patch::RenameVersion {
-                    uid: "A1/FAST".to_owned(),
-                    name: "新名字".to_owned(),
+                Patch::SetValue {
+                    level: Level::Machine,
+                    owner: "A1".to_owned(),
+                    key: "wiping.child".to_owned(),
+                    value: Some(serde_json::json!(33)),
                 },
-                Patch::ArchiveVersion {
-                    uid: "A1/FAST".to_owned(),
+                Patch::SetValue {
+                    level: Level::Version,
+                    owner: "A1/FAST".to_owned(),
+                    key: "toolhead.offset.x".to_owned(),
+                    value: None,
                 },
             ],
         )
@@ -1259,14 +1216,19 @@ mod tests {
 
         let lines = diff_draft(&ctx, &c, &d);
         assert_eq!(lines.len(), 3, "三处改动三行：{lines:#?}");
+        assert!(
+            lines.iter().all(|l| l.kind == "改值"),
+            "草稿里剩下的只有值改动：{lines:#?}"
+        );
 
-        let value_line = lines.iter().find(|l| l.kind == "改值").unwrap();
+        let value_line = lines.iter().find(|l| l.owner == "A1/STANDARD").unwrap();
         assert_eq!(value_line.target, "A1 · 标准版");
         assert_eq!(value_line.before, "-1 mm", "before 取已落盘那一份");
         assert_eq!(value_line.after, "7 mm");
 
-        assert!(lines.iter().any(|l| l.kind == "改名" && l.after == "新名字"));
-        assert!(lines.iter().any(|l| l.kind == "归档状态"));
+        // 删键（挂回继承）也要占一行，而且要说得出来是「挂回」
+        let cleared = lines.iter().find(|l| l.owner == "A1/FAST").unwrap();
+        assert_eq!(cleared.target, "A1 · 高速版");
     }
 
     /// 草稿里指向已消失版本的条目在**加载时**清掉，并且报出来。
@@ -1303,21 +1265,26 @@ mod tests {
         assert!(!w::disabled::NOTHING_TO_SAVE.is_empty());
     }
 
-    /// 保存之后 uid 会变，而且**下一屏里那一版要在树上**（b04 Task 8.5）。
+    /// **「改一个值 → 保存 → 重开工作台，值还在」**（b04 Task 12.6）。
     ///
-    /// 这条以前的样子是「断言必须有一条提示说上游没有 NEW1」—— 那是把死胡同钉住：
-    /// 清单当时是上游的只读产物，新建的版本永远进不去。清单换成 `presets/` 之后，
-    /// 保存 → 重读 → 它就该在树上，而且没有任何提示
+    /// 这是这一轮的主线，也是以前一直断着的那个主功能：写回能力早就做好了，
+    /// 但 `storage::save` 还在写那些没人再读的 json，于是**保存等于什么都没做**。
+    ///
+    /// 这条以前挂在「新建版本 → 保存 → 在树上看见」上，而新建现在归「机型与版本」页
+    /// （REPORT §7.4），所以换成整条主链：**改值 → 保存 → 重读盘 → 值还在**。
+    /// 「重读盘」这三个字是这条判据的全部 —— 只看内存的话等于什么都没验
     #[test]
-    fn saving_a_new_version_puts_it_on_the_tree_with_its_new_uid() {
+    fn a_value_edited_then_saved_survives_reopening_the_workbench() {
         let (_d, _f, mut ctx) = ctx();
         apply_patches(
             &mut ctx.draft,
             &ctx.committed,
             &ctx.presets.registry,
-            &[Patch::NewVersion {
-                machine_id: "A1".to_owned(),
-                name: "我的新配方".to_owned(),
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(7)),
             }],
         )
         .unwrap();
@@ -1325,21 +1292,39 @@ mod tests {
 
         let out =
             storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft).unwrap();
-        assert_eq!(out.remap.get("new-1").map(String::as_str), Some("A1/NEW1"));
+        assert!(out.remap.is_empty(), "保存不再改 uid");
 
-        // 保存之后必须重读：落盘的那一份才是新的真相
+        // 重开 = 重读盘。落盘的那一份才是新的真相
         ctx.reload_from_disk().unwrap();
         let (c2, d2, n2) = state(&ctx).unwrap();
         assert!(d2.is_clean(), "保存后草稿清空");
         let v = view_of(&ctx, &c2, &d2, n2);
         assert!(v.notices.is_empty(), "不该有任何提示：{:?}", v.notices);
-        let a1 = v.machines.iter().find(|m| m.id == "A1").expect("A1 那一支");
-        assert!(
-            a1.versions.iter().any(|x| x.uid == "A1/NEW1"),
-            "保存完在树上还是看不见：{:?}",
-            a1.versions.iter().map(|x| &x.uid).collect::<Vec<_>>()
+        assert_eq!(v.dirty_count, 0);
+
+        // ① 盘上：值躺在 `machineVariants` 的 `A1:STANDARD` 里
+        let table = &ctx
+            .presets
+            .registry
+            .param("toolhead.offset.x")
+            .unwrap()
+            .machine_variants;
+        assert_eq!(table["A1:STANDARD"].as_f64(), Some(7.0), "值没落到盘上");
+        assert_eq!(table["A1:FAST"].as_f64(), Some(-0.7), "顺手动了隔壁那一版");
+
+        // ② 界面上：来源层该是「版本」—— 它自己钉着这一项
+        let book = Book::new(&ctx.up, &ctx.presets, &c2, &d2);
+        let l = book.version_layers("A1/STANDARD").unwrap();
+        assert_eq!(
+            l.effective("toolhead.offset.x").unwrap().value.as_f64(),
+            Some(7.0),
+            "float 字段越过一次盘就是 7.0，不是在赌它的表示"
         );
-        assert_eq!(v.badges.versions, 5, "原来四版，加一版");
+        assert_eq!(l.effective("toolhead.offset.x").unwrap().origin, Origin::Version);
+
+        // ③ 顺带：改了值，这一版的产物指纹就变了 → 该显示「待生成」
+        assert_eq!(book.build_state("A1/STANDARD"), BuildState::NeverBuilt);
+        assert_eq!(v.badges.versions, 4, "这一轮不改清单，版本数不变");
     }
 
     /// 矩阵与批量预览的列序一致，且矩阵能按一列当「字段详情」用

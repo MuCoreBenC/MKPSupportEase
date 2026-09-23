@@ -229,9 +229,6 @@ fn machines(book: &Book<'_>, out: &mut Vec<Issue>) {
 /// 版本级：值越界、枚举不存在、条件成环、孤儿键
 fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
     for v in book.versions() {
-        if v.archived {
-            continue; // 归档的不参与交付，也就不参与校验
-        }
         let Some(layers) = book.version_layers(&v.uid) else {
             continue;
         };
@@ -417,29 +414,9 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
         });
     }
 
-    // 版本自己挑了 BBS 但挑成了空：**待办** ——
-    // 「跟机型默认」和「明确不要任何曲线」在界面上长得像，但后者需要有人确认过
-    for v in book.versions() {
-        if v.archived {
-            continue;
-        }
-        if v.own_bbs.as_ref().is_some_and(Vec::is_empty) {
-            out.push(Issue {
-                id: format!("bbs.empty.{}", v.uid),
-                severity: Severity::Todo,
-                title: format!("{} 明确不带任何 BBS 曲线", v.name),
-                detail: "这一版自己挑了一份 BBS 清单，而清单是空的 —— 与「跟机型默认」不是\
-                         同一件事。确认是有意的话，这一条可以一直留着。"
-                    .to_owned(),
-                at: Where {
-                    view: View::Menu,
-                    machine_id: Some(v.machine_id.clone()),
-                    uid: Some(v.uid.clone()),
-                    key: None,
-                },
-            });
-        }
-    }
+    /* 「版本自己挑了 BBS 但挑成了空」这条校验撤了（b04 Task 12）：版本不再有自己的
+       那份清单（REPORT §7.3），于是那个入口不存在了 ——
+       「跟机型默认」和「明确不要任何曲线」也不再会长得像。 */
 }
 
 #[cfg(test)]
@@ -447,7 +424,6 @@ mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
-    use crate::workbench::domain::Overrides;
     use std::collections::BTreeMap;
 
     fn committed() -> Committed {
@@ -464,16 +440,11 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared: true,
                     ..Default::default()
                 },
             );
         }
         Committed {
-            machines: ["A1", "A2L", "P1S"]
-                .into_iter()
-                .map(|m| (m.to_owned(), Overrides::new()))
-                .collect(),
             versions,
             catalog: fixture_catalog(),
             ..Default::default()
@@ -607,9 +578,13 @@ mod tests {
         }
     }
 
-    /// 归档的版本不参与校验 —— 它不交付，报它的问题是噪音
+    /// 字段值不合法 → **阻断**，并且说得出来卡在哪一项上
+    ///
+    /// 以前这一条还要验「归档的版本不参与校验」（归档之后那条阻断会让路）。
+    /// 归档这个概念删掉了（REPORT §7.2），于是「不参与校验」没有入口了 ——
+    /// 清单上每一版现在都参与交付
     #[test]
-    fn archived_versions_are_skipped() {
+    fn an_illegal_value_blocks_and_names_the_field() {
         let f = Fixture::load();
         let c = committed();
         let mut d = Draft::default();
@@ -625,21 +600,15 @@ mod tests {
             }],
         )
         .unwrap();
-        assert!(inspect(&Book::new(&f.up, &f.presets, &c, &d)).blocked());
 
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::ArchiveVersion {
-                uid: "A1/STANDARD".to_owned(),
-            }],
-        )
-        .unwrap();
-        assert!(
-            !inspect(&Book::new(&f.up, &f.presets, &c, &d)).blocked(),
-            "归档之后它不交付了，那条阻断也就不该挡着别人生成"
-        );
+        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        assert!(r.blocked(), "值不合法必须挡住生成");
+        let hit = r
+            .issues
+            .iter()
+            .find(|i| i.at.key.as_deref() == Some("wiping.mode"))
+            .expect("没报在具体那一项上");
+        assert_eq!(hit.at.uid.as_deref(), Some("A1/STANDARD"));
     }
 
     /// 三档的词互不相同，且解释句不是把词重复一遍
