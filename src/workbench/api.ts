@@ -175,7 +175,12 @@ export interface BookView {
   lastBuild: string | null
   buildRows: BuildRow[]
   notices: string[]
+  /** `wording::SnapshotState` —— 崩溃快照跟上了没有。**与 `save` 是两件事** */
+  snapshot: SnapshotState
 }
+
+/** `wording::SnapshotState` */
+export type SnapshotState = 'current' | 'pending' | 'failed'
 
 /* ---------- 字段定义 ---------- */
 
@@ -284,6 +289,10 @@ export interface Cell {
   reason: string | null
   /** 根在前 */
   blocked: BlockedBy[]
+  /** 点开灰格子时显示的整句。**后端拼好的**，前端不组装 */
+  blockedNote: string | null
+  /** 「去改那一项」跳到哪个字段。`null` = 不给跳转按钮 */
+  jumpTo: string | null
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
   raw: unknown
 }
@@ -295,7 +304,17 @@ export interface Row {
   desc: string
   unit: string | null
   sectionId: string
+  /** 组的中文名。**与上一行不同就插一条分组表头** —— 分组是后端排出来的 */
+  sectionLabel: string
   tabId: string | null
+  /** 0 = 顶层，1 = 子项。只有两级 */
+  depth: number
+  parentKey: string | null
+  parentLabel: string | null
+  /** 「属于：X」 */
+  parentNote: string | null
+  /** 「受「X」控制」/「整组由「X」控制」。**与当前值无关**，灰之前就在 */
+  controlNote: string | null
   gcode: boolean
   deprecated: boolean
   cells: Cell[]
@@ -309,6 +328,52 @@ export interface Matrix {
   note: string | null
   /** 空的时候写出为什么空，不留白 */
   emptyReason: string | null
+}
+
+/* ---------- 配方台（默认视角） ---------- */
+
+/** `derive::Desk` —— 一个版本的分组列表 */
+export interface Desk {
+  /** 左栏。**不随搜索变** */
+  nav: DeskNavTab[]
+  groups: DeskGroup[]
+  /** 过滤前一共几项 */
+  total: number
+  note: string | null
+  emptyReason: string | null
+}
+
+/** `derive::DeskNavTab` */
+export interface DeskNavTab {
+  id: string
+  label: string
+  count: number
+  sections: DeskNavSection[]
+}
+
+/** `derive::DeskNavSection` */
+export interface DeskNavSection {
+  id: string
+  label: string
+  count: number
+}
+
+/** `derive::DeskGroup` */
+export interface DeskGroup {
+  sectionId: string
+  label: string
+  count: number
+  /** 整组被 section 级条件关掉时的那一句。界面据此把整组收起来 */
+  offNote: string | null
+  items: DeskItem[]
+}
+
+/** `derive::DeskItem` —— 一项 + 挂在它下面的子项。**只有两级** */
+export interface DeskItem {
+  row: Row
+  children: Row[]
+  /** 这一项把自己下面那几个关掉了时的那一句 */
+  offNote: string | null
 }
 
 /* ---------- 仓库盘点 / 回退 / 回收站 ---------- */
@@ -479,7 +544,19 @@ export interface ApplyResult {
   /** 为 false 时界面**不给**撤销按钮 —— 删除与生成记录不进撤销栈 */
   undoable: boolean
   notices: string[]
+  /** 顺带带回来的那一页。**省掉 apply 之后再问一次**（一次手势一次派生） */
+  desk: Desk | null
+  matrix: Matrix | null
 }
+
+/**
+ * `app::Refresh` —— 写完顺带刷哪一页。
+ *
+ * 注意 `page` 是判别字段（Rust 那边 `tag = "page"`）
+ */
+export type Refresh =
+  | { page: 'desk'; machineId: string; uid?: string | null; tab?: string | null; query?: string }
+  | { page: 'matrix'; cols: ColRef[]; tab?: string | null; query?: string }
 
 /** `app::SaveResult` */
 export interface SaveResult {
@@ -487,6 +564,89 @@ export interface SaveResult {
   /** 旧 uid → 新 uid。**新建与移动都会改 uid**，选中与勾选列要据此修 */
   remap: Record<string, string>
   notices: string[]
+}
+
+/* ---------- 校验三档 ---------- */
+
+/** `issues::Severity`。分档的判据是「挡不挡生成」，不是「严不严重」 */
+export type Severity = 'block' | 'todo' | 'hint'
+
+/** `issues::View` —— 去哪儿处理 */
+export type IssueView = 'params' | 'menu' | 'build' | 'fields' | 'stock' | 'fallback'
+
+/** `issues::Where`。一条说不清去哪儿的问题**等于没报** */
+export interface IssueWhere {
+  view: IssueView
+  machineId: string | null
+  uid: string | null
+  key: string | null
+}
+
+/** `issues::Issue` */
+export interface Issue {
+  id: string
+  severity: Severity
+  title: string
+  /** 「怎么办」。不是把标题换个说法重复一遍 */
+  detail: string
+  at: IssueWhere
+}
+
+/** `issues::Report`。`blocks > 0` = 生成该全禁用 */
+export interface IssueReport {
+  issues: Issue[]
+  blocks: number
+  todos: number
+  hints: number
+  /** 零问题时的那一句。**不留白** */
+  emptyHint: string
+}
+
+/* ---------- 生成 / 恢复 / 发布 ---------- */
+
+/** `build::Scope` —— 三个生成入口 */
+export type BuildScope = 'stale' | 'all' | { picked: string[] }
+
+/** `build::GenerateReport` */
+export interface GenerateReport {
+  stamp: string
+  written: string[]
+  /** 算出来和现在的文件一模一样，所以没重写。**要显式说出来** ——
+   *  不说的话「点了生成但文件时间没变」看起来像失败了 */
+  unchanged: string[]
+  skipped: [string, string][]
+  /** 生成记录要走 `applyDraft` 落进草稿 */
+  mark: Patch
+}
+
+/** `build::RevertChange` */
+export interface RevertChange {
+  key: string
+  label: string
+  before: string
+  after: string
+}
+
+/** `build::RevertPreview` —— **只算不写**，patches 交给 applyDraft */
+export interface RevertPreview {
+  uid: string
+  allowed: boolean
+  blockedReason: string | null
+  patches: Patch[]
+  changes: RevertChange[]
+  /** 原本继承来的、会从此脱钩的那几项。**不许闷着改** */
+  detaching: string[]
+}
+
+/** `build::PublishReport` */
+export interface PublishReport {
+  stamp: string
+  root: string
+  files: number
+  /** null = 上游未声明。**不编一个版本号出来** */
+  minimumClient: string | null
+  todos: number
+  hints: number
 }
 
 /* ---------- 状态词 ---------- */
@@ -541,9 +701,70 @@ export interface Words {
     | 'matrixSearchSpansAllTabs',
     string
   >
+  /**
+   * 关联那一组里**不带变量**的那几句。
+   * 带变量的整句在后端就拼好了（`Row.controlNote` / `Cell.blockedNote`）——
+   * 前端不拿模板填空，模板一分两处迟早分岔
+   */
+  relate: Record<'goFixIt' | 'showAnyway', string>
+  /** 崩溃快照三态。**与 `save` 不是一回事** */
+  snapshot: Record<SnapshotState, Word>
 }
 
 /* ---------- 命令 ---------- */
+
+/* ---------- 机型与版本（`app::machines`） ---------- */
+
+/** `machines::BrandView` */
+export interface BrandView {
+  id: string
+  name: string
+  logo: string | null
+}
+
+/** `machines::VersionView` —— 版本卡上那六格 */
+export interface VersionView {
+  id: string
+  name: string
+  presetFile: string | null
+  recommendedBundle: string | null
+  tag: string | null
+  description: string | null
+}
+
+/** `machines::MachineView` */
+export interface MachineView {
+  id: string
+  /** 人看的名字。实测有机型的 `name` 是空串而 `display` 才是给人看的 */
+  display: string
+  name: string
+  brand: string
+  defaultBundle: string | null
+  externalAliases: string[]
+  image: string | null
+  icon: string | null
+  /** 有没有 `[dimensions]`。A2L 实测没有 */
+  hasDimensions: boolean
+  /** 禁区块数。0 = 这台没有禁区文件 */
+  zoneCount: number
+  versions: VersionView[]
+  /** 它自己那个 toml 文件名（`A1.toml`）。**给人看的**，让「我在改哪个文件」不用猜 */
+  file: string
+}
+
+/** `machines::MachineList` */
+export interface MachineList {
+  brands: BrandView[]
+  machines: MachineView[]
+  /** 数据根的绝对路径 */
+  root: string
+}
+
+/** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
+export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' | 'description'
+
+/** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
+export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 
 export const wb = {
   open: () => invoke<void>('wb_open'),
@@ -562,6 +783,56 @@ export const wb = {
   ui: () => invoke<Record<string, unknown>>('wb_ui'),
   saveUi: (ui: Record<string, unknown>) => invoke<void>('wb_save_ui', { ui }),
 
+  /**
+   * 机型与版本清单。**这一页唯一的读入口**，不走 `wb_apply_draft` ——
+   * 清单与参数值不共用状态机
+   */
+  machines: () => invoke<MachineList>('wb_machines'),
+
+  /**
+   * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。
+   * 已存在的文件**绝不覆盖**（后端用 `create_new` 原子地占路径）
+   */
+  addMachine: (id: string, brand: string, display: string) =>
+    invoke<MachineList>('wb_add_machine', { id, brand, display }),
+
+  /**
+   * 改版本的一格。`value = null` = **清空**，而清空在文件里是**删掉那一行**，
+   * 不是写 `tag = ''` —— 后者读成「填过，填了个空」，和「还没填」是两件事
+   */
+  setVersionField: (
+    machineId: string,
+    versionId: string,
+    field: VersionField,
+    value: string | null,
+  ) => invoke<MachineList>('wb_set_version_field', { machineId, versionId, field, value }),
+
+  /** 改机型自己的一格。`display` / `brand` 不许清空 */
+  setMachineField: (machineId: string, field: MachineField, value: string | null) =>
+    invoke<MachineList>('wb_set_machine_field', { machineId, field, value }),
+
+  /**
+   * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**
+   * 返回的是字段 key（`wiping.wiper_x` 这种）—— 那是用户能据以行动的单位
+   */
+  versionOrphans: (machineId: string, versionId: string) =>
+    invoke<string[]>('wb_version_orphans', { machineId, versionId }),
+
+  /** 删一个版本。**不可逆**，所以界面上是两步确认 */
+  removeVersion: (machineId: string, versionId: string) =>
+    invoke<MachineList>('wb_remove_version', { machineId, versionId }),
+
+  /**
+   * 加一个版本。**立刻落盘，没有草稿也没有撤销** ——
+   * 逆操作是「删掉那个版本」，所以不为它建一套中间态。
+   * 返回的是**重读盘之后**的清单，界面看到的就是落盘的结果
+   */
+  addVersion: (machineId: string, id: string, name: string) =>
+    invoke<MachineList>('wb_add_version', { machineId, id, name }),
+
+  /** 默认视角：一个版本的分组列表 */
+  desk: (machineId: string, uid: string | null, tab: string | null, query: string) =>
+    invoke<Desk>('wb_desk', { machineId, uid, tab, query }),
   previewMove: (uid: string, toMachineId: string) =>
     invoke<MovePreview>('wb_preview_move', { uid, toMachineId }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
@@ -570,10 +841,19 @@ export const wb = {
 
   /**
    * **唯一的写入口。** `label` 是给撤销按钮显示的一句话
-   * （`撤销：A1 基底 · X 轴偏移`），所以它必须是人话，不是命令名
+   * （`撤销：A1 基底 · X 轴偏移`），所以它必须是人话，不是命令名。
+   *
+   * `refresh` 说「顺带把哪一页给我」：给了就不用在这之后再问一次 ——
+   * 一次手势一次 IPC、后端一次派生
    */
-  applyDraft: (label: string, patches: Patch[]) =>
-    invoke<ApplyResult>('wb_apply_draft', { label, patches }),
+  applyDraft: (label: string, patches: Patch[], refresh?: Refresh) =>
+    invoke<ApplyResult>('wb_apply_draft', { label, patches, refresh: refresh ?? null }),
   save: () => invoke<SaveResult>('wb_save'),
   discard: () => invoke<BookView>('wb_discard'),
+
+  preflight: () => invoke<IssueReport>('wb_preflight'),
+  previewToml: (uid: string) => invoke<string>('wb_preview_toml', { uid }),
+  generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
+  revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
+  publish: () => invoke<PublishReport>('wb_publish'),
 }

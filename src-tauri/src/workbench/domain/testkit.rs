@@ -51,19 +51,40 @@ fn params() -> serde_json::Value {
     serde_json::json!({
         "params": [
             {
-                "key": "toolhead.offset.x", "configKey": "OffX",
-                "tomlKey": "off_x", "jsonKey": "off_x",
-                "label": "X 轴偏移", "desc": "喷嘴在 X 上的偏移", "tomlComment": "",
+                "key": "toolhead.offset.x", "configKey": "XOffset",
+                "tomlKey": "offset", "jsonKey": "x",
+                "label": "X 轴偏移", "desc": "喷嘴在 X 上的偏移", "tomlComment": "笔尖偏移",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 0,
                 "scope": "machine_specific", "section": "toolhead",
                 "layout": { "order": 1, "sectionId": "space" },
-                "unit": "mm",
+                "unit": "mm", "min": -50, "max": 50, "step": 0.05,
                 // A1 两个版本值不同 → 留覆盖；P1S 唯一版本 → 上提到基底
                 "machineVariants": {
                     "A1:STANDARD": -1,
                     "A1:FAST": -0.7,
                     "P1S:LITE": -25.9
                 }
+            },
+            // y 与 z 与 x **共享 tomlKey**：渲染时要合成内联表
+            // `offset = { x = …, y = …, z = … }`，成员名取 jsonKey。
+            // 这是上游真实的形状（toolhead.offset.x/y/z 的 tomlKey 都是 offset）
+            {
+                "key": "toolhead.offset.y", "configKey": "YOffset",
+                "tomlKey": "offset", "jsonKey": "y",
+                "label": "Y 轴偏移", "desc": "", "tomlComment": "笔尖偏移",
+                "valueType": "float", "uiComponent": "number", "defaultValue": 18.6,
+                "scope": "machine_specific", "section": "toolhead",
+                "layout": { "order": 1.1, "sectionId": "space" },
+                "unit": "mm", "min": -50, "max": 50, "step": 0.05
+            },
+            {
+                "key": "toolhead.offset.z", "configKey": "ZOffset",
+                "tomlKey": "offset", "jsonKey": "z",
+                "label": "Z 轴偏移", "desc": "", "tomlComment": "笔尖偏移",
+                "valueType": "float", "uiComponent": "number", "defaultValue": 4,
+                "scope": "machine_specific", "section": "toolhead",
+                "layout": { "order": 1.2, "sectionId": "space" },
+                "unit": "mm", "min": 0, "max": 20, "step": 0.05
             },
             {
                 "key": "toolhead.only_p1s", "configKey": "OnlyP1S",
@@ -82,13 +103,17 @@ fn params() -> serde_json::Value {
                 "scope": "universal", "section": "toolhead",
                 "layout": { "order": 3, "sectionId": "space" }
             },
+            // 下面两条的 `layout.order` **刻意和 space 组的号段重叠**（1.05 / 1.5 落在
+            // offset.x 的 1 与 only_p1s 的 2 之间）。上游真实数据就是这样：order 是
+            // section **内部**的序号，跨组必然撞号。拿它当全局键排序就会把两组洗成一团 ——
+            // `rows_are_grouped_by_section_not_interleaved` 靠这个形状才测得到东西
             {
                 "key": "wiping.mode", "configKey": "Mode",
                 "tomlKey": "mode", "jsonKey": "mode",
                 "label": "擦拭部件", "desc": "", "tomlComment": "",
                 "valueType": "string", "uiComponent": "segmented", "defaultValue": "tower",
                 "scope": "universal", "section": "wiping",
-                "layout": { "order": 4, "sectionId": "wipe" },
+                "layout": { "order": 1.05, "sectionId": "wipe" },
                 "choices": [
                     { "label": "擦料塔", "value": "tower" },
                     { "label": "圆盘擦拭", "value": "disk" }
@@ -100,7 +125,7 @@ fn params() -> serde_json::Value {
                 "label": "塔位置 X", "desc": "", "tomlComment": "",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 20,
                 "scope": "universal", "section": "wiping",
-                "layout": { "order": 5, "sectionId": "wipe" },
+                "layout": { "order": 1.5, "sectionId": "wipe" },
                 "parentKey": "wiping.mode",
                 "showWhen": { "key": "wiping.mode", "op": "eq", "value": "tower" }
             }
@@ -120,6 +145,8 @@ fn layout() -> serde_json::Value {
         "tabs": [
             { "id": "offset", "sections": [{ "id": "space", "items": [
                 { "id": "i0", "paramKey": "toolhead.offset.x" },
+                { "id": "i0y", "paramKey": "toolhead.offset.y" },
+                { "id": "i0z", "paramKey": "toolhead.offset.z" },
                 { "id": "i1", "paramKey": "toolhead.only_p1s" },
                 { "id": "i2", "paramKey": "toolhead.script" }
             ] }] },

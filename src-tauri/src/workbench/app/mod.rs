@@ -32,18 +32,23 @@
 //! 与矩阵单元格**一模一样**。再建一套 DTO 等于给同一件事写两个形状，
 //! 迟早只改其中一个。所以字段详情走 `wb_matrix(cols=[那一列])`。
 
+pub mod build;
+/// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
+/// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
+pub mod machines;
 pub mod storage;
 pub mod words;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::workbench::domain::derive::{Book, BookView, ColRef, Matrix, StockRow};
+use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix, StockRow};
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::{BulkPreview, MovePreview};
 use crate::workbench::domain::wording as w;
@@ -53,10 +58,30 @@ use crate::workbench::upstream::registry::{ParamDef, ShowWhen, TabMeta, UiCompon
 use crate::workbench::upstream::Upstream;
 use crate::workbench::{paths, Roots};
 
-/// 一次会话里不变的那两样：上游快照 + 数据根
+/// 一次会话的全部状态。
+///
+/// **草稿的真相在这里，不在盘上。** 上一稿每条命令都 `read_draft` 一次、
+/// 每次编辑都 `write_draft` 一次（原子写 = 临时文件 + rename + fsync），
+/// 于是「改一个数」的代价里有一次磁盘往返 —— 手感上就是卡。
+/// 更糟的是把磁盘当状态源：那是「三份状态各存一套」那个老病的另一种形态。
+///
+/// 现在磁盘上的 `.draft/book.json` 只是**崩溃恢复快照**，由 [`flush_if_due`] 懒写。
 pub struct Ctx {
     pub up: Upstream,
     pub store: Store,
+    /// 落盘的那一份。开场读一次，`wb_save` 之后重读
+    committed: Committed,
+    /// 未保存的改动。**编辑只碰它**
+    draft: Draft,
+    /// 加载时攒下的提示（孤儿版本、清理掉的草稿条目…）
+    notices: Vec<String>,
+    /// 编辑序号：每次改草稿 +1
+    dirty_seq: u64,
+    /// 已经写进快照的序号。与 `dirty_seq` 相等 = 快照是最新的
+    flushed_seq: u64,
+    last_edit: Instant,
+    /// 上一次快照写失败的原因。**不阻断编辑**，只报出来
+    flush_error: Option<String>,
 }
 
 impl Ctx {
@@ -65,10 +90,97 @@ impl Ctx {
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Ok(Self {
-            up: Upstream::load()?,
+        Self::with(Upstream::load()?, store)
+    }
+
+    /// 给定上游与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
+    pub(super) fn with(up: Upstream, store: Store) -> Result<Self, AppError> {
+        let mut ctx = Self {
+            up,
             store,
-        })
+            committed: Committed::default(),
+            draft: Draft::default(),
+            notices: Vec::new(),
+            dirty_seq: 0,
+            flushed_seq: 0,
+            last_edit: Instant::now(),
+            flush_error: None,
+        };
+        ctx.reload_from_disk()?;
+        Ok(ctx)
+    }
+
+    /// 从磁盘重建「已落盘 + 草稿快照」。**只在三处调**：开场、`wb_save` 之后、`wb_reload`。
+    ///
+    /// 清理指向已消失对象的草稿条目也在这里 —— 上游可能在工作台开着的时候被重建，
+    /// 但那件事只会在重读的时候发生，不需要每条命令都查一遍
+    fn reload_from_disk(&mut self) -> Result<(), AppError> {
+        let loaded = storage::load(&self.store, &self.up)?;
+        let mut draft = storage::read_draft(&self.store)?;
+        let mut notices = loaded.notices;
+        let pruned = draft.prune(&loaded.committed);
+        let dirty = !pruned.is_empty();
+        notices.extend(pruned);
+
+        self.committed = loaded.committed;
+        self.draft = draft;
+        self.notices = notices;
+        // 清理过的话快照就过期了，但**不在这里写** —— 交给懒写
+        self.flushed_seq = self.dirty_seq;
+        if dirty {
+            self.dirty_seq += 1;
+        }
+        Ok(())
+    }
+
+    /// 草稿改过了。**只动内存**，落盘交给懒写
+    fn touch(&mut self) {
+        self.dirty_seq += 1;
+        self.last_edit = Instant::now();
+    }
+
+    /// 快照过期了吗
+    fn stale(&self) -> bool {
+        self.flushed_seq != self.dirty_seq
+    }
+
+    /// 写一次快照。**永不返回 Err** —— 快照的价值是崩溃恢复，
+    /// 为了它让一次编辑失败是本末倒置。失败只记下来，界面上报一格
+    fn flush(&mut self) {
+        if !self.stale() {
+            return;
+        }
+        match storage::write_draft(&self.store, &self.draft) {
+            Ok(()) => {
+                self.flushed_seq = self.dirty_seq;
+                self.flush_error = None;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e.message, "草稿快照写不进去");
+                self.flush_error = Some(e.message);
+            }
+        }
+    }
+
+    /// 界面要显示的提示：加载时那些 + 快照写不进去那一条
+    fn notices_now(&self) -> Vec<String> {
+        let mut out = self.notices.clone();
+        if let Some(e) = &self.flush_error {
+            out.push(format!("{}：{e}", w::SNAPSHOT_FAILED));
+        }
+        out
+    }
+
+    /// 快照状态，给状态条用。**与「未保存 N 处」是两条信息**：
+    /// 「未保存」说的是仓库文件，「待落盘」说的是崩溃快照
+    fn snapshot(&self) -> w::SnapshotState {
+        if self.flush_error.is_some() {
+            w::SnapshotState::Failed
+        } else if self.stale() {
+            w::SnapshotState::Pending
+        } else {
+            w::SnapshotState::Current
+        }
     }
 }
 
@@ -81,13 +193,20 @@ fn session() -> &'static Mutex<Option<Ctx>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
-/// 借出会话上下文，没有就现建一个。
+/// 借出会话上下文，没有就现建一个。`pub(super)` 是给同层的 `build` 用的
 ///
-/// 锁中毒（上一次持锁时 panic 了）不当成致命错误：清掉重来，
-/// 因为 `Ctx` 是只读快照，重建一份的代价只是再读一次上游
-fn with_ctx<T>(f: impl FnOnce(&Ctx) -> Result<T, AppError>) -> Result<T, AppError> {
+/// 锁中毒（上一次持锁时 panic 了）不当成致命错误：清掉重来。
+/// 代价是丢掉那一刻还没落盘的草稿 —— 但持锁时 panic 本来就意味着状态不可信
+pub(super) fn with_ctx<T>(f: impl FnOnce(&Ctx) -> Result<T, AppError>) -> Result<T, AppError> {
+    with_ctx_mut(|ctx| f(ctx))
+}
+
+/// 要改草稿的那几条命令走这个。**改完只动内存**，落盘交给懒写
+pub(super) fn with_ctx_mut<T>(
+    f: impl FnOnce(&mut Ctx) -> Result<T, AppError>,
+) -> Result<T, AppError> {
     let mut guard = session().lock().unwrap_or_else(|e| {
-        tracing::warn!("上游快照的锁中毒了，重建一份");
+        tracing::warn!("会话的锁中毒了，重建一份");
         let mut g = e.into_inner();
         *g = None;
         g
@@ -95,35 +214,80 @@ fn with_ctx<T>(f: impl FnOnce(&Ctx) -> Result<T, AppError>) -> Result<T, AppErro
     if guard.is_none() {
         *guard = Some(Ctx::open()?);
     }
-    f(guard.as_ref().expect("刚刚放进去的"))
+    f(guard.as_mut().expect("刚刚放进去的"))
 }
 
-/// 丢掉上游快照，下一次调用会重读
+/// 空闲多久算「停手了」。写得太短等于没省，太长丢的就多
+const IDLE_BEFORE_FLUSH: Duration = Duration::from_secs(2);
+
+/// 空闲落盘的那个线程只起一次。窗口关掉再开不该攒出第二个
+static FLUSHER: OnceLock<()> = OnceLock::new();
+
+/// 起一个每秒醒一次的线程：**停手了才写**。
+///
+/// 用 `std::thread` 而不是异步任务，是为了不给这一件事拉一个 `tokio` 依赖进来；
+/// 一个每秒醒一次、醒了就看一眼计数器的线程，代价可以忽略。
+/// 没有会话时它什么也不做，所以窗口关了也不用回收
+pub(super) fn spawn_flusher() {
+    FLUSHER.get_or_init(|| {
+        let spawned = std::thread::Builder::new()
+            .name("wb-flush".to_owned())
+            .spawn(|| loop {
+                std::thread::sleep(Duration::from_secs(1));
+                flush_if_due();
+            });
+        if let Err(e) = spawned {
+            // 起不来就退回「每次编辑都写」那种行为？不 —— 那会把卡又带回来。
+            // 这里只报一声：失焦与关窗那两个时机仍然会落盘
+            tracing::warn!(error = %e, "空闲落盘的线程起不来，快照只在失焦/关窗时写");
+        }
+    });
+}
+
+/// 空闲落盘。**没停手就不写** —— 连着改 10 个值只在停手之后写一次
+fn flush_if_due() {
+    let Ok(mut guard) = session().lock() else { return };
+    let Some(ctx) = guard.as_mut() else { return };
+    if ctx.stale() && ctx.last_edit.elapsed() >= IDLE_BEFORE_FLUSH {
+        ctx.flush();
+    }
+}
+
+/// 立刻落盘。窗口失焦 / 关闭前调，**不等那 2 秒**
+pub(super) fn flush_now() {
+    let Ok(mut guard) = session().lock() else { return };
+    if let Some(ctx) = guard.as_mut() {
+        ctx.flush();
+    }
+}
+
+/// 丢掉会话，下一次调用会重读。**先落盘** —— 否则重读会把未保存的改动吃掉
 fn drop_ctx() {
     if let Ok(mut g) = session().lock() {
+        if let Some(ctx) = g.as_mut() {
+            ctx.flush();
+        }
         *g = None;
     }
 }
 
-/// 每条命令的开头：读出「已落盘」与「草稿」，并把指向已消失对象的草稿条目清掉。
+/// 「已落盘 + 草稿」的一份拷贝。
 ///
-/// **清理要在每次读的时候做，不是只在启动时做**：上游可能在工作台开着的时候被重建
-fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppError> {
-    let loaded = storage::load(&ctx.store, &ctx.up)?;
-    let mut draft = storage::read_draft(&ctx.store)?;
-    let mut notices = loaded.notices;
-    let pruned = draft.prune(&loaded.committed);
-    if !pruned.is_empty() {
-        // 清理过就写回去，否则每次打开都报同一批提示
-        storage::write_draft(&ctx.store, &draft)?;
-        notices.extend(pruned);
-    }
-    Ok((loaded.committed, draft, notices))
+/// **不读磁盘**：内存里那一份就是真相。返回拷贝而不是引用，是为了让调用方
+/// 能继续拿 `&Ctx` 做别的事（`Book` 要同时借上游与这两样）——
+/// 一次克隆是几千个小分配，比原来那一次 fsync 便宜三个数量级
+pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppError> {
+    Ok((
+        ctx.committed.clone(),
+        ctx.draft.clone(),
+        ctx.notices_now(),
+    ))
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
     let mut v = Book::new(&ctx.up, committed, draft).book_view();
     v.notices = notices;
+    v.snapshot = ctx.snapshot();
     v
 }
 
@@ -320,6 +484,29 @@ pub fn wb_matrix(
             let (c, d, _) = state(ctx)?;
             Ok(Book::new(&ctx.up, &c, &d).matrix(
                 &cols,
+                tab.as_deref(),
+                query.as_deref().unwrap_or_default(),
+            ))
+        })
+    })
+}
+
+/// 配方台一屏（默认视角）：一个版本的分组列表。
+///
+/// 矩阵是它的对比工具，不是默认 —— 一屏几十列的表格不好看也不好改
+#[tauri::command]
+pub fn wb_desk(
+    machine_id: String,
+    uid: Option<String>,
+    tab: Option<String>,
+    query: Option<String>,
+) -> Result<Desk, AppError> {
+    traced("wb_desk", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            Ok(Book::new(&ctx.up, &c, &d).desk(
+                &machine_id,
+                uid.as_deref(),
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
             ))
@@ -604,23 +791,96 @@ pub struct ApplyResult {
     /// 为 false 时界面**不给**撤销按钮（删除与生成记录不进撤销栈）
     pub undoable: bool,
     pub notices: Vec<String>,
+    /// 调用方要的那一页，**顺带带回来**。上一稿前端要在 apply 之后再问一次，
+    /// 于是一次手势要走两趟 IPC、后端把整本书算两遍
+    pub desk: Option<Desk>,
+    pub matrix: Option<Matrix>,
 }
 
-/// **唯一的写入口。** 一次调用 = 一次手势 = 一条撤销
+/// 写完顺带刷哪一页。`None` = 只要 `BookView`。
+///
+/// 两个 `rename_all` 都要写：枚举上那个改的是**变体名**（`desk` / `matrix`），
+/// 变体里的字段名要 `rename_all_fields` 才会变成小驼峰 —— 少写一个的话
+/// 前端传 `machineId` 而后端等 `machine_id`，表现只是「那一页没回来」。
+///
+/// 三个可选字段都带 `default`：**结构体里的 `Option` 不会自动缺省**
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "page")]
+pub enum Refresh {
+    Desk {
+        machine_id: String,
+        #[serde(default)]
+        uid: Option<String>,
+        #[serde(default)]
+        tab: Option<String>,
+        #[serde(default)]
+        query: Option<String>,
+    },
+    Matrix {
+        cols: Vec<ColRef>,
+        #[serde(default)]
+        tab: Option<String>,
+        #[serde(default)]
+        query: Option<String>,
+    },
+}
+
+/// **唯一的写入口。** 一次调用 = 一次手势 = 一条撤销。
+///
+/// **不落盘** —— 改完内存就返回。快照由空闲落盘负责（§3）。
+/// 上一稿在这里做一次原子写，于是每敲一个值都有一次 fsync
 #[tauri::command]
-pub fn wb_apply_draft(label: String, patches: Vec<Patch>) -> Result<ApplyResult, AppError> {
+pub fn wb_apply_draft(
+    label: String,
+    patches: Vec<Patch>,
+    refresh: Option<Refresh>,
+) -> Result<ApplyResult, AppError> {
     traced("wb_apply_draft", |_| {
-        with_ctx(|ctx| {
-            let (c, mut d, mut notices) = state(ctx)?;
-            let out = apply_patches(&mut d, &c, &ctx.up.registry, &patches)?;
-            storage::write_draft(&ctx.store, &d)?;
+        with_ctx_mut(|ctx| {
+            let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &patches)?;
+            ctx.touch();
+            let mut notices = ctx.notices_now();
             notices.extend(out.notices);
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
+
+            // 一次派生，两份结果：整本视图 + 调用方要的那一页
+            let book = Book::new(&ctx.up, &ctx.committed, &ctx.draft);
+            let (desk, matrix) = match &refresh {
+                None => (None, None),
+                Some(Refresh::Desk {
+                    machine_id,
+                    uid,
+                    tab,
+                    query,
+                }) => (
+                    Some(book.desk(
+                        machine_id,
+                        uid.as_deref(),
+                        tab.as_deref(),
+                        query.as_deref().unwrap_or_default(),
+                    )),
+                    None,
+                ),
+                Some(Refresh::Matrix { cols, tab, query }) => (
+                    None,
+                    Some(book.matrix(
+                        cols,
+                        tab.as_deref(),
+                        query.as_deref().unwrap_or_default(),
+                    )),
+                ),
+            };
+            let mut view = book.book_view();
+            view.notices = notices.clone();
+            view.snapshot = ctx.snapshot();
+
             Ok(ApplyResult {
-                view: view_of(ctx, &c, &d, notices.clone()),
+                view,
                 inverse: out.inverse,
                 undoable: out.undoable,
                 notices,
+                desk,
+                matrix,
             })
         })
     })
@@ -638,19 +898,21 @@ pub struct SaveResult {
 #[tauri::command]
 pub fn wb_save() -> Result<SaveResult, AppError> {
     traced("wb_save", |_| {
-        with_ctx(|ctx| {
-            let (c, d, mut notices) = state(ctx)?;
-            if d.is_clean() {
+        with_ctx_mut(|ctx| {
+            if ctx.draft.is_clean() {
                 return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
             }
-            let out = storage::save(&ctx.store, &ctx.up, &c, &d)?;
-            notices.extend(out.notices);
+            // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
+            ctx.flush();
+            let out = storage::save(&ctx.store, &ctx.up, &ctx.committed, &ctx.draft)?;
+            let mut notices = out.notices;
 
-            // 保存之后重读：落盘的那一份才是新的真相
-            let (c2, d2, n2) = state(ctx)?;
-            notices.extend(n2);
+            // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
+            ctx.reload_from_disk()?;
+            notices.extend(ctx.notices_now());
+            let view = view_of(ctx, &ctx.committed, &ctx.draft, notices.clone());
             Ok(SaveResult {
-                view: view_of(ctx, &c2, &d2, notices.clone()),
+                view,
                 remap: out.remap,
                 notices,
             })
@@ -661,18 +923,18 @@ pub fn wb_save() -> Result<SaveResult, AppError> {
 #[tauri::command]
 pub fn wb_discard() -> Result<BookView, AppError> {
     traced("wb_discard", |_| {
-        with_ctx(|ctx| {
-            let (c, d, notices) = state(ctx)?;
-            if d.is_clean() {
+        with_ctx_mut(|ctx| {
+            if ctx.draft.is_clean() {
                 return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
             }
-            storage::write_draft(&ctx.store, &Draft::default())?;
-            tracing::info!(dropped = d.dirty_count(), "草稿已丢弃");
-            let (c2, d2, n2) = state(ctx)?;
-            let _ = c;
-            let mut all = notices;
-            all.extend(n2);
-            Ok(view_of(ctx, &c2, &d2, all))
+            let dropped = ctx.draft.dirty_count();
+            ctx.draft = Draft::default();
+            ctx.touch();
+            // 丢弃**立刻落盘**：留着旧快照的话，崩一次就把刚丢掉的又捞回来了
+            ctx.flush();
+            tracing::info!(dropped, "草稿已丢弃");
+            let notices = ctx.notices_now();
+            Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices))
         })
     })
 }
@@ -698,7 +960,8 @@ mod tests {
         let f = Fixture::load();
         // `Upstream` 没有 Clone，所以再读一份给 Ctx
         let up = Fixture::load();
-        (dir, f, Ctx { up: up.up, store })
+        let ctx = Ctx::with(up.up, store).unwrap();
+        (dir, f, ctx)
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {
@@ -754,10 +1017,12 @@ mod tests {
         assert_eq!(ctx.up.manifest.latest_release(), Some("0.0.4"));
     }
 
-    /// 一条 patch 走完整条路径：改草稿 → 落盘 → 视图跟着变 → 反向能回去
+    /// 一条 patch 走完整条路径：改**内存** → 视图跟着变 → 反向能回去。
+    ///
+    /// 注意这里**没有落盘**这一步：一次编辑不碰磁盘，快照是另一件事
     #[test]
     fn one_gesture_goes_through_the_single_write_entry() {
-        let (_d, _f, ctx) = ctx();
+        let (_d, _f, mut ctx) = ctx();
         let patch = Patch::SetValue {
             level: Level::Machine,
             owner: "A1".to_owned(),
@@ -765,25 +1030,192 @@ mod tests {
             value: Some(serde_json::json!(42)),
         };
 
-        let (c, mut d, _) = state(&ctx).unwrap();
-        let out = apply_patches(&mut d, &c, &ctx.up.registry, &[patch]).unwrap();
-        storage::write_draft(&ctx.store, &d).unwrap();
+        let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &[patch]).unwrap();
+        ctx.touch();
         assert!(out.undoable);
 
-        // 重新读：草稿真的落盘了
         let (c2, d2, _) = state(&ctx).unwrap();
         assert_eq!(d2.dirty_count(), 1);
         let v = view_of(&ctx, &c2, &d2, Vec::new());
         assert_eq!(v.dirty_count, 1);
         assert_eq!(v.save, w::SaveState::Dirty);
+        assert_eq!(v.snapshot, w::SnapshotState::Pending, "还没落盘");
 
         // 反向回去 → 干净
-        let (c3, mut d3, _) = state(&ctx).unwrap();
-        apply_patches(&mut d3, &c3, &ctx.up.registry, &out.inverse).unwrap();
-        storage::write_draft(&ctx.store, &d3).unwrap();
-        let (_, d4, _) = state(&ctx).unwrap();
-        assert!(d4.is_clean(), "撤销之后该回到干净");
+        let inverse = out.inverse;
+        apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &inverse).unwrap();
+        ctx.touch();
+        assert!(ctx.draft.is_clean(), "撤销之后该回到干净");
     }
+
+    /// **编辑不碰磁盘。** 上一稿每次编辑一次原子写，那是「卡」的一个来源，
+    /// 也是把磁盘当状态源
+    #[test]
+    fn editing_does_not_touch_the_disk() {
+        let (dir, _f, mut ctx) = ctx();
+        let snapshot = dir.path().join(".draft").join("book.json");
+        assert!(!snapshot.exists(), "干净仓库本来就没有快照");
+
+        for n in 0..10 {
+            apply_patches(
+                &mut ctx.draft,
+                &ctx.committed,
+                &ctx.up.registry,
+                &[Patch::SetValue {
+                    level: Level::Machine,
+                    owner: "A1".to_owned(),
+                    key: "wiping.child".to_owned(),
+                    value: Some(serde_json::json!(n + 1)),
+                }],
+            )
+            .unwrap();
+            ctx.touch();
+            assert!(!snapshot.exists(), "第 {n} 次编辑就落盘了");
+        }
+
+        // 十次编辑**攒成一次**落盘
+        assert!(ctx.stale());
+        ctx.flush();
+        assert!(snapshot.exists());
+        assert!(!ctx.stale());
+
+        // 已经是最新的，再 flush 一次什么都不做
+        ctx.flush();
+        assert!(!ctx.stale());
+    }
+
+    /// 那个「改过去改不回来」的后端侧回归：
+    /// 一层本来没有自有值时，`disk` → `tower` 这两步**脏计数都是 1**，
+    /// 但有效值必须两次都跟着变。上一稿前端拿脏计数当刷新信号，所以第二步看不见
+    #[test]
+    fn a_value_changed_back_and_forth_is_visible_each_time() {
+        let (_d, _f, mut ctx) = ctx();
+        let set = |ctx: &mut Ctx, v: &str| {
+            apply_patches(
+                &mut ctx.draft,
+                &ctx.committed,
+                &ctx.up.registry,
+                &[Patch::SetValue {
+                    level: Level::Version,
+                    owner: "A1/STANDARD".to_owned(),
+                    key: "wiping.mode".to_owned(),
+                    value: Some(serde_json::json!(v)),
+                }],
+            )
+            .unwrap();
+            ctx.touch();
+        };
+        let now = |ctx: &Ctx| {
+            let cols = cols(&[("A1", Some("A1/STANDARD"))]);
+            let (c, d, _) = state(ctx).unwrap();
+            let m = Book::new(&ctx.up, &c, &d).matrix(&cols, None, "");
+            let row = m.rows.into_iter().find(|r| r.key == "wiping.mode").unwrap();
+            row.cells[0].raw.clone()
+        };
+
+        set(&mut ctx, "disk");
+        assert_eq!(now(&ctx), serde_json::json!("disk"));
+        assert_eq!(ctx.draft.dirty_count(), 1);
+
+        set(&mut ctx, "tower");
+        assert_eq!(now(&ctx), serde_json::json!("tower"), "改回去必须看得见");
+        assert_eq!(ctx.draft.dirty_count(), 1, "脏计数没变 —— 所以它不能当刷新信号");
+    }
+
+    /// 快照写不进去时：**编辑照常**，但要报出来
+    #[test]
+    fn a_failed_snapshot_is_reported_without_blocking_edits() {
+        let (_d, _f, mut ctx) = ctx();
+        ctx.touch();
+        ctx.flush_error = Some("磁盘满了".to_owned());
+
+        assert_eq!(ctx.snapshot(), w::SnapshotState::Failed);
+        let notices = ctx.notices_now();
+        assert!(
+            notices.iter().any(|n| n.contains("磁盘满了")),
+            "写不进去要说出原因：{notices:?}"
+        );
+
+        // 还能继续改
+        apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.up.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(9)),
+            }],
+        )
+        .expect("快照失败不该拦住编辑");
+    }
+
+    /// 快照三态的词互不相同，且「未保存」与「待落盘」不是同一句
+    #[test]
+    fn snapshot_words_are_distinct_from_save_words() {
+        use w::SnapshotState as S;
+        let all = [S::Current, S::Pending, S::Failed];
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a.label(), b.label());
+                assert_ne!(a.explain(), b.explain());
+            }
+        }
+        assert_ne!(S::Pending.label(), w::SaveState::Dirty.label());
+    }
+
+    /// 「顺带刷哪一页」的线上形状。**这里错了不会编译报错，只会在运行时静默拿不到那一页**
+    #[test]
+    fn a_refresh_request_deserializes_from_the_wire_shape() {
+        let desk: Refresh = serde_json::from_value(serde_json::json!({
+            "page": "desk", "machineId": "A1", "uid": "A1/STANDARD", "tab": null, "query": ""
+        }))
+        .expect("配方台那一页");
+        match desk {
+            Refresh::Desk { machine_id, uid, .. } => {
+                assert_eq!(machine_id, "A1");
+                assert_eq!(uid.as_deref(), Some("A1/STANDARD"));
+            }
+            _ => panic!("解成了别的页"),
+        }
+
+        let matrix: Refresh = serde_json::from_value(serde_json::json!({
+            "page": "matrix",
+            "cols": [{ "machineId": "A1", "versionUid": null }],
+            "tab": "wiping"
+        }))
+        .expect("对比那一页");
+        match matrix {
+            Refresh::Matrix { cols, tab, query } => {
+                assert_eq!(cols.len(), 1);
+                assert_eq!(tab.as_deref(), Some("wiping"));
+                assert!(query.is_none(), "不给就是不给，不要编一个空串");
+            }
+            _ => panic!("解成了别的页"),
+        }
+    }
+
+    /// 一次手势一次派生：两页各自算得出来，而且**不互相要求对方在场**
+    #[test]
+    fn both_pages_can_be_produced_from_one_derivation() {
+        let (_d, _f, ctx) = ctx();
+        let (c, d, _) = state(&ctx).unwrap();
+        let book = Book::new(&ctx.up, &c, &d);
+
+        let desk = book.desk("A1", Some("A1/STANDARD"), None, "");
+        let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
+
+        let desk_rows: usize = desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .map(|i| 1 + i.children.len())
+            .sum();
+        assert_eq!(desk_rows, matrix.rows.len(), "同一份数据，两种摆法，行数一样");
+    }
+
+
 
     /// **差异清单要逐条说得出来**，不能只给一个数字
     #[test]
@@ -824,10 +1256,13 @@ mod tests {
         assert!(lines.iter().any(|l| l.kind == "归档状态"));
     }
 
-    /// 草稿里指向已消失版本的条目在**每次读**的时候清掉，并且只提示一次
+    /// 草稿里指向已消失版本的条目在**加载时**清掉，并且报出来。
+    ///
+    /// 清理从「每次命令都查一遍」挪到了加载那一次：上游可能在工作台开着的时候被重建，
+    /// 但那件事只会在重读的时候发生
     #[test]
-    fn stale_draft_entries_are_pruned_and_reported_once() {
-        let (_d, _f, ctx) = ctx();
+    fn stale_draft_entries_are_pruned_at_load_and_reported() {
+        let (_d, _f, mut ctx) = ctx();
         let mut d = Draft::default();
         d.values.insert(
             "v:A1/GONE:toolhead.offset.x".to_owned(),
@@ -835,14 +1270,14 @@ mod tests {
         );
         storage::write_draft(&ctx.store, &d).unwrap();
 
+        ctx.reload_from_disk().unwrap();
+
         let (_, d1, n1) = state(&ctx).unwrap();
-        assert!(d1.is_clean());
+        assert!(d1.is_clean(), "指向不存在版本的那一条该被清掉");
         assert_eq!(n1.len(), 1);
         assert!(n1[0].contains("A1/GONE"));
-
-        // 第二次读不该再报 —— 清理结果已经写回去了
-        let (_, _, n2) = state(&ctx).unwrap();
-        assert!(n2.is_empty(), "同一个问题不该每次打开都报一遍");
+        // 清理过 ⇒ 快照过期 ⇒ 空闲落盘会把清理结果写回去
+        assert!(ctx.stale(), "清理过的草稿要重新落盘");
     }
 
     /// 干净草稿时保存 / 丢弃都该被拒，并且给出那一句
@@ -858,11 +1293,10 @@ mod tests {
     /// 保存之后 uid 会变，而且视图里那一版要用新 uid
     #[test]
     fn saving_a_new_version_remaps_its_uid_in_the_next_view() {
-        let (_d, _f, ctx) = ctx();
-        let (c, mut d, _) = state(&ctx).unwrap();
+        let (_d, _f, mut ctx) = ctx();
         apply_patches(
-            &mut d,
-            &c,
+            &mut ctx.draft,
+            &ctx.committed,
             &ctx.up.registry,
             &[Patch::NewVersion {
                 machine_id: "A1".to_owned(),
@@ -870,11 +1304,13 @@ mod tests {
             }],
         )
         .unwrap();
-        storage::write_draft(&ctx.store, &d).unwrap();
+        ctx.touch();
 
-        let out = storage::save(&ctx.store, &ctx.up, &c, &d).unwrap();
+        let out = storage::save(&ctx.store, &ctx.up, &ctx.committed, &ctx.draft).unwrap();
         assert_eq!(out.remap.get("new-1").map(String::as_str), Some("A1/NEW1"));
 
+        // 保存之后必须重读：落盘的那一份才是新的真相
+        ctx.reload_from_disk().unwrap();
         let (c2, d2, n2) = state(&ctx).unwrap();
         assert!(d2.is_clean(), "保存后草稿清空");
         let v = view_of(&ctx, &c2, &d2, n2);

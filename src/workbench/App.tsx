@@ -30,16 +30,30 @@ import {
   type Boot,
   type ColRef,
   type Patch,
+  type Refresh,
   type Words,
 } from './api'
 import { useDensity } from './useDensity'
 import { PageHeader, type Action, type Badge } from './shell/PageHeader'
 import { StatusBar } from './shell/StatusBar'
 import { StatusStrip } from './shell/StatusStrip'
+import { MachinesPage } from './views/MachinesPage'
+import { ParamDesk } from './views/ParamDesk'
+import { ParamsMatrix } from './views/ParamsMatrix'
 
-/** 三个视角。**是视角不是步骤** */
+/**
+ * 五个视角。**是视角不是步骤。**
+ *
+ * 默认是「机型与版本」—— 它是最基础的那一件事：先有机型有版本，才谈得上调参数。
+ * 上一轮的教训就是我把顺序做反了，先去打磨矩阵的排序与颜色，
+ * 而系统连「加一个机型」的位置都没有。
+ *
+ * 「配方」是分组列表，矩阵退成「对比」（同时看几台机器的同一项）。
+ */
 const VIEWS = [
-  { id: 'params', label: '参数' },
+  { id: 'machines', label: '机型与版本' },
+  { id: 'params', label: '配方' },
+  { id: 'compare', label: '对比' },
   { id: 'menu', label: '套餐与菜单' },
   { id: 'build', label: '生成' },
 ] as const
@@ -75,7 +89,7 @@ export function WorkbenchApp() {
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [view, setView] = useState<ViewId>('params')
+  const [view, setView] = useState<ViewId>('machines')
   const [maintain, setMaintain] = useState<MaintainId | null>(null)
   const [focus, setFocus] = useState<Focus | null>(null)
   const [checked, setChecked] = useState<ColRef[]>([])
@@ -85,13 +99,32 @@ export function WorkbenchApp() {
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<UndoEntry[]>([])
 
+  /**
+   * 「后端状态变过了」的计数器。**每写一次就 +1，与改了几处无关。**
+   *
+   * 原来这里传的是 `book.dirtyCount`，那是个错的信号：
+   * 「把一个版本覆盖从 disk 改成 tower」时，草稿里那一条**还在**（只是值换了），
+   * 脏计数一个不变 —— 于是矩阵不重取，格子上还显示 disk，
+   * 表现出来就是「这一项怎么都改不回去」。后端每次都写对了，是界面没刷新。
+   */
+  const [tick, setTick] = useState(0)
+
+  /** 从配方页跳到对比页时要定位的那一项 */
+  const [compareKey, setCompareKey] = useState<string | null>(null)
+
   /** 出错时把 message 留下。`AppError` 与客户端共用同一套 */
   const fail = useCallback((e: unknown) => {
     setFatal(isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e))
   }, [])
 
-  /* 首屏三步：先 boot（上游缺失时也能显示数据根）→ 取词表 → 取整本 */
+  /* 首屏三步：先 boot（上游缺失时也能显示数据根）→ 取词表 → 取整本。
+     用一个 ref 挡住第二次：`StrictMode` 在 dev 下会把每个 effect 跑两遍，
+     于是这三条命令全部发两次（日志里 `wb_boot` / `wb_words` 成对出现）。
+     **不摘 StrictMode** —— 它抓过真问题；挡在调用这一层更便宜 */
+  const booted = useRef(false)
   useEffect(() => {
+    if (booted.current) return
+    booted.current = true
     void (async () => {
       try {
         const b = await wb.boot()
@@ -115,11 +148,18 @@ export function WorkbenchApp() {
    * Task 14 的三种改法直接调它，`where: 'undo'`。
    */
   const run = useCallback(
-    async (label: string, patches: Patch[], where: 'undo' | 'redo') => {
+    async (
+      label: string,
+      patches: Patch[],
+      where: 'undo' | 'redo',
+      /** 顺带要哪一页。给了就不用在这之后再问一次 —— 一次手势一次 IPC */
+      refresh?: Refresh,
+    ) => {
       setBusy(true)
       try {
-        const out = await wb.applyDraft(label, patches)
+        const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
+        setTick((n) => n + 1)
         // 不可撤销的手势（删除、生成记录）**不进栈**，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
           const entry = { label, patches: out.inverse }
@@ -176,6 +216,7 @@ export function WorkbenchApp() {
       // 保存之后撤销栈作废：栈里的反向 patch 指的是保存前那一份状态
       setUndoStack([])
       setRedoStack([])
+      setTick((n) => n + 1)
     } catch (e) {
       fail(e)
     } finally {
@@ -189,6 +230,7 @@ export function WorkbenchApp() {
       setBook(await wb.discard())
       setUndoStack([])
       setRedoStack([])
+      setTick((n) => n + 1)
     } catch (e) {
       fail(e)
     } finally {
@@ -293,16 +335,23 @@ export function WorkbenchApp() {
   /* ---------- 渲染 ---------- */
 
   const focusText = useMemo(() => {
+    // 「机型与版本」页没有"主选中"这个概念 —— 那是参数页的语义。
+    // 把它原样漏到这一页，底部就会常驻一句「没有主选中」，说的是另一页的事
+    if (view === 'machines') return '机型与版本 · 直接编辑 presets/machines/'
     if (!focus || !book || !words) return '没有主选中'
     const m = book.machines.find((x) => x.id === focus.machineId)
     if (!m) return '没有主选中'
     if (!focus.uid) return `主选中 ${m.display} · ${words.level.machine.label}`
     const v = m.versions.find((x) => x.uid === focus.uid)
     return `主选中 ${m.display} / ${v?.name ?? focus.uid}`
-  }, [focus, book, words])
+  }, [view, focus, book, words])
 
   return (
-    <div className="wb" data-wb ref={shellRef}>
+    /* `data-page` 放在**根上**而不是 `.wb-body` 上：顶部那排操作按钮
+       （保存配方 / 丢弃改动 / 撤销 / 重做）与徽章都属于参数页那套草稿，
+       「机型与版本」页不走那套，所以它们在这一页不该出现 —— 摆着会让人以为
+       点「保存配方」能存下机型的改动。CSS 要能管到顶部，属性就得在顶部之上 */
+    <div className="wb" data-wb data-page={view} ref={shellRef}>
       {boot && words && book ? (
         <StatusStrip
           recipePath={boot.roots.workbench}
@@ -344,7 +393,7 @@ export function WorkbenchApp() {
         </div>
       ))}
 
-      <div className="wb-body">
+      <div className="wb-body" data-page={view}>
         <aside className="wb-side">
           <div className="wb-side__head">配方本</div>
           <div className="wb-side__list">
@@ -515,17 +564,46 @@ export function WorkbenchApp() {
                 ))}
               </div>
               <div className="wb-pane">
-                <p className="wb-todo">
-                  {view === 'params' && (
-                    <>
-                      参数矩阵在 Task 13–15 落地。现在勾了 {checked.length} 列；
-                      后端 <span className="wb-mono">wb_matrix</span> 已经能按配方本顺序
-                      把列排好、行取并集、每格带来源与「被谁关着」。
-                    </>
-                  )}
-                  {view === 'menu' && <>套餐与菜单在 Task 16 落地。</>}
-                  {view === 'build' && <>生成视角在 Task 17 落地（含 Task 9 的校验三档）。</>}
-                </p>
+                {/* 最基础的那一页：有哪些机型、每台有哪些版本。
+                    「加一个机型 / 加一个版本」的位置就在这里 */}
+                {view === 'machines' && <MachinesPage />}
+                {/* 默认视角：这一版的分组列表。改一个值走一次 IPC，后端顺带把这一页带回来 */}
+                {view === 'params' &&
+                  words &&
+                  (focus ? (
+                    <ParamDesk
+                      machineId={focus.machineId}
+                      uid={focus.uid}
+                      where={focusText}
+                      words={words}
+                      tick={tick}
+                      onApply={async (label, patches, refresh) => {
+                        const out = await run(label, patches, 'undo', refresh)
+                        return { desk: out?.desk ?? null }
+                      }}
+                      onCompare={(key) => {
+                        setCompareKey(key)
+                        setView('compare')
+                      }}
+                    />
+                  ) : (
+                    <p className="wb-todo">在左边配方本里点一个机型或版本，这里编它的配方。</p>
+                  ))}
+                {/* 对比：同时看几台机器的同一项。**它不是默认** */}
+                {view === 'compare' && words && (
+                  <ParamsMatrix
+                    cols={checked}
+                    words={words}
+                    dirtyKey={tick}
+                    focusKey={compareKey}
+                    /* 三种改法全走这一条 —— 正向操作压撤销栈 */
+                    onApply={(label, patches) => run(label, patches, 'undo')}
+                  />
+                )}
+                {view === 'menu' && <p className="wb-todo">套餐与菜单在 Task 16 落地。</p>}
+                {view === 'build' && (
+                  <p className="wb-todo">生成视角在 Task 17 落地（含 Task 9 的校验三档）。</p>
+                )}
               </div>
             </>
           )}
@@ -538,6 +616,7 @@ export function WorkbenchApp() {
           focus={focusText}
           save={book.save}
           dirtyCount={book.dirtyCount}
+          snapshot={book.snapshot}
           words={words}
         />
       ) : (

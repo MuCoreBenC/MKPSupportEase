@@ -519,6 +519,26 @@ impl Registry {
             .map(|t| t.id.as_str())
     }
 
+    /// 一个 section 的中文名与组内序。**中文名与顺序的唯一权威是 `param_registry.tabs`**
+    /// （`layout_schema` 全文没有 label / order）。
+    ///
+    /// 这里不过滤"装不装参数"：调用方要的是元数据本身，过滤是 `param_tabs` 的事
+    pub fn section_meta(&self, section_id: &str) -> Option<&SectionMeta> {
+        self.tabs
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == section_id)
+    }
+
+    /// 页签的先后。**查不到给 `f64::MAX`，不是 0** ——
+    /// 上游多一个没在 `tabs` 里声明的页签时，它该排到最后，而不是插到最前面
+    pub fn tab_order(&self, tab_id: &str) -> f64 {
+        self.tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .map_or(f64::MAX, |t| t.order)
+    }
+
     /// 全表指纹。进有效配方的 hash —— 否则改了字段定义，产物不会变成"待生成"
     pub fn fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
@@ -734,6 +754,31 @@ mod tests {
         assert_eq!(tabs.len(), 1, "settings 整个 tab 都该被滤掉");
         assert_eq!(tabs[0].id, "t1");
         assert_eq!(tabs[0].label, "页签一", "中文名取 param_registry.tabs");
+    }
+
+    /// 分组元数据：中文名与组内序都从 `param_registry.tabs` 来，查不到就是 `None`。
+    /// 调用方拿 `None` 退化成显示 section id，而不是显示一个空字符串
+    #[test]
+    fn section_meta_falls_back_to_none_for_unknown_id() {
+        let (p, l) = good();
+        let (_d, r) = load(p, l);
+        let r = r.unwrap();
+        let s = r.section_meta("s1").expect("s1 声明过");
+        assert_eq!(s.label, "分组一");
+        assert_eq!(s.order, 0.0);
+        assert!(r.section_meta("不存在的组").is_none());
+    }
+
+    /// 未声明的页签要排到**最后**。给 0 的话它会插到所有页签前面，
+    /// 于是上游随手加一个 tab 就把整张矩阵的行序掀翻
+    #[test]
+    fn tab_order_puts_unknown_tabs_last() {
+        let (p, l) = good();
+        let (_d, r) = load(p, l);
+        let r = r.unwrap();
+        assert_eq!(r.tab_order("t1"), 10.0);
+        assert_eq!(r.tab_order("ghost"), f64::MAX);
+        assert!(r.tab_order("t1") < r.tab_order("ghost"));
     }
 
     /// 指纹：改一个 step 就要变（否则改了字段定义产物不会过期）

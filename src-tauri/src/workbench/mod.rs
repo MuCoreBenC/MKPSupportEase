@@ -26,6 +26,12 @@ pub mod app;
 pub mod clock;
 pub mod domain;
 pub mod paths;
+/// 我们自己那份预设数据（`<repo>/presets/*.toml`）。**读它也写它**。
+///
+/// 它最终会取代 `upstream`（那一层读 `mkpse-presets/content/*.json`，是别人的构建产物）。
+/// 现在两层并存**是刻意的一步**：先把「读 + 写回 + 字节保真」这条路在新层上走通，
+/// 再把 `domain` 与 `app` 切过来。一次切完的话，保真判据要和一大片编译错误同时处理。
+pub mod presets;
 pub mod store;
 pub mod upstream;
 
@@ -48,13 +54,28 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
-        .title("SupportEase 后厨工作台")
-        .inner_size(1360.0, 900.0)
-        .min_inner_size(900.0, 560.0)
-        .resizable(true)
-        .build()
-        .map_err(|e| AppError::internal("建不出工作台窗口").with_detail(e.to_string()))?;
+    let win =
+        WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
+            .title("SupportEase 后厨工作台")
+            .inner_size(1360.0, 900.0)
+            .min_inner_size(900.0, 560.0)
+            .resizable(true)
+            .build()
+            .map_err(|e| AppError::internal("建不出工作台窗口").with_detail(e.to_string()))?;
+
+    /* 草稿在内存里，磁盘上只有崩溃快照。落盘三个时机里的两个挂在窗口事件上：
+       失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。
+       第三个是「空闲 2 秒」，由下面那个计时器管。 */
+    win.on_window_event(|e| match e {
+        tauri::WindowEvent::Focused(false) | tauri::WindowEvent::CloseRequested { .. } => {
+            app::flush_now();
+        }
+        _ => {}
+    });
+
+    // 第三个时机是「空闲 2 秒」，由一个每秒醒一次的线程管。
+    // 放在窗口创建之后：没有工作台窗口时这件事根本不该发生
+    app::spawn_flusher();
 
     tracing::info!("工作台窗口已打开");
     Ok(())

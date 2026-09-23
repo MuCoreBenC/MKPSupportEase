@@ -1,0 +1,15 @@
+id = 'A2L'
+name = ''
+display = 'A2L'
+brand = 'Bambu Lab'
+externalAliases = []
+image = ''
+icon = 'a1'
+
+[[versions]]
+id = 'STANDARD'
+name = '标准版'
+presetFile = ''
+recommendedBundle = ''
+tag = ''
+description = ''

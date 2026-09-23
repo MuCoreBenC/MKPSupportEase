@@ -114,6 +114,17 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
         app::words::wb_words,
+        // 「机型与版本」那一页：读写 presets/machines/*.toml。
+        // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
+        app::machines::wb_machines,
+        app::machines::wb_add_machine,
+        app::machines::wb_add_version,
+        app::machines::wb_version_orphans,
+        app::machines::wb_remove_version,
+        app::machines::wb_set_version_field,
+        app::machines::wb_set_machine_field,
+        // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
+        app::wb_desk,
         app::wb_matrix,
         app::wb_stock,
         app::wb_fallback,
@@ -126,5 +137,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_apply_draft,
         app::wb_save,
         app::wb_discard,
+        // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
+        // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
+        app::build::wb_preflight,
+        app::build::wb_preview_toml,
+        app::build::wb_generate,
+        app::build::wb_revert_preview,
+        app::build::wb_publish,
     ])
 }

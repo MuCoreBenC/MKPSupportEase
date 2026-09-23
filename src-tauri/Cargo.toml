@@ -23,7 +23,7 @@ tauri-build = { version = "2.5.1", features = [] }
 # 一道管命令在不在二进制里。任一道漏了，另一道还挡得住。
 [features]
 default = []
-workbench = ["dep:sha2", "dep:time"]
+workbench = ["dep:sha2", "dep:time", "dep:toml_edit"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -45,6 +45,14 @@ uuid = { version = "1", features = ["v7"] }
 # "少编一个 crate"，而是**默认构建的代码里 `use sha2` 编不过** —— 隔离靠的是这个，不是包体积
 sha2 = { version = "0.10", optional = true }
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+# 保留格式的 TOML 编辑器（cargo 自己用的那个）。
+#
+# **选它而不是 `toml` 是一条设计决定，不是口味**：工作台要编辑 `presets/*.toml`，
+# 而「读进来不改再写出去必须字节不变」是往那个目录写第一个字节之前必须先绿的判据。
+# 用 `toml` 反序列化再重新序列化的话，那条判据要靠我复刻别人 writer 的引号风格、
+# 键序、浮点格式才能成立 —— 那是最脆的一类承诺。
+# `toml_edit` 保留原文与格式，只改被改的那一处，于是保真在**构造上**成立。
+toml_edit = { version = "0.22", features = ["serde"], optional = true }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -52,3 +60,6 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 window-vibrancy = "0.8"
+
+[dev-dependencies]
+toml = "1.0.7"

@@ -74,6 +74,10 @@ pub struct Words {
     pub disabled: BTreeMap<&'static str, &'static str>,
     /// 空状态那几句。**不留白** —— 空白会被读成「还没算」
     pub empty: BTreeMap<&'static str, &'static str>,
+    /// 关联那一组里不带变量的那几句
+    pub relate: BTreeMap<&'static str, &'static str>,
+    /// 崩溃快照三态。**与 `save` 不是一回事**
+    pub snapshot: Table,
 }
 
 /// 整张词表。开场取一次
@@ -196,6 +200,22 @@ fn words() -> Words {
             ("matrixSearchSpansAllTabs", w::MATRIX_SEARCH_SPANS_ALL_TABS),
         ]
         .into_iter()
+        .collect(),
+
+        relate: [
+            ("goFixIt", w::relate::GO_FIX_IT),
+            ("showAnyway", w::relate::SHOW_ANYWAY),
+        ]
+        .into_iter()
+        .collect(),
+
+        snapshot: [
+            ("current", w::SnapshotState::Current),
+            ("pending", w::SnapshotState::Pending),
+            ("failed", w::SnapshotState::Failed),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
         .collect(),
     }
 }

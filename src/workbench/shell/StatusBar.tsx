@@ -8,7 +8,7 @@
  * 但状态条上它是一个点加两个字（够不够新），这里是一个具体的数（有多少处要存）。
  * 这是刻意的重复：保存这件事在哪个屏都要看得见。
  */
-import type { Badges, SaveState, Words } from '../api'
+import type { Badges, SaveState, SnapshotState, Words } from '../api'
 
 interface Props {
   badges: Badges
@@ -16,10 +16,17 @@ interface Props {
   focus: string
   save: SaveState
   dirtyCount: number
+  /**
+   * 崩溃快照跟上了没有。**与 `save` 是两条独立信息，不许合成一句**：
+   * 「未保存」说的是仓库文件里还没有这些改动；
+   * 「待落盘」说的是崩溃快照还没跟上 —— 草稿本身在内存里，是真相
+   */
+  snapshot: SnapshotState
   words: Words
 }
 
-export function StatusBar({ badges, focus, save, dirtyCount, words }: Props) {
+export function StatusBar({ badges, focus, save, dirtyCount, snapshot, words }: Props) {
+  const snap = words.snapshot[snapshot]
   return (
     <footer className="wb-foot">
       <span className="wb-foot__left">
@@ -30,6 +37,17 @@ export function StatusBar({ badges, focus, save, dirtyCount, words }: Props) {
           {words.level.machine.label} {badges.baseItems} 项（自有 {badges.baseOwn}） ·{' '}
           {words.level.version.label} {badges.overrideItems} 项（自有 {badges.overrideOwn}）
         </span>
+        {/* 快照只在没跟上的时候才占位置：跟上了是常态，常态不值得一直说 */}
+        {snapshot !== 'current' && (
+          <span className="wb-foot__save" title={snap.explain ?? undefined}>
+            <span
+              className="wb-dot"
+              data-state={snapshot === 'failed' ? 'danger' : 'warn'}
+              aria-hidden
+            />
+            {snap.label}
+          </span>
+        )}
         <span className="wb-foot__save">
           <span
             className="wb-dot"

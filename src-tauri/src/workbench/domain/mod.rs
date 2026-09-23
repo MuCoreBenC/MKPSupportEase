@@ -22,6 +22,7 @@
 //! 先写好才不用把同一批文案写两遍再搬一次）。
 
 pub mod derive;
+pub mod issues;
 pub mod layer;
 pub mod patch;
 pub mod preview;

@@ -57,14 +57,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::workbench::upstream::catalog::MkpPreset;
+use crate::workbench::upstream::registry::ParamDef;
 use crate::workbench::upstream::{Asset, ResourceType, Upstream};
 
 use super::layer::{no_overrides, Layers, Level, Origin, Overrides};
 use super::patch::{BuiltRecord, BundleEdit, Committed, Draft, Visibility};
 use super::variants::{digest, Digested};
-use super::visibility::{BlockedBy, Gate};
+use super::visibility::{BlockScope, BlockedBy, Gate};
 use super::wording as w;
-use super::wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState};
+use super::wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState, SnapshotState};
 
 /* ---------- 版本身份 ---------- */
 
@@ -487,6 +488,8 @@ impl<'a> Book<'a> {
             last_build: self.built.values().map(|r| r.stamp.clone()).max(),
             build_rows: self.build_rows(),
             notices: Vec::new(),
+            // 这一层看不到文件，所以快照状态由 `app` 覆盖。默认说「跟上了」
+            snapshot: SnapshotState::Current,
         }
     }
 
@@ -618,17 +621,8 @@ impl<'a> Book<'a> {
                 }
             }
         }
-        // 按 layout.order 升序（`visible_keys` 已经排过，合并多列后要再排一次）
-        keys.sort_by(|a, b| {
-            let o = |k: &str| {
-                self.up
-                    .registry
-                    .param(k)
-                    .map(|p| p.layout.order)
-                    .unwrap_or(f64::MAX)
-            };
-            o(a).total_cmp(&o(b))
-        });
+        // 行序：**分类 → 组 → 父子 → 组内序**。见 `row_sort_key`
+        keys.sort_by(|a, b| self.row_sort_key(a).cmp(&self.row_sort_key(b)));
         let total_rows = keys.len();
 
         let gates: Vec<Option<Gate<'_>>> = cols
@@ -664,13 +658,24 @@ impl<'a> Book<'a> {
                     .zip(&gates)
                     .map(|(c, g)| self.cell(c, g.as_ref(), key))
                     .collect();
+                let parent = p
+                    .parent_key
+                    .as_deref()
+                    .and_then(|k| self.up.registry.param(k));
                 Some(Row {
                     key: key.to_owned(),
                     label: p.label.clone(),
                     desc: p.desc.clone(),
                     unit: p.unit.clone(),
                     section_id: p.layout.section_id.clone(),
+                    section_label: self.section_label(&p.layout.section_id),
                     tab_id: self.tab_of(&p.layout.section_id).map(str::to_owned),
+                    // 只有两级：上游 74 条里 7 条有 parentKey，没有一条的父自己还有父
+                    depth: u8::from(p.parent_key.is_some()),
+                    parent_key: p.parent_key.clone(),
+                    parent_label: parent.map(|x| x.label.clone()),
+                    parent_note: parent.map(|x| w::relate::belongs_to(&x.label)),
+                    control_note: self.control_note(p),
                     gcode: w::is_gcode(p),
                     deprecated: p.deprecated,
                     cells,
@@ -765,6 +770,26 @@ impl<'a> Book<'a> {
         let blocked = gate.map(|g| g.blocked(key)).unwrap_or_default();
         let own = layers.has_own(col.level, key);
 
+        // 「谁把我关了」的整句 + 跳转目标。`blocked` 是**根在前**排的，
+        // 所以取第一条就是"最上游那个要先动的东西"，中间环节不必全列出来
+        let (blocked_note, jump_to) = match blocked.first() {
+            None => (None, None),
+            Some(b) => {
+                let here = self
+                    .up
+                    .registry
+                    .param(&b.key)
+                    .is_some_and(|c| c.applies_to(&col.machine_id));
+                if here {
+                    (Some(w::relate::blocked_note(&b.label, &b.need)), Some(b.key.clone()))
+                } else {
+                    // 控制它的那一项这台机型上根本没有 —— **不给跳转**。
+                    // 这是上游数据问题，骗用户去点一个不存在的格子更糟
+                    (Some(w::relate::controller_not_here(&b.label)), None)
+                }
+            }
+        };
+
         let (kind, text, lines) = if w::is_gcode(p) {
             let (n, t) = w::gcode_text(hit.value);
             (CellKind::Gcode, t, Some(n))
@@ -789,12 +814,242 @@ impl<'a> Book<'a> {
                 Some(w::disabled::BLOCKED_BY_CONDITION.to_owned())
             },
             blocked,
+            blocked_note,
+            jump_to,
             raw: hit.value.clone(),
         }
     }
 
+    /// 行头常驻的那一句：这一项归谁管。
+    ///
+    /// **不看当前值** —— 所以它在格子还没变灰之前就已经在那儿了。
+    /// 「不知道是哪个选项导致它灰色」的正解是这一句常驻，而不是等灰了再去悬停
+    fn control_note(&self, p: &ParamDef) -> Option<String> {
+        if let Some(sw) = &p.show_when {
+            return Some(w::relate::controlled_by(self.label_of(&sw.key)));
+        }
+        // section 级条件：要用户做的事一样，但说法不同（「整组关着」vs「上一项没开」）
+        let sw = self.up.registry.section_show_when(&p.layout.section_id)?;
+        Some(w::relate::group_controlled_by(self.label_of(&sw.key)))
+    }
+
+    /// 字段的中文名。查不到就退回 key —— 空字符串会让那句话变成「受「」控制」
+    fn label_of<'s>(&'s self, key: &'s str) -> &'s str {
+        self.up
+            .registry
+            .param(key)
+            .map_or(key, |p| p.label.as_str())
+    }
+
+    /// 行序的排序键：**五段**。
+    ///
+    /// 只按 `layout.order` 排是错的 —— 那是 section **内部**的序号（实测各组都从 1 开始，
+    /// 还有 `0.5` 这种插队值）。把它当全局键，等于把 16 个分组洗牌，
+    /// 出来就是「既不按逻辑、也不按字母」的那种乱序。
+    ///
+    /// 第三段是**父项的**序号，不是 `depth`：这样子项紧跟在自己的父项后面。
+    /// 若改成 `depth` 单独占一段，一个有子项的父行会被自己的子项挤到组尾。
+    ///
+    /// 最后一段是 key，保证**同序时也稳定** —— 否则同一份数据两次渲染的顺序可能不同。
+    fn row_sort_key<'k>(&self, key: &'k str) -> (i64, i64, i64, i64, &'k str) {
+        let Some(p) = self.up.registry.param(key) else {
+            return (i64::MAX, i64::MAX, i64::MAX, i64::MAX, key);
+        };
+        let section = p.layout.section_id.as_str();
+        let tab = self
+            .tab_of(section)
+            .map_or(f64::MAX, |t| self.up.registry.tab_order(t));
+        let group = self
+            .up
+            .registry
+            .section_meta(section)
+            .map_or(f64::MAX, |s| s.order);
+        let family = p
+            .parent_key
+            .as_deref()
+            .and_then(|k| self.up.registry.param(k))
+            .map_or(p.layout.order, |parent| parent.layout.order);
+        (
+            milli(tab),
+            milli(group),
+            milli(family),
+            milli(p.layout.order),
+            key,
+        )
+    }
+
+    /// 组的中文名。查不到就退化成 section id ——
+    /// 空字符串会让分组行变成一条没有标题的空白，那比露出一个英文 id 更难查
+    fn section_label(&self, section_id: &str) -> String {
+        self.up
+            .registry
+            .section_meta(section_id)
+            .map_or_else(|| section_id.to_owned(), |s| s.label.clone())
+    }
+
+    /* ---------- 配方台（默认视角） ---------- */
+
+    /**
+    一个版本的分组列表。**建在 `matrix()` 上，不另起一套判定。**
+
+    矩阵那一套已经把「行序五段键 / 搜索与分类过滤 / 单元格四分支 / 谁把我关了」都算好了。
+    这里做的只有三件事：
+
+    1. 按 `section_id` 切成组（行序已经保证同组连续，所以切一刀就够）
+    2. 把子项挂到父项下面
+    3. 父项把子项整组关掉时给一句话，让界面能把它们收起来
+
+    左栏那份导航**不跟着搜索变**：它从字段定义直接数，
+    否则搜一个词整棵导航树就塌了，而那正是用来换分组看的东西。
+    */
+    pub fn desk(&self, machine_id: &str, uid: Option<&str>, tab: Option<&str>, query: &str) -> Desk {
+        let col = ColRef {
+            machine_id: machine_id.to_owned(),
+            version_uid: uid.map(str::to_owned),
+        };
+        let m = self.matrix(&[col], tab, query);
+        let searching = !query.trim().is_empty();
+
+        // 先按组切；同组连续是行序的保证，这里不再自己聚合
+        let mut groups: Vec<DeskGroup> = Vec::new();
+        for row in m.rows {
+            let key = row.section_id.clone();
+            if groups.last().map(|g| g.section_id.as_str()) != Some(key.as_str()) {
+                groups.push(DeskGroup {
+                    section_id: key,
+                    label: row.section_label.clone(),
+                    count: 0,
+                    off_note: None,
+                    items: Vec::new(),
+                });
+            }
+            let g = groups.last_mut().expect("刚刚放进去的");
+            g.count += 1;
+            // 子项挂到父项下面。**搜索时不挂** —— 命中的可能只有子项，
+            // 把它塞进一个没命中的父项里会让人以为父项也命中了
+            let parent_here = !searching
+                && row.parent_key.as_deref().is_some_and(|p| {
+                    g.items.last().map(|i| i.row.key.as_str()) == Some(p)
+                });
+            if parent_here {
+                g.items.last_mut().expect("上面刚判过").children.push(row);
+            } else {
+                g.items.push(DeskItem {
+                    row,
+                    children: Vec::new(),
+                    off_note: None,
+                });
+            }
+        }
+
+        // 整组 / 整族被关掉的那句话
+        for g in &mut groups {
+            for it in &mut g.items {
+                it.off_note = family_off_note(&it.row, &it.children);
+            }
+            g.off_note = group_off_note(g);
+        }
+
+        Desk {
+            nav: self.desk_nav(machine_id),
+            groups,
+            total: m.total_rows,
+            note: m.note,
+            empty_reason: m.empty_reason,
+        }
+    }
+
+    /// 左栏导航：tab → section 两级 + 计数。**直接从字段定义数**，不受搜索与分类影响
+    fn desk_nav(&self, machine_id: &str) -> Vec<DeskNavTab> {
+        let mut per_section: BTreeMap<&str, usize> = BTreeMap::new();
+        for key in self.up.registry.visible_keys(machine_id) {
+            if let Some(p) = self.up.registry.param(key) {
+                *per_section.entry(p.layout.section_id.as_str()).or_default() += 1;
+            }
+        }
+        self.up
+            .registry
+            .param_tabs()
+            .into_iter()
+            .filter_map(|t| {
+                let sections: Vec<DeskNavSection> = t
+                    .sections
+                    .iter()
+                    .filter_map(|s| {
+                        let count = per_section.get(s.id.as_str()).copied().unwrap_or(0);
+                        // 这台机型一项都没有的组不列出来（A2L 那种机型会遇到）
+                        (count > 0).then(|| DeskNavSection {
+                            id: s.id.clone(),
+                            label: s.label.clone(),
+                            count,
+                        })
+                    })
+                    .collect();
+                let count = sections.iter().map(|s| s.count).sum();
+                (count > 0).then_some(DeskNavTab {
+                    id: t.id,
+                    label: t.label,
+                    count,
+                    sections,
+                })
+            })
+            .collect()
+    }
+
     fn tab_of(&self, section_id: &str) -> Option<&str> {
         self.up.registry.tab_of_section(section_id)
+    }
+}
+
+/// 父项把下面整族关掉了吗。**判据是子项全部改不动，而且是同一个父项关的**
+fn family_off_note(parent: &Row, children: &[Row]) -> Option<String> {
+    if children.is_empty() {
+        return None;
+    }
+    let all_off = children.iter().all(|c| {
+        c.cells
+            .first()
+            .is_some_and(|cell| cell.blocked.iter().any(|b| b.key == parent.key))
+    });
+    if !all_off {
+        return None;
+    }
+    let value = parent.cells.first().map_or("", |c| c.text.as_str());
+    Some(w::relate::family_off(&parent.label, value, children.len()))
+}
+
+/// 整组被 section 级条件关掉了吗
+fn group_off_note(g: &DeskGroup) -> Option<String> {
+    let mut who: Option<(&str, &str)> = None;
+    for it in &g.items {
+        let cell = it.row.cells.first()?;
+        let hit = cell
+            .blocked
+            .iter()
+            .find(|b| b.scope == BlockScope::Section)?;
+        match who {
+            None => who = Some((&hit.key, &hit.label)),
+            // 同一组里两个不同的 section 条件 —— 上游没有这种数据，有的话不合成一句
+            Some((k, _)) if k != hit.key => return None,
+            Some(_) => {}
+        }
+    }
+    let (_, label) = who?;
+    Some(w::relate::group_off(label, "", g.count))
+}
+
+/// `order` 压成能进元组比较的整数。上游最细到 0.1（实测有 `0.5` / `1.1`），乘 1000 留余量。
+///
+/// `f64::MAX` 这种「查不到」的哨兵**饱和**到 `i64::MAX`，
+/// 不许让它回绕成负数排到最前面 —— 那会让一个上游未声明的分组顶到表头
+fn milli(v: f64) -> i64 {
+    const LIMIT: f64 = (i64::MAX / 1000) as f64;
+    if v >= LIMIT {
+        i64::MAX
+    } else if v <= -LIMIT {
+        i64::MIN
+    } else {
+        (v * 1000.0).round() as i64
     }
 }
 
@@ -872,6 +1127,9 @@ pub struct BookView {
     /// 这一层看不到文件，而"仓库里有一份上游已经不存在的配方"只有读文件时才发现。
     /// 不交出来的话，那一份在树上会整个消失，用户只看到"我的改动去哪了"
     pub notices: Vec<String>,
+    /// 崩溃快照跟上了没有。**与 `save` / `dirty_count` 是两件事** ——
+    /// 「未保存」说仓库文件，「待落盘」说快照。由 `app` 层填
+    pub snapshot: SnapshotState,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -972,6 +1230,57 @@ pub struct StockRow {
 
 /* ---------- 矩阵 ---------- */
 
+/// 配方台一屏：左栏导航 + 分组列表
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Desk {
+    /// 左栏。**不随搜索变** —— 它是换分组看的工具
+    pub nav: Vec<DeskNavTab>,
+    pub groups: Vec<DeskGroup>,
+    /// 过滤前一共几项
+    pub total: usize,
+    pub note: Option<String>,
+    pub empty_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeskNavTab {
+    pub id: String,
+    pub label: String,
+    pub count: usize,
+    pub sections: Vec<DeskNavSection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeskNavSection {
+    pub id: String,
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeskGroup {
+    pub section_id: String,
+    pub label: String,
+    pub count: usize,
+    /// 整组被 section 级条件关掉时的那一句。界面据此把整组收起来
+    pub off_note: Option<String>,
+    pub items: Vec<DeskItem>,
+}
+
+/// 一项，外加挂在它下面的子项。**只有两级**
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeskItem {
+    pub row: Row,
+    pub children: Vec<Row>,
+    /// 这一项把自己下面那几个关掉了时的那一句
+    pub off_note: Option<String>,
+}
+
 /// 前端勾了什么。**顺序无所谓**，后端会按配方本重排
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1031,7 +1340,21 @@ pub struct Row {
     pub desc: String,
     pub unit: Option<String>,
     pub section_id: String,
+    /// 组的中文名。前端在它与上一行不同时插一条分组表头 ——
+    /// **分组是后端排出来的**，前端只是照着变化分段，不自己聚合
+    pub section_label: String,
     pub tab_id: Option<String>,
+    /// 0 = 顶层，1 = 某个父字段的子项。**只有两级**，上游没有更深的
+    pub depth: u8,
+    pub parent_key: Option<String>,
+    /// 父字段的中文名。父自己不可见（被 `machineFilter` 排掉 / 已废弃）时为 `None`，
+    /// 但 `depth` 仍是 1 —— 它在数据上确实是子项
+    pub parent_label: Option<String>,
+    /// 行头那句「属于：X」。整句在后端拼好，**前端不做格式化**
+    pub parent_note: Option<String>,
+    /// 行头那句「受「X」控制」/「整组由「X」控制」。**与当前值无关**，
+    /// 所以它在格子变灰之前就已经在那儿了
+    pub control_note: Option<String>,
     /// G-code 行**拒绝批量**（doc §8.4）
     pub gcode: bool,
     pub deprecated: bool,
@@ -1067,6 +1390,11 @@ pub struct Cell {
     pub reason: Option<String>,
     /// 根在前
     pub blocked: Vec<BlockedBy>,
+    /// 点开灰格子时显示的整句。两种：能跳的说「由「X」控制，需 Y」，
+    /// 不能跳的说「控制它的「X」在这台机型上没有这一项」
+    pub blocked_note: Option<String>,
+    /// 「去改那一项」跳到哪个字段。`None` = **不给跳转按钮**
+    pub jump_to: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
     pub raw: Value,
 }
@@ -1085,6 +1413,8 @@ impl Cell {
             editable: false,
             reason: Some(w::disabled::NOT_APPLICABLE.to_owned()),
             blocked: Vec::new(),
+            blocked_note: None,
+            jump_to: None,
             raw: Value::Null,
         }
     }
@@ -1522,6 +1852,280 @@ mod tests {
         assert_eq!(row.cells[1].kind, CellKind::Value, "P1S 那一列是正常值");
     }
 
+    /// 行序按**组**聚在一起。判据是「同一个组名不许出现两次以上的连续段」——
+    /// 一个组名消失后又回来，就是两组被洗到一起了，也就是反馈里那种乱序
+    #[test]
+    fn rows_are_grouped_by_section_not_interleaved() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "");
+        let mut seen: Vec<&str> = Vec::new();
+        let mut runs: Vec<&str> = Vec::new();
+        for r in &m.rows {
+            if runs.last() != Some(&r.section_label.as_str()) {
+                runs.push(&r.section_label);
+            }
+        }
+        for g in &runs {
+            assert!(
+                !seen.contains(g),
+                "组「{g}」断开又回来了，说明分组被洗乱：{:?}",
+                m.rows
+                    .iter()
+                    .map(|r| (&r.section_label, &r.key))
+                    .collect::<Vec<_>>()
+            );
+            seen.push(g);
+        }
+        // fixture 的两组号段是**重叠**的，所以这个断言不是白跑的
+        assert_eq!(runs, vec!["空间偏移", "擦料方式"], "组序照 tab.order");
+        assert!(m.rows.iter().all(|r| !r.section_label.is_empty()));
+    }
+
+    /// 子项紧跟父项，并且带上父的中文名
+    #[test]
+    fn child_rows_follow_their_parent() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let at = |k: &str| m.rows.iter().position(|r| r.key == k).unwrap();
+        assert_eq!(
+            at("wiping.child"),
+            at("wiping.mode") + 1,
+            "子项必须紧跟父项：{:?}",
+            m.rows.iter().map(|r| &r.key).collect::<Vec<_>>()
+        );
+
+        let child = &m.rows[at("wiping.child")];
+        assert_eq!(child.depth, 1);
+        assert_eq!(child.parent_key.as_deref(), Some("wiping.mode"));
+        assert_eq!(child.parent_label.as_deref(), Some("擦拭部件"));
+
+        let parent = &m.rows[at("wiping.mode")];
+        assert_eq!(parent.depth, 0, "父项自己是顶层");
+        assert!(parent.parent_label.is_none());
+    }
+
+    /// 同一份数据两次渲染的行序必须一字不差 —— 靠排序键最后那一段 key 兜底
+    #[test]
+    fn row_order_is_stable_for_equal_keys() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        let want = &cols(&[("A1", None), ("P1S", None)]);
+        let a: Vec<String> = b.matrix(want, None, "").rows.into_iter().map(|r| r.key).collect();
+        let z: Vec<String> = b.matrix(want, None, "").rows.into_iter().map(|r| r.key).collect();
+        assert_eq!(a, z);
+    }
+
+    /// 排序键的哨兵不许回绕：`f64::MAX` 压成整数后要是 `i64::MAX`，
+    /// 而不是一个负数 —— 负数会把「上游没声明的组」顶到表头
+    #[test]
+    fn unknown_order_saturates_instead_of_wrapping() {
+        assert_eq!(milli(f64::MAX), i64::MAX);
+        assert_eq!(milli(f64::MIN), i64::MIN);
+        assert_eq!(milli(1.05), 1050);
+        assert_eq!(milli(0.0), 0);
+        assert!(milli(1.0) < milli(1.1) && milli(1.1) < milli(f64::MAX));
+    }
+
+    /// 关联关系要**常驻可读**：行头那句话在格子还没变灰的时候就在
+    #[test]
+    fn the_control_note_is_there_before_the_cell_goes_grey() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        // 干净状态下 wiping.mode 还是「擦料塔」，所以 wiping.child 是**可编辑**的
+        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let child = m.rows.iter().find(|r| r.key == "wiping.child").unwrap();
+        assert!(child.cells[0].editable, "这会儿还没被关着");
+        assert_eq!(
+            child.control_note.as_deref(),
+            Some("受「擦拭部件」控制"),
+            "没灰的时候也要说得出归谁管"
+        );
+        assert_eq!(child.parent_note.as_deref(), Some("属于：擦拭部件"));
+
+        let mode = m.rows.iter().find(|r| r.key == "wiping.mode").unwrap();
+        assert!(mode.control_note.is_none(), "它自己不受谁控制");
+        assert!(mode.parent_note.is_none());
+    }
+
+    /// 灰格子要**说出是谁**并给出跳转目标 —— 光 `editable: false` 是在让人猜
+    #[test]
+    fn a_blocked_cell_names_its_controller_and_where_to_go() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        apply(
+            &mut d,
+            &c,
+            &f.up.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "wiping.mode".to_owned(),
+                value: Some(serde_json::json!("disk")),
+            }],
+        )
+        .unwrap();
+
+        let b = Book::new(&f.up, &c, &d);
+        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let cell = &m.rows.iter().find(|r| r.key == "wiping.child").unwrap().cells[0];
+
+        assert!(!cell.editable);
+        let note = cell.blocked_note.as_deref().expect("灰了必须有一句");
+        assert!(note.contains("擦拭部件"), "没点名是谁关的：{note}");
+        assert!(note.contains("等于 擦料塔"), "没说要改成什么：{note}");
+        assert_eq!(cell.jump_to.as_deref(), Some("wiping.mode"), "得能跳过去");
+
+        // 没被关着的格子不带这两样，否则界面上会多出一句空话
+        let mode = &m.rows.iter().find(|r| r.key == "wiping.mode").unwrap().cells[0];
+        assert!(mode.blocked_note.is_none() && mode.jump_to.is_none());
+    }
+
+    /* ---------- 配方台 ---------- */
+
+    /// 分组、计数、子项归位：配方台那一屏的骨架
+    #[test]
+    fn the_desk_groups_rows_and_hangs_children_under_their_parent() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
+
+        // 两个组，顺序照 tab.order（空间偏移在擦料方式前面）
+        let labels: Vec<&str> = desk.groups.iter().map(|g| g.label.as_str()).collect();
+        assert_eq!(labels, vec!["空间偏移", "擦料方式"]);
+
+        // 每组自己数自己的项数，且与它装的行数一致
+        for g in &desk.groups {
+            let rows: usize = g.items.iter().map(|i| 1 + i.children.len()).sum();
+            assert_eq!(g.count, rows, "组「{}」的计数与行数对不上", g.label);
+        }
+
+        // 子项挂在父项下面，不再是平铺的两行
+        let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
+        let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
+        assert_eq!(mode.children.len(), 1);
+        assert_eq!(mode.children[0].key, "wiping.child");
+        assert!(
+            wipe.items.iter().all(|i| i.row.key != "wiping.child"),
+            "子项不该同时又是顶层项"
+        );
+
+        // 单列：每一行只有一格
+        assert!(desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .all(|i| i.row.cells.len() == 1));
+    }
+
+    /// 左栏导航**不随搜索变**：它是换分组看的工具，搜一个词就塌掉的话就没用了
+    #[test]
+    fn the_nav_counts_do_not_follow_the_search() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        let all = b.desk("A1", Some("A1/STANDARD"), None, "");
+        let searched = b.desk("A1", Some("A1/STANDARD"), None, "擦料塔");
+        assert_eq!(all.nav, searched.nav, "导航不该跟着搜索走");
+
+        // 但分组列表要跟着搜索走
+        assert!(searched.groups.len() <= all.groups.len());
+        assert!(searched.total > 0, "总数说的是过滤前");
+
+        // 这台机型一项都没有的组不列出来
+        let a2l = b.desk("A2L", Some("A2L/STANDARD"), None, "");
+        for t in &a2l.nav {
+            assert!(t.count > 0);
+            assert!(t.sections.iter().all(|s| s.count > 0));
+        }
+    }
+
+    /// 父项把下面那几项关掉时，**给一句话让界面能收起来** ——
+    /// 这是「矩阵里只能一格一行灰字」的替代
+    #[test]
+    fn a_closed_family_gets_one_sentence_instead_of_grey_cells() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        apply(
+            &mut d,
+            &c,
+            &f.up.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.mode".to_owned(),
+                value: Some(serde_json::json!("disk")),
+            }],
+        )
+        .unwrap();
+
+        let b = Book::new(&f.up, &c, &d);
+        let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
+        let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
+        let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
+
+        let note = mode.off_note.as_deref().expect("关掉了就要说一句");
+        assert!(note.contains("擦拭部件"), "要点名是谁关的：{note}");
+        assert!(note.contains("圆盘擦拭"), "要说它现在是什么值：{note}");
+        assert!(note.contains('1'), "要说关掉了几项：{note}");
+
+        // 没关的时候不给这一句，否则界面上多一条空话
+        let open = Book::new(&f.up, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
+        let mode2 = open
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .find(|i| i.row.key == "wiping.mode")
+            .unwrap();
+        assert!(mode2.off_note.is_none());
+    }
+
+    /// 搜索时**不把子项塞进没命中的父项**，否则会让人以为父项也命中了
+    #[test]
+    fn searching_does_not_nest_children_under_a_parent_that_did_not_match() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &c, &d);
+
+        // 只命中子项（「塔位置 X」是 wiping.child 的中文名）
+        let desk = b.desk("A1", Some("A1/STANDARD"), None, "塔位置");
+        let items: Vec<&str> = desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .map(|i| i.row.key.as_str())
+            .collect();
+        assert_eq!(items, vec!["wiping.child"]);
+        assert!(desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .all(|i| i.children.is_empty()));
+        // 组名仍然说得出来（行上带着 sectionLabel）
+        assert_eq!(desk.groups[0].label, "擦料方式");
+    }
+
     /// 单元格三种 kind 各出现一次，且「被关着」与「不适用」分得开
     #[test]
     fn cells_separate_blocked_from_not_applicable() {
@@ -1592,9 +2196,9 @@ mod tests {
         );
         assert_eq!(found.note.as_deref(), Some(w::MATRIX_SEARCH_SPANS_ALL_TABS));
 
-        // 搜 tomlKey 也要命中
+        // 搜 tomlKey 也要命中（三个偏移共享 tomlKey `offset`）
         assert!(b
-            .matrix(&one, None, "off_x")
+            .matrix(&one, None, "offset")
             .rows
             .iter()
             .any(|r| r.key == "toolhead.offset.x"));

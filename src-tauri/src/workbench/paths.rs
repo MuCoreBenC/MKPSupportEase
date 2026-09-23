@@ -130,6 +130,22 @@ pub fn upstream_candidates() -> Vec<String> {
     }
 }
 
+/// 我们自己那份预设数据的根：`<repo>/presets`。
+///
+/// **它和 [`upstream_root`] 是两件不同的事，别合并**：那个指向 `mkpse-presets`
+/// （历史上的上游，现在只是我们搬数据的来源）；这个是**我们自己的**数据，
+/// 工作台读它也写它。搬完之后只有这一份是真相。
+///
+/// 判据同样是**标志文件**而不是 `is_dir()`：一个同名空目录不该骗过定位，
+/// 否则真正的失败会推迟到第一次读机型文件才暴露。
+pub fn presets_root() -> Option<PathBuf> {
+    let p = repo_root().join("presets");
+    p.join("registry")
+        .join("param_registry.toml")
+        .is_file()
+        .then_some(p)
+}
+
 /// 解析上游仓库内的相对路径。**只读用**，越界一律 `PERMISSION_DENIED`
 pub fn resolve_upstream(rel: &str) -> Result<PathBuf, AppError> {
     let root = upstream_root().ok_or_else(|| {

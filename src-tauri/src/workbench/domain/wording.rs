@@ -127,6 +127,42 @@ impl SaveState {
     }
 }
 
+/* ---------- 崩溃快照状态 ---------- */
+
+/// 草稿快照（`.draft/book.json`）的三态。
+///
+/// **与 [`SaveState`] 是两件事，不许合成一句**：
+/// 「未保存」说的是仓库文件里还没有这些改动；
+/// 「待落盘」说的是崩溃快照还没跟上 —— 草稿本身在内存里，是真相。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SnapshotState {
+    Current,
+    Pending,
+    Failed,
+}
+
+impl SnapshotState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Current => "快照已跟上",
+            Self::Pending => "待落盘",
+            Self::Failed => "快照写不进去",
+        }
+    }
+
+    pub fn explain(self) -> &'static str {
+        match self {
+            Self::Current => "停手之后已经写过一次崩溃快照，现在崩了也不丢",
+            Self::Pending => "刚改的还在内存里，停手 2 秒后会写一次快照",
+            Self::Failed => "快照写不进去，这会儿崩了会丢掉未保存的改动。改动本身没受影响",
+        }
+    }
+}
+
+/// 快照失败那条提示的前缀。后面接系统给的原因
+pub const SNAPSHOT_FAILED: &str = "草稿快照写不进去（改动还在，但崩了会丢）";
+
 /* ---------- BBS 三态（doc 的进口饮料） ---------- */
 
 /// 一条 BBS 曲线在**交付**上的身份。
@@ -332,6 +368,58 @@ pub mod disabled {
     pub const NOT_UNDOABLE: &str = "删除和生成记录不进撤销栈；删掉的版本在回收站里";
 }
 
+/* ---------- 「谁把我关了」 ---------- */
+
+/// 带变量的几句。**整句在这里拼好再交给前端**，前端不拿模板去填空 ——
+/// 那等于把「句子长什么样」这件事分到两个仓库里，迟早一边改了另一边没跟上。
+///
+/// 这一组是反馈里「灰色之后我不知道是哪个选项导致它灰色」的直接解药：
+/// 关联关系要**常驻可读**，不能只躺在 tooltip 里。
+pub mod relate {
+    /// 行头常驻：这一项归谁管。悬停之前就该读得到
+    pub fn controlled_by(label: &str) -> String {
+        format!("受「{label}」控制")
+    }
+
+    /// 整组被 section 级条件关着 —— 要用户做的事一样，但解释句不同
+    pub fn group_controlled_by(label: &str) -> String {
+        format!("整组由「{label}」控制")
+    }
+
+    /// 子项行头：它挂在哪个父项下面
+    pub fn belongs_to(label: &str) -> String {
+        format!("属于：{label}")
+    }
+
+    /// 点开一个灰格子时的那一句。`need` 是 `BlockedBy::need`，已经是整句
+    pub fn blocked_note(label: &str, need: &str) -> String {
+        format!("改不动：由「{label}」控制，需{need}")
+    }
+
+    /// 跳过去改那一项
+    pub const GO_FIX_IT: &str = "去改那一项";
+
+    /// 控制它的那一项在这台机型上根本没有 —— 这时候**不给跳转**。
+    /// 骗用户去点一个不存在的格子，比直接说出这是上游数据问题更糟
+    pub fn controller_not_here(label: &str) -> String {
+        format!("控制它的「{label}」在这台机型上没有这一项")
+    }
+
+    /// 一个父项把自己下面整组关掉了。列表里直接把那几项收起来，只留这一句 ——
+    /// 矩阵里只能靠每格一行灰字，那是「信息过载」的来源
+    pub fn family_off(label: &str, value: &str, n: usize) -> String {
+        format!("「{label}」选了{value}，下面这 {n} 项现在不生效")
+    }
+
+    /// 整组被 section 级条件关掉
+    pub fn group_off(label: &str, value: &str, n: usize) -> String {
+        format!("「{label}」选了{value}，这一组 {n} 项现在不生效")
+    }
+
+    /// 收起来的那几项点开看的入口
+    pub const SHOW_ANYWAY: &str = "仍然展开看";
+}
+
 /* ---------- 不留白 ---------- */
 
 /// 零问题时**明确写出来**，因为空白会被读成「还没校验」（doc §10.2）
@@ -506,5 +594,30 @@ mod tests {
             disabled::DETACH_NOTHING_TO_DETACH,
             "能点和不能点说了同一句话，等于没解释"
         );
+    }
+
+    /// 关联那一组：**每个模板都要被调用一次**，且都真的把名字填进去了。
+    /// 加了词却没接线的话，界面上只会剩一句「受「」控制」
+    #[test]
+    fn every_relate_sentence_names_the_field_it_talks_about() {
+        let all = [
+            relate::controlled_by("擦拭部件"),
+            relate::group_controlled_by("擦拭部件"),
+            relate::belongs_to("擦拭部件"),
+            relate::blocked_note("擦拭部件", "等于 擦料塔"),
+            relate::controller_not_here("擦拭部件"),
+        ];
+        for s in &all {
+            assert!(s.contains("擦拭部件"), "这一句没把字段名说出来：{s}");
+            assert!(!s.contains("{}"), "占位符没被替换：{s}");
+        }
+        // 五句互不相同 —— 说同一句话等于没区分场景
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(relate::blocked_note("擦拭部件", "等于 擦料塔").contains("等于 擦料塔"));
+        assert!(!relate::GO_FIX_IT.is_empty());
     }
 }
