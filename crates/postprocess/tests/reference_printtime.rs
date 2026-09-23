@@ -6,7 +6,7 @@
 //! 一条退档（`TotalSeconds` 差 1 ULP）的真因是**参考文件的解析层**而非算法（serde_json
 //! 默认 feature 的浮点快路径），修掉解析后 5 项全部逐位相等 ⇒ 容差分支已删。
 
-use mkp_pp::postproc::printtime::{Options, estimate};
+use postprocess::postproc::printtime::{Options, estimate};
 
 fn load(rel: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap()

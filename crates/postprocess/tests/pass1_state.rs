@@ -7,7 +7,7 @@
 //! helper 直测的 3 条（findPrevPositionCmd 索引 0、stripSkippableBlocks 两形态）
 //! 在各模块的单元测试里（scan.rs / delete_wipe.rs）。
 
-use mkp_pp::ir::Ir;
+use postprocess::ir::Ir;
 
 fn fixture_ir() -> Ir {
     let json = std::fs::read_to_string(
@@ -31,13 +31,13 @@ fn run_first_pass(gcode: &[String], ir_data: Ir) -> (Vec<String>, Ir) {
     let mut ir = ir_data;
     let toml_machine = ir.machine.machine_type.clone();
     let mut progress = |_, _: String| {};
-    let out = mkp_pp::postproc::pass1::first_pass(
+    let out = postprocess::postproc::pass1::first_pass(
         gcode,
         &mut ir,
         &toml_machine,
         &mut progress,
-        &mkp_pp::diag::CancelToken::new(),
-        mkp_pp::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
     )
     .expect("first_pass 失败");
     (out.lines, ir)

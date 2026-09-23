@@ -9,7 +9,7 @@
 //! `; WIPE_*` 带空格变体、`E-.12056` 紧凑负值。扫描原语在这些形态上的
 //! 行为是 pass1/pass2 字节等价的前提。
 
-use mkp_pp::gcode::{
+use postprocess::gcode::{
     extract_coord, format_speed, get_e_value, has_e_param, is_feature_line, match_any_feature,
     match_slicer_comment, parse_xyze,
 };

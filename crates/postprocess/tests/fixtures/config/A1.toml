@@ -1,7 +1,7 @@
-# mkp-pp 配置文件（由 `mkp-pp init` 生成）
+# mkpse-pp 配置文件（由 `mkpse-pp init` 生成）
 # 结构与内核的 IR 完全一致：改这里就是改 IR，没有中间映射层。
 # 缺任何一个键都会报错（刻意的：拼错键名不会被静默忽略）。
-# 想看这份配置经过默认值兜底与机型表填充之后的真实取值：`mkp-pp dump-ir -c 本文件`
+# 想看这份配置经过默认值兜底与机型表填充之后的真实取值：`mkpse-pp dump-ir -c 本文件`
 SchemaVersion = 1
 WarningDiagnostics = []
 Warnings = []

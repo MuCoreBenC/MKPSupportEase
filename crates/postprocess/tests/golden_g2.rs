@@ -16,29 +16,30 @@ fn run_pass2_chain(input: &str) -> Vec<String> {
             .join("tests/fixtures/ir/golden_42274_2.json"),
     )
     .expect("读不到 IR fixture（Task 4.2 的导出物）");
-    let mut ir_data: mkp_pp::ir::Ir = serde_json::from_str(&ir_json).expect("IR JSON 反序列化失败");
+    let mut ir_data: postprocess::ir::Ir =
+        serde_json::from_str(&ir_json).expect("IR JSON 反序列化失败");
     let toml_machine = ir_data.machine.machine_type.clone();
     let mut progress = |_pct: f64, _msg: String| {};
-    let p1 = mkp_pp::postproc::pass1::first_pass(
+    let p1 = postprocess::postproc::pass1::first_pass(
         &content,
         &mut ir_data,
         &toml_machine,
         &mut progress,
-        &mkp_pp::diag::CancelToken::new(),
-        mkp_pp::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
     )
     .expect("first_pass 失败");
     let final_tower_height = p1.stats.max_z_height;
     let mut pass2_stats = Default::default();
-    let p2 = mkp_pp::postproc::pass2::second_pass(
+    let p2 = postprocess::postproc::pass2::second_pass(
         p1,
         &mut ir_data,
         final_tower_height,
         &toml_machine,
         &mut progress,
         &mut pass2_stats,
-        &mkp_pp::diag::CancelToken::new(),
-        mkp_pp::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
     )
     .expect("second_pass 失败");
     p2.lines

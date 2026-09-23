@@ -1,19 +1,19 @@
-# 后处理内核 —— 自 /Users/wzy/projects/mkp-pp **整包搬入**，源码内容一个字节未改。
+# 后处理内核 —— 自 /Users/wzy/projects/mkpse-pp **整包搬入**，源码内容一个字节未改。
 #
-# **包名刻意仍叫 mkp-pp、lib 仍叫 mkp_pp。** 理由不是懒：改名要动 22 个测试文件里的
-# 每一处 `use mkp_pp::`，而「搬家没搬错」这条判据靠的正是**内容零 diff**
+# **包名刻意仍叫 mkpse-pp、lib 仍叫 postprocess。** 理由不是懒：改名要动 22 个测试文件里的
+# 每一处 `use postprocess::`，而「搬家没搬错」这条判据靠的正是**内容零 diff**
 #（K1：两侧 src/ + tests/ 的 sha256 清单逐行相同）。改名会把机械改动与搬运错误
-# 混进同一条 diff，谁也说不清哪一处不同是故意的。代价（包名 mkp-pp ≠ 产品名 mkp-ssr）
-# 登记在这里，等 K1..K7 全绿、mkp-pp 那个文件夹删掉之后再考虑改名。
+# 混进同一条 diff，谁也说不清哪一处不同是故意的。代价（包名 mkpse-pp ≠ 产品名 mkp-ssr）
+# 登记在这里，等 K1..K7 全绿、mkpse-pp 那个文件夹删掉之后再考虑改名。
 #
 # 一个 lib + 一个 bin。刻意不是多 crate：链条只剩
 # cli → pipeline → postproc → ir → gcode/diag 一条直线，
 # 代价（丢掉 Cargo 强制的分层判据）由 tests/boundaries.rs 的文本判据接手。
 #
-# bin `mkp-pp` **保留但不进 .app 包**：check / dump-ir 是诊断预设与 IR 的唯一手段，
+# bin `mkpse-pp` **保留但不进 .app 包**：check / dump-ir 是诊断预设与 IR 的唯一手段，
 # 且 tests/cli.rs 依赖它（删掉等于删判据）。分发物只有 src-tauri 那一个可执行物。
 [package]
-name = "mkp-pp"
+name = "mkpse-postprocess"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,11 +21,11 @@ publish = false
 description = "MKP 后处理内核：G-code + IR 配置 → 处理后 G-code"
 
 [lib]
-name = "mkp_pp"
+name = "postprocess"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mkp-pp"
+name = "mkpse-pp"
 path = "src/main.rs"
 
 [dependencies]
@@ -50,7 +50,7 @@ tempfile.workspace = true
 # **这里不能再写 [lints.clippy]** —— cargo 1.97 实测：
 #   cannot override `workspace.lints` in `lints`, either remove the overrides
 #   or `lints.workspace = true` and manually specify the lints
-# 所以原 mkp-pp 里那段注释挪到这上面，内容一字不改：
+# 所以原 mkpse-pp 里那段注释挪到这上面，内容一字不改：
 #
 # 刻意**不** deny clippy::suboptimal_flops：它给的修复建议正是 mul_add —— 与
 # 「几何层禁 FMA 融合」直接矛盾（源仓库 Task 3 实测撞上：a*b+c 的直写形态被它

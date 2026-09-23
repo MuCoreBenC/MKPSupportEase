@@ -32,7 +32,7 @@ const TOWER_CENTER_Y: f64 = 20.0;
 
 // —— 三个入口接真实实现（Task 8）。签名保持 Option<Vec<String>>
 // （nil 与空切片必须可区分）。——
-use mkp_pp::postproc::tower::{
+use postprocess::postproc::tower::{
     generate_mini_spiral_gcode, generate_rib_gcode, generate_sheath_gcode,
 };
 

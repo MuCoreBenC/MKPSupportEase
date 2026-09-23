@@ -5,9 +5,9 @@
 //! （Task 4.3 只导出了生成器对），此处为行为判据 —— 如实登记，不假称字节级。
 //! 三种 exec_mode 各一条（13.5）。
 
-use mkp_pp::ir::Ir;
-use mkp_pp::postproc::calibration::{Mode, detect_mode, insert_calibration_gcode};
-use mkp_pp::postproc::disk::{BBox, CentroidResult};
+use postprocess::ir::Ir;
+use postprocess::postproc::calibration::{Mode, detect_mode, insert_calibration_gcode};
+use postprocess::postproc::disk::{BBox, CentroidResult};
 
 fn fixture_ir() -> Ir {
     let json = std::fs::read_to_string(
@@ -215,7 +215,8 @@ fn vibration_detection_removed_in_mech_mode() {
         ";===== other region",
         "M970 S9",
     ]);
-    let out = mkp_pp::postproc::calibration::remove_vibration_detection_from_mech_mode(&content);
+    let out =
+        postprocess::postproc::calibration::remove_vibration_detection_from_mech_mode(&content);
     assert!(
         !out.iter()
             .any(|l| l.starts_with("M970 S1") || l == "M974 X1"),

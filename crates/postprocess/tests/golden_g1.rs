@@ -15,16 +15,17 @@ fn run_first_pass(input: &str) -> Vec<String> {
             .join("tests/fixtures/ir/golden_42274_2.json"),
     )
     .expect("读不到 IR fixture（Task 4.2 的导出物）");
-    let mut ir_data: mkp_pp::ir::Ir = serde_json::from_str(&ir_json).expect("IR JSON 反序列化失败");
+    let mut ir_data: postprocess::ir::Ir =
+        serde_json::from_str(&ir_json).expect("IR JSON 反序列化失败");
     let mut progress = |_pct: f64, _msg: String| {};
     let toml_machine = ir_data.machine.machine_type.clone();
-    let out = mkp_pp::postproc::pass1::first_pass(
+    let out = postprocess::postproc::pass1::first_pass(
         &content,
         &mut ir_data,
         &toml_machine,
         &mut progress,
-        &mkp_pp::diag::CancelToken::new(),
-        mkp_pp::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
     )
     .expect("first_pass 失败");
     out.lines

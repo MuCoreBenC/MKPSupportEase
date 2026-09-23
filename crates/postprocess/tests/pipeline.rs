@@ -4,7 +4,7 @@
 //! `tests/fixtures/config/A1.toml` 是从**既有的** IR JSON 判据资产
 //! `tests/fixtures/ir/build9/A1.json`（= 来源仓库 `ir::build()` 吃
 //! `tests/fixtures/presets/A1.toml` 的输出）用 `config::to_toml` 派生出来的，
-//! 派生器与 `mkp-pp init` 是同一条路。[`fixture_is_derived_from_the_ir_json`]
+//! 派生器与 `mkpse-pp init` 是同一条路。[`fixture_is_derived_from_the_ir_json`]
 //! 每轮都重新核对这条派生关系 —— 手改 TOML 或改动 JSON 都会让它红。
 //!
 //! **为什么不用 `golden_42274_2.json`（G1/G2 喂给 pass1 的那份 IR）**：实测它跑不完整条链。
@@ -18,10 +18,10 @@
 //! 缺失 / registry 坏枚举 —— 本项目没有预设文件、没有头注释、没有参数注册表）。
 //! 换成 3 条对着**新的**失败面的判据：缺配置文件 / 坏 TOML / 机型名不认识。
 
-use mkp_pp::config;
-use mkp_pp::diag::CancelToken;
-use mkp_pp::ir::{Ir, fill_defaults};
-use mkp_pp::pipeline::{ProcessRequest, ProgressEvent, Step, assert_step_order, process};
+use postprocess::config;
+use postprocess::diag::CancelToken;
+use postprocess::ir::{Ir, fill_defaults};
+use postprocess::pipeline::{ProcessRequest, ProgressEvent, Step, assert_step_order, process};
 
 fn repo_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -89,7 +89,7 @@ fn fixture_is_derived_from_the_ir_json() {
 
 #[test]
 fn full_pipeline_runs_and_orders_steps() {
-    let out_path = std::env::temp_dir().join("mkp-pp-e2e-test.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-e2e-test.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
         config_path: config_fixture(),
@@ -136,7 +136,7 @@ fn full_pipeline_runs_and_orders_steps() {
 /// 变成机械可查的失败。
 #[test]
 fn every_executed_step_also_emits_progress() {
-    let out_path = std::env::temp_dir().join("mkp-pp-step-event-parity.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-step-event-parity.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
         config_path: config_fixture(),
@@ -169,7 +169,7 @@ fn every_executed_step_also_emits_progress() {
 /// `--set` 真的作用在管线上（不只是在 config 的单测里）。
 #[test]
 fn override_reaches_the_pipeline() {
-    let out_path = std::env::temp_dir().join("mkp-pp-override.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-override.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
         config_path: config_fixture(),
@@ -201,7 +201,7 @@ fn missing_config_file_is_reported_with_code() {
 
 #[test]
 fn broken_toml_aborts_with_code() {
-    let tmp = std::env::temp_dir().join("mkp-pp-badtoml.toml");
+    let tmp = std::env::temp_dir().join("mkpse-pp-badtoml.toml");
     std::fs::write(&tmp, "[this is not = toml\n").expect("写临时文件");
     let req = ProcessRequest {
         gcode_path: golden_input(),
@@ -223,7 +223,7 @@ fn broken_toml_aborts_with_code() {
 /// 机型维度全 0，输出是垃圾而退出码是 0。
 #[test]
 fn unknown_machine_type_aborts_before_pass1() {
-    let out_path = std::env::temp_dir().join("mkp-pp-unknown-machine-out.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-unknown-machine-out.gcode");
     let _ = std::fs::remove_file(&out_path);
     let req = ProcessRequest {
         gcode_path: golden_input(),

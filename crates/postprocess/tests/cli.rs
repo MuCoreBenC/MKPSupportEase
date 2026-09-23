@@ -1,7 +1,7 @@
 //! CLI 面的判据：**真的把二进制跑起来**，不是调库函数。
 //!
 //! 为什么必须真跑：退出码、stdout/stderr 分流、clap 的参数面这三件事在库里不存在，
-//! 它们只在进程边界上有意义。`env!("CARGO_BIN_EXE_mkp-pp")` 由 Cargo 提供，
+//! 它们只在进程边界上有意义。`env!("CARGO_BIN_EXE_mkpse-pp")` 由 Cargo 提供，
 //! 指向本次构建出来的那个二进制（不会拿到 PATH 上装的旧版本）。
 //!
 //! **未覆盖的一条，先说清**：退出码 `130`（Ctrl-C）需要给子进程发真 SIGINT
@@ -17,7 +17,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_mkp-pp")
+    env!("CARGO_BIN_EXE_mkpse-pp")
 }
 
 fn golden_input() -> PathBuf {
@@ -49,7 +49,7 @@ fn stderr_of(out: &Output) -> String {
 }
 
 fn temp_copy(tag: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("mkp-pp-cli-{tag}.gcode"));
+    let path = std::env::temp_dir().join(format!("mkpse-pp-cli-{tag}.gcode"));
     std::fs::copy(golden_input(), &path).expect("复制输入失败");
     path
 }
@@ -62,11 +62,11 @@ fn part_of(p: &Path) -> PathBuf {
 
 /// 成功路径：退出 0，**stdout 只有结果路径这一行**，进度在 stderr。
 ///
-/// 「stdout 只有一行」这条是给脚本用的契约：`out=$(mkp-pp run …)` 必须直接是路径。
+/// 「stdout 只有一行」这条是给脚本用的契约：`out=$(mkpse-pp run …)` 必须直接是路径。
 #[test]
 fn run_succeeds_and_stdout_is_only_the_output_path() {
     let input = temp_copy("ok");
-    let out_path = std::env::temp_dir().join("mkp-pp-cli-ok.out.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-cli-ok.out.gcode");
     let _ = std::fs::remove_file(&out_path);
 
     let out = run_cli(&[
@@ -227,7 +227,11 @@ fn init_prints_a_config_that_parses() {
     let out = run_cli(&["init"]);
     assert_eq!(code_of(&out), 0);
     let text = stdout_of(&out);
-    assert_eq!(text, mkp_pp::config::init_toml(), "init 与库函数应同源");
+    assert_eq!(
+        text,
+        postprocess::config::init_toml(),
+        "init 与库函数应同源"
+    );
     let parsed: toml::Value = toml::from_str(&text).expect("init 的产物必须是合法 TOML");
     assert!(
         parsed.as_table().is_some_and(|t| t.contains_key("Tower")),
@@ -238,7 +242,7 @@ fn init_prints_a_config_that_parses() {
 /// `init -o` **不覆盖已存在的文件**（静默盖掉等于删用户数据）。
 #[test]
 fn init_refuses_to_overwrite() {
-    let path = std::env::temp_dir().join("mkp-pp-cli-init-existing.toml");
+    let path = std::env::temp_dir().join("mkpse-pp-cli-init-existing.toml");
     std::fs::write(&path, "# 用户改过的东西\n").expect("写占位文件");
     let out = run_cli(&["init", "-o", path.to_str().unwrap()]);
     assert_eq!(code_of(&out), 2, "stderr:\n{}", stderr_of(&out));

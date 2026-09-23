@@ -53,7 +53,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_mkp-pp")
+    env!("CARGO_BIN_EXE_mkpse-pp")
 }
 
 fn golden_input() -> PathBuf {
@@ -77,7 +77,7 @@ fn run_cli(args: &[&str]) -> Output {
 
 /// 跑一次 `run`，返回输出文件的字节。
 fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
-    let out_path = std::env::temp_dir().join(format!("mkp-pp-e2e-{tag}.gcode"));
+    let out_path = std::env::temp_dir().join(format!("mkpse-pp-e2e-{tag}.gcode"));
     let _ = std::fs::remove_file(&out_path);
     let input = golden_input();
     let config = config_a1();
@@ -102,10 +102,10 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
 }
 
 /// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `mkp_pp::postproc::marks::strip_mark_lines` 这一份实现（全仓 8 处比对共用它；
+/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（全仓 8 处比对共用它；
 /// 分成八份实现就等于八个可能各自跑偏的口径）。
 fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    mkp_pp::postproc::marks::strip_mark_lines(bytes)
+    postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
 /// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。

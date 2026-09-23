@@ -8,7 +8,7 @@
 //! （M017「禁止机型回退」的语义，要保留），于是修之前：
 //!
 //! ```text
-//! mkp-pp check -c … --set Machine.MachineType=A2L
+//! mkpse-pp check -c … --set Machine.MachineType=A2L
 //! → 退出码 0，「配置可用」，机型 A2L（X 0.0..0.0 / Y 0.0..0.0），禁区 0 处
 //! ```
 //!
@@ -27,14 +27,14 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use mkp_pp::postproc::machine_dims::has_machine_dimensions;
+use postprocess::postproc::machine_dims::has_machine_dimensions;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_mkp-pp")
+    env!("CARGO_BIN_EXE_mkpse-pp")
 }
 
 fn config_a1() -> PathBuf {
@@ -151,9 +151,9 @@ fn dump_ir_rejects_a_machine_that_has_no_dimensions() {
 #[test]
 fn run_rejects_it_at_preflight_with_exit_two() {
     let machine = a_canonical_name_without_dimensions();
-    let input = std::env::temp_dir().join("mkp-pp-nodims.gcode");
+    let input = std::env::temp_dir().join("mkpse-pp-nodims.gcode");
     std::fs::copy(golden_input(), &input).expect("复制输入失败");
-    let out_path = std::env::temp_dir().join("mkp-pp-nodims.out.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-nodims.out.gcode");
     let _ = std::fs::remove_file(&out_path);
 
     let out = run_cli(&[
@@ -210,7 +210,7 @@ fn the_two_lookups_agree() {
     for m in canonical_names() {
         for form in [m.clone(), m.to_lowercase(), m.to_uppercase()] {
             let has = has_machine_dimensions(&form);
-            let dims = mkp_pp::postproc::machine_dims::get_machine_dimensions(&form);
+            let dims = postprocess::postproc::machine_dims::get_machine_dimensions(&form);
             let non_zero = dims.movement_range.max_x != 0.0 || dims.movement_range.max_y != 0.0;
             assert_eq!(
                 has, non_zero,

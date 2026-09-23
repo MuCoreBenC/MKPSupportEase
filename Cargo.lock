@@ -1964,22 +1964,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mkp-pp"
-version = "0.2.0"
-dependencies = [
- "clap",
- "ctrlc",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.20",
- "toml 0.8.2",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "mkp-support-ease"
 version = "0.0.1"
 dependencies = [
@@ -2001,6 +1985,22 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "window-vibrancy 0.8.0",
+]
+
+[[package]]
+name = "mkpse-postprocess"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "ctrlc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

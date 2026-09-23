@@ -16,11 +16,11 @@
 
 use std::path::PathBuf;
 
-use mkp_pp::config;
-use mkp_pp::diag::CancelToken;
-use mkp_pp::ir::Ir;
-use mkp_pp::pipeline::{ProcessRequest, process};
-use mkp_pp::postproc::support::{apply_wiping_decision, decide_wiping};
+use postprocess::config;
+use postprocess::diag::CancelToken;
+use postprocess::ir::Ir;
+use postprocess::pipeline::{ProcessRequest, process};
+use postprocess::postproc::support::{apply_wiping_decision, decide_wiping};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -141,7 +141,7 @@ fn the_field_really_drives_the_decision() {
 fn pipeline_decision_matches_independent_recomputation() {
     let config_path = repo_root().join("tests/fixtures/config/A1.toml");
     let input = repo_root().join("tests/golden/42274.2.gcode");
-    let out_path = std::env::temp_dir().join("mkp-pp-wiping-source.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-pp-wiping-source.gcode");
 
     // 独立重算：直接从配置文件读 preferred，再对同一份输入跑 decide + apply。
     let cfg_ir = config::load(&config_path).expect("配置 fixture 必须能读");

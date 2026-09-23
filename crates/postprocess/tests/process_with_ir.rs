@@ -36,8 +36,8 @@
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
-use mkp_pp::diag::CancelToken;
-use mkp_pp::pipeline::{self, IrProcessRequest, NoProgress, ProcessRequest};
+use postprocess::diag::CancelToken;
+use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProcessRequest};
 
 /// 伪随机序列是进程级状态 ⇒ 跑整链必须独占它。
 static SEQUENCE: Mutex<()> = Mutex::new(());
@@ -70,7 +70,7 @@ fn reference_output() -> PathBuf {
 ///
 /// **调用方必须持有 [`lock_sequence`] 的锁**：里面会 reset 那条进程级伪随机序列。
 fn run_in_place(with_ir: bool) -> Vec<u8> {
-    mkp_pp::gcode::reset_pseudo_random();
+    postprocess::gcode::reset_pseudo_random();
 
     let dir = tempfile::tempdir().expect("临时目录");
     let work = dir.path().join("input.gcode");
@@ -136,9 +136,9 @@ fn process_with_ir_matches_the_config_face_byte_for_byte() {
 }
 
 /// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `mkp_pp::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
+/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
 fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    mkp_pp::postproc::marks::strip_mark_lines(bytes)
+    postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
 #[test]

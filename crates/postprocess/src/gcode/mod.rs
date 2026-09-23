@@ -11,7 +11,7 @@
 //! 换成文本扫描 —— 能力更弱（绕得过：换个写法引用），登记在 spec doc.md §3.1。
 //!
 //! 本模块内部的 `crate::…` 路径在搬家时被改写成 `crate::gcode::…`（16 行，
-//! 因为 `crate::` 的含义从「gcode crate 根」变成了「mkp_pp crate 根」）；除此之外零改动。
+//! 因为 `crate::` 的含义从「gcode crate 根」变成了「postprocess crate 根」）；除此之外零改动。
 //!
 //! 移植对照（行为规格 = 旧仓库 `mkp-core/gcode`，不做文件级翻译，按语义重组）：
 //! - `format`      ← offset_fmt.go（Format* / 伪随机 / MathRound）

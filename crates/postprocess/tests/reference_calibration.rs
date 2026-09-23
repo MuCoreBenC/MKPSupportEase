@@ -4,8 +4,8 @@
 //! Task 4.3 从旧仓库导出。证据等级：对照当前 Go 实现的输出（见
 //! tests/reference/README.md），Go 若有 bug 此处逐字节复制。
 
-use mkp_pp::ir::Ir;
-use mkp_pp::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
+use postprocess::ir::Ir;
+use postprocess::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 

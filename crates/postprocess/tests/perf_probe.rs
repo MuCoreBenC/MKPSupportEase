@@ -21,7 +21,7 @@ use golden_common as gc;
 /// 迭代数：与 Go 侧 `-benchtime 10x` 对齐。
 const ITERS: usize = 10;
 
-fn fixture_ir() -> mkp_pp::ir::Ir {
+fn fixture_ir() -> postprocess::ir::Ir {
     let ir_json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/ir/golden_42274_2.json"),
@@ -36,21 +36,23 @@ fn fixture_ir() -> mkp_pp::ir::Ir {
 fn fixture_chain_probe() {
     let input = gc::read_golden("42274.2.gcode");
     let content: Vec<String> = gc::split_lines(&input);
-    let cancel = mkp_pp::diag::CancelToken::new();
-    let iv = mkp_pp::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL;
+    let cancel = postprocess::diag::CancelToken::new();
+    let iv = postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL;
 
     // 预热一轮（页错误/首次分配不计入）
     {
         let mut ir = fixture_ir();
         let m = ir.machine.machine_type.clone();
         let mut p = |_, _: String| {};
-        let p1 = mkp_pp::postproc::pass1::first_pass(&content, &mut ir, &m, &mut p, &cancel, iv)
-            .unwrap();
+        let p1 =
+            postprocess::postproc::pass1::first_pass(&content, &mut ir, &m, &mut p, &cancel, iv)
+                .unwrap();
         let h = p1.stats.max_z_height;
         let mut s = Default::default();
-        let _ =
-            mkp_pp::postproc::pass2::second_pass(p1, &mut ir, h, &m, &mut p, &mut s, &cancel, iv)
-                .unwrap();
+        let _ = postprocess::postproc::pass2::second_pass(
+            p1, &mut ir, h, &m, &mut p, &mut s, &cancel, iv,
+        )
+        .unwrap();
     }
 
     let mut walls = Vec::with_capacity(ITERS);
@@ -59,13 +61,15 @@ fn fixture_chain_probe() {
         let mut ir = fixture_ir();
         let m = ir.machine.machine_type.clone();
         let mut p = |_, _: String| {};
-        let p1 = mkp_pp::postproc::pass1::first_pass(&content, &mut ir, &m, &mut p, &cancel, iv)
-            .unwrap();
+        let p1 =
+            postprocess::postproc::pass1::first_pass(&content, &mut ir, &m, &mut p, &cancel, iv)
+                .unwrap();
         let h = p1.stats.max_z_height;
         let mut s = Default::default();
-        let p2 =
-            mkp_pp::postproc::pass2::second_pass(p1, &mut ir, h, &m, &mut p, &mut s, &cancel, iv)
-                .unwrap();
+        let p2 = postprocess::postproc::pass2::second_pass(
+            p1, &mut ir, h, &m, &mut p, &mut s, &cancel, iv,
+        )
+        .unwrap();
         walls.push(t0.elapsed().as_secs_f64());
         // 反空转：输出必须非零（防止探针空跑还自称测了东西）
         assert!(!p2.lines.is_empty(), "第 {i} 轮输出为空");

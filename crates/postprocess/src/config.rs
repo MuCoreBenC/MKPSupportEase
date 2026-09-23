@@ -245,11 +245,11 @@ pub fn to_toml(ir: &Ir) -> String {
         .collect::<BTreeMap<String, toml::Value>>();
 
     let mut out = String::new();
-    out.push_str("# mkp-pp 配置文件（由 `mkp-pp init` 生成）\n");
+    out.push_str("# mkpse-pp 配置文件（由 `mkpse-pp init` 生成）\n");
     out.push_str("# 结构与内核的 IR 完全一致：改这里就是改 IR，没有中间映射层。\n");
     out.push_str("# 缺任何一个键都会报错（刻意的：拼错键名不会被静默忽略）。\n");
     out.push_str(
-        "# 想看这份配置经过默认值兜底与机型表填充之后的真实取值：`mkp-pp dump-ir -c 本文件`\n",
+        "# 想看这份配置经过默认值兜底与机型表填充之后的真实取值：`mkpse-pp dump-ir -c 本文件`\n",
     );
     emit_table(&mut out, "", &table);
     out
