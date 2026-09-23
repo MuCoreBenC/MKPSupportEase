@@ -1,10 +1,13 @@
-# 后处理内核 —— 自 /Users/wzy/projects/mkpse-pp **整包搬入**，源码内容一个字节未改。
+# 后处理内核 —— 从 mkp-ssr 的 `crates/core` 整包搬入（b04 Task 13）。
 #
-# **包名刻意仍叫 mkpse-pp、lib 仍叫 postprocess。** 理由不是懒：改名要动 22 个测试文件里的
-# 每一处 `use postprocess::`，而「搬家没搬错」这条判据靠的正是**内容零 diff**
-#（K1：两侧 src/ + tests/ 的 sha256 清单逐行相同）。改名会把机械改动与搬运错误
-# 混进同一条 diff，谁也说不清哪一处不同是故意的。代价（包名 mkpse-pp ≠ 产品名 mkp-ssr）
-# 登记在这里，等 K1..K7 全绿、mkpse-pp 那个文件夹删掉之后再考虑改名。
+# 搬入是**两笔**：M2a（`47436e4`）先原样复制、连包名都不改，拿「122 个文件逐文件 sha256
+# 与源一致」当搬运证据；M2b（`d3f542b`）再单独一笔改名 —— 包 `mkpse-postprocess`、
+# lib `postprocess`、bin `mkpse-pp`。拆开是因为改名要动 24 个文件（含 3 个测试文件），
+# 机械改动与搬运错误混进同一条 diff 的话，「那 20 个测试文件全绿」就不再是搬运证据了。
+#
+# 源仓库那份清单顶上写着「包名刻意仍叫 mkp-pp……等 K1..K7 全绿之后再考虑改名」——
+# 那是**那边**的决定，依赖他们那套跨仓 sha256 比对判据。我们不走那条路：
+# 搬运证据换成了 M2a 的零 diff，于是改名可以立刻做，也不需要任何过渡别名。
 #
 # 一个 lib + 一个 bin。刻意不是多 crate：链条只剩
 # cli → pipeline → postproc → ir → gcode/diag 一条直线，
@@ -50,7 +53,7 @@ tempfile.workspace = true
 # **这里不能再写 [lints.clippy]** —— cargo 1.97 实测：
 #   cannot override `workspace.lints` in `lints`, either remove the overrides
 #   or `lints.workspace = true` and manually specify the lints
-# 所以原 mkpse-pp 里那段注释挪到这上面，内容一字不改：
+# 所以源仓库那份清单里的一段注释挪到这上面，内容一字不改：
 #
 # 刻意**不** deny clippy::suboptimal_flops：它给的修复建议正是 mul_add —— 与
 # 「几何层禁 FMA 融合」直接矛盾（源仓库 Task 3 实测撞上：a*b+c 的直写形态被它
