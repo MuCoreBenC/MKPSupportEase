@@ -81,7 +81,8 @@ pub const PARAM_REGISTRY_TOML: &str =
 ///
 /// **这张表是手写的**（`include_str!` 的路径必须是字面量），漏一份不会报错，
 /// 所以判据咬两头：`gen-presets --check` 保证入库产物与配方一致，
-/// K-O6c 保证这张表与入库目录**一份不差**。
+/// `tests/builtin_presets_match_dir.rs` 保证这张表与入库目录**一份不差**
+/// （文件名集合相同 + 每条内容与同名文件逐字节相等 + 无重名）。
 pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
     (
         "A1-standard.toml",
