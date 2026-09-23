@@ -17,6 +17,17 @@ resolver = "2"
 # 而这个报错看起来像清单写错了，不像"目录还没建"。
 members = ["crates/postprocess", "src-tauri"]
 
+# **`crates/preset` 这一笔刻意不进 `members`**（b04 Task 15 / M4a）。
+#
+# 它是从 `mkp-ssr/crates/preset` **逐字节**搬进来的 —— 连 `Cargo.toml` 都没改，
+# 所以里面还写着 `mkp-pp = { path = "../core" }`，在我们这边（内核已改名成
+# `crates/postprocess`）**编译不过**。而这一笔的唯一证据就是"内容零 diff"，
+# 改依赖就把证据毁了。
+#
+# 于是先 `exclude`：目录进库、但不参与编译，CI 仍然是绿的。
+# 下一笔（M4b）做机械改名，同时把它挪进 `members` 并删掉这一段。
+exclude = ["crates/preset"]
+
 # **为「原样复制」准备的一组字段。**
 #
 # 后处理内核那份 `Cargo.toml` 是**一个字节都不改**搬过来的（M2a 的搬运证据就是这个），

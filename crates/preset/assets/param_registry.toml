@@ -1,0 +1,2448 @@
+updated = '2026-07-05 16:46:54'
+
+[[tabs]]
+id = 'offset'
+label = '偏移'
+icon = 'wrench'
+order = 10.0
+
+[[tabs.sections]]
+id = 'space_offset'
+label = '空间偏移'
+description = '工具头空间偏移参数'
+order = 100.0
+
+[[tabs.sections]]
+id = 'motion'
+label = '运动与挤出'
+description = '运动速度与挤出参数'
+order = 200.0
+
+[[tabs]]
+id = 'wiping'
+label = '擦料'
+icon = 'layers'
+order = 20.0
+
+[[tabs.sections]]
+id = 'wiping_method'
+label = '擦料方式'
+description = '擦料方式选择（擦料塔/圆盘擦拭）'
+order = 0.0
+
+[[tabs.sections]]
+id = 'tower_position'
+label = '擦料塔位置与打印'
+description = '擦料塔位置与打印参数'
+order = 1.0
+
+[[tabs.sections]]
+id = 'safety_advanced'
+label = '安全与高级参数'
+description = '安全与高级擦料塔参数'
+order = 2.0
+
+[[tabs.sections]]
+id = 'tower_structure'
+label = '塔结构加强'
+description = '擦料塔结构加强参数'
+order = 3.0
+
+[[tabs.sections]]
+id = 'disk_action'
+label = '圆盘动作控制'
+description = '圆盘擦拭动作控制参数'
+order = 4.0
+
+[[tabs]]
+id = 'fan'
+label = '风扇'
+icon = 'fan'
+order = 30.0
+
+[[tabs.sections]]
+id = 'fan_control'
+label = '温控与风扇'
+description = '温控与风扇参数'
+order = 0.0
+
+[[tabs]]
+id = 'glue'
+label = '涂胶'
+icon = 'paintbrush'
+order = 40.0
+
+[[tabs.sections]]
+id = 'glue_advanced_motion'
+label = '高级运动调控'
+description = '涂胶高级运动调控参数'
+order = 0.0
+
+[[tabs.sections]]
+id = 'glue_ironing'
+label = '支撑面熨烫'
+description = '支撑面熨烫与稀疏涂胶参数'
+order = 1.0
+
+[[tabs.sections]]
+id = 'glue_z_compensation'
+label = '涂胶方向补偿'
+description = '涂胶 Z 方向补偿参数'
+order = 2.0
+
+[[tabs]]
+id = 'gcode'
+label = '切换'
+icon = 'terminal'
+order = 50.0
+
+[[tabs.sections]]
+id = 'custom_gcode'
+label = '自定义G-code'
+description = '自定义 G-code 指令'
+order = 0.0
+
+[[tabs]]
+id = 'advanced'
+label = '更多'
+icon = 'sliders'
+order = 60.0
+
+[[tabs.sections]]
+id = 'pen_revitalization'
+label = '润笔'
+description = '润笔与首笔活化参数'
+order = 0.0
+
+[[tabs.sections]]
+id = 'glue_params'
+label = '涂胶参数'
+description = '涂胶基础参数'
+order = 1.0
+
+[[tabs.sections]]
+id = 'z_lift'
+label = 'Z轴抬升'
+description = 'Z 轴抬升高度参数'
+order = 2.0
+
+[[tabs.sections]]
+id = 'machine_specific'
+label = '机型专属'
+description = '机型专属参数'
+order = 3.0
+
+[[tabs]]
+id = 'internal'
+label = '内部参数'
+icon = 'settings'
+order = 70.0
+sections = []
+
+[[tabs]]
+id = 'settings'
+label = '软件设置'
+order = 80.0
+
+[[tabs.sections]]
+id = 'appearance'
+label = '外观'
+order = 100.0
+
+[[tabs.sections]]
+id = 'update'
+label = '软件更新'
+order = 200.0
+
+[[tabs.sections]]
+id = 'interaction'
+label = '辅助交互'
+order = 300.0
+
+[[tabs.sections]]
+id = 'slicer'
+label = '切片器'
+order = 400.0
+
+[[tabs.sections]]
+id = 'post_process'
+label = '后处理'
+order = 500.0
+
+[[tabs.sections]]
+id = 'calibration'
+label = '校准'
+order = 600.0
+
+[[tabs.sections]]
+id = 'bed_glue'
+label = '热床预涂胶'
+order = 700.0
+
+[[tabs.sections]]
+id = 'cache_management'
+label = '缓存管理'
+order = 800.0
+
+[[tabs.sections]]
+id = 'data_maintenance'
+label = '数据维护'
+order = 900.0
+
+[[tabs.sections]]
+id = 'uninstall_cleanup'
+label = '卸载清理'
+order = 1000.0
+
+[[tabs.sections]]
+id = 'performance'
+label = '性能（DEV）'
+order = 1100.0
+
+[[params]]
+key = 'toolhead.MKP_retract'
+label = '回抽长度'
+desc = '涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析'
+tomlKey = 'MKP_retract'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'toolhead'
+configKey = 'MKPRetract'
+jsonKey = 'MKP_retract'
+selectable = true
+mergeable = true
+min = -50.0
+max = 50.0
+step = 0.1
+scope = 'universal'
+tomlComment = '回抽长度(mm)'
+
+[params.layout]
+sectionId = 'motion'
+order = 200.0
+
+[[params]]
+key = 'toolhead.custom_mount_gcode'
+label = '下笔 G-code'
+desc = '用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量'
+tomlKey = 'custom_mount_gcode'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomMountGcode'
+jsonKey = 'custom_mount_gcode'
+selectable = true
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+tomlComment = '自定义工具头获取 G-code'
+machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+
+[params.machineVariants]
+'A1:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
+'A1:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
+'A1:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
+'A1_MINI:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
+'A1_MINI:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
+'A1_MINI:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
+'P1S:LITE' = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+'P2S:STANDARD' = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+'X1C:LITE' = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 0.5
+
+[[params]]
+key = 'toolhead.custom_unmount_gcode'
+label = '收笔 G-code'
+desc = '用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量'
+tomlKey = 'custom_unmount_gcode'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomUnmountGcode'
+jsonKey = 'custom_unmount_gcode'
+selectable = true
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+tomlComment = '自定义工具头收起 G-code'
+machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+
+[params.machineVariants]
+'A1:FAST' = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:FASTV3.3' = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X273 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:STANDARD' = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1_MINI:FAST' = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:FASTV3.3' = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:STANDARD' = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'P1S:LITE' = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+'P2S:STANDARD' = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+'X1C:LITE' = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 1.0
+
+[[params]]
+key = 'wiping.disable_3rd_layer_clog_detect'
+label = '关闭第三层裹头检测'
+desc = '开启后移除第三层裹头检测段。仅对A1/A1 mini机型有效'
+tomlKey = 'disable_3rd_layer_clog_detect'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'Disable3rdLayerClogDetect'
+jsonKey = 'disable_3rd_layer_clog_detect'
+selectable = true
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'shared'
+tomlComment = '关闭第三层裹头检测(A1/A1 mini)'
+machineFilter = 'A1,A1_MINI,A2L'
+
+[params.layout]
+sectionId = 'machine_specific'
+order = 1.0
+
+[[params]]
+key = 'wiping.disable_front_cover_alarm'
+label = '强制关闭前盖脱落报警'
+desc = '开启后将强制关闭前盖脱落报警。仅对P1系列机型有效'
+tomlKey = 'disable_front_cover_alarm'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'wiping'
+configKey = 'DisableFrontCoverAlarm'
+jsonKey = 'disable_front_cover_alarm'
+selectable = true
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'shared'
+tomlComment = '关闭第三层裹头检测(A1/A1 mini)'
+machineFilter = 'P1S,P2S,X1C'
+deprecated = true
+
+[params.layout]
+sectionId = 'machine_specific'
+order = 0.0
+
+[[params]]
+key = 'wiping.disable_timelapse'
+label = '关闭延时摄影'
+desc = '开启后移除延时摄影段(SKIPTYPE: timelapse)。仅对i3结构的A系列机型有效'
+tomlKey = 'disable_timelapse'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'DisableTimelapse'
+jsonKey = 'disable_timelapse'
+selectable = true
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'shared'
+tomlComment = '关闭延时摄影(A系列i3结构)'
+machineFilter = 'A1,A1_MINI,A2L'
+
+[params.layout]
+sectionId = 'machine_specific'
+order = 2.0
+
+[[params]]
+key = 'wiping.disk_stagger_angle'
+label = '错开角度'
+desc = '每层圆盘旋转偏移的角度（0-30°）'
+tomlKey = 'disk_stagger_angle'
+unit = '°'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 5.0
+section = 'wiping'
+configKey = 'DiskStaggerAngle'
+jsonKey = 'disk_stagger_angle'
+selectable = true
+mergeable = true
+min = 0.0
+max = 30.0
+step = 1.0
+scope = 'universal'
+tomlComment = '圆盘错开角度(度) 范围:0~30'
+parentKey = 'wiping.disk_stagger_mode'
+
+[params.layout]
+sectionId = 'disk_action'
+order = 41.0
+
+[params.showWhen]
+key = 'wiping.disk_stagger_mode'
+op = 'neq'
+value = 'off'
+
+[[params]]
+key = 'wiping.disk_stagger_max_angle'
+label = '最大偏移角度'
+desc = '摆动的最大偏移角度（10-90°）'
+tomlKey = 'disk_stagger_max_angle'
+unit = '°'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 45.0
+section = 'wiping'
+configKey = 'DiskStaggerMaxAngle'
+jsonKey = 'disk_stagger_max_angle'
+selectable = true
+mergeable = true
+min = 10.0
+max = 90.0
+step = 1.0
+scope = 'universal'
+tomlComment = '圆盘最大偏移角度(度) 范围:10~90'
+parentKey = 'wiping.disk_stagger_mode'
+
+[params.layout]
+sectionId = 'disk_action'
+order = 42.0
+
+[params.showWhen]
+key = 'wiping.disk_stagger_mode'
+op = 'neq'
+value = 'off'
+
+[[params]]
+key = 'wiping.disk_stagger_mode'
+label = '错开模式'
+desc = '关闭：不旋转 | 开启：始终错开 | 自动：小层高时自动错开'
+tomlKey = 'disk_stagger_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'off'
+section = 'wiping'
+configKey = 'DiskStaggerMode'
+jsonKey = 'disk_stagger_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '圆盘错开模式(off/on/auto)'
+parentKey = 'wiping.have_wiping_components'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[[params.choices]]
+value = 'auto'
+label = '自动'
+
+[params.layout]
+sectionId = 'disk_action'
+order = 40.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'disk'
+
+[[params]]
+key = 'wiping.disk_stagger_swing_mode'
+label = '摆动模式'
+desc = '旋转楼梯：单向累加到达最大值后回卷 | 锯齿摆动：到最大值后反向折返'
+tomlKey = 'disk_stagger_swing_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'spiral'
+section = 'wiping'
+configKey = 'DiskStaggerSwingMode'
+jsonKey = 'disk_stagger_swing_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '圆盘摆动模式(spiral/oscillate)'
+parentKey = 'wiping.disk_stagger_mode'
+
+[[params.choices]]
+value = 'spiral'
+label = '旋转楼梯'
+
+[[params.choices]]
+value = 'oscillate'
+label = '锯齿摆动'
+
+[params.layout]
+sectionId = 'disk_action'
+order = 43.0
+
+[params.showWhen]
+key = 'wiping.disk_stagger_mode'
+op = 'neq'
+value = 'off'
+
+[[params]]
+key = 'wiping.fan_speed'
+label = '风扇速度'
+desc = '风扇 PWM 速度 (0-255)，控制冷却风量'
+tomlKey = 'fan_speed'
+unit = '0-255'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 255.0
+section = 'wiping'
+configKey = 'FanSpeed'
+jsonKey = 'fan_speed'
+selectable = true
+mergeable = true
+min = 0.0
+max = 255.0
+step = 1.0
+scope = 'universal'
+tomlComment = '风扇速度 范围:0~255'
+
+[params.layout]
+sectionId = 'fan_control'
+order = 1.0
+
+[[params]]
+key = 'wiping.fast_tower_mode'
+label = '擦料塔速度与质量'
+desc = '快速：最大层高打印，仅涂胶面层慢速擦嘴 | 跟随模型：层高与模型一致 | 自定义：自定义层高和擦嘴策略'
+tomlKey = 'fast_tower_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'fast'
+section = 'wiping'
+configKey = 'FastTowerMode'
+jsonKey = 'fast_tower_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '擦料塔模式'
+parentKey = 'wiping.have_wiping_components'
+
+[[params.choices]]
+value = 'fast'
+label = '快速'
+
+[[params.choices]]
+value = 'follow'
+label = '跟随模型'
+
+[[params.choices]]
+value = 'custom'
+label = '自定义'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 31.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'toolhead.first_pen_revitalization_flag'
+label = '首笔活化'
+desc = '在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效'
+tomlKey = 'first_pen_revitalization_flag'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'toolhead'
+configKey = 'FirstPenRevitalizationFlag'
+jsonKey = 'first_pen_revitalization_flag'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '首笔活化标志'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 0.0
+
+[[params]]
+key = 'wiping.glue_inter_model_lift_height'
+label = '涂胶区域间Z轴抬升高度'
+desc = '模型间跳转 + 段间跳转微抬合并控制。涂胶区域间移动和段间跳转均使用此高度'
+tomlKey = 'glue_inter_model_lift_height'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 2.0
+section = 'wiping'
+configKey = 'GlueInterModelLiftHeight'
+jsonKey = 'glue_inter_model_lift_height'
+selectable = true
+mergeable = true
+min = 2.0
+max = 5.0
+step = 0.5
+scope = 'universal'
+tomlComment = '模型间/段间跳转Z抬升高度(mm) 范围:2~5'
+
+[params.layout]
+sectionId = 'z_lift'
+order = 2.0
+
+[[params]]
+key = 'wiping.glue_pass_count'
+label = '涂胶次数'
+desc = '同一区域的涂胶遍数，多次涂胶可增加粘合力但延长打印时间'
+tomlKey = 'glue_pass_count'
+unit = '次'
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 1.0
+section = 'wiping'
+configKey = 'GluePassCount'
+jsonKey = 'glue_pass_count'
+selectable = true
+mergeable = true
+min = 1.0
+max = 10.0
+step = 1.0
+scope = 'universal'
+tomlComment = '涂胶次数 范围:1~10'
+
+[params.layout]
+sectionId = 'glue_params'
+order = 2.0
+
+[[params]]
+key = 'wiping.glue_sparse_ratio'
+label = '涂胶稀疏比'
+desc = '小喷嘴(≤0.3mm)涂胶路径稀疏比例，0=不稀疏，50=隔行删除(默认)，100=仅保留首尾'
+tomlKey = 'glue_sparse_ratio'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 50.0
+section = 'wiping'
+configKey = 'GlueSparseRatio'
+jsonKey = 'glue_sparse_ratio'
+selectable = true
+mergeable = true
+min = 0.0
+max = 100.0
+step = 1.0
+scope = 'universal'
+tomlComment = '涂胶稀疏比(%)'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 9.0
+
+[[params]]
+key = 'wiping.glue_z_compensation_bed_bl'
+label = '热床-后左补偿'
+desc = '热床模式下后左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+tomlKey = 'glue_z_compensation_bed_bl'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationBedBL'
+jsonKey = 'glue_z_compensation_bed_bl'
+selectable = true
+mergeable = true
+min = -0.2
+max = 0.2
+step = 0.01
+scope = 'universal'
+tomlComment = '热床后左角Z补偿 范围:-0.2~0.2'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 4.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'bed'
+
+[[params]]
+key = 'wiping.glue_z_compensation_bed_br'
+label = '热床-后右补偿'
+desc = '热床模式下后右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+tomlKey = 'glue_z_compensation_bed_br'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationBedBR'
+jsonKey = 'glue_z_compensation_bed_br'
+selectable = true
+mergeable = true
+min = -0.2
+max = 0.2
+step = 0.01
+scope = 'universal'
+tomlComment = '热床后右角Z补偿 范围:-0.2~0.2'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 5.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'bed'
+
+[[params]]
+key = 'wiping.glue_z_compensation_bed_fl'
+label = '热床-前左补偿'
+desc = '热床模式下前左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+tomlKey = 'glue_z_compensation_bed_fl'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationBedFL'
+jsonKey = 'glue_z_compensation_bed_fl'
+selectable = true
+mergeable = true
+min = -0.2
+max = 0.2
+step = 0.01
+scope = 'universal'
+tomlComment = '热床前左角Z补偿 范围:-0.2~0.2'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 2.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'bed'
+
+[[params]]
+key = 'wiping.glue_z_compensation_bed_fr'
+label = '热床-前右补偿'
+desc = '热床模式下前右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+tomlKey = 'glue_z_compensation_bed_fr'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationBedFR'
+jsonKey = 'glue_z_compensation_bed_fr'
+selectable = true
+mergeable = true
+min = -0.2
+max = 0.2
+step = 0.01
+scope = 'universal'
+tomlComment = '热床前右角Z补偿 范围:-0.2~0.2'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 3.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'bed'
+
+[[params]]
+key = 'wiping.glue_z_compensation_enabled'
+label = '涂胶方向补偿'
+desc = '开启后涂胶 Z 会根据 X/Y 位置按 4 角补偿值进行双线性插值，解决特定方向涂不上胶的问题。补偿范围自动外扩 2mm 避免边缘突变'
+tomlKey = 'glue_z_compensation_enabled'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'wiping'
+configKey = 'GlueZCompensationEnabled'
+jsonKey = 'glue_z_compensation_enabled'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '涂胶方向补偿开关: false=关闭, true=开启(按4角双线性插值)'
+deprecated = true
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 0.0
+
+[[params]]
+key = 'wiping.glue_z_compensation_mode'
+label = '补偿范围模式'
+desc = '热床范围：针对整个热床物理面积补偿，适合床面本身倾斜（范围 ±0.2mm，外扩 2mm）；涂胶面范围：针对每层每个连续涂胶区域的包围盒补偿，适合模型局部不平（范围 ±0.1mm，外扩 2mm）'
+tomlKey = 'glue_z_compensation_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'bed'
+section = 'wiping'
+configKey = 'GlueZCompensationMode'
+jsonKey = 'glue_z_compensation_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)'
+parentKey = 'wiping.glue_z_compensation_enabled'
+
+[[params.choices]]
+value = 'bed'
+label = '热床范围'
+
+[[params.choices]]
+value = 'patch'
+label = '涂胶面范围'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 1.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'wiping.glue_z_compensation_patch_bl'
+label = '涂胶面-后左补偿'
+desc = '涂胶面模式下后左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+tomlKey = 'glue_z_compensation_patch_bl'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationPatchBL'
+jsonKey = 'glue_z_compensation_patch_bl'
+selectable = true
+mergeable = true
+min = -0.1
+max = 0.1
+step = 0.01
+scope = 'universal'
+tomlComment = '涂胶面后左角Z补偿 范围:-0.1~0.1'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 8.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'patch'
+
+[[params]]
+key = 'wiping.glue_z_compensation_patch_br'
+label = '涂胶面-后右补偿'
+desc = '涂胶面模式下后右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+tomlKey = 'glue_z_compensation_patch_br'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationPatchBR'
+jsonKey = 'glue_z_compensation_patch_br'
+selectable = true
+mergeable = true
+min = -0.1
+max = 0.1
+step = 0.01
+scope = 'universal'
+tomlComment = '涂胶面后右角Z补偿 范围:-0.1~0.1'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 9.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'patch'
+
+[[params]]
+key = 'wiping.glue_z_compensation_patch_fl'
+label = '涂胶面-前左补偿'
+desc = '涂胶面模式下前左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+tomlKey = 'glue_z_compensation_patch_fl'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationPatchFL'
+jsonKey = 'glue_z_compensation_patch_fl'
+selectable = true
+mergeable = true
+min = -0.1
+max = 0.1
+step = 0.01
+scope = 'universal'
+tomlComment = '涂胶面前左角Z补偿 范围:-0.1~0.1'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 6.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'patch'
+
+[[params]]
+key = 'wiping.glue_z_compensation_patch_fr'
+label = '涂胶面-前右补偿'
+desc = '涂胶面模式下前右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+tomlKey = 'glue_z_compensation_patch_fr'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'GlueZCompensationPatchFR'
+jsonKey = 'glue_z_compensation_patch_fr'
+selectable = true
+mergeable = true
+min = -0.1
+max = 0.1
+step = 0.01
+scope = 'universal'
+tomlComment = '涂胶面前右角Z补偿 范围:-0.1~0.1'
+parentKey = 'wiping.glue_z_compensation_mode'
+
+[params.layout]
+sectionId = 'glue_z_compensation'
+order = 7.0
+
+[params.showWhen]
+key = 'wiping.glue_z_compensation_mode'
+op = 'eq'
+value = 'patch'
+
+[[params]]
+key = 'wiping.glue_z_lift_height'
+label = '涂胶Z轴抬升高度'
+desc = "涂胶前/后抬笔高度。换笔芯后涂胶前抬笔 + 涂胶结束抬笔使用此高度。前3层使用子参数'前3层抬升高度'"
+tomlKey = 'glue_z_lift_height'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 5.0
+section = 'wiping'
+configKey = 'GlueZLiftHeight'
+jsonKey = 'glue_z_lift_height'
+selectable = true
+mergeable = true
+min = 5.0
+max = 10.0
+step = 0.5
+scope = 'universal'
+tomlComment = '涂胶Z抬升高度(mm) 范围:5~10'
+
+[params.layout]
+sectionId = 'z_lift'
+order = 0.0
+
+[[params]]
+key = 'wiping.glue_z_lift_height_first_layers'
+label = '前3层抬升高度'
+desc = '前3层涂胶前/后抬笔的额外高度，用于首层附着稳定。与涂胶Z轴抬升高度叠加使用'
+tomlKey = 'glue_z_lift_height_first_layers'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 6.0
+section = 'wiping'
+configKey = 'GlueZLiftHeightFirstLayers'
+jsonKey = 'glue_z_lift_height_first_layers'
+selectable = true
+mergeable = true
+min = 6.0
+max = 10.0
+step = 0.5
+scope = 'universal'
+tomlComment = '前3层抬升高度(mm) 范围:6~10'
+parentKey = 'wiping.glue_z_lift_height'
+
+[params.layout]
+sectionId = 'z_lift'
+order = 1.0
+
+[params.showWhen]
+key = 'wiping.glue_z_lift_height'
+op = 'gt'
+value = '0'
+
+[[params]]
+key = 'toolhead.glue_z_offset'
+label = '涂胶Z偏移'
+desc = '涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面'
+tomlKey = 'glue_z_offset'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = -0.05
+section = 'toolhead'
+configKey = 'GlueZOffset'
+jsonKey = 'glue_z_offset'
+selectable = true
+mergeable = true
+min = -5.0
+max = 5.0
+step = 0.01
+scope = 'universal'
+tomlComment = '涂胶Z偏移(mm) 范围:-5~2'
+
+[params.layout]
+sectionId = 'glue_params'
+order = 1.0
+
+[[params]]
+key = 'wiping.have_wiping_components'
+label = '擦料方式'
+desc = '选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘'
+tomlKey = 'have_wiping_components'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'tower'
+section = 'wiping'
+configKey = 'UseWipingTowers'
+jsonKey = 'have_wiping_components'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '使用擦嘴塔而非擦嘴组件'
+pinned = true
+
+[[params.choices]]
+value = 'tower'
+label = '擦料塔'
+
+[[params.choices]]
+value = 'disk'
+label = '圆盘擦拭'
+
+[params.layout]
+sectionId = 'wiping_method'
+order = 10.0
+
+[[params]]
+key = 'wiping.ironing_coverage_threshold'
+label = '熨烫覆盖阈值'
+desc = '熨烫面占支撑面的最低路径长度比例，低于此值时回退到支撑面'
+tomlKey = 'ironing_coverage_threshold'
+unit = '%'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 10.0
+section = 'wiping'
+configKey = 'IroningCoverageThreshold'
+jsonKey = 'ironing_coverage_threshold'
+selectable = true
+mergeable = true
+min = 0.0
+max = 100.0
+step = 1.0
+scope = 'universal'
+tomlComment = '熨烫覆盖率阈值(%) 范围:0~100'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 3.0
+
+[[params]]
+key = 'wiping.ironing_e_sum_threshold'
+label = '熨烫挤出阈值'
+desc = '当熨烫段挤出总量超过此阈值时自动移除熨烫（仅在自动模式下生效）'
+tomlKey = 'ironing_e_sum_threshold'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 7.9
+section = 'wiping'
+configKey = 'IroningESumThreshold'
+jsonKey = 'ironing_e_sum_threshold'
+selectable = true
+mergeable = true
+min = 0.0
+max = 100.0
+step = 0.1
+scope = 'universal'
+tomlComment = '熨烫E总和阈值 范围:0~100'
+parentKey = 'wiping.ironing_mode'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 1.0
+
+[params.showWhen]
+key = 'wiping.ironing_mode'
+op = 'eq'
+value = 'auto'
+
+[[params]]
+key = 'wiping.ironing_mode'
+label = '支撑面熨烫'
+desc = '控制支撑面上层熨烫的保留/移除：关闭=始终移除熨烫挤出；开启=始终保留；自动=根据挤出量阈值判断'
+tomlKey = 'ironing_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'off'
+section = 'wiping'
+configKey = 'IroningMode'
+jsonKey = 'ironing_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '熨烫模式: off=始终移除, on=始终保留, auto=自动判断'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[[params.choices]]
+value = 'auto'
+label = '自动'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 0.0
+
+[[params]]
+key = 'wiping.ironing_suppress_expand'
+label = '熨烫抑制扩展范围'
+desc = '已激活熨烫段包围盒向外扩展的距离，0为关闭扩展'
+tomlKey = 'ironing_suppress_expand'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'IroningSuppressExpand'
+jsonKey = 'ironing_suppress_expand'
+selectable = true
+mergeable = true
+min = 0.0
+max = 20.0
+step = 0.5
+scope = 'universal'
+tomlComment = '熨烫抑制扩展(mm) 范围:0~20'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 4.0
+
+[[params]]
+key = 'wiping.ironing_suppress_expand_mode'
+label = '熨烫抑制扩展模式'
+desc = '熨烫抑制区域的扩展方式：包围盒外扩=沿XY轴均匀外扩；质心半径外扩=从质心向外径向扩展'
+tomlKey = 'ironing_suppress_expand_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'bbox'
+section = 'wiping'
+configKey = 'IroningSuppressExpandMode'
+jsonKey = 'ironing_suppress_expand_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '熨烫抑制扩展模式(bbox/centroid)'
+parentKey = 'wiping.ironing_suppress_expand'
+
+[[params.choices]]
+value = 'bbox'
+label = '包围盒外扩'
+
+[[params.choices]]
+value = 'centroid'
+label = '质心半径外扩'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 5.0
+
+[params.showWhen]
+key = 'wiping.ironing_suppress_expand'
+op = 'gt'
+value = '0'
+
+[[params]]
+key = 'wiping.min_support_interface_enabled'
+label = '最小支撑涂胶面过滤'
+desc = '启用后过滤掉过小的支撑涂胶面，避免无效涂胶'
+tomlKey = 'min_support_interface_enabled'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'MinSupportInterfaceEnabled'
+jsonKey = 'min_support_interface_enabled'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '最小支撑涂胶面过滤'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 8.0
+
+[[params]]
+key = 'wiping.nozzle_cooling_flag'
+label = '涂胶期间降温'
+desc = '涂胶期间降低喷嘴温度以防止胶水因过热而滴漏'
+tomlKey = 'nozzle_cooling_flag'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'wiping'
+configKey = 'NozzleCoolingFlag'
+jsonKey = 'nozzle_cooling_flag'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '涂胶期间是否降温'
+
+[params.layout]
+sectionId = 'fan_control'
+order = 0.0
+
+[[params]]
+key = 'toolhead.offset.x'
+label = 'X 轴偏移'
+desc = '涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右'
+tomlKey = 'offset'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'toolhead'
+configKey = 'XOffset'
+jsonKey = 'x'
+selectable = true
+mergeable = true
+mergeGroup = 'offset'
+min = -50.0
+max = 50.0
+step = 0.05
+scope = 'machine_specific'
+variantMode = 'per_variant'
+tomlComment = '笔尖偏移'
+machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+pinned = true
+
+[params.machineVariants]
+'A1:FAST' = -0.7
+'A1:FASTV3.3' = 0.1
+'A1:STANDARD' = -1.0
+'A1_MINI:FAST' = -0.5
+'A1_MINI:FASTV3.3' = -0.9
+'A1_MINI:STANDARD' = -0.3
+'P1S:LITE' = -25.9
+'P2S:STANDARD' = -25.9
+'X1C:LITE' = -25.9
+
+[params.machineMinVariants]
+'P1S:LITE' = -50.0
+'P2S:STANDARD' = -50.0
+'X1C:LITE' = -50.0
+
+[params.machineMaxVariants]
+'P1S:LITE' = 50.0
+'P2S:STANDARD' = 50.0
+'X1C:LITE' = 50.0
+
+[params.layout]
+sectionId = 'space_offset'
+order = 100.0
+
+[params.serialization]
+subfieldsOrder = ['x', 'y', 'z']
+
+[[params]]
+key = 'toolhead.offset.y'
+label = 'Y 轴偏移'
+desc = '涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准'
+tomlKey = 'offset'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'toolhead'
+configKey = 'YOffset'
+jsonKey = 'y'
+selectable = true
+mergeable = true
+mergeGroup = 'offset'
+min = -50.0
+max = 50.0
+step = 0.05
+scope = 'machine_specific'
+variantMode = 'per_variant'
+tomlComment = '笔尖偏移'
+machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+pinned = true
+
+[params.machineVariants]
+'A1:FAST' = 26.3
+'A1:FASTV3.3' = 24.4
+'A1:STANDARD' = 18.6
+'A1_MINI:FAST' = 24.0
+'A1_MINI:FASTV3.3' = 23.0
+'A1_MINI:STANDARD' = 18.1
+'P1S:LITE' = 14.0
+'P2S:STANDARD' = 14.0
+'X1C:LITE' = 14.0
+
+[params.machineMinVariants]
+'P1S:LITE' = -50.0
+'P2S:STANDARD' = -50.0
+'X1C:LITE' = -50.0
+
+[params.machineMaxVariants]
+'P1S:LITE' = 50.0
+'P2S:STANDARD' = 50.0
+'X1C:LITE' = 50.0
+
+[params.layout]
+sectionId = 'space_offset'
+order = 150.0
+
+[[params]]
+key = 'toolhead.offset.z'
+label = 'Z 轴偏移'
+desc = '涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离'
+tomlKey = 'offset'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 4.0
+section = 'toolhead'
+configKey = 'ZOffset'
+jsonKey = 'z'
+selectable = true
+mergeable = true
+mergeGroup = 'offset'
+min = 0.0
+max = 20.0
+step = 0.05
+scope = 'machine_specific'
+variantMode = 'per_variant'
+tomlComment = '笔尖偏移'
+machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+pinned = true
+
+[params.machineVariants]
+P1S = 1.1
+'P1S:LITE' = 1.1
+P2S = 1.1
+'P2S:STANDARD' = 1.1
+X1C = 1.1
+'X1C:LITE' = 1.1
+
+[params.machineMinVariants]
+'P1S:LITE' = 0.0
+'P2S:STANDARD' = 0.0
+'X1C:LITE' = 0.0
+
+[params.machineMaxVariants]
+'P1S:LITE' = 20.0
+'P2S:STANDARD' = 20.0
+'X1C:LITE' = 20.0
+
+[params.layout]
+sectionId = 'space_offset'
+order = 200.0
+
+[[params]]
+key = 'wiping.outer_structure'
+label = '外围结构'
+desc = '选择擦料塔外围结构类型：无=不生成外围；斜肋外墙=在塔外侧生成斜肋支撑；护套=包裹塔体外围防止倒塌'
+tomlKey = 'outer_structure'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'rib'
+section = 'wiping'
+configKey = 'OuterStructure'
+jsonKey = 'outer_structure'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '外围结构(none/rib)'
+parentKey = 'wiping.have_wiping_components'
+
+[[params.choices]]
+value = 'brim'
+label = 'brim'
+
+[[params.choices]]
+value = 'rib'
+label = '斜肋外墙'
+
+[[params.choices]]
+value = 'sheath'
+label = '护套'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 50.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.prime_enabled'
+label = '启用润笔'
+desc = '润笔总开关，关闭后所有润笔相关参数不显示且润笔逻辑不执行'
+tomlKey = 'prime_enabled'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'PrimeEnabled'
+jsonKey = 'prime_enabled'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '润笔总开关'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 1.0
+
+[[params]]
+key = 'wiping.prime_every_layer'
+label = '每层润笔'
+desc = '开启后每层涂胶前都触发润笔，与润笔触发层数互斥'
+tomlKey = 'prime_every_layer'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'wiping'
+configKey = 'PrimeEveryLayer'
+jsonKey = 'prime_every_layer'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '每层润笔'
+parentKey = 'wiping.prime_enabled'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 6.0
+
+[params.showWhen]
+key = 'wiping.prime_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'toolhead.prime_length'
+label = '润笔路径长度'
+desc = '长时间未涂胶后重新润笔的路径长度，确保胶水充分流出'
+tomlKey = 'prime_length'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 100.0
+section = 'toolhead'
+configKey = 'PrimeLength'
+jsonKey = 'prime_length'
+selectable = true
+mergeable = true
+min = 0.0
+max = 500.0
+step = 10.0
+scope = 'universal'
+tomlComment = '预涂长度(mm) 范围:0~500'
+parentKey = 'wiping.prime_enabled'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 2.0
+
+[params.showWhen]
+key = 'wiping.prime_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'wiping.prime_min_path_length'
+label = '润笔最小路径长度'
+desc = '触发润笔的最小路径长度阈值，路径长度小于此值时不触发润笔'
+tomlKey = 'prime_min_path_length'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 5.0
+section = 'wiping'
+configKey = 'PrimeMinPathLength'
+jsonKey = 'prime_min_path_length'
+selectable = true
+mergeable = true
+min = 0.0
+max = 100.0
+step = 1.0
+scope = 'universal'
+tomlComment = '润笔最小路径长度(mm) 范围:0~100'
+parentKey = 'wiping.prime_enabled'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 3.0
+
+[params.showWhen]
+key = 'wiping.prime_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'wiping.prime_per_model'
+label = '每个模型都润笔'
+desc = '开启后每个模型的涂胶前都执行润笔，关闭则每层只润笔一次'
+tomlKey = 'prime_per_model'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = false
+section = 'wiping'
+configKey = 'PrimePerModel'
+jsonKey = 'prime_per_model'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '每个模型都润笔'
+parentKey = 'wiping.prime_enabled'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 5.0
+
+[params.showWhen]
+key = 'wiping.prime_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'wiping.prime_trigger_layers'
+label = '润笔触发层数'
+desc = '超过此层数未涂胶时自动触发润笔'
+tomlKey = 'prime_trigger_layers'
+unit = '层'
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 30.0
+section = 'wiping'
+configKey = 'PrimeTriggerLayers'
+jsonKey = 'prime_trigger_layers'
+selectable = true
+mergeable = true
+min = 0.0
+max = 999.0
+step = 1.0
+scope = 'universal'
+tomlComment = '预涂触发层数 范围:0~999'
+parentKey = 'wiping.prime_enabled'
+
+[params.layout]
+sectionId = 'pen_revitalization'
+order = 4.0
+
+[params.showWhen]
+key = 'wiping.prime_enabled'
+op = 'eq'
+value = true
+
+[[params]]
+key = 'wiping.rib_extra_length'
+label = '斜肋额外长度'
+desc = '斜肋外墙的额外延伸长度，0为不延伸'
+tomlKey = 'rib_extra_length'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'RibExtraLength'
+jsonKey = 'rib_extra_length'
+selectable = true
+mergeable = true
+min = 0.0
+max = 300.0
+step = 1.0
+scope = 'universal'
+tomlComment = '斜肋额外长度(mm) 范围:0~300'
+parentKey = 'wiping.outer_structure'
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 53.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'rib'
+
+[[params]]
+key = 'wiping.rib_fillet_wall'
+label = '外墙倒圆角'
+desc = '斜肋外墙是否倒圆角'
+tomlKey = 'rib_fillet_wall'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'RibFilletWall'
+jsonKey = 'rib_fillet_wall'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '外墙倒圆角'
+parentKey = 'wiping.outer_structure'
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 55.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'rib'
+
+[[params]]
+key = 'wiping.rib_width'
+label = '斜肋宽度'
+desc = '斜肋外墙的宽度'
+tomlKey = 'rib_width'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 8.0
+section = 'wiping'
+configKey = 'RibWidth'
+jsonKey = 'rib_width'
+selectable = true
+mergeable = true
+min = 0.0
+max = 300.0
+step = 1.0
+scope = 'universal'
+tomlComment = '斜肋宽度(mm) 范围:0~300'
+parentKey = 'wiping.outer_structure'
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 54.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'rib'
+
+[[params]]
+key = 'wiping.sheath_base_expand'
+label = '护套底层膨胀量'
+desc = '护套底层相对塔体的单边膨胀量'
+tomlKey = 'sheath_base_expand'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 5.0
+section = 'wiping'
+configKey = 'SheathBaseExpand'
+jsonKey = 'sheath_base_expand'
+selectable = true
+mergeable = true
+min = 0.0
+max = 20.0
+step = 0.5
+scope = 'universal'
+tomlComment = '鞘底扩展(mm) 范围:0~20'
+parentKey = 'wiping.outer_structure'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 58.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'sheath'
+
+[[params]]
+key = 'wiping.sheath_converge_layers'
+label = '护套收敛层数'
+desc = '护套从底层膨胀逐渐收敛到塔体外轮廓的层数'
+tomlKey = 'sheath_converge_layers'
+unit = '层'
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 50.0
+section = 'wiping'
+configKey = 'SheathConvergeLayers'
+jsonKey = 'sheath_converge_layers'
+selectable = true
+mergeable = true
+min = 1.0
+max = 200.0
+step = 1.0
+scope = 'universal'
+tomlComment = '鞘收敛层数 范围:1~200'
+parentKey = 'wiping.outer_structure'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 60.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'sheath'
+
+[[params]]
+key = 'wiping.sheath_enable_height'
+label = '护套自动启用高度'
+desc = '自动模式下，模型高度超过此值时启用护套'
+tomlKey = 'sheath_enable_height'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 70.0
+section = 'wiping'
+configKey = 'SheathEnableHeight'
+jsonKey = 'sheath_enable_height'
+selectable = true
+mergeable = true
+min = 0.0
+max = 300.0
+step = 5.0
+scope = 'universal'
+tomlComment = '鞘启用高度(mm) 范围:0~300'
+parentKey = 'wiping.outer_structure'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 57.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'sheath'
+
+[[params]]
+key = 'wiping.sheath_wall_width'
+label = '护套壁宽'
+desc = '护套壁的宽度'
+tomlKey = 'sheath_wall_width'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.8
+section = 'wiping'
+configKey = 'SheathWallWidth'
+jsonKey = 'sheath_wall_width'
+selectable = true
+mergeable = true
+min = 0.2
+max = 3.0
+step = 0.1
+scope = 'universal'
+tomlComment = '鞘壁宽(mm) 范围:0.2~3'
+parentKey = 'wiping.outer_structure'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 59.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'sheath'
+
+[[params]]
+key = 'wiping.small_feature_factor'
+label = '小特征因子'
+desc = '小特征速度系数 = MaxSpeed × 此值。值越小(如0.5)小特征越精细但更慢'
+tomlKey = 'small_feature_factor'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 1.0
+section = 'wiping'
+configKey = 'SmallFeatureFactor'
+jsonKey = 'small_feature_factor'
+selectable = true
+mergeable = true
+min = 0.1
+max = 2.0
+step = 0.05
+scope = 'universal'
+tomlComment = '小特征因子 范围:0~2'
+
+[params.layout]
+sectionId = 'glue_params'
+order = 0.0
+
+[[params]]
+key = 'toolhead.speed_limit'
+label = '涂胶速度限制'
+desc = '涂胶笔的最大移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步'
+tomlKey = 'speed_limit'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 70.0
+section = 'toolhead'
+configKey = 'MaxSpeed'
+jsonKey = 'speed_limit'
+selectable = true
+mergeable = true
+min = 10.0
+max = 500.0
+step = 5.0
+scope = 'universal'
+tomlComment = '涂胶速度限制 (mm/s)'
+pinned = true
+
+[params.layout]
+sectionId = 'motion'
+order = 100.0
+
+[[params]]
+key = 'wiping.support_extrusion_multiplier'
+label = '支撑挤出倍率'
+desc = '支撑材料的挤出倍率，影响支撑密度和拆除难度'
+tomlKey = 'support_extrusion_multiplier'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.8
+section = 'wiping'
+configKey = 'SupportExtrusionMultiplier'
+jsonKey = 'support_extrusion_multiplier'
+selectable = true
+mergeable = true
+min = 0.1
+max = 3.0
+step = 0.05
+scope = 'universal'
+tomlComment = '支撑体挤出倍率'
+
+[params.layout]
+sectionId = 'glue_advanced_motion'
+order = 0.0
+
+[[params]]
+key = 'wiping.tower_custom_layer_height'
+label = '塔层高策略'
+desc = '自定义模式下的擦料塔层高策略'
+tomlKey = 'tower_custom_layer_height'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'auto'
+section = 'wiping'
+configKey = 'TowerCustomLayerHeight'
+jsonKey = 'tower_custom_layer_height'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '塔层高策略'
+parentKey = 'wiping.fast_tower_mode'
+
+[[params.choices]]
+value = 'min'
+label = '最小层高'
+
+[[params.choices]]
+value = 'max'
+label = '最大层高'
+
+[[params.choices]]
+value = 'auto'
+label = '自适应'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 34.0
+
+[params.showWhen]
+key = 'wiping.fast_tower_mode'
+op = 'eq'
+value = 'custom'
+
+[[params]]
+key = 'wiping.tower_extrude_ratio'
+label = '擦料塔挤出倍率'
+desc = '擦料塔出胶量比例，值越大出胶越多。会被处理器动态计算覆盖'
+tomlKey = 'tower_extrude_ratio'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 1.0
+section = 'wiping'
+configKey = 'TowerExtrudeRatio'
+jsonKey = 'tower_extrude_ratio'
+selectable = true
+mergeable = true
+min = 0.1
+max = 3.0
+step = 0.05
+scope = 'universal'
+tomlComment = '支撑体挤出倍率'
+parentKey = 'wiping.have_wiping_components'
+
+[params.layout]
+sectionId = 'tower_position'
+order = 22.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.tower_first_layer_flow'
+label = '擦料塔首层流量'
+desc = '擦料塔首层护套和斜肋的挤出流量比例，1.0为标准流量'
+tomlKey = 'tower_first_layer_flow'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 1.0
+section = 'wiping'
+configKey = 'TowerFirstLayerFlow'
+jsonKey = 'tower_first_layer_flow'
+selectable = true
+mergeable = true
+min = 0.5
+max = 2.0
+step = 0.1
+scope = 'universal'
+tomlComment = '擦料塔首层流量 范围:0.5~2'
+parentKey = 'wiping.have_wiping_components'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 30.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.tower_glue_layer_speed'
+label = '涂胶面层速度'
+desc = '涂胶面层的塔体打印速度'
+tomlKey = 'tower_glue_layer_speed'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 35.0
+section = 'wiping'
+configKey = 'TowerGlueLayerSpeed'
+jsonKey = 'tower_glue_layer_speed'
+selectable = true
+mergeable = true
+min = 5.0
+max = 200.0
+step = 5.0
+scope = 'universal'
+tomlComment = '涂胶面层速度'
+parentKey = 'wiping.fast_tower_mode'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 33.0
+
+[params.showWhen]
+key = 'wiping.fast_tower_mode'
+op = 'eq'
+value = 'custom'
+
+[[params]]
+key = 'wiping.tower_rib_speed'
+label = '斜肋打印速度'
+desc = '跟随塔：使用塔体打印速度 | 自定义：指定斜肋打印速度'
+tomlKey = 'tower_rib_speed'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'follow'
+section = 'wiping'
+configKey = 'TowerRibSpeed'
+jsonKey = 'tower_rib_speed'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '斜肋打印速度模式'
+parentKey = 'wiping.outer_structure'
+
+[[params.choices]]
+value = 'follow'
+label = '跟随塔'
+
+[[params.choices]]
+value = 'custom'
+label = '自定义'
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 51.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'rib'
+
+[[params]]
+key = 'wiping.tower_rib_speed_value'
+label = '自定义速度'
+desc = '斜肋外墙的自定义打印速度'
+tomlKey = 'tower_rib_speed_value'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 40.0
+section = 'wiping'
+configKey = 'TowerRibSpeedValue'
+jsonKey = 'tower_rib_speed_value'
+selectable = true
+mergeable = true
+min = 5.0
+max = 200.0
+step = 5.0
+scope = 'universal'
+tomlComment = '斜肋自定义打印速度'
+parentKey = 'wiping.tower_rib_speed'
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 52.0
+
+[params.showWhen]
+key = 'wiping.tower_rib_speed'
+op = 'eq'
+value = 'custom'
+
+[[params]]
+key = 'wiping.tower_safe_z_offset'
+label = '塔安全Z偏移'
+desc = '擦料塔安全Z偏移距离，范围0.3~5.0mm'
+tomlKey = 'tower_safe_z_offset'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0.7
+section = 'wiping'
+configKey = 'TowerSafeZOffset'
+jsonKey = 'tower_safe_z_offset'
+selectable = true
+mergeable = true
+min = 0.3
+max = 5.0
+step = 0.1
+scope = 'universal'
+tomlComment = '塔安全Z偏移(0.3~5.0mm)'
+parentKey = 'wiping.have_wiping_components'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 36.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.tower_sheath_speed'
+label = '护套打印速度'
+desc = '护套的打印速度'
+tomlKey = 'tower_sheath_speed'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 40.0
+section = 'wiping'
+configKey = 'TowerSheathSpeed'
+jsonKey = 'tower_sheath_speed'
+selectable = true
+mergeable = true
+min = 5.0
+max = 200.0
+step = 5.0
+scope = 'universal'
+tomlComment = '护套打印速度'
+parentKey = 'wiping.outer_structure'
+deprecated = true
+
+[params.layout]
+sectionId = 'tower_structure'
+order = 56.0
+
+[params.showWhen]
+key = 'wiping.outer_structure'
+op = 'eq'
+value = 'sheath'
+
+[[params]]
+key = 'wiping.tower_travel_speed'
+label = '塔刮擦速度'
+desc = '擦料塔刮擦移动速度，范围50~500mm/s'
+tomlKey = 'tower_travel_speed'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 200.0
+section = 'wiping'
+configKey = 'TowerTravelSpeed'
+jsonKey = 'tower_travel_speed'
+selectable = true
+mergeable = true
+min = 50.0
+max = 500.0
+step = 10.0
+scope = 'universal'
+tomlComment = '塔刮擦速度(50~500mm/s)'
+parentKey = 'wiping.have_wiping_components'
+
+[params.layout]
+sectionId = 'tower_position'
+order = 23.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.tower_wipe_mode'
+label = '擦嘴策略'
+desc = '开启：每层都擦嘴 | 关闭：包括涂胶面都不擦 | 自动：仅涂胶面层擦嘴'
+tomlKey = 'tower_wipe_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'auto'
+section = 'wiping'
+configKey = 'TowerWipeMode'
+jsonKey = 'tower_wipe_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '擦嘴策略'
+parentKey = 'wiping.fast_tower_mode'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'auto'
+label = '自动'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 35.0
+
+[params.showWhen]
+key = 'wiping.fast_tower_mode'
+op = 'eq'
+value = 'custom'
+
+[[params]]
+key = 'wiping.use_ironing_path'
+label = '涂胶面使用熨烫路径'
+desc = '开启后，涂胶面优先使用熨烫段的 XY 路径；熨烫覆盖不足的区域自动回退到支撑面路径'
+tomlKey = 'use_ironing_path'
+valueType = 'bool'
+uiComponent = 'switch'
+defaultValue = true
+section = 'wiping'
+configKey = 'UseIroningPath'
+jsonKey = 'use_ironing_path'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = '使用熨烫路径作为涂胶路径'
+
+[[params.choices]]
+value = 'off'
+label = '关闭'
+
+[[params.choices]]
+value = 'on'
+label = '开启'
+
+[params.layout]
+sectionId = 'glue_ironing'
+order = 2.0
+
+[[params]]
+key = 'wiping.user_dry_time'
+label = '额外干燥时间'
+desc = '涂胶后额外等待干燥的时间 (秒)，让胶水充分固化'
+tomlKey = 'user_dry_time'
+unit = '秒'
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 0.0
+section = 'wiping'
+configKey = 'UserDryTime'
+jsonKey = 'user_dry_time'
+selectable = true
+mergeable = true
+min = 0.0
+max = 300.0
+step = 1.0
+scope = 'universal'
+tomlComment = '额外干燥时间'
+
+[params.layout]
+sectionId = 'fan_control'
+order = 2.0
+
+[[params]]
+key = 'wiping.wiper_x'
+label = '擦料塔X坐标'
+desc = '擦料塔在热床上的X坐标位置 (mm)'
+tomlKey = 'wiper_x'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 20.0
+section = 'wiping'
+configKey = 'WiperX'
+jsonKey = 'wiper_x'
+selectable = true
+mergeable = true
+mergeGroup = 'wiper'
+min = 10.0
+max = 226.0
+step = 1.0
+scope = 'machine_specific'
+variantMode = 'shared'
+tomlComment = '擦嘴塔X坐标(mm)'
+parentKey = 'wiping.have_wiping_components'
+
+[params.machineMinVariants]
+'A1:FAST' = 10.0
+'A1:STANDARD' = 10.0
+'A1_MINI:FAST' = 10.0
+'A1_MINI:FASTV3.3' = 10.0
+'A1_MINI:STANDARD' = 10.0
+'P1S:LITE' = 10.0
+'P2S:STANDARD' = 10.0
+'X1C:LITE' = 10.0
+
+[params.machineMaxVariants]
+'A1:FAST' = 226.0
+'A1:STANDARD' = 226.0
+'A1_MINI:FAST' = 150.0
+'A1_MINI:FASTV3.3' = 150.0
+'A1_MINI:STANDARD' = 150.0
+'P1S:LITE' = 226.0
+'P2S:STANDARD' = 226.0
+'X1C:LITE' = 226.0
+
+[params.layout]
+sectionId = 'tower_position'
+order = 20.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.wiper_y'
+label = '擦料塔Y坐标'
+desc = '擦料塔在热床上的Y坐标位置 (mm)'
+tomlKey = 'wiper_y'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 20.0
+section = 'wiping'
+configKey = 'WiperY'
+jsonKey = 'wiper_y'
+selectable = true
+mergeable = true
+mergeGroup = 'wiper'
+min = 10.0
+max = 226.0
+step = 1.0
+scope = 'machine_specific'
+variantMode = 'shared'
+tomlComment = '擦嘴塔Y坐标(mm)'
+parentKey = 'wiping.have_wiping_components'
+
+[params.machineMinVariants]
+'A1:FAST' = 10.0
+'A1_MINI:FAST' = 10.0
+'A1_MINI:FASTV3.3' = 10.0
+'A1_MINI:STANDARD' = 10.0
+'P1S:LITE' = 10.0
+'P2S:STANDARD' = 10.0
+'X1C:LITE' = 10.0
+
+[params.machineMaxVariants]
+'A1:FAST' = 226.0
+'A1_MINI:FAST' = 150.0
+'A1_MINI:FASTV3.3' = 150.0
+'A1_MINI:STANDARD' = 150.0
+'P1S:LITE' = 226.0
+'P2S:STANDARD' = 226.0
+'X1C:LITE' = 226.0
+
+[params.layout]
+sectionId = 'tower_position'
+order = 21.0
+
+[params.showWhen]
+key = 'wiping.have_wiping_components'
+op = 'eq'
+value = 'tower'
+
+[[params]]
+key = 'wiping.wipetower_speed'
+label = '塔体打印速度'
+desc = '非涂胶面层的塔体打印速度'
+tomlKey = 'wipetower_speed'
+unit = 'mm/s'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 200.0
+section = 'wiping'
+configKey = 'WipeTowerPrintSpeed'
+jsonKey = 'wipetower_speed'
+selectable = true
+mergeable = true
+min = 10.0
+max = 500.0
+step = 10.0
+scope = 'universal'
+tomlComment = '擦嘴塔打印速度'
+parentKey = 'wiping.fast_tower_mode'
+
+[params.layout]
+sectionId = 'safety_advanced'
+order = 32.0
+
+[params.showWhen]
+key = 'wiping.fast_tower_mode'
+op = 'eq'
+value = 'custom'
+
+[[params]]
+key = 'wiping.xy_calibration_mode'
+label = 'XY校准模式'
+desc = 'XY校准模式：默认或新型'
+tomlKey = 'xy_calibration_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'new'
+section = 'wiping'
+configKey = 'XYCalibrationMode'
+jsonKey = 'xy_calibration_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = 'XY校准模式(default=默认,new=新型)'
+
+[[params.choices]]
+value = 'default'
+label = '默认'
+
+[[params.choices]]
+value = 'new'
+label = '新型'
+
+[params.layout]
+sectionId = 'machine_specific'
+order = 2.0
+
+[[params]]
+key = 'wiping.z_calibration_mode'
+label = 'Z校准模式'
+desc = 'Z校准模式：默认或新型'
+tomlKey = 'z_calibration_mode'
+valueType = 'string'
+uiComponent = 'segmented'
+defaultValue = 'new'
+section = 'wiping'
+configKey = 'ZCalibrationMode'
+jsonKey = 'z_calibration_mode'
+selectable = true
+mergeable = true
+scope = 'universal'
+tomlComment = 'Z校准模式(default=默认,new=新型)'
+
+[[params.choices]]
+value = 'default'
+label = '默认'
+
+[[params.choices]]
+value = 'new'
+label = '新型'
+
+[params.layout]
+sectionId = 'machine_specific'
+order = 3.0

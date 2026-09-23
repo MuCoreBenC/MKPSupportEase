@@ -1,0 +1,52 @@
+# 预设 TOML → IR 的映射层，自 mkp-sr 切片（`crates/preset` + `crates/ir/src/build.rs`）。
+#
+# **为什么独立成 crate，而不是塞进 core 的一个模块**：mkp-pp/AGENTS.md §4 记着一条
+# 「ir 之后不再读 TOML，但今天没有门禁」的约束。独立成 crate 之后依赖方向是
+# preset → core 单向，postproc 想读 TOML 就得依赖本 crate，而那是反方向 —— Cargo 会拦。
+# 编译器接手了原来只靠人守的约束。
+#
+# **不搬** mkp-sr 的 `ui.rs`（UI 元数据）。
+#
+# `write.rs`（toml_edit 保注释写回）**这一轮搬回来了**（spec `preset-editing-amber-labels`）：
+# GUI 要让用户改预设，而用户的预设里约 70 条注释 / 100 行，
+# 「读成结构体再序列化」会把它们全抹掉。代价照实说：多了一整类「改坏用户预设」的事故面，
+# 兜着它的是 K-P1（零编辑往返逐字节相同）/ K-P2（单键改值只有那一行变）/
+# K-P3（拒绝新增键）+ 落盘前的 read + load_ir 复检 + 备份。
+[package]
+name = "mkp-preset"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "预设 TOML（snake_case 用户参数）→ 内核 IR（PascalCase）的唯一映射点"
+
+[dependencies]
+# 唯一的内部依赖，方向 preset → core。
+mkp-pp = { path = "../core" }
+serde.workspace = true
+toml.workspace = true
+# 血统摘要（判「官方版变了没有」用它）。workspace 依赖，`crates/core` 已经在用，
+# 提成本 crate 的显式依赖不引入新编译单元。
+sha2.workspace = true
+# 写回面：只有它能保住注释与键序（`toml` 0.8 的公共 API 两个都不保）。
+# 版本已经在 Cargo.lock 里（`toml 0.8.23` 内部就依赖 `toml_edit 0.22.27`），
+# 提成显式依赖不引入新的编译单元。
+toml_edit = "0.22"
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# build9 判据要读 Go 侧导出的 IR JSON 并做字段树归一比较。
+serde_json.workspace = true
+# load_ir 的整链判据要把输入复制到临时目录再原地覆盖。
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+# 预设生成器 —— **仓库内的开发工具**，`src-tauri` 不依赖它，`tauri build` 也不打包它。
+# AGENTS.md 的「零第二可执行物」管的是**分发物**；开发工具不在其列（理由记在诚实边界里）。
+# 显式声明是为了要一个带连字符的命令名（默认会是文件名 `gen_presets`）。
+[[bin]]
+name = "gen-presets"
+path = "src/bin/gen_presets.rs"
