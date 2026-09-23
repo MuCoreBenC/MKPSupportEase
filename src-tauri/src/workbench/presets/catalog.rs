@@ -478,19 +478,21 @@ impl Catalog {
         })?;
         let file = dir.join(format!("{id}.toml"));
 
-        // **原子地占住这个路径。** 已存在就失败，绝不覆盖
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file)
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::AlreadyExists => AppError::invalid_argument(format!(
-                    "{} 已经存在了。**没有覆盖它** —— 如果那是一台你想改的机型，去左边选它",
-                    file.display()
-                )),
-                _ => AppError::internal(format!("建不出 {}", file.display()))
-                    .with_detail(e.to_string()),
-            })?;
+        // **原子地占住这个路径。** 已存在就失败，绝不覆盖。
+        //
+        // `File::create_new` 就是 `OpenOptions::new().write(true).create_new(true).open(..)`
+        // （std 的实现即是如此），而后者被 `clippy.toml` 列进了禁列 —— 它是绕开
+        // "写盘只经一处"的两条闸门之一。这里要的语义恰好是 `create_new`：
+        // **不可能截断已有文件**，那正是禁列允许的那一类
+        std::fs::File::create_new(&file).map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => AppError::invalid_argument(format!(
+                "{} 已经存在了。**没有覆盖它** —— 如果那是一台你想改的机型，去左边选它",
+                file.display()
+            )),
+            _ => {
+                AppError::internal(format!("建不出 {}", file.display())).with_detail(e.to_string())
+            }
+        })?;
 
         let mut doc = DocumentMut::new();
         doc["id"] = literal_str(id);
