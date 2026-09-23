@@ -1,120 +1,253 @@
 # B04 交接（写给接手的新对话）
 
-## 0. 你现在的位置
+更新日期：2026-09-24
+本文件以 GitHub 上 `.comate/specs/b04-panel-successor/tasks.md` 为长期总纲，
+Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任务编号。
 
-**项目**：`G:\project\MKPSupportEase` —— Tauri v2 + React + Rust 的开发者工作台，
-要替代 `mkpse-next-v3/mkppanel`（Wails，已退役）。旧客户端 `mkpsupporte` 也退役。
-
-**已经能用的**：「机型与版本」页（`src/workbench/views/MachinesPage.tsx`），
-四种写操作齐了 —— 加机型 / 加版本 / 删版本 / 改元字段。数据是
-`MKPSupportEase/presets/*.toml`（12 个文件，从 `mkpse-presets/source/` 搬来的）。
-
-**当前是绿的**：264 测试 / 默认 feature 18 / 两种 feature clippy 零警告 / lint 干净 / 两个构建过。
-
-**先读这两个**（别读全部历史）：
-1. `.comate/specs/b04-panel-successor/tasks.md` —— Task 1–7 已 `[x]`，下一步是 **Task 8**
-2. `.comate/specs/b04-panel-successor/doc.md` §1.1 / §1.2 —— 方向定案与「只搬核心」的边界
+> **本文件替代 2026-09-23 之前那份 Task 8 时代的交接。** 那份里的「下一步 Task 8」
+> 「`presets/` 还是未跟踪状态」「用 python 与 `mkpse-presets/source/` 比 sha256」
+> 全部已过期，不要再照着做。
 
 ---
 
-## 1. 下一步：Task 8（拆掉自造的「配方本」）
+## 0. 你现在的位置（先核一遍，不要相信任何一句转述）
 
-这是**整个 b04 里最难的一步**，因为它不是新增，是切换，而且中途没有"绿着的中间态"。
-
-### 作业面
-
-现在有**两层并存**（刻意的）：
-
-| 层 | 读什么 | 谁在用 |
+| 项 | 值 | 怎么核 |
 |---|---|---|
-| `src-tauri/src/workbench/presets/` | `presets/*.toml`（**新，是真相**） | 「机型与版本」页 |
-| `src-tauri/src/workbench/upstream/` | `mkpse-presets/content/*.json`（旧产物） | `domain/` + `app/` 的参数那一整套 |
+| 工作分支 | `feat/b04-p3-migration` | `git status -sb` |
+| `main` | `203c287`（PR #10 的 squash） | `git log --oneline -1 origin/main` |
+| 本分支领先 main | **9 笔**（M1 / B2-prep / M2a / M2b / M3） | `git log --oneline origin/main..HEAD` |
+| 草稿 PR | **#11** —— **只作 CI 载体**（不打算按批次再开 PR） | `gh pr view 11` |
+| 判据基线 | 后处理内核 **249 passed + 2 ignored**；我们 **18**（默认）/ **264**（workbench） | 见 §8 |
+| `62a72b9` 的 CI | **三个 job 全绿**（`web` / `rust` / `rust-windows`，run `35892855809`） | `gh pr view 11 --json statusCheckRollup` |
+| 工作区 | 干净 | `git status --short` |
 
-外加一层我自造、现在要删的：`workbench/machines/*.json` + `versions/*.json`
-（它重复发明了 `presets/machines/*.toml`）。
-
-**要做的**：
-1. `Committed` 的来源从「我们自造的 json」改成 `presets/machines/*.toml`
-2. 三层值解析（出厂 → 机型 → 版本）改读 `[params.machineVariants]`
-3. 删 `storage.rs` 里读写 `workbench/machines|versions/*.json` 的那一半
-4. 草稿仍在内存 + 懒落盘（那一套**留用**，只换底下的数据源）
-
-### 已知会炸的地方
-
-- 删 `upstream::catalog` / `upstream::manifest` 会让 `domain/derive.rs`、`app/build.rs`、
-  `domain/issues.rs` **大面积编译失败**。预期如此，逐个修回来。
-- `ParamDef` / `TabMeta` 现在是**从 `upstream::registry` 借用**的（`presets/registry.rs` 里
-  `use crate::workbench::upstream::registry::{ParamDef, TabMeta}`）。切换时这些类型要搬家 ——
-  **搬家是纯移动，别顺手重写**。
-- 有一条必须转正的回归测试：`a_new_version_shows_up_on_the_tree_after_saving`。
-  历史上 `NewVersion` 保存后在树上**看不见**（因为版本清单被当成上游只读），
-  我当时写了条断言"必须有提示"就放过去了 —— 那是个有测试兜着的死胡同。切换完它该真的出现。
-
-### 建议的切法
-
-一次做完再报，中途不要停。如果预算不够，**宁可只做第 1 步（`Committed` 换源）并让全套测试绿**，
-也不要把 4 步各做一半。
+**第一件事就是把上表核一遍。** GitHub 上的合并状态**不代表本机 checkout 已同步** ——
+上一轮就出现过「PR 已合并但本机还停在旧 HEAD」。
 
 ---
 
-## 2. 五条硬纪律（都是踩出来的，不遵守会返工）
+## 1. 新对话先读什么（别读全部历史）
 
-1. **写入只走后端，前端不碰文件。** 后端校验 + 写 + **重读盘再返回** ——
-   界面显示的必须是落盘结果，不是内存里的样子。
-2. **每个写操作按自己的风险写判据，不复制测试。**
-   加版本的风险是"改已有文件时把别处重排"；加机型是"覆盖已存在的文件"（用 `create_new`
-   原子占路径，不是先 stat 再写）；删版本是"跨文件孤儿引用"。判据长得不一样才对。
-3. **失败不留痕。** 被拒之后断言「状态没变 + 文件文本一字未动」。
-4. **「清空」是删键，不是写空串。** `tag = ''` 读成「填过，填了个空」，和「还没填」是两件事。
-5. **写字符串值用 `catalog.rs` 里的 `literal_str()`，不要用 `toml_edit::value()`。**
-   后者输出双引号，而真数据全用单引号，会让文件**逐渐漂成混合风格**。
+| 顺序 | 文件 | 为什么 |
+|---|---|---|
+| 1 | `tasks.md` | **唯一长期主线 Task 1–22。**状态以它为准 |
+| 2 | `MIGRATION-PLAN.md` | Task 13 的施工图（M0–M7 分段与验收） |
+| 3 | `TASK-13-MIGRATION-INVENTORY.md` | 迁移盘点与**拆批定案**（`§6` 是定案表） |
+| 4 | `TASK-13-WRITE-DISCIPLINE-OPTIONS.md` | 写盘纪律三方案比较与**定案**（C 主 + A1 辅，B 推迟） |
+| 5 | `DATA-CONTRACT.md` / `AUDIT-EVIDENCE.md` | 数据契约与审计证据 |
 
-### 反空转（这个项目反复吃过亏）
-
-- 判据自己也要有判据。`one_edit_only` / `literal_str` 各配了一条"判据的判据"。
-- **「我声称在盯某件事」≠「有判据在盯」。** 引号漂移就是这么漏的：
-  我在注释里写了"会盯引号"，而那条测试里根本没有关于引号的断言，全绿了好几轮。
-  怀疑什么就**加一条会失败的断言去问**。
-- 真数据上的测试找不到对象时**要 panic 说"判据失去对象，要重写"**，不要静默跳过。
+不要用本文件替代 `tasks.md`。**三处冲突时的优先级**：仓库最新文件 > 提交与 CI 证据 > 本文件。
 
 ---
 
-## 3. 验证命令（照抄）
+## 2. 项目终点（按 `tasks.md`）
+
+1. workspace 根运行 `cargo test`，三个 crate 的判据全绿
+2. 非测试代码中旧包名 / 旧仓库路径 / 旧 `content/` 链路清零
+3. 自动判据覆盖「改值 → 生成 → `load_ir` → IR 中值正确」
+4. 至少一条真实 G-code 后处理用例可验证
+5. `presets/` 真实数据迁移前后 SHA-256 一致；有例外就逐文件审阅并记录
+6. 侧边栏一页一件事，未完成的功能不摆按钮
+7. 文档与代码不再把本项目称作"下游 / 消费端"
+
+---
+
+## 3. Task 1–22 状态总览
+
+| Task | 主题 | 状态 |
+|---|---|---|
+| 1–10 | 结构摸底 → 参数值写回能力 | ✅ 已完成 |
+| 11 | **M0**：比值，再搬代码 | ✅ 值等值已证；**精确领头键收尾**与 `eprintln!`→`assert!` 挂在 Task 15 之后 |
+| 12 | 删自造 workbench JSON、收口数据模型 | ✅ `b38cca9` + `6880403` |
+| 13 | **M1+M2**：workspace 与内核迁入 | ⏳ **M1 / M2a / M2b 已做，M3 另立 Task 14；M4–M7 待做**（见 §4） |
+| 14 | **M3**：尺寸/别名/禁区改从 `presets/` 读 | ✅ `62a72b9` |
+| 15 | **M4**：预设解析迁入、注册表合一 | ⏭ 下一步 |
+| 16 | **M5**：纵向切片（改值→生成→`load_ir`→真实后处理） | 待做 |
+| 17 | **M6**：删除 `upstream/` 整层 | 待做 |
+| 18 | 其余源文件搬进 `presets/` | 待做；**二进制资源归属需动手前定案** |
+| 19 | 写入纪律 | 待做；方案已定、CI 前置已补 |
+| 20 | 侧边栏 + 只摆做完的页 | 待做 |
+| 21 | 机型/资源页补齐 + 参数页并入 | 待做 |
+| 22 | **M7** + 清场与验收 | 待做 |
+
+---
+
+## 4. Task 13 专项进度（M0–M7）
+
+| 段 | 内容 | 状态 | 提交 |
+|---|---|---|---|
+| **M0** | 比值再搬 | ✅ | 结论在 `DATA-CONTRACT.md` / `AUDIT-EVIDENCE.md` |
+| **M1** | 建 workspace，`src-tauri` 成成员；依赖统一到根 | ✅ | `70eed0c`（布局）+ `44c5ebe`（依赖）；`Cargo.lock` 搬到仓库根 |
+| **M2a** | `crates/core` → `crates/postprocess`，**原样复制** | ✅ | `47436e4` + `fef9698`（lock 补提） |
+| **M2b** | 单独一笔机械改名 | ✅ | `d3f542b` + `133fa01`（清单顶部说明修正） |
+| **M3** | 尺寸/别名/禁区改从 `presets/` 读 | ✅ | `62a72b9`（= Task 14） |
+| **M4** | `crates/preset` 迁入，注册表合一 | ⏭ | — |
+| **M5** | 生成器接上，`load_ir` 复检 | — | — |
+| **M6** | 删 `upstream/` 整层 + 源码扫描断言 | — | — |
+| **M7** | 措辞清场 | — | — |
+
+### M1 定下的三件事（别重新讨论）
+
+1. **`toml` 取 0.8，不取更新的 1.x。** 内核用 0.8 档的 API（`toml::Value` /
+   `toml::map::Map` / `Value::try_from`），而 M2a 的搬运证据是**内容零 diff** ——
+   取 1.x 就得改内核代码，改代码与搬运不能混在同一条 diff 里。我们这侧只用
+   `str::parse::<toml::Table>()` 与 `toml::to_string`，0.8 上都有 ⇒ 单向让步，谁都不用改代码。
+2. **`serde_json` 开 `float_roundtrip` + `preserve_order`**（不是优化项，是内核 golden 的
+   正确性开关）。代价是**我们自己的解析行为也跟着变了一档** ⇒ 落地时重跑过 264，全绿。
+3. **`members` 显式列，不用 `crates/*` 通配。** 目录还不存在时 glob 会让 cargo 报
+   `failed to load manifest for workspace member ...`，看起来像清单写错了。
+
+### M2a / M2b 的判据（这两个数是证据，不是估计）
+
+- **M2a**：122 个文件**逐文件 sha256 与源一致**（只源有 0 / 只目标有 0 / 内容不同 0）；
+  另核对「索引里的 blob == 工作区内容」（防 `.gitattributes` 的 `eol=lf` 归一化偷改 golden）
+  ⇒ 122 个全部相同。内核自带测试 **246 passed + 2 ignored**。
+  **逐字节比对的 golden 在 Windows/amd64 上全绿** —— 内核是在 macOS/arm64 上开发的，
+  这条把「FMA 融合导致字节不等价」的担心实测排除了。
+- **M2b**：对**只读源树**重放同一条有序替换规则，再逐文件比对 ⇒ **24 个文件全部相同**。
+  两处例外必须知道：
+  1. **rustfmt 的重排**（6 个文件 / 15 行删 / 27 行增）：`mkp_pp::`（7 列）变
+     `postprocess::`（12 列）会把一些行推过 100 列，不重排 `fmt --check` 必红 ⇒ 只能同属一笔
+  2. **一处手改**：那条「第一处 `name = "mkpse-pp"` → 包名」的规则本该只作用于
+     `Cargo.toml`，却命中了 `src/main.rs` 里 clap 的 `#[command(name = ...)]`，已改回
+     `mkpse-pp`。**这一处"逐文件重放"抓不到** —— 它只证明"新内容 = 源内容经同一规则"，
+     规则本身错它照样全绿。是读结果读出来的。
+
+### M3 定下的事
+
+`presets/` 是尺寸 / 别名 / 禁区的**唯一来源**，两份编译期快照已删。数据改成**注入**
+（`machine_dims::install`）或从目录读（`load_presets_dir`）：
+
+- **`install` 第二次返回 Err 而不是覆盖** —— 静默替换会把"两处数据"变成"看谁先跑"
+- 没人装时有一条**有顺序的逃生链**：`MKPSE_PRESETS_DIR` → 仓库相对 `../../presets` → panic。
+  中间那条只为开发与测试成立（249 条判据会走到这里，而 `OnceLock` 只能装一次）
+- **发布物必须在启动时 `install()`** —— 数据根运行时才知道，**这是 M5 欠的接线**
+- 旧快照搬到 `tests/reference/legacy_snapshot/` 当**基线**，新判据
+  `presets_are_the_only_source.rs` 证明 presets 能逐字段复现它（125 字段 / 23 别名 / 3 台禁区）。
+  **这条判据一落地就抓到一次静默数据丢失**：`MachineFile` 少了 `rename_all = "camelCase"`
+  ⇒ `externalAliases` 全被忽略、别名 23 条变 6 条、机型识别会全挂而**不会报错**。
+
+---
+
+## 5. 已定的关键纪律（迁移期，别重新讨论）
+
+1. **先证明，再搬。** 搬运 / 改名 / 行为改动 / 依赖清理**分开**，每批只动一个不变量。
+2. **迁移期间禁止 `UPDATE_GOLDEN=1`。** 一设就把判据变成"把现状抄成期望"。
+3. **不以测试通过替代数据等值证据。** 除 M0 有逐文件结论外，**不改 `presets/` 里的真数据**。
+4. **写盘纪律：源码扫描断言为主（C）、Clippy 为辅（A1）。**
+   豁免必须**精确列出理由与退役条件**；「clippy 通过」**不等于**「写盘纪律已验证」。
+5. **CI 必须覆盖默认与 workbench 两种 feature**（已补，见 §6）。
+6. `mkp-ssr` 是**只读迁移源**；不迁前端、不做双向同步、**不留兼容别名**。
+7. 判据的 `cargo tree -d` 口径：**"无重复依赖"不可能按字面执行**（Tauri 自己的树里
+   本来就有 53 条）。它只能指"**每一条新增的重复都能追到一条决定**"。基线 **58 条 / 26 个 crate 名**。
+
+---
+
+## 6. 已并入 `main` 的 Task 13 前置（PR #10，`203c287`）
+
+| 提交 | 内容 |
+|---|---|
+| `486b792` | 写盘纪律三方案比较与定案（C 主 + A1 辅，B 推迟） |
+| `db4c12c` | 补齐**既有**格式欠账：189 处 rustfmt 差异 / 26 个文件，全在 `src/workbench/**` |
+| `208a577` | **CI 补 workbench 覆盖**：`rust` job 的 clippy 与 test 各跑两遍 |
+| `f90f57f` | **Clippy 禁列补全**：补 `File::options` 与 `OpenOptions::new`，并用探针验证会响 |
+
+三条要点：
+
+- **格式欠账是既有的**：`cargo fmt --check` 在 `bd1a173` 上就红。而 CI 的顺序是
+  `格式 → clippy → 测试`，第一步失败后面根本不执行 ⇒ **不修格式，补 feature 也等于白补**
+- **CI 的 `rust` job 现在在仓库根跑**（virtual manifest 默认成员 = 全部成员），
+  缓存路径 `target`、key `hashFiles('Cargo.lock')`；`--features` 在 virtual 根上不合法，
+  工作台那两条带 `-p mkp-support-ease`
+- **禁列补全时发现** `presets::catalog::add_machine` 正当地用 `OpenOptions::new().create_new(true)`
+  做"原子占住一个新路径"，于是换成语义逐字相同的 `File::create_new`（Rust 1.77 起稳定，
+  本 crate MSRV 1.77.2），**没有引入第二个 `#[allow]` 逃生口**
+
+---
+
+## 7. Task 15–22 路线摘要
+
+- **Task 15 / M4**：迁入 preset crate（**纯移动 + 改名**，`mkp_preset::` → `preset::`）；
+  删 `assets/param_registry.toml` 那份分岔副本，改读我们那份；消除四处分岔；
+  9 份内置预设**暂留作基线**；手写 `BUILTIN_PRESETS` 改成按清单校验
+- **Task 16 / M5**：`wb_generate` 后**同进程** `load_ir` 复检；验证改值写盘 → 生成 → IR 值正确；
+  未选变体产物**字节不变**、其他机型 SHA 不变；至少一条真实 G-code 后处理。
+  **顺带必须做的**：启动时 `machine_dims::install()`（M3 欠的接线）
+- **Task 17 / M6**：删 `workbench/upstream/`、`paths::upstream_*`、`Roots.upstream`；
+  修 manifest 悬空引用 / 资源缺失静默跳过 / 上游字段透传；落实非测试源码扫描断言
+- **Task 18**：迁入 fallback registry、bundles、资源登记、release 元数据与版本；
+  **二进制资源放 `presets/` 还是外挂，动手前必须定案**；FAQ/notification/theme/about/event
+  不在本轮编辑范围
+- **Task 19**：写盘统一入口、外部修改提示、回收站/撤销语义与界面文案复查
+- **Task 20**：侧边栏按内容/交付/系统分组；删未完成页签/按钮；顶部状态与保存常驻
+- **Task 21**：补齐机型尺寸/禁区/套餐/资源引用/删机型恢复；`ParamDesk` 并入参数页；
+  版本矩阵比较；字段定义可改但 `tomlKey` 不可改
+- **Task 22**：清场与验收（含手动主线：新增机型 → 新增版本 → 改值 → 生成 → `load_ir` → 打开 TOML）
+
+---
+
+## 8. 验证命令（照抄，**现在都在仓库根跑**）
 
 ```powershell
-cd G:\project\MKPSupportEase\src-tauri
-cargo test --features workbench 2>&1 | Select-String "^test result"
-cargo test 2>&1 | Select-String "^test result"
-cargo clippy --features workbench --all-targets -- -D warnings; Write-Output "EXIT=$LASTEXITCODE"
-cargo clippy --all-targets -- -D warnings; Write-Output "EXIT=$LASTEXITCODE"
 cd G:\project\MKPSupportEase
-npm run lint; npm run build; npm run build:workbench
+cargo test                                     # 默认 feature（两个成员）
+cargo test -p mkp-support-ease --features workbench   # 工作台那 264 条
+cargo test -p mkpse-postprocess                # 内核那 249 条
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
+npm run lint; npm run build
 ```
 
-真数据没被污染的判据（**不要用 `git status`**，`presets/` 还是未跟踪状态，它只会回一行
-`?? presets/`，什么都验不到）：用 python 把 `presets/` 的 12 个文件与
-`mkpse-presets/source/` 的对应文件做 sha256 比对。
+- **判成败看 `test result: ok. N passed`**，不要看管道退出码
+- 期望值：内核 `249 passed + 2 ignored`（2 条是性能探针）/ 我们 `18` 与 `264`
+- 真数据是否被污染：`git status --short` 必须只剩你**有意**改的那些文件；
+  `presets/` 的 12 个文件在整个迁移里**一个字节都不该变**
 
 ---
 
-## 4. 三个环境陷阱
+## 9. 环境陷阱与操作备忘（这一轮踩出来的）
 
-1. **管道会吞掉 cargo 的退出码。** `cargo test | Select-String` 即使全通过也返回 1。
-   判成败看 `test result: ok. N passed`，或显式 `; Write-Output "EXIT=$LASTEXITCODE"`。
-2. **`tauri dev` 异常退出会留两种残留**：vite（占 5321，下次报「端口被占」）和
-   app exe（占文件锁，下次 cargo 报「failed to remove ...exe / 拒绝访问」）。
-   两者组合的症状是**窗口在但整页白屏**。起 dev 前先查这两样。
-3. **`read_file` 读 `mkpse-presets` 里的文件会把那个仓库的 `AGENTS.md` 当规则注入**（约 15k tokens）。
-   要看那边的数据用 `python -c` 打印。
+1. **`gh` 不读 Windows 系统代理。** 这台机器走本地代理 `127.0.0.1:7890`：
+   git 读自己的 `http.proxy`、PowerShell/.NET 读系统代理，而 **Go 写的 `gh` 只读环境变量**。
+   症状是"git push 能过、`gh api` 能过、但 `gh auth refresh` 在 `POST /login/device/code`
+   连接超时"。
+   **本机已按用户环境变量永久设好**（2026-09-24）：
+   `HTTPS_PROXY=http://127.0.0.1:7890`、`NO_PROXY=localhost,127.0.0.1,::1`。
+   - **副作用要知道**：凡是读这两个变量的程序都会跟着走代理 —— `cargo` / `npm` /
+     `node` / `pip` / 各家 CLI。代理没开时它们会**连不出去**，而不是回落直连。
+     临时关掉：`$env:HTTPS_PROXY=''`（只影响当前会话）。
+   - `NO_PROXY` 是为 `tauri dev` / vite 的本机回环准备的，别删。
+   - 新开的终端才能看到 `setx` 的结果；**当前会话仍需 `$env:HTTPS_PROXY=...`**。
+2. **改 `.github/workflows/` 需要令牌带 `workflow` scope**，否则 push 被 GitHub 拒
+   （`refusing to allow an OAuth App to create or update workflow ...`）。
+   解法：`gh auth refresh -h github.com -s workflow`（**要本人过一遍浏览器**）。
+3. **提交信息文件写进 `.git/` 偶发落成 0 字节**（本轮中过两次，表现为
+   `Aborting commit due to empty commit message`）。稳的做法：写到**仓库根的临时文件**，
+   **同一条命令里先验长度再提交，成功后立刻删**。
+4. **管道会吞掉退出码**：`cargo test | Select-String ...` 全通过也可能返回 1。
+5. **这台机器的默认 shell 是 PowerShell 5.1，不认 `&&` / `||`。**
+   写了就报 `标记"&&"不是此版本中的有效语句分隔符`，看起来像命令本身错了。
+   用 `;` 串（不判成败）、或写成分行、或要判成败时用
+   `cmd1; if ($LASTEXITCODE -eq 0) { cmd2 }`。第 3 条那个"先验长度再提交"就得这么写。
+6. **PowerShell 的 `>` 重定向写 UTF-16**，拿它比对中文文本会得到"不一致"的假象；
+   用 `[System.IO.File]::ReadAllText(path, UTF8)`。
+7. **`.NET` API 的相对路径按进程 CWD 解析**，不是按 PowerShell 的当前位置 —— 混用会
+   报"找不到路径"。
+8. **`cargo metadata` 的输出带 BOM**，`node` 里 `JSON.parse` 前要 `.replace(/^\uFEFF/,'')`。
+9. **`file!()` 的基准会随构建方式变**：单 crate 时相对 crate 根，建了 workspace 之后
+   相对**仓库根**。凡是用它拼路径的判据都要改成 `CARGO_MANIFEST_DIR` + 显式相对路径
+   （本轮就有一条判据因此以"报错"形式失效，见 §4 M2b 那类坑）。
+10. `tauri dev` 异常退出会留两种残留（vite 占 5321、app exe 占文件锁），症状是**白屏**。
 
 ---
 
-## 5. 后面还有什么（tasks.md 里有细节）
+## 10. 常用仓库与文件
 
-Task 9 写入纪律的源码扫描断言 → Task 10 侧边栏（现在是五个顶部页签，
-`data-page` 已经让「机型与版本」页隐藏了参数页的按钮与树）→ Task 11 尺寸与禁区两个二级 Tab
-→ Task 12 参数页并进来（`ParamDesk` 形态是对的，**不要重做**，矩阵降成它里面的一个开关）
-→ Task 13 清场（含 `presets/` 进 git）→ Task 14 验收。
-
-**用户的偏好**：一页一件事、页与页之间不共享控件与状态；没做完的功能**不摆按钮**
-（摆一个点不动的按钮比没有更糟）；不要发明"更好的 SOP"，照 mkppanel 原本的结构做。
+- 仓库：`MuCoreBenC/MKPSupportEase`；PR #11（草稿，CI 载体）
+- 长期总纲：`.comate/specs/b04-panel-successor/tasks.md`
+- 迁移计划：`MIGRATION-PLAN.md`　盘点：`TASK-13-MIGRATION-INVENTORY.md`
+- 写盘纪律：`TASK-13-WRITE-DISCIPLINE-OPTIONS.md`　数据契约：`DATA-CONTRACT.md`
+- 审计证据：`AUDIT-EVIDENCE.md`　重建计划：`REBUILD-PLAN.md`
+- 只读迁移源：`G:\project\mkp-ssr`（**不在里面写任何东西**）
