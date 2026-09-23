@@ -469,7 +469,10 @@ impl Manifest {
             if !miss.is_empty() {
                 return Err(
                     AppError::corrupted(format!("套餐 {} 引用了不存在的资源", b.id)).with_detail(
-                        format!("悬空的 assetRef：{} —— 客户端下载时才会 404", miss.join("、")),
+                        format!(
+                            "悬空的 assetRef：{} —— 客户端下载时才会 404",
+                            miss.join("、")
+                        ),
                     ),
                 );
             }
@@ -719,10 +722,11 @@ mod tests {
     #[test]
     fn duplicate_asset_id_is_rejected() {
         let mut m = good();
-        m["assets"]
-            .as_array_mut()
-            .unwrap()
-            .push(asset("a1_bbs_04", "bbs_profile", "presets/bbs/dup.json"));
+        m["assets"].as_array_mut().unwrap().push(asset(
+            "a1_bbs_04",
+            "bbs_profile",
+            "presets/bbs/dup.json",
+        ));
         let (_d, r) = load(m);
         assert!(r
             .unwrap_err()
@@ -839,8 +843,18 @@ mod tests {
                 .unwrap();
 
         let top_known: BTreeSet<&str> = [
-            "manifestVersion", "version", "minimumClient", "channel", "updated", "forceUpdate",
-            "assets", "bundles", "machines", "tracks", "contentFiles", "brands",
+            "manifestVersion",
+            "version",
+            "minimumClient",
+            "channel",
+            "updated",
+            "forceUpdate",
+            "assets",
+            "bundles",
+            "machines",
+            "tracks",
+            "contentFiles",
+            "brands",
             // brands 与 machine_catalog.brands 逐字节相同，归 catalog 读
             "ttl", // 客户端抓取策略，工作台不消费
         ]
@@ -858,8 +872,15 @@ mod tests {
         );
 
         let asset_known: BTreeSet<&str> = [
-            "id", "resourceType", "category", "machineId", "fileName", "relativePath", "sha256",
-            "size", "updatedAt",
+            "id",
+            "resourceType",
+            "category",
+            "machineId",
+            "fileName",
+            "relativePath",
+            "sha256",
+            "size",
+            "updatedAt",
         ]
         .into_iter()
         .collect();
@@ -871,7 +892,10 @@ mod tests {
                 }
             }
         }
-        assert!(unknown_asset.is_empty(), "资源条目有我没读的字段：{unknown_asset:?}");
+        assert!(
+            unknown_asset.is_empty(),
+            "资源条目有我没读的字段：{unknown_asset:?}"
+        );
 
         // 上游现在**没有**兼容声明。这条不是在要求它保持为空，是钉住
         // "为空时必须是 None"：一旦上游开始声明，这里会红，提醒我去接 doc §12 那条

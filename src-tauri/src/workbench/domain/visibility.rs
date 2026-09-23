@@ -454,12 +454,9 @@ mod tests {
                   "items": [{ "id": "i7", "paramKey": "in_gated_section" }] }
             ] }]
         });
-        let r = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let r =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
         (d, r)
     }
 
@@ -662,12 +659,9 @@ mod tests {
                 { "id": "i0", "paramKey": "x" }, { "id": "i1", "paramKey": "y" }
             ] }] }]
         });
-        let reg = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let reg =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
 
         let empty = Overrides::new();
         let l = Layers::new(&reg, "A1", &empty, &empty);
@@ -733,12 +727,9 @@ mod tests {
                 { "id": "i0", "paramKey": "a" }, { "id": "i1", "paramKey": "b" }
             ] }] }]
         });
-        let reg2 = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let reg2 =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
         let l = Layers::new(&reg2, "A1", &empty, &empty);
         let bad = Gate::new(&reg2, &l).unsatisfiable();
         assert_eq!(bad.len(), 1);
@@ -764,7 +755,11 @@ mod tests {
         let l = Layers::new(&p.registry, &m.id, &d.base, over);
         let g = Gate::new(&p.registry, &l);
 
-        assert!(g.cycles().is_empty(), "真数据里出现了 showWhen 环：{:?}", g.cycles());
+        assert!(
+            g.cycles().is_empty(),
+            "真数据里出现了 showWhen 环：{:?}",
+            g.cycles()
+        );
         assert!(
             g.unsatisfiable().is_empty(),
             "有字段的条件永远不可能满足：{:?}",
@@ -777,7 +772,11 @@ mod tests {
             for b in g.blocked(key) {
                 blocked_count += 1;
                 assert!(!b.need.trim().is_empty(), "{key} 的理由是空句子");
-                assert!(!b.need.contains('"'), "{key} 的理由里漏了 JSON 引号：{}", b.need);
+                assert!(
+                    !b.need.contains('"'),
+                    "{key} 的理由里漏了 JSON 引号：{}",
+                    b.need
+                );
                 assert!(!b.label.trim().is_empty(), "{key} 卡在一个没有名字的字段上");
             }
         }

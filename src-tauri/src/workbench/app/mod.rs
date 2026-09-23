@@ -256,7 +256,9 @@ pub(super) fn spawn_flusher() {
 
 /// 空闲落盘。**没停手就不写** —— 连着改 10 个值只在停手之后写一次
 fn flush_if_due() {
-    let Ok(mut guard) = session().lock() else { return };
+    let Ok(mut guard) = session().lock() else {
+        return;
+    };
     let Some(ctx) = guard.as_mut() else { return };
     if ctx.stale() && ctx.last_edit.elapsed() >= IDLE_BEFORE_FLUSH {
         ctx.flush();
@@ -265,7 +267,9 @@ fn flush_if_due() {
 
 /// 立刻落盘。窗口失焦 / 关闭前调，**不等那 2 秒**
 pub(super) fn flush_now() {
-    let Ok(mut guard) = session().lock() else { return };
+    let Ok(mut guard) = session().lock() else {
+        return;
+    };
     if let Some(ctx) = guard.as_mut() {
         ctx.flush();
     }
@@ -287,11 +291,7 @@ fn drop_ctx() {
 /// 能继续拿 `&Ctx` 做别的事（`Book` 要同时借上游与这两样）——
 /// 一次克隆是几千个小分配，比原来那一次 fsync 便宜三个数量级
 pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppError> {
-    Ok((
-        ctx.committed.clone(),
-        ctx.draft.clone(),
-        ctx.notices_now(),
-    ))
+    Ok((ctx.committed.clone(), ctx.draft.clone(), ctx.notices_now()))
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
@@ -670,11 +670,15 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
         let before = Book::new(&ctx.up, &ctx.presets, committed, &clean);
         let (b, a) = match level {
             Level::Machine => (
-                before.machine_layers(&owner).and_then(|l| l.effective(&key)),
+                before
+                    .machine_layers(&owner)
+                    .and_then(|l| l.effective(&key)),
                 book.machine_layers(&owner).and_then(|l| l.effective(&key)),
             ),
             Level::Version => (
-                before.version_layers(&owner).and_then(|l| l.effective(&key)),
+                before
+                    .version_layers(&owner)
+                    .and_then(|l| l.effective(&key)),
                 book.version_layers(&owner).and_then(|l| l.effective(&key)),
             ),
         };
@@ -696,7 +700,13 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
 
     // ② 结构改动。**各算一条** —— 它们和改一个值一样要被保存
     for (file_id, vis) in &draft.visibility {
-        out.push(structural(file_id, file_id, "菜单可见性", "", w::visibility_label(*vis)));
+        out.push(structural(
+            file_id,
+            file_id,
+            "菜单可见性",
+            "",
+            w::visibility_label(*vis),
+        ));
     }
     for (bundle_id, edit) in &draft.bundles {
         out.push(structural(
@@ -766,7 +776,11 @@ pub struct ApplyResult {
 ///
 /// 三个可选字段都带 `default`：**结构体里的 `Option` 不会自动缺省**
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "page")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "page"
+)]
 pub enum Refresh {
     Desk {
         machine_id: String,
@@ -798,7 +812,12 @@ pub fn wb_apply_draft(
 ) -> Result<ApplyResult, AppError> {
     traced("wb_apply_draft", |_| {
         with_ctx_mut(|ctx| {
-            let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &patches)?;
+            let out = apply_patches(
+                &mut ctx.draft,
+                &ctx.committed,
+                &ctx.presets.registry,
+                &patches,
+            )?;
             ctx.touch();
             let notices = ctx.notices_now();
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
@@ -823,11 +842,7 @@ pub fn wb_apply_draft(
                 ),
                 Some(Refresh::Matrix { cols, tab, query }) => (
                     None,
-                    Some(book.matrix(
-                        cols,
-                        tab.as_deref(),
-                        query.as_deref().unwrap_or_default(),
-                    )),
+                    Some(book.matrix(cols, tab.as_deref(), query.as_deref().unwrap_or_default())),
                 ),
             };
             let mut view = book.book_view();
@@ -962,11 +977,17 @@ mod tests {
         let script = params.iter().find(|p| p.key == "toolhead.script").unwrap();
         assert_eq!(script.default_text, w::BLANK, "空串写「空」不是空白");
 
-        let off = params.iter().find(|p| p.key == "toolhead.offset.x").unwrap();
+        let off = params
+            .iter()
+            .find(|p| p.key == "toolhead.offset.x")
+            .unwrap();
         assert_eq!(off.default_text, "0 mm");
         assert_eq!(off.machine_filter.len(), 0, "不限机型");
 
-        let only = params.iter().find(|p| p.key == "toolhead.only_p1s").unwrap();
+        let only = params
+            .iter()
+            .find(|p| p.key == "toolhead.only_p1s")
+            .unwrap();
         assert_eq!(only.machine_filter, vec!["P1S"]);
     }
 
@@ -992,7 +1013,13 @@ mod tests {
             value: Some(serde_json::json!(42)),
         };
 
-        let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &[patch]).unwrap();
+        let out = apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[patch],
+        )
+        .unwrap();
         ctx.touch();
         assert!(out.undoable);
 
@@ -1005,7 +1032,13 @@ mod tests {
 
         // 反向回去 → 干净
         let inverse = out.inverse;
-        apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &inverse).unwrap();
+        apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &inverse,
+        )
+        .unwrap();
         ctx.touch();
         assert!(ctx.draft.is_clean(), "撤销之后该回到干净");
     }
@@ -1081,7 +1114,11 @@ mod tests {
 
         set(&mut ctx, "tower");
         assert_eq!(now(&ctx), serde_json::json!("tower"), "改回去必须看得见");
-        assert_eq!(ctx.draft.dirty_count(), 1, "脏计数没变 —— 所以它不能当刷新信号");
+        assert_eq!(
+            ctx.draft.dirty_count(),
+            1,
+            "脏计数没变 —— 所以它不能当刷新信号"
+        );
     }
 
     /// 快照写不进去时：**编辑照常**，但要报出来
@@ -1135,7 +1172,9 @@ mod tests {
         }))
         .expect("配方台那一页");
         match desk {
-            Refresh::Desk { machine_id, uid, .. } => {
+            Refresh::Desk {
+                machine_id, uid, ..
+            } => {
                 assert_eq!(machine_id, "A1");
                 assert_eq!(uid.as_deref(), Some("A1/STANDARD"));
             }
@@ -1174,10 +1213,12 @@ mod tests {
             .flat_map(|g| g.items.iter())
             .map(|i| 1 + i.children.len())
             .sum();
-        assert_eq!(desk_rows, matrix.rows.len(), "同一份数据，两种摆法，行数一样");
+        assert_eq!(
+            desk_rows,
+            matrix.rows.len(),
+            "同一份数据，两种摆法，行数一样"
+        );
     }
-
-
 
     /// **差异清单要逐条说得出来**，不能只给一个数字。
     ///
@@ -1290,8 +1331,7 @@ mod tests {
         .unwrap();
         ctx.touch();
 
-        let out =
-            storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft).unwrap();
+        let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft).unwrap();
         assert!(out.remap.is_empty(), "保存不再改 uid");
 
         // 重开 = 重读盘。落盘的那一份才是新的真相
@@ -1320,7 +1360,10 @@ mod tests {
             Some(7.0),
             "float 字段越过一次盘就是 7.0，不是在赌它的表示"
         );
-        assert_eq!(l.effective("toolhead.offset.x").unwrap().origin, Origin::Version);
+        assert_eq!(
+            l.effective("toolhead.offset.x").unwrap().origin,
+            Origin::Version
+        );
 
         // ③ 顺带：改了值，这一版的产物指纹就变了 → 该显示「待生成」
         assert_eq!(book.build_state("A1/STANDARD"), BuildState::NeverBuilt);

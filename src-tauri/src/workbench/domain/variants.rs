@@ -186,10 +186,9 @@ mod tests {
             }] }]
         });
 
-        let reg = crate::workbench::presets::registry::load_from_json_fixture(
-            root, &params, &layout,
-        )
-        .unwrap();
+        let reg =
+            crate::workbench::presets::registry::load_from_json_fixture(root, &params, &layout)
+                .unwrap();
         (reg, versions.iter().map(|v| (*v).to_owned()).collect())
     }
 
@@ -214,7 +213,10 @@ mod tests {
             serde_json::json!({ "A1:STANDARD": -1, "A1:FAST": -0.7, "A1:FASTV3.3": 0.1 }),
         );
         let d = digest(&reg, "A1", &vs);
-        assert!(!d.base.contains_key("toolhead.offset.x"), "基底不该猜一个值");
+        assert!(
+            !d.base.contains_key("toolhead.offset.x"),
+            "基底不该猜一个值"
+        );
         assert_eq!(d.override_count(), 3);
         assert_eq!(
             d.versions["FAST"]["toolhead.offset.x"],
@@ -301,7 +303,6 @@ mod tests {
         assert!(d.base.is_empty(), "这是 A2L 那一栏为什么是 0/0");
         assert_eq!(d.override_count(), 0);
     }
-
 
     /* ---------- 真数据（`<repo>/presets/`） ---------- */
 
@@ -400,7 +401,11 @@ mod tests {
         assert_eq!(total, (18, 15), "合计与 doc §3.3 不一致");
 
         // A1 基底里那一项的身份也钉住：表里写的是 custom_mount_gcode
-        let a1 = digest(&p.registry, "A1", &vids_of(p.catalog.machine("A1").unwrap()));
+        let a1 = digest(
+            &p.registry,
+            "A1",
+            &vids_of(p.catalog.machine("A1").unwrap()),
+        );
         assert!(
             a1.base.contains_key("toolhead.custom_mount_gcode"),
             "A1 基底那一项应该是 custom_mount_gcode，实际是 {:?}",
@@ -408,7 +413,11 @@ mod tests {
         );
 
         // A2L 的 0/0 单独说一句：它**不是**"读失败了"，是数据没给它写任何机型差异
-        let a2l = digest(&p.registry, "A2L", &vids_of(p.catalog.machine("A2L").unwrap()));
+        let a2l = digest(
+            &p.registry,
+            "A2L",
+            &vids_of(p.catalog.machine("A2L").unwrap()),
+        );
         assert!(a2l.base.is_empty() && a2l.override_count() == 0);
         assert_eq!(a2l.versions.len(), 1, "它有一个版本，只是没有机型差异");
 
@@ -502,7 +511,10 @@ mod tests {
                     let want = theirs
                         .and_then(|m| m.get(k))
                         .unwrap_or_else(|| panic!("{key} 的 {name} 里旧数据没有键 {k}"));
-                    assert!(same(v, want), "{key} 的 {name}[{k}] 值不一致：{v:?} / {want:?}");
+                    assert!(
+                        same(v, want),
+                        "{key} 的 {name}[{k}] 值不一致：{v:?} / {want:?}"
+                    );
                     if v != want {
                         repr_only += 1;
                     }
@@ -519,6 +531,3 @@ mod tests {
         );
     }
 }
-
-
-

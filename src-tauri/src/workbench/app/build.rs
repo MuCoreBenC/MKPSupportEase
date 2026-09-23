@@ -179,7 +179,10 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
             if p.ui_component == UiComponent::Gcode {
                 // 多行字符串：注释在上一行，值用 `"""`
                 push_comment(&mut out, &p.toml_comment, false);
-                out.push_str(&format!("{toml_key} = \"\"\"\n{}\n\"\"\"\n", gcode_body(hit.value)));
+                out.push_str(&format!(
+                    "{toml_key} = \"\"\"\n{}\n\"\"\"\n",
+                    gcode_body(hit.value)
+                ));
             } else {
                 out.push_str(&format!("{toml_key} = {}", scalar(p, hit.value)));
                 push_comment(&mut out, &p.toml_comment, true);
@@ -373,10 +376,9 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
                     continue;
                 }
                 match rows.iter().find(|r| r.uid == uid) {
-                    Some(r) if r.state == w::BuildState::NoResources => skipped.push((
-                        uid.to_owned(),
-                        w::disabled::BUILD_NO_RESOURCES.to_owned(),
-                    )),
+                    Some(r) if r.state == w::BuildState::NoResources => {
+                        skipped.push((uid.to_owned(), w::disabled::BUILD_NO_RESOURCES.to_owned()))
+                    }
                     Some(_) => todo.push(uid),
                     None => skipped.push((uid.to_owned(), "这一版不在树上".to_owned())),
                 }
@@ -397,7 +399,10 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
             for r in &rendered {
                 let target = dist.join(&r.file_name);
                 let existing = std::fs::read_to_string(&target).ok();
-                if existing.as_deref().is_some_and(|old| same_payload(old, &r.text)) {
+                if existing
+                    .as_deref()
+                    .is_some_and(|old| same_payload(old, &r.text))
+                {
                     unchanged.push(r.uid.clone());
                 } else {
                     crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
@@ -589,14 +594,11 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
                 };
                 let path = mkp.join(preset_file_name(&v.machine_id, &v.version_id));
                 let Ok(bytes) = std::fs::read(&path) else {
-                    return Err(AppError::not_found(format!(
-                        "{} 的产物还没生成",
-                        v.name
-                    ))
-                    .with_detail(format!(
-                        "{} 不存在。先在生成视角里生成，再发布",
-                        path.display()
-                    )));
+                    return Err(AppError::not_found(format!("{} 的产物还没生成", v.name))
+                        .with_detail(format!(
+                            "{} 不存在。先在生成视角里生成，再发布",
+                            path.display()
+                        )));
                 };
                 assets.push(DistAsset {
                     // 哈希**按发布出去的那份字节算**，不抄上游的 —— 抄了就等于声明
@@ -693,7 +695,11 @@ mod tests {
         assert!(r.text.starts_with("# uuid: "));
         assert!(r.text.contains("# machine: A1"));
         assert!(r.text.contains("# variant: standard"));
-        assert!(r.text.contains("[toolhead]"), "段名要从数据里来：\n{}", r.text);
+        assert!(
+            r.text.contains("[toolhead]"),
+            "段名要从数据里来：\n{}",
+            r.text
+        );
 
         // 解析成 `Table` 而不是 `Value`：toml 1.x 的 `Value` 从字符串解析要求整份文档
         // 就是一个值，而我们产出的是一份带表头的文档
@@ -701,14 +707,22 @@ mod tests {
         let toolhead = &parsed["toolhead"];
         // 三个共享 tomlKey 的参数合成内联表，成员名取 jsonKey。
         // **整数不写小数点** —— 上游真产物就是 `offset = { x = -1, y = 18.6, z = 4 }`
-        assert_eq!(toolhead["offset"]["x"].as_integer(), Some(-1), "A1:STANDARD 的上游覆盖");
+        assert_eq!(
+            toolhead["offset"]["x"].as_integer(),
+            Some(-1),
+            "A1:STANDARD 的上游覆盖"
+        );
         assert_eq!(toolhead["offset"]["y"].as_float(), Some(18.6));
         assert_eq!(toolhead["offset"]["z"].as_integer(), Some(4));
         // G-code 走多行字符串
         assert!(toolhead["script"].as_str().is_some());
         assert_eq!(parsed["wiping"]["mode"].as_str(), Some("tower"));
         // 行尾注释要在
-        assert!(r.text.contains("} # 笔尖偏移"), "内联表的注释丢了：\n{}", r.text);
+        assert!(
+            r.text.contains("} # 笔尖偏移"),
+            "内联表的注释丢了：\n{}",
+            r.text
+        );
     }
 
     /// **M0：我们渲染出来的产物 vs 真机验证过的那份基线。**（b04 Task 11）
@@ -731,10 +745,12 @@ mod tests {
             eprintln!("没同时定位到 presets 与上游，这条 M0 检查未执行（不是通过）");
             return;
         };
-        let baseline_dir =
-            paths::repo_root().join("../mkp-ssr/crates/preset/assets/presets");
+        let baseline_dir = paths::repo_root().join("../mkp-ssr/crates/preset/assets/presets");
         if !baseline_dir.is_dir() {
-            eprintln!("没找到基线目录 {}，这条 M0 检查未执行（不是通过）", baseline_dir.display());
+            eprintln!(
+                "没找到基线目录 {}，这条 M0 检查未执行（不是通过）",
+                baseline_dir.display()
+            );
             return;
         }
 
@@ -827,8 +843,6 @@ mod tests {
             );
         }
     }
-
-
 
     /// 同样的输入**产出同样的字节**（除了时间戳那一行）——
     /// uuid 用随机数的话这条就不成立，而「字节没变不重写」也就废了
@@ -966,7 +980,10 @@ mod tests {
             .iter()
             .find(|m| m.id == "A2L")
             .expect("夹具里有 A2L");
-        assert!(!a2l.has_dimensions, "夹具的 A2L 本该没有尺寸，这条判据在空转");
+        assert!(
+            !a2l.has_dimensions,
+            "夹具的 A2L 本该没有尺寸，这条判据在空转"
+        );
 
         // 别的机型有尺寸 —— 这一支不该把它们也拦下来
         assert!(
@@ -1050,6 +1067,3 @@ mod tests {
         );
     }
 }
-
-
-

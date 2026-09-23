@@ -115,13 +115,23 @@ fn check_same_catalog(up: &Upstream, presets: &Presets) {
         .catalog
         .machines()
         .iter()
-        .map(|m| (m.id.clone(), m.versions.iter().map(|v| v.id.clone()).collect()))
+        .map(|m| {
+            (
+                m.id.clone(),
+                m.versions.iter().map(|v| v.id.clone()).collect(),
+            )
+        })
         .collect();
     let theirs: Vec<(String, Vec<String>)> = up
         .catalog
         .machines()
         .iter()
-        .map(|m| (m.id.clone(), m.versions.iter().map(|v| v.id.clone()).collect()))
+        .map(|m| {
+            (
+                m.id.clone(),
+                m.versions.iter().map(|v| v.id.clone()).collect(),
+            )
+        })
         .collect();
     assert_eq!(
         ours, theirs,
@@ -209,7 +219,6 @@ fn write_presets(root: &Path) {
 fn as_toml(v: &serde_json::Value) -> String {
     toml::to_string(v).expect("夹具那两份 JSON 应该都能表示成 TOML")
 }
-
 
 fn params() -> serde_json::Value {
     serde_json::json!({

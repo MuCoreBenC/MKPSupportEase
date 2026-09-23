@@ -258,7 +258,11 @@ mod tests {
 
         assert!(p.allowed);
         let hit: Vec<&str> = p.effects.iter().map(|e| e.col.as_str()).collect();
-        assert_eq!(hit, vec!["P1S", "P1S/LITE"], "A1 那两列被关着，不该算进 N 列");
+        assert_eq!(
+            hit,
+            vec!["P1S", "P1S/LITE"],
+            "A1 那两列被关着，不该算进 N 列"
+        );
         assert_eq!(p.skipped.len(), 2);
         assert!(p.skipped.iter().all(|s| !s.blocked.is_empty()));
         assert_eq!(p.skipped[0].blocked[0].key, "wiping.mode");
@@ -362,7 +366,10 @@ mod tests {
             &cols(&[("A1", None)]),
         );
         assert!(!p.allowed);
-        assert_eq!(p.blocked_reason.as_deref(), Some(w::disabled::BULK_REFUSES_GCODE));
+        assert_eq!(
+            p.blocked_reason.as_deref(),
+            Some(w::disabled::BULK_REFUSES_GCODE)
+        );
         assert!(p.effects.is_empty(), "拒绝了就不该给出影响列表");
     }
 

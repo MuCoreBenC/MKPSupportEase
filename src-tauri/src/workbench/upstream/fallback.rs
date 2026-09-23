@@ -327,10 +327,7 @@ mod tests {
     #[test]
     fn missing_enabled_is_an_error_not_a_silent_true() {
         let mut v = good();
-        v["fallbacks"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("enabled");
+        v["fallbacks"][0].as_object_mut().unwrap().remove("enabled");
         let (_d, r) = load(v);
         let e = r.unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
@@ -398,7 +395,11 @@ mod tests {
         );
         // reportField 是运行报告的对账键，空了就对不上
         for r in f.rules() {
-            assert!(!r.report_field.trim().is_empty(), "{} 没有 reportField", r.id);
+            assert!(
+                !r.report_field.trim().is_empty(),
+                "{} 没有 reportField",
+                r.id
+            );
         }
 
         let raw: serde_json::Value =
@@ -413,10 +414,20 @@ mod tests {
             .keys()
             .filter(|k| !top.contains(k.as_str()))
             .collect();
-        assert!(unknown.is_empty(), "回退登记表顶层有我没读的键：{unknown:?}");
+        assert!(
+            unknown.is_empty(),
+            "回退登记表顶层有我没读的键：{unknown:?}"
+        );
 
         let known: BTreeSet<&str> = [
-            "id", "category", "trigger", "from", "to", "enabled", "severity", "desc",
+            "id",
+            "category",
+            "trigger",
+            "from",
+            "to",
+            "enabled",
+            "severity",
+            "desc",
             "reportField",
         ]
         .into_iter()
@@ -429,6 +440,9 @@ mod tests {
                 }
             }
         }
-        assert!(unknown_field.is_empty(), "回退规则有我没读的字段：{unknown_field:?}");
+        assert!(
+            unknown_field.is_empty(),
+            "回退规则有我没读的字段：{unknown_field:?}"
+        );
     }
 }

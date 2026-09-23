@@ -33,11 +33,10 @@ pub mod wording;
 #[cfg(test)]
 pub mod testkit;
 
-
 pub use derive::{Book, BookView, Col, ColRef, Matrix};
 pub use layer::{Layers, Level, Origin, Overrides, ValueOrigin};
-pub use preview::BulkPreview;
 pub use patch::{Committed, Draft, Patch, Visibility};
+pub use preview::BulkPreview;
 pub use variants::{digest, Digested};
 pub use visibility::{BlockScope, BlockedBy, Gate};
 pub use wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState};

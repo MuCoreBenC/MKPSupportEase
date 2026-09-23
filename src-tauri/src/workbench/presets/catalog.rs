@@ -276,9 +276,7 @@ impl Machine {
             .versions
             .iter()
             .position(|v| v.id == version)
-            .ok_or_else(|| {
-                AppError::not_found(format!("{} 里没有叫 {version} 的版本", self.id))
-            })?;
+            .ok_or_else(|| AppError::not_found(format!("{} 里没有叫 {version} 的版本", self.id)))?;
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
             return Err(AppError::invalid_argument(format!(
@@ -409,7 +407,6 @@ impl Catalog {
             .collect()
     }
 
-
     /// 把一台机型写回它自己的文件。原子写（同目录临时文件 + rename）——
     /// 半个文件的 TOML 比没有更糟
     pub fn write_machine(&self, id: &str) -> Result<(), AppError> {
@@ -460,7 +457,9 @@ impl Catalog {
             ));
         }
         if self.machine(id).is_some() {
-            return Err(AppError::invalid_argument(format!("已经有一台叫 {id} 的机型")));
+            return Err(AppError::invalid_argument(format!(
+                "已经有一台叫 {id} 的机型"
+            )));
         }
         if let Some(owner) = self
             .machines
@@ -666,10 +665,7 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
                             .map(|pts| {
                                 pts.iter()
                                     .filter_map(|p| {
-                                        Some((
-                                            p.get("x")?.as_float()?,
-                                            p.get("y")?.as_float()?,
-                                        ))
+                                        Some((p.get("x")?.as_float()?, p.get("y")?.as_float()?))
                                     })
                                     .collect()
                             })
@@ -686,8 +682,8 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::presets::{can_be_literal, one_edit_only};
     use crate::workbench::paths;
+    use crate::workbench::presets::{can_be_literal, one_edit_only};
 
     fn catalog() -> Option<(PathBuf, Catalog)> {
         let root = paths::presets_root()?;
@@ -706,7 +702,10 @@ mod tests {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert!(!c.machines().is_empty(), "一个机型都没读到，下面的断言会空转");
+        assert!(
+            !c.machines().is_empty(),
+            "一个机型都没读到，下面的断言会空转"
+        );
 
         for m in c.machines() {
             let original = std::fs::read_to_string(m.file()).expect("刚读过的文件");
@@ -739,10 +738,7 @@ mod tests {
         doc["display"] = toml_edit::value("改过了");
         assert_ne!(m.to_toml(), doc.to_string(), "改了一个字段却比不出差异");
         // 而且**只有那一处**变了：保真不是"整体重排后碰巧相等"
-        assert!(
-            doc.to_string().contains("改过了"),
-            "改动没落到文本里"
-        );
+        assert!(doc.to_string().contains("改过了"), "改动没落到文本里");
         assert!(
             doc.to_string().contains("externalAliases"),
             "改一个字段把别的字段弄丢了"
@@ -823,7 +819,8 @@ mod tests {
             return;
         };
         let (tmp, mut c) = copy_of(&root);
-        c.add_machine("TEST_X9", "Bambu Lab", "测试机 X9").expect("加得上");
+        c.add_machine("TEST_X9", "Bambu Lab", "测试机 X9")
+            .expect("加得上");
 
         // **从盘上重读**，走完整的 loader
         let c2 = Catalog::load_from(tmp.path()).expect("重读整个目录");
@@ -862,9 +859,15 @@ mod tests {
         let before = std::fs::read_to_string(&a1).unwrap();
 
         // 走「ID 已存在」这条：先被 `machine()` 查重拦下
-        let e = c.add_machine("A1", "Bambu Lab", "冒牌 A1").expect_err("该被拒");
+        let e = c
+            .add_machine("A1", "Bambu Lab", "冒牌 A1")
+            .expect_err("该被拒");
         assert!(e.message.contains("A1"));
-        assert_eq!(std::fs::read_to_string(&a1).unwrap(), before, "A1.toml 被动了");
+        assert_eq!(
+            std::fs::read_to_string(&a1).unwrap(),
+            before,
+            "A1.toml 被动了"
+        );
 
         // 再走「文件已存在但内存里没这台机型」这条 —— 那是 `create_new` 兜的底。
         // 手动造出这个状态：盘上有文件，但 Catalog 是在它出现之前加载的
@@ -894,12 +897,21 @@ mod tests {
         };
         let (tmp, mut c) = copy_of(&root);
         assert!(
-            c.machine("A1").unwrap().external_aliases.contains(&"A1C".to_owned()),
+            c.machine("A1")
+                .unwrap()
+                .external_aliases
+                .contains(&"A1C".to_owned()),
             "前提变了：A1 不再有 A1C 这个别名，这条测试要重写"
         );
 
-        let e = c.add_machine("A1C", "Bambu Lab", "撞别名的").expect_err("该被拒");
-        assert!(e.message.contains("A1C") && e.message.contains("A1"), "{}", e.message);
+        let e = c
+            .add_machine("A1C", "Bambu Lab", "撞别名的")
+            .expect_err("该被拒");
+        assert!(
+            e.message.contains("A1C") && e.message.contains("A1"),
+            "{}",
+            e.message
+        );
         // 文件**一个都没建**
         assert!(!tmp.path().join("machines").join("A1C.toml").exists());
         assert_eq!(c.machines().len(), 6, "被拒的调用改动了状态");
@@ -927,7 +939,9 @@ mod tests {
             }
         }
         // 一个文件都没建出来
-        let n = std::fs::read_dir(tmp.path().join("machines")).unwrap().count();
+        let n = std::fs::read_dir(tmp.path().join("machines"))
+            .unwrap()
+            .count();
         assert_eq!(n, 6, "被拒的调用建出了文件");
     }
 
@@ -939,13 +953,13 @@ mod tests {
     #[test]
     fn literal_quoting_never_changes_the_value_it_writes() {
         let cases = [
-            "标准版",                    // 中文，能用单引号
-            "A1 fast",                   // 带空格
-            "it's mine",                 // **含单引号 → 必须退回双引号**
-            "line1\nline2",              // 含换行 → 退回双引号
-            "tab\there",                 // 控制字符
-            "quote\"inside",             // 含双引号，但能用单引号
-            "both'and\"",                // 两种都有
+            "标准版",        // 中文，能用单引号
+            "A1 fast",       // 带空格
+            "it's mine",     // **含单引号 → 必须退回双引号**
+            "line1\nline2",  // 含换行 → 退回双引号
+            "tab\there",     // 控制字符
+            "quote\"inside", // 含双引号，但能用单引号
+            "both'and\"",    // 两种都有
         ];
         for c in cases {
             let mut doc = DocumentMut::new();
@@ -963,7 +977,10 @@ mod tests {
             );
             // 能用字面量的就该用字面量 —— 否则这个函数等于没起作用
             if can_be_literal(c) {
-                assert!(text.contains(&format!("'{c}'")), "该用单引号却没有：{text:?}");
+                assert!(
+                    text.contains(&format!("'{c}'")),
+                    "该用单引号却没有：{text:?}"
+                );
             }
         }
     }
@@ -1000,10 +1017,19 @@ mod tests {
         // 两边都非空 —— 这就是"替换"的形状
         let (removed, inserted) = one_edit_only(&before, &m.to_toml());
         assert!(!removed.is_empty() && !inserted.is_empty(), "不是替换形状");
-        assert!(inserted.contains("改过的名字"), "新值不在插入段：{inserted:?}");
+        assert!(
+            inserted.contains("改过的名字"),
+            "新值不在插入段：{inserted:?}"
+        );
         // **别的字段一个都不许进这次改动的范围**
-        assert!(!removed.contains("presetFile"), "波及了 presetFile：{removed:?}");
-        assert!(!removed.contains("[[versions]]"), "波及了整个块：{removed:?}");
+        assert!(
+            !removed.contains("presetFile"),
+            "波及了 presetFile：{removed:?}"
+        );
+        assert!(
+            !removed.contains("[[versions]]"),
+            "波及了整个块：{removed:?}"
+        );
 
         // **引号风格**：真数据全用单引号。这一条是拿来**测量**的 ——
         // 通过说明 `toml_edit` 跟着原文；失败就打出实际输出，那时要正面决定
@@ -1076,8 +1102,12 @@ mod tests {
         let e1 = m
             .set_version_field(&v0, VersionField::Name, None)
             .expect_err("版本名称不许清空");
-        let e2 = m.set_field(MachineField::Display, Some("  ")).expect_err("显示名不许清空");
-        let e3 = m.set_field(MachineField::Brand, None).expect_err("品牌不许清空");
+        let e2 = m
+            .set_field(MachineField::Display, Some("  "))
+            .expect_err("显示名不许清空");
+        let e3 = m
+            .set_field(MachineField::Brand, None)
+            .expect_err("品牌不许清空");
         assert!(e1.message.contains("版本名称"), "{}", e1.message);
         assert!(e2.message.contains("显示名"), "{}", e2.message);
         assert!(e3.message.contains("品牌"), "{}", e3.message);
@@ -1087,7 +1117,6 @@ mod tests {
         // 可选的那几格**可以**清空 —— 对照组，证明上面拦的是"必填"不是"全部"
         m.set_field(MachineField::Icon, None).expect("图标可以清空");
     }
-
 
     /// 删除的**形状**：`one_edit_only` 的插入段必须为空。
     ///
@@ -1111,7 +1140,10 @@ mod tests {
             .map(|v| v.id.clone())
             .collect();
 
-        c.machine_mut("A1").unwrap().remove_version(&victim).expect("删得掉");
+        c.machine_mut("A1")
+            .unwrap()
+            .remove_version(&victim)
+            .expect("删得掉");
         c.write_machine("A1").expect("写回");
 
         let c2 = Catalog::load_from(tmp.path()).expect("重读");
@@ -1121,7 +1153,10 @@ mod tests {
 
         let (removed, inserted) = one_edit_only(&before, &m.to_toml());
         assert!(inserted.trim().is_empty(), "删除却插入了东西：{inserted:?}");
-        assert!(removed.contains(&victim), "删掉的那段里没有它的 id：{removed:?}");
+        assert!(
+            removed.contains(&victim),
+            "删掉的那段里没有它的 id：{removed:?}"
+        );
         // 别的版本的 id 不许出现在被删掉的那一段里
         for s in &survivors {
             assert!(!removed.contains(s), "把 {s} 一起删掉了");
@@ -1144,7 +1179,11 @@ mod tests {
             .unwrap()
             .remove_version("NOPE")
             .expect_err("该报错");
-        assert!(e.message.contains("NOPE") && e.message.contains("A1"), "{}", e.message);
+        assert!(
+            e.message.contains("NOPE") && e.message.contains("A1"),
+            "{}",
+            e.message
+        );
         assert_eq!(c.machine("A1").unwrap().versions.len(), n);
         assert_eq!(c.machine("A1").unwrap().to_toml(), before, "文本被动了");
     }
@@ -1162,7 +1201,10 @@ mod tests {
         let only = c.machine("A2L").unwrap().versions[0].id.clone();
         assert_eq!(c.machine("A2L").unwrap().versions.len(), 1, "前提变了");
 
-        c.machine_mut("A2L").unwrap().remove_version(&only).expect("该允许");
+        c.machine_mut("A2L")
+            .unwrap()
+            .remove_version(&only)
+            .expect("该允许");
         c.write_machine("A2L").expect("写回");
 
         // 关键：**删空之后文件还得读得回来**（不能留下一个坏掉的 TOML）
@@ -1171,7 +1213,6 @@ mod tests {
         assert!(m.versions.is_empty());
         assert_eq!(m.display, "A2L", "别的字段被带走了");
     }
-
 
     /// 加一个版本 = 往机型文件里插一个 `[[versions]]` 块。
     ///
@@ -1212,12 +1253,22 @@ mod tests {
 
         // 原有版本原封不动
         let now_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
-        assert_eq!(&now_ids[..before_ids.len()], &before_ids[..], "原有版本被动了");
+        assert_eq!(
+            &now_ids[..before_ids.len()],
+            &before_ids[..],
+            "原有版本被动了"
+        );
 
         // **只动一处**：什么都没删，插进去的那一段里有新版本的 id 与名字
         let (removed, inserted) = one_edit_only(&before, &m.to_toml());
-        assert!(removed.trim().is_empty(), "加一个版本却删掉了东西：{removed:?}");
-        assert!(inserted.contains("TEST_NEW"), "插入段不含新 id：{inserted:?}");
+        assert!(
+            removed.trim().is_empty(),
+            "加一个版本却删掉了东西：{removed:?}"
+        );
+        assert!(
+            inserted.contains("TEST_NEW"),
+            "插入段不含新 id：{inserted:?}"
+        );
         assert!(inserted.contains("我的新版本"));
     }
 
@@ -1234,7 +1285,9 @@ mod tests {
         let empty_id = m.add_version("", "名字").expect_err("空 ID 该被拒");
         let empty_name = m.add_version("OK_ID", "").expect_err("空名字该被拒");
         let bad_chars = m.add_version("有中文", "名字").expect_err("非法字符该被拒");
-        let dup = m.add_version("STANDARD", "名字").expect_err("重复 ID 该被拒");
+        let dup = m
+            .add_version("STANDARD", "名字")
+            .expect_err("重复 ID 该被拒");
 
         for (what, e) in [
             ("空 ID", &empty_id),

@@ -71,7 +71,9 @@ impl BuildState {
             Self::Built => "产物和当前配方一致，不用重新生成",
             Self::Stale => "配方改过了，产物还是旧的；生成之后客户端才会拿到新的",
             Self::NeverBuilt => "还没生成过，客户端现在下载不到这一版",
-            Self::NoResources => "没有可交付的产物，参数也全是出厂默认 —— 还没有为它写过配方。参数照样能看能改",
+            Self::NoResources => {
+                "没有可交付的产物，参数也全是出厂默认 —— 还没有为它写过配方。参数照样能看能改"
+            }
         }
     }
 
@@ -465,7 +467,11 @@ mod tests {
         for s in build {
             check(s.label(), s.explain(), &mut seen);
         }
-        for s in [ArtifactState::Fresh, ArtifactState::Stale, ArtifactState::Missing] {
+        for s in [
+            ArtifactState::Fresh,
+            ArtifactState::Stale,
+            ArtifactState::Missing,
+        ] {
             assert!(!s.label().is_empty());
             assert!(!s.explain().is_empty());
         }
@@ -476,7 +482,11 @@ mod tests {
             seen.push(s.label());
         }
         let mut seen: Vec<&str> = Vec::new();
-        for s in [BbsAssign::Assigned, BbsAssign::Optional, BbsAssign::ArchiveOnly] {
+        for s in [
+            BbsAssign::Assigned,
+            BbsAssign::Optional,
+            BbsAssign::ArchiveOnly,
+        ] {
             check(s.label(), s.explain(), &mut seen);
         }
         let mut seen: Vec<&str> = Vec::new();
@@ -520,7 +530,12 @@ mod tests {
         assert!(!all.contains(&BuildState::NoResources.label()));
     }
 
-    fn param(value_type: &str, ui: &str, choices: serde_json::Value, unit: Option<&str>) -> ParamDef {
+    fn param(
+        value_type: &str,
+        ui: &str,
+        choices: serde_json::Value,
+        unit: Option<&str>,
+    ) -> ParamDef {
         let mut v = serde_json::json!({
             "key": "k", "configKey": "K", "tomlKey": "k", "jsonKey": "k",
             "label": "字段", "desc": "", "tomlComment": "",
@@ -576,7 +591,10 @@ mod tests {
             serde_json::json!([{ "label": "老写法", "value": "legacy", "deprecated": true }]),
             None,
         );
-        assert_eq!(value_text(&p, &serde_json::json!("legacy")), "老写法（已废弃）");
+        assert_eq!(
+            value_text(&p, &serde_json::json!("legacy")),
+            "老写法（已废弃）"
+        );
     }
 
     /// 有单位就带上单位
@@ -590,7 +608,10 @@ mod tests {
     /// 「0 行 · 点开」点开是一片空白，没有意义
     #[test]
     fn gcode_reports_line_count_and_says_blank_when_empty() {
-        assert_eq!(gcode_text(&serde_json::json!("A\nB\nC")), (3, "3 行 · 点开".to_owned()));
+        assert_eq!(
+            gcode_text(&serde_json::json!("A\nB\nC")),
+            (3, "3 行 · 点开".to_owned())
+        );
         assert_eq!(gcode_text(&serde_json::json!("")), (0, BLANK.to_owned()));
         assert_eq!(gcode_text(&serde_json::json!(null)), (0, BLANK.to_owned()));
     }

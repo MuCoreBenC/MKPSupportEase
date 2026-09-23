@@ -97,7 +97,9 @@ pub fn wb_add_version(
 ) -> Result<MachineList, AppError> {
     traced("wb_add_version", |_| {
         let mut p = Presets::load()?;
-        p.catalog.machine_mut(&machine_id)?.add_version(&id, &name)?;
+        p.catalog
+            .machine_mut(&machine_id)?
+            .add_version(&id, &name)?;
         p.catalog.write_machine(&machine_id)?;
         tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
         // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
@@ -112,11 +114,7 @@ pub fn wb_add_version(
 /// 这个最坏是**覆盖掉一台已存在的机型**。所以底下用 `create_new` 原子地占路径，
 /// 已存在一律拒绝 —— 详见 `Catalog::add_machine` 的注释
 #[tauri::command]
-pub fn wb_add_machine(
-    id: String,
-    brand: String,
-    display: String,
-) -> Result<MachineList, AppError> {
+pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<MachineList, AppError> {
     traced("wb_add_machine", |_| {
         let mut p = Presets::load()?;
         p.catalog.add_machine(&id, &brand, &display)?;
@@ -143,10 +141,7 @@ pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<
 /// 删一个版本，立刻落盘。**不可逆**（没有回收站也没有撤销），
 /// 所以界面那边是两步确认，而且确认框里要列出上面那条查出来的孤儿
 #[tauri::command]
-pub fn wb_remove_version(
-    machine_id: String,
-    version_id: String,
-) -> Result<MachineList, AppError> {
+pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<MachineList, AppError> {
     traced("wb_remove_version", |_| {
         let mut p = Presets::load()?;
         // 先记下来再删 —— 删完就查不出它被谁引用了

@@ -396,12 +396,8 @@ impl ParamRegistry {
         }
         let dangling: Vec<&str> = layout_set.difference(&param_keys).copied().collect();
         if !dangling.is_empty() {
-            return Err(
-                AppError::corrupted("布局里引用了字段定义里没有的参数").with_detail(format!(
-                    "悬空的 paramKey：{}",
-                    dangling.join("、")
-                )),
-            );
+            return Err(AppError::corrupted("布局里引用了字段定义里没有的参数")
+                .with_detail(format!("悬空的 paramKey：{}", dangling.join("、"))));
         }
 
         // ② 每个 section 两侧的参数数逐个相等
@@ -617,9 +613,7 @@ impl ParamRegistry {
             .entry("machineVariants")
             .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
             .as_table_mut()
-            .ok_or_else(|| {
-                AppError::corrupted(format!("{key} 的 machineVariants 不是一张表"))
-            })?;
+            .ok_or_else(|| AppError::corrupted(format!("{key} 的 machineVariants 不是一张表")))?;
         table[owner] = item;
 
         self.params[at]
@@ -739,11 +733,8 @@ fn to_toml_value(
     vt: ValueType,
     key: &str,
 ) -> Result<toml_edit::Item, AppError> {
-    let bad_type = || {
-        AppError::invalid_argument(format!(
-            "{key} 的值 {v} 与它的 valueType（{vt:?}）对不上"
-        ))
-    };
+    let bad_type =
+        || AppError::invalid_argument(format!("{key} 的值 {v} 与它的 valueType（{vt:?}）对不上"));
     match v {
         serde_json::Value::Bool(b) => Ok(toml_edit::value(*b)),
         serde_json::Value::Number(n) => match vt {
@@ -928,7 +919,7 @@ mod tests {
         let (mut p, mut l) = good();
         p["params"][0]["machineFilter"] = serde_json::json!("P1S"); // a.x 只给 P1S
         p["params"][1]["deprecated"] = serde_json::json!(true); // a.y 废弃
-        // 补一个既不限机型也没废弃的，用来证明剩下的那个真的在
+                                                                // 补一个既不限机型也没废弃的，用来证明剩下的那个真的在
         p["params"]
             .as_array_mut()
             .unwrap()
@@ -941,7 +932,11 @@ mod tests {
         let (_d, r) = load(p, l);
         let r = r.unwrap();
 
-        assert_eq!(r.visible_keys("A1"), vec!["a.w"], "A1 只该看到不限机型且未废弃的");
+        assert_eq!(
+            r.visible_keys("A1"),
+            vec!["a.w"],
+            "A1 只该看到不限机型且未废弃的"
+        );
         assert_eq!(
             r.visible_keys("P1S"),
             vec!["a.w", "a.x"],
@@ -1149,13 +1144,38 @@ mod tests {
             .expect("读得到");
         let doc: DocumentMut = text.parse().expect("合法 TOML");
         let known: BTreeSet<&str> = [
-            "key", "configKey", "tomlKey", "jsonKey", "label", "desc", "tomlComment",
-            "valueType", "uiComponent", "defaultValue", "scope", "section", "layout", "min",
-            "max", "step", "unit", "parentKey", "showWhen", "choices", "variantMode",
-            "machineFilter", "deprecated", "machineVariants", "machineMinVariants",
-            "machineMaxVariants", "mergeGroup", "pinned", "serialization",
+            "key",
+            "configKey",
+            "tomlKey",
+            "jsonKey",
+            "label",
+            "desc",
+            "tomlComment",
+            "valueType",
+            "uiComponent",
+            "defaultValue",
+            "scope",
+            "section",
+            "layout",
+            "min",
+            "max",
+            "step",
+            "unit",
+            "parentKey",
+            "showWhen",
+            "choices",
+            "variantMode",
+            "machineFilter",
+            "deprecated",
+            "machineVariants",
+            "machineMinVariants",
+            "machineMaxVariants",
+            "mergeGroup",
+            "pinned",
+            "serialization",
             // 刻意不读的两个：实测 74/74 全 true，零区分度
-            "mergeable", "selectable",
+            "mergeable",
+            "selectable",
         ]
         .into_iter()
         .collect();
@@ -1205,13 +1225,20 @@ mod tests {
         };
         let before = r.to_toml();
 
-        r.set_variant("toolhead.MKP_retract", "A1:STANDARD", &serde_json::json!(-1.5))
-            .expect("写得动");
+        r.set_variant(
+            "toolhead.MKP_retract",
+            "A1:STANDARD",
+            &serde_json::json!(-1.5),
+        )
+        .expect("写得动");
         r.write_back().expect("落盘");
 
         let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
         assert_eq!(
-            again.param("toolhead.MKP_retract").unwrap().machine_variants["A1:STANDARD"],
+            again
+                .param("toolhead.MKP_retract")
+                .unwrap()
+                .machine_variants["A1:STANDARD"],
             serde_json::json!(-1.5),
             "重读盘之后值不在 —— 内存里成了盘上没成"
         );
@@ -1328,11 +1355,14 @@ mod tests {
             .map(|p| p.key.clone())
             .expect("实测有 4 条 int");
 
-        r.set_variant(&float_key, "A1", &serde_json::json!(3)).unwrap();
-        r.set_variant(&int_key, "A1", &serde_json::json!(3)).unwrap();
+        r.set_variant(&float_key, "A1", &serde_json::json!(3))
+            .unwrap();
+        r.set_variant(&int_key, "A1", &serde_json::json!(3))
+            .unwrap();
         r.write_back().unwrap();
 
-        let text = std::fs::read_to_string(tmp.path().join("registry/param_registry.toml")).unwrap();
+        let text =
+            std::fs::read_to_string(tmp.path().join("registry/param_registry.toml")).unwrap();
         // 真数据的口径（实测）：纯机型键**不加引号**（`P1S = 1.1`），
         // 带冒号的键只能加引号（`'P1S:LITE' = 1.1`）。写回要跟着这个口径
         assert!(text.contains("A1 = 3.0"), "float 字段没写成 3.0");
@@ -1380,7 +1410,11 @@ mod tests {
             }
         }
         // 三次都被拒，盘上与内存都不该有痕迹
-        assert_eq!(before, std::fs::read_to_string(&path).unwrap(), "文件被改了");
+        assert_eq!(
+            before,
+            std::fs::read_to_string(&path).unwrap(),
+            "文件被改了"
+        );
         assert_eq!(before, r.to_toml(), "内存里的文档被改了");
     }
 
@@ -1401,11 +1435,19 @@ mod tests {
         let before = std::fs::read_to_string(p.registry.file()).unwrap();
 
         let e = p
-            .set_variant("toolhead.MKP_retract", "NO_SUCH_MACHINE", &serde_json::json!(1))
+            .set_variant(
+                "toolhead.MKP_retract",
+                "NO_SUCH_MACHINE",
+                &serde_json::json!(1),
+            )
             .expect_err("机型不存在");
         assert_eq!(e.code, crate::error::ErrorCode::NotFound);
         let e2 = p
-            .set_variant("toolhead.MKP_retract", "A1:NO_SUCH_VERSION", &serde_json::json!(1))
+            .set_variant(
+                "toolhead.MKP_retract",
+                "A1:NO_SUCH_VERSION",
+                &serde_json::json!(1),
+            )
             .expect_err("版本不存在");
         assert_eq!(e2.code, crate::error::ErrorCode::NotFound);
         assert_ne!(e.message, e2.message, "两种不存在说了同一句话");
@@ -1416,11 +1458,20 @@ mod tests {
             "被拒之后文件被改了"
         );
         // 对照组：真机型真版本写得进去，而且改完整份数据还读得通（跨文件断言会跑）
-        p.set_variant("toolhead.MKP_retract", "A1:STANDARD", &serde_json::json!(-2.5))
-            .expect("真版本该写得进去");
-        let again = crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完整份还读得通");
+        p.set_variant(
+            "toolhead.MKP_retract",
+            "A1:STANDARD",
+            &serde_json::json!(-2.5),
+        )
+        .expect("真版本该写得进去");
+        let again =
+            crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完整份还读得通");
         assert_eq!(
-            again.registry.param("toolhead.MKP_retract").unwrap().machine_variants["A1:STANDARD"],
+            again
+                .registry
+                .param("toolhead.MKP_retract")
+                .unwrap()
+                .machine_variants["A1:STANDARD"],
             serde_json::json!(-2.5)
         );
     }
@@ -1457,8 +1508,16 @@ mod tests {
 
         // 一批：两个机型基底 + 一个版本覆盖 + 一次清空
         p.apply_values(&[
-            ("toolhead.MKP_retract".to_owned(), "A1".to_owned(), Some(serde_json::json!(-3.5))),
-            ("toolhead.MKP_retract".to_owned(), "P1S".to_owned(), Some(serde_json::json!(-4.0))),
+            (
+                "toolhead.MKP_retract".to_owned(),
+                "A1".to_owned(),
+                Some(serde_json::json!(-3.5)),
+            ),
+            (
+                "toolhead.MKP_retract".to_owned(),
+                "P1S".to_owned(),
+                Some(serde_json::json!(-4.0)),
+            ),
             (
                 "toolhead.MKP_retract".to_owned(),
                 "A1:FAST".to_owned(),
@@ -1468,16 +1527,28 @@ mod tests {
         .expect("一批写得进去");
 
         let again = crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完读得通");
-        let t = &again.registry.param("toolhead.MKP_retract").unwrap().machine_variants;
+        let t = &again
+            .registry
+            .param("toolhead.MKP_retract")
+            .unwrap()
+            .machine_variants;
         assert_eq!(t["A1"], serde_json::json!(-3.5));
         assert_eq!(t["P1S"], serde_json::json!(-4.0));
         assert_eq!(t["A1:FAST"], serde_json::json!(-5.0));
 
         // 清空也走同一条路
-        p.apply_values(&[("toolhead.MKP_retract".to_owned(), "A1:FAST".to_owned(), None)])
-            .expect("清得掉");
+        p.apply_values(&[(
+            "toolhead.MKP_retract".to_owned(),
+            "A1:FAST".to_owned(),
+            None,
+        )])
+        .expect("清得掉");
         let again = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
-        let t = &again.registry.param("toolhead.MKP_retract").unwrap().machine_variants;
+        let t = &again
+            .registry
+            .param("toolhead.MKP_retract")
+            .unwrap()
+            .machine_variants;
         assert!(!t.contains_key("A1:FAST"), "清空没生效");
         assert_eq!(t["A1"], serde_json::json!(-3.5), "顺带把别的键改了");
     }
@@ -1501,12 +1572,28 @@ mod tests {
         // 第一条合法、第二条机型不存在、第三条字段不存在
         let e = p
             .apply_values(&[
-                ("toolhead.MKP_retract".to_owned(), "A1".to_owned(), Some(serde_json::json!(-9.0))),
-                ("toolhead.MKP_retract".to_owned(), "NOPE".to_owned(), Some(serde_json::json!(1))),
-                ("没有这个字段".to_owned(), "A1".to_owned(), Some(serde_json::json!(1))),
+                (
+                    "toolhead.MKP_retract".to_owned(),
+                    "A1".to_owned(),
+                    Some(serde_json::json!(-9.0)),
+                ),
+                (
+                    "toolhead.MKP_retract".to_owned(),
+                    "NOPE".to_owned(),
+                    Some(serde_json::json!(1)),
+                ),
+                (
+                    "没有这个字段".to_owned(),
+                    "A1".to_owned(),
+                    Some(serde_json::json!(1)),
+                ),
             ])
             .expect_err("整批该被拒");
-        assert_eq!(e.code, crate::error::ErrorCode::NotFound, "先报的该是机型不存在");
+        assert_eq!(
+            e.code,
+            crate::error::ErrorCode::NotFound,
+            "先报的该是机型不存在"
+        );
 
         assert_eq!(
             before,

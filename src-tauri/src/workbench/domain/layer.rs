@@ -279,12 +279,9 @@ mod tests {
                 { "id": "i3", "paramKey": "toolhead.gone" }
             ] }] }]
         });
-        let r = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let r =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
         (d, r)
     }
 
@@ -302,18 +299,18 @@ mod tests {
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
         let over = overrides(&[("toolhead.offset.x", serde_json::json!(2))]);
 
-        let l =         Layers::new(&reg, "A1", &base, &over);
+        let l = Layers::new(&reg, "A1", &base, &over);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(2));
         assert_eq!(r.origin, Origin::Version);
 
         let empty = Overrides::new();
-        let l =         Layers::new(&reg, "A1", &base, &empty);
+        let l = Layers::new(&reg, "A1", &base, &empty);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(1));
         assert_eq!(r.origin, Origin::Machine);
 
-        let l =         Layers::new(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let r = l.effective("toolhead.offset.x").unwrap();
         assert_eq!(*r.value, serde_json::json!(0));
         assert_eq!(r.origin, Origin::Factory);
@@ -327,14 +324,14 @@ mod tests {
         let empty = Overrides::new();
 
         // 出厂默认本来就是空串 → 有值，来源出厂
-        let l =         Layers::new(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let r = l.effective("toolhead.custom_mount_gcode").unwrap();
         assert_eq!(*r.value, serde_json::json!(""));
         assert_eq!(r.origin, Origin::Factory);
 
         // 版本上显式写了空串 → 有值，来源版本，且 has_own 为真
         let over = overrides(&[("toolhead.custom_mount_gcode", serde_json::json!(""))]);
-        let l =         Layers::new(&reg, "A1", &empty, &over);
+        let l = Layers::new(&reg, "A1", &empty, &over);
         let r = l.effective("toolhead.custom_mount_gcode").unwrap();
         assert_eq!(r.origin, Origin::Version, "写了空串也是写过");
         assert!(l.has_own(Level::Version, "toolhead.custom_mount_gcode"));
@@ -346,16 +343,20 @@ mod tests {
         let (_d, reg) = registry();
         let empty = Overrides::new();
 
-        let a1 =         Layers::new(&reg, "A1", &empty, &empty);
-        assert!(a1.effective("toolhead.only_p1s").is_none(), "不该退回出厂默认");
+        let a1 = Layers::new(&reg, "A1", &empty, &empty);
+        assert!(
+            a1.effective("toolhead.only_p1s").is_none(),
+            "不该退回出厂默认"
+        );
         assert!(!a1.applies("toolhead.only_p1s"));
         assert_eq!(a1.not_applicable(), vec!["toolhead.only_p1s"]);
-        assert!(!a1
-            .effective_recipe()
-            .contains_key("toolhead.only_p1s"));
+        assert!(!a1.effective_recipe().contains_key("toolhead.only_p1s"));
 
-        let p1s =         Layers::new(&reg, "P1S", &empty, &empty);
-        assert_eq!(*p1s.effective("toolhead.only_p1s").unwrap().value, serde_json::json!(9));
+        let p1s = Layers::new(&reg, "P1S", &empty, &empty);
+        assert_eq!(
+            *p1s.effective("toolhead.only_p1s").unwrap().value,
+            serde_json::json!(9)
+        );
         assert!(p1s.not_applicable().is_empty());
     }
 
@@ -364,7 +365,7 @@ mod tests {
     fn unknown_key_is_none() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l =         Layers::new(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         assert!(l.effective("toolhead.made_up").is_none());
         assert!(!l.applies("toolhead.made_up"));
     }
@@ -376,10 +377,16 @@ mod tests {
         let (_d, reg) = registry();
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
         let over = overrides(&[("toolhead.offset.x", serde_json::json!(2))]);
-        let l =         Layers::new(&reg, "A1", &base, &over);
+        let l = Layers::new(&reg, "A1", &base, &over);
 
-        assert_eq!(l.effective("toolhead.offset.x").unwrap().origin, Origin::Version);
-        assert!(l.has_own(Level::Machine, "toolhead.offset.x"), "基底那一项还在");
+        assert_eq!(
+            l.effective("toolhead.offset.x").unwrap().origin,
+            Origin::Version
+        );
+        assert!(
+            l.has_own(Level::Machine, "toolhead.offset.x"),
+            "基底那一项还在"
+        );
         assert!(l.has_own(Level::Version, "toolhead.offset.x"));
         assert!(!l.has_own(Level::Machine, "toolhead.custom_mount_gcode"));
     }
@@ -394,7 +401,7 @@ mod tests {
             ("toolhead.deleted_upstream", serde_json::json!(7)), // 上游已删
         ]);
         let over = overrides(&[("toolhead.only_p1s", serde_json::json!(6))]);
-        let l =         Layers::new(&reg, "A1", &base, &over);
+        let l = Layers::new(&reg, "A1", &base, &over);
 
         assert_eq!(
             l.orphan_keys(),
@@ -402,7 +409,7 @@ mod tests {
             "两层各出现一次的 only_p1s 只该报一次"
         );
         // 同一份数据在 P1S 上只剩真正被删的那个
-        let l =         Layers::new(&reg, "P1S", &base, &over);
+        let l = Layers::new(&reg, "P1S", &base, &over);
         assert_eq!(l.orphan_keys(), vec!["toolhead.deleted_upstream"]);
     }
 
@@ -411,7 +418,7 @@ mod tests {
     fn effective_recipe_is_stable_and_filtered() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let l =         Layers::new(&reg, "A1", &empty, &empty);
+        let l = Layers::new(&reg, "A1", &empty, &empty);
         let keys: Vec<&str> = l.effective_recipe().into_keys().collect();
         assert_eq!(
             keys,
@@ -479,7 +486,10 @@ mod tests {
         // 机型层那一项也没了 → 才是出厂默认
         let l = Layers::new(&reg, "A1", &empty, &empty);
         assert_eq!(l.effective(k).unwrap().origin, Origin::Factory);
-        assert!(!l.has_own(Level::Machine, k), "没钉着就不该给出「挂回继承」");
+        assert!(
+            !l.has_own(Level::Machine, k),
+            "没钉着就不该给出「挂回继承」"
+        );
     }
 
     /// `own_count` 不数已经失效的键 —— 界面上「N 项自有」不该把改不到产物的项算进去
@@ -502,21 +512,21 @@ mod tests {
     fn fingerprint_reacts_to_values_and_to_the_field_definitions() {
         let (_d, reg) = registry();
         let empty = Overrides::new();
-        let a =         Layers::new(&reg, "A1", &empty, &empty).fingerprint();
+        let a = Layers::new(&reg, "A1", &empty, &empty).fingerprint();
 
         let base = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
-        let b =         Layers::new(&reg, "A1", &base, &empty).fingerprint();
+        let b = Layers::new(&reg, "A1", &base, &empty).fingerprint();
         assert_ne!(a, b, "值变了指纹要变");
 
         // 同样的值换台机型也要变 —— 不同机型的产物是不同文件
-        let c =         Layers::new(&reg, "P1S", &base, &empty).fingerprint();
+        let c = Layers::new(&reg, "P1S", &base, &empty).fingerprint();
         assert_ne!(b, c);
 
         // 只改字段定义（给 offset.x 换个 tomlKey），值一个没动
         let (_d2, reg2) = registry_with_toml_key("off_x_v2");
         let only_x = overrides(&[("toolhead.offset.x", serde_json::json!(1))]);
-        let changed_defs =         Layers::new(&reg2, "A1", &only_x, &empty).fingerprint();
-        let same_values =         Layers::new(&reg, "A1", &only_x, &empty).fingerprint();
+        let changed_defs = Layers::new(&reg2, "A1", &only_x, &empty).fingerprint();
+        let same_values = Layers::new(&reg, "A1", &only_x, &empty).fingerprint();
         assert_ne!(
             changed_defs, same_values,
             "改了 tomlKey 产出的 TOML 就不一样了，产物必须变成待生成"
@@ -544,12 +554,9 @@ mod tests {
                 { "id": "i0", "paramKey": "toolhead.offset.x" }
             ] }] }]
         });
-        let r = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let r =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
         (d, r)
     }
 

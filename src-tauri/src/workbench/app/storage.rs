@@ -165,8 +165,11 @@ pub fn load(store: &Store, presets: &Presets) -> Result<Loaded, AppError> {
 
 fn check_version(v: u32, rel: &str) -> Result<(), AppError> {
     if v > V {
-        return Err(AppError::corrupted(format!("{rel} 是更新版本的工作台写的"))
-            .with_detail(format!("文件结构版本 {v}，本程序只认到 {V}。请升级工作台，不要在这个版本上改动")));
+        return Err(
+            AppError::corrupted(format!("{rel} 是更新版本的工作台写的")).with_detail(format!(
+                "文件结构版本 {v}，本程序只认到 {V}。请升级工作台，不要在这个版本上改动"
+            )),
+        );
     }
     Ok(())
 }
@@ -372,8 +375,7 @@ mod tests {
         assert_eq!(std.name, "标准版", "显示名来自 [[versions]] 的 name");
         assert_eq!(std.tag.as_deref(), Some("推荐"));
         assert_eq!(
-            loaded.committed.versions["A2L/STANDARD"].tag,
-            None,
+            loaded.committed.versions["A2L/STANDARD"].tag, None,
             "空 tag 是 None，不是空串 —— 界面上要能分出「没配角标」"
         );
         assert_eq!(loaded.committed.versions["P1S/LITE"].name, "精简版");
@@ -388,7 +390,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["A1", "A2L", "P1S"]
         );
-        assert_eq!(loaded.committed.catalog[0].version_ids, ["STANDARD", "FAST"]);
+        assert_eq!(
+            loaded.committed.catalog[0].version_ids,
+            ["STANDARD", "FAST"]
+        );
 
         // 值一个都不在这里：干净仓库连一个文件都不该被读出来
         assert!(s
@@ -455,7 +460,11 @@ mod tests {
             Some(7.0),
             "版本覆盖没写进去（owner 用的是冒号，不是斜杠）"
         );
-        assert_eq!(table["A1:FAST"].as_f64(), Some(-0.7), "不该顺手动隔壁那一版");
+        assert_eq!(
+            table["A1:FAST"].as_f64(),
+            Some(-0.7),
+            "不该顺手动隔壁那一版"
+        );
 
         // 名字只有机型文件一个来源 —— 这里不存第二个副本
         let again = load(&s, &fresh).unwrap();
@@ -622,10 +631,7 @@ mod tests {
                 Patch::MarkBuilt {
                     uids: vec!["A1/STANDARD".to_owned()],
                     stamp: "2026-01-01T00:00:00Z".to_owned(),
-                    fingerprints: BTreeMap::from([(
-                        "A1/STANDARD".to_owned(),
-                        "fp-abc".to_owned(),
-                    )]),
+                    fingerprints: BTreeMap::from([("A1/STANDARD".to_owned(), "fp-abc".to_owned())]),
                 },
             ],
         )

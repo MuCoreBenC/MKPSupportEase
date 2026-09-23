@@ -352,7 +352,10 @@ mod tests {
         let (d, s) = store();
         let raw = "{\n  \"drink\": \"进口\"\n}\n".as_bytes();
         s.put_raw("bbs/BBS-01.json", raw).unwrap();
-        assert_eq!(std::fs::read(d.path().join("bbs/BBS-01.json")).unwrap(), raw);
+        assert_eq!(
+            std::fs::read(d.path().join("bbs/BBS-01.json")).unwrap(),
+            raw
+        );
     }
 
     /// **上游真实 id 必须全部通得过白名单**。

@@ -247,13 +247,25 @@ mod tests {
         ] {
             check(&t.build, serde_json::to_value(v).unwrap(), "BuildState");
         }
-        for v in [ArtifactState::Fresh, ArtifactState::Stale, ArtifactState::Missing] {
-            check(&t.artifact, serde_json::to_value(v).unwrap(), "ArtifactState");
+        for v in [
+            ArtifactState::Fresh,
+            ArtifactState::Stale,
+            ArtifactState::Missing,
+        ] {
+            check(
+                &t.artifact,
+                serde_json::to_value(v).unwrap(),
+                "ArtifactState",
+            );
         }
         for v in [SaveState::Saved, SaveState::Dirty] {
             check(&t.save, serde_json::to_value(v).unwrap(), "SaveState");
         }
-        for v in [BbsAssign::Assigned, BbsAssign::Optional, BbsAssign::ArchiveOnly] {
+        for v in [
+            BbsAssign::Assigned,
+            BbsAssign::Optional,
+            BbsAssign::ArchiveOnly,
+        ] {
             check(&t.bbs_assign, serde_json::to_value(v).unwrap(), "BbsAssign");
         }
         for v in [BbsSource::Own, BbsSource::InheritedFromMachine] {
@@ -266,7 +278,11 @@ mod tests {
             check(&t.level, serde_json::to_value(v).unwrap(), "Level");
         }
         for v in [Visibility::Menu, Visibility::ArchiveOnly] {
-            check(&t.visibility, serde_json::to_value(v).unwrap(), "Visibility");
+            check(
+                &t.visibility,
+                serde_json::to_value(v).unwrap(),
+                "Visibility",
+            );
         }
         for v in [BulkKind::Detaching, BulkKind::Changing, BulkKind::NoChange] {
             check(&t.bulk_kind, serde_json::to_value(v).unwrap(), "BulkKind");

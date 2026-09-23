@@ -334,11 +334,7 @@ pub fn apply(
 }
 
 /// 整批校验。这里只判"能不能做"，不改任何东西
-fn validate(
-    committed: &Committed,
-    registry: &Registry,
-    patches: &[Patch],
-) -> Result<(), AppError> {
+fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Result<(), AppError> {
     let known_uid = |uid: &String| -> Result<(), AppError> {
         if committed.has_version(uid) {
             Ok(())
@@ -453,7 +449,11 @@ fn apply_one(
             presets,
             bbs,
         } => {
-            let saved = committed.bundles.get(bundle_id).cloned().unwrap_or_default();
+            let saved = committed
+                .bundles
+                .get(bundle_id)
+                .cloned()
+                .unwrap_or_default();
             let before = draft
                 .bundles
                 .get(bundle_id)
@@ -583,12 +583,9 @@ mod tests {
                 { "id": "i1", "paramKey": "toolhead.offset.z" }
             ] }] }]
         });
-        let r = crate::workbench::presets::registry::load_from_json_fixture(
-            d.path(),
-            &params,
-            &layout,
-        )
-        .unwrap();
+        let r =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
         (d, r)
     }
 
@@ -646,13 +643,23 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.z", Some(serde_json::json!(2)))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                Some(serde_json::json!(2)),
+            )],
         )
         .unwrap();
 
         assert_eq!(
             out.inverse,
-            vec![set(Level::Version, "A1/STANDARD", "toolhead.offset.z", None)],
+            vec![set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                None
+            )],
             "反向该是删键，不是「设回 1.1」"
         );
         assert!(out.undoable);
@@ -669,7 +676,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(7)))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(7)),
+            )],
         )
         .unwrap();
         assert_eq!(
@@ -694,7 +706,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", None)],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                None,
+            )],
         )
         .unwrap();
         assert_eq!(
@@ -708,7 +725,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!("")))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!("")),
+            )],
         )
         .unwrap();
         assert_eq!(
@@ -728,7 +750,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(-1)))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(-1)),
+            )],
         )
         .unwrap();
         assert!(out.inverse.is_empty());
@@ -746,7 +773,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(7)))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(7)),
+            )],
         )
         .unwrap();
         assert_eq!(draft.dirty_count(), 1);
@@ -755,7 +787,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(-1)))],
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(-1)),
+            )],
         )
         .unwrap();
         assert_eq!(draft.dirty_count(), 0, "改回去就不该再算一处未保存改动");
@@ -792,9 +829,24 @@ mod tests {
         let c = committed();
 
         for bad in [
-            set(Level::Version, "A1/STANDARD", "toolhead.made_up", Some(serde_json::json!(1))),
-            set(Level::Version, "A1/NOPE", "toolhead.offset.x", Some(serde_json::json!(1))),
-            set(Level::Machine, "KOBRA", "toolhead.offset.x", Some(serde_json::json!(1))),
+            set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.made_up",
+                Some(serde_json::json!(1)),
+            ),
+            set(
+                Level::Version,
+                "A1/NOPE",
+                "toolhead.offset.x",
+                Some(serde_json::json!(1)),
+            ),
+            set(
+                Level::Machine,
+                "KOBRA",
+                "toolhead.offset.x",
+                Some(serde_json::json!(1)),
+            ),
         ] {
             let mut draft = Draft::default();
             let good = set(
@@ -826,8 +878,18 @@ mod tests {
         let mut draft = Draft::default();
 
         let forward = vec![
-            set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(5))),
-            set(Level::Version, "A1/STANDARD", "toolhead.offset.x", Some(serde_json::json!(7))),
+            set(
+                Level::Machine,
+                "A1",
+                "toolhead.offset.x",
+                Some(serde_json::json!(5)),
+            ),
+            set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(7)),
+            ),
             set(Level::Version, "A1/STANDARD", "toolhead.offset.z", None),
         ];
         let out = apply(&mut draft, &c, &reg, &forward).unwrap();
@@ -836,7 +898,11 @@ mod tests {
 
         apply(&mut draft, &c, &reg, &out.inverse).unwrap();
         assert_eq!(draft.dirty_count(), 0, "脏计数要回到 0");
-        assert!(draft.values.is_empty(), "值要回到没改过：{:?}", draft.values);
+        assert!(
+            draft.values.is_empty(),
+            "值要回到没改过：{:?}",
+            draft.values
+        );
     }
 
     /// 反向要**倒着**执行才对：同一个键连改两次，反向顺序错了就回不去
@@ -851,8 +917,18 @@ mod tests {
             &c,
             &reg,
             &[
-                set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(1))),
-                set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(2))),
+                set(
+                    Level::Machine,
+                    "A1",
+                    "toolhead.offset.x",
+                    Some(serde_json::json!(1)),
+                ),
+                set(
+                    Level::Machine,
+                    "A1",
+                    "toolhead.offset.x",
+                    Some(serde_json::json!(2)),
+                ),
             ],
         )
         .unwrap();
@@ -861,7 +937,12 @@ mod tests {
         assert_eq!(
             out.inverse,
             vec![
-                set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(1))),
+                set(
+                    Level::Machine,
+                    "A1",
+                    "toolhead.offset.x",
+                    Some(serde_json::json!(1))
+                ),
                 set(Level::Machine, "A1", "toolhead.offset.x", None),
             ]
         );
@@ -880,7 +961,12 @@ mod tests {
             &mut draft,
             &c,
             &reg,
-            &[set(Level::Machine, "A1", "toolhead.offset.x", Some(serde_json::json!(5)))],
+            &[set(
+                Level::Machine,
+                "A1",
+                "toolhead.offset.x",
+                Some(serde_json::json!(5)),
+            )],
         )
         .unwrap();
         // 手工塞一条指向已消失版本的草稿（模拟上游删掉了那个版本）
@@ -905,7 +991,11 @@ mod tests {
             (Level::Version, "A1/FASTV3.3", "wiping.glue_z_lift_height"),
         ] {
             let s = value_key(level, owner, key);
-            assert_eq!(parse_value_key(&s), Some((level, owner, key)), "来回转不回去：{s}");
+            assert_eq!(
+                parse_value_key(&s),
+                Some((level, owner, key)),
+                "来回转不回去：{s}"
+            );
         }
         assert!(parse_value_key("x:A1:k").is_none());
         assert!(parse_value_key("m:A1").is_none());

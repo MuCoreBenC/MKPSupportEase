@@ -55,7 +55,11 @@ mod tests {
     fn iso_looks_like_rfc3339_utc() {
         let s = now_iso8601();
         assert!(s.ends_with('Z'), "不是 UTC：{s}");
-        assert_eq!(s.len(), 20, "长度不对（应为 2026-09-22T14:31:02Z 这种）：{s}");
+        assert_eq!(
+            s.len(),
+            20,
+            "长度不对（应为 2026-09-22T14:31:02Z 这种）：{s}"
+        );
     }
 
     /// 文件名用的那份绝不能含冒号 —— 这条不是风格，是 Windows 上能不能落盘
@@ -75,7 +79,11 @@ mod tests {
     #[test]
     fn release_time_matches_what_the_consumer_writes() {
         let s = now_release_time();
-        assert_eq!(s.len(), 19, "长度不对（应为 2026-08-19 01:38:13 这种）：{s}");
+        assert_eq!(
+            s.len(),
+            19,
+            "长度不对（应为 2026-08-19 01:38:13 这种）：{s}"
+        );
         assert!(!s.contains('T') && !s.contains('Z'), "不该带 T/Z：{s}");
         assert_eq!(s.as_bytes()[10], b' ', "第 11 位该是空格：{s}");
         // 与另外两种格式都不一样 —— 三者混用是这个文件存在的理由

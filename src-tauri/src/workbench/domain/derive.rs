@@ -193,7 +193,12 @@ impl<'a> Book<'a> {
     pub fn machine_layers(&self, machine_id: &str) -> Option<Layers<'_>> {
         let base = self.bases.get(machine_id)?;
         let id = self.machine(machine_id)?.id.as_str();
-        Some(Layers::new(&self.presets.registry, id, base, no_overrides()))
+        Some(Layers::new(
+            &self.presets.registry,
+            id,
+            base,
+            no_overrides(),
+        ))
     }
 
     /// 一个版本的三层视图。
@@ -344,7 +349,10 @@ impl<'a> Book<'a> {
             let ml = self.machine_layers(&m.id);
             // 每层只有一张表，所以"这一层有几项"与"其中自己钉了几项"是同一个数。
             // 以前每层有两半（见 `domain::layer` 的模块文档），才需要两个数
-            let base_count = ml.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0);
+            let base_count = ml
+                .as_ref()
+                .map(|l| l.own_count(Level::Machine))
+                .unwrap_or(0);
             base_items += base_count;
 
             let mut nodes = Vec::new();
@@ -550,7 +558,11 @@ impl<'a> Book<'a> {
 
         let gates: Vec<Option<Gate<'_>>> = cols
             .iter()
-            .map(|c| c.layers.as_ref().map(|l| Gate::new(&self.presets.registry, l)))
+            .map(|c| {
+                c.layers
+                    .as_ref()
+                    .map(|l| Gate::new(&self.presets.registry, l))
+            })
             .collect();
 
         let rows: Vec<Row> = keys
@@ -647,7 +659,10 @@ impl<'a> Book<'a> {
                         level: Level::Machine,
                         machine: m.display.clone(),
                         label: w::level_label(Level::Machine).to_owned(),
-                        items: layers.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0),
+                        items: layers
+                            .as_ref()
+                            .map(|l| l.own_count(Level::Machine))
+                            .unwrap_or(0),
                     },
                     machine_id: m.id.clone(),
                     level: Level::Machine,
@@ -667,7 +682,10 @@ impl<'a> Book<'a> {
                         level: Level::Version,
                         machine: m.display.clone(),
                         label: v.name.clone(),
-                        items: layers.as_ref().map(|l| l.own_count(Level::Version)).unwrap_or(0),
+                        items: layers
+                            .as_ref()
+                            .map(|l| l.own_count(Level::Version))
+                            .unwrap_or(0),
                     },
                     machine_id: m.id.clone(),
                     level: Level::Version,
@@ -704,7 +722,10 @@ impl<'a> Book<'a> {
                     .param(&b.key)
                     .is_some_and(|c| c.applies_to(&col.machine_id));
                 if here {
-                    (Some(w::relate::blocked_note(&b.label, &b.need)), Some(b.key.clone()))
+                    (
+                        Some(w::relate::blocked_note(&b.label, &b.need)),
+                        Some(b.key.clone()),
+                    )
                 } else {
                     // 控制它的那一项这台机型上根本没有 —— **不给跳转**。
                     // 这是上游数据问题，骗用户去点一个不存在的格子更糟
@@ -729,7 +750,10 @@ impl<'a> Book<'a> {
             origin_explain: Some(w::origin_explain(hit.origin).to_owned()),
             own,
             // 改动还在草稿里 —— 界面用蓝色描边标它，不换底色（doc §7 视觉规范）
-            dirty: self.draft.pending(col.level, &col.key_of_level(), key).is_some(),
+            dirty: self
+                .draft
+                .pending(col.level, &col.key_of_level(), key)
+                .is_some(),
             editable: blocked.is_empty(),
             reason: if blocked.is_empty() {
                 None
@@ -752,7 +776,10 @@ impl<'a> Book<'a> {
             return Some(w::relate::controlled_by(self.label_of(&sw.key)));
         }
         // section 级条件：要用户做的事一样，但说法不同（「整组关着」vs「上一项没开」）
-        let sw = self.presets.registry.section_show_when(&p.layout.section_id)?;
+        let sw = self
+            .presets
+            .registry
+            .section_show_when(&p.layout.section_id)?;
         Some(w::relate::group_controlled_by(self.label_of(&sw.key)))
     }
 
@@ -825,7 +852,13 @@ impl<'a> Book<'a> {
     左栏那份导航**不跟着搜索变**：它从字段定义直接数，
     否则搜一个词整棵导航树就塌了，而那正是用来换分组看的东西。
     */
-    pub fn desk(&self, machine_id: &str, uid: Option<&str>, tab: Option<&str>, query: &str) -> Desk {
+    pub fn desk(
+        &self,
+        machine_id: &str,
+        uid: Option<&str>,
+        tab: Option<&str>,
+        query: &str,
+    ) -> Desk {
         let col = ColRef {
             machine_id: machine_id.to_owned(),
             version_uid: uid.map(str::to_owned),
@@ -851,9 +884,10 @@ impl<'a> Book<'a> {
             // 子项挂到父项下面。**搜索时不挂** —— 命中的可能只有子项，
             // 把它塞进一个没命中的父项里会让人以为父项也命中了
             let parent_here = !searching
-                && row.parent_key.as_deref().is_some_and(|p| {
-                    g.items.last().map(|i| i.row.key.as_str()) == Some(p)
-                });
+                && row
+                    .parent_key
+                    .as_deref()
+                    .is_some_and(|p| g.items.last().map(|i| i.row.key.as_str()) == Some(p));
             if parent_here {
                 g.items.last_mut().expect("上面刚判过").children.push(row);
             } else {
@@ -1021,9 +1055,7 @@ fn roll_up(states: impl Iterator<Item = BuildState>) -> BuildState {
 /// 整本产物状态。**「暂无资源」的版本不参与** —— 它们本来就不该有产物，
 /// 把它们算进去会让整本永远是「未生成」
 fn artifact_state(states: impl Iterator<Item = BuildState>) -> ArtifactState {
-    let all: Vec<BuildState> = states
-        .filter(|s| *s != BuildState::NoResources)
-        .collect();
+    let all: Vec<BuildState> = states.filter(|s| *s != BuildState::NoResources).collect();
     if all.is_empty() || all.iter().all(|s| *s == BuildState::NeverBuilt) {
         return ArtifactState::Missing;
     }
@@ -1459,13 +1491,19 @@ mod tests {
         let b = Book::new(&up, &presets, &c, &d);
 
         let l = b.machine_layers("A1").unwrap();
-        assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(33));
+        assert_eq!(
+            *l.effective("wiping.child").unwrap().value,
+            serde_json::json!(33)
+        );
         assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Machine);
 
         // 两个版本自己都没写过这一项，继承的是基底
         for uid in ["A1/STANDARD", "A1/FAST"] {
             let l = b.version_layers(uid).unwrap();
-            assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(33));
+            assert_eq!(
+                *l.effective("wiping.child").unwrap().value,
+                serde_json::json!(33)
+            );
             assert_eq!(
                 l.effective("wiping.child").unwrap().origin,
                 Origin::Machine,
@@ -1476,7 +1514,10 @@ mod tests {
         let view = b.book_view();
         let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
         assert_eq!(a1.items, 1, "机型层数出来的就是这一项");
-        assert_eq!(view.badges.base_items, 2, "A1 这一项，加上 P1S 上提的那一项");
+        assert_eq!(
+            view.badges.base_items, 2,
+            "A1 这一项，加上 P1S 上提的那一项"
+        );
     }
 
     /// **A2L：参数侧与资源侧是两件事**（doc §11）。
@@ -1703,8 +1744,14 @@ mod tests {
 
         let b = Book::new(&up, &presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
-        assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(99));
-        assert!(l.has_own(Level::Version, "wiping.child"), "这一层自己钉着它");
+        assert_eq!(
+            *l.effective("wiping.child").unwrap().value,
+            serde_json::json!(99)
+        );
+        assert!(
+            l.has_own(Level::Version, "wiping.child"),
+            "这一层自己钉着它"
+        );
 
         apply(
             &mut d,
@@ -1723,9 +1770,15 @@ mod tests {
         // （有落差时它只退一层，见 `domain::layer` 的 detaching_falls_back_one_level_at_a_time）
         let b = Book::new(&up, &presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
-        assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(20));
+        assert_eq!(
+            *l.effective("wiping.child").unwrap().value,
+            serde_json::json!(20)
+        );
         assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
-        assert!(!l.has_own(Level::Version, "wiping.child"), "自有那一项该没了");
+        assert!(
+            !l.has_own(Level::Version, "wiping.child"),
+            "自有那一项该没了"
+        );
     }
 
     /* ---------- 矩阵 ---------- */
@@ -1790,7 +1843,11 @@ mod tests {
         );
 
         // 而 A1 那一列上它是「不适用」，不是空白
-        let row = m.rows.iter().find(|r| r.key == "toolhead.only_p1s").unwrap();
+        let row = m
+            .rows
+            .iter()
+            .find(|r| r.key == "toolhead.only_p1s")
+            .unwrap();
         let a1_cell = &row.cells[0];
         assert_eq!(a1_cell.kind, CellKind::NotApplicable);
         assert_eq!(a1_cell.text, w::NOT_APPLICABLE);
@@ -1981,7 +2038,11 @@ mod tests {
         }
 
         let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
-        let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
+        let mode = wipe
+            .items
+            .iter()
+            .find(|i| i.row.key == "wiping.mode")
+            .unwrap();
         assert_eq!(mode.children.len(), 1);
         assert_eq!(mode.children[0].key, "wiping.child");
         assert!(
@@ -2041,7 +2102,11 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
         let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
-        let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
+        let mode = wipe
+            .items
+            .iter()
+            .find(|i| i.row.key == "wiping.mode")
+            .unwrap();
 
         let note = mode.off_note.as_deref().expect("关掉了就要说一句");
         assert!(note.contains("擦拭部件"), "要点名是谁关的：{note}");
@@ -2049,8 +2114,12 @@ mod tests {
         assert!(note.contains('1'), "要说关掉了几项：{note}");
 
         // 没关的时候不给这一句，否则界面上多一条空话
-        let open =
-            Book::new(&f.up, &f.presets, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
+        let open = Book::new(&f.up, &f.presets, &c, &Draft::default()).desk(
+            "A1",
+            Some("A1/STANDARD"),
+            None,
+            "",
+        );
         let mode2 = open
             .groups
             .iter()
@@ -2144,7 +2213,10 @@ mod tests {
         let one = cols(&[("A1", None)]);
 
         let only_wiping = b.matrix(&one, Some("wiping"), "");
-        assert!(only_wiping.rows.iter().all(|r| r.key.starts_with("wiping.")));
+        assert!(only_wiping
+            .rows
+            .iter()
+            .all(|r| r.key.starts_with("wiping.")));
         assert!(only_wiping.note.is_none());
 
         // 搜一个只在 offset 分类里的词，但分类过滤停在 wiping

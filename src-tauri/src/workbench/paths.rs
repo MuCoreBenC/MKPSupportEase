@@ -35,7 +35,6 @@ const UPSTREAM_DIR: &str = "mkpse-presets";
 /// 校验的其实是"配方有没有超出我以为客户端支持的范围"（doc §12），不是真兼容性。
 pub const WORKBENCH_DIRS: [&str; 5] = ["machines", "bbs", ".draft", ".trash", ".snapshots"];
 
-
 /// 仓库根。见本模块文档的两级回退
 pub fn repo_root() -> PathBuf {
     if let Some(dir) = std::env::var_os("MKPSE_REPO_DIR") {
@@ -155,7 +154,6 @@ pub fn resolve_upstream(rel: &str) -> Result<PathBuf, AppError> {
     resolve_in(&root, rel)
 }
 
-
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
     for sub in subs {
         let dir = root.join(sub);
@@ -240,7 +238,6 @@ mod tests {
             }
         }
     }
-
 
     fn walk_files(dir: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();

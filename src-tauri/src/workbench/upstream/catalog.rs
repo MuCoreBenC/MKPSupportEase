@@ -354,11 +354,11 @@ impl Catalog {
         for m in &self.machines {
             for a in &m.external_aliases {
                 if let Some(prev) = owner.insert(a.as_str(), m.id.as_str()) {
-                    return Err(
-                        AppError::corrupted(format!("别名 {a} 被两台机型同时认领")).with_detail(
-                            format!("{prev} 与 {} —— 客户端传这个别名过来会匹配到运气", m.id),
-                        ),
-                    );
+                    return Err(AppError::corrupted(format!("别名 {a} 被两台机型同时认领"))
+                        .with_detail(format!(
+                            "{prev} 与 {} —— 客户端传这个别名过来会匹配到运气",
+                            m.id
+                        )));
                 }
             }
             // 别名也不能和别人的正名撞
@@ -378,23 +378,27 @@ impl Catalog {
                 .get(&m.id)
                 .is_some_and(|x| x.has_dimensions());
             if in_manifest != m.dimensions.is_some() {
-                return Err(AppError::corrupted(format!("{} 的尺寸两份对不上", m.id))
-                    .with_detail(format!(
-                    "machine_catalog {}，manifest {} —— 客户端读 manifest 那一份",
-                    if m.dimensions.is_some() { "有" } else { "没有" },
-                    if in_manifest { "有" } else { "没有" }
-                )));
+                return Err(
+                    AppError::corrupted(format!("{} 的尺寸两份对不上", m.id)).with_detail(format!(
+                        "machine_catalog {}，manifest {} —— 客户端读 manifest 那一份",
+                        if m.dimensions.is_some() {
+                            "有"
+                        } else {
+                            "没有"
+                        },
+                        if in_manifest { "有" } else { "没有" }
+                    )),
+                );
             }
         }
 
         // ⑤ 有禁区就必须有尺寸 —— 禁区是床面坐标，没有床面画不出来
         for m in &self.machines {
             if !m.forbidden_zones.is_empty() && m.dimensions.is_none() {
-                return Err(AppError::corrupted(format!(
-                    "{} 登记了禁区却没有床身尺寸",
-                    m.id
-                ))
-                .with_detail("禁区是床面坐标，没有床面就画不出来，也判不了越界"));
+                return Err(
+                    AppError::corrupted(format!("{} 登记了禁区却没有床身尺寸", m.id))
+                        .with_detail("禁区是床面坐标，没有床面就画不出来，也判不了越界"),
+                );
             }
         }
 
@@ -543,7 +547,10 @@ mod tests {
         assert!(a2l.dimensions.is_none(), "上游没登记它的尺寸");
         assert!(a2l.forbidden_zones.is_empty());
         assert_eq!(a2l.default_bundle, None);
-        assert!(!a2l.has_any_product(), "还没有产物 —— 资源那面写「暂无资源」");
+        assert!(
+            !a2l.has_any_product(),
+            "还没有产物 —— 资源那面写「暂无资源」"
+        );
         assert_eq!(a2l.version("STANDARD").unwrap().machine_key, "A2L:STANDARD");
         assert!(c.machine("A1").unwrap().has_any_product(), "A1 有产物");
     }
@@ -586,7 +593,11 @@ mod tests {
         ]);
         let (_d, r) = load(cat, manifest_json());
         let e = r.unwrap_err();
-        assert!(e.detail.unwrap_or_default().contains("A2L"), "{}", e.message);
+        assert!(
+            e.detail.unwrap_or_default().contains("A2L"),
+            "{}",
+            e.message
+        );
     }
 
     /// 机型清单里有、资源清单里没有 —— 那台机型对客户等于不存在
@@ -696,17 +707,27 @@ mod tests {
         // models[] 与 versions[] 的字段：重叠的那些刻意从 manifest 取（见模块文档），
         // 所以这里把"知道但不从这里读"也列出来，而不是假装它们不存在
         let model_known: BTreeSet<&str> = [
-            "id", "externalAliases", "versions",
+            "id",
+            "externalAliases",
+            "versions",
             // 下面这些从 manifest.machines 取：那边才有 machineKey 与 mkpPresetAssetId，
             // 同一台机型的显示名不该有两个来源
-            "name", "display", "defaultBundle", "image", "icon",
+            "name",
+            "display",
+            "defaultBundle",
+            "image",
+            "icon",
         ]
         .into_iter()
         .collect();
         let version_known: BTreeSet<&str> = [
             "id",
             // 同上；presetFile 是文件名，manifest 那边给的是稳定 asset id
-            "name", "presetFile", "recommendedBundle", "tag", "description",
+            "name",
+            "presetFile",
+            "recommendedBundle",
+            "tag",
+            "description",
         ]
         .into_iter()
         .collect();

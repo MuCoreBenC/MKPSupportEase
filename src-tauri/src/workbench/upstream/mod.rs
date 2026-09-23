@@ -106,7 +106,10 @@ mod tests {
     /// 判据落在**源码文本**上而不是类型上：Rust 没法表达"这个模块不许调用某个函数"。
     #[test]
     fn upstream_layer_has_no_write_path() {
-        let dir = std::path::Path::new(file!()).parent().unwrap().to_path_buf();
+        let dir = std::path::Path::new(file!())
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let mut scanned = 0usize;
         for e in std::fs::read_dir(&dir).expect("读不出上游层目录").flatten() {
             let p = e.path();

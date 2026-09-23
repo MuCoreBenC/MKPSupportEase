@@ -35,7 +35,6 @@ pub mod presets;
 pub mod store;
 pub mod upstream;
 
-
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -64,8 +63,8 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
             .map_err(|e| AppError::internal("建不出工作台窗口").with_detail(e.to_string()))?;
 
     /* 草稿在内存里，磁盘上只有崩溃快照。落盘三个时机里的两个挂在窗口事件上：
-       失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。
-       第三个是「空闲 2 秒」，由下面那个计时器管。 */
+    失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。
+    第三个是「空闲 2 秒」，由下面那个计时器管。 */
     win.on_window_event(|e| match e {
         tauri::WindowEvent::Focused(false) | tauri::WindowEvent::CloseRequested { .. } => {
             app::flush_now();
