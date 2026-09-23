@@ -1,9 +1,0 @@
-{
-  "id": "standard",
-  "displayName": "标准版",
-  "machineId": "A1",
-  "overrides": {},
-  "bbs": {
-    "mode": "inherit"
-  }
-}

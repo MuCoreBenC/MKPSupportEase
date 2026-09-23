@@ -11,7 +11,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 
-import '../styles/tokens.css'
+import './tokens.css'
 import './workbench.css'
 import { WorkbenchApp } from './App'
 

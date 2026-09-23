@@ -25,16 +25,16 @@ const WORKBENCH_DIR: &str = "workbench";
 /// 发布目录名（仓库根下）。刻意不叫 `dist` —— 那个名字被 vite 的前端产物占着，
 /// 两者混在一起会让"清一下产物"这种操作顺手删掉交付资源。
 const DIST_DIR: &str = "dist-presets";
+/// 上游预设仓库的目录名
+const UPSTREAM_DIR: &str = "mkpse-presets";
 
-/// 开发源数据根下首次启动就建齐的子目录
-const WORKBENCH_DIRS: [&str; 6] = [
-    "machines",
-    "bbs",
-    "capability",
-    ".draft",
-    ".trash",
-    ".snapshots",
-];
+/// 开发源数据根下首次启动就建齐的子目录。**这份清单是唯一的** ——
+/// `store::bootstrap` 引用它而不是再抄一遍（两处写死同一份清单迟早漂移）。
+///
+/// `capability` 已随第三版去掉 —— 第二版那份能力定义是我自己按 registry 手写的，
+/// 校验的其实是"配方有没有超出我以为客户端支持的范围"（doc §12），不是真兼容性。
+pub const WORKBENCH_DIRS: [&str; 5] = ["machines", "bbs", ".draft", ".trash", ".snapshots"];
+
 
 /// 仓库根。见本模块文档的两级回退
 pub fn repo_root() -> PathBuf {
@@ -73,6 +73,72 @@ pub fn resolve(rel: &str) -> Result<PathBuf, AppError> {
 pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
     resolve_in(&dist_root()?, rel)
 }
+
+/* ---------- 上游预设仓库（只读） ---------- */
+
+/// 上游 `mkpse-presets`，**只读**。
+///
+/// 三级定位，第一个命中的就用：
+/// 1. `MKPSE_PRESETS_DIR` 环境变量 —— 仓库不在默认位置时的口子
+/// 2. `<repo>/../mkpse-next-v3/mkpse-presets` —— 当前工作区的实际布局
+/// 3. `<repo>/../mkpse-presets` —— 上游那边解除 submodule 后的推荐布局
+///
+/// **返回 `None` 是一个有意义的状态，不是错误值**：这时工作台不该启动业务，而该显示
+/// "找不到 mkpse-presets，试过哪几个位置"（doc §15 第一条）。用空数据装成能跑，
+/// 会让人以为上游是空的 —— 那和"读不出来"是两件完全不同的事。
+///
+/// 判据是**标志文件**而不是 `is_dir()`：只看目录存在的话，一个同名空目录就能骗过定位，
+/// 而真正的失败会推迟到第一次读 `param_registry.json` 才暴露（报错指向受害者而非真因）。
+pub fn upstream_root() -> Option<PathBuf> {
+    fn marked(p: PathBuf) -> Option<PathBuf> {
+        if p.join("content").join("param_registry.json").is_file() {
+            Some(p)
+        } else {
+            None
+        }
+    }
+
+    if let Some(dir) = std::env::var_os("MKPSE_PRESETS_DIR") {
+        // 显式指定的路径不做兜底：指错了要当场看见，不能悄悄退回猜的那两个
+        return marked(PathBuf::from(dir));
+    }
+
+    let parent = repo_root().parent().map(Path::to_path_buf)?;
+    marked(parent.join("mkpse-next-v3").join(UPSTREAM_DIR))
+        .or_else(|| marked(parent.join(UPSTREAM_DIR)))
+}
+
+/// 定位失败时给人看的候选路径。错误信息里要写出**试过哪里** ——
+/// 只说"找不到"没法据以行动
+pub fn upstream_candidates() -> Vec<String> {
+    if let Some(dir) = std::env::var_os("MKPSE_PRESETS_DIR") {
+        return vec![format!(
+            "MKPSE_PRESETS_DIR={}",
+            PathBuf::from(dir).display()
+        )];
+    }
+    match repo_root().parent() {
+        Some(parent) => vec![
+            parent
+                .join("mkpse-next-v3")
+                .join(UPSTREAM_DIR)
+                .display()
+                .to_string(),
+            parent.join(UPSTREAM_DIR).display().to_string(),
+        ],
+        None => Vec::new(),
+    }
+}
+
+/// 解析上游仓库内的相对路径。**只读用**，越界一律 `PERMISSION_DENIED`
+pub fn resolve_upstream(rel: &str) -> Result<PathBuf, AppError> {
+    let root = upstream_root().ok_or_else(|| {
+        AppError::not_found("找不到上游预设仓库 mkpse-presets")
+            .with_detail(format!("试过：{}", upstream_candidates().join("；")))
+    })?;
+    resolve_in(&root, rel)
+}
+
 
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
     for sub in subs {
@@ -117,6 +183,48 @@ mod tests {
         let e = resolve_in(d.path(), "../outside.json").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::PermissionDenied);
     }
+
+    /// 上游定位要么给出一个**真带标志文件**的目录，要么给 `None`。
+    ///
+    /// 刻意**不断言**"一定找得到" —— 那会把测试绑在这台机器的工作区布局上，
+    /// 换台机器或在 CI 上就变成一条与代码无关的红。这里断言的是**不变式**：
+    /// 返回 Some 时那个目录必须真的能读到 `param_registry.json`。
+    #[test]
+    fn upstream_root_is_either_marked_or_none() {
+        if let Some(p) = upstream_root() {
+            assert!(
+                p.join("content").join("param_registry.json").is_file(),
+                "定位到了 {} 但里面没有 content/param_registry.json",
+                p.display()
+            );
+        }
+    }
+
+    /// 定位失败时必须说得出试过哪里 —— 空清单等于只说"找不到"
+    #[test]
+    fn upstream_candidates_are_actionable() {
+        let c = upstream_candidates();
+        assert!(!c.is_empty(), "候选路径清单是空的，错误信息将无法据以行动");
+        assert!(
+            c.iter().all(|s| !s.trim().is_empty()),
+            "候选里有空串：{c:?}"
+        );
+    }
+
+    /// 找不到上游时，`resolve_upstream` 必须是 `NOT_FOUND` 且 detail 里带候选路径；
+    /// 找得到时则要能解析出仓库内的路径。两种环境下这条都成立
+    #[test]
+    fn resolve_upstream_reports_where_it_looked() {
+        match resolve_upstream("content/param_registry.json") {
+            Ok(p) => assert!(p.is_file(), "解析出来的路径不是文件：{}", p.display()),
+            Err(e) => {
+                assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+                let detail = e.detail.unwrap_or_default();
+                assert!(detail.contains("试过"), "错误里没写试过哪里：{detail}");
+            }
+        }
+    }
+
 
     fn walk_files(dir: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();

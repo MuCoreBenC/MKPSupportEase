@@ -1,347 +1,512 @@
-/*
- * 工作台样式。
+/**
+ * 工作台外壳的布局（doc §7）。
  *
- * 刻意与客户端的 App.module.css 分开：客户端要好看（玻璃、渐变、动效），
- * 工作台要**信息密度**（一屏看到尽量多的字段与状态）。把两套诉求塞进一套样式，
- * 结果是两边都别扭。
+ * 第二版那份占位样式（`.wb-shell` / `.wb-topbar` / `.wb-table`…）整份换掉了：
+ * 那是给一个只有一张表的占位页写的，而这一版是三条结构带 + 两栏 + 页签。
  *
- * 色值取 src/styles/tokens.css 的变量 —— 那是设计系统层，两个窗口共用是对的；
- * 布局与密度是业务层，各写各的。每处 var() 都带回退值：工作台不该因为某个 token
- * 改了名就变成白底黑字。
+ * 色值全部走 `tokens.css` 的 `[data-wb]` 变量 —— 那一份是设计系统层，
+ * 值照参考实现抄（同一个产品群，重新调一套只会让两个窗口像两个软件）。
+ *
+ * # 滚动容器只在最内层
+ *
+ * 外层一律 `min-height: 0` 且不滚，只有树的列表与视角内容自己滚。
+ * 不这么做会出现「整页滚 + 内层再滚」两层滚动条，用户滚一下不知道滚的是哪个。
+ *
+ * # 浮层用 absolute，根节点是包含块
+ *
+ * `.wb` 上 `position: relative`，浮层一律 absolute 不用 fixed ——
+ * 以后这套界面可能被放进一个带 `transform` 的预览外壳里，那时 fixed 会量错坐标。
+ *
+ * # mini 档：只改布局，不藏操作
+ *
+ * `[data-density='mini']` 下左右两栏改上下堆叠、侧栏限高自己滚、维护四项横排。
+ * **一个可用操作都不许 `display: none`** —— 藏了之后用户在小窗口里永远做不了那件事，
+ * 而他看不出来是被藏了还是没这个功能。能省的只有说明文字。
  */
 
-.wb-shell {
+/* 兜底：外壳还没挂上（比如报错早退）时也别裸着 */
+body {
+  margin: 0;
+  background: #f8fafc;
+}
+
+.wb {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 13px;
-  color: var(--text-1, #1c1c1e);
-  background: var(--bg-1, #f5f5f7);
-}
-
-/* ---------- 顶栏 ---------- */
-
-.wb-topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 0 0 auto;
-  height: 38px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
-  background: var(--bg-2, #fff);
-}
-
-.wb-brand {
-  font-weight: 600;
-}
-
-/* 这句提示常驻：工作台与客户端长得越像，越需要一眼能分清现在在哪一个窗口里 */
-.wb-hint {
-  color: var(--text-3, #8a8a8e);
-  font-size: 12px;
-}
-
-.wb-hint--ok {
-  color: #1a7f37;
-}
-
-.wb-hint--bad {
-  color: #b3261e;
-}
-
-/* 数据根常驻显示：出问题时第一句要问的就是"它在读哪个目录" */
-.wb-paths {
-  margin-left: auto;
   overflow: hidden;
-  color: var(--text-3, #8a8a8e);
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  font-size: 11px;
+  background: var(--w-page);
+  color: var(--w-t1);
+  font-size: var(--w-fs-md);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.wb-mono {
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-base);
+}
+
+/* ---------- 结构带 1：状态条 ---------- */
+
+.wb-strip {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 24px;
+  align-items: center;
+  height: var(--w-strip-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+  font-size: var(--w-fs-sm);
+}
+
+.wb-strip--loading {
+  color: var(--w-t3);
+}
+
+.wb-strip__cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.wb-strip__key {
+  color: var(--w-t-off);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.wb-strip__path {
+  overflow: hidden;
+  color: var(--w-t3);
+  font-family: var(--w-mono);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* ---------- 横幅 ---------- */
+.wb-strip__state {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  color: var(--w-t2);
+}
+
+/* 状态点：绿 = 就位，橙 = 要留意（**不是错误**），灰 = 没有 */
+.wb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-t-off);
+}
+
+.wb-dot[data-state="ok"] {
+  background: var(--w-ok);
+}
+
+.wb-dot[data-state="warn"] {
+  background: var(--w-warn);
+}
+
+/* ---------- 结构带 2：文件头 ---------- */
+
+.wb-head {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  height: var(--w-head-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.wb-head__id {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.wb-head__title {
+  font-size: var(--w-fs-lg);
+  font-weight: 600;
+}
+
+.wb-head__sub {
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-head__badges {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-head__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.wb-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-tag);
+  background: var(--w-card-inner);
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+  white-space: nowrap;
+}
+
+.wb-badge__own {
+  color: var(--w-t-off);
+  font-style: normal;
+}
+
+.wb-badge--mini {
+  margin-left: 4px;
+  padding: 0 4px;
+}
+
+.wb-btn {
+  height: var(--w-btn-md);
+  padding: var(--w-p-btn-md);
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn);
+  background: var(--w-card);
+  color: var(--w-t1);
+  font-size: var(--w-fs-base);
+  cursor: pointer;
+}
+
+.wb-btn:hover:not(:disabled) {
+  border-color: var(--w-primary);
+}
+
+.wb-btn:disabled {
+  color: var(--w-t-off);
+
+  /* **不用 cursor: not-allowed**：那在部分浏览器上会挡掉 title，
+     而禁用的按钮恰恰是最需要看到 title 的地方（它得说出为什么不能点） */
+  cursor: default;
+}
+
+.wb-btn[data-tone="primary"]:not(:disabled) {
+  border-color: var(--w-primary);
+  background: var(--w-primary);
+  color: #fff;
+}
+
+.wb-btn[data-tone="danger"]:not(:disabled) {
+  border-color: var(--w-danger);
+  color: var(--w-danger);
+}
+
+.wb-link {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--w-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------- 提示条 ---------- */
 
 .wb-banner {
   flex: 0 0 auto;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
-  background: #eef3fb;
-  line-height: 1.5;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  line-height: 1.6;
 }
 
-/* 橙/黄 = "值变了 / 要留意"，**不是错误**。doc §6 明确要求不用红色表达这个意思 */
-.wb-banner--warn {
-  background: #fff6e5;
+.wb-banner[data-tone="warn"] {
+  border-left: 3px solid var(--w-warn);
 }
 
-.wb-banner--bad {
-  background: #fdecea;
+.wb-banner[data-tone="danger"] {
+  border-left: 3px solid var(--w-danger);
+  color: var(--w-danger);
 }
 
-/* ---------- 主区 ---------- */
+/* ---------- 两栏 ---------- */
+
+.wb-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: var(--w-sidebar);
+  min-height: 0;
+  border-right: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.wb-side__head {
+  flex: 0 0 auto;
+  padding: 8px 12px 4px;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* 两个滚动容器之一 */
+.wb-side__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+.wb-side__maintain {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 0 6px 8px;
+}
+
+.wb-mitem {
+  height: var(--w-h-sm);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--w-r-input);
+  background: none;
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-mitem[data-on="yes"] {
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+}
+
+/* ---------- 树的行 ---------- */
+
+.wb-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: var(--w-h-sm);
+  padding: 0 8px;
+  font-size: var(--w-fs-base);
+}
+
+.wb-row[data-kind="version"] {
+  padding-left: 18px;
+}
+
+/* 主选中用底色；勾选用 checkbox 自己 —— 两套选中不能共用一种视觉 */
+.wb-row[data-focus="yes"] {
+  background: var(--w-primary-soft);
+}
+
+.wb-row__twist {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+}
+
+.wb-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  text-align: left;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* 新建未保存：一个小圆点，不占字宽 */
+.wb-row__new {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--w-primary);
+}
+
+.wb-row__count {
+  flex: 0 0 auto;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-tag {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-tag);
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+  white-space: nowrap;
+}
+
+/* 「暂无资源」用灰不用红：它不是错误，是还没写配方 */
+.wb-tag[data-state="off"] {
+  border-color: var(--w-src-factory-line);
+  background: var(--w-src-factory-bg);
+  color: var(--w-src-factory-t);
+}
+
+.wb-tag[data-state="ok"] {
+  border-color: rgb(16 185 129 / 25%);
+  background: rgb(16 185 129 / 10%);
+  color: var(--w-ok);
+}
+
+.wb-tag[data-state="warn"] {
+  border-color: rgb(217 119 6 / 25%);
+  background: rgb(217 119 6 / 10%);
+  color: var(--w-warn);
+}
+
+/* ---------- 右栏 ---------- */
 
 .wb-main {
   display: flex;
   flex: 1 1 auto;
-  min-height: 0;
-}
-
-.wb-tree {
-  flex: 0 0 220px;
-  overflow: auto;
-  padding: 8px;
-  border-right: 1px solid var(--line-1, rgb(0 0 0 / 10%));
-  background: var(--bg-2, #fff);
-}
-
-.wb-tree-group {
-  margin-bottom: 10px;
-}
-
-.wb-tree-machine {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  color: var(--text-2, #5a5a5e);
-  font-weight: 600;
-}
-
-.wb-tree-empty {
-  padding: 2px 6px 2px 18px;
-  color: var(--text-3, #8a8a8e);
-  font-size: 12px;
-}
-
-.wb-tree-item {
-  display: block;
-  width: 100%;
-  padding: 4px 6px 4px 18px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.wb-tree-item:hover {
-  background: rgb(0 0 0 / 5%);
-}
-
-.wb-tree-item--on {
-  background: #dbe7ff;
-}
-
-.wb-work {
-  display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .wb-tabs {
   display: flex;
-  gap: 2px;
   flex: 0 0 auto;
-  padding: 6px 10px 0;
-  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 10%));
-  background: var(--bg-2, #fff);
+  gap: 2px;
+  padding: 8px 16px 0;
 }
 
 .wb-tab {
-  padding: 6px 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
+  height: var(--w-h-md);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--w-r-card) var(--w-r-card) 0 0;
   background: none;
-  color: var(--text-2, #5a5a5e);
-  font: inherit;
+  color: var(--w-t2);
+  font-size: var(--w-fs-md);
   cursor: pointer;
 }
 
-.wb-tab--on {
-  border-bottom-color: #2f6fed;
-  color: var(--text-1, #1c1c1e);
-  font-weight: 600;
+.wb-tab[data-on="yes"] {
+  border-color: var(--w-line);
+  background: var(--w-card);
+  color: var(--w-t1);
 }
 
-.wb-page {
+.wb-pane {
+  /* 负 1px 让它和选中的页签咬合 */
   flex: 1 1 auto;
   min-height: 0;
+  margin: -1px 16px 16px;
   overflow: auto;
-  padding: 14px;
+  padding: var(--w-p-card-lg);
+  border: 1px solid var(--w-line);
+  border-radius: 0 var(--w-r-card) var(--w-r-card);
+  background: var(--w-card);
 }
 
-.wb-placeholder {
+.wb-todo {
   margin: 0;
-  color: var(--text-2, #5a5a5e);
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+  line-height: 1.8;
 }
 
-/* ---------- 布局小件 ---------- */
+/* ---------- 结构带 3：底部条 ---------- */
 
-.wb-stack {
+.wb-foot {
   display: flex;
-  flex-direction: column;
+  flex: 0 0 auto;
   gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--w-foot-h);
+  padding: 0 12px;
+  border-top: 1px solid var(--w-line);
+  background: var(--w-card);
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
 }
 
-.wb-row {
+.wb-foot__right {
   display: flex;
+  gap: 12px;
   align-items: center;
-  gap: 10px;
+}
+
+.wb-foot__save {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* ---------- mini 档：改布局，不藏操作 ---------- */
+
+[data-density="mini"] .wb-body {
+  flex-direction: column;
+}
+
+[data-density="mini"] .wb-side {
+  /* 限高 45% 自己滚。参考实现记过实测：竖排的维护四项占 154px，
+     而 400×560 下侧栏只有 195px —— 减掉树头之后列表只剩 8px，
+     六台机型十个版本全被裁在滚动区外 */
+  width: auto;
+  max-height: 45%;
+  border-right: 0;
+  border-bottom: 1px solid var(--w-line);
+}
+
+[data-density="mini"] .wb-side__maintain {
+  flex-direction: row;
   flex-wrap: wrap;
-}
-
-.wb-field-inline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.wb-radio {
-  display: flex;
-  align-items: center;
   gap: 4px;
 }
 
-/* 保存/放弃常驻在底部：字段表很长，滚到哪都要能提交 */
-.wb-sticky-actions {
-  position: sticky;
-  bottom: 0;
-  padding: 10px 0;
-  border-top: 1px solid var(--line-1, rgb(0 0 0 / 10%));
-  background: var(--bg-1, #f5f5f7);
+[data-density="mini"] .wb-strip {
+  flex-wrap: wrap;
+  gap: 12px;
+  height: auto;
+  padding: 4px 8px;
 }
 
-.wb-section-title {
-  margin: 0 0 6px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-3, #8a8a8e);
+/* 说明文字可以省，操作不行 */
+[data-density="mini"] .wb-head__sub,
+[data-density="mini"] .wb-foot__counts {
+  display: none;
 }
 
-/* ---------- 控件 ---------- */
-
-.wb-input,
-.wb-textarea {
-  padding: 4px 7px;
-  border: 1px solid var(--line-2, rgb(0 0 0 / 18%));
-  border-radius: 5px;
-  background: var(--bg-2, #fff);
-  color: inherit;
-  font: inherit;
-}
-
-.wb-input--num {
-  width: 110px;
-}
-
-.wb-textarea {
-  width: 100%;
-  min-width: 320px;
-  resize: vertical;
-}
-
-.wb-btn {
-  padding: 5px 12px;
-  border: 1px solid var(--line-2, rgb(0 0 0 / 18%));
-  border-radius: 5px;
-  background: var(--bg-2, #fff);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.wb-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.wb-btn--primary {
-  border-color: #2f6fed;
-  background: #2f6fed;
-  color: #fff;
-}
-
-.wb-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #2f6fed;
-  font: inherit;
-  cursor: pointer;
-}
-
-/* ---------- 表格 ---------- */
-
-.wb-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.wb-table th,
-.wb-table td {
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--line-1, rgb(0 0 0 / 8%));
-  text-align: left;
-  vertical-align: top;
-}
-
-.wb-table th {
-  color: var(--text-3, #8a8a8e);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-/* 该机型不适用的行：压暗但**不隐藏** —— 值还在文件里，藏起来只会让人以为丢了 */
-.wb-row--na {
-  opacity: 0.5;
-}
-
-/* 换机型预览里"值变了"的行。橙色，不是红色 —— 值变化不是错误 */
-.wb-row--warn {
-  background: #fff9ee;
-}
-
-.wb-mono {
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  font-size: 11px;
-}
-
-/* 矩阵可能很宽（一列一个版本），横向滚动而不是压缩列宽 */
-.wb-scroll-x {
-  overflow-x: auto;
-}
-
-/* ---------- 标签 ---------- */
-
-.wb-tag {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 9px;
-  background: rgb(0 0 0 / 6%);
-  color: var(--text-2, #5a5a5e);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.wb-tag--own {
-  background: #dbe7ff;
-  color: #1e4fb5;
-}
-
-/* 同上：橙色表示"要留意"，不表示错 */
-.wb-tag--warn {
-  background: #ffe9c2;
-  color: #8a5300;
-}
-
-.wb-tag--na {
-  background: rgb(0 0 0 / 4%);
-  color: var(--text-3, #8a8a8e);
+[data-density="mini"] .wb-pane {
+  margin: -1px 8px 8px;
+  padding: var(--w-p-card-sm);
 }
