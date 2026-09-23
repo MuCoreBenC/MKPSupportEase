@@ -1,0 +1,7 @@
+{
+  "bytes": 570391,
+  "compute_delta": true,
+  "sha256": "93b9fb839f26e015aead4f7773fc117064c3be12d51e8142a08fc9d9a17ed247",
+  "source": "processor/testdata/42274.2.pass2.expected.gcode",
+  "startup_overhead_seconds": 240
+}

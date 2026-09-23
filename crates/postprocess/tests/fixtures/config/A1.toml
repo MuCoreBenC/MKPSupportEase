@@ -1,0 +1,179 @@
+# mkp-pp 配置文件（由 `mkp-pp init` 生成）
+# 结构与内核的 IR 完全一致：改这里就是改 IR，没有中间映射层。
+# 缺任何一个键都会报错（刻意的：拼错键名不会被静默忽略）。
+# 想看这份配置经过默认值兜底与机型表填充之后的真实取值：`mkp-pp dump-ir -c 本文件`
+SchemaVersion = 1
+WarningDiagnostics = []
+Warnings = []
+
+[Disk]
+StaggerAngle = 5.0
+StaggerMaxAngle = 45.0
+StaggerMode = "off"
+SwingMode = "spiral"
+
+[Filament]
+Slicer = "BambuStudio"
+Type = "PETG"
+
+[GCode]
+CustomGcodeEOwnership = true
+MKPExtrude = 5.5
+MKPRetract = -5.0
+RefillExtrudeCommand = "G1 E5.5 F1000"
+WaitForDryingCommand = ""
+
+[Glue]
+InterModelLiftHeight = 2.0
+PassCount = 1
+SparseRatio = 50.0
+ZCompEnabled = false
+ZCompMode = "bed"
+ZLiftHeight = 5.0
+ZLiftHeightFirstLayers = 6.0
+ZOffset = -0.05
+
+[Glue.ZCompBed]
+BackLeft = 0.0
+BackRight = 0.0
+FrontLeft = 0.0
+FrontRight = 0.0
+
+[Glue.ZCompPatch]
+BackLeft = 0.0
+BackRight = 0.0
+FrontLeft = 0.0
+FrontRight = 0.0
+
+[Ironing]
+CoverageThreshold = 10.0
+ESumThreshold = 7.9
+ExtrudeRatio = 0.0
+Mode = "off"
+SuppressExpand = 0.0
+SuppressExpandMode = "bbox"
+UsePath = true
+
+# 除 MachineType 外，多数字段会被内置机型表覆盖（运动范围 / 涂胶区 / 禁区），
+# 在这里改了不生效。层高 / 喷嘴 / 速度这几个是零值兜底：填 0 就用默认值。
+[Machine]
+FirstLayerHeight = 0.0
+FirstLayerSpeed = 0.0
+ForbiddenZones = []
+GcodeMachineType = ""
+GlueMaxX = 0.0
+GlueMaxY = 0.0
+GlueMinX = 0.0
+GlueMinY = 0.0
+MachineType = "A1"
+MaxX = 0.0
+MaxY = 0.0
+MinSupportInterfaceEnabled = true
+MinX = 0.0
+MinY = 0.0
+NozzleDiameter = 0.0
+RetractLength = 0.0
+SupportInterfaceSpeed = 0.0
+TravelSpeed = 0.0
+TreeSupport = false
+TypicalLayerHeight = 0.0
+WallPrintSpeed = 0.0
+
+# 展示用元信息，对处理结果无影响；全空即可。
+[Meta]
+CurrentSelectedPreset = "X1"
+Mail = ""
+NewPresetName = ""
+PresetName = ""
+TempXOffsetCalibr = 0.0
+TempYOffsetCalibr = 0.0
+TempZOffsetCalibr = 0.0
+UpdateDate = ""
+
+[Prime]
+Enabled = true
+EveryLayer = false
+Length = 100.0
+MinPathLength = 5.0
+PerModel = false
+TriggerLayers = 30
+
+[Rib]
+BottomFillStyle = "grid"
+ExtraLength = 0.0
+FilletWall = true
+Width = 8.0
+
+[Safety]
+AllowProceed = false
+CalibrationExecutionMode = "print_then_calibrate"
+Disable3rdLayerClogDetect = true
+DisableFrontCoverAlarm = false
+DisableTimelapse = true
+IsCalibrationMode = false
+L803LeakPrevent = false
+UnsafeClose = true
+XYCalibration = "new"
+ZCalibration = "new"
+
+[Sheath]
+BaseExpand = 5.0
+ConvergeLayers = 50
+EnableHeight = 70.0
+WallWidth = 0.8
+
+# 运行态，不是配置。pass1 写、pass2 读 —— 手改这里没有意义，可能让结果不可解释。
+# 它出现在这里是因为配置文件的结构就是 IR 本身（见 src/config.rs 模块文档 §3）。
+[State]
+BottomGlueEntries = []
+CurrentFanSpeed = 0.0
+CurrentFanSpeedSet = false
+GlueBottomDedupMode = ""
+GlueBottomEnabled = false
+InconsistentCount = 0
+ThisLayerRevitalization = false
+
+[State.SupportLayerZSet]
+
+[Toolhead]
+CustomMountGcode = ["G92 E0", "G1 E-5 F1800", "G92 E0", "L801", "M204 S10000", "G1 X256 F42000", "G1 X261 F10000", "G1 X267 F10000", "G1 X256 F42000", "G1 F42000", ""]
+CustomUnmountGcode = ["M106 S[AUTO]", "G1 X256 F42000", "G1 X261 F10000", "G1 X271 F10000", "G1 X256 F5000", "G1 F42000", "L802", "G92 E0", "G1 E5.5 F1000", "G92 E0", "G1 F30000", ""]
+FirstPenRevitalizationFlag = false
+GlueZOffset = -0.05
+MKPRetract = -5.0
+MaxSpeed = 4200.0
+NozzleSwitchTemperature = 0.0
+PrimeLength = 100.0
+XOffset = -1.0
+YOffset = 18.6
+ZOffset = 4.0
+
+[Tower]
+CustomLayerHeight = "auto"
+ExtrudeRatio = 1.0
+FastMode = "fast"
+FirstLayerFlow = 1.0
+GlueLayerSpeed = 35.0
+LayerCount = 0
+RibSpeedMode = "follow"
+RibSpeedValue = 40.0
+SafeZOffset = 0.7
+SheathSpeed = 40.0
+TravelSpeed = 200.0
+UseTowers = false
+WipeMode = "auto"
+
+[Wiping]
+FanSpeed = 255.0
+Mode = ""
+Needed = false
+NozzleCooling = false
+OuterStructure = "rib"
+PreferredMode = "tower"
+SmallFeatureFactor = 1.0
+SupportExtrusionMultiplier = 0.8
+TowerExtrudeRatio = 1.0
+TowerPrintSpeed = 200.0
+UserDryTime = 0
+WiperX = 20.0
+WiperY = 20.0

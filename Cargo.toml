@@ -15,7 +15,7 @@ resolver = "2"
 # **显式列成员，不用 `crates/*` 通配**：目录还不存在时 glob 会让 cargo 直接报
 # "failed to load manifest for workspace member `.../crates/*`"，
 # 而这个报错看起来像清单写错了，不像"目录还没建"。
-members = ["src-tauri"]
+members = ["crates/postprocess", "src-tauri"]
 
 # **为「原样复制」准备的一组字段。**
 #
