@@ -104,12 +104,16 @@ mod tests {
     /// 拦不住走 `fsx::atomic` 写到上游路径去。
     ///
     /// 判据落在**源码文本**上而不是类型上：Rust 没法表达"这个模块不许调用某个函数"。
+    ///
+    /// 目录写死成 manifest 下的相对路径，**刻意不用 `file!()`**：它的基准会随构建方式变 ——
+    /// 单独一个 crate 时它相对 **crate 根**（`src/workbench/upstream/mod.rs`），
+    /// 建了 workspace 之后相对**仓库根**（`src-tauri/src/workbench/upstream/mod.rs`）。
+    /// 于是 `CARGO_MANIFEST_DIR + file!()` 会多出一层 `src-tauri`。
+    /// 它不会报错，只会让 `read_dir` 找不到目录 —— **判据以"报错"的形式失效**，
+    /// 看起来像被测代码写错了（b04 Task 13 建 workspace 时实测）。
     #[test]
     fn upstream_layer_has_no_write_path() {
-        let dir = std::path::Path::new(file!())
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/upstream");
         let mut scanned = 0usize;
         for e in std::fs::read_dir(&dir).expect("读不出上游层目录").flatten() {
             let p = e.path();

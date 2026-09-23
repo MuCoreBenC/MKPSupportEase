@@ -1,0 +1,22 @@
+# workspace 根（b04 Task 13 / M1）。
+#
+# `src-tauri` 从这里起是一个**成员**，不再是独立 crate。这一步刻意**不动任何 Rust 代码** ——
+# 判据是「建了 workspace 之后，原有的 18 + 264 条判据仍然全绿」。
+#
+# 为什么现在就建：后处理内核与预设解析要迁进来（`crates/postprocess` / `crates/preset`），
+# 它们与 `src-tauri` 共用一批第三方依赖。版本不统一的话 `cargo tree -d` 会列出重复依赖，
+# 而那是迁移验收的一条判据（MIGRATION-PLAN §5 的 M1/M2）。
+#
+# `resolver = "2"`：virtual manifest 不写它会退回 resolver 1 并打警告。
+# 两个成员都是 edition 2021，所以 2 是对应档位 —— 源仓库那边是 edition 2024 + resolver 3，
+# 我们**不跟**：那要把 `rust-version` 抬到 1.97，而 1.77.2 是 Tauri 那一侧定的下限。
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+# 只有后处理内核（迁入后）会用 `[lints] workspace = true` 领这一组。
+#
+# `src-tauri` **刻意不领**：Tauri 的宏与 macOS 那几段 objc2 会碰到 `unsafe`，
+# 在那里 forbid 等于逼人加豁免属性，反而把违规藏进属性里（b04 Task 13.4）。
+[workspace.lints.rust]
+unsafe_code = "forbid"

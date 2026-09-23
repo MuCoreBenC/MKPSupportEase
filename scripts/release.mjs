@@ -189,6 +189,9 @@ writeFileSync(confPath, JSON.stringify({ ...conf, version }, null, 2) + '\n')
  * 工作区凭空变脏，而且入库的 lock 与 manifest 不一致。v0.0.1 那次就是这么漏的。
  * `--workspace --offline`：只刷新本 workspace 的条目，不去网络升级依赖。
  */
+/* 建了 workspace（b04 Task 13）之后，lock 文件在**仓库根**。在成员目录里跑
+ * `cargo update --workspace` 仍然是对的（cargo 从成员目录往上找 workspace，
+ * 改的就是根上那一份），所以这里只是把路径含义写清楚，不改命令。 */
 runLive('cargo', ['update', '--workspace', '--offline'], { cwd: tauriDir })
 
 ok(`版本号四处改成 ${version}（含 Cargo.lock）`)
@@ -202,7 +205,7 @@ runLive('git', [
   'add',
   'package.json',
   'src-tauri/Cargo.toml',
-  'src-tauri/Cargo.lock',
+  'Cargo.lock',
   'src-tauri/tauri.conf.json',
 ])
 runLive('git', ['commit', '-m', `chore: v${version}`])

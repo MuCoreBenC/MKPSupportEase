@@ -6,10 +6,13 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
   /* 构建产物一律不扫。
-     src-tauri/target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
+     target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
      （压缩过的二进制字节），eslint 会在那上面报 Parsing error。本地一跑 build 就红，
-     CI 上因为 target 不入库反而看不见，是个只在本机出现的假故障。 */
-  { ignores: ['dist', 'node_modules', 'src-tauri/target', 'src-tauri/gen'] },
+     CI 上因为 target 不入库反而看不见，是个只在本机出现的假故障。
+
+     建了 workspace（b04 Task 13）之后产物目录搬到了仓库根，所以两个都要列：
+     根上的 `target` 是新的，`src-tauri/target` 是切换之前留下的。 */
+  { ignores: ['dist', 'node_modules', 'target', 'src-tauri/target', 'src-tauri/gen'] },
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

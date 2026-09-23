@@ -53,9 +53,10 @@ jobs:
     # 而本产品只发 macOS。跑在目标平台上，CI 绿才等于"我这台机器上也能编"。
     # 公开仓库的 macOS runner 不计费，所以这个选择不花钱。
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: src-tauri
+    # **在仓库根跑，不在 `src-tauri` 里跑。** 建了 workspace（b04 Task 13）之后，
+    # virtual manifest 的默认成员就是全部成员 —— 在根上跑，`fmt --all` /
+    # `clippy --all-targets` / `test` 的覆盖面会自动跟着长；在成员目录里跑则只覆盖那一个包。
+    # 代价是 `--features` 在 virtual 根上不合法，工作台那两条要带 `-p` 指定包。
     steps:
       - uses: actions/checkout@v5
 
@@ -72,8 +73,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
 
@@ -90,13 +91,13 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: clippy（workbench）
-        run: cargo clippy --all-targets --features workbench -- -D warnings
+        run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
 
       - name: 测试（默认 feature）
         run: cargo test
 
       - name: 测试（workbench）
-        run: cargo test --features workbench
+        run: cargo test -p mkp-support-ease --features workbench
 
   # Windows 侧单独一个 job，**不并进 rust 的 matrix**：
   # matrix 会把 job 名变成 `rust (macos-latest)`，而 ruleset 里的必需检查叫 `rust` ——
@@ -108,9 +109,7 @@ jobs:
   rust-windows:
     name: rust-windows
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: src-tauri
+    # 同 `rust`：在仓库根跑，覆盖全部成员（理由写在那边）。
     steps:
       - uses: actions/checkout@v5
 
@@ -127,8 +126,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
 
