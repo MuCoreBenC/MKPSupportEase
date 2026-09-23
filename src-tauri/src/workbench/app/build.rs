@@ -818,16 +818,19 @@ mod tests {
         assert!(!row.buildable, "生成时该跳过它");
     }
 
-    /// **跳过 A2L 时说的必须是真因：缺尺寸，不是缺资源。**（b04 P0 审计的后续）
+    /// **跳过占位机型时说的必须是真因，而且不许写成催办。**（b04 P0 审计的后续）
     ///
-    /// 两句话指的方向不同：「暂无资源」让人去找资源，而这一台要补的是床身尺寸。
-    /// 真因是消费端在内置尺寸表里查不到这台机型 → 拒掉整份配方，
-    /// 所以它生成出来也用不了。指错方向的提示比没有提示更费时间。
+    /// A2L 现在只是占了个名字，还没开始做。空着是**闭合的**：这台不生成、不进清单，
+    /// 消费端也拿不到（它自己的内置尺寸表里同样没有这台）。所以这里要的是
+    /// 「收起来并说一句」，不是「催人去补」。
+    ///
+    /// 「暂无资源」那句话不能复用：缺资源是漏（该有的没有），占位是刻意 ——
+    /// 说成缺资源会让人去找一件根本不存在的东西。
     ///
     /// 这一条同时是「判据的判据」：夹具里 A2L **刻意没有** `[dimensions]`
     /// （`testkit::has_dimensions`），所以它一定走得到这一支
     #[test]
-    fn skipping_a_machine_without_dimensions_names_the_real_reason() {
+    fn skipping_a_placeholder_machine_names_the_real_reason() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
         let book = Book::new(&f.up, &f.presets, &c, &draft);
@@ -848,17 +851,31 @@ mod tests {
             "只有 A2L 该缺尺寸"
         );
 
-        // 两句话必须是两句话
+        // 两句话必须是两句话，而且都不许是催办口气
         assert_ne!(
             w::disabled::BUILD_NO_DIMENSIONS,
             w::disabled::BUILD_NO_RESOURCES,
-            "缺尺寸与缺资源说了同一句话，用户会照着错的方向去找"
+            "占位与缺资源说了同一句话，用户会照着错的方向去找"
         );
         assert!(
-            w::disabled::BUILD_NO_DIMENSIONS.contains("尺寸"),
-            "真因里没提尺寸：{}",
+            w::disabled::BUILD_NO_DIMENSIONS.contains("占位"),
+            "没说清这是占位：{}",
             w::disabled::BUILD_NO_DIMENSIONS
+        );
+        assert!(
+            !w::disabled::BUILD_NO_DIMENSIONS.contains("补上"),
+            "写成了催办：{}",
+            w::disabled::BUILD_NO_DIMENSIONS
+        );
+
+        // 占位不挡生成 —— 别的机型照样交付
+        let report = crate::workbench::domain::issues::inspect(&book);
+        assert!(
+            report.first_block().is_none(),
+            "占位机型把整批生成挡住了：{:?}",
+            report.first_block().map(|b| b.title.clone())
         );
     }
 }
+
 

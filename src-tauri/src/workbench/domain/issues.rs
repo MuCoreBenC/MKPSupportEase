@@ -194,24 +194,26 @@ fn compat(book: &Book<'_>, out: &mut Vec<Issue>) {
 /// 机型级
 fn machines(book: &Book<'_>, out: &mut Vec<Issue>) {
     for m in book.machines() {
-        // A2L：机型文件里没有 `[dimensions]`。
+        // 机型文件里没有 `[dimensions]` —— A2L 现在就是这样。
         //
-        // **这一条在 b04 的 P0 审计之后变重了。** 原来的说法是"越界检查与禁区判不了，
-        // 参数与产物不受影响"—— 后半句是错的：消费端 `load_ir` 在内置尺寸表里查不到
-        // 这台机型时**直接拒掉整份预设**（`MissingMachine`），所以产物受影响，
-        // 而且是全份被拒，不是少一项检查。
+        // **这是「占位」，不是「缺数据」。** 这台机器还没开始做，先占了个名字。
+        // 所以它是 `Hint`（合法但值得知道）而不是 `Todo`（要人去填的空）——
+        // 标成待办等于每次打开出货检查都催一次，催的还是一件**刻意**没做的事，
+        // 而那种提示看两次就会被整列忽略，连真的待办一起。
         //
-        // 仍然是 `Todo` 而不是 `Block`：它只废掉这一台机型，别的机型照样交付，
-        // 而 `Block` 会拦住整批生成。
+        // 没有尺寸的机型不会被生成、也不会进清单（`app::build` 那边按这一条跳过），
+        // 消费端因此拿不到它 —— 它自己的内置尺寸表里也没有这台，就算给它预设也会
+        // 整份拒掉（b04 P0 审计：`mkp-preset` 的 `load_ir` 第 8 步）。
+        // 两边都不交付，所以空着是**闭合的**，不是漏。
         if !m.has_dimensions {
             out.push(Issue {
                 id: format!("machine.dimensions.{}", m.id),
-                severity: Severity::Todo,
-                title: format!("{} 的床身尺寸{}", m.display, w::UNCONFIGURED),
-                detail: "机型文件里没有 [dimensions]，于是越界检查与禁区都判不了。\
-                         更要紧的是**消费端会拒掉这台机型的整份配方** —— \
-                         它的内置尺寸表里没有这台机器，读预设时直接报「没有这个机型」。\
-                         也就是说这一台现在生成出来也用不了，得先把尺寸补上。"
+                severity: Severity::Hint,
+                title: format!("{} 是占位机型，不参与交付", m.display),
+                detail: "机型文件里没有 [dimensions] —— 这台还没开始做，先占个名字。\
+                         没有尺寸的机型不会被生成、也不会进清单，消费端拿不到它，\
+                         所以空着是安全的，不是漏了什么。\
+                         真要做这台机器的时候把尺寸填上，它就会自动进入交付。"
                     .to_owned(),
                 at: Where {
                     view: View::Params,
@@ -527,11 +529,30 @@ mod tests {
             .issues
             .iter()
             .any(|i| i.id == "compat.minimum_client" && i.severity == Severity::Todo));
-        // 待办：A2L 没登记尺寸
-        assert!(r
+        // **提示（不是待办）：A2L 是占位机型。**
+        //
+        // 档位本身就是判据：`Todo` 会让出货检查每次都催一遍一件刻意没做的事，
+        // 而那种催促看两次就会被整列忽略 —— 连真的待办一起
+        let placeholder = r
             .issues
             .iter()
-            .any(|i| i.id == "machine.dimensions.A2L" && i.severity == Severity::Todo));
+            .find(|i| i.id == "machine.dimensions.A2L")
+            .expect("A2L 没有尺寸，这一条该在");
+        assert_eq!(
+            placeholder.severity,
+            Severity::Hint,
+            "占位机型是「合法但值得知道」，不是「要人去填的空」"
+        );
+        assert!(
+            placeholder.title.contains("占位"),
+            "标题要说清这是占位：{}",
+            placeholder.title
+        );
+        assert!(
+            !placeholder.detail.contains("补上尺寸") && !placeholder.detail.contains("先把尺寸"),
+            "不该写成催办：{}",
+            placeholder.detail
+        );
 
         // 提示：没进任何套餐的文件（夹具里只有一条 BBS 进了套餐，三个 MKP 都没进）
         let hint = r
