@@ -70,8 +70,7 @@ pub use write::{Edit, EditValue, KeySnapshot, apply_edits, snapshot};
 /// `load_param_registry()` 有 20 多处调用点，混进搬运这一批会把它变成重构。
 ///
 /// 消费方：`build()` 的零值默认与范围校验、弃用参数检查。
-pub const PARAM_REGISTRY_TOML: &str =
-    include_str!("../../../presets/registry/param_registry.toml");
+pub const PARAM_REGISTRY_TOML: &str = include_str!("../../../presets/registry/param_registry.toml");
 
 /// **内置预设**：由配方生成、随版本走的那 9 份（文件名 + 内容）。
 ///
