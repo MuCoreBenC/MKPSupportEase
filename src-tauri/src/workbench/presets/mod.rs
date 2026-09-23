@@ -192,6 +192,10 @@ impl Presets {
 
     /// 写一个机型 / 版本的值，**写完落盘**（原子写）。
     ///
+    /// 单条入口。**一次保存改一批值时不要循环调它** —— 那会把 56 KB 的
+    /// `param_registry.toml` 写 N 遍，而且中途失败会留下"改了一半"的文件。
+    /// 批量走 [`Self::apply_values`]。
+    ///
     /// # 为什么 owner 必须在这一层查
     ///
     /// `machineVariants` 的键指向机型与版本，而那两样在另一个文件里。
@@ -206,15 +210,48 @@ impl Presets {
         owner: &str,
         value: &serde_json::Value,
     ) -> Result<(), AppError> {
-        self.check_owner_exists(owner)?;
-        self.registry.set_variant(key, owner, value)?;
-        self.registry.write_back()
+        self.apply_values(&[(key.to_owned(), owner.to_owned(), Some(value.clone()))])
     }
 
     /// 清空一个机型 / 版本的值（删键），写完落盘
     pub fn clear_variant(&mut self, key: &str, owner: &str) -> Result<(), AppError> {
-        self.check_owner_exists(owner)?;
-        self.registry.clear_variant(key, owner)?;
+        self.apply_values(&[(key.to_owned(), owner.to_owned(), None)])
+    }
+
+    /// 一批值一次落盘。`(字段 key, owner, 值)`，值为 `None` = 清空（删键）。
+    ///
+    /// # 为什么要有批量入口
+    ///
+    /// 一次「保存」常常是一片改动（改了一个机型基底，顺带调了三个版本）。
+    /// 逐条调 [`Self::set_variant`] 的代价是把 56 KB 的文件写 N 遍 ——
+    /// 不只是慢：**中途失败会留下一个"改了前三条、没改后两条"的文件**，
+    /// 而那种状态没有任何判据能描述它。
+    ///
+    /// 这里的做法是：**先把 owner 全部校验完，再改内存里的文档，最后写一次**。
+    /// 任何一条 owner 不合法 → 一个字节都不写。
+    ///
+    /// 注意「改内存」这一步之后若写盘失败，内存与盘会不一致 ——
+    /// 调用方（`app::Ctx`）在保存后一律重读盘，所以那个窗口不会被看见
+    pub fn apply_values(
+        &mut self,
+        edits: &[(String, String, Option<serde_json::Value>)],
+    ) -> Result<(), AppError> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        // **先全查一遍再动手**：一条不合法就整批不写
+        for (key, owner, _) in edits {
+            self.check_owner_exists(owner)?;
+            if self.registry.param(key).is_none() {
+                return Err(AppError::invalid_argument(format!("字段定义里没有 {key}")));
+            }
+        }
+        for (key, owner, value) in edits {
+            match value {
+                Some(v) => self.registry.set_variant(key, owner, v)?,
+                None => self.registry.clear_variant(key, owner)?,
+            }
+        }
         self.registry.write_back()
     }
 

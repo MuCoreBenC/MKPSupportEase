@@ -1439,5 +1439,105 @@ mod tests {
             }
         }
     }
-}
 
+    /// **一批值一次落盘**（b04 Task 12.1 的前置）。
+    ///
+    /// 一次「保存」常常是一片改动。逐条写的代价不只是把 56 KB 写 N 遍 ——
+    /// 中途失败会留下「改了前三条、没改后两条」的文件，而那种状态
+    /// 没有任何判据能描述它。所以批量入口要么全成，要么一个字节都不写。
+    #[test]
+    fn a_batch_of_values_lands_in_one_write() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        copy_tree(&root, tmp.path());
+        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+
+        // 一批：两个机型基底 + 一个版本覆盖 + 一次清空
+        p.apply_values(&[
+            ("toolhead.MKP_retract".to_owned(), "A1".to_owned(), Some(serde_json::json!(-3.5))),
+            ("toolhead.MKP_retract".to_owned(), "P1S".to_owned(), Some(serde_json::json!(-4.0))),
+            (
+                "toolhead.MKP_retract".to_owned(),
+                "A1:FAST".to_owned(),
+                Some(serde_json::json!(-5.0)),
+            ),
+        ])
+        .expect("一批写得进去");
+
+        let again = crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完读得通");
+        let t = &again.registry.param("toolhead.MKP_retract").unwrap().machine_variants;
+        assert_eq!(t["A1"], serde_json::json!(-3.5));
+        assert_eq!(t["P1S"], serde_json::json!(-4.0));
+        assert_eq!(t["A1:FAST"], serde_json::json!(-5.0));
+
+        // 清空也走同一条路
+        p.apply_values(&[("toolhead.MKP_retract".to_owned(), "A1:FAST".to_owned(), None)])
+            .expect("清得掉");
+        let again = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let t = &again.registry.param("toolhead.MKP_retract").unwrap().machine_variants;
+        assert!(!t.contains_key("A1:FAST"), "清空没生效");
+        assert_eq!(t["A1"], serde_json::json!(-3.5), "顺带把别的键改了");
+    }
+
+    /// **一条不合法 → 整批不写。**
+    ///
+    /// 这一条盯的是"部分成功"这种状态。它比失败更糟：失败能重试，
+    /// 而"前三条成了、后两条没成"之后，用户看到的是一份他没打算要的数据，
+    /// 而且没有任何提示说哪几条生效了
+    #[test]
+    fn one_bad_edit_in_a_batch_writes_nothing() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        copy_tree(&root, tmp.path());
+        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let before = std::fs::read_to_string(p.registry.file()).unwrap();
+
+        // 第一条合法、第二条机型不存在、第三条字段不存在
+        let e = p
+            .apply_values(&[
+                ("toolhead.MKP_retract".to_owned(), "A1".to_owned(), Some(serde_json::json!(-9.0))),
+                ("toolhead.MKP_retract".to_owned(), "NOPE".to_owned(), Some(serde_json::json!(1))),
+                ("没有这个字段".to_owned(), "A1".to_owned(), Some(serde_json::json!(1))),
+            ])
+            .expect_err("整批该被拒");
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound, "先报的该是机型不存在");
+
+        assert_eq!(
+            before,
+            std::fs::read_to_string(p.registry.file()).unwrap(),
+            "整批被拒之后盘上文件被改了"
+        );
+        assert_eq!(before, p.registry.to_toml(), "内存里的文档也被改了");
+    }
+
+    /// 空批次是合法的空操作 —— **不写盘**。
+    ///
+    /// 没有这一条的话，「保存」在没有任何值改动时也会重写一遍 56 KB，
+    /// 于是文件 mtime 变了、git 里多一条噪音 diff
+    #[test]
+    fn an_empty_batch_does_not_touch_the_file() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        copy_tree(&root, tmp.path());
+        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let path = p.registry.file().to_path_buf();
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        p.apply_values(&[]).expect("空批次是合法的");
+
+        assert_eq!(
+            before,
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            "空批次动了文件的 mtime"
+        );
+    }
+}
