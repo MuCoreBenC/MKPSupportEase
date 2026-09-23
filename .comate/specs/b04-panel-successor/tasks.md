@@ -175,16 +175,34 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
       现在没装时有一条逃生链（`MKPSE_PRESETS_DIR` → 仓库相对 `../../presets` → panic），
       只为开发与测试成立，理由写在 `machine_dims.rs` 的模块文档里
 
-- [ ] Task 15: **M4 —— 预设解析迁进来，注册表合一**
-    - 15.1: `mkp-ssr/crates/preset` → `crates/preset`，**纯移动** +
-      包名 `mkpse-preset` / lib `preset`；`mkp_preset::` → `preset::`
-    - 15.2: 删 `assets/param_registry.toml`（那份分岔副本），改读
-      `presets/registry/param_registry.toml` —— **注册表从此只有一份**
-    - 15.3: 那 4 处分岔（两处 label、一处 `uiComponent`、一块 `[[params.choices]]`）
-      随之消失；加一条判据确认"只有一份"
-    - 15.4: `assets/presets/*.toml` 9 份暂留当对照基线，Task 18 删
-    - 15.5: `BUILTIN_PRESETS` 手写表改成按清单校验（缺一份要报错，不许静默）
-    - 15.6: 判据：它自带的 8 个测试文件全绿
+- [x] Task 15: **M4 —— 预设解析迁进来，注册表合一**
+    - 15.1: ✅ `mkp-ssr/crates/preset` → `crates/preset`，包名 `mkpse-preset` /
+      `[lib] name = "preset"`；`mkp_preset::` → `preset::`。拆两笔：**M4a 原样搬**
+      （35 个文件逐文件 sha256 一致、索引 blob == 工作区 35/35，先用 `exclude` 不进
+      `members` 以保住零 diff 证据）+ **M4b 机械改名**（对只读源树重放同一规则再
+      rustfmt，**32/35 逐文件相同、零处意外差异**；3 处手改精确到 3 行）
+    - 15.2: ✅ `assets/param_registry.toml` 已删，`include_str!` 与
+      `registry_edit::registry_path()` 都指 `presets/registry/param_registry.toml` ——
+      全仓 `param_registry.toml` **只剩一个文件**
+    - 15.3: ✅ 实测是 **5 处**（不是 4 处）：两处 `label`、**两处** `uiComponent`、
+      一块 `[[params.choices]]`。而且这 5 处**一条老判据都碰不到** ——
+      `label`/`uiComponent` 在 `ParamEntry` 里只有 serde 读写；`choices` 白名单在
+      `validate.rs:264` 有 `value_type == "string"` 这道门而那条参数是 `float`；
+      `build.rs:533` 那处要求 `deprecated = true`。所以新判据
+      `registry_is_the_only_source.rs` 比的是**全文字节**，不是逐字段
+      （逐字段看不见 `jsonKey`/`mergeGroup`/`showWhen` 这些它不读的键）
+    - 15.4: ✅ `assets/presets/*.toml` 9 份保留未动，Task 18 删
+    - 15.5: ✅ `builtin_presets_match_dir.rs` 三条（名字集合 / 每条内容逐字节 /
+      无重名），**用探针验过会响**：塞一份多余 toml ⇒ FAILED 且点名，撤掉 ⇒ 绿
+    - 15.6: ✅ 它自带的 8 个测试文件全绿；`cargo test -p mkpse-preset` 新基线
+      **106 条**（71 单元 + 8 个老测试文件 29 条 + 两份新判据 6 条）。切数据源后
+      **老判据一条没红**，`registry_branch_diff` 的快照也没动 ⇒ 本轮**没有动任何 golden**
+    - **口径更正**：`cargo tree -d` 基线从 **58 条 / 26 名** 变成 **61 / 27**。
+      新增 3 条（`toml_edit` 0.20.2 + 0.22.27、`winnow` 0.7.15）是「`toml` 取 0.8」
+      与「写回必须用 toml_edit 0.22」两条既有决定叠加的必然结果，不推翻其一消不掉。
+      `Cargo.lock` 只多了 `mkpse-preset` 一个条目，没引入新的第三方版本
+    - **仍然欠的**：注册表还是 `include_str!` 编进二进制（数据只有一份了，但发布物里
+      改不了）。改成运行时从数据根读 + M3 欠的 `machine_dims::install()` 接线，**两件一起挂 M5**
 
 - [ ] Task 16: **M5 —— 纵向切片：一条路走通**（原 P2）
     - 16.1: `wb_generate` 之后在**同一个进程里**用 `preset::load_ir()` 复检产物

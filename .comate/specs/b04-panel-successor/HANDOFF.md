@@ -16,10 +16,12 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 |---|---|---|
 | 工作分支 | `feat/b04-p3-migration` | `git status -sb` |
 | `main` | `203c287`（PR #10 的 squash） | `git log --oneline -1 origin/main` |
-| 本分支领先 main | **9 笔**（M1 / B2-prep / M2a / M2b / M3） | `git log --oneline origin/main..HEAD` |
+| 本分支领先 main | **16 笔**（M1 / B2-prep / M2a / M2b / M3 / **M4a–M4d** / 文档与格式三笔）—— **这个数以命令为准，别信本行** | `git log --oneline origin/main..HEAD` |
 | 草稿 PR | **#11** —— **只作 CI 载体**（不打算按批次再开 PR） | `gh pr view 11` |
-| 判据基线 | 后处理内核 **249 passed + 2 ignored**；我们 **18**（默认）/ **264**（workbench） | 见 §8 |
+| 判据基线 | 内核 **249 + 2 ignored**；预设 **106**；我们 **18**（默认）/ **264**（workbench） | 见 §8 |
+| `cargo tree -d` 基线 | **61 条 / 27 个名字**（M4b 起，原 58/26，新增 3 条的出处见 §5.7） | `cargo tree -d` |
 | `62a72b9` 的 CI | **三个 job 全绿**（`web` / `rust` / `rust-windows`，run `35892855809`） | `gh pr view 11 --json statusCheckRollup` |
+| M4 四笔的 CI | **还没推** —— 推之前本地全绿（fmt / 两条 clippy / 三组测试 / npm） | `gh run list --branch feat/b04-p3-migration` |
 | 工作区 | 干净 | `git status --short` |
 
 **第一件事就是把上表核一遍。** GitHub 上的合并状态**不代表本机 checkout 已同步** ——
@@ -60,10 +62,10 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 | 1–10 | 结构摸底 → 参数值写回能力 | ✅ 已完成 |
 | 11 | **M0**：比值，再搬代码 | ✅ 值等值已证；**精确领头键收尾**与 `eprintln!`→`assert!` 挂在 Task 15 之后 |
 | 12 | 删自造 workbench JSON、收口数据模型 | ✅ `b38cca9` + `6880403` |
-| 13 | **M1+M2**：workspace 与内核迁入 | ⏳ **M1 / M2a / M2b 已做，M3 另立 Task 14；M4–M7 待做**（见 §4） |
+| 13 | **M1+M2**：workspace 与内核迁入 | ⏳ **M1 / M2a / M2b 已做，M3 另立 Task 14；M4 另立 Task 15（已做）；M5–M7 待做**（见 §4） |
 | 14 | **M3**：尺寸/别名/禁区改从 `presets/` 读 | ✅ `62a72b9` |
-| 15 | **M4**：预设解析迁入、注册表合一 | ⏭ 下一步 |
-| 16 | **M5**：纵向切片（改值→生成→`load_ir`→真实后处理） | 待做 |
+| 15 | **M4**：预设解析迁入、注册表合一 | ✅ 四笔：`e87b90f` / `168a2b6` / `a3ae1cf` / `f7c38f3`（+ `554f601` 补格式） |
+| 16 | **M5**：纵向切片（改值→生成→`load_ir`→真实后处理） | ⏭ 下一步；**欠两条接线**（见 §7） |
 | 17 | **M6**：删除 `upstream/` 整层 | 待做 |
 | 18 | 其余源文件搬进 `presets/` | 待做；**二进制资源归属需动手前定案** |
 | 19 | 写入纪律 | 待做；方案已定、CI 前置已补 |
@@ -82,8 +84,8 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 | **M2a** | `crates/core` → `crates/postprocess`，**原样复制** | ✅ | `47436e4` + `fef9698`（lock 补提） |
 | **M2b** | 单独一笔机械改名 | ✅ | `d3f542b` + `133fa01`（清单顶部说明修正） |
 | **M3** | 尺寸/别名/禁区改从 `presets/` 读 | ✅ | `62a72b9`（= Task 14） |
-| **M4** | `crates/preset` 迁入，注册表合一 | ⏭ | — |
-| **M5** | 生成器接上，`load_ir` 复检 | — | — |
+| **M4** | `crates/preset` 迁入，注册表合一 | ✅ | 四笔：`e87b90f`（原样搬）+ `168a2b6`（改名+入 members）+ `a3ae1cf`（注册表切源）+ `f7c38f3`（内置预设清单判据）；`554f601` 补一行格式 |
+| **M5** | 生成器接上，`load_ir` 复检 | ⏭ | — |
 | **M6** | 删 `upstream/` 整层 + 源码扫描断言 | — | — |
 | **M7** | 措辞清场 | — | — |
 
@@ -140,7 +142,11 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 5. **CI 必须覆盖默认与 workbench 两种 feature**（已补，见 §6）。
 6. `mkp-ssr` 是**只读迁移源**；不迁前端、不做双向同步、**不留兼容别名**。
 7. 判据的 `cargo tree -d` 口径：**"无重复依赖"不可能按字面执行**（Tauri 自己的树里
-   本来就有 53 条）。它只能指"**每一条新增的重复都能追到一条决定**"。基线 **58 条 / 26 个 crate 名**。
+   本来就有 53 条）。它只能指"**每一条新增的重复都能追到一条决定**"。
+   基线 **61 条 / 27 个 crate 名**（M4b 起；此前 58 / 26）。M4b 新增的 3 条逐条有出处：
+   `toml_edit v0.20.2`（`toml 0.8` 的内部依赖）、`toml_edit v0.22.27`（preset 的写回保真，
+   K-P1/P2/P3 的唯一实现）、`winnow v0.7.15`（前者 + tauri-build 那支各一档）——
+   是「`toml` 取 0.8」与「写回必须用 toml_edit 0.22」两条决定叠加的必然结果。
 
 ---
 
@@ -168,12 +174,15 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 
 ## 7. Task 15–22 路线摘要
 
-- **Task 15 / M4**：迁入 preset crate（**纯移动 + 改名**，`mkp_preset::` → `preset::`）；
-  删 `assets/param_registry.toml` 那份分岔副本，改读我们那份；消除四处分岔；
-  9 份内置预设**暂留作基线**；手写 `BUILTIN_PRESETS` 改成按清单校验
+- **Task 15 / M4** ✅ 已做完（四笔，见 §4）。施工文档在
+  `.comate/specs/b04-m4-preset-unify/`（`doc.md` / `tasks.md` / `summary.md`）。
+  **它留给 M5 的两件事**：① 注册表仍是 `include_str!` 编进二进制（数据只有一份了，
+  但发布物里改不了）；② `registry_edit` 的写盘目标已经是真源，**现在有能力污染
+  `presets/`** —— 暂时靠"12 个文件 sha256 不变"那条验收兜着，没有代码级的闸
 - **Task 16 / M5**：`wb_generate` 后**同进程** `load_ir` 复检；验证改值写盘 → 生成 → IR 值正确；
   未选变体产物**字节不变**、其他机型 SHA 不变；至少一条真实 G-code 后处理。
-  **顺带必须做的**：启动时 `machine_dims::install()`（M3 欠的接线）
+  **顺带必须做的两条接线**：启动时 `machine_dims::install()`（M3 欠的）+
+  注册表改成运行时从数据根读（M4 欠的）—— 它们是同一件事的两半，一起做
 - **Task 17 / M6**：删 `workbench/upstream/`、`paths::upstream_*`、`Roots.upstream`；
   修 manifest 悬空引用 / 资源缺失静默跳过 / 上游字段透传；落实非测试源码扫描断言
 - **Task 18**：迁入 fallback registry、bundles、资源登记、release 元数据与版本；
@@ -191,19 +200,23 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 
 ```powershell
 cd G:\project\MKPSupportEase
-cargo test                                     # 默认 feature（两个成员）
+cargo test                                     # 默认 feature（三个成员）
 cargo test -p mkp-support-ease --features workbench   # 工作台那 264 条
 cargo test -p mkpse-postprocess                # 内核那 249 条
+cargo test -p mkpse-preset                     # 预设那 106 条
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
+cargo tree -d                                  # 61 条 / 27 名（口径见 §5.7）
 npm run lint; npm run build
 ```
 
 - **判成败看 `test result: ok. N passed`**，不要看管道退出码
-- 期望值：内核 `249 passed + 2 ignored`（2 条是性能探针）/ 我们 `18` 与 `264`
+- 期望值：内核 `249 passed + 2 ignored`（2 条是性能探针）/ 预设 `106` / 我们 `18` 与 `264`
+- **`cargo test` 之外别忘了 `fmt --check`**：M4c 就是只跑了测试，漏了一行格式，
+  全量验收才报出来（补在 `554f601`）。CI 的顺序是格式 → clippy → 测试，格式红了后面不跑
 - 真数据是否被污染：`git status --short` 必须只剩你**有意**改的那些文件；
-  `presets/` 的 12 个文件在整个迁移里**一个字节都不该变**
+  `presets/` 的 12 个文件在整个迁移里**一个字节都不该变**（M4 全程已复核）
 
 ---
 
