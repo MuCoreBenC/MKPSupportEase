@@ -152,14 +152,28 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
     - 分支：`feat/b04-p3-migration`（本机与远端同步），草稿 PR #11 只作为 CI 的载体 ——
       每 push 一次自动跑一遍，不再逐批开 PR
 
-- [ ] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
-    - 14.1: 删 `crates/postprocess/assets/machine_dimensions.json` 与
-      `machine_catalog_extra.json`，改成从 `presets/machines/*.toml` +
-      `forbidden_zones/*.toml` 读（或由我们生成同形状的数据）
-    - 14.2: 那条「125 字段等值」的判据从**跨仓比对**变成**同仓单一来源**
-    - 14.3: 别名 23 条由 `externalAliases` 生成；`normalize_to_canonical` 查不到仍返回空串
-    - 14.4: 禁区未命中只 warn 不阻塞这条行为保留，但话术改成我们自己的
-    - 14.5: A2L 的路径复查：尺寸表没有它 → `load_ir` 拒它。这条要与「占位机型」口径一致
+- [x] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
+    - 14.1: ✅ 两份 `assets/*.json` **已删**（`assets/` 目录没剩下东西）。
+      数据改成**注入**：`machine_dims::install(tables)` 或 `load_presets_dir(dir)`，
+      后者读 `presets/machines/*.toml` 的 `[dimensions]` / `externalAliases`
+      与 `presets/forbidden_zones/*.toml` 的 `[[zones]]`
+    - 14.2: ✅ 旧快照**降级成基线**（搬到 `tests/reference/legacy_snapshot/`），
+      新判据 `presets_are_the_only_source.rs` 三条：尺寸 5 台×25 字段逐字段、
+      别名 23 条逐条、禁区 3 台逐点 —— 全部相等。**内核 249 条全绿，
+      其中逐字节比对的 golden 一条没变**，这是"等价"的最强证据
+    - 14.3: ✅ 别名由 `externalAliases` + `id` 生成（键一律大写，与旧快照同语义）；
+      `normalize_to_canonical` 未命中仍返回空串（行为未动）
+    - 14.4: ✅ 禁区未命中只 warn 不阻塞的行为保留；文案本来就是我们的口吻
+      （只描述了"禁区数据为空，跳过填充"这件事，不引用任何外部仓库）
+    - 14.5: ✅ A2L 仍然没有 `[dimensions]` ⇒ 「别名认识它、尺寸表没有它」那个差集
+      仍然非空，`machine_dims_must_exist.rs` 的三条 CLI 判据继续有扫描面并通过。
+      该文件现在从 `presets/machines/*.toml` 取数（不再读那份 asset）
+    - **顺带抓到一条静默数据丢失**：`MachineFile` 少了 `rename_all = "camelCase"`，
+      于是 `externalAliases` 全被忽略 —— 别名从 23 条变 6 条、机型识别会全挂，
+      而不会有任何报错。是新判据里那条"逐条相等"抓到的
+    - **待 M5 接上**：发布物必须在启动时 `install()`（数据根在运行时才知道）；
+      现在没装时有一条逃生链（`MKPSE_PRESETS_DIR` → 仓库相对 `../../presets` → panic），
+      只为开发与测试成立，理由写在 `machine_dims.rs` 的模块文档里
 
 - [ ] Task 15: **M4 —— 预设解析迁进来，注册表合一**
     - 15.1: `mkp-ssr/crates/preset` → `crates/preset`，**纯移动** +

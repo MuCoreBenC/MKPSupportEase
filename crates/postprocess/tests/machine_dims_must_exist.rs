@@ -2,9 +2,9 @@
 //!
 //! ## 这条判据在守什么（实测事实，不是假想）
 //!
-//! `assets/machine_catalog_extra.json` 的 `aliasMap` 把 23 个别名映射到 **6** 个规范名
-//! （A1 / A1_MINI / A2L / P1S / P2S / X1C），而 `assets/machine_dimensions.json` 只有
-//! **5** 个条目 —— **没有 A2L**。而 `get_machine_dimensions` 未命中时返回 zero-value
+//! 机型清单（`presets/machines/*.toml` 的 `id` 与 `externalAliases`）把 23 个别名
+//! 映射到 **6** 个规范名（A1 / A1_MINI / A2L / P1S / P2S / X1C），而其中有 `[dimensions]`
+//! 的只有 **5** 台 —— **没有 A2L**。而 `get_machine_dimensions` 未命中时返回 zero-value
 //! （M017「禁止机型回退」的语义，要保留），于是修之前：
 //!
 //! ```text
@@ -45,26 +45,37 @@ fn golden_input() -> PathBuf {
     repo_root().join("tests/golden/42274.2.gcode")
 }
 
-/// aliasMap 的**目标**集合（规范名），从磁盘上那份内置表读，不复述。
+/// 规范名集合：从**我们自己的机型清单**（`presets/machines/*.toml`）读，不复述。
+///
+/// 这一条以前读的是内核自带的 `assets/machine_catalog_extra.json`。
+/// M3 把唯一来源换成了 `presets/`，判据跟着换 —— 否则它盯的东西
+/// 与产品实际用的东西不是同一份（那正是这次改动要消灭的失效模式）。
 fn canonical_names() -> Vec<String> {
-    let path = repo_root().join("assets/machine_catalog_extra.json");
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("读不到 {}（{e}）—— 判据已空转", path.display()));
-    let value: serde_json::Value = serde_json::from_str(&raw).expect("机型目录扩展不是合法 JSON");
-    let map = value
-        .get("aliasMap")
-        .and_then(|v| v.as_object())
-        .expect("aliasMap 段不存在 —— 判据已空转");
-    let mut out: Vec<String> = map
-        .values()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect();
+    let dir = repo_root().join("../../presets/machines");
+    let entries = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("读不到 {}（{e}）—— 判据已空转", dir.display()));
+    let mut out: Vec<String> = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("读不到 {}（{e}）", path.display()));
+        let value: toml::Value = toml::from_str(&raw)
+            .unwrap_or_else(|e| panic!("{} 不是合法 TOML：{e}", path.display()));
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{} 里没有 id", path.display()));
+        out.push(id.to_string());
+    }
     out.sort();
     out.dedup();
-    // 反空转哨兵：实测 6 个规范名 / 23 个别名。
+    // 反空转哨兵：实测 6 个规范名（含没有尺寸的 A2L）。
     assert!(
         out.len() >= 4,
-        "aliasMap 只解析出 {} 个规范名（期望 ≥ 4）—— 表读坏了，判据不成立",
+        "机型清单只解析出 {} 个规范名（期望 ≥ 4）—— 目录读坏了，判据不成立",
         out.len()
     );
     out
