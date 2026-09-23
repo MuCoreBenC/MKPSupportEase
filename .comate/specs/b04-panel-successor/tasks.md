@@ -124,13 +124,26 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
 
 
 - [ ] Task 13: **M1 + M2 —— 建 workspace，后处理内核迁进来**
+    - 盘点：✅ [TASK-13-MIGRATION-INVENTORY.md](./TASK-13-MIGRATION-INVENTORY.md)
+      （只读取证：迁什么 / 依赖什么 / 怎么分类 / 怎么切批 / 拿什么验收）
+    - 盘点定案（2026-09-23，见该文件 §6）：**B2/B3 拆两笔**（零 diff 搬运 + 独立改名）；
+      bin 的三个依赖先照搬、M5 再定；两个 asset JSON 与 9 份测试用预设按
+      「搬迁 + 头注 + 记入 M5 收尾清单」处理。**写盘纪律的豁免：待决策**（§2.5 ①）
     - 13.1: 新建 workspace 根 `Cargo.toml`，`src-tauri` 变成成员；
-      依赖版本统一（新增 `tracing-subscriber` / `clap` / `ctrlc`）
+      依赖版本统一（新增 `tracing-subscriber` / `clap` / `ctrlc`）。
+      另：`serde_json` 要开 `float_roundtrip` + `preserve_order`（它不是优化项，
+      是那边 golden 判据的正确性开关）—— 开了之后**我们自己的 264 条要重跑**
     - 13.2: `mkp-ssr/crates/core` → `crates/postprocess`，**纯移动**：
-      包名 `mkpse-postprocess`、lib 名 `postprocess`，逻辑一个字不改
-    - 13.3: `mkp_pp::` → `postprocess::` 全量替换；**不留过渡别名**
-    - 13.4: `src-tauri` 刻意不领 workspace lints（Tauri 的宏会碰到 `unsafe_code = forbid`）
-    - 13.5: 判据：它自带的 20 个测试文件全绿 + 我们原有的 274 条仍绿 + `cargo tree -d` 无重复依赖
+      包名 `mkpse-postprocess`、lib 名 `postprocess`，逻辑一个字不改。
+      盘点建议拆成**两笔**：先原样复制拿「内容零 diff」当搬运证据，再一笔改名 ——
+      否则机械改动与搬运错误混进同一条 diff，那 20 个测试文件全绿就不再是搬运证据了
+    - 13.3: `mkp_pp::` → `postprocess::` 全量替换（实测 64 行 / 19 文件）；
+      **不留过渡别名**。另有 3 处 `env!("CARGO_BIN_EXE_mkp-pp")` 是编译期宏，bin 改名必改
+    - 13.4: `src-tauri` 刻意不领 workspace lints（Tauri 的宏会碰到 `unsafe_code = forbid`）。
+      另：workspace 根的 `[lints]` **不能写 clippy 规则** —— cargo 报
+      `cannot override workspace.lints in lints`
+    - 13.5: 判据：它自带的 20 个测试文件全绿 + 我们原有的 **264** 条仍绿 +
+      `cargo tree -d` 无重复依赖。（`274` 是 Task 12 之前的数字）
 
 - [ ] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
     - 14.1: 删 `crates/postprocess/assets/machine_dimensions.json` 与
