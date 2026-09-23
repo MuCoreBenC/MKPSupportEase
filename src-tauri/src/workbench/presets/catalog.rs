@@ -15,7 +15,7 @@
 //! 我没建模的字段（`[dimensions.calibration]` 那十来个标定点在这一轮就没建模），
 //! 以及原文的排版。前者是数据损坏，后者让 diff 变成一片红。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -23,6 +23,8 @@ use toml_edit::DocumentMut;
 
 use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
+
+use super::literal_str;
 
 /// 品牌。`presets/brands.toml` 里的 `[[brands]]`
 #[derive(Debug, Clone)]
@@ -47,47 +49,6 @@ pub struct MachineVersion {
 #[derive(Debug, Clone)]
 pub struct Zone {
     pub points: Vec<(f64, f64)>,
-}
-
-/// 把字符串包成一个**单引号（字面量）表示**的 TOML 值。
-///
-/// # 为什么不能直接用 `toml_edit::value(s)`
-///
-/// 它输出双引号，而真数据 12 个文件**全用单引号**（`name = '标准版'`）。
-/// 每改一个字段就多一处不一致，文件会**逐渐漂成混合风格** —— 那是不可逆的熵增，
-/// 而且每次 diff 都多一行噪音。
-///
-/// 这一条不是审美：`one_edit_only` 那条判据说的是「别处没动」，
-/// 而引号属于「这一处」，所以它**通得过** —— 但保真的本意是
-/// 「只有我改的那个值变了」，不包括表示形式。
-/// 这个漂移是靠一条专门去问的断言才发现的，测试全绿并不代表它没发生。
-///
-/// # 怎么做到的
-///
-/// `toml_edit` 没有公开 API 能直接设置「表示形式」（`set_repr_unchecked` 是私有的），
-/// 所以走一条更朴素的路：**解析一小段 `k = '值'`**，让 `toml_edit` 自己按原文建出带
-/// 单引号表示的值，再把它取出来。
-///
-/// 这条路比私有 API 更可靠：**解析成功本身就证明那个表示是合法的**。
-/// 解析失败（说明 `can_be_literal` 判漏了）就退回双引号 —— 自带兜底，不会写出坏 TOML。
-///
-/// # 退回双引号的条件
-///
-/// TOML 的字面量字符串**不支持任何转义**：里面不能有单引号，也不能跨行或含控制字符。
-/// 含这些的值只能用双引号 + 转义 —— 那时风格让位于正确。
-fn literal_str(s: &str) -> toml_edit::Item {
-    if can_be_literal(s) {
-        if let Ok(doc) = format!("k = '{s}'").parse::<DocumentMut>() {
-            if let Some(item) = doc.get("k") {
-                return item.clone();
-            }
-        }
-    }
-    toml_edit::value(s)
-}
-
-fn can_be_literal(s: &str) -> bool {
-    !s.contains('\'') && !s.chars().any(char::is_control)
 }
 
 /// 版本身上可以改的那几格。
@@ -439,6 +400,16 @@ impl Catalog {
         self.zones.get(machine_id).map(Vec::as_slice)
     }
 
+    /// 全部 `机型:版本` 键。`param_registry.toml` 的 `machineVariants`
+    /// 用的就是这个形状，跨文件校验要拿它比对（见 [`super::Presets::check_cross_consistency`]）
+    pub fn machine_keys(&self) -> BTreeSet<String> {
+        self.machines
+            .iter()
+            .flat_map(|m| m.versions.iter().map(move |v| format!("{}:{}", m.id, v.id)))
+            .collect()
+    }
+
+
     /// 把一台机型写回它自己的文件。原子写（同目录临时文件 + rename）——
     /// 半个文件的 TOML 比没有更糟
     pub fn write_machine(&self, id: &str) -> Result<(), AppError> {
@@ -715,6 +686,7 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::presets::{can_be_literal, one_edit_only};
     use crate::workbench::paths;
 
     fn catalog() -> Option<(PathBuf, Catalog)> {
@@ -803,49 +775,6 @@ mod tests {
         std::fs::copy(root.join("brands.toml"), tmp.path().join("brands.toml")).unwrap();
         let c = Catalog::load_from(tmp.path()).expect("副本也该读得通");
         (tmp, c)
-    }
-
-    /// 一次编辑只动了一处：**除了中间那一段，前后都逐字节不变。**
-    ///
-    /// 返回 `(被删掉的那段, 被插入的那段)`。
-    ///
-    /// # 为什么不用「新文本以旧文本为前缀」
-    ///
-    /// 那一条把**实现细节**写进了判据 —— 它说的是「改动发生在末尾」，
-    /// 而我们真正想验的是「别处没动」。两句话在"追加"这个场景下碰巧等价，
-    /// 换成**删除**或**中间插入**就分道扬镳：删一个 `[[versions]]` 块时前缀断言直接失效，
-    /// 那时候只能退而写一条更弱的判据，而更弱的判据放得过真正的损坏。
-    ///
-    /// 这一条对三种改动都成立，所以新增 / 删除 / 改一个字段可以共用它。
-    fn one_edit_only(before: &str, after: &str) -> (String, String) {
-        let pre = before
-            .bytes()
-            .zip(after.bytes())
-            .position(|(a, b)| a != b)
-            .unwrap_or(before.len().min(after.len()));
-        let max_suf = before.len().min(after.len()) - pre;
-        let suf = (0..max_suf)
-            .position(|i| {
-                before.as_bytes()[before.len() - 1 - i] != after.as_bytes()[after.len() - 1 - i]
-            })
-            .unwrap_or(max_suf);
-
-        // 切在字符边界上，否则中文会被劈成半个字
-        let cut = |s: &str, lo: usize, hi: usize| {
-            let mut lo = lo;
-            while lo < s.len() && !s.is_char_boundary(lo) {
-                lo -= 1;
-            }
-            let mut hi = hi;
-            while hi > lo && !s.is_char_boundary(hi) {
-                hi += 1;
-            }
-            s[lo..hi].to_owned()
-        };
-        (
-            cut(before, pre, before.len() - suf),
-            cut(after, pre, after.len() - suf),
-        )
     }
 
     /// 判据的判据。`one_edit_only` 是个会被三种改动共用的工具，

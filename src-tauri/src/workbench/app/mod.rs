@@ -53,8 +53,9 @@ use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::{BulkPreview, MovePreview};
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
+use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
+use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
-use crate::workbench::upstream::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
 use crate::workbench::upstream::Upstream;
 use crate::workbench::{paths, Roots};
 
@@ -68,6 +69,9 @@ use crate::workbench::{paths, Roots};
 /// 现在磁盘上的 `.draft/book.json` 只是**崩溃恢复快照**，由 [`flush_if_due`] 懒写。
 pub struct Ctx {
     pub up: Upstream,
+    /// 我们自己那份预设数据。**机型与版本的清单从这里来**（b04 Task 8），
+    /// 而且它是可写的 —— 新建版本要落进 `presets/machines/*.toml`
+    pub presets: Presets,
     pub store: Store,
     /// 落盘的那一份。开场读一次，`wb_save` 之后重读
     committed: Committed,
@@ -85,18 +89,20 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// 真仓库。**上游定位不到时直接失败** —— 那种情况下工作台不该启动业务，
-    /// 因为字段定义、机型清单、资源清单全在上游，缺了它每一页都是空的
+    /// 真仓库。**上游或我们的预设数据定位不到时直接失败** ——
+    /// 那种情况下工作台不该启动业务：清单在 `presets/`，字段定义与资源清单在上游，
+    /// 缺了哪一半每一页都是空的
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Self::with(Upstream::load()?, store)
+        Self::with(Upstream::load()?, Presets::load()?, store)
     }
 
-    /// 给定上游与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
-    pub(super) fn with(up: Upstream, store: Store) -> Result<Self, AppError> {
+    /// 给定两份数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
+    pub(super) fn with(up: Upstream, presets: Presets, store: Store) -> Result<Self, AppError> {
         let mut ctx = Self {
             up,
+            presets,
             store,
             committed: Committed::default(),
             draft: Draft::default(),
@@ -110,12 +116,16 @@ impl Ctx {
         Ok(ctx)
     }
 
-    /// 从磁盘重建「已落盘 + 草稿快照」。**只在三处调**：开场、`wb_save` 之后、`wb_reload`。
+    /// 从磁盘重建「清单 + 已落盘 + 草稿快照」。**只在三处调**：开场、`wb_save` 之后、`wb_reload`。
     ///
-    /// 清理指向已消失对象的草稿条目也在这里 —— 上游可能在工作台开着的时候被重建，
-    /// 但那件事只会在重读的时候发生，不需要每条命令都查一遍
+    /// **清单也一起重读**：它在 `presets/` 里，而「机型与版本」页会直接往那儿写
+    /// （那一页每次操作自己读自己写）。不重读的话，这边的树会比盘上旧一步，
+    /// 而"界面显示的必须是落盘结果"是这个项目的头一条纪律。
+    ///
+    /// 清理指向已消失对象的草稿条目也在这里
     fn reload_from_disk(&mut self) -> Result<(), AppError> {
-        let loaded = storage::load(&self.store, &self.up)?;
+        self.presets = Presets::load_from(self.presets.root())?;
+        let loaded = storage::load(&self.store, &self.presets)?;
         let mut draft = storage::read_draft(&self.store)?;
         let mut notices = loaded.notices;
         let pruned = draft.prune(&loaded.committed);
@@ -285,7 +295,7 @@ pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppErr
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
-    let mut v = Book::new(&ctx.up, committed, draft).book_view();
+    let mut v = Book::new(&ctx.up, &ctx.presets, committed, draft).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
     v
@@ -331,13 +341,13 @@ pub fn wb_boot() -> Result<Boot, AppError> {
         };
         match with_ctx(|ctx| {
             Ok(UpstreamInfo {
-                registry_updated: ctx.up.registry.updated.clone(),
+                registry_updated: ctx.presets.registry.updated().to_owned(),
                 manifest_updated: ctx.up.manifest.compat.updated.clone(),
                 channel: ctx.up.manifest.compat.channel.clone(),
                 minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
                 latest_release: ctx.up.manifest.latest_release().map(str::to_owned),
-                params: ctx.up.registry.params().len(),
-                machines: ctx.up.catalog.machines().len(),
+                params: ctx.presets.registry.params().len(),
+                machines: ctx.presets.catalog.machines().len(),
                 deliverables: ctx.up.manifest.deliverables().len(),
                 fallbacks: ctx.up.fallback.rules().len(),
             })
@@ -358,7 +368,7 @@ pub fn wb_boot() -> Result<Boot, AppError> {
     })
 }
 
-/// 重读上游。改完 `mkpse-presets` 之后不用重启工作台
+/// 重读上游与我们自己那份预设数据。改完 `presets/` 之后不用重启工作台
 #[tauri::command]
 pub fn wb_reload() -> Result<Boot, AppError> {
     drop_ctx();
@@ -428,9 +438,9 @@ pub struct ChoiceView {
 pub fn wb_registry() -> Result<RegistryView, AppError> {
     traced("wb_registry", |_| {
         with_ctx(|ctx| {
-            let reg = &ctx.up.registry;
+            let reg = &ctx.presets.registry;
             Ok(RegistryView {
-                updated: reg.updated.clone(),
+                updated: reg.updated().to_owned(),
                 tabs: reg.param_tabs(),
                 params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
             })
@@ -438,7 +448,7 @@ pub fn wb_registry() -> Result<RegistryView, AppError> {
     })
 }
 
-fn param_view(reg: &crate::workbench::upstream::Registry, p: &ParamDef) -> ParamView {
+fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
     ParamView {
         key: p.key.clone(),
         label: p.label.clone(),
@@ -482,7 +492,7 @@ pub fn wb_matrix(
     traced("wb_matrix", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &c, &d).matrix(
+            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(
                 &cols,
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
@@ -504,7 +514,7 @@ pub fn wb_desk(
     traced("wb_desk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &c, &d).desk(
+            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).desk(
                 &machine_id,
                 uid.as_deref(),
                 tab.as_deref(),
@@ -520,7 +530,7 @@ pub fn wb_stock() -> Result<Vec<StockRow>, AppError> {
     traced("wb_stock", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &c, &d).stock_rows())
+            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).stock_rows())
         })
     })
 }
@@ -597,7 +607,7 @@ pub fn wb_preview_move(uid: String, to_machine_id: String) -> Result<MovePreview
     traced("wb_preview_move", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Book::new(&ctx.up, &c, &d)
+            Book::new(&ctx.up, &ctx.presets, &c, &d)
                 .preview_move(&uid, &to_machine_id)
                 .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))
         })
@@ -613,7 +623,7 @@ pub fn wb_preview_bulk(
     traced("wb_preview_bulk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &c, &d).preview_bulk(&key, &value, &cols))
+            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
         })
     })
 }
@@ -645,7 +655,7 @@ pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
 }
 
 fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> {
-    let book = Book::new(&ctx.up, committed, draft);
+    let book = Book::new(&ctx.up, &ctx.presets, committed, draft);
     let mut out: Vec<DiffLine> = Vec::new();
 
     let target_of = |level: Level, owner: &str| -> String {
@@ -665,11 +675,11 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
         .filter_map(|raw| split_any(raw))
         .collect::<Vec<_>>()
     {
-        let Some(p) = ctx.up.registry.param(&key) else {
+        let Some(p) = ctx.presets.registry.param(&key) else {
             continue;
         };
         let clean = Draft::default();
-        let before = Book::new(&ctx.up, committed, &clean);
+        let before = Book::new(&ctx.up, &ctx.presets, committed, &clean);
         let (b, a) = match level {
             Level::Machine => (
                 before.machine_layers(&owner).and_then(|l| l.effective(&key)),
@@ -837,14 +847,14 @@ pub fn wb_apply_draft(
 ) -> Result<ApplyResult, AppError> {
     traced("wb_apply_draft", |_| {
         with_ctx_mut(|ctx| {
-            let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &patches)?;
+            let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &patches)?;
             ctx.touch();
             let mut notices = ctx.notices_now();
             notices.extend(out.notices);
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
 
             // 一次派生，两份结果：整本视图 + 调用方要的那一页
-            let book = Book::new(&ctx.up, &ctx.committed, &ctx.draft);
+            let book = Book::new(&ctx.up, &ctx.presets, &ctx.committed, &ctx.draft);
             let (desk, matrix) = match &refresh {
                 None => (None, None),
                 Some(Refresh::Desk {
@@ -904,7 +914,7 @@ pub fn wb_save() -> Result<SaveResult, AppError> {
             }
             // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
             ctx.flush();
-            let out = storage::save(&ctx.store, &ctx.up, &ctx.committed, &ctx.draft)?;
+            let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
             let mut notices = out.notices;
 
             // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
@@ -952,16 +962,19 @@ mod tests {
     use super::*;
     use crate::workbench::domain::testkit::Fixture;
 
-    /// 造一个不碰真仓库、也不碰那个全局的 `Ctx`
-    fn ctx() -> (tempfile::TempDir, Fixture, Ctx) {
+    /// 造一个不碰真仓库、也不碰那个全局的 `Ctx`。
+    ///
+    /// 第一个返回值是**两个临时目录**：仓库那个，加上夹具那个。
+    /// 夹具那个必须活到测试结束 —— `Ctx` 会往它的 `presets/` 里写（新建版本进清单）
+    fn ctx() -> ((tempfile::TempDir, tempfile::TempDir), Fixture, Ctx) {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::at(dir.path());
         store.bootstrap().unwrap();
         let f = Fixture::load();
-        // `Upstream` 没有 Clone，所以再读一份给 Ctx
-        let up = Fixture::load();
-        let ctx = Ctx::with(up.up, store).unwrap();
-        (dir, f, ctx)
+        // `Upstream` / `Presets` 都没有 Clone，所以再读一份给 Ctx
+        let (fx_dir, up, presets) = Fixture::load().into_parts();
+        let ctx = Ctx::with(up, presets, store).unwrap();
+        ((dir, fx_dir), f, ctx)
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {
@@ -989,7 +1002,7 @@ mod tests {
     #[test]
     fn the_registry_view_formats_default_values_on_the_backend() {
         let (_d, _f, ctx) = ctx();
-        let reg = &ctx.up.registry;
+        let reg = &ctx.presets.registry;
         let params: Vec<ParamView> = reg.params().iter().map(|p| param_view(reg, p)).collect();
 
         let mode = params.iter().find(|p| p.key == "wiping.mode").unwrap();
@@ -1030,7 +1043,7 @@ mod tests {
             value: Some(serde_json::json!(42)),
         };
 
-        let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &[patch]).unwrap();
+        let out = apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &[patch]).unwrap();
         ctx.touch();
         assert!(out.undoable);
 
@@ -1043,7 +1056,7 @@ mod tests {
 
         // 反向回去 → 干净
         let inverse = out.inverse;
-        apply_patches(&mut ctx.draft, &ctx.committed, &ctx.up.registry, &inverse).unwrap();
+        apply_patches(&mut ctx.draft, &ctx.committed, &ctx.presets.registry, &inverse).unwrap();
         ctx.touch();
         assert!(ctx.draft.is_clean(), "撤销之后该回到干净");
     }
@@ -1053,14 +1066,14 @@ mod tests {
     #[test]
     fn editing_does_not_touch_the_disk() {
         let (dir, _f, mut ctx) = ctx();
-        let snapshot = dir.path().join(".draft").join("book.json");
+        let snapshot = dir.0.path().join(".draft").join("book.json");
         assert!(!snapshot.exists(), "干净仓库本来就没有快照");
 
         for n in 0..10 {
             apply_patches(
                 &mut ctx.draft,
                 &ctx.committed,
-                &ctx.up.registry,
+                &ctx.presets.registry,
                 &[Patch::SetValue {
                     level: Level::Machine,
                     owner: "A1".to_owned(),
@@ -1094,7 +1107,7 @@ mod tests {
             apply_patches(
                 &mut ctx.draft,
                 &ctx.committed,
-                &ctx.up.registry,
+                &ctx.presets.registry,
                 &[Patch::SetValue {
                     level: Level::Version,
                     owner: "A1/STANDARD".to_owned(),
@@ -1108,7 +1121,7 @@ mod tests {
         let now = |ctx: &Ctx| {
             let cols = cols(&[("A1", Some("A1/STANDARD"))]);
             let (c, d, _) = state(ctx).unwrap();
-            let m = Book::new(&ctx.up, &c, &d).matrix(&cols, None, "");
+            let m = Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(&cols, None, "");
             let row = m.rows.into_iter().find(|r| r.key == "wiping.mode").unwrap();
             row.cells[0].raw.clone()
         };
@@ -1140,7 +1153,7 @@ mod tests {
         apply_patches(
             &mut ctx.draft,
             &ctx.committed,
-            &ctx.up.registry,
+            &ctx.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -1201,7 +1214,7 @@ mod tests {
     fn both_pages_can_be_produced_from_one_derivation() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &c, &d);
+        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
 
         let desk = book.desk("A1", Some("A1/STANDARD"), None, "");
         let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
@@ -1225,7 +1238,7 @@ mod tests {
         apply_patches(
             &mut d,
             &c,
-            &ctx.up.registry,
+            &ctx.presets.registry,
             &[
                 Patch::SetValue {
                     level: Level::Version,
@@ -1290,14 +1303,18 @@ mod tests {
         assert!(!w::disabled::NOTHING_TO_SAVE.is_empty());
     }
 
-    /// 保存之后 uid 会变，而且视图里那一版要用新 uid
+    /// 保存之后 uid 会变，而且**下一屏里那一版要在树上**（b04 Task 8.5）。
+    ///
+    /// 这条以前的样子是「断言必须有一条提示说上游没有 NEW1」—— 那是把死胡同钉住：
+    /// 清单当时是上游的只读产物，新建的版本永远进不去。清单换成 `presets/` 之后，
+    /// 保存 → 重读 → 它就该在树上，而且没有任何提示
     #[test]
-    fn saving_a_new_version_remaps_its_uid_in_the_next_view() {
+    fn saving_a_new_version_puts_it_on_the_tree_with_its_new_uid() {
         let (_d, _f, mut ctx) = ctx();
         apply_patches(
             &mut ctx.draft,
             &ctx.committed,
-            &ctx.up.registry,
+            &ctx.presets.registry,
             &[Patch::NewVersion {
                 machine_id: "A1".to_owned(),
                 name: "我的新配方".to_owned(),
@@ -1306,7 +1323,8 @@ mod tests {
         .unwrap();
         ctx.touch();
 
-        let out = storage::save(&ctx.store, &ctx.up, &ctx.committed, &ctx.draft).unwrap();
+        let out =
+            storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft).unwrap();
         assert_eq!(out.remap.get("new-1").map(String::as_str), Some("A1/NEW1"));
 
         // 保存之后必须重读：落盘的那一份才是新的真相
@@ -1314,12 +1332,14 @@ mod tests {
         let (c2, d2, n2) = state(&ctx).unwrap();
         assert!(d2.is_clean(), "保存后草稿清空");
         let v = view_of(&ctx, &c2, &d2, n2);
-        // 上游没有 NEW1 这一版，所以它在树上看不到 —— 但**必须有一条提示**
+        assert!(v.notices.is_empty(), "不该有任何提示：{:?}", v.notices);
+        let a1 = v.machines.iter().find(|m| m.id == "A1").expect("A1 那一支");
         assert!(
-            v.notices.iter().any(|n| n.contains("NEW1")),
-            "上游没有这一版就得说出来，不能让它静默消失：{:?}",
-            v.notices
+            a1.versions.iter().any(|x| x.uid == "A1/NEW1"),
+            "保存完在树上还是看不见：{:?}",
+            a1.versions.iter().map(|x| &x.uid).collect::<Vec<_>>()
         );
+        assert_eq!(v.badges.versions, 5, "原来四版，加一版");
     }
 
     /// 矩阵与批量预览的列序一致，且矩阵能按一列当「字段详情」用
@@ -1327,7 +1347,7 @@ mod tests {
     fn a_single_column_matrix_serves_as_the_field_detail_view() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &c, &d);
+        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
 
         let m = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
         assert_eq!(m.cols.len(), 1);

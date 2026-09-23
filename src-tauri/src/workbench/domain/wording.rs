@@ -30,7 +30,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::workbench::upstream::registry::{ParamDef, UiComponent, ValueType};
+use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
 use super::layer::{Level, Origin};
 use super::patch::Visibility;

@@ -60,7 +60,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::workbench::upstream::Registry;
+use crate::workbench::presets::ParamRegistry as Registry;
 
 /// 一层的稀疏覆盖表。`BTreeMap` 不只是为了好看 ——
 /// 指纹要按稳定顺序算，`HashMap` 每次进程的遍历顺序都不同
@@ -302,12 +302,12 @@ mod tests {
                 { "id": "i3", "paramKey": "toolhead.gone" }
             ] }] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let r = Registry::load_from(d.path()).unwrap();
+        let r = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
         (d, r)
     }
 
@@ -571,21 +571,21 @@ mod tests {
                 { "id": "i0", "paramKey": "toolhead.offset.x" }
             ] }] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let r = Registry::load_from(d.path()).unwrap();
+        let r = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
         (d, r)
     }
 
-    /// 上游那两个出厂默认是空串的字段**真的存在** ——
+    /// 真数据里那两个出厂默认是空串的字段**真的存在** ——
     /// 没有它们，上面那条"空串是值"的判据就是在测一个不存在的情况
     #[test]
-    fn real_upstream_really_has_empty_string_defaults() {
-        let Some(root) = paths::upstream_root() else {
-            eprintln!("没定位到上游 mkpse-presets，这条对齐检查未执行（不是通过）");
+    fn real_data_really_has_empty_string_defaults() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条对齐检查未执行（不是通过）");
             return;
         };
         let reg = Registry::load_from(&root).unwrap();

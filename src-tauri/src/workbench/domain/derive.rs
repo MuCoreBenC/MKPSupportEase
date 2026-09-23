@@ -56,12 +56,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::workbench::presets::registry::ParamDef;
+use crate::workbench::presets::Presets;
 use crate::workbench::upstream::catalog::MkpPreset;
-use crate::workbench::upstream::registry::ParamDef;
 use crate::workbench::upstream::{Asset, ResourceType, Upstream};
 
 use super::layer::{no_overrides, Layers, Level, Origin, Overrides};
-use super::patch::{BuiltRecord, BundleEdit, Committed, Draft, Visibility};
+use super::patch::{BuiltRecord, BundleEdit, CatalogMachine, Committed, Draft, Visibility};
 use super::variants::{digest, Digested};
 use super::visibility::{BlockScope, BlockedBy, Gate};
 use super::wording as w;
@@ -91,7 +92,15 @@ pub struct VersionIdentity {
 
 pub struct Book<'a> {
     pub up: &'a Upstream,
+    /// 我们自己那份预设数据。**字段定义与三层取值全走它**（b04 Task 9）
+    pub presets: &'a Presets,
     draft: &'a Draft,
+    /// **清单**：有哪些机型、每台有哪些版本。来源是 `presets/machines/*.toml`
+    /// （借自 [`Committed::catalog`]）。
+    ///
+    /// b04 Task 8 之前这里读的是 `up.catalog` —— 那是上游的构建产物，只读，
+    /// 于是「加一个版本」保存之后它在树上看不见。现在清单是我们自己的数据
+    pub(super) catalog: &'a [CatalogMachine],
     /// 机型 id → 上游归并结果（派生，不落盘）。
     /// `pub(super)` 是给同层的 `preview` 用的 —— 它要推演"假如搬到那台机型"
     pub(super) digests: BTreeMap<String, Digested>,
@@ -99,7 +108,7 @@ pub struct Book<'a> {
     pub(super) bases: BTreeMap<String, Overrides>,
     /// uid → 我们写的版本覆盖
     pub(super) overs: BTreeMap<String, Overrides>,
-    /// 按机型顺序、机型内按上游顺序排好（新建的排在后面）
+    /// 按机型顺序、机型内按清单顺序排好（新建的排在后面）
     versions: Vec<VersionIdentity>,
     built: BTreeMap<String, BuiltRecord>,
     visibility: BTreeMap<String, Visibility>,
@@ -107,16 +116,25 @@ pub struct Book<'a> {
 }
 
 impl<'a> Book<'a> {
-    pub fn new(up: &'a Upstream, committed: &'a Committed, draft: &'a Draft) -> Self {
-        let digests: BTreeMap<String, Digested> = up
+    pub fn new(
+        up: &'a Upstream,
+        presets: &'a Presets,
+        committed: &'a Committed,
+        draft: &'a Draft,
+    ) -> Self {
+        let digests: BTreeMap<String, Digested> = committed
             .catalog
-            .machines()
             .iter()
-            .map(|m| (m.id.clone(), digest(&up.registry, m)))
+            .map(|m| {
+                (
+                    m.id.clone(),
+                    digest(&presets.registry, &m.id, &m.version_ids),
+                )
+            })
             .collect();
 
         let mut bases: BTreeMap<String, Overrides> = BTreeMap::new();
-        for m in up.catalog.machines() {
+        for m in &committed.catalog {
             let mut own = committed.machines.get(&m.id).cloned().unwrap_or_default();
             overlay(&mut own, draft, Level::Machine, &m.id);
             bases.insert(m.id.clone(), own);
@@ -126,9 +144,9 @@ impl<'a> Book<'a> {
         let mut versions: Vec<VersionIdentity> = Vec::new();
         let mut overs: BTreeMap<String, Overrides> = BTreeMap::new();
 
-        for m in up.catalog.machines() {
-            for v in &m.versions {
-                let uid = format!("{}/{}", m.id, v.id);
+        for m in &committed.catalog {
+            for vid in &m.version_ids {
+                let uid = format!("{}/{}", m.id, vid);
                 if purged.contains(uid.as_str()) {
                     continue;
                 }
@@ -144,21 +162,27 @@ impl<'a> Book<'a> {
                         .cloned()
                         .or_else(|| c.map(|x| x.machine_id.clone()))
                         .unwrap_or_else(|| m.id.clone()),
-                    version_id: v.id.clone(),
+                    version_id: vid.clone(),
                     name: draft
                         .renamed
                         .get(&uid)
                         .cloned()
                         .or_else(|| c.map(|x| x.name.clone()))
-                        .unwrap_or_else(|| v.name.clone()),
-                    tag: v.tag.clone(),
+                        .unwrap_or_else(|| vid.clone()),
+                    tag: c.and_then(|x| x.tag.clone()),
                     archived: draft
                         .archived
                         .get(&uid)
                         .copied()
                         .unwrap_or_else(|| c.is_some_and(|x| x.archived)),
                     is_new: false,
-                    mkp_preset: v.mkp_preset.clone(),
+                    // 产物还在上游那一层（资源与套餐这一轮没搬，见 presets/mod.rs）。
+                    // 清单里有、上游没有的版本 → `None` = 未生成，那是对的
+                    mkp_preset: up
+                        .catalog
+                        .machine(&m.id)
+                        .and_then(|x| x.version(vid))
+                        .and_then(|x| x.mkp_preset.clone()),
                     own_bbs: draft
                         .bbs
                         .get(&uid)
@@ -199,7 +223,9 @@ impl<'a> Book<'a> {
 
         Self {
             up,
+            presets,
             draft,
+            catalog: &committed.catalog,
             digests,
             bases,
             overs,
@@ -210,15 +236,26 @@ impl<'a> Book<'a> {
         }
     }
 
+    /* ---------- 清单 ---------- */
+
+    /// 清单里的机型，照文件名顺序
+    pub fn machines(&self) -> &[CatalogMachine] {
+        self.catalog
+    }
+
+    pub(super) fn machine(&self, id: &str) -> Option<&'a CatalogMachine> {
+        self.catalog.iter().find(|m| m.id == id)
+    }
+
     /* ---------- 取层 ---------- */
 
     /// 机型基底那一列的三层视图（版本层为空）
     pub fn machine_layers(&self, machine_id: &str) -> Option<Layers<'_>> {
         let d = self.digests.get(machine_id)?;
         let base = self.bases.get(machine_id)?;
-        let id = self.up.catalog.machine(machine_id)?.id.as_str();
+        let id = self.machine(machine_id)?.id.as_str();
         Some(Layers::new(
-            &self.up.registry,
+            &self.presets.registry,
             id,
             &d.base,
             base,
@@ -237,9 +274,9 @@ impl<'a> Book<'a> {
         let d = self.digests.get(&v.machine_id)?;
         let base = self.bases.get(&v.machine_id)?;
         let over = self.overs.get(uid)?;
-        let id = self.up.catalog.machine(&v.machine_id)?.id.as_str();
+        let id = self.machine(&v.machine_id)?.id.as_str();
         Some(Layers::new(
-            &self.up.registry,
+            &self.presets.registry,
             id,
             &d.base,
             base,
@@ -268,7 +305,7 @@ impl<'a> Book<'a> {
 
     /// 一台机型的默认 BBS：`defaultBundle` 指的那个套餐里的曲线
     pub fn machine_default_bbs(&self, machine_id: &str) -> Vec<String> {
-        let Some(m) = self.up.catalog.machine(machine_id) else {
+        let Some(m) = self.machine(machine_id) else {
             return Vec::new();
         };
         let Some(bid) = &m.default_bundle else {
@@ -386,7 +423,7 @@ impl<'a> Book<'a> {
         let mut over_own = 0usize;
         let mut version_count = 0usize;
 
-        for m in self.up.catalog.machines() {
+        for m in self.catalog {
             let d = &self.digests[&m.id];
             let ml = self.machine_layers(&m.id);
             let m_own = ml.as_ref().map(|l| l.own_count(Level::Machine)).unwrap_or(0);
@@ -454,7 +491,7 @@ impl<'a> Book<'a> {
                 total: m_total,
                 // 机型级：所有活着的版本都「暂无资源」才算这台机型暂无资源
                 build: roll_up(live.into_iter()),
-                dimensions_missing: m.dimensions.is_none(),
+                dimensions_missing: !m.has_dimensions,
                 versions: nodes,
             });
         }
@@ -471,7 +508,7 @@ impl<'a> Book<'a> {
             machines,
             archived,
             badges: Badges {
-                machines: self.up.catalog.machines().len(),
+                machines: self.catalog.len(),
                 versions: version_count,
                 base_items,
                 base_own,
@@ -615,7 +652,7 @@ impl<'a> Book<'a> {
         // 行取并集：任意一列的机型有这个字段，这一行就在
         let mut keys: Vec<&str> = Vec::new();
         for c in &cols {
-            for k in self.up.registry.visible_keys(&c.machine_id) {
+            for k in self.presets.registry.visible_keys(&c.machine_id) {
                 if !keys.contains(&k) {
                     keys.push(k);
                 }
@@ -627,13 +664,13 @@ impl<'a> Book<'a> {
 
         let gates: Vec<Option<Gate<'_>>> = cols
             .iter()
-            .map(|c| c.layers.as_ref().map(|l| Gate::new(&self.up.registry, l)))
+            .map(|c| c.layers.as_ref().map(|l| Gate::new(&self.presets.registry, l)))
             .collect();
 
         let rows: Vec<Row> = keys
             .into_iter()
             .filter_map(|key| {
-                let p = self.up.registry.param(key)?;
+                let p = self.presets.registry.param(key)?;
                 // **搜索一开，分类过滤让开**（doc §8.1）：
                 // 否则用户搜一个词、没命中当前分类，会以为这个字段不存在
                 if searching {
@@ -661,7 +698,7 @@ impl<'a> Book<'a> {
                 let parent = p
                     .parent_key
                     .as_deref()
-                    .and_then(|k| self.up.registry.param(k));
+                    .and_then(|k| self.presets.registry.param(k));
                 Some(Row {
                     key: key.to_owned(),
                     label: p.label.clone(),
@@ -713,7 +750,7 @@ impl<'a> Book<'a> {
             .map(|c| (c.machine_id.as_str(), c.version_uid.as_deref()))
             .collect();
         let mut out = Vec::new();
-        for m in self.up.catalog.machines() {
+        for m in self.catalog {
             if wanted.contains(&(m.id.as_str(), None)) {
                 let layers = self.machine_layers(&m.id);
                 out.push(ResolvedCol {
@@ -759,7 +796,7 @@ impl<'a> Book<'a> {
         let Some(layers) = &col.layers else {
             return Cell::not_applicable();
         };
-        let Some(p) = self.up.registry.param(key) else {
+        let Some(p) = self.presets.registry.param(key) else {
             return Cell::not_applicable();
         };
         let Some(hit) = layers.effective(key) else {
@@ -776,7 +813,7 @@ impl<'a> Book<'a> {
             None => (None, None),
             Some(b) => {
                 let here = self
-                    .up
+                    .presets
                     .registry
                     .param(&b.key)
                     .is_some_and(|c| c.applies_to(&col.machine_id));
@@ -829,13 +866,13 @@ impl<'a> Book<'a> {
             return Some(w::relate::controlled_by(self.label_of(&sw.key)));
         }
         // section 级条件：要用户做的事一样，但说法不同（「整组关着」vs「上一项没开」）
-        let sw = self.up.registry.section_show_when(&p.layout.section_id)?;
+        let sw = self.presets.registry.section_show_when(&p.layout.section_id)?;
         Some(w::relate::group_controlled_by(self.label_of(&sw.key)))
     }
 
     /// 字段的中文名。查不到就退回 key —— 空字符串会让那句话变成「受「」控制」
     fn label_of<'s>(&'s self, key: &'s str) -> &'s str {
-        self.up
+        self.presets
             .registry
             .param(key)
             .map_or(key, |p| p.label.as_str())
@@ -852,22 +889,22 @@ impl<'a> Book<'a> {
     ///
     /// 最后一段是 key，保证**同序时也稳定** —— 否则同一份数据两次渲染的顺序可能不同。
     fn row_sort_key<'k>(&self, key: &'k str) -> (i64, i64, i64, i64, &'k str) {
-        let Some(p) = self.up.registry.param(key) else {
+        let Some(p) = self.presets.registry.param(key) else {
             return (i64::MAX, i64::MAX, i64::MAX, i64::MAX, key);
         };
         let section = p.layout.section_id.as_str();
         let tab = self
             .tab_of(section)
-            .map_or(f64::MAX, |t| self.up.registry.tab_order(t));
+            .map_or(f64::MAX, |t| self.presets.registry.tab_order(t));
         let group = self
-            .up
+            .presets
             .registry
             .section_meta(section)
             .map_or(f64::MAX, |s| s.order);
         let family = p
             .parent_key
             .as_deref()
-            .and_then(|k| self.up.registry.param(k))
+            .and_then(|k| self.presets.registry.param(k))
             .map_or(p.layout.order, |parent| parent.layout.order);
         (
             milli(tab),
@@ -881,7 +918,7 @@ impl<'a> Book<'a> {
     /// 组的中文名。查不到就退化成 section id ——
     /// 空字符串会让分组行变成一条没有标题的空白，那比露出一个英文 id 更难查
     fn section_label(&self, section_id: &str) -> String {
-        self.up
+        self.presets
             .registry
             .section_meta(section_id)
             .map_or_else(|| section_id.to_owned(), |s| s.label.clone())
@@ -962,12 +999,12 @@ impl<'a> Book<'a> {
     /// 左栏导航：tab → section 两级 + 计数。**直接从字段定义数**，不受搜索与分类影响
     fn desk_nav(&self, machine_id: &str) -> Vec<DeskNavTab> {
         let mut per_section: BTreeMap<&str, usize> = BTreeMap::new();
-        for key in self.up.registry.visible_keys(machine_id) {
-            if let Some(p) = self.up.registry.param(key) {
+        for key in self.presets.registry.visible_keys(machine_id) {
+            if let Some(p) = self.presets.registry.param(key) {
                 *per_section.entry(p.layout.section_id.as_str()).or_default() += 1;
             }
         }
-        self.up
+        self.presets
             .registry
             .param_tabs()
             .into_iter()
@@ -997,7 +1034,7 @@ impl<'a> Book<'a> {
     }
 
     fn tab_of(&self, section_id: &str) -> Option<&str> {
-        self.up.registry.tab_of_section(section_id)
+        self.presets.registry.tab_of_section(section_id)
     }
 }
 
@@ -1424,7 +1461,7 @@ impl Cell {
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, CommittedVersion, Patch};
-    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
 
     fn committed() -> Committed {
         // 三台机型、四个版本，落盘的部分先全空 —— 干净仓库就是这个样子
@@ -1441,7 +1478,7 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared_upstream: true,
+                    declared: true,
                     ..Default::default()
                 },
             );
@@ -1452,7 +1489,7 @@ mod tests {
                 .map(|m| (m.to_owned(), Overrides::new()))
                 .collect(),
             versions,
-            machine_ids: ["A1", "A2L", "P1S"].into_iter().map(str::to_owned).collect(),
+            catalog: fixture_catalog(),
             ..Default::default()
         }
     }
@@ -1472,7 +1509,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let view = Book::new(&f.up, &c, &d).book_view();
+        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
 
         assert_eq!(view.badges.machines, 3);
         assert_eq!(view.badges.versions, 4);
@@ -1500,7 +1537,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         assert_eq!(b.build_state("A2L/STANDARD"), BuildState::NoResources);
         assert!(!b.has_any_recipe("A2L/STANDARD"), "上游给它 0 项机型差异");
@@ -1531,7 +1568,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // P1S 的唯一版本：上游归并把偏移上提到了机型基底 → 有配方
         assert!(b.has_any_recipe("P1S/LITE"));
@@ -1546,14 +1583,14 @@ mod tests {
         let mut d = Draft::default();
 
         // 先记一条「按当前配方生成过」
-        let fp = Book::new(&f.up, &c, &d)
+        let fp = Book::new(&f.up, &f.presets, &c, &d)
             .version_layers("A1/STANDARD")
             .unwrap()
             .fingerprint();
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::MarkBuilt {
                 uids: vec!["A1/STANDARD".to_owned()],
                 stamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -1562,7 +1599,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Book::new(&f.up, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.up, &f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Built
         );
 
@@ -1570,7 +1607,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -1580,7 +1617,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Book::new(&f.up, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.up, &f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -1598,7 +1635,7 @@ mod tests {
         let before: Vec<String> = ["A1/STANDARD", "A1/FAST"]
             .iter()
             .map(|u| {
-                Book::new(&f.up, &c, &d)
+                Book::new(&f.up, &f.presets, &c, &d)
                     .version_layers(u)
                     .unwrap()
                     .fingerprint()
@@ -1609,7 +1646,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -1618,7 +1655,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         for (i, u) in ["A1/STANDARD", "A1/FAST"].iter().enumerate() {
             assert_eq!(
                 b.version_layers(u).unwrap().fingerprint(),
@@ -1640,7 +1677,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -1649,7 +1686,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let mut moved = 0;
         for (i, u) in ["A1/STANDARD", "A1/FAST"].iter().enumerate() {
             if b.version_layers(u).unwrap().fingerprint() != before[i] {
@@ -1676,7 +1713,7 @@ mod tests {
         .collect();
         let mut d = Draft::default();
 
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         assert_eq!(
             *b.version_layers("A1/STANDARD").unwrap().effective("wiping.child").unwrap().value,
             serde_json::json!(99)
@@ -1685,7 +1722,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -1695,7 +1732,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(*l.effective("wiping.child").unwrap().value, serde_json::json!(20));
         assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
@@ -1712,7 +1749,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[
                 Patch::RenameVersion {
                     uid: "A1/FAST".to_owned(),
@@ -1733,7 +1770,7 @@ mod tests {
         )
         .unwrap();
 
-        let view = Book::new(&f.up, &c, &d).book_view();
+        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
         let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
         let p1s = view.machines.iter().find(|m| m.id == "P1S").unwrap();
 
@@ -1757,7 +1794,7 @@ mod tests {
         let e = apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::PurgeVersion {
                 uid: "A1/FAST".to_owned(),
             }],
@@ -1768,13 +1805,13 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::ArchiveVersion {
                 uid: "A1/FAST".to_owned(),
             }],
         )
         .unwrap();
-        let view = Book::new(&f.up, &c, &d).book_view();
+        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
         let a1 = view.machines.iter().find(|m| m.id == "A1").unwrap();
         assert_eq!(a1.versions.len(), 1);
         assert!(view.archived.iter().any(|v| v.uid == "A1/FAST"));
@@ -1789,7 +1826,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let want = ["A1", "A1/STANDARD", "A1/FAST", "P1S", "P1S/LITE"];
         for shuffled in [
@@ -1820,7 +1857,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let m = Book::new(&f.up, &c, &d).matrix(&cols(&[("A1", None)]), None, "");
+        let m = Book::new(&f.up, &f.presets, &c, &d).matrix(&cols(&[("A1", None)]), None, "");
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Machine);
         assert_eq!(m.cols[0].version_uid, None);
@@ -1833,7 +1870,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "");
         let keys: Vec<&str> = m.rows.iter().map(|r| r.key.as_str()).collect();
@@ -1859,7 +1896,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "");
         let mut seen: Vec<&str> = Vec::new();
@@ -1891,7 +1928,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None)]), None, "");
         let at = |k: &str| m.rows.iter().position(|r| r.key == k).unwrap();
@@ -1918,7 +1955,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let want = &cols(&[("A1", None), ("P1S", None)]);
         let a: Vec<String> = b.matrix(want, None, "").rows.into_iter().map(|r| r.key).collect();
@@ -1943,7 +1980,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // 干净状态下 wiping.mode 还是「擦料塔」，所以 wiping.child 是**可编辑**的
         let m = b.matrix(&cols(&[("A1", None)]), None, "");
@@ -1970,7 +2007,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -1980,7 +2017,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let m = b.matrix(&cols(&[("A1", None)]), None, "");
         let cell = &m.rows.iter().find(|r| r.key == "wiping.child").unwrap().cells[0];
 
@@ -2003,7 +2040,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
 
@@ -2041,7 +2078,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let all = b.desk("A1", Some("A1/STANDARD"), None, "");
         let searched = b.desk("A1", Some("A1/STANDARD"), None, "擦料塔");
@@ -2069,7 +2106,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -2079,7 +2116,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
         let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
         let mode = wipe.items.iter().find(|i| i.row.key == "wiping.mode").unwrap();
@@ -2090,7 +2127,7 @@ mod tests {
         assert!(note.contains('1'), "要说关掉了几项：{note}");
 
         // 没关的时候不给这一句，否则界面上多一条空话
-        let open = Book::new(&f.up, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
+        let open = Book::new(&f.up, &f.presets, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
         let mode2 = open
             .groups
             .iter()
@@ -2106,7 +2143,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // 只命中子项（「塔位置 X」是 wiping.child 的中文名）
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "塔位置");
@@ -2136,7 +2173,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -2146,7 +2183,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let m = b.matrix(&cols(&[("A1", None)]), None, "");
 
         let child = m.rows.iter().find(|r| r.key == "wiping.child").unwrap();
@@ -2181,7 +2218,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let one = cols(&[("A1", None)]);
 
         let only_wiping = b.matrix(&one, Some("wiping"), "");
@@ -2210,7 +2247,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         let no_cols = b.matrix(&[], None, "");
         assert_eq!(no_cols.empty_reason.as_deref(), Some(w::MATRIX_NO_COLS));
@@ -2228,7 +2265,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let rows = Book::new(&f.up, &c, &d).stock_rows();
+        let rows = Book::new(&f.up, &f.presets, &c, &d).stock_rows();
 
         assert_eq!(rows.len(), 4, "3 个 MKP + 1 个 BBS，界面素材不算");
         assert!(rows.iter().all(|r| !r.sha256.is_empty() && r.size > 0));
@@ -2241,7 +2278,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let mut d = Draft::default();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // A1 的 defaultBundle 里有那条 BBS → A1 的两个版本继承它 → 已分配
         let row = b.stock_rows().into_iter().find(|r| r.id == "a1_bbs_04").unwrap();
@@ -2257,14 +2294,14 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetVisibility {
                 file_id: "a1_bbs_04".to_owned(),
                 visibility: Visibility::ArchiveOnly,
             }],
         )
         .unwrap();
-        let row = Book::new(&f.up, &c, &d)
+        let row = Book::new(&f.up, &f.presets, &c, &d)
             .stock_rows()
             .into_iter()
             .find(|r| r.id == "a1_bbs_04")
@@ -2282,14 +2319,14 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetBbs {
                 uid: "A1/STANDARD".to_owned(),
                 list: Some(vec![]),
             }],
         )
         .unwrap();
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::Own);
         assert!(b.effective_bbs("A1/STANDARD").is_empty());
         assert_eq!(
@@ -2307,7 +2344,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let rows = Book::new(&f.up, &c, &d).build_rows();
+        let rows = Book::new(&f.up, &f.presets, &c, &d).build_rows();
 
         assert_eq!(rows.len(), 4);
         for r in &rows {
@@ -2336,12 +2373,12 @@ mod tests {
         let mut d = Draft::default();
 
         assert_eq!(
-            Book::new(&f.up, &c, &d).book_view().artifact,
+            Book::new(&f.up, &f.presets, &c, &d).book_view().artifact,
             ArtifactState::Missing
         );
 
         // 把三个有产物的版本都记成已生成
-        let b = Book::new(&f.up, &c, &d);
+        let b = Book::new(&f.up, &f.presets, &c, &d);
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
         let fps: BTreeMap<String, String> = uids
             .iter()
@@ -2356,7 +2393,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::MarkBuilt {
                 uids: uids.iter().map(|u| (*u).to_owned()).collect(),
                 stamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -2365,7 +2402,7 @@ mod tests {
         )
         .unwrap();
 
-        let view = Book::new(&f.up, &c, &d).book_view();
+        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
         assert_eq!(
             view.artifact,
             ArtifactState::Fresh,

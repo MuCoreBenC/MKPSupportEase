@@ -66,7 +66,7 @@ use crate::workbench::domain::patch::Patch;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::Level;
 use crate::workbench::paths;
-use crate::workbench::upstream::registry::{ParamDef, UiComponent, ValueType};
+use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
 use super::{state, with_ctx};
 
@@ -77,7 +77,7 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(issues::inspect(&Book::new(&ctx.up, &c, &d)))
+            Ok(issues::inspect(&Book::new(&ctx.up, &ctx.presets, &c, &d)))
         })
     })
 }
@@ -127,7 +127,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     // 段名从数据里来。段序按每段内最小的 layout.order —— 与界面上的顺序一致
     let mut sections: Vec<(&str, f64)> = Vec::new();
     for key in layers.keys() {
-        let Some(p) = book.up.registry.param(key) else {
+        let Some(p) = book.presets.registry.param(key) else {
             continue;
         };
         match sections.iter_mut().find(|(s, _)| *s == p.section) {
@@ -143,7 +143,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
         // 同一个 tomlKey 下可能有多个参数（内联表）。按 tomlKey 首次出现的顺序排
         let mut groups: Vec<(&str, Vec<&ParamDef>)> = Vec::new();
         for key in layers.keys() {
-            let Some(p) = book.up.registry.param(key) else {
+            let Some(p) = book.presets.registry.param(key) else {
                 continue;
             };
             if p.section != section {
@@ -320,7 +320,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &c, &d);
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
 
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
@@ -410,7 +410,7 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.up, &c, &d), &uid)?.text)
+            Ok(render(&Book::new(&ctx.up, &ctx.presets, &c, &d), &uid)?.text)
         })
     })
 }
@@ -447,7 +447,7 @@ pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &c, &d);
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
             let v = book
                 .version(&uid)
                 .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))?;
@@ -475,7 +475,7 @@ pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
                 .version_layers(&uid)
                 .ok_or_else(|| AppError::corrupted("取值层取不出来"))?;
             for (key, want) in &snap {
-                let Some(p) = ctx.up.registry.param(key) else {
+                let Some(p) = ctx.presets.registry.param(key) else {
                     continue; // 上游已经删了这个参数，恢复它没有意义
                 };
                 let Some(hit) = layers.effective(key) else {
@@ -542,7 +542,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
     traced("wb_publish", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &c, &d);
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
                 return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
@@ -622,7 +622,7 @@ fn sha256_of(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft};
-    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use crate::workbench::domain::Overrides;
     use crate::workbench::store::Store;
 
@@ -644,7 +644,7 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared_upstream: true,
+                    declared: true,
                     ..Default::default()
                 },
             );
@@ -655,7 +655,7 @@ mod tests {
                 .map(|m| (m.to_owned(), Overrides::new()))
                 .collect(),
             versions,
-            machine_ids: ["A1", "A2L", "P1S"].into_iter().map(str::to_owned).collect(),
+            catalog: fixture_catalog(),
             ..Default::default()
         };
         (dir, f, c)
@@ -666,7 +666,7 @@ mod tests {
     fn rendered_toml_parses_and_keeps_the_values() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &c, &draft);
+        let book = Book::new(&f.up, &f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
         assert!(r.text.starts_with("# uuid: "));
@@ -696,7 +696,7 @@ mod tests {
     fn rendering_is_deterministic_apart_from_the_timestamp() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &c, &draft);
+        let book = Book::new(&f.up, &f.presets, &c, &draft);
         let a = render(&book, "A1/STANDARD").unwrap();
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
@@ -709,12 +709,12 @@ mod tests {
     fn changing_a_value_changes_the_output() {
         let (_d, f, c) = setup();
         let mut draft = Draft::default();
-        let before = render(&Book::new(&f.up, &c, &draft), "A1/STANDARD").unwrap();
+        let before = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
 
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -723,7 +723,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let after = render(&Book::new(&f.up, &c, &draft), "A1/STANDARD").unwrap();
+        let after = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
 
         assert!(!same_payload(&before.text, &after.text));
         assert_ne!(before.fingerprint, after.fingerprint);
@@ -767,7 +767,7 @@ mod tests {
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -776,7 +776,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let book = Book::new(&f.up, &c, &draft);
+        let book = Book::new(&f.up, &f.presets, &c, &draft);
         let r = issues::inspect(&book);
         assert!(r.blocked());
         assert!(!w::disabled::BUILD_BLOCKED.is_empty());
@@ -788,7 +788,7 @@ mod tests {
     fn a2l_renders_but_is_skipped_by_generate() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &c, &draft);
+        let book = Book::new(&f.up, &f.presets, &c, &draft);
 
         let r = render(&book, "A2L/STANDARD").unwrap();
         assert!(r.text.contains("# machine: A2L"));

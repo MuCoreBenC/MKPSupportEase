@@ -16,6 +16,12 @@
 //! 每份文件都带 `v`（结构版本）。**不带的话，将来改形状只能靠"试着反序列化，
 //! 失败就当空"**，而那会把用户的一整本配方静默当成空的。
 //!
+//! # 清单不在这里（b04 Task 8）
+//!
+//! 上面这些文件里只有**值**。有哪些机型、每台有哪些版本、版本叫什么，
+//! 来自 `presets/machines/*.toml` —— 那是我们自己的数据，**可写**。
+//! 所以 [`load`] 收 `&Presets`，[`save`] 收 `&mut Presets`（新建版本要进清单）。
+//!
 //! # 三条规矩
 //!
 //! 1. **文件不存在 = 干净状态，不是错误。** 干净仓库里这些文件一个都没有（doc §7：
@@ -41,10 +47,10 @@ use crate::error::AppError;
 use crate::workbench::clock;
 use crate::workbench::domain::layer::Overrides;
 use crate::workbench::domain::patch::{
-    BuiltRecord, BundleEdit, Committed, CommittedVersion, Draft, Visibility,
+    BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft, Visibility,
 };
+use crate::workbench::presets::Presets;
 use crate::workbench::store::{validate_id, Store};
-use crate::workbench::upstream::Upstream;
 
 /// 结构版本。读到更大的数字就拒绝，而不是硬着头皮解析
 const V: u32 = 1;
@@ -121,20 +127,22 @@ impl std::fmt::Debug for Loaded {
 
 /// 把 `workbench/` 读成 [`Committed`]。
 ///
-/// 需要 `upstream` 是因为版本的**显示名**默认来自上游 —— 我们的文件里只在改过名时才有它
-pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
+/// # 清单来自 `presets/machines/*.toml`（b04 Task 8）
+///
+/// 这里读两处，各管一半：
+///
+/// - **清单**（有哪些机型、每台有哪些版本、版本叫什么）← `presets`，我们自己的数据
+/// - **值**（机型基底与版本覆盖）← `workbench/*.json`，我们写的那一半
+///
+/// 换源之前清单读的是上游那份构建产物，于是「加一个版本」保存之后它在树上看不见 ——
+/// 因为清单里没有它，而清单是只读的。现在清单是可写的，那个死胡同没了
+pub fn load(store: &Store, presets: &Presets) -> Result<Loaded, AppError> {
     let mut notices = Vec::new();
     let mut machines: BTreeMap<String, Overrides> = BTreeMap::new();
     let mut versions: BTreeMap<String, CommittedVersion> = BTreeMap::new();
+    let mut catalog: Vec<CatalogMachine> = Vec::new();
 
-    let known: BTreeMap<&str, Vec<&str>> = up
-        .catalog
-        .machines()
-        .iter()
-        .map(|m| (m.id.as_str(), m.versions.iter().map(|v| v.id.as_str()).collect()))
-        .collect();
-
-    for m in up.catalog.machines() {
+    for m in presets.catalog.machines() {
         let rel = store.machine_rel(&m.id)?;
         let base = match store.read_doc::<MachineFile>(&rel, "机型基底")? {
             Some(f) => {
@@ -144,13 +152,21 @@ pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
             None => Overrides::new(),
         };
         machines.insert(m.id.clone(), base);
+        catalog.push(CatalogMachine {
+            id: m.id.clone(),
+            display: m.display.clone(),
+            icon: m.icon.clone(),
+            default_bundle: m.default_bundle.clone(),
+            has_dimensions: m.has_dimensions,
+            version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+        });
 
-        // **先给上游声明的每一版建一条空记录。**
+        // **先给清单里的每一版建一条空记录。**
         //
         // `Committed` 是"这些版本当前落盘的样子"，而不是"我们写过文件的那些版本"。
         // 只按文件建的话，干净仓库里 `Committed.versions` 是空的，于是
         // `patch::validate` 会把「改 A1/STANDARD 的某一项」判成"版本不存在" ——
-        // 而那一版明明在上游清单里。第一次接 IPC 层时就是这么红的。
+        // 而那一版明明在清单里。第一次接 IPC 层时就是这么红的。
         for v in &m.versions {
             versions.insert(
                 format!("{}/{}", m.id, v.id),
@@ -160,8 +176,9 @@ pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
                     name: v.name.clone(),
                     overrides: Overrides::new(),
                     archived: false,
+                    tag: v.tag.clone(),
                     bbs: None,
-                    declared_upstream: true,
+                    declared: true,
                 },
             );
         }
@@ -173,16 +190,12 @@ pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
             };
             check_version(f.v, &rel)?;
 
-            let upstream_name = up
-                .catalog
-                .machine(&m.id)
-                .and_then(|x| x.version(&vid))
-                .map(|x| x.name.clone());
-            if upstream_name.is_none() {
-                // 上游已经没有这一版了。**说出来** —— 它在树上会整个消失。
+            let declared = m.versions.iter().find(|x| x.id == vid);
+            if declared.is_none() {
+                // 清单里已经没有这一版了。**说出来** —— 它在树上会整个消失。
                 // 但记录还是要留着：留着才有机会把它的值搬走或删掉
                 notices.push(format!(
-                    "{}/{} 在上游已经不存在，它的改动不会出现在树上（文件还在，没有删）",
+                    "{}/{} 已经不在机型清单里，它的改动不会出现在树上（文件还在，没有删）",
                     m.id, vid
                 ));
             }
@@ -191,21 +204,25 @@ pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
                 CommittedVersion {
                     machine_id: m.id.clone(),
                     version_id: vid.clone(),
-                    name: f.name.or(upstream_name.clone()).unwrap_or_else(|| vid.clone()),
+                    name: f
+                        .name
+                        .or_else(|| declared.map(|x| x.name.clone()))
+                        .unwrap_or_else(|| vid.clone()),
                     overrides: f.overrides,
                     archived: f.archived,
+                    tag: declared.and_then(|x| x.tag.clone()),
                     bbs: f.bbs,
-                    declared_upstream: upstream_name.is_some(),
+                    declared: declared.is_some(),
                 },
             );
         }
     }
 
-    // 上游不认识的机型目录：同样要说出来
+    // 清单里没有的机型目录：同样要说出来
     for id in store.machine_ids()? {
-        if !known.contains_key(id.as_str()) {
+        if presets.catalog.machine(&id).is_none() {
             notices.push(format!(
-                "仓库里有机型 {id} 的配方，但上游机型清单里没有它 —— 这一份不会出现在树上"
+                "仓库里有机型 {id} 的配方，但机型清单里没有它 —— 这一份不会出现在树上"
             ));
         }
     }
@@ -224,12 +241,7 @@ pub fn load(store: &Store, up: &Upstream) -> Result<Loaded, AppError> {
             visibility: delivery.visibility,
             bundles: delivery.bundles,
             built: built.records,
-            machine_ids: up
-                .catalog
-                .machines()
-                .iter()
-                .map(|m| m.id.clone())
-                .collect(),
+            catalog,
         },
         notices,
     })
@@ -285,10 +297,13 @@ pub struct SaveOutcome {
 /// 把草稿写回仓库文件。
 ///
 /// 顺序是**先算出全部要写的内容，再逐个原子写，最后删旧文件**。
-/// 中途失败最坏是多一份文件（下一次加载会报"上游没有这一版"），不会两头都没有
+/// 中途失败最坏是多一份文件（下一次加载会报"不在机型清单里"），不会两头都没有。
+///
+/// `presets` 是 `&mut` 的，因为**新建版本要进清单** —— 清单在
+/// `presets/machines/{机型}.toml` 里，而那是这一版"存在"的依据
 pub fn save(
     store: &Store,
-    up: &Upstream,
+    presets: &mut Presets,
     committed: &Committed,
     draft: &Draft,
 ) -> Result<SaveOutcome, AppError> {
@@ -337,14 +352,14 @@ pub fn save(
         }
         let file = VersionFile {
             v: V,
-            // 只在真的改过名时才写进文件；否则留 `None`，显示名跟着上游走
+            // 只在真的改过名时才写进文件；否则留 `None`，显示名跟着清单走
             name: renamed.cloned().or_else(|| {
-                let upstream_name = up
+                let declared_name = presets
                     .catalog
                     .machine(&to_machine)
-                    .and_then(|m| m.version(&cv.version_id))
+                    .and_then(|m| m.versions.iter().find(|x| x.id == cv.version_id))
                     .map(|x| x.name.as_str());
-                match upstream_name {
+                match declared_name {
                     Some(n) if n == cv.name => None,
                     _ => Some(cv.name.clone()),
                 }
@@ -370,12 +385,6 @@ pub fn save(
             continue;
         }
         validate_id(&v.version_id, "版本 id")?;
-        let mut over = Overrides::new();
-        for (key, value) in pending_of(draft, crate::workbench::domain::Level::Version, &v.uid) {
-            if let Some(val) = value {
-                over.insert(key, val);
-            }
-        }
         let rel = store.version_rel(&v.machine_id, &v.version_id)?;
         if store
             .read_doc::<serde_json::Value>(&rel, "版本覆盖")?
@@ -388,11 +397,35 @@ pub fn save(
             ));
             continue;
         }
+
+        /* **先进清单，再写值。**
+
+        清单（`presets/machines/{机型}.toml` 的 `[[versions]]`）才是"这一版存在"的依据；
+        只写覆盖文件的话，保存之后它在树上看不见 —— 那正是 b04 Task 8 之前那个死胡同。
+        顺序反过来（先写值再进清单）在清单写失败时会留下一个谁都不认的孤儿文件。 */
+        let added = match presets.catalog.machine_mut(&v.machine_id) {
+            Ok(m) => m.add_version(&v.version_id, &v.name),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = added {
+            notices.push(format!("「{}」没有保存：{}", v.name, e.message));
+            continue;
+        }
+        presets.catalog.write_machine(&v.machine_id)?;
+
+        let mut over = Overrides::new();
+        for (key, value) in pending_of(draft, crate::workbench::domain::Level::Version, &v.uid) {
+            if let Some(val) = value {
+                over.insert(key, val);
+            }
+        }
         store.write_doc(
             &rel,
             &VersionFile {
                 v: V,
-                name: Some(v.name.clone()),
+                // 清单里刚写下的就是这个名字，所以**不在覆盖文件里再钉一遍** ——
+                // 钉住之后去清单里改名，树上不会跟着变
+                name: None,
                 archived: draft.archived.get(&v.uid).copied().unwrap_or(false),
                 bbs: draft.bbs.get(&v.uid).cloned().flatten(),
                 overrides: over,
@@ -472,13 +505,13 @@ mod tests {
         (d, s)
     }
 
-    /// 干净仓库：一个文件都没有。**`Committed.versions` 仍然要有上游那四版** ——
+    /// 干净仓库：一个文件都没有。**`Committed.versions` 仍然要有清单里那四版** ——
     /// 它是"这些版本当前落盘的样子"，不是"我们写过文件的那些版本"
     #[test]
     fn a_clean_repo_loads_as_empty_not_as_an_error() {
         let f = Fixture::load();
         let (_d, s) = store();
-        let loaded = load(&s, &f.up).unwrap();
+        let loaded = load(&s, &f.presets).unwrap();
         assert_eq!(loaded.committed.machines.len(), 3, "三台机型都有一张空表");
         assert_eq!(loaded.committed.versions.len(), 4, "四个版本都在，覆盖都是空的");
         assert!(loaded
@@ -487,6 +520,17 @@ mod tests {
             .values()
             .all(|v| v.overrides.is_empty() && !v.archived));
         assert_eq!(loaded.committed.versions["A1/STANDARD"].name, "标准版");
+        // 清单本身也要出来，而且照机型文件的顺序
+        assert_eq!(
+            loaded
+                .committed
+                .catalog
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["A1", "A2L", "P1S"]
+        );
+        assert_eq!(loaded.committed.catalog[0].version_ids, ["STANDARD", "FAST"]);
         assert!(loaded.notices.is_empty());
         assert!(read_draft(&s).unwrap().is_clean());
     }
@@ -494,15 +538,15 @@ mod tests {
     /// 保存 → 重新读 → 值与身份都回来
     #[test]
     fn saving_then_loading_round_trips() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let (_d, s) = store();
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
 
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[
                 Patch::SetValue {
                     level: Level::Machine,
@@ -525,10 +569,10 @@ mod tests {
         .unwrap();
         write_draft(&s, &draft).unwrap();
 
-        let out = save(&s, &f.up, &c, &draft).unwrap();
+        let out = save(&s, &mut f.presets, &c, &draft).unwrap();
         assert!(out.remap.is_empty(), "没有新建也没有移动");
 
-        let again = load(&s, &f.up).unwrap().committed;
+        let again = load(&s, &f.presets).unwrap().committed;
         assert_eq!(again.machines["A1"]["wiping.child"], serde_json::json!(42));
         let v = &again.versions["A1/STANDARD"];
         assert_eq!(v.overrides["toolhead.offset.x"], serde_json::json!(7));
@@ -537,23 +581,23 @@ mod tests {
         assert!(read_draft(&s).unwrap().is_clean());
     }
 
-    /// 没改过名的版本**不把名字写进文件** —— 写了的话上游以后改中文名，我们这边收不到
+    /// 没改过名的版本**不把名字写进文件** —— 写了的话去清单里改中文名，这边收不到
     #[test]
     fn an_unrenamed_version_does_not_pin_its_name() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let (_d, s) = store();
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::ArchiveVersion {
                 uid: "A1/FAST".to_owned(),
             }],
         )
         .unwrap();
-        save(&s, &f.up, &c, &draft).unwrap();
+        save(&s, &mut f.presets, &c, &draft).unwrap();
 
         let raw: serde_json::Value = s
             .read_doc(&s.version_rel("A1", "FAST").unwrap(), "版本")
@@ -562,21 +606,33 @@ mod tests {
         assert_eq!(raw["name"], serde_json::Value::Null, "名字不该被钉住");
         assert_eq!(raw["archived"], true);
 
-        let again = load(&s, &f.up).unwrap().committed;
-        assert_eq!(again.versions["A1/FAST"].name, "高速版", "显示名跟着上游");
+        let again = load(&s, &f.presets).unwrap().committed;
+        assert_eq!(again.versions["A1/FAST"].name, "高速版", "显示名跟着清单");
     }
 
-    /// **新建版本保存后 uid 会变**，所以要交出改名表
+    /// **那条死胡同的正面回归**（b04 Task 8.5）。
+    ///
+    /// 历史上「新建版本」保存之后在树上**看不见**：版本清单当时是上游的只读产物，
+    /// 新建的那一版不在里面，于是它落成了一个谁都不认的孤儿文件。
+    /// 当时那条测试断言的是「必须有一条提示」—— 那等于用测试把一个死胡同钉住了。
+    ///
+    /// 清单换成我们自己的 `presets/machines/*.toml` 之后，它该真的出现。四件事都要成立：
+    ///
+    /// 1. 机型文件里多了一个 `[[versions]]` 块，而且是**盘上**的（重读一遍再查）
+    /// 2. 重新加载时它 `declared`，并且**一条提示都没有** —— 它不再是孤儿
+    /// 3. 它出现在 `Book` 铺出来的树上，自己那个值也在
+    /// 4. uid 变了（`new-1` → `A1/NEW1`），所以要交出改名表
     #[test]
-    fn a_new_version_gets_remapped_on_save() {
-        let f = Fixture::load();
+    fn a_new_version_shows_up_on_the_tree_after_saving() {
+        // 临时目录要活过那次写，所以整份交出来（见 `Fixture::into_parts`）
+        let (_fx, up, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &presets.registry,
             &[Patch::NewVersion {
                 machine_id: "A1".to_owned(),
                 name: "我的新配方".to_owned(),
@@ -586,7 +642,7 @@ mod tests {
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "new-1".to_owned(),
@@ -596,31 +652,55 @@ mod tests {
         )
         .unwrap();
 
-        let out = save(&s, &f.up, &c, &draft).unwrap();
+        let out = save(&s, &mut presets, &c, &draft).unwrap();
         assert_eq!(out.remap.get("new-1").map(String::as_str), Some("A1/NEW1"));
+        assert!(out.notices.is_empty(), "没有该报的事：{:?}", out.notices);
 
-        let again = load(&s, &f.up).unwrap();
-        // 上游没有 NEW1 这一版 → 要有一条提示，而不是静默消失
-        assert_eq!(again.notices.len(), 1);
-        assert!(again.notices[0].contains("NEW1"));
+        // ① 清单**在盘上**多了这一版。重读一遍再查 —— 内存里成了盘上没成是最难查的一类
+        let fresh = Presets::load_from(presets.root()).expect("改完还得读得通");
+        let a1 = fresh.catalog.machine("A1").expect("A1 还在");
+        assert!(
+            a1.versions
+                .iter()
+                .any(|v| v.id == "NEW1" && v.name == "我的新配方"),
+            "机型文件里没有 NEW1 —— 那就是那个死胡同：保存了，但清单里没有它"
+        );
+        assert_eq!(a1.versions.len(), 3, "原来两版，加一版");
+
+        // ② 它是清单里声明着的，不是孤儿；一条提示都不该有
+        let again = load(&s, &fresh).unwrap();
+        assert!(
+            again.notices.is_empty(),
+            "新建的版本又被当成孤儿了：{:?}",
+            again.notices
+        );
         let v = &again.committed.versions["A1/NEW1"];
+        assert!(v.declared, "清单里有它，`declared` 却是 false");
         assert_eq!(v.name, "我的新配方");
         assert_eq!(v.overrides["wiping.child"], serde_json::json!(5));
+
+        // ③ 树上看得见。这是那条死胡同当年真正失效的地方
+        let clean = Draft::default();
+        let view = crate::workbench::domain::Book::new(&up, &fresh, &again.committed, &clean)
+            .book_view();
+        let node = view.machines.iter().find(|m| m.id == "A1").expect("A1 那一支");
+        assert_eq!(node.versions.len(), 3, "树上还是两版 —— 新建的那一版没出现");
+        assert!(node.versions.iter().any(|x| x.uid == "A1/NEW1"));
     }
 
     /// **移动之后 uid 也会变**，而且旧文件要删掉
     #[test]
     fn moving_rewrites_the_file_and_remaps_the_uid() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let (_d, s) = store();
 
         // 先落一份 A1/FAST
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/FAST".to_owned(),
@@ -629,22 +709,22 @@ mod tests {
             }],
         )
         .unwrap();
-        save(&s, &f.up, &c, &draft).unwrap();
+        save(&s, &mut f.presets, &c, &draft).unwrap();
 
         // 再把它搬到 P1S
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::MoveVersion {
                 uid: "A1/FAST".to_owned(),
                 to_machine_id: "P1S".to_owned(),
             }],
         )
         .unwrap();
-        let out = save(&s, &f.up, &c, &draft).unwrap();
+        let out = save(&s, &mut f.presets, &c, &draft).unwrap();
         assert_eq!(out.remap.get("A1/FAST").map(String::as_str), Some("P1S/FAST"));
 
         assert!(
@@ -653,7 +733,7 @@ mod tests {
                 .is_none(),
             "旧文件要删掉，不然下次加载会出现两份"
         );
-        let again = load(&s, &f.up).unwrap();
+        let again = load(&s, &f.presets).unwrap();
         assert_eq!(
             again.committed.versions["P1S/FAST"].overrides["wiping.child"],
             serde_json::json!(11)
@@ -662,13 +742,13 @@ mod tests {
 
     /// 删除**进回收站**。
     ///
-    /// 能删的只有「上游已经不再有的版本」—— 上游还声明着的版本删不掉（`patch` 那边拦着），
-    /// 因为版本清单是上游的，删掉我们的文件它照样在树上
+    /// 能删的只有「清单里已经没有的版本」—— 清单里还声明着的删不掉（`patch` 那边拦着），
+    /// 因为这一层管的是值，删掉我们的文件它照样在树上
     #[test]
     fn purging_an_orphan_version_moves_the_file_to_the_trash() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let (_d, s) = store();
-        // 手工放一份上游没有的版本 —— 相当于上游把 OLD 这一版删掉了
+        // 手工放一份清单里没有的版本 —— 相当于有人把 OLD 这一版从机型文件里删了
         s.write_doc(
             &s.version_rel("A1", "OLD").unwrap(),
             &VersionFile {
@@ -683,41 +763,41 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load(&s, &f.up).unwrap();
-        assert!(!loaded.committed.versions["A1/OLD"].declared_upstream);
-        assert_eq!(loaded.notices.len(), 1, "上游没有这一版要有一条提示");
+        let loaded = load(&s, &f.presets).unwrap();
+        assert!(!loaded.committed.versions["A1/OLD"].declared);
+        assert_eq!(loaded.notices.len(), 1, "清单里没有这一版要有一条提示");
 
         let c = loaded.committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::PurgeVersion {
                 uid: "A1/OLD".to_owned(),
             }],
         )
         .unwrap();
-        let out = save(&s, &f.up, &c, &draft).unwrap();
+        let out = save(&s, &mut f.presets, &c, &draft).unwrap();
 
         assert_eq!(s.trash_entries().unwrap().len(), 1);
         assert!(out.notices.iter().any(|n| n.contains("回收站")));
-        let again = load(&s, &f.up).unwrap();
+        let again = load(&s, &f.presets).unwrap();
         assert!(!again.committed.versions.contains_key("A1/OLD"));
         assert!(again.notices.is_empty(), "孤儿清掉了，提示也该没了");
     }
 
-    /// 上游还声明着的版本**删不掉**，并且要指出该用归档
+    /// 清单里还声明着的版本**删不掉**，并且要指出该用归档
     #[test]
-    fn purging_an_upstream_version_is_refused_and_points_at_archiving() {
+    fn purging_a_declared_version_is_refused_and_points_at_archiving() {
         let f = Fixture::load();
         let (_d, s) = store();
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         let e = apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::PurgeVersion {
                 uid: "A1/FAST".to_owned(),
             }],
@@ -728,10 +808,10 @@ mod tests {
         assert!(draft.is_clean());
     }
 
-    /// 新建的 id 撞上已有文件时**不覆盖**，记一条提示
+    /// 新建的 id 撞上已有文件时**不覆盖**，记一条提示，而且**清单一个字节都不动**
     #[test]
     fn a_colliding_new_version_is_refused_not_overwritten() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let (_d, s) = store();
         // 手工放一份 A1/NEW1
         s.write_doc(
@@ -745,28 +825,35 @@ mod tests {
             },
         )
         .unwrap();
+        let before = std::fs::read_to_string(f.presets.catalog.machine("A1").unwrap().file())
+            .expect("机型文件在");
 
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::NewVersion {
                 machine_id: "A1".to_owned(),
                 name: "我的新配方".to_owned(),
             }],
         )
         .unwrap();
-        let out = save(&s, &f.up, &c, &draft).unwrap();
+        let out = save(&s, &mut f.presets, &c, &draft).unwrap();
 
         assert!(out.remap.is_empty());
         assert_eq!(out.notices.len(), 1);
-        let again = load(&s, &f.up).unwrap().committed;
+        let again = load(&s, &f.presets).unwrap().committed;
         assert_eq!(
             again.versions["A1/NEW1"].name, "别人的配方",
             "别人的配方一个字节都不该被动"
         );
+        // **失败不留痕**：被拒之后机型文件的文本一字未动 ——
+        // 不然清单里会多一个没有值的 NEW1，而那比什么都没发生更糟
+        let after = std::fs::read_to_string(f.presets.catalog.machine("A1").unwrap().file())
+            .expect("机型文件还在");
+        assert_eq!(before, after, "被拒之后机型文件被改了");
     }
 
     /// 干净草稿**不留空文件** —— 留着的话「有没有未保存改动」在文件系统上看不出来
@@ -774,12 +861,12 @@ mod tests {
     fn a_clean_draft_leaves_no_file() {
         let f = Fixture::load();
         let (_d, s) = store();
-        let c = load(&s, &f.up).unwrap().committed;
+        let c = load(&s, &f.presets).unwrap().committed;
         let mut draft = Draft::default();
         apply(
             &mut draft,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -811,7 +898,7 @@ mod tests {
             &serde_json::json!({ "v": 99, "base": { "wiping.child": 1 } }),
         )
         .unwrap();
-        let e = load(&s, &f.up).unwrap_err();
+        let e = load(&s, &f.presets).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
         assert!(e.detail.unwrap_or_default().contains("99"));
     }

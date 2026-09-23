@@ -1,4 +1,4 @@
-//! 只在测试里编译的上游夹具。
+//! 只在测试里编译的夹具：**一份上游 + 一份我们自己的 `presets/`**。
 //!
 //! 为什么要一份共享夹具：`derive` 与 `preview` 都需要一整套自洽的上游
 //! （字段定义 + 布局 + 机型清单 + 资源清单，四份还要过得了那一串一致性断言）。
@@ -15,23 +15,136 @@
 //! | `showWhen` | `wiping.child` 吊在 `wiping.mode` 上 | 「看得见改不动」 |
 //! | `gcode` | `toolhead.script` | 单元格第二分支 + 拒绝批量 |
 //! | 什么都没有 | A2L（无尺寸、无产物、无机型差异） | 「暂无资源」 |
+//!
+//! # 两份数据，一张清单（b04 Task 8）
+//!
+//! 机型与版本的**清单**现在来自 `presets/machines/*.toml`（我们自己的数据，可写），
+//! 产物与套餐还在上游。两边说的必须是同一批机型 —— 所以 [`Fixture::load`] 末尾有一条
+//! **构造时**的断言在盯：手写的上游 JSON 与生成的 presets TOML 一旦分岔就立刻 panic，
+//! 而不是等某个测试以"派生结果少一行"的形式失败。
+//!
+//! `registry/param_registry.toml` 与 `layout_schema.toml` 不手写第二遍：
+//! 它们由上游那两份 JSON **序列化成 TOML** 得到（两边键名本来就一样，
+//! 见 `presets/registry.rs` 的模块文档）。一份来源两种格式，不会分岔。
 
 use std::path::Path;
 
+use crate::workbench::presets::Presets;
 use crate::workbench::upstream::Upstream;
+
+use super::patch::CatalogMachine;
+
+/// 夹具里的一个版本：`(版本 id, 版本名, tag)`
+type FixtureVersion = (&'static str, &'static str, &'static str);
+/// 夹具里的一台机型：`(机型 id, defaultBundle, 版本列表)`
+type FixtureMachine = (&'static str, &'static str, &'static [FixtureVersion]);
+
+/// 夹具的机型清单。
+///
+/// **一处定义**：presets 夹具的 TOML、以及测试里那份 `Committed` 的清单都从这里长出来
+pub const FIXTURE_MACHINES: &[FixtureMachine] = &[
+    (
+        "A1",
+        "A1_default",
+        &[("STANDARD", "标准版", "推荐"), ("FAST", "高速版", "热门")],
+    ),
+    ("A2L", "", &[("STANDARD", "标准版", "")]),
+    ("P1S", "", &[("LITE", "精简版", "推荐")]),
+];
+
+/// 上面那份清单的 `Committed.catalog` 形态。干净仓库里它就是全部的清单
+pub fn fixture_catalog() -> Vec<CatalogMachine> {
+    FIXTURE_MACHINES
+        .iter()
+        .map(|(id, bundle, versions)| CatalogMachine {
+            id: (*id).to_owned(),
+            display: (*id).to_owned(),
+            icon: Some("a1".to_owned()),
+            default_bundle: Some((*bundle).to_owned()).filter(|s| !s.is_empty()),
+            has_dimensions: has_dimensions(id),
+            version_ids: versions.iter().map(|(v, _, _)| (*v).to_owned()).collect(),
+        })
+        .collect()
+}
+
+/// A2L **刻意没有尺寸** —— 真上游就是这样，而「这台还没配尺寸」是界面上要说出来的一档
+fn has_dimensions(id: &str) -> bool {
+    id != "A2L"
+}
 
 pub struct Fixture {
     /// 临时目录要活到测试结束，所以持有它
     _dir: tempfile::TempDir,
     pub up: Upstream,
+    /// 我们自己那份数据。**清单的来源**，而且是可写的
+    pub presets: Presets,
 }
 
 impl Fixture {
     pub fn load() -> Self {
         let dir = tempfile::tempdir().unwrap();
         write_all(dir.path());
+        write_presets(&dir.path().join("presets"));
         let up = Upstream::load_from(dir.path()).expect("夹具本身应该是自洽的");
-        Self { _dir: dir, up }
+        let presets =
+            Presets::load_from(&dir.path().join("presets")).expect("presets 夹具应该读得通");
+        check_same_catalog(&up, &presets);
+        Self {
+            _dir: dir,
+            up,
+            presets,
+        }
+    }
+
+    /// 把临时目录连同两份数据一起交出去。
+    ///
+    /// **要写 presets 的测试必须用这个**：`presets` 会被写回磁盘，
+    /// 那个临时目录得活过那次写。直接 `f.presets` 搬走的话目录已经被删了，
+    /// 而症状是一条"建不出文件"的错，离原因很远
+    pub fn into_parts(self) -> (tempfile::TempDir, Upstream, Presets) {
+        (self._dir, self.up, self.presets)
+    }
+}
+
+/// **构造时**的对齐断言：上游那份手写 JSON 与 presets 夹具说的必须是同一批机型与版本。
+///
+/// 分岔的后果不会以"夹具不对"的形式出现，而是"派生结果少了一行"或者
+/// "产物状态莫名是未生成" —— 那种失败要查很久才回到这里
+fn check_same_catalog(up: &Upstream, presets: &Presets) {
+    let ours: Vec<(String, Vec<String>)> = presets
+        .catalog
+        .machines()
+        .iter()
+        .map(|m| (m.id.clone(), m.versions.iter().map(|v| v.id.clone()).collect()))
+        .collect();
+    let theirs: Vec<(String, Vec<String>)> = up
+        .catalog
+        .machines()
+        .iter()
+        .map(|m| (m.id.clone(), m.versions.iter().map(|v| v.id.clone()).collect()))
+        .collect();
+    assert_eq!(
+        ours, theirs,
+        "夹具的两份数据分岔了：presets 说 {ours:?}，上游说 {theirs:?}"
+    );
+    assert_eq!(
+        ours.len(),
+        FIXTURE_MACHINES.len(),
+        "FIXTURE_MACHINES 与实际生成的机型数不一致"
+    );
+    // 尺寸那一档也要对齐：`dimensions_missing` 现在读 presets，而
+    // `issues` 那边还在看上游（尺寸页是后面的任务）。两边说的不一样时，
+    // 界面上会出现「这台没尺寸」和「这台有尺寸」同时成立
+    for m in presets.catalog.machines() {
+        let upstream_has = up
+            .catalog
+            .machine(&m.id)
+            .is_some_and(|x| x.dimensions.is_some());
+        assert_eq!(
+            m.has_dimensions, upstream_has,
+            "{} 的尺寸：presets 说 {}，上游说 {upstream_has}",
+            m.id, m.has_dimensions
+        );
     }
 }
 
@@ -40,12 +153,63 @@ fn w(root: &Path, rel: &str, v: &serde_json::Value) {
 }
 
 fn write_all(root: &Path) {
-    w(root, "content/param_registry.json", &params());
-    w(root, "content/layout_schema.json", &layout());
+    // 字段定义与布局**只写 TOML**（b04 Task 9：上游那两份 JSON 已经没人读了）；
+    // 下面 `write_presets` 会从同一份 JSON 转出来
     w(root, "content/machine_catalog.json", &catalog());
     w(root, "manifest.json", &manifest());
     w(root, "content/fallback_registry.json", &fallback());
 }
+
+/// 我们自己那份 `presets/`。
+///
+/// 机型文件手写（它的形状就是被测对象之一），字段定义与布局**从上游那两份 JSON 转过来** ——
+/// 同一份内容手写两遍就是给分岔留门
+fn write_presets(root: &Path) {
+    let t = |rel: &str, text: String| {
+        crate::fsx::atomic::atomic_write(&root.join(rel), text.as_bytes()).unwrap();
+    };
+
+    t(
+        "brands.toml",
+        "[[brands]]\nid = 'Bambu Lab'\nname = '拓竹 (Bambu Lab)'\nlogo = 'bambu-logo.png'\n"
+            .to_owned(),
+    );
+    for (id, bundle, versions) in FIXTURE_MACHINES {
+        let mut s = String::new();
+        s.push_str(&format!("id = '{id}'\n"));
+        s.push_str(&format!("display = '{id}'\n"));
+        s.push_str("brand = 'Bambu Lab'\n");
+        s.push_str("icon = 'a1'\n");
+        if !bundle.is_empty() {
+            s.push_str(&format!("defaultBundle = '{bundle}'\n"));
+        }
+        if *id == "A1" {
+            s.push_str("externalAliases = ['A1C']\n");
+        }
+        // 这一层只看「有没有 `[dimensions]`」（`presets/catalog.rs` 没给尺寸建细模型），
+        // 所以放一格就够；A2L 刻意不放
+        if has_dimensions(id) {
+            s.push_str("\n[dimensions]\nbedSize = { width = 256, depth = 256 }\n");
+        }
+        for (vid, name, tag) in *versions {
+            s.push_str(&format!("\n[[versions]]\nid = '{vid}'\nname = '{name}'\n"));
+            // 空 tag **不写这一行**（写成 '' 会读成「填过，填了个空」）
+            if !tag.is_empty() {
+                s.push_str(&format!("tag = '{tag}'\n"));
+            }
+        }
+        t(&format!("machines/{id}.toml"), s);
+    }
+
+    t("registry/param_registry.toml", as_toml(&params()));
+    t("layout_schema.toml", as_toml(&layout()));
+}
+
+/// 把一份 JSON 原样转成 TOML。两边的键名一样（camelCase），所以这是纯格式转换
+fn as_toml(v: &serde_json::Value) -> String {
+    toml::to_string(v).expect("夹具那两份 JSON 应该都能表示成 TOML")
+}
+
 
 fn params() -> serde_json::Value {
     serde_json::json!({

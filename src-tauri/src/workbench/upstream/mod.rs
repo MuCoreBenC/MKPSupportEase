@@ -1,16 +1,20 @@
-//! 上游只读层 —— `mkpse-presets` 的读取入口。
+//! 上游只读层 —— `mkpse-presets` 里**还没搬过来**的那几份数据。
 //!
-//! **这一层只读。** 上游是另一个仓库的产物（由 mkppanel 的 Builder 从 `source/*.toml` 全量生成），
-//! 工作台没有任何理由往里写；写进去只会在下一次上游构建时被覆盖，而覆盖是静默的。
+//! **这一层只读，而且正在缩小。** b04 Task 9 把字段定义与布局搬进了
+//! [`crate::workbench::presets`]（连同那三条一致性断言），所以这里只剩资源与套餐清单、
+//! 机型的产物视图、以及应急规则。Task 12 会把它们也搬完，然后整个目录删掉。
 //!
-//! 四个子模块，每个文件**只有一个所有者**：
+//! 三个子模块，每个文件**只有一个所有者**：
 //!
 //! | 子模块 | 读什么 | 实测规模 |
 //! |---|---|---|
-//! | [`registry`] | `content/param_registry.json` + `content/layout_schema.json` | 74 参数 / 8 tab / 27 section（只有 16 个装参数） |
 //! | [`manifest`] | `manifest.json` + `content/preset_registry.json` | 72 资源（18 交付物 + 54 素材）/ 5 套餐 / 15 内容文件 |
 //! | [`catalog`] | `content/machine_catalog.json`（+ 清单的机型视图） | 6 机型 / 10 版本 / 5 份尺寸（缺 A2L）/ 3 份禁区 |
 //! | [`fallback`] | `content/fallback_registry.json` | 20 条 + guide 长文 |
+//!
+//! 机型与版本的**清单**已经不在这一层了（b04 Task 8：清单来自
+//! `presets/machines/*.toml`）。这里的 [`catalog`] 现在只剩一个用处：
+//! 按 `(机型, 版本)` 查它的产物（`mkpPresetAssetId`）。
 //!
 //! # 刻意不读的两个文件
 //!
@@ -37,12 +41,10 @@
 pub mod catalog;
 pub mod fallback;
 pub mod manifest;
-pub mod registry;
 
 pub use catalog::{Catalog, Machine, MachineVersion};
 pub use fallback::FallbackRegistry;
 pub use manifest::{Asset, Bundle, Manifest, ResourceType};
-pub use registry::Registry;
 
 use std::path::Path;
 
@@ -51,15 +53,12 @@ use crate::workbench::paths;
 
 /// 一次读齐的上游快照。
 ///
-/// 为什么要有这个聚合：四份数据之间有交叉断言（版本指向的产物在不在、尺寸两份对不对、
-/// 参数的 `machineVariants` 版本键是不是真的机型版本）。分四次各读一次，
-/// 就没有任何时刻能把它们放在一起查。
+/// 为什么要有这个聚合：几份数据之间有交叉断言（版本指向的产物在不在、尺寸两份对不对）。
+/// 分开各读一次，就没有任何时刻能把它们放在一起查。
 ///
 /// **它是一个快照，不是缓存。** 读完之后上游文件改了，这份不会跟着变 ——
 /// 这是刻意的：一次操作里各处看到的上游必须是同一份，否则派生出来的状态会自相矛盾。
-/// 什么时候重读由调用方（Task 10 的 IPC 层）决定。
 pub struct Upstream {
-    pub registry: Registry,
     pub manifest: Manifest,
     pub catalog: Catalog,
     pub fallback: FallbackRegistry,
@@ -69,8 +68,8 @@ impl std::fmt::Debug for Upstream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Upstream({:?} / {:?} / {:?} / {:?})",
-            self.registry, self.manifest, self.catalog, self.fallback
+            "Upstream({:?} / {:?} / {:?})",
+            self.manifest, self.catalog, self.fallback
         )
     }
 }
@@ -87,52 +86,11 @@ impl Upstream {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let manifest = Manifest::load_from(root)?;
         let catalog = Catalog::load_from(root, &manifest)?;
-        let out = Self {
-            registry: Registry::load_from(root)?,
+        Ok(Self {
             fallback: FallbackRegistry::load_from(root)?,
             manifest,
             catalog,
-        };
-        out.check_cross_consistency()?;
-        Ok(out)
-    }
-
-    /// 跨文件的那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
-    ///
-    /// 这是**最容易悄悄坏掉**的一条。键写错一个字母（`"A1_Mini:FAST"`）不会有任何报错 ——
-    /// 三步归并（doc §3.3）会把它当成一台不存在的机型的覆盖，然后它既不进任何机型的基底、
-    /// 也不进任何版本的覆盖，那个值就凭空消失了。界面上看起来只是"这一项用的是出厂默认"。
-    pub fn check_cross_consistency(&self) -> Result<(), AppError> {
-        let machines: Vec<&str> = self.catalog.machines().iter().map(|m| m.id.as_str()).collect();
-        let keys = self.catalog.machine_keys();
-
-        for p in self.registry.params() {
-            for table in [
-                ("machineVariants", &p.machine_variants),
-                ("machineMinVariants", &p.machine_min_variants),
-                ("machineMaxVariants", &p.machine_max_variants),
-            ] {
-                let (name, map) = table;
-                for k in map.keys() {
-                    let ok = if k.contains(':') {
-                        keys.contains(&k.as_str())
-                    } else {
-                        machines.contains(&k.as_str())
-                    };
-                    if !ok {
-                        return Err(AppError::corrupted(format!(
-                            "{} 的 {name} 里有一个认不出的键：{k}",
-                            p.key
-                        ))
-                        .with_detail(
-                            "键要么是机型 id（A1），要么是机型:版本（A1:FASTV3.3）。\
-                             认不出的键会在归并时凭空消失，界面上只看得到「这一项用的是出厂默认」",
-                        ));
-                    }
-                }
-            }
-        }
-        Ok(())
+        })
     }
 }
 
@@ -173,7 +131,7 @@ mod tests {
                 );
             }
         }
-        assert!(scanned >= 4, "只扫到 {scanned} 个文件，判据在空转");
+        assert!(scanned >= 3, "只扫到 {scanned} 个文件，判据在空转");
     }
 
     /// 测试夹具要造临时上游，所以只查 `#[cfg(test)]` 之前的那一段；注释行也去掉 ——
@@ -211,8 +169,7 @@ mod tests {
             eprintln!("没定位到上游 mkpse-presets，这条对齐检查未执行（不是通过）");
             return;
         };
-        let u = super::Upstream::load_from(&root).expect("四份上游数据读不齐或交叉断言不过");
-        assert!(!u.registry.params().is_empty());
+        let u = super::Upstream::load_from(&root).expect("三份上游数据读不齐或交叉断言不过");
         assert!(!u.catalog.machines().is_empty());
         assert!(!u.manifest.deliverables().is_empty());
         assert!(!u.fallback.rules().is_empty());

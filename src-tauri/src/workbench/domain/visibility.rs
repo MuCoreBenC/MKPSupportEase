@@ -39,8 +39,8 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::workbench::upstream::registry::{ShowOp, ShowWhen, ValueType};
-use crate::workbench::upstream::Registry;
+use crate::workbench::presets::registry::{ShowOp, ShowWhen, ValueType};
+use crate::workbench::presets::ParamRegistry as Registry;
 
 use super::layer::Layers;
 
@@ -319,7 +319,7 @@ fn op_word(op: ShowOp) -> &'static str {
 ///
 /// 开关念「开启 / 关闭」，枚举念它的中文选项名 —— 界面上显示 `disk` 的话，
 /// 用户要在一堆中文按钮里猜哪个是 `disk`
-fn display_value(target: &crate::workbench::upstream::registry::ParamDef, wanted: &Value) -> String {
+fn display_value(target: &crate::workbench::presets::registry::ParamDef, wanted: &Value) -> String {
     if target.value_type == ValueType::Bool {
         return match as_bool(wanted) {
             Some(true) => "开启".into(),
@@ -454,12 +454,12 @@ mod tests {
                   "items": [{ "id": "i7", "paramKey": "in_gated_section" }] }
             ] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let r = Registry::load_from(d.path()).unwrap();
+        let r = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
         (d, r)
     }
 
@@ -662,12 +662,12 @@ mod tests {
                 { "id": "i0", "paramKey": "x" }, { "id": "i1", "paramKey": "y" }
             ] }] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let reg = Registry::load_from(d.path()).unwrap();
+        let reg = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
 
         let empty = Overrides::new();
         let l = Layers::without_upstream(&reg, "A1", &empty, &empty);
@@ -733,12 +733,12 @@ mod tests {
                 { "id": "i0", "paramKey": "a" }, { "id": "i1", "paramKey": "b" }
             ] }] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let reg2 = Registry::load_from(d.path()).unwrap();
+        let reg2 = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
         let l = Layers::without_upstream(&reg2, "A1", &empty, &empty);
         let bad = Gate::new(&reg2, &l).unsatisfiable();
         assert_eq!(bad.len(), 1);
@@ -746,24 +746,25 @@ mod tests {
         assert_eq!(bad[0].wants, serde_json::json!("teleport"));
     }
 
-    /* ---------- 真上游 ---------- */
+    /* ---------- 真数据 ---------- */
 
     /// 真数据上：没有环、没有永不成立的条件、四层链能走通，
     /// 且**默认值下不该有一大片字段是灰的**
     #[test]
-    fn real_upstream_chains_are_sane() {
-        let Some(root) = paths::upstream_root() else {
-            eprintln!("没定位到上游 mkpse-presets，这条对齐检查未执行（不是通过）");
+    fn real_data_chains_are_sane() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条对齐检查未执行（不是通过）");
             return;
         };
-        let up = crate::workbench::upstream::Upstream::load_from(&root).unwrap();
-        let m = up.catalog.machine("A1").expect("上游应该有 A1");
-        let d = crate::workbench::domain::digest(&up.registry, m);
-        let over = &d.versions[&m.versions[0].id];
-        let l = Layers::without_upstream(&up.registry, &m.id, &d.base, over);
-        let g = Gate::new(&up.registry, &l);
+        let p = crate::workbench::presets::Presets::load_from(&root).unwrap();
+        let m = p.catalog.machine("A1").expect("清单里应该有 A1");
+        let vids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
+        let d = crate::workbench::domain::digest(&p.registry, &m.id, &vids);
+        let over = &d.versions[&vids[0]];
+        let l = Layers::without_upstream(&p.registry, &m.id, &d.base, over);
+        let g = Gate::new(&p.registry, &l);
 
-        assert!(g.cycles().is_empty(), "上游出现了 showWhen 环：{:?}", g.cycles());
+        assert!(g.cycles().is_empty(), "真数据里出现了 showWhen 环：{:?}", g.cycles());
         assert!(
             g.unsatisfiable().is_empty(),
             "有字段的条件永远不可能满足：{:?}",
@@ -787,7 +788,7 @@ mod tests {
         let deep = g.blocked("wiping.tower_rib_speed_value");
         let _ = deep; // 值取决于默认值，这里只要它能算出来且不死循环
         assert!(
-            up.registry
+            p.registry
                 .param("wiping.tower_rib_speed_value")
                 .and_then(|p| p.show_when.as_ref())
                 .is_some(),
@@ -801,9 +802,9 @@ mod tests {
     /// 一旦分岔，界面上会出现两种嵌套关系 —— 用户看到一个字段缩在某项下面，
     /// 但把那项打开它还是灰的
     #[test]
-    fn real_upstream_parent_key_matches_show_when() {
-        let Some(root) = paths::upstream_root() else {
-            eprintln!("没定位到上游 mkpse-presets，这条对齐检查未执行（不是通过）");
+    fn real_data_parent_key_matches_show_when() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条对齐检查未执行（不是通过）");
             return;
         };
         let reg = Registry::load_from(&root).unwrap();

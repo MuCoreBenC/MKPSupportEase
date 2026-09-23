@@ -11,6 +11,20 @@
 //!
 //! 所以数据搬进我们项目（`<repo>/presets/`），这一层**读它也写它**。
 //!
+//! # 现在切到哪一步了（b04 Task 8）
+//!
+//! | 谁 | 读哪一层 |
+//! |---|---|
+//! | 机型与版本的**清单**（有哪些机型、每台有哪些版本、版本六个元字段） | **这一层** |
+//! | 字段定义（74 条）、界面布局、资源与套餐清单 | 还在 `upstream` |
+//!
+//! 清单换源的后果一句话：**清单是可写的**。「加一个版本」保存之后它真的出现在树上，
+//! 而不是留下一个谁都不认的孤儿文件（那是换源之前的死胡同，见 `app/storage.rs` 里
+//! `a_new_version_shows_up_on_the_tree_after_saving`）。
+//!
+//! 剩下那半边（三层取值改读这一层的 `[params.machineVariants]`、删掉我们自造的
+//! `workbench/machines|versions/*.json`）是 Task 8 后面几步。
+//!
 //! # 一条判据先于一切写入
 //!
 //! **读进来不改再写出去，字节必须不变。**
@@ -32,7 +46,7 @@ use crate::error::AppError;
 use crate::workbench::paths;
 
 pub use catalog::{Brand, Catalog, Machine, MachineField, MachineVersion, VersionField, Zone};
-pub use registry::{Layout, LayoutItem, LayoutSection, LayoutTab, ParamRegistry};
+pub use registry::{ParamRegistry, ShowOp, ShowWhen, TabMeta, UiComponent, ValueType};
 
 /// 读一个源文件。读不到要**说出是哪个文件** —— 只说"读不到"没法据以行动
 pub(crate) fn read(path: &Path) -> Result<String, AppError> {
@@ -49,6 +63,93 @@ pub(crate) fn parse_text(text: &str, path: &Path) -> Result<DocumentMut, AppErro
     })
 }
 
+/// 把字符串包成一个**单引号（字面量）表示**的 TOML 值。
+///
+/// # 为什么不能直接用 `toml_edit::value(s)`
+///
+/// 它输出双引号，而真数据的字符串**全用单引号**（`name = '标准版'`）。
+/// 每改一个字段就多一处不一致，文件会**逐渐漂成混合风格** —— 那是不可逆的熵增，
+/// 而且每次 diff 都多一行噪音。
+///
+/// 这一条不是审美：`one_edit_only` 那条判据说的是「别处没动」，
+/// 而引号属于「这一处」，所以它**通得过** —— 但保真的本意是
+/// 「只有我改的那个值变了」，不包括表示形式。
+/// 这个漂移是靠一条专门去问的断言才发现的，测试全绿并不代表它没发生。
+///
+/// # 怎么做到的
+///
+/// `toml_edit` 没有公开 API 能直接设置「表示形式」（`set_repr_unchecked` 是私有的），
+/// 所以走一条更朴素的路：**解析一小段 `k = '值'`**，让 `toml_edit` 自己按原文建出带
+/// 单引号表示的值，再把它取出来。
+///
+/// 这条路比私有 API 更可靠：**解析成功本身就证明那个表示是合法的**。
+/// 解析失败（说明 `can_be_literal` 判漏了）就退回双引号 —— 自带兜底，不会写出坏 TOML。
+///
+/// # 退回双引号的条件
+///
+/// TOML 的字面量字符串**不支持任何转义**：里面不能有单引号，也不能跨行或含控制字符。
+/// 含这些的值只能用双引号 + 转义 —— 那时风格让位于正确。
+/// 多行 G-code 走的就是这一支（真数据里它们本来就是带 `\n` 转义的双引号字符串）。
+pub(crate) fn literal_str(s: &str) -> toml_edit::Item {
+    if can_be_literal(s) {
+        if let Ok(doc) = format!("k = '{s}'").parse::<DocumentMut>() {
+            if let Some(item) = doc.get("k") {
+                return item.clone();
+            }
+        }
+    }
+    toml_edit::value(s)
+}
+
+pub(crate) fn can_be_literal(s: &str) -> bool {
+    !s.contains('\'') && !s.chars().any(char::is_control)
+}
+
+/// 一次编辑只动了一处：**除了中间那一段，前后都逐字节不变。**
+///
+/// 返回 `(被删掉的那段, 被插入的那段)`。
+///
+/// # 为什么不用「新文本以旧文本为前缀」
+///
+/// 那一条把**实现细节**写进了判据 —— 它说的是「改动发生在末尾」，
+/// 而我们真正想验的是「别处没动」。两句话在"追加"这个场景下碰巧等价，
+/// 换成**删除**或**中间插入**就分道扬镳：删一个 `[[versions]]` 块时前缀断言直接失效，
+/// 那时候只能退而写一条更弱的判据，而更弱的判据放得过真正的损坏。
+///
+/// 这一条对三种改动都成立，所以新增 / 删除 / 改一个字段可以共用它 ——
+/// 机型文件与 `param_registry.toml` 也共用同一条（b04 Task 10 起）。
+#[cfg(test)]
+pub(crate) fn one_edit_only(before: &str, after: &str) -> (String, String) {
+    let pre = before
+        .bytes()
+        .zip(after.bytes())
+        .position(|(a, b)| a != b)
+        .unwrap_or(before.len().min(after.len()));
+    let max_suf = before.len().min(after.len()) - pre;
+    let suf = (0..max_suf)
+        .position(|i| {
+            before.as_bytes()[before.len() - 1 - i] != after.as_bytes()[after.len() - 1 - i]
+        })
+        .unwrap_or(max_suf);
+
+    // 切在字符边界上，否则中文会被劈成半个字
+    let cut = |s: &str, lo: usize, hi: usize| {
+        let mut lo = lo;
+        while lo < s.len() && !s.is_char_boundary(lo) {
+            lo -= 1;
+        }
+        let mut hi = hi;
+        while hi > lo && !s.is_char_boundary(hi) {
+            hi += 1;
+        }
+        s[lo..hi].to_owned()
+    };
+    (
+        cut(before, pre, before.len() - suf),
+        cut(after, pre, after.len() - suf),
+    )
+}
+
 /// 一次加载的全部预设数据。
 ///
 /// 目前是机型目录 + 字段定义 + 界面布局。还没搬的是 `assets/` / `bundles/` /
@@ -58,7 +159,6 @@ pub(crate) fn parse_text(text: &str, path: &Path) -> Result<DocumentMut, AppErro
 pub struct Presets {
     pub catalog: Catalog,
     pub registry: ParamRegistry,
-    pub layout: Layout,
     root: PathBuf,
 }
 
@@ -77,17 +177,112 @@ impl Presets {
     }
 
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
-        Ok(Self {
+        let out = Self {
             catalog: Catalog::load_from(root)?,
             registry: ParamRegistry::load_from(root)?,
-            layout: Layout::load_from(root)?,
             root: root.to_path_buf(),
-        })
+        };
+        out.check_cross_consistency()?;
+        Ok(out)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    /// 写一个机型 / 版本的值，**写完落盘**（原子写）。
+    ///
+    /// # 为什么 owner 必须在这一层查
+    ///
+    /// `machineVariants` 的键指向机型与版本，而那两样在另一个文件里。
+    /// 写进一个不存在的键之后，下一次 [`Self::load_from`] 会被
+    /// [`Self::check_cross_consistency`] 判成 `Corrupted` —— **整个工作台起不来**。
+    /// 所以这一步不是"顺手校验"，是防止把数据写成一个自己都读不回来的状态。
+    ///
+    /// 写完**重读盘再由调用方返回界面**：界面显示的必须是落盘结果（doc §1 头一条纪律）
+    pub fn set_variant(
+        &mut self,
+        key: &str,
+        owner: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), AppError> {
+        self.check_owner_exists(owner)?;
+        self.registry.set_variant(key, owner, value)?;
+        self.registry.write_back()
+    }
+
+    /// 清空一个机型 / 版本的值（删键），写完落盘
+    pub fn clear_variant(&mut self, key: &str, owner: &str) -> Result<(), AppError> {
+        self.check_owner_exists(owner)?;
+        self.registry.clear_variant(key, owner)?;
+        self.registry.write_back()
+    }
+
+    /// `A1` 要是真机型，`A1:FAST` 要是真机型的真版本
+    fn check_owner_exists(&self, owner: &str) -> Result<(), AppError> {
+        let (machine, version) = match owner.split_once(':') {
+            Some((m, v)) => (m, Some(v)),
+            None => (owner, None),
+        };
+        let m = self.catalog.machine(machine).ok_or_else(|| {
+            AppError::not_found(format!("没有机型 {machine}")).with_detail(
+                "值只能写在真机型或真版本上 —— 写别的会让下一次加载直接失败".to_owned(),
+            )
+        })?;
+        if let Some(v) = version {
+            if !m.versions.iter().any(|x| x.id == v) {
+                return Err(AppError::not_found(format!("{machine} 没有版本 {v}"))
+                    .with_detail("版本清单在机型文件的 [[versions]] 里".to_owned()));
+            }
+        }
+        Ok(())
+    }
+
+    /// 跨文件那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
+    ///
+    /// 这是**最容易悄悄坏掉**的一条。键写错一个字母（`"A1_Mini:FAST"`）不会有任何报错 ——
+    /// 三步归并（doc §3.3）会把它当成一台不存在的机型的覆盖，然后它既不进任何机型的基底、
+    /// 也不进任何版本的覆盖，那个值就凭空消失了。界面上看起来只是"这一项用的是出厂默认"。
+    ///
+    /// 它只能在这一层查：字段定义在 `registry`，机型与版本在 `catalog`，
+    /// 分开读的话没有任何时刻能把两边放在一起看
+    pub fn check_cross_consistency(&self) -> Result<(), AppError> {
+        let machines: Vec<&str> = self
+            .catalog
+            .machines()
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        let keys = self.catalog.machine_keys();
+
+        for p in self.registry.params() {
+            for (name, map) in [
+                ("machineVariants", &p.machine_variants),
+                ("machineMinVariants", &p.machine_min_variants),
+                ("machineMaxVariants", &p.machine_max_variants),
+            ] {
+                for k in map.keys() {
+                    let ok = if k.contains(':') {
+                        keys.contains(k)
+                    } else {
+                        machines.contains(&k.as_str())
+                    };
+                    if !ok {
+                        return Err(AppError::corrupted(format!(
+                            "{} 的 {name} 里有一个认不出的键：{k}",
+                            p.key
+                        ))
+                        .with_detail(
+                            "键要么是机型 id（A1），要么是机型:版本（A1:FASTV3.3）。\
+                             认不出的键会在归并时凭空消失，界面上只看得到「这一项用的是出厂默认」",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
 
     /// 删掉这个版本之后，`param_registry.toml` 里哪些字段会留下孤儿引用。
     ///

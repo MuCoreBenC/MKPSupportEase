@@ -224,7 +224,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
         let Some(layers) = book.version_layers(&v.uid) else {
             continue;
         };
-        let gate = Gate::new(&book.up.registry, &layers);
+        let gate = Gate::new(&book.presets.registry, &layers);
 
         // 环：**阻断**。它不成立时可见性算不出稳定结果，产物里那些字段进不进都说不清
         for c in gate.cycles() {
@@ -275,7 +275,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
         }
 
         for key in layers.keys() {
-            let Some(p) = book.up.registry.param(key) else {
+            let Some(p) = book.presets.registry.param(key) else {
                 continue;
             };
             let Some(hit) = layers.effective(key) else {
@@ -354,7 +354,7 @@ fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
         .map(|m| m.id.as_str())
         .collect();
 
-    for p in book.up.registry.params() {
+    for p in book.presets.registry.params() {
         let ghosts: Vec<&str> = p
             .machine_filter
             .iter()
@@ -435,7 +435,7 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
-    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use crate::workbench::domain::Overrides;
     use std::collections::BTreeMap;
 
@@ -453,7 +453,7 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared_upstream: true,
+                    declared: true,
                     ..Default::default()
                 },
             );
@@ -464,7 +464,7 @@ mod tests {
                 .map(|m| (m.to_owned(), Overrides::new()))
                 .collect(),
             versions,
-            machine_ids: ["A1", "A2L", "P1S"].into_iter().map(str::to_owned).collect(),
+            catalog: fixture_catalog(),
             ..Default::default()
         }
     }
@@ -476,7 +476,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &c, &d));
+        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
 
         assert_eq!(r.blocks, 0, "健康数据被判成阻断了：{:#?}", r.first_block());
         assert!(!r.blocked());
@@ -494,7 +494,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: crate::workbench::domain::Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -505,7 +505,7 @@ mod tests {
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &c, &d));
+        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
         assert!(r.blocked(), "枚举值不存在该是阻断");
         let b = r.first_block().unwrap();
         assert_eq!(b.severity, Severity::Block);
@@ -542,7 +542,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: crate::workbench::domain::Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -551,7 +551,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let r = inspect(&Book::new(&f.up, &c, &d));
+        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
         assert_eq!(r.issues[0].severity, Severity::Block);
         assert!(r.issues.windows(2).all(|w| w[0].severity <= w[1].severity));
     }
@@ -562,7 +562,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &c, &d));
+        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
 
         assert!(!r.issues.is_empty(), "一条都没有，下面的判据在空转");
         for i in &r.issues {
@@ -586,7 +586,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: crate::workbench::domain::Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -595,19 +595,19 @@ mod tests {
             }],
         )
         .unwrap();
-        assert!(inspect(&Book::new(&f.up, &c, &d)).blocked());
+        assert!(inspect(&Book::new(&f.up, &f.presets, &c, &d)).blocked());
 
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::ArchiveVersion {
                 uid: "A1/STANDARD".to_owned(),
             }],
         )
         .unwrap();
         assert!(
-            !inspect(&Book::new(&f.up, &c, &d)).blocked(),
+            !inspect(&Book::new(&f.up, &f.presets, &c, &d)).blocked(),
             "归档之后它不交付了，那条阻断也就不该挡着别人生成"
         );
     }

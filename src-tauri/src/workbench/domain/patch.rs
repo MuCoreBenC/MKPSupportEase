@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::AppError;
-use crate::workbench::upstream::Registry;
+use crate::workbench::presets::ParamRegistry as Registry;
 
 use super::layer::{Level, Overrides};
 
@@ -236,7 +236,7 @@ impl Draft {
                 ok
             }
             Some((Level::Machine, owner, _)) => {
-                let ok = committed.machine_ids.contains(owner);
+                let ok = committed.has_machine(owner);
                 if !ok {
                     gone.insert(owner.to_owned());
                 }
@@ -276,8 +276,39 @@ pub struct Committed {
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
     pub built: BTreeMap<String, BuiltRecord>,
-    /// 上游有哪些机型。校验 `owner` 与 `to_machine_id` 用
-    pub machine_ids: BTreeSet<String>,
+    /// **清单**：有哪些机型、每台有哪些版本。来源是 `presets/machines/*.toml`
+    /// （b04 Task 8）—— 在那之前它是 `machine_ids`，来源是上游那份构建产物。
+    ///
+    /// 换源的后果一句话：**清单是我们自己的数据，可写**。
+    /// 「加一个版本」保存之后它真的会出现在树上，而不是只留下一个孤儿文件
+    pub catalog: Vec<CatalogMachine>,
+}
+
+impl Committed {
+    pub fn machine(&self, id: &str) -> Option<&CatalogMachine> {
+        self.catalog.iter().find(|m| m.id == id)
+    }
+
+    pub fn has_machine(&self, id: &str) -> bool {
+        self.machine(id).is_some()
+    }
+}
+
+/// 清单里的一台机型。**只有清单，不含参数值** ——
+/// 值那三层还在 `machines` / `versions` 里（Task 8 后面几步才搬）
+#[derive(Debug, Clone, Default)]
+pub struct CatalogMachine {
+    pub id: String,
+    /// 界面上显示的名字。实测有机型的 `name` 是空串而 `display` 才是给人看的
+    pub display: String,
+    pub icon: Option<String>,
+    /// `defaultBundle`：这台机型默认那一套 BBS 曲线
+    pub default_bundle: Option<String>,
+    /// 机型文件里有没有 `[dimensions]`。A2L 实测没有 —— 界面上要能看出"这台还没配尺寸"
+    pub has_dimensions: bool,
+    /// 版本 id，**照机型文件里的顺序**。
+    /// 不用 `BTreeSet` 是因为顺序会直接进界面，而字典序不是作者写下的顺序
+    pub version_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -287,14 +318,17 @@ pub struct CommittedVersion {
     pub name: String,
     pub overrides: Overrides,
     pub archived: bool,
+    /// 版本卡上那个角标（`推荐` / `热门`）。来源是机型文件里的 `tag`
+    pub tag: Option<String>,
     /// `None` = 继承机型默认的那一份 BBS
     pub bbs: Option<Vec<String>>,
-    /// **上游机型清单里还有这一版吗。**
+    /// **清单里还有这一版吗**（`presets/machines/{机型}.toml` 的 `[[versions]]`）。
     ///
-    /// 为 true 时[`Patch::PurgeVersion`]会被拒：版本清单是上游的，删掉我们的文件
-    /// 只是"这一版没有自有改动了"，它照样出现在树上。那种情况下该做的是**归档**。
+    /// 为 true 时[`Patch::PurgeVersion`]会被拒：这一层管的是**值**，
+    /// 删掉我们的覆盖文件只是"这一版没有自有改动了"，它照样出现在树上。
+    /// 那种情况下该做的是**归档**；真要从清单里去掉它，去「机型与版本」页删版本。
     /// 不拦的话，用户点了删除、版本还在，而且没有任何提示说为什么
-    pub declared_upstream: bool,
+    pub declared: bool,
 }
 
 /// 应用的结果
@@ -411,7 +445,7 @@ fn validate(
         }
     };
     let known_machine = |id: &String| -> Result<(), AppError> {
-        if committed.machine_ids.contains(id) {
+        if committed.has_machine(id) {
             Ok(())
         } else {
             Err(AppError::not_found(format!("机型 {id} 不存在"))
@@ -448,22 +482,20 @@ fn validate(
             // **移动到不存在的机型当没移**（doc §15）：那会让这个版本从树上整个消失，
             // 比不动更糟。所以这里不拒绝整批，留给 apply_one 记一条提示
             Patch::MoveVersion { uid, .. } => known_uid(uid)?,
-            // **删除只对「上游不再有的版本」与「草稿里新建的」开放。**
-            // 版本清单是上游的：删掉我们的文件只是"这一版没有自有改动了"，
-            // 它照样出现在树上。那种情况下该做的是归档
+            // **删除只对「清单里已经没有的版本」与「草稿里新建的」开放。**
+            // 清单（`presets/machines/*.toml`）与这一层的值是两件事：
+            // 删掉我们的覆盖文件只是"这一版没有自有改动了"，它照样出现在树上。
+            // 那种情况下该做的是归档；真要从清单里去掉它，去「机型与版本」页删版本
             Patch::PurgeVersion { uid } => {
                 known_uid(uid)?;
-                if committed
-                    .versions
-                    .get(uid)
-                    .is_some_and(|v| v.declared_upstream)
-                {
+                if committed.versions.get(uid).is_some_and(|v| v.declared) {
                     return Err(AppError::invalid_argument(format!(
-                        "{uid} 是上游机型清单里的版本，删不掉"
+                        "{uid} 还在机型清单里，删不掉"
                     ))
                     .with_detail(
-                        "版本清单由上游维护，删掉我们的文件它照样在树上。\
-                         不想交付这一版的话用「归档」",
+                        "这一页删的是「我们写的那些值」，删掉它这一版照样在树上。\
+                         不想交付这一版的话用「归档」；要把它从清单里去掉，\
+                         去「机型与版本」页删版本",
                     ));
                 }
             }
@@ -587,7 +619,7 @@ fn apply_one(
         }
 
         Patch::MoveVersion { uid, to_machine_id } => {
-            if !committed.machine_ids.contains(to_machine_id) {
+            if !committed.has_machine(to_machine_id) {
                 // doc §15：当没移。整个版本从树上消失比不动更糟
                 notices.push(format!(
                     "机型 {to_machine_id} 不存在，{uid} 没有移动"
@@ -883,17 +915,17 @@ mod tests {
                 { "id": "i1", "paramKey": "toolhead.offset.z" }
             ] }] }]
         });
-        let w = |rel: &str, v: &serde_json::Value| {
-            crate::fsx::atomic::atomic_write_json(&d.path().join(rel), v).unwrap()
-        };
-        w("content/param_registry.json", &params);
-        w("content/layout_schema.json", &layout);
-        let r = Registry::load_from(d.path()).unwrap();
+        let r = crate::workbench::presets::registry::load_from_json_fixture(
+            d.path(),
+            &params,
+            &layout,
+        )
+        .unwrap();
         (d, r)
     }
 
     /// A1 有基底（offset.z = 1.1）与两个版本：
-    /// `A1/STANDARD` 上游还声明着，`A1/OLD` 是上游已经删掉的孤儿（只有它能被删）
+    /// `A1/STANDARD` 清单里还声明着，`A1/OLD` 是清单里已经没有的孤儿（只有它能被删）
     fn committed() -> Committed {
         let mut machines = BTreeMap::new();
         machines.insert(
@@ -915,8 +947,9 @@ mod tests {
                     .into_iter()
                     .collect(),
                 archived: false,
+                tag: None,
                 bbs: None,
-                declared_upstream: true,
+                declared: true,
             },
         );
         versions.insert(
@@ -924,8 +957,8 @@ mod tests {
             CommittedVersion {
                 machine_id: "A1".to_owned(),
                 version_id: "OLD".to_owned(),
-                name: "上游已删的老版本".to_owned(),
-                declared_upstream: false,
+                name: "清单里已经没有的老版本".to_owned(),
+                declared: false,
                 ..Default::default()
             },
         );
@@ -933,7 +966,19 @@ mod tests {
         Committed {
             machines,
             versions,
-            machine_ids: ["A1", "P1S"].into_iter().map(str::to_owned).collect(),
+            catalog: vec![
+                CatalogMachine {
+                    id: "A1".to_owned(),
+                    display: "A1".to_owned(),
+                    version_ids: vec!["STANDARD".to_owned()],
+                    ..Default::default()
+                },
+                CatalogMachine {
+                    id: "P1S".to_owned(),
+                    display: "P1S".to_owned(),
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         }
     }

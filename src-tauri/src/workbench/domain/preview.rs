@@ -145,7 +145,7 @@ impl Book<'_> {
         let v = self.version(uid)?;
         let from = v.machine_id.clone();
 
-        let to_exists = self.up.catalog.machine(to_machine_id).is_some();
+        let to_exists = self.machine(to_machine_id).is_some();
         let mut out = MovePreview {
             uid: uid.to_owned(),
             from_machine: from.clone(),
@@ -185,7 +185,7 @@ impl Book<'_> {
             if b.value == a.value {
                 continue;
             }
-            let Some(p) = self.up.registry.param(key) else {
+            let Some(p) = self.presets.registry.param(key) else {
                 continue;
             };
             out.inherited_changes.push(InheritedChange {
@@ -202,7 +202,7 @@ impl Book<'_> {
             out.gained.push((*key).to_owned());
         }
         for key in before_keys.difference(&after_keys) {
-            let Some(p) = self.up.registry.param(key) else {
+            let Some(p) = self.presets.registry.param(key) else {
                 continue;
             };
             out.lost.push(LostKey {
@@ -227,9 +227,9 @@ impl Book<'_> {
         let d = self.digests.get(to_machine_id)?;
         let base = self.bases.get(to_machine_id)?;
         let over = self.overs.get(uid)?;
-        let id = self.up.catalog.machine(to_machine_id)?.id.as_str();
+        let id = self.machine(to_machine_id)?.id.as_str();
         Some(Layers::new(
-            &self.up.registry,
+            &self.presets.registry,
             id,
             &d.base,
             base,
@@ -242,7 +242,7 @@ impl Book<'_> {
     ///
     /// 目标列由调用方给（= 树上勾了什么），**能落到哪几列由这里判**
     pub fn preview_bulk(&self, key: &str, value: &Value, cols: &[ColRef]) -> BulkPreview {
-        let Some(p) = self.up.registry.param(key) else {
+        let Some(p) = self.presets.registry.param(key) else {
             return BulkPreview {
                 key: key.to_owned(),
                 label: key.to_owned(),
@@ -294,7 +294,7 @@ impl Book<'_> {
                 });
                 continue;
             }
-            let blocked = Gate::new(&self.up.registry, &layers).blocked(key);
+            let blocked = Gate::new(&self.presets.registry, &layers).blocked(key);
             if !blocked.is_empty() {
                 out.skipped.push(BulkSkip {
                     col: col.key.clone(),
@@ -333,7 +333,7 @@ impl Book<'_> {
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
-    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
 
     fn committed() -> Committed {
@@ -350,7 +350,7 @@ mod tests {
                     machine_id: machine.to_owned(),
                     version_id: vid.to_owned(),
                     name: name.to_owned(),
-                    declared_upstream: true,
+                    declared: true,
                     ..Default::default()
                 },
             );
@@ -361,7 +361,7 @@ mod tests {
                 .map(|m| (m.to_owned(), super::super::layer::Overrides::new()))
                 .collect(),
             versions,
-            machine_ids: ["A1", "A2L", "P1S"].into_iter().map(str::to_owned).collect(),
+            catalog: fixture_catalog(),
             ..Default::default()
         }
     }
@@ -386,7 +386,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
 
         let p = b.preview_move("A1/STANDARD", "P1S").unwrap();
         assert!(p.allowed);
@@ -421,7 +421,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -431,7 +431,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let p = b.preview_move("A1/STANDARD", "P1S").unwrap();
         assert_eq!(p.kept, vec!["wiping.child"]);
         assert!(
@@ -449,7 +449,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "P1S/LITE".to_owned(),
@@ -459,7 +459,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let p = b.preview_move("P1S/LITE", "A1").unwrap();
         let lost = p
             .lost
@@ -478,7 +478,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
 
         let p = b.preview_move("A1/STANDARD", "KOBRA").unwrap();
         assert!(!p.allowed);
@@ -502,7 +502,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Machine,
                 owner: "A1".to_owned(),
@@ -512,7 +512,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let p = b.preview_bulk(
             "wiping.child",
             &serde_json::json!(66),
@@ -538,7 +538,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.only_p1s",
@@ -559,7 +559,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let target = cols(&[("A1", Some("A1/STANDARD")), ("A1", Some("A1/FAST"))]);
 
         // A1 两个版本在 offset.x 上有**上游**覆盖，但我们没写过 → 新增覆盖
@@ -583,7 +583,7 @@ mod tests {
         apply(
             &mut d,
             &c,
-            &f.up.registry,
+            &f.presets.registry,
             &[Patch::SetValue {
                 level: Level::Version,
                 owner: "A1/STANDARD".to_owned(),
@@ -592,7 +592,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let p = b.preview_bulk(
             "toolhead.offset.x",
             &serde_json::json!(9),
@@ -608,7 +608,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.script",
@@ -626,7 +626,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &c, &d);
+        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
         let shuffled = cols(&[
             ("P1S", Some("P1S/LITE")),
             ("A1", Some("A1/FAST")),
@@ -654,7 +654,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let p = super::super::Book::new(&f.up, &c, &d).preview_bulk(
+        let p = super::super::Book::new(&f.up, &f.presets, &c, &d).preview_bulk(
             "toolhead.made_up",
             &serde_json::json!(1),
             &cols(&[("A1", None)]),
