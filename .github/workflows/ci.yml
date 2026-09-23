@@ -80,12 +80,23 @@ jobs:
       - name: 格式
         run: cargo fmt --all -- --check
 
-      # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效
-      - name: clippy
+      # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效。
+      #
+      # **两种 feature 组合都要跑。** 工作台是 `#[cfg(feature = "workbench")]` 门内的，
+      # 不启用 feature 时那整棵子树**连编译都不会被碰** —— 于是它的写盘约束、
+      # 它的 264 条判据，在 CI 里等于从来没有被检过。这不是覆盖率的小数点问题，
+      # 而是唯一会写 `presets/`（用户数据）的那棵树整个不在场。
+      - name: clippy（默认 feature）
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: 测试
+      - name: clippy（workbench）
+        run: cargo clippy --all-targets --features workbench -- -D warnings
+
+      - name: 测试（默认 feature）
         run: cargo test
+
+      - name: 测试（workbench）
+        run: cargo test --features workbench
 
   # Windows 侧单独一个 job，**不并进 rust 的 matrix**：
   # matrix 会把 job 名变成 `rust (macos-latest)`，而 ruleset 里的必需检查叫 `rust` ——
@@ -121,6 +132,11 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
+      # **这一档刻意不启用 `workbench`。** 它的存在理由是 `#[cfg(not(target_os = "macos"))]`
+      # 那几段在 macOS 上一行都不会被编译；而 `src/workbench/**` 里
+      # `cfg(not(target_os` / `cfg(target_os` / `cfg(windows` / `cfg(unix)` **零命中** ——
+      # 工作台没有平台相关的编译分支，在 Windows 上再跑一遍得不到新信息，只是多花一份 runner。
+      # 哪天工作台里出现了平台分支，这里要跟着加上（那时这条注释就是提醒）。
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
 

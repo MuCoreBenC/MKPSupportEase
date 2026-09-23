@@ -1,0 +1,1740 @@
+/**
+ * 工作台外壳的布局（doc §7）。
+ *
+ * 第二版那份占位样式（`.wb-shell` / `.wb-topbar` / `.wb-table`…）整份换掉了：
+ * 那是给一个只有一张表的占位页写的，而这一版是三条结构带 + 两栏 + 页签。
+ *
+ * 色值全部走 `tokens.css` 的 `[data-wb]` 变量 —— 那一份是设计系统层，
+ * 值照参考实现抄（同一个产品群，重新调一套只会让两个窗口像两个软件）。
+ *
+ * # 滚动容器只在最内层
+ *
+ * 外层一律 `min-height: 0` 且不滚，只有树的列表与视角内容自己滚。
+ * 不这么做会出现「整页滚 + 内层再滚」两层滚动条，用户滚一下不知道滚的是哪个。
+ *
+ * # 浮层用 absolute，根节点是包含块
+ *
+ * `.wb` 上 `position: relative`，浮层一律 absolute 不用 fixed ——
+ * 以后这套界面可能被放进一个带 `transform` 的预览外壳里，那时 fixed 会量错坐标。
+ *
+ * # mini 档：只改布局，不藏操作
+ *
+ * `[data-density='mini']` 下左右两栏改上下堆叠、侧栏限高自己滚、维护四项横排。
+ * **一个可用操作都不许 `display: none`** —— 藏了之后用户在小窗口里永远做不了那件事，
+ * 而他看不出来是被藏了还是没这个功能。能省的只有说明文字。
+ */
+
+/* 兜底：外壳还没挂上（比如报错早退）时也别裸着 */
+body {
+  margin: 0;
+  background: #f8fafc;
+}
+
+.wb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--w-page);
+  color: var(--w-t1);
+  font-size: var(--w-fs-md);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.wb-mono {
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-base);
+}
+
+/* ---------- 结构带 1：状态条 ---------- */
+
+.wb-strip {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 24px;
+  align-items: center;
+  height: var(--w-strip-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+  font-size: var(--w-fs-sm);
+}
+
+.wb-strip--loading {
+  color: var(--w-t3);
+}
+
+.wb-strip__cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.wb-strip__key {
+  color: var(--w-t-off);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.wb-strip__path {
+  overflow: hidden;
+  color: var(--w-t3);
+  font-family: var(--w-mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wb-strip__state {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  color: var(--w-t2);
+}
+
+/* 状态点：绿 = 就位，橙 = 要留意（**不是错误**），灰 = 没有 */
+.wb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-t-off);
+}
+
+.wb-dot[data-state="ok"] {
+  background: var(--w-ok);
+}
+
+.wb-dot[data-state="warn"] {
+  background: var(--w-warn);
+}
+
+/* ---------- 结构带 2：文件头 ---------- */
+
+.wb-head {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  height: var(--w-head-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.wb-head__id {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.wb-head__title {
+  font-size: var(--w-fs-lg);
+  font-weight: 600;
+}
+
+.wb-head__sub {
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-head__badges {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-head__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.wb-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-tag);
+  background: var(--w-card-inner);
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+  white-space: nowrap;
+}
+
+.wb-badge__own {
+  color: var(--w-t-off);
+  font-style: normal;
+}
+
+.wb-badge--mini {
+  margin-left: 4px;
+  padding: 0 4px;
+}
+
+.wb-btn {
+  height: var(--w-btn-md);
+  padding: var(--w-p-btn-md);
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn);
+  background: var(--w-card);
+  color: var(--w-t1);
+  font-size: var(--w-fs-base);
+  cursor: pointer;
+}
+
+.wb-btn:hover:not(:disabled) {
+  border-color: var(--w-primary);
+}
+
+.wb-btn:disabled {
+  color: var(--w-t-off);
+
+  /* **不用 cursor: not-allowed**：那在部分浏览器上会挡掉 title，
+     而禁用的按钮恰恰是最需要看到 title 的地方（它得说出为什么不能点） */
+  cursor: default;
+}
+
+.wb-btn[data-tone="primary"]:not(:disabled) {
+  border-color: var(--w-primary);
+  background: var(--w-primary);
+  color: #fff;
+}
+
+.wb-btn[data-tone="danger"]:not(:disabled) {
+  border-color: var(--w-danger);
+  color: var(--w-danger);
+}
+
+.wb-link {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--w-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------- 提示条 ---------- */
+
+.wb-banner {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  line-height: 1.6;
+}
+
+.wb-banner[data-tone="warn"] {
+  border-left: 3px solid var(--w-warn);
+}
+
+.wb-banner[data-tone="danger"] {
+  border-left: 3px solid var(--w-danger);
+  color: var(--w-danger);
+}
+
+/* ---------- 两栏 ---------- */
+
+.wb-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: var(--w-sidebar);
+  min-height: 0;
+  border-right: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.wb-side__head {
+  flex: 0 0 auto;
+  padding: 8px 12px 4px;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* 两个滚动容器之一 */
+.wb-side__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+.wb-side__maintain {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 0 6px 8px;
+}
+
+.wb-mitem {
+  height: var(--w-h-sm);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--w-r-input);
+  background: none;
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-mitem[data-on="yes"] {
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+}
+
+/* ---------- 树的行 ---------- */
+
+.wb-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: var(--w-h-sm);
+  padding: 0 8px;
+  font-size: var(--w-fs-base);
+}
+
+.wb-row[data-kind="version"] {
+  padding-left: 18px;
+}
+
+/* 主选中用底色；勾选用 checkbox 自己 —— 两套选中不能共用一种视觉 */
+.wb-row[data-focus="yes"] {
+  background: var(--w-primary-soft);
+}
+
+.wb-row__twist {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+}
+
+.wb-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  text-align: left;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* 新建未保存：一个小圆点，不占字宽 */
+.wb-row__new {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--w-primary);
+}
+
+.wb-row__count {
+  flex: 0 0 auto;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-tag {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-tag);
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+  white-space: nowrap;
+}
+
+/* 「暂无资源」用灰不用红：它不是错误，是还没写配方 */
+.wb-tag[data-state="off"] {
+  border-color: var(--w-src-factory-line);
+  background: var(--w-src-factory-bg);
+  color: var(--w-src-factory-t);
+}
+
+.wb-tag[data-state="ok"] {
+  border-color: rgb(16 185 129 / 25%);
+  background: rgb(16 185 129 / 10%);
+  color: var(--w-ok);
+}
+
+.wb-tag[data-state="warn"] {
+  border-color: rgb(217 119 6 / 25%);
+  background: rgb(217 119 6 / 10%);
+  color: var(--w-warn);
+}
+
+/* ---------- 右栏 ---------- */
+
+.wb-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 8px 16px 0;
+}
+
+.wb-tab {
+  height: var(--w-h-md);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--w-r-card) var(--w-r-card) 0 0;
+  background: none;
+  color: var(--w-t2);
+  font-size: var(--w-fs-md);
+  cursor: pointer;
+}
+
+.wb-tab[data-on="yes"] {
+  border-color: var(--w-line);
+  background: var(--w-card);
+  color: var(--w-t1);
+}
+
+.wb-pane {
+  /* 负 1px 让它和选中的页签咬合 */
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: -1px 16px 16px;
+  overflow: auto;
+  padding: var(--w-p-card-lg);
+  border: 1px solid var(--w-line);
+  border-radius: 0 var(--w-r-card) var(--w-r-card);
+  background: var(--w-card);
+}
+
+.wb-todo {
+  margin: 0;
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+  line-height: 1.8;
+}
+
+.wb-todo[data-tone="danger"] {
+  color: var(--w-danger);
+}
+
+/* ---------- 卡片壳（机型页与配方台共用） ----------
+   **这三个类之前一个都没定义**，而两个页面都在用它们 ——
+   所以「版本」与「3 个」会紧挨成「版本3 个」（容器根本不是 flex，
+   我先前加的 `gap` 作用在一个没有布局的元素上，等于没写）。
+   卡片的外框、内边距也一直是缺的。 */
+
+.wb-card {
+  flex: 0 0 auto;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  background: var(--w-card);
+}
+
+.wb-card__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--w-line);
+}
+
+.wb-card__title {
+  font-size: var(--w-fs-md);
+  font-weight: 600;
+}
+
+/* ---------- 机型与版本页 ----------
+   最基础的那一页：有哪些机型、每台有哪些版本。
+
+   **这一页不共用参数页的壳。** 顶部那排「保存配方 / 丢弃改动 / 撤销 / 重做」
+   与那几个徽章都属于参数页的草稿那一套，而这一页的写入不走它 ——
+   摆着会让人以为点「保存配方」能存下机型的改动。左边那棵配方本树同理。
+   「页与页之间不共享」不光指状态，也指控件。 */
+
+.wb[data-page="machines"] .wb-head__actions,
+.wb[data-page="machines"] .wb-head__badges,
+.wb-body[data-page="machines"] .wb-side {
+  display: none;
+}
+
+.wb-mc {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+.wb-mc__left {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  min-width: 240px;
+  /* **没有这一条，底下那两行说明会被卡片列表挤出可视区** ——
+     flex 子项的默认最小尺寸是内容尺寸，列表撑高整列，overflow 就不生效了 */
+  min-height: 0;
+  padding-right: 8px;
+  border-right: 1px solid var(--w-line);
+}
+
+.wb-mc__cards {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wb-mc__card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  background: var(--w-card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-mc__card:hover {
+  background: var(--w-card-inner);
+}
+
+.wb-mc__card[data-on="yes"] {
+  border-color: var(--w-primary);
+  background: var(--w-primary-soft);
+}
+
+.wb-mc__brand {
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-mc__name {
+  font-size: var(--w-fs-md);
+  font-weight: 600;
+}
+
+.wb-mc__meta {
+  color: var(--w-t-off);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-xs);
+}
+
+/* 缺配置要在卡片上就看得见，不用点进去才发现 */
+.wb-mc__warn {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--w-warn-soft, var(--w-card-inner));
+  color: var(--w-warn);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+/* 左栏顶部：搜索 + 新增机型 */
+.wb-mc__lefthead {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.wb-mc__lefthead .wb-input {
+  min-width: 0;
+}
+
+/* 卡片头右侧那一组（计数 + 按钮） */
+.wb-mc__headright {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 新增版本的内联表单。**不是模态框** —— 两个字段不值得盖一层遮罩 */
+.wb-mc__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+}
+
+.wb-mc__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--w-fs-base);
+}
+
+.wb-mc__field > span {
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+}
+
+/* 立刻落盘这件事要讲在前面 */
+.wb-mc__hint {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--w-warn);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-mc__count {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+}
+
+/* 数据根。一行放不下就截断，全路径进 title。
+   `flex: 0 0 auto` 是必须的 —— 默认会被上面那个列表压扁成 0 高 */
+.wb-mc__root {
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  color: var(--w-t-off);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-mc__right {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wb-mc__head {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.wb-mc__title {
+  font-size: var(--w-fs-lg);
+  font-weight: 600;
+}
+
+/* 键值表：元信息与版本详情共用 */
+.wb-kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: var(--w-fs-base);
+}
+
+.wb-kv dt {
+  color: var(--w-t3);
+}
+
+.wb-kv dd {
+  margin: 0;
+  color: var(--w-t1);
+  word-break: break-all;
+}
+
+/* 一个版本一张可折叠的卡 */
+.wb-ver {
+  border-top: 1px solid var(--w-line);
+}
+
+.wb-ver:first-of-type {
+  border-top: 0;
+}
+
+.wb-ver__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-ver__head:hover {
+  background: var(--w-card-inner);
+}
+
+.wb-ver__name {
+  font-size: var(--w-fs-md);
+}
+
+.wb-ver__id {
+  color: var(--w-t-off);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-ver__tag {
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+/* 就地编辑的那一格 */
+.wb-kv__edit {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.wb-kv__btn {
+  flex: 0 1 auto;
+  min-width: 40px;
+  padding: 1px 4px;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.wb-kv__btn:hover {
+  border-color: var(--w-line-strong);
+  background: var(--w-card);
+}
+
+.wb-kv__clear {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: 0;
+  background: none;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+}
+
+.wb-kv__clear:hover {
+  color: var(--w-danger);
+}
+
+/* 「为什么这一格改不了」就写在旁边，不用悬停 */
+.wb-kv__note {
+  color: var(--w-t-off);
+  font-family: inherit;
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+/* 删除版本：两步确认。第一步的按钮 */
+.wb-ver__foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px 10px;
+}
+
+/* 第二步：把「会坏掉什么」摆出来。**不可逆的操作要占地方** */
+.wb-ver__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 10px 10px;
+  padding: 10px;
+  border: 1px solid var(--w-danger);
+  border-radius: var(--w-r-input);
+  background: var(--w-card-inner);
+}
+
+.wb-ver__warn {
+  margin: 0;
+  color: var(--w-danger);
+  font-size: var(--w-fs-base);
+}
+
+.wb-ver__orphans,
+.wb-ver__ok {
+  margin: 0;
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  line-height: 1.7;
+}
+
+.wb-ver__orphans code {
+  color: var(--w-warn);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-xs);
+  word-break: break-all;
+}
+
+.wb-ver__buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* mini 档：左栏让开，靠搜索找机型 */
+[data-density="mini"] .wb-mc__left {
+  width: 160px;
+  min-width: 160px;
+}
+
+/* ---------- 配方台（默认视角） ----------
+   一屏十几行、每行看得清值和来源。矩阵是它的对比工具，不是默认 */
+
+.wb-desk {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.wb-desk__bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.wb-desk__where {
+  flex: 0 0 auto;
+  font-size: var(--w-fs-md);
+  font-weight: 600;
+}
+
+.wb-desk__body {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* 左栏：分组树。点一下只定位，不过滤 —— 过滤是搜索的事 */
+.wb-desk__nav {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  width: 180px;
+  min-width: 180px;
+  overflow-y: auto;
+  padding-right: 8px;
+  border-right: 1px solid var(--w-line);
+}
+
+.wb-desk__navgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.wb-desk__navtab,
+.wb-desk__navsec {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--w-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--w-r-input);
+  background: none;
+  color: var(--w-t1);
+  font: inherit;
+  font-size: var(--w-fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-desk__navtab {
+  font-weight: 600;
+}
+
+.wb-desk__navsec {
+  padding-left: 18px;
+  color: var(--w-t3);
+}
+
+.wb-desk__navtab:hover,
+.wb-desk__navsec:hover {
+  background: var(--w-card-inner);
+}
+
+.wb-desk__navtab[data-on="yes"] {
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+}
+
+.wb-desk__n {
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+/* 唯一的滚动容器 */
+.wb-desk__list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 整组 / 整族被关掉时的那一句。**默认收起来**，只留这一行 */
+.wb-desk__off {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-desk__off[data-indent="yes"] {
+  padding-left: 26px;
+}
+
+/* 一行：中文名 · 类型 · 当前值（带来源色）。收起时就这些 */
+.wb-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  border-top: 1px solid var(--w-line);
+  padding: 0 10px;
+}
+
+.wb-line:first-of-type {
+  border-top: 0;
+}
+
+.wb-line[data-depth="1"] {
+  padding-left: 26px;
+  background: var(--w-card-inner);
+}
+
+/* 改了还没保存：**左侧琥珀竖条**。蓝色在这套界面里只表示「选中」 */
+.wb-line[data-dirty="yes"] {
+  box-shadow: inset 3px 0 0 var(--w-warn);
+}
+
+.wb-line__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-line__head:disabled {
+  cursor: default;
+}
+
+.wb-line__label {
+  font-size: var(--w-fs-md);
+}
+
+.wb-line__type {
+  color: var(--w-t-off);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-line__value {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  height: var(--w-cell-h);
+}
+
+.wb-line__text {
+  font-size: var(--w-fs-md);
+}
+
+.wb-line__na {
+  color: var(--w-t-off);
+  font-size: var(--w-fs-base);
+}
+
+/* 展开区：就地改 + 说明 + 元数据。**整行占满两列** */
+.wb-line__open {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 10px;
+}
+
+.wb-line__edit {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.wb-line__k {
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-line__unit {
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-line__desc,
+.wb-line__blocked {
+  margin: 0;
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+  line-height: 1.7;
+}
+
+.wb-line__blocked {
+  color: var(--w-warn);
+}
+
+.wb-line__meta {
+  font-size: var(--w-fs-base);
+}
+
+.wb-line__meta summary {
+  color: var(--w-t3);
+  cursor: pointer;
+}
+
+.wb-line__meta dl {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 2px 8px;
+  margin: 6px 0 0;
+}
+
+.wb-line__meta dt {
+  color: var(--w-t-off);
+}
+
+.wb-line__meta dd {
+  margin: 0;
+  color: var(--w-t2);
+  font-family: var(--w-mono);
+  word-break: break-all;
+}
+
+/* mini 档：左栏让开，靠搜索换分组 */
+[data-density="mini"] .wb-desk__nav {
+  display: none;
+}
+
+/* ---------- 参数矩阵（对比视角） ---------- */
+
+.wb-mx {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.wb-mx__bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.wb-mx__tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wb-chip {
+  height: var(--w-h-xs);
+  padding: var(--w-p-btn-sm);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-btn);
+  background: var(--w-card);
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  cursor: pointer;
+}
+
+.wb-chip[data-on="yes"] {
+  border-color: var(--w-primary);
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+}
+
+/* 搜索一开分类过滤就让开 —— 让它看起来「暂时不起作用」，而不是消失 */
+.wb-chip[data-off="yes"] {
+  opacity: 0.45;
+}
+
+.wb-input {
+  flex: 0 0 auto;
+  width: 240px;
+  height: var(--w-h-sm);
+  padding: 0 8px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-input);
+  background: var(--w-input);
+  font-size: var(--w-fs-base);
+}
+
+.wb-mx__count,
+.wb-mx__note {
+  flex: 0 0 auto;
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-mx__note {
+  margin: 0 0 8px;
+}
+
+/* 唯一的滚动容器之二 */
+.wb-mx__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.wb-mx__table {
+  /* separate 是必须的：collapse 会让 sticky 单元格的边框丢掉 */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--w-fs-base);
+}
+
+.wb-mx__corner,
+.wb-mx__colhead,
+.wb-mx__rowhead,
+.wb-mx__cell {
+  border-right: 1px solid var(--w-line);
+  border-bottom: 1px solid var(--w-line);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* 双向冻结。z-index 三级：角 > 列头 > 行头。
+   **冻结的那三种必须自己不透明** —— 背景一旦换成半透明色（比如选中的淡蓝），
+   下面滚过去的行就会从里面透出来，界面上表现为「文字叠在表头上」 */
+.wb-mx__corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--w-card-inner);
+  color: var(--w-t3);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wb-mx__colhead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 160px;
+  background: var(--w-card-inner);
+  font-weight: 500;
+}
+
+.wb-mx__rowhead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 240px;
+  min-width: 240px;
+  background: var(--w-card-inner);
+  font-weight: 500;
+}
+
+/* 分组表头行：行序是后端排的，这里只在组名变化处分段。
+   **不做折叠** —— 折叠要持久化、要和搜索交互，换回来的只是少滚几屏 */
+.wb-mx__group > th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-page);
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wb-mx__machine,
+.wb-mx__field {
+  display: block;
+  color: var(--w-t1);
+}
+
+.wb-mx__label {
+  display: block;
+  color: var(--w-t2);
+}
+
+.wb-mx__own,
+.wb-mx__key {
+  display: block;
+  height: 1.35em;
+  overflow: hidden;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-mx__key {
+  font-family: var(--w-mono);
+}
+
+.wb-mx__dep {
+  margin-left: 4px;
+  color: var(--w-warn);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+/* 普通格子显式落在最底层（`z-index: 0`），
+   免得 box-shadow / outline 把它抬到冻结表头上面去 */
+.wb-mx__cell {
+  position: relative;
+  z-index: 0;
+  background: var(--w-card);
+  white-space: nowrap;
+}
+
+/* 一行的内容区高度写死：**文本与控件同高**。
+   行高随「点没点」变化的话，点第二下必然点偏 */
+.wb-mx__slot {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: var(--w-cell-h);
+}
+
+/* 不适用：压到最淡。它**没有这一项**，不是值为空 */
+.wb-mx__cell[data-kind="na"] {
+  background: var(--w-card-inner);
+  color: var(--w-t-off);
+}
+
+/* 被上级条件关着：看得见、改不动。
+   **只压值的字色，不用 opacity** —— opacity 会把来源徽章和挂回按钮一起压淡，
+   那两个和「能不能改」没关系 */
+.wb-mx__cell[data-blocked="yes"] .wb-mx__value {
+  color: var(--w-t-off);
+}
+
+/**
+ * 两个通道分开（修正主 doc §7 原本「草稿用蓝色描边」那一句）：
+ *
+ * - **蓝 = 选中**，我正在操作这里
+ * - **琥珀 = 改了还没保存**，tokens 里这个颜色的定义就是「值变了 / 要留意」
+ *
+ * 原来两件事同色，于是「取消选中之后还剩一圈蓝」看着像取消没生效。
+ * 草稿用左侧竖条而不是整格描边：一列改了 28 项时，28 个框会连成一片，
+ * 而 28 条竖条是一道能一眼扫完的垂直轨迹
+ */
+.wb-mx__cell[data-dirty="yes"] {
+  box-shadow: inset 3px 0 0 var(--w-warn);
+}
+
+/* 整列可编辑：**整列垫一层淡底色，不给每一格画框**。
+   一屏几十个输入框边框就是「很简陋」的来源 */
+.wb-mx__cell[data-coledit="yes"] {
+  background: var(--w-primary-soft);
+}
+
+.wb-mx__cell[data-coledit="yes"] .wb-ctl {
+  border-color: transparent;
+  background: none;
+}
+
+.wb-mx__cell[data-coledit="yes"] .wb-ctl:hover,
+.wb-mx__cell[data-coledit="yes"] .wb-ctl:focus {
+  border-color: var(--w-primary);
+  background: var(--w-input);
+}
+
+.wb-mx__gcode {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+  background: var(--w-card-inner);
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+}
+
+/* 来源三档：灰 = 出厂，紫 = 机型，蓝 = 版本 */
+.wb-mx__origin {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: 1px solid var(--w-src-factory-line);
+  border-radius: var(--w-r-tag);
+  background: var(--w-src-factory-bg);
+  color: var(--w-src-factory-t);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-mx__origin[data-origin="machine"] {
+  border-color: var(--w-src-machine-line);
+  background: var(--w-src-machine-bg);
+  color: var(--w-src-machine-t);
+}
+
+.wb-mx__origin[data-origin="version"] {
+  border-color: var(--w-src-version-line);
+  background: var(--w-src-version-bg);
+  color: var(--w-src-version-t);
+}
+
+[data-density="mini"] .wb-input {
+  width: 100%;
+}
+
+[data-density="mini"] .wb-mx__bar {
+  flex-wrap: wrap;
+}
+
+/* mini 下行头只有 140px：关联小字让开，分组行**留着** —— 它是信息不是装饰。
+   注意 `--w-cell-h` 在任何密度下都不变，否则「点一下就位移」会从密度切换那边回来 */
+[data-density="mini"] .wb-mx__rel {
+  display: none;
+}
+
+/* ---------- 三种改法 ---------- */
+
+/* 列头 / 行头做成按钮：点它们是两种改法的入口 */
+.wb-mx__headbtn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 选中：**用 inset 阴影而不是换背景**。
+   换背景会把冻结的表头变成半透明（淡蓝是 10% alpha），于是滚过去的行从里面透出来 */
+.wb-mx__colhead[data-on="yes"],
+.wb-mx__rowhead[data-on="yes"] {
+  box-shadow: inset 0 0 0 999px var(--w-primary-soft);
+}
+
+/* 「列编辑」占的是列头第三行**原本那句话的位置**，不新增一行 —— 新增一行会让整表下移 */
+.wb-mx__colflag {
+  color: var(--w-primary);
+}
+
+/* 行头第二/三行的小字：字段 key、归属、受谁控制 */
+.wb-mx__rowhead[data-depth="1"] .wb-mx__headbtn {
+  padding-left: 12px;
+  border-left: 2px solid var(--w-line-strong);
+}
+
+.wb-mx__rel {
+  display: block;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+}
+
+/**
+ * 选中条：**常驻占位**。以前是「选中了才插一条」，于是每点一下整张表都往下掉一截，
+ * 下一次点击就点偏了 —— 反馈里「点的不准」说的就是这个。
+ * 现在高度恒定，没内容时只是看不见。
+ *
+ * 点一格**不显示它**：那一格里正亮着输入框，再说一遍「正在改 X」是多余的
+ */
+.wb-selbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  height: var(--w-h-sm);
+  margin-bottom: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--w-primary);
+  border-radius: var(--w-r-input);
+  background: var(--w-primary-soft);
+  color: var(--w-t2);
+  font-size: var(--w-fs-base);
+}
+
+.wb-selbar[data-empty="yes"] {
+  visibility: hidden;
+}
+
+/* 值做成按钮：点一下进编辑。**被条件关着时也能点** ——
+   点开的是「谁把我关了」那句说明，不是编辑器。disabled 的按钮连 tooltip 都弹不出来 */
+.wb-mx__value {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 灰格子点开的那一条：整句由后端给，前端不组装 */
+.wb-mx__why {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-top: 2px;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+  white-space: normal;
+}
+
+/* 正在编辑的那一格用 outline 而不是 box-shadow：
+   box-shadow 会把草稿那条琥珀竖条整条盖掉，于是「改过」这条信息在编辑时消失 */
+.wb-mx__cell[data-editing="yes"] {
+  outline: 1px solid var(--w-primary);
+  outline-offset: -1px;
+}
+
+.wb-mx__detach {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--w-t-off);
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+}
+
+.wb-mx__detach:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* 控件高度与文本行**完全一致**（`--w-cell-h`），这样文本↔控件互换时零位移 */
+.wb-ctl {
+  box-sizing: border-box;
+  height: var(--w-cell-h);
+  padding: 0 4px;
+  border: 1px solid var(--w-primary);
+  border-radius: var(--w-r-input);
+  background: var(--w-input);
+  font-size: var(--w-fs-base);
+}
+
+.wb-ctl[data-form="cell"][data-kind="number"] {
+  width: 76px;
+}
+
+.wb-ctl[data-form="row"] {
+  height: var(--w-h-sm);
+  min-width: 140px;
+}
+
+/**
+ * 开关就是开关。原来这里渲染的是一个写着「开」/「关」的文字按钮 ——
+ * 那不是控件，是一个把状态写成汉字的按钮，而且两个字的宽度还不一样。
+ *
+ * 轨道尺寸写死，**两个状态同尺寸**：否则切换一下这一列的宽度就变了
+ */
+.wb-sw {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--w-line-strong);
+  border-radius: 8px;
+  background: var(--w-card-inner);
+  cursor: pointer;
+  transition: background-color 120ms linear;
+}
+
+.wb-sw__knob {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--w-t-off);
+  transition: transform 120ms linear;
+}
+
+.wb-sw[aria-checked="true"] {
+  border-color: var(--w-primary);
+  background: var(--w-primary);
+}
+
+.wb-sw[aria-checked="true"] .wb-sw__knob {
+  background: #fff;
+  transform: translateX(12px);
+}
+
+/* 被条件关着的开关：看得见、点它出说明、**不翻转** */
+.wb-sw[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ---------- 批量条 ---------- */
+
+.wb-bulk {
+  padding: 8px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+}
+
+.wb-bulk__inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wb-bulk__label {
+  font-size: var(--w-fs-base);
+  font-weight: 500;
+}
+
+.wb-bulk__no,
+.wb-bulk__note,
+.wb-bulk__skip {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-bulk__preview {
+  flex: 1 1 100%;
+}
+
+.wb-bulk__actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.wb-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--w-fs-base);
+}
+
+.wb-diff th,
+.wb-diff td {
+  border-bottom: 1px solid var(--w-line);
+  padding: 2px 6px;
+  text-align: left;
+}
+
+.wb-diff__del {
+  background: var(--w-diff-del);
+}
+
+.wb-diff__add {
+  background: var(--w-diff-add);
+}
+
+/* ---------- G-code 抽屉 ---------- */
+
+.wb-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: var(--w-backdrop);
+}
+
+.wb-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 90%);
+
+  /* 浮层有阴影没有边框；卡片有边框没有阴影 */
+  box-shadow: var(--w-shadow-float);
+  background: var(--w-card);
+}
+
+.wb-drawer__head,
+.wb-drawer__foot {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: var(--w-fs-base);
+}
+
+.wb-drawer__foot {
+  justify-content: flex-end;
+  border-top: 1px solid var(--w-line);
+}
+
+.wb-drawer__head {
+  border-bottom: 1px solid var(--w-line);
+  font-weight: 600;
+}
+
+.wb-drawer__desc {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px 0;
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-drawer__ta {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 8px 12px;
+  padding: 8px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-input);
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-base);
+  resize: none;
+}
+
+
+
+/* ---------- 结构带 3：底部条 ---------- */
+
+.wb-foot {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--w-foot-h);
+  padding: 0 12px;
+  border-top: 1px solid var(--w-line);
+  background: var(--w-card);
+  color: var(--w-t3);
+  font-size: var(--w-fs-base);
+}
+
+.wb-foot__right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.wb-foot__save {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* ---------- mini 档：改布局，不藏操作 ---------- */
+
+[data-density="mini"] .wb-body {
+  flex-direction: column;
+}
+
+[data-density="mini"] .wb-side {
+  /* 限高 45% 自己滚。参考实现记过实测：竖排的维护四项占 154px，
+     而 400×560 下侧栏只有 195px —— 减掉树头之后列表只剩 8px，
+     六台机型十个版本全被裁在滚动区外 */
+  width: auto;
+  max-height: 45%;
+  border-right: 0;
+  border-bottom: 1px solid var(--w-line);
+}
+
+[data-density="mini"] .wb-side__maintain {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+[data-density="mini"] .wb-strip {
+  flex-wrap: wrap;
+  gap: 12px;
+  height: auto;
+  padding: 4px 8px;
+}
+
+/* 说明文字可以省，操作不行 */
+[data-density="mini"] .wb-head__sub,
+[data-density="mini"] .wb-foot__counts {
+  display: none;
+}
+
+[data-density="mini"] .wb-pane {
+  margin: -1px 8px 8px;
+  padding: var(--w-p-card-sm);
+}

@@ -15,11 +15,20 @@ pub mod fsx;
 pub mod ipc;
 pub mod obs;
 
+// 后厨工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
+// 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
+// 见 .comate/specs/b03-backstage-workbench/doc.md §4
+//
+// （这里刻意用行注释：块注释在 Rust 里是可嵌套的，正文里出现 `/` 加 `*` 会开一个新注释，
+// 而路径通配写法很容易写出那两个字符。）
+#[cfg(feature = "workbench")]
+pub mod workbench;
+
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    with_commands(tauri::Builder::default())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -50,14 +59,89 @@ pub fn run() {
                 eprintln!("[setup] 找不到 main 窗口，跳过窗口外观");
             }
 
+            /* 后厨工作台的第二个窗口。**刻意在运行时建，而不是写进 tauri.conf.json**：
+            配置里的 windows 数组是整体覆盖的，把工作台窗口写进一份"给工作台用的配置"
+            就得把 main 窗口也抄一遍 —— 两份声明迟早漂移。写在这里，窗口的存在与
+            feature 严格同生共死，不需要任何一份配置去声明它。
+            开不出来只警告不中止：工作台开不出来是开发者的事，不该让客户端窗口也起不来 */
+            #[cfg(feature = "workbench")]
+            if let Err(e) = workbench::open_window(&handle) {
+                tracing::warn!("工作台窗口开不出来：{e}");
+            }
+
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            ipc::get_preset,
-            ipc::save_offsets,
-            ipc::get_calib_models,
-            ipc::open_model,
-        ])
         .run(tauri::generate_context!())
         .expect("Tauri 启动失败");
+}
+
+/* ---------- 命令清单 ----------
+
+Tauri 只允许调一次 `invoke_handler`，所以"客户端命令 + 可选的工作台命令"没法拼接，
+只能按 feature 给出两份完整清单。
+
+**两份里客户端那几个必须一字不差地同时出现。** 新增客户端命令时改两处 —— 这是
+Tauri 的 API 形状决定的，不是这里想省事；把它放在相邻的两个函数里，是为了漏改时
+一眼能看出来。 */
+
+#[cfg(not(feature = "workbench"))]
+fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    b.invoke_handler(tauri::generate_handler![
+        ipc::get_preset,
+        ipc::save_offsets,
+        ipc::get_calib_models,
+        ipc::open_model,
+    ])
+}
+
+#[cfg(feature = "workbench")]
+fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    use workbench::app;
+    b.invoke_handler(tauri::generate_handler![
+        ipc::get_preset,
+        ipc::save_offsets,
+        ipc::get_calib_models,
+        ipc::open_model,
+        // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
+        // 其余全是读、查（只读推演）、或一件明确的事。
+        // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、
+        // 差异列表、状态一致性每一件都要挨个改十几处。
+        app::wb_open,
+        app::wb_boot,
+        app::wb_reload,
+        app::wb_book,
+        app::wb_registry,
+        // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
+        // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
+        app::words::wb_words,
+        // 「机型与版本」那一页：读写 presets/machines/*.toml。
+        // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
+        app::machines::wb_machines,
+        app::machines::wb_add_machine,
+        app::machines::wb_add_version,
+        app::machines::wb_version_orphans,
+        app::machines::wb_remove_version,
+        app::machines::wb_set_version_field,
+        app::machines::wb_set_machine_field,
+        // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
+        app::wb_desk,
+        app::wb_matrix,
+        app::wb_stock,
+        app::wb_fallback,
+        app::wb_trash,
+        app::wb_ui,
+        app::wb_save_ui,
+        app::wb_preview_bulk,
+        app::wb_diff_draft,
+        app::wb_apply_draft,
+        app::wb_save,
+        app::wb_discard,
+        // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
+        // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
+        app::build::wb_preflight,
+        app::build::wb_preview_toml,
+        app::build::wb_generate,
+        app::build::wb_revert_preview,
+        app::build::wb_publish,
+    ])
 }

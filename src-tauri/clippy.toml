@@ -5,8 +5,24 @@
 # 机器拦得住的事情不该靠记性。
 #
 # 逃生口只有一个：fsx/atomic.rs 顶上的 #[allow(clippy::disallowed_methods)]。
+#
+# 禁的是**会截断已有文件**的那几个入口。前三条是直接入口，后两条是"拿到写句柄"
+# 的闸门 —— 闸门不关的话，前三条禁了也能绕过去。b04 Task 13 盘点实测：
+# 这个洞一直存在（`OpenOptions::new().create(true).write(true)` 不在禁列里），只是没人踩。
 disallowed-methods = [
   { path = "std::fs::write", reason = "会先把目标文件截断再写，崩溃时留半个文件。用 fsx::atomic::atomic_write" },
   { path = "std::fs::File::create", reason = "同上。要写盘走 fsx::atomic" },
   { path = "tokio::fs::write", reason = "同上。要写盘走 fsx::atomic" },
+  { path = "std::fs::File::options", reason = "它返回 OpenOptions，是绕开上面三条的闸门。要写盘走 fsx::atomic" },
+  { path = "std::fs::OpenOptions::new", reason = "另一条同样的闸门。要表达「要么建出来、要么已存在就失败」用 File::create_new（见下）" },
 ]
+
+# **刻意不禁 `std::fs::File::create_new`。**
+#
+# 它带 `create_new(true)`：路径已存在就失败，**不可能截断任何已有文件**。它是
+# "原子地占住一个新路径"的唯一原语，而 `fsx::atomic::atomic_write` 的 rename 会**覆盖**，
+# 表达不了这个语义 —— `presets::catalog::add_machine` 正是靠它避免覆盖一台已存在的机型
+# （那次覆盖不可逆）。禁掉它等于把那条路逼回"先 stat 再写"的窗口里。
+#
+# 它留下的唯一风险是"占住了路径但还没写内容时挂掉 ⇒ 0 字节文件"。那与"半个文件"
+# 不同：内容是后一次原子写进去的，而这一点在 `add_machine` 的文档里写着。

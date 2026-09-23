@@ -1,0 +1,69 @@
+id = 'A1_MINI'
+name = ''
+display = 'A1 mini'
+brand = 'Bambu Lab'
+defaultBundle = 'A1_MINI_default'
+externalAliases = ['A1MINI', 'A1M', 'A1MC', 'A1MQ', 'A1MF']
+image = 'a1_mini.webp'
+icon = 'a1_mini'
+
+[dimensions]
+edgeZone = 10.0
+
+[dimensions.bedSize]
+depth = 180.0
+width = 180.0
+
+[dimensions.calibration]
+lShapeBaseX = 30.21
+lShapeBaseY = 88.373
+xLineX = 76.523
+xLineY = 66.83
+xLineYEnd = 76.83
+yLineX = 66.523
+yLineXEnd = 76.523
+yLineY = 76.83
+zStartX = 30.21
+zStartY = 88.373
+
+[dimensions.flags]
+gcodeMarker = ';===== machine: A1 mini'
+hasSecondFan = false
+
+[dimensions.glueArea]
+glueMaxX = 180.0
+glueMaxY = 180.0
+glueMinX = -10.0
+glueMinY = 0.0
+wipeX = 160.0
+
+[dimensions.movementRange]
+maxX = 180.0
+maxY = 180.0
+maxZ = 999.0
+minX = -10.0
+minY = 0.0
+
+[[versions]]
+id = 'STANDARD'
+name = '标准版'
+presetFile = 'A1M.toml'
+recommendedBundle = 'A1_MINI_default'
+tag = '推荐'
+description = '官方标准配置'
+
+[[versions]]
+id = 'FAST'
+name = '快拆版6月以前'
+presetFile = 'A1MF.toml'
+recommendedBundle = 'A1_MINI_default'
+tag = '热门'
+description = '支持快拆配件的改装配置'
+
+[[versions]]
+id = 'FASTV3.3'
+name = '快拆版260628'
+presetFile = 'A1MF_260628.toml'
+recommendedBundle = 'A1_MINI_default'
+tag = '最新'
+description = '6月以后闲鱼购买的，以及6月28开源的快拆260628版本'

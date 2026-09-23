@@ -16,6 +16,11 @@ src-tauri/gen/schemas
 .env
 .env.*
 
+# 后厨工作台的未保存编辑（B03）。草稿是"关掉再开还在那个状态"用的**本机**状态，
+# 入库只会让每次开工作台都产生假改动。
+# 其余 workbench/ 下的东西全部入库 —— 那是开发源数据，就该跟着 git 走。
+workbench/.draft/
+
 # 系统
 .DS_Store
 Thumbs.db

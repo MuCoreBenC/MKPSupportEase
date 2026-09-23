@@ -1,0 +1,69 @@
+id = 'A1'
+name = ''
+display = 'A1'
+brand = 'Bambu Lab'
+defaultBundle = 'A1_default'
+externalAliases = ['A1C', 'A1F']
+image = 'a1.webp'
+icon = 'a1'
+
+[dimensions]
+edgeZone = 10.0
+
+[dimensions.bedSize]
+depth = 255.0
+width = 260.0
+
+[dimensions.calibration]
+lShapeBaseX = 68.21
+lShapeBaseY = 126.373
+xLineX = 114.523
+xLineY = 104.83
+xLineYEnd = 114.83
+yLineX = 104.53
+yLineXEnd = 114.53
+yLineY = 114.83
+zStartX = 68.21
+zStartY = 126.373
+
+[dimensions.flags]
+gcodeMarker = ';===== machine: A1'
+hasSecondFan = false
+
+[dimensions.glueArea]
+glueMaxX = 260.0
+glueMaxY = 255.0
+glueMinX = -40.0
+glueMinY = 0.0
+wipeX = 252.0
+
+[dimensions.movementRange]
+maxX = 260.0
+maxY = 255.0
+maxZ = 999.0
+minX = -40.0
+minY = 0.0
+
+[[versions]]
+id = 'STANDARD'
+name = '标准版'
+presetFile = 'A1.toml'
+recommendedBundle = 'A1_default'
+tag = '推荐'
+description = '官方标准配置，适合大多数用户'
+
+[[versions]]
+id = 'FAST'
+name = '快拆版6月以前'
+presetFile = 'A1F.toml'
+recommendedBundle = 'A1_default'
+tag = '热门'
+description = '支持快拆配件的改装配置'
+
+[[versions]]
+id = 'FASTV3.3'
+name = '快拆版260628'
+presetFile = 'A1F_260628.toml'
+recommendedBundle = 'A1_default'
+tag = '最新'
+description = '6月以后闲鱼购买的，以及6月28开源的快拆260628版本'

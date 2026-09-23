@@ -13,7 +13,7 @@ export { isAppError } from './contract'
  * 于是整个开发期都碰不到真实链路，等到打包那一刻才第一次接通，那时候出的问题最难查。
  *
  * `__TAURI_INTERNALS__` 是 Tauri v2 注入到 window 上的内部对象，有它就说明 `invoke` 能用。
- * 浏览器直接开 5178 时它不存在 → 走 mock，路径不丢。
+ * 浏览器直接开 5321 时它不存在 → 走 mock，路径不丢。
  */
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 

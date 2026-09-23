@@ -1,0 +1,53 @@
+id = 'X1C'
+name = ''
+display = 'X1C'
+brand = 'Bambu Lab'
+defaultBundle = 'X1C_default'
+externalAliases = ['X1', 'X1S', 'X1E', 'X1 Carbon', 'X1CARBON']
+image = 'x1c.webp'
+icon = 'p1s'
+
+[dimensions]
+edgeZone = 10.0
+
+[dimensions.bedSize]
+depth = 256.0
+width = 255.0
+
+[dimensions.calibration]
+lShapeBaseX = 68.21
+lShapeBaseY = 126.373
+xLineX = 114.523
+xLineY = 104.83
+xLineYEnd = 114.83
+yLineX = 104.53
+yLineXEnd = 114.53
+yLineY = 112.83
+zStartX = 68.21
+zStartY = 126.373
+
+[dimensions.flags]
+gcodeMarker = ';===== machine: X1'
+hasSecondFan = true
+
+[dimensions.glueArea]
+glueMaxX = 255.0
+glueMaxY = 265.0
+glueMinX = 0.0
+glueMinY = 0.0
+wipeX = 20.0
+
+[dimensions.movementRange]
+maxX = 255.0
+maxY = 265.0
+maxZ = 999.0
+minX = 0.0
+minY = 0.0
+
+[[versions]]
+id = 'LITE'
+name = 'lite版'
+presetFile = 'X1.toml'
+recommendedBundle = 'X1C_default'
+tag = '推荐'
+description = '群里开源的最新lite'

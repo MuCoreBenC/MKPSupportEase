@@ -1,0 +1,53 @@
+id = 'P1S'
+name = ''
+display = 'P1S'
+brand = 'Bambu Lab'
+defaultBundle = 'P1S_default'
+externalAliases = ['P1', 'P1SC', 'P1P', 'P1C']
+image = 'p1s.webp'
+icon = 'p1s'
+
+[dimensions]
+edgeZone = 10.0
+
+[dimensions.bedSize]
+depth = 256.0
+width = 256.0
+
+[dimensions.calibration]
+lShapeBaseX = 68.21
+lShapeBaseY = 126.373
+xLineX = 114.523
+xLineY = 104.83
+xLineYEnd = 114.83
+yLineX = 104.53
+yLineXEnd = 114.53
+yLineY = 112.83
+zStartX = 68.21
+zStartY = 126.373
+
+[dimensions.flags]
+gcodeMarker = ';===== machine: P1'
+hasSecondFan = true
+
+[dimensions.glueArea]
+glueMaxX = 255.0
+glueMaxY = 265.0
+glueMinX = 0.0
+glueMinY = 0.0
+wipeX = 20.0
+
+[dimensions.movementRange]
+maxX = 255.0
+maxY = 265.0
+maxZ = 999.0
+minX = 0.0
+minY = 0.0
+
+[[versions]]
+id = 'LITE'
+name = 'lite版'
+presetFile = 'P1.toml'
+recommendedBundle = 'P1S_default'
+tag = '推荐'
+description = '群里开源的最新lite'

@@ -1,0 +1,112 @@
+/**
+ * 工作台的视觉规范（doc §7「视觉规范」）。
+ *
+ * 值照参考实现那一份抄 —— 它和客户端是同一个产品群的设计系统，
+ * 重新调一套只会让两个窗口看起来像两个软件。
+ *
+ * # 作用域用 `data-` 属性，不用类名
+ *
+ * `[data-wb]` 而不是 `.wb`：这个仓库的客户端侧用 CSS Modules，类名会被哈希掉，
+ * 普通 CSS 文件里选不中。数据属性不会被改写，所以外壳与内层组件能共用同一组变量。
+ *
+ * # 颜色语义三条硬规矩（不许混用）
+ *
+ * | 颜色 | 意思 | 用在哪 |
+ * |---|---|---|
+ * | 橙 `--w-warn` | **「值变了 / 要留意」，不是错误** | 待生成、仅归档、移动预览里会变的项 |
+ * | 红 `--w-danger` | 真的错了 | 读不到数据、阻断级校验 |
+ * | 蓝 `--w-primary` | **草稿描边，不是底色** | `inset 0 0 0 1px`，这样「是什么来源」与「改没改」两条信息都在 |
+ *
+ * 最后那条是这套配色里最容易做错的地方：草稿用底色的话就把来源徽章的底色顶掉了，
+ * 于是「这一项来自哪一层」这条信息在改过的格子上消失 —— 而那恰恰是最需要看清的时候。
+ */
+
+[data-wb] {
+  /* 字号。全部 px：这是密集表格界面，rem 会被系统字号放大成另一个布局 */
+  --w-fs-xs: 10px;   /* 徽章 */
+  --w-fs-sm: 11px;   /* 状态条 */
+  --w-fs-base: 12px; /* 底部条、表头、元信息 */
+  --w-fs-md: 13px;   /* 正文、输入框 */
+  --w-fs-lg: 14px;   /* 分组标题、文件名 */
+  --w-fs-xl: 16px;   /* 页标题 */
+
+  /* 控件高度。默认 30px 是整套界面「密」的来源 */
+  --w-h-xs: 24px;
+  --w-h-sm: 26px;
+  --w-h-md: 30px;
+  --w-h-lg: 34px;
+  --w-h-xl: 40px;
+  --w-btn-sm: 24px;
+  --w-btn-md: 32px;
+
+  /**
+   * 矩阵单元格内容区的高度。**文本与控件共用这一个值**，
+   * 所以「点一下把文本换成输入框」不会改变行高 —— 行高一变，
+   * 后面所有行就会上下跳，下一次点击必然点偏。
+   * 它**不随密度变**：密度只改字号与内边距
+   */
+  --w-cell-h: 22px;
+
+  /* 圆角：徽章几乎直角，卡片 12，浮层 16 */
+  --w-r-tag: 2px;
+  --w-r-input: 4px;
+  --w-r-btn: 8px;
+  --w-r-card: 12px;
+  --w-r-float: 16px;
+
+  --w-p-btn-sm: 4px 10px;
+  --w-p-btn-md: 6px 12px;
+  --w-p-input: 8px 12px;
+  --w-p-card-sm: 12px;
+  --w-p-card-lg: 16px;
+
+  /* 结构尺寸。三条带的高度写死，因为它们要在任何密度下都占同样的位置 */
+  --w-sidebar: 260px;
+  --w-panel: 320px;
+  --w-strip-h: 26px;
+  --w-head-h: 44px;
+  --w-foot-h: 30px;
+
+  /* 表面四层 */
+  --w-page: #f8fafc;
+  --w-card: #fff;
+  --w-card-inner: #f9fafb;
+  --w-input: #fff;
+
+  /* 卡片 1px 边框、没有阴影；阴影只给浮层，而浮层没有边框 */
+  --w-line: #e5e7eb;
+  --w-line-strong: #d1d5db;
+  --w-shadow-float: 0 10px 40px rgb(15 23 42 / 18%);
+  --w-backdrop: rgb(23 23 23 / 50%);
+
+  /* 文字四级 */
+  --w-t1: #1c1c1c;
+  --w-t2: #525252;
+  --w-t3: #737373;
+  --w-t-off: #a3a3a3;
+
+  /* 语义色 */
+  --w-primary: #3b82f6;
+  --w-primary-soft: rgb(59 130 246 / 10%);
+  --w-ok: #10b981;
+  --w-warn: #d97706;
+  --w-danger: #dc2626;
+
+  /* diff 两侧 */
+  --w-diff-add: rgb(16 185 129 / 12%);
+  --w-diff-del: rgb(220 38 38 / 10%);
+
+  /* 来源三档：灰 = 出厂，紫 = 机型，蓝 = 版本。
+     与 domain::Origin 的三个变体一一对应，多一档少一档都说明哪边漂了 */
+  --w-src-factory-t: #6b7280;
+  --w-src-factory-bg: rgb(107 114 128 / 10%);
+  --w-src-factory-line: rgb(107 114 128 / 25%);
+  --w-src-machine-t: #7c3aed;
+  --w-src-machine-bg: rgb(124 58 237 / 10%);
+  --w-src-machine-line: rgb(124 58 237 / 25%);
+  --w-src-version-t: #2563eb;
+  --w-src-version-bg: rgb(37 99 235 / 10%);
+  --w-src-version-line: rgb(37 99 235 / 25%);
+
+  --w-mono: ui-monospace, sfmono-regular, 'SF Mono', menlo, consolas, monospace;
+}

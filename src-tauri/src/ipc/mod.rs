@@ -46,7 +46,10 @@ pub struct CalibModel {
 ///
 /// 写成高阶函数而不是宏：宏能少写一点字，但报错信息会指向宏展开后的位置，
 /// 调试时要多绕一道。这里的重复只有一行。
-fn traced<T>(
+///
+/// `pub(crate)` 是为了让 `workbench` 模块也走同一层 —— 工作台出错时同样要能按
+/// traceId 去日志里捞，不该为它再造一套包装。
+pub(crate) fn traced<T>(
     name: &'static str,
     f: impl FnOnce(&str) -> Result<T, AppError>,
 ) -> Result<T, AppError> {

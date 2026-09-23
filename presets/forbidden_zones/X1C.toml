@@ -1,0 +1,41 @@
+[[zones]]
+[[zones.points]]
+x = 0.0
+y = 0.0
+
+[[zones.points]]
+x = 240.0
+y = 0.0
+
+[[zones.points]]
+x = 240.0
+y = 14.0
+
+[[zones.points]]
+x = 238.0
+y = 14.0
+
+[[zones.points]]
+x = 238.0
+y = 5.0
+
+[[zones.points]]
+x = 0.0
+y = 5.0
+
+[[zones]]
+[[zones.points]]
+x = 0.0
+y = 0.0
+
+[[zones.points]]
+x = 18.0
+y = 0.0
+
+[[zones.points]]
+x = 18.0
+y = 28.0
+
+[[zones.points]]
+x = 0.0
+y = 28.0
