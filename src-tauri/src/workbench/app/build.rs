@@ -720,6 +720,125 @@ mod tests {
         assert!(r.text.contains("} # 笔尖偏移"), "内联表的注释丢了：\n{}", r.text);
     }
 
+    /// **M0：我们渲染出来的产物 vs 真机验证过的那份基线。**（b04 Task 11）
+    ///
+    /// 这是整个迁移的前置判据。基线是 `mkp-ssr` 里那 9 份内置预设之一 ——
+    /// 它们由那边的 `gen-presets` 从 `preset_recipes.toml` 生成，**上过真机**。
+    /// 我们这条链（`presets/*.toml` → `render()`）算出来的如果与它正文字节相同，
+    /// 说明两套真源等值、迁移不需要修数据；不同就必须先定哪边对 ——
+    /// 搬完 3 万行代码再发现值对不上，会留下一批"生成出来但和验证过的不一样"的产物，
+    /// 而那种错在产物上看不出来。
+    ///
+    /// 比的是**正文**：`uuid` 与 `release_time` 两行按定义就该不同
+    /// （前者按内容指纹算、后者是当下时间），它们不参与比较。
+    ///
+    /// 基线路径是兄弟仓库，找不到就跳过 —— 这条判据的寿命到 Task 22.2 为止
+    /// （那时基线会被删掉，因为那时只有我们一份）。
+    #[test]
+    fn our_render_matches_the_machine_verified_baseline() {
+        let (Some(_), Some(_)) = (paths::presets_root(), paths::upstream_root()) else {
+            eprintln!("没同时定位到 presets 与上游，这条 M0 检查未执行（不是通过）");
+            return;
+        };
+        let baseline_dir =
+            paths::repo_root().join("../mkp-ssr/crates/preset/assets/presets");
+        if !baseline_dir.is_dir() {
+            eprintln!("没找到基线目录 {}，这条 M0 检查未执行（不是通过）", baseline_dir.display());
+            return;
+        }
+
+        let up = crate::workbench::upstream::Upstream::load().expect("真上游");
+        let presets = crate::workbench::presets::Presets::load().expect("真 presets");
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::workbench::store::Store::at(tmp.path());
+        store.bootstrap().unwrap();
+        let c = super::super::storage::load(&store, &presets)
+            .expect("干净仓库读得通")
+            .committed;
+        let draft = Draft::default();
+        let book = Book::new(&up, &presets, &c, &draft);
+
+        /// 去掉那两行按定义会变的头部
+        fn body(s: &str) -> String {
+            s.lines()
+                .filter(|l| !l.starts_with("# uuid:") && !l.starts_with("# release_time:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        /// 同一份正文按行排序 —— 用来把「值不一样」与「只是顺序不一样」分开。
+        ///
+        /// 这两件事的处置完全不同：值不一样要定哪边对（可能要改数据），
+        /// 顺序不一样只要定一个口径（TOML 键序不影响语义，`load_ir` 读进去是一样的）。
+        /// 合在一起报「不一致」等于把一个能一句话解决的问题说成了一个要查数据的问题
+        fn sorted_body(s: &str) -> Vec<String> {
+            let mut v: Vec<String> = body(s).lines().map(str::to_owned).collect();
+            v.sort();
+            v
+        }
+
+        let mut compared = 0usize;
+        let mut value_diff: Vec<String> = Vec::new();
+        let mut order_only: Vec<String> = Vec::new();
+        for v in book.versions() {
+            let name = preset_file_name(&v.machine_id, &v.version_id);
+            let path = baseline_dir.join(&name);
+            let Ok(want) = std::fs::read_to_string(&path) else {
+                continue; // 基线里没有这一份（A2L 就是这样）—— 不是差异
+            };
+            let got = render(&book, &v.uid).expect("渲染得出来").text;
+            compared += 1;
+            let (a, b) = (body(&got), body(&want));
+            if a == b {
+                continue;
+            }
+            if sorted_body(&got) == sorted_body(&want) {
+                // 每一行两边都有，只是排的位置不同
+                order_only.push(name);
+                continue;
+            }
+            // 真差异：逐行列出只在一边出现的
+            let (sa, sb) = (sorted_body(&got), sorted_body(&want));
+            let only_ours: Vec<&String> = sa.iter().filter(|l| !sb.contains(l)).take(4).collect();
+            let only_theirs: Vec<&String> = sb.iter().filter(|l| !sa.contains(l)).take(4).collect();
+            value_diff.push(format!(
+                "  {name}\n    只在我们：{only_ours:?}\n    只在基线：{only_theirs:?}"
+            ));
+        }
+
+        assert!(compared > 0, "一份都没比到，这条判据在空转");
+        assert!(
+            value_diff.is_empty(),
+            "**值不一致**（比了 {compared} 份）—— 这要先定哪边对，不能直接搬代码：\n{}",
+            value_diff.join("\n")
+        );
+
+        // **M0 的结论（2026-09-23 实测）：9 份逐行同集合，值全对上了。**
+        //
+        // 剩下的唯一差异是**段内键序**：基线是 offset → speed_limit → custom_mount_gcode…，
+        // 我们按 `layout.order`（界面顺序）。TOML 键序不影响语义，`load_ir` 读进去一样，
+        // 所以这不是数据问题，是口径问题。
+        //
+        // 为什么这里只记录不断言：**定案倾向跟基线**（那 9 份已经发布、上过真机，
+        // 字节相同意味着"换成我们生成"在交付面上是零变化），但改排序会牵动
+        // 好几条既有判据，属于一次独立的改动。它是 Task 11 的收尾项。
+        //
+        // 不断言不等于放过：`value_diff` 那一条是真判据（值一变就红），
+        // 而键序这一条一旦修好，把下面这个 `if` 换成 `assert!` 即可 —— 留着这行是为了
+        // 让"还没修"这件事在每次跑测试时都出现在眼前，而不是躺在某个清单里
+        if !order_only.is_empty() {
+            eprintln!(
+                "【M0 已知差异，待 Task 11 收尾】值全对上了（{compared} 份逐行同集合），\
+                 但段内键序不同：{} 份。定案倾向跟基线（它已发布、上过真机）。\
+                 推断基线用的是注册表里 [[params]] 的出现顺序，而我们用 layout.order —— \
+                 落地前要先验证这个推断",
+                order_only.len()
+            );
+        }
+    }
+
+
+
     /// 同样的输入**产出同样的字节**（除了时间戳那一行）——
     /// uuid 用随机数的话这条就不成立，而「字节没变不重写」也就废了
     #[test]
