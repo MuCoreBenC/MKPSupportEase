@@ -27,14 +27,16 @@ workbench = ["dep:sha2", "dep:time", "dep:toml_edit"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
+# 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
+# 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 # 原子写盘：同目录临时文件 + persist（见 fsx/atomic.rs）
-tempfile = "3"
+tempfile.workspace = true
 # 可观测性走 tracing 一套，不再叠 tauri-plugin-log —— 两套日志栈会各写一份、互相不知道
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
@@ -43,7 +45,7 @@ uuid = { version = "1", features = ["v7"] }
 # optional = true 的意思是"默认构建里本 crate 用不上它们"。
 # 注意 sha2 本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的收益不是
 # "少编一个 crate"，而是**默认构建的代码里 `use sha2` 编不过** —— 隔离靠的是这个，不是包体积
-sha2 = { version = "0.10", optional = true }
+sha2 = { workspace = true, optional = true }
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
@@ -62,4 +64,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 window-vibrancy = "0.8"
 
 [dev-dependencies]
-toml = "1.0.7"
+# 测试里用它把夹具的 JSON 转成 TOML（`testkit` / `presets::registry`），
+# 以及把产出的 TOML 解析回来（`app::build`）。版本取 workspace 那一档（0.8，见根上的说明）
+toml.workspace = true
