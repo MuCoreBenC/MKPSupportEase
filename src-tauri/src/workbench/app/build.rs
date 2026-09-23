@@ -119,7 +119,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     // uuid 按指纹算，**不是随机数** —— 随机的话同一份配方每次产出不同字节，
     // 「字节没变不重写」这条规则就永远不生效
     out.push_str(&format!("# uuid: {}\n", uuid_from(&fingerprint)));
-    out.push_str(&format!("# release_time: {}\n", clock::now_iso8601()));
+    out.push_str(&format!("# release_time: {}\n", clock::now_release_time()));
     out.push_str(&format!("# machine: {}\n", machine.id));
     out.push_str(&format!("# variant: {}\n", v.version_id.to_lowercase()));
     out.push_str("#胶笔配置\n");
@@ -189,16 +189,32 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
 
     Ok(Rendered {
         uid: uid.to_owned(),
-        // 产物文件名：上游给的那个（`A1F_260628.toml`）优先，没有就按机型_版本造一个
-        file_name: v
-            .mkp_preset
-            .as_ref()
-            .map(|x| x.file_name.clone())
-            .unwrap_or_else(|| format!("{}_{}.toml", machine.id, v.version_id)),
+        file_name: preset_file_name(&machine.id, &v.version_id),
         text: out,
         fingerprint,
         snapshot,
     })
+}
+
+/// 产物文件名。**一处定义，生成与发布共用。**
+///
+/// `{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
+///
+/// # 为什么是这一套，不是上游那一套
+///
+/// 上游 manifest 给的名字是 `A1.toml` / `A1F.toml` / `A1F_260628.toml` 这种历史命名，
+/// 而**消费端按 `{机型}-{版本小写}.toml` 找文件**（它 9 份内置预设全是这个形状，
+/// 见 b04 `AUDIT-EVIDENCE.md` §2）。名字对不上的后果不是报错，是消费端找不到 ——
+/// 我们生成了一堆它认不出的文件。
+///
+/// 所以这条改动同时**断掉了对上游 `mkp_preset.file_name` 的依赖**：
+/// 名字现在只由「机型 id + 版本 id」决定，而这两样都在我们自己的清单里。
+/// 上游整层删掉时（b04 Task 12）这里一个字都不用改。
+///
+/// 版本 id 小写是跟着 `# variant:` 那一行走的 —— 同一份产物里两处指同一个东西，
+/// 大小写不一致会让人以为是两个变体
+pub fn preset_file_name(machine_id: &str, version_id: &str) -> String {
+    format!("{machine_id}-{}.toml", version_id.to_lowercase())
 }
 
 /// 行尾注释或独立注释行。**空注释不写 `# `** —— 一个孤零零的井号是噪音
@@ -574,7 +590,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
                 let Some(p) = &v.mkp_preset else {
                     continue; // 暂无资源：跳过，不报错
                 };
-                let path = mkp.join(&p.file_name);
+                let path = mkp.join(preset_file_name(&v.machine_id, &v.version_id));
                 let Ok(bytes) = std::fs::read(&path) else {
                     return Err(AppError::not_found(format!(
                         "{} 的产物还没生成",
@@ -593,7 +609,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
                     id: p.asset_id.clone(),
                     resource_type: "mkp_preset".to_owned(),
                     machine_id: v.machine_id.clone(),
-                    file_name: p.file_name.clone(),
+                    file_name: preset_file_name(&v.machine_id, &v.version_id),
                     relative_path: format!("presets/mkp/{}", p.file_name),
                 });
             }
@@ -806,8 +822,8 @@ mod tests {
 
         let r = render(&book, "A2L/STANDARD").unwrap();
         assert!(r.text.contains("# machine: A2L"));
-        // 上游没给它文件名，所以按机型_版本造一个
-        assert_eq!(r.file_name, "A2L_STANDARD.toml");
+        // 文件名只由清单决定（机型 id + 版本 id 小写），与上游给不给名字无关
+        assert_eq!(r.file_name, "A2L-standard.toml");
 
         let row = book
             .build_rows()
@@ -876,6 +892,54 @@ mod tests {
             report.first_block().map(|b| b.title.clone())
         );
     }
+
+    /// **生成出来的名字必须正好是消费端认得的那一批。**（b04 §02 契约的第一条）
+    ///
+    /// 消费端按 `{机型}-{版本小写}.toml` 找文件，它内置的 9 份就是这个形状
+    /// （`AUDIT-EVIDENCE.md` §2 逐份列过）。名字对不上的后果不是报错，
+    /// 是它**找不到** —— 我们生成了一堆它认不出的文件，而两边都不会说话。
+    ///
+    /// 这是一条**会随清单变化而红**的判据，而且红了就该看：
+    /// 改版本 id 或加机型都会改变这批名字，那时要同步的是消费端的内置表。
+    /// 期望值里多出的 `A2L-standard.toml` 是占位机型 —— 它不会被生成，
+    /// 但名字口径照样成立
+    #[test]
+    fn generated_names_match_what_the_consumer_looks_for() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let p = crate::workbench::presets::Presets::load_from(&root).unwrap();
+        let got: std::collections::BTreeSet<String> = p
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| m.versions.iter().map(|v| preset_file_name(&m.id, &v.id)))
+            .collect();
+
+        // 消费端 crates/preset/assets/presets/ 下实测的 9 份 + 占位的 A2L
+        let want: std::collections::BTreeSet<String> = [
+            "A1-standard.toml",
+            "A1-fast.toml",
+            "A1-fastv3.3.toml",
+            "A1_MINI-standard.toml",
+            "A1_MINI-fast.toml",
+            "A1_MINI-fastv3.3.toml",
+            "A2L-standard.toml",
+            "P1S-lite.toml",
+            "P2S-standard.toml",
+            "X1C-lite.toml",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+        assert_eq!(
+            got, want,
+            "产物名与消费端认的那一批不一致 —— 它会找不到文件，而两边都不报错"
+        );
+    }
 }
+
 
 
