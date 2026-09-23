@@ -126,24 +126,31 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
 - [ ] Task 13: **M1 + M2 —— 建 workspace，后处理内核迁进来**
     - 盘点：✅ [TASK-13-MIGRATION-INVENTORY.md](./TASK-13-MIGRATION-INVENTORY.md)
       （只读取证：迁什么 / 依赖什么 / 怎么分类 / 怎么切批 / 拿什么验收）
-    - 盘点定案（2026-09-23，见该文件 §6）：**B2/B3 拆两笔**（零 diff 搬运 + 独立改名）；
-      bin 的三个依赖先照搬、M5 再定；两个 asset JSON 与 9 份测试用预设按
-      「搬迁 + 头注 + 记入 M5 收尾清单」处理。**写盘纪律的豁免：待决策**（§2.5 ①）
-    - 13.1: 新建 workspace 根 `Cargo.toml`，`src-tauri` 变成成员；
-      依赖版本统一（新增 `tracing-subscriber` / `clap` / `ctrlc`）。
-      另：`serde_json` 要开 `float_roundtrip` + `preserve_order`（它不是优化项，
-      是那边 golden 判据的正确性开关）—— 开了之后**我们自己的 264 条要重跑**
-    - 13.2: `mkp-ssr/crates/core` → `crates/postprocess`，**纯移动**：
-      包名 `mkpse-postprocess`、lib 名 `postprocess`，逻辑一个字不改。
-      盘点建议拆成**两笔**：先原样复制拿「内容零 diff」当搬运证据，再一笔改名 ——
-      否则机械改动与搬运错误混进同一条 diff，那 20 个测试文件全绿就不再是搬运证据了
-    - 13.3: `mkp_pp::` → `postprocess::` 全量替换（实测 64 行 / 19 文件）；
+    - 盘点定案（2026-09-23，见该文件 §6 + [TASK-13-WRITE-DISCIPLINE-OPTIONS.md](./TASK-13-WRITE-DISCIPLINE-OPTIONS.md)）：
+      **M2 拆 M2a/M2b**（零 diff 搬运 + 独立改名）；bin 的三个依赖先照搬、M5 再定；
+      两个 asset JSON 与 9 份测试用预设按「搬迁 + 头注 + 记入 M5 收尾清单」处理；
+      写盘纪律**C（源码扫描断言）为主 + A1（根上唯一一份 `clippy.toml`）为辅**，B 推迟
+    - 13.1: ✅ **已完成**（`70eed0c` 布局 + `44c5ebe` 依赖统一）。
+      根 `Cargo.toml` 建好、`src-tauri` 成成员、`Cargo.lock` 搬到根且 cargo 未改写它。
+      依赖版本统一到 `[workspace.dependencies]`；`serde_json` 开了
+      `float_roundtrip` + `preserve_order` —— **我们自己的 264 条重跑过，全绿**
+      （这一档变化没动到我们的行为）。`toml` 取 **0.8** 不取 1.x：内核用 0.8 档的 API，
+      而 M2a 的搬运证据是内容零 diff，改代码与搬运不能混在同一条 diff 里
+    - 13.2 = **M2a**（下一步）：`mkp-ssr/crates/core` → `crates/postprocess`，
+      **原样复制，连包名 `mkp-pp` / lib `mkp_pp` 都先不改**。
+      判据：121 个文件逐文件 sha256 与源一致 + `cargo test -p mkp-pp` 全绿
+    - 13.3 = **M2b**：**单独一笔机械改名**。`mkp_pp::` → `postprocess::`（实测 64 行 / 19 文件）；
       **不留过渡别名**。另有 3 处 `env!("CARGO_BIN_EXE_mkp-pp")` 是编译期宏，bin 改名必改
-    - 13.4: `src-tauri` 刻意不领 workspace lints（Tauri 的宏会碰到 `unsafe_code = forbid`）。
-      另：workspace 根的 `[lints]` **不能写 clippy 规则** —— cargo 报
+    - 13.4: ✅ workspace 根的 `[lints.rust] unsafe_code = "forbid"` 已就位，
+      `src-tauri` 刻意**不领**（Tauri 的宏与 macOS 那几段 objc2 会碰到 unsafe）。
+      另：根的 `[lints]` **不能写 clippy 规则** —— cargo 报
       `cannot override workspace.lints in lints`
     - 13.5: 判据：它自带的 20 个测试文件全绿 + 我们原有的 **264** 条仍绿 +
-      `cargo tree -d` 无重复依赖。（`274` 是 Task 12 之前的数字）
+      `cargo tree -d` **不新增说不清的重复**。
+      （"无重复依赖"不可能按字面执行：Tauri 自己的树里本来就有 53 条；
+      改口径的证据与逐项比对见 `44c5ebe` 的提交信息。`274` 也是旧数字）
+    - 分支：`feat/b04-p3-migration`（本机与远端同步），草稿 PR #11 只作为 CI 的载体 ——
+      每 push 一次自动跑一遍，不再逐批开 PR
 
 - [ ] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
     - 14.1: 删 `crates/postprocess/assets/machine_dimensions.json` 与
