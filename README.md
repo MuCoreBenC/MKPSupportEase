@@ -11,7 +11,7 @@ Tauri 2 + React 18 + TypeScript。目前是**骨架**：首页向导与校准页
 ```bash
 npm install          # 顺带装好 git 闸门（prepare → scripts/setup-hooks.mjs）
 npm run tauri dev    # 原生窗口，数据来自 Rust
-npm run dev          # 只开浏览器 http://localhost:5178/，数据走 mock
+npm run dev          # 只开浏览器 http://localhost:5321/，数据走 mock
 ```
 
 两条路径都留着是刻意的：浏览器里改界面快，原生窗口里才碰得到真实的 IPC 链路。
