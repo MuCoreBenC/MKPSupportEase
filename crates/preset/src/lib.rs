@@ -60,9 +60,18 @@ pub use write::{Edit, EditValue, KeySnapshot, apply_edits, snapshot};
 
 /// param_registry 快照。
 ///
-/// `include_str!` 编进二进制、**不走任何分发管线**（换参数集 = 出新版本）——
-/// 与来源仓库同一决定。消费方：`build()` 的零值默认与范围校验、弃用参数检查。
-pub const PARAM_REGISTRY_TOML: &str = include_str!("../assets/param_registry.toml");
+/// **指向仓库里那份唯一真源** `presets/registry/param_registry.toml`（Task 15 / M4c）。
+/// 搬进来时 `crates/preset/assets/` 下那份 56 KB 副本已经删掉 —— 两份数据只差 5 处
+/// （两处 label、两处 `uiComponent`、一块 `[[params.choices]]`），而那种差异
+/// 在界面上看得见、在判据里看不见，留着就是把双真相固化。
+///
+/// 仍然是 `include_str!` 编进二进制、**不走任何分发管线**（换参数集 = 出新版本）。
+/// 「改成运行时从数据根读」与 M3 欠的那次 `machine_dims::install()` 接线一起做（M5）：
+/// `load_param_registry()` 有 20 多处调用点，混进搬运这一批会把它变成重构。
+///
+/// 消费方：`build()` 的零值默认与范围校验、弃用参数检查。
+pub const PARAM_REGISTRY_TOML: &str =
+    include_str!("../../../presets/registry/param_registry.toml");
 
 /// **内置预设**：由配方生成、随版本走的那 9 份（文件名 + 内容）。
 ///

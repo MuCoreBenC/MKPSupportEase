@@ -24,8 +24,15 @@ use serde::Serialize;
 use toml_edit::{DocumentMut, Value};
 
 /// 仓库里那份参数注册表的路径（与 `generate::recipe_path` 同一套路：编译期常量）。
+///
+/// **M4c 起指向唯一真源** `presets/registry/param_registry.toml`，
+/// 与 `lib.rs` 那个 `include_str!` 咬的是同一个文件 —— 否则"改完重编译才生效"
+/// 这句话就不成立了（改的是一份、编进去的是另一份）。
+///
+/// 代价照实说：这个模块从此**有能力写真数据**。它只在开发态有意义（见模块头），
+/// 而兜着它的是「`presets/` 12 个文件 sha256 在整个迁移里不变」那条验收。
 pub fn registry_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/param_registry.toml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/registry/param_registry.toml")
 }
 
 /// 一次区间编辑的结果。`changed` 是**真的动了的那几个键名**（给界面报数用）。
