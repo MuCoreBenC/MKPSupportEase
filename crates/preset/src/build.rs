@@ -15,19 +15,19 @@
 //! 搬入 mkp-ssr 时的改动**恰好两处**（其余逐字不动）：
 //! - 下面那段 use：来源 crate 名 → 本仓库的模块路径。
 //! - 删掉本文件里的 `fill_defaults` 与 `num_strip`：内核
-//!   `crates/core/src/ir/defaults.rs` 已有**逐字相同**的两份（搬入时实测 `diff` 退 0，
+//!   `crates/postprocess/src/ir/defaults.rs` 已有**逐字相同**的两份（搬入时实测 `diff` 退 0，
 //!   24 行与 30 行完全一致）。同一个函数留两份 = 同一个换算在两处发生（AGENTS.md §1.1），
 //!   迟早漂移，而漂移的表现是「改了一处、另一处照旧绿」。
 
 use crate::registry::Registry;
 use crate::{IntOrFloat, TomlConfig};
-use mkp_pp::diag::PostprocError;
-use mkp_pp::ir::types::*;
+use postprocess::diag::PostprocError;
+use postprocess::ir::types::*;
 // `num_strip` 从内核拿（本文件原来那份已删）。
 // **`fill_defaults` 刻意不 import**：`build()` 不调它 —— 时机是「G-code 元数据提取之后」，
 // 那是编排层（pipeline）的事。import 进来只会得到一条 unused 警告，
 // 而警告在 -D warnings 下就是错误。
-use mkp_pp::ir::num_strip;
+use postprocess::ir::num_strip;
 use std::collections::HashMap;
 
 /// exec_mode 三值（`""` = CLI 回退读 TOML，process.go:219 语义）。
@@ -366,7 +366,7 @@ pub fn build(
     Ok(ir)
 }
 
-// `fill_defaults` **在这里被删掉了**（同上）：内核 `crates/core/src/ir/defaults.rs`
+// `fill_defaults` **在这里被删掉了**（同上）：内核 `crates/postprocess/src/ir/defaults.rs`
 // 有逐字相同的一份（实测 `diff` 退 0、各 24 行）。它刻意不在 `build()` 内调用 ——
 // 时机是「G-code 元数据提取之后」，那是编排层的事。
 
@@ -898,8 +898,8 @@ pub(crate) fn split_gcode_lines(s: &str) -> Vec<String> {
 }
 
 // `num_strip` **在这里被删掉了**（搬入 mkp-ssr 的第 2 处改动）：内核
-// `crates/core/src/ir/defaults.rs` 里有逐字相同的一份（实测 `diff` 退 0、各 30 行），
-// 且 postproc 的元数据扫描本来就调那一份。本文件顶部 `use mkp_pp::ir::num_strip`。
+// `crates/postprocess/src/ir/defaults.rs` 里有逐字相同的一份（实测 `diff` 退 0、各 30 行），
+// 且 postproc 的元数据扫描本来就调那一份。本文件顶部 `use postprocess::ir::num_strip`。
 
 fn clamp_float(v: f64, min: f64, max: f64) -> f64 {
     if v < min {
@@ -1126,7 +1126,7 @@ mod tests {
         ] {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 // 同上：预设 fixture 只在内核那一份里。
-                .join("../core/tests/fixtures/presets")
+                .join("../postprocess/tests/fixtures/presets")
                 .join(format!("{name}.toml"));
             let file = crate::read_preset(&path).unwrap();
             build(&file.config, Some(&reg), CalibrationExecMode::Fallback)

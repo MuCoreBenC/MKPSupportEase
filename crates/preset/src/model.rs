@@ -233,7 +233,7 @@ impl PresetKey {
 
     pub fn new(machine: &str, variant: Option<&str>) -> Self {
         let raw = machine.trim();
-        let canonical = mkp_pp::postproc::machine_dims::normalize_to_canonical(raw);
+        let canonical = postprocess::postproc::machine_dims::normalize_to_canonical(raw);
         Self {
             machine: if canonical.is_empty() {
                 raw.to_string()

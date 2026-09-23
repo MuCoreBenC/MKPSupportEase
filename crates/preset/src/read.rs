@@ -1,9 +1,9 @@
 //! 读取面 —— 头注释正则、CRLF 两段式、错误码（对照 config/read.go）。
 
 use crate::model::{PresetFile, TomlConfig};
-// 搬入 mkp-ssr 的唯一改动：mkp_diag → mkp_pp::diag（错误码本身一个字没动，
+// 搬入 mkp-ssr 的唯一改动：mkp_diag → postprocess::diag（错误码本身一个字没动，
 // 它们是对外契约：E_CFG_PARSE_001 / E_TOML_PARSE_001 …）。
-use mkp_pp::diag::PostprocError;
+use postprocess::diag::PostprocError;
 use std::path::Path;
 
 /// 读预设文件。文件缺失 → `E_FS_NOT_FOUND_001`；解析两段式均失败 →

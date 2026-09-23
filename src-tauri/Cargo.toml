@@ -54,7 +54,10 @@ time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 用 `toml` 反序列化再重新序列化的话，那条判据要靠我复刻别人 writer 的引号风格、
 # 键序、浮点格式才能成立 —— 那是最脆的一类承诺。
 # `toml_edit` 保留原文与格式，只改被改的那一处，于是保真在**构造上**成立。
-toml_edit = { version = "0.22", features = ["serde"], optional = true }
+#
+# 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）；`optional` 留在这里，
+# 隔离靠的是「默认构建里 `use toml_edit` 编不过」，不是依赖图里没有它。
+toml_edit = { workspace = true, optional = true }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]

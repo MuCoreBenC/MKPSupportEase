@@ -195,11 +195,11 @@ pub fn diff(
     mine_text: &str,
     base_text: Option<&str>,
     official_text: &str,
-) -> Result<Vec<FieldDiff>, mkp_pp::diag::PostprocError> {
+) -> Result<Vec<FieldDiff>, postprocess::diag::PostprocError> {
     use std::collections::BTreeMap;
 
     type Row = (bool, Option<crate::write::EditValue>);
-    fn index(text: &str) -> Result<BTreeMap<String, Row>, mkp_pp::diag::PostprocError> {
+    fn index(text: &str) -> Result<BTreeMap<String, Row>, postprocess::diag::PostprocError> {
         Ok(crate::write::snapshot(text)?
             .into_iter()
             .map(|s| (format!("{}.{}", s.section, s.key), (s.present, s.value)))

@@ -7,10 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use mkp_preset::lineage::{make_copy, sha256_hex, strip_lineage_for_compare};
+use preset::lineage::{make_copy, sha256_hex, strip_lineage_for_compare};
 
 fn fixtures() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("读 fixture 目录")
         .flatten()
@@ -50,8 +50,8 @@ fn ko2_a_copy_differs_from_its_source_only_by_the_lineage_lines() {
         // **值必须一模一样**。剪三行再比只能证明「加了三行」，证明不了那三行加在了安全的位置 ——
         // 插进 `"""` 多行 G-code 里面，剪的时候一样能剪掉，但那段 G-code 已经多了一行。
         // 所以这里再比一次 serde 面。
-        let a = mkp_preset::read_preset_from_bytes(src.clone()).expect("来源读得回来");
-        let b = mkp_preset::read_preset_from_bytes(copy.clone()).expect("副本读得回来");
+        let a = preset::read_preset_from_bytes(src.clone()).expect("来源读得回来");
+        let b = preset::read_preset_from_bytes(copy.clone()).expect("副本读得回来");
         assert_eq!(
             a.config, b.config,
             "K-O2 红：{name} 的副本值变了 —— 三行插到了会改变内容的位置"
@@ -89,7 +89,7 @@ fn ko2b_a_copy_is_still_a_usable_preset() {
         let out = dir.path().join(&name);
         std::fs::write(&out, &copy).expect("写副本");
 
-        let file = mkp_preset::read_preset(&out)
+        let file = preset::read_preset(&out)
             .unwrap_or_else(|e| panic!("K-O2b 红：{name} 的副本读不回来了：{e}"));
         let lineage = file
             .lineage
@@ -105,7 +105,7 @@ fn ko2b_a_copy_is_still_a_usable_preset() {
         // 原有的头字段没被血统挤掉
         assert!(!file.machine.is_empty(), "K-O2b 红：{name} 的 machine 丢了");
 
-        mkp_preset::load_ir(&out, None)
+        preset::load_ir(&out, None)
             .unwrap_or_else(|e| panic!("K-O2b 红：{name} 的副本 load_ir 失败：{e}"));
         checked += 1;
     }
@@ -117,8 +117,8 @@ fn ko2b_a_copy_is_still_a_usable_preset() {
 // K-O3：差异的五种状态 + 三个值
 // ——————————————————————————————————————————————————————————————
 
-use mkp_preset::lineage::{DiffState, FieldDiff, diff};
-use mkp_preset::write::EditValue;
+use preset::lineage::{DiffState, FieldDiff, diff};
+use preset::write::EditValue;
 
 /// 拼一份最小可解析的预设（`snapshot` 只要求它是合法 TOML）。
 fn preset(toolhead: &[&str], wiping: &[&str]) -> String {

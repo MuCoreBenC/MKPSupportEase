@@ -1,9 +1,9 @@
 //! `gen-presets`：把配方渲染成预设。**仓库内的开发工具，不进 `.app`**。
 //!
 //! ```text
-//! cargo run -q -p mkp-preset --bin gen-presets                 # --check（默认）
-//! cargo run -q -p mkp-preset --bin gen-presets -- --write      # 写进 assets/presets/
-//! cargo run -q -p mkp-preset --bin gen-presets -- --print A1:standard
+//! cargo run -q -p mkpse-preset --bin gen-presets                 # --check（默认）
+//! cargo run -q -p mkpse-preset --bin gen-presets -- --write      # 写进 assets/presets/
+//! cargo run -q -p mkpse-preset --bin gen-presets -- --print A1:standard
 //! ```
 //!
 //! # 为什么 `--check` 是默认
@@ -13,7 +13,7 @@
 //!
 //! # 这个文件是薄壳
 //!
-//! 渲染、逐字节比、扫多余产物三件事都在 `mkp_preset::generate` 里 ——
+//! 渲染、逐字节比、扫多余产物三件事都在 `preset::generate` 里 ——
 //! 工作台（spec `recipe-workbench`）的命令调的是同一套函数。这里只负责认参数与打印。
 //!
 //! **一处红字的措辞变了**（挪进库的代价，照实记）：入库产物读不到时，
@@ -22,10 +22,10 @@
 
 use std::path::PathBuf;
 
-use mkp_preset::generate::{
+use preset::generate::{
     assets_dir, check_all, check_baseline, fixtures_dir, sync_baseline, write_all,
 };
-use mkp_preset::recipe::{Recipe, render};
+use preset::recipe::{Recipe, render};
 
 const RECIPE: &str = include_str!("../../assets/preset_recipes.toml");
 

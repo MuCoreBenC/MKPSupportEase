@@ -3,10 +3,10 @@
 //! 三层，从强到弱：
 //!
 //! 1. **整链字节判据**：`load_ir(预设 A1.toml)` → `process_with_ir` 的输出与
-//!    `crates/core/tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）
+//!    `crates/postprocess/tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）
 //!    **除 MKP 标记行外逐字节相等**。这条把「预设 → IR → 12 步 → 输出」整条链一次钉住
 //!    —— 参考物正是 `mkp-sr` 的 CLI 用**同一份预设**生成的（命令记在
-//!    `crates/core/tests/end_to_end.rs` 头部）。
+//!    `crates/postprocess/tests/end_to_end.rs` 头部）。
 //!    注意它比 `end_to_end.rs` 更强一档：那条走的是**已经转好的 IR TOML**，
 //!    这条走的是**真正的预设文件**，中间那 2,242 行映射也在覆盖面里。
 //!
@@ -19,14 +19,14 @@
 //! 3. **真实预设**：用户机器上的 `~/Documents/MKPSupportSSR/presets/mkp/A1MF.toml`
 //!    能过 `load_ir`。它在仓库外 ⇒ 不存在时**响亮跳过**（打印路径与原因，不静默 return）。
 //!
-//! 伪随机序列是**进程级**状态（见 `crates/core/tests/process_with_ir.rs` 的文件头），
+//! 伪随机序列是**进程级**状态（见 `crates/postprocess/tests/process_with_ir.rs` 的文件头），
 //! 所以整链那条在跑之前 reset，且用一把锁串行。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use mkp_pp::diag::CancelToken;
-use mkp_pp::pipeline::{self, IrProcessRequest, NoProgress};
+use postprocess::diag::CancelToken;
+use postprocess::pipeline::{self, IrProcessRequest, NoProgress};
 
 static SEQUENCE: Mutex<()> = Mutex::new(());
 
@@ -38,29 +38,29 @@ fn lock_sequence() -> MutexGuard<'static, ()> {
 }
 
 fn core_path(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../core/{rel}"))
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../postprocess/{rel}"))
 }
 
 /// 用户机器上的真实预设（仓库外资产）。
 const REAL_PRESET: &str = "/Users/wzy/Documents/MKPSupportSSR/presets/mkp/A1MF.toml";
 
 /// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `mkp_pp::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
+/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
 fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    mkp_pp::postproc::marks::strip_mark_lines(bytes)
+    postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
 #[test]
 fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     let _seq = lock_sequence();
-    mkp_pp::gcode::reset_pseudo_random();
+    postprocess::gcode::reset_pseudo_random();
 
     let dir = tempfile::tempdir().expect("临时目录");
     let work = dir.path().join("input.gcode");
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
 
     let raw = std::fs::read_to_string(&work).expect("读输入");
-    let ir = mkp_preset::load_ir(&core_path("tests/fixtures/presets/A1.toml"), Some(&raw))
+    let ir = preset::load_ir(&core_path("tests/fixtures/presets/A1.toml"), Some(&raw))
         .expect("预设 → IR 必须成功");
 
     // 顺手把「第 7、8 步真的发生了」钉住：文件名带扩展名、机型已归一。
@@ -131,7 +131,7 @@ fn an_unknown_machine_alias_is_a_hard_error() {
     let path = minimal_preset(dir.path(), Some("NOT_A_PRINTER"));
     // **不用 expect_err**：它在 Ok 分支会把整个 Ir 用 Debug 打出来（NV-5.5 实测刷了 5KB，
     // 真因埋在里面 —— AGENTS.md §7⑦ 同款）。只打一句人话 + 两个关键字段。
-    let err = match mkp_preset::load_ir(&path, None) {
+    let err = match preset::load_ir(&path, None) {
         Err(e) => e,
         Ok(ir) => panic!(
             "未知机型必须失败，实测却成功了：machine_type={:?} max_x={} —— \
@@ -150,7 +150,7 @@ fn an_unknown_machine_alias_is_a_hard_error() {
 fn a_missing_machine_header_is_a_hard_error() {
     let dir = tempfile::tempdir().expect("临时目录");
     let path = minimal_preset(dir.path(), None);
-    let err = mkp_preset::load_ir(&path, None).expect_err("缺 `# machine:` 必须失败");
+    let err = preset::load_ir(&path, None).expect_err("缺 `# machine:` 必须失败");
     assert_eq!(
         err.code(),
         "E_CFG_PARSE_001",
@@ -170,7 +170,7 @@ fn the_real_user_preset_loads() {
         );
         return;
     }
-    let ir = mkp_preset::load_ir(path, None).expect("真实预设必须能过 load_ir");
+    let ir = preset::load_ir(path, None).expect("真实预设必须能过 load_ir");
     assert_eq!(ir.meta.preset_name, "A1MF.toml");
     assert!(
         !ir.machine.machine_type.is_empty() && ir.machine.max_x > 0.0,
@@ -192,7 +192,7 @@ fn the_real_user_preset_loads() {
         ir.machine.typical_layer_height
     );
     let mut filled = ir.clone();
-    mkp_pp::ir::fill_defaults(&mut filled);
+    postprocess::ir::fill_defaults(&mut filled);
     assert!(
         filled.machine.first_layer_height == 0.2 && filled.machine.typical_layer_height == 0.2,
         "fill_defaults 之后层高应是 0.2/0.2，实测 {}/{}",

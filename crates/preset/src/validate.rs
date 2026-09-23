@@ -30,7 +30,7 @@
 
 use crate::model::TomlConfig;
 use crate::registry::{EffectiveRange, ParamEntry, Registry};
-use mkp_pp::diag::PostprocError;
+use postprocess::diag::PostprocError;
 
 /// Go fmt `%v`/`%g` 对 float64 的最短定点形式（值域内与 Rust `{}` 逐字一致；
 /// 与 ir::build 的 go_float_str 同一约定——本 crate 不依赖 ir，各自持有）。
@@ -526,9 +526,9 @@ mod tests {
     fn nine_real_presets_pass_both_layers() {
         let reg = load_param_registry();
         // 搬入 mkp-ssr 的路径改动：预设 fixture 在**内核那份**里
-        // （crates/core/tests/fixtures/presets），不在本 crate 下 —— 判据资产只留一份。
-        let dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets");
+        // （crates/postprocess/tests/fixtures/presets），不在本 crate 下 —— 判据资产只留一份。
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../postprocess/tests/fixtures/presets");
         let mut count = 0;
         for entry in std::fs::read_dir(&dir).expect("fixtures 目录应存在") {
             let path = entry.unwrap().path();
@@ -539,7 +539,7 @@ mod tests {
             validate_config(&preset.config)
                 .unwrap_or_else(|e| panic!("第一层拦了 {}：{e:?}", path.display()));
             let canonical =
-                mkp_pp::postproc::machine_dims::normalize_to_canonical(preset.machine.trim());
+                postprocess::postproc::machine_dims::normalize_to_canonical(preset.machine.trim());
             validate_against_registry(&preset.config, &reg, &canonical, preset.variant.as_deref())
                 .unwrap_or_else(|e| panic!("第二层拦了 {}：{e:?}", path.display()));
             count += 1;

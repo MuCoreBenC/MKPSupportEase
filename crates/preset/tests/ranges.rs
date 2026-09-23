@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use mkp_preset::registry::{RangeSource, load_param_registry};
+use preset::registry::{RangeSource, load_param_registry};
 
 /// `ParamEntry` 认识的 serde 键名。**改结构就要改这里** —— K-R4 就是靠这份清单发现差集的。
 const KNOWN_PARAM_KEYS: &[&str] = &[
@@ -181,8 +181,8 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     use std::path::PathBuf;
 
     // 9 份 fixture（仓库内，必跑）
-    let dir =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../postprocess/tests/fixtures/presets");
     let mut targets: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("fixtures 目录应存在")
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -210,7 +210,7 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     }
 
     for p in &targets {
-        mkp_preset::load_ir(p, None)
+        preset::load_ir(p, None)
             .unwrap_or_else(|e| panic!("K-R1 红：{} 读不出来了：{e}", p.display()));
     }
 
@@ -225,9 +225,9 @@ fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
     use std::path::Path;
 
     // 真实预设（fixture）：A1MF 那批文件头有 `# variant: fast`
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
     let raw = std::fs::read_to_string(dir.join("A1MF.toml")).expect("读 fixture");
-    let file = mkp_preset::read_preset_from_bytes(raw.clone()).expect("读预设");
+    let file = preset::read_preset_from_bytes(raw.clone()).expect("读预设");
     assert_eq!(
         file.variant.as_deref(),
         Some("fast"),
@@ -242,7 +242,7 @@ fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
         .map(|l| format!("{l}\n"))
         .collect();
     assert_ne!(raw, without, "构造失败：没找到 # variant 那一行");
-    let file2 = mkp_preset::read_preset_from_bytes(without).expect("缺 variant 也要读得成功");
+    let file2 = preset::read_preset_from_bytes(without).expect("缺 variant 也要读得成功");
     assert_eq!(file2.variant, None);
 
     // `# machine:` 缺失照旧是硬错误（回归，不许被顺手放宽）
@@ -251,23 +251,20 @@ fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
         .filter(|l| !l.trim_start().starts_with("# machine"))
         .map(|l| format!("{l}\n"))
         .collect();
-    let err = mkp_preset::read_preset_from_bytes(no_machine).expect_err("缺 machine 必须报错");
+    let err = preset::read_preset_from_bytes(no_machine).expect_err("缺 machine 必须报错");
     assert_eq!(err.code(), "E_CFG_PARSE_001", "K-R7 红：错误码变了");
 
     // 手写匹配器的边界：`# variant_x:` 不许命中 `variant`
     assert_eq!(
-        mkp_preset::parse_variant_from_content("# variant_x: v\n"),
+        preset::parse_variant_from_content("# variant_x: v\n"),
         None,
         "K-R7 红：键名前缀被误命中（`variant_x` 不是 `variant`）"
     );
     // 空值视同未命中（与 release_time 同规则）
-    assert_eq!(
-        mkp_preset::parse_variant_from_content("# variant:   \n"),
-        None
-    );
+    assert_eq!(preset::parse_variant_from_content("# variant:   \n"), None);
     // 原样返回，不改大小写（归一在查表那一侧做）
     assert_eq!(
-        mkp_preset::parse_variant_from_content("#  variant :  FastV3.3  \n").as_deref(),
+        preset::parse_variant_from_content("#  variant :  FastV3.3  \n").as_deref(),
         Some("FastV3.3")
     );
 
@@ -279,8 +276,7 @@ fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
 #[test]
 fn kr4_unknown_registry_keys_stay_on_the_snapshot() {
     // 直接读快照文本：`ParamEntry` 认不认识是这条判据要查的事，不能用它自己去解析。
-    let raw: toml::Value =
-        toml::from_str(mkp_preset::PARAM_REGISTRY_TOML).expect("快照是合法 TOML");
+    let raw: toml::Value = toml::from_str(preset::PARAM_REGISTRY_TOML).expect("快照是合法 TOML");
     let params = raw
         .get("params")
         .and_then(|v| v.as_array())

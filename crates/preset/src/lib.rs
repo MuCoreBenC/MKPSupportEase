@@ -1,8 +1,8 @@
-//! `mkp-preset` —— 预设 TOML（snake_case 用户参数）→ 内核 IR（PascalCase）的**唯一**映射点。
+//! `mkpse-preset` —— 预设 TOML（snake_case 用户参数）→ 内核 IR（PascalCase）的**唯一**映射点。
 //!
 //! 来源：`/Users/wzy/projects/mkp-rust/mkp-sr` 的 `crates/preset`（model / read /
 //! registry / validate）与 `crates/ir/src/build.rs`。IR 类型**不搬**，直接吃
-//! `mkp_pp::ir` 那份（内核已有，且被 A 档字节判据守着）。
+//! `postprocess::ir` 那份（内核已有，且被 A 档字节判据守着）。
 //!
 //! 为什么这条链必须存在：用户手上的预设长这样
 //! （`/Users/wzy/Documents/MKPSupportSSR/presets/mkp/A1MF.toml`）
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! 而内核的配置文件**就是 IR**（`SchemaVersion = 1` / `[Disk]` / `Toolhead.MaxSpeed` 是 mm/min）。
-//! 两者不是同一个东西；`mkp-pp` 当初刻意把映射整层删掉了，本 crate 把它补回来。
+//! 两者不是同一个东西；后处理内核当初刻意把映射整层删掉了，本 crate 把它补回来。
 //!
 //! **两张脸的对外契约**（顺序不许重排，理由见 [`load_ir`]）：
 //! - [`read_preset`] / [`validate`] / [`registry`]：预设文件侧；
@@ -131,7 +131,7 @@ pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
 /// | 6 | [`build`] | 映射本体：零值兜底 → 逐字段映射 → 兼容迁移 → 派生 → 范围校验 |
 /// | 7 | `meta.preset_name` = **带扩展名**的文件名 | 来源实测就是带 `.toml`，这是对外可见字符串 |
 /// | 8 | `machine_type` 归一 + 尺寸表命中检查 | 别名认识 ≠ 尺寸表里有（见下）。**这里才是归一的报错点** |
-/// | 9 | [`mkp_pp::pipeline::fill_machine_facts`] | 机型维度 + 禁区 + G-code 自报机型 |
+/// | 9 | [`postprocess::pipeline::fill_machine_facts`] | 机型维度 + 禁区 + G-code 自报机型 |
 ///
 /// 第 9 步**刻意复用内核那个函数**而不是在这里再写一遍查表：那三件事在 CLI 路径上也要做，
 /// 两处实现必然漂移。
@@ -151,9 +151,9 @@ pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
 pub fn load_ir(
     preset_path: &std::path::Path,
     gcode_text: Option<&str>,
-) -> Result<mkp_pp::ir::Ir, mkp_pp::diag::PostprocError> {
-    use mkp_pp::diag::PostprocError;
-    use mkp_pp::postproc::machine_dims::{has_machine_dimensions, normalize_to_canonical};
+) -> Result<postprocess::ir::Ir, postprocess::diag::PostprocError> {
+    use postprocess::diag::PostprocError;
+    use postprocess::postproc::machine_dims::{has_machine_dimensions, normalize_to_canonical};
 
     // 1
     let file = read_preset(preset_path)?;
@@ -207,6 +207,6 @@ pub fn load_ir(
         });
     }
     // 9
-    mkp_pp::pipeline::fill_machine_facts(&mut ir, gcode_text);
+    postprocess::pipeline::fill_machine_facts(&mut ir, gcode_text);
     Ok(ir)
 }

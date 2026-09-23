@@ -5,10 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
-use mkp_preset::{PresetKey, read_preset_from_bytes};
+use preset::{PresetKey, read_preset_from_bytes};
 
 fn fixtures() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("读 fixture 目录")
         .flatten()
@@ -113,7 +113,7 @@ fn klc0_case_and_missing_variant() {
     assert_eq!(
         PresetKey::new("a1mini", Some("fast")).machine,
         "A1_MINI",
-        "机型别名要归一（归一表在 mkp_pp 那侧，只认表里的写法）"
+        "机型别名要归一（归一表在 postprocess 那侧，只认表里的写法）"
     );
     assert_eq!(
         PresetKey::new("A1MF", Some("fast")),

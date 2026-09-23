@@ -15,18 +15,7 @@ resolver = "2"
 # **显式列成员，不用 `crates/*` 通配**：目录还不存在时 glob 会让 cargo 直接报
 # "failed to load manifest for workspace member `.../crates/*`"，
 # 而这个报错看起来像清单写错了，不像"目录还没建"。
-members = ["crates/postprocess", "src-tauri"]
-
-# **`crates/preset` 这一笔刻意不进 `members`**（b04 Task 15 / M4a）。
-#
-# 它是从 `mkp-ssr/crates/preset` **逐字节**搬进来的 —— 连 `Cargo.toml` 都没改，
-# 所以里面还写着 `mkp-pp = { path = "../core" }`，在我们这边（内核已改名成
-# `crates/postprocess`）**编译不过**。而这一笔的唯一证据就是"内容零 diff"，
-# 改依赖就把证据毁了。
-#
-# 于是先 `exclude`：目录进库、但不参与编译，CI 仍然是绿的。
-# 下一笔（M4b）做机械改名，同时把它挪进 `members` 并删掉这一段。
-exclude = ["crates/preset"]
+members = ["crates/postprocess", "crates/preset", "src-tauri"]
 
 # **为「原样复制」准备的一组字段。**
 #
@@ -85,6 +74,11 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 toml = "0.8"
 
 sha2 = "0.10"
+# 写回保真那一套：`crates/preset`（改预设 / 改注册表区间）与 `src-tauri`
+# （工作台写回 `presets/*.toml`）都用它。**必须住在这里** —— 两边各写一份版本号，
+# 同一个 crate 就会在依赖树里出现两次，而那正是 `cargo tree -d` 那条判据盯的东西。
+# `serde` feature 是 `src-tauri` 那侧要的（`toml_edit::de`），并集不影响 preset。
+toml_edit = { version = "0.22", features = ["serde"] }
 # 这两个只给后处理内核那个命令行 bin 用（`--features` 挂在 bin 上）
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"

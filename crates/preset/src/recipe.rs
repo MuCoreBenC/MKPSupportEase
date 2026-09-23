@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mkp_pp::diag::PostprocError;
+use postprocess::diag::PostprocError;
 use serde::Deserialize;
 
 use crate::write::EDITABLE_KEYS;

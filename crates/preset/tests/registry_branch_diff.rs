@@ -12,7 +12,7 @@
 //! ## 快照怎么生成（派生，不是手搓）
 //!
 //! ```text
-//! MKPSSR_UPDATE_REGISTRY_DIFF=1 cargo test -p mkp-preset --test registry_branch_diff
+//! MKPSSR_UPDATE_REGISTRY_DIFF=1 cargo test -p mkpse-preset --test registry_branch_diff
 //! ```
 //!
 //! 生成用的**就是本文件里同一条代码路径**（先算清单、再写盘），所以快照与判据不可能
@@ -22,7 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mkp_preset::{CalibrationExecMode, build, load_param_registry, read_preset};
+use preset::{CalibrationExecMode, build, load_param_registry, read_preset};
 use serde_json::Value;
 
 const NAMES: &[&str] = &[
@@ -38,7 +38,7 @@ const NAMES: &[&str] = &[
 ];
 
 fn core_fixtures(rel: String) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../core/tests/fixtures/{rel}"))
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../postprocess/tests/fixtures/{rel}"))
 }
 
 fn snapshot_path() -> PathBuf {
@@ -133,7 +133,7 @@ fn registry_branch_diff_matches_the_snapshot() {
     let want = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
             "读不到快照 {}（{e}）。要生成请跑：\n  \
-             MKPSSR_UPDATE_REGISTRY_DIFF=1 cargo test -p mkp-preset --test registry_branch_diff",
+             MKPSSR_UPDATE_REGISTRY_DIFF=1 cargo test -p mkpse-preset --test registry_branch_diff",
             path.display()
         )
     });

@@ -1,13 +1,13 @@
 //! 判据 K4：**9 份真实预设过 `build(cfg, None)` 与 Go 侧导出的 IR 逐字段树相等**。
 //!
 //! 来源：`mkp-sr/crates/ir/tests/build9.rs`，搬入 mkp-ssr 时的改动只有三处：
-//! ① crate 名（`mkp_ir::build` → `mkp_preset::build`）；
+//! ① crate 名（`mkp_ir::build` → `preset::build`）；
 //! ② fixture 路径指向内核那一份（见下）；
 //! ③ 加了一条反空转哨兵。
 //!
 //! ## fixture 为什么不复制一份到本 crate
 //!
-//! 9 份预设与 9 份 IR JSON 都已经在 `crates/core/tests/fixtures/` 里
+//! 9 份预设与 9 份 IR JSON 都已经在 `crates/postprocess/tests/fixtures/` 里
 //! （Task 2 随内核整包搬入，且与 `mkp-sr` 侧实测逐字节相同）。
 //! **再复制一份 = 两份判据资产**，而两份资产必然漂移；漂移的表现是
 //! 「改了一处、另一处照旧绿」。所以这里跨 crate 指路径，不复制。
@@ -25,7 +25,7 @@
 //! - `registry = None` 与 `Some` 走**不同**默认值分支，判据资产是 `None` 那支；
 //!   钩子实际走的是 `Some`（Task 4.5 另有一条自比判据）。
 
-use mkp_preset::{CalibrationExecMode, build, read_preset};
+use preset::{CalibrationExecMode, build, read_preset};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +43,7 @@ const NAMES: &[&str] = &[
 
 /// 内核那份 fixture 的根（从本 crate 的 manifest 目录出发）。
 fn core_fixtures(rel: String) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../core/tests/fixtures/{rel}"))
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../postprocess/tests/fixtures/{rel}"))
 }
 
 /// 数字统一按 f64 比较（Go MarshalIndent 把 4200.0 写成 4200，

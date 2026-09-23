@@ -11,12 +11,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use mkp_preset::recipe::{Recipe, render};
+use preset::recipe::{Recipe, render};
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");
 
 fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets")
 }
 
 /// `(机型, 变体)` → fixture 的路径与原文（从**文件头**读，不靠文件名猜）。
@@ -31,7 +31,7 @@ fn fixtures_by_combo() -> BTreeMap<(String, String), (PathBuf, String)> {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("读 fixture");
-        let file = mkp_preset::read_preset_from_bytes(text.clone()).expect("fixture 必须能读");
+        let file = preset::read_preset_from_bytes(text.clone()).expect("fixture 必须能读");
         let variant = file.variant.clone().expect("fixture 必须有 # variant:");
         out.insert((file.machine.clone(), variant), (path, text));
     }
@@ -117,7 +117,7 @@ fn kg3_generated_presets_are_usable() {
         let out = dir.path().join(format!("{machine}-{variant}.toml"));
         std::fs::write(&out, &text).expect("写产物");
 
-        let file = mkp_preset::read_preset(&out)
+        let file = preset::read_preset(&out)
             .unwrap_or_else(|e| panic!("K-G3 红：{machine}:{variant} 读不回来：{e}"));
         assert_eq!(file.machine, machine, "K-G3 红：机型头写错了");
         assert_eq!(file.variant.as_deref(), Some(variant.as_str()));
@@ -125,7 +125,7 @@ fn kg3_generated_presets_are_usable() {
             file.release_time.as_deref(),
             Some(recipe.release_time.as_str())
         );
-        mkp_preset::load_ir(&out, None)
+        preset::load_ir(&out, None)
             .unwrap_or_else(|e| panic!("K-G3 红：{machine}:{variant} load_ir 失败：{e}"));
         checked += 1;
     }
@@ -151,7 +151,7 @@ fn kg4_every_override_field_actually_lands_in_the_product() {
         let text = render(&recipe, &machine, &variant).expect("渲染");
         let parsed: toml::Value = toml::from_str(&text).expect("产物是合法 TOML");
         // 顺手确认一件事：生成的**官方**预设不该带副本的血统三行
-        let file = mkp_preset::read_preset_from_bytes(text.clone()).expect("产物能读");
+        let file = preset::read_preset_from_bytes(text.clone()).expect("产物能读");
         assert!(
             file.lineage.is_none(),
             "K-G4 红：官方预设不该带 `# based_on*`"

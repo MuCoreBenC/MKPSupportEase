@@ -23,7 +23,7 @@
 //! - `speed_limit = 70` 是**整数**：不写成 `70.0`（`tower_wipe_speed` 更是
 //!   `IntOrFloat` 双形态，写错形态连类型都变了）。
 
-use mkp_pp::diag::PostprocError;
+use postprocess::diag::PostprocError;
 use toml_edit::{DocumentMut, Formatted, Item, TableLike, Value};
 
 /// 一个编辑值。**已经按 `valueType` 解析好**：解析与量程校验是调用方（表单层）的事，

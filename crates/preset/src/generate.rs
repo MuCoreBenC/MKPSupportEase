@@ -148,12 +148,12 @@ pub fn write_all(recipe: &Recipe, dir: &Path) -> Result<usize, String> {
     Ok(written)
 }
 
-/// 对照基线目录（`crates/core/tests/fixtures/presets/`）。
+/// 对照基线目录（`crates/postprocess/tests/fixtures/presets/`）。
 ///
 /// **这是内核判据的输入，也是「上一次审阅通过的样子」**。翻案之后（spec `recipe-workbench` §0）
 /// 它不再是真源：真源是配方，产物由配方生成，基线是产物的一份留影。
 pub fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/presets")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets")
 }
 
 /// 目录里的预设按 `(机型, 变体)` 配对。

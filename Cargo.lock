@@ -2004,6 +2004,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mkpse-preset"
+version = "0.2.0"
+dependencies = [
+ "mkpse-postprocess",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
+ "toml_edit 0.22.27",
+ "tracing",
+]
+
+[[package]]
 name = "muda"
 version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
