@@ -9,6 +9,10 @@
 //! 取消语义本身在 `tests/cancel.rs` 里以库层面 5 条判据覆盖；缺的只是
 //! 「SIGINT → CancelToken 这根线接上了没有」，登记为诚实边界。
 
+// 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+#![allow(clippy::disallowed_methods)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

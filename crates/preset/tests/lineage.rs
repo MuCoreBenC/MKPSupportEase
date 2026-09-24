@@ -5,6 +5,10 @@
 //! 「拷字节 + 加三行」听起来不可能出错，但只要有人哪天把它改成
 //! 「读成结构体再写出来」，这些东西会一起消失，而界面上完全看不出来。
 
+// 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+#![allow(clippy::disallowed_methods)]
+
 use std::path::{Path, PathBuf};
 
 use preset::lineage::{make_copy, sha256_hex, strip_lineage_for_compare};

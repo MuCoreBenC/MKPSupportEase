@@ -8,6 +8,10 @@
 //!
 //! K-G1 守的是「没有引入变化」，**不是**「参数正确」（参数对不对只有真机知道）。
 
+// 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

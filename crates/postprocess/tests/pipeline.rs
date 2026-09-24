@@ -18,6 +18,10 @@
 //! 缺失 / registry 坏枚举 —— 本项目没有预设文件、没有头注释、没有参数注册表）。
 //! 换成 3 条对着**新的**失败面的判据：缺配置文件 / 坏 TOML / 机型名不认识。
 
+// 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+#![allow(clippy::disallowed_methods)]
+
 use postprocess::config;
 use postprocess::diag::CancelToken;
 use postprocess::ir::{Ir, fill_defaults};
