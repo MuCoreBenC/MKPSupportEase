@@ -146,15 +146,16 @@
     - 12.7（侦察结论，9.3a 不改名）：BBS 旧云端代号（`MKPProcess X1 0.4 0.24.json`）活在**两处**——文件名 + JSON 内容身份（`name`/`print_settings_id` = "MKPProcess X1"），而 `inherits` 已用新名（`@BBL X1C`）。**仓内代码零依赖**（assetUrl 只做空格编码透传，无 TSX 调用方；assets.toml 的 path 是唯一引用处）。裁决建议：文件名与内容身份是**切片器侧用户可见的预设名**，改了会让已导入用户的预设列表漂移；asset id 已是稳定键、G-0 命名函数只管 MKP 产物 —— **建议维持登记值不改**，9.3a 挂到「消费端（切片器导入行为）确认后再裁决」，不为交付层阻塞
     - 12.8（边界照实记）：wb_publish 现在写三份 JSON + 13 份资产 + manifest（仍只编 mkp_preset 9 条）——manifest 扩容到全资产、残留文件 blocker、可达性正式化都在 Task 13
 
-- [ ] Task 13: 可达性筛选、残留拦截与 manifest
-    - 13.1: 可达性分析：从机型 / 版本 / 套餐的引用出发，算出应交付的文件集合
-    - 13.2: 资产库中不可达的文件不进交付
-    - 13.3: 校验未通过的内容不进交付
-    - 13.4: **残留拦截**：发布前扫描交付目录，不在本次可达集合内的文件一律列出，**有残留就中止发布，不写 manifest**（doc §9.1）
-    - 13.5: 提供显式「清理残留」动作，走 `.trash/` 回收而不是直接删
-    - 13.6: manifest 作为发布最后一步生成，只描述已落地的文件（路径、大小、sha256、时间）
-    - 13.7: 发布全程走 `fsx::atomic::atomic_write`
-    - 13.8: 判据：manifest 条目数等于交付目录实际文件数；每条 sha256 与文件真实哈希一致
+- [x] Task 13: 可达性筛选、残留拦截与 manifest
+    - 13.1: ✅ 可达性分析：`dist::deliverable_set` —— 从引用关系**算出**交付文件集合（相对路径）：content 3 份自产 + manifest + `assets/<path>`（引用可达集，Task 12 的 13 条）+ `presets/mkp/<preset_file_name>`（有 mkp 连接键的版本，产物名由命名函数算出）。引用面的正式化收口在此，集合与 Task 12 的 `referenced_assets` 同一来源
+    - 13.2: ✅ 不可达不进交付：模型 3 与 0.2mm BBS 4 在真数据判据里显式断言不出现（`!p.contains("models/")`）
+    - 13.3: ✅ 校验未通过不进交付：`wb_publish` 开头的 `issues::inspect` 阻断闸（既有，Task 13 确认语义）—— Block 档拒发布，待办/提示不挡但进 PublishReport
+    - 13.4: ✅ **残留拦截**：`scan_strays` 递归扫交付目录，不在交付集合内的逐条列出（字典序），**有残留就中止发布、一个字节都不写**（判据实测：stale.json 被拦且原样保留、manifest 未写）。doc §9.1 的理由成立：残留会被消费端真的下载到
+    - 13.5: ✅ `wb_clean_dist_strays`：显式清理动作，移入 `workbench/.trash/dist/<stamp>/` **保留相对路径可还原**（rename 同卷原子；与版本回收站的 json-stem 格式约定互不干扰——dist 是子树）。查询面 `wb_dist_strays` 先列清单再动手；`api.ts` 两条封装同步
+    - 13.6: ✅ manifest 作为最后一步生成，只描述已落地的文件：**v3** —— assets 扩到全部交付文件（mkp_preset 9 条 + 引用集资产 13 条），sha256/size **按发布出去的字节现算**；**删掉 `bundles` 字段** —— 它是从上游透传的第二份套餐列表，assetRefs 还是旧资产 id 空间（`a1_bbs_mkpprocess…`）与新 assets_index join 不上；套餐唯一真相 = `content/bundles.json`。结构变了所以 manifestVersion 升 3。resourceType 词汇：新条目用资产域 `kind.key()`（slicerProfile 而非上游的 bbs_profile）—— manifest 与 assets_index 是同一批资产的两种视图，join 键必须一致
+    - 13.7: ✅ 全程走 `fsx::atomic::atomic_write`（JSON 与资产复制都走；残留清理是 rename，同卷原子且不碰 clippy.toml 禁列）
+    - 13.8: ✅ 判据：夹具级 `publish_blocks_on_strays_then_manifests_every_delivered_file`（全链：残留拦下 → 清理进回收站 → 重发 → **manifest 条目数 = 交付目录实际文件数**（口径：assets 条目 ↔ 交付目录中除 manifest/content 外的全部文件，一一对应）+ 每条 sha256 与真实字节重算一致）；真数据 `the_real_deliverable_set_has_the_expected_shape`（集合 20 = content 3 + manifest 1 + 资产 13 + 夹具上游认的 mkp 3；**9 份产物名单由命名函数独立锚定**，夹具上游不认的 6 版留给真上游；空目录零残留是正常状态）
+    - 13.9（审查点名核实）：**`mkpPresetAssetId` 的边界** —— 它是 machine_catalog 版本条目 → manifest.assets[]（resourceType = mkp_preset）条目 id 的**连接键**，上游命名空间（`a1_mkp_standard`）；资产域 Asset.id（`a1-image`）是另一命名空间（assets_index 与 manifest 资产条目）。manifest 里两类 id 共存靠 resourceType 区分；资产域 enum 刻意没有 mkpPreset 档（doc §12.5 结构化保证）—— 词汇撞名、域不同，边界已写进 `dist.rs` 模块头
 
 - [ ] Task 14: 工作台接通四阶段骨架
     - 14.1: 六个页面按 doc §4.2 映射到后台数据

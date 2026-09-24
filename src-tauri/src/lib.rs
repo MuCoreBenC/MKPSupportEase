@@ -123,6 +123,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::assets::wb_asset_usage,
         // 「套餐管理」：读 `presets/bundles.toml`（b05 Task 10）。同一套纪律：只读
         app::bundles::wb_bundles,
+        // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
+        app::build::wb_dist_strays,
+        app::build::wb_clean_dist_strays,
         app::machines::wb_add_machine,
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,

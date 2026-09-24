@@ -591,22 +591,14 @@ pub struct PublishReport {
     pub hints: usize,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DistAsset {
-    id: String,
-    resource_type: String,
-    machine_id: String,
-    file_name: String,
-    relative_path: String,
-    sha256: String,
-    size: u64,
-}
-
 /// 发布：把 `dist-presets/` 里的产物连同清单一起定稿。
 ///
 /// **清单最后写**：先写资源、最后写指向它们的清单。反过来的话，中途失败会留下一份
-/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现
+/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现。
+///
+/// 闸门顺序（b05 Task 13）：**校验阻断**（`issues::inspect`，13.3）→
+/// **残留拦截**（`publish_into` 开头扫描，13.4：有残留一个字节都不写）→
+/// 内容与 manifest（13.6/13.7）。落盘细节全部在 [`super::dist::publish_into`]。
 #[tauri::command]
 pub fn wb_publish() -> Result<PublishReport, AppError> {
     traced("wb_publish", |_| {
@@ -620,64 +612,27 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
             }
 
             let root = paths::dist_root()?;
-            let mkp = root.join("presets").join("mkp");
-            let mut assets: Vec<DistAsset> = Vec::new();
-
-            for v in book.versions() {
-                let Some(p) = &v.mkp_preset else {
-                    continue; // 暂无资源：跳过，不报错
-                };
-                let path = mkp.join(preset_file_name(&v.machine_id, &v.version_id));
-                let Ok(bytes) = std::fs::read(&path) else {
-                    return Err(AppError::not_found(format!("{} 的产物还没生成", v.name))
-                        .with_detail(format!(
-                            "{} 不存在。先在生成视角里生成，再发布",
-                            path.display()
-                        )));
-                };
-                assets.push(DistAsset {
-                    // 哈希**按发布出去的那份字节算**，不抄上游的 —— 抄了就等于声明
-                    // 一个我们没验证过的哈希
-                    sha256: sha256_of(&bytes),
-                    size: bytes.len() as u64,
-                    id: p.asset_id.clone(),
-                    resource_type: "mkp_preset".to_owned(),
-                    machine_id: v.machine_id.clone(),
-                    file_name: preset_file_name(&v.machine_id, &v.version_id),
-                    relative_path: format!("presets/mkp/{}", p.file_name),
-                });
-            }
-
-            let stamp = clock::now_iso8601();
-
-            // 目录类 JSON + 资产复制（b05 Task 12）。**在 manifest 之前** ——
-            // manifest 只描述已落地的文件，三份 JSON 与 assets/ 也是"已落地"的一部分。
-            // 资产文件不在（登记了但没搬）在这里拦下，报错带资产 id
             let asset_root = paths::assets_root()?;
-            let content = super::dist::write_content(&root, &asset_root, &book)?;
-            tracing::info!(
-                assets = content.assets_copied,
-                "交付内容写入完成（content/*.json ×3 + assets/）"
-            );
+            let meta = super::dist::PublishMeta {
+                stamp: clock::now_iso8601(),
+                channel: ctx.up.manifest.compat.channel.clone(),
+                minimum_client: ctx
+                    .up
+                    .manifest
+                    .compat
+                    .minimum_client
+                    .clone()
+                    .unwrap_or_default(),
+                version: ctx.up.manifest.compat.version.clone().unwrap_or_default(),
+            };
+            let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+            let stamp = meta.stamp;
 
-            let manifest = serde_json::json!({
-                "manifestVersion": 2,
-                "channel": ctx.up.manifest.compat.channel,
-                "updated": stamp,
-                // **上游未声明就照实留空**，不编一个版本号出来（doc §12）
-                "minimumClient": ctx.up.manifest.compat.minimum_client.clone().unwrap_or_default(),
-                "version": ctx.up.manifest.compat.version.clone().unwrap_or_default(),
-                "assets": assets,
-                "bundles": ctx.up.manifest.bundles(),
-            });
-            // 清单最后写。`fsx::atomic` 是仓库唯一的写盘出口
-            crate::fsx::atomic::atomic_write_json(&root.join("manifest.json"), &manifest)?;
-
-            tracing::info!(files = assets.len(), at = %stamp, "发布完成");
+            tracing::info!(files = out.files, at = %stamp, "发布完成");
             Ok(PublishReport {
                 stamp,
                 root: root.display().to_string(),
-                files: assets.len(),
+                files: out.files,
                 minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
                 todos: report.todos,
                 hints: report.hints,
@@ -686,11 +641,45 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
     })
 }
 
-fn sha256_of(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(bytes);
-    format!("{:x}", h.finalize())
+/// **交付目录的残留清单**（b05 Task 13.4 的查询面）。
+///
+/// 「不在本次交付集合内」的文件，按字典序。发布被残留拦下时，界面先给这一条
+/// 让人看清是什么，再决定要不要清理。
+#[tauri::command]
+pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
+    traced("wb_dist_strays", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let expected = super::dist::deliverable_set(&book);
+            Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
+        })
+    })
+}
+
+/// **清理残留**（b05 Task 13.5）：显式动作，走 `workbench/.trash/dist/<stamp>/`
+/// 回收（保留相对路径，可还原），不直接删。清理完重新发布即可。
+#[tauri::command]
+pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
+    traced("wb_clean_dist_strays", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let expected = super::dist::deliverable_set(&book);
+            let root = paths::dist_root()?;
+            let strays = super::dist::scan_strays(&root, &expected);
+            if strays.is_empty() {
+                return Ok(0);
+            }
+            let stamp = clock::now_iso8601();
+            // 收集符号里的 `:` 会让 Windows 路径出问题，压成安全形状
+            let stamp = stamp.replace([':', ' '], "-");
+            let trash_root = paths::workbench_root()?.join(".trash");
+            let moved = super::dist::clean_strays(&root, &strays, &trash_root, &stamp)?;
+            tracing::info!(moved, at = %stamp, "交付残留已移入回收站");
+            Ok(moved)
+        })
+    })
 }
 
 #[cfg(test)]

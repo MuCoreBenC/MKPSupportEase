@@ -910,4 +910,15 @@ export const wb = {
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   publish: () => invoke<PublishReport>('wb_publish'),
+
+  /**
+   * 交付目录的残留清单（b05 Task 13.4）：「不在本次交付集合内」的文件。
+   * **发布被残留拦下时先看这一条** —— 残留会被消费端真的下载到
+   */
+  distStrays: () => invoke<string[]>('wb_dist_strays'),
+  /**
+   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/dist/` 回收（保留相对路径），
+   * **不直接删**。清理完重新发布即可
+   */
+  cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
 }
