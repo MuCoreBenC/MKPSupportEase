@@ -127,6 +127,17 @@ fn override_table<'d>(doc: &'d mut DocumentMut, combo_key: &str) -> Result<&'d m
 ///
 /// `combo_key` **必须是 `机型:变体`**（机型级那一层已经取消），`field` 是 `uuid` 或 `段.键`。
 /// 字段不存在时**新增一行**（放在这张表的末尾）—— 新机型填 `offset` 时要用。
+///
+/// # 这一条与 [`crate::write`] 的 K-P3 立场相反，是有意的
+///
+/// `write.rs` 改的是**用户的预设文件**，那边第一条硬规矩就是"只改已存在的键、
+/// 拒绝新增"：用户文件里多出一个键，下次 `read_preset` 自己就读不回来
+/// （`model.rs` 全体 `deny_unknown_fields`），而且那是别人的东西。
+///
+/// 这里改的是**我们自己的配方**（`preset_recipes.toml`）：给新机型补一个覆盖值
+/// 本来就得新增一行，拒绝新增等于这个函数没用。
+///
+/// 两边的判据也因此不同 —— 别把一边的结论搬到另一边。
 pub fn set_override(
     text: &str,
     combo_key: &str,

@@ -259,3 +259,42 @@ fn the_scan_would_catch_a_write() {
         "属性标在 use 上时后面的生产代码被误剔除了"
     );
 }
+
+/// **生成器的幂等门禁**（与写盘无关，但同属"源码级文本门禁"，所以住在这个文件里）。
+///
+/// `generate.rs` 的模块头写着"这里不许出现 `uuid::new_v4()` / `now()` / `SystemTime`"，
+/// 并注明门禁是 `scripts/check_generator_purity.py` —— **那个脚本没有跟着搬进来**，
+/// 从 M4a 到现在那句话一直指向一个不存在的文件。
+///
+/// 指向空气的门禁比没有门禁更糟：它让人以为有东西在看着。所以这条判据把它补上。
+///
+/// 为什么这件事要拦：产物要逐字节与基线比（K-G0'）。生成器里只要有一处时间戳或随机
+/// uuid，同一份配方每次生成的结果就不一样，那条黄金判据会从"证明"变成"每次都得重新
+/// 同步基线"，而基线一旦开始随手同步就等于没有基线。
+#[test]
+fn the_generator_stays_pure() {
+    const IMPURE: &[&str] = &[
+        "new_v4",
+        "SystemTime",
+        "Instant::now",
+        "Utc::now",
+        "Local::now",
+        "rand::",
+    ];
+    let path = crates_root().join("preset/src/generate.rs");
+    let src = std::fs::read_to_string(&path).expect("读得到 generate.rs");
+    let prod = production_part(&src);
+    // 反空转：切完之后还得剩下正文（`render` / `write_all` 那些都在里面）
+    assert!(
+        prod.contains("pub fn write_all"),
+        "generate.rs 的生产部分被切空了 —— 这条判据在空转"
+    );
+    for bad in IMPURE {
+        assert!(
+            !prod.contains(bad),
+            "generate.rs 的生产部分出现了 `{bad}` —— 生成器必须幂等：\
+             uuid 与发布时间只能来自配方，否则产物与基线的逐字节判据（K-G0'）会从\
+             「证明」退化成「每次重新同步基线」"
+        );
+    }
+}
