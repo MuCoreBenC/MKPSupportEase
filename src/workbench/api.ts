@@ -693,6 +693,8 @@ export interface VersionView {
   recommendedBundle: string | null
   tag: string | null
   description: string | null
+  /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
+  hasRecipe: boolean
 }
 
 /** `machines::MachineView` */
@@ -804,6 +806,14 @@ export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' |
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 
+/** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
+export interface BaselineDiffEntry {
+  fileName: string
+  status: 'same' | 'changed' | 'missingBaseline'
+  productSha: string
+  baselineSha: string | null
+}
+
 export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
@@ -910,6 +920,38 @@ export const wb = {
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   publish: () => invoke<PublishReport>('wb_publish'),
+
+  /**
+   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
+   * `recommendedBundle` 抄模板，`presetFile` 不抄（G-2 待删的悬空名）；
+   * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
+   */
+  copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>
+    invoke<MachineList>('wb_copy_version', {
+      machineId, templateVersionId, id, name,
+      tag: tag ?? null, description: description ?? null,
+    }),
+
+  /**
+   * 复制参数正文（b05 Task 14.5 / doc §4.3 第 7 步）：取模板版本的**完整有效配方**
+   * 钉成新版本的显式覆盖 —— **复制为独立版本，后续修改互不影响**。
+   * 缺失的参数不伪造（模板有效配方里没有的键继续继承 defaults）。
+   * 返回写入的键数。**前提**：新版本定义已存在（先 copyVersion）
+   */
+  copyRecipe: (machineId: string, templateVersionId: string, newVersionId: string) =>
+    invoke<number>('wb_copy_recipe', { machineId, templateVersionId, newVersionId }),
+
+  /**
+   * 对照基线 diff（b05 Task 14.9 第①步，**只读**）：九份产物 vs 基线目录，
+   * `status` ∈ `same | changed | missingBaseline`。**人看过这份清单再点同步**
+   */
+  baselineDiff: () => invoke<BaselineDiffEntry[]>('wb_baseline_diff'),
+  /**
+   * 同步对照基线（b05 Task 14.9 第②步，**显式写入动作**）：落点闸在
+   * `preset::sync_baseline` 内部（只认真 fixtures 或系统临时目录）。
+   * 内容相同的跳过，返回真正写入的份数
+   */
+  syncBaseline: () => invoke<number>('wb_sync_baseline'),
 
   /**
    * 交付目录的残留清单（b05 Task 13.4）：「不在本次交付集合内」的文件。

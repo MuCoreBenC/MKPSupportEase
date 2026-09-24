@@ -157,16 +157,16 @@
     - 13.8: ✅ 判据：夹具级 `publish_blocks_on_strays_then_manifests_every_delivered_file`（全链：残留拦下 → 清理进回收站 → 重发 → **manifest 条目数 = 交付目录实际文件数**（口径：assets 条目 ↔ 交付目录中除 manifest/content 外的全部文件，一一对应）+ 每条 sha256 与真实字节重算一致）；真数据 `the_real_deliverable_set_has_the_expected_shape`（集合 20 = content 3 + manifest 1 + 资产 13 + 夹具上游认的 mkp 3；**9 份产物名单由命名函数独立锚定**，夹具上游不认的 6 版留给真上游；空目录零残留是正常状态）
     - 13.9（审查点名核实）：**`mkpPresetAssetId` 的边界** —— 它是 machine_catalog 版本条目 → manifest.assets[]（resourceType = mkp_preset）条目 id 的**连接键**，上游命名空间（`a1_mkp_standard`）；资产域 Asset.id（`a1-image`）是另一命名空间（assets_index 与 manifest 资产条目）。manifest 里两类 id 共存靠 resourceType 区分；资产域 enum 刻意没有 mkpPreset 档（doc §12.5 结构化保证）—— 词汇撞名、域不同，边界已写进 `dist.rs` 模块头
 
-- [ ] Task 14: 工作台接通四阶段骨架
-    - 14.1: 六个页面按 doc §4.2 映射到后台数据
-    - 14.2: 阶段闸门落实为交互约束：检查未过不给生成，生成未过不给发布
-    - 14.3: 「复制已有版本」走通 doc §4.3 第 2–5 步，保存时**只写版本定义**
-    - 14.4: 版本列表显示「参数源待补」状态，不因缺文件而隐藏该版本
-    - 14.5: 参数编辑器支持从模板复制出参数正文后改值写回
-    - 14.6: 资产选择走资产库模态框，不让人手填路径
-    - 14.7: `workbench/` 五个子目录真正投入使用（`machines/ bbs/ .draft/ .trash/ .snapshots/`）
-    - 14.8: 端到端跑通 doc §4.3 全部 11 步作为验收场景
-    - 14.9: **「同步基线」做成显式、带 diff 确认的独立入口**（来源：Task 6.4 的裁决 —— 并入本任务）。三条要求不许松：① 先展示 diff，人确认后才写；② 是独立动作，不出现在「新增版本」的必经步骤里；③ 写的是 `crates/postprocess/tests/fixtures/presets/`，落点闸只认它或系统临时目录（`generate::check_baseline_target`）。底层规则见 `docs/ARCHITECTURE.md` §10.6
+- [ ] Task 14: 工作台接通四阶段骨架（**14a 后端链路已完成，14b 前端接通 + 14c 端到端验收待做**）
+    - 14.1: 六个页面按 doc §4.2 映射到后台数据（勘察完成：机型/配方/对比三视角已接，menu/build 待 14b）
+    - 14.2: 阶段闸门落实为交互约束：检查未过不给生成，生成未过不给发布（后端硬闸已就位：`wb_generate`/`wb_publish` 开头 `inspect`+`first_block`；14b 只做前端按钮约束）
+    - 14.3: ✅ 「复制已有版本」：`catalog::copy_version` + `wb_copy_version` —— 抄 `recommendedBundle`、tag/description 前端预填；**不抄 `presetFile`**（G-2 悬空名）；**只写版本定义**（单文件，避开 16.2 事务空白）。校验抽公共 `validate_new_version_id`（两条路不分岔）。判据：真目录副本复制+落盘重读+三个反向拦
+    - 14.4: ✅ 「参数源待补」：`registry::version_has_variants`（只看 `machineVariants`，min/max 特化表不算）+ `VersionView.hasRecipe`。false = 纯继承基底，**版本照常显示**
+    - 14.5: ✅ 参数正文复制：`wb_copy_recipe`（领域体 `copy_recipe` 可测）—— 取模板**完整有效配方**（defaults⊕基底⊕覆盖归并，`layer.keys()`=全部可见键）经 `apply_values` 批量钉成新版本显式覆盖。**裁决 A（2026-09-24）：独立快照**。判据 `copied_recipe_is_an_independent_snapshot`：①复制后两边逐键一致；②**改模板版本层与改基底后快照版均不变**（基底传播被显式值挡住——方案 A 的决定性证据）；③hasRecipe 翻转；④键数=模板有效配方键数（不伪造缺失参数）
+    - 14.6: 资产选择走资产库模态框，不让人手填路径（`wb_assets` 就位零消费，待 14b）
+    - 14.7: `workbench/` 五个子目录真正投入使用（勘察：machines/.draft/.trash 在用；bbs/ 零读写、.snapshots/ 只写不读，待 14b/14c 定职责）
+    - 14.8: 端到端跑通 doc §4.3 全部 11 步作为验收场景（待 14c）
+    - 14.9: ✅ **「同步基线」显式带 diff 确认的独立入口**：`wb_baseline_diff`（**只读**：`BUILTIN_PRESETS` vs fixtures 逐份三态 same/changed/missingBaseline + 两侧 sha 前 16）+ `wb_sync_baseline`（转调 `preset::generate::sync_baseline`，**落点闸在其内部**，src-tauri 不经手路径）。判据：真数据 9 条全 same（diff 只读验证：跑前后基线目录指纹不变）；tempdir 反向走查（落点闸允许临时目录）——改一份→changed→sync 只写那一份→重回全绿+字节逐一同产物。**写纪律判据同步登记**：`the_baseline_has_exactly_one_write_path` 的 ALLOWED 加 build.rs（14.9 授权的显式入口，防的是自动写不是确认后的写）与 lib.rs（注册清单）
 
 - [ ] Task 15: 空白初始化流程
     - 15.1: 从干净的 `presets/` + `workbench/` 出发，能建起第一台机型

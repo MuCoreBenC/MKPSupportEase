@@ -260,11 +260,14 @@ fn the_scan_would_catch_a_write() {
     );
 }
 
-/// **对照基线只能有一个写入口**（b05 Task 6）。
+/// **对照基线的写入口只许是「显式人工同步」**（b05 Task 6，14.9 扩展）。
 ///
-/// 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：能改它的动作只该有一个 ——
-/// `gen-presets --sync-baseline`（`preset/src/bin/gen_presets.rs`）→
-/// `generate::sync_baseline`。生成路径、发布路径、工作台任何命令都不许调它。
+/// 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：能改它的动作只有两个 ——
+/// `gen-presets --sync-baseline`（CLI，原始入口）与工作台的 `wb_sync_baseline`
+/// （b05 Task 14.9：§10.6 预留的「显式、带 diff 确认的独立入口」，2026-09-24 授权落地）。
+/// 两者都走 `generate::sync_baseline`，落点闸（`check_baseline_target`）在函数内部，
+/// 谁也绕不过。**生成路径、发布路径、其余任何命令都不许碰它** ——
+/// 防的是"同步变成生成/发布的自动步骤"，不是"人看过了 diff 再点的那一下"。
 ///
 /// # 为什么这件事要用源码扫描来管
 ///
@@ -276,10 +279,13 @@ fn the_scan_would_catch_a_write() {
 /// 两条一起才算拦得住：一条证明没有别的入口，一条证明真跑起来没动。
 #[test]
 fn the_baseline_has_exactly_one_write_path() {
-    /// 允许出现 `sync_baseline` 的文件：定义处 + 唯一入口。**别的都算违规。**
+    /// 允许出现 `sync_baseline` 的文件：定义处 + 两个显式入口 + lib.rs 的
+    /// 命令注册清单（`generate_handler!` 只引用名字，不是写路径）。**别的都算违规。**
     const ALLOWED: &[&str] = &[
         "crates/preset/src/generate.rs",
         "crates/preset/src/bin/gen_presets.rs",
+        "src-tauri/src/lib.rs",
+        "src-tauri/src/workbench/app/build.rs",
     ];
 
     let crates = crates_root();

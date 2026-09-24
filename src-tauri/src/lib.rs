@@ -126,6 +126,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
+        // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
+        app::machines::wb_copy_version,
+        app::wb_copy_recipe,
+        // 对照基线（b05 Task 14.9）：diff 只读 + 确认后同步（落点闸在 preset 内部）
+        app::build::wb_baseline_diff,
+        app::build::wb_sync_baseline,
         app::machines::wb_add_machine,
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,

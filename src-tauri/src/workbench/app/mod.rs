@@ -56,8 +56,10 @@ use serde_json::Value;
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix, StockRow};
+use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
+use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
@@ -868,6 +870,99 @@ pub fn wb_apply_draft(
     })
 }
 
+/// **从模板复制参数正文**（b05 Task 14.5 / doc §4.3 第 7 步）。
+///
+/// # 语义（裁决 2026-09-24：方案 A，独立快照）
+///
+/// 取模板版本的**完整有效配方**（defaults ⊕ 机型基底 ⊕ 模板覆盖，归并后的最终值），
+/// 经 [`Presets::apply_values`] 批量钉成新版本的显式覆盖。复制后两边**独立演化**：
+/// 再改模板或基底，不影响已复制的新版本 —— 界面上要说清「复制为独立版本，
+/// 后续修改互不影响」。
+///
+/// # 两条不许越的线
+///
+/// - **缺失参数不伪造**：只写有效配方里真实存在的键（registry 可见键的归并值），
+///   不在的继续继承 defaults —— 不给缺的键造默认值；
+/// - **不复制无效配方**：有效配方来自 registry 归并，解析不过的版本根本进不了
+///   layers，不存在「半份配方」这个形状。
+///
+/// # 为什么现读而不是走 `Ctx`
+///
+/// `wb_copy_version`（14.3）是独立命令、独立落盘；会话缓存 `ctx.committed` 里
+/// **没有它**。这里全部从盘上现读 —— 盘上真相是唯一可靠的判定依据。
+/// 这也是 doc 第 5 步与第 7 步分成两个动作的另一个好处：每步都是单文件写入，
+/// 不需要跨文件事务。
+/// [`wb_copy_recipe`] 的领域体（收 `&mut Presets` 以便判据直接测）。
+pub(crate) fn copy_recipe(
+    p: &mut Presets,
+    machine_id: &str,
+    template_version_id: &str,
+    new_version_id: &str,
+) -> Result<usize, AppError> {
+    let m = p
+        .catalog
+        .machine(machine_id)
+        .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?;
+    let new_uid = format!("{machine_id}:{new_version_id}");
+    // 新版本必须已在清单里 —— 14.3 先建定义，这里才有的复制
+    if !m.versions.iter().any(|v| v.id == new_version_id) {
+        return Err(AppError::not_found(format!(
+            "版本 {new_uid} 不在清单里 —— 先复制版本定义，再复制参数正文"
+        )));
+    }
+    if !m.versions.iter().any(|v| v.id == template_version_id) {
+        return Err(AppError::not_found(format!(
+            "模板版本 {machine_id}/{template_version_id} 不存在"
+        )));
+    }
+
+    // 模板的完整有效配方：digest 出三层，归并后的值就是快照内容
+    let version_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
+    let digested = variants::digest(&p.registry, machine_id, &version_ids);
+    let template_over = digested
+        .versions
+        .get(template_version_id)
+        .cloned()
+        .unwrap_or_default();
+    let layers = Layers::new(&p.registry, machine_id, &digested.base, &template_over);
+    let effective = layers.effective_recipe();
+    if effective.is_empty() {
+        return Err(AppError::invalid_argument(format!(
+            "模板版本 {template_version_id} 的有效配方是空的，没有可复制的内容"
+        )));
+    }
+
+    let edits: Vec<(String, String, Option<serde_json::Value>)> = effective
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), new_uid.clone(), Some((*v).clone())))
+        .collect();
+    let keys = edits.len();
+    // 批量入口：先全查 owner 与键，再一次落盘 —— 74 个键写 74 次盘是那条
+    // 文档警告过的反模式
+    p.apply_values(&edits)?;
+    Ok(keys)
+}
+
+#[tauri::command]
+pub fn wb_copy_recipe(
+    machine_id: String,
+    template_version_id: String,
+    new_version_id: String,
+) -> Result<usize, AppError> {
+    traced("wb_copy_recipe", |_| {
+        let mut p = Presets::load()?;
+        let keys = copy_recipe(&mut p, &machine_id, &template_version_id, &new_version_id)?;
+        tracing::info!(
+            machine = %machine_id,
+            template = %template_version_id,
+            version = %new_version_id,
+            keys,
+            "参数正文复制完成（独立快照，此后互不影响）"
+        );
+        Ok(keys)
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveResult {
@@ -946,6 +1041,125 @@ mod tests {
         let (fx_dir, up, presets) = Fixture::load().into_parts();
         let ctx = Ctx::with(up, presets, store).unwrap();
         ((dir, fx_dir), f, ctx)
+    }
+
+    /* ---------- 参数正文复制（b05 Task 14.5，裁决 A：独立快照） ---------- */
+
+    /// 算一个版本的有效配方（与 `copy_recipe` 内部同一套 digest + Layers）
+    fn effective(
+        p: &Presets,
+        machine_id: &str,
+        version_id: &str,
+    ) -> BTreeMap<String, serde_json::Value> {
+        let version_ids: Vec<String> = p
+            .catalog
+            .machine(machine_id)
+            .expect("机型在")
+            .versions
+            .iter()
+            .map(|v| v.id.clone())
+            .collect();
+        let digested = variants::digest(&p.registry, machine_id, &version_ids);
+        let over = digested
+            .versions
+            .get(version_id)
+            .cloned()
+            .unwrap_or_default();
+        Layers::new(&p.registry, machine_id, &digested.base, &over)
+            .effective_recipe()
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.clone()))
+            .collect()
+    }
+
+    /// **14.5 的两条验收**（裁决 A，2026-09-24）：
+    /// ① 复制后两边有效配方一致；
+    /// ② **改模板（版本层或机型基底）后新版本不变** —— 这是「独立快照」的决定性
+    /// 证据：只复制自有覆盖的话，基底改动会传播过来，这条就会红。
+    ///
+    /// 顺带锁定 14.4 的翻转：新版本 `hasRecipe=false`（待补）→ 复制后 true
+    #[test]
+    fn copied_recipe_is_an_independent_snapshot() {
+        let f = Fixture::load();
+        let mut p = f.presets;
+
+        // 14.3 的等价动作：先建版本定义（此刻它纯继承，hasRecipe = false）
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .add_version("SNAPSHOT", "快照版")
+            .unwrap();
+        assert!(
+            !p.registry.version_has_variants("A1:SNAPSHOT"),
+            "新建版本没有显式键 —— 就是「参数源待补」"
+        );
+
+        // 复制：从模板 FAST 取完整有效配方
+        let keys = copy_recipe(&mut p, "A1", "FAST", "SNAPSHOT").expect("复制");
+        assert!(keys > 0, "模板的有效配方不应为空");
+        assert!(
+            p.registry.version_has_variants("A1:SNAPSHOT"),
+            "复制后新版本有自己的显式键 —— 「待补」翻正"
+        );
+
+        // ① 复制后两边一致（逐键，值与键数都对）
+        let template_eff = effective(&p, "A1", "FAST");
+        let snapshot_eff = effective(&p, "A1", "SNAPSHOT");
+        assert_eq!(template_eff.len(), snapshot_eff.len(), "键数一致");
+        for (k, v) in &template_eff {
+            assert_eq!(snapshot_eff.get(k), Some(v), "键 {k} 复制后两边不一致");
+        }
+
+        // ② 反向验证（版本层）：改模板的一个值 → 新版本不动
+        let probe = "wiping.mode";
+        let before = snapshot_eff.get(probe).expect("夹具有这个键").clone();
+        let flipped = if before == "disk" { "tower" } else { "disk" };
+        p.apply_values(&[(
+            probe.to_owned(),
+            "A1:FAST".to_owned(),
+            Some(serde_json::json!(flipped)),
+        )])
+        .expect("改模板");
+        assert_eq!(
+            effective(&p, "A1", "FAST").get(probe),
+            Some(&serde_json::json!(flipped)),
+            "模板真的改了"
+        );
+        assert_eq!(
+            effective(&p, "A1", "SNAPSHOT").get(probe),
+            Some(&before),
+            "快照版不该跟着模板动"
+        );
+
+        // ② 反向验证（**机型基底**）：改基底 → 模板跟着变（继承），快照版不动 ——
+        // 快照版显式化了全部可见键，基底改动被它自己的值挡住。这是方案 A 与
+        // 「只复制自有覆盖」的实质差异，也是裁决 A 要的独立演化
+        let base_probe = "toolhead.offset.y";
+        let snap_before = effective(&p, "A1", "SNAPSHOT").get(base_probe).cloned();
+        p.apply_values(&[(
+            base_probe.to_owned(),
+            "A1".to_owned(),
+            Some(serde_json::json!(99.5)),
+        )])
+        .expect("改基底");
+        assert_eq!(
+            effective(&p, "A1", "FAST").get(base_probe),
+            Some(&serde_json::json!(99.5)),
+            "模板继承基底，应该跟着变"
+        );
+        assert_eq!(
+            effective(&p, "A1", "SNAPSHOT").get(base_probe),
+            snap_before.as_ref(),
+            "快照版被自己的显式值挡住，基底改动不传播"
+        );
+
+        // 「缺失参数不伪造」：复制写的键数 = 模板有效配方键数，
+        // 没有为 registry 里不存在的键造值（apply_values 会拦未知键，到不了盘）
+        assert_eq!(
+            keys,
+            template_eff.len(),
+            "复制的键数就是模板有效配方的键数，一个不多一个不少"
+        );
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {

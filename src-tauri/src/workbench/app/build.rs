@@ -682,12 +682,180 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
     })
 }
 
+/* ---------- 对照基线（b05 Task 14.9） ---------- */
+
+/// 基线 diff 的一条：产物（`BUILTIN_PRESETS`，判据保证与入库目录一份不差）vs
+/// `crates/postprocess/tests/fixtures/presets/` 的同名文件
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineDiffEntry {
+    pub file_name: String,
+    /// `same` / `changed` / `missingBaseline`。没有"产物侧缺失"：
+    /// 产物名单来自编译进二进制的表，它有判据盯着
+    pub status: String,
+    /// 两侧内容哈希前 16 位。给界面确认用 —— 哈希不同就是变了
+    pub product_sha: String,
+    pub baseline_sha: Option<String>,
+}
+
+/// **基线 diff**（14.9 的第①步，**只读**）：列出九份产物的同步状态，
+/// 人看过这份清单、点确认，才轮到 [`wb_sync_baseline`] 写。
+///
+/// 为什么产物侧用 `BUILTIN_PRESETS` 而不是读盘：那张表有判据
+/// （`builtin_presets_match_dir`）保证与入库目录**一份不差**，编译进二进制
+/// 意味着"发布者看到的"与"用户二进制里带的"是同一份。
+#[tauri::command]
+pub fn wb_baseline_diff() -> Result<Vec<BaselineDiffEntry>, AppError> {
+    traced("wb_baseline_diff", |_| {
+        Ok(baseline_diff_against(&preset::generate::fixtures_dir()))
+    })
+}
+
+/// diff 的领域体：对哪份基线目录比对由调用方给 ——
+/// 判据要在系统临时目录的基线上做反向走查（落点闸允许的那个豁免）
+fn baseline_diff_against(fixtures: &std::path::Path) -> Vec<BaselineDiffEntry> {
+    let mut out = Vec::new();
+    for (name, content) in preset::BUILTIN_PRESETS {
+        let product_sha = short_sha(content.as_bytes());
+        let baseline_bytes = std::fs::read(fixtures.join(name));
+        let (status, baseline_sha) = match &baseline_bytes {
+            Ok(b) if b.as_slice() == content.as_bytes() => ("same", short_sha(b)),
+            Ok(b) => ("changed", short_sha(b)),
+            Err(_) => ("missingBaseline", String::new()),
+        };
+        out.push(BaselineDiffEntry {
+            file_name: (*name).to_owned(),
+            status: status.to_owned(),
+            product_sha,
+            baseline_sha: (!baseline_sha.is_empty()).then_some(baseline_sha),
+        });
+    }
+    out
+}
+
+/// **同步对照基线**（14.9 的第②步，**显式写入动作**）。
+///
+/// 前提：人已经看过 [`wb_baseline_diff`] 的清单并确认。这里直接转调
+/// `preset::generate::sync_baseline` —— **落点闸在它内部**
+/// （`check_baseline_target` 只认真 fixtures 目录或系统临时目录），src-tauri
+/// 不经手路径，也就没有绕过闸的口子。内容相同的自动跳过，返回真正写入的份数。
+#[tauri::command]
+pub fn wb_sync_baseline() -> Result<usize, AppError> {
+    traced("wb_sync_baseline", |_| {
+        let n = preset::generate::sync_baseline(
+            &preset::generate::assets_dir(),
+            &preset::generate::fixtures_dir(),
+        )
+        .map_err(|e| AppError::invalid_argument("基线同步被拒绝").with_detail(e))?;
+        tracing::info!(synced = n, "对照基线已同步（人工确认后）");
+        Ok(n)
+    })
+}
+
+fn short_sha(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let h = Sha256::digest(bytes);
+    format!("{:x}", h).chars().take(16).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use crate::workbench::store::Store;
+    use std::collections::BTreeSet;
+
+    /* ---------- 对照基线（b05 Task 14.9） ---------- */
+
+    /// **真数据只读锚点**：当前产物与基线应当逐字节相同（K-G0' 绿的现状），
+    /// 所以 diff 必须是 9 条全 `same`。这条同时验证 diff 命令**只读**：
+    /// 它跑前后基线目录的文件集合不能变。
+    #[test]
+    fn the_real_baseline_diff_reports_all_same() {
+        let fixtures = preset::generate::fixtures_dir();
+        let before: BTreeSet<String> = walk_shas(&fixtures);
+        let out = wb_baseline_diff().expect("diff");
+        assert_eq!(
+            out.len(),
+            9,
+            "BUILTIN_PRESETS 是 9 份 —— 名单变了就说清为什么"
+        );
+        let not_same: Vec<_> = out.iter().filter(|e| e.status != "same").collect();
+        assert!(
+            not_same.is_empty(),
+            "真产物与基线应当全绿，却有：{not_same:?} —— 谁改了没同步？"
+        );
+        let after: BTreeSet<String> = walk_shas(&fixtures);
+        assert_eq!(before, after, "diff 是只读的，不许动基线目录");
+    }
+
+    /// **反向走查（在系统临时目录做，落点闸明确允许；真基线一个字节不碰）**：
+    /// 改一份基线 → diff 报 `changed` → sync 写入 → diff 回到全 `same`，
+    /// 且写入后的字节与产物**逐字节相同**。未经确认直接写在这里不存在 ——
+    /// sync 是显式命令，判据同时证明它**只动 diff 说过的那一份**
+    #[test]
+    fn sync_baseline_writes_exactly_what_the_diff_named() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fixtures = tmp.path().to_path_buf();
+        // 铺 9 份与产物相同的基线
+        for (name, content) in preset::BUILTIN_PRESETS {
+            crate::fsx::atomic::atomic_write(&fixtures.join(name), content.as_bytes()).unwrap();
+        }
+        // 改其中一份（反向：diff 必须抓到）
+        let victim = preset::BUILTIN_PRESETS[0].0;
+        crate::fsx::atomic::atomic_write(
+            &fixtures.join(victim),
+            format!("{}\n# 改过了\n", preset::BUILTIN_PRESETS[0].1).as_bytes(),
+        )
+        .unwrap();
+
+        let out = baseline_diff_against(&fixtures);
+        let changed: Vec<_> = out.iter().filter(|e| e.status == "changed").collect();
+        assert_eq!(changed.len(), 1, "恰好一份变了：{changed:?}");
+        assert_eq!(changed[0].file_name, victim);
+        assert!(changed[0].baseline_sha.is_some());
+
+        // sync（tempdir 在落点闸的允许清单里）：只写那一份，其余跳过
+        let n = preset::generate::sync_baseline(&preset::generate::assets_dir(), &fixtures)
+            .expect("sync");
+        assert_eq!(n, 1, "只同步 diff 点名的那一份");
+
+        // 重回全绿，且那份的字节与产物逐字节相同
+        let out2 = baseline_diff_against(&fixtures);
+        assert!(out2.iter().all(|e| e.status == "same"), "sync 后必须全绿");
+        assert_eq!(
+            std::fs::read(fixtures.join(victim)).unwrap(),
+            preset::BUILTIN_PRESETS[0].1.as_bytes(),
+            "写入的字节就是产物本体"
+        );
+    }
+
+    /// 目录里全部文件的 sha 指纹（文件名 → sha 前 16），给"只读"断言用
+    fn walk_shas(dir: &std::path::Path) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        fn walk(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    let bytes = std::fs::read(&p).unwrap_or_default();
+                    out.insert(format!(
+                        "{}:{}",
+                        p.file_name()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default(),
+                        short_sha(&bytes)
+                    ));
+                }
+            }
+        }
+        if dir.is_dir() {
+            walk(dir, &mut out);
+        }
+        out
+    }
 
     fn setup() -> (tempfile::TempDir, Fixture, Committed) {
         let dir = tempfile::tempdir().unwrap();
