@@ -38,6 +38,8 @@ pub mod assets;
 pub mod build;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
+/// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
+pub mod dist;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;

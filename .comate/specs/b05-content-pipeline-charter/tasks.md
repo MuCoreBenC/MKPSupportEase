@@ -136,13 +136,15 @@
     - 11.9: ✅ 清单里有、上游不认的机型与版本 → `upstream_drift`（**提示**档：render 已用自己的清单，这类不一致从此不再以「机型不存在」暴露，但发布侧还看着上游的过渡期里要有处可见）。机型级报过就 continue，版本不逐条刷屏。真数据实测：夹具上游 + 真清单 → A1_MINI / P2S / X1C 三条机型级 + A1.FASTV3.3 一条版本级（夹具上游只有两版）
     - 11.10（过程）：`preset::PRESET_RECIPES_TOML` 公开（原在 gen-presets 的 bin 里私有 include），`gen_presets` 转引 —— 两处 `include_str!` 字面量靠人眼盯着同一文件的隐患消除；K-G7 复验绿
 
-- [ ] Task 12: 交付层 —— `dist-presets/` 结构与目录类 JSON
-    - 12.1: 定稿交付目录结构（doc §7 是示意，此处定稿）
-    - 12.2: 生成机型目录 JSON：机型、版本及其关系
-    - 12.3: 生成套餐 JSON
-    - 12.4: 生成资产索引 JSON：清单、位置、归属
-    - 12.5: 目录 JSON 的文件名字段全部由命名函数算出，不存在手写字面量
-    - 12.6: 判据：目录 JSON 中引用的每个文件都在交付目录中真实存在
+- [x] Task 12: 交付层 —— `dist-presets/` 结构与目录类 JSON
+    - 12.1: ✅ 目录结构定稿（`app/dist.rs` 模块头）：`content/`（三份 JSON）+ `presets/mkp/`（**子层保留** —— MKP 与 BBS 是两类预设，G-3 开放维度，且 wb_generate 已按此写，定稿是承认现状为契约）+ `assets/`（**沿用资产根目录形状**，`printers/` 而非示意的 `machines/` —— path 在两个根下逐字节同形，不存在第二份路径映射；改用示意等于重写 21 条 path）+ `manifest.json`（最后写，既有）
+    - 12.2: ✅ `machine_catalog.json`：brands + 6 台机型 10 版（含 A2L 占位，`hasDimensions: false` 是它的标注，与上游契约同形）；版本条目带 `mkpPresetAssetId` 连接键（指向 manifest 的 assets[].id）；**不带 `presetFile`**（G-2 待删字段不进交付契约）
+    - 12.3: ✅ `bundles.json`：`bundles.toml` 五字段直出（id/display/machineId/assetRefs/updatedAt —— 旧契约没有 updatedAt，多给无害）
+    - 12.4: ✅ `assets_index.json`：**只编进交付的引用可达集**（机型 image/icon + 套餐 assetRefs，去重照 assets.toml 登记顺序；正式的可达性分析在 Task 13，集合不变）—— sha256/size 是 Task 13.6 的事（与 manifest 扩容一起），这里只管清单、位置、归属
+    - 12.5: ✅ 文件名字段全部由命名函数算出，边界照实写进 `dist.rs` 模块头：MKP 产物名 = `preset::preset_file_name`（唯一实现）；资产 path 是**登记值**（assets.toml 唯一一份路径），JSON 原样引用、生成器里零字面量 ——「不存在手写字面量」指生成器里不再出现第二份名字，不是把登记值改成计算值
+    - 12.6: ✅ 判据两条：夹具级 `write_content_copies_every_referenced_file…`（可达集逐条复制 + 缺文件资产报错带 id）与真数据 `the_real_delivery_set_matches_the_real_references`（**可达集 13 = 图 5 + 图标 3 + BBS 5**；模型 3 与 0.2mm BBS 4 刻意不进——没被引用；12.6 逐条存在 + 套餐 assetRefs join 资产索引闭合；反空转锚点 6 台 / 10 版 / 5 套餐 / 13 条）
+    - 12.7（侦察结论，9.3a 不改名）：BBS 旧云端代号（`MKPProcess X1 0.4 0.24.json`）活在**两处**——文件名 + JSON 内容身份（`name`/`print_settings_id` = "MKPProcess X1"），而 `inherits` 已用新名（`@BBL X1C`）。**仓内代码零依赖**（assetUrl 只做空格编码透传，无 TSX 调用方；assets.toml 的 path 是唯一引用处）。裁决建议：文件名与内容身份是**切片器侧用户可见的预设名**，改了会让已导入用户的预设列表漂移；asset id 已是稳定键、G-0 命名函数只管 MKP 产物 —— **建议维持登记值不改**，9.3a 挂到「消费端（切片器导入行为）确认后再裁决」，不为交付层阻塞
+    - 12.8（边界照实记）：wb_publish 现在写三份 JSON + 13 份资产 + manifest（仍只编 mkp_preset 9 条）——manifest 扩容到全资产、残留文件 blocker、可达性正式化都在 Task 13
 
 - [ ] Task 13: 可达性筛选、残留拦截与 manifest
     - 13.1: 可达性分析：从机型 / 版本 / 套餐的引用出发，算出应交付的文件集合

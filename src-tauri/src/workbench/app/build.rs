@@ -649,6 +649,17 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
             }
 
             let stamp = clock::now_iso8601();
+
+            // 目录类 JSON + 资产复制（b05 Task 12）。**在 manifest 之前** ——
+            // manifest 只描述已落地的文件，三份 JSON 与 assets/ 也是"已落地"的一部分。
+            // 资产文件不在（登记了但没搬）在这里拦下，报错带资产 id
+            let asset_root = paths::assets_root()?;
+            let content = super::dist::write_content(&root, &asset_root, &book)?;
+            tracing::info!(
+                assets = content.assets_copied,
+                "交付内容写入完成（content/*.json ×3 + assets/）"
+            );
+
             let manifest = serde_json::json!({
                 "manifestVersion": 2,
                 "channel": ctx.up.manifest.compat.channel,
