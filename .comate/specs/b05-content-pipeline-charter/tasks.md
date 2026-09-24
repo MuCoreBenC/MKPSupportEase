@@ -45,6 +45,7 @@
     - 3.3: ✅ **裁决取②：不删，改指仓内基线** —— 原文前提已被实测证伪（`../mkp-ssr/...` 在开发机上存在、判据真比了 9 份；两侧基线 sha256 9/9 相同，只差文件名）。改为：基线走 `preset::generate::fixtures_dir()`；配对读文件头 `# machine:` / `# variant:`（不认文件名，Task 5 改名后不用再动）；9 份一份不少地比到 —— 少了 / 重了 / 身份读不出来都直接失败，删掉「没找到就 return」那条静默分支
     - 3.3a: ✅ 随之把 `render()` 的机型查询从上游那份换成**我们自己那份清单**（`book.machines()`）：没有这一改，这条判据在 CI 里仍跑不起来（上游不在仓库里）。没有任何判据覆盖「上游没有这台」那条旧分支，而上游那层正在退出（b04 Task 12）—— 理由与代价写在 `render()` 的注释里
     - 3.3b: ✅ 复验：判据实测 **9/9 配上并逐份比过**（值全对，只剩「段内键序」那条已知差异，仍是 Task 11 的收尾项）；`cargo test -p mkp-support-ease --features workbench` 265/265
+    - 3.3c: ✅ **那处生产代码改动的独立审查**（结论单独成篇：`render-machine-source-review.md`，与 Task 5 分开汇报）：① `book.machines()` 是当前正式机型来源（b04 Task 8 起，清单来自 `presets/machines/*.toml`）；② 渲染链里只剩这一处读上游的机型身份，上游那层正在退出（b04 Task 12）；③ **需要独立判据** —— 已补 `render_takes_the_machine_from_our_own_catalog`，并做了反空转验证（改回上游那份 → 它与 M0 同时红，改回来 266/266 绿）。残余风险一条：真 `presets/` 与真上游之间没有任何判据比机型集合 → 并入 Task 11
     - 3.4: ✅ `cargo test -p mkpse-preset` 全绿（77 lib + 39 集成）、`cargo fmt --all --check` 与 `cargo clippy -p mkpse-preset --all-targets -- -D warnings` 全过
 
 - [x] Task 4: 旧名 → 新身份映射表（数据文档，不改文件）
@@ -117,6 +118,7 @@
     - 11.6: 分级：参数源缺失报 warning（允许版本先存在），构建时才升为 error
     - 11.7: 错误信息带上对象 id、字段名、找过的路径
     - 11.8: 扩展 `wb_preflight` 的 `Report`，前端按严重度分组展示
+    - 11.9: 上游存在时，检查「我们清单里有、上游不认」的机型与版本，报 warning（来源：Task 3.3c 的残余风险 —— `render()` 改用我们自己的清单之后，这类不一致不再以「机型不存在」暴露）
 
 - [ ] Task 12: 交付层 —— `dist-presets/` 结构与目录类 JSON
     - 12.1: 定稿交付目录结构（doc §7 是示意，此处定稿）

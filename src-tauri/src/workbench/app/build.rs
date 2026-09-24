@@ -1144,6 +1144,62 @@ mod tests {
         }
     }
 
+    /// **渲染的机型取自我们自己的清单，不是上游那一份。**（b05 Task 3.3 的审查结论）
+    ///
+    /// 为什么它要有自己的一条判据：`render()` 以前用 `book.up.catalog.machine()` 查机型，
+    /// 改成 `book.machines()`（`presets/machines/*.toml`）之后确实变了一处行为 ——
+    /// 「上游清单里没有这台」不再让渲染失败。这不是为了让某条判据跑通而松掉的检查，
+    /// 而是把归属摆正（机型 id 与版本 id 一样是我们的身份，`docs/ARCHITECTURE.md` §10.1），
+    /// 所以它得单独钉住，而不是躲在 M0 那条的阴影里。
+    ///
+    /// 反空转靠**挑一台夹具上游不认的机型**：夹具上游只认 A1 / A2L / P1S
+    /// （`testkit::FIXTURE_MACHINES`），而真 `presets/` 里有 A1_MINI。
+    /// 哪天有人把机型查询改回上游那份，这里会以「机型 A1_MINI 不存在」红 ——
+    /// 与 M0 那条红在同一行代码上，但两条各自指认不同的原因。
+    #[test]
+    fn render_takes_the_machine_from_our_own_catalog() {
+        // 前提反空转①：夹具上游**确实不认** A1_MINI（不然这条判据在空转）
+        let fixture = Fixture::load();
+        assert!(
+            fixture.up.catalog.machine("A1_MINI").is_none(),
+            "夹具上游认了 A1_MINI，这条判据的前提没了 —— 换一台它不认的机型"
+        );
+
+        // 前提反空转②：真 presets/ 必须有它 —— 清单在我们这边
+        let presets = crate::workbench::presets::Presets::load().expect("真 presets");
+        assert!(
+            presets.catalog.machine("A1_MINI").is_some(),
+            "真 presets 里没有 A1_MINI，前提没了"
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::workbench::store::Store::at(tmp.path());
+        store.bootstrap().unwrap();
+        let c = super::super::storage::load(&store, &presets)
+            .expect("干净仓库读得通")
+            .committed;
+        let draft = Draft::default();
+        let book = Book::new(&fixture.up, &presets, &c, &draft);
+
+        let v = book
+            .versions()
+            .iter()
+            .find(|v| v.machine_id == "A1_MINI")
+            .expect("真 presets 里应当有 A1_MINI 的版本");
+        let r = render(&book, &v.uid).expect("上游认不认这台机型，都不该影响渲染");
+
+        assert!(
+            r.text.contains(&format!("# machine: {}\n", v.machine_id)),
+            "`# machine:` 那一行不是我们清单里的 id：{:?}",
+            r.text.lines().take(4).collect::<Vec<_>>()
+        );
+        assert!(
+            r.file_name.starts_with("A1_MINI-"),
+            "产物名没跟着我们清单里的机型 id 走：{}",
+            r.file_name
+        );
+    }
+
     /// **生成出来的名字必须正好是消费端认得的那一批。**（b04 §02 契约的第一条）
     ///
     /// 消费端按 `{机型}-{版本小写}.toml` 找文件，它内置的 9 份就是这个形状
