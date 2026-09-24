@@ -4,8 +4,8 @@ display = 'P2S'
 brand = 'Bambu Lab'
 defaultBundle = 'P2S_default'
 externalAliases = ['P2']
-image = 'p2s.webp'
-icon = 'p1s'
+image = 'p2s-image'
+icon = 'p1s-icon'
 
 [dimensions]
 edgeZone = 10.0

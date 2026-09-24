@@ -758,6 +758,15 @@ export interface AssetList {
   root: string
 }
 
+/** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4）。删资产之前先问这一条 */
+export interface AssetUsageView {
+  id: string
+  /** 直接引用它的机型 */
+  machines: string[]
+  /** 引用它的套餐。**今天恒为空** —— 套餐域是 Task 10 */
+  bundles: string[]
+}
+
 /**
  * 资产 URL。后端给的前缀只有一处（`/assets/`），这里只负责**编码一次** ——
  * 实测 BBS 文件名里有空格（`MKPProcess A1 0.2 0.10.json`）。
@@ -798,6 +807,12 @@ export const wb = {
    * 现在普遍 `present: false` —— 条目与文件一起在 b05 Task 9 落地
    */
   assets: () => invoke<AssetList>('wb_assets'),
+
+  /**
+   * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，
+   * 界面上只表现为「那台机型的图没了」。删除守卫在数据层（`Presets::remove_asset`）
+   */
+  assetUsage: (assetId: string) => invoke<AssetUsageView>('wb_asset_usage', { assetId }),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。

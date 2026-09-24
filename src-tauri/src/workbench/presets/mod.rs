@@ -152,6 +152,18 @@ pub(crate) fn one_edit_only(before: &str, after: &str) -> (String, String) {
     )
 }
 
+/// 一条资产被谁引用（b05 Task 9.4）。
+///
+/// **没有 `versions` 字段**：版本今天不直接引用资产（`recommendedBundle` → 套餐 → 资产，
+/// 是间接的）。留一个永远为空的字段比说清"还没有"更糟 —— 它会被当成"查过了，没有版本在用"。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AssetUsage {
+    /// 直接引用它的机型（`image` / `icon` 字段写着这个 id）
+    pub machines: Vec<String>,
+    /// 引用它的套餐。**今天恒为空** —— 套餐定义（含 `assetRefs`）是 Task 10
+    pub bundles: Vec<String>,
+}
+
 /// 一次加载的全部预设数据。
 ///
 /// 现在是机型目录 + 资产定义 + 字段定义 + 界面布局。还没搬的是 `bundles/` /
@@ -281,6 +293,92 @@ impl Presets {
         Ok(())
     }
 
+    /// **机型引用的资产 id 必须存在**（b05 Task 9 / 8.6）。
+    ///
+    /// 存在性**分两级**（Task 11.6 同一口径）：
+    ///
+    /// - id 认不出来 ⇒ **error**。那是打错了字，与 `machineVariants` 的键写错同一类：
+    ///   界面上只会表现为"那张图没了"，没有任何东西报错；
+    /// - id 认得出、但文件还没搬进来 ⇒ **warning**（Task 11.1）。允许"先把关联建起来、
+    ///   文件后补"（导入一张图之前就要能选机型），但**不许静默** ——
+    ///   现在由 `wb_assets` 的 `present: false` 说出来，校验层接手后升成一条 warning。
+    fn check_asset_refs(&self) -> Result<(), AppError> {
+        for m in self.catalog.machines() {
+            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+                let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                if self.assets.get(id).is_none() {
+                    return Err(AppError::corrupted(format!(
+                        "机型 {} 的 {field} 指向一个不存在的资产：{id}",
+                        m.id
+                    ))
+                    .with_detail(
+                        "资产定义在 presets/assets.toml。id 打错的后果是那张图/图标静默消失"
+                            .to_owned(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// **谁在用它**（b05 Task 9.4）：删资产之前必须先问这一条。
+    ///
+    /// 删掉一张还被机型引用着的图，界面上只表现为"那台机型的图没了" ——
+    /// 与 `machineVariants` 的孤儿同一类：不报错，只是没了。
+    pub fn asset_usage(&self, id: &str) -> Result<AssetUsage, AppError> {
+        if self.assets.get(id).is_none() {
+            return Err(AppError::not_found(format!("没有资产 {id}")));
+        }
+        let want = id.trim().to_lowercase();
+        let same = |v: &Option<String>| {
+            v.as_deref()
+                .is_some_and(|s| s.trim().to_lowercase() == want)
+        };
+
+        let machines: Vec<String> = self
+            .catalog
+            .machines()
+            .iter()
+            .filter(|m| same(&m.image) || same(&m.icon))
+            .map(|m| m.id.clone())
+            .collect();
+
+        Ok(AssetUsage {
+            machines,
+            // 套餐那一档要等 Task 10：`assetRefs` 与套餐定义今天还不存在。
+            // **留空不是"没有"，是"还没实现"** —— 所以字段旁边的注释写清楚了这一点
+            bundles: Vec::new(),
+        })
+    }
+
+    /// 删一条资产，**先反查**（b05 Task 9.5）：有人引用就拒绝，并说出是谁
+    pub fn remove_asset(&mut self, id: &str) -> Result<(), AppError> {
+        let usage = self.asset_usage(id)?;
+        if !usage.machines.is_empty() || !usage.bundles.is_empty() {
+            return Err(
+                AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
+                    format!(
+                        "引用它的机型：{}；套餐：{}",
+                        if usage.machines.is_empty() {
+                            "（无）".to_owned()
+                        } else {
+                            usage.machines.join("、")
+                        },
+                        if usage.bundles.is_empty() {
+                            "（无）".to_owned()
+                        } else {
+                            usage.bundles.join("、")
+                        }
+                    ),
+                ),
+            );
+        }
+        self.assets.remove(id)?;
+        self.assets.write()
+    }
+
     /// 跨文件那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
     ///
     /// 这是**最容易悄悄坏掉**的一条。键写错一个字母（`"A1_Mini:FAST"`）不会有任何报错 ——
@@ -301,6 +399,8 @@ impl Presets {
         // 资产条目归属的机型必须存在（b05 Task 8）。与下面那条同一类错：
         // 写一个不存在的机型 id，界面上只表现为"这台机型的图没了"，没有任何东西报错
         self.assets.check_against_machines(&machines)?;
+        // 反方向：机型引用的资产 id 必须存在（b05 Task 9 / 8.6）
+        self.check_asset_refs()?;
 
         for p in self.registry.params() {
             for (name, map) in [
@@ -487,6 +587,96 @@ mod tests {
              读进来没事，但第一次保存会被 toml_edit 整份改写成 LF —— diff 一片红，\
              真正改了什么反而看不出来。存成 LF（本仓 .gitattributes 也是这么规定的）"
         );
+    }
+
+    /// **机型引用的资产必须能解析到真实文件**（b05 Task 9.7）。
+    ///
+    /// 与上面那条加载期检查的分工：加载期只管"id 认不认得出来"（打错字是 error），
+    /// 这条管"文件真的在不在" —— 那是搬运的验收，也是 Task 11.1 的 warning 级。
+    #[test]
+    fn every_machine_asset_ref_points_at_a_real_file() {
+        let Some(p) = real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut checked = 0usize;
+        for m in p.catalog.machines() {
+            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+                let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                let a = p
+                    .assets
+                    .get(id)
+                    .unwrap_or_else(|| panic!("{} 的 {field} 指向一个不存在的资产 {id}", m.id));
+                assert!(
+                    p.assets.present(a),
+                    "资产 {id}（{}）的文件不在：{}",
+                    a.path,
+                    p.assets
+                        .resolve(a)
+                        .map(|x| x.display().to_string())
+                        .unwrap_or_else(|e| format!("解析失败：{e}"))
+                );
+                checked += 1;
+            }
+        }
+        // 反空转：真数据里 5 张机型图 + 6 个图标引用（A2L 没有图）—— 少于 10 条就是漏查了
+        assert!(checked >= 10, "只查了 {checked} 条引用 —— 这条判据在空转");
+    }
+
+    /// **反查与删除守卫**（b05 Task 9.4 / 9.5）。
+    ///
+    /// 用夹具而不是真数据：真数据里删东西是破坏性的，而这里要验的正是"删"这条路径。
+    #[test]
+    fn an_asset_that_is_still_used_cannot_be_removed() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+
+        // 反查说得出是谁：夹具里 A1 的 `image` 指着它
+        let usage = presets.asset_usage("a1-image").expect("反查");
+        assert_eq!(usage.machines, vec!["A1".to_owned()]);
+        assert!(usage.bundles.is_empty(), "套餐域还没实现（Task 10）");
+
+        let err = presets
+            .remove_asset("a1-image")
+            .expect_err("有人引用就不能删");
+        assert!(err.message.contains("还被引用"), "实测：{}", err.message);
+        assert!(
+            err.detail.unwrap_or_default().contains("A1"),
+            "要说清是谁在用，不然人只能一个个机型去翻"
+        );
+        assert!(presets.assets.get("a1-image").is_some(), "被拦下就不该真删");
+
+        // 大小写不敏感：换个写法同样拦得住
+        presets
+            .remove_asset("A1-IMAGE")
+            .expect_err("id 查询是大小写不敏感的，删除守卫也该是");
+
+        // 没人引用的一条：删得掉，而且落盘后重读确实少了它
+        let before = presets.assets.items().len();
+        presets
+            .remove_asset("a1-extra-image")
+            .expect("没人引用就该删得掉");
+        assert_eq!(presets.assets.items().len(), before - 1);
+        let again = Presets::load_from(presets.root()).expect("重读");
+        assert!(
+            again.assets.get("a1-extra-image").is_none(),
+            "删了要真的落盘，不能只改内存"
+        );
+        assert!(
+            again.assets.get("a1-icon").is_some(),
+            "别的条目一个都不许少"
+        );
+    }
+
+    /// 删一个不存在的资产要**报"没有"**，而不是静默成功
+    #[test]
+    fn removing_an_unknown_asset_says_so() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+        let err = presets.remove_asset("no-such-asset").expect_err("必须报错");
+        assert!(err.message.contains("没有资产"), "实测：{}", err.message);
     }
 
     /// 别名不许和任何机型 ID 相撞 —— 撞了的话"按 ID 找机型"会有两个答案

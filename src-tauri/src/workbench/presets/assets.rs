@@ -237,6 +237,42 @@ impl Assets {
         Ok(())
     }
 
+    /// 删掉一条，返回被删的那个。
+    ///
+    /// **本函数不判断"有没有人用它"** —— 它看不见机型与套餐。那道判断在
+    /// [`super::Presets::remove_asset`]，**删资产要走那一条**（b05 Task 9.5）。
+    pub fn remove(&mut self, id: &str) -> Result<Asset, AppError> {
+        let want = id.trim().to_lowercase();
+        let Some(pos) = self.items.iter().position(|a| a.id.to_lowercase() == want) else {
+            return Err(AppError::not_found(format!("没有资产 {id}")));
+        };
+        let removed = self.items.remove(pos);
+
+        // 文档面同样要删掉那一段 —— 只改内存的话，下一次 `write` 会把它写回来
+        let arr = self
+            .doc
+            .get_mut("assets")
+            .and_then(|i| i.as_array_of_tables_mut())
+            .ok_or_else(|| {
+                AppError::corrupted(format!("{} 的 assets 不是表数组", self.file.display()))
+            })?;
+        let idx = arr
+            .iter()
+            .position(|t| {
+                t.get("id")
+                    .and_then(|i| i.as_str())
+                    .is_some_and(|s| s.to_lowercase() == want)
+            })
+            .ok_or_else(|| {
+                AppError::corrupted(format!(
+                    "内存里有 {}，文档里却找不到那一段 —— 别删，先查加载逻辑",
+                    removed.id
+                ))
+            })?;
+        arr.remove(idx);
+        Ok(removed)
+    }
+
     /// 原子写回。**唯一的写盘点**（与 [`super::Catalog::write_machine`] 同一条出口）
     pub fn write(&self) -> Result<(), AppError> {
         crate::fsx::atomic::atomic_write(&self.file, self.to_toml().as_bytes())

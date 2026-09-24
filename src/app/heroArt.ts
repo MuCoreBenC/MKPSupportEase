@@ -26,14 +26,26 @@ export const BRAND_ART: Record<string, string> = {
   bambu: BAMBU_LOGO_DARK,
 }
 
+/**
+ * 整机图。**路径指向资产根**（`public/assets/`，b05 Task 8 的约定）——
+ * 这几张已经从 `public/printers/bambu/` 搬进去了（Task 9.1），别再往旧位置写。
+ *
+ * 严格说这里仍是一张硬编码表：真正的引用在资产库里（`presets/assets.toml` 的
+ * `a1-image` / `p2s-image` …，机型定义的 `image` 字段指着它们）。**旧 app 这一侧
+ * 还没有接资产命令**（那是工作台的事，Task 14.6），所以先把路径对齐、别断图。
+ *
+ * `p2s` / `x1c` 是旧仓那两张（裁决 2026-09-24：暂用，将来补新图再换）；
+ * `a2l` 至今没有图，自动回落到品牌 logo。
+ */
 export const MODEL_ART: Record<string, ModelArt> = {
-  a1: { plain: '/printers/bambu/a1.webp' },
+  a1: { plain: '/assets/printers/a1.webp' },
   a1mini: {
-    plain: '/printers/bambu/a1mini.webp',
-    withVariant: '/printers/bambu/a1mini-variant.webp',
+    plain: '/assets/printers/a1mini.webp',
+    withVariant: '/assets/printers/a1mini-variant.webp',
   },
-  p1s: { plain: '/printers/bambu/p1s.webp' },
-  // a2l / p2s / x1c 暂缺图，自动回落到品牌 logo
+  p1s: { plain: '/assets/printers/p1s.webp' },
+  p2s: { plain: '/assets/printers/p2s.webp' },
+  x1c: { plain: '/assets/printers/x1c.webp' },
 }
 
 /** 回落链：版本图 → 整机图 → 品牌 logo → 空 */

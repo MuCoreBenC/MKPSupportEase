@@ -4,8 +4,8 @@ display = 'X1C'
 brand = 'Bambu Lab'
 defaultBundle = 'X1C_default'
 externalAliases = ['X1', 'X1S', 'X1E', 'X1 Carbon', 'X1CARBON']
-image = 'x1c.webp'
-icon = 'p1s'
+image = 'x1c-image'
+icon = 'p1s-icon'
 
 [dimensions]
 edgeZone = 10.0

@@ -80,7 +80,7 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// # 为什么在 `public/` 下面
 ///
 /// 这些文件要能被前端**按 URL 取**（机型图、图标、模型），而 vite 的 `public/` 是唯一
-/// "原样进产物、按路径直通"的目录 —— 前端拿到的是 `/assets/printers/bambu/a1.webp`。
+/// "原样进产物、按路径直通"的目录 —— 前端拿到的是 `/assets/printers/a1.webp`。
 ///
 /// 取 `public/` 下的一个子根而不是 `public/` 本身：那里还有 hero 图之类的**界面素材**，
 /// 两类东西混在一层，`path` 就说不清"这条资产属于谁管"。约定是「我们管的资产全在

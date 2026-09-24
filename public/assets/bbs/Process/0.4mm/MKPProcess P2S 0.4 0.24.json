@@ -1,0 +1,43 @@
+{
+    "enable_arc_fitting": "0",
+    "enable_support": "1",
+    "enable_support_ironing": "1",
+    "from": "User",
+    "gap_infill_speed": [
+        "50",
+        "nil"
+    ],
+    "inherits": "0.20mm Standard @BBL P2S",
+    "name": "MKPProcess P2S",
+    "only_one_wall_first_layer": "1",
+    "post_process": [
+        "请将MKP命令粘贴到这里"
+    ],
+    "print_extruder_id": [
+        "1",
+        "1"
+    ],
+    "print_extruder_variant": [
+        "Direct Drive Standard",
+        "Direct Drive High Flow"
+    ],
+    "print_settings_id": "MKPProcess P2S",
+    "raft_first_layer_density": "100%",
+    "support_base_pattern_spacing": "3",
+    "support_interface_bottom_layers": "0",
+    "support_interface_spacing": "0",
+    "support_interface_top_layers": "1",
+    "support_ironing_flow": "15%",
+    "support_ironing_pattern": "concentric",
+    "support_ironing_spacing": "0.3",
+    "support_ironing_speed": "70",
+    "support_object_first_layer_gap": "0.45",
+    "support_object_xy_distance": "0.3",
+    "support_remove_small_overhang": "0",
+    "support_style": "grid",
+    "support_top_z_distance": "0",
+    "support_type": "normal(auto)",
+    "tree_support_wall_count": "1",
+    "version": "2.5.0.14",
+    "z_direction_outwall_speed_continuous": "1"
+}

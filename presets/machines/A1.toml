@@ -4,8 +4,8 @@ display = 'A1'
 brand = 'Bambu Lab'
 defaultBundle = 'A1_default'
 externalAliases = ['A1C', 'A1F']
-image = 'a1.webp'
-icon = 'a1'
+image = 'a1-image'
+icon = 'a1-icon'
 
 [dimensions]
 edgeZone = 10.0

@@ -197,6 +197,27 @@ fn write_presets(root: &Path) {
          path = 'printers/a1.webp'\n\
          \n\
          [[assets]]\n\
+         id = 'a1-icon'\n\
+         type = 'icon'\n\
+         machineId = 'A1'\n\
+         name = 'A1 图标'\n\
+         path = 'icons/a1.svg'\n\
+         \n\
+         [[assets]]\n\
+         id = 'p1s-icon'\n\
+         type = 'icon'\n\
+         machineId = 'P1S'\n\
+         name = 'P1S 图标'\n\
+         path = 'icons/p1s.svg'\n\
+         \n\
+         [[assets]]\n\
+         id = 'a1-extra-image'\n\
+         type = 'image'\n\
+         machineId = 'A1'\n\
+         name = 'A1 备选图（没人引用）'\n\
+         path = 'printers/a1-extra.webp'\n\
+         \n\
+         [[assets]]\n\
          id = 'p1s-bbs-02-010'\n\
          type = 'slicerProfile'\n\
          machineId = 'P1S'\n\
@@ -211,7 +232,18 @@ fn write_presets(root: &Path) {
         s.push_str(&format!("id = '{id}'\n"));
         s.push_str(&format!("display = '{id}'\n"));
         s.push_str("brand = 'Bambu Lab'\n");
-        s.push_str("icon = 'a1'\n");
+        // 图标是**资产 id**（b05 Task 9 改的引用形式）：P1S 用自己的那份，
+        // 其余借用 a1 那份 —— 与真数据里「P2S / X1C 借 p1s-icon」同一形状
+        s.push_str(if *id == "P1S" {
+            "icon = 'p1s-icon'\n"
+        } else {
+            "icon = 'a1-icon'\n"
+        });
+        // A1 有一张机型图（`a1-image` 指着它）—— 反查与删除守卫那条判据要用；
+        // 其余机型不给图，与真数据里 A2L 没有图同一形状
+        if *id == "A1" {
+            s.push_str("image = 'a1-image'\n");
+        }
         if !bundle.is_empty() {
             s.push_str(&format!("defaultBundle = '{bundle}'\n"));
         }

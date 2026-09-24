@@ -50,6 +50,31 @@ pub struct AssetList {
     pub root: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetUsageView {
+    pub id: String,
+    /// 直接引用它的机型（`image` / `icon` 字段写着这个 id）
+    pub machines: Vec<String>,
+    /// 引用它的套餐。**今天恒为空** —— 套餐定义（含 `assetRefs`）是 Task 10
+    pub bundles: Vec<String>,
+}
+
+/// **谁在用它**（b05 Task 9.4）。删资产之前先问这一条 ——
+/// 删掉一张还被机型引用着的图，界面上只表现为"那台机型的图没了"
+#[tauri::command]
+pub fn wb_asset_usage(asset_id: String) -> Result<AssetUsageView, AppError> {
+    traced("wb_asset_usage", |_| {
+        let presets = Presets::load()?;
+        let usage = presets.asset_usage(&asset_id)?;
+        Ok(AssetUsageView {
+            id: asset_id.clone(),
+            machines: usage.machines,
+            bundles: usage.bundles,
+        })
+    })
+}
+
 /// 资产库清单。**只读**（写入口在数据层，还没接到命令）
 #[tauri::command]
 pub fn wb_assets() -> Result<AssetList, AppError> {
@@ -77,4 +102,60 @@ pub fn wb_assets() -> Result<AssetList, AppError> {
             root: root.display().to_string(),
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **真数据上的一条**：条目数与文件都在（b05 Task 9 的验收）。
+    ///
+    /// 它比 `presets::tests` 那条多看一层：命令返回的 DTO 是不是也对
+    /// （`present`、`url` 前缀、类型都在）。
+    #[test]
+    fn the_real_asset_list_is_complete_and_present() {
+        let list = wb_assets().expect("真 presets 读得通");
+        assert_eq!(
+            list.assets.len(),
+            21,
+            "机型图 6 + 图标 3 + 模型 3 + BBS 9 —— 条数变了就该在提交里说清为什么"
+        );
+
+        let missing: Vec<&str> = list
+            .assets
+            .iter()
+            .filter(|a| !a.present)
+            .map(|a| a.id.as_str())
+            .collect();
+        assert!(missing.is_empty(), "这些资产的文件不在：{missing:?}");
+
+        assert!(
+            list.assets.iter().any(|a| a.kind == AssetKind::Model),
+            "模型这一类要在（裁决：保留 model 类型）"
+        );
+        assert!(
+            list.assets.iter().all(|a| a.url.starts_with("/assets/")),
+            "URL 前缀只有后端一处，别在 TSX 里再拼"
+        );
+        assert!(
+            list.assets.iter().all(|a| !a.name.trim().is_empty()),
+            "每条都要有给人看的名字"
+        );
+    }
+
+    /// 反查在真数据上也说得清是谁在用（b05 Task 9.4）
+    #[test]
+    fn the_real_usage_lookup_names_the_machines() {
+        let u = wb_asset_usage("p1s-icon".to_owned()).expect("反查");
+        assert_eq!(
+            u.machines,
+            vec!["P1S".to_owned(), "P2S".to_owned(), "X1C".to_owned()],
+            "三个机型共用这一份图标（归属写 P1S，借用的是另外两台）"
+        );
+        assert!(u.bundles.is_empty(), "套餐域还没实现（Task 10）");
+
+        // 机型图各归各的
+        let u = wb_asset_usage("a1-image".to_owned()).expect("反查");
+        assert_eq!(u.machines, vec!["A1".to_owned()]);
+    }
 }

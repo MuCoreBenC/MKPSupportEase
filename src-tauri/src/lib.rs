@@ -120,6 +120,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「资产库」：读 `presets/assets.toml`（b05 Task 8）。现在只有读 ——
         // 写入口在数据层就位，接上它要有界面（Task 14）
         app::assets::wb_assets,
+        app::assets::wb_asset_usage,
         app::machines::wb_add_machine,
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,
