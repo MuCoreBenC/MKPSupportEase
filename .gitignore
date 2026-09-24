@@ -32,3 +32,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# 本机对照用的参考素材（如 mkpse-presets 的一份拷贝）。只读来看、不参与构建，
+# 刻意不入库 —— 它有自己的上游仓库，进来只会变成第二份真源。
+/local-reference/
