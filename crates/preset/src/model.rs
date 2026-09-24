@@ -250,9 +250,15 @@ impl PresetKey {
     ///
     /// 与内置产物同一套命名 —— **语义即钥匙即文件名**，于是「同一个变体的副本」
     /// 在磁盘上也只会有一个名字，不会出现 `A1MF.toml` 与 `A1_MINI-fast.toml` 两份同参数副本。
+    ///
+    /// **有变体那一档转调 [`crate::generate::file_name`]**（b05 Task 5）：
+    /// 以前这里自己拼一遍，而拼出来的东西要和产物同名 —— 那是两份独立实现，
+    /// 中间没有编译器（`docs/ARCHITECTURE.md` §10.3 要求五个使用点共用一个函数）。
+    /// 无变体那一档是本函数自己的形状：老预设没有 `# variant:`，规则（身份 → 名字）
+    /// 在这一档上不成立，所以它是显式写出来的例外，不是漏掉。
     pub fn file_name(&self) -> String {
         match &self.variant {
-            Some(v) => format!("{}-{}.toml", self.machine, v),
+            Some(v) => crate::generate::file_name(&self.machine, v),
             None => format!("{}.toml", self.machine),
         }
     }

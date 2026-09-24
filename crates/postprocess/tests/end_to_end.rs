@@ -18,7 +18,7 @@
 //!
 //! 本侧用的配置 `tests/fixtures/config/A1.toml` 也是**派生**的：由
 //! `mkp-sr` 的 `ir::build()` 对同一份 A1 预设产出的 IR JSON
-//! （`tests/fixtures/ir/build9/A1.json`）经 `config::to_toml` 转成 TOML，
+//! （`tests/fixtures/ir/build9/A1-standard.json`）经 `config::to_toml` 转成 TOML，
 //! 唯一的人工改动是 `Machine.MachineType = "A1"`（预设里的机型声明在 IR 之外，
 //! 见 `tests/pipeline.rs` 的派生说明与每轮复查）。
 //!

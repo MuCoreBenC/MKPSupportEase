@@ -54,15 +54,16 @@
     - 4.3: ✅ 记了 B 套的读法（`M`=mini 档位、`F`=快拆、`_260628`=开源版日期），并写明两条要点：**B 套不可算**（要查表或读文件头）、日期后缀不是版本语义
     - 4.4: ✅ 文档头尾都标了有效期：迁移完成后归档失效、不进长期代码路径；附「B 套今天还留在哪」的五类收尾清单
 
-- [ ] Task 5: 按新规范重命名基线、夹具与硬编码名单
-    - 5.1: 重写 `crates/preset/src/generate.rs:402-417` 的 `assert_ne!`（它现在要求两边文件名必须不同）
-    - 5.2: 配对从 `pair_by_head` 改为按文件名直配，删除 `pair_by_head` / `head_value`（`generate.rs:172-226`）
-    - 5.3: 重命名 `crates/postprocess/tests/fixtures/presets/` 下九份文件
-    - 5.4: 同步重命名派生夹具 `crates/postprocess/tests/fixtures/ir/build9/` 下九份 JSON
-    - 5.5: 更新四处硬编码名单：`pipeline_wiping_source.rs:30-40`、`build9.rs:35`、`registry_branch_diff.rs:35`、`crates/preset/src/build.rs:1119`
-    - 5.6: 更新 `crates/preset/src/lib.rs:85-122` 的 `BUILTIN_PRESETS` 手写表与 `include_str!` 路径
-    - 5.7: 复验硬防线：九份产物 sha256 与 doc §2.4 表完全一致
-    - 5.8: 更新 `crates/preset/assets/preset_recipes.toml:11-17` 的链路说明与 `docs/` 相关段落
+- [x] Task 5: 按新规范重命名基线、夹具与硬编码名单
+    - 5.1: ✅ 那条 `assert_ne!` 连同它所在的判据一起重写成 `pairing_goes_by_file_name` —— 现在咬「两边文件名集合相同」（少一份、多一份、名字写岔了都红）
+    - 5.2: ✅ `pair_by_head` / `head_value` 整个删掉，换成 `toml_files()`（按文件名索引）；`check_baseline` / `sync_baseline` 都改成按名字直配。顺带把 `tests/recipe.rs` 的 `fixtures_by_combo()`（**另一处**按头配对）改成按名字取 fixture —— 现在全仓没有按 `# machine:` 配对的代码了（工作台那条 M0 判据除外，它的理由写在文件里）
+    - 5.3: ✅ 九份基线改名，git 记为相似度 100% 的改名：18 份夹具合计 **0 增 0 删**
+    - 5.4: ✅ 九份 IR 夹具同步改名（内容里本来就没有文件名：`PresetName` 是空串）
+    - 5.5: ✅ 四处硬编码名单全换新名，并写明「名字是命名规则算出来的、写死字面量是刻意的」（防从目录遍历推出来）；`registry_branch_diff.snapshot` 按文档命令重生成，**diff 只有段落名，`0 处` 一条没变**
+    - 5.6: ✅ **无需改动**：`BUILTIN_PRESETS` 与它的 `include_str!` 路径本来就是新名（产物侧一直在 A 套），本轮没动它一个字节
+    - 5.7: ✅ 硬防线实测（改名前后逐份比）：九份基线 sha256 **与迁移前完全相同**（`0B19FEAA…` / `115E061F…` / … 见 `migration-map.md`）；`gen-presets --check` 与 `--baseline` 都绿，后者报「9 份同名文件逐字节相同」
+    - 5.8: ✅ `preset_recipes.toml` / `test_recipes.toml` 的链路说明改成真实路径 +「两边同名、按名字直配」；`docs/ARCHITECTURE.md` §10.5 改写成「已收口」并指向映射表
+    - 5.9: ✅ **越出清单但同类的一处**：`PresetKey::file_name` 有变体那一档改转调 `generate::file_name`（它以前自己拼一遍，是全仓第三处 `format!` 命名 —— Task 2 那句「唯一实现」此前并不成立）。无变体那一档保留为**显式例外**：老预设没有 `# variant:`，规则（身份 → 名字）在这一档上不成立
 
 - [ ] Task 6: 把基线维护从日常生产流程里摘出来
     - 6.1: 明确对照基线是判据资产，不是产物副本，也不是交付文件

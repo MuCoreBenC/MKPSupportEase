@@ -29,16 +29,19 @@ use preset::{CalibrationExecMode, build, read_preset};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// 9 份夹具的文件名主干（= `{机型 id}-{版本 id 小写}`，b05 Task 5 统一命名）。
+///
+/// 字面量写死，不按目录遍历推：名字集合本身是要盯的东西。
 const NAMES: &[&str] = &[
-    "A1",
-    "A1F",
-    "A1F_260628",
-    "A1M",
-    "A1MF",
-    "A1MF_260628",
-    "P1",
-    "P2",
-    "X1",
+    "A1-standard",
+    "A1-fast",
+    "A1-fastv3.3",
+    "A1_MINI-standard",
+    "A1_MINI-fast",
+    "A1_MINI-fastv3.3",
+    "P1S-lite",
+    "P2S-standard",
+    "X1C-lite",
 ];
 
 /// 内核那份 fixture 的根（从本 crate 的 manifest 目录出发）。

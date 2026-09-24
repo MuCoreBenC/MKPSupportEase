@@ -29,16 +29,20 @@ use std::path::{Path, PathBuf};
 use preset::{CalibrationExecMode, build, load_param_registry, read_preset};
 use serde_json::Value;
 
+/// 9 份夹具的文件名主干（= `{机型 id}-{版本 id 小写}`，b05 Task 5 统一命名）。
+///
+/// 快照里的段落名就是这些 —— 改名要让快照跟着改，**并在提交信息里说明为什么**
+/// （见文件头那条规矩）。
 const NAMES: &[&str] = &[
-    "A1",
-    "A1F",
-    "A1F_260628",
-    "A1M",
-    "A1MF",
-    "A1MF_260628",
-    "P1",
-    "P2",
-    "X1",
+    "A1-standard",
+    "A1-fast",
+    "A1-fastv3.3",
+    "A1_MINI-standard",
+    "A1_MINI-fast",
+    "A1_MINI-fastv3.3",
+    "P1S-lite",
+    "P2S-standard",
+    "X1C-lite",
 ];
 
 fn core_fixtures(rel: String) -> PathBuf {

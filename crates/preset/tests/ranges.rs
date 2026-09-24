@@ -221,9 +221,9 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
 
 #[test]
 fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
-    // 真实预设（fixture）：A1MF 那批文件头有 `# variant: fast`
+    // 真实预设（fixture）：A1_MINI 的 fast 那份，文件头有 `# variant: fast`
     let dir = preset::generate::fixtures_dir();
-    let raw = std::fs::read_to_string(dir.join("A1MF.toml")).expect("读 fixture");
+    let raw = std::fs::read_to_string(dir.join("A1_MINI-fast.toml")).expect("读 fixture");
     let file = preset::read_preset_from_bytes(raw.clone()).expect("读预设");
     assert_eq!(
         file.variant.as_deref(),

@@ -2,7 +2,7 @@
 //!
 //! 三层，从强到弱：
 //!
-//! 1. **整链字节判据**：`load_ir(预设 A1.toml)` → `process_with_ir` 的输出与
+//! 1. **整链字节判据**：`load_ir(预设 A1-standard.toml)` → `process_with_ir` 的输出与
 //!    `crates/postprocess/tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）
 //!    **除 MKP 标记行外逐字节相等**。这条把「预设 → IR → 12 步 → 输出」整条链一次钉住
 //!    —— 参考物正是 `mkp-sr` 的 CLI 用**同一份预设**生成的（命令记在
@@ -64,12 +64,16 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
 
     let raw = std::fs::read_to_string(&work).expect("读输入");
-    let ir = preset::load_ir(&core_path("tests/fixtures/presets/A1.toml"), Some(&raw))
-        .expect("预设 → IR 必须成功");
+    let ir = preset::load_ir(
+        &core_path("tests/fixtures/presets/A1-standard.toml"),
+        Some(&raw),
+    )
+    .expect("预设 → IR 必须成功");
 
     // 顺手把「第 7、8 步真的发生了」钉住：文件名带扩展名、机型已归一。
+    // 名字跟着夹具一起改了（b05 Task 5）：`preset_name` 取的是**实际路径**的文件名。
     assert_eq!(
-        ir.meta.preset_name, "A1.toml",
+        ir.meta.preset_name, "A1-standard.toml",
         "preset_name 必须是带扩展名的文件名"
     );
     assert_eq!(ir.machine.machine_type, "A1", "机型必须归一成 Canonical ID");
@@ -111,8 +115,8 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
 
 /// 写一份最小可解析的预设到临时目录，`machine` 头由调用方给。
 fn minimal_preset(dir: &Path, machine_header: Option<&str>) -> PathBuf {
-    let src =
-        std::fs::read_to_string(core_path("tests/fixtures/presets/A1.toml")).expect("读基准预设");
+    let src = std::fs::read_to_string(core_path("tests/fixtures/presets/A1-standard.toml"))
+        .expect("读基准预设");
     // 去掉原有的 `# machine:` 行，再按需要加回一条 —— 这样其余字段全是真实值，
     // 判据测的是机型这一个变量。
     let body: String = src
@@ -175,6 +179,8 @@ fn the_real_user_preset_loads() {
         return;
     }
     let ir = preset::load_ir(path, None).expect("真实预设必须能过 load_ir");
+    // 这份文件名 `A1MF.toml` **不跟着夹具改名**：它是用户目录里那份（云端旧命名），
+    // 不是我们的产物。`preset_name` 照实取实际路径的文件名 —— 判据说的是这件事。
     assert_eq!(ir.meta.preset_name, "A1MF.toml");
     assert!(
         !ir.machine.machine_type.is_empty() && ir.machine.max_x > 0.0,

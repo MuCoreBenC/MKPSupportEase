@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-// 两个目录都只认 `generate::` 那一处（理由见 `tests/recipe.rs`）
-use preset::generate::{assets_dir, fixtures_dir};
+// 基线目录只认 `generate::` 那一处（理由见 `tests/recipe.rs`）
+use preset::generate::fixtures_dir;
 use preset::{PresetKey, read_preset_from_bytes};
 
 fn fixtures() -> Vec<PathBuf> {
@@ -29,37 +29,26 @@ fn key_of(text: &str) -> PresetKey {
 ///
 /// 这里同时钉住**文件名**：副本、内置产物、以及将来的任何产物都按它命名，
 /// 名字变了等于用户目录里多出一份看起来一样的东西。
+///
+/// b05 Task 5 之前这张表是**四元组**（旧云端名 → 机型 → 变体 → 产物名），
+/// 因为两边命名不同；夹具改名之后那层映射没有了，剩下的就是
+/// 「钥匙 → 名字」——而名字由 `preset::preset_file_name` 算出，不是查表来的。
 #[test]
 fn klc0_every_fixture_has_the_key_we_expect() {
-    let want: Vec<(&str, &str, Option<&str>, &str)> = vec![
-        ("A1.toml", "A1", Some("standard"), "A1-standard.toml"),
-        ("A1F.toml", "A1", Some("fast"), "A1-fast.toml"),
-        (
-            "A1F_260628.toml",
-            "A1",
-            Some("fastv3.3"),
-            "A1-fastv3.3.toml",
-        ),
-        (
-            "A1M.toml",
-            "A1_MINI",
-            Some("standard"),
-            "A1_MINI-standard.toml",
-        ),
-        ("A1MF.toml", "A1_MINI", Some("fast"), "A1_MINI-fast.toml"),
-        (
-            "A1MF_260628.toml",
-            "A1_MINI",
-            Some("fastv3.3"),
-            "A1_MINI-fastv3.3.toml",
-        ),
-        ("P1.toml", "P1S", Some("lite"), "P1S-lite.toml"),
-        ("P2.toml", "P2S", Some("standard"), "P2S-standard.toml"),
-        ("X1.toml", "X1C", Some("lite"), "X1C-lite.toml"),
+    let want: Vec<(&str, &str, Option<&str>)> = vec![
+        ("A1-standard.toml", "A1", Some("standard")),
+        ("A1-fast.toml", "A1", Some("fast")),
+        ("A1-fastv3.3.toml", "A1", Some("fastv3.3")),
+        ("A1_MINI-standard.toml", "A1_MINI", Some("standard")),
+        ("A1_MINI-fast.toml", "A1_MINI", Some("fast")),
+        ("A1_MINI-fastv3.3.toml", "A1_MINI", Some("fastv3.3")),
+        ("P1S-lite.toml", "P1S", Some("lite")),
+        ("P2S-standard.toml", "P2S", Some("standard")),
+        ("X1C-lite.toml", "X1C", Some("lite")),
     ];
     assert_eq!(fixtures().len(), 9);
 
-    for (name, machine, variant, file_name) in want {
+    for (name, machine, variant) in want {
         let path = fixtures()
             .into_iter()
             .find(|p| p.file_name().unwrap() == name)
@@ -70,32 +59,40 @@ fn klc0_every_fixture_has_the_key_we_expect() {
             (machine, variant),
             "K-LC0 红：{name} 的钥匙不对"
         );
-        assert_eq!(key.file_name(), file_name, "K-LC0 红：{name} 的文件名不对");
+        assert_eq!(
+            key.file_name(),
+            name,
+            "K-LC0 红：{name} 这个名字与钥匙算出来的不一样"
+        );
     }
     println!("K-LC0 绿：9 份 fixture 的钥匙与文件名逐份对上");
 }
 
-/// 同一台机器的同一个变体、两个文件名 ⇒ **同一把钥匙**。
+/// 云端旧名与我们那套写法说的是**同一把钥匙**。
 ///
-/// 这正是现实里的样子：云端叫 `A1MF.toml`、我们的内置产物叫 `A1_MINI-fast.toml`，
-/// 内容完全相同（实测 sha 都是 `115e061f…`）。
+/// 这条判据以前叫 `klc0_same_machine_and_variant_is_one_key_regardless_of_file_name`：
+/// 拿夹具里那份 `A1MF.toml` 与内置产物 `A1_MINI-fast.toml` 逐字节比，说明「同一份内容、
+/// 两个文件名 ⇒ 同一把钥匙」。b05 Task 5 把夹具也改名之后，「两个文件名」这个前提没了
+/// —— 内容相等由 `generate.rs` 的 `kg0p_products_match_the_baseline` 守。
+///
+/// 留下的真问题是：**旧名字还算不算同一把钥匙**。旧仓与用户目录里仍然是 `A1MF.toml`，
+/// 它必须归到 `A1_MINI:fast` —— 归错了，同一个预设会被当成两台机器的两份参数。
 #[test]
-fn klc0_same_machine_and_variant_is_one_key_regardless_of_file_name() {
-    let cloud = std::fs::read_to_string(
-        fixtures()
-            .into_iter()
-            .find(|p| p.file_name().unwrap() == "A1MF.toml")
-            .expect("A1MF"),
-    )
-    .expect("读云端那份");
-    let builtin =
-        std::fs::read_to_string(assets_dir().join("A1_MINI-fast.toml")).expect("读内置那份");
+fn the_cloud_shorthand_is_the_same_key_as_our_own_spelling() {
+    let text = std::fs::read_to_string(fixtures_dir().join("A1_MINI-fast.toml"))
+        .expect("读夹具那份（A1_MINI 的 fast）");
+    let from_header = key_of(&text);
+    // 旧名那套的简写：`M` = mini、`F` = 快拆（读法见 spec 的 `migration-map.md`）
+    let from_shorthand = PresetKey::new("A1MF", Some("fast"));
 
-    assert_eq!(cloud, builtin, "前提：这两份内容本来就相同");
     assert_eq!(
-        key_of(&cloud),
-        key_of(&builtin),
-        "K-LC0 红：同机同变体的两份文件必须是同一把钥匙"
+        from_header, from_shorthand,
+        "K-LC0 红：云端旧名 `A1MF` 与我们那套 `A1_MINI:fast` 必须是同一把钥匙"
+    );
+    assert_eq!(
+        from_header.file_name(),
+        "A1_MINI-fast.toml",
+        "钥匙对应的文件名必须与夹具那份同名 —— 名字是算出来的"
     );
 }
 

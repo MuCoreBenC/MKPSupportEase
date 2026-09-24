@@ -2,8 +2,8 @@
 //!
 //! **判据资产的来路必须说清**，否则下一个人会以为这份 TOML 是手写的：
 //! `tests/fixtures/config/A1.toml` 是从**既有的** IR JSON 判据资产
-//! `tests/fixtures/ir/build9/A1.json`（= 来源仓库 `ir::build()` 吃
-//! `tests/fixtures/presets/A1.toml` 的输出）用 `config::to_toml` 派生出来的，
+//! `tests/fixtures/ir/build9/A1-standard.json`（= 来源仓库 `ir::build()` 吃
+//! 那份 A1 标准预设的输出）用 `config::to_toml` 派生出来的，
 //! 派生器与 `mkpse-pp init` 是同一条路。[`fixture_is_derived_from_the_ir_json`]
 //! 每轮都重新核对这条派生关系 —— 手改 TOML 或改动 JSON 都会让它红。
 //!
@@ -36,7 +36,7 @@ fn golden_input() -> std::path::PathBuf {
 }
 
 fn ir_json_path() -> std::path::PathBuf {
-    repo_root().join("tests/fixtures/ir/build9/A1.json")
+    repo_root().join("tests/fixtures/ir/build9/A1-standard.json")
 }
 
 fn config_fixture() -> std::path::PathBuf {

@@ -87,7 +87,8 @@ Z 的 897 与经典同行数（Z 经典本来就有停留），差别只在坐�
 `tests/reference/detail/go_detail_reference.json`（2,776 B，sha256
 `a50a6cd7d39ad78b46b5793bf45052ee102e17de65ca9f2c9d77c587255017e0`）= 旧仓库
 `engine.Process` 真跑一遍后 `RunContext.LastDetail` 的 JSON 投影，输入是本仓库自己的
-`tests/golden/42274.2.gcode`（sha256 记在文件里）+ `tests/fixtures/presets/A1.toml`，
+`tests/golden/42274.2.gcode`（sha256 记在文件里）+ 当时那份 A1 标准预设
+（旧名 `tests/fixtures/presets/A1.toml`，b05 Task 5 起叫 `A1-standard.toml`），
 `goVersion=go1.26.4`。导出工具同样是 `//go:build ignore_export_detail` 的一次性测试，
 **已删除**（旧仓库 `git status` 已复核 clean）。
 

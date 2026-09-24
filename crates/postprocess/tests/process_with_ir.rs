@@ -8,7 +8,7 @@
 //!
 //! - 输入 `tests/golden/42274.2.gcode`：来源仓库的判据输入，原样搬入。
 //! - 配置 `tests/fixtures/config/A1.toml`：由 `mkp-sr` 的 `ir::build()` 产出的
-//!   `tests/fixtures/ir/build9/A1.json` 经 `config::to_toml` 转成（派生说明与每轮复查
+//!   `tests/fixtures/ir/build9/A1-standard.json` 经 `config::to_toml` 转成（派生说明与每轮复查
 //!   在 `tests/pipeline.rs`）。**刻意不用** `fixtures/ir/golden_42274_2.json` ——
 //!   那份带 ±999 的机器范围，喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，
 //!   看着像搬错了，其实是选错 fixture（AGENTS.md §7⑥）。

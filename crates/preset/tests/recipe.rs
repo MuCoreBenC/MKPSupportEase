@@ -12,7 +12,6 @@
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 // 基线目录只认 `generate::fixtures_dir()` 那一处 —— 手写相对路径会在目录布局一变时
@@ -22,24 +21,20 @@ use preset::recipe::{Recipe, render};
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");
 
-/// `(机型, 变体)` → fixture 的路径与原文（从**文件头**读，不靠文件名猜）。
-fn fixtures_by_combo() -> BTreeMap<(String, String), (PathBuf, String)> {
-    let mut out = BTreeMap::new();
-    for entry in std::fs::read_dir(fixtures_dir())
-        .expect("读 fixture 目录")
-        .flatten()
-    {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).expect("读 fixture");
-        let file = preset::read_preset_from_bytes(text.clone()).expect("fixture 必须能读");
-        let variant = file.variant.clone().expect("fixture 必须有 # variant:");
-        out.insert((file.machine.clone(), variant), (path, text));
-    }
-    assert_eq!(out.len(), 9, "fixture 应有 9 份，实测 {}", out.len());
-    out
+/// 一个 `(机型, 变体)` 对应的 fixture：路径与原文。
+///
+/// **按名字找，不读文件头**（b05 Task 5）：夹具已改成产物命名，名字由
+/// `preset::preset_file_name` 算出 —— 于是这条判据顺带钉住「配方里的机型变体
+/// 与夹具文件名对得上」，对不上时的表现是「找不到那份夹具」，指名道姓。
+fn fixture(machine: &str, variant: &str) -> (PathBuf, String) {
+    let path = fixtures_dir().join(preset::preset_file_name(machine, variant));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "K-G1 红：读不到 {}（{machine}:{variant}）：{e}",
+            path.display()
+        )
+    });
+    (path, text)
 }
 
 /// 第一处不同在哪（行号 + 两边的原文）。判据红的时候要能直接照着修。
@@ -63,7 +58,6 @@ fn first_diff(want: &str, got: &str) -> Option<String> {
 #[test]
 fn kg1_generated_presets_are_byte_identical_to_the_existing_ones() {
     let recipe = Recipe::parse(RECIPE).expect("配方必须读得回来");
-    let fixtures = fixtures_by_combo();
 
     let combos = recipe.combos();
     assert_eq!(
@@ -74,18 +68,16 @@ fn kg1_generated_presets_are_byte_identical_to_the_existing_ones() {
     );
 
     for (machine, variant) in &combos {
-        let (path, want) = fixtures
-            .get(&(machine.clone(), variant.clone()))
-            .unwrap_or_else(|| panic!("K-G1 红：现有预设里没有 {machine}:{variant}"));
+        let (path, want) = fixture(machine, variant);
         let got = render(&recipe, machine, variant)
             .unwrap_or_else(|e| panic!("K-G1 红：{machine}:{variant} 渲染失败：{e}"));
-        if let Some(where_) = first_diff(want, &got) {
+        if let Some(where_) = first_diff(&want, &got) {
             panic!(
                 "K-G1 红：{machine}:{variant} 与 {} 不同 —— {where_}",
                 path.file_name().unwrap().to_string_lossy()
             );
         }
-        assert_eq!(&got, want, "K-G1 红：{machine}:{variant} 逐字节不同");
+        assert_eq!(&got, &want, "K-G1 红：{machine}:{variant} 逐字节不同");
     }
     println!("K-G1 绿：{} 份生成物与现有预设逐字节相同", combos.len());
 }

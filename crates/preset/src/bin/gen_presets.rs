@@ -109,7 +109,7 @@ fn run() -> Result<String, String> {
                      —— 这不一定是错：如果那处改动是你要的，看过 diff 之后跑 `--sync-baseline`"
                 )),
                 None => Ok(format!(
-                    "K-G0' 绿：{} 对（机型:变体）产物与对照基线逐字节相同",
+                    "K-G0' 绿：{} 份同名文件（产物 / 对照基线）逐字节相同",
                     report.checked
                 )),
             }

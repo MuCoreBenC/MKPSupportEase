@@ -27,16 +27,20 @@ fn repo_root() -> PathBuf {
 }
 
 /// 9 份预设 fixture 与它们对应的 `ir::build()` 产物。
+///
+/// 名字是 `{机型 id}-{版本 id 小写}` 这套规则算出来的（b05 Task 5 统一命名，
+/// 规范见 `docs/ARCHITECTURE.md` §10）。**写死成字面量是刻意的**：
+/// 这个名字集合本身就是要盯的东西，从目录遍历推出来会让「少一份」变成静默通过。
 const PRESET_NAMES: [&str; 9] = [
-    "A1",
-    "A1F",
-    "A1F_260628",
-    "A1M",
-    "A1MF",
-    "A1MF_260628",
-    "P1",
-    "P2",
-    "X1",
+    "A1-standard",
+    "A1-fast",
+    "A1-fastv3.3",
+    "A1_MINI-standard",
+    "A1_MINI-fast",
+    "A1_MINI-fastv3.3",
+    "P1S-lite",
+    "P2S-standard",
+    "X1C-lite",
 ];
 
 /// 从预设 TOML 里刮 `have_wiping_components` 的值。

@@ -52,7 +52,12 @@ pub fn assets_dir() -> PathBuf {
 ///
 /// **这是全仓唯一的命名实现**（规范见 `docs/ARCHITECTURE.md` §10）。生成、发布、
 /// 消费端查找、目录 JSON 四方都走这一个函数；`src-tauri` 那边的
-/// `workbench::app::build::preset_file_name` 是它的薄壳。
+/// `workbench::app::build::preset_file_name` 是它的薄壳，`PresetKey::file_name`
+/// 有变体那一档也转调这里（它无变体那一档是显式例外：老预设没有版本 id）。
+///
+/// 「唯一」由判据钉住：`naming_follows_the_one_rule`（规则本身）、
+/// `naming_matches_the_preset_crate`（跨 crate 的薄壳）、
+/// `pairing_goes_by_file_name`（产物与基线的名字集合相同）。
 ///
 /// 之前是两份独立实现：这里直接拼 `{machine}-{variant}`，`src-tauri` 那边多做一次
 /// `to_lowercase()`。两处形状相同但没有编译器连着它们 —— 漂移只是时间问题，
@@ -181,12 +186,13 @@ pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets")
 }
 
-/// 目录里的预设按 `(机型, 变体)` 配对。
+/// 目录里的 `.toml`，按**文件名**索引（`A1-standard.toml` → 路径）。
 ///
-/// **按头字段认，不认文件名**：入库产物叫 `A1-fastv3.3.toml`，
-/// 而基线那边沿用云端的名字 `A1F_260628.toml` —— 同一份预设，两个名字。
-/// 按名字配对会得到「9 份都缺失」这种毫无线索的结论。
-pub fn pair_by_head(dir: &Path) -> Result<BTreeMap<(String, String), PathBuf>, String> {
+/// **配对按文件名，是 b05 Task 5 之后才成立的事。** 以前基线沿用云端那套名字
+/// （`A1F_260628.toml`），与产物名对不上，只能读文件头认身份（旧的 `pair_by_head`）。
+/// 基线改名之后两边名字都由 [`file_name`] 算出 —— **名字就是身份**，
+/// 于是配对不需要再读文件内容，能读到的第一处差异就是真差异。
+fn toml_files(dir: &Path) -> Result<BTreeMap<String, PathBuf>, String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("读不到 {}：{e}", dir.display()))?;
     let mut out = BTreeMap::new();
     for path in entries
@@ -194,64 +200,34 @@ pub fn pair_by_head(dir: &Path) -> Result<BTreeMap<(String, String), PathBuf>, S
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
     {
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读不到 {}：{e}", path.display()))?;
-        let machine = head_value(&text, "machine");
-        let variant = head_value(&text, "variant");
-        match (machine, variant) {
-            (Some(m), Some(v)) => {
-                if let Some(old) = out.insert((m.clone(), v.clone()), path.clone()) {
-                    return Err(format!(
-                        "{} 与 {} 都自称是 {m}:{v} —— 同一个机型变体有两份文件",
-                        old.display(),
-                        path.display()
-                    ));
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "{} 的头上找不到机型或变体 —— 它不像一份预设",
-                    path.display()
-                ));
-            }
-        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        out.insert(name, path);
     }
     Ok(out)
 }
 
-/// `# machine: A1` → `Some("A1")`。只认第一处。
-///
-/// **非注释行要跳过、不能中断扫描**：预设的头几行是注释，但正文里全是键值 ——
-/// 在第一行非注释处 `return None` 会让「头字段找不到」变成常态（这里踩过一次）。
-fn head_value(text: &str, key: &str) -> Option<String> {
-    for line in text.lines() {
-        let Some(rest) = line.trim_start().strip_prefix('#') else {
-            continue;
-        };
-        if let Some(v) = rest.trim_start().strip_prefix(key)
-            && let Some(v) = v.trim_start().strip_prefix(':')
-        {
-            return Some(v.trim().to_string());
-        }
-    }
-    None
-}
-
 /// K-G0'：入库产物与对照基线九对九逐字节相同。
+///
+/// **配对按文件名**（b05 Task 5.2）：两边的名字都由 [`file_name`] 算出，
+/// 「同一份预设」现在等价于「同一个文件名」，所以这里一个字节的内容都不用先读。
 ///
 /// **不看配方** —— 「产物与配方一致」是 [`check_all`] 的事。这一条只回答
 /// 「产物变过没有、变的那一处审阅过没有」。两条分开，红的时候才知道该修哪一头。
 pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, String> {
-    let made = pair_by_head(assets)?;
-    let base = pair_by_head(fixtures)?;
+    let made = toml_files(assets)?;
+    let base = toml_files(fixtures)?;
     let mut checked = 0usize;
 
-    for ((machine, variant), made_path) in &made {
-        let Some(base_path) = base.get(&(machine.clone(), variant.clone())) else {
+    for (name, made_path) in &made {
+        let Some(base_path) = base.get(name) else {
             return Ok(CheckReport {
                 checked,
                 first_diff: Some(format!(
-                    "{machine}:{variant} 在对照基线里没有对应的那一份 —— 新机型？确认过就同步基线"
+                    "{name} 在对照基线里没有对应的那一份 —— 新机型？确认过就同步基线"
                 )),
             });
         };
@@ -260,23 +236,18 @@ pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, Str
         if let Some(where_) = first_diff(&a, &b) {
             return Ok(CheckReport {
                 checked,
-                first_diff: Some(format!(
-                    "{machine}:{variant}（基线 {} / 产物 {}）不同 —— {where_}",
-                    base_path.file_name().unwrap_or_default().to_string_lossy(),
-                    made_path.file_name().unwrap_or_default().to_string_lossy(),
-                    where_ = where_
-                )),
+                first_diff: Some(format!("{name}（基线 / 产物）不同 —— {where_}")),
             });
         }
         checked += 1;
     }
 
-    for (machine, variant) in base.keys() {
-        if !made.contains_key(&(machine.clone(), variant.clone())) {
+    for name in base.keys() {
+        if !made.contains_key(name) {
             return Ok(CheckReport {
                 checked,
                 first_diff: Some(format!(
-                    "对照基线里有 {machine}:{variant}，而配方生成不出这一份 —— 机型删了？基线也该跟"
+                    "对照基线里有 {name}，而配方生成不出这一份 —— 机型删了？基线也该跟"
                 )),
             });
         }
@@ -328,7 +299,8 @@ fn check_baseline_target(fixtures: &Path) -> Result<(), String> {
 ///
 /// 落点由 [`check_baseline_target`] 咬住：只能写真基线目录或临时目录。
 ///
-/// 基线那边**保留原有文件名**；新机型在基线里还没有对应文件时，按产物的名字新建一份。
+/// 基线那边的文件名**就是产物的文件名**（同一个 [`file_name`] 算出来的）——
+/// 内容相同就不写，所以「同步」只在真的变了的时候落笔。
 ///
 /// **写盘豁免**（`clippy::disallowed_methods`）：见上 —— 它的风险不在"截断半个文件"，
 /// 而在"改了判据期望却没人看 diff"。兜着后者的是人工审阅、`git diff`
@@ -339,15 +311,11 @@ fn check_baseline_target(fixtures: &Path) -> Result<(), String> {
 #[allow(clippy::disallowed_methods)]
 pub fn sync_baseline(assets: &Path, fixtures: &Path) -> Result<usize, String> {
     check_baseline_target(fixtures)?;
-    let made = pair_by_head(assets)?;
-    let base = pair_by_head(fixtures)?;
+    let made = toml_files(assets)?;
     let mut synced = 0usize;
-    for ((machine, variant), made_path) in &made {
+    for (name, made_path) in &made {
         let text = std::fs::read_to_string(made_path).map_err(|e| format!("读不回来：{e}"))?;
-        let target = match base.get(&(machine.clone(), variant.clone())) {
-            Some(p) => p.clone(),
-            None => fixtures.join(file_name(machine, variant)),
-        };
+        let target = fixtures.join(name);
         if std::fs::read_to_string(&target).ok().as_deref() == Some(text.as_str()) {
             continue; // 内容相同就不写：mtime 变动会让别的判据重跑
         }
@@ -362,6 +330,8 @@ pub fn sync_baseline(assets: &Path, fixtures: &Path) -> Result<usize, String> {
 #[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     fn recipe() -> Recipe {
@@ -450,20 +420,25 @@ mod tests {
         assert!(why.contains("A9-old.toml"), "实测：{why}");
     }
 
-    /// 按头字段配对：两边**文件名不同**也要配上（产物 `A1-fastv3.3.toml` ⇄ 基线 `A1F_260628.toml`）。
+    /// **两边的文件名集合相同** —— 配对直接按名字（b05 Task 5）。
+    ///
+    /// 这条判据以前叫 `pairing_goes_by_head_not_by_file_name`，它的前提是
+    /// 「两边命名不同」（产物 `A1-fastv3.3.toml` ⇄ 基线 `A1F_260628.toml`），
+    /// 所以只能读文件头认身份；它还带一句 `assert_ne!` 预告「名字一样了要重写」。
+    /// 基线改名之后那一刻到了：名字由同一个 [`file_name`] 算出，
+    /// 于是改咬**集合相等** —— 少一份、多一份、名字写岔了都红，
+    /// 而 `check_baseline` 也从此不需要读第二个字节。
     #[test]
-    fn pairing_goes_by_head_not_by_file_name() {
-        let made = pair_by_head(&assets_dir()).expect("产物能配对");
-        let base = pair_by_head(&fixtures_dir()).expect("基线能配对");
+    fn pairing_goes_by_file_name() {
+        let made = toml_files(&assets_dir()).expect("产物能列出来");
+        let base = toml_files(&fixtures_dir()).expect("基线能列出来");
         assert_eq!(made.len(), 9, "产物应有 9 份");
         assert_eq!(base.len(), 9, "基线应有 9 份");
-        let key = ("A1".to_string(), "fastv3.3".to_string());
-        let a = made.get(&key).expect("产物里有 A1:fastv3.3");
-        let b = base.get(&key).expect("基线里有 A1:fastv3.3");
-        assert_ne!(
-            a.file_name(),
-            b.file_name(),
-            "这条判据的前提就是两边命名不同；名字一样了说明有人统一过命名，这个断言要重写"
+        let made_names: BTreeSet<&String> = made.keys().collect();
+        let base_names: BTreeSet<&String> = base.keys().collect();
+        assert_eq!(
+            made_names, base_names,
+            "两边文件名集合不同 —— 只在一侧出现的那些就是配不上的那些"
         );
     }
 
@@ -496,7 +471,7 @@ mod tests {
         }
         let report = check_baseline(assets.path(), base.path()).expect("能跑完");
         let why = report.first_diff.expect("必须点名");
-        assert!(why.contains("X1C:lite"), "实测：{why}");
+        assert!(why.contains("X1C-lite.toml"), "实测：{why}");
     }
 
     /// 同步基线：内容相同的不写（mtime 不动），改过的那一份写回去。
@@ -513,8 +488,8 @@ mod tests {
             "两边一致时一个字节都不该写"
         );
 
-        // 扰动基线的**一行**，不是整份文件：整份换掉会让它连头字段都没有，
-        // 那时候红的是「这文件不像预设」而不是「基线与产物不同」—— 两回事。
+        // 扰动基线的**一行**，不是整份文件：整份换掉会让这份基线读不出内容，
+        // 那时红的是别的东西（构造/解析），而不是「基线与产物不同」—— 两回事。
         let victim = base.path().join("A1-standard.toml");
         let text = std::fs::read_to_string(&victim).expect("读基线");
         std::fs::write(

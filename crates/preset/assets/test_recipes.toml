@@ -26,8 +26,10 @@
 #
 # 改它 = 出新一批预设。改完要走完这条链，否则判据会红：
 #   ① 这个文件           ← 真源（手改，或用 `--recipe-window` 那扇工作台）
-#   ② assets/presets/    ← 生成物：`gen-presets --write`（判据 K-G7）
-#   ③ core/tests/fixtures/presets/ ← 对照基线：确认 diff 是你要的之后再同步（K-G0'）
+#   ② crates/preset/assets/presets/            ← 生成物：`gen-presets --write`（判据 K-G7）
+#   ③ crates/postprocess/tests/fixtures/presets/ ← 对照基线：确认 diff 是你要的之后再同步（K-G0'）
+#
+# ②③ 两边同名（`{机型 id}-{版本 id 小写}.toml`，`generate::file_name` 算出，b05 Task 5）。
 #
 # **③ 是唯一的安全网**：它守的不是「数值对」，而是「没有未经审阅的变化」。
 # 配方里一个数改错了不会有任何判据报红 —— 那种错只有 `git diff` 与真机打印看得出来。

@@ -1110,19 +1110,22 @@ mod tests {
     }
 
     /// 9 份真实预设在**嵌入注册表**分支下 build 也必须成功（弃用/范围不误伤）。
+    ///
+    /// 名单是 `{机型 id}-{版本 id 小写}` 那套规则算出来的（b05 Task 5 统一命名）；
+    /// 写死成字面量是刻意的 —— 名字集合本身是要盯的东西。
     #[test]
     fn nine_presets_build_with_embedded_registry() {
         let reg = crate::load_param_registry();
         for name in [
-            "A1",
-            "A1F",
-            "A1F_260628",
-            "A1M",
-            "A1MF",
-            "A1MF_260628",
-            "P1",
-            "P2",
-            "X1",
+            "A1-standard",
+            "A1-fast",
+            "A1-fastv3.3",
+            "A1_MINI-standard",
+            "A1_MINI-fast",
+            "A1_MINI-fastv3.3",
+            "P1S-lite",
+            "P2S-standard",
+            "X1C-lite",
         ] {
             // 同上：预设 fixture 只在内核那一份里，路径只认 `generate::fixtures_dir()`。
             let path = crate::generate::fixtures_dir().join(format!("{name}.toml"));

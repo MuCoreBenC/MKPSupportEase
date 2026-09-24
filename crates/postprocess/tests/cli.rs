@@ -266,7 +266,7 @@ fn dump_ir_shows_machine_table_filled_values() {
     assert_eq!(code_of(&out), 0, "stderr:\n{}", stderr_of(&out));
     let v: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("必须是合法 JSON");
 
-    // 配置文件里这些是 0（`build9/A1.json` 的原值），机型表填充后才有真值。
+    // 配置文件里这些是 0（`build9/A1-standard.json` 的原值），机型表填充后才有真值。
     assert_eq!(v["Machine"]["MaxX"], 260.0);
     assert_eq!(v["Machine"]["MaxY"], 255.0);
     // 没给输入 ⇒ **不写** GcodeHeaderFacts 这个键（给空对象会被读成「刮出来是空的」）
