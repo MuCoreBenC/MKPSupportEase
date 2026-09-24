@@ -281,6 +281,10 @@ pub fn set_range_at(
     Ok(edit)
 }
 
+// 测试写临时文件、铺样例是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+// 这里那几条落盘判据要先在临时目录里铺一份 SAMPLE，不然没法验三道闸。
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
     use super::*;
