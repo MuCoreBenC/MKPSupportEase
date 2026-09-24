@@ -588,7 +588,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
         let got = referenced_assets(&book);
         let ids: Vec<&str> = got.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
@@ -604,7 +604,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().expect("machines 数组");
@@ -648,7 +648,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         // 夹具资产根：给可达集里的每条资产造一个假文件（登记了但文件不在
         // 是发布侧要拦的形状，所以可达集之外的 a1-extra-image 故意不造）
@@ -711,7 +711,7 @@ mod tests {
         let f = Fixture::load();
         let c = Committed::default();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &real, &c, &d);
+        let book = Book::new(Some(&f.up), &real, &c, &d);
 
         // JSON 条数锚点：6 台机型（含 A2L 占位）、10 个版本、5 条套餐
         let cat = machine_catalog_json(&book);
@@ -784,7 +784,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         // 交付集合（13.1）：content 3 + manifest + 夹具可达资产 4 + mkp 产物 3
         let expected = deliverable_set(&book);
@@ -929,7 +929,7 @@ mod tests {
             ..Default::default()
         };
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &real, &c, &d);
+        let book = Book::new(Some(&f.up), &real, &c, &d);
 
         let expected = deliverable_set(&book);
         // 反空转锚点：content 3 + manifest 1 + 资产 13 + mkp（夹具上游认 3 版）= 20。

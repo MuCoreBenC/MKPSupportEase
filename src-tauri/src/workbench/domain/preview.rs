@@ -244,7 +244,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
         let p = b.preview_bulk(
             "wiping.child",
             &serde_json::json!(66),
@@ -274,7 +274,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.only_p1s",
@@ -295,7 +295,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
         let target = cols(&[("A1", Some("A1/STANDARD")), ("A1", Some("A1/FAST"))]);
 
         // ① 这一层**没钉着**那个键 → 新增覆盖。`wiping.child` 在 `machineVariants`
@@ -342,7 +342,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
         let p = b.preview_bulk(
             "toolhead.offset.x",
             &serde_json::json!(9),
@@ -358,7 +358,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.script",
@@ -379,7 +379,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(Some(&f.up), &f.presets, &c, &d);
         let shuffled = cols(&[
             ("P1S", Some("P1S/LITE")),
             ("A1", Some("A1/FAST")),
@@ -407,7 +407,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let p = super::super::Book::new(&f.up, &f.presets, &c, &d).preview_bulk(
+        let p = super::super::Book::new(Some(&f.up), &f.presets, &c, &d).preview_bulk(
             "toolhead.made_up",
             &serde_json::json!(1),
             &cols(&[("A1", None)]),

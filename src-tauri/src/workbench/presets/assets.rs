@@ -70,6 +70,20 @@ impl AssetKind {
             Self::SlicerProfile => "slicerProfile",
         }
     }
+
+    /// **资产根下的子目录**（b05 Task 8.4 的目录约定；Task 15.4 导入时用它定落点）。
+    ///
+    /// 四个名字不是新发明的：真数据那 21 条 `path` 的前缀就是这四个
+    /// （`printers/` 6 · `icons/` 3 · `models/` 3 · `bbs/` 9）。导入按类型落进对应
+    /// 子目录，于是**手写的与导入的在同一套约定里**，不会出现第二份目录布局。
+    pub fn dir(self) -> &'static str {
+        match self {
+            Self::Image => "printers",
+            Self::Icon => "icons",
+            Self::Model => "models",
+            Self::SlicerProfile => "bbs",
+        }
+    }
 }
 
 /// 一条资产定义。字段就六个，每个都有理由：
@@ -571,6 +585,32 @@ mod tests {
             Some(AssetKind::Icon),
             "重读之后按**大小写不敏感**的 id 仍然取得到"
         );
+    }
+
+    /// **目录约定不是新发明的**：真数据每一条 `path` 的前缀就是它那个类型的
+    /// `dir()`（Task 15.4 的导入按 `dir()` 落点 —— 这条判据保证导入的与手写的
+    /// 在同一套布局里，哪天多出第五个前缀它会红）
+    #[test]
+    fn the_dir_convention_matches_the_real_paths() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let a = Assets::load_from(&root).expect("presets/assets.toml 必须读得通");
+        let checked = a.items().len();
+        assert!(
+            checked >= 21,
+            "只查了 {checked} 条 —— 真数据实测 21 条，这条判据在空转"
+        );
+        for it in a.items() {
+            let want = format!("{}/", it.kind.dir());
+            assert!(
+                it.path.starts_with(&want),
+                "资产 {} 的 path 是 `{}`，不以 `{want}` 开头 —— 目录约定与真数据分岔了",
+                it.id,
+                it.path
+            );
+        }
     }
 
     /// 真仓库那份骨架：读得通、零编辑往返逐字节相同

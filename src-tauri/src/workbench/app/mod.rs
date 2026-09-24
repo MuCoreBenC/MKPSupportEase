@@ -33,13 +33,16 @@
 //! 迟早只改其中一个。所以字段详情走 `wb_matrix(cols=[那一列])`。
 
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
-/// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
+/// 不套参数值那套状态机）。读之外有 `wb_import_asset`（b05 Task 15.4：复制进资产根
+/// + 登记定义）；删除入口仍没有命令 —— 写命令一律要有界面，归 Task 17
 pub mod assets;
 pub mod build;
-/// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
+/// 「套餐管理」（b05 Task 10）。读之外有 `wb_add_bundle`（b05 Task 15.3：**先查
+/// 再写**，不许把盘写成加载期读不回来的样子）
 pub mod bundles;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod dist;
+pub mod init;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;
@@ -77,7 +80,10 @@ use crate::workbench::{paths, Roots};
 ///
 /// 现在磁盘上的 `.draft/book.json` 只是**崩溃恢复快照**，由 [`flush_if_due`] 懒写。
 pub struct Ctx {
-    pub up: Upstream,
+    /// 上游。**`None` = 未配置（b05 Task 15 裁定①：引导/降级模式）**——
+    /// 机型 / 版本 / 套餐 / 资产编辑不依赖它；仓库盘点、产物身份与发布元数据
+    /// 在缺失时显式降级。不再作为工作台启动的硬门
+    pub up: Option<Upstream>,
     /// 我们自己那份预设数据。**机型与版本的清单从这里来**（b04 Task 8），
     /// 而且它是可写的 —— 新建版本要落进 `presets/machines/*.toml`
     pub presets: Presets,
@@ -98,17 +104,26 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// 真仓库。**上游或我们的预设数据定位不到时直接失败** ——
-    /// 那种情况下工作台不该启动业务：清单在 `presets/`，字段定义与资源清单在上游，
-    /// 缺了哪一半每一页都是空的
+    /// 真仓库。**我们的预设数据定位不到时才失败**（未初始化）——
+    /// 上游缺失不再挡住启动（b05 Task 15 裁定①）：机型 / 版本 / 套餐 / 资产
+    /// 的编辑不依赖上游，缺失时进引导/降级模式，依赖上游的功能显式报原因。
+    /// 清单在 `presets/`，字段定义也在（b04 Task 8）——上游只剩产物身份、
+    /// 仓库盘点与发布元数据
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Self::with(Upstream::load()?, Presets::load()?, store)
+        // 上游加载失败不是错误（裁定①）：None 进 with，降级提示由 with 统一补
+        let up = Upstream::load().ok();
+        Self::with(up, Presets::load()?, store)
     }
 
-    /// 给定两份数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
-    pub(super) fn with(up: Upstream, presets: Presets, store: Store) -> Result<Self, AppError> {
+    /// 给定两份数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局。
+    /// `up = None` = 无上游（降级模式）
+    pub(super) fn with(
+        up: Option<Upstream>,
+        presets: Presets,
+        store: Store,
+    ) -> Result<Self, AppError> {
         let mut ctx = Self {
             up,
             presets,
@@ -122,6 +137,15 @@ impl Ctx {
             flush_error: None,
         };
         ctx.reload_from_disk()?;
+        // 上游未配置（引导/降级模式）→ 一条人话提示。放在 reload **之后**：
+        // reload 会用盘上那份清单重建 notices，这里补的是会话级的
+        if ctx.up.is_none() {
+            ctx.notices.push(
+                "上游未配置：仓库盘点、产物身份与发布元数据不可用，\
+                 其余功能照常。可用环境变量 MKPSE_PRESETS_DIR 指定位置。"
+                    .to_owned(),
+            );
+        }
         Ok(ctx)
     }
 
@@ -304,7 +328,7 @@ pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppErr
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
-    let mut v = Book::new(&ctx.up, &ctx.presets, committed, draft).book_view();
+    let mut v = Book::new(ctx.up.as_ref(), &ctx.presets, committed, draft).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
     v
@@ -316,12 +340,17 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 #[serde(rename_all = "camelCase")]
 pub struct Boot {
     pub roots: Roots,
-    /// 上游读不出来时的那一句。`None` = 一切就绪。
+    /// 读不出来时的那一句。`None` = 一切就绪。
     /// **不把它做成错误返回**：界面要能在"上游缺失"的状态下把三个数据根显示出来，
-    /// 那是排查这个问题唯一有用的信息
+    /// 那是排查这个问题唯一有用的信息。
+    /// **三态**（b05 Task 15）：未初始化（引导语）/ 已初始化无上游（降级说明）/
+    /// 就绪（`None`）—— 界面据此把「工作台可用状态」与「上游连接状态」分开呈现
     pub problem: Option<String>,
     pub detail: Option<String>,
     pub info: Option<UpstreamInfo>,
+    /// **工作台数据初始化了吗**（b05 Task 15 裁定②）：`presets_root()` 的标志文件
+    /// 在 = 已初始化。未初始化时界面只开放初始化入口，其余业务不可用
+    pub initialized: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -339,7 +368,11 @@ pub struct UpstreamInfo {
     pub fallbacks: usize,
 }
 
-/// 三个数据根 + 上游就位情况。界面开场调它
+/// 三个数据根 + 上游就位情况 + 初始化状态。界面开场调它。
+///
+/// **三态**（b05 Task 15）：①未初始化 → `initialized: false` + 引导语，
+/// 界面只开放初始化入口；②已初始化无上游 → 降级说明 + `info: None`，
+/// 业务照常（机型/版本/套餐/资产）；③就绪 → `problem: None` + 完整统计。
 #[tauri::command]
 pub fn wb_boot() -> Result<Boot, AppError> {
     traced("wb_boot", |_| {
@@ -348,30 +381,59 @@ pub fn wb_boot() -> Result<Boot, AppError> {
             dist: paths::dist_root()?.display().to_string(),
             upstream: paths::upstream_root().map(|p| p.display().to_string()),
         };
+        // 裁定②：未初始化是**引导态**，不是启动失败 —— 只开放初始化入口
+        if paths::presets_root().is_none() {
+            return Ok(Boot {
+                roots,
+                problem: Some(
+                    "工作台数据尚未初始化：presets/ 里还没有最小骨架（参数注册表等）。\
+                     先执行「初始化工作台」，再进入业务。"
+                        .to_owned(),
+                ),
+                detail: None,
+                info: None,
+                initialized: false,
+            });
+        }
         match with_ctx(|ctx| {
-            Ok(UpstreamInfo {
+            // 裁定①：无上游 = 降级，不是启动失败。统计没有可说的（None），业务照常
+            Ok(ctx.up.as_ref().map(|up| UpstreamInfo {
                 registry_updated: ctx.presets.registry.updated().to_owned(),
-                manifest_updated: ctx.up.manifest.compat.updated.clone(),
-                channel: ctx.up.manifest.compat.channel.clone(),
-                minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
-                latest_release: ctx.up.manifest.latest_release().map(str::to_owned),
+                manifest_updated: up.manifest.compat.updated.clone(),
+                channel: up.manifest.compat.channel.clone(),
+                minimum_client: up.manifest.compat.minimum_client.clone(),
+                latest_release: up.manifest.latest_release().map(str::to_owned),
                 params: ctx.presets.registry.params().len(),
                 machines: ctx.presets.catalog.machines().len(),
-                deliverables: ctx.up.manifest.deliverables().len(),
-                fallbacks: ctx.up.fallback.rules().len(),
-            })
+                deliverables: up.manifest.deliverables().len(),
+                fallbacks: up.fallback.rules().len(),
+            }))
         }) {
-            Ok(info) => Ok(Boot {
+            Ok(Some(info)) => Ok(Boot {
                 roots,
                 problem: None,
                 detail: None,
                 info: Some(info),
+                initialized: true,
+            }),
+            Ok(None) => Ok(Boot {
+                roots,
+                problem: Some(
+                    "上游未配置（引导模式）：仓库盘点、产物身份与发布元数据不可用，\
+                     机型 / 版本 / 套餐 / 资产照常。可用环境变量 MKPSE_PRESETS_DIR \
+                     指定位置，或克隆上游后点重新加载。"
+                        .to_owned(),
+                ),
+                detail: None,
+                info: None,
+                initialized: true,
             }),
             Err(e) => Ok(Boot {
                 roots,
                 problem: Some(e.message),
                 detail: e.detail,
                 info: None,
+                initialized: true,
             }),
         }
     })
@@ -501,7 +563,7 @@ pub fn wb_matrix(
     traced("wb_matrix", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(
+            Ok(Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d).matrix(
                 &cols,
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
@@ -523,7 +585,7 @@ pub fn wb_desk(
     traced("wb_desk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).desk(
+            Ok(Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d).desk(
                 &machine_id,
                 uid.as_deref(),
                 tab.as_deref(),
@@ -539,7 +601,7 @@ pub fn wb_stock() -> Result<Vec<StockRow>, AppError> {
     traced("wb_stock", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).stock_rows())
+            Ok(Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d).stock_rows())
         })
     })
 }
@@ -571,7 +633,19 @@ pub struct FallbackGroup {
 pub fn wb_fallback() -> Result<FallbackTable, AppError> {
     traced("wb_fallback", |_| {
         with_ctx(|ctx| {
-            let f = &ctx.up.fallback;
+            // 应急规则表整体来自上游（b05 Task 15 裁定①）。未配置 → 空表 +
+            // read_only_reason 说清原因 —— 类型不动，空态有据可查
+            let Some(f) = ctx.up.as_ref().map(|u| &u.fallback) else {
+                return Ok(FallbackTable {
+                    version: 0,
+                    updated: String::new(),
+                    guide: String::new(),
+                    groups: Vec::new(),
+                    disabled: Vec::new(),
+                    empty_hint: w::NO_DISABLED_FALLBACK,
+                    read_only_reason: "上游未配置：应急规则来自上游，配置后可用",
+                });
+            };
             Ok(FallbackTable {
                 version: f.version,
                 updated: f.updated.clone(),
@@ -620,7 +694,7 @@ pub fn wb_preview_bulk(
     traced("wb_preview_bulk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
+            Ok(Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
         })
     })
 }
@@ -652,7 +726,7 @@ pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
 }
 
 fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> {
-    let book = Book::new(&ctx.up, &ctx.presets, committed, draft);
+    let book = Book::new(ctx.up.as_ref(), &ctx.presets, committed, draft);
     let mut out: Vec<DiffLine> = Vec::new();
 
     let target_of = |level: Level, owner: &str| -> String {
@@ -676,7 +750,7 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
             continue;
         };
         let clean = Draft::default();
-        let before = Book::new(&ctx.up, &ctx.presets, committed, &clean);
+        let before = Book::new(ctx.up.as_ref(), &ctx.presets, committed, &clean);
         let (b, a) = match level {
             Level::Machine => (
                 before
@@ -832,7 +906,7 @@ pub fn wb_apply_draft(
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
 
             // 一次派生，两份结果：整本视图 + 调用方要的那一页
-            let book = Book::new(&ctx.up, &ctx.presets, &ctx.committed, &ctx.draft);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &ctx.committed, &ctx.draft);
             let (desk, matrix) = match &refresh {
                 None => (None, None),
                 Some(Refresh::Desk {
@@ -1039,7 +1113,7 @@ mod tests {
         let f = Fixture::load();
         // `Upstream` / `Presets` 都没有 Clone，所以再读一份给 Ctx
         let (fx_dir, up, presets) = Fixture::load().into_parts();
-        let ctx = Ctx::with(up, presets, store).unwrap();
+        let ctx = Ctx::with(Some(up), presets, store).unwrap();
         ((dir, fx_dir), f, ctx)
     }
 
@@ -1216,9 +1290,15 @@ mod tests {
     #[test]
     fn upstream_info_reports_undeclared_as_none() {
         let (_d, _f, ctx) = ctx();
-        assert_eq!(ctx.up.manifest.compat.minimum_client, None);
-        assert_eq!(ctx.up.manifest.compat.version, None);
-        assert_eq!(ctx.up.manifest.latest_release(), Some("0.0.4"));
+        assert_eq!(
+            ctx.up.as_ref().unwrap().manifest.compat.minimum_client,
+            None
+        );
+        assert_eq!(ctx.up.as_ref().unwrap().manifest.compat.version, None);
+        assert_eq!(
+            ctx.up.as_ref().unwrap().manifest.latest_release(),
+            Some("0.0.4")
+        );
     }
 
     /// 一条 patch 走完整条路径：改**内存** → 视图跟着变 → 反向能回去。
@@ -1324,7 +1404,7 @@ mod tests {
         let now = |ctx: &Ctx| {
             let cols = cols(&[("A1", Some("A1/STANDARD"))]);
             let (c, d, _) = state(ctx).unwrap();
-            let m = Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(&cols, None, "");
+            let m = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d).matrix(&cols, None, "");
             let row = m.rows.into_iter().find(|r| r.key == "wiping.mode").unwrap();
             row.cells[0].raw.clone()
         };
@@ -1423,7 +1503,7 @@ mod tests {
     fn both_pages_can_be_produced_from_one_derivation() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+        let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
 
         let desk = book.desk("A1", Some("A1/STANDARD"), None, "");
         let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
@@ -1574,7 +1654,7 @@ mod tests {
         assert_eq!(table["A1:FAST"].as_f64(), Some(-0.7), "顺手动了隔壁那一版");
 
         // ② 界面上：来源层该是「版本」—— 它自己钉着这一项
-        let book = Book::new(&ctx.up, &ctx.presets, &c2, &d2);
+        let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c2, &d2);
         let l = book.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             l.effective("toolhead.offset.x").unwrap().value.as_f64(),
@@ -1596,7 +1676,7 @@ mod tests {
     fn a_single_column_matrix_serves_as_the_field_detail_view() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+        let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
 
         let m = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
         assert_eq!(m.cols.len(), 1);
@@ -1616,9 +1696,79 @@ mod tests {
     #[test]
     fn the_fallback_page_says_why_it_is_read_only() {
         let (_d, _f, ctx) = ctx();
-        let f = &ctx.up.fallback;
+        let f = &ctx.up.as_ref().expect("夹具带上游").fallback;
         assert!(!f.guide.is_empty());
         assert!(f.disabled().is_empty());
         assert!(!w::NO_DISABLED_FALLBACK.is_empty(), "空列表也要有一句话");
+    }
+
+    /* ---------- 无上游降级（b05 Task 15 裁定①） ---------- */
+
+    /// **上游未配置时业务照常，降级诚实**（裁定①的核心验收）：
+    /// `Ctx::with(None, …)` 下 book_view / build_rows 照常派生，
+    /// 机型显示名来自**我们自己的清单**（改了显示名这边跟着变 —— 顺手收口
+    /// 了 `derive.rs` 里 `up.catalog` 的残留回退），产物身份全 `None`
+    /// （本来就在上游 manifest 里），仓库盘点空（原因由命令层说）。
+    #[test]
+    fn without_upstream_the_desk_still_works_and_degrades_honestly() {
+        let (fx_dir, _up, presets) = Fixture::load().into_parts();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+
+        // 改我们清单里的显示名 —— 若这条显示名还在读上游，这条断言就会红
+        let presets_root = fx_dir.path().join("presets");
+        let mut p = Presets::load_from(&presets_root).unwrap();
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_field(
+                crate::workbench::presets::catalog::MachineField::Display,
+                Some("改过的名字"),
+            )
+            .unwrap();
+        p.catalog.write_machine("A1").unwrap();
+        let p = Presets::load_from(&presets_root).unwrap();
+        let loaded = crate::workbench::app::storage::load(&store, &p).unwrap();
+
+        let _ctx = Ctx::with(None, presets, store).unwrap();
+        let draft = Draft::default();
+        let book = Book::new(None, &p, &loaded.committed, &draft);
+
+        let rows = book.build_rows();
+        let a1 = rows
+            .iter()
+            .find(|r| r.machine_id == "A1")
+            .expect("夹具 A1 在清单里");
+        assert_eq!(
+            a1.machine, "改过的名字",
+            "显示名来自我们自己的清单，不读上游"
+        );
+        assert!(
+            rows.iter().all(|r| r.mkp_file.is_none()),
+            "无上游 → 产物身份全空（它们登记在上游 manifest 里）"
+        );
+        assert!(book.stock_rows().is_empty(), "仓库盘点无上游即空");
+        assert!(
+            !book.book_view().machines.is_empty(),
+            "业务数据照常派生 —— 上游缺失不否定本地能力"
+        );
+    }
+
+    /// 上游在会话里缺失时，**要有一条人话提示**（裁定①：显式降级，不闷着）
+    #[test]
+    fn a_missing_upstream_leaves_a_plain_language_notice() {
+        let (_fx_dir, _up, presets) = Fixture::load().into_parts();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+        let ctx = Ctx::with(None, presets, store).unwrap();
+        let notices = ctx.notices_now();
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.contains("上游未配置") && n.contains("不可用")),
+            "降级要有原因可读：{notices:?}"
+        );
     }
 }

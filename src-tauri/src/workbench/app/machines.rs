@@ -219,6 +219,7 @@ pub fn wb_set_version_field(
 ) -> Result<MachineList, AppError> {
     traced("wb_set_version_field", |_| {
         let mut p = Presets::load()?;
+        check_version_ref(&p, field, value.as_deref())?;
         p.catalog.machine_mut(&machine_id)?.set_version_field(
             &version_id,
             field,
@@ -238,12 +239,67 @@ pub fn wb_set_machine_field(
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_field", |_| {
         let mut p = Presets::load()?;
+        check_machine_ref(&p, field, value.as_deref())?;
         p.catalog
             .machine_mut(&machine_id)?
             .set_field(field, value.as_deref())?;
         p.catalog.write_machine(&machine_id)?;
         Ok(list_of(&Presets::load()?))
     })
+}
+
+/// **引用格先查再写**（b05 Task 15.3）。
+///
+/// `defaultBundle` → 套餐、`image` / `icon` → 资产，这三格写的都是**别的文件里的
+/// id**。打错一个字母不会有任何报错：下一次加载会被 `check_bundle_refs` /
+/// `check_asset_refs` 判成 Corrupted —— **整个工作台起不来**，而界面上只表现为
+/// "存了个值"。所以值不是空的就先查它解析得到。
+///
+/// `None` / 空串 = 清空（删那一行），那是合法态 —— 不查。
+fn check_machine_ref(
+    p: &Presets,
+    field: MachineField,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    let Some(v) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    match field {
+        MachineField::DefaultBundle => {
+            if p.bundles.get(v).is_none() {
+                return Err(AppError::not_found(format!("没有套餐 {v}")).with_detail(
+                    "套餐定义在 presets/bundles.toml；先建套餐（wb_add_bundle），再来引用它"
+                        .to_owned(),
+                ));
+            }
+        }
+        MachineField::Image | MachineField::Icon if p.assets.get(v).is_none() => {
+            return Err(AppError::not_found(format!("没有资产 {v}")).with_detail(
+                "资产定义在 presets/assets.toml；先导入资产（wb_import_asset），再来引用它"
+                    .to_owned(),
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// 版本那一格同理：只有一个引用格（`recommendedBundle` → 套餐）
+fn check_version_ref(
+    p: &Presets,
+    field: VersionField,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    let Some(v) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    if field == VersionField::RecommendedBundle && p.bundles.get(v).is_none() {
+        return Err(AppError::not_found(format!("没有套餐 {v}")).with_detail(
+            "套餐定义在 presets/bundles.toml；悬空的 recommendedBundle 会让下一次加载失败"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn list_of(p: &Presets) -> MachineList {

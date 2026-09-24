@@ -172,6 +172,21 @@ pub fn inspect(book: &Book<'_>) -> Report {
 /// 等于把「数据坏了」变成「工具坏了」，后者更糟。
 pub fn preflight(book: &Book<'_>, recipe: Result<&Recipe, &str>) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
+    // **空 registry = 阻断**（b05 Task 15 裁定③）：空集通过会把"尚未建立参数体系"
+    // 误报成"预检成功"。数据还没初始化完，就照实说 —— 其余检查照跑（空的
+    // 机型/套餐清单本来就没有可查的，不会重复刷屏）
+    if book.presets.registry.params().is_empty() {
+        issues.push(Issue {
+            id: "registry.empty".to_owned(),
+            severity: Severity::Block,
+            title: "缺少可用参数注册数据".to_owned(),
+            detail: "param_registry.toml 里没有任何参数定义 —— 还没建立参数体系。\
+                     先初始化工作台数据并定义参数（或接入上游），在此之前参数编辑\
+                     与生成没有可用的字段。"
+                .to_owned(),
+            at: Where::view(View::Fields),
+        });
+    }
     collect(book, &mut issues);
     match recipe {
         Ok(r) => recipe_alignment(book, r, &mut issues),
@@ -310,8 +325,12 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
 /// 「机型不存在」的形式暴露，只能靠主动对表才能看见。它不挡任何东西：
 /// 上游今天是搬数据的来源，不是运行时的依赖。
 fn upstream_drift(book: &Book<'_>, out: &mut Vec<Issue>) {
+    // 上游未配置 → 无从谈起「漂移」：这条检查是相对上游的对表
+    let Some(up_stream) = book.up else {
+        return;
+    };
     for m in book.machines() {
-        let Some(up) = book.up.catalog.machine(&m.id) else {
+        let Some(up) = up_stream.catalog.machine(&m.id) else {
             out.push(Issue {
                 id: format!("upstream.unknown_machine.{}", m.id),
                 severity: Severity::Hint,
@@ -344,7 +363,11 @@ fn upstream_drift(book: &Book<'_>, out: &mut Vec<Issue>) {
 
 /// 兼容声明（doc §12）
 fn compat(book: &Book<'_>, out: &mut Vec<Issue>) {
-    if book.up.manifest.compat.minimum_client.is_none() {
+    // 上游未配置 → 没有声明可查，这条检查跳过（「不可用原因」由 boot 说）
+    let Some(up) = book.up else {
+        return;
+    };
+    if up.manifest.compat.minimum_client.is_none() {
         out.push(Issue {
             id: "compat.minimum_client".to_owned(),
             severity: Severity::Todo,
@@ -533,8 +556,11 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
 /// 上游数据本身的问题：**一律提示，不阻断** ——
 /// 它们不是我们能修的，报成阻断会让工作台变成一个打不开的软件
 fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let known: Vec<&str> = book
-        .up
+    // 上游未配置 → 没有参照清单，ghost 过滤无从判定，整条跳过
+    let Some(up) = book.up else {
+        return;
+    };
+    let known: Vec<&str> = up
         .catalog
         .machines()
         .iter()
@@ -617,7 +643,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         // 夹具清单：A1(STANDARD, FAST)、A2L(占位，无尺寸)、P1S(LITE)。
         // body 用 TOML 双引号 + `\n` 转义（字面量串不支持跨行，见 recipe.rs minimal()）
@@ -714,7 +740,7 @@ uuid = '22222222-2222-2222-2222-222222222222'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         let text = r##"
 release_time = '2026-01-01 00:00:00'
@@ -755,7 +781,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &d);
 
         let r = preflight(&book, Err("配方读不回来（测试）"));
         assert!(
@@ -804,7 +830,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
 
         assert_eq!(r.blocks, 0, "健康数据被判成阻断了：{:#?}", r.first_block());
         assert!(!r.blocked());
@@ -833,7 +859,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
         assert!(r.blocked(), "枚举值不存在该是阻断");
         let b = r.first_block().unwrap();
         assert_eq!(b.severity, Severity::Block);
@@ -898,7 +924,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             }],
         )
         .unwrap();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
         assert_eq!(r.issues[0].severity, Severity::Block);
         assert!(r.issues.windows(2).all(|w| w[0].severity <= w[1].severity));
     }
@@ -909,7 +935,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
 
         assert!(!r.issues.is_empty(), "一条都没有，下面的判据在空转");
         for i in &r.issues {
@@ -947,7 +973,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
         assert!(r.blocked(), "值不合法必须挡住生成");
         let hit = r
             .issues
@@ -979,7 +1005,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(Some(&f.up), &f.presets, &c, &d));
         assert!(
             !r.issues.iter().any(|i| i.id.starts_with("upstream.")),
             "对齐的夹具不该报上游漂移：{:?}",
@@ -1035,7 +1061,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             ..Default::default()
         };
         let draft = Draft::default();
-        let book = Book::new(&f.up, &real, &committed, &draft);
+        let book = Book::new(Some(&f.up), &real, &committed, &draft);
         let recipe =
             Recipe::parse(preset::PRESET_RECIPES_TOML).expect("仓库里的配方真源必须 parse 得过");
         assert_eq!(

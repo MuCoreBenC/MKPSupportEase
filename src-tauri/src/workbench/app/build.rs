@@ -85,7 +85,7 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
@@ -374,7 +374,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
 
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
@@ -480,7 +480,7 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.up, &ctx.presets, &c, &d), &uid)?.text)
+            Ok(render(&Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d), &uid)?.text)
         })
     })
 }
@@ -517,7 +517,7 @@ pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let v = book
                 .version(&uid)
                 .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))?;
@@ -604,7 +604,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
     traced("wb_publish", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
                 return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
@@ -613,17 +613,22 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
 
             let root = paths::dist_root()?;
             let asset_root = paths::assets_root()?;
+            // 发布元数据（频道 / 最低客户端）来自上游 manifest。**上游未配置时
+            // 留空并如实上报**（b05 Task 15 裁定①）：交付照样进行 —— 残留闸、
+            // 可达集合、manifest 全链不依赖上游；只是产物身份（mkp 连接键）
+            // 为空，manifest 里不会有 mkp 条目
+            let (channel, minimum_client) = match &ctx.up {
+                Some(up) => (
+                    up.manifest.compat.channel.clone(),
+                    up.manifest.compat.minimum_client.clone(),
+                ),
+                None => (String::new(), None),
+            };
             let meta = super::dist::PublishMeta {
                 stamp: clock::now_iso8601(),
-                channel: ctx.up.manifest.compat.channel.clone(),
-                minimum_client: ctx
-                    .up
-                    .manifest
-                    .compat
-                    .minimum_client
-                    .clone()
-                    .unwrap_or_default(),
-                version: ctx.up.manifest.compat.version.clone().unwrap_or_default(),
+                channel,
+                minimum_client: minimum_client.clone().unwrap_or_default(),
+                version: String::new(),
             };
             let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
             let stamp = meta.stamp;
@@ -633,7 +638,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
                 stamp,
                 root: root.display().to_string(),
                 files: out.files,
-                minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
+                minimum_client,
                 todos: report.todos,
                 hints: report.hints,
             })
@@ -650,7 +655,7 @@ pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
     traced("wb_dist_strays", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let expected = super::dist::deliverable_set(&book);
             Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
         })
@@ -664,7 +669,7 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
     traced("wb_clean_dist_strays", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let expected = super::dist::deliverable_set(&book);
             let root = paths::dist_root()?;
             let strays = super::dist::scan_strays(&root, &expected);
@@ -893,7 +898,7 @@ mod tests {
     fn rendered_toml_parses_and_keeps_the_values() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
         assert!(r.text.starts_with("# uuid: "));
@@ -974,7 +979,7 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&fixture.up, &presets, &c, &draft);
+        let book = Book::new(Some(&fixture.up), &presets, &c, &draft);
 
         /// 基线目录按**身份**索引：`(机型 id, 版本 id 小写)` → 文件。
         ///
@@ -1128,7 +1133,7 @@ mod tests {
     fn rendering_is_deterministic_apart_from_the_timestamp() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let a = render(&book, "A1/STANDARD").unwrap();
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
@@ -1141,7 +1146,11 @@ mod tests {
     fn changing_a_value_changes_the_output() {
         let (_d, f, c) = setup();
         let mut draft = Draft::default();
-        let before = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let before = render(
+            &Book::new(Some(&f.up), &f.presets, &c, &draft),
+            "A1/STANDARD",
+        )
+        .unwrap();
 
         apply(
             &mut draft,
@@ -1155,7 +1164,11 @@ mod tests {
             }],
         )
         .unwrap();
-        let after = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let after = render(
+            &Book::new(Some(&f.up), &f.presets, &c, &draft),
+            "A1/STANDARD",
+        )
+        .unwrap();
 
         assert!(!same_payload(&before.text, &after.text));
         assert_ne!(before.fingerprint, after.fingerprint);
@@ -1208,7 +1221,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let r = issues::inspect(&book);
         assert!(r.blocked());
         assert!(!w::disabled::BUILD_BLOCKED.is_empty());
@@ -1220,7 +1233,7 @@ mod tests {
     fn a2l_renders_but_is_skipped_by_generate() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
 
         let r = render(&book, "A2L/STANDARD").unwrap();
         assert!(r.text.contains("# machine: A2L"));
@@ -1251,7 +1264,7 @@ mod tests {
     fn skipping_a_placeholder_machine_names_the_real_reason() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
 
         let a2l = book
             .machines()
@@ -1360,7 +1373,7 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&fixture.up, &presets, &c, &draft);
+        let book = Book::new(Some(&fixture.up), &presets, &c, &draft);
 
         let v = book
             .versions()
@@ -1520,7 +1533,7 @@ mod tests {
         同一条真实路径（机型页直写 presets/，生成视角靠重载看见它） */
         let loaded = crate::workbench::app::storage::load(&store, &p).unwrap();
         let draft = Draft::default();
-        let book = Book::new(&up, &p, &loaded.committed, &draft);
+        let book = Book::new(Some(&up), &p, &loaded.committed, &draft);
         assert!(
             book.version("A1/E2E").is_some(),
             "机型页落盘的新版本在生成视角可见"

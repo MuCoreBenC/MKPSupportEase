@@ -93,6 +93,11 @@ pub enum MachineField {
     Name,
     Image,
     Icon,
+    /// 这台机型的默认套餐（b05 Task 15.3）。它指向 `presets/bundles.toml` 里的一条
+    /// 套餐 —— 与 `image` / `icon` 同一类**引用格**：写一个解析不到的 id，
+    /// 下一次加载会被 `check_bundle_refs` 判成 Corrupted（整个工作台起不来），
+    /// 所以命令层在写之前先查（见 `app::machines::check_ref`）
+    DefaultBundle,
 }
 
 impl MachineField {
@@ -103,6 +108,7 @@ impl MachineField {
             Self::Name => "name",
             Self::Image => "image",
             Self::Icon => "icon",
+            Self::DefaultBundle => "defaultBundle",
         }
     }
 
@@ -410,6 +416,7 @@ impl Machine {
             MachineField::Name => self.name = owned.unwrap_or_default(),
             MachineField::Image => self.image = owned,
             MachineField::Icon => self.icon = owned,
+            MachineField::DefaultBundle => self.default_bundle = owned,
         }
         Ok(())
     }

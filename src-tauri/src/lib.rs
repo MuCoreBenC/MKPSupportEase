@@ -117,18 +117,23 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「机型与版本」那一页：读写 presets/machines/*.toml。
         // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
         app::machines::wb_machines,
-        // 「资产库」：读 `presets/assets.toml`（b05 Task 8）。现在只有读 ——
-        // 写入口在数据层就位，接上它要有界面（Task 14）
+        // 「资产库」：读 `presets/assets.toml`（b05 Task 8）；
+        // `wb_import_asset` 是 Task 15.4 的导入（复制进资产根 + 登记定义）
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
-        // 「套餐管理」：读 `presets/bundles.toml`（b05 Task 10）。同一套纪律：只读
+        app::assets::wb_import_asset,
+        // 「套餐管理」：读 `presets/bundles.toml`（b05 Task 10）；
+        // `wb_add_bundle` 是 Task 15.3 的建套餐（先查再写，不许把盘写成读不回来的样子）
         app::bundles::wb_bundles,
+        app::bundles::wb_add_bundle,
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
         app::machines::wb_copy_version,
         app::wb_copy_recipe,
+        // 空白初始化（b05 Task 15 裁定②）：显式动作建最小骨架，幂等拒绝覆盖
+        app::init::wb_init_workbench,
         // 对照基线（b05 Task 14.9）：diff 只读 + 确认后同步（落点闸在 preset 内部）
         app::build::wb_baseline_diff,
         app::build::wb_sync_baseline,

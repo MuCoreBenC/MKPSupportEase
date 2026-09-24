@@ -1,10 +1,19 @@
 //! 「套餐管理」的后端：读 `presets/bundles.toml`（套餐域①层，b05 Task 10）。
 //!
-//! # 现在只有读
+//! # 读之外有了「建套餐」（b05 Task 15.3）
 //!
-//! 与 [`crate::workbench::app::assets`] 同一条纪律：写入口（`Bundles::add` / `write` /
-//! `drop_asset_refs`）已经在数据层就位，接上它要有界面 —— Task 14，那时这一步
-//! 不该顺手加进来。
+//! 空白初始化那台设备上要能建出第一个套餐，所以这条写入口先落命令层
+//! （界面归 Task 17）。它比「加一个版本」多一道：**套餐的每条引用都要先在别的
+//! 文件里站得住**（机型在 `machines/`、资产在 `assets.toml`），而那三件事
+//! 加载期会查成 Corrupted —— 写坏了不是报一次错，是整个 `presets/` 读不回来。
+//! 所以 [`add_bundle`] 的原则是**先查再写**：不合格就一个字节都不写。
+//!
+//! # 为什么「至少一条 BBS」在这里拦而不是等加载期
+//!
+//! doc §12.4：MKP 与 BBS 成套配发，发了 MKP 不发 BBS，用户打出来的结果是错的。
+//! 加载期那条（`check_bundle_refs`）管的是**盘上已有的数据**；写入口管的是
+//! 「不许把盘写成那个样子」。两条是同一条判据的两端 —— 只留加载期那一端的话，
+//! 人点一次「建套餐」就把工作台变成了起不来的状态。
 //!
 //! # 为什么每个 ref 都带解析状态
 //!
@@ -16,7 +25,8 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::workbench::presets::{AssetKind, Presets};
+use crate::workbench::clock;
+use crate::workbench::presets::{AssetKind, Bundle, Presets};
 
 /// 套餐里一个 `assetRef` 的解析状态
 #[derive(Debug, Clone, Serialize)]
@@ -47,12 +57,15 @@ pub struct BundleList {
     pub bundles: Vec<BundleView>,
 }
 
-/// 套餐清单。**只读**（写入口在数据层，还没接到命令）
+/// 套餐清单。**只读**
 #[tauri::command]
 pub fn wb_bundles() -> Result<BundleList, AppError> {
-    traced("wb_bundles", |_| {
-        let presets = Presets::load()?;
-        let bundles = presets
+    traced("wb_bundles", |_| Ok(list_of(&Presets::load()?)))
+}
+
+fn list_of(presets: &Presets) -> BundleList {
+    BundleList {
+        bundles: presets
             .bundles
             .items()
             .iter()
@@ -77,8 +90,112 @@ pub fn wb_bundles() -> Result<BundleList, AppError> {
                     .collect(),
                 updated_at: b.updated_at.clone(),
             })
-            .collect();
-        Ok(BundleList { bundles })
+            .collect(),
+    }
+}
+
+/* ---------- 建套餐（b05 Task 15.3） ---------- */
+
+/// 写之前先查一遍：**这三条不合格，写下去 `presets/` 就再也读不回来**。
+///
+/// 数据层的 `Bundles::add` 只看得见 `bundles.toml` 自己（id 撞、空 `assetRefs`、
+/// 空串项）。下面这三条要同时看得见机型与资产，所以只能在这一层查 ——
+/// 与 `Presets::check_bundle_refs` 是同一套判据，**不是两套**：这里拦「不许写成
+/// 那个样子」，那边拦「盘上不许有那个样子」。
+fn check_addable(p: &Presets, b: &Bundle) -> Result<(), AppError> {
+    if b.asset_refs.is_empty() {
+        return Err(
+            AppError::invalid_argument(format!("套餐 {} 的 assetRefs 是空的", b.id)).with_detail(
+                "套餐的内容就是 BBS 引用（doc §12.4）：空的套餐等于交付了一半 —— \
+             MKP 预设与 BBS 预设必须成套配发"
+                    .to_owned(),
+            ),
+        );
+    }
+    // ① 归属机型必须是真机型
+    if p.catalog.machine(&b.machine_id).is_none() {
+        return Err(AppError::not_found(format!("没有机型 {}", b.machine_id))
+            .with_detail("套餐是按机型配的：先建这台机型，再来建它的套餐".to_owned()));
+    }
+    // ② 每条引用都要解析到真资产；③ 其中至少一条是 BBS
+    let mut has_bbs = false;
+    for r in &b.asset_refs {
+        let a = p.assets.get(r).ok_or_else(|| {
+            AppError::not_found(format!(
+                "套餐 {} 的 assetRefs 里有一条指向不存在的资产：{r}",
+                b.id
+            ))
+            .with_detail(
+                "资产定义在 presets/assets.toml。先用「导入资产」把它登记进来，\
+                     再来建套餐 —— 写一条解析不到的引用会让整个工作台起不来"
+                    .to_owned(),
+            )
+        })?;
+        if a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs") {
+            has_bbs = true;
+        }
+    }
+    if !has_bbs {
+        return Err(AppError::invalid_argument(format!(
+            "套餐 {} 的 assetRefs 里没有一条 BBS 预设",
+            b.id
+        ))
+        .with_detail(
+            "MKP 预设与配套 BBS 预设必须成套配发（doc §12.4）：发了 MKP 不发 BBS，\
+             用户打出来的结果是错的。先把一条 BBS 预设导入进来"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// 领域体：加一条套餐并**立刻落盘**。
+///
+/// `updated_at` 由调用方给 —— 迁移照抄来的旧值不能写今天
+/// （那是把「搬了个文件」记成「改了套餐」），新建的才是今天。
+pub fn add_bundle(p: &mut Presets, bundle: Bundle) -> Result<(), AppError> {
+    let candidate = Bundle {
+        id: bundle.id.trim().to_owned(),
+        display: bundle.display.trim().to_owned(),
+        machine_id: bundle.machine_id.trim().to_owned(),
+        asset_refs: bundle
+            .asset_refs
+            .iter()
+            .map(|s| s.trim().to_owned())
+            .collect(),
+        updated_at: bundle.updated_at,
+    };
+    check_addable(p, &candidate)?;
+    p.bundles.add(candidate)?;
+    p.bundles.write()
+}
+
+/// **建一份套餐**（b05 Task 15.3）。`updatedAt` 写今天 —— 它就是今天建的。
+///
+/// 建完之后**从盘上重读**再返回：界面看到的必须是落盘的结果。
+/// 「被机型引用」走 [`super::machines::wb_set_machine_field`] 的 `defaultBundle`
+/// （版本那一格是 `recommendedBundle`），那是另一次独立的写。
+#[tauri::command]
+pub fn wb_add_bundle(
+    id: String,
+    display: String,
+    machine_id: String,
+    asset_refs: Vec<String>,
+) -> Result<BundleList, AppError> {
+    traced("wb_add_bundle", |_| {
+        let mut p = Presets::load()?;
+        add_bundle(
+            &mut p,
+            Bundle {
+                id: id.clone(),
+                display,
+                machine_id,
+                asset_refs,
+                updated_at: Some(clock::today()),
+            },
+        )?;
+        tracing::info!(bundle = %id, "建了一份套餐");
+        Ok(list_of(&Presets::load()?))
     })
 }
 
@@ -86,6 +203,135 @@ pub fn wb_bundles() -> Result<BundleList, AppError> {
 mod tests {
     use super::*;
     use crate::workbench::app::assets::wb_asset_usage;
+    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::presets::MachineField;
+
+    /* ---------- 建套餐（b05 Task 15.3） ---------- */
+
+    /// **建第一个套餐**：落盘 → 重读得到 → **整机 presets 仍然读得通**。
+    ///
+    /// 最后那一句才是这一条的重心：`add_bundle` 写下去的东西要过得了加载期的
+    /// 跨文件检查（`check_bundle_refs`）。只看"条目加进去了"的话，一个把工作台
+    /// 写成起不来的实现也会绿。
+    ///
+    /// 顺带把「被机型引用」也走一遍（`defaultBundle` 那一格），并确认引用之后
+    /// 加载期照样读得通 —— 15.3 说的"建套餐并被机型引用"是这两步
+    #[test]
+    fn a_new_bundle_lands_and_can_be_referenced_by_its_machine() {
+        let (fx_dir, _up, mut p) = Fixture::load().into_parts();
+        // P1S 是夹具里唯一"有 BBS 却还没有套餐"的机型 —— 正是新建套餐的形状
+        add_bundle(
+            &mut p,
+            Bundle {
+                id: "P1S_default".to_owned(),
+                display: "官方推荐".to_owned(),
+                machine_id: "P1S".to_owned(),
+                asset_refs: vec!["p1s-bbs-02-010".to_owned()],
+                updated_at: Some("2026-09-24".to_owned()),
+            },
+        )
+        .expect("建套餐");
+
+        let again = Presets::load_from(p.root()).expect("建完之后整个 presets 仍读得通");
+        let got = again.bundles.get("P1S_default").expect("落盘了");
+        assert_eq!(got.machine_id, "P1S");
+        assert_eq!(got.asset_refs, vec!["p1s-bbs-02-010".to_owned()]);
+
+        // 被机型引用：写 `defaultBundle`，写完整机仍读得通
+        let mut p = Presets::load_from(p.root()).expect("重读");
+        p.catalog
+            .machine_mut("P1S")
+            .unwrap()
+            .set_field(MachineField::DefaultBundle, Some("P1S_default"))
+            .unwrap();
+        p.catalog.write_machine("P1S").unwrap();
+        let again = Presets::load_from(p.root()).expect("引用之后仍读得通");
+        assert_eq!(
+            again
+                .catalog
+                .machine("P1S")
+                .unwrap()
+                .default_bundle
+                .as_deref(),
+            Some("P1S_default")
+        );
+        assert!(
+            again.bundles.get("P1S_default").is_some(),
+            "机型引用的那条套餐必须查得到 —— 悬空引用在加载期是 error"
+        );
+        drop(fx_dir);
+    }
+
+    /// **先查再写**：四条不合格的形状一律拒绝，而且**一个字节都不写**
+    /// （落盘了就说明套餐被写成了加载期读不回来的样子）
+    #[test]
+    fn a_bundle_that_would_not_load_is_refused_before_writing() {
+        let (fx_dir, _up, mut p) = Fixture::load().into_parts();
+        let before = std::fs::read_to_string(p.bundles.file()).expect("原文");
+
+        let bad = [
+            (
+                "假机型",
+                Bundle {
+                    id: "X_default".to_owned(),
+                    display: "官方推荐".to_owned(),
+                    machine_id: "NO_SUCH".to_owned(),
+                    asset_refs: vec!["p1s-bbs-02-010".to_owned()],
+                    updated_at: None,
+                },
+            ),
+            (
+                "假资产",
+                Bundle {
+                    id: "P1S_default".to_owned(),
+                    display: "官方推荐".to_owned(),
+                    machine_id: "P1S".to_owned(),
+                    asset_refs: vec!["no-such-asset".to_owned()],
+                    updated_at: None,
+                },
+            ),
+            (
+                "没有 BBS",
+                Bundle {
+                    id: "P1S_default".to_owned(),
+                    display: "官方推荐".to_owned(),
+                    machine_id: "P1S".to_owned(),
+                    asset_refs: vec!["p1s-icon".to_owned()],
+                    updated_at: None,
+                },
+            ),
+            (
+                "空引用",
+                Bundle {
+                    id: "P1S_default".to_owned(),
+                    display: "官方推荐".to_owned(),
+                    machine_id: "P1S".to_owned(),
+                    asset_refs: Vec::new(),
+                    updated_at: None,
+                },
+            ),
+        ];
+        for (why, b) in bad {
+            let err = add_bundle(&mut p, b).expect_err(&format!("{why} 必须被拦，实测通过了"));
+            assert!(!err.message.is_empty(), "{why} 的拒绝要说清原因");
+        }
+        // 撞 id（大小写不敏感）也拦
+        let dup = Bundle {
+            id: "a1_default".to_owned(),
+            display: "官方推荐".to_owned(),
+            machine_id: "A1".to_owned(),
+            asset_refs: vec!["a1-bbs-04-020".to_owned()],
+            updated_at: None,
+        };
+        assert!(add_bundle(&mut p, dup).is_err(), "撞 id 必须被拦");
+
+        assert_eq!(
+            std::fs::read_to_string(p.bundles.file()).expect("原文"),
+            before,
+            "被拦下就不该动 bundles.toml"
+        );
+        drop(fx_dir);
+    }
 
     /// **真数据上的一条**：5 份套餐、每条的引用都解析得到、每条至少一条 BBS。
     /// 旧仓 `updatedAt = '2026-07-12'` 照实搬 —— 迁移不改内容，日期照旧

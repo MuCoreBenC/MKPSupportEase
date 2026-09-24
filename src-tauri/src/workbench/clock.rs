@@ -30,6 +30,18 @@ pub fn now_stamp() -> String {
         .unwrap_or_else(|_| "19700101T000000Z".into())
 }
 
+/// **只给日期**：`2026-07-12`（b05 Task 15.3）。
+///
+/// `presets/bundles.toml` 的 `updatedAt` 就是这个写法 —— 旧仓五份套餐实测都没有
+/// 时刻，只有日期。新建套餐时写今天，跟着旧数据的形状走，不写时刻（写时刻等于
+/// 给同一个字段造出第二种格式）。
+pub fn today() -> String {
+    let fmt = format_description!("[year]-[month]-[day]");
+    OffsetDateTime::now_utc()
+        .format(fmt)
+        .unwrap_or_else(|_| "1970-01-01".into())
+}
+
 /// **产物头部那一行 `# release_time:` 专用**：`2026-08-19 01:38:13`。
 ///
 /// 空格分隔、无时区后缀 —— 这不是我们的偏好，是消费端已有的 9 份预设都长这样
@@ -70,6 +82,16 @@ mod tests {
             assert!(!s.contains(bad), "{s} 含非法字符 {bad}");
         }
         assert_eq!(s.len(), 16, "长度不对：{s}");
+    }
+
+    /// 只给日期那份：`2026-07-12` —— 与 `bundles.toml` 的 `updatedAt` 同形，
+    /// 不带时刻也不带 `T`/`Z`
+    #[test]
+    fn today_is_just_a_date() {
+        let s = today();
+        assert_eq!(s.len(), 10, "长度不对（应为 2026-07-12 这种）：{s}");
+        assert!(!s.contains('T') && !s.contains('Z'), "不该带时刻：{s}");
+        assert_eq!(s.as_bytes()[4], b'-', "第 5 位该是连字符：{s}");
     }
 
     /// 产物头部那份：**空格分隔、无时区后缀**，形如 `2026-08-19 01:38:13`。
