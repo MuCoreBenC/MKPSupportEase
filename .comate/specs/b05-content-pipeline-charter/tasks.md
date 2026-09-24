@@ -65,12 +65,16 @@
     - 5.8: ✅ `preset_recipes.toml` / `test_recipes.toml` 的链路说明改成真实路径 +「两边同名、按名字直配」；`docs/ARCHITECTURE.md` §10.5 改写成「已收口」并指向映射表
     - 5.9: ✅ **越出清单但同类的一处**：`PresetKey::file_name` 有变体那一档改转调 `generate::file_name`（它以前自己拼一遍，是全仓第三处 `format!` 命名 —— Task 2 那句「唯一实现」此前并不成立）。无变体那一档保留为**显式例外**：老预设没有 `# variant:`，规则（身份 → 名字）在这一档上不成立
 
-- [ ] Task 6: 把基线维护从日常生产流程里摘出来
-    - 6.1: 明确对照基线是判据资产，不是产物副本，也不是交付文件
-    - 6.2: 基线更新只在「本次变更确实预期产物变化」时发生，走独立流程
-    - 6.3: 从生成与发布路径中移除任何自动同步基线的动作
-    - 6.4: 工作台里「同步基线」做成显式、带 diff 确认的独立入口，不出现在新增版本的必经步骤里
-    - 6.5: 判据：普通生成与发布路径不写入基线目录
+- [ ] Task 6: 把基线维护从日常生产流程里摘出来（除 6.4 外已收口）
+    - 6.1: ✅ 写进 `docs/ARCHITECTURE.md` §10.6：对照基线是**判据资产**，不是产物副本、不是交付文件；与产物同名同内容但职责不同，**不合并它们**（合了就是自比自）
+    - 6.2: ✅ 同一节 + `gen-presets` 文件头写清流程：只在「本次变更确实预期产物变化」时更新；先看差异（`--baseline` 或 `git diff`）→ 确认是要的 → 手动 `--sync-baseline`
+    - 6.3: ✅ **核对结论：生成与发布路径本来就没有自动同步** —— `--write` 只写 `assets/presets/`；`wb_generate` 写 `dist-presets/presets/mkp/` + 快照；`wb_publish` 写 `dist-presets/` + manifest；`sync_baseline` 在 `src-tauri` 零命中、唯一调用点是那个 CLI；`scripts/` 与 CI 里也没有任何引用。本轮没有要删的调用 —— 改的是**把这个事实锁住**
+    - 6.4: ⛔ **工作台里没有这个入口，本轮也没建** —— 今天能做这件事的只有 CLI。要建的是「显式 + 带 diff 确认 + 不在新增版本必经步骤里」的 UI 动作（Rust 命令 + 前端视图 + 类型），属功能开发而非"摘出来"；约束已写进 §10.6 与 doc §4.3 第 10 步。**等裁决：并入 Task 14，还是现在单开**
+    - 6.5: ✅ 两条判据，各堵一半：
+        - `write_discipline_scan.rs::the_baseline_has_exactly_one_write_path` —— 源码扫描（`crates/*/src` + `src-tauri/src`），`sync_baseline` 只允许出现在定义处与 `bin/gen_presets.rs`；断言是**相等**不是子集（入口搬走会红）
+        - `tests/baseline_stays_untouched_on_the_generate_path.rs` —— 真跑 `check_all` / `check_baseline` / `write_all`(临时目录)，基线九份**内容 sha256** 不变；附 `the_snapshot_notices_a_change` 证明检测器不空转
+    - 6.5a: ✅ 两条都做了反空转探针（都实测会红）：放一个不被编译的 `preset/src/__probe_scan.rs` → 扫描判据红并点出文件名；临时给 `write_all` 加一行写基线 → 运行时判据红。探针已撤，基线九份 sha256 回到迁移前的值
+    - 6.5b: 边界照实记：判据锁的是 **Rust 源码**（crates/*/src + src-tauri/src）；`scripts/`、CI、`*.py` 今天对基线零引用（人工核对），但**没有判据锁着**
 
 - [ ] Task 7: 旧仓迁移盘点收口（只盘点，不搬运）
     - 7.1: BBS 与套餐的盘点结论已在 doc §12.4 落定，此处只补未覆盖的部分

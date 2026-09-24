@@ -3,6 +3,8 @@
 //! ```text
 //! cargo run -q -p mkpse-preset --bin gen-presets                 # --check（默认）
 //! cargo run -q -p mkpse-preset --bin gen-presets -- --write      # 写进 assets/presets/
+//! cargo run -q -p mkpse-preset --bin gen-presets -- --baseline   # 产物 vs 对照基线（只读）
+//! cargo run -q -p mkpse-preset --bin gen-presets -- --sync-baseline   # 显式同步基线（见下）
 //! cargo run -q -p mkpse-preset --bin gen-presets -- --print A1:standard
 //! ```
 //!
@@ -10,6 +12,20 @@
 //!
 //! 默认动作应当是**只读的那一个**：这条命令进 `make judge`，而判据不该在跑的时候改仓库。
 //! 想写就明说 `--write`。
+//!
+//! # `--sync-baseline` 是**唯一**能改对照基线的动作（b05 Task 6）
+//!
+//! 而它不在任何自动路径上：
+//!
+//! - `--write`（生成入库产物）与 `--check` / `--baseline`（只读）都不碰基线目录；
+//! - 工作台那条链（`wb_generate` / `wb_publish`）也不碰 —— 有两条判据盯着：
+//!   `tests/write_discipline_scan.rs` 的 `the_baseline_has_exactly_one_write_path`
+//!   （源码扫描：调用点只有下面这一个）与
+//!   `tests/baseline_stays_untouched_on_the_generate_path.rs`（真跑一遍生成/检查路径，
+//!   基线逐份哈希不变）；
+//! - 流程是「先跑 `--baseline` 看差异（或者直接 `git diff`），确认那处变化是你**要的**，
+//!   再手动跑 `--sync-baseline`」。**基线更新不是生成或发布的自动步骤，也不是每次发布的
+//!   必经步骤**（doc §7；性质见 `docs/ARCHITECTURE.md` §10.6）。
 //!
 //! # 这个文件是薄壳
 //!
@@ -36,6 +52,9 @@ enum Mode {
     /// K-G0'：产物与对照基线九对九逐字节相同（只读）。
     Baseline,
     /// 把产物同步成对照基线 —— **人看过 diff 之后才该跑**（doc §0 的 ③）。
+    ///
+    /// 全仓唯一能改基线的入口；`sync_baseline` 自己也有一道落点闸
+    /// （只允许真基线目录或系统临时目录）。见文件头那一段。
     SyncBaseline,
 }
 

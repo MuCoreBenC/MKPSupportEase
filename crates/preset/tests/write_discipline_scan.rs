@@ -260,6 +260,70 @@ fn the_scan_would_catch_a_write() {
     );
 }
 
+/// **对照基线只能有一个写入口**（b05 Task 6）。
+///
+/// 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：能改它的动作只该有一个 ——
+/// `gen-presets --sync-baseline`（`preset/src/bin/gen_presets.rs`）→
+/// `generate::sync_baseline`。生成路径、发布路径、工作台任何命令都不许调它。
+///
+/// # 为什么这件事要用源码扫描来管
+///
+/// **"没有调用"这件事没有运行时表现。** 同族的运行时判据
+/// （`tests/baseline_stays_untouched_on_the_generate_path.rs`）只能证明**那一次**没写：
+/// 哪天有人把 `sync_baseline` 加进 `write_all` 或 `wb_publish`，它照样绿
+/// —— 除非恰好构造出会触发写入的输入。这条扫的是**调用点本身**，绕不过去。
+///
+/// 两条一起才算拦得住：一条证明没有别的入口，一条证明真跑起来没动。
+#[test]
+fn the_baseline_has_exactly_one_write_path() {
+    /// 允许出现 `sync_baseline` 的文件：定义处 + 唯一入口。**别的都算违规。**
+    const ALLOWED: &[&str] = &[
+        "crates/preset/src/generate.rs",
+        "crates/preset/src/bin/gen_presets.rs",
+    ];
+
+    let crates = crates_root();
+    let repo = crates.parent().expect("crates/ 必有父目录").to_path_buf();
+
+    let mut files = Vec::new();
+    for member in ["preset", "postprocess"] {
+        rust_files(&crates.join(member).join("src"), &mut files);
+    }
+    // 工作台那一侧也要扫：它编译在 `workbench` feature 之后，默认构建摸不到，
+    // 而"默认构建摸不到"恰恰是这类调用点最容易溜进来的地方
+    rust_files(&repo.join("src-tauri").join("src"), &mut files);
+
+    let mut hits: Vec<String> = Vec::new();
+    for path in &files {
+        let rel = path
+            .strip_prefix(&repo)
+            .expect("在仓库之下")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("读不到 {rel}：{e}"));
+        if production_part(&src).contains("sync_baseline") {
+            hits.push(rel);
+        }
+    }
+    hits.sort();
+
+    let mut want: Vec<String> = ALLOWED.iter().map(|s| (*s).to_owned()).collect();
+    want.sort();
+    // 断言是**相等**而不是"子集"：`ALLOWED` 里那两处必须真的命中
+    //（函数改名/入口搬走时这里会红，而不是变成一张永远绿的白名单）
+    assert_eq!(
+        hits, want,
+        "对照基线的写入口不止一个了 —— 它只能被 `gen-presets --sync-baseline` 显式改；\
+         生成与发布路径都该只读它（`docs/ARCHITECTURE.md` §10.6）"
+    );
+    // 反空转：扫不到文件的话上面那条永远是绿的
+    assert!(
+        files.len() >= 60,
+        "只扫到 {} 个 .rs —— 路径大概拼错了",
+        files.len()
+    );
+}
+
 /// **生成器的幂等门禁**（与写盘无关，但同属"源码级文本门禁"，所以住在这个文件里）。
 ///
 /// `generate.rs` 的模块头写着"这里不许出现 `uuid::new_v4()` / `now()` / `SystemTime`"，
