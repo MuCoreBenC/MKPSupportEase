@@ -1,0 +1,69 @@
+# 套餐域①层：**一份集中定义**（b05 Task 10）。
+#
+# # 套餐是什么
+#
+# **套餐的内容就是 BBS 引用**（doc §12.4 的决定性事实）。它不是"预设的集合"——
+# MKP 预设的路径由命名规则算出（doc §12.5：不为它建条目），套餐管的是**配发内容**：
+# 给这台机型配哪几份切片器预设。
+#
+# # 为什么 `assetRefs` 不能空
+#
+# MKP 侧的 `use_ironing_path = true`（拿熨烫路径当涂胶路径）只在 BBS 侧
+# `enable_support_ironing = "1"` 与那组 `support_ironing_*` 成立时才有意义。
+# **发了 MKP 预设不发配套 BBS 预设，用户打出来的结果是错的**（doc §12.4）——
+# 所以加载期就拦「套餐里一条 BBS 都没有」。
+#
+# # 字段就是旧数据那五个
+#
+# 旧仓 `source/bundles/*_default.toml` 实测：`id` / `display` / `machineId` /
+# `assetRefs` / `updatedAt`。照实搬，**不造默认值**：
+#
+# - `id` 沿用旧写法（`A1_default`）：它被机型文件引用着（`defaultBundle` 五处 +
+#   每个版本的 `recommendedBundle` 一处，实测 14 处非空引用；A2L 那处空串不算）。
+#   G-0 那套管的是**产物文件名**，不是套餐 id —— 没有规则就换个写法，只会让那 14 处跟着漂。
+#   等 Task 12 一起谈。
+# - `updatedAt` 沿用旧值 `2026-07-12`：**迁移不改内容，日期照旧** ——
+#   写上今天就是把"搬了个文件"记成"改了套餐"。
+# - `assetRefs` 换成了**我们的资产 id**（旧仓是 `a1_bbs_mkpprocess_a1_04_020` 那种，
+#   见 `.comate/specs/.../migration-map.md` 的 B 套读法）。
+#
+# **刻意不写**：MKP 预设的路径（命名规则算）、`nozzle` / `layerHeight`（旧仓那份
+# `source/preset_registry.toml` 有它们，但那是**交付索引**要用的字段 —— Task 12；
+# 在这里再存一份就是第二份会过期的真相）。
+
+# ---------------- 五个机型各一份（旧仓实测 5 份） ----------------
+
+[[bundles]]
+id = 'A1_default'
+display = '官方推荐'
+machineId = 'A1'
+assetRefs = ['a1-bbs-04-020']
+updatedAt = '2026-07-12'
+
+[[bundles]]
+id = 'A1_MINI_default'
+display = '官方推荐'
+machineId = 'A1_MINI'
+assetRefs = ['a1_mini-bbs-04-020']
+updatedAt = '2026-07-12'
+
+[[bundles]]
+id = 'P1S_default'
+display = '官方推荐'
+machineId = 'P1S'
+assetRefs = ['p1s-bbs-04-024']
+updatedAt = '2026-07-12'
+
+[[bundles]]
+id = 'P2S_default'
+display = '官方推荐'
+machineId = 'P2S'
+assetRefs = ['p2s-bbs-04-024']
+updatedAt = '2026-07-12'
+
+[[bundles]]
+id = 'X1C_default'
+display = '官方推荐'
+machineId = 'X1C'
+assetRefs = ['x1c-bbs-04-024']
+updatedAt = '2026-07-12'

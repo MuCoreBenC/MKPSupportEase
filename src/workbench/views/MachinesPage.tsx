@@ -25,11 +25,13 @@ import {
   isAppError,
   wb,
   type BrandView,
+  type BundleList,
   type MachineField,
   type MachineList,
   type MachineView,
   type VersionField,
 } from '../api'
+import { AssetPicker } from './AssetPicker'
 
 export function MachinesPage() {
   const [data, setData] = useState<MachineList | null>(null)
@@ -414,10 +416,20 @@ function MachineDetail({
 }) {
   const [openVersion, setOpenVersion] = useState<string | null>(m.versions[0]?.id ?? null)
   const [adding, setAdding] = useState(false)
+  const [copying, setCopying] = useState(false)
   const [newId, setNewId] = useState('')
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  /** 套餐清单。「推荐套餐」是**从清单里选**，不让人手填 id（doc §4.4 同一条原则） */
+  const [bundles, setBundles] = useState<BundleList | null>(null)
+
+  useEffect(() => {
+    void wb
+      .bundles()
+      .then(setBundles)
+      .catch(() => setBundles(null)) // 拉不到就退化成纯展示，不挡住这一页的其他编辑
+  }, [])
 
   /** 改机型自己的一格。错误就近显示在元信息卡片头上 */
   const save = (field: MachineField, value: string | null) => {
@@ -491,8 +503,9 @@ function MachineDetail({
           <dd>{m.externalAliases.length > 0 ? m.externalAliases.join('、') : '—'}</dd>
           <dt>默认套餐</dt>
           <dd>{m.defaultBundle ?? '—'}</dd>
-          <EditableKV label="图片" value={m.image} onSave={(v) => save('image', v)} />
-          <EditableKV label="图标" value={m.icon} onSave={(v) => save('icon', v)} />
+          {/* 图片 / 图标走资产库模态框（14.6）：写的是**资产 id**，不让人手填路径 */}
+          <AssetKV label="图片" kind="image" value={m.image} onSave={(v) => save('image', v)} />
+          <AssetKV label="图标" kind="icon" value={m.icon} onSave={(v) => save('icon', v)} />
           <dt>尺寸</dt>
           <dd>{m.hasDimensions ? '已配置' : '未配置'}</dd>
           <dt>禁区</dt>
@@ -508,8 +521,23 @@ function MachineDetail({
             <button
               type="button"
               className="wb-btn"
+              disabled={m.versions.length === 0}
+              title={m.versions.length === 0 ? '这台还没有版本可当模板' : undefined}
+              onClick={() => {
+                setCopying((c) => !c)
+                setAdding(false)
+              }}
+            >
+              {copying ? '取消' : '复制已有版本…'}
+            </button>
+            <button
+              type="button"
+              className="wb-btn"
               data-tone="primary"
-              onClick={() => setAdding((a) => !a)}
+              onClick={() => {
+                setAdding((a) => !a)
+                setCopying(false)
+              }}
             >
               {adding ? '取消' : '+ 新增版本'}
             </button>
@@ -556,6 +584,19 @@ function MachineDetail({
           </div>
         )}
 
+        {/* 复制已有版本（doc §4.3 第 2–5 步 + 第 7 步的正文复制）。
+            与「新增」互斥 —— 两个表单同时开着分不清在写哪个 */}
+        {copying && (
+          <CopyVersionForm
+            m={m}
+            onDone={(next, createdId) => {
+              onChanged(next)
+              setCopying(false)
+              setOpenVersion(createdId)
+            }}
+          />
+        )}
+
         {m.versions.map((v) => {
           const open = openVersion === v.id
           return (
@@ -568,6 +609,12 @@ function MachineDetail({
                 <span className="wb-ver__name">{v.name || v.id}</span>
                 <span className="wb-ver__id">{v.id}</span>
                 {v.tag && <i className="wb-ver__tag">{v.tag}</i>}
+                {/* 14.4「参数源待补」：false = 纯继承基底。**版本照常显示**，只标注 */}
+                {!v.hasRecipe && (
+                  <i className="wb-ver__tag wb-ver__tag--todo" title="这个版本还没有自己的参数正文，全部继承机型基底">
+                    参数源待补
+                  </i>
+                )}
               </button>
               {open && (
                 <>
@@ -588,11 +635,35 @@ function MachineDetail({
                       value={v.presetFile}
                       onSave={(x) => saveVersion(v.id, 'presetFile', x)}
                     />
-                    <EditableKV
-                      label="推荐套餐"
-                      value={v.recommendedBundle}
-                      onSave={(x) => saveVersion(v.id, 'recommendedBundle', x)}
-                    />
+                    <dt>推荐套餐</dt>
+                    <dd>
+                      {/* 从套餐清单里选（只列归属这台机型的套餐）。清单没拉到就退化为纯展示 */}
+                      {bundles ? (
+                        <select
+                          className="wb-ctl"
+                          data-form="row"
+                          value={v.recommendedBundle ?? ''}
+                          onChange={(e) => void saveVersion(v.id, 'recommendedBundle', e.target.value || null)}
+                        >
+                          <option value="">—（不推荐）</option>
+                          {v.recommendedBundle &&
+                            !bundles.bundles.some((b) => b.id === v.recommendedBundle) && (
+                              <option value={v.recommendedBundle}>
+                                {v.recommendedBundle}（不在套餐清单）
+                              </option>
+                            )}
+                          {bundles.bundles
+                            .filter((b) => b.machineId === m.id)
+                            .map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.display}（{b.id}）
+                              </option>
+                            ))}
+                        </select>
+                      ) : (
+                        (v.recommendedBundle ?? '—')
+                      )}
+                    </dd>
                     <EditableKV
                       label="标签"
                       value={v.tag}
@@ -614,9 +685,270 @@ function MachineDetail({
 
       {/* 还没接上的**不摆按钮** —— 摆一个点不动的按钮比没有更糟 */}
       <p className="wb-todo">
-        「新增版本」已经能用。新增机型 / 改名 / 删除还没接上 ——
+        新增版本 / 复制已有版本 / 改版本字段 / 删除版本都已接上。新增机型 / 改机型还没接 ——
         后端的写回与逐字节保真已经就位。
       </p>
+    </>
+  )
+}
+
+/**
+ * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）+ 参数正文复制（14.5 / 第 7 步）。
+ *
+ * # 落盘语义（要与后端的裁决一致）
+ *
+ * 第一步只写**版本定义**（单文件）：`recommendedBundle` 抄模板、`presetFile`
+ * **不抄**（G-2 待删的悬空名）；`tag` / `description` 用模板值预填，人可改。
+ * 第二步（可选，默认开）复制**完整有效配方**，钉成新版本的显式覆盖 ——
+ * 复制出来的是**独立快照**：之后改模板或改基底，都不会传播到这一版。
+ *
+ * 第二步失败时第一步已经落盘（版本确实存在了）—— 界面要如实区分这两件事，
+ * 给「重试正文复制」而不是让人从头再来。
+ */
+function CopyVersionForm({
+  m,
+  onDone,
+}: {
+  m: MachineView
+  onDone: (next: MachineList, createdId: string) => void
+}) {
+  const [template, setTemplate] = useState(m.versions[0]?.id ?? '')
+  const [id, setId] = useState('')
+  const [name, setName] = useState('')
+  const [tag, setTag] = useState('')
+  const [description, setDescription] = useState('')
+  const [withRecipe, setWithRecipe] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  /** 版本定义已落盘、但正文复制失败时进入这个态：createdId 非 null */
+  const [createdId, setCreatedId] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  const pickTemplate = (tid: string) => {
+    setTemplate(tid)
+    const t = m.versions.find((v) => v.id === tid)
+    setTag(t?.tag ?? '')
+    setDescription(t?.description ?? '')
+  }
+
+  const copyRecipe = async (machineId: string, from: string, to: string) => {
+    const keys = await wb.copyRecipe(machineId, from, to)
+    return keys as number
+  }
+
+  const submit = () => {
+    setBusy(true)
+    setErr(null)
+    setNote(null)
+    void wb
+      .copyVersion(m.id, template, id.trim(), name.trim(), tag || undefined, description || undefined)
+      .then(async (next) => {
+        if (!withRecipe) {
+          onDone(next, id.trim())
+          return
+        }
+        try {
+          const keys = await copyRecipe(m.id, template, id.trim())
+          onDone(next, id.trim())
+          // onDone 之后表单卸载，这里不再有 UI 要更新
+          void keys
+        } catch (e) {
+          // 版本定义已存在 —— 如实说，给重试入口
+          setCreatedId(id.trim())
+          setErr(
+            `版本定义已写入，但复制参数正文失败：${
+              isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e)
+            }`,
+          )
+          setBusy(false)
+        }
+      })
+      .catch((e: unknown) => {
+        setErr(isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e))
+        setBusy(false)
+      })
+  }
+
+  const retryRecipe = () => {
+    if (!createdId) return
+    setBusy(true)
+    setErr(null)
+    void copyRecipe(m.id, template, createdId)
+      .then((keys) => {
+        setNote(`参数正文已复制（${keys} 项显式值）。`)
+        setBusy(false)
+      })
+      .catch((e: unknown) => {
+        setErr(isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e))
+        setBusy(false)
+      })
+  }
+
+  if (createdId) {
+    return (
+      <div className="wb-mc__add">
+        <p className="wb-todo">
+          版本 <b>{createdId}</b> 已经写入 <span className="wb-mono">{m.file}</span>
+          （在下面的列表里能看到，「参数源待补」标注的就是它）。
+        </p>
+        {note && <p className="wb-todo" data-tone="ok">{note}</p>}
+        {err && <p className="wb-todo" data-tone="danger">{err}</p>}
+        <div className="wb-ver__buttons">
+          <button type="button" className="wb-btn" onClick={() => setCreatedId(null)}>
+            返回表单
+          </button>
+          {!note && (
+            <button type="button" className="wb-btn" data-tone="primary" disabled={busy} onClick={retryRecipe}>
+              重试复制正文
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="wb-mc__add">
+      <label className="wb-mc__field">
+        <span>模板版本</span>
+        <select
+          className="wb-ctl"
+          data-form="row"
+          value={template}
+          onChange={(e) => pickTemplate(e.target.value)}
+        >
+          {m.versions.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name || v.id}（{v.id}）
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="wb-mc__field">
+        <span>新版本 ID</span>
+        <input
+          className="wb-input"
+          value={id}
+          placeholder="大写字母 / 数字 / 下划线"
+          autoFocus
+          onChange={(e) => setId(e.target.value.toUpperCase())}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+      </label>
+      <label className="wb-mc__field">
+        <span>版本名称</span>
+        <input
+          className="wb-input"
+          value={name}
+          placeholder="给人看的名字，例如 快拆版"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+      </label>
+      <label className="wb-mc__field">
+        <span>标签</span>
+        <input
+          className="wb-input"
+          value={tag}
+          placeholder="已按模板预填"
+          onChange={(e) => setTag(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+      </label>
+      <label className="wb-mc__field">
+        <span>描述</span>
+        <input
+          className="wb-input"
+          value={description}
+          placeholder="已按模板预填"
+          onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+      </label>
+      <label className="wb-mc__field wb-mc__field--check">
+        <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
+        <span>同时复制模板的完整参数正文（独立快照 —— 之后改模板 / 改基底都不影响这一版）</span>
+      </label>
+      <button type="button" className="wb-btn" data-tone="primary" disabled={busy || !id.trim() || !template} onClick={submit}>
+        {withRecipe ? '建版本并复制正文' : '只建版本定义'}
+      </button>
+      <p className="wb-mc__hint">
+        确认后**立刻写入** <span className="wb-mono">{m.file}</span>
+        （没有草稿、没有撤销）。推荐套餐抄模板；预设文件名不抄 —— 那个字段是待删除的旧悬空名。
+      </p>
+      {err && (
+        <p className="wb-todo" data-tone="danger">
+          {err}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 资产格（b05 Task 14.6）：值是**资产 id**，只能从资产库选或清空，
+ * 没有自由输入 —— 路径只有 `presets/assets.toml` 一份，手填必错。
+ */
+function AssetKV({
+  label,
+  kind,
+  value,
+  onSave,
+}: {
+  label: string
+  kind: 'image' | 'icon'
+  value: string | null
+  onSave: (next: string | null) => Promise<unknown>
+}) {
+  const [picking, setPicking] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd className="wb-kv__edit">
+        <span className="wb-kv__btn wb-kv__btn--static" title="资产 id。要换就从资产库选">
+          {value ?? '—'}
+        </span>
+        <button
+          type="button"
+          className="wb-kv__clear"
+          title="从资产库选一个"
+          disabled={busy}
+          onClick={() => setPicking(true)}
+        >
+          选择…
+        </button>
+        {value !== null && (
+          <button
+            type="button"
+            className="wb-kv__clear"
+            title="清空这一格（会把文件里那一行删掉，不是写成空串）"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true)
+              void onSave(null).finally(() => setBusy(false))
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </dd>
+      {picking && (
+        <AssetPicker
+          kind={kind}
+          current={value}
+          title={`选择${label}`}
+          onPick={(a) => {
+            setBusy(true)
+            void onSave(a.id).finally(() => {
+              setBusy(false)
+              setPicking(false)
+            })
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
     </>
   )
 }

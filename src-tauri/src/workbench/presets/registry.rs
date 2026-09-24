@@ -460,6 +460,19 @@ impl ParamRegistry {
         &self.params
     }
 
+    /// **这个版本有没有自己的参数正文**（b05 Task 14.4 / doc §4.3 第 6 步）。
+    ///
+    /// 判据：`machineVariants` 里存在 `{机型}:{版本}` 形状的键。
+    /// **只看这一张表** —— min/max 那两张是字段定义的机型特化，不是配方值
+    /// （见 `machine_min_variants` 的字段注释）。`false` = 纯继承基底 ——
+    /// 不是错误（defaults 兜底照样渲染），但界面上要标「参数源待补」：
+    /// 模板复制（14.5）之后这里翻成 true。
+    pub fn version_has_variants(&self, uid: &str) -> bool {
+        self.params
+            .iter()
+            .any(|p| p.machine_variants.contains_key(uid))
+    }
+
     pub fn param(&self, key: &str) -> Option<&ParamDef> {
         self.index.get(key).map(|i| &self.params[*i])
     }

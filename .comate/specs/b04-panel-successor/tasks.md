@@ -126,44 +126,83 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
 - [ ] Task 13: **M1 + M2 —— 建 workspace，后处理内核迁进来**
     - 盘点：✅ [TASK-13-MIGRATION-INVENTORY.md](./TASK-13-MIGRATION-INVENTORY.md)
       （只读取证：迁什么 / 依赖什么 / 怎么分类 / 怎么切批 / 拿什么验收）
-    - 盘点定案（2026-09-23，见该文件 §6）：**B2/B3 拆两笔**（零 diff 搬运 + 独立改名）；
-      bin 的三个依赖先照搬、M5 再定；两个 asset JSON 与 9 份测试用预设按
-      「搬迁 + 头注 + 记入 M5 收尾清单」处理。**写盘纪律的豁免：待决策**（§2.5 ①）
-    - 13.1: 新建 workspace 根 `Cargo.toml`，`src-tauri` 变成成员；
-      依赖版本统一（新增 `tracing-subscriber` / `clap` / `ctrlc`）。
-      另：`serde_json` 要开 `float_roundtrip` + `preserve_order`（它不是优化项，
-      是那边 golden 判据的正确性开关）—— 开了之后**我们自己的 264 条要重跑**
-    - 13.2: `mkp-ssr/crates/core` → `crates/postprocess`，**纯移动**：
-      包名 `mkpse-postprocess`、lib 名 `postprocess`，逻辑一个字不改。
-      盘点建议拆成**两笔**：先原样复制拿「内容零 diff」当搬运证据，再一笔改名 ——
-      否则机械改动与搬运错误混进同一条 diff，那 20 个测试文件全绿就不再是搬运证据了
-    - 13.3: `mkp_pp::` → `postprocess::` 全量替换（实测 64 行 / 19 文件）；
+    - 盘点定案（2026-09-23，见该文件 §6 + [TASK-13-WRITE-DISCIPLINE-OPTIONS.md](./TASK-13-WRITE-DISCIPLINE-OPTIONS.md)）：
+      **M2 拆 M2a/M2b**（零 diff 搬运 + 独立改名）；bin 的三个依赖先照搬、M5 再定；
+      两个 asset JSON 与 9 份测试用预设按「搬迁 + 头注 + 记入 M5 收尾清单」处理；
+      写盘纪律**C（源码扫描断言）为主 + A1（根上唯一一份 `clippy.toml`）为辅**，B 推迟
+    - 13.1: ✅ **已完成**（`70eed0c` 布局 + `44c5ebe` 依赖统一）。
+      根 `Cargo.toml` 建好、`src-tauri` 成成员、`Cargo.lock` 搬到根且 cargo 未改写它。
+      依赖版本统一到 `[workspace.dependencies]`；`serde_json` 开了
+      `float_roundtrip` + `preserve_order` —— **我们自己的 264 条重跑过，全绿**
+      （这一档变化没动到我们的行为）。`toml` 取 **0.8** 不取 1.x：内核用 0.8 档的 API，
+      而 M2a 的搬运证据是内容零 diff，改代码与搬运不能混在同一条 diff 里
+    - 13.2 = **M2a**（下一步）：`mkp-ssr/crates/core` → `crates/postprocess`，
+      **原样复制，连包名 `mkp-pp` / lib `mkp_pp` 都先不改**。
+      判据：121 个文件逐文件 sha256 与源一致 + `cargo test -p mkp-pp` 全绿
+    - 13.3 = **M2b**：**单独一笔机械改名**。`mkp_pp::` → `postprocess::`（实测 64 行 / 19 文件）；
       **不留过渡别名**。另有 3 处 `env!("CARGO_BIN_EXE_mkp-pp")` 是编译期宏，bin 改名必改
-    - 13.4: `src-tauri` 刻意不领 workspace lints（Tauri 的宏会碰到 `unsafe_code = forbid`）。
-      另：workspace 根的 `[lints]` **不能写 clippy 规则** —— cargo 报
+    - 13.4: ✅ workspace 根的 `[lints.rust] unsafe_code = "forbid"` 已就位，
+      `src-tauri` 刻意**不领**（Tauri 的宏与 macOS 那几段 objc2 会碰到 unsafe）。
+      另：根的 `[lints]` **不能写 clippy 规则** —— cargo 报
       `cannot override workspace.lints in lints`
     - 13.5: 判据：它自带的 20 个测试文件全绿 + 我们原有的 **264** 条仍绿 +
-      `cargo tree -d` 无重复依赖。（`274` 是 Task 12 之前的数字）
+      `cargo tree -d` **不新增说不清的重复**。
+      （"无重复依赖"不可能按字面执行：Tauri 自己的树里本来就有 53 条；
+      改口径的证据与逐项比对见 `44c5ebe` 的提交信息。`274` 也是旧数字）
+    - 分支：`feat/b04-p3-migration`（本机与远端同步），草稿 PR #11 只作为 CI 的载体 ——
+      每 push 一次自动跑一遍，不再逐批开 PR
 
-- [ ] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
-    - 14.1: 删 `crates/postprocess/assets/machine_dimensions.json` 与
-      `machine_catalog_extra.json`，改成从 `presets/machines/*.toml` +
-      `forbidden_zones/*.toml` 读（或由我们生成同形状的数据）
-    - 14.2: 那条「125 字段等值」的判据从**跨仓比对**变成**同仓单一来源**
-    - 14.3: 别名 23 条由 `externalAliases` 生成；`normalize_to_canonical` 查不到仍返回空串
-    - 14.4: 禁区未命中只 warn 不阻塞这条行为保留，但话术改成我们自己的
-    - 14.5: A2L 的路径复查：尺寸表没有它 → `load_ir` 拒它。这条要与「占位机型」口径一致
+- [x] Task 14: **M3 —— 尺寸 / 别名 / 禁区改从 `presets/` 读**
+    - 14.1: ✅ 两份 `assets/*.json` **已删**（`assets/` 目录没剩下东西）。
+      数据改成**注入**：`machine_dims::install(tables)` 或 `load_presets_dir(dir)`，
+      后者读 `presets/machines/*.toml` 的 `[dimensions]` / `externalAliases`
+      与 `presets/forbidden_zones/*.toml` 的 `[[zones]]`
+    - 14.2: ✅ 旧快照**降级成基线**（搬到 `tests/reference/legacy_snapshot/`），
+      新判据 `presets_are_the_only_source.rs` 三条：尺寸 5 台×25 字段逐字段、
+      别名 23 条逐条、禁区 3 台逐点 —— 全部相等。**内核 249 条全绿，
+      其中逐字节比对的 golden 一条没变**，这是"等价"的最强证据
+    - 14.3: ✅ 别名由 `externalAliases` + `id` 生成（键一律大写，与旧快照同语义）；
+      `normalize_to_canonical` 未命中仍返回空串（行为未动）
+    - 14.4: ✅ 禁区未命中只 warn 不阻塞的行为保留；文案本来就是我们的口吻
+      （只描述了"禁区数据为空，跳过填充"这件事，不引用任何外部仓库）
+    - 14.5: ✅ A2L 仍然没有 `[dimensions]` ⇒ 「别名认识它、尺寸表没有它」那个差集
+      仍然非空，`machine_dims_must_exist.rs` 的三条 CLI 判据继续有扫描面并通过。
+      该文件现在从 `presets/machines/*.toml` 取数（不再读那份 asset）
+    - **顺带抓到一条静默数据丢失**：`MachineFile` 少了 `rename_all = "camelCase"`，
+      于是 `externalAliases` 全被忽略 —— 别名从 23 条变 6 条、机型识别会全挂，
+      而不会有任何报错。是新判据里那条"逐条相等"抓到的
+    - **待 M5 接上**：发布物必须在启动时 `install()`（数据根在运行时才知道）；
+      现在没装时有一条逃生链（`MKPSE_PRESETS_DIR` → 仓库相对 `../../presets` → panic），
+      只为开发与测试成立，理由写在 `machine_dims.rs` 的模块文档里
 
-- [ ] Task 15: **M4 —— 预设解析迁进来，注册表合一**
-    - 15.1: `mkp-ssr/crates/preset` → `crates/preset`，**纯移动** +
-      包名 `mkpse-preset` / lib `preset`；`mkp_preset::` → `preset::`
-    - 15.2: 删 `assets/param_registry.toml`（那份分岔副本），改读
-      `presets/registry/param_registry.toml` —— **注册表从此只有一份**
-    - 15.3: 那 4 处分岔（两处 label、一处 `uiComponent`、一块 `[[params.choices]]`）
-      随之消失；加一条判据确认"只有一份"
-    - 15.4: `assets/presets/*.toml` 9 份暂留当对照基线，Task 18 删
-    - 15.5: `BUILTIN_PRESETS` 手写表改成按清单校验（缺一份要报错，不许静默）
-    - 15.6: 判据：它自带的 8 个测试文件全绿
+- [x] Task 15: **M4 —— 预设解析迁进来，注册表合一**
+    - 15.1: ✅ `mkp-ssr/crates/preset` → `crates/preset`，包名 `mkpse-preset` /
+      `[lib] name = "preset"`；`mkp_preset::` → `preset::`。拆两笔：**M4a 原样搬**
+      （35 个文件逐文件 sha256 一致、索引 blob == 工作区 35/35，先用 `exclude` 不进
+      `members` 以保住零 diff 证据）+ **M4b 机械改名**（对只读源树重放同一规则再
+      rustfmt，**32/35 逐文件相同、零处意外差异**；3 处手改精确到 3 行）
+    - 15.2: ✅ `assets/param_registry.toml` 已删，`include_str!` 与
+      `registry_edit::registry_path()` 都指 `presets/registry/param_registry.toml` ——
+      全仓 `param_registry.toml` **只剩一个文件**
+    - 15.3: ✅ 实测是 **5 处**（不是 4 处）：两处 `label`、**两处** `uiComponent`、
+      一块 `[[params.choices]]`。而且这 5 处**一条老判据都碰不到** ——
+      `label`/`uiComponent` 在 `ParamEntry` 里只有 serde 读写；`choices` 白名单在
+      `validate.rs:264` 有 `value_type == "string"` 这道门而那条参数是 `float`；
+      `build.rs:533` 那处要求 `deprecated = true`。所以新判据
+      `registry_is_the_only_source.rs` 比的是**全文字节**，不是逐字段
+      （逐字段看不见 `jsonKey`/`mergeGroup`/`showWhen` 这些它不读的键）
+    - 15.4: ✅ `assets/presets/*.toml` 9 份保留未动，Task 18 删
+    - 15.5: ✅ `builtin_presets_match_dir.rs` 三条（名字集合 / 每条内容逐字节 /
+      无重名），**用探针验过会响**：塞一份多余 toml ⇒ FAILED 且点名，撤掉 ⇒ 绿
+    - 15.6: ✅ 它自带的 8 个测试文件全绿；`cargo test -p mkpse-preset` 新基线
+      **106 条**（71 单元 + 8 个老测试文件 29 条 + 两份新判据 6 条）。切数据源后
+      **老判据一条没红**，`registry_branch_diff` 的快照也没动 ⇒ 本轮**没有动任何 golden**
+    - **口径更正**：`cargo tree -d` 基线从 **58 条 / 26 名** 变成 **61 / 27**。
+      新增 3 条（`toml_edit` 0.20.2 + 0.22.27、`winnow` 0.7.15）是「`toml` 取 0.8」
+      与「写回必须用 toml_edit 0.22」两条既有决定叠加的必然结果，不推翻其一消不掉。
+      `Cargo.lock` 只多了 `mkpse-preset` 一个条目，没引入新的第三方版本
+    - **仍然欠的**：注册表还是 `include_str!` 编进二进制（数据只有一份了，但发布物里
+      改不了）。改成运行时从数据根读 + M3 欠的 `machine_dims::install()` 接线，**两件一起挂 M5**
 
 - [ ] Task 16: **M5 —— 纵向切片：一条路走通**（原 P2）
     - 16.1: `wb_generate` 之后在**同一个进程里**用 `preset::load_ir()` 复检产物
@@ -195,6 +234,22 @@ P1 契约 1.0（`DATA-CONTRACT.md`）、A2L 占位机型的定性与话术、
 
 - [ ] Task 19: 写入纪律（原 Task 13）
     - 19.1: 所有写盘只经一处，源码扫描断言（b03 Task 10.8 一直挂着）
+      —— **纪律的覆盖面这一块已提前做完**（2026-09-24，施工文档
+      `.comate/specs/b04-preset-write-guard/`，6 笔提交），因为 M4c 把
+      `registry_edit` 指向了 `presets/` 真源，不能等到本任务再补。已落地的：
+        - `clippy.toml` 从 `src-tauri/` **上移到仓库根** ⇒ `crates/postprocess` 与
+          `crates/preset` 从此受管（此前两个成员完全不受管）；
+        - 生产 5 处 + 测试 10 处逐处写明理由与**退役条件**（那 5 处的退役条件全都指向本任务）；
+        - 源码扫描断言 `crates/preset/tests/write_discipline_scan.rs`（3 条 + 幂等门禁 1 条），
+          白名单逐条写"崩在半路会坏掉什么"，且**用探针验过会响**；
+        - 写真源那一处（`registry_edit::set_range`）上了三道闸：no-op 不写盘 /
+          落盘前"只许声明过的键变" / 落盘后回读 + 重新解析；
+        - `generate::sync_baseline` 加落点断言（它是全仓唯一能改内核判据期望值的写盘点）。
+      **本任务仍然欠的**：①「所有写盘只经**一处**」没做到 —— 现在是"每处各自原子写 +
+      逐处豁免"，`fsx::atomic` 住在 `src-tauri` 而依赖方向是 `src-tauri → preset → postprocess`，
+      要真正统一入口得把它下沉到内核（doc 里记为 B1，本轮刻意没做）；
+      ②`presets/` 的 sha256 判据仍是**人工核**，没有自动判据（要先定"什么时候允许变"，
+      而 Task 18 就要往 `presets/` 加文件）；③备份 / 回收站语义未定（见 19.3）
     - 19.2: 「外面改过」→ 一条提示，不拦不弹选择
     - 19.3: 回收站与撤销的口径复查：删版本不可逆、删值有草稿兜着，
       界面上要说成两件事

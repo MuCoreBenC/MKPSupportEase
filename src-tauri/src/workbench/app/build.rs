@@ -72,12 +72,24 @@ use super::{state, with_ctx};
 
 /* ---------- 校验 ---------- */
 
+/// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
+///
+/// 配方正文直接取 `preset::PRESET_RECIPES_TOML`（编进二进制的真源，与 `gen-presets`
+/// 咬同一份）。读不回来不报错 —— 它变成报告里的**一条**，其余检查照跑；
+/// 让预检整个失败等于把「数据坏了」变成「工具坏了」。
+///
+/// 生成闸门（[`issues::inspect`]，`wb_generate` 里那道）**刻意不含**配方对齐：
+/// 生成读参数注册表，不读配方，对不上不影响工作台的产物（见 `issues.rs` 那边的说明）。
 #[tauri::command]
 pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(issues::inspect(&Book::new(&ctx.up, &ctx.presets, &c, &d)))
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
+            let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
+                .map_err(|e| e.to_string());
+            let recipe_ref = recipe.as_ref().map_err(String::as_str);
+            Ok(issues::preflight(&book, recipe_ref))
         })
     })
 }
@@ -102,10 +114,19 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     let layers = book
         .version_layers(uid)
         .ok_or_else(|| AppError::corrupted(format!("{uid} 的取值层取不出来")))?;
+    // 机型从**我们自己那份清单**里查（`presets/machines/*.toml`，借自 `Committed.catalog`）。
+    //
+    // 以前查的是上游那份（`book.up.catalog`）—— 于是渲染任一产物都要先有上游仓库，
+    // 而机型 id 与版本 id 一样是**我们的身份**（`docs/ARCHITECTURE.md` §10.1），
+    // 上游那层正在退出（b04 Task 12）。
+    //
+    // 直接理由（b05 Task 3.3）：没有这一改，那条「渲染出来的产物 vs 真机基线」的判据
+    // 在 CI 里永远跑不起来 —— 上游不在仓库里（`local-reference/` 刻意不入库），
+    // 而它恰恰是唯一盯着这条渲染链的判据。
     let machine = book
-        .up
-        .catalog
-        .machine(&v.machine_id)
+        .machines()
+        .iter()
+        .find(|m| m.id == v.machine_id)
         .ok_or_else(|| AppError::not_found(format!("机型 {} 不存在", v.machine_id)))?;
 
     let fingerprint = layers.fingerprint();
@@ -199,9 +220,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     })
 }
 
-/// 产物文件名。**一处定义，生成与发布共用。**
-///
-/// `{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
+/// 产物文件名。`{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
 ///
 /// # 为什么是这一套，不是上游那一套
 ///
@@ -215,9 +234,25 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
 /// 上游整层删掉时（b04 Task 12）这里一个字都不用改。
 ///
 /// 版本 id 小写是跟着 `# variant:` 那一行走的 —— 同一份产物里两处指同一个东西，
-/// 大小写不一致会让人以为是两个变体
+/// 大小写不一致会让人以为是两个变体。
+///
+/// # 这是薄壳，规则不在这一层
+///
+/// 权威实现在 `crates/preset/src/generate.rs` 的 `file_name`（从 crate 根导出为
+/// `preset::preset_file_name`），规范写在 `docs/ARCHITECTURE.md` §10。**小写化在那边
+/// 发生，只发生一次。**
+///
+/// 这里以前是**第二份实现**：形状相同，但两份独立实现之间没有编译器 —— 漂移的表现
+/// 不是报错，是消费端找不到文件。b05 Task 2 把它并掉了，代价是 `mkpse-preset` 成了
+/// 依赖（`workbench` feature 下的可选依赖，见 `src-tauri/Cargo.toml`）：
+/// **默认（发布）构建的依赖图里没有它**，那 56 KB 参数注册表与 9 份内置预设也就
+/// 进不去给用户的二进制。换掉的是"一个拼字符串的函数要拖进整个内核 crate"这条顾虑，
+/// 换来的是一条规则只有一处。
+///
+/// 两边仍然可能被各自改坏 —— 连着它们的是本文件的判据
+/// `naming_matches_the_preset_crate`（逐例对两边），不是类型系统。
 pub fn preset_file_name(machine_id: &str, version_id: &str) -> String {
-    format!("{machine_id}-{}.toml", version_id.to_lowercase())
+    preset::preset_file_name(machine_id, version_id)
 }
 
 /// 行尾注释或独立注释行。**空注释不写 `# `** —— 一个孤零零的井号是噪音
@@ -339,7 +374,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
 
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
@@ -445,7 +480,7 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.up, &ctx.presets, &c, &d), &uid)?.text)
+            Ok(render(&Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d), &uid)?.text)
         })
     })
 }
@@ -482,7 +517,7 @@ pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let v = book
                 .version(&uid)
                 .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))?;
@@ -556,28 +591,20 @@ pub struct PublishReport {
     pub hints: usize,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DistAsset {
-    id: String,
-    resource_type: String,
-    machine_id: String,
-    file_name: String,
-    relative_path: String,
-    sha256: String,
-    size: u64,
-}
-
 /// 发布：把 `dist-presets/` 里的产物连同清单一起定稿。
 ///
 /// **清单最后写**：先写资源、最后写指向它们的清单。反过来的话，中途失败会留下一份
-/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现
+/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现。
+///
+/// 闸门顺序（b05 Task 13）：**校验阻断**（`issues::inspect`，13.3）→
+/// **残留拦截**（`publish_into` 开头扫描，13.4：有残留一个字节都不写）→
+/// 内容与 manifest（13.6/13.7）。落盘细节全部在 [`super::dist::publish_into`]。
 #[tauri::command]
 pub fn wb_publish() -> Result<PublishReport, AppError> {
     traced("wb_publish", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
                 return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
@@ -585,54 +612,33 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
             }
 
             let root = paths::dist_root()?;
-            let mkp = root.join("presets").join("mkp");
-            let mut assets: Vec<DistAsset> = Vec::new();
+            let asset_root = paths::assets_root()?;
+            // 发布元数据（频道 / 最低客户端）来自上游 manifest。**上游未配置时
+            // 留空并如实上报**（b05 Task 15 裁定①）：交付照样进行 —— 残留闸、
+            // 可达集合、manifest 全链不依赖上游；只是产物身份（mkp 连接键）
+            // 为空，manifest 里不会有 mkp 条目
+            let (channel, minimum_client) = match &ctx.up {
+                Some(up) => (
+                    up.manifest.compat.channel.clone(),
+                    up.manifest.compat.minimum_client.clone(),
+                ),
+                None => (String::new(), None),
+            };
+            let meta = super::dist::PublishMeta {
+                stamp: clock::now_iso8601(),
+                channel,
+                minimum_client: minimum_client.clone().unwrap_or_default(),
+                version: String::new(),
+            };
+            let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+            let stamp = meta.stamp;
 
-            for v in book.versions() {
-                let Some(p) = &v.mkp_preset else {
-                    continue; // 暂无资源：跳过，不报错
-                };
-                let path = mkp.join(preset_file_name(&v.machine_id, &v.version_id));
-                let Ok(bytes) = std::fs::read(&path) else {
-                    return Err(AppError::not_found(format!("{} 的产物还没生成", v.name))
-                        .with_detail(format!(
-                            "{} 不存在。先在生成视角里生成，再发布",
-                            path.display()
-                        )));
-                };
-                assets.push(DistAsset {
-                    // 哈希**按发布出去的那份字节算**，不抄上游的 —— 抄了就等于声明
-                    // 一个我们没验证过的哈希
-                    sha256: sha256_of(&bytes),
-                    size: bytes.len() as u64,
-                    id: p.asset_id.clone(),
-                    resource_type: "mkp_preset".to_owned(),
-                    machine_id: v.machine_id.clone(),
-                    file_name: preset_file_name(&v.machine_id, &v.version_id),
-                    relative_path: format!("presets/mkp/{}", p.file_name),
-                });
-            }
-
-            let stamp = clock::now_iso8601();
-            let manifest = serde_json::json!({
-                "manifestVersion": 2,
-                "channel": ctx.up.manifest.compat.channel,
-                "updated": stamp,
-                // **上游未声明就照实留空**，不编一个版本号出来（doc §12）
-                "minimumClient": ctx.up.manifest.compat.minimum_client.clone().unwrap_or_default(),
-                "version": ctx.up.manifest.compat.version.clone().unwrap_or_default(),
-                "assets": assets,
-                "bundles": ctx.up.manifest.bundles(),
-            });
-            // 清单最后写。`fsx::atomic` 是仓库唯一的写盘出口
-            crate::fsx::atomic::atomic_write_json(&root.join("manifest.json"), &manifest)?;
-
-            tracing::info!(files = assets.len(), at = %stamp, "发布完成");
+            tracing::info!(files = out.files, at = %stamp, "发布完成");
             Ok(PublishReport {
                 stamp,
                 root: root.display().to_string(),
-                files: assets.len(),
-                minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
+                files: out.files,
+                minimum_client,
                 todos: report.todos,
                 hints: report.hints,
             })
@@ -640,11 +646,121 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
     })
 }
 
-fn sha256_of(bytes: &[u8]) -> String {
+/// **交付目录的残留清单**（b05 Task 13.4 的查询面）。
+///
+/// 「不在本次交付集合内」的文件，按字典序。发布被残留拦下时，界面先给这一条
+/// 让人看清是什么，再决定要不要清理。
+#[tauri::command]
+pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
+    traced("wb_dist_strays", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
+            let expected = super::dist::deliverable_set(&book);
+            Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
+        })
+    })
+}
+
+/// **清理残留**（b05 Task 13.5）：显式动作，走 `workbench/.trash/dist/<stamp>/`
+/// 回收（保留相对路径，可还原），不直接删。清理完重新发布即可。
+#[tauri::command]
+pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
+    traced("wb_clean_dist_strays", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(ctx.up.as_ref(), &ctx.presets, &c, &d);
+            let expected = super::dist::deliverable_set(&book);
+            let root = paths::dist_root()?;
+            let strays = super::dist::scan_strays(&root, &expected);
+            if strays.is_empty() {
+                return Ok(0);
+            }
+            let stamp = clock::now_iso8601();
+            // 收集符号里的 `:` 会让 Windows 路径出问题，压成安全形状
+            let stamp = stamp.replace([':', ' '], "-");
+            let trash_root = paths::workbench_root()?.join(".trash");
+            let moved = super::dist::clean_strays(&root, &strays, &trash_root, &stamp)?;
+            tracing::info!(moved, at = %stamp, "交付残留已移入回收站");
+            Ok(moved)
+        })
+    })
+}
+
+/* ---------- 对照基线（b05 Task 14.9） ---------- */
+
+/// 基线 diff 的一条：产物（`BUILTIN_PRESETS`，判据保证与入库目录一份不差）vs
+/// `crates/postprocess/tests/fixtures/presets/` 的同名文件
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineDiffEntry {
+    pub file_name: String,
+    /// `same` / `changed` / `missingBaseline`。没有"产物侧缺失"：
+    /// 产物名单来自编译进二进制的表，它有判据盯着
+    pub status: String,
+    /// 两侧内容哈希前 16 位。给界面确认用 —— 哈希不同就是变了
+    pub product_sha: String,
+    pub baseline_sha: Option<String>,
+}
+
+/// **基线 diff**（14.9 的第①步，**只读**）：列出九份产物的同步状态，
+/// 人看过这份清单、点确认，才轮到 [`wb_sync_baseline`] 写。
+///
+/// 为什么产物侧用 `BUILTIN_PRESETS` 而不是读盘：那张表有判据
+/// （`builtin_presets_match_dir`）保证与入库目录**一份不差**，编译进二进制
+/// 意味着"发布者看到的"与"用户二进制里带的"是同一份。
+#[tauri::command]
+pub fn wb_baseline_diff() -> Result<Vec<BaselineDiffEntry>, AppError> {
+    traced("wb_baseline_diff", |_| {
+        Ok(baseline_diff_against(&preset::generate::fixtures_dir()))
+    })
+}
+
+/// diff 的领域体：对哪份基线目录比对由调用方给 ——
+/// 判据要在系统临时目录的基线上做反向走查（落点闸允许的那个豁免）
+fn baseline_diff_against(fixtures: &std::path::Path) -> Vec<BaselineDiffEntry> {
+    let mut out = Vec::new();
+    for (name, content) in preset::BUILTIN_PRESETS {
+        let product_sha = short_sha(content.as_bytes());
+        let baseline_bytes = std::fs::read(fixtures.join(name));
+        let (status, baseline_sha) = match &baseline_bytes {
+            Ok(b) if b.as_slice() == content.as_bytes() => ("same", short_sha(b)),
+            Ok(b) => ("changed", short_sha(b)),
+            Err(_) => ("missingBaseline", String::new()),
+        };
+        out.push(BaselineDiffEntry {
+            file_name: (*name).to_owned(),
+            status: status.to_owned(),
+            product_sha,
+            baseline_sha: (!baseline_sha.is_empty()).then_some(baseline_sha),
+        });
+    }
+    out
+}
+
+/// **同步对照基线**（14.9 的第②步，**显式写入动作**）。
+///
+/// 前提：人已经看过 [`wb_baseline_diff`] 的清单并确认。这里直接转调
+/// `preset::generate::sync_baseline` —— **落点闸在它内部**
+/// （`check_baseline_target` 只认真 fixtures 目录或系统临时目录），src-tauri
+/// 不经手路径，也就没有绕过闸的口子。内容相同的自动跳过，返回真正写入的份数。
+#[tauri::command]
+pub fn wb_sync_baseline() -> Result<usize, AppError> {
+    traced("wb_sync_baseline", |_| {
+        let n = preset::generate::sync_baseline(
+            &preset::generate::assets_dir(),
+            &preset::generate::fixtures_dir(),
+        )
+        .map_err(|e| AppError::invalid_argument("基线同步被拒绝").with_detail(e))?;
+        tracing::info!(synced = n, "对照基线已同步（人工确认后）");
+        Ok(n)
+    })
+}
+
+fn short_sha(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(bytes);
-    format!("{:x}", h.finalize())
+    let h = Sha256::digest(bytes);
+    format!("{:x}", h).chars().take(16).collect()
 }
 
 #[cfg(test)]
@@ -652,7 +768,100 @@ mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
+    use crate::workbench::presets::Presets;
     use crate::workbench::store::Store;
+    use std::collections::BTreeSet;
+
+    /* ---------- 对照基线（b05 Task 14.9） ---------- */
+
+    /// **真数据只读锚点**：当前产物与基线应当逐字节相同（K-G0' 绿的现状），
+    /// 所以 diff 必须是 9 条全 `same`。这条同时验证 diff 命令**只读**：
+    /// 它跑前后基线目录的文件集合不能变。
+    #[test]
+    fn the_real_baseline_diff_reports_all_same() {
+        let fixtures = preset::generate::fixtures_dir();
+        let before: BTreeSet<String> = walk_shas(&fixtures);
+        let out = wb_baseline_diff().expect("diff");
+        assert_eq!(
+            out.len(),
+            9,
+            "BUILTIN_PRESETS 是 9 份 —— 名单变了就说清为什么"
+        );
+        let not_same: Vec<_> = out.iter().filter(|e| e.status != "same").collect();
+        assert!(
+            not_same.is_empty(),
+            "真产物与基线应当全绿，却有：{not_same:?} —— 谁改了没同步？"
+        );
+        let after: BTreeSet<String> = walk_shas(&fixtures);
+        assert_eq!(before, after, "diff 是只读的，不许动基线目录");
+    }
+
+    /// **反向走查（在系统临时目录做，落点闸明确允许；真基线一个字节不碰）**：
+    /// 改一份基线 → diff 报 `changed` → sync 写入 → diff 回到全 `same`，
+    /// 且写入后的字节与产物**逐字节相同**。未经确认直接写在这里不存在 ——
+    /// sync 是显式命令，判据同时证明它**只动 diff 说过的那一份**
+    #[test]
+    fn sync_baseline_writes_exactly_what_the_diff_named() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fixtures = tmp.path().to_path_buf();
+        // 铺 9 份与产物相同的基线
+        for (name, content) in preset::BUILTIN_PRESETS {
+            crate::fsx::atomic::atomic_write(&fixtures.join(name), content.as_bytes()).unwrap();
+        }
+        // 改其中一份（反向：diff 必须抓到）
+        let victim = preset::BUILTIN_PRESETS[0].0;
+        crate::fsx::atomic::atomic_write(
+            &fixtures.join(victim),
+            format!("{}\n# 改过了\n", preset::BUILTIN_PRESETS[0].1).as_bytes(),
+        )
+        .unwrap();
+
+        let out = baseline_diff_against(&fixtures);
+        let changed: Vec<_> = out.iter().filter(|e| e.status == "changed").collect();
+        assert_eq!(changed.len(), 1, "恰好一份变了：{changed:?}");
+        assert_eq!(changed[0].file_name, victim);
+        assert!(changed[0].baseline_sha.is_some());
+
+        // sync（tempdir 在落点闸的允许清单里）：只写那一份，其余跳过
+        let n = preset::generate::sync_baseline(&preset::generate::assets_dir(), &fixtures)
+            .expect("sync");
+        assert_eq!(n, 1, "只同步 diff 点名的那一份");
+
+        // 重回全绿，且那份的字节与产物逐字节相同
+        let out2 = baseline_diff_against(&fixtures);
+        assert!(out2.iter().all(|e| e.status == "same"), "sync 后必须全绿");
+        assert_eq!(
+            std::fs::read(fixtures.join(victim)).unwrap(),
+            preset::BUILTIN_PRESETS[0].1.as_bytes(),
+            "写入的字节就是产物本体"
+        );
+    }
+
+    /// 目录里全部文件的 sha 指纹（文件名 → sha 前 16），给"只读"断言用
+    fn walk_shas(dir: &std::path::Path) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        fn walk(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    let bytes = std::fs::read(&p).unwrap_or_default();
+                    out.insert(format!(
+                        "{}:{}",
+                        p.file_name()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default(),
+                        short_sha(&bytes)
+                    ));
+                }
+            }
+        }
+        if dir.is_dir() {
+            walk(dir, &mut out);
+        }
+        out
+    }
 
     fn setup() -> (tempfile::TempDir, Fixture, Committed) {
         let dir = tempfile::tempdir().unwrap();
@@ -689,7 +898,7 @@ mod tests {
     fn rendered_toml_parses_and_keeps_the_values() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
         assert!(r.text.starts_with("# uuid: "));
@@ -727,34 +936,41 @@ mod tests {
 
     /// **M0：我们渲染出来的产物 vs 真机验证过的那份基线。**（b04 Task 11）
     ///
-    /// 这是整个迁移的前置判据。基线是 `mkp-ssr` 里那 9 份内置预设之一 ——
-    /// 它们由那边的 `gen-presets` 从 `preset_recipes.toml` 生成，**上过真机**。
-    /// 我们这条链（`presets/*.toml` → `render()`）算出来的如果与它正文字节相同，
-    /// 说明两套真源等值、迁移不需要修数据；不同就必须先定哪边对 ——
-    /// 搬完 3 万行代码再发现值对不上，会留下一批"生成出来但和验证过的不一样"的产物，
-    /// 而那种错在产物上看不出来。
+    /// 这是整个迁移的前置判据。基线是那 9 份内置预设 —— 它们由 `gen-presets` 从
+    /// `preset_recipes.toml` 生成，**上过真机**。我们这条链（`presets/*.toml` → `render()`）
+    /// 算出来的如果与它正文字节相同，说明两套真源等值、迁移不需要修数据；
+    /// 不同就必须先定哪边对 —— 搬完 3 万行代码再发现值对不上，会留下一批
+    /// "生成出来但和验证过的不一样"的产物，而那种错在产物上看不出来。
     ///
     /// 比的是**正文**：`uuid` 与 `release_time` 两行按定义就该不同
     /// （前者按内容指纹算、后者是当下时间），它们不参与比较。
     ///
-    /// 基线路径是兄弟仓库，找不到就跳过 —— 这条判据的寿命到 Task 22.2 为止
-    /// （那时基线会被删掉，因为那时只有我们一份）。
+    /// # 基线在仓内，配对认身份不认文件名（b05 Task 3.3）
+    ///
+    /// 基线以前指向兄弟仓库 `../mkp-ssr/crates/preset/assets/presets`：开发机上有它、
+    /// CI 上没有 —— 于是在 CI 里这条判据一次都没跑过（那句"没找到基线目录"连颜色都不变）。
+    /// 现在改指 `preset::generate::fixtures_dir()`：**仓内那 9 份，与旧仓那份逐字节相同**
+    /// （sha256 9/9 一致，只差文件名），判据的强度没有变，但它从此在 CI 里也真跑。
+    ///
+    /// 配对**按文件头的 `# machine:` / `# variant:`**，不按文件名：夹具那边现在还是
+    /// 云端那套名字（`A1MF_260628.toml`），b05 Task 5 会把它们改成产物命名
+    /// （`A1_MINI-fastv3.3.toml`）。两套名字都配得上，这条判据不用跟着改。
+    ///
+    /// # 反空转：9 份一份都不能少
+    ///
+    /// 基线少了、同一身份重了、或某一份没被任何版本配上，都直接失败 ——
+    /// 一条"比了 0 份"的判据比没有判据更坏，因为它是绿的。
     #[test]
     fn our_render_matches_the_machine_verified_baseline() {
-        let (Some(_), Some(_)) = (paths::presets_root(), paths::upstream_root()) else {
-            eprintln!("没同时定位到 presets 与上游，这条 M0 检查未执行（不是通过）");
-            return;
-        };
-        let baseline_dir = paths::repo_root().join("../mkp-ssr/crates/preset/assets/presets");
-        if !baseline_dir.is_dir() {
-            eprintln!(
-                "没找到基线目录 {}，这条 M0 检查未执行（不是通过）",
-                baseline_dir.display()
-            );
-            return;
-        }
-
-        let up = crate::workbench::upstream::Upstream::load().expect("真上游");
+        // 上游只为让 `Book` 有个 `up` 可指：**机型与版本全部来自我们自己那份清单**
+        // （`presets/machines/*.toml`），`render()` 已经不再查上游（见那边那段注释），
+        // 所以夹具上游一个字节都进不了比对的正文。
+        //
+        // 为什么用夹具而不是真上游：真上游在仓库外（`local-reference/` 刻意不入库），
+        // 拿它的存在当条件，这条判据在 CI 里就永远跳过 —— 而它恰恰是唯一盯着
+        // 这条渲染链的判据。夹具是自造的，任何环境里都在。
+        // （哪天 `Book` 不再持有 `up`，这里连夹具都不用造：b04 Task 12 的收尾。）
+        let fixture = Fixture::load();
         let presets = crate::workbench::presets::Presets::load().expect("真 presets");
         let tmp = tempfile::tempdir().unwrap();
         let store = crate::workbench::store::Store::at(tmp.path());
@@ -763,7 +979,52 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&up, &presets, &c, &draft);
+        let book = Book::new(Some(&fixture.up), &presets, &c, &draft);
+
+        /// 基线目录按**身份**索引：`(机型 id, 版本 id 小写)` → 文件。
+        ///
+        /// 读不出来的、同一身份出现两次的，都在这里直接报错：静默跳过会让这条判据
+        /// 悄悄少比几份，而它看起来还是绿的。
+        fn baseline_by_identity(
+            dir: &std::path::Path,
+        ) -> BTreeMap<(String, String), std::path::PathBuf> {
+            let mut out: BTreeMap<(String, String), std::path::PathBuf> = BTreeMap::new();
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("读不到基线目录 {}：{e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("目录项").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("读不到 {}：{e}", path.display()));
+                let file = preset::read_preset_from_bytes(text)
+                    .unwrap_or_else(|e| panic!("{} 读不出来：{e}", path.display()));
+                let variant = file.variant.as_deref().unwrap_or_else(|| {
+                    panic!("{} 的文件头没有 `# variant:`，身份认不出来", path.display())
+                });
+                let key = (file.machine.clone(), variant.to_lowercase());
+                if let Some(prev) = out.insert(key.clone(), path.clone()) {
+                    panic!(
+                        "基线 {:?} 有两份：{} 与 {}",
+                        key,
+                        prev.display(),
+                        path.display()
+                    );
+                }
+            }
+            out
+        }
+
+        let baseline_dir = preset::generate::fixtures_dir();
+        let baselines = baseline_by_identity(&baseline_dir);
+        assert_eq!(
+            baselines.len(),
+            9,
+            "基线应当正好 9 份（实测 {}）：{:?} —— 是谁动的？",
+            baselines.len(),
+            baselines.keys().collect::<Vec<_>>()
+        );
 
         /// 去掉那两行按定义会变的头部
         fn body(s: &str) -> String {
@@ -787,13 +1048,17 @@ mod tests {
         let mut compared = 0usize;
         let mut value_diff: Vec<String> = Vec::new();
         let mut order_only: Vec<String> = Vec::new();
+        let mut matched: Vec<(String, String)> = Vec::new();
         for v in book.versions() {
+            // 产物名只进报告（它比 uid 更接近用户看到的东西）；配对靠的是身份
             let name = preset_file_name(&v.machine_id, &v.version_id);
-            let path = baseline_dir.join(&name);
-            let Ok(want) = std::fs::read_to_string(&path) else {
-                continue; // 基线里没有这一份（A2L 就是这样）—— 不是差异
+            let key = (v.machine_id.clone(), v.version_id.to_lowercase());
+            let Some(path) = baselines.get(&key) else {
+                continue; // 没有基线的版本（A2L 那台占位就是这样）—— 不是差异
             };
+            let want = std::fs::read_to_string(path).expect("读基线");
             let got = render(&book, &v.uid).expect("渲染得出来").text;
+            matched.push(key);
             compared += 1;
             let (a, b) = (body(&got), body(&want));
             if a == b {
@@ -813,7 +1078,25 @@ mod tests {
             ));
         }
 
-        assert!(compared > 0, "一份都没比到，这条判据在空转");
+        // 反空转①：9 份基线一份不少地配上号。
+        // 配不上只有一种原因：`presets/machines/*.toml` 里那条身份没了（改名/删版本），
+        // 而基线还留着 —— 那种情况必须有人处置，不能靠 `continue` 悄悄少比一份
+        let unmatched: Vec<&(String, String)> =
+            baselines.keys().filter(|k| !matched.contains(*k)).collect();
+        assert!(
+            unmatched.is_empty(),
+            "基线里有 {} 份没配上任何版本：{unmatched:?} —— \
+             `presets/machines/*.toml` 与夹具的身份对不上了",
+            unmatched.len()
+        );
+        // 反空转②：比到的份数 == 基线份数（上面那条为空 + 一对一配对 ⇒ 这条冗余，
+        // 它写在这是为了让「基线 9 份、比了 9 份」成为一句能直接读的结论）
+        assert_eq!(
+            compared,
+            baselines.len(),
+            "比了 {compared} 份，基线有 {} 份",
+            baselines.len()
+        );
         assert!(
             value_diff.is_empty(),
             "**值不一致**（比了 {compared} 份）—— 这要先定哪边对，不能直接搬代码：\n{}",
@@ -850,7 +1133,7 @@ mod tests {
     fn rendering_is_deterministic_apart_from_the_timestamp() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let a = render(&book, "A1/STANDARD").unwrap();
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
@@ -863,7 +1146,11 @@ mod tests {
     fn changing_a_value_changes_the_output() {
         let (_d, f, c) = setup();
         let mut draft = Draft::default();
-        let before = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let before = render(
+            &Book::new(Some(&f.up), &f.presets, &c, &draft),
+            "A1/STANDARD",
+        )
+        .unwrap();
 
         apply(
             &mut draft,
@@ -877,7 +1164,11 @@ mod tests {
             }],
         )
         .unwrap();
-        let after = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let after = render(
+            &Book::new(Some(&f.up), &f.presets, &c, &draft),
+            "A1/STANDARD",
+        )
+        .unwrap();
 
         assert!(!same_payload(&before.text, &after.text));
         assert_ne!(before.fingerprint, after.fingerprint);
@@ -930,7 +1221,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
         let r = issues::inspect(&book);
         assert!(r.blocked());
         assert!(!w::disabled::BUILD_BLOCKED.is_empty());
@@ -942,7 +1233,7 @@ mod tests {
     fn a2l_renders_but_is_skipped_by_generate() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
 
         let r = render(&book, "A2L/STANDARD").unwrap();
         assert!(r.text.contains("# machine: A2L"));
@@ -973,7 +1264,7 @@ mod tests {
     fn skipping_a_placeholder_machine_names_the_real_reason() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(Some(&f.up), &f.presets, &c, &draft);
 
         let a2l = book
             .machines()
@@ -1017,6 +1308,89 @@ mod tests {
             report.first_block().is_none(),
             "占位机型把整批生成挡住了：{:?}",
             report.first_block().map(|b| b.title.clone())
+        );
+    }
+
+    /// 薄壳与权威实现逐例相等 —— 这是连着两处的**那根线**。
+    ///
+    /// 命名规则现在只有一处（`preset::preset_file_name`），这里只转调；但"转调"本身
+    /// 没有类型系统兜底：哪天有人在薄壳里再补一次 `to_lowercase()`、或把分隔符从 `-`
+    /// 改成 `_`，编译照样过，红的是消费端的查找。所以拿一组能区分行为的输入两边各算一遍。
+    ///
+    /// 输入刻意选在规则的每条边界上：版本 id 大小写混写（小写化在哪一侧发生）、
+    /// 机型 id 含 `_`（它必须原样保留）、版本 id 含 `.`（`fastv3.3` 那种）。
+    #[test]
+    fn naming_matches_the_preset_crate() {
+        for (machine, version) in [
+            ("A1", "standard"),
+            ("A1", "FASTV3.3"),
+            ("A1", "Fast"),
+            ("A1_MINI", "STANDARD"),
+            ("A1_MINI", "FastV3.3"),
+            ("P1S", "lite"),
+            ("X1C", "LITE"),
+        ] {
+            assert_eq!(
+                preset_file_name(machine, version),
+                preset::preset_file_name(machine, version),
+                "{machine}:{version} —— 两处算出的文件名不同，规则已经分岔"
+            );
+        }
+    }
+
+    /// **渲染的机型取自我们自己的清单，不是上游那一份。**（b05 Task 3.3 的审查结论）
+    ///
+    /// 为什么它要有自己的一条判据：`render()` 以前用 `book.up.catalog.machine()` 查机型，
+    /// 改成 `book.machines()`（`presets/machines/*.toml`）之后确实变了一处行为 ——
+    /// 「上游清单里没有这台」不再让渲染失败。这不是为了让某条判据跑通而松掉的检查，
+    /// 而是把归属摆正（机型 id 与版本 id 一样是我们的身份，`docs/ARCHITECTURE.md` §10.1），
+    /// 所以它得单独钉住，而不是躲在 M0 那条的阴影里。
+    ///
+    /// 反空转靠**挑一台夹具上游不认的机型**：夹具上游只认 A1 / A2L / P1S
+    /// （`testkit::FIXTURE_MACHINES`），而真 `presets/` 里有 A1_MINI。
+    /// 哪天有人把机型查询改回上游那份，这里会以「机型 A1_MINI 不存在」红 ——
+    /// 与 M0 那条红在同一行代码上，但两条各自指认不同的原因。
+    #[test]
+    fn render_takes_the_machine_from_our_own_catalog() {
+        // 前提反空转①：夹具上游**确实不认** A1_MINI（不然这条判据在空转）
+        let fixture = Fixture::load();
+        assert!(
+            fixture.up.catalog.machine("A1_MINI").is_none(),
+            "夹具上游认了 A1_MINI，这条判据的前提没了 —— 换一台它不认的机型"
+        );
+
+        // 前提反空转②：真 presets/ 必须有它 —— 清单在我们这边
+        let presets = crate::workbench::presets::Presets::load().expect("真 presets");
+        assert!(
+            presets.catalog.machine("A1_MINI").is_some(),
+            "真 presets 里没有 A1_MINI，前提没了"
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::workbench::store::Store::at(tmp.path());
+        store.bootstrap().unwrap();
+        let c = super::super::storage::load(&store, &presets)
+            .expect("干净仓库读得通")
+            .committed;
+        let draft = Draft::default();
+        let book = Book::new(Some(&fixture.up), &presets, &c, &draft);
+
+        let v = book
+            .versions()
+            .iter()
+            .find(|v| v.machine_id == "A1_MINI")
+            .expect("真 presets 里应当有 A1_MINI 的版本");
+        let r = render(&book, &v.uid).expect("上游认不认这台机型，都不该影响渲染");
+
+        assert!(
+            r.text.contains(&format!("# machine: {}\n", v.machine_id)),
+            "`# machine:` 那一行不是我们清单里的 id：{:?}",
+            r.text.lines().take(4).collect::<Vec<_>>()
+        );
+        assert!(
+            r.file_name.starts_with("A1_MINI-"),
+            "产物名没跟着我们清单里的机型 id 走：{}",
+            r.file_name
         );
     }
 
@@ -1064,6 +1438,224 @@ mod tests {
         assert_eq!(
             got, want,
             "产物名与消费端认的那一批不一致 —— 它会找不到文件，而两边都不报错"
+        );
+    }
+
+    /* ---------- 端到端（b05 Task 14.8 / doc §4.3 的 11 步） ---------- */
+
+    /// **doc §4.3 的 11 步在隔离环境走通**（14c 的验收判据）。
+    ///
+    /// 形态照实说：
+    /// - `wb_*` 命令是薄壳（真仓库 `Presets::load()` / `dist_root()`，进不了单测，
+    ///   见 [`wb_generate`] 的注释）；前端手势 → 命令 → 领域体的对应由
+    ///   HANDOFF §2 的静态核对锁定。这里按**领域体**走 11 步，每一步的输入都是
+    ///   上一步**落盘后从盘重读**的结果 —— 与 UI 的真实往返同构
+    ///   （前端每次写完拿到的都是重读清单）。
+    /// - 上游用夹具（CI 上没有真 mkpse-presets，与 11.9 / 12.6 同一边界）。
+    /// - 第 10 步的落盘走查在系统临时目录的基线上（落点闸明确允许的豁免）；
+    ///   真 fixtures 是判据资产，由 `the_real_baseline_diff_reports_all_same` 锁只读。
+    /// - 复制出的 E2E 版本**不进交付集合**：`mkp_preset` 连接键来自上游 manifest
+    ///   （derive.rs），夹具/真上游没登记它之前交付侧不认 —— 这与 13.8 真数据判据
+    ///   「夹具上游不认的 6 版留给真上游」同一条契约，不是链路断点；
+    ///   真数据上这形状由 `upstream_drift`（11.9）报出来。
+    #[test]
+    fn the_eleven_steps_of_doc_4_3_run_end_to_end() {
+        /* ── 环境：夹具临时目录当"盘"，store 建齐工作台子目录 ── */
+        let (fx_dir, up, _presets) = Fixture::load().into_parts();
+        let presets_root = fx_dir.path().join("presets");
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+
+        /* 步 1「进入 A1 的版本管理」：盘上重读清单，模板版本在 */
+        let p = Presets::load_from(&presets_root).unwrap();
+        let template_bundle = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "FAST")
+            .expect("夹具 A1 有 FAST 版可当模板")
+            .recommended_bundle
+            .clone();
+
+        /* 步 2–5「复制已有版本」：选模板 → 填 id/name/tag/description（前端预填
+        模板值）→ 保存 = **只写版本定义**（机型文件一个文件） */
+        let mut p = p;
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .copy_version("FAST", "E2E", "端到端版", Some("快拆"), Some("14c 验收"))
+            .unwrap();
+        p.catalog.write_machine("A1").unwrap();
+
+        // 步 5（续）：落盘重读 —— 界面看到的必须是落盘结果
+        let p = Presets::load_from(&presets_root).unwrap();
+        let e2e = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "E2E")
+            .expect("落盘后清单里有 E2E");
+        assert_eq!(e2e.recommended_bundle, template_bundle, "推荐套餐随复制走");
+        assert!(
+            e2e.preset_file.is_none(),
+            "G-2：复制刻意不抄 presetFile（悬空名不扩散）"
+        );
+        assert_eq!(e2e.tag.as_deref(), Some("快拆"), "tag 预填值落盘");
+
+        /* 步 6「参数源待补」：版本照常显示，标注 hasRecipe=false（14.4 的判据来源） */
+        assert!(!p.registry.version_has_variants("A1:E2E"));
+
+        /* 步 7「进参数编辑器改值」：复制模板完整有效配方，钉成显式覆盖（14.5） */
+        let mut p = p;
+        let keys = crate::workbench::app::copy_recipe(&mut p, "A1", "FAST", "E2E").unwrap();
+        assert!(keys > 0, "模板的有效配方不应为空");
+        // 反向（CopyVersionForm「重试复制正文」路径的后端语义）：版本不在清单 →
+        // 拒绝且错误可读 —— 失败时版本定义不回滚，界面据实分态
+        let err = crate::workbench::app::copy_recipe(&mut p, "A1", "FAST", "NO_SUCH").unwrap_err();
+        assert!(
+            err.message.contains("先复制版本定义"),
+            "实测：{}",
+            err.message
+        );
+        // 落盘重读：显式值真的进了 registry
+        let p = Presets::load_from(&presets_root).unwrap();
+        assert!(
+            p.registry.version_has_variants("A1:E2E"),
+            "复制落了盘，第 6 步的「待补」翻正"
+        );
+
+        /* 步 8「进检查」：清单重建走 storage::load —— 与 `Ctx::reload_from_disk`
+        同一条真实路径（机型页直写 presets/，生成视角靠重载看见它） */
+        let loaded = crate::workbench::app::storage::load(&store, &p).unwrap();
+        let draft = Draft::default();
+        let book = Book::new(Some(&up), &p, &loaded.committed, &draft);
+        assert!(
+            book.version("A1/E2E").is_some(),
+            "机型页落盘的新版本在生成视角可见"
+        );
+        let recipe =
+            preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML).map_err(|e| e.to_string());
+        let report = issues::preflight(&book, recipe.as_ref().map_err(String::as_str));
+        assert_eq!(
+            report.blocks,
+            0,
+            "参数源已补则检查全绿，却有阻断：{:?}",
+            report
+                .issues
+                .iter()
+                .map(|i| (i.severity, i.title.clone()))
+                .collect::<Vec<_>>()
+        );
+
+        /* 步 9「进生成，看 diff」：渲染 + 唯一命名 + 落盘 */
+        let r = render(&book, "A1/E2E").unwrap();
+        assert_eq!(
+            r.file_name,
+            preset::preset_file_name("A1", "E2E"),
+            "产物名由命名函数算出，前端没有第二份实现"
+        );
+        let _: toml::Table = r.text.parse().expect("渲染产物必须是合法 TOML");
+        // 独立快照落到产物侧：E2E 的有效值此刻与模板逐键一致。
+        // 逐键按 f64 比而不是 serde_json 的表示相等 —— 复制的显式值经过
+        // JSON 往返，整数会以浮点表示落回（4 → 4.0），值语义没变；这本身
+        // 就是「复制 = 显式覆盖」的旁证（继承值保持原表示，显式值过一遍存取）
+        let rt = render(&book, "A1/FAST").unwrap();
+        assert_eq!(r.snapshot.len(), rt.snapshot.len(), "键数一致");
+        for (k, v) in &rt.snapshot {
+            let got = r.snapshot.get(k).unwrap_or_else(|| panic!("键 {k} 缺失"));
+            match (v.as_f64(), got.as_f64()) {
+                (Some(a), Some(b)) => assert_eq!(a, b, "键 {k} 的值复制后不一致"),
+                _ => assert_eq!(got, v, "键 {k} 复制后不一致"),
+            }
+        }
+
+        /* 步 10「审阅 diff 后同步基线」：diff → 确认 → sync → **重读 diff**。
+        产物源是编译期 assets_dir（只读）；基线在系统临时目录（落点闸允许） */
+        let fixtures = tempfile::tempdir().unwrap();
+        for (name, content) in preset::BUILTIN_PRESETS {
+            crate::fsx::atomic::atomic_write(&fixtures.path().join(name), content.as_bytes())
+                .unwrap();
+        }
+        assert!(
+            baseline_diff_against(fixtures.path())
+                .iter()
+                .all(|e| e.status == "same"),
+            "先把基线铺成与九份产物全绿"
+        );
+        let victim = preset::BUILTIN_PRESETS[0].0;
+        crate::fsx::atomic::atomic_write(
+            &fixtures.path().join(victim),
+            format!("{}\n# 端到端走查\n", preset::BUILTIN_PRESETS[0].1).as_bytes(),
+        )
+        .unwrap();
+        let diff = baseline_diff_against(fixtures.path());
+        assert_eq!(
+            diff.iter().filter(|e| e.status == "changed").count(),
+            1,
+            "diff 只报改过的那一份，其余仍是 same"
+        );
+        let n = preset::generate::sync_baseline(&preset::generate::assets_dir(), fixtures.path())
+            .unwrap();
+        assert_eq!(n, 1, "sync 只写 diff 说过的那一份");
+        assert!(
+            baseline_diff_against(fixtures.path())
+                .iter()
+                .all(|e| e.status == "same"),
+            "同步完成后**重读 diff**，状态以重读为准 —— 全绿"
+        );
+
+        /* 步 11「进发布」：交付集合闭合 + publish_into 全链（残留闸 → 内容 →
+        资产复制 → manifest 最后写） */
+        let dist = tempfile::tempdir().unwrap();
+        for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
+            crate::fsx::atomic::atomic_write(
+                &dist.path().join("presets").join("mkp").join(name),
+                format!("# preset {name}").as_bytes(),
+            )
+            .unwrap();
+        }
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        let expected = crate::workbench::app::dist::deliverable_set(&book);
+        assert_eq!(
+            expected.len(),
+            11,
+            "content 3 + manifest 1 + assets 4 + mkp 3（12.6 的夹具锚）；\
+             E2E 不在其中 —— 它的 mkp 连接键在上游 manifest，登记前不进交付"
+        );
+        assert!(!expected.contains("presets/mkp/A1-e2e.toml"));
+        let meta = crate::workbench::app::dist::PublishMeta {
+            stamp: "2026-09-24T00:00:00Z".to_owned(),
+            channel: "stable".to_owned(),
+            minimum_client: String::new(),
+            version: String::new(),
+        };
+        let out =
+            crate::workbench::app::dist::publish_into(dist.path(), asset_root.path(), &book, &meta)
+                .unwrap();
+        assert_eq!(out.presets, 3);
+        assert_eq!(out.assets_copied, 4);
+        // manifest 最后写（13.7）：条目 = mkp 3 + 资产 4，哈希按发布出去的字节算
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dist.path().join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["assets"].as_array().unwrap().len(),
+            7,
+            "mkp 3 + 资产 4"
         );
     }
 }

@@ -1,0 +1,223 @@
+# 资产域①层：**一份集中定义**（b05 Task 8）。
+#
+# 这里登记我们管的资产：图片 / 图标 / 模型 / 切片器预设（BBS）四类。
+# **文件本体不在这里** —— 它们在资产根 `<repo>/public/assets/` 下，条目里的 `path`
+# 就是相对那个根的一段（前端按 `/assets/<path>` 取）。
+#
+# 为什么一份文件而不是一资产一文件：旧仓 `source/assets/*.toml` 是 18 份、一资产一文件，
+# 加一张图就要新建一个文件，而"这批资产都属于 A1"这句话在目录里看不出来（doc §8）。
+# 门槛：超过 20 个条目再拆（doc §8）。
+#
+# **这里不写什么**：
+# - 不写 `fileName`：路径只有 `path` 一处（旧仓同时存 `fileName` 与 `relativePath`）
+# - 不写 `sha256` / `size`：那是**交付物**的属性，发布时按真实字节算（Task 13.6）
+# - **不给 MKP 预设建条目**：它的路径由命名规则算出（doc §12.5），登记一份就是冗余
+#
+# 一条的形状（`type` 取值：`image` | `icon` | `model` | `slicerProfile`）：
+#
+#   [[assets]]
+#   id = 'a1-image'                   # 主键，**大小写不敏感**唯一
+#   type = 'image'
+#   machineId = 'A1'                  # 归属机型；不属于任何机型时整行省略
+#   name = 'A1 外观图'                # 给人看的名字
+#   path = 'printers/a1.webp'         # 相对资产根，不许越界（拒绝对路径与 `..`）
+#
+# 切片器预设多两项（G-3：切片器是**开放的扩展维度**，今天只有 bbs）：
+#
+#   [[assets]]
+#   id = 'a1-bbs-02-010'
+#   type = 'slicerProfile'
+#   machineId = 'A1'
+#   name = 'A1 0.2 喷头 0.10 层高'
+#   path = 'bbs/A1/MKPProcess A1 0.2 0.10.json'
+#   slicer = 'bbs'
+#   profile = 'process'               # 该切片器下的档位（旧仓的 category）
+#
+# ==================== 条目（b05 Task 9 落地） ====================
+#
+# `id` 的写法是**建议约定**，判据只管两条：唯一 + 大小写不敏感。
+#   机型相关的：`{机型 id 小写}-{语义}`（`a1-image` / `a1_mini-icon`）
+#   不属于某一台的：按源文件语义（`mkp-support-test-models`）
+# `machineId` 是**归属**（这份东西为谁做的），不是唯一的使用者 —— 图标 `p1s-icon`
+# 归 P1S，而 P2S / X1C 的 `icon` 字段也指向它（共享一件素材是允许的）。
+
+# ---------------- 机型图 ----------------
+#
+# 4 张是新版大图（原来在 `public/printers/bambu/`，Task 9 搬进来的）；
+# **P2S / X1C 暂用旧仓那两张**（裁决 2026-09-24：不为一缺两张图阻塞迁移，将来补新的再换）。
+
+[[assets]]
+id = 'a1-image'
+type = 'image'
+machineId = 'A1'
+name = 'A1 外观图'
+path = 'printers/a1.webp'
+
+[[assets]]
+id = 'a1_mini-image'
+type = 'image'
+machineId = 'A1_MINI'
+name = 'A1 mini 外观图'
+path = 'printers/a1mini.webp'
+
+[[assets]]
+id = 'a1_mini-variant-image'
+type = 'image'
+machineId = 'A1_MINI'
+name = 'A1 mini 外观图（快拆版）'
+path = 'printers/a1mini-variant.webp'
+
+[[assets]]
+id = 'p1s-image'
+type = 'image'
+machineId = 'P1S'
+name = 'P1S 外观图'
+path = 'printers/p1s.webp'
+
+[[assets]]
+id = 'p2s-image'
+type = 'image'
+machineId = 'P2S'
+name = 'P2S 外观图（旧仓图，待换新）'
+path = 'printers/p2s.webp'
+
+[[assets]]
+id = 'x1c-image'
+type = 'image'
+machineId = 'X1C'
+name = 'X1C 外观图（旧仓图，待换新）'
+path = 'printers/x1c.webp'
+
+# ---------------- 图标 ----------------
+
+[[assets]]
+id = 'a1-icon'
+type = 'icon'
+machineId = 'A1'
+name = 'A1 图标'
+path = 'icons/a1.svg'
+
+[[assets]]
+id = 'a1_mini-icon'
+type = 'icon'
+machineId = 'A1_MINI'
+name = 'A1 mini 图标'
+path = 'icons/a1_mini.svg'
+
+[[assets]]
+id = 'p1s-icon'
+type = 'icon'
+machineId = 'P1S'
+name = 'P1S 图标（P2S / X1C 共用）'
+path = 'icons/p1s.svg'
+
+# ---------------- 模型 ----------------
+#
+# 名字与预览图**暂缓**（裁决 2026-09-24）：旧仓那 8 张预览图按 D-4 没迁，
+# 所以这里只有三份模型本体，`name` 取的是源文件语义而不是"模型库里的标题"。
+# 文件名沿用旧仓那套（`.3mf`；同一份的 `.zip` 与解压目录**不重复交付**，见 Task 7.4）。
+
+[[assets]]
+id = 'mkp-support-test-models'
+type = 'model'
+name = 'MKP 支撑测试模型（多模型拼盘）'
+path = 'models/MKP_support_test_models.3mf'
+
+[[assets]]
+id = 'precise-calibration'
+type = 'model'
+name = '精密校准模型'
+path = 'models/Precise_Calibration.3mf'
+
+[[assets]]
+id = 'zoffset-calibration'
+type = 'model'
+name = 'Z 轴偏移校准模型'
+path = 'models/ZOffset_Calibration.3mf'
+
+# ---------------- 切片器预设（BBS） ----------------
+#
+# 路径沿用旧仓那套目录与文件名（`Process/0.2mm/…`）—— **文件名没改**：
+# 它是消费端（BBS 侧）一直在用的名字，改名要单独定规则（Task 12 再谈），
+# 而 **asset id 才是稳定键**。`slicer` 是 G-3 留的开放维度，`profile` 是档位。
+
+[[assets]]
+id = 'a1-bbs-02-010'
+type = 'slicerProfile'
+machineId = 'A1'
+name = 'A1：0.2 喷头 0.10 层高'
+path = 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'a1-bbs-04-020'
+type = 'slicerProfile'
+machineId = 'A1'
+name = 'A1：0.4 喷头 0.20 层高'
+path = 'bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'a1_mini-bbs-02-010'
+type = 'slicerProfile'
+machineId = 'A1_MINI'
+name = 'A1 mini：0.2 喷头 0.10 层高'
+path = 'bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'a1_mini-bbs-04-020'
+type = 'slicerProfile'
+machineId = 'A1_MINI'
+name = 'A1 mini：0.4 喷头 0.20 层高'
+path = 'bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'p1s-bbs-02-010'
+type = 'slicerProfile'
+machineId = 'P1S'
+name = 'P1S：0.2 喷头 0.10 层高'
+path = 'bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'p1s-bbs-04-024'
+type = 'slicerProfile'
+machineId = 'P1S'
+name = 'P1S：0.4 喷头 0.24 层高'
+path = 'bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'p2s-bbs-04-024'
+type = 'slicerProfile'
+machineId = 'P2S'
+name = 'P2S：0.4 喷头 0.24 层高'
+path = 'bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'x1c-bbs-02-010'
+type = 'slicerProfile'
+machineId = 'X1C'
+name = 'X1C：0.2 喷头 0.10 层高'
+path = 'bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json'
+slicer = 'bbs'
+profile = 'process'
+
+[[assets]]
+id = 'x1c-bbs-04-024'
+type = 'slicerProfile'
+machineId = 'X1C'
+name = 'X1C：0.4 喷头 0.24 层高'
+path = 'bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json'
+slicer = 'bbs'
+profile = 'process'

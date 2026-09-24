@@ -4,8 +4,8 @@ display = 'A1 mini'
 brand = 'Bambu Lab'
 defaultBundle = 'A1_MINI_default'
 externalAliases = ['A1MINI', 'A1M', 'A1MC', 'A1MQ', 'A1MF']
-image = 'a1_mini.webp'
-icon = 'a1_mini'
+image = 'a1_mini-image'
+icon = 'a1_mini-icon'
 
 [dimensions]
 edgeZone = 10.0

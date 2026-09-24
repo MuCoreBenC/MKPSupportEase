@@ -25,6 +25,8 @@ const WORKBENCH_DIR: &str = "workbench";
 /// 发布目录名（仓库根下）。刻意不叫 `dist` —— 那个名字被 vite 的前端产物占着，
 /// 两者混在一起会让"清一下产物"这种操作顺手删掉交付资源。
 const DIST_DIR: &str = "dist-presets";
+/// 资产根的名字（`public/` 下）。见 [`assets_root`]
+const ASSET_DIR: &str = "assets";
 /// 上游预设仓库的目录名
 const UPSTREAM_DIR: &str = "mkpse-presets";
 
@@ -33,7 +35,15 @@ const UPSTREAM_DIR: &str = "mkpse-presets";
 ///
 /// `capability` 已随第三版去掉 —— 第二版那份能力定义是我自己按 registry 手写的，
 /// 校验的其实是"配方有没有超出我以为客户端支持的范围"（doc §12），不是真兼容性。
-pub const WORKBENCH_DIRS: [&str; 5] = ["machines", "bbs", ".draft", ".trash", ".snapshots"];
+///
+/// `bbs/` 也去了（b05 Task 14.7 裁决，2026-09-24）：全仓核实工作台对它**零读写**
+/// —— BBS 资产的职责在资产域（`public/assets/bbs/` + `presets/assets.toml` 条目），
+/// 交付子树是 `dist-presets/assets/bbs/`。bootstrap 不再为一个没有职责的目录占位。
+/// 剩下四个各司其职：`machines/` 存值的草稿（身份清单来自 `presets/machines/*.toml`）、
+/// `.draft/` 是会话草稿（gitignore）、`.trash/` 是版本与残留回收站、
+/// `.snapshots/` 存生成快照（`wb_generate` 写，`wb_revert_preview` 读 ——
+/// 「恢复配方」靠它，不是只写不读）。
+pub const WORKBENCH_DIRS: [&str; 4] = ["machines", ".draft", ".trash", ".snapshots"];
 
 /// 仓库根。见本模块文档的两级回退
 pub fn repo_root() -> PathBuf {
@@ -71,6 +81,31 @@ pub fn resolve(rel: &str) -> Result<PathBuf, AppError> {
 /// 把相对路径解析到发布目录内
 pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
     resolve_in(&dist_root()?, rel)
+}
+
+/// 资产文件的根：`<repo>/public/assets/`（b05 Task 8 定的约定）。
+///
+/// # 为什么在 `public/` 下面
+///
+/// 这些文件要能被前端**按 URL 取**（机型图、图标、模型），而 vite 的 `public/` 是唯一
+/// "原样进产物、按路径直通"的目录 —— 前端拿到的是 `/assets/printers/a1.webp`。
+///
+/// 取 `public/` 下的一个子根而不是 `public/` 本身：那里还有 hero 图之类的**界面素材**，
+/// 两类东西混在一层，`path` 就说不清"这条资产属于谁管"。约定是「我们管的资产全在
+/// `public/assets/` 里，别的 `public/` 文件不许被 `presets/assets.toml` 引用」。
+///
+/// # 目录按需建
+///
+/// 与 [`workbench_root`] / [`dist_root`] 同一口径。而且这里**必须**存在：防穿越
+/// （[`resolve_in`]）的第三道要比真实路径，根不存在的话每条路径都会解析失败 ——
+/// "还没搬过资产"要落成一个真实存在的空目录（`public/assets/.gitkeep` 占着），
+/// 而不是一个查不出来的状态。
+pub fn assets_root() -> Result<PathBuf, AppError> {
+    let root = repo_root().join("public").join(ASSET_DIR);
+    std::fs::create_dir_all(&root).map_err(|e| {
+        AppError::io(format!("建不出资产目录：{}", root.display())).with_detail(e.to_string())
+    })?;
+    Ok(root)
 }
 
 /* ---------- 上游预设仓库（只读） ---------- */

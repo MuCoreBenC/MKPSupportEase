@@ -21,20 +21,25 @@ tauri-build = { version = "2.5.1", features = [] }
 #
 # 与 vite 那边的 `--mode workbench` 是**两道独立的闸**：一道管页面在不在产物里，
 # 一道管命令在不在二进制里。任一道漏了，另一道还挡得住。
+#
+# 它同时是**依赖开关**：`dep:mkpse-preset` 挂在这一档（见下方依赖注释），
+# 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
 [features]
 default = []
-workbench = ["dep:sha2", "dep:time", "dep:toml_edit"]
+workbench = ["dep:sha2", "dep:time", "dep:toml_edit", "dep:mkpse-preset"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
+# 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
+# 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 # 原子写盘：同目录临时文件 + persist（见 fsx/atomic.rs）
-tempfile = "3"
+tempfile.workspace = true
 # 可观测性走 tracing 一套，不再叠 tauri-plugin-log —— 两套日志栈会各写一份、互相不知道
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
@@ -43,7 +48,7 @@ uuid = { version = "1", features = ["v7"] }
 # optional = true 的意思是"默认构建里本 crate 用不上它们"。
 # 注意 sha2 本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的收益不是
 # "少编一个 crate"，而是**默认构建的代码里 `use sha2` 编不过** —— 隔离靠的是这个，不是包体积
-sha2 = { version = "0.10", optional = true }
+sha2 = { workspace = true, optional = true }
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
@@ -52,7 +57,23 @@ time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 用 `toml` 反序列化再重新序列化的话，那条判据要靠我复刻别人 writer 的引号风格、
 # 键序、浮点格式才能成立 —— 那是最脆的一类承诺。
 # `toml_edit` 保留原文与格式，只改被改的那一处，于是保真在**构造上**成立。
-toml_edit = { version = "0.22", features = ["serde"], optional = true }
+#
+# 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）；`optional` 留在这里，
+# 隔离靠的是「默认构建里 `use toml_edit` 编不过」，不是依赖图里没有它。
+toml_edit = { workspace = true, optional = true }
+
+# 预设解析 crate。工作台只为**借一个函数**：产物命名规则（`preset::preset_file_name`，
+# 权威实现见 `crates/preset/src/generate.rs`，规范见 `docs/ARCHITECTURE.md` §10）。
+#
+# 为什么值得破一次"src-tauri 不碰内核 crate"的解耦：命名规则以前有两份独立实现
+# （这里一份、`crates/preset` 一份），形状相同但**中间没有编译器** —— 漂移的表现不是报错，
+# 是消费端找不到文件。转调之后规则只有一处，改一次两边同步。
+#
+# 代价照实说：它 `include_str!` 带了 56 KB 参数注册表与 9 份内置预设，
+# 且它自己还依赖 `mkpse-postprocess`。所以它 **optional + 只挂在 workbench feature 下** ——
+# 默认（发布）构建的依赖图里没有这个 crate，给用户的二进制里也就没有那批数据。
+# 隔离靠的不是"少编一个包"，是**默认构建里 `use preset` 编不过**（与 sha2 / toml_edit 同一套路）。
+mkpse-preset = { path = "../crates/preset", optional = true }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -62,4 +83,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 window-vibrancy = "0.8"
 
 [dev-dependencies]
-toml = "1.0.7"
+# 测试里用它把夹具的 JSON 转成 TOML（`testkit` / `presets::registry`），
+# 以及把产出的 TOML 解析回来（`app::build`）。版本取 workspace 那一档（0.8，见根上的说明）
+toml.workspace = true

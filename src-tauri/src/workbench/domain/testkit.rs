@@ -184,12 +184,89 @@ fn write_presets(root: &Path) {
         "[[brands]]\nid = 'Bambu Lab'\nname = '拓竹 (Bambu Lab)'\nlogo = 'bambu-logo.png'\n"
             .to_owned(),
     );
+    // 资产定义（b05 Task 8）：两条 —— 一条图片（归 A1）、一条切片器预设（归 P1S），
+    // 两种类型都走到。`path` 指向夹具资产根里**不存在**的文件是合法的：
+    // 存在性不是加载期的事（条目与文件一起在 Task 9 落地）
+    t(
+        "assets.toml",
+        "[[assets]]\n\
+         id = 'a1-image'\n\
+         type = 'image'\n\
+         machineId = 'A1'\n\
+         name = 'A1 外观图'\n\
+         path = 'printers/a1.webp'\n\
+         \n\
+         [[assets]]\n\
+         id = 'a1-icon'\n\
+         type = 'icon'\n\
+         machineId = 'A1'\n\
+         name = 'A1 图标'\n\
+         path = 'icons/a1.svg'\n\
+         \n\
+         [[assets]]\n\
+         id = 'p1s-icon'\n\
+         type = 'icon'\n\
+         machineId = 'P1S'\n\
+         name = 'P1S 图标'\n\
+         path = 'icons/p1s.svg'\n\
+         \n\
+         [[assets]]\n\
+         id = 'a1-extra-image'\n\
+         type = 'image'\n\
+         machineId = 'A1'\n\
+         name = 'A1 备选图（没人引用）'\n\
+         path = 'printers/a1-extra.webp'\n\
+         \n\
+         [[assets]]\n\
+         id = 'a1-bbs-04-020'\n\
+         type = 'slicerProfile'\n\
+         machineId = 'A1'\n\
+         name = 'A1 0.4 喷头 0.20 层高'\n\
+         path = 'bbs/A1/process.json'\n\
+         slicer = 'bbs'\n\
+         profile = 'process'\n\
+         \n\
+         [[assets]]\n\
+         id = 'p1s-bbs-02-010'\n\
+         type = 'slicerProfile'\n\
+         machineId = 'P1S'\n\
+         name = 'P1S 0.2 喷头 0.10 层高'\n\
+         path = 'bbs/P1S/process.json'\n\
+         slicer = 'bbs'\n\
+         profile = 'process'\n"
+            .to_owned(),
+    );
+    // 套餐定义（b05 Task 10）：一条，被夹具里 A1 的 `defaultBundle` 与
+    // 两个版本的 `recommendedBundle` 引用着。`assetRefs` 里的 BBS 是 10.8 那条
+    // 「成套配发」判据要用的形状；p1s-bbs-02-010 刻意**没有**套餐引用 ——
+    // 「没人引用的 BBS 删得掉」要用它
+    t(
+        "bundles.toml",
+        "[[bundles]]\n\
+         id = 'A1_default'\n\
+         display = '官方推荐'\n\
+         machineId = 'A1'\n\
+         assetRefs = ['a1-bbs-04-020']\n\
+         updatedAt = '2026-07-12'\n"
+            .to_owned(),
+    );
     for (id, bundle, versions) in FIXTURE_MACHINES {
         let mut s = String::new();
         s.push_str(&format!("id = '{id}'\n"));
         s.push_str(&format!("display = '{id}'\n"));
         s.push_str("brand = 'Bambu Lab'\n");
-        s.push_str("icon = 'a1'\n");
+        // 图标是**资产 id**（b05 Task 9 改的引用形式）：P1S 用自己的那份，
+        // 其余借用 a1 那份 —— 与真数据里「P2S / X1C 借 p1s-icon」同一形状
+        s.push_str(if *id == "P1S" {
+            "icon = 'p1s-icon'\n"
+        } else {
+            "icon = 'a1-icon'\n"
+        });
+        // A1 有一张机型图（`a1-image` 指着它）—— 反查与删除守卫那条判据要用；
+        // 其余机型不给图，与真数据里 A2L 没有图同一形状
+        if *id == "A1" {
+            s.push_str("image = 'a1-image'\n");
+        }
         if !bundle.is_empty() {
             s.push_str(&format!("defaultBundle = '{bundle}'\n"));
         }
@@ -206,6 +283,11 @@ fn write_presets(root: &Path) {
             // 空 tag **不写这一行**（写成 '' 会读成「填过，填了个空」）
             if !tag.is_empty() {
                 s.push_str(&format!("tag = '{tag}'\n"));
+            }
+            // A1 的每一版都推荐同一条套餐 —— 与真数据同形状（b05 Task 10），
+            // `check_bundle_refs` 的机型侧检查靠它有东西可查
+            if *id == "A1" {
+                s.push_str("recommendedBundle = 'A1_default'\n");
             }
         }
         t(&format!("machines/{id}.toml"), s);

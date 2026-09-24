@@ -1,0 +1,187 @@
+{
+  "A1": {
+    "bedSize": {
+      "depth": 255,
+      "width": 260
+    },
+    "calibration": {
+      "lShapeBaseX": 68.21,
+      "lShapeBaseY": 126.373,
+      "xLineX": 114.523,
+      "xLineY": 104.83,
+      "xLineYEnd": 114.83,
+      "yLineX": 104.53,
+      "yLineXEnd": 114.53,
+      "yLineY": 114.83,
+      "zStartX": 68.21,
+      "zStartY": 126.373
+    },
+    "edgeZone": 10,
+    "flags": {
+      "gcodeMarker": ";===== machine: A1",
+      "hasSecondFan": false
+    },
+    "glueArea": {
+      "glueMaxX": 260,
+      "glueMaxY": 255,
+      "glueMinX": -40,
+      "glueMinY": 0,
+      "wipeX": 252
+    },
+    "movementRange": {
+      "maxX": 260,
+      "maxY": 255,
+      "maxZ": 999,
+      "minX": -40,
+      "minY": 0
+    }
+  },
+  "A1_MINI": {
+    "bedSize": {
+      "depth": 180,
+      "width": 180
+    },
+    "calibration": {
+      "lShapeBaseX": 30.21,
+      "lShapeBaseY": 88.373,
+      "xLineX": 76.523,
+      "xLineY": 66.83,
+      "xLineYEnd": 76.83,
+      "yLineX": 66.523,
+      "yLineXEnd": 76.523,
+      "yLineY": 76.83,
+      "zStartX": 30.21,
+      "zStartY": 88.373
+    },
+    "edgeZone": 10,
+    "flags": {
+      "gcodeMarker": ";===== machine: A1 mini",
+      "hasSecondFan": false
+    },
+    "glueArea": {
+      "glueMaxX": 180,
+      "glueMaxY": 180,
+      "glueMinX": -10,
+      "glueMinY": 0,
+      "wipeX": 160
+    },
+    "movementRange": {
+      "maxX": 180,
+      "maxY": 180,
+      "maxZ": 999,
+      "minX": -10,
+      "minY": 0
+    }
+  },
+  "P1S": {
+    "bedSize": {
+      "depth": 256,
+      "width": 256
+    },
+    "calibration": {
+      "lShapeBaseX": 68.21,
+      "lShapeBaseY": 126.373,
+      "xLineX": 114.523,
+      "xLineY": 104.83,
+      "xLineYEnd": 114.83,
+      "yLineX": 104.53,
+      "yLineXEnd": 114.53,
+      "yLineY": 112.83,
+      "zStartX": 68.21,
+      "zStartY": 126.373
+    },
+    "edgeZone": 10,
+    "flags": {
+      "gcodeMarker": ";===== machine: P1",
+      "hasSecondFan": true
+    },
+    "glueArea": {
+      "glueMaxX": 255,
+      "glueMaxY": 265,
+      "glueMinX": 0,
+      "glueMinY": 0,
+      "wipeX": 20
+    },
+    "movementRange": {
+      "maxX": 255,
+      "maxY": 265,
+      "maxZ": 999,
+      "minX": 0,
+      "minY": 0
+    }
+  },
+  "P2S": {
+    "bedSize": {
+      "depth": 256,
+      "width": 256
+    },
+    "calibration": {
+      "lShapeBaseX": 68.21,
+      "lShapeBaseY": 126.373,
+      "xLineX": 114.523,
+      "xLineY": 104.83,
+      "xLineYEnd": 114.83,
+      "yLineX": 104.53,
+      "yLineXEnd": 114.53,
+      "yLineY": 112.83,
+      "zStartX": 68.21,
+      "zStartY": 126.373
+    },
+    "edgeZone": 10,
+    "flags": {
+      "gcodeMarker": ";===== machine: P2",
+      "hasSecondFan": true
+    },
+    "glueArea": {
+      "glueMaxX": 256,
+      "glueMaxY": 265,
+      "glueMinX": 0,
+      "glueMinY": 0,
+      "wipeX": 20
+    },
+    "movementRange": {
+      "maxX": 256,
+      "maxY": 265,
+      "maxZ": 999,
+      "minX": 0,
+      "minY": 0
+    }
+  },
+  "X1C": {
+    "bedSize": {
+      "depth": 256,
+      "width": 255
+    },
+    "calibration": {
+      "lShapeBaseX": 68.21,
+      "lShapeBaseY": 126.373,
+      "xLineX": 114.523,
+      "xLineY": 104.83,
+      "xLineYEnd": 114.83,
+      "yLineX": 104.53,
+      "yLineXEnd": 114.53,
+      "yLineY": 112.83,
+      "zStartX": 68.21,
+      "zStartY": 126.373
+    },
+    "edgeZone": 10,
+    "flags": {
+      "gcodeMarker": ";===== machine: X1",
+      "hasSecondFan": true
+    },
+    "glueArea": {
+      "glueMaxX": 255,
+      "glueMaxY": 265,
+      "glueMinX": 0,
+      "glueMinY": 0,
+      "wipeX": 20
+    },
+    "movementRange": {
+      "maxX": 255,
+      "maxY": 265,
+      "maxZ": 999,
+      "minX": 0,
+      "minY": 0
+    }
+  }
+}

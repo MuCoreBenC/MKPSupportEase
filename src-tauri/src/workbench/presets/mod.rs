@@ -11,12 +11,14 @@
 //!
 //! 所以数据搬进我们项目（`<repo>/presets/`），这一层**读它也写它**。
 //!
-//! # 现在切到哪一步了（b04 Task 8）
+//! # 现在切到哪一步了（b05 Task 10）
 //!
 //! | 谁 | 读哪一层 |
 //! |---|---|
 //! | 机型与版本的**清单**（有哪些机型、每台有哪些版本、版本六个元字段） | **这一层** |
-//! | 字段定义（74 条）、界面布局、资源与套餐清单 | 还在 `upstream` |
+//! | 资产定义（21 条）、套餐定义（5 条） | **这一层** |
+//! | 字段定义（74 条）、界面布局 | **这一层**（b04 Task 9 起） |
+//! | `preset_registry.toml`（交付索引：`nozzle` / `layerHeight`） | 还没搬 —— Task 12 |
 //!
 //! 清单换源的后果一句话：**清单是可写的**。「加一个版本」保存之后它真的出现在树上，
 //! 而不是留下一个谁都不认的孤儿文件（那是换源之前的死胡同，见 `app/storage.rs` 里
@@ -35,6 +37,8 @@
 //! 实现上它不是靠"我复刻了原作者的 writer"，而是靠 [`toml_edit`] 保留原文：
 //! 只有被改的那一处会变，别处连空行和引号风格都不动。**保真在构造上成立，不靠自觉。**
 
+pub mod assets;
+pub mod bundles;
 pub mod catalog;
 pub mod registry;
 
@@ -45,6 +49,8 @@ use toml_edit::DocumentMut;
 use crate::error::AppError;
 use crate::workbench::paths;
 
+pub use assets::{Asset, AssetKind, Assets};
+pub use bundles::{Bundle, Bundles};
 pub use catalog::{Brand, Catalog, Machine, MachineField, MachineVersion, VersionField, Zone};
 pub use registry::{ParamRegistry, ShowOp, ShowWhen, TabMeta, UiComponent, ValueType};
 
@@ -105,6 +111,14 @@ pub(crate) fn can_be_literal(s: &str) -> bool {
     !s.contains('\'') && !s.chars().any(char::is_control)
 }
 
+/// 一个"可选引用"字段：**trim 后非空才算引用**。
+///
+/// 空串与 `None` 同义（"没有"），这是 8.6 定下的口径 —— 旧数据里 A2L 的
+/// `recommendedBundle = ''` 读成"填过但填了个空"，查存在性时必须跳过而不是报错
+fn non_empty(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
 /// 一次编辑只动了一处：**除了中间那一段，前后都逐字节不变。**
 ///
 /// 返回 `(被删掉的那段, 被插入的那段)`。
@@ -150,14 +164,35 @@ pub(crate) fn one_edit_only(before: &str, after: &str) -> (String, String) {
     )
 }
 
+/// 一条资产被谁引用（b05 Task 9.4，套餐那一档 Task 10）。
+///
+/// **没有 `versions` 字段**：版本今天不直接引用资产（`recommendedBundle` → 套餐 → 资产，
+/// 是间接的）。留一个永远为空的字段比说清"还没有"更糟 —— 它会被当成"查过了，没有版本在用"。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AssetUsage {
+    /// 直接引用它的机型（`image` / `icon` 字段写着这个 id）
+    pub machines: Vec<String>,
+    /// 引用它的套餐（`assetRefs` 写着这个 id 的套餐 id）。
+    /// **归属不是引用**：`p1s-icon` 归 P1S，但引用它的是 P1S / P2S / X1C 三台 ——
+    /// 这里列的是后者
+    pub bundles: Vec<String>,
+}
+
 /// 一次加载的全部预设数据。
 ///
-/// 目前是机型目录 + 字段定义 + 界面布局。还没搬的是 `assets/` / `bundles/` /
-/// `preset_registry.toml` —— 它们属于「资源与套餐」，按「先只搬核心」留到后面
-/// （机型文件里的 `defaultBundle` / `presetFile` 因此是悬空引用，**这是刻意的**：
-/// 它们只是字符串，编辑机型时照样显示照样改，只有生成与校验才需要解析）。
+/// 现在是机型目录 + 资产定义 + 套餐定义 + 字段定义 + 界面布局。还没搬的只有
+/// `preset_registry.toml` —— 它是**交付索引**（消费端按 `nozzle` / `layerHeight` 挑预设），
+/// 属于 Task 12；在这里存一份就是第二份会过期的真相。
+///
+/// 机型文件里的 `defaultBundle` / `recommendedBundle` 在 Task 10 之前是**刻意的悬空引用**
+/// （只是字符串）；现在它们必须能解析到 `bundles.toml` 里的一条套餐，
+/// 加载期查（[`Self::check_bundle_refs`]）。`presetFile` 仍按 G-2 要删（Task 16.3）。
 pub struct Presets {
     pub catalog: Catalog,
+    /// 资产域①层（b05 Task 8）
+    pub assets: Assets,
+    /// 套餐域①层（b05 Task 10）。`defaultBundle` / `recommendedBundle` 指向的是它的条目
+    pub bundles: Bundles,
     pub registry: ParamRegistry,
     root: PathBuf,
 }
@@ -179,6 +214,8 @@ impl Presets {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let out = Self {
             catalog: Catalog::load_from(root)?,
+            assets: Assets::load_from(root)?,
+            bundles: Bundles::load_from(root)?,
             registry: ParamRegistry::load_from(root)?,
             root: root.to_path_buf(),
         };
@@ -275,6 +312,175 @@ impl Presets {
         Ok(())
     }
 
+    /// **机型引用的资产 id 必须存在**（b05 Task 9 / 8.6）。
+    ///
+    /// 存在性**分两级**（Task 11.6 同一口径）：
+    ///
+    /// - id 认不出来 ⇒ **error**。那是打错了字，与 `machineVariants` 的键写错同一类：
+    ///   界面上只会表现为"那张图没了"，没有任何东西报错；
+    /// - id 认得出、但文件还没搬进来 ⇒ **warning**（Task 11.1）。允许"先把关联建起来、
+    ///   文件后补"（导入一张图之前就要能选机型），但**不许静默** ——
+    ///   现在由 `wb_assets` 的 `present: false` 说出来，校验层接手后升成一条 warning。
+    fn check_asset_refs(&self) -> Result<(), AppError> {
+        for m in self.catalog.machines() {
+            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+                let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                if self.assets.get(id).is_none() {
+                    return Err(AppError::corrupted(format!(
+                        "机型 {} 的 {field} 指向一个不存在的资产：{id}",
+                        m.id
+                    ))
+                    .with_detail(
+                        "资产定义在 presets/assets.toml。id 打错的后果是那张图/图标静默消失"
+                            .to_owned(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// **套餐域的引用必须都能落地**（b05 Task 10.5 / 10.7 / 10.8）。
+    ///
+    /// 三条，方向各不同：
+    ///
+    /// 1. **机型与版本 → 套餐**（10.5：悬空引用消除）。`defaultBundle` 与每个版本的
+    ///    `recommendedBundle` 写着的 id 必须能在 `bundles.toml` 里查到 —— 悬空的时候
+    ///    它们只是字符串，查不到只表现为"那台机器没有推荐套餐"，现在升级成 error
+    ///    （doc §9：套餐定义落地后转为 error）。**空串跳过**（A2L 那台四个字段皆空），
+    ///    与 [`Self::check_asset_refs`] 同一口径 —— "没有"就该不写那一行；
+    /// 2. **套餐 → 机型**（归属必须真实）。套餐的 `machineId` 指着不存在的机型，
+    ///    与资产条目的假归属是同一类错（Task 8.8 那条的反方向）；
+    /// 3. **套餐 → 资产**（10.7 后半 + 10.8）。每个 `assetRef` 必须解析到一条真实资产，
+    ///    且**至少一条是 BBS 预设**（10.8）：MKP 侧 `use_ironing_path = true` 只在 BBS 侧
+    ///    那组值成立时才有意义（doc §12.4），发了 MKP 不发 BBS，用户打出来的结果是错的。
+    ///    这一条要看得见资产定义，所以放在这里而不是 [`super::bundles`] 的单文件检查里
+    fn check_bundle_refs(&self) -> Result<(), AppError> {
+        for m in self.catalog.machines() {
+            if let Some(id) = non_empty(&m.default_bundle) {
+                self.bundles.get(id).ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "机型 {} 的 defaultBundle 指向一个不存在的套餐：{id}",
+                        m.id
+                    ))
+                    .with_detail("套餐定义在 presets/bundles.toml".to_owned())
+                })?;
+            }
+            for v in &m.versions {
+                if let Some(id) = non_empty(&v.recommended_bundle) {
+                    self.bundles.get(id).ok_or_else(|| {
+                        AppError::corrupted(format!(
+                            "机型 {} 版本 {} 的 recommendedBundle 指向一个不存在的套餐：{id}",
+                            m.id, v.id
+                        ))
+                        .with_detail("套餐定义在 presets/bundles.toml".to_owned())
+                    })?;
+                }
+            }
+        }
+
+        for b in self.bundles.items() {
+            self.catalog.machine(&b.machine_id).ok_or_else(|| {
+                AppError::corrupted(format!(
+                    "套餐 {} 的 machineId 指向一个不存在的机型：{}",
+                    b.id, b.machine_id
+                ))
+            })?;
+
+            let mut has_bbs = false;
+            for r in &b.asset_refs {
+                let a = self.assets.get(r).ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "套餐 {} 的 assetRefs 指向一个不存在的资产：{r}",
+                        b.id
+                    ))
+                    .with_detail(
+                        "资产定义在 presets/assets.toml；id 打错的后果是这套 BBS 预设静默缺席"
+                            .to_owned(),
+                    )
+                })?;
+                if a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs") {
+                    has_bbs = true;
+                }
+            }
+            if !has_bbs {
+                return Err(AppError::corrupted(format!(
+                    "套餐 {} 的 assetRefs 里没有一条 BBS 预设",
+                    b.id
+                ))
+                .with_detail(
+                    "套餐的内容就是 BBS 引用（doc §12.4）：MKP 预设与其配套 BBS 预设必须\
+                     成套配发，发了 MKP 不发 BBS，用户打出来的结果是错的"
+                        .to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// **谁在用它**（b05 Task 9.4，套餐那一档 b05 Task 10）：删资产之前必须先问这一条。
+    ///
+    /// 删掉一张还被机型引用着的图，界面上只表现为"那台机型的图没了" ——
+    /// 与 `machineVariants` 的孤儿同一类：不报错，只是没了。
+    pub fn asset_usage(&self, id: &str) -> Result<AssetUsage, AppError> {
+        if self.assets.get(id).is_none() {
+            return Err(AppError::not_found(format!("没有资产 {id}")));
+        }
+        let want = id.trim().to_lowercase();
+        let same = |v: &Option<String>| {
+            v.as_deref()
+                .is_some_and(|s| s.trim().to_lowercase() == want)
+        };
+
+        let machines: Vec<String> = self
+            .catalog
+            .machines()
+            .iter()
+            .filter(|m| same(&m.image) || same(&m.icon))
+            .map(|m| m.id.clone())
+            .collect();
+
+        // 引用它的套餐：`assetRefs` 里写着这个 id 的。反查的是**套餐 id**，
+        // 因为那是机型文件引用的东西 —— 人拿着它去机型文件里能找到出处
+        let bundles: Vec<String> = self
+            .bundles
+            .items()
+            .iter()
+            .filter(|b| b.asset_refs.iter().any(|r| r.trim().to_lowercase() == want))
+            .map(|b| b.id.clone())
+            .collect();
+
+        Ok(AssetUsage { machines, bundles })
+    }
+
+    /// 删一条资产，**先反查**（b05 Task 9.5）：有人引用就拒绝，并说出是谁
+    pub fn remove_asset(&mut self, id: &str) -> Result<(), AppError> {
+        let usage = self.asset_usage(id)?;
+        if !usage.machines.is_empty() || !usage.bundles.is_empty() {
+            return Err(
+                AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
+                    format!(
+                        "引用它的机型：{}；套餐：{}",
+                        if usage.machines.is_empty() {
+                            "（无）".to_owned()
+                        } else {
+                            usage.machines.join("、")
+                        },
+                        if usage.bundles.is_empty() {
+                            "（无）".to_owned()
+                        } else {
+                            usage.bundles.join("、")
+                        }
+                    ),
+                ),
+            );
+        }
+        self.assets.remove(id)?;
+        self.assets.write()
+    }
+
     /// 跨文件那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
     ///
     /// 这是**最容易悄悄坏掉**的一条。键写错一个字母（`"A1_Mini:FAST"`）不会有任何报错 ——
@@ -291,6 +497,14 @@ impl Presets {
             .map(|m| m.id.as_str())
             .collect();
         let keys = self.catalog.machine_keys();
+
+        // 资产条目归属的机型必须存在（b05 Task 8）。与下面那条同一类错：
+        // 写一个不存在的机型 id，界面上只表现为"这台机型的图没了"，没有任何东西报错
+        self.assets.check_against_machines(&machines)?;
+        // 反方向：机型引用的资产 id 必须存在（b05 Task 9 / 8.6）
+        self.check_asset_refs()?;
+        // 套餐域：机型/版本 → 套餐、套餐 → 机型、套餐 → 资产（b05 Task 10.5/10.7/10.8）
+        self.check_bundle_refs()?;
 
         for p in self.registry.params() {
             for (name, map) in [
@@ -427,6 +641,170 @@ mod tests {
         assert!(whole.is_empty(), "空版本号匹配到了东西：{whole:?}");
     }
 
+    /// 递归收 `.toml`（`registry/` 与 `forbidden_zones/` 都在子目录里）
+    fn collect_toml(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect_toml(&p, out);
+            } else if p.extension().is_some_and(|x| x == "toml") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// **①层的数据文件必须是 LF 换行。**
+    ///
+    /// 为什么值得一条判据：`toml_edit` 写回时把换行统一成 LF，于是一个 CRLF 的文件
+    /// **读进来没事，第一次保存就整份被改写** —— diff 里一片红，而真正改了什么反而看不出来。
+    /// `.gitattributes` 管得住入库那一份，管不住工作区里手写或工具生成的那一份
+    /// （真踩过：新加的定义文件被工具按 CRLF 写出来，正是这条判据把它抓出来的）。
+    ///
+    /// 扫 `presets/` 下全部 `.toml`。**不看 `*.json`** —— 那些是上游产物，不在我们写回的面上。
+    #[test]
+    fn the_source_files_keep_lf_line_endings() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut files = Vec::new();
+        collect_toml(&root, &mut files);
+        assert!(
+            files.len() >= 10,
+            "只扫到 {} 个 .toml —— 路径大概不对，这条判据在空转",
+            files.len()
+        );
+
+        let mut bad: Vec<String> = Vec::new();
+        for p in &files {
+            let bytes = std::fs::read(p).expect("读得到");
+            if bytes.contains(&b'\r') {
+                bad.push(p.strip_prefix(&root).unwrap_or(p).display().to_string());
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "这些 .toml 是 CRLF：{bad:?}\n\
+             读进来没事，但第一次保存会被 toml_edit 整份改写成 LF —— diff 一片红，\
+             真正改了什么反而看不出来。存成 LF（本仓 .gitattributes 也是这么规定的）"
+        );
+    }
+
+    /// **机型引用的资产必须能解析到真实文件**（b05 Task 9.7）。
+    ///
+    /// 与上面那条加载期检查的分工：加载期只管"id 认不认得出来"（打错字是 error），
+    /// 这条管"文件真的在不在" —— 那是搬运的验收，也是 Task 11.1 的 warning 级。
+    #[test]
+    fn every_machine_asset_ref_points_at_a_real_file() {
+        let Some(p) = real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut checked = 0usize;
+        for m in p.catalog.machines() {
+            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+                let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                let a = p
+                    .assets
+                    .get(id)
+                    .unwrap_or_else(|| panic!("{} 的 {field} 指向一个不存在的资产 {id}", m.id));
+                assert!(
+                    p.assets.present(a),
+                    "资产 {id}（{}）的文件不在：{}",
+                    a.path,
+                    p.assets
+                        .resolve(a)
+                        .map(|x| x.display().to_string())
+                        .unwrap_or_else(|e| format!("解析失败：{e}"))
+                );
+                checked += 1;
+            }
+        }
+        // 反空转：真数据里 5 张机型图 + 6 个图标引用（A2L 没有图）—— 少于 10 条就是漏查了
+        assert!(checked >= 10, "只查了 {checked} 条引用 —— 这条判据在空转");
+    }
+
+    /// **反查与删除守卫**（b05 Task 9.4 / 9.5，套餐那一档 b05 Task 10）。
+    ///
+    /// 用夹具而不是真数据：真数据里删东西是破坏性的，而这里要验的正是"删"这条路径。
+    #[test]
+    fn an_asset_that_is_still_used_cannot_be_removed() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+
+        // 反查说得出是谁：夹具里 A1 的 `image` 指着它
+        let usage = presets.asset_usage("a1-image").expect("反查");
+        assert_eq!(usage.machines, vec!["A1".to_owned()]);
+        assert!(usage.bundles.is_empty(), "机型图不该被任何套餐引用");
+
+        let err = presets
+            .remove_asset("a1-image")
+            .expect_err("有人引用就不能删");
+        assert!(err.message.contains("还被引用"), "实测：{}", err.message);
+        assert!(
+            err.detail.unwrap_or_default().contains("A1"),
+            "要说清是谁在用，不然人只能一个个机型去翻"
+        );
+        assert!(presets.assets.get("a1-image").is_some(), "被拦下就不该真删");
+
+        // 大小写不敏感：换个写法同样拦得住
+        presets
+            .remove_asset("A1-IMAGE")
+            .expect_err("id 查询是大小写不敏感的，删除守卫也该是");
+
+        // **被套餐引用的 BBS 也删不掉**（b05 Task 10）：它一没，套餐里那台机器的
+        // `use_ironing_path` 就成了没人配套的孤招 —— 守卫要说得出是哪条套餐在用
+        let usage = presets.asset_usage("a1-bbs-04-020").expect("反查");
+        assert!(usage.machines.is_empty(), "BBS 预设不被机型直接引用");
+        assert_eq!(
+            usage.bundles,
+            vec!["A1_default".to_owned()],
+            "套餐那一档必须说得出是谁"
+        );
+        let err = presets
+            .remove_asset("a1-bbs-04-020")
+            .expect_err("被套餐引用就不能删");
+        let detail = err.detail.clone().unwrap_or_default();
+        assert!(
+            detail.contains("A1_default"),
+            "要报出套餐 id，实测：{detail:?}"
+        );
+        assert!(
+            presets.assets.get("a1-bbs-04-020").is_some(),
+            "被拦下就不该真删"
+        );
+
+        // 没人引用的一条：删得掉，而且落盘后重读确实少了它
+        let before = presets.assets.items().len();
+        presets
+            .remove_asset("a1-extra-image")
+            .expect("没人引用就该删得掉");
+        assert_eq!(presets.assets.items().len(), before - 1);
+        let again = Presets::load_from(presets.root()).expect("重读");
+        assert!(
+            again.assets.get("a1-extra-image").is_none(),
+            "删了要真的落盘，不能只改内存"
+        );
+        assert!(
+            again.assets.get("a1-icon").is_some(),
+            "别的条目一个都不许少"
+        );
+    }
+
+    /// 删一个不存在的资产要**报"没有"**，而不是静默成功
+    #[test]
+    fn removing_an_unknown_asset_says_so() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+        let err = presets.remove_asset("no-such-asset").expect_err("必须报错");
+        assert!(err.message.contains("没有资产"), "实测：{}", err.message);
+    }
+
     /// 别名不许和任何机型 ID 相撞 —— 撞了的话"按 ID 找机型"会有两个答案
     #[test]
     fn aliases_do_not_collide_with_machine_ids() {
@@ -443,5 +821,129 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **机型与版本引用的每个 bundle id 都存在**（b05 Task 10.5 / 10.7，真数据）。
+    ///
+    /// 加载期检查（[`Self::check_bundle_refs`]）在 `real()` 里已经跑过一遍，
+    /// 这里要的是**能看见数字**：引用了多少处、指向了哪几条套餐 ——
+    /// 一条全靠"加载没报错"的判据分不清"检查过了"和"检查在空转"。
+    #[test]
+    fn the_real_bundle_references_resolve() {
+        let Some(p) = real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut checked = 0usize;
+        let mut named = std::collections::BTreeSet::new();
+        for m in p.catalog.machines() {
+            for (field, id) in [("defaultBundle", &m.default_bundle)] {
+                if let Some(id) = id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    let b = p
+                        .bundles
+                        .get(id)
+                        .unwrap_or_else(|| panic!("{} 的 {field} 指向不存在的套餐 {id}", m.id));
+                    assert_eq!(b.machine_id, m.id, "套餐归属与引用它的机型不一致");
+                    checked += 1;
+                    named.insert(id.to_owned());
+                }
+            }
+            for v in &m.versions {
+                if let Some(id) = v
+                    .recommended_bundle
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    p.bundles.get(id).unwrap_or_else(|| {
+                        panic!(
+                            "{} 版本 {} 的 recommendedBundle 指向不存在的套餐 {id}",
+                            m.id, v.id
+                        )
+                    });
+                    checked += 1;
+                    named.insert(id.to_owned());
+                }
+            }
+        }
+        // 反空转：真数据实测 14 处非空引用（5 defaultBundle + 9 recommendedBundle；
+        // A2L 的空串不算）。少于它就是机型文件变了 —— 说清为什么再改这个数
+        assert!(
+            checked >= 14,
+            "只查了 {checked} 处 bundle 引用 —— 这条判据在空转"
+        );
+        // 5 台机各一条套餐，条数变了要在提交里说清为什么
+        assert_eq!(
+            named.len(),
+            5,
+            "引用到的套餐数：{named:?} —— 旧仓实测 5 份（A1/A1_MINI/P1S/P2S/X1C 各一）"
+        );
+    }
+
+    /// **套餐引用的每个 assetRef 都能解析，且每条套餐至少一条 BBS**
+    /// （b05 Task 10.7 / 10.8，真数据）。
+    ///
+    /// 与加载期检查的分工同 9.7 那条：加载期只管"id 认不认得出来"，
+    /// 这里把**归属也对上**（套餐的 machineId ↔ 资产的 machineId）并点出数字。
+    #[test]
+    fn the_real_bundle_asset_refs_resolve() {
+        let Some(p) = real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let items = p.bundles.items();
+        assert_eq!(
+            items.len(),
+            5,
+            "旧仓实测 5 份套餐 —— 条数变了就在提交里说清为什么"
+        );
+
+        let mut bbs_total = 0usize;
+        for b in items {
+            assert_eq!(
+                p.catalog.machine(&b.machine_id).map(|m| m.id.as_str()),
+                Some(b.machine_id.as_str()),
+                "套餐 {} 的归属机型不存在",
+                b.id
+            );
+            assert!(
+                !b.asset_refs.is_empty(),
+                "套餐 {} 的 assetRefs 是空的 —— 加载期就该拦下，到这里还在说明检查没接上",
+                b.id
+            );
+            for r in &b.asset_refs {
+                let a = p
+                    .assets
+                    .get(r)
+                    .unwrap_or_else(|| panic!("套餐 {} 引用不存在的资产 {r}", b.id));
+                if a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs") {
+                    bbs_total += 1;
+                    assert_eq!(
+                        a.machine_id.as_deref(),
+                        Some(b.machine_id.as_str()),
+                        "套餐 {}（{}）引用了别家机型的 BBS：{r}（{}）",
+                        b.id,
+                        b.machine_id,
+                        a.machine_id.as_deref().unwrap_or("（无归属）")
+                    );
+                }
+            }
+        }
+        // 反空转：5 条套餐各引 1 条 BBS（实测），BBS 引用总数为 0 说明上面的判定路径没走通
+        assert!(
+            bbs_total >= 5,
+            "5 条套餐只对上 {bbs_total} 条 BBS 引用 —— 10.8 的判定在空转"
+        );
+
+        // **反查实测**（10.4 判据的反向）：`a1-bbs-04-020` 只被 A1_default 引用；
+        // 换个大小写查同一个资产，结果必须一致
+        let u = p.asset_usage("a1-bbs-04-020").expect("反查");
+        assert_eq!(u.bundles, vec!["A1_default".to_owned()]);
+        let u2 = p.asset_usage("A1-BBS-04-020").expect("反查（大写）");
+        assert_eq!(u, u2, "反查是大小写不敏感的");
+        // 机型图那一档不被套餐引用：归属 ≠ 引用
+        let u = p.asset_usage("a1-image").expect("反查");
+        assert_eq!(u.machines, vec!["A1".to_owned()]);
+        assert!(u.bundles.is_empty(), "机型图不该出现在套餐的 assetRefs 里");
     }
 }

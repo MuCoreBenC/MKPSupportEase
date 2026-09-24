@@ -4,8 +4,8 @@ display = 'P1S'
 brand = 'Bambu Lab'
 defaultBundle = 'P1S_default'
 externalAliases = ['P1', 'P1SC', 'P1P', 'P1C']
-image = 'p1s.webp'
-icon = 'p1s'
+image = 'p1s-image'
+icon = 'p1s-icon'
 
 [dimensions]
 edgeZone = 10.0

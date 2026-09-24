@@ -1738,3 +1738,375 @@ body {
   margin: -1px 8px 8px;
   padding: var(--w-p-card-sm);
 }
+
+/* ---------- 生成视角（b05 Task 14.1/14.2/14.9） ---------- */
+
+.wb-build {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-build__counts {
+  display: flex;
+  gap: 16px;
+  margin: 0 0 8px;
+  color: var(--w-t2);
+}
+
+.wb-build__counts b[data-tone="danger"] {
+  color: var(--w-danger);
+}
+
+.wb-build__counts b[data-tone="ok"] {
+  color: var(--w-ok);
+}
+
+.wb-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-issue {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--w-line);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+
+.wb-issue[data-sev="block"] {
+  border-left-color: var(--w-danger);
+}
+
+.wb-issue[data-sev="todo"] {
+  border-left-color: var(--w-warn, #b45309);
+}
+
+.wb-issue[data-sev="hint"] {
+  border-left-color: var(--w-line-strong);
+}
+
+.wb-issue__sev {
+  flex: 0 0 auto;
+  font-size: var(--w-fs-xs);
+  color: var(--w-t3);
+}
+
+.wb-issue[data-sev="block"] .wb-issue__sev {
+  color: var(--w-danger);
+  font-weight: 600;
+}
+
+.wb-issue__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-issue__body span {
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-build__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-build__row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--w-fs-base);
+}
+
+.wb-build__who {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-build__why {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-build__result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 4px;
+  background: var(--w-card);
+}
+
+.wb-build__result p {
+  margin: 0 0 4px;
+}
+
+.wb-build__files {
+  margin: 0;
+  font-size: var(--w-fs-xs);
+  color: var(--w-t2);
+  word-break: break-all;
+}
+
+.wb-build__skips {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: var(--w-fs-xs);
+  color: var(--w-t2);
+}
+
+.wb-build__previewbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.wb-build__previewbar select {
+  flex: 0 1 320px;
+}
+
+.wb-build__toml {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--w-line);
+  border-radius: 4px;
+  background: var(--w-card);
+  font-size: var(--w-fs-xs);
+  white-space: pre;
+}
+
+.wb-build__baseline-note {
+  margin: 0 0 8px;
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+}
+
+.wb-build__confirm {
+  margin: 0 0 8px;
+  padding: 10px;
+  border: 1px solid var(--w-primary);
+  border-radius: 4px;
+  background: var(--w-primary-soft);
+}
+
+.wb-build__confirm p {
+  margin: 0 0 8px;
+}
+
+.wb-build__strays {
+  margin: 8px 0;
+}
+
+.wb-build__strays p {
+  margin: 0 0 4px;
+}
+
+/* diff 清单。脏行左边一条红线 —— 状态列的文字已经说了，颜色只是辅助 */
+.wb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--w-fs-xs);
+}
+
+.wb-table th {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--w-line-strong);
+  color: var(--w-t3);
+  font-weight: normal;
+  text-align: left;
+}
+
+.wb-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--w-line);
+}
+
+.wb-table tr[data-dirty] td:first-child {
+  border-left: 3px solid var(--w-warn, #b45309);
+  padding-left: 5px;
+}
+
+/* ---------- 套餐与菜单视角（b05 Task 14.1） ---------- */
+
+.wb-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-menu__refs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-menu__refs li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.wb-menu__refs li[data-broken] {
+  color: var(--w-danger);
+}
+
+.wb-menu__bbs,
+.wb-menu__role {
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--w-primary-soft);
+  color: var(--w-primary);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+.wb-menu__broken {
+  color: var(--w-danger);
+  font-size: var(--w-fs-xs);
+  font-style: normal;
+}
+
+.wb-menu__role {
+  background: none;
+  color: var(--w-t3);
+}
+
+/* ---------- 资产选择模态框（b05 Task 14.6） ---------- */
+
+/* 浮层 absolute（外壳纪律：根节点是包含块，不用 fixed） */
+.wb-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 35%);
+}
+
+.wb-modal__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  padding: 12px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: 8px;
+  background: var(--w-page);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  overflow: hidden;
+}
+
+.wb-assetgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.wb-asset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--w-line);
+  border-radius: 6px;
+  background: var(--w-card);
+  text-align: left;
+}
+
+.wb-asset[data-on="yes"] {
+  border-color: var(--w-primary);
+  outline: 1px solid var(--w-primary);
+}
+
+.wb-asset:disabled {
+  opacity: 0.45;
+}
+
+.wb-asset__thumb {
+  width: 100%;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.wb-asset__thumb--blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--w-t3);
+}
+
+.wb-asset__name {
+  font-size: var(--w-fs-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-asset__meta {
+  color: var(--w-t3);
+  font-size: var(--w-fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 补充：机型页新增的两处 ---------- */
+
+/* 复制表单里的「同时复制正文」整行复选 */
+.wb-mc__field--check {
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+
+.wb-mc__field--check > span {
+  color: var(--w-t2);
+  font-size: var(--w-fs-xs);
+}
+
+/* 「参数源待补」标 —— 与 tag 同形，警示色 */
+.wb-ver__tag--todo {
+  background: var(--w-warn-soft, #fef3c7);
+  color: var(--w-warn, #b45309);
+}
+
+/* 资产格的值不是按钮（没有编辑态），静态展示 */
+.wb-kv__btn--static {
+  cursor: default;
+}
+
+.wb-kv__btn--static:hover {
+  border-color: transparent;
+  background: none;
+}

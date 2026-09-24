@@ -3,8 +3,7 @@ name = ''
 display = 'A2L'
 brand = 'Bambu Lab'
 externalAliases = []
-image = ''
-icon = 'a1'
+icon = 'a1-icon'
 
 [[versions]]
 id = 'STANDARD'

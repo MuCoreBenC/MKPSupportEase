@@ -93,6 +93,11 @@ pub enum MachineField {
     Name,
     Image,
     Icon,
+    /// 这台机型的默认套餐（b05 Task 15.3）。它指向 `presets/bundles.toml` 里的一条
+    /// 套餐 —— 与 `image` / `icon` 同一类**引用格**：写一个解析不到的 id，
+    /// 下一次加载会被 `check_bundle_refs` 判成 Corrupted（整个工作台起不来），
+    /// 所以命令层在写之前先查（见 `app::machines::check_ref`）
+    DefaultBundle,
 }
 
 impl MachineField {
@@ -103,6 +108,7 @@ impl MachineField {
             Self::Name => "name",
             Self::Image => "image",
             Self::Icon => "icon",
+            Self::DefaultBundle => "defaultBundle",
         }
     }
 
@@ -162,53 +168,121 @@ impl Machine {
     /// tag / description）**留空不写**，而不是写成空串：
     /// 空串会在界面上显示成"已经填过但填了个空"，和"还没填"是两件事。
     pub fn add_version(&mut self, id: &str, name: &str) -> Result<(), AppError> {
-        let id = id.trim();
         let name = name.trim();
-        if id.is_empty() {
-            return Err(AppError::invalid_argument("版本 ID 不能为空"));
-        }
         if name.is_empty() {
             return Err(AppError::invalid_argument("版本名称不能为空"));
         }
-        // ID 会进文件名与产物的键，所以限死字符集。
-        // 放宽的话，一个带空格或中文的 ID 会在生成 TOML 那一步才炸，那时离现场很远了
-        if !id
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-        {
-            return Err(AppError::invalid_argument(
-                "版本 ID 只能用大写字母、数字和下划线",
-            ));
-        }
-        if self.versions.iter().any(|v| v.id == id) {
-            return Err(AppError::invalid_argument(format!(
-                "这台机型已经有一个叫 {id} 的版本了"
-            )));
-        }
+        let id = validate_new_version_id(self, id)?;
+        Self::append_version(
+            &mut self.doc,
+            &self.file,
+            &mut self.versions,
+            &id,
+            name,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
 
+    /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：从模板版本抄
+    /// `recommendedBundle`（版本 → 套餐的关系随复制走），`tag` / `description`
+    /// 由调用方给（前端拿模板值预填，人可改）。
+    ///
+    /// 两条**刻意不做**：
+    /// - **不复制 `presetFile`** —— 那是 G-2 待删的 B 套悬空名字，把悬空引用抄进
+    ///   新版本等于扩大它；参数源状态由 `hasRecipe`（14.4）呈现，新版本默认「待补」；
+    /// - **不碰参数正文** —— doc 第 5 步「只写版本定义」，参数正文是 14.5 的
+    ///   独立动作（`wb_copy_recipe`）。两步分离让每次写都只落一个文件，
+    ///   不需要 16.2 的跨文件事务。
+    pub fn copy_version(
+        &mut self,
+        template_id: &str,
+        new_id: &str,
+        name: &str,
+        tag: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<(), AppError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid_argument("版本名称不能为空"));
+        }
+        let new_id = validate_new_version_id(self, new_id)?;
+        let bundle = self
+            .versions
+            .iter()
+            .find(|v| v.id == template_id)
+            .ok_or_else(|| AppError::not_found(format!("模板版本 {template_id} 不存在")))?
+            .recommended_bundle
+            .clone();
+        Self::append_version(
+            &mut self.doc,
+            &self.file,
+            &mut self.versions,
+            &new_id,
+            name,
+            None,
+            bundle,
+            tag,
+            description,
+        )
+    }
+
+    /// 建一个 `[[versions]]` 块并同步内存清单。`add_version` 与 `copy_version` 共用，
+    /// 免得两条路分岔（谁忘了同步 `self.versions` 都会让界面上少一行）
+    #[allow(clippy::too_many_arguments)]
+    fn append_version(
+        doc: &mut toml_edit::DocumentMut,
+        file: &Path,
+        versions: &mut Vec<MachineVersion>,
+        id: &str,
+        name: &str,
+        preset_file: Option<String>,
+        recommended_bundle: Option<String>,
+        tag: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<(), AppError> {
         let mut t = toml_edit::Table::new();
         t["id"] = literal_str(id);
         t["name"] = literal_str(name);
+        if let Some(tag) = tag.filter(|s| !s.trim().is_empty()) {
+            t["tag"] = literal_str(tag.trim());
+        }
+        if let Some(desc) = description.filter(|s| !s.trim().is_empty()) {
+            t["description"] = literal_str(desc.trim());
+        }
+        if let Some(pf) = &preset_file {
+            t["presetFile"] = literal_str(pf);
+        }
+        if let Some(b) = &recommended_bundle {
+            t["recommendedBundle"] = literal_str(b);
+        }
 
         // `versions` 可能整个不存在（一个版本都没有的机型）
-        let entry = self
-            .doc
+        let entry = doc
             .entry("versions")
             .or_insert(toml_edit::Item::ArrayOfTables(
                 toml_edit::ArrayOfTables::new(),
             ));
         let arr = entry.as_array_of_tables_mut().ok_or_else(|| {
-            AppError::corrupted(format!("{} 的 versions 不是表数组", self.file.display()))
+            AppError::corrupted(format!("{} 的 versions 不是表数组", file.display()))
         })?;
         arr.push(t);
 
-        self.versions.push(MachineVersion {
+        versions.push(MachineVersion {
             id: id.to_owned(),
             name: name.to_owned(),
-            preset_file: None,
-            recommended_bundle: None,
-            tag: None,
-            description: None,
+            preset_file,
+            recommended_bundle,
+            tag: tag
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            description: description
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
         });
         Ok(())
     }
@@ -342,6 +416,7 @@ impl Machine {
             MachineField::Name => self.name = owned.unwrap_or_default(),
             MachineField::Image => self.image = owned,
             MachineField::Icon => self.icon = owned,
+            MachineField::DefaultBundle => self.default_bundle = owned,
         }
         Ok(())
     }
@@ -363,6 +438,17 @@ impl Catalog {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let brands = load_brands(&root.join("brands.toml"))?;
         let machines = load_machines(&root.join("machines"))?;
+        check_unique_ids(
+            &machines
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.clone(),
+                        m.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
         let zones = load_zones(&root.join("forbidden_zones"))?;
         Ok(Self {
             brands,
@@ -552,6 +638,74 @@ fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
             })
         })
         .collect())
+}
+
+/// 新版本 id 的公共校验（`add_version` 与 `copy_version` 同一条，免得两条路分岔）：
+/// 非空、字符集限死（id 会进文件名与产物的键）、机型内唯一。
+fn validate_new_version_id(m: &Machine, id: &str) -> Result<String, AppError> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(AppError::invalid_argument("版本 ID 不能为空"));
+    }
+    // 放宽的话，一个带空格或中文的 ID 会在生成 TOML 那一步才炸，那时离现场很远了
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(AppError::invalid_argument(
+            "版本 ID 只能用大写字母、数字和下划线",
+        ));
+    }
+    if m.versions.iter().any(|v| v.id == id) {
+        return Err(AppError::invalid_argument(format!(
+            "这台机型已经有一个叫 {id} 的版本了"
+        )));
+    }
+    Ok(id.to_owned())
+}
+
+/// 机型与版本的 id 唯一性（b05 Task 11.3）—— **大小写不敏感**。
+///
+/// 四类 id（机型 / 版本 / 资产 / 套餐）都要过这一条：资产与套餐在各自 load 时查了
+/// （Task 8.8 / Task 10），这里补机型与版本这两类。doc §9 的理由：仅大小写不同的
+/// 两个 id 在「文件名统一小写」之后会撞成同一个文件，而「按 id 查」的结果取决于
+/// 谁排在前面 —— 撞了必须当场报错，不能等到某个平台或某次改名才炸。
+///
+/// 输入是 `(机型 id, 版本 id 列表)` 的切片而不是 `&[Machine]`：检查的只是 id 集合，
+/// 给更小的输入面，测试也能直接喂（Windows 的文件系统大小写不敏感，
+/// 仅大小写不同的两份机型文件在夹具里根本写不出来）。
+fn check_unique_ids(machines: &[(String, Vec<String>)]) -> Result<(), AppError> {
+    let mut seen: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for (id, versions) in machines {
+        let lower = id.to_lowercase();
+        if let Some(prev) = seen.insert(lower, id.clone()) {
+            return Err(AppError::corrupted(format!(
+                "机型 id 撞了：{prev} 与 {id}（仅大小写不同）"
+            ))
+            .with_detail(
+                "id 是主键，且大小写不敏感 —— 撞了的话「按 id 查」的结果取决于谁排在前面，\
+                 而文件名统一小写后两者还会撞成同一个文件"
+                    .to_owned(),
+            ));
+        }
+        // 版本 id 是**机型内**唯一（11.3）：不同机型有同名版本是合法的（P1S 与 X1C 都有 lite）
+        let mut versions_seen: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for v in versions {
+            let vl = v.to_lowercase();
+            if let Some(prev) = versions_seen.insert(vl, v.clone()) {
+                return Err(AppError::corrupted(format!(
+                    "机型 {id} 的版本 id 撞了：{prev} 与 {v}（仅大小写不同）"
+                ))
+                .with_detail(
+                    "版本 id 在机型内唯一，且大小写不敏感（doc §9）：\
+                     产物文件名统一小写，`Fast` 与 `FAST` 会写成同一个文件"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
@@ -773,6 +927,140 @@ mod tests {
         std::fs::copy(root.join("brands.toml"), tmp.path().join("brands.toml")).unwrap();
         let c = Catalog::load_from(tmp.path()).expect("副本也该读得通");
         (tmp, c)
+    }
+
+    /* ---------- 唯一性（b05 Task 11.3） ---------- */
+
+    /// **仅大小写不同的 id 必须当场炸**（11.3 / doc §9）。
+    ///
+    /// 四类 id 里资产与套餐已各有判据，这一条补机型与版本。检查函数收
+    /// `(机型 id, 版本 id 列表)` 切片而不是 `&[Machine]`：Windows 的文件系统
+    /// 大小写不敏感，仅大小写不同的两份机型文件在夹具里根本写不出来 ——
+    /// 输入面收小之后，这个形状才能直接喂进来
+    #[test]
+    fn case_only_id_collisions_are_refused() {
+        // 机型 id 撞（A1 vs a1）
+        let err = check_unique_ids(&[("A1".to_owned(), vec![]), ("a1".to_owned(), vec![])])
+            .expect_err("撞了必须报错");
+        assert!(
+            err.message.contains("机型 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("A1") && err.message.contains("a1"),
+            "要说清撞的是哪两个：{}",
+            err.message
+        );
+
+        // 版本 id 撞（机型内 FAST vs fast）；**不同机型的同名版本是合法的**
+        let err = check_unique_ids(&[(
+            "A1".to_owned(),
+            vec!["STANDARD".to_owned(), "fast".to_owned(), "FAST".to_owned()],
+        )])
+        .expect_err("机型内撞版本 id 必须报错");
+        assert!(
+            err.message.contains("版本 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+
+        // P1S 与 X1C 都有 lite —— 机型内唯一就够，跨机型同名不是错
+        check_unique_ids(&[
+            ("P1S".to_owned(), vec!["LITE".to_owned()]),
+            ("X1C".to_owned(), vec!["lite".to_owned()]),
+        ])
+        .expect("不同机型的同名版本不该报错");
+    }
+
+    /// 加载期同一道闸：**从盘上读出来的数据撞 id 也一样拦**（副本上改，不碰真数据）
+    #[test]
+    fn loading_a_directory_with_case_only_collisions_fails() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+
+        // 机型 id 撞：文件名可以不同（Windows 允许），文件**里**的 id 只差大小写
+        let (tmp, _c) = copy_of(&root);
+        crate::fsx::atomic::atomic_write(
+            &tmp.path().join("machines").join("TEST_LOWER.toml"),
+            "id = 'a1'\ndisplay = '小写撞名机'\nbrand = 'Bambu Lab'\n".as_bytes(),
+        )
+        .unwrap();
+        let err = Catalog::load_from(tmp.path()).expect_err("撞机型 id 必须整目录拒载");
+        assert!(
+            err.message.contains("机型 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+
+        // 版本 id 撞：往 A1.toml 尾部 append 一个 fast（A1 已有 FAST）
+        let (tmp, _c) = copy_of(&root);
+        let p = tmp.path().join("machines").join("A1.toml");
+        let mut text = std::fs::read_to_string(&p).unwrap();
+        text.push_str("\n[[versions]]\nid = 'fast'\nname = '撞名版'\n");
+        crate::fsx::atomic::atomic_write(&p, text.as_bytes()).unwrap();
+        let err = Catalog::load_from(tmp.path()).expect_err("机型内撞版本 id 必须整目录拒载");
+        assert!(
+            err.message.contains("版本 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+    }
+
+    /* ---------- 复制版本（b05 Task 14.3） ---------- */
+
+    /// **复制版本只写版本定义**，从模板抄 recommendedBundle、
+    /// **不抄 presetFile**（G-2 待删的悬空名），tag/description 按参数。
+    /// 落盘后从盘上重读核对（副本上改，不碰真数据）
+    #[test]
+    fn copy_version_writes_the_definition_only() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c) = copy_of(&root);
+        let template = c.machine("A1").unwrap().versions[2].clone(); // FASTV3.3
+        assert_eq!(template.id, "FASTV3.3", "夹具前提：A1 第三版是快拆 6.28");
+
+        c.machine_mut("A1")
+            .unwrap()
+            .copy_version("FASTV3.3", "COPYTEST", "复制测试", Some("新标签"), None)
+            .expect("复制得出来");
+        c.write_machine("A1").expect("落盘");
+
+        let c2 = Catalog::load_from(tmp.path()).expect("重读");
+        let a1 = c2.machine("A1").unwrap();
+        let nv = a1
+            .versions
+            .iter()
+            .find(|v| v.id == "COPYTEST")
+            .expect("新版本在");
+        assert_eq!(nv.name, "复制测试");
+        assert_eq!(nv.tag.as_deref(), Some("新标签"));
+        assert_eq!(
+            nv.recommended_bundle.as_deref(),
+            template.recommended_bundle.as_deref(),
+            "版本 → 套餐的关系随复制走"
+        );
+        assert!(
+            nv.preset_file.is_none(),
+            "presetFile 是 G-2 待删的悬空名，不许抄进新版本"
+        );
+        assert_eq!(a1.versions.len(), 4, "原有三版一台不少");
+
+        // 反向：重名、非法 id、模板不存在，一个都进不来
+        let m = c.machine_mut("A1").unwrap();
+        assert!(m
+            .copy_version("FASTV3.3", "COPYTEST", "x", None, None)
+            .is_err());
+        assert!(m
+            .copy_version("FASTV3.3", "bad-id", "x", None, None)
+            .is_err());
+        assert!(m
+            .copy_version("NO_SUCH", "COPYTEST2", "x", None, None)
+            .is_err());
     }
 
     /// 判据的判据。`one_edit_only` 是个会被三种改动共用的工具，

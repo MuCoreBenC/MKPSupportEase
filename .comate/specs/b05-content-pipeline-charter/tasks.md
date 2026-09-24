@@ -1,0 +1,210 @@
+# 新工作台产品流程与数据契约 —— 落地任务计划
+
+> 依据 `doc.md`。四道决策闸（G-0 命名规范 / G-1 配方组织形式 / G-2 `presetFile` 去留 / G-3 BBS 与 Orca）没开的任务不执行。
+> 贯穿全程的硬防线：**九份产物内容逐字节不变**（sha256 与 doc §2.4 表一致）。改名只改名字，参数值一个都不许动。
+> 旧仓参考在 `local-reference/mkpse-presets/`，**全程只读，不删**。
+
+---
+
+## 决策记录（已拍板）
+
+| 闸 | 决定 | 落点 |
+| --- | --- | --- |
+| G-0 命名规范 | `{机型id}-{版本id小写}.toml`；身份保持原样，小写只在命名函数里发生一次 | Task 1 已写进 `docs/ARCHITECTURE.md` §10 |
+| G-1 配方组织 | **方案甲：保持现状**，实现 §5.1 选定的失败处理 | Task 16.2 |
+| G-2 `presetFile` | **删除**（机型文件字段、`presets/catalog.rs` 的 `VersionField`、前端类型三处同步） | Task 16.3 |
+| G-3 切片器资源 | **纳入 BBS**，保留开放的切片器扩展维度；删除现有 Orca 文件 | Task 16.4；**删除范围以 Task 7 盘点结论为准，不提前扩大** |
+| Task 2 实现方式 | **①：`mkpse-preset` 作为 `workbench` feature 下的可选依赖**，转调权威实现 | 本文件 Task 2.3 |
+
+**提交节奏**：每个 Task 收口提交一次。其中 Task 5（重命名 + sha256 复验）与 Task 9（资产迁移）
+各自独立提交，不与别的改动混在一起 —— 这两笔是「改了很多文件但内容该逐字节不变」，混进去就验不清。
+
+---
+
+- [x] Task 1: 冻结命名与身份规范（闸 G-0；只出文档，不动代码与数据）
+    - 1.1: 按 doc §6.3 定稿五项：字段组成、大小写、分隔符、扩展名、ID→文件名的映射方向
+    - 1.2: 在 `docs/` 写一节「版本身份与文件命名规范」，明确内部身份（机型 id + 版本 id）与外部文件名的职责分界
+    - 1.3: 写明规范覆盖的五个使用点：版本定义、参数源关联、构建产物、消费端查找、发布文件名
+    - 1.4: 写明不变式「身份稳定、文件名可算」，并点出现存的三处违反（`generate.rs:55-57`、`build.rs:219-221`、机型定义的 `presetFile` 字面量）
+    - 1.5: 写明大小写风险：文件名小写化后，仅大小写不同的 id 会冲突成同一个文件
+
+- [x] Task 2: 命名实现收敛成唯一一处（决定：① 可选依赖）
+    - 2.1: ✅ 权威实现定在 `crates/preset/src/generate.rs` 的 `file_name`，小写化在它内部发生一次
+    - 2.2: ✅ 从 crate 根导出为 `preset::preset_file_name`（`lib.rs`）
+    - 2.3: ✅ 取 ①：`mkpse-preset = { path = "../crates/preset", optional = true }`，只挂在 `workbench` feature 下；`src-tauri` 的 `preset_file_name` 改为转调（薄壳，不再自己拼字符串）
+    - 2.3a: ✅ 边界实测：`cargo tree -p mkp-support-ease`（默认 feature）里**没有** `mkpse-preset` / `mkpse-postprocess`，**发布构建的依赖图与产物都不含**那 56 KB 注册表与 9 份预设；代价只落在工作台构建（开发态）。引用点全在 `#[cfg(feature = "workbench")]` 门内，不带 feature 时 `use preset` 直接编不过
+    - 2.4: ✅ 判据 `naming_follows_the_one_rule`：小写化、机型 id 原样、分隔符 `-`、且对配方侧是恒等变换
+    - 2.5: ✅ 判据 `case_only_differences_collide`：仅大小写不同的 id 必然塌成同一文件名（校验层据此拦）
+    - 2.6: ✅ 前端**没有第二份实现**（全仓核对：没有任何地方自己拼 `{机型}-{版本}.toml`）。前端唯一掌握的预设名是机型定义里的 `presetFile` 字段 —— 那是 G-2 的删除对象（Task 16.3），删掉后前端只展示后台算出的名字
+    - 2.7: ✅ 判据 `naming_matches_the_preset_crate`：薄壳与权威实现逐例相等 —— 这是跨 crate 连着两处的那根线（转调本身没有类型系统兜底）
+    - 2.8: ✅ `cargo test -p mkpse-preset --lib` 77/77 绿；`cargo test -p mk-support-ease --features workbench` 265/265 绿；`fmt` 与两档 `clippy -D warnings` 全过；`stored_presets_match_the_recipe` 与 `kg0p_products_match_the_baseline` 都过 —— 九份产物字节未变
+
+- [ ] Task 3: 收拢重复路径常量与清理死引用（零行为变更）
+    - 3.1: ✅ 九处手写 `fixtures/presets` 统一走 `preset::generate::fixtures_dir()`（`tests/recipe.rs` 的本地 `fixtures_dir()` 一并删掉；顺手覆盖了任务清单外的 src 内两处：`src/validate.rs`、`src/build.rs` 的单测 —— 同一类重复，同一笔改）
+    - 3.2: ✅ `builtin_presets_match_dir.rs` 的本地 `builtin_dir()` 与 `key.rs` 的内置预设路径改为 `preset::generate::assets_dir()`
+    - 3.3: ✅ **裁决取②：不删，改指仓内基线** —— 原文前提已被实测证伪（`../mkp-ssr/...` 在开发机上存在、判据真比了 9 份；两侧基线 sha256 9/9 相同，只差文件名）。改为：基线走 `preset::generate::fixtures_dir()`；配对读文件头 `# machine:` / `# variant:`（不认文件名，Task 5 改名后不用再动）；9 份一份不少地比到 —— 少了 / 重了 / 身份读不出来都直接失败，删掉「没找到就 return」那条静默分支
+    - 3.3a: ✅ 随之把 `render()` 的机型查询从上游那份换成**我们自己那份清单**（`book.machines()`）：没有这一改，这条判据在 CI 里仍跑不起来（上游不在仓库里）。没有任何判据覆盖「上游没有这台」那条旧分支，而上游那层正在退出（b04 Task 12）—— 理由与代价写在 `render()` 的注释里
+    - 3.3b: ✅ 复验：判据实测 **9/9 配上并逐份比过**（值全对，只剩「段内键序」那条已知差异，仍是 Task 11 的收尾项）；`cargo test -p mkp-support-ease --features workbench` 265/265
+    - 3.3c: ✅ **那处生产代码改动的独立审查**（结论单独成篇：`render-machine-source-review.md`，与 Task 5 分开汇报）：① `book.machines()` 是当前正式机型来源（b04 Task 8 起，清单来自 `presets/machines/*.toml`）；② 渲染链里只剩这一处读上游的机型身份，上游那层正在退出（b04 Task 12）；③ **需要独立判据** —— 已补 `render_takes_the_machine_from_our_own_catalog`，并做了反空转验证（改回上游那份 → 它与 M0 同时红，改回来 266/266 绿）。残余风险一条：真 `presets/` 与真上游之间没有任何判据比机型集合 → 并入 Task 11
+    - 3.4: ✅ `cargo test -p mkpse-preset` 全绿（77 lib + 39 集成）、`cargo fmt --all --check` 与 `cargo clippy -p mkpse-preset --all-targets -- -D warnings` 全过
+
+- [x] Task 4: 旧名 → 新身份映射表（数据文档，不改文件）
+    - 4.1: ✅ 落在 `migration-map.md`：九行「旧云端名 ↔ 机型 id ↔ 版本 id ↔ 新文件名」，附字节数与 sha256 前 16 位（**两侧相同**，实测逐对相等）
+    - 4.2: ✅ 与 `crates/preset/tests/key.rs:32-57` 的硬编码四元组逐条对照：顺序与内容完全一致；那条判据除了读表还反空转（`len == 9`）并逐份断身份与 `key.file_name()`
+    - 4.3: ✅ 记了 B 套的读法（`M`=mini 档位、`F`=快拆、`_260628`=开源版日期），并写明两条要点：**B 套不可算**（要查表或读文件头）、日期后缀不是版本语义
+    - 4.4: ✅ 文档头尾都标了有效期：迁移完成后归档失效、不进长期代码路径；附「B 套今天还留在哪」的五类收尾清单
+
+- [x] Task 5: 按新规范重命名基线、夹具与硬编码名单
+    - 5.1: ✅ 那条 `assert_ne!` 连同它所在的判据一起重写成 `pairing_goes_by_file_name` —— 现在咬「两边文件名集合相同」（少一份、多一份、名字写岔了都红）
+    - 5.2: ✅ `pair_by_head` / `head_value` 整个删掉，换成 `toml_files()`（按文件名索引）；`check_baseline` / `sync_baseline` 都改成按名字直配。顺带把 `tests/recipe.rs` 的 `fixtures_by_combo()`（**另一处**按头配对）改成按名字取 fixture —— 现在全仓没有按 `# machine:` 配对的代码了（工作台那条 M0 判据除外，它的理由写在文件里）
+    - 5.3: ✅ 九份基线改名，git 记为相似度 100% 的改名：18 份夹具合计 **0 增 0 删**
+    - 5.4: ✅ 九份 IR 夹具同步改名（内容里本来就没有文件名：`PresetName` 是空串）
+    - 5.5: ✅ 四处硬编码名单全换新名，并写明「名字是命名规则算出来的、写死字面量是刻意的」（防从目录遍历推出来）；`registry_branch_diff.snapshot` 按文档命令重生成，**diff 只有段落名，`0 处` 一条没变**
+    - 5.6: ✅ **无需改动**：`BUILTIN_PRESETS` 与它的 `include_str!` 路径本来就是新名（产物侧一直在 A 套），本轮没动它一个字节
+    - 5.7: ✅ 硬防线实测（改名前后逐份比）：九份基线 sha256 **与迁移前完全相同**（`0B19FEAA…` / `115E061F…` / … 见 `migration-map.md`）；`gen-presets --check` 与 `--baseline` 都绿，后者报「9 份同名文件逐字节相同」
+    - 5.8: ✅ `preset_recipes.toml` / `test_recipes.toml` 的链路说明改成真实路径 +「两边同名、按名字直配」；`docs/ARCHITECTURE.md` §10.5 改写成「已收口」并指向映射表
+    - 5.9: ✅ **越出清单但同类的一处**：`PresetKey::file_name` 有变体那一档改转调 `generate::file_name`（它以前自己拼一遍，是全仓第三处 `format!` 命名 —— Task 2 那句「唯一实现」此前并不成立）。无变体那一档保留为**显式例外**：老预设没有 `# variant:`，规则（身份 → 名字）在这一档上不成立
+
+- [ ] Task 6: 把基线维护从日常生产流程里摘出来（除 6.4 外已收口）
+    - 6.1: ✅ 写进 `docs/ARCHITECTURE.md` §10.6：对照基线是**判据资产**，不是产物副本、不是交付文件；与产物同名同内容但职责不同，**不合并它们**（合了就是自比自）
+    - 6.2: ✅ 同一节 + `gen-presets` 文件头写清流程：只在「本次变更确实预期产物变化」时更新；先看差异（`--baseline` 或 `git diff`）→ 确认是要的 → 手动 `--sync-baseline`
+    - 6.3: ✅ **核对结论：生成与发布路径本来就没有自动同步** —— `--write` 只写 `assets/presets/`；`wb_generate` 写 `dist-presets/presets/mkp/` + 快照；`wb_publish` 写 `dist-presets/` + manifest；`sync_baseline` 在 `src-tauri` 零命中、唯一调用点是那个 CLI；`scripts/` 与 CI 里也没有任何引用。本轮没有要删的调用 —— 改的是**把这个事实锁住**
+    - 6.4: ➡️ **裁决（2026-09-24）：并入 Task 14**（见 14.9），现在不单开。任务到此收口 —— 规则（§10.6）、落点闸、两条判据都在位；工作台那个入口是**功能开发**（要看 diff、要确认），提前做会把功能开发与资产域任务搅在一起
+    - 6.5: ✅ 两条判据，各堵一半：
+        - `write_discipline_scan.rs::the_baseline_has_exactly_one_write_path` —— 源码扫描（`crates/*/src` + `src-tauri/src`），`sync_baseline` 只允许出现在定义处与 `bin/gen_presets.rs`；断言是**相等**不是子集（入口搬走会红）
+        - `tests/baseline_stays_untouched_on_the_generate_path.rs` —— 真跑 `check_all` / `check_baseline` / `write_all`(临时目录)，基线九份**内容 sha256** 不变；附 `the_snapshot_notices_a_change` 证明检测器不空转
+    - 6.5a: ✅ 两条都做了反空转探针（都实测会红）：放一个不被编译的 `preset/src/__probe_scan.rs` → 扫描判据红并点出文件名；临时给 `write_all` 加一行写基线 → 运行时判据红。探针已撤，基线九份 sha256 回到迁移前的值
+    - 6.5b: 边界照实记：判据锁的是 **Rust 源码**（crates/*/src + src-tauri/src）；`scripts/`、CI、`*.py` 今天对基线零引用（人工核对），但**没有判据锁着**
+
+- [x] Task 7: 旧仓迁移盘点收口（只盘点，不搬运）
+    - 7.0: ✅ 产物是 `asset-inventory.md`（口径与证据、`assets/` 六个子目录、`models/` 三种形态、迁移清单 15 条、只读证据与「我们这边还引用它吗」）
+    - 7.1: ✅ doc §12.4 已定的（BBS 9 份 13.8 KB、套餐 5 份 0.7 KB、`source/assets` 18 份 3.2 KB）只做引用与体量复核，不重复盘点
+    - 7.2: ✅ 六个子目录逐个体量/归属/引用：`faq` 29 份 5.37 MB、`machines` 11 份 247.5 KB、`models` 8 份 30.9 KB、`avatars` 3 份 14.1 KB、`icons/machine` 3(+1) 份 1.1 KB、`qr` 8 份 0 B。归属取自旧仓自己的 `manifest.json` 与 `content/asset_usage.json`
+    - 7.3: ✅ **成立**：8 份全是 `*.png.gitkeep`、0 字节、没有一张真图 → 整目录舍弃
+    - 7.4: ✅ **定案：只交付 `.3mf`**。实测两组配对是**逐字节相同**的同一份（`MKP_support_test_models.3mf` = `.zip`、`ZOffset_Calibration.3mf` = `.zip`），解压目录的 17 个条目与那个 `.3mf` 里的 17 个条目一一对应 → 三选一无信息损失。另记一条事实：这三份 `.3mf` **不在 manifest 的 72 条里**，是 `model_copy.models[].modelFile` 按裸名引用的
+    - 7.5: ✅ `faq/` 29 份 5.37 MB 标**舍弃**（D-4）；同一口径下 `avatars/`（about）与 `assets/models/model_*.webp`（model_copy）一并舍弃
+    - 7.6: ✅ 迁移清单 15 条：直接保留 3 条（机器图 5 张 / 图标 3 份 / 模型 3 份 `3mf`）、需转换 3 条（BBS / 套餐 / 资产元数据）、舍弃 9 条、不迁 1 条。保留+转换 ≈ 4.08 MB，舍弃 ≈ 10.89 MB
+    - 7.7: ✅ 只读不删有据：拷贝没有 `.git`，改用**它自己的账** —— `manifest.json` 72 条 sha256 **逐份核过，0 缺 0 不符**（盘点前后各核一次）；全仓 mtime 一致（`2026-09-14 19:26`）；本次只跑读操作
+    - 7.8: ✅ 两条空档照实记在 `asset-inventory.md` §5，**已裁决（2026-09-24）**：① `assets/models/` 与 `assets/faq/` **不要** → 预览图与 FAQ 一并舍弃；模型本体的**名字与预览图暂缓**（Task 8 只保留 `model` 类型，本轮不虚构元数据）；② 机型图**用现有新版那批大图**（`public/printers/bambu/`）—— 附注：那批只覆盖 A1 / A1_MINI（2 张）/ P1S，**P2S 与 X1C 没有新版**（见 9.1a）
+
+- [ ] Task 8: 资产域①层 —— 集中式资产定义与目录约定（除 8.6 外已收口；8.6 按裁决挪到 Task 9）
+    - 8.1: ✅ 数据形状：`id` / `type` / `machineId?` / `name` / `path`（+ `slicer`·`profile` 只给切片器预设）。**不写** `fileName`（路径只有一处）、**不写** `sha256`/`size`（交付时按真实字节算）。详见 `asset-domain-design.md` §1
+    - 8.2: ✅ 类型集合：`image` / `icon` / `model` / `slicerProfile`。裁决（2026-09-24）：**`model` 保留为类型**、名称与预览图**暂缓**（本轮不虚构元数据）
+    - 8.3: ✅ **不给 MKP 预设建条目** —— 而且是**结构化**的保证：enum 里没有 `mkpPreset` 这一档（想登记得先改 enum）
+    - 8.4: ✅ 目录约定：资产根 `public/assets/`（vite 静态目录下的唯一子根，URL 前缀 `/assets/`）；`path` **相对资产根**，不相对定义文件；根按需建（`resolve_in` 第三道要求根存在，空目录靠 `.gitkeep` 进库）
+    - 8.5: ✅ `presets/assets.rs`：模型 + 加载期判据 + `add`/`write`（原子写，走仓库唯一写盘出口）+ 零编辑往返逐字节相同；`Presets.assets` 接入并参与 `check_cross_consistency`；`wb_assets`（**只读**）与前端类型一起落地
+    - 8.6: ➡️ **挪到 Task 9 一起做**（裁决）：改机型引用前必须已有 id 与文件，否则造出一批"指向不存在资产的引用" —— 而那正是 9.7 要拦的东西。Task 9 一次做完：**搬文件 → 写条目 → 改引用**
+    - 8.7: ✅ `api.ts`：`AssetKind` / `AssetView` / `AssetList` + `wb.assets()` + `assetUrl()`（路径里有空格，编码只做一次）
+    - 8.8: ✅ 两条加载期判据 + 反空转输入：id 唯一（大小写不敏感，`a1-image` vs `A1-Image` 实测红）、path 落在资产根内（`../` / 绝对路径 / `a/../../b` 三条实测红）。**另加三条**：键名写错要响亮（`deny_unknown_fields`）、切片器字段搭配、归属机型必须是真机型（跨文件，进 `check_cross_consistency`，实测一条假归属会让所有加载类判据一起红）
+    - 8.9: ✅ 顺手抓到的一条真事，补成判据：**①层 `.toml` 必须是 LF** —— 工具新建文件会写成 CRLF，而 `toml_edit` 写回统一成 LF ⇒ 第一次保存整份被改写、diff 一片红。本轮的 `presets/assets.toml` 正是被这条判据抓出来的（`.gitattributes` 管得住入库那一份，管不住工作区那一份）
+    - 8.10: 边界照实记：`wb_assets` 现在**只有读**（写入口在数据层，接上它要有界面 —— Task 14.6）；`present` 字段现在普遍 `false`（条目与文件一起在 Task 9 落地），这是"还没搬"不是错，Task 11.1 会把它升成校验层的一条
+
+- [x] Task 9: 资产迁移执行与引用反查
+    - 9.1: ✅ **21 份文件搬进资产根**（`public/assets/`）：机型图 6（4 张新版**移动**自 `public/printers/bambu/`、P2S/X1C 两张**复制**自旧仓）、图标 3、模型 3（`.3mf`）、BBS 9。复制件逐份 sha256 与源**相同**、移动件 git 记 **100% 相似度**
+    - 9.1a: ✅ 裁决：**P2S / X1C 暂用旧仓那两张**（条目的名字里标了"待换新"），将来补新图再换；A2L 本来就没有图
+    - 9.2: ✅ `presets/assets.toml` 落了 **21 条**：`id` / `type` / `machineId?` / `name` / `path`（+ `slicer`·`profile`）；路径沿用源文件名与目录结构
+    - 9.3: ✅ BBS 9 份按新结构重写成条目（`slicer = 'bbs'` + `profile = 'process'`），**不照抄一文件一条**；文件本体沿用旧仓的目录与文件名
+    - 9.3a: ⏳ **待裁决**：BBS 文件名里还带着旧云端代号（`MKPProcess X1 …`，不是 `X1C`）—— 它与 G-0 那套产物命名不是一回事，而 asset id 已经是稳定键。改名与否等 Task 12 定交付命名时一起谈
+    - 9.4: ✅ `Presets::asset_usage` + `wb_asset_usage`：机型那一档说得出是谁（实测 `p1s-icon` → P1S、P2S、X1C）；**没有 `versions` 字段** —— 版本今天不直接引用资产（版本 → 套餐 → 资产是间接的），留一个恒空字段比说清"还没有"更糟；套餐那一档等 Task 10
+    - 9.5: ✅ `Presets::remove_asset`：**先反查**，有人引用就拒绝并列出引用方（实测删 `a1-image` 被拦且报出 A1；换个大小写照样拦；没人引用的那条删得掉，且落盘后重读确实少了它）
+    - 9.6: ✅ **部分**（照实记）：`src/app/heroArt.ts` 的路径改成 `/assets/printers/…`，并顺带点亮 `p2s` / `x1c`（图现在有了）；`public/printers/` 已空。**旧 app 那一侧仍是硬编码表** —— 它没接资产命令（资产选择是工作台的事，Task 14.6）
+    - 9.7: ✅ 判据两条：`every_machine_asset_ref_points_at_a_real_file`（真数据 11 条引用逐条解析到真实文件，反空转 ≥10）与 `the_real_asset_list_is_complete_and_present`（21 条、每条 `present`、URL 前缀只有后端一处、每条有名字）
+    - 8.6: ✅（从 Task 8 挪来）机型定义的 `image` / `icon` 改成**资产 id**；A2L 的 `image = ''` **删掉那一行** —— 空串读成"填过但填了个空"，不写才是"没有"
+    - 9.8: ✅ 加载期补了**反向**检查：机型引用的 id **认不出来是 error**（打错字与 `machineVariants` 键写错同一类）；id 认得出、文件还没搬是 **warning 级**（现在由 `wb_assets` 的 `present` 说出来，Task 11.1 接手升成一条 warning）
+    - 9.9: ✅ 旧仓全程只读：迁移后再核 `manifest.json` 的 72 条 sha256，**0 缺 0 不符**
+
+- [x] Task 10: 套餐域①层 —— 集中式套餐定义与悬空引用消除
+    - 10.1: ✅ 数据形状就是旧数据那五个：`id` / `display` / `machineId` / `assetRefs` / `updatedAt`，**照实搬不造默认值**（`updatedAt` 沿用旧值 `2026-07-12` —— 迁移不改内容，写今天就是把"搬了个文件"记成"改了套餐"）；`assetRefs` 换成我们的资产 id
+    - 10.2: ✅ `presets/bundles.toml` 一份集中定义（旧仓 5 份离门槛还远；门槛同资产域：超过 20 个再拆）
+    - 10.3: ✅ 5 份迁入，**逐份核对**旧仓 `source/bundles/*_default.toml`：id / display / machineId / updatedAt 逐字段一致；`assetRefs` 经旧仓资产条目反解到同一份文件（如 `a1_bbs_mkpprocess_a1_04_020` → `MKPProcess A1 0.4 0.20.json` → `a1-bbs-04-020`），5 条映射零错位
+    - 10.4: ✅ 数据层读写全就位（`Bundles::load_from` / `get` / `add` / `write` / `drop_asset_refs`）；命令层 `wb_bundles`（**只读**，每个 ref 带 `resolvable` / `isBbs` 解析状态）+ `api.ts` 类型与封装 —— 写命令等界面（Task 14），与 `wb_assets` 同一条纪律。`drop_asset_refs` 自带空套餐守卫：去掉某套餐唯一的引用整次拦截（与加载期拦空 `assetRefs` 是同一条判据的两端）
+    - 10.5: ✅ `defaultBundle` / `recommendedBundle` 转为**可解析引用**：加载期 `Presets::check_bundle_refs` 查「机型与版本引用的套餐存在 + 套餐归属的机型存在」，认不出是 error（doc §9：套餐定义落地后悬空转 error）；空串跳过（A2L 四折空，与 `image` 同口径）
+    - 10.6: ✅ `presets/mod.rs` 模块头的搬迁状态表更新：套餐已搬，剩 `preset_registry.toml`（Task 12 的交付索引，不在这里存第二份）
+    - 10.7: ✅ 判据真数据实测：`the_real_bundle_references_resolve`（**14 处非空引用**逐条可解析、指向 5 条套餐、归属机型一致；反空转 ≥14）与 `the_real_bundle_asset_refs_resolve`（5 条套餐的每个 `assetRef` 解析到真实资产且逐条 BBS、BBS 归属与套餐归属一致、`a1-bbs-04-020` 反查 → `A1_default` 且大小写不敏感）；另有 `wb_bundles` 的 5 份全量核对
+    - 10.8: ✅ 加载期拦「套餐里没有一条 BBS」+ `drop_asset_refs` 拦「去掉最后一条 BBS」。10.8 的语义耦合在本层可表达的就是「套餐必须含 BBS」—— MKP 预设不建资产条目、路径由命名规则算（doc §12.5），它的"缺"不经过资产域
+    - 10.9（顺手抓到的）：`bundles.toml` 一度被工具写成 CRLF，被 `the_source_files_keep_lf_line_endings` 当场抓出（Task 8.9 那条判据的又一次实弹验证）—— 已转 LF
+
+- [x] Task 11: 校验层补齐（阶段②「检查内容」）
+    - 11.1: ✅ 引用完整性盘点：`image`/`icon`→资产（9.8）、bundle→套餐、`assetRef`→资产（10.5/10.7）已在加载期拦成 error；**`presetFile` 刻意不查** —— 它是 G-2 要删的 B 套悬空名字（Task 16.3），报 9 条噪音没有行动价值。参数源（配方）这一面见 11.5/11.6
+    - 11.2: ✅ 盘点 + **修了一个真 bug**：值越界 / 枚举 / 条件环 / 废弃 / 孤儿键已由 `issues.rs` 覆盖（写入口另在 `apply_values` 拦未知键）；但枚举检查对 **bool(switch) 字段误报** —— 真数据里它们挂的 `'off'/'on'` choices 是显示文案不是取值域，真清单跑一遍会炸出 54 条假阻断（wiping.* 五条 + first_pen_revitalization_flag × 9 版本）。已修：`valueType == bool` 跳过枚举检查，取值域由类型保证。判据：夹具枚举阻断测试照旧红（wiping.mode 是真枚举），真数据 `the_real_recipe_and_catalog_line_up` 里无一条 choice 阻断
+    - 11.3: ✅ 机型 id（跨文件）与版本 id（机型内）**大小写不敏感**唯一 —— 加载期 `check_unique_ids`，撞了整目录拒载（corrupted），错误带撞的是哪两个 id。资产 / 套餐 id 已在各自 load 时查（Task 8.8 / 10），四类齐了。判据：直接喂列表（Windows 写不出仅大小写不同的文件名，输入面收小之后这个形状才测得到）+ 副本目录加载期两条实测红
+    - 11.4: ✅ 孤儿 = 配方里没有任何版本定义指向的参数源：机型级（配方有清单不认）与变体级（`机型:变体` 没有对应版本定义，gen-presets 会生成一份谁也不引用的内置预设而生成不报错）→ **待办**
+    - 11.5: ✅ 清单 ↔ 配方（G-1 方案甲：`preset_recipes.toml`）三个方向对齐检查 `recipe_alignment`：机型存在配方缺它 / 配方有清单不认（机型级 + 变体级）/ 清单版本配方缺变体。**占位机型（无 `[dimensions]`）整台跳过** —— 不参与交付，两条链都没有它是闭合的（与 A2L 占位提示同一口径）。doc §5.1 的「检测那一半」；修复入口归 Task 16.2 的跨文件事务
+    - 11.6: ✅ 分级：配方对齐全部**待办**（warning 语义：机型 / 版本可以先存在，参数源后补，不挡工作台生成 —— render 读参数注册表不读配方；`gen-presets --check` 那条链构建时才真正报错）。结构上分成两个闸门：`wb_generate` 用的 `inspect` **不含**配方对齐（生成不读配方），预检用 `preflight`（inspect 的全部 + 对齐）
+    - 11.7: ✅ 盘点确认：加载期错误带文件路径 + detail（既有风格）；校验层 `Issue.at` 带 view / 机型 / 版本 / 字段（`every_issue_is_actionable` 判据锁着）。新检查的错误都带 id 与撞名清单
+    - 11.8: ✅（后端部分；UI 归生成视角那一轮）`wb_preflight` 升级为 `issues::preflight`：四类检查（引用 / 参数 / 唯一性 / 孤儿+对齐）结果全进 Report，配方读不回来是**报告里的一条**而不是命令失败 —— 校验层停摆比数据坏了更糟。`api.ts` 的 `IssueReport` 类型已就位；`App.tsx` 明写生成视角含校验三档的展示在 Task 17 落地，本轮不动 UI
+    - 11.9: ✅ 清单里有、上游不认的机型与版本 → `upstream_drift`（**提示**档：render 已用自己的清单，这类不一致从此不再以「机型不存在」暴露，但发布侧还看着上游的过渡期里要有处可见）。机型级报过就 continue，版本不逐条刷屏。真数据实测：夹具上游 + 真清单 → A1_MINI / P2S / X1C 三条机型级 + A1.FASTV3.3 一条版本级（夹具上游只有两版）
+    - 11.10（过程）：`preset::PRESET_RECIPES_TOML` 公开（原在 gen-presets 的 bin 里私有 include），`gen_presets` 转引 —— 两处 `include_str!` 字面量靠人眼盯着同一文件的隐患消除；K-G7 复验绿
+
+- [x] Task 12: 交付层 —— `dist-presets/` 结构与目录类 JSON
+    - 12.1: ✅ 目录结构定稿（`app/dist.rs` 模块头）：`content/`（三份 JSON）+ `presets/mkp/`（**子层保留** —— MKP 与 BBS 是两类预设，G-3 开放维度，且 wb_generate 已按此写，定稿是承认现状为契约）+ `assets/`（**沿用资产根目录形状**，`printers/` 而非示意的 `machines/` —— path 在两个根下逐字节同形，不存在第二份路径映射；改用示意等于重写 21 条 path）+ `manifest.json`（最后写，既有）
+    - 12.2: ✅ `machine_catalog.json`：brands + 6 台机型 10 版（含 A2L 占位，`hasDimensions: false` 是它的标注，与上游契约同形）；版本条目带 `mkpPresetAssetId` 连接键（指向 manifest 的 assets[].id）；**不带 `presetFile`**（G-2 待删字段不进交付契约）
+    - 12.3: ✅ `bundles.json`：`bundles.toml` 五字段直出（id/display/machineId/assetRefs/updatedAt —— 旧契约没有 updatedAt，多给无害）
+    - 12.4: ✅ `assets_index.json`：**只编进交付的引用可达集**（机型 image/icon + 套餐 assetRefs，去重照 assets.toml 登记顺序；正式的可达性分析在 Task 13，集合不变）—— sha256/size 是 Task 13.6 的事（与 manifest 扩容一起），这里只管清单、位置、归属
+    - 12.5: ✅ 文件名字段全部由命名函数算出，边界照实写进 `dist.rs` 模块头：MKP 产物名 = `preset::preset_file_name`（唯一实现）；资产 path 是**登记值**（assets.toml 唯一一份路径），JSON 原样引用、生成器里零字面量 ——「不存在手写字面量」指生成器里不再出现第二份名字，不是把登记值改成计算值
+    - 12.6: ✅ 判据两条：夹具级 `write_content_copies_every_referenced_file…`（可达集逐条复制 + 缺文件资产报错带 id）与真数据 `the_real_delivery_set_matches_the_real_references`（**可达集 13 = 图 5 + 图标 3 + BBS 5**；模型 3 与 0.2mm BBS 4 刻意不进——没被引用；12.6 逐条存在 + 套餐 assetRefs join 资产索引闭合；反空转锚点 6 台 / 10 版 / 5 套餐 / 13 条）
+    - 12.7（侦察结论，9.3a 不改名）：BBS 旧云端代号（`MKPProcess X1 0.4 0.24.json`）活在**两处**——文件名 + JSON 内容身份（`name`/`print_settings_id` = "MKPProcess X1"），而 `inherits` 已用新名（`@BBL X1C`）。**仓内代码零依赖**（assetUrl 只做空格编码透传，无 TSX 调用方；assets.toml 的 path 是唯一引用处）。裁决建议：文件名与内容身份是**切片器侧用户可见的预设名**，改了会让已导入用户的预设列表漂移；asset id 已是稳定键、G-0 命名函数只管 MKP 产物 —— **建议维持登记值不改**，9.3a 挂到「消费端（切片器导入行为）确认后再裁决」，不为交付层阻塞
+    - 12.8（边界照实记）：wb_publish 现在写三份 JSON + 13 份资产 + manifest（仍只编 mkp_preset 9 条）——manifest 扩容到全资产、残留文件 blocker、可达性正式化都在 Task 13
+
+- [x] Task 13: 可达性筛选、残留拦截与 manifest
+    - 13.1: ✅ 可达性分析：`dist::deliverable_set` —— 从引用关系**算出**交付文件集合（相对路径）：content 3 份自产 + manifest + `assets/<path>`（引用可达集，Task 12 的 13 条）+ `presets/mkp/<preset_file_name>`（有 mkp 连接键的版本，产物名由命名函数算出）。引用面的正式化收口在此，集合与 Task 12 的 `referenced_assets` 同一来源
+    - 13.2: ✅ 不可达不进交付：模型 3 与 0.2mm BBS 4 在真数据判据里显式断言不出现（`!p.contains("models/")`）
+    - 13.3: ✅ 校验未通过不进交付：`wb_publish` 开头的 `issues::inspect` 阻断闸（既有，Task 13 确认语义）—— Block 档拒发布，待办/提示不挡但进 PublishReport
+    - 13.4: ✅ **残留拦截**：`scan_strays` 递归扫交付目录，不在交付集合内的逐条列出（字典序），**有残留就中止发布、一个字节都不写**（判据实测：stale.json 被拦且原样保留、manifest 未写）。doc §9.1 的理由成立：残留会被消费端真的下载到
+    - 13.5: ✅ `wb_clean_dist_strays`：显式清理动作，移入 `workbench/.trash/dist/<stamp>/` **保留相对路径可还原**（rename 同卷原子；与版本回收站的 json-stem 格式约定互不干扰——dist 是子树）。查询面 `wb_dist_strays` 先列清单再动手；`api.ts` 两条封装同步
+    - 13.6: ✅ manifest 作为最后一步生成，只描述已落地的文件：**v3** —— assets 扩到全部交付文件（mkp_preset 9 条 + 引用集资产 13 条），sha256/size **按发布出去的字节现算**；**删掉 `bundles` 字段** —— 它是从上游透传的第二份套餐列表，assetRefs 还是旧资产 id 空间（`a1_bbs_mkpprocess…`）与新 assets_index join 不上；套餐唯一真相 = `content/bundles.json`。结构变了所以 manifestVersion 升 3。resourceType 词汇：新条目用资产域 `kind.key()`（slicerProfile 而非上游的 bbs_profile）—— manifest 与 assets_index 是同一批资产的两种视图，join 键必须一致
+    - 13.7: ✅ 全程走 `fsx::atomic::atomic_write`（JSON 与资产复制都走；残留清理是 rename，同卷原子且不碰 clippy.toml 禁列）
+    - 13.8: ✅ 判据：夹具级 `publish_blocks_on_strays_then_manifests_every_delivered_file`（全链：残留拦下 → 清理进回收站 → 重发 → **manifest 条目数 = 交付目录实际文件数**（口径：assets 条目 ↔ 交付目录中除 manifest/content 外的全部文件，一一对应）+ 每条 sha256 与真实字节重算一致）；真数据 `the_real_deliverable_set_has_the_expected_shape`（集合 20 = content 3 + manifest 1 + 资产 13 + 夹具上游认的 mkp 3；**9 份产物名单由命名函数独立锚定**，夹具上游不认的 6 版留给真上游；空目录零残留是正常状态）
+    - 13.9（审查点名核实）：**`mkpPresetAssetId` 的边界** —— 它是 machine_catalog 版本条目 → manifest.assets[]（resourceType = mkp_preset）条目 id 的**连接键**，上游命名空间（`a1_mkp_standard`）；资产域 Asset.id（`a1-image`）是另一命名空间（assets_index 与 manifest 资产条目）。manifest 里两类 id 共存靠 resourceType 区分；资产域 enum 刻意没有 mkpPreset 档（doc §12.5 结构化保证）—— 词汇撞名、域不同，边界已写进 `dist.rs` 模块头
+
+- [x] Task 14: 工作台接通四阶段骨架（**14a 后端链路 + 14b 前端接通 + 14c 端到端验收，全部收口**）
+    - 14.1: ✅ 六个页面按 doc §4.2 映射到后台数据。14b 落地：**menu 视角** = `MenuPage`（只读接 `wb_bundles`：套餐清单、每条 `assetRef` 的 resolvable/isBbs 解析状态、`defaultBundle`/`recommendedBundle` 引用反查 —— 套餐写入口仍未建，照 10.4 纪律不摆假按钮）；**build 视角** = `BuildPage`（检查 / 生成 / 基线 / 发布四段同屏；生成带 stale/all 两档 scope + `wb_preview_toml` 渲染预览 + `GenerateReport.mark` 走 `wb_apply_draft` 落草稿）；机型/配方/对比三视角沿用既有接入
+    - 14.2: ✅ 闸门落实为交互约束（`BuildPage`）：检查未过（`report.blocks > 0`）不给生成；产物不新鲜（`book.artifact !== 'fresh'`）或交付目录有残留不给发布。**禁用理由全部引后端给的话**（`words.disabled.buildBlocked` / `words.artifact[...].explain` / 残留清单），前端不是第二套判定 —— 后端硬闸（inspect + first_block + scan_strays）仍在
+    - 14.3: ✅ 「复制已有版本」：`catalog::copy_version` + `wb_copy_version` —— 抄 `recommendedBundle`、tag/description 前端预填；**不抄 `presetFile`**（G-2 悬空名）；**只写版本定义**（单文件，避开 16.2 事务空白）。校验抽公共 `validate_new_version_id`（两条路不分岔）。判据：真目录副本复制+落盘重读+三个反向拦。**14b 补 UI**：`MachinesPage::CopyVersionForm`（模板下拉 + tag/description 预填 + 「同时复制正文」默认勾选）
+    - 14.4: ✅ 「参数源待补」：`registry::version_has_variants`（只看 `machineVariants`，min/max 特化表不算）+ `VersionView.hasRecipe`。false = 纯继承基底，**版本照常显示**。**14b 补 UI**：版本卡上的「参数源待补」标注
+    - 14.5: ✅ 参数正文复制：`wb_copy_recipe`（领域体 `copy_recipe` 可测）—— 取模板**完整有效配方**（defaults⊕基底⊕覆盖归并，`layer.keys()`=全部可见键）经 `apply_values` 批量钉成新版本显式覆盖。**裁决 A（2026-09-24）：独立快照**。判据 `copied_recipe_is_an_independent_snapshot`：①复制后两边逐键一致；②**改模板版本层与改基底后快照版均不变**（基底传播被显式值挡住——方案 A 的决定性证据）；③hasRecipe 翻转；④键数=模板有效配方键数（不伪造缺失参数）。**14b 补 UI**：CopyVersionForm 第二步调 `wb_copy_recipe`；**正文复制失败而版本定义已落盘时，两件事分开说**，给「重试复制正文」而不是从头再来
+    - 14.6: ✅ 资产选择走资产库模态框，不让人手填路径（`AssetPicker`）：机型 `image`/`icon` 从 `wb_assets` 按 kind 过滤选择，写的是**资产 id**；`present: false` 的条目不可选（先有文件才能选择，doc §4.4）；`recommendedBundle` 同原则改套餐下拉（只列归属本机型的套餐，悬空值原样显示不藏）
+    - 14.7: ✅ `workbench/` 五个子目录职责定夺（2026-09-24 裁决）：**`bbs/` 移出 `WORKBENCH_DIRS`** —— 全仓核实零读写（BBS 资产职责在资产域：`public/assets/bbs/` + assets.toml 条目；交付子树是 `dist-presets/assets/bbs/`），bootstrap 不再为没有职责的目录占位；**`.snapshots/` 勘误：不是「只写不读」** —— `wb_generate` 写、`wb_revert_preview` 读（「恢复配方」的依据），读写都就位；`machines/`（值的草稿，身份清单来自 presets/machines/*.toml）、`.draft/`（会话草稿，gitignore）、`.trash/`（版本与残留回收站）维持。判据 `ensures_subdirs_without_writing_files` 跟随清单，paths 6/6 绿
+    - 14.8: ✅ 端到端跑通 doc §4.3 全部 11 步作为验收场景。判据 `the_eleven_steps_of_doc_4_3_run_end_to_end`（`app/build.rs` tests）：隔离环境（夹具盘 + 临时 store）逐步走 **复制版本（只写定义→落盘重读→推荐套餐随复制/`presetFile` 不抄）→ 待补标注 → 复制正文（含「版本不在清单」的反向拒绝 = 前端重试路径的后端语义）→ `storage::load` 真实重建清单后 preflight 全绿 → 渲染（唯一命名 + 快照与模板逐键值语义一致）→ 基线 diff→改→sync 只写那一份→重读全绿 → deliverable_set 闭合 + publish_into 全链（manifest 条目 = mkp 3 + 资产 4）**。边界照实记三条：①命令层（`wb_*`）写真仓库进不了单测，前端手势→命令→领域体的对应由 HANDOFF 静态核对锁定；②复制版本经 JSON 往返整数以浮点表示落回（`4`→`4.0`，值语义不变）——「复制=显式覆盖」的旁证，判据按 f64 逐键比；③复制出的版本**不进交付集合**（`mkp_preset` 连接键来自上游 manifest）——与 13.8「夹具上游不认的 6 版留给真上游」同一条上游契约，真数据上由 `upstream_drift`（11.9）报出，不是链路断点。真 fixtures 由 `the_real_baseline_diff_reports_all_same` 锁只读（走查前后指纹不变），端到端落盘走查在系统临时目录（落点闸允许）
+    - 14.9: ✅ **「同步基线」显式带 diff 确认的独立入口**：`wb_baseline_diff`（**只读**：`BUILTIN_PRESETS` vs fixtures 逐份三态 same/changed/missingBaseline + 两侧 sha 前 16）+ `wb_sync_baseline`（转调 `preset::generate::sync_baseline`，**落点闸在其内部**，src-tauri 不经手路径）。判据：真数据 9 条全 same（diff 只读验证：跑前后基线目录指纹不变）；tempdir 反向走查（落点闸允许临时目录）——改一份→changed→sync 只写那一份→重回全绿+字节逐一同产物。**写纪律判据同步登记**：`the_baseline_has_exactly_one_write_path` 的 ALLOWED 加 build.rs（14.9 授权的显式入口，防的是自动写不是确认后的写）与 lib.rs（注册清单）。**14b 补交互（2026-09-24 锁定的顺序）**：BuildPage 内 只读 diff → 分类展示（将覆盖 / 将新增；产物名单是编译进二进制的固定九份，**没有「从基线删除」的候选**，UI 明说这条口径）→ 人点「同步基线…」进确认区 → 「确认写入 N 份」才调 `wb_sync_baseline` → **完成后重读 `wb_baseline_diff` 刷新清单**，状态以重读结果为准，不显示预设的成功话术
+
+- [ ] Task 15: 空白初始化流程（**后端全部实施完成（2026-09-24）：326/326 + 两条命令级场景判据；剩验收，UI 归 Task 17**）
+    - 15.0: **三条裁定 + 勘察结论（2026-09-24，锁定后实施）**
+        - 裁定①（上游缺失降级）：工作台可启动进入机型/版本/套餐/资产初始化流程；参数编辑/预检/生成等依赖上游的功能**显式显示不可用原因**；不用 mock/空数据伪装上游；上游恢复后重读真实数据，不要求重建已保存内容。现状依据：`Ctx::open` 注释"字段定义在上游"的前提已过时（b04 Task 8 起字段定义 registry 在我们 presets/ 里），上游的实质依赖面只剩 **mkp_preset 连接键（derive）、BBS 归属回退（derive:251，我们套餐域就位后近乎死回退）、仓库盘点 stock（derive:478/497 整页建立在上游 manifest 上）、发布元数据 channel/minimum_client（build.rs:618-636）、boot 统计**——降级面比预想窄
+        - 裁定②（显式初始化，不放宽根目录判定）：`presets_root()` 的标志文件判定**不改**；由显式初始化动作创建最小骨架，完成后根目录才被识别。**未初始化态只开放初始化入口**；初始化重复执行必须明确行为（已有任何真数据 → 拒绝并报告现状，绝不覆盖）。**最小骨架形状（勘察定稿）**：`presets/brands.toml`（空表）、`presets/layout_schema.toml`（空表）、`presets/registry/param_registry.toml`（空表 ← 标志文件，建完即"已初始化"）、`presets/machines/`（空目录，零机型合法）、`presets/assets.toml` / `bundles.toml`（空表；结构体字段全 `#[serde(default)]`，空文件合法）；`forbidden_zones/` 不需要（load_zones 明示目录不存在是合法态）；`workbench/` 四子目录由 `store::bootstrap` 自动建
+        - 裁定③（空 registry 预检 = 阻断）：空 registry **不空集通过**——`wb_preflight` 返回可理解的阻断项「缺少可用参数注册数据」；不得因空 registry 崩溃
+        - 命令分类（已初始化但无上游，勘察）：**原样可用**（领域体层面）——`wb_add_machine` / `wb_add_version` / `wb_set_*_field` / `wb_copy_version` / `wb_copy_recipe`（空 registry 下空模板配方 → 明确报"没有可复制的内容"）/ `wb_bundles` / `wb_assets` / `wb_asset_usage` / `wb_machines`；**降级可用（显示原因）**——`wb_registry`（空表=无字段可编，诚实空态）/ `wb_generate`（产物身份 uuid/asset id 依赖上游连接键）/ `wb_publish`（发布元数据缺上游 → 显式缺省）/ `wb_preflight`（按裁定③报阻断）；**不可用（整页显示原因）**——`wb_stock`（整页建立在上游 manifest.deliverables 上）。**改造核心**：`Ctx.up` 是非可选 `Upstream`、`Ctx::open` 双 `?` 硬门——无上游模式下 up 要降级（Option 或空实现），`Book::new` 签名波及 8 处调用 + derive 内部 None 路径；derive:439 用 `up.catalog` 查机型显示名是 b04 Task 8 前的残留回退，改造时一并收口
+        - **实施记录（2026-09-24，按裁定落地）**：①`Ctx.up: Option<Upstream>`——`Ctx::open` 只把 presets 缺失当失败，上游缺失转 `None` 并由 `with` 统一补一条降级提示（reload 之后 push，避免被重建覆盖）；`Book.up: Option<&Upstream>`，**90 处 `Book::new` 调用点**全部显式化（`Some(&f.up)` / `ctx.up.as_ref()`）。derive 四处 None 路径：`mkp_preset` 全 None（产物身份本来在上游 manifest）、BBS 回退跳过、`build_rows` 显示名**改用我们自己的清单**（收口 `up.catalog` 残留回退，机型页改了名生成视角跟着变）、`stock_rows` 空（原因由命令层说）。②`wb_publish` 元数据（channel/minimum_client）无上游留空如实上报，交付全链照走。③`wb_fallback` 无上游 → 空表 + `read_only_reason` 说原因（类型不动）。④**`wb_init_workbench`**（新 `app/init.rs`）：六件骨架（内容带注释头说明空起点语义），**只在干净空白时成功**——任一骨架文件已存在或 machines/ 非空 → 拒绝列出现状绝不覆盖；判据三条（成功且 `Presets::load_from` 读通 / 重跑拒绝且数据零字节不动 / 半初始化拒绝点名）。⑤`wb_boot` 三态：`initialized: false`（引导语，只开放初始化入口）/ 已初始化无上游（降级说明 + `info: None`）/ 就绪。⑥裁定③：`issues::preflight` 开头对空 registry 插 `registry.empty` 阻断（其余检查照跑）。**判据 6 条新增**：init×3、无上游往返×2（显示名来自我们清单 + 降级人话提示）、preflight 阻断×1（init 骨架当空 registry 夹具，闭环）；**加首开场景判据×1**（`src-tauri/tests/first_run.rs`，2026-09-24 指定的验收场景：`MKPSE_REPO_DIR` 指向临时目录的**独立测试进程**——未初始化 boot 引导语 → init 五文件 → boot 翻转（无上游=降级说明）→ `wb_add_machine`/`wb_add_version` 建第一台与第一版（`hasRecipe=false` 待补）→ 重复 init 拒绝且数据不动。命令级真实路径，新设备语义）；全量 **lib 319/319 + first_run 1/1**，写纪律 5/5、基线 2/2、端到端 11 步判据照绿。**未提交（待验收）**
+        - **实施记录（二）：命令层 15.3 / 15.4（2026-09-24，后端实施完成）**：①**`wb_import_asset`**（15.4，领域体 `app::assets::import_asset(p, root, req)`，资产根由调用方给以便判据用临时目录）：复制进资产根 + `Assets::add/write` 登记，**顺序是先复制再登记、登记失败回滚那个文件**（只复制不登记会留下谁也看不见的孤儿文件；反过来是 `present: false`，那是已知且会报出来的状态）。四条先查再写：源必须是真文件 / `machineId` 必须是真机型 / id 不许撞（大小写不敏感）/ **落点绝不覆盖**（`<kind.dir()>/<源文件名>`，同名按 `-2`/`-3` 避让）。新增 `AssetKind::dir()`（`printers`/`icons`/`models`/`bbs`）—— 不是新发明，真数据 21 条 `path` 的前缀就是这四个，有判据 `the_dir_convention_matches_the_real_paths` 锁着（反空转 ≥21）。②**`wb_add_bundle`**（15.3，领域体 `app::bundles::add_bundle`）：**先查再写**——套餐的三条跨文件判据（归属机型真、每条 `assetRef` 解析得到、至少一条 BBS）不合格就一个字节都不写；理由是写坏了不是报一次错，是下一次加载被 `check_bundle_refs` 判成 Corrupted、**整个 presets/ 读不回来**。`updatedAt` 写今天（新增 `clock::today()`，与旧数据 `2026-07-12` 同形；迁移照抄的旧值不许写今天）。③**「被机型引用」开了那一格**：`MachineField` 增 `DefaultBundle`（`defaultBundle` 此前没有写入口）；`wb_set_machine_field` / `wb_set_version_field` 对**引用格**（defaultBundle→套餐、image/icon→资产、recommendedBundle→套餐）**先查再写** —— 打错一个字母的下场同样是整个工作台起不来。`wb_add_bundle` / `wb_import_asset` 已注册进 `lib.rs`。**判据 +7**：import×3（复制+登记落盘重读 / 同名不覆盖 / 四条拒绝且一个字节不写）、bundle×2（落盘+整机仍读得通+被机型引用后仍读得通 / 五种不合格形状全拦且文件不动）、目录约定×1、`clock::today` 形状×1；**命令层端到端 ×1**（新文件 `src-tauri/tests/first_content.rs`，独立进程 + `MKPSE_REPO_DIR`→tempdir：init → 建机型版本 → 导入图并关联 `image` → 导入 BBS → 建套餐 → 机型 `defaultBundle` 引用 → 重开 boot 全绿 → 五种写不成的形状被拦且已有数据不动）。它把 15.3 与 15.4 串在一条链上，因为**建套餐必须先有 BBS**（doc §12.4）—— 分开写两条谁也证明不了这条依赖。**全量：lib 326/326 + first_content 1/1 + first_run 1/1**，写纪律 5/5、基线 2/2、端到端 11 步照绿、fmt / clippy `-D warnings` 绿。**未提交（待验收）**。前端仍零改动（冻结 e4f85bd）
+        - **只读验收记录（2026-09-24，未发现在功能上与裁定不一致项）**
+            - **①回滚会不会误删原有文件**：全仓唯一一处 `remove_file` 在 `app/assets.rs`，删除对象是本次 `target_path` 挑出来的**新落点**（挑点时就已确认不存在）、经 `atomic_write` 自己建出来的那个文件。补一条判据把它从"读代码推断"改成机器验证：`a_failed_registration_rolls_back_only_the_file_it_wrote`（`name` 留空 → `Assets::add` 的 `check_one` 拒收 → 复制已发生 → 回滚那条分支被真正走到），同时说三件事：刚复制的那个落点被删掉 / 挨着它的同名老文件 `printers/a1.webp` 一个字节不动 / 定义里没多出条目。**反空转实测**：临时撤掉 `remove_file` 那一行后该判据当场红，撤回后恢复绿
+            - **②残余窗口（照实记，未修，等裁决）**：`target_path` 的"不存在"判据与 `atomic_write` 之间是一次 check-then-write。同一瞬间另一进程或人手工放入同名文件的话，rename 会覆盖它，而随后若登记失败，回滚会删到那个文件。桌面单会话下这条路径走不到；要彻底消除需把这次写换成 `create_new`（`clippy.toml` 里刻意不禁的那个原语）
+            - **③引用校验覆盖盘点**（逐条过**所有能写 `presets/` 的非测试入口**）：`wb_add_version` / `wb_copy_version`（抄自模板，来源恒已过加载期）/ `wb_add_machine` / `wb_remove_version` 都不写引用格；**已加先查再写的**是 `wb_set_machine_field`（DefaultBundle / Image / Icon）、`wb_set_version_field`（RecommendedBundle）、`wb_add_bundle`、`wb_import_asset`；`Presets::apply_values` 的 owner 校验早已就位。`Bundles::drop_asset_refs` / `Assets::remove` / `Presets::remove_asset` 三个数据层写入**今天没有命令层**，进不了界面
+            - **④两条边界，Task 17 开工时要带上**（都非本轮引入，本轮只读登记）：
+                - **「套餐」今天有两套**：`presets/bundles.toml`（b05 Task 10 的①层 —— `wb_add_bundle` / `wb_bundles` 读写它，交付可达集 `dist::referenced_assets` 也算的它）与 `workbench/delivery.json` 里的 `BundleEdit`（旧模型 —— `Patch::SetBundle` 写、`derive::bundle_bbs` 读；`api.ts:493` 有类型但**全仓无 TSX 调用方**，是待删的死支）。两套 id 空间撞名（都是 `A1_default`）。新工作台的套餐 UI **必须走①层那条**
+                - **引用校验成立的前提是"今天没有删除命令"**：Task 17 若要加删除入口，删资产必须走 `Presets::remove_asset`（反查守卫与判据都在）；**删套餐目前没有对应领域体**，要新建时必须先反查机型 `defaultBundle` / 版本 `recommendedBundle` 的引用，否则下一次加载会被 `check_bundle_refs` 判成 Corrupted —— 整个工作台起不来
+            - **⑤重启/重读验证**：两条命令级判据（`first_run` / `first_content`）都以"从盘上重读"收尾，`first_content` 末了还重开一次 `wb_boot` 并复查清单
+            - **全量**：lib **327/327**（含新增那条回滚判据）+ `first_content` 1/1 + `first_run` 1/1；写纪律 5/5、基线 2/2、fmt / `clippy -D warnings` 绿；工作区无 stray（`public/` 干净）
+    - 15.1: ✅ 从干净的 `presets/` + `workbench/` 出发，能建起第一台机型（**经显式初始化动作**，见 15.0 裁定②）—— 命令级链路判据 `tests/first_run.rs`：init → `wb_add_machine`
+    - 15.2: ✅ 能为这台机型建第一个版本（不要求参数源已存在）—— `wb_add_version`，新版本 `hasRecipe = false`（标「参数源待补」而非隐藏）
+    - 15.3: ✅ 能建第一个套餐并被机型引用 —— `wb_add_bundle` + `wb_set_machine_field(DefaultBundle)`（版本那一格是 `recommendedBundle`，两条都在）。**UI 归 Task 17 新工作台**
+    - 15.4: ✅ 能导入第一张图片并关联到机型 —— `wb_import_asset`（复制进 `public/assets/` 的类型子目录 + `Assets::add/write` 登记）+ `wb_set_machine_field(Image)`。**UI 归 Task 17**
+    - 15.5: ✅ 全程不手动碰任何文件 —— 两条命令级判据（first_run / first_content）全程只调 `wb_*`，且都落在临时目录里，不碰真仓库
+    - 15.6: 判据：空白初始化后立即跑校验，结果是「可理解的待办清单」而非崩溃或空数据假象（空 registry 按裁定③是清单里的**一条阻断**，不是成功）
+
+- [ ] Task 16: 决策闸收口与文档同步
+    - 16.1: G-0 定稿后：把命名规范写进 `docs/`，并让 Task 2 的判据引用它
+    - 16.2: G-1 决议后：选方案甲则实现 §5.1 选定的失败处理；选方案乙则拆分配方并改 `recipe_path` / `Recipe` 解析 / `include_str!` 策略
+    - 16.3: G-2 决议后：同步 `presets/catalog.rs` 的 `VersionField`、前端类型、机型文件字段集合
+    - 16.4: G-3 决议后：固化资产类型集合与交付目录是否含 BBS；Orca 按建议舍弃则记录理由，不留空目录
+    - 16.5: 更新 `docs/ARCHITECTURE.md` 与 `docs/PRESET-PRODUCT-RULES.md` 中与本轮变更相关的段落
+    - 16.6: 全量复验：`cargo test`、`cargo clippy -- -D warnings`、`gen-presets --check`、`gen-presets --baseline`
+    - 16.7: 确认旧仓数据全程未删；迁移映射表归档后标记失效
+
+- [ ] Task 17: **新工作台前端（提案，2026-09-24 提出方向，待确认设计后开工）**
+    > 动机与方向（用户原话要点）：现有工作台界面需要大调整；14a–14c 的后端逻辑是新近且有效的资产；不再在现有架构上修修补补，而是全新整改。**现有工作台前端冻结在 `e4f85bd`**（Task 14 收口点，可用状态），并行开发新前端，新前端验收后直接替换；**不迁就旧前端形态，也不迁就消费客户端契约**（新项目，无包袱）。
+    - 17.1: 设计先行 —— 新工作台的信息架构与交互稿（六页面映射 doc §4.2 仍是数据契约，但页面形态、导航、编辑模型完全重新设计；后端 `wb_*` 契约与「前端不算业务」纪律沿用）
+    - 17.2: 技术选型与目录（独立入口与旧前端共存，如 `workbench-next.html` + `src/workbench-next/`；React+Vite 沿用或重选，由设计稿反推）
+    - 17.3: 与 Task 15 的分工 —— 初始化/引导/降级是**后端契约**（15 先行，与前端形态无关）；15.3/15.4 的写入口 UI 直接落在 17
+    - 17.4: 旧前端处置 —— 新前端验收后删除 `src/workbench/`（或归档），冻结点 `e4f85bd` 之前不再接受 UI 迭代
+    - 17.5: **换设备验收场景（2026-09-24 实拍截图，新前端 + Task 15 共用的反例）**：新设备上上游仓库未 clone → 定位失败（候选是相对仓库算的：`MKPSE_PRESETS_DIR` → `<repo>/../mkpse-next-v3/mkpse-presets` → `<repo>/../mkpse-presets`，判定用标志文件）→ 旧前端顶部出现大面积红色横幅「没有上游工作台不启动业务」，**而主内容区机型数据照常显示**——页面间状态割裂（机型页绕过 boot 自己拉数据，`wb_machines` 不走 `ctx.up`）。要求：①换设备不能因上游缺席让已有工作台数据不可用；②找不到上游进引导/降级模式，不是整体启动失败；③上游路径应可**在界面里**重新配置（现在只有 `MKPSE_PRESETS_DIR` 环境变量一个口子，改完还要手动刷新），不依赖某台设备的目录布局；④错误提示区分「上游未配置」与「工作台数据不可用」；⑤「工作台可用状态」与「上游连接状态」分开呈现，路径问题不得主导页面、不占大面积横幅。横幅文案「字段定义、机型版本、交付资源全在它里面」对 b04 Task 8 之后的数据格局已过时（那些都在我们 presets/ 里），新前端文案重写；拥挤/截断的布局问题一并留给新设计，不在冻结的旧前端修补

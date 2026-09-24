@@ -693,6 +693,8 @@ export interface VersionView {
   recommendedBundle: string | null
   tag: string | null
   description: string | null
+  /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
+  hasRecipe: boolean
 }
 
 /** `machines::MachineView` */
@@ -723,11 +725,94 @@ export interface MachineList {
   root: string
 }
 
+/* ---------- 资产库（`app::assets` / `presets::assets`） ---------- */
+
+/**
+ * `presets::AssetKind` —— 资产类型集合（闸 G-3：切片器维度**开放**，模型保留）。
+ *
+ * 四个取值而不是三个：`image` 与 `icon` 是两种消费方式（一个是机型图、一个是矢量标记）。
+ * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
+ */
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile'
+
+/** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
+export interface AssetView {
+  id: string
+  kind: AssetKind
+  /** 归属机型；不属于任何机型时是 null */
+  machineId: string | null
+  name: string
+  /** 相对资产根（`public/assets/`）的一段 */
+  path: string
+  /** `/assets/<path>`。**用之前过 `assetUrl()`** —— 路径里可能有空格 */
+  url: string
+  /** 切片器（今天只有 `bbs`）与它下面的档位；只有 `slicerProfile` 才有 */
+  slicer: string | null
+  profile: string | null
+  /** 文件在不在。**Task 9 之前普遍 false** —— 那是还没搬，不是错 */
+  present: boolean
+}
+
+/** `assets::AssetList` */
+export interface AssetList {
+  assets: AssetView[]
+  /** 资产根的绝对路径 */
+  root: string
+}
+
+/** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4，套餐那一档 Task 10） */
+export interface AssetUsageView {
+  id: string
+  /** 直接引用它的机型 */
+  machines: string[]
+  /** 引用它的套餐（`assetRefs` 写着这个 id 的）。**归属不是引用** ——
+   *  `p1s-icon` 归 P1S，但借它当图标的是另外两台 */
+  bundles: string[]
+}
+
+/** `bundles::BundleRefView` —— 套餐里一个 `assetRef` 的解析状态（b05 Task 10） */
+export interface BundleRefView {
+  id: string
+  /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
+  resolvable: boolean
+  /** 是不是 BBS 预设。每条套餐至少一条 true（MKP 与 BBS 成套配发） */
+  isBbs: boolean
+}
+
+/** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`） */
+export interface BundleView {
+  id: string
+  display: string
+  machineId: string
+  assetRefs: BundleRefView[]
+  /** 上一次改动日期（迁移照抄旧值，不写「搬运日」） */
+  updatedAt: string | null
+}
+
+/** `bundles::BundleList` */
+export interface BundleList {
+  bundles: BundleView[]
+}
+
+/**
+ * 资产 URL。后端给的前缀只有一处（`/assets/`），这里只负责**编码一次** ——
+ * 实测 BBS 文件名里有空格（`MKPProcess A1 0.2 0.10.json`）。
+ */
+export const assetUrl = (url: string) => encodeURI(url)
+
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
 export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' | 'description'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
+
+/** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
+export interface BaselineDiffEntry {
+  fileName: string
+  status: 'same' | 'changed' | 'missingBaseline'
+  productSha: string
+  baselineSha: string | null
+}
 
 export const wb = {
   open: () => invoke<void>('wb_open'),
@@ -751,6 +836,24 @@ export const wb = {
    * 清单与参数值不共用状态机
    */
   machines: () => invoke<MachineList>('wb_machines'),
+
+  /**
+   * 资产库清单（**只读**）。条目来自 `presets/assets.toml`，文件在 `public/assets/` 下。
+   * 现在普遍 `present: false` —— 条目与文件一起在 b05 Task 9 落地
+   */
+  assets: () => invoke<AssetList>('wb_assets'),
+
+  /**
+   * 套餐清单（**只读**，b05 Task 10）。条目来自 `presets/bundles.toml`，
+   * `defaultBundle` / `recommendedBundle` 引用的就是这里的 `id`
+   */
+  bundles: () => invoke<BundleList>('wb_bundles'),
+
+  /**
+   * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，
+   * 界面上只表现为「那台机型的图没了」。删除守卫在数据层（`Presets::remove_asset`）
+   */
+  assetUsage: (assetId: string) => invoke<AssetUsageView>('wb_asset_usage', { assetId }),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。
@@ -817,4 +920,47 @@ export const wb = {
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   publish: () => invoke<PublishReport>('wb_publish'),
+
+  /**
+   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
+   * `recommendedBundle` 抄模板，`presetFile` 不抄（G-2 待删的悬空名）；
+   * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
+   */
+  copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>
+    invoke<MachineList>('wb_copy_version', {
+      machineId, templateVersionId, id, name,
+      tag: tag ?? null, description: description ?? null,
+    }),
+
+  /**
+   * 复制参数正文（b05 Task 14.5 / doc §4.3 第 7 步）：取模板版本的**完整有效配方**
+   * 钉成新版本的显式覆盖 —— **复制为独立版本，后续修改互不影响**。
+   * 缺失的参数不伪造（模板有效配方里没有的键继续继承 defaults）。
+   * 返回写入的键数。**前提**：新版本定义已存在（先 copyVersion）
+   */
+  copyRecipe: (machineId: string, templateVersionId: string, newVersionId: string) =>
+    invoke<number>('wb_copy_recipe', { machineId, templateVersionId, newVersionId }),
+
+  /**
+   * 对照基线 diff（b05 Task 14.9 第①步，**只读**）：九份产物 vs 基线目录，
+   * `status` ∈ `same | changed | missingBaseline`。**人看过这份清单再点同步**
+   */
+  baselineDiff: () => invoke<BaselineDiffEntry[]>('wb_baseline_diff'),
+  /**
+   * 同步对照基线（b05 Task 14.9 第②步，**显式写入动作**）：落点闸在
+   * `preset::sync_baseline` 内部（只认真 fixtures 或系统临时目录）。
+   * 内容相同的跳过，返回真正写入的份数
+   */
+  syncBaseline: () => invoke<number>('wb_sync_baseline'),
+
+  /**
+   * 交付目录的残留清单（b05 Task 13.4）：「不在本次交付集合内」的文件。
+   * **发布被残留拦下时先看这一条** —— 残留会被消费端真的下载到
+   */
+  distStrays: () => invoke<string[]>('wb_dist_strays'),
+  /**
+   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/dist/` 回收（保留相对路径），
+   * **不直接删**。清理完重新发布即可
+   */
+  cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
 }

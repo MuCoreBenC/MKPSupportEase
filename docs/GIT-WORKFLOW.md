@@ -136,7 +136,7 @@ gh pr merge --squash --delete-branch
 | --- | --- |
 | `package.json` | `version` |
 | `src-tauri/Cargo.toml` | `[package] version` |
-| `src-tauri/Cargo.lock` | 本 crate 那一条的 `version`（漏了它下次 cargo 会自己改写，工作区凭空变脏） |
+| `Cargo.lock`（仓库根） | 本 crate 那一条的 `version`（漏了它下次 cargo 会自己改写，工作区凭空变脏）。建 workspace 之后它在根上，不在 `src-tauri/` 里了 |
 | `src-tauri/tauri.conf.json` | `version` |
 
 ---
