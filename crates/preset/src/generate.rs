@@ -135,6 +135,15 @@ pub fn check_all(recipe: &Recipe, dir: &Path) -> Result<CheckReport, String> {
 /// 渲染全部组合并写进入库目录，返回写了几份。
 ///
 /// 多余产物**不删**：删文件的动作不该藏在「生成」里。它们由 [`check_all`] 点名，人来删。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：写的是本 crate 自己的
+/// `assets/presets/`（`gen-presets` 这个**仓库内开发工具**的产出目录），不是用户数据、
+/// 也不是 `presets/` 真源。而且这条路只有显式 `--write` 才走得到，默认动作是 `--check`。
+/// 崩溃留半个文件的后果是"再跑一次 `--write`"，不是数据坏掉。
+///
+/// **退役条件**：Task 19 统一写盘入口落地后改成转调它；或 Task 18 把这批产物的
+/// 归属定案、这个开发工具随之退役。
+#[allow(clippy::disallowed_methods)]
 pub fn write_all(recipe: &Recipe, dir: &Path) -> Result<usize, String> {
     let mut written = 0usize;
     std::fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{e}", dir.display()))?;
@@ -264,10 +273,23 @@ pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, Str
 
 /// 把入库产物同步成对照基线，返回同步了几份。
 ///
+/// **它写的是内核判据的夹具**（`crates/postprocess/tests/fixtures/presets/`）——
+/// 也就是说这个函数**有能力改判据的期望值**。全仓能做到这件事的只有它一处。
+/// 迁移期那条"禁止 `UPDATE_GOLDEN=1`"的纪律讲的是同一件事：
+/// 把现状抄成期望，判据就从"证明"退化成"自比自"。
+///
 /// **这是一个需要人先看过 diff 的动作**（doc §0 的 ③）：它把「现在的产物」定成
 /// 「上一次审阅通过的样子」。自动化它等于把唯一的安全网拆了。
 ///
 /// 基线那边**保留原有文件名**；新机型在基线里还没有对应文件时，按产物的名字新建一份。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：见上 —— 它的风险不在"截断半个文件"，
+/// 而在"改了判据期望却没人看 diff"。兜着后者的是人工审阅与
+/// `git diff`，以及下一笔要加的"目标必须落在 `crates/postprocess/tests/` 之下"。
+///
+/// **退役条件**：Task 18 把这批产物的归属定案（产物改由我们自己生成）之后，
+/// 这个函数与它的基线目录一起退役。
+#[allow(clippy::disallowed_methods)]
 pub fn sync_baseline(assets: &Path, fixtures: &Path) -> Result<usize, String> {
     let made = pair_by_head(assets)?;
     let base = pair_by_head(fixtures)?;

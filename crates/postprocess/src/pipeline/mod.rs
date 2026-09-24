@@ -586,6 +586,14 @@ fn emit(sink: &mut dyn ProgressSink, step: Step, message: &str) {
 }
 
 /// `<out>.part` → rename 原子替换；rename 失败回退复制。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：禁列禁 `fs::write` 的理由是
+/// "会截断目标文件、崩溃时留半个文件"。这里写的是 **`.part` 临时文件**，
+/// 目标文件直到 rename 那一刻都没被碰过 —— 正是禁列想要的那个模式，
+/// 只是它自己就是实现，没法再转调别人。
+///
+/// **退役条件**：Task 19 统一写盘入口落地、且内核能用上那个入口时，改成转调它。
+#[allow(clippy::disallowed_methods)]
 fn write_atomic(path: &Path, lines: &[String]) -> Result<(), PostprocError> {
     let part_path = {
         let mut p = path.as_os_str().to_os_string();

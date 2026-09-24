@@ -227,6 +227,15 @@ fn preflight(gcode: &Path, config: &Path, set: &[String]) -> Option<ExitCode> {
     None
 }
 
+/// `init` 子命令：把一份样例配置打到 stdout，或写到 `--out` 指定的路径。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：禁列防的是"截断用户已有文件"，
+/// 而这里**先判 `path.exists()` 再写**，已存在就报错退出 —— 截断在语义上不可能发生。
+/// 写的也是用户在命令行上自己指定的路径，不是仓库资产或用户数据目录。
+///
+/// **退役条件**：Task 19 统一写盘入口落地后，改成转调它（那时 `exists()` 那道判断
+/// 应该换成 `File::create_new` 那种"原子地占住新路径"的原语）。
+#[allow(clippy::disallowed_methods)]
 fn cmd_init(out: Option<&Path>) -> ExitCode {
     let text = config::init_toml();
     match out {
