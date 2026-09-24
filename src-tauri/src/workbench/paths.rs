@@ -35,7 +35,15 @@ const UPSTREAM_DIR: &str = "mkpse-presets";
 ///
 /// `capability` 已随第三版去掉 —— 第二版那份能力定义是我自己按 registry 手写的，
 /// 校验的其实是"配方有没有超出我以为客户端支持的范围"（doc §12），不是真兼容性。
-pub const WORKBENCH_DIRS: [&str; 5] = ["machines", "bbs", ".draft", ".trash", ".snapshots"];
+///
+/// `bbs/` 也去了（b05 Task 14.7 裁决，2026-09-24）：全仓核实工作台对它**零读写**
+/// —— BBS 资产的职责在资产域（`public/assets/bbs/` + `presets/assets.toml` 条目），
+/// 交付子树是 `dist-presets/assets/bbs/`。bootstrap 不再为一个没有职责的目录占位。
+/// 剩下四个各司其职：`machines/` 存值的草稿（身份清单来自 `presets/machines/*.toml`）、
+/// `.draft/` 是会话草稿（gitignore）、`.trash/` 是版本与残留回收站、
+/// `.snapshots/` 存生成快照（`wb_generate` 写，`wb_revert_preview` 读 ——
+/// 「恢复配方」靠它，不是只写不读）。
+pub const WORKBENCH_DIRS: [&str; 4] = ["machines", ".draft", ".trash", ".snapshots"];
 
 /// 仓库根。见本模块文档的两级回退
 pub fn repo_root() -> PathBuf {

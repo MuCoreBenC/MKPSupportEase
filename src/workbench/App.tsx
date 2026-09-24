@@ -40,6 +40,8 @@ import { StatusStrip } from './shell/StatusStrip'
 import { MachinesPage } from './views/MachinesPage'
 import { ParamDesk } from './views/ParamDesk'
 import { ParamsMatrix } from './views/ParamsMatrix'
+import { MenuPage } from './views/MenuPage'
+import { BuildPage } from './views/BuildPage'
 
 /**
  * 五个视角。**是视角不是步骤。**
@@ -593,9 +595,18 @@ export function WorkbenchApp() {
                     onApply={(label, patches) => run(label, patches, 'undo')}
                   />
                 )}
-                {view === 'menu' && <p className="wb-todo">套餐与菜单在 Task 16 落地。</p>}
-                {view === 'build' && (
-                  <p className="wb-todo">生成视角在 Task 17 落地（含 Task 9 的校验三档）。</p>
+                {view === 'menu' && <MenuPage />}
+                {/* 生成视角：检查 / 生成 / 基线 / 发布四段 + 闸门按钮约束（b05 Task 14.1/14.2/14.9） */}
+                {view === 'build' && book && words && (
+                  <BuildPage
+                    book={book}
+                    words={words}
+                    onApply={(label, patches) => run(label, patches, 'undo')}
+                    onView={async () => {
+                      setBook(await wb.book())
+                      setTick((n) => n + 1)
+                    }}
+                  />
                 )}
               </div>
             </>

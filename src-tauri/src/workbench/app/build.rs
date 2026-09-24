@@ -763,6 +763,7 @@ mod tests {
     use super::*;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
+    use crate::workbench::presets::Presets;
     use crate::workbench::store::Store;
     use std::collections::BTreeSet;
 
@@ -1424,6 +1425,224 @@ mod tests {
         assert_eq!(
             got, want,
             "产物名与消费端认的那一批不一致 —— 它会找不到文件，而两边都不报错"
+        );
+    }
+
+    /* ---------- 端到端（b05 Task 14.8 / doc §4.3 的 11 步） ---------- */
+
+    /// **doc §4.3 的 11 步在隔离环境走通**（14c 的验收判据）。
+    ///
+    /// 形态照实说：
+    /// - `wb_*` 命令是薄壳（真仓库 `Presets::load()` / `dist_root()`，进不了单测，
+    ///   见 [`wb_generate`] 的注释）；前端手势 → 命令 → 领域体的对应由
+    ///   HANDOFF §2 的静态核对锁定。这里按**领域体**走 11 步，每一步的输入都是
+    ///   上一步**落盘后从盘重读**的结果 —— 与 UI 的真实往返同构
+    ///   （前端每次写完拿到的都是重读清单）。
+    /// - 上游用夹具（CI 上没有真 mkpse-presets，与 11.9 / 12.6 同一边界）。
+    /// - 第 10 步的落盘走查在系统临时目录的基线上（落点闸明确允许的豁免）；
+    ///   真 fixtures 是判据资产，由 `the_real_baseline_diff_reports_all_same` 锁只读。
+    /// - 复制出的 E2E 版本**不进交付集合**：`mkp_preset` 连接键来自上游 manifest
+    ///   （derive.rs），夹具/真上游没登记它之前交付侧不认 —— 这与 13.8 真数据判据
+    ///   「夹具上游不认的 6 版留给真上游」同一条契约，不是链路断点；
+    ///   真数据上这形状由 `upstream_drift`（11.9）报出来。
+    #[test]
+    fn the_eleven_steps_of_doc_4_3_run_end_to_end() {
+        /* ── 环境：夹具临时目录当"盘"，store 建齐工作台子目录 ── */
+        let (fx_dir, up, _presets) = Fixture::load().into_parts();
+        let presets_root = fx_dir.path().join("presets");
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+
+        /* 步 1「进入 A1 的版本管理」：盘上重读清单，模板版本在 */
+        let p = Presets::load_from(&presets_root).unwrap();
+        let template_bundle = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "FAST")
+            .expect("夹具 A1 有 FAST 版可当模板")
+            .recommended_bundle
+            .clone();
+
+        /* 步 2–5「复制已有版本」：选模板 → 填 id/name/tag/description（前端预填
+        模板值）→ 保存 = **只写版本定义**（机型文件一个文件） */
+        let mut p = p;
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .copy_version("FAST", "E2E", "端到端版", Some("快拆"), Some("14c 验收"))
+            .unwrap();
+        p.catalog.write_machine("A1").unwrap();
+
+        // 步 5（续）：落盘重读 —— 界面看到的必须是落盘结果
+        let p = Presets::load_from(&presets_root).unwrap();
+        let e2e = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "E2E")
+            .expect("落盘后清单里有 E2E");
+        assert_eq!(e2e.recommended_bundle, template_bundle, "推荐套餐随复制走");
+        assert!(
+            e2e.preset_file.is_none(),
+            "G-2：复制刻意不抄 presetFile（悬空名不扩散）"
+        );
+        assert_eq!(e2e.tag.as_deref(), Some("快拆"), "tag 预填值落盘");
+
+        /* 步 6「参数源待补」：版本照常显示，标注 hasRecipe=false（14.4 的判据来源） */
+        assert!(!p.registry.version_has_variants("A1:E2E"));
+
+        /* 步 7「进参数编辑器改值」：复制模板完整有效配方，钉成显式覆盖（14.5） */
+        let mut p = p;
+        let keys = crate::workbench::app::copy_recipe(&mut p, "A1", "FAST", "E2E").unwrap();
+        assert!(keys > 0, "模板的有效配方不应为空");
+        // 反向（CopyVersionForm「重试复制正文」路径的后端语义）：版本不在清单 →
+        // 拒绝且错误可读 —— 失败时版本定义不回滚，界面据实分态
+        let err = crate::workbench::app::copy_recipe(&mut p, "A1", "FAST", "NO_SUCH").unwrap_err();
+        assert!(
+            err.message.contains("先复制版本定义"),
+            "实测：{}",
+            err.message
+        );
+        // 落盘重读：显式值真的进了 registry
+        let p = Presets::load_from(&presets_root).unwrap();
+        assert!(
+            p.registry.version_has_variants("A1:E2E"),
+            "复制落了盘，第 6 步的「待补」翻正"
+        );
+
+        /* 步 8「进检查」：清单重建走 storage::load —— 与 `Ctx::reload_from_disk`
+        同一条真实路径（机型页直写 presets/，生成视角靠重载看见它） */
+        let loaded = crate::workbench::app::storage::load(&store, &p).unwrap();
+        let draft = Draft::default();
+        let book = Book::new(&up, &p, &loaded.committed, &draft);
+        assert!(
+            book.version("A1/E2E").is_some(),
+            "机型页落盘的新版本在生成视角可见"
+        );
+        let recipe =
+            preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML).map_err(|e| e.to_string());
+        let report = issues::preflight(&book, recipe.as_ref().map_err(String::as_str));
+        assert_eq!(
+            report.blocks,
+            0,
+            "参数源已补则检查全绿，却有阻断：{:?}",
+            report
+                .issues
+                .iter()
+                .map(|i| (i.severity, i.title.clone()))
+                .collect::<Vec<_>>()
+        );
+
+        /* 步 9「进生成，看 diff」：渲染 + 唯一命名 + 落盘 */
+        let r = render(&book, "A1/E2E").unwrap();
+        assert_eq!(
+            r.file_name,
+            preset::preset_file_name("A1", "E2E"),
+            "产物名由命名函数算出，前端没有第二份实现"
+        );
+        let _: toml::Table = r.text.parse().expect("渲染产物必须是合法 TOML");
+        // 独立快照落到产物侧：E2E 的有效值此刻与模板逐键一致。
+        // 逐键按 f64 比而不是 serde_json 的表示相等 —— 复制的显式值经过
+        // JSON 往返，整数会以浮点表示落回（4 → 4.0），值语义没变；这本身
+        // 就是「复制 = 显式覆盖」的旁证（继承值保持原表示，显式值过一遍存取）
+        let rt = render(&book, "A1/FAST").unwrap();
+        assert_eq!(r.snapshot.len(), rt.snapshot.len(), "键数一致");
+        for (k, v) in &rt.snapshot {
+            let got = r.snapshot.get(k).unwrap_or_else(|| panic!("键 {k} 缺失"));
+            match (v.as_f64(), got.as_f64()) {
+                (Some(a), Some(b)) => assert_eq!(a, b, "键 {k} 的值复制后不一致"),
+                _ => assert_eq!(got, v, "键 {k} 复制后不一致"),
+            }
+        }
+
+        /* 步 10「审阅 diff 后同步基线」：diff → 确认 → sync → **重读 diff**。
+        产物源是编译期 assets_dir（只读）；基线在系统临时目录（落点闸允许） */
+        let fixtures = tempfile::tempdir().unwrap();
+        for (name, content) in preset::BUILTIN_PRESETS {
+            crate::fsx::atomic::atomic_write(&fixtures.path().join(name), content.as_bytes())
+                .unwrap();
+        }
+        assert!(
+            baseline_diff_against(fixtures.path())
+                .iter()
+                .all(|e| e.status == "same"),
+            "先把基线铺成与九份产物全绿"
+        );
+        let victim = preset::BUILTIN_PRESETS[0].0;
+        crate::fsx::atomic::atomic_write(
+            &fixtures.path().join(victim),
+            format!("{}\n# 端到端走查\n", preset::BUILTIN_PRESETS[0].1).as_bytes(),
+        )
+        .unwrap();
+        let diff = baseline_diff_against(fixtures.path());
+        assert_eq!(
+            diff.iter().filter(|e| e.status == "changed").count(),
+            1,
+            "diff 只报改过的那一份，其余仍是 same"
+        );
+        let n = preset::generate::sync_baseline(&preset::generate::assets_dir(), fixtures.path())
+            .unwrap();
+        assert_eq!(n, 1, "sync 只写 diff 说过的那一份");
+        assert!(
+            baseline_diff_against(fixtures.path())
+                .iter()
+                .all(|e| e.status == "same"),
+            "同步完成后**重读 diff**，状态以重读为准 —— 全绿"
+        );
+
+        /* 步 11「进发布」：交付集合闭合 + publish_into 全链（残留闸 → 内容 →
+        资产复制 → manifest 最后写） */
+        let dist = tempfile::tempdir().unwrap();
+        for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
+            crate::fsx::atomic::atomic_write(
+                &dist.path().join("presets").join("mkp").join(name),
+                format!("# preset {name}").as_bytes(),
+            )
+            .unwrap();
+        }
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        let expected = crate::workbench::app::dist::deliverable_set(&book);
+        assert_eq!(
+            expected.len(),
+            11,
+            "content 3 + manifest 1 + assets 4 + mkp 3（12.6 的夹具锚）；\
+             E2E 不在其中 —— 它的 mkp 连接键在上游 manifest，登记前不进交付"
+        );
+        assert!(!expected.contains("presets/mkp/A1-e2e.toml"));
+        let meta = crate::workbench::app::dist::PublishMeta {
+            stamp: "2026-09-24T00:00:00Z".to_owned(),
+            channel: "stable".to_owned(),
+            minimum_client: String::new(),
+            version: String::new(),
+        };
+        let out =
+            crate::workbench::app::dist::publish_into(dist.path(), asset_root.path(), &book, &meta)
+                .unwrap();
+        assert_eq!(out.presets, 3);
+        assert_eq!(out.assets_copied, 4);
+        // manifest 最后写（13.7）：条目 = mkp 3 + 资产 4，哈希按发布出去的字节算
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dist.path().join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["assets"].as_array().unwrap().len(),
+            7,
+            "mkp 3 + 资产 4"
         );
     }
 }
