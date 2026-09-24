@@ -758,13 +758,38 @@ export interface AssetList {
   root: string
 }
 
-/** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4）。删资产之前先问这一条 */
+/** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4，套餐那一档 Task 10） */
 export interface AssetUsageView {
   id: string
   /** 直接引用它的机型 */
   machines: string[]
-  /** 引用它的套餐。**今天恒为空** —— 套餐域是 Task 10 */
+  /** 引用它的套餐（`assetRefs` 写着这个 id 的）。**归属不是引用** ——
+   *  `p1s-icon` 归 P1S，但借它当图标的是另外两台 */
   bundles: string[]
+}
+
+/** `bundles::BundleRefView` —— 套餐里一个 `assetRef` 的解析状态（b05 Task 10） */
+export interface BundleRefView {
+  id: string
+  /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
+  resolvable: boolean
+  /** 是不是 BBS 预设。每条套餐至少一条 true（MKP 与 BBS 成套配发） */
+  isBbs: boolean
+}
+
+/** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`） */
+export interface BundleView {
+  id: string
+  display: string
+  machineId: string
+  assetRefs: BundleRefView[]
+  /** 上一次改动日期（迁移照抄旧值，不写「搬运日」） */
+  updatedAt: string | null
+}
+
+/** `bundles::BundleList` */
+export interface BundleList {
+  bundles: BundleView[]
 }
 
 /**
@@ -807,6 +832,12 @@ export const wb = {
    * 现在普遍 `present: false` —— 条目与文件一起在 b05 Task 9 落地
    */
   assets: () => invoke<AssetList>('wb_assets'),
+
+  /**
+   * 套餐清单（**只读**，b05 Task 10）。条目来自 `presets/bundles.toml`，
+   * `defaultBundle` / `recommendedBundle` 引用的就是这里的 `id`
+   */
+  bundles: () => invoke<BundleList>('wb_bundles'),
 
   /**
    * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，

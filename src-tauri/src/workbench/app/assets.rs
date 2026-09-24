@@ -56,7 +56,8 @@ pub struct AssetUsageView {
     pub id: String,
     /// 直接引用它的机型（`image` / `icon` 字段写着这个 id）
     pub machines: Vec<String>,
-    /// 引用它的套餐。**今天恒为空** —— 套餐定义（含 `assetRefs`）是 Task 10
+    /// 引用它的套餐（`assetRefs` 写着这个 id 的套餐 id，b05 Task 10 起）。
+    /// **归属不是引用**：`p1s-icon` 归 P1S，但借它当图标的另有其人
     pub bundles: Vec<String>,
 }
 
@@ -152,7 +153,7 @@ mod tests {
             vec!["P1S".to_owned(), "P2S".to_owned(), "X1C".to_owned()],
             "三个机型共用这一份图标（归属写 P1S，借用的是另外两台）"
         );
-        assert!(u.bundles.is_empty(), "套餐域还没实现（Task 10）");
+        assert!(u.bundles.is_empty(), "图标不是套餐的配发内容");
 
         // 机型图各归各的
         let u = wb_asset_usage("a1-image".to_owned()).expect("反查");

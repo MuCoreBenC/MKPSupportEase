@@ -36,6 +36,8 @@
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
 pub mod assets;
 pub mod build;
+/// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
+pub mod bundles;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;

@@ -121,6 +121,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 写入口在数据层就位，接上它要有界面（Task 14）
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
+        // 「套餐管理」：读 `presets/bundles.toml`（b05 Task 10）。同一套纪律：只读
+        app::bundles::wb_bundles,
         app::machines::wb_add_machine,
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,

@@ -218,6 +218,15 @@ fn write_presets(root: &Path) {
          path = 'printers/a1-extra.webp'\n\
          \n\
          [[assets]]\n\
+         id = 'a1-bbs-04-020'\n\
+         type = 'slicerProfile'\n\
+         machineId = 'A1'\n\
+         name = 'A1 0.4 喷头 0.20 层高'\n\
+         path = 'bbs/A1/process.json'\n\
+         slicer = 'bbs'\n\
+         profile = 'process'\n\
+         \n\
+         [[assets]]\n\
          id = 'p1s-bbs-02-010'\n\
          type = 'slicerProfile'\n\
          machineId = 'P1S'\n\
@@ -225,6 +234,20 @@ fn write_presets(root: &Path) {
          path = 'bbs/P1S/process.json'\n\
          slicer = 'bbs'\n\
          profile = 'process'\n"
+            .to_owned(),
+    );
+    // 套餐定义（b05 Task 10）：一条，被夹具里 A1 的 `defaultBundle` 与
+    // 两个版本的 `recommendedBundle` 引用着。`assetRefs` 里的 BBS 是 10.8 那条
+    // 「成套配发」判据要用的形状；p1s-bbs-02-010 刻意**没有**套餐引用 ——
+    // 「没人引用的 BBS 删得掉」要用它
+    t(
+        "bundles.toml",
+        "[[bundles]]\n\
+         id = 'A1_default'\n\
+         display = '官方推荐'\n\
+         machineId = 'A1'\n\
+         assetRefs = ['a1-bbs-04-020']\n\
+         updatedAt = '2026-07-12'\n"
             .to_owned(),
     );
     for (id, bundle, versions) in FIXTURE_MACHINES {
@@ -260,6 +283,11 @@ fn write_presets(root: &Path) {
             // 空 tag **不写这一行**（写成 '' 会读成「填过，填了个空」）
             if !tag.is_empty() {
                 s.push_str(&format!("tag = '{tag}'\n"));
+            }
+            // A1 的每一版都推荐同一条套餐 —— 与真数据同形状（b05 Task 10），
+            // `check_bundle_refs` 的机型侧检查靠它有东西可查
+            if *id == "A1" {
+                s.push_str("recommendedBundle = 'A1_default'\n");
             }
         }
         t(&format!("machines/{id}.toml"), s);

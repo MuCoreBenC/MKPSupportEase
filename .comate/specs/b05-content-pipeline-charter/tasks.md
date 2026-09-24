@@ -113,15 +113,16 @@
     - 9.8: ✅ 加载期补了**反向**检查：机型引用的 id **认不出来是 error**（打错字与 `machineVariants` 键写错同一类）；id 认得出、文件还没搬是 **warning 级**（现在由 `wb_assets` 的 `present` 说出来，Task 11.1 接手升成一条 warning）
     - 9.9: ✅ 旧仓全程只读：迁移后再核 `manifest.json` 的 72 条 sha256，**0 缺 0 不符**
 
-- [ ] Task 10: 套餐域①层 —— 集中式套餐定义与悬空引用消除
-    - 10.1: 定套餐定义的数据形状：id、显示名、归属机型、`assetRefs`、更新时间
-    - 10.2: 采用一份集中定义，写明「超过 20 个再拆」的门槛
-    - 10.3: 迁入旧仓 5 份套餐（A1 / A1_MINI / P1S / P2S / X1C 各一个 `*_default`）
-    - 10.4: 实现读写与工作台「套餐管理」的后端命令
-    - 10.5: `defaultBundle` / `recommendedBundle` 从刻意悬空转为可解析引用
-    - 10.6: 更新 `src-tauri/src/workbench/presets/mod.rs:155-157` 的注释（它现在说 `bundles/` 还没搬）
-    - 10.7: 判据：机型与版本引用的每个 bundle id 都存在；套餐的每个 `assetRef` 都能解析
-    - 10.8: 判据：**MKP 预设与其配套 BBS 预设必须同批交付**（doc §12.4 的语义耦合），缺一方报 error
+- [x] Task 10: 套餐域①层 —— 集中式套餐定义与悬空引用消除
+    - 10.1: ✅ 数据形状就是旧数据那五个：`id` / `display` / `machineId` / `assetRefs` / `updatedAt`，**照实搬不造默认值**（`updatedAt` 沿用旧值 `2026-07-12` —— 迁移不改内容，写今天就是把"搬了个文件"记成"改了套餐"）；`assetRefs` 换成我们的资产 id
+    - 10.2: ✅ `presets/bundles.toml` 一份集中定义（旧仓 5 份离门槛还远；门槛同资产域：超过 20 个再拆）
+    - 10.3: ✅ 5 份迁入，**逐份核对**旧仓 `source/bundles/*_default.toml`：id / display / machineId / updatedAt 逐字段一致；`assetRefs` 经旧仓资产条目反解到同一份文件（如 `a1_bbs_mkpprocess_a1_04_020` → `MKPProcess A1 0.4 0.20.json` → `a1-bbs-04-020`），5 条映射零错位
+    - 10.4: ✅ 数据层读写全就位（`Bundles::load_from` / `get` / `add` / `write` / `drop_asset_refs`）；命令层 `wb_bundles`（**只读**，每个 ref 带 `resolvable` / `isBbs` 解析状态）+ `api.ts` 类型与封装 —— 写命令等界面（Task 14），与 `wb_assets` 同一条纪律。`drop_asset_refs` 自带空套餐守卫：去掉某套餐唯一的引用整次拦截（与加载期拦空 `assetRefs` 是同一条判据的两端）
+    - 10.5: ✅ `defaultBundle` / `recommendedBundle` 转为**可解析引用**：加载期 `Presets::check_bundle_refs` 查「机型与版本引用的套餐存在 + 套餐归属的机型存在」，认不出是 error（doc §9：套餐定义落地后悬空转 error）；空串跳过（A2L 四折空，与 `image` 同口径）
+    - 10.6: ✅ `presets/mod.rs` 模块头的搬迁状态表更新：套餐已搬，剩 `preset_registry.toml`（Task 12 的交付索引，不在这里存第二份）
+    - 10.7: ✅ 判据真数据实测：`the_real_bundle_references_resolve`（**14 处非空引用**逐条可解析、指向 5 条套餐、归属机型一致；反空转 ≥14）与 `the_real_bundle_asset_refs_resolve`（5 条套餐的每个 `assetRef` 解析到真实资产且逐条 BBS、BBS 归属与套餐归属一致、`a1-bbs-04-020` 反查 → `A1_default` 且大小写不敏感）；另有 `wb_bundles` 的 5 份全量核对
+    - 10.8: ✅ 加载期拦「套餐里没有一条 BBS」+ `drop_asset_refs` 拦「去掉最后一条 BBS」。10.8 的语义耦合在本层可表达的就是「套餐必须含 BBS」—— MKP 预设不建资产条目、路径由命名规则算（doc §12.5），它的"缺"不经过资产域
+    - 10.9（顺手抓到的）：`bundles.toml` 一度被工具写成 CRLF，被 `the_source_files_keep_lf_line_endings` 当场抓出（Task 8.9 那条判据的又一次实弹验证）—— 已转 LF
 
 - [ ] Task 11: 校验层补齐（阶段②「检查内容」）
     - 11.1: 引用完整性：参数源、`image`、`icon`、bundle、`assetRef` 逐项检查存在性
