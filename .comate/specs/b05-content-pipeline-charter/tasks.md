@@ -42,7 +42,9 @@
 - [ ] Task 3: 收拢重复路径常量与清理死引用（零行为变更）
     - 3.1: ✅ 九处手写 `fixtures/presets` 统一走 `preset::generate::fixtures_dir()`（`tests/recipe.rs` 的本地 `fixtures_dir()` 一并删掉；顺手覆盖了任务清单外的 src 内两处：`src/validate.rs`、`src/build.rs` 的单测 —— 同一类重复，同一笔改）
     - 3.2: ✅ `builtin_presets_match_dir.rs` 的本地 `builtin_dir()` 与 `key.rs` 的内置预设路径改为 `preset::generate::assets_dir()`
-    - 3.3: ⛔ **前提被证伪，等一次裁决** —— `../mkp-ssr/crates/preset/assets/presets` 在开发机上**存在**，那条 M0 判据（`our_render_matches_the_machine_verified_baseline`）不是死引用：实测**真比了 9 份**（值全对，只剩键序那条已知差异）。而它所对照的两侧基线**逐字节相同**（sha256 9/9 一致），只差文件名（`A1-standard.toml` ↔ `A1.toml`）。所以「删掉」= 拿掉工作台渲染链唯一的真机基线对照（它在 CI 上则永远跳过，等于空转）。三条路待选：① 按原文删；② 改指仓内基线 `preset::generate::fixtures_dir()`（判据在 CI 里也真跑）；③ 并入 Task 5（那时夹具已改名，按文件名直配成立）
+    - 3.3: ✅ **裁决取②：不删，改指仓内基线** —— 原文前提已被实测证伪（`../mkp-ssr/...` 在开发机上存在、判据真比了 9 份；两侧基线 sha256 9/9 相同，只差文件名）。改为：基线走 `preset::generate::fixtures_dir()`；配对读文件头 `# machine:` / `# variant:`（不认文件名，Task 5 改名后不用再动）；9 份一份不少地比到 —— 少了 / 重了 / 身份读不出来都直接失败，删掉「没找到就 return」那条静默分支
+    - 3.3a: ✅ 随之把 `render()` 的机型查询从上游那份换成**我们自己那份清单**（`book.machines()`）：没有这一改，这条判据在 CI 里仍跑不起来（上游不在仓库里）。没有任何判据覆盖「上游没有这台」那条旧分支，而上游那层正在退出（b04 Task 12）—— 理由与代价写在 `render()` 的注释里
+    - 3.3b: ✅ 复验：判据实测 **9/9 配上并逐份比过**（值全对，只剩「段内键序」那条已知差异，仍是 Task 11 的收尾项）；`cargo test -p mkp-support-ease --features workbench` 265/265
     - 3.4: ✅ `cargo test -p mkpse-preset` 全绿（77 lib + 39 集成）、`cargo fmt --all --check` 与 `cargo clippy -p mkpse-preset --all-targets -- -D warnings` 全过
 
 - [ ] Task 4: 旧名 → 新身份映射表（数据文档，不改文件）

@@ -102,10 +102,19 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     let layers = book
         .version_layers(uid)
         .ok_or_else(|| AppError::corrupted(format!("{uid} 的取值层取不出来")))?;
+    // 机型从**我们自己那份清单**里查（`presets/machines/*.toml`，借自 `Committed.catalog`）。
+    //
+    // 以前查的是上游那份（`book.up.catalog`）—— 于是渲染任一产物都要先有上游仓库，
+    // 而机型 id 与版本 id 一样是**我们的身份**（`docs/ARCHITECTURE.md` §10.1），
+    // 上游那层正在退出（b04 Task 12）。
+    //
+    // 直接理由（b05 Task 3.3）：没有这一改，那条「渲染出来的产物 vs 真机基线」的判据
+    // 在 CI 里永远跑不起来 —— 上游不在仓库里（`local-reference/` 刻意不入库），
+    // 而它恰恰是唯一盯着这条渲染链的判据。
     let machine = book
-        .up
-        .catalog
-        .machine(&v.machine_id)
+        .machines()
+        .iter()
+        .find(|m| m.id == v.machine_id)
         .ok_or_else(|| AppError::not_found(format!("机型 {} 不存在", v.machine_id)))?;
 
     let fingerprint = layers.fingerprint();
@@ -741,34 +750,41 @@ mod tests {
 
     /// **M0：我们渲染出来的产物 vs 真机验证过的那份基线。**（b04 Task 11）
     ///
-    /// 这是整个迁移的前置判据。基线是 `mkp-ssr` 里那 9 份内置预设之一 ——
-    /// 它们由那边的 `gen-presets` 从 `preset_recipes.toml` 生成，**上过真机**。
-    /// 我们这条链（`presets/*.toml` → `render()`）算出来的如果与它正文字节相同，
-    /// 说明两套真源等值、迁移不需要修数据；不同就必须先定哪边对 ——
-    /// 搬完 3 万行代码再发现值对不上，会留下一批"生成出来但和验证过的不一样"的产物，
-    /// 而那种错在产物上看不出来。
+    /// 这是整个迁移的前置判据。基线是那 9 份内置预设 —— 它们由 `gen-presets` 从
+    /// `preset_recipes.toml` 生成，**上过真机**。我们这条链（`presets/*.toml` → `render()`）
+    /// 算出来的如果与它正文字节相同，说明两套真源等值、迁移不需要修数据；
+    /// 不同就必须先定哪边对 —— 搬完 3 万行代码再发现值对不上，会留下一批
+    /// "生成出来但和验证过的不一样"的产物，而那种错在产物上看不出来。
     ///
     /// 比的是**正文**：`uuid` 与 `release_time` 两行按定义就该不同
     /// （前者按内容指纹算、后者是当下时间），它们不参与比较。
     ///
-    /// 基线路径是兄弟仓库，找不到就跳过 —— 这条判据的寿命到 Task 22.2 为止
-    /// （那时基线会被删掉，因为那时只有我们一份）。
+    /// # 基线在仓内，配对认身份不认文件名（b05 Task 3.3）
+    ///
+    /// 基线以前指向兄弟仓库 `../mkp-ssr/crates/preset/assets/presets`：开发机上有它、
+    /// CI 上没有 —— 于是在 CI 里这条判据一次都没跑过（那句"没找到基线目录"连颜色都不变）。
+    /// 现在改指 `preset::generate::fixtures_dir()`：**仓内那 9 份，与旧仓那份逐字节相同**
+    /// （sha256 9/9 一致，只差文件名），判据的强度没有变，但它从此在 CI 里也真跑。
+    ///
+    /// 配对**按文件头的 `# machine:` / `# variant:`**，不按文件名：夹具那边现在还是
+    /// 云端那套名字（`A1MF_260628.toml`），b05 Task 5 会把它们改成产物命名
+    /// （`A1_MINI-fastv3.3.toml`）。两套名字都配得上，这条判据不用跟着改。
+    ///
+    /// # 反空转：9 份一份都不能少
+    ///
+    /// 基线少了、同一身份重了、或某一份没被任何版本配上，都直接失败 ——
+    /// 一条"比了 0 份"的判据比没有判据更坏，因为它是绿的。
     #[test]
     fn our_render_matches_the_machine_verified_baseline() {
-        let (Some(_), Some(_)) = (paths::presets_root(), paths::upstream_root()) else {
-            eprintln!("没同时定位到 presets 与上游，这条 M0 检查未执行（不是通过）");
-            return;
-        };
-        let baseline_dir = paths::repo_root().join("../mkp-ssr/crates/preset/assets/presets");
-        if !baseline_dir.is_dir() {
-            eprintln!(
-                "没找到基线目录 {}，这条 M0 检查未执行（不是通过）",
-                baseline_dir.display()
-            );
-            return;
-        }
-
-        let up = crate::workbench::upstream::Upstream::load().expect("真上游");
+        // 上游只为让 `Book` 有个 `up` 可指：**机型与版本全部来自我们自己那份清单**
+        // （`presets/machines/*.toml`），`render()` 已经不再查上游（见那边那段注释），
+        // 所以夹具上游一个字节都进不了比对的正文。
+        //
+        // 为什么用夹具而不是真上游：真上游在仓库外（`local-reference/` 刻意不入库），
+        // 拿它的存在当条件，这条判据在 CI 里就永远跳过 —— 而它恰恰是唯一盯着
+        // 这条渲染链的判据。夹具是自造的，任何环境里都在。
+        // （哪天 `Book` 不再持有 `up`，这里连夹具都不用造：b04 Task 12 的收尾。）
+        let fixture = Fixture::load();
         let presets = crate::workbench::presets::Presets::load().expect("真 presets");
         let tmp = tempfile::tempdir().unwrap();
         let store = crate::workbench::store::Store::at(tmp.path());
@@ -777,7 +793,52 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&up, &presets, &c, &draft);
+        let book = Book::new(&fixture.up, &presets, &c, &draft);
+
+        /// 基线目录按**身份**索引：`(机型 id, 版本 id 小写)` → 文件。
+        ///
+        /// 读不出来的、同一身份出现两次的，都在这里直接报错：静默跳过会让这条判据
+        /// 悄悄少比几份，而它看起来还是绿的。
+        fn baseline_by_identity(
+            dir: &std::path::Path,
+        ) -> BTreeMap<(String, String), std::path::PathBuf> {
+            let mut out: BTreeMap<(String, String), std::path::PathBuf> = BTreeMap::new();
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("读不到基线目录 {}：{e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("目录项").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("读不到 {}：{e}", path.display()));
+                let file = preset::read_preset_from_bytes(text)
+                    .unwrap_or_else(|e| panic!("{} 读不出来：{e}", path.display()));
+                let variant = file.variant.as_deref().unwrap_or_else(|| {
+                    panic!("{} 的文件头没有 `# variant:`，身份认不出来", path.display())
+                });
+                let key = (file.machine.clone(), variant.to_lowercase());
+                if let Some(prev) = out.insert(key.clone(), path.clone()) {
+                    panic!(
+                        "基线 {:?} 有两份：{} 与 {}",
+                        key,
+                        prev.display(),
+                        path.display()
+                    );
+                }
+            }
+            out
+        }
+
+        let baseline_dir = preset::generate::fixtures_dir();
+        let baselines = baseline_by_identity(&baseline_dir);
+        assert_eq!(
+            baselines.len(),
+            9,
+            "基线应当正好 9 份（实测 {}）：{:?} —— 是谁动的？",
+            baselines.len(),
+            baselines.keys().collect::<Vec<_>>()
+        );
 
         /// 去掉那两行按定义会变的头部
         fn body(s: &str) -> String {
@@ -801,13 +862,17 @@ mod tests {
         let mut compared = 0usize;
         let mut value_diff: Vec<String> = Vec::new();
         let mut order_only: Vec<String> = Vec::new();
+        let mut matched: Vec<(String, String)> = Vec::new();
         for v in book.versions() {
+            // 产物名只进报告（它比 uid 更接近用户看到的东西）；配对靠的是身份
             let name = preset_file_name(&v.machine_id, &v.version_id);
-            let path = baseline_dir.join(&name);
-            let Ok(want) = std::fs::read_to_string(&path) else {
-                continue; // 基线里没有这一份（A2L 就是这样）—— 不是差异
+            let key = (v.machine_id.clone(), v.version_id.to_lowercase());
+            let Some(path) = baselines.get(&key) else {
+                continue; // 没有基线的版本（A2L 那台占位就是这样）—— 不是差异
             };
+            let want = std::fs::read_to_string(path).expect("读基线");
             let got = render(&book, &v.uid).expect("渲染得出来").text;
+            matched.push(key);
             compared += 1;
             let (a, b) = (body(&got), body(&want));
             if a == b {
@@ -827,7 +892,25 @@ mod tests {
             ));
         }
 
-        assert!(compared > 0, "一份都没比到，这条判据在空转");
+        // 反空转①：9 份基线一份不少地配上号。
+        // 配不上只有一种原因：`presets/machines/*.toml` 里那条身份没了（改名/删版本），
+        // 而基线还留着 —— 那种情况必须有人处置，不能靠 `continue` 悄悄少比一份
+        let unmatched: Vec<&(String, String)> =
+            baselines.keys().filter(|k| !matched.contains(*k)).collect();
+        assert!(
+            unmatched.is_empty(),
+            "基线里有 {} 份没配上任何版本：{unmatched:?} —— \
+             `presets/machines/*.toml` 与夹具的身份对不上了",
+            unmatched.len()
+        );
+        // 反空转②：比到的份数 == 基线份数（上面那条为空 + 一对一配对 ⇒ 这条冗余，
+        // 它写在这是为了让「基线 9 份、比了 9 份」成为一句能直接读的结论）
+        assert_eq!(
+            compared,
+            baselines.len(),
+            "比了 {compared} 份，基线有 {} 份",
+            baselines.len()
+        );
         assert!(
             value_diff.is_empty(),
             "**值不一致**（比了 {compared} 份）—— 这要先定哪边对，不能直接搬代码：\n{}",
