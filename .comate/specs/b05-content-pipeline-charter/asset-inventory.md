@@ -96,13 +96,17 @@
 | `assets/faq`、`assets/avatars`、`assets/models`、`assets/qr`、`models/*` | 代码里对它们的路径**零命中** |
 | 我们自己的图 | 在 `public/printers/bambu/`（4 张，与旧仓同名不同文件）与 `public/models/hero_pile.webp`；引用点在 `src/app/heroArt.ts`、`PageHome` / `PageCalib` |
 
-## 5. 两条要你知道的空档（不扩大范围，只记事实）
+## 5. 两条空档的裁决（2026-09-24）
 
-1. **模型预览图与模型名在被舍弃的那一侧。** `content/model_copy.json` 里每个模型有
-   `title` / `subtitle` / `description` / `time` / `weight` / `tag` / `image` / `modelFile`。
-   D-4 把 `model_copy` 列为不纳入，于是按规则**舍弃**；但保留的三份 `.3mf` 取出后是
-   **没有名字、没有预览图**的 —— 将来做"模型库"界面时，这一块要么从 `model_copy` 里按需取
-   （那就等于部分推翻了 D-4），要么由人重新命名。**这是取舍，不是遗漏**，所以写在这里。
-2. **同一用途两份图。** 我们机型定义指向旧仓那几张（21.7 KB 起），而当前界面显示的是
-   `public/printers/bambu/` 那几张（95.7 KB 起）—— 不是同一份文件。Task 9 搬运时要人看一眼
-   定哪份（分辨率高的那张未必是想要的那张）。
+> 这两条在盘点时记成「待裁决」，现在**都定了**。裁决只改这里的结论，§1~§3 的实测数据照旧。
+
+1. **模型预览图与模型名** —— 裁决：`assets/models/`（8 张预览图）与 `assets/faq/` **都不要**；
+   模型**本体**（三份 `.3mf`）保留，`model` 作为资产类型保留，**名字与预览图暂缓** ——
+   本轮不虚构元数据，等真做模型库界面时再定。
+2. **机型图来源** —— 裁决：**用现有新版那批大图**（`public/printers/bambu/`），不用旧仓那 5 张。
+   于是 §3 清单里第 1 条（`assets/machines/{a1,a1_mini,p1s,p2s,x1c}.webp` 直接保留）**改为**：
+   只作对照，不进新资产库（例外见下）。
+   **一处缺口照实记**：新版那批只有 4 张（`a1.webp` 95.7 KB / `a1mini.webp` 84.5 KB /
+   `a1mini-variant.webp` 43.9 KB / `p1s.webp` 42.8 KB），覆盖 A1 / A1_MINI（两张）/ P1S；
+   **P2S 与 X1C 没有新版**（A2L 本来就没有图）。搬之前要定：补新图，还是暂用旧仓那两张。
+   已记进 spec 的 `tasks.md` 9.1a。

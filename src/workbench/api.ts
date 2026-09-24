@@ -723,6 +723,47 @@ export interface MachineList {
   root: string
 }
 
+/* ---------- 资产库（`app::assets` / `presets::assets`） ---------- */
+
+/**
+ * `presets::AssetKind` —— 资产类型集合（闸 G-3：切片器维度**开放**，模型保留）。
+ *
+ * 四个取值而不是三个：`image` 与 `icon` 是两种消费方式（一个是机型图、一个是矢量标记）。
+ * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
+ */
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile'
+
+/** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
+export interface AssetView {
+  id: string
+  kind: AssetKind
+  /** 归属机型；不属于任何机型时是 null */
+  machineId: string | null
+  name: string
+  /** 相对资产根（`public/assets/`）的一段 */
+  path: string
+  /** `/assets/<path>`。**用之前过 `assetUrl()`** —— 路径里可能有空格 */
+  url: string
+  /** 切片器（今天只有 `bbs`）与它下面的档位；只有 `slicerProfile` 才有 */
+  slicer: string | null
+  profile: string | null
+  /** 文件在不在。**Task 9 之前普遍 false** —— 那是还没搬，不是错 */
+  present: boolean
+}
+
+/** `assets::AssetList` */
+export interface AssetList {
+  assets: AssetView[]
+  /** 资产根的绝对路径 */
+  root: string
+}
+
+/**
+ * 资产 URL。后端给的前缀只有一处（`/assets/`），这里只负责**编码一次** ——
+ * 实测 BBS 文件名里有空格（`MKPProcess A1 0.2 0.10.json`）。
+ */
+export const assetUrl = (url: string) => encodeURI(url)
+
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
 export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' | 'description'
 
@@ -751,6 +792,12 @@ export const wb = {
    * 清单与参数值不共用状态机
    */
   machines: () => invoke<MachineList>('wb_machines'),
+
+  /**
+   * 资产库清单（**只读**）。条目来自 `presets/assets.toml`，文件在 `public/assets/` 下。
+   * 现在普遍 `present: false` —— 条目与文件一起在 b05 Task 9 落地
+   */
+  assets: () => invoke<AssetList>('wb_assets'),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。

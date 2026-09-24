@@ -184,6 +184,28 @@ fn write_presets(root: &Path) {
         "[[brands]]\nid = 'Bambu Lab'\nname = '拓竹 (Bambu Lab)'\nlogo = 'bambu-logo.png'\n"
             .to_owned(),
     );
+    // 资产定义（b05 Task 8）：两条 —— 一条图片（归 A1）、一条切片器预设（归 P1S），
+    // 两种类型都走到。`path` 指向夹具资产根里**不存在**的文件是合法的：
+    // 存在性不是加载期的事（条目与文件一起在 Task 9 落地）
+    t(
+        "assets.toml",
+        "[[assets]]\n\
+         id = 'a1-image'\n\
+         type = 'image'\n\
+         machineId = 'A1'\n\
+         name = 'A1 外观图'\n\
+         path = 'printers/a1.webp'\n\
+         \n\
+         [[assets]]\n\
+         id = 'p1s-bbs-02-010'\n\
+         type = 'slicerProfile'\n\
+         machineId = 'P1S'\n\
+         name = 'P1S 0.2 喷头 0.10 层高'\n\
+         path = 'bbs/P1S/process.json'\n\
+         slicer = 'bbs'\n\
+         profile = 'process'\n"
+            .to_owned(),
+    );
     for (id, bundle, versions) in FIXTURE_MACHINES {
         let mut s = String::new();
         s.push_str(&format!("id = '{id}'\n"));

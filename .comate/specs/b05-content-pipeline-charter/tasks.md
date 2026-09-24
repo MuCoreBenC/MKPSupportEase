@@ -69,7 +69,7 @@
     - 6.1: ✅ 写进 `docs/ARCHITECTURE.md` §10.6：对照基线是**判据资产**，不是产物副本、不是交付文件；与产物同名同内容但职责不同，**不合并它们**（合了就是自比自）
     - 6.2: ✅ 同一节 + `gen-presets` 文件头写清流程：只在「本次变更确实预期产物变化」时更新；先看差异（`--baseline` 或 `git diff`）→ 确认是要的 → 手动 `--sync-baseline`
     - 6.3: ✅ **核对结论：生成与发布路径本来就没有自动同步** —— `--write` 只写 `assets/presets/`；`wb_generate` 写 `dist-presets/presets/mkp/` + 快照；`wb_publish` 写 `dist-presets/` + manifest；`sync_baseline` 在 `src-tauri` 零命中、唯一调用点是那个 CLI；`scripts/` 与 CI 里也没有任何引用。本轮没有要删的调用 —— 改的是**把这个事实锁住**
-    - 6.4: ⛔ **工作台里没有这个入口，本轮也没建** —— 今天能做这件事的只有 CLI。要建的是「显式 + 带 diff 确认 + 不在新增版本必经步骤里」的 UI 动作（Rust 命令 + 前端视图 + 类型），属功能开发而非"摘出来"；约束已写进 §10.6 与 doc §4.3 第 10 步。**等裁决：并入 Task 14，还是现在单开**
+    - 6.4: ➡️ **裁决（2026-09-24）：并入 Task 14**（见 14.9），现在不单开。任务到此收口 —— 规则（§10.6）、落点闸、两条判据都在位；工作台那个入口是**功能开发**（要看 diff、要确认），提前做会把功能开发与资产域任务搅在一起
     - 6.5: ✅ 两条判据，各堵一半：
         - `write_discipline_scan.rs::the_baseline_has_exactly_one_write_path` —— 源码扫描（`crates/*/src` + `src-tauri/src`），`sync_baseline` 只允许出现在定义处与 `bin/gen_presets.rs`；断言是**相等**不是子集（入口搬走会红）
         - `tests/baseline_stays_untouched_on_the_generate_path.rs` —— 真跑 `check_all` / `check_baseline` / `write_all`(临时目录)，基线九份**内容 sha256** 不变；附 `the_snapshot_notices_a_change` 证明检测器不空转
@@ -85,20 +85,23 @@
     - 7.5: ✅ `faq/` 29 份 5.37 MB 标**舍弃**（D-4）；同一口径下 `avatars/`（about）与 `assets/models/model_*.webp`（model_copy）一并舍弃
     - 7.6: ✅ 迁移清单 15 条：直接保留 3 条（机器图 5 张 / 图标 3 份 / 模型 3 份 `3mf`）、需转换 3 条（BBS / 套餐 / 资产元数据）、舍弃 9 条、不迁 1 条。保留+转换 ≈ 4.08 MB，舍弃 ≈ 10.89 MB
     - 7.7: ✅ 只读不删有据：拷贝没有 `.git`，改用**它自己的账** —— `manifest.json` 72 条 sha256 **逐份核过，0 缺 0 不符**（盘点前后各核一次）；全仓 mtime 一致（`2026-09-14 19:26`）；本次只跑读操作
-    - 7.8: ✅ 两条**空档**照实记在 `asset-inventory.md` §5（不扩大范围、不擅自补）：① 模型预览图与模型名都落在被舍弃的 `model_copy` 那一侧，保留下来的三份 `.3mf` 没有名字与预览；② 机型图是「同一用途两份不同文件」（旧仓 84.8 KB vs `public/printers/bambu` 那几张，差约 4 倍），Task 9 搬之前要人看一眼定哪份
+    - 7.8: ✅ 两条空档照实记在 `asset-inventory.md` §5，**已裁决（2026-09-24）**：① `assets/models/` 与 `assets/faq/` **不要** → 预览图与 FAQ 一并舍弃；模型本体的**名字与预览图暂缓**（Task 8 只保留 `model` 类型，本轮不虚构元数据）；② 机型图**用现有新版那批大图**（`public/printers/bambu/`）—— 附注：那批只覆盖 A1 / A1_MINI（2 张）/ P1S，**P2S 与 X1C 没有新版**（见 9.1a）
 
-- [ ] Task 8: 资产域①层 —— 集中式资产定义与目录约定
-    - 8.1: 定资产定义的数据形状：id、类型、归属机型、相对路径、显示名
-    - 8.2: 类型集合按闸 G-3 确定；建议三类：BBS profile、图片 / 图标、模型
-    - 8.3: **不给 MKP 预设建资产条目**（doc §12.5：旧仓那 9 份 `mkp_preset` 是冗余，路径由命名规则算出）
-    - 8.4: 定资产目录约定，替代 `public/` 下的散落引用
-    - 8.5: 实现 Rust 侧数据模型 + 保格式写回
-    - 8.6: 机型定义的 `image` / `icon` 从裸文件名改为指向资产 id
-    - 8.7: 前端 `src/workbench/api.ts` 补对应类型，与 Rust 侧一一对应
-    - 8.8: 判据：资产 id 唯一（**大小写不敏感**）；相对路径必须落在资产根内（走 `resolve_in` 防穿越）
+- [ ] Task 8: 资产域①层 —— 集中式资产定义与目录约定（除 8.6 外已收口；8.6 按裁决挪到 Task 9）
+    - 8.1: ✅ 数据形状：`id` / `type` / `machineId?` / `name` / `path`（+ `slicer`·`profile` 只给切片器预设）。**不写** `fileName`（路径只有一处）、**不写** `sha256`/`size`（交付时按真实字节算）。详见 `asset-domain-design.md` §1
+    - 8.2: ✅ 类型集合：`image` / `icon` / `model` / `slicerProfile`。裁决（2026-09-24）：**`model` 保留为类型**、名称与预览图**暂缓**（本轮不虚构元数据）
+    - 8.3: ✅ **不给 MKP 预设建条目** —— 而且是**结构化**的保证：enum 里没有 `mkpPreset` 这一档（想登记得先改 enum）
+    - 8.4: ✅ 目录约定：资产根 `public/assets/`（vite 静态目录下的唯一子根，URL 前缀 `/assets/`）；`path` **相对资产根**，不相对定义文件；根按需建（`resolve_in` 第三道要求根存在，空目录靠 `.gitkeep` 进库）
+    - 8.5: ✅ `presets/assets.rs`：模型 + 加载期判据 + `add`/`write`（原子写，走仓库唯一写盘出口）+ 零编辑往返逐字节相同；`Presets.assets` 接入并参与 `check_cross_consistency`；`wb_assets`（**只读**）与前端类型一起落地
+    - 8.6: ➡️ **挪到 Task 9 一起做**（裁决）：改机型引用前必须已有 id 与文件，否则造出一批"指向不存在资产的引用" —— 而那正是 9.7 要拦的东西。Task 9 一次做完：**搬文件 → 写条目 → 改引用**
+    - 8.7: ✅ `api.ts`：`AssetKind` / `AssetView` / `AssetList` + `wb.assets()` + `assetUrl()`（路径里有空格，编码只做一次）
+    - 8.8: ✅ 两条加载期判据 + 反空转输入：id 唯一（大小写不敏感，`a1-image` vs `A1-Image` 实测红）、path 落在资产根内（`../` / 绝对路径 / `a/../../b` 三条实测红）。**另加三条**：键名写错要响亮（`deny_unknown_fields`）、切片器字段搭配、归属机型必须是真机型（跨文件，进 `check_cross_consistency`，实测一条假归属会让所有加载类判据一起红）
+    - 8.9: ✅ 顺手抓到的一条真事，补成判据：**①层 `.toml` 必须是 LF** —— 工具新建文件会写成 CRLF，而 `toml_edit` 写回统一成 LF ⇒ 第一次保存整份被改写、diff 一片红。本轮的 `presets/assets.toml` 正是被这条判据抓出来的（`.gitattributes` 管得住入库那一份，管不住工作区那一份）
+    - 8.10: 边界照实记：`wb_assets` 现在**只有读**（写入口在数据层，接上它要有界面 —— Task 14.6）；`present` 字段现在普遍 `false`（条目与文件一起在 Task 9 落地），这是"还没搬"不是错，Task 11.1 会把它升成校验层的一条
 
 - [ ] Task 9: 资产迁移执行与引用反查
     - 9.1: 按 Task 7 清单把图片、图标、模型搬入新资产目录，文件内容不变
+    - 9.1a: ⏳ **机型图来源已定但有一处缺口**：用现有新版大图（`public/printers/bambu/` 那 4 张）—— 它们只覆盖 A1 / A1_MINI（2 张）/ P1S；**P2S 与 X1C 没有新版**，A2L 本来就没有图。搬之前要定：补新图、还是暂用旧仓那两张（`assets/machines/{p2s,x1c}.webp`）。**不因此阻塞 Task 8**
     - 9.2: 为每份搬入的文件生成资产定义条目
     - 9.3: 迁移 BBS 的 9 份 JSON 与其 9 条资产元数据（按新结构重写，不照抄一文件一条）
     - 9.4: 实现「谁在用它」反查：给定资产 id，列出引用它的机型 / 版本 / 套餐
@@ -154,6 +157,7 @@
     - 14.6: 资产选择走资产库模态框，不让人手填路径
     - 14.7: `workbench/` 五个子目录真正投入使用（`machines/ bbs/ .draft/ .trash/ .snapshots/`）
     - 14.8: 端到端跑通 doc §4.3 全部 11 步作为验收场景
+    - 14.9: **「同步基线」做成显式、带 diff 确认的独立入口**（来源：Task 6.4 的裁决 —— 并入本任务）。三条要求不许松：① 先展示 diff，人确认后才写；② 是独立动作，不出现在「新增版本」的必经步骤里；③ 写的是 `crates/postprocess/tests/fixtures/presets/`，落点闸只认它或系统临时目录（`generate::check_baseline_target`）。底层规则见 `docs/ARCHITECTURE.md` §10.6
 
 - [ ] Task 15: 空白初始化流程
     - 15.1: 从干净的 `presets/` + `workbench/` 出发，能建起第一台机型

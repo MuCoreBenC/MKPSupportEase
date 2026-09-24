@@ -35,6 +35,7 @@
 //! 实现上它不是靠"我复刻了原作者的 writer"，而是靠 [`toml_edit`] 保留原文：
 //! 只有被改的那一处会变，别处连空行和引号风格都不动。**保真在构造上成立，不靠自觉。**
 
+pub mod assets;
 pub mod catalog;
 pub mod registry;
 
@@ -45,6 +46,7 @@ use toml_edit::DocumentMut;
 use crate::error::AppError;
 use crate::workbench::paths;
 
+pub use assets::{Asset, AssetKind, Assets};
 pub use catalog::{Brand, Catalog, Machine, MachineField, MachineVersion, VersionField, Zone};
 pub use registry::{ParamRegistry, ShowOp, ShowWhen, TabMeta, UiComponent, ValueType};
 
@@ -152,12 +154,15 @@ pub(crate) fn one_edit_only(before: &str, after: &str) -> (String, String) {
 
 /// 一次加载的全部预设数据。
 ///
-/// 目前是机型目录 + 字段定义 + 界面布局。还没搬的是 `assets/` / `bundles/` /
-/// `preset_registry.toml` —— 它们属于「资源与套餐」，按「先只搬核心」留到后面
-/// （机型文件里的 `defaultBundle` / `presetFile` 因此是悬空引用，**这是刻意的**：
-/// 它们只是字符串，编辑机型时照样显示照样改，只有生成与校验才需要解析）。
+/// 现在是机型目录 + 资产定义 + 字段定义 + 界面布局。还没搬的是 `bundles/` /
+/// `preset_registry.toml` —— 它们属于「套餐」，按「先只搬核心」留到后面
+/// （机型文件里的 `defaultBundle` / `recommendedBundle` / `presetFile` 因此是悬空引用，
+/// **这是刻意的**：它们只是字符串，编辑机型时照样显示照样改，只有生成与校验才需要解析。
+/// `presetFile` 按 G-2 要删，见 Task 16.3）。
 pub struct Presets {
     pub catalog: Catalog,
+    /// 资产域①层（b05 Task 8）。**现在是空骨架** —— 条目与文件一起在 Task 9 落地
+    pub assets: Assets,
     pub registry: ParamRegistry,
     root: PathBuf,
 }
@@ -179,6 +184,7 @@ impl Presets {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let out = Self {
             catalog: Catalog::load_from(root)?,
+            assets: Assets::load_from(root)?,
             registry: ParamRegistry::load_from(root)?,
             root: root.to_path_buf(),
         };
@@ -291,6 +297,10 @@ impl Presets {
             .map(|m| m.id.as_str())
             .collect();
         let keys = self.catalog.machine_keys();
+
+        // 资产条目归属的机型必须存在（b05 Task 8）。与下面那条同一类错：
+        // 写一个不存在的机型 id，界面上只表现为"这台机型的图没了"，没有任何东西报错
+        self.assets.check_against_machines(&machines)?;
 
         for p in self.registry.params() {
             for (name, map) in [
@@ -425,6 +435,58 @@ mod tests {
         // 同理：整台机型那种键（没有冒号）不该被算成某一版的引用
         let whole = p.orphans_if_version_removed(machine, "");
         assert!(whole.is_empty(), "空版本号匹配到了东西：{whole:?}");
+    }
+
+    /// 递归收 `.toml`（`registry/` 与 `forbidden_zones/` 都在子目录里）
+    fn collect_toml(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                collect_toml(&p, out);
+            } else if p.extension().is_some_and(|x| x == "toml") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// **①层的数据文件必须是 LF 换行。**
+    ///
+    /// 为什么值得一条判据：`toml_edit` 写回时把换行统一成 LF，于是一个 CRLF 的文件
+    /// **读进来没事，第一次保存就整份被改写** —— diff 里一片红，而真正改了什么反而看不出来。
+    /// `.gitattributes` 管得住入库那一份，管不住工作区里手写或工具生成的那一份
+    /// （真踩过：新加的定义文件被工具按 CRLF 写出来，正是这条判据把它抓出来的）。
+    ///
+    /// 扫 `presets/` 下全部 `.toml`。**不看 `*.json`** —— 那些是上游产物，不在我们写回的面上。
+    #[test]
+    fn the_source_files_keep_lf_line_endings() {
+        let Some(root) = paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut files = Vec::new();
+        collect_toml(&root, &mut files);
+        assert!(
+            files.len() >= 10,
+            "只扫到 {} 个 .toml —— 路径大概不对，这条判据在空转",
+            files.len()
+        );
+
+        let mut bad: Vec<String> = Vec::new();
+        for p in &files {
+            let bytes = std::fs::read(p).expect("读得到");
+            if bytes.contains(&b'\r') {
+                bad.push(p.strip_prefix(&root).unwrap_or(p).display().to_string());
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "这些 .toml 是 CRLF：{bad:?}\n\
+             读进来没事，但第一次保存会被 toml_edit 整份改写成 LF —— diff 一片红，\
+             真正改了什么反而看不出来。存成 LF（本仓 .gitattributes 也是这么规定的）"
+        );
     }
 
     /// 别名不许和任何机型 ID 相撞 —— 撞了的话"按 ID 找机型"会有两个答案
