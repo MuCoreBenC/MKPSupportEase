@@ -16,12 +16,13 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 |---|---|---|
 | 工作分支 | `feat/b04-p3-migration` | `git status -sb` |
 | `main` | `203c287`（PR #10 的 squash） | `git log --oneline -1 origin/main` |
-| 本分支领先 main | **16 笔**（M1 / B2-prep / M2a / M2b / M3 / **M4a–M4d** / 文档与格式三笔）—— **这个数以命令为准，别信本行** | `git log --oneline origin/main..HEAD` |
+| 本分支领先 main | **23 笔**（M1 / B2-prep / M2a / M2b / M3 / **M4a–M4d** / **写盘纪律 6 笔** / 文档与格式）—— **这个数以命令为准，别信本行** | `git log --oneline origin/main..HEAD` |
 | 草稿 PR | **#11** —— **只作 CI 载体**（不打算按批次再开 PR） | `gh pr view 11` |
-| 判据基线 | 内核 **249 + 2 ignored**；预设 **106**；我们 **18**（默认）/ **264**（workbench） | 见 §8 |
+| 判据基线 | 内核 **249 + 2 ignored**；预设 **114**（75 单元 + 39 集成）；我们 **18**（默认）/ **264**（workbench） | 见 §8 |
 | `cargo tree -d` 基线 | **61 条 / 27 个名字**（M4b 起，原 58/26，新增 3 条的出处见 §5.7） | `cargo tree -d` |
-| `62a72b9` 的 CI | **三个 job 全绿**（`web` / `rust` / `rust-windows`，run `35892855809`） | `gh pr view 11 --json statusCheckRollup` |
-| M4 四笔的 CI | **还没推** —— 推之前本地全绿（fmt / 两条 clippy / 三组测试 / npm） | `gh run list --branch feat/b04-p3-migration` |
+| `clippy.toml` 在哪 | **仓库根**（2026-09-24 从 `src-tauri/` 上移；就近优先不合并，见 §9 第 12 条） | `ls clippy.toml` |
+| M4 那批的 CI | ✅ 全绿（`9c0a8ea`，run `35936554601`） | `gh run list --branch feat/b04-p3-migration` |
+| 写盘纪律那 6 笔的 CI | **还没推** —— 推之前本地九条全绿（见 §8） | 同上 |
 | 工作区 | 干净 | `git status --short` |
 
 **第一件事就是把上表核一遍。** GitHub 上的合并状态**不代表本机 checkout 已同步** ——
@@ -139,6 +140,15 @@ Task 13 的 M0–M7 是**迁移专项拆分**，不是整个项目的长期任�
 3. **不以测试通过替代数据等值证据。** 除 M0 有逐文件结论外，**不改 `presets/` 里的真数据**。
 4. **写盘纪律：源码扫描断言为主（C）、Clippy 为辅（A1）。**
    豁免必须**精确列出理由与退役条件**；「clippy 通过」**不等于**「写盘纪律已验证」。
+   **覆盖面（2026-09-24 补齐，见 `.comate/specs/b04-preset-write-guard/`）**：
+   `clippy.toml` 已从 `src-tauri/` **上移到仓库根**，`crates/postprocess` 与
+   `crates/preset` 从此也受管（此前完全不受管，而 preset 有一处直接写 `presets/` 真源）。
+   两层都用**探针**验过会响：摘掉内核那个 `#[allow]` ⇒ clippy 红；
+   往白名单外的文件塞一行 `fs::write` ⇒ 扫描判据红并点名。
+   扫描判据在 `crates/preset/tests/write_discipline_scan.rs`，白名单 4 个文件逐条写了
+   "崩在半路会坏掉什么"。**它的口径不是"第一个 `#[cfg(test)]` 之前"** ——
+   那样会漏掉写在 `mod tests` 之后的生产代码（既有那条 `upstream/mod.rs` 判据有这个洞，
+   本轮探针打穿的就是它）。
 5. **CI 必须覆盖默认与 workbench 两种 feature**（已补，见 §6）。
 6. `mkp-ssr` 是**只读迁移源**；不迁前端、不做双向同步、**不留兼容别名**。
 7. 判据的 `cargo tree -d` 口径：**"无重复依赖"不可能按字面执行**（Tauri 自己的树里
@@ -203,7 +213,7 @@ cd G:\project\MKPSupportEase
 cargo test                                     # 默认 feature（三个成员）
 cargo test -p mkp-support-ease --features workbench   # 工作台那 264 条
 cargo test -p mkpse-postprocess                # 内核那 249 条
-cargo test -p mkpse-preset                     # 预设那 106 条
+cargo test -p mkpse-preset                     # 预设那 114 条
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
@@ -212,11 +222,17 @@ npm run lint; npm run build
 ```
 
 - **判成败看 `test result: ok. N passed`**，不要看管道退出码
-- 期望值：内核 `249 passed + 2 ignored`（2 条是性能探针）/ 预设 `106` / 我们 `18` 与 `264`
+- 期望值：内核 `249 passed + 2 ignored`（2 条是性能探针）/ 预设 `114`
+  （75 单元 + 39 集成）/ 我们 `18` 与 `264`
 - **`cargo test` 之外别忘了 `fmt --check`**：M4c 就是只跑了测试，漏了一行格式，
   全量验收才报出来（补在 `554f601`）。CI 的顺序是格式 → clippy → 测试，格式红了后面不跑
+- **动过 `clippy.toml` 之后，clippy 那两条要先 clean 再跑**（见 §9 第 11 条）：
+  `cargo clean -p mkpse-preset -p mkpse-postprocess -p mkp-support-ease`
 - 真数据是否被污染：`git status --short` 必须只剩你**有意**改的那些文件；
-  `presets/` 的 12 个文件在整个迁移里**一个字节都不该变**（M4 全程已复核）
+  `presets/` 的 12 个文件在整个迁移里**一个字节都不该变**。
+  核法（比"和某份旧清单比"更强，它证明的是与 HEAD 一致）：
+  `git diff --stat HEAD -- presets/` 为空 + `git log --oneline -1 -- presets/`
+  应停在 `203c287`（PR #10）+ 逐文件核「索引 blob == 工作区内容」12/12
 
 ---
 
@@ -244,6 +260,10 @@ npm run lint; npm run build
    写了就报 `标记"&&"不是此版本中的有效语句分隔符`，看起来像命令本身错了。
    用 `;` 串（不判成败）、或写成分行、或要判成败时用
    `cmd1; if ($LASTEXITCODE -eq 0) { cmd2 }`。第 3 条那个"先验长度再提交"就得这么写。
+   **另一个同类坑：双引号串里不能用 `\"` 转义引号。** 本轮栽了两次 ——
+   一次 `git commit -m "… \"../core\" …"` 把 `--check` 当成 git 的选项（报
+   `unknown option 'check'`），一次探针脚本直接解析失败。要在字符串里放引号，
+   用单引号串（`'let _ = fs::write(p, "x");'`）或 `[char]34`。
 6. **PowerShell 的 `>` 重定向写 UTF-16**，拿它比对中文文本会得到"不一致"的假象；
    用 `[System.IO.File]::ReadAllText(path, UTF8)`。
 7. **`.NET` API 的相对路径按进程 CWD 解析**，不是按 PowerShell 的当前位置 —— 混用会
@@ -253,6 +273,14 @@ npm run lint; npm run build
    相对**仓库根**。凡是用它拼路径的判据都要改成 `CARGO_MANIFEST_DIR` + 显式相对路径
    （本轮就有一条判据因此以"报错"形式失效，见 §4 M2b 那类坑）。
 10. `tauri dev` 异常退出会留两种残留（vite 占 5321、app exe 占文件锁），症状是**白屏**。
+11. **`cargo clippy` 会跳过未变更的 crate —— 改完 `clippy.toml` 直接跑，命中清单是假的。**
+    实测：把禁列放到仓库根之后第一次跑报 **9 处**且 `crates/postprocess` 一处都没有；
+    `cargo clean -p mkpse-preset -p mkpse-postprocess` 之后重跑是 **15 处**
+    （生产 5 + 测试 10）。这与"管道吞退出码"是同一类陷阱 ——
+    **改任何 lint 配置之后，先 clean 再验，否则你在看一份空转的结果。**
+12. **`clippy.toml` 就近优先、不合并。** 成员自带一份就会**整份屏蔽**仓库根那份，
+    而且没有任何警告（两次探针实测，理由写在根 `clippy.toml` 顶部）。
+    所以要给某个成员放宽，**别新建 crate 级配置**，用 `#[allow]` 逐处写理由。
 
 ---
 
@@ -260,7 +288,11 @@ npm run lint; npm run build
 
 - 仓库：`MuCoreBenC/MKPSupportEase`；PR #11（草稿，CI 载体）
 - 长期总纲：`.comate/specs/b04-panel-successor/tasks.md`
+- 本轮施工文档：`.comate/specs/b04-m4-preset-unify/`（Task 15 / M4）、
+  `.comate/specs/b04-preset-write-guard/`（写盘纪律补齐，Task 19 的提前一小块）
+- 写盘禁列：**仓库根** `clippy.toml`（就近优先不合并，见 §9 第 12 条）；
+  扫描判据：`crates/preset/tests/write_discipline_scan.rs`
 - 迁移计划：`MIGRATION-PLAN.md`　盘点：`TASK-13-MIGRATION-INVENTORY.md`
-- 写盘纪律：`TASK-13-WRITE-DISCIPLINE-OPTIONS.md`　数据契约：`DATA-CONTRACT.md`
+- 写盘纪律方案比较：`TASK-13-WRITE-DISCIPLINE-OPTIONS.md`　数据契约：`DATA-CONTRACT.md`
 - 审计证据：`AUDIT-EVIDENCE.md`　重建计划：`REBUILD-PLAN.md`
 - 只读迁移源：`G:\project\mkp-ssr`（**不在里面写任何东西**）
