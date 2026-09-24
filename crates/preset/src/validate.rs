@@ -525,10 +525,9 @@ mod tests {
     #[test]
     fn nine_real_presets_pass_both_layers() {
         let reg = load_param_registry();
-        // 搬入 mkp-ssr 的路径改动：预设 fixture 在**内核那份**里
-        // （crates/postprocess/tests/fixtures/presets），不在本 crate 下 —— 判据资产只留一份。
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../postprocess/tests/fixtures/presets");
+        // 预设 fixture 在**内核那份**里（crates/postprocess/tests/fixtures/presets），
+        // 不在本 crate 下 —— 判据资产只留一份，路径只认 `generate::fixtures_dir()`。
+        let dir = crate::generate::fixtures_dir();
         let mut count = 0;
         for entry in std::fs::read_dir(&dir).expect("fixtures 目录应存在") {
             let path = entry.unwrap().path();

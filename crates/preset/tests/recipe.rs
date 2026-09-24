@@ -13,15 +13,14 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+// 基线目录只认 `generate::fixtures_dir()` 那一处 —— 手写相对路径会在目录布局一变时
+// 悄悄指向别处，而「读不到就跳过」的判据看起来还是绿的。
+use preset::generate::fixtures_dir;
 use preset::recipe::{Recipe, render};
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");
-
-fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets")
-}
 
 /// `(机型, 变体)` → fixture 的路径与原文（从**文件头**读，不靠文件名猜）。
 fn fixtures_by_combo() -> BTreeMap<(String, String), (PathBuf, String)> {

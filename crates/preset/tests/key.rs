@@ -3,12 +3,14 @@
 //! 这把钥匙决定三件事：列表里哪些条目该合成一条、副本叫什么名字、
 //! 副本的来源找不到时拿谁作对照。三处用同一把，所以它算错一次会同时错三处。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+// 两个目录都只认 `generate::` 那一处（理由见 `tests/recipe.rs`）
+use preset::generate::{assets_dir, fixtures_dir};
 use preset::{PresetKey, read_preset_from_bytes};
 
 fn fixtures() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
+    let dir = fixtures_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("读 fixture 目录")
         .flatten()
@@ -86,10 +88,8 @@ fn klc0_same_machine_and_variant_is_one_key_regardless_of_file_name() {
             .expect("A1MF"),
     )
     .expect("读云端那份");
-    let builtin = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets/A1_MINI-fast.toml"),
-    )
-    .expect("读内置那份");
+    let builtin =
+        std::fs::read_to_string(assets_dir().join("A1_MINI-fast.toml")).expect("读内置那份");
 
     assert_eq!(cloud, builtin, "前提：这两份内容本来就相同");
     assert_eq!(

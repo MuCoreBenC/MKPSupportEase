@@ -181,8 +181,7 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     use std::path::PathBuf;
 
     // 9 份 fixture（仓库内，必跑）
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../postprocess/tests/fixtures/presets");
+    let dir = preset::generate::fixtures_dir();
     let mut targets: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("fixtures 目录应存在")
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -222,10 +221,8 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
 
 #[test]
 fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
-    use std::path::Path;
-
     // 真实预设（fixture）：A1MF 那批文件头有 `# variant: fast`
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
+    let dir = preset::generate::fixtures_dir();
     let raw = std::fs::read_to_string(dir.join("A1MF.toml")).expect("读 fixture");
     let file = preset::read_preset_from_bytes(raw.clone()).expect("读预设");
     assert_eq!(

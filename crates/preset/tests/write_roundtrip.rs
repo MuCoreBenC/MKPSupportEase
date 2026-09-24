@@ -8,13 +8,15 @@
 //! K-P2 用「行级 diff 恰好一行」+ 「结构比较除该键外全等」双验：
 //! 前者说明文件没被重排，后者说明没有别的键被顺手改掉（文本 diff 会被格式化差异淹没）。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+// 基线目录只认 `generate::fixtures_dir()` 那一处（理由见 `tests/recipe.rs`）
+use preset::generate::fixtures_dir;
 use preset::model::TomlConfig;
 use preset::write::{Edit, EditValue, apply_edits};
 
 fn presets() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
+    let dir = fixtures_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("读 fixtures/presets")
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -58,8 +60,7 @@ fn kp1_zero_edits_round_trip_is_byte_identical() {
 
 #[test]
 fn kp2_one_edit_changes_exactly_one_line() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets/A1.toml");
+    let path = fixtures_dir().join("A1.toml");
     let raw = std::fs::read_to_string(&path).expect("读预设");
     let before = parse(&raw);
 
@@ -114,8 +115,7 @@ fn kp2_one_edit_changes_exactly_one_line() {
 
 #[test]
 fn kp2b_inline_table_and_multiline_keep_their_shape() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../postprocess/tests/fixtures/presets/A1MF.toml");
+    let path = fixtures_dir().join("A1MF.toml");
     let raw = std::fs::read_to_string(&path).expect("读预设");
 
     // inline table 内部改一个分量：整块不许被重写，行尾注释要留着
@@ -156,8 +156,7 @@ fn kp2b_inline_table_and_multiline_keep_their_shape() {
 
 #[test]
 fn kp3_refuses_new_keys_missing_sections_and_bad_values() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets/A1.toml");
+    let path = fixtures_dir().join("A1.toml");
     let raw = std::fs::read_to_string(&path).expect("读预设");
 
     let cases: Vec<(&str, Edit, &str)> = vec![

@@ -1124,10 +1124,8 @@ mod tests {
             "P2",
             "X1",
         ] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                // 同上：预设 fixture 只在内核那一份里。
-                .join("../postprocess/tests/fixtures/presets")
-                .join(format!("{name}.toml"));
+            // 同上：预设 fixture 只在内核那一份里，路径只认 `generate::fixtures_dir()`。
+            let path = crate::generate::fixtures_dir().join(format!("{name}.toml"));
             let file = crate::read_preset(&path).unwrap();
             build(&file.config, Some(&reg), CalibrationExecMode::Fallback)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));

@@ -9,12 +9,13 @@
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use preset::generate::fixtures_dir;
 use preset::lineage::{make_copy, sha256_hex, strip_lineage_for_compare};
 
 fn fixtures() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets");
+    let dir = fixtures_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("读 fixture 目录")
         .flatten()

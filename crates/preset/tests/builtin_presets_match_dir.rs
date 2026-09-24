@@ -15,14 +15,12 @@
 //! 这一轮**暂留当对照基线**（tasks.md 15.4），Task 18 才删。
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 
-fn builtin_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets")
-}
+// 入库产物目录只认 `generate::assets_dir()` 那一处（理由见 `tests/recipe.rs`）
+use preset::generate::assets_dir;
 
 fn names_on_disk() -> BTreeSet<String> {
-    let dir = builtin_dir();
+    let dir = assets_dir();
     let entries = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("读不到内置预设目录 {}：{e}", dir.display()));
     entries
@@ -63,7 +61,7 @@ fn the_handwritten_table_matches_the_directory() {
 #[test]
 fn every_entry_carries_the_bytes_of_its_own_file() {
     for (name, content) in preset::BUILTIN_PRESETS {
-        let path = builtin_dir().join(name);
+        let path = assets_dir().join(name);
         let on_disk = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("读不到 {}：{e}", path.display()));
         assert!(
