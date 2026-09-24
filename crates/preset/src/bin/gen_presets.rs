@@ -43,7 +43,9 @@ use preset::generate::{
 };
 use preset::recipe::{Recipe, render};
 
-const RECIPE: &str = include_str!("../../assets/preset_recipes.toml");
+/// 转引 crate 根公开的那一份（b05 Task 11 起 `PRESET_RECIPES_TOML` 是 pub 的）——
+/// 两处 `include_str!` 字面量指同一文件全靠人眼，转引之后编译器保证只此一份。
+use preset::PRESET_RECIPES_TOML as RECIPE;
 
 enum Mode {
     Check,

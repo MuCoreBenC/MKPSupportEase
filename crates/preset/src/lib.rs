@@ -77,6 +77,15 @@ pub use write::{Edit, EditValue, KeySnapshot, apply_edits, snapshot};
 /// 消费方：`build()` 的零值默认与范围校验、弃用参数检查。
 pub const PARAM_REGISTRY_TOML: &str = include_str!("../../../presets/registry/param_registry.toml");
 
+/// 配方正文真源（`preset_recipes.toml`，方案甲 / G-1：6 台机型集中一个文件）。
+///
+/// `include_str!` 编进二进制，与 [`PARAM_REGISTRY_TOML`] 同一条路。**公开它**是为了
+/// 让工作台的校验层（`wb_preflight`，b05 Task 11.4/11.5/11.6）能做「机型清单 ↔ 配方」
+/// 的对齐检查 —— 那是 §5.1「可检测的不一致」的检测那一半（修复入口归 Task 16.2）。
+/// 在此之前它只活在 `gen-presets` 的 bin 里（那边原来自己 include 了一份），
+/// 两处字面量指同一文件全靠人眼盯着，公开一份让编译器保证。
+pub const PRESET_RECIPES_TOML: &str = include_str!("../assets/preset_recipes.toml");
+
 /// **内置预设**：由配方生成、随版本走的那 9 份（文件名 + 内容）。
 ///
 /// `include_str!` 编进二进制、**不走任何分发管线**（与参数注册表同一条路：

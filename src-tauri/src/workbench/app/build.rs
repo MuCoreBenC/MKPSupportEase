@@ -72,12 +72,24 @@ use super::{state, with_ctx};
 
 /* ---------- 校验 ---------- */
 
+/// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
+///
+/// 配方正文直接取 `preset::PRESET_RECIPES_TOML`（编进二进制的真源，与 `gen-presets`
+/// 咬同一份）。读不回来不报错 —— 它变成报告里的**一条**，其余检查照跑；
+/// 让预检整个失败等于把「数据坏了」变成「工具坏了」。
+///
+/// 生成闸门（[`issues::inspect`]，`wb_generate` 里那道）**刻意不含**配方对齐：
+/// 生成读参数注册表，不读配方，对不上不影响工作台的产物（见 `issues.rs` 那边的说明）。
 #[tauri::command]
 pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(issues::inspect(&Book::new(&ctx.up, &ctx.presets, &c, &d)))
+            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
+                .map_err(|e| e.to_string());
+            let recipe_ref = recipe.as_ref().map_err(String::as_str);
+            Ok(issues::preflight(&book, recipe_ref))
         })
     })
 }

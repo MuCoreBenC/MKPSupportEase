@@ -363,6 +363,17 @@ impl Catalog {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let brands = load_brands(&root.join("brands.toml"))?;
         let machines = load_machines(&root.join("machines"))?;
+        check_unique_ids(
+            &machines
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.clone(),
+                        m.versions.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
         let zones = load_zones(&root.join("forbidden_zones"))?;
         Ok(Self {
             brands,
@@ -552,6 +563,50 @@ fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
             })
         })
         .collect())
+}
+
+/// 机型与版本的 id 唯一性（b05 Task 11.3）—— **大小写不敏感**。
+///
+/// 四类 id（机型 / 版本 / 资产 / 套餐）都要过这一条：资产与套餐在各自 load 时查了
+/// （Task 8.8 / Task 10），这里补机型与版本这两类。doc §9 的理由：仅大小写不同的
+/// 两个 id 在「文件名统一小写」之后会撞成同一个文件，而「按 id 查」的结果取决于
+/// 谁排在前面 —— 撞了必须当场报错，不能等到某个平台或某次改名才炸。
+///
+/// 输入是 `(机型 id, 版本 id 列表)` 的切片而不是 `&[Machine]`：检查的只是 id 集合，
+/// 给更小的输入面，测试也能直接喂（Windows 的文件系统大小写不敏感，
+/// 仅大小写不同的两份机型文件在夹具里根本写不出来）。
+fn check_unique_ids(machines: &[(String, Vec<String>)]) -> Result<(), AppError> {
+    let mut seen: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for (id, versions) in machines {
+        let lower = id.to_lowercase();
+        if let Some(prev) = seen.insert(lower, id.clone()) {
+            return Err(AppError::corrupted(format!(
+                "机型 id 撞了：{prev} 与 {id}（仅大小写不同）"
+            ))
+            .with_detail(
+                "id 是主键，且大小写不敏感 —— 撞了的话「按 id 查」的结果取决于谁排在前面，\
+                 而文件名统一小写后两者还会撞成同一个文件"
+                    .to_owned(),
+            ));
+        }
+        // 版本 id 是**机型内**唯一（11.3）：不同机型有同名版本是合法的（P1S 与 X1C 都有 lite）
+        let mut versions_seen: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for v in versions {
+            let vl = v.to_lowercase();
+            if let Some(prev) = versions_seen.insert(vl, v.clone()) {
+                return Err(AppError::corrupted(format!(
+                    "机型 {id} 的版本 id 撞了：{prev} 与 {v}（仅大小写不同）"
+                ))
+                .with_detail(
+                    "版本 id 在机型内唯一，且大小写不敏感（doc §9）：\
+                     产物文件名统一小写，`Fast` 与 `FAST` 会写成同一个文件"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
@@ -773,6 +828,86 @@ mod tests {
         std::fs::copy(root.join("brands.toml"), tmp.path().join("brands.toml")).unwrap();
         let c = Catalog::load_from(tmp.path()).expect("副本也该读得通");
         (tmp, c)
+    }
+
+    /* ---------- 唯一性（b05 Task 11.3） ---------- */
+
+    /// **仅大小写不同的 id 必须当场炸**（11.3 / doc §9）。
+    ///
+    /// 四类 id 里资产与套餐已各有判据，这一条补机型与版本。检查函数收
+    /// `(机型 id, 版本 id 列表)` 切片而不是 `&[Machine]`：Windows 的文件系统
+    /// 大小写不敏感，仅大小写不同的两份机型文件在夹具里根本写不出来 ——
+    /// 输入面收小之后，这个形状才能直接喂进来
+    #[test]
+    fn case_only_id_collisions_are_refused() {
+        // 机型 id 撞（A1 vs a1）
+        let err = check_unique_ids(&[("A1".to_owned(), vec![]), ("a1".to_owned(), vec![])])
+            .expect_err("撞了必须报错");
+        assert!(
+            err.message.contains("机型 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("A1") && err.message.contains("a1"),
+            "要说清撞的是哪两个：{}",
+            err.message
+        );
+
+        // 版本 id 撞（机型内 FAST vs fast）；**不同机型的同名版本是合法的**
+        let err = check_unique_ids(&[(
+            "A1".to_owned(),
+            vec!["STANDARD".to_owned(), "fast".to_owned(), "FAST".to_owned()],
+        )])
+        .expect_err("机型内撞版本 id 必须报错");
+        assert!(
+            err.message.contains("版本 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+
+        // P1S 与 X1C 都有 lite —— 机型内唯一就够，跨机型同名不是错
+        check_unique_ids(&[
+            ("P1S".to_owned(), vec!["LITE".to_owned()]),
+            ("X1C".to_owned(), vec!["lite".to_owned()]),
+        ])
+        .expect("不同机型的同名版本不该报错");
+    }
+
+    /// 加载期同一道闸：**从盘上读出来的数据撞 id 也一样拦**（副本上改，不碰真数据）
+    #[test]
+    fn loading_a_directory_with_case_only_collisions_fails() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+
+        // 机型 id 撞：文件名可以不同（Windows 允许），文件**里**的 id 只差大小写
+        let (tmp, _c) = copy_of(&root);
+        crate::fsx::atomic::atomic_write(
+            &tmp.path().join("machines").join("TEST_LOWER.toml"),
+            "id = 'a1'\ndisplay = '小写撞名机'\nbrand = 'Bambu Lab'\n".as_bytes(),
+        )
+        .unwrap();
+        let err = Catalog::load_from(tmp.path()).expect_err("撞机型 id 必须整目录拒载");
+        assert!(
+            err.message.contains("机型 id 撞了"),
+            "实测：{}",
+            err.message
+        );
+
+        // 版本 id 撞：往 A1.toml 尾部 append 一个 fast（A1 已有 FAST）
+        let (tmp, _c) = copy_of(&root);
+        let p = tmp.path().join("machines").join("A1.toml");
+        let mut text = std::fs::read_to_string(&p).unwrap();
+        text.push_str("\n[[versions]]\nid = 'fast'\nname = '撞名版'\n");
+        crate::fsx::atomic::atomic_write(&p, text.as_bytes()).unwrap();
+        let err = Catalog::load_from(tmp.path()).expect_err("机型内撞版本 id 必须整目录拒载");
+        assert!(
+            err.message.contains("版本 id 撞了"),
+            "实测：{}",
+            err.message
+        );
     }
 
     /// 判据的判据。`one_edit_only` 是个会被三种改动共用的工具，
