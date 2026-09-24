@@ -21,9 +21,12 @@ tauri-build = { version = "2.5.1", features = [] }
 #
 # 与 vite 那边的 `--mode workbench` 是**两道独立的闸**：一道管页面在不在产物里，
 # 一道管命令在不在二进制里。任一道漏了，另一道还挡得住。
+#
+# 它同时是**依赖开关**：`dep:mkpse-preset` 挂在这一档（见下方依赖注释），
+# 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
 [features]
 default = []
-workbench = ["dep:sha2", "dep:time", "dep:toml_edit"]
+workbench = ["dep:sha2", "dep:time", "dep:toml_edit", "dep:mkpse-preset"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -58,6 +61,19 @@ time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）；`optional` 留在这里，
 # 隔离靠的是「默认构建里 `use toml_edit` 编不过」，不是依赖图里没有它。
 toml_edit = { workspace = true, optional = true }
+
+# 预设解析 crate。工作台只为**借一个函数**：产物命名规则（`preset::preset_file_name`，
+# 权威实现见 `crates/preset/src/generate.rs`，规范见 `docs/ARCHITECTURE.md` §10）。
+#
+# 为什么值得破一次"src-tauri 不碰内核 crate"的解耦：命名规则以前有两份独立实现
+# （这里一份、`crates/preset` 一份），形状相同但**中间没有编译器** —— 漂移的表现不是报错，
+# 是消费端找不到文件。转调之后规则只有一处，改一次两边同步。
+#
+# 代价照实说：它 `include_str!` 带了 56 KB 参数注册表与 9 份内置预设，
+# 且它自己还依赖 `mkpse-postprocess`。所以它 **optional + 只挂在 workbench feature 下** ——
+# 默认（发布）构建的依赖图里没有这个 crate，给用户的二进制里也就没有那批数据。
+# 隔离靠的不是"少编一个包"，是**默认构建里 `use preset` 编不过**（与 sha2 / toml_edit 同一套路）。
+mkpse-preset = { path = "../crates/preset", optional = true }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]

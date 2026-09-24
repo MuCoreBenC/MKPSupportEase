@@ -199,9 +199,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     })
 }
 
-/// 产物文件名。**一处定义，生成与发布共用。**
-///
-/// `{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
+/// 产物文件名。`{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
 ///
 /// # 为什么是这一套，不是上游那一套
 ///
@@ -215,9 +213,25 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
 /// 上游整层删掉时（b04 Task 12）这里一个字都不用改。
 ///
 /// 版本 id 小写是跟着 `# variant:` 那一行走的 —— 同一份产物里两处指同一个东西，
-/// 大小写不一致会让人以为是两个变体
+/// 大小写不一致会让人以为是两个变体。
+///
+/// # 这是薄壳，规则不在这一层
+///
+/// 权威实现在 `crates/preset/src/generate.rs` 的 `file_name`（从 crate 根导出为
+/// `preset::preset_file_name`），规范写在 `docs/ARCHITECTURE.md` §10。**小写化在那边
+/// 发生，只发生一次。**
+///
+/// 这里以前是**第二份实现**：形状相同，但两份独立实现之间没有编译器 —— 漂移的表现
+/// 不是报错，是消费端找不到文件。b05 Task 2 把它并掉了，代价是 `mkpse-preset` 成了
+/// 依赖（`workbench` feature 下的可选依赖，见 `src-tauri/Cargo.toml`）：
+/// **默认（发布）构建的依赖图里没有它**，那 56 KB 参数注册表与 9 份内置预设也就
+/// 进不去给用户的二进制。换掉的是"一个拼字符串的函数要拖进整个内核 crate"这条顾虑，
+/// 换来的是一条规则只有一处。
+///
+/// 两边仍然可能被各自改坏 —— 连着它们的是本文件的判据
+/// `naming_matches_the_preset_crate`（逐例对两边），不是类型系统。
 pub fn preset_file_name(machine_id: &str, version_id: &str) -> String {
-    format!("{machine_id}-{}.toml", version_id.to_lowercase())
+    preset::preset_file_name(machine_id, version_id)
 }
 
 /// 行尾注释或独立注释行。**空注释不写 `# `** —— 一个孤零零的井号是噪音
@@ -1018,6 +1032,33 @@ mod tests {
             "占位机型把整批生成挡住了：{:?}",
             report.first_block().map(|b| b.title.clone())
         );
+    }
+
+    /// 薄壳与权威实现逐例相等 —— 这是连着两处的**那根线**。
+    ///
+    /// 命名规则现在只有一处（`preset::preset_file_name`），这里只转调；但"转调"本身
+    /// 没有类型系统兜底：哪天有人在薄壳里再补一次 `to_lowercase()`、或把分隔符从 `-`
+    /// 改成 `_`，编译照样过，红的是消费端的查找。所以拿一组能区分行为的输入两边各算一遍。
+    ///
+    /// 输入刻意选在规则的每条边界上：版本 id 大小写混写（小写化在哪一侧发生）、
+    /// 机型 id 含 `_`（它必须原样保留）、版本 id 含 `.`（`fastv3.3` 那种）。
+    #[test]
+    fn naming_matches_the_preset_crate() {
+        for (machine, version) in [
+            ("A1", "standard"),
+            ("A1", "FASTV3.3"),
+            ("A1", "Fast"),
+            ("A1_MINI", "STANDARD"),
+            ("A1_MINI", "FastV3.3"),
+            ("P1S", "lite"),
+            ("X1C", "LITE"),
+        ] {
+            assert_eq!(
+                preset_file_name(machine, version),
+                preset::preset_file_name(machine, version),
+                "{machine}:{version} —— 两处算出的文件名不同，规则已经分岔"
+            );
+        }
     }
 
     /// **生成出来的名字必须正好是消费端认得的那一批。**（b04 §02 契约的第一条）

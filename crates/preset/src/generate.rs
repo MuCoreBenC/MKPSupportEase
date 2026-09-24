@@ -48,12 +48,24 @@ pub fn assets_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets")
 }
 
-/// 产物的文件名：`<机型>-<变体>.toml`。
+/// 产物的文件名：`<机型 id>-<版本 id 小写>.toml`。
+///
+/// **这是全仓唯一的命名实现**（规范见 `docs/ARCHITECTURE.md` §10）。生成、发布、
+/// 消费端查找、目录 JSON 四方都走这一个函数；`src-tauri` 那边的
+/// `workbench::app::build::preset_file_name` 是它的薄壳。
+///
+/// 之前是两份独立实现：这里直接拼 `{machine}-{variant}`，`src-tauri` 那边多做一次
+/// `to_lowercase()`。两处形状相同但没有编译器连着它们 —— 漂移只是时间问题，
+/// 而漂移的后果不是报错，是消费端找不到文件。
+///
+/// **小写在这里发生，只发生一次。** 配方里的变体本来就是小写（`standard` / `fast` /
+/// `fastv3.3`），所以对生成这一侧是恒等变换，九份产物的名字一个都不变；
+/// 机型 id 不动（`A1_MINI` 保持原样，它的下划线是身份的一部分）。
 ///
 /// **刻意不沿用云端那批文件名**（`A1MF_260628.toml` 之类）：那些名字是另一套系统的，
-/// 照抄只会在用户目录里制造同名混淆。
+/// 照抄只会在用户目录里制造同名混淆。旧名到新身份的映射是一次性的迁移输入。
 pub fn file_name(machine: &str, variant: &str) -> String {
-    format!("{machine}-{variant}.toml")
+    format!("{machine}-{}.toml", variant.to_lowercase())
 }
 
 /// 第一处不同在哪 —— 报告要能直接照着修（行号 + 两边原文）。
@@ -355,6 +367,45 @@ mod tests {
     fn recipe() -> Recipe {
         let text = std::fs::read_to_string(recipe_path()).expect("仓库里的配方");
         Recipe::parse(&text).expect("配方合法")
+    }
+
+    /// 命名规范（`docs/ARCHITECTURE.md` §10）的四条不变式。
+    ///
+    /// 这个函数现在是**全仓唯一**的命名实现，`src-tauri` 那边是薄壳。以前两处各拼一遍，
+    /// 而两份独立实现之间没有编译器 —— 这条判据就是那个编译器。
+    #[test]
+    fn naming_follows_the_one_rule() {
+        // ① 版本 id 小写化，且只在这里发生一次
+        assert_eq!(file_name("A1", "FASTV3.3"), "A1-fastv3.3.toml");
+        assert_eq!(file_name("A1", "fastv3.3"), "A1-fastv3.3.toml");
+
+        // ② 机型 id 原样保留 —— `A1_MINI` 的下划线是身份的一部分，不许跟着小写或被换成 `-`
+        assert_eq!(file_name("A1_MINI", "STANDARD"), "A1_MINI-standard.toml");
+
+        // ③ 分隔符是 `-`：机型 id 自己含 `_`，用 `_` 分隔会歧义
+        assert_eq!(file_name("P1S", "lite"), "P1S-lite.toml");
+
+        // ④ 对配方这一侧是恒等变换 —— 配方里的变体本来就是小写，
+        //    所以引入小写化没有改动任何一份入库产物的名字
+        for (machine, variant) in recipe().combos() {
+            assert_eq!(
+                variant,
+                variant.to_lowercase(),
+                "配方里的变体 {machine}:{variant} 不是小写 —— \
+                 小写化就不再是恒等变换，产物会改名"
+            );
+        }
+    }
+
+    /// 仅大小写不同的版本 id 会塌成同一个文件名。
+    ///
+    /// 这不是"可能冲突"，是**必然冲突**：`docs/ARCHITECTURE.md` §10.4 因此要求唯一性检查
+    /// 大小写不敏感。冲突的表现不是报错，是后写的产物静默覆盖先写的 —— 所以这里先把
+    /// 事实钉住，校验层（b05 Task 11）再据此拦。
+    #[test]
+    fn case_only_differences_collide() {
+        assert_eq!(file_name("A1", "Fast"), file_name("A1", "FAST"));
+        assert_eq!(file_name("A1", "fast"), file_name("A1", "FaSt"));
     }
 
     /// 入库产物与配方一致（与 `gen-presets --check` 同一条结论，这里从库里咬一次）。

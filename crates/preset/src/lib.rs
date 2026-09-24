@@ -46,6 +46,11 @@ pub mod validate;
 pub mod write;
 
 pub use build::{CalibrationExecMode, build};
+/// 产物 / 交付文件名的**唯一命名实现**。规范见 `docs/ARCHITECTURE.md` §10。
+///
+/// 从 crate 根导出，是为了让 `src-tauri` 侧（工作台的生成与发布）能复用同一份规则，
+/// 而不是各拼一遍字符串。
+pub use generate::file_name as preset_file_name;
 pub use model::{
     IntOrFloat, Lineage, PresetFile, PresetKey, TomlConfig, ToolheadConfig, ToolheadOffset,
     WipingConfig,
