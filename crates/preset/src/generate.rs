@@ -271,6 +271,35 @@ pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, Str
     })
 }
 
+/// [`sync_baseline`] 的落点闸：只允许两类目标目录。
+///
+/// 它是全仓**唯一**能改内核判据期望值的写盘点，所以"写到哪"也要钉住，
+/// 而不是只在文档里叮嘱一句：
+///
+/// - **真基线目录** [`fixtures_dir`]（产品路径）；
+/// - **系统临时目录之下**（判据路径 —— 那几条测试用 `tempfile::tempdir()`）。
+///
+/// 其他任何路径一律拒绝。误传一个仓库内别的目录，后果是"判据的期望值被悄悄换掉"，
+/// 而那种错在产物上看不出来 —— 与「禁止 `UPDATE_GOLDEN=1`」防的是同一件事。
+fn check_baseline_target(fixtures: &Path) -> Result<(), String> {
+    let target = fixtures
+        .canonicalize()
+        .map_err(|e| format!("基线目录不可用（{}）：{e}", fixtures.display()))?;
+    if fixtures_dir().canonicalize().ok().as_deref() == Some(target.as_path()) {
+        return Ok(());
+    }
+    if let Ok(tmp) = std::env::temp_dir().canonicalize()
+        && target.starts_with(&tmp)
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "拒绝把对照基线写到 {} —— 只允许 {}（真基线）或系统临时目录（判据用）",
+        target.display(),
+        fixtures_dir().display()
+    ))
+}
+
 /// 把入库产物同步成对照基线，返回同步了几份。
 ///
 /// **它写的是内核判据的夹具**（`crates/postprocess/tests/fixtures/presets/`）——
@@ -281,16 +310,19 @@ pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, Str
 /// **这是一个需要人先看过 diff 的动作**（doc §0 的 ③）：它把「现在的产物」定成
 /// 「上一次审阅通过的样子」。自动化它等于把唯一的安全网拆了。
 ///
+/// 落点由 [`check_baseline_target`] 咬住：只能写真基线目录或临时目录。
+///
 /// 基线那边**保留原有文件名**；新机型在基线里还没有对应文件时，按产物的名字新建一份。
 ///
 /// **写盘豁免**（`clippy::disallowed_methods`）：见上 —— 它的风险不在"截断半个文件"，
-/// 而在"改了判据期望却没人看 diff"。兜着后者的是人工审阅与
-/// `git diff`，以及下一笔要加的"目标必须落在 `crates/postprocess/tests/` 之下"。
+/// 而在"改了判据期望却没人看 diff"。兜着后者的是人工审阅、`git diff`
+/// 与上面那条落点断言。
 ///
 /// **退役条件**：Task 18 把这批产物的归属定案（产物改由我们自己生成）之后，
 /// 这个函数与它的基线目录一起退役。
 #[allow(clippy::disallowed_methods)]
 pub fn sync_baseline(assets: &Path, fixtures: &Path) -> Result<usize, String> {
+    check_baseline_target(fixtures)?;
     let made = pair_by_head(assets)?;
     let base = pair_by_head(fixtures)?;
     let mut synced = 0usize;

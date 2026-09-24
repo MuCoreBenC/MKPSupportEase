@@ -176,23 +176,108 @@ pub fn set_range_in_text(
     ))
 }
 
-/// 同上，但直接改**仓库工作副本**里那份文件。
+/// 落盘前的自检：**改出来的文本只许在声明过的那几个键上与原文不同**。
 ///
-/// 没有改动时**不写盘**：无意义的 mtime 跳动会让 `git status` 与构建缓存都变吵。
+/// 这条判据原来只活在测试里（下面的 `only_those_lines_change`）。判据在测试里，
+/// 意味着"生产路径真的改出了别的差异"时没有任何东西会拦 —— 而这个函数写的是
+/// `presets/` 里的真源。所以把它提到落盘之前：不满足就拒绝写，文件一个字节不动。
+///
+/// 口径是**行的多重集合差**，不是逐行位置比：`toml_edit` 保序，但删一个键会让行数变，
+/// 位置比会在"删掉 step"这种正常情形上误报。
+fn only_declared_keys_changed(before: &str, after: &str, changed: &[String]) -> Result<(), String> {
+    let mut tally: std::collections::BTreeMap<&str, i32> = std::collections::BTreeMap::new();
+    for line in before.lines() {
+        *tally.entry(line).or_insert(0) -= 1;
+    }
+    for line in after.lines() {
+        *tally.entry(line).or_insert(0) += 1;
+    }
+    for (line, _) in tally.iter().filter(|(_, n)| **n != 0) {
+        let key = line.trim().split('=').next().unwrap_or("").trim();
+        if !changed.iter().any(|c| c == key) {
+            return Err(format!(
+                "改出来的文本里有一处没声明过的差异：`{}` —— 本次只声明改了 {:?}。\
+                 **拒绝落盘**，文件没有被碰过",
+                line.trim(),
+                changed
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 原子落盘：同目录临时文件 → `rename` 顶替。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：`fs::write` 写的是**临时文件**，
+/// 目标文件直到 rename 那一刻都没被碰过 —— 与内核 `pipeline::write_atomic` 同一形状
+/// （那边用 `.part`）。禁列防的"截断目标、崩溃留半个文件"在这里不可能发生。
+///
+/// 不用 `tempfile`：它在本 crate 只是 dev-dependency，生产路径不该为了一个临时文件名
+/// 把它提成正式依赖。
+///
+/// **退役条件**：Task 19 统一写盘入口落地后改成转调它。
+#[allow(clippy::disallowed_methods)]
+fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(".writing");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, text).map_err(|e| format!("写临时文件失败（{}）：{e}", tmp.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("顶替注册表失败（{}）：{e}", path.display()));
+    }
+    Ok(())
+}
+
+/// 同上，但直接改**仓库工作副本**里那份文件（`presets/registry/param_registry.toml`）。
+///
+/// 三道闸，缺一条这个函数就不该存在（它写的是真数据）：
+///
+/// 1. 没有改动时**不写盘** —— 无意义的 mtime 跳动会让 `git status` 与构建缓存都变吵；
+/// 2. 落盘**前** [`only_declared_keys_changed`]：多出一处差异就拒绝，文件不动；
+/// 3. 落盘**后**回读复检：字节必须与预期一致，且**还能被解析回来**。
 pub fn set_range(
     param_key: &str,
     min: Option<f64>,
     max: Option<f64>,
     step: Option<f64>,
 ) -> Result<RangeEdit, String> {
-    let path = registry_path();
-    let text = std::fs::read_to_string(&path)
+    set_range_at(&registry_path(), param_key, min, max, step)
+}
+
+/// [`set_range`] 的本体，落点由调用方给。
+///
+/// 拆出来的唯一理由是**可测**：三道闸都要在临时目录里真造一次失败来验证，
+/// 而不是"写完看着像对的"。产品路径只走 [`set_range`]。
+pub fn set_range_at(
+    path: &Path,
+    param_key: &str,
+    min: Option<f64>,
+    max: Option<f64>,
+    step: Option<f64>,
+) -> Result<RangeEdit, String> {
+    let text = std::fs::read_to_string(path)
         .map_err(|e| format!("读不到注册表（{}）：{e}", path.display()))?;
     let (out, edit) = set_range_in_text(&text, param_key, min, max, step)?;
     if edit.changed.is_empty() {
         return Ok(edit);
     }
-    std::fs::write(&path, out).map_err(|e| format!("写不进注册表（{}）：{e}", path.display()))?;
+    only_declared_keys_changed(&text, &out, &edit.changed)?;
+    write_atomic(path, &out)?;
+    let back = std::fs::read_to_string(path)
+        .map_err(|e| format!("落盘后读不回来（{}）：{e}", path.display()))?;
+    if back != out {
+        return Err(format!(
+            "落盘后回读与预期不一致（{}）—— 文件已经写下去了，请用 git diff 检查",
+            path.display()
+        ));
+    }
+    back.parse::<DocumentMut>().map_err(|e| {
+        format!(
+            "落盘后的注册表解析不回来（{}）：{e} —— 文件已经写下去了，请用 git diff 检查",
+            path.display()
+        )
+    })?;
     Ok(edit)
 }
 
@@ -306,6 +391,95 @@ max = 226.0
         let err = set_range_in_text(SAMPLE, "nope.nothing", None, None, None)
             .expect_err("不存在的参数要报错");
         assert!(err.contains("nope.nothing"), "{err}");
+    }
+
+    /// 落盘路径的正常情形：只有那一行变、回读字节一致、而且还能解析回来。
+    ///
+    /// **三个参数都要照实传**：`None` 的语义是"把这个键清掉"，不是"这次不改它"
+    /// （见 [`set_range_in_text`] 里 `None` 那一支）。第一版这条判据只传了 `min`、
+    /// 把 `max` 留成 `None`，于是连带删掉 `max = 226.0` 那一行，`changed` 变成
+    /// `["min", "max"]` —— 判据红得对，是判据写错了，不是闸写错了。
+    #[test]
+    fn the_write_path_changes_exactly_one_line_and_reads_back() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("param_registry.toml");
+        std::fs::write(&path, SAMPLE).expect("铺一份样例");
+
+        // SAMPLE 里 wiper_x 是 min = 0.0 / max = 226.0 / 无 step ⇒ 照实传，只动 min
+        let edit = set_range_at(&path, "wiping.wiper_x", Some(5.0), Some(226.0), None)
+            .expect("这一改应当被接受");
+        assert_eq!(edit.changed, ["min"]);
+
+        let after = std::fs::read_to_string(&path).expect("读回来");
+        let diff: Vec<_> = SAMPLE
+            .lines()
+            .zip(after.lines())
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert_eq!(diff.len(), 1, "落盘后动的行数不对：{diff:?}");
+        assert!(after.contains("min = 5.0"), "没写对：\n{after}");
+        after
+            .parse::<DocumentMut>()
+            .expect("落盘后的文本必须还能解析");
+        // 临时文件不许留下
+        assert!(
+            !path.with_extension("toml.writing").exists(),
+            "原子写的临时文件没清掉"
+        );
+    }
+
+    /// 落盘**前**那道闸：多出一处没声明的差异就拒。
+    ///
+    /// 这里直接喂一份"被动过手脚"的文本 —— 因为 `set_range_in_text` 自己不会写出
+    /// 多余差异，而这道闸防的正是"有人改了它、或者 toml_edit 换了行为"。
+    #[test]
+    fn an_undeclared_difference_is_refused() {
+        let tampered = SAMPLE.replace("label = '回抽长度'", "label = '被人顺手改了'");
+        let err = only_declared_keys_changed(SAMPLE, &tampered, &["min".to_string()])
+            .expect_err("多出一处 label 的差异必须拒");
+        assert!(err.contains("label"), "报错要点名那一行：{err}");
+        assert!(err.contains("拒绝落盘"), "{err}");
+    }
+
+    /// 被拒的那一改**一个字节都不许落到文件上**。
+    #[test]
+    fn a_refused_edit_leaves_the_file_byte_identical() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("param_registry.toml");
+        std::fs::write(&path, SAMPLE).expect("铺一份样例");
+
+        // 默认值 20 落在 [50, 226] 之外 ⇒ set_range_in_text 就该拒，写盘轮不到发生
+        let err = set_range_at(&path, "wiping.wiper_x", Some(50.0), Some(226.0), None)
+            .expect_err("默认值被关在区间外，必须拒");
+        assert!(err.contains("默认值"), "{err}");
+
+        let after = std::fs::read_to_string(&path).expect("读回来");
+        assert_eq!(after, SAMPLE, "被拒的改动不许动文件");
+        assert!(
+            !path.with_extension("toml.writing").exists(),
+            "被拒时不该留下任何临时文件"
+        );
+    }
+
+    /// 没有改动时不写盘：`mtime` 不该跳。
+    #[test]
+    fn a_noop_edit_does_not_touch_the_file() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("param_registry.toml");
+        std::fs::write(&path, SAMPLE).expect("铺一份样例");
+        let before = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .expect("mtime");
+
+        // 与现有值完全相同
+        let edit =
+            set_range_at(&path, "wiping.wiper_x", Some(0.0), Some(226.0), None).expect("no-op");
+        assert!(edit.changed.is_empty(), "不该有改动：{:?}", edit.changed);
+
+        let after = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .expect("mtime");
+        assert_eq!(before, after, "no-op 不该碰文件");
     }
 
     #[test]
