@@ -495,12 +495,14 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
     }
 }
 
-/// 一屏矩阵。列由前端勾选给出，**顺序由后端按配方本重排**
+/// 一屏矩阵。列由前端勾选给出，**顺序由后端按配方本重排**；
+/// `baseMachineId`（对照模式的基准机型）驱动差异判据与行序 —— 见 [`derive::Matrix`]
 #[tauri::command]
 pub fn wb_matrix(
     cols: Vec<ColRef>,
     tab: Option<String>,
     query: Option<String>,
+    base_machine_id: Option<String>,
 ) -> Result<Matrix, AppError> {
     traced("wb_matrix", |_| {
         with_ctx(|ctx| {
@@ -509,6 +511,7 @@ pub fn wb_matrix(
                 &cols,
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
+                base_machine_id.as_deref(),
             ))
         })
     })
@@ -855,7 +858,7 @@ pub fn wb_apply_draft(
                 ),
                 Some(Refresh::Matrix { cols, tab, query }) => (
                     None,
-                    Some(book.matrix(cols, tab.as_deref(), query.as_deref().unwrap_or_default())),
+                    Some(book.matrix(cols, tab.as_deref(), query.as_deref().unwrap_or_default(), None)),
                 ),
             };
             let mut view = book.book_view();
@@ -1328,7 +1331,7 @@ mod tests {
         let now = |ctx: &Ctx| {
             let cols = cols(&[("A1", Some("A1/STANDARD"))]);
             let (c, d, _) = state(ctx).unwrap();
-            let m = Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(&cols, None, "");
+            let m = Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(&cols, None, "", None);
             let row = m.rows.into_iter().find(|r| r.key == "wiping.mode").unwrap();
             row.cells[0].raw.clone()
         };
@@ -1430,7 +1433,7 @@ mod tests {
         let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
 
         let desk = book.desk("A1", Some("A1/STANDARD"), None, "");
-        let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
+        let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None);
 
         let desk_rows: usize = desk
             .groups
@@ -1602,7 +1605,7 @@ mod tests {
         let (c, d, _) = state(&ctx).unwrap();
         let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
 
-        let m = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "");
+        let m = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None);
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Version);
         // 每一行都带齐字段详情要的东西

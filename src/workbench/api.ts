@@ -288,6 +288,10 @@ export interface Cell {
   blockedHint: string | null
   /** 「去改那一项」跳到哪个字段。`null` = 不给跳转按钮 */
   jumpTo: string | null
+  /** 对照模式（C14 第四轮）：这一格的值与基准机型基底**不同**（绿底）。基准列恒 false */
+  differs: boolean
+  /** 差异格的悬停句（「机型基底是 X」）。后端拼好的 */
+  diffTip: string | null
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
   raw: unknown
 }
@@ -335,6 +339,10 @@ export interface Matrix {
   note: string | null
   /** 空的时候写出为什么空，不留白 */
   emptyReason: string | null
+  /** 有任一勾选列与基准机型基底**不同**的行（C14 对照）。「仅显示差异」与状态列读它 */
+  diffKeys: string[]
+  /** 基准机型**没有**的参数行 —— 状态列写「本机无此项」 */
+  notOwnKeys: string[]
 }
 
 /* ---------- 配方台（默认视角） ---------- */
@@ -700,6 +708,8 @@ export interface Words {
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
   paramDeprecatedChoice: Word
+  /** 对照矩阵状态列三档（C14 第四轮） */
+  matrixRow: Record<'notOwn' | 'diff' | 'same', Word>
 }
 
 /* ---------- 命令 ---------- */
@@ -851,8 +861,8 @@ export const wb = {
 
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
-  matrix: (cols: ColRef[], tab: string | null, query: string) =>
-    invoke<Matrix>('wb_matrix', { cols, tab, query }),
+  matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
+    invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   stock: () => invoke<StockRow[]>('wb_stock'),
   fallback: () => invoke<FallbackTable>('wb_fallback'),
   trash: () => invoke<TrashEntry[]>('wb_trash'),

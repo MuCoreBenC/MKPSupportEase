@@ -53,11 +53,11 @@ import ParamsPage from './views/ParamsPage'
 import s from './c14.module.css'
 
 /**
- * 一级导航。前五页是 C14 定稿的顺序；「对比」是过渡期保留项 —— C14 把矩阵并进了
- * 参数台，这一版要等 P2/P3 把参数台搬完才跟着并（P1 里参数台还是旧视角）。
+ * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
+ * （P3 已接），不再有独立的「对比」页。
  */
 interface NavItem {
-  id: PageId | 'compare'
+  id: PageId
   label: string
   icon: ReactNode
   badge?: 'dirty' | 'build'
@@ -122,8 +122,6 @@ const NAV: NavItem[] = [
       </>
     ),
   },
-  /* 过渡期保留（P3 并进参数台后删除） */
-  { id: 'compare', label: '对比', icon: <path d="M8 4v16M16 4v16" /> },
 ]
 
 type NavId = NavItem['id']
@@ -381,8 +379,6 @@ export function WorkbenchApp() {
         return `${book.badges.machines} 台机型 · ${book.badges.versions} 个版本`
       case 'params':
         return '改了先进草稿，保存才落盘'
-      case 'compare':
-        return '过渡页 —— 对比矩阵在 P3 随参数台一起并进来（C14 把它长在参数台的对照栏）'
       case 'bundles':
         return 'P4 落地 —— 后端 wb_bundles / 套餐引用校验已就位'
       case 'build':
@@ -423,7 +419,7 @@ export function WorkbenchApp() {
             dirty={dirty}
             onApply={async (label, patches, refresh) => {
               const out = await run(label, patches, 'undo', refresh)
-              return { desk: out?.desk ?? null }
+              return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
             onSave={() => void save()}
             onDiscard={() => void discard()}
@@ -431,19 +427,16 @@ export function WorkbenchApp() {
             onGoto={goto}
           />
         )
-      case 'compare':
       case 'bundles':
       case 'assets':
       case 'build':
         return (
           <p className="wb-todo">
-            {id === 'compare'
-              ? '对比矩阵随 P3 回来。'
-              : id === 'bundles'
-                ? '套餐与菜单视角在 P4 落地（14.1 的 menu 半边）。'
-                : id === 'assets'
-                  ? '资产库视角在 P4 落地（14.6：资产只从库里挑）。'
-                  : '生成与发布视角在 P5 落地（14.2 的闸门按钮含在内）。检查报告的读数已在页头。'}
+            {id === 'bundles'
+              ? '套餐与菜单视角在 P4 落地（14.1 的 menu 半边）。'
+              : id === 'assets'
+                ? '资产库视角在 P4 落地（14.6：资产只从库里挑）。'
+                : '生成与发布视角在 P5 落地（14.2 的闸门按钮含在内）。检查报告的读数已在页头。'}
           </p>
         )
     }

@@ -121,7 +121,7 @@ impl Book<'_> {
 
         // 列序照配方本，与矩阵同一条规则：预览里的顺序要和表里的一致，
         // 否则用户得在两份不同顺序的清单之间对照
-        for col in self.matrix(cols, None, "").cols {
+        for col in self.matrix(cols, None, "", None).cols {
             let machine = col.machine.clone();
             let layers = match col.level {
                 Level::Machine => self.machine_layers(&col.machine_id),
@@ -387,7 +387,7 @@ mod tests {
         ]);
 
         let matrix_order: Vec<String> = b
-            .matrix(&shuffled, None, "")
+            .matrix(&shuffled, None, "", None)
             .cols
             .into_iter()
             .map(|c| c.key)

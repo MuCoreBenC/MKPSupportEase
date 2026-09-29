@@ -537,11 +537,40 @@ impl<'a> Book<'a> {
 
     /* ---------- 矩阵 ---------- */
 
-    /// 一屏矩阵。列由前端勾选给出，**但顺序由这里按配方本重排**
-    pub fn matrix(&self, cols: &[ColRef], tab: Option<&str>, query: &str) -> Matrix {
+    /// 一屏矩阵。列由前端勾选给出，**但顺序由这里按配方本重排**。
+    ///
+    /// `base_machine`（对照模式的基准机型，C14 第四轮）带来三件事：
+    ///
+    /// 1. **行序跟基准机型走**：它自己的参数按它的分组顺序排完，
+    ///    别的机型多出来的参数接在后面（正在看的人不用重新认位置）；
+    /// 2. **差异判据**：每格 `differs` = 这个值与基准机型的机型基底不同
+    ///    （比较格式化后的文本，与原型的 `cell.text` 同一条）；任一列不同的行
+    ///    进 `diff_keys`（「仅显示差异」与状态列读它）。基准列自己不是差异；
+    ///    基准机型没有的参数行没有基准可比，进 `not_own_keys`（状态列写
+    ///    「本机无此项」）。
+    /// 3. 差异格的悬停句 `diff_tip`（「机型基底是 X」）在后端拼好。
+    ///
+    /// 配方台（desk）传 `None`：那边没有「跟基准比」这个问题。
+    pub fn matrix(
+        &self,
+        cols: &[ColRef],
+        tab: Option<&str>,
+        query: &str,
+        base_machine: Option<&str>,
+    ) -> Matrix {
         let cols = self.order_cols(cols);
         let q = query.trim().to_lowercase();
         let searching = !q.is_empty();
+
+        // 基准机型的三层与它看得到的参数（`base_machine` 认不出时按没有基准算）
+        let base_layers = base_machine.and_then(|id| self.machine_layers(id));
+        let base_keys: Vec<&str> = match base_machine {
+            Some(id) if self.catalog.iter().any(|m| m.id == id) => {
+                self.presets.registry.desk_keys(id)
+            }
+            _ => Vec::new(),
+        };
+        let in_base = |key: &str| base_keys.contains(&key);
 
         // 行取并集：任意一列的机型有这个字段，这一行就在。
         // **走 `desk_keys` 不走 `visible_keys`**：这一屏是给人看的，弃用的参数
@@ -554,8 +583,17 @@ impl<'a> Book<'a> {
                 }
             }
         }
-        // 行序：**分类 → 组 → 父子 → 组内序**。见 `row_sort_key`
-        keys.sort_by(|a, b| self.row_sort_key(a).cmp(&self.row_sort_key(b)));
+        // 行序（C14 第四轮）：**基准机型的参数先排完，别家多出来的接后面**；
+        // 没有基准时按全局五段键（配方台与旧对照的同一把尺）
+        if !base_keys.is_empty() {
+            let mut head: Vec<&str> = base_keys.iter().copied().filter(|k| keys.contains(k)).collect();
+            let mut extras: Vec<&str> = keys.iter().filter(|k| !base_keys.contains(k)).copied().collect();
+            extras.sort_by(|a, b| self.row_sort_key(a).cmp(&self.row_sort_key(b)));
+            head.extend(extras);
+            keys = head;
+        } else {
+            keys.sort_by(|a, b| self.row_sort_key(a).cmp(&self.row_sort_key(b)));
+        }
         let total_rows = keys.len();
 
         let gates: Vec<Option<Gate<'_>>> = cols
@@ -567,61 +605,89 @@ impl<'a> Book<'a> {
             })
             .collect();
 
-        let rows: Vec<Row> = keys
-            .into_iter()
-            .filter_map(|key| {
-                let p = self.presets.registry.param(key)?;
-                // **搜索一开，分类过滤让开**（doc §8.1）：
-                // 否则用户搜一个词、没命中当前分类，会以为这个字段不存在
-                if searching {
-                    let hay = [
-                        p.label.as_str(),
-                        p.key.as_str(),
-                        p.toml_key.as_str(),
-                        p.layout.section_id.as_str(),
-                        p.desc.as_str(),
-                    ];
-                    if !hay.iter().any(|h| h.to_lowercase().contains(&q)) {
-                        return None;
-                    }
-                } else if let Some(t) = tab {
-                    if !self.tab_of(&p.layout.section_id).is_some_and(|x| x == t) {
-                        return None;
-                    }
+        let mut rows: Vec<Row> = Vec::new();
+        let mut diff_keys: Vec<String> = Vec::new();
+        let mut not_own_keys: Vec<String> = Vec::new();
+        for key in keys {
+            let p = self.presets.registry.param(key);
+            let Some(p) = p else {
+                continue;
+            };
+            // **搜索一开，分类过滤让开**（doc §8.1）：
+            // 否则用户搜一个词、没命中当前分类，会以为这个字段不存在
+            if searching {
+                let hay = [
+                    p.label.as_str(),
+                    p.key.as_str(),
+                    p.toml_key.as_str(),
+                    p.layout.section_id.as_str(),
+                    p.desc.as_str(),
+                ];
+                if !hay.iter().any(|h| h.to_lowercase().contains(&q)) {
+                    continue;
                 }
+            } else if let Some(t) = tab {
+                if !self.tab_of(&p.layout.section_id).is_some_and(|x| x == t) {
+                    continue;
+                }
+            }
 
-                let cells = cols
-                    .iter()
-                    .zip(&gates)
-                    .map(|(c, g)| self.cell(c, g.as_ref(), key))
-                    .collect();
-                let parent = p
-                    .parent_key
-                    .as_deref()
-                    .and_then(|k| self.presets.registry.param(k));
-                Some(Row {
-                    key: key.to_owned(),
-                    label: p.label.clone(),
-                    desc: p.desc.clone(),
-                    unit: p.unit.clone(),
-                    section_id: p.layout.section_id.clone(),
-                    section_label: self.section_label(&p.layout.section_id),
-                    tab_id: self.tab_of(&p.layout.section_id).map(str::to_owned),
-                    // 只有两级：上游 74 条里 7 条有 parentKey，没有一条的父自己还有父
-                    depth: u8::from(p.parent_key.is_some()),
-                    parent_key: p.parent_key.clone(),
-                    parent_label: parent.map(|x| x.label.clone()),
-                    parent_note: parent.map(|x| w::relate::belongs_to(&x.label)),
-                    control_note: self.control_note(p),
-                    gcode: w::is_gcode(p),
-                    deprecated: p.deprecated,
-                    // 矩阵的行跨多台机型，「改了影响谁」不知道该答哪一台 —— 那是
-                    // 配方台（desk）的事，那边填 [`DeskImpact`]
-                    impact: None,
-                    cells,
-                })
-            })
-            .collect();
+            // 基准值（格式化后的文本）。基准机型没有这个参数 = 没有基准可比
+            let base_text: Option<String> = match (&base_layers, in_base(key)) {
+                (Some(l), true) => l.effective(key).map(|hit| w::value_text(p, hit.value)),
+                _ => None,
+            };
+
+            let parent = p
+                .parent_key
+                .as_deref()
+                .and_then(|k| self.presets.registry.param(k));
+            let mut cells: Vec<Cell> = Vec::new();
+            let mut row_differs = false;
+            for (c, g) in cols.iter().zip(&gates) {
+                let mut cell = self.cell(c, g.as_ref(), key);
+                let is_base_col = c.machine_id.as_str() == base_machine.unwrap_or("")
+                    && c.level == Level::Machine;
+                let differs = match (&base_text, is_base_col) {
+                    (Some(bt), false) => cell.text != *bt,
+                    _ => false,
+                };
+                if differs {
+                    row_differs = true;
+                    cell.differs = true;
+                    cell.diff_tip = base_text.as_deref().map(w::relate::base_value_is);
+                }
+                cells.push(cell);
+            }
+            if row_differs {
+                diff_keys.push(key.to_owned());
+            }
+            if !in_base(key) {
+                not_own_keys.push(key.to_owned());
+            }
+
+            rows.push(Row {
+                key: key.to_owned(),
+                label: p.label.clone(),
+                desc: p.desc.clone(),
+                unit: p.unit.clone(),
+                section_id: p.layout.section_id.clone(),
+                section_label: self.section_label(&p.layout.section_id),
+                tab_id: self.tab_of(&p.layout.section_id).map(str::to_owned),
+                // 只有两级：上游 74 条里 7 条有 parentKey，没有一条的父自己还有父
+                depth: u8::from(p.parent_key.is_some()),
+                parent_key: p.parent_key.clone(),
+                parent_label: parent.map(|x| x.label.clone()),
+                parent_note: parent.map(|x| w::relate::belongs_to(&x.label)),
+                control_note: self.control_note(p),
+                gcode: w::is_gcode(p),
+                deprecated: p.deprecated,
+                // 矩阵的行跨多台机型，「改了影响谁」不知道该答哪一台 —— 那是
+                // 配方台（desk）的事，那边填 [`DeskImpact`]
+                impact: None,
+                cells,
+            });
+        }
 
         let note = if searching {
             Some(w::MATRIX_SEARCH_SPANS_ALL_TABS.to_owned())
@@ -642,6 +708,8 @@ impl<'a> Book<'a> {
             total_rows,
             note,
             empty_reason,
+            diff_keys,
+            not_own_keys,
         }
     }
 
@@ -782,6 +850,9 @@ impl<'a> Book<'a> {
             blocked_note,
             blocked_hint,
             jump_to,
+            // 对照模式的差异在 matrix() 里按基准机型判（cell 不知道基准是谁）
+            differs: false,
+            diff_tip: None,
             raw: hit.value.clone(),
         }
     }
@@ -893,7 +964,7 @@ impl<'a> Book<'a> {
                 version_uid: Some(v.uid.clone()),
             });
         }
-        let m = self.matrix(&want, tab, query);
+        let m = self.matrix(&want, tab, query, None);
         // 请求的那一层在哪一列。找不到（版本刚被删掉之类的竞态）退回基底列：
         // 界面显示的是「这一层现在长什么样」，基底永远存在
         let cur = m
@@ -1377,6 +1448,11 @@ pub struct Matrix {
     pub note: Option<String>,
     /// 空的时候**写出为什么空**，不留白
     pub empty_reason: Option<String>,
+    /// 有任一勾选列与基准机型基底**不同**的行（C14 对照）。前端「仅显示差异」
+    /// 与状态列的「差异/一致」读它；没有基准（desk 路径）时为空
+    pub diff_keys: Vec<String>,
+    /// 基准机型**没有**的参数行（从别的机型并进来的）—— 状态列写「本机无此项」
+    pub not_own_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1459,6 +1535,11 @@ pub struct Cell {
     pub blocked_hint: Option<String>,
     /// 「去改那一项」跳到哪个字段。`None` = **不给跳转按钮**
     pub jump_to: Option<String>,
+    /// 对照模式（C14 第四轮）：这一格的值与基准机型基底**不同**（绿底）。
+    /// 基准列自己恒 false；desk 路径恒 false
+    pub differs: bool,
+    /// 差异格的悬停句（「机型基底是 X」）。**后端拼好的**，前端不组装
+    pub diff_tip: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
     pub raw: Value,
 }
@@ -1480,6 +1561,8 @@ impl Cell {
             blocked_note: None,
             blocked_hint: None,
             jump_to: None,
+            differs: false,
+            diff_tip: None,
             raw: Value::Null,
         }
     }
@@ -1932,7 +2015,7 @@ mod tests {
                 ("A1", Some("A1/FAST")),
             ]),
         ] {
-            let m = b.matrix(&shuffled, None, "");
+            let m = b.matrix(&shuffled, None, "", None);
             let got: Vec<&str> = m.cols.iter().map(|c| c.key.as_str()).collect();
             assert_eq!(got, want, "勾选顺序不该影响列序");
         }
@@ -1944,7 +2027,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let m = Book::new(&f.up, &f.presets, &c, &d).matrix(&cols(&[("A1", None)]), None, "");
+        let m = Book::new(&f.up, &f.presets, &c, &d).matrix(&cols(&[("A1", None)]), None, "", None);
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Machine);
         assert_eq!(m.cols[0].version_uid, None);
@@ -1959,7 +2042,7 @@ mod tests {
         let d = Draft::default();
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
-        let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "", None);
         let keys: Vec<&str> = m.rows.iter().map(|r| r.key.as_str()).collect();
         assert!(
             keys.contains(&"toolhead.only_p1s"),
@@ -1988,7 +2071,7 @@ mod tests {
         let d = Draft::default();
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
-        let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "", None);
         let mut seen: Vec<&str> = Vec::new();
         let mut runs: Vec<&str> = Vec::new();
         for r in &m.rows {
@@ -2020,7 +2103,7 @@ mod tests {
         let d = Draft::default();
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
-        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
         let at = |k: &str| m.rows.iter().position(|r| r.key == k).unwrap();
         assert_eq!(
             at("wiping.child"),
@@ -2049,13 +2132,13 @@ mod tests {
 
         let want = &cols(&[("A1", None), ("P1S", None)]);
         let a: Vec<String> = b
-            .matrix(want, None, "")
+            .matrix(want, None, "", None)
             .rows
             .into_iter()
             .map(|r| r.key)
             .collect();
         let z: Vec<String> = b
-            .matrix(want, None, "")
+            .matrix(want, None, "", None)
             .rows
             .into_iter()
             .map(|r| r.key)
@@ -2082,7 +2165,7 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
         // 干净状态下 wiping.mode 还是「擦料塔」，所以 wiping.child 是**可编辑**的
-        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
         let child = m.rows.iter().find(|r| r.key == "wiping.child").unwrap();
         assert!(child.cells[0].editable, "这会儿还没被关着");
         assert_eq!(
@@ -2117,7 +2200,7 @@ mod tests {
         .unwrap();
 
         let b = Book::new(&f.up, &f.presets, &c, &d);
-        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
         let cell = &m
             .rows
             .iter()
@@ -2283,6 +2366,92 @@ mod tests {
         assert_eq!(impact_v.followers.len(), 1, "FAST 没钉它，还在跟着基底");
     }
 
+    /// 对照矩阵的差异判据（C14 第四轮）：**基准写死基准机型的基底**。
+    /// 基底列自己不是差异；与基底不同的格进 diff_keys（绿底 + 悬停句）；
+    /// 基准机型没有的参数行进 not_own_keys（状态列「本机无此项」），
+    /// 行序是基准机型先、别家多出来的接后面。
+    #[test]
+    fn the_matrix_diffs_against_the_base_machines_base() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &f.presets, &c, &d);
+
+        let m = b.matrix(
+            &cols(&[("A1", None), ("A1", Some("A1/STANDARD")), ("P1S", Some("P1S/LITE"))]),
+            None,
+            "",
+            Some("A1"),
+        );
+
+        // ① 行序：A1 的参数排完，P1S 独有的 only_p1s 接在最后
+        assert_eq!(
+            m.rows.last().unwrap().key,
+            "toolhead.only_p1s",
+            "别家多出来的参数接后面（C14：行序跟着基准机型走）"
+        );
+        assert!(m.not_own_keys.contains(&"toolhead.only_p1s".to_owned()));
+
+        // ② STANDARD 钉着 offset.x = -1，基底是出厂 0 → 差异行 + 差异格
+        let row = m
+            .rows
+            .iter()
+            .find(|r| r.key == "toolhead.offset.x")
+            .unwrap();
+        assert!(!row.cells[0].differs, "基准列自己不是差异");
+        assert!(row.cells[1].differs, "STANDARD 的 -1 与基底不同");
+        assert!(
+            m.diff_keys.contains(&"toolhead.offset.x".to_owned()),
+            "差异行进 diff_keys（「仅显示差异」与状态列读它）"
+        );
+        let tip = row.cells[1].diff_tip.as_deref().expect("差异格要有悬停句");
+        assert!(
+            tip.starts_with("机型基底是 ") && tip.ends_with("0 mm"),
+            "悬停句说基准值：{tip}"
+        );
+
+        // ③ only_p1s 行：基准机型没有 → 没有差异可比，A1 的格子是「—」
+        let row2 = m
+            .rows
+            .iter()
+            .find(|r| r.key == "toolhead.only_p1s")
+            .unwrap();
+        assert!(!row2.cells.iter().any(|c| c.differs));
+        assert_eq!(row2.cells[0].kind, CellKind::NotApplicable);
+
+        // ④ 勾选列的值改回与基底一致后，差异消失（比的是值，不是出处）
+        let mut d2 = Draft::default();
+        apply(
+            &mut d2,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(0)),
+            }],
+        )
+        .unwrap();
+        let b2 = Book::new(&f.up, &f.presets, &c, &d2);
+        let m2 = b2.matrix(
+            &cols(&[("A1", None), ("A1", Some("A1/STANDARD"))]),
+            None,
+            "",
+            Some("A1"),
+        );
+        let row3 = m2
+            .rows
+            .iter()
+            .find(|r| r.key == "toolhead.offset.x")
+            .unwrap();
+        assert!(
+            !m2.diff_keys.contains(&"toolhead.offset.x".to_owned()),
+            "值一样就不算差异（哪怕一个是出厂默认、一个是本版钉的 0）"
+        );
+        assert!(!row3.cells[1].differs);
+    }
+
     /// 左栏导航**不随搜索变**：它是换分组看的工具，搜一个词就塌掉的话就没用了
     #[test]
     fn the_nav_counts_do_not_follow_the_search() {
@@ -2400,7 +2569,7 @@ mod tests {
         .unwrap();
 
         let b = Book::new(&f.up, &f.presets, &c, &d);
-        let m = b.matrix(&cols(&[("A1", None)]), None, "");
+        let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
 
         let child = m.rows.iter().find(|r| r.key == "wiping.child").unwrap();
         let cell = &child.cells[0];
@@ -2437,7 +2606,7 @@ mod tests {
         let b = Book::new(&f.up, &f.presets, &c, &d);
         let one = cols(&[("A1", None)]);
 
-        let only_wiping = b.matrix(&one, Some("wiping"), "");
+        let only_wiping = b.matrix(&one, Some("wiping"), "", None);
         assert!(only_wiping
             .rows
             .iter()
@@ -2445,7 +2614,7 @@ mod tests {
         assert!(only_wiping.note.is_none());
 
         // 搜一个只在 offset 分类里的词，但分类过滤停在 wiping
-        let found = b.matrix(&one, Some("wiping"), "X 轴");
+        let found = b.matrix(&one, Some("wiping"), "X 轴", None);
         assert!(
             found.rows.iter().any(|r| r.key == "toolhead.offset.x"),
             "搜索要跨全部分类，否则用户会以为这个字段不存在"
@@ -2454,7 +2623,7 @@ mod tests {
 
         // 搜 tomlKey 也要命中（三个偏移共享 tomlKey `offset`）
         assert!(b
-            .matrix(&one, None, "offset")
+            .matrix(&one, None, "offset", None)
             .rows
             .iter()
             .any(|r| r.key == "toolhead.offset.x"));
@@ -2468,10 +2637,10 @@ mod tests {
         let d = Draft::default();
         let b = Book::new(&f.up, &f.presets, &c, &d);
 
-        let no_cols = b.matrix(&[], None, "");
+        let no_cols = b.matrix(&[], None, "", None);
         assert_eq!(no_cols.empty_reason.as_deref(), Some(w::MATRIX_NO_COLS));
 
-        let no_match = b.matrix(&cols(&[("A1", None)]), None, "根本没有这个词");
+        let no_match = b.matrix(&cols(&[("A1", None)]), None, "根本没有这个词", None);
         assert_eq!(no_match.empty_reason.as_deref(), Some(w::MATRIX_NO_MATCH));
         assert!(no_match.total_rows > 0, "总行数要说过滤前的");
     }

@@ -84,6 +84,8 @@ pub struct Words {
     pub param_deprecated: Word,
     /// 「已弃用」选项级那一枚。判据是推出来的（见 `registry::deprecated_choice_values`）
     pub param_deprecated_choice: Word,
+    /// 对照矩阵状态列三档（C14 第四轮）
+    pub matrix_row: Table,
 }
 
 /// 整张词表。开场取一次
@@ -240,6 +242,15 @@ fn words() -> Words {
             w::deprecated::CHOICE_LABEL,
             w::deprecated::CHOICE_EXPLAIN,
         ),
+
+        matrix_row: [
+            ("notOwn", w::matrix_row::NOT_OWN, w::matrix_row::NOT_OWN_EXPLAIN),
+            ("diff", w::matrix_row::DIFF, w::matrix_row::DIFF_EXPLAIN),
+            ("same", w::matrix_row::SAME, w::matrix_row::SAME_EXPLAIN),
+        ]
+        .into_iter()
+        .map(|(k, l, e)| (k, Word::new(l, e)))
+        .collect(),
     }
 }
 
@@ -310,6 +321,12 @@ mod tests {
         for v in [BulkKind::Detaching, BulkKind::Changing, BulkKind::NoChange] {
             check(&t.bulk_kind, serde_json::to_value(v).unwrap(), "BulkKind");
         }
+        for key in ["notOwn", "diff", "same"] {
+            assert!(
+                t.matrix_row.contains_key(key),
+                "matrixRow 的 {key} 不在词表里 —— 前端会查出 undefined"
+            );
+        }
     }
 
     /// 每个词都要有内容；有解释句的那些，解释句不能只是把词重复一遍
@@ -327,6 +344,7 @@ mod tests {
             &t.visibility,
             &t.bulk_kind,
             &t.param_status,
+            &t.matrix_row,
         ] {
             for (k, word) in table {
                 assert!(!word.label.trim().is_empty(), "{k} 没有词");

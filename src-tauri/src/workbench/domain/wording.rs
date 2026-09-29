@@ -471,6 +471,16 @@ pub mod relate {
 
     /// 收起来的那几项点开看的入口
     pub const SHOW_ANYWAY: &str = "仍然展开看";
+
+    /// 对照矩阵差异格的悬停句（C14 第四轮）：差异由绿底承担，悬停才说基准是多少
+    pub fn base_value_is(text: &str) -> String {
+        format!("{}是 {text}", super::level_label(super::Level::Machine))
+    }
+
+    /// 对照矩阵格子的悬停句：这一台机型根本没有这个参数（跨机型并集里的「—」）
+    pub fn machine_lacks(machine: &str) -> String {
+        format!("{machine} 没有这个参数")
+    }
 }
 
 /* ---------- 不留白 ---------- */
@@ -487,6 +497,19 @@ pub const MATRIX_NO_MATCH: &str = "没有匹配的字段";
 pub const MATRIX_NO_COLS: &str = "在左边配方本里勾选机型或版本，勾中的会成为这里的列";
 /// 搜索一开，分类过滤让开（doc §8.1）
 pub const MATRIX_SEARCH_SPANS_ALL_TABS: &str = "搜索跨全部分类";
+
+/* ---------- 对照矩阵的状态列（C14 第四轮） ---------- */
+
+/// 状态列三档：格子里是词，悬停是解释。「差异/一致」说的都是
+/// 「勾选列 vs 基准机型的机型基底」这一件事。
+pub mod matrix_row {
+    pub const NOT_OWN: &str = "本机无此项";
+    pub const NOT_OWN_EXPLAIN: &str = "这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比";
+    pub const DIFF: &str = "差异";
+    pub const DIFF_EXPLAIN: &str = "有勾选列的值与机型基底不同 —— 绿底的那几格就是";
+    pub const SAME: &str = "一致";
+    pub const SAME_EXPLAIN: &str = "勾选列的值都与机型基底一致";
+}
 
 #[cfg(test)]
 mod tests {

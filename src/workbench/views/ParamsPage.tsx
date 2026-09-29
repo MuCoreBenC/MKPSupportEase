@@ -1,32 +1,34 @@
 /*
- * 参数台 —— C14 版式（feat/b05-14b-c14-port P2，方案见 C14-PORT-PLAN.md）。
+ * 参数台 —— C14 版式（feat/b05-14b-c14-port，方案见 C14-PORT-PLAN.md）。
  *
  * 版式骨架照 C14 的参数台（B02 一脉）：
  *
- *   ┌────────────────────────────────────────────────────────┐
- *   │ A1 / 标准版 · 73 参数 · 52 可编辑                        │
- *   ├──────────┬─────────────────────────────────┬───────────┤
- *   │ (左树rail)│ 全部 73  偏移 5  擦料 27  …     │ 参数编辑区 │
- *   │          ├────────────────┬────────────────┤ （撑满右侧 │
- *   │          │ 空间偏移        │ 擦料方式        │  的正式    │
- *   │          │ 参数行          │ 参数行         │  编辑区）  │
- *   └──────────┴────────────────┴────────────────┴───────────┘
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ A1 / 标准版 · 73 参数 · 52 可编辑              单版本 | 版本对照 │
+ *   ├──────────┬─────────────────────────────────┬─────────────────┤
+ *   │ (左树rail)│ 全部 73  偏移 5  擦料 27  …     │ 参数编辑区 / 批量 │
+ *   │          ├────────────────┬────────────────┤ （撑满右侧的正式  │
+ *   │          │ 空间偏移        │ 擦料方式        │  编辑区）         │
+ *   │          │ 参数行          │ 参数行         │                  │
+ *   └──────────┴────────────────┴────────────────┴──────────────────┘
+ *
+ * 两种模式（C14）共用左边那棵树：
+ *
+ *   单版本  我要改东西 → 一行只给「当前值 / 为什么」；左树是 radio
+ *   对照    我要理解差别 → `wb_matrix` 按**基准机型的基底**判差异（绿底/状态列），
+ *           左树是 checkbox（可跨机型、可刷选）；右栏两页签「参数详情 / 批量修改」，
+ *           批量走 `wb_preview_bulk` 先看后写
  *
  * # 与原型的分工（判据全部在后端，前端只读派生）
  *
- *  - 原型 `derive.ts` 的 cellOf / fmt / blocked（showWhen 判定）→ 后端
- *    `wb_desk` 的 `Row` / `Cell`（text / blocked / blockedHint / editable）；
- *  - 选项级弃用（deprecatedValuesOf）→ 后端 `ChoiceView.deprecated`；
- *  - 「改了影响谁」（impactOf）→ 后端 `Row.impact`；
- *  - 写值：原型 store.updateCell → 这里翻成一条 `Patch::setValue` 走
- *    `wb_apply_draft`（弃用闸在后端 patch 校验 + 前端手势前的 toast）；
+ *  - 状态/文案/能不能改：`wb_desk` / `wb_matrix` 的 Row / Cell（text / blocked /
+ *    blockedHint / editable / deprecated / differs / diffTip）；
+ *  - 选项级弃用 → 后端 `ChoiceView.deprecated`；「改了影响谁」→ 后端 `Row.impact`；
+ *  - 差异（仅显示差异、绿格、一致/差异/本机无此项）→ 后端 `Matrix.diffKeys` /
+ *    `Cell.differs` / `Matrix.notOwnKeys`，状态词来自 `words.matrixRow`；
+ *  - 写值：翻成 `Patch::setValue` 走 `wb_apply_draft`（弃用闸在后端 patch 校验 +
+ *    前端手势前的 toast）；批量先 `wb_preview_bulk` 预览、确认才写；
  *  - 撤销 / 重做 / 保存 / 未保存改动在**外壳**（P1 已就位）。
- *
- * # 这一版（P2）只有单版本模式
- *
- * C14 的「版本对照」（左树勾列 + 矩阵 + 批量修改）在 P3 随 `wb_matrix` /
- * `wb_preview_bulk` 一起并进来 —— 那时这个页头会加回「单版本 / 版本对照」
- * 两枚模式钮。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -35,8 +37,11 @@ import {
   isAppError,
   wb,
   type BookView,
+  type Col,
+  type ColRef,
   type Desk,
   type DeskGroup,
+  type Matrix,
   type Patch,
   type Refresh,
   type RegistryView,
@@ -48,8 +53,12 @@ import { toasts } from '../c14/toast'
 import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
 import { useSplitWidth } from '../c14/useSplitWidth'
+import { usePaintSelectC14 as usePaintSelect } from '../c14/usePaintSelect'
 import type { ParamView } from '../api'
+import BatchEdit from './BatchEdit'
+import type { BatchTarget } from './BatchEdit'
 import CellEditor from './CellEditor'
+import CompareMatrix from './CompareMatrix'
 import ParamDetail, { StatusTag } from './ParamDetail'
 import s from '../c14.module.css'
 
@@ -59,6 +68,14 @@ import s from '../c14.module.css'
  */
 const BASE = ''
 type Target = string | null
+
+/** 对照列的记号：`机型|版本`（版本空串 = 那台的基底）。机型的 id 里没有 `|` */
+const colId = (m: string, uid: string): string => `${m}|${uid}`
+/** 按第一个 `|` 切开是安全的（同上） */
+const colSplit = (id: string): { m: string; uid: string } => {
+  const i = id.indexOf('|')
+  return { m: id.slice(0, i), uid: id.slice(i + 1) }
+}
 
 /** 两条竖线的可拖范围（C14 第三/四轮的量）。默认 176 / 320，min 是「读得出名字」那条线 */
 const RAIL = { dft: 176, min: 152, max: 320 }
@@ -73,12 +90,12 @@ interface Props {
   tick: number
   /** 草稿脏不脏（放弃 / 保存按钮） */
   dirty: boolean
-  /** 唯一写入口（外壳的 run）。refresh 让后端顺带把 desk 带回来 */
+  /** 唯一写入口（外壳的 run）。refresh 让后端顺带把那一页带回来 */
   onApply: (
     label: string,
     patches: Patch[],
     refresh?: Refresh,
-  ) => Promise<{ desk: Desk | null }>
+  ) => Promise<{ desk: Desk | null; matrix: Matrix | null }>
   /** 外壳的保存 / 放弃 / 撤销 */
   onSave: () => void
   onDiscard: () => void
@@ -101,16 +118,27 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   /* 单版本模式的「正在改谁」。两个都默认 null：正文显示空态（C14 第十七轮） */
   const [machineId, setMachineId] = useState<string | null>(init?.machineId ?? null)
   const [target, setTarget] = useState<Target>(init?.uid ?? null)
+  /** 单版本 | 版本对照（C14 第八轮起的双模式） */
+  const [mode, setMode] = useState<'single' | 'compare'>('single')
   /** 顶上 tab = 一级参数领域。`null` = 全部 */
   const [tabSel, setTabSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
   /** 右栏详情读的那一项 */
   const [sel, setSel] = useState<string | null>(init?.key ?? null)
+  /** 对照模式的列（左树勾选，可跨机型）。默认空 —— 「可以都不选，空着」 */
+  const [compareCols, setCompareCols] = useState<string[]>([])
+  /** 仅显示差异（对照模式） */
+  const [diffOnly, setDiffOnly] = useState(false)
+  /** 对照模式右栏的两页签：false = 参数详情，true = 批量修改 */
+  const [batchTab, setBatchTab] = useState(false)
   /** 多行 G-code 的模态框：存「哪一层」—— 按钮只在框右上角那枚（C14 第八轮） */
-  const [gcodeOpen, setGcodeOpen] = useState<{ key: string; uid: string | null } | null>(null)
+  const [gcodeOpen, setGcodeOpen] = useState<{ key: string; mid: string; uid: string | null } | null>(null)
 
   const [registry, setRegistry] = useState<RegistryView | null>(null)
   const [desk, setDesk] = useState<Desk | null>(null)
+  const [matrix, setMatrix] = useState<Matrix | null>(null)
+  /** 对照模式右栏「参数详情」用的那一屏（基准机型的全部层） */
+  const [drawerDesk, setDrawerDesk] = useState<Desk | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -163,6 +191,14 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   const machine =
     machineId !== null ? (book.machines.find((m) => m.id === machineId) ?? null) : null
 
+  /*
+   * 差异的基准机型（C14 第六轮）：单版本模式选了谁就是谁；对照模式**不预设
+   * 当前机型** —— 基准取「树序里第一条被勾中列」所属的那台。两处都没有时空串
+   * （没有基准，矩阵不出现差异）。
+   */
+  const baseMachineId =
+    machine?.id ?? (compareCols.length > 0 ? colSplit(compareCols[0]).m : '')
+
   const refresh: Refresh = useMemo(
     () => ({
       page: 'desk',
@@ -174,36 +210,71 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     [machineId, target, tabSel, q],
   )
 
+  const compareColRefs: ColRef[] = useMemo(
+    () =>
+      compareCols.map((id) => {
+        const { m, uid } = colSplit(id)
+        return { machineId: m, versionUid: uid === '' ? null : uid }
+      }),
+    [compareCols],
+  )
+
   /* 一屏配方台。tab / 搜索的过滤在后端（搜索跨分类，B02 的行为） */
   useEffect(() => {
-    if (machineId === null || target === null) {
-      setDesk(null)
+    if (mode !== 'single' || machineId === null || target === null) {
       return
     }
     void wb
       .desk(machineId, target === BASE ? null : target, tabSel, q)
       .then(setDesk)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [machineId, target, tabSel, q, tick])
+  }, [mode, machineId, target, tabSel, q, tick])
+
+  /* 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮） */
+  useEffect(() => {
+    if (mode !== 'compare' || compareColRefs.length === 0) {
+      setMatrix(null)
+      return
+    }
+    void wb
+      .matrix(compareColRefs, tabSel, q, baseMachineId)
+      .then(setMatrix)
+      .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
+  }, [mode, compareColRefs, tabSel, q, baseMachineId, tick])
+
+  /* 对照模式右栏「参数详情」的数据：基准机型的全部层（选了参数才取） */
+  useEffect(() => {
+    if (mode !== 'compare' || sel === null || baseMachineId === '') {
+      setDrawerDesk(null)
+      return
+    }
+    void wb
+      .desk(baseMachineId, target === BASE ? null : target, null, '')
+      .then(setDrawerDesk)
+      .catch(() => setDrawerDesk(null))
+  }, [mode, sel, baseMachineId, target, tick])
+
+  /** 机器的中文名（对照模式的层标签用） */
 
   /** 层的中文名（撤销按钮的 label、G-code 模态框副标题共用） */
-  const layerLabelOf = (layerUid: string | null): string => {
-    if (layerUid === null)
-      return `${machine?.display ?? machineId ?? ''} · ${words.level.machine.label}`
-    const v = machine?.versions.find((x) => x.uid === layerUid)
-    return `${machine?.display ?? ''} / ${v?.name ?? layerUid}`
+  const layerLabelOf = (mid: string, layerUid: string | null): string => {
+    const m = book.machines.find((x) => x.id === mid)
+    if (layerUid === null) return `${m?.display ?? mid} · ${words.level.machine.label}`
+    const v = m?.versions.find((x) => x.uid === layerUid)
+    return `${m?.display ?? mid} / ${v?.name ?? layerUid}`
   }
 
   /** 写值的统一入口：手势前拦弃用、按 valueType 归位，然后走外壳的 apply */
   const writeValue = async (
     row: Row,
     param: ParamView,
+    ownerMachineId: string,
     layerUid: string | null,
     next: string | null,
+    refreshKind: 'desk' | 'matrix' = 'desk',
+    beforeRaw?: string,
   ) => {
-    /* 被写的那一层现在的值（toast 的「改成 X」要跟它比） */
-    const beforeCell = row.cells[cellIndexOf(desk, layerUid)]
-    const before = String(beforeCell?.raw ?? '')
+    const before = beforeRaw ?? String(row.cells[0]?.raw ?? '')
     /*
      * 已弃用的不许写（C14 §五）。判据读的是后端字段：参数级 `param.deprecated`、
      * 选项级 `ChoiceView.deprecated`（推出来的并集）。闸本身在后端 patch 校验 ——
@@ -230,10 +301,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     }
 
     const level = layerUid !== null ? 'version' : 'machine'
-    const owner = layerUid ?? (machineId ?? '')
-    await onApply(`${layerLabelOf(layerUid)} · ${param.label}`, [
+    const owner = layerUid ?? ownerMachineId
+    const applyRefresh: Refresh =
+      refreshKind === 'matrix'
+        ? { page: 'matrix', cols: compareColRefs, tab: tabSel, query: q }
+        : refresh
+    const out = await onApply(`${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`, [
       { kind: 'setValue', level, owner, key: row.key, value },
-    ], refresh)
+    ], applyRefresh)
+    if (refreshKind === 'matrix' && out.matrix) setMatrix(out.matrix)
 
     /* 一次点击 = 一次改动的提示（开关与枚举手滑改错是重灾区）；给一条能撤回的 */
     if (
@@ -271,12 +347,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     return () => ro.disconnect()
   }, [railOpen])
 
+  /** 正文这一模式有没有内容可看（C14 第十七轮：没选就没有那一套） */
+  const bodyReady =
+    mode === 'single'
+      ? machine !== null && target !== null && desk !== null
+      : compareCols.length > 0
+
   /*
    * 正文摆不开两列就退一列（每张卡要放下 名称 + 控件 + 状态 ≈ 420px）。
    * 判据是正文的实际宽度。阈值带滞后：进两列要 ≥920，退一列要 <880。
    * 依赖 bodyReady：空态时 .pScroll 不渲染，不然观察器永远装不上。
    */
-  const bodyReady = machine !== null && target !== null && desk !== null
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -294,17 +375,19 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     return () => ro.disconnect()
   }, [bodyReady])
 
-  /* 切 tab / 换目标回到顶部 */
+  /* 切 tab / 换模式 / 换目标回到顶部 */
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [tabSel, machineId, target, bodyReady])
+  }, [tabSel, mode, machineId, target, bodyReady])
 
   const switchMachine = (next: string) => {
     const m = book.machines.find((x) => x.id === next)
     setMachineId(next)
     setTarget(m?.versions[0]?.uid ?? BASE)
+    setCompareCols([])
     setSel(null)
     setFocusUid(null)
+    setBatchTab(false)
     setTabSel(null)
   }
 
@@ -313,6 +396,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     setTarget(next)
     setSel(null)
     setFocusUid(null)
+  }
+
+  /**
+   * 勾 / 取消一列。允许勾到空（C14 第十七轮）—— 空着是合法状态。
+   * **函数式更新**：连续勾几列（或刷选手势）落到同一次渲染里时，
+   * 读 state 的写法会把前几笔吞掉。
+   */
+  const toggleCol = (id: string) => {
+    setCompareCols((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
   }
 
   const totalCount = desk?.total ?? 0
@@ -333,34 +427,114 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
   /* 右栏按需出现：选了参数就有。没选参数时整栏收起，不摆一块空面板占位置 */
   const selParam = sel !== null ? (paramOf(sel) ?? null) : null
-  const selRow = sel !== null ? (rowOf(desk, sel) ?? null) : null
-  const asideShown = sel !== null && selParam !== null && selRow !== null && bodyReady
+  const selRow =
+    sel !== null ? (mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)) : null
+  const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
+  const asideShown =
+    sel !== null &&
+    selParam !== null &&
+    bodyReady &&
+    (mode === 'single'
+      ? selRow !== null
+      : /* 对照：详情要基准机型的行；批量只要参数能批量 */
+        (batchTab && batchable) || (!batchTab && selRow !== null))
+
+  /** 批量目标：勾选列里的**版本列**（基底不进目标，C14 文件头第 1 条），可跨机型 */
+  const batchTargets: BatchTarget[] = useMemo(
+    () =>
+      compareCols
+        .filter((id) => colSplit(id).uid !== '')
+        .map((id) => {
+          const { m, uid } = colSplit(id)
+          const machine = book.machines.find((x) => x.id === m)
+          const v = machine?.versions.find((x) => x.uid === uid)
+          return {
+            /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
+               不是左树的 `机器|版本` 记号 —— 两套记号混用会让确认写入对不上列 */
+            id: uid,
+            name: `${machine?.display ?? m} · ${v?.name ?? uid}`,
+            machineId: m,
+            uid,
+          }
+        }),
+    [compareCols, book.machines],
+  )
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
-  const gcodeRow = gcodeOpen !== null ? (rowOf(desk, gcodeOpen.key) ?? null) : null
-  const gcodeCell =
-    gcodeOpen !== null && gcodeRow !== null
-      ? (gcodeRow.cells[cellIndexOf(desk, gcodeOpen.uid)] ?? null)
-      : null
+  const gcodeCell = useMemo(() => {
+    if (gcodeOpen === null) return null
+    if (mode === 'single') {
+      const row = rowOf(desk, gcodeOpen.key)
+      return row?.cells[cellIndexOf(desk, gcodeOpen.uid)] ?? null
+    }
+    const m = matrix
+    if (m === null) return null
+    const row = m.rows.find((r) => r.key === gcodeOpen.key)
+    if (!row) return null
+    const ci = m.cols.findIndex(
+      (c) => c.machineId === gcodeOpen.mid && (c.versionUid ?? null) === gcodeOpen.uid,
+    )
+    return ci >= 0 ? (row.cells[ci] ?? null) : null
+  }, [gcodeOpen, mode, desk, matrix])
 
-  /** 左树一行。单版本 = radio（选谁改谁）。选中判断必须带机型 ——
-      A2L 和 A1 都有叫 STANDARD 的版本，只比版本 id 会全树一起亮（作者实测） */
+  /*
+   * 左树刷选（C14 第七轮）：按住拖过去、经过哪行改哪行。对照模式里所有机型的
+   * 所有版本都是可选项；A 全选、Ctrl+I 反选还在。enabled 里带 railOpen：
+   * 收起态那棵树没渲染，hook 只在依赖变了时才装监听。
+   */
+  const railTreeRef = useRef<HTMLElement>(null)
+  const railIds = useMemo(
+    () =>
+      book.machines.flatMap((m) => [
+        colId(m.id, BASE),
+        ...m.versions.map((v) => colId(m.id, v.uid)),
+      ]),
+    [book.machines],
+  )
+  const compareSet = useMemo(() => new Set(compareCols), [compareCols])
+  const railAll = railIds.length > 0 && railIds.every((c) => compareSet.has(c))
+  usePaintSelect({
+    ref: railTreeRef,
+    ids: railIds,
+    selected: compareSet,
+    onChange: (next) => setCompareCols([...next]),
+    /*
+     * 手势期间的实时反馈：直接翻这一行的 DOM（勾、蓝底、aria）——
+     * 手一过就亮，React 一次都不渲染；松手那一下才提交换态。
+     */
+    preview: (el, on) => {
+      el.classList.toggle(String(s.pVrowOn), on)
+      el.setAttribute('aria-checked', String(on))
+      el.firstElementChild?.setAttribute('data-on', String(on))
+    },
+    enabled: mode === 'compare' && railOpen,
+  })
+
+  /** 左树一行。单版本 = radio（选谁改谁）；对照 = checkbox（勾选比较列）。
+      选中判断必须带机型 —— A2L 和 A1 都有叫 STANDARD 的版本（作者实测） */
   const railRow = (m: { id: string; display: string }, uid: string, name: string, id: string, note?: string) => {
     const mine = m.id === machineId
-    const on = mine && uid === target
+    const cid = colId(m.id, uid)
+    const on = mode === 'single' ? mine && uid === target : compareSet.has(cid)
     const kind = uid === BASE ? 'base' : 'version'
     const title =
       uid === BASE ? `${m.display} 的基底 —— 改它这一台所有版本都跟着动` : note
     return (
       <button
-        key={uid}
+        key={cid}
         type="button"
         className={`${s.pVrow} ${on ? s.pVrowOn : ''}`}
         data-kind={kind}
-        role="radio"
+        /* 对照模式下每一行都能被刷选（usePaintSelect 认这个标记） */
+        data-sel={mode === 'compare' ? cid : undefined}
+        role={mode === 'single' ? 'radio' : 'checkbox'}
         aria-checked={on}
         onClick={() => {
+          if (mode === 'compare') {
+            toggleCol(cid)
+            return
+          }
           /* 切机型后仍落到点的那一行 —— 不是机型的第一个版本（C14） */
           if (m.id !== machineId) switchMachine(m.id)
           switchTarget(uid)
@@ -371,7 +545,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
           选中 = 蓝色打勾（作者：「还不如用打勾的」）。勾常驻渲染、由 CSS 按
           data-on 显隐（C14 第十一轮）。
         */}
-        <span className={s.pVmark} data-on={on} data-radio aria-hidden>
+        <span className={s.pVmark} data-on={on} data-radio={mode === 'single'} aria-hidden>
           <svg
             viewBox="0 0 12 12"
             fill="none"
@@ -388,6 +562,9 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
           <span className={s.pVname}>{name}</span>
           {id && <span className={s.pVid}>{id}</span>}
         </span>
+        {mode === 'compare' && mine && uid === target && (
+          <span className={s.pTagOff}>当前</span>
+        )}
       </button>
     )
   }
@@ -400,9 +577,16 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     )
   }
 
+  /** 对照矩阵喂给视图的行（「仅显示差异」在这里滤） */
+  const shownMatrix = matrix
+    ? diffOnly
+      ? { ...matrix, rows: matrix.rows.filter((r) => matrix.diffKeys.includes(r.key)) }
+      : matrix
+    : null
+
   return (
     <div className={s.pPage}>
-      {/* 页头一行：左 = 当前上下文，右 = 模式（P3 加回「版本对照」） */}
+      {/* 页头一行：左 = 当前上下文，右 = 模式。版本选择在左树 —— 不抢视觉中心 */}
       <div className={s.pHead}>
         <button
           type="button"
@@ -448,7 +632,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
               : `${machine.display} / ${target === BASE ? '机型基底' : (machine.versions.find((v) => v.uid === target)?.name ?? target)}`}
           </span>
           <span className={s.cardNote}>
-            {machine !== null && target !== null && desk !== null
+            {mode === 'single' && machine !== null && target !== null && desk !== null
               ? `${totalCount} 参数 · ${editableCount} 可编辑` +
                 (target !== BASE
                   ? ` · 本版钉着 ${desk.cols[desk.cur]?.items ?? 0} 项`
@@ -470,6 +654,22 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
           </span>
         )}
         <span className={s.grow} />
+        <span className={s.pMode}>
+          <button
+            type="button"
+            className={`${s.pModeBtn} ${mode === 'single' ? s.pModeOn : ''}`}
+            onClick={() => setMode('single')}
+          >
+            单版本
+          </button>
+          <button
+            type="button"
+            className={`${s.pModeBtn} ${mode === 'compare' ? s.pModeOn : ''}`}
+            onClick={() => setMode('compare')}
+          >
+            版本对照
+          </button>
+        </span>
       </div>
 
       <div
@@ -495,8 +695,34 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
         >
           {railOpen && (
             <div className={s.pRailBody} ref={railBodyRef}>
-              <div className={s.pRailHint}>选一个机型和版本来改</div>
-              <nav className={s.pRailTree} aria-label="机型与版本">
+              <div className={s.pRailHint}>
+                {mode === 'single' ? (
+                  '选一个机型和版本来改'
+                ) : (
+                  <>
+                    {/*
+                      只留一枚全选框（作者：「全选反选清空没必要，只留一个框框
+                      在文案左边就好」）。三态：全选中 = 勾满；部分 = 横杠；
+                      没勾 = 空。清空 = 再点一下（全空，不再兜一枚基准列）；
+                      反选还在键盘上（Ctrl+I）。
+                    */}
+                    <label className={s.pAll}>
+                      <input
+                        ref={(el) => {
+                          if (el) el.indeterminate = !railAll && compareCols.length > 0
+                        }}
+                        type="checkbox"
+                        checked={railAll}
+                        onChange={() =>
+                          setCompareCols(railAll ? [] : [...railIds])
+                        }
+                      />
+                      勾选要对照的列（可跨机型）
+                    </label>
+                  </>
+                )}
+              </div>
+              <nav className={s.pRailTree} aria-label="机型与版本" ref={railTreeRef}>
                 {book.machines.map((m) => (
                   <div key={m.id} className={s.pMg}>
                     <div className={s.pMgName}>
@@ -518,130 +744,315 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
         <div className={s.pMain}>
           {/*
             正文按「有没有内容」分两态（C14 第十七轮）：这一页的参数表是所选
-            机型/版本的派生 —— 没选就编不出那一套。摆一套假的进来，点也点不动，
+            对象的派生 —— 没选就编不出那一套。摆一套假的进来，点也点不动，
             只会让人以为「参数就在这，只是暂时改不了」；留白 + 一句从哪里开始
             才是实话。
           */}
-          {bodyReady && desk !== null ? (
-            <>
-              {/* 工具行：搜索收短（180px）放最左 —— 搜索不是这个页面的主操作 */}
-              <div className={s.pOps}>
-                <input
-                  className={s.pSearch}
-                  type="search"
-                  value={q}
-                  placeholder="搜索参数"
-                  onChange={(e) => setQ(e.target.value)}
-                />
-                <span className={s.cardNote}>
-                  {countRows(desk)} 条
-                  {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
-                </span>
-                <span className={s.grow} />
-                {/* 撤销 / 重做 / 未保存改动是全稿的动作，长在外壳状态栏上；
-                    这里只留「放弃 / 保存」—— 只有这两件是「这一页在改的东西」 */}
-                <span className={s.pOpsBtns}>
-                  <button type="button" className={`${s.btn} ${s.btnSm}`} disabled={!dirty} onClick={onDiscard}>
-                    放弃
-                  </button>
-                  <button
-                    type="button"
-                    className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                    disabled={!dirty}
-                    title={dirty ? undefined : words.disabled.nothingToSave}
-                    onClick={onSave}
-                  >
-                    保存
-                  </button>
-                </span>
-              </div>
+          {bodyReady ? (
+            mode === 'single' && desk !== null ? (
+              <>
+                {/* 工具行：搜索收短（180px）放最左 —— 搜索不是这个页面的主操作 */}
+                <div className={s.pOps}>
+                  <input
+                    className={s.pSearch}
+                    type="search"
+                    value={q}
+                    placeholder="搜索参数"
+                    onChange={(e) => setQ(e.target.value)}
+                  />
+                  <span className={s.cardNote}>
+                    {countRows(desk)} 条
+                    {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
+                  </span>
+                  <span className={s.grow} />
+                  {/* 撤销 / 重做 / 未保存改动是全稿的动作，长在外壳状态栏上；
+                      这里只留「放弃 / 保存」—— 只有这两件是「这一页在改的东西」 */}
+                  <span className={s.pOpsBtns}>
+                    <button type="button" className={`${s.btn} ${s.btnSm}`} disabled={!dirty} onClick={onDiscard}>
+                      放弃
+                    </button>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+                      disabled={!dirty}
+                      title={dirty ? undefined : words.disabled.nothingToSave}
+                      onClick={onSave}
+                    >
+                      保存
+                    </button>
+                  </span>
+                </div>
 
-              {/* 顶上 tab = 一级参数领域。分组不再是控件 —— 它在下面做卡头 */}
-              <div className={s.pTabRow} role="tablist" aria-label="参数领域">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tabSel === null}
-                  className={`${s.pTab} ${tabSel === null ? s.pTabOn : ''}`}
-                  onClick={() => setTabSel(null)}
-                >
-                  全部 <em>{desk.total}</em>
-                </button>
-                {desk.nav.map((t) => (
+                {/* 顶上 tab = 一级参数领域。分组不再是控件 —— 它在下面做卡头 */}
+                <div className={s.pTabRow} role="tablist" aria-label="参数领域">
                   <button
-                    key={t.id}
                     type="button"
                     role="tab"
-                    aria-selected={tabSel === t.id}
-                    className={`${s.pTab} ${tabSel === t.id ? s.pTabOn : ''}`}
-                    onClick={() => setTabSel(t.id)}
+                    aria-selected={tabSel === null}
+                    className={`${s.pTab} ${tabSel === null ? s.pTabOn : ''}`}
+                    onClick={() => setTabSel(null)}
                   >
-                    {t.label} <em>{t.count}</em>
+                    全部 <em>{desk.total}</em>
                   </button>
-                ))}
-              </div>
+                  {desk.nav.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={tabSel === t.id}
+                      className={`${s.pTab} ${tabSel === t.id ? s.pTabOn : ''}`}
+                      onClick={() => setTabSel(t.id)}
+                    >
+                      {t.label} <em>{t.count}</em>
+                    </button>
+                  ))}
+                </div>
 
-              <div className={s.pScroll} ref={scrollRef}>
-                {desk.groups.length > 0 ? (
-                  /* 分组卡最多两列：这是参数工作区，不是仪表盘（作者对五列的判语） */
-                  <div className={s.pGrid2}>
-                    {desk.groups.map((g) => (
-                      <GroupCard
-                        key={g.sectionId}
-                        group={g}
-                        cur={desk.cur}
-                        uid={target === BASE ? null : target}
-                        words={words}
-                        paramOf={paramOf}
-                        sel={sel}
-                        onPick={(key) => setSel(key)}
-                        onWrite={writeValue}
-                        onOpenGcode={(key) => setGcodeOpen({ key, uid: target === BASE ? null : target })}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className={s.pAsideEmpty}>
-                    {q.trim() ? `没有匹配「${q.trim()}」的参数` : '这一组下没有参数'}
-                  </div>
-                )}
-              </div>
-            </>
+                <div className={s.pScroll} ref={scrollRef}>
+                  {desk.groups.length > 0 ? (
+                    /* 分组卡最多两列：这是参数工作区，不是仪表盘（作者对五列的判语） */
+                    <div className={s.pGrid2}>
+                      {desk.groups.map((g) => (
+                        <GroupCard
+                          key={g.sectionId}
+                          group={g}
+                          cur={desk.cur}
+                          uid={target === BASE ? null : target}
+                          ownerMachineId={machineId ?? ''}
+                          words={words}
+                          paramOf={paramOf}
+                          sel={sel}
+                          onPick={(key) => setSel(key)}
+                          onWrite={writeValue}
+                          onOpenGcode={(key) =>
+                            setGcodeOpen({
+                              key,
+                              mid: machineId ?? '',
+                              uid: target === BASE ? null : target,
+                            })
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={s.pAsideEmpty}>
+                      {q.trim() ? `没有匹配「${q.trim()}」的参数` : '这一组下没有参数'}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : shownMatrix !== null ? (
+              <>
+                {/* 工具行（对照）：搜索 + 仅显示差异 + 计数 + 放弃/保存 */}
+                <div className={s.pOps}>
+                  <input
+                    className={s.pSearch}
+                    type="search"
+                    value={q}
+                    placeholder="搜索参数"
+                    onChange={(e) => setQ(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={`${s.pChip} ${diffOnly ? s.pChipOn : ''}`}
+                    onClick={() => setDiffOnly(!diffOnly)}
+                    title="只留下这几列里值不一样的参数 —— 对照模式就是为了看这个"
+                  >
+                    仅显示差异 <em>{shownMatrix.diffKeys.length}</em>
+                  </button>
+                  <span className={s.cardNote}>
+                    {shownMatrix.rows.length} 条
+                    {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
+                  </span>
+                  <span className={s.grow} />
+                  <span className={s.pOpsBtns}>
+                    <button type="button" className={`${s.btn} ${s.btnSm}`} disabled={!dirty} onClick={onDiscard}>
+                      放弃
+                    </button>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+                      disabled={!dirty}
+                      title={dirty ? undefined : words.disabled.nothingToSave}
+                      onClick={onSave}
+                    >
+                      保存
+                    </button>
+                  </span>
+                </div>
+
+                <div className={s.pTabRow} role="tablist" aria-label="参数领域">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tabSel === null}
+                    className={`${s.pTab} ${tabSel === null ? s.pTabOn : ''}`}
+                    onClick={() => setTabSel(null)}
+                  >
+                    全部 <em>{shownMatrix.totalRows}</em>
+                  </button>
+                  {tabCountsOf(shownMatrix, registry).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={tabSel === t.id}
+                      className={`${s.pTab} ${tabSel === t.id ? s.pTabOn : ''}`}
+                      onClick={() => setTabSel(t.id)}
+                    >
+                      {t.label} <em>{t.count}</em>
+                    </button>
+                  ))}
+                </div>
+
+                <div className={s.pScroll} ref={scrollRef}>
+                  <CompareMatrix
+                    matrix={shownMatrix}
+                    baseMachineId={baseMachineId}
+                    words={words}
+                    paramOf={paramOf}
+                    sel={sel}
+                    onPick={(key) => {
+                      setSel(key)
+                      setBatchTab(false)
+                    }}
+                    onPickBatch={(key) => {
+                      setSel(key)
+                      setBatchTab(true)
+                    }}
+                    onWriteCell={(col, row, param, next) => {
+                      void writeValue(
+                        row,
+                        param,
+                        col.machineId,
+                        col.level === 'version' ? (col.versionUid ?? null) : null,
+                        next,
+                        'matrix',
+                        String(cellAtCol(shownMatrix, col, row.key)?.raw ?? ''),
+                      )
+                    }}
+                  />
+                </div>
+              </>
+            ) : null
           ) : (
             <div className={s.pBlank}>
-              <p className={s.pBlankTitle}>先选一个机型和版本</p>
-              <p className={s.pBlankNote}>
-                左上角的把手就是「机型与版本」：鼠标扫过临时展开，点一下钉住。选好之后，
-                参数会列在这里，可以直接改值 —— 想改哪一版就选哪一版，基底也在里面。
-              </p>
+              {mode === 'single' ? (
+                <>
+                  <p className={s.pBlankTitle}>先选一个机型和版本</p>
+                  <p className={s.pBlankNote}>
+                    左上角的把手就是「机型与版本」：鼠标扫过临时展开，点一下钉住。选好之后，
+                    参数会列在这里，可以直接改值 —— 想改哪一版就选哪一版，基底也在里面。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className={s.pBlankTitle}>勾选要对照的版本列</p>
+                  <p className={s.pBlankNote}>
+                    在左树里勾一个或多个版本（可以跨机型），勾上之后这里按列排开 ——
+                    不一样的格子会亮出来。左树收起时，鼠标扫过左上角的把手就出来。
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        {/* 右栏按需出现：选了参数就有（C14 的三栏工作台） */}
-        {asideShown && desk !== null && selParam !== null && selRow !== null && machine !== null && (
+        {/* 右栏按需出现：选了参数就有。对照模式 = 两页签「参数详情 / 批量修改」 */}
+        {asideShown && selParam !== null && (
           <aside className={s.pAside}>
-            <ParamDetail
-              uid={target === BASE ? null : target}
-              paramKey={sel}
-              cols={desk.cols}
-              cur={desk.cur}
-              row={selRow}
-              param={selParam}
-              machine={machine}
-              words={words}
-              groupLabel={groupLabelOf(registry, selRow)}
-              onClose={() => setSel(null)}
-              /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
-              onPick={(key) => setSel(key)}
-              /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
-              onOpenGcode={(key, layerUid) => setGcodeOpen({ key, uid: layerUid })}
-              onWriteLayer={(layerUid, next) => {
-                const row = rowOf(desk, sel)
-                const p = paramOf(sel)
-                if (row && p) void writeValue(row, p, layerUid, next)
-              }}
-            />
+            {mode === 'compare' && (
+              <div className={s.pAsideHead}>
+                <span className={s.pAsideTabs}>
+                  <button
+                    type="button"
+                    className={`${s.pAsideTab} ${batchTab ? '' : s.pAsideTabOn}`}
+                    onClick={() => setBatchTab(false)}
+                  >
+                    参数详情
+                  </button>
+                  {batchable && (
+                    <button
+                      type="button"
+                      className={`${s.pAsideTab} ${batchTab ? s.pAsideTabOn : ''}`}
+                      onClick={() => setBatchTab(true)}
+                    >
+                      批量修改
+                    </button>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className={s.pCardX}
+                  onClick={() => {
+                    setSel(null)
+                    setBatchTab(false)
+                  }}
+                  aria-label="收起"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            {sel !== null && (mode === 'single' || !batchTab || !batchable) && selRow !== null &&
+              (mode === 'single' ? desk : drawerDesk) !== null && (
+                <ParamDetail
+                  uid={target === BASE ? null : target}
+                  paramKey={sel}
+                  cols={(mode === 'single' ? desk : drawerDesk)!.cols}
+                  cur={(mode === 'single' ? desk : drawerDesk)!.cur}
+                  row={selRow}
+                  param={selParam}
+                  machine={
+                    (mode === 'single'
+                      ? book.machines.find((m) => m.id === (machineId ?? ''))
+                      : book.machines.find((m) => m.id === baseMachineId)) ??
+                    book.machines[0]!
+                  }
+                  words={words}
+                  groupLabel={groupLabelOf(registry, selRow)}
+                  onClose={() => setSel(null)}
+                  /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
+                  onPick={(key) => setSel(key)}
+                  /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
+                  onOpenGcode={(key, layerUid) => {
+                    const mid =
+                      mode === 'single'
+                        ? (machineId ?? '')
+                        : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
+                          baseMachineId)
+                    setGcodeOpen({ key, mid, uid: layerUid })
+                  }}
+                  onWriteLayer={(layerUid, next) => {
+                    const ownerMid =
+                      mode === 'single'
+                        ? (machineId ?? '')
+                        : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
+                          baseMachineId)
+                    const row = mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)
+                    const idx = cellIndexOf(mode === 'single' ? desk : drawerDesk, layerUid)
+                    void writeValue(
+                      row ?? selRow,
+                      selParam,
+                      ownerMid,
+                      layerUid,
+                      next,
+                      'desk',
+                      String(row?.cells[idx]?.raw ?? ''),
+                    )
+                  }}
+                />
+              )}
+            {mode === 'compare' && batchable && batchTab && (
+              <BatchEdit
+                param={selParam}
+                words={words}
+                targets={batchTargets}
+                onApply={async (label, patches) => {
+                  await onApply(label, patches)
+                }}
+              />
+            )}
           </aside>
         )}
 
@@ -682,15 +1093,27 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
         多行 G-code 的模态框（C14 第八轮）。**只有行上那枚按钮能打开它**；
         经 ModalC14 落到外壳的 .shellBody（P1 的遮罩宿主约定）。
       */}
-      {gcodeOpen !== null && gcodeParam !== null && gcodeRow !== null && gcodeCell !== null && (
+      {gcodeOpen !== null && gcodeParam !== null && gcodeCell !== null && (
         <GcodeModal
           param={gcodeParam}
           cell={gcodeCell}
-          layerLabel={layerLabelOf(gcodeOpen.uid)}
+          layerLabel={layerLabelOf(gcodeOpen.mid, gcodeOpen.uid)}
           disabled={!gcodeCell.editable}
           dirty={dirty}
           write={(next) => {
-            void writeValue(gcodeRow, gcodeParam, gcodeOpen.uid, next)
+            const row =
+              mode === 'single' ? rowOf(desk, gcodeOpen.key) : (matrix?.rows.find((r) => r.key === gcodeOpen.key) ?? null)
+            if (row) {
+              void writeValue(
+                row,
+                gcodeParam,
+                gcodeOpen.mid,
+                gcodeOpen.uid,
+                next,
+                mode === 'compare' ? 'matrix' : 'desk',
+                String(gcodeCell.raw ?? ''),
+              )
+            }
           }}
           onSave={onSave}
           onClose={() => setGcodeOpen(null)}
@@ -706,6 +1129,7 @@ function GroupCard({
   group,
   cur,
   uid,
+  ownerMachineId,
   words,
   paramOf,
   sel,
@@ -717,11 +1141,20 @@ function GroupCard({
   cur: number
   /** 当前正在改的层（正文行写值的目标层） */
   uid: string | null
+  ownerMachineId: string
   words: Words
   paramOf: (key: string) => ParamView | null
   sel: string | null
   onPick: (key: string) => void
-  onWrite: (row: Row, param: ParamView, layerUid: string | null, next: string | null) => void
+  onWrite: (
+    row: Row,
+    param: ParamView,
+    ownerMachineId: string,
+    layerUid: string | null,
+    next: string | null,
+    refreshKind?: 'desk' | 'matrix',
+    beforeRaw?: string,
+  ) => void
   onOpenGcode: (key: string) => void
 }) {
   return (
@@ -739,6 +1172,7 @@ function GroupCard({
             row={row}
             cur={cur}
             uid={uid}
+            ownerMachineId={ownerMachineId}
             words={words}
             param={paramOf(row.key)}
             on={sel === row.key}
@@ -759,6 +1193,7 @@ function ParamLine({
   row,
   cur,
   uid,
+  ownerMachineId,
   words,
   param,
   on,
@@ -770,11 +1205,20 @@ function ParamLine({
   cur: number
   /** 当前正在改的层。`null` = 机型基底 */
   uid: string | null
+  ownerMachineId: string
   words: Words
   param: ParamView | null
   on: boolean
   onPick: (key: string) => void
-  onWrite: (row: Row, param: ParamView, layerUid: string | null, next: string | null) => void
+  onWrite: (
+    row: Row,
+    param: ParamView,
+    ownerMachineId: string,
+    layerUid: string | null,
+    next: string | null,
+    refreshKind?: 'desk' | 'matrix',
+    beforeRaw?: string,
+  ) => void
   onOpenGcode: (key: string) => void
 }) {
   const cell = row.cells[cur]
@@ -814,7 +1258,7 @@ function ParamLine({
           cell={cell}
           form="row"
           disabled={!cell.editable}
-          onWrite={(next) => onWrite(row, param, uid, next)}
+          onWrite={(next) => onWrite(row, param, ownerMachineId, uid, next)}
           onOpenGcode={() => onOpenGcode(row.key)}
         />
       </span>
@@ -863,6 +1307,29 @@ function cellIndexOf(desk: Desk | null, uid: string | null): number {
   if (desk === null) return 0
   const i = desk.cols.findIndex((c) => (c.versionUid ?? null) === uid)
   return i >= 0 ? i : desk.cur
+}
+
+/** 对照矩阵里某一列的格子 */
+function cellAtCol(matrix: Matrix, col: Col, key: string) {
+  const row = matrix.rows.find((r) => r.key === key)
+  const ci = matrix.cols.findIndex((c) => c.key === col.key)
+  return row && ci >= 0 ? (row.cells[ci] ?? null) : null
+}
+
+/** 对照矩阵的页签（后端矩阵不带 nav，计数从行本身数） */
+function tabCountsOf(
+  matrix: Matrix,
+  registry: RegistryView | null,
+): { id: string; label: string; count: number }[] {
+  if (registry === null) return []
+  const count = new Map<string, number>()
+  for (const r of matrix.rows) {
+    if (r.tabId === null) continue
+    count.set(r.tabId, (count.get(r.tabId) ?? 0) + 1)
+  }
+  return registry.tabs
+    .map((t) => ({ id: t.id, label: t.label, count: count.get(t.id) ?? 0 }))
+    .filter((t) => t.count > 0)
 }
 
 /** 抽屉头的小字：「领域 · 分组」。tab 名要查注册表 */

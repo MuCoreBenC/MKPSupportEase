@@ -106,6 +106,11 @@ const WORDS: Json = {
     label: '已弃用',
     explain: '这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西',
   },
+  matrixRow: {
+    notOwn: { label: '本机无此项', explain: '这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比' },
+    diff: { label: '差异', explain: '有勾选列的值与机型基底不同 —— 绿底的那几格就是' },
+    same: { label: '一致', explain: '勾选列的值都与机型基底一致' },
+  },
 }
 
 /* ---------- 参数夹具（照 ParamView / ChoiceView 的形状手写） ---------- */
@@ -270,9 +275,7 @@ function valueText(pdef: FixtureParam, v: unknown): string {
 
 /* ---------- Desk / Book / Registry 的现算（照 DTO 形状） ---------- */
 
-function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json {
-  const hit = effective(machineId, uid, pdef.key)
-  const raw = hit?.value
+function blockedOf(machineId: string, uid: string | null, pdef: FixtureParam): Json[] {
   const blocked: Json[] = []
   if (pdef.showWhen) {
     const dep = effective(machineId, uid, pdef.showWhen.key)
@@ -286,6 +289,13 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
       })
     }
   }
+  return blocked
+}
+
+function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json {
+  const hit = effective(machineId, uid, pdef.key)
+  const raw = hit?.value
+  const blocked = blockedOf(machineId, uid, pdef)
   const deprecated = pdef.deprecated
   const editable = blocked.length === 0 && !deprecated
   const originExplain =
@@ -393,6 +403,113 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
   return { nav, cols, cur: cur >= 0 ? cur : 0, groups, total: PARAMS.length, note: q ? '搜索跨全部分类' : null, emptyReason: null }
 }
 
+/** 对照矩阵（C14 第四轮）：基准机型判差异、行序跟基准走 —— 照真后端的规矩 */
+function buildMatrix(
+  cols: { machineId: string; versionUid: string | null }[],
+  tab: string | null,
+  query: string,
+  baseMachineId: string | null,
+): Json {
+  const q = query.trim().toLowerCase()
+  const colDefs = cols.map((c) => {
+    const m = MACHINES.find((x) => x.id === c.machineId)
+    const v = m?.versions.find((x) => x.uid === c.versionUid) ?? null
+    const uid = c.versionUid
+    return {
+      key: uid ?? c.machineId,
+      machineId: c.machineId,
+      versionUid: uid,
+      level: uid === null ? 'machine' : 'version',
+      machine: m?.display ?? c.machineId,
+      label: uid === null ? '机型基底' : (v?.name ?? uid),
+      items: Object.keys(uid === null ? (atRest.base[c.machineId] ?? {}) : (atRest.over[uid] ?? {})).length,
+    }
+  })
+  const params = PARAMS.filter((pdef) => {
+    if (q) return `${pdef.label} ${pdef.key}`.toLowerCase().includes(q)
+    return tab === null || pdef.tabId === tab
+  })
+  const baseTextOf = (key: string): string | null => {
+    if (!baseMachineId) return null
+    const pdef = PARAMS.find((x) => x.key === key)
+    if (!pdef) return null
+    const hit = effective(baseMachineId, null, key)
+    return hit ? valueText(pdef, hit.value) : null
+  }
+  const rows: Json[] = []
+  const diffKeys: string[] = []
+  const notOwnKeys: string[] = []
+  for (const pdef of params) {
+    const row = rowOf(baseMachineId ?? 'A1', null, pdef)
+    ;(row as Json).impact = null
+    const cells = colDefs.map((c) => {
+      const cell = cellOf(c.machineId, c.versionUid, pdef)
+      const isBaseCol = c.machineId === baseMachineId && c.level === 'machine'
+      const bt = baseTextOf(pdef.key)
+      const differs = bt !== null && !isBaseCol && cell.text !== bt
+      if (differs) {
+        cell.differs = true
+        cell.diffTip = `机型基底是 ${bt}`
+      }
+      return cell
+    })
+    if (cells.some((c) => c.differs === true)) diffKeys.push(pdef.key)
+    rows.push(row)
+    ;(row as Json).cells = cells
+  }
+  void notOwnKeys
+  return {
+    cols: colDefs,
+    rows,
+    totalRows: PARAMS.length,
+    note: q ? '搜索跨全部分类' : null,
+    emptyReason: null,
+    diffKeys,
+    notOwnKeys,
+  }
+}
+
+/** 批量预览（C14 批量 + 产品纪律「先看后写」）：每一列的前后值与跳过原因 */
+function previewBulkOf(key: string, value: unknown, cols: { machineId: string; versionUid: string | null }[]): Json {
+  const pdef = PARAMS.find((x) => x.key === key)
+  if (!pdef) {
+    return { key, label: key, allowed: false, blockedReason: '字段定义里没有这一项', effects: [], skipped: [] }
+  }
+  const out: Json = {
+    key,
+    label: pdef.label,
+    allowed: pdef.uiComponent !== 'gcode',
+    blockedReason: pdef.uiComponent === 'gcode' ? 'G-code 不做批量' : null,
+    effects: [] as Json[],
+    skipped: [] as Json[],
+  }
+  if (!out.allowed) return out
+  for (const c of cols) {
+    const m = MACHINES.find((x) => x.id === c.machineId)
+    const v = m?.versions.find((x) => x.uid === c.versionUid) ?? null
+    const label = v ? v.name : '机型基底'
+    const blocked = blockedOf(c.machineId, c.versionUid, pdef)
+    if (blocked.length > 0) {
+      ;(out.skipped as Json[]).push({
+        col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
+        reason: '上一项没打开，这一项现在不生效，所以不让改', blocked,
+      })
+      continue
+    }
+    const hit = effective(c.machineId, c.versionUid, key)
+    const hadOwn = hit?.origin === (c.versionUid === null ? 'machine' : 'version')
+    const kind = hit && String(hit.value) === String(value) ? 'noChange' : hadOwn ? 'changing' : 'detaching'
+    ;(out.effects as Json[]).push({
+      col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
+      level: c.versionUid === null ? 'machine' : 'version',
+      before: hit ? valueText(pdef, hit.value) : '不适用',
+      after: valueText(pdef, value),
+      kind,
+    })
+  }
+  return out
+}
+
 function buildBook(): Json {
   const dirtyCount = pending.size
   return {
@@ -454,6 +571,23 @@ export function installMockBackend() {
         return Promise.resolve(buildRegistry())
       case 'wb_desk':
         return Promise.resolve(buildDesk(machineId, (args?.uid as string | null) ?? null, (args?.tab as string | null) ?? null, (args?.query as string) ?? ''))
+      case 'wb_matrix':
+        return Promise.resolve(
+          buildMatrix(
+            (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
+            (args?.tab as string | null) ?? null,
+            (args?.query as string) ?? '',
+            (args?.baseMachineId as string | null) ?? null,
+          ),
+        )
+      case 'wb_preview_bulk':
+        return Promise.resolve(
+          previewBulkOf(
+            args?.key as string,
+            args?.value,
+            (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
+          ),
+        )
       case 'wb_preflight':
         return Promise.resolve({ issues: [], blocks: 0, todos: 0, hints: 0, emptyHint: '都过了 —— 没有阻断、没有待办、没有提示' })
       case 'wb_machines':
