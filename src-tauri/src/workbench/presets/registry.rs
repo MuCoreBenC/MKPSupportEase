@@ -501,6 +501,100 @@ impl ParamRegistry {
         hit.into_iter().map(|p| p.key.as_str()).collect()
     }
 
+    /// 参数台 / 矩阵**这一屏**的行：与 [`Self::visible_keys`] 唯一的差别是
+    /// **弃用的参数不隐藏**（C14 §五：作者明确要「看得见 + 有那种感觉」——
+    /// 藏起来会变成「明明有却找不到」；界面上划红线 + 禁用 + 徽章，值照旧读得到）。
+    ///
+    /// 生成侧（配方归并、参数正文）仍走 [`Self::visible_keys`]：弃用的参数
+    /// 不进产物，那是上游标记的另一半含义，两边不许混。
+    pub fn desk_keys(&self, machine_id: &str) -> Vec<&str> {
+        let mut hit: Vec<&ParamDef> = self
+            .params
+            .iter()
+            .filter(|p| p.applies_to(machine_id))
+            .collect();
+        hit.sort_by(|a, b| a.layout.order.total_cmp(&b.layout.order));
+        hit.into_iter().map(|p| p.key.as_str()).collect()
+    }
+
+    /// 这个参数的选项里，哪些**已经弃用** —— 给控件的选项划线、给写值那道闸用（C14 §五）。
+    ///
+    /// # 判据是推出来的，不是上游标的
+    ///
+    /// 注册表的选项级 `deprecated` 上游基本不标；但有些档位通向的东西已经全没了，
+    /// 规则很直白：**选这一档（`showWhen` 指向它、`op = eq`）之后，能被它放开的
+    /// 参数全都弃用了（且至少放开一条）**。要求「至少放开一条」是防 `every`
+    /// 把空集读成「全都」，那样没接任何子项的普通选项会被误判。
+    ///
+    /// `neq` / `gt` 不算「放开」：选这一档时那些参数是被**关掉**的，不构成
+    /// 「选它会通向弃用」。「至少放开一条」的实测结果全表只命中一档：
+    /// `外围结构 = 护套` —— 它放开的 5 条全被上游标了。
+    ///
+    /// 上游自己标的选项级 `deprecated` 照旧算数：两路判据**并集**。
+    pub fn deprecated_choice_values(&self, key: &str) -> BTreeSet<String> {
+        let Some(p) = self.param(key) else {
+            return BTreeSet::new();
+        };
+        let mut out = BTreeSet::new();
+        for c in &p.choices {
+            if c.deprecated {
+                out.insert(json_key(&c.value));
+            }
+        }
+        for c in &p.choices {
+            // 被这一档放开的参数：showWhen 指向本参数、op = eq、值就是这一档
+            let gated: Vec<&ParamDef> = self
+                .params
+                .iter()
+                .filter(|q| {
+                    q.show_when
+                        .as_ref()
+                        .is_some_and(|sw| {
+                            sw.key == key
+                                && sw.op == ShowOp::Eq
+                                && json_key(&sw.value) == json_key(&c.value)
+                        })
+                })
+                .collect();
+            if !gated.is_empty() && gated.iter().all(|q| q.deprecated) {
+                out.insert(json_key(&c.value));
+            }
+        }
+        out
+    }
+
+    /// 这个值是不是该参数的一个**已弃用选项**。命中给回选项的中文名 ——
+    /// 写值那道闸（`patch::validate`）的错误消息要点名是哪一档。
+    /// `value = null`（挂回继承）不在这里判：删键不是写值。
+    pub fn deprecated_choice_hit(&self, key: &str, value: &Value) -> Option<String> {
+        if value.is_null() {
+            return None;
+        }
+        let dead = self.deprecated_choice_values(key);
+        let p = self.param(key)?;
+        let k = json_key(value);
+        if !dead.contains(&k) {
+            return None;
+        }
+        p.choices
+            .iter()
+            .find(|c| json_key(&c.value) == k)
+            .map(|c| c.label.clone())
+    }
+
+    /// 该参数各选项的弃用标记，**与 `choices` 一一对齐** ——
+    /// 给 `wb_registry` 的 `ChoiceView` 用。上游标的与推出来的取并集
+    /// （判据见 [`Self::deprecated_choice_values`]）
+    pub fn choice_deprecated(&self, key: &str) -> Vec<bool> {
+        let dead = self.deprecated_choice_values(key);
+        self.param(key).map_or_else(Vec::new, |p| {
+            p.choices
+                .iter()
+                .map(|c| dead.contains(&json_key(&c.value)))
+                .collect()
+        })
+    }
+
     /// 装参数的 section id（实测 16 个）。
     ///
     /// 判据是**布局里有没有 items**，而不是"section 在不在 tabs 里声明过" ——
@@ -777,6 +871,20 @@ where
         .collect())
 }
 
+/// 选项值 / `showWhen` 值的**匹配键**。两边都是注册表里的 JSON 标量，
+/// 字符串直接比原文；数字归一成 f64 再比 —— `1` 与 `1.0` 在 `Value` 的相等
+/// 判断里是两个数，但在注册表里说的是同一档。
+fn json_key(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n
+            .as_f64()
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| n.to_string()),
+        other => other.to_string(),
+    }
+}
+
 /// 测试夹具：把一份 JSON 形状的字段定义 + 布局写成 TOML，再走真的 loader 读回来。
 ///
 /// 为什么让测试写 JSON 而不是直接写 TOML：这两份数据的键名本来就一样
@@ -955,6 +1063,107 @@ mod tests {
             vec!["a.w", "a.x"],
             "P1S 还该看到点名给它的那个，且按 order 升序"
         );
+    }
+
+    /// 参数台这一屏**不隐藏弃用项**（C14 §五）：划线 + 禁用，不是藏起来。
+    /// 与 `visible_keys` 唯一的差别就在这一条 —— 生成侧照旧看不见它们。
+    #[test]
+    fn desk_keys_keeps_deprecated_params_visible() {
+        let (mut p, l) = good();
+        p["params"][1]["deprecated"] = serde_json::json!(true); // a.y 废弃
+        let (_d, r) = load(p, l);
+        let r = r.unwrap();
+
+        assert_eq!(
+            r.visible_keys("A1"),
+            vec!["a.x"],
+            "生成侧照旧不带走弃用的参数"
+        );
+        assert_eq!(
+            r.desk_keys("A1"),
+            vec!["a.y", "a.x"],
+            "参数台要看得见弃用的参数（划线那一条的前提）"
+        );
+    }
+
+    /// 选项级弃用判据（C14 §五，§4-2）：**这一档放开的参数全弃用了（且至少一条）**
+    /// 才算弃用。上游自己标的选项级标记照旧算数。
+    #[test]
+    fn deprecated_choice_is_derived_from_its_gated_family() {
+        let mut p = serde_json::json!({
+            "params": [
+                {
+                    "key": "frame.type", "configKey": "Frame", "tomlKey": "type", "jsonKey": "type",
+                    "label": "外围结构", "desc": "", "tomlComment": "",
+                    "valueType": "string", "uiComponent": "segmented", "defaultValue": "brim",
+                    "scope": "universal", "section": "s1",
+                    "layout": { "order": 1, "sectionId": "s1" },
+                    "choices": [
+                        { "label": "斜肋外墙", "value": "brim" },
+                        { "label": "护套", "value": "sheath" },
+                        { "label": "半护套", "value": "half" },
+                        { "label": "旧写法", "value": "legacy", "deprecated": true }
+                    ]
+                },
+                // half 放开 1 条、那条没弃用 → half 不标（every 不许把「还有活的」读成「全都弃用」）
+                {
+                    "key": "frame.half_only", "configKey": "X", "tomlKey": "ho", "jsonKey": "ho",
+                    "label": "半护套专属", "desc": "", "tomlComment": "",
+                    "valueType": "float", "uiComponent": "number", "defaultValue": 0,
+                    "scope": "universal", "section": "s1",
+                    "layout": { "order": 2.0, "sectionId": "s1" },
+                    "showWhen": { "key": "frame.type", "op": "eq", "value": "half" }
+                },
+            ],
+            "tabs": [{
+                "id": "t1", "label": "页签一", "order": 10,
+                "sections": [{ "id": "s1", "label": "分组一", "order": 0 }]
+            }],
+            "updated": "2026-01-01 00:00:00"
+        });
+        // 护套放开的 2 条，全弃用 → 「护套」该被推出来
+        for key in ["frame.shell.speed", "frame.shell.height"] {
+            p["params"].as_array_mut().unwrap().push(serde_json::json!({
+                "key": key, "configKey": "X", "tomlKey": key, "jsonKey": key,
+                "label": key, "desc": "", "tomlComment": "",
+                "valueType": "float", "uiComponent": "number", "defaultValue": 0,
+                "scope": "universal", "section": "s1",
+                "layout": { "order": 3.0, "sectionId": "s1" },
+                "deprecated": true,
+                "showWhen": { "key": "frame.type", "op": "eq", "value": "sheath" }
+            }));
+        }
+        // brim 放开 1 条但没弃用 → brim 不标
+        p["params"].as_array_mut().unwrap().push(serde_json::json!({
+            "key": "frame.brim_only", "configKey": "X", "tomlKey": "bo", "jsonKey": "bo",
+            "label": "brim 专属", "desc": "", "tomlComment": "",
+            "valueType": "float", "uiComponent": "number", "defaultValue": 0,
+            "scope": "universal", "section": "s1",
+            "layout": { "order": 4.0, "sectionId": "s1" },
+            "showWhen": { "key": "frame.type", "op": "eq", "value": "brim" }
+        }));
+        let l = serde_json::json!({
+            "tabs": [{ "id": "t1", "sections": [{
+                "id": "s1",
+                "items": [
+                    { "id": "i0", "paramKey": "frame.type" },
+                    { "id": "i1", "paramKey": "frame.half_only" },
+                    { "id": "i2", "paramKey": "frame.shell.speed" },
+                    { "id": "i3", "paramKey": "frame.shell.height" },
+                    { "id": "i4", "paramKey": "frame.brim_only" }
+                ]
+            }] }]
+        });
+        let (_d, r) = load(p, l);
+        let r = r.unwrap();
+
+        let dead = r.deprecated_choice_values("frame.type");
+        assert!(dead.contains("sheath"), "放开的 2 条全弃用 → 这一档弃用");
+        assert!(dead.contains("legacy"), "上游自己标的照旧算数");
+        assert!(!dead.contains("brim"), "放开的东西里还有能改的 → 不标");
+        assert!(!dead.contains("half"), "空集不许被 every 读成「全都」");
+        // 不存在的参数：空集，不是 panic
+        assert!(r.deprecated_choice_values("ghost").is_empty());
     }
 
     /// 只装参数的 section 才进矩阵分类；空 section（component 占位）要被过滤掉

@@ -49,7 +49,7 @@ import HistoryModal from './c14/HistoryModal'
 import SplitterC14 from './c14/SplitterC14'
 import { useSplitWidth } from './c14/useSplitWidth'
 import MachinesPage from './views/MachinesPage'
-import { ParamDesk } from './views/ParamDesk'
+import ParamsPage from './views/ParamsPage'
 import s from './c14.module.css'
 
 /**
@@ -131,7 +131,7 @@ type NavId = NavItem['id']
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
 const NAVW = { dft: 236, min: 64, max: 320 }
 
-/** 主选中：机型行（`uid` 为 null = 编基底）或版本行 —— 参数台的工作对象 */
+/** 跨页定位载荷：机型页「编辑参数」跳到参数台时带上（C14 的 GotoFocus） */
 interface Focus {
   machineId: string
   uid: string | null
@@ -198,8 +198,8 @@ export function WorkbenchApp() {
         const [w, bk] = await Promise.all([wb.words(), wb.book()])
         setWords(w)
         setBook(bk)
-        // 默认主选中 = 第一台机型的基底：参数台不该在没有任何对象时空着
-        setFocus((f) => f ?? { machineId: bk.machines[0]?.id ?? '', uid: null })
+        // 参数台默认谁都不选（C14 第十七轮）：空态留白 + 文案，
+        // 「还没选」这个状态必须存在 —— 选中由左树那一下点击或 goto 产生
         setReport(await wb.preflight())
       } catch (e) {
         fail(e)
@@ -413,28 +413,23 @@ export function WorkbenchApp() {
           />
         )
       case 'params':
-        return focus ? (
-          <ParamDesk
+        return (
+          <ParamsPage
             key={focusGen}
-            machineId={focus.machineId}
-            uid={focus.uid}
-            where={
-              focus.uid
-                ? `主选中 ${focus.machineId} / ${book.machines
-                    .find((m) => m.id === focus.machineId)
-                    ?.versions.find((v) => v.uid === focus.uid)?.name ?? focus.uid}`
-                : `主选中 ${focus.machineId} · ${words.level.machine.label}`
-            }
+            book={book}
             words={words}
+            initialFocus={focus}
             tick={tick}
+            dirty={dirty}
             onApply={async (label, patches, refresh) => {
               const out = await run(label, patches, 'undo', refresh)
               return { desk: out?.desk ?? null }
             }}
-            onCompare={() => setPage('compare')}
+            onSave={() => void save()}
+            onDiscard={() => void discard()}
+            onUndo={() => void undo()}
+            onGoto={goto}
           />
-        ) : (
-          <p className="wb-todo">还没有主选中 —— 去机型与版本页挑一台机型或一个版本。</p>
         )
       case 'compare':
       case 'bundles':

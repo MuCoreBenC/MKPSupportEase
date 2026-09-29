@@ -284,6 +284,8 @@ export interface Cell {
   blocked: BlockedBy[]
   /** 点开灰格子时显示的整句。**后端拼好的**，前端不组装 */
   blockedNote: string | null
+  /** 行上的短提示（C14）：「要 X 才可改」。与 `blockedNote` 同源不同场合 */
+  blockedHint: string | null
   /** 「去改那一项」跳到哪个字段。`null` = 不给跳转按钮 */
   jumpTo: string | null
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
@@ -310,7 +312,19 @@ export interface Row {
   controlNote: string | null
   gcode: boolean
   deprecated: boolean
+  /**
+   * 「改了影响谁」（C14 抽屉的作用域栏）。**配方台逐行给**；
+   * 矩阵的行跨多台机型、答不出「哪一台」，是 null
+   */
+  impact: DeskImpact | null
   cells: Cell[]
+}
+
+/** `derive::DeskImpact` —— 版本层编辑 targets 只有自己，followers 是跟着基底的其它版本 */
+export interface DeskImpact {
+  /** 「A1 / 标准版」这种，直接可显示 */
+  targets: string[]
+  followers: string[]
 }
 
 /** `derive::Matrix` */
@@ -325,10 +339,17 @@ export interface Matrix {
 
 /* ---------- 配方台（默认视角） ---------- */
 
-/** `derive::Desk` —— 一个版本的分组列表 */
+/** `derive::Desk` —— 一个版本的分组列表（C14：列给全，右栏「各版本取值」直接用） */
 export interface Desk {
   /** 左栏。**不随搜索变** */
   nav: DeskNavTab[]
+  /**
+   * 基底 + 这一机型所有版本，各一列。行的 `cells` 与它**一一对应** ——
+   * 右栏「各版本取值」每层一行编辑控件，不用为选一个参数再问一次矩阵
+   */
+  cols: Col[]
+  /** 请求的那一层在 `cols` 里的下标。正文那格 = `row.cells[cur]` */
+  cur: number
   groups: DeskGroup[]
   /** 过滤前一共几项 */
   total: number
@@ -652,7 +673,8 @@ export interface Words {
     | 'buildNoResources'
     | 'nothingToSave'
     | 'nothingToUndo'
-    | 'notUndoable',
+    | 'notUndoable'
+    | 'deprecatedWriteBlocked',
     string
   >
   empty: Record<
@@ -672,6 +694,12 @@ export interface Words {
   relate: Record<'goFixIt' | 'showAnyway', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
+  /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
+  paramStatus: Record<'factory' | 'machine' | 'version' | 'dirty', Word>
+  /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
+  paramDeprecated: Word
+  /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
+  paramDeprecatedChoice: Word
 }
 
 /* ---------- 命令 ---------- */

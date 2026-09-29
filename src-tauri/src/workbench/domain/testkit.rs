@@ -383,6 +383,18 @@ fn params() -> serde_json::Value {
                 "layout": { "order": 1.5, "sectionId": "wipe" },
                 "parentKey": "wiping.mode",
                 "showWhen": { "key": "wiping.mode", "op": "eq", "value": "tower" }
+            },
+            // 弃用参数（C14 §五）：参数台要**看得见**（划线 + 禁用），生成侧
+            // （`visible_keys`）照旧不带走它 —— 两边各一条判据，这一条夹具
+            // 让两边都能测
+            {
+                "key": "wiping.legacy", "configKey": "Legacy",
+                "tomlKey": "legacy", "jsonKey": "legacy",
+                "label": "旧版擦料计数", "desc": "", "tomlComment": "",
+                "valueType": "float", "uiComponent": "number", "defaultValue": 7,
+                "scope": "universal", "section": "wiping",
+                "layout": { "order": 1.6, "sectionId": "wipe" },
+                "deprecated": true
             }
         ],
         "tabs": [
@@ -407,7 +419,8 @@ fn layout() -> serde_json::Value {
             ] }] },
             { "id": "wiping", "sections": [{ "id": "wipe", "items": [
                 { "id": "i3", "paramKey": "wiping.mode" },
-                { "id": "i4", "paramKey": "wiping.child" }
+                { "id": "i4", "paramKey": "wiping.child" },
+                { "id": "i5", "paramKey": "wiping.legacy" }
             ] }] }
         ]
     })

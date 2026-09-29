@@ -78,6 +78,12 @@ pub struct Words {
     pub relate: BTreeMap<&'static str, &'static str>,
     /// 崩溃快照三态。**与 `save` 不是一回事**
     pub snapshot: Table,
+    /// 参数台一行上的状态四档（C14）：dirty 压过 origin —— 改了还没保存是最要紧的事实
+    pub param_status: Table,
+    /// 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated`
+    pub param_deprecated: Word,
+    /// 「已弃用」选项级那一枚。判据是推出来的（见 `registry::deprecated_choice_values`）
+    pub param_deprecated_choice: Word,
 }
 
 /// 整张词表。开场取一次
@@ -187,6 +193,7 @@ fn words() -> Words {
             ("nothingToSave", w::disabled::NOTHING_TO_SAVE),
             ("nothingToUndo", w::disabled::NOTHING_TO_UNDO),
             ("notUndoable", w::disabled::NOT_UNDOABLE),
+            ("deprecatedWriteBlocked", w::disabled::DEPRECATED_WRITE_BLOCKED),
         ]
         .into_iter()
         .collect(),
@@ -217,6 +224,22 @@ fn words() -> Words {
         .into_iter()
         .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
         .collect(),
+
+        param_status: [
+            ("factory", w::param_status::FACTORY_LABEL, w::param_status::FACTORY_EXPLAIN),
+            ("machine", w::param_status::MACHINE_LABEL, w::param_status::MACHINE_EXPLAIN),
+            ("version", w::param_status::VERSION_LABEL, w::param_status::VERSION_EXPLAIN),
+            ("dirty", w::param_status::DIRTY_LABEL, w::param_status::DIRTY_EXPLAIN),
+        ]
+        .into_iter()
+        .map(|(k, l, e)| (k, Word::new(l, e)))
+        .collect(),
+
+        param_deprecated: Word::new(w::deprecated::PARAM_LABEL, w::deprecated::PARAM_EXPLAIN),
+        param_deprecated_choice: Word::new(
+            w::deprecated::CHOICE_LABEL,
+            w::deprecated::CHOICE_EXPLAIN,
+        ),
     }
 }
 
@@ -303,6 +326,7 @@ mod tests {
             &t.level,
             &t.visibility,
             &t.bulk_kind,
+            &t.param_status,
         ] {
             for (k, word) in table {
                 assert!(!word.label.trim().is_empty(), "{k} 没有词");
@@ -330,5 +354,16 @@ mod tests {
         assert_eq!(v["placeholder"]["blank"], "空");
         // `save` 这一档没有解释句 —— 为 null 而不是空串，前端才好判
         assert!(v["save"]["saved"]["explain"].is_null());
+        // 「已弃用」两档（C14 §五）：参数级说「这个参数在退场」，选项级说
+        // 「这一档通向的东西已经在退场」—— 两句话不能混成一句
+        assert_eq!(v["paramStatus"]["dirty"]["label"], "已修改");
+        assert_eq!(v["paramDeprecated"]["label"], "已弃用");
+        assert!(v["paramDeprecated"]["explain"].is_string());
+        assert_eq!(v["paramDeprecatedChoice"]["label"], "已弃用");
+        assert_ne!(
+            v["paramDeprecated"]["explain"], v["paramDeprecatedChoice"]["explain"],
+            "两档说的是两件事，解释句不该相同"
+        );
+        assert!(v["disabled"]["deprecatedWriteBlocked"].is_string());
     }
 }

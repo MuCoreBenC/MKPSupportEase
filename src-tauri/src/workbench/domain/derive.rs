@@ -543,10 +543,12 @@ impl<'a> Book<'a> {
         let q = query.trim().to_lowercase();
         let searching = !q.is_empty();
 
-        // 行取并集：任意一列的机型有这个字段，这一行就在
+        // 行取并集：任意一列的机型有这个字段，这一行就在。
+        // **走 `desk_keys` 不走 `visible_keys`**：这一屏是给人看的，弃用的参数
+        // 要划线 + 禁用地摆着（C14 §五），不进产物是生成侧（`visible_keys`）的事
         let mut keys: Vec<&str> = Vec::new();
         for c in &cols {
-            for k in self.presets.registry.visible_keys(&c.machine_id) {
+            for k in self.presets.registry.desk_keys(&c.machine_id) {
                 if !keys.contains(&k) {
                     keys.push(k);
                 }
@@ -613,6 +615,9 @@ impl<'a> Book<'a> {
                     control_note: self.control_note(p),
                     gcode: w::is_gcode(p),
                     deprecated: p.deprecated,
+                    // 矩阵的行跨多台机型，「改了影响谁」不知道该答哪一台 —— 那是
+                    // 配方台（desk）的事，那边填 [`DeskImpact`]
+                    impact: None,
                     cells,
                 })
             })
@@ -703,7 +708,10 @@ impl<'a> Book<'a> {
         let Some(p) = self.presets.registry.param(key) else {
             return Cell::not_applicable();
         };
-        let Some(hit) = layers.effective(key) else {
+        // **这一屏走 `view_effective`**：弃用的参数也要显示它的值（C14 §五）。
+        // 生成侧的 `effective` 会把弃用的键查成 None —— 那是「不进产物」的判据，
+        // 不是「不适用」；两者在这一格上必须分开
+        let Some(hit) = layers.view_effective(key) else {
             // 这台机型没有这一项。**与"被关着"分开说**：
             // 前者根本没有这一项，后者有值、会进产物，只是现在不该改
             return Cell::not_applicable();
@@ -733,6 +741,9 @@ impl<'a> Book<'a> {
                 }
             }
         };
+        let blocked_hint = blocked
+            .first()
+            .map(|b| w::relate::blocked_hint(&b.label, &b.need));
 
         let (kind, text, lines) = if w::is_gcode(p) {
             let (n, t) = w::gcode_text(hit.value);
@@ -740,6 +751,11 @@ impl<'a> Book<'a> {
         } else {
             (CellKind::Value, w::value_text(p, hit.value), None)
         };
+
+        // 已弃用（C14 §五）**不并进 blocked**：blocked 说「条件不成立，换个条件就能用」，
+        // 弃用说「这一项正在退场」—— 对弃用的行说「要 X 才可改」是假话。
+        // 它只做两件事：把 editable 关掉，给界面一档标记（Row.deprecated）去说自己的话。
+        let deprecated = p.deprecated;
 
         Cell {
             kind,
@@ -754,14 +770,17 @@ impl<'a> Book<'a> {
                 .draft
                 .pending(col.level, &col.key_of_level(), key)
                 .is_some(),
-            editable: blocked.is_empty(),
-            reason: if blocked.is_empty() {
-                None
-            } else {
+            editable: blocked.is_empty() && !deprecated,
+            reason: if !blocked.is_empty() {
                 Some(w::disabled::BLOCKED_BY_CONDITION.to_owned())
+            } else if deprecated {
+                Some(w::deprecated::PARAM_EXPLAIN.to_owned())
+            } else {
+                None
             },
             blocked,
             blocked_note,
+            blocked_hint,
             jump_to,
             raw: hit.value.clone(),
         }
@@ -843,11 +862,14 @@ impl<'a> Book<'a> {
     一个版本的分组列表。**建在 `matrix()` 上，不另起一套判定。**
 
     矩阵那一套已经把「行序五段键 / 搜索与分类过滤 / 单元格四分支 / 谁把我关了」都算好了。
-    这里做的只有三件事：
+    这里做的只有四件事：
 
     1. 按 `section_id` 切成组（行序已经保证同组连续，所以切一刀就够）
     2. 把子项挂到父项下面
     3. 父项把子项整组关掉时给一句话，让界面能把它们收起来
+    4. **列给全**（C14）：基底 + 这一机型所有版本各一列 —— 右栏「各版本取值」
+       每一层都是一行编辑控件（C14 的三栏工作台模型），不能让前端为选一个参数
+       再去问一次矩阵。`cur` 指认请求的那一层在哪一列，前端不用猜
 
     左栏那份导航**不跟着搜索变**：它从字段定义直接数，
     否则搜一个词整棵导航树就塌了，而那正是用来换分组看的东西。
@@ -859,11 +881,26 @@ impl<'a> Book<'a> {
         tab: Option<&str>,
         query: &str,
     ) -> Desk {
-        let col = ColRef {
+        // 基底列 + 这一机型的全部版本列。列序由 `order_cols` 定（基底最前、
+        // 版本跟清单顺序），右栏「各版本取值」要的正是这个顺序
+        let mut want = vec![ColRef {
             machine_id: machine_id.to_owned(),
-            version_uid: uid.map(str::to_owned),
-        };
-        let m = self.matrix(&[col], tab, query);
+            version_uid: None,
+        }];
+        for v in self.versions.iter().filter(|v| v.machine_id == machine_id) {
+            want.push(ColRef {
+                machine_id: machine_id.to_owned(),
+                version_uid: Some(v.uid.clone()),
+            });
+        }
+        let m = self.matrix(&want, tab, query);
+        // 请求的那一层在哪一列。找不到（版本刚被删掉之类的竞态）退回基底列：
+        // 界面显示的是「这一层现在长什么样」，基底永远存在
+        let cur = m
+            .cols
+            .iter()
+            .position(|c| c.version_uid.as_deref() == uid)
+            .unwrap_or(0);
         let searching = !query.trim().is_empty();
 
         // 先按组切；同组连续是行序的保证，这里不再自己聚合
@@ -899,16 +936,32 @@ impl<'a> Book<'a> {
             }
         }
 
-        // 整组 / 整族被关掉的那句话
+        // 整组 / 整族被关掉的那句话。**判读当前请求那一层** —— 关没关是跟着
+        // 这一层的值走的（版本改了开关，基底还关着，在版本层看就是开着的）
         for g in &mut groups {
             for it in &mut g.items {
-                it.off_note = family_off_note(&it.row, &it.children);
+                it.off_note = family_off_note(&it.row, &it.children, cur);
             }
-            g.off_note = group_off_note(g);
+            g.off_note = group_off_note(g, cur);
+        }
+
+        // 「改了影响谁」（C14 抽屉的作用域栏）。**逐行各填各的** —— 子项也是
+        // 可以选进右栏的，它们的传播面与父项无关
+        let mut rows: Vec<&mut Row> = Vec::new();
+        for g in &mut groups {
+            for it in &mut g.items {
+                rows.push(&mut it.row);
+                rows.extend(it.children.iter_mut());
+            }
+        }
+        for row in rows {
+            row.impact = Some(self.impact_of(machine_id, uid, &row.key));
         }
 
         Desk {
             nav: self.desk_nav(machine_id),
+            cols: m.cols,
+            cur,
             groups,
             total: m.total_rows,
             note: m.note,
@@ -916,10 +969,57 @@ impl<'a> Book<'a> {
         }
     }
 
-    /// 左栏导航：tab → section 两级 + 计数。**直接从字段定义数**，不受搜索与分类影响
+    /// 「改了影响谁」（C14）。
+    ///
+    /// 版本层的格子只影响这一版（别的版本各有各的一格，这正是覆盖制的形状）；
+    /// 机型基底那一格影响**所有没自己钉**的版本。所以两档返回的不是同一个问题的答案，
+    /// 界面上也就分开写：前者是「影响版本」，后者是「谁在跟着基底」。
+    fn impact_of(&self, machine_id: &str, uid: Option<&str>, key: &str) -> DeskImpact {
+        let label = |v: &VersionIdentity| -> String {
+            let m = self
+                .catalog
+                .iter()
+                .find(|m| m.id == v.machine_id)
+                .map_or(&v.machine_id, |m| &m.display);
+            format!("{m} / {}", v.name)
+        };
+        let pins = |v: &VersionIdentity| -> bool {
+            self.version_layers(&v.uid)
+                .is_some_and(|l| l.has_own(Level::Version, key))
+        };
+        let mine: Vec<&VersionIdentity> = self
+            .versions
+            .iter()
+            .filter(|v| v.machine_id == machine_id)
+            .collect();
+        match uid {
+            Some(u) => DeskImpact {
+                targets: mine
+                    .iter()
+                    .filter(|v| v.uid == u)
+                    .map(|v| label(v))
+                    .collect(),
+                followers: mine
+                    .iter()
+                    .filter(|v| v.uid != u && !pins(v))
+                    .map(|v| label(v))
+                    .collect(),
+            },
+            None => {
+                let followers: Vec<&&VersionIdentity> = mine.iter().filter(|v| !pins(v)).collect();
+                DeskImpact {
+                    targets: followers.iter().map(|v| label(v)).collect(),
+                    followers: Vec::new(),
+                }
+            }
+        }
+    }
+
+    /// 左栏导航：tab → section 两级 + 计数。**直接从字段定义数**，不受搜索与分类影响。
+    /// 与矩阵的行同一份来源（`desk_keys`）：弃用的参数占着位置，计数里也算它
     fn desk_nav(&self, machine_id: &str) -> Vec<DeskNavTab> {
         let mut per_section: BTreeMap<&str, usize> = BTreeMap::new();
-        for key in self.presets.registry.visible_keys(machine_id) {
+        for key in self.presets.registry.desk_keys(machine_id) {
             if let Some(p) = self.presets.registry.param(key) {
                 *per_section.entry(p.layout.section_id.as_str()).or_default() += 1;
             }
@@ -958,28 +1058,29 @@ impl<'a> Book<'a> {
     }
 }
 
-/// 父项把下面整族关掉了吗。**判据是子项全部改不动，而且是同一个父项关的**
-fn family_off_note(parent: &Row, children: &[Row]) -> Option<String> {
+/// 父项把下面整族关掉了吗。**判据是子项全部改不动，而且是同一个父项关的**。
+/// `cur` = 请求的那一层在 cells 里的下标 —— 关没关跟着这一层的值走
+fn family_off_note(parent: &Row, children: &[Row], cur: usize) -> Option<String> {
     if children.is_empty() {
         return None;
     }
     let all_off = children.iter().all(|c| {
         c.cells
-            .first()
+            .get(cur)
             .is_some_and(|cell| cell.blocked.iter().any(|b| b.key == parent.key))
     });
     if !all_off {
         return None;
     }
-    let value = parent.cells.first().map_or("", |c| c.text.as_str());
+    let value = parent.cells.get(cur).map_or("", |c| c.text.as_str());
     Some(w::relate::family_off(&parent.label, value, children.len()))
 }
 
-/// 整组被 section 级条件关掉了吗
-fn group_off_note(g: &DeskGroup) -> Option<String> {
+/// 整组被 section 级条件关掉了吗。`cur` 同上
+fn group_off_note(g: &DeskGroup, cur: usize) -> Option<String> {
     let mut who: Option<(&str, &str)> = None;
     for it in &g.items {
-        let cell = it.row.cells.first()?;
+        let cell = it.row.cells.get(cur)?;
         let hit = cell
             .blocked
             .iter()
@@ -1170,12 +1271,17 @@ pub struct StockRow {
 
 /* ---------- 矩阵 ---------- */
 
-/// 配方台一屏：左栏导航 + 分组列表
+/// 配方台一屏：左栏导航 + 分组列表 + **这一机型的全部层**（C14）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Desk {
     /// 左栏。**不随搜索变** —— 它是换分组看的工具
     pub nav: Vec<DeskNavTab>,
+    /// 基底 + 这一机型所有版本，各一列。行的 `cells` 与它**一一对应** ——
+    /// 右栏「各版本取值」每层一行编辑控件（C14 的三栏工作台），数据从这里出
+    pub cols: Vec<Col>,
+    /// 请求的那一层在 `cols` 里的下标。正文那格 = `row.cells[cur]`
+    pub cur: usize,
     pub groups: Vec<DeskGroup>,
     /// 过滤前一共几项
     pub total: usize,
@@ -1299,7 +1405,22 @@ pub struct Row {
     /// G-code 行**拒绝批量**（doc §8.4）
     pub gcode: bool,
     pub deprecated: bool,
+    /// 「改了影响谁」（C14 抽屉的作用域栏）。**配方台逐行填**；矩阵的行跨多台
+    /// 机型、答不出「哪一台」，是 `None`
+    pub impact: Option<DeskImpact>,
     pub cells: Vec<Cell>,
+}
+
+/// 「改这里影响」+「谁在跟着基底」。
+///
+/// 版本层编辑：targets = 这一版本身，followers = 现在还跟着基底的其它版本
+/// （「想一次改一片就得去基底」）；机型基底编辑：targets = 没自己钉的那些版本。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeskImpact {
+    /// 「A1 / 标准版」这种，直接可显示
+    pub targets: Vec<String>,
+    pub followers: Vec<String>,
 }
 
 /// 三种 kind。**doc §8.3 的第四条分支（选中了升级成真控件）不在这里** ——
@@ -1334,6 +1455,8 @@ pub struct Cell {
     /// 点开灰格子时显示的整句。两种：能跳的说「由「X」控制，需 Y」，
     /// 不能跳的说「控制它的「X」在这台机型上没有这一项」
     pub blocked_note: Option<String>,
+    /// 行上的短提示（C14 §一/二）：「要 X 才可改」。与 `blocked_note` 同源不同场合
+    pub blocked_hint: Option<String>,
     /// 「去改那一项」跳到哪个字段。`None` = **不给跳转按钮**
     pub jump_to: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
@@ -1355,6 +1478,7 @@ impl Cell {
             reason: Some(w::disabled::NOT_APPLICABLE.to_owned()),
             blocked: Vec::new(),
             blocked_note: None,
+            blocked_hint: None,
             jump_to: None,
             raw: Value::Null,
         }
@@ -2050,12 +2174,113 @@ mod tests {
             "子项不该同时又是顶层项"
         );
 
-        // 单列：每一行只有一格
+        // 列给全（C14）：基底 + 这一机型所有版本，每行一格一列；
+        // `cur` 指认请求的那一层（A1/STANDARD），不是基底列
+        assert_eq!(desk.cols.len(), 3, "A1 = 基底 + STANDARD + FAST");
+        assert_eq!(desk.cols[0].version_uid, None);
+        assert_eq!(desk.cur, 1, "请求的是 STANDARD 那一列");
         assert!(desk
             .groups
             .iter()
             .flat_map(|g| g.items.iter())
-            .all(|i| i.row.cells.len() == 1));
+            .all(|i| i.row.cells.len() == desk.cols.len() && i.row.impact.is_some()));
+    }
+
+    /// 弃用的参数在参数台上**看得见但改不动**（C14 §五）：行还在（不隐藏）、
+    /// editable 关掉、reason 说的是「已弃用」那句话 —— 而不是「不适用」。
+    /// 生成侧照旧不带它（见 `variants` 的测试）。
+    #[test]
+    fn deprecated_params_stay_visible_and_inert_in_the_desk() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = Book::new(&f.up, &f.presets, &c, &d);
+
+        let desk = b.desk("A1", None, None, "");
+        let row = desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .find(|i| i.row.key == "wiping.legacy")
+            .expect("弃用的参数也要占一行 —— 藏起来会变成「明明有却找不到」");
+
+        assert!(row.row.deprecated);
+        let cell = &row.row.cells[desk.cur];
+        assert!(!cell.editable, "弃用的格子改不动");
+        assert!(cell.blocked.is_empty(), "弃用不是「条件不成立」，不许混进 blocked");
+        assert!(
+            cell.reason.as_deref().is_some_and(|r| r.contains("不再使用")),
+            "要说清为什么改不动：{:?}",
+            cell.reason
+        );
+        assert!(cell.blocked_hint.is_none(), "对弃用的行说「要 X 才可改」是假话");
+
+        // 对照：被条件关着的格子给的是**另一套**话
+        let mut d2 = Draft::default();
+        apply(
+            &mut d2,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "wiping.mode".to_owned(),
+                value: Some(serde_json::json!("disk")),
+            }],
+        )
+        .unwrap();
+        let b2 = Book::new(&f.up, &f.presets, &c, &d2);
+        let desk2 = b2.desk("A1", None, None, "");
+        let child = desk2
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .flat_map(|i| std::iter::once(&i.row).chain(i.children.iter()))
+            .find(|r| r.key == "wiping.child")
+            .unwrap();
+        let cell = child.cells[desk2.cur].clone();
+        assert!(
+            cell.blocked_hint.as_deref().is_some_and(|h| h.starts_with("要 ") && h.ends_with(" 才可改")),
+            "被关着的行要给短提示：{:?}",
+            cell.blocked_hint
+        );
+    }
+
+    /// 「改了影响谁」（C14 抽屉的作用域栏）：改基底影响所有没自己钉的版本，
+    /// 改版本只影响那一版 —— 其余没钉的列为「跟着基底走」。
+    #[test]
+    fn impact_tells_editing_a_base_apart_from_editing_a_version() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+
+        // 基底视角：A1 的两个版本都没钉 toolhead.offset.x …… 不对，夹具的
+        // machineVariants 里 A1:STANDARD / A1:FAST 都钉了这一项 —— 那就换一项：
+        // toolhead.offset.z 只有 P1S:LITE 钉着，A1 两版都是继承
+        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let desk = b.desk("A1", None, None, "");
+        let row = desk
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .find(|i| i.row.key == "toolhead.offset.z")
+            .unwrap();
+        let impact = row.row.impact.as_ref().unwrap();
+        assert_eq!(impact.targets.len(), 2, "改基底，两个没钉的版本都跟着变");
+        assert!(impact.followers.is_empty());
+
+        // 版本视角：targets 只有它自己；没钉的**别的**版本是「跟着基底走」
+        let desk_v = b.desk("A1", Some("A1/STANDARD"), None, "");
+        let row_v = desk_v
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .find(|i| i.row.key == "toolhead.offset.z")
+            .unwrap();
+        let impact_v = row_v.row.impact.as_ref().unwrap();
+        assert_eq!(impact_v.targets.len(), 1, "版本层只影响这一版");
+        assert!(impact_v.targets[0].contains("标准版"), "点名要用人话：{}", impact_v.targets[0]);
+        assert_eq!(impact_v.followers.len(), 1, "FAST 没钉它，还在跟着基底");
     }
 
     /// 左栏导航**不随搜索变**：它是换分组看的工具，搜一个词就塌掉的话就没用了

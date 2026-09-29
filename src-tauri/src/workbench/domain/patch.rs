@@ -50,6 +50,7 @@ use crate::error::AppError;
 use crate::workbench::presets::ParamRegistry as Registry;
 
 use super::layer::Level;
+use super::wording as w;
 
 /// 交付物对客户可见吗（doc 的「菜单」与「仅归档」）。
 ///
@@ -361,6 +362,7 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
                     return Err(AppError::invalid_argument(format!("字段定义里没有 {key}"))
                         .with_detail("整批改动已拒绝，草稿没有变"));
                 }
+                deprecated_write_gate(registry, key, p)?;
                 match level {
                     Level::Machine => known_machine(owner)?,
                     Level::Version => known_uid(owner)?,
@@ -382,6 +384,43 @@ fn non_blank(s: &str, what: &str) -> Result<(), AppError> {
     if s.trim().is_empty() {
         return Err(AppError::invalid_argument(format!("{what}不能为空"))
             .with_detail("整批改动已拒绝，草稿没有变"));
+    }
+    Ok(())
+}
+
+/// 弃用写闸（C14 §五）：**写值的唯一出口就是这里**，所以闸只设这一处 ——
+/// 行上的控件、右栏各层、以后的批量，谁想写都得从这儿过。
+///
+/// 两档：
+/// 1. 参数自己被弃用 —— 值照旧读得到，但「不要再改它」（`null` = 挂回继承不拦：
+///    删键不是写值，老配方里钉着的弃用值也得有一条退路）；
+/// 2. 写进来的值是一个已弃用的选项（「外围结构 = 护套」那一档 —— 选项点得动，
+///    作者要的正是「我可以选择但是不能保存」）。
+///
+/// 界面在手势前就拦了（toast 一句人话）；这里是后端的闸，拦的是绕过界面的路。
+fn deprecated_write_gate(registry: &Registry, key: &str, patch: &Patch) -> Result<(), AppError> {
+    let Patch::SetValue { value, .. } = patch else {
+        return Ok(());
+    };
+    // `None`（或显式 null）= 删键 = 挂回继承：删键不是写值，不拦
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.is_null() {
+        return Ok(());
+    }
+    let Some(p) = registry.param(key) else {
+        return Ok(());
+    };
+    let refused = |what: &str| {
+        AppError::invalid_argument(format!("{what}{}", w::disabled::DEPRECATED_WRITE_BLOCKED))
+            .with_detail("整批改动已拒绝，草稿没有变")
+    };
+    if p.deprecated {
+        return Err(refused(&p.label));
+    }
+    if let Some(choice) = registry.deprecated_choice_hit(key, value) {
+        return Err(refused(&format!("{0} 的「{choice}」", p.label)));
     }
     Ok(())
 }
@@ -866,6 +905,129 @@ mod tests {
             );
             assert_eq!(draft.dirty_count(), 0, "整批拒绝就不许留下前半截");
         }
+    }
+
+    /// 弃用写闸（C14 §五）：**写值的唯一出口就是 patch 校验**，所以闸设在这里 ——
+    /// 弃用的参数写不进去、弃用的选项档写不进去；`null`（挂回继承）不拦，
+    /// 删键不是写值。整批拒绝，草稿一个字节不动。
+    #[test]
+    fn deprecated_writes_are_refused_at_the_only_write_gate() {
+        let d = tempfile::tempdir().unwrap();
+        let params = serde_json::json!({
+            "params": [
+                {
+                    "key": "toolhead.legacy", "configKey": "Legacy", "tomlKey": "legacy",
+                    "jsonKey": "legacy", "label": "旧版擦料计数", "desc": "", "tomlComment": "",
+                    "valueType": "float", "uiComponent": "number", "defaultValue": 7,
+                    "scope": "universal", "section": "toolhead",
+                    "layout": { "order": 1, "sectionId": "s1" },
+                    "deprecated": true
+                },
+                {
+                    "key": "wiping.mode", "configKey": "Mode", "tomlKey": "mode",
+                    "jsonKey": "mode", "label": "擦拭部件", "desc": "", "tomlComment": "",
+                    "valueType": "string", "uiComponent": "segmented", "defaultValue": "tower",
+                    "scope": "universal", "section": "toolhead",
+                    "layout": { "order": 2, "sectionId": "s1" },
+                    "choices": [
+                        { "label": "擦料塔", "value": "tower" },
+                        { "label": "圆盘擦拭", "value": "disk" }
+                    ]
+                },
+                {
+                    "key": "wiping.disk_only", "configKey": "D", "tomlKey": "d", "jsonKey": "d",
+                    "label": "圆盘专属", "desc": "", "tomlComment": "",
+                    "valueType": "float", "uiComponent": "number", "defaultValue": 0,
+                    "scope": "universal", "section": "toolhead",
+                    "layout": { "order": 3, "sectionId": "s1" },
+                    "deprecated": true,
+                    "showWhen": { "key": "wiping.mode", "op": "eq", "value": "disk" }
+                }
+            ],
+            "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
+                       "sections": [{ "id": "s1", "label": "空间偏移", "order": 0 }] }],
+            "updated": "2026-01-01 00:00:00"
+        });
+        let layout = serde_json::json!({
+            "tabs": [{ "id": "t1", "sections": [{ "id": "s1", "items": [
+                { "id": "i0", "paramKey": "toolhead.legacy" },
+                { "id": "i1", "paramKey": "wiping.mode" },
+                { "id": "i2", "paramKey": "wiping.disk_only" }
+            ] }] }]
+        });
+        let reg =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
+        let c = committed();
+
+        // ① 弃用的参数：写值被拒，草稿不动
+        let mut draft = Draft::default();
+        let err = apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "toolhead.legacy",
+                Some(serde_json::json!(3)),
+            )],
+        )
+        .unwrap_err();
+        assert!(matches!(err.code, crate::error::ErrorCode::InvalidArgument));
+        assert!(err.message.contains("旧版擦料计数"), "{}", err.message);
+        assert!(err.message.contains("已弃用"), "{}", err.message);
+        assert_eq!(draft.dirty_count(), 0);
+
+        // ② 弃用的选项档：参数没弃用，但「圆盘擦拭」放开的参数全弃用 → 写它被拒
+        let mut draft = Draft::default();
+        let err = apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "wiping.mode",
+                Some(serde_json::json!("disk")),
+            )],
+        )
+        .unwrap_err();
+        assert!(err.message.contains("「圆盘擦拭」"), "{}", err.message);
+        assert_eq!(draft.dirty_count(), 0);
+
+        // ③ 没弃用的档照旧能写
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "wiping.mode",
+                Some(serde_json::json!("tower")),
+            )],
+        )
+        .unwrap();
+
+        // ④ 挂回继承（null）不拦：删键不是写值 —— 老配方里钉着的弃用值也得有退路
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[
+                set(
+                    Level::Machine,
+                    "A1",
+                    "toolhead.legacy",
+                    Some(serde_json::json!(3)),
+                ),
+                set(Level::Machine, "A1", "wiping.mode", None),
+            ],
+        )
+        .expect_err("第一批里有弃用写值，整批照旧要拒");
     }
 
     /// **apply 反向能回到原状**：机型层与版本层的值、脏计数都回。

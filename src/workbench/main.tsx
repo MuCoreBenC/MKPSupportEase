@@ -16,6 +16,13 @@ import './workbench.css'
 import './c14tokens.css'
 import { WorkbenchApp } from './App'
 
+/* 开发桩：浏览器里没有 Tauri IPC 时装上（见 dev/mockBackend.ts 的文件头）。
+   真机 / 生产构建不装 —— import.meta.env.DEV 为 false 时这段连同模块都被摇掉 */
+if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+  const { installMockBackend } = await import('./dev/mockBackend')
+  installMockBackend()
+}
+
 const host = document.getElementById('workbench-root')
 if (!host) {
   throw new Error('找不到 #workbench-root —— workbench.html 与本文件对不上了')

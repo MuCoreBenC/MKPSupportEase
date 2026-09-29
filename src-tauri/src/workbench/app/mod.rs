@@ -458,6 +458,9 @@ pub fn wb_registry() -> Result<RegistryView, AppError> {
 }
 
 fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
+    // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集，
+    // 与 choices 一一对齐
+    let dead = reg.choice_deprecated(&p.key);
     ParamView {
         key: p.key.clone(),
         label: p.label.clone(),
@@ -478,10 +481,11 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
         choices: p
             .choices
             .iter()
-            .map(|c| ChoiceView {
+            .zip(dead)
+            .map(|(c, dead)| ChoiceView {
                 label: c.label.clone(),
                 value: c.value.clone(),
-                deprecated: c.deprecated,
+                deprecated: c.deprecated || dead,
             })
             .collect(),
         show_when: p.show_when.clone(),

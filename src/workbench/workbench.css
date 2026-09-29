@@ -30,6 +30,19 @@ body {
   background: #f8fafc;
 }
 
+/*
+ * 盒模型：试验场的样式全都建立在 global.css 那条全局 border-box 之上
+ * （行高 43 = --p-ctl-h 34 + 内衬 8 + 边 1；G-code 框 172×88；控件 34）。
+ * 工作台入口原本没有这条 reset，content-box 会把每一格撑高几像素，
+ * C14 README 里量过的数就全不成立了。圈在 [data-wb] 里，不碰别处。
+ */
+[data-wb],
+[data-wb] *,
+[data-wb]::before,
+[data-wb]::after {
+  box-sizing: border-box;
+}
+
 .wb {
   position: relative;
   display: flex;

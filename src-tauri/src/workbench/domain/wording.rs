@@ -377,6 +377,41 @@ pub mod disabled {
     pub const NOTHING_TO_UNDO: &str = "没有可以撤销的操作";
     /// 这次手势不可撤销
     pub const NOT_UNDOABLE: &str = "删除和生成记录不进撤销栈；删掉的版本在回收站里";
+    /// 往一个已弃用的参数（或已弃用的选项档）里写值。**写闸设在 patch 校验这一处**，
+    /// 界面的 toast 与后端的拒绝共用这一句（C14 §五：说一句人话，不静默失败）
+    pub const DEPRECATED_WRITE_BLOCKED: &str = "已弃用，不能改（上游已标记）";
+}
+
+/* ---------- 「已弃用」（C14 §五） ---------- */
+
+/// 上游注册表标了 `deprecated` 的那一档。判据在注册表那一格，措辞只此一处。
+///
+/// 刻意避开「已删除 / 无此参数」：它还在注册表里、值还读得到，
+/// 说「删了」会让人以为老配方里那个值也没了。
+pub mod deprecated {
+    /// 行上、抽屉里共用的那枚徽章
+    pub const PARAM_LABEL: &str = "已弃用";
+    /// 抽屉「状态」行与禁用控件的悬停解释
+    pub const PARAM_EXPLAIN: &str =
+        "上游已标记这一项不再使用 —— 值照旧读得到（老配方里可能还写着它），但不要再改它";
+    /// 选项级的那枚。说的不是「这个参数在退场」，是「这一档通向的东西已经在退场」
+    pub const CHOICE_LABEL: &str = "已弃用";
+    pub const CHOICE_EXPLAIN: &str = "这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西";
+}
+
+/// 参数台一行上的状态（C14）：**值的出处 + 改没改**，四档。
+///
+/// 「已修改」单独一档：一笔没交出去的改动才是现在最要紧的事实，
+/// 它压过「值是谁给的」—— 保存之后标签自己会变回去。
+pub mod param_status {
+    pub const FACTORY_LABEL: &str = "出厂默认";
+    pub const FACTORY_EXPLAIN: &str = "注册表里的默认值，这台机器没改过、这个版本也没改过";
+    pub const MACHINE_LABEL: &str = "机型默认";
+    pub const MACHINE_EXPLAIN: &str = "来自这台机器的基底，这个版本自己没钉 —— 改基底它会跟着变";
+    pub const VERSION_LABEL: &str = "本版修改";
+    pub const VERSION_EXPLAIN: &str = "这个版本自己钉着的值，不跟随机型基底";
+    pub const DIRTY_LABEL: &str = "已修改";
+    pub const DIRTY_EXPLAIN: &str = "改了还没保存 —— 保存之后才会写进配方";
 }
 
 /* ---------- 「谁把我关了」 ---------- */
@@ -405,6 +440,13 @@ pub mod relate {
     /// 点开一个灰格子时的那一句。`need` 是 `BlockedBy::need`，已经是整句
     pub fn blocked_note(label: &str, need: &str) -> String {
         format!("改不动：由「{label}」控制，需{need}")
+    }
+
+    /// 行上的短提示（C14 §一/二）：「要 擦料方式 等于 擦料塔 才可改」。
+    /// `need` 只有「等于 擦料塔」半句，主语（卡住它的字段名）在这里补上 ——
+    /// 与 `blocked_note` 分开是因为场合不同：弹层要整句，行上只要短句。
+    pub fn blocked_hint(label: &str, need: &str) -> String {
+        format!("要 {label} {need} 才可改")
     }
 
     /// 跳过去改那一项
