@@ -1,0 +1,74 @@
+/* 等宽字：这里装的多半是 TOML 里的字面量（路径、代号、一小段指令），对齐比好看重要 */
+
+.view {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px dashed transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(var(--fs-label) + 1px);
+  color: var(--text-1);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.view:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-solid);
+}
+
+.view:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+.empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(var(--fs-label) + 1px);
+  color: var(--text-1);
+}
+
+/* 压掉 global.css 那条全局 input 聚焦环，聚焦看边框 */
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input[data-invalid='true'],
+.view[data-invalid='true'] {
+  border-color: #e5484d;
+}
+
+/*
+ * 编辑时校验（C06）：框标红 + 框下一行原因。
+ * `data-error` 只在编辑态挂上 —— 收起之后没有框可标，错误也不该继续留着。
+ */
+.input[data-error='true'] {
+  border-color: #e5484d;
+}
+
+.err {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  color: #e5484d;
+}

@@ -1,0 +1,184 @@
+/*
+ * 分段与开关共用这一份样式（它们是同一个组件）。
+ *
+ * 聚焦约定（#30 定的，#31/#33 继续）：只加深边框 / 画一圈内描边，**不加外圈光环**；
+ * 并且要压掉 global.css 那条全局 `:focus-visible`（`outline: 2px` + `offset: 2px`），
+ * 它会在圆角控件外面画一个直角方块。
+ *
+ * # 尺码走变量（C10）
+ *
+ * 外圈圆角、内衬、段的横竖内边距都读下面这几个变量，**取不到就用 fallback**，
+ * 而 fallback 就是 #33 那一版写死的数 —— 所以不设这几个变量的稿（A/B 轨）
+ * 一个像素都不动；要让某一稿的控件更矮或更圆，在它的容器上覆写即可，
+ * 不必碰共用件，也不必写 `:global`。
+ *
+ * 注意这里**不在 `.group` 上先声明一遍**：CSS 变量是「元素自己的声明 > 继承来的」，
+ * 自己声明一句 `--seg-r: var(--r-sm)` 会把外层覆写的值挡在外面（C10 第一版就栽在这儿，
+ * 量出来圆角还是 4px）。要么声明、要么用 fallback，不能两头都占。
+ *
+ *   --seg-r    外圈圆角（默认跟主题的 --r-sm）
+ *   --seg-in   内段与滑块自己的圆角。**默认 5px 是 #33 的原值**，不是算出来的 ——
+ *              想「内外同心」（内圈 = 外圈 − 内衬）就显式覆写成
+ *              `calc(var(--seg-r) - var(--seg-pad))`，否则内圈会比外圈还圆（C09 就是这样）
+ *   --seg-pad  外圈内衬（滑块四周留的那一圈）
+ *   --seg-y    段上下内边距 —— 控件**高度就是它**
+ *   --seg-x    段左右内边距
+ */
+
+.group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--seg-pad, 3px);
+  border: 1px solid var(--line);
+  border-radius: var(--seg-r, var(--r-sm));
+  background: var(--surface-sunken);
+}
+
+.groupOff {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--seg-pad, 3px);
+  border: 1px dashed var(--line);
+  border-radius: var(--seg-r, var(--r-sm));
+  background: var(--surface-sunken);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 滑块：位置与宽度由 JS 量出来写在 style 上，这里只管长相与缓动 */
+.pill {
+  position: absolute;
+  top: var(--seg-pad, 3px);
+  bottom: var(--seg-pad, 3px);
+  border-radius: var(--seg-in, 5px);
+  background: var(--surface-solid);
+  box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
+  transition:
+    left 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    width 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.2s ease;
+  pointer-events: none;
+}
+
+/*
+ * 开关打开时滑块本身着色 —— 「开」这件事要在一眼之内看见，不能只靠文字。
+ *
+ * 两个值都**可被容器覆写**（C13 第十八轮加的 `--seg-on-bg` / `--seg-on-shadow`，
+ * fallback 就是原来写死的那两行）：C13 的作者这一轮要求「开关也做成那种选择
+ * 切换器，不要搞那么多区别」—— 于是 C13 把这两样覆写成普通滑块（白底 + 那道
+ * 投影），开关与选择器在那一稿里长得一模一样。不设变量的稿一个像素不动。
+ */
+.pill[data-on='true'] {
+  background: var(--seg-on-bg, var(--accent-soft));
+  box-shadow: var(--seg-on-shadow, inset 0 0 0 1px var(--accent));
+}
+
+.seg,
+.segOn {
+  position: relative;
+  z-index: 1;
+  padding: var(--seg-y, 5px) var(--seg-x, 13px);
+  border: 0;
+  border-radius: var(--seg-in, 5px);
+  background: transparent;
+  font: inherit;
+  font-size: var(--seg-fs, var(--fs-label));
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  /*
+   * 段能不能被压扁。**默认 `0 1 auto` 就是 flex 项的初始值** —— 不设这个变量的稿
+   * 一个像素不动（与 `--seg-fs` 同一条办法）。
+   *
+   * C13 第十八轮把它覆写成 `none`（见 c13.module.css 的 `--seg-flex`）：那一稿
+   * 的题目里有「显示不完整」，而段被压到比文字窄时，`nowrap` 的字会溢出到段外面、
+   * 看着像那一档没画完。宁可整组去挤旁边的名字，也不许把档位文字压扁。
+   */
+  flex: var(--seg-flex, 0 1 auto);
+}
+
+.seg:hover {
+  color: var(--text-1);
+}
+
+.segOn {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.seg:focus-visible,
+.segOn:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+/*
+ * 已弃用的那一档（C13）：划一条线。
+ *
+ * **划在字上、颜色用红**（作者：「它是那个灰色的线不明显呀，你要不然就用红色的线
+ * 更明显」）。线只给标签，不给整段加背景 —— 它仍然可以点（能不能落盘是调用方
+ * 那道闸的事，见 `FieldOption.deprecated`）。
+ */
+.seg[data-dep],
+.segOn[data-dep] {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger, #c8453c);
+  text-decoration-thickness: 1px;
+}
+
+.groupOff .seg,
+.groupOff .segOn {
+  cursor: not-allowed;
+}
+
+/*
+ * 长文案（「跟随模型」这种）：降一号字、收紧左右内边距，免得一行摆不下。
+ *
+ * 两个值都**可被容器覆写**（C13 第十八轮加的 `--seg-x-long` / `--seg-fs-long`，
+ * fallback 就是原来写死的 10px / −1px）：作者这一轮要的是「开关和选择切换器
+ * 不要有那么多区别」—— 而当时同一页里开关（关闭 / 开启，两个字）是 14px、
+ * 长文案的选择器是 13px，并排放着就是两个大小。C13 把两头都钉到 13px
+ * （见 c13.module.css 的 `--seg-*`），一页里的分段控件从此一个尺码。
+ *
+ * 注意这里**声明的是 `--seg-x` 自己**而不是读它：声明会盖掉继承来的覆写，
+ * 所以要走变量才留得住「调用方说了算」这条（C10 第一版栽过一次同类问题）。
+ */
+.group[data-long='true'],
+.groupOff[data-long='true'] {
+  --seg-x: var(--seg-x-long, 10px);
+}
+
+.group[data-long='true'] .seg,
+.group[data-long='true'] .segOn,
+.groupOff[data-long='true'] .seg,
+.groupOff[data-long='true'] .segOn {
+  font-size: var(--seg-fs-long, calc(var(--fs-label) - 1px));
+}
+
+/* 密表里的格子：矮一点、紧一点。这里**自己声明**变量是对的 ——
+   它就是「这一块比外面那套尺码再收一档」，栅格里的格子不跟着页面走 */
+.group[data-dense='true'],
+.groupOff[data-dense='true'] {
+  --seg-r: 8px;
+  --seg-in: 5px;
+  --seg-pad: 2px;
+  --seg-y: 3px;
+  --seg-x: 9px;
+}
+
+.group[data-dense='true'] .seg,
+.group[data-dense='true'] .segOn,
+.groupOff[data-dense='true'] .seg,
+.groupOff[data-dense='true'] .segOn {
+  font-size: calc(var(--fs-label) - 1px);
+}
+
+[data-density='mini'] .group,
+[data-density='mini'] .groupOff {
+  --seg-y: 4px;
+  --seg-x: 9px;
+}

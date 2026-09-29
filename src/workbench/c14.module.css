@@ -1,0 +1,4610 @@
+/*
+ * C14 · 样式
+ *
+ * 与 A/B 轨同构后不再有 C01/C02 那种 iframe 样式隔离，所以三条自己兜住：
+ *   1. 只用 CSS Modules，不写任何全局选择器，不碰 global.css / tokens.css
+ *   2. 浮层一律走 FieldLayer（components/field），不 portal 到 body
+ *   3. 颜色照 tokens.css 的语义：灰色不是错误色，--danger 只给不可逆动作
+ */
+
+.shell {
+  /*
+   * 工作台的主色是**蓝**，不是 A 轨用户端的绿 —— 依据 `b03/tokens.css` 的
+   * `--w-primary: #3b82f6`（与真项目 workbench 一致）。C05 是工作台原型，
+   * 主操作、选中态、强调都用工作台蓝；绿只留给「成功」语义（--wb-ok）。
+   * 语义分层：蓝=主操作/选中 · 绿=成功 · 红=危险 · 灰=缺失/占位。
+   */
+  --wb-primary: #3b82f6;
+  --wb-primary-deep: #2f74dd;
+  --wb-primary-soft: rgba(59, 130, 246, 0.12);
+  --wb-ok: #10b981;
+  /*
+   * C14：圆角是**控件属性**，不是整个页面的建筑风格（作者原话：该直角的时候
+   * 就要直角）。全局那套 --r-* 是给首页卡片墙的宽松量（8/12/16），C14 在稿内
+   * 收紧：页面骨架、分组卡、表格一律近直角；输入框 4px；真正的浮层走 --r-lg。
+   * 徽章、状态标签另行写成 2px（几乎直角，b03 的 --w-r-tag 同值）。
+   */
+  --r-sm: 4px;
+  --r-md: 3px;
+  --r-lg: 4px;
+
+  /*
+   * 分段选择器（枚举摊开时那排按钮）的尺码（C14）。
+   *
+   * 作者对着实物改了两轮：先说「参考 B02 的切换器，它是用统一的圆角，外面的圆角
+   * 可能要大一点」，放大到 10px 之后又说「圆角在这有点不符，可以变成直角一点」——
+   * 他说得对：C09 定的调子是**全稿圆角收紧**（页面骨架、分组卡、参数行、tab 一律
+   * 近直角，输入框 4px），一组按钮比输入框还圆，在这一屏里就是最跳的那个。
+   *
+   * 现在：外圈 4px、内段 2px（同心 = 外圈 − 内衬），与输入框/按钮同一把尺子；
+   * 高度仍沿用压过的那档（组高 ≈28.5 / 30，C09 是 34.5 / 36）。
+   *
+   * 这几个变量只在本稿覆写 —— 共用件（`components/field/SegmentedField.module.css`）
+   * 的默认值原封不动，A/B 轨一个像素都不动。
+   *
+   * # 第十八轮：长短文案、开关与选择器，**一个尺码**
+   *
+   * 作者对着截图：「能不能把开关也做成那种选择切换器的呀？……现在这些开关，
+   * 它的高度太高了，它就应该跟选择切换器一样……就是那种两个切换器嘛，
+   * True 和 False，不要搞那么多区别」。
+   *
+   * 量出来的差别正是共用件那条「长文案降一号字」的规则：同一页里
+   * `关闭 / 开启`（两个字）走 14px 字 + 11px 内衬（组高 31），而 `圆盘擦拭`、
+   * `稀疏一半` 那种（三字以上）走 13px 字 + 10px 内衬（组高 29）—— 并排放着，
+   * 开关就是那排里最胖的那个。
+   *
+   * 于是把**这两种情况钉到同一个值**：字号一律 `--fs-label − 1`（跟着密度走）、
+   * 内衬一律 10px。下面那一组就是加在共用件上的口子（那边写成
+   * `var(--seg-…, 原值)`），不设这些变量的稿一个像素不动。
+   *
+   * 开关「开」时那块滑块也跟着变成普通滑块（白底 + 投影）：作者说的是
+   * 「不要搞那么多区别」—— 选择器选中是白的，开关选中也该是白的。
+   */
+  --seg-r: 4px;
+  --seg-in: 2px;
+  --seg-pad: 2px;
+  --seg-y: 3px;
+  --seg-x: 10px;
+  --seg-x-long: 10px;
+  --seg-fs: calc(var(--fs-label) - 1px);
+  --seg-fs-long: calc(var(--fs-label) - 1px);
+  --seg-on-bg: var(--surface-solid);
+  --seg-on-shadow: 0 1px 3px rgb(20 32 45 / 10%);
+  /*
+   * 段**不许被压扁**（见共用件里那条 `flex` 的说明）：`nowrap` 的文字一旦比段还宽
+   * 就溢到段外面，看着就是「这一档没显示完整」。宁可整组去挤旁边的名字。
+   */
+  --seg-flex: none;
+
+  /*
+   * 「已弃用」徽章的红是**退过火的**（C14，作者：「我希望它有一点那种微微的红色，
+   * 就是那种红色变成灰色的感觉，就是禁用的红色，你知道的，不用很深的红色」）。
+   *
+   * 三个都不是 `--danger`：那是阻断 / 不可逆的红，弃用不是错误 —— 但纯灰又
+   * 不够看（作者上一轮已经说过「灰色的线不明显」）。所以红往灰里退一档：
+   * 字用低饱和的红，底上铺一层极淡的红，边框是半透明的红线。
+   * 三处（列表的状态位、抽屉的副标题与「基本信息」）都读这一组。
+   */
+  --dep-red: #b1716a;
+  --dep-red-soft: rgba(200, 69, 60, 0.08);
+  --dep-red-line: rgba(200, 69, 60, 0.28);
+
+  display: grid;
+
+  /*
+   * 单列**显式钉成 minmax(0, 1fr)**（C14 第十七轮）。
+   *
+   * 原来列是隐式的 `auto` —— 它的下限是内容的 min-content：mini 档下状态栏
+   * 那一行读数需要 528px（窗口只有 398），于是整个外壳的网格列被撑到 528，
+   * `.body` / `.content` 跟着变宽，正文与状态栏一起画到窗口框外面去（量过）。
+   * `minmax(0, 1fr)` 把下限按到 0：列宽永远等于窗口宽，内容超出由各自的
+   * 滚动/裁剪规则处理，不再反过来撑破外壳。
+   */
+  grid-template-columns: minmax(0, 1fr);
+
+  /*
+   * 定位上下文（C14 第十七轮）：外壳导航那条拖线（`.pSplitNav`）挂在这一层，
+   * 用 `left = --nav-w` 找导航的右缘 —— 导航宽是整壳的事，宿主就该是壳。
+   */
+  position: relative;
+
+  /*
+   * 第一行交给 `.tb` 自己定高 —— 标题栏是**平台两档**（Windows 38 / macOS 52，见
+   * 下面的 `.tb`），写成 `var(--titlebar-h)` 会把两个平台都摊成 44：既不是 Win 的 38，
+   * 也不是 macOS 的 52，还和壳层拖动带的判据（TITLEBAR_H）对不上。
+   */
+  /*
+   * 两行：标题栏 + 标题栏以下的整层（`.shellBody`）。原来这里写三行
+   * （auto 1fr 状态栏），第十九轮起状态栏那行搬进 `.shellBody` 自己的网格 ——
+   * 模态框的遮罩宿主要的是「标题栏以下、整个窗口」这一层，它得把导航、
+   * 页面、状态栏一起包住。
+   */
+  grid-template-rows: auto minmax(0, 1fr);
+
+  height: 100%;
+  background: var(--bg-1);
+  color: var(--text-1);
+  font: var(--fs-body) / 1.5 -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* ---------- 窗口栏 ---------- */
+
+/*
+ * 窗口 chrome 的**基准是 C02**（`src/versions/c02/prototype.html` 的 `.tb` / `.wb` / `.dots`），
+ * 那一版的数字是对着 AppKit 与 Win11 实测来的。C05 之前在这里自己改了一版（灯 11px/gap 8、
+ * 三颗灯全灰、窗口键 32×26 带圆角、图标 10px），全是回归 —— 一律照 C02 抄回来。
+ *
+ * 要改这块之前先去看 C02，不要凭感觉调。
+ */
+.tb {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+
+  /* Windows 档 38px（真项目 --titlebar-h-win）；macOS 52px 在下面覆盖 —— 照 C01/C02 */
+  height: var(--titlebar-h-win);
+  padding: 0 12px;
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Windows：窗口键贴到右上角，右内衬归零 */
+.tb[data-p='windows'] {
+  padding-right: 0;
+}
+
+/*
+ * macOS：标题栏 52（装 unified toolbar 后系统按这一档摆红绿灯，灯圆心 y=26），
+ * 灯组左缘 20px，对齐 AppKit 实测 close 圆心 (26, 26)
+ */
+.tb[data-p='macos'] {
+  height: var(--titlebar-h-mac);
+  padding-left: 20px;
+}
+
+
+.tbName {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.tb[data-p='macos'] .tbName {
+  justify-content: center;
+}
+
+.tbTag {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+/* macOS 三颗灯：12px、圆心距 23px（= 12 灯 + 11 缝），对齐真项目 chrome.rs 实测 */
+.dots {
+  display: flex;
+  gap: 11px;
+  min-width: 72px;
+}
+
+.dots i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+/*
+ * 三色必须写成 `.dots i.dN` —— **`.dN` 单独写压不住上面那条**：
+ * `.dots i` 是 (0,1,1)，`.d1` 只有 (0,1,0)，特异性输了，三颗灯就全是灰的。
+ * C02 写的就是 `.dots i.d1`，我上一轮抄漏了这一层，灯照旧是灰点。
+ */
+.dots i.d1 {
+  background: #ff5f57;
+}
+
+.dots i.d2 {
+  background: #febc2e;
+}
+
+.dots i.d3 {
+  background: #28c840;
+}
+
+
+/*
+ * Windows 窗口键的地盘：撑满标题栏全高、贴到右上角、彼此无缝。
+ * margin-bottom: -1px 盖住 .tb 的 border-bottom —— 系统的窗口键底下也没有线。
+ */
+.tbRight {
+  display: flex;
+  align-self: stretch;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-bottom: -1px;
+}
+
+/* Win11 惯例的 caption button：46px 宽、无圆角、贴边，关闭键悬停整块变红 */
+.wb {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  color: var(--text-2);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+/*
+ * 字形照 A38（`a38/shell/iconsA38.tsx` + TopTabsA38）：**13px，不是 16px**。
+ * A38 的注释写了为什么：16px/1.5 描边算下来字形只有 8px、笔画 1px，
+ * 而 Win11 原生 caption 字形是 10px@32px 高 —— 按比例补到 13px 才对得上。
+ * 方框也**不带圆角**（`M4 4h16v16H4z`），Win11 的最大化键就是个直角方框。
+ */
+.wb svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+
+.wb:hover {
+  color: var(--text-1);
+  background: rgb(16 24 32 / 6%);
+}
+
+.wb:active {
+  background: rgb(16 24 32 / 11%);
+}
+
+.wbClose:hover {
+  color: #fff;
+  background: #e5484d;
+}
+
+.wbClose:active {
+  color: #fff;
+  background: #cf3c41;
+}
+
+
+/* ---------- 主体 ---------- */
+
+/*
+ * 标题栏以下的整层（C14 第十九轮）：导航 + 页面 + 状态栏都在这里面。
+ *
+ * 两件事靠它：
+ *   · **模态框的遮罩宿主** —— `position: relative` 让 `Modal` 那块
+ *     `absolute inset: 0` 的遮罩正好落在「标题栏以下、整个窗口」
+ *     （作者：「他就应该去排除那一个顶部的那个状态栏，然后剩下的所有窗口
+ *     用来给模态框」）。上一轮（b8452b2）只建了这个 div、样式没跟上，
+ *     遮罩宿主与行几何都是空的 —— 这一轮补齐。
+ *   · 行几何照原来 `.shell` 的第 2、3 行：`1fr` + 状态栏高。
+ */
+.shellBody {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-h);
+  min-height: 0;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  min-height: 0;
+}
+
+.main {
+  display: grid;
+  grid-template-rows: var(--c-head-h, 52px) 1fr;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nav {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-solid);
+  border-right: 1px solid var(--line);
+  /*
+   * 导航自己是容器：**窄到 88 就退成图标列**（C14 第十七轮）。
+   * 拖那条竖线拖到底 = 64，那时名字放不下 —— 形态跟着宽度走，而不是跟着
+   * React 的某个属性走（拖动中宽度是直接写变量的，React 不知道，见下面那段）。
+   */
+  container: shell-nav / inline-size;
+}
+
+/*
+ * 外壳导航那条线（C14 第十七轮，作者：「我不喜欢这个（折叠把手），
+ * 我要的是**拖动那条竖线的**」）。
+ *
+ * 它拖的是导航右缘 —— `left = 导航宽 − 4.5` 让命中区（9px）的中心正好压在
+ * `.nav` 那条 border-right 上，两侧各 4.5px。
+ *
+ * **它挂在 `.nav` 里面（JSX 里就是最后一个子元素）**，所以定位上下文是
+ * `.nav` 自己（上面那条 `position: relative`）—— 不是外壳、也不是 `.pBody`。
+ * 这一点是量出来的：挂在外壳上时 `z-index: 3` 会把它压到页面内容**下面**，
+ * 命中区就废了（`.pMain` 里的卡片后画、且自己也有 z-index；导航的右缘只有
+ * 藏在 `.nav` 里才会随导航宽度一起走、且不被后画的页面盖住）。
+ */
+.pSplitNav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--nav-w, 216px) - 4.5px);
+}
+
+.navList {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 8px 0;
+  overflow: auto;
+}
+
+.navGroup {
+  padding: 10px 8px 6px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+.navSep {
+  height: 1px;
+  margin: 8px 6px 2px;
+  background: var(--line);
+}
+
+.navItem {
+  position: relative;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  margin-top: 2px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.navItem:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.navItemOn {
+  position: relative;
+  color: var(--text-1);
+  font-weight: 600;
+  background: var(--wb-primary-soft);
+}
+
+.navItemOn::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--wb-primary);
+}
+
+/* 导航图标：**默认不出现**。宽档名字看得见，图标只会多占一格 ——
+   它只在 narrow（compact）档由 `.shell[data-density='compact'] .navIcon` 打开 */
+.navIcon {
+  display: none;
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+}
+
+.navIcon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.navLabel {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 计数徽标：为 0 时整个不出现 */
+.navBadge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 2px;
+}
+
+/* 不挡生成的那些（待办 / 未保存草稿）：一屏只留阻断一个红色（C06）。
+   颜色两项都重写 —— 漏一项就会从上面那条漏进来。 */
+.navBadgeSoft {
+  color: var(--text-2);
+  background: var(--surface-sunken);
+}
+
+/*
+ * 上游连接信息：灯 + 短句 + 附注（C14 第二轮）。
+ *
+ * 原来是两行长句，窄档里整块被挤成竖排一行一个字 —— 名字与日期是全宽才读得完的
+ * 东西，硬塞进 64px 只会变成噪音。现在分层：灯是「一眼状态」，短句说连没连，
+ * 附注（名字 · 日期）只在摆得开的时候出现。
+ */
+.upstream {
+  display: flex;
+  flex: none;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  margin: 8px;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+/* 连接灯：绿 = 连着，灰 = 降级在用本地副本（灰色不是错误色，--danger 留着不动） */
+.upDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.upDot[data-on='true'] {
+  background: var(--wb-ok);
+}
+
+.upText {
+  min-width: 0;
+}
+
+.upLine {
+  display: block;
+}
+
+.upNote {
+  display: block;
+  color: var(--text-3);
+}
+
+.upstreamOff {
+  color: var(--text-3);
+}
+
+/* ---------- 页头 ---------- */
+
+.head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  /*
+   * 右内衬 = 页面容器的内衬 + **滚动条宽度**（`--sbw` 由 AppC14 量出来写在这个壳上）。
+   * 页面内容是可滚动的，滚动条自己占一条；页头不缩这一条的话，右上角那组
+   * 「未保存 / 放弃 / 保存」就比下面「单版本 / 版本对照」靠右十几像素
+   * —— 作者指出的那一处不对齐。量不到变量时退化成 0（老浏览器/无滚动条）。
+   */
+  padding: 0 calc(var(--gap) + var(--sbw, 0px)) 0 var(--gap);
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--line);
+}
+
+.headT {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.headT h1 {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.headSub {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.headOps {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  /*
+   * 必须显式居中：这组里徽章 18px（`.tag`）、按钮 24px（`.btnSm`），
+   * 默认的 `stretch` 对「有确定高度」的项等于顶对齐 —— 于是「已保存」比
+   * 「放弃 / 保存」高 3px（量的：顶都是 169.5，中线 178.5 对 181.5）。
+   */
+  align-items: center;
+}
+
+.content {
+  min-height: 0;
+  padding: var(--gap);
+  overflow: auto;
+}
+
+/*
+ * 一页占一格（C14 第十八轮起的保活机制，第十九轮补上这份样式）：
+ * 「挂过就一直挂着」，切走只是 `display: none`（`hidden` 属性）。
+ *
+ * 高度给满：页面（`.pPage` 那一支）写的是 `height: 100%`，中间这层若是
+ * auto 高，百分比就解析不出来 —— 参数台会塌成内容高。切走的页不能靠
+ * UA 样式表那条 `[hidden]`：作者样式只要写了 display 就会压过它，
+ * 所以这里自己再写一遍，两条一起管。
+ */
+.pageSlot {
+  height: 100%;
+}
+
+.pageSlot[hidden] {
+  display: none;
+}
+
+/* ---------- 状态栏 ---------- */
+
+.sb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  /*
+   * 状态栏是**读数**，窄档下先让位（C14 第十七轮）：`min-width: 0` 让它能被
+   * 窗口压窄，`overflow: hidden` 兜底不画到框外；真正放不下的那几段读数
+   * 由 `data-density='mini'` 收起来（见下面「档位收口」）。
+   */
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 var(--gap);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border-top: 1px solid var(--line);
+}
+
+.sbSeg {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.sbBar {
+  color: var(--line-strong);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  /* 「已保存」是成功语义，用 ok 绿；未保存的 .dotDirty 用 danger 红 */
+  background: var(--wb-ok);
+}
+
+.dotDirty {
+  background: var(--danger);
+}
+
+.sbDemo {
+  margin-left: auto;
+  padding: 2px 7px;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--r-sm);
+}
+
+/*
+ * 状态栏上的动作组（C14）：撤销 / 重做 / 未保存改动。
+ *
+ * 它们从参数台的工具行搬到这里 —— 那行原来挤着七个按钮，而这几个动作是**全稿**的
+ * （机型页删版本、资产库改可见性、参数台改值都算）。做成「平时看不见边框、
+ * 悬停才浮出来」的样子：状态栏是读数的地方，动作不该抢读数。
+ */
+.sbOps {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.sbBtn {
+  height: 20px;
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sbBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+  border-color: var(--line);
+}
+
+.sbBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* 有未保存改动时点它 —— 给一个「这儿有东西」的信号，但不喧哗 */
+.sbBtnOn {
+  color: var(--wb-primary-deep);
+}
+
+/* ---------- 未保存改动清单（外壳级弹窗，C14 从参数台搬上来） ---------- */
+
+/* 一步一块：块头是一句话，块里是「哪一格：从什么值 → 什么值」 */
+.hStep {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.hStep:last-child {
+  border-bottom: 0;
+}
+
+.hHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.hMore {
+  margin-left: auto;
+  font-style: normal;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 「哪一格」：参数名 + 它落在哪台机型/哪个版本 */
+.hWhat {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hFrom {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.hArrow {
+  flex: none;
+  color: var(--line-strong);
+}
+
+.hTo {
+  flex: none;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/* ---------- 通用件 ---------- */
+
+.btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+.btn:disabled {
+  color: var(--text-3);
+  border-color: var(--line);
+}
+
+.btnOn {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: var(--wb-primary);
+}
+
+/* 主操作：工作台蓝实心，一页最多一个（弹窗内算独立一层） */
+.btnPrimary {
+  color: #fff;
+  font-weight: 600;
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--wb-primary-deep);
+  border-color: var(--wb-primary-deep);
+}
+
+/* 禁用的主按钮不是「蓝底灰字」—— 底也一起灰下去，和 b03 的 .primary:disabled 一致 */
+.btnPrimary:disabled {
+  color: #fff;
+  background: var(--line-strong);
+  border-color: var(--line-strong);
+}
+
+.btnDanger {
+  color: #fff;
+  font-weight: 600;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 危险按钮自己的悬停（C14）。少了这条，鼠标一悬停就被 `.btn:hover` 的灰底
+   按特异性盖掉 —— 「确认恢复？」的红色瞬间变灰（作者：「恢复默认的时候，
+   我悬停的时候它的颜色不对」）。hover 只能更深一档的红，不许换成一族别的颜色。 */
+.btnDanger:hover:not(:disabled) {
+  background: #a8382f;
+  border-color: #a8382f;
+}
+
+.btnDanger:disabled {
+  color: #fff;
+  background: var(--line-strong);
+  border-color: var(--line-strong);
+}
+
+.btnSm {
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--fs-label);
+}
+
+.inp {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.inp:focus {
+  border-color: var(--wb-primary);
+  outline: 2px solid var(--wb-primary-soft);
+}
+
+.sel {
+  height: 28px;
+  padding: 0 6px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex: none;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  line-height: 18px;
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.tagAccent {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+}
+
+/* 灰色不是错误色：缺失/占位用 text-3 */
+.tagGhost {
+  color: var(--text-3);
+}
+
+.tagDanger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.tagSevBlock {
+  color: #fff;
+  background: var(--danger);
+}
+
+.tagSevTodo {
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+}
+
+.tagSevHint {
+  color: var(--text-3);
+}
+
+.tagBuildBuilt {
+  /* 「已生成」是成功语义，不是主操作 —— ok 绿 */
+  color: var(--wb-ok);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.tagBuildStale {
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+}
+
+.tagBuildNever {
+  color: var(--text-2);
+  border: 1px dashed var(--line-strong);
+}
+
+.tagBuildNone {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 可操作的 chip：左半点进去看，右半的 × 解除（C05） */
+.chip:has(.chipX) {
+  padding: 0 2px 0 8px;
+}
+
+.chipMain {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.chipMain:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+}
+
+.chipX {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  color: var(--text-3);
+  border-radius: 2px;
+}
+
+.chipX:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/*
+ * 「把版本指到这个套餐」那一行的选择器（C14 第十九轮）：
+ *
+ * 共用件 SelectField 的触发器自带 34px 高、`.wrap` 又不吃 flex —— 和旁边 28px
+ * 的「改指向」并排一高一矮（作者：「按钮的这个容器呀，大小呀，和其他的最好一致」）。
+ * 这里包一层给两件事：吃满剩余宽度（原来 `.addRow .sel` 那条管不到它），触发器
+ * 高度对齐到这一行的按钮尺子 28。
+ */
+.assignSel {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.assignSel button {
+  height: 28px;
+}
+
+/* SelectField 的根（`.wrap`）不吃 flex —— 让这一层唯一的孩子撑满容器 */
+.assignSel > * {
+  flex: 1;
+  min-width: 0;
+}
+
+
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.grow {
+  flex: 1;
+}
+
+.card {
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.cardHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cardHead h2 {
+  flex: 1;
+  font-size: var(--fs-body);
+}
+
+.cardNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.cardBody {
+  padding: 14px;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* 机型图：图片在演示目录里就显示，找不到/没有就占位 —— 灰色不是错误色 */
+.machineImg {
+  display: block;
+  max-width: 200px;
+  max-height: 110px;
+  margin: 0 auto 10px;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+}
+
+.machineImgPh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88px;
+  margin-bottom: 10px;
+  padding: 0 12px;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  text-align: center;
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+/* ---------- 参数台 ---------- */
+
+.matrix {
+  /* 框选的橡皮筋画在这一层里（C14 第六轮，见 `.selBand`） */
+  position: relative;
+  overflow: auto;
+}
+
+.mRow {
+  display: flex;
+  align-items: stretch;
+  min-width: max-content;
+  /* 行高兜一条下限（作者：「参数这一些的高度太低了吧」）—— 28px 的瘦行
+     一屏挤七十多行，扫起来费劲；32 与单版本模式的参数行一档 */
+  min-height: 32px;
+}
+
+.mHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card-face);
+  border-bottom: 1px solid var(--line);
+}
+
+.mHead > span,
+.mRow > span {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 10px;
+  border-left: 1px solid var(--line);
+}
+
+.mHead > span:first-child,
+.mRow > span:first-child {
+  border-left: 0;
+}
+
+/*
+ * 对照矩阵的列宽**一律钉死**（C14 第五轮）。
+ *
+ * 原先表头行与数据行是两条独立的 flex 行（都是 `min-width: max-content`），
+ * 各自按自己的内容算总宽 —— 于是两行分给各列的宽度不一样（实测表头列
+ * 101.8 / 数据列 96.8），越往右偏差越大（第 4 列差 20px）。作者的判语：
+ * 「没有太对齐的感觉，每一列每一列之间那个差距越来越大」。
+ *
+ * 现在只留横向滚动：列宽固定值，参数列 208、值列 104（原 min-width 的值）。
+ * 窗口窄就横向滚，不再靠压列宽「自适应」—— 表格的列宽跟着容器变才是对不齐的根。
+ */
+/*
+ * 参数名与单位**横排**（C14 第五轮）。
+ *
+ * 208px 的列里，「名字 + 单位」实测只用到 76px（X 轴偏移 + mm）——竖着排
+ * 纯粹白占一行：每行 41.5px 的高度里有一半是单位那一行，73 行白烧掉
+ * 一千多像素（作者：「宽度足够的时候怎么没有变成同一行呢」）。
+ *
+ * 横过来之后行高回到单行。名字与单位按基线对齐，读作「名字 单位」——
+ * 和值列里「值」的排法是同一套读法。
+ */
+.pKey {
+  flex: none;
+  flex-direction: row;
+  gap: 5px;
+  align-items: baseline;
+  justify-content: flex-start;
+  width: 208px;
+}
+
+.pSub {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.pCol {
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  justify-content: center;
+  width: 104px;
+  font-size: var(--fs-body);
+}
+
+.pCol em {
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+/*
+ * 机型基底列：**不染底**（C14 第四轮）。
+ *
+ * 原来是淡蓝底，于是「底色」同时表示三件事（基底、选中、差异），作者那句
+ * 「他应该是对比那个基础的，基础的应该是白色的，而且变了的还是绿色的」
+ * 就是把它们拆开：**白 = 基准，绿 = 跟基准不一样**。
+ * 基底列靠「永远在最左 + 列头写着机型基底」认，不再靠底色。
+ */
+.pColBase {
+  color: var(--text-1);
+}
+
+.mRow + .mRow {
+  border-top: 1px solid var(--line);
+}
+
+.mSec {
+  min-height: 26px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  background: var(--surface-sunken);
+}
+
+.mSec > span {
+  border-left: 0;
+}
+
+.cell {
+  flex: none;
+  justify-content: space-between;
+  width: 104px;
+  text-align: left;
+  cursor: pointer;
+  /*
+   * 底色的**兜底值**（C14 第六轮）：跨机型那一列垫一层灰，写在 `--x-bg` 上
+   * 而不是直接写 `background` —— 直接写的话它会盖掉下面 `.cellDiff` 的绿
+   * （后者在文件里更靠后，但同权重下谁在后面谁赢，跨机型的格子就再也绿不起来）。
+   * 变量只垫底：差异绿 / 脏红 / hover 灰照旧各自压上来。
+   */
+  background: var(--x-bg, transparent);
+}
+
+.cell:hover {
+  background: var(--surface-sunken);
+}
+
+.cellOff {
+  cursor: default;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    var(--surface-sunken) 5px,
+    var(--surface-sunken) 10px
+  );
+}
+
+.cellOwn {
+  background: var(--surface-solid);
+}
+
+.cellDirty {
+  background: var(--danger-soft);
+}
+
+.cellText {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.origin {
+  flex: none;
+  padding: 0 5px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  color: var(--text-3);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.originVersion {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.originMachine {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: transparent;
+}
+
+/* 草稿态的 origin 标签：红色已经由格子背景 .cellDirty 承担，
+   标签只负责说明来源，不要双重红（C06） */
+.originDirty {
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border-color: transparent;
+}
+
+.offText {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 编辑态：**铺满整格**（C14 第四轮）。
+ *
+ * 格子的内容区两侧各有 10px 内衬，而 `form='cell'` 的控件都是内容宽
+ * （共用件的根是 inline-flex）—— 于是编辑态是"格子里一个小控件"，
+ * 枚举的下拉浮层又贴着这个小控件算位置：又窄又偏。作者两条抱怨
+ * （「选择器他都没充满这个的宽度」「那个下拉菜单的窗它的位置不对」）
+ * 是同一个根因。
+ *
+ * 负 margin 吃掉内衬：控件的左沿与格子左沿重合，浮层（matchWidth）
+ * 于是与格子同宽同位 —— 这就是「贴着这一格的正下方」。
+ *
+ * 覆写只落在 `.cellEd` / `.edCell` 里（只出现在矩阵格子），不动共用件。
+ */
+.cellEd {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* 编辑态那一层**吃满格子的高**（C14 第十三轮）：控件（步进器的框、下拉的
+     触发器）才撑得满整格 —— 点格子任何一处都在控件上，值也落在格子的中线上。
+     用 `align-self: stretch` 而不是 height:100% —— 后者在「高度由 stretch 得来」
+     的格子里解析不出确定值（实测停在控件自己的 18px） */
+  align-self: stretch;
+  gap: 4px;
+  width: calc(100% + 20px);
+  margin: 0 -10px;
+}
+
+/* 控件根节点吃满（`.wrap` / `.box` 这类 inline-flex 根）—— 宽高都要 */
+.cellEd > *,
+.edCell > * {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+/* 步进器在 cell 形态下多包了一层（见 CellEditorC14）——
+   这层要是 inline，里面的 inline-flex 根再怎么设宽也没用 */
+.edCell {
+  display: block;
+}
+
+/* 数字吃剩余宽度、箭头推到右缘（与 row 形态的 .edNum 同一条分法） */
+.edCell input {
+  flex: 1 1 auto;
+}
+
+/*
+ * 进入编辑（聚焦）时，数值**靠左**（C14 第十四轮，作者：「点击它那个编辑它的
+ * 时候，文字也是靠左的。不只是这一个，单版本的也一样」）。
+ *
+ * 只读态照旧右对齐 —— 一列数字右对齐才好比大小；一旦开始编辑，光标与文字
+ * 从左边起，读的写的都是起始处。改在这一层（`.edNum` / `.edCell` 都是 C14
+ * 自己的壳），不动共用件的 `.input`，老稿不受影响。
+ */
+.edNum input:focus,
+.edCell input:focus {
+  text-align: left;
+}
+
+/*
+ * 格子里的编辑控件（作者：「就算编辑的时候，数字也直接出现在这里面，
+ * 不要再出现一个框框了」）：
+ *
+ *   文本 / 下拉 / 多行   自己就是一个框，照常描边
+ *   数字步进器           **去掉它自己的框** —— 它外面已经有格子了，
+ *                        再描一圈就是框套框；值直接坐在格子里
+ */
+.cellEd input,
+.cellEd select,
+.cellEd textarea {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+}
+
+.cellEd:focus-within input,
+.cellEd:focus-within select {
+  border-color: var(--accent);
+}
+
+/* 数字那层壳（`.edCell` 包着共用件的 `.box`）：框与底全撤，吃满格子 */
+.cellEd .edCell > * {
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.cellEd .edCell input {
+  height: 100%;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+}
+
+/*
+ * 下拉（选择器）格同理：**值直接坐在格子里**（C14 第十三轮，作者对着截图：
+ * 「这个下拉菜单的，你改一下，它不需要里面那个容器装起来了」）——
+ * 框与底全撤，只留值与箭头；格子的外描边由 `.cell[data-editing]` 那一条给。
+ *
+ * 认的是 `aria-haspopup="listbox"` 这个**语义属性**，不是哈希类名 ——
+ * 顺带也不会误伤开关那种分段按钮（它们是 role="radio" 的按钮）。
+ */
+.cellEd button[aria-haspopup='listbox'] {
+  height: 100%;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.cellEd button[aria-haspopup='listbox']:hover {
+  background: transparent;
+}
+
+/*
+ * 编辑态那一格：**格子自己描一圈外框**（C14 第十三轮）。
+ *
+ * 作者：「我点击了它会出现步进器，但它这个视觉效果太弱了，应该上下都出现
+ * 一条横线那种 —— 它需要那个格子的外描边」。上一轮为了不要「框套框」把
+ * 步进器自己那层框撤了，于是编辑态跟只读态几乎一样，点开之后不知道哪格在改。
+ *
+ * 用 `inset` 阴影描边而不是 border：格子是 flex 项，加 border 会把它撑宽
+ * 2px、整列错位；inset 阴影不参与布局，列的宽度与对齐一个像素不动。
+ * `background` 同时压成白底 —— 编辑的那一格从绿/灰底里跳出来，读的就是它。
+ */
+.cell[data-editing='true'] {
+  background: var(--surface-solid);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 2px;
+}
+
+.cellEd textarea {
+  height: auto;
+  padding: 4px 6px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* 修改历史 */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.hRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  border-radius: var(--r-sm);
+}
+
+.hRow:hover {
+  background: var(--surface-sunken);
+}
+
+.hKey {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 列表（资产 / 套餐 / 生成） ---------- */
+
+.split {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  /*
+   * 整页定高、左右**各自滚**（C14 第二十三轮，作者：「左侧的这个列表，不要受到
+   * 右边的滚动的影响……就都跟那个参数台的一样，左侧的是自己的滚动」）：
+   * 行钉成 minmax(0, 1fr)，列各自 overflow —— 右侧内容再长，左边清单也纹丝不动。
+   * compact / mini 摆不开，退回随页滚（见「档位收口」那条覆盖）。
+   */
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--gap);
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * 左列（套餐/资产库的匿名 div、机型页的 .side，都是 .split 的第一个孩子）
+ * 变成竖排：筛选、按钮、合计占自然高，**清单吃剩下的高、自己滚**。
+ * （原来那条 sticky 钉顶是「整页一起滚」时代的做法，这一版用不上了。）
+ */
+.split > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.split > div:first-child .list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 8px;
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.row:hover {
+  background: var(--surface-sunken);
+}
+
+.rowOn {
+  background: var(--wb-primary-soft);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.sum {
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+/* 筛选行的轴名（切片器/喷嘴/层高）：灰一点、和 chip 同排，不抢焦 */
+.barLabel {
+  flex-shrink: 0;
+  margin-right: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 一根轴 = 轴名 + 它的选项，捆成一个不可拆的组 —— 窄栏折行只发生在组与组之间 */
+.axisGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-gap, 12px);
+  min-width: 0;
+  /* 右侧自己滚（C14 第二十三轮）：与左列互不影响 */
+  min-height: 0;
+  overflow: auto;
+}
+
+.kv {
+  display: grid;
+
+  /*
+   * 标签列按内容取宽（C05）。原来写死 84px，「内部名（可选）」这种标签会折成两行，
+   * 每个格子白占一行 —— 作者的原话是「他甚至还挤占了我一行」。
+   * max-content 让整列取最宽那条标签的宽度，所有行对齐且都不折。
+   */
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: baseline;
+}
+
+.kvKey {
+  font-size: var(--fs-body);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+
+.kvVal {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  word-break: break-all;
+  /* 行高钉在与控件同高（.inp / TextField 28px）：状态徽章出现不改变行高 */
+  min-height: 28px;
+}
+
+.kvDim {
+  color: var(--text-3);
+}
+
+.refs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+.refRow {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.refRow b {
+  flex: none;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.group {
+  margin-top: 12px;
+}
+
+.groupHead {
+  margin-bottom: 6px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.fileRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.fileRow + .fileRow {
+  margin-top: 4px;
+}
+
+.fileName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-body);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.addRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.addRow .sel,
+.addRow .inp {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 包进 .group 的添加行：与上文的距离交给组距和组头，不再自己另加一段 */
+.group .addRow {
+  margin-top: 0;
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--gap);
+  align-items: start;
+}
+
+/*
+ * ②「客户端数据包」的三个版本轴（C14 第二十四轮重排，作者：「都长在一起了，
+ * 再调整调整，更现代化一点」）：一块一轴 —— 名字 + 原始键值一行，人话说明一行，
+ * 控件一行。块与块之间留缝，不再挤在一个 kv 网格里。
+ */
+.vstack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.vfield {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.vhead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 24px;
+}
+
+.vkey {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.vhelp {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.vrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vrow .inp {
+  flex: 1;
+  min-width: 0;
+}
+
+.vstatic {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+/*
+ * 检查项与生成行的**内联详情**（C14 第二十六轮，作者：「他应该把这个提示详细地
+ * 写清楚……它有什么文件没什么文件，有什么套餐没什么套餐，我都可以查看」）：
+ * 点「详情」展开一块小字账目，不跳页就能看清为什么。
+ */
+.issueDetail,
+.rowDetail {
+  /* 上下都留缝（C14 第二十七轮，作者：「直接贴着下面那个卡片的上边缘，不对」） */
+  margin: 6px 0 12px;
+  padding: 8px 10px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+.issueDetail div,
+.rowDetail div {
+  margin-top: 2px;
+}
+
+.issueDetail b,
+.rowDetail b {
+  color: var(--text-1);
+}
+
+/* 「去处理」定位的闪烁（2 秒后由 React 摘掉类） */
+@keyframes c14-flash-card {
+  0%, 55% {
+    background: var(--wb-primary-soft);
+    border-color: var(--wb-primary);
+  }
+
+  100% {
+    background: var(--surface-solid);
+  }
+}
+
+@keyframes c14-flash-row {
+  0%, 55% {
+    background: var(--wb-primary-soft);
+  }
+
+  100% {
+    background: transparent;
+  }
+}
+
+.flashIt {
+  animation: c14-flash-card 1.8s ease-out;
+}
+
+.rowFlash {
+  animation: c14-flash-row 1.8s ease-out;
+}
+
+/*
+ * 生成与发布的版式（C14，作者：「我还是喜欢左旧的那种，左右分布的，左边是那些
+ * 事项、未完成的提示的感觉，右边才是主要操作的地方」）：
+ *
+ *   .colsRev  左 = 检查事项清单（把关），右 = 主要操作。比旧 .cols 把宽的一栏
+ *             让给右边 —— 现在右栏装着三步，左栏是清单。
+ *   .flow     右栏里三步从上到下（顺序仍在：生成 → 客户端数据包 → 发布）。
+ *             叫 .flow 不叫 .steps：后者在机型页那一带已被占用，不挤一个名字。
+ */
+.colsRev {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: var(--gap);
+  /* 与 .split 同一套（C14 第二十四轮）：整页定高，左栏检查清单、右栏三步各自滚
+     （作者：「生成与发布左侧的检查还是会滚动的」）。compact / mini 退回随页滚。 */
+  height: 100%;
+  min-height: 0;
+}
+
+/* 左栏的检查卡撑满、清单在卡肚里滚（卡头钉住） */
+.colsRev > .card:first-child {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.colsRev > .card:first-child .cardBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+  overflow: auto;
+}
+
+.issue {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.issue + .issue {
+  margin-top: 8px;
+}
+
+.issueBlock {
+  background: var(--danger-soft);
+  border-color: rgba(200, 69, 60, 0.3);
+}
+
+.issueTxt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.issueTxt b {
+  font-size: var(--fs-body);
+}
+
+.issueTxt span {
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.emptyHint {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 14px;
+  font-size: var(--fs-body);
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-radius: var(--r-sm);
+}
+
+.warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--danger-soft);
+  border-radius: var(--r-sm);
+}
+
+.warnTitle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.warnDetail {
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.dim {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+}
+
+.dimRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.dimKey {
+  flex: none;
+  width: 84px;
+  font-size: var(--fs-body);
+  color: var(--text-3);
+}
+
+.dimVal {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.placeholder {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+.placeholder p {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 620px;
+  padding: 22px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.empty h2 {
+  font-size: 15px;
+}
+
+.empty p {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* ---------- C05：必填标记与「需填写」 ---------- */
+
+.req {
+  margin-left: 2px;
+  color: var(--danger);
+}
+
+/* 可以后补的必填：橙星 —— 与「需填写」橙标同一族。红星只留给「不填就不许建」的格 */
+.reqLater {
+  color: var(--warn);
+}
+
+/* 弹窗里的行内原因：按钮为什么点不动，当场说出来 —— 藏在禁用按钮的悬停里等于没说 */
+.inpHint {
+  grid-column: 1 / -1;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+/* 必填却还空着。**不是错误**，所以不用 --danger */
+.todo {
+  padding: 1px 6px;
+  font-size: var(--fs-label);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+
+/* 机型图选择器：缩略图网格 */
+
+.imgGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.imgCell {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.imgCell:hover {
+  border-color: var(--line-strong);
+}
+
+.imgCellOn {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.imgCell img {
+  width: 100%;
+  height: 64px;
+  object-fit: contain;
+}
+
+.imgName {
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 列表页的即时过滤框 */
+/*
+ * 左列第一行：搜索挤窄（约 2/3），剩下的位置给「新增」（C14 第二十六轮，
+ * 作者：「把搜索挤一下……留剩下的位置给这个新增机型新增套餐」，且「用不显眼的
+ * 颜色」—— 新增是低频动作，不该是全列最响的一块）。
+ */
+.topRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.topRow .filter,
+.topRow .inp {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.filter {
+  height: 28px;
+  margin-bottom: 8px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.filter:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 版本行选中态（版本详情落地用） */
+.rowPick {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* toast 里的「撤销」 */
+.toastAct {
+  margin-left: 10px;
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+/* ---------- C06：统一素材选择器 ---------- */
+
+/* 字段位：缩略图 + 当前文件名 + [更换] */
+.assetField {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  /* 行高对齐缩略图（.assetThumb 34px）：状态徽章出现不改变行高 */
+  min-height: 34px;
+}
+
+.assetThumb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+/* 「未配」与「缺图」是同一个位置：都是没有可看的图，但话不一样 */
+.assetThumbPh {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.assetName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 页签：候选网格按扩展名分「图片 / SVG」两页 —— 打开时落在哪页由入口的 defaultCategory 决定 */
+.pickTabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.pickTab {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.pickTab:hover {
+  background: var(--surface-sunken);
+}
+
+/* 选中态与 .btnOn 同一词汇：主色软底 + 深主色字 */
+.pickTabOn {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: var(--wb-primary);
+}
+
+/* 网格可滚：候选会长（每种格式都可能十几张），框高不该跟着候选数长 */
+.pickGrid {
+  max-height: 176px;
+  overflow: auto;
+}
+
+.pickPreview {
+  display: grid;
+  place-items: center;
+  height: 196px;
+  margin-top: 12px;
+  padding: 8px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+.pickPreview img {
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.pickPh {
+  padding: 0 12px;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.pickMeta {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* ---------- C14：参数台（骨架照 B02 重排） ---------- */
+
+/*
+ * 这一页自己撑满内容区：左 rail、正文、右详情各自滚，
+ * 而不是整页一起滚 —— 点开一行之后，左边的扫描位置不该被顶掉。
+ */
+.pPage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+
+  /*
+   * 行里**最高的那个控件**的高度（C14）：步进器与下拉都是 34px，
+   * 而这两个共用件在窄档会自己收一档（`NumberField` / `SelectField` 的
+   * `[data-density='compact']` → 30px）—— 行高的地板得跟着一起收，
+   * 否则窄档每一行白白多出 4px。mini 档不收：下拉那一档仍是 34（量过）。
+   */
+  --p-ctl-h: 34px;
+}
+
+[data-density='compact'] .pPage {
+  --p-ctl-h: 30px;
+}
+
+/*
+ * 页头一行：左 = 当前上下文（机型 / 版本 · 计数），右 = 页面模式。
+ * C08 顶上那两排（机型下拉 + 版本卡横条）退场 —— 版本选择进了左树，
+ * 视觉重量按「参数内容 > 分类 > 当前版本 > 版本管理」排。
+ */
+.pHead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: none;
+  margin-bottom: 8px;
+}
+
+.pCtx {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.pCtxName {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 模式切换是**一层凹槽里嵌一块白**，与 A31 那套分段控件同一个词 */
+.pMode {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-sm);
+}
+
+.pModeBtn {
+  height: 24px;
+  padding: 0 12px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  border-radius: 3px;
+}
+
+.pModeBtn:hover {
+  color: var(--text-1);
+}
+
+.pModeOn {
+  color: var(--text-1);
+  font-weight: 600;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+}
+
+/*
+ * 主体：左 rail（机型/版本，常驻）+ 正文。抽屉是**按需浮出**的（作者：
+ * 右侧不点它就不出现），挂在这个定位上下文上。
+ */
+/*
+ * 三栏的缝**不做成 gap**（C14 第四轮）：gap 会连"栏不在了"的时候也占着。
+ *
+ * 作者圈着正文左侧那条竖空白：「还可以再往左把它那个空格吃掉，那个空格
+ * 没有意义，那个空格不需要点击」。那一条 = 收起态 rail 的 24px 占位 + 12px
+ * 的缝 —— 把手 C14 起已经站在页头（不占栏），这条 24px 就纯是空的。
+ *
+ * 所以缝跟着**栏自己**走：rail 钉住时 margin-right 12、详情栏出现时
+ * margin-left 12；收起/浮出态两者都不占。`.pSplitRail` 的定位
+ * （`left: --p-rail-w + 1.5px`）与缝的几何完全不变，拖线不用动。
+ */
+.pBody {
+  position: relative;
+  display: flex;
+  flex: 1;
+  gap: 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+/*
+ * 三条竖线（C14 第三轮起，第十七轮多一条）：rail 右缘 / 详情栏左缘 /
+ * **外壳导航右缘**，都能拖着改宽。
+ *
+ * 命中区 9px，跨在栏与正文之间那道 12px 的缝上（线画在缝中，`:hover` 才显形）——
+ * 静置时这一屏和 C10 定稿一个像素不差，鼠标过去才看得到「这里能拖」。
+ * 宽度由宿主上的变量决定（参数台两条读 `.pBody` 的 `--p-rail-w` / `--p-aside-w`，
+ * 导航那条读 `.shell` 的 `--nav-w`；拖动时分隔条自己直接覆写，见 `SplitterC14.tsx`）。
+ *
+ * 定位的 +1.5 / −4.5 是让线心落在缝的中线 / 栏的 border 上，不是随手给的数
+ * —— 改之前先量。
+ */
+.pSplit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 9px;
+  cursor: col-resize;
+
+  /* 触屏上这是拖，不是滚 */
+  touch-action: none;
+}
+
+.pSplit::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: transparent;
+  border-radius: 1px;
+  transition: background 0.12s ease;
+}
+
+/* 悬停：主色的半透明版（rgba 与 --wb-primary 同源）。
+   原来用 --line-strong，截图里在预览窗口的 90% 缩放下几乎看不见 ——
+   提示线看不见就等于没提示 */
+.pSplit:hover::before {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+/* 拖动中：线是实心主色，松手前一直看得见它在哪 */
+.pSplit[data-on]::before {
+  background: var(--wb-primary);
+}
+
+/* 贴住默认值（吸附中）：线加粗一点，读数牌上多「默认」两个字 */
+.pSplit[data-snap]::before {
+  width: 4px;
+  margin-left: -2px;
+}
+
+/* 键盘聚焦：没这条键盘用户看不见焦点在哪（A38 同款处理） */
+.pSplit:focus-visible {
+  outline: none;
+}
+
+.pSplit:focus-visible::before,
+.pSplit:focus-visible[data-on]::before {
+  width: 4px;
+  margin-left: -2px;
+  background: var(--wb-primary);
+}
+
+/* rail 线：缝的中点 = rail 宽 + 6，命中区 9px 居中对齐过去 */
+.pSplitRail {
+  left: calc(var(--p-rail-w, 208px) + 1.5px);
+}
+
+/* 详情栏线：贴在详情栏左缘那条 border-left 上（栏内缘有 12px 内衬，盖不到内容） */
+.pSplitAside {
+  right: calc(var(--p-aside-w, 360px) - 4.5px);
+}
+
+/* 宽度读数牌：只在拖动中出现，跟着线走 */
+.pSplitChip {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--wb-primary);
+  border-radius: var(--r-md);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 0.1s ease;
+}
+
+.pSplitChip b {
+  font-weight: 600;
+}
+
+.pSplit[data-on] .pSplitChip {
+  opacity: 1;
+}
+
+/* 「默认」只在宽度贴住默认值（吸附中）时出现 */
+.pSplitChip i {
+  display: none;
+  font-style: normal;
+  opacity: 0.85;
+}
+
+.pSplit[data-snap] .pSplitChip i {
+  display: inline;
+}
+
+/*
+ * 左 rail：机型 / 版本树。C14 起有**三种形态**（作者的第一种压缩法：
+ * 「换成那种可以隐藏的悬浮的」）：
+ *
+ *   collapsed  收起 —— **宽度归 0**（C14 第四轮）。把手在页头，这一栏里
+ *              没有任何东西，占位就是纯空白 —— 作者圈着它说「那个空格
+ *              没有意义，那个空格不需要点击」。剩下的入口是：鼠标扫过
+ *              页头的把手，树立刻浮出来
+ *   float      悬停浮出 —— 整条 rail 绝对定位盖在正文左侧，鼠标离开就收。
+ *              不是抽屉：切版本仍然零点击（鼠标扫过把手，树立刻出来，
+ *              这一点是 C08 起立的规矩，不能被"省地方"破坏）
+ *   pinned     钉住 —— 占位展开、可拖宽（C11 及以前的唯一形态）
+ *
+ * `--p-rail-w` 只管展开态的宽度（pinned / float 共用）。缝（12px）改成
+ * margin —— 只有钉住时才占（见 .pBody 那条）。
+ */
+.pRail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 0;
+  min-height: 0;
+}
+
+.pRail[data-mode='pinned'] {
+  width: var(--p-rail-w, 176px);
+  margin-right: 12px;
+}
+
+/* 树那一层：常态就是普通的列内容器 */
+.pRailBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * 浮出态：**只有树这一层**绝对定位盖到正文上，`.pRail` 自己仍是 0 宽 ——
+ * 正文的宽度不变（第一版让整条 rail 脱离流，悬停时正文实测跳宽 36px，
+ * 内容跟着重排；那也是「浮出」最不该有的动静）。
+ *
+ * 左缘从 24px 收到 0（C14 第四轮）：那 24px 原来是给**栏里的把手**留的，
+ * 把手早已搬去页头 —— 留位就变成了白缝。
+ */
+/*
+ * 浮出态的宽度**另有一条底线 224px**（C14 第六轮）。
+ *
+ * 作者：「悬浮的一行比较好」—— 他圈的是浮出来的那棵树，说「它够宽的时候
+ * 才是一行，现在它变成两行了」。`--p-rail-w` 默认 176 是**钉住态**的压缩线
+ * （第五轮那条「内容不变、只把宽度压窄」）；浮出态不占版面（正文宽度不变，
+ * 见上面那段），没必要跟着一起挨那一刀 —— 224 让「中文名 + 英文名」横排
+ * 各自完整（横排需要约 180 内容宽 + 左右内衬 18），行就不会折成两行。
+ * 拖宽之后（> 224）仍以拖出来的宽度为准。
+ */
+.pRail[data-mode='float'] .pRailBody {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  width: max(var(--p-rail-w, 176px), 224px);
+  /* 四边内衬（作者：「它这个边距留的有点窄，悬浮的卡片的时候」）——
+     原来只有右侧 10px，树行贴着卡片左缘 */
+  padding: 8px 10px 10px 8px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-lift);
+}
+
+/*
+ * 把手（C14）：一个 24×24 的小方块，站在**页头**最左，不占 rail 的那一行高度
+ * —— 作者：「把它往上移，移到上面标题栏的位置，然后它可以倾斜 45°，
+ * 这样就不用白白地占一行位置了」。箭头斜 45° 指着展开的方向；
+ * 钉住时翻到 -135°（指回去）。
+ */
+.pRailHandle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-3);
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.pRailHandle svg {
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.pRailHandle:hover,
+.pRailHandleOn {
+  color: var(--wb-primary-deep);
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-soft);
+}
+
+.pRailHandleOn svg {
+  transform: rotate(-135deg);
+}
+
+.pRailHint {
+  /* 对照模式下这一行还挂着「全选 / 反选 / 清空」，要能容下它们 */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 2px 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.pRailTree {
+  /* 框选的橡皮筋画在这一层里（C14 第六轮，见 `.selBand`） */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 8px;
+  overflow: auto;
+}
+
+/* 机型一行：名字 + 版本数。它是分组名，不是可点的东西 */
+.pMg {
+  margin-bottom: 4px;
+}
+
+.pMgName {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 2px 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.pMgName em {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+/* 版本行：radio（单版本）/ checkbox（对照）。名字主、id 副 */
+.pVrow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  text-align: left;
+}
+
+.pVrow:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.pVrowOn {
+  color: var(--wb-primary-deep);
+  font-weight: 500;
+  background: var(--wb-primary-soft);
+}
+
+/*
+ * 选择记号：radio 圆 / checkbox 方，照 B02 的 .mark。直角方块 —— 圆角是控件事。
+ *
+ * 选中 = 蓝底 + **白色打勾**（C14 第二轮）。
+ * 原来是「蓝底 + 内嵌一圈白」，radio 看起来就是「圆环中间一点」。作者的原话：
+ * 「中间那一个…中间一点是很喜欢，还不如用打勾的」—— 12px 里一个点的辨识度
+ * 不如一勾，而且对照模式那个方块里本来就该是勾（矩形装勾是通行写法）。
+ * 形状（圆 / 方）仍然区分两种模式：单版本是「选一个」，对照是「勾几列」。
+ */
+.pVmark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+}
+
+/*
+ * 勾**常驻**、按 `data-on` 显隐（C14 第十一轮）：刷选时直接翻这一行的
+ * `data-on` 就能立刻画出/收掉那只勾 —— 走 CSS 才有这条零渲染的路。
+ */
+.pVmark svg {
+  display: none;
+  width: 10px;
+  height: 10px;
+}
+
+.pVmark[data-on='true'] svg {
+  display: block;
+}
+
+.pVmark[data-radio='true'] {
+  border-radius: 50%;
+}
+
+/* 选中：蓝底 + 白勾（勾读 currentColor，所以颜色在这一条上给） */
+.pVmark[data-on='true'] {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary);
+  color: var(--surface-solid);
+}
+
+/*
+ * 名字与 id 的排法跟着栏宽走（C14 第五轮）—— 和右栏「各版本取值」同一套。
+ *
+ *   窄（默认 176）竖排：横着排「名字 + id」两个都看不全（「快拆版260…」+
+ *                「FASTV…」），竖着排各自完整：上面名字、下面小字是 id；
+ *   宽（≥ 200）  横排：名字 + id 实际只要约 144px 内容宽，栏宽了之后竖排
+ *                的理由（同时完整放不下）不成立，还白占一倍行高。
+ *   形态由 ParamsPageC14 的 ResizeObserver 写在 .pRailBody 上。
+ */
+.pVtext {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pRailBody[data-form='wide'] .pVtext {
+  flex-direction: row;
+  gap: 5px;
+  align-items: baseline;
+}
+
+.pVname {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pVid {
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pVrowOn .pVid {
+  color: var(--wb-primary-deep);
+}
+
+/*
+ * 机型基底**跟版本长得不一样**（C14 第六轮，作者：「希望这个机型的基底
+ * 和他们那些不一样」）—— 但**机型之间一视同仁**（C14 第十七轮）。
+ *
+ * 第六轮分过两种：当前机型的亮 + 蓝竖线、别家的压暗。作者随后问
+ * 「为什么 a1 的基底这么特殊？其他的基底呢？」—— 于是取消分区：所有机型的
+ * 基底都长同一副样子（一条 2px 蓝竖线 + 正文色名字），一眼和版本行分得开。
+ * 它是不是差异的基准由矩阵列头说（那儿写着「A1 基底」），左树不再宣布。
+ *
+ * 不染色块：选中态已经是蓝底（`--wb-primary-soft`），再垫一层色就成了
+ * 「两种蓝」；竖线只占 2px，和选中态叠着也不打架。
+ */
+.pVrow[data-kind='base'] {
+  color: var(--text-1);
+  box-shadow: inset 2px 0 0 var(--wb-primary);
+}
+
+/* 对照模式里「正在改的那一版」的小角标 */
+.pTagOff {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  line-height: 14px;
+  color: var(--text-3);
+  border: 1px solid var(--line);
+}
+
+/* 正文栏 */
+.pMain {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 工具行：左 = 本模式的东西，右 = 历史 / 撤销 / 保存 */
+.pOps {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+  margin-bottom: 8px;
+}
+
+/* 按钮一组，窄正文下整组换行 —— 零散换行会把「放弃/保存」裁成半个字 */
+.pOpsBtns {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  align-items: center;
+}
+
+/* tab 行 = 一级参数领域。分组不再是控件 —— 它是下面卡片的卡头 */
+.pTabRow {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex: none;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+/*
+ * tab 直角 + 轻底色选中，不要胶囊（作者：可以有非常轻微的状态底色）。
+ * 计数一律灰字 —— 它不是状态，不上颜色。
+ */
+.pTab {
+  padding: 5px 10px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+}
+
+.pTab:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.pTab em {
+  margin-left: 2px;
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.pTabOn {
+  color: var(--text-1);
+  font-weight: 600;
+  background: var(--wb-primary-soft);
+  border-bottom-color: var(--wb-primary);
+}
+
+.pTabOn em {
+  color: var(--wb-primary-deep);
+}
+
+/* 可操作的小 chip（仅显示差异）：直角，不再是胶囊 */
+.pChip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.pChip:hover {
+  background: var(--surface-sunken);
+}
+
+.pChip em {
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.pChipOn {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: var(--wb-primary);
+}
+
+.pChipOn em {
+  color: var(--wb-primary-deep);
+}
+
+.pSearch {
+  /* 收短 —— 搜索不是这个页面的主操作，不配占一整条 rail 的宽度（作者） */
+  width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.pSearch:focus {
+  border-color: var(--wb-primary);
+  outline: 2px solid var(--wb-primary-soft);
+}
+
+.pScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+
+  /*
+   * 两列还是一列看**正文的实际宽度**，不看窗口宽（rail 和外壳导航都要从总宽里扣）。
+   * 这件事 C09 交给 CSS 容器查询（`container-type: inline-size` + `@container`），
+   * C14 改成 `ParamsPageC14` 里的 ResizeObserver 直接写 `data-cols`：
+   *
+   *   容器查询每次**尺寸变化**都要重新求值整棵子树 —— 实测拖窗口那一秒里，
+   *   布局自 90ms 里有 45ms 花在它上面，而且 900px 附近来回穿越时列数反复翻。
+   *   改成 ResizeObserver + 写 DOM 属性后只在跨阈值时动一次（还带滞后，见那个 effect）。
+   */
+}
+
+/*
+ * 正文空态（C14 第十七轮，作者：「默认不要帮我选任何的，可以空着留白加上
+ * 文案提示，需要选择」）。
+ *
+ * 两种做法里选了「留白 + 一句话」，没有用「灰色禁用的参数模版」：参数表是
+ * 所选机型/版本的派生（有哪些参数、值多少、能不能改全跟着选中对象走），
+ * 没选就编不出那一套 —— 摆一套假的进来，点也点不动，只会让人以为
+ * 「参数就在这，只是暂时改不了」。空着 + 说清从哪里开始，才是这里的事实。
+ *
+ * 占据整个正文区（不摆搜索框与 tab 行：没有数据可搜可筛）。
+ */
+.pBlank {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 24px;
+  text-align: center;
+}
+
+.pBlankTitle {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.pBlankNote {
+  max-width: 44ch;
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.9;
+  color: var(--text-3);
+}
+
+.pScroll[data-cols='1'] .pGrid2 {
+  grid-template-columns: 1fr;
+}
+
+/*
+ * 数字步进器的**定宽容器**（132px）：框随内容伸缩的话，同一页里一行一个宽度 ——
+ * 「数字长一点框就长一点」看着像两套组件（作者）。只在 row 形态生效，
+ * 对照矩阵的格子仍按列宽走。
+ *
+ * C14 补上**框内怎么分**：输入区吃掉剩余宽度（数字仍右对齐、紧贴单位），
+ * 箭头被推到框的**右缘**。C09 只定了框宽、没定框内分配，于是箭头跟着数字走 ——
+ * 数字短的那一行箭头就靠左、后面空出一截（作者：「它那个箭头应该始终是靠右的」）。
+ * 现在所有行的箭头落在同一条竖线上；输入区自己有 min-width，不会缩到读不出数。
+ */
+.edNum {
+  display: inline-flex;
+  width: 132px;
+  min-width: 0;
+}
+
+.edNum > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.edNum input {
+  flex: 1 1 auto;
+}
+
+/*
+ * 一行参数（B02 的密度）：名称 / 控件（常驻）/ 状态。
+ * B02 的分法：范围与说明是详情面板的事，不占行内的列 —— 两列分组卡里
+ * 每张卡不宽，四列硬摆就是 C08 那种「出厂默 / 认」的切碎样。
+ * 名字优先于控件（B02 注释原话）：窄卡先压控件，别把名字挤没了。
+ * C14 把键名从行上拿掉了（作者：那是看实现细节，不是看参数信息）。
+ */
+.pRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+
+  /*
+   * 行高**一律按里面最高的那个控件定**（C14，`--p-ctl-h` 见 `.pPage`）。
+   *
+   * 作者的原话：「我之前不是说要把这些高度做成一致的吗？但是我说的是**外面
+   * 那一行**啊 —— 里面的这一些开关呀、选择切换器呀，它的高度不用撑得这么高」。
+   * 要对齐的是**行的下缘线**，不是一个一个把控件撑到同一个高。
+   *
+   * 量过（Ultra 1760×900，100%，擦料 tab 的 27 行，改前）：行里最高的控件是
+   * 步进器 34px（`.box` 自己钉死的），于是**步进器行 43px、其它行 38px** ——
+   * 一列扫过去下缘线参差。现在地板 = 34 + 上下内衬 4×2 + 下边框 1 = 43px，
+   * 控件各自按自然高度居中：步进器 34、分段选择器 30.8 / 29.3（长文案降一号字）、
+   * 文本框 28 —— 三者那几像素的差别落在行内，不再影响行的节奏。
+   *
+   * 量过改后：Ultra 27 行全是 43；Compact 27 行全是 39（地板跟着 `--p-ctl-h` 收到 30）。
+   */
+  min-height: calc(var(--p-ctl-h, 34px) + 9px);
+  padding: 4px 12px;
+  font-size: var(--fs-body);
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+
+  /*
+   * 视口之外的行**不参与布局与绘制**（C14）。
+   *
+   * 参数台一次最多 12 张卡、70 多行，每行还常驻着步进器/分段/开关这些活控件 ——
+   * 拖窗口尺寸时真正影响观感的只有眼前那十几行，其余几十行却在陪着一起重排、重绘
+   * （这就是 C07 流畅而 C08 之后卡的差别：C07 每行是纯文字，805 个元素；
+   * C08 起每行挂控件，1892 个元素、226 个交互控件）。
+   *
+   * `content-visibility: auto` 让浏览器跳过不在视口里的行；`contain-intrinsic-size`
+   * 给个估值，`auto` 关键字会记住实测高度，所以滚动条长度不会跳。
+   * 量过：同一次拖动，布局 90 → 51ms、绘制 113 → 78ms；与「去掉容器查询」一起上，
+   * 布局 90 → 35ms。
+   */
+  content-visibility: auto;
+  /* 估值跟着行高走（C14）：`contain-intrinsic-size` 说的是**内容盒**，
+     而内容盒就是那个最高的控件 —— 写死 40 会比实际高 10px，滚动条长度会跳一下。
+     `auto` 关键字仍会记住实测高度，这只管「还没渲染过」的那一帧。 */
+  contain-intrinsic-size: auto var(--p-ctl-h, 34px);
+
+  /*
+   * # 「自己接管这件事」试过，量完撤了 —— 数字留在这儿，免得下次再试一遍
+   *
+   * 同一次拖动窗口尺寸，CDP tracing 切出来的布局耗时（ms）：
+   *
+   *   本稿（`content-visibility: auto`，交给浏览器判）   50
+   *   一次性把视口外 25 行藏掉（**拖动前**就藏好）        29   ← 这笔钱真实存在
+   *   实时按视口切换 `content-visibility: hidden`         58
+   *   实时按视口切换 `visibility`（React state 驱动）      75
+   *   实时按视口切换 `visibility`（直接写 DOM，不进 React） 68
+   *   摘掉视口外的控件（DOM 1896 → 1700，行还在）          46
+   *   行抽成独立 memo 组件（多一层 props 与 fiber）        60 上下
+   *
+   * 差在**切换频率**：拖动时窗口尺寸一直在变，每一行都在反复进出视口，每次切换都要
+   * 重算样式、重排一次 —— 切换本身比「让这几行陪着重排」更贵（样式重算 23 → 49ms）。
+   * 虚拟化在**滚动**列表里成立，是因为滚动时很少有几行穿越边界；拖尺寸时每一行都在穿越。
+   * 那 29ms 只有「一次性藏好、之后不动」才拿得到，实时拿不到。
+   */
+}
+
+.pRow:hover {
+  background: var(--surface-sunken);
+}
+
+.pRowOn {
+  background: var(--wb-primary-soft);
+}
+
+.pRowName {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 96px;
+}
+
+.pRowLabel {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.pRowText {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pRowLabel em {
+  flex: none;
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+/* 控件常驻：这里是「改」的地方，点它不等于选中这一行 */
+.pRowCtl {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+}
+
+/*
+ * 多行 G-code 那一行的控件列（C14 第十八轮）：**只有它允许被压**。
+ *
+ * 别的行不让位是对的（`.pRowCtl` 是 `flex: none`：控件一旦被压就会切成
+ * 「出厂默 / 认」那种碎片）。但 G-code 框是一块 172px 的东西，窄窗口（Mini 400）
+ * 里一行只有 ~330：不让它收，被挤出去的就是右边那枚状态徽章 ——
+ * 而 G-code 框收窄只是少看几个字符，框里照样能滚。让位顺序：
+ * 「名字缩到 96 → G-code 框再收 → 都不行才轮到底下那句话」。
+ */
+.pRowCtlG {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/*
+ * 不适用行的行内短句（B02 的词汇）：要 XX = YY 才可改 —— 是条件，不是错误。
+ *
+ * C14 把上限从 180 放到 260，并且**允许它收缩**：作者的原话是「这些文字被省略了
+ * 看不到」。量过（行宽 730）：最长的那句「要 擦料塔速度与质量 = 自定义 才可改」
+ * 需要 213px，而 180 的上限把它硬裁掉一截 —— 提示被裁掉就等于没提示。
+ * 260 给最长的几句留了余量，名字那一列（flex: 1 1 auto、下限 96px）照样吃得饱。
+ *
+ * `flex: 0 1 auto` 而不是 `none`：小窗（Mini 400）里一行只有 ~330px，
+ * 不许收缩的话这一行会整个溢出、把右边的控件挤出卡片。现在它让位顺序是
+ * 「名字先缩到 96 → 提示再缩」，真的摆不下才省略号（全文仍在 title 上）。
+ */
+.pRowBlock {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--wb-warn, #b45309);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 状态标签：灰 = 跟别人走，主色 = 这台机器/这个版本自己定的，橙 = 手上还没交出去。
+   2px 圆角 —— 徽章几乎直角（b03 的 --w-r-tag 同值）。
+
+   **宽度按四个字定死**（C14）：四种状态里最长的是「出厂默认 / 机型默认 / 本版修改」，
+   都是四个字；「已修改」只有三个字，随文字伸缩的话它比别人窄一档，
+   同一列里上下的徽章宽窄不一、行尾的竖线也跟着参差（作者：「徽章是最小宽度，
+   大家都一致就不用变来变去」）。min-width 取「四个字 + 两侧内边距 + 边框」，
+   短的一个字就居中留白 —— 宽度一样，位置一样。 */
+.pStatus {
+  box-sizing: border-box;
+  flex: none;
+  min-width: calc(4em + 14px);
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  color: var(--text-3);
+  text-align: center;
+  white-space: nowrap;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.stFactory {
+  color: var(--text-3);
+}
+
+.stMachine {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: transparent;
+}
+
+.stVersion {
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border-color: var(--line-strong);
+}
+
+.stDirty {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+/* 不适用的一格：灰底 + 灰字，位置照旧占着 —— 藏起来的话，人记不住刚才在哪 */
+.stOff {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-color: transparent;
+}
+
+/* ---------- 已弃用（上游 `deprecated`，C14） ---------- */
+
+/*
+ * 已弃用是**第三档**：既不是「有值可改」，也不是「条件不成立」。判据在派生层
+ * （`Cell.deprecated`），这一节只管长相。
+ *
+ * 作者两条要求原话：「弃用应该是画一条横线，然后不让去选择吧，或者选择了不让保存，
+ * 然后我打开右侧的抽屉，里面它也应该显示弃用 什么什么呀」。落到三处：
+ *
+ *   行     名字划一条线、字压暗（**不铺灰底** —— 那是「不适用」的长相），
+ *          右边那枚状态位换成灰的「已弃用」，控件照旧摆着但改不动
+ *   抽屉   名字同样划线 + 副标题挂一枚「已弃用」；「基本信息」第一行就是「状态」；
+ *          「各版本取值」每一层写「已弃用」，不再说「要 X = Y 才可改」
+ *   矩阵   名字划线；格子写「已弃用」、垫灰底（不是「不适用」那条斜纹）
+ *
+ * 「不让改」的闸在 `store/cellWrite.ts`（写值的唯一出口），长相只是第一道。
+ */
+/*
+ * 那条线**用红色**（作者第二眼：「它是那个灰色的线不明显呀，你要不然就用红色的线
+ * 更明显」）。
+ *
+ * 记一句为什么原来给的是灰：这一稿的颜色分层里红只给「阻断 / 危险」，
+ * 弃用不是错误（值还在、读得到）。但线的可读性优先 —— 灰线压在同色系的灰字上
+ * 几乎看不见，而线本身不是状态，它只是「这一项要退场」的记号。
+ */
+.pRowDep .pRowText {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+}
+
+/* 控件压暗一档 —— 与「不适用」的行同一条处理：看得见、改不动 */
+.pRowDep .pRowCtl {
+  opacity: 0.55;
+}
+
+/*
+ * 「已弃用」那枚小徽章（抽屉的副标题与「基本信息」都在用）。
+ *
+ * `flex: none` + `white-space: nowrap` **不能省**：它作为 `.pKvV`（flex、可换行）
+ * 的子项会被压到只剩一个字宽，三个字就竖着摞了 —— 作者看到的正是那个样子，
+ * 他的要求是「徽章始终是横着的，它就是横着放的」。
+ */
+.pDepTag {
+  display: inline-block;
+  flex: none;
+  padding: 0 5px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  color: var(--dep-red);
+  white-space: nowrap;
+  background: var(--dep-red-soft);
+  border: 1px solid var(--dep-red-line);
+  border-radius: 2px;
+}
+
+/*
+ * 列表状态位上那枚：与「出厂默认 / 机型默认 / 本版修改 / 已修改」**同一副骨架**
+ * （`.pStatus` 定了四字宽，行尾的竖线才不参差），只换一身「禁用的红」。
+ */
+.pStatusDep {
+  color: var(--dep-red);
+  background: var(--dep-red-soft);
+  border-color: var(--dep-red-line);
+}
+
+/* 抽屉头 h3 上那条线 */
+.pDHeadT h3[data-dep] {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+}
+
+/* 「基本信息 · 可选项」那一行里被划掉的那一档（外壳见 ParamDetailC14） */
+.pDepStrike[data-dep] {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+}
+
+/* 「基本信息」里那一行「状态」的解释句 */
+.pDepNote {
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text-2);
+}
+
+/* 「各版本取值」那一层改不动时的说法：**灰**，不是「不适用」那句的橙。
+   前一层 `.pEdOff` 在文件里更靠后，所以这里带上 `.pEdEditor` 拿特异性 */
+.pEdEditor .pEdOffDep {
+  color: var(--text-3);
+}
+
+/* 矩阵：名字划线 */
+.pKey[data-dep] .pKeyName {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+}
+
+/* 矩阵的格子：灰底（「不适用」那条斜纹是另一个意思，不借用） */
+.cellDep {
+  background: var(--surface-sunken);
+}
+
+/* ---------- 正文：分组卡（最多两列） ---------- */
+
+/*
+ * 分组卡**最多两列**（作者对五列的判语：像仪表盘）—— 这是参数工作区，
+ * 不是卡片墙。同排的卡**等高**（grid 默认 stretch）：两行的组撑到和旁边
+ * 三行的组一样高，下缘对齐，不再有的空有的不空。
+ * 直角：1px 边框、没有阴影（B02 的规则：卡片有边框没阴影，浮层才有阴影）。
+ */
+.pGrid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-bottom: 10px;
+}
+
+/* 正文摆不开两列（每张卡要放下 名称+控件+状态 ≈ 420px）就退一列 ——
+   退不退由 `.pScroll[data-cols='1']` 说了算（见上面那条规则与页面里的 ResizeObserver） */
+
+.pGroup {
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.pGroupHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--line);
+}
+
+.pGroupHead em {
+  margin-left: auto;
+  font-style: normal;
+}
+
+/*
+ * 父子缩进：子参数比父参数再进一层（**一层一块**，按 `data-depth` 铺几块就是几级）。
+ *
+ * C09 只留了 14px 空白 —— 等于没缩进：作者是翻了注册表才发现「自定义速度」是
+ * 「斜肋打印速度」的子项；而且当时一律按「有父就 1 级」算，「自定义速度」与
+ * 它父的缩进一模一样，看着还是同一层的两行。C14 两级都治：级数跟着父累进
+ * （见 `treeRowsOf`），每一级画一条竖引线。
+ *
+ * 线画在 `<i>` 自己的左边框上、用 `align-self: stretch` 撑到文字那一行的高度 ——
+ * 空盒子靠 `height` 撑不出可用的线（`baseline` 对齐会让它贴到基线上面去）。
+ */
+.pIndent {
+  flex: none;
+  align-self: stretch;
+  width: 14px;
+  margin-right: 2px;
+  border-left: 1px solid var(--line-strong);
+}
+
+/* 不适用的行：整行灰下去，但仍然占着位置（判据在前置条件，不在显示） */
+.pRowOff {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+}
+
+/* 行上那句橙色提示已由 .pRowBlock 承担；不适用的行控件再压一档 */
+.pRowOff .pRowCtl {
+  opacity: 0.55;
+}
+
+/* ---------- 右栏：参数编辑区（常驻的三栏工作台） ---------- */
+
+/*
+ * 版本 / 参数列表 / 参数编辑 —— 它是页面的**一个区域**，不是弹出来的东西：
+ * 不悬浮、不覆盖、没有 ×（作者定的交互模型）。与正文之间一条分隔线，直角。
+ */
+.pAside {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  /* 宽度可拖（C14 第三轮）：那条 border-left 就是作者圈的第二条竖线，见 .pSplitAside */
+  width: var(--p-aside-w, 360px);
+  min-height: 0;
+  /* 与正文的缝（原来是 .pBody 的 gap，C14 第四轮改挂到栏自己 —— 栏不出现就不占缝） */
+  margin-left: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.pAsideHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: none;
+  padding-bottom: 8px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.pAsideHead span {
+  flex: 1;
+}
+
+/* 搜索没有命中时的空态（正文里） */
+.pAsideEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font-size: var(--fs-label);
+  line-height: 2;
+  color: var(--text-3);
+  text-align: center;
+  border: 1px dashed var(--line-strong);
+}
+
+/* ---------- 参数详情（右栏正式编辑区） ---------- */
+
+/*
+ * 面板回答五件事：当前值 / 基本信息 / 各版本取值 / 作用域 / 技术信息（折叠）。
+ * 键名不再是头上的副标题 —— 想深究的人点开「技术信息」（作者：key 留给
+ * 开发者/调试界面）。分段之间用细线分隔，不再一层套一层白卡。
+ */
+.pDetail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.pDHead {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex: none;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pDHeadT {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pDHeadT h3 {
+  overflow: hidden;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pCardX {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-3);
+  border-radius: 2px;
+}
+
+.pCardX:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.pDetailScroll {
+  flex: 1;
+  min-height: 0;
+  padding-top: 10px;
+  overflow: auto;
+}
+
+/* 详情的分段：一条细线一个话题，不再每段一张白卡 */
+.pDSection + .pDSection {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pDSecTitle {
+  margin-bottom: 6px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.pDVal {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+/* 当前值是大字 —— 这张面板存在的理由就是「我现在是什么值」 */
+.pCardNum {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pCardNum em {
+  margin-left: 4px;
+  font-size: var(--fs-label);
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.pCardEd {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+
+/*
+ * 各版本取值 = 编辑区。**每一行的值本身就是控件**（作者定的核心交互）：
+ * 点哪一行改哪一层，不用回左树切版本。基底也在里面 —— 改一次动一片，
+ * 这层关系交给「恢复」按钮的悬停提示，不摆说明。
+ * 用 grid 而不是 flex：控件的**起点各行对齐**（flex 下名称长短会把控件推得参差）。
+ */
+.pEdRows {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 「各版本取值」每层一块 —— **只有两种状态，整行一起切**（C14 第十二轮）。
+ *
+ * 行里就两个块，各自是一个整体（作者点名的布局模型）：
+ *
+ *   identity = 徽章 + 版本身份
+ *   editor   = 控件 + ↶
+ *
+ *   窄（默认 320）  identity           —— 「我是谁」占一行
+ *                   editor（右对齐）    —— 「怎么改」占一行，输入框贴右
+ *   宽（≥ 400）     identity | editor   —— 并排一行
+ *
+ * **不用 `flex-wrap`** —— 那正是作者不要的「大家各自乱换行」：两个块要么并排、
+ * 要么上下，不存在「本版跑到左边、标题在中间、输入框掉到下面」那种半换行。
+ * 窄态 editor 里 ↶ 在左、控件在右（`row-reverse` + space-between），
+ * 与作者圈的那张图一致；宽态恢复「控件在前、↶ 在后」并整体贴右。
+ */
+.pEdRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'id id'
+    'ed ed';
+  gap: 4px 8px;
+  align-items: center;
+  padding: 6px;
+  font-size: var(--fs-body);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 宽态（这块面板 ≥ 400px）：两块并排。`data-form` 由 ParamDetailC14 的
+   ResizeObserver 写（不进 React，拖右栏竖线时这几十行不参与重渲染） */
+.pEdRows[data-form='wide'] .pEdRow {
+  grid-template-areas: 'id ed';
+}
+
+/* 左侧选中的工作上下文那行：浅底标出 —— 它是「现在主要在改的」 */
+.pEdRowOn {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+}
+
+/* 「我是谁」：徽章 + 名字，一个整体。名字**不折行**（长了省略号）——
+   折行会把这一块撑高，整个两行模型就散了 */
+.pEdIdentity {
+  grid-area: id;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 状态徽章：两字小徽章（不再沿用 `.pStatus` 那条「四个字」的 min-width） */
+.pEdIdentity .pStatus {
+  flex: none;
+  min-width: 0;
+  padding: 0 7px;
+}
+
+.pEdName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pEdName em {
+  margin-left: 5px;
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+/* 「怎么改」：控件 + ↶，也是一个整体 —— 手势 / 布局都当它是一块 */
+.pEdEditor {
+  grid-area: ed;
+  display: flex;
+  /* 窄态：↶ 在左、控件在右（作者圈的那张图），输入框仍然贴右缘 */
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 宽态：控件在前、↶ 在后，整块贴右 —— 不再一左一右摊开 */
+.pEdRows[data-form='wide'] .pEdEditor {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+/* 控件本体：与中间列表同一个组件（form="row"），宽度交给控件自己 */
+.pEdCtl {
+  display: flex;
+  min-width: 0;
+}
+
+/*
+ * 前置条件不成立的层：看得见、改不动 —— 一句橙字说清要什么。
+ *
+ * C14：宽度从写死的 124 改成**吃满右侧那一块**（`flex: 1 1 auto`）。
+ * 124 是照「值」的宽度定的，而这里放的是「要 X = Y」——量过：最长的那句
+ * （「擦料塔速度与质量 = 自定义」）要 165px，在 124 里照样被裁成
+ * 「擦料塔速度与质量 = 自…」。这块面板窄态右栏能给到 ~259px，装得下；
+ * 摆不下时才省略（全文仍在 title 上）。
+ */
+.pEdOff {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--wb-warn, #b45309);
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 「恢复默认」是一枚小操作，常驻在 editor 这一块里（窄态左、宽态右）——
+   两张手稿里它都在（不是悬停才出现）；占位恒为 18px，行高不因它有无而跳 */
+.pEdReset {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.pEdReset:hover {
+  color: var(--wb-primary-deep);
+  background: var(--surface-sunken);
+}
+
+/* 没有可恢复层的行占住同一个位置 */
+.pEdResetPh {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+/* 技术信息：最底部、最弱的一档 —— 开发信息从主阅读路径里拿走 */
+.pDTech {
+  margin-top: 14px;
+  padding-top: 8px;
+  opacity: 0.85;
+}
+
+.pDesc {
+  margin: 8px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* 详情里的键值对：两列网格，右列可换行（范围那一格会长） */
+.pKv {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: var(--fs-label);
+}
+
+.pKvK {
+  color: var(--text-3);
+}
+
+.pKvV {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text-1);
+  word-break: break-all;
+}
+
+/*
+ * 抽屉里「属于 X 的子参数」那个 X（C14）—— 它是个入口，但不该长得像主操作：
+ * 主色文字、无底无边，悬停才划线。点了就换抽屉里看的参数。
+ */
+.pKvLink {
+  padding: 0;
+  font: inherit;
+  color: var(--wb-primary-deep);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pKvLink:hover {
+  text-decoration: underline;
+}
+
+/* 批量修改面板在右栏里共用这个 flex 容器（不再带边框 —— 分隔交给 .pAside） */
+.pCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pCardHead {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.pCardHead h3 {
+  flex: 1;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.pEdNum {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  background: var(--surface-solid);
+  border: 1px solid var(--wb-primary);
+  border-radius: 4px;
+}
+
+/*
+ * 多行 G-code 的框（C14 第十八轮重做：上色 + 行号 + 角上一枚「打开编辑器」）。
+ *
+ * # 两条上一轮定下、这一轮不动的
+ *
+ * 1. **`resize: none`**。`<textarea>` 的 UA 默认是 `resize: both` —— 右下角自带
+ *    拖拽手柄，拖着能同时改宽和高，而且改不回默认（作者：「我拖动它改了它这个
+ *    里面这个容器的宽高之后，改不回默认的了」）。拖动写的是**行内 style**，
+ *    React 不管它、也不进撤销栈，只有刷新才还原。锁掉。
+ * 2. **框高由布局说了算**：行上 88（与其它行一个地板高度），内容长了在框里滚；
+ *    要看全，用角上那枚按钮开模态框（这一轮改的，上一轮是就地撑高）。
+ *
+ * # 两层叠着画（见 `GcodeEditor` 文件头）
+ *
+ *   `.pGcePre`  只读的着色层，`aria-hidden`，绝对定位铺满
+ *   `.pGceTa`   真正的输入框，**字是透明的**，只留光标与选区
+ *
+ * 所以 `.pGcePre, .pGceTa` 那一条里的**字体、字号、行高、内衬**必须两处完全一样 ——
+ * 少一样字就错位（这是这套办法唯一的坑，写在一处就是不想让它分家）。
+ */
+.pGce {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  /* 圆角要裁掉里面两层的方角 */
+  overflow: hidden;
+  background: var(--surface-solid);
+  border: 1px solid var(--wb-primary);
+  border-radius: 4px;
+}
+
+/* 行上：定高，超出在框里滚（上一轮量过的那 88） */
+.pGce[data-size='inline'] {
+  height: 88px;
+}
+
+/*
+ * 模态框里：吃满给它的那一块高。
+ *
+ * 用 `min(420px, 46vh)` 而不是写死 420：模态框自身被外壳的窗口高度卡着
+ * （`Modal` 的 `max-height: 100%`），在小窗口里写死就会把标签栏与页脚挤出去。
+ * 窄档再各收一档 —— Mini（400×560）里 420 比半页还高。
+ */
+.pGce[data-size='modal'] {
+  height: min(420px, 46vh);
+}
+
+[data-density='compact'] .pGce[data-size='modal'] {
+  height: min(340px, 46vh);
+}
+
+[data-density='mini'] .pGce[data-size='modal'] {
+  height: 240px;
+}
+
+/* 改不动的那些层：描边退一档（与行上禁用控件同一条处理） */
+.pGce[data-off] {
+  border-color: var(--line-strong);
+}
+
+.pGceBox {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * 行号槽（只在模态框里出现）：自己不滚，跟着输入框的 scrollTop 走
+ * （同步写在 `GcodeEditor` 的 `sync` 里）。
+ *
+ * 第十九轮修：它原来**不在**下面那条「共用的尺子」里 —— 字体、行高全靠继承，
+ * 量出来是 18px / monospace，而代码两层是 15px / ui-monospace。行号越大偏得
+ * 越多：到第 10 行累计漂移 23.7px，最后一行代码正好对到「9」的行号上，
+ * 「10」孤零零指着空白 —— 作者看到的「第 10 行空出来了」大半是它。
+ */
+.pGceNum {
+  flex: none;
+  overflow: hidden;
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--line);
+  text-align: right;
+  user-select: none;
+}
+
+/* 三层共同的那把尺子（着色 / 输入 / 行号槽）—— 改这里就是三层一起改，只改一层就会错位 */
+.pGcePre,
+.pGceTa,
+.pGceNum {
+  margin: 0;
+  padding: 4px 6px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  /*
+   * 行高跟着字号走（`+3` 就是原来那副行距：12.5px 的字 ≈ 15.5px 一行）。
+   *
+   * 写死 18px 的话，行上那个 88px 高的框只能露出 4 行（改前是 5 行多一点，
+   * 作者截图里那一块正是那个样子）—— 少一行就是「更看不全」，
+   * 与这一轮「要看清」的题目相反。
+   */
+  line-height: calc(var(--fs-label) + 3px);
+  /* 不换行（见 GcodeEditor 文件头第 1 条：两层的折行算法不一样） */
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* 右上角那枚按钮压着第一行的尾巴 —— 右内衬让出来 */
+.pGce[data-size='inline'] .pGcePre,
+.pGce[data-size='inline'] .pGceTa {
+  padding-right: 24px;
+}
+
+.pGcePre {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--text-1);
+}
+
+.pGceTa {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 字交给下层画 */
+  color: transparent;
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  caret-color: var(--text-1);
+}
+
+.pGceTa:disabled {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 选区的底色照旧给一层 —— 字是透明的，选区里看到的还是下层那些颜色 */
+.pGceTa::selection {
+  background: var(--wb-primary-soft);
+}
+
+/*
+ * 上色的那三类（`arg` / 空白不上色，跟着正文色走）。
+ *
+ * 指令给**工作台蓝**（作者要的「按 G-code 的那种去显示它的颜色」，就是这一件事）；
+ * 注释压成灰斜体（真数据里是中文，`L803;此处使喷嘴降温`）；`[AUTO]` 变量给橙 ——
+ * 它与行上那句「要 X = Y 才可改」同色：都是「这里不是字面量」的记号。
+ */
+.pGcCmd {
+  color: var(--wb-primary-deep);
+  font-weight: 600;
+}
+
+.pGcVar {
+  color: var(--wb-warn, #b45309);
+  font-weight: 600;
+}
+
+.pGcCmt {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/*
+ * G-code 框外面那层壳：定位上下文（右上角那枚按钮）+ **框的宽度**。
+ *
+ * # 宽度为什么要写死 172
+ *
+ * 上一轮这里是 `width: 100%`：那时框里是一个 `<textarea>`，它有**自己的固有宽度**
+ * （UA 给的 `cols` 二十来个字符），所以「100%」虽然解不出来，整块也照样撑到 ~172。
+ * 这一轮框里换成了两层（着色层 + 透明输入框，见 `GcodeEditor`），
+ * **两层都不带固有宽度** —— 壳就塌成了一小条（量过：30px，只有内衬宽）。
+ * 所以宽度写在这儿，一处说了算：
+ *
+ *   行上 / 右栏     172px（作者一直在看的那个尺码）
+ *   矩阵的格子      吃满（`.cellEd > *` 那条 `width: 100%` 更具体，照旧赢）
+ *
+ * `min-width: 0` 是给窄窗口留的：行上的 ctl 让位时它跟着收，
+ * 不会把右边那枚状态徽章顶出卡片（见 `.pRowCtlG`）。
+ */
+.pGwrap {
+  position: relative;
+  display: block;
+  width: 172px;
+  min-width: 0;
+}
+
+/*
+ * 「打开编辑器」。压在这块框的右上角（作者点名的位置：这个框框这个容器里面的右上角）。
+ *
+ * 它开的是**模态框**（这一轮改的，上一轮是把这一块就地撑高）：作者说得清楚 ——
+ * 「给我一个按钮才能打开模态框，不要点击就打开」，所以框本身照旧就地可改，
+ * 弹不弹只由这一枚说了算。图标是「开一个新窗口」那个记号。
+ */
+.pGbig {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--text-3);
+  background: var(--surface-solid);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.pGbig:hover {
+  color: var(--wb-primary-deep);
+  border-color: var(--line);
+}
+
+.pGbig:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+/* 模态框页脚左边那句话（模态框的页脚是 flex-end，它靠 margin-right: auto 站左边） */
+.pGmNote {
+  margin-right: auto;
+  padding-right: 12px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.pGmNote b {
+  color: var(--wb-warn, #b45309);
+  font-weight: 600;
+}
+
+/* ---------- 批量修改 ---------- */
+
+.pBatchRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pBatchChips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pBatchVal {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+
+.pLink {
+  font-size: var(--fs-label);
+  color: var(--wb-primary-deep);
+}
+
+.pLink:hover {
+  text-decoration: underline;
+}
+
+/* 对照模式的版本横条 */
+.pVerBar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* ---------- 对照矩阵：勾选列 + 状态列 ---------- */
+
+.pPick {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  border-left: 0;
+}
+
+/*
+ * 行首那枚**单选圆点**（C14 第十五轮）。
+ *
+ * 参数从「一批」收成「一个」之后，勾选框就不诚实了 —— 圆点才说明
+ * 「只能选一个」（作者：「不能多选不同的参数，一行就是对应的多个版本」）。
+ * 14px 的圈 + 按下后一颗实心点，与左树那枚方勾同源（同一套选中色）。
+ * gcode / 长文本这些行**不画**这枚点（没有的入口好过灰掉的入口）。
+ */
+.pPickDot {
+  display: grid;
+  /* `flex: none` 不能省：这一格的内衬由 `.mRow > span` 那条（0,1,1）说了算，
+     可用宽只有 8px —— 允它收缩的话 14px 会被挤成 8×14 的**竖椭圆**
+     （作者一眼看出来：「它不够圆呀」）。不缩、居中溢出，才是正圆 */
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.pPickDot:hover {
+  border-color: var(--wb-primary);
+}
+
+.pPickDot[data-on='true'] {
+  border-color: var(--wb-primary);
+}
+
+.pPickDot[data-on='true']::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--wb-primary);
+  border-radius: 50%;
+}
+
+/* 右栏顶上那排页签：参数详情 / 批量修改（C14 第十五轮） */
+.pAsideTabs {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.pAsideTab {
+  padding: 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pAsideTab:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.pAsideTabOn {
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: var(--wb-primary);
+}
+
+.pState {
+  flex: none;
+  width: 64px;
+  justify-content: flex-end;
+}
+
+.pTagDiff,
+.pTagSame {
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  border-radius: 2px;
+}
+
+.pTagDiff {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+
+.pTagSame {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+}
+
+.pKeyName {
+  font-size: var(--fs-body);
+  color: inherit;
+  text-align: left;
+}
+
+.pKeyName:hover {
+  color: var(--wb-primary-deep);
+  text-decoration: underline;
+}
+
+/* 对照矩阵的同一级缩进（C14：级数跟着父累进，所以这里也要有 2 级） */
+.pKey[data-depth='1'] {
+  padding-left: 26px;
+}
+
+.pKey[data-depth='2'] {
+  padding-left: 42px;
+}
+
+/*
+ * 选中行只染**参数名那一段**，不铺整行。
+ * 整行铺色会跟格子自己的底色撞车：hover 灰、差异绿、脏红，
+ * 一个选中的蓝底垫在下面就是三种颜色拼一行（作者截图里的「颜色不一样」）。
+ */
+.mRowOn > .pKey {
+  background: var(--wb-primary-soft);
+  box-shadow: inset 2px 0 0 var(--wb-primary);
+}
+
+/*
+ * 对照模式的差异格：浅绿底。
+ * 只标「跟**机型基底**不一样」，不标「谁对谁错」 —— 那不是这一页能判的事。
+ *
+ * 原先还常驻一个 ↑ 角标，C14 第四轮拿掉了（作者：「箭头是什么意思？
+ * 向上的箭头在右边占个位置」）—— 差异由底色承担，符号是冗余的；
+ * 基准值挪进格子的 title（hover 可见）。
+ */
+.cellDiff {
+  background: var(--accent-soft);
+}
+
+/* ---------- C14 第六/七轮：刷选 + 跨机型对照 ---------- */
+
+/*
+ * 全选框（作者：「全选反选清空没必要，只留一个框框在文案左边就好」）。
+ * 左树那枚的文案是「勾选要对照的列（可跨机型）」，矩阵那枚就一个字「全选」；
+ * 三态：全选中 / 部分（横杠）/ 没勾。反选留在键盘上（Ctrl+I），不给按钮。
+ */
+.pAll {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pAll input {
+  margin: 0;
+  accent-color: var(--wb-primary);
+}
+
+.pAll:hover {
+  color: var(--text-1);
+}
+
+/*
+ * 刷选（按住拖过去）的容器：拖动时别让文字被顺手选中 —— 那是刷选最大的敌人
+ * （拖半路一片蓝，松手还可能把拖选打断）。
+ */
+.pRailTree,
+.matrix {
+  user-select: none;
+}
+
+/*
+ * 批量修改面板里的全选 / 反选（那一排目标 chip 有两三打，按钮留在那里）。
+ * 做成 12px 的小方块而不是 `.btn` —— 这一行已经很挤，按钮不能比字还大。
+ */
+.pMiniOps {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.pMiniBtn {
+  padding: 0 5px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  color: var(--text-3);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.pMiniBtn em {
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-2);
+}
+
+.pMiniBtn:hover {
+  color: var(--wb-primary-deep);
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-soft);
+}
+
+/*
+ * 跨机型的列：**只垫一层灰，不染色**（作者：「加上不同颜色的背景，
+ * 那样会不会很乱」—— 会。这一屏已经在用绿（差异）/ 红（脏）/ 蓝（选中）
+ * 三套颜色，再来一套彩色就没有读法了）。
+ *
+ * 机型身份由列头那枚小字机型名承担，灰底只负责说「这几列不是当前这台」。
+ */
+.pColCross {
+  background: var(--surface-sunken);
+}
+
+.cellCross {
+  --x-bg: var(--surface-sunken);
+}
+
+/* 批量目标 chip 不再区分「当前机型 / 别的机型」的线型 ——
+   名字里已经写着机型了（C14 第十五轮，作者：「为什么 A1 的是实线，其他的
+   都是虚线」）。原来那条 `.pChipCross`（虚线）随之删掉 */
+
+/* 「当前机型没有这个参数」—— 不是一致，也不是差异，是没有可比的对象 */
+.pTagNA {
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  line-height: 15px;
+  color: var(--text-3);
+  border: 1px dashed var(--line);
+}
+
+/* ---------- C06：卡片内分段（版本详情三段） ---------- */
+
+.sect + .sect {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.sectHead {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+/* 段内动作行：一段里排成一排的那几颗按钮（②③ 的「编辑参数 / 生成配方」都挂在它上面） */
+.sectOps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+/* ---------- C14：当前版本工作台 ---------- */
+
+/*
+ * 「下一步」上面那排进度点：① 身份 ② 参数 ③ 配方 ④ 套餐。
+ * 做完的换主色浅底 —— 不用绿色：红色留给阻断，别的颜色一律不拿来表状态。
+ */
+.steps {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.step {
+  padding: 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.step[data-done='true'] {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* 选择套餐弹窗里的候选清单 —— 装了几个文件是挑套餐时真正要看的东西 */
+.bunList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+/* 候选行里带出来的套餐备注（C14 第二十七轮）：一句话太长就省略，全文在 title 上 */
+.bunNote {
+  max-width: 170px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * 参数台：从版本页「编辑参数」跳过来时，正在改的那一版（C14）。
+ * 整列跟它走 —— 表头下划线 + 那一列的格子浅底，因为这一页本来就是
+ * 「机型基底 + N 个版本」的矩阵，只高亮表头会看走眼。
+ */
+.pFocus {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  white-space: nowrap;
+  background: var(--accent-soft);
+  border-radius: var(--r-sm);
+}
+
+.pColFocus {
+  color: var(--accent-deep);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cellFocus {
+  background: var(--accent-soft);
+}
+
+/* 新建套餐弹窗里那一行「装进本版本的预设」 */
+.nbChk {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: var(--fs-label);
+}
+
+/*
+ * 配方段的状态行：药丸 + 一句解释。
+ * 状态是**配方的属性**，所以它跟在文件名下面，不是与文件名并列的一格。
+ */
+.recipeState {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* ---------- C06：尺寸可编辑 ---------- */
+
+.dimGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+}
+
+.dimCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dimCellRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  /* 行高对齐行内最高的 NumberField sm（28px）：状态徽章出现不改变行高 */
+  min-height: 28px;
+}
+
+/* 只读说明用灰字 —— 说明不是状态，不上颜色（doc §8 纪律 1） */
+.dimSrc {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 占位机型还没有值时的输入位：没有数字可以步进，用文本框 */
+.dimInp {
+  width: 84px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.dimInp:focus {
+  border-color: var(--wb-primary);
+  outline: 2px solid var(--wb-primary-soft);
+}
+
+/* 布尔那一格（第二风扇）：勾选框与「有 / 无」并排，值本身不用彩色药丸 */
+.dimBool {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/* ---------- C06：编辑时的即时校验 ---------- */
+
+/* 不是错误弹窗，就是输入框下面一行红字 —— 编辑时就报，不等提交（doc §4.3） */
+.fieldErr {
+  margin: 6px 0 0;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+/* 红字旁边那个框也要标红 —— 收起之后没有框可标，所以只有编辑态挂 data-error */
+.inp[data-error='true'] {
+  border-color: var(--danger);
+}
+
+/* ---------- 档位收口 ---------- */
+
+
+.shell[data-density='compact'] .split,
+.shell[data-density='mini'] .split,
+.shell[data-density='compact'] .colsRev,
+.shell[data-density='mini'] .colsRev {
+  grid-template-columns: minmax(0, 1fr);
+  /* 摆不开的档退回随页滚：整页定高、左右各滚只在宽档给 */
+  height: auto;
+  grid-template-rows: none;
+}
+
+/*
+ * 单列时左列（机型清单那一条）**不再钉顶**（C14 第十七轮，作者：「小窗口的时候，
+ * 上面的太大了，会压着底下的，而且会叠在一起」）。
+ *
+ * `.side` 的 sticky 是为了「右侧卡片滚起来时，筛选与清单留在原地」—— 那前提是
+ * **左右两列**。折成一列之后它只会帮倒忙：清单钉在滚动区顶上不动，下面的
+ * 「身份 / 尺寸 / 版本」滚上来整块被它盖住（实测：滚 400px 后清单还在原位，
+ * 与身份卡重叠 386px —— 正是那句「压着底下的」）。
+ * 单列没有「旁边一列滚过去」这回事，所以这一档退回 static，跟着一起滚。
+ */
+.shell[data-density='compact'] .side,
+.shell[data-density='mini'] .side {
+  position: static;
+}
+
+.shell[data-density='compact'] .cols,
+.shell[data-density='mini'] .cols {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/*
+ * mini 档的状态栏只留「已保存」+「演示数据」+ 动作组（C14 第十七轮）。
+ *
+ * 那一档窗口 400px：四段读数全摆需要 528px —— 会把外壳的网格列撑宽,
+ * 整条状态栏画到窗口框外面去（量过；外壳列的 `minmax(0,1fr)` 已经兜底,
+ * 但内容挤不下还是会被裁）。藏掉的这三段在版本行、检查页都看得到完整样子,
+ * 状态栏这一档让位给动作组（撤销 / 重做 / 未保存改动 / 恢复默认）。
+ */
+.shell[data-density='mini'] .sbMinor {
+  display: none;
+}
+
+/*
+ * mini 档的页头**允许换行**（C14 第十九轮，作者：「有点拥挤了……单版本啊，
+ * 版本对照啊，这些按钮都已经超出界限了，你可以把它再多往下多放几行嘛」）。
+ *
+ * 参数台页头一行是「上下文（机型 / 版本 · 计数）+ 模式切换」：400px 里
+ * 「A1 / STANDARD · 73 参数 · 47 可编辑 · 本版钉着 5 项」加「单版本 | 版本对照」
+ * 要 560px 往上 —— 模式切换被顶出窗口右缘（量过：右缘超出 30px）。
+ * `nowrap` 的 flex 不换行只会硬挤，这里放开：上下文一行，放不下的
+ * 模式切换另起一行贴右（`.pMode` 的 `margin-left: auto` 在换行后管对齐）。
+ */
+.shell[data-density='mini'] .pHead {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.shell[data-density='mini'] .pMode {
+  margin-left: auto;
+}
+
+/* ---------- 侧栏退成图标一列（窗口窄档，或手动把导航拖窄） ---------- */
+
+/*
+ * 两个入口共用同一副形态：
+ *
+ *   窗口窄档  这一档 `--nav-w` 只有 64px（tokens.css），六个导航项的名字一律
+ *             被截成「机…」「参…」「资…」—— 半个字认不出是什么（作者原话：
+ *             「缩小的时候改用图标」），所以这一档整个换成图标。
+ *   手动拖窄  拖导航右缘那条竖线拖到底就是 64（C14 第十七轮），那时名字一个字
+ *             都放不下 —— 与上一档同款：图标居中、徽标压角、名字进 title。
+ *
+ * 图标态：名字藏掉、图标居中，计数徽标从「行尾一格」改成压在图标右上角的
+ * 小角标（它原来会跟图标抢那 48px 的横向空间）。名字搬到按钮的 title 上。
+ *
+ * **两个门都要写**，因为容器查询打不开窄档那个门：
+ *
+ *   `@container` 查的是 `.nav` 的**行盒宽** —— 拖宽时宽度是直接写 CSS 变量
+ *   的（一帧不进 React 的规矩），React 侧不知道它多宽，容器查询正好是「布局
+ *   自己判断」，正好管手动拖窄这一支。
+ *   窄档这一支则由 `data-density` 走一遍：那一档的 64 写在 `.nav` 自己的
+ *   `--nav-w` 上（`!important`，见上），而**行盒宽要等布局才定** —— 依赖它
+ *   会出现「先按 216 排一次、下一帧才跳到 64」，所以窄档单独列一份。
+ *
+ * 两份形态完全一致：**改一处要改两处**。
+ */
+@container shell-nav (max-width: 88px) {
+  .navItem {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .navLabel {
+    display: none;
+  }
+
+  .navIcon {
+    display: block;
+  }
+
+  .navBadge {
+    position: absolute;
+    top: 3px;
+    right: 7px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    font-size: 9px;
+  }
+
+  /* 连接信息只留那盏灯：短句与附注都读不完，留着就是噪音（完整内容在 title 上） */
+  .upstream {
+    justify-content: center;
+    padding: 6px 0;
+  }
+
+  .upText {
+    display: none;
+  }
+
+  .upDot {
+    margin-top: 0;
+  }
+}
+
+.shell[data-density='compact'] .navItem {
+  justify-content: center;
+  padding: 0;
+}
+
+.shell[data-density='compact'] .navLabel {
+  display: none;
+}
+
+.shell[data-density='compact'] .navIcon {
+  display: block;
+}
+
+.shell[data-density='compact'] .navBadge {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+}
+
+.shell[data-density='compact'] .upstream {
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.shell[data-density='compact'] .upText {
+  display: none;
+}
+
+.shell[data-density='compact'] .upDot {
+  margin-top: 0;
+}
+
+/*
+ * 窄档的导航宽（C14 第十七轮起），分两处写：
+ *
+ *   64 写在 `.nav` / `.navItem` 自己的 `--nav-w` 上（外壳的行内 style 里可能
+ *   带着用户拖过的值，稿内样式只能用 `!important` 压过它）；
+ *   而 `.body` 的 `grid-template-columns` 读的是**外壳那一层**的 `--nav-w`
+ *   （`--nav-w` 不是继承属性：`.nav` 上写的值，父元素 `.body` 读不到）——
+ *   所以网格列宽这里单独钉一次，否则窄档导航会按外壳上那个拖过的值走。
+ */
+.shell[data-density='compact'] .nav,
+.shell[data-density='compact'] .navItem {
+  --nav-w: 64px !important;
+}
+
+.shell[data-density='compact'] .body {
+  grid-template-columns: 64px 1fr;
+}
+
+.shell[data-density='mini'] .body {
+  grid-template-columns: 1fr;
+  /*
+   * 两行（C14 第十九轮）：第一行 mini 档的横排页导航（`.mnav`），第二行正文。
+   * `minmax(0, 1fr)` 与外壳同一把尺子 —— 正文不许把自己的 min-content
+   * 撑成行高。
+   */
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/*
+ * mini 档的横排页导航（C14 第十九轮，作者：「mini 模式下侧边栏都没了我怎么改呀」）。
+ *
+ * 侧栏在这一档整个藏掉，页面切换得有个落点：贴着标题栏一条，六个页排成 chips，
+ * 放不下的横向滚（窗口只有 400px，六个全名 ≈ 520px）。图标用的是导航自己那套
+ * （`.navIcon` 默认 display:none，这里打开）；滚动条不用管 —— 全局本来就把
+ * 滚动条藏成幽灵（global.css），chips 被截半格本身就是「还能滚」的提示。
+ */
+.mnav {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--line);
+}
+
+.mnavItem {
+  position: relative;
+  display: flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.mnavItem:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.mnavItemOn {
+  color: var(--text-1);
+  font-weight: 600;
+  background: var(--wb-primary-soft);
+}
+
+/* chips 里图标常开（`.navIcon` 默认藏，宽档侧栏用不到它） */
+.mnavItem .navIcon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.mnavLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell[data-density='mini'] .nav {
+  display: none;
+}
+
+.shell[data-density='mini'] .pKey {
+  width: 128px;
+}
+
+/* mini 档列窄一点 —— 跟着上面那条「列宽钉死」走，改 width 而不是 min-width */
+.shell[data-density='mini'] .pCol,
+.shell[data-density='mini'] .cell {
+  width: 92px;
+}
+
+.shell[data-density='compact'] .dim,
+.shell[data-density='mini'] .dim {
+  grid-template-columns: minmax(0, 1fr);
+}

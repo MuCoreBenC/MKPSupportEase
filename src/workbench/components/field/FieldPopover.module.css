@@ -1,0 +1,15 @@
+/*
+ * 层是 pointer-events: none，浮层自己要把点击收回来，否则列表点不动。
+ * 未量到位置之前不显形（data-ready='false'）—— 翻转要先知道自己多高。
+ */
+
+.pop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+}
+
+.pop[data-ready='false'] {
+  visibility: hidden;
+}

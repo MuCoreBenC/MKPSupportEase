@@ -1,622 +1,1509 @@
 /**
- * 「机型与版本」页 —— 照 mkppanel 那个「机型目录」的骨架。
+ * 「机型与版本」页 —— C14 版式移植（feat/b05-14b-c14-port）。
  *
- * # 这一页回答的就是那个问过的问题
+ * 版式与交互来自试验场 C14（第 1～26 轮的验收结论都在）：左列筛选 + 机型行、
+ * 右侧「身份 / 尺寸 / 版本 / 版本详情」四张卡、版本行右键菜单、
+ * 详情卡按「① 身份 ② 参数 ③ 配方 ④ 关联 + 下一步」分段。
  *
- * 「加一个新机型在哪里加？加一个新版本怎么加？」——**在这里**。
- * 左边是机型卡，右上角是「+ 新增机型」，版本区右上角是「+ 新增版本」。
+ * # 与原型的差别 —— 每一条都是真后端决定的（原型自己也在副标题里承认了）
  *
- * 之前答不出来是因为机型清单被定成「上游的、不许改」，结构上就没有那个位置；
- * 现在数据在我们自己项目里（`presets/machines/*.toml`），
- * 一个机型 = 一个文件，一个版本 = 那个文件里的一个 `[[versions]]` 块。
- *
- * # 这一页刻意不做的
- *
- * - **不共享任何跨页状态**：它自己读自己写，不碰参数页那套草稿/撤销栈。
- *   「新建一个机型」和「把 X 轴偏移改成 -1」在撤销语义上不是一回事。
- * - **不做拖拽排序**：顺序由文件名决定，改顺序不是这一页的职责。
- * - **本轮只读。** 新增/改名/删除的按钮**不摆出来** —— 摆一个点不动的按钮
- *   比没有更糟，这是上一轮刚被指出来的问题。写入在下一轮接上（后端的
- *   往返保真与原子写已经就位）。
+ *  - **删除是两步问孤儿、确认后立刻落盘**：产品模型里删除不可逆、没有草稿
+ *    （`wb_remove_version` 的注释写明）。原型的「Ctrl+Z 能整块退回来」在这里不成立，
+ *    文案照实说。
+ *  - **复制版本走两条真命令**：`wb_copy_version` 只写版本定义；「同时复制配方」
+ *    才补一刀 `wb_copy_recipe`（14.3/14.5，拷出来是独立快照）。
+ *  - **这些原型动作没有接**（后端没有对应命令，前端不装样子，见 C14-PORT-PLAN §4
+ *    的待裁决清单）：改机型/版本 id、复制机型、删除机型、尺寸九格编辑、
+ *    版本图（原型本地字段）、改配方文件名（G-2 要删的字段）、就地新建套餐、
+ *    改套餐内容（套餐内容的产品模型还在迁移中，随 P4 的 menu/stock 视角一起接）。
+ *    对应的按钮与菜单项**不渲染** —— 摆一个点不动的按钮比没有更糟。
+ *  - **生成**走 `wb_generate({ picked: [uid] })`，产物名由命名函数算（G-0），
+ *    没有「配方文件缺失」这一档；闸门读 `wb_preflight` 的阻断与 `buildRows` 的
+ *    buildable / disabledReason —— 前端不复判任何一条规则。
+ *  - **机型图 / 图标是资产 id**（Task 8.6），挑选走资产库选择器（14.6：
+ *    不让人手填路径）。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import {
-  isAppError,
-  wb,
-  type BrandView,
-  type MachineField,
-  type MachineList,
-  type MachineView,
-  type VersionField,
+import { isAppError, wb } from '../api'
+import type {
+  AssetList,
+  BookView,
+  BundleList,
+  IssueReport,
+  MachineList,
+  MachineView,
+  RegistryView,
+  VersionView,
+  Words,
 } from '../api'
+import { ContextMenu } from '../components/menu'
+import type { ContextMenuEntry } from '../components/menu/types'
+import { useContextMenu } from '../components/menu/useContextMenu'
+import AssetPicker, { AssetField } from '../c14/AssetPicker'
+import FieldMark, { TodoValue } from '../c14/FieldMark'
+import ModalC14 from '../c14/ModalC14'
+import PickOrType from '../c14/PickOrType'
+import { fieldState, machineFieldLabels, placeholderText } from '../c14/labels'
+import { toasts } from '../c14/toast'
+import type { GotoFocus } from '../c14/types'
+import s from '../c14.module.css'
 
-export function MachinesPage() {
-  const [data, setData] = useState<MachineList | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [sel, setSel] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [addingMachine, setAddingMachine] = useState(false)
+interface Props {
+  book: BookView
+  words: Words
+  onGoto: (view: string, focus?: GotoFocus) => void
+  /** 草稿写入口（撤销栈归外壳）。本页只有「生成记录」这一种 patch 从这里过 */
+  onApply: (label: string, patches: import('../api').Patch[]) => Promise<void>
+  /** 外壳的保存。生成按钮在草稿脏时给的「先落盘再生成」就是它 */
+  onSave: () => Promise<boolean>
+  /** 结构性写（建 / 删 / 复制）之后让外壳重取整本 —— 徽章的机型版本数跟着走 */
+  onBookRefresh: () => void
+}
 
-  const load = useCallback(() => {
-    void wb
-      .machines()
-      .then((d) => {
-        setData(d)
-        // 默认选第一台：空着的右栏没有信息量
-        setSel((s) => s ?? d.machines[0]?.id ?? null)
-      })
-      .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
+/** 版本行选中标记：`机型id/版本id`。只在本页内当 key 用，不是后端的 uid */
+const vidOf = (machineId: string, versionId: string) => `${machineId}/${versionId}`
+
+/** 机型 / 版本 id 的即时格式提示（真闸在后端；这里只让明显打错的当场现形） */
+const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
+
+/** 生成态四档的样式（C14 的 tag 类名表） */
+const STATE_TAG: Record<string, string> = {
+  built: s.tagBuildBuilt,
+  stale: s.tagBuildStale,
+  neverBuilt: s.tagBuildNever,
+  noResources: s.tagBuildNone,
+}
+
+export default function MachinesPage({ book, words, onGoto, onApply, onSave, onBookRefresh }: Props) {
+  const [list, setList] = useState<MachineList | null>(null)
+  const [assets, setAssets] = useState<AssetList | null>(null)
+  const [bundles, setBundles] = useState<BundleList | null>(null)
+  const [registry, setRegistry] = useState<RegistryView | null>(null)
+  const [report, setReport] = useState<IssueReport | null>(null)
+  const [pageErr, setPageErr] = useState<string | null>(null)
+
+  const [machineId, setMachineId] = useState('')
+  const [pickedVid, setPickedVid] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
+  const menu = useContextMenu<string>()
+
+  /* —— 弹窗 —— */
+  const [addOpen, setAddOpen] = useState(false)
+  const [addId, setAddId] = useState('')
+  const [addBrand, setAddBrand] = useState('')
+  const [addDisplay, setAddDisplay] = useState('')
+  const [addVOpen, setAddVOpen] = useState(false)
+  const [avId, setAvId] = useState('')
+  const [avName, setAvName] = useState('')
+  const [copyOpen, setCopyOpen] = useState<string | null>(null)
+  const [copyId, setCopyId] = useState('')
+  const [copyName, setCopyName] = useState('')
+  const [withRecipe, setWithRecipe] = useState(true)
+  /** 删除版本的两步：`null` = 没开；`{vid}` = 第一步；带 orphans = 第二步 */
+  const [del, setDel] = useState<{ vid: string; orphans: string[] | null } | null>(null)
+  const [bunOpen, setBunOpen] = useState<string | null>(null)
+  const [bunPick, setBunPick] = useState('')
+  const [imgOpen, setImgOpen] = useState(false)
+  const [iconOpen, setIconOpen] = useState(false)
+  const [editVOpen, setEditVOpen] = useState<string | null>(null)
+  const [evName, setEvName] = useState('')
+  const [evTag, setEvTag] = useState('')
+  const [evDesc, setEvDesc] = useState('')
+
+  /* —— 取数 —— */
+  const loadAll = useCallback(() => {
+    void (async () => {
+      try {
+        const [l, a, b, r] = await Promise.all([wb.machines(), wb.assets(), wb.bundles(), wb.registry()])
+        setList(l)
+        setAssets(a)
+        setBundles(b)
+        setRegistry(r)
+      } catch (e) {
+        setPageErr(isAppError(e) ? e.message : String(e))
+      }
+    })()
+  }, [])
+  useEffect(loadAll, [loadAll])
+
+  /** 每次写完都重取检查报告 —— 阻断集合变了，生成按钮的门禁跟着走 */
+  const refreshReport = useCallback(() => {
+    wb.preflight()
+      .then(setReport)
+      .catch(() => undefined)
   }, [])
 
-  useEffect(load, [load])
+  /** 结构性写之后：外壳的整本（徽章、构建行）也要跟上 */
+  const afterStructural = useCallback(() => {
+    onBookRefresh()
+    refreshReport()
+  }, [onBookRefresh, refreshReport])
 
-  if (error) {
+  const m: MachineView | undefined = list?.machines.find((x) => x.id === machineId)
+
+  /* 选中态自动跟上：机型被删（外部）后落回第一台，版本卡不挂在旧 id 上 */
+  useEffect(() => {
+    if (list && !list.machines.some((x) => x.id === machineId)) {
+      setMachineId(list.machines[0]?.id ?? '')
+      setPickedVid(null)
+    }
+  }, [list, machineId])
+  useEffect(() => {
+    if (pickedVid === null || !m) return
+    const [, pv] = pickedVid.split('/')
+    if (!m.versions.some((v) => v.id === pv)) setPickedVid(null)
+  }, [pickedVid, m])
+
+  /** 版本 id → 整本里的节点（uid / 生成态 / 覆盖数 / bbs 都在那边算好了） */
+  const nodeOf = useCallback(
+    (mid: string, vid: string) =>
+      book.machines.find((x) => x.id === mid)?.versions.find((v) => v.versionId === vid),
+    [book],
+  )
+  const rowOf = useCallback(
+    (uid: string) => book.buildRows.find((r) => r.uid === uid),
+    [book],
+  )
+
+  const q = filter.trim().toLowerCase()
+  const listed = useMemo(() => {
+    const all = list?.machines ?? []
+    return q
+      ? all.filter(
+          (x) =>
+            x.id.toLowerCase().includes(q) ||
+            x.display.toLowerCase().includes(q) ||
+            x.brand.toLowerCase().includes(q),
+        )
+      : all
+  }, [list, q])
+
+  /** 必填却空着的身份格数（display / brand）。空着标「需填写」，不是错误 */
+  const todoOf = (x: MachineView) =>
+    [x.display, x.brand].filter((v) => !v.trim()).length
+
+  /** 改机型的一格。后端校验；失败的话把那句话原样端给人 */
+  const saveMachine = async (field: 'display' | 'brand' | 'name' | 'image' | 'icon', value: string | null) => {
+    if (!m) return
+    try {
+      setList(await wb.setMachineField(m.id, field, value))
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 改版本的一格。同上 */
+  const saveVersion = async (versionId: string, field: 'name' | 'tag' | 'description' | 'recommendedBundle', value: string | null) => {
+    if (!m) return
+    try {
+      setList(await wb.setVersionField(m.id, versionId, field, value))
+      if (field === 'recommendedBundle') onBookRefresh()
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /* —— 生成（③ 配方段的按钮 + 「下一步」里那颗是同一件事） —— */
+
+  const dirty = book.dirtyCount > 0
+  const myBlocks = useCallback(
+    (uid: string) =>
+      (report?.issues ?? []).filter((i) => i.severity === 'block' && i.at.uid === uid),
+    [report],
+  )
+
+  /** 这个版本为什么现在不能生成；空串 = 能 */
+  const genNote = (mid: string, vid: string): string => {
+    const uid = nodeOf(mid, vid)?.uid
+    if (dirty) return '有未保存改动 —— 生成读的是已保存的那一份，先保存才能生成'
+    if (uid === undefined) return ''
+    const blocks = myBlocks(uid)
+    if (blocks.length > 0) return `有 ${blocks.length} 条阻断没处理完：${blocks[0].title}`
+    const row = rowOf(uid)
+    if (row && !row.buildable) return row.disabledReason ?? row.reason
+    return ''
+  }
+
+  const doBuild = useCallback(
+    async (mid: string, vid: string) => {
+      const node = nodeOf(mid, vid)
+      if (node === undefined) return
+      try {
+        const rep = await wb.generate({ picked: [node.uid] })
+        // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）
+        await onApply(
+          `生成记录：${rep.written.length + rep.unchanged.length} 份`,
+          [rep.mark],
+        )
+        const file = rowOf(node.uid)?.mkpFile
+        toasts.push(
+          `已生成 ${file ?? '预设'}：写出 ${rep.written.length} 份` +
+            (rep.unchanged.length > 0 ? `，${rep.unchanged.length} 份内容没变、跳过重写` : ''),
+        )
+      } catch (e) {
+        toasts.push(isAppError(e) ? e.message : String(e))
+      }
+    },
+    [nodeOf, onApply, rowOf],
+  )
+
+  /** 先落盘再生成 —— 一个按钮两个动作，顺序规定死：先保存，成了才生成 */
+  const saveAndBuild = useCallback(
+    async (mid: string, vid: string) => {
+      if (!(await onSave())) return
+      await doBuild(mid, vid)
+    },
+    [onSave, doBuild],
+  )
+
+  /* —— 版本行右键菜单 —— */
+  const entries: ContextMenuEntry[] =
+    menu.target && m
+      ? [
+          {
+            id: 'copy',
+            label: '复制版本…',
+            onSelect: () => {
+              const tid = (menu.target ?? '').split('/')[1] ?? ''
+              setCopyOpen(`${m.id}/${tid}`)
+              setCopyId(`${tid}_COPY`)
+              const tpl = m.versions.find((v) => v.id === tid)
+              setCopyName(tpl ? `${tpl.name || tid} 副本` : '')
+              setWithRecipe(true)
+            },
+          },
+          {
+            id: 'edit-v',
+            label: '编辑版本…',
+            onSelect: () => {
+              const vid = (menu.target ?? '').split('/')[1] ?? ''
+              const v = m.versions.find((x) => x.id === vid)
+              setEditVOpen(`${m.id}/${vid}`)
+              setEvName(v?.name ?? '')
+              setEvTag(v?.tag ?? '')
+              setEvDesc(v?.description ?? '')
+            },
+          },
+          {
+            id: 'delete',
+            label: '删除版本…',
+            danger: true,
+            onSelect: () => setDel({ vid: `${m.id}/${(menu.target ?? '').split('/')[1] ?? ''}`, orphans: null }),
+          },
+        ]
+      : []
+
+  /* —— 弹窗公共的提交失败出口 —— */
+  const failToast = (e: unknown) => toasts.push(isAppError(e) ? e.message : String(e))
+
+  if (pageErr !== null) {
     return (
       <p className="wb-todo" data-tone="danger">
-        {error}
+        {pageErr}
       </p>
     )
   }
-  if (!data) return <p className="wb-todo">正在读 presets/machines/…</p>
+  if (!list || !assets || !bundles || !registry) {
+    return <p className="wb-todo">正在读机型目录、资产库与注册表…</p>
+  }
 
-  const q = query.trim().toLowerCase()
-  const shown = q
-    ? data.machines.filter(
-        (m) =>
-          m.id.toLowerCase().includes(q) ||
-          m.display.toLowerCase().includes(q) ||
-          m.brand.toLowerCase().includes(q) ||
-          m.externalAliases.some((a) => a.toLowerCase().includes(q)),
+  /* 机型全删完不白屏：给空状态（C04 的教训） */
+  if (!list.machines.length) {
+    return (
+      <div className={s.detail}>
+        <div className={s.empty}>
+          <h2>一台机型都没有了</h2>
+          <p>机型是一切的起点 —— 配方、套餐、切片器都挂在它下面。先建一台：</p>
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnPrimary}`}
+            onClick={() => {
+              setAddId('')
+              setAddBrand(list.brands[0]?.name ?? '')
+              setAddDisplay('')
+              setAddOpen(true)
+            }}
+          >
+            新增机型
+          </button>
+        </div>
+        {null}
+      </div>
+    )
+  }
+  if (!m) return null
+
+  const pickedVidParts = pickedVid?.split('/') ?? null
+  const picked: VersionView | undefined =
+    pickedVidParts && pickedVidParts[0] === m.id
+      ? m.versions.find((v) => v.id === pickedVidParts[1])
+      : undefined
+  const pickedNode = picked ? nodeOf(m.id, picked.id) : undefined
+  const pickedRow = pickedNode ? rowOf(pickedNode.uid) : undefined
+  const todo = todoOf(m)
+  const visibleCount = registry.params.filter(
+    (p) => p.machineFilter.length === 0 || p.machineFilter.includes(m.id),
+  ).length
+  const brandOptions = list.brands.map((b) => b.name)
+  const imageOptions = assets.assets.filter((a) => a.kind === 'image')
+  const iconOptions = assets.assets.filter((a) => a.kind === 'icon')
+  const assetById = (id: string | null) =>
+    id ? (assets.assets.find((a) => a.id === id) ?? null) : null
+
+  const addIdTaken = list.machines.some((x) => x.id === addId.trim())
+  const addReady = addId.trim() !== '' && addDisplay.trim() !== '' && addBrand.trim() !== ''
+  const avTaken = m.versions.some((v) => v.id === avId.trim())
+  const avReady = idOk(avId) && avName.trim() !== '' && !avTaken
+  const copyParts = copyOpen?.split('/') ?? null
+  const copyTpl = copyParts ? m.versions.find((v) => v.id === copyParts[1]) : undefined
+  const copyTaken = copyOpen !== null && m.versions.some((v) => v.id === copyId.trim())
+  const copyReady = copyOpen !== null && idOk(copyId) && !copyTaken && copyId.trim() !== ''
+
+  /** 新增机型。后端三格都必填（catalog::add_machine 逐格拦），按钮跟着它走 */
+  const submitAddMachine = async () => {
+    try {
+      const next = await wb.addMachine(addId.trim(), addBrand.trim(), addDisplay.trim())
+      setList(next)
+      setMachineId(addId.trim())
+      setPickedVid(null)
+      setAddOpen(false)
+      toasts.push(`已新增机型 ${addId.trim()} —— presets/machines/${addId.trim()}.toml 已写入`)
+      afterStructural()
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /** 新增版本。id 校验在后端（字符集 + 机型内唯一），名字必填 */
+  const submitAddVersion = async () => {
+    try {
+      const next = await wb.addVersion(m.id, avId.trim(), avName.trim())
+      setList(next)
+      setPickedVid(vidOf(m.id, avId.trim()))
+      setAddVOpen(false)
+      toasts.push(`已新增版本 ${m.id}/${avId.trim()} —— 写进了 ${m.file}`)
+      afterStructural()
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /**
+   * 复制版本（14.3 / 14.5 的两步流）。两条命令各自**只写单文件**：
+   * 先建版本定义；勾了「同时复制配方」再补一刀参数正文 —— 拷出来是独立快照，
+   * 之后改模板、改基底都传不到它身上。
+   */
+  const submitCopy = async () => {
+    if (copyParts === null) return
+    const [, templateId] = copyParts
+    try {
+      const next = await wb.copyVersion(
+        m.id,
+        templateId,
+        copyId.trim(),
+        copyName.trim() || `${copyTpl?.name ?? templateId} 副本`,
+        copyTpl?.tag ?? undefined,
+        copyTpl?.description ?? undefined,
       )
-    : data.machines
-  const current = data.machines.find((m) => m.id === sel) ?? null
+      setList(next)
+      let recipeNote = '只复制了版本定义'
+      if (withRecipe) {
+        try {
+          const n = await wb.copyRecipe(m.id, templateId, copyId.trim())
+          recipeNote = `参数正文已复制（${n} 项，独立快照）`
+        } catch (e) {
+          failToast(e)
+          recipeNote = '版本定义已建，但参数正文复制失败 —— 可以在参数台重试'
+        }
+      }
+      toasts.push(`已复制为 ${m.id}/${copyId.trim()} —— ${recipeNote}`)
+      setPickedVid(vidOf(m.id, copyId.trim()))
+      setCopyOpen(null)
+      afterStructural()
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /** 删除版本第二步。**立刻落盘，不可逆** —— 所以第一步先问孤儿 */
+  const submitDelete = async () => {
+    if (del === null || del.orphans === null || !m) return
+    const [, vid] = del.vid.split('/')
+    try {
+      const next = await wb.removeVersion(m.id, vid)
+      setList(next)
+      if (pickedVid === del.vid) setPickedVid(null)
+      setDel(null)
+      toasts.push(`已删除版本 ${m.id}/${vid} —— ${m.file} 已写回`)
+      afterStructural()
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /** 批量改版本身份三格（编辑版本模态框）。一格失败就停，不静默半成功 */
+  const submitEditVersion = async () => {
+    if (editVOpen === null || !evName.trim()) return
+    const [, vid] = editVOpen.split('/')
+    try {
+      let next = await wb.setVersionField(m.id, vid, 'name', evName)
+      next = await wb.setVersionField(m.id, vid, 'tag', evTag.trim() === '' ? null : evTag)
+      next = await wb.setVersionField(
+        m.id,
+        vid,
+        'description',
+        evDesc.trim() === '' ? null : evDesc,
+      )
+      setList(next)
+      toasts.push(`已更新 ${m.id}/${vid} 的版本信息`)
+      setEditVOpen(null)
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /* 下一步：按真实工作流挑第一件没做完的事（判据全部来自上面的派生） */
+  const nextStep = (() => {
+    if (!picked || !pickedNode) return null
+    const uid = pickedNode.uid
+    if (dirty)
+      return {
+        label: '保存改动',
+        hint: '这些改动还在草稿里 —— 生成读的是已保存的那一份。',
+        run: () => void onSave(),
+      }
+    if (!picked.hasRecipe)
+      return {
+        label: '补参数源',
+        hint: '这个版本还是纯继承基底（参数源待补）—— 去参数台把它的参数正文钉下来。',
+        run: () => onGoto('params', { machineId: m.id, uid, key: null }),
+      }
+    const blocks = myBlocks(uid)
+    if (blocks.length > 0)
+      return {
+        label: `处理 ${blocks.length} 条阻断`,
+        hint: `${blocks[0].title} —— 阻断是唯一的硬闸门，照这份数据生成出来的一定是坏的。`,
+        run: () => onGoto('build', { machineId: m.id, uid, key: null }),
+      }
+    if (pickedNode.build === 'neverBuilt' || pickedNode.build === 'stale')
+      return {
+        label: pickedNode.build === 'neverBuilt' ? '生成配方' : '重新生成',
+        hint:
+          pickedNode.build === 'neverBuilt'
+            ? '还没生成过，客户端现在下载不到这一版。'
+            : '配方改过了，磁盘上的产物还是上次生成那份。',
+        run: () => void doBuild(m.id, picked.id),
+      }
+    if (!picked.recommendedBundle)
+      return {
+        label: '选择套餐',
+        hint: '套餐决定客户端会装到哪几份文件。',
+        run: () => {
+          setBunOpen(vidOf(m.id, picked.id))
+          setBunPick('')
+        },
+      }
+    return {
+      label: '去检查与生成',
+      hint: '这一版该做的都做完了 —— 下一阶段是整个交付包的检查与生成。',
+      run: () => onGoto('build', { machineId: m.id, uid, key: null }),
+    }
+  })()
+
+  /** 打开删除弹窗的第一步：先问孤儿（删除独有的风险，用户不查就不知道） */
+  const askDelete = (vid: string) => {
+    setDel({ vid: vidOf(m.id, vid), orphans: null })
+    void wb
+      .versionOrphans(m.id, vid)
+      .then((orphans) => setDel((cur) => (cur && cur.vid === vidOf(m.id, vid) ? { ...cur, orphans } : cur)))
+      .catch(failToast)
+  }
 
   return (
-    <div className="wb-mc">
-      <div className="wb-mc__left">
-        <div className="wb-mc__lefthead">
+    <div className={s.split}>
+      {/* —— 左列：筛选 + 机型行 —— */}
+      <div className={s.side}>
+        <div className={s.topRow}>
           <input
-            className="wb-input"
-            type="search"
-            placeholder="搜机型名 / ID / 品牌 / 别名"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            className={s.filter}
+            value={filter}
+            placeholder="筛机型（id / 显示名 / 品牌）"
+            aria-label="筛选机型"
+            onChange={(e) => setFilter(e.target.value)}
           />
           <button
             type="button"
-            className="wb-btn"
-            data-tone="primary"
-            onClick={() => setAddingMachine((a) => !a)}
+            className={`${s.btn} ${s.btnSm}`}
+            title="新增一台机型 —— 建一个 presets/machines/ 下的新文件，三格都必填"
+            onClick={() => {
+              setAddId('')
+              setAddBrand(list.brands[0]?.name ?? '')
+              setAddDisplay('')
+              setAddOpen(true)
+            }}
           >
-            {addingMachine ? '取消' : '+ 新增机型'}
+            新增机型
           </button>
         </div>
-
-        {addingMachine && (
-          <NewMachineForm
-            brands={data.brands}
-            onDone={(next) => {
-              setData(next)
-              setAddingMachine(false)
-            }}
-          />
-        )}
-
-        <div className="wb-mc__cards">
-          {shown.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className="wb-mc__card"
-              data-on={m.id === sel ? 'yes' : undefined}
-              onClick={() => setSel(m.id)}
-            >
-              <span className="wb-mc__brand">{m.brand}</span>
-              <span className="wb-mc__name">{m.display}</span>
-              <span className="wb-mc__meta">
-                {m.id} · {m.versions.length} 版
-              </span>
-              {/* 缺配置要在卡片上就看得见，不用点进去才发现 */}
-              {!m.hasDimensions && <i className="wb-mc__warn">未配尺寸</i>}
-            </button>
-          ))}
-          {shown.length === 0 && <p className="wb-todo">没有匹配的机型</p>}
-        </div>
-        <p className="wb-mc__count">
-          {data.machines.length} 机型 · {data.brands.length} 品牌
-        </p>
-        {/* 明写数据根。顶部状态条上的 RECIPE 指的是**参数页那一套**的目录，
-            这一页读写的是另一个地方 —— 不写出来就会让人以为在改同一份东西 */}
-        <p className="wb-mc__root" title={data.root}>
-          读写 {data.root}
-        </p>
-      </div>
-
-      <div className="wb-mc__right">
-        {current ? (
-          <MachineDetail m={current} onChanged={setData} />
-        ) : (
-          <p className="wb-todo">左边选一台机型</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * 一格「点一下就地改」。
- *
- * 纪律与参数页那边一致：**失焦或回车才提交**，不是每敲一个字符提交一次 ——
- * 后者会把一次改名变成十几次写盘。Esc 放弃。
- *
- * 「清空」按钮只给可选的那几格：必填格清空之后卡片上就只剩一个 ID 了。
- * 而且清空**不是写空串**，是删掉文件里那一行（后端负责，前端只传 null）。
- */
-function EditableKV({
-  label,
-  value,
-  onSave,
-  clearable = true,
-}: {
-  label: string
-  value: string | null
-  onSave: (next: string | null) => Promise<unknown>
-  clearable?: boolean
-}) {
-  const [editing, setEditing] = useState(false)
-  const [text, setText] = useState(value ?? '')
-  const [busy, setBusy] = useState(false)
-
-  const commit = (next: string | null) => {
-    setBusy(true)
-    void onSave(next).finally(() => {
-      setBusy(false)
-      setEditing(false)
-    })
-  }
-
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd className="wb-kv__edit">
-        {editing ? (
-          <input
-            className="wb-ctl"
-            data-form="row"
-            value={text}
-            autoFocus
-            disabled={busy}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={() => (text === (value ?? '') ? setEditing(false) : commit(text))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commit(text)
-              if (e.key === 'Escape') {
-                setText(value ?? '')
-                setEditing(false)
-              }
-            }}
-          />
-        ) : (
-          <>
-            <button
-              type="button"
-              className="wb-kv__btn"
-              title="点一下改"
-              onClick={() => {
-                setText(value ?? '')
-                setEditing(true)
-              }}
-            >
-              {value ?? '—'}
-            </button>
-            {clearable && value !== null && (
+        <div className={s.list}>
+          {listed.map((x) => {
+            const t = todoOf(x)
+            return (
               <button
+                key={x.id}
                 type="button"
-                className="wb-kv__clear"
-                title="清空这一格（会把文件里那一行删掉，不是写成空串）"
-                disabled={busy}
-                onClick={() => commit(null)}
+                className={`${s.row} ${x.id === m.id ? s.rowOn : ''}`}
+                onClick={() => {
+                  setMachineId(x.id)
+                  setPickedVid(null)
+                }}
               >
-                ✕
+                <span className={s.rowName}>{x.display || x.id}</span>
+                {/* id 也要露出来：复制出来的机型和原机同名，只看 display 分不清 */}
+                <span className={`${s.mono} ${s.rowMeta}`}>{x.id}</span>
+                <span className={s.rowMeta}>{x.versions.length} 版</span>
+                {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>占位</span>}
+                {t > 0 && (
+                  <span className={s.todo} title={fieldState.needsInputHint}>
+                    {fieldState.needsInput} {t}
+                  </span>
+                )}
               </button>
+            )
+          })}
+        </div>
+        {!listed.length && (
+          <div className={s.sum}>
+            没有匹配「{filter}」的机型{' '}
+            <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setFilter('')}>
+              清空筛选
+            </button>
+          </div>
+        )}
+        <div className={s.sum}>
+          {listed.length === list.machines.length
+            ? `${list.machines.length} 台机型 · ${list.machines.reduce((n, x) => n + x.versions.length, 0)} 个版本`
+            : `筛出 ${listed.length} / ${list.machines.length} 台`}
+        </div>
+        {/* 明写数据根：这一页读写的是 presets/machines/，与参数台的草稿是两个地方 */}
+        <div className={s.sum} title={list.root}>
+          读写 {list.root}
+        </div>
+      </div>
+
+      {/* —— 右侧：四张卡 —— */}
+      <div className={s.detail}>
+        {/* 身份 */}
+        <div className={s.card}>
+          <div className={s.cardHead}>
+            <h2>身份</h2>
+            <span className={s.cardNote}>{m.id}</span>
+            {todo > 0 && (
+              <span className={s.todo} title={fieldState.needsInputHint}>
+                {fieldState.needsInput} {todo} 项
+              </span>
             )}
-          </>
-        )}
-      </dd>
-    </>
-  )
-}
+            <span className={s.cardNote}>{m.file}</span>
+          </div>
+          <div className={s.cardBody}>
+            <div className={s.kv}>
+              <span className={s.kvKey}>
+                {machineFieldLabels.display}
+                <FieldMark later />
+              </span>
+              <span className={s.kvVal}>
+                <input
+                  className={s.inp}
+                  defaultValue={m.display}
+                  key={`display-${m.id}-${m.display}`}
+                  aria-label={machineFieldLabels.display}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim()
+                    if (next !== m.display) void saveMachine('display', next)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                />
+                {!m.display.trim() && <TodoValue />}
+              </span>
 
-/**
- * 删一个版本。**两步**：第一步先去问「会留下什么孤儿」，第二步才真删。
- *
- * 为什么不是一步一个 confirm：孤儿引用这件事**用户不查就不知道**。
- * 一个只写着「确定删除吗」的对话框等于什么都没告诉他 ——
- * 而这个操作不可逆（没有回收站也没有撤销）。
- */
-function DeleteVersion({
-  machineId,
-  version,
-  onChanged,
-}: {
-  machineId: string
-  version: string
-  onChanged: (next: MachineList) => void
-}) {
-  /** null = 还没问过；数组 = 问过了，这是结果 */
-  const [orphans, setOrphans] = useState<string[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+              <span className={s.kvKey}>
+                {machineFieldLabels.brand}
+                <FieldMark later />
+              </span>
+              <span className={s.kvVal}>
+                <PickOrType
+                  label={machineFieldLabels.brand}
+                  options={brandOptions}
+                  value={m.brand}
+                  emptyLabel={`选一个品牌…（空着会标「${fieldState.needsInput}」）`}
+                  onChange={(next) => {
+                    if (!next.trim()) {
+                      toasts.push('品牌不许清空 —— 它是身份的一部分')
+                      return
+                    }
+                    void saveMachine('brand', next)
+                  }}
+                />
+                {!m.brand.trim() && <TodoValue />}
+              </span>
 
-  if (orphans === null) {
-    return (
-      <div className="wb-ver__foot">
-        <button
-          type="button"
-          className="wb-btn"
-          data-tone="danger"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true)
-            setErr(null)
-            void wb
-              .versionOrphans(machineId, version)
-              .then(setOrphans)
-              .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-              .finally(() => setBusy(false))
-          }}
-        >
-          删除这个版本…
-        </button>
-        {err && (
-          <span className="wb-todo" data-tone="danger">
-            {err}
-          </span>
-        )}
-      </div>
-    )
-  }
+              {/* 下面三格可空 —— 空着是正常状态，不标任何东西 */}
+              <span className={s.kvKey}>{machineFieldLabels.name}</span>
+              <span className={s.kvVal}>
+                <input
+                  className={s.inp}
+                  defaultValue={m.name}
+                  key={`name-${m.id}-${m.name}`}
+                  aria-label={machineFieldLabels.name}
+                  placeholder="可空"
+                  onBlur={(e) => {
+                    const next = e.target.value.trim()
+                    if (next !== m.name) void saveMachine('name', next === '' ? null : next)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                />
+              </span>
 
-  return (
-    <div className="wb-ver__confirm">
-      <p className="wb-ver__warn">
-        要删掉 <b>{version}</b>。**立刻写入文件，没有回收站也没有撤销。**
-      </p>
-      {orphans.length > 0 ? (
-        <p className="wb-ver__orphans">
-          删掉之后这 {orphans.length} 项在 param_registry 里会留下指向它的**孤儿引用**
-          （不报错，但那几项在这台机器上会悄悄不生效）：
-          <br />
-          <code>{orphans.join('、')}</code>
-        </p>
-      ) : (
-        <p className="wb-ver__ok">没有任何字段引用这一版，删掉不会留下孤儿。</p>
-      )}
-      <div className="wb-ver__buttons">
-        <button type="button" className="wb-btn" onClick={() => setOrphans(null)}>
-          不删了
-        </button>
-        <button
-          type="button"
-          className="wb-btn"
-          data-tone="danger"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true)
-            setErr(null)
-            void wb
-              .removeVersion(machineId, version)
-              .then(onChanged)
-              .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-              .finally(() => setBusy(false))
-          }}
-        >
-          确认删除
-        </button>
-      </div>
-      {err && (
-        <p className="wb-todo" data-tone="danger">
-          {err}
-        </p>
-      )}
-    </div>
-  )
-}
+              <span className={s.kvKey}>{machineFieldLabels.image}</span>
+              <span className={s.kvVal}>
+                <AssetField
+                  label={machineFieldLabels.image}
+                  asset={assetById(m.image)}
+                  onOpen={() => setImgOpen(true)}
+                />
+              </span>
 
-/**
- * 新建机型。**它会建一个新文件**，所以表单上要把这件事说出来 ——
- * 「加一个版本」是往已有文件里插一段，这个是从零造一个文件，风险不同。
- *
- * 品牌用下拉（从已有品牌里选）而不是自由输入：品牌是个小的封闭集合，
- * 自由输入会攒出「Bambu Lab」「BambuLab」「bambu lab」三个同义词
- */
-function NewMachineForm({
-  brands,
-  onDone,
-}: {
-  brands: BrandView[]
-  onDone: (next: MachineList) => void
-}) {
-  const [id, setId] = useState('')
-  const [display, setDisplay] = useState('')
-  const [brand, setBrand] = useState(brands[0]?.name ?? '')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+              <span className={s.kvKey}>{machineFieldLabels.icon}</span>
+              <span className={s.kvVal}>
+                <AssetField
+                  label={machineFieldLabels.icon}
+                  asset={assetById(m.icon)}
+                  onOpen={() => setIconOpen(true)}
+                />
+              </span>
 
-  const submit = () => {
-    setBusy(true)
-    setErr(null)
-    void wb
-      .addMachine(id, brand, display)
-      .then(onDone)
-      // 校验全在后端（ID 字符集、与别名查重、文件已存在）。前端不复制一份判定
-      .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-      .finally(() => setBusy(false))
-  }
+              <span className={s.kvKey}>别名</span>
+              <span className={s.kvVal}>
+                {m.externalAliases.length ? (
+                  <span className={s.chips}>
+                    {m.externalAliases.map((a) => (
+                      <span key={a} className={s.chip}>
+                        {a}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className={s.kvDim}>—</span>
+                )}
+                <span className={s.cardNote}>对照名来自数据文件，工作台不给编辑</span>
+              </span>
+            </div>
+          </div>
+        </div>
 
-  return (
-    <div className="wb-mc__add">
-      <label className="wb-mc__field">
-        <span>机型 ID</span>
-        <input
-          className="wb-input"
-          value={id}
-          placeholder="会变成文件名"
-          autoFocus
-          onChange={(e) => setId(e.target.value.toUpperCase())}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-        />
-      </label>
-      <label className="wb-mc__field">
-        <span>显示名</span>
-        <input
-          className="wb-input"
-          value={display}
-          placeholder="给人看的名字"
-          onChange={(e) => setDisplay(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-        />
-      </label>
-      <label className="wb-mc__field">
-        <span>品牌</span>
-        <select className="wb-ctl" data-form="row" value={brand} onChange={(e) => setBrand(e.target.value)}>
-          {brands.map((b) => (
-            <option key={b.id} value={b.name}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="button" className="wb-btn" data-tone="primary" disabled={busy} onClick={submit}>
-        新建 {id || 'ID'}.toml
-      </button>
-      <p className="wb-mc__hint">
-        会在 presets/machines/ 下**新建一个文件**并立刻写入（没有草稿、没有撤销）。
-        同名文件已存在时不会被覆盖，会直接报错。
-      </p>
-      {err && (
-        <p className="wb-todo" data-tone="danger">
-          {err}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function MachineDetail({
-  m,
-  onChanged,
-}: {
-  m: MachineView
-  /** 写入成功后后端回的新清单 —— 界面直接用它，不再自己猜状态 */
-  onChanged: (next: MachineList) => void
-}) {
-  const [openVersion, setOpenVersion] = useState<string | null>(m.versions[0]?.id ?? null)
-  const [adding, setAdding] = useState(false)
-  const [newId, setNewId] = useState('')
-  const [newName, setNewName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  /** 改机型自己的一格。错误就近显示在元信息卡片头上 */
-  const save = (field: MachineField, value: string | null) => {
-    setErr(null)
-    return wb
-      .setMachineField(m.id, field, value)
-      .then(onChanged)
-      .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-  }
-
-  /** 改某个版本的一格 */
-  const saveVersion = (versionId: string, field: VersionField, value: string | null) => {
-    setErr(null)
-    return wb
-      .setVersionField(m.id, versionId, field, value)
-      .then(onChanged)
-      .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-  }
-
-
-  const submit = () => {
-    setBusy(true)
-    setErr(null)
-    void wb
-      .addVersion(m.id, newId, newName)
-      .then((next) => {
-        onChanged(next)
-        setAdding(false)
-        setNewId('')
-        setNewName('')
-        setOpenVersion(newId.trim())
-      })
-      /* 校验在后端（ID 字符集、重名都在那儿判）。
-         前端**不复制一份判定** —— 两处判定迟早分岔，而分岔的表现是
-         「界面说可以，后端说不行」 */
-      .catch((e: unknown) => setErr(isAppError(e) ? e.message : String(e)))
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <>
-      <header className="wb-mc__head">
-        <span className="wb-mc__title">{m.display}</span>
-        <span className="wb-mx__count">{m.file}</span>
-      </header>
-
-      <section className="wb-card">
-        <header className="wb-card__head">
-          <span className="wb-card__title">元信息</span>
-          {err && (
-            <span className="wb-todo" data-tone="danger">
-              {err}
-            </span>
-          )}
-        </header>
-        <dl className="wb-kv">
-          <dt>机型 ID</dt>
-          <dd>
-            {m.id}
-            <i className="wb-kv__note">（就是文件名，改不了）</i>
-          </dd>
-          <EditableKV
-            label="显示名"
-            value={m.display}
-            clearable={false}
-            onSave={(v) => save('display', v)}
-          />
-          <EditableKV label="品牌" value={m.brand} clearable={false} onSave={(v) => save('brand', v)} />
-          <EditableKV label="内部名" value={m.name || null} onSave={(v) => save('name', v)} />
-          <dt>外部别名</dt>
-          <dd>{m.externalAliases.length > 0 ? m.externalAliases.join('、') : '—'}</dd>
-          <dt>默认套餐</dt>
-          <dd>{m.defaultBundle ?? '—'}</dd>
-          <EditableKV label="图片" value={m.image} onSave={(v) => save('image', v)} />
-          <EditableKV label="图标" value={m.icon} onSave={(v) => save('icon', v)} />
-          <dt>尺寸</dt>
-          <dd>{m.hasDimensions ? '已配置' : '未配置'}</dd>
-          <dt>禁区</dt>
-          <dd>{m.zoneCount > 0 ? `${m.zoneCount} 块` : '无'}</dd>
-        </dl>
-      </section>
-
-      <section className="wb-card">
-        <header className="wb-card__head">
-          <span className="wb-card__title">版本</span>
-          <span className="wb-mc__headright">
-            <span className="wb-mx__count">{m.versions.length} 个</span>
-            <button
-              type="button"
-              className="wb-btn"
-              data-tone="primary"
-              onClick={() => setAdding((a) => !a)}
-            >
-              {adding ? '取消' : '+ 新增版本'}
-            </button>
-          </span>
-        </header>
-
-        {/* 内联表单，不是模态框 —— 加一个版本只要两个字段，
-            为它盖一层遮罩把整页挡住不值得 */}
-        {adding && (
-          <div className="wb-mc__add">
-            <label className="wb-mc__field">
-              <span>版本 ID</span>
-              <input
-                className="wb-input"
-                value={newId}
-                placeholder="大写字母 / 数字 / 下划线"
-                autoFocus
-                onChange={(e) => setNewId(e.target.value.toUpperCase())}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-              />
-            </label>
-            <label className="wb-mc__field">
-              <span>版本名称</span>
-              <input
-                className="wb-input"
-                value={newName}
-                placeholder="给人看的名字，例如 标准版"
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-              />
-            </label>
-            <button type="button" className="wb-btn" data-tone="primary" disabled={busy} onClick={submit}>
-              写进 {m.file}
-            </button>
-            {/* 说清它会立刻落盘 —— **没有草稿也没有撤销**，那就要提前讲 */}
-            <p className="wb-mc__hint">
-              确认后**立刻写入**那个文件（没有草稿、没有撤销）。写错了就删掉这个版本。
-            </p>
-            {err && (
-              <p className="wb-todo" data-tone="danger">
-                {err}
+        {/* 尺寸（只读 —— 九格编辑待后端出命令，见 C14-PORT-PLAN §4） */}
+        <div className={s.card}>
+          <div className={s.cardHead}>
+            <h2>尺寸</h2>
+          </div>
+          <div className={s.cardBody}>
+            {m.hasDimensions ? (
+              <div className={s.kv}>
+                <span className={s.kvKey}>状态</span>
+                <span className={s.kvVal}>已配置</span>
+                <span className={s.kvKey}>禁区</span>
+                <span className={s.kvVal}>{m.zoneCount > 0 ? `${m.zoneCount} 块` : '无'}</span>
+              </div>
+            ) : (
+              <p className={s.note} style={{ margin: 0 }}>
+                {placeholderText.noDimensions} —— 占位机型不参与交付，检查与生成页会给一条说明而不是报错。
               </p>
             )}
           </div>
-        )}
+        </div>
 
-        {m.versions.map((v) => {
-          const open = openVersion === v.id
-          return (
-            <div key={v.id} className="wb-ver" data-open={open ? 'yes' : undefined}>
+        {/* 版本 */}
+        <div className={s.card}>
+          <div className={s.cardHead}>
+            <h2>版本 {m.versions.length}</h2>
+            <span className={s.cardNote}>点一行看详情，右键出菜单</span>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              onClick={() => {
+                setAvId('')
+                setAvName('')
+                setAddVOpen(true)
+              }}
+            >
+              新增版本
+            </button>
+          </div>
+          <div className={s.cardBody}>
+            {m.versions.map((v) => {
+              const node = nodeOf(m.id, v.id)
+              const st = node?.build ?? 'neverBuilt'
+              const bbsHint = node
+                ? node.bbsSource === 'inheritedFromMachine'
+                  ? `切片器 ${node.bbsCount}（跟机型默认）`
+                  : `切片器 ${node.bbsCount}（这个套餐自己的）`
+                : '切片器 —'
+              return (
+                <div
+                  key={v.id}
+                  className={`${s.row} ${pickedVid === vidOf(m.id, v.id) ? s.rowPick : ''}`}
+                  {...menu.triggerProps(vidOf(m.id, v.id))}
+                  onClick={() => setPickedVid(pickedVid === vidOf(m.id, v.id) ? null : vidOf(m.id, v.id))}
+                >
+                  <span className={`${s.mono} ${s.rowMeta}`}>{v.id}</span>
+                  <span className={s.rowName}>{v.name}</span>
+                  <span className={s.rowMeta}>{v.recommendedBundle ?? placeholderText.noBundle}</span>
+                  {!v.hasRecipe && (
+                    <span className={s.todo} title="纯继承机型基底，还没有自己的参数正文（14.4）">
+                      参数源待补
+                    </span>
+                  )}
+                  <span
+                    className={`${s.tag} ${STATE_TAG[st]}`}
+                    title={`${words.build[st].explain ?? ''} · ${bbsHint}`}
+                  >
+                    {words.build[st].label}
+                  </span>
+                </div>
+              )
+            })}
+            {!m.versions.length && (
+              <p className={s.note} style={{ margin: 0 }}>
+                这台机型还没有版本 —— 占位机型的正常状态。
+              </p>
+            )}
+            <p className={s.note}>
+              新增与删除**立刻写入文件**（没有草稿也没有撤销，删之前会先问孤儿引用）；
+              复制走两条命令：先版本定义，勾了才拷参数正文。
+            </p>
+          </div>
+        </div>
+
+        {/* 版本详情 */}
+        {picked && pickedNode && (
+          <div className={s.card}>
+            <div className={s.cardHead}>
+              <h2 className={s.mono}>{picked.id}</h2>
+              <span className={s.cardNote}>{picked.name}</span>
               <button
                 type="button"
-                className="wb-ver__head"
-                onClick={() => setOpenVersion(open ? null : v.id)}
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => {
+                  setEditVOpen(vidOf(m.id, picked.id))
+                  setEvName(picked.name)
+                  setEvTag(picked.tag ?? '')
+                  setEvDesc(picked.description ?? '')
+                }}
               >
-                <span className="wb-ver__name">{v.name || v.id}</span>
-                <span className="wb-ver__id">{v.id}</span>
-                {v.tag && <i className="wb-ver__tag">{v.tag}</i>}
+                编辑
               </button>
-              {open && (
-                <>
-                  <dl className="wb-kv">
-                    <dt>版本 ID</dt>
-                    <dd>
-                      {v.id}
-                      <i className="wb-kv__note">（改 ID 等于删一个再加一个，没做）</i>
-                    </dd>
-                    <EditableKV
-                      label="版本名称"
-                      value={v.name || null}
-                      clearable={false}
-                      onSave={(x) => saveVersion(v.id, 'name', x)}
-                    />
-                    <EditableKV
-                      label="预设文件"
-                      value={v.presetFile}
-                      onSave={(x) => saveVersion(v.id, 'presetFile', x)}
-                    />
-                    <EditableKV
-                      label="推荐套餐"
-                      value={v.recommendedBundle}
-                      onSave={(x) => saveVersion(v.id, 'recommendedBundle', x)}
-                    />
-                    <EditableKV
-                      label="标签"
-                      value={v.tag}
-                      onSave={(x) => saveVersion(v.id, 'tag', x)}
-                    />
-                    <EditableKV
-                      label="描述"
-                      value={v.description}
-                      onSave={(x) => saveVersion(v.id, 'description', x)}
-                    />
-                  </dl>
-                  <DeleteVersion machineId={m.id} version={v.id} onChanged={onChanged} />
-                </>
-              )}
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => {
+                  setCopyOpen(vidOf(m.id, picked.id))
+                  setCopyId(`${picked.id}_COPY`)
+                  setCopyName(`${picked.name || picked.id} 副本`)
+                  setWithRecipe(true)
+                }}
+              >
+                复制
+              </button>
+              <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => askDelete(picked.id)}>
+                删除
+              </button>
+              <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setPickedVid(null)}>
+                收起
+              </button>
             </div>
-          )
-        })}
-      </section>
+            <div className={s.cardBody}>
+              {/* ① 身份 */}
+              <div className={s.sect}>
+                <div className={s.sectHead}>① 身份</div>
+                <div className={s.kv}>
+                  <span className={s.kvKey}>
+                    版本名称
+                    <FieldMark />
+                  </span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.name}
+                      key={`vname-${picked.id}-${picked.name}`}
+                      aria-label="版本名称"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== picked.name) {
+                          if (!next) toasts.push('版本名不许清空 —— 检查与生成页要靠它认版本')
+                          else void saveVersion(picked.id, 'name', next)
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
 
-      {/* 还没接上的**不摆按钮** —— 摆一个点不动的按钮比没有更糟 */}
-      <p className="wb-todo">
-        「新增版本」已经能用。新增机型 / 改名 / 删除还没接上 ——
-        后端的写回与逐字节保真已经就位。
-      </p>
-    </>
+                  <span className={s.kvKey}>版本 id</span>
+                  <span className={s.kvVal}>
+                    <span className={s.mono}>{picked.id}</span>
+                    <span className={s.cardNote}>改 id = 删掉再加一个 —— 这一步后端还没做</span>
+                  </span>
+
+                  <span className={s.kvKey}>标签</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.tag ?? ''}
+                      key={`vtag-${picked.id}-${picked.tag ?? ''}`}
+                      aria-label="标签"
+                      placeholder="可空"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.tag ?? '')) void saveVersion(picked.id, 'tag', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
+
+                  <span className={s.kvKey}>描述</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.description ?? ''}
+                      key={`vdesc-${picked.id}-${picked.description ?? ''}`}
+                      aria-label="描述"
+                      placeholder="可空"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.description ?? ''))
+                          void saveVersion(picked.id, 'description', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
+                </div>
+              </div>
+
+              {/* ② 参数 —— 这里不放表单，参数台是编辑工作区；这一页只回答三件事 */}
+              <div className={s.sect}>
+                <div className={s.sectHead}>② 参数</div>
+                <div className={s.kv}>
+                  <span className={s.kvKey}>{picked.hasRecipe ? '本版本覆盖' : '参数源'}</span>
+                  <span className={s.kvVal}>
+                    {picked.hasRecipe ? (
+                      <>
+                        <span className={s.tnum}>{pickedNode.items}</span>
+                        <span className={s.cardNote}>
+                          {' '}
+                          项 · 这台机型可见参数共 {visibleCount} 条，其余跟随机型基底
+                        </span>
+                      </>
+                    ) : (
+                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基底">
+                        参数源待补
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className={s.sectOps}>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnSm}`}
+                    title="参数在参数台专业地改 —— 跳过去并落在这一版"
+                    onClick={() => onGoto('params', { machineId: m.id, uid: pickedNode.uid, key: null })}
+                  >
+                    编辑参数
+                  </button>
+                </div>
+              </div>
+
+              {/* ③ 配方 —— 状态是配方的属性；生成本来就该在这一页做完 */}
+              <div className={s.sect}>
+                <div className={s.sectHead}>③ 配方</div>
+                <div className={s.recipeState}>
+                  <span className={`${s.tag} ${STATE_TAG[pickedNode.build]}`}>
+                    {words.build[pickedNode.build].label}
+                  </span>
+                  <span className={s.cardNote}>{words.build[pickedNode.build].explain}</span>
+                  {pickedNode.lastBuild !== null && (
+                    <span className={s.cardNote}>上次生成 {pickedNode.lastBuild}</span>
+                  )}
+                </div>
+                <div className={s.kv}>
+                  <span className={s.kvKey}>产物名</span>
+                  <span className={s.kvVal}>
+                    <span className={s.mono}>{pickedRow?.mkpFile ?? '—'}</span>
+                    <span className={s.cardNote}>按「机型-版本」由命名规则算出，不手填（G-0）</span>
+                  </span>
+                </div>
+                {(() => {
+                  const note = genNote(m.id, picked.id)
+                  const canGen = note === '' && pickedNode.build !== 'noResources'
+                  return (
+                    <>
+                      <div className={s.sectOps}>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm} ${s.btnPrimary}`}
+                          disabled={!canGen}
+                          title={canGen ? `生成 ${pickedRow?.mkpFile ?? '预设'}` : note}
+                          onClick={() => void doBuild(m.id, picked.id)}
+                        >
+                          {pickedNode.build === 'stale' ? '重新生成' : '生成配方'}
+                        </button>
+                        {dirty && canGen && (
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            title="先落盘，再生成 —— 顺序在这里是规定死的"
+                            onClick={() => void saveAndBuild(m.id, picked.id)}
+                          >
+                            保存并生成
+                          </button>
+                        )}
+                      </div>
+                      {!canGen && note !== '' && (
+                        <p className={s.note} style={{ marginTop: 8 }}>
+                          {note}
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+
+              {/* ④ 关联 */}
+              <div className={s.sect}>
+                <div className={s.sectHead}>④ 关联</div>
+                <div className={s.kv}>
+                  <span className={s.kvKey}>套餐</span>
+                  <span className={s.kvVal}>
+                    {picked.recommendedBundle ? (
+                      <>
+                        <button
+                          type="button"
+                          className={s.chip}
+                          title="去套餐页看它 —— 那一页是管理套餐内容的地方"
+                          onClick={() => onGoto('bundles', { machineId: m.id, uid: null, key: picked.recommendedBundle })}
+                        >
+                          {picked.recommendedBundle}
+                        </button>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          onClick={() => {
+                            setBunOpen(vidOf(m.id, picked.id))
+                            setBunPick(picked.recommendedBundle ?? '')
+                          }}
+                        >
+                          更换套餐…
+                        </button>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          onClick={() => void saveVersion(picked.id, 'recommendedBundle', null)}
+                        >
+                          取消关联
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className={s.kvDim}>{placeholderText.noBundle}</span>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          onClick={() => {
+                            setBunOpen(vidOf(m.id, picked.id))
+                            setBunPick('')
+                          }}
+                        >
+                          选择套餐…
+                        </button>
+                      </>
+                    )}
+                  </span>
+
+                  <span className={s.kvKey}>套餐内容</span>
+                  <span className={s.kvVal}>
+                    {(() => {
+                      const b = bundles.bundles.find((x) => x.id === picked.recommendedBundle)
+                      if (!b)
+                        return (
+                          <span className={s.kvDim}>还没选套餐 —— 切片器和 MKP 都放在套餐里，先选一个</span>
+                        )
+                      const mkp = b.assetRefs.filter((r) => !r.isBbs).length
+                      const bbs = b.assetRefs.filter((r) => r.isBbs).length
+                      return (
+                        <span className={s.cardNote}>
+                          {b.display || b.id} · MKP 预设 {mkp} · 切片器 {bbs}
+                          {b.assetRefs.some((r) => !r.resolvable) && ' · 有引用解析不到（检查页会报）'}
+                          {' —— 内容的增删在套餐页（P4）'}
+                        </span>
+                      )
+                    })()}
+                  </span>
+                </div>
+              </div>
+
+              {/* 下一步：一次只给一颗按钮 */}
+              <div className={s.sect}>
+                <div className={s.sectHead}>下一步</div>
+                <div className={s.steps}>
+                  <span className={s.step} data-done={!dirty}>
+                    ① 身份
+                  </span>
+                  <span className={s.step} data-done={picked.hasRecipe}>
+                    ② 参数
+                  </span>
+                  <span className={s.step} data-done={pickedNode.build === 'built'}>
+                    ③ 配方
+                  </span>
+                  <span className={s.step} data-done={!!picked.recommendedBundle}>
+                    ④ 套餐
+                  </span>
+                </div>
+                {nextStep && (
+                  <div className={s.sectOps}>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+                      onClick={nextStep.run}
+                    >
+                      下一步：{nextStep.label}
+                    </button>
+                  </div>
+                )}
+                {nextStep?.hint && <p className={s.note}>{nextStep.hint}</p>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ContextMenu at={menu.at} entries={entries} onClose={menu.close} />
+
+      {/* —— 选择套餐 —— */}
+      <ModalC14
+        open={bunOpen !== null}
+        title={`选择套餐 · ${bunOpen ?? ''}`}
+        subtitle="一个版本只记得一个套餐 —— 选完立刻写进机型文件（没有草稿）"
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setBunOpen(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setBunOpen(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={!bunPick}
+              title={bunPick ? undefined : '先在下面挑一个套餐'}
+              onClick={() => {
+                if (bunOpen === null || !bunPick) return
+                const [, vid] = bunOpen.split('/')
+                void saveVersion(vid, 'recommendedBundle', bunPick)
+                setBunOpen(null)
+              }}
+            >
+              关联
+            </button>
+          </>
+        }
+      >
+        <div className={s.bunList}>
+          {bundles.bundles
+            .filter((b) => b.machineId === m.id)
+            .map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                className={`${s.row} ${bunPick === b.id ? s.rowPick : ''}`}
+                onClick={() => setBunPick(b.id)}
+              >
+                <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
+                <span className={s.rowName}>{b.display || '—'}</span>
+                <span className={s.rowMeta}>
+                  MKP {b.assetRefs.filter((r) => !r.isBbs).length} · 切片器{' '}
+                  {b.assetRefs.filter((r) => r.isBbs).length}
+                </span>
+                {b.id === picked?.recommendedBundle && <span className={`${s.tag} ${s.tagGhost}`}>当前</span>}
+              </button>
+            ))}
+          {!bundles.bundles.some((b) => b.machineId === m.id) && (
+            <p className={s.note} style={{ margin: 0 }}>
+              这台机型名下还没有套餐（套餐归属机型，版本指过去）—— 套餐页（P4）是建它的地方。
+            </p>
+          )}
+        </div>
+      </ModalC14>
+
+      {/* —— 素材选择器：机型图 / 图标（都是资产 id，只从库里挑） —— */}
+      <AssetPicker
+        open={imgOpen}
+        title={`选择机型图 · ${m.id}`}
+        options={imageOptions}
+        value={m.image}
+        onCancel={() => setImgOpen(false)}
+        onPick={(next) => {
+          void saveMachine('image', next)
+          toasts.push(next ? `机型图指到资产 ${next}` : '已清空机型图')
+          setImgOpen(false)
+        }}
+      />
+      <AssetPicker
+        open={iconOpen}
+        title={`选择图标 · ${m.id}`}
+        options={iconOptions}
+        value={m.icon}
+        onCancel={() => setIconOpen(false)}
+        onPick={(next) => {
+          void saveMachine('icon', next)
+          toasts.push(next ? `图标指到资产 ${next}` : '已清空图标')
+          setIconOpen(false)
+        }}
+      />
+
+      {/* —— 新增机型 —— */}
+      <ModalC14
+        open={addOpen}
+        title="新增机型"
+        subtitle="照 wb_add_machine(id, brand, display) —— 会新建一个 presets/machines/ 下的文件并立刻写入"
+        size="sm"
+        closeOnScrim={false}
+        onClose={() => setAddOpen(false)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setAddOpen(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={!addReady}
+              title={
+                !idOk(addId) && addId.trim() !== ''
+                  ? 'id 只能用大写字母、数字和下划线（它会直接变成文件名）'
+                  : addIdTaken
+                    ? '已经有一台叫这个的机型了'
+                    : addReady
+                      ? undefined
+                      : '三格都要填（后端逐格校验）'
+              }
+              onClick={() => void submitAddMachine()}
+            >
+              新建
+            </button>
+          </>
+        }
+      >
+        <label className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>
+            机型 id
+            <FieldMark />
+          </span>
+          <input
+            className={s.inp}
+            value={addId}
+            placeholder="A2L"
+            aria-label="机型 id"
+            onChange={(e) => setAddId(e.target.value.toUpperCase())}
+          />
+          {/* 拦着新建的理由当场写在输入框下面 —— 只放禁用按钮的悬停里，人只能猜 */}
+          {addId.trim() !== '' && !idOk(addId) && (
+            <span className={s.inpHint}>id 只能用大写字母、数字和下划线 —— 例如 A2L、A1_MINI</span>
+          )}
+          {addIdTaken && <span className={s.inpHint}>id「{addId.trim()}」已经被占了 —— 换一个</span>}
+          <span className={s.kvKey}>
+            品牌
+            <FieldMark later />
+          </span>
+          <PickOrType
+            label="品牌"
+            options={brandOptions}
+            value={addBrand}
+            emptyLabel="选一个品牌…"
+            onChange={setAddBrand}
+          />
+          <span className={s.kvKey}>
+            显示名
+            <FieldMark later />
+          </span>
+          <input
+            className={s.inp}
+            value={addDisplay}
+            placeholder="给人看的名字，例如 A1 mini"
+            aria-label="显示名"
+            onChange={(e) => setAddDisplay(e.target.value)}
+          />
+        </label>
+        <p className={s.note}>
+          <strong>红星只留给 id，橙星是「可以后补的必填」</strong> —— 不过这一步三格都得填：
+          真后端逐格校验，空着建不出来。新建的机型还没有尺寸（占位机型），
+          没版本、不参与交付 —— 检查与生成页会给一条说明而不是报错。
+          <br />
+          同名文件已存在时**不会被覆盖**，后端会直接报错。
+        </p>
+      </ModalC14>
+
+      {/* —— 新增版本 —— */}
+      <ModalC14
+        open={addVOpen}
+        title={`新增版本 · ${m.id}`}
+        subtitle="照 wb_add_version(machineId, id, name) —— 写进机型文件，立刻生效"
+        size="sm"
+        closeOnScrim={false}
+        onClose={() => setAddVOpen(false)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setAddVOpen(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={!avReady}
+              title={
+                avTaken
+                  ? '这台机型已经有这个版本 id 了'
+                  : !idOk(avId) && avId.trim() !== ''
+                    ? '版本 id 只能用大写字母、数字和下划线'
+                    : !avName.trim()
+                      ? '版本名不能空着'
+                      : undefined
+              }
+              onClick={() => void submitAddVersion()}
+            >
+              新建
+            </button>
+          </>
+        }
+      >
+        <div className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>
+            版本 id
+            <FieldMark />
+          </span>
+          <input
+            className={s.inp}
+            value={avId}
+            placeholder="STANDARD"
+            aria-label="版本 id"
+            onChange={(e) => setAvId(e.target.value.toUpperCase())}
+          />
+          <span className={s.kvKey}>
+            版本名
+            <FieldMark />
+          </span>
+          <input
+            className={s.inp}
+            value={avName}
+            placeholder="标准版"
+            aria-label="版本名"
+            onChange={(e) => setAvName(e.target.value)}
+          />
+        </div>
+        <p className={s.note}>
+          <strong>id 与版本名都得现在填</strong>：版本一建出来就直接参与生成，
+          没名字的版本在检查页和生成页都认不出来。
+          <br />
+          新版本的标签、说明、套餐还是空的，参数纯继承机型基底（卡片上会标
+          「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。
+        </p>
+      </ModalC14>
+
+      {/* —— 复制版本（14.3 / 14.5） —— */}
+      <ModalC14
+        open={copyOpen !== null}
+        title={`复制版本 · ${copyOpen ?? ''}`}
+        subtitle="两条命令各自只写单文件：先版本定义，勾了「同时复制配方」再拷参数正文"
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setCopyOpen(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setCopyOpen(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={!copyReady}
+              title={
+                copyTaken
+                  ? '这台机型已经有这个版本 id 了'
+                  : idOk(copyId) || copyId.trim() === ''
+                    ? undefined
+                    : '版本 id 只能用大写字母、数字和下划线'
+              }
+              onClick={() => void submitCopy()}
+            >
+              复制
+            </button>
+          </>
+        }
+      >
+        <label className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>
+            新版本 id
+            <FieldMark />
+          </span>
+          <input
+            className={s.inp}
+            value={copyId}
+            aria-label="新版本 id"
+            onChange={(e) => setCopyId(e.target.value.toUpperCase())}
+          />
+          <span className={s.kvKey}>版本名</span>
+          <input
+            className={s.inp}
+            value={copyName}
+            aria-label="新版本名"
+            placeholder="给人看的名字"
+            onChange={(e) => setCopyName(e.target.value)}
+          />
+        </label>
+        <label className={s.refRow} style={{ marginTop: 12 }}>
+          <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
+          <span>
+            <b>同时复制配方</b>
+            <span className={s.cardNote} style={{ display: 'block' }}>
+              后端是两个独立命令：<code className={s.mono}>wb_copy_version</code> 只写版本定义，
+              <code className={s.mono}>wb_copy_recipe</code> 才拷参数值，而且拷出来是
+              <strong>独立快照</strong> —— 之后改模板、改基底都传不到它身上。
+              不勾就是一个纯继承基底的空壳版本（标「参数源待补」）。
+            </span>
+          </span>
+        </label>
+      </ModalC14>
+
+      {/* —— 编辑版本（name / tag / description 三格一次提交） —— */}
+      <ModalC14
+        open={editVOpen !== null}
+        title={`编辑版本 · ${editVOpen ?? ''}`}
+        subtitle="name / tag / description —— 对齐 wb_set_version_field 的白名单；套餐在 ④ 关联里改"
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setEditVOpen(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setEditVOpen(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={!evName.trim()}
+              title={evName.trim() ? undefined : '版本名不许清空'}
+              onClick={() => void submitEditVersion()}
+            >
+              保存
+            </button>
+          </>
+        }
+      >
+        <label className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>
+            版本名
+            <FieldMark />
+          </span>
+          <input className={s.inp} value={evName} aria-label="版本名" onChange={(e) => setEvName(e.target.value)} />
+          <span className={s.kvKey}>标签</span>
+          <input
+            className={s.inp}
+            value={evTag}
+            aria-label="标签"
+            placeholder="可空"
+            onChange={(e) => setEvTag(e.target.value)}
+          />
+          <span className={s.kvKey}>描述</span>
+          <input
+            className={s.inp}
+            value={evDesc}
+            aria-label="描述"
+            placeholder="可空"
+            onChange={(e) => setEvDesc(e.target.value)}
+          />
+        </label>
+        <p className={s.note}>
+          版本 id 不在这里改 —— id 是身份，改它等于删掉再加一个（后端还没有这一步）。
+          一次提交三格：一格失败就停，不会只成功一半。
+        </p>
+      </ModalC14>
+
+      {/* —— 删除版本（两步：先问孤儿，再确认；确认后立刻落盘，不可逆） —— */}
+      <ModalC14
+        open={del !== null}
+        title={`删除版本 · ${del?.vid.split('/')[1] ?? ''}`}
+        subtitle="先查孤儿引用，再确认 —— 确认之后立刻写入，没有回收站也没有撤销"
+        size="md"
+        onClose={() => setDel(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setDel(null)}>
+              不删了
+            </button>
+            {del?.orphans !== null ? (
+              <button type="button" className={`${s.btn} ${s.btnDanger}`} onClick={() => void submitDelete()}>
+                确认删除
+              </button>
+            ) : (
+              <span className={s.cardNote}>正在查孤儿引用…</span>
+            )}
+          </>
+        }
+      >
+        {del === null ? null : del.orphans === null ? (
+          <p className={s.note} style={{ margin: 0 }}>
+            正在查「删掉这一版会让哪些字段留下孤儿引用」……
+          </p>
+        ) : (
+          <>
+            <p className={s.note} style={{ margin: 0 }}>
+              要删掉 <b>{m.id}/{del.vid.split('/')[1]}</b>。
+              <strong>立刻写入文件，没有回收站也没有撤销。</strong>
+            </p>
+            {del.orphans.length > 0 ? (
+              <p className={s.note}>
+                删掉之后这 {del.orphans.length} 项会留下指向它的<strong>孤儿引用</strong>
+                （不报错，但那几项在这台机器上会悄悄不生效）：
+                <br />
+                <code className={s.mono}>{del.orphans.join('、')}</code>
+              </p>
+            ) : (
+              <p className={s.note}>没有任何字段引用这一版，删掉不会留下孤儿。</p>
+            )}
+            <p className={s.note}>
+              <strong>会一起消失的</strong>：版本本身、标签与说明、它对套餐的指向、
+              已生成的产物记录，以及它自己钉过的 {pickedNode?.items ?? 0} 项参数值。
+              <br />
+              <strong>一个都不动的</strong>：这台机型、别的版本、套餐定义、资产库里的文件。
+            </p>
+          </>
+        )}
+      </ModalC14>
+    </div>
   )
 }
