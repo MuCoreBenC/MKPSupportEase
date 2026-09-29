@@ -120,8 +120,12 @@ body,
 }
 
 /* 试验场 global.css 给全体 button 的复位；工作台原来只有 .wb-btn 一族有样式，
-   搬来的模态框 / 右键菜单 / 字段控件里有大量裸 button，没有这条会顶着 UA 底色 */
-[data-wb] button {
+   搬来的模态框 / 右键菜单 / 字段控件里有大量裸 button，没有这条会顶着 UA 底色。
+   **作用域圈在壳里，优先级必须也圈掉**：`:where(...)` 让这条只剩元素级（0,0,1）——
+   与原型的裸 `button` 复位同优先级，`.pTab` / `.pVrow` / `.seg` 这些单类内衬
+   （0,1,0）才赢得过它。写成 `[data-wb] button`（0,1,1）的话，页签、左树行、
+   分段选项、普通按钮的内衬会全部被它归零 —— P2 验收时「参数台不像 C14」的根因。 */
+:where([data-wb]) button {
   font: inherit;
   color: inherit;
   border: none;
@@ -130,8 +134,8 @@ body,
   cursor: pointer;
 }
 
-[data-wb] button:focus-visible,
-[data-wb] input:focus-visible {
+:where([data-wb]) button:focus-visible,
+:where([data-wb]) input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
