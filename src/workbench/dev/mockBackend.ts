@@ -78,6 +78,7 @@ const WORDS: Json = {
     notUndoable: '删除和生成记录不进撤销栈；删掉的版本在回收站里',
     deprecatedWriteBlocked: '已弃用，不能改（上游已标记）',
     deleteAssetInUse: '还有套餐装着它，或还有机型把它当图 / 图标用 —— 先解除引用',
+    publishBlocked: '有阻断问题没解决，不许发布',
   },
   empty: {
     noIssues: '都过了 —— 没有阻断、没有待办、没有提示',
@@ -357,6 +358,27 @@ function bundleListOf(query: string | null) {
     total: BUNDLES.length,
   }
 }
+
+const STORE_DIRS = [
+  { name: 'machines', role: '机型配方的真源（machineVariants 按机型一份）。机型页读写它' },
+  { name: 'bbs', role: '零读写 —— BBS 预设今天不经工作台，占位' },
+  { name: '.draft', role: '草稿与界面状态（book.json / ui.json）。只存「改了什么」，懒写' },
+  { name: '.trash', role: '回收站：删除版本的生成快照、交付残留回收，都在这里' },
+  { name: '.snapshots', role: '生成快照：生成时写入，恢复配方时只读 —— 不当编辑对象' },
+]
+
+/** 生成记录（MarkBuilt 的内存账）；wb_generate 往里记 */
+const builtRecords = new Set<string>(['A1/STANDARD'])
+
+const BASELINE = [
+  { fileName: 'A1_standard_v3.3.toml', status: 'same', productSha: 'f444aeaf1a2b3c4d', baselineSha: 'f444aeaf1a2b3c4d' },
+  { fileName: 'A1_fast_v3.3.toml', status: 'same', productSha: '9c8b7a6f5e4d3c2b', baselineSha: '9c8b7a6f5e4d3c2b' },
+  { fileName: 'P1S_standard_v3.3.toml', status: 'changed', productSha: '0112233445566778', baselineSha: '9988776655443322' },
+]
+
+const TRASH = [
+  { file: '20260928-T-10-12-45__A1__OLDVER', deletedStamp: '20260928-T-10-12-45', machineId: 'A1', versionId: 'OLDVER' },
+]
 
 const FALLBACK_TABLE = {
   version: 2,
@@ -676,7 +698,26 @@ function buildBook(): Json {
     save: dirtyCount > 0 ? 'dirty' : 'saved',
     artifact: 'stale',
     lastBuild: '2026-09-20 10:00:00',
-    buildRows: [],
+    buildRows: MACHINE_VIEWS.flatMap((m) =>
+      m.versions.map((v) => {
+        const uid = `${m.id}/${v.id}`
+        const built = builtRecords.has(uid)
+        return {
+          uid,
+          machineId: m.id,
+          machine: m.id,
+          name: v.name,
+          state: m.id === 'A2L' ? 'neverBuilt' : built ? 'built' : 'neverBuilt',
+          reason: '',
+          buildable: m.hasDimensions,
+          disabledReason: m.hasDimensions ? null : '这台机型还没配尺寸（占位），不参与交付',
+          mkpFile: built ? `MKPProcess_${m.id}_${v.id}.toml` : null,
+          bbsCount: 1,
+          bbsSource: 'own',
+          lastBuild: built ? '2026-09-30 12:00:00（演示）' : null,
+        }
+      }),
+    ),
     notices: [],
     snapshot: dirtyCount > 0 ? 'pending' : 'current',
   }
@@ -710,6 +751,7 @@ export function installMockBackend() {
           problem: null, detail: null,
           info: { registryUpdated: '2026-09-01', manifestUpdated: '2026-09-01', channel: 'dev',
                   minimumClient: null, latestRelease: null, params: PARAMS.length, machines: 1, deliverables: 9, fallbacks: 12 },
+          storeDirs: STORE_DIRS,
         })
       case 'wb_words':
         return Promise.resolve(WORDS)
@@ -737,7 +779,29 @@ export function installMockBackend() {
           ),
         )
       case 'wb_preflight':
-        return Promise.resolve({ issues: [], blocks: 0, todos: 0, hints: 0, emptyHint: '都过了 —— 没有阻断、没有待办、没有提示' })
+        return Promise.resolve({
+          issues: [
+            {
+              id: 'compat.minimum_client',
+              severity: 'todo',
+              title: '最低客户端版本未声明',
+              detail:
+                '上游 manifest.json 的 minimumClient 是空串 —— 上游现在没有声明「客户端要多新才能用这份数据」。这不是我们该填的空，而是发布时要知道的事。',
+              at: { view: 'build', machineId: null, uid: null, key: null },
+            },
+            {
+              id: 'bundle.orphan_files',
+              severity: 'hint',
+              title: '有 2 个文件没进任何套餐',
+              detail: 'a2l-image、a1-extra-image —— 客户看得到它们，只是没有套餐推荐。仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。',
+              at: { view: 'menu', machineId: null, uid: null, key: null },
+            },
+          ],
+          blocks: 0,
+          todos: 1,
+          hints: 1,
+          emptyHint: '都过了 —— 没有阻断、没有待办、没有提示',
+        })
       case 'wb_machines':
         return Promise.resolve({ brands: [], machines: MACHINE_VIEWS, root: 'C:\\dev\\workbench' })
       case 'wb_bundles':
@@ -775,6 +839,64 @@ export function installMockBackend() {
         if (at >= 0) ASSETS.splice(at, 1)
         return Promise.resolve(assetListOf(null, null, null, null, null, null))
       }
+      case 'wb_generate': {
+        const scope = args?.scope as string | { picked: string[] }
+        const rows = buildBook().buildRows as { uid: string; buildable: boolean; state: string }[]
+        const picked =
+          typeof scope === 'string'
+            ? rows.filter((r) => r.buildable && (scope === 'all' || r.state === 'stale')).map((r) => r.uid)
+            : (scope?.picked ?? [])
+        const written: string[] = []
+        const unchanged: string[] = []
+        const skipped: [string, string][] = []
+        for (const uid of picked) {
+          const row = rows.find((r) => r.uid === uid)
+          if (!row || !row.buildable) {
+            skipped.push([uid, '这台机型还没配尺寸（占位），不参与交付'])
+            continue
+          }
+          if (builtRecords.has(uid)) unchanged.push(uid)
+          else written.push(uid)
+          builtRecords.add(uid)
+        }
+        return Promise.resolve({
+          stamp: '2026-09-30 12:00:00（演示）',
+          written,
+          unchanged,
+          skipped,
+          mark: {
+            kind: 'markBuilt',
+            uids: [...written, ...unchanged],
+            stamp: '2026-09-30 12:00:00（演示）',
+            fingerprints: {},
+          },
+        })
+      }
+      case 'wb_publish':
+        return Promise.resolve({
+          stamp: '2026-09-30 12:30:00（演示）',
+          root: 'C:\\dev\\dist',
+          files: 21,
+          minimumClient: null,
+          todos: 1,
+          hints: 2,
+        })
+      case 'wb_baseline_diff':
+        return Promise.resolve(BASELINE)
+      case 'wb_sync_baseline': {
+        const n = BASELINE.filter((b) => b.status !== 'same').length
+        for (const b of BASELINE) {
+          b.baselineSha = b.productSha
+          b.status = 'same'
+        }
+        return Promise.resolve(n)
+      }
+      case 'wb_dist_strays':
+        return Promise.resolve(['presets/mkp/old_file.toml'])
+      case 'wb_clean_dist_strays':
+        return Promise.resolve(1)
+      case 'wb_trash':
+        return Promise.resolve(TRASH)
       case 'wb_fallback':
         return Promise.resolve(FALLBACK_TABLE)
       case 'wb_asset_usage': {

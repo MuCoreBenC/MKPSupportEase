@@ -45,6 +45,8 @@ interface Props {
   tick: number
   /** 跨页跳转带来的预选（套餐页文件行的「在资产库里看…」） */
   initialSel?: string | null
+  /** 身份筛选的预选（检查报告的「孤儿文件」跳过来就替人筛好「可选」，C14 第二十七轮） */
+  initialAssign?: string | null
   onGoto: (view: string, focus?: GotoFocus) => void
   /** 草稿写入口（改交付身份走它 —— 可见性是唯一进参数草稿的动作，带撤销） */
   onApply: (label: string, patches: import('../api').Patch[]) => Promise<void>
@@ -61,13 +63,13 @@ const KIND_LABEL: Record<string, string> = {
 type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile'
 type Assign = 'all' | 'assigned' | 'optional' | 'archiveOnly'
 
-export default function AssetsPage({ words, tick, initialSel, onGoto, onApply }: Props) {
+export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
   const [fallback, setFallback] = useState<FallbackTable | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
   const [kind, setKind] = useState<Kind>('all')
-  const [assign, setAssign] = useState<Assign>('all')
+  const [assign, setAssign] = useState<Assign>((initialAssign as Assign) ?? 'all')
   /** 切片器的三根轴（C14 第二十八轮）：只在 kind = 切片器时生效，换走后留着不丢（粘性） */
   const [slicer, setSlicer] = useState<'' | 'bbs' | 'orca'>('')
   const [nozzle, setNozzle] = useState('')

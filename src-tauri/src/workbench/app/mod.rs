@@ -322,6 +322,8 @@ pub struct Boot {
     pub problem: Option<String>,
     pub detail: Option<String>,
     pub info: Option<UpstreamInfo>,
+    /// 工作台子目录的职责（14.7）。上游缺失时也给 —— 目录与职责跟上游无关
+    pub store_dirs: Vec<StoreDirRole>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -337,6 +339,36 @@ pub struct UpstreamInfo {
     pub machines: usize,
     pub deliverables: usize,
     pub fallbacks: usize,
+}
+
+/// 工作台子目录的职责（14.7）。**谁写它、谁读它、能不能当编辑对象**，
+/// 一句话说清 —— 界面上要显式摆出来，不留给前端猜
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreDirRole {
+    pub name: String,
+    pub role: &'static str,
+}
+
+/// 子目录职责清单。名字来自 [`paths::WORKBENCH_DIRS`]（同一份清单，不抄第二遍），
+/// 职责的措辞跟着 store.rs 的文档走：bbs 零读写、.snapshots 只写不读、
+/// .draft 只存「改了什么」、.trash 是回收站、machines 是机型配方的真源读写。
+fn store_dir_roles() -> Vec<StoreDirRole> {
+    let role_of = |name: &str| match name {
+        "machines" => "机型配方的真源（machineVariants 按机型一份）。机型页读写它",
+        "bbs" => "零读写 —— BBS 预设今天不经工作台，占位",
+        ".draft" => "草稿与界面状态（book.json / ui.json）。只存「改了什么」，懒写",
+        ".trash" => "回收站：删除版本的生成快照、交付残留回收，都在这里",
+        ".snapshots" => "生成快照：生成时写入，恢复配方时只读 —— 不当编辑对象",
+        _ => "",
+    };
+    paths::WORKBENCH_DIRS
+        .iter()
+        .map(|name| StoreDirRole {
+            name: (*name).to_owned(),
+            role: role_of(name),
+        })
+        .collect()
 }
 
 /// 三个数据根 + 上游就位情况。界面开场调它
@@ -366,12 +398,14 @@ pub fn wb_boot() -> Result<Boot, AppError> {
                 problem: None,
                 detail: None,
                 info: Some(info),
+                store_dirs: store_dir_roles(),
             }),
             Err(e) => Ok(Boot {
                 roots,
                 problem: Some(e.message),
                 detail: e.detail,
                 info: None,
+                store_dirs: store_dir_roles(),
             }),
         }
     })

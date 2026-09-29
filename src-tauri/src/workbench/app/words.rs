@@ -190,6 +190,7 @@ fn words() -> Words {
             ("notApplicable", w::disabled::NOT_APPLICABLE),
             ("bulkRefusesGcode", w::disabled::BULK_REFUSES_GCODE),
             ("buildBlocked", w::disabled::BUILD_BLOCKED),
+            ("publishBlocked", w::disabled::PUBLISH_BLOCKED),
             ("buildNothingToDo", w::disabled::BUILD_NOTHING_TO_DO),
             ("buildNoResources", w::disabled::BUILD_NO_RESOURCES),
             ("nothingToSave", w::disabled::NOTHING_TO_SAVE),

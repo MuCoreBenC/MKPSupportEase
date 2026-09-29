@@ -98,6 +98,8 @@ export interface Boot {
   problem: string | null
   detail: string | null
   info: UpstreamInfo | null
+  /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
+  storeDirs: { name: string; role: string }[]
 }
 
 /* ---------- 整本 ---------- */
@@ -677,6 +679,7 @@ export interface Words {
     | 'notApplicable'
     | 'bulkRefusesGcode'
     | 'buildBlocked'
+    | 'publishBlocked'
     | 'buildNothingToDo'
     | 'buildNoResources'
     | 'nothingToSave'

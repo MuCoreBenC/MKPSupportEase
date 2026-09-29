@@ -52,6 +52,7 @@ import MachinesPage from './views/MachinesPage'
 import ParamsPage from './views/ParamsPage'
 import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
+import BuildPage from './views/BuildPage'
 import s from './c14.module.css'
 
 /**
@@ -162,6 +163,8 @@ export function WorkbenchApp() {
   /** 套餐 / 资产页的跨页预选（C14 的 GotoFocus：机型页 ④ 关联、套餐页反查都在用） */
   const [bundleSel, setBundleSel] = useState<string | null>(null)
   const [assetSel, setAssetSel] = useState<string | null>(null)
+  /** 资产页身份筛选的预选（检查报告的孤儿文件跳过来替人筛好「可选」） */
+  const [assetAssign, setAssetAssign] = useState<string | null>(null)
 
   /** 撤销 / 重做栈。会话内存，关窗就没 —— 草稿本身还在盘上 */
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
@@ -317,7 +320,9 @@ export function WorkbenchApp() {
         setBundleSel(foc.key ?? foc.uid ?? null)
         setFocusGen((g) => g + 1)
       } else if (next === 'assets') {
-        setAssetSel(foc.key ?? foc.uid ?? null)
+        /* key = 'optional' 是检查报告「孤儿文件」的暗号：替人筛好身份，不是选中某条 */
+        setAssetAssign(foc.key === 'optional' ? 'optional' : null)
+        setAssetSel(foc.key === 'optional' ? null : (foc.key ?? null))
         setFocusGen((g) => g + 1)
       }
     }
@@ -459,6 +464,7 @@ export function WorkbenchApp() {
             words={words}
             tick={tick}
             initialSel={assetSel}
+            initialAssign={assetAssign}
             onGoto={goto}
             onApply={async (label, patches) => {
               await run(label, patches, 'undo')
@@ -466,10 +472,21 @@ export function WorkbenchApp() {
           />
         )
       case 'build':
+        if (!boot) return null
         return (
-          <p className="wb-todo">
-            生成与发布视角在 P5 落地（14.2 的闸门按钮含在内）。检查报告的读数已在页头。
-          </p>
+          <BuildPage
+            boot={boot}
+            book={book}
+            words={words}
+            report={report}
+            tick={tick}
+            onGoto={goto}
+            onApply={async (label, patches) => {
+              await run(label, patches, 'undo')
+            }}
+            onSave={save}
+            onBookRefresh={refreshBook}
+          />
         )
     }
   }
