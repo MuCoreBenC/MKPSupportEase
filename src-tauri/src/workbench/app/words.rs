@@ -196,6 +196,7 @@ fn words() -> Words {
             ("nothingToUndo", w::disabled::NOTHING_TO_UNDO),
             ("notUndoable", w::disabled::NOT_UNDOABLE),
             ("deprecatedWriteBlocked", w::disabled::DEPRECATED_WRITE_BLOCKED),
+            ("deleteAssetInUse", w::disabled::DELETE_ASSET_IN_USE),
         ]
         .into_iter()
         .collect(),
@@ -207,6 +208,8 @@ fn words() -> Words {
             ("matrixNoMatch", w::MATRIX_NO_MATCH),
             ("matrixNoCols", w::MATRIX_NO_COLS),
             ("matrixSearchSpansAllTabs", w::MATRIX_SEARCH_SPANS_ALL_TABS),
+            ("selectBundle", w::SELECT_BUNDLE),
+            ("selectAsset", w::SELECT_ASSET),
         ]
         .into_iter()
         .collect(),

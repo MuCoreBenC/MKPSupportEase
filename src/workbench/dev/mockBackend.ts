@@ -77,6 +77,7 @@ const WORDS: Json = {
     nothingToUndo: '没有可以撤销的操作',
     notUndoable: '删除和生成记录不进撤销栈；删掉的版本在回收站里',
     deprecatedWriteBlocked: '已弃用，不能改（上游已标记）',
+    deleteAssetInUse: '还有套餐装着它，或还有机型把它当图 / 图标用 —— 先解除引用',
   },
   empty: {
     noIssues: '都过了 —— 没有阻断、没有待办、没有提示',
@@ -85,6 +86,8 @@ const WORDS: Json = {
     matrixNoMatch: '没有匹配的参数',
     matrixNoCols: '先勾选要对照的列',
     matrixSearchSpansAllTabs: '搜索跨全部分类',
+    selectBundle: '左边选一个套餐',
+    selectAsset: '左边选一条文件，这里显示它被谁引用',
   },
   relate: { goFixIt: '去改那一项', showAnyway: '仍然展开看' },
   snapshot: {
@@ -234,6 +237,151 @@ const atRest: { base: Record<string, Json>; over: Record<string, Json> } = {
 
 /** 草稿里还没保存的改动（level|owner|key → value；null = 删键） */
 const pending = new Map<string, unknown>()
+
+/* ---------- 套餐 / 资产 / 回退夹具（P4 三页的形状镜像；判定照后端文档现算） ---------- */
+
+/** 机型夹具带上一版一套的指向（MachinesPage 也要用） */
+const MACHINE_VIEWS = [
+  {
+    id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
+    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: 'a1-image', icon: 'a1-icon',
+    hasDimensions: true, zoneCount: 0, file: 'A1.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', presetFile: null, recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
+      { id: 'FAST', name: '高速版', presetFile: null, recommendedBundle: 'A1_FAST', tag: null, description: null, hasRecipe: true },
+    ],
+  },
+  {
+    id: 'A2L', display: 'A2L', name: '', brand: 'Anker',
+    defaultBundle: null, externalAliases: [], image: null, icon: null,
+    hasDimensions: false, zoneCount: 0, file: 'A2L.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', presetFile: null, recommendedBundle: '', tag: null, description: null, hasRecipe: false },
+    ],
+  },
+]
+
+type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string }
+
+/** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算 */
+const ASSETS: FixtureRef[] = [
+  { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp' },
+  { id: 'a2l-image', kind: 'image', slicer: null, profile: null, name: 'A2L 外观图（没人引用）', path: 'printers/a2l.webp' },
+  { id: 'a1-icon', kind: 'icon', slicer: null, profile: null, name: 'A1 图标', path: 'icons/a1.svg' },
+  { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
+  { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
+  { id: 'a1-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json' },
+  { id: 'a1-bbs-04-020', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.4 喷头 0.20 层高', path: 'bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json' },
+  { id: 'a1-mini-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1 mini：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json' },
+  { id: 'p1s-bbs-04-024', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'P1S：0.4 喷头 0.24 层高', path: 'bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json' },
+  { id: 'a1-orca-02-010', kind: 'slicerProfile', slicer: 'orca', profile: 'process', name: 'A1：Orca 0.2 喷头 0.10 层高（可选）', path: 'orca/Process/0.2mm/OrcaProcess A1 0.2 0.10.json' },
+]
+
+/** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST） */
+const BUNDLES: { id: string; display: string; machineId: string; assetRefs: string[]; updatedAt: string | null }[] = [
+  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-bbs-04-020'], updatedAt: '2026-07-12' },
+  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
+  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
+]
+
+/** 可见性（含草稿态）：fileId → 'archiveOnly'。写路径与 save 都落这里 */
+const pendingVis = new Map<string, string>()
+
+/** 切片器三根轴之二三 —— 判据与后端 slicer_axes 同一条（路径 mm 段 + 文件名尾数） */
+function slicerAxes(path: string): { nozzle: string | null; layer: string | null } {
+  const numeric = (s: string) => s !== '' && /\d/.test(s) && /^[0-9.]+$/.test(s)
+  const nozzle = path.split('/').find((seg) => seg.endsWith('mm'))?.slice(0, -2) ?? null
+  const file = path.split('/').pop() ?? path
+  const stem = /\.json$/i.test(file) ? file.replace(/\.json$/i, '') : file
+  const tail = stem.split(' ').pop() ?? null
+  return { nozzle: nozzle && numeric(nozzle) ? nozzle : null, layer: tail && numeric(tail) ? tail : null }
+}
+
+const inBundleSet = () =>
+  new Set(BUNDLES.flatMap((b) => b.assetRefs.map((r) => r.toLowerCase())))
+
+function assetListOf(kind: string | null, slicer: string | null, nozzle: string | null, layer: string | null, assign: string | null, query: string | null) {
+  const bundled = inBundleSet()
+  const rows = ASSETS.map((a) => {
+    const axes = slicerAxes(a.path)
+    const vis = pendingVis.get(a.id) ?? 'menu'
+    const asg = vis === 'archiveOnly' ? 'archiveOnly' : bundled.has(a.id.toLowerCase()) ? 'assigned' : 'optional'
+    return {
+      id: a.id, kind: a.kind, machineId: a.id.startsWith('a1-') && a.kind !== 'model' ? 'A1' : a.id.startsWith('p1s-') ? 'P1S' : null,
+      name: a.name, path: a.path, url: `/assets/${a.path}`, slicer: a.slicer, profile: a.profile,
+      present: true, nozzle: axes.nozzle, layer: axes.layer, assign: asg,
+    }
+  })
+  const q = (query ?? '').trim().toLowerCase()
+  const all = rows
+  const filtered = rows.filter((a) =>
+    (kind === null || a.kind === kind) &&
+    (slicer === null || a.slicer === slicer) &&
+    (nozzle === null || a.nozzle === nozzle) &&
+    (layer === null || a.layer === layer) &&
+    (assign === null || a.assign === assign) &&
+    (q === '' || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)),
+  )
+  const numeric = (xs: string[]) => [...new Set(xs)].sort((x, y) => parseFloat(x) - parseFloat(y))
+  return {
+    assets: filtered,
+    root: 'C:\\dev\\public\\assets',
+    nozzles: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.nozzle).map((a) => a.nozzle as string)),
+    layers: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.layer).map((a) => a.layer as string)),
+    total: all.length,
+    optionalCount: all.filter((a) => a.assign === 'optional').length,
+    archiveCount: all.filter((a) => a.assign === 'archiveOnly').length,
+  }
+}
+
+function bundleListOf(query: string | null) {
+  const q = (query ?? '').trim().toLowerCase()
+  const versions = MACHINE_VIEWS.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, defaultBundle: m.defaultBundle, ...v })))
+  const listed = BUNDLES.filter((b) => q === '' || b.id.toLowerCase().includes(q) || b.display.toLowerCase().includes(q))
+  return {
+    bundles: listed.map((b) => ({
+      id: b.id, display: b.display, machineId: b.machineId, updatedAt: b.updatedAt,
+      assetRefs: b.assetRefs.map((r) => {
+        const a = ASSETS.find((x) => x.id === r)
+        return {
+          id: r, kind: a?.kind ?? 'slicerProfile', resolvable: a !== undefined,
+          isBbs: a?.kind === 'slicerProfile' && a.slicer === 'bbs',
+          name: a?.name ?? '', present: a !== undefined,
+          visibility: pendingVis.get(r) ?? 'menu',
+        }
+      }),
+      users: versions.filter((v) => (v.recommendedBundle ?? '').toLowerCase() === b.id.toLowerCase())
+        .map((v) => ({ machineId: v.machineId, versionId: v.id })),
+      defaultFor: MACHINE_VIEWS.filter((m) => (m.defaultBundle ?? '').toLowerCase() === b.id.toLowerCase()).map((m) => m.id),
+    })),
+    total: BUNDLES.length,
+  }
+}
+
+const FALLBACK_TABLE = {
+  version: 2,
+  updated: '2026-06-30',
+  guide: '回退规则由上游维护：客户端按这张表在预设缺失时退回默认行为。\n改这里的唯一入口是 mkppanel 的「回退登记表」页。',
+  groups: [
+    {
+      label: '缺省回退（2）',
+      rules: [
+        { id: 'fb-wipe-mode', category: 'default', trigger: '擦料方式缺失', from: '（无）', to: '擦料塔', enabled: true, severity: 'info', desc: '老版本配方没有擦料方式时按擦料塔处理', reportField: 'fallbacks.wipeMode' },
+        { id: 'fb-ironing', category: 'default', trigger: '熨烫阈值缺失', from: '（无）', to: '关闭', enabled: true, severity: 'info', desc: '熨烫阈值缺失视为关闭', reportField: 'fallbacks.ironing' },
+      ],
+    },
+    {
+      label: '迁移回退（1）',
+      rules: [
+        { id: 'fb-legacy-count', category: 'migration', trigger: '旧版擦料计数出现', from: '旧键', to: '忽略并提示', enabled: false, severity: 'warn', desc: '迁移期兼容键，触发即报（示例：被手动关掉）', reportField: 'fallbacks.legacyCount' },
+      ],
+    },
+  ],
+  disabled: ['fb-legacy-count'],
+  emptyHint: '当前没有关掉的规则',
+  readOnlyReason: '这张表由上游维护，改动请回 mkppanel 的「回退登记表」页',
+}
+
 
 const splitKey = (raw: string) => {
   const [level, owner, ...rest] = raw.split('|')
@@ -511,7 +659,7 @@ function previewBulkOf(key: string, value: unknown, cols: { machineId: string; v
 }
 
 function buildBook(): Json {
-  const dirtyCount = pending.size
+  const dirtyCount = pending.size + pendingVis.size
   return {
     machines: MACHINES.map((m) => ({
       id: m.id, display: m.display, icon: null, items: Object.keys(atRest.base[m.id] ?? {}).length,
@@ -591,7 +739,52 @@ export function installMockBackend() {
       case 'wb_preflight':
         return Promise.resolve({ issues: [], blocks: 0, todos: 0, hints: 0, emptyHint: '都过了 —— 没有阻断、没有待办、没有提示' })
       case 'wb_machines':
-        return Promise.resolve({ brands: [], machines: [], root: 'C:\\dev\\workbench' })
+        return Promise.resolve({ brands: [], machines: MACHINE_VIEWS, root: 'C:\\dev\\workbench' })
+      case 'wb_bundles':
+        return Promise.resolve(bundleListOf((args?.query as string | null) ?? null))
+      case 'wb_set_bundle_refs': {
+        const bundleId = args?.bundleId as string
+        const ids = (args?.assetIds as string[]) ?? []
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        if (!ids.some((id) => ASSETS.find((x) => x.id === id)?.kind === 'slicerProfile')) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 ${bundleId} 的 assetRefs 里没有一条 BBS 预设`, traceId: 'mock' })
+        }
+        b.assetRefs = ids
+        b.updatedAt = '今天（演示）'
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_assets':
+        return Promise.resolve(
+          assetListOf(
+            (args?.kind as string | null) ?? null,
+            (args?.slicer as string | null) ?? null,
+            (args?.nozzle as string | null) ?? null,
+            (args?.layer as string | null) ?? null,
+            (args?.assign as string | null) ?? null,
+            (args?.query as string | null) ?? null,
+          ),
+        )
+      case 'wb_remove_asset': {
+        const assetId = args?.assetId as string
+        const used = BUNDLES.some((b) => b.assetRefs.includes(assetId)) || assetId === 'a1-image' || assetId === 'a1-icon'
+        if (used) {
+          return Promise.reject({ code: 'INVALID', message: `资产 ${assetId} 还被引用着，不能删`, traceId: 'mock' })
+        }
+        const at = ASSETS.findIndex((a) => a.id === assetId)
+        if (at >= 0) ASSETS.splice(at, 1)
+        return Promise.resolve(assetListOf(null, null, null, null, null, null))
+      }
+      case 'wb_fallback':
+        return Promise.resolve(FALLBACK_TABLE)
+      case 'wb_asset_usage': {
+        const assetId = args?.assetId as string
+        const machines = MACHINE_VIEWS.filter(
+          (m) => m.image === assetId || m.icon === assetId,
+        ).map((m) => m.id)
+        const bundles = BUNDLES.filter((b) => b.assetRefs.includes(assetId)).map((b) => b.id)
+        return Promise.resolve({ id: assetId, machines, bundles })
+      }
       case 'wb_apply_draft': {
         const patches = (args?.patches as Json[]) ?? []
         const inverse: Json[] = []
@@ -600,6 +793,16 @@ export function installMockBackend() {
           return table && key in table ? table[key] : null
         }
         for (const patch of patches) {
+          if (patch.kind === 'setVisibility') {
+            const { fileId, visibility } = patch as never as { fileId: string; visibility: string }
+            const before = pendingVis.get(fileId) ?? 'menu'
+            if (before === visibility) continue
+            inverse.push({ kind: 'setVisibility', fileId, visibility: before })
+            // 改回「在菜单」= 拿掉草稿（与后端 draft 的口径一致：Menu 是缺省）
+            if (visibility === 'menu') pendingVis.delete(fileId)
+            else pendingVis.set(fileId, visibility)
+            continue
+          }
           if (patch.kind !== 'setValue') continue
           const { level, owner, key, value } = patch as never as { level: 'machine' | 'version'; owner: string; key: string; value: unknown }
           const vk = `${level}|${owner}|${key}`

@@ -420,6 +420,60 @@ impl Presets {
         Ok(())
     }
 
+    /// 改一份套餐的文件清单（b05 Task 14 / P4：套餐内容编辑的领域入口）。
+    ///
+    /// 跨文件的两条判据在这里拦（加载期 [`Self::check_bundle_refs`] 的同款，方向相反：
+    /// 那边拦「已写坏的定义读进来」，这边拦「写出去之前就不合格」）：
+    ///
+    /// 1. 每个 `assetRef` 必须解析到一条真实资产 —— id 打错的后果是这套 BBS 预设静默缺席；
+    /// 2. 改完**至少一条 BBS 预设**（10.8：MKP 与 BBS 成套配发，发 MKP 不发 BBS，
+    ///    用户打出来的结果是错的）。
+    ///
+    /// 全部通过才落一个文件（`bundles.toml`），由 [`super::bundles::Bundles::set_refs`]
+    /// 保证内存与文档面一起改。内容没变就不写 —— `updatedAt` 不能被一次空操作刷新。
+    pub fn set_bundle_refs(&mut self, bundle_id: &str, refs: &[String]) -> Result<bool, AppError> {
+        let Some(cur) = self.bundles.get(bundle_id) else {
+            return Err(AppError::not_found(format!("查无此套餐：{bundle_id}")));
+        };
+        let same = |a: &[String], b: &[String]| {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b.iter())
+                    .all(|(x, y)| x.trim().to_lowercase() == y.trim().to_lowercase())
+        };
+        if same(&cur.asset_refs, refs) {
+            return Ok(false);
+        }
+
+        // 先整套查一遍再动手：任何一条不合格就一个字节都不写（同 remove_asset 的纪律）
+        let mut has_bbs = false;
+        for r in refs {
+            let a = self.assets.get(r.trim()).ok_or_else(|| {
+                AppError::invalid_argument(format!(
+                    "套餐 {bundle_id} 的 assetRef 指向一个不存在的资产：{r}"
+                ))
+                .with_detail("资产定义在 presets/assets.toml；引用必须先在资产库里登记".to_owned())
+            })?;
+            if a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs") {
+                has_bbs = true;
+            }
+        }
+        if !has_bbs {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 {bundle_id} 的 assetRefs 里没有一条 BBS 预设"
+            ))
+            .with_detail(
+                "套餐的内容就是 BBS 引用（doc §12.4）：MKP 预设与其配套 BBS 预设必须\
+                 成套配发，发了 MKP 不发 BBS，用户打出来的结果是错的"
+                    .to_owned(),
+            ));
+        }
+
+        self.bundles.set_refs(bundle_id, refs)?;
+        self.bundles.write()?;
+        Ok(true)
+    }
+
     /// **谁在用它**（b05 Task 9.4，套餐那一档 b05 Task 10）：删资产之前必须先问这一条。
     ///
     /// 删掉一张还被机型引用着的图，界面上只表现为"那台机型的图没了" ——
@@ -727,6 +781,78 @@ mod tests {
         }
         // 反空转：真数据里 5 张机型图 + 6 个图标引用（A2L 没有图）—— 少于 10 条就是漏查了
         assert!(checked >= 10, "只查了 {checked} 条引用 —— 这条判据在空转");
+    }
+
+    /// **改一份套餐的文件清单**（b05 Task 14 / P4）：真写盘 + `updatedAt` 盖新值、
+    /// 内容没变不写、悬空引用与「没有一条 BBS」被整拦下。
+    ///
+    /// 用夹具而不是真数据：写路径的测试不许动真仓库（ bundles.toml 是真源，别的
+    /// 测试还在并行读它）。
+    #[test]
+    fn set_bundle_refs_replaces_the_list_or_refuses() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+        let file = presets.bundles.file().to_path_buf();
+        let original = std::fs::read_to_string(&file).expect("读夹具原文");
+
+        // 内容没变：Ok(false)，文件一个字节都不动（updatedAt 不许被空操作刷新）
+        let changed = presets
+            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()])
+            .expect("没变也是成功的");
+        assert!(!changed);
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("重读"),
+            original,
+            "空操作不该写盘"
+        );
+
+        // 换内容：返回 true，落盘重读真的变了、日期盖今天（原来那格是迁移照抄的 2026-07-12）
+        let changed = presets
+            .set_bundle_refs(
+                "a1_default",
+                &["p1s-bbs-02-010".to_owned(), "a1-bbs-04-020".to_owned()],
+            )
+            .expect("换内容");
+        assert!(changed);
+        let on_disk = std::fs::read_to_string(&file).expect("读盘");
+        assert!(on_disk.contains("p1s-bbs-02-010"), "要真落盘，不能只在内存里：{on_disk}");
+        let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
+        assert!(on_disk.contains(&today), "updatedAt 要盖上今天：{on_disk}");
+        assert!(
+            presets.bundles.get("A1_default").is_some(),
+            "id 查询大小写不敏感，改过的那条还在"
+        );
+        assert_eq!(
+            presets.bundles.get("A1_default").unwrap().asset_refs.len(),
+            2,
+            "内存里也要跟上 —— 下一次 write 才不会把旧值写回去"
+        );
+
+        // 悬空引用被拦；拦下之后文件还是刚才那份
+        let err = presets
+            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()])
+            .expect_err("悬空引用必须被拦");
+        assert!(err.message.contains("不存在"), "实测：{}", err.message);
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("重读"),
+            on_disk,
+            "被拦下就不该动文件"
+        );
+
+        // 只装图片不装 BBS 也被拦（10.8 成套配发）
+        let err = presets
+            .set_bundle_refs("A1_default", &["a1-image".to_owned()])
+            .expect_err("没有 BBS 必须被拦");
+        assert!(err.message.contains("BBS"), "实测：{}", err.message);
+
+        // 空列表同一条判据的另一端：加载期拦空 assetRefs，这里拦写出去的空套餐
+        let err = presets
+            .set_bundle_refs("A1_default", &[])
+            .expect_err("空套餐必须被拦");
+        assert!(err.message.contains("BBS"), "实测：{}", err.message);
+
+        // 查无此套餐
+        assert!(presets.set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()]).is_err());
     }
 
     /// **反查与删除守卫**（b05 Task 9.4 / 9.5，套餐那一档 b05 Task 10）。

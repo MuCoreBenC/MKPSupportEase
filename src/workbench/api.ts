@@ -682,7 +682,8 @@ export interface Words {
     | 'nothingToSave'
     | 'nothingToUndo'
     | 'notUndoable'
-    | 'deprecatedWriteBlocked',
+    | 'deprecatedWriteBlocked'
+    | 'deleteAssetInUse',
     string
   >
   empty: Record<
@@ -691,7 +692,9 @@ export interface Words {
     | 'noDisabledFallback'
     | 'matrixNoMatch'
     | 'matrixNoCols'
-    | 'matrixSearchSpansAllTabs',
+    | 'matrixSearchSpansAllTabs'
+    | 'selectBundle'
+    | 'selectAsset',
     string
   >
   /**
@@ -787,8 +790,14 @@ export interface AssetView {
   /** 切片器（今天只有 `bbs`）与它下面的档位；只有 `slicerProfile` 才有 */
   slicer: string | null
   profile: string | null
-  /** 文件在不在。**Task 9 之前普遍 false** —— 那是还没搬，不是错 */
+  /** 文件在不在。还没搬的话是 false —— 那是状态，不是错 */
   present: boolean
+  /** 切片器三根轴之二：喷嘴。后端从路径的 `0.4mm` 那段派生；只有切片器条目有 */
+  nozzle: string | null
+  /** 三根轴之三：层高。后端从文件名尾部派生（`… 0.10.json` → `0.10`） */
+  layer: string | null
+  /** 交付身份三态。可见性（含草稿态）压过「进没进套餐」，与 stock 行上同口径 */
+  assign: BbsAssign
 }
 
 /** `assets::AssetList` */
@@ -796,6 +805,16 @@ export interface AssetList {
   assets: AssetView[]
   /** 资产根的绝对路径 */
   root: string
+  /** 喷嘴轴候选值。从全部切片器条目取，**不随筛选变** —— 选中一个值不能让别的选项消失 */
+  nozzles: string[]
+  /** 层高轴候选值。同上 */
+  layers: string[]
+  /** 过滤前一共几条 —— 页脚「筛出 X / Y 个」的 Y */
+  total: number
+  /** 全量里的「可选」条数（页脚读数，不随筛选变） */
+  optionalCount: number
+  /** 全量里的「仅归档」条数（页脚读数，不随筛选变） */
+  archiveCount: number
 }
 
 /** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4，套餐那一档 Task 10） */
@@ -808,28 +827,48 @@ export interface AssetUsageView {
   bundles: string[]
 }
 
-/** `bundles::BundleRefView` —— 套餐里一个 `assetRef` 的解析状态（b05 Task 10） */
+/** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
 export interface BundleRefView {
   id: string
+  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设不建资产条目，MKP 组恒空） */
+  kind: AssetKind
   /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
   resolvable: boolean
   /** 是不是 BBS 预设。每条套餐至少一条 true（MKP 与 BBS 成套配发） */
   isBbs: boolean
+  /** 资产域登记的名字。解析不到时是空串 */
+  name: string
+  /** 文件在不在 */
+  present: boolean
+  /** 交付身份（在菜单 / 仅归档）。**含草稿态** —— 刚设还没保存的也看得见 */
+  visibility: Visibility
 }
 
-/** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`） */
+/** `bundles::BundleUserView` —— 指向这份套餐的一个版本（一版一套的主指向） */
+export interface BundleUserView {
+  machineId: string
+  versionId: string
+}
+
+/** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`，唯一真源） */
 export interface BundleView {
   id: string
   display: string
   machineId: string
   assetRefs: BundleRefView[]
-  /** 上一次改动日期（迁移照抄旧值，不写「搬运日」） */
+  /** 上一次改动日期（迁移照抄旧值；真改动由后端盖上当天） */
   updatedAt: string | null
+  /** **一版一套**：`recommendedBundle` 指着这份套餐的版本 */
+  users: BundleUserView[]
+  /** `defaultBundle` 指着它的机型 —— 生成侧「版本没自己指」时回退的那一档 */
+  defaultFor: string[]
 }
 
 /** `bundles::BundleList` */
 export interface BundleList {
   bundles: BundleView[]
+  /** 过滤前一共几份 —— 页脚「筛出 X / Y 个」的 Y */
+  total: number
 }
 
 /**
@@ -876,16 +915,33 @@ export const wb = {
   machines: () => invoke<MachineList>('wb_machines'),
 
   /**
-   * 资产库清单（**只读**）。条目来自 `presets/assets.toml`，文件在 `public/assets/` 下。
-   * 现在普遍 `present: false` —— 条目与文件一起在 b05 Task 9 落地
+   * 资产库清单（P4）。条目来自 `presets/assets.toml`（资产域①层），
+   * 类型 / 三根轴 / 交付身份 / 搜索在后端筛；选项表不随筛选变
    */
-  assets: () => invoke<AssetList>('wb_assets'),
+  assets: (
+    kind: string | null,
+    slicer: string | null,
+    nozzle: string | null,
+    layer: string | null,
+    assign: string | null,
+    query: string | null,
+  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, assign, query }),
+
+  /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
+  removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
 
   /**
-   * 套餐清单（**只读**，b05 Task 10）。条目来自 `presets/bundles.toml`，
-   * `defaultBundle` / `recommendedBundle` 引用的就是这里的 `id`
+   * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、
+   * 指向按一版一套分两档报；`query` 是 id / 显示名的子串筛选
    */
-  bundles: () => invoke<BundleList>('wb_bundles'),
+  bundles: (query: string | null) => invoke<BundleList>('wb_bundles', { query }),
+
+  /**
+   * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
+   * 悬空引用 / 「没有一条 BBS」在后端拦；`updatedAt` 由那次写盖上当天
+   */
+  setBundleRefs: (bundleId: string, assetIds: string[]) =>
+    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds }),
 
   /**
    * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，

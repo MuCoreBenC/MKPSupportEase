@@ -50,6 +50,8 @@ import SplitterC14 from './c14/SplitterC14'
 import { useSplitWidth } from './c14/useSplitWidth'
 import MachinesPage from './views/MachinesPage'
 import ParamsPage from './views/ParamsPage'
+import BundlesPage from './views/BundlesPage'
+import AssetsPage from './views/AssetsPage'
 import s from './c14.module.css'
 
 /**
@@ -129,10 +131,11 @@ type NavId = NavItem['id']
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
 const NAVW = { dft: 236, min: 64, max: 320 }
 
-/** 跨页定位载荷：机型页「编辑参数」跳到参数台时带上（C14 的 GotoFocus） */
+/** 跨页定位载荷（C14 语义）：`key` 给套餐/资产页落到某一项（机型页 ④ 关联在用） */
 interface Focus {
   machineId: string
   uid: string | null
+  key?: string | null
 }
 
 interface UndoEntry {
@@ -154,8 +157,11 @@ export function WorkbenchApp() {
 
   const [page, setPage] = useState<NavId>('machines')
   const [focus, setFocus] = useState<Focus | null>(null)
-  /** 参数台的 remount 代号：`goto` 过来是「换现场」，要重挂去读新的主选中 */
+  /** 定位页的 remount 代号：`goto` 过来是「换现场」，要重挂去读新的主选中 */
   const [focusGen, setFocusGen] = useState(0)
+  /** 套餐 / 资产页的跨页预选（C14 的 GotoFocus：机型页 ④ 关联、套餐页反查都在用） */
+  const [bundleSel, setBundleSel] = useState<string | null>(null)
+  const [assetSel, setAssetSel] = useState<string | null>(null)
 
   /** 撤销 / 重做栈。会话内存，关窗就没 —— 草稿本身还在盘上 */
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
@@ -302,9 +308,18 @@ export function WorkbenchApp() {
   /** 跨页定位（C14 语义）：跳过去并落上主选中；那一页重挂一次去读它 */
   const goto = useCallback((view: string, foc?: GotoFocus) => {
     const next = view as NavId
-    if (foc && next === 'params') {
-      setFocus({ machineId: foc.machineId, uid: foc.uid })
-      setFocusGen((g) => g + 1)
+    if (foc) {
+      if (next === 'params') {
+        /* 参数台的定位一定有机型语境；套餐/资产那两路才会带 null 过来 */
+        setFocus({ machineId: foc.machineId ?? '', uid: foc.uid })
+        setFocusGen((g) => g + 1)
+      } else if (next === 'bundles') {
+        setBundleSel(foc.key ?? foc.uid ?? null)
+        setFocusGen((g) => g + 1)
+      } else if (next === 'assets') {
+        setAssetSel(foc.key ?? foc.uid ?? null)
+        setFocusGen((g) => g + 1)
+      }
     }
     setPage(next)
   }, [])
@@ -380,13 +395,13 @@ export function WorkbenchApp() {
       case 'params':
         return '改了先进草稿，保存才落盘'
       case 'bundles':
-        return 'P4 落地 —— 后端 wb_bundles / 套餐引用校验已就位'
+        return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
       case 'build':
         return report
           ? `阻断 ${report.blocks} · 待办 ${report.todos} · 提示 ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
           : ''
       case 'assets':
-        return 'P4 落地 —— 后端 wb_stock / wb_assets / wb_asset_usage 已就位'
+        return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
     }
   }, [page, book, report])
 
@@ -428,15 +443,32 @@ export function WorkbenchApp() {
           />
         )
       case 'bundles':
+        return (
+          <BundlesPage
+            key={focusGen}
+            words={words}
+            tick={tick}
+            initialSel={bundleSel}
+            onGoto={goto}
+          />
+        )
       case 'assets':
+        return (
+          <AssetsPage
+            key={focusGen}
+            words={words}
+            tick={tick}
+            initialSel={assetSel}
+            onGoto={goto}
+            onApply={async (label, patches) => {
+              await run(label, patches, 'undo')
+            }}
+          />
+        )
       case 'build':
         return (
           <p className="wb-todo">
-            {id === 'bundles'
-              ? '套餐与菜单视角在 P4 落地（14.1 的 menu 半边）。'
-              : id === 'assets'
-                ? '资产库视角在 P4 落地（14.6：资产只从库里挑）。'
-                : '生成与发布视角在 P5 落地（14.2 的闸门按钮含在内）。检查报告的读数已在页头。'}
+            生成与发布视角在 P5 落地（14.2 的闸门按钮含在内）。检查报告的读数已在页头。
           </p>
         )
     }

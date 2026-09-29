@@ -175,6 +175,62 @@ impl Bundles {
         crate::fsx::atomic::atomic_write(&self.file, self.to_toml().as_bytes())
     }
 
+    /// 把一条套餐的 `assetRefs` 整体换掉（b05 Task 14 / P4：套餐内容编辑）。
+    ///
+    /// 与 [`Self::add`] 同一条纪律：**先整套查一遍，不合格就一个字节都不改**。
+    /// 这里只查单条形状（空列表 / 空串项 / 重复项，与 [`Self::check_one`] 同一套）；
+    /// 「引用的资产存在」「至少一条 BBS」是跨文件判据，调用方
+    /// （[`super::Presets::set_bundle_refs`]）拦在写之前 —— 与加载期
+    /// [`super::Presets::check_bundle_refs`] 是同一条判据的两端。
+    ///
+    /// 内容变了就要盖 `updatedAt`：这一格记的就是「上一次改动日期」，
+    /// 迁移照抄旧值、真改动盖新值，两件事不冲突。
+    pub fn set_refs(&mut self, id: &str, refs: &[String]) -> Result<(), AppError> {
+        let want = id.trim().to_lowercase();
+        let idx = self
+            .items
+            .iter()
+            .position(|b| b.id.to_lowercase() == want)
+            .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?;
+
+        let trimmed: Vec<String> = refs.iter().map(|s| s.trim().to_owned()).collect();
+        // 影子条目借 check_one 的同一套判据，免得两条路分岔
+        self.check_one(&Bundle {
+            id: self.items[idx].id.clone(),
+            display: self.items[idx].display.clone(),
+            machine_id: self.items[idx].machine_id.clone(),
+            asset_refs: trimmed.clone(),
+            updated_at: None,
+        })?;
+
+        let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
+        {
+            let arr = self
+                .doc
+                .get_mut("bundles")
+                .and_then(|i| i.as_array_of_tables_mut())
+                .ok_or_else(|| {
+                    AppError::corrupted(format!("{} 的 bundles 不是表数组", self.file.display()))
+                })?;
+            let table = arr.get_mut(idx).ok_or_else(|| {
+                AppError::corrupted(format!(
+                    "文档里没有第 {idx} 条套餐（内存里有 {}）",
+                    self.items[idx].id
+                ))
+            })?;
+            let mut list = toml_edit::Array::new();
+            for r in &trimmed {
+                list.push(r.as_str());
+            }
+            table["assetRefs"] = toml_edit::value(list);
+            // 只改内存的话下一次 write 会把旧值写回去 —— 文档面一起改（同 drop_asset_refs）
+            table["updatedAt"] = super::literal_str(&today);
+        }
+        self.items[idx].asset_refs = trimmed;
+        self.items[idx].updated_at = Some(today);
+        Ok(())
+    }
+
     /// 把某个资产从**每一条**套餐的 `assetRefs` 里去掉（反查之下的收尾动作）。
     ///
     /// 与 [`Self::add`] 同一条纪律：**先把所有套餐查一遍再动手**，任何一条不合格
@@ -459,6 +515,47 @@ mod tests {
         );
         let on_disk = std::fs::read_to_string(b.file()).expect("读原文");
         assert_eq!(b.to_toml(), on_disk, "零编辑往返必须逐字节相同");
+    }
+
+    /// `set_refs`（P4 套餐内容编辑的底座）：整列替换 + `updatedAt` 盖新值，
+    /// 会造成空套餐（或空串 / 重复项）的那次必须被整拦下，查无此套餐报 not_found。
+    #[test]
+    fn set_refs_replaces_the_whole_list_or_nothing() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        put(dir.path(), one("A1_default", "'a1-bbs-04-020'"));
+        let mut b = Bundles::load_from(dir.path()).expect("读得通");
+
+        // 查无此套餐：大小写对不上也算没有（get 的口径是大小写不敏感，这里同一条）
+        assert!(b.set_refs("no_such", &["x".to_owned()]).is_err());
+
+        // 空列表被拦（check_one：套餐的内容就是 BBS 引用），文件一个字节都不动
+        let before = b.to_toml();
+        assert!(b.set_refs("A1_default", &[]).is_err());
+        assert_eq!(b.to_toml(), before, "被拦下就不该动文件");
+
+        // 正路径：换一条 + updatedAt 盖今天；重读得到
+        b.set_refs("a1_default", &["a1-bbs-02-010".to_owned()])
+            .expect("换一条");
+        assert_eq!(
+            b.get("A1_default").expect("还在").asset_refs,
+            vec!["a1-bbs-02-010".to_owned()]
+        );
+        let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
+        assert_eq!(
+            b.get("A1_default").expect("还在").updated_at.as_deref(),
+            Some(today.as_str()),
+            "内容变了就是改了套餐 —— updatedAt 要跟上"
+        );
+        assert!(b.to_toml().contains(&today), "文档面也要盖，不然 write 写回旧值");
+
+        b.write().expect("写");
+        let again = Bundles::load_from(dir.path()).expect("重读");
+        assert_eq!(
+            again.get("a1_default").expect("大小写不敏感").asset_refs,
+            vec!["a1-bbs-02-010".to_owned()]
+        );
+        // 迁移照抄的旧日期被真改动顶掉 —— 这是有意的，见 set_refs 的注释
+        assert_ne!(again.get("a1_default").expect("在").updated_at.as_deref(), Some("2026-07-12"));
     }
 
     /// `drop_asset_refs`：内存与**文档面**一起改，写回重读确实少了；

@@ -7,7 +7,8 @@
 
 /** 跨页定位载荷：落到哪台机型（哪个版本），`key` 给矩阵/参数台定位到某一项 */
 export interface GotoFocus {
-  machineId: string
+  /** 套餐 / 资产页的跳转没有机型语境 —— 那就带着 null 过去（C14 同形） */
+  machineId: string | null
   /** null = 机型基底 */
   uid: string | null
   /** 参数 key（跳到某一项时用） */

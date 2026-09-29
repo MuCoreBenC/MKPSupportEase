@@ -117,12 +117,15 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「机型与版本」那一页：读写 presets/machines/*.toml。
         // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
         app::machines::wb_machines,
-        // 「资产库」：读 `presets/assets.toml`（b05 Task 8）。现在只有读 ——
-        // 写入口在数据层就位，接上它要有界面（Task 14）
+        // 「资产库」：读 `presets/assets.toml`（b05 Task 8），P4 起带三轴派生与筛选；
+        // 删除走数据层的反查守卫（有人引用整次拒绝）
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
-        // 「套餐管理」：读 `presets/bundles.toml`（b05 Task 10）。同一套纪律：只读
+        app::assets::wb_remove_asset,
+        // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
+        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）
         app::bundles::wb_bundles,
+        app::bundles::wb_set_bundle_refs,
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,

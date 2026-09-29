@@ -266,22 +266,52 @@ impl<'a> Book<'a> {
             .unwrap_or_default()
     }
 
-    /// 一个版本最终交付哪些 BBS = 它那台机型的默认那一份。
+    /// 一个版本最终交付哪些 BBS = **它自己指的那个套餐**（一版一套）。
     ///
-    /// 「这一版自己挑一串曲线」这条路径删掉了（REPORT §7.3）：版本已经有
-    /// `recommendedBundle`，在版本上再存一份 asset id 就是两处真相。
-    /// 要换就换它指向哪个套餐 —— 那是「机型与资源」页的事（Task 21）
+    /// 指向模型是 C14 第十九轮定稿、作者 2026-09-30 拍板移植的「一版一套」：
+    /// 版本的 `recommendedBundle` 优先；没指的（A2L 那处空串）回退机型 `defaultBundle`。
+    /// 之前这里只看机型默认（REPORT §7.3 那刀收得太狠）—— 套餐页把「改指向」
+    /// 接进来之后（P4），再只看机型的话界面就是在说谎：指过去了、交付却没跟上。
+    ///
+    /// 套餐的内容照 [`Self::bundle_bbs`] 的口径：改动 overlay 优先，没有就走上游。
     pub fn effective_bbs(&self, uid: &str) -> Vec<String> {
-        match self.version(uid) {
-            Some(v) => self.machine_default_bbs(&v.machine_id),
-            None => Vec::new(),
-        }
+        let Some(v) = self.version(uid) else {
+            return Vec::new();
+        };
+        let own = self
+            .presets
+            .catalog
+            .machine(&v.machine_id)
+            .and_then(|m| m.versions.iter().find(|x| x.id == v.version_id))
+            .and_then(|x| x.recommended_bundle.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let bid = match own {
+            Some(b) => b,
+            // 版本没指 → 机型默认（machine_default_bbs 自己处理「没配」那档）
+            None => {
+                return self.machine_default_bbs(&v.machine_id);
+            }
+        };
+        self.bundle_bbs(bid)
     }
 
-    /// **现在只有一种来源。** 参数照收是为了不惊动调用方，但它已经不参与判断了 ——
-    /// 等「机型与资源」页把套餐换成那个入口（Task 21），这里才会重新有第二种答案
-    pub fn bbs_source(&self, _uid: &str) -> BbsSource {
-        BbsSource::InheritedFromMachine
+    /// 一版一套下的来源两档：版本自己指了套餐就是「本版本一份」，
+    /// 没指（回退机型默认）才是「跟机型默认」。
+    pub fn bbs_source(&self, uid: &str) -> BbsSource {
+        let own = self.version(uid).is_some_and(|v| {
+            self.presets
+                .catalog
+                .machine(&v.machine_id)
+                .and_then(|m| m.versions.iter().find(|x| x.id == v.version_id))
+                .and_then(|x| x.recommended_bundle.as_deref())
+                .is_some_and(|s| !s.trim().is_empty())
+        });
+        if own {
+            BbsSource::Own
+        } else {
+            BbsSource::InheritedFromMachine
+        }
     }
 
     /* ---------- 生成状态 ---------- */
@@ -2676,7 +2706,8 @@ mod tests {
             .unwrap();
         assert_eq!(row.assign, BbsAssign::Assigned);
         assert!(row.in_any_bundle);
-        assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::InheritedFromMachine);
+        // 夹具里 A1 各版本自己就指着 A1_default（一版一套，P4 起）：来源是「本版本一份」
+        assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::Own);
         assert_eq!(b.effective_bbs("A1/STANDARD"), vec!["a1_bbs_04"]);
 
         // P1S 没有 defaultBundle → 它的版本一条 BBS 都没有
@@ -2702,12 +2733,13 @@ mod tests {
         assert!(row.in_any_bundle, "两个字段互不影响");
     }
 
-    /// **一个版本交付哪几条曲线 = 它那台机型的默认套餐**（REPORT §7.3）。
+    /// **改一份套餐，指着它的版本全都跟着变**（一版一套，P4 起）。
     ///
-    /// 「这一版自己挑一串」这条路径删掉了，所以改套餐会**同时**带动这台机型下的每一版 ——
-    /// 没有哪一版能偷偷留一份
+    /// 夹具里 A1 两个版本的 `recommendedBundle` 都指 A1_default（与真数据同形状：
+    /// 一个机型眼下就一套套餐），所以改套餐内容两个版本都跟 —— 各指各的套餐之后
+    /// 就各跟各的了，那正是套餐页「改指向」要有的效果
     #[test]
-    fn every_version_of_a_machine_draws_from_the_same_bundle() {
+    fn every_version_pointing_at_a_bundle_follows_it() {
         let f = Fixture::load();
         let c = committed();
         let mut d = Draft::default();
@@ -2715,11 +2747,10 @@ mod tests {
 
         for uid in ["A1/STANDARD", "A1/FAST"] {
             assert_eq!(
-                b.bbs_source(uid),
-                BbsSource::InheritedFromMachine,
-                "只有一种来源了"
+                b.effective_bbs(uid),
+                vec!["a1_bbs_04"],
+                "两个版本都指着 A1_default"
             );
-            assert_eq!(b.effective_bbs(uid), vec!["a1_bbs_04"]);
         }
 
         apply(
@@ -2739,7 +2770,7 @@ mod tests {
             assert_eq!(
                 b.effective_bbs(uid),
                 vec!["a1_bbs_04", "a1_bbs_06"],
-                "{uid} 跟着套餐变 —— 它自己存不了第二份"
+                "{uid} 跟着套餐变"
             );
         }
         assert!(

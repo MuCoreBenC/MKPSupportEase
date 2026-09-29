@@ -115,7 +115,12 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   const loadAll = useCallback(() => {
     void (async () => {
       try {
-        const [l, a, b, r] = await Promise.all([wb.machines(), wb.assets(), wb.bundles(), wb.registry()])
+        const [l, a, b, r] = await Promise.all([
+          wb.machines(),
+          wb.assets(null, null, null, null, null, null),
+          wb.bundles(null),
+          wb.registry(),
+        ])
         setList(l)
         setAssets(a)
         setBundles(b)
