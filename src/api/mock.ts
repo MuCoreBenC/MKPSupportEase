@@ -1,15 +1,32 @@
 import { NotImplementedError } from './errors'
 import type { CalibModel, MkpApi, Preset } from './contract'
+import {
+  allMachines,
+  allPresetFiles,
+  appliedPreset,
+  copyToSlicerIn,
+  localFileIds,
+  localUserFiles,
+  menuEntries,
+  paramMeta,
+  resolveParams,
+  resolveVersionFiles,
+  slicerCopied,
+} from './mockServer'
 
 /**
- * mock 实现：同一套契约，数据写死在本文件里。
+ * mock 实现：同一套契约，浏览器预览时由它作答。
  *
- * **这个文件是临时实现，不是数据层。** Rust 接管时替换的是 `mock.ts` → `rust.ts` 这一个文件，
- * 页面一行不动 —— 所以业务假数据必须住在这里，不能散到页面或 `src/app/constants/` 去。
+ * **这个文件是接线处，不是数据层。** 真机上换的是 `src/api/bridge.ts`（Rust 侧注入的那一份），
+ * 页面一行不动 —— 所以业务假数据不散在页面或 `src/app/constants/` 里。
  * 界面结构数据（页签、品牌/机型/版本三级选项）是另一回事，那些属于应用本身，在 `src/app/constants/`。
  *
- * 数据来自试验场的 `src/mock/mkpFull.ts` 与 `src/mock/testModels.ts`，只取本仓库真正用到的三份：
- * 预设索引、校准板清单、测试模型清单。那两个文件（549 + 100 行，含大量其他页面的假数据）不搬。
+ * 数据分两处，别混：
+ *
+ * - **本文件里**：校准页那三个方法（预设索引、校准板清单、三轴偏移）用的那几份手写常量。
+ * - **`src/api/mockServer/`**：预设页 / 参数页 / 同步页要读的那十二个方法，
+ *   由 `data/*.json` 的六份上游快照解析而来。那一整个目录是搬过来的假后端，
+ *   真机上由 Rust 侧接管，`mockServer/` 整个不再被引用。
  *
  * 刻意**不加延迟**。真实情况是「连接慢、下载快」，而这里连接这一步根本不存在 ——
  * 凭空塞一个 300ms 只会让每次选机型都闪一下骨架屏，那是假的慢，不是真的慢。
@@ -102,60 +119,67 @@ export const mockApi: MkpApi = {
 
   /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
    *
-   * 这一轮先把**形状**立起来：下面这些一律给"空"，让页面能画空态、不会白屏。
-   * 真正的夹具（试验场那份假后端：6 台机型 / 10 个版本 / 74 条参数 / 42 条带条件，
-   * 见 `src/server/data/*.json` + `resolve/*.ts`）随预设页与参数页搬进来 ——
-   * 搬进来时替换的就是本文件这一节，页面一行不动（与 `mock.ts → rust.ts` 同一条规矩）。
+   * 数据来自 `src/api/mockServer/`：那份假后端把 `data/*.json` 的六份上游快照
+   * （机型目录 / 参数注册表 / 布局表 / 资产清单 / 套餐 / 切片器文件事实）
+   * 合成下面这些形状。6 台机型 / 10 个版本 / 74 条参数 / 43 条带条件。
+   *
+   * **只答产品仓契约里有的那十二个** —— 工作台那一侧的方法（配方本、套餐定义、
+   * 发布检查…）没有搬，契约里没有它们。真机上换成 Rust 侧实现时，换掉的是
+   * `mockServer/` 这一整个目录，下面这十二行一行不动。
    */
   async getMachines() {
-    return []
+    return allMachines()
   },
 
-  async getVersionFiles() {
-    /* null 的语义是「后端没有这个组合」，不是「这个组合下没文件」——空夹具给 null */
-    return null
+  async getVersionFiles(machineId, versionId) {
+    /* null 的语义是「后端没有这个组合」，不是「这个组合下没文件」 */
+    return resolveVersionFiles(machineId, versionId)
   },
 
   async getLocalFiles() {
-    return []
+    /* 固定演示集合 —— 假后端没有文件系统，见 mockServer/localFiles.ts 文件头 */
+    return localFileIds()
   },
 
   async getLocalUserFiles() {
-    return []
+    /* 同样是一份手写的演示集合：用户自己放进预设目录的那些，云端没有它们 */
+    return localUserFiles()
   },
 
   async getAppliedPreset() {
     /* null = 一套都还没应用。这是合法状态，不是错误 */
-    return null
+    return appliedPreset()
   },
 
   async getSlicerCopied() {
-    return []
+    return slicerCopied()
   },
 
   async copyToSlicer(assetId) {
-    console.info('[mock] copyToSlicer', assetId)
+    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多 */
+    copyToSlicerIn(assetId)
   },
 
   async getPresetFiles() {
-    return []
+    return allPresetFiles()
   },
 
   async getMenu() {
-    return []
+    return menuEntries()
   },
 
   async getParamMeta() {
-    return []
+    return paramMeta()
   },
 
-  async getMachineParams() {
-    return []
+  async getMachineParams(machineId, versionId) {
+    /* 已按机器过滤掉 machineFilter 不适用的、并排除 deprecated / hidden 的字段 */
+    return resolveParams(machineId, versionId)
   },
 
   /**
-   * 试验场那份假后端对这个方法是**故意抛**的（那里没有真网络），产品仓照同一条口径：
-   * 空夹具不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
+   * 假后端对这个方法是**故意抛**的（浏览器里没有真网络），产品仓照同一条口径：
+   * 不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
    */
   async downloadFiles() {
     throw new NotImplementedError('downloadFiles')

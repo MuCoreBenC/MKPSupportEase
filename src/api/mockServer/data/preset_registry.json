@@ -1,0 +1,112 @@
+{
+  "entries": [
+    {
+      "fileName": "MKPProcess A1 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "A1"
+      ],
+      "displayName": "MKPProcess A1 0.2 0.10.json",
+      "nozzle": "0.2",
+      "layerHeight": "0.10"
+    },
+    {
+      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "A1_MINI"
+      ],
+      "displayName": "MKPProcess A1 mini 0.2 0.10.json",
+      "nozzle": "0.2",
+      "layerHeight": "0.10"
+    },
+    {
+      "fileName": "MKPProcess P1S 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "P1S"
+      ],
+      "displayName": "MKPProcess P1S 0.2 0.10.json",
+      "nozzle": "0.2",
+      "layerHeight": "0.10"
+    },
+    {
+      "fileName": "MKPProcess X1 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "X1C"
+      ],
+      "displayName": "MKPProcess X1 0.2 0.10.json",
+      "nozzle": "0.2",
+      "layerHeight": "0.10"
+    },
+    {
+      "fileName": "MKPProcess A1 0.4 0.20.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "A1"
+      ],
+      "displayName": "MKPProcess A1 0.4 0.20.json",
+      "nozzle": "0.4",
+      "layerHeight": "0.20"
+    },
+    {
+      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "A1_MINI"
+      ],
+      "displayName": "MKPProcess A1 mini 0.4 0.20.json",
+      "nozzle": "0.4",
+      "layerHeight": "0.20"
+    },
+    {
+      "fileName": "MKPProcess P1S 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "P1S"
+      ],
+      "displayName": "MKPProcess P1S 0.4 0.24.json",
+      "nozzle": "0.4",
+      "layerHeight": "0.24"
+    },
+    {
+      "fileName": "MKPProcess P2S 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "P2S"
+      ],
+      "displayName": "MKPProcess P2S 0.4 0.24.json",
+      "nozzle": "0.4",
+      "layerHeight": "0.24"
+    },
+    {
+      "fileName": "MKPProcess X1 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineIds": [
+        "X1C"
+      ],
+      "displayName": "MKPProcess X1 0.4 0.24.json",
+      "nozzle": "0.4",
+      "layerHeight": "0.24"
+    }
+  ]
+}
