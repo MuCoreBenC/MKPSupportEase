@@ -214,3 +214,5 @@ T8 又把这条链切了一刀，搬的时候照它：**「同步」页只说说
 4. **mock 集中在 `src/api/mock/**`**：页面只认 `contract.ts`。
 5. **只搬界面**：业务判定一律登记（§6-3），不新增 Rust 命令、不动 `write_discipline_scan.rs` 的白名单。
 6. **旧页面删除要记账**：`PagePlaceholder` 被替换掉一页就在 §5 的表里划掉一页；四个占位页全替换完，这个组件和 `App.tsx` 里的 `switch` 分支一起收口。
+7. **静态资源路径必须按本仓目录重写，不能照抄**（P1c 抓到的第一个真 bug）：A40 的 `home/heroArt.ts` 里五条图片路径写的是试验场 `public/` 根下的文件（`/a1.webp`、`/bambulab.svg`…），本仓一张都没有 —— 而且**页签点得开、控制台也干净**，因为没选机型时那张大图根本不挂 `<img>`；真选到机型才会露出来。本仓的整机图在 `public/assets/printers/`，品牌 logo 是 `src/app/assets/bambuLogo.ts` 里的 data URI。以后每搬一个引用静态资源的文件（P5 的 BBS 目录、云端的 `/cloud/presets.json` 都在这一类里），**逐条开 URL 核一遍**（`Invoke-WebRequest` 看 `Content-Type`：SPA 回落会给你 200 + `text/html`，那不是图片）。
+8. **探针的量法也要对**：上面那条第一次是被探针误报的 —— 大图住在牌堆的第 0 张卡，停在选择页时那张卡不在 DOM 里，量到的是 0 张。教训：**先确认"要量的东西这一刻在不在 DOM 里"**，再判它坏没坏（`home-flow.mjs --pick` 现在会先点「回主页」再量，并且把 `naturalWidth` 一起打出来 —— 路径错时它是 0）。

@@ -34,56 +34,49 @@ import {
  */
 
 /**
- * 按「打印件版本」索引的预设。键是 `src/app/constants/variants.ts` 里的 id。
+ * 按「打印件版本」索引的预设 —— `getPreset` 的夹具。
  *
- * 三个版本给三份不同的文件与偏移 —— 这样「换版本 → 文件名和 XYZ 真的都变了」在界面上看得见。
- * 每份带一个 model（`constants/models.ts` 的 id）：校准页的预设下拉选了某一份之后，
- * 要能反填「机型 + 打印件版本」两级，光有 variant 不够。三份都是 A1 mini 那台的文件。
+ * **这一份是 v023 时代留下的**：那三份全是 A1 mini 的，键（`std` / `fast-old` /
+ * `fast-260628`）来自已被替换掉的旧客户端常量表。每一份原来还带一个 `model` 字段，
+ * 是给旧校准页反填「机型 + 版本」两级用的 —— 那页换掉之后没有消费者了，已经拿掉。
+ *
+ * 客户端换成 A40 那一套之后，**页面不再调 `getPreset` 了** —— 它们走文件体系
+ * （`getMachines` / `getVersionFiles` / `getPresetFiles`），见 `src/app/calib/usePreset.ts`
+ * 文件头那段说明。契约里的 `getPreset` 留着（`bridge` 那头对应 Rust 的 `get_preset`），
+ * 所以这里继续给出一个像样的夹具，不删。
+ *
+ * 顺带记一笔：这个文件里原来还导出一份 `presetCatalog`，是给旧页面直接 import 的
+ * （"假数据从 api 层漏进页面"的唯一一处）。旧页面删掉之后它就没有消费者了，已随 P1c 收尾删除 ——
+ * 现在假数据的出口只剩 `mockApi` 这一张契约表。
  */
-const presetIndex: Record<string, Preset & { model: string }> = {
+const presetIndex: Record<string, Preset> = {
   std: {
     name: 'A1M.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1M.toml',
-    model: 'a1mini',
     axes: { x: -0.6, y: 22.4, z: 3.8 },
     speed: 60,
   },
   'fast-old': {
     name: 'A1MF.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml',
-    model: 'a1mini',
     axes: { x: -0.8, y: 22.8, z: 3.9 },
     speed: 65,
   },
   'fast-260628': {
     name: 'A1MF_260628.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF_260628.toml',
-    model: 'a1mini',
     axes: { x: -0.9, y: 23, z: 4 },
     speed: 70,
   },
 }
 
 /**
- * 预设目录 —— 界面上「有哪几份预设可选」。
+ * 校准板清单。
  *
- * 契约里暂时没有对应的方法（五个 command 已经定死，见 doc §4），所以这里以同步常量的形式
- * 暴露给校准头的下拉与两个页面的反填逻辑。Rust 接管时这条会变成第六个 command，
- * 届时改的仍然只是本文件与调用点的三行，不是页面结构。
+ * 契约里没有对应的"预设目录"方法，而旧版校准页的预设下拉需要一份候选表 ——
+ * 那时候这里以同步常量的形式导出过 `presetCatalog`。新版（A40）的预设候选走
+ * `getPresetFiles()` / `getMachines()`，所以那份常量已经退场（见 `presetIndex` 上面那段）。
  */
-export interface PresetCatalogEntry {
-  /** `constants/variants.ts` 里的 id，同时是 getPreset 的键 */
-  variant: string
-  name: string
-  path: string
-  /** `constants/models.ts` 里的 id —— 选了预设要能反填「机型 + 版本」两级 */
-  model: string
-}
-
-export const presetCatalog: PresetCatalogEntry[] = Object.entries(presetIndex).map(
-  ([variant, row]) => ({ variant, name: row.name, path: row.path, model: row.model }),
-)
-
 const calibModels: CalibModel[] = [
   { id: 'z', name: 'Z 轴校准', desc: '校准喷嘴高度与第一层，先打这个', size: '284 KB', ready: true },
   { id: 'xy', name: 'XY 校准', desc: '校准平面内的偏移，Z 轴之后打', size: '377 KB', ready: true },

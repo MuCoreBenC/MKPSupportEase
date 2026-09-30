@@ -102,6 +102,67 @@ if (advanced === 0) {
   console.log('\n（没找到推进按钮 —— 首页可能停在摘要态，或按钮文案变了；不判失败）')
 }
 
+/*
+ * --pick：在选择那一页上逐级点下去（机型 → 版本），然后查"大图到底出来没有"。
+ *
+ * 这一段是**移植时留下的教训**：`home/heroArt.ts` 里那五条图片路径原来写的是试验场
+ * `public/` 根下的文件，产品仓一条都没有 —— 而首页落地那一态不挂 `<img>`，
+ * 所以「页签点得开、控制台也干净」这两条**看不出这个问题**，要真选到某一台才会露出来。
+ * 这里量的是 `naturalWidth`：路径错（SPA 回落成 index.html）时它是 0。
+ */
+if (process.argv.includes('--pick')) {
+  console.log('\n[--pick] 逐级点下去')
+  /*
+   * 这三组是**分级揭示**的：先点品牌，机型那一组才出现；点了机型，版本那一组才出现。
+   * 所以品牌名必须在列表里 —— 第一批探针少写了它，结果一个都没点到（0 张图，
+   * 看起来像"图片坏了"，其实是"根本没选到机型"）。
+   */
+  for (const label of [
+    '拓竹 (Bambu Lab)',
+    'A1 mini',
+    '标准版',
+    '快拆版260628',
+    /* 其余机型的版本名：目录里就这几个（A1 / A1 mini 三档、P1S 与 X1C 是 lite版） */
+    'lite版',
+    'A1',
+    'P1S',
+  ]) {
+    const btn = page.getByRole('button', { name: label, exact: false }).first()
+    if ((await btn.count()) === 0) continue
+    await btn.click()
+    await page.waitForTimeout(700)
+    console.log(`  点了「${label}」`)
+  }
+  /* 大图是**淡入**的（useArtLayers 先预载图片、加载成功才上层）：量早了会看到 0 张 */
+  await page.waitForTimeout(2000)
+  /*
+   * 再点「回主页」：大图住在**第 0 张卡**（选好机型之后它从欢迎版面换成机型摘要卡）。
+   * 停在选择那一页时那张卡在牌堆后面，量不到 —— 第一批探针就停在那儿，看到 0 张图，
+   * 一度以为图片路径全坏了（路径那处确实是坏的，但这条量法本身也不对）。
+   */
+  const back = page.getByRole('button', { name: '回主页' }).first()
+  if ((await back.count()) > 0) {
+    await back.click()
+    await page.waitForTimeout(1600)
+  }
+  await snap('home-picked')
+  const imgs = await page.evaluate(() =>
+    [...document.querySelectorAll('img')].map((i) => ({
+      src: i.getAttribute('src') ?? '',
+      natural: i.naturalWidth,
+      /* 在不在 main 里：大图那套是"卡片位 + 退出层"两层，可能不在当前可见的那张卡上 */
+      inMain: Boolean(i.closest('main')),
+    })),
+  )
+  const artSlots = await page.evaluate(
+    () => document.querySelectorAll('[class*="art" i], [class*="hero" i]').length,
+  )
+  console.log(`  大图槽（class 含 art/hero 的元素）  ${artSlots}`)
+  console.log(`  图片   ${imgs.length} 张：${imgs.map((i) => `${i.src}(${i.natural}px)`).join(' · ') || '（一张都没有）'}`)
+  const broken = imgs.filter((i) => i.natural === 0)
+  if (broken.length > 0) problems.push(`图片没加载成功（路径或文件不对）：${JSON.stringify(broken)}`)
+}
+
 /* 校准页 */
 const calib = page.getByRole('button', { name: '校准', exact: true }).first()
 if ((await calib.count()) > 0) {

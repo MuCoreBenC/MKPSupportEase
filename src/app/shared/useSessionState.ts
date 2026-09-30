@@ -1,5 +1,13 @@
 /*
- * 切走再切回来不丢选择。
+ * 切走再切回来不丢选择（**会话内的记忆**）。
+ *
+ * # 为什么改了这个名字（移植时）
+ *
+ * 试验场那边这一份叫 `useStickyState`，而 `src/hooks/useStickyState.ts`（也从试验场搬来、
+ * v023 那一版就在用）**同名但是另一件事**：那个是 `localStorage` 持久化（刷新还在），
+ * 这个是模块作用域的会话记忆（刷新就没）。两个同名不同命的 hook 放在一个仓库里，
+ * 迟早有人 import 错一个，症状还都像"状态没生效"。所以这一份按职责改名 ——
+ * 名字里写明是**会话**（`useSessionState`），要持久化请用 `src/hooks/useStickyState.ts`。
  *
  * # 为什么需要它
  *
@@ -23,7 +31,7 @@ import { useCallback, useState } from 'react'
 
 const memory = new Map<string, unknown>()
 
-export function useStickyState<T>(key: string, initial: T): [T, (next: T) => void] {
+export function useSessionState<T>(key: string, initial: T): [T, (next: T) => void] {
   const [value, setValue] = useState<T>(() => (memory.has(key) ? (memory.get(key) as T) : initial))
 
   const set = useCallback(
