@@ -1,0 +1,170 @@
+/*
+ * 右键菜单的长相（A34）。
+ *
+ * 两条约定照着走：
+ *
+ *   浮层    有阴影、无边框那一套（参考后台的做法）
+ *   聚焦    只加深边框/底色，**不加外圈光环**（与 field 那套控件同一条）
+ *
+ * 行高 30px、字号 --fs-label，密集尺度。窄窗口不缩菜单 —— 它是浮层，
+ * 缩了反而更难点；真放不下的时候翻边逻辑会把它挪到有地方的那一侧。
+ *
+ * 圆角（第二十八轮）：**不吃 --r-md** —— C14/C13 外壳把它压到 3px（全稿近直角），
+ * 而菜单是浮层，作者要它像 iOS 那样圆（「不要太直角的，跟他一样圆角一点」，
+ * 参考 X 上 corner-shape 那条帖）。支持 corner-shape 的浏览器走 16px + squircle
+ * 的连续曲率；老浏览器回退 10px 普通圆角。
+ */
+
+.pop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 168px;
+  max-width: 260px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+  pointer-events: auto;
+}
+
+@supports (corner-shape: squircle) {
+  .pop {
+    border-radius: 16px;
+    /* stylelint-disable-next-line property-no-unknown -- 新属性，stylelint 的属性库还没收录（Chrome 139+） */
+    corner-shape: squircle;
+  }
+}
+
+/* 量到位置之前不显形 —— 翻边要先知道自己多大 */
+.pop[data-ready='false'] {
+  visibility: hidden;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+}
+
+.item,
+.danger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.item:hover,
+.item:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+}
+
+.danger:hover,
+.danger:focus-visible {
+  outline: none;
+  background: var(--danger-soft);
+}
+
+/* 禁用项：灰下去，但**鼠标还能悬停看到原因**（title 要有机会显示） */
+.item:disabled,
+.danger:disabled {
+  background: transparent;
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.none {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* —— 二次确认 —— */
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 252px;
+  padding: 8px 10px 10px;
+}
+
+.askHead {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.askBody {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.askActs {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.cancel,
+.ok {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.cancel:focus-visible,
+.ok:focus-visible {
+  outline: none;
+  border-color: var(--text-1);
+}
+
+.ok {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.ok:focus-visible {
+  border-color: var(--text-1);
+}

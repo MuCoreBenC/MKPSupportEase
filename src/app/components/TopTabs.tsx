@@ -46,6 +46,10 @@ const TAB_ICONS: Record<string, IconName> = {
   preset: 'presets',
   calib: 'crosshair',
   params: 'params',
+  /* 这一轮加的两条（试验场 A40 的顶栏图标名）：同步 = 下载箭头；BBS 预设 = 3D 盒子
+     （它与「报告」共用过同一个文档图标，所以 A40 特意把它换成了盒子） */
+  sync: 'download',
+  bbs: 'box',
   report: 'doc',
   settings: 'settings',
 }

@@ -1,0 +1,15 @@
+/*
+ * 浮层层本身不吃点击（pointer-events: none），只有里面的浮层吃（见 FieldPopover.module.css）。
+ * 否则它铺满整页，页面就再也点不动了。
+ *
+ * z-index 90 的来历：外壳内阴影 `.shell::after` 是 60，各个遮罩是 50/60/70，
+ * PickerDropdown 的列表是 70 —— 90 压过全部。#32 的右键菜单写的是 20，
+ * 那个值在抽屉开着的时候会被遮罩真遮住。
+ */
+
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}

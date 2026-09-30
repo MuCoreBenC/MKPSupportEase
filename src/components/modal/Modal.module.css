@@ -1,0 +1,121 @@
+/*
+ * 居中模态框的长相。
+ *
+ * 居中靠 flex（`place-items: center`），**不用 `top:50%` + transform** —— 理由写在 Modal.tsx 的文件头。
+ * 遮罩 `absolute inset: 0`，盖住的是宿主那一层（内容区），不是整页。
+ */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pad);
+  background: rgba(16, 24, 32, 0.28);
+}
+
+.box {
+  display: flex;
+  max-width: 100%; /* 窄窗口里框不许比可用区宽，三档一律让位给容器 */
+  max-height: 100%;
+  flex-direction: column;
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+  outline: none;
+}
+
+.box[data-size='sm'] {
+  width: 340px;
+}
+
+.box[data-size='md'] {
+  width: 460px;
+}
+
+.box[data-size='lg'] {
+  width: 640px;
+}
+
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sub {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 文字按钮而不是一个 × 图标 —— 动作按钮要用文字（项目约定） */
+.close {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--card-face);
+  color: var(--text-1);
+}
+
+/* 聚焦只加深边框，不加光环（项目约定） */
+.close:focus-visible {
+  outline: none;
+  border-color: var(--text-1);
+  color: var(--text-1);
+}
+
+.body {
+  min-height: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+[data-density='mini'] .scrim {
+  padding: 8px;
+}
+
+[data-density='mini'] .head,
+[data-density='mini'] .body,
+[data-density='mini'] .foot {
+  padding-left: 10px;
+  padding-right: 10px;
+}

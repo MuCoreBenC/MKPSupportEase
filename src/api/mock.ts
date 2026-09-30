@@ -1,3 +1,4 @@
+import { NotImplementedError } from './errors'
 import type { CalibModel, MkpApi, Preset } from './contract'
 
 /**
@@ -97,5 +98,66 @@ export const mockApi: MkpApi = {
 
   async openModel(modelId) {
     console.info('[mock] openModel', modelId)
+  },
+
+  /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
+   *
+   * 这一轮先把**形状**立起来：下面这些一律给"空"，让页面能画空态、不会白屏。
+   * 真正的夹具（试验场那份假后端：6 台机型 / 10 个版本 / 74 条参数 / 42 条带条件，
+   * 见 `src/server/data/*.json` + `resolve/*.ts`）随预设页与参数页搬进来 ——
+   * 搬进来时替换的就是本文件这一节，页面一行不动（与 `mock.ts → rust.ts` 同一条规矩）。
+   */
+  async getMachines() {
+    return []
+  },
+
+  async getVersionFiles() {
+    /* null 的语义是「后端没有这个组合」，不是「这个组合下没文件」——空夹具给 null */
+    return null
+  },
+
+  async getLocalFiles() {
+    return []
+  },
+
+  async getLocalUserFiles() {
+    return []
+  },
+
+  async getAppliedPreset() {
+    /* null = 一套都还没应用。这是合法状态，不是错误 */
+    return null
+  },
+
+  async getSlicerCopied() {
+    return []
+  },
+
+  async copyToSlicer(assetId) {
+    console.info('[mock] copyToSlicer', assetId)
+  },
+
+  async getPresetFiles() {
+    return []
+  },
+
+  async getMenu() {
+    return []
+  },
+
+  async getParamMeta() {
+    return []
+  },
+
+  async getMachineParams() {
+    return []
+  },
+
+  /**
+   * 试验场那份假后端对这个方法是**故意抛**的（那里没有真网络），产品仓照同一条口径：
+   * 空夹具不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
+   */
+  async downloadFiles() {
+    throw new NotImplementedError('downloadFiles')
   },
 }
