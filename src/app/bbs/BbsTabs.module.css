@@ -1,0 +1,64 @@
+/* 参数分页的页签条。选中态是下面那条绿线 —— BBS 就是这样。
+   边框与底色由外面那层 `.tabsRow` 画（搜索框跟在同一行，边框必须连成一条） */
+
+.tabs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  padding: 0 6px;
+  overflow-x: auto;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--bbs-dim);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--bbs-text);
+}
+
+.tab[data-on='true'] {
+  border-bottom-color: var(--bbs-green);
+  color: var(--bbs-text);
+  font-weight: 600;
+}
+
+/* 搜索中、这一页没命中：压暗。「哪几页有货」要一眼看出来 */
+.tab[data-dim='true'] {
+  color: var(--bbs-disabled);
+}
+
+.tab:focus-visible {
+  outline: 1px solid var(--bbs-focus);
+  outline-offset: -1px;
+}
+
+/* 命中数角标。**不用橙色** —— 橙在这一页是「改动」的意思，两个概念不能撞色 */
+.badge {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
+.tab[data-on='true'] .badge {
+  background: var(--bbs-green);
+  color: #fff;
+}

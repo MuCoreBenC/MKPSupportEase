@@ -1,0 +1,32 @@
+/* 一个参数组：标题那条分割线 + 若干行 */
+
+.group {
+  margin-top: 10px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--bbs-line);
+  color: var(--bbs-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* 图标颜色由 svg 里的 var(--ico-*) 决定 —— 这里只管尺寸 */
+.gico {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.gico svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}

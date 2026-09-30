@@ -1,0 +1,9 @@
+{
+  "_note": "public/bbs 那四份元数据的出处印章：页面状态条要显示 bbs_version 与抄录日期。别手改，见同目录 PROVENANCE.md",
+  "from": "mkp-adaptive-console@e509255 public/bbs（machine-motion/tools/bbs-extract.mjs 的产物）",
+  "bbs_version": "02.08.02.61",
+  "source": "Bambu Studio 源码 PrintConfig.cpp / Tab.cpp / zh_CN.po + 安装目录 resources/images（AGPL-3.0）",
+  "syncedAt": "2026-09-30T14:36:27.866Z",
+  "files": 4,
+  "bytes": 527048
+}

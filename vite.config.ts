@@ -1,8 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { bbsFs } from './tools/dev-server/bbsFs.mjs'
 
 /*
- * 只有 react() 一个插件。
+ * 两个插件：react() 与 bbsFs()。
+ *
+ * `bbsFs()` 是 BBS 预设页的数据源 —— `GET /api/bbs/presets` 实时读本机 BBS 目录
+ * （本仓不打包那 285 个预设快照，见 C15-A40-PORT-PLAN §6-2）。它**只读**、只在 serve 期
+ * 存在（dev 与 preview 都挂，验收走的是 preview），`vite build` 的产物里没有它。
  *
  * 试验场那份还挂着 calibFs() 与 curvesFs() 两个 dev-server 插件 —— 它们提供
  * `/__calib/write`、`/__curves/write` 两个**无鉴权的写盘端点**，是标定工作台与
@@ -43,7 +48,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [react(), bbsFs()],
 
     build: {
       rollupOptions: { input },

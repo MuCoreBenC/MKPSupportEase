@@ -1,0 +1,38 @@
+/* 状态条。sticky 在底部 —— 参数表很长，滚到哪都得看得见口径 */
+
+.bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--bbs-line);
+  background: var(--bbs-page-bg);
+  color: var(--bbs-dim);
+  font-size: 11px;
+}
+
+/* 搜参数那一格：搜索中才出现，用 focus 色标一下，和「改动」的橙分开 */
+.search {
+  color: var(--bbs-focus);
+}
+
+/* 继承链可能很长，单独占一行、允许换行 —— 它是这一页最关键的口径，不能被截断 */
+.chain {
+  width: 100%;
+  color: var(--bbs-dim-2);
+  word-break: break-all;
+}
+
+/* 提示不是错误：缺数据、退快照、变体对不上都走这一条，用橙不用红 */
+.note {
+  width: 100%;
+  color: var(--bbs-orange);
+}
+
+.error {
+  width: 100%;
+  color: var(--danger);
+}

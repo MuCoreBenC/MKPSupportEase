@@ -1,0 +1,282 @@
+/*
+ * BBS 预设查看器的版面 + **两套皮肤的全部变量**。
+ *
+ * 变量为什么落在这一页的根节点上，而不是 src/styles/tokens.css：
+ * 这两套取值是照 BBS 自己的 token 抄的（语义色板 StateColor.hpp:13-49、
+ * 明↔暗对照 StateColor.cpp:8-51、图标换色 BitmapCache.cpp:349-361），
+ * 只对「复刻 BBS 界面」这一页成立。放进全局会污染别的页面，也会让人以为
+ * MKP 有了深色套 —— 它没有。
+ *
+ * 深色是默认：上游那一页原本就是深色的，不因为多了明亮档就改默认观感。
+ *
+ * --ico-* 这几个不是随便配的：BBS 的 param_*.svg 是双色的（#262E30 画轮廓、
+ * #ACACAC 填高亮块），上游提取时已把「既出现在图标里、又在 BBS 那张替换表里」的
+ * 5 个源色换成了 var(--ico-<源色>)。变量名直接用源色，方便跟源码对账。
+ * 把轮廓一律刷成单色会让图标糊成一团粗灰 —— 那是上游踩过的坑。
+ */
+
+.page {
+  /* ===== 深色（默认） ===== */
+  --bbs-page-bg: #141414;
+  --bbs-panel: #262626;
+  --bbs-panel-2: #2b2b2b;
+  --bbs-field: #3a3a3a;
+  --bbs-field-border: #484848;
+  --bbs-line: #383838;
+  --bbs-text: #e8e8e8;
+  --bbs-label: #cfcfcf;
+  --bbs-dim: #8a8a8a;
+  --bbs-dim-2: #7a7a7a;
+  --bbs-green: #00c853;
+  /* 改动项：BBS 里被改过的参数标签就是这种橙 */
+  --bbs-orange: #e5a33d;
+  --bbs-focus: #6a9fff;
+  --bbs-menu-hover: #3a3a3a;
+  --bbs-menu-selected: #2a4a8a;
+  --bbs-btn-hover: #454545;
+  --bbs-chk-border: #6f6f6f;
+  --bbs-chev: #a9a9a9;
+  --bbs-disabled: #6f6f6f;
+  --bbs-pm-disabled: #6a6a6a;
+  --bbs-shadow-menu: rgba(0, 0, 0, 0.4);
+  /* 搜索命中那一行的底色。淡得刚好看出「这一片有东西」，不抢橙色（改动）的戏 */
+  --bbs-hit: rgb(255 255 255 / 6%);
+
+  /* 图标源色 → 暗色替换值（BitmapCache.cpp:349-361） */
+  --ico-262e30: #efeff0;
+  --ico-6b6b6b: #818182;
+  --ico-909090: #fff;
+  --ico-808080: #818183;
+  --ico-cecece: #54545b;
+
+  /* 参数值左对齐的竖线位置。行左边有 33px 缩进（给组图标那一格） */
+  --bbs-label-w: 236px;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bbs-page-bg);
+  color: var(--bbs-text);
+  font-size: 12px;
+}
+
+/* ===== 明亮 =====
+   只覆盖变量，不新增任何规则 —— 尺寸、间距、圆角在两套主题里必须完全一样 */
+.page[data-theme='light'] {
+  --bbs-page-bg: #f1f1f1;
+  --bbs-panel: #fff;
+  --bbs-panel-2: #fff;
+  --bbs-field: #fff;
+  --bbs-field-border: #cecece;
+  --bbs-line: #e8e8e8;
+  --bbs-text: #262e30;
+  --bbs-label: #323a3d;
+  --bbs-dim: #6b6b6b;
+  --bbs-dim-2: #909090;
+  --bbs-green: #00ae42;
+  --bbs-orange: #ff6f00;
+  /* 浅色下 BBS 的聚焦边框是品牌绿，不是深色那套的蓝 */
+  --bbs-focus: #00ae42;
+  --bbs-menu-hover: #f1f1f1;
+  /* LightGreen：BBS 浅色下的选中底是淡绿，不是深蓝 */
+  --bbs-menu-selected: #edfaf2;
+  --bbs-btn-hover: #eee;
+  --bbs-chk-border: #cecece;
+  --bbs-chev: #909090;
+  --bbs-disabled: #909090;
+  --bbs-pm-disabled: #a6a9aa;
+  --bbs-shadow-menu: rgba(0, 0, 0, 0.12);
+  --bbs-hit: rgb(0 0 0 / 5%);
+
+  /* 浅色模式就是 BBS 原件本身的颜色，一处都不换 */
+  --ico-262e30: #262e30;
+  --ico-6b6b6b: #6b6b6b;
+  --ico-909090: #909090;
+  --ico-808080: #808080;
+  --ico-cecece: #cecece;
+}
+
+/* 窄档收窄标签列，否则值列会被挤出右边缘 */
+.page[data-density='compact'] {
+  --bbs-label-w: 180px;
+}
+
+.page[data-density='mini'] {
+  --bbs-label-w: 44%;
+}
+
+/* 拖拽态：整页接文件，边框亮起来告诉你松手就收 */
+.page[data-dropping='true'] {
+  outline: 2px dashed var(--bbs-green);
+  outline-offset: -2px;
+}
+
+/* ===== 工具条 =====
+   这一条是「我们的壳」，BBS 里没有，所以刻意用更深的底色区分。
+   按钮一律用文字标签，不用图标 */
+.bar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--bbs-line);
+  background: var(--bbs-page-bg);
+}
+
+.btn {
+  padding: 4px 9px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 4px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bbs-btn-hover);
+}
+
+.btn[data-on='true'] {
+  border-color: var(--bbs-green);
+}
+
+/* 焦点态只加深边框，不发光 */
+.btn:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+.btn:disabled {
+  color: var(--bbs-disabled);
+  cursor: default;
+}
+
+/* 当前预设名占中间那一段，长了省略 */
+.name {
+  flex: 1;
+  min-width: 80px;
+  overflow: hidden;
+  color: var(--bbs-label);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.file {
+  display: none;
+}
+
+/* ===== 主体 =====
+ *
+ * `min-height: 0` 这一条在这一层和下面每一层都必须有，缺一层滚动就整个失效：
+ * flex item 的 `min-height` 默认是 **auto**，意思是「不许收缩到比内容更矮」。
+ * 抽屉里 39 项预设有 ~1100px 高，缺了这条，`.drawer` 会被内容撑到 1100px，
+ * `.list` 的 `flex: 1` 算出来也是 1100px —— `scrollHeight === clientHeight`，
+ * 浏览器认为没有可滚的内容，**滚轮不该有反应**；溢出那截被 `.page` 的
+ * `overflow: hidden` 裁掉，于是只能靠改窗口大小改变裁切位置才看到下面的项。
+ * 这就是第二轮那个「滚不动」的全部成因，跟滚动条看不见（幽灵滚动条）无关。
+ *
+ * `position: relative` 是给浮层态的抽屉当定位父级 —— 它用 absolute 不用 fixed：
+ * 预览外壳 `.window` 上有 transform，那是 fixed 的包含块（#33 那两个点不开的浮层）。
+ */
+.body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bbs-panel);
+}
+
+/*
+ * 浮层态的遮罩。
+ *
+ * 为什么需要它：参数行只占左边 ~420px（标签列 236 + 控件），浮层一开正好把它们全盖住，
+ * 右边剩下的是参数区本来就空的那半 —— 截图上看起来像「参数没了」。一层很淡的遮罩
+ * 把「现在被临时盖住了，点一下就回去」这件事说出来，比让人猜好。
+ * 它也顺手替掉了原来挂在 `.main` 上的 mousedown：有遮罩就点不到底下的控件，
+ * 不会出现「关抽屉顺便改了一个参数」。
+ */
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  border: 0;
+  background: rgb(0 0 0 / 28%);
+  cursor: default;
+}
+
+/* ===== 参数分页那一行 =====
+   页签在左、**搜参数的框在右端**（组件是 BbsSearchBox，样式在它自己那份 css 里）。
+   为什么不放顶部工具条：抽屉里已经有一个搜预设名的框，两个都堆左上角分不清谁管谁；
+   放在这一行，位置本身就说明作用域是「下面这些参数」。 */
+.tabsRow {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+  border-bottom: 1px solid var(--bbs-line);
+  background: var(--bbs-panel);
+}
+
+/* 搜索的两条兜底提示：这一页没命中 / 一个都没命中。
+   语气直白、不用错误色 —— 搜不到不是错误 */
+.hintBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--bbs-line);
+  background: var(--bbs-panel-2);
+  color: var(--bbs-dim);
+  font-size: 11.5px;
+}
+
+/* 有命中的页名，点了才切 —— 你说的「不用自动切换」 */
+.hintLink {
+  padding: 2px 7px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 4px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hintLink:hover {
+  background: var(--bbs-btn-hover);
+}
+
+.hintLink:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 24px;
+  overflow-y: auto;
+}
+
+.blank {
+  padding: 24px 16px;
+  color: var(--bbs-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}

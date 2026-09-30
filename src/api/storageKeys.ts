@@ -43,6 +43,16 @@ export const STORAGE = {
 
   /** 参数页「修改历史」悬浮抽屉的宽度（px，JSON 数字）。同样是纯前端偏好 */
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
+
+  /**
+   * BBS 预设页的四格偏好：看全部还是跟 BBS 一样、皮肤深浅、抽屉是并排还是浮层、
+   * 抽屉宽度。**全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），
+   * 所以四格都不承载底账。
+   */
+  clientBbsView: 'mkp.A40.bbs.view',
+  clientBbsTheme: 'mkp.A40.bbs.light',
+  clientBbsDrawerMode: 'mkp.A40.bbs.drawerMode',
+  clientBbsDrawerW: 'mkp.A40.bbs.drawerW',
 } as const
 
 export type StorageKey = (typeof STORAGE)[keyof typeof STORAGE]

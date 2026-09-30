@@ -1,0 +1,221 @@
+/* 一行参数的右半边：四类控件。尺寸与颜色照上游 bbs-preset.css，
+   颜色全部走 --bbs-* 变量（定义在 PageBbs.module.css 的 .page 上，两套主题各一份）。 */
+
+.val {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  position: relative;
+}
+
+/* ===== 数值 ===== */
+.num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 58px;
+  padding: 3px 7px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 3px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.unit {
+  color: var(--bbs-dim);
+  font-size: 11px;
+  /* `mm 或 %` 这种双单位不许换行，也不许把控件挤窄 */
+  white-space: nowrap;
+}
+
+/* 数值框的上下箭头：BBS 的 spin_inc / spin_dec（各 8×5 的圆头折线） */
+.arrows {
+  display: inline-flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-right: 2px;
+}
+
+.arrows svg {
+  display: block;
+  width: 8px;
+  height: 5px;
+}
+
+/* ===== 枚举 ===== */
+.sel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 96px;
+  max-width: 150px;
+  padding: 3px 7px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 3px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sel:disabled {
+  cursor: default;
+}
+
+.sel:hover:not(:disabled),
+.sel:focus-visible {
+  /* 焦点态只加深边框，不发光 */
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+.selOpen {
+  border-color: var(--bbs-focus);
+}
+
+.selText {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chev {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--bbs-chev);
+}
+
+.chev svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* 图案类枚举每项前面那个小图标（BBS 的 param_<枚举值>.svg）。
+   颜色由 svg 里的 var(--ico-*) 决定，这里一个颜色属性都不设 */
+.eico {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.eico svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* 展开的菜单。absolute 挂在控件上，跟着行一起滚 —— 不 portal 到浮层层：
+   它是行内的东西，滚出视口就该跟着出去 */
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  max-height: 200px;
+  margin-top: 2px;
+  overflow-y: auto;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 4px;
+  background: var(--bbs-panel-2);
+  box-shadow: 0 4px 12px var(--bbs-shadow-menu);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--bbs-menu-hover);
+}
+
+.menuItemOn {
+  background: var(--bbs-menu-selected);
+}
+
+/* ===== 复选框 ===== */
+.chk {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chk:disabled {
+  cursor: default;
+}
+
+.chkIco svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+/* 兜底：icons.json 缺图时才用，别让这一格变成空白 */
+.chkFallback {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--bbs-chk-border);
+  border-radius: 2px;
+}
+
+.chkFallback.chkOn {
+  border-color: var(--bbs-green);
+  background: var(--bbs-green);
+}
+
+.chkFallback.chkOn::after {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-bottom: 2px solid #fff;
+  border-left: 2px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+/* ===== 长文本 ===== */
+.textline {
+  max-width: 132px;
+  padding: 3px 7px;
+  overflow: hidden;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 3px;
+  background: var(--bbs-field);
+  color: var(--bbs-dim);
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
