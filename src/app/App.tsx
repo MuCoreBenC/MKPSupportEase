@@ -7,8 +7,11 @@ import PagePlaceholder from './components/PagePlaceholder'
 import ResizeEdges from './components/ResizeEdges'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
+import PageBbs from './bbs/PageBbs'
 import PageCalib from './calib/PageCalib'
 import PageHome from './home/PageHome'
+import PagePackage from './pages/PagePackage'
+import PageParams from './params/PageParams'
 import PagePresets from './presets/PagePresets'
 import { inTauri } from './window'
 import s from './App.module.css'
@@ -31,7 +34,8 @@ const PLATFORM = detectPlatform()
  *   所以 `.shell` 的 flex 列布局一个字不用改。
  *
  * 六个页签（预设 / 参数 / 同步 / BBS 预设 / 报告 / 设置）这一轮先是空态：
- * 按阶段计划 P2–P5 一页一页换成真页面（报告与设置两页作者已裁决**本轮就做空态**）。
+ * 按阶段计划 P2–P5 一页一页换成真页面 —— 预设（P2）、参数（P3）、同步（P4）、
+ * BBS 预设（P5）已接上；报告与设置两页作者已裁决**本轮就做空态**。
  * 空态写的是"这一页本版未接入"，不是白屏 —— 少一个页签会让"这一版缺什么"变得看不见。
  */
 export default function App() {
@@ -46,15 +50,10 @@ export default function App() {
    * 两页的数据源不是同一份（预设页走 `src/api`，BBS 页走本机 BBS 目录），不能互相塞对象。
    * `nonce` 是「同一个文件再点一次也要重新触发」用的，不然第二次点没反应。
    *
-   * BBS 页本轮还是空态，所以这一格暂时只被写入、没有读者 —— 留着是因为
-   * **它就是那条入口的状态**，等 BBS 页接上来时不该再去重造一遍。
-   *
-   * 下面那一句 `void` 只是为了把「暂时没有读者」这件事写成代码：
-   * 状态本身是好的（下一次点击会换 nonce），只是读它的那一页还没搬过来。
-   * BBS 页接上之后，把 `pending` 传给它、这句就删掉。
+   * BBS 页（P5）接上来之后这一格有了读者 —— 它整份传下去，由那一页按文件名在
+   * 自己的清单里找（见 `src/app/bbs/PageBbs.tsx` 里那个 effect）。
    */
   const [pendingBbs, setPendingBbs] = useState<{ name: string; nonce: number } | null>(null)
-  void pendingBbs
 
   const openBbs = useCallback((name: string) => {
     setPendingBbs((prev) => ({ name, nonce: (prev?.nonce ?? 0) + 1 }))
@@ -68,11 +67,11 @@ export default function App() {
       case 'preset':
         return <PagePresets density={density} onOpenBbs={openBbs} />
       case 'params':
-        return <PagePlaceholder title="参数" hint="后处理参数与风险项" />
+        return <PageParams density={density} onOpenPackage={() => setTab('sync')} />
       case 'sync':
-        return <PagePlaceholder title="同步" hint="客户端说明书与本机预设的同步" />
+        return <PagePackage onOpenParams={() => setTab('params')} />
       case 'bbs':
-        return <PagePlaceholder title="BBS 预设" hint="Bambu Studio 工艺预设查看器" />
+        return <PageBbs density={density} pending={pendingBbs} />
       case 'report':
         return <PagePlaceholder title="报告" hint="后处理执行报告与历史" />
       case 'settings':
