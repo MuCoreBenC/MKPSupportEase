@@ -1,0 +1,180 @@
+/* 搜索框（收字用，筛选在页面里做，见 SearchField.tsx / PageParams.tsx） */
+
+/*
+ * 宽度**全部交给外层槽** ——这个框自己不设宽。
+ *
+ * 原来这里有四套宽度：基础 280、wide 240、compact 160、mini `flex: 1`。
+ * 最后那套是问题来源：mini 档下它把「分类条 + 搜索框」这一行的剩余空间
+ * 全吃光，实测窗口 400 → 640px 时搜索框从 102px 一路拉到 342px
+ * （作者：「这个窗口比较小的时候，我希望那个搜索条还是不要这么长」）。
+ *
+ * 宽度是**页面布局**的事（它和分类条怎么分一行），长相才是这个组件的事 ——
+ * 所以档位宽度搬到 `PageParams.module.css` 的 `.searchSlot` 上，
+ * 这里一律 100% 铺满那个槽。
+ */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  /* 点框内任何一处都进编辑态（见 .tsx 的 onMouseDown）—— 光标也照这个说 */
+  cursor: text;
+  min-width: 0;
+  max-width: 100%;
+  /* 28px，全档一样 —— 与页内控件一条线（原来 34，compact/mini 30） */
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+}
+
+/* 聚焦只加深边框，不加光环 */
+.field:focus-within {
+  border-color: var(--accent);
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/*
+ * 盖掉 global.css 里那条全局 input 聚焦环：它跟着 input 自己的直角盒走、还往外推 2px，
+ * 聚焦时会变成「套在圆角框外面的绿方块」。聚焦看 .field 的边框变色就够。
+ */
+.input:focus,
+.input:focus-visible {
+  outline: none;
+}
+
+/*
+ * 「命中 N 条」那截绿字整个撤掉（作者：「命中 xxx 都可以不显示了吧」）——
+ * 它原来占着框里约 75px，把输入区挤到只剩十几像素（compact 档那只框一共 132px）。
+ * 结果本来就在下面按卡列着；一条都没命中时，页面上那句「没有匹配的参数」还在。
+ * 原来这里还有一条 `[data-density='mini'] .hits { display: none }`，随它一起删。
+ */
+
+.clear {
+  flex-shrink: 0;
+  /*
+   * 方框 18×18，里面那枚 × 是**图标**（`icons` 的 close），不是文字「×」。
+   *
+   * 作者的原话：「这个叉叉好像没有居中？有点偏下」—— 放大 4 倍量下来确实偏下：
+   * 13px 下那个字形的墨迹离上边 7.5px、离下边 4px，因为 × 的**墨迹**在字身框里
+   * 本来就低于中线，`line-height` 怎么调都只是把行盒居中，管不到墨迹
+   * （试过 `display: grid` 一版，两边的行盒位置逐像素相同 —— 那个改法解决不了它）。
+   *
+   * 换成与抽屉那颗关闭键同一个 path（24 的 viewBox 里 6..18，天然对称），
+   * 再用 grid 居中：11px 的图标在 18px 的方框里，墨迹上下各 6.25px。
+   */
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  /* 不做圆点 —— 全稿不用圆润件 */
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.clear:hover {
+  color: var(--text-1);
+}
+
+/*
+ * 「最近搜索」下拉。长相照共用件那份下拉列表（`SelectField.module.css`
+ * 的 `.list` / `.opt`）：4px 内衬、1px 描边、圆角收到页面的 `--r-sm`、同一个浮起阴影。
+ * 定位与「点外面关掉」交给 `FieldPopover`，这里只管长相。
+ *
+ * 宽度不跟框走（框在 compact 档只有 132px，装不下一个词）：给一个下限，
+ * 长词靠 `text-overflow` 省略，上限也别让它横着长到半屏。
+ */
+.hist {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 168px;
+  max-width: 280px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.histHead {
+  padding: 4px 8px 6px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+}
+
+.histRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.histTerm {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.histTerm:hover {
+  background: var(--surface-sunken);
+}
+
+.histTerm:focus-visible,
+.histForget:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+/* 删一条：跟「清空搜索」那颗同一套长相（同样用图标、同样 grid 居中），只是透明底 */
+.histForget {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.histForget:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}

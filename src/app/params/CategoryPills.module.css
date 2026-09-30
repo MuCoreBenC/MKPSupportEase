@@ -1,0 +1,173 @@
+/*
+ * 参数页的分类条（款式 = 六个圆胶囊睡在一个圆胶囊槽里）。
+ *
+ * 走了一圈又回到圆的：
+ *   ① 最早是一排 999px 圆胶囊（外面再套一个圆框 + 小影子）—— 那会还没有数字；
+ *   ② 后来照作者的「有了数字就不用圆的了，圆角小一点、偏矩形一点」和「整个界面的
+ *      切换器都用校准页面那种」改成方槽（外 4 / 内 2、1px 边框、44 高）；
+ *   ③ 再往后作者在几版对照里挑中了「结构逐项等于方槽、只把圆角放到 999px」的那一版。
+ *      也就是说：他真正要的是**圆**，方槽那版别扭的事不在结构上。
+ *
+ *   ④ 同一次他又要「小尺寸窗口下的」摆法 → 选定**按这一行实际剩多少宽连续退化**。
+ *      改之前是按 `data-density` 两档把条数整个 `display:none`，实测 720 窗口那一行
+ *      明明还空着 338px、数字照样藏了；400 窗口连名字都没了，只剩六个图标靠嵌白猜。
+ *      现在改成：
+ *
+ *     · 尺码随**实测可用宽**连续收（clamp + 线性插值），不再分档 → 位置不会跳
+ *     · 丢东西的次序写在一处：**先丢段内的条数，名字（条外那截）永远留着**
+ *     · 可用宽由组件自己按 DOM 量（见 CategoryPills.tsx）：行内容宽 − 搜索框 − 缝，
+ *       搜索框搬到头部那一行时自然就不扣它了 —— 这正是「按实际宽」而不是「按档位」的意思
+ *
+ * ⑤ 最后又把窄端的三条缝也接进同一条斜坡，并把条外那截「N 项」整个撤掉
+ *   （见 `CategoryPills.tsx`）。根因是量出来的：窗口 400 那一行只剩 **0.8px** 余量，
+ *   名字后头挂上「22 项」就宽出 5px，而分类条是这一行里唯一能让的
+ *   （`overflow-x: auto`）—— 于是最后一个胶囊被啃掉一角；更窄的窗口（360：宽出 35px）
+ *   直接吃掉一个多胶囊。
+ *
+ * # 尺码表（线性插值，两端照定稿那版量出来的样子）
+ *
+ *   可用宽 avail   244     356     424     598     790
+ *   图标           13.1    14.5    15.4    17.6    20
+ *   段内衬         7.1     8.4     9.2     11.3    13
+ *   段高           24      24      25.8    30.7    36
+ *   槽内衬         2       2       2.1     2.5     3
+ *   条数字号       10      10      10.3    11.1    12
+ *   组件内缝       6.8     11.2    14      14      14
+ *
+ * 条数什么时候走：avail 低于约 372px —— 再往下「条数 + 名字」就放不进这一行了，
+ * 而名字优先级更高（它是「我在哪一类」唯一的答案）。撤掉条外那个「N 项」之后
+ * 这一段依旧保守（条数真正放得下是 avail ≈ 356），留着那 16px 余量当护栏：
+ * 名字长短、条数位数都还能吃掉一点，宁可数字晚一点回来，不要它回来就顶着横滚。
+ */
+
+.wrap {
+  /* 组件会按实测值改写；这里是 CSS 的兜底（没量到之前先按中间那档画） */
+  --avail: 598px;
+
+  --cat-icon: clamp(13px, calc(10px + var(--avail) * 0.01266), 20px);
+  --cat-pad: clamp(7px, calc(4.2px + var(--avail) * 0.0119), 13px);
+  --cat-h: clamp(24px, calc(13.8px + var(--avail) * 0.02809), 36px);
+  --cat-well: clamp(2px, calc(1px + var(--avail) * 0.00253), 3px);
+  --cat-num: clamp(10px, calc(8.4px + var(--avail) * 0.00456), 12px);
+
+  /* 条数：宽度线性收到 0 —— 掉它是**掉到最后一步**，而且是连续地掉，不是一刀切 */
+  --cat-num-w: clamp(0px, calc((var(--avail) - 372px) * 8), 26px);
+  --cat-num-sep: clamp(0px, calc((var(--avail) - 372px) * 0.24), 4px);
+
+  display: flex;
+  align-items: center;
+  /*
+   * 组件内部的两条缝也跟着可用宽收。
+   *
+   * 原来写死 14px。槽本身在窄端已经收得很小（段 27px 高 24），两条 14px 的缝
+   * 却一点不让 —— 实测 380 窗口那一行只剩 17px 就给分类条横滚用掉了：
+   * 段缩到最小也挤不下，最后那个胶囊被啃掉一角（作者：「左侧 tab 显示不完整」）。
+   *
+   * 曲线的取法：425px 以上一律 14（这一段的样子一个字没变），往下线性收到 6。
+   */
+  gap: clamp(6px, calc(var(--avail) * 0.04 - 3px), 14px);
+  min-width: 0;
+}
+
+/* 圆胶囊槽：几何照方槽版本，只有圆角是 999px；尺寸随可用宽收 */
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--cat-well);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+
+  /* 兜底：万一还是 wider than life（比可用宽还宽），横着滚而不是挤变形 */
+  overflow-x: auto;
+}
+
+.pill,
+.pillOn {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 图标与条数之间的缝挂在条数自己身上 —— 它收没了，缝也不留 */
+  gap: 0;
+  height: var(--cat-h);
+  padding: 0 var(--cat-pad);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/* 图标尺码交给 CSS（写在 attribute 上的 size 会被它盖掉） */
+.icon {
+  width: var(--cat-icon);
+  height: var(--cat-icon);
+}
+
+.pill:hover {
+  color: var(--text-1);
+}
+
+/* 校准页 .tab[data-on] 同款：嵌白 + 8% 小阴影 */
+.pillOn {
+  background: var(--surface-solid);
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
+}
+
+/* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」）——
+ * 选中段的嵌白底 + 加粗就是指示。 */
+.pill:focus-visible,
+.pillOn:focus-visible {
+  outline: none;
+}
+
+.dot {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e5484d;
+  box-shadow: 0 0 0 1.5px var(--surface-solid);
+}
+
+.sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line-strong);
+  flex-shrink: 0;
+}
+
+/*
+ * 条外那截名字（现在只有名字，没有「N 项」）。
+ *
+ * 名字在任何宽度都留着 —— 它是「我在哪一类」唯一说得出口的答案（图标纯靠猜）。
+ * 原来名字后面还挂一个「N 项」，和胶囊里的条数说的是同一件事；窄窗那一行容不下
+ * 两遍，去掉它换回分类条的完整（详情见 CategoryPills.tsx 里那段注释）。
+ */
+.current {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: calc(var(--fs-body) + 3px);
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.num {
+  margin-left: var(--cat-num-sep);
+  max-width: var(--cat-num-w);
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--cat-num);
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}

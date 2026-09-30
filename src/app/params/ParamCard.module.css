@@ -1,0 +1,83 @@
+/* 卡面按「有边框、没阴影」的规矩 —— 阴影只留给浮层 */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  scroll-margin-top: 12px;
+}
+
+/* 卡片标题在卡外面 —— 旧程序就是这样，标题像给一叠纸贴的标签 */
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px 2px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* 卡面圆角随页面 token 收到 4px；影子去掉（规矩：卡片有边框没阴影，浮层才有阴影） */
+.body {
+  border: 1px solid var(--line);
+  border-radius: var(--card-r);
+  background: var(--card-face);
+}
+
+/*
+ * 嵌套子块：比卡片更暗一档、四周留边，让「它是挂在上一行下面的」一眼看出来。
+ * 上边不留白 —— 它必须紧贴**条件行**，中间空一道就不像一条依赖了。
+ *
+ * 把底色从 --surface-sunken（3.5%）提到 6%：作者圈着受控参数块两侧说
+ * 「点开了之后背景没变，有点突兀」—— 3.5% 在用户端的行距上读不出来，整块看上去
+ * 和普通行一样白，只剩左右两条灰色细带，倒成了没来由的缝。6% 让「灰底跟着
+ * 条件参数出现」这件事本身看得见（「不适用的行整行灰下去」是同一个意图）。
+ */
+/*
+ * 子块两层：`.sub` 容器只管定位（原来那圈缝），`.subWell` 是灰框本体
+ * （底色/描边/圆角/内距 —— 作者定稿：这些不用变）。
+ * 分两层的理由：条件行展开时容器铺打开态绿底当"缝"，灰框在绿底里原样嵌着 ——
+ * 一层做不出「外圈变色、框不变」（box-shadow 外扩还会把圆角放大成 15px 的圆角圈，
+ * 作者：「背景下面不应该是圆角」）。
+ */
+.sub {
+  margin: 0 12px 12px;
+}
+
+.subWell {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  /* 不透明等效色（= 6% 黑铺在卡面 #fbfcfd 上的结果）：展开态它垫在绿底上，
+     半透明会泛绿 —— 作者定稿「灰色的背景不用变」，渲染必须与改动前逐像素相同 */
+  background: rgb(237 238 240);
+  overflow: hidden;
+}
+
+/*
+ * 条件行展开：容器 margin 清零、padding 顶替缝宽，绿底（不透明等效色，叠在同色上
+ * 不变色，理由见前）铺满左右与底部的缝 —— 四角直角，灰框原样嵌在里面。
+ */
+[data-open='true'] + .sub {
+  margin: 0 0 12px;
+  padding: 0 12px 12px;
+  background: rgb(225 243 233);
+}
+
+/* 整块控件（G-code 编辑器）自己带边距 */
+.block {
+  padding: 14px 16px;
+}
+
+.block + .block {
+  border-top: 1px solid var(--line);
+}
+
+[data-density='mini'] .sub {
+  margin: 0 8px 8px;
+}
+
+/* mini 的缝是 8px,绿圈同步收窄（同一个不透明等效色,理由见上） */
+[data-density='mini'] [data-open='true'] + .sub {
+  margin: 0 0 8px;
+  padding: 0 8px 8px;
+}

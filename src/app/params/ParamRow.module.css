@@ -1,0 +1,209 @@
+/* 行的内边距与最小高度照用户端那一版，不动 */
+
+.wrap,
+.wrapOpen {
+  display: flex;
+  flex-direction: column;
+}
+
+.wrap + .wrap,
+.wrap + .wrapOpen,
+.wrapOpen + .wrap,
+.wrapOpen + .wrapOpen {
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * 展开详情的那一行整体压一点底色，跟没展开的行区分开。
+ * 修「点开了之后背景没变，有点突兀」：原来 2% 的中性灰在宽松行距上根本读不出来
+ * （工作台的做法是打开的行铺 12% 主色底，一眼可见）——这里换成用户端自己的
+ * --accent-soft（绿 12%），「这一条正开着」在同一眼之内看见，语义与工作台同位。
+ */
+.wrapOpen {
+  background: var(--accent-soft);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+  padding: 10px 18px;
+  font-size: var(--fs-body);
+}
+
+/* 名称那一块是按钮：点它展开详情。看着不像按钮（无边框无底色），但能点、能聚焦 */
+.left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px 4px 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.left:hover .label {
+  color: var(--accent-deep);
+}
+
+.left:hover .info {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+/* 聚焦不再另画一圈：行的开合看展开箭头与子块，不需要描边 */
+.left:focus-visible {
+  outline: none;
+}
+
+.labelWrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.label {
+  color: var(--text-1);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 改不动的原因：写清是哪个条件参数控制的 */
+.note {
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: #a86416;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/*
+ * 数字步进器的外壳（见 ParamRow.tsx 里的说明）：
+ * 132px 定宽，箭头永远靠右；进入编辑（聚焦）数值靠左 —— 只读态照旧右对齐，
+ * 一列数字右对齐才好比大小。改在这一层壳上，不动共用件的 `.input`，别处不受影响。
+ */
+.edNum {
+  display: inline-flex;
+  width: 132px;
+  min-width: 0;
+}
+
+.edNum > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.edNum input {
+  flex: 1 1 auto;
+}
+
+.edNum input:focus {
+  text-align: left;
+}
+
+.restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #f0c48a;
+  border-radius: var(--r-sm);
+  background: #fff8ee;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: #a86416;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.restore:hover {
+  background: #fdefda;
+}
+
+.restore:focus-visible {
+  outline: none;
+  border-color: #a86416;
+  box-shadow: inset 0 0 0 1px #a86416;
+}
+
+/* ---------- 展开的详情 ---------- */
+
+.detail {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 2px 18px 14px;
+  font-size: var(--fs-label);
+}
+
+.dt {
+  color: var(--text-3);
+}
+
+.dd {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.ddKey {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+[data-density='mini'] .row {
+  min-height: 52px;
+  padding: 8px 12px;
+  gap: 10px;
+}
+
+[data-density='mini'] .detail {
+  grid-template-columns: 56px 1fr;
+  padding: 2px 12px 12px;
+}
+
+/*
+ * 「类型」那一格里包里的原词：`bool` / `string` 这种 —— 中文说法在前，
+ * 原词压淡跟在后面。作者点名要的就是原词（「string，bool 之类的」）。
+ */
+.typeKey {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
