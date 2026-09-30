@@ -12,6 +12,8 @@
  * 探针只做"看得见"的判断：页签点开之后正文里有没有字、标题对不对、控制台有没有 error。
  * 具体到某一页的量（行高 / 溢出 / 位置）由各阶段的专用探针去量，别都堆在这一个里。
  */
+import { mkdir } from 'node:fs/promises'
+
 import { chromium } from 'playwright-core'
 
 const url = process.argv[2]?.startsWith('http') ? process.argv[2] : 'http://localhost:5321/'
@@ -50,14 +52,20 @@ page.on('requestfailed', (r) => {
 await page.goto(url, { waitUntil: 'load' })
 await page.waitForSelector('header', { timeout: 10000 })
 
+const wantShots = process.argv.includes('--shots')
+const shotDir = 'tmp-shots'
+if (wantShots) await mkdir(shotDir, { recursive: true })
+
 console.log(`url ${url}`)
-console.log(`${'页签'.padEnd(10)} ${'正文首行'.padEnd(52)} 判定`)
-console.log('-'.repeat(80))
+console.log(
+  `${'页签'.padEnd(10)} ${'状态'.padEnd(8)} ${'正文首行'.padEnd(44)} 判定`,
+)
+console.log('-'.repeat(86))
 
 for (const label of TABS) {
   const btn = page.getByRole('button', { name: label, exact: true }).first()
   await btn.click()
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(180)
 
   const info = await page.evaluate(() => {
     const main = document.querySelector('main')
@@ -68,9 +76,18 @@ for (const label of TABS) {
     }
   })
 
+  /* 占位页会写着这一句（PagePlaceholder 的固定文案）—— 一眼看出哪几页还没搬 */
+  const kind = info.text.includes('这一页本版未接入') ? '占位' : '真页面'
   const ok = info.activeLabel === label && info.text.length > 0
   if (!ok) problems.push(`${label}: active=${info.activeLabel} 正文=${info.text.slice(0, 30)}`)
-  console.log(`${label.padEnd(10)} ${info.text.slice(0, 50).padEnd(52)} ${ok ? 'ok' : 'FAIL'}`)
+  console.log(
+    `${label.padEnd(10)} ${kind.padEnd(8)} ${info.text.slice(0, 42).padEnd(44)} ${ok ? 'ok' : 'FAIL'}`,
+  )
+
+  if (wantShots) {
+    const slug = { 首页: 'home', 预设: 'preset', 校准: 'calib', 参数: 'params', 同步: 'sync', 'BBS 预设': 'bbs', 报告: 'report', 设置: 'settings' }[label]
+    await page.screenshot({ path: `${shotDir}/${slug}.png` })
+  }
 }
 
 console.log('-'.repeat(80))

@@ -28,6 +28,15 @@ workbench/.draft/
 .DS_Store
 Thumbs.db
 
+# 探针跑出来的截图（scripts/probes/*.mjs 用 --shots / --shot 写这里）。
+# 它们是"这一次走查的现场"，不是设计稿：要看就当场看，入库只会攒一堆过期的图。
+# 试验场那边也是这个目录名与同一条规矩。
+tmp-shots/
+
+# 一次性脚本的临时落点（移植期间的对账、拼装脚本等）。跑完即删，
+# 留在这儿是为了万一被忘掉时不会混进提交。
+tmp-port/
+
 # 编辑器
 .vscode/*
 !.vscode/extensions.json

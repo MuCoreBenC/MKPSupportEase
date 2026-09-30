@@ -4,6 +4,15 @@
 > - 试验场 `mkp-adaptive-console` @ `64738aa`（main，C15 / A40 双活；T7 / T8 / T13–T15 已合并，PR #43 收尾）
 > - 产品仓 `MKPSupportEase` @ `1544223`（`feat/b05-14b-c14-port`，14b 的 P1–P5 已闭环，工作树干净）
 >
+> **试验场是个活靶子**（2026-09-30 复核）：起草之后它又并了 T16（PR #44–#47，HEAD 现在是 `e509255`），
+> 改动落在 `src/api/contract.ts`（`PresetFileInfo` 增 `statFrom`）、假后端（新增 `resolve/bbsFiles.ts`
+> + `data/bbs_files.json`、`machine_catalog.json` 的套餐指向修正）、`src/versions/a40/presets/**`
+> （**预设页那一版改了**：切片器改吃真文件、页面说实话）、以及 `public/presets/bbs/**`（真 BBS 预设快照）。
+> 于是规矩定两条：**① 每阶段开工前先 `git log` 一次试验场，按当时 HEAD 取源**；
+> **② 已落地的部分做一次一致性核对** —— 契约 37 个类型里 35 个与试验场逐字相同，
+> 唯一不同的是 `MkpApi`（是我们刻意裁的 38 → 16），16 个没搬的类型全是配方/套餐/回退/测试端那一类。
+> 本方案记的"差多少"仍是 `64738aa` 那次的口径；T16 之后预设页的增量按新 HEAD 重取。
+>
 > 本方案是**本轮施工图**：只做前端，不新增 Rust 命令；业务接入（真后端）留到下一轮。
 > 体例照 `C14-PORT-PLAN.md`（同一套页面对照表 / 契约差异 / 分阶段 / 待裁决）。
 
