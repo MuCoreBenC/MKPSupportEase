@@ -1,0 +1,175 @@
+/*
+ * 页面通用骨架 —— 从更早那一稿的通用页骨架搬来（原 207 行）。
+ * 报告页与设置页两页共用它（报告页借的是 `.rows` / `.row` / `.section` / `.code` 那一套）。
+ *
+ * 本仓这一轮只落了这一份骨架：报告页与设置页都还是空态占位，等它们搬过来就用它。
+ *
+ * # 删掉了这两页用不到的约 90 行
+ *
+ *   .cards / .card / .card[data-on] / .cardTitle / .cardDesc   更早那一稿机型页的卡片网格
+ *   .groupTabs / .groupTab / .groupTab[data-on] + ::after       那一稿参数页的分组横条
+ *   .dot                                                        那条横条上的红点
+ *   .search                                                     那一稿的搜索框
+ *
+ * 留着它们等于让下一个人以为这两页还有卡片和分组横条。试验场的参数页与预设页各有自己的
+ * 胶囊与搜索框（`params/CategoryPills` / `presets` 里那一个 180px 的），
+ * 不共用这一份。**其余每一条都逐字照搬，一个值没动。**
+ *
+ * 末尾追加的三块是设置页要用的（各自注了为什么）。
+ */
+
+.page {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 26px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.headMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+
+.code {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgb(16 24 32 / 3%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  min-width: 0;
+}
+
+.rowLabel {
+  flex: 0 0 132px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.rowValue {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* ══════════ 以下是新加的三块 ══════════ */
+
+/*
+ * 页头那一句常驻的「演示」。设置页的每一个二态都是本地 `useState`，切走整页就复位 ——
+ * 不说清的话它看起来像坏了（改完切回来发现又变回去了）。
+ * 和报告页 `.demoMark` 同一个配色：琥珀不是错误红，它说的是「这不是真的」。
+ */
+.demoMark {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff3e2;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #a86416;
+}
+
+.demoLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/*
+ * 相关链接那一列的地址。**可选中、可复制，但不是链接** ——
+ * 契约里没有 `openExternal`，所以这一行不做成能点的东西：
+ * 一个看起来能点却点不动的链接比一行能自己复制的地址糟得多。
+ * `user-select: text` 是明写的，因为同一行里的按钮那一套默认不给选。
+ */
+.linkAddr {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-2);
+  user-select: text;
+  overflow-wrap: anywhere;
+}
