@@ -29,6 +29,26 @@
  *  - 写值：翻成 `Patch::setValue` 走 `wb_apply_draft`（弃用闸在后端 patch 校验 +
  *    前端手势前的 toast）；批量先 `wb_preview_bulk` 预览、确认才写；
  *  - 撤销 / 重做 / 保存 / 未保存改动在**外壳**（P1 已就位）。
+ *
+ * # C15 A2：模式开关一关，整张卡收起来（只留一句 + 「仍然展开看」）
+ *
+ * 作者的原话是「切换到圆盘擦拭的时候那些擦料塔的都隐藏」—— 切一下模式开关，
+ * 属于另一支的那几张卡整张收起来，而不是留一屏灰行。**判据仍然只有后端那一份**：
+ *
+ *   · 整组被** section 级条件**关掉的，后端把那一组的话都写好了（`DeskGroup.offNote`，
+ *     措辞在 `wording.rs` 的 `relate::group_off`；`derive.rs` 的 `group_off_note`
+ *     逐项查 `blocked[].scope === 'section'` 且是同一个 key）—— 这一句优先；
+ *   · 全是**字段级条件**关的（作者的实测数据里 9 条塔参数就是这种），后端不给整组的话，
+ *     就摆第一行那句 `blockedHint`（同样是后端拼的整句）—— 前端一句中文都不拼。
+ *
+ * 前端在这里只做**版面决定**：这一卡现在一行都改不动，就把行收起来、把这句摆在卡头下面。
+ * 「哪一行为什么改不动」仍旧是 `Cell.blocked` / `blockedHint` 说了算（`visibility.rs`），
+ * 这一层不重新判一遍可见性 —— 那就是把业务搬回前端了。
+ *
+ * 两条边界，都是照 A40 客户端那一版（`ParamCardA40` 第 43 轮）定的：
+ *   · **搜索态永远不收起** —— 那份列表是人自己搜出来的，「命中就该看见」（第 37 轮）；
+ *   · 单行被关着仍是「看得见、改不动」：藏起来的后果是用户以为这个参数不存在。
+ *     收起来的那几行留一个 「仍然展开看」（词从后端来：`words.relate.showAnyway`）。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -129,6 +149,11 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   const [compareCols, setCompareCols] = useState<string[]>([])
   /** 仅显示差异（对照模式） */
   const [diffOnly, setDiffOnly] = useState(false)
+  /**
+   * 「仍然展开看」摊开的那几张卡（C15 A2）。**只装 session 里点开过的** ——
+   * 收不收起来每次渲染按后端给的行态现判，所以条件一变回来，卡自己就正常了。
+   */
+  const [openedCards, setOpenedCards] = useState<string[]>([])
   /** 对照模式右栏的两页签：false = 参数详情，true = 批量修改 */
   const [batchTab, setBatchTab] = useState(false)
   /** 多行 G-code 的模态框：存「哪一层」—— 按钮只在框右上角那枚（C14 第八轮） */
@@ -812,27 +837,46 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                   {desk.groups.length > 0 ? (
                     /* 分组卡最多两列：这是参数工作区，不是仪表盘（作者对五列的判语） */
                     <div className={s.pGrid2}>
-                      {desk.groups.map((g) => (
-                        <GroupCard
-                          key={g.sectionId}
-                          group={g}
-                          cur={desk.cur}
-                          uid={target === BASE ? null : target}
-                          ownerMachineId={machineId ?? ''}
-                          words={words}
-                          paramOf={paramOf}
-                          sel={sel}
-                          onPick={(key) => setSel(key)}
-                          onWrite={writeValue}
-                          onOpenGcode={(key) =>
-                            setGcodeOpen({
-                              key,
-                              mid: machineId ?? '',
-                              uid: target === BASE ? null : target,
-                            })
-                          }
-                        />
-                      ))}
+                      {desk.groups.map((g) => {
+                        /*
+                         * 模式开关整卡收起（C15 A2）：整卡现在一行都改不动就收起行，
+                         * 只留后端那句 + 「仍然展开看」。判据见文件头那一节 ——
+                         * 一句话说：**判据全在后端给的字段里**（`offNote` / `blockedHint`）。
+                         */
+                        const note = collapseNoteOf(g, desk.cur, q.trim() !== '')
+                        if (note !== null && !openedCards.includes(g.sectionId)) {
+                          return (
+                            <CollapsedCard
+                              key={g.sectionId}
+                              group={g}
+                              note={note}
+                              words={words}
+                              onOpen={() => setOpenedCards((prev) => [...prev, g.sectionId])}
+                            />
+                          )
+                        }
+                        return (
+                          <GroupCard
+                            key={g.sectionId}
+                            group={g}
+                            cur={desk.cur}
+                            uid={target === BASE ? null : target}
+                            ownerMachineId={machineId ?? ''}
+                            words={words}
+                            paramOf={paramOf}
+                            sel={sel}
+                            onPick={(key) => setSel(key)}
+                            onWrite={writeValue}
+                            onOpenGcode={(key) =>
+                              setGcodeOpen({
+                                key,
+                                mid: machineId ?? '',
+                                uid: target === BASE ? null : target,
+                              })
+                            }
+                          />
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className={s.pAsideEmpty}>
@@ -1125,6 +1169,51 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
 /* ---------- 页面内部的小件 ---------- */
 
+/**
+ * 「模式开关整卡收起」的收起态（C15 A2）：卡头照旧（哪一张卡、几项），
+ * 下面只留**后端那一句** + 「仍然展开看」。
+ *
+ * 为什么留一句而不是整张卡消失：Rust 那两句（`family_off` / `group_off`）的注释
+ * 就是为这件事写的 ——「列表里直接把那几项收起来，只留这一句」，并且词表里备好了
+ * 「仍然展开看」这个入口（`words.relate.showAnyway`）。整张卡无声消失的话，
+ * 人要翻半天才知道「原来有这么一组、只是现在不生效」。
+ */
+function CollapsedCard({
+  group,
+  note,
+  words,
+  onOpen,
+}: {
+  group: DeskGroup
+  /** 后端那一句（`offNote` 优先，退回第一行的 `blockedHint`） */
+  note: string
+  words: Words
+  onOpen: () => void
+}) {
+  return (
+    <section className={s.pGroup} data-off="true">
+      <header className={s.pGroupHead}>
+        <span>{group.label}</span>
+        <em>{group.count}</em>
+      </header>
+      <div className={s.pOffRow}>
+        <span className={s.pOffNote} title={note}>
+          {note}
+        </span>
+        <span className={s.grow} />
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnSm}`}
+          title="这几行现在都被条件关着 —— 摊开看它们（摊开了也还是改不动）"
+          onClick={onOpen}
+        >
+          {words.relate.showAnyway}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function GroupCard({
   group,
   cur,
@@ -1283,6 +1372,32 @@ function ParamLine({
 }
 
 /* ---------- 纯函数小工具 ---------- */
+
+/**
+ * **整卡收起该怎么说**（C15 A2）。返回 `null` = 不收起来（照旧铺行）。
+ *
+ * 判据全是从后端收到的那几个字段读出来的，前端不重判可见性：
+ *
+ *   1. 这一卡里**每一行**在 `cur` 这一列都被条件关着（`Cell.blocked` 非空）。
+ *      用 `blocked` 而不是 `!editable`：已弃用的行也不可编辑，但它不是「在等一个开关」
+ *      —— 对弃用的行说「换个条件就能用」是假话（`derive.rs` 那条注释）。
+ *      取不到格子的（列对不上）一律**不收**：看不准的时候别藏东西。
+ *   2. 收起时那句话：`group.offNote`（后端为「整组被 section 级条件关掉」写好的整句）
+ *      优先；否则退回第一行的 `blockedHint`（也是后端拼的整句：`要 X 等于 Y 才可改`）。
+ *      两句都没有就**不收** —— 收了却说不清为什么，比留着灰行更糟。
+ *   3. 搜索态（`searching`）永远不收：那份列表是人自己搜出来的。
+ */
+function collapseNoteOf(group: DeskGroup, cur: number, searching: boolean): string | null {
+  if (searching) return null
+  const cells = group.items
+    .flatMap((it) => [it.row, ...it.children])
+    .map((row) => row.cells[cur])
+  if (cells.length === 0) return null
+  if (cells.some((c) => c === undefined)) return null
+  if (!cells.every((c) => (c?.blocked.length ?? 0) > 0)) return null
+  const note = group.offNote ?? cells.find((c) => c?.blockedHint != null)?.blockedHint ?? null
+  return note
+}
 
 /** 一屏当前的行数（分组卡里的行 = 顶层 + 子项） */
 function countRows(desk: Desk): number {

@@ -10,6 +10,14 @@
  * 数据全部由后端给：每层的格子来自 `Desk.cols` × `Row.cells`（一次 `wb_desk`
  * 就带全，不用为选一个参数再问一次）；「改了影响谁」来自 `Row.impact`；
  * 哪几档选项已弃用来自 `ChoiceView.deprecated`。前端不算业务。
+ *
+ * # C15 B1：类型提到「基本信息」里
+ *
+ * 值类型（`valueType`）/ 控件（`uiComponent`）/ 步进（`step`）原来住在最底下那一段
+ * 「技术信息」—— 抽屉是「这东西到底是什么」的地方，而这三样正是答案的一部分，
+ * 却压在整页最弱的档里（作者没找到它们）。C15 把它们提进「基本信息」，与
+ * 「范围 / 可选项」「前置条件」并排；「技术信息」只留注册键（实现细节那一栏）。
+ * 两样东西仍然全部来自后端注册表（`ParamView`），界面只换位置，不加判据。
  */
 
 import { useEffect, useRef } from 'react'
@@ -317,6 +325,23 @@ export default function ParamDetail({
             <span className={s.pKvV}>{param.label}</span>
             <span className={s.pKvK}>单位</span>
             <span className={s.pKvV}>{param.unit ?? '—'}</span>
+            {/*
+              C15 B1：**类型 / 控件**从最底下那一段「技术信息」提上来，与「范围 /
+              可选项」「前置条件」挨在一起 —— 「这东西是什么」该在一处说完。
+              作者的原话是「比如 string，bool 之类的，都在抽屉里面显示的」；
+              原来它们压在最弱的那一档（`技术信息`），作者没找到。
+              两栏都是后端给的注册表原词（`ParamView.valueType` / `uiComponent`），
+              前端不翻译、不按控件反推类型 —— 那正是这两栏存在的理由（见 contract.ts）。
+            */}
+            <span className={s.pKvK}>值类型</span>
+            <span className={s.pKvV}>
+              <span className={s.mono}>{param.valueType}</span>
+            </span>
+            <span className={s.pKvK}>控件</span>
+            <span className={s.pKvV}>
+              <span className={s.mono}>{param.uiComponent}</span>
+              {param.step !== null && param.step !== undefined && ` · 步进 ${param.step}`}
+            </span>
             <span className={s.pKvK}>{param.choices.length > 0 ? '可选项' : '范围'}</span>
             <span className={s.pKvV}>
               {/* 可选项那一行里，已弃用的那一档当场划掉 —— 与控件上那一条是同一个信号 */}
@@ -398,20 +423,16 @@ export default function ParamDetail({
           </div>
         </section>
 
-        {/* 技术信息：最底部、最弱的一档。**默认展开**（作者：就 3 行字，折叠反而
-            多一下点击）—— 弱化靠位置与颜色，不靠藏起来 */}
+        {/* 技术信息：最底部、最弱的一档。**默认展开**（作者：就这些字，折叠反而
+            多一下点击）—— 弱化靠位置与颜色，不靠藏起来。
+            C15 B1 之后这里只剩「实现细节」那一栏：值类型 / 控件 / 步进已经提到
+            「基本信息」去和范围、条件作伴了 —— 那几样是「这是什么」，
+            注册键才是「它在程序里叫什么」。 */}
         <section className={`${s.pDSection} ${s.pDTech}`}>
           <div className={s.pDSecTitle}>技术信息</div>
           <div className={s.pKv}>
             <span className={s.pKvK}>注册键</span>
             <span className={`${s.pKvV} ${s.mono}`}>{param.key}</span>
-            <span className={s.pKvK}>值类型</span>
-            <span className={s.pKvV}>
-              {param.valueType}
-              {param.step !== null && param.step !== undefined && ` · 步进 ${param.step}`}
-            </span>
-            <span className={s.pKvK}>控件</span>
-            <span className={s.pKvV}>{param.uiComponent}</span>
           </div>
         </section>
       </div>
