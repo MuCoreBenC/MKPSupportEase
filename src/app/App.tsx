@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import { FieldLayer } from '../components/field'
 import { useDensity } from '../hooks/useDensity'
@@ -9,6 +9,7 @@ import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
 import PageCalib from './calib/PageCalib'
 import PageHome from './home/PageHome'
+import PagePresets from './presets/PagePresets'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -38,12 +39,34 @@ export default function App() {
   const density = useDensity(rootRef)
   const [tab, setTab] = useState('machine')
 
+  /*
+   * 预设页右键「在 BBS 预设查看器中打开」要跨页带一个目标过去。
+   *
+   * 存文件名而不是存整行：BBS 页自己有一份清单，按名字查得到就选中，查不到就说一句 ——
+   * 两页的数据源不是同一份（预设页走 `src/api`，BBS 页走本机 BBS 目录），不能互相塞对象。
+   * `nonce` 是「同一个文件再点一次也要重新触发」用的，不然第二次点没反应。
+   *
+   * BBS 页本轮还是空态，所以这一格暂时只被写入、没有读者 —— 留着是因为
+   * **它就是那条入口的状态**，等 BBS 页接上来时不该再去重造一遍。
+   *
+   * 下面那一句 `void` 只是为了把「暂时没有读者」这件事写成代码：
+   * 状态本身是好的（下一次点击会换 nonce），只是读它的那一页还没搬过来。
+   * BBS 页接上之后，把 `pending` 传给它、这句就删掉。
+   */
+  const [pendingBbs, setPendingBbs] = useState<{ name: string; nonce: number } | null>(null)
+  void pendingBbs
+
+  const openBbs = useCallback((name: string) => {
+    setPendingBbs((prev) => ({ name, nonce: (prev?.nonce ?? 0) + 1 }))
+    setTab('bbs')
+  }, [])
+
   const renderPage = () => {
     switch (tab) {
       case 'calib':
         return <PageCalib />
       case 'preset':
-        return <PagePlaceholder title="预设" hint="本地与云端预设的管理" />
+        return <PagePresets density={density} onOpenBbs={openBbs} />
       case 'params':
         return <PagePlaceholder title="参数" hint="后处理参数与风险项" />
       case 'sync':

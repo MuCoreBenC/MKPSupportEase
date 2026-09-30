@@ -24,6 +24,25 @@ export const STORAGE = {
 
   /** 客户端「使用这一份」记的那一条（**全局唯一**的当前使用） */
   clientActive: 'mkp.a40.active',
+
+  /**
+   * 预设页的「置顶」集合（一串 pinKey，JSON 数组）。**纯前端的排序偏好**，
+   * 不是底账 —— 它只影响那一张表的先后。
+   *
+   * 与上面三格一样：值沿用原来的、一个字不改，名字还没定，所以先收到这里。
+   */
+  clientPresetsPinned: 'mkp.A40.presets.pinned',
+
+  /**
+   * 参数页的「最近搜索」词表（一串搜索词，JSON 数组）。**纯前端的输入偏好**，
+   * 不是底账 —— 它只影响搜索框那个下拉里的几条。
+   *
+   * 与上面几格一样：值沿用原来的、一个字不改，名字还没定，所以先收到这里。
+   */
+  clientParamsSearchHistory: 'mkp.A40.params.searchHistory',
+
+  /** 参数页「修改历史」悬浮抽屉的宽度（px，JSON 数字）。同样是纯前端偏好 */
+  clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 } as const
 
 export type StorageKey = (typeof STORAGE)[keyof typeof STORAGE]

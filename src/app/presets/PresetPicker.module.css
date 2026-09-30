@@ -1,0 +1,29 @@
+/*
+ * 机型下拉那一段。
+ *
+ * 主工具栏上「机型 + 搜索」这一簇靠右（`margin-left: auto`），把左半让给两条分段。
+ * 没有外框、没有 padding —— 那些都归工具条（`PagePresets.module.css` 的 `.toolbar`）。
+ * 高度走共用 SelectField 的 `--sel-h` 钩子（页面根上 32px，与二级分段一条线）。
+ */
+
+.picker {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  /* 推右的 auto 边距在位置分段(.segPush)身上 —— 机型紧挨着它，右簇不散开 */
+}
+
+.legend {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* mini 排位（见 PagePresets.module.css 的工具栏说明）：
+   机型跟在位置分段（order 2）后面、同一排的右端 —— 那半行本来就是空的，
+   它因此不再另占一排（此前它在最末一排与「共 N 项 │ 台账」挤） */
+[data-density='mini'] .picker {
+  order: 3;
+}

@@ -1,0 +1,616 @@
+/*
+ * 预设页的骨架。与参数页同一套宽松尺度（`--pad` / `--fs-*`），
+ * 不套工作台那套密集的 `--w-*` —— 两边的密度取向不同。
+ *
+ * # 上面是**两排工具栏**
+ *
+ * ```
+ * ┌MKP 配置│切片器配置┐ ┌本地│云端┐        机型[A1 ▾]  [搜索…]
+ * ● 已应用 A1.toml · A1   [定位]                        共 4 项   ← MKP
+ * 喷嘴 全部 0.2 0.4 …     层高 全部 0.08 … 更多                    ← 切片器
+ * ├────────────────────────────────────────────┤
+ * 名称            机型   版本    时间   大小   来源   状态      操作
+ * ```
+ *
+ * 第一排主工具栏：一级类型分段（38px / 16px 字）+ 二级位置分段（32px）靠左，
+ * 机型 + 搜索（32px）靠右 —— 左右都占住，不再「控件漂在空白里」。
+ * 第二排轻筛选：MKP 是全局唯一的**已应用状态条**（不跟机型筛选走，筛没了有「定位」），
+ * 切片器是**喷嘴 / 层高筛选**（没有应用概念，也不找替代状态 —— 作者定的规则）。
+ *
+ * **左右一条线**：`--page-x`（约 20–24px）从工具栏贯到表格名称列与页脚，
+ * 比原来的 `--pad + 10px`（28–32px）收一档 —— 作者：「收到跟表格名称列更严格地对齐」。
+ *
+ * **一个控件都不藏进「更多」**（搜索收进「更多」的只有层高的溢出值）。
+ */
+
+.page {
+  /* 浮层贴在这一页里，不飘到窗口外面（`.window` 有 transform，fixed 会量错） */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+
+  /*
+   * 几何对齐参数页那一套，**只作用这一页**（首页与标题栏保持全局宽松 tokens）。
+   * --card-r 必须在这里重写一遍：
+   * 它在 :root 上就已经按全局 --r-lg 求过值，后代覆写 --r-lg 传不进求好值的 --card-r。
+   * --sel-h 是共用 SelectField 的高度钩子（触发器读 var(--sel-h, 34px)）；
+   * --page-x 是这一页的左右基准线（工具栏 / 提示条 / 表格名称列 / 页脚共用）。
+   */
+  --r-sm: 4px;
+  --r-md: 3px;
+  --r-lg: 4px;
+  --card-r: 4px;
+  --sel-h: 32px;
+  --sel-opt-r: 2px;
+  --page-x: calc(var(--pad) + 2px);
+}
+
+/* ---------- 工具栏区：主工具栏 + 轻筛选（一个换行容器） ---------- */
+
+/*
+ * 主工具栏与轻筛选**合进一个换行容器** —— 各排靠 `.tbBreak`
+ * （flex-basis: 100% 的零高断行）切开，mini 档再用 order 把搜索挪到状态条
+ * 同一行的右端（少占一行）。分隔线画在容器底部：工具栏与表格才是两个层次。
+ * 每排左右都从 --page-x 起（content-left / 右线）。
+ */
+.toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 12px var(--page-x) 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 零高断行：flex-basis 撑满一行，后面的内容自然落到下一排 */
+.tbBreak {
+  flex-basis: 100%;
+  height: 0;
+}
+
+/* ---------- 搜索 ---------- */
+
+/*
+ * **固定 180px**，全档一样。作者原话：「这个搜索有点长吧」——
+ * 不设 `flex`、不设 `min-width`：它就是 180，谁也别拉它。
+ */
+.search {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 180px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+}
+
+/* 聚焦只加深边框，不加光环 */
+.search:focus-within {
+  border-color: var(--accent);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/* 盖掉 global.css 那条全局 input 聚焦环：它跟着 input 的直角盒走，会套出一个绿方块 */
+.input:focus,
+.input:focus-visible {
+  outline: none;
+}
+
+.clear {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  /* 不做圆点 —— 这一套版面不用圆润件，近直角 */
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.clear:hover {
+  color: var(--text-1);
+}
+
+/* ---------- 轻筛选 / 状态区（在同一个换行容器里） ---------- */
+
+/* MKP 的已应用状态条：全局唯一的一条事实，不跟机型筛选走。
+   自适应宽度 —— 只包住内容，不拉通整行（作者：「为什么要拉这么长」） */
+.appliedStrip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+}
+
+.appliedDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.appliedText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.appliedName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.appliedSep {
+  margin: 0 2px;
+  color: var(--text-3);
+}
+
+/* 「定位」：清掉机型筛选，把正在生效的那一行滚到眼前 */
+.locateBtn {
+  flex-shrink: 0;
+  margin-left: auto;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  cursor: pointer;
+}
+
+.locateBtn:hover {
+  color: var(--accent);
+}
+
+.locateBtn:focus-visible {
+  outline: none;
+}
+
+/*
+ * 「定位」的闪烁层：**一块盖在行上的普通 div**，不进表格 ——
+ * 折叠边框表内部（tr/td 背景）跑任何 keyframes，适配缩放下合成层缓存都会留
+ * 旧帧，读起来就是行里若隐若现的白带。div 的终态是 display:none，缓存与否
+ * 无关紧要。位置由 locateApplied 现量现设（相对 .page，它本就是 relative）。
+ */
+.locateFlash {
+  position: absolute;
+  left: 0;
+  display: none;
+  background: rgb(32 178 90 / 20%);
+  pointer-events: none;
+}
+
+/* 一套都还没应用：中性说明，不是错误 */
+.stripDim {
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 切片器的喷嘴 / 层高：**上下两行**（作者：横着接，层高一多一定越来越乱）。
+ * 字段名只是字段名 —— 定宽 48px；一道竖线把它与值分开，竖线后面的 chips 才是
+ * 可点的内容。标签与 chips 都提到 --fs-body（作者：「喷嘴层高这些
+ * 文字太小太细了，看不清」），标签再压 500 字重兜住「太细」那一半。
+ */
+.filterGroup {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.filterLabel {
+  flex-shrink: 0;
+  width: 48px;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.chip {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--text-1);
+}
+
+.chip[data-on='true'] {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* 焦点不再另画一圈（作者：「点了之后不要有一个绿色描边」）——
+ * 选中态有底色 + 加粗兜着，看得见。 */
+.chip:focus-visible {
+  outline: none;
+}
+
+/* 「更多」的溢出列表挂在 FieldPopover 里（浮层才有阴影） */
+.moreList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.moreItem {
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.moreItem:hover {
+  background: var(--surface-sunken);
+}
+
+.moreItem[data-on='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+/*
+ * 右端信息组：「共 N 项」+ 仓库台账。**包成一个不拆分的整体** ——
+ * 窄窗折行时两样一起走，台账的竖线永远不会落单（作者圈过那半截孤线）。
+ * margin-left: auto 把整组顶到右线。
+ */
+.meta {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 「共 N 项」与表格操作列、仓库台账共用同一条右线 */
+.counts {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 仓库台账：从页脚搬上来（页脚那行白的整个去掉），与「共 N 项」一道竖线隔开 */
+.ledger {
+  flex-shrink: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 内容区（提示条 + 一张表） ---------- */
+
+/*
+ * 表格自己管滚动（表头要 sticky），所以这一层**不滚** —— 两层滚动叠在一起，
+ * 幽灵滚动条下根本看不出是哪一层在动。position: relative 是给详情模态框当包含块：
+ * 遮罩挂在这里，就不会盖住页头与页脚（与参数页同一条摆法，#31 特意调过）。
+ */
+.main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 「暂不支持」那一块自己占内容区，可滚（missing[] 条数不定） */
+.noneHold {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--gap) var(--page-x) calc(var(--pad) * 2);
+}
+
+/* ---------- 提示条（所有提示与错误的固定位置） ---------- */
+
+/*
+ * 表格上方那一条。约定：**以后所有提示与错误都走这里**，一次一条，后来的替换前面的，
+ * × 手动关、不自动消失。**两种颜色说两件事**：
+ *
+ *   中性（.note）    真的做了（置顶 / 取消置顶），或正在请壳做
+ *   琥珀（.noteBad） **没接上**（尚未实现 / 契约里还没有这个方法）—— 不是操作失败，
+ *                    所以不上错误红；但也绝不许静默成功
+ */
+.note,
+.noteBad {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px var(--page-x);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-label);
+  line-height: 1.6;
+}
+
+.note {
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+
+.noteBad {
+  background: #fff3e2;
+  color: #a86416;
+}
+
+.noteClose {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+.noteClose:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
+}
+
+/* ---------- 详情模态框里的字段表 ---------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 14px;
+}
+
+.factKey {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.factVal {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+/* 路径是给人核对磁盘位置的，等宽 + 允许换行（别省略号，核对不了就没用） */
+.factPath {
+  margin: 0;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* 加载中与加载失败：整页一句话，不装成空表 */
+.loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pad);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 暂不支持 ---------- */
+
+/* 灰色、虚线框。**不是错误色** —— 它和网络失败要长得不一样 */
+.none {
+  padding: calc(var(--pad) + 2px);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--card-r);
+  background: var(--surface-sunken);
+}
+
+.noneHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.noneBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  /* tag 几何（18px 高 / 0 6px 内衬 / 2px 圆角），不再做胶囊 */
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--surface-solid);
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.noneList {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.noneItem {
+  font-size: var(--fs-label);
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.noneFoot {
+  margin: 10px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 窄窗口 ---------- */
+
+/* 折行全靠 flex-wrap 与 .tbBreak；宽档/compact 用 DOM 顺序即宽档排位 */
+[data-density='compact'] .toolbar,
+[data-density='mini'] .toolbar {
+  gap: 6px 10px;
+  padding: 10px var(--page-x) 8px;
+}
+
+/*
+ * mini：**两排**（456×420 这类小窗）。
+ *
+ * 作者划掉了原来第三排那截「共 1 项 · 仓库 20 · 本机 4 + 我的 3」，说
+ * 「可以变成两行的……也可以把它压窄一点」。所以这一档的排位重排成：
+ *
+ *   行 1  类型分段 ┊ 位置分段 … 机型（.picker 的 order 3，写在它自己的 module）
+ *   行 2  已应用条 ┊ 喷嘴 … 搜索(130) … 共 N 项
+ *
+ * 三处变化：
+ *   · 机型从最末一排挪到第一排右端 —— 那半行本来就空着；
+ *   · 搜索 order 7 → 6，与状态条/喷嘴同排，宽度 150 → 130（作者：压窄一点）；
+ *   · 台账（仓库 N · 本机 N + 我的 N）不再单独占一排：CSS 隐掉，
+ *     内容搬进「共 N 项」的 title（见 PagePresets.tsx）—— 小窗里它值一行高度，
+ *     而它是三档全局事实，悬停看得到就够，不算消失。
+ *
+ * 断行 2（tbBreak2）仍在切片器的喷嘴与层高之间：层高照旧另起一排。
+ * 注意 .seg / .segPush / .picker 的 order 写在它们**自己的 module** 里
+ * （CSS Modules 类名按文件哈希，跨 module 的类选择器够不着）。
+ */
+[data-density='mini'] .tbBreak {
+  order: 4;
+}
+
+[data-density='mini'] .appliedStrip {
+  order: 5;
+}
+
+[data-density='mini'] .groupNozzle {
+  order: 5;
+}
+
+[data-density='mini'] .stripDim {
+  order: 5;
+}
+
+[data-density='mini'] .search {
+  order: 6;
+  margin-left: auto;
+  width: 130px;
+}
+
+/*
+ * 「共 N 项」与搜索同行。
+ *
+ * 这里要去掉宽档那条 `margin-left: auto` —— 搜索自己就带着
+ * `margin-left: auto`，两个 auto 会**平分**剩余空间，于是搜索被停在半路：
+ * 实测 456px 窗口下状态条到 803、搜索 853–983（左边空 50、右边到「共 N 项」还有 50）。
+ * 作者：「搜索的，你需要把它往右靠呀」。
+ *
+ * 改成 meta 不吃空间、由搜索的 auto 吃掉 —— 搜索贴住右端，「共 N 项」紧跟它右边。
+ */
+[data-density='mini'] .meta {
+  order: 7;
+  margin-left: 0;
+}
+
+/* 台账在 mini 档不占位（内容在「共 N 项」的 title 里） */
+[data-density='mini'] .ledger {
+  display: none;
+}
+
+[data-density='mini'] .tbBreak2 {
+  order: 8;
+}
+
+[data-density='mini'] .groupLayer {
+  order: 9;
+}
