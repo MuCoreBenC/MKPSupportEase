@@ -1,3 +1,7 @@
+/*
+ * 首页与校准页那几个确认弹窗用的就是它。
+ */
+
 import type { ReactNode } from 'react'
 import s from './ui.module.css'
 

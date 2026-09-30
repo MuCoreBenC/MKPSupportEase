@@ -22,7 +22,7 @@
 |---|---|---|---|
 | **P1** | 8 页签骨架 + 字段控件层 + 契约扩容（16 方法） + `NotImplementedError` + `storageKeys` + tokens 补 danger/warn | ✅ 完成（`2372775`） | `npx tsc -b` ✓ · `npm run lint` ✓ · `npm run build` ✓ · 探针 `scripts/probes/tabs.mjs` → 8 页签全开、0 条 console error |
 | **P1b** | **假后端数据层**：`src/api/mockServer/**`（试验场 `src/server/` 的客户端那半）+ `mock.ts` 接线，替掉 P1 的空夹具 | ✅ 完成（见下条提交） | `tsc -b` ✓ · `lint` ✓ · `build` ✓（136 模块）· 数据独立复核：参数 74 / 带条件 43 / 条件参数 11 / 已弃用 7 · 机型 6 / 版本 10（5 台有尺寸）· 资产 20（11 bbs + 9 mkp）· 仓库条目 9 · 套餐 9。`getPresetFiles` 20 与试验场发布包的 9 不同属预期（20 是整个资产库，6 份 `optional`） |
-| **P1c** | **客户端骨架**：`src/app/{home,calib,ui,shared,store}/`（A40 的首页 + 校准 + 两套共用件 + 同步层），删掉旧 v023 那一簇 | ⏳ 进行中 | 待子任务回报：三个闸 + 探针截图（首页/校准要见真数据） |
+| **P1c** | **客户端骨架**：`src/app/{home,calib,ui,shared,store}/`（A40 的首页 + 校准 + 两套共用件 + 同步层），删掉旧 v023 那一簇 | ✅ 完成（见下条提交） | `tsc -b` ✓ · `lint` ✓ · `build` ✓（135 模块）· 探针 `tabs.mjs` 8 页签全开 0 error · 探针 `home-flow.mjs`：首页欢迎 → 点「现在开始」进选择页；校准页板子 + 11 热点 + 预设下拉列出**新数据层那 9 份** MKP 预设（旧的 `presetCatalog` 只有 3 份）。键名全走 `storageKeys`（`src/app` 里已无 `mkp.*` 字面量）· `TraceTag` 已在 `home/PresetStack` 上接回（错误带着 `traceId`）· 产品壳四件（`TopTabs`/`ResizeEdges`/`useTitlebarDrag`/`window.ts`）与 `App.tsx` 外壳未动 |
 | **P2** | 预设页（`presets/` 12 文件）：MKP/切片器 × 本地/云端两张表、两排工具栏、已应用状态条、喷嘴/层高筛选、点行展开、右键菜单、跳 BBS。**取源按 T16 之后那一版**（切片器改吃真文件、`statFrom` 分真值/演示值） | ⬜ 待办 | 与 A40 README 第三～十轮、第三十一轮实测条目逐条复量 |
 | **P3** | 参数页（`params/` 19 文件）：分类条、卡片、行、抽屉、G-code 块、搜索（命中带父子）、快捷键、撤销/重做 | ⬜ 待办 | 与 A40 README 第三十三～四十轮实测条目逐条复量 |
 | **P4** | 同步页（`pages/PagePackage` + `store/package` 已在 P1c 落地）：说明书自动同步、三态分开、空态；**报告/设置本轮只做空态** | ⬜ 待办 | 三态不串；空态写"本版未接入" |
@@ -34,6 +34,17 @@
 > P7 与计划里的序号不同：**首页/校准的替换已在 P1c 提前做掉**（原计划是 P7）——
 > 理由是 A40 的 `ui/` 与产品仓 v023 的 `ui/` 是同一套东西的两代，放着不动会出现两套并存的补丁。
 > 剩下的 C15 版面增量（模式开关整卡收起、抽屉类型）是**工作台**侧的事，与客户端无关，因此留作 P7。
+
+---
+
+## 各阶段的依赖（按 T16 之后那一版量过，免得开工才发现缺件）
+
+| 阶段 | 需要的外部件 | 需要的自家件 | 结论 |
+|---|---|---|---|
+| **P2** 预设页 | `api` ✓ · `components/field` ✓ · `components/menu` ✓ · `hooks/useDensity` ✓ | `shared/OriginChip` ✓ · `shared/useStickyState` ✓ · `store/package` ✓（都在 P1c 落地） | **零缺件**，骨架一完就能开 |
+| **P3** 参数页 | `api` ✓ · `components/field`（含 `FieldControl` / `FieldPopover` 深路径）✓ · `hooks/{useDensity,useStickyState}` ✓ | `shared/Drawer` ✓ · `shared/useDrawerWidth` ✓ · `store/package` ✓ · **`shell/iconsA40` ✗ 没搬** | **要补一件**：`shell/icons.tsx`（分类条那六个手画图标就在它里面）。`shell/TopTabs` 仍然不搬（见债 #5），只取图标表 |
+| **P4** 同步页 | `hooks/useDensity` ✓ | `store/package` ✓ · `shared/note` + `NoteBar` ✓ · `ui/{Controls,Modal}` ✓ | 零缺件。**只搬 `pages/PagePackage`**；`PageSettings` 与 `report/` 按裁决做空态，它们要的 `mockA40` 手编数据不搬 |
+| **P5** BBS 页 | `hooks/useDensity` · `hooks/useStickyState` ✓ | `shared/{useDrawerWidth,useStickyState}` ✓ | 零缺件，自包含；数据改读本机 BBS 目录（不搬 285 个静态文件） |
 
 ---
 
