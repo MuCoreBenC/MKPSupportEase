@@ -1579,10 +1579,38 @@
 }
 
 .groupHead {
+  /*
+   * C15：`.groupHead` 从「一行小字」变成**可以带一枚右侧按钮的行**（发布物那一支的
+   * 「查看 JSON」）。文本仍是左对齐、样式一个像素没变 —— 只是变成 flex，右侧的按钮
+   * 靠 `.grow` 顶到头上（其余用到它的地方只是多了一层 flex，一个子节点时看不出差别）。
+   */
+  display: flex;
+  gap: 8px;
+  align-items: center;
   margin-bottom: 6px;
   font-size: var(--fs-label);
   letter-spacing: 0.06em;
   color: var(--text-3);
+}
+
+/*
+ * 客户端数据包的只读正文块（C15）—— 「查看 JSON」/「查看 TOML」那一块。
+ * 等宽、可滚、不高过一屏；**不给语法高亮**：这不是编辑器，是「让我看一眼」。
+ * 滚动条自己那条规矩仍然只有全局那一处（组件级不许写 ::-webkit-scrollbar）。
+ */
+.pkgJson {
+  width: 100%;
+  min-height: 240px;
+  max-height: 52vh;
+  padding: 10px;
+  background: var(--bg-2, #f7f8f7);
+  color: var(--text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  resize: none;
 }
 
 .fileRow {
@@ -3218,6 +3246,29 @@
 .pGroupHead em {
   margin-left: auto;
   font-style: normal;
+}
+
+/*
+ * 「模式开关整卡收起」（C15 A2）：整卡一行都改不动时，行全收起来，卡头下面只留
+ * 后端那一句 + 「仍然展开看」。那一句原本住在每一行上（`.pRowBlock`），
+ * 一屏铺满就是作者说的「信息过载」—— 一句话说清整卡，比 N 行灰字可读。
+ * 卡头与行高都不动：收起来只是少了几行，宽度与格位一个像素没变。
+ */
+.pOffRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--p-ctl-h, 34px);
+  padding: 0 12px;
+}
+
+.pOffNote {
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /*

@@ -191,7 +191,46 @@ const PARAMS: FixtureParam[] = [
       ] }),
   p({ key: 'toolhead.script', label: '装载胶箱 G-code', order: 9, sectionId: 'space', tabId: 'space',
       valueType: 'string', uiComponent: 'gcode', defaultValue: GCODE_SAMPLE() }),
+  /*
+   * —— C15 A2「整卡收起」的两张演示卡 ——
+   *
+   * 真数据里两种关法都存在，各摆一张（照 `presets/layout_schema.toml` 与
+   * `presets/registry/param_registry.toml` 的实况）：
+   *
+   *   tower_position   门槛写在**布局表**上（section 级 showWhen，真数据里就是那一段
+   *                    `tower_position` 指 `wiping.have_wiping_components = tower`）
+   *                    → 整组被 section 级条件关掉，后端给整句话（`offNote`）
+   *   tower_structure  门槛写在**参数**上（字段级 showWhen，真数据里那 9 条塔参数就是）
+   *                    → 后端不给整组的话，收起时摆第一行那句 `blockedHint`
+   *
+   * 切到「圆盘擦拭」（`wiping.mode = disk`）这两张卡就整张收起来 —— 正是作者
+   * 「切换到圆盘擦拭的时候那些擦料塔的都隐藏」那句话要的形状。
+   */
+  p({ key: 'wiping.wiper_x', label: '擦料塔位置 X', sectionId: 'tower_position', order: 10, defaultValue: -1, unit: 'mm' }),
+  p({ key: 'wiping.wiper_y', label: '擦料塔位置 Y', sectionId: 'tower_position', order: 11, defaultValue: 18.6, unit: 'mm' }),
+  p({ key: 'wiping.tower_first_layer_flow', label: '擦料塔首层流量', sectionId: 'tower_structure', order: 12, defaultValue: 1, unit: 'x',
+      showWhen: { key: 'wiping.mode', op: 'eq', value: 'tower' } }),
+  p({ key: 'wiping.outer_structure', label: '外围结构', sectionId: 'tower_structure', order: 13, valueType: 'string', uiComponent: 'segmented',
+      defaultValue: 'brim',
+      choices: [
+        { label: 'brim', value: 'brim', deprecated: false },
+        { label: '斜肋外墙', value: 'rib', deprecated: false },
+      ],
+      showWhen: { key: 'wiping.mode', op: 'eq', value: 'tower' } }),
 ]
+
+/**
+ * **section 级条件**（照 `presets/layout_schema.toml` 的 `[tabs.sections.showWhen]` 手抄一条）。
+ *
+ * 真后端把这一档读进 `Registry::section_show_when`，命中时给 `Cell.blocked` 添一条
+ * `scope: 'section'` —— `derive.rs` 的 `group_off_note` 就靠它认出「整组被 section 级
+ * 条件关掉」，把那句话写进 `DeskGroup.offNote`（界面据此把整组收起来）。
+ * 这里只抄形状，不抄数据：条件指向的还是夹具那个模式开关。
+ */
+const SECTION_SHOW_WHEN: Record<string, { key: string; op: 'eq' | 'neq' | 'gt'; value: unknown }> = {
+  tower_position: { key: 'wiping.mode', op: 'eq', value: 'tower' },
+}
+
 
 function GCODE_SAMPLE(): string {
   return [
@@ -211,6 +250,9 @@ const TABS = [
   { id: 'wiping', label: '擦料', order: 1, sections: [
     { id: 'wipe', label: '擦料方式', order: 1 },
     { id: 'shell', label: '外围结构', order: 2 },
+    /* C15 A2 的两张演示卡（见 PARAMS 里那一段注释） */
+    { id: 'tower_position', label: '擦料塔位置与打印', order: 3 },
+    { id: 'tower_structure', label: '塔结构加强', order: 4 },
   ] },
   { id: 'ironing', label: '熨烫', order: 2, sections: [{ id: 'ironing', label: '熨烫覆盖', order: 1 }] },
   { id: 'space', label: '偏移', order: 3, sections: [{ id: 'space', label: '空间偏移', order: 1 }] },
@@ -445,20 +487,33 @@ function valueText(pdef: FixtureParam, v: unknown): string {
 
 /* ---------- Desk / Book / Registry 的现算（照 DTO 形状） ---------- */
 
+/**
+ * 这一项被哪些条件关着。**根在前** —— 与后端的 `Gate::blocked` 同一个口径：
+ * 段（section）级的条件排在字段自己的条件前面（那是更靠上的根）。
+ *
+ * 真后端 `visibility.rs` 的 `walk` 一段不落：字段自己的 `showWhen` +
+ * 它所在 section 的 `showWhen`（`Registry::section_show_when`），
+ * 命中时给 `scope` 标 `field` / `section` —— 后者是「整组收起」那句
+ * （`derive.rs` 的 `group_off_note`）唯一的判据。
+ */
 function blockedOf(machineId: string, uid: string | null, pdef: FixtureParam): Json[] {
   const blocked: Json[] = []
-  if (pdef.showWhen) {
-    const dep = effective(machineId, uid, pdef.showWhen.key)
-    if (String(dep?.value) !== String(pdef.showWhen.value)) {
-      const depP = PARAMS.find((x) => x.key === pdef.showWhen?.key)
-      blocked.push({
-        key: pdef.showWhen.key,
-        label: depP?.label ?? pdef.showWhen.key,
-        need: `等于 ${depP ? valueText(depP, pdef.showWhen.value) : String(pdef.showWhen.value)}`,
-        scope: 'field',
-      })
+  const describe = (sw: { key: string; op: string; value: unknown }, scope: string): Json => {
+    const depP = PARAMS.find((x) => x.key === sw.key)
+    return {
+      key: sw.key,
+      label: depP?.label ?? sw.key,
+      need: `${sw.op === 'eq' ? '等于' : sw.op === 'neq' ? '不等于' : '大于'} ${depP ? valueText(depP, sw.value) : String(sw.value)}`,
+      scope,
     }
   }
+  const holds = (sw: { key: string; value: unknown }): boolean => {
+    const dep = effective(machineId, uid, sw.key)
+    return String(dep?.value) === String(sw.value)
+  }
+  const section = SECTION_SHOW_WHEN[pdef.sectionId]
+  if (section && !holds(section)) blocked.push(describe(section, 'section'))
+  if (pdef.showWhen && !holds(pdef.showWhen)) blocked.push(describe(pdef.showWhen, 'field'))
   return blocked
 }
 
@@ -542,7 +597,7 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
     if (q) return `${pdef.label} ${pdef.key}`.toLowerCase().includes(q)
     return tab === null || pdef.tabId === tab
   })
-  const groups: { sectionId: string; label: string; count: number; offNote: null; items: Json[] }[] = []
+  const groups: { sectionId: string; label: string; count: number; offNote: string | null; items: Json[] }[] = []
   for (const pdef of params) {
     const row = rowOf(machineId, uid, pdef)
     let group = groups[groups.length - 1]
@@ -570,7 +625,36 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
       count: PARAMS.filter((pdef) => pdef.sectionId === s.id).length,
     })),
   }))
-  return { nav, cols, cur: cur >= 0 ? cur : 0, groups, total: PARAMS.length, note: q ? '搜索跨全部分类' : null, emptyReason: null }
+  const curIdx = cur >= 0 ? cur : 0
+  /* 整组被 section 级条件关掉的那一句（见 groupOffNoteOf） */
+  for (const g of groups) g.offNote = groupOffNoteOf(g, curIdx)
+  return { nav, cols, cur: curIdx, groups, total: PARAMS.length, note: q ? '搜索跨全部分类' : null, emptyReason: null }
+}
+
+/**
+ * **整组被 section 级条件关掉了吗**（照 `derive.rs` 的 `group_off_note` 逐条搬）：
+ * 组里每一项的当前格子都有一条 `scope: 'section'` 的 blocked，**且是同一个 key** ——
+ * 是的话就回那一句（界面据此把整组收起来），不是就 null。
+ *
+ * 措辞照抄 `wording.rs` 的 `relate::group_off`，**连它那个空值也一起抄**：
+ * 真后端传的是 `group_off(label, "", count)`（`derive.rs`），所以那句话在界面与
+ * 真机上一样读作「「X」选了，这一组 N 项现在不生效」。夹具不替后端把话说圆 ——
+ * 说圆了，浏览器里验收的就不是真后端会给的那一句了。
+ */
+function groupOffNoteOf(g: Json, cur: number): string | null {
+  let who: { key: string; label: string } | null = null
+  for (const it of g.items as Json[]) {
+    const cell = ((it.row as Json).cells as Json[])[cur] as Json | undefined
+    if (!cell) return null
+    const hit = (cell.blocked as Json[]).find((b) => b.scope === 'section')
+    if (!hit) return null
+    const key = String(hit.key)
+    const label = String(hit.label)
+    if (who === null) who = { key, label }
+    else if (who.key !== key) return null
+  }
+  if (who === null) return null
+  return `「${who.label}」选了，这一组 ${String(g.count)} 项现在不生效`
 }
 
 /** 对照矩阵（C14 第四轮）：基准机型判差异、行序跟基准走 —— 照真后端的规矩 */
@@ -881,6 +965,33 @@ export function installMockBackend() {
           todos: 1,
           hints: 2,
         })
+      case 'wb_preview_toml': {
+        /*
+         * 单独看一份产物的正文。**真产物由 Rust 的 `build::render()` 出**（段名取
+         * `param.section`、共享 tomlKey 的参数合成内联表、注释按 `tomlComment`…）。
+         * 这里只把「哪一版、哪些值」按 TOML 的样子摊平，好让「查看 TOML」这个入口
+         * 在浏览器里能验收；正文头一行就写着这是开发桩，不冒充真渲染器。
+         */
+        const uid = String(args?.uid ?? '')
+        const [mid, vid] = uid.split('/')
+        const m = MACHINES.find((x) => x.id === mid)
+        if (!m || !m.versions.some((v) => v.uid === uid)) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `查无此版本：${uid}`, traceId: 'mock' })
+        }
+        const out = [
+          '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
+          `# machine: ${mid}`,
+          `# variant: ${(vid ?? '').toLowerCase()}`,
+          '',
+          '[demo]',
+        ]
+        for (const pdef of PARAMS) {
+          const hit = effective(mid, uid, pdef.key)
+          if (!hit) continue
+          out.push(`${pdef.key.split('.').pop()} = ${JSON.stringify(String(hit.value))}`)
+        }
+        return Promise.resolve(`${out.join('\n')}\n`)
+      }
       case 'wb_baseline_diff':
         return Promise.resolve(BASELINE)
       case 'wb_sync_baseline': {
