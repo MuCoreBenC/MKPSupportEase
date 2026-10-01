@@ -87,6 +87,24 @@ const calibModels: CalibModel[] = [
 /** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
 let mockActive: ActivePreset | null = null
 
+/*
+ * 浏览器里的「下载区」：两份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
+ *
+ * 为什么不是一份：预设页的交付行有三种状态（未下载 / 已下载 / 需更新），只给"未下载"
+ * 一种的话，另外两种在浏览器里**根本画不出来** —— 而它们正是这一层最需要被看见的东西
+ * （"需更新"尤其：那一档以前会被显示成"未下载"）。
+ *
+ * 为什么不凑第三种（再塞一份"还没下过"的）：交付构造上**每个 (机型, 版本) 只有一份产物**
+ * （`preset_file_name` 由机型 + 版本算出），再塞一份同版本的条目就是**编形状**了。
+ * 「未下载」那一档在浏览器里由官方行的「下载」按钮覆盖（同一套动作列），真机上则由
+ * "目录里登记了、下载区还没有"的那些行覆盖。
+ *
+ * 两份都**不是真的能下**：点「下载」/「更新」仍如实抛"浏览器里没有下载区"，
+ * 见 `downloadCatalogFile`。
+ */
+const MOCK_DOWNLOADED = ['A1-standard.toml']
+const MOCK_STALE = ['A1-fast.toml']
+
 export const mockApi: MkpApi = {
   async getPreset(variantId) {
     const row = presetIndex[variantId]
@@ -207,10 +225,19 @@ export const mockApi: MkpApi = {
         {
           kind: 'mkp_preset',
           fileName: 'A1-standard.toml',
-          path: 'mkp/A1-standard.toml',
+          path: 'mkp/presets/A1-standard.toml',
           machineId: 'A1',
           versionId: 'STANDARD',
           sha256: '0'.repeat(64),
+          size: 2048,
+        },
+        {
+          kind: 'mkp_preset',
+          fileName: 'A1-fast.toml',
+          path: 'mkp/presets/A1-fast.toml',
+          machineId: 'A1',
+          versionId: 'FAST',
+          sha256: '1'.repeat(64),
           size: 2048,
         },
       ],
@@ -246,13 +273,14 @@ export const mockApi: MkpApi = {
     throw new NotImplementedError('setPresetSource：浏览器模式的数据源只读，配不了')
   },
 
+  /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：
+     两份对得上目录、一份对不上。三个读合起来才够预设页画三态，这是其中两个 */
   async getDownloadedFiles() {
-    /* 盘就是底账——浏览器没有盘上的下载区，如实答空 */
-    return []
+    return [...MOCK_DOWNLOADED]
   },
 
   async getStaleFiles() {
-    return []
+    return [...MOCK_STALE]
   },
 
   /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原。

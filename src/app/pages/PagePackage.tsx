@@ -25,6 +25,8 @@ import type {
   RemoteUpdateCheck,
   RuntimeCatalog,
 } from '../../api/contract'
+/* 下载过程与逐份结局的措辞：与预设页同一份（`shared/download.ts`）—— 同一件事一处文案 */
+import { outcomeText, tickText } from '../shared/download'
 
 /** 下载区现状（盘就是底账）+ 下载按钮的失败说明（第一圈浏览器里没有源，如实亮出来） */
 type WorldState = {
@@ -35,24 +37,9 @@ type WorldState = {
 }
 
 /**
- * 把一次下载的水位说成一句话。
- *
- * **没有总长度就说收了多少字节**，不为了有百分比去编一个分母 —— 服务端不报长度是常事。
+ * 下载那句话在 `shared/download.ts`（与预设页同一份）—— 两个页面说的是同一件事，
+ * 各写一套迟早漂。这里只留用法。
  */
-function tickText(t: DownloadTick): string {
-  switch (t.stage) {
-    case 'connecting':
-      return `${t.fileName}：正在连接数据源`
-    case 'transferring':
-      return t.total !== null && t.total > 0
-        ? `${t.fileName}：已收 ${Math.round((t.received / t.total) * 100)}%（${t.received} / ${t.total} 字节）`
-        : `${t.fileName}：已收 ${t.received} 字节`
-    case 'done':
-      return `${t.fileName}：已落进下载区`
-    case 'failed':
-      return `${t.fileName}：没成${t.message !== undefined && t.message !== '' ? ` —— ${t.message}` : ''}`
-  }
-}
 
 export default function PagePackage() {
   const [world, setWorld] = useState<WorldState | null>(null)
@@ -370,7 +357,7 @@ export default function PagePackage() {
           {tick !== null && <p className={s.note}>{tickText(tick)}</p>}
           {failed.map((o) => (
             <p key={o.fileName} className={`${s.note} ${s.staleNote}`}>
-              {o.fileName}：{o.message}
+              {outcomeText(o)}
             </p>
           ))}
           {downloadErr !== null && (

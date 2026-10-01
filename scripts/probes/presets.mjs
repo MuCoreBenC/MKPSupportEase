@@ -22,14 +22,21 @@ const browser = await chromium.launch({ channel: 'msedge' })
 const page = await browser.newPage({ viewport: { width: 1760, height: 900 } })
 
 const problems = []
-/* 已知且无害：index.html 没写 favicon，浏览器自己会去要一次 */
-const BENIGN = [/\/favicon\.ico$/]
+/*
+ * 已知且无害：
+ *   ① index.html 没写 favicon，浏览器自己会去要一次；
+ *   ② 浏览器里点「下载 / 更新」**必然**抛「未实现的接口」（没有下载区、没有数据源）——
+ *      那是设计成要报错的：探针自己在第 5 节点了它一次，页面把这条错误如实显示出来，
+ *      正是要的结果（"点了说成功但盘上什么都没有"才是要抓的）。
+ */
+const BENIGN = [/\/favicon\.ico$/, /未实现的接口: downloadCatalogFile/]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
 page.on('console', (m) => {
   if (m.type() !== 'error') return
   const at = m.location?.()?.url ?? ''
-  if (benign(at)) return
+  /* 白名单要**连正文一起看**：`② ` 那一条认的是消息本身，不是它从哪个文件抛出来的 */
+  if (benign(at) || benign(m.text())) return
   problems.push(`console.error: ${m.text()}${at ? ` @ ${at}` : ''}`)
 })
 page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`))
@@ -161,7 +168,103 @@ await page.screenshot({ path: `${shotDir}/presets-menu.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(150)
 
-/* ---------- 5. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
+/* ---------- 5. 交付预设的三态（catalog 登记 + 下载区 mkp/） ---------- */
+/*
+ * 守的是**状态可见性**：目录里那一份在本机是什么样，页面上要说得对、给的动作要对。
+ *
+ * 浏览器模式（假后端）给的是固定演示集合（`src/api/mock.ts` 的三个读合起来）：
+ * 一份对得上目录、一份对不上、一份还没下过 —— 三态都得画出来。
+ * 最容易犯的错是**把「需更新」画成「未下载」**：只看"文件在不在"就会把一份坏档
+ * 说成没下过，用户点"下载"以为是第一次下。所以这条单独断言。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await page.waitForTimeout(200)
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+/** 每一行的文件名 + 操作列那一格（按钮取按钮文字，灰字取文字） */
+const actions = () =>
+  page.evaluate(() => {
+    const rows = [...document.querySelectorAll('main tbody tr')].filter(
+      (r) => r.querySelector('td:not([colspan])') !== null,
+    )
+    return rows.map((r) => {
+      const name = r.querySelector('td')?.innerText.replace(/\s+/g, ' ').trim() ?? ''
+      const last = [...r.querySelectorAll('td')].pop()
+      const btn = last?.querySelector('button')
+      return {
+        name,
+        action: btn ? btn.innerText.trim() : (last?.innerText.replace(/\s+/g, ' ').trim() ?? ''),
+      }
+    })
+  })
+
+const localActions = await actions()
+console.log(`\n[交付三态 · 本地表] ${localActions.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+const localFast = localActions.find((r) => r.name.includes('A1-fast.toml'))
+if (localFast === undefined) {
+  problems.push('本地表里没有「需更新」的那一份（盘上确实有它，藏起来就等于说本机没有）')
+} else if (!localFast.action.includes('更新')) {
+  problems.push(`盘上与目录不符的那一份，本地表的动作该是「更新」，实测「${localFast.action}」`)
+}
+
+await rad('preset-scope', 'cloud').click({ force: true })
+await page.waitForTimeout(300)
+const cloudRows = await actions()
+console.log(`[交付三态 · 云端表] ${cloudRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+
+/*
+ * 三态里只断言两态：假后端给的是**两份**固定演示数据（见 `src/api/mock.ts` 那段注释）——
+ * 交付构造上每个 (机型, 版本) 只有一份产物，再塞一份同版本的条目就是编形状了。
+ * 「未下载」那一档由官方行的「下载」按钮覆盖（同一套动作列），这里不重复量。
+ */
+const wantState = [
+  ['A1-standard.toml', '已下载', '对得上目录的那一份 → 灰字「已下载」，没有可点的动作'],
+  ['A1-fast.toml', '更新', '盘上与目录不符的那一份 → 按钮是「更新」，不是「下载」'],
+]
+for (const [file, want, why] of wantState) {
+  const hit = cloudRows.find((r) => r.name.includes(file))
+  console.log(`  ${file} → ${hit?.action ?? '(没这一行)'}（期望含「${want}」）—— ${why}`)
+  if (hit === undefined) problems.push(`云端表里没有 ${file}`)
+  else if (!hit.action.includes(want)) {
+    problems.push(`${file} 该显示「${want}」，实测「${hit.action}」`)
+  }
+}
+
+/* 点「更新」：浏览器里没有下载区，**必须如实说失败** —— 不许说"已更新" */
+const updRow = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'A1-fast.toml' })
+  .first()
+await updRow.getByRole('button', { name: '更新' }).click()
+await page.waitForTimeout(700)
+const note = await page.evaluate(
+  () => document.querySelector('main p[role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+)
+console.log(`[交付三态] 点「更新」之后提示条：${note || '(没有提示条)'}`)
+if (note === '') problems.push('点「更新」之后没有提示条')
+if (note.includes('已更新')) problems.push(`浏览器里没有下载区，不许说「已更新」（实测「${note}」）`)
+if (!/失败|没成/.test(note)) problems.push(`点「更新」应当如实报失败，实测提示条是「${note}」`)
+
+/* 展开详情里那句「状态」：三态各自的原话（不是"已应用 / 未应用"那一句） */
+await updRow.click()
+await page.waitForTimeout(300)
+const statusFact = await page.evaluate(() => {
+  const dl = document.querySelector('main tbody dl')
+  if (dl === null) return ''
+  const dts = [...dl.querySelectorAll('dt')]
+  const dds = [...dl.querySelectorAll('dd')]
+  const i = dts.findIndex((d) => (d.textContent ?? '').trim() === '状态')
+  return i < 0 ? '' : (dds[i]?.textContent ?? '').trim()
+})
+console.log(`[交付三态] 展开详情「状态」= ${statusFact || '(没有这一格)'}`)
+if (!statusFact.includes('需更新')) problems.push(`展开详情的状态该说「需更新」，实测「${statusFact}」`)
+await page.screenshot({ path: `${shotDir}/presets-release-states.png` })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(200)
+
+/* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
  * BBS 页本轮还是空态（`PagePlaceholder`），所以落地之后看到的应该是那句空态文案 ——
@@ -195,7 +298,7 @@ if (bbsCount === 0) {
 await page.getByRole('button', { name: '预设', exact: true }).first().click()
 await page.waitForTimeout(300)
 
-/* ---------- 6. 两档尺寸截图 ---------- */
+/* ---------- 7. 两档尺寸截图 ---------- */
 await page.setViewportSize({ width: 1760, height: 900 })
 await page.waitForTimeout(300)
 await page.screenshot({ path: `${shotDir}/presets-ultra.png` })
@@ -220,4 +323,6 @@ if (problems.length > 0) {
   for (const p of problems) console.log(`  - ${p}`)
   process.exit(1)
 }
-console.log('\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来，控制台没有 error')
+console.log(
+  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的两态（已下载 / 需更新）画得对且点得动，控制台没有 error',
+)

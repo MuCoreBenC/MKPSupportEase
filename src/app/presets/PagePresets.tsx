@@ -66,13 +66,18 @@
  *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
  *   时间 / 大小              `PresetFileInfo.{modifiedText,sizeText}`    **假后端按 path 稳定推的演示值**，前端一行不编
+ *                            （交付行的大小是**真值**：catalog 登记的那个字节数）
  *   与出厂不同 N 项          `getMachineParams` 里 origin === 'variant'  真（按已应用那个机型+版本算）
  *   暂不支持                 `VersionFiles.incomplete` + `missing[]`     真（只有 A2L）
  *   应用 / 复制              应用：唯一底账一个口（交付行合流，IPC 落 run/）
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
  *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
- *   **下载**                 `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
+ *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
+ *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
+ *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`       真（两个读合起来才够三态：
+ *                            未下载 / 已下载 / 需更新 —— 见 `ReleaseFileState`）
+ *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
  *   **复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
  *
@@ -92,6 +97,8 @@ import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
+/* 下载过程那句话与同步页**同一份**（`shared/download.ts`）—— 两个页面说的是同一件事 */
+import { tickText } from '../shared/download'
 import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'
 import PresetTable from './PresetTable'
@@ -261,18 +268,32 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    */
   const download = (row: PresetTableRow) => {
     if (row.releaseUid !== undefined) {
+      /*
+       * 「需更新」走的是**同一条下载管道**（再下一遍，旧份自动归档）—— 所以两处的区别
+       * 只在动词与结果那句话上，行为一模一样。别在这里分支去找"另一个命令"：没有那个命令。
+       */
+      const updating = row.releaseState === 'stale'
+      const verb = updating ? '更新' : '下载'
       setBusyKey(row.rowKey)
-      setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
-      data.downloadRelease(row.fileName).then(
-        () => {
-          setBusyKey(null)
-          setNote({ text: `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`, bad: false })
-        },
-        (e: unknown) => {
-          setBusyKey(null)
-          setNote({ text: `下载失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
-        },
-      )
+      setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
+      /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
+      data
+        .downloadRelease(row.fileName, (t) => setNote({ text: tickText(t), bad: t.stage === 'failed' }))
+        .then(
+          () => {
+            setBusyKey(null)
+            setNote({
+              text: updating
+                ? `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
+                : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
+              bad: false,
+            })
+          },
+          (e: unknown) => {
+            setBusyKey(null)
+            setNote({ text: `${verb}失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+          },
+        )
       return
     }
     const ref: FileRef = { kind: row.kind, fileName: row.fileName, path: row.path }
@@ -397,7 +418,12 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
     if (row.scope === 'cloud') {
       return [
-        { id: 'download', label: '下载', onSelect: () => download(row) },
+        {
+          id: 'download',
+          /* 盘上那一份与目录不符时这一项是「更新」：同一条管道，动词不同 */
+          label: row.releaseState === 'stale' ? '更新' : '下载',
+          onSelect: () => download(row),
+        },
         {
           id: 'link',
           label: '复制链接',

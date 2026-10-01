@@ -290,6 +290,39 @@ export const CLOUD_STATE_WHY = {
 }
 
 /**
+ * **交付预设在"本机"的三态**（catalog 登记的交付预设才有的那一档）。
+ *
+ * 它是两个读的组合，**不是前端猜的**：
+ *
+ *   `api.getDownloadedFiles()`  盘上在、且字节与目录登记的一致 → `ok`
+ *   `api.getStaleFiles()`       盘上在、但字节与目录不一致     → `stale`
+ *   两个都不含它                                              → `missing`（还没下过，合法状态）
+ *
+ * 为什么 `stale` 必须单独一档：盘上那份可能是**旧版本**（目录更新带来的），
+ * 也可能是被手动动过 —— 只看"文件在不在"会把这几种全说成「已下载」，
+ * 而它下下来/应用起来都是错的（`applyActivePreset` 的 SHA 校验会拒）。
+ * 这一档就是"更新"的入口：动作是把这份**再下一遍**，不是另下一份到别处。
+ */
+export type ReleaseFileState = 'missing' | 'ok' | 'stale'
+
+export const RELEASE_STATE_TEXT: Record<ReleaseFileState, string> = {
+  missing: '未下载',
+  ok: '已下载',
+  stale: '需更新',
+}
+
+export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
+  missing: '未下载：目录里登记了它，你机器上还没有',
+  ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「应用」',
+  stale:
+    '需更新：盘上这一份与目录登记的字节不一样 —— 可能是目录换了新版，也可能是这份文件被手动动过。点「更新」重下一份',
+}
+
+/** 「更新」那颗按钮的说明：它不是"删除重下"，旧份进归档，删除永远不是更新的一部分 */
+export const RELEASE_UPDATE_WHY =
+  '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
+
+/**
  * 交付身份在云端表上的说法。
  *
  * 和 `DELIVERY_TEXT`（默认交付 / 可选）是同一个字段的两种措辞：那一套是仓库视角的身份，
@@ -766,6 +799,11 @@ export interface PresetRowBase {
   releaseUid?: string
   /** 它属于哪一次发布（包版本）。来源列那枚 chip 的动态那一截读它 */
   releaseVersion?: string | null
+  /**
+   * 交付预设在**本机**的三态（见 `ReleaseFileState`）。**只有 release 行有它** ——
+   * 其余来源没有"从目录下载"这一回事。`undefined` = 这一行不是交付预设。
+   */
+  releaseState?: ReleaseFileState
 }
 
 
@@ -855,8 +893,15 @@ export interface PresetRowsInput {
    * `usePresetData` 从 `api.getRuntimeCatalog()` 取；空数组 = 目录里没有登记交付文件。
    */
   releasePresets: ReleasePresetSource[]
-  /** 下载区（`mkp/`）里已有的那些。本地表的 release 行就是它们 */
+  /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
+  /**
+   * 下载区里有、**但与目录登记不一致**的那些（`ReleaseFileState = stale`）。
+   *
+   * 和 `localReleases` 分开传：本地表要按"盘上有没有"画（两者都画），
+   * 云端表要按三态标（一个 ok 一个需更新）。合成一个数组的话，两处都要再拆一次。
+   */
+  staleReleases: ReleasePresetSource[]
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
 }
@@ -1008,6 +1053,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     query,
     pinned,
     localReleases,
+    staleReleases,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
@@ -1082,20 +1128,37 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
 
   /*
    * 目录里登记的交付预设：下载之后它们就躺在下载区（`mkp/`，盘就是底账），
-   * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**只收已下载的**。
+   * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**收盘上真有的那些**：
+   * 与目录对得上的是「已下载」，对不上的是「需更新」。两者都在盘上，
+   * 藏起后一种就等于对用户说"你机器上没有它"，而更新入口也就没了。
    * 「生效」认唯一底账（新世界 `run/active-preset.json`）里那一条（与官方行合流，不分两套）。
    */
-  const release = localReleases
+  const onDisk: { p: ReleasePresetSource; state: ReleaseFileState }[] = [
+    ...localReleases.map((p) => ({ p, state: 'ok' as const })),
+    ...staleReleases.map((p) => ({ p, state: 'stale' as const })),
+  ]
+
+  const release = onDisk
     .filter(() => matchesKind(kind, 'mkp_preset'))
-    .filter((p) => machineId === '' || p.machineId === machineId)
-    .map((p): PresetLocalRow => {
+    .filter(({ p }) => machineId === '' || p.machineId === machineId)
+    .map(({ p, state }): PresetLocalRow => {
       const live = active !== null && active.fileName === p.fileName
       return {
-        rowKey: `release:${machineId}:${p.uid}`,
+        /*
+         * 行键与置顶键都用 **fileName**，不用 `uid`（`机型/版本`）。
+         *
+         * 交付构造上每个 (机型, 版本) 只有一份产物，所以 uid 现在也唯一 —— 但那是
+         * **没写下来的前提**（`CatalogFile` 里没有这条约束）。拿它当 React 键，撞了之后的
+         * 症状是「另一张表里冒出一行幽灵」：实测过，同一 uid 两份文件时，切一次轴
+         * 云端那一行会漏进本地表。而 `fileName` 是这套系统里**明写的**取用口径 ——
+         * 下载 / 应用 / 读正文全认它（`download_runtime_file` 就是按名字在目录里找）。
+         */
+        rowKey: `release:${machineId}:${p.fileName}`,
         /* 仓库里没有它，没有 assetId —— 「应用」认 fileName（页面里分流） */
-        pinKey: `release:${p.uid}`,
+        pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
-        path: `下载区 mkp · ${p.uid}`,
+        /* 第二行小字：把人引到盘上的落点；与目录不符的那一份要把这点说出来 */
+        path: state === 'stale' ? `下载区 mkp · ${p.uid}（与目录不符）` : `下载区 mkp · ${p.uid}`,
         kind: 'mkp_preset',
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
@@ -1108,6 +1171,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         untagged: false,
         releaseUid: p.uid,
         releaseVersion: p.releaseVersion,
+        releaseState: state,
         live,
       }
     })
@@ -1140,11 +1204,14 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     pinned,
     releasePresets,
     localReleases,
+    staleReleases,
     releaseVersion,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
   const localReleaseIds = new Set(localReleases.map((p) => p.uid))
+  /* 盘上有、但与目录不一致的那些 —— 云端表上它们不是「未下载」，是「需更新」 */
+  const staleReleaseIds = new Set(staleReleases.map((p) => p.uid))
 
   /*
    * 凡文件名在**云端最新发布**里打包过的，官方行不再列出 —— 发布行接管它
@@ -1196,9 +1263,16 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetCloudRow => {
       const live = active !== null && active.fileName === p.fileName
+      /* 三态：对得上目录 / 盘上有但对不上 / 还没有。两个读合起来才够（见 `ReleaseFileState`） */
+      const state: ReleaseFileState = localReleaseIds.has(p.uid)
+        ? 'ok'
+        : staleReleaseIds.has(p.uid)
+          ? 'stale'
+          : 'missing'
       return {
-        rowKey: `release-cloud:${p.uid}`,
-        pinKey: `release:${p.uid}`,
+        /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
+        rowKey: `release-cloud:${p.fileName}`,
+        pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         path: `官方交付 / ${p.machineId} / ${p.versionId}`,
         kind: 'mkp_preset',
@@ -1207,13 +1281,15 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         versions: [versionName(p.machineId, p.versionId)],
         sizeText: sizeTextOf(p.size),
         applied: live,
-        pinned: pinned.has(`release:${p.uid}`),
+        pinned: pinned.has(`release:${p.fileName}`),
         scope: 'cloud',
         origin: 'release',
         releaseUid: p.uid,
         releaseVersion,
         delivery: 'default',
-        downloaded: localReleaseIds.has(p.uid),
+        /* `downloaded` 仍问"与目录一致的那一份在不在本机"（切片器那一档也用它） */
+        downloaded: state === 'ok',
+        releaseState: state,
       }
     })
 

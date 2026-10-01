@@ -86,8 +86,21 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      **判据**：`publish_into` 收尾逐条核对"发出去的每份文件都在说明书里按同一 path 登记、字节与 SHA 一致"
      （运行时）+ 真数据判据 `the_published_layout_lands_where_the_catalog_says`（写盘面 == 登记面）。
    - ⬜ **还没做的**：`MKPSE_PRESET_SOURCE` 落进流水线（"发到哪"是产品决定）；上传那一环还是手工/云盘。
-3. ⬜ **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加
+3. 🔄 **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加
    下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本。
+   - ✅ **第一层：下载状态 + 更新**（本次）——交付行现在答得出「**这一份在本机是什么样**」：
+     未下载 / 已下载 / **需更新**（盘上有、字节与目录不符）。
+     三态来自**两个读的组合**（`getDownloadedFiles` = 与目录一致、`getStaleFiles` = 不一致），
+     前端不猜；`stale` 必须单独一档 —— 只问"文件在不在"会把一份旧版 / 被手动动过的文件
+     说成「已下载」，而它应用时会被 SHA 校验拒掉。
+     动作跟着状态走：需更新 → 「更新」（**同一条下载管道**：再下一遍、旧份进归档，
+     没有第二个命令）；本地表那一行**不给「应用」**（点了必被拒 —— 不给必报错的按钮）。
+     过程也如实说：单份下载挂 Channel 水位（`shared/download.ts`，与同步页**同一份文案**），
+     失败分态转述后端理由（没配数据源 / 源上没有这份 / 字节不符）。
+     **判据**：`scripts/probes/presets.mjs` 第 5 节（浏览器模式两态画得对、动作对、
+     点「更新」如实失败、展开详情说「需更新」）；跑法见 §7。
+   - ⬜ 还欠这一层的：批量补齐 / 批量更新（`downloadCatalogFiles` 的逐份结局，同步页已有用法）、
+     归档历史的可见性、用户自己的文件（`getLocalUserFiles` 恒空）、修改（改参数）。
 
 ## 4. 续做入口（从哪接手）
 
@@ -166,6 +179,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `scripts/check-zero-network.mjs`（CI web job） | 判据 2：启动零网络 —— 网络符号只许住 `runtime/net.rs` / `.setup()` 段零联网 / `src/api/` 不许绕过 IPC 发 HTTP |
 | `workbench::app::dist` 判据 | **交付根相对路径 == 客户端落点**：`the_published_layout_lands_where_the_catalog_says`（真数据：写盘面 == catalog 登记面、字节与 SHA 一致）/ 夹具发布：manifest 每条都在 `mkp/…` 下且 catalog 里按同一 path 登记 / 残留拦截 / 回收站 / 可达集计数（真数据 8 条资产） |
 | `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的两态与动作（已下载·灰字、需更新·按钮）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已入库忽略） |
 
 ## 7. 仓库状态速记
 
@@ -176,6 +190,12 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
 - **资产去哪一档看一把尺子**：产品数据资源（用户下载 / 更新 / 管理）→ `public/assets/` + `presets/assets.toml` + catalog；界面展示素材（程序自己看一眼）→ `src/app/assets/` 或 `public/`，不进台账。台账里今天 15 条 = 9 BBS + 3 图标 + 3 模型。
+- **预设页那条链路怎么手工看**（浏览器模式 = 假后端）：`npm run build` →
+  `npx vite preview --port 4173 --strictPort` → 开 `http://localhost:4173/` 的「预设」页 ——
+  交付行按假后端的**固定演示集合**画两态（`A1-standard.toml` 已下载、`A1-fast.toml` 需更新）；
+  点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
+  自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
+  **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。
 - **交付根（`presets/dist/`）的布局**：`catalog.json` + `manifest.json` 在根，产品资源一律在 `mkp/…`
   （`mkp/presets/` 是 `wb_generate` 落的、其余按 kind 分目录）——**与客户端下载区同形**。
   本机换过布局时，旧目录里的文件会成"残留"：发布页有清理（进 `workbench/.trash/dist/`），

@@ -82,7 +82,10 @@ import {
   DOWNLOAD_WHY,
   RELEASE_DOWNLOAD_WHY,
   RELEASE_SIZE_WHY,
+  RELEASE_STATE_TEXT,
+  RELEASE_STATE_WHY,
   RELEASE_TIME_WHY,
+  RELEASE_UPDATE_WHY,
   KIND_AXIS_TEXT,
   LIVE_TEXT,
   LIVE_WHY,
@@ -243,6 +246,17 @@ export default function PresetTable({
                */
               const inUse = row.scope === 'local' ? row.live : row.applied
               const busy = row.rowKey === busyKey
+              /*
+               * 交付预设那一档的三件事分开判（见 `ReleaseFileState`）：
+               *   `needsUpdate` 盘上有但对不上目录 → 动作是「更新」（再跑一遍管道）
+               *   `downloaded`  与目录一致的那一份在本机 → 灰字「已下载」，没有可点的动作
+               * 其余来源（切片器官方行）没有"从目录下载"这一回事，照旧走 `downloaded` 布尔
+               */
+              const needsUpdate = row.releaseState === 'stale'
+              /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
+              const gotIt =
+                row.scope === 'cloud' &&
+                (row.releaseState === undefined ? row.downloaded : row.releaseState === 'ok')
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               return (
@@ -318,6 +332,21 @@ export default function PresetTable({
                         <span className={s.actDone} title={LIVE_WHY[kind].on}>
                           {LIVE_TEXT[kind].on}
                         </span>
+                      ) : needsUpdate ? (
+                        /*
+                         * 盘上那一份与目录不符 → **不给「应用」**。应用会拿它去对 SHA，
+                         * 必被拒（`applyActivePreset` 的第一道闸）。给一个点了必报错的
+                         * 按钮比不给糟 —— 这里给的是修它的那个动作。
+                         */
+                        <button
+                          type="button"
+                          className={s.actBtn}
+                          disabled={busy}
+                          title={RELEASE_UPDATE_WHY}
+                          onClick={() => onDownload(row)}
+                        >
+                          更新
+                        </button>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
                         /* 用户自己的文件没有 asset id，契约那两个写只认 asset id */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
@@ -334,7 +363,7 @@ export default function PresetTable({
                           {ACTION_TEXT[kind]}
                         </button>
                       )
-                    ) : row.downloaded ? (
+                    ) : gotIt ? (
                       <span className={s.actDone} title={CLOUD_STATE_WHY.downloaded}>
                         {CLOUD_STATE_TEXT.downloaded}
                       </span>
@@ -343,13 +372,17 @@ export default function PresetTable({
                         type="button"
                         className={s.actBtn}
                         disabled={busy}
-                        /* 发布行是真下载，官方行仍是「未实现」—— 文案按行分流 */
+                        /* 发布行是真下载（需更新时是"再下一遍"），官方行仍是「未实现」—— 文案按行分流 */
                         title={
-                          row.releaseUid !== undefined ? RELEASE_DOWNLOAD_WHY : DOWNLOAD_WHY
+                          row.releaseUid !== undefined
+                            ? needsUpdate
+                              ? RELEASE_UPDATE_WHY
+                              : RELEASE_DOWNLOAD_WHY
+                            : DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
-                        下载
+                        {needsUpdate ? '更新' : '下载'}
                       </button>
                     )}
                   </td>
@@ -391,13 +424,27 @@ export default function PresetTable({
                           {originChip(row).text}
                         </dd>
 
+                        {/*
+                         * 状态：交付预设那一档说的是**本机那一份的三态**（未下载 / 已下载 /
+                         * 需更新），其余来源说"生效没生效"。两件事不混一句
+                         * ——「已应用」不等于"本机这份是对的"，所以需更新时两个都写。
+                         */}
                         <dt className={s.factKey}>状态</dt>
-                        <dd className={s.factVal}>
-                          {row.scope === 'local'
-                            ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
-                            : row.downloaded
-                              ? CLOUD_STATE_TEXT.downloaded
-                              : CLOUD_STATE_TEXT.pending}
+                        <dd
+                          className={s.factVal}
+                          title={
+                            row.releaseState === undefined
+                              ? undefined
+                              : RELEASE_STATE_WHY[row.releaseState]
+                          }
+                        >
+                          {row.releaseState !== undefined
+                            ? RELEASE_STATE_TEXT[row.releaseState]
+                            : row.scope === 'local'
+                              ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
+                              : row.downloaded
+                                ? CLOUD_STATE_TEXT.downloaded
+                                : CLOUD_STATE_TEXT.pending}
                           {row.applied && ' · 正在用'}
                         </dd>
 

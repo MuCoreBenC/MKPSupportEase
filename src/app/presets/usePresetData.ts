@@ -56,7 +56,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
-import type { ActivePreset, Machine } from '../../api'
+import type { ActivePreset, DownloadTick, Machine } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { ReleasePresetSource } from './presetTree'
@@ -147,12 +147,16 @@ export interface PresetData {
   copy: (assetId: string) => Promise<void>
   /**
    * 「下载」目录里登记的那一份：走新世界下载管道（`api.downloadCatalogFile(fileName)`），
-   * 落进下载区 `mkp/`。
+   * 落进下载区 `mkp/`。盘上那一份对不上目录时（需更新）走的是**同一条路** ——
+   * 再下一遍，旧份自动归档，没有单独的"更新"代码路径。
+   *
+   * `onTick` 给了就把过程说出来（一次调用一路水位，后端在下载过程中推）；不给就是
+   * 原来那个"点了等结果"。**下载快慢由网络决定，界面上说真的字节数，不编进度条。**
    *
    * 与官方文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
    * 这一条**真的能下**。失败照抛给页面说出来。
    */
-  downloadRelease: (fileName: string) => Promise<void>
+  downloadRelease: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<void>
 }
 
   /**
@@ -166,8 +170,16 @@ export interface ReleaseState {
   at: string | null
   /** 目录里登记的交付预设（MKP 的全量） */
   presets: ReleasePresetSource[]
-  /** 下载区（`mkp/`）里已有的（本地表的 release 行就是它们） */
+  /** 下载区（`mkp/`）里已有、**且与目录登记一致**的（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
+  /**
+   * 下载区里有、**但与目录登记不一致**的（`ReleaseFileState = stale`，即「需更新」）。
+   *
+   * 与 `localReleases` 是**两个读**：`getDownloadedFiles()` 只答"盘上有没有且对不对"，
+   * `getStaleFiles()` 才答"盘上有一份但不能用"。少了这一个读，「需更新」就会
+   * 被显示成「未下载」—— 用户点"下载"以为是第一次下，实际是在修一份坏档。
+   */
+  stale: ReleasePresetSource[]
   /** 已下载的 uid 集合 */
   localUids: string[]
 }
@@ -177,6 +189,7 @@ const EMPTY_RELEASE: ReleaseState = {
   at: null,
   presets: [],
   localReleases: [],
+  stale: [],
   localUids: [],
 }
 
@@ -201,8 +214,14 @@ export function usePresetData(): PresetData {
    * 界面上看到的必须是底账答的，不是前端猜的。
    */
   const readRelease = useCallback(async (): Promise<ReleaseState> => {
-    const [catalog, mine] = await Promise.all([api.getRuntimeCatalog(), api.getDownloadedFiles()])
+    /* 三个读：目录清单、盘上对得上的、盘上对不上的。**后两个都要** —— 见 `ReleaseState.stale` */
+    const [catalog, mine, drifted] = await Promise.all([
+      api.getRuntimeCatalog(),
+      api.getDownloadedFiles(),
+      api.getStaleFiles(),
+    ])
     const downloaded = new Set(mine)
+    const stale = new Set(drifted)
     const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
       uid: `${f.machineId}/${f.versionId}`,
       machineId: f.machineId,
@@ -211,12 +230,15 @@ export function usePresetData(): PresetData {
       size: f.size,
       releaseVersion: null,
     }))
+    /* 判据用 fileName：盘就是底账，盘上认的文件名 = 目录登记的文件名（不是 id、不是路径） */
     const localList = listed.filter((p) => downloaded.has(p.fileName))
+    const staleList = listed.filter((p) => stale.has(p.fileName))
     return {
       version: catalog.revision,
       at: null,
       presets: listed,
       localReleases: localList,
+      stale: staleList,
       localUids: localList.map((p) => p.uid),
     }
   }, [])
@@ -337,8 +359,8 @@ export function usePresetData(): PresetData {
    * 不 catch：失败传给页面说出来，与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个。）
    */
   const downloadRelease = useCallback(
-    async (fileName: string) => {
-      await api.downloadCatalogFile(fileName)
+    async (fileName: string, onTick?: (tick: DownloadTick) => void) => {
+      await api.downloadCatalogFile(fileName, onTick)
       setRelease(await readRelease())
     },
     [readRelease],
@@ -520,6 +542,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       pinned,
       releasePresets: data.release.presets,
       localReleases: data.release.localReleases,
+      staleReleases: data.release.stale,
       releaseVersion: data.release.version,
     }),
     [
@@ -527,6 +550,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       data.machineId,
       data.release.localReleases,
       data.release.presets,
+      data.release.stale,
       data.release.version,
       data.userFiles,
       copiedSet,
