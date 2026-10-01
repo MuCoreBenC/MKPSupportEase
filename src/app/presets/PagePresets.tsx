@@ -94,7 +94,10 @@
 
 import { useRef, useState } from 'react'
 import { api, NotImplementedError } from '../../api'
-import type { FileRef } from '../../api'
+import type { ArchivedFile, FileRef } from '../../api'
+import { longStatText } from '../store/package'
+/* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
+import Drawer from '../shared/Drawer'
 import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
@@ -105,6 +108,8 @@ import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'
 import PresetTable from './PresetTable'
 import {
+  ARCHIVE_DRAWER,
+  ARCHIVE_WHY,
   DOWNLOAD_WHY,
   MISSING_METHOD,
   NO_ASSET_WHY,
@@ -114,6 +119,7 @@ import {
   noContractText,
   notImplementedText,
   releaseBatchText,
+  sizeTextOf,
 } from './presetTree'
 import type {
   PresetKindAxis,
@@ -181,6 +187,20 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    * 锁整张表只会让人以为页面卡了。
    */
   const [batchBusy, setBatchBusy] = useState(false)
+
+  /*
+   * 归档抽屉（「旧版本」）。`null` = 关着。
+   *
+   * 抽屉里管两件事：**列出这一份的旧版本** + **读其中一份的正文**。正文单独一个状态，
+   * 因为读正文要问后端（前端不碰文件系统），而且会失败 —— 失败要如实说，不许显示空正文。
+   */
+  const [archive, setArchive] = useState<{ fileName: string; rows: ArchivedFile[] } | null>(null)
+  const [archiveBody, setArchiveBody] = useState<{
+    path: string
+    text: string | null
+    error: string | null
+    loading: boolean
+  } | null>(null)
 
   /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
   const [moreOpen, setMoreOpen] = useState(false)
@@ -375,6 +395,36 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       .finally(() => setBatchBusy(false))
   }
 
+  /**
+   * 打开「旧版本」抽屉：按**文件名**把归档里那一份的旧版本挑出来。
+   *
+   * 判据用文件名 —— 与下载 / 应用 / 读正文同一套口径（归档里那份与交付文件同名，
+   * 换版本换的是字节不是名字）。
+   */
+  const openArchive = (row: PresetTableRow) => {
+    menu.close()
+    setArchiveBody(null)
+    setArchive({
+      fileName: row.fileName,
+      rows: data.archived.filter((a) => a.fileName === row.fileName),
+    })
+  }
+
+  /** 读归档里某一份的正文。失败照实说（与下载 / 应用同一条规矩：不吞、不装） */
+  const readArchiveBody = (a: ArchivedFile) => {
+    setArchiveBody({ path: a.path, text: null, error: null, loading: true })
+    api.readArchivedText(a.path).then(
+      (text) => setArchiveBody({ path: a.path, text, error: null, loading: false }),
+      (e: unknown) =>
+        setArchiveBody({
+          path: a.path,
+          text: null,
+          error: e instanceof Error ? e.message : String(e),
+          loading: false,
+        }),
+    )
+  }
+
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
   const togglePin = (row: PresetTableRow) => {
     page.togglePin(row.pinKey)
@@ -549,6 +599,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const table = page.scope === 'local' ? page.local : page.cloud
   /* 批量那一行的字：这一批里有什么，决定它是「下载」「更新」还是「下载并更新」 */
   const batch = releaseBatchText(page.pending.missing, page.pending.stale)
+  /* 这一份在归档里有几个旧版本。按文件名对（与下载 / 应用同一套口径） */
+  const archiveCountOf = (fileName: string): number =>
+    data.archived.filter((a) => a.fileName === fileName).length
 
   /* 层高 chips 一排放不下的值收进「更多」（先摆 6 个） */
   const layerMain = page.slicerFilters.layers.slice(0, 6)
@@ -863,6 +916,8 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
                  */
                 busyKey={busyKey}
+                archiveCountOf={archiveCountOf}
+                onOpenArchive={openArchive}
                 onLive={runLive}
                 onDownload={download}
               />
@@ -870,6 +925,79 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           )}
 
           {/* 查看详情不再是模态框 —— 点行展开下方的内容 */}
+
+          {/*
+           * 「旧版本」抽屉：归档区那一面。
+           *
+           * 挂在 `.main` 里（与参数页同一条规矩）：遮罩只盖内容区，底栏与窗口右下的
+           * resize 手柄还点得到。抽屉里只做两件事 —— 列出旧版本、读其中一份的正文；
+           * **删除 / 恢复 / 用这份旧版本都没有**（归档管理不在这一层）。
+           */}
+          <Drawer
+            open={archive !== null}
+            title={ARCHIVE_DRAWER.title}
+            subtitle={
+              archive === null
+                ? undefined
+                : `${archive.fileName} · 归档 ${archive.rows.length} 份`
+            }
+            onClose={() => {
+              setArchive(null)
+              setArchiveBody(null)
+            }}
+          >
+            {archive !== null && (
+              <div className={s.arch}>
+                <ul className={s.archList}>
+                  {archive.rows.map((a) => (
+                    <li key={a.path} className={s.archItem}>
+                      <div className={s.archLine}>
+                        <span className={s.archName} title={a.path}>
+                          {a.fileName}
+                        </span>
+                        <span className={s.archMeta}>
+                          {sizeTextOf(a.size)} ·{' '}
+                          {a.modifiedUnix === null
+                            ? '时间未知'
+                            : longStatText(new Date(a.modifiedUnix * 1000).toISOString())}
+                        </span>
+                      </div>
+                      <p className={s.archWho} title={a.path}>
+                        {a.machineId === null || a.versionId === null
+                          ? ARCHIVE_DRAWER.unknown
+                          : `${a.machineId} · ${a.versionId}`}
+                      </p>
+                      <button
+                        type="button"
+                        className={s.archBtn}
+                        onClick={() => readArchiveBody(a)}
+                      >
+                        {ARCHIVE_DRAWER.open}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {archiveBody !== null && (
+                  <div className={s.archBody}>
+                    <p className={s.archBodyHead}>
+                      {ARCHIVE_DRAWER.bodyTitle} · {archiveBody.path}
+                    </p>
+                    {archiveBody.loading ? (
+                      <p className={s.archNote}>{ARCHIVE_DRAWER.reading}</p>
+                    ) : archiveBody.error !== null ? (
+                      /* 读不出来就照实说：不许显示一段空正文假装它是空的 */
+                      <p className={s.archErr}>读不出来：{archiveBody.error}</p>
+                    ) : (
+                      <pre className={s.archPre}>{archiveBody.text}</pre>
+                    )}
+                  </div>
+                )}
+
+                <p className={s.archNote}>{ARCHIVE_WHY}</p>
+              </div>
+            )}
+          </Drawer>
         </div>
 
         {/* 页脚整个去掉了：仓库台账搬上状态条那一行，

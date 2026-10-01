@@ -343,6 +343,90 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
     })
 }
 
+/// 归档区里的一份旧版本（给界面看的形状）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedFileDto {
+    /// 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来
+    pub path: String,
+    pub file_name: String,
+    pub size: u64,
+    /// 这份旧版本被换下来的时刻（UTC epoch 秒）。**界面自己转人话** ——
+    /// 默认构建不引时间库（`time` 只挂在 workbench feature 下），别为一行时间戳把它拉进来
+    pub modified_unix: Option<u64>,
+    /// 认得出是谁的旧版本就给；**认不出照实留空**（目录里已经没有这一份了：换源 / 下线）
+    pub machine_id: Option<String>,
+    pub version_id: Option<String>,
+    pub kind: Option<String>,
+}
+
+/// 归档区里有什么（官方文件换版本时，被换下来的那一份）。
+///
+/// 归档**不是用户修改历史**：它是官方版本生命周期的一部分 —— 换版本时旧份进
+/// `archive/`（保留最早一份，不覆盖、不删）。用户改出来的东西是**另一条线**
+/// （另存成另一份文件），永远不回写官方原件。
+///
+/// 这条读只回答"盘上躺着哪些旧版本、认得出是谁的"：**不提供删除、不提供恢复**
+/// （那是归档管理的活，这一层不做）。
+#[tauri::command]
+pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, AppError> {
+    traced("getArchivedFiles", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let prefix = format!("{}/", runtime::paths::ARCHIVE_DIR);
+        Ok(runtime::delivery::archived_files(&root)
+            .into_iter()
+            .map(|a| {
+                /* 认人靠"同位"：`archive/mkp/presets/x.toml` ↔ 目录里的 `mkp/presets/x.toml`
+                （同名，新字节）。**不解析文件名**去猜机型版本 —— 名字规则将来会变，
+                而"归档这份与目录里哪一份同位"是一个不需要额外知识的事实 */
+                let known = a
+                    .path
+                    .strip_prefix(&prefix)
+                    .and_then(|rel| catalog.files.iter().find(|f| f.path == rel));
+                ArchivedFileDto {
+                    path: a.path,
+                    file_name: a.file_name,
+                    size: a.size,
+                    modified_unix: a.modified_unix,
+                    machine_id: known.map(|f| f.machine_id.clone()),
+                    version_id: known.map(|f| f.version_id.clone()),
+                    kind: known.map(|f| f.kind.clone()),
+                }
+            })
+            .collect())
+    })
+}
+
+/// 读归档区里某一份旧版本的正文（旧版 TOML）。
+///
+/// **只认归档区**：入参是 [`get_archived_files`] 给的那个相对路径，这里再核一次前缀
+/// 并过防穿越 —— 归档区之外的东西这条读一概不碰（下载区有它自己那条读）。
+/// 只服务文本类资源：不是 UTF-8 就如实报错，不猜编码。
+#[tauri::command]
+pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("readArchivedText", |_| {
+            let root = internal_root(&app)?;
+            let rel = path.trim_start_matches('/').to_owned();
+            let prefix = format!("{}/", runtime::paths::ARCHIVE_DIR);
+            if !rel.starts_with(&prefix) {
+                return Err(AppError::invalid_argument(format!(
+                    "只读归档区里的文件（要 {prefix}… 开头，给的是 {rel}）"
+                )));
+            }
+            let target = crate::fsx::paths::resolve_in(&root, &rel)?;
+            let bytes = std::fs::read(&target).map_err(|_| {
+                AppError::not_found(format!("归档里没有 {rel} —— 它可能已经被清掉了"))
+            })?;
+            String::from_utf8(bytes)
+                .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+        })
+    });
+    task.await
+        .map_err(|e| AppError::internal("读归档没跑到终局").with_detail(e.to_string()))?
+}
+
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */
 
 /// 给界面的使用中状态：指针 + 从目录反查出来的机型/版本 + 文件是否还是当时那份

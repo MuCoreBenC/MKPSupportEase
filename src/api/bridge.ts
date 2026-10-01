@@ -130,6 +130,9 @@ export const bridgeApi: MkpApi = {
   getRuntimeCatalog: () => call('getRuntimeCatalog', 'get_runtime_catalog'),
   getDownloadedFiles: () => call('getDownloadedFiles', 'get_downloaded_files'),
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
+  /* 归档区（官方旧版本留档）：只列 + 读正文。删除 / 恢复**没有命令** —— 这一层不做 */
+  getArchivedFiles: () => call('getArchivedFiles', 'get_archived_files'),
+  readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   downloadCatalogFile: (fileName, onTick) =>
     call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
   downloadCatalogFiles: (fileNames, onTick) =>

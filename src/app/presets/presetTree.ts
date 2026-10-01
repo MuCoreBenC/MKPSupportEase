@@ -322,6 +322,44 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
 export const RELEASE_UPDATE_WHY =
   '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
 
+/** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
+export function sizeTextOf(size: number): string {
+  return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
+}
+
+/**
+ * 归档那一格（展开详情里的「旧版本」）。
+ *
+ * `archive/` 是**官方版本生命周期**的一部分：云端换版本时，旧的那一份被换下来放进归档
+ * （保留最早一份，不覆盖、不删）。它**不是用户修改历史** —— 用户改出来的东西是另一条线
+ * （另存成另一份文件），永远不回写官方原件。
+ *
+ * 这一层只做**看得见 / 认得出 / 看得了**：不提供删除、不提供恢复，也没有"用这份旧版本"
+ * （归档管理不在这一层，见 HANDOFF §3.5 的七步顺序）。
+ */
+export const ARCHIVE_KEY = '旧版本'
+
+export const ARCHIVE_WHY =
+  '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖、不删）。' +
+  '它属于官方文件的生命周期，不是你的修改历史 —— 你改出来的东西是另一份文件（另存），永远不回写官方原件。' +
+  '这一层只让你看得见、认得出、看得了：不提供删除、不提供恢复，也没有「用这份旧版本」。'
+
+/** 那一格上的字：几份 + 可以点开 */
+export function archiveOpenText(count: number): string {
+  return `${count} 份（点开看）`
+}
+
+/** 归档抽屉里的那几句话 */
+export const ARCHIVE_DRAWER = {
+  title: '旧版本',
+  /** 每条上那颗按钮 */
+  open: '看正文',
+  reading: '正在读…',
+  bodyTitle: '正文',
+  /** 认不出机型版本时那一格写什么 */
+  unknown: '认不出是哪台机型的哪一版（目录里已经没有这一份了）',
+} as const
+
 /**
  * 批量那一行的字：**这一批里有什么，决定它是"下载"还是"更新"**。
  *
@@ -1049,11 +1087,6 @@ function versionNameLookup(
     )
   }
   return (machineId, versionId) => byMachine.get(machineId)?.get(versionId) ?? versionId
-}
-
-/** TOML 正文的字节数 → 人话。与假后端 sizeText 的口径一致（KB 一位小数） */
-function sizeTextOf(size: number): string {
-  return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
 }
 
 /**

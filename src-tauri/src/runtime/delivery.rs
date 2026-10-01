@@ -149,6 +149,71 @@ pub fn deliver(
     Ok(target)
 }
 
+/* ---------- 归档区（旧版本留档） ---------- */
+
+/// 归档区里的一份旧版本。**盘就是底账**（与下载区同一套规矩）：扫盘得到，不记账本。
+///
+/// 归档是**官方版本生命周期**的一部分（换版本时旧份进 `archive/`，不删），
+/// **不是用户修改历史** —— 用户改出来的东西是另一条线（另存成另一份文件），
+/// 永远不回写官方原件。所以这里只有"官方旧版本"，没有"谁在什么时候改了什么"。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchivedFile {
+    /// 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
+    pub path: String,
+    /// 文件名。与它对应的交付文件**同名**：换版本换的是字节，不是名字
+    pub file_name: String,
+    pub size: u64,
+    /// 这份旧版本**被换下来的时刻**（UTC epoch 秒）。归档没有单独的"归档时刻"这一回事——
+    /// 写这份文件的时刻就是它。`None` = 文件系统没给（不是 0，也不编一个）
+    pub modified_unix: Option<u64>,
+}
+
+/// 归档区里现在有什么（按路径升序 —— `read_dir` 的顺序是文件系统说的，不稳定，
+/// 界面要一个每次刷新都一样的表）。
+///
+/// 归档区不存在 = 还没归档过东西（合法状态，不是错误）：返回空表。
+/// **只列，不动盘**：这一层不提供删除、不提供恢复。
+pub fn archived_files(internal_root: &Path) -> Vec<ArchivedFile> {
+    let mut out = Vec::new();
+    let mut stack = vec![archive_dir(internal_root)];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue; // 目录不存在 / 读不动：当作"这一支没有东西"，不让整条读失败
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let rel = path
+                .strip_prefix(internal_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(ArchivedFile {
+                path: rel,
+                file_name: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                size: meta.len(),
+                modified_unix: meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
 /* ---------- 一次多份（第二圈：并发） ---------- */
 
 /// 多份同时下载时走几条道。**固定上限而不是每份一条**：下载源是别人的服务器，
@@ -440,6 +505,87 @@ mod tests {
             std::fs::read(root.path().join("archive/mkp/A1-standard.toml")).unwrap(),
             "版本一".as_bytes(),
             "归档槽不覆盖：要完整历史是以后的事，先保证最早的丢不了"
+        );
+    }
+
+    /* ---------- 归档区（旧版本留档的可见性） ---------- */
+
+    /// 归档区不存在 = 还没归档过东西：空表，不是错误（新装的机器就是这个状态）
+    #[test]
+    fn archived_files_is_empty_before_anything_was_archived() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(archived_files(root.path()).is_empty());
+    }
+
+    /// **盘当底账**：换版本之后它列得出那一份旧版本（路径 / 文件名 / 大小 / 时刻），
+    /// 而且按它给的路径能读回**原字节**（列出来的东西与归档里那份是同一份）
+    #[test]
+    fn archived_files_lists_what_the_update_pushed_aside() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        let v1 = entry("A1-standard.toml", "版本一".as_bytes());
+        let v2 = entry("A1-standard.toml", "版本二".as_bytes());
+
+        deliver(
+            root.path(),
+            &v1,
+            &MemorySource("版本一".as_bytes().to_vec()),
+        )
+        .unwrap();
+        assert!(
+            archived_files(root.path()).is_empty(),
+            "第一次下载没有旧版本 —— 归档只在换版本时产生"
+        );
+
+        deliver(
+            root.path(),
+            &v2,
+            &MemorySource("版本二".as_bytes().to_vec()),
+        )
+        .unwrap();
+
+        let got = archived_files(root.path());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, "archive/mkp/A1-standard.toml");
+        assert_eq!(got[0].file_name, "A1-standard.toml", "与交付文件同名");
+        assert_eq!(
+            got[0].size,
+            "版本一".len() as u64,
+            "大小是**旧份**的字节数，不是新的"
+        );
+        assert!(got[0].modified_unix.is_some(), "写这份文件的时刻要带上");
+        assert_eq!(
+            std::fs::read(root.path().join(&got[0].path)).unwrap(),
+            "版本一".as_bytes(),
+            "按这条读给的路径读回来的是旧版本的原字节"
+        );
+    }
+
+    /// 归档槽**保留最早一份**（不覆盖）—— 所以连升两版之后，列出来仍然只有一份、
+    /// 而且是最早那版。这条同时把"归档 ≠ 每次更新的历史"钉在判据里
+    #[test]
+    fn archived_files_reflects_the_single_archive_slot() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        for content in ["版本一", "版本二", "版本三"] {
+            let file = entry("A1-standard.toml", content.as_bytes());
+            deliver(
+                root.path(),
+                &file,
+                &MemorySource(content.as_bytes().to_vec()),
+            )
+            .unwrap();
+        }
+
+        let got = archived_files(root.path());
+        assert_eq!(
+            got.len(),
+            1,
+            "归档槽只有一个（最早那份），不是每次更新的历史"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join(&got[0].path)).unwrap(),
+            "版本一".as_bytes()
         );
     }
 

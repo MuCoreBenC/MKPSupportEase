@@ -283,6 +283,30 @@ export const mockApi: MkpApi = {
     return [...MOCK_STALE]
   },
 
+  /*
+   * 归档区：浏览器里没有盘，给一条**固定演示** —— 让"这一份有旧版本"那一格画得出来。
+   * 真机上它是扫 `archive/` 得到的（换版本时被换下来的那一份）。
+   * 认人那三格（机型 / 版本 / kind）跟着演示的那条走 —— 形状不编，数字编。
+   */
+  async getArchivedFiles() {
+    return [
+      {
+        path: 'archive/mkp/presets/A1-fast.toml',
+        fileName: 'A1-fast.toml',
+        size: 2048,
+        modifiedUnix: 1780000000,
+        machineId: 'A1',
+        versionId: 'FAST',
+        kind: 'mkp_preset',
+      },
+    ]
+  },
+
+  /** 读归档里的正文要真的盘（浏览器里没有）：与 downloadCatalogFile 同一条口径，不假装 */
+  async readArchivedText() {
+    throw new NotImplementedError('readArchivedText：浏览器里没有归档区，先用真机跑一次更新')
+  },
+
   /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原。
      没有文件落地，所以 apply 只对已"模拟下载"的文件开——这里没有，恒拒，如实 */
   async getActivePreset() {

@@ -56,7 +56,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
-import type { ActivePreset, DownloadOutcome, DownloadTick, Machine } from '../../api'
+import type {
+  ActivePreset,
+  ArchivedFile,
+  DownloadOutcome,
+  DownloadTick,
+  Machine,
+} from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { ReleasePresetSource } from './presetTree'
@@ -94,6 +100,15 @@ export interface PresetData {
    * 「已下载」在 `mkp/`（盘就是底账）。这一层只读不写；写走下面的 `downloadRelease` / `apply`。
    */
   release: ReleaseState
+
+  /**
+   * 归档区里躺着的**官方旧版本**（换版本时被换下来的那一份）。
+   *
+   * 与交付那一路同源：跟 `release` 一起读、同样**不挡首屏**，每次下载 / 更新之后跟着重读
+   * （刚更新过的那一份会出现在这里）。**只读** —— 界面不删、不恢复、也不拿它当"用户修改历史"：
+   * 归档是官方版本生命周期的一部分（见 `ArchivedFile` 的注释）。
+   */
+  archived: ArchivedFile[]
 
   machines: Machine[]
   /** 当前机型。**空串 = 「全部机型」那一档**（预设页才用得到，首页永远是一台具体的） */
@@ -219,6 +234,8 @@ export function usePresetData(): PresetData {
   const [error, setError] = useState<string | null>(null)
   const [at, setAt] = useState<{ machineId: string; versionId: string } | null>(null)
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
+  /* 归档区（官方旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
+  const [archived, setArchived] = useState<ArchivedFile[]>([])
 
   /**
    * 把官方交付这一路的现况读一遍。
@@ -229,12 +246,16 @@ export function usePresetData(): PresetData {
    * 界面上看到的必须是底账答的，不是前端猜的。
    */
   const readRelease = useCallback(async (): Promise<ReleaseState> => {
-    /* 三个读：目录清单、盘上对得上的、盘上对不上的。**后两个都要** —— 见 `ReleaseState.stale` */
-    const [catalog, mine, drifted] = await Promise.all([
+    /* 四个读：目录清单、盘上对得上的、盘上对不上的、归档区里躺着的旧版本。
+       **后两个都要**（见 `ReleaseState.stale`）；归档是"更新过之后会变"的那一份，
+       所以它跟着这一路一起读，而不是单开一次首屏读 */
+    const [catalog, mine, drifted, keep] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
+      api.getArchivedFiles(),
     ])
+    setArchived(keep)
     const downloaded = new Set(mine)
     const stale = new Set(drifted)
     const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
@@ -414,6 +435,7 @@ export function usePresetData(): PresetData {
     apply,
     copy,
     release,
+    archived,
     downloadRelease,
     downloadReleaseBatch,
   }

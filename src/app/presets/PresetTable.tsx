@@ -72,6 +72,9 @@ import type { ContextMenuApi } from '../../components/menu'
 import { longStatText, shortStatText } from '../store/package'
 import {
   ACTION_TEXT,
+  ARCHIVE_KEY,
+  ARCHIVE_WHY,
+  archiveOpenText,
   CLOUD_STATE_TEXT,
   CLOUD_STATE_WHY,
   DASH_,
@@ -131,6 +134,13 @@ interface Props {
   onToggleExpand: (rowKey: string) => void
   /** 正在做动作的那一行（rowKey）。只禁那一颗按钮，不锁整张表 */
   busyKey: string | null
+  /**
+   * 这一份在归档区里有几个**旧版本**（按文件名对）。
+   * `0` = 没有 → 展开详情里那一格**不显示**（没有 ≠ 未知，不必占一个"—"）
+   */
+  archiveCountOf: (fileName: string) => number
+  /** 打开「旧版本」抽屉（归档的可视化在页面层的抽屉里，表这边只给入口） */
+  onOpenArchive: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
@@ -150,6 +160,8 @@ export default function PresetTable({
   /** 展开详情的那一行(rowKey)。状态在页面层(右键菜单也要能展开它) */
   expandedKey,
   onToggleExpand,
+  archiveCountOf,
+  onOpenArchive,
   onLive,
   onDownload,
 }: Props) {
@@ -253,6 +265,8 @@ export default function PresetTable({
                * 其余来源（切片器官方行）没有"从目录下载"这一回事，照旧走 `downloaded` 布尔
                */
               const needsUpdate = row.releaseState === 'stale'
+              /* 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有 */
+              const archiveCount = archiveCountOf(row.fileName)
               /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
@@ -468,6 +482,28 @@ export default function PresetTable({
                         <dd className={s.factVal} title={statWhyOf(row)}>
                           {longStatText(row.modifiedText) ?? UNKNOWN}
                         </dd>
+
+                        {/*
+                         * 归档：官方旧版本留档。**没有旧版本就不显示这一格** ——
+                         * "没有"不是"未知"，不必占一个「—」。
+                         * 它和上面的「状态」说的是两件事：状态说盘上这一份对不对，
+                         * 这里说"以前那几份还在不在"。
+                         */}
+                        {archiveCount > 0 && (
+                          <>
+                            <dt className={s.factKey}>{ARCHIVE_KEY}</dt>
+                            <dd className={s.factVal}>
+                              <button
+                                type="button"
+                                className={s.factLink}
+                                title={ARCHIVE_WHY}
+                                onClick={() => onOpenArchive(row)}
+                              >
+                                {archiveOpenText(archiveCount)}
+                              </button>
+                            </dd>
+                          </>
+                        )}
 
                         <dt className={s.factKey}>置顶</dt>
                         <dd className={s.factVal}>{row.pinned ? '已置顶' : '未置顶'}</dd>

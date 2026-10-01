@@ -593,6 +593,27 @@ export interface RuntimeCatalogMachine {
 }
 
 /**
+ * 归档区里的一份**官方旧版本**（cloud 换版本时被换下来的那一份）。
+ *
+ * 归档是**官方版本生命周期**的一部分，**不是用户修改历史**：换版本时旧份进
+ * `archive/`（保留最早一份，不覆盖、不删）；用户改出来的东西是另一条线
+ * （另存成另一份文件），永远不回写官方原件。
+ */
+export interface ArchivedFile {
+  /** 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
+  path: string
+  /** 文件名。与它对应的交付文件同名：换版本换的是字节，不是名字 */
+  fileName: string
+  size: number
+  /** 被换下来的时刻（UTC **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
+  modifiedUnix: number | null
+  /** 认得出是谁的旧版本就有；**认不出是 `null`**（目录里已经没有这一份了）—— 不猜 */
+  machineId: string | null
+  versionId: string | null
+  kind: string | null
+}
+
+/**
  * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
  * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
  * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
@@ -831,6 +852,20 @@ export interface MkpApi {
    * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
    */
   getStaleFiles(): Promise<string[]>
+
+  /**
+   * 归档区里有什么：官方文件换版本时**被换下来的那些旧版本**。
+   *
+   * **只列** —— 不删、不恢复、也没有"用这份旧版本"（归档管理不在这一层）。
+   * 目录里已经没有的那几份，`machineId / versionId / kind` 如实给 `null`。
+   */
+  getArchivedFiles(): Promise<ArchivedFile[]>
+
+  /**
+   * 读归档区里某一份旧版本的正文（旧版 TOML）。
+   * **只认归档区**：入参是 [`getArchivedFiles`] 给的那个相对路径；不是 UTF-8 就如实报错。
+   */
+  readArchivedText(path: string): Promise<string>
 
   /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。

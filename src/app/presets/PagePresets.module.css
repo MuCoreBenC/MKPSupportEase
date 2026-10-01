@@ -428,6 +428,134 @@
   padding-bottom: 7px;
 }
 
+/* ---------- 「旧版本」抽屉（归档区那一面） ---------- */
+
+.arch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.archList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.archItem {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.archLine {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.archName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text);
+}
+
+.archMeta {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 认人那一行：认得出就是"机型 · 版本"，认不出**照实说认不出**（不猜） */
+.archWho {
+  grid-column: 1;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.archBtn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.archBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.archBtn:focus-visible {
+  outline: none;
+}
+
+.archBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.archBodyHead {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.archPre {
+  max-height: 46vh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.archErr {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: #fff3e2;
+  color: #a86416;
+  font-size: var(--fs-label);
+}
+
+.archNote {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
 /* ---------- 批量那一行（只在云端表、且这一批非空时出现） ---------- */
 
 .batch {

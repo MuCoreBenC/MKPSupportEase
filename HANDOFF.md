@@ -86,9 +86,18 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      **判据**：`publish_into` 收尾逐条核对"发出去的每份文件都在说明书里按同一 path 登记、字节与 SHA 一致"
      （运行时）+ 真数据判据 `the_published_layout_lands_where_the_catalog_says`（写盘面 == 登记面）。
    - ⬜ **还没做的**：`MKPSE_PRESET_SOURCE` 落进流水线（"发到哪"是产品决定）；上传那一环还是手工/云盘。
-3. 🔄 **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加
-   下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本。
-   - ✅ **第一层：下载状态 + 更新**（本次）——交付行现在答得出「**这一份在本机是什么样**」：
+3. 🔄 **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加。
+   **总模型**（2026-10-02 定，写在 `DATA-ARCHITECTURE.md` §1③「预设 TOML 的一生」里）：
+   **官方线**（云端 → `mkp/` → `archive/`）与**用户线**（另存 → `presets-mine/`）**不许混** ——
+   官方原件不可变、用户修改另存、归档只服务官方线。七步按这个模型走，一次只做一层：
+   1. ✅ **官方 TOML 下载 / 已下载 / 需更新**（`ac42520`）
+   2. ✅ **批量下载 / 更新**（`3c12fcf`）
+   3. ✅ **官方旧版本归档及必要的可见性**（本次）
+   4. ⬜ 用户自己的 TOML（`（已修改）` 那一条线）
+   5. ⬜ 临时编辑 → 保存 → 用户文件（`.tmp` 从来不落进 `mkp/`）
+   6. ⬜ 官方文件异常修改检测（SHA 报警：不许应用 / 不许编辑 / 不许复制，只能重下）
+   7. ⬜ 官方更新与用户修改文件同时存在时的 UI / 行为
+   - ✅ **第一层：下载状态 + 更新**（2026-10-02）——交付行现在答得出「**这一份在本机是什么样**」：
      未下载 / 已下载 / **需更新**（盘上有、字节与目录不符）。
      三态来自**两个读的组合**（`getDownloadedFiles` = 与目录一致、`getStaleFiles` = 不一致），
      前端不猜；`stale` 必须单独一档 —— 只问"文件在不在"会把一份旧版 / 被手动动过的文件
@@ -107,7 +116,14 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      结局**逐份**收：提示条主句说总数、**没成的那几份各占一行带后端给的原因** ——
      既不许压成一句"批量失败"，也不许一份失败被说成整批成功；命令级失败（比如没配数据源，
      一份都没发出去）是**另一档**说法，与"逐份被拒"分开。
-   - ⬜ 还欠这一层的：归档历史的可见性、用户自己的文件（`getLocalUserFiles` 恒空）、修改（改参数）。
+   - ✅ **第三层：官方旧版本归档及必要的可见性**（本次）——只解决一件事：
+     **因为更新而进了 `archive/` 的旧版本，用户看得见、认得出、看得了**。
+     两条读（`get_archived_files` / `read_archived_text`，都只读、只认归档区），
+     一行界面（交付行的展开详情里多一格「旧版本 N 份」→ 点开是抽屉：列表 + 正文）。
+     **认人不解析文件名**：按"`archive/` 去掉前缀之后与目录里哪一份同位"匹配 ——
+     同位是一个不需要额外知识的事实；目录里已经没有的那几份，机型 / 版本**如实留空**。
+     **不提供删除、不提供恢复、也没有"用这份旧版本"**（归档管理不在这一层）；
+     读不出来就照实说，不许显示空正文。判据：探针第 5b 节 + `delivery` 那三条新判据。
 
 ## 4. 续做入口（从哪接手）
 
@@ -186,6 +202,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `scripts/check-zero-network.mjs`（CI web job） | 判据 2：启动零网络 —— 网络符号只许住 `runtime/net.rs` / `.setup()` 段零联网 / `src/api/` 不许绕过 IPC 发 HTTP |
 | `workbench::app::dist` 判据 | **交付根相对路径 == 客户端落点**：`the_published_layout_lands_where_the_catalog_says`（真数据：写盘面 == catalog 登记面、字节与 SHA 一致）/ 夹具发布：manifest 每条都在 `mkp/…` 下且 catalog 里按同一 path 登记 / 残留拦截 / 回收站 / 可达集计数（真数据 8 条资产） |
 | `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
+| `runtime::delivery` 归档 3 条 | `archived_files_is_empty_before_anything_was_archived`（没归档过 = 空表，不是错误）/ `…lists_what_the_update_pushed_aside`（列出来的按它自己的路径能读回**旧版本的原字节**）/ `…reflects_the_single_archive_slot`（连升两版仍只列一份 = 最早那份：**归档 ≠ 每次更新的历史**） |
 | `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的两态与动作（已下载·灰字、需更新·按钮）** / **批量那一层（批次行只含未下载+需更新、逐份结局各占一行且不许伪装成功）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
@@ -197,6 +214,12 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
 - **资产去哪一档看一把尺子**：产品数据资源（用户下载 / 更新 / 管理）→ `public/assets/` + `presets/assets.toml` + catalog；界面展示素材（程序自己看一眼）→ `src/app/assets/` 或 `public/`，不进台账。台账里今天 15 条 = 9 BBS + 3 图标 + 3 模型。
+- **归档（`archive/`）住哪、怎么来的**：`<appDataDir>/archive/` + **交付根相对路径**
+  （`archive/mkp/presets/A1-fast.toml`）—— 与 `mkp/` 同形，所以"归档里这份是谁"不用猜：
+  去掉前缀与目录里哪一份同位，就是谁。只有"换版本"往里放东西，**保留最早一份**（不覆盖、不删）。
+  界面上它挂在交付行的展开详情里（「旧版本 N 份」→ 抽屉，能看正文）。
+  **三条读只读不写**：删除 / 恢复**连命令都没有**（归档管理不在这一层）。
+  它服务的是**官方线**，不是用户修改历史 —— 见总纲 §1③「预设 TOML 的一生」。
 - **预设页那条链路怎么手工看**（浏览器模式 = 假后端）：`npm run build` →
   `npx vite preview --port 4173 --strictPort` → 开 `http://localhost:4173/` 的「预设」页 ——
   交付行按假后端的**固定演示集合**画两态（`A1-standard.toml` 已下载、`A1-fast.toml` 需更新）；

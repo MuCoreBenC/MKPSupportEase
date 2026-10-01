@@ -27,9 +27,14 @@ const problems = []
  *   ① index.html 没写 favicon，浏览器自己会去要一次；
  *   ② 浏览器里点「下载 / 更新」**必然**抛「未实现的接口」（没有下载区、没有数据源）——
  *      那是设计成要报错的：探针自己在第 5 节点了它一次，页面把这条错误如实显示出来，
- *      正是要的结果（"点了说成功但盘上什么都没有"才是要抓的）。
+ *      正是要的结果（"点了说成功但盘上什么都没有"才是要抓的）；
+ *   ③ 同一档还有「看正文」：归档里那份的字节要真的盘，浏览器里没有 —— 页面照实说"读不出来"。
  */
-const BENIGN = [/\/favicon\.ico$/, /未实现的接口: downloadCatalogFile/]
+const BENIGN = [
+  /\/favicon\.ico$/,
+  /未实现的接口: downloadCatalogFile/,
+  /未实现的接口: readArchivedText/,
+]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
 page.on('console', (m) => {
@@ -263,7 +268,62 @@ console.log(`[交付三态] 展开详情「状态」= ${statusFact || '(没有�
 if (!statusFact.includes('需更新')) problems.push(`展开详情的状态该说「需更新」，实测「${statusFact}」`)
 await page.screenshot({ path: `${shotDir}/presets-release-states.png` })
 
-/* ---------- 5b. 批量：多份一起处理（逐份给结局） ---------- */
+/* ---------- 5b. 归档：官方旧版本看得见、认得出、看得了 ---------- */
+/*
+ * 守两件事：
+ *   ① 归档的那一格画得出来、点得开，里面按**路径**列出旧版本（假后端给了一条演示）；
+ *   ② 这一层**不提供归档管理** —— 抽屉里不许出现「删除 / 恢复 / 清空」这类动作
+ *      （归档管理不在这一层，见 HANDOFF §3.5 的七步顺序）。
+ * 读正文在浏览器里必然失败（没有盘），所以要断言它**如实说读不出来**，不是显示空正文。
+ */
+const archiveCell = page.getByRole('button', { name: /^\d+ 份（点开看）$/ })
+const archiveCells = await archiveCell.count()
+console.log(`\n[归档] 展开详情里的「旧版本」那一格：${archiveCells} 个`)
+if (archiveCells === 0) {
+  problems.push('展开详情里没有「旧版本」那一格（假后端给了一份归档演示）')
+} else {
+  await archiveCell.first().click()
+  await page.waitForTimeout(400)
+  const drawer = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    return {
+      open: dlg !== null,
+      text: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 240),
+      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map(
+        (b) => (b.innerText || b.getAttribute('aria-label') || '').trim(),
+      ),
+    }
+  })
+  console.log(`[归档] 抽屉${drawer.open ? '开着' : '没开'}：${drawer.text}`)
+  if (!drawer.open) problems.push('点「旧版本」没有打开抽屉')
+  /* 列表里要认出它：文件名 + 这是哪台机型的哪一版（那条归档是不是你要找的，就靠这两个） */
+  if (!drawer.text.includes('A1-fast.toml')) problems.push('抽屉里没列出那份旧版本')
+  if (!/A1 · FAST/.test(drawer.text)) problems.push('抽屉里要认出它是哪台机型的哪一版')
+  for (const forbidden of ['删除', '恢复', '清空']) {
+    if (drawer.buttons.some((b) => b.includes(forbidden))) {
+      problems.push(`这一层不提供归档管理，抽屉里不该有「${forbidden}」`)
+    }
+  }
+
+  await page.getByRole('button', { name: '看正文' }).first().click()
+  await page.waitForTimeout(500)
+  const bodyText = await page.evaluate(() =>
+    (document.querySelector('[role="dialog"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  )
+  console.log(`[归档] 点「看正文」之后：${bodyText.slice(0, 160)}`)
+  if (!/读不出来/.test(bodyText)) {
+    problems.push(`浏览器里没有盘，读正文该如实说读不出来，实测「${bodyText.slice(0, 120)}」`)
+  }
+  /* 正文头要带**归档里那条路径** —— 读它用的就是这条路径（界面上的"哪一份"由此无歧义） */
+  if (!bodyText.includes('archive/mkp/presets/A1-fast.toml')) {
+    problems.push('正文头要带那份旧版本在归档里的路径')
+  }
+  await page.screenshot({ path: `${shotDir}/presets-archive.png` })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+}
+
+/* ---------- 5c. 批量：多份一起处理（逐份给结局） ---------- */
 /*
  * 守三件事：
  *   ① 批次的范围 —— **已下载的不进来**（这一批只有那一份「需更新」的）；

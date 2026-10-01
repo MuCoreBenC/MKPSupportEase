@@ -444,6 +444,21 @@
   color: var(--text-3);
 }
 
+/* 展开详情里可点的那一格（「旧版本 2 份」）：长得像链接，但它是按钮 */
+.factLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--accent-deep);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.factLink:focus-visible {
+  outline: none;
+}
+
 /* ---------- 行展开 ---------- */
 
 /*
