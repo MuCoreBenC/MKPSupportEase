@@ -47,7 +47,6 @@ minY = 0.0
 [[versions]]
 id = 'LITE'
 name = 'lite版'
-presetFile = 'P1.toml'
 recommendedBundle = 'P1S_default'
 tag = '推荐'
 description = '群里开源的最新lite'

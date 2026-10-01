@@ -546,7 +546,10 @@ mod tests {
             Some(today.as_str()),
             "内容变了就是改了套餐 —— updatedAt 要跟上"
         );
-        assert!(b.to_toml().contains(&today), "文档面也要盖，不然 write 写回旧值");
+        assert!(
+            b.to_toml().contains(&today),
+            "文档面也要盖，不然 write 写回旧值"
+        );
 
         b.write().expect("写");
         let again = Bundles::load_from(dir.path()).expect("重读");
@@ -555,7 +558,10 @@ mod tests {
             vec!["a1-bbs-02-010".to_owned()]
         );
         // 迁移照抄的旧日期被真改动顶掉 —— 这是有意的，见 set_refs 的注释
-        assert_ne!(again.get("a1_default").expect("在").updated_at.as_deref(), Some("2026-07-12"));
+        assert_ne!(
+            again.get("a1_default").expect("在").updated_at.as_deref(),
+            Some("2026-07-12")
+        );
     }
 
     /// `drop_asset_refs`：内存与**文档面**一起改，写回重读确实少了；

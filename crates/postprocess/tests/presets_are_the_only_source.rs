@@ -68,7 +68,7 @@ fn presets_reproduce_the_legacy_dimension_table() {
     }
 }
 
-/// 别名：23 条映射逐条相等，键都是大写。
+/// 别名：基线那 23 条映射逐条相等（**除已删除的 `A2L` 那一条**），键都是大写。
 #[test]
 fn presets_reproduce_the_legacy_alias_map() {
     let tables = load_presets_dir(&presets_dir()).expect("presets 应当读得通");
@@ -88,13 +88,34 @@ fn presets_reproduce_the_legacy_alias_map() {
         .collect();
 
     assert_eq!(expected.len(), 23, "基线里的别名数变了，判据的扫描面要重算");
+
+    // **一处已知且故意的偏离**：`presets/machines/A2L.toml` 已删 —— 它没有 `[dimensions]`，
+    // 过不了 `pipeline::config_ir` 那道硬门（留着它也处理不了任何东西，只会换来一条
+    // 更绕的错误消息），删掉是产品决定。它没有 `externalAliases`，只贡献 `A2L` → `A2L`
+    // 这一条映射，于是读出来的表比基线少一条。
+    //
+    // 这里**只摘掉这一条**再比，而不是把期望数改成 22 了事：别处再多漂一条，
+    // 下面那个全等断言仍然会红。
+    let mut want = expected.clone();
+    let gone = want.remove("A2L");
+    assert_eq!(
+        gone.as_deref(),
+        Some("A2L"),
+        "基线里本该有 `A2L` → `A2L` 这一条（那台机器没有 externalAliases）"
+    );
+
     assert_eq!(
         tables.alias_map().len(),
-        23,
-        "从 presets 读出来的别名是 {} 条（期望 23）",
-        tables.alias_map().len()
+        want.len(),
+        "从 presets 读出来的别名是 {} 条（期望 {}，基线 23 减去已删除的 A2L）",
+        tables.alias_map().len(),
+        want.len()
     );
-    assert_eq!(tables.alias_map(), &expected, "别名映射与旧快照不一致");
+    assert_eq!(
+        tables.alias_map(),
+        &want,
+        "别名映射与旧快照不一致（除已删除的 A2L 之外应当逐条相等）"
+    );
 }
 
 /// 禁区：3 台机器的多边形逐点相等。

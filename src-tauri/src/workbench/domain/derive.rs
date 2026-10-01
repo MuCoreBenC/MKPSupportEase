@@ -57,16 +57,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::workbench::presets::registry::ParamDef;
-use crate::workbench::presets::Presets;
-use crate::workbench::upstream::catalog::MkpPreset;
-use crate::workbench::upstream::{Asset, ResourceType, Upstream};
+use crate::workbench::presets::{AssetKind, Presets};
 
 use super::layer::{no_overrides, Layers, Level, Origin, Overrides};
-use super::patch::{BuiltRecord, BundleEdit, CatalogMachine, Committed, Draft, Visibility};
+use super::patch::{variant_key, BuiltRecord, BundleEdit, CatalogMachine, Committed, Draft};
 use super::variants::digest;
 use super::visibility::{BlockScope, BlockedBy, Gate};
 use super::wording as w;
-use super::wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState, SnapshotState};
+use super::wording::{ArtifactState, BbsSource, BuildState, SaveState, SnapshotState};
 
 /* ---------- 版本身份 ---------- */
 
@@ -79,15 +77,16 @@ pub struct VersionIdentity {
     pub version_id: String,
     pub name: String,
     pub tag: Option<String>,
-    /// 上游给的产物。清单里有、上游还没有对应文件的版本为 `None` = 未生成
-    pub mkp_preset: Option<MkpPreset>,
+    /// 这一版的产物文件名（`{机型}-{版本小写}.toml`）。**由命名规则算出** ——
+    /// 不再读上游 manifest：名字只由「机型 id + 版本 id」决定，两者都在我们自己的清单里
+    pub mkp_file: String,
 }
 
 /* ---------- 整本 ---------- */
 
 pub struct Book<'a> {
-    pub up: &'a Upstream,
-    /// 我们自己那份预设数据。**字段定义与三层取值全走它**（b04 Task 9）
+    /// 我们自己那份预设数据（`<repo>/presets`，**唯一的预设真相源**）。
+    /// 字段定义与三层取值全走它
     pub presets: &'a Presets,
     draft: &'a Draft,
     /// **清单**：有哪些机型、每台有哪些版本。来源是 `presets/machines/*.toml`
@@ -103,17 +102,11 @@ pub struct Book<'a> {
     /// 按机型顺序、机型内按清单顺序排好
     versions: Vec<VersionIdentity>,
     built: BTreeMap<String, BuiltRecord>,
-    visibility: BTreeMap<String, Visibility>,
     bundles: BTreeMap<String, BundleEdit>,
 }
 
 impl<'a> Book<'a> {
-    pub fn new(
-        up: &'a Upstream,
-        presets: &'a Presets,
-        committed: &'a Committed,
-        draft: &'a Draft,
-    ) -> Self {
+    pub fn new(presets: &'a Presets, committed: &'a Committed, draft: &'a Draft) -> Self {
         // 两层的值都只有一个来源：`machineVariants` 归并出来的那两张表，
         // 草稿里未落盘的改动叠在上面。以前这里读的是我们自造的 json，
         // 于是每层各有"上游给的"与"我们写的"两张表（b04 Task 12 之前）
@@ -144,26 +137,19 @@ impl<'a> Book<'a> {
                         .map(|x| x.name.clone())
                         .unwrap_or_else(|| vid.clone()),
                     tag: declared.and_then(|v| v.tag.clone()),
-                    // 产物还在上游那一层（资源与套餐这一轮没搬，见 presets/mod.rs）。
-                    // 清单里有、上游没有的版本 → `None` = 未生成，那是对的
-                    mkp_preset: up
-                        .catalog
-                        .machine(&m.id)
-                        .and_then(|x| x.version(vid))
-                        .and_then(|x| x.mkp_preset.clone()),
+                    // 产物名由命名规则算出（唯一实现在 `preset::preset_file_name`）——
+                    // 不再查上游 manifest，清单里有这一版就有这个名字
+                    mkp_file: preset::preset_file_name(&m.id, vid),
                 });
             }
         }
 
         let mut built = committed.built.clone();
         built.extend(draft.built.clone());
-        let mut visibility = committed.visibility.clone();
-        visibility.extend(draft.visibility.clone());
         let mut bundles = committed.bundles.clone();
         bundles.extend(draft.bundles.clone());
 
         Self {
-            up,
             presets,
             draft,
             catalog: &committed.catalog,
@@ -171,7 +157,6 @@ impl<'a> Book<'a> {
             overs,
             versions,
             built,
-            visibility,
             bundles,
         }
     }
@@ -243,22 +228,21 @@ impl<'a> Book<'a> {
         self.bundle_bbs(bid)
     }
 
-    /// 套餐里的 BBS。我们的改动优先于上游那一份
+    /// 套餐里的 BBS。草稿改动优先于 `bundles.toml` 登记的那一份
     pub fn bundle_bbs(&self, bundle_id: &str) -> Vec<String> {
         if let Some(edit) = self.bundles.get(bundle_id) {
             return edit.bbs.clone();
         }
-        self.up
-            .manifest
-            .bundle(bundle_id)
+        self.presets
+            .bundles
+            .get(bundle_id)
             .map(|b| {
                 b.asset_refs
                     .iter()
                     .filter(|id| {
-                        self.up
-                            .manifest
-                            .asset(id)
-                            .is_some_and(|a| a.resource_type == ResourceType::BbsProfile)
+                        self.presets.assets.get(id).is_some_and(|a| {
+                            a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs")
+                        })
                     })
                     .cloned()
                     .collect()
@@ -318,14 +302,15 @@ impl<'a> Book<'a> {
 
     /// 四档之一。判据是**指纹比对，不看文件时间**
     pub fn build_state(&self, uid: &str) -> BuildState {
-        let Some(v) = self.version(uid) else {
+        if self.version(uid).is_none() {
             return BuildState::NeverBuilt;
-        };
-        let has_product = v.mkp_preset.is_some();
+        }
         let has_bbs = !self.effective_bbs(uid).is_empty();
 
-        if !has_product && !has_bbs && !self.has_any_recipe(uid) {
-            // 三个条件缺一不可，见模块文档那张表
+        // 产物名总是算得出来（命名规则只认机型 + 版本），所以「有没有可产出的东西」
+        // 现在只看**配方**：机型层或版本层在这一版上钉过值，就有东西可产。
+        // 全空的占位版本（既无配方也无 BBS）才是「暂无资源」
+        if !self.has_any_recipe(uid) && !has_bbs {
             return BuildState::NoResources;
         }
         let Some(rec) = self.built.get(uid) else {
@@ -466,8 +451,6 @@ impl<'a> Book<'a> {
                     uid: v.uid.clone(),
                     machine_id: v.machine_id.clone(),
                     machine: self
-                        .up
-                        .catalog
                         .machine(&v.machine_id)
                         .map(|m| m.display.clone())
                         .unwrap_or_else(|| v.machine_id.clone()),
@@ -486,83 +469,12 @@ impl<'a> Book<'a> {
                             .to_owned(),
                         )
                     },
-                    mkp_file: v.mkp_preset.as_ref().map(|p| p.file_name.clone()),
+                    mkp_file: Some(v.mkp_file.clone()),
                     bbs_count: self.effective_bbs(&v.uid).len(),
                     last_build: self.last_build(&v.uid).map(str::to_owned),
                 }
             })
             .collect()
-    }
-
-    /// 仓库盘点那张表：**只列交付物**（18 条），界面素材不算。
-    ///
-    /// 每条都有真 sha256 与真 size（来自 `manifest.assets`）——
-    /// 所以这一页不该出现一个「未知」
-    pub fn stock_rows(&self) -> Vec<StockRow> {
-        let assigned: BTreeSet<String> = self
-            .versions
-            .iter()
-            .flat_map(|v| self.effective_bbs(&v.uid))
-            .collect();
-        let in_bundle: BTreeSet<&str> = self
-            .up
-            .manifest
-            .bundles()
-            .iter()
-            .flat_map(|b| {
-                self.bundles
-                    .get(&b.id)
-                    .map(|e| {
-                        e.presets
-                            .iter()
-                            .chain(e.bbs.iter())
-                            .map(String::as_str)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| b.asset_refs.iter().map(String::as_str).collect())
-            })
-            .collect();
-
-        let mut out: Vec<StockRow> = self
-            .up
-            .manifest
-            .deliverables()
-            .into_iter()
-            .map(|a| StockRow {
-                assign: self.assign_of(a, &assigned),
-                in_any_bundle: in_bundle.contains(a.id.as_str()),
-                visibility: self
-                    .visibility
-                    .get(&a.id)
-                    .copied()
-                    .unwrap_or(Visibility::Menu),
-                id: a.id.clone(),
-                resource_type: a.resource_type,
-                machine_id: a.machine_id.clone(),
-                file_name: a.file_name.clone(),
-                relative_path: a.relative_path.clone(),
-                sha256: a.sha256.clone(),
-                size: a.size,
-                updated_at: a.updated_at.clone(),
-                nozzle: a.nozzle.clone(),
-                layer_height: a.layer_height.clone(),
-            })
-            .collect();
-        out.sort_by(|a, b| a.id.cmp(&b.id));
-        out
-    }
-
-    /// BBS 三态。**与「有没有进套餐」正交**（tasks 7.6）：
-    /// 一条曲线可以已分配给某个版本、同时不属于任何套餐
-    fn assign_of(&self, asset: &Asset, assigned: &BTreeSet<String>) -> BbsAssign {
-        if self.visibility.get(&asset.id) == Some(&Visibility::ArchiveOnly) {
-            return BbsAssign::ArchiveOnly;
-        }
-        if assigned.contains(&asset.id) {
-            BbsAssign::Assigned
-        } else {
-            BbsAssign::Optional
-        }
     }
 
     /* ---------- 矩阵 ---------- */
@@ -616,8 +528,16 @@ impl<'a> Book<'a> {
         // 行序（C14 第四轮）：**基准机型的参数先排完，别家多出来的接后面**；
         // 没有基准时按全局五段键（配方台与旧对照的同一把尺）
         if !base_keys.is_empty() {
-            let mut head: Vec<&str> = base_keys.iter().copied().filter(|k| keys.contains(k)).collect();
-            let mut extras: Vec<&str> = keys.iter().filter(|k| !base_keys.contains(k)).copied().collect();
+            let mut head: Vec<&str> = base_keys
+                .iter()
+                .copied()
+                .filter(|k| keys.contains(k))
+                .collect();
+            let mut extras: Vec<&str> = keys
+                .iter()
+                .filter(|k| !base_keys.contains(k))
+                .copied()
+                .collect();
             extras.sort_by(|a, b| self.row_sort_key(a).cmp(&self.row_sort_key(b)));
             head.extend(extras);
             keys = head;
@@ -884,7 +804,18 @@ impl<'a> Book<'a> {
             differs: false,
             diff_tip: None,
             raw: hit.value.clone(),
+            rest: self.rest_at(col, key),
         }
+    }
+
+    /// 这一列**盘上**钉着的值（草稿不算）。`None` = 这一层没钉着它 ——
+    /// 界面上的「恢复修改前的」要据此写 `null` **删键**、让它挂回继承，
+    /// 而不是写回一个值（写回值会把继承钉死，那是另一回事）。
+    fn rest_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
+        let p = self.presets.registry.param(key)?;
+        p.machine_variants
+            .get(&variant_key(col.level, &col.key_of_level()))
+            .cloned()
     }
 
     /// 行头常驻的那一句：这一项归谁管。
@@ -1350,26 +1281,6 @@ pub struct BuildRow {
     pub last_build: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StockRow {
-    pub id: String,
-    pub resource_type: ResourceType,
-    pub machine_id: Option<String>,
-    pub file_name: String,
-    pub relative_path: String,
-    /// 真哈希。这一页不该出现「未知」
-    pub sha256: String,
-    pub size: u64,
-    pub updated_at: String,
-    pub nozzle: Option<String>,
-    pub layer_height: Option<String>,
-    pub assign: BbsAssign,
-    /// **与 `assign` 正交**：可以已分配、同时不属于任何套餐
-    pub in_any_bundle: bool,
-    pub visibility: Visibility,
-}
-
 /* ---------- 矩阵 ---------- */
 
 /// 配方台一屏：左栏导航 + 分组列表 + **这一机型的全部层**（C14）
@@ -1572,6 +1483,9 @@ pub struct Cell {
     pub diff_tip: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
     pub raw: Value,
+    /// 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
+    /// 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+    pub rest: Option<Value>,
 }
 
 impl Cell {
@@ -1594,6 +1508,7 @@ impl Cell {
             differs: false,
             diff_tip: None,
             raw: Value::Null,
+            rest: None,
         }
     }
 }
@@ -1655,10 +1570,8 @@ mod tests {
     ///
     /// 必须走 [`Fixture::into_parts`]：这批值要写盘，而盘在那个临时目录里。
     /// 目录被删之后再写的症状是一条八竿子打不着的「建不出文件」
-    fn saved_values(
-        edits: &[(&str, &str, serde_json::Value)],
-    ) -> (tempfile::TempDir, Upstream, Presets) {
-        let (dir, up, mut presets) = Fixture::load().into_parts();
+    fn saved_values(edits: &[(&str, &str, serde_json::Value)]) -> (tempfile::TempDir, Presets) {
+        let (dir, mut presets) = Fixture::load().into_parts();
         let batch: Vec<(String, String, Option<serde_json::Value>)> = edits
             .iter()
             .map(|(key, owner, v)| ((*key).to_owned(), (*owner).to_owned(), Some(v.clone())))
@@ -1666,7 +1579,7 @@ mod tests {
         presets
             .apply_values(&batch)
             .expect("夹具的字段与 owner 都是真的");
-        (dir, up, presets)
+        (dir, presets)
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {
@@ -1686,7 +1599,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
+        let view = Book::new(&f.presets, &c, &d).book_view();
 
         assert_eq!(view.badges.machines, 3);
         assert_eq!(view.badges.versions, 4);
@@ -1722,10 +1635,10 @@ mod tests {
     /// 中间没有第二份自造 json 要同步 —— 这一层不再有第二副本
     #[test]
     fn a_value_saved_to_the_registry_shows_up_on_the_tree() {
-        let (_dir, up, presets) = saved_values(&[("wiping.child", "A1", serde_json::json!(33))]);
+        let (_dir, presets) = saved_values(&[("wiping.child", "A1", serde_json::json!(33))]);
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&up, &presets, &c, &d);
+        let b = Book::new(&presets, &c, &d);
 
         let l = b.machine_layers("A1").unwrap();
         assert_eq!(
@@ -1765,7 +1678,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         assert_eq!(b.build_state("A2L/STANDARD"), BuildState::NoResources);
         assert!(
@@ -1799,7 +1712,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         // P1S 的唯一版本：`P1S:LITE` 那一条被上提成了机型基底 → 有配方
         assert!(b.has_any_recipe("P1S/LITE"));
@@ -1814,7 +1727,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let got: Vec<&str> = b
             .live_versions("A1")
@@ -1849,7 +1762,7 @@ mod tests {
         let mut d = Draft::default();
 
         // 先记一条「按当前配方生成过」
-        let fp = Book::new(&f.up, &f.presets, &c, &d)
+        let fp = Book::new(&f.presets, &c, &d)
             .version_layers("A1/STANDARD")
             .unwrap()
             .fingerprint();
@@ -1865,7 +1778,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Book::new(&f.up, &f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Built
         );
 
@@ -1883,7 +1796,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            Book::new(&f.up, &f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -1901,7 +1814,7 @@ mod tests {
         let before: Vec<String> = ["A1/STANDARD", "A1/FAST"]
             .iter()
             .map(|u| {
-                Book::new(&f.up, &f.presets, &c, &d)
+                Book::new(&f.presets, &c, &d)
                     .version_layers(u)
                     .unwrap()
                     .fingerprint()
@@ -1921,7 +1834,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         for (i, u) in ["A1/STANDARD", "A1/FAST"].iter().enumerate() {
             assert_eq!(
                 b.version_layers(u).unwrap().fingerprint(),
@@ -1935,7 +1848,7 @@ mod tests {
                     .unwrap()
                     .value,
                 if *u == "A1/STANDARD" {
-                    serde_json::json!(-1)
+                    serde_json::json!(-1.0)
                 } else {
                     serde_json::json!(-0.7)
                 },
@@ -1956,7 +1869,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let mut moved = 0;
         for (i, u) in ["A1/STANDARD", "A1/FAST"].iter().enumerate() {
             if b.version_layers(u).unwrap().fingerprint() != before[i] {
@@ -1964,7 +1877,7 @@ mod tests {
             }
             let r = b.version_layers(u).unwrap();
             let hit = r.effective("wiping.child").unwrap();
-            assert_eq!(*hit.value, serde_json::json!(44));
+            assert_eq!(*hit.value, serde_json::json!(44.0));
             assert_eq!(hit.origin, Origin::Machine, "值来自机型这一层");
         }
         assert_eq!(moved, 2, "两个版本都没写过它，所以两个都该跟着变");
@@ -1974,12 +1887,12 @@ mod tests {
     #[test]
     fn a_pending_delete_shows_up_before_saving() {
         // 「已经写过的那一条」只能造在 registry 里 —— 值在这一层唯一的落盘处
-        let (_dir, up, presets) =
+        let (_dir, presets) =
             saved_values(&[("wiping.child", "A1:STANDARD", serde_json::json!(99))]);
         let c = committed();
         let mut d = Draft::default();
 
-        let b = Book::new(&up, &presets, &c, &d);
+        let b = Book::new(&presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             *l.effective("wiping.child").unwrap().value,
@@ -2005,11 +1918,11 @@ mod tests {
 
         // 挂回继承在这台机型上一路退到出厂默认：版本层删掉之后机型层那一项也不存在
         // （有落差时它只退一层，见 `domain::layer` 的 detaching_falls_back_one_level_at_a_time）
-        let b = Book::new(&up, &presets, &c, &d);
+        let b = Book::new(&presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             *l.effective("wiping.child").unwrap().value,
-            serde_json::json!(20)
+            serde_json::json!(20.0)
         );
         assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
         assert!(
@@ -2026,7 +1939,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let want = ["A1", "A1/STANDARD", "A1/FAST", "P1S", "P1S/LITE"];
         for shuffled in [
@@ -2057,7 +1970,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let m = Book::new(&f.up, &f.presets, &c, &d).matrix(&cols(&[("A1", None)]), None, "", None);
+        let m = Book::new(&f.presets, &c, &d).matrix(&cols(&[("A1", None)]), None, "", None);
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Machine);
         assert_eq!(m.cols[0].version_uid, None);
@@ -2070,7 +1983,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "", None);
         let keys: Vec<&str> = m.rows.iter().map(|r| r.key.as_str()).collect();
@@ -2099,7 +2012,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None), ("P1S", None)]), None, "", None);
         let mut seen: Vec<&str> = Vec::new();
@@ -2131,7 +2044,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
         let at = |k: &str| m.rows.iter().position(|r| r.key == k).unwrap();
@@ -2158,7 +2071,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let want = &cols(&[("A1", None), ("P1S", None)]);
         let a: Vec<String> = b
@@ -2192,7 +2105,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         // 干净状态下 wiping.mode 还是「擦料塔」，所以 wiping.child 是**可编辑**的
         let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
@@ -2229,7 +2142,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
         let cell = &m
             .rows
@@ -2262,7 +2175,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
 
@@ -2307,7 +2220,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let desk = b.desk("A1", None, None, "");
         let row = desk
@@ -2320,13 +2233,21 @@ mod tests {
         assert!(row.row.deprecated);
         let cell = &row.row.cells[desk.cur];
         assert!(!cell.editable, "弃用的格子改不动");
-        assert!(cell.blocked.is_empty(), "弃用不是「条件不成立」，不许混进 blocked");
         assert!(
-            cell.reason.as_deref().is_some_and(|r| r.contains("不再使用")),
+            cell.blocked.is_empty(),
+            "弃用不是「条件不成立」，不许混进 blocked"
+        );
+        assert!(
+            cell.reason
+                .as_deref()
+                .is_some_and(|r| r.contains("不再使用")),
             "要说清为什么改不动：{:?}",
             cell.reason
         );
-        assert!(cell.blocked_hint.is_none(), "对弃用的行说「要 X 才可改」是假话");
+        assert!(
+            cell.blocked_hint.is_none(),
+            "对弃用的行说「要 X 才可改」是假话"
+        );
 
         // 对照：被条件关着的格子给的是**另一套**话
         let mut d2 = Draft::default();
@@ -2342,7 +2263,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b2 = Book::new(&f.up, &f.presets, &c, &d2);
+        let b2 = Book::new(&f.presets, &c, &d2);
         let desk2 = b2.desk("A1", None, None, "");
         let child = desk2
             .groups
@@ -2353,7 +2274,9 @@ mod tests {
             .unwrap();
         let cell = child.cells[desk2.cur].clone();
         assert!(
-            cell.blocked_hint.as_deref().is_some_and(|h| h.starts_with("要 ") && h.ends_with(" 才可改")),
+            cell.blocked_hint
+                .as_deref()
+                .is_some_and(|h| h.starts_with("要 ") && h.ends_with(" 才可改")),
             "被关着的行要给短提示：{:?}",
             cell.blocked_hint
         );
@@ -2370,7 +2293,7 @@ mod tests {
         // 基底视角：A1 的两个版本都没钉 toolhead.offset.x …… 不对，夹具的
         // machineVariants 里 A1:STANDARD / A1:FAST 都钉了这一项 —— 那就换一项：
         // toolhead.offset.z 只有 P1S:LITE 钉着，A1 两版都是继承
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let desk = b.desk("A1", None, None, "");
         let row = desk
             .groups
@@ -2392,7 +2315,11 @@ mod tests {
             .unwrap();
         let impact_v = row_v.row.impact.as_ref().unwrap();
         assert_eq!(impact_v.targets.len(), 1, "版本层只影响这一版");
-        assert!(impact_v.targets[0].contains("标准版"), "点名要用人话：{}", impact_v.targets[0]);
+        assert!(
+            impact_v.targets[0].contains("标准版"),
+            "点名要用人话：{}",
+            impact_v.targets[0]
+        );
         assert_eq!(impact_v.followers.len(), 1, "FAST 没钉它，还在跟着基底");
     }
 
@@ -2405,10 +2332,14 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let m = b.matrix(
-            &cols(&[("A1", None), ("A1", Some("A1/STANDARD")), ("P1S", Some("P1S/LITE"))]),
+            &cols(&[
+                ("A1", None),
+                ("A1", Some("A1/STANDARD")),
+                ("P1S", Some("P1S/LITE")),
+            ]),
             None,
             "",
             Some("A1"),
@@ -2463,7 +2394,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let b2 = Book::new(&f.up, &f.presets, &c, &d2);
+        let b2 = Book::new(&f.presets, &c, &d2);
         let m2 = b2.matrix(
             &cols(&[("A1", None), ("A1", Some("A1/STANDARD"))]),
             None,
@@ -2488,7 +2419,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let all = b.desk("A1", Some("A1/STANDARD"), None, "");
         let searched = b.desk("A1", Some("A1/STANDARD"), None, "擦料塔");
@@ -2523,7 +2454,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "");
         let wipe = desk.groups.iter().find(|g| g.label == "擦料方式").unwrap();
         let mode = wipe
@@ -2538,12 +2469,8 @@ mod tests {
         assert!(note.contains('1'), "要说关掉了几项：{note}");
 
         // 没关的时候不给这一句，否则界面上多一条空话
-        let open = Book::new(&f.up, &f.presets, &c, &Draft::default()).desk(
-            "A1",
-            Some("A1/STANDARD"),
-            None,
-            "",
-        );
+        let open =
+            Book::new(&f.presets, &c, &Draft::default()).desk("A1", Some("A1/STANDARD"), None, "");
         let mode2 = open
             .groups
             .iter()
@@ -2559,7 +2486,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         // 只命中子项（「塔位置 X」是 wiping.child 的中文名）
         let desk = b.desk("A1", Some("A1/STANDARD"), None, "塔位置");
@@ -2598,7 +2525,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let m = b.matrix(&cols(&[("A1", None)]), None, "", None);
 
         let child = m.rows.iter().find(|r| r.key == "wiping.child").unwrap();
@@ -2633,7 +2560,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let one = cols(&[("A1", None)]);
 
         let only_wiping = b.matrix(&one, Some("wiping"), "", None);
@@ -2665,7 +2592,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         let no_cols = b.matrix(&[], None, "", None);
         assert_eq!(no_cols.empty_reason.as_deref(), Some(w::MATRIX_NO_COLS));
@@ -2675,62 +2602,21 @@ mod tests {
         assert!(no_match.total_rows > 0, "总行数要说过滤前的");
     }
 
-    /* ---------- 仓库盘点 ---------- */
-
-    /// 盘点只列交付物，且**每条都有真哈希** —— 这一页不该出现「未知」
+    /// **BBS 与「进没进套餐」的正交面**（tasks 7.6）：A1 的 `defaultBundle`
+    /// 里有那条 BBS，它的两个版本跟着；P1S 没有默认套餐 → 一条都没有
     #[test]
-    fn stock_lists_only_deliverables_with_real_hashes() {
+    fn a_machines_bbs_follows_its_default_bundle() {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let rows = Book::new(&f.up, &f.presets, &c, &d).stock_rows();
+        let b = Book::new(&f.presets, &c, &d);
 
-        assert_eq!(rows.len(), 4, "3 个 MKP + 1 个 BBS，界面素材不算");
-        assert!(rows.iter().all(|r| !r.sha256.is_empty() && r.size > 0));
-        assert!(!rows.iter().any(|r| r.resource_type == ResourceType::Image));
-    }
-
-    /// **BBS 三态与「进没进套餐」正交**（tasks 7.6）
-    #[test]
-    fn bbs_assignment_and_bundle_membership_are_independent() {
-        let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
-
-        // A1 的 defaultBundle 里有那条 BBS → A1 的两个版本继承它 → 已分配
-        let row = b
-            .stock_rows()
-            .into_iter()
-            .find(|r| r.id == "a1_bbs_04")
-            .unwrap();
-        assert_eq!(row.assign, BbsAssign::Assigned);
-        assert!(row.in_any_bundle);
         // 夹具里 A1 各版本自己就指着 A1_default（一版一套，P4 起）：来源是「本版本一份」
         assert_eq!(b.bbs_source("A1/STANDARD"), BbsSource::Own);
-        assert_eq!(b.effective_bbs("A1/STANDARD"), vec!["a1_bbs_04"]);
+        assert_eq!(b.effective_bbs("A1/STANDARD"), vec!["a1-bbs-04-020"]);
 
         // P1S 没有 defaultBundle → 它的版本一条 BBS 都没有
         assert!(b.effective_bbs("P1S/LITE").is_empty());
-
-        // 标成仅归档 → 三态变了，但"进没进套餐"没变
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::SetVisibility {
-                file_id: "a1_bbs_04".to_owned(),
-                visibility: Visibility::ArchiveOnly,
-            }],
-        )
-        .unwrap();
-        let row = Book::new(&f.up, &f.presets, &c, &d)
-            .stock_rows()
-            .into_iter()
-            .find(|r| r.id == "a1_bbs_04")
-            .unwrap();
-        assert_eq!(row.assign, BbsAssign::ArchiveOnly);
-        assert!(row.in_any_bundle, "两个字段互不影响");
     }
 
     /// **改一份套餐，指着它的版本全都跟着变**（一版一套，P4 起）。
@@ -2743,12 +2629,12 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let mut d = Draft::default();
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
 
         for uid in ["A1/STANDARD", "A1/FAST"] {
             assert_eq!(
                 b.effective_bbs(uid),
-                vec!["a1_bbs_04"],
+                vec!["a1-bbs-04-020"],
                 "两个版本都指着 A1_default"
             );
         }
@@ -2765,7 +2651,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         for uid in ["A1/STANDARD", "A1/FAST"] {
             assert_eq!(
                 b.effective_bbs(uid),
@@ -2787,7 +2673,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let rows = Book::new(&f.up, &f.presets, &c, &d).build_rows();
+        let rows = Book::new(&f.presets, &c, &d).build_rows();
 
         assert_eq!(rows.len(), 4);
         for r in &rows {
@@ -2799,12 +2685,12 @@ mod tests {
         let a2l = rows.iter().find(|r| r.uid == "A2L/STANDARD").unwrap();
         assert_eq!(a2l.state, BuildState::NoResources);
         assert!(!a2l.buildable);
-        assert_eq!(a2l.mkp_file, None);
 
         let a1 = rows.iter().find(|r| r.uid == "A1/STANDARD").unwrap();
         assert_eq!(a1.state, BuildState::NeverBuilt);
         assert!(a1.buildable);
-        assert_eq!(a1.mkp_file.as_deref(), Some("A1.toml"));
+        // 产物名由命名规则算出：`{机型}-{版本小写}.toml`
+        assert_eq!(a1.mkp_file.as_deref(), Some("A1-standard.toml"));
     }
 
     /// 整本产物状态：**「暂无资源」的版本不参与** ——
@@ -2816,12 +2702,12 @@ mod tests {
         let mut d = Draft::default();
 
         assert_eq!(
-            Book::new(&f.up, &f.presets, &c, &d).book_view().artifact,
+            Book::new(&f.presets, &c, &d).book_view().artifact,
             ArtifactState::Missing
         );
 
         // 把三个有产物的版本都记成已生成
-        let b = Book::new(&f.up, &f.presets, &c, &d);
+        let b = Book::new(&f.presets, &c, &d);
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
         let fps: BTreeMap<String, String> = uids
             .iter()
@@ -2840,7 +2726,7 @@ mod tests {
         )
         .unwrap();
 
-        let view = Book::new(&f.up, &f.presets, &c, &d).book_view();
+        let view = Book::new(&f.presets, &c, &d).book_view();
         assert_eq!(
             view.artifact,
             ArtifactState::Fresh,

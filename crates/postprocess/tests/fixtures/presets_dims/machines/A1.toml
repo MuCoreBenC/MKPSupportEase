@@ -1,0 +1,41 @@
+# 测试专用机型清单（**不是生产预设** —— `presets/machines/` 那份不参与这条判据）。
+#
+# 为什么要有它：`machine_dims_must_exist` 那条判据需要**同时存在**两种机型 ——
+# 别名表认识的、尺寸表里有 / 没有。上一版把「没有尺寸的那一台」寄托在生产预设上
+# （当时 `presets/machines/A2L.toml` 是唯一没有 `[dimensions]` 的），于是 A2L 一删，
+# 判据的反空转前提就跟着没了、整片变红。**测试的前提该由测试自己带着。**
+#
+# 这台是「有尺寸」的那一半（正面对照）；`NODIM.toml` 是另一半（守卫要拦的）。
+#
+# 尺寸照 `presets/machines/A1.toml` 抄，为的是让「正常机型必须仍然通过」那条断言里
+# 两个真实数字（X..260.0 / Y..255.0）指着**这份 fixture 自己**，而不是又一个生产依赖。
+id = 'A1'
+name = ''
+display = 'A1'
+brand = 'Bambu Lab'
+externalAliases = ['A1C', 'A1F']
+
+[dimensions]
+edgeZone = 10.0
+
+[dimensions.bedSize]
+depth = 255.0
+width = 260.0
+
+[dimensions.movementRange]
+maxX = 260.0
+maxY = 255.0
+maxZ = 999.0
+minX = -40.0
+minY = 0.0
+
+[dimensions.glueArea]
+glueMaxX = 260.0
+glueMaxY = 255.0
+glueMinX = -40.0
+glueMinY = 0.0
+wipeX = 252.0
+
+[dimensions.flags]
+gcodeMarker = ';===== machine: A1'
+hasSecondFan = false

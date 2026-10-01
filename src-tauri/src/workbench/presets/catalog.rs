@@ -34,12 +34,14 @@ pub struct Brand {
     pub logo: Option<String>,
 }
 
-/// 一个版本。六个字段，与 mkppanel 版本卡上那六格一一对应
+/// 一个版本。字段与 mkppanel 版本卡上那几格一一对应。
+///
+/// **`presetFile` 已退休**（G-2）：产物文件名由命名规则（机型 id + 版本 id 小写）算出，
+/// 不让 TOML 指挥程序去找文件（Task 12 清债）
 #[derive(Debug, Clone)]
 pub struct MachineVersion {
     pub id: String,
     pub name: String,
-    pub preset_file: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
     pub description: Option<String>,
@@ -61,7 +63,6 @@ pub struct Zone {
 #[serde(rename_all = "camelCase")]
 pub enum VersionField {
     Name,
-    PresetFile,
     RecommendedBundle,
     Tag,
     Description,
@@ -71,7 +72,6 @@ impl VersionField {
     fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
-            Self::PresetFile => "presetFile",
             Self::RecommendedBundle => "recommendedBundle",
             Self::Tag => "tag",
             Self::Description => "description",
@@ -158,8 +158,8 @@ impl Machine {
     /// 这就是「加一个新版本怎么加」那个问题的答案所在：
     /// 一个版本 = 机型文件里的一个 `[[versions]]` 块。
     ///
-    /// 六个字段里只要 `id` 与 `name` —— 其余四个（presetFile / recommendedBundle /
-    /// tag / description）**留空不写**，而不是写成空串：
+    /// 五个字段里只要 `id` 与 `name` —— 其余（recommendedBundle / tag / description）
+    /// **留空不写**，而不是写成空串：
     /// 空串会在界面上显示成"已经填过但填了个空"，和"还没填"是两件事。
     pub fn add_version(&mut self, id: &str, name: &str) -> Result<(), AppError> {
         let name = name.trim();
@@ -176,7 +176,6 @@ impl Machine {
             None,
             None,
             None,
-            None,
         )
     }
 
@@ -185,8 +184,7 @@ impl Machine {
     /// 由调用方给（前端拿模板值预填，人可改）。
     ///
     /// 两条**刻意不做**：
-    /// - **不复制 `presetFile`** —— 那是 G-2 待删的 B 套悬空名字，把悬空引用抄进
-    ///   新版本等于扩大它；参数源状态由 `hasRecipe`（14.4）呈现，新版本默认「待补」；
+    /// - **不复制参数源状态** —— 新版本默认「待补」（`hasRecipe` 14.4 呈现它）；
     /// - **不碰参数正文** —— doc 第 5 步「只写版本定义」，参数正文是 14.5 的
     ///   独立动作（`wb_copy_recipe`）。两步分离让每次写都只落一个文件，
     ///   不需要 16.2 的跨文件事务。
@@ -216,7 +214,6 @@ impl Machine {
             &mut self.versions,
             &new_id,
             name,
-            None,
             bundle,
             tag,
             description,
@@ -232,7 +229,6 @@ impl Machine {
         versions: &mut Vec<MachineVersion>,
         id: &str,
         name: &str,
-        preset_file: Option<String>,
         recommended_bundle: Option<String>,
         tag: Option<&str>,
         description: Option<&str>,
@@ -245,9 +241,6 @@ impl Machine {
         }
         if let Some(desc) = description.filter(|s| !s.trim().is_empty()) {
             t["description"] = literal_str(desc.trim());
-        }
-        if let Some(pf) = &preset_file {
-            t["presetFile"] = literal_str(pf);
         }
         if let Some(b) = &recommended_bundle {
             t["recommendedBundle"] = literal_str(b);
@@ -267,7 +260,6 @@ impl Machine {
         versions.push(MachineVersion {
             id: id.to_owned(),
             name: name.to_owned(),
-            preset_file,
             recommended_bundle,
             tag: tag
                 .map(str::trim)
@@ -376,7 +368,6 @@ impl Machine {
         let owned = val.map(str::to_owned);
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
-            VersionField::PresetFile => v.preset_file = owned,
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
             VersionField::Description => v.description = owned,
@@ -746,7 +737,6 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                         Some(MachineVersion {
                             id: t.get("id")?.as_str()?.to_owned(),
                             name: g("name").unwrap_or_default(),
-                            preset_file: g("presetFile"),
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
                             description: g("description"),
@@ -1004,8 +994,7 @@ mod tests {
 
     /* ---------- 复制版本（b05 Task 14.3） ---------- */
 
-    /// **复制版本只写版本定义**，从模板抄 recommendedBundle、
-    /// **不抄 presetFile**（G-2 待删的悬空名），tag/description 按参数。
+    /// **复制版本只写版本定义**，从模板抄 recommendedBundle，tag/description 按参数。
     /// 落盘后从盘上重读核对（副本上改，不碰真数据）
     #[test]
     fn copy_version_writes_the_definition_only() {
@@ -1036,10 +1025,6 @@ mod tests {
             nv.recommended_bundle.as_deref(),
             template.recommended_bundle.as_deref(),
             "版本 → 套餐的关系随复制走"
-        );
-        assert!(
-            nv.preset_file.is_none(),
-            "presetFile 是 G-2 待删的悬空名，不许抄进新版本"
         );
         assert_eq!(a1.versions.len(), 4, "原有三版一台不少");
 
@@ -1118,8 +1103,8 @@ mod tests {
         assert!(m.default_bundle.is_none() && m.image.is_none() && m.icon.is_none());
         assert!(m.external_aliases.is_empty());
 
-        // 原有六台一台没少，而且顺序仍然照文件名（新建之后的顺序要和重启之后一样）
-        assert_eq!(c2.machines().len(), 7);
+        // 原有五台一台没少，而且顺序仍然照文件名（新建之后的顺序要和重启之后一样）
+        assert_eq!(c2.machines().len(), 6);
         let ids: Vec<&str> = c2.machines().iter().map(|m| m.id.as_str()).collect();
         let mut sorted = ids.clone();
         sorted.sort_unstable();
@@ -1127,7 +1112,7 @@ mod tests {
 
         // 新建之后**不重读**也能立刻看到（界面依赖这个）
         assert!(c.machine("TEST_X9").is_some());
-        assert_eq!(c.machines().len(), 7);
+        assert_eq!(c.machines().len(), 6);
     }
 
     /// **绝不覆盖已存在的文件。** 这是本条唯一的不可逆风险
@@ -1197,7 +1182,7 @@ mod tests {
         );
         // 文件**一个都没建**
         assert!(!tmp.path().join("machines").join("A1C.toml").exists());
-        assert_eq!(c.machines().len(), 6, "被拒的调用改动了状态");
+        assert_eq!(c.machines().len(), 5, "被拒的调用改动了状态");
     }
 
     /// 三条格式拒绝，每条有自己的话
@@ -1225,7 +1210,7 @@ mod tests {
         let n = std::fs::read_dir(tmp.path().join("machines"))
             .unwrap()
             .count();
-        assert_eq!(n, 6, "被拒的调用建出了文件");
+        assert_eq!(n, 5, "被拒的调用建出了文件");
     }
 
     /// 引号风格的判据自己也要被验一次。
@@ -1305,10 +1290,6 @@ mod tests {
             "新值不在插入段：{inserted:?}"
         );
         // **别的字段一个都不许进这次改动的范围**
-        assert!(
-            !removed.contains("presetFile"),
-            "波及了 presetFile：{removed:?}"
-        );
         assert!(
             !removed.contains("[[versions]]"),
             "波及了整个块：{removed:?}"
@@ -1480,21 +1461,21 @@ mod tests {
             return;
         };
         let (tmp, mut c) = copy_of(&root);
-        // A2L 实测只有一个版本
-        let only = c.machine("A2L").unwrap().versions[0].id.clone();
-        assert_eq!(c.machine("A2L").unwrap().versions.len(), 1, "前提变了");
+        // P1S 实测只有一个版本
+        let only = c.machine("P1S").unwrap().versions[0].id.clone();
+        assert_eq!(c.machine("P1S").unwrap().versions.len(), 1, "前提变了");
 
-        c.machine_mut("A2L")
+        c.machine_mut("P1S")
             .unwrap()
             .remove_version(&only)
             .expect("该允许");
-        c.write_machine("A2L").expect("写回");
+        c.write_machine("P1S").expect("写回");
 
         // 关键：**删空之后文件还得读得回来**（不能留下一个坏掉的 TOML）
         let c2 = Catalog::load_from(tmp.path()).expect("删空之后整个目录还要读得通");
-        let m = c2.machine("A2L").expect("机型本身还在");
+        let m = c2.machine("P1S").expect("机型本身还在");
         assert!(m.versions.is_empty());
-        assert_eq!(m.display, "A2L", "别的字段被带走了");
+        assert_eq!(m.display, "P1S", "别的字段被带走了");
     }
 
     /// 加一个版本 = 往机型文件里插一个 `[[versions]]` 块。
@@ -1531,8 +1512,8 @@ mod tests {
         let v = m.versions.last().unwrap();
         assert_eq!(v.id, "TEST_NEW");
         assert_eq!(v.name, "我的新版本");
-        // 四个可选字段**留空不写**，不是写成空串
-        assert!(v.preset_file.is_none() && v.tag.is_none() && v.description.is_none());
+        // 三个可选字段**留空不写**，不是写成空串
+        assert!(v.recommended_bundle.is_none() && v.tag.is_none() && v.description.is_none());
 
         // 原有版本原封不动
         let now_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();

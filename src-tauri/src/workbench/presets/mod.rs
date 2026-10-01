@@ -113,8 +113,8 @@ pub(crate) fn can_be_literal(s: &str) -> bool {
 
 /// 一个"可选引用"字段：**trim 后非空才算引用**。
 ///
-/// 空串与 `None` 同义（"没有"），这是 8.6 定下的口径 —— 旧数据里 A2L 的
-/// `recommendedBundle = ''` 读成"填过但填了个空"，查存在性时必须跳过而不是报错
+/// 空串与 `None` 同义（"没有"），这是 8.6 定下的口径 —— 旧数据里 `recommendedBundle = ''`
+/// 读成"填过但填了个空"，查存在性时必须跳过而不是报错
 fn non_empty(v: &Option<String>) -> Option<&str> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
@@ -186,7 +186,7 @@ pub struct AssetUsage {
 ///
 /// 机型文件里的 `defaultBundle` / `recommendedBundle` 在 Task 10 之前是**刻意的悬空引用**
 /// （只是字符串）；现在它们必须能解析到 `bundles.toml` 里的一条套餐，
-/// 加载期查（[`Self::check_bundle_refs`]）。`presetFile` 仍按 G-2 要删（Task 16.3）。
+/// 加载期查（[`Self::check_bundle_refs`]）。
 pub struct Presets {
     pub catalog: Catalog,
     /// 资产域①层（b05 Task 8）
@@ -349,7 +349,7 @@ impl Presets {
     /// 1. **机型与版本 → 套餐**（10.5：悬空引用消除）。`defaultBundle` 与每个版本的
     ///    `recommendedBundle` 写着的 id 必须能在 `bundles.toml` 里查到 —— 悬空的时候
     ///    它们只是字符串，查不到只表现为"那台机器没有推荐套餐"，现在升级成 error
-    ///    （doc §9：套餐定义落地后转为 error）。**空串跳过**（A2L 那台四个字段皆空），
+    ///    （doc §9：套餐定义落地后转为 error）。**空串跳过**（旧数据里那台四个字段皆空），
     ///    与 [`Self::check_asset_refs`] 同一口径 —— "没有"就该不写那一行；
     /// 2. **套餐 → 机型**（归属必须真实）。套餐的 `machineId` 指着不存在的机型，
     ///    与资产条目的假归属是同一类错（Task 8.8 那条的反方向）；
@@ -628,8 +628,8 @@ mod tests {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        // 搬进来的是 6 个机型，其中 A2L 是四折空
-        assert_eq!(p.catalog.machines().len(), 6, "搬进来的机型数");
+        // 搬进来的是 5 个机型
+        assert_eq!(p.catalog.machines().len(), 5, "搬进来的机型数");
         assert!(!p.catalog.brands().is_empty());
 
         let a1 = p.catalog.machine("A1").expect("A1 必须在");
@@ -639,11 +639,6 @@ mod tests {
         assert_eq!(a1.versions[0].id, "STANDARD");
         assert_eq!(a1.versions[0].name, "标准版");
         assert_eq!(a1.external_aliases, vec!["A1C", "A1F"]);
-
-        // A2L：有机型有版本，但没尺寸、没禁区。**不许 panic，也不许被跳过**
-        let a2l = p.catalog.machine("A2L").expect("A2L 必须在");
-        assert!(!a2l.has_dimensions, "A2L 实测没有 [dimensions]");
-        assert_eq!(a2l.versions.len(), 1);
 
         // 禁区只有三台机器有
         assert!(p.catalog.zones("P1S").is_some());
@@ -695,7 +690,8 @@ mod tests {
         assert!(whole.is_empty(), "空版本号匹配到了东西：{whole:?}");
     }
 
-    /// 递归收 `.toml`（`registry/` 与 `forbidden_zones/` 都在子目录里）
+    /// 递归收 `.toml`（`registry/` 与 `forbidden_zones/` 都在子目录里）。
+    /// **跳过 `dist/`** —— 那是机器生成的产物目录，不是手维护的源
     fn collect_toml(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -703,6 +699,9 @@ mod tests {
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
+                if p.file_name().is_some_and(|n| n == "dist") {
+                    continue;
+                }
                 collect_toml(&p, out);
             } else if p.extension().is_some_and(|x| x == "toml") {
                 out.push(p);
@@ -779,8 +778,8 @@ mod tests {
                 checked += 1;
             }
         }
-        // 反空转：真数据里 5 张机型图 + 6 个图标引用（A2L 没有图）—— 少于 10 条就是漏查了
-        assert!(checked >= 10, "只查了 {checked} 条引用 —— 这条判据在空转");
+        // 反空转：真数据里 3 张机型图 + 5 个图标引用 —— 少于 8 条就是漏查了
+        assert!(checked >= 8, "只查了 {checked} 条引用 —— 这条判据在空转");
     }
 
     /// **改一份套餐的文件清单**（b05 Task 14 / P4）：真写盘 + `updatedAt` 盖新值、
@@ -815,7 +814,10 @@ mod tests {
             .expect("换内容");
         assert!(changed);
         let on_disk = std::fs::read_to_string(&file).expect("读盘");
-        assert!(on_disk.contains("p1s-bbs-02-010"), "要真落盘，不能只在内存里：{on_disk}");
+        assert!(
+            on_disk.contains("p1s-bbs-02-010"),
+            "要真落盘，不能只在内存里：{on_disk}"
+        );
         let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
         assert!(on_disk.contains(&today), "updatedAt 要盖上今天：{on_disk}");
         assert!(
@@ -852,7 +854,9 @@ mod tests {
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
         // 查无此套餐
-        assert!(presets.set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()]).is_err());
+        assert!(presets
+            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()])
+            .is_err());
     }
 
     /// **反查与删除守卫**（b05 Task 9.4 / 9.5，套餐那一档 b05 Task 10）。

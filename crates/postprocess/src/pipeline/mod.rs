@@ -192,8 +192,9 @@ pub fn config_ir(config_path: &Path, overrides: &[String]) -> Result<Ir, Postpro
             ),
         });
     }
-    // 第二道：别名认识 ≠ 尺寸表里有。两张表实测不一致（aliasMap 6 个规范名、
-    // machine_dimensions 5 个，差 `A2L`），而尺寸表未命中会安静地留下 0×0 的运动范围 ——
+    // 第二道：别名认识 ≠ 尺寸表里有。两张表由同一批清单装出来、收录条件却不同
+    // （别名无条件进，尺寸要 `[dimensions]` 那段），实测曾差出一台 `A2L`；
+    // 而尺寸表未命中会安静地留下 0×0 的运动范围 ——
     // `check` 曾因此对一台 0×0 的机器说「配置可用」，真跑才在边界检查处失败、报错点离真因很远。
     if !crate::postproc::machine_dims::has_machine_dimensions(&ir.machine.machine_type) {
         return Err(PostprocError::MissingMachine {

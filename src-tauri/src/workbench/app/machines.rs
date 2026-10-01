@@ -35,7 +35,6 @@ pub struct BrandView {
 pub struct VersionView {
     pub id: String,
     pub name: String,
-    pub preset_file: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
     pub description: Option<String>,
@@ -58,7 +57,7 @@ pub struct MachineView {
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
     pub icon: Option<String>,
-    /// 有没有 `[dimensions]`。A2L 实测没有 —— 界面上要能看出"这台还没配尺寸"
+    /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
     /// 禁区块数。0 = 这台没有禁区文件
     pub zone_count: usize,
@@ -281,7 +280,6 @@ fn list_of(p: &Presets) -> MachineList {
                         VersionView {
                             id: v.id.clone(),
                             name: v.name.clone(),
-                            preset_file: v.preset_file.clone(),
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
                             description: v.description.clone(),
@@ -322,11 +320,9 @@ mod tests {
             "A1.toml",
             "界面上要显示「我在改哪个文件」"
         );
-        // A2L：有版本、没尺寸、没禁区 —— 三个状态各自独立，界面要分别显示
-        let a2l = p.catalog.machine("A2L").expect("A2L 在");
-        assert!(!a2l.has_dimensions);
-        assert_eq!(p.catalog.zones("A2L").map_or(0, <[_]>::len), 0);
-        assert_eq!(a2l.versions.len(), 1);
+        // A1 有尺寸、无禁区；P1S 有禁区 —— 几个状态各自独立，界面要分别显示
+        assert!(a1.has_dimensions);
+        assert_eq!(p.catalog.zones("A1").map_or(0, <[_]>::len), 0);
         // P1S 有禁区
         assert!(p.catalog.zones("P1S").map_or(0, <[_]>::len) > 0);
     }

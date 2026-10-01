@@ -2,6 +2,8 @@
 node_modules
 dist
 dist-ssr
+# 预设交付产物（人维护 presets/*.toml，机器生成 presets/dist/*）—— 不入库
+presets/dist/
 # 建了 workspace（b04 Task 13）之后，cargo 的产物目录在**仓库根**。
 # 老那一行留着：切换之前留下的 src-tauri/target 还在本机磁盘上，删不删由你
 target

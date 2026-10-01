@@ -144,8 +144,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
         app::wb_desk,
         app::wb_matrix,
-        app::wb_stock,
-        app::wb_fallback,
         app::wb_trash,
         app::wb_ui,
         app::wb_save_ui,

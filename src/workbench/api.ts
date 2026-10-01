@@ -59,8 +59,6 @@ export type BbsSource = 'own' | 'inheritedFromMachine'
 export type Visibility = 'menu' | 'archiveOnly'
 /** `derive::CellKind` —— 三种，不是四种：「选中了升级成真控件」是前端的事 */
 export type CellKind = 'notApplicable' | 'gcode' | 'value'
-/** `upstream::ResourceType` */
-export type ResourceType = 'bbsProfile' | 'mkpPreset' | 'image'
 /** `registry::ValueType` */
 export type ValueType = 'float' | 'int' | 'bool' | 'string'
 /** `registry::UiComponent` */
@@ -72,32 +70,22 @@ export type BulkKind = 'detaching' | 'changing' | 'noChange'
 
 /* ---------- 启动 ---------- */
 
-/** `app::Roots`。`upstream` 为 null = 定位不到（是状态，不是错误） */
+/** `workbench::Roots`。**唯一的数据根是 `presets/`**，没有第二候选、不 fallback */
 export interface Roots {
+  /** 开发源数据根（仓库里的 `workbench/`） */
   workbench: string
+  /** 预设真相源（仓库里的 `presets/`） */
+  presets: string
+  /** 交付产物目录（仓库里的 `presets/dist/`） */
   dist: string
-  upstream: string | null
 }
 
-/** `app::UpstreamInfo`。`minimumClient` 为 null = **上游未声明** */
-export interface UpstreamInfo {
-  registryUpdated: string
-  manifestUpdated: string
-  channel: string
-  minimumClient: string | null
-  latestRelease: string | null
-  params: number
-  machines: number
-  deliverables: number
-  fallbacks: number
-}
-
-/** `app::Boot`。**上游缺失时也是成功返回**，界面要能在那个状态下显示数据根 */
+/** `app::Boot`。**预设根定位不到时也是一个成功返回**，界面要显示问题与数据根 */
 export interface Boot {
   roots: Roots
+  /** **真正的开场失败**（今天只剩「presets/ 定位不到」这一种）。null = 业务能跑 */
   problem: string | null
   detail: string | null
-  info: UpstreamInfo | null
   /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
   storeDirs: { name: string; role: string }[]
 }
@@ -296,6 +284,11 @@ export interface Cell {
   diffTip: string | null
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
   raw: unknown
+  /**
+   * 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
+   * 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+   */
+  rest: unknown
 }
 
 /** `derive::Row` */
@@ -400,56 +393,7 @@ export interface DeskItem {
   offNote: string | null
 }
 
-/* ---------- 仓库盘点 / 回退 / 回收站 ---------- */
-
-/** `derive::StockRow` */
-export interface StockRow {
-  id: string
-  resourceType: ResourceType
-  machineId: string | null
-  fileName: string
-  relativePath: string
-  sha256: string
-  size: number
-  updatedAt: string
-  nozzle: string | null
-  layerHeight: string | null
-  assign: BbsAssign
-  /** **与 assign 正交**：可以已分配、同时不属于任何套餐 */
-  inAnyBundle: boolean
-  visibility: Visibility
-}
-
-/** `fallback::Rule` */
-export interface FallbackRule {
-  id: string
-  category: 'default' | 'infer' | 'migration' | 'override' | 'recovery'
-  trigger: string
-  from: string
-  to: string
-  enabled: boolean
-  severity: 'info' | 'warn'
-  desc: string
-  reportField: string
-}
-
-/** `app::FallbackGroup` */
-export interface FallbackGroup {
-  label: string
-  rules: FallbackRule[]
-}
-
-/** `app::FallbackTable` */
-export interface FallbackTable {
-  version: number
-  updated: string
-  /** 带换行的长文，**原样显示** */
-  guide: string
-  groups: FallbackGroup[]
-  disabled: string[]
-  emptyHint: string
-  readOnlyReason: string
-}
+/* ---------- 回收站 ---------- */
 
 /** `store::TrashEntry` */
 export interface TrashEntry {
@@ -729,11 +673,10 @@ export interface BrandView {
   logo: string | null
 }
 
-/** `machines::VersionView` —— 版本卡上那六格 */
+/** `machines::VersionView` —— 版本卡上那几格 */
 export interface VersionView {
   id: string
   name: string
-  presetFile: string | null
   recommendedBundle: string | null
   tag: string | null
   description: string | null
@@ -752,7 +695,7 @@ export interface MachineView {
   externalAliases: string[]
   image: string | null
   icon: string | null
-  /** 有没有 `[dimensions]`。A2L 实测没有 */
+  /** 有没有 `[dimensions]` —— 界面上要能看出「这台还没配尺寸」 */
   hasDimensions: boolean
   /** 禁区块数。0 = 这台没有禁区文件 */
   zoneCount: number
@@ -881,7 +824,7 @@ export interface BundleList {
 export const assetUrl = (url: string) => encodeURI(url)
 
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
-export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' | 'description'
+export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
@@ -900,13 +843,10 @@ export const wb = {
   reload: () => invoke<Boot>('wb_reload'),
   words: () => invoke<Words>('wb_words'),
 
-
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
-  stock: () => invoke<StockRow[]>('wb_stock'),
-  fallback: () => invoke<FallbackTable>('wb_fallback'),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
   ui: () => invoke<Record<string, unknown>>('wb_ui'),
   saveUi: (ui: Record<string, unknown>) => invoke<void>('wb_save_ui', { ui }),
@@ -1020,7 +960,7 @@ export const wb = {
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
-   * `recommendedBundle` 抄模板，`presetFile` 不抄（G-2 待删的悬空名）；
+   * `recommendedBundle` 抄模板；
    * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
    */
   copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>

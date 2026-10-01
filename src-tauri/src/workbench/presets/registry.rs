@@ -547,13 +547,11 @@ impl ParamRegistry {
                 .params
                 .iter()
                 .filter(|q| {
-                    q.show_when
-                        .as_ref()
-                        .is_some_and(|sw| {
-                            sw.key == key
-                                && sw.op == ShowOp::Eq
-                                && json_key(&sw.value) == json_key(&c.value)
-                        })
+                    q.show_when.as_ref().is_some_and(|sw| {
+                        sw.key == key
+                            && sw.op == ShowOp::Eq
+                            && json_key(&sw.value) == json_key(&c.value)
+                    })
                 })
                 .collect();
             if !gated.is_empty() && gated.iter().all(|q| q.deprecated) {

@@ -328,7 +328,31 @@
 [data-layer='exit'][data-phase='out'] .frame {
   --pane-shift: min(0px, (1400px - 100cqw) / 2);
 
-  transform: translateX(var(--pane-shift));
+  /*
+   * 平移与缩放并进同一条 transform —— 这是**硬约束**：`translate` 和 `scale` 两个独立
+   * 属性虽然语义更清楚，但它们的插值会各按各的曲线走，露出卡出场时就有一段
+   * "框已经到位、字还在飘"，两个 CSS 文件里各写一条也一样会打架。
+   *
+   * `scale(var(--peek-content))` 就是"内容偏小"的那一半 —— 只有白底 `.face` 会缩的话，
+   * 观感是卡框在长、字没动（见 SlideDeck.module.css 里 --peek-content 那段）。
+   */
+  transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+
+  /*
+   * 虚焦 + 压暗：露出卡是"下一页的预览"，不是能点的东西（它本来就被 inert 挡住了点击）。
+   * 变量由 SlideDeck 的 .deck 下发（--peek-blur / --peek-dim，悬停时收小 / 抬起）。
+   *
+   * 模糊必须也写进下面两条关键帧 —— 关键帧里没提到的属性会退回这条静态值，
+   * 于是 forwards 之后内容会一直虚着。过渡的延迟由 .card 那条 hover 规则下发
+   * （进场 180ms、离场 0），所以这里的 transition 不写死延迟。
+   */
+  opacity: var(--peek-dim, 1);
+  filter: blur(var(--peek-blur, 0));
+  transition:
+    opacity var(--peek-hover-dur, 0.26s) cubic-bezier(0.4, 0, 0.2, 1)
+      var(--peek-hover-delay, 0s),
+    filter var(--peek-hover-dur, 0.26s) cubic-bezier(0.4, 0, 0.2, 1)
+      var(--peek-hover-delay, 0s);
 }
 
 /*
@@ -350,36 +374,92 @@
 
 
 
+/*
+ * 推入：内容从"虚焦、偏小的露出卡"一路走到实色 + 原尺寸 —— 分段见下面的 frame-settle。
+ *
+ * 时长是**一整个 glide，不是 0.6 × glide**：位移在 60% 就走完了（与卡片的 card-slide
+ * 同窗口同曲线），60% → 80% 留给放大（与白底的 face-grow 同窗口同曲线），
+ * 最后 80% → 100% 才消模糊 —— 那一段正好压在"卡片层换平面层"的那一刻上。
+ */
 [data-layer='card'][data-phase='in'] .frame {
-  animation: frame-settle calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
+  animation: frame-settle var(--glide-ms) cubic-bezier(0.32, 0.68, 0.12, 1) forwards;
 }
 
 /*
- * both 是这里的关键：forwards 只管动画结束之后，延迟那一段会按静态值（已经在左边）画 ——
- * 于是内容会先瞬跳再退出。both 让延迟期间就套用 0% 关键帧。
+ * 退回：内容先缩回露出态（0 → 45%，与白底的 face-shrink 同窗口），再整体左移出画
+ * （45% → 100%，与卡片的 card-slide-out 同窗口）。所以这条也是**一整个 glide 且无延迟** ——
+ * 拆成"0.55 × glide + 延迟 0.45 × glide"的话，前 45% 没人管，缩放就丢了。
+ *
+ * both 仍然要留：forwards 只管动画结束之后，少了 both 的话 0% 那一帧套不上，
+ * 内容会先瞬跳再退出。
  */
 [data-layer='exit'][data-phase='out'] .frame {
-  animation: frame-tuck calc(var(--glide-ms) * 0.55) cubic-bezier(0.32, 0.68, 0.12, 1)
-    calc(var(--glide-ms) * 0.45) both;
+  animation: frame-tuck var(--glide-ms) cubic-bezier(0.32, 0.68, 0.12, 1) both;
 }
 
+/*
+ * 落位：四条属性各自分段，共用一条动画。
+ *
+ *   位移   0%  → 60%   回到 0                    —— 与 card-slide 同窗口同曲线
+ *   缩放   0%  → 60%   保持偏小；60% → 80% 长到 1 —— 与白底 face-grow 同窗口
+ *   亮度   0%  → 60%   保持压暗；60% → 80% 回到 1
+ *   模糊   0%  → 80%   **保持** 2.4px；80% → 100% 才归零
+ *
+ * 60 / 80 这两个界不是随手取的，它们是"卡框长完"的两个时刻（glide = 720 时是 432ms / 576ms）：
+ * 缩放段必须与白底的 face-grow 同窗口同曲线，错开就是"卡框先长、字后长"——
+ * 那正是 SlideDeck 里专门修过的毛病，所以这里不跟着旧版的 85% 走。
+ *
+ * 模糊留到最后 20% 才消，是为了遮住落位那一瞬的亚像素重排（Windows Chromium 在合成层
+ * 切换时会重新栅格化文字）；那一段的 linear 是从旧版搬来的 —— 曲线收尾落在模糊上会
+ * "糊着突然变清"，线性过渡更像对焦。
+ */
 @keyframes frame-settle {
   0% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
+  }
+
+  60% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
+  }
+
+  80% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(var(--peek-blur, 0));
+
+    /* 只作用于 80% → 100% 这一段：模糊线性归零 */
+    animation-timing-function: linear;
   }
 
   100% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
   }
 }
 
+/* 退回：内容从实色 + 原尺寸一路缩回、虚过去，终点正好是露出卡该有的样子 */
 @keyframes frame-tuck {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+
+  45% {
+    transform: translateX(0) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
   }
 
   100% {
-    transform: translateX(var(--pane-shift));
+    transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
+    opacity: var(--peek-dim, 1);
+    filter: blur(var(--peek-blur, 0));
   }
 }
 

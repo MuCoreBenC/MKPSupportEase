@@ -1,7 +1,7 @@
 //! 开发源数据的读写底座。
 //!
 //! 第三版把它**削到只剩底座**：原来那些带类型的 registry / machine / version 读写全部删掉了 ——
-//! 字段定义改由 [`crate::workbench::upstream`] 从 `mkpse-presets` 读（doc §2），
+//! 字段定义改由 [`crate::workbench::presets`] 从 `<repo>/presets` 读（doc §2），
 //! 配方本的形状与规则归 [`crate::workbench::domain`]（doc §1 第二条铁律）。
 //! 留在这里的只有四样与"业务是什么"无关的东西：
 //!

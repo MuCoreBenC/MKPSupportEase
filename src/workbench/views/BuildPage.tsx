@@ -21,9 +21,9 @@
  *
  * # 与原型的差别 —— 每一条都是真后端决定的
  *
- *  - **包版本 / 最低客户端版本不是输入框**：发布沿用上游 compat 声明的
- *    channel / version / minimumClient（`PublishMeta` 从上游清单带过去）。
- *    「最低客户端版本未声明」在左栏是一条待办，那句话自己写着
+ *  - **包版本 / 最低客户端版本不是输入框**：上游整层删掉之后这两格没有来源 ——
+ *    `wb_publish` 的 `PublishMeta` 里只有 channel 是发布常量，版本与最低客户端版本
+ *    照实留空。「最低客户端版本未声明」在左栏是一条待办，那句话自己写着
  *    「这不是我们该填的空」—— 所以这里只读，不造一个输入框出来。
  *  - **检查只有一份账**：产品的 wb_preflight 是一份报告（引用 / 参数 / 唯一性 /
  *    孤儿 + 清单↔配方对齐），不像原型分 checkIssues / publishIssues 两份。
@@ -41,9 +41,8 @@
  * 在本仓照样成立（合同在 `src/api/contract.ts` 的 `Release` / `ReleasePreset`）：
  *
  *   ② 说明书        `clientPackage.ts` 现装一份真包（机型 / 版本 / 字段 / 值 / 版本轴）
- *   ② 包版本        上游 manifest 声明的最近一次发布（`UpstreamInfo.latestRelease`）加三枚
- *                   快捷，算出「下一版该填的数」—— 本仓的包版本取自上游 `compat.version`
- *                   （`PublishMeta` 从那里带过去），工作台不自己写它
+ *   ② 包版本        工作台不替发布定版本号（`wb_publish` 的 meta 里这一格留空），
+ *                   这里只从 1.0.0 起步加三枚快捷，算出「下一版该填的数」给人参考
  *   ② 兼容性清单    客户端团队那张表（`src/workbench/compat.ts` 的 `CLIENT_COMPAT`），
  *                   外加按木桶原理算出来的「自动判断：x.y.z」—— 常显，悬停看它命中了哪几样
  *   ③ 发布物清单    产物名单与文件名来自 `BuildRow.mkpFile`（Rust 交付集合里那几份
@@ -76,12 +75,16 @@ import type {
 import type { ClientDataPackage } from '../../api/contract'
 import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
+import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
 import { CLIENT_COMPAT, minClientOf, verdictTextOf } from '../compat'
 import { buildClientPackage, buildRelease, collectInputs } from '../clientPackage'
 import { cloudSummary, listCloud, removeFromCloud, uploadToCloud } from '../cloud'
 import type { CloudEntry } from '../cloud'
 import s from '../c14.module.css'
+
+/** 发布渠道常量 —— 与后端 `app::build::PUBLISH_CHANNEL` 同一个值（上游整层删掉后的唯一来源） */
+const PUBLISH_CHANNEL = 'stable'
 
 interface Props {
   boot: Boot
@@ -122,21 +125,13 @@ function gotoOf(i: Issue): { view: string; focus?: GotoFocus } | null {
   }
 }
 
-/* ---------- 版本号的小工具（照原型）：只认 x.y.z 三段数字，别的当看不懂 ---------- */
+/* ---------- 版本号的小工具（照原型）：从 1.0.0 起，只认 x.y.z 三段数字 ---------- */
 
 type Triple = [number, number, number]
 
-function parseVer(v: string | null | undefined): Triple | null {
-  if (!v) return null
-  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim())
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
-}
-
-const fmtVer = (t: Triple): string => t.join('.')
-
 /** 在第 `at` 段加一格，后面几段归零（`1.4.7` +0.1.0 → `1.5.0`） */
 const bumpVer = (t: Triple, at: 0 | 1 | 2): string =>
-  fmtVer(t.map((x, i) => (i === at ? x + 1 : i > at ? 0 : x)) as Triple)
+  t.map((x, i) => (i === at ? x + 1 : i > at ? 0 : x)).join('.')
 
 /**
  * 「什么时候发的」那一刻，给人看的写法（与静态快照里那份 `at` 同款：`2026-09-28 10:12`）。
@@ -180,15 +175,13 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
   const ids = Object.keys(picked).filter((k) => picked[k])
 
   /*
-   * 包版本（C15）：建议值从**上游声明的最近一次发布** +0.0.1 起步，从没声明过就是 1.0.0
-   * （第一版不做加法 —— 「从 1.0.0 加一格」是那三枚快捷的事）。
+   * 包版本（C15）：建议值从 1.0.0 起步（第一版不做加法 —— 「从 1.0.0 加一格」是那三枚快捷的事）。
    *
-   * 本仓这一格是**上游的**：`wb_publish` 的包版本取 `manifest.compat.version`
-   * （`PublishMeta` 从上游带过去，工作台不写它），发布的返回值里也没有版本号。
-   * 所以这里算出的是「下一版该往上游写什么数」，不是一个能回头改发布的输入框。
+   * 工作台不替发布定版本号：`wb_publish` 的 meta 里这一格留空（上游整层删掉后没有来源），
+   * 发布的返回值里也没有版本号。所以这里算出的是「下一版该填什么数」，
+   * 不是一个能回头改发布的输入框。
    */
-  const lastVer = parseVer(boot.info?.latestRelease)
-  const suggestVer = ver ?? (lastVer ? bumpVer(lastVer, 2) : '1.0.0')
+  const suggestVer = ver ?? '1.0.0'
 
   /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `presets/mkp/` 同一批） */
   const artifacts = rows.flatMap((r) => (r.mkpFile === null ? [] : [{ uid: r.uid, fileName: r.mkpFile }]))
@@ -209,7 +202,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     void (async () => {
       try {
         const next = buildClientPackage(await collectInputs(), {
-          minClientVersion: boot.info?.minimumClient ?? null,
+          minClientVersion: null,
         })
         if (!alive) return
         setPkg(next)
@@ -221,7 +214,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
       }
     })()
     return () => { alive = false }
-  }, [tick, boot.info?.minimumClient])
+  }, [tick])
 
   /* 兼容性清单的结论：拿这一份包去扫那张表（木桶原理），常显那个数、悬停看全账 */
   const compat = pkg === null ? null : minClientOf(pkg)
@@ -244,19 +237,11 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
 
   /*
    * 「去处理」的定位（C14 第二十四轮）：滚动到目标模块 + 闪烁两秒。
-   * 闪烁不走 React 状态 —— 瞬态 DOM 效果进状态只会逼全页重渲染；
-   * classList 直改 + 1.8s 后摘掉。
+   * 本体在 `c14/locate.ts`（目标页也用同一份 —— 参数台的「去处理」落地按它滚 + 闪）。
    */
   const goTarget = (sel: string) => {
-    const el = document.getElementById(sel)
-    if (!el) return
-    el.scrollIntoView({ block: 'center' })
     const isRow = sel.startsWith('t-build-') && sel !== 't-build'
-    const cls = isRow ? s.rowFlash : s.flashIt
-    el.classList.remove(s.flashIt, s.rowFlash)
-    void (el as HTMLElement).offsetWidth /* 打断正在播的同款动画，从头再闪 */
-    el.classList.add(cls)
-    window.setTimeout(() => el.classList.remove(s.flashIt, s.rowFlash), 1800)
+    locateAnchor(sel, { row: isRow })
   }
 
   const issueGoto = (i: Issue) => {
@@ -370,7 +355,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
       const release = await buildRelease(inp, {
         version: suggestVer,
         at: stampNow(),
-        minClientVersion: boot.info?.minimumClient ?? null,
+        minClientVersion: null,
       })
       uploadToCloud({
         id: `workbench-${suggestVer}`,
@@ -543,15 +528,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
           <div className={s.cardBody}>
             {/*
               三个版本轴（C15 把原型 ② 卡那一排搬过来，按本仓的账重排）：
-              本仓这三格全部是**上游声明 / 后端只读** —— `wb_publish` 的包版本与最低
-              客户端版本取自上游 manifest 的 compat（`PublishMeta` 从那里带过去），
-              工作台一个都不自己写。「未声明」在左栏是一条待办，它那句话自己写着
-              「这不是我们该填的空」。数据结构版本（schemaVersion）本仓没有这一格
-              —— 交付清单那份结构版本是 manifest 的 `manifestVersion`，不在 `boot` 里。
+              上游整层删掉之后，包版本与最低客户端版本都没有来源 —— `wb_publish` 的
+              `PublishMeta` 里只剩 channel 是发布常量，其余照实留空。「未声明」在左栏
+              是一条待办，它那句话自己写着「这不是我们该填的空」。数据结构版本
+              （schemaVersion）本仓没有这一格。
             */}
             <div className={s.kv}>
               <span className={s.kvKey}>渠道</span>
-              <span className={s.kvVal}>{boot.info?.channel || '—'}</span>
+              <span className={s.kvVal}>{PUBLISH_CHANNEL}</span>
               <span className={s.kvKey}>发布目录</span>
               <span className={`${s.kvVal} ${s.mono}`}>{boot.roots.dist}</span>
             </div>
@@ -576,8 +560,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                           key={label}
                           type="button"
                           className={`${s.btn} ${s.btnSm}`}
-                          title={`从${lastVer ? `上游声明的 ${fmtVer(lastVer)}` : '1.0.0'} 往上加一格`}
-                          onClick={() => setVer(bumpVer(lastVer ?? [1, 0, 0], at))}
+                          title="从 1.0.0 往上加一格"
+                          onClick={() => setVer(bumpVer([1, 0, 0], at))}
                         >
                           {label}
                         </button>
@@ -589,16 +573,12 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   </p>
                   <div className={s.vrow}>
                     <span className={s.vstatic}>{suggestVer}</span>
-                    <span className={s.cardNote}>
-                      {lastVer
-                        ? `上次发布 ${fmtVer(lastVer)}（上游 manifest 声明的）`
-                        : '上游 manifest 没声明过发布版本 —— 从 1.0.0 起算'}
-                    </span>
+                    <span className={s.cardNote}>工作台不读上游声明 —— 从 1.0.0 起算</span>
                   </div>
                   <p className={s.vhelp}>
-                    上面那三枚算的是<strong>下一版该往上游写什么数</strong>。本仓发布的包版本取自
-                    上游 manifest 的 <span className={s.mono}>compat.version</span>（发布时原样
-                    带过去，返回值里也没有它），所以这里不是一个能回头改发布结果的输入框。
+                    上面那三枚算的是<strong>下一版该填什么数</strong>，给人参考。本轮工作台不替
+                    发布定版本号（`wb_publish` 的 meta 里这一格留空），所以这里不是一个能回头
+                    改发布结果的输入框。
                   </p>
                 </div>
 
@@ -620,11 +600,10 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   </p>
                   <div className={s.vrow}>
                     <span className={s.vstatic}>
-                      {boot.info?.minimumClient || <span className={s.kvDim}>未声明</span>}
+                      <span className={s.kvDim}>未声明</span>
                     </span>
                     <span className={s.cardNote}>
-                      上游 manifest 的 <span className={s.mono}>compat.minimumClient</span>
-                      {boot.info?.minimumClient ? '' : ' 是空串（左栏有待办）'}
+                      上游整层删掉之后没有来源 —— 照实留空（左栏有待办）
                     </span>
                   </div>
                   {/*
@@ -683,12 +662,6 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   </>
                 ) : (
                   <span className={s.chip}>{pkgErr ?? '正在装说明书……'}</span>
-                )}
-                {boot.info && (
-                  <>
-                    <span className={s.chip}>{boot.info.deliverables} 个交付物</span>
-                    <span className={s.chip}>{boot.info.fallbacks} 条回退规则</span>
-                  </>
                 )}
               </div>
               <p className={s.note}>
@@ -767,9 +740,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                     ? 'preset.toml — 未生成'
                     : `preset.toml × ${artifacts.length} 份`}
                 </span>
-                <span className={s.chip}>
-                  {boot.info?.latestRelease ? `包版本 ${boot.info.latestRelease}` : '包版本 — 上游未声明'}
-                </span>
+                <span className={s.chip}>包版本（建议）{suggestVer}</span>
                 <span className={s.chip}>
                   {lastPublish
                     ? `本次发布落下 ${lastPublish.files} 个文件 · ${lastPublish.stamp}`
@@ -1053,9 +1024,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
               {
                 release: {
                   version: suggestVer,
-                  channel: boot.info?.channel ?? null,
-                  /* 上游 manifest 声明的那一格；本仓不写它。「自动判断」的建议见 ② 卡 */
-                  minimumClient: boot.info?.minimumClient ?? null,
+                  channel: PUBLISH_CHANNEL,
+                  /* 上游整层删掉之后没有来源；「自动判断」的建议见 ② 卡 */
+                  minimumClient: null,
                   presets: artifacts.map((a) => a.fileName),
                 },
                 clientPackage: pkg,

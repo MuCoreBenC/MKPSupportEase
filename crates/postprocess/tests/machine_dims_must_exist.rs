@@ -2,35 +2,50 @@
 //!
 //! ## 这条判据在守什么（实测事实，不是假想）
 //!
-//! 机型清单（`presets/machines/*.toml` 的 `id` 与 `externalAliases`）把 23 个别名
-//! 映射到 **6** 个规范名（A1 / A1_MINI / A2L / P1S / P2S / X1C），而其中有 `[dimensions]`
-//! 的只有 **5** 台 —— **没有 A2L**。而 `get_machine_dimensions` 未命中时返回 zero-value
-//! （M017「禁止机型回退」的语义，要保留），于是修之前：
+//! 两张表由 `machine_dims::load_presets_dir` 从**同一批清单文件**装出来
+//! （`<presets>/machines/*.toml`），但收录条件不同：`id` 与 `externalAliases`
+//! 无条件进 `alias_map`，而尺寸要 `[dimensions]` 那一段才进 `dimensions`。
+//! 于是「别名认识、尺寸表没有」这个差集**可能非空**，而 `get_machine_dimensions`
+//! 未命中时返回 zero-value（M017「禁止机型回退」的语义，要保留），于是修之前：
 //!
 //! ```text
-//! mkpse-pp check -c … --set Machine.MachineType=A2L
-//! → 退出码 0，「配置可用」，机型 A2L（X 0.0..0.0 / Y 0.0..0.0），禁区 0 处
+//! mkpse-pp check -c … --set Machine.MachineType=<缺尺寸的那台>
+//! → 退出码 0，「配置可用」，机型 X 0.0..0.0 / Y 0.0..0.0，禁区 0 处
 //! ```
 //!
 //! `check` 对一台运动范围 0×0 的机器说「可用」，真跑 `run` 才在边界检查处失败，
 //! 报错点离真因很远。修法是在 `pipeline::config_ir`（`run` / `check` / `dump-ir`
 //! **共用**的第 2 步本体）里加第二道：归一之后要求尺寸表命中，未命中即硬错误。
 //!
-//! ## 判据的扫描面是**算出来的**，不是写死 A2L
+//! ## 前提由 **fixture** 自带，不借生产预设
 //!
-//! 下面的 `a_canonical_name_without_dimensions()` 从两张内置表现算差集。这样：
-//! - 将来给 A2L 补了尺寸 ⇒ 差集变空 ⇒ 那个函数**响亮 panic** 并说明该怎么处置
-//!   （不是静默通过 —— 「0 命中」和「判据没执行」在终端上长得一样，见 AGENTS §7③）；
-//! - 将来 aliasMap 又多一个没尺寸的机型 ⇒ 判据自动覆盖它，不用改一行。
+//! 要跑起来得先有一台「缺尺寸」的机型。上一版把这件事寄托在生产数据上（当时
+//! `presets/machines/A2L.toml` 是唯一没有 `[dimensions]` 的那台），于是 A2L 一删，
+//! 判据的反空转前提跟着没了 —— **生产数据不该为测试的需要背这个包袱**。两份清单
+//! 现在躺在 `tests/fixtures/presets_dims/machines/`：
+//!
+//! - `A1.toml`    —— 有尺寸（正面对照，也供 `check` 走完整条管线）
+//! - `NODIM.toml` —— 没有 `[dimensions]`（守卫要拦的那一台）
+//!
+//! 扫描面仍是**算出来的**（`canonical_names()` 与 `has_machine_dimensions()` 的差集），
+//! 不是写死 `NODIM`：fixture 里再添一台没尺寸的，判据自动覆盖它。差集为空时那个
+//! 函数**响亮 panic** 并说明该怎么处置（不是静默通过 —— 「0 命中」和「判据没执行」
+//! 在终端上长得一样，见 AGENTS §7③）。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::Once;
 
-use postprocess::postproc::machine_dims::has_machine_dimensions;
+use postprocess::postproc::machine_dims::{has_machine_dimensions, install, load_presets_dir};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// 测试自带的那份机型表根目录（形状与 `presets/` 同：`machines/` 一层的清单）。
+fn fixture_presets_dir() -> PathBuf {
+    repo_root().join("tests/fixtures/presets_dims")
 }
 
 fn bin() -> &'static str {
@@ -45,13 +60,30 @@ fn golden_input() -> PathBuf {
     repo_root().join("tests/golden/42274.2.gcode")
 }
 
-/// 规范名集合：从**我们自己的机型清单**（`presets/machines/*.toml`）读，不复述。
+/// 把 fixture 那张机型表装进**本进程** —— 只有装过，`has_machine_dimensions` /
+/// `get_machine_dimensions` 才会给出 fixture 的答案（否则它们会去读 `presets/`，
+/// 于是「有没有尺寸」的差集变成生产数据的事，判据又回到了老路上）。
 ///
-/// 这一条以前读的是内核自带的 `assets/machine_catalog_extra.json`。
-/// M3 把唯一来源换成了 `presets/`，判据跟着换 —— 否则它盯的东西
-/// 与产品实际用的东西不是同一份（那正是这次改动要消灭的失效模式）。
+/// 子进程那侧不走 `install`，走 `MKPSE_PRESETS_DIR`（见 `run_cli`）—— 那是 pipeline
+/// 自己的逃生链口子。
+///
+/// **只装一次**：`install` 第二次会返回 Err（那是它的语义，防的是"两处数据看谁先跑"）。
+fn install_fixture_tables() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let tables =
+            load_presets_dir(&fixture_presets_dir()).expect("fixture 机型表读不出来 —— 判据已空转");
+        install(tables).expect("机型表只能装一次");
+    });
+}
+
+/// 规范名集合：从**测试自带的机型清单**读，不复述。
+///
+/// 顺带把表装进本进程 —— 凡是算差集的调用方都要先有表，所以在这里收一次口，
+/// 免得每个用例各记一遍。
 fn canonical_names() -> Vec<String> {
-    let dir = repo_root().join("../../presets/machines");
+    install_fixture_tables();
+    let dir = fixture_presets_dir().join("machines");
     let entries = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("读不到 {}（{e}）—— 判据已空转", dir.display()));
     let mut out: Vec<String> = Vec::new();
@@ -72,16 +104,16 @@ fn canonical_names() -> Vec<String> {
     }
     out.sort();
     out.dedup();
-    // 反空转哨兵：实测 6 个规范名（含没有尺寸的 A2L）。
+    // 反空转哨兵：fixture 实测 2 个规范名（A1 有尺寸 / NODIM 没有）。
     assert!(
-        out.len() >= 4,
-        "机型清单只解析出 {} 个规范名（期望 ≥ 4）—— 目录读坏了，判据不成立",
+        out.len() >= 2,
+        "fixture 机型清单只解析出 {} 个规范名（期望 ≥ 2）—— 目录读坏了，判据不成立",
         out.len()
     );
     out
 }
 
-/// 取一个「别名表认识、尺寸表没有」的规范名。实测就是 `A2L`。
+/// 取一台「别名表认识、尺寸表没有」的机型。实测就是 `NODIM`。
 fn a_canonical_name_without_dimensions() -> String {
     let missing: Vec<String> = canonical_names()
         .into_iter()
@@ -90,15 +122,19 @@ fn a_canonical_name_without_dimensions() -> String {
     match missing.first() {
         Some(m) => m.clone(),
         None => panic!(
-            "两张内置表现在一致了（每个规范名都有尺寸条目）—— 这条判据失去了扫描面。\n\
-             这是好事，但**不许让它静默通过**：请把本文件的 CLI 三条判据改成\n\
-             指向一个构造出来的缺失机型（或删掉它们并在提交信息里写清理由）。"
+            "fixture 里每个规范名都有尺寸条目了 —— 这条判据失去了扫描面。\n\
+             这是好事，但**不许让它静默通过**：请在 \
+             `tests/fixtures/presets_dims/machines/` 里补一份没有 `[dimensions]` 的清单\n\
+             （或删掉本文件这几条判据并在提交信息里写清理由）。"
         ),
     }
 }
 
+/// 起 CLI 时**把机型表指向 fixture**：pipeline 的逃生链口子是 `MKPSE_PRESETS_DIR`，
+/// 不设它就会去读 `presets/`（那正是这次要甩掉的依赖）。
 fn run_cli(args: &[&str]) -> Output {
     Command::new(bin())
+        .env("MKPSE_PRESETS_DIR", fixture_presets_dir())
         .args(args)
         .output()
         .expect("CLI 二进制必须能起来")
@@ -231,12 +267,12 @@ fn the_two_lookups_agree() {
         }
         agreements.insert(m.clone(), has_machine_dimensions(&m));
     }
-    // 反空转：确实比过东西，且两种结论都出现过（全 true 或全 false 说明扫描面选坏了）。
-    assert!(checked >= 12, "只比了 {checked} 次 —— 判据近乎空转");
+    // 反空转：确实比过东西（fixture 2 台 × 3 种写法），且两种结论都出现过。
+    assert!(checked >= 6, "只比了 {checked} 次 —— 判据近乎空转");
     let yes = agreements.values().filter(|v| **v).count();
     let no = agreements.len() - yes;
     assert!(
         yes > 0 && no > 0,
-        "内置两张表现在 {yes} 个有尺寸 / {no} 个没有 —— 需要两种情况都存在这条判据才有意义"
+        "fixture 里现在 {yes} 个有尺寸 / {no} 个没有 —— 需要两种情况都存在这条判据才有意义"
     );
 }

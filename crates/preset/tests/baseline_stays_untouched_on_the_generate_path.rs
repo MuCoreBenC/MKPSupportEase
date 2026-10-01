@@ -101,7 +101,7 @@ fn the_generate_and_check_paths_do_not_touch_the_baseline() {
     );
 
     // ② 生成路径：写进**临时目录**（真 `--write` 写的是 assets/，这里不碰仓库；
-    //    工作台那条 `wb_generate` 写的是 dist-presets/ —— 两者都不该碰基线）
+    //    工作台那条 `wb_generate` 写的是 presets/dist/ —— 两者都不该碰基线）
     let tmp = tempfile::tempdir().expect("临时目录");
     assert_eq!(write_all(&r, tmp.path()).expect("写产物"), 9);
 

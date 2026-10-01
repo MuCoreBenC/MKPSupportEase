@@ -4,7 +4,6 @@ display = 'X1C'
 brand = 'Bambu Lab'
 defaultBundle = 'X1C_default'
 externalAliases = ['X1', 'X1S', 'X1E', 'X1 Carbon', 'X1CARBON']
-image = 'x1c-image'
 icon = 'p1s-icon'
 
 [dimensions]
@@ -47,7 +46,6 @@ minY = 0.0
 [[versions]]
 id = 'LITE'
 name = 'lite版'
-presetFile = 'X1.toml'
 recommendedBundle = 'X1C_default'
 tag = '推荐'
 description = '群里开源的最新lite'

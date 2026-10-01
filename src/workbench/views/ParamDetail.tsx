@@ -170,9 +170,19 @@ export default function ParamDetail({
   const deprecated = row.deprecated
   const deadChoices = param.choices.filter((c) => c.deprecated)
 
-  /** 范围那一行的文本：有可选项写可选项，有上下限写区间，都没有写「—」 */
+  /**
+   * 这一条参数是不是**枚举**：`choices` 只有在 string 档才是取值域 ——
+   * 与 `CellEditor` 的控件分派、`validate.rs` 的枚举门同一道门。
+   *
+   * 「有 choices 就当枚举」是错的：`wiping.ironing_coverage_threshold` 是
+   * float，挂着的 0/50/90 三条是「预设档」，这一条该说的是 `0~100 %`，
+   * 控件也该是能填的百分比框，不是三选一。
+   */
+  const isEnum = param.valueType === 'string' && param.choices.length > 0
+
+  /** 范围那一行的文本：枚举写可选项，数值写区间，都没有写「—」 */
   const rangeText = (() => {
-    if (param.choices.length > 0) return param.choices.map((c) => c.label).join(' / ')
+    if (isEnum) return param.choices.map((c) => c.label).join(' / ')
     if (param.min !== null && param.max !== null) {
       /* 单位里带数字的（真数据里有 unit 就是 "0-255" 的）不再拼一次 */
       const unit = param.unit && !/\d/.test(param.unit) ? ` ${param.unit}` : ''
@@ -342,10 +352,10 @@ export default function ParamDetail({
               <span className={s.mono}>{param.uiComponent}</span>
               {param.step !== null && param.step !== undefined && ` · 步进 ${param.step}`}
             </span>
-            <span className={s.pKvK}>{param.choices.length > 0 ? '可选项' : '范围'}</span>
+            <span className={s.pKvK}>{isEnum ? '可选项' : '范围'}</span>
             <span className={s.pKvV}>
               {/* 可选项那一行里，已弃用的那一档当场划掉 —— 与控件上那一条是同一个信号 */}
-              {param.choices.length > 0
+              {isEnum
                 ? param.choices.flatMap((c, i) => [
                     i > 0 ? ' / ' : null,
                     <span

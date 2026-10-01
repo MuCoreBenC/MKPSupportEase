@@ -43,8 +43,9 @@
 
 # ---------------- 机型图 ----------------
 #
-# 4 张是新版大图（原来在 `public/printers/bambu/`，Task 9 搬进来的）；
-# **P2S / X1C 暂用旧仓那两张**（裁决 2026-09-24：不为一缺两张图阻塞迁移，将来补新的再换）。
+# 4 张是新版大图（原来在 `public/printers/bambu/`，Task 9 搬进来的）。
+# **P2S / X1C 没有外观图**：旧仓那两张（`p2s-image` / `x1c-image`）是待换的旧图，
+# 已随这次清理删掉；等有真实来源再登记，机型条目里的 `image` 现在照实留空。
 
 [[assets]]
 id = 'a1-image'
@@ -73,20 +74,6 @@ type = 'image'
 machineId = 'P1S'
 name = 'P1S 外观图'
 path = 'printers/p1s.webp'
-
-[[assets]]
-id = 'p2s-image'
-type = 'image'
-machineId = 'P2S'
-name = 'P2S 外观图（旧仓图，待换新）'
-path = 'printers/p2s.webp'
-
-[[assets]]
-id = 'x1c-image'
-type = 'image'
-machineId = 'X1C'
-name = 'X1C 外观图（旧仓图，待换新）'
-path = 'printers/x1c.webp'
 
 # ---------------- 图标 ----------------
 

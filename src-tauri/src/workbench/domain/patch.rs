@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::AppError;
-use crate::workbench::presets::ParamRegistry as Registry;
+use crate::workbench::presets::{ParamRegistry as Registry, ValueType};
 
 use super::layer::Level;
 use super::wording as w;
@@ -316,6 +316,11 @@ pub fn apply(
     registry: &Registry,
     patches: &[Patch],
 ) -> Result<Applied, AppError> {
+    // 数字先归到注册表声明的那个类型上（见 [`normalize`]）—— 校验、比较、落草稿
+    // 三处必须看同一个 `Value`
+    let normalized: Vec<Patch> = patches.iter().map(|p| normalize(registry, p)).collect();
+    let patches: &[Patch] = &normalized;
+
     validate(committed, registry, patches)?;
 
     let undoable = patches.iter().all(Patch::is_undoable);
@@ -332,6 +337,68 @@ pub fn apply(
         inverse: if undoable { inverse } else { Vec::new() },
         undoable,
     })
+}
+
+/// 把 `SetValue` 的数字归到注册表声明的那个类型上。
+///
+/// JSON 只有一种 number，而 `serde_json::Value` 分正/负整数与浮点**三种** ——
+/// 盘上的 `-1.0`（TOML 里的浮点，见 `param_registry.toml` 的 `'A1:STANDARD' = -1.0`）
+/// 和界面发来的 `-1`（JS 的 number 序列化成整数）用 `==` 比是**不相等**的两个 `Value`。
+/// 不归一的话，「改了又改回去」永远比不中盘上那个值：
+///
+///   · [`apply_one`] 里那两步比较都落空 → 草稿里留下一笔多余的改动，
+///     界面一直显示「已修改」、保存按钮一直亮（作者实测）；
+///   · 草稿里存的是 `-1`、盘上是 `-1.0`，一次无害的编辑也会让生成物的数字换一副长相。
+///
+/// 归不了（值不是数、类型不是数、注册表里没有这个 key）就原样放行 ——
+/// 这一层不是校验器，判能不能写是 [`validate`] 的事。
+///
+/// 批量预览（[`super::preview`]）也用这个口径把要对齐的那个值归位：
+/// 它和写入口看的是同一份盘上数据，归一规则分岔的话「预览说没有变化、写入却记了一笔」
+/// 就会同时成立。
+pub(super) fn normalize_value(registry: &Registry, key: &str, v: &Value) -> Value {
+    let num = match registry.param(key).map(|p| p.value_type) {
+        Some(ValueType::Float) => v.as_f64().and_then(serde_json::Number::from_f64),
+        Some(ValueType::Int) => as_int(v).map(serde_json::Number::from),
+        _ => None,
+    };
+    match num {
+        Some(n) => Value::Number(n),
+        None => v.clone(),
+    }
+}
+
+/// 整数参数那一侧的归一：盘上写成 `1.0` 也要读回 `1`。
+///
+/// `Value::as_i64()` 只认整数那两种编号，遇到 `1.0`（浮点）返回 `None` ——
+/// 真数据里 `wiping.glue_pass_count` 等四个 int 参数的 `defaultValue` 就写成了
+/// `1.0` / `30.0` / `50.0` / `0.0`，不补这一步它们仍然比不中
+fn as_int(v: &Value) -> Option<i64> {
+    if let Some(i) = v.as_i64() {
+        return Some(i);
+    }
+    match v.as_f64() {
+        Some(f) if f.is_finite() && f.fract() == 0.0 => Some(f as i64),
+        _ => None,
+    }
+}
+
+fn normalize(registry: &Registry, patch: &Patch) -> Patch {
+    let Patch::SetValue {
+        level,
+        owner,
+        key,
+        value: Some(v),
+    } = patch
+    else {
+        return patch.clone();
+    };
+    Patch::SetValue {
+        level: *level,
+        owner: owner.clone(),
+        key: key.clone(),
+        value: Some(normalize_value(registry, key, v)),
+    }
 }
 
 /// 整批校验。这里只判"能不能做"，不改任何东西
@@ -444,8 +511,24 @@ fn apply_one(
                 return; // 没变化：不记草稿、不产反向，脏计数也不该涨
             }
             let vk = value_key(*level, owner, key);
-            if &at_rest(registry, *level, owner, key) == value {
-                // 改回了盘上那个值 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
+            /*
+             * 「这一处还算不算改动」= **这一层钉完之后，和它原本的样子是不是一致**：
+             *
+             *   写 `None`（删键）→ 本层原来就没钉着它，才叫一致；
+             *   写值 `v`        → `v` 等于本层**不钉它**时会拿到的那个值
+             *                     （版本 → 机型 → 出厂），才叫一致。
+             *
+             * 后半句是唯一有内容的那半（作者实测报的那条）：版本层一直继承着机型层
+             * 时，本层盘上什么都没有 —— 光比本层（只有 [`at_rest`] 的话）会说「改了」，
+             * 于是"改成开启、再改回关闭"在草稿里留下一枚多余的 `关闭`，
+             * 界面就一直显示「已修改」、保存按钮一直亮。
+             */
+            let settled = match value {
+                None => at_rest(registry, *level, owner, key).is_none(),
+                Some(v) => at_rest_effective(registry, *level, owner, key).as_ref() == Some(v),
+            };
+            if settled {
+                // 改回了这一层原本的样子 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
                 // 否则"改了又改回来"会让保存按钮一直亮着
                 draft.values.remove(&vk);
             } else {
@@ -562,10 +645,38 @@ fn own_value(
     at_rest(registry, level, owner, key)
 }
 
-/// `machineVariants` 里**此刻写着**的那一个值 —— 这是这一层唯一的盘上真相
+/// `machineVariants` 里**此刻写着**的那一个值 —— 这是这一层唯一的盘上真相。
+///
+/// **读出来就归一到声明类型**（[`normalize_value`]）：真数据里有几处声明是浮点、
+/// 盘上却写成了整数（`wiping.glue_pass_count` 的 `defaultValue = 1.0` 反过来也有）。
+/// 只归一界面发来的那一侧的话，这两档仍然比不中，「改回原值」照样留下一笔多余改动
 fn at_rest(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<Value> {
     let variant = variant_key(level, owner);
-    registry.param(key)?.machine_variants.get(&variant).cloned()
+    let raw = registry.param(key)?.machine_variants.get(&variant)?;
+    Some(normalize_value(registry, key, raw))
+}
+
+/// 「这一层**不钉这个键**时会拿到的值」—— 三层查找的后两档：机型 → 出厂。
+///
+/// 与 [`at_rest`] 只差一处：`at_rest` 只看**本层**钉着的键。版本层一直继承着机型层时
+/// 它什么都没有（`None`），于是"改成开启、再改回关闭"拿 `None == Some(关闭)` 去比 ——
+/// 比不中，草稿里留下一枚多余的草稿，界面一直显示「已修改」（作者实测）。
+fn at_rest_effective(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<Value> {
+    if let Some(v) = at_rest(registry, level, owner, key) {
+        return Some(v);
+    }
+    // 版本 uid 的形状是 `机型/版本`（见 [`variant_key`] 的反方向）
+    if matches!(level, Level::Version) {
+        if let Some(mid) = owner.split('/').next() {
+            if let Some(v) = at_rest(registry, Level::Machine, mid, key) {
+                return Some(v);
+            }
+        }
+    }
+    // 出厂那一档同样归一到声明类型，理由见 [`at_rest`]
+    registry
+        .param(key)
+        .map(|p| normalize_value(registry, key, &p.default_value))
 }
 
 /// 只留下 uid 还活着的条目，被丢掉的记进 `gone`。
@@ -595,13 +706,18 @@ mod tests {
     /// patch 层除了判"这个 key 存在吗"，还要知道"它此刻钉着什么"（[`at_rest`]）——
     /// 而现在这一层的真相就在 `machineVariants` 里，所以夹具也要带上它：
     /// `offset.z` 在机型层有值（`A1`），`offset.x` 在版本层有值（`A1:STANDARD`）
+    ///
+    /// **数值一律写成浮点**（`4.0` / `-1.0`），照抄 `presets/registry/param_registry.toml`
+    /// 里那个样子：写成 `4` / `-1` 会让夹具里所有数字都成了整数，而界面发来的正好也是
+    /// 整数 —— 两边碰巧同型，`serde_json` 那个「浮点 ≠ 整数」的坑就永远测不出来
+    /// （真出过一次，见 [`normalize`]）
     fn registry() -> (tempfile::TempDir, Registry) {
         let d = tempfile::tempdir().unwrap();
         let p = |key: &str, order: f64, variants: serde_json::Value| {
             serde_json::json!({
                 "key": key, "configKey": "X", "tomlKey": key, "jsonKey": key,
                 "label": key, "desc": "", "tomlComment": "",
-                "valueType": "float", "uiComponent": "number", "defaultValue": 4,
+                "valueType": "float", "uiComponent": "number", "defaultValue": 4.0,
                 "scope": "universal", "section": "toolhead",
                 "layout": { "order": order, "sectionId": "s1" },
                 "machineVariants": variants
@@ -609,7 +725,7 @@ mod tests {
         };
         let params = serde_json::json!({
             "params": [
-                p("toolhead.offset.x", 1.0, serde_json::json!({ "A1:STANDARD": -1 })),
+                p("toolhead.offset.x", 1.0, serde_json::json!({ "A1:STANDARD": -1.0 })),
                 p("toolhead.offset.z", 2.0, serde_json::json!({ "A1": 1.1 }))
             ],
             "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
@@ -729,7 +845,7 @@ mod tests {
                 Level::Version,
                 "A1/STANDARD",
                 "toolhead.offset.x",
-                Some(serde_json::json!(-1))
+                Some(serde_json::json!(-1.0))
             )]
         );
     }
@@ -835,6 +951,276 @@ mod tests {
         )
         .unwrap();
         assert_eq!(draft.dirty_count(), 0, "改回去就不该再算一处未保存改动");
+    }
+
+    /// **改回「本层原来那个值」也要清干净 —— 哪怕本层压根没钉过它。**
+    ///
+    /// 作者实测的那条：版本层一直是继承机型层的（本层 `machineVariants` 里什么都没有），
+    /// 改成别的、再改回继承来的那个值，界面却一直挂着「已修改」。
+    #[test]
+    fn changing_back_to_the_inherited_value_clears_the_dirty_mark() {
+        let (_d, reg) = registry();
+        let c = committed();
+        let mut draft = Draft::default();
+
+        // `toolhead.offset.z` 只有机型层钉着（`A1` = 1.1），版本层没有任何条目
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                Some(serde_json::json!(2)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 1);
+
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                Some(serde_json::json!(1.1)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            draft.dirty_count(),
+            0,
+            "改回机型层继承来的值 = 没改过，草稿不该留下那一笔"
+        );
+    }
+
+    /// **界面发来整数、盘上写的是浮点** —— `serde_json::Value` 里 `-1` 与 `-1.0`
+    /// 是两个**不相等**的 `Value`。不归型的话「改回去」永远比不中盘上那个值，
+    /// 草稿里留下多余的一笔（作者在真后端上实测到的那条）。
+    #[test]
+    fn an_integer_from_the_ui_matches_the_float_on_disk() {
+        let (_d, reg) = registry();
+        let c = committed();
+        let mut draft = Draft::default();
+        let vk = value_key(Level::Version, "A1/STANDARD", "toolhead.offset.x");
+
+        // 盘上 `A1:STANDARD` = -1.0；界面把输入框里的 "-1" 发成整数
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(5)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 1);
+        assert_eq!(
+            draft.values.get(&vk),
+            Some(&Some(serde_json::json!(5.0))),
+            "落进草稿的也必须是浮点，和盘上同型"
+        );
+
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.x",
+                Some(serde_json::json!(-1)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            draft.dirty_count(),
+            0,
+            "整数 -1 就是盘上那个浮点 -1.0，改回去不该再算改动"
+        );
+    }
+
+    /// 一份只有 `toolhead.offset.x` 的最小字段定义，**盘上那一份故意写成
+    /// 与声明类型不同的数字写法**（`disk` 参数说了算）。
+    ///
+    /// 真数据里两种写法都有：几个 float 参数的 `machineVariants` 写成整数、
+    /// 几个 int 参数的 `defaultValue` 写成 `1.0`。夹具照抄这个形状才测得到那个坑
+    fn registry_with_offtype_disk(
+        declared: &str,
+        disk: serde_json::Value,
+    ) -> (tempfile::TempDir, Registry) {
+        let d = tempfile::tempdir().unwrap();
+        let params = serde_json::json!({
+            "params": [{
+                "key": "toolhead.offset.x", "configKey": "X", "tomlKey": "x", "jsonKey": "x",
+                "label": "X 轴偏移", "desc": "", "tomlComment": "",
+                "valueType": declared, "uiComponent": "number", "defaultValue": 0,
+                "scope": "universal", "section": "toolhead",
+                "layout": { "order": 1.0, "sectionId": "s1" },
+                "machineVariants": { "A1:STANDARD": disk }
+            }],
+            "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
+                       "sections": [{ "id": "s1", "label": "空间偏移", "order": 0 }] }],
+            "updated": "2026-01-01 00:00:00"
+        });
+        let layout = serde_json::json!({
+            "tabs": [{ "id": "t1", "sections": [{ "id": "s1", "items": [
+                { "id": "i0", "paramKey": "toolhead.offset.x" }
+            ] }] }]
+        });
+        let r =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
+        (d, r)
+    }
+
+    /// 声明是**浮点**、盘上却写成整数：界面发来的整数仍要能比中。
+    ///
+    /// 只归一界面发来的那一侧不够 —— 盘上读出来的那份也得归一（见 [`at_rest`]）
+    #[test]
+    fn an_integer_written_on_disk_still_matches_the_declared_float_type() {
+        let (_d, reg) = registry_with_offtype_disk("float", serde_json::json!(-1));
+        let c = committed();
+        let mut draft = Draft::default();
+        let write = |draft: &mut Draft, v: serde_json::Value| {
+            apply(
+                draft,
+                &c,
+                &reg,
+                &[set(
+                    Level::Version,
+                    "A1/STANDARD",
+                    "toolhead.offset.x",
+                    Some(v),
+                )],
+            )
+            .unwrap();
+        };
+
+        write(&mut draft, serde_json::json!(5));
+        assert_eq!(draft.dirty_count(), 1);
+
+        write(&mut draft, serde_json::json!(-1));
+        assert_eq!(
+            draft.dirty_count(),
+            0,
+            "盘上写成 -1 也还是那个 -1.0，改回去不该再算改动"
+        );
+    }
+
+    /// 反过来的那一档：声明是**整数**、盘上写成 `-1.0`。
+    ///
+    /// `Value::as_i64()` 认不出 `-1.0`，所以归一里补了 [`as_int`] 那一手
+    #[test]
+    fn a_float_written_on_disk_still_matches_the_declared_int_type() {
+        let (_d, reg) = registry_with_offtype_disk("int", serde_json::json!(-1.0));
+        let c = committed();
+        let mut draft = Draft::default();
+        let write = |draft: &mut Draft, v: serde_json::Value| {
+            apply(
+                draft,
+                &c,
+                &reg,
+                &[set(
+                    Level::Version,
+                    "A1/STANDARD",
+                    "toolhead.offset.x",
+                    Some(v),
+                )],
+            )
+            .unwrap();
+        };
+
+        write(&mut draft, serde_json::json!(5));
+        assert_eq!(draft.dirty_count(), 1);
+
+        write(&mut draft, serde_json::json!(-1));
+        assert_eq!(
+            draft.dirty_count(),
+            0,
+            "盘上写成 -1.0 也还是那个 -1，改回去不该再算改动"
+        );
+    }
+
+    /// 机型层同理：钉回落盘那个值、或钉回出厂默认（= 有效值没变）都不算改动
+    #[test]
+    fn pinning_the_value_a_layer_already_effectively_has_is_not_a_change() {
+        let (_d, reg) = registry();
+        let c = committed();
+        let mut draft = Draft::default();
+
+        // 机型层本来就钉着 1.1
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "toolhead.offset.z",
+                Some(serde_json::json!(1.1)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 0, "钉着同样的值不是改动");
+
+        // `toolhead.offset.x` 在机型层没有条目 → 有效值就是出厂默认 4
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "toolhead.offset.x",
+                Some(serde_json::json!(4)),
+            )],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 0, "钉回出厂默认值 = 有效值没变");
+    }
+
+    /// 删键（`None`）的判据仍是**本层**：本层本来就没有它 → 删了也没变
+    #[test]
+    fn deleting_a_key_the_layer_never_had_is_not_a_change() {
+        let (_d, reg) = registry();
+        let c = committed();
+        let mut draft = Draft::default();
+
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                None,
+            )],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 0, "本层没有这个键，删键就是没变化");
+
+        // 本层钉着 1.1 → 删键是一次真实的改动（挂回继承）
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(Level::Machine, "A1", "toolhead.offset.z", None)],
+        )
+        .unwrap();
+        assert_eq!(draft.dirty_count(), 1, "删掉本层钉着的键要记一笔");
+        assert_eq!(
+            draft.values.get("m:A1:toolhead.offset.z"),
+            Some(&None),
+            "草稿里要写「这一层的这个键被删了」"
+        );
     }
 
     /// 生成记录不产反向 —— 撤销一条「生成过」没有意义
@@ -1103,7 +1489,7 @@ mod tests {
                     Level::Machine,
                     "A1",
                     "toolhead.offset.x",
-                    Some(serde_json::json!(1))
+                    Some(serde_json::json!(1.0))
                 ),
                 set(Level::Machine, "A1", "toolhead.offset.x", None),
             ]

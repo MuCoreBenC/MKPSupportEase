@@ -284,8 +284,8 @@ pub const UNSUPPORTED: &str = "暂不支持";
 
 /// 值在格子里显示成什么。**格式化一律由后端做**，前端不碰（doc §8.3）。
 ///
-/// 三条：空串写「空」；开关写「开启 / 关闭」；有 `choices` 的写命中项的中文名 ——
-/// 界面上显示 `disk` 的话，用户得在一堆中文按钮里猜哪个是 `disk`
+/// 三条：空串写「空」；开关写「开启 / 关闭」；**string 档且带 `choices`** 的写命中项
+/// 的中文名 —— 界面上显示 `disk` 的话，用户得在一堆中文按钮里猜哪个是 `disk`
 pub fn value_text(param: &ParamDef, value: &Value) -> String {
     if param.value_type == ValueType::Bool {
         return match value {
@@ -294,7 +294,15 @@ pub fn value_text(param: &ParamDef, value: &Value) -> String {
             other => plain(other),
         };
     }
-    if let Some(hit) = param.choices.iter().find(|c| &c.value == value) {
+    // `choices` 是取值域**只有 string 这一档**（与 `validate.rs` 的
+    // `value_type == "string"`、`CellEditor` 的控件分派同一道门）：数值参数身上
+    // 挂着的不是可选值，别拿它的中文名盖掉「50 %」这种读数。
+    let hit = if param.value_type == ValueType::Text {
+        param.choices.iter().find(|c| &c.value == value)
+    } else {
+        None
+    };
+    if let Some(hit) = hit {
         return if hit.deprecated {
             // 当前值正好是废弃项时要标出来（doc §15）：它还能用，但不该继续用
             format!("{}（已废弃）", hit.label)
@@ -387,7 +395,8 @@ pub mod disabled {
 
     /// 删资产被反查拦下时那句话（P4 资产库拦截页）。产品语义里版本不直接引用资产
     /// （版本 → 套餐 → 资产是间接的），所以是「机型引用」不是原型那句「当 MKP 用」
-    pub const DELETE_ASSET_IN_USE: &str = "还有套餐装着它，或还有机型把它当图 / 图标用 —— 先解除引用";
+    pub const DELETE_ASSET_IN_USE: &str =
+        "还有套餐装着它，或还有机型把它当图 / 图标用 —— 先解除引用";
 }
 
 /* ---------- 「已弃用」（C14 §五） ---------- */
@@ -404,7 +413,8 @@ pub mod deprecated {
         "上游已标记这一项不再使用 —— 值照旧读得到（老配方里可能还写着它），但不要再改它";
     /// 选项级的那枚。说的不是「这个参数在退场」，是「这一档通向的东西已经在退场」
     pub const CHOICE_LABEL: &str = "已弃用";
-    pub const CHOICE_EXPLAIN: &str = "这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西";
+    pub const CHOICE_EXPLAIN: &str =
+        "这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西";
 }
 
 /// 参数台一行上的状态（C14）：**值的出处 + 改没改**，四档。

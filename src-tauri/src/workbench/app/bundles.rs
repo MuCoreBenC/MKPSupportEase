@@ -130,8 +130,7 @@ fn list_of(
                         kind: a.map_or(AssetKind::SlicerProfile, |a| a.kind),
                         resolvable: a.is_some(),
                         is_bbs: a.is_some_and(|a| {
-                            a.kind == AssetKind::SlicerProfile
-                                && a.slicer.as_deref() == Some("bbs")
+                            a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs")
                         }),
                         name: a.map_or(String::new(), |a| a.name.clone()),
                         present: a.is_some_and(|a| presets.assets.present(a)),
@@ -184,7 +183,12 @@ pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
     traced("wb_bundles", |_| {
         with_ctx(|ctx| {
             let (committed, draft, _) = state(ctx)?;
-            Ok(list_of(&ctx.presets, &committed.visibility, &draft.visibility, query.as_deref()))
+            Ok(list_of(
+                &ctx.presets,
+                &committed.visibility,
+                &draft.visibility,
+                query.as_deref(),
+            ))
         })
     })
 }
@@ -312,7 +316,9 @@ mod tests {
     fn the_query_filters_without_losing_the_total() {
         let hit = wb_bundles(Some("a1".to_owned())).expect("筛选");
         assert!(
-            hit.bundles.iter().all(|b| b.id.to_lowercase().contains("a1")),
+            hit.bundles
+                .iter()
+                .all(|b| b.id.to_lowercase().contains("a1")),
             "命中的都该含 a1：{:?}",
             hit.bundles.iter().map(|b| b.id.clone()).collect::<Vec<_>>()
         );
@@ -321,7 +327,10 @@ mod tests {
             "5 份套餐里 A1 / A1_MINI / P1S / P2S / X1C 各一，筛 a1 不该是全部"
         );
         assert_eq!(hit.total, 5);
-        assert!(wb_bundles(Some("不存在的套餐".to_owned())).is_ok(), "筛不中是空清单不是错误");
+        assert!(
+            wb_bundles(Some("不存在的套餐".to_owned())).is_ok(),
+            "筛不中是空清单不是错误"
+        );
     }
 
     /// 反查的**套餐那一档**在真数据上说得清是谁（b05 Task 10）

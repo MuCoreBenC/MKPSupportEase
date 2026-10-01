@@ -69,6 +69,7 @@ import {
   type Words,
 } from '../api'
 import type { GotoFocus } from '../c14/types'
+import { locateAnchor } from '../c14/locate'
 import { toasts } from '../c14/toast'
 import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
@@ -172,11 +173,12 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   const [asideW, setAsideW] = useSplitWidth('pAside', ASIDE.dft, ASIDE.min, ASIDE.max)
 
   /*
-   * 左 rail 的三种形态：collapsed 收起（默认）/ float 悬停浮出 / pinned 钉住。
-   * 默认收起：两侧怎么变窄是这一稿的题目；但切版本仍然零点击 ——
-   * 鼠标扫过把手，整棵树立刻浮出来。
+   * 左 rail 的三种形态：collapsed 收起 / float 悬停浮出 / pinned 钉住（**默认**）。
+   * 默认钉住（作者：「我希望这个默认可以展开的」）：一进来就看得见机型与版本这棵树，
+   * 不用先去点页头那枚把手。点把手仍可收起 —— 收起后鼠标扫过把手临时浮出，
+   * 切版本照样零点击。
    */
-  const [railPinned, setRailPinned] = useState(false)
+  const [railPinned, setRailPinned] = useState(true)
   const [railFloat, setRailFloat] = useState(false)
   const railOpen = railPinned || railFloat
   /* 把手在页头：离开后延时 220ms 收起（够走过去、又不至于赖着不走） */
@@ -254,6 +256,21 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .then(setDesk)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
   }, [mode, machineId, target, tabSel, q, tick])
+
+  /*
+   * 「去处理」带过来的定位（C14 第二十四轮 / C15 同款）：等这一屏配方台读完，
+   * 滚到那一项 + 闪一下。锚点 id 挂在 ParamLine 上（`t-param-<key>`）。
+   * **只做一次** —— 之后用户在本页自己滚来滚去不该被拽回去。
+   */
+  const locatedRef = useRef(false)
+  useEffect(() => {
+    if (locatedRef.current) return
+    const key = init?.key
+    if (!key || desk === null || mode !== 'single') return
+    locatedRef.current = true
+    /* effect 在 DOM 提交之后跑，行已经在树里 —— 直接量、直接滚 */
+    locateAnchor(`t-param-${key}`, { row: true })
+  }, [init, desk, mode])
 
   /* 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮） */
   useEffect(() => {
@@ -336,11 +353,16 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     ], applyRefresh)
     if (refreshKind === 'matrix' && out.matrix) setMatrix(out.matrix)
 
-    /* 一次点击 = 一次改动的提示（开关与枚举手滑改错是重灾区）；给一条能撤回的 */
+    /*
+     * 一次点击 = 一次改动的提示（开关与枚举手滑改错是重灾区）；给一条能撤回的。
+     * 枚举那一档同样按 `valueType === 'string'` 认（与 `CellEditor` 的控件分派
+     * 同一道门）—— 数值参数身上的 choices 是「预设档」，打字改值不发这条。
+     */
     if (
       next !== null &&
       before !== next &&
-      (param.uiComponent === 'switch' || param.choices.length > 0)
+      (param.uiComponent === 'switch' ||
+        (param.valueType === 'string' && param.choices.length > 0))
     ) {
       const label =
         param.choices.find((o) => String(o.value) === next)?.label ??
@@ -416,8 +438,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     setTabSel(null)
   }
 
-  /** 换正在改的那一版。那枚「正在编辑」提示跟着作废 */
-  const switchTarget = (next: string) => {
+  /** 换正在改的那一版（`null` = 取消选择）。那枚「正在编辑」提示跟着作废 */
+  const switchTarget = (next: Target) => {
     setTarget(next)
     setSel(null)
     setFocusUid(null)
@@ -465,25 +487,32 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
         (batchTab && batchable) || (!batchTab && selRow !== null))
 
   /** 批量目标：勾选列里的**版本列**（基底不进目标，C14 文件头第 1 条），可跨机型 */
-  const batchTargets: BatchTarget[] = useMemo(
-    () =>
-      compareCols
-        .filter((id) => colSplit(id).uid !== '')
-        .map((id) => {
-          const { m, uid } = colSplit(id)
-          const machine = book.machines.find((x) => x.id === m)
-          const v = machine?.versions.find((x) => x.uid === uid)
-          return {
-            /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
-               不是左树的 `机器|版本` 记号 —— 两套记号混用会让确认写入对不上列 */
-            id: uid,
-            name: `${machine?.display ?? m} · ${v?.name ?? uid}`,
-            machineId: m,
-            uid,
-          }
-        }),
-    [compareCols, book.machines],
-  )
+  const batchTargets: BatchTarget[] = useMemo(() => {
+    /* 抽屉要那一行在这一项上的格子：预填「设置新值」、判「有没有变化」，
+       以及「恢复修改前的」该写回什么。行还没到（矩阵在拉）就是空态 */
+    const row = sel !== null ? (matrix?.rows.find((r) => r.key === sel) ?? null) : null
+    return compareCols
+      .filter((id) => colSplit(id).uid !== '')
+      .map((id) => {
+        const { m, uid } = colSplit(id)
+        const machine = book.machines.find((x) => x.id === m)
+        const v = machine?.versions.find((x) => x.uid === uid)
+        /* 后端重排后的列记号就是版本 uid（见下 id 注） */
+        const ci = matrix?.cols.findIndex((c) => c.key === uid) ?? -1
+        const cell = row !== null && ci >= 0 ? (row.cells[ci] ?? null) : null
+        return {
+          /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
+             不是左树的 `机器|版本` 记号 —— 两套记号混用会让确认写入对不上列 */
+          id: uid,
+          name: `${machine?.display ?? m} · ${v?.name ?? uid}`,
+          machineId: m,
+          uid,
+          raw: cell?.raw ?? null,
+          rest: cell?.rest ?? null,
+          dirty: cell?.dirty ?? false,
+        }
+      })
+  }, [compareCols, book.machines, matrix, sel])
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
@@ -558,6 +587,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
         onClick={() => {
           if (mode === 'compare') {
             toggleCol(cid)
+            return
+          }
+          /*
+           * 再点一次已选中的那一行 = **取消选择**（作者：「那些点击之后可以
+           * 去掉选择状态，不是非要选择一个」）。没选是合法状态：正文回空态，
+           * 不会兜一台假机型。机型 id 留着不撤 —— 从头再来时省一次点击。
+           */
+          if (mine && uid === target) {
+            switchTarget(null)
             return
           }
           /* 切机型后仍落到点的那一行 —— 不是机型的第一个版本（C14） */
@@ -732,16 +770,40 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                       反选还在键盘上（Ctrl+I）。
                     */}
                     <label className={s.pAll}>
+                      {/* 输入藏起来（仍可聚焦、可点），画的是旁边那枚自绘框 */}
                       <input
                         ref={(el) => {
                           if (el) el.indeterminate = !railAll && compareCols.length > 0
                         }}
+                        className={s.pAllInput}
                         type="checkbox"
                         checked={railAll}
                         onChange={() =>
                           setCompareCols(railAll ? [] : [...railIds])
                         }
                       />
+                      {/*
+                        自绘的三态框，**与左树每一行那枚勾选框同一副长相**
+                        （作者：「这个的多选框怎么样式不一样」）—— 原生
+                        `accent-color` 画出来的半选横杠和行上那枚勾对不上。
+                      */}
+                      <span
+                        className={s.pVmark}
+                        data-on={railAll}
+                        data-mixed={!railAll && compareCols.length > 0}
+                        aria-hidden
+                      >
+                        <svg
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m2.6 6.3 2.4 2.4L9.5 3.9" />
+                        </svg>
+                      </span>
                       勾选要对照的列（可跨机型）
                     </label>
                   </>
@@ -1317,6 +1379,8 @@ function ParamLine({
 
   return (
     <div
+      /* 「去处理」定位的锚点（locateAnchor 按它滚 + 闪） */
+      id={`t-param-${row.key}`}
       className={`${s.pRow} ${on ? s.pRowOn : ''} ${off ? s.pRowOff : ''} ${dep ? s.pRowDep : ''}`}
       onClick={() => onPick(row.key)}
       title={

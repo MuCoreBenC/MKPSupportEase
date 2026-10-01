@@ -33,6 +33,7 @@ use serde::Serialize;
 use preset::recipe::Recipe;
 
 use crate::workbench::presets::registry::ValueType;
+use crate::workbench::presets::AssetKind;
 
 use super::derive::Book;
 use super::patch::CatalogMachine;
@@ -191,11 +192,9 @@ pub fn preflight(book: &Book<'_>, recipe: Result<&Recipe, &str>) -> Report {
 
 /// 不依赖配方的那几类。生成闸门与预检共用
 fn collect(book: &Book<'_>, out: &mut Vec<Issue>) {
-    compat(book, out);
     machines(book, out);
     versions(book, out);
-    upstream_data(book, out);
-    upstream_drift(book, out);
+    filter_ghosts(book, out);
     delivery(book, out);
 }
 
@@ -300,65 +299,6 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
                 });
             }
         }
-    }
-}
-
-/// 清单里有、上游不认的机型与版本（b05 Task 11.9）。**提示档**。
-///
-/// 背景：`render()` 改用我们自己的清单之后（b05 Task 3.3c 的残余风险收尾），
-/// 「上游清单里没有这台」不再让渲染失败 —— 也就是说这类不一致从此不再以
-/// 「机型不存在」的形式暴露，只能靠主动对表才能看见。它不挡任何东西：
-/// 上游今天是搬数据的来源，不是运行时的依赖。
-fn upstream_drift(book: &Book<'_>, out: &mut Vec<Issue>) {
-    for m in book.machines() {
-        let Some(up) = book.up.catalog.machine(&m.id) else {
-            out.push(Issue {
-                id: format!("upstream.unknown_machine.{}", m.id),
-                severity: Severity::Hint,
-                title: format!("上游不认机型 {}", m.id),
-                detail: "我们清单里有、上游清单里没有。渲染用我们自己的清单，\
-                         所以这不影响任何产物；但发布侧的数据仍以上游为准时，\
-                         这台在上游那边是不存在的。上游退役（Task 8 之后只读）\
-                         之前，每次加机型都会先见到这一条。"
-                    .to_owned(),
-                at: Where::view(View::Build),
-            });
-            continue;
-        };
-        for v in &m.version_ids {
-            if !up.versions.iter().any(|x| x.id == *v) {
-                out.push(Issue {
-                    id: format!("upstream.unknown_version.{}.{}", m.id, v),
-                    severity: Severity::Hint,
-                    title: format!("上游不认版本 {}:{}", m.id, v),
-                    detail: "同上：清单是我们说了算，上游只是不再对齐的参照。\
-                             保留这条是为了在「发布侧还看着上游」的过渡期里，\
-                             两边清单的出入有一处固定可见的地方。"
-                        .to_owned(),
-                    at: Where::view(View::Build),
-                });
-            }
-        }
-    }
-}
-
-/// 兼容声明（doc §12）
-fn compat(book: &Book<'_>, out: &mut Vec<Issue>) {
-    if book.up.manifest.compat.minimum_client.is_none() {
-        out.push(Issue {
-            id: "compat.minimum_client".to_owned(),
-            severity: Severity::Todo,
-            title: format!("最低客户端版本{}", w::UNDECLARED),
-            // doc §12 那三条实测事实原样写进说明 —— 不写的话，看到这一条的人
-            // 第一反应会是「去哪儿填」，而答案是「不在我们这儿」
-            detail: "上游 manifest.json 的 minimumClient 是空串，version 也是空串，\
-                     全局只有 manifestVersion: 2 与 fallback_registry.version: 1 两个版本号。\
-                     也就是说上游现在**没有**声明「客户端要多新才能用这份数据」。\
-                     这不是我们该填的空，而是发布时要知道的事：\
-                     老客户端拿到新字段会静默忽略，而不是报错。"
-                .to_owned(),
-            at: Where::view(View::Build),
-        });
     }
 }
 
@@ -483,12 +423,18 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
 
             // 枚举值不在选项里：**阻断**。
             //
-            // **bool（switch）字段跳过**：真数据里它们挂着的 `choices`
-            // （`'off'` / `'on'`）是显示文案，不是取值域 —— 取值域由 bool 类型保证，
-            // 值永远进不了那两个字符串。不跳过的话，每台机器每个版本要误报六条阻断
-            // （wiping.* 五条 + first_pen_revitalization_flag，b05 Task 11.2 实测）
-            if !p.choices.is_empty()
-                && p.value_type != ValueType::Bool
+            // **`choices` 是取值域只有 string 这一档** —— 与 `validate.rs` 的
+            // `value_type == "string"` 同一道门。bool / float 参数身上挂着的
+            // 是显示文案与「预设档」，不是逼人选的取值域：
+            //
+            //   · bool：`'off'` / `'on'` 是显示文案，取值域由 bool 类型保证；
+            //     不跳过的话每台机器每个版本要误报六条阻断（wiping.* 五条 +
+            //     first_pen_revitalization_flag，b05 Task 11.2 实测）；
+            //   · float：`wiping.ironing_coverage_threshold` 挂 0/50/90 三条
+            //     预设档，而出厂默认就是 10.0 —— 照枚举查会把它判成阻断，
+            //     可它真身是一个能填的百分比。
+            if p.value_type == ValueType::Text
+                && !p.choices.is_empty()
                 && !p.choices.iter().any(|c| &c.value == hit.value)
             {
                 out.push(Issue {
@@ -530,16 +476,13 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
     }
 }
 
-/// 上游数据本身的问题：**一律提示，不阻断** ——
-/// 它们不是我们能修的，报成阻断会让工作台变成一个打不开的软件
-fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let known: Vec<&str> = book
-        .up
-        .catalog
-        .machines()
-        .iter()
-        .map(|m| m.id.as_str())
-        .collect();
+/// `machineFilter` 里认不出的机型：**一律提示，不阻断**。
+///
+/// 过滤里写着一台机型清单里没有的机型，多半是删机型时漏改了过滤。
+/// 这一项在那几台（不存在的）机型上会被当成不适用，而在真实机型上不受影响 ——
+/// 所以它不挡任何东西，只是留一处固定可见的地方
+fn filter_ghosts(book: &Book<'_>, out: &mut Vec<Issue>) {
+    let known: Vec<&str> = book.machines().iter().map(|m| m.id.as_str()).collect();
 
     for p in book.presets.registry.params() {
         let ghosts: Vec<&str> = p
@@ -557,7 +500,7 @@ fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
             title: format!("{} 的机型过滤里有认不出的机型", p.label),
             detail: format!(
                 "{} 不在机型清单里。这一项在那几台（不存在的）机型上会被当成不适用，\
-                 而在真实机型上不受影响。多半是上游删机型时漏改了过滤。",
+                 而在真实机型上不受影响。多半是删机型时漏改了过滤。",
                 ghosts.join("、")
             ),
             at: Where {
@@ -570,20 +513,31 @@ fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
     }
 }
 
-/// 交付这一面
+/// 交付这一面：登记了、却没进任何套餐的**切片器预设**。
+///
+/// **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）
 fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let orphan: Vec<String> = book
-        .stock_rows()
-        .into_iter()
-        .filter(|r| !r.in_any_bundle)
-        .map(|r| r.file_name)
+    let bundled: std::collections::BTreeSet<String> = book
+        .presets
+        .bundles
+        .items()
+        .iter()
+        .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
+        .collect();
+    let orphan: Vec<&str> = book
+        .presets
+        .assets
+        .items()
+        .iter()
+        .filter(|a| a.kind == AssetKind::SlicerProfile)
+        .filter(|a| !bundled.contains(&a.id.to_lowercase()))
+        .map(|a| a.path.as_str())
         .collect();
     if !orphan.is_empty() {
-        // **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）
         out.push(Issue {
             id: "bundle.orphan_files".to_owned(),
             severity: Severity::Hint,
-            title: format!("有 {} 个文件没进任何套餐", orphan.len()),
+            title: format!("有 {} 个切片器预设没进任何套餐", orphan.len()),
             detail: format!(
                 "{} —— 客户看得到它们（除非标了仅归档），只是没有套餐推荐。\
                  仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。",
@@ -617,7 +571,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         // 夹具清单：A1(STANDARD, FAST)、A2L(占位，无尺寸)、P1S(LITE)。
         // body 用 TOML 双引号 + `\n` 转义（字面量串不支持跨行，见 recipe.rs minimal()）
@@ -714,7 +668,7 @@ uuid = '22222222-2222-2222-2222-222222222222'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         let text = r##"
 release_time = '2026-01-01 00:00:00'
@@ -755,7 +709,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         let r = preflight(&book, Err("配方读不回来（测试）"));
         assert!(
@@ -765,9 +719,9 @@ uuid = '33333333-3333-3333-3333-333333333333'
             "实测：{:?}",
             r.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
         );
-        // 其余检查照跑：夹具上游没声明最低客户端版本，那条待办该在
+        // 其余检查照跑：A2L 是占位机型，那条提示该在
         assert!(
-            r.issues.iter().any(|i| i.id == "compat.minimum_client"),
+            r.issues.iter().any(|i| i.id == "machine.dimensions.A2L"),
             "配方坏了不该把别的检查一起带停"
         );
     }
@@ -804,7 +758,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
 
         assert_eq!(r.blocks, 0, "健康数据被判成阻断了：{:#?}", r.first_block());
         assert!(!r.blocked());
@@ -833,7 +787,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert!(r.blocked(), "枚举值不存在该是阻断");
         let b = r.first_block().unwrap();
         assert_eq!(b.severity, Severity::Block);
@@ -841,11 +795,6 @@ uuid = '33333333-3333-3333-3333-333333333333'
         assert_eq!(b.at.key.as_deref(), Some("wiping.mode"));
         assert!(b.detail.contains("擦料塔"), "要列出真的选项：{}", b.detail);
 
-        // 待办：上游没声明最低客户端版本（夹具照真上游做的，minimumClient 是空串）
-        assert!(r
-            .issues
-            .iter()
-            .any(|i| i.id == "compat.minimum_client" && i.severity == Severity::Todo));
         // **提示（不是待办）：A2L 是占位机型。**
         //
         // 档位本身就是判据：`Todo` 会让出货检查每次都催一遍一件刻意没做的事，
@@ -871,7 +820,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             placeholder.detail
         );
 
-        // 提示：没进任何套餐的文件（夹具里只有一条 BBS 进了套餐，三个 MKP 都没进）
+        // 提示：没进任何套餐的切片器预设（夹具里只有一条 BBS 进了套餐）
         let hint = r
             .issues
             .iter()
@@ -898,7 +847,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             }],
         )
         .unwrap();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert_eq!(r.issues[0].severity, Severity::Block);
         assert!(r.issues.windows(2).all(|w| w[0].severity <= w[1].severity));
     }
@@ -909,7 +858,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
 
         assert!(!r.issues.is_empty(), "一条都没有，下面的判据在空转");
         for i in &r.issues {
@@ -947,7 +896,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert!(r.blocked(), "值不合法必须挡住生成");
         let hit = r
             .issues
@@ -970,37 +919,16 @@ uuid = '33333333-3333-3333-3333-333333333333'
         }
     }
 
-    /* ---------- 上游漂移（b05 Task 11.9） ---------- */
-
-    /// 夹具上游与清单**完全对齐** → 一条漂移都不该有（healthy 对照；
-    /// 没有这条，产出侧那条分不清「对齐了」和「没查」）
-    #[test]
-    fn upstream_drift_stays_silent_when_the_catalogs_agree() {
-        let f = Fixture::load();
-        let c = committed();
-        let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
-        assert!(
-            !r.issues.iter().any(|i| i.id.starts_with("upstream.")),
-            "对齐的夹具不该报上游漂移：{:?}",
-            r.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
-        );
-    }
-
-    /// **真数据上的预检全量**（b05 Task 11.4–11.6 / 11.9，防空转的主判据）。
+    /// **真数据上的预检全量**（b05 Task 11.4–11.6，防空转的主判据）。
     ///
-    /// 夹具上游 + 真机型清单 + 真配方：
-    /// - 清单侧（真 presets）交付机型与版本同真配方**完全对齐** → 配方类一条不该报，
-    ///   A2L 占位跳过（不参与交付）；
-    /// - 夹具上游只认 A1 / A2L / P1S → 真清单里的 A1_MINI / P2S / X1C
-    ///   正好当上游漂移的产出侧样本（11.9）
+    /// 真机型清单 + 真配方：清单侧（真 presets）交付机型与版本同真配方**完全对齐**
+    /// → 配方类一条不该报，占位机型（无尺寸）跳过（不参与交付）
     #[test]
     fn the_real_recipe_and_catalog_line_up() {
         let Some(root) = crate::workbench::paths::presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        let f = Fixture::load();
         let real =
             crate::workbench::presets::Presets::load_from(&root).expect("真 presets 必须读得通");
         // 清单照 Book 的吃法走 Committed.catalog：从真 Catalog 转出 CatalogMachine
@@ -1035,7 +963,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             ..Default::default()
         };
         let draft = Draft::default();
-        let book = Book::new(&f.up, &real, &committed, &draft);
+        let book = Book::new(&real, &committed, &draft);
         let recipe =
             Recipe::parse(preset::PRESET_RECIPES_TOML).expect("仓库里的配方真源必须 parse 得过");
         assert_eq!(
@@ -1052,38 +980,6 @@ uuid = '33333333-3333-3333-3333-333333333333'
             out.iter()
                 .map(|i| (i.id.as_str(), i.title.as_str()))
                 .collect::<Vec<_>>()
-        );
-
-        // 11.9：夹具上游不认 A1_MINI / P2S / X1C —— 漂移要说得出是谁（Hint 档）
-        let r = inspect(&book);
-        let drift: Vec<&str> = r
-            .issues
-            .iter()
-            .filter(|i| i.id.starts_with("upstream.unknown_machine."))
-            .map(|i| i.id.as_str())
-            .collect();
-        assert_eq!(
-            drift,
-            vec![
-                "upstream.unknown_machine.A1_MINI",
-                "upstream.unknown_machine.P2S",
-                "upstream.unknown_machine.X1C",
-            ],
-            "上游漂移的机型集合变了 —— 夹具上游或真清单动了，说清为什么"
-        );
-        // 机型级报过就 continue：那三台的版本不该逐条再报一遍。
-        // A1 的 FASTV3.3 是**机型认得、版本不认**的合法漂移（夹具上游只有
-        // STANDARD / FAST 两版）—— 这一条该在，而且是版本级的样本
-        let version_drift: Vec<&str> = r
-            .issues
-            .iter()
-            .filter(|i| i.id.starts_with("upstream.unknown_version."))
-            .map(|i| i.id.as_str())
-            .collect();
-        assert_eq!(
-            version_drift,
-            vec!["upstream.unknown_version.A1.FASTV3.3"],
-            "版本级漂移的集合变了 —— 夹具上游或真清单动了，说清为什么"
         );
     }
 }

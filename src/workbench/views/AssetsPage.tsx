@@ -24,17 +24,16 @@
  *    按钮不渲染（待裁决项记在 C14-PORT-PLAN §4）。
  *  - **大小 / 修改时间不显示**：资产定义刻意不存它们（那是交付物的属性，
  *    发布时按真实字节算，Task 13.6）—— 原型里那格本来就标着「演示值」。
- *  - **回退登记表**在这页末尾（§2 的映射：回退表归 stock 视角）。上游维护、
- *    只读，`wb_fallback` 自己带「为什么只读」那句。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { AssetList, AssetView, FallbackTable, Words } from '../api'
+import type { AssetList, AssetView, Words } from '../api'
 import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
 import ModalC14 from '../c14/ModalC14'
+import { locateAnchor } from '../c14/locate'
 import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import s from '../c14.module.css'
@@ -65,7 +64,6 @@ type Assign = 'all' | 'assigned' | 'optional' | 'archiveOnly'
 
 export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
-  const [fallback, setFallback] = useState<FallbackTable | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
   const [kind, setKind] = useState<Kind>('all')
@@ -83,19 +81,15 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     (k: Kind, a: Assign, sl: string, nz: string, ly: string, query: string) => {
       void (async () => {
         try {
-          const [l, f] = await Promise.all([
-            wb.assets(
-              k === 'all' ? null : k,
-              k === 'slicerProfile' && sl ? sl : null,
-              k === 'slicerProfile' && nz ? nz : null,
-              k === 'slicerProfile' && ly ? ly : null,
-              a === 'all' ? null : a,
-              query || null,
-            ),
-            wb.fallback(),
-          ])
+          const l = await wb.assets(
+            k === 'all' ? null : k,
+            k === 'slicerProfile' && sl ? sl : null,
+            k === 'slicerProfile' && nz ? nz : null,
+            k === 'slicerProfile' && ly ? ly : null,
+            a === 'all' ? null : a,
+            query || null,
+          )
           setList(l)
-          setFallback(f)
         } catch (e) {
           setPageErr(isAppError(e) ? e.message : String(e))
         }
@@ -132,6 +126,18 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     if (!list || sel) return
     setSel(list.assets[0]?.id ?? null)
   }, [list, sel])
+
+  /*
+   * 「去处理」跳过来时：等清单读过、那一行确实在，滚过去 + 闪一下（见 `c14/locate.ts`）。
+   * 孤儿文件那一路带的是「替人筛好可选」而不是选中某条（`initialSel` 为空），不定位。
+   */
+  const locatedRef = useRef(false)
+  useEffect(() => {
+    if (locatedRef.current) return
+    if (!initialSel || !list || !list.assets.some((a) => a.id === initialSel)) return
+    locatedRef.current = true
+    locateAnchor(`t-asset-${initialSel}`, { row: true })
+  }, [initialSel, list])
   /** 反查结果对着当前选中吗 —— 右键「删除…」会先换选中再开框，旧结果不能拿来说话 */
   const usageReady = usage !== null && cur !== undefined && usage.id === cur.id
   const inUse =
@@ -202,7 +208,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
       })()
     : []
 
-  if (!list || !fallback) {
+  if (!list) {
     if (pageErr) return <p className="wb-todo">{pageErr}</p>
     return <p className="wb-todo">正在读资产定义……</p>
   }
@@ -335,6 +341,8 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
             <button
               key={a.id}
               type="button"
+              /* 「去处理」定位的锚点（locateAnchor 按它滚 + 闪） */
+              id={`t-asset-${a.id}`}
               className={`${s.row} ${sel === a.id ? s.rowOn : ''}`}
               onClick={() => setSel(a.id)}
               {...aMenu.triggerProps(a.id)}
@@ -503,46 +511,6 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
             </div>
           </div>
         )}
-
-        {/* 回退登记表（§2 的映射：归 stock 视角）。上游维护、只读 —— 表自己带原因 */}
-        <div className={s.card} style={{ marginTop: 12 }}>
-          <div className={s.cardHead}>
-            <h2>回退登记表</h2>
-            <span className={s.cardNote}>
-              v{fallback.version} · 更新 {fallback.updated}
-            </span>
-          </div>
-          <div className={s.cardBody}>
-            <p className={s.note} style={{ marginTop: 0, whiteSpace: 'pre-wrap' }}>
-              {fallback.guide}
-            </p>
-            {fallback.disabled.length > 0 ? (
-              <div className={s.warn}>
-                <div className={s.warnTitle}>被关掉的规则（触发时直接报错中止）</div>
-                <div className={s.warnDetail}>{fallback.disabled.join('、')}</div>
-              </div>
-            ) : (
-              <p className={s.note}>{fallback.emptyHint}</p>
-            )}
-            {fallback.groups.map((g) => (
-              <div key={g.label} className={s.group}>
-                <div className={s.groupHead}>{g.label}（{g.rules.length}）</div>
-                {g.rules.map((r) => (
-                  <div key={r.id} className={s.fileRow}>
-                    <span className={`${s.fileName} ${s.mono}`}>{r.id}</span>
-                    <span className={s.tag}>{r.enabled ? '启用' : '停用'}</span>
-                    <span className={s.rowMeta}>
-                      {r.trigger}：{r.from} → {r.to}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ))}
-            <p className={s.note} style={{ margin: 0 }}>
-              {fallback.readOnlyReason}
-            </p>
-          </div>
-        </div>
       </div>
 
       <ContextMenu at={aMenu.at} entries={assetEntries} onClose={aMenu.close} />

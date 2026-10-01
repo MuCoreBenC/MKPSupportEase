@@ -196,7 +196,10 @@ fn words() -> Words {
             ("nothingToSave", w::disabled::NOTHING_TO_SAVE),
             ("nothingToUndo", w::disabled::NOTHING_TO_UNDO),
             ("notUndoable", w::disabled::NOT_UNDOABLE),
-            ("deprecatedWriteBlocked", w::disabled::DEPRECATED_WRITE_BLOCKED),
+            (
+                "deprecatedWriteBlocked",
+                w::disabled::DEPRECATED_WRITE_BLOCKED,
+            ),
             ("deleteAssetInUse", w::disabled::DELETE_ASSET_IN_USE),
         ]
         .into_iter()
@@ -232,10 +235,26 @@ fn words() -> Words {
         .collect(),
 
         param_status: [
-            ("factory", w::param_status::FACTORY_LABEL, w::param_status::FACTORY_EXPLAIN),
-            ("machine", w::param_status::MACHINE_LABEL, w::param_status::MACHINE_EXPLAIN),
-            ("version", w::param_status::VERSION_LABEL, w::param_status::VERSION_EXPLAIN),
-            ("dirty", w::param_status::DIRTY_LABEL, w::param_status::DIRTY_EXPLAIN),
+            (
+                "factory",
+                w::param_status::FACTORY_LABEL,
+                w::param_status::FACTORY_EXPLAIN,
+            ),
+            (
+                "machine",
+                w::param_status::MACHINE_LABEL,
+                w::param_status::MACHINE_EXPLAIN,
+            ),
+            (
+                "version",
+                w::param_status::VERSION_LABEL,
+                w::param_status::VERSION_EXPLAIN,
+            ),
+            (
+                "dirty",
+                w::param_status::DIRTY_LABEL,
+                w::param_status::DIRTY_EXPLAIN,
+            ),
         ]
         .into_iter()
         .map(|(k, l, e)| (k, Word::new(l, e)))
@@ -248,7 +267,11 @@ fn words() -> Words {
         ),
 
         matrix_row: [
-            ("notOwn", w::matrix_row::NOT_OWN, w::matrix_row::NOT_OWN_EXPLAIN),
+            (
+                "notOwn",
+                w::matrix_row::NOT_OWN,
+                w::matrix_row::NOT_OWN_EXPLAIN,
+            ),
             ("diff", w::matrix_row::DIFF, w::matrix_row::DIFF_EXPLAIN),
             ("same", w::matrix_row::SAME, w::matrix_row::SAME_EXPLAIN),
         ]

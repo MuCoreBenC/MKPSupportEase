@@ -207,15 +207,16 @@ fn list_of(
         .filter(|a| slicer.map_or(true, |s| a.slicer.as_deref() == Some(s)))
         .filter(|a| {
             let (n, l) = slicer_axes(a.kind, &a.path);
-            nozzle.map_or(true, |x| n.as_deref() == Some(x)) && layer.map_or(true, |x| l.as_deref() == Some(x))
+            nozzle.map_or(true, |x| n.as_deref() == Some(x))
+                && layer.map_or(true, |x| l.as_deref() == Some(x))
         })
         .filter(|a| {
-            assign.map_or(true, |want| assign_of_all.get(&a.id.to_lowercase()) == Some(&want))
+            assign.map_or(true, |want| {
+                assign_of_all.get(&a.id.to_lowercase()) == Some(&want)
+            })
         })
         .filter(|a| {
-            q.is_empty()
-                || a.name.to_lowercase().contains(&q)
-                || a.id.to_lowercase().contains(&q)
+            q.is_empty() || a.name.to_lowercase().contains(&q) || a.id.to_lowercase().contains(&q)
         })
         .map(|a| {
             let (nozzle, layer) = slicer_axes(a.kind, &a.path);
@@ -252,7 +253,10 @@ fn list_of(
 /// 「0.2 / 0.4 / 1.0」按数值排，不按字典序（"10" < "2" 是错的顺序）
 fn sort_numeric(values: &mut Vec<String>) {
     values.sort_by(|a, b| {
-        let (x, y) = (a.parse::<f64>().unwrap_or(0.0), b.parse::<f64>().unwrap_or(0.0));
+        let (x, y) = (
+            a.parse::<f64>().unwrap_or(0.0),
+            b.parse::<f64>().unwrap_or(0.0),
+        );
         x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
     });
     values.dedup();
@@ -360,8 +364,8 @@ mod tests {
         let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            21,
-            "机型图 6 + 图标 3 + 模型 3 + BBS 9 —— 条数变了就该在提交里说清为什么"
+            19,
+            "机型图 4 + 图标 3 + 模型 3 + BBS 9 —— 条数变了就该在提交里说清为什么"
         );
 
         let missing: Vec<&str> = list
@@ -433,7 +437,10 @@ mod tests {
             vec!["0.2".to_owned(), "0.4".to_owned()],
             "选项表不随筛选变 —— 选中一个值不能让别的选项消失"
         );
-        assert!(filtered.assets.iter().all(|a| a.nozzle.as_deref() == Some("0.4")));
+        assert!(filtered
+            .assets
+            .iter()
+            .all(|a| a.nozzle.as_deref() == Some("0.4")));
     }
 
     /// 交付身份三态在真数据上的分布：5 条套餐各引 1 条 BBS → 恰好 5 条已分配；
@@ -488,9 +495,15 @@ mod tests {
 
         // a1-extra-image 刻意没人引用 —— 删得掉，重读真的没了
         presets.remove_asset("a1-extra-image").expect("删掉");
-        assert!(presets.assets.get("a1-extra-image").is_none(), "内存里要没了");
+        assert!(
+            presets.assets.get("a1-extra-image").is_none(),
+            "内存里要没了"
+        );
         presets.assets.write().expect("写");
         let again = Presets::load_from(presets.root()).expect("重读");
-        assert!(again.assets.get("a1-extra-image").is_none(), "落盘之后重读也没了");
+        assert!(
+            again.assets.get("a1-extra-image").is_none(),
+            "落盘之后重读也没了"
+        );
     }
 }

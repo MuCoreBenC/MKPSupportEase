@@ -15,7 +15,7 @@
  *   2. **gcode / 长文本 / 已弃用没有这一页**（调用方不给页签）
  *   3. **目标名字一律带机型**（作者：「把 A1 的补上」）
  */
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { wb, type ParamView, type Patch, type Words, type BulkPreview } from '../api'
 import { toasts } from '../c14/toast'
@@ -30,6 +30,15 @@ export interface BatchTarget {
   name: string
   machineId: string
   uid: string | null
+  /** 这一列在这一项上的**当前原始值**（矩阵那格给的）。预填「设置新值」、判「有没有变化」用它 */
+  raw: unknown
+  /**
+   * 这一列**盘上**的值（`Cell.rest`）。`null` = 这一层原本没钉着它 ——
+   * 「恢复」要写 `null` **删键**、让它挂回继承，不是写回一个值
+   */
+  rest: unknown
+  /** 这一格有没有未保存的改动 —— 「恢复」只对改过的列有意义 */
+  dirty: boolean
 }
 
 interface Props {
@@ -49,19 +58,49 @@ function coerce(param: ParamView, raw: string): unknown {
   return raw
 }
 
+/**
+ * 格子的原始值 → 「设置新值」那个控件认的原文。**与 `CellEditor` 同一条口径**
+ * （那边是 `String(cell.raw ?? '')`），只有开关那一档要翻成开/关两个字。
+ */
+function toInput(param: ParamView, v: unknown): string {
+  if (param.uiComponent === 'switch') return v === true || v === 'true' ? '开' : '关'
+  return v === null || v === undefined ? '' : String(v)
+}
+
 export default function BatchEdit({ param, words, targets, onApply }: Props) {
   const [pickedIds, setPickedIds] = useState<string[] | null>(null)
-  const [raw, setRaw] = useState('')
+  /** 用户自己改过的值。`null` = 还没动过 → 显示各列的**共同当前值**（见 `commonRaw`） */
+  const [rawEdit, setRawEdit] = useState<string | null>(null)
   const [preview, setPreview] = useState<BulkPreview | null>(null)
   const [previewValue, setPreviewValue] = useState<unknown>(null)
 
   const pickedTargets = pickedIds ?? targets.map((v) => v.id)
+  const picked = targets.filter((t) => pickedTargets.includes(t.id))
+
+  /*
+   * 各目标列在这一项上的当前值**全都一样**时，就把它预填进「设置新值」——
+   * 作者点开抽屉看到空框，而那一行每列本来就是同一个值（「但是这一行都是一样的呀」）。
+   * 不一样就不预填：没有「共同的那个值」可言。矩阵刷新（比如写完之后）会重算。
+   */
+  const commonRaw = useMemo(() => {
+    if (targets.length === 0) return ''
+    const first = toInput(param, targets[0]!.raw)
+    return targets.every((t) => toInput(param, t.raw) === first) ? first : ''
+  }, [param, targets])
+
+  /* 换了参数、或者矩阵刷新出了新的共同值 → 用户手改的那份作废，回到预填 */
+  useEffect(() => {
+    setRawEdit(null)
+  }, [param.key, commonRaw])
+
+  const raw = rawEdit ?? commonRaw
 
   const toggle = (id: string) => {
-    const cur = pickedTargets.includes(id)
-      ? pickedTargets.filter((x) => x !== id)
-      : [...pickedTargets, id]
-    setPickedIds(cur.length ? cur : [id])
+    setPickedIds(
+      pickedTargets.includes(id)
+        ? pickedTargets.filter((x) => x !== id)
+        : [...pickedTargets, id],
+    )
   }
 
   /** 全选 / 反选（拖选手势之外也要有明写的按钮） */
@@ -73,10 +112,36 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
     return hit ? hit.label : raw || '（空）'
   }
 
+  /**
+   * 勾选的那些列，值**是不是都已经等于**要写的新值。是就没变化 ——
+   * 「都说了让他和原始数据对比，变化了才有变化」（作者）：按钮该灰，不给点。
+   */
+  const noChange = picked.length > 0 && picked.every((t) => toInput(param, t.raw) === raw)
+
+  /** 勾选里**改过**的列 —— 「恢复修改前的」只对它们有意义 */
+  const restorable = picked.filter((t) => t.dirty)
+
+  /**
+   * 恢复修改前的：**按列各自退回改动前那一层**（作者：「要根据矩阵里面那一行的
+   * 各自的值恢复改之前的」）。`rest` 为 `null` = 这一层原本就没钉着它 → 写 `null`
+   * **删键**、让它挂回继承；写回一个值会把继承钉死，那是另一回事。
+   */
+  const restore = async () => {
+    if (!restorable.length) return
+    const patches: Patch[] = restorable.map((t) => ({
+      kind: 'setValue',
+      level: t.uid !== null ? 'version' : 'machine',
+      owner: t.uid ?? t.machineId,
+      key: param.key,
+      value: t.rest,
+    }))
+    await onApply(`${param.label} 恢复修改前（${patches.length} 列）`, patches)
+  }
+
   /** 应用 = 先预览（后端判每一列的 before/after 与跳过原因），人看过再写 */
   const apply = async () => {
-    if (!pickedTargets.length) return
-    const chosen = targets.filter((t) => pickedTargets.includes(t.id))
+    if (!picked.length || noChange) return
+    const chosen = picked
     if (param.uiComponent === 'number' && (raw === '' || Number.isNaN(Number(raw)))) {
       toasts.push('先填一个数字再应用')
       return
@@ -179,15 +244,19 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
       <div className={s.pBatchRow}>
         <span className={s.pKvK}>设置新值</span>
         <span className={s.pBatchVal}>
+          {/* 枚举只有 string 这一档才有取值域 —— 与 CellEditor / `validate.rs`
+              的 `value_type == "string"` 同一道门。float 参数身上挂着的 choices
+              是「预设档」，这一格该给能填的数字框，不是切下拉
+              （`wiping.ironing_coverage_threshold` 就是这种）。 */}
           {param.uiComponent === 'switch' ? (
             <button
               type="button"
               className={`${s.btn} ${s.btnSm} ${raw === '开' ? s.btnOn : ''}`}
-              onClick={() => setRaw(raw === '开' ? '关' : '开')}
+              onClick={() => setRawEdit(raw === '开' ? '关' : '开')}
             >
               {raw === '开' ? '开' : '关'}
             </button>
-          ) : param.choices.length > 0 ? (
+          ) : param.valueType === 'string' && param.choices.length > 0 ? (
             <SelectField
               label={param.label}
               size="sm"
@@ -197,7 +266,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
                 label: o.label,
                 deprecated: o.deprecated || undefined,
               }))}
-              onChange={setRaw}
+              onChange={setRawEdit}
             />
           ) : (
             <input
@@ -207,21 +276,46 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
               min={param.min ?? undefined}
               max={param.max ?? undefined}
               step={param.step ?? undefined}
-              onChange={(e) => setRaw(e.target.value)}
+              onChange={(e) => setRawEdit(e.target.value)}
             />
           )}
         </span>
       </div>
 
-      <button
-        type="button"
-        className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-        disabled={!pickedTargets.length}
-        title={!pickedTargets.length ? '先挑至少一个应用目标' : undefined}
-        onClick={() => void apply()}
-      >
-        应用
-      </button>
+      <div className={s.pBatchOps}>
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+          disabled={!picked.length || noChange}
+          title={
+            !picked.length
+              ? '先挑至少一个应用目标'
+              : noChange
+                ? '勾选的列都已经是这个值了 —— 没有变化就没有要写的'
+                : undefined
+          }
+          onClick={() => void apply()}
+        >
+          应用
+        </button>
+        {/*
+          「恢复修改前的」：把这几列各自退回**改动前**的值（不是恢复出厂基底，
+          也不是挂回继承那一枚 ↶ —— 后者只退一层，这里是退出这一轮改的那一笔）。
+        */}
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnSm}`}
+          disabled={restorable.length === 0}
+          title={
+            restorable.length === 0
+              ? '勾选的列都没有改动，没有要恢复的'
+              : '把改过的列各自退回改动前的值'
+          }
+          onClick={() => void restore()}
+        >
+          恢复修改前的
+        </button>
+      </div>
       <p className={s.note}>
         写到<b>勾选的那些版本各自那一层</b>，没勾的版本不动。一次动作一条历史，Ctrl+Z 整块退回来。
       </p>

@@ -53,11 +53,15 @@ import ParamsPage from './views/ParamsPage'
 import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
 import BuildPage from './views/BuildPage'
+import SettingsPage from './views/SettingsPage'
 import s from './c14.module.css'
 
 /**
  * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
  * （P3 已接），不再有独立的「对比」页。
+ *
+ * `settings` 排在末尾：它不是一个业务页 —— 预设根固定是 `<repo>/presets`，
+ * 这一页只读地摆开数据根与子目录职责，导航角落那盏灯点它进来。
  */
 interface NavItem {
   id: PageId
@@ -122,6 +126,17 @@ const NAV: NavItem[] = [
       <>
         <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
         <path d="m3.5 15.5 4.2-4.2 3 3 3.8-3.8 6 5.5" />
+      </>
+    ),
+  },
+  /* 齿轮 = 只读的设置（数据根与子目录职责） */
+  {
+    id: 'settings',
+    label: '设置',
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
       </>
     ),
   },
@@ -191,8 +206,9 @@ export function WorkbenchApp() {
     setFatal(isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e))
   }, [])
 
-  /* 首屏四步：boot（上游缺失也能显示数据根）→ 词表 → 整本 → 检查报告。
-     ref 挡住 StrictMode 的第二遍（那三条命令全发两次） */
+  /* 首屏四步：boot（预设根定位不到也能显示数据根）→ 词表 → 整本 → 检查报告。
+     **预设根定位不到不再是一道门**：六页业务照常，只是依赖预设的读数留空，
+     问题横幅与「设置」页负责把数据根说清。ref 挡住 StrictMode 的第二遍（那三条命令全发两次） */
   const booted = useRef(false)
   useEffect(() => {
     if (booted.current) return
@@ -201,7 +217,6 @@ export function WorkbenchApp() {
       try {
         const b = await wb.boot()
         setBoot(b)
-        if (!b.info) return // 上游缺失：不启动业务
         const [w, bk] = await Promise.all([wb.words(), wb.book()])
         setWords(w)
         setBook(bk)
@@ -228,6 +243,18 @@ export function WorkbenchApp() {
       .catch(() => undefined)
     refreshReport()
   }, [refreshReport])
+
+  /**
+   * `presets/` 改过之后（「重新加载」= 后端重开一次会话）：换 `Boot`，并把
+   * 整本与检查报告重取一遍 —— 预设数据变了会改这两处读数
+   */
+  const reloadBoot = useCallback(
+    (b: Boot) => {
+      setBoot(b)
+      refreshBook()
+    },
+    [refreshBook],
+  )
 
   /**
    * 走唯一写入口。`where` 说这次结果往哪个栈压（正向压撤销、撤销压重做、重做压撤销）
@@ -313,8 +340,9 @@ export function WorkbenchApp() {
     const next = view as NavId
     if (foc) {
       if (next === 'params') {
-        /* 参数台的定位一定有机型语境；套餐/资产那两路才会带 null 过来 */
-        setFocus({ machineId: foc.machineId ?? '', uid: foc.uid })
+        /* 参数台的定位一定有机型语境；套餐/资产那两路才会带 null 过来。
+           `key` 一起带过去 —— 参数台落地后按它滚到那一项 + 闪一下 */
+        setFocus({ machineId: foc.machineId ?? '', uid: foc.uid, key: foc.key ?? null })
         setFocusGen((g) => g + 1)
       } else if (next === 'bundles') {
         setBundleSel(foc.key ?? foc.uid ?? null)
@@ -407,6 +435,8 @@ export function WorkbenchApp() {
           : ''
       case 'assets':
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+      case 'settings':
+        return '只读 —— 数据根与工作台子目录的职责'
     }
   }, [page, book, report])
 
@@ -488,6 +518,9 @@ export function WorkbenchApp() {
             onBookRefresh={refreshBook}
           />
         )
+      case 'settings':
+        if (!boot) return null
+        return <SettingsPage boot={boot} />
     }
   }
   const nowNode = renderPage(page)
@@ -536,27 +569,32 @@ export function WorkbenchApp() {
         })}
       </div>
 
-      {/* 上游 / 数据根。灯 + 短句 + 附注；窄档只留灯（完整信息在 title 上） */}
+      {/*
+        唯一的预设真相源。灯 + 短句 + 附注；窄档只留灯（完整信息在 title 上）。
+        **点它进设置页** —— 那里只读地摆开三个数据根与子目录职责（没有可改的表单：
+        预设根固定是 `<repo>/presets`）
+      */}
       <div
-        className={`${s.upstream} ${boot?.info ? '' : s.upstreamOff}`}
+        className={s.upstream}
+        role="button"
+        tabIndex={0}
         title={
           boot
-            ? `配方本 ${boot.roots.workbench}\n交付 ${boot.roots.dist}\n${
-                boot.info
-                  ? `上游已连接 · 注册表 ${boot.info.registryUpdated}`
-                  : '上游未连接（可用环境变量 MKPSE_PRESETS_DIR 指过去）'
-              }`
+            ? `预设源 ${boot.roots.presets}\n配方本 ${boot.roots.workbench}\n交付 ${boot.roots.dist}\n点击查看设置`
             : '正在读…'
         }
+        onClick={() => setPage('settings')}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setPage('settings')
+          }
+        }}
       >
-        <span className={s.upDot} data-on={!!boot?.info} aria-hidden />
+        <span className={s.upDot} data-on={!!boot} aria-hidden />
         <span className={s.upText}>
-          <span className={s.upLine}>{boot?.info ? '已连接' : '未连接'}</span>
-          <span className={s.upNote}>
-            {boot?.info
-              ? `上游 · 注册表 ${boot.info.registryUpdated}`
-              : '本地副本 · MKPSE_PRESETS_DIR 可改'}
-          </span>
+          <span className={s.upLine}>{boot ? '预设源' : '读取中'}</span>
+          <span className={s.upNote}>{boot ? boot.roots.presets : '正在读…'}</span>
         </span>
       </div>
 
@@ -685,17 +723,34 @@ export function WorkbenchApp() {
                   </div>
                 </div>
 
+                {/*
+                  这一条只剩**真正的开场失败**（今天只有「presets/ 定位不到」一种）。
+                  预设根固定是 `<repo>/presets`，没有可改的路径表单 —— 把目录补齐后
+                  点「重新加载」重开一次会话即可，不用重启应用；「设置页」进去只读地
+                  看三个数据根到底指哪
+                */}
                 {boot?.problem && (
                   <div className="wb-banner" data-tone="danger" style={{ margin: '0 12px' }}>
                     {boot.problem}
                     {boot.detail && <> —— <span className="wb-mono">{boot.detail}</span></>}
                     <br />
-                    没有上游工作台不启动业务。可以用环境变量{' '}
-                    <span className="wb-mono">MKPSE_PRESETS_DIR</span> 指过去，改完点
-                    <button type="button" className="wb-link" onClick={() => location.reload()}>
+                    确认仓库里的
+                    <span className="wb-mono">presets/</span>
+                    已就位，然后点
+                    <button
+                      type="button"
+                      className="wb-link"
+                      onClick={() => {
+                        wb.reload().then(reloadBoot).catch(fail)
+                      }}
+                    >
                       重新加载
                     </button>
-                    。
+                    ，或去
+                    <button type="button" className="wb-link" onClick={() => setPage('settings')}>
+                      设置页
+                    </button>
+                    看数据根。
                   </div>
                 )}
 

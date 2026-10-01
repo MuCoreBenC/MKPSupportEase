@@ -12,17 +12,18 @@
 //! 收成一条之后，这四件事变成这一条路径的副产物。
 //!
 //! 这一层只做三件事：解析入参 → 调 `domain` → 把 DTO 交出去。
-//! **不在这里写规则**（那是 `domain`），**不在这里读上游**（那是 `upstream`）。
+//! **不在这里写规则**（那是 `domain`），**不在这里读磁盘**（那是 `presets` / `storage`）。
 //!
-//! # 上游缓存一次，其余每次现读
+//! # 预设缓存一次，其余每次现读
 //!
 //! | 数据 | 什么时候读 | 为什么 |
 //! |---|---|---|
-//! | 上游（74 参数 / 6 机型 / 72 资源） | **开工作台时一次**，`wb_reload` 显式重读 | 它是只读的外部产物；一次操作里各处看到的必须是同一份，否则派生出来的状态会自相矛盾 |
+//! | 预设真相源（`presets/`：74 参数 / 机型 / 套餐 / 资产） | **开工作台时一次**，`wb_reload` 显式重读 | 一次操作里各处看到的必须是同一份，否则派生出来的状态会自相矛盾 |
 //! | 已落盘（`workbench/`） | 每次命令现读 | 它是可变的那一面。缓存它就等于又造了一个"当前状态"的副本（doc §1 第四条铁律） |
 //! | 草稿 | 每次命令现读 | 同上 |
 //!
-//! 一个进程只有一个工作台窗口，所以上游那一份放在模块级的 [`SESSION`] 里。
+//! **唯一的数据根是 `presets/`**（旧的上游仓库连同它的三级定位、环境变量、设置项一起
+//! 退休了）。一个进程只有一个工作台窗口，所以那一份放在模块级的 [`SESSION`] 里。
 //! **命令本身只是薄壳**：真正的逻辑都在拿 `&Ctx` 的自由函数上，
 //! 所以单测可以直接造 `Ctx`，不碰那个全局。
 //!
@@ -55,7 +56,7 @@ use serde_json::Value;
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix, StockRow};
+use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
@@ -65,7 +66,6 @@ use crate::workbench::domain::{Committed, Level};
 use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
-use crate::workbench::upstream::Upstream;
 use crate::workbench::{paths, Roots};
 
 /// 一次会话的全部状态。
@@ -77,7 +77,6 @@ use crate::workbench::{paths, Roots};
 ///
 /// 现在磁盘上的 `.draft/book.json` 只是**崩溃恢复快照**，由 [`flush_if_due`] 懒写。
 pub struct Ctx {
-    pub up: Upstream,
     /// 我们自己那份预设数据。**机型与版本的清单从这里来**（b04 Task 8），
     /// 而且它是可写的 —— 新建版本要落进 `presets/machines/*.toml`
     pub presets: Presets,
@@ -98,19 +97,22 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// 真仓库。**上游或我们的预设数据定位不到时直接失败** ——
-    /// 那种情况下工作台不该启动业务：清单在 `presets/`，字段定义与资源清单在上游，
-    /// 缺了哪一半每一页都是空的
+    /// 真仓库。
+    ///
+    /// **唯一的数据根是 `presets/`**（旧的上游仓库连同它的定位、设置项一起退休了）：
+    /// 机型 / 参数 / 套餐 / 资产 / 交付产物都在 `presets/` 下面。
+    ///
+    /// 会失败的是 `presets/` 定位不到 —— 那是清单与字段定义的唯一来源，
+    /// 缺了它每一页都是空的，装成能跑只会让人以为"我们没有机型"。
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Self::with(Upstream::load()?, Presets::load()?, store)
+        Self::with(Presets::load()?, store)
     }
 
-    /// 给定两份数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
-    pub(super) fn with(up: Upstream, presets: Presets, store: Store) -> Result<Self, AppError> {
+    /// 给定预设数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
+    pub(super) fn with(presets: Presets, store: Store) -> Result<Self, AppError> {
         let mut ctx = Self {
-            up,
             presets,
             store,
             committed: Committed::default(),
@@ -304,7 +306,7 @@ pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppErr
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
-    let mut v = Book::new(&ctx.up, &ctx.presets, committed, draft).book_view();
+    let mut v = Book::new(&ctx.presets, committed, draft).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
     v
@@ -316,29 +318,11 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 #[serde(rename_all = "camelCase")]
 pub struct Boot {
     pub roots: Roots,
-    /// 上游读不出来时的那一句。`None` = 一切就绪。
-    /// **不把它做成错误返回**：界面要能在"上游缺失"的状态下把三个数据根显示出来，
-    /// 那是排查这个问题唯一有用的信息
+    /// **真正的开场失败**（今天只剩"`presets/` 定位不到"这一种）。`None` = 业务能跑
     pub problem: Option<String>,
     pub detail: Option<String>,
-    pub info: Option<UpstreamInfo>,
-    /// 工作台子目录的职责（14.7）。上游缺失时也给 —— 目录与职责跟上游无关
+    /// 工作台子目录的职责（14.7）
     pub store_dirs: Vec<StoreDirRole>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpstreamInfo {
-    pub registry_updated: String,
-    pub manifest_updated: String,
-    pub channel: String,
-    /// **`None` = 上游未声明**（实测 `minimumClient` 就是空串），不是 0 也不是空串
-    pub minimum_client: Option<String>,
-    pub latest_release: Option<String>,
-    pub params: usize,
-    pub machines: usize,
-    pub deliverables: usize,
-    pub fallbacks: usize,
 }
 
 /// 工作台子目录的职责（14.7）。**谁写它、谁读它、能不能当编辑对象**，
@@ -371,51 +355,57 @@ fn store_dir_roles() -> Vec<StoreDirRole> {
         .collect()
 }
 
-/// 三个数据根 + 上游就位情况。界面开场调它
+/// 三个数据根。界面开场调它。**唯一的数据根是 `presets/`**
 #[tauri::command]
 pub fn wb_boot() -> Result<Boot, AppError> {
-    traced("wb_boot", |_| {
-        let roots = Roots {
-            workbench: paths::workbench_root()?.display().to_string(),
-            dist: paths::dist_root()?.display().to_string(),
-            upstream: paths::upstream_root().map(|p| p.display().to_string()),
-        };
-        match with_ctx(|ctx| {
-            Ok(UpstreamInfo {
-                registry_updated: ctx.presets.registry.updated().to_owned(),
-                manifest_updated: ctx.up.manifest.compat.updated.clone(),
-                channel: ctx.up.manifest.compat.channel.clone(),
-                minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
-                latest_release: ctx.up.manifest.latest_release().map(str::to_owned),
-                params: ctx.presets.registry.params().len(),
-                machines: ctx.presets.catalog.machines().len(),
-                deliverables: ctx.up.manifest.deliverables().len(),
-                fallbacks: ctx.up.fallback.rules().len(),
-            })
-        }) {
-            Ok(info) => Ok(Boot {
-                roots,
-                problem: None,
-                detail: None,
-                info: Some(info),
-                store_dirs: store_dir_roles(),
-            }),
-            Err(e) => Ok(Boot {
-                roots,
-                problem: Some(e.message),
-                detail: e.detail,
-                info: None,
-                store_dirs: store_dir_roles(),
-            }),
-        }
-    })
+    traced("wb_boot", |_| boot_inner())
 }
 
-/// 重读上游与我们自己那份预设数据。改完 `presets/` 之后不用重启工作台
+/// 重读我们自己那份预设数据。改完 `presets/` 之后不用重启工作台
 #[tauri::command]
 pub fn wb_reload() -> Result<Boot, AppError> {
     drop_ctx();
-    wb_boot()
+    boot_inner()
+}
+
+/// 开场那一段。先算出三个数据根，再开一次会话（`presets/` 定位不到才会是 problem）
+fn boot_inner() -> Result<Boot, AppError> {
+    match (|| -> Result<Boot, AppError> {
+        let roots = Roots {
+            workbench: paths::workbench_root()?.display().to_string(),
+            presets: paths::presets_root()
+                .ok_or_else(|| AppError::not_found("定位不到 <repo>/presets"))?
+                .display()
+                .to_string(),
+            dist: paths::dist_root()?.display().to_string(),
+        };
+        // 建一次会话：能开就说明 presets/ 读得通（会话自己也读一次）
+        with_ctx(|_| Ok(()))?;
+        Ok(Boot {
+            roots,
+            problem: None,
+            detail: None,
+            store_dirs: store_dir_roles(),
+        })
+    })() {
+        Ok(boot) => Ok(boot),
+        Err(e) => Ok(Boot {
+            roots: Roots {
+                workbench: paths::workbench_root()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                presets: paths::presets_root()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                dist: paths::dist_root()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            },
+            problem: Some(e.message),
+            detail: e.detail,
+            store_dirs: store_dir_roles(),
+        }),
+    }
 }
 
 /* ---------- 读 ---------- */
@@ -541,7 +531,7 @@ pub fn wb_matrix(
     traced("wb_matrix", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(
+            Ok(Book::new(&ctx.presets, &c, &d).matrix(
                 &cols,
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
@@ -564,71 +554,12 @@ pub fn wb_desk(
     traced("wb_desk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).desk(
+            Ok(Book::new(&ctx.presets, &c, &d).desk(
                 &machine_id,
                 uid.as_deref(),
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
             ))
-        })
-    })
-}
-
-/// 仓库盘点：18 个交付物 + 三态 + 归属。**每条都有真哈希**
-#[tauri::command]
-pub fn wb_stock() -> Result<Vec<StockRow>, AppError> {
-    traced("wb_stock", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).stock_rows())
-        })
-    })
-}
-
-/// 回退登记表。**这一页只读**（上游自己写着"禁止手改 content/*.json"）
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FallbackTable {
-    pub version: u32,
-    pub updated: String,
-    /// 带换行的长文，**原样保留**
-    pub guide: String,
-    pub groups: Vec<FallbackGroup>,
-    /// 被关掉的规则：触发时直接报错中止。空是正常状态，界面写「当前没有关掉的规则」
-    pub disabled: Vec<String>,
-    pub empty_hint: &'static str,
-    /// 这一页为什么只读
-    pub read_only_reason: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FallbackGroup {
-    pub label: &'static str,
-    pub rules: Vec<crate::workbench::upstream::fallback::Rule>,
-}
-
-#[tauri::command]
-pub fn wb_fallback() -> Result<FallbackTable, AppError> {
-    traced("wb_fallback", |_| {
-        with_ctx(|ctx| {
-            let f = &ctx.up.fallback;
-            Ok(FallbackTable {
-                version: f.version,
-                updated: f.updated.clone(),
-                guide: f.guide.clone(),
-                groups: f
-                    .by_category()
-                    .into_iter()
-                    .map(|(cat, rules)| FallbackGroup {
-                        label: cat.label(),
-                        rules: rules.into_iter().cloned().collect(),
-                    })
-                    .collect(),
-                disabled: f.disabled().iter().map(|r| r.id.clone()).collect(),
-                empty_hint: w::NO_DISABLED_FALLBACK,
-                read_only_reason: "这张表由上游维护，改动请回 mkppanel 的「回退登记表」页",
-            })
         })
     })
 }
@@ -661,7 +592,7 @@ pub fn wb_preview_bulk(
     traced("wb_preview_bulk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.up, &ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
+            Ok(Book::new(&ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
         })
     })
 }
@@ -693,7 +624,7 @@ pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
 }
 
 fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> {
-    let book = Book::new(&ctx.up, &ctx.presets, committed, draft);
+    let book = Book::new(&ctx.presets, committed, draft);
     let mut out: Vec<DiffLine> = Vec::new();
 
     let target_of = |level: Level, owner: &str| -> String {
@@ -717,7 +648,7 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
             continue;
         };
         let clean = Draft::default();
-        let before = Book::new(&ctx.up, &ctx.presets, committed, &clean);
+        let before = Book::new(&ctx.presets, committed, &clean);
         let (b, a) = match level {
             Level::Machine => (
                 before
@@ -873,7 +804,7 @@ pub fn wb_apply_draft(
             tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
 
             // 一次派生，两份结果：整本视图 + 调用方要的那一页
-            let book = Book::new(&ctx.up, &ctx.presets, &ctx.committed, &ctx.draft);
+            let book = Book::new(&ctx.presets, &ctx.committed, &ctx.draft);
             let (desk, matrix) = match &refresh {
                 None => (None, None),
                 Some(Refresh::Desk {
@@ -892,7 +823,12 @@ pub fn wb_apply_draft(
                 ),
                 Some(Refresh::Matrix { cols, tab, query }) => (
                     None,
-                    Some(book.matrix(cols, tab.as_deref(), query.as_deref().unwrap_or_default(), None)),
+                    Some(book.matrix(
+                        cols,
+                        tab.as_deref(),
+                        query.as_deref().unwrap_or_default(),
+                        None,
+                    )),
                 ),
             };
             let mut view = book.book_view();
@@ -1078,9 +1014,9 @@ mod tests {
         let store = Store::at(dir.path());
         store.bootstrap().unwrap();
         let f = Fixture::load();
-        // `Upstream` / `Presets` 都没有 Clone，所以再读一份给 Ctx
-        let (fx_dir, up, presets) = Fixture::load().into_parts();
-        let ctx = Ctx::with(up, presets, store).unwrap();
+        // `Presets` 没有 Clone，所以再读一份给 Ctx
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let ctx = Ctx::with(presets, store).unwrap();
         ((dir, fx_dir), f, ctx)
     }
 
@@ -1243,7 +1179,7 @@ mod tests {
             .iter()
             .find(|p| p.key == "toolhead.offset.x")
             .unwrap();
-        assert_eq!(off.default_text, "0 mm");
+        assert_eq!(off.default_text, "0.0 mm");
         assert_eq!(off.machine_filter.len(), 0, "不限机型");
 
         let only = params
@@ -1251,15 +1187,6 @@ mod tests {
             .find(|p| p.key == "toolhead.only_p1s")
             .unwrap();
         assert_eq!(only.machine_filter, vec!["P1S"]);
-    }
-
-    /// 上游信息里，**上游未声明的东西要是 `None`** 而不是空串
-    #[test]
-    fn upstream_info_reports_undeclared_as_none() {
-        let (_d, _f, ctx) = ctx();
-        assert_eq!(ctx.up.manifest.compat.minimum_client, None);
-        assert_eq!(ctx.up.manifest.compat.version, None);
-        assert_eq!(ctx.up.manifest.latest_release(), Some("0.0.4"));
     }
 
     /// 一条 patch 走完整条路径：改**内存** → 视图跟着变 → 反向能回去。
@@ -1341,13 +1268,18 @@ mod tests {
         assert!(!ctx.stale());
     }
 
-    /// 那个「改过去改不回来」的后端侧回归：
-    /// 一层本来没有自有值时，`disk` → `tower` 这两步**脏计数都是 1**，
-    /// 但有效值必须两次都跟着变。上一稿前端拿脏计数当刷新信号，所以第二步看不见
+    /// 那个「改过去改不回来」的后端侧回归：**有效值每一步都必须跟着变**。
+    ///
+    /// 上一稿前端拿脏计数当刷新信号，所以这里连脏计数一起钉住：`toolhead.offset.x`
+    /// 在版本层本来就钉着（`A1:STANDARD` = -1），5 → 7 两步**都脏**、脏计数一直是 1，
+    /// 而值确实变了 —— 刷新信号只能是 `tick`，不能是脏计数。
+    ///
+    /// 第三步回到 `-1`（本层盘上那个值）：**脏计数归 0**，这一处不再是改动
+    /// （作者实测报的那条：「改了又改回去就变成了已修改是不对的」）。
     #[test]
     fn a_value_changed_back_and_forth_is_visible_each_time() {
         let (_d, _f, mut ctx) = ctx();
-        let set = |ctx: &mut Ctx, v: &str| {
+        let set = |ctx: &mut Ctx, v: i64| {
             apply_patches(
                 &mut ctx.draft,
                 &ctx.committed,
@@ -1355,7 +1287,7 @@ mod tests {
                 &[Patch::SetValue {
                     level: Level::Version,
                     owner: "A1/STANDARD".to_owned(),
-                    key: "wiping.mode".to_owned(),
+                    key: "toolhead.offset.x".to_owned(),
                     value: Some(serde_json::json!(v)),
                 }],
             )
@@ -1365,21 +1297,33 @@ mod tests {
         let now = |ctx: &Ctx| {
             let cols = cols(&[("A1", Some("A1/STANDARD"))]);
             let (c, d, _) = state(ctx).unwrap();
-            let m = Book::new(&ctx.up, &ctx.presets, &c, &d).matrix(&cols, None, "", None);
-            let row = m.rows.into_iter().find(|r| r.key == "wiping.mode").unwrap();
+            let m = Book::new(&ctx.presets, &c, &d).matrix(&cols, None, "", None);
+            let row = m
+                .rows
+                .into_iter()
+                .find(|r| r.key == "toolhead.offset.x")
+                .unwrap();
             row.cells[0].raw.clone()
         };
 
-        set(&mut ctx, "disk");
-        assert_eq!(now(&ctx), serde_json::json!("disk"));
+        set(&mut ctx, 5);
+        assert_eq!(now(&ctx), serde_json::json!(5.0));
         assert_eq!(ctx.draft.dirty_count(), 1);
 
-        set(&mut ctx, "tower");
-        assert_eq!(now(&ctx), serde_json::json!("tower"), "改回去必须看得见");
+        set(&mut ctx, 7);
+        assert_eq!(now(&ctx), serde_json::json!(7.0), "改了必须看得见");
         assert_eq!(
             ctx.draft.dirty_count(),
             1,
             "脏计数没变 —— 所以它不能当刷新信号"
+        );
+
+        set(&mut ctx, -1);
+        assert_eq!(now(&ctx), serde_json::json!(-1.0), "改回去同样必须看得见");
+        assert_eq!(
+            ctx.draft.dirty_count(),
+            0,
+            "改回本层盘上那个值 = 没改过，不该再挂着「已修改」"
         );
     }
 
@@ -1464,7 +1408,7 @@ mod tests {
     fn both_pages_can_be_produced_from_one_derivation() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+        let book = Book::new(&ctx.presets, &c, &d);
 
         let desk = book.desk("A1", Some("A1/STANDARD"), None, "");
         let matrix = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None);
@@ -1526,8 +1470,8 @@ mod tests {
 
         let value_line = lines.iter().find(|l| l.owner == "A1/STANDARD").unwrap();
         assert_eq!(value_line.target, "A1 · 标准版");
-        assert_eq!(value_line.before, "-1 mm", "before 取已落盘那一份");
-        assert_eq!(value_line.after, "7 mm");
+        assert_eq!(value_line.before, "-1.0 mm", "before 取已落盘那一份");
+        assert_eq!(value_line.after, "7.0 mm");
 
         // 删键（挂回继承）也要占一行，而且要说得出来是「挂回」
         let cleared = lines.iter().find(|l| l.owner == "A1/FAST").unwrap();
@@ -1615,7 +1559,7 @@ mod tests {
         assert_eq!(table["A1:FAST"].as_f64(), Some(-0.7), "顺手动了隔壁那一版");
 
         // ② 界面上：来源层该是「版本」—— 它自己钉着这一项
-        let book = Book::new(&ctx.up, &ctx.presets, &c2, &d2);
+        let book = Book::new(&ctx.presets, &c2, &d2);
         let l = book.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             l.effective("toolhead.offset.x").unwrap().value.as_f64(),
@@ -1637,7 +1581,7 @@ mod tests {
     fn a_single_column_matrix_serves_as_the_field_detail_view() {
         let (_d, _f, ctx) = ctx();
         let (c, d, _) = state(&ctx).unwrap();
-        let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+        let book = Book::new(&ctx.presets, &c, &d);
 
         let m = book.matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None);
         assert_eq!(m.cols.len(), 1);
@@ -1651,15 +1595,5 @@ mod tests {
                 assert!(cell.origin_explain.is_some(), "来源要带一句「改了会怎样」");
             }
         }
-    }
-
-    /// 回退登记表这一页是**只读**的，而且要说出为什么
-    #[test]
-    fn the_fallback_page_says_why_it_is_read_only() {
-        let (_d, _f, ctx) = ctx();
-        let f = &ctx.up.fallback;
-        assert!(!f.guide.is_empty());
-        assert!(f.disabled().is_empty());
-        assert!(!w::NO_DISABLED_FALLBACK.is_empty(), "空列表也要有一句话");
     }
 }

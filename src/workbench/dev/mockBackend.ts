@@ -182,13 +182,14 @@ const PARAMS: FixtureParam[] = [
   p({ key: 'frame.shell.wall', label: '护套壁宽', order: 7, sectionId: 'shell', defaultValue: 0.8, min: 0.1, max: 3, step: 0.1, unit: 'mm',
       parentKey: 'frame.type', depth: 1, deprecated: true,
       showWhen: { key: 'frame.type', op: 'eq', value: 'sheath' } }),
-  p({ key: 'ironing.threshold', label: '熨烫覆盖阈值', order: 8, sectionId: 'ironing', tabId: 'ironing', valueType: 'string', uiComponent: 'segmented',
-      defaultValue: 'off',
-      choices: [
-        { label: '关闭', value: 'off', deprecated: false },
-        { label: '稀疏一半', value: 'half', deprecated: false },
-        { label: '稀疏90%', value: 'p90', deprecated: false },
-      ] }),
+  /*
+   * 照真数据摆：`wiping.ironing_coverage_threshold` 是 **float + 百分比输入框**
+   * （unit % · 0~100 · 步进 1），身上**不带** choices —— 真源里那三条 0/50/90
+   * 没有任何消费方，却被一路误读成「只能三选一」，已按「`choices` 是取值域、
+   * 只对 string 开」这道判据从 `presets/registry/param_registry.toml` 删掉。
+   */
+  p({ key: 'ironing.threshold', label: '熨烫覆盖阈值', order: 8, sectionId: 'ironing', tabId: 'ironing',
+      defaultValue: 10, min: 0, max: 100, step: 1, unit: '%' }),
   p({ key: 'toolhead.script', label: '装载胶箱 G-code', order: 9, sectionId: 'space', tabId: 'space',
       valueType: 'string', uiComponent: 'gcode', defaultValue: GCODE_SAMPLE() }),
   /*
@@ -290,16 +291,8 @@ const MACHINE_VIEWS = [
     defaultBundle: 'A1_default', externalAliases: ['A1C'], image: 'a1-image', icon: 'a1-icon',
     hasDimensions: true, zoneCount: 0, file: 'A1.toml',
     versions: [
-      { id: 'STANDARD', name: '标准版', presetFile: null, recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
-      { id: 'FAST', name: '高速版', presetFile: null, recommendedBundle: 'A1_FAST', tag: null, description: null, hasRecipe: true },
-    ],
-  },
-  {
-    id: 'A2L', display: 'A2L', name: '', brand: 'Anker',
-    defaultBundle: null, externalAliases: [], image: null, icon: null,
-    hasDimensions: false, zoneCount: 0, file: 'A2L.toml',
-    versions: [
-      { id: 'STANDARD', name: '标准版', presetFile: null, recommendedBundle: '', tag: null, description: null, hasRecipe: false },
+      { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
+      { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, hasRecipe: true },
     ],
   },
 ]
@@ -309,7 +302,6 @@ type FixtureRef = { id: string; kind: string; slicer: string | null; profile: st
 /** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算 */
 const ASSETS: FixtureRef[] = [
   { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp' },
-  { id: 'a2l-image', kind: 'image', slicer: null, profile: null, name: 'A2L 外观图（没人引用）', path: 'printers/a2l.webp' },
   { id: 'a1-icon', kind: 'icon', slicer: null, profile: null, name: 'A1 图标', path: 'icons/a1.svg' },
   { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
   { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
@@ -401,6 +393,20 @@ function bundleListOf(query: string | null) {
   }
 }
 
+/** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
+function mockBoot(): Json {
+  return {
+    roots: {
+      workbench: 'C:\\dev\\workbench',
+      presets: 'C:\\dev\\presets',
+      dist: 'C:\\dev\\presets\\dist',
+    },
+    problem: null,
+    detail: null,
+    storeDirs: STORE_DIRS,
+  }
+}
+
 const STORE_DIRS = [
   { name: 'machines', role: '机型配方的真源（machineVariants 按机型一份）。机型页读写它' },
   { name: 'bbs', role: '零读写 —— BBS 预设今天不经工作台，占位' },
@@ -421,31 +427,6 @@ const BASELINE = [
 const TRASH = [
   { file: '20260928-T-10-12-45__A1__OLDVER', deletedStamp: '20260928-T-10-12-45', machineId: 'A1', versionId: 'OLDVER' },
 ]
-
-const FALLBACK_TABLE = {
-  version: 2,
-  updated: '2026-06-30',
-  guide: '回退规则由上游维护：客户端按这张表在预设缺失时退回默认行为。\n改这里的唯一入口是 mkppanel 的「回退登记表」页。',
-  groups: [
-    {
-      label: '缺省回退（2）',
-      rules: [
-        { id: 'fb-wipe-mode', category: 'default', trigger: '擦料方式缺失', from: '（无）', to: '擦料塔', enabled: true, severity: 'info', desc: '老版本配方没有擦料方式时按擦料塔处理', reportField: 'fallbacks.wipeMode' },
-        { id: 'fb-ironing', category: 'default', trigger: '熨烫阈值缺失', from: '（无）', to: '关闭', enabled: true, severity: 'info', desc: '熨烫阈值缺失视为关闭', reportField: 'fallbacks.ironing' },
-      ],
-    },
-    {
-      label: '迁移回退（1）',
-      rules: [
-        { id: 'fb-legacy-count', category: 'migration', trigger: '旧版擦料计数出现', from: '旧键', to: '忽略并提示', enabled: false, severity: 'warn', desc: '迁移期兼容键，触发即报（示例：被手动关掉）', reportField: 'fallbacks.legacyCount' },
-      ],
-    },
-  ],
-  disabled: ['fb-legacy-count'],
-  emptyHint: '当前没有关掉的规则',
-  readOnlyReason: '这张表由上游维护，改动请回 mkppanel 的「回退登记表」页',
-}
-
 
 const splitKey = (raw: string) => {
   const [level, owner, ...rest] = raw.split('|')
@@ -543,7 +524,15 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
     blockedHint: blocked.length > 0 ? `要 ${(blocked[0] as Json).label} ${(blocked[0] as Json).need} 才可改` : null,
     jumpTo: blocked.length > 0 ? (blocked[0] as Json).key : null,
     raw: raw ?? null,
+    /* 盘上钉着的那个值（草稿不算）—— 「恢复修改前的」据此写回，没钉着就写 null 删键 */
+    rest: atRestOf(uid !== null ? 'version' : 'machine', uid ?? machineId, pdef.key),
   }
+}
+
+/** 这一层在 `atRest` 表里钉着的值（`pending` 一概不看） */
+function atRestOf(level: 'machine' | 'version', owner: string, key: string): unknown {
+  const table = level === 'machine' ? atRest.base[owner] : atRest.over[owner]
+  return table && key in table ? table[key] : null
 }
 
 /* origin explain 已在 cellOf 里从词表现取。 */
@@ -791,7 +780,7 @@ function buildBook(): Json {
           machineId: m.id,
           machine: m.id,
           name: v.name,
-          state: m.id === 'A2L' ? 'neverBuilt' : built ? 'built' : 'neverBuilt',
+          state: built ? 'built' : 'neverBuilt',
           reason: '',
           buildable: m.hasDimensions,
           disabledReason: m.hasDimensions ? null : '这台机型还没配尺寸（占位），不参与交付',
@@ -830,13 +819,7 @@ export function installMockBackend() {
     const machineId = 'A1'
     switch (cmd) {
       case 'wb_boot':
-        return Promise.resolve({
-          roots: { workbench: 'C:\\dev\\workbench', dist: 'C:\\dev\\dist', upstream: 'C:\\dev\\upstream' },
-          problem: null, detail: null,
-          info: { registryUpdated: '2026-09-01', manifestUpdated: '2026-09-01', channel: 'dev',
-                  minimumClient: null, latestRelease: null, params: PARAMS.length, machines: 1, deliverables: 9, fallbacks: 12 },
-          storeDirs: STORE_DIRS,
-        })
+        return Promise.resolve(mockBoot())
       case 'wb_words':
         return Promise.resolve(WORDS)
       case 'wb_book':
@@ -877,7 +860,7 @@ export function installMockBackend() {
               id: 'bundle.orphan_files',
               severity: 'hint',
               title: '有 2 个文件没进任何套餐',
-              detail: 'a2l-image、a1-extra-image —— 客户看得到它们，只是没有套餐推荐。仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。',
+              detail: 'a1-mini-bbs-02-010、a1-orca-02-010 —— 客户看得到它们，只是没有套餐推荐。仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。',
               at: { view: 'menu', machineId: null, uid: null, key: null },
             },
           ],
@@ -1008,8 +991,6 @@ export function installMockBackend() {
         return Promise.resolve(1)
       case 'wb_trash':
         return Promise.resolve(TRASH)
-      case 'wb_fallback':
-        return Promise.resolve(FALLBACK_TABLE)
       case 'wb_asset_usage': {
         const assetId = args?.assetId as string
         const machines = MACHINE_VIEWS.filter(
@@ -1075,10 +1056,7 @@ export function installMockBackend() {
       case 'wb_save_ui':
         return Promise.resolve(null)
       case 'wb_reload':
-        return Promise.resolve({
-          roots: { workbench: 'C:\\dev\\workbench', dist: 'C:\\dev\\dist', upstream: 'C:\\dev\\upstream' },
-          problem: null, detail: null, info: null,
-        })
+        return Promise.resolve(mockBoot())
       default:
         return Promise.reject({ code: 'NOT_IMPLEMENTED', message: `开发桩没有实现 ${cmd}`, traceId: 'mock' })
     }

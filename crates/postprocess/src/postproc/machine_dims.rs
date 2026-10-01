@@ -125,8 +125,10 @@ pub struct MachineDimensions {
 /// 它**只是数据的容器**，不含任何规则 —— 规则在下面的查询函数里。
 #[derive(Debug, Default)]
 pub struct MachineTables {
-    /// 规范机型 id → 尺寸。**没有 `[dimensions]` 的机型不在这里**（A2L 就是这种，
-    /// 而"没有尺寸的机型要硬错"那条判据正靠这个差集算出来）
+    /// 规范机型 id → 尺寸。**没有 `[dimensions]` 的机型不在这里**（不是填 zero-value），
+    /// 而"没有尺寸的机型要硬错"那条判据正靠这个差集算出来 —— 它的两份输入现在是
+    /// `crates/postprocess/tests/fixtures/presets_dims/machines/` 造出来的，
+    /// 不再借生产清单（那里已经没有这种机型了）
     dimensions: HashMap<String, MachineDimensions>,
     /// **大写** alias → 规范机型 id。查询侧只做大写化，与旧快照同语义
     alias_map: HashMap<String, String>,
@@ -247,7 +249,8 @@ struct MachineFile {
     id: String,
     #[serde(default)]
     external_aliases: Vec<String>,
-    /// 没有这一段的机型不入尺寸表（`presets/machines/*.toml` 里只有 A2L 是这样）
+    /// 没有这一段的机型不入尺寸表（不是填 zero-value）。生产清单里现在一台都没有 ——
+    /// 判据那台是 fixture 造出来的（`tests/fixtures/presets_dims/machines/NODIM.toml`）
     #[serde(default)]
     dimensions: Option<MachineDimensions>,
 }

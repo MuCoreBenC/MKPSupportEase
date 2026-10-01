@@ -9,31 +9,24 @@
 //! 第二版那 30 多个 `wb_*` 命令与整个 domain 层已全部摘除（doc §6：旧契约作废），
 //! 新架构按三层重排：
 //!
-//! - [`upstream`] 上游只读层（`mkpse-presets`，零写入函数）
+//! - [`presets`] 预设真相源（`<repo>/presets/*.toml`，读它也写它）
 //! - [`domain`] 规则与派生（三层取值、归并、可见性、patch、状态、预览、文案）
 //! - [`app`] IPC 入口与落盘（**写只有 `wb_apply_draft` 一条**）
 //!
-//! 留用的底座：[`paths`]（三个数据根）/ [`clock`]（时间戳唯一来源）/
+//! 留用的底座：[`paths`]（数据根）/ [`clock`]（时间戳唯一来源）/
 //! [`store`]（原子写、id 白名单、通用 JSON IO、草稿/快照/回收站的落盘位置）。
 //!
-//! **第二版的 model / resolve / bbs / catalog / generate / publish / preflight / state
-//! 全部删掉了**，不是留着改。它们的输入面是我自己造的 10 条字段定义与两层取值，
-//! 而这一版字段定义来自上游 74 条、取值是三层 —— 留着等于在一个专为消灭双轨的
-//! 重做里先建一条双轨。其中有价值的部分（TOML 渲染与转义、原子替换、catalog 最后写、
-//! 状态按 hash 比对）在 doc §8–§10 里逐条记着，Task 9 照着重写。
+//! **只剩一个 workspace 数据根**：`<repo>/presets`。旧的 `upstream/`（只读别人的
+//! `mkpse-presets/content/*.json`）连同它的三级定位、环境变量、fallback 与设置项
+//! 一起退休了 —— 不 fallback、不猜路径，运行时只认这一个根。
 
 pub mod app;
 pub mod clock;
 pub mod domain;
 pub mod paths;
-/// 我们自己那份预设数据（`<repo>/presets/*.toml`）。**读它也写它**。
-///
-/// 它最终会取代 `upstream`（那一层读 `mkpse-presets/content/*.json`，是别人的构建产物）。
-/// 现在两层并存**是刻意的一步**：先把「读 + 写回 + 字节保真」这条路在新层上走通，
-/// 再把 `domain` 与 `app` 切过来。一次切完的话，保真判据要和一大片编译错误同时处理。
+/// 预设真相源（`<repo>/presets/*.toml`）。**读它也写它**，是唯一的预设数据根
 pub mod presets;
 pub mod store;
-pub mod upstream;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -85,8 +78,8 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
 pub struct Roots {
     /// 开发源数据根（仓库里的 `workbench/`）
     pub workbench: String,
-    /// 发布目录（仓库里的 `dist-presets/`）
+    /// 预设真相源（仓库里的 `presets/`）—— 机型 / 参数 / 套餐 / 资产 / 交付产物都在它下面
+    pub presets: String,
+    /// 交付产物目录（仓库里的 `presets/dist/`）
     pub dist: String,
-    /// 上游预设仓库（只读）。定位不到时是 `None` —— **这时工作台不该启动业务**
-    pub upstream: Option<String>,
 }

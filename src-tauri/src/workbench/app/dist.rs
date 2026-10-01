@@ -1,9 +1,9 @@
-//! 交付层（b05 Task 12）：`dist-presets/` 的**目录类 JSON** 与资产复制。
+//! 交付层（b05 Task 12）：`presets/dist/` 的**目录类 JSON** 与资产复制。
 //!
 //! # 目录结构定稿（12.1；doc §7 的示意在此落定）
 //!
 //! ```text
-//! dist-presets/
+//! presets/dist/
 //! ├── content/
 //! │   ├── machine_catalog.json     机型 + 版本 + 关系（12.2）
 //! │   ├── bundles.json             套餐 + 包含什么（12.3）
@@ -51,10 +51,12 @@
 //!   还是旧资产 id 空间（`a1_bbs_mkpprocess…`），跟新的 assets_index 根本 join 不上；
 //!   套餐的唯一真相是 `content/bundles.json`。结构变了，`manifestVersion` 升 3。
 //! - **两类 id 的边界**（审查点名核实过）：manifest 条目有两种命名空间 ——
-//!   `mkp_preset` 条目的 id 沿用**上游**的（`a1_mkp_standard`；资产域 enum 刻意没有
-//!   mkpPreset 档，doc §12.5），资产条目的 id 用**资产域** Asset.id（`a1-image`）。
-//!   `machine_catalog.json` 版本条目的 `mkpPresetAssetId` 是**连接键**（指向 manifest
-//!   里 mkp_preset 条目），不是资产域 Asset ID —— 词汇撞名，域不同。
+//!   `mkp_preset` 条目的 id 就是**产物名**（`A1-standard.toml`，命名规则算出，
+//!   资产域 enum 刻意没有 mkpPreset 档，doc §12.5），资产条目的 id 用**资产域**
+//!   Asset.id（`a1-image`）。`machine_catalog.json` 版本条目的 `mkpPresetAssetId`
+//!   是**连接键**（指向 manifest 里 mkp_preset 条目），不是资产域 Asset ID ——
+//!   词汇撞名，域不同。删掉上游之后，这个连接键不再来自上游 manifest，
+//!   而是与产物名同一份计算值。
 //! - **resourceType 词汇**：新条目用资产域 `kind.key()`（`image` / `icon` / `model` /
 //!   `slicerProfile`），不用上游的 `bbs_profile` —— manifest 与 assets_index 是同一批
 //!   资产的两种视图，join 键（id + type）必须一致；旧词汇是迁移输入（doc §6.2）。
@@ -66,9 +68,8 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::workbench::domain::derive::Book;
+use crate::workbench::domain::BuildState;
 use crate::workbench::presets::{Asset, AssetKind};
-
-use super::build::preset_file_name;
 
 /// 交付目录里资产子树的根名。**与资产根 public/assets/ 的形状一致**（见模块头）
 pub const ASSETS_DIR: &str = "assets";
@@ -211,10 +212,13 @@ pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
                         name: &v.name,
                         tag: &v.tag,
                         recommended_bundle: &v.recommended_bundle,
+                        // 连接键指向 manifest 里这一版的 mkp_preset 条目，
+                        // 值就是产物名（命名规则算出）。占位版本（没有可产出的东西）
+                        // 不进交付，连接键照实留空
                         mkp_preset_asset_id: book
                             .version(&uid)
-                            .and_then(|x| x.mkp_preset.as_ref())
-                            .map(|p| p.asset_id.clone()),
+                            .filter(|_| book.build_state(&uid) != BuildState::NoResources)
+                            .map(|x| x.mkp_file.clone()),
                     }
                 })
                 .collect(),
@@ -333,12 +337,11 @@ pub fn deliverable_set(book: &Book<'_>) -> BTreeSet<String> {
         set.insert(format!("{ASSETS_DIR}/{}", a.path));
     }
     for v in book.versions() {
-        if v.mkp_preset.is_some() {
-            set.insert(format!(
-                "presets/mkp/{}",
-                preset_file_name(&v.machine_id, &v.version_id)
-            ));
+        // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
+        if book.build_state(&v.uid) == BuildState::NoResources {
+            continue;
         }
+        set.insert(format!("presets/mkp/{}", v.mkp_file));
     }
     set
 }
@@ -422,7 +425,8 @@ pub struct DistAsset {
     pub size: u64,
 }
 
-/// 发布的元信息（从调用方带进来：clock 与上游 compat 都不属于交付层）
+/// 发布的元信息（从调用方带进来：clock 与渠道常量都不属于交付层）。
+/// 最低客户端与版本原先是上游 manifest 的 `compat`，上游删掉后没有来源、照实留空
 #[derive(Debug, Clone)]
 pub struct PublishMeta {
     pub stamp: String,
@@ -476,10 +480,11 @@ pub fn publish_into(
     let mut presets_count = 0usize;
 
     for v in book.versions() {
-        let Some(p) = &v.mkp_preset else {
+        if book.build_state(&v.uid) == BuildState::NoResources {
             continue; // 暂无资源：跳过，不报错
-        };
-        let name = preset_file_name(&v.machine_id, &v.version_id);
+        }
+        // 产物名由命名规则算出（机型 id + 版本 id），不再查上游 manifest
+        let name = v.mkp_file.clone();
         let rel = format!("presets/mkp/{name}");
         let bytes = std::fs::read(dist_root.join(&rel)).map_err(|e| {
             AppError::not_found(format!("{} 的产物还没生成", v.name)).with_detail(format!(
@@ -493,7 +498,9 @@ pub fn publish_into(
             // 一个我们没验证过的哈希
             sha256: sha256_of(&bytes),
             size: bytes.len() as u64,
-            id: p.asset_id.clone(),
+            // mkp 条目的 id 用产物名（唯一一处连接键，machine_catalog 的
+            // mkpPresetAssetId 指向它）
+            id: name.clone(),
             resource_type: "mkp_preset".to_owned(),
             machine_id: v.machine_id.clone(),
             file_name: name,
@@ -550,6 +557,7 @@ fn sha256_of(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::build::preset_file_name;
     use crate::workbench::domain::patch::{Committed, CommittedVersion};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
@@ -588,7 +596,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
         let got = referenced_assets(&book);
         let ids: Vec<&str> = got.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
@@ -604,7 +612,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().expect("machines 数组");
@@ -619,8 +627,8 @@ mod tests {
         let versions = a1["versions"].as_array().unwrap();
         assert_eq!(versions.len(), 2);
         assert_eq!(
-            versions[0]["mkpPresetAssetId"], "a1_mkp_standard",
-            "版本→manifest 资产的连接键"
+            versions[0]["mkpPresetAssetId"], "A1-standard.toml",
+            "版本→manifest 资产的连接键 = 产物名（命名规则算出）"
         );
         assert!(
             versions[0].get("presetFile").is_none(),
@@ -648,7 +656,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         // 夹具资产根：给可达集里的每条资产造一个假文件（登记了但文件不在
         // 是发布侧要拦的形状，所以可达集之外的 a1-extra-image 故意不造）
@@ -693,8 +701,9 @@ mod tests {
 
     /// **真数据上的交付集**（12.6 的真数据版 + 防空转锚点）。
     ///
-    /// 锚点来自真数据的三个数：机型图 5（A2L 占位无图）、图标 3（P2S/X1C 借
-    /// p1s-icon）、BBS 5（五条套餐各一条 0.4mm）→ 可达集 **13**；三份模型与
+    /// 锚点来自真数据的三个数：机型图 3（只剩 A1 / A1_MINI / P1S 三台有图，
+    /// P2S / X1C 的旧图已随清理删除）、图标 3（P2S/X1C 借 p1s-icon）、
+    /// BBS 5（五条套餐各一条 0.4mm）→ 可达集 **11**；三份模型与
     /// 四份 0.2mm BBS 没被引用，**刻意不进交付**（Task 13 的可达性分析收窄它们，
     /// 集合本身不变）。12.6 逐条：索引引用的每个文件都在交付目录真实存在。
     #[test]
@@ -708,27 +717,26 @@ mod tests {
             return;
         };
         let real = crate::workbench::presets::Presets::load_from(&root).expect("真 presets");
-        let f = Fixture::load();
         let c = Committed::default();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &real, &c, &d);
+        let book = Book::new(&real, &c, &d);
 
-        // JSON 条数锚点：6 台机型（含 A2L 占位）、10 个版本、5 条套餐
+        // JSON 条数锚点：5 台机型、9 个版本、5 条套餐
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().unwrap();
-        assert_eq!(machines.len(), 6, "真数据 6 台机型（A2L 占位也在清单里）");
+        assert_eq!(machines.len(), 5, "真数据 5 台机型");
         let versions: usize = machines
             .iter()
             .map(|m| m["versions"].as_array().unwrap().len())
             .sum();
-        assert_eq!(versions, 10, "版本总数变了 —— 说清为什么再改判据");
+        assert_eq!(versions, 9, "版本总数变了 —— 说清为什么再改判据");
         assert_eq!(bundles_json(&book)["bundles"].as_array().unwrap().len(), 5);
 
-        // 可达集 13 = 图 5 + 图标 3 + BBS 5；模型与 0.2mm BBS 刻意不进
+        // 可达集 11 = 图 3 + 图标 3 + BBS 5；模型与 0.2mm BBS 刻意不进
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            13,
+            11,
             "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么"
         );
         assert!(
@@ -744,7 +752,7 @@ mod tests {
         // 落盘（真资产根 → 临时交付根），12.6 逐条核对 + assetRefs join 闭合
         let dist = tempfile::tempdir().unwrap();
         let out = write_content(dist.path(), &asset_root, &book).expect("真数据落盘");
-        assert_eq!(out.assets_copied, 13);
+        assert_eq!(out.assets_copied, 11);
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
             let p = dist
@@ -784,7 +792,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &d);
+        let book = Book::new(&f.presets, &c, &d);
 
         // 交付集合（13.1）：content 3 + manifest + 夹具可达资产 4 + mkp 产物 3
         let expected = deliverable_set(&book);
@@ -902,7 +910,7 @@ mod tests {
     }
 
     /// **真数据上的交付集合**（13.1 的真数据版 + 防空转）：
-    /// mkp 产物名 9 个（命名函数逐版算出）、资产 13 条 ——
+    /// mkp 产物名 9 个（命名函数逐版算出）、资产 11 条 ——
     /// 集合计数锚点变了就说明清单或套餐变了
     #[test]
     fn the_real_deliverable_set_has_the_expected_shape() {
@@ -911,7 +919,6 @@ mod tests {
             return;
         };
         let real = crate::workbench::presets::Presets::load_from(&root).expect("真 presets");
-        let f = Fixture::load();
         let c = Committed {
             catalog: real
                 .catalog
@@ -929,15 +936,13 @@ mod tests {
             ..Default::default()
         };
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.up, &real, &c, &d);
+        let book = Book::new(&real, &c, &d);
 
         let expected = deliverable_set(&book);
-        // 反空转锚点：content 3 + manifest 1 + 资产 13 + mkp（夹具上游认 3 版）= 20。
-        // mkp 条目跟着 mkp_preset 连接键走（夹具上游只认 A1×2 + P1S×1）；
-        // 真上游在用户机器上时是全部 9 版
-        assert_eq!(expected.len(), 20, "交付集合条数变了 —— 说清为什么");
+        // 反空转锚点：content 3 + manifest 1 + 资产 11 + mkp 9（五台机型全部有套餐）= 24
+        assert_eq!(expected.len(), 24, "交付集合条数变了 —— 说清为什么");
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
-        // 与夹具上游认不认无关 —— 这是发布集合在真上游下的目标形状
+        // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状
         let mkp_names: std::collections::BTreeSet<String> = real
             .catalog
             .machines()
@@ -950,12 +955,12 @@ mod tests {
             })
             .collect();
         assert_eq!(mkp_names.len(), 9, "五台交付机型的产物名单必须是 9 份");
-        // 集合里的 mkp 条目只来自**夹具上游认的 3 版**（mkp_preset 连接键）：
-        // A1×2 + P1S×1 必须在；其余 6 版夹具上游不认，留给真上游 —— 不在集合是对的
+        // 集合里的 mkp 条目来自**每一版有可产出内容的版本**（五台机型全部有套餐，
+        // build_state != NoResources）：9 版都在，逐份锚定
         for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
             assert!(
                 expected.contains(&format!("presets/mkp/{name}")),
-                "夹具上游认的版本 {name} 必须进交付集合"
+                "版本 {name} 必须进交付集合"
             );
         }
         assert_eq!(
@@ -963,8 +968,8 @@ mod tests {
                 .iter()
                 .filter(|p| p.starts_with("presets/mkp/"))
                 .count(),
-            3,
-            "夹具上游只认 3 版 —— 多出来的 mkp 条目说明集合在空转"
+            9,
+            "9 版都有套餐 → 9 份 mkp 产物，少一条说明集合在空转"
         );
         assert_eq!(
             expected

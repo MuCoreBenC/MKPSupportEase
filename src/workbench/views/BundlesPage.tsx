@@ -26,7 +26,7 @@
  *  - **行上的数是后端算的**：每行自己的指向数（C05 那个「读错 users」的坑
  *    在产品侧不存在 —— 判据根本不在前端）。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type { AssetList, BundleList, MachineList, Words } from '../api'
@@ -34,6 +34,7 @@ import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
 import SelectField from '../c14/field/SelectField'
+import { locateAnchor } from '../c14/locate'
 import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import BundleResourcesModal from './BundleResourcesModal'
@@ -100,6 +101,18 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
     if (sel && list.bundles.some((b) => b.id === sel)) return
     setSel(list.bundles[0]?.id ?? null)
   }, [list, sel])
+
+  /*
+   * 「去处理」跳过来时：等清单读过、那一行确实在，滚过去 + 闪一下（见 `c14/locate.ts`）。
+   * 只做一次 —— 之后用户在本页换选择不该被拽回去。
+   */
+  const locatedRef = useRef(false)
+  useEffect(() => {
+    if (locatedRef.current) return
+    if (!initialSel || !list || !list.bundles.some((b) => b.id === initialSel)) return
+    locatedRef.current = true
+    locateAnchor(`t-bundle-${initialSel}`, { row: true })
+  }, [initialSel, list])
 
   /** 全部版本的 uid（改指向的下拉用）。uid 与机型页同形：`机型/版本` */
   const allUids = (machines?.machines ?? []).flatMap((m) =>
@@ -225,6 +238,8 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               <button
                 key={b.id}
                 type="button"
+                /* 「去处理」定位的锚点（locateAnchor 按它滚 + 闪） */
+                id={`t-bundle-${b.id}`}
                 className={`${s.row} ${sel === b.id ? s.rowOn : ''}`}
                 onClick={() => setSel(b.id)}
               >

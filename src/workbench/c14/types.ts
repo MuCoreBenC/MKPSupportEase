@@ -15,5 +15,10 @@ export interface GotoFocus {
   key?: string | null
 }
 
-/** 一级导航的五个页面（C14 定稿：按工作流排序，不分「维护」组） */
-export type PageId = 'machines' | 'params' | 'bundles' | 'build' | 'assets'
+/**
+ * 一级导航的页面（C14 定稿：按工作流排序，不分「维护」组）。
+ *
+ * `settings` 排在末尾：它不是一个业务页 —— 预设根固定是 `<repo>/presets`，
+ * 这一页只读地摆开数据根与子目录职责，供排查「读错了目录」用。
+ */
+export type PageId = 'machines' | 'params' | 'bundles' | 'build' | 'assets' | 'settings'

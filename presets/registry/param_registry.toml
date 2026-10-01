@@ -239,7 +239,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '自定义工具头获取 G-code'
-machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 
 [params.machineVariants]
 'A1:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
@@ -272,7 +272,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '自定义工具头收起 G-code'
-machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 
 [params.machineVariants]
 'A1:FAST' = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
@@ -305,7 +305,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '关闭第三层裹头检测(A1/A1 mini)'
-machineFilter = 'A1,A1_MINI,A2L'
+machineFilter = 'A1,A1_MINI'
 
 [params.layout]
 sectionId = 'machine_specific'
@@ -350,7 +350,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '关闭延时摄影(A系列i3结构)'
-machineFilter = 'A1,A1_MINI,A2L'
+machineFilter = 'A1,A1_MINI'
 
 [params.layout]
 sectionId = 'machine_specific'
@@ -1276,7 +1276,7 @@ step = 0.05
 scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '笔尖偏移'
-machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 pinned = true
 
 [params.machineVariants]
@@ -1328,7 +1328,7 @@ step = 0.05
 scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '笔尖偏移'
-machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 pinned = true
 
 [params.machineVariants]
@@ -1377,7 +1377,7 @@ step = 0.05
 scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '笔尖偏移'
-machineFilter = 'A1,A1_MINI,A2L,P1S,P2S,X1C'
+machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 pinned = true
 
 [params.machineVariants]

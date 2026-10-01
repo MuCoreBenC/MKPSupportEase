@@ -59,12 +59,21 @@ export default function CellEditor({
   const field: FieldSchema = {
     key: param.key,
     label: param.label,
+    /*
+     * 控件由 `uiComponent` 说了算 —— **有 choices 不能把 number 顶成枚举**。
+     *
+     * `choices` 是取值域**只有 string 这一档**（`validate.rs` 的
+     * `value_type == "string"` 同一道门）；float 参数身上挂着的几条是
+     * 「预设档」，不是逼人选的是非题。`wiping.ironing_coverage_threshold`
+     * 就是这种：unit % · 0~100 · 步进 1，画出来必须是一个能填的百分比框，
+     * 而不是三选一（客户端那一版同一口径：`clientPackage.ts` 的 `CLIENT_CONTROL`）。
+     */
     control:
       param.uiComponent === 'gcode'
         ? 'gcode'
         : param.uiComponent === 'switch'
           ? 'switch'
-          : param.choices.length > 0
+          : param.valueType === 'string' && param.choices.length > 0
             ? 'choice'
             : param.uiComponent === 'number'
               ? 'number'
@@ -136,9 +145,9 @@ export default function CellEditor({
    *         才撑得开。
    *
    * **只是「数字控件」的容器**（C14 第十八轮修的）：`uiComponent === 'number'`
-   * 不等于画出来是步进器 —— 「熨烫覆盖阈值」就是 number + 三档 choices，
-   * 它画出来是分段选择器（181px 宽），却被这层按 132px 钉死，尾巴被裁掉。
-   * 判据挪到**真正画出来的那个控件**上（`field.control`）。
+   * 不等于画出来是步进器 —— 判据必须落在**真正画出来的那个控件**上
+   * （`field.control`），照 `uiComponent` 认会把这层套给一个不是步进器的控件，
+   * 按 132px 钉死、尾巴被裁掉。
    */
   if (field.control === 'number') {
     return (

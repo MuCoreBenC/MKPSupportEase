@@ -21,6 +21,10 @@ import { bbsFs } from './tools/dev-server/bbsFs.mjs'
  * - port: 5321 —— 刻意避开 5173~5180（Vite 默认及其顺延区，同机其它项目大概率占着）
  *   和 5432（PostgreSQL 默认）。改这个值必须同步改 src-tauri/tauri.conf.json 的 devUrl，
  *   两处不一致 = Tauri 窗口白屏。
+ *
+ *   工作台模式（workbench）另起 5322：两份 frontend 同源不同页，若共用 5321，
+ *   只要工作台的 vite 还在跑，`npm run tauri dev` 就必然撞上 `Port 5321 is in use`。
+ *   分开后两边可同时开，改 5322 同样要同步 src-tauri/tauri.workbench.conf.json 的 devUrl。
  * - open: false —— Tauri 会开自己的原生窗口，再开一个浏览器标签是多余的。
  * - host —— 只在 Tauri 需要时绑网卡（`TAURI_DEV_HOST` 由 tauri dev 在真机调试时注入），
  *   平时不绑，避免把 dev server 暴露给同网段。这与试验场的 `host: true` 是刻意的差别。
@@ -56,7 +60,7 @@ export default defineConfig(({ mode }) => {
 
     server: {
       host: process.env.TAURI_DEV_HOST ?? false,
-      port: 5321,
+      port: withWorkbench ? 5322 : 5321,
       strictPort: true,
       open: false,
     },

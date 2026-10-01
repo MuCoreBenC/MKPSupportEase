@@ -1,0 +1,9 @@
+# 另一半：**别名表认识、尺寸表没有**的机型 —— `[dimensions]` 整段缺席。
+#
+# `load_presets_dir` 对没有 `[dimensions]` 的机型**不入尺寸表**（不是填 zero-value），
+# 「别名认识 ≠ 尺寸表里有」这个差集就是 `machine_dims_must_exist` 那几条判据的输入。
+# 这台机器是**造出来的**，不是某台真实机型 —— 生产预设里不该为了测试留一台坏机器。
+id = 'NODIM'
+name = ''
+display = 'NODIM（测试用：无尺寸）'
+externalAliases = ['NODIMX']

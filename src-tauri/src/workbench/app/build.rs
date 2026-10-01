@@ -70,6 +70,10 @@ use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
 use super::{state, with_ctx};
 
+/// 发布渠道。原先是上游 manifest 的 `compat.channel`；上游整层删掉后，
+/// 工作台自己发的是正式渠道，定成常量
+const PUBLISH_CHANNEL: &str = "stable";
+
 /* ---------- 校验 ---------- */
 
 /// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
@@ -85,7 +89,7 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
             let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
@@ -374,7 +378,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
 
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
@@ -480,7 +484,7 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.up, &ctx.presets, &c, &d), &uid)?.text)
+            Ok(render(&Book::new(&ctx.presets, &c, &d), &uid)?.text)
         })
     })
 }
@@ -517,7 +521,7 @@ pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
             let v = book
                 .version(&uid)
                 .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))?;
@@ -591,7 +595,7 @@ pub struct PublishReport {
     pub hints: usize,
 }
 
-/// 发布：把 `dist-presets/` 里的产物连同清单一起定稿。
+/// 发布：把 `presets/dist/` 里的产物连同清单一起定稿。
 ///
 /// **清单最后写**：先写资源、最后写指向它们的清单。反过来的话，中途失败会留下一份
 /// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现。
@@ -604,7 +608,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
     traced("wb_publish", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
             let report = issues::inspect(&book);
             if let Some(b) = report.first_block() {
                 return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
@@ -613,17 +617,13 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
 
             let root = paths::dist_root()?;
             let asset_root = paths::assets_root()?;
+            // 渠道是发布常量；最低客户端与版本原本跟着上游 manifest 的 compat 走，
+            // 上游整层删掉之后没有来源 —— **照实留空**，不编一个版本号出来
             let meta = super::dist::PublishMeta {
                 stamp: clock::now_iso8601(),
-                channel: ctx.up.manifest.compat.channel.clone(),
-                minimum_client: ctx
-                    .up
-                    .manifest
-                    .compat
-                    .minimum_client
-                    .clone()
-                    .unwrap_or_default(),
-                version: ctx.up.manifest.compat.version.clone().unwrap_or_default(),
+                channel: PUBLISH_CHANNEL.to_owned(),
+                minimum_client: String::new(),
+                version: String::new(),
             };
             let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
             let stamp = meta.stamp;
@@ -633,7 +633,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
                 stamp,
                 root: root.display().to_string(),
                 files: out.files,
-                minimum_client: ctx.up.manifest.compat.minimum_client.clone(),
+                minimum_client: None,
                 todos: report.todos,
                 hints: report.hints,
             })
@@ -650,7 +650,7 @@ pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
     traced("wb_dist_strays", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
             let expected = super::dist::deliverable_set(&book);
             Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
         })
@@ -664,7 +664,7 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
     traced("wb_clean_dist_strays", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.up, &ctx.presets, &c, &d);
+            let book = Book::new(&ctx.presets, &c, &d);
             let expected = super::dist::deliverable_set(&book);
             let root = paths::dist_root()?;
             let strays = super::dist::scan_strays(&root, &expected);
@@ -892,7 +892,7 @@ mod tests {
     fn rendered_toml_parses_and_keeps_the_values() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(&f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
         assert!(r.text.starts_with("# uuid: "));
@@ -956,15 +956,9 @@ mod tests {
     /// 一条"比了 0 份"的判据比没有判据更坏，因为它是绿的。
     #[test]
     fn our_render_matches_the_machine_verified_baseline() {
-        // 上游只为让 `Book` 有个 `up` 可指：**机型与版本全部来自我们自己那份清单**
-        // （`presets/machines/*.toml`），`render()` 已经不再查上游（见那边那段注释），
-        // 所以夹具上游一个字节都进不了比对的正文。
-        //
-        // 为什么用夹具而不是真上游：真上游在仓库外（`local-reference/` 刻意不入库），
-        // 拿它的存在当条件，这条判据在 CI 里就永远跳过 —— 而它恰恰是唯一盯着
-        // 这条渲染链的判据。夹具是自造的，任何环境里都在。
-        // （哪天 `Book` 不再持有 `up`，这里连夹具都不用造：b04 Task 12 的收尾。）
-        let fixture = Fixture::load();
+        // 基线是消费端内置的 9 份，必须与真 presets 逐份对上。
+        // 机型与版本全部来自我们自己那份清单（`presets/machines/*.toml`），
+        // `render()` 不查任何外部来源。
         let presets = crate::workbench::presets::Presets::load().expect("真 presets");
         let tmp = tempfile::tempdir().unwrap();
         let store = crate::workbench::store::Store::at(tmp.path());
@@ -973,7 +967,7 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&fixture.up, &presets, &c, &draft);
+        let book = Book::new(&presets, &c, &draft);
 
         /// 基线目录按**身份**索引：`(机型 id, 版本 id 小写)` → 文件。
         ///
@@ -1127,7 +1121,7 @@ mod tests {
     fn rendering_is_deterministic_apart_from_the_timestamp() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(&f.presets, &c, &draft);
         let a = render(&book, "A1/STANDARD").unwrap();
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
@@ -1140,7 +1134,7 @@ mod tests {
     fn changing_a_value_changes_the_output() {
         let (_d, f, c) = setup();
         let mut draft = Draft::default();
-        let before = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let before = render(&Book::new(&f.presets, &c, &draft), "A1/STANDARD").unwrap();
 
         apply(
             &mut draft,
@@ -1154,7 +1148,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let after = render(&Book::new(&f.up, &f.presets, &c, &draft), "A1/STANDARD").unwrap();
+        let after = render(&Book::new(&f.presets, &c, &draft), "A1/STANDARD").unwrap();
 
         assert!(!same_payload(&before.text, &after.text));
         assert_ne!(before.fingerprint, after.fingerprint);
@@ -1207,7 +1201,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(&f.presets, &c, &draft);
         let r = issues::inspect(&book);
         assert!(r.blocked());
         assert!(!w::disabled::BUILD_BLOCKED.is_empty());
@@ -1219,7 +1213,7 @@ mod tests {
     fn a2l_renders_but_is_skipped_by_generate() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(&f.presets, &c, &draft);
 
         let r = render(&book, "A2L/STANDARD").unwrap();
         assert!(r.text.contains("# machine: A2L"));
@@ -1250,7 +1244,7 @@ mod tests {
     fn skipping_a_placeholder_machine_names_the_real_reason() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
-        let book = Book::new(&f.up, &f.presets, &c, &draft);
+        let book = Book::new(&f.presets, &c, &draft);
 
         let a2l = book
             .machines()
@@ -1324,28 +1318,17 @@ mod tests {
         }
     }
 
-    /// **渲染的机型取自我们自己的清单，不是上游那一份。**（b05 Task 3.3 的审查结论）
+    /// **渲染的机型取自我们自己的清单。**
     ///
-    /// 为什么它要有自己的一条判据：`render()` 以前用 `book.up.catalog.machine()` 查机型，
-    /// 改成 `book.machines()`（`presets/machines/*.toml`）之后确实变了一处行为 ——
-    /// 「上游清单里没有这台」不再让渲染失败。这不是为了让某条判据跑通而松掉的检查，
-    /// 而是把归属摆正（机型 id 与版本 id 一样是我们的身份，`docs/ARCHITECTURE.md` §10.1），
-    /// 所以它得单独钉住，而不是躲在 M0 那条的阴影里。
+    /// `render()` 曾经用上游目录查机型，所以「上游清单里没有这台」会让渲染失败。
+    /// 上游整层删掉之后，机型只来自 `presets/machines/*.toml`（借自 `Committed.catalog`）
+    /// —— 这条判据钉住「机型 id 与版本 id 一样是我们的身份」（`docs/ARCHITECTURE.md` §10.1）。
     ///
-    /// 反空转靠**挑一台夹具上游不认的机型**：夹具上游只认 A1 / A2L / P1S
-    /// （`testkit::FIXTURE_MACHINES`），而真 `presets/` 里有 A1_MINI。
-    /// 哪天有人把机型查询改回上游那份，这里会以「机型 A1_MINI 不存在」红 ——
-    /// 与 M0 那条红在同一行代码上，但两条各自指认不同的原因。
+    /// 反空转靠**挑一台夹具清单里没有、真 `presets/` 里有的机型**（A1_MINI）：
+    /// 它不在 `testkit::FIXTURE_MACHINES`（A1 / A2L / P1S），渲染必须照样成功。
     #[test]
     fn render_takes_the_machine_from_our_own_catalog() {
-        // 前提反空转①：夹具上游**确实不认** A1_MINI（不然这条判据在空转）
-        let fixture = Fixture::load();
-        assert!(
-            fixture.up.catalog.machine("A1_MINI").is_none(),
-            "夹具上游认了 A1_MINI，这条判据的前提没了 —— 换一台它不认的机型"
-        );
-
-        // 前提反空转②：真 presets/ 必须有它 —— 清单在我们这边
+        // 前提反空转：真 presets/ 必须有 A1_MINI —— 清单在我们这边
         let presets = crate::workbench::presets::Presets::load().expect("真 presets");
         assert!(
             presets.catalog.machine("A1_MINI").is_some(),
@@ -1359,7 +1342,7 @@ mod tests {
             .expect("干净仓库读得通")
             .committed;
         let draft = Draft::default();
-        let book = Book::new(&fixture.up, &presets, &c, &draft);
+        let book = Book::new(&presets, &c, &draft);
 
         let v = book
             .versions()
@@ -1387,9 +1370,7 @@ mod tests {
     /// 是它**找不到** —— 我们生成了一堆它认不出的文件，而两边都不会说话。
     ///
     /// 这是一条**会随清单变化而红**的判据，而且红了就该看：
-    /// 改版本 id 或加机型都会改变这批名字，那时要同步的是消费端的内置表。
-    /// 期望值里多出的 `A2L-standard.toml` 是占位机型 —— 它不会被生成，
-    /// 但名字口径照样成立
+    /// 改版本 id 或加机型都会改变这批名字，那时要同步的是消费端的内置表
     #[test]
     fn generated_names_match_what_the_consumer_looks_for() {
         let Some(root) = crate::workbench::paths::presets_root() else {
@@ -1404,7 +1385,7 @@ mod tests {
             .flat_map(|m| m.versions.iter().map(|v| preset_file_name(&m.id, &v.id)))
             .collect();
 
-        // 消费端 crates/preset/assets/presets/ 下实测的 9 份 + 占位的 A2L
+        // 消费端 crates/preset/assets/presets/ 下实测的 9 份
         let want: std::collections::BTreeSet<String> = [
             "A1-standard.toml",
             "A1-fast.toml",
@@ -1412,7 +1393,6 @@ mod tests {
             "A1_MINI-standard.toml",
             "A1_MINI-fast.toml",
             "A1_MINI-fastv3.3.toml",
-            "A2L-standard.toml",
             "P1S-lite.toml",
             "P2S-standard.toml",
             "X1C-lite.toml",

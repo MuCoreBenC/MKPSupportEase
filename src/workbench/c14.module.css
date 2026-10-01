@@ -2619,6 +2619,23 @@
 }
 
 /*
+ * 半选（全选框的第三态）：蓝底 + 一道横杠。勾那一枚此时 `data-on` 是 false、
+ * SVG 不画，所以这一格里只有 `::after` 这一道杠 —— 与打勾同一副长相，只换记号。
+ */
+.pVmark[data-mixed='true'] {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary);
+}
+
+.pVmark[data-mixed='true']::after {
+  content: '';
+  width: 6px;
+  height: 2px;
+  background: var(--surface-solid);
+  border-radius: 1px;
+}
+
+/*
  * 名字与 id 的排法跟着栏宽走（C14 第五轮）—— 和右栏「各版本取值」同一套。
  *
  *   窄（默认 176）竖排：横着排「名字 + id」两个都看不全（「快拆版260…」+
@@ -3942,6 +3959,17 @@
   flex-wrap: wrap;
 }
 
+/* 「应用 / 恢复修改前的」并排一行：主操作吃满剩余，恢复按内容宽 */
+.pBatchOps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pBatchOps > :first-child {
+  flex: 1;
+}
+
 .pBatchVal {
   display: flex;
   align-items: center;
@@ -4119,6 +4147,7 @@
  * 三态：全选中 / 部分（横杠）/ 没勾。反选留在键盘上（Ctrl+I），不给按钮。
  */
 .pAll {
+  position: relative;
   display: inline-flex;
   gap: 5px;
   align-items: center;
@@ -4128,13 +4157,32 @@
   user-select: none;
 }
 
-.pAll input {
+/*
+ * 那枚 `input` 藏起来，画的是它后面那枚自绘框（`.pVmark`）。
+ *
+ * 为什么不用 `accent-color`：原生画出来的半选横杠与左树每一行那枚勾**长得不一样**
+ * （作者：「这个的多选框怎么样式不一样」）—— 一行里两种长相的框并排摆着就是两套东西。
+ * 藏起来而不是删掉：键盘仍然能聚焦、空格仍然能勾（只留 `appearance:none` 又会
+ * 变成一格空方块，还把勾的位置让给原生）。
+ */
+.pAllInput {
+  position: absolute;
+  width: 12px;
+  height: 12px;
   margin: 0;
-  accent-color: var(--wb-primary);
+  opacity: 0;
+  cursor: pointer;
 }
 
 .pAll:hover {
   color: var(--text-1);
+}
+
+/* 焦点在藏起来的那枚输入上时，把圈画在看得见的这一行上 */
+.pAll:focus-within {
+  outline: 1px solid var(--wb-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 /*

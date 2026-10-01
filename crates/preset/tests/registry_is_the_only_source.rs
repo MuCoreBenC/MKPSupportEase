@@ -1,14 +1,16 @@
 //! **注册表只有一份**（b04 Task 15 / M4c）。
 //!
 //! 搬进来之前，`crates/preset/assets/param_registry.toml` 与我们的
-//! `presets/registry/param_registry.toml` 是同一份数据的两个副本，实测差 5 处：
-//! 两处 `label`（下笔/收笔 → 装载/卸载胶箱）、两处 `uiComponent`（segmented → select）、
-//! 一块 `[[params.choices]]`（`wiping.ironing_coverage_threshold` 多 0/50/90 三条）。
+//! `presets/registry/param_registry.toml` 是同一份数据的两个副本，实测差 4 处：
+//! 两处 `label`（下笔/收笔 → 装载/卸载胶箱）、两处 `uiComponent`（segmented → select）。
 //!
-//! 那 5 处**都不会让任何判据变红**：`label` / `uiComponent` 在 `ParamEntry` 里只有
-//! serde 读写、没有分支读；`choices` 的白名单在 `validate.rs` 上有
-//! `value_type == "string"` 这道门，而那条参数是 `float`；`build.rs` 那处 deprecated
-//! 检查要求 `deprecated = true`，新增那 3 条都没写。
+//! （原来还有第 5 处：`wiping.ironing_coverage_threshold` 多挂了 0/50/90 三条
+//! `[[params.choices]]`。那三条在控件与校验两层都没有消费方 —— 它是 `float`，而
+//! 「`choices` 是取值域」这道门只对 `value_type == "string"` 开 —— 于是被一路误读成
+//! 「只能三选一」，真身却是一个能填的百分比框。已按同一道判据从真源删掉。）
+//!
+//! 那 4 处**都不会让任何判据变红**：`label` / `uiComponent` 在 `ParamEntry` 里只有
+//! serde 读写、没有分支读。
 //!
 //! 换句话说：**双真相在这里是静默的**。所以必须有一条判据专门咬"只有一份"，
 //! 而不是指望现有判据顺手发现。
@@ -72,22 +74,16 @@ fn the_only_source_actually_carries_the_registry() {
     );
     assert_eq!(reg.tabs.len(), 8, "真源应有 8 个 [[tabs]]（实测基线）");
 
-    // 那 5 处差异里唯一有结构的一处：这条参数在我们那份里带 3 条 choices，
-    // 而它是 float —— 证明我们读到的是**我们那份**，不是来源仓库那份。
+    // 指纹：`wiping.disk_stagger_swing_mode` 在我们那份里是 `select`、来源仓库那份是
+    // `segmented` —— 读到 `select` 就证明读到的是**我们那份**，不是来源仓库那份。
     let entry = reg
         .params
         .iter()
-        .find(|p| p.param_key == "wiping.ironing_coverage_threshold")
-        .expect("真源应有 wiping.ironing_coverage_threshold");
-    assert_eq!(entry.value_type, "float");
+        .find(|p| p.param_key == "wiping.disk_stagger_swing_mode")
+        .expect("真源应有 wiping.disk_stagger_swing_mode");
     assert_eq!(
-        entry.choices.len(),
-        3,
-        "我们那份给这条参数加了 0/50/90 三个预设档（来源仓库那份没有）—— \
+        entry.ui_component, "select",
+        "我们那份把这条的 uiComponent 改成了 `select`（来源仓库那份是 `segmented`）—— \
          这条断言是「读到的是真源」的指纹"
-    );
-    assert!(
-        entry.choices.iter().all(|c| !c.deprecated),
-        "那 3 条 choices 都不是 deprecated；写成 deprecated 会让 build() 开始拦值"
     );
 }

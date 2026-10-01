@@ -70,8 +70,15 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
  *
  * 不做成"返回空数组"：空数组与"后端说没有"在界面上长得一样，
  * 而这两件事要分开（见 `errors.ts` 那段）。抛出来，页面上是一块写明方法名的空态。
+ *
+ * **必须是 async**：契约上这些方法返回 `Promise`，调用方把「失败」接在
+ * `.then(ok, err)` / `.catch` 上 —— 直接同步 throw 会绕过那条 reject 通道，
+ * 在 `Promise.all([api.getMachines(), ...])` 这种**数组字面量**处就炸穿出去
+ * （异常发生在 `Promise.all` 被调用之前），于是调用方的兜底永远收不到它。
+ * 落在 `useEffect` 里就是 React 渲染期异常，没有 error boundary 时整棵树卸载 ——
+ * 白屏，而不是这块「未接入」空态。async 之后异常才走 reject，兜底才接得住。
  */
-function notWired(method: MkpApiMethod): never {
+async function notWired(method: MkpApiMethod): Promise<never> {
   throw new NotImplementedError(method)
 }
 
