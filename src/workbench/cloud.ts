@@ -7,10 +7,10 @@
  *
  * 这份文件负责最后那两格：云端上现在有哪些包、上传一份上去。它只有两个来源：
  *
- *   静态快照  `public/cloud/presets.json` —— 等于「云端已经有别人发过的几份」，只读。
+ *   静态快照  `src/workbench/fixtures/cloud-presets.json` —— 等于「云端已经有别人发过的几份」，只读。
  *             **改判后已随仓分发**（债 #6：作者要「静态快照 ＋ 我刚上传的」两条都要，
- *             且该快照与我们的假后端同源同一批上游 JSON）。读不到一样退空 ——
- *             代码本来就是这么写的（`catch` 退空数组，不编数据）。
+ *             且该快照与我们的假后端同源同一批上游 JSON）。快照随源码打包、只进工作台构建
+ *             （原来放 public/ 会混进客户端安装包，数据总纲欠账 #2）。
  *   我刚上传的 `localStorage[STORAGE.cloud]` —— 演示用。真后端是写文件 + 推云端，
  *             这里换成 localStorage，**同一个键让客户端也读得到** —— 联动就靠这一格。
  *             上传的是**整个 release**（说明书 + N 份 TOML），由 `clientPackage.ts` 现装，
@@ -28,6 +28,7 @@
 
 import { STORAGE } from '../api/storageKeys'
 import type { ClientDataPackage, ReleasePreset } from '../api/contract'
+import staticSnapshot from './fixtures/cloud-presets.json'
 
 /**
  * 云端目录里的一项 = **一次发布**。
@@ -54,9 +55,13 @@ export interface CloudEntry {
   presets: ReleasePreset[]
 }
 
-/** 静态云端（只读）：`public/cloud/presets.json` 里的一组快照 */
-const STATIC_URL = '/cloud/presets.json'
-
+/**
+ * 静态云端（只读）：随源码分发的快照。
+ *
+ * 原来放在 `public/cloud/presets.json`，靠 URL fetch —— 那样它会跟着 vite 的 public/
+ * 原样进**客户端**安装包，假云端就混进成品了（数据总纲欠账 #2）。改成静态 import：
+ * 只有 import 它的工作台构建会带上，客户端构建里没有这个字节。
+ */
 interface StaticFile {
   note?: string
   entries?: {
@@ -72,25 +77,19 @@ interface StaticFile {
 
 let staticCache: CloudEntry[] | null = null
 
-/** 读静态云端。读不到（产品仓没搬这份文件）就当云端空的 —— 不编数据 */
+/** 读静态云端。快照随源码打包（只进工作台构建），不存在"读不到"这一档 —— 解析不出 entries 就当空的 */
 export async function staticCloud(): Promise<CloudEntry[]> {
   if (staticCache !== null) return staticCache
-  try {
-    const res = await fetch(STATIC_URL)
-    if (!res.ok) throw new Error(String(res.status))
-    const file = (await res.json()) as StaticFile
-    staticCache = (file.entries ?? []).map((e) => ({
-      id: e.id,
-      name: e.name,
-      version: e.version ?? null,
-      at: e.at ?? null,
-      from: 'static' as const,
-      package: e.package,
-      presets: e.presets ?? [],
-    }))
-  } catch {
-    staticCache = []
-  }
+  const file = staticSnapshot as StaticFile
+  staticCache = (file.entries ?? []).map((e) => ({
+    id: e.id,
+    name: e.name,
+    version: e.version ?? null,
+    at: e.at ?? null,
+    from: 'static' as const,
+    package: e.package,
+    presets: e.presets ?? [],
+  }))
   return staticCache
 }
 
