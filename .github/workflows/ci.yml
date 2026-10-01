@@ -47,6 +47,12 @@ jobs:
       - name: 构建
         run: npm run build
 
+      # 判据 1（DATA-ARCHITECTURE.md §5）：铁律不许只写在文档里。扫客户端构建产物，
+      # 开发源 TOML / 模拟数据 / 工作台内容出现即红。只对客户端构建跑——
+      # 工作台构建故意带那些东西，不在本判据管辖内
+      - name: 安装包产物扫描
+        run: npm run check:bundle
+
   rust:
     name: rust
     # macOS 而不是 ubuntu：Tauri 的 Rust 侧在 Linux 上要先装 libwebkit2gtk 等一串系统包，
