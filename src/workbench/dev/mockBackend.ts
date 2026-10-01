@@ -288,7 +288,7 @@ const pending = new Map<string, unknown>()
 const MACHINE_VIEWS = [
   {
     id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
-    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: 'a1-image', icon: 'a1-icon',
+    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
     hasDimensions: true, zoneCount: 0, file: 'A1.toml',
     versions: [
       { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
@@ -299,9 +299,10 @@ const MACHINE_VIEWS = [
 
 type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string }
 
-/** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算 */
+/** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算。
+ * **没有 image 类**（2026-10-01 起）：整机图已从资产台账剥离、搬进 `src/app/assets/printers/`，
+ * 这个夹具跟着真台账走 —— 否则浏览器里跑工作台会看到一个后端已经不存在的一类。 */
 const ASSETS: FixtureRef[] = [
-  { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp' },
   { id: 'a1-icon', kind: 'icon', slicer: null, profile: null, name: 'A1 图标', path: 'icons/a1.svg' },
   { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
   { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
@@ -898,7 +899,7 @@ export function installMockBackend() {
         )
       case 'wb_remove_asset': {
         const assetId = args?.assetId as string
-        const used = BUNDLES.some((b) => b.assetRefs.includes(assetId)) || assetId === 'a1-image' || assetId === 'a1-icon'
+        const used = BUNDLES.some((b) => b.assetRefs.includes(assetId)) || assetId === 'a1-icon'
         if (used) {
           return Promise.reject({ code: 'INVALID', message: `资产 ${assetId} 还被引用着，不能删`, traceId: 'mock' })
         }

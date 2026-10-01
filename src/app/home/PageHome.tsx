@@ -46,6 +46,11 @@ import {
 } from '../calib/calibAxes'
 import { useCalibration } from '../calib/useCalibration'
 import { usePreset } from '../calib/usePreset'
+/* 第五步那张合影：**界面自带素材**（不是产品数据资源，不进 Catalog / Delivery）。
+   2026-10-01 起与机型整机图同一条规矩：从 `public/models/` 搬进 `src/app/assets/hero/`，
+   改走 vite 资源管线（import 回来带内容哈希），取图不再经过 `public/` 直通 */
+import heroPile from '../assets/hero/hero_pile.webp'
+import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 
 import p from './PageHome.module.css'
 
@@ -571,8 +576,8 @@ export default function PageHome({ density }: PageHomeProps) {
               <div className={p.modelsHero}>
                 <img
                   className={p.modelsHeroImg}
-                  src="/models/hero_pile.webp"
-                  srcSet="/models/hero_pile.webp 1x, /models/hero_pile@2x.webp 2x"
+                  src={heroPile}
+                  srcSet={`${heroPile} 1x, ${heroPile2x} 2x`}
                   alt="测试模型"
                   draggable={false}
                 />

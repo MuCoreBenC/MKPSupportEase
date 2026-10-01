@@ -397,6 +397,10 @@ impl Presets {
 
     /// **机型引用的资产 id 必须存在**（b05 Task 9 / 8.6）。
     ///
+    /// 今天机型的 `image` **一律为空**（整机图 2026-10-01 从台账剥离、搬进
+    /// `src/app/assets/`），实际走这条的是 `icon`；image 这一支留着是因为字段还在，
+    /// 哪天有产品级的机型图要登记回来（那时 `kind_of_asset` 也得跟着放开）。
+    ///
     /// 存在性**分两级**（Task 11.6 同一口径）：
     ///
     /// - id 认不出来 ⇒ **error**。那是打错了字，与 `machineVariants` 的键写错同一类：
@@ -892,8 +896,9 @@ mod tests {
                 checked += 1;
             }
         }
-        // 反空转：真数据里 3 张机型图 + 5 个图标引用 —— 少于 8 条就是漏查了
-        assert!(checked >= 8, "只查了 {checked} 条引用 —— 这条判据在空转");
+        // 反空转：真数据里 5 条图标引用（整机图 2026-10-01 剥离台账后不再占这一档）
+        // —— 少于 5 条就是漏查了
+        assert!(checked >= 5, "只查了 {checked} 条引用 —— 这条判据在空转");
     }
 
     /// **改一份套餐的文件清单**（b05 Task 14 / P4）：真写盘 + `updatedAt` 盖新值、
@@ -1198,9 +1203,9 @@ mod tests {
         assert_eq!(u.bundles, vec!["A1_default".to_owned()]);
         let u2 = p.asset_usage("A1-BBS-04-020").expect("反查（大写）");
         assert_eq!(u, u2, "反查是大小写不敏感的");
-        // 机型图那一档不被套餐引用：归属 ≠ 引用
-        let u = p.asset_usage("a1-image").expect("反查");
+        // 图标那一档不被套餐引用：归属 ≠ 引用
+        let u = p.asset_usage("a1-icon").expect("反查");
         assert_eq!(u.machines, vec!["A1".to_owned()]);
-        assert!(u.bundles.is_empty(), "机型图不该出现在套餐的 assetRefs 里");
+        assert!(u.bundles.is_empty(), "图标不该出现在套餐的 assetRefs 里");
     }
 }

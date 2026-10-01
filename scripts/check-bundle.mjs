@@ -55,8 +55,12 @@ const FORBIDDEN = [
   [/\/assets\/models\//, '已走下载管道的模型（不该再随包分发）'],
   [/\/assets\/icons\//, '已走下载管道的图标（不该再随包分发）'],
 
-  // 注意：`public/models/`（首页那张 hero_pile.webp）是**另一拨** —— 它是 UI 装饰，
-  // 不在资产台账里，也不归 catalog 管。别把它和上面那几条混为一谈。
+  // 注意：**界面自带素材不在这份清单的管辖里，也不需要靠目录名堵** ——
+  // 品牌 logo、机型整机图、首页 / 校准页那张 hero 合影，2026-10-01 起都住
+  // `src/app/assets/`（`bambuLogo.ts` / `printers/` / `hero/`），由 vite 资源管线打进
+  // `dist/assets/*.webp`（带内容哈希），与品牌 logo 同一档。
+  // `public/` 从此只剩两样：台账管的载荷根 `assets/{bbs,icons,models}`，与 BBS 页元数据 `bbs/`。
+  // 归属的判据在 Rust 侧（`runtime::catalog`：「资产台账里已无 image 类」），不在这里。
 ]
 
 function walk(dir, prefix = '') {

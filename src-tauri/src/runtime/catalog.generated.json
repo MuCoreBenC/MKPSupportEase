@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "6db22693209c082c",
+  "revision": "3a47cf1201f89525",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -19,7 +19,7 @@
         "A1C",
         "A1F"
       ],
-      "image": "a1-image",
+      "image": null,
       "icon": "a1-icon",
       "dimensions": {
         "bedSize": {
@@ -96,7 +96,7 @@
         "A1MQ",
         "A1MF"
       ],
-      "image": "a1_mini-image",
+      "image": null,
       "icon": "a1_mini-icon",
       "dimensions": {
         "bedSize": {
@@ -172,7 +172,7 @@
         "P1P",
         "P1C"
       ],
-      "image": "p1s-image",
+      "image": null,
       "icon": "p1s-icon",
       "dimensions": {
         "bedSize": {
@@ -493,34 +493,6 @@
     }
   ],
   "assets": [
-    {
-      "id": "a1-image",
-      "type": "image",
-      "machineId": "A1",
-      "name": "A1 外观图",
-      "path": "printers/a1.webp"
-    },
-    {
-      "id": "a1_mini-image",
-      "type": "image",
-      "machineId": "A1_MINI",
-      "name": "A1 mini 外观图",
-      "path": "printers/a1mini.webp"
-    },
-    {
-      "id": "a1_mini-variant-image",
-      "type": "image",
-      "machineId": "A1_MINI",
-      "name": "A1 mini 外观图（快拆版）",
-      "path": "printers/a1mini-variant.webp"
-    },
-    {
-      "id": "p1s-image",
-      "type": "image",
-      "machineId": "P1S",
-      "name": "P1S 外观图",
-      "path": "printers/p1s.webp"
-    },
     {
       "id": "a1-icon",
       "type": "icon",

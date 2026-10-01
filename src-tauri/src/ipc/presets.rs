@@ -805,7 +805,7 @@ mod tests {
         assert!(version_files_dto(&catalog, "NOPE", "X").is_none());
         assert!(version_files_dto(&catalog, "A1", "NOPE").is_none());
 
-        // —— 云端表：只出切片器预设，19 条资产里机型图/图标不进来 ——
+        // —— 云端表：只出切片器预设，15 条资产里图标/模型不进来 ——
         let presets = preset_files_dto(&catalog);
         assert!(!presets.is_empty());
         assert!(presets.iter().all(|p| p.kind != "mkp_preset"));
@@ -832,7 +832,13 @@ mod tests {
                 .visibility
         };
         assert_eq!(vis("a1-bbs-04-020"), "bundled");
-        assert_eq!(vis("a1-image"), "optional", "机型图不被套餐引用");
+        assert_eq!(vis("a1-icon"), "optional", "图标不被套餐引用");
+        // 菜单里没有整机图那一类：2026-10-01 它已从资产台账剥离（界面的展示素材，
+        // 不归 Catalog）—— 菜单逐条来自 `catalog.assets`，台账没有的就不会出现
+        assert!(
+            catalog.asset("a1-image").is_none(),
+            "整机图不在 catalog 里了"
+        );
 
         // —— 参数元信息：全部 74 条，含废弃 ——
         let meta = param_meta_dto(&catalog);

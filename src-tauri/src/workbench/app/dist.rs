@@ -718,11 +718,13 @@ mod tests {
 
     /// **真数据上的交付集**（12.6 的真数据版 + 防空转锚点）。
     ///
-    /// 锚点来自真数据的三个数：机型图 3（只剩 A1 / A1_MINI / P1S 三台有图，
-    /// P2S / X1C 的旧图已随清理删除）、图标 3（P2S/X1C 借 p1s-icon）、
-    /// BBS 5（五条套餐各一条 0.4mm）→ 可达集 **11**；三份模型与
+    /// 锚点来自真数据的两个数：图标 3（P2S/X1C 借 p1s-icon）、
+    /// BBS 5（五条套餐各一条 0.4mm）→ 可达集 **8**；三份模型与
     /// 四份 0.2mm BBS 没被引用，**刻意不进交付**（Task 13 的可达性分析收窄它们，
     /// 集合本身不变）。12.6 逐条：索引引用的每个文件都在交付目录真实存在。
+    ///
+    /// 机型图那 3 条 2026-10-01 也随之离场 —— 整机图从资产台账剥离（它是界面素材，
+    /// 不进 Catalog / Delivery），机型的 `image` 字段照实为空，可达集里自然没有它。
     #[test]
     fn the_real_delivery_set_matches_the_real_references() {
         let Some(root) = crate::workbench::paths::presets_root() else {
@@ -749,11 +751,12 @@ mod tests {
         assert_eq!(versions, 9, "版本总数变了 —— 说清为什么再改判据");
         assert_eq!(bundles_json(&book)["bundles"].as_array().unwrap().len(), 5);
 
-        // 可达集 11 = 图 3 + 图标 3 + BBS 5；模型与 0.2mm BBS 刻意不进
+        // 可达集 8 = 图标 3 + BBS 5；模型与 0.2mm BBS 刻意不进
+        // （机型图那 3 条随"整机图剥离台账"离场：机型的 image 字段照实为空）
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            11,
+            8,
             "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么"
         );
         assert!(
@@ -769,7 +772,7 @@ mod tests {
         // 落盘（真资产根 → 临时交付根），12.6 逐条核对 + assetRefs join 闭合
         let dist = tempfile::tempdir().unwrap();
         let out = write_content(dist.path(), &asset_root, &book).expect("真数据落盘");
-        assert_eq!(out.assets_copied, 11);
+        assert_eq!(out.assets_copied, 8, "可达集 8 条，一条不少一条不多");
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
             let p = dist
@@ -956,8 +959,8 @@ mod tests {
     }
 
     /// **真数据上的交付集合**（13.1 的真数据版 + 防空转）：
-    /// mkp 产物名 9 个（命名函数逐版算出）、资产 11 条 ——
-    /// 集合计数锚点变了就说明清单或套餐变了
+    /// mkp 产物名 9 个（命名函数逐版算出）、资产 8 条（图标 3 + BBS 5；
+    /// 整机图 2026-10-01 剥离台账后不再进交付）—— 集合计数锚点变了就说明清单或套餐变了
     #[test]
     fn the_real_deliverable_set_has_the_expected_shape() {
         let Some(root) = crate::workbench::paths::presets_root() else {
@@ -985,11 +988,11 @@ mod tests {
         let book = Book::new(&real, &c, &d);
 
         let expected = deliverable_set(&book);
-        // 反空转锚点：content 3 + manifest 1 + 资产 11 + mkp 9（五台机型全部有套餐）= 24
+        // 反空转锚点：content 3 + manifest 1 + catalog.json 1 + 资产 8 + mkp 9（五台机型全部有套餐）= 22
         assert_eq!(
             expected.len(),
-            25,
-            "交付集合条数变了 —— 说清为什么（catalog.json 进了交付集合）"
+            22,
+            "交付集合条数变了 —— 说清为什么（整机图剥离台账后资产从 11 条降到 8 条）"
         );
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
         // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状

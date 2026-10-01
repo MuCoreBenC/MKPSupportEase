@@ -1,8 +1,13 @@
 # 资产域①层：**一份集中定义**（b05 Task 8）。
 #
-# 这里登记我们管的资产：图片 / 图标 / 模型 / 切片器预设（BBS）四类。
+# 这里登记我们管的资产：图标 / 模型 / 切片器预设（BBS）三类。
 # **文件本体不在这里** —— 它们在资产根 `<repo>/public/assets/` 下，条目里的 `path`
-# 就是相对那个根的一段（前端按 `/assets/<path>` 取）。
+# 就是相对那个根的一段。
+#
+# **整机图（`type = 'image'`）不在这里**（2026-10-01 剥离）：它是界面的展示素材，
+# 不是用户要下载 / 更新 / 管理的产品数据资源。判断依据是"它是不是产品数据资源"，
+# 而不是"文件是不是图片"。它现在与品牌 logo 同住 `src/app/assets/printers/`，
+# 由 vite 的资源管线随程序本体走（判据：`runtime::catalog` 里"台账已无 image 类"）。
 #
 # 为什么一份文件而不是一资产一文件：旧仓 `source/assets/*.toml` 是 18 份、一资产一文件，
 # 加一张图就要新建一个文件，而"这批资产都属于 A1"这句话在目录里看不出来（doc §8）。
@@ -13,14 +18,14 @@
 # - 不写 `sha256` / `size`：那是**交付物**的属性，发布时按真实字节算（Task 13.6）
 # - **不给 MKP 预设建条目**：它的路径由命名规则算出（doc §12.5），登记一份就是冗余
 #
-# 一条的形状（`type` 取值：`image` | `icon` | `model` | `slicerProfile`）：
+# 一条的形状（`type` 取值：`icon` | `model` | `slicerProfile`）：
 #
 #   [[assets]]
-#   id = 'a1-image'                   # 主键，**大小写不敏感**唯一
-#   type = 'image'
+#   id = 'a1-icon'                    # 主键，**大小写不敏感**唯一
+#   type = 'icon'
 #   machineId = 'A1'                  # 归属机型；不属于任何机型时整行省略
-#   name = 'A1 外观图'                # 给人看的名字
-#   path = 'printers/a1.webp'         # 相对资产根，不许越界（拒绝对路径与 `..`）
+#   name = 'A1 图标'                  # 给人看的名字
+#   path = 'icons/a1.svg'             # 相对资产根，不许越界（拒绝对路径与 `..`）
 #
 # 切片器预设多两项（G-3：切片器是**开放的扩展维度**，今天只有 bbs）：
 #
@@ -36,44 +41,10 @@
 # ==================== 条目（b05 Task 9 落地） ====================
 #
 # `id` 的写法是**建议约定**，判据只管两条：唯一 + 大小写不敏感。
-#   机型相关的：`{机型 id 小写}-{语义}`（`a1-image` / `a1_mini-icon`）
+#   机型相关的：`{机型 id 小写}-{语义}`（`a1-icon` / `a1_mini-icon`）
 #   不属于某一台的：按源文件语义（`mkp-support-test-models`）
 # `machineId` 是**归属**（这份东西为谁做的），不是唯一的使用者 —— 图标 `p1s-icon`
 # 归 P1S，而 P2S / X1C 的 `icon` 字段也指向它（共享一件素材是允许的）。
-
-# ---------------- 机型图 ----------------
-#
-# 4 张是新版大图（原来在 `public/printers/bambu/`，Task 9 搬进来的）。
-# **P2S / X1C 没有外观图**：旧仓那两张（`p2s-image` / `x1c-image`）是待换的旧图，
-# 已随这次清理删掉；等有真实来源再登记，机型条目里的 `image` 现在照实留空。
-
-[[assets]]
-id = 'a1-image'
-type = 'image'
-machineId = 'A1'
-name = 'A1 外观图'
-path = 'printers/a1.webp'
-
-[[assets]]
-id = 'a1_mini-image'
-type = 'image'
-machineId = 'A1_MINI'
-name = 'A1 mini 外观图'
-path = 'printers/a1mini.webp'
-
-[[assets]]
-id = 'a1_mini-variant-image'
-type = 'image'
-machineId = 'A1_MINI'
-name = 'A1 mini 外观图（快拆版）'
-path = 'printers/a1mini-variant.webp'
-
-[[assets]]
-id = 'p1s-image'
-type = 'image'
-machineId = 'P1S'
-name = 'P1S 外观图'
-path = 'printers/p1s.webp'
 
 # ---------------- 图标 ----------------
 

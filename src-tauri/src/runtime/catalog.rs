@@ -52,7 +52,8 @@ pub struct Catalog {
     /// 机型的完整定义：元信息、尺寸、版本、禁区
     #[serde(default)]
     pub machines: Vec<CatalogMachine>,
-    /// 资产定义（图片 / 图标 / 模型 / 切片器预设的登记，总纲欠账 #3 的登记面）
+    /// 资产定义（图标 / 模型 / 切片器预设的登记，总纲欠账 #3 的登记面）。
+    /// **没有整机图**：它是界面的展示素材，2026-10-01 从台账剥离进 `src/app/assets/`
     #[serde(default)]
     pub assets: Vec<Asset>,
     /// 套餐定义（一版一套：MKP 与配套 BBS 的成套配发关系）
@@ -101,6 +102,9 @@ pub struct CatalogMachine {
     /// 外部别名（`A1C` / `A1F` 这种）。**不许与任何机型 ID 相撞**（构建源已保证）
     #[serde(default)]
     pub external_aliases: Vec<String>,
+    /// **资产 id**（不是路径）：机型图。整机图 2026-10-01 从台账剥离之后，
+    /// 源里 **一律不再写它**（照实为空），界面用自己的素材表（`src/app/home/heroArt.ts`）。
+    /// 字段留着是给"将来真有产品级的机型图要按需下载"留的位置；今天没有任何机型写它。
     #[serde(default)]
     pub image: Option<String>,
     #[serde(default)]
@@ -152,8 +156,11 @@ fn kind_dir(kind: &str) -> &'static str {
 
 /// 资产台账里的类型 → 目录里的 kind。
 ///
-/// **返回 `None` 就是不登记**（目前只有整机图那一类）—— 那类的处置见模块头注释：
-/// 它是首页的 UI 装饰，接进下载会先经过一次"首页图从哪来"的产品决定。
+/// **返回 `None` 就是不登记**。今天只有 `Image` 走这一支 —— 而它已经不是"暂不登记"，
+/// 而是**台账里根本不该有它**：整机图 2026-10-01 从台账剥离，搬进 `src/app/assets/`
+/// （界面的展示素材，随程序本体走）。这一支留在 match 里是因为
+/// [`crate::presetdata::AssetKind`] 仍是四类枚举，编译器要求穷尽 ——
+/// **源里再出现 `type = 'image'` 就会静默不登记**，所以判据钉着"台账里已无 image 类"。
 fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static str> {
     match asset_kind {
         crate::presetdata::AssetKind::SlicerProfile => Some(kind::BBS_CONFIG),
@@ -567,21 +574,37 @@ mod tests {
             );
         }
 
-        // 整机图那一类**故意不登记**（它是首页的 UI 装饰，接进下载要先过一次产品决定）。
-        // 这条是"别忘了它"：等它接进来，把上面那个数组加上 Image 即可，这条会自然消失
+        // **整机图不在台账里**（2026-10-01 裁决）：它是界面的展示素材，不是产品数据资源。
+        // 这条判据守着那条边界 —— 它既防"哪天顺手登记回来"（那样 catalog 会多出一类
+        // 用户既不能下载也不需要更新的东西），也防上面那个数组悄悄把 Image 加回来。
         let images_in_toml = source
             .assets
             .items()
             .iter()
             .filter(|a| a.kind == crate::presetdata::AssetKind::Image)
             .count();
-        assert!(images_in_toml > 0, "台账里确有整机图（它现在还随包）");
+        assert_eq!(
+            images_in_toml, 0,
+            "资产台账里已无 image 类：整机图住 src/app/assets/printers/（界面素材，不归 Catalog）"
+        );
         assert!(
             !catalog
                 .files
                 .iter()
                 .any(|f| f.path.starts_with("mkp/images/")),
-            "整机图还没接进管道：接的时候要带着首页图一起改，别只登记不换消费方"
+            "下载区没有 images 这一类：整机图不进 Delivery"
+        );
+        // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
+        // 今天 15 条 = 9 BBS + 3 图标 + 3 模型；整机图剥离时它从 19 降到 15
+        assert_eq!(
+            catalog.assets.len(),
+            source.assets.items().len(),
+            "catalog 的资产定义与 presets/assets.toml 逐条对齐"
+        );
+        assert_eq!(
+            catalog.assets.len(),
+            15,
+            "实测 15 条（9 BBS + 3 图标 + 3 模型）—— 条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -662,7 +685,11 @@ mod tests {
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
 
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
-        assert_eq!(catalog.assets.len(), 19, "实测 19 条资产定义");
+        assert_eq!(
+            catalog.assets.len(),
+            15,
+            "实测 15 条资产定义（9 BBS + 3 图标 + 3 模型）—— 整机图 2026-10-01 剥离台账，19→15"
+        );
         assert_eq!(catalog.bundles.len(), 5, "实测 5 份套餐");
         assert_eq!(catalog.registry.params.len(), 74, "实测 74 条字段定义");
         assert!(

@@ -50,7 +50,8 @@
 | `crates/preset` + 判据测试 | `BUILTIN_PRESETS` 与命名函数，判据保证与 `dist` 一份不差 | 是 |
 | `crates/*/tests/fixtures/` | 判据资产（对照基线等，见 `ARCHITECTURE.md` §10.6） | 是 |
 | `workbench/` | 工作台运行态（快照 / 草稿），是**工具的暂存区**，不是数据源 | 否（不入库、不进包） |
-| `public/assets/` | 内置资源的**源**：图标、3mf 模型、BBS 切片配置 | 是 |
+| `public/assets/` | 我们管的资产（**产品数据资源**）的**载荷源**：`bbs/` `icons/` `models/` —— 三类都已登记进 catalog、客户端按需下载 | 是 |
+| `src/app/assets/` | **界面展示素材**：品牌 logo、机型整机图（`printers/`）、测试模型合影（`hero/`）。判据是"它是不是产品数据资源"而不是"文件是不是图片"—— 这些不进 catalog，随程序本体走（vite 资源管线）。**2026-10-01 起 `public/` 里不再有界面素材**，只剩台账管的载荷根与 BBS 页元数据 | 是 |
 
 ### ② 安装包 —— 把源做成成品
 
@@ -60,7 +61,8 @@
 | --- | --- |
 | 程序本体 + 前端产物 | 二进制与 vite 产物 |
 | **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身。**它不带云端地址** —— 见 §1④ 的分工 |
-| 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放。**登记后不再随前端产物分发**：它是"产品开发出来的资源"，与 MKP 预设一样走 catalog → Source → Delivery → `mkp/<kind>/…`（第三圈的做法） |
+| 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放。**登记后不再随前端产物分发**：它是"产品开发出来的资源"，与 MKP 预设一样走 catalog → Source → Delivery → `mkp/<kind>/…`（第三圈已收口：三类全部接进同一条管道） |
+| 界面展示素材 | 品牌 logo、机型整机图、首页 / 校准页的测试模型合影——**随程序本体**（vite 资源管线，产物里带内容哈希），**不进 catalog**：它们不是产品数据资源，用户不下载也不更新。边界由 `runtime::catalog` 的判据守着（「资产台账里已无 image 类」） |
 | 内置预设 | 随软件发布的成品内容（现 9 份，入库产物目录 `crates/preset/assets/presets`，判据锚定），在 catalog 里标"内置" |
 
 | 禁止 | 理由 |
@@ -147,8 +149,8 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- | --- |
 | 机型 / 版本 / 参数 / 布局定义 | `presets/*.toml`（人） | 算进 catalog | 无副本——改定义 = 改源重新发布 | — |
 | MKP 预设（出厂内容） | `crates/preset/assets/presets`（入库产物，判据锚定） | 内置 9 份，catalog 登记 | `mkp/` 原件只读；`presets-mine/` 副本可改 | manifest + 文件 |
-| BBS 切片配置 | `public/assets/bbs`（成品） | 随包，catalog 登记 | 不改原件 | 将来可更新 |
-| 图标 / 3mf 模型 | `public/assets` | 随包，catalog 登记 | 不改 | 大文件将来可按需下载，地址由 catalog 给 |
+| BBS 切片配置 · 图标 · 3mf 模型 | `public/assets/{bbs,icons,models}`（成品） | catalog 登记（说明书随包），**文件本体不随包**：按需下载进 `mkp/<kind>/` | 不改原件 | manifest + 文件本体（地址 = 数据源 baseUrl + catalog 的 `path`） |
+| 界面展示素材（品牌 logo / 机型整机图 / 测试模型合影） | `src/app/assets/`（整机图与合影 2026-10-01 起搬来） | **随程序本体**（它就是界面的一部分） | 无副本 | — |
 | 偏移量 / 运行状态 | — | — | `run/`（程序替用户管） | — |
 | **数据源地址**（当前用哪个云端） | 用户填（界面里）或构建方注入默认值 | 可选的随包默认值（`MKPSE_PRESET_SOURCE`） | `run/preset-source.json`（程序写，用户可删=回到未配置） | 被寻址的一方，不拥有这份设置 |
 | 导出 / 报告 | — | — | `exports/` `reports/`（用户） | — |
@@ -162,7 +164,8 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- |
 | 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
-| 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图（`printers/`）是唯一还在随包的一类** —— 它是首页的 UI 装饰，接进管道要连带改首页取图方式，单独一轮做 |
+| 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图不作为该类收口，而是改判归属、剥离台账**（第三刀，见下） |
+| 3b | ~~`public/assets/printers/` 的整机图：登记进 catalog 还是留在包外，一直悬着~~ | ~~归属未定~~ | **已收口 2026-10-01（第三圈第三刀）**：判定它不是产品数据资源而是**界面展示素材**（用户不下载、不更新、不管理它），于是**从资产台账剥离**：文件搬去 `src/app/assets/printers/`（vite 资源管线随程序本体走），`presets/assets.toml` 的 4 条 `image` 与机型文件的 `image` 引用清掉（19 → 15 条定义）。判据从"别忘了整机图"换向为**「资产台账里已无 image 类」**。遗留：schema 层的 `AssetKind::Image` 与机型 `image` 字段保留而值为空（要不要连 schema 一起收掉，另裁） |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
 | 5 | 下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/` | 命名欠账，职责是同一个（下载原件区） | 以本文 `mkp/` 为准收口；`PRESET-PRODUCT-RULES.md` 录入正文时同步 |
 | 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |

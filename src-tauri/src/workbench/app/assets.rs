@@ -365,8 +365,8 @@ mod tests {
         let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            19,
-            "机型图 4 + 图标 3 + 模型 3 + BBS 9 —— 条数变了就该在提交里说清为什么"
+            15,
+            "图标 3 + 模型 3 + BBS 9 —— 整机图 2026-10-01 剥离台账（19→15），条数变了要说清为什么"
         );
 
         let missing: Vec<&str> = list
@@ -477,8 +477,9 @@ mod tests {
         );
         assert!(u.bundles.is_empty(), "图标不是套餐的配发内容");
 
-        // 机型图各归各的
-        let u = wb_asset_usage("a1-image".to_owned()).expect("反查");
+        // 一台机型一份图标：A1 只引自己那份（整机图 2026-10-01 已剥离台账，
+        // 反查这一档改用图标举例）
+        let u = wb_asset_usage("a1-icon".to_owned()).expect("反查");
         assert_eq!(u.machines, vec!["A1".to_owned()]);
     }
 

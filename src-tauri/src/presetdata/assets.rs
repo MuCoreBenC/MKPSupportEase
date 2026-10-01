@@ -51,6 +51,11 @@ pub const ASSETS_FILE: &str = "assets.toml";
 /// 一个是矢量标记，前端一处 <img>、一处当符号用），而 doc §8 那句"图片 / 图标、模型"
 /// 说的是**同一类文件形态**，不是同一个字段语义。
 ///
+/// **今天台账里没有 `image`**（2026-10-01 剥离）：整机图是界面的展示素材，走 `src/app/assets/`
+/// 随程序本体，不进 Catalog / Delivery。变体留着是因为它是**形态分类**，
+/// 而"进不进台账"是另一条判断——判据是 [`crate::runtime::catalog`] 里那句
+/// "台账里已无 image 类"，不是这里少一个枚举取值。
+///
 /// **没有 `mkpPreset`**：那一条按 doc §12.5 不建条目（见模块头）。这个 enum 是那句话的
 /// 结构化版本 —— 想登记 MKP 预设得先改这里，而改这里要过一次 review。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

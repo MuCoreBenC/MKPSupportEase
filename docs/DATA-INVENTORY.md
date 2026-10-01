@@ -19,7 +19,8 @@
 > 2026-10-01 增补：Rust 侧的 R2/R3/R4/R5 四条已在本圈收口（见 §3.1 勾账）——
 > `client/` 目录删除、catalog 加厚出完整 definition、九条读命令换源。
 > §1 八环节里的"安装包资源管理"随之有了正面向：catalog 的 `assets` 域已登记
-> 19 条资产定义（载荷登记与下载仍欠，见 #3）。
+> 资产定义（载荷与下载在第三圈前两刀接上；第三刀把不归它管的整机图摘掉，
+> **19 条 → 15 条** = 9 BBS + 3 图标 + 3 模型）。
 >
 > 2026-10-01 增补：**前端最大欠账 C4 收口**（见 §3.2 勾账）——localStorage 三格底账
 > （说明书 / 本机预设 / 使用中）退役，消费方（预设页 / 参数页 / 首页 / 校准页 / 同步页）
@@ -58,10 +59,11 @@
 | F1 | `presets/*.toml`（13 份源） | 机型 / 禁区 / 套餐 / 资产 / 布局 / 注册表的定义源 | ① 源 | **保留**。与总纲 §1① 的布局一字不差 |
 | F2 | `presets/dist/` | 发布器产物暂存（实际已有 `presets/mkp/` 9 份；content JSON 与 manifest 是设计稿、尚未生成）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
 | F2b | `crates/preset/assets/presets/`（9 份，入库） | **入库产物目录**：`BUILTIN_PRESETS` 编进二进制的同一批真字节 | ① 的②半成品真身 | **保留**；构建器与判据都认它 |
-| F3 | `public/assets/icons|models|printers` | 图标 / 3mf / 机型图，随 vite 进包 | ② 内置资源（源） | **保留**；收口：发布时登记进 catalog（版本/SHA） |
-| F4 | `public/assets/bbs/Process/`（9 份 JSON） | BBS 切片配置成品 | ② 内置资源 | **收口**（总纲欠账 #3）：登记，不是裸放 |
-| F5 | `public/bbs/`（PROVENANCE / registry / layout / defaults / icons / _sync.json） | BBS 页元数据（提取器产物，随本仓分发） | ② 内置资源 | **保留**；与 F4 同一批登记 |
-| F6 | `public/models/hero_pile*.webp` | 首页大图 | ② 内置资源（UI 资产） | **保留**；登记 |
+| F3 | `public/assets/icons\|models`（+ `bbs/` 见 F4） | 图标 / 3mf 模型的**载荷**，随 vite 进包（工作台按 URL 直取） | ② 内置资源（源） | **收口**：第三圈第二刀已登记进 catalog（`kind=icon` / `kind=model`），客户端按需下载进 `mkp/icons/` `mkp/models/`，随包副本退役 |
+| F3b | ~~`public/assets/printers/`~~ → `src/app/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前的判定是"② 内置资源"，**2026-10-01 改判**：它是**界面展示素材**（不是产品数据资源） | **已收口 2026-10-01（第三刀）**：从资产台账（`presets/assets.toml` 的 4 条 `image`）剥离，搬进 `src/app/assets/`，由 vite 资源管线随程序本体走；机型文件的 `image` 引用一并清空。判据：`runtime::catalog`「台账里已无 image 类」 |
+| F4 | `public/assets/bbs/Process/`（9 份 JSON） | BBS 切片配置成品 | ② 内置资源 | **已收口 2026-10-01（第一刀）**：登记进 catalog（`kind=bbs_config`），落点 `mkp/bbs/…`，随包副本退役 |
+| F5 | `public/bbs/`（PROVENANCE / registry / layout / defaults / icons / _sync.json） | BBS 页元数据（提取器产物，随本仓分发） | ② 内置资源 | **保留**；与 F4 同一批登记（这几份是 BBS 页的界面数据，不是下载资源） |
+| F6 | ~~`public/models/hero_pile*.webp`~~ → `src/app/assets/hero/` | 首页第五步 / 校准页测试模型那一屏的合影 | 界面展示素材（不是产品数据资源） | **已收口 2026-10-01（第三刀顺手搬）**：与 F3b 同一条规则、同一层（`src/app/assets/hero/`），改走 vite 资源管线；**不登记进资产台账**。搬完后 `public/` 里不再有界面素材 |
 | F7 | ~~`public/cloud/presets.json`~~ → `src/workbench/fixtures/cloud-presets.json` | 模拟云端的静态快照（工作台演示管道的另一半） | ① 开发夹具 | **已收口 2026-10-01**：静态 import，只进工作台构建；客户端产物 grep 验证无此字节 |
 | F8 | `workbench/.snapshots/ .draft/` | 工作台运行态 | ① 工具暂存 | **保留**（现状未入库，维持） |
 | F9 | `crates/*/tests/fixtures/` | 判据资产（对照基线等） | ① 判据 | **保留**（`ARCHITECTURE.md` §10.6 已定） |
@@ -242,5 +244,34 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   接进管道要连首页取图方式一起改（判据里留了一条"别忘了它"的断言）。
   判据：每一种登记类都与资产台账条数对齐 + 落点前缀 + 大小=盘上真字节；
   新增一条"模型也走同一管道"的端到端判据。
+
+- 2026-10-01：**第三圈第三刀 —— 整机图从资产台账剥离**（第三圈第 1 步收口）。
+  1. **先问归属，再决定路径**：前两刀把预设 / BBS / 模型 / 图标接进 Catalog + Delivery 之后，
+     剩下唯一还在随包的一类是整机图（`public/assets/printers/`，4 张 webp）。
+     判定它的尺子不是"文件是不是图片"，而是**"它是不是产品数据资源"**——
+     用户不需要单独下载 / 更新 / 管理它，首页只是为了展示机器取一张图。
+     登记进 catalog 反而会把 Catalog 的职责扩大到界面的展示素材，所以**剥离**。
+  2. **落点**：`public/assets/printers/` → `src/app/assets/printers/`（与品牌 logo
+     `bambuLogo.ts` 同一层），由 vite 资源管线打进产物（带内容哈希），
+     首页 `heroArt.ts` 改成 `import` 自己那一份 —— 取图不再经过 `public/` 直通。
+  3. **台账侧**：`presets/assets.toml` 删掉 4 条 `type='image'` 条目（19 → 15 条定义），
+     并清掉 A1 / A1_MINI / P1S 机型文件里的 `image` 引用（否则加载期
+     `check_asset_refs` 直接报悬空引用 —— 那条守卫留着，今天管的是 `icon`）。
+     同一条规则下的最后一件也顺手搬了：**测试模型合影**（`public/models/hero_pile*.webp`，
+     首页第五步与校准页在用）→ `src/app/assets/hero/`。搬完 `public/` 里只剩
+     台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`，
+     `workbench/paths.rs` 那句"两类东西混在一层"从此不成立。
+  4. **判据换向**：原来那条"别忘了整机图（它现在还随包）"**删掉**，改成
+     **「资产台账里已无 image 类」** + 「下载区没有 `mkp/images/`」+ 资产定义与台账逐条对齐。
+     随包退役不再靠 `DELIVERED_ASSET_DIRS` 兜它 —— 它已经不经过 `public/` 了。
+  5. **连带修正**：`heroArt.ts` 里 P2S / X1C 两条指向**不存在文件**的路径一并删掉
+     （台账注释早就写明这两台没有外观图；不存在的路径在 SPA 里回落成 index.html，
+     `<img>` 静默不显示，页签点得开、控制台也干净 —— 属于"静默失效"那一类）。
+  6. **如实说明**：整机图搬到界面层之后，`AssetKind::Image` 枚举变体与机型的 `image`
+     字段仍在（schema 层保留，值为空），工作台的"机型图"筛选页签与机型图下拉从此为空 ——
+     这是"台账里没有这一类"的真实反映，不是坏掉。
+     **schema 暂不清理**（作者 2026-10-02 定）："现在没有数据"不等于"这个概念从系统里永远不存在"，
+     保持 schema 稳定；将来确认永远不用，再做一次专门的 schema 清理（那会连带改
+     前端契约 `Machine.image`、mock、工作台机型页与资产页）。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

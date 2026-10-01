@@ -24,6 +24,10 @@ import { AXIS_ROWS, NEED_PRESET, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
 import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
+/* 测试模型那一屏的合影：**界面自带素材**（不是产品数据资源，不进 Catalog / Delivery）。
+   与首页第五步用的是同一张，2026-10-01 从 `public/models/` 搬进 `src/app/assets/hero/` */
+import heroPile from '../assets/hero/hero_pile.webp'
+import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 import s from './PageCalib.module.css'
 
 /** 板子的配色跟应用的模式对齐；等应用做了深色模式，这里换成跟随主题的那个值 */
@@ -342,8 +346,8 @@ export default function PageCalib() {
           <div className={s.hero}>
             <img
               className={s.heroImg}
-              src="/models/hero_pile.webp"
-              srcSet="/models/hero_pile.webp 1x, /models/hero_pile@2x.webp 2x"
+              src={heroPile}
+              srcSet={`${heroPile} 1x, ${heroPile2x} 2x`}
               alt="测试模型"
               draggable={false}
             />

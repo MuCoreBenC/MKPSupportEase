@@ -11,9 +11,11 @@ import { bbsFs } from './tools/dev-server/bbsFs.mjs'
  * "用户安装包里也带一份"。第三圈起它们归 catalog 管（带 SHA / 大小、按需下载进 `mkp/`），
  * 包里那份副本就成了第二个真源：**盘上哪份是对的，从此有两个答案。**
  *
- * 这里只摘**已经接进管道的那几类**（接一类加一行），没接的（整机图那一类 UI 装饰）
- * 暂时还在包里 —— 等它们也接进来，这份清单就是空的时候，`public/` 那整个目录
- * 也可以搬走。判据 1（`scripts/check-bundle.mjs`）盯着这件事：清单里有的却出现在产物里就红。
+ * 这里只摘**已经接进管道的那几类**（接一类加一行）。今天恰好是 `public/assets/` 下
+ * 台账管的全部三类 —— 曾经剩下的那个例外（整机图 `printers/`）在 2026-10-01 被判定为
+ * **界面素材**而不是产品数据资源，搬去了 `src/app/assets/printers/`（走 vite 资源管线，
+ * import 回来带内容哈希），所以它不再经过这里。判据 1（`scripts/check-bundle.mjs`）
+ * 盯着这件事：清单里有的却出现在产物里就红 —— 两处是**同一份清单**，加一类改两处。
  */
 const DELIVERED_ASSET_DIRS = ['bbs', 'models', 'icons']
 
