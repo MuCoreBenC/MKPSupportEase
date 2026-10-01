@@ -223,6 +223,24 @@ export const mockApi: MkpApi = {
     throw new NotImplementedError('downloadCatalogFile')
   },
 
+  async downloadCatalogFiles(fileNames) {
+    /* 一份都没成就直说，不返回"假装成功"的空结局表 */
+    return fileNames.map((fileName) => ({
+      fileName,
+      ok: false,
+      message: '浏览器里没有下载区，也没有数据源地址',
+    }))
+  },
+
+  /** 浏览器模式下数据源既读不到也配不了：如实答"没配"，页面据此把配置入口说清楚 */
+  async getPresetSource() {
+    return null
+  },
+
+  async setPresetSource() {
+    throw new NotImplementedError('setPresetSource：浏览器模式的数据源只读，配不了')
+  },
+
   async getDownloadedFiles() {
     /* 盘就是底账——浏览器没有盘上的下载区，如实答空 */
     return []

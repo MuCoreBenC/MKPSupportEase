@@ -193,4 +193,27 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      `ClientDataPackage`/`ReleasePreset` 类型保留（工作台侧还在用），
      客户端消费面零引用。
 
+- 2026-10-01：**④ Delivery 加厚收口（第二圈）—— 真源头上线的那一刀**。
+  1. **地址不在 catalog 里**（总纲 §1④ 的分工定死）：新增 `runtime/source.rs`
+     管"当前用哪个云端"——住内部根 `run/preset-source.json`，沿用
+     `runtime/state.rs` 那一套规则（一种状态一个文件 + `*Schema` 代次 +
+     atomic_write + 坏档 CORRUPTED），默认地址由构建期 `MKPSE_PRESET_SOURCE`
+     注入；**没注入就是没配**，下载与检查更新都如实拒绝，不猜 URL。
+  2. 下载地址 = `baseUrl` + catalog 记的相对位置（总纲 §1④ 那个分工），
+     所以换 Gitee / 换自建 CDN 不用重发说明书。命令
+     `get_preset_source` / `set_preset_source`。
+  3. **网络只住一个文件**：新增 `runtime/net.rs` —— ureq（同步客户端 + rustls，
+     不引异步 HTTP 栈）装在 `Source` trait 后面，`delivery.rs` 的管道一行未改。
+     阻塞网络与磁盘丢进 `tauri::async_runtime::spawn_blocking`，不堵异步运行时。
+  4. **失败与进度的口径**：只有**运输类**故障（连接/超时/解析/被掐）退避重试；
+     404、500、字节超了目录记的大小一次都不重试（那是答案不是抖动）。
+     进度走 Tauri `Channel`，只报真知道的事（`connecting` / `transferring` /
+     `done` / `failed`）—— 没有"校验中 / 落盘中"，那两步在管道内部，报了就是编的。
+     批量并发在 Rust 侧（`deliver_all`，固定 4 条道），**逐份给结局**，返回按请求顺序。
+  5. **脚手架退场**：原来探测仓库绝对路径的那段（探测 `presets/dist` 与
+     `crates/preset/assets/presets` 两个目录）全部删除，检查 / 应用更新改走同一个地址概念。
+  6. **判据 2 落地**：`scripts/check-zero-network.mjs`，
+     三道闸——网络符号只许住 `runtime/net.rs`、程序的 `.setup()` 段零联网、
+     `src/api/` 不许绕过 IPC 自己发 HTTP。挂 CI web job，干净过并用种脏实测过。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

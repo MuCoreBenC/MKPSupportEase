@@ -1,7 +1,13 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 
 import { NotImplementedError } from './errors'
-import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
+import {
+  isAppError,
+  type AppError,
+  type DownloadTick,
+  type MkpApi,
+  type MkpApiMethod,
+} from './contract'
 
 /**
  * IPC 桥：把契约里的方法映射到 Rust 侧的 command。
@@ -68,6 +74,23 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
 }
 
 /**
+ * 需要看进度时把回调挂成一条 Tauri Channel。
+ *
+ * **为什么不在调用方那边 new Channel**：一次调用一个 channel、参数名要与 Rust 侧的
+ * `on_tick` 对上——这种细节在这层收一次，页面只见回调。
+ * **不给回调就完全不挂** —— 与"点了等结果"那条路共用同一个 command，没有第二个版本。
+ */
+function withTick(
+  args: Record<string, unknown>,
+  onTick?: (tick: DownloadTick) => void,
+): Record<string, unknown> {
+  if (onTick === undefined) return args
+  const channel = new Channel<DownloadTick>()
+  channel.onmessage = onTick
+  return { ...args, onTick: channel }
+}
+
+/**
  * 一个**还没接**的接口。
  *
  * 不做成"返回空数组"：空数组与"后端说没有"在界面上长得一样，
@@ -107,8 +130,13 @@ export const bridgeApi: MkpApi = {
   getRuntimeCatalog: () => call('getRuntimeCatalog', 'get_runtime_catalog'),
   getDownloadedFiles: () => call('getDownloadedFiles', 'get_downloaded_files'),
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
-  downloadCatalogFile: (fileName) =>
-    call('downloadCatalogFile', 'download_runtime_file', { fileName }),
+  downloadCatalogFile: (fileName, onTick) =>
+    call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
+  downloadCatalogFiles: (fileNames, onTick) =>
+    call('downloadCatalogFiles', 'download_runtime_files', withTick({ fileNames }, onTick)),
+  getPresetSource: () => call('getPresetSource', 'get_preset_source'),
+  setPresetSource: (baseUrl) =>
+    call('setPresetSource', 'set_preset_source', { baseUrl }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   applyActivePreset: (fileName) =>
     call('applyActivePreset', 'apply_active_preset', { fileName }),

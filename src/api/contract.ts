@@ -673,6 +673,41 @@ export interface RemoteUpdateCheck {
   remoteRevision: string
 }
 
+/**
+ * 一次下载的阶段。**只有这四个** —— 没有"校验中 / 落盘中"：
+ * 那两步发生在管道内部，命令层拿不到它们的时机，报出来就成了编出来的进度。
+ */
+export type DownloadStage = 'connecting' | 'transferring' | 'done' | 'failed'
+
+/**
+ * 一次下载的水位。与 Rust 侧 `ipc::catalog::DownloadTick` 逐字段对齐
+ * （两侧之间隔着 IPC，没有编译器，靠这里一份形状与那边的 serde rename 对上）。
+ */
+export interface DownloadTick {
+  stage: DownloadStage
+  fileName: string
+  received: number
+  /** 服务端没给长度时是 `null` —— 界面那时就别说百分比，说"已收多少字节" */
+  total: number | null
+  /** 只在 `failed` 上有值：失败原因，来自后端，前端不造句 */
+  message?: string
+}
+
+/** 批量下载里每一份的结局。**一份出错不拖累别人**，所以按份返回，不是一次总的结果 */
+export interface DownloadOutcome {
+  fileName: string
+  ok: boolean
+  /** 失败原因同样来自后端 */
+  message: string
+}
+
+/** 当前数据源（出厂默认值或用户填的都算） */
+export interface PresetSource {
+  baseUrl: string
+  /** `true` = 用户在界面里填的；`false` = 构建期注入的出厂默认值 */
+  fromUser: boolean
+}
+
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -749,11 +784,34 @@ export interface MkpApi {
   getRuntimeCatalog(): Promise<RuntimeCatalog>
 
   /**
-   * 新数据世界的下载管道（第一圈骨架）：把 catalog 里登记的一份拉进下载区 mkp/。
-   * SHA 或大小对不上就整个拒绝——坏字节不落盘。第一圈只有开发源，
-   * 真云端来了换管道里的源实现，这个口子不动。
+   * 新数据世界的下载管道：把 catalog 里登记的一份从数据源拉进下载区 `mkp/`。
+   * SHA 或大小对不上就整个拒绝——坏字节不落盘。
+   *
+   * `onTick` 可选：给了就看过程（一次调用一路事件），不给就是原来那个"点了等结果"。
+   * 数据源地址不在 catalog 里，见 [`getPresetSource`]。
    */
-  downloadCatalogFile(fileName: string): Promise<void>
+  downloadCatalogFile(
+    fileName: string,
+    onTick?: (tick: DownloadTick) => void,
+  ): Promise<void>
+
+  /**
+   * 批量下载（并发在 Rust 侧做）。**一份失败不拖累别人** —— 按份给结局，
+   * 界面因此能说清楚"八份成了、两份因为什么没成"，而不是一句抹平的"下载失败"。
+   */
+  downloadCatalogFiles(
+    fileNames: string[],
+    onTick?: (tick: DownloadTick) => void,
+  ): Promise<DownloadOutcome[]>
+
+  /**
+   * 当前数据源。`null` = 还没配（既没填过、也没有出厂默认值）——
+   * 这时下载与检查更新都会拒绝执行并说明去哪儿配。
+   */
+  getPresetSource(): Promise<PresetSource | null>
+
+  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝 */
+  setPresetSource(baseUrl: string): Promise<PresetSource>
 
   /**
    * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。

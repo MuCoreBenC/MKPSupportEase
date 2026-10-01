@@ -51,6 +51,23 @@ time = { version = "0.3", features = ["formatting", "macros"], optional = true }
 # 它本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的成本是零。
 sha2.workspace = true
 
+# **唯一的 HTTP 客户端**（第二圈：把「下载」从本地目录源换成真远端源）。
+#
+# **为什么不是异步那一套**：命令体本来就是同步阻塞的磁盘 IO，与其为了一次 GET
+# 拉进一整套 async HTTP 栈（runtime + reactor + hyper），不如让阻塞网络与阻塞磁盘
+# 同在线程池里——这条路径需要的全部能力就是「GET 一个 URL、拿回字节」，
+# 交给 spawn_blocking 就够。
+#
+# **为什么关默认 feature、只开 rustls**：默认 feature 是 native-tls，
+# Linux 上要目标机有 OpenSSL 动态库、Windows CI 上要多一个外部依赖；
+# rustls 是纯 Rust，三个 CI job（web / rust / rust-windows）都只从源码编，没有环境差异。
+#
+# **代价照实说**：它大概是默认构建里最重的一条依赖（带一整套 TLS 栈）。
+# 换来的是「开发文件不当运行时数据库」这条铁律的最后一公里——以前
+# `download_runtime_file` 得探测仓库绝对路径（`crates/preset/assets/presets`）才跑得通，
+# 那不是产品行为，是脚手架。
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
 # **选它而不是 `toml` 是一条设计决定，不是口味**：预设层要编辑 `presets/*.toml`，

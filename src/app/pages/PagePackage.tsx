@@ -17,7 +17,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import s from './PagePackage.module.css'
 import { api } from '../../api'
-import type { ActivePreset, RemoteUpdateCheck, RuntimeCatalog } from '../../api/contract'
+import type {
+  ActivePreset,
+  DownloadOutcome,
+  DownloadTick,
+  PresetSource,
+  RemoteUpdateCheck,
+  RuntimeCatalog,
+} from '../../api/contract'
 
 /** 下载区现状（盘就是底账）+ 下载按钮的失败说明（第一圈浏览器里没有源，如实亮出来） */
 type WorldState = {
@@ -27,12 +34,53 @@ type WorldState = {
   active: ActivePreset | null
 }
 
+/**
+ * 把一次下载的水位说成一句话。
+ *
+ * **没有总长度就说收了多少字节**，不为了有百分比去编一个分母 —— 服务端不报长度是常事。
+ */
+function tickText(t: DownloadTick): string {
+  switch (t.stage) {
+    case 'connecting':
+      return `${t.fileName}：正在连接数据源`
+    case 'transferring':
+      return t.total !== null && t.total > 0
+        ? `${t.fileName}：已收 ${Math.round((t.received / t.total) * 100)}%（${t.received} / ${t.total} 字节）`
+        : `${t.fileName}：已收 ${t.received} 字节`
+    case 'done':
+      return `${t.fileName}：已落进下载区`
+    case 'failed':
+      return `${t.fileName}：没成${t.message !== undefined && t.message !== '' ? ` —— ${t.message}` : ''}`
+  }
+}
+
 export default function PagePackage() {
   const [world, setWorld] = useState<WorldState | null>(null)
   const [downloadErr, setDownloadErr] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   /* 远端目录检查结果——只点「检查更新」才查（那是显式动作，不进首屏） */
   const [remote, setRemote] = useState<RemoteUpdateCheck | null>(null)
+  /* 数据源**不在 catalog 里**（那是部署的事），所以是独立的一个读数，
+     读不出来要单独说出来，不能假装成"没配" */
+  const [source, setSource] = useState<PresetSource | null>(null)
+  const [sourceErr, setSourceErr] = useState<string | null>(null)
+  const [sourceDraft, setSourceDraft] = useState<string>('')
+  /* 下载水位：一次调用一路事件，界面据此说"在动"，而不是转一个没有内容的圈 */
+  const [tick, setTick] = useState<DownloadTick | null>(null)
+  /* 批量下载里没成的那几份 —— 成了的不占版面 */
+  const [failed, setFailed] = useState<DownloadOutcome[]>([])
+
+  const readSource = useCallback(async () => {
+    setSourceErr(null)
+    try {
+      const got = await api.getPresetSource()
+      setSource(got)
+      setSourceDraft(got?.baseUrl ?? '')
+    } catch (e) {
+      setSource(null)
+      setSourceErr((e as { message?: string }).message ?? '数据源读不出来')
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -49,11 +97,12 @@ export default function PagePackage() {
           ? { catalog, downloaded, stale, active }
           : null,
       )
+      if (alive) void readSource()
     })()
     return () => {
       alive = false
     }
-  }, [])
+  }, [readSource])
 
   const refreshWorld = useCallback(async () => {
     const [catalog, downloaded, stale, active] = await Promise.all([
@@ -74,8 +123,10 @@ export default function PagePackage() {
     if (world === null || world.catalog.files.length === 0 || downloading) return
     setDownloading(true)
     setDownloadErr(null)
+    setFailed([])
+    setTick(null)
     try {
-      await api.downloadCatalogFile(world.catalog.files[0].fileName)
+      await api.downloadCatalogFile(world.catalog.files[0].fileName, setTick)
       await refreshWorld()
     } catch (e) {
       setDownloadErr((e as { message?: string }).message ?? '下载没成，原因没说清')
@@ -108,15 +159,17 @@ export default function PagePackage() {
     }
   }, [refreshWorld])
 
-  /* 更新 = 对每一份过时文件重跑一遍下载管道：旧份自动归档，没有单独的更新代码路径 */
+  /* 更新 = 对每一份过时文件重跑一遍下载管道：旧份自动归档，没有单独的更新代码路径。
+     一批进去、**逐份给结局**（并发在 Rust 侧）：八份里两份字节对不上时，
+     页面说的是那两份因为什么没成，而不是一句抹平的"更新失败" */
   const tryUpdate = useCallback(async () => {
     if (world === null || world.stale.length === 0 || downloading) return
     setDownloading(true)
     setDownloadErr(null)
+    setTick(null)
     try {
-      for (const name of world.stale) {
-        await api.downloadCatalogFile(name)
-      }
+      const outcomes = await api.downloadCatalogFiles(world.stale, setTick)
+      setFailed(outcomes.filter((o) => !o.ok))
       await refreshWorld()
     } catch (e) {
       setDownloadErr((e as { message?: string }).message ?? '更新没成，原因没说清')
@@ -125,6 +178,16 @@ export default function PagePackage() {
       setDownloading(false)
     }
   }, [world, downloading, refreshWorld])
+
+  /* 换数据源：写完立刻生效（下一次下载就用新的）。不合法由后端拒绝，页面转述它的理由 */
+  const trySaveSource = useCallback(async () => {
+    setSourceErr(null)
+    try {
+      setSource(await api.setPresetSource(sourceDraft.trim()))
+    } catch (e) {
+      setSourceErr((e as { message?: string }).message ?? '这个地址没被接受')
+    }
+  }, [sourceDraft])
 
   /* 检查更新：对远端目录比较指纹。显式动作，不进首屏、不自动跑 */
   const checkRemote = useCallback(async () => {
@@ -167,6 +230,44 @@ export default function PagePackage() {
           </p>
         </div>
       </header>
+
+      <section className={s.section}>
+        <div className={s.secTitle}>数据源地址</div>
+        <div className={s.kv}>
+          <span className={s.key}>当前</span>
+          <span className={`${s.val} ${s.mono}`}>
+            {source === null ? '还没配置（下载与检查更新都会拒绝执行）' : source.baseUrl}
+            {source !== null && (
+              <span className={s.origin}>{source.fromUser ? '你填的' : '出厂默认'}</span>
+            )}
+          </span>
+        </div>
+        <p className={s.note}>
+          目录（catalog）只说一份文件在交付集合里的位置，**不说它在哪个服务器上**——
+          服务器是部署的事：官方源、Gitee、你自己放的 CDN 都行。下载地址 = 这里填的地址
+          + 目录记的相对位置，所以换源不用重发说明书。
+        </p>
+        <div className={s.acts}>
+          <input
+            className={s.sourceInput}
+            value={sourceDraft}
+            onChange={(e) => setSourceDraft(e.target.value)}
+            placeholder="https://…"
+            aria-label="数据源地址"
+          />
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnMain}`}
+            onClick={trySaveSource}
+            disabled={sourceDraft.trim() === ''}
+          >
+            保存数据源
+          </button>
+        </div>
+        {sourceErr !== null && (
+          <p className={`${s.note} ${s.staleNote}`}>数据源：{sourceErr}</p>
+        )}
+      </section>
 
       {world !== null && (
         <section className={s.section}>
@@ -266,6 +367,12 @@ export default function PagePackage() {
               应用远端目录
             </button>
           )}
+          {tick !== null && <p className={s.note}>{tickText(tick)}</p>}
+          {failed.map((o) => (
+            <p key={o.fileName} className={`${s.note} ${s.staleNote}`}>
+              {o.fileName}：{o.message}
+            </p>
+          ))}
           {downloadErr !== null && (
             <p className={`${s.note} ${s.staleNote}`}>下载没成：{downloadErr}</p>
           )}

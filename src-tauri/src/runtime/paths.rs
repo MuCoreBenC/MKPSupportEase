@@ -17,6 +17,10 @@ pub const MKP_DIR: &str = "mkp";
 /// 归档区的目录名。相对**内部根**。换版本时旧份进这里，不删（总纲十问 #9）
 pub const ARCHIVE_DIR: &str = "archive";
 
+/// 数据源设置的文件名。相对**内部根**，与使用中指针同一个目录：
+/// 两者都是"程序自己产生的持久状态"，储一处、写法一套（见 `state.rs` 的规则）
+pub const SOURCE_FILE: &str = "run/preset-source.json";
+
 /// 运行时说明书：`<appDataDir>/catalog.json`
 pub fn catalog_file(root: &Path) -> PathBuf {
     root.join(CATALOG_FILE)

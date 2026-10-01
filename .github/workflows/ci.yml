@@ -53,6 +53,13 @@ jobs:
       - name: 安装包产物扫描
         run: npm run check:bundle
 
+      # 判据 2（DATA-ARCHITECTURE.md §5 第 2 条）：启动零网络。
+      # 扫源码而不是产物：要看的是"程序起来那一刻动没动网络"，那是代码形状的问题，
+      # 产物里问不出来。三道闸——网络符号只许住在 runtime/net.rs、启动段零联网、
+      # 前端不许绕过 IPC 自己发 HTTP
+      - name: 启动零网络扫描
+        run: npm run check:zero-network
+
   rust:
     name: rust
     # macOS 而不是 ubuntu：Tauri 的 Rust 侧在 Linux 上要先装 libwebkit2gtk 等一串系统包，

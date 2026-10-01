@@ -59,7 +59,7 @@
 | 允许 | 说明 |
 | --- | --- |
 | 程序本体 + 前端产物 | 二进制与 vite 产物 |
-| **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA，云端地址在哪。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身 |
+| **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身。**它不带云端地址** —— 见 §1④ 的分工 |
 | 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放 |
 | 内置预设 | 随软件发布的成品内容（现 9 份，入库产物目录 `crates/preset/assets/presets`，判据锚定），在 catalog 里标"内置" |
 
@@ -81,7 +81,7 @@
 ├── archive/       更新后旧版本的归档（不删）
 ├── index/         索引
 ├── logs/          按天滚动日志
-└── run/           运行状态（偏移量等）
+└── run/           运行状态：`active-preset.json`（使用中指针）、`preset-source.json`（数据源地址）
 ```
 
 **User 根**（`Documents/SupportEase/`，用户自己要看要拷的）：
@@ -97,10 +97,27 @@ Documents/SupportEase/
 
 ### ④ 云端 —— 只干两件事
 
-1. **manifest**：有什么、什么版本、SHA 多少、下载地址在哪。
+1. **manifest**：有什么、什么版本、SHA 多少。
 2. **文件本体**：用户点了下载才给。
 
 它不解释业务、不算账、不做首屏、不认识没下载它的用户。
+
+#### 地址这件事由谁负责（2026-10-01 定的分工）
+
+**云端地址不写在 catalog 里。** `presets/` 是内容源，换 Gitee、换成自己的 CDN 是
+部署的事，不该为了换服务器重新发布一次说明书。分工是：
+
+```text
+catalog         说：有一份文件，它在交付集合里的相对位置是 mkp/A1-standard.toml
+run/preset-source.json  说：这台机器当前用哪个数据源（官方源 / Gitee / 自建 CDN）
+下载地址        = 数据源的 baseUrl + catalog 的相对位置
+```
+
+于是"换源"只改 `run/preset-source.json` 一处；`path` 是 catalog 的既有字段，
+schema 不为地址再长字段。地址可以有构建期注入的默认值（`MKPSE_PRESET_SOURCE`），
+**没有就如实答"还没配置"，不许猜一个 URL 出来假装能下**。
+
+程序可联网的代码只有一处（`runtime/net.rs`）：阻这件事由判据 2 的第①道闸盯着。
 
 ---
 
@@ -130,6 +147,7 @@ Documents/SupportEase/
 | BBS 切片配置 | `public/assets/bbs`（成品） | 随包，catalog 登记 | 不改原件 | 将来可更新 |
 | 图标 / 3mf 模型 | `public/assets` | 随包，catalog 登记 | 不改 | 大文件将来可按需下载，地址由 catalog 给 |
 | 偏移量 / 运行状态 | — | — | `run/`（程序替用户管） | — |
+| **数据源地址**（当前用哪个云端） | 用户填（界面里）或构建方注入默认值 | 可选的随包默认值（`MKPSE_PRESET_SOURCE`） | `run/preset-source.json`（程序写，用户可删=回到未配置） | 被寻址的一方，不拥有这份设置 |
 | 导出 / 报告 | — | — | `exports/` `reports/`（用户） | — |
 | 日志 / 归档 / 索引 | — | — | `logs/` `archive/` `index/`（程序） | — |
 
@@ -151,7 +169,11 @@ Documents/SupportEase/
 规矩先立在这里，实现顺序不拘（与 `write_discipline_scan` 同思路——能扫描的先扫描，能跑的再跑）：
 
 1. **安装包扫描**：构建后扫产物目录，出现 `presets/` 源 TOML、`cloud/presets.json`、`workbench`、`.snapshots`、`*.draft` 即失败。
-2. **启动零网络**：启动路径无网络调用。先源码扫描起步，后补运行时判据。
+2. **启动零网络**：启动路径无网络调用。**已落地 2026-10-01（源码扫描）**：
+   `npm run check:zero-network`，挂在 CI web job。三道闸——
+   ① 网络字节只许住在 `runtime/net.rs`；② 程序的 `.setup()` 段不许联网；
+   ③ `src/api/` 不许绕过 IPC 自己发 HTTP。干净过、种脏能抓（两方向实测）。
+   **它不是运行时判据**：静态扫描抓不到"A 调 B、B 最终联网"的间接调用，那条以后补。
 3. **下载区初始为空**：扩展现有 seed 测试——首启后 `mkp/` 零文件。（旧世界 seed 测试随 `client/` 退役；`runtime::release` 的 `mkp_dir_is_created_empty` 承担同一条）
 4. **首屏唯一数据源 = catalog**：客户端清单加载只认 catalog，代码路径扫描钉住。（2026-10-01 落地：九条读命令的 DTO 构建只接受 `runtime::Catalog`，判据 `dto_builders_read_the_catalog_and_nothing_else` 钉死）
 

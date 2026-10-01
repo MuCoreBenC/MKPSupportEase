@@ -20,8 +20,10 @@
 
 pub mod catalog;
 pub mod delivery;
+pub mod net;
 pub mod paths;
 pub mod release;
+pub mod source;
 pub mod state;
 pub mod update;
 

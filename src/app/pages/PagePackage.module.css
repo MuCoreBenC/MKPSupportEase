@@ -131,6 +131,19 @@
   font-size: var(--fs-label);
 }
 
+/* 数据源地址输入框：地址是一串长得多的 URL，宽度给足、用等宽字体好认 */
+.sourceInput {
+  width: 320px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-1, #fff);
+  color: var(--text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+}
+
 .note {
   margin: 6px 0 0;
   font-size: var(--fs-label);

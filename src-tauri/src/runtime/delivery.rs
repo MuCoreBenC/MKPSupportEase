@@ -149,6 +149,84 @@ pub fn deliver(
     Ok(target)
 }
 
+/* ---------- 一次多份（第二圈：并发） ---------- */
+
+/// 多份同时下载时走几条道。**固定上限而不是每份一条**：下载源是别人的服务器，
+/// 一次开几十个连接既没快多少，又很容易被当成滥用拦掉
+pub const CONCURRENCY: usize = 4;
+
+/// 多份下载里某一份的结局。**按份给结局**——一份失败不许拖累其它份，
+/// 也不许被抹成一句"下载失败"（界面要说出是哪份、因为什么）
+#[derive(Debug, Clone)]
+pub struct FileOutcome {
+    pub file_name: String,
+    pub ok: bool,
+    /// 失败原因。**成功了就是空的**——不塞一个"成功了"进去充数
+    pub message: String,
+}
+
+/// 一次取多份：**并发在这一层做，不丢给前端**。
+///
+/// 前端自己并发的话，"失败了几份、失败在哪儿"要由它逐条 patch 出来，那份汇总
+/// 既不完整也不一致（它的并发版本和 socket 版本还会打架）。这里发的每一份都走
+/// **同一个 [`deliver`]**，幂等且落点互不相同，所以并行是安全的。
+///
+/// `on_each` 在每一份有结局时立刻回调（顺序是完成顺序）；返回值则是**请求顺序**
+/// ——界面要一个稳定的行序，不要一个随网络抖动的顺序。
+pub fn deliver_all(
+    internal_root: &Path,
+    files: &[CatalogFile],
+    source: &(dyn Source + Sync),
+    on_each: &(dyn Fn(&FileOutcome) + Send + Sync),
+) -> Vec<FileOutcome> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::channel;
+
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let lanes = files.len().clamp(1, CONCURRENCY);
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = channel::<(usize, FileOutcome)>();
+
+    std::thread::scope(|scope| {
+        for _lane in 0..lanes {
+            let tx = tx.clone();
+            let next = &next;
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, Ordering::SeqCst);
+                let Some(file) = files.get(index) else {
+                    break;
+                };
+                let outcome = match deliver(internal_root, file, source) {
+                    Ok(target) => FileOutcome {
+                        file_name: target
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| file.file_name.clone()),
+                        ok: true,
+                        message: String::new(),
+                    },
+                    Err(e) => FileOutcome {
+                        file_name: file.file_name.clone(),
+                        ok: false,
+                        message: e.message,
+                    },
+                };
+                on_each(&outcome);
+                if tx.send((index, outcome)).is_err() {
+                    break;
+                }
+            });
+        }
+    });
+    drop(tx);
+
+    let mut done: Vec<(usize, FileOutcome)> = rx.into_iter().collect();
+    done.sort_by_key(|(index, _)| *index);
+    done.into_iter().map(|(_, outcome)| outcome).collect()
+}
+
 /// 已经下载到本地的文件名（catalog 登记的里面，盘上是 Current 的）。
 /// 不查缓存、不记账本——每次都问盘，下载完立刻看得见。
 pub fn downloaded_files(internal_root: &Path, catalog: &super::Catalog) -> Vec<String> {
@@ -418,6 +496,146 @@ mod tests {
             stale_files(root.path(), &new_catalog),
             vec!["A1-standard.toml".to_owned()]
         );
+    }
+
+    /* ---------- 批量（第二圈） ---------- */
+
+    /// 按 [`content_of`] 那条约定吐字节的源：批量用例里"全都成功"的那一档
+    struct HonestSource;
+    impl Source for HonestSource {
+        fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
+            Ok(content_of(file))
+        }
+    }
+
+    /// 测试里的唯一约定：一份文件的内容就是"<文件名> 的内容"。
+    /// 条目按它造 SHA，下面的源也按它吐字节——**两边同一条约定**，不要各写一套
+    fn content_of(file: &CatalogFile) -> Vec<u8> {
+        format!("{} 的内容", file.file_name).as_bytes().to_vec()
+    }
+
+    fn batch(names: &[&str]) -> Vec<CatalogFile> {
+        let files: Vec<CatalogFile> = names.iter().map(|n| entry(n, &[])).collect();
+        // size/sha 由内容算出来，所以先造壳再回填
+        files
+            .into_iter()
+            .map(|mut file| {
+                let bytes = content_of(&file);
+                file.sha256 = hex(&Sha256::digest(&bytes));
+                file.size = bytes.len() as u64;
+                file
+            })
+            .collect()
+    }
+
+    /// 挑一份给错的字节（**长度还一模一样**）——用来造"批量里某一份坏档"
+    struct PickySource<'a> {
+        bad_for: &'a str,
+    }
+    impl Source for PickySource<'_> {
+        fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
+            if file.file_name != self.bad_for {
+                return Ok(content_of(file));
+            }
+            // 长度对齐，只有内容不对：真正要靠 SHA 那道闸拦住的那种坏档
+            Ok(content_of(file).iter().map(|_| b'x').collect())
+        }
+    }
+
+    /// 让某一特别慢：用来证明"返回结果按请求顺序，而不是按快慢"
+    struct SlowSource {
+        slow_ms: u64,
+    }
+    impl Source for SlowSource {
+        fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
+            if !file.file_name.ends_with("0.toml") {
+                return Ok(content_of(file));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(self.slow_ms));
+            Ok(content_of(file))
+        }
+    }
+
+    fn setup_batch(names: &[&str]) -> (tempfile::TempDir, Vec<CatalogFile>) {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        (root, batch(names))
+    }
+
+    /// 五份一起下：**每份都在盘上**（途经同一个 `deliver`，幂等与校验照旧）
+    #[test]
+    fn batch_delivers_every_file() {
+        let (root, files) = setup_batch(&["0.toml", "1.toml", "2.toml", "3.toml", "4.toml"]);
+
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = {
+            let order = order.clone();
+            move |o: &FileOutcome| order.lock().expect("锁坏了").push(o.file_name.clone())
+        };
+
+        let outcomes = deliver_all(root.path(), &files, &HonestSource, &record);
+
+        assert_eq!(outcomes.len(), 5);
+        assert!(outcomes.iter().all(|o| o.ok), "全都该成功：{outcomes:?}");
+        for file in &files {
+            assert_eq!(
+                std::fs::read(root.path().join(&file.path)).unwrap(),
+                content_of(file),
+                "{} 落到盘上",
+                file.file_name
+            );
+        }
+        assert!(
+            outcomes.iter().all(|o| o.message.is_empty()),
+            "成功不带评语"
+        );
+        assert_eq!(order.lock().expect("锁坏了").len(), 5, "每一份都回调了一次");
+    }
+
+    /// 返回的是**请求顺序**：界面那张表的行序不该跟着网络抖动变
+    #[test]
+    fn batch_result_keeps_the_requested_order() {
+        let (root, files) = setup_batch(&["0.toml", "1.toml", "2.toml", "3.toml"]);
+
+        let outcomes = deliver_all(root.path(), &files, &SlowSource { slow_ms: 150 }, &|_| {});
+
+        let got: Vec<&str> = outcomes.iter().map(|o| o.file_name.as_str()).collect();
+        assert_eq!(got, vec!["0.toml", "1.toml", "2.toml", "3.toml"]);
+    }
+
+    /// 一份坏档不拖累别人：**其它三份照常落盘**，坏的那份单独带着原因回来
+    #[test]
+    fn batch_isolates_a_bad_file_from_the_others() {
+        let (root, files) = setup_batch(&["0.toml", "1.toml", "2.toml", "3.toml"]);
+
+        let outcomes = deliver_all(
+            root.path(),
+            &files,
+            &PickySource { bad_for: "2.toml" },
+            &|_| {},
+        );
+
+        let bad = outcomes.iter().find(|o| !o.ok).expect("该有一份失败");
+        assert_eq!(bad.file_name, "2.toml");
+        assert!(!bad.message.is_empty(), "失败要说原因");
+        assert_eq!(
+            outcomes.iter().filter(|o| o.ok).count(),
+            3,
+            "其余三份不受影响"
+        );
+        assert!(
+            !root.path().join("mkp/2.toml").exists(),
+            "坏字节不落盘这条对批量同样成立"
+        );
+        assert!(root.path().join("mkp/0.toml").exists());
+    }
+
+    /// 什么都没要 = 什么都不做，也不炸
+    #[test]
+    fn empty_batch_is_a_no_op() {
+        let (root, files) = setup_batch(&[]);
+        let outcomes = deliver_all(root.path(), &files, &HonestSource, &|_| {});
+        assert!(outcomes.is_empty());
     }
 
     // ---- 测试小工具 ----
