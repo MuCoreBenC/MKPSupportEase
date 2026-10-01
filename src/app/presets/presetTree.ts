@@ -74,6 +74,7 @@
 
 import type {
   ActivePreset,
+  BasedOn,
   FileKind,
   FileRef,
   FilesState,
@@ -438,6 +439,76 @@ export const MINE_DRAWER = {
 
 /** 「看正文」那颗按钮的说明（展开详情里的 title） */
 export const MINE_BODY_WHY = `读这一份的正文：它就在你自己的目录里，读它不需要校验（它本来就没有官方 SHA）。`
+
+/**
+ * 用户那份**基于官方哪一版**（第七层）。三档说的是**同一件事**：
+ * 它当初基于的那一版，和目录里现在这一版是不是同一份 ——
+ * **不判这份文件好不好**（用户自己那份从来不是坏文件）。
+ *
+ * `outdated` 就是「官方：v2，我的：基于 v1」那件事在界面上的落点。
+ */
+export const BASED_ON_TEXT: Record<BasedOn, string> = {
+  current: '基于当前版',
+  outdated: '基于旧版官方',
+  unknown: '来源说不清',
+}
+
+export const BASED_ON_WHY: Record<BasedOn, string> = {
+  current: '这份文件头里记着它是从目录里**现在**这一版官方拷出来改的（血统摘要与目录登记的一致）—— 官方没换过版',
+  outdated:
+    '官方已经换新版了，而这份还是从**旧版**官方派生出来的。**它照常能用、能改**，' +
+    '只是不会跟着官方更新 —— 它从来不是官方那一份（要不要把改动挪到新版上，是另一件事）',
+  unknown:
+    '说不清从哪一版改的：要么这份文件没有血统（手工拷的 / 别的程序写出来的），' +
+    '要么它记的来源已经不在目录里了（换源或下线）。**这不影响它是一份正常的用户预设**',
+}
+
+/** 展开详情里那一格的名字 */
+export const BASED_ON_KEY = '基于'
+
+/**
+ * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
+ * 与 `versionsText` / `releaseBatchText` 同一条规矩：一句话只有一个出处。
+ */
+export function basedOnCellText(row: {
+  basedOn?: BasedOn
+  basedOnSource?: string | null
+  basedOnOfficial?: string | null
+}): string {
+  /* 说得清来源的名字就说它（`A1 · 标准版`），说不清就退回血统里那串原文 */
+  const source = row.basedOnOfficial ?? row.basedOnSource ?? ''
+  switch (row.basedOn) {
+    case 'current':
+      return source === '' ? '目录里现在这一版官方' : `${source} · 官方当前版`
+    case 'outdated':
+      return source === '' ? '旧版官方（官方已换新版）' : `${source} · 官方已换新版`
+    default:
+      return source === ''
+        ? '没有血统（说不清从哪一版改的）'
+        : `${source}（目录里已经没有它了）`
+  }
+}
+
+/**
+ * 「应用」用户自己那份的说明。
+ *
+ * 与官方那份**同一个入口、同一条底账**（`run/active-preset.json`）——
+ * 「只读」是文件归属的属性，不是"能不能被使用"的属性（第七层作者定）。
+ * 区别只有闸不一样：官方那份要 SHA 与目录对得上；用户那份要落在 `presets-mine/` 那一格里。
+ */
+export const MINE_APPLY_WHY =
+  '应用：把这一份设成正在使用的配置（与官方那份同一条底账 run/active-preset.json）。' +
+  '改它不会影响官方那份；官方换版本也不会动你的这份'
+
+/**
+ * 用户那份**不能被应用**时的说明：认不出它是 MKP 预设。
+ *
+ * `.json` 那几份（bbs / orca 光看扩展名分不出）不是预设 —— 给一个点了必被拒的按钮，
+ * 比不给糟（与 NO_ASSET_WHY 同一条口径）。
+ */
+export const MINE_NOT_PRESET_WHY =
+  '这一份认不出来是 MKP 预设（切片器那两类都是 .json，光看扩展名分不出是 bbs 还是 orca）—— ' +
+  '能被使用的只有 TOML 预设'
 
 /** 归档抽屉里的那几句话 */
 export const ARCHIVE_DRAWER = {
@@ -1000,12 +1071,24 @@ export interface PresetLocalRow extends PresetRowBase {
    * 这一行**生效了没有**。两种类型判据不同（见 `LIVE_TEXT`）：
    *
    *   MKP     是唯一底账（使用中指针）里那一条 → 已应用 / 未应用
+   *           （**用户的与官方的共用这一条**：指针说 `origin` + 认 `path` / `fileName`）
    *   切片器   `getSlicerCopied().includes(assetId)`   → 已复制 / 未复制
    *
    * 原来这里是四档 `status`，但本地表实际只有「生效 / 没生效」两档，而那四档里的
    * `ready`（本地有）对切片器是句废话 —— 在本机不等于切片器看得见它。
    */
   live: boolean
+  /**
+   * **用户自己那份**基于官方哪一版（只有 `origin === 'mine'` 的行有它）。
+   *
+   * 它是"文件头血统 + 目录现况"比出来的一个事实，不是"这份文件好不好"——
+   * `outdated` 的那份照常能用能改，见 [`BASED_ON_WHY`]。
+   */
+  basedOn?: BasedOn
+  /** 血统里记的来源原文（`mkp/presets/A1-standard.toml`）。没有血统是 `null` */
+  basedOnSource?: string | null
+  /** 来源那份现在对应哪台机型的哪一版（人话，已按名字查好）。认不出是 `null` */
+  basedOnOfficial?: string | null
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1298,33 +1381,53 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
    */
   const mine = mineFiles
     .filter((f) => f.kind === null || matchesKind(kind, f.kind))
-    .map((f): PresetLocalRow => ({
-      /* rowKey 带上当前那一档机型：换机型时这一行要当成新的一行重画（焦点与菜单都跟着行走） */
-      rowKey: `mine:${machineId}:${f.path}`,
-      /* 没有 asset id，也没有别的身份 —— **路径就是它的身份**（用户随时可能改名，认路径最稳） */
-      pinKey: f.path,
-      fileName: f.fileName,
-      path: f.path,
-      /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
-      kind: f.kind,
-      machineId,
-      /* 机型这一层没有来源 —— 写「—」，不替他猜 */
-      machineText: DASH_,
-      /* 用户自己的文件不属于任何版本。表格那一列写「—」，不替他猜一个 */
-      versions: [],
-      /* **真值**：盘上那份的大小与改动时刻（用户线也盘当底账）—— 与切片器那一档同一档来源 */
-      sizeText: sizeTextOf(f.size),
-      modifiedText:
-        f.modifiedUnix === null ? undefined : new Date(f.modifiedUnix * 1000).toISOString(),
-      statFrom: 'file',
-      applied: false,
-      pinned: pinned.has(f.path),
-      scope: 'local',
-      origin: 'mine',
-      untagged: true,
-      /* 没有 asset id 就没法「应用 / 复制」（契约只认 asset id），所以永远是没生效那一档 */
-      live: false,
-    }))
+    .map((f): PresetLocalRow => {
+      /*
+       * 用户自己那份**也能被应用**（第七层）：只有认得出是 MKP 预设（`.toml`）的才行 ——
+       * `.json` 那几份（bbs / orca 分不出）不是预设，应用它们无从谈起。
+       * 「生效」认的是**唯一底账**里的那一条：`origin` 是用户线、而且路径就是这一条。
+       */
+      const canApply = f.kind === 'mkp_preset'
+      const live = canApply && active?.origin === 'mine' && active.path === f.path
+      /* 血统里的来源，现在对应哪台机型的哪一版（人话）。认不出就不写 */
+      const source =
+        f.basedOnMachineId === null || f.basedOnVersionId === null
+          ? null
+          : `${names.get(f.basedOnMachineId) ?? f.basedOnMachineId} · ${versionName(
+              f.basedOnMachineId,
+              f.basedOnVersionId,
+            )}`
+      return {
+        /* rowKey 带上当前那一档机型：换机型时这一行要当成新的一行重画（焦点与菜单都跟着行走） */
+        rowKey: `mine:${machineId}:${f.path}`,
+        /* 没有 asset id，也没有别的身份 —— **路径就是它的身份**（用户随时可能改名，认路径最稳） */
+        pinKey: f.path,
+        fileName: f.fileName,
+        path: f.path,
+        /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
+        kind: f.kind,
+        machineId,
+        /* 机型这一层没有来源 —— 写「—」，不替他猜 */
+        machineText: DASH_,
+        /* 用户自己的文件不属于任何版本。表格那一列写「—」，不替他猜一个 */
+        versions: [],
+        /* **真值**：盘上那份的大小与改动时刻（用户线也盘当底账）—— 与切片器那一档同一档来源 */
+        sizeText: sizeTextOf(f.size),
+        modifiedText:
+          f.modifiedUnix === null ? undefined : new Date(f.modifiedUnix * 1000).toISOString(),
+        statFrom: 'file',
+        applied: live,
+        pinned: pinned.has(f.path),
+        scope: 'local',
+        origin: 'mine',
+        untagged: true,
+        live,
+        /* 血统：它当初基于官方哪一版、那一版现在还在不在（第七层） */
+        basedOn: f.basedOn,
+        basedOnSource: f.basedOnLabel,
+        basedOnOfficial: source,
+      }
+    })
 
   /*
    * 目录里登记的交付预设：下载之后它们就躺在下载区（`mkp/`，盘就是底账），

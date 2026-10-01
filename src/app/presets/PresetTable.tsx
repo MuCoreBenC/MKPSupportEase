@@ -75,6 +75,10 @@ import {
   ARCHIVE_KEY,
   ARCHIVE_WHY,
   archiveOpenText,
+  BASED_ON_KEY,
+  BASED_ON_TEXT,
+  BASED_ON_WHY,
+  basedOnCellText,
   CLOUD_STATE_TEXT,
   CLOUD_STATE_WHY,
   DASH_,
@@ -83,8 +87,10 @@ import {
   FILE_TIME_WHY,
   KIND_NAME,
   KIND_UNKNOWN,
+  MINE_APPLY_WHY,
   MINE_BODY_WHY,
   MINE_DRAWER,
+  MINE_NOT_PRESET_WHY,
   DOWNLOAD_WHY,
   EDIT_TEXT,
   EDIT_WHY,
@@ -325,6 +331,15 @@ export default function PresetTable({
                           未标机型
                         </span>
                       )}
+                      {/*
+                       * 我那份是**从旧版官方**改出来的（官方已经换新版）—— 一眼看得见。
+                       * 它不是"坏文件"：照常能用能改，展开详情里那一格说得更全。
+                       */}
+                      {row.scope === 'local' && row.basedOn === 'outdated' && (
+                        <span className={s.basedOld} title={BASED_ON_WHY.outdated}>
+                          {BASED_ON_TEXT.outdated}
+                        </span>
+                      )}
                     </span>
                     {/* 第二行等宽小字：给人核对磁盘位置的，不是标题 */}
                     <span className={s.path} title={row.path}>
@@ -383,8 +398,29 @@ export default function PresetTable({
                         >
                           {needsRepair ? '重新下载' : '更新'}
                         </button>
+                      ) : row.origin === 'mine' ? (
+                        /*
+                         * **用户自己那份也能被应用**（第七层）：与官方那份同一个入口、
+                         * 同一条底账 —— "只读"是文件归属的属性，不是"能不能被使用"的属性。
+                         * 认不出是 MKP 预设的那几份（`.json`）不给按钮，只说明为什么。
+                         */
+                        row.kind === 'mkp_preset' ? (
+                          <button
+                            type="button"
+                            className={s.actBtn}
+                            disabled={busy}
+                            title={MINE_APPLY_WHY}
+                            onClick={() => onLive(row)}
+                          >
+                            {ACTION_TEXT.mkp}
+                          </button>
+                        ) : (
+                          <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
+                            {DASH_}
+                          </span>
+                        )
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
-                        /* 用户自己的文件没有 asset id，契约那两个写只认 asset id */
+                        /* 官方副本没有 asset id 时也应用不了（契约那两个写只认 asset id） */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
                           {DASH_}
                         </span>
@@ -464,6 +500,23 @@ export default function PresetTable({
                         <dd className={s.factVal} title={originChip(row).title}>
                           {originChip(row).text}
                         </dd>
+
+                        {/*
+                         * 我那份是从哪一份官方、哪一版改出来的（血统写在文件头，跟着文件走）。
+                         * 「官方已换新版」这一档不是错误 —— 它只说"你这份是旧版派生"，
+                         * 那份文件照常能用能改（要不要把改动挪到新版上，是另一件事）。
+                         */}
+                        {row.origin === 'mine' && (
+                          <>
+                            <dt className={s.factKey}>{BASED_ON_KEY}</dt>
+                            <dd
+                              className={s.factVal}
+                              title={BASED_ON_WHY[row.basedOn ?? 'unknown']}
+                            >
+                              {basedOnCellText(row)}
+                            </dd>
+                          </>
+                        )}
 
                         {/*
                          * 状态：交付预设那一档说的是**本机那一份的三态**（未下载 / 已下载 /

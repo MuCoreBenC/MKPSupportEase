@@ -20,7 +20,7 @@ use crate::runtime;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserPresetFileDto {
-    /// 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文时把它交回来
+    /// 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文 / 应用时把它交回来
     pub path: String,
     pub file_name: String,
     pub size: u64,
@@ -29,24 +29,56 @@ pub struct UserPresetFileDto {
     /// 认得出是哪一类就给；**认不出是 `null`**（见 [`runtime::mine::kind_of`]）。
     /// 界面上认不出的那一档**在任何类型档下都列** —— 不藏，也不替用户猜
     pub kind: Option<String>,
+    /// 它当初基于的官方那一版，和目录里**现在**这一版是不是同一份：
+    /// `current` / `outdated` / `unknown`（见 [`runtime::mine::BasedOn`]）。
+    ///
+    /// **它不判"这份文件好不好"**：用户自己那份从来不是坏文件；
+    /// `outdated` 只说"官方换版了，你这份是从旧版派生的"（第七层要说的那件事）。
+    pub based_on: String,
+    /// 血统里记的来源（`mkp/presets/A1-standard.toml`）。没有血统是 `null`
+    pub based_on_label: Option<String>,
+    /// 建副本那一刻来源文件头的版本号（给人看的，形如 `2026-08-19 01:38:13`）
+    pub based_on_release: Option<String>,
+    /// 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜）
+    pub based_on_machine_id: Option<String>,
+    pub based_on_version_id: Option<String>,
 }
 
 /// 用户自己有哪些文件（`presets-mine/` 里躺着什么）。
 ///
 /// **盘就是底账**：扫盘，不记账本 —— 这一份的主人就是用户，他随时可能在 Finder 里改它。
-/// 没有"官方身份"可说：云端没有它，所以没有 SHA、不属于任何版本、也不参与套餐。
+/// 它没有"官方身份"（云端没有它），但**可能带着血统**（`# based_on*` 三行，写在文件里）：
+/// 从哪一份官方、哪一版拷出来改的 —— 于是"官方换版了没有"换台电脑也认得出。
 #[tauri::command]
 pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileDto>, AppError> {
     traced("getUserPresetFiles", |_| {
         let root = crate::fsx::paths::user_root(&app)?;
+        let internal = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&internal)?;
         Ok(runtime::mine::mine_files(&root)
             .into_iter()
-            .map(|f| UserPresetFileDto {
-                path: f.path,
-                file_name: f.file_name,
-                size: f.size,
-                modified_unix: f.modified_unix,
-                kind: f.kind.map(str::to_owned),
+            .map(|f| {
+                let source = runtime::mine::source_of(&catalog, f.lineage.as_ref());
+                UserPresetFileDto {
+                    based_on: match runtime::mine::based_on(&catalog, f.lineage.as_ref()) {
+                        runtime::mine::BasedOn::Current => "current",
+                        runtime::mine::BasedOn::Outdated => "outdated",
+                        runtime::mine::BasedOn::Unknown => "unknown",
+                    }
+                    .to_owned(),
+                    based_on_label: f.lineage.as_ref().and_then(|l| l.based_on.clone()),
+                    based_on_release: f
+                        .lineage
+                        .as_ref()
+                        .and_then(|l| l.based_on_release_time.clone()),
+                    based_on_machine_id: source.map(|s| s.machine_id.clone()),
+                    based_on_version_id: source.map(|s| s.version_id.clone()),
+                    path: f.path,
+                    file_name: f.file_name,
+                    size: f.size,
+                    modified_unix: f.modified_unix,
+                    kind: f.kind.map(str::to_owned),
+                }
             })
             .collect())
     })
@@ -178,8 +210,24 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
         let draft = runtime::state::load_draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，没得存"))?;
 
+        /*
+         * 血统要写进那份用户文件里：来源 = 目录里那一份的**相对路径**
+         * （`mkp/presets/A1-standard.toml`，与工作台建副本的"角色目录 + 文件名"同一形状）。
+         *
+         * 目录里已经没有它了（编辑期间换源 / 下线）就只写文件名本身 —— 血统还认得出"从哪一份"，
+         * 只是少了"在哪"。**不为这个拦住保存**：用户改了半天的东西不该被一个地址问题卡住。
+         */
+        let based_on = catalog_lookup(&root, &draft.source_file_name)
+            .map(|f| f.path)
+            .unwrap_or_else(|| draft.source_file_name.clone());
+
         /* 另存本体在 `runtime::mine`（纯函数、有判据盯着"官方原件一动不动"） */
-        let done = runtime::mine::commit_draft(&user_root, &draft.source_file_name, &draft.text)?;
+        let done = runtime::mine::commit_draft(
+            &user_root,
+            &draft.source_file_name,
+            &based_on,
+            &draft.text,
+        )?;
         /* 存完就该丢掉草稿：它会盖住下一次「改这份」的"接着上次改" */
         runtime::state::clear_draft(&root)?;
 
@@ -190,6 +238,19 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             replaced: done.replaced,
         })
     })
+}
+
+/// 目录里按文件名找一份交付文件（用来给血统写上"来源的落点"）。
+/// 读不到目录就 `None` —— 那不该拦住一次保存。
+fn catalog_lookup(
+    root: &std::path::Path,
+    file_name: &str,
+) -> Option<runtime::catalog::CatalogFile> {
+    runtime::load_released_catalog(root)
+        .ok()?
+        .files
+        .into_iter()
+        .find(|f| f.file_name == file_name)
 }
 
 /// 读用户自己那份的正文。

@@ -631,6 +631,70 @@ await page.waitForTimeout(200)
 await page.getByRole('option').nth(1).click()
 await page.waitForTimeout(350)
 
+/* ---------- 5g. 我那份能被使用，而且说得清基于哪一版官方（第七层） ---------- */
+/*
+ * 守四件事：
+ *   ① 我那份**有「应用」**（不再是没有动作的「—」）：两条线都能成为使用中的那一份
+ *      —— "只读"是文件归属的属性，不是"能不能被使用"的属性；
+ *   ② 点它 → 状态条说得出「已应用 我那份」，而且**多一枚「我的文件」**
+ *      （用户得看得出现在跑的不是官方那份）；
+ *   ③ 「基于旧版官方」那一枚画得出来（假后端给的那份正好是从旧版改的）；
+ *   ④ 展开详情那一格说得清：来源 + 官方已换新版。
+ *
+ * 真机那条更硬的判据在 Rust 侧：`state::save_active_mine` / `active_target`（两条线的落点）
+ * 与 `mine::based_on`（旧的 / 当前的 / 说不清）。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+const myActions = await actions()
+const myEntry = myActions.find((r) => r.name.includes('我的 A1 涂胶.toml'))
+console.log(`\n[我的那份] ${myEntry?.name ?? '(没这一行)'} → ${myEntry?.action ?? '(没有)'}`)
+if (myEntry === undefined) {
+  problems.push('本地表里没有我自己的那一份')
+} else if (!myEntry.action.includes('应用')) {
+  problems.push(`我那份该有「应用」（两条线都能成为使用中的那一份），实测「${myEntry.action}」`)
+}
+
+const myTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶.toml' })
+  .first()
+const rowText = (await myTr.innerText()).replace(/\s+/g, ' ').trim()
+console.log(`[我的那份] 行内容：${rowText}`)
+if (!rowText.includes('基于旧版官方')) {
+  problems.push('从旧版改出来的那一份，名字旁边该有「基于旧版官方」那一枚')
+}
+
+await myTr.click()
+await page.waitForTimeout(300)
+const myFacts = await factOf()
+console.log(`[我的那份] 展开详情「基于」= ${myFacts['基于'] ?? '(没有这一格)'}`)
+if (!(myFacts['基于'] ?? '').includes('官方已换新版')) {
+  problems.push(`旧版派生那一份，「基于」那格该说「官方已换新版」，实测「${myFacts['基于']}」`)
+}
+if (!(myFacts['基于'] ?? '').includes('快拆版6月以前')) {
+  problems.push('「基于」那格要说得出来源是哪台机型的哪一版（A1 · 快拆版6月以前）')
+}
+
+await myTr.getByRole('button', { name: '应用' }).click()
+await page.waitForTimeout(600)
+const strip = await page.evaluate(() =>
+  (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
+)
+console.log(`[我的那份] 应用之后（前 200 字）：${strip}`)
+if (!strip.includes('已应用')) problems.push('应用我那份之后，状态条该说「已应用」')
+if (!strip.includes('我的 A1 涂胶.toml')) problems.push('状态条要说得出用的是我那一份')
+if (!strip.includes('我的文件')) problems.push('用的是我那份时，状态条上该有「我的文件」那一枚')
+const afterApply = (await actions()).find((r) => r.name.includes('我的 A1 涂胶.toml'))
+console.log(`[我的那份] 应用之后操作列：${afterApply?.action ?? '(没有)'}`)
+if (!(afterApply?.action ?? '').includes('已应用')) {
+  problems.push(`应用之后那一行该变成灰字「已应用」，实测「${afterApply?.action}」`)
+}
+await page.screenshot({ path: `${shotDir}/presets-mine-apply.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -691,5 +755,6 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对，控制台没有 error',
+  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
+    '我那份能被应用并说得出「基于旧版官方」，控制台没有 error',
 )

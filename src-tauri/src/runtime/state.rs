@@ -12,12 +12,27 @@
 //!
 //! # 第一个住进来的状态：使用中指针
 //!
-//! [`ActivePreset`] 记"当前使用的是下载区（`mkp/`）里的哪一份"。全局唯一——
+//! [`ActivePreset`] 记"当前使用的是哪一份"。全局唯一——
 //! 产品规则定的「同一时刻只能有一份处于已应用状态」，在构造上成立：
 //! 状态就一个文件，写新的自然盖旧的（原子替换，没有中间态）。
 //!
-//! 指针里带着**应用时刻的 SHA**：`mkp/` 是只读原件区，这份 SHA 就是"文件没被动过"
-//! 的凭证——盘上的字节漂了，界面能看出「文件已经不是当时应用的那份」。
+//! 指针里带着**应用时刻的 SHA**：这份 SHA 就是"文件没被动过"的凭证 ——
+//! 盘上的字节漂了，界面能看出「文件已经不是当时应用的那份」。
+//!
+//! # 两条线都能进来（第七层，2026-10-02 作者定）
+//!
+//! ```text
+//! 官方线  云端 → mkp/…        只读，只有"云端换版本"能替换它   ┐
+//!                                                          ├─ 都能成为使用中
+//! 用户线  另存 → presets-mine/ 用户自己可改，不属任何官方版本  ┘
+//! ```
+//!
+//! **"只读"是文件归属的属性，不是"能不能被使用"的属性**（作者原话）。
+//! 所以指针多了 [`ActiveOrigin`]：它只说"这一份住在哪条线上"，**不是两套 Preset 模型** ——
+//! 两条线的落点解析各按自己的根来（[`active_target`]），其余（唯一性、指纹、撤销）一模一样。
+//!
+//! **两条线上"字节漂了"的意思不一样**：官方线是"它不是我们交付的那一版了"（可疑，见
+//! [`super::delivery::FileTrust`]）；用户线是"用户自己又改了它"（正常 —— 那份是他的）。
 
 use std::path::{Path, PathBuf};
 
@@ -26,6 +41,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
+use crate::fsx::paths::MINE_DIR;
 
 use super::catalog::hex;
 use super::catalog::CatalogFile;
@@ -35,15 +51,37 @@ pub const ACTIVE_SCHEMA: u32 = 1;
 
 const ACTIVE_FILE: &str = "run/active-preset.json";
 
+/// 使用中那一份**来自哪条线**。
+///
+/// 缺省是 [`ActiveOrigin::Official`] —— 第七层之前写下的指针文件里没有这个字段，
+/// 读出来就是它（那些文件记的确实都是官方交付文件，**语义没变，所以不升 schema**）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActiveOrigin {
+    /// 官方线：目录（catalog）登记的交付文件（`mkp/…`）
+    #[default]
+    Official,
+    /// 用户线：用户自己那份（`presets-mine/…`）
+    Mine,
+}
+
 /// 使用中指针。全局唯一，`None` = 还没用任何一份（合法状态，不是错误）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivePreset {
     pub active_schema: u32,
-    /// `mkp/` 里的文件名。用 catalog 的 `file_name` 做键，不存路径——路径是目录的职责
+    /// 这一份住在哪条线上。**旧档没有这个字段 ⇒ 官方线**（见 [`ActiveOrigin`]）
+    #[serde(default)]
+    pub origin: ActiveOrigin,
+    /// 文件名。官方线：catalog 的 `file_name` 就是键（**不存路径——路径是目录的职责**）；
+    /// 用户线：它只是给人看的名字，落点看 `path`
     pub file_name: String,
-    /// 应用时刻的指纹。将来拿它发现"文件已经不是当时那份"
+    /// 应用时刻的指纹。拿它发现"文件已经不是当时那份"
     pub sha256: String,
+    /// **用户线**的落点：相对**用户根**的路径（`presets-mine/我的/另存.toml`）。
+    /// 官方线不写它 —— 落点由目录给。用户目录里可以自己分文件夹，所以这里必须存路径
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// 状态文件的落点：`<appDataDir>/run/active-preset.json`
@@ -71,13 +109,41 @@ pub fn load_active(root: &Path) -> Result<Option<ActivePreset>, AppError> {
     Ok(Some(state))
 }
 
-/// 记下"用这一份"。`file` 来自 catalog（名字与 SHA 都是目录登记的），整份替换旧的。
+/// 记下"用这一份官方的"。`file` 来自 catalog（名字与 SHA 都是目录登记的），整份替换旧的。
 pub fn save_active(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
-    let state = ActivePreset {
-        active_schema: ACTIVE_SCHEMA,
-        file_name: file.file_name.clone(),
-        sha256: file.sha256.clone(),
-    };
+    write_active(
+        root,
+        ActivePreset {
+            active_schema: ACTIVE_SCHEMA,
+            origin: ActiveOrigin::Official,
+            file_name: file.file_name.clone(),
+            sha256: file.sha256.clone(),
+            path: None,
+        },
+    )
+}
+
+/// 记下"用我自己那一份"（`presets-mine/…`）。`rel` 是**相对用户根**的路径（[`super::mine`]
+/// 那一套口径），`sha256` 是应用那一刻它的字节摘要（用户后来自己改它就是"漂了"，
+/// 见模块头：那条对用户线是正常的，不是可疑）。
+pub fn save_active_mine(root: &Path, rel: &str, sha256: &str) -> Result<ActivePreset, AppError> {
+    let file_name = Path::new(rel)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| rel.to_owned());
+    write_active(
+        root,
+        ActivePreset {
+            active_schema: ACTIVE_SCHEMA,
+            origin: ActiveOrigin::Mine,
+            file_name,
+            sha256: sha256.to_owned(),
+            path: Some(rel.to_owned()),
+        },
+    )
+}
+
+fn write_active(root: &Path, state: ActivePreset) -> Result<ActivePreset, AppError> {
     let json = serde_json::to_vec_pretty(&state)
         .map_err(|e| AppError::internal("使用中状态序列化失败").with_detail(e.to_string()))?;
     atomic_write(&active_file(root), &json)?;
@@ -93,13 +159,51 @@ pub fn clear_active(root: &Path) -> Result<(), AppError> {
     }
 }
 
+/// 使用中那一份**现在在盘上的哪儿**（两条线各按自己的根解析），
+/// 以及它是否还找得到（`None` = 找不到了）。
+///
+/// - 官方线：落点由**目录**给（`catalog.files` 里同名的那个 `path`）——
+///   指针不存路径，所以目录换了布局、这份下线了，这里自然就找不到了；
+/// - 用户线：落点在用户根下（`presets-mine/…`），过一道防穿越闸。
+pub fn active_target(
+    internal_root: &Path,
+    user_root: &Path,
+    catalog: &super::Catalog,
+    state: &ActivePreset,
+) -> Option<PathBuf> {
+    match state.origin {
+        ActiveOrigin::Official => {
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == state.file_name)?;
+            crate::fsx::paths::resolve_in(internal_root, &file.path).ok()
+        }
+        ActiveOrigin::Mine => {
+            let rel = state.path.as_deref()?;
+            if !rel.starts_with(&format!("{MINE_DIR}/")) {
+                return None; // 指针里记的不是用户根那一格：按"找不到"处理，不去猜
+            }
+            crate::fsx::paths::resolve_in(user_root, rel).ok()
+        }
+    }
+}
+
 /// 应用时刻的指纹 → 当下的盘。`Ok(true)` = 文件还是当时那份。
-/// 状态不在 → `Ok(false)`；盘上的文件没了也算"漂了"（指针指向的东西不存在了）。
-pub fn active_matches_disk(root: &Path, state: &ActivePreset) -> bool {
-    let bytes = std::fs::read(root.join("mkp").join(&state.file_name));
-    match bytes {
-        Ok(bytes) => hex(&Sha256::digest(&bytes)) == state.sha256,
-        Err(_) => false,
+///
+/// 找不到那一份（目录里没有了 / 用户把它删了）也算"漂了" —— 指针指向的东西不存在了。
+pub fn active_matches_disk(
+    internal_root: &Path,
+    user_root: &Path,
+    catalog: &super::Catalog,
+    state: &ActivePreset,
+) -> bool {
+    match active_target(internal_root, user_root, catalog, state) {
+        None => false,
+        Some(target) => match std::fs::read(&target) {
+            Ok(bytes) => hex(&Sha256::digest(&bytes)) == state.sha256,
+            Err(_) => false,
+        },
     }
 }
 
@@ -211,11 +315,21 @@ mod tests {
         CatalogFile {
             kind: "mkp_preset".to_owned(),
             file_name: name.to_owned(),
-            path: format!("mkp/{name}"),
+            /* 真实布局：交付根相对路径 = 客户端落点（都是 `mkp/presets/…`） */
+            path: format!("mkp/presets/{name}"),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
             sha256: hex(&Sha256::digest(content)),
             size: content.len() as u64,
+        }
+    }
+
+    fn catalog_with(files: Vec<CatalogFile>) -> crate::runtime::Catalog {
+        crate::runtime::Catalog {
+            catalog_schema: crate::runtime::catalog::CATALOG_SCHEMA,
+            revision: "test".to_owned(),
+            files,
+            ..crate::runtime::Catalog::default()
         }
     }
 
@@ -348,19 +462,131 @@ mod tests {
     #[test]
     fn drift_is_detected_when_disk_bytes_change() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("mkp")).unwrap();
+        let user = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("mkp/presets")).unwrap();
         let file = entry("A1-standard.toml", "当时的内容".as_bytes());
         save_active(d.path(), &file).unwrap();
         crate::fsx::atomic::atomic_write(
-            &d.path().join("mkp/A1-standard.toml"),
+            &d.path().join("mkp/presets/A1-standard.toml"),
             "被动过".as_bytes(),
         )
         .unwrap();
 
+        let catalog = catalog_with(vec![file]);
         let state = load_active(d.path()).unwrap().unwrap();
         assert!(
-            !active_matches_disk(d.path(), &state),
+            !active_matches_disk(d.path(), user.path(), &catalog, &state),
             "盘上的字节漂了要看得见"
         );
+    }
+
+    /* ---------- 两条线都能成为使用中（第七层） ---------- */
+
+    /// **落点由目录给**：官方线按 catalog 的 `path` 解析（`mkp/presets/…` 真布局），
+    /// 不按文件名拼路径 —— 一份字节与目录一致的官方文件，在真布局下 intact 必须是 true
+    #[test]
+    fn the_official_pointer_resolves_through_the_catalog() {
+        let d = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("mkp/presets")).unwrap();
+        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        crate::fsx::atomic::atomic_write(
+            &d.path().join("mkp/presets/A1-standard.toml"),
+            "官方当前版本".as_bytes(),
+        )
+        .unwrap();
+        save_active(d.path(), &file).unwrap();
+        let state = load_active(d.path()).unwrap().unwrap();
+
+        assert_eq!(state.origin, ActiveOrigin::Official);
+        assert!(state.path.is_none(), "官方线不存路径：那是目录的职责");
+        let catalog = catalog_with(vec![file]);
+        assert!(
+            active_matches_disk(d.path(), user.path(), &catalog, &state),
+            "按目录的 path 找到的那一份就是应用时那份"
+        );
+        assert_eq!(
+            active_target(d.path(), user.path(), &catalog, &state).as_deref(),
+            Some(d.path().join("mkp/presets/A1-standard.toml").as_path())
+        );
+
+        /* 目录里已经没有它了（下线 / 换源）：找不到 ⇒ 漂了。不猜一个路径出来 */
+        assert!(!active_matches_disk(
+            d.path(),
+            user.path(),
+            &catalog_with(Vec::new()),
+            &state
+        ));
+    }
+
+    /// 旧档（第七层之前写下的、没有 `origin` 字段）读出来就是官方线 —— **语义没变，不升 schema**
+    #[test]
+    fn an_older_pointer_file_still_means_the_official_line() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = format!(
+            "{{ \"activeSchema\": {ACTIVE_SCHEMA}, \"fileName\": \"A1-standard.toml\", \"sha256\": \"y\" }}"
+        );
+        crate::fsx::atomic::atomic_write(&active_file(d.path()), json.as_bytes()).unwrap();
+
+        let state = load_active(d.path()).unwrap().unwrap();
+        assert_eq!(state.origin, ActiveOrigin::Official);
+        assert_eq!(state.path, None);
+    }
+
+    /// **用户自己那份也能是使用中的那一份**：落点在用户根（可以带子目录），
+    /// 指纹按它的字节算；它后来被用户改了 → "漂了"（对用户线这是正常事，不是可疑）
+    #[test]
+    fn the_users_own_copy_can_be_the_active_one() {
+        let d = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(user.path().join("presets-mine/我的")).unwrap();
+        let target = user.path().join("presets-mine/我的/另存.toml");
+        crate::fsx::atomic::atomic_write(&target, "涂胶 = 1.4".as_bytes()).unwrap();
+        let sha = hex(&Sha256::digest("涂胶 = 1.4".as_bytes()));
+
+        let saved = save_active_mine(d.path(), "presets-mine/我的/另存.toml", &sha).unwrap();
+        assert_eq!(saved.origin, ActiveOrigin::Mine);
+        assert_eq!(saved.file_name, "另存.toml", "文件名只是给人看的");
+        assert_eq!(saved.path.as_deref(), Some("presets-mine/我的/另存.toml"));
+
+        let catalog = catalog_with(Vec::new());
+        let loaded = load_active(d.path()).unwrap().unwrap();
+        assert!(
+            active_matches_disk(d.path(), user.path(), &catalog, &loaded),
+            "用户线的落点在用户根下，与目录无关"
+        );
+
+        /* 用户自己又改了它：指针还是那一份，但字节已经不是当时那份 */
+        crate::fsx::atomic::atomic_write(&target, "涂胶 = 1.5".as_bytes()).unwrap();
+        assert!(!active_matches_disk(
+            d.path(),
+            user.path(),
+            &catalog,
+            &loaded
+        ));
+    }
+
+    /// 指针里记的路径不是用户根那一格 ⇒ 按"找不到"处理（不去猜、不去别处找）
+    #[test]
+    fn a_pointer_pointing_outside_the_mine_dir_is_not_resolved() {
+        let d = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let mut stray = save_active_mine(d.path(), "presets-mine/x.toml", "abc").unwrap();
+        stray.path = Some("../secret.toml".to_owned());
+
+        assert!(active_target(d.path(), user.path(), &catalog_with(Vec::new()), &stray).is_none());
+    }
+
+    /// 全局唯一对两条线同样成立：先应用官方的，再改成自己那份，指针里只剩后者
+    #[test]
+    fn applying_one_line_replaces_the_other() {
+        let d = tempfile::tempdir().unwrap();
+        save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        save_active_mine(d.path(), "presets-mine/我的/另存.toml", "sha").unwrap();
+
+        let state = load_active(d.path()).unwrap().expect("该有一份");
+        assert_eq!(state.origin, ActiveOrigin::Mine);
+        assert_eq!(state.file_name, "另存.toml");
     }
 }

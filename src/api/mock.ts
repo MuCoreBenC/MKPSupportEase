@@ -95,18 +95,30 @@ let mockActive: ActivePreset | null = null
  */
 const mockMine: UserPresetFile[] = [
   {
+    /* 带血统、而且**基于旧版官方**（官方已经换到新版）：界面上要有「基于旧版官方」那一枚 */
     path: 'presets-mine/我的 A1 涂胶.toml',
     fileName: '我的 A1 涂胶.toml',
     size: 2048,
     modifiedUnix: 1780000000,
     kind: 'mkp_preset',
+    basedOn: 'outdated',
+    basedOnLabel: 'mkp/presets/A1-fast.toml',
+    basedOnRelease: '2026-05-29 04:26:12',
+    basedOnMachineId: 'A1',
+    basedOnVersionId: 'FAST',
   },
   {
+    /* 没有血统（手工拷的 / 别的程序写出来的）—— 照实说不出新旧，这是合法状态 */
     path: 'presets-mine/Process_0.2mm.json',
     fileName: 'Process_0.2mm.json',
     size: 1024,
     modifiedUnix: 1780003600,
     kind: null,
+    basedOn: 'unknown',
+    basedOnLabel: null,
+    basedOnRelease: null,
+    basedOnMachineId: null,
+    basedOnVersionId: null,
   },
 ]
 /** 正文库：只有**这份会话里另存出来的**才有（真机上每一份都能读）。键 = 相对用户根的路径 */
@@ -230,20 +242,30 @@ export const mockApi: MkpApi = {
     if (mockDraft === null) throw new Error('现在没有正在改的那一份，没得存')
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-mine/${fileName}`
-    const size = mockDraft.text.length
+    /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */
+    const label = `mkp/presets/${mockDraft.sourceFileName}`
+    const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${mockDraft.text}`
+    const size = text.length
     const replaced = mockMine.some((f) => f.path === path)
-    if (replaced) {
-      mockMine[mockMine.findIndex((f) => f.path === path)] = {
-        path,
-        fileName,
-        size,
-        modifiedUnix: nowSec(),
-        kind: 'mkp_preset',
-      }
-    } else {
-      mockMine.push({ path, fileName, size, modifiedUnix: nowSec(), kind: 'mkp_preset' })
+    const entry: UserPresetFile = {
+      path,
+      fileName,
+      size,
+      modifiedUnix: nowSec(),
+      kind: 'mkp_preset',
+      /* 刚存出来的这份就是基于**当前**目录那一版（演示里那份恰好对得上目录） */
+      basedOn: 'current',
+      basedOnLabel: label,
+      basedOnRelease: null,
+      basedOnMachineId: 'A1',
+      basedOnVersionId: 'STANDARD',
     }
-    mockMineText.set(path, mockDraft.text)
+    if (replaced) {
+      mockMine[mockMine.findIndex((f) => f.path === path)] = entry
+    } else {
+      mockMine.push(entry)
+    }
+    mockMineText.set(path, text)
     mockDraft = null
     return { path, fileName, size, replaced }
   },
@@ -424,14 +446,38 @@ export const mockApi: MkpApi = {
     throw new NotImplementedError('readArchivedText：浏览器里没有归档区，先用真机跑一次更新')
   },
 
-  /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原。
-     没有文件落地，所以 apply 只对已"模拟下载"的文件开——这里没有，恒拒，如实 */
+  /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原 */
   async getActivePreset() {
     return mockActive
   },
 
-  async applyActivePreset(fileName) {
-    throw new NotImplementedError(`applyActivePreset(${fileName})：浏览器里没有下载区，先用真机下载一份`)
+  /*
+   * 两条线一个入口，浏览器里**两条线的处境不一样**，照实分开：
+   *
+   *   用户线（`presets-mine/…`）  假后端有一份**内存里的用户目录**（上面那两份演示），
+   *                             所以这一档能真的走一遍：记指针、界面立刻变「已应用」
+   *   官方线（`mkp/…`）           浏览器里没有下载区、也没有那份字节，**校验无从谈起** ——
+   *                             与 downloadCatalogFile 同一条口径：如实拒，不假装成功
+   */
+  async applyActivePreset(fileName, origin, path) {
+    if (origin !== 'mine') {
+      throw new NotImplementedError(
+        `applyActivePreset(${fileName})：浏览器里没有下载区，那份字节不在，先用真机下载一份`,
+      )
+    }
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`用户目录里没有 ${path ?? '(没给路径)'}`)
+    mockActive = {
+      origin: 'mine',
+      fileName: hit.fileName,
+      path: hit.path,
+      /* 指纹是应用那一刻的字节摘要；浏览器里没有真字节，用路径占位（形状不编） */
+      sha256: `mock:${hit.path}`,
+      machineId: hit.basedOnMachineId ?? '',
+      versionId: hit.basedOnVersionId ?? '',
+      intact: true,
+    }
+    return mockActive
   },
 
   async clearActivePreset() {

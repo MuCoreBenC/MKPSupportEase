@@ -176,6 +176,26 @@
   color: var(--text-3);
 }
 
+/*
+ * 「我的文件」那一小枚：正在使用的是用户自己那份（不是官方交付那份）。
+ *
+ * 与表里「我的」来源 chip 同一层意思，但状态条独立成条 —— 它要说清"现在跑的这份
+ * 不跟着官方更新"，所以必须在状态条上单独看得见。
+ */
+.appliedMine {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 /* 「定位」：清掉机型筛选，把正在生效的那一行滚到眼前 */
 .locateBtn {
   flex-shrink: 0;

@@ -17,16 +17,32 @@
 //! 这一份是**给用户自己看、自己拷、自己留的**（见 `fsx::paths` 的模块注释：内部根不放
 //! Documents 是因为 iCloud 会把文件驱逐成占位 stub，那是程序管理的数据不能待的地方）。
 //!
-//! # 这里只有读
+//! # 用户那份与官方的关系：**血统写在文件里**
 //!
-//! 「临时编辑 → 保存 → 用户文件」是**下一层**的事：今天的 `presets-mine/` 里只有
-//! 用户手动放进去的东西，所以真机上多半是空的 —— **空是合法状态，不是错误**。
-//! 这一层只回答"用户自己有哪些文件、是哪一类、正文是什么"。
+//! 它从哪一份官方、哪一版拷出来的（`# based_on*` 三行）随文件走，见 [`super::lineage`]。
+//! 于是"官方换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
+//! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
+//!
+//! # 读在上面，写只在一处
+//!
+//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写只有 [`commit_draft`] 一处**
+//! （另存成用户那份，第 5 层）。"在应用内继续编辑用户自己那份"还没做（登记在案）——
+//! 那会新增一条**写用户根**的路径，要单独一层。今天真机上 `presets-mine/` 多半是空的 ——
+//! **空是合法状态，不是错误**。
 
 use std::path::Path;
 
 use crate::error::AppError;
 use crate::fsx::paths::MINE_DIR;
+
+use super::catalog::Catalog;
+use super::lineage::{self, Lineage};
+
+/// 读血统时最多看文件头这么多字节。
+///
+/// 三行血统住在**文件头注释块**里（头几行），所以够用；而用户目录是**用户自己的地盘**，
+/// 他可能往里扔一个几百 MB 的文件 —— 为了读三行注释把整份读进内存不是这一层该干的事。
+pub const LINEAGE_READ_LIMIT: u64 = 8 * 1024;
 
 /// 用户自己的一份文件。**盘就是底账**（与下载区、归档区同一套规矩）：扫盘得到，不记账本 ——
 /// 账本一定会和盘漂移，而这一份的主人就是用户，他随时可能在 Finder 里动它。
@@ -41,6 +57,90 @@ pub struct MineFile {
     pub modified_unix: Option<u64>,
     /// 认得出是哪一类就给（见 [`kind_of`]）；**认不出是 `None`**，不猜
     pub kind: Option<&'static str>,
+    /// 它从哪一份官方、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
+    /// （手工拷的、或别的程序写出来的）—— **不是错误**
+    pub lineage: Option<Lineage>,
+}
+
+/// 这份用户文件**基于的官方版本**现在怎么样了。
+///
+/// 三档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是不是同一份** ——
+/// 不回答"这份用户文件好不好"（它是用户自己的文件，从来不是"坏文件"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BasedOn {
+    /// 基于目录里**当前**那一版（官方没换版）
+    Current,
+    /// 基于官方的**旧版**：官方已经换新版了。**这份用户文件照常能用、能改** ——
+    /// 它只是"从旧版派生"的
+    Outdated,
+    /// 说不清：没有血统，或血统指的那一份已经不在目录里（换源 / 下线 / 改过名）
+    Unknown,
+}
+
+/// 读一份文件的头注释（最多 [`LINEAGE_READ_LIMIT`] 字节）拿血统。
+///
+/// 读不出来（不是文本、没权限、文件太大被截断而三行不在前面）⇒ `None`：
+/// 这一层不为此报错 —— 血统是**附加信息**，缺了不影响这份文件被认成用户的预设。
+pub fn lineage_of_file(path: &Path) -> Option<Lineage> {
+    let bytes = read_head(path, LINEAGE_READ_LIMIT)?;
+    lineage::parse_lineage_from_content(&String::from_utf8_lossy(&bytes))
+}
+
+/// 只读前 `limit` 字节（不把整个文件读进内存）
+fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.take(limit).read_to_end(&mut buf).ok()?;
+    Some(buf)
+}
+
+/// **这份用户文件是从哪一份官方派生的、那一版现在还在不在**。
+///
+/// 血统里存的是 `based_on`（角色目录 + 文件名，形如 `mkp/presets/A1-standard.toml`）
+/// 与 `based_on_sha256`（那时候官方那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
+///
+/// - 摘一样 ⇒ [`BasedOn::Current`]（官方没换版）
+/// - 摘不一样 ⇒ [`BasedOn::Outdated`]（官方换版了）—— **这就是第七层要说的那件事**
+/// - 目录里已经没有它 ⇒ [`BasedOn::Unknown`]（说不出新旧）
+///
+/// 只看血统里记的那一份，**不看用户文件自己的字节**：用户改过的东西必然与官方不同，
+/// 拿它去比只会得出"永远不一样"这种废话。
+pub fn based_on(catalog: &Catalog, lineage: Option<&Lineage>) -> BasedOn {
+    let Some(lineage) = lineage else {
+        return BasedOn::Unknown;
+    };
+    let Some(source) = lineage.based_on.as_deref() else {
+        return BasedOn::Unknown;
+    };
+    let known = catalog
+        .files
+        .iter()
+        .find(|f| f.path == source)
+        .or_else(|| catalog.files.iter().find(|f| f.file_name == source));
+    let Some(file) = known else {
+        return BasedOn::Unknown;
+    };
+    match lineage.based_on_sha256.as_deref() {
+        Some(sha) if sha == file.sha256 => BasedOn::Current,
+        Some(_) => BasedOn::Outdated,
+        /* 有来源没摘要：比不了 ⇒ 说不清新旧（缺的那项就是"不知道"） */
+        None => BasedOn::Unknown,
+    }
+}
+
+/// 血统指的那一份官方，现在**对应哪台机型的哪个版本**（界面要说人话用）。
+/// 说不清就 `None` —— 不猜。
+pub fn source_of<'a>(
+    catalog: &'a Catalog,
+    lineage: Option<&Lineage>,
+) -> Option<&'a super::catalog::CatalogFile> {
+    let source = lineage?.based_on.as_deref()?;
+    catalog
+        .files
+        .iter()
+        .find(|f| f.path == source)
+        .or_else(|| catalog.files.iter().find(|f| f.file_name == source))
 }
 
 /// 按扩展名认类别。**只认 `.toml`（MKP 预设）**。
@@ -88,6 +188,7 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
             out.push(MineFile {
                 path: rel,
                 kind: kind_of(&file_name),
+                lineage: lineage_of_file(&path),
                 file_name,
                 size: meta.len(),
                 modified_unix: meta
@@ -136,9 +237,15 @@ pub struct Committed {
 /// 这一刀全层的核心不变式就在这个函数里：它**只写用户根**——
 /// 官方原件（`mkp/`）与下载区**一概不碰**（只有云端换版本能替换官方原件）。
 /// 再存一次就是**覆盖它自己**：用户改的是"我那份"，不该越存越多。
+///
+/// 写下去的是**副本的形状**：`text` + 头注释块里三行血统（[`super::lineage::make_copy`]）——
+/// `based_on` = 来源那份在**交付根里的相对路径**（`mkp/presets/A1-standard.toml`，
+/// 与工作台建副本的"角色目录 + 文件名"同一形状）。于是这份文件拷到哪台电脑上都说得清
+/// 自己从哪来、基于哪一版（第七层：「官方换版了、你这份还是基于旧版」就靠它判）。
 pub fn commit_draft(
     user_root: &Path,
     source_file_name: &str,
+    based_on: &str,
     text: &str,
 ) -> Result<Committed, AppError> {
     let file_name = edited_name(source_file_name);
@@ -146,11 +253,12 @@ pub fn commit_draft(
     /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     let replaced = target.exists();
-    crate::fsx::atomic::atomic_write(&target, text.as_bytes())?;
+    let body = super::lineage::make_copy(text, based_on);
+    crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
     Ok(Committed {
         path: rel,
         file_name,
-        size: text.len() as u64,
+        size: body.len() as u64,
         replaced,
     })
 }
@@ -179,6 +287,28 @@ mod tests {
     /// 造一份用户文件。写盘走仓库唯一那个出口（`clippy.toml` 禁 `std::fs::write`）
     fn write(root: &Path, rel: &str, text: &str) {
         crate::fsx::atomic::atomic_write(&root.join(rel), text.as_bytes()).unwrap();
+    }
+
+    /// 造一份目录登记（SHA/大小都对得上），用来试「基于的官方那一版现在是什么样」
+    fn entry_bytes(name: &str, content: &str) -> super::super::catalog::CatalogFile {
+        super::super::catalog::CatalogFile {
+            kind: "mkp_preset".to_owned(),
+            file_name: name.to_owned(),
+            path: format!("mkp/presets/{name}"),
+            machine_id: "A1".to_owned(),
+            version_id: "STANDARD".to_owned(),
+            sha256: lineage::sha256_hex(content),
+            size: content.len() as u64,
+        }
+    }
+
+    fn catalog_with(files: Vec<super::super::catalog::CatalogFile>) -> Catalog {
+        Catalog {
+            catalog_schema: super::super::catalog::CATALOG_SCHEMA,
+            revision: "test".to_owned(),
+            files,
+            ..Catalog::default()
+        }
     }
 
     /// 一份都没有 = 空表，不是错误（今天真机上就是这个状态：产生用户文件的是下一层）
@@ -242,6 +372,8 @@ mod tests {
 
     /// **这一层的核心不变式**：另存只写用户根 —— 官方原件（`mkp/`）字节不变、
     /// 下载区里不会多出文件（临时文件不住那儿）。再存一次是覆盖它自己。
+    ///
+    /// 写下去的是**副本的形状**：正文 + 头注释里三行血统（剪掉三行必须与正文逐字节相同）。
     #[test]
     fn commit_writes_the_edited_copy_and_leaves_the_official_alone() {
         let user = tempfile::tempdir().unwrap();
@@ -257,14 +389,18 @@ mod tests {
             .unwrap()
             .count();
 
-        let done = commit_draft(user.path(), "A1-fast.toml", "涂胶宽度 = 1.4").unwrap();
+        let label = "mkp/presets/A1-fast.toml";
+        let done = commit_draft(user.path(), "A1-fast.toml", label, "涂胶宽度 = 1.4").unwrap();
         assert_eq!(done.path, "presets-mine/A1-fast（已修改）.toml");
         assert!(!done.replaced, "第一次另存没有盖掉谁");
+        let saved = std::fs::read_to_string(user.path().join(&done.path)).unwrap();
         assert_eq!(
-            std::fs::read(user.path().join(&done.path)).unwrap(),
-            "涂胶宽度 = 1.4".as_bytes(),
-            "用户那份里是改过的正文"
+            crate::runtime::lineage::strip_lineage_for_compare(&saved),
+            "涂胶宽度 = 1.4",
+            "剪掉血统三行就是用户改过的正文"
         );
+        let got = crate::runtime::lineage::parse_lineage_from_content(&saved).expect("该带上血统");
+        assert_eq!(got.based_on.as_deref(), Some(label), "说得出是从哪一份拷的");
 
         assert_eq!(
             std::fs::read(official.path().join("mkp/presets/A1-fast.toml")).unwrap(),
@@ -279,28 +415,123 @@ mod tests {
             "下载区里不会多出东西：临时文件不住 mkp/"
         );
 
-        /* 再存一次：还是同一个名字，盖掉它自己 */
-        let again = commit_draft(user.path(), "A1-fast.toml", "涂胶宽度 = 1.5").unwrap();
+        /* 再存一次：还是同一个名字，盖掉它自己（血统也还是三行，不叠加） */
+        let again = commit_draft(user.path(), "A1-fast.toml", label, "涂胶宽度 = 1.5").unwrap();
         assert!(again.replaced, "第二次是覆盖");
         assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+        let saved = std::fs::read_to_string(user.path().join(&again.path)).unwrap();
         assert_eq!(
-            std::fs::read(user.path().join(&again.path)).unwrap(),
-            "涂胶宽度 = 1.5".as_bytes()
+            crate::runtime::lineage::strip_lineage_for_compare(&saved),
+            "涂胶宽度 = 1.5"
         );
+        assert_eq!(saved.matches("# based_on:").count(), 1, "血统不叠加");
     }
 
-    /// 另存出来的那份，接着就能被用户线列出来、也读得回来（一条链的收尾连上了）
+    /// 另存出来的那份，接着就能被用户线列出来、血统也读得回来（一条链的收尾连上了）
     #[test]
     fn the_committed_copy_shows_up_in_mine_files() {
         let user = tempfile::tempdir().unwrap();
-        let done = commit_draft(user.path(), "我的 A1 涂胶.toml", "涂胶宽度 = 1.3").unwrap();
+        let label = "mkp/presets/A1-standard.toml";
+        let done = commit_draft(user.path(), "我的 A1 涂胶.toml", label, "涂胶宽度 = 1.3").unwrap();
 
         let listed = mine_files(user.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].path, done.path);
         assert_eq!(listed[0].kind, Some("mkp_preset"), ".toml 认得出");
-        assert_eq!(listed[0].size, "涂胶宽度 = 1.3".len() as u64);
+        assert_eq!(
+            listed[0]
+                .lineage
+                .as_ref()
+                .and_then(|l| l.based_on.as_deref()),
+            Some(label),
+            "列出来的时候就把血统读出来了"
+        );
         assert!(check_mine_prefix(&done.path).is_ok(), "落点在那一格里");
+    }
+
+    /* ---------- 基于官方哪一版（第七层：官方换版了没有） ---------- */
+
+    /// 目录里登记着来源那一份，摘要一样 ⇒ 基于当前版；官方换了版 ⇒ 旧版
+    #[test]
+    fn the_official_update_shows_up_as_based_on_an_old_version() {
+        let v1 = entry_bytes("A1-standard.toml", "官方第一版");
+        let mut v2 = entry_bytes("A1-standard.toml", "官方第二版");
+        let based_on_v1 = Lineage {
+            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
+            based_on_release_time: None,
+            based_on_sha256: Some(lineage::sha256_hex("官方第一版")),
+        };
+
+        /* 目录里还是 v1：基于当前版 */
+        assert_eq!(
+            based_on(&catalog_with(vec![v1.clone()]), Some(&based_on_v1)),
+            BasedOn::Current
+        );
+
+        /* 官方换到 v2：同一份用户文件变成「基于旧版」—— 而它不是坏文件 */
+        v2.path = v1.path.clone();
+        assert_eq!(
+            based_on(&catalog_with(vec![v2.clone()]), Some(&based_on_v1)),
+            BasedOn::Outdated,
+            "官方换版了，用户那份还是基于旧版"
+        );
+        assert_eq!(
+            source_of(&catalog_with(vec![v2]), Some(&based_on_v1)).map(|f| f.machine_id.as_str()),
+            Some("A1"),
+            "界面要说得出它是哪台机型哪一版改出来的"
+        );
+    }
+
+    /// 说不清那几档：没有血统 / 血统里没摘要 / 来源已经不在目录里（换源、下线）
+    #[test]
+    fn unknown_when_the_source_cannot_be_resolved() {
+        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "官方")]);
+        assert_eq!(based_on(&catalog, None), BasedOn::Unknown, "没有血统");
+
+        let no_sha = Lineage {
+            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
+            based_on_release_time: None,
+            based_on_sha256: None,
+        };
+        assert_eq!(
+            based_on(&catalog, Some(&no_sha)),
+            BasedOn::Unknown,
+            "记了来源没记摘要 —— 比不了就是比不了"
+        );
+
+        let gone = Lineage {
+            based_on: Some("mkp/presets/A1-gone.toml".to_owned()),
+            based_on_release_time: None,
+            based_on_sha256: Some(lineage::sha256_hex("官方")),
+        };
+        assert_eq!(
+            based_on(&catalog, Some(&gone)),
+            BasedOn::Unknown,
+            "来源不在目录里（换源或下线）"
+        );
+        assert!(source_of(&catalog, Some(&gone)).is_none());
+    }
+
+    /// 读血统只看文件头那一小段：一个几百 MB 的文件不许为了让界面读三行注释就整份读进来
+    #[test]
+    fn lineage_is_read_from_the_head_only() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("big.toml");
+        let mut text = String::from("# based_on: mkp/presets/A1-standard.toml\n");
+        text.push_str(&"x".repeat((LINEAGE_READ_LIMIT as usize) * 2));
+        crate::fsx::atomic::atomic_write(&path, text.as_bytes()).unwrap();
+
+        assert!(
+            lineage_of_file(&path).is_some(),
+            "三行在文件头，头 8 KB 里就读得到"
+        );
+    }
+
+    /// 不是文本 / 读不出来 ⇒ 没有血统（**不是错误**：血统是附加信息）
+    #[test]
+    fn an_unreadable_head_is_just_no_lineage() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(lineage_of_file(&root.path().join("根本没有这个文件")).is_none());
     }
 
     /// 读正文只认用户自己那一格：别的地方（`exports/`、`../`）一概不碰

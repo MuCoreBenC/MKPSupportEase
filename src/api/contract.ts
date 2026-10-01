@@ -366,8 +366,20 @@ export interface PresetFileInfo {
  * 没有「用户自己标的适用机型」这种字段 —— 今天没有任何地方能让用户去标它，
  * 留一个永远空的字段就是在编形状（需要它的那一步再加）。
  */
+/**
+ * 用户自己那份**基于的官方那一版**现在怎么样了（第七层）。
+ *
+ * 三档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是不是同一份** ——
+ * 不回答"这份用户文件好不好"（用户自己那份从来不是坏文件）。
+ *
+ * 判定用的是文件头血统里记的 `based_on_sha256`（建副本那一刻来源全文的摘要），
+ * **不拿用户文件自己的字节去比**：用户改过的东西必然与官方不同，那样只会得出
+ * "永远不一样"这种废话。
+ */
+export type BasedOn = 'current' | 'outdated' | 'unknown'
+
 export interface UserPresetFile {
-  /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文时把它交回来 */
+  /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
   path: string
   fileName: string
   size: number
@@ -380,6 +392,15 @@ export interface UserPresetFile {
    * 是 bbs 还是 orca，所以照实认不出。界面上认不出的那一档**在任何类型档下都列**。
    */
   kind: FileKind | null
+  /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
+  basedOn: BasedOn
+  /** 血统里记的来源（`mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
+  basedOnLabel: string | null
+  /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */
+  basedOnRelease: string | null
+  /** 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜） */
+  basedOnMachineId: string | null
+  basedOnVersionId: string | null
 }
 
 /**
@@ -736,13 +757,31 @@ export interface RuntimeCatalog {
 }
 
 /**
+ * 使用中那一份**住在哪条线上**（第七层起）。
+ *
+ * ```text
+ * official  官方线：目录（catalog）登记的交付文件（`mkp/…`）—— 只读，只有云端换版本能替换它
+ * mine      用户线：用户自己那份（`presets-mine/…`）—— 用户可改，不属任何官方版本
+ * ```
+ *
+ * **"只读"是文件归属的属性，不是"能不能被使用"的属性** —— 两条线都能成为使用中的那一份。
+ */
+export type ActiveOrigin = 'official' | 'mine'
+
+/**
  * 使用中指针（新数据世界的第一个用户状态，全局唯一）。
- * `intact` 是"盘上那份还是应用时刻的那份"——`mkp/` 是只读区，正常恒 true；
- * false 说明字节漂了（被手动动过 / 文件没了），界面要照实说。
+ *
+ * `intact` 是"盘上那份还是应用时刻的那份"。**两条线上它的意思不一样**：
+ * 官方线正常恒 true（`mkp/` 是只读区）；用户线在用户自己又改了那份时是 false ——
+ * 那是正常事（那份是他的），不是"这份配置坏了"。
  */
 export interface ActivePreset {
+  origin: ActiveOrigin
   fileName: string
+  /** 用户线的落点（相对用户根）；官方线是 `null`（落点由目录给） */
+  path: string | null
   sha256: string
+  /** 认不出是哪台机型哪一版时是空串（用户那份没有血统、或目录里已经没有来源那份） */
   machineId: string
   versionId: string
   intact: boolean
@@ -833,7 +872,10 @@ export interface MkpApi {
    * **用户自己的预设文件**（用户线，`~/Documents/SupportEase/presets-mine/`）。
    *
    * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
-   * 一份都没有 = 空数组，**不是错误**（今天"产生用户文件"的动作用户还做不了：那是下一层）。
+   * 一份都没有 = 空数组，**不是错误**。
+   *
+   * 每一份都带上**血统**（如果它带着 `# based_on*` 三行）与它对应的判定
+   * （[`BasedOn`]）—— 那是"官方换版了、你这份还是基于旧版"这件事的判据。
    */
   getUserPresetFiles(): Promise<UserPresetFile[]>
 
@@ -860,7 +902,11 @@ export interface MkpApi {
   /**
    * **另存成用户自己的文件**：`presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
    *
-   * 不碰官方原件、不碰下载区、**不碰使用中指针**（生效是另一条线）。
+   * 写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
+   * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
+   * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）。
+   *
+   * 不碰官方原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
    * 再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）。
    */
   commitPresetDraft(): Promise<CommittedDraft>
@@ -982,10 +1028,23 @@ export interface MkpApi {
   getActivePreset(): Promise<ActivePreset | null>
 
   /**
-   * 「使用这一份」：把下载区里某份登记过的文件记成使用中。
-   * 文件没下载 / 盘上字节与目录对不上 → reject，不会应用半份。
+   * 「使用这一份」。**两条线共用这一个入口**（第七层）：官方交付文件与用户自己那份
+   * 都是真的 Preset —— "只读"是文件归属的属性，不是"能不能被使用"的属性。
+   *
+   * ```text
+   * official  目录里有这一份 + 盘上字节与目录登记的当前版本逐字节一致
+   *           （没下载 / 被改过 / 是旧版本 —— 都 reject，不会应用半份）
+   * mine      落点必须在 presets-mine/ 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
+   * ```
+   *
+   * `origin` 缺省是 `official`（老调用点不用改）；`path` 只有用户线要给
+   * （用户目录里可以自己分文件夹，所以认的是路径，不是文件名）。
    */
-  applyActivePreset(fileName: string): Promise<ActivePreset>
+    applyActivePreset(
+      fileName: string,
+      origin?: ActiveOrigin,
+      path?: string,
+    ): Promise<ActivePreset>
 
   /**
    * 撤销使用。幂等：本来就没在用也不报错。

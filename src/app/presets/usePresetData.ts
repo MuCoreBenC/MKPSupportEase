@@ -57,6 +57,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type {
+  ActiveOrigin,
   ActivePreset,
   ArchivedFile,
   CommittedDraft,
@@ -154,13 +155,16 @@ export interface PresetData {
    */
   pickMachine: (machineId: string) => void
   /**
-   * 把目录里登记的某一份交付预设设为**当前使用的那一条**。
+   * 把某一份设为**当前使用的那一条**。**两条线共用这一个入口**（第七层）：
    *
-   * 走新世界的应用命令（`api.applyActivePreset(fileName)`，Rust 侧校验 SHA 后写
+   *   官方交付文件  `apply(fileName)`
+   *   用户自己那份  `apply(fileName, 'mine', path)`（用户目录里可以分文件夹，所以认路径）
+   *
+   * 走新世界的应用命令（`api.applyActivePreset`，Rust 侧按各自的闸校验后写
    * `run/active-preset.json`）**然后重读底账** —— 界面看到的永远是底账答的，
    * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    */
-  apply: (fileName: string) => Promise<void>
+  apply: (fileName: string, origin?: ActiveOrigin, path?: string) => Promise<void>
   /** 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上 */
   copy: (assetId: string) => Promise<void>
   /**
@@ -419,9 +423,12 @@ export function usePresetData(): PresetData {
    * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
    * 就是从这里冒上去的）。
    */
-  const apply = useCallback(async (fileName: string) => {
-    setActive(await api.applyActivePreset(fileName))
-  }, [])
+  const apply = useCallback(
+    async (fileName: string, origin: ActiveOrigin = 'official', path?: string) => {
+      setActive(await api.applyActivePreset(fileName, origin, path))
+    },
+    [],
+  )
 
   const copy = useCallback(async (assetId: string) => {
     await api.copyToSlicer(assetId)
@@ -600,6 +607,13 @@ export interface PresetPage {
   appliedMachineText: string
   /** 已应用那个文件的文件名（官方行查树、release 行查发布清单）。都查不到退回 ref */
   appliedFileName: string
+  /**
+   * 正在使用的这一份**是用户自己的那份**（不是官方交付的）。
+   *
+   * 状态条据此多写一小句说明 —— 两条线都能成为使用中的那一份（第七层），
+   * 用户得看得出"现在跑的是我改的那一份"。
+   */
+  appliedIsMine: boolean
 
   query: string
   setQuery: (next: string) => void
@@ -772,6 +786,7 @@ export function usePresetPage(data: PresetData): PresetPage {
     applied: data.active,
     appliedMachineText: appliedMachine?.display ?? data.active?.machineId ?? '',
     appliedFileName,
+    appliedIsMine: data.active?.origin === 'mine',
     query,
     setQuery,
     searching: query.trim() !== '',

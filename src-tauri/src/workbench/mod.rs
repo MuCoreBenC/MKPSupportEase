@@ -33,6 +33,10 @@ pub mod paths;
 pub use crate::presetdata as presets;
 pub mod store;
 
+/// 两端一致性判据：客户端那份「血统三行」与这里那份必须逐字节一样（**只在测试里编**）
+#[cfg(test)]
+mod lineage_parity;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 

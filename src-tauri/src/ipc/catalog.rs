@@ -471,34 +471,69 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
 
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */
 
-/// 给界面的使用中状态：指针 + 从目录反查出来的机型/版本 + 文件是否还是当时那份
+/// 给界面的使用中状态：指针 + 认得出的机型/版本 + 文件是否还是当时那份
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivePresetDto {
+    /// 这一份住在哪条线上（`official` / `mine`）—— 官方线与用户线**都能成为使用中**
+    pub origin: runtime::state::ActiveOrigin,
     pub file_name: String,
+    /// 用户线的落点（相对用户根）；官方线是 `null`（落点由目录给）
+    pub path: Option<String>,
     pub sha256: String,
-    /// 目录里已经没有这份时是空串（目录更新了、状态还在——过渡期的诚实表达）
+    /// 认不出是哪台机型的哪一版时是空串（用户自己那份没有血统、或目录里已经没有来源那份）
     pub machine_id: String,
     pub version_id: String,
-    /// 盘上的文件还是不是应用时刻的那份（`mkp/` 是只读区，正常恒 true）
+    /// 盘上的文件还是不是应用时刻的那份。
+    ///
+    /// 两条线上它的意思不一样：官方线正常恒 true（`mkp/` 是只读区）；用户线**用户自己
+    /// 又改了那份**时是 false —— 那是正常事（那份是他的），不是"这份配置坏了"。
     pub intact: bool,
 }
 
 fn active_dto(
-    root: &Path,
+    internal_root: &Path,
+    user_root: &Path,
     catalog: &runtime::Catalog,
     state: runtime::state::ActivePreset,
 ) -> ActivePresetDto {
-    let listed = catalog
-        .files
-        .iter()
-        .find(|f| f.file_name == state.file_name);
+    use runtime::state::ActiveOrigin;
+    let (machine_id, version_id) = match state.origin {
+        ActiveOrigin::Official => {
+            let listed = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == state.file_name);
+            (
+                listed.map(|f| f.machine_id.clone()).unwrap_or_default(),
+                listed.map(|f| f.version_id.clone()).unwrap_or_default(),
+            )
+        }
+        ActiveOrigin::Mine => {
+            /*
+             * 用户那份**自己说了**它从哪台机型的哪一版派生（血统三行写在文件头），
+             * 这里只把那个来源翻成机型 / 版本。认不出来就留空 —— 不猜一个。
+             */
+            let lineage = state
+                .path
+                .as_deref()
+                .and_then(|rel| crate::fsx::paths::resolve_in(user_root, rel).ok())
+                .and_then(|path| runtime::mine::lineage_of_file(&path));
+            let source = runtime::mine::source_of(catalog, lineage.as_ref());
+            (
+                source.map(|f| f.machine_id.clone()).unwrap_or_default(),
+                source.map(|f| f.version_id.clone()).unwrap_or_default(),
+            )
+        }
+    };
     ActivePresetDto {
-        machine_id: listed.map(|f| f.machine_id.clone()).unwrap_or_default(),
-        version_id: listed.map(|f| f.version_id.clone()).unwrap_or_default(),
-        intact: runtime::state::active_matches_disk(root, &state),
+        origin: state.origin,
+        path: state.path.clone(),
+        intact: runtime::state::active_matches_disk(internal_root, user_root, catalog, &state),
         file_name: state.file_name,
         sha256: state.sha256,
+        machine_id,
+        version_id,
     }
 }
 
@@ -507,44 +542,85 @@ fn active_dto(
 pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>, AppError> {
     traced("getActivePreset", |_| {
         let root = internal_root(&app)?;
+        let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
         match runtime::state::load_active(&root)? {
             None => Ok(None),
-            Some(state) => Ok(Some(active_dto(&root, &catalog, state))),
+            Some(state) => Ok(Some(active_dto(&root, &user, &catalog, state))),
         }
     })
 }
 
-/// 「使用这一份」：把目录里登记的某份下载文件记成使用中。全局唯一——
-/// 产品规则定死了同一时刻只能有一份处于已应用状态，构造上就是"一个文件"。
+/// 「使用这一份」。**两条线共用这一个入口**（作者 2026-10-02 定的第七层）：
+/// 官方交付文件与用户自己那份都是真的 Preset，**"只读"是文件归属的属性，
+/// 不是"能不能被使用"的属性** —— 所以这里只有"按来源定位 + 各自的可信度判定"，
+/// 没有两套 Preset 模型、也没有第二个写指针的口。
+///
+/// 全局唯一：产品规则定死了同一时刻只能有一份处于已应用状态，构造上就是"一个文件"。
+///
+/// 两条线各自的**入口闸**（都在盘上真的读一遍，不靠界面拦）：
+///
+/// ```text
+/// official  目录里有这一份 + 盘上字节与目录登记逐字节一致（没下载 / 被改过 / 是旧版本 —— 都不许应用）
+/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
+/// ```
 #[tauri::command]
 pub async fn apply_active_preset(
     app: AppHandle,
     file_name: String,
+    origin: Option<runtime::state::ActiveOrigin>,
+    path: Option<String>,
 ) -> Result<ActivePresetDto, AppError> {
     traced("applyActivePreset", |_| {
+        use runtime::state::ActiveOrigin;
         let root = internal_root(&app)?;
+        let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        let file = catalog
-            .files
-            .iter()
-            .find(|f| f.file_name == file_name)
-            .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
 
-        // 应用的是盘上那份：字节得真的在、且与目录对得上（没下载/被删/漂了都不许应用）
-        let on_disk = std::fs::read(root.join(&file.path)).ok();
-        let bytes = on_disk.ok_or_else(|| {
-            AppError::not_found(format!("{file_name} 还不在本机——先下载，再使用"))
-        })?;
-        let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
-        if digest != file.sha256 {
-            return Err(AppError::sha_mismatch(format!(
-                "{file_name} 盘上的内容与目录对不上，拒绝应用"
-            )));
-        }
+        let state = match origin.unwrap_or_default() {
+            ActiveOrigin::Official => {
+                let file = catalog
+                    .files
+                    .iter()
+                    .find(|f| f.file_name == file_name)
+                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
 
-        let state = runtime::state::save_active(&root, file)?;
-        Ok(active_dto(&root, &catalog, state))
+                // 应用的是盘上那份：字节得真的在、且与目录对得上（没下载/被删/漂了都不许应用）
+                let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
+                    AppError::not_found(format!("{file_name} 还不在本机——先下载，再使用"))
+                })?;
+                let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+                if digest != file.sha256 {
+                    return Err(AppError::sha_mismatch(format!(
+                        "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— \
+                         先「更新」或「重新下载」换一份干净的"
+                    )));
+                }
+                runtime::state::save_active(&root, file)?
+            }
+            ActiveOrigin::Mine => {
+                let rel = path.ok_or_else(|| {
+                    AppError::invalid_argument(
+                        "用自己那份要给出它在用户根里的路径（presets-mine/…）",
+                    )
+                })?;
+                /* 两道闸都在读盘之前：只认用户根那一格，而且得是一份 MKP 预设（.toml） */
+                runtime::mine::check_mine_prefix(&rel)?;
+                if runtime::mine::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
+                    return Err(AppError::invalid_argument(format!(
+                        "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
+                    )));
+                }
+                let target = crate::fsx::paths::resolve_in(&user, &rel)?;
+                let bytes = std::fs::read(&target).map_err(|_| {
+                    AppError::not_found(format!("{rel} 不在本机了——它可能已经被移走或删掉"))
+                })?;
+                let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+                runtime::state::save_active_mine(&root, &rel, &digest)?
+            }
+        };
+
+        Ok(active_dto(&root, &user, &catalog, state))
     })
 }
 

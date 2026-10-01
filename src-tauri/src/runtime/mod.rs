@@ -20,6 +20,8 @@
 
 pub mod catalog;
 pub mod delivery;
+/// **血统三行**（用户那份是从哪份官方、哪一版拷出来改的）—— 写在文件头注释里
+pub mod lineage;
 /// **用户线**：用户自己的预设（`presets-mine/`）—— 与官方线（`mkp/` / `archive/`）分开
 pub mod mine;
 pub mod net;

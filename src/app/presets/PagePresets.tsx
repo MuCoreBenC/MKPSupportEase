@@ -621,10 +621,27 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     }
 
     /*
-     * MKP：「应用」只有一个写 —— 唯一底账（新世界 `run/active-preset.json`）。
-     * 只有目录登记的交付行能应用：动作认 **fileName**（目录登记的文件名 =
-     * 使用中指针的口径 = 首页反填要读的那一条）。Rust 侧会校验"已下载且 SHA 对得上"，
-     * 没下载 / 字节漂了都应用不成，错误原样冒给提示条。
+     * **用户自己那份也能应用**（第七层）：同一个写口、同一条底账 ——
+     * 只是落点由用户根给（用户目录里可以自己分文件夹，所以交的是**路径**）。
+     * 后端那一道闸是"在 presets-mine/ 那一格里 + 盘上真有 + 是 TOML 预设"。
+     */
+    if (row.origin === 'mine') {
+      setBusyKey(row.rowKey)
+      data.apply(row.fileName, 'mine', row.path).then(
+        () => setBusyKey(null),
+        (e: unknown) => {
+          setBusyKey(null)
+          setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+        },
+      )
+      return
+    }
+
+    /*
+     * 官方交付行：「应用」只有一个写 —— 唯一底账（新世界 `run/active-preset.json`）。
+     * 动作认 **fileName**（目录登记的文件名 = 使用中指针的口径 = 首页反填要读的那一条）。
+     * Rust 侧会校验"已下载且 SHA 与目录登记的当前版本对得上"，
+     * 没下载 / 字节漂了 / 是旧版本都应用不成，错误原样冒给提示条。
      */
     if (row.releaseUid === undefined) {
       /* 到不了这里：MKP 档的本地表只有交付行有操作按钮。留着防形状变化时静默出错 */
@@ -861,6 +878,19 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                   <span className={s.appliedSep}>·</span>
                   {page.appliedMachineText}
                 </span>
+                {/*
+                 * 正在使用的是**你自己那份**（第七层：两条线都能成为使用中的那一份）。
+                 * 这一小句不能省：用户得看得出"现在跑的不是官方那份"——
+                 * 它不跟着官方更新。
+                 */}
+                {page.appliedIsMine && (
+                  <span
+                    className={s.appliedMine}
+                    title="正在使用的是你自己那份（presets-mine/…）—— 官方怎么更新都不会动它"
+                  >
+                    我的文件
+                  </span>
+                )}
                 <button
                   type="button"
                   className={s.locateBtn}

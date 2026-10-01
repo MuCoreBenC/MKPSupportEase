@@ -152,8 +152,9 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (baseUrl) =>
     call('setPresetSource', 'set_preset_source', { baseUrl }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
-  applyActivePreset: (fileName) =>
-    call('applyActivePreset', 'apply_active_preset', { fileName }),
+  /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
+  applyActivePreset: (fileName, origin, path) =>
+    call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),

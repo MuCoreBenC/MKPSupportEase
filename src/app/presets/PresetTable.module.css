@@ -253,6 +253,25 @@
   white-space: nowrap;
 }
 
+/*
+ * 「基于旧版官方」那一枚（我那份是从旧版改出来的）。
+ *
+ * **中性色，不是警示色**：它不是错误 —— 那份文件照常能用能改，只是官方换过版了。
+ * 实线边框与 `--line-strong` 的虚线「未标机型」分开：两件事，不混成同一种记号。
+ */
+.basedOld {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 .path {
   display: block;
   margin-top: 2px;
