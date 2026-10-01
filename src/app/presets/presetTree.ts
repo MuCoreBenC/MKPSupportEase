@@ -323,6 +323,35 @@ export const RELEASE_UPDATE_WHY =
   '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
 
 /**
+ * 批量那一行的字：**这一批里有什么，决定它是"下载"还是"更新"**。
+ *
+ * 计数由调用方从行上的 `releaseState` 数出来（`missing` / `stale`），这里只负责措辞 ——
+ * 批量不自己判状态，它是"多份单文件操作的组合"，判据还是那一个。
+ * `已下载的不进这一批`：这一层只解决"多份一起处理"，不解决"再下一遍已经对了的东西"。
+ */
+export function releaseBatchText(
+  missing: number,
+  stale: number,
+): { count: string; label: string; why: string } {
+  const total = missing + stale
+  const label =
+    missing === 0 ? `更新 ${total} 份` : stale === 0 ? `下载 ${total} 份` : `下载并更新 ${total} 份`
+  const parts = [
+    missing > 0 ? `未下载 ${missing} 份` : '',
+    stale > 0 ? `需更新 ${stale} 份` : '',
+  ].filter((s) => s !== '')
+  return {
+    count: parts.join(' · '),
+    label,
+    why:
+      '这一批＝把多份单文件操作合成一次：全程走同一条下载管道（没有第二套），逐份给结局 —— ' +
+      '哪一份没成会单独列出来，绝不压成一句"批量失败"或"批量成功"。' +
+      '已下载的那几份不在这一批里（不重复下）。' +
+      '范围是**当前机型 + 这一档类型**，不受搜索词影响（搜索是"我在找什么"，不该改变"按一下要动几份"）。',
+  }
+}
+
+/**
  * 交付身份在云端表上的说法。
  *
  * 和 `DELIVERY_TEXT`（默认交付 / 可选）是同一个字段的两种措辞：那一套是仓库视角的身份，

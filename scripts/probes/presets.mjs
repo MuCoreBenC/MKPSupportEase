@@ -240,7 +240,8 @@ const updRow = page
 await updRow.getByRole('button', { name: '更新' }).click()
 await page.waitForTimeout(700)
 const note = await page.evaluate(
-  () => document.querySelector('main p[role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+  /* 提示条本体是 `[role="status"]`（里面主句 + 逐份明细各一行）—— 别按 `p` 找 */
+  () => document.querySelector('main [role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
 )
 console.log(`[交付三态] 点「更新」之后提示条：${note || '(没有提示条)'}`)
 if (note === '') problems.push('点「更新」之后没有提示条')
@@ -261,6 +262,52 @@ const statusFact = await page.evaluate(() => {
 console.log(`[交付三态] 展开详情「状态」= ${statusFact || '(没有这一格)'}`)
 if (!statusFact.includes('需更新')) problems.push(`展开详情的状态该说「需更新」，实测「${statusFact}」`)
 await page.screenshot({ path: `${shotDir}/presets-release-states.png` })
+
+/* ---------- 5b. 批量：多份一起处理（逐份给结局） ---------- */
+/*
+ * 守三件事：
+ *   ① 批次的范围 —— **已下载的不进来**（这一批只有那一份「需更新」的）；
+ *   ② 结局**逐份**给 —— 没成的那几份各占一行、带后端给的原因，不压成一句"批量失败"；
+ *   ③ 有名有姓的失败**不许被说成成功**（假后端里这一批是全军覆没）。
+ * 命令级失败那一档（比如没配数据源 → 一份都没发出去）浏览器里没有触发路径，这里量不到。
+ */
+const batchBtn = page.getByRole('button', { name: /^(下载|更新|下载并更新) \d+ 份$/ })
+const batchCount = await batchBtn.count()
+const barText =
+  batchCount > 0
+    ? (await batchBtn.first().locator('xpath=..').innerText()).replace(/\s+/g, ' ').trim()
+    : ''
+console.log(`\n[批量] 批次行：${barText || '(没有这一行)'}  按钮 ${batchCount} 个`)
+if (batchCount === 0) problems.push('云端表有 1 份需更新，却没出现批量那一行')
+if (/未下载/.test(barText)) {
+  problems.push(`已下载的那一份不该进这一批（它已经对了），实测批次行「${barText}」`)
+}
+if (!/需更新 1 份/.test(barText)) problems.push(`批次行该说「需更新 1 份」，实测「${barText}」`)
+
+if (batchCount > 0) {
+  await batchBtn.first().click()
+  await page.waitForTimeout(900)
+  const batchNote = await page.evaluate(() => ({
+    text: (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    /* 明细是**各占一行**的（主句 + 每份一段），拼成一句就没法读了 */
+    lines: document.querySelectorAll('main [role="status"] p').length,
+  }))
+  console.log(`[批量] 点完之后提示条（${batchNote.lines} 行）：${batchNote.text}`)
+  if (batchNote.lines < 2) {
+    problems.push(`逐份结局该各占一行，实测提示条里只有 ${batchNote.lines} 个段落`)
+  }
+  if (!/没成/.test(batchNote.text)) {
+    problems.push(`这一批全军覆没，提示条该如实说「没成」，实测「${batchNote.text}」`)
+  }
+  if (/都成了/.test(batchNote.text)) {
+    problems.push(`一份都没成，不许说成功（实测「${batchNote.text}」）`)
+  }
+  if (!/没有下载区/.test(batchNote.text)) {
+    problems.push(`逐份结局里要带后端给的原因（"浏览器里没有下载区…"），实测「${batchNote.text}」`)
+  }
+  await page.screenshot({ path: `${shotDir}/presets-batch.png` })
+}
+
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(200)
 

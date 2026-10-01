@@ -75,6 +75,8 @@
  *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
+ *   **批量**（云端表那一行）   `api.downloadCatalogFiles()`（多份）            真（同一套机制；**逐份结局**，
+ *                            没成的各占提示条一行。范围 = 机型 + 类型，不受搜索词影响；已下载的不进来）
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`       真（两个读合起来才够三态：
  *                            未下载 / 已下载 / 需更新 —— 见 `ReleaseFileState`）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
@@ -97,8 +99,8 @@ import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
-/* 下载过程那句话与同步页**同一份**（`shared/download.ts`）—— 两个页面说的是同一件事 */
-import { tickText } from '../shared/download'
+/* 下载过程与逐份结局的措辞：与同步页**同一份**（`shared/download.ts`）—— 同一件事一处文案 */
+import { outcomeText, tickText } from '../shared/download'
 import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'
 import PresetTable from './PresetTable'
@@ -111,6 +113,7 @@ import {
   UNSUPPORTED_TEXT,
   noContractText,
   notImplementedText,
+  releaseBatchText,
 } from './presetTree'
 import type {
   PresetKindAxis,
@@ -138,10 +141,17 @@ const PLACEHOLDER: Record<Density, string> = {
   mini: '搜索…',
 }
 
-/** 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」 */
+/**
+ * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
+ *
+ * `lines` 是**一次动作里逐份的结局**（批量下 3 份、2 份没成）：主句说总数，
+ * 明细一行一份。为什么不用一条长句拼起来：那种句子没人读得完，而且拼起来之后
+ * 「哪一份坏了」这唯一有用的信息就淹了。
+ */
 interface Note {
   text: string
   bad: boolean
+  lines?: string[]
 }
 
 export default function PagePresets({ density, onOpenBbs }: Props) {
@@ -165,6 +175,12 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    * 不做全表遮罩：一行的动作不该把整张表锁住。
    */
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  /*
+   * 批量在进行中。它只锁那一颗批次按钮 —— 行级的动作**不跟着锁**：
+   * 一根水管里同时下两份不同的文件本来就是允许的（后端幂等、落点互不相同），
+   * 锁整张表只会让人以为页面卡了。
+   */
+  const [batchBusy, setBatchBusy] = useState(false)
 
   /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
   const [moreOpen, setMoreOpen] = useState(false)
@@ -316,6 +332,47 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         })
       },
     )
+  }
+
+  /**
+   * 批量：把「未下载 + 需更新」的那些**一次交给后端** —— 多份单文件操作的组合，
+   * 不是第二套机制（走同一个 `downloadCatalogFiles`，Rust 侧逐份跑同一个 `deliver`）。
+   *
+   * 结局**逐份**收：全成 / 有名有姓地列出没成的。**命令级失败是另一档**（比如没配数据源）：
+   * 那时一份都没发出去，不能说成"全都失败了" —— 两句话不一样，用户要做的也不一样。
+   */
+  const runBatch = () => {
+    const { fileNames } = page.pending
+    if (fileNames.length === 0 || batchBusy) return
+    const { label } = releaseBatchText(page.pending.missing, page.pending.stale)
+    setBatchBusy(true)
+    setNote({ text: `正在${label}…`, bad: false })
+    data
+      .downloadReleaseBatch(fileNames, (t) =>
+        setNote({ text: tickText(t), bad: t.stage === 'failed' }),
+      )
+      .then(
+        (outcomes) => {
+          const bad = outcomes.filter((o) => !o.ok)
+          const done = outcomes.length - bad.length
+          setNote(
+            bad.length === 0
+              ? { text: `${label}完成：${done} 份都落进下载区了`, bad: false }
+              : {
+                  text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
+                  bad: true,
+                  lines: bad.map(outcomeText),
+                },
+          )
+        },
+        (e: unknown) => {
+          setNote({
+            text: `这一批没能发出去（一份都没下）：${e instanceof Error ? e.message : String(e)}`,
+            bad: true,
+          })
+        },
+      )
+      .finally(() => setBatchBusy(false))
   }
 
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
@@ -490,6 +547,8 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   const table = page.scope === 'local' ? page.local : page.cloud
+  /* 批量那一行的字：这一批里有什么，决定它是「下载」「更新」还是「下载并更新」 */
+  const batch = releaseBatchText(page.pending.missing, page.pending.stale)
 
   /* 层高 chips 一排放不下的值收进「更多」（先摆 6 个） */
   const layerMain = page.slicerFilters.layers.slice(0, 6)
@@ -740,18 +799,50 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
             </div>
           ) : (
             <>
-              {note !== null && (
-                <p className={note.bad ? s.noteBad : s.note} role="status">
-                  {note.text}
+              {/*
+               * 批量那一行：只在**云端表**、且这一批非空时出现。
+               * 为什么在云端表：那里说的是"目录里有什么、你缺什么"，批量正是补这里；
+               * 本地表说的是"我机器上有什么"（需更新那几份已经各带一颗「更新」）。
+               * 为什么敢占一行高度：它的数**与眼前这张表同口径**（当前机型 + 这一档类型），
+               * 而且带着动作 —— 不是那种"别处还有个数字"的噪音（那种以前删过）。
+               */}
+              {page.scope === 'cloud' && page.pending.total > 0 && (
+                <div className={s.batch}>
+                  <span className={s.batchText} title={batch.why}>
+                    {batch.count}
+                  </span>
                   <button
                     type="button"
-                    className={s.noteClose}
-                    aria-label="关闭这条提示"
-                    onClick={() => setNote(null)}
+                    className={s.batchBtn}
+                    disabled={batchBusy}
+                    title={batch.why}
+                    onClick={runBatch}
                   >
-                    ×
+                    {batchBusy ? '处理中…' : batch.label}
                   </button>
-                </p>
+                </div>
+              )}
+
+              {note !== null && (
+                <div className={note.bad ? s.noteBad : s.note} role="status">
+                  <p className={s.noteMain}>
+                    {note.text}
+                    <button
+                      type="button"
+                      className={s.noteClose}
+                      aria-label="关闭这条提示"
+                      onClick={() => setNote(null)}
+                    >
+                      ×
+                    </button>
+                  </p>
+                  {/* 一次动作里逐份的结局：一行一份（批量里"哪一份坏了"是唯一有用的信息） */}
+                  {(note.lines ?? []).map((line) => (
+                    <p key={line} className={s.noteItem}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
               )}
 
               <PresetTable

@@ -56,7 +56,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
-import type { ActivePreset, DownloadTick, Machine } from '../../api'
+import type { ActivePreset, DownloadOutcome, DownloadTick, Machine } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { ReleasePresetSource } from './presetTree'
@@ -157,6 +157,21 @@ export interface PresetData {
    * 这一条**真的能下**。失败照抛给页面说出来。
    */
   downloadRelease: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<void>
+  /**
+   * **一次处理多份**（批量补齐 / 批量更新）。
+   *
+   * 就是上面那一条的复数版：同一个后端命令族（`api.downloadCatalogFiles`，它在 Rust 侧
+   * 逐份跑**同一个** `deliver`、并发也在那边做），同一条水位，同一次"重读底账"。
+   * **逐份结局按请求顺序返回**给页面说出来 —— 这里不聚合、不吞：一份失败就是那一条
+   * `ok: false`，页面照实列出来（"批量失败"这种话是后端与页面都不许说的）。
+   *
+   * 传进来的这几份**已经由调用方按行上的状态挑过**（未下载 + 需更新，已下载的不进来）——
+   * 这一层不重新判断谁该下。
+   */
+  downloadReleaseBatch: (
+    fileNames: string[],
+    onTick?: (tick: DownloadTick) => void,
+  ) => Promise<DownloadOutcome[]>
 }
 
   /**
@@ -366,6 +381,19 @@ export function usePresetData(): PresetData {
     [readRelease],
   )
 
+  /*
+   * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
+   * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
+   */
+  const downloadReleaseBatch = useCallback(
+    async (fileNames: string[], onTick?: (tick: DownloadTick) => void) => {
+      const outcomes = await api.downloadCatalogFiles(fileNames, onTick)
+      setRelease(await readRelease())
+      return outcomes
+    },
+    [readRelease],
+  )
+
   const machineId = at?.machineId ?? ''
   const versionId = at?.versionId ?? ''
 
@@ -387,6 +415,7 @@ export function usePresetData(): PresetData {
     copy,
     release,
     downloadRelease,
+    downloadReleaseBatch,
   }
 }
 
@@ -456,6 +485,21 @@ export interface PresetPage {
   local: PresetTableData<PresetLocalRow>
   /** 云端表 —— 菜单上有什么官方文件 */
   cloud: PresetTableData<PresetCloudRow>
+
+  /**
+   * 批量要处理的那一批：**未下载 + 需更新**，已下载的不进来（不重复下）。
+   *
+   * 判定就是云端表行上那个 `releaseState`（唯一判据），这一层没长第二套状态判断；
+   * 范围取**筛选前**的云端行 —— 按机型与类型（表的口径），**不受搜索词影响**。
+   */
+  pending: {
+    fileNames: string[]
+    /** 其中「未下载」几份 */
+    missing: number
+    /** 其中「需更新」几份 */
+    stale: number
+    total: number
+  }
 
   /** 置顶集合（`pinKey`）。落 localStorage，纯前端排序 */
   pinned: Set<string>
@@ -566,6 +610,25 @@ export function usePresetPage(data: PresetData): PresetPage {
   const cloudBase = useMemo(() => cloudRows(input), [input])
 
   /*
+   * 批量那一批。取**云端表筛前**的行，两个理由：
+   *   ① 云端 = 目录登记的全集，本地只是它的子集（同一份文件在两张表里都有）——
+   *      拿一边数就够了，合起来数会重复；
+   *   ② **不受搜索词影响**：搜索是"我在找什么"，不该悄悄改变"按一下要动几份"。
+   * 筛选（机型 / 类型）已经在 `cloudRows` 里做过了，所以这里只按状态挑。
+   */
+  const pending = useMemo(() => {
+    const rows = cloudBase.rows.filter(
+      (r) => r.origin === 'release' && (r.releaseState === 'missing' || r.releaseState === 'stale'),
+    )
+    return {
+      fileNames: rows.map((r) => r.fileName),
+      missing: rows.filter((r) => r.releaseState === 'missing').length,
+      stale: rows.filter((r) => r.releaseState === 'stale').length,
+      total: rows.length,
+    }
+  }, [cloudBase.rows])
+
+  /*
    * 切片器的喷嘴 / 层高：可选项从**没筛过**的当前表里取（筛过的行会让选项一个个消失），
    * 然后再把筛选应用到行上出最终的表。MKP 没有这两个字段 —— 值集恒为空，筛选恒为「全部」。
    * 选中的值不在可选集里（换了机型 / 表）时自动视为「全部」，不然会筛出一张永远空着的表。
@@ -617,6 +680,7 @@ export function usePresetPage(data: PresetData): PresetPage {
     setScope,
     local,
     cloud,
+    pending,
     pinned,
     togglePin,
     applied: data.active,

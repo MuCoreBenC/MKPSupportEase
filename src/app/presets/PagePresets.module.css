@@ -393,17 +393,90 @@
  *   琥珀（.noteBad） **没接上**（尚未实现 / 契约里还没有这个方法）—— 不是操作失败，
  *                    所以不上错误红；但也绝不许静默成功
  */
+/*
+ * 提示条：**主句一行 + 逐份结局若干行**（批量里没成的那几份各占一行）。
+ * 所以外层是竖排容器，主句自己那一行还要摆那颗关闭按钮（`margin-left: auto` 靠它）。
+ */
 .note,
 .noteBad {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-label);
+  line-height: 1.6;
+}
+
+.noteMain {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0;
   padding: 7px var(--page-x);
+}
+
+/* 逐份结局那一行：缩进一档，跟主句分开 —— 它是明细，不是又一句提示 */
+.noteItem {
+  margin: 0;
+  padding: 0 var(--page-x) 4px calc(var(--page-x) + 14px);
+  color: inherit;
+  opacity: 0.92;
+}
+
+.noteItem:last-child {
+  padding-bottom: 7px;
+}
+
+/* ---------- 批量那一行（只在云端表、且这一批非空时出现） ---------- */
+
+.batch {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px var(--page-x);
   border-bottom: 1px solid var(--line);
+  background: var(--surface);
   font-size: var(--fs-label);
-  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.batchText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 与表格里那颗小按钮同一档（同一套变量，两处看起来是一家人） */
+.batchBtn {
+  flex-shrink: 0;
+  margin-left: auto;
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.batchBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.batchBtn:focus-visible {
+  outline: none;
+}
+
+.batchBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
 }
 
 .note {
