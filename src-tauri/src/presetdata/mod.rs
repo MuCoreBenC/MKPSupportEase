@@ -1089,16 +1089,21 @@ mod tests {
         let mut checked = 0usize;
         let mut named = std::collections::BTreeSet::new();
         for m in p.catalog.machines() {
-            for (field, id) in [("defaultBundle", &m.default_bundle)] {
-                if let Some(id) = id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                    let b = p
-                        .bundles
-                        .get(id)
-                        .unwrap_or_else(|| panic!("{} 的 {field} 指向不存在的套餐 {id}", m.id));
-                    assert_eq!(b.machine_id, m.id, "套餐归属与引用它的机型不一致");
-                    checked += 1;
-                    named.insert(id.to_owned());
-                }
+            // 机型层只有 defaultBundle 一格（版本层是 recommendedBundle）——
+            // 写成单元素循环会被 clippy（新版 stable）判 single_element_loop
+            if let Some(id) = m
+                .default_bundle
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let b = p
+                    .bundles
+                    .get(id)
+                    .unwrap_or_else(|| panic!("{} 的 defaultBundle 指向不存在的套餐 {id}", m.id));
+                assert_eq!(b.machine_id, m.id, "套餐归属与引用它的机型不一致");
+                checked += 1;
+                named.insert(id.to_owned());
             }
             for v in &m.versions {
                 if let Some(id) = v
