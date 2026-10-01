@@ -86,6 +86,7 @@ import type {
   PresetScopeAxis,
   PresetTableData,
   PresetTree,
+  ReleaseFileState,
   UserPresetFile,
   PresetVersionInput,
 } from './presetTree'
@@ -217,11 +218,15 @@ export interface ReleaseState {
   /** 下载区（`mkp/`）里已有、**且与目录登记一致**的（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
   /**
-   * 下载区里有、**但与目录登记不一致**的（`ReleaseFileState = stale`，即「需更新」）。
+   * 下载区里有、**但与目录登记不一致**的（`ReleaseFileState = old / tampered`，
+   * 即「旧版本 / 内容异常」）。
    *
    * 与 `localReleases` 是**两个读**：`getDownloadedFiles()` 只答"盘上有没有且对不对"，
-   * `getStaleFiles()` 才答"盘上有一份但不能用"。少了这一个读，「需更新」就会
+   * `getStaleFiles()` 才答"盘上有一份但不能用"。少了这一个读，「旧版本 / 内容异常」就会
    * 被显示成「未下载」—— 用户点"下载"以为是第一次下，实际是在修一份坏档。
+   *
+   * 不一致的那几份**是哪一档**由第三个读（`getDeliveryTrust`）定：认得出是官方某一版旧版的
+   * 是 `old`，哪儿都查不出的是 `tampered`（第三圈第 6 层）。
    */
   stale: ReleasePresetSource[]
   /** 已下载的 uid 集合 */
@@ -255,24 +260,40 @@ export function usePresetData(): PresetData {
   /**
    * 把官方交付这一路的现况读一遍。
    *
-   * 全部来自新世界的两份底账：清单读 `api.getRuntimeCatalog()` 的 files 域，
-   * 「已下载」读 `api.getDownloadedFiles()`（`mkp/`，盘就是底账）。
+   * 全部来自新世界的底账：清单读 `api.getRuntimeCatalog()` 的 files 域，
+   * 「盘上有没有、对不对」读 `api.getDownloadedFiles()` / `api.getStaleFiles()`
+   * （`mkp/`，盘就是底账），「盘上那份认得出是哪一版吗」读 `api.getDeliveryTrust()`
+   * （第三圈第 6 层），旧版本留档读 `api.getArchivedFiles()`。
+   *
    * 下载 / 应用之后**重读一遍**而不是本地改状态 —— 与 `copy` 同一条规矩：
    * 界面上看到的必须是底账答的，不是前端猜的。
    */
   const readRelease = useCallback(async (): Promise<ReleaseState> => {
-    /* 四个读：目录清单、盘上对得上的、盘上对不上的、归档区里躺着的旧版本。
-       **后两个都要**（见 `ReleaseState.stale`）；归档是"更新过之后会变"的那一份，
-       所以它跟着这一路一起读，而不是单开一次首屏读 */
-    const [catalog, mine, drifted, keep] = await Promise.all([
+    /* 五个读：目录清单、盘上对得上的、盘上对不上的、**那些对不上的认得出是哪一版吗**、
+       归档区里躺着的旧版本。中间三个合起来才是四档（见 `ReleaseFileState`）；
+       归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读 */
+    const [catalog, mine, drifted, trust, keep] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
+      api.getDeliveryTrust(),
       api.getArchivedFiles(),
     ])
     setArchived(keep)
     const downloaded = new Set(mine)
-    const stale = new Set(drifted)
+    const driftedSet = new Set(drifted)
+    /* 判词按**文件名**查 —— 与下载 / 应用 / 读正文同一套口径（这套系统认的一直是 fileName） */
+    const verdicts = new Map(trust.map((t) => [t.fileName, t.verdict]))
+    /*
+     * 四档**只在这里判一次**（两张表都读这一份结果，不许自己再判一次）。
+     * 第三个读没给判词（两读之间有缝，理论上到不了）时按「内容异常」处理 ——
+     * 那正是"认不出"的实情，而它的后果只是"得重下一份干净的"，宁可响。
+     */
+    const stateOf = (fileName: string): ReleaseFileState => {
+      if (downloaded.has(fileName)) return 'ok'
+      if (!driftedSet.has(fileName)) return 'missing'
+      return verdicts.get(fileName) === 'old' ? 'old' : 'tampered'
+    }
     const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
       uid: `${f.machineId}/${f.versionId}`,
       machineId: f.machineId,
@@ -280,10 +301,11 @@ export function usePresetData(): PresetData {
       fileName: f.fileName,
       size: f.size,
       releaseVersion: null,
+      state: stateOf(f.fileName),
     }))
     /* 判据用 fileName：盘就是底账，盘上认的文件名 = 目录登记的文件名（不是 id、不是路径） */
-    const localList = listed.filter((p) => downloaded.has(p.fileName))
-    const staleList = listed.filter((p) => stale.has(p.fileName))
+    const localList = listed.filter((p) => p.state === 'ok')
+    const staleList = listed.filter((p) => p.state === 'old' || p.state === 'tampered')
     return {
       version: catalog.revision,
       at: null,
@@ -547,17 +569,20 @@ export interface PresetPage {
   cloud: PresetTableData<PresetCloudRow>
 
   /**
-   * 批量要处理的那一批：**未下载 + 需更新**，已下载的不进来（不重复下）。
+   * 批量要处理的那一批：**未下载 + 旧版本 + 内容异常**，已下载的不进来（不重复下）。
    *
    * 判定就是云端表行上那个 `releaseState`（唯一判据），这一层没长第二套状态判断；
    * 范围取**筛选前**的云端行 —— 按机型与类型（表的口径），**不受搜索词影响**。
+   * 三档分开数：前两档是"补上官方那份"，第三档是"盘上那份我们不认"，用户要做的事不一样。
    */
   pending: {
     fileNames: string[]
     /** 其中「未下载」几份 */
     missing: number
-    /** 其中「需更新」几份 */
+    /** 其中「旧版本」几份（认得出是官方某一版旧版） */
     stale: number
+    /** 其中「内容异常」几份（这台机器上查不出它属于哪一版） */
+    tampered: number
     total: number
   }
 
@@ -678,12 +703,13 @@ export function usePresetPage(data: PresetData): PresetPage {
    */
   const pending = useMemo(() => {
     const rows = cloudBase.rows.filter(
-      (r) => r.origin === 'release' && (r.releaseState === 'missing' || r.releaseState === 'stale'),
+      (r) => r.origin === 'release' && r.releaseState !== undefined && r.releaseState !== 'ok',
     )
     return {
       fileNames: rows.map((r) => r.fileName),
       missing: rows.filter((r) => r.releaseState === 'missing').length,
-      stale: rows.filter((r) => r.releaseState === 'stale').length,
+      stale: rows.filter((r) => r.releaseState === 'old').length,
+      tampered: rows.filter((r) => r.releaseState === 'tampered').length,
       total: rows.length,
     }
   }, [cloudBase.rows])

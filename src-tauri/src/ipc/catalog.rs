@@ -343,6 +343,48 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
     })
 }
 
+/// 盘上这一份**认得出是哪一版吗**（第三圈第 6 层：SHA 报警）。
+///
+/// `getStaleFiles` 只回答"盘上的字节与目录不一致"，而那可能是三件不同的事 ——
+/// 这一条把那三件分开，并且**只列有事的**（没下载 / 与目录一致的两种不出现）：
+///
+///   `old`        = 认得出它是官方的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
+///   `tampered`   = 目录、归档、旧目录都对不上 —— 这台机器上查不出它属于哪一版
+///
+/// **它与"云端有更新"是两件事**：后者是 [`check_remote_update`]（比目录指纹），
+/// 与本机这一份的字节无关。别把两者混成一句「需更新」—— 用户因此既不知道自己的
+/// 文件是不是被改过，也不知道该不该等更新。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryTrustDto {
+    pub file_name: String,
+    pub verdict: String,
+    /// `old` 且归档区里有它字节时给（`archive/mkp/presets/A1-fast.toml`）—— 界面据此
+    /// 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
+    pub archived_path: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_delivery_trust(app: AppHandle) -> Result<Vec<DeliveryTrustDto>, AppError> {
+    traced("getDeliveryTrust", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        Ok(runtime::delivery::trust_entries(&root, &catalog)
+            .into_iter()
+            .map(|e| DeliveryTrustDto {
+                file_name: e.file_name,
+                verdict: match e.trust {
+                    runtime::delivery::FileTrust::OldVersion => "old",
+                    // Absent / Current 在 `trust_entries` 里就滤掉了，到不了这里
+                    _ => "tampered",
+                }
+                .to_owned(),
+                archived_path: e.archived_path,
+            })
+            .collect())
+    })
+}
+
 /// 归档区里的一份旧版本（给界面看的形状）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

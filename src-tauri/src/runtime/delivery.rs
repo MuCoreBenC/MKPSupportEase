@@ -30,6 +30,21 @@
 //! 同一份文件的字节变了（catalog 更新带来新版本），再走一遍 [`deliver`] 就是更新：
 //! 旧份先复制进 `archive/`（保留**最早**一份——归档槽不覆盖，要完整历史等需要的那天），
 //! 然后原子换新。删除永远不是更新的一部分。
+//!
+//! # 这一份我们认得出吗（第三圈第 6 层）
+//!
+//! 盘上有字节 ≠ 那字节是官方内容。`stale` 只说"与目录不一致"，而那可能是两种完全不同的事：
+//!
+//! ```text
+//! 盘上这一份 vs 目录登记的当前版本
+//!   ├─ 逐字节相同      → [`FileTrust::Current`]   就是当前这一版
+//!   ├─ 与 [`archive/`] 里某一版相同 → [`FileTrust::OldVersion`]  认得出它是哪一版（旧版）
+//!   └─ 哪儿都对不上    → [`FileTrust::Unknown`]   这台机器上查不出它属于哪一版
+//! ```
+//!
+//! **`stale` 与"云端有没有更新"是两件事**：前者问"本机这份是不是我们认可的官方内容"，
+//! 后者是 [`super::update::check`] 的事（比目录指纹）。混成一句"需更新"，用户既不知道
+//! 自己的文件是不是被改过，也不知道该不该等更新 —— 所以这一段单独给 [`trust_entries`]。
 
 use std::path::{Path, PathBuf};
 
@@ -41,7 +56,7 @@ use crate::fsx::paths::resolve_in;
 
 use super::catalog::hex;
 use super::catalog::CatalogFile;
-use super::paths::archive_dir;
+use super::paths::{archive_dir, CATALOG_FILE};
 
 /// 下载源：catalog 里登记的那份文件从哪里拿。
 ///
@@ -212,6 +227,149 @@ pub fn archived_files(internal_root: &Path) -> Vec<ArchivedFile> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
+}
+
+/* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
+
+/// 盘上这一份**官方文件**我们认得出是哪一版吗。
+///
+/// 四个答案，**只回答"本机这份是不是我们认可的官方内容"**——不掺"云端有没有更新"
+/// （那是 [`super::update::check`] 的问题，比的是目录指纹，与本机的字节无关）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileTrust {
+    /// 盘上没有这一份（合法状态，不是错误）
+    Absent,
+    /// 字节与目录登记一致 —— 就是当前这一版
+    Current,
+    /// 字节与我们认得的某一版**旧**官方一致 —— 认得出它是哪一版
+    OldVersion,
+    /// 与目录、归档、被归档的旧目录都对不上 —— 这台机器上查不出它属于哪一版
+    Unknown,
+}
+
+/// 一份被认出来的旧版本。**证据在哪**要说出来：界面拿它去开抽屉看正文，
+/// 读者也能一眼看出"凭什么说它是旧版"。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownVersion {
+    pub sha256: String,
+    /// 归档区里躺着这份字节时给（`archive/mkp/presets/A1-fast.toml`）。
+    /// 只被旧目录登记过、归档里没有它字节的那种是 `None` —— 那样同样认得出，
+    /// 只是没有"可以看正文"这一档
+    pub archived_path: Option<String>,
+}
+
+/// 除了**目录登记的当前那一版**之外，这台机器还认得这一份文件的哪几版。
+///
+/// 两个来源，都是"我们亲手发出去的字节"：
+///
+/// 1. `archive/` 里那份旧文件 —— 换版本时被换下来的那一份；
+/// 2. 被归档的旧目录（`archive/catalog.json`）里登记的同一份文件 ——
+///    它记着更早那些版本的字节指纹，所以归档槽被后来的版本占了也还能认出更早那一版。
+///
+/// **没有第三个来源**：盘上的字节自己不算证据（那正是要判的东西）。
+pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<KnownVersion> {
+    let mut out = Vec::new();
+
+    let rel = format!("{}/{}", super::paths::ARCHIVE_DIR, file.path);
+    if let Ok(bytes) = std::fs::read(internal_root.join(&rel)) {
+        out.push(KnownVersion {
+            sha256: hex(&Sha256::digest(&bytes)),
+            archived_path: Some(rel),
+        });
+    }
+
+    let Ok(old_bytes) = std::fs::read(
+        internal_root
+            .join(super::paths::ARCHIVE_DIR)
+            .join(CATALOG_FILE),
+    ) else {
+        return out;
+    };
+    // 旧目录读不出来 / 是更未来的代次 → 当作"没有这一档证据"，不让整条判据失败
+    let Ok(old) = super::Catalog::parse(&old_bytes) else {
+        return out;
+    };
+    let hit = old
+        .files
+        .iter()
+        .find(|f| f.path == file.path)
+        .or_else(|| old.files.iter().find(|f| f.file_name == file.file_name));
+    if let Some(entry) = hit {
+        out.push(KnownVersion {
+            sha256: entry.sha256.clone(),
+            archived_path: None,
+        });
+    }
+    out
+}
+
+/// 盘上这一份是哪一版（[`FileTrust`] 四档），以及认得出时**证据在哪**。
+fn inspect(internal_root: &Path, file: &CatalogFile) -> (FileTrust, Option<String>) {
+    let Ok(bytes) = std::fs::read(internal_root.join(&file.path)) else {
+        return (FileTrust::Absent, None);
+    };
+    let got = hex(&Sha256::digest(&bytes));
+    if got == file.sha256 {
+        return (FileTrust::Current, None);
+    }
+    for known in other_known_versions(internal_root, file) {
+        if known.sha256 == got {
+            return (FileTrust::OldVersion, known.archived_path);
+        }
+    }
+    (FileTrust::Unknown, None)
+}
+
+pub fn trust_of(internal_root: &Path, file: &CatalogFile) -> FileTrust {
+    inspect(internal_root, file).0
+}
+
+/// 一份"认得出 / 认不出"的交代。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileTrustEntry {
+    pub file_name: String,
+    pub trust: FileTrust,
+    /// `OldVersion` 且归档里有它字节时的路径（界面据此这样说得出正文）；其余是 `None`
+    pub archived_path: Option<String>,
+}
+
+/// 目录登记的每一份都过一遍，**只列有事的**：盘上没有（还没下载）和与目录一致的那两种
+/// 不在"报警表"里 —— 它们没有问题，列出来只会把真正要处理的那几份淹掉。
+pub fn trust_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<FileTrustEntry> {
+    catalog
+        .files
+        .iter()
+        .filter_map(|file| {
+            let (trust, archived_path) = inspect(internal_root, file);
+            match trust {
+                FileTrust::Absent | FileTrust::Current => None,
+                FileTrust::OldVersion | FileTrust::Unknown => Some(FileTrustEntry {
+                    file_name: file.file_name.clone(),
+                    trust,
+                    archived_path,
+                }),
+            }
+        })
+        .collect()
+}
+
+/// 取出**可以当依据**的官方正文：只有盘上这一份与目录登记逐字节一致时才给。
+///
+/// 「临时编辑」那条链的第一步就在于此：改的来源必须是当前这一版官方原件。
+/// 被改过（SHA 对不上）的那些不给 —— 它的字节存疑，修复它的动作是**重新下载**，
+/// 不许拿它当原文去改（改完另存成用户文件，等于把可疑内容洗成"我改过的那一份"）。
+pub fn official_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
+    let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
+        AppError::not_found(format!("{} 还没下载到本机 —— 先下载，再改", file.file_name))
+    })?;
+    if hex(&Sha256::digest(&bytes)) != file.sha256 {
+        return Err(AppError::sha_mismatch(format!(
+            "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的官方版，再改",
+            file.file_name
+        )));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| AppError::corrupted(format!("{} 不是 UTF-8 文本，改不了", file.file_name)))
 }
 
 /* ---------- 一次多份（第二圈：并发） ---------- */
@@ -641,6 +799,135 @@ mod tests {
         assert_eq!(
             stale_files(root.path(), &new_catalog),
             vec!["A1-standard.toml".to_owned()]
+        );
+    }
+
+    /* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
+
+    /// 往内部根里写一份文件（写盘走仓库唯一那个出口）
+    fn put_file(root: &Path, rel: &str, content: &str) {
+        crate::fsx::atomic::atomic_write(&root.join(rel), content.as_bytes()).unwrap();
+    }
+
+    /// 造一份只用来当**被归档的旧目录**的 catalog（它登记着更早那一版的字节指纹）
+    fn old_catalog_json(files: Vec<CatalogFile>) -> Vec<u8> {
+        let catalog = Catalog {
+            catalog_schema: super::super::catalog::CATALOG_SCHEMA,
+            revision: "older".to_owned(),
+            files,
+            ..Catalog::default()
+        };
+        catalog.to_pretty_json().unwrap().into_bytes()
+    }
+
+    /// 与目录一致 = 当前这一版：报警表里不该有它
+    #[test]
+    fn a_clean_copy_is_current_and_not_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+
+        let catalog = catalog_with(vec![file.clone()]);
+        assert_eq!(trust_of(root.path(), &file), FileTrust::Current);
+        assert!(
+            trust_entries(root.path(), &catalog).is_empty(),
+            "没问题就不报警"
+        );
+    }
+
+    /// **认不出**：既不是目录这一版，也不是归档里那一版 —— 这台机器上查不出它属于哪一版
+    #[test]
+    fn tampered_bytes_are_not_recognized() {
+        let root = tempfile::tempdir().unwrap();
+        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
+
+        assert_eq!(trust_of(root.path(), &file), FileTrust::Unknown);
+
+        let got = trust_entries(root.path(), &catalog_with(vec![file]));
+        assert_eq!(got.len(), 1, "有问题的那一份要出现在报警表里");
+        assert_eq!(got[0].file_name, "A1-standard.toml");
+        assert_eq!(got[0].trust, FileTrust::Unknown);
+        assert!(got[0].archived_path.is_none(), "认不出就没有证据可指");
+    }
+
+    /// **认得出**：盘上这份就是归档里那一版 —— 旧版本，而且说得出证据在哪
+    #[test]
+    fn a_copy_of_the_archived_version_is_recognized_as_old() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = entry("A1-standard.toml", "版本一".as_bytes());
+        let v2 = entry("A1-standard.toml", "版本二".as_bytes());
+        deliver(
+            root.path(),
+            &v1,
+            &MemorySource("版本一".as_bytes().to_vec()),
+        )
+        .unwrap();
+        deliver(
+            root.path(),
+            &v2,
+            &MemorySource("版本二".as_bytes().to_vec()),
+        )
+        .unwrap();
+        /* 用户把归档里那份旧版捞回下载区（或更新还没落到这里） */
+        put_file(root.path(), "mkp/A1-standard.toml", "版本一");
+
+        assert_eq!(trust_of(root.path(), &v2), FileTrust::OldVersion);
+
+        let got = trust_entries(root.path(), &catalog_with(vec![v2]));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].trust, FileTrust::OldVersion);
+        assert_eq!(
+            got[0].archived_path.as_deref(),
+            Some("archive/mkp/A1-standard.toml"),
+            "证据是归档里那一份 —— 界面拿它去看旧版正文"
+        );
+    }
+
+    /// 归档区里没有它的字节，但**被归档的旧目录登记过它** —— 同样认得出（认得出的那一档
+    /// 不会因为归档槽被人占了就退化成"异常修改"）
+    #[test]
+    fn a_version_from_the_archived_catalog_is_recognized_as_old() {
+        let root = tempfile::tempdir().unwrap();
+        let older = entry("A1-standard.toml", "更旧的那一版".as_bytes());
+        let current = entry("A1-standard.toml", "当前版本".as_bytes());
+        put_file(root.path(), "mkp/A1-standard.toml", "更旧的那一版");
+        crate::fsx::atomic::atomic_write(
+            &root
+                .path()
+                .join(super::super::paths::ARCHIVE_DIR)
+                .join(CATALOG_FILE),
+            &old_catalog_json(vec![older]),
+        )
+        .unwrap();
+
+        assert_eq!(trust_of(root.path(), &current), FileTrust::OldVersion);
+        let got = trust_entries(root.path(), &catalog_with(vec![current]));
+        assert_eq!(got[0].trust, FileTrust::OldVersion);
+        assert!(
+            got[0].archived_path.is_none(),
+            "归档区里没有它的字节 —— 认得出，但没有那一版可以打开看"
+        );
+    }
+
+    /// 「改这份」的入口：**SHA 对不上的字节不许当原文用**（修它的动作是重新下载）
+    #[test]
+    fn official_text_refuses_bytes_that_drifted() {
+        let root = tempfile::tempdir().unwrap();
+        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+
+        let missing = official_text(root.path(), &file).unwrap_err();
+        assert_eq!(missing.code, crate::error::ErrorCode::NotFound);
+
+        put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
+        let drifted = official_text(root.path(), &file).unwrap_err();
+        assert_eq!(drifted.code, crate::error::ErrorCode::ShaMismatch);
+
+        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+        assert_eq!(
+            official_text(root.path(), &file).unwrap(),
+            "官方当前版本",
+            "与目录一致的那一份才是可以改的原文"
         );
     }
 

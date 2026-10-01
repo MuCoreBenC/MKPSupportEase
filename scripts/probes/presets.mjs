@@ -175,13 +175,14 @@ await page.screenshot({ path: `${shotDir}/presets-menu.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(150)
 
-/* ---------- 5. 交付预设的三态（catalog 登记 + 下载区 mkp/） ---------- */
+/* ---------- 5. 交付预设的四态（catalog 登记 + 下载区 mkp/ + 认得出是哪一版吗） ---------- */
 /*
  * 守的是**状态可见性**：目录里那一份在本机是什么样，页面上要说得对、给的动作要对。
  *
- * 浏览器模式（假后端）给的是固定演示集合（`src/api/mock.ts` 的三个读合起来）：
- * 一份对得上目录、一份对不上、一份还没下过 —— 三态都得画出来。
- * 最容易犯的错是**把「需更新」画成「未下载」**：只看"文件在不在"就会把一份坏档
+ * 浏览器模式（假后端）给的是固定演示集合（`src/api/mock.ts` 那三个读合起来）：
+ * 一份对得上目录、一份是归档里那版旧版、一份哪儿都查不出是哪一版 —— 四档都得画出来
+ *（「未下载」那一档由官方行的「下载」按钮覆盖，见那一节）。
+ * 最容易犯的错是**把盘上不对劲的那份画成「未下载」**：只看"文件在不在"就会把一份坏档
  * 说成没下过，用户点"下载"以为是第一次下。所以这条单独断言。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
@@ -207,27 +208,27 @@ const actions = () =>
   })
 
 const localActions = await actions()
-console.log(`\n[交付三态 · 本地表] ${localActions.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+console.log(`\n[交付四态 · 本地表] ${localActions.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
 const localFast = localActions.find((r) => r.name.includes('A1-fast.toml'))
 if (localFast === undefined) {
-  problems.push('本地表里没有「需更新」的那一份（盘上确实有它，藏起来就等于说本机没有）')
+  problems.push('本地表里没有盘上不对劲的那一份（盘上确实有它，藏起来就等于说本机没有）')
 } else if (!localFast.action.includes('更新')) {
-  problems.push(`盘上与目录不符的那一份，本地表的动作该是「更新」，实测「${localFast.action}」`)
+  problems.push(`旧版本那一份，本地表的动作该是「更新」，实测「${localFast.action}」`)
 }
 
 await rad('preset-scope', 'cloud').click({ force: true })
 await page.waitForTimeout(300)
 const cloudRows = await actions()
-console.log(`[交付三态 · 云端表] ${cloudRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+console.log(`[交付四态 · 云端表] ${cloudRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
 
 /*
- * 三态里只断言两态：假后端给的是**两份**固定演示数据（见 `src/api/mock.ts` 那段注释）——
- * 交付构造上每个 (机型, 版本) 只有一份产物，再塞一份同版本的条目就是编形状了。
- * 「未下载」那一档由官方行的「下载」按钮覆盖（同一套动作列），这里不重复量。
+ * 四态里只断言当前机型这两档：假后端给的是**按 (机型, 版本) 各一份**的固定演示数据
+ *（见 `src/api/mock.ts` 那段注释），A1 下这两份正好是「已下载」与「旧版本」。
+ * 另两档（内容异常 / 未下载）在 5f 与官方行那颗「下载」按钮上量，这里不重复。
  */
 const wantState = [
   ['A1-standard.toml', '已下载', '对得上目录的那一份 → 灰字「已下载」，没有可点的动作'],
-  ['A1-fast.toml', '更新', '盘上与目录不符的那一份 → 按钮是「更新」，不是「下载」'],
+  ['A1-fast.toml', '更新', '盘上那份就是归档里那一版 → 按钮是「更新」，不是「下载」'],
 ]
 for (const [file, want, why] of wantState) {
   const hit = cloudRows.find((r) => r.name.includes(file))
@@ -250,12 +251,12 @@ const note = await page.evaluate(
   /* 提示条本体是 `[role="status"]`（里面主句 + 逐份明细各一行）—— 别按 `p` 找 */
   () => document.querySelector('main [role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
 )
-console.log(`[交付三态] 点「更新」之后提示条：${note || '(没有提示条)'}`)
+console.log(`[交付四态] 点「更新」之后提示条：${note || '(没有提示条)'}`)
 if (note === '') problems.push('点「更新」之后没有提示条')
 if (note.includes('已更新')) problems.push(`浏览器里没有下载区，不许说「已更新」（实测「${note}」）`)
 if (!/失败|没成/.test(note)) problems.push(`点「更新」应当如实报失败，实测提示条是「${note}」`)
 
-/* 展开详情里那句「状态」：三态各自的原话（不是"已应用 / 未应用"那一句） */
+/* 展开详情里那句「状态」：四态各自的原话（不是"已应用 / 未应用"那一句） */
 await updRow.click()
 await page.waitForTimeout(300)
 const statusFact = await page.evaluate(() => {
@@ -266,8 +267,8 @@ const statusFact = await page.evaluate(() => {
   const i = dts.findIndex((d) => (d.textContent ?? '').trim() === '状态')
   return i < 0 ? '' : (dds[i]?.textContent ?? '').trim()
 })
-console.log(`[交付三态] 展开详情「状态」= ${statusFact || '(没有这一格)'}`)
-if (!statusFact.includes('需更新')) problems.push(`展开详情的状态该说「需更新」，实测「${statusFact}」`)
+console.log(`[交付四态] 展开详情「状态」= ${statusFact || '(没有这一格)'}`)
+if (!statusFact.includes('旧版本')) problems.push(`展开详情的状态该说「旧版本」，实测「${statusFact}」`)
 await page.screenshot({ path: `${shotDir}/presets-release-states.png` })
 
 /* ---------- 5b. 归档：官方旧版本看得见、认得出、看得了 ---------- */
@@ -537,6 +538,99 @@ if (editBtnCount === 0) {
   await page.screenshot({ path: `${shotDir}/presets-edit.png` })
 }
 
+/* ---------- 5f. 认得出 / 认不出（第三圈第 6 层：官方文件的 SHA 报警） ---------- */
+/*
+ * 守三件事：
+ *   ① 盘上与目录不符的两档**分得开**：`旧版本`（认得出是官方某一版旧版）与
+ *      `内容异常`（这台机器上查不出它属于哪一版）—— 假后端各给一份演示；
+ *   ② 内容存疑的那两份**没有「应用」也没有「改这份」**：修复动作只有重新下载
+ *      （不给点了必报错的按钮：`applyActivePreset` 的第一道闸就是 SHA）；
+ *   ③ 那两份的「复制」在右键菜单里是**灰的、而且带原因**（不许复制那条边界）。
+ *
+ * 真机上更硬的判据在 Rust 侧（`runtime::delivery`）：旧版 / 查不出是哪一版的判定，
+ * 以及「改这份」在入口就把漂了的字节拒掉（`official_text`）。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(250)
+/* 那两份演示分属两台机型：切到「全部机型」才同屏看得到（本机的东西不该被机型选择藏起来） */
+await page.getByRole('button', { name: '机型' }).click()
+await page.waitForTimeout(200)
+await page.getByRole('option', { name: /全部机型/ }).click()
+await page.waitForTimeout(400)
+
+const trustRows = await actions()
+console.log(`\n[认得出 · 全部机型] ${trustRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+
+const trustWant = [
+  ['A1-fast.toml', '更新', '盘上那份**就是归档里那一版** → 旧版本，换成当前版'],
+  ['A1mini-standard.toml', '重新下载', '盘上那份哪儿都查不出是哪一版 → 内容异常，只能重下一份'],
+]
+for (const [file, want, why] of trustWant) {
+  const hit = trustRows.find((r) => r.name.includes(file))
+  console.log(`  ${file} → ${hit?.action ?? '(没这一行)'}（期望含「${want}」）—— ${why}`)
+  if (hit === undefined) problems.push(`本地表里没有 ${file}`)
+  else if (!hit.action.includes(want)) problems.push(`${file} 的动作该含「${want}」，实测「${hit.action}」`)
+  else if (hit.action.includes('应用')) problems.push(`${file} 内容存疑，不该给「应用」（实测「${hit.action}」）`)
+}
+
+/** 展开详情里某一格的值（dt 文案 → dd 文案） */
+const factOf = () =>
+  page.evaluate(() => {
+    const dl = document.querySelector('main tbody dl')
+    if (dl === null) return {}
+    const dts = [...dl.querySelectorAll('dt')]
+    const dds = [...dl.querySelectorAll('dd')]
+    const out = {}
+    dts.forEach((dt, i) => {
+      out[(dt.textContent ?? '').trim()] = (dds[i]?.textContent ?? '').trim()
+    })
+    return out
+  })
+
+const suspectRow = (file) =>
+  page
+    .locator('main tbody tr')
+    .filter({ has: page.locator('td:not([colspan])') })
+    .filter({ hasText: file })
+    .first()
+
+await suspectRow('A1mini-standard.toml').click()
+await page.waitForTimeout(300)
+const tamperedFacts = await factOf()
+console.log(`[认不出] A1mini-standard.toml 展开详情：状态=${tamperedFacts['状态'] ?? '(没有)'}`)
+if (!(tamperedFacts['状态'] ?? '').includes('内容异常')) {
+  problems.push(`认不出的那一份，状态该说「内容异常」，实测「${tamperedFacts['状态']}」`)
+}
+const editBtns = await page.getByRole('button', { name: '改这份' }).count()
+console.log(`[认不出] 展开详情里「改这份」按钮：${editBtns} 个（展开的这一份内容存疑，该是 0）`)
+if (editBtns > 0) problems.push('内容存疑的那一份不该有「改这份」（改的来源必须是官方当前版）')
+
+/* 右键：不许复制那条边界要说得出原因（灰一项不说为什么等于坏了） */
+await suspectRow('A1mini-standard.toml').click({ button: 'right' })
+await page.waitForTimeout(250)
+const copyItem = await page.evaluate(() => {
+  const ul = document.querySelector('[role="menu"]')
+  if (ul === null) return null
+  const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
+    (b) => (b.textContent ?? '').trim() === '复制',
+  )
+  return btn === undefined ? null : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
+})
+console.log(`[认不出] 右键「复制」：${copyItem === null ? '没有这一项' : `灰=${copyItem.disabled} 原因「${copyItem.why}」`}`)
+if (copyItem === null) problems.push('右键菜单里没有「复制」这一项')
+else if (!copyItem.disabled) problems.push('内容存疑的那一份不许复制，菜单里该是灰的')
+else if (!copyItem.why.includes('不许')) problems.push(`灰掉的「复制」要带原因（不许复制），实测「${copyItem.why}」`)
+await page.screenshot({ path: `${shotDir}/presets-trust.png` })
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+/* 回到 A1：后面几节按这台机型看（选项顺序＝下拉给的顺序：全部机型 排第一档，接着第一台机型） */
+await page.getByRole('button', { name: '机型' }).click()
+await page.waitForTimeout(200)
+await page.getByRole('option').nth(1).click()
+await page.waitForTimeout(350)
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -597,5 +691,5 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的两态（已下载 / 需更新）画得对且点得动，控制台没有 error',
+  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对，控制台没有 error',
 )

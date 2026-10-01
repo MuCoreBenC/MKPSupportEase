@@ -89,6 +89,7 @@ import {
   EDIT_TEXT,
   EDIT_WHY,
   RELEASE_DOWNLOAD_WHY,
+  RELEASE_REPAIR_WHY,
   RELEASE_SIZE_WHY,
   RELEASE_STATE_TEXT,
   RELEASE_STATE_WHY,
@@ -270,12 +271,16 @@ export default function PresetTable({
               const inUse = row.scope === 'local' ? row.live : row.applied
               const busy = row.rowKey === busyKey
               /*
-               * 交付预设那一档的三件事分开判（见 `ReleaseFileState`）：
-               *   `needsUpdate` 盘上有但对不上目录 → 动作是「更新」（再跑一遍管道）
-               *   `downloaded`  与目录一致的那一份在本机 → 灰字「已下载」，没有可点的动作
+               * 盘上那份不对劲时，按钮的字**按档分**（见 `ReleaseFileState`）：
+               *   `old`      认得出是官方某一版旧版 → 「更新」（再跑一遍管道换成当前版）
+               *   `tampered` 这台机器上查不出它属于哪一版 → 「重新下载」—— 同一颗动作、
+               *              同一根管道，只是说法要说清"盘上那份我们不认"
+               * 两档都**不给「应用」**：`applyActivePreset` 的第一道闸就是 SHA，
+               * 点了必被拒（不给必报错的按钮）。
                * 其余来源（切片器官方行）没有"从目录下载"这一回事，照旧走 `downloaded` 布尔
                */
-              const needsUpdate = row.releaseState === 'stale'
+              const needsRepair = row.releaseState === 'tampered'
+              const needsUpdate = row.releaseState === 'old' || needsRepair
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
                * **用户线那一份问都不问**：归档是官方版本生命周期的事，
@@ -366,15 +371,17 @@ export default function PresetTable({
                          * 盘上那一份与目录不符 → **不给「应用」**。应用会拿它去对 SHA，
                          * 必被拒（`applyActivePreset` 的第一道闸）。给一个点了必报错的
                          * 按钮比不给糟 —— 这里给的是修它的那个动作。
+                         * 字两档不同：旧版本说「更新」（换成当前版），内容异常说「重新下载」
+                         * （那份我们不认，重下一份干净的）—— 动作是同一个，说法不一样。
                          */
                         <button
                           type="button"
                           className={s.actBtn}
                           disabled={busy}
-                          title={RELEASE_UPDATE_WHY}
+                          title={needsRepair ? RELEASE_REPAIR_WHY : RELEASE_UPDATE_WHY}
                           onClick={() => onDownload(row)}
                         >
-                          更新
+                          {needsRepair ? '重新下载' : '更新'}
                         </button>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
                         /* 用户自己的文件没有 asset id，契约那两个写只认 asset id */
@@ -401,17 +408,19 @@ export default function PresetTable({
                         type="button"
                         className={s.actBtn}
                         disabled={busy}
-                        /* 发布行是真下载（需更新时是"再下一遍"），官方行仍是「未实现」—— 文案按行分流 */
+                        /* 发布行是真下载（盘上那份不对时是"再下一遍"），官方行仍是「未实现」—— 文案按行分流 */
                         title={
                           row.releaseUid !== undefined
-                            ? needsUpdate
-                              ? RELEASE_UPDATE_WHY
-                              : RELEASE_DOWNLOAD_WHY
+                            ? needsRepair
+                              ? RELEASE_REPAIR_WHY
+                              : needsUpdate
+                                ? RELEASE_UPDATE_WHY
+                                : RELEASE_DOWNLOAD_WHY
                             : DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
-                        {needsUpdate ? '更新' : '下载'}
+                        {needsRepair ? '重新下载' : needsUpdate ? '更新' : '下载'}
                       </button>
                     )}
                   </td>

@@ -121,22 +121,21 @@ const MOCK_OFFICIAL_TEXT =
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 /*
- * 浏览器里的「下载区」：两份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
+ * 浏览器里的「下载区」：三份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
  *
- * 为什么不是一份：预设页的交付行有三种状态（未下载 / 已下载 / 需更新），只给"未下载"
- * 一种的话，另外两种在浏览器里**根本画不出来** —— 而它们正是这一层最需要被看见的东西
- * （"需更新"尤其：那一档以前会被显示成"未下载"）。
+ * 为什么不是一份：预设页的交付行有四种状态（未下载 / 已下载 / 旧版本 / 内容异常），
+ * 只给"未下载"一种的话，另外三种在浏览器里**根本画不出来** —— 而它们正是这一层
+ * 最需要被看见的东西（"内容异常"尤其：那一档以前会被显示成"需更新"）。
  *
- * 为什么不凑第三种（再塞一份"还没下过"的）：交付构造上**每个 (机型, 版本) 只有一份产物**
- * （`preset_file_name` 由机型 + 版本算出），再塞一份同版本的条目就是**编形状**了。
- * 「未下载」那一档在浏览器里由官方行的「下载」按钮覆盖（同一套动作列），真机上则由
- * "目录里登记了、下载区还没有"的那些行覆盖。
+ * 三份各占一档，**同一档里的两份不存在**：交付构造上每个 (机型, 版本) 只有一份产物，
+ * 再塞一份同版本的条目就是**编形状**了。「未下载」那一档在浏览器里由官方行的「下载」
+ * 按钮覆盖（同一套动作列），真机上则由"目录里登记了、下载区还没有"的那些行覆盖。
  *
- * 两份都**不是真的能下**：点「下载」/「更新」仍如实抛"浏览器里没有下载区"，
+ * 三份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
  * 见 `downloadCatalogFile`。
  */
 const MOCK_DOWNLOADED = ['A1-standard.toml']
-const MOCK_STALE = ['A1-fast.toml']
+const MOCK_STALE = ['A1-fast.toml', 'A1mini-standard.toml']
 
 export const mockApi: MkpApi = {
   async getPreset(variantId) {
@@ -308,6 +307,12 @@ export const mockApi: MkpApi = {
             { id: 'FAST', name: '快拆版6月以前' },
           ],
         },
+        {
+          id: 'A1_MINI',
+          display: 'A1 mini',
+          brand: '拓竹 (Bambu Lab)',
+          versions: [{ id: 'STANDARD', name: '标准版' }],
+        },
       ],
       files: [
         {
@@ -326,6 +331,16 @@ export const mockApi: MkpApi = {
           machineId: 'A1',
           versionId: 'FAST',
           sha256: '1'.repeat(64),
+          size: 2048,
+        },
+        {
+          /* 「内容异常」那一档的演示：盘上有它、但与目录对不上，而且哪儿都查不出它是哪一版 */
+          kind: 'mkp_preset',
+          fileName: 'A1mini-standard.toml',
+          path: 'mkp/presets/A1mini-standard.toml',
+          machineId: 'A1_MINI',
+          versionId: 'STANDARD',
+          sha256: '2'.repeat(64),
           size: 2048,
         },
       ],
@@ -369,6 +384,20 @@ export const mockApi: MkpApi = {
 
   async getStaleFiles() {
     return [...MOCK_STALE]
+  },
+
+  /*
+   * 第 6 层：认得出是哪一版吗。演示集合与上面两条对齐 ——
+   *   `A1-fast.toml` 盘上那份**就是归档里那一版**（下面 `getArchivedFiles` 给的那条），
+   *                所以它是「旧版本」，证据是那条归档路径；
+   *   `A1mini-standard.toml` 与目录、归档都对不上 → 「内容异常」。
+   * 真机上这两档都是算出来的（见 `runtime::delivery::trust_entries`），不记账本。
+   */
+  async getDeliveryTrust() {
+    return [
+      { fileName: 'A1-fast.toml', verdict: 'old' as const, archivedPath: 'archive/mkp/presets/A1-fast.toml' },
+      { fileName: 'A1mini-standard.toml', verdict: 'tampered' as const, archivedPath: null },
+    ]
   },
 
   /*

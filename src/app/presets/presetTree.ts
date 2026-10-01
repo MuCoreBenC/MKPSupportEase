@@ -300,37 +300,65 @@ export const CLOUD_STATE_WHY = {
 }
 
 /**
- * **交付预设在"本机"的三态**（catalog 登记的交付预设才有的那一档）。
+ * **盘上那一份是什么**（catalog 登记的交付预设才有的那一档）。
  *
- * 它是两个读的组合，**不是前端猜的**：
+ * 三个读的组合，**不是前端猜的**：
  *
  *   `api.getDownloadedFiles()`  盘上在、且字节与目录登记的一致 → `ok`
- *   `api.getStaleFiles()`       盘上在、但字节与目录不一致     → `stale`
- *   两个都不含它                                              → `missing`（还没下过，合法状态）
+ *   `api.getStaleFiles()`       盘上在、但字节与目录不一致     → 再问下面这一条
+ *   `api.getDeliveryTrust()`    那不一致的字节**认得出是哪一版吗** → `old` / `tampered`
+ *   三个都不含它                                              → `missing`（还没下过，合法状态）
  *
- * 为什么 `stale` 必须单独一档：盘上那份可能是**旧版本**（目录更新带来的），
- * 也可能是被手动动过 —— 只看"文件在不在"会把这几种全说成「已下载」，
- * 而它下下来/应用起来都是错的（`applyActivePreset` 的 SHA 校验会拒）。
- * 这一档就是"更新"的入口：动作是把这份**再下一遍**，不是另下一份到别处。
+ * 为什么后两档必须分开（第三圈第 6 层）：盘上那份可能是**我们发过的旧版本**
+ * （云端换了新版），也可能是**被改过 / 来路不明**的字节 —— 前者的正文我们认得了、
+ * 说得出来源；后者这台机器上查不出它属于哪一版。只说一句「需更新」是把"本机内容可不可信"
+ * 和"云端有没有新版"混成一句：用户既不知道自己的文件是不是被改过，也不知道该不该等更新。
+ *
+ * 三档不一致的（old / tampered）**共有一条边界**：不许应用、不许改、不许复制，
+ * 只能重新下载一份干净的 —— 见 [`isSuspectRelease`]。
  */
-export type ReleaseFileState = 'missing' | 'ok' | 'stale'
+export type ReleaseFileState = 'missing' | 'ok' | 'old' | 'tampered'
 
 export const RELEASE_STATE_TEXT: Record<ReleaseFileState, string> = {
   missing: '未下载',
   ok: '已下载',
-  stale: '需更新',
+  old: '旧版本',
+  tampered: '内容异常',
 }
 
 export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
   missing: '未下载：目录里登记了它，你机器上还没有',
   ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「应用」',
-  stale:
-    '需更新：盘上这一份与目录登记的字节不一样 —— 可能是目录换了新版，也可能是这份文件被手动动过。点「更新」重下一份',
+  old:
+    '旧版本：盘上这一份的字节与归档里那一版**逐字节相同** —— 它是我们发过的某一版旧版（云端已经换了新的）。' +
+    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「更新」换成当前版本',
+  tampered:
+    '内容异常：盘上这一份的字节既不是目录登记的当前版本，也不是我们发过的任何一版 —— ' +
+    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，只能重新下载一份干净的',
 }
+
+/** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
+export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
+  return state === 'old' || state === 'tampered'
+}
+
+/** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
+export const RELEASE_SUSPECT_WHY =
+  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「重新下载」换一份干净的回来'
 
 /** 「更新」那颗按钮的说明：它不是"删除重下"，旧份进归档，删除永远不是更新的一部分 */
 export const RELEASE_UPDATE_WHY =
   '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
+
+/**
+ * 「重新下载」那颗按钮的说明（只给**内容异常**那一档）。
+ *
+ * 它不是第二套机制：与「下载 / 更新」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
+ * 不同的只有说法 —— 这里要讲清"盘上那份我们不认"，因为用户多半不知道文件被谁动过。
+ */
+export const RELEASE_REPAIR_WHY =
+  '重新下载：盘上这一份我们不认得（不是目录登记的当前版本，也不是我们发过的任何一版）—— ' +
+  '再下一份干净的换上，落点与校验与「下载」是同一条管道'
 
 /**
  * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
@@ -425,20 +453,27 @@ export const ARCHIVE_DRAWER = {
 /**
  * 批量那一行的字：**这一批里有什么，决定它是"下载"还是"更新"**。
  *
- * 计数由调用方从行上的 `releaseState` 数出来（`missing` / `stale`），这里只负责措辞 ——
- * 批量不自己判状态，它是"多份单文件操作的组合"，判据还是那一个。
+ * 计数由调用方从行上的 `releaseState` 数出来，这里只负责措辞 —— 批量不自己判状态，
+ * 它是"多份单文件操作的组合"，判据还是那一个。三档分开说（未下载 / 需更新 / 内容异常），
+ * 因为用户要做的事不一样：前两种是补上官方那份，后一种是**盘上那份我们不认**。
  * `已下载的不进这一批`：这一层只解决"多份一起处理"，不解决"再下一遍已经对了的东西"。
  */
 export function releaseBatchText(
   missing: number,
   stale: number,
+  tampered: number,
 ): { count: string; label: string; why: string } {
-  const total = missing + stale
+  const total = missing + stale + tampered
   const label =
-    missing === 0 ? `更新 ${total} 份` : stale === 0 ? `下载 ${total} 份` : `下载并更新 ${total} 份`
+    missing === 0
+      ? `更新 ${total} 份`
+      : stale + tampered === 0
+        ? `下载 ${total} 份`
+        : `下载并更新 ${total} 份`
   const parts = [
     missing > 0 ? `未下载 ${missing} 份` : '',
     stale > 0 ? `需更新 ${stale} 份` : '',
+    tampered > 0 ? `内容异常 ${tampered} 份` : '',
   ].filter((s) => s !== '')
   return {
     count: parts.join(' · '),
@@ -1051,6 +1086,19 @@ export interface PresetRowsInput {
  * 大小是**发布时对产物真字节算的真值**（catalog 登记的），时间刻意没有
  * （catalog 没有 `generatedAt`，没有可信时间源不编一个）。
  */
+/**
+ * 交付行第二行那串小字：把人引到盘上的落点，**顺带把"盘上那份不对劲"这件事写在原地**。
+ *
+ * 三种话对应 [`ReleaseFileState`] 的三种"盘上有东西"：一致 / 旧版本 / 内容异常。
+ * 它不改任何判定（判定全在 `state` 上）—— 只是让用户在这一行上就能看出该不该信它。
+ */
+function releasePathText(p: ReleasePresetSource): string {
+  const at = `下载区 mkp · ${p.uid}`
+  const note =
+    p.state === 'old' ? '（旧版本）' : p.state === 'tampered' ? '（内容异常）' : ''
+  return `${at}${note}`
+}
+
 export interface ReleasePresetSource {
   /** `A1/STANDARD` 这种。行键沿用；下载 / 应用两个动作认 `fileName` */
   uid: string
@@ -1061,6 +1109,14 @@ export interface ReleasePresetSource {
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
   releaseVersion: string | null
+  /**
+   * 盘上那一份现在是什么（见 [`ReleaseFileState`]）。
+   *
+   * **算它的地方只有一处**：`usePresetData.readRelease` 把三个读（目录清单 / 下载区 /
+   * 认得出是哪一版吗）合成这一个字段。两张表都读它，**不许自己再判一次** ——
+   * 两处各判一次，迟早有一处忘了跟（"需更新"以前就是那样把坏档说成"未下载"的）。
+   */
+  state: ReleaseFileState
 }
 
 /** 一台机型下的一个文件：代表那一份 + 用到它的版本名与 id */
@@ -1273,19 +1329,17 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
   /*
    * 目录里登记的交付预设：下载之后它们就躺在下载区（`mkp/`，盘就是底账），
    * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**收盘上真有的那些**：
-   * 与目录对得上的是「已下载」，对不上的是「需更新」。两者都在盘上，
-   * 藏起后一种就等于对用户说"你机器上没有它"，而更新入口也就没了。
+   * 与目录一致的、以及不一致的（旧版本 / 内容异常）。四档全在盘上，
+   * 藏起后三种就等于对用户说"你机器上没有它"，而修复它的入口也就没了。
    * 「生效」认唯一底账（新世界 `run/active-preset.json`）里那一条（与官方行合流，不分两套）。
    */
-  const onDisk: { p: ReleasePresetSource; state: ReleaseFileState }[] = [
-    ...localReleases.map((p) => ({ p, state: 'ok' as const })),
-    ...staleReleases.map((p) => ({ p, state: 'stale' as const })),
-  ]
+  const onDisk = [...localReleases, ...staleReleases]
 
   const release = onDisk
     .filter(() => matchesKind(kind, 'mkp_preset'))
-    .filter(({ p }) => machineId === '' || p.machineId === machineId)
-    .map(({ p, state }): PresetLocalRow => {
+    .filter((p) => machineId === '' || p.machineId === machineId)
+    .map((p): PresetLocalRow => {
+      const state = p.state
       const live = active !== null && active.fileName === p.fileName
       return {
         /*
@@ -1301,8 +1355,8 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         /* 仓库里没有它，没有 assetId —— 「应用」认 fileName（页面里分流） */
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
-        /* 第二行小字：把人引到盘上的落点；与目录不符的那一份要把这点说出来 */
-        path: state === 'stale' ? `下载区 mkp · ${p.uid}（与目录不符）` : `下载区 mkp · ${p.uid}`,
+        /* 第二行小字：把人引到盘上的落点；盘上那份不对劲时把那件事写在这里 */
+        path: releasePathText(p),
         kind: 'mkp_preset',
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
@@ -1347,15 +1401,10 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     query,
     pinned,
     releasePresets,
-    localReleases,
-    staleReleases,
     releaseVersion,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
-  const localReleaseIds = new Set(localReleases.map((p) => p.uid))
-  /* 盘上有、但与目录不一致的那些 —— 云端表上它们不是「未下载」，是「需更新」 */
-  const staleReleaseIds = new Set(staleReleases.map((p) => p.uid))
 
   /*
    * 凡文件名在**云端最新发布**里打包过的，官方行不再列出 —— 发布行接管它
@@ -1407,12 +1456,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetCloudRow => {
       const live = active !== null && active.fileName === p.fileName
-      /* 三态：对得上目录 / 盘上有但对不上 / 还没有。两个读合起来才够（见 `ReleaseFileState`） */
-      const state: ReleaseFileState = localReleaseIds.has(p.uid)
-        ? 'ok'
-        : staleReleaseIds.has(p.uid)
-          ? 'stale'
-          : 'missing'
+      /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
+      const state = p.state
       return {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
         rowKey: `release-cloud:${p.fileName}`,

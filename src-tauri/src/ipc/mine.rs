@@ -84,11 +84,15 @@ pub struct CommittedDraftDto {
 /// 这是"临时编辑"那条链的第一步（总纲 §1③「预设 TOML 的一生」）：
 /// 用户改的永远是临时文件，点保存才另存进用户根；官方原件只有"云端换版本"能替换它。
 ///
-/// 两条前置条件都是**前置**，不靠报错提示：
+/// 三条前置条件都是**前置**，不靠报错提示：
 ///   - 只改 MKP 预设（TOML）—— 其它资源不是这一层的对象；
-///   - 盘上得真有那一份（没下载就没正文可改，先说"先去下载"）。
+///   - 盘上得真有那一份（没下载就没正文可改，先说"先去下载"）；
+///   - **盘上这份得与目录逐字节一致**（第六层：旧版本 / 被改过的不许改 —— 复制就当成
+///     存疑内容的原文，而另存之后它还会变成"我改过的那一份"）。判定在
+///     [`runtime::delivery::official_text`] 一处，界面不许自己再判一次。
 ///
-/// 已经有一份**同一来源**的草稿时：**接着改**（`reused: true`），不覆盖用户的改动。
+/// 已经有一份**同一来源**的草稿时：**接着改**（`reused: true`），不覆盖用户的改动
+/// （那种情况不读盘上的字节，所以上面第三条不成立）。
 #[tauri::command]
 pub async fn begin_preset_edit(
     app: AppHandle,
@@ -119,11 +123,14 @@ pub async fn begin_preset_edit(
             }
         }
 
-        let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
-            AppError::not_found(format!("{file_name} 还没下载到本机 —— 先下载，再改"))
-        })?;
-        let text = String::from_utf8(bytes)
-            .map_err(|_| AppError::corrupted(format!("{file_name} 不是 UTF-8 文本，改不了")))?;
+        /*
+         * 第六层的门禁：**内容存疑的那一份不许改**。
+         *
+         * 「改这份」要把盘上的字节当原文复制进临时文件 —— 而盘上这份与目录登记不一致时
+         * （旧版本 / 被改过），复制的就是存疑的内容，另存之后它还会变成"我改过的那一份"。
+         * 所以这一道闸在**入口**，不在界面：按钮没出现的地方也照样改不了。
+         */
+        let text = runtime::delivery::official_text(&root, file)?;
         let draft = runtime::state::save_draft(&root, &file.file_name, &file.sha256, &text)?;
         Ok(PresetDraftDto {
             source_file_name: draft.source_file_name,

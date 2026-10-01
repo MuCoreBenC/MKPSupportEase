@@ -78,8 +78,9 @@
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
  *   **批量**（云端表那一行）   `api.downloadCatalogFiles()`（多份）            真（同一套机制；**逐份结局**，
  *                            没成的各占提示条一行。范围 = 机型 + 类型，不受搜索词影响；已下载的不进来）
- *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`       真（两个读合起来才够三态：
- *                            未下载 / 已下载 / 需更新 —— 见 `ReleaseFileState`）
+ *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
+ *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
+ *                            见 `ReleaseFileState`）
  *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
  *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
  *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
@@ -119,9 +120,11 @@ import {
   DOWNLOAD_WHY,
   MISSING_METHOD,
   NO_ASSET_WHY,
+  RELEASE_SUSPECT_WHY,
   STATUS_TEXT,
   STATUS_WHY,
   UNSUPPORTED_TEXT,
+  isSuspectRelease,
   noContractText,
   notImplementedText,
   releaseBatchText,
@@ -335,11 +338,13 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const download = (row: PresetTableRow) => {
     if (row.releaseUid !== undefined) {
       /*
-       * 「需更新」走的是**同一条下载管道**（再下一遍，旧份自动归档）—— 所以两处的区别
-       * 只在动词与结果那句话上，行为一模一样。别在这里分支去找"另一个命令"：没有那个命令。
+       * 盘上那份不对劲的两档（旧版本 / 内容异常）走的是**同一条下载管道**（再下一遍，
+       * 旧份自动归档）—— 所以区别只在动词与结果那句话上，行为一模一样。
+       * 别在这里分支去找"另一个命令"：没有那个命令。
        */
-      const updating = row.releaseState === 'stale'
-      const verb = updating ? '更新' : '下载'
+      const repairing = row.releaseState === 'tampered'
+      const updating = repairing || row.releaseState === 'old'
+      const verb = repairing ? '重新下载' : updating ? '更新' : '下载'
       setBusyKey(row.rowKey)
       setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
@@ -349,9 +354,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           () => {
             setBusyKey(null)
             setNote({
-              text: updating
-                ? `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
-                : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
+              text: repairing
+                ? `已重新下载 ${row.fileName} —— 盘上那份不认得的，现在换成了目录登记的当前版本`
+                : updating
+                  ? `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
+                  : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
               bad: false,
             })
           },
@@ -399,7 +406,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const runBatch = () => {
     const { fileNames } = page.pending
     if (fileNames.length === 0 || batchBusy) return
-    const { label } = releaseBatchText(page.pending.missing, page.pending.stale)
+    const { label } = releaseBatchText(
+      page.pending.missing,
+      page.pending.stale,
+      page.pending.tampered,
+    )
     setBatchBusy(true)
     setNote({ text: `正在${label}…`, bad: false })
     data
@@ -663,11 +674,12 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
     if (row.scope === 'cloud') {
+      const repairing = row.releaseState === 'tampered'
       return [
         {
           id: 'download',
-          /* 盘上那一份与目录不符时这一项是「更新」：同一条管道，动词不同 */
-          label: row.releaseState === 'stale' ? '更新' : '下载',
+          /* 盘上那一份不对劲时这一项换词：同一条管道，动词不同（旧版本→更新，内容异常→重新下载） */
+          label: repairing ? '重新下载' : row.releaseState === 'old' ? '更新' : '下载',
           onSelect: () => download(row),
         },
         {
@@ -684,13 +696,24 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     /* 临时编辑的入口：只有"与目录一致"的交付行有（它才有正文可改，且内容不存疑） */
     const canEdit = row.origin === 'release' && row.releaseState === 'ok'
+    /*
+     * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
+     * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
+     * 不能让它换个名字继续活着。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了。
+     */
+    const suspect = isSuspectRelease(row.releaseState)
 
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
       ...(canEdit
         ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
         : []),
-      { id: 'copy', label: '复制', onSelect: () => sayNoContract(MISSING_METHOD.copy, row) },
+      {
+        id: 'copy',
+        label: '复制',
+        disabled: suspect ? RELEASE_SUSPECT_WHY : undefined,
+        onSelect: () => sayNoContract(MISSING_METHOD.copy, row),
+      },
       {
         id: 'rename',
         label: '重命名',
@@ -743,7 +766,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
   const table = page.scope === 'local' ? page.local : page.cloud
   /* 批量那一行的字：这一批里有什么，决定它是「下载」「更新」还是「下载并更新」 */
-  const batch = releaseBatchText(page.pending.missing, page.pending.stale)
+  const batch = releaseBatchText(
+    page.pending.missing,
+    page.pending.stale,
+    page.pending.tampered,
+  )
   /* 这一份在归档里有几个旧版本。按文件名对（与下载 / 应用同一套口径） */
   const archiveCountOf = (fileName: string): number =>
     data.archived.filter((a) => a.fileName === fileName).length

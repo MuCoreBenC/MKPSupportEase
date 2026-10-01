@@ -146,6 +146,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_active_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
+        // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
+        ipc::catalog::get_delivery_trust,
         ipc::catalog::get_archived_files,
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,
@@ -190,6 +192,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_active_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
+        // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
+        ipc::catalog::get_delivery_trust,
         ipc::catalog::get_archived_files,
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,

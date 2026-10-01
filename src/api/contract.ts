@@ -654,6 +654,30 @@ export interface ArchivedFile {
 }
 
 /**
+ * 盘上这一份**认得出是哪一版吗**（第三圈第 6 层：官方文件的 SHA 报警）。
+ *
+ * **只答"本机这份是不是我们认可的官方内容"**，不掺"云端有没有更新"（后者是
+ * [`checkRemoteUpdate`]，比的是目录指纹，与本机这一份的字节无关）。混成一句「需更新」，
+ * 用户既不知道自己的文件是不是被改过，也不知道该不该等更新 —— 所以它是单独一条读。
+ *
+ * **只列有事的**：还没下载、和与目录逐字节一致的两种不出现（它们没有问题，
+ * 列进来只会把真正要处理的那几份淹掉）。
+ */
+export interface DeliveryTrust {
+  fileName: string
+  /**
+   * `old`      认得出它是官方的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
+   * `tampered` 目录、归档、旧目录都对不上 —— 这台机器上查不出它属于哪一版
+   */
+  verdict: 'old' | 'tampered'
+  /**
+   * `old` 且归档区里有它字节时给（`archive/mkp/presets/A1-fast.toml`）—— 界面据此
+   * 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
+   */
+  archivedPath: string | null
+}
+
+/**
  * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
  * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
  * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
@@ -923,8 +947,20 @@ export interface MkpApi {
   /**
    * 有更新的文件名：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
    * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
+   *
+   * **它只说"不一致"，不说"因为什么"** —— 分成哪两种（旧版本 / 查不出它是哪一版）
+   * 看 [`getDeliveryTrust`]。
    */
   getStaleFiles(): Promise<string[]>
+
+  /**
+   * 盘上这几份交付预设**认得出是哪一版吗**（第三圈第 6 层）。**只列有事的**
+   * （没下载 / 与目录一致的两种不出现）。
+   *
+   * 与 [`getStaleFiles`] 是同一个事实的两层：那一条说"与目录不一致"，这一条说
+   * "那不一致的字节是不是我们发过的某一版"。**它与"云端有没有更新"也是两件事**。
+   */
+  getDeliveryTrust(): Promise<DeliveryTrust[]>
 
   /**
    * 归档区里有什么：官方文件换版本时**被换下来的那些旧版本**。
