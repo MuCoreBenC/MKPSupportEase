@@ -937,7 +937,11 @@ mod tests {
                     .to_string_lossy()
                     .replace('\\', "/")
             })
-            .filter(|rel| rel != MANIFEST_FILE && !CONTENT_FILES.contains(&rel.as_str()))
+            .filter(|rel| {
+                rel != MANIFEST_FILE
+                    && rel != NEW_CATALOG_FILE
+                    && !CONTENT_FILES.contains(&rel.as_str())
+            })
             .collect();
         actual_rel.sort();
         let mut listed: Vec<String> = assets
@@ -982,7 +986,11 @@ mod tests {
 
         let expected = deliverable_set(&book);
         // 反空转锚点：content 3 + manifest 1 + 资产 11 + mkp 9（五台机型全部有套餐）= 24
-        assert_eq!(expected.len(), 24, "交付集合条数变了 —— 说清为什么");
+        assert_eq!(
+            expected.len(),
+            25,
+            "交付集合条数变了 —— 说清为什么（catalog.json 进了交付集合）"
+        );
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
         // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状
         let mkp_names: std::collections::BTreeSet<String> = real

@@ -29,8 +29,9 @@
 ## 2. 怎么验证（每一轮都要全绿才推）
 
 ```bash
-cargo test                                   # 139 条（在仓库根跑，workspace 全成员）
-cargo clippy --all-targets -- -D warnings    # 两种 feature 都要：默认 + --features workbench
+cargo test                                   # 默认 feature（在仓库根跑，workspace 全成员）
+cargo test -p mkp-support-ease --features workbench --lib   # **workbench 的判据也要跑**（CI 两个都跑）
+cargo clippy --all-targets -- -D warnings    # clippy 两种 feature 都要：默认 + --features workbench
 cargo fmt --check                            # CI 有格式 job
 npm run build && npm run check:bundle        # 前端构建 + 判据 1（安装包产物扫描）
 npx eslint <改过的文件>                       # CI 跑全量 lint
