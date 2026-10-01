@@ -1,5 +1,12 @@
 //! 三层取值与来源层（doc §3.1、§3.6）。
 //!
+//! **住在这里而不是工作台里**：客户端预设页要显示每项参数的有效值与来源层，
+//! 而那正是这一份算法。工作台侧通过 `workbench::domain::layer` 这个名字用它
+//! （别名，见 `workbench/domain/mod.rs`）。
+//!
+//! 它**不碰盘**：只拿一个 `&ParamRegistry` 与两张稀疏覆盖表算，
+//! 所以两边各自的数据根都能喂给它。
+//!
 //! ```text
 //! 出厂默认（param_registry.defaultValue，全局单值）
 //!   ← 机型基底（machineVariants 的裸键，比如 `A1`）
@@ -64,7 +71,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::workbench::presets::ParamRegistry as Registry;
+use crate::presetdata::ParamRegistry as Registry;
 
 /// 一层的稀疏覆盖表。`BTreeMap` 不只是为了好看 ——
 /// 指纹要按稳定顺序算，`HashMap` 每次进程的遍历顺序都不同
@@ -265,7 +272,6 @@ impl<'a> Layers<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::paths;
 
     /// 三个字段：一个普通的、一个出厂默认是**空串**的、一个只给 P1S 的
     fn registry() -> (tempfile::TempDir, Registry) {
@@ -299,9 +305,8 @@ mod tests {
                 { "id": "i3", "paramKey": "toolhead.gone" }
             ] }] }]
         });
-        let r =
-            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
-                .unwrap();
+        let r = crate::presetdata::registry::load_from_json_fixture(d.path(), &params, &layout)
+            .unwrap();
         (d, r)
     }
 
@@ -574,9 +579,8 @@ mod tests {
                 { "id": "i0", "paramKey": "toolhead.offset.x" }
             ] }] }]
         });
-        let r =
-            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
-                .unwrap();
+        let r = crate::presetdata::registry::load_from_json_fixture(d.path(), &params, &layout)
+            .unwrap();
         (d, r)
     }
 
@@ -584,7 +588,7 @@ mod tests {
     /// 没有它们，上面那条"空串是值"的判据就是在测一个不存在的情况
     #[test]
     fn real_data_really_has_empty_string_defaults() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条对齐检查未执行（不是通过）");
             return;
         };

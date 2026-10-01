@@ -41,18 +41,57 @@ pub mod assets;
 pub mod bundles;
 pub mod catalog;
 pub mod registry;
+/// 三层取值（出厂 → 机型基底 → 版本覆盖）与来源层。**纯计算**，不碰盘。
+///
+/// 原住 `workbench/domain/layer.rs`。搬过来的理由：客户端预设页要显示每项参数的
+/// 有效值与来源，而那正是这一份算法 —— **代码共用一份，两边各自的数据根喂给它**。
+pub mod resolve;
 
 use std::path::{Path, PathBuf};
 
 use toml_edit::DocumentMut;
 
 use crate::error::AppError;
-use crate::workbench::paths;
 
 pub use assets::{Asset, AssetKind, Assets};
 pub use bundles::{Bundle, Bundles};
-pub use catalog::{Brand, Catalog, Machine, MachineField, MachineVersion, VersionField, Zone};
+pub use catalog::{
+    Brand, Catalog, Dimensions, Machine, MachineField, MachineVersion, VersionField, Zone,
+};
 pub use registry::{ParamRegistry, ShowOp, ShowWhen, TabMeta, UiComponent, ValueType};
+pub use resolve::{no_overrides, Layers, Level, Origin, Overrides, ValueOrigin};
+
+/// **测试专用的**仓库预设根：`<repo>/presets`。
+///
+/// 这一层**不决定数据根** —— 根由调用方给（[`Presets::load_from`]）。这个函数只为
+/// 「拿真数据当判据」的测试存在，且 `CARGO_MANIFEST_DIR` 是编译期的仓库路径，
+/// **运行时不会有任何人调用它**（正式客户端跑在没有仓库的机器上）。
+#[cfg(test)]
+pub(crate) fn repo_presets_root() -> Option<PathBuf> {
+    // CARGO_MANIFEST_DIR = <repo>/src-tauri
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("presets");
+    // 判据是**标志文件**而不是 `is_dir()`：一个同名空目录不该骗过定位
+    root.join("registry")
+        .join("param_registry.toml")
+        .is_file()
+        .then_some(root)
+}
+
+/// **测试专用的**仓库资产载荷根：`<repo>/public/assets`。
+///
+/// 与 [`repo_presets_root`] 同一条理由：只为"拿真数据当判据"的测试存在。
+/// 定义与载荷在仓库里本来就分家（`presets/assets.toml` ↔ `public/assets/`），
+/// 所以运行时的载荷根必须由调用方给（[`Presets::set_asset_root`]）。
+#[cfg(test)]
+pub(crate) fn repo_assets_root() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("public")
+        .join("assets");
+    root.is_dir().then_some(root)
+}
 
 /// 读一个源文件。读不到要**说出是哪个文件** —— 只说"读不到"没法据以行动
 pub(crate) fn read(path: &Path) -> Result<String, AppError> {
@@ -109,6 +148,21 @@ pub(crate) fn literal_str(s: &str) -> toml_edit::Item {
 
 pub(crate) fn can_be_literal(s: &str) -> bool {
     !s.contains('\'') && !s.chars().any(char::is_control)
+}
+
+/// MKP 产物的文件名：`<机型 id>-<版本 id 小写>.toml`（`A1` + `FASTV3.3` → `A1-fastv3.3.toml`）。
+///
+/// # 为什么这里有一份副本
+///
+/// 权威实现在 `crates/preset/src/generate.rs::file_name`（由 `preset_file_name` 重导出），
+/// 工作台那一侧转调它。**客户端不能转调** —— 那个 crate 挂在 `workbench` feature 下，
+/// 是个 optional 依赖，正式客户端里根本不存在。
+///
+/// 所以这里放一份**逐字副本**，由 [`tests::mkp_file_name_matches_the_generator`]
+/// 钉住 `generate.rs` 自己那几条样例。漂移的表现很硬：消费端按这个名字找不到文件，
+/// 而界面上只表现为"这个版本没有产物"，没有任何一步会报错。
+pub fn mkp_file_name(machine: &str, version: &str) -> String {
+    format!("{machine}-{}.toml", version.to_lowercase())
 }
 
 /// 一个"可选引用"字段：**trim 后非空才算引用**。
@@ -198,19 +252,21 @@ pub struct Presets {
 }
 
 impl Presets {
-    /// 真仓库。定位不到时**返回错误而不是空数据** ——
-    /// 用空数据装成能跑，会让人以为"我们没有机型"，而那和"读不出来"是两件事
-    pub fn load() -> Result<Self, AppError> {
-        let root = paths::presets_root().ok_or_else(|| {
-            AppError::not_found("找不到我们的预设数据目录 presets/").with_detail(
-                "期望 <repo>/presets/registry/param_registry.toml 存在；\
-                 数据从 mkpse-presets/source/ 搬过来（见 b04 doc §1.2）"
-                    .to_owned(),
-            )
-        })?;
-        Self::load_from(&root)
-    }
-
+    /// 从一个**由调用方给定的**根读进来。
+    ///
+    /// # 为什么不在这里决定根
+    ///
+    /// 这是客户端与工作台之间那条边界的落点：**代码共用一份，数据根必须是两套**。
+    ///
+    /// - 客户端：`Presets::load_from(<appDataDir>/presets)` —— 用户机器上的正式数据；
+    /// - 工作台：`Presets::load_from(<repo>/presets)` —— 仓库里的开发源数据。
+    ///
+    /// 这一层只要一个 root，**不猜、不 fallback、不读环境变量**。定位根的职责
+    /// 分别住在 `workbench::paths`（仓库）与客户端那一侧（`appDataDir`）。
+    ///
+    /// # 读不到就报错，不用空数据装成能跑
+    ///
+    /// 空的机型列表与"读不出来"是两件事，后者要能被说出来。
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
         let out = Self {
             catalog: Catalog::load_from(root)?,
@@ -225,6 +281,29 @@ impl Presets {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// 重读**同一个根**，载荷根跟着走。
+    ///
+    /// 重读只有这一条出口：盘上刚被别处改过（机型页直接写 `presets/`）时要靠它刷新。
+    /// 走 [`Self::load_from`] 重新拼一个的话，**载荷根会悄悄丢掉** ——
+    /// 表现是全部资产突然变成"文件不在"，而那种错查起来最费劲。
+    pub fn reload(&self) -> Result<Self, AppError> {
+        let mut p = Self::load_from(&self.root)?;
+        if let Some(asset_root) = self.assets.asset_root() {
+            p.set_asset_root(asset_root);
+        }
+        Ok(p)
+    }
+
+    /// 资产**载荷**根（`path` 那一栏的基准）。**可选，且由调用方给**。
+    ///
+    /// 定义（`presets/assets.toml`）与载荷（资产文件本体）本来就是两个地方：
+    /// 工作台那份在仓库的 `public/assets/`，而客户端这一轮**只释放定义、不释放文件本体**，
+    /// 所以它压根没有载荷根 —— 这时 [`Assets::present`] 一律为 false，
+    /// 界面上表现为"文件还没到"，而不是一个查不出来的状态。
+    pub fn set_asset_root(&mut self, root: &Path) {
+        self.assets.set_asset_root(root);
     }
 
     /// 写一个机型 / 版本的值，**写完落盘**（原子写）。
@@ -431,7 +510,15 @@ impl Presets {
     ///
     /// 全部通过才落一个文件（`bundles.toml`），由 [`super::bundles::Bundles::set_refs`]
     /// 保证内存与文档面一起改。内容没变就不写 —— `updatedAt` 不能被一次空操作刷新。
-    pub fn set_bundle_refs(&mut self, bundle_id: &str, refs: &[String]) -> Result<bool, AppError> {
+    ///
+    /// `now_iso8601` 由**调用方**给（工作台给 `workbench::clock::now_iso8601()`）：
+    /// 这一层不该为了写一个日期而把时间源也认下来 —— 与"根由调用方给"同一条纪律。
+    pub fn set_bundle_refs(
+        &mut self,
+        bundle_id: &str,
+        refs: &[String],
+        now_iso8601: &str,
+    ) -> Result<bool, AppError> {
         let Some(cur) = self.bundles.get(bundle_id) else {
             return Err(AppError::not_found(format!("查无此套餐：{bundle_id}")));
         };
@@ -469,7 +556,7 @@ impl Presets {
             ));
         }
 
-        self.bundles.set_refs(bundle_id, refs)?;
+        self.bundles.set_refs(bundle_id, refs, now_iso8601)?;
         self.bundles.write()?;
         Ok(true)
     }
@@ -618,8 +705,26 @@ mod tests {
     /// 真数据上的对齐检查。定位不到就**说清楚这条没执行**，不当成通过 ——
     /// 静默 skip 是这个项目里反复踩过的坑
     fn real() -> Option<Presets> {
-        let root = paths::presets_root()?;
+        let root = repo_presets_root()?;
         Some(Presets::load_from(&root).expect("presets/ 里的机型目录读不齐"))
+    }
+
+    /// **产物命名规则的那份副本必须与生成器一致。**
+    ///
+    /// 样例逐字取自 `crates/preset/src/generate.rs` 自己的测试。客户端里没有那个 crate
+    /// （它挂在 `workbench` feature 下），所以只能靠这一条钉住 —— 漂移的时候产物名对不上，
+    /// 消费端会以为"这个版本没有文件"。
+    #[test]
+    fn mkp_file_name_matches_the_generator() {
+        assert_eq!(mkp_file_name("A1", "FASTV3.3"), "A1-fastv3.3.toml");
+        assert_eq!(mkp_file_name("A1", "fastv3.3"), "A1-fastv3.3.toml");
+        assert_eq!(
+            mkp_file_name("A1_MINI", "STANDARD"),
+            "A1_MINI-standard.toml"
+        );
+        assert_eq!(mkp_file_name("P1S", "lite"), "P1S-lite.toml");
+        // 大小写不敏感：命名规则只把版本那段小写，机型 id 原样
+        assert_eq!(mkp_file_name("A1", "Fast"), mkp_file_name("A1", "FAST"));
     }
 
     #[test]
@@ -719,7 +824,7 @@ mod tests {
     /// 扫 `presets/` 下全部 `.toml`。**不看 `*.json`** —— 那些是上游产物，不在我们写回的面上。
     #[test]
     fn the_source_files_keep_lf_line_endings() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
@@ -752,10 +857,15 @@ mod tests {
     /// 这条管"文件真的在不在" —— 那是搬运的验收，也是 Task 11.1 的 warning 级。
     #[test]
     fn every_machine_asset_ref_points_at_a_real_file() {
-        let Some(p) = real() else {
+        let Some(mut p) = real() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
+        let Some(asset_root) = repo_assets_root() else {
+            eprintln!("没定位到 <repo>/public/assets，这条检查未执行（不是通过）");
+            return;
+        };
+        p.set_asset_root(&asset_root);
         let mut checked = 0usize;
         for m in p.catalog.machines() {
             for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
@@ -787,16 +897,21 @@ mod tests {
     ///
     /// 用夹具而不是真数据：写路径的测试不许动真仓库（ bundles.toml 是真源，别的
     /// 测试还在并行读它）。
+    ///
+    /// 写在 `workbench` feature 下：夹具与时间源都住在工作台那一侧，而这一层
+    /// 刻意不认它们（写路径的日期由调用方给）。
+    #[cfg(feature = "workbench")]
     #[test]
     fn set_bundle_refs_replaces_the_list_or_refuses() {
         let f = crate::workbench::domain::testkit::Fixture::load();
         let mut presets = f.presets;
         let file = presets.bundles.file().to_path_buf();
         let original = std::fs::read_to_string(&file).expect("读夹具原文");
+        let now = || crate::workbench::clock::now_iso8601();
 
         // 内容没变：Ok(false)，文件一个字节都不动（updatedAt 不许被空操作刷新）
         let changed = presets
-            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()])
+            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()], &now())
             .expect("没变也是成功的");
         assert!(!changed);
         assert_eq!(
@@ -810,6 +925,7 @@ mod tests {
             .set_bundle_refs(
                 "a1_default",
                 &["p1s-bbs-02-010".to_owned(), "a1-bbs-04-020".to_owned()],
+                &now(),
             )
             .expect("换内容");
         assert!(changed);
@@ -832,7 +948,7 @@ mod tests {
 
         // 悬空引用被拦；拦下之后文件还是刚才那份
         let err = presets
-            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()])
+            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()], &now())
             .expect_err("悬空引用必须被拦");
         assert!(err.message.contains("不存在"), "实测：{}", err.message);
         assert_eq!(
@@ -843,25 +959,26 @@ mod tests {
 
         // 只装图片不装 BBS 也被拦（10.8 成套配发）
         let err = presets
-            .set_bundle_refs("A1_default", &["a1-image".to_owned()])
+            .set_bundle_refs("A1_default", &["a1-image".to_owned()], &now())
             .expect_err("没有 BBS 必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
         // 空列表同一条判据的另一端：加载期拦空 assetRefs，这里拦写出去的空套餐
         let err = presets
-            .set_bundle_refs("A1_default", &[])
+            .set_bundle_refs("A1_default", &[], &now())
             .expect_err("空套餐必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
         // 查无此套餐
         assert!(presets
-            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()])
+            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()], &now())
             .is_err());
     }
 
     /// **反查与删除守卫**（b05 Task 9.4 / 9.5，套餐那一档 b05 Task 10）。
     ///
     /// 用夹具而不是真数据：真数据里删东西是破坏性的，而这里要验的正是"删"这条路径。
+    #[cfg(feature = "workbench")]
     #[test]
     fn an_asset_that_is_still_used_cannot_be_removed() {
         let f = crate::workbench::domain::testkit::Fixture::load();
@@ -927,6 +1044,7 @@ mod tests {
     }
 
     /// 删一个不存在的资产要**报"没有"**，而不是静默成功
+    #[cfg(feature = "workbench")]
     #[test]
     fn removing_an_unknown_asset_says_so() {
         let f = crate::workbench::domain::testkit::Fixture::load();

@@ -17,9 +17,13 @@
 //!
 //! # 文件本体在哪
 //!
-//! 不在本文件旁边，而在**资产根** `<repo>/public/assets/` 下（[`paths::assets_root`]）。
-//! 条目里的 `path` **永远相对资产根**，不相对本文件所在目录 —— 这条是刻意的：
-//! 定义（①层，`presets/`）与载荷（②层，`public/assets/`）本来就分家，路径的基准只有一处。
+//! 不在本文件旁边，而在**资产载荷根**下（工作台那边是 `<repo>/public/assets/`）。
+//! 条目里的 `path` **永远相对载荷根**，不相对本文件所在目录 —— 这条是刻意的：
+//! 定义（①层，`presets/`）与载荷本来就是分家，路径的基准只有一处。
+//!
+//! **载荷根由调用方给**（[`Assets::set_asset_root`]）：这一层不决定数据在哪里。
+//! 客户端这一轮只释放定义、不释放文件本体，所以它压根没有载荷根 ——
+//! 那时 [`Assets::resolve`] 报"没有载荷根"，[`Assets::present`] 一律为 false。
 //!
 //! # 加载期就查掉的两条（Task 8.8）
 //!
@@ -36,8 +40,7 @@ use serde::{Deserialize, Serialize};
 use toml_edit::DocumentMut;
 
 use crate::error::AppError;
-use crate::fsx::paths::resolve_in;
-use crate::workbench::paths;
+use crate::fsx::paths::{check_relative, resolve_in};
 
 /// 定义文件（`presets/` 下）
 pub const ASSETS_FILE: &str = "assets.toml";
@@ -116,6 +119,8 @@ pub struct Assets {
     items: Vec<Asset>,
     doc: DocumentMut,
     file: PathBuf,
+    /// 载荷根。**由调用方给**，没有就是"这一侧没有资产文件本体"（见模块头）
+    asset_root: Option<PathBuf>,
 }
 
 impl Assets {
@@ -134,9 +139,19 @@ impl Assets {
             items: parsed.assets,
             doc,
             file,
+            asset_root: None,
         };
         out.check()?;
         Ok(out)
+    }
+
+    /// 载荷根。**由调用方给**（工作台给 `<repo>/public/assets`）—— 这一层不决定数据在哪
+    pub fn set_asset_root(&mut self, root: &Path) {
+        self.asset_root = Some(root.to_path_buf());
+    }
+
+    pub fn asset_root(&self) -> Option<&Path> {
+        self.asset_root.as_deref()
     }
 
     pub fn items(&self) -> &[Asset] {
@@ -155,13 +170,21 @@ impl Assets {
         self.items.iter().find(|a| a.id.to_lowercase() == want)
     }
 
-    /// 一个条目的**真实路径**：资产根 + `path`，走 [`resolve_in`] 的三道闸。
+    /// 一个条目的**真实路径**：载荷根 + `path`，走 [`resolve_in`] 的三道闸。
+    ///
+    /// 没有载荷根时报错而不是猜一个 —— 猜出来的路径要么查不到文件、要么查到别人的文件。
     pub fn resolve(&self, asset: &Asset) -> Result<PathBuf, AppError> {
-        let root = paths::assets_root()?;
-        resolve_in(&root, asset.path.trim()).map_err(|e| {
+        let root = self.asset_root.as_ref().ok_or_else(|| {
+            AppError::not_found("这一侧没有资产载荷根").with_detail(
+                "资产文件本体与定义分家：定义在 presets/assets.toml，载荷在 \
+                 public/assets/。没有载荷根时按「文件还没到」处理，不要猜路径"
+                    .to_owned(),
+            )
+        })?;
+        resolve_in(root, asset.path.trim()).map_err(|e| {
             AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", asset.id, asset.path))
                 .with_detail(format!(
-                    "path 必须落在资产根（{}）之内，且只能是相对路径；原错误：{e}",
+                    "path 必须落在资产载荷根（{}）之内，且只能是相对路径；原错误：{e}",
                     root.display()
                 ))
         })
@@ -320,8 +343,14 @@ impl Assets {
                 a.id
             )));
         }
-        // 路径：走那道防穿越闸（顺带证明它不是空的）
-        let _ = self.resolve(a)?;
+        // 路径：走那两道不需要根的闸（非空 / 非绝对 / 无 `..`，顺带证明它不是空的）。
+        // **第三道（比真实路径防符号链接）要有载荷根才查得了**，那一步在 [`Self::resolve`]。
+        // 加载期不拿载荷根：客户端这一轮压根没有资产文件本体，而"路径不许 `../x`"
+        // 这条判据与根在不在无关
+        check_relative(a.path.trim()).map_err(|e| {
+            AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", a.id, a.path))
+                .with_detail(e.to_string())
+        })?;
 
         match a.kind {
             AssetKind::SlicerProfile => {
@@ -576,7 +605,7 @@ mod tests {
     /// 真仓库那份骨架：读得通、零编辑往返逐字节相同
     #[test]
     fn the_real_assets_file_loads_and_roundtrips() {
-        let Some(root) = crate::workbench::paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             panic!("找不到 <repo>/presets —— 这条判据不能跳过");
         };
         let a = Assets::load_from(&root).expect("presets/assets.toml 必须读得通");

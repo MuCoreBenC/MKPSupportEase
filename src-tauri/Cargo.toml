@@ -26,7 +26,7 @@ tauri-build = { version = "2.5.1", features = [] }
 # 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
 [features]
 default = []
-workbench = ["dep:sha2", "dep:time", "dep:toml_edit", "dep:mkpse-preset"]
+workbench = ["dep:time", "dep:mkpse-preset"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -44,23 +44,24 @@ tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
 
-# 只有 workbench feature 用得到的两个：产物指纹与发布时间戳。
-# optional = true 的意思是"默认构建里本 crate 用不上它们"。
-# 注意 sha2 本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的收益不是
-# "少编一个 crate"，而是**默认构建的代码里 `use sha2` 编不过** —— 隔离靠的是这个，不是包体积
-sha2 = { workspace = true, optional = true }
+# 只有 workbench feature 用得到的：发布时间戳（`clock`）。
+# optional = true 的意思是"默认构建里本 crate 用不上它"。
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+# 指纹（`presetdata::resolve::Layers::fingerprint`）与预设体摘要都要它。
+# 它本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的成本是零。
+sha2.workspace = true
+
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
-# **选它而不是 `toml` 是一条设计决定，不是口味**：工作台要编辑 `presets/*.toml`，
+# **选它而不是 `toml` 是一条设计决定，不是口味**：预设层要编辑 `presets/*.toml`，
 # 而「读进来不改再写出去必须字节不变」是往那个目录写第一个字节之前必须先绿的判据。
 # 用 `toml` 反序列化再重新序列化的话，那条判据要靠我复刻别人 writer 的引号风格、
 # 键序、浮点格式才能成立 —— 那是最脆的一类承诺。
 # `toml_edit` 保留原文与格式，只改被改的那一处，于是保真在**构造上**成立。
 #
-# 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）；`optional` 留在这里，
-# 隔离靠的是「默认构建里 `use toml_edit` 编不过」，不是依赖图里没有它。
-toml_edit = { workspace = true, optional = true }
+# **不再是 optional**：`presetdata`（客户端也在编）读 `presets/*.toml` 用的就是它。
+# 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）。
+toml_edit.workspace = true
 
 # 预设解析 crate。工作台只为**借一个函数**：产物命名规则（`preset::preset_file_name`，
 # 权威实现见 `crates/preset/src/generate.rs`，规范见 `docs/ARCHITECTURE.md` §10）。

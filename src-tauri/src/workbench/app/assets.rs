@@ -34,6 +34,7 @@ use serde::Serialize;
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::domain::{BbsAssign, Visibility};
+use crate::workbench::load_presets;
 use crate::workbench::paths;
 use crate::workbench::presets::{AssetKind, Presets};
 
@@ -320,7 +321,7 @@ pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
 #[tauri::command]
 pub fn wb_asset_usage(asset_id: String) -> Result<AssetUsageView, AppError> {
     traced("wb_asset_usage", |_| {
-        let presets = Presets::load()?;
+        let presets = load_presets()?;
         let usage = presets.asset_usage(&asset_id)?;
         Ok(AssetUsageView {
             id: asset_id.clone(),

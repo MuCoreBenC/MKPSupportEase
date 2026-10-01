@@ -18,7 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use toml_edit::DocumentMut;
 
 use crate::error::AppError;
@@ -51,6 +51,89 @@ pub struct MachineVersion {
 #[derive(Debug, Clone)]
 pub struct Zone {
     pub points: Vec<(f64, f64)>,
+}
+
+/* ---------- 机型尺寸：`[dimensions]` 全族 ----------
+ *
+ * 这一族字段的读者是客户端预设页（它要画床身、禁区与校准点）与工作台的尺寸页。
+ * 字段名与外层契约 `src/api/contract.ts` 的 `MachineDimensions` **一一对应**，
+ * 所以序列化时 `camelCase` 一开就直接对得上，中间不需要再翻译一层。
+ *
+ * 为什么现在才建模：早先只问「有没有 `[dimensions]`」（占位机型整台跳过），
+ * 字段本身一直躺在 `doc` 里没丢。这一轮客户端要显示，就得逐格定死 ——
+ * 上游那里是 `map[string]any`，叶子名字都不保证，定死后少一格就编译不过。
+ */
+
+/// 床身尺寸，mm
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BedSize {
+    pub width: f64,
+    pub depth: f64,
+}
+
+/// 喷头可达范围，mm
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovementRange {
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_y: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+/// 可涂胶范围 + 擦料点的 X 坐标
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlueArea {
+    pub glue_min_x: f64,
+    pub glue_max_x: f64,
+    pub glue_min_y: f64,
+    pub glue_max_y: f64,
+    pub wipe_x: f64,
+}
+
+/// 校准时笔尖要走的那几个点
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationPoints {
+    pub l_shape_base_x: f64,
+    pub l_shape_base_y: f64,
+    pub x_line_x: f64,
+    pub x_line_y: f64,
+    pub x_line_y_end: f64,
+    pub y_line_x: f64,
+    pub y_line_x_end: f64,
+    pub y_line_y: f64,
+    pub z_start_x: f64,
+    pub z_start_y: f64,
+}
+
+/// 机型标记
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineFlags {
+    /// G-code 里用来认机型的那行注释
+    pub gcode_marker: String,
+    pub has_second_fan: bool,
+}
+
+/// 一台机型的尺寸。**挂在机型上而不是版本上** —— 换快拆件不会改床身尺寸。
+///
+/// `Machine::dimensions` 为 `None` = 这台机型还没有 `[dimensions]`（占位机型），
+/// 与 [`Machine::has_dimensions`] 同一件事的两种表达：前者只在要显示时用，
+/// 后者被工作台的交付可达性判断用了二十来处（保留是为了不让那一片跟着改）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dimensions {
+    pub bed_size: BedSize,
+    pub movement_range: MovementRange,
+    pub glue_area: GlueArea,
+    pub calibration: CalibrationPoints,
+    /// 边缘留白，mm
+    pub edge_zone: f64,
+    pub flags: MachineFlags,
 }
 
 /// 版本身上可以改的那几格。
@@ -123,9 +206,14 @@ pub struct Machine {
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
     pub icon: Option<String>,
-    /// 这一轮**不建细模型**：尺寸页是后面的任务，现在只需要知道有没有。
-    /// 字段本身在 `doc` 里一个不少 —— 建模不全不等于会丢
+    /// 机型文件里有没有 `[dimensions]`。**占位机型整台跳过**（工作台的交付可达性用它）
     pub has_dimensions: bool,
+    /// `[dimensions]` 的逐格视图。`None` = 这台机型还没有那一节。
+    ///
+    /// **与 [`Machine::has_dimensions`] 是同一件事**，两处都在 [`load_machines`] 里一次读出
+    /// （构造点只有那一个与 `add_machine`），所以不会各说各话。保留布尔那份是因为
+    /// 工作台的交付可达性判据用了它二十来处 —— 那一片不该为客户端加一个字段而跟着改。
+    pub dimensions: Option<Dimensions>,
     pub versions: Vec<MachineVersion>,
     doc: DocumentMut,
     file: PathBuf,
@@ -583,6 +671,7 @@ impl Catalog {
             image: None,
             icon: None,
             has_dimensions: false,
+            dimensions: None,
             versions: Vec::new(),
             doc,
             file,
@@ -746,6 +835,9 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
             })
             .unwrap_or_default();
 
+        // 尺寸那一节读一次，两个字段从这里一起出 —— 两处各判一次就会各说各话
+        let dimensions = load_dimensions(&doc, &file)?;
+
         out.push(Machine {
             display: s("display").unwrap_or_else(|| id.clone()),
             name: s("name").unwrap_or_default(),
@@ -762,7 +854,8 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                 .unwrap_or_default(),
             image: s("image"),
             icon: s("icon"),
-            has_dimensions: doc.get("dimensions").is_some(),
+            has_dimensions: dimensions.is_some(),
+            dimensions,
             versions,
             id,
             doc,
@@ -770,6 +863,111 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
         });
     }
     Ok(out)
+}
+
+/// 读一格数字。TOML 里 `10.0` 是 float、`10` 是 integer，**两种写法都要认** ——
+/// 上游手写时两种都出现过，只认 float 的话一个 `maxZ = 999` 就会让整台机型读不出来
+fn dim_num(t: &toml_edit::Table, k: &str, file: &Path, ctx: &str) -> Result<f64, AppError> {
+    let v = t
+        .get(k)
+        .ok_or_else(|| AppError::corrupted(format!("{} 的 [{ctx}] 缺了 {k}", file.display())))?;
+    v.as_float()
+        .or_else(|| v.as_integer().map(|i| i as f64))
+        .ok_or_else(|| {
+            AppError::corrupted(format!(
+                "{} 的 [{ctx}].{k} 不是数字：{}",
+                file.display(),
+                v.to_string().trim()
+            ))
+        })
+}
+
+/// 读 `[dimensions]` 全族。**整节缺席是合法的**（占位机型就是这个样子），
+/// 但既然那一节在，格子就必须读得出来。
+///
+/// # 为什么半读不能说成"没配"
+///
+/// 半张 `[dimensions]` 与整节缺席在界面上长得一样（都是"没有尺寸"），
+/// 但前者是**数据写坏了**：那是 edit 出错的现场，静默降级之后就再也查不到了。
+/// 与 [`load_zones`] 判 `points` 的口径一致 —— 这里报错，让修的人当场看见是哪个文件哪一格。
+fn load_dimensions(doc: &DocumentMut, file: &Path) -> Result<Option<Dimensions>, AppError> {
+    let Some(d) = doc.get("dimensions").and_then(|i| i.as_table()) else {
+        return Ok(None);
+    };
+    let sub = |name: &str| -> Result<&toml_edit::Table, AppError> {
+        d.get(name).and_then(|i| i.as_table()).ok_or_else(|| {
+            AppError::corrupted(format!(
+                "{} 的 [dimensions] 缺了 {name} 子表",
+                file.display()
+            ))
+            .with_detail(
+                "[dimensions] 是全有或全无：半张与「这台没配尺寸」在界面上长得一样，\
+                     而前者是写坏了 —— 静默降级之后就查不到了"
+                    .to_owned(),
+            )
+        })
+    };
+
+    let bed = sub("bedSize")?;
+    let mv = sub("movementRange")?;
+    let glue = sub("glueArea")?;
+    let cal = sub("calibration")?;
+    let flags = sub("flags")?;
+
+    Ok(Some(Dimensions {
+        bed_size: BedSize {
+            width: dim_num(bed, "width", file, "dimensions.bedSize")?,
+            depth: dim_num(bed, "depth", file, "dimensions.bedSize")?,
+        },
+        movement_range: MovementRange {
+            min_x: dim_num(mv, "minX", file, "dimensions.movementRange")?,
+            max_x: dim_num(mv, "maxX", file, "dimensions.movementRange")?,
+            min_y: dim_num(mv, "minY", file, "dimensions.movementRange")?,
+            max_y: dim_num(mv, "maxY", file, "dimensions.movementRange")?,
+            max_z: dim_num(mv, "maxZ", file, "dimensions.movementRange")?,
+        },
+        glue_area: GlueArea {
+            glue_min_x: dim_num(glue, "glueMinX", file, "dimensions.glueArea")?,
+            glue_max_x: dim_num(glue, "glueMaxX", file, "dimensions.glueArea")?,
+            glue_min_y: dim_num(glue, "glueMinY", file, "dimensions.glueArea")?,
+            glue_max_y: dim_num(glue, "glueMaxY", file, "dimensions.glueArea")?,
+            wipe_x: dim_num(glue, "wipeX", file, "dimensions.glueArea")?,
+        },
+        calibration: CalibrationPoints {
+            l_shape_base_x: dim_num(cal, "lShapeBaseX", file, "dimensions.calibration")?,
+            l_shape_base_y: dim_num(cal, "lShapeBaseY", file, "dimensions.calibration")?,
+            x_line_x: dim_num(cal, "xLineX", file, "dimensions.calibration")?,
+            x_line_y: dim_num(cal, "xLineY", file, "dimensions.calibration")?,
+            x_line_y_end: dim_num(cal, "xLineYEnd", file, "dimensions.calibration")?,
+            y_line_x: dim_num(cal, "yLineX", file, "dimensions.calibration")?,
+            y_line_x_end: dim_num(cal, "yLineXEnd", file, "dimensions.calibration")?,
+            y_line_y: dim_num(cal, "yLineY", file, "dimensions.calibration")?,
+            z_start_x: dim_num(cal, "zStartX", file, "dimensions.calibration")?,
+            z_start_y: dim_num(cal, "zStartY", file, "dimensions.calibration")?,
+        },
+        edge_zone: dim_num(d, "edgeZone", file, "dimensions")?,
+        flags: MachineFlags {
+            gcode_marker: flags
+                .get("gcodeMarker")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "{} 的 [dimensions.flags].gcodeMarker 不是字符串",
+                        file.display()
+                    ))
+                })?,
+            has_second_fan: flags
+                .get("hasSecondFan")
+                .and_then(|v| v.as_bool())
+                .ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "{} 的 [dimensions.flags].hasSecondFan 不是布尔值",
+                        file.display()
+                    ))
+                })?,
+        },
+    }))
 }
 
 fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
@@ -821,11 +1019,10 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::paths;
-    use crate::workbench::presets::{can_be_literal, one_edit_only};
+    use crate::presetdata::{can_be_literal, one_edit_only};
 
     fn catalog() -> Option<(PathBuf, Catalog)> {
-        let root = paths::presets_root()?;
+        let root = crate::presetdata::repo_presets_root()?;
         let c = Catalog::load_from(&root).expect("机型目录读不齐");
         Some((root, c))
     }

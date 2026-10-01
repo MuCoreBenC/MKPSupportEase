@@ -20,6 +20,7 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::traced;
+use crate::workbench::load_presets;
 use crate::workbench::presets::{MachineField, Presets, VersionField};
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,7 +80,7 @@ pub struct MachineList {
 /// 机型与版本清单。**这一页唯一的读入口**
 #[tauri::command]
 pub fn wb_machines() -> Result<MachineList, AppError> {
-    traced("wb_machines", |_| Ok(list_of(&Presets::load()?)))
+    traced("wb_machines", |_| Ok(list_of(&load_presets()?)))
 }
 
 /// 加一个版本，**立刻落盘**，回一份新的清单。
@@ -100,7 +101,7 @@ pub fn wb_add_version(
     name: String,
 ) -> Result<MachineList, AppError> {
     traced("wb_add_version", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         p.catalog
             .machine_mut(&machine_id)?
             .add_version(&id, &name)?;
@@ -108,7 +109,7 @@ pub fn wb_add_version(
         tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
         // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
         // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 
@@ -127,7 +128,7 @@ pub fn wb_copy_version(
     description: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_copy_version", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         p.catalog.machine_mut(&machine_id)?.copy_version(
             &template_version_id,
             &id,
@@ -143,7 +144,7 @@ pub fn wb_copy_version(
             "从模板复制了一个版本（只写版本定义）"
         );
         // 从盘上重读再返回：**界面看到的应该是落盘的结果**
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 
@@ -155,12 +156,12 @@ pub fn wb_copy_version(
 #[tauri::command]
 pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<MachineList, AppError> {
     traced("wb_add_machine", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         p.catalog.add_machine(&id, &brand, &display)?;
         tracing::info!(machine = %id, "建了一台机型");
         // 重读盘再返回：**界面看到的是落盘的结果**。
         // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 
@@ -173,7 +174,7 @@ pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<Mach
 #[tauri::command]
 pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<String>, AppError> {
     traced("wb_version_orphans", |_| {
-        Ok(Presets::load()?.orphans_if_version_removed(&machine_id, &version_id))
+        Ok(load_presets()?.orphans_if_version_removed(&machine_id, &version_id))
     })
 }
 
@@ -182,7 +183,7 @@ pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<
 #[tauri::command]
 pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<MachineList, AppError> {
     traced("wb_remove_version", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         // 先记下来再删 —— 删完就查不出它被谁引用了
         let orphans = p.orphans_if_version_removed(&machine_id, &version_id);
         p.catalog
@@ -201,7 +202,7 @@ pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<Machi
                 "删了一个版本，留下了孤儿引用"
             );
         }
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 
@@ -217,14 +218,14 @@ pub fn wb_set_version_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_version_field", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         p.catalog.machine_mut(&machine_id)?.set_version_field(
             &version_id,
             field,
             value.as_deref(),
         )?;
         p.catalog.write_machine(&machine_id)?;
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 
@@ -236,12 +237,12 @@ pub fn wb_set_machine_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_field", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         p.catalog
             .machine_mut(&machine_id)?
             .set_field(field, value.as_deref())?;
         p.catalog.write_machine(&machine_id)?;
-        Ok(list_of(&Presets::load()?))
+        Ok(list_of(&load_presets()?))
     })
 }
 

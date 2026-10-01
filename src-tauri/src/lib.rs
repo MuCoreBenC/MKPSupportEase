@@ -10,10 +10,24 @@
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
 pub mod chrome;
+/// 正式客户端的数据面：自己的数据根（`appDataDir/presets`）+ 首启释放内置默认。
+pub mod client;
 pub mod error;
 pub mod fsx;
 pub mod ipc;
 pub mod obs;
+/// 预设数据的**纯读写与解析核心**：机型目录 / 资产 / 套餐 / 字段定义 / 界面布局，
+/// 加上三层取值。[`presetdata::Presets::load_from`] 只要一个根。
+///
+/// **不带 feature gate** —— 客户端与工作台共用同一份代码。两边的差别只在根：
+/// 客户端读 `appDataDir/presets`（用户机器上的正式数据），工作台读 `<repo>/presets`
+/// （仓库里的开发源数据）。
+///
+/// **数据根不在这里决定**，也**不在运行时读仓库** —— 客户端跑在一台没有仓库的机器上。
+///
+/// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
+/// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
+pub mod presetdata;
 
 // 后厨工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
 // 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
@@ -48,6 +62,17 @@ pub fn run() {
                     obs::tracing::init_tracing(std::path::Path::new("/tmp/supportease-logs"));
                     tracing::warn!("内部数据根不可用：{e}");
                 }
+            }
+
+            /* 内置默认预设：第一次启动铺一份进客户端自己的数据根（`appDataDir/presets`）。
+            **只铺缺失的** —— 已有的一份一个字节都不动（覆盖策略见 client::paths）。
+            失败只告警不挡启动：界面会显示「一台机型都没有」，那是能据以行动的状态，
+            比整个程序开不起来好。 */
+            let seeded = client::paths::presets_root(&handle)
+                .and_then(|root| client::paths::seed_if_absent(&root));
+            match seeded {
+                Ok(r) => tracing::info!(report = %r.summary(), "内置默认预设已就位"),
+                Err(e) => tracing::warn!("内置默认预设没就位：{e}"),
             }
 
             /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
@@ -91,6 +116,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
+        // 预设页（A41）的真后端。读客户端自己的数据根（`appDataDir/presets`）
+        ipc::presets::get_machines,
+        ipc::presets::get_version_files,
+        ipc::presets::get_preset_files,
+        ipc::presets::get_menu,
+        ipc::presets::get_param_meta,
+        ipc::presets::get_machine_params,
+        ipc::presets::get_local_files,
+        ipc::presets::get_local_user_files,
+        ipc::presets::get_slicer_copied,
     ])
 }
 
@@ -102,6 +137,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
+        // 客户端命令：**两份清单一字不差**（漏一份就是「原生机能用、工作台构建不能用」）
+        ipc::presets::get_machines,
+        ipc::presets::get_version_files,
+        ipc::presets::get_preset_files,
+        ipc::presets::get_menu,
+        ipc::presets::get_param_meta,
+        ipc::presets::get_machine_params,
+        ipc::presets::get_local_files,
+        ipc::presets::get_local_user_files,
+        ipc::presets::get_slicer_copied,
         // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、

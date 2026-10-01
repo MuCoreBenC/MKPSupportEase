@@ -959,7 +959,7 @@ mod tests {
         // 基线是消费端内置的 9 份，必须与真 presets 逐份对上。
         // 机型与版本全部来自我们自己那份清单（`presets/machines/*.toml`），
         // `render()` 不查任何外部来源。
-        let presets = crate::workbench::presets::Presets::load().expect("真 presets");
+        let presets = crate::workbench::load_presets().expect("真 presets");
         let tmp = tempfile::tempdir().unwrap();
         let store = crate::workbench::store::Store::at(tmp.path());
         store.bootstrap().unwrap();
@@ -1329,7 +1329,7 @@ mod tests {
     #[test]
     fn render_takes_the_machine_from_our_own_catalog() {
         // 前提反空转：真 presets/ 必须有 A1_MINI —— 清单在我们这边
-        let presets = crate::workbench::presets::Presets::load().expect("真 presets");
+        let presets = crate::workbench::load_presets().expect("真 presets");
         assert!(
             presets.catalog.machine("A1_MINI").is_some(),
             "真 presets 里没有 A1_MINI，前提没了"

@@ -24,14 +24,41 @@ pub mod app;
 pub mod clock;
 pub mod domain;
 pub mod paths;
-/// 预设真相源（`<repo>/presets/*.toml`）。**读它也写它**，是唯一的预设数据根
-pub mod presets;
+/// 预设真相源。**它不住在这里** —— 代码搬去了 [`crate::presetdata`]（客户端也要读预设，
+/// 而这一整棵子树是 feature gate 的），这里只是把它**别名**回 `presets`：
+/// 工作台侧几十处 `crate::workbench::presets::X` 因此一个都不用改。
+///
+/// 数据根仍然是工作台自己的那一个（`<repo>/presets`），经 [`load_presets`] 给进去 ——
+/// **代码共用一份，数据根两套**。
+pub use crate::presetdata as presets;
 pub mod store;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::error::AppError;
+
+/// 读工作台的预设数据根：`<repo>/presets`。
+///
+/// 这是工作台与客户端**唯一**的分岔点：两边跑同一份 [`presetdata`] 代码，
+/// 只是根不同 —— 客户端给 `appDataDir/presets`，工作台给仓库。
+///
+/// 资产**载荷**根（`<repo>/public/assets`）只在这一档挂上：客户端这一轮只释放定义、
+/// 不释放文件本体，所以它那边 [`presets::Assets::present`] 一律为 false。
+pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
+    let root = paths::presets_root().ok_or_else(|| {
+        AppError::not_found("找不到工作台的预设数据根 presets/").with_detail(
+            "期望 <repo>/presets/registry/param_registry.toml 存在 —— \
+             工作台的数据根指向**仓库里的开发源数据**，不是 appDataDir"
+                .to_owned(),
+        )
+    })?;
+    let mut p = crate::presetdata::Presets::load_from(&root)?;
+    if let Ok(asset_root) = paths::assets_root() {
+        p.set_asset_root(&asset_root);
+    }
+    Ok(p)
+}
 
 /// 工作台窗口的标签。与客户端的 `main` 分开，`get_webview_window` 拿的是各自那一个
 const WINDOW_LABEL: &str = "workbench";

@@ -81,6 +81,40 @@ fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
 /// 2. 拒绝 `..` 与其他非普通分量 —— `a/../../x`；
 /// 3. 拼完之后**用规范化后的真实路径**再确认仍在根内 —— 符号链接指向根外时前两条都看不出来。
 pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf, AppError> {
+    check_relative(rel)?;
+
+    let joined = root.join(Path::new(rel));
+
+    /* 第三道：比真实路径。
+    只有存在的那部分能 canonicalize，所以拿"最深的已存在祖先"来比 ——
+    目标文件还不存在（第一次写）是正常情况，不能因此判越界。 */
+    let anchor = deepest_existing(&joined);
+    let real_anchor = anchor
+        .canonicalize()
+        .map_err(|e| AppError::io("路径解析失败").with_detail(e.to_string()))?;
+    let real_root = root
+        .canonicalize()
+        .map_err(|e| AppError::io("数据目录不可用").with_detail(e.to_string()))?;
+
+    if !real_anchor.starts_with(&real_root) {
+        return Err(
+            AppError::permission_denied("路径不能越过数据目录").with_detail(format!(
+                "{} 实际指向 {}",
+                joined.display(),
+                real_anchor.display()
+            )),
+        );
+    }
+
+    Ok(joined)
+}
+
+/// 前两道闸，**不需要根**：非空、非绝对、无 `..` 与其他非普通分量。
+///
+/// [`resolve_in`] 在它之上再加第三道（比真实路径）。单独拎出来是给"加载期校验"
+/// 用的场合：那时还没有数据根（比如客户端这一轮只释放定义、不释放资产文件本体），
+/// 而"路径不能是 `../x`"这条判据与根在不在无关。
+pub fn check_relative(rel: &str) -> Result<(), AppError> {
     let rel_path = Path::new(rel);
 
     if rel.is_empty() {
@@ -106,30 +140,7 @@ pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf, AppError> {
         }
     }
 
-    let joined = root.join(rel_path);
-
-    /* 第三道：比真实路径。
-    只有存在的那部分能 canonicalize，所以拿"最深的已存在祖先"来比 ——
-    目标文件还不存在（第一次写）是正常情况，不能因此判越界。 */
-    let anchor = deepest_existing(&joined);
-    let real_anchor = anchor
-        .canonicalize()
-        .map_err(|e| AppError::io("路径解析失败").with_detail(e.to_string()))?;
-    let real_root = root
-        .canonicalize()
-        .map_err(|e| AppError::io("数据目录不可用").with_detail(e.to_string()))?;
-
-    if !real_anchor.starts_with(&real_root) {
-        return Err(
-            AppError::permission_denied("路径不能越过数据目录").with_detail(format!(
-                "{} 实际指向 {}",
-                joined.display(),
-                real_anchor.display()
-            )),
-        );
-    }
-
-    Ok(joined)
+    Ok(())
 }
 
 /// 从 path 往上找第一个真实存在的祖先
