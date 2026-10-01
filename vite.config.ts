@@ -15,7 +15,7 @@ import { bbsFs } from './tools/dev-server/bbsFs.mjs'
  * 暂时还在包里 —— 等它们也接进来，这份清单就是空的时候，`public/` 那整个目录
  * 也可以搬走。判据 1（`scripts/check-bundle.mjs`）盯着这件事：清单里有的却出现在产物里就红。
  */
-const DELIVERED_ASSET_DIRS = ['bbs']
+const DELIVERED_ASSET_DIRS = ['bbs', 'models', 'icons']
 
 /** 从客户端构建产物里摘掉上面那几类资产的副本。**工作台构建不摘** —— 那是开发态工具 */
 function dropDeliveredAssets(enabled: boolean) {

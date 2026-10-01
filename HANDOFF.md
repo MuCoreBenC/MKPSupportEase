@@ -64,7 +64,9 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 1. **资产载荷全部纳入 catalog**（先不谈官方源 / Gitee 最终用哪个）
    - ✅ **第一刀：BBS 配置**（本次）——“Catalog → kind=bbs_config → Source → Delivery → SHA → `mkp/bbs/`” 闭环；
      随包副本从客户端产物退役；BBS 页改从下载区载入。**判据：真 HTTP 拉一份 BBS 配置落进 `mkp/bbs/…`**。
-   - ⬜ 模型（`assets/models/`）、图标（`assets/icons/`）：同一条路，各加一个 kind + 一个落点目录。
+   - ✅ **第二刀：模型 + 图标**（本次）—— 各加一个 kind（`model` / `icon`）与落点目录，
+     **管道、命令、判据结构一行没改**；随包副本同样退役。产物的 `dist/assets/` 现在只剩 `printers/`。
+   - ⬜ 整机图（`assets/printers/`）：唯一还在随包的一类，见下面那条。
    - ⬜ 整机图那一类 UI 装饰：要么接进管道（kind=image），要么干脆剥离资产台账搬进 `src/app/assets/`
      —— **现在是唯一还在随包的资产类**（判据 1 的清单里加上就红）。
 2. ⬜ **发布接上**：`presets/` → publish → catalog / manifest → 发布源。产出要明确回答

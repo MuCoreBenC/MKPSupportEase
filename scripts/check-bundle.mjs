@@ -52,6 +52,11 @@ const FORBIDDEN = [
   // 包里再带一份就是第二个真源。新增一类资产进管道，这里就多一行（与 vite.config.ts
   // 的 DELIVERED_ASSET_DIRS 同一份清单，改一处就要改另一处）
   [/\/assets\/bbs\//, '已走下载管道的 BBS 资产（不该再随包分发）'],
+  [/\/assets\/models\//, '已走下载管道的模型（不该再随包分发）'],
+  [/\/assets\/icons\//, '已走下载管道的图标（不该再随包分发）'],
+
+  // 注意：`public/models/`（首页那张 hero_pile.webp）是**另一拨** —— 它是 UI 装饰，
+  // 不在资产台账里，也不归 catalog 管。别把它和上面那几条混为一谈。
 ]
 
 function walk(dir, prefix = '') {

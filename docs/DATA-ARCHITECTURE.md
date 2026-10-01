@@ -162,7 +162,7 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- |
 | 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
-| 3 | ~~`public/assets/bbs/Process/` 9 份 JSON 裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈第一刀）**：BBS 切片器预设登记进 catalog（`kind=bbs_config`，落点 `mkp/bbs/…`），客户端按需下载，随包副本退役。模型 / 图标下一刀照同一条路走 |
+| 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图（`printers/`）是唯一还在随包的一类** —— 它是首页的 UI 装饰，接进管道要连带改首页取图方式，单独一轮做 |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
 | 5 | 下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/` | 命名欠账，职责是同一个（下载原件区） | 以本文 `mkp/` 为准收口；`PRESET-PRODUCT-RULES.md` 录入正文时同步 |
 | 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |

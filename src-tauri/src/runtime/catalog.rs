@@ -130,17 +130,36 @@ pub mod kind {
     pub const PRESET: &str = "mkp_preset";
     /// 切片器预设。今天只有 BBS（`slicer = 'bbs'`、档位 `profile = 'process'`）
     pub const BBS_CONFIG: &str = "bbs_config";
+    /// 测试 / 校准用的 3mf 模型
+    pub const MODEL: &str = "model";
+    /// 机型图标
+    pub const ICON: &str = "icon";
 }
 
 /// 一种 kind 在下载区里的目录名。**下载区按种类分层，不按来源分层**
 ///
-/// （同一个来源送来预设和 BBS 配置，落点也不混在一起：盘上的目录结构要能回答
+/// （同一个来源送来预设、BBS 配置和图标，落点也不混在一起：盘上的目录结构要能回答
 /// "这一格是干什么用的"，那是给人看的，也是给将来清理用的。）
 fn kind_dir(kind: &str) -> &'static str {
     match kind {
         kind::PRESET => "presets",
         kind::BBS_CONFIG => "bbs",
+        kind::MODEL => "models",
+        kind::ICON => "icons",
         _ => "other",
+    }
+}
+
+/// 资产台账里的类型 → 目录里的 kind。
+///
+/// **返回 `None` 就是不登记**（目前只有整机图那一类）—— 那类的处置见模块头注释：
+/// 它是首页的 UI 装饰，接进下载会先经过一次"首页图从哪来"的产品决定。
+fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static str> {
+    match asset_kind {
+        crate::presetdata::AssetKind::SlicerProfile => Some(kind::BBS_CONFIG),
+        crate::presetdata::AssetKind::Model => Some(kind::MODEL),
+        crate::presetdata::AssetKind::Icon => Some(kind::ICON),
+        crate::presetdata::AssetKind::Image => None,
     }
 }
 
@@ -314,9 +333,9 @@ impl Catalog {
         // **登记的是盘上真文件的字节**：定义说有、文件不在 = 缺失（交给调用方裁决严格还是宽松），
         // 绝不登记一个"应该在但没见到"的条目——那等于把期望值编进目录里。
         for asset in presets.assets.items() {
-            if asset.kind != crate::presetdata::AssetKind::SlicerProfile {
+            let Some(kind) = kind_of_asset(asset.kind) else {
                 continue;
-            }
+            };
             let Ok(full) = presets.assets.resolve(asset) else {
                 missing.push(format!(
                     "资产 {}（{}）：这一侧没有资产载荷根",
@@ -339,8 +358,8 @@ impl Catalog {
                 continue;
             };
             files.push(CatalogFile {
-                kind: kind::BBS_CONFIG.to_owned(),
-                path: asset_dest(kind::BBS_CONFIG, &asset.path),
+                kind: kind.to_owned(),
+                path: asset_dest(kind, &asset.path),
                 file_name,
                 machine_id: asset.machine_id.clone().unwrap_or_default(),
                 version_id: String::new(),
@@ -518,22 +537,52 @@ mod tests {
             presets.iter().map(|f| &f.path).collect::<Vec<_>>()
         );
 
-        // 资产（第三圈第一刀：BBS 切片器预设）：**与 presets/assets.toml 里的
-        // slicerProfile 条数对齐** —— 少登记一条就是"目录说有、下载不到"
-        let bbs: Vec<&CatalogFile> = catalog
-            .files
-            .iter()
-            .filter(|f| f.kind == kind::BBS_CONFIG)
-            .collect();
-        let in_toml = crate::presetdata::Presets::load_from(&repo_root().join("presets"))
-            .expect("源读得出来")
+        // 资产（第三圈）：**每一种登记过的类型都与 presets/assets.toml 的条数对齐** ——
+        // 少登记一条就是"目录说有、下载不到"，多登记一条就是"目录在编数据"
+        let source = crate::presetdata::Presets::load_from(&repo_root().join("presets"))
+            .expect("源读得出来");
+        for asset_kind in [
+            crate::presetdata::AssetKind::SlicerProfile,
+            crate::presetdata::AssetKind::Model,
+            crate::presetdata::AssetKind::Icon,
+        ] {
+            let want = kind_of_asset(asset_kind).expect("这一类是要登记的");
+            let in_toml = source
+                .assets
+                .items()
+                .iter()
+                .filter(|a| a.kind == asset_kind)
+                .count();
+            let got = catalog.files.iter().filter(|f| f.kind == want).count();
+            assert_eq!(got, in_toml, "{want} 的条目数与资产台账对齐");
+            assert!(got > 0, "{want} 这一类台账里确实有货");
+            assert!(
+                catalog
+                    .files
+                    .iter()
+                    .filter(|f| f.kind == want)
+                    .all(|f| f.path.starts_with(&format!("mkp/{}/", kind_dir(want)))),
+                "{want} 一律落在 mkp/{}/ 下",
+                kind_dir(want)
+            );
+        }
+
+        // 整机图那一类**故意不登记**（它是首页的 UI 装饰，接进下载要先过一次产品决定）。
+        // 这条是"别忘了它"：等它接进来，把上面那个数组加上 Image 即可，这条会自然消失
+        let images_in_toml = source
             .assets
             .items()
             .iter()
-            .filter(|a| a.kind == crate::presetdata::AssetKind::SlicerProfile)
+            .filter(|a| a.kind == crate::presetdata::AssetKind::Image)
             .count();
-        assert_eq!(bbs.len(), in_toml, "BBS 条目数与资产台账对齐");
-        assert!(!bbs.is_empty(), "资产台账里确有切片器预设");
+        assert!(images_in_toml > 0, "台账里确有整机图（它现在还随包）");
+        assert!(
+            !catalog
+                .files
+                .iter()
+                .any(|f| f.path.starts_with("mkp/images/")),
+            "整机图还没接进管道：接的时候要带着首页图一起改，别只登记不换消费方"
+        );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
         let a1_fast = catalog
@@ -580,13 +629,17 @@ mod tests {
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
         let repo = repo_root();
 
-        for f in catalog.files.iter().filter(|f| f.kind == kind::BBS_CONFIG) {
-            let on_disk = repo.join(REPO_ASSET_ROOT).join(
-                f.path
-                    .strip_prefix("mkp/bbs/")
-                    .map(|tail| format!("bbs/{tail}"))
-                    .unwrap_or_default(),
-            );
+        // 资产类：按资产台账里的 `path` 回查盘上的真字节（文件名可能重名，路径不会）
+        let source =
+            crate::presetdata::Presets::load_from(&repo.join("presets")).expect("源读得出来");
+        for f in catalog.files.iter().filter(|f| f.kind != kind::PRESET) {
+            let asset = source
+                .assets
+                .items()
+                .iter()
+                .find(|a| asset_dest(kind_of_asset(a.kind).unwrap_or(""), &a.path) == f.path)
+                .unwrap_or_else(|| panic!("{} 在资产台账里找不到", f.path));
+            let on_disk = repo.join(REPO_ASSET_ROOT).join(&asset.path);
             let bytes = std::fs::read(&on_disk)
                 .unwrap_or_else(|e| panic!("载荷 {} 读不出来：{e}", on_disk.display()));
             assert_eq!(bytes.len() as u64, f.size, "{} 的大小", f.file_name);

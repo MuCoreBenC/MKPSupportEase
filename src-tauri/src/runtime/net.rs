@@ -707,6 +707,34 @@ mod tests {
         );
     }
 
+    /// 模型（3mf）走的是**同一条管道**：除了 kind 与落点目录，与 BBS 那一支没有差别。
+    /// 这条钉的是"接一种新资源只是加一个常量"—— 如果哪天为了模型另开一条路径，这条会先红。
+    #[test]
+    fn a_model_rides_the_same_pipeline_too() {
+        let content = b"3MF\x00binary-ish".to_vec();
+        let file = CatalogFile {
+            kind: super::super::catalog::kind::MODEL.to_owned(),
+            file_name: "MKP_support_test_models.3mf".to_owned(),
+            path: "mkp/models/MKP_support_test_models.3mf".to_owned(),
+            machine_id: String::new(),
+            version_id: String::new(),
+            sha256: super::super::catalog::hex(&sha2::Sha256::digest(&content)),
+            size: content.len() as u64,
+        };
+        let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
+        let root = fresh_root();
+
+        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let target =
+            super::super::delivery::deliver(root.path(), &file, &source).expect("该走得通");
+
+        assert_eq!(
+            target,
+            root.path().join("mkp/models/MKP_support_test_models.3mf")
+        );
+        assert_eq!(std::fs::read(&target).expect("读到"), content);
+    }
+
     /// 远端撒谎且**长度一模一样**：大小那道闸放行，SHA 那道必须拦住。
     /// （真机最常见的一类: 服务端上错文件 / 代理塞了错误页 —— 字节数常能对上。）
     #[test]

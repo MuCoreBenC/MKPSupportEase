@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "ec7f90d4b10089f9",
+  "revision": "6db22693209c082c",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -4684,6 +4684,60 @@
       "versionId": "LITE",
       "sha256": "17ca04c3c51035b30df54939354f9b21ea9aee827a5a9000cfc25b44273f6772",
       "size": 4362
+    },
+    {
+      "kind": "icon",
+      "fileName": "a1.svg",
+      "path": "mkp/icons/a1.svg",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "68024611b1c1aaf2ef0f0b3f2476f0e53ec78adade8770d89d6c8a350e0d9d83",
+      "size": 386
+    },
+    {
+      "kind": "icon",
+      "fileName": "a1_mini.svg",
+      "path": "mkp/icons/a1_mini.svg",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "8cfe37d585d7604d2493a67469e11b4b699784120ff00989ef3338e45caa1046",
+      "size": 363
+    },
+    {
+      "kind": "icon",
+      "fileName": "p1s.svg",
+      "path": "mkp/icons/p1s.svg",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "87604671835eeccb73ac11196253e360756e4196382d6b93b48bed1d046db2f7",
+      "size": 324
+    },
+    {
+      "kind": "model",
+      "fileName": "MKP_support_test_models.3mf",
+      "path": "mkp/models/MKP_support_test_models.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "8486199771d639a0e761707a216b204073a9f267d8c37b29dce6bf115ff029aa",
+      "size": 3317913
+    },
+    {
+      "kind": "model",
+      "fileName": "Precise_Calibration.3mf",
+      "path": "mkp/models/Precise_Calibration.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "9d7b373d3aa90fe2e68a6760d54e1bbd8d4a9259006959665ac91cdee68b4f32",
+      "size": 385969
+    },
+    {
+      "kind": "model",
+      "fileName": "ZOffset_Calibration.3mf",
+      "path": "mkp/models/ZOffset_Calibration.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "773b65b0dcdf09472c013bd4eec0edff94372e795dd50d1db99d9cef85f9490c",
+      "size": 290327
     },
     {
       "kind": "bbs_config",
