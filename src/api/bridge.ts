@@ -108,6 +108,10 @@ export const bridgeApi: MkpApi = {
   getDownloadedFiles: () => call('getDownloadedFiles', 'get_downloaded_files'),
   downloadCatalogFile: (fileName) =>
     call('downloadCatalogFile', 'download_runtime_file', { fileName }),
+  getActivePreset: () => call('getActivePreset', 'get_active_preset'),
+  applyActivePreset: (fileName) =>
+    call('applyActivePreset', 'apply_active_preset', { fileName }),
+  clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
 
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   getAppliedPreset: () => notWired('getAppliedPreset'),

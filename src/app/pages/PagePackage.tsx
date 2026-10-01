@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import s from './PagePackage.module.css'
 import { api } from '../../api'
-import type { RuntimeCatalog } from '../../api/contract'
+import type { ActivePreset, RuntimeCatalog } from '../../api/contract'
 import {
   autoSync,
   latestOf,
@@ -95,6 +95,8 @@ export default function PagePackage({ onOpenParams }: Props) {
   const [downloaded, setDownloaded] = useState<string[] | null>(null)
   const [downloadErr, setDownloadErr] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
+  /* 使用中指针（全局唯一；intact=false 说明盘上的文件漂了，照实说） */
+  const [active, setActive] = useState<ActivePreset | null>(null)
   /* 获取 / 使用之后重新读一遍本机状态（localStorage 不是响应式的） */
   const [tick, setTick] = useState(0)
 
@@ -107,12 +109,14 @@ export default function PagePackage({ onOpenParams }: Props) {
       const list = await listCloud()
       const w = await api.getRuntimeCatalog().catch(() => null)
       const d = await api.getDownloadedFiles().catch(() => null)
+      const a = await api.getActivePreset().catch(() => null)
       if (!alive) return
       setCloud(list)
       setCur(r.local)
       setStatus(r.status)
       setWorld(w)
       setDownloaded(d)
+      setActive(a)
     })()
     return () => {
       alive = false
@@ -134,6 +138,35 @@ export default function PagePackage({ onOpenParams }: Props) {
       setDownloading(false)
     }
   }, [world, downloading])
+
+  /* 使用 / 撤销。成功后整个新世界区块重读一遍（下载区 + 指针） */
+  const refreshWorld = useCallback(async () => {
+    setDownloaded(await api.getDownloadedFiles().catch(() => null))
+    setActive(await api.getActivePreset().catch(() => null))
+  }, [])
+
+  const tryApply = useCallback(async () => {
+    if (world === null || world.files.length === 0 || downloading) return
+    setDownloading(true)
+    setDownloadErr(null)
+    try {
+      setActive(await api.applyActivePreset(world.files[0].fileName))
+    } catch (e) {
+      setDownloadErr((e as { message?: string }).message ?? '使用没成，原因没说清')
+    } finally {
+      setDownloading(false)
+    }
+  }, [world, downloading])
+
+  const tryClear = useCallback(async () => {
+    setDownloadErr(null)
+    try {
+      await api.clearActivePreset()
+      await refreshWorld()
+    } catch (e) {
+      setDownloadErr((e as { message?: string }).message ?? '撤销没成，原因没说清')
+    }
+  }, [refreshWorld])
 
   const latest = latestOf(cloud)
   const layout = useMemo(() => (cur === null ? [] : layoutOf(cur.package)), [cur])
@@ -237,6 +270,16 @@ export default function PagePackage({ onOpenParams }: Props) {
                 : `${downloaded.length} / ${world.files.length} 份（文件在盘上且 SHA 对得上才算数）`}
             </span>
           </div>
+          <div className={s.kv}>
+            <span className={s.key}>当前使用</span>
+            <span className={s.val}>
+              {active === null
+                ? '还没用任何一份'
+                : `${active.fileName}（${active.machineId} / ${active.versionId}）${
+                    active.intact ? '' : ' —— 文件已经不是应用时的那份'
+                  }`}
+            </span>
+          </div>
           <button
             type="button"
             className={s.btn}
@@ -245,6 +288,23 @@ export default function PagePackage({ onOpenParams }: Props) {
           >
             {downloading ? '正在下载……' : '下载第一份（走新管道）'}
           </button>
+          {active !== null ? (
+            <button type="button" className={s.btn} onClick={tryClear} disabled={downloading}>
+              撤销使用
+            </button>
+          ) : (
+            downloaded !== null &&
+            downloaded.length > 0 && (
+              <button
+                type="button"
+                className={s.btn}
+                onClick={tryApply}
+                disabled={downloading || world.files.length === 0}
+              >
+                使用第一份
+              </button>
+            )
+          )}
           {downloadErr !== null && (
             <p className={`${s.note} ${s.staleNote}`}>下载没成：{downloadErr}</p>
           )}

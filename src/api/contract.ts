@@ -601,6 +601,19 @@ export interface RuntimeCatalog {
   files: RuntimeCatalogFile[]
 }
 
+/**
+ * 使用中指针（新数据世界的第一个用户状态，全局唯一）。
+ * `intact` 是"盘上那份还是应用时刻的那份"——`mkp/` 是只读区，正常恒 true；
+ * false 说明字节漂了（被手动动过 / 文件没了），界面要照实说。
+ */
+export interface ActivePreset {
+  fileName: string
+  sha256: string
+  machineId: string
+  versionId: string
+  intact: boolean
+}
+
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -687,6 +700,22 @@ export interface MkpApi {
    * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
    */
   getDownloadedFiles(): Promise<string[]>
+
+  /**
+   * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。
+   */
+  getActivePreset(): Promise<ActivePreset | null>
+
+  /**
+   * 「使用这一份」：把下载区里某份登记过的文件记成使用中。
+   * 文件没下载 / 盘上字节与目录对不上 → reject，不会应用半份。
+   */
+  applyActivePreset(fileName: string): Promise<ActivePreset>
+
+  /**
+   * 撤销使用。幂等：本来就没在用也不报错。
+   */
+  clearActivePreset(): Promise<void>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

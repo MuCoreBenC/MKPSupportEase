@@ -131,5 +131,12 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   防穿越、原子落盘 `mkp/`、"已下载"不记账本——盘就是底账；命令
   `download_runtime_file` / `get_downloaded_files`；同步页可点下载看结果。
   §1 八缺里的"下载 / 校验"两个环节有了骨架，"更新 / 归档"第二圈接。
+- 2026-10-01：**⑤ 用户数据的持久化规则落地** —— `runtime/state.rs`：
+  一种状态一个文件（JSON + `*Schema` 代次）、住内部根 `run/` 下、写走 atomic_write、
+  **坏档不静默**（`CORRUPTED`，不装作"没有"）。第一个真数据是**使用中指针**
+  （`run/active-preset.json`）：全局唯一在构造上成立（就一个文件），指针带应用时刻的
+  SHA——盘上字节漂了界面看得见。命令 `get/apply/clear_active_preset`；
+  同步页可"使用 / 撤销"。旧世界 localStorage 三格仍留在原处（收口 C4 时退役），
+  但新世界从此有了自己的状态住所，业务不必再往 localStorage 里塞。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

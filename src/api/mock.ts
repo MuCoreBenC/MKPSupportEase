@@ -1,5 +1,5 @@
 import { NotImplementedError } from './errors'
-import type { CalibModel, MkpApi, Preset } from './contract'
+import type { ActivePreset, CalibModel, MkpApi, Preset } from './contract'
 import {
   allMachines,
   allPresetFiles,
@@ -82,6 +82,9 @@ const calibModels: CalibModel[] = [
   { id: 'xy', name: 'XY 校准', desc: '校准平面内的偏移，Z 轴之后打', size: '377 KB', ready: true },
   { id: 'sup', name: '支撑测试', desc: '校准完打这个看支撑效果', size: '3.2 MB', ready: true },
 ]
+
+/** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
+let mockActive: ActivePreset | null = null
 
 export const mockApi: MkpApi = {
   async getPreset(variantId) {
@@ -220,5 +223,19 @@ export const mockApi: MkpApi = {
   async getDownloadedFiles() {
     /* 盘就是底账——浏览器没有盘上的下载区，如实答空 */
     return []
+  },
+
+  /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原。
+     没有文件落地，所以 apply 只对已"模拟下载"的文件开——这里没有，恒拒，如实 */
+  async getActivePreset() {
+    return mockActive
+  },
+
+  async applyActivePreset(fileName) {
+    throw new NotImplementedError(`applyActivePreset(${fileName})：浏览器里没有下载区，先用真机下载一份`)
+  },
+
+  async clearActivePreset() {
+    mockActive = null
   },
 }
