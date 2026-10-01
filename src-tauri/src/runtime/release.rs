@@ -46,6 +46,18 @@ impl ReleaseReport {
 }
 
 pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
+    release_bytes(root, EMBEDDED_CATALOG)
+}
+
+/// 把**任意一份合法 catalog 字节**释放进数据根——[`release_catalog`]（随包那份）与
+/// 远端更新（`apply_remote_update`，工作台发布的 `dist/catalog.json`）共用的唯一入口。
+///
+/// 先验后写：解析不过的字节连盘都不碰（坏目录不许替换好目录）。
+/// 升级语义见模块头：盘上不同 → 旧份归档、新份生效。
+pub fn release_bytes(root: &Path, bytes: &[u8]) -> Result<ReleaseReport, AppError> {
+    // 先验后写的第一闸：格式不对的目录没有资格上盘
+    super::Catalog::parse(bytes)?;
+
     std::fs::create_dir_all(mkp_dir(root)).map_err(|e| {
         AppError::io(format!("建不出下载区：{}", mkp_dir(root).display()))
             .with_detail(e.to_string())
@@ -54,9 +66,9 @@ pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
     let path = catalog_file(root);
     match std::fs::read(&path) {
         // 最常见的路：同一个版本再开一次，一个字节都不动
-        Ok(existing) if existing == EMBEDDED_CATALOG => Ok(ReleaseReport::default()),
-        // 盘上有、但与随包不同：升级（或文件被手动动过）。旧份归档——归档槽保留最早一份，
-        // 槽位已有就不覆盖；然后换上随包新份
+        Ok(existing) if existing == bytes => Ok(ReleaseReport::default()),
+        // 盘上有、但与带来的不同：升级（或文件被手动动过）。旧份归档——归档槽保留最早一份，
+        // 槽位已有就不覆盖；然后换上新份
         Ok(old) => {
             let archive = archive_dir(root).join("catalog.json");
             std::fs::create_dir_all(archive.parent().expect("归档路径必有父目录")).map_err(
@@ -71,7 +83,7 @@ pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
                 atomic_write(&archive, &old)?;
                 true
             };
-            atomic_write(&path, EMBEDDED_CATALOG)?;
+            atomic_write(&path, bytes)?;
             Ok(ReleaseReport {
                 written: true,
                 archived,
@@ -79,7 +91,7 @@ pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
         }
         // 读不到（多半是还没有）就铺一份。真读不了（权限）时下面的写会报出真原因
         Err(_) => {
-            atomic_write(&path, EMBEDDED_CATALOG)?;
+            atomic_write(&path, bytes)?;
             Ok(ReleaseReport {
                 written: true,
                 archived: false,

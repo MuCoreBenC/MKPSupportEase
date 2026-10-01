@@ -113,6 +113,8 @@ export const bridgeApi: MkpApi = {
   applyActivePreset: (fileName) =>
     call('applyActivePreset', 'apply_active_preset', { fileName }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
+  checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
+  applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
 
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   getAppliedPreset: () => notWired('getAppliedPreset'),

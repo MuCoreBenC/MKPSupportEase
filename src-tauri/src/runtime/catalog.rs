@@ -97,83 +97,123 @@ impl Catalog {
     }
 }
 
-/// 从**层①**构建：`<repo>/presets`（源定义）+ `crates/preset/assets/presets`（交付产物真字节）。
-///
-/// 产物字节取**入库**的那一份（`BUILTIN_PRESETS` 编进二进制的同一批文件）——
-/// `presets/dist/` 是本机 gitignore 掉的暂存，进不了 CI，不能当判据输入。
-/// 每个机型版本都必须配齐产物，缺一份就失败 —— 第一圈宁可红着，不让目录里出现
-/// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
-pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
-    let presets_dir = repo_root.join("presets");
-    let presets = crate::presetdata::Presets::load_from(&presets_dir)?;
-    let assets = repo_root
-        .join("crates")
-        .join("preset")
-        .join("assets")
-        .join("presets");
-
-    // 品牌显示名：机型文件里写的是 id，给人看的是 brands.toml 里的名字（与 get_machines 同一条）
-    let brands: HashMap<&str, &str> = presets
-        .catalog
-        .brands()
-        .iter()
-        .map(|b| (b.id.as_str(), b.name.as_str()))
-        .collect();
-
-    let mut machines = Vec::new();
-    let mut files = Vec::new();
-
-    for m in presets.catalog.machines() {
-        machines.push(CatalogMachine {
-            id: m.id.clone(),
-            display: if m.display.trim().is_empty() {
-                m.id.clone()
-            } else {
-                m.display.clone()
-            },
-            brand: brands
-                .get(m.brand.as_str())
-                .map(|s| (*s).to_owned())
-                .unwrap_or_else(|| m.brand.clone()),
-            versions: m
-                .versions
-                .iter()
-                .map(|v| CatalogVersion {
-                    id: v.id.clone(),
-                    name: v.name.clone(),
-                })
-                .collect(),
-        });
-
-        for v in &m.versions {
-            let file_name = crate::presetdata::mkp_file_name(&m.id, &v.id);
-            let bytes = std::fs::read(assets.join(&file_name)).map_err(|e| {
-                AppError::not_found(format!(
-                    "{} / {} 没有交付产物（{}）—— 入库产物目录里没有这一份，先补齐再构建目录",
-                    m.id, v.id, file_name
-                ))
-                .with_detail(e.to_string())
-            })?;
-            files.push(CatalogFile {
-                kind: "mkp_preset".to_owned(),
-                path: format!("mkp/{file_name}"),
-                file_name,
-                machine_id: m.id.clone(),
-                version_id: v.id.clone(),
-                sha256: hex(&Sha256::digest(&bytes)),
-                size: bytes.len() as u64,
-            });
-        }
+impl Catalog {
+    /// 从**层①**构建：`<repo>/presets`（源定义）+ `crates/preset/assets/presets`（交付产物真字节）。
+    ///
+    /// 产物字节取**入库**的那一份（`BUILTIN_PRESETS` 编进二进制的同一批文件）——
+    /// `presets/dist/` 是本机 gitignore 掉的暂存，进不了 CI，不能当判据输入。
+    /// 每个机型版本都必须配齐产物，缺一份就失败 —— 第一圈宁可红着，不让目录里出现
+    /// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
+    pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
+        let presets = crate::presetdata::Presets::load_from(&repo_root.join("presets"))?;
+        let assets = repo_root
+            .join("crates")
+            .join("preset")
+            .join("assets")
+            .join("presets");
+        Self::build_from_presets(&presets, &assets)
     }
 
-    let mut catalog = Catalog {
-        catalog_schema: CATALOG_SCHEMA,
-        revision: String::new(),
-        machines,
-        files,
-    };
-    catalog.revision = revision_of(&catalog);
-    Ok(catalog)
+    /// 从**已加载的预设源 + 一个产物目录**构建。这是两端共用的构建本体：
+    /// - 安装包侧（[`Catalog::build_from_repo`]）：产物目录 = 入库产物，**严格**——缺一份就失败；
+    /// - 发布侧（工作台 `wb_publish`）：产物目录 = `dist/presets/mkp`，**宽松**——
+    ///   没有产物的版本是合法状态（交付集合本来就不含它），跳过。
+    pub fn build_from_presets(
+        presets: &crate::presetdata::Presets,
+        artifacts_dir: &Path,
+    ) -> Result<Catalog, AppError> {
+        let (catalog, missing) = Self::collect(presets, artifacts_dir);
+        if let Some(first) = missing.first() {
+            return Err(AppError::not_found(format!(
+                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            )));
+        }
+        Ok(catalog.finalize())
+    }
+
+    /// 宽松版：没有产物的版本合法，只登记真实存在的产物。工作台发布 `dist/catalog.json` 用它
+    pub fn build_from_presets_lenient(
+        presets: &crate::presetdata::Presets,
+        artifacts_dir: &Path,
+    ) -> Catalog {
+        let (catalog, _) = Self::collect(presets, artifacts_dir);
+        catalog.finalize()
+    }
+
+    /// 走一遍源 + 产物目录。返回目录与**缺失清单**（严格/宽松由调用方裁决）
+    fn collect(
+        presets: &crate::presetdata::Presets,
+        artifacts_dir: &Path,
+    ) -> (Catalog, Vec<String>) {
+        // 品牌显示名：机型文件里写的是 id，给人看的是 brands.toml 里的名字（与 get_machines 同一条）
+        let brands: HashMap<&str, &str> = presets
+            .catalog
+            .brands()
+            .iter()
+            .map(|b| (b.id.as_str(), b.name.as_str()))
+            .collect();
+
+        let mut machines = Vec::new();
+        let mut files = Vec::new();
+        let mut missing = Vec::new();
+
+        for m in presets.catalog.machines() {
+            machines.push(CatalogMachine {
+                id: m.id.clone(),
+                display: if m.display.trim().is_empty() {
+                    m.id.clone()
+                } else {
+                    m.display.clone()
+                },
+                brand: brands
+                    .get(m.brand.as_str())
+                    .map(|s| (*s).to_owned())
+                    .unwrap_or_else(|| m.brand.clone()),
+                versions: m
+                    .versions
+                    .iter()
+                    .map(|v| CatalogVersion {
+                        id: v.id.clone(),
+                        name: v.name.clone(),
+                    })
+                    .collect(),
+            });
+
+            for v in &m.versions {
+                let file_name = crate::presetdata::mkp_file_name(&m.id, &v.id);
+                let Ok(bytes) = std::fs::read(artifacts_dir.join(&file_name)) else {
+                    missing.push(format!("{} / {}（{}）", m.id, v.id, file_name));
+                    continue;
+                };
+                files.push(CatalogFile {
+                    kind: "mkp_preset".to_owned(),
+                    path: format!("mkp/{file_name}"),
+                    file_name,
+                    machine_id: m.id.clone(),
+                    version_id: v.id.clone(),
+                    sha256: hex(&Sha256::digest(&bytes)),
+                    size: bytes.len() as u64,
+                });
+            }
+        }
+
+        (
+            Catalog {
+                catalog_schema: CATALOG_SCHEMA,
+                revision: String::new(),
+                machines,
+                files,
+            },
+            missing,
+        )
+    }
+
+    /// 指纹收口。构建路径（严格/宽松）与将来的手工组装都从这里过——
+    /// revision 的算法只有这一处
+    pub(crate) fn finalize(mut self) -> Catalog {
+        self.revision = revision_of(&self);
+        self
+    }
 }
 
 /// 对 machines + files 的稳定序列化取摘要。`revision` 本身不在输入里，没有自指问题
@@ -211,7 +251,7 @@ mod tests {
 
     #[test]
     fn builds_five_machines_and_nine_files() {
-        let catalog = build_from_repo(&repo_root()).expect("构建不该失败");
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
         assert_eq!(catalog.machines.len(), 5, "5 台机型");
         assert_eq!(
             catalog
@@ -239,8 +279,8 @@ mod tests {
 
     #[test]
     fn revision_tracks_the_inputs() {
-        let mut a = build_from_repo(&repo_root()).unwrap();
-        let b = build_from_repo(&repo_root()).unwrap();
+        let mut a = Catalog::build_from_repo(&repo_root()).unwrap();
+        let b = Catalog::build_from_repo(&repo_root()).unwrap();
         assert_eq!(a.revision, b.revision, "同样的输入，指纹必须一样");
 
         a.files[0].sha256 = "0".repeat(64);

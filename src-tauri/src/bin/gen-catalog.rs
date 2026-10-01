@@ -35,7 +35,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("src-tauri 上面应该就是仓库根")?
         .to_path_buf();
 
-    let catalog = runtime::catalog::build_from_repo(&repo)?;
+    let catalog = runtime::Catalog::build_from_repo(&repo)?;
     let json = catalog.to_pretty_json()?;
 
     let out = manifest.join("src/runtime/catalog.generated.json");

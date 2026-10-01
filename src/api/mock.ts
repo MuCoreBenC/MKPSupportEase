@@ -242,4 +242,13 @@ export const mockApi: MkpApi = {
   async clearActivePreset() {
     mockActive = null
   },
+
+  /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */
+  async checkRemoteUpdate() {
+    throw new NotImplementedError('checkRemoteUpdate：浏览器里没有远端目录')
+  },
+
+  async applyRemoteUpdate() {
+    throw new NotImplementedError('applyRemoteUpdate：浏览器里没有远端目录')
+  },
 }

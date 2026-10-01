@@ -142,4 +142,12 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   开发源 TOML / 模拟数据 / 工作台内容出现即红（黑名单制，工作台构建不在管辖内）；
   挂进 CI web job。干净过、种脏能抓，两种方向都实测过。
 
+- 2026-10-01：**R11 落地（第二圈）** —— 两端共用契约成形：工作台发布
+  `wb_publish` 现在额外产出 `presets/dist/catalog.json`（与客户端
+  `runtime::Catalog` 同 schema、同指纹算法，`build_from_presets_lenient`
+  宽松构建）；客户端新增检查/应用更新（`check_remote_update` /
+  `apply_remote_update`）：指纹比较 → 应用走既有 release 归档管道 →
+  Stale 文件走既有下载管道。**更新没有第三条路径**。下载源跟着目录走
+  （本地 revision 与远端一致才从远端拿）。真云端来了只换清单来源。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

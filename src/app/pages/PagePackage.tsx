@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import s from './PagePackage.module.css'
 import { api } from '../../api'
-import type { ActivePreset, RuntimeCatalog } from '../../api/contract'
+import type { ActivePreset, RemoteUpdateCheck, RuntimeCatalog } from '../../api/contract'
 import {
   autoSync,
   latestOf,
@@ -98,6 +98,8 @@ export default function PagePackage({ onOpenParams }: Props) {
   const [downloading, setDownloading] = useState(false)
   /* 使用中指针（全局唯一；intact=false 说明盘上的文件漂了，照实说） */
   const [active, setActive] = useState<ActivePreset | null>(null)
+  /* 远端目录检查结果——只点「检查更新」才查（那是显式动作，不进首屏） */
+  const [remote, setRemote] = useState<RemoteUpdateCheck | null>(null)
   /* 获取 / 使用之后重新读一遍本机状态（localStorage 不是响应式的） */
   const [tick, setTick] = useState(0)
 
@@ -189,6 +191,33 @@ export default function PagePackage({ onOpenParams }: Props) {
       setDownloading(false)
     }
   }, [stale, downloading, refreshWorld])
+
+  /* 检查更新：对远端目录比较指纹。显式动作，不进首屏、不自动跑 */
+  const checkRemote = useCallback(async () => {
+    setDownloadErr(null)
+    try {
+      setRemote(await api.checkRemoteUpdate())
+    } catch (e) {
+      setRemote(null)
+      setDownloadErr((e as { message?: string }).message ?? '检查没成，原因没说清')
+    }
+  }, [])
+
+  /* 应用远端目录：旧目录归档、新目录生效；之后 Stale 照常出现，用既有下载管道拉新 */
+  const applyRemote = useCallback(async () => {
+    if (downloading) return
+    setDownloading(true)
+    setDownloadErr(null)
+    try {
+      await api.applyRemoteUpdate()
+      await refreshWorld()
+      setRemote(await api.checkRemoteUpdate())
+    } catch (e) {
+      setDownloadErr((e as { message?: string }).message ?? '应用没成，原因没说清')
+    } finally {
+      setDownloading(false)
+    }
+  }, [downloading, refreshWorld])
 
   const latest = latestOf(cloud)
   const layout = useMemo(() => (cur === null ? [] : layoutOf(cur.package)), [cur])
@@ -303,6 +332,16 @@ export default function PagePackage({ onOpenParams }: Props) {
             </span>
           </div>
           <div className={s.kv}>
+            <span className={s.key}>远端目录</span>
+            <span className={s.val}>
+              {remote === null
+                ? '没查过'
+                : remote.upToDate
+                  ? '已是最新（指纹一致）'
+                  : `有新目录 ${remote.remoteRevision}（本地 ${remote.localRevision}）`}
+            </span>
+          </div>
+          <div className={s.kv}>
             <span className={s.key}>当前使用</span>
             <span className={s.val}>
               {active === null
@@ -340,6 +379,14 @@ export default function PagePackage({ onOpenParams }: Props) {
           {stale !== null && stale.length > 0 && (
             <button type="button" className={s.btn} onClick={tryUpdate} disabled={downloading}>
               {downloading ? '正在更新……' : `更新这 ${stale.length} 份到最新`}
+            </button>
+          )}
+          <button type="button" className={s.btn} onClick={checkRemote} disabled={downloading}>
+            检查更新
+          </button>
+          {remote !== null && !remote.upToDate && (
+            <button type="button" className={s.btn} onClick={applyRemote} disabled={downloading}>
+              应用远端目录
             </button>
           )}
           {downloadErr !== null && (

@@ -22,6 +22,7 @@ pub mod delivery;
 pub mod paths;
 pub mod release;
 pub mod state;
+pub mod update;
 
 pub use catalog::Catalog;
 
@@ -60,7 +61,7 @@ mod tests {
     fn embedded_matches_rebuild() {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let repo = manifest.parent().expect("src-tauri 上面就是仓库根");
-        let catalog = catalog::build_from_repo(repo).expect("目录构建不出来");
+        let catalog = catalog::Catalog::build_from_repo(repo).expect("目录构建不出来");
         let json = catalog.to_pretty_json().expect("序列化失败");
         assert_eq!(
             json.as_bytes(),

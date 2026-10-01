@@ -12,7 +12,9 @@
 //! │   └── mkp/<preset_file_name>   参数本体（wb_generate 落的，9 份起）
 //! ├── assets/                      资产根（public/assets/）的**引用可达子集**
 //! │   └── printers/ icons/ models/ bbs/…   path 在两个根下同形
-//! └── manifest.json                最后写（wb_publish 收尾）
+//! ├── manifest.json                最后写（wb_publish 收尾）
+//! └── catalog.json                 **新世界两端共用契约**（与客户端 runtime::Catalog
+//!                                  同 schema；客户端检查/应用更新对它做指纹比较）
 //! ```
 //!
 //! 两条定稿决定，各有一条理由：
@@ -77,6 +79,8 @@ pub const ASSETS_DIR: &str = "assets";
 pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
 pub const MANIFEST_FILE: &str = "manifest.json";
+/// 新世界目录的固定文件名（两端共用契约：与客户端 `runtime::Catalog` 同 schema）
+pub const NEW_CATALOG_FILE: &str = "catalog.json";
 
 /// content 子树的三份文件（相对交付根）
 pub const CONTENT_FILES: [&str; 3] = [
@@ -333,6 +337,7 @@ pub fn deliverable_set(book: &Book<'_>) -> BTreeSet<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
     set.extend(CONTENT_FILES.map(str::to_owned));
     set.insert(MANIFEST_FILE.to_owned());
+    set.insert(NEW_CATALOG_FILE.to_owned());
     for a in referenced_assets(book) {
         set.insert(format!("{ASSETS_DIR}/{}", a.path));
     }
@@ -539,6 +544,18 @@ pub fn publish_into(
     });
     // 清单最后写。`fsx::atomic` 是仓库唯一的写盘出口
     crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
+
+    // **新世界的目录**（两端共用契约）：与客户端 `runtime::Catalog` 同一个类型、
+    // 同一个 schema、同一套指纹。工作台发布的是"远端那份"，客户端检查/应用更新
+    // 就是对两个 revision 做比较——不再有第二种清单格式。
+    // 宽松构建：没有产物的版本合法（交付集合本来就不含它）。`path` 与客户端
+    // 同语义（落点 `mkp/…`）；远端文件在哪个子目录是源实现的事（dist/presets/mkp）。
+    let new_catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
+        book.presets,
+        &dist_root.join("presets/mkp"),
+    )
+    .to_pretty_json()?;
+    crate::fsx::atomic::atomic_write(&dist_root.join(NEW_CATALOG_FILE), new_catalog.as_bytes())?;
 
     Ok(PublishOutcome {
         files: assets.len(),
@@ -794,15 +811,19 @@ mod tests {
         let d = crate::workbench::domain::patch::Draft::default();
         let book = Book::new(&f.presets, &c, &d);
 
-        // 交付集合（13.1）：content 3 + manifest + 夹具可达资产 4 + mkp 产物 3
+        // 交付集合（13.1）：content 3 + manifest + catalog.json + 夹具可达资产 4 + mkp 产物 3
         let expected = deliverable_set(&book);
         assert_eq!(
             expected.len(),
-            11,
-            "content 3 + manifest 1 + assets 4 + mkp 3"
+            12,
+            "content 3 + manifest 1 + catalog.json 1 + assets 4 + mkp 3"
         );
         assert!(expected.contains("presets/mkp/A1-standard.toml"));
         assert!(expected.contains("assets/bbs/A1/process.json"));
+        assert!(
+            expected.contains(NEW_CATALOG_FILE),
+            "新世界目录在交付集合里"
+        );
 
         let dist = tempfile::tempdir().unwrap();
         let asset_root = tempfile::tempdir().unwrap();
@@ -872,6 +893,27 @@ mod tests {
             manifest.get("bundles").is_none(),
             "套餐的唯一真相在 bundles.json"
         );
+
+        // **新世界目录**：与客户端同 schema、指纹非空、条目 = 有产物的版本；
+        // 内容字节的 SHA 与 dist 里真实字节一致（消费端将来拿它当校验期望值）
+        let new_catalog = crate::runtime::Catalog::parse(
+            &std::fs::read(dist.path().join(NEW_CATALOG_FILE)).expect("catalog.json 该被写出"),
+        )
+        .expect("发布产出的 catalog.json 必须是合法目录");
+        assert_eq!(
+            new_catalog.catalog_schema,
+            crate::runtime::catalog::CATALOG_SCHEMA
+        );
+        assert_eq!(new_catalog.revision.len(), 16, "指纹 16 位");
+        assert_eq!(new_catalog.files.len(), 3, "夹具三个有产物的版本");
+        for f in &new_catalog.files {
+            let bytes = std::fs::read(dist.path().join("presets/mkp").join(&f.file_name)).unwrap();
+            use sha2::{Digest, Sha256};
+            assert_eq!(
+                crate::runtime::catalog::hex(&Sha256::digest(&bytes)),
+                f.sha256
+            );
+        }
 
         // **13.8**：manifest 每条 relativePath 的文件存在、sha256 与真实字节一致；
         // 且交付目录里除 manifest/content 外，没有清单之外的文件

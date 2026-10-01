@@ -614,6 +614,16 @@ export interface ActivePreset {
   intact: boolean
 }
 
+/**
+ * 远端目录检查结果（两端共用契约：比较的是 revision 指纹，不逐项 diff）。
+ * 开发期远端 = 工作台发布的 dist/catalog.json；真云端来了只换来源，这个形状不动。
+ */
+export interface RemoteUpdateCheck {
+  upToDate: boolean
+  localRevision: string
+  remoteRevision: string
+}
+
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -722,6 +732,17 @@ export interface MkpApi {
    * 撤销使用。幂等：本来就没在用也不报错。
    */
   clearActivePreset(): Promise<void>
+
+  /**
+   * 检查更新：对远端目录比较指纹（本地 vs 远端的 revision）。
+   */
+  checkRemoteUpdate(): Promise<RemoteUpdateCheck>
+
+  /**
+   * 应用远端目录：旧目录归档、新目录生效。之后照常走「有更新」→ 下载，
+   * 没有第三条更新路径。
+   */
+  applyRemoteUpdate(): Promise<void>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

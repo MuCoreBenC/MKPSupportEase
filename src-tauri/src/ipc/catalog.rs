@@ -33,16 +33,33 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 /// 开发机上它存在，管道就能端到端走通；用户机器上不存在，命令诚实说还没接。
 /// 这条路径探测随第二圈真源上线一起退场——它不是架构的一部分，是脚手架。
 fn dev_source_dir() -> PathBuf {
+    repo_root().join("crates/preset/assets/presets")
+}
+
+fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("src-tauri 上面就是仓库根")
-        .join("crates/preset/assets/presets")
+        .to_path_buf()
+}
+
+/// 远端（开发期替身 = 工作台发布的 dist）：`presets/dist/catalog.json` + 文件根。
+/// 工作台发布过至少一次才存在——它就是"云端有东西"的开发期形态。
+fn dev_remote() -> Option<(PathBuf, PathBuf)> {
+    let dist = repo_root().join("presets/dist");
+    let cat = dist.join("catalog.json");
+    cat.is_file()
+        .then(|| (cat.clone(), dist.join("presets/mkp")))
 }
 
 /// 把 catalog 里登记的一份文件拉进下载区（`mkp/`）。
 ///
 /// 第一圈的口径：一次一份（`downloadFiles` 那个批量口子还留给旧世界）。
 /// 字节对不上 SHA 就整个拒绝——`mkp/` 里不会出现坏文件。
+///
+/// **源的选取跟着目录走**：本地目录若是远端发布的（revision 一致），文件也从远端
+/// 拿（dist/presets/mkp）；本地还是随包目录时才用入库产物目录。两边的字节各自与
+/// 自己的目录指纹配对，拿错了 SHA 校验会当场拦住——但顺序对齐让它根本不发生。
 #[tauri::command]
 pub async fn download_runtime_file(app: AppHandle, file_name: String) -> Result<String, AppError> {
     traced("downloadRuntimeFile", |_| {
@@ -54,14 +71,27 @@ pub async fn download_runtime_file(app: AppHandle, file_name: String) -> Result<
             .find(|f| f.file_name == file_name)
             .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
 
-        let dir = dev_source_dir();
-        if !dir.is_dir() {
+        let source_root: PathBuf = match dev_remote() {
+            Some((remote_catalog, remote_files)) => {
+                let remote = runtime::Catalog::parse(&std::fs::read(&remote_catalog)?)?;
+                if remote.revision == catalog.revision {
+                    remote_files
+                } else {
+                    dev_source_dir()
+                }
+            }
+            None => dev_source_dir(),
+        };
+        if !source_root.is_dir() {
             return Err(AppError::not_implemented(
                 "下载还没接：真云端在第二圈，这台机器上也没有开发源",
             ));
         }
-        let target =
-            runtime::delivery::deliver(&root, file, &runtime::delivery::LocalDirSource::new(&dir))?;
+        let target = runtime::delivery::deliver(
+            &root,
+            file,
+            &runtime::delivery::LocalDirSource::new(&source_root),
+        )?;
         Ok(target
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -175,5 +205,51 @@ pub async fn clear_active_preset(app: AppHandle) -> Result<(), AppError> {
     traced("clearActivePreset", |_| {
         let root = internal_root(&app)?;
         runtime::state::clear_active(&root)
+    })
+}
+
+/* ---------- 检查 / 应用更新（两端共用契约的消费者侧） ---------- */
+
+/// 给界面的更新检查结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteUpdateDto {
+    pub up_to_date: bool,
+    pub local_revision: String,
+    pub remote_revision: String,
+}
+
+/// 对远端目录做检查更新（开发期替身 = 工作台发布的 `presets/dist/catalog.json`；
+/// 真云端来了换 manifest 的来源，比较逻辑不动）。
+#[tauri::command]
+pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppError> {
+    traced("checkRemoteUpdate", |_| {
+        let root = internal_root(&app)?;
+        let (remote_catalog, _) = dev_remote().ok_or_else(|| {
+            AppError::not_implemented("还没有远端目录：先在工作台发布一次（或接真云端）")
+        })?;
+        let remote = runtime::Catalog::parse(&std::fs::read(&remote_catalog)?)?;
+        let local = runtime::load_released_catalog(&root)?;
+        let r = runtime::update::check(&local, &remote);
+        Ok(RemoteUpdateDto {
+            up_to_date: r.up_to_date,
+            local_revision: r.local_revision,
+            remote_revision: r.remote_revision,
+        })
+    })
+}
+
+/// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
+/// 「有更新」里，用既有的下载管道拉新——更新没有第三条路径。
+#[tauri::command]
+pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
+    traced("applyRemoteUpdate", |_| {
+        let root = internal_root(&app)?;
+        let (remote_catalog, _) = dev_remote().ok_or_else(|| {
+            AppError::not_implemented("还没有远端目录：先在工作台发布一次（或接真云端）")
+        })?;
+        let bytes = std::fs::read(&remote_catalog)?;
+        let report = runtime::release::release_bytes(&root, &bytes)?;
+        Ok(report.summary())
     })
 }
