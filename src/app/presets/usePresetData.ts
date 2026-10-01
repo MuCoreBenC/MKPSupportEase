@@ -15,7 +15,7 @@
  *   机型与版本          api.getMachines()                         → 6 机型 / 10 版本
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
- *   用户自己的文件      api.getLocalUserFiles()                   → **固定演示集合**，实测 3 个（云端没有它们）
+ *   用户自己的文件      api.getUserPresetFiles()                  → **用户线**（扫 presets-mine/），空是合法状态
  *   当前使用的那一条    api.getActivePreset()（新世界底账 `run/active-preset.json`）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
@@ -77,7 +77,6 @@ import {
   slicerFilterValues,
 } from './presetTree'
 import type {
-  LocalUserFile,
   PresetCloudRow,
   PresetKindAxis,
   PresetLocalRow,
@@ -85,6 +84,7 @@ import type {
   PresetScopeAxis,
   PresetTableData,
   PresetTree,
+  UserPresetFile,
   PresetVersionInput,
 } from './presetTree'
 
@@ -123,12 +123,12 @@ export interface PresetData {
    */
   localIds: string[]
   /**
-   * 用户自己放进预设目录的文件（第二个读）。
+   * **用户线**：用户自己放的那一份（`presets-mine/` 里扫出来的）。
    *
    * **云端没有它们**，所以它们只出现在本地表里、没有交付身份、也不参与套餐与菜单。
-   * 同样是固定演示集合（实测 3 个：2 个 MKP / 1 个切片器，其中一个故意没标适用机型）。
+   * 认不出类别的那几份（`.json`）也在里面 —— 界面上任何类型档下都列，不藏。
    */
-  userFiles: LocalUserFile[]
+  mine: UserPresetFile[]
   /**
    * 正在使用的**唯一那一条**：从新世界底账（`run/active-preset.json`）读出来的，
    * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
@@ -227,7 +227,8 @@ export function usePresetData(): PresetData {
   const [machines, setMachines] = useState<Machine[]>([])
   const [tree, setTree] = useState<PresetTree>({ machines: [], totalFiles: 0 })
   const [localIds, setLocalIds] = useState<string[]>([])
-  const [userFiles, setUserFiles] = useState<LocalUserFile[]>([])
+  /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
+  const [mine, setMine] = useState<UserPresetFile[]>([])
   const [active, setActive] = useState<ActivePreset | null>(null)
   const [slicerCopied, setSlicerCopied] = useState<string[]>([])
   const [ready, setReady] = useState(false)
@@ -283,14 +284,16 @@ export function usePresetData(): PresetData {
     let alive = true
 
     const load = async () => {
+      /* 用户线那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
       const [repo, list, menu, local, mine, copied] = await Promise.all([
         api.getPresetFiles(),
         api.getMachines(),
         api.getMenu(),
         api.getLocalFiles(),
-        api.getLocalUserFiles(),
+        api.getUserPresetFiles(),
         api.getSlicerCopied(),
       ])
+      setMine(mine)
 
       /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
       const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
@@ -316,7 +319,6 @@ export function usePresetData(): PresetData {
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
       setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
       setLocalIds(local)
-      setUserFiles(mine)
       setActive(entry)
       setSlicerCopied(copied)
 
@@ -427,7 +429,7 @@ export function usePresetData(): PresetData {
     machine: machines.find((m) => m.id === machineId),
     tree,
     localIds,
-    userFiles,
+    mine,
     active,
     slicerCopied,
     pick,
@@ -599,7 +601,7 @@ export function usePresetPage(data: PresetData): PresetPage {
     (): PresetRowsInput => ({
       machines,
       machineId: data.machineId,
-      userFiles: data.userFiles,
+      mine: data.mine,
       localIds: localSet,
       slicerCopiedIds: copiedSet,
       active: data.active,
@@ -618,7 +620,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       data.release.presets,
       data.release.stale,
       data.release.version,
-      data.userFiles,
+      data.mine,
       copiedSet,
       kind,
       localSet,

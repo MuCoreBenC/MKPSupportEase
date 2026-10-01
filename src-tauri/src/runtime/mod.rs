@@ -20,6 +20,8 @@
 
 pub mod catalog;
 pub mod delivery;
+/// **用户线**：用户自己的预设（`presets-mine/`）—— 与官方线（`mkp/` / `archive/`）分开
+pub mod mine;
 pub mod net;
 pub mod paths;
 pub mod release;

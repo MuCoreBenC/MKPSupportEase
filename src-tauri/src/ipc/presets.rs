@@ -16,8 +16,13 @@
 //! | `get_param_meta` | 字段定义（**全部**，含废弃） |
 //! | `get_machine_params` | `machineVariants` 的三层取值 |
 //! | `get_local_files` | 本轮恒为空集合（见下） |
-//! | `get_local_user_files` | 本轮恒为空集合 |
 //! | `get_slicer_copied` | 本轮恒为空集合 |
+//!
+//! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
+//! 不住 catalog 也不住内部根 —— 它在 `Documents/SupportEase/presets-mine/`，
+//! 由 [`crate::ipc::mine::get_user_preset_files`] / `read_user_preset_text` 那两条读回答。
+//! 旧命令恒空、且旧 DTO 里的「用户自己标的适用机型」在新世界里没有来源（没人能标），
+//! 留着就是两套口径。
 //!
 //! # 只出切片器预设，不出机型图
 //!
@@ -709,12 +714,6 @@ fn machine_params_dto(
 #[tauri::command]
 pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| Ok(Vec::new()))
-}
-
-/// 用户自己放进预设目录的文件。**扫盘那条路要等云端联动那一轮**（见方案 §6）
-#[tauri::command]
-pub fn get_local_user_files(_app: AppHandle) -> Result<Vec<Value>, AppError> {
-    traced("getLocalUserFiles", |_| Ok(Vec::new()))
 }
 
 /// 已经复制进切片器目录的那些。**本轮恒空** —— 写盘那一侧还没有

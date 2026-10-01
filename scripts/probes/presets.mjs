@@ -28,12 +28,14 @@ const problems = []
  *   ② 浏览器里点「下载 / 更新」**必然**抛「未实现的接口」（没有下载区、没有数据源）——
  *      那是设计成要报错的：探针自己在第 5 节点了它一次，页面把这条错误如实显示出来，
  *      正是要的结果（"点了说成功但盘上什么都没有"才是要抓的）；
- *   ③ 同一档还有「看正文」：归档里那份的字节要真的盘，浏览器里没有 —— 页面照实说"读不出来"。
+ *   ③ 同一档还有「看正文」：归档里那份 / 用户自己那份的字节都要真的盘，浏览器里没有 ——
+ *      页面照实说"读不出来"。
  */
 const BENIGN = [
   /\/favicon\.ico$/,
   /未实现的接口: downloadCatalogFile/,
   /未实现的接口: readArchivedText/,
+  /未实现的接口: readUserPresetText/,
 ]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
@@ -370,6 +372,93 @@ if (batchCount > 0) {
 
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(200)
+
+/* ---------- 5d. 用户线：我自己的那一份（看得见、认得出、看得了） ---------- */
+/*
+ * 守三件事：
+ *   ① 用户线那两份在本地表里列得出来（假后端给两条演示：一份 `.toml` 认得出、一份 `.json` 认不出）；
+ *   ② **认不出类别的那一份在任何类型档下都列**（藏起来等于说他没这份文件）；
+ *   ③ 「看正文」是**只读**的：读不出来如实说，抽屉里不许出现 改 / 保存 / 另存 / 删除
+ *      （改它要等"临时编辑 → 保存"那一层）。
+ */
+await page.waitForTimeout(200)
+const mineRows = await actions()
+console.log(`\n[用户线 · 本地表] ${mineRows.map((r) => r.name).join(' || ')}`)
+for (const name of ['我的 A1 涂胶.toml', 'Process_0.2mm.json']) {
+  if (!mineRows.some((r) => r.name.includes(name))) {
+    problems.push(`本地表里没有我自己的那一份：${name}`)
+  }
+}
+
+/* ② 认不出的那一份在切片器档下也还在；认得出是 MKP 预设的那一份不该跑过去 */
+await rad('preset-kind', 'slicer').click({ force: true })
+await page.waitForTimeout(350)
+const slicerRows = await actions()
+console.log(`[用户线 · 切片器档] ${slicerRows.map((r) => r.name).join(' || ')}`)
+if (!slicerRows.some((r) => r.name.includes('Process_0.2mm.json'))) {
+  problems.push('认不出类别的那一份在切片器档下也该列出来（认不出就不藏）')
+}
+if (slicerRows.some((r) => r.name.includes('我的 A1 涂胶.toml'))) {
+  problems.push('认得出是 MKP 预设的那一份不该出现在切片器档下')
+}
+await rad('preset-kind', 'mkp').click({ force: true })
+await page.waitForTimeout(350)
+
+/* ③ 展开那一份 → 「正文 / 看正文」 */
+const mineRow = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'Process_0.2mm.json' })
+  .first()
+await mineRow.click()
+await page.waitForTimeout(300)
+const mineKind = await page.evaluate(() => {
+  const dl = document.querySelector('main tbody dl')
+  if (dl === null) return ''
+  const dts = [...dl.querySelectorAll('dt')]
+  const dds = [...dl.querySelectorAll('dd')]
+  const i = dts.findIndex((d) => (d.textContent ?? '').trim() === '类型')
+  return i < 0 ? '' : (dds[i]?.textContent ?? '').trim()
+})
+console.log(`[用户线] 那一份的类型：${mineKind || '(没有这一格)'}`)
+if (!mineKind.includes('认不出')) {
+  problems.push(`认不出类别的那一份，类型该写「认不出是哪一类」，实测「${mineKind}」`)
+}
+
+const bodyBtn = page.getByRole('button', { name: '看正文' })
+const bodyBtnCount = await bodyBtn.count()
+console.log(`[用户线] 「看正文」按钮 ${bodyBtnCount} 个`)
+if (bodyBtnCount === 0) {
+  problems.push('展开我自己的那一份，里面没有「看正文」')
+} else {
+  await bodyBtn.last().click()
+  await page.waitForTimeout(500)
+  const mineDrawer = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    return {
+      text: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 220),
+      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map(
+        (b) => (b.innerText || b.getAttribute('aria-label') || '').trim(),
+      ),
+    }
+  })
+  console.log(`[用户线] 抽屉：${mineDrawer.text}`)
+  if (!mineDrawer.text.includes('Process_0.2mm.json')) {
+    problems.push('抽屉里要认出看的是哪一份')
+  }
+  if (!/读不出来/.test(mineDrawer.text)) {
+    problems.push('浏览器里没有用户目录，读正文该如实说读不出来')
+  }
+  /* 这一层只能看：写入动作连按钮都不该有 */
+  for (const forbidden of ['保存', '另存', '删除', '改名']) {
+    if (mineDrawer.buttons.some((b) => b.includes(forbidden))) {
+      problems.push(`这一层只能看，抽屉里不该有「${forbidden}」`)
+    }
+  }
+  await page.screenshot({ path: `${shotDir}/presets-mine.png` })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+}
 
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*

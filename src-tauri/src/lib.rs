@@ -127,7 +127,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        ipc::presets::get_local_user_files,
+        // 用户线（用户自己的预设，住 Documents/SupportEase/presets-mine）
+        ipc::mine::get_user_preset_files,
+        ipc::mine::read_user_preset_text,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
@@ -164,7 +166,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        ipc::presets::get_local_user_files,
+        // 用户线（用户自己的预设，住 Documents/SupportEase/presets-mine）
+        ipc::mine::get_user_preset_files,
+        ipc::mine::read_user_preset_text,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,

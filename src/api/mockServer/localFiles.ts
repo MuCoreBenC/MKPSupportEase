@@ -1,4 +1,4 @@
-import type { AppliedPreset, LocalUserFile } from '../../api/contract'
+import type { AppliedPreset } from '../../api/contract'
 import { allPresetFiles } from './resources'
 
 /*
@@ -7,7 +7,7 @@ import { allPresetFiles } from './resources'
  * # 为什么要有它
  *
  * 用户端的预设列表要说「这个文件在你机器上 / 还得下」。契约里给的是**逐文件**的集合
- * （`getLocalFiles` / `getLocalUserFiles`），不是按版本的一个总状态 ——
+ * （`getLocalFiles`），不是按版本的一个总状态 ——
  * 后者会让「本地 / 云端」这个区分整个消失。
  *
  * # 真后端要做的事（这里一件都没做）
@@ -61,63 +61,18 @@ export function localFileIds(): string[] {
 }
 
 // ——————————————————————————————————————————————————————————————
-// 用户自己的文件
+// 用户自己的文件：**已经搬走了**
 // ——————————————————————————————————————————————————————————————
 
-/**
- * **云端没有的那些文件。** 同样是手写的演示数据。
+/*
+ * 这一支（旧 `getLocalUserFiles` 的演示集合）已随 2026-10-02 的换源退役：
+ * 用户自己的文件是**用户线**，住 `~/Documents/SupportEase/presets-mine/`，
+ * 由 `runtime::mine` + `ipc::mine` 那两条读回答（盘就是底账，没有演示集合）。
+ * 浏览器模式下的演示数据在 `src/api/mock.ts` 的 `getUserPresetFiles` 里。
  *
- * 和上面那份集合的区别不是「另外几个 id」，而是**另一种东西**：上面那些是官方 asset
- * 已经下到本机，云端有权威副本；这三个是用户自己放进预设目录的，仓库里查不到，
- * 所以它们没有 asset id、没有交付身份，也永远不出现在云端那张表里。
- *
- * 挑这三个的目的：让本地表里「官方 / 我的」两种来源同时可见，并且能看出权限差别 ——
- * 官方那几行的「重命名」是灰的，这三行不是。
- *
- * 真后端要做的：遍历预设目录，把**不在 manifest 里**的文件都归到这一类。
- * 「适用机型」真后端只能靠文件名或文件内容猜，所以这里故意留一个 `machineIds: []`
- * 的例子 —— 用户没标就是没标，界面要能显示「未标机型」而不是替他猜一个。
+ * 旧夹具同时退役的还有一个形状问题：它带 `machineIds`（用户自己标的适用机型），
+ * 而今天没有任何地方能让用户去标 —— 留着一个永远空的字段就是在编形状。
  */
-const DEMO_USER_FILES: LocalUserFile[] = [
-  {
-    id: 'user_a1mini_debug',
-    fileName: 'a1mini_调试版.toml',
-    path: 'user/a1mini_调试版.toml',
-    kind: 'mkp_preset',
-    machineIds: ['A1_MINI'],
-  },
-  {
-    id: 'user_p1s_slow',
-    fileName: 'p1s_慢速加胶.toml',
-    path: 'user/p1s_慢速加胶.toml',
-    kind: 'mkp_preset',
-    machineIds: ['P1S'],
-  },
-  {
-    /*
-     * 这一个换成了**真仓那份文件的副本**：名字、喷嘴层高、内容都来自
-     * `presets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json`。
-     *
-     * 位置仍在 `user/` 下：演示要的就是「你把它放进自己预设目录」这一种 ——
-     * 官方路径 `presets/bbs/…` 下那份是另一条记录（云端那张表里）。
-     */
-    id: 'user_mkpprocess_a1mini_04_020',
-    fileName: 'MKPProcess A1 mini 0.4 0.20.json',
-    path: 'user/MKPProcess A1 mini 0.4 0.20.json',
-    kind: 'bbs_profile',
-    /* 故意空着：用户没标适用机型。文件名里写着 A1 mini，但「没标」是他自己的状态，不替他猜 */
-    machineIds: [],
-    /* 这两个从文件名读得出来（真后端也只能这么猜），照实填 */
-    nozzle: '0.4',
-    layerHeight: '0.20',
-  },
-]
-
-/** 用户自己的文件。返回副本，调用方改不到这份演示数据 */
-export function localUserFiles(): LocalUserFile[] {
-  return DEMO_USER_FILES.map((f) => ({ ...f, machineIds: [...f.machineIds] }))
-}
-
 // ——————————————————————————————————————————————————————————————
 // 正在生效的那一套（全局唯一）
 // ——————————————————————————————————————————————————————————————

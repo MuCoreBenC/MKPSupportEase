@@ -38,8 +38,8 @@
  *
  * # 本地 / 云端是**两张互不相干的表**
  *
- *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ 你自己放进
- *           预设目录的（`getLocalUserFiles()`，**云端没有它们**）
+ *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ **用户线**
+ *           （`getUserPresetFiles()` 扫 `presets-mine/` —— **云端没有它们**）
  *   云端表  菜单上有什么官方文件（已分配 + 可选）。仅归档的一处都不出现
  *
  * 一个官方文件下载之后两张表里都有，那是对的：云端表说「仓库里有这个东西」，
@@ -61,7 +61,8 @@
  *   套餐内 / 可单下          `PresetFileInfo.delivery`                   真（14 默认 / 6 可选）
  *   属于哪个机型版本         `api.getVersionFiles()` + `machineIds`      真（就是「版本」那一列）
  *   本机有哪些官方文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
- *   我自己的文件             `api.getLocalUserFiles()`                   **演示集合**（同上，实测 3 个）
+ *   我自己的文件             `api.getUserPresetFiles()`                  真（**用户线**：扫 `presets-mine/`，盘当底账）
+ *   我那一份的正文           `api.readUserPresetText()`                  真（只读；抽屉里看，读不出来照实说）
  *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
  *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
@@ -110,6 +111,7 @@ import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
   ARCHIVE_WHY,
+  MINE_DRAWER,
   DOWNLOAD_WHY,
   MISSING_METHOD,
   NO_ASSET_WHY,
@@ -189,13 +191,21 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const [batchBusy, setBatchBusy] = useState(false)
 
   /*
-   * 归档抽屉（「旧版本」）。`null` = 关着。
+   * **只读正文抽屉**在看哪一份。`null` = 关着。
    *
-   * 抽屉里管两件事：**列出这一份的旧版本** + **读其中一份的正文**。正文单独一个状态，
-   * 因为读正文要问后端（前端不碰文件系统），而且会失败 —— 失败要如实说，不许显示空正文。
+   * 两条线共用一个抽屉，因为它俩要的是同一件事：取出一份文本、只读地看。
+   *   `archive` 官方线的旧版本（先列出一份文件的那几个旧版本，再挑一份看）
+   *   `mine`    用户线的那一份（就一份，打开直接读）
+   *
+   * 正文单独一个状态：读它要问后端（前端不碰文件系统），而且**会失败** ——
+   * 失败要如实说，不许显示一段空正文假装它是空的。
    */
-  const [archive, setArchive] = useState<{ fileName: string; rows: ArchivedFile[] } | null>(null)
-  const [archiveBody, setArchiveBody] = useState<{
+  const [viewer, setViewer] = useState<
+    | { kind: 'archive'; fileName: string; rows: ArchivedFile[] }
+    | { kind: 'mine'; fileName: string; path: string }
+    | null
+  >(null)
+  const [body, setBody] = useState<{
     path: string
     text: string | null
     error: string | null
@@ -332,6 +342,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         )
       return
     }
+    if (row.kind === null) {
+      /* 认不出类别的东西（用户自己那份 `.json`）不进官方下载那条路：它本来也不在仓库里 */
+      setNote({ text: `${row.fileName}：认不出它是哪一类，走不了「下载」这条路`, bad: true })
+      return
+    }
     const ref: FileRef = { kind: row.kind, fileName: row.fileName, path: row.path }
     setBusyKey(row.rowKey)
     setNote({ text: `正在请壳下载 ${row.fileName}…`, bad: false })
@@ -396,6 +411,26 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
+   * 读一份正文（只读）。**两条线共用这一个口子**，只是问的命令不同：
+   * 归档区那份走 `readArchivedText`，用户自己那份走 `readUserPresetText`。
+   * 失败照实说（与下载 / 应用同一条规矩：不吞、不装）。
+   */
+  const readBody = (path: string, which: 'archive' | 'user') => {
+    setBody({ path, text: null, error: null, loading: true })
+    const ask = which === 'user' ? api.readUserPresetText(path) : api.readArchivedText(path)
+    ask.then(
+      (text) => setBody({ path, text, error: null, loading: false }),
+      (e: unknown) =>
+        setBody({
+          path,
+          text: null,
+          error: e instanceof Error ? e.message : String(e),
+          loading: false,
+        }),
+    )
+  }
+
+  /**
    * 打开「旧版本」抽屉：按**文件名**把归档里那一份的旧版本挑出来。
    *
    * 判据用文件名 —— 与下载 / 应用 / 读正文同一套口径（归档里那份与交付文件同名，
@@ -403,26 +438,24 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    */
   const openArchive = (row: PresetTableRow) => {
     menu.close()
-    setArchiveBody(null)
-    setArchive({
+    setBody(null)
+    setViewer({
+      kind: 'archive',
       fileName: row.fileName,
       rows: data.archived.filter((a) => a.fileName === row.fileName),
     })
   }
 
-  /** 读归档里某一份的正文。失败照实说（与下载 / 应用同一条规矩：不吞、不装） */
-  const readArchiveBody = (a: ArchivedFile) => {
-    setArchiveBody({ path: a.path, text: null, error: null, loading: true })
-    api.readArchivedText(a.path).then(
-      (text) => setArchiveBody({ path: a.path, text, error: null, loading: false }),
-      (e: unknown) =>
-        setArchiveBody({
-          path: a.path,
-          text: null,
-          error: e instanceof Error ? e.message : String(e),
-          loading: false,
-        }),
-    )
+  /**
+   * 打开用户线那一份的正文（「看正文」）。就一份文件，打开直接读 —— 没有列表这一层。
+   *
+   * **这一层只能看**：改它 / 另存 / 保存是下一层（临时编辑 → 保存），所以抽屉里
+   * 一个写入按钮都没有（连"另存为"都不给）。
+   */
+  const openMine = (row: PresetTableRow) => {
+    menu.close()
+    setViewer({ kind: 'mine', fileName: row.fileName, path: row.path })
+    readBody(row.path, 'user')
   }
 
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
@@ -804,7 +837,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项` +
                 /* 小窗里台账整条隐掉了，数并进这句，免得连同它的说明一起消失 */
                 (density === 'mini'
-                  ? `。仓库 ${data.tree.totalFiles} 个官方文件（已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${data.userFiles.length} 个。${DOWNLOAD_WHY}`
+                  ? `。仓库 ${data.tree.totalFiles} 个官方文件（已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${data.mine.length} 个。${DOWNLOAD_WHY}`
                   : '')
               }
             >
@@ -812,10 +845,10 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
             </span>
             <span
               className={s.ledger}
-              title={`仓库里一共几个官方文件（已剔掉仅归档的）· 本机已有几个官方副本（getLocalFiles，演示集合）· 你自己的文件几个（getLocalUserFiles，云端没有它们）。${DOWNLOAD_WHY}`}
+              title={`仓库里一共几个官方文件（已剔掉仅归档的）· 本机已有几个官方副本（getLocalFiles，演示集合）· 你自己的文件几个（getUserPresetFiles，扫 presets-mine；云端没有它们）。${DOWNLOAD_WHY}`}
             >
               仓库 {data.tree.totalFiles} · 本机 {data.localIds.length} + 我的{' '}
-              {data.userFiles.length}
+              {data.mine.length}
             </span>
           </span>
         </div>
@@ -918,6 +951,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 busyKey={busyKey}
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
+                onOpenMine={openMine}
                 onLive={runLive}
                 onDownload={download}
               />
@@ -927,74 +961,86 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           {/* 查看详情不再是模态框 —— 点行展开下方的内容 */}
 
           {/*
-           * 「旧版本」抽屉：归档区那一面。
+           * **只读正文抽屉**：两条线共用这一个外壳。
            *
            * 挂在 `.main` 里（与参数页同一条规矩）：遮罩只盖内容区，底栏与窗口右下的
-           * resize 手柄还点得到。抽屉里只做两件事 —— 列出旧版本、读其中一份的正文；
-           * **删除 / 恢复 / 用这份旧版本都没有**（归档管理不在这一层）。
+           * resize 手柄还点得到。
+           *
+           *   官方线（`archive`）列出旧版本、挑一份看；**删除 / 恢复 / 用这份旧版本都没有**
+           *   用户线（`mine`）  就一份，打开直接读；**改它 / 另存 / 保存都没有**（下一层的事）
+           *
+           * 两边的共同点：**只读**，读不出来照实说。
            */}
           <Drawer
-            open={archive !== null}
-            title={ARCHIVE_DRAWER.title}
+            open={viewer !== null}
+            title={viewer?.kind === 'mine' ? MINE_DRAWER.title : ARCHIVE_DRAWER.title}
             subtitle={
-              archive === null
+              viewer === null
                 ? undefined
-                : `${archive.fileName} · 归档 ${archive.rows.length} 份`
+                : viewer.kind === 'mine'
+                  ? `${viewer.fileName} · 你自己的文件`
+                  : `${viewer.fileName} · 归档 ${viewer.rows.length} 份`
             }
             onClose={() => {
-              setArchive(null)
-              setArchiveBody(null)
+              setViewer(null)
+              setBody(null)
             }}
           >
-            {archive !== null && (
+            {viewer !== null && (
               <div className={s.arch}>
-                <ul className={s.archList}>
-                  {archive.rows.map((a) => (
-                    <li key={a.path} className={s.archItem}>
-                      <div className={s.archLine}>
-                        <span className={s.archName} title={a.path}>
-                          {a.fileName}
-                        </span>
-                        <span className={s.archMeta}>
-                          {sizeTextOf(a.size)} ·{' '}
-                          {a.modifiedUnix === null
-                            ? '时间未知'
-                            : longStatText(new Date(a.modifiedUnix * 1000).toISOString())}
-                        </span>
-                      </div>
-                      <p className={s.archWho} title={a.path}>
-                        {a.machineId === null || a.versionId === null
-                          ? ARCHIVE_DRAWER.unknown
-                          : `${a.machineId} · ${a.versionId}`}
-                      </p>
-                      <button
-                        type="button"
-                        className={s.archBtn}
-                        onClick={() => readArchiveBody(a)}
-                      >
-                        {ARCHIVE_DRAWER.open}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                {viewer.kind === 'archive' && (
+                  <ul className={s.archList}>
+                    {viewer.rows.map((a) => (
+                      <li key={a.path} className={s.archItem}>
+                        <div className={s.archLine}>
+                          <span className={s.archName} title={a.path}>
+                            {a.fileName}
+                          </span>
+                          <span className={s.archMeta}>
+                            {sizeTextOf(a.size)} ·{' '}
+                            {a.modifiedUnix === null
+                              ? '时间未知'
+                              : longStatText(new Date(a.modifiedUnix * 1000).toISOString())}
+                          </span>
+                        </div>
+                        <p className={s.archWho} title={a.path}>
+                          {a.machineId === null || a.versionId === null
+                            ? ARCHIVE_DRAWER.unknown
+                            : `${a.machineId} · ${a.versionId}`}
+                        </p>
+                        <button
+                          type="button"
+                          className={s.archBtn}
+                          onClick={() => readBody(a.path, 'archive')}
+                        >
+                          {ARCHIVE_DRAWER.open}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
-                {archiveBody !== null && (
+                {body !== null && (
                   <div className={s.archBody}>
                     <p className={s.archBodyHead}>
-                      {ARCHIVE_DRAWER.bodyTitle} · {archiveBody.path}
+                      {ARCHIVE_DRAWER.bodyTitle} · {body.path}
                     </p>
-                    {archiveBody.loading ? (
-                      <p className={s.archNote}>{ARCHIVE_DRAWER.reading}</p>
-                    ) : archiveBody.error !== null ? (
+                    {body.loading ? (
+                      <p className={s.archNote}>
+                        {viewer.kind === 'mine' ? MINE_DRAWER.reading : ARCHIVE_DRAWER.reading}
+                      </p>
+                    ) : body.error !== null ? (
                       /* 读不出来就照实说：不许显示一段空正文假装它是空的 */
-                      <p className={s.archErr}>读不出来：{archiveBody.error}</p>
+                      <p className={s.archErr}>读不出来：{body.error}</p>
                     ) : (
-                      <pre className={s.archPre}>{archiveBody.text}</pre>
+                      <pre className={s.archPre}>{body.text}</pre>
                     )}
                   </div>
                 )}
 
-                <p className={s.archNote}>{ARCHIVE_WHY}</p>
+                <p className={s.archNote}>
+                  {viewer.kind === 'mine' ? MINE_DRAWER.note : ARCHIVE_WHY}
+                </p>
               </div>
             )}
           </Drawer>

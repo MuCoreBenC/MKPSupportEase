@@ -61,8 +61,8 @@
  *   其余官方行   `PresetFileInfo.sizeText` / `.modifiedText` —— 按 path 的 FNV 哈希稳定推的演示值
  *   发布行       时间 = 发布 / 下载时刻（ISO）、大小 = TOML 字节数 —— 都不是编的
  *
- * **前端一行都不编**：拿不到就写「未知」并在 title 里说清为什么（用户自己放进预设目录的
- * 文件就是这一种 —— 契约的 `LocalUserFile` 上没有这两个字段）。
+ * **前端一行都不编**：拿不到就写「未知」并在 title 里说清为什么。
+ * （用户自己那份的大小与时间**是真值**：后端扫盘拿的，`statFrom: 'file'` 那一档。）
  * 时间显示两种形态：行上只写 `MM-DD`、展开面板带年份 —— 见 `shortStatText` / `longStatText`。
  */
 
@@ -82,6 +82,9 @@ import {
   FILE_SIZE_WHY,
   FILE_TIME_WHY,
   KIND_NAME,
+  KIND_UNKNOWN,
+  MINE_BODY_WHY,
+  MINE_DRAWER,
   DOWNLOAD_WHY,
   RELEASE_DOWNLOAD_WHY,
   RELEASE_SIZE_WHY,
@@ -141,6 +144,8 @@ interface Props {
   archiveCountOf: (fileName: string) => number
   /** 打开「旧版本」抽屉（归档的可视化在页面层的抽屉里，表这边只给入口） */
   onOpenArchive: (row: PresetTableRow) => void
+  /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**，写它要等下一层） */
+  onOpenMine: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
@@ -162,6 +167,7 @@ export default function PresetTable({
   onToggleExpand,
   archiveCountOf,
   onOpenArchive,
+  onOpenMine,
   onLive,
   onDownload,
 }: Props) {
@@ -265,8 +271,12 @@ export default function PresetTable({
                * 其余来源（切片器官方行）没有"从目录下载"这一回事，照旧走 `downloaded` 布尔
                */
               const needsUpdate = row.releaseState === 'stale'
-              /* 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有 */
-              const archiveCount = archiveCountOf(row.fileName)
+              /*
+               * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
+               * **用户线那一份问都不问**：归档是官方版本生命周期的事，
+               * 用户自己的文件不进归档，也不该因为同名就借到官方的旧版本。
+               */
+              const archiveCount = row.origin === 'mine' ? 0 : archiveCountOf(row.fileName)
               /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
@@ -414,7 +424,10 @@ export default function PresetTable({
                     <td colSpan={mkp ? 6 : 7}>
                       <dl className={s.facts}>
                         <dt className={s.factKey}>类型</dt>
-                        <dd className={s.factVal}>{KIND_NAME[row.kind]}</dd>
+                        {/* 认不出是哪一类就照实说（用户自己的 `.json`：bbs 与 orca 分不出） */}
+                        <dd className={s.factVal}>
+                          {row.kind === null ? KIND_UNKNOWN : KIND_NAME[row.kind]}
+                        </dd>
 
                         {mkp && (
                           <>
@@ -500,6 +513,26 @@ export default function PresetTable({
                                 onClick={() => onOpenArchive(row)}
                               >
                                 {archiveOpenText(archiveCount)}
+                              </button>
+                            </dd>
+                          </>
+                        )}
+
+                        {/*
+                         * 用户线那一份：**只读**的正文入口。
+                         * 改它 / 另存 / 保存都是下一层的事 —— 这里连按钮都不给（不给必报错的按钮）。
+                         */}
+                        {row.origin === 'mine' && (
+                          <>
+                            <dt className={s.factKey}>{MINE_DRAWER.cell}</dt>
+                            <dd className={s.factVal}>
+                              <button
+                                type="button"
+                                className={s.factLink}
+                                title={MINE_BODY_WHY}
+                                onClick={() => onOpenMine(row)}
+                              >
+                                {MINE_DRAWER.open}
                               </button>
                             </dd>
                           </>

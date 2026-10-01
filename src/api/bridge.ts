@@ -118,7 +118,9 @@ export const bridgeApi: MkpApi = {
   getVersionFiles: (machineId, versionId) =>
     call('getVersionFiles', 'get_version_files', { machineId, versionId }),
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
-  getLocalUserFiles: () => call('getLocalUserFiles', 'get_local_user_files'),
+  /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine）。只读，没有写命令 */
+  getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
+  readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

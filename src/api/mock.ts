@@ -7,7 +7,6 @@ import {
   catalogRegistry,
   copyToSlicerIn,
   localFileIds,
-  localUserFiles,
   menuEntries,
   paramMeta,
   resolveParams,
@@ -156,9 +155,34 @@ export const mockApi: MkpApi = {
     return localFileIds()
   },
 
-  async getLocalUserFiles() {
-    /* 同样是一份手写的演示集合：用户自己放进预设目录的那些，云端没有它们 */
-    return localUserFiles()
+  /*
+   * 用户线：浏览器里没有 `~/Documents/SupportEase/`，给一份**固定演示**（两份）——
+   * 一份认得出类别（`.toml` → MKP 预设）、一份**认不出**（`.json` 可能是 bbs 也可能是 orca）。
+   * 后者是为了让"认不出的也照样列出来（任何类型档下都列）"这条在浏览器里看得见。
+   * 真机上它是扫 `presets-mine/` 得到的，盘就是底账。
+   */
+  async getUserPresetFiles() {
+    return [
+      {
+        path: 'presets-mine/我的 A1 涂胶.toml',
+        fileName: '我的 A1 涂胶.toml',
+        size: 2048,
+        modifiedUnix: 1780000000,
+        kind: 'mkp_preset' as const,
+      },
+      {
+        path: 'presets-mine/Process_0.2mm.json',
+        fileName: 'Process_0.2mm.json',
+        size: 1024,
+        modifiedUnix: 1780003600,
+        kind: null,
+      },
+    ]
+  },
+
+  /** 读用户自己那份要真的盘（浏览器里没有用户目录）：与 readArchivedText 同一条口径，不假装 */
+  async readUserPresetText() {
+    throw new NotImplementedError('readUserPresetText：浏览器里没有用户目录，先用真机跑一次')
   },
 
   async getAppliedPreset() {

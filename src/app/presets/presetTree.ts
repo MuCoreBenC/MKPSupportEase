@@ -22,7 +22,7 @@
  * 正确的模型是**两张表各回答一个问题**，谁也不管谁：
  *
  *   本地表  你这台机器上有哪些文件。两种来源：官方下载下来的副本（`getLocalFiles()`）
- *           与用户自己放进预设目录的（`getLocalUserFiles()`，**云端没有它们**）
+ *           与用户自己放进预设目录的（`getUserPresetFiles()` —— 用户线，**云端没有它们**）
  *   云端表  菜单上有哪些官方文件（已分配 + 可选）。行尾标「已下载 / 未下载」
  *
  * 所以一个官方文件下载之后**两张表里都有**，那是对的；用户自己的文件只在本地表里，
@@ -56,7 +56,8 @@
  * ```
  *
  * 真后端两档都要 `stat`。前端只搬，不算、不编、不补默认值：拿不到就写「未知」并在 title 里说清
- * 为什么（用户自己放进预设目录的文件就是这一种 —— 契约的 `LocalUserFile` 上没有这两个字段）。
+ * 为什么（官方那一档拿不到真值时）。**用户线那一份是真值** —— 后端扫盘给的大小与时刻
+ * （`statFrom: 'file'` 那一档），不用编也不用写「未知」。
  *
  * `FileRef.size`（字节数）仍恒为 undefined，它和 `sizeText` 不是同一个东西，别混。
  *
@@ -76,21 +77,21 @@ import type {
   FileKind,
   FileRef,
   FilesState,
-  LocalUserFile,
   Machine,
   MachineVersion,
   MenuEntry,
   PresetFileInfo,
+  UserPresetFile,
   VersionFiles,
 } from '../../api'
 
 /**
- * 用户自己放进预设目录的文件（`LocalUserFile`）。
+ * 用户自己的一份文件（用户线，`presets-mine/`）。
  *
  * 名字直接用契约那一个，**不抄字段**：契约改了这里跟着改。这里**转出去**是因为
  * 这一页的输入形状（`PresetRowsInput`）也把它写在签名上 —— 调用方不必再去 `src/api` 取一次。
  */
-export type { LocalUserFile }
+export type { UserPresetFile }
 
 /** 取不到真值时的统一说法，与工作台那边用的是同一个词 */
 export const UNKNOWN = '未知'
@@ -141,6 +142,15 @@ export const KIND_NAME: Record<FileKind, string> = {
   bbs_profile: 'BBS 工艺',
   orca_profile: 'Orca 工艺',
 }
+
+/**
+ * **认不出是哪一类**时的说法（行上的 `kind === null`）。
+ *
+ * 什么时候会认不出：用户自己放的文件（用户线）。后端只按扩展名认 —— `.toml` 是 MKP 预设；
+ * 切片器那两类都是 `.json`，**光看扩展名分不出是 bbs 还是 orca**，所以照实认不出。
+ * 这一档在任何类型档下都列（不藏），认不出来也不编一个类别给它。
+ */
+export const KIND_UNKNOWN = '认不出是哪一类'
 
 /**
  * 两条分段控件的词表。
@@ -348,6 +358,28 @@ export const ARCHIVE_WHY =
 export function archiveOpenText(count: number): string {
   return `${count} 份（点开看）`
 }
+
+/**
+ * 用户线那一份的抽屉（点「看正文」看的那个）。
+ *
+ * 它和归档那个抽屉共用外壳，但说的是另一条线：**用户自己的文件**。
+ * 这一层只做「看得见、认得出、看得了」—— **改它 / 新建它 / 保存是下一层**，
+ * 所以抽屉里没有任何写入按钮（连"另存为"都没有：那是第 5 步）。
+ */
+export const MINE_DRAWER = {
+  title: '我自己的这一份',
+  /** 展开详情里那一格的名字与按钮 */
+  cell: '正文',
+  open: '看正文',
+  reading: '正在读…',
+  note:
+    '这是**你自己的文件**（住 ~/Documents/SupportEase/presets-mine）：云端没有它，' +
+    '所以没有 SHA、不属于任何版本、也不参与套餐。官方换版本不会动它；' +
+    '改它也永远不回写官方原件。这一层只能看 —— 改它要等"临时编辑 → 保存"那一层。',
+} as const
+
+/** 「看正文」那颗按钮的说明（展开详情里的 title） */
+export const MINE_BODY_WHY = `读这一份的正文：它就在你自己的目录里，读它不需要校验（它本来就没有官方 SHA）。`
 
 /** 归档抽屉里的那几句话 */
 export const ARCHIVE_DRAWER = {
@@ -750,7 +782,7 @@ export function statusOf(
 /**
  * 搜索：按文件名 / 路径。空串 = 不筛。
  *
- * 参数写成结构类型而不是 `PresetFileNode`，是因为用户自己的文件（`LocalUserFile`）
+ * 参数写成结构类型而不是 `PresetFileNode`，是因为用户自己的文件（`UserPresetFile`）
  * 与两张表的行都要用同一条判据 —— 三处各写一遍 `includes` 迟早会有一处忘了筛路径。
  */
 export function fileMatchesQuery(
@@ -822,7 +854,13 @@ export interface PresetRowBase {
   fileName: string
   /** 相对预设仓库根。表格第二行的小字与「在文件夹中显示」都用它 */
   path: string
-  kind: FileKind
+  /**
+   * 哪一类。**`null` = 认不出**（用户自己的 `.json`：bbs 与 orca 都是 json，光看扩展名分不出）。
+   *
+   * 认不出的行**在任何类型档下都列**（藏起来等于说他没这份文件），
+   * 展开详情里那一格写「认不出是哪一类」—— 不替他认成 MKP 预设。
+   */
+  kind: FileKind | null
   /** 这一行挂在哪台机型下。「全部机型」那一档下每一行各属于自己那台，所以它得在行上 */
   machineId: string
   /**
@@ -939,8 +977,11 @@ export interface PresetRowsInput {
   machines: PresetMachineNode[]
   /** 当前机型 id。空串 = 全部机型（用户自己的文件那一半按它筛，空串就不筛） */
   machineId: string
-  /** `api.getLocalUserFiles()` 的结果。**云端没有这些文件**（假后端给的是固定演示集合） */
-  userFiles: LocalUserFile[]
+  /**
+   * `api.getUserPresetFiles()` 的结果：**用户线**（`presets-mine/` 里那些）。
+   * 云端没有它们 —— 所以它们只在这张本地表里出现，也永远不进云端表。
+   */
+  mine: UserPresetFile[]
   /** `api.getLocalFiles()` 的结果（同样是固定演示集合） */
   localIds: Set<string>
   /**
@@ -1095,10 +1136,12 @@ function versionNameLookup(
  * 两种来源拼在一起，用 `origin` 分开：
  *
  *   官方副本  当前这些机型的文件里，`getLocalFiles()` 说已经下到本机的那些
- *   我的文件  `getLocalUserFiles()` 给的，**仓库里查不到**，所以没有交付身份、也不属于任何版本
+ *   我的文件  `getUserPresetFiles()` 扫出来的（**用户线**：`presets-mine/`）—— 云端没有它，
+ *             所以没有交付身份、不属于任何版本、也没有 SHA 可比
  *
  * 官方那一半按**机型**汇总（一个文件一行，用到它的版本收进 `versions`）；
- * 我的那一半按用户自己标的适用机型筛，**没标的在任何机型下都列**（见 `untagged`）。
+ * 我的那一半是**用户线**（`presets-mine/` 扫出来的）：机型这一层没有来源，
+ * 所以任何机型档下都列（机上写「—」，名称列挂「未标机型」，见 `untagged`）。
  *
  * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
  * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
@@ -1107,7 +1150,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
   const {
     machines,
     machineId,
-    userFiles,
+    mine: mineFiles,
     localIds,
     slicerCopiedIds,
     active,
@@ -1156,34 +1199,43 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
       }
     })
 
-  const mine = userFiles
-    .filter((f) => matchesKind(kind, f.kind))
-    /* 「全部机型」（空串）不筛机型；没标机型的在任何一档下都列 */
-    .filter((f) => machineId === '' || f.machineIds.length === 0 || f.machineIds.includes(machineId))
+  /*
+   * **用户线**：用户自己放进 `presets-mine/` 的那些（`~/Documents/SupportEase/`）。
+   *
+   * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
+   * 也没有 SHA 可比。所以它们只活在这一张本地表里，云端表永远看不到。
+   *
+   * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
+   *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
+   *   - **机型**这一层根本没有来源（今天没有地方让用户标它）→ 任何机型档下都列，
+   *     机上那格写「—」、名称列上挂「未标机型」—— 这与官方那半边的 `untagged` 是同一条口径。
+   */
+  const mine = mineFiles
+    .filter((f) => f.kind === null || matchesKind(kind, f.kind))
     .map((f): PresetLocalRow => ({
       /* rowKey 带上当前那一档机型：换机型时这一行要当成新的一行重画（焦点与菜单都跟着行走） */
-      rowKey: `mine:${machineId}:${f.id}`,
-      /* 仓库里没有它，所以没有 assetId —— 「已应用」也就不可能落在它身上 */
-      pinKey: f.id,
+      rowKey: `mine:${machineId}:${f.path}`,
+      /* 没有 asset id，也没有别的身份 —— **路径就是它的身份**（用户随时可能改名，认路径最稳） */
+      pinKey: f.path,
       fileName: f.fileName,
       path: f.path,
+      /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
       kind: f.kind,
       machineId,
-      /* 他标了几台就写几台；一台都没标写「—」，名称列上那枚「未标机型」说的是同一件事 */
-      machineText:
-        f.machineIds.length === 0
-          ? DASH_
-          : f.machineIds.map((id) => names.get(id) ?? id).join(' · '),
+      /* 机型这一层没有来源 —— 写「—」，不替他猜 */
+      machineText: DASH_,
       /* 用户自己的文件不属于任何版本。表格那一列写「—」，不替他猜一个 */
       versions: [],
-      nozzle: f.nozzle,
-      layerHeight: f.layerHeight,
-      /* 契约的 LocalUserFile 上没有大小与时间 —— 留 undefined，界面写「未知」 */
+      /* **真值**：盘上那份的大小与改动时刻（用户线也盘当底账）—— 与切片器那一档同一档来源 */
+      sizeText: sizeTextOf(f.size),
+      modifiedText:
+        f.modifiedUnix === null ? undefined : new Date(f.modifiedUnix * 1000).toISOString(),
+      statFrom: 'file',
       applied: false,
-      pinned: pinned.has(f.id),
+      pinned: pinned.has(f.path),
       scope: 'local',
       origin: 'mine',
-      untagged: f.machineIds.length === 0,
+      untagged: true,
       /* 没有 asset id 就没法「应用 / 复制」（契约只认 asset id），所以永远是没生效那一档 */
       live: false,
     }))

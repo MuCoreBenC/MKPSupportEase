@@ -27,8 +27,11 @@ pub enum Root {
 
 /// 内部根下首次启动就建齐的子目录
 const INTERNAL_DIRS: [&str; 5] = ["cloud", "archive", "index", "logs", "run"];
+/// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::mine`）要认它，
+/// 字面量只许有这一处
+pub const MINE_DIR: &str = "presets-mine";
 /// 用户根下首次启动就建齐的子目录
-const USER_DIRS: [&str; 3] = ["exports", "reports", "presets-mine"];
+const USER_DIRS: [&str; 3] = ["exports", "reports", MINE_DIR];
 
 /// 用户可见目录的名字。与窗口标题一致 —— 这个目录是给用户看的，就该叫产品名
 const USER_DIR_NAME: &str = "SupportEase";

@@ -348,34 +348,38 @@ export interface PresetFileInfo {
 }
 
 /**
- * **用户自己的文件**（A34）。
+ * **用户自己的一份文件**（用户线）。
  *
- * 和 `PresetFileInfo` 是两种东西，不要混：
+ * 与 `PresetFileInfo`（官方文件）是两种东西，不要混 —— 这是总纲 §1③「预设 TOML 的一生」
+ * 在类型上的体现：
  *
- *   `PresetFileInfo`  官方仓库里的文件。有 asset id、有交付身份、云端有一份权威副本
- *   `LocalUserFile`   用户自己放进预设目录的文件。**云端没有它**，所以没有 asset id、
- *                     没有 `delivery`、也不参与套餐与菜单
+ * ```text
+ * 官方线                               用户线
+ *   云端 → mkp/ → archive/              presets-mine/（另存出来的那一份）
+ *   有 SHA、属于版本、不可变            云端没有它：没有 SHA、不属于任何版本、不参与套餐
+ * ```
  *
- * 这是「本地的就是本地的，云端的就是云端的」这条规则在类型上的体现：用户端的预设页有
- * 两张互不相干的表，本地表里能看到这种文件，云端表里永远看不到。
+ * 用户那份**从官方另存出来之后与云端脱钩**，可以自由改，**永远不回写官方原件**；
+ * 反过来官方换版本也不会动它。
  *
- * 权限也因此不同：官方下载下来的副本**只读**（不能改名，删了能重新下回来），
- * 这种文件可以随便改名，但删了就没有任何地方能找回来。
- *
- * **假后端返回一份固定演示集合**，见 `src/server/resolve/localFiles.ts`。
+ * **形状就是盘上的事实**：路径 / 文件名 / 大小 / 改动时刻 / 认得出的类别。
+ * 没有「用户自己标的适用机型」这种字段 —— 今天没有任何地方能让用户去标它，
+ * 留一个永远空的字段就是在编形状（需要它的那一步再加）。
  */
-export interface LocalUserFile {
-  /** 本机唯一。真后端用绝对路径的哈希，假后端直接写死一个 `user_` 前缀的串 */
-  id: string
-  fileName: string
-  /** 相对预设仓库根 */
+export interface UserPresetFile {
+  /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文时把它交回来 */
   path: string
-  kind: FileKind
-  /** 用户自己标的适用机型。可以是空数组 —— 他没标就是没标，不要替他猜 */
-  machineIds: string[]
-  /** 只有切片器 profile 才有。MKP 的涂胶预设没有喷嘴层高这回事 */
-  nozzle?: string
-  layerHeight?: string
+  fileName: string
+  size: number
+  /** 最后改动时刻（UTF **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
+  modifiedUnix: number | null
+  /**
+   * 认得出是哪一类就给；**认不出是 `null`**。
+   *
+   * 后端只认 `.toml`（MKP 预设）—— 切片器那两类都是 `.json`，光看扩展名分不出
+   * 是 bbs 还是 orca，所以照实认不出。界面上认不出的那一档**在任何类型档下都列**。
+   */
+  kind: FileKind | null
 }
 
 /**
@@ -765,8 +769,19 @@ export interface MkpApi {
   /** 本机预设目录里**已经有的**文件名（官方那一批，固定演示集合） */
   getLocalFiles(): Promise<string[]>
 
-  /** 用户自己放进预设目录的文件 */
-  getLocalUserFiles(): Promise<LocalUserFile[]>
+  /**
+   * **用户自己的预设文件**（用户线，`~/Documents/SupportEase/presets-mine/`）。
+   *
+   * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
+   * 一份都没有 = 空数组，**不是错误**（今天"产生用户文件"的动作用户还做不了：那是下一层）。
+   */
+  getUserPresetFiles(): Promise<UserPresetFile[]>
+
+  /**
+   * 读用户自己那份的正文。**只认 `presets-mine/`**（入参是 [`getUserPresetFiles`] 给的路径），
+   * 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来。
+   */
+  readUserPresetText(path: string): Promise<string>
 
   /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
   getAppliedPreset(): Promise<AppliedPreset | null>

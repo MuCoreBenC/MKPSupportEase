@@ -33,6 +33,5 @@ export {
   appliedPreset,
   copyToSlicerIn,
   localFileIds,
-  localUserFiles,
   slicerCopied,
 } from './localFiles'
