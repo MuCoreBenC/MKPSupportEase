@@ -21,6 +21,7 @@ pub mod catalog;
 pub mod delivery;
 pub mod paths;
 pub mod release;
+pub mod state;
 
 pub use catalog::Catalog;
 
