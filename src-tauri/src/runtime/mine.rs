@@ -23,12 +23,20 @@
 //! 于是"官方换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
 //! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
 //!
-//! # 读在上面，写只在一处
+//! # 读在上面，写只有两条（都是"写我自己的文件"）
 //!
-//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写只有 [`commit_draft`] 一处**
-//! （另存成用户那份，第 5 层）。"在应用内继续编辑用户自己那份"还没做（登记在案）——
-//! 那会新增一条**写用户根**的路径，要单独一层。今天真机上 `presets-mine/` 多半是空的 ——
-//! **空是合法状态，不是错误**。
+//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有两个函数**，
+//! 对应两条**不同**的事，不许合并成一个"存一下"：
+//!
+//! ```text
+//! commit_draft  另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
+//! save_back     写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
+//! ```
+//!
+//! 两条共用一句话：**官方原件（`mkp/` 与下载区）一概不碰**。区别只在"落点是谁"与
+//! "那三行血统从哪来"：另存是新的一份、血统从**来源**算；写回还是同一份、血统
+//! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
+//! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
 use std::path::Path;
 
@@ -263,6 +271,55 @@ pub fn commit_draft(
     })
 }
 
+/// **把编辑后的正文写回它自己**（第八层）：**同一个路径、同一份文件，不产生第二份**。
+///
+/// 与 [`commit_draft`]（另存）只有两处不同：
+///
+/// - **落点是原来那条路径**，不是派生的新名字 —— 用户改的就是"我那份"，
+///   所以不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
+/// - **三行血统照抄文件里原来那三行**（出处没变，见
+///   [`super::lineage::rewrite_keeping_lineage`]）—— 保存之后它仍然说得清
+///   "我从哪一版官方派生"，也不会因为重算摘要变成"基于我自己改过的字节"。
+///   这份本来就没有血统（手工拷的 / 别的程序写出来的）⇒ 照实不写，**不编一个出处**。
+///
+/// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**：不去别处新建一份（那不是用户点的
+/// 那个"保存"），也不假装存成了。
+pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+        )));
+    }
+    /* 血统是**这份文件自己的属性**：先读出来再照抄回去（读不出来 = 它本来就没有） */
+    let lineage = lineage_of_file(&target);
+    let body = super::lineage::rewrite_keeping_lineage(text, lineage.as_ref());
+    crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
+    Ok(Committed {
+        path: rel.to_owned(),
+        file_name: target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| rel.to_owned()),
+        size: body.len() as u64,
+        /* 写的就是原来那一份所在的位置：当然是覆盖 */
+        replaced: true,
+    })
+}
+
+/// 读用户自己那份的正文（**只认 `presets-mine/`**，见 [`check_mine_prefix`]）。
+///
+/// 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来，不装成空正文。
+pub fn read_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    let bytes = std::fs::read(&target)
+        .map_err(|_| AppError::not_found(format!("找不到 {rel} —— 它可能已经被移走或删掉了")))?;
+    String::from_utf8(bytes)
+        .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+}
+
 /// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
@@ -447,6 +504,94 @@ mod tests {
             "列出来的时候就把血统读出来了"
         );
         assert!(check_mine_prefix(&done.path).is_ok(), "落点在那一格里");
+    }
+
+    /* ---------- 写回自己（第八层：改我那份 → 保存） ---------- */
+
+    /// **这一层的核心不变式**：改我那份 → 保存 = **写回同一份** ——
+    /// 不产生 `（已修改）2.toml`，血统还是当初那三行（出处没变）
+    #[test]
+    fn saving_back_writes_the_same_file_and_keeps_the_lineage() {
+        let user = tempfile::tempdir().unwrap();
+        let label = "mkp/presets/A1-standard.toml";
+        let done = commit_draft(user.path(), "A1-standard.toml", label, "涂胶宽度 = 1.0").unwrap();
+        let lineage = lineage_of_file(&user.path().join(&done.path)).expect("副本该有血统");
+        let edited = "涂胶宽度 = 1.4";
+
+        let back = save_back(user.path(), &done.path, edited).unwrap();
+
+        assert_eq!(back.path, done.path, "还是同一条路径，没有第二份");
+        assert_eq!(back.file_name, done.file_name);
+        assert!(back.replaced, "写的就是原来那一份所在的位置");
+        assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+
+        let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
+        assert_eq!(
+            lineage::strip_lineage_for_compare(&after),
+            edited,
+            "正文就是改过的那份"
+        );
+        assert_eq!(
+            lineage_of_file(&user.path().join(&back.path)),
+            Some(lineage),
+            "出处那三行一个字都没变 —— 不会变成\"基于我自己改过的字节\""
+        );
+    }
+
+    /// **什么都没改就什么都没发生**：打开又保存，文件逐字节不变
+    #[test]
+    fn saving_back_an_untouched_file_changes_nothing() {
+        let user = tempfile::tempdir().unwrap();
+        let done = commit_draft(
+            user.path(),
+            "A1-standard.toml",
+            "mkp/presets/A1-standard.toml",
+            "涂胶宽度 = 1.0",
+        )
+        .unwrap();
+        let before = std::fs::read(user.path().join(&done.path)).unwrap();
+        let body = lineage::strip_lineage_for_compare(&String::from_utf8_lossy(&before));
+
+        save_back(user.path(), &done.path, &body).unwrap();
+
+        assert_eq!(
+            std::fs::read(user.path().join(&done.path)).unwrap(),
+            before,
+            "打开又保存：逐字节不变"
+        );
+    }
+
+    /// 本来就没有血统的那份（手工拷的 / 别的程序写的）写回时**不编一个出处**
+    #[test]
+    fn saving_back_a_file_without_lineage_invents_none() {
+        let user = tempfile::tempdir().unwrap();
+        write(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.0");
+
+        let back = save_back(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.2").unwrap();
+
+        let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
+        assert_eq!(after, "涂胶宽度 = 1.2", "没有血统就不写血统");
+        assert_eq!(lineage_of_file(&user.path().join(&back.path)), None);
+    }
+
+    /// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**，不去别处新建一份
+    #[test]
+    fn saving_back_refuses_when_the_file_is_gone() {
+        let user = tempfile::tempdir().unwrap();
+        let e = save_back(user.path(), "presets-mine/已经不在了.toml", "涂胶 = 1").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+        assert!(
+            !user.path().join("presets-mine/已经不在了.toml").exists(),
+            "没有顺手建一份出来"
+        );
+    }
+
+    /// 写回也只认用户自己那一格：`exports/`、`../` 一概不碰
+    #[test]
+    fn saving_back_stays_in_the_mine_dir() {
+        let user = tempfile::tempdir().unwrap();
+        assert!(save_back(user.path(), "exports/x.toml", "涂胶 = 1").is_err());
+        assert!(save_back(user.path(), "../x.toml", "涂胶 = 1").is_err());
     }
 
     /* ---------- 基于官方哪一版（第七层：官方换版了没有） ---------- */

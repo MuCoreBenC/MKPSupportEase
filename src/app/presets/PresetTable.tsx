@@ -90,6 +90,8 @@ import {
   MINE_APPLY_WHY,
   MINE_BODY_WHY,
   MINE_DRAWER,
+  MINE_EDIT_TEXT,
+  MINE_EDIT_WHY,
   MINE_NOT_PRESET_WHY,
   DOWNLOAD_WHY,
   EDIT_TEXT,
@@ -155,7 +157,10 @@ interface Props {
   onOpenArchive: (row: PresetTableRow) => void
   /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**） */
   onOpenMine: (row: PresetTableRow) => void
-  /** 开始改这一份（临时编辑那条链）—— 只有"与目录一致"的交付行给这个入口 */
+  /**
+   * 开始改这一份（临时编辑那条链）。两条线共一个入口：
+   * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
+   */
   onEdit: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
@@ -607,9 +612,10 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 用户线那一份：**只读**的正文入口。
-                         * 改它 / 另存都要先经过"改这份"那条链（点它会另存出一份自己的）——
-                         * 这里只给看，不给就地改官方那一份。
+                         * 用户线那一份：**看正文** + **改这份**（第八层）。
+                         * 两条都是它自己的入口：改的是临时文件，保存时**写回它自己**
+                         * （不另存一份新的、也不碰官方原件）。
+                         * 认不出是哪一类的那份（`.json`）不给「改」—— 这一层只改 TOML 预设。
                          */}
                         {row.origin === 'mine' && (
                           <>
@@ -622,6 +628,21 @@ export default function PresetTable({
                                 onClick={() => onOpenMine(row)}
                               >
                                 {MINE_DRAWER.open}
+                              </button>
+                            </dd>
+                          </>
+                        )}
+                        {row.origin === 'mine' && row.kind === 'mkp_preset' && (
+                          <>
+                            <dt className={s.factKey}>{MINE_EDIT_TEXT.cell}</dt>
+                            <dd className={s.factVal}>
+                              <button
+                                type="button"
+                                className={s.factLink}
+                                title={MINE_EDIT_WHY}
+                                onClick={() => onEdit(row)}
+                              >
+                                {MINE_EDIT_TEXT.open}
                               </button>
                             </dd>
                           </>

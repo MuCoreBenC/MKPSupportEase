@@ -695,6 +695,100 @@ if (!(afterApply?.action ?? '').includes('已应用')) {
 }
 await page.screenshot({ path: `${shotDir}/presets-mine-apply.png` })
 
+/* ---------- 5h. 改我自己这份 → 保存回它自己（第八层） ---------- */
+/*
+ * 守四件事：
+ *   ① 我那份也有「改这份」—— 它已经是我自己的文件，"能改"是自然的下一步；
+ *   ② 编辑器里给的是**正文**：三行血统是程序的元数据，不该出现在编辑器里；
+ *   ③ 保存说「保存回我这份」，存完**没有多出一份**（不产生 `（已修改）2.toml`）；
+ *   ④ **血统还在**：保存之后「看正文」看得见那三行，「基于旧版官方」那一枚也没变
+ *      —— 改的是参数，不是它从哪一版官方派生。
+ *
+ * 真机那条更硬的判据在 Rust 侧：`mine::save_back`（同一路径写回、血统照抄）与
+ * `lineage::rewrite_keeping_lineage`（摘要不许变成"我自己改过的字节"）。
+ */
+/* 展开详情这一格：上一节点过这一行，它可能已经展开着 —— 再点一次会收起来 */
+const ensureExpanded = async () => {
+  if ((await page.locator('main tbody dl').count()) === 0) {
+    await myTr.click()
+    await page.waitForTimeout(300)
+  }
+}
+await ensureExpanded()
+const mineEditFact = (await factOf())['修改'] ?? '(没有这一格)'
+console.log(`\n[改我这份] 展开详情「修改」= ${mineEditFact}`)
+if (mineEditFact !== '改这份') {
+  problems.push(`我那份展开详情里该有「修改 → 改这份」，实测「${mineEditFact}」`)
+}
+
+/* 展开详情那一格在**另一行**（colspan 那一行），所以从 `dl` 里点 */
+await page.locator('main tbody dl').getByRole('button', { name: '改这份' }).click()
+await page.waitForTimeout(600)
+const mineEditor = await page.evaluate(() => {
+  const dlg = document.querySelector('[role="dialog"]')
+  const area = dlg?.querySelector('textarea')
+  return {
+    open: area !== null && area !== undefined,
+    whole: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    text: area?.value ?? '',
+  }
+})
+console.log(`[改我这份] 抽屉：${mineEditor.whole.slice(0, 80)}`)
+if (!mineEditor.open) problems.push('点我那份的「改这份」没有打开编辑器')
+if (!mineEditor.whole.includes('改我自己这份')) {
+  problems.push(`编辑我自己那份时标题该说「改我自己这份」，实测「${mineEditor.whole.slice(0, 40)}」`)
+}
+if (!mineEditor.whole.includes('保存回我这份')) {
+  problems.push('编辑我自己那份时，保存按钮该说「保存回我这份」（不是「保存为用户文件」）')
+}
+if (mineEditor.text.includes('# based_on')) {
+  problems.push('编辑器里不该出现血统那三行（那是程序的元数据，不是用户改的正文）')
+}
+if (!mineEditor.text.includes('涂胶宽度')) problems.push('编辑器里没有我那份的正文')
+
+/* 改一行：边改边存（debounce 700ms） */
+await page.locator('[role="dialog"] textarea').fill('涂胶宽度 = 1.8\n起始延时 = 0.4\n')
+await page.waitForTimeout(1300)
+await page.getByRole('button', { name: '保存回我这份' }).click()
+await page.waitForTimeout(700)
+const backNote = await page.evaluate(() =>
+  (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+)
+console.log(`[改我这份] 保存之后提示条：${backNote}`)
+if (!backNote.includes('已保存回我自己那一份')) {
+  problems.push(`写回之后该说「已保存回我自己那一份」，实测「${backNote}」`)
+}
+if (!backNote.includes('presets-mine/我的 A1 涂胶.toml')) {
+  problems.push(`写回之后要说得出写回哪去了（同一条路径），实测「${backNote}」`)
+}
+await page.screenshot({ path: `${shotDir}/presets-mine-edit.png` })
+
+/* 没有多出一份：写回的是它自己 */
+const mineNames = (await actions()).map((r) => r.name)
+const mineCount = mineNames.filter((n) => n.includes('我的 A1 涂胶')).length
+console.log(`[改我这份] 表里「我的 A1 涂胶」${mineCount} 行：${mineNames.join(' | ')}`)
+if (mineCount !== 1) problems.push(`写回不该多出一份（实测 ${mineCount} 行都叫「我的 A1 涂胶」）`)
+if (mineNames.some((n) => n.includes('我的 A1 涂胶（已修改）'))) {
+  problems.push('写回我自己那份不该另存出一份新的（不产生「（已修改）」）')
+}
+
+/* 血统还在：保存之后看正文，那三行与"旧版派生"那一枚都还在 */
+await ensureExpanded()
+const mineRowAfter = (await myTr.innerText()).replace(/\s+/g, ' ').trim()
+if (!mineRowAfter.includes('基于旧版官方')) {
+  problems.push('写回之后「基于旧版官方」那一枚该还在（出处没变）')
+}
+await page.locator('main tbody dl').getByRole('button', { name: '看正文' }).click()
+await page.waitForTimeout(600)
+const mineBody = await page.evaluate(
+  () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
+)
+console.log(`[改我这份] 保存之后正文：${mineBody.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
+if (!mineBody.includes('涂胶宽度 = 1.8')) problems.push('写回之后正文该是改过的那份')
+if (!mineBody.includes('# based_on:')) problems.push('写回之后血统那三行该还在（出处不能丢）')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(250)
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -756,5 +850,6 @@ if (problems.length > 0) {
 }
 console.log(
   '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
-    '我那份能被应用并说得出「基于旧版官方」，控制台没有 error',
+    '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
+    '控制台没有 error',
 )

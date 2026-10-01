@@ -196,15 +196,23 @@ export interface PresetData {
   ) => Promise<DownloadOutcome[]>
 
   /**
-   * **开始改一份**官方交付预设：把正文复制进临时文件（官方原件一动不动）。
+   * **开始改一份**预设：把正文复制进临时文件（原件一动不动）。
+   * 两条线一个入口：官方线交文件名，用户线还要交路径（用户目录里可以自己分文件夹）。
    * `reused` = 接着上次那半截改。
    */
-  beginEdit: (fileName: string) => Promise<PresetDraft>
+  beginEdit: (
+    fileName: string,
+    origin?: ActiveOrigin,
+    path?: string,
+  ) => Promise<PresetDraft>
   /** 把改动写进临时文件（界面边改边存 —— 改到一半关掉也还在） */
   putDraft: (text: string) => Promise<void>
-  /** 放弃这次编辑（丢草稿；官方原件与下载区全程没被碰过，所以它天生安全） */
+  /** 放弃这次编辑（丢草稿；原件与下载区全程没被碰过，所以它天生安全） */
   discardDraft: () => Promise<void>
-  /** 另存成用户自己的文件，然后**重读用户线**（本地表跟着多出那一份） */
+  /**
+   * 存进用户根：官方线**另存**成一份新的、用户线**写回它自己**（第八层）。
+   * 存完**重读用户线** —— 官方线那一份要跟着出现在本地表里，用户线要跟着变时刻与大小。
+   */
   commitDraft: () => Promise<CommittedDraft>
 }
 
@@ -453,7 +461,11 @@ export function usePresetData(): PresetData {
    * 全是薄薄一层转发 —— 判定不在前端（哪一份能改、草稿在哪、存成什么名字，都由后端答）。
    * 只有**另存之后**多做一件事：重读用户线（本地表里那一半「我的文件」要跟着变）。
    */
-  const beginEdit = useCallback((fileName: string) => api.beginPresetEdit(fileName), [])
+  const beginEdit = useCallback(
+    (fileName: string, origin: ActiveOrigin = 'official', path?: string) =>
+      api.beginPresetEdit(fileName, origin, path),
+    [],
+  )
 
   const putDraft = useCallback((text: string) => api.putPresetDraft(text), [])
 

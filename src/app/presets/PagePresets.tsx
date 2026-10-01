@@ -99,7 +99,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { api, NotImplementedError } from '../../api'
-import type { ArchivedFile, FileRef } from '../../api'
+import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
@@ -117,6 +117,7 @@ import {
   ARCHIVE_WHY,
   EDIT_TEXT,
   MINE_DRAWER,
+  MINE_EDIT_TEXT,
   DOWNLOAD_WHY,
   MISSING_METHOD,
   NO_ASSET_WHY,
@@ -227,7 +228,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    * （用户可能还在打字，提示条会闪）。
    */
   const [editing, setEditing] = useState<{
+    /** 改的是哪一条线 —— 保存按钮说什么、保存之后那句话说什么都由它决定 */
+    origin: ActiveOrigin
     sourceFileName: string
+    /** 用户线的落点（`null` = 官方线，落点由目录给） */
+    path: string | null
     text: string
     reused: boolean
     draftError: string | null
@@ -492,19 +497,22 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
-   * **开始改这一份**：让后端把官方正文复制进临时文件，然后把编辑器打开。
+   * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 前置条件全在后端拦（只改 MKP 预设 / 盘上得真有那一份）—— 这里不重复判断。
-   * 同来源的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
+   * 两条线**同一个入口**（与「应用」同一形状）：官方线交文件名、用户线还要交路径
+   * （用户目录里可以自己分文件夹）。前置条件全在后端拦 —— 这里不重复判断。
+   * 同一份的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
     setViewer(null)
-    data.beginEdit(row.fileName).then(
+    data.beginEdit(row.fileName, row.origin === 'mine' ? 'mine' : 'official', row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
         setEditing({
+          origin: draft.origin,
           sourceFileName: draft.sourceFileName,
+          path: draft.path,
           text: draft.text,
           reused: draft.reused,
           draftError: null,
@@ -555,15 +563,21 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     )
   }
 
-  /** 保存为用户文件：另存进 `presets-mine/`，然后关掉编辑器（本地表跟着多出那一份） */
+  /**
+   * 保存：官方线**另存**进 `presets-mine/`（本地表跟着多出那一份）；
+   * 用户线**写回它自己**（第八层：同一个文件，不会多出一份）。
+   */
   const commitEdit = () => {
+    const mine = editing?.origin === 'mine'
     data.commitDraft().then(
       (done) => {
         setEditing(null)
         setNote({
-          text: done.replaced
-            ? EDIT_TEXT.savedAgain(done.fileName)
-            : EDIT_TEXT.saved(done.fileName, done.path),
+          text: mine
+            ? MINE_EDIT_TEXT.savedBack(done.fileName, done.path)
+            : done.replaced
+              ? EDIT_TEXT.savedAgain(done.fileName)
+              : EDIT_TEXT.saved(done.fileName, done.path),
           bad: false,
         })
       },
@@ -711,8 +725,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     const official = row.origin === 'official'
 
-    /* 临时编辑的入口：只有"与目录一致"的交付行有（它才有正文可改，且内容不存疑） */
-    const canEdit = row.origin === 'release' && row.releaseState === 'ok'
+    /*
+     * 临时编辑的入口（两条线）：
+     * 交付行只有"与目录一致"的那一份有（它才有正文可改，且内容不存疑）；
+     * 我自己那份都能改 —— 认不出是哪一类的（`.json`）不给，这一层只改 TOML 预设。
+     */
+    const canEdit =
+      (row.origin === 'release' && row.releaseState === 'ok') ||
+      (row.origin === 'mine' && row.kind === 'mkp_preset')
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
@@ -1217,22 +1237,30 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
           {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
-           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存为用户文件」。
+           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存」。
+           *
+           * 两条线共用这一个抽屉，只有两句话不同（保存成什么、保存到哪）：
+           * 官方线「保存为用户文件」= 另存一份新的；用户线「保存回我这份」= 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
            * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
            */}
           <Drawer
             open={editing !== null}
-            title={EDIT_TEXT.title}
-            subtitle={editing === null ? undefined : editing.sourceFileName}
+            title={editing?.origin === 'mine' ? MINE_EDIT_TEXT.title : EDIT_TEXT.title}
+            subtitle={
+              editing === null
+                ? undefined
+                : /* 用户线说落点（他自己可能分了文件夹）：官方线只说文件名 */
+                  (editing.path ?? editing.sourceFileName)
+            }
             footer={
               <>
                 <button type="button" className={s.editGhost} onClick={discardEdit}>
                   {EDIT_TEXT.discard}
                 </button>
                 <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                  {EDIT_TEXT.commit}
+                  {editing?.origin === 'mine' ? MINE_EDIT_TEXT.commit : EDIT_TEXT.commit}
                 </button>
               </>
             }
@@ -1240,7 +1268,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           >
             {editing !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>{EDIT_TEXT.note}</p>
+                <p className={s.editNote}>
+                  {editing.origin === 'mine' ? MINE_EDIT_TEXT.note : EDIT_TEXT.note}
+                </p>
                 {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
                 <textarea
                   className={s.editArea}

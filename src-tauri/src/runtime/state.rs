@@ -237,15 +237,73 @@ const DRAFT_FILE: &str = "run/draft-preset.json";
 #[serde(rename_all = "camelCase")]
 pub struct PresetDraft {
     pub draft_schema: u32,
-    /// 从哪一份改出来的（`mkp/` 里的**文件名** —— catalog 的键，不存路径）
+    /// 改的是**哪条线上**那一份（第八层起用户自己那份也能改）。
+    /// 缺省是官方线 —— 第七层之前写下的草稿都是官方的，**语义没变，所以不升 schema**。
+    #[serde(default)]
+    pub origin: ActiveOrigin,
+    /// 从哪一份改出来的。官方线是 `mkp/` 里的**文件名**（catalog 的键，不存路径）；
+    /// 用户线是**给人看的文件名**（落点看 `path`）
     pub source_file_name: String,
-    /// 打开那一刻官方原件的字节指纹。**留着是为了以后能回答"你改的是不是当时那一版"**，
-    /// 这一层不做判断（判断要连上"官方更新"那条线，见 HANDOFF §3.5 的第 6/7 步）
+    /// **用户线**的落点：相对**用户根**的路径（`presets-mine/我的/另存.toml`）。
+    /// 官方线不写它 —— 落点由目录给
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// 打开那一刻那一份的字节指纹（官方线 = 目录登记的 SHA；用户线 = 它的全文摘要）。
+    ///
+    /// 留着是为了回答两个问题：官方线"你改的是不是当时那一版"；用户线
+    /// "这份文件在你编辑期间被外面换过没有"（**第九层**的事，这一层只如实记下来）
     pub source_sha256: String,
     /// 正文：用户改到哪算哪
     pub text: String,
     /// 最后改动时刻（UTC epoch 秒）。不引时间库，读时用
     pub updated_unix: u64,
+}
+
+/// **这份草稿改的是哪一份**（两条线各自的钥匙）。
+///
+/// 官方线认**文件名**（目录的键）；用户线认**路径** —— 用户目录里两份文件同名很正常
+/// （他自己分文件夹），只比文件名会把 A 的草稿接到 B 上。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftSubject {
+    pub origin: ActiveOrigin,
+    pub file_name: String,
+    pub path: Option<String>,
+}
+
+impl DraftSubject {
+    /// 官方线：目录里那一份（认文件名）
+    pub fn official(file_name: &str) -> Self {
+        Self {
+            origin: ActiveOrigin::Official,
+            file_name: file_name.to_owned(),
+            path: None,
+        }
+    }
+
+    /// 用户线：用户自己那份（认路径）
+    pub fn mine(file_name: &str, path: &str) -> Self {
+        Self {
+            origin: ActiveOrigin::Mine,
+            file_name: file_name.to_owned(),
+            path: Some(path.to_owned()),
+        }
+    }
+
+    /// 是不是同一份（两条线各自的键，见类型注释）
+    pub fn matches(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+impl PresetDraft {
+    /// 这份草稿改的是哪一份
+    pub fn subject(&self) -> DraftSubject {
+        DraftSubject {
+            origin: self.origin,
+            file_name: self.source_file_name.clone(),
+            path: self.path.clone(),
+        }
+    }
 }
 
 /// 草稿的落点：`<appDataDir>/run/draft-preset.json`
@@ -281,13 +339,15 @@ pub fn load_draft(root: &Path) -> Result<Option<PresetDraft>, AppError> {
 /// 落一份草稿（整份替换旧的 —— 一个状态一个文件）
 pub fn save_draft(
     root: &Path,
-    source_file_name: &str,
+    subject: &DraftSubject,
     source_sha256: &str,
     text: &str,
 ) -> Result<PresetDraft, AppError> {
     let draft = PresetDraft {
         draft_schema: DRAFT_SCHEMA,
-        source_file_name: source_file_name.to_owned(),
+        origin: subject.origin,
+        source_file_name: subject.file_name.clone(),
+        path: subject.path.clone(),
         source_sha256: source_sha256.to_owned(),
         text: text.to_owned(),
         updated_unix: now_unix(),
@@ -384,7 +444,8 @@ mod tests {
     #[test]
     fn draft_roundtrips_and_clears() {
         let d = tempfile::tempdir().unwrap();
-        let saved = save_draft(d.path(), "A1-fast.toml", "abc", "涂胶 = 1.2").unwrap();
+        let subject = DraftSubject::official("A1-fast.toml");
+        let saved = save_draft(d.path(), &subject, "abc", "涂胶 = 1.2").unwrap();
         let loaded = load_draft(d.path()).unwrap().expect("该读回来");
 
         assert_eq!(loaded.source_file_name, "A1-fast.toml");
@@ -419,13 +480,61 @@ mod tests {
         );
     }
 
+    /// 两条线的钥匙不同：用户目录里两份文件同名很正常（他自己分文件夹），
+    /// 只比文件名会把 A 的草稿接到 B 上
+    #[test]
+    fn a_draft_knows_which_line_it_belongs_to() {
+        let d = tempfile::tempdir().unwrap();
+        save_draft(
+            d.path(),
+            &DraftSubject::official("A1-fast.toml"),
+            "a",
+            "官方",
+        )
+        .unwrap();
+        let mine = DraftSubject::mine("A1-fast.toml", "presets-mine/我的/A1-fast.toml");
+        save_draft(d.path(), &mine, "b", "我的").unwrap();
+
+        let loaded = load_draft(d.path()).unwrap().expect("该读回来");
+        assert_eq!(loaded.text, "我的");
+        assert_eq!(loaded.subject(), mine, "改的是我自己那份");
+        assert!(
+            !loaded
+                .subject()
+                .matches(&DraftSubject::official("A1-fast.toml")),
+            "同名不同线 ≠ 同一份：「接着改」不许接错"
+        );
+    }
+
+    /// 旧档（还没写 `origin` 的那批草稿）**就是官方线** —— 语义没变，所以不升 schema
+    #[test]
+    fn an_older_draft_file_is_still_the_official_line() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = format!(
+            "{{ \"draftSchema\": {DRAFT_SCHEMA}, \"sourceFileName\": \"A1-fast.toml\", \
+             \"sourceSha256\": \"abc\", \"text\": \"涂胶 = 1\", \"updatedUnix\": 1 }}"
+        );
+        crate::fsx::atomic::atomic_write(&draft_file(d.path()), json.as_bytes()).unwrap();
+
+        let loaded = load_draft(d.path()).unwrap().expect("该读回来");
+        assert_eq!(loaded.origin, ActiveOrigin::Official);
+        assert_eq!(loaded.path, None, "官方线不存路径 —— 落点由目录给");
+    }
+
     /// 草稿与使用中指针**两个文件、互不干扰**：改一份不等于在用它
     #[test]
     fn draft_and_active_are_separate_files() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("run")).unwrap();
         save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        save_draft(d.path(), "A1-fast.toml", "x", "涂胶 = 2").unwrap();
+        save_draft(
+            d.path(),
+            &DraftSubject::official("A1-fast.toml"),
+            "x",
+            "涂胶 = 2",
+        )
+        .unwrap();
 
         assert_eq!(
             load_active(d.path()).unwrap().unwrap().file_name,

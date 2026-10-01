@@ -121,8 +121,9 @@ export const bridgeApi: MkpApi = {
   /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine） */
   getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
   readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
-  /* 临时编辑那条链：改的是临时文件，官方原件全程不动（另存才落用户根） */
-  beginPresetEdit: (fileName) => call('beginPresetEdit', 'begin_preset_edit', { fileName }),
+  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */
+  beginPresetEdit: (fileName, origin, path) =>
+    call('beginPresetEdit', 'begin_preset_edit', { fileName, origin, path }),
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),

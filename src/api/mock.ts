@@ -1,5 +1,12 @@
 import { NotImplementedError } from './errors'
-import type { ActivePreset, CalibModel, MkpApi, Preset, UserPresetFile } from './contract'
+import type {
+  ActiveOrigin,
+  ActivePreset,
+  CalibModel,
+  MkpApi,
+  Preset,
+  UserPresetFile,
+} from './contract'
 import {
   allMachines,
   allPresetFiles,
@@ -121,14 +128,43 @@ const mockMine: UserPresetFile[] = [
     basedOnVersionId: null,
   },
 ]
-/** 正文库：只有**这份会话里另存出来的**才有（真机上每一份都能读）。键 = 相对用户根的路径 */
+/** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
 const mockMineText = new Map<string, string>()
-/** 编辑中的那一份（真机上是 `run/draft-preset.json`） */
-let mockDraft: { sourceFileName: string; text: string; updatedUnix: number } | null = null
+/** 编辑中的那一份（真机上是 `run/draft-preset.json`）。`path` 只有用户线才有 */
+let mockDraft: {
+  origin: ActiveOrigin
+  sourceFileName: string
+  path: string | null
+  text: string
+  updatedUnix: number
+} | null = null
 
 /** 演示正文。真机上它是官方原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
 const MOCK_OFFICIAL_TEXT =
   '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节\n涂胶宽度 = 1.2\n起始延时 = 0.5\n'
+
+/*
+ * 三行血统（真机上由 `runtime::lineage` 管：另存时写、写回时照抄）。
+ * 假后端没有那一套，只做**文本形状上的同一件事**：编辑器里给正文、保存时把原来那三行抄回去。
+ */
+const lineageLinesOf = (text: string) =>
+  text.split('\n').filter((line) => line.startsWith('# based_on'))
+const withoutLineage = (text: string) =>
+  text.split('\n').filter((line) => !line.startsWith('# based_on')).join('\n')
+
+/* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上） */
+mockMineText.set(
+  'presets-mine/我的 A1 涂胶.toml',
+  [
+    '# 我自己的这一份（假后端演示正文）',
+    '# based_on: mkp/presets/A1-fast.toml',
+    '# based_on_release_time: 2026-05-29 04:26:12',
+    `# based_on_sha256: ${'0'.repeat(64)}`,
+    '涂胶宽度 = 1.1',
+    '起始延时 = 0.4',
+    '',
+  ].join('\n'),
+)
 
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -220,11 +256,38 @@ export const mockApi: MkpApi = {
    * 临时编辑那条链：内存里真的走一遍（改的是临时文件，官方原件一动不动）。
    * 与真机同一个形状 —— 直道里的分岔只有一条：正文来自演示常量而不是 `mkp/` 里的字节。
    */
-  async beginPresetEdit(fileName) {
-    if (mockDraft !== null && mockDraft.sourceFileName === fileName) {
-      return { ...mockDraft, reused: true }
+  async beginPresetEdit(fileName, origin = 'official', path) {
+    /* 两条线的钥匙：官方线认文件名，用户线认路径（用户目录里同名很正常） */
+    if (mockDraft !== null && mockDraft.origin === origin && mockDraft.sourceFileName === fileName) {
+      if (origin === 'official' || mockDraft.path === (path ?? null)) {
+        return { ...mockDraft, reused: true }
+      }
     }
-    mockDraft = { sourceFileName: fileName, text: MOCK_OFFICIAL_TEXT, updatedUnix: nowSec() }
+    if (origin === 'mine') {
+      const rel = path ?? ''
+      const raw = mockMineText.get(rel)
+      if (raw === undefined) {
+        throw new NotImplementedError(
+          `beginPresetEdit：浏览器里只有那份演示正文能改（${rel} 没有正文）`,
+        )
+      }
+      /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
+      mockDraft = {
+        origin,
+        sourceFileName: fileName,
+        path: rel,
+        text: withoutLineage(raw),
+        updatedUnix: nowSec(),
+      }
+      return { ...mockDraft, reused: false }
+    }
+    mockDraft = {
+      origin,
+      sourceFileName: fileName,
+      path: null,
+      text: MOCK_OFFICIAL_TEXT,
+      updatedUnix: nowSec(),
+    }
     return { ...mockDraft, reused: false }
   },
 
@@ -237,9 +300,29 @@ export const mockApi: MkpApi = {
     mockDraft = null
   },
 
-  /** 另存成 `presets-mine/<原名>（已修改）.toml` —— 与 Rust 侧 `mine::edited_name` 同一条规则 */
+  /** 官方线：另存成 `presets-mine/<原名>（已修改）.toml`（与 Rust 侧 `mine::edited_name` 同一条规则） */
   async commitPresetDraft() {
     if (mockDraft === null) throw new Error('现在没有正在改的那一份，没得存')
+
+    /*
+     * 用户线（第八层）：**写回它自己** —— 同一个路径、同一份文件，不产生第二份；
+     * 血统**照抄原来那三行**（出处没变）。与 Rust 侧 `mine::save_back` 同一件事。
+     */
+    if (mockDraft.origin === 'mine') {
+      const rel = mockDraft.path ?? ''
+      const old = mockMineText.get(rel)
+      if (old === undefined) {
+        throw new NotImplementedError(`commitPresetDraft：${rel} 已经没有正文可写回`)
+      }
+      const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
+      const fileName = rel.slice(rel.lastIndexOf('/') + 1)
+      const at = mockMine.findIndex((f) => f.path === rel)
+      if (at >= 0) mockMine[at] = { ...mockMine[at], size: text.length, modifiedUnix: nowSec() }
+      mockMineText.set(rel, text)
+      mockDraft = null
+      return { path: rel, fileName, size: text.length, replaced: true }
+    }
+
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-mine/${fileName}`
     /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */

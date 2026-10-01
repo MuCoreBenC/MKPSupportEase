@@ -406,21 +406,23 @@ export interface UserPresetFile {
 /**
  * **编辑中的那一份**（临时文件）。全局唯一 —— 同一时刻只改一份。
  *
- * 它是"临时编辑"这条链的第一步（总纲 §1③）：
+ * 它是"临时编辑"这条链的第一步（总纲 §1③）。**两条线**的第一步：
  *
  * ```text
- * mkp/presets/A1-fast.toml     官方原件 —— 编辑全程一动不动
- *        │ 点「改这份」：正文复制出来
- *        ▼
- * run/draft-preset.json        临时文件（用户改的是它；改到一半关掉也还在）
- *        │ 点「保存为用户文件」
- *        ▼
- * presets-mine/A1-fast（已修改）.toml
+ * 官方线   mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
+ * 用户线   presets-mine/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
  * ```
+ *
+ * 改的永远是**临时文件**（`run/draft-preset.json`，改到一半关掉也还在）；
+ * 原件全程一动不动，官方那份只有"云端换版本"能替换它。
  */
 export interface PresetDraft {
-  /** 从哪一份改出来的（下载区里的文件名） */
+  /** 改的是哪一条线（官方交付文件 / 我自己那份）—— 保存按钮说什么由它决定 */
+  origin: ActiveOrigin
+  /** 从哪一份改出来的。官方线是 `mkp/` 里的文件名；用户线是给人看的文件名（落点看 `path`） */
   sourceFileName: string
+  /** **用户线**的落点（相对用户根）：保存时写回这里。官方线是 `null`（落点由目录给） */
+  path: string | null
   /** 正文：用户改到哪算哪 */
   text: string
   /** 最后改动时刻（UTC epoch 秒） */
@@ -886,12 +888,18 @@ export interface MkpApi {
   readUserPresetText(path: string): Promise<string>
 
   /**
-   * **开始改一份官方交付预设**：把正文复制进临时文件，**官方原件一动不动**。
+   * **开始改一份预设**：把正文复制进临时文件，**原件一动不动**。
    *
-   * 两条前置（都在后端拦）：只改 MKP 预设（TOML）；盘上得真有那一份（没下载就先下载）。
-   * 已经有同一来源的草稿 → **接着改**（`reused: true`），不覆盖用户的改动。
+   * 两条线走同一个入口（`origin` 缺省 `official`，与 [`applyActivePreset`] 同一形状）：
+   * 官方线认**文件名**（目录的键），用户线认**路径**（用户目录里可以自己分文件夹）。
+   *
+   * 前置都在后端拦：只改 MKP 预设（TOML）；官方线还要求盘上这份与目录逐字节一致
+   * （第六层：旧版本 / 被改过的不许改）；用户线只要求盘上真有 —— **它不查 SHA**，
+   * 用户那份本来就是允许改的。
+   *
+   * 已经有同一份的草稿 → **接着改**（`reused: true`），不覆盖用户的改动。
    */
-  beginPresetEdit(fileName: string): Promise<PresetDraft>
+  beginPresetEdit(fileName: string, origin?: ActiveOrigin, path?: string): Promise<PresetDraft>
 
   /** 把改动写进临时文件（界面边改边存）。**只动正文** —— 来源与那一刻的指纹不动 */
   putPresetDraft(text: string): Promise<void>
@@ -900,14 +908,18 @@ export interface MkpApi {
   discardPresetDraft(): Promise<void>
 
   /**
-   * **另存成用户自己的文件**：`presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
+   * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
+   * 官方线**另存**成 `presets-mine/<原名>（已修改）<后缀>`（原件全程不动）；
+   * 用户线**写回它自己** —— 同一个路径、同一份文件，不产生第二份（第八层）。
    *
-   * 写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
+   * 官方线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
    * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
-   * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）。
+   * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）；
+   * 用户线写回时那三行**照抄原来那三行**（出处没变）。
    *
    * 不碰官方原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
-   * 再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）。
+   * 官方线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
+   * 用户线写的就是原来那一份所在的位置（`replaced` 恒为 true）。
    */
   commitPresetDraft(): Promise<CommittedDraft>
 
