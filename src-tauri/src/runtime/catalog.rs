@@ -1,62 +1,117 @@
-//! 运行时说明书（catalog）：有哪些机型版本、每份交付文件叫什么、SHA 是多少、下载地址在哪。
+//! 运行时说明书（catalog）：首屏需要的**全部定义** + 每份交付文件的 SHA 与下载落点。
 //!
 //! # 它是谁的产物
 //!
 //! 发布构建（`cargo run --bin gen-catalog`）从**层①**（`<repo>/presets` 的源 TOML +
-//! `presets/dist/presets/mkp` 的交付产物真字节）构建出来，落成
+//! `crates/preset/assets/presets` 的交付产物真字节）构建出来，落成
 //! `src/runtime/catalog.generated.json` 编进二进制（**层②**），首启释放进
 //! `<appDataDir>/catalog.json`（**层③**）。层③的运行时只读释放下来的那一份。
+//! 工作台发布（`wb_publish`）用同一个构建本体产出 `dist/catalog.json` ——
+//! **发布方与消费方说的是同一种语言**（两端共用契约，R11 起生效）。
 //!
-//! # 第一圈的边界（刻意的少）
+//! # 加厚（第二圈）：definition 进 catalog
 //!
-//! 只有机型 / 版本 / MKP 预设文件三样。预设外的资产（图标、3mf、BBS 配置）、云端地址、
-//! 状态位都**还没进**——Catalog 是逐渐长出来的（见 DATA-INVENTORY §4 的收口顺序），
-//! 不是一步设计一个巨大 JSON。[`CATALOG_SCHEMA`] 表达格式代次：将来加字段不升号，
-//! 改语义才升。
+//! 从"只有机型/版本/文件清单"长出**完整定义**：品牌、机型的全部字段（含尺寸与禁区）、
+//! 资产、套餐、字段定义与界面布局。definition 的类型**直接复用** [`crate::presetdata`]
+//! 的 serde 类型（`Asset` / `Bundle` / `ParamDef` / `Dimensions` / `TabMeta`…）——
+//! 它们本来就是这些事实的类型化表达，另造一套镜像只会让两边慢慢漂。
+//! 从此客户端首屏只读 catalog 这**一个文件**，不再解析 13 份源 TOML（旧世界退役）。
+//!
+//! [`CATALOG_SCHEMA`] 表达格式代次：**加字段不升号**（definition 全部带
+//! `#[serde(default)]`，旧 catalog 也能读，缺的定义当"没有"），改语义才升。
 //!
 //! # revision 是什么
 //!
-//! 对 machines + files 的稳定序列化取的 SHA256 前 16 位 ——「这份目录描述的输入
-//! 和上次是不是同一份」。它**不是**完整性校验（那是文件条目里每个 `sha256` 的事）。
-//! 刻意没有 `generatedAt`：没有可信时间源之前不编一个上去（与 ClientDataPackage
-//! 同一条裁决）。
+//! 对 brands + machines + assets + bundles + registry + files 的稳定序列化取的
+//! SHA256 前 16 位 ——「这份目录描述的输入和上次是不是同一份」。definition 在输入里：
+//! 改一个字段定义、挪一个布局项，revision 就变，检查更新看得见。它**不是**完整性校验
+//! （那是文件条目里每个 `sha256` 的事）。刻意没有 `generatedAt`：没有可信时间源之前
+//! 不编一个上去（与 ClientDataPackage 同一条裁决）。
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
+use crate::presetdata::{Asset, Bundle, Dimensions, LayoutTab, MachineVersion, ParamDef, TabMeta};
 
 /// 目录格式的代次。读到的文件比这新 → `CORRUPTED`（程序老）；比这旧同理（文件是旧程序写的，
 /// 这一版还没有那种文件，判据先立着）
 pub const CATALOG_SCHEMA: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
     pub catalog_schema: u32,
     /// 目录指纹。源或交付产物变了它就变
     pub revision: String,
+    /// 品牌清单（机型文件里写的是 id，给人看的名字在这里）
+    #[serde(default)]
+    pub brands: Vec<crate::presetdata::Brand>,
+    /// 机型的完整定义：元信息、尺寸、版本、禁区
+    #[serde(default)]
     pub machines: Vec<CatalogMachine>,
+    /// 资产定义（图片 / 图标 / 模型 / 切片器预设的登记，总纲欠账 #3 的登记面）
+    #[serde(default)]
+    pub assets: Vec<Asset>,
+    /// 套餐定义（一版一套：MKP 与配套 BBS 的成套配发关系）
+    #[serde(default)]
+    pub bundles: Vec<Bundle>,
+    /// 字段定义与界面布局（参数表 74 条 + 页签/分组元数据 + 参数摆放）
+    #[serde(default)]
+    pub registry: CatalogRegistry,
+    /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
+    /// 没下载就没有；下载了才出现在 `mkp/`）
     pub files: Vec<CatalogFile>,
 }
 
+/// catalog 里 definition 的注册表部分：字段定义 + 分组元数据 + 参数摆放。
+///
+/// 与 [`crate::presetdata::ParamRegistry`] 的差别只有**没有写回状态**（`DocumentMut`
+/// 与文件路径是工作台的编辑侧资产）——读所需的 params / tabs / layout 三样原样在。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogRegistry {
+    #[serde(default)]
+    pub params: Vec<ParamDef>,
+    /// 页签与分组的元数据（中文名、排序、图标的唯一权威）
+    #[serde(default)]
+    pub tabs: Vec<TabMeta>,
+    /// 参数摆放（`layout_schema`：哪个参数落在哪个 section、section 级可见性）
+    #[serde(default)]
+    pub layout: Vec<LayoutTab>,
+}
+
+/// 一台机型的完整定义。与 [`crate::presetdata::Machine`] 的只读视图同构 ——
+/// 那边拖着 `DocumentMut`（保真写回用），这边是纯数据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogMachine {
     pub id: String,
+    /// 界面上显示的名字。空串当"没有"处理（访问方法会给 id）
     pub display: String,
-    pub brand: String,
-    pub versions: Vec<CatalogVersion>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogVersion {
-    pub id: String,
+    /// TOML 里的 `name` 字段（实测有的机型 display 才是人看的，name 是空串）
+    #[serde(default)]
     pub name: String,
+    /// **品牌显示名**（构建时已从 brands.toml 换算，与 get_machines 同一条）
+    pub brand: String,
+    #[serde(default)]
+    pub default_bundle: Option<String>,
+    /// 外部别名（`A1C` / `A1F` 这种）。**不许与任何机型 ID 相撞**（构建源已保证）
+    #[serde(default)]
+    pub external_aliases: Vec<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// `None` = 占位机型，还没配 `[dimensions]`
+    #[serde(default)]
+    pub dimensions: Option<Dimensions>,
+    pub versions: Vec<MachineVersion>,
+    /// 禁区。没有就是空数组（构建源里只有 P1S / P2S / X1C 有）
+    #[serde(default)]
+    pub zones: Vec<crate::presetdata::Zone>,
 }
 
 /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
@@ -102,7 +157,7 @@ impl Catalog {
     ///
     /// 产物字节取**入库**的那一份（`BUILTIN_PRESETS` 编进二进制的同一批文件）——
     /// `presets/dist/` 是本机 gitignore 掉的暂存，进不了 CI，不能当判据输入。
-    /// 每个机型版本都必须配齐产物，缺一份就失败 —— 第一圈宁可红着，不让目录里出现
+    /// 每个机型版本都必须配齐产物，缺一份就失败 —— 宁可红着，不让目录里出现
     /// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
     pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
         let presets = crate::presetdata::Presets::load_from(&repo_root.join("presets"))?;
@@ -140,13 +195,17 @@ impl Catalog {
         catalog.finalize()
     }
 
-    /// 走一遍源 + 产物目录。返回目录与**缺失清单**（严格/宽松由调用方裁决）
+    /// 走一遍源 + 产物目录。返回目录与**缺失清单**（严格/宽松由调用方裁决）。
+    ///
+    /// definition 直接从已加载的 [`crate::presetdata::Presets`] 抄——那里是**加载期校验过**
+    /// 的定义（id 唯一、引用落地、布局双射），catalog 不做第二次校验：同一份数据两套门禁,
+    /// 就会有两套不同的答案。
     fn collect(
         presets: &crate::presetdata::Presets,
         artifacts_dir: &Path,
     ) -> (Catalog, Vec<String>) {
         // 品牌显示名：机型文件里写的是 id，给人看的是 brands.toml 里的名字（与 get_machines 同一条）
-        let brands: HashMap<&str, &str> = presets
+        let brands: std::collections::HashMap<&str, &str> = presets
             .catalog
             .brands()
             .iter()
@@ -165,18 +224,22 @@ impl Catalog {
                 } else {
                     m.display.clone()
                 },
+                name: m.name.clone(),
                 brand: brands
                     .get(m.brand.as_str())
                     .map(|s| (*s).to_owned())
                     .unwrap_or_else(|| m.brand.clone()),
-                versions: m
-                    .versions
-                    .iter()
-                    .map(|v| CatalogVersion {
-                        id: v.id.clone(),
-                        name: v.name.clone(),
-                    })
-                    .collect(),
+                default_bundle: m.default_bundle.clone(),
+                external_aliases: m.external_aliases.clone(),
+                image: m.image.clone(),
+                icon: m.icon.clone(),
+                dimensions: m.dimensions.clone(),
+                versions: m.versions.clone(),
+                zones: presets
+                    .catalog
+                    .zones(&m.id)
+                    .map(<[crate::presetdata::Zone]>::to_vec)
+                    .unwrap_or_default(),
             });
 
             for v in &m.versions {
@@ -201,7 +264,15 @@ impl Catalog {
             Catalog {
                 catalog_schema: CATALOG_SCHEMA,
                 revision: String::new(),
+                brands: presets.catalog.brands().to_vec(),
                 machines,
+                assets: presets.assets.items().to_vec(),
+                bundles: presets.bundles.items().to_vec(),
+                registry: CatalogRegistry {
+                    params: presets.registry.params().to_vec(),
+                    tabs: presets.registry.tabs().to_vec(),
+                    layout: presets.registry.layout().to_vec(),
+                },
                 files,
             },
             missing,
@@ -214,18 +285,99 @@ impl Catalog {
         self.revision = revision_of(&self);
         self
     }
+
+    /* ---------- 消费端的只读访问面（ipc/presets 的九条命令从这里出数） ---------- */
+
+    /// 按 ID 找机型。**别名不走这里** —— 别名是外部叫法，不是主键
+    pub fn machine(&self, id: &str) -> Option<&CatalogMachine> {
+        self.machines.iter().find(|m| m.id == id)
+    }
+
+    /// 品牌清单
+    pub fn brands(&self) -> &[crate::presetdata::Brand] {
+        &self.brands
+    }
+
+    /// 资产定义清单
+    pub fn assets(&self) -> &[Asset] {
+        &self.assets
+    }
+
+    /// 套餐定义清单
+    pub fn bundles(&self) -> &[Bundle] {
+        &self.bundles
+    }
+
+    /// 参数定义清单
+    pub fn params(&self) -> &[ParamDef] {
+        &self.registry.params
+    }
+
+    /// 显示用的机型名：`display` 空串当"没有"，给 id
+    pub fn display_of(m: &CatalogMachine) -> &str {
+        if m.display.trim().is_empty() {
+            &m.id
+        } else {
+            m.display.as_str()
+        }
+    }
+
+    /// 按 id 取资产。**大小写不敏感**（与 presetdata 的 `Assets::get` 同一口径——
+    /// 机型文件引用时不保证大小写一致）
+    pub fn asset(&self, id: &str) -> Option<&Asset> {
+        let want = id.trim().to_lowercase();
+        self.assets.iter().find(|a| a.id.to_lowercase() == want)
+    }
+
+    /// 按 id 取套餐。**大小写不敏感**（与 presetdata 的 `Bundles::get` 同一口径）
+    pub fn bundle(&self, id: &str) -> Option<&Bundle> {
+        let want = id.trim().to_lowercase();
+        self.bundles.iter().find(|b| b.id.to_lowercase() == want)
+    }
+
+    /// 按全局主键找参数定义
+    pub fn param(&self, key: &str) -> Option<&ParamDef> {
+        self.registry.params.iter().find(|p| p.key == key)
+    }
+
+    /// 一个 section 的中文名与组内序（中文名与顺序的唯一权威是 `[[tabs]]`，
+    /// `layout_schema` 全文没有 label / order——与 ParamRegistry::section_meta 同一条）
+    pub fn section_meta(&self, section_id: &str) -> Option<&crate::presetdata::SectionMeta> {
+        self.registry
+            .tabs
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == section_id)
+    }
+
+    /// 某个机型版本的交付文件条目。MKP 产物的路径由 catalog 登记给出，
+    /// **不再由命名规则重算** —— 首屏唯一数据源 = catalog（总纲判据 4）
+    pub fn file_of(&self, machine_id: &str, version_id: &str) -> Option<&CatalogFile> {
+        self.files
+            .iter()
+            .find(|f| f.machine_id == machine_id && f.version_id == version_id)
+    }
 }
 
-/// 对 machines + files 的稳定序列化取摘要。`revision` 本身不在输入里，没有自指问题
+/// 对 definition + files 的稳定序列化取摘要。`revision` 本身不在输入里，没有自指问题。
+/// definition 在输入里：改字段定义、挪布局、换套餐，检查更新都看得见
 fn revision_of(catalog: &Catalog) -> String {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Payload<'a> {
+        brands: &'a [crate::presetdata::Brand],
         machines: &'a [CatalogMachine],
+        assets: &'a [Asset],
+        bundles: &'a [Bundle],
+        registry: &'a CatalogRegistry,
         files: &'a [CatalogFile],
     }
     let bytes = serde_json::to_vec(&Payload {
+        brands: &catalog.brands,
         machines: &catalog.machines,
+        assets: &catalog.assets,
+        bundles: &catalog.bundles,
+        registry: &catalog.registry,
         files: &catalog.files,
     })
     .unwrap_or_default();
@@ -277,6 +429,69 @@ mod tests {
         assert!(a1_fast.size > 0);
     }
 
+    /// **加厚判据：definition 真的进了 catalog。**
+    ///
+    /// 这不是"字段存在"的形状检查，而是**反空转**的精确计数 —— collect 忘抄某一域
+    /// （assets / bundles / registry 各一行代码），客户端那一屏就静默地缺一块。
+    /// 条数与源 TOML 对齐（变了要在提交里说清为什么，与 presetdata 的真数据判据同一纪律）
+    #[test]
+    fn the_definition_travels_with_the_catalog() {
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
+
+        assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
+        assert_eq!(catalog.assets.len(), 19, "实测 19 条资产定义");
+        assert_eq!(catalog.bundles.len(), 5, "实测 5 份套餐");
+        assert_eq!(catalog.registry.params.len(), 74, "实测 74 条字段定义");
+        assert!(
+            !catalog.registry.tabs.is_empty() && !catalog.registry.layout.is_empty(),
+            "页签元数据与参数摆放都该在"
+        );
+
+        // 机型的完整字段跟着走：A1 的别名、尺寸与版本定义
+        let a1 = catalog.machine("A1").expect("A1 必须在");
+        assert_eq!(a1.external_aliases, vec!["A1C", "A1F"]);
+        assert!(a1.dimensions.is_some(), "A1 配了 [dimensions]");
+        let fast = a1
+            .versions
+            .iter()
+            .find(|v| v.id == "FASTV3.3")
+            .expect("A1 的第三版");
+        assert_eq!(fast.name, "快拆版260628");
+
+        // 禁区：只有 P1S / P2S / X1C 有
+        assert!(catalog.machine("A1").unwrap().zones.is_empty());
+        assert!(
+            !catalog.machine("P1S").unwrap().zones.is_empty(),
+            "P1S 有禁区"
+        );
+
+        // 访问面：file_of 是 MKP 引用的唯一出处（不再按命名规则重算）
+        let f = catalog.file_of("A1", "FASTV3.3").expect("file_of 要找得到");
+        assert_eq!(f.path, "mkp/A1-fastv3.3.toml");
+        assert!(catalog.file_of("A1", "NOPE").is_none());
+    }
+
+    /// definition 的 serde 往返必须无损：序列化出去的 catalog 解析回来，逐字段一致。
+    /// 加厚引入了一整批复用类型（ParamDef / LayoutTab / Dimensions…），任何一处的
+    /// serde 属性配错（缺 default、rename 不对）都会在这里现形 —— 而不是等客户端首屏空了才查
+    #[test]
+    fn the_thick_catalog_round_trips_through_json() {
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
+        let json = catalog.to_pretty_json().expect("序列化失败");
+        let back = Catalog::parse(json.as_bytes()).expect("自己写出的目录要读得回来");
+        assert_eq!(back.revision, catalog.revision);
+        assert_eq!(back.machines.len(), catalog.machines.len());
+        assert_eq!(back.assets.len(), catalog.assets.len());
+        assert_eq!(back.bundles.len(), catalog.bundles.len());
+        assert_eq!(back.registry.params.len(), catalog.registry.params.len());
+        assert_eq!(back.registry.layout.len(), catalog.registry.layout.len());
+        // 抽一条参数逐字段比：serde 属性配错最先在这种地方现形
+        assert_eq!(
+            back.registry.params[0].key, catalog.registry.params[0].key,
+            "第一条参数的 key 往返丢了"
+        );
+    }
+
     #[test]
     fn revision_tracks_the_inputs() {
         let mut a = Catalog::build_from_repo(&repo_root()).unwrap();
@@ -286,6 +501,11 @@ mod tests {
         a.files[0].sha256 = "0".repeat(64);
         a.revision = revision_of(&a);
         assert_ne!(a.revision, b.revision, "文件字节变了，指纹得跟着变");
+
+        // **definition 也在指纹的输入里**：改一个字段定义，检查更新要看得见
+        a.registry.params[0].label = "改过的名字".to_owned();
+        a.revision = revision_of(&a);
+        assert_ne!(a.revision, b.revision, "定义变了，指纹也得跟着变");
     }
 
     /// 格式代次不认就拒 —— 往前与往后都不许静默错读

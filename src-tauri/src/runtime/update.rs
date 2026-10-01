@@ -41,8 +41,7 @@ mod tests {
         Catalog {
             catalog_schema: super::super::catalog::CATALOG_SCHEMA,
             revision: revision.to_owned(),
-            machines: Vec::new(),
-            files: Vec::new(),
+            ..Catalog::default()
         }
     }
 

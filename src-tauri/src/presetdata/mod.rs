@@ -58,7 +58,10 @@ pub use bundles::{Bundle, Bundles};
 pub use catalog::{
     Brand, Catalog, Dimensions, Machine, MachineField, MachineVersion, VersionField, Zone,
 };
-pub use registry::{ParamRegistry, ShowOp, ShowWhen, TabMeta, UiComponent, ValueType};
+pub use registry::{
+    LayoutTab, ParamDef, ParamRegistry, SectionMeta, ShowOp, ShowWhen, TabMeta, UiComponent,
+    ValueType,
+};
 pub use resolve::{no_overrides, Layers, Level, Origin, Overrides, ValueOrigin};
 
 /// **测试专用的**仓库预设根：`<repo>/presets`。
@@ -258,11 +261,12 @@ impl Presets {
     ///
     /// 这是客户端与工作台之间那条边界的落点：**代码共用一份，数据根必须是两套**。
     ///
-    /// - 客户端：`Presets::load_from(<appDataDir>/presets)` —— 用户机器上的正式数据；
-    /// - 工作台：`Presets::load_from(<repo>/presets)` —— 仓库里的开发源数据。
+    /// - 工作台：`Presets::load_from(<repo>/presets)` —— 仓库里的开发源数据；
+    /// - 客户端：**不再走这里**（2026-10-01 换源收口）——它只读释放进内部根的 catalog，
+    ///   definition 由发布构建从同一批源算出并序列化（类型直接复用本层的 serde 形态）。
     ///
     /// 这一层只要一个 root，**不猜、不 fallback、不读环境变量**。定位根的职责
-    /// 分别住在 `workbench::paths`（仓库）与客户端那一侧（`appDataDir`）。
+    /// 分别住在 `workbench::paths`（仓库）与 `runtime::release`（catalog 释放）。
     ///
     /// # 读不到就报错，不用空数据装成能跑
     ///

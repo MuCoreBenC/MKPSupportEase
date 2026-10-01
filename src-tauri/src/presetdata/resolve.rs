@@ -71,6 +71,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::presetdata::ParamDef;
 use crate::presetdata::ParamRegistry as Registry;
 
 /// 一层的稀疏覆盖表。`BTreeMap` 不只是为了好看 ——
@@ -81,6 +82,52 @@ pub type Overrides = BTreeMap<String, Value>;
 pub fn no_overrides() -> &'static Overrides {
     static EMPTY: OnceLock<Overrides> = OnceLock::new();
     EMPTY.get_or_init(Overrides::new)
+}
+
+/* ---------- 两个世界的共用算法（只依赖参数定义，不依赖 ParamRegistry） ----------
+ *
+ * 三层取值与可见性过滤是**纯计算**，但它的两个数据源形态不同：
+ * 旧世界/工作台从 [`ParamRegistry`]（解析 TOML 树的缓存）拿参数定义，
+ * 新世界（客户端换源后）从 catalog 的 definition 切片拿。把算法提成只认
+ * `&[ParamDef]` 的纯函数，两层各自转调——**一份算法，不许分叉**。
+ */
+
+/// 这台机型**真实看得到**的字段键，按 `layout.order` 升序。
+///
+/// 两道过滤：`machineFilter` 排除的不属于这台机型；`deprecated` 的不再显示、不进产物。
+/// [`ParamRegistry::visible_keys`] 与 [`Layers::keys`] 都从这里出。
+pub fn visible_keys_of<'a>(params: &'a [ParamDef], machine_id: &str) -> Vec<&'a str> {
+    let mut hit: Vec<&ParamDef> = params
+        .iter()
+        .filter(|p| !p.deprecated && p.applies_to(machine_id))
+        .collect();
+    hit.sort_by(|a, b| a.layout.order.total_cmp(&b.layout.order));
+    hit.into_iter().map(|p| p.key.as_str()).collect()
+}
+
+/// 三档查找（版本 → 机型 → 出厂）的有效值。
+///
+/// **`None` 与"值是空串"严格分开**：前者是"这一项不存在"（弃用、或不属于这台机型），
+/// 后者是一个真实的值（那两个出厂默认就是空串的 G-code 字段）。
+/// [`Layers::effective`] 与新世界的消费端都从这里出。
+pub fn effective_of<'a>(
+    p: &'a ParamDef,
+    machine_id: &str,
+    base: &'a Overrides,
+    over: &'a Overrides,
+) -> Option<ValueOrigin<'a>> {
+    if p.deprecated || !p.applies_to(machine_id) {
+        return None;
+    }
+    for (table, origin) in [(over, Origin::Version), (base, Origin::Machine)] {
+        if let Some(v) = table.get(p.key.as_str()) {
+            return Some(ValueOrigin { value: v, origin });
+        }
+    }
+    Some(ValueOrigin {
+        value: &p.default_value,
+        origin: Origin::Factory,
+    })
 }
 
 /// 可写的两层。出厂层不在这里：它是全局单值，不是某一台机器的东西
@@ -135,9 +182,9 @@ impl<'a> Layers<'a> {
     }
 
     /// 这台机型看得见的字段，按 `layout.order` 升序。
-    /// 等价于 `registry.visible_keys(machine_id)` —— 留个门面，调用方不用知道过滤规则在哪
+    /// 算法在 [`visible_keys_of`] —— 这里只是把 `&ParamRegistry` 适配到它
     pub fn keys(&self) -> Vec<&'a str> {
-        self.registry.visible_keys(self.machine_id)
+        visible_keys_of(self.registry.params(), self.machine_id)
     }
 
     /// 这个字段在这台机型上存不存在。未知的 key 一律 false
@@ -160,22 +207,11 @@ impl<'a> Layers<'a> {
 
     /// 有效值 + 来源层。三层都没有（或这个字段在这台机型上不适用）返回 `None`。
     ///
-    /// **`None` 与"值是空串"严格分开**：前者是"这一项不存在"，后者是一个真实的值。
-    ///
-    /// 查找顺序就是三档：版本 → 机型 → 出厂（doc §3.1）
+    /// 算法在 [`effective_of`] —— 这里只是把 `&ParamRegistry` 适配到它
     pub fn effective(&self, key: &str) -> Option<ValueOrigin<'a>> {
-        if !self.applies(key) {
-            return None;
-        }
-        for (table, origin) in [(self.over, Origin::Version), (self.base, Origin::Machine)] {
-            if let Some(v) = table.get(key) {
-                return Some(ValueOrigin { value: v, origin });
-            }
-        }
-        self.registry.param(key).map(|p| ValueOrigin {
-            value: &p.default_value,
-            origin: Origin::Factory,
-        })
+        self.registry
+            .param(key)
+            .and_then(|p| effective_of(p, self.machine_id, self.base, self.over))
     }
 
     /// 参数台这一屏的取值。与 [`Self::effective`] 的唯一差别：

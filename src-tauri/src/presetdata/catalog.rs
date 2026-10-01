@@ -26,11 +26,15 @@ use crate::fsx::atomic::atomic_write;
 
 use super::literal_str;
 
-/// 品牌。`presets/brands.toml` 里的 `[[brands]]`
-#[derive(Debug, Clone)]
+/// 品牌。`presets/brands.toml` 里的 `[[brands]]`。
+///
+/// 带 serde：**新世界 catalog 的 definition 直接复用这份类型**（两端共用一份契约，
+/// 不另造一套镜像结构）——TOML 解析仍是手写的，serde 只服务 JSON。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Brand {
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub logo: Option<String>,
 }
 
@@ -38,17 +42,21 @@ pub struct Brand {
 ///
 /// **`presetFile` 已退休**（G-2）：产物文件名由命名规则（机型 id + 版本 id 小写）算出，
 /// 不让 TOML 指挥程序去找文件（Task 12 清债）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MachineVersion {
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub recommended_bundle: Option<String>,
+    #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
 }
 
 /// 一块禁区 —— 一串点围成的多边形
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Zone {
     pub points: Vec<(f64, f64)>,
 }

@@ -481,6 +481,14 @@ impl ParamRegistry {
         &self.tabs
     }
 
+    /// 参数摆放（`layout_schema.toml` 的 `tabs[].sections[].items[]`）。
+    ///
+    /// 给**新世界 catalog 的构建**用：catalog 的 definition 要带上完整布局，
+    /// 客户端只读 catalog 就能渲染界面（总纲判据 4 的数据基础）
+    pub fn layout(&self) -> &[LayoutTab] {
+        &self.layout
+    }
+
     /// `param_registry.toml` 的 `updated`，给界面显示
     pub fn updated(&self) -> &str {
         &self.updated
@@ -490,15 +498,10 @@ impl ParamRegistry {
     ///
     /// 两道过滤：`machineFilter` 排除的不属于这台机型；`deprecated` 的不再显示、不进产物。
     /// 归并机型基底时也走这一条（doc §3.3 的 `visibleKeys`）—— 被排除的字段不该出现在
-    /// 它的基底里。
+    /// 它的基底里。算法在 [`crate::presetdata::resolve::visible_keys_of`]（与 catalog
+    /// 消费端共用），这里只是适配
     pub fn visible_keys(&self, machine_id: &str) -> Vec<&str> {
-        let mut hit: Vec<&ParamDef> = self
-            .params
-            .iter()
-            .filter(|p| !p.deprecated && p.applies_to(machine_id))
-            .collect();
-        hit.sort_by(|a, b| a.layout.order.total_cmp(&b.layout.order));
-        hit.into_iter().map(|p| p.key.as_str()).collect()
+        super::resolve::visible_keys_of(&self.params, machine_id)
     }
 
     /// 参数台 / 矩阵**这一屏**的行：与 [`Self::visible_keys`] 唯一的差别是
@@ -855,18 +858,38 @@ fn to_toml_value(
 ///
 /// 拆的时候顺手 trim 并丢掉空段 —— 现在没有 `"A1, A1_MINI"` 这种带空格的写法，
 /// 但一个多打的空格会让 `"A1_MINI"` 变成 `" A1_MINI"`，然后这台机型的字段静默消失
+/// `machineFilter` 的读取：**两种输入形状都认**。
+///
+/// TOML 源里是**逗号分隔字符串**（`"A1,A1_MINI,A2L"`）—— 手写源的形状；
+/// catalog（新世界两端共用的 JSON 契约）里是**字符串数组** —— `Vec<String>` 序列化的
+/// 自然产物。只认前者的话，catalog 往返（parse 自己产出的 JSON）当场断，
+/// definition 就进不了共用契约 —— 这不是宽松，是序列化与反序列化必须说同一种话。
 fn comma_separated<'de, D>(d: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let raw: Option<String> = Option::deserialize(d)?;
-    Ok(raw
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect())
+    let v: Value = Value::deserialize(d)?;
+    match v {
+        Value::Null => Ok(Vec::new()),
+        Value::String(s) => Ok(s
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect()),
+        Value::Array(items) => items
+            .into_iter()
+            .map(|i| match i {
+                Value::String(s) => Ok(s),
+                other => Err(serde::de::Error::custom(format!(
+                    "machineFilter 数组里只能是字符串，见到：{other}"
+                ))),
+            })
+            .collect(),
+        other => Err(serde::de::Error::custom(format!(
+            "machineFilter 要么是逗号分隔字符串，要么是字符串数组，见到：{other}"
+        ))),
+    }
 }
 
 /// 选项值 / `showWhen` 值的**匹配键**。两边都是注册表里的 JSON 标量，

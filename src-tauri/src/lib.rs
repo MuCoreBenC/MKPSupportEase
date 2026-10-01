@@ -10,8 +10,6 @@
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
 pub mod chrome;
-/// 正式客户端的数据面：自己的数据根（`appDataDir/presets`）+ 首启释放内置默认。
-pub mod client;
 pub mod error;
 pub mod fsx;
 pub mod ipc;
@@ -19,17 +17,18 @@ pub mod obs;
 /// 预设数据的**纯读写与解析核心**：机型目录 / 资产 / 套餐 / 字段定义 / 界面布局，
 /// 加上三层取值。[`presetdata::Presets::load_from`] 只要一个根。
 ///
-/// **不带 feature gate** —— 客户端与工作台共用同一份代码。两边的差别只在根：
-/// 客户端读 `appDataDir/presets`（用户机器上的正式数据），工作台读 `<repo>/presets`
-/// （仓库里的开发源数据）。
+/// **不带 feature gate** —— 客户端与工作台共用同一份代码，但两边读的层不同：
+/// 工作台读 `<repo>/presets`（仓库里的开发源数据），客户端只读 catalog
+/// （`appDataDir/catalog.json`，definition 由发布构建从同一批源算出）。
 ///
 /// **数据根不在这里决定**，也**不在运行时读仓库** —— 客户端跑在一台没有仓库的机器上。
 ///
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
 pub mod presetdata;
-/// **新数据世界**（第一圈骨架）：随包 catalog 的释放口 + 下载区/说明书的落点规则。
-/// 与 [`client`] 的旧世界并存，收口次序见 `docs/DATA-INVENTORY.md` §4。
+/// **新数据世界**：随包 catalog 的释放口 + 下载区/说明书的落点规则。
+/// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
+/// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
 
 // 后厨工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
@@ -67,20 +66,11 @@ pub fn run() {
                 }
             }
 
-            /* 内置默认预设：第一次启动铺一份进客户端自己的数据根（`appDataDir/presets`）。
-            **只铺缺失的** —— 已有的一份一个字节都不动（覆盖策略见 client::paths）。
-            失败只告警不挡启动：界面会显示「一台机型都没有」，那是能据以行动的状态，
-            比整个程序开不起来好。 */
-            let seeded = client::paths::presets_root(&handle)
-                .and_then(|root| client::paths::seed_if_absent(&root));
-            match seeded {
-                Ok(r) => tracing::info!(report = %r.summary(), "内置默认预设已就位"),
-                Err(e) => tracing::warn!("内置默认预设没就位：{e}"),
-            }
-
-            /* 新数据世界（第一圈）：随包 catalog 释放进内部根 + 建出空的下载区。
-            与上面的旧铺盘**并存**，收口后旧的那段退场（docs/DATA-INVENTORY.md §4）。
-            同样只补缺失、失败只告警不挡启动。 */
+            /* 运行时 catalog：随包那份释放进内部根 + 建出空的下载区。
+            这是安装包 → 用户本地（层② → 层③）的唯一铺盘：客户端首屏的全部定义
+            （机型 / 资产 / 套餐 / 字段定义 / 布局）都从这一份出数。盘上已有且一致就
+            一个字节不动；不同（升级）就旧份归档、新份生效（runtime::release）。
+            失败只告警不挡启动：界面会显示「读不到说明书」，那是能据以行动的状态。 */
             match fsx::paths::internal_root(&handle)
                 .and_then(|root| runtime::release::release_catalog(&root))
             {

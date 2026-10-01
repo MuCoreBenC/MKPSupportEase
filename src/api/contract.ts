@@ -180,12 +180,16 @@ export interface FileRef {
   kind: FileKind
   /** 界面上显示的文件名 */
   fileName: string
-  /** 相对预设仓库根的路径，'presets/mkp/A1F_260628.toml' */
+  /**
+   * 文件落点：MKP 预设相对**内部数据根**（'mkp/A1-fastv3.3.toml'，即下载区的登记落点）；
+   * 切片器配置相对**预设仓库根**（'presets/bbs/…'，前端按它拼内置资源 URL）。
+   * 前端只把它当标识/去重键用，不拿它拼本机路径。
+   */
   path: string
   /**
-   * 下面两个**目前一定是 undefined**。
-   * 上游的资产清单里 sha256 和 size 全是空值，真值要到发布打 manifest 时才算出来。
-   * 宁可留空让界面显示「未知」，也不造一个看起来煞有介事的假数字。
+   * `mkp_preset` 那一支带**真值**（运行时 catalog 的文件条目对交付产物真字节算的，
+   * 下载校验拿它当期望值）；切片器那两支仍是 undefined —— 资产本体的登记与
+   * 下载要等交付管道接管（总纲欠账 #3），没有就显示「未知」。
    */
   size?: number
   sha256?: string

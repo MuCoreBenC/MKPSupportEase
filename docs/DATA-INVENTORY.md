@@ -16,6 +16,11 @@
 | 前端代码（模块级） | 9 | 6 保留、3 收口（最大欠账：**用户数据住 localStorage**） |
 | 构建与工具 | 4 | 4 保留 |
 
+> 2026-10-01 增补：Rust 侧的 R2/R3/R4/R5 四条已在本圈收口（见 §3.1 勾账）——
+> `client/` 目录删除、catalog 加厚出完整 definition、九条读命令换源。
+> §1 八环节里的"安装包资源管理"随之有了正面向：catalog 的 `assets` 域已登记
+> 19 条资产定义（载荷登记与下载仍欠，见 #3）。
+
 两个改变判断的发现：
 
 1. **"做菜"的环节已经存在大半。** 工作台 `wb_publish` 的交付层结构已在代码里定稿（`content/` 三件 JSON + `presets/mkp/` 产物 + `assets/` 可达子集 + `manifest.json`，SHA/size 发布时算、残留文件拦截发布——见 `workbench/app/dist.rs` 头注释）；盘上目前实际生成过的只有 9 份预设产物（`presets/dist/presets/mkp/`，本机暂存不入库），入库真身在 `crates/preset/assets/presets/`。总纲欠账 #1 的解法**不是新写构建器**，是把这条已有的管道接给安装包。
@@ -67,12 +72,12 @@
 | # | 在哪 | 干什么 | 按总纲 | 裁决 |
 | --- | --- | --- | --- | --- |
 | R1 | `fsx/paths.rs`、`fsx/atomic.rs` | 两根 + 防穿越 + 唯一写盘出口 | 基础设施 | **保留** |
-| R2 | `client/mod.rs` | 数据面骨架："代码一套，数据根两套，永不互读写" | ③ 的管理者 | **保留** |
-| R3 | `client/defaults.rs` | 13 份源 TOML `include_str!` 进二进制 | **违反铁律 1**（总纲欠账 #1） | **收口**：换成随包 catalog 一份。模块头的三条理由（用户机器没仓库 / 只定义无载荷 / 与 load_from 对齐）在 catalog 方案里全部仍成立，换的是**形态**不是动机 |
-| R4 | `client/paths.rs` `seed_if_absent` | 首启铺定义 + 建 `mkp/` 空目录；drift 只报不覆盖；**已有测试钉死 mkp/ 初始为空** | 首启释放 | **收口**：铺 13 份 → 释放/校验 catalog 一份；`mkp/` 建目录与空判据测试**原样保留**（总纲判据 3 已经在这了） |
-| R5 | `ipc/presets.rs`（9 条读命令 + 缓存） | 首屏与预设页的全部数据源。零网络；SHA/size 栏留空"等发布打 manifest"；`forget_cached_presets` 给未来写命令留了钩子 | 首屏读本地 = 铁律 2 的正面样本 | **保留**命令形状；**收口**数据源：`load_presets` 从"解析 TOML 树"换成"读 catalog"。九条命令的 DTO 一个都不用动——这是 catalog 化成本最低的原因 |
+| R2 | `client/mod.rs` | 数据面骨架："代码一套，数据根两套，永不互读写" | ③ 的管理者 | **已收口 2026-10-01（随 R3/R4）**：模块退役。"数据根两套"的纪律由新的分工接手——工作台读仓库源（presetdata::load_from），客户端只读 catalog，仍永不互读写 |
+| R3 | `client/defaults.rs` | 13 份源 TOML `include_str!` 进二进制 | **违反铁律 1**（总纲欠账 #1） | **已收口 2026-10-01（R3）**：模块整个退役。definition 由发布构建从同一批源算进 catalog（definition 类型直接复用 presetdata 的 serde 类型），客户端不再持有源文件字节 |
+| R4 | `client/paths.rs` `seed_if_absent` | 首启铺定义 + 建 `mkp/` 空目录；drift 只报不覆盖；**已有测试钉死 mkp/ 初始为空** | 首启释放 | **已收口 2026-10-01（R4）**：`client/` 目录删除。铺盘只剩 catalog 一份（`runtime::release`，升级=旧份归档、新份生效）；`mkp/` 建目录与空判据由 release 的 `mkp_dir_is_created_empty` 原样承担 |
+| R5 | `ipc/presets.rs`（9 条读命令 + 缓存） | 首屏与预设页的全部数据源。零网络；SHA/size 栏留空"等发布打 manifest"；`forget_cached_presets` 给未来写命令留了钩子 | 首屏读本地 = 铁律 2 的正面样本 | **已收口 2026-10-01（R5）**：九条命令的 DTO 一个没动，数据源换成释放的 catalog（按**字节**缓存，目录换新自动失效）；MKP 引用带真 size/SHA；三层取值改走与 ParamRegistry 共用的 `resolve::visible_keys_of / effective_of`。判据 `dto_builders_read_the_catalog_and_nothing_else` 钉死"唯一数据源" |
 | R6 | `ipc/mod.rs`（4 条基础命令） | 预设值 / 偏移量 / 校准模型 / 开模型 | ③ run 状态 + ② 内置模型 | **保留** |
-| R7 | `presetdata/`（catalog/assets/bundles/registry/resolve） | TOML 树解析 + 三层取值 | ①↔③ 的解析层 | **保留**给工作台；客户端侧随 R5 换源后退役。三层取值（`resolve`）是纯计算，两边继续共用 |
+| R7 | `presetdata/`（catalog/assets/bundles/registry/resolve） | TOML 树解析 + 三层取值 | ①↔③ 的解析层 | **保留**给工作台；客户端侧已随 R5 换源退役（2026-10-01）——但它的**类型**成了两端共用契约的 definition（serde 序列化进 catalog），三层取值（`resolve`）提取成 `visible_keys_of / effective_of` 继续两边共用 |
 | R8 | `workbench/`（paths/app/domain/store…） | 后厨：源编辑、生成、发布、manifest v3、残留拦截 | ① 的工具 | **保留**。`wb_publish` 就是总纲"发布构建"的现成本体 |
 | R9 | `crates/preset`（BUILTIN_PRESETS + `preset_file_name`） | 命名唯一实现 + 9 份内置预设编译进二进制，判据锚入库产物目录 | ② 内置内容 | **保留**形态；**收口**清单归 catalog（总纲欠账 #4） |
 | R10 | `client/defaults.rs` 之外的 `chrome/obs/error/lib` | 窗口 / 日志 / 错误 | 基础设施 | **保留**（不属数据架构，列此备查） |
@@ -149,5 +154,22 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   `apply_remote_update`）：指纹比较 → 应用走既有 release 归档管道 →
   Stale 文件走既有下载管道。**更新没有第三条路径**。下载源跟着目录走
   （本地 revision 与远端一致才从远端拿）。真云端来了只换清单来源。
+
+- 2026-10-01：**catalog 加厚 + 换源收口（R3/R4/R5，第二圈）** ——
+  1. **catalog 长出完整 definition**：brands / 机型的全部字段（含尺寸与禁区）/
+     assets（19 条）/ bundles（5 份）/ registry（74 条字段定义 + 页签元数据 +
+     参数摆放）全部进 `runtime::Catalog`，definition 类型**直接复用**
+     presetdata 的 serde 类型（不造镜像结构）；revision 指纹把 definition
+     算进输入（改一个字段定义，检查更新就看得见）。`CATALOG_SCHEMA` 不升
+     （加字段不升号；definition 全带 `#[serde(default)]`）。
+  2. **客户端换源**：九条预设读命令的 DTO 一个没动，数据源从"解析
+     `<appDataDir>/presets` 的 13 份 TOML"换成"读释放的 catalog"（按字节缓存，
+     目录换新自动失效）。三层取值提取成 `resolve::visible_keys_of /
+     effective_of`，与 ParamRegistry 共用一份算法。判据
+     `dto_builders_read_the_catalog_and_nothing_else` +
+     `the_definition_travels_with_the_catalog` 落地。
+  3. **旧世界退役**：`client/` 目录（defaults 13 份 include_str! + seed 铺盘）
+     删除，启动铺盘只剩 catalog 一份（release 管道）。**总纲欠账 #1 收口**。
+     判据 4（首屏唯一数据源 = catalog）在 Rust 侧由类型 + 判据钉死。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

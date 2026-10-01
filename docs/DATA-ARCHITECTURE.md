@@ -139,7 +139,7 @@ Documents/SupportEase/
 
 | # | 现状 | 违反 | 收口方向 |
 | --- | --- | --- | --- |
-| 1 | `client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/` | 铁律 1（开发文件成了运行时数据库） | catalog 替代：铺盘的只有 catalog 一份，不再铺源文件 |
+| 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
 | 3 | `public/assets/bbs/Process/` 9 份 JSON 裸进安装包 | 半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知 | 发布构建登记进 catalog |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
@@ -152,8 +152,8 @@ Documents/SupportEase/
 
 1. **安装包扫描**：构建后扫产物目录，出现 `presets/` 源 TOML、`cloud/presets.json`、`workbench`、`.snapshots`、`*.draft` 即失败。
 2. **启动零网络**：启动路径无网络调用。先源码扫描起步，后补运行时判据。
-3. **下载区初始为空**：扩展现有 seed 测试——首启后 `mkp/` 零文件。
-4. **首屏唯一数据源 = catalog**：客户端清单加载只认 catalog，代码路径扫描钉住。
+3. **下载区初始为空**：扩展现有 seed 测试——首启后 `mkp/` 零文件。（旧世界 seed 测试随 `client/` 退役；`runtime::release` 的 `mkp_dir_is_created_empty` 承担同一条）
+4. **首屏唯一数据源 = catalog**：客户端清单加载只认 catalog，代码路径扫描钉住。（2026-10-01 落地：九条读命令的 DTO 构建只接受 `runtime::Catalog`，判据 `dto_builders_read_the_catalog_and_nothing_else` 钉死）
 
 ## 6. 新需求的准入问句
 

@@ -1,18 +1,19 @@
-//! **新数据世界**（第一圈骨架，见 `docs/DATA-ARCHITECTURE.md`）。
+//! **新数据世界**（见 `docs/DATA-ARCHITECTURE.md`）。
 //!
 //! 总纲把所有文件划进四层：开发仓库 → 安装包 → 用户本地 → 云端。这一模块管的是
 //! **第③层（用户本地）的运行时形态**与**第②层 → 第③层的释放口**：
 //!
 //! ```text
 //! 安装包（二进制里嵌着的 catalog.generated.json）
-//!     │  首启释放（release，只补缺失）
+//!     │  首启释放（release）
 //!     ▼
 //! <appDataDir>/catalog.json     说明书 —— 首屏唯一数据源（铁律 2：启动零网络）
 //! <appDataDir>/mkp/             下载区 —— 初始为空，用户下载了什么才有什么（铁律 3）
 //! ```
 //!
-//! 与旧世界（[`crate::client`]：`include_str!` 13 份源 TOML 铺进 `presets/`）**并存**，
-//! 两套互不读写；收口次序见 `docs/DATA-INVENTORY.md` §4，收口完旧的那套退场。
+//! 客户端首屏（`ipc::presets` 的九条读命令）从 catalog 的 definition 出数；
+//! 旧世界（include_str! 13 份源 TOML 铺进 `presets/` 的 `client/` 模块）已随换源退役
+//! —— 开发文件不再成为运行时数据库（铁律 1 收口，总纲欠账 #1）。
 //!
 //! 名字里没有版本号（作者裁决：新系统不背旧命名的包袱）——目录格式由
 //! [`catalog::CATALOG_SCHEMA`] 表达，进化靠加字段，不靠改名。
@@ -26,21 +27,30 @@ pub mod update;
 
 pub use catalog::Catalog;
 
-/// 读**释放进内部根的那份** catalog（铁律 4：运行时只认自己的运行时数据）。
-/// 盘上没有（setup 释放失败、或文件被删）就就地补一次再读：那是兜底，不是正常路径。
-/// 命令层（`ipc::catalog`）与将来的写路径共用这一条入口，读法只有这一份。
-pub fn load_released_catalog(root: &std::path::Path) -> Result<Catalog, crate::error::AppError> {
+/// 读**释放进内部根的那份** catalog 的原始字节。盘上没有（setup 释放失败、或文件被删）
+/// 就就地补一次再读：那是兜底，不是正常路径。
+///
+/// 给"按字节缓存"的消费者用（`ipc::presets` 的九条读命令）：同一份字节只 parse 一次，
+/// 目录换新（升级 / 应用远端更新）后字节变，缓存自动失效——**不需要失效钩子**。
+pub fn load_released_catalog_bytes(
+    root: &std::path::Path,
+) -> Result<Vec<u8>, crate::error::AppError> {
     let path = paths::catalog_file(root);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(bytes),
         Err(_) => {
             release::release_catalog(root)?;
             std::fs::read(&path).map_err(|e| {
                 crate::error::AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
-            })?
+            })
         }
-    };
-    Catalog::parse(&bytes)
+    }
+}
+
+/// 读**释放进内部根的那份** catalog（铁律 4：运行时只认自己的运行时数据）。
+/// 命令层（`ipc::catalog`）与将来的写路径共用这一条入口，读法只有这一份。
+pub fn load_released_catalog(root: &std::path::Path) -> Result<Catalog, crate::error::AppError> {
+    Catalog::parse(&load_released_catalog_bytes(root)?)
 }
 
 /// 随安装包走的那份 catalog —— 发布构建（`cargo run --bin gen-catalog`）的产物。
