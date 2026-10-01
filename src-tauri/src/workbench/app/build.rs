@@ -429,8 +429,11 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
                 rendered.push(render(&book, uid)?);
             }
 
-            // ② 全部成功才逐个原子替换
-            let dist = paths::dist_root()?.join("presets").join("mkp");
+            // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
+            // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
+            let dist = paths::dist_root()?
+                .join(super::dist::MKP_DIR)
+                .join("presets");
             let mut written = Vec::new();
             let mut unchanged = Vec::new();
             let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();

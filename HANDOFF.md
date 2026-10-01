@@ -75,16 +75,23 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      （`public/models/hero_pile*.webp`，首页第五步与校准页在用）→ `src/app/assets/hero/`。
      `public/` 从此只剩台账管的载荷根与 BBS 页元数据。
      第 1 步到此收口：**Catalog / Delivery 管产品数据资源，`src/app/assets` 管界面自带素材**。
-2. ⬜ **发布接上**：`presets/` → publish → catalog / manifest → 发布源。产出要明确回答
+2. 🔄 **发布接上**：`presets/` → publish → catalog / manifest → 发布源。产出要明确回答
    "这次发布了什么 / 叫什么 / path 是什么 / SHA / 大小 / 什么 kind"；`MKPSE_PRESET_SOURCE` 只决定"发到哪"。
-   **工作台 dist 现在还是 `assets/…` 布局，与客户端 `mkp/…` 不同形 —— 这一刀必须对齐**，
-   否则将来 URL 拼得上、落点却对不上（已登记在 §5）。
+   - ✅ **第 2 步（发布布局对齐 `mkp/…`）**（本次）——交付根**就是客户端按 URL 直取的那个根**，
+     所以相对路径是契约的一半，不是发布侧的自由：原来这里是 `assets/<载荷 path>` + `presets/mkp/<名字>`，
+     客户端认的却是 `mkp/<kind 目录>/…`，**URL 拼得上、落点对不上**。
+     现在两边**共用 `runtime::catalog::dest_of_asset` 一处算法**：`wb_generate` 落 `dist/mkp/presets/`，
+     资产落 `dist/mkp/{bbs,models,icons}/…`，`assets_index.json` 的 `path`、
+     `manifest` 的 `relativePath`、`catalog.json` 的 `files[].path` 三者同值。
+     **判据**：`publish_into` 收尾逐条核对"发出去的每份文件都在说明书里按同一 path 登记、字节与 SHA 一致"
+     （运行时）+ 真数据判据 `the_published_layout_lands_where_the_catalog_says`（写盘面 == 登记面）。
+   - ⬜ **还没做的**：`MKPSE_PRESET_SOURCE` 落进流水线（"发到哪"是产品决定）；上传那一环还是手工/云盘。
 3. ⬜ **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加
    下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本。
 
 ## 4. 续做入口（从哪接手）
 
-- **第三圈第 1 步已收口，下一刀是 §3.5 第 2 步：把工作台发布的布局从 `assets/…` 对齐成 `mkp/…`**（否则 URL 拼得上、落点却对不上）。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等发布那一刀做。
+- **第三圈第 2 步的布局对齐已完成**（2026-10-02）：交付根相对路径 = 客户端下载区的相对路径（`mkp/…`），两端共用 `runtime::catalog::dest_of_asset`。**下一步是 §3.5 第 3 步：Preset 成为第一个完整消费者**（发现 → 下载 → 本地文件 → 页面，再逐层加下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本）。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等那一刀做。
 - **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。
 - **下载这条链的入口**：`ipc::catalog::download_runtime_file`（一份，带 `Channel` 进度）与 `download_runtime_files`（一份清单，逐份结局）；源由 `runtime::source::current_base_url` 给出；字节在生产后走 `runtime::delivery::deliver`。
 - 前端消费新世界的样板：预设页（`usePresetData.readRelease` = catalog.files + `getDownloadedFiles`，写走 `downloadCatalogFiles` / `applyActivePreset` 后**重读底账**）；参数页（`useParams` = `getMachines` + `getParamMeta` + `getRuntimeCatalog` 的 registry 摊页签树 + `getMachineParams` 按 combo 拉值）。
@@ -136,6 +143,11 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   整机图那一刀就是按这把尺子改判的（原来写在台账里的 4 条 `image` 条目已删）。
 - **下载区按 kind 分层**（`mkp/presets/`、`mkp/bbs/`…）：新增资源只加 [`runtime::catalog::kind`] 一个常量
   + [`kind_dir`] 一个分支。**不要**为某一种资源另开一个目录另写一套下载 —— 那是这一圈唯一的硬规矩。
+- **交付根的相对路径 = 客户端落点**（2026-10-02）：发布根就是数据源地址指向的根，
+  客户端下载地址 = `数据源地址 + catalog 的 `files[].path``。所以**发布侧不许自己拼路径** ——
+  算落点只有一处：[`runtime::catalog::dest_of_asset`]（`wb_generate` 的 `mkp/presets/` 也照它）。
+  两套拼接的典型症状是"上传成功、用户点下载却 404"，而两边各自看着都对。
+  判据在 `publish_into` 收尾（发出去的每份都在说明书里按同一 path 登记、字节与 SHA 一致）。
 
 ## 6. 判据清单（全是活的，别删）
 
@@ -152,6 +164,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `STORAGE` 三键已删（C4） | localStorage 不再住底账：`STORAGE.clientPackage / clientPresets / clientActive` 引用直接 tsc 失败——编译期判据 |
 | `scripts/check-bundle.mjs`（CI web job） | 判据 1：开发源 TOML / 模拟数据 / 工作台内容不进客户端安装包 |
 | `scripts/check-zero-network.mjs`（CI web job） | 判据 2：启动零网络 —— 网络符号只许住 `runtime/net.rs` / `.setup()` 段零联网 / `src/api/` 不许绕过 IPC 发 HTTP |
+| `workbench::app::dist` 判据 | **交付根相对路径 == 客户端落点**：`the_published_layout_lands_where_the_catalog_says`（真数据：写盘面 == catalog 登记面、字节与 SHA 一致）/ 夹具发布：manifest 每条都在 `mkp/…` 下且 catalog 里按同一 path 登记 / 残留拦截 / 回收站 / 可达集计数（真数据 8 条资产） |
 | `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
 
 ## 7. 仓库状态速记
@@ -163,3 +176,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
 - **资产去哪一档看一把尺子**：产品数据资源（用户下载 / 更新 / 管理）→ `public/assets/` + `presets/assets.toml` + catalog；界面展示素材（程序自己看一眼）→ `src/app/assets/` 或 `public/`，不进台账。台账里今天 15 条 = 9 BBS + 3 图标 + 3 模型。
+- **交付根（`presets/dist/`）的布局**：`catalog.json` + `manifest.json` 在根，产品资源一律在 `mkp/…`
+  （`mkp/presets/` 是 `wb_generate` 落的、其余按 kind 分目录）——**与客户端下载区同形**。
+  本机换过布局时，旧目录里的文件会成"残留"：发布页有清理（进 `workbench/.trash/dist/`），
+  也可以直接把 `presets/dist/mkp/presets/` 之外的东西清掉重发（它本来就不入库）。

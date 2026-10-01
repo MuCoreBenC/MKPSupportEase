@@ -28,7 +28,7 @@
 
 两个改变判断的发现：
 
-1. **"做菜"的环节已经存在大半。** 工作台 `wb_publish` 的交付层结构已在代码里定稿（`content/` 三件 JSON + `presets/mkp/` 产物 + `assets/` 可达子集 + `manifest.json`，SHA/size 发布时算、残留文件拦截发布——见 `workbench/app/dist.rs` 头注释）；盘上目前实际生成过的只有 9 份预设产物（`presets/dist/presets/mkp/`，本机暂存不入库），入库真身在 `crates/preset/assets/presets/`。总纲欠账 #1 的解法**不是新写构建器**，是把这条已有的管道接给安装包。
+1. **"做菜"的环节已经存在大半。** 工作台 `wb_publish` 的交付层结构已在代码里定稿（`content/` 三件 JSON + `mkp/presets/` 产物 + `mkp/{bbs,models,icons}/…` 可达子集 + `manifest.json` + `catalog.json`，SHA/size 发布时算、残留文件拦截发布——见 `workbench/app/dist.rs` 头注释）；盘上目前实际生成过的只有 9 份预设产物（`presets/dist/mkp/presets/`，本机暂存不入库），入库真身在 `crates/preset/assets/presets/`。总纲欠账 #1 的解法**不是新写构建器**，是把这条已有的管道接给安装包。
 2. **最大的一笔不在总纲 §4 里：客户端的用户数据住 localStorage**（`mkp.a40.package / presets / active`）。说明书、下载的预设、使用中状态都是③层运行时数据，现在住在 WebView 的 localStorage——换机器即丢、不可备份、绕过 `atomic_write` 纪律。违反铁律 4。
 
 ---
@@ -57,7 +57,7 @@
 | # | 现在在哪 | 是什么 | 按总纲 | 裁决 |
 | --- | --- | --- | --- | --- |
 | F1 | `presets/*.toml`（13 份源） | 机型 / 禁区 / 套餐 / 资产 / 布局 / 注册表的定义源 | ① 源 | **保留**。与总纲 §1① 的布局一字不差 |
-| F2 | `presets/dist/` | 发布器产物暂存（实际已有 `presets/mkp/` 9 份；content JSON 与 manifest 是设计稿、尚未生成）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
+| F2 | `presets/dist/` | 发布器产物暂存（实际已有 `mkp/presets/` 9 份；content JSON / manifest / catalog.json 是设计稿、尚未生成）。**布局与客户端落点同形**（2026-10-02 对齐）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
 | F2b | `crates/preset/assets/presets/`（9 份，入库） | **入库产物目录**：`BUILTIN_PRESETS` 编进二进制的同一批真字节 | ① 的②半成品真身 | **保留**；构建器与判据都认它 |
 | F3 | `public/assets/icons\|models`（+ `bbs/` 见 F4） | 图标 / 3mf 模型的**载荷**，随 vite 进包（工作台按 URL 直取） | ② 内置资源（源） | **收口**：第三圈第二刀已登记进 catalog（`kind=icon` / `kind=model`），客户端按需下载进 `mkp/icons/` `mkp/models/`，随包副本退役 |
 | F3b | ~~`public/assets/printers/`~~ → `src/app/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前的判定是"② 内置资源"，**2026-10-01 改判**：它是**界面展示素材**（不是产品数据资源） | **已收口 2026-10-01（第三刀）**：从资产台账（`presets/assets.toml` 的 4 条 `image`）剥离，搬进 `src/app/assets/`，由 vite 资源管线随程序本体走；机型文件的 `image` 引用一并清空。判据：`runtime::catalog`「台账里已无 image 类」 |
@@ -273,5 +273,31 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      **schema 暂不清理**（作者 2026-10-02 定）："现在没有数据"不等于"这个概念从系统里永远不存在"，
      保持 schema 稳定；将来确认永远不用，再做一次专门的 schema 清理（那会连带改
      前端契约 `Machine.image`、mock、工作台机型页与资产页）。
+
+- 2026-10-02：**第三圈第 2 步 —— 发布布局与客户端落点对齐**（`assets/…` → `mkp/…`）。
+  1. **为什么必须对齐**：交付根就是**数据源地址指向的那个根**，客户端下载地址 =
+     `数据源地址 + catalog 的 files[].path`。而发布侧原来自己拼了一套坐标系
+     （`assets/<载荷 path>` + `presets/mkp/<名字>`），客户端认的是 `mkp/<kind 目录>/…` ——
+     **URL 拼得上、落点对不上**：上传成功、用户点了下载却 404，而两边各自"看着都对"。
+  2. **做法：落点只有一处算法**。把 `runtime::catalog::dest_of_asset` 提为公有，两端共用：
+     客户端拿它算 `CatalogFile.path`，工作台发布拿它算"复制到交付根的哪个相对位置"。
+     `wb_generate` 落 `dist/mkp/presets/`；`assets_index.json` 的 `path`、manifest 的
+     `relativePath`、catalog 的 `files[].path` **三者同值**，不再各拼各的。
+  3. **判据**：① 运行时（`publish_into` 收尾）——本次发出的每一份文件都在说明书里按同一 path
+     登记、字节与 SHA 一致（对不上就是"发布出去的字节与说明书说的不是同一份"）；
+     清单与目录**过了核对才写**。② 真数据判据
+     `the_published_layout_lands_where_the_catalog_says`：写盘面 == 登记面（真数据 8 条资产），
+     逐份对 SHA。③ 夹具发布判据补"交付面 ⊆ 登记面"。
+  4. **如实说明**：说明书登记 15 条资产，而交付只发**被引用可达的 8 条**
+     （doc §7 原则 1 的可达性收窄，b05 Task 13 的裁决）——"登记得比发得多"是设计不是漏洞：
+     客户端只会去取它下载集里那 8 条。所以收尾核对核对的是**本次发出的集合**，不是目录全部条目。
+  5. 同批修正：`dist.rs` 头注释重写（交付根布局 + 落点唯一）、工作台文案与开发态夹具
+     （`BuildPage` 的 `mkp/presets/…`、`mockBackend` 的残留清单）。本机 `presets/dist/presets/mkp/`
+     那 9 份已挪到 `presets/dist/mkp/presets/`（本机产物，不入库）。
+  6. **登记两条不在本刀范围的欠账**（不是漏做）：① `src/workbench/clientPackage.ts` 造的
+     `ClientDataPackage` 仍用另一套坐标（`presets/mkp/…` / `presets/<载荷 path>`）——
+     它的客户端消费方已在 C4 退役（`STORAGE.clientPackage` 的编译期判据），所以这是
+     "该删或该对齐"的 b05 债；② `src/api/mockServer/*` 与 `presetTree.ts` 里还有
+     "随包副本 `public/assets/bbs/`"的旧说法（第一刀起就退役了），属产品前端 mock 的坐标问题。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

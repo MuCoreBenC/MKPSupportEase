@@ -46,7 +46,8 @@
  *   ② 兼容性清单    客户端团队那张表（`src/workbench/compat.ts` 的 `CLIENT_COMPAT`），
  *                   外加按木桶原理算出来的「自动判断：x.y.z」—— 常显，悬停看它命中了哪几样
  *   ③ 发布物清单    产物名单与文件名来自 `BuildRow.mkpFile`（Rust 交付集合里那几份
- *                   `presets/mkp/*.toml`），TOML 正文走 `wb_preview_toml`（**真 Rust 渲染器**）
+ *                   `mkp/presets/*.toml` —— 交付根下的落点，与客户端下载区同形），
+ *                   TOML 正文走 `wb_preview_toml`（**真 Rust 渲染器**）
  *   ③ 查看 JSON     这次发布的那份**说明书原样**（`ClientDataPackage`）+ `wb_publish` 的返回
  *   ③ 上传到云端    整个 release（说明书 + 预设文件）写进 `STORAGE.cloud` ——
  *                   客户端「同步」页读的就是这一格，联动这条链到此闭合
@@ -183,7 +184,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
    */
   const suggestVer = ver ?? '1.0.0'
 
-  /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `presets/mkp/` 同一批） */
+  /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `mkp/presets/` 同一批） */
   const artifacts = rows.flatMap((r) => (r.mkpFile === null ? [] : [{ uid: r.uid, fileName: r.mkpFile }]))
 
   /* 云端那一格：进页取一次。真云端在本轮不存在，见 cloud.ts 的文件头 */
@@ -735,7 +736,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                     ? `说明书 — ${pkgErr ?? '正在装……'}`
                     : `说明书 × 1 · ${pkg.fields.length} 字段（带条件 ${condCount}）`}
                 </span>
-                <span className={s.chip} title="已经生成出来的版本各一份：presets/mkp/<机型>-<版本>.toml">
+                <span className={s.chip} title="已经生成出来的版本各一份：mkp/presets/<机型>-<版本>.toml">
                   {artifacts.length === 0
                     ? 'preset.toml — 未生成'
                     : `preset.toml × ${artifacts.length} 份`}

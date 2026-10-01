@@ -987,7 +987,7 @@ export function installMockBackend() {
         return Promise.resolve(n)
       }
       case 'wb_dist_strays':
-        return Promise.resolve(['presets/mkp/old_file.toml'])
+        return Promise.resolve(['mkp/presets/old_file.toml'])
       case 'wb_clean_dist_strays':
         return Promise.resolve(1)
       case 'wb_trash':

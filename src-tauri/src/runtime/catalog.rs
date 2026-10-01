@@ -183,6 +183,22 @@ fn asset_dest(kind: &str, asset_path: &str) -> String {
     format!("mkp/{}/{rest}", kind_dir(kind))
 }
 
+/// 一条资产在**下载区 / 交付根**的落点：`mkp/<kind 目录>/…`。
+///
+/// **两端共用这一处算法**（2026-10-02）——这是"发布方与消费方说同一种语言"的落点那半句：
+///
+/// - 客户端：拿它算 [`CatalogFile::path`]，下载地址 = 数据源地址 + 它；
+/// - 工作台发布：拿它算这条资产该复制到交付根的哪个相对位置（`dist/mkp/…`）。
+///
+/// 两套拼接一定会漂，而漂的表现是「URL 拼得上、落点却对不上」——上传成功了、
+/// 客户端也点了下载，文件落到别的目录，或者根本 404。所以在发布侧调用这一处，
+/// 不自己 `format!` 一遍。
+///
+/// 返回 `None` = 台账里这一类不登记（今天只剩 `Image`，它已从台账剥离）。
+pub fn dest_of_asset(asset: &crate::presetdata::Asset) -> Option<String> {
+    kind_of_asset(asset.kind).map(|kind| asset_dest(kind, &asset.path))
+}
+
 /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
 /// 没下载就没有；下载了才出现在 `mkp/`）。
 ///
@@ -247,8 +263,8 @@ impl Catalog {
 
     /// 从**已加载的预设源 + 一个产物目录**构建。这是两端共用的构建本体：
     /// - 安装包侧（[`Catalog::build_from_repo`]）：产物目录 = 入库产物，**严格**——缺一份就失败；
-    /// - 发布侧（工作台 `wb_publish`）：产物目录 = `dist/presets/mkp`，**宽松**——
-    ///   没有产物的版本是合法状态（交付集合本来就不含它），跳过。
+    /// - 发布侧（工作台 `wb_publish`）：产物目录 = `dist/mkp/presets`（与客户端落点同形），
+    ///   **宽松**——没有产物的版本是合法状态（交付集合本来就不含它），跳过。
     pub fn build_from_presets(
         presets: &crate::presetdata::Presets,
         artifacts_dir: &Path,

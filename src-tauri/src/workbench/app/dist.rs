@@ -1,31 +1,36 @@
 //! 交付层（b05 Task 12）：`presets/dist/` 的**目录类 JSON** 与资产复制。
 //!
-//! # 目录结构定稿（12.1；doc §7 的示意在此落定）
+//! # 目录结构定稿（12.1；**2026-10-02 与客户端落点对齐**）
+//!
+//! 交付根就是「客户端拿 URL 直取的那个根」（数据源地址指向它）。所以这里的相对路径
+//! **不是发布侧的自由**，而是契约的一半 —— 客户端下载用的地址是
+//! `数据源地址 + catalog 里登记的那个相对位置`：
 //!
 //! ```text
-//! presets/dist/
-//! ├── content/
-//! │   ├── machine_catalog.json     机型 + 版本 + 关系（12.2）
-//! │   ├── bundles.json             套餐 + 包含什么（12.3）
-//! │   └── assets_index.json        资产清单 + 位置 + 归属（12.4）
-//! ├── presets/
-//! │   └── mkp/<preset_file_name>   参数本体（wb_generate 落的，9 份起）
-//! ├── assets/                      资产根（public/assets/）的**引用可达子集**
-//! │   └── printers/ icons/ models/ bbs/…   path 在两个根下同形
-//! ├── manifest.json                最后写（wb_publish 收尾）
-//! └── catalog.json                 **新世界两端共用契约**（与客户端 runtime::Catalog
-//!                                  同 schema；客户端检查/应用更新对它做指纹比较）
+//! presets/dist/                       ← 数据源地址指向的根
+//! ├── catalog.json                    **两端共用契约**（与客户端 runtime::Catalog 同
+//! │                                   schema；客户端按 join_url(base,"catalog.json") 取）
+//! ├── manifest.json                   发布账：本次发了哪些文件、SHA、大小（最后写）
+//! ├── content/                        目录类 JSON（doc §7 的那一面，客户端暂不读）
+//! │   ├── machine_catalog.json        机型 + 版本 + 关系（12.2）
+//! │   ├── bundles.json                套餐 + 包含什么（12.3）
+//! │   └── assets_index.json           资产清单 + 位置 + 归属（12.4）
+//! └── mkp/                            产品资源区 —— **与客户端下载区同名同形**
+//!     ├── presets/<preset_file_name>  MKP 产物（`wb_generate` 落的，9 份起）
+//!     ├── bbs/Process/…               切片器配置
+//!     ├── models/…                    3mf 模型
+//!     └── icons/…                     机型图标
 //! ```
 //!
-//! 两条定稿决定，各有一条理由：
+//! **落点由 catalog 说了算**：交付集合里每一个文件的相对路径，都等于它在
+//! `catalog.json` 的 `files[].path`（两边共用 [`crate::runtime::catalog::dest_of_asset`]
+//! 一处算法）。发布侧**不再自己拼一遍** —— 曾经这里是 `assets/<载荷 path>` +
+//! `presets/mkp/<名字>`，而客户端认的落点是 `mkp/<kind 目录>/…`：URL 拼得上、
+//! 落点对不上，上传成功、客户端点下载却 404。这一类错在两边各自"看着对"的时候最难查，
+//! 所以 [`publish_into`] 收尾时**逐条核对**盘上真字节（见那个函数的最后一段）。
 //!
-//! - **`presets/mkp/` 子层保留**（不收成示意里的一层）：MKP 预设与 BBS 预设是两类
-//!   预设（G-3 的切片器开放维度），子层给「按预设类型」留位置，而且 `wb_generate`
-//!   已经按这个形状在写 —— 定稿是**承认现状为契约**，不是另起一套；
-//! - **`assets/` 沿用资产根的目录形状**（`printers/` 而不是示意里的 `machines/`）：
-//!   资产 path 在两个根下**逐字节同形**，资产索引 JSON 的位置字段在交付根下直接可用
-//!   —— 不存在第二份路径映射。改用示意的 `machines/` 等于把 21 条 path 全部重写一遍，
-//!   而那正是 assets.toml 刻意避免的「路径只有一处」被破坏。
+//! **`mkp/presets/` 子层保留**（不收成 `mkp/` 一层）：MKP 预设与 BBS 预设是两类预设
+//! （G-3 的切片器开放维度），子层给「按预设类型」留位置，与客户端 `kind_dir` 的分层一致。
 //!
 //! # 12.5 「文件名字段全部由命名函数算出」的边界
 //!
@@ -73,8 +78,11 @@ use crate::workbench::domain::derive::Book;
 use crate::workbench::domain::BuildState;
 use crate::workbench::presets::{Asset, AssetKind};
 
-/// 交付目录里资产子树的根名。**与资产根 public/assets/ 的形状一致**（见模块头）
-pub const ASSETS_DIR: &str = "assets";
+/// 交付根下的**产品资源区**：与客户端下载区 `mkp/` 同名同形（见模块头）。
+/// 交付集合里每一个文件都落在它下面，相对路径 = catalog 的 `files[].path`
+pub const MKP_DIR: &str = "mkp";
+/// MKP 产物在交付根里的子目录（对应客户端 `kind_dir(mkp_preset)` 那一格）
+pub const MKP_PRESETS_DIR: &str = "mkp/presets";
 /// 目录类 JSON 的子目录
 pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
@@ -113,8 +121,10 @@ struct AssetIndexEntry<'a> {
     kind: AssetKind,
     machine_id: &'a Option<String>,
     name: &'a str,
-    /// 相对交付根 `assets/` 的一段 —— 与资产根下的 path 同形
-    path: &'a str,
+    /// **交付根相对的落点**（`mkp/…`）—— 与 catalog 的 `CatalogFile.path` 同值。
+    /// 曾经这里是"相对 `assets/` 的一段、与资产根同形"，对齐后统一成 catalog 那套
+    /// （算出来的，所以是 owned）
+    path: String,
     slicer: &'a Option<String>,
     profile: &'a Option<String>,
 }
@@ -257,18 +267,24 @@ pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
 }
 
 /// 12.4：资产索引。**只编进交付的那部分**（[`referenced_assets`]），
-/// 位置是交付根 `assets/` 下的一段（与资产根同形）
+/// 位置是**交付根相对的落点**（`mkp/…`，与 catalog 的 `CatalogFile.path` 同值 —— 同一处算法）
 pub fn assets_index_json(assets: &[Asset]) -> serde_json::Value {
     let entries: Vec<AssetIndexEntry<'_>> = assets
         .iter()
-        .map(|a| AssetIndexEntry {
-            id: &a.id,
-            kind: a.kind,
-            machine_id: &a.machine_id,
-            name: &a.name,
-            path: &a.path,
-            slicer: &a.slicer,
-            profile: &a.profile,
+        .filter_map(|a| {
+            // 台账里不登记进交付的那一类（今天的 `image`）不进索引 ——
+            // **索引与 catalog 的登记面必须一致**：索引里有、catalog 里没有，
+            // 就成了"发布了却没人能下载到"的静默坑
+            let path = crate::runtime::catalog::dest_of_asset(a)?;
+            Some(AssetIndexEntry {
+                id: &a.id,
+                kind: a.kind,
+                machine_id: &a.machine_id,
+                name: &a.name,
+                path,
+                slicer: &a.slicer,
+                profile: &a.profile,
+            })
         })
         .collect();
     serde_json::json!({ "assets": entries })
@@ -281,18 +297,19 @@ pub fn assets_index_json(assets: &[Asset]) -> serde_json::Value {
 pub struct DistContent {
     /// 三份目录 JSON（machine_catalog / bundles / assets_index）
     pub content_files: usize,
-    /// 复制进 `assets/` 的资产文件数
+    /// 复制进交付根 `mkp/…` 的资产文件数
     pub assets_copied: usize,
 }
 
-/// 写三份目录 JSON，并把引用可达的资产从资产根复制进交付根。
+/// 写三份目录 JSON，并把引用可达的资产从资产根复制进交付根（`mkp/<kind 目录>/…`）。
 ///
 /// **资产根是参数**（依赖注入）：生产上是 `public/assets/`，测试给临时目录 ——
 /// 「登记了但文件不在」在这里是错误（加载期只查 id 认不认得出，
 /// 文件在不在正是发布要守的最后一道），但缺了它的测试就造不出夹具。
 ///
-/// 复制走「读源 → 原子写目标」：交付目录是只读输出（doc §7 原则 3），
-/// 原子写保证半份文件不会出现在那里。
+/// 落点**由 [`crate::runtime::catalog::dest_of_asset`] 给出**，不在这里拼第二次：
+/// 客户端就是按那个相对位置取文件的。复制走「读源 → 原子写目标」：
+/// 交付目录是只读输出（doc §7 原则 3），原子写保证半份文件不会出现在那里。
 pub fn write_content(
     dist_root: &Path,
     asset_root: &Path,
@@ -309,14 +326,17 @@ pub fn write_content(
     crate::fsx::atomic::atomic_write_json(&content.join("assets_index.json"), &index)?;
 
     let mut copied = 0usize;
-    let out_root = dist_root.join(ASSETS_DIR);
     for a in &referenced {
+        // 不登记的那一类不进交付（与 catalog / 资产索引同一口径）
+        let Some(rel) = crate::runtime::catalog::dest_of_asset(a) else {
+            continue;
+        };
         let src = asset_root.join(&a.path);
         let bytes = std::fs::read(&src).map_err(|e| {
             AppError::not_found(format!("资产 {} 的文件不在：{}", a.id, src.display()))
                 .with_detail(e.to_string())
         })?;
-        crate::fsx::atomic::atomic_write(&out_root.join(&a.path), &bytes)?;
+        crate::fsx::atomic::atomic_write(&dist_root.join(&rel), &bytes)?;
         copied += 1;
     }
 
@@ -328,25 +348,33 @@ pub fn write_content(
 
 /* ---------- 发布（b05 Task 13） ---------- */
 
-/// **交付集合**（13.1）：本次发布应当存在于交付目录的全部文件（相对路径）。
+/// **交付集合**（13.1）：本次发布应当存在于交付目录的全部文件（**相对交付根的路径**）。
 ///
 /// 它是从引用关系**算出来**的：`content/` 三份自产、`manifest.json` 自产、
-/// `assets/<path>` 来自引用可达集、`presets/mkp/<file_name>` 来自「有产物的版本」
-/// （产物名由命名函数算出）。残留在语义上就是「目录里有、这个集合里没有」。
+/// `catalog.json` 自产、资产来自引用可达集（落点 = catalog 的 `files[].path`）、
+/// `mkp/presets/<file_name>` 来自「有产物的版本」（产物名由命名函数算出）。
+/// 残留在语义上就是「目录里有、这个集合里没有」。
+///
+/// **集合里每个路径都是客户端会按 URL 去取的那个相对位置** —— 交付根就是数据源地址
+/// 指向的根，所以这份集合同时是"发布出去的东西"与"客户端能取到的东西"两份清单。
 pub fn deliverable_set(book: &Book<'_>) -> BTreeSet<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
     set.extend(CONTENT_FILES.map(str::to_owned));
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
     for a in referenced_assets(book) {
-        set.insert(format!("{ASSETS_DIR}/{}", a.path));
+        // 落点与客户端同源（[`crate::runtime::catalog::dest_of_asset`]）；
+        // 台账里不登记的那一类不进交付集合
+        if let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) {
+            set.insert(rel);
+        }
     }
     for v in book.versions() {
         // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
         if book.build_state(&v.uid) == BuildState::NoResources {
             continue;
         }
-        set.insert(format!("presets/mkp/{}", v.mkp_file));
+        set.insert(format!("{MKP_PRESETS_DIR}/{}", v.mkp_file));
     }
     set
 }
@@ -458,7 +486,9 @@ pub struct PublishOutcome {
 ///    一个字节都不写，manifest 更不会写（13.4）；
 /// 2. 写三份目录 JSON + 复制引用集资产（Task 12 的 [`write_content`]）；
 /// 3. 读 mkp 产物与已复制的资产字节，**按发布出去的那份算 sha256**（13.6）；
-/// 4. manifest 最后写（13.7，原子写）。
+/// 4. 产出 `catalog.json`（两端共用契约），并**逐条核对它的 `path` 在交付根里真有
+///    那份文件、字节也对得上** —— 发布布局 = 客户端落点，这条错了在这里就红；
+/// 5. manifest 最后写（13.7，原子写）。
 pub fn publish_into(
     dist_root: &Path,
     asset_root: &Path,
@@ -490,7 +520,7 @@ pub fn publish_into(
         }
         // 产物名由命名规则算出（机型 id + 版本 id），不再查上游 manifest
         let name = v.mkp_file.clone();
-        let rel = format!("presets/mkp/{name}");
+        let rel = format!("{MKP_PRESETS_DIR}/{name}");
         let bytes = std::fs::read(dist_root.join(&rel)).map_err(|e| {
             AppError::not_found(format!("{} 的产物还没生成", v.name)).with_detail(format!(
                 "{} 不存在（{}）。先在生成视角里生成，再发布",
@@ -515,7 +545,10 @@ pub fn publish_into(
     }
 
     for a in &referenced {
-        let rel = format!("{ASSETS_DIR}/{}", a.path);
+        // 落点与客户端同源；不登记的类跳过（不进交付集合，也不该进 manifest）
+        let Some(rel) = crate::runtime::catalog::dest_of_asset(a) else {
+            continue;
+        };
         // 刚在上面 write_content 复制过，读不到属于内部错误 —— 但还是带上 id 报
         let bytes = std::fs::read(dist_root.join(&rel)).map_err(|e| {
             AppError::not_found(format!("资产 {} 的文件不在交付目录", a.id))
@@ -542,20 +575,73 @@ pub fn publish_into(
         "version": meta.version,
         "assets": assets,
     });
-    // 清单最后写。`fsx::atomic` 是仓库唯一的写盘出口
-    crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
 
     // **新世界的目录**（两端共用契约）：与客户端 `runtime::Catalog` 同一个类型、
     // 同一个 schema、同一套指纹。工作台发布的是"远端那份"，客户端检查/应用更新
     // 就是对两个 revision 做比较——不再有第二种清单格式。
-    // 宽松构建：没有产物的版本合法（交付集合本来就不含它）。`path` 与客户端
-    // 同语义（落点 `mkp/…`）；远端文件在哪个子目录是源实现的事（dist/presets/mkp）。
+    // 宽松构建：没有产物的版本合法（交付集合本来就不含它）。产物目录给的就是
+    // 交付根里那一格（`mkp/presets/`）——**与客户端落点同形**，不再有一层自己的坐标系。
     let new_catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
-        &dist_root.join("presets/mkp"),
-    )
-    .to_pretty_json()?;
-    crate::fsx::atomic::atomic_write(&dist_root.join(NEW_CATALOG_FILE), new_catalog.as_bytes())?;
+        &dist_root.join(MKP_PRESETS_DIR),
+    );
+
+    // **收尾核对**（2026-10-02）：本次发出去的每一份文件，说明书里都登记了、字节也对得上。
+    //
+    // 这一条把"发布布局 = 客户端落点"从约定变成运行时判据。客户端取文件的地址是
+    // `数据源地址 + catalog 的 path`，所以任何一处错位都是"上传成功、用户点了下载却 404"：
+    // 复制到别的目录去了、少复制一份、复制错了。跑在这里，而不是等用户在界面里撞上。
+    // 顺带把 catalog 的 SHA / 大小也验了：那是下载后校验的期望值，发布时先对一遍真字节。
+    //
+    // 核对的是**本次发出的集合**（[`deliverable_set`]），不是 catalog 的全部条目：
+    // 说明书里登记 15 条资产，但只有**被引用可达的 8 条**进交付（doc §7 原则 1 的可达性
+    // 收窄）—— 客户端也只下载它够得着的那 8 条，所以"登记得比发得多"是设计，不是漏洞。
+    let registered: std::collections::HashMap<&str, &crate::runtime::catalog::CatalogFile> =
+        new_catalog
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f))
+            .collect();
+    for rel in expected.iter() {
+        if rel == MANIFEST_FILE || rel == NEW_CATALOG_FILE || CONTENT_FILES.contains(&rel.as_str())
+        {
+            continue; // 自产的三类不在说明书里（说明书自己就是其中之一）
+        }
+        let Some(f) = registered.get(rel.as_str()) else {
+            return Err(AppError::internal(format!(
+                "交付了 {rel}，但说明书里没有登记它"
+            ))
+            .with_detail(
+                "客户端只认 catalog 的 `files[].path`：登记漏了就等于这份文件发出去也没人能取到"
+                    .to_owned(),
+            ));
+        };
+        let bytes = std::fs::read(dist_root.join(rel)).map_err(|e| {
+            AppError::internal(format!("目录登记了 {}，交付根里却没有这份文件", f.path))
+                .with_detail(format!(
+                    "客户端会按「数据源地址 + {}」去取 —— 发布布局必须与 catalog 的 path 对齐：{e}",
+                    f.path
+                ))
+        })?;
+        if bytes.len() as u64 != f.size || sha256_of(&bytes) != f.sha256 {
+            return Err(AppError::internal(format!(
+                "{} 的字节与目录登记的不一致（大小或 SHA）",
+                f.path
+            ))
+            .with_detail(
+                "目录里的 SHA / 大小是下载后校验的期望值：对不上就是发布出去的字节与说明书说的不是同一份"
+                    .to_owned(),
+            ));
+        }
+    }
+
+    // 清单与目录收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
+    let new_catalog_text = new_catalog.to_pretty_json()?;
+    crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
+    crate::fsx::atomic::atomic_write(
+        &dist_root.join(NEW_CATALOG_FILE),
+        new_catalog_text.as_bytes(),
+    )?;
 
     Ok(PublishOutcome {
         files: assets.len(),
@@ -691,19 +777,25 @@ mod tests {
         let dist = tempfile::tempdir().unwrap();
         let out = write_content(dist.path(), asset_root.path(), &book).expect("落盘");
         assert_eq!(out.content_files, 3);
-        assert_eq!(out.assets_copied, 4);
+        // 可达集 4 条（a1-image + a1-icon + p1s-icon + a1-bbs-04-020），但 **image 类
+        // 不登记进交付**（就是整机图那一档）—— 所以真正落盘的是 3 条：
+        // 与真台账「整机图剥离」同一条规则，夹具这一条是它的反空转锚点
+        assert_eq!(out.assets_copied, 3);
 
         // 三份 JSON 真的在盘上
         for name in ["machine_catalog.json", "bundles.json", "assets_index.json"] {
             assert!(dist.path().join("content").join(name).is_file(), "{name}");
         }
-        // 12.6：资产索引引用的每一条都在交付目录里真实存在
+        // 12.6：资产索引引用的每一条都在交付目录里真实存在 ——
+        // 索引里的 `path` 就是**交付根相对的落点**（`mkp/…`），直接拿它查盘
         let idx = assets_index_json(&referenced_assets(&book));
         for a in idx["assets"].as_array().unwrap() {
-            let p = dist
-                .path()
-                .join(ASSETS_DIR)
-                .join(a["path"].as_str().unwrap());
+            let rel = a["path"].as_str().unwrap();
+            assert!(
+                rel.starts_with(&format!("{MKP_DIR}/")),
+                "索引里的落点要落进 mkp/：{rel}"
+            );
+            let p = dist.path().join(rel);
             assert!(p.is_file(), "索引里的 {} 没有落在交付目录", a["id"]);
         }
 
@@ -775,10 +867,8 @@ mod tests {
         assert_eq!(out.assets_copied, 8, "可达集 8 条，一条不少一条不多");
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
-            let p = dist
-                .path()
-                .join(ASSETS_DIR)
-                .join(a["path"].as_str().unwrap());
+            // 落点是 `mkp/<kind 目录>/…`（交付根相对），直接查盘
+            let p = dist.path().join(a["path"].as_str().unwrap());
             assert!(p.is_file(), "索引里的 {} 没有落在交付目录", a["id"]);
         }
         let index_ids: Vec<&str> = idx["assets"]
@@ -809,26 +899,12 @@ mod tests {
     /// 消费端就少下载一个；多描述一个，客户端就 404 一个
     #[test]
     fn publish_blocks_on_strays_then_manifests_every_delivered_file() {
-        let f = Fixture::load();
+        let mut f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
-        let book = Book::new(&f.presets, &c, &d);
-
-        // 交付集合（13.1）：content 3 + manifest + catalog.json + 夹具可达资产 4 + mkp 产物 3
-        let expected = deliverable_set(&book);
-        assert_eq!(
-            expected.len(),
-            12,
-            "content 3 + manifest 1 + catalog.json 1 + assets 4 + mkp 3"
-        );
-        assert!(expected.contains("presets/mkp/A1-standard.toml"));
-        assert!(expected.contains("assets/bbs/A1/process.json"));
-        assert!(
-            expected.contains(NEW_CATALOG_FILE),
-            "新世界目录在交付集合里"
-        );
-
-        let dist = tempfile::tempdir().unwrap();
+        // 载荷根：夹具默认不带（`Fixture::load` 只写 TOML），这里补上 ——
+        // 生产上 `load_presets` 会挂真实载荷根，挂上之后说明书里才会有资产条目
+        // （没挂 = 资产全部算"载荷缺失"，目录里只剩预设，发布侧的收尾核对会当场发现）
         let asset_root = tempfile::tempdir().unwrap();
         for rel in [
             "printers/a1.webp",
@@ -838,10 +914,34 @@ mod tests {
         ] {
             crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
         }
-        // 夹具三版的 mkp 产物（wb_generate 的等价物：文件在，内容任意）
+        f.presets.set_asset_root(asset_root.path());
+        let book = Book::new(&f.presets, &c, &d);
+
+        // 交付集合（13.1）：content 3 + manifest + catalog.json + 夹具资产 3 + mkp 产物 3。
+        // 夹具可达集有 4 条，`a1-image` 是 image 类 —— **不登记进交付**（整机图那条规则）
+        let expected = deliverable_set(&book);
+        assert_eq!(
+            expected.len(),
+            11,
+            "content 3 + manifest 1 + catalog.json 1 + assets 3（image 类不进）+ mkp 3"
+        );
+        assert!(expected.contains("mkp/presets/A1-standard.toml"));
+        assert!(expected.contains("mkp/bbs/A1/process.json"));
+        assert!(
+            !expected.iter().any(|p| p.contains("printers/")),
+            "整机图（image 类）不进交付集合：{expected:?}"
+        );
+        assert!(
+            expected.contains(NEW_CATALOG_FILE),
+            "新世界目录在交付集合里"
+        );
+
+        let dist = tempfile::tempdir().unwrap();
+        // 夹具三版的 mkp 产物（wb_generate 的等价物：文件在，内容任意）；
+        // 落点就是 `wb_generate` 落的那一格
         for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
             crate::fsx::atomic::atomic_write(
-                &dist.path().join("presets").join("mkp").join(name),
+                &dist.path().join(MKP_PRESETS_DIR).join(name),
                 format!("# preset {name}").as_bytes(),
             )
             .unwrap();
@@ -883,11 +983,11 @@ mod tests {
         );
 
         // **重发成功**：manifest v3、无 bundles 字段（第二份套餐列表删掉了）、
-        // 条目 = mkp 3 + 资产 4
+        // 条目 = mkp 3 + 资产 3（可达 4 条里 image 类不进）
         let out = publish_into(dist.path(), asset_root.path(), &book, &meta).expect("发布");
         assert_eq!(out.presets, 3);
-        assert_eq!(out.assets_copied, 4);
-        assert_eq!(out.files, 7);
+        assert_eq!(out.assets_copied, 3);
+        assert_eq!(out.files, 6);
 
         let manifest_text = std::fs::read_to_string(dist.path().join("manifest.json")).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
@@ -908,9 +1008,17 @@ mod tests {
             crate::runtime::catalog::CATALOG_SCHEMA
         );
         assert_eq!(new_catalog.revision.len(), 16, "指纹 16 位");
-        assert_eq!(new_catalog.files.len(), 3, "夹具三个有产物的版本");
+        assert_eq!(
+            new_catalog.files.len(),
+            6,
+            "夹具：3 个有产物的版本 + 3 条有载荷的资产 —— p1s-bbs-02-010 没被引用、\
+             夹具载荷根里也没造它的文件，两条 image 类不登记"
+        );
         for f in &new_catalog.files {
-            let bytes = std::fs::read(dist.path().join("presets/mkp").join(&f.file_name)).unwrap();
+            // 按**目录登记的 path** 去盘上取（不是按 file_name 拼）——
+            // 客户端就是这么取的：数据源地址 + path。拼错方向在这条上就红
+            let bytes = std::fs::read(dist.path().join(&f.path))
+                .unwrap_or_else(|e| panic!("目录登记了 {}，盘上没有：{e}", f.path));
             use sha2::{Digest, Sha256};
             assert_eq!(
                 crate::runtime::catalog::hex(&Sha256::digest(&bytes)),
@@ -922,14 +1030,32 @@ mod tests {
         // 且交付目录里除 manifest/content 外，没有清单之外的文件
         use sha2::{Digest, Sha256};
         let assets = manifest["assets"].as_array().unwrap();
-        assert_eq!(assets.len(), 7);
+        assert_eq!(assets.len(), 6);
         for a in assets {
-            let p = dist.path().join(a["relativePath"].as_str().unwrap());
+            let rel = a["relativePath"].as_str().unwrap();
+            // 发布布局的锚点：每一份交付文件都落在 `mkp/…` 下（客户端下载区的形状）
+            assert!(
+                rel.starts_with(&format!("{MKP_DIR}/")),
+                "交付文件必须在 mkp/ 下：{rel}"
+            );
+            let p = dist.path().join(rel);
             let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} 不在交付目录", a["id"]));
             let h = format!("{:x}", Sha256::digest(&bytes));
             assert_eq!(a["sha256"], h, "{} 的哈希与真实字节不符", a["id"]);
             assert_eq!(a["size"], bytes.len() as u64);
         }
+        // **发布面 ⊆ 登记面**（第 2 步的核心不变式）：发出去的每一份都能在
+        // catalog 里按同一个相对路径找到 —— 找不到就是"发了也没人能取到"
+        let catalog_paths: std::collections::BTreeSet<&str> =
+            new_catalog.files.iter().map(|f| f.path.as_str()).collect();
+        for a in assets {
+            let rel = a["relativePath"].as_str().unwrap();
+            assert!(
+                catalog_paths.contains(rel),
+                "交付了 {rel}，但说明书里没有登记它（客户端只认 catalog 的 path）"
+            );
+        }
+
         let mut actual: Vec<PathBuf> = Vec::new();
         collect_files(dist.path(), &mut actual);
         let mut actual_rel: Vec<String> = actual
@@ -1012,14 +1138,14 @@ mod tests {
         // build_state != NoResources）：9 版都在，逐份锚定
         for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
             assert!(
-                expected.contains(&format!("presets/mkp/{name}")),
+                expected.contains(&format!("{MKP_PRESETS_DIR}/{name}")),
                 "版本 {name} 必须进交付集合"
             );
         }
         assert_eq!(
             expected
                 .iter()
-                .filter(|p| p.starts_with("presets/mkp/"))
+                .filter(|p| p.starts_with(&format!("{MKP_PRESETS_DIR}/")))
                 .count(),
             9,
             "9 版都有套餐 → 9 份 mkp 产物，少一条说明集合在空转"
@@ -1027,7 +1153,7 @@ mod tests {
         assert_eq!(
             expected
                 .iter()
-                .filter(|p| p.starts_with("assets/bbs/"))
+                .filter(|p| p.starts_with("mkp/bbs/"))
                 .count(),
             5,
             "BBS 进交付的只有套餐引用的 5 条"
@@ -1040,5 +1166,102 @@ mod tests {
         // 空目录零残留（还没发布过是正常状态，不是错误）
         let dist = tempfile::tempdir().unwrap();
         assert!(scan_strays(dist.path(), &expected).is_empty());
+    }
+
+    /// **发布布局 = 客户端落点**（第 2 步的核心判据，真数据版）。
+    ///
+    /// 这条是这一刀要防的那种错：发布侧曾经自己拼一套（`assets/<载荷 path>` +
+    /// `presets/mkp/<名字>`），而客户端认的落点是 `mkp/<kind 目录>/…` ——
+    /// **URL 拼得上、落点对不上**：上传成功、用户点了下载却 404，
+    /// 而且两边各自"看着都对"。所以判据不做字符串锚点，直接对真字节：
+    ///
+    /// - 目录登记的每个相对位置，盘上真有那份文件，且大小 / SHA 一致；
+    /// - 反过来，写盘面与登记面**逐一对应**（没有登记了没写的，也没有写了没登记的）。
+    #[test]
+    fn the_published_layout_lands_where_the_catalog_says() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let asset_root = crate::workbench::paths::assets_root().expect("资产载荷根");
+        let mut real = crate::workbench::presets::Presets::load_from(&root).expect("真 presets");
+        // 两端同一份载荷源：客户端从入库产物的 catalog 里拿的是同一批字节
+        real.set_asset_root(&asset_root);
+
+        let c = Committed {
+            catalog: real
+                .catalog
+                .machines()
+                .iter()
+                .map(|m| crate::workbench::domain::patch::CatalogMachine {
+                    id: m.id.clone(),
+                    display: m.display.clone(),
+                    icon: m.icon.clone(),
+                    default_bundle: m.default_bundle.clone(),
+                    has_dimensions: m.has_dimensions,
+                    version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let d = crate::workbench::domain::patch::Draft::default();
+        let book = Book::new(&real, &c, &d);
+
+        let dist = tempfile::tempdir().unwrap();
+        write_content(dist.path(), &asset_root, &book).expect("资产落盘");
+
+        // 与发布侧同一次构建（产物目录给的是交付根里那一格；这里没跑 wb_generate，
+        // 宽松构建会跳过没有产物的版本 —— 资产的登记面不受影响）
+        let catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
+            &real,
+            &dist.path().join(MKP_PRESETS_DIR),
+        );
+
+        // 交付根里到底写了些什么（三份目录 JSON 不算交付文件）
+        let mut on_disk: Vec<PathBuf> = Vec::new();
+        collect_files(dist.path(), &mut on_disk);
+        let mut written: Vec<String> = on_disk
+            .iter()
+            .map(|p| {
+                p.strip_prefix(dist.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .filter(|rel| !CONTENT_FILES.contains(&rel.as_str()))
+            .collect();
+        written.sort();
+
+        // 反空转：真数据里进交付的是 8 条资产（图标 3 + BBS 5）—— 整机图不在其中
+        assert_eq!(
+            written.len(),
+            8,
+            "写盘面该是 8 条资产（图标 3 + BBS 5）：{written:?}"
+        );
+        assert!(
+            written
+                .iter()
+                .all(|p| p.starts_with(&format!("{MKP_DIR}/"))),
+            "交付文件都该落在 mkp/ 下：{written:?}"
+        );
+
+        // **本条判据的核心**：盘上每一份文件，说明书里都按同一个相对路径登记着，
+        // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
+        let registered: std::collections::HashMap<&str, &crate::runtime::catalog::CatalogFile> =
+            catalog.files.iter().map(|f| (f.path.as_str(), f)).collect();
+        assert_eq!(
+            catalog.files.len(),
+            15,
+            "反空转：说明书登记台账全部 15 条（9 BBS + 3 图标 + 3 模型），交付只发可达的 8 条"
+        );
+        for rel in &written {
+            let f = registered
+                .get(rel.as_str())
+                .unwrap_or_else(|| panic!("交付了 {rel}，说明书里却没有登记"));
+            let bytes = std::fs::read(dist.path().join(rel))
+                .unwrap_or_else(|e| panic!("读不到 {rel}: {e}"));
+            assert_eq!(bytes.len() as u64, f.size, "{rel} 的大小");
+            assert_eq!(sha256_of(&bytes), f.sha256, "{rel} 的 SHA");
+        }
     }
 }
