@@ -211,4 +211,14 @@ export const mockApi: MkpApi = {
       ],
     }
   },
+
+  /** 浏览器里没有下载区也没有源：与 downloadFiles 同一条口径，不假装下载成功 */
+  async downloadCatalogFile() {
+    throw new NotImplementedError('downloadCatalogFile')
+  },
+
+  async getDownloadedFiles() {
+    /* 盘就是底账——浏览器没有盘上的下载区，如实答空 */
+    return []
+  },
 }

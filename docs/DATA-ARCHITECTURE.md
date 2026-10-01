@@ -140,7 +140,7 @@ Documents/SupportEase/
 | # | 现状 | 违反 | 收口方向 |
 | --- | --- | --- | --- |
 | 1 | `client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/` | 铁律 1（开发文件成了运行时数据库） | catalog 替代：铺盘的只有 catalog 一份，不再铺源文件 |
-| 2 | `public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包 | 铁律 1/3（模拟数据进了成品） | 挪出 `public/`，进 dev/test 夹具；判据 1 拦截 |
+| 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
 | 3 | `public/assets/bbs/Process/` 9 份 JSON 裸进安装包 | 半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知 | 发布构建登记进 catalog |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
 | 5 | 下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/` | 命名欠账，职责是同一个（下载原件区） | 以本文 `mkp/` 为准收口；`PRESET-PRODUCT-RULES.md` 录入正文时同步 |

@@ -675,6 +675,18 @@ export interface MkpApi {
    * 零网络 —— 与 getMachines（旧世界解析 TOML 树）并存，收口后由它接班。
    */
   getRuntimeCatalog(): Promise<RuntimeCatalog>
+
+  /**
+   * 新数据世界的下载管道（第一圈骨架）：把 catalog 里登记的一份拉进下载区 mkp/。
+   * SHA 或大小对不上就整个拒绝——坏字节不落盘。第一圈只有开发源，
+   * 真云端来了换管道里的源实现，这个口子不动。
+   */
+  downloadCatalogFile(fileName: string): Promise<void>
+
+  /**
+   * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
+   */
+  getDownloadedFiles(): Promise<string[]>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

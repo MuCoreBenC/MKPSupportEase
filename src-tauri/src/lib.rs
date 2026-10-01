@@ -141,6 +141,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
+        ipc::catalog::get_downloaded_files,
+        ipc::catalog::download_runtime_file,
     ])
 }
 
@@ -164,6 +166,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
+        ipc::catalog::get_downloaded_files,
+        ipc::catalog::download_runtime_file,
         // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、

@@ -1,11 +1,13 @@
-//! 新数据世界的读口：客户端的运行时 catalog。
+//! 新数据世界的读口：客户端的运行时 catalog 与下载管道的命令面。
 //!
-//! 只读**释放进数据根的那一份**（`<appDataDir>/catalog.json`）——铁律 4：
-//! 运行时只认自己的运行时数据，不直接读嵌进二进制的那份。
-//! 盘上没有（setup 释放失败、或文件被删）就就地补一次再读：那是兜底，不是正常路径。
+//! 读走 [`runtime::load_released_catalog`]：只读**释放进数据根的那一份**
+//! （`<appDataDir>/catalog.json`）——铁律 4：运行时只认自己的运行时数据。
 //!
-//! 这条命令**零网络**（铁律 2）。它就是第一圈闭环的最后一环：
-//! 页面 → 这里 → 运行时 catalog → 一条真实数据。
+//! 三条命令**首屏零网络**（铁律 2）；下载那一条也不在启动路径上，
+//! 而且第一圈只有开发源——真云端（第二圈）来了换 [`runtime::delivery::Source`]
+//! 的实现，命令与管道都不动。
+
+use std::path::{Path, PathBuf};
 
 use tauri::AppHandle;
 
@@ -19,16 +21,58 @@ use super::traced;
 pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, AppError> {
     traced("getRuntimeCatalog", |_| {
         let root = internal_root(&app)?;
-        let path = runtime::paths::catalog_file(&root);
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                runtime::release::release_catalog(&root)?;
-                std::fs::read(&path).map_err(|e| {
-                    AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
-                })?
-            }
-        };
-        runtime::Catalog::parse(&bytes)
+        runtime::load_released_catalog(&root)
+    })
+}
+
+/// 第一圈的开发源：入库产物目录（`crates/preset/assets/presets`）。
+///
+/// 编译期钉的是**开发机的绝对路径**，运行时只做一件事：探测"这台机器有没有这个源"。
+/// 开发机上它存在，管道就能端到端走通；用户机器上不存在，命令诚实说还没接。
+/// 这条路径探测随第二圈真源上线一起退场——它不是架构的一部分，是脚手架。
+fn dev_source_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("src-tauri 上面就是仓库根")
+        .join("crates/preset/assets/presets")
+}
+
+/// 把 catalog 里登记的一份文件拉进下载区（`mkp/`）。
+///
+/// 第一圈的口径：一次一份（`downloadFiles` 那个批量口子还留给旧世界）。
+/// 字节对不上 SHA 就整个拒绝——`mkp/` 里不会出现坏文件。
+#[tauri::command]
+pub async fn download_runtime_file(app: AppHandle, file_name: String) -> Result<String, AppError> {
+    traced("downloadRuntimeFile", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let file = catalog
+            .files
+            .iter()
+            .find(|f| f.file_name == file_name)
+            .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+
+        let dir = dev_source_dir();
+        if !dir.is_dir() {
+            return Err(AppError::not_implemented(
+                "下载还没接：真云端在第二圈，这台机器上也没有开发源",
+            ));
+        }
+        let target =
+            runtime::delivery::deliver(&root, file, &runtime::delivery::LocalDirSource::new(&dir))?;
+        Ok(target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file_name.clone()))
+    })
+}
+
+/// 已经下载到下载区的文件名（盘就是底账：文件在且 SHA 对得上才算数）
+#[tauri::command]
+pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<String>, AppError> {
+    traced("getDownloadedFiles", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        Ok(runtime::delivery::downloaded_files(&root, &catalog))
     })
 }

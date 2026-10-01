@@ -53,7 +53,7 @@
 | F4 | `public/assets/bbs/Process/`（9 份 JSON） | BBS 切片配置成品 | ② 内置资源 | **收口**（总纲欠账 #3）：登记，不是裸放 |
 | F5 | `public/bbs/`（PROVENANCE / registry / layout / defaults / icons / _sync.json） | BBS 页元数据（提取器产物，随本仓分发） | ② 内置资源 | **保留**；与 F4 同一批登记 |
 | F6 | `public/models/hero_pile*.webp` | 首页大图 | ② 内置资源（UI 资产） | **保留**；登记 |
-| F7 | `public/cloud/presets.json` | 模拟云端的静态快照（工作台演示管道的另一半） | ① 开发夹具 | **删除出 `public/`**（总纲欠账 #2）。挪进 dev 夹具（如 `src/api/mockServer/` 的 fixtures 或 `workbench/` dev 资源）——`workbench/cloud.ts` 读它的路径跟着改。它是 serve/dev-only 的演示数据，进安装包是事故 |
+| F7 | ~~`public/cloud/presets.json`~~ → `src/workbench/fixtures/cloud-presets.json` | 模拟云端的静态快照（工作台演示管道的另一半） | ① 开发夹具 | **已收口 2026-10-01**：静态 import，只进工作台构建；客户端产物 grep 验证无此字节 |
 | F8 | `workbench/.snapshots/ .draft/` | 工作台运行态 | ① 工具暂存 | **保留**（现状未入库，维持） |
 | F9 | `crates/*/tests/fixtures/` | 判据资产（对照基线等） | ① 判据 | **保留**（`ARCHITECTURE.md` §10.6 已定） |
 | F10 | `public/` 本身这个约定 | vite 原样拷贝进包的目录 | ② 的**源**与②**本体**在这里重合 | **收口**（结构性）：引入发布构建后，"进包的东西"应是构建产物而非 public/ 原样拷贝。过渡期先靠判据 1（安装包扫描）兜底 |
@@ -125,5 +125,11 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   `get_runtime_catalog`（读释放进数据根的那份，零网络）、同步页新增「数据骨架（新）」
   读数区。最小闭环 **页面 → 新 API → 运行时 catalog → 真实数据** 已通；
   下载区 `mkp/` 初始为空有测试钉着（铁律 3）。旧世界一概未动。
+- 2026-10-01：**F7 收口**（假云端快照挪出 `public/`，只进工作台构建）；
+  **④ Delivery 骨架立起来** —— `runtime/delivery.rs`：`Source` 可插拔
+  （第一圈只有 `LocalDirSource`，真云端来了换实现管道不动）、SHA/大小校验在落盘之前、
+  防穿越、原子落盘 `mkp/`、"已下载"不记账本——盘就是底账；命令
+  `download_runtime_file` / `get_downloaded_files`；同步页可点下载看结果。
+  §1 八缺里的"下载 / 校验"两个环节有了骨架，"更新 / 归档"第二圈接。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

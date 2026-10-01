@@ -91,6 +91,10 @@ export default function PagePackage({ onOpenParams }: Props) {
   /* 新数据世界（第一圈）：随包 catalog 读一条真实数据。与旧世界的同步**互不拖累** ——
      一边失败另一边照常显示，catch 成 null 由界面说「读不到」 */
   const [world, setWorld] = useState<RuntimeCatalog | null>(null)
+  /* 下载区现状（盘就是底账）+ 下载按钮的失败说明（第一圈浏览器里没有源，如实亮出来） */
+  const [downloaded, setDownloaded] = useState<string[] | null>(null)
+  const [downloadErr, setDownloadErr] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
   /* 获取 / 使用之后重新读一遍本机状态（localStorage 不是响应式的） */
   const [tick, setTick] = useState(0)
 
@@ -102,16 +106,34 @@ export default function PagePackage({ onOpenParams }: Props) {
       const r = await autoSync()
       const list = await listCloud()
       const w = await api.getRuntimeCatalog().catch(() => null)
+      const d = await api.getDownloadedFiles().catch(() => null)
       if (!alive) return
       setCloud(list)
       setCur(r.local)
       setStatus(r.status)
       setWorld(w)
+      setDownloaded(d)
     })()
     return () => {
       alive = false
     }
   }, [tick])
+
+  /* 走新管道拉一份进下载区。成功后重问盘（不记账本），失败把话说在页面上 */
+  const tryDownload = useCallback(async () => {
+    if (world === null || world.files.length === 0 || downloading) return
+    setDownloading(true)
+    setDownloadErr(null)
+    try {
+      await api.downloadCatalogFile(world.files[0].fileName)
+      setDownloaded(await api.getDownloadedFiles())
+    } catch (e) {
+      const msg = (e as { message?: string }).message
+      setDownloadErr(msg ?? '下载没成，原因没说清')
+    } finally {
+      setDownloading(false)
+    }
+  }, [world, downloading])
 
   const latest = latestOf(cloud)
   const layout = useMemo(() => (cur === null ? [] : layoutOf(cur.package)), [cur])
@@ -206,6 +228,25 @@ export default function PagePackage({ onOpenParams }: Props) {
               第一份真实文件：<b>{world.files[0].fileName}</b>（SHA{' '}
               {world.files[0].sha256.slice(0, 12)}…，{world.files[0].size} 字节）
             </p>
+          )}
+          <div className={s.kv}>
+            <span className={s.key}>已下载</span>
+            <span className={s.val}>
+              {downloaded === null
+                ? '—'
+                : `${downloaded.length} / ${world.files.length} 份（文件在盘上且 SHA 对得上才算数）`}
+            </span>
+          </div>
+          <button
+            type="button"
+            className={s.btn}
+            onClick={tryDownload}
+            disabled={downloading || world.files.length === 0}
+          >
+            {downloading ? '正在下载……' : '下载第一份（走新管道）'}
+          </button>
+          {downloadErr !== null && (
+            <p className={`${s.note} ${s.staleNote}`}>下载没成：{downloadErr}</p>
           )}
         </section>
       )}

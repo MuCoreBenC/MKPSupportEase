@@ -18,10 +18,28 @@
 //! [`catalog::CATALOG_SCHEMA`] 表达，进化靠加字段，不靠改名。
 
 pub mod catalog;
+pub mod delivery;
 pub mod paths;
 pub mod release;
 
 pub use catalog::Catalog;
+
+/// 读**释放进内部根的那份** catalog（铁律 4：运行时只认自己的运行时数据）。
+/// 盘上没有（setup 释放失败、或文件被删）就就地补一次再读：那是兜底，不是正常路径。
+/// 命令层（`ipc::catalog`）与将来的写路径共用这一条入口，读法只有这一份。
+pub fn load_released_catalog(root: &std::path::Path) -> Result<Catalog, crate::error::AppError> {
+    let path = paths::catalog_file(root);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            release::release_catalog(root)?;
+            std::fs::read(&path).map_err(|e| {
+                crate::error::AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
+            })?
+        }
+    };
+    Catalog::parse(&bytes)
+}
 
 /// 随安装包走的那份 catalog —— 发布构建（`cargo run --bin gen-catalog`）的产物。
 ///

@@ -192,7 +192,8 @@ fn revision_of(catalog: &Catalog) -> String {
     hex(&Sha256::digest(&bytes))[..16].to_owned()
 }
 
-fn hex(bytes: &[u8]) -> String {
+/// SHA256 摘要的 hex 字符串。构建器算指纹、delivery 校验落盘字节，共用这一条实现
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
