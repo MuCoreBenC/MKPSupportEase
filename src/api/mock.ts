@@ -1,5 +1,5 @@
 import { NotImplementedError } from './errors'
-import type { ActivePreset, CalibModel, MkpApi, Preset } from './contract'
+import type { ActivePreset, CalibModel, MkpApi, Preset, UserPresetFile } from './contract'
 import {
   allMachines,
   allPresetFiles,
@@ -87,6 +87,40 @@ const calibModels: CalibModel[] = [
 let mockActive: ActivePreset | null = null
 
 /*
+ * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
+ *
+ * 为什么让它在内存里真的能走通：编辑那条链（改 → 临时文件 → 另存）是这一层最需要被看见的
+ * 东西；只抛"未实现"的话，浏览器里连编辑器长什么样、保存之后表格怎么变都验不了。
+ * 真机上它是 `~/Documents/SupportEase/presets-mine/`，盘就是底账。
+ */
+const mockMine: UserPresetFile[] = [
+  {
+    path: 'presets-mine/我的 A1 涂胶.toml',
+    fileName: '我的 A1 涂胶.toml',
+    size: 2048,
+    modifiedUnix: 1780000000,
+    kind: 'mkp_preset',
+  },
+  {
+    path: 'presets-mine/Process_0.2mm.json',
+    fileName: 'Process_0.2mm.json',
+    size: 1024,
+    modifiedUnix: 1780003600,
+    kind: null,
+  },
+]
+/** 正文库：只有**这份会话里另存出来的**才有（真机上每一份都能读）。键 = 相对用户根的路径 */
+const mockMineText = new Map<string, string>()
+/** 编辑中的那一份（真机上是 `run/draft-preset.json`） */
+let mockDraft: { sourceFileName: string; text: string; updatedUnix: number } | null = null
+
+/** 演示正文。真机上它是官方原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
+const MOCK_OFFICIAL_TEXT =
+  '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节\n涂胶宽度 = 1.2\n起始延时 = 0.5\n'
+
+const nowSec = () => Math.floor(Date.now() / 1000)
+
+/*
  * 浏览器里的「下载区」：两份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
  *
  * 为什么不是一份：预设页的交付行有三种状态（未下载 / 已下载 / 需更新），只给"未下载"
@@ -155,34 +189,64 @@ export const mockApi: MkpApi = {
     return localFileIds()
   },
 
-  /*
-   * 用户线：浏览器里没有 `~/Documents/SupportEase/`，给一份**固定演示**（两份）——
-   * 一份认得出类别（`.toml` → MKP 预设）、一份**认不出**（`.json` 可能是 bbs 也可能是 orca）。
-   * 后者是为了让"认不出的也照样列出来（任何类型档下都列）"这条在浏览器里看得见。
-   * 真机上它是扫 `presets-mine/` 得到的，盘就是底账。
-   */
+  /* 用户线：两份**固定演示**（一份 `.toml` 认得出、一份 `.json` 认不出）+ 这份会话另存出来的 */
   async getUserPresetFiles() {
-    return [
-      {
-        path: 'presets-mine/我的 A1 涂胶.toml',
-        fileName: '我的 A1 涂胶.toml',
-        size: 2048,
-        modifiedUnix: 1780000000,
-        kind: 'mkp_preset' as const,
-      },
-      {
-        path: 'presets-mine/Process_0.2mm.json',
-        fileName: 'Process_0.2mm.json',
-        size: 1024,
-        modifiedUnix: 1780003600,
-        kind: null,
-      },
-    ]
+    return mockMine.map((f) => ({ ...f }))
   },
 
-  /** 读用户自己那份要真的盘（浏览器里没有用户目录）：与 readArchivedText 同一条口径，不假装 */
-  async readUserPresetText() {
-    throw new NotImplementedError('readUserPresetText：浏览器里没有用户目录，先用真机跑一次')
+  /** 只有这份会话另存出来的那份有正文可读（真机上每一份都能读） */
+  async readUserPresetText(path) {
+    const text = mockMineText.get(path)
+    if (text === undefined) {
+      throw new NotImplementedError(
+        'readUserPresetText：浏览器里只有这份会话另存出来的那份有正文',
+      )
+    }
+    return text
+  },
+
+  /*
+   * 临时编辑那条链：内存里真的走一遍（改的是临时文件，官方原件一动不动）。
+   * 与真机同一个形状 —— 直道里的分岔只有一条：正文来自演示常量而不是 `mkp/` 里的字节。
+   */
+  async beginPresetEdit(fileName) {
+    if (mockDraft !== null && mockDraft.sourceFileName === fileName) {
+      return { ...mockDraft, reused: true }
+    }
+    mockDraft = { sourceFileName: fileName, text: MOCK_OFFICIAL_TEXT, updatedUnix: nowSec() }
+    return { ...mockDraft, reused: false }
+  },
+
+  async putPresetDraft(text) {
+    if (mockDraft === null) throw new Error('现在没有正在改的那一份')
+    mockDraft = { ...mockDraft, text, updatedUnix: nowSec() }
+  },
+
+  async discardPresetDraft() {
+    mockDraft = null
+  },
+
+  /** 另存成 `presets-mine/<原名>（已修改）.toml` —— 与 Rust 侧 `mine::edited_name` 同一条规则 */
+  async commitPresetDraft() {
+    if (mockDraft === null) throw new Error('现在没有正在改的那一份，没得存')
+    const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
+    const path = `presets-mine/${fileName}`
+    const size = mockDraft.text.length
+    const replaced = mockMine.some((f) => f.path === path)
+    if (replaced) {
+      mockMine[mockMine.findIndex((f) => f.path === path)] = {
+        path,
+        fileName,
+        size,
+        modifiedUnix: nowSec(),
+        kind: 'mkp_preset',
+      }
+    } else {
+      mockMine.push({ path, fileName, size, modifiedUnix: nowSec(), kind: 'mkp_preset' })
+    }
+    mockMineText.set(path, mockDraft.text)
+    mockDraft = null
+    return { path, fileName, size, replaced }
   },
 
   async getAppliedPreset() {

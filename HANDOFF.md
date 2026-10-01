@@ -94,7 +94,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
    2. ✅ **批量下载 / 更新**（`3c12fcf`）
    3. ✅ **官方旧版本归档及必要的可见性**（本次）
    4. ✅ **用户自己的 TOML**（`（已修改）` 那一条线）
-   5. ⬜ 临时编辑 → 保存 → 用户文件（`.tmp` 从来不落进 `mkp/`）
+   5. ✅ **临时编辑 → 保存 → 用户文件**（`.tmp` 从来不落进 `mkp/`）
    6. ⬜ 官方文件异常修改检测（SHA 报警：不许应用 / 不许编辑 / 不许复制，只能重下）
    7. ⬜ 官方更新与用户修改文件同时存在时的 UI / 行为
    - ✅ **第一层：下载状态 + 更新**（2026-10-02）——交付行现在答得出「**这一份在本机是什么样**」：
@@ -133,9 +133,19 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      机型这一层没有来源 → 任何机型档下都列、机上是「—」+「未标机型」。
      老的 `getLocalUserFiles`（恒空）与它的 DTO **一起退役**：那 DTO 上的「用户自己标的适用机型」
      在新世界里没有任何地方能标，留着就是两套口径 + 一个永远空的字段。
-     **还没有写入者**：临时编辑 → 保存是第 5 步，所以今天这个目录里只会有用户手动放的东西
-     （空是合法状态）；用户那份**也还不能被应用**（`run/active-preset.json` 只认官方交付文件）——
-     那是"用户文件算不算一种使用中的配置"这条产品规则的活，登记在案。
+     早先"还没有写入者"——第 5 步补上了（见下）。用户那份**仍不能被应用**
+     （`run/active-preset.json` 只认官方交付文件）—— 那是"用户文件算不算一种使用中的配置"
+     这条产品规则的活，登记在案（第 7 步附近）。
+   - ✅ **第五层：临时编辑 → 保存 → 用户文件**（本次）——官方原件**不可变**这条在代码里成立了：
+     点「改这份」把官方正文复制进**临时文件**（`run/draft-preset.json`），用户改的是它
+     （边改边存，700ms 停手落一次；改到一半关掉也还在）；点「保存为用户文件」才另存成
+     `presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。**官方原件与下载区全程没被碰过** ——
+     判据逐字节盯着（另存前后 `mkp/` 里那份的字节不变、下载区文件数不变）。
+     **临时文件为什么不跟官方原件同目录**（示意里的 `A1MF_260701.tmp.toml`）：`mkp/` 的判据是
+     "盘上每个文件都在目录里登记"（`stale_files` 靠它认陈旧），塞 `.tmp` 进去立刻变成
+     "目录里没有的陈旧文件"，把交付那层的判据全污染了 —— 草稿是**运行状态**，住 `run/`。
+     入口只给"与目录一致"的交付行（没下载就没正文可改；需更新那份内容存疑，先更新再改）；
+     **关掉编辑器 ≠ 放弃**（草稿还在，回头接着改）；真正丢草稿只有「放弃这次编辑」那一颗。
 
 ## 4. 续做入口（从哪接手）
 
@@ -216,6 +226,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
 | `runtime::delivery` 归档 3 条 | `archived_files_is_empty_before_anything_was_archived`（没归档过 = 空表，不是错误）/ `…lists_what_the_update_pushed_aside`（列出来的按它自己的路径能读回**旧版本的原字节**）/ `…reflects_the_single_archive_slot`（连升两版仍只列一份 = 最早那份：**归档 ≠ 每次更新的历史**） |
 | `runtime::mine` 用户线 4 条 | `mine_files_is_empty_when_the_user_has_nothing`（一份都没有 = 空表，不是错误）/ `…lists_what_the_user_put_there`（路径相对用户根、按升序、子目录也算、只出 `presets-mine/`）/ `kind_is_only_claimed_when_the_extension_says_so`（`.json` **照实认不出**）/ `only_the_mine_subdir_is_readable`（读正文只认那一格：`exports/`、`..`、目录本身都拒） |
+| `runtime::mine` 另存 2 条 | `commit_writes_the_edited_copy_and_leaves_the_official_alone`（**核心不变式**：另存只写用户根、官方原件字节不变、下载区文件数不变、再存是覆盖它自己）/ `the_committed_copy_shows_up_in_mine_files`（另存出来的那份接着就能被列出来、读得回来） |
+| `runtime::state` 草稿 4 条 | `draft_roundtrips_and_clears`（存/读/丢，丢是幂等）/ `absent_draft_is_none_not_error` / `corrupted_draft_is_an_error`（坏档不静默）/ `draft_and_active_are_separate_files`（**改一份 ≠ 在用它**：两个状态文件互不干扰） |
 | `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的两态与动作（已下载·灰字、需更新·按钮）** / **批量那一层（批次行只含未下载+需更新、逐份结局各占一行且不许伪装成功）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
@@ -227,6 +239,12 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
 - **资产去哪一档看一把尺子**：产品数据资源（用户下载 / 更新 / 管理）→ `public/assets/` + `presets/assets.toml` + catalog；界面展示素材（程序自己看一眼）→ `src/app/assets/` 或 `public/`，不进台账。台账里今天 15 条 = 9 BBS + 3 图标 + 3 模型。
+- **临时编辑那条链的落点**：编辑中的正文住 `<appDataDir>/run/draft-preset.json`
+  （**不是** `mkp/`：那是下载区，判据是"每个文件都在目录里登记"，塞 `.tmp` 进去就污染交付那层）。
+  保存 = 另存成 `<Documents>/SupportEase/presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
+  四条命令：`begin_preset_edit` / `put_preset_draft` / `discard_preset_draft` / `commit_preset_draft`。
+  界面：本地表与云端表的交付行（**与目录一致**的那种）展开详情里有「改这份」→ 编辑器抽屉；
+  关掉抽屉**不丢**（草稿在盘上，回头点「改这份」接着改），丢草稿只有 footer 那颗「放弃这次编辑」。
 - **用户自己那一份住哪**：`~/Documents/SupportEase/presets-mine/`（**用户根**，与内部根分开 ——
   程序管的数据不放 Documents，因为 iCloud 会把文件驱逐成占位 stub，见 `fsx::paths`）。
   两条只读命令：`get_user_preset_files`（列）/ `read_user_preset_text`（读正文，**只认那一格**）。

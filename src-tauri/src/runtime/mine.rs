@@ -102,6 +102,59 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
     out
 }
 
+/// 用户另存出来的那一份叫什么：`<原名（不含后缀）>（已修改）<后缀>`。
+///
+/// 例如 `A1-fast.toml` → `A1-fast（已修改）.toml`。用全角括号：这是**给人看的名字**，
+/// 用户要在 Finder 里一眼认出"这是我改过的那一份"；半角括号在文件名里太像代码。
+///
+/// 再存一次**还是这个名字**（覆盖它自己）—— 用户改的就是"我那份"，不该越存越多。
+pub fn edited_name(source_file_name: &str) -> String {
+    let path = Path::new(source_file_name);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| source_file_name.to_owned());
+    match path.extension() {
+        Some(ext) => format!("{stem}（已修改）.{}", ext.to_string_lossy()),
+        None => format!("{stem}（已修改）"),
+    }
+}
+
+/// 另存完成的结果
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Committed {
+    /// 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`）
+    pub path: String,
+    pub file_name: String,
+    pub size: u64,
+    /// 盖掉了一份同名的用户文件（第二次保存就是这种）
+    pub replaced: bool,
+}
+
+/// **临时编辑的收尾：把草稿另存成用户自己的文件**（`presets-mine/<原名>（已修改）<后缀>`）。
+///
+/// 这一刀全层的核心不变式就在这个函数里：它**只写用户根**——
+/// 官方原件（`mkp/`）与下载区**一概不碰**（只有云端换版本能替换官方原件）。
+/// 再存一次就是**覆盖它自己**：用户改的是"我那份"，不该越存越多。
+pub fn commit_draft(
+    user_root: &Path,
+    source_file_name: &str,
+    text: &str,
+) -> Result<Committed, AppError> {
+    let file_name = edited_name(source_file_name);
+    let rel = format!("{MINE_DIR}/{file_name}");
+    /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
+    let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
+    let replaced = target.exists();
+    crate::fsx::atomic::atomic_write(&target, text.as_bytes())?;
+    Ok(Committed {
+        path: rel,
+        file_name,
+        size: text.len() as u64,
+        replaced,
+    })
+}
+
 /// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
@@ -169,6 +222,85 @@ mod tests {
         );
         assert_eq!(kind_of("说明.md"), None);
         assert_eq!(kind_of("没有扩展名"), None);
+    }
+
+    /// 另存出来的名字：原名 + `（已修改）`，后缀留在最后
+    #[test]
+    fn edited_name_keeps_the_stem_and_marks_it() {
+        assert_eq!(edited_name("A1-fast.toml"), "A1-fast（已修改）.toml");
+        assert_eq!(
+            edited_name("我的 A1 涂胶.toml"),
+            "我的 A1 涂胶（已修改）.toml"
+        );
+        assert_eq!(edited_name("没有后缀"), "没有后缀（已修改）");
+        assert_eq!(
+            edited_name("a.b.toml"),
+            "a.b（已修改）.toml",
+            "只剥最后那一段后缀"
+        );
+    }
+
+    /// **这一层的核心不变式**：另存只写用户根 —— 官方原件（`mkp/`）字节不变、
+    /// 下载区里不会多出文件（临时文件不住那儿）。再存一次是覆盖它自己。
+    #[test]
+    fn commit_writes_the_edited_copy_and_leaves_the_official_alone() {
+        let user = tempfile::tempdir().unwrap();
+        let official = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(official.path().join("mkp/presets")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &official.path().join("mkp/presets/A1-fast.toml"),
+            "涂胶宽度 = 1.0".as_bytes(),
+        )
+        .unwrap();
+        let before = std::fs::read(official.path().join("mkp/presets/A1-fast.toml")).unwrap();
+        let files_before = std::fs::read_dir(official.path().join("mkp/presets"))
+            .unwrap()
+            .count();
+
+        let done = commit_draft(user.path(), "A1-fast.toml", "涂胶宽度 = 1.4").unwrap();
+        assert_eq!(done.path, "presets-mine/A1-fast（已修改）.toml");
+        assert!(!done.replaced, "第一次另存没有盖掉谁");
+        assert_eq!(
+            std::fs::read(user.path().join(&done.path)).unwrap(),
+            "涂胶宽度 = 1.4".as_bytes(),
+            "用户那份里是改过的正文"
+        );
+
+        assert_eq!(
+            std::fs::read(official.path().join("mkp/presets/A1-fast.toml")).unwrap(),
+            before,
+            "官方原件一个字节都没动"
+        );
+        assert_eq!(
+            std::fs::read_dir(official.path().join("mkp/presets"))
+                .unwrap()
+                .count(),
+            files_before,
+            "下载区里不会多出东西：临时文件不住 mkp/"
+        );
+
+        /* 再存一次：还是同一个名字，盖掉它自己 */
+        let again = commit_draft(user.path(), "A1-fast.toml", "涂胶宽度 = 1.5").unwrap();
+        assert!(again.replaced, "第二次是覆盖");
+        assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+        assert_eq!(
+            std::fs::read(user.path().join(&again.path)).unwrap(),
+            "涂胶宽度 = 1.5".as_bytes()
+        );
+    }
+
+    /// 另存出来的那份，接着就能被用户线列出来、也读得回来（一条链的收尾连上了）
+    #[test]
+    fn the_committed_copy_shows_up_in_mine_files() {
+        let user = tempfile::tempdir().unwrap();
+        let done = commit_draft(user.path(), "我的 A1 涂胶.toml", "涂胶宽度 = 1.3").unwrap();
+
+        let listed = mine_files(user.path());
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, done.path);
+        assert_eq!(listed[0].kind, Some("mkp_preset"), ".toml 认得出");
+        assert_eq!(listed[0].size, "涂胶宽度 = 1.3".len() as u64);
+        assert!(check_mine_prefix(&done.path).is_ok(), "落点在那一格里");
     }
 
     /// 读正文只认用户自己那一格：别的地方（`exports/`、`../`）一概不碰

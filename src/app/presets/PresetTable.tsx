@@ -86,6 +86,8 @@ import {
   MINE_BODY_WHY,
   MINE_DRAWER,
   DOWNLOAD_WHY,
+  EDIT_TEXT,
+  EDIT_WHY,
   RELEASE_DOWNLOAD_WHY,
   RELEASE_SIZE_WHY,
   RELEASE_STATE_TEXT,
@@ -144,8 +146,10 @@ interface Props {
   archiveCountOf: (fileName: string) => number
   /** 打开「旧版本」抽屉（归档的可视化在页面层的抽屉里，表这边只给入口） */
   onOpenArchive: (row: PresetTableRow) => void
-  /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**，写它要等下一层） */
+  /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**） */
   onOpenMine: (row: PresetTableRow) => void
+  /** 开始改这一份（临时编辑那条链）—— 只有"与目录一致"的交付行给这个入口 */
+  onEdit: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
@@ -168,6 +172,7 @@ export default function PresetTable({
   archiveCountOf,
   onOpenArchive,
   onOpenMine,
+  onEdit,
   onLive,
   onDownload,
 }: Props) {
@@ -519,8 +524,30 @@ export default function PresetTable({
                         )}
 
                         {/*
+                         * 临时编辑的入口：**只有"与目录一致"的交付行**给 ——
+                         * 没下载（missing）就没有正文可改；需更新（stale）那一份的内容本身存疑，
+                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）。
+                         */}
+                        {row.origin === 'release' && row.releaseState === 'ok' && (
+                          <>
+                            <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
+                            <dd className={s.factVal}>
+                              <button
+                                type="button"
+                                className={s.factLink}
+                                title={EDIT_WHY}
+                                onClick={() => onEdit(row)}
+                              >
+                                {EDIT_TEXT.open}
+                              </button>
+                            </dd>
+                          </>
+                        )}
+
+                        {/*
                          * 用户线那一份：**只读**的正文入口。
-                         * 改它 / 另存 / 保存都是下一层的事 —— 这里连按钮都不给（不给必报错的按钮）。
+                         * 改它 / 另存都要先经过"改这份"那条链（点它会另存出一份自己的）——
+                         * 这里只给看，不给就地改官方那一份。
                          */}
                         {row.origin === 'mine' && (
                           <>

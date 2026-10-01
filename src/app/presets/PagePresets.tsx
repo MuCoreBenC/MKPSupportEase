@@ -80,6 +80,9 @@
  *                            没成的各占提示条一行。范围 = 机型 + 类型，不受搜索词影响；已下载的不进来）
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`       真（两个读合起来才够三态：
  *                            未下载 / 已下载 / 需更新 —— 见 `ReleaseFileState`）
+ *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
+ *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
+ *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
  *   **复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
@@ -93,7 +96,7 @@
  * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, NotImplementedError } from '../../api'
 import type { ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
@@ -111,6 +114,7 @@ import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
   ARCHIVE_WHY,
+  EDIT_TEXT,
   MINE_DRAWER,
   DOWNLOAD_WHY,
   MISSING_METHOD,
@@ -211,6 +215,22 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     error: string | null
     loading: boolean
   } | null>(null)
+
+  /*
+   * **编辑器**（临时编辑那条链）。`null` = 没在改。
+   *
+   * 正文是**临时文件里那份**（后端给的），不是官方原件的 —— 改谁也不动 `mkp/`。
+   * `draftError` 是"草稿自动落盘失败了"那一行：它安静地待在抽屉里，不占提示条
+   * （用户可能还在打字，提示条会闪）。
+   */
+  const [editing, setEditing] = useState<{
+    sourceFileName: string
+    text: string
+    reused: boolean
+    draftError: string | null
+  } | null>(null)
+  /** 上一次真正落到临时文件里的正文。用它判断"值不值得再存一次" */
+  const savedTextRef = useRef<string>('')
 
   /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
   const [moreOpen, setMoreOpen] = useState(false)
@@ -438,6 +458,8 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    */
   const openArchive = (row: PresetTableRow) => {
     menu.close()
+    /* 两个抽屉互斥（草稿已经在盘上，"接着改"能回来，所以关掉编辑器不丢东西） */
+    setEditing(null)
     setBody(null)
     setViewer({
       kind: 'archive',
@@ -449,13 +471,97 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   /**
    * 打开用户线那一份的正文（「看正文」）。就一份文件，打开直接读 —— 没有列表这一层。
    *
-   * **这一层只能看**：改它 / 另存 / 保存是下一层（临时编辑 → 保存），所以抽屉里
-   * 一个写入按钮都没有（连"另存为"都不给）。
+   * **这一层只能看**：改它要先经过「改这份」那条链（那会另存出一份自己的）。
    */
   const openMine = (row: PresetTableRow) => {
     menu.close()
+    setEditing(null)
     setViewer({ kind: 'mine', fileName: row.fileName, path: row.path })
     readBody(row.path, 'user')
+  }
+
+  /**
+   * **开始改这一份**：让后端把官方正文复制进临时文件，然后把编辑器打开。
+   *
+   * 前置条件全在后端拦（只改 MKP 预设 / 盘上得真有那一份）—— 这里不重复判断。
+   * 同来源的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
+   */
+  const openEdit = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    data.beginEdit(row.fileName).then(
+      (draft) => {
+        savedTextRef.current = draft.text
+        setEditing({
+          sourceFileName: draft.sourceFileName,
+          text: draft.text,
+          reused: draft.reused,
+          draftError: null,
+        })
+      },
+      (e: unknown) => {
+        setNote({
+          text: `改不了 ${row.fileName}：${e instanceof Error ? e.message : String(e)}`,
+          bad: true,
+        })
+      },
+    )
+  }
+
+  /*
+   * 边改边存：停下 700ms 才落一次（在打字的中间态里反复写盘没有意义）。
+   * 落盘的是**临时文件** —— 官方原件一动不动，这也是"改到一半关掉还在"的来源。
+   * 失败写进抽屉里那一行（不弹提示条：用户还在打字，别拿一条会闪的条子打断他）。
+   */
+  useEffect(() => {
+    if (editing === null || editing.text === savedTextRef.current) return
+    const text = editing.text
+    const timer = window.setTimeout(() => {
+      data.putDraft(text).then(
+        () => {
+          savedTextRef.current = text
+        },
+        (e: unknown) =>
+          setEditing((cur) =>
+            cur === null
+              ? cur
+              : { ...cur, draftError: e instanceof Error ? e.message : String(e) },
+          ),
+      )
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [data, editing])
+
+  /** 放弃这次编辑：丢草稿（官方原件与下载区全程没被碰过，所以它天生安全） */
+  const discardEdit = () => {
+    data.discardDraft().then(
+      () => {
+        setEditing(null)
+        setNote({ text: '已放弃这次编辑 —— 官方原件从头到尾没有被改过', bad: false })
+      },
+      (e: unknown) =>
+        setNote({ text: `放弃不了：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+    )
+  }
+
+  /** 保存为用户文件：另存进 `presets-mine/`，然后关掉编辑器（本地表跟着多出那一份） */
+  const commitEdit = () => {
+    data.commitDraft().then(
+      (done) => {
+        setEditing(null)
+        setNote({
+          text: done.replaced
+            ? EDIT_TEXT.savedAgain(done.fileName)
+            : EDIT_TEXT.saved(done.fileName, done.path),
+          bad: false,
+        })
+      },
+      (e: unknown) =>
+        setNote({
+          text: `没存上：${e instanceof Error ? e.message : String(e)}`,
+          bad: true,
+        }),
+    )
   }
 
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
@@ -576,8 +682,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     const official = row.origin === 'official'
 
+    /* 临时编辑的入口：只有"与目录一致"的交付行有（它才有正文可改，且内容不存疑） */
+    const canEdit = row.origin === 'release' && row.releaseState === 'ok'
+
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+      ...(canEdit
+        ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
+        : []),
       { id: 'copy', label: '复制', onSelect: () => sayNoContract(MISSING_METHOD.copy, row) },
       {
         id: 'rename',
@@ -952,6 +1064,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenMine={openMine}
+                onEdit={openEdit}
                 onLive={runLive}
                 onDownload={download}
               />
@@ -1041,6 +1154,52 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 <p className={s.archNote}>
                   {viewer.kind === 'mine' ? MINE_DRAWER.note : ARCHIVE_WHY}
                 </p>
+              </div>
+            )}
+          </Drawer>
+
+          {/*
+           * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
+           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存为用户文件」。
+           *
+           * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
+           * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
+           */}
+          <Drawer
+            open={editing !== null}
+            title={EDIT_TEXT.title}
+            subtitle={editing === null ? undefined : editing.sourceFileName}
+            footer={
+              <>
+                <button type="button" className={s.editGhost} onClick={discardEdit}>
+                  {EDIT_TEXT.discard}
+                </button>
+                <button type="button" className={s.editPrimary} onClick={commitEdit}>
+                  {EDIT_TEXT.commit}
+                </button>
+              </>
+            }
+            onClose={() => setEditing(null)}
+          >
+            {editing !== null && (
+              <div className={s.edit}>
+                <p className={s.editNote}>{EDIT_TEXT.note}</p>
+                {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
+                <textarea
+                  className={s.editArea}
+                  value={editing.text}
+                  spellCheck={false}
+                  aria-label="预设正文"
+                  onChange={(e) =>
+                    setEditing((cur) => (cur === null ? cur : { ...cur, text: e.target.value }))
+                  }
+                />
+                {editing.draftError !== null && (
+                  <p className={s.editErr}>
+                    {EDIT_TEXT.draftFailed}
+                    {editing.draftError}
+                  </p>
+                )}
               </div>
             )}
           </Drawer>

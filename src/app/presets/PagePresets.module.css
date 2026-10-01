@@ -556,6 +556,100 @@
   color: var(--text-3);
 }
 
+/* ---------- 编辑器抽屉（临时编辑那条链） ---------- */
+
+.edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 正文区吃掉抽屉剩余高度（抽屉 body 是带滚动的容器，这里自己管） */
+  height: 100%;
+  min-height: 0;
+}
+
+.editNote {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* 「接着上次改」那一行：它不是警告，是一句提醒 */
+.editReused {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.editArea {
+  flex: 1;
+  min-height: 240px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text);
+  resize: none;
+}
+
+.editArea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.editErr {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: #fff3e2;
+  color: #a86416;
+  font-size: var(--fs-label);
+}
+
+/* footer 里那两颗：放弃是次要动作，保存是这一屏的正事 */
+.editGhost,
+.editPrimary {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.editGhost {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+.editGhost:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.editPrimary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.editPrimary:hover {
+  filter: brightness(1.05);
+}
+
+.editGhost:focus-visible,
+.editPrimary:focus-visible {
+  outline: none;
+}
+
 /* ---------- 批量那一行（只在云端表、且这一批非空时出现） ---------- */
 
 .batch {

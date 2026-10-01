@@ -332,6 +332,36 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
 export const RELEASE_UPDATE_WHY =
   '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
 
+/**
+ * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
+ *
+ * 这一层只做"改 → 另存成用户那一份"这条链本身：官方原件全程不动（只有云端换版本能替换它），
+ * 用户改的是临时文件，保存 = 另存成 `presets-mine/<原名>（已修改）<后缀>`。
+ * **不做**：改完之后"生效 / 应用"（那是"用户那份也能不能用"那条产品规则的活）、
+ * 与官方更新的并存处理（第 7 步）。
+ */
+export const EDIT_TEXT = {
+  cell: '修改',
+  open: '改这份',
+  title: '改这一份',
+  note:
+    '改的是**临时文件**：官方原件一动不动（只有云端换版本能替换它），改到一半关掉也还在。' +
+    '点「保存为用户文件」才另存成你自己那一份 —— 那份从此与云端脱钩：' +
+    '官方怎么更新都不动它，改它也永远不回写官方原件。',
+  reused: '上次改到一半的那一份，接着改',
+  discard: '放弃这次编辑',
+  commit: '保存为用户文件',
+  /** 草稿自动落盘失败时那一行（安静地写在抽屉里，不用提示条） */
+  draftFailed: '草稿没存上：',
+  /** 存到哪去了那句（`replaced` 时另说） */
+  saved: (name: string, path: string) => `已保存成你自己那一份：${name}（${path}）`,
+  savedAgain: (name: string) => `已保存：${name} —— 盖掉了上一次那份（你改的一直是同一份）`,
+} as const
+
+/** 「改这份」那颗按钮的说明 */
+export const EDIT_WHY =
+  '修改：把这一份的正文复制进临时文件再改 —— 官方原件不会被改动（只有云端换版本能替换它）'
+
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`

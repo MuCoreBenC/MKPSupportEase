@@ -460,6 +460,83 @@ if (bodyBtnCount === 0) {
   await page.waitForTimeout(250)
 }
 
+/* ---------- 5e. 临时编辑：改 → 另存成用户那一份 ---------- */
+/*
+ * 守三件事：
+ *   ① 只有"与目录一致"的交付行有「改这份」（没下载就没正文可改；需更新的那份内容存疑）；
+ *   ② 编辑器里是**临时文件里那份**正文，不是就地改官方；
+ *   ③ 保存之后本地表多出 `（已修改）` 那一份 —— 而**原来那一份还在**（官方原件没被改掉）。
+ *
+ * 真机那条更硬的判据在 Rust 侧（`runtime::mine`）：另存只写用户根、
+ * 官方原件字节不变、下载区里不会多出文件（临时文件不住 `mkp/`）。
+ */
+const stdRow = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'A1-standard.toml' })
+  .first()
+await stdRow.click()
+await page.waitForTimeout(300)
+
+const editBtn = page.getByRole('button', { name: '改这份' })
+const editBtnCount = await editBtn.count()
+console.log(`\n[编辑] 「改这份」按钮 ${editBtnCount} 个`)
+if (editBtnCount === 0) {
+  problems.push('与目录一致的交付行展开后没有「改这份」')
+} else {
+  await editBtn.first().click()
+  await page.waitForTimeout(500)
+  const editor = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const area = dlg?.querySelector('textarea')
+    return {
+      open: area !== null && area !== undefined,
+      text: area?.value ?? '',
+      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map((b) =>
+        (b.innerText || b.getAttribute('aria-label') || '').trim(),
+      ),
+    }
+  })
+  console.log(
+    `[编辑] 抽屉${editor.open ? '开着' : '没开'}，正文 ${editor.text.length} 字节：${editor.text.replace(/\n/g, ' / ').slice(0, 70)}`,
+  )
+  if (!editor.open) problems.push('点「改这份」没有打开编辑器（抽屉里该有一个 textarea）')
+  if (editor.text.length === 0) problems.push('编辑器里没有正文（该是临时文件里那份）')
+  if (!editor.buttons.includes('保存为用户文件')) problems.push('编辑器里没有「保存为用户文件」')
+  if (!editor.buttons.includes('放弃这次编辑')) problems.push('编辑器里没有「放弃这次编辑」')
+
+  /* 改一行：边改边存（debounce 700ms），抽屉里不该出现"草稿没存上" */
+  await page.locator('[role="dialog"] textarea').fill('# 改过的正文\n涂胶宽度 = 1.4\n')
+  await page.waitForTimeout(1300)
+  const draftErr = await page.evaluate(
+    () => document.querySelector('[role="dialog"]')?.innerText ?? '',
+  )
+  if (draftErr.includes('草稿没存上')) problems.push('草稿没存上（浏览器里草稿也在内存里，不该失败）')
+
+  await page.getByRole('button', { name: '保存为用户文件' }).click()
+  await page.waitForTimeout(700)
+  const savedNote = await page.evaluate(() =>
+    (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  )
+  console.log(`[编辑] 保存之后提示条：${savedNote}`)
+  if (!savedNote.includes('已保存')) {
+    problems.push(`保存之后提示条该说「已保存…」，实测「${savedNote}」`)
+  }
+  if (!savedNote.includes('presets-mine/')) {
+    problems.push('保存之后要说清落在哪（presets-mine/…）')
+  }
+
+  const afterSave = await actions()
+  console.log(`[编辑] 保存后本地表：${afterSave.map((r) => r.name).join(' || ')}`)
+  if (!afterSave.some((r) => r.name.includes('A1-standard（已修改）.toml'))) {
+    problems.push('保存之后本地表里该多出「（已修改）」那一份')
+  }
+  if (!afterSave.some((r) => r.name.includes('A1-standard.toml'))) {
+    problems.push('保存不该动官方原件：本地表里原来那一份还得在')
+  }
+  await page.screenshot({ path: `${shotDir}/presets-edit.png` })
+}
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。

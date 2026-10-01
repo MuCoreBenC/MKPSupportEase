@@ -118,9 +118,14 @@ export const bridgeApi: MkpApi = {
   getVersionFiles: (machineId, versionId) =>
     call('getVersionFiles', 'get_version_files', { machineId, versionId }),
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
-  /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine）。只读，没有写命令 */
+  /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine） */
   getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
   readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
+  /* 临时编辑那条链：改的是临时文件，官方原件全程不动（另存才落用户根） */
+  beginPresetEdit: (fileName) => call('beginPresetEdit', 'begin_preset_edit', { fileName }),
+  putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
+  discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
+  commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

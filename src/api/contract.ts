@@ -383,6 +383,42 @@ export interface UserPresetFile {
 }
 
 /**
+ * **编辑中的那一份**（临时文件）。全局唯一 —— 同一时刻只改一份。
+ *
+ * 它是"临时编辑"这条链的第一步（总纲 §1③）：
+ *
+ * ```text
+ * mkp/presets/A1-fast.toml     官方原件 —— 编辑全程一动不动
+ *        │ 点「改这份」：正文复制出来
+ *        ▼
+ * run/draft-preset.json        临时文件（用户改的是它；改到一半关掉也还在）
+ *        │ 点「保存为用户文件」
+ *        ▼
+ * presets-mine/A1-fast（已修改）.toml
+ * ```
+ */
+export interface PresetDraft {
+  /** 从哪一份改出来的（下载区里的文件名） */
+  sourceFileName: string
+  /** 正文：用户改到哪算哪 */
+  text: string
+  /** 最后改动时刻（UTC epoch 秒） */
+  updatedUnix: number
+  /** 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的 */
+  reused: boolean
+}
+
+/** 另存完成的结果：用户文件落在哪、多大、是不是盖掉了上一次那份 */
+export interface CommittedDraft {
+  /** 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`） */
+  path: string
+  fileName: string
+  size: number
+  /** 盖掉了一份同名的用户文件（第二次保存就是这种） */
+  replaced: boolean
+}
+
+/**
  * **正在生效的那一套预设。全局唯一。**
  *
  * 这是 A34 这一轮纠正的一个模型错误。原来前端自己推：「当前机型 + 当前版本那个默认交付的
@@ -782,6 +818,28 @@ export interface MkpApi {
    * 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来。
    */
   readUserPresetText(path: string): Promise<string>
+
+  /**
+   * **开始改一份官方交付预设**：把正文复制进临时文件，**官方原件一动不动**。
+   *
+   * 两条前置（都在后端拦）：只改 MKP 预设（TOML）；盘上得真有那一份（没下载就先下载）。
+   * 已经有同一来源的草稿 → **接着改**（`reused: true`），不覆盖用户的改动。
+   */
+  beginPresetEdit(fileName: string): Promise<PresetDraft>
+
+  /** 把改动写进临时文件（界面边改边存）。**只动正文** —— 来源与那一刻的指纹不动 */
+  putPresetDraft(text: string): Promise<void>
+
+  /** 放弃这次编辑：丢掉临时文件（幂等；官方原件与下载区全程没被碰过，所以它天生安全） */
+  discardPresetDraft(): Promise<void>
+
+  /**
+   * **另存成用户自己的文件**：`presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
+   *
+   * 不碰官方原件、不碰下载区、**不碰使用中指针**（生效是另一条线）。
+   * 再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）。
+   */
+  commitPresetDraft(): Promise<CommittedDraft>
 
   /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
   getAppliedPreset(): Promise<AppliedPreset | null>

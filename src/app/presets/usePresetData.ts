@@ -59,9 +59,11 @@ import { api } from '../../api'
 import type {
   ActivePreset,
   ArchivedFile,
+  CommittedDraft,
   DownloadOutcome,
   DownloadTick,
   Machine,
+  PresetDraft,
 } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
@@ -187,6 +189,18 @@ export interface PresetData {
     fileNames: string[],
     onTick?: (tick: DownloadTick) => void,
   ) => Promise<DownloadOutcome[]>
+
+  /**
+   * **开始改一份**官方交付预设：把正文复制进临时文件（官方原件一动不动）。
+   * `reused` = 接着上次那半截改。
+   */
+  beginEdit: (fileName: string) => Promise<PresetDraft>
+  /** 把改动写进临时文件（界面边改边存 —— 改到一半关掉也还在） */
+  putDraft: (text: string) => Promise<void>
+  /** 放弃这次编辑（丢草稿；官方原件与下载区全程没被碰过，所以它天生安全） */
+  discardDraft: () => Promise<void>
+  /** 另存成用户自己的文件，然后**重读用户线**（本地表跟着多出那一份） */
+  commitDraft: () => Promise<CommittedDraft>
 }
 
   /**
@@ -405,6 +419,24 @@ export function usePresetData(): PresetData {
   )
 
   /*
+   * 临时编辑那条链：起手（复制官方正文进临时文件）、边改边存、放弃、另存成用户文件。
+   *
+   * 全是薄薄一层转发 —— 判定不在前端（哪一份能改、草稿在哪、存成什么名字，都由后端答）。
+   * 只有**另存之后**多做一件事：重读用户线（本地表里那一半「我的文件」要跟着变）。
+   */
+  const beginEdit = useCallback((fileName: string) => api.beginPresetEdit(fileName), [])
+
+  const putDraft = useCallback((text: string) => api.putPresetDraft(text), [])
+
+  const discardDraft = useCallback(() => api.discardPresetDraft(), [])
+
+  const commitDraft = useCallback(async () => {
+    const done = await api.commitPresetDraft()
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
+
+  /*
    * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
    */
@@ -440,6 +472,10 @@ export function usePresetData(): PresetData {
     archived,
     downloadRelease,
     downloadReleaseBatch,
+    beginEdit,
+    putDraft,
+    discardDraft,
+    commitDraft,
   }
 }
 
