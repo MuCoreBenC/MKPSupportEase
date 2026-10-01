@@ -199,10 +199,18 @@ fn write_presets(root: &Path) {
         if *id == "A1" {
             s.push_str("externalAliases = ['A1C']\n");
         }
-        // 这一层只看「有没有 `[dimensions]`」（`presets/catalog.rs` 没给尺寸建细模型），
-        // 所以放一格就够；A2L 刻意不放
+        // 夹具写的 `[dimensions]` 要与真数据**同形状**（`presets/machines/A1.toml`）：
+        // 解析层现在逐格读它（`load_dimensions`），少一格就整台机型读不出来。
+        // A2L 刻意不放 —— 那是「占位机型整台跳过」的判据要用的。
         if has_dimensions(id) {
-            s.push_str("\n[dimensions]\nbedSize = { width = 256, depth = 256 }\n");
+            s.push_str(
+                "\n[dimensions]\nedgeZone = 10.0\n\
+                 \n[dimensions.bedSize]\nwidth = 256.0\ndepth = 256.0\n\
+                 \n[dimensions.movementRange]\nminX = -10.0\nmaxX = 256.0\nminY = 0.0\nmaxY = 256.0\nmaxZ = 256.0\n\
+                 \n[dimensions.glueArea]\nglueMinX = 0.0\nglueMaxX = 256.0\nglueMinY = 0.0\nglueMaxY = 256.0\nwipeX = 250.0\n\
+                 \n[dimensions.calibration]\nlShapeBaseX = 68.21\nlShapeBaseY = 126.373\nxLineX = 114.523\nxLineY = 104.83\nxLineYEnd = 114.83\nyLineX = 104.53\nyLineXEnd = 114.53\nyLineY = 114.83\nzStartX = 68.21\nzStartY = 126.373\n\
+                 \n[dimensions.flags]\ngcodeMarker = ';===== machine: TEST'\nhasSecondFan = false\n",
+            );
         }
         for (vid, name, tag) in *versions {
             s.push_str(&format!("\n[[versions]]\nid = '{vid}'\nname = '{name}'\n"));

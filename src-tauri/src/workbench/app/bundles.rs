@@ -32,6 +32,7 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::traced;
+use crate::workbench::clock;
 use crate::workbench::domain::patch::Visibility;
 use crate::workbench::presets::{AssetKind, Presets};
 
@@ -205,7 +206,9 @@ pub fn wb_set_bundle_refs(
 ) -> Result<BundleList, AppError> {
     traced("wb_set_bundle_refs", |_| {
         with_ctx_mut(|ctx| {
-            ctx.presets.set_bundle_refs(&bundle_id, &asset_ids)?;
+            // 时间戳由工作台这一侧给（时间源只有 `clock` 一处，见它的模块头）
+            ctx.presets
+                .set_bundle_refs(&bundle_id, &asset_ids, &clock::now_iso8601())?;
             let (committed, draft, _) = state(ctx)?;
             Ok(list_of(
                 &ctx.presets,

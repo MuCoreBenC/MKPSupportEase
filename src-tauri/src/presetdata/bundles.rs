@@ -185,7 +185,15 @@ impl Bundles {
     ///
     /// 内容变了就要盖 `updatedAt`：这一格记的就是「上一次改动日期」，
     /// 迁移照抄旧值、真改动盖新值，两件事不冲突。
-    pub fn set_refs(&mut self, id: &str, refs: &[String]) -> Result<(), AppError> {
+    ///
+    /// `now_iso8601` 由**调用方**给：这一层不认时间源（与"根由调用方给"同一条纪律）。
+    /// 只取前 10 位（`YYYY-MM-DD`）—— 那一格要的是日期，不是时刻。
+    pub fn set_refs(
+        &mut self,
+        id: &str,
+        refs: &[String],
+        now_iso8601: &str,
+    ) -> Result<(), AppError> {
         let want = id.trim().to_lowercase();
         let idx = self
             .items
@@ -203,7 +211,7 @@ impl Bundles {
             updated_at: None,
         })?;
 
-        let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
+        let today = now_iso8601.get(..10).unwrap_or(now_iso8601).to_owned();
         {
             let arr = self
                 .doc
@@ -504,7 +512,7 @@ mod tests {
     /// **真仓库那份**：五份套餐读得通、零编辑往返逐字节相同
     #[test]
     fn the_real_bundles_file_loads_and_roundtrips() {
-        let Some(root) = crate::workbench::paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             panic!("找不到 <repo>/presets —— 这条判据不能跳过");
         };
         let b = Bundles::load_from(&root).expect("presets/bundles.toml 必须读得通");
@@ -524,23 +532,25 @@ mod tests {
         let dir = tempfile::tempdir().expect("临时目录");
         put(dir.path(), one("A1_default", "'a1-bbs-04-020'"));
         let mut b = Bundles::load_from(dir.path()).expect("读得通");
+        // 时间戳由调用方给（这一层不认时间源），用固定值让断言可以逐字比
+        let now = "2026-10-01T00:00:00Z";
 
         // 查无此套餐：大小写对不上也算没有（get 的口径是大小写不敏感，这里同一条）
-        assert!(b.set_refs("no_such", &["x".to_owned()]).is_err());
+        assert!(b.set_refs("no_such", &["x".to_owned()], now).is_err());
 
         // 空列表被拦（check_one：套餐的内容就是 BBS 引用），文件一个字节都不动
         let before = b.to_toml();
-        assert!(b.set_refs("A1_default", &[]).is_err());
+        assert!(b.set_refs("A1_default", &[], now).is_err());
         assert_eq!(b.to_toml(), before, "被拦下就不该动文件");
 
         // 正路径：换一条 + updatedAt 盖今天；重读得到
-        b.set_refs("a1_default", &["a1-bbs-02-010".to_owned()])
+        b.set_refs("a1_default", &["a1-bbs-02-010".to_owned()], now)
             .expect("换一条");
         assert_eq!(
             b.get("A1_default").expect("还在").asset_refs,
             vec!["a1-bbs-02-010".to_owned()]
         );
-        let today = crate::workbench::clock::now_iso8601()[..10].to_owned();
+        let today = now[..10].to_owned();
         assert_eq!(
             b.get("A1_default").expect("还在").updated_at.as_deref(),
             Some(today.as_str()),

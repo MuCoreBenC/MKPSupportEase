@@ -23,7 +23,10 @@
 
 pub mod derive;
 pub mod issues;
-pub mod layer;
+/// 三层取值。**它住在 [`crate::presetdata::resolve`]** —— 客户端预设页要同一份算法，
+/// 而这一整棵子树是 feature gate 的。这里只是别名回原来的名字，
+/// 工作台侧几十处 `crate::workbench::domain::layer::X` 因此一个都不用改。
+pub use crate::presetdata::resolve as layer;
 pub mod patch;
 pub mod preview;
 pub mod variants;

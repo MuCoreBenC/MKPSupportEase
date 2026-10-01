@@ -907,8 +907,7 @@ pub fn load_from_json_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::paths;
-    use crate::workbench::presets::one_edit_only;
+    use crate::presetdata::one_edit_only;
 
     /* ---------- 夹具上的门禁（任何机器上都执行） ---------- */
 
@@ -1235,7 +1234,7 @@ mod tests {
     /* ---------- 真数据（只在定位到 presets/ 的机器上执行） ---------- */
 
     fn real() -> Option<ParamRegistry> {
-        let root = paths::presets_root()?;
+        let root = crate::presetdata::repo_presets_root()?;
         Some(ParamRegistry::load_from(&root).expect("字段定义或布局读不通"))
     }
 
@@ -1356,7 +1355,7 @@ mod tests {
     /// 而条数变化不会。清单里那两个"刻意不读"的要写明原因，否则下一个人会以为是漏的
     #[test]
     fn every_field_in_the_real_file_is_either_read_or_listed() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
@@ -1422,7 +1421,7 @@ mod tests {
 
     /// 把两个文件复制到临时目录，**在副本上改**，不碰真数据
     fn copy_of_real() -> Option<(tempfile::TempDir, ParamRegistry)> {
-        let root = paths::presets_root()?;
+        let root = crate::presetdata::repo_presets_root()?;
         let tmp = tempfile::tempdir().expect("临时目录");
         for rel in ["registry/param_registry.toml", "layout_schema.toml"] {
             let dst = tmp.path().join(rel);
@@ -1644,14 +1643,14 @@ mod tests {
     /// 整个工作台起不来。所以这一条拦的是"把数据写成自己都读不回来的状态"
     #[test]
     fn writing_a_value_onto_a_machine_that_does_not_exist_is_refused() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
         // 整份 presets 复制一遍（机型文件也要，这一条查的就是跨文件）
         let tmp = tempfile::tempdir().unwrap();
         copy_tree(&root, tmp.path());
-        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).expect("副本读得通");
+        let mut p = crate::presetdata::Presets::load_from(tmp.path()).expect("副本读得通");
         let before = std::fs::read_to_string(p.registry.file()).unwrap();
 
         let e = p
@@ -1684,8 +1683,7 @@ mod tests {
             &serde_json::json!(-2.5),
         )
         .expect("真版本该写得进去");
-        let again =
-            crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完整份还读得通");
+        let again = crate::presetdata::Presets::load_from(tmp.path()).expect("改完整份还读得通");
         assert_eq!(
             again
                 .registry
@@ -1718,13 +1716,13 @@ mod tests {
     /// 没有任何判据能描述它。所以批量入口要么全成，要么一个字节都不写。
     #[test]
     fn a_batch_of_values_lands_in_one_write() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
         copy_tree(&root, tmp.path());
-        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
 
         // 一批：两个机型基底 + 一个版本覆盖 + 一次清空
         p.apply_values(&[
@@ -1746,7 +1744,7 @@ mod tests {
         ])
         .expect("一批写得进去");
 
-        let again = crate::workbench::presets::Presets::load_from(tmp.path()).expect("改完读得通");
+        let again = crate::presetdata::Presets::load_from(tmp.path()).expect("改完读得通");
         let t = &again
             .registry
             .param("toolhead.MKP_retract")
@@ -1763,7 +1761,7 @@ mod tests {
             None,
         )])
         .expect("清得掉");
-        let again = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
         let t = &again
             .registry
             .param("toolhead.MKP_retract")
@@ -1780,13 +1778,13 @@ mod tests {
     /// 而且没有任何提示说哪几条生效了
     #[test]
     fn one_bad_edit_in_a_batch_writes_nothing() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
         copy_tree(&root, tmp.path());
-        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
         let before = std::fs::read_to_string(p.registry.file()).unwrap();
 
         // 第一条合法、第二条机型不存在、第三条字段不存在
@@ -1829,13 +1827,13 @@ mod tests {
     /// 于是文件 mtime 变了、git 里多一条噪音 diff
     #[test]
     fn an_empty_batch_does_not_touch_the_file() {
-        let Some(root) = paths::presets_root() else {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
         copy_tree(&root, tmp.path());
-        let mut p = crate::workbench::presets::Presets::load_from(tmp.path()).unwrap();
+        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
         let path = p.registry.file().to_path_buf();
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
 

@@ -63,6 +63,7 @@ use crate::workbench::domain::preview::BulkPreview;
 use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
+use crate::workbench::load_presets;
 use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
@@ -107,7 +108,7 @@ impl Ctx {
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Self::with(Presets::load()?, store)
+        Self::with(load_presets()?, store)
     }
 
     /// 给定预设数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
@@ -135,7 +136,7 @@ impl Ctx {
     ///
     /// 清理指向已消失对象的草稿条目也在这里
     fn reload_from_disk(&mut self) -> Result<(), AppError> {
-        self.presets = Presets::load_from(self.presets.root())?;
+        self.presets = self.presets.reload()?;
         let loaded = storage::load(&self.store, &self.presets)?;
         let mut draft = storage::read_draft(&self.store)?;
         let mut notices = loaded.notices;
@@ -927,7 +928,7 @@ pub fn wb_copy_recipe(
     new_version_id: String,
 ) -> Result<usize, AppError> {
     traced("wb_copy_recipe", |_| {
-        let mut p = Presets::load()?;
+        let mut p = load_presets()?;
         let keys = copy_recipe(&mut p, &machine_id, &template_version_id, &new_version_id)?;
         tracing::info!(
             machine = %machine_id,

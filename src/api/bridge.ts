@@ -11,10 +11,12 @@ import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './con
  * 所以参数照常写 `{ variantId }`。
  *
  * 前四个方法（预设 / 偏移 / 校准板 / 打开模型）是 v023 移植时就接通的，走真 command。
- * 「客户端接发布包」这一轮新增的十二个方法**产品仓后端还没有** —— 按仓里的纪律
- * （HANDOFF 14.1：后端没有的命令**不渲染入口**），它们在真机上抛 `NotImplementedError`，
- * 页面因此显示「本版未接入」那一块，而不是白屏、也不是假装成功。
- * 浏览器里（`npm run dev`）走的是 mock，不经过这一层。
+ * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
+ * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
+ * 还剩三个写盘 / 应用 / 下载的（`getAppliedPreset` / `copyToSlicer` / `downloadFiles`）
+ * 后端还没有：按仓里的纪律（HANDOFF 14.1：后端没有的命令**不渲染入口**），
+ * 它们在真机上抛 `NotImplementedError`，页面因此显示「本版未接入」那一块，
+ * 而不是白屏、也不是假装成功。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
  * 是多一层没必要的间接：`invoke` 本身就是那座桥。
@@ -88,17 +90,21 @@ export const bridgeApi: MkpApi = {
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
 
-  /* ——— 这一轮新增的十二个：Rust 侧还没有对应 command ——— */
-  getMachines: () => notWired('getMachines'),
-  getVersionFiles: () => notWired('getVersionFiles'),
-  getLocalFiles: () => notWired('getLocalFiles'),
-  getLocalUserFiles: () => notWired('getLocalUserFiles'),
+  /* ——— 预设页（A41）的读接口：走真 command —— */
+  getMachines: () => call('getMachines', 'get_machines'),
+  getVersionFiles: (machineId, versionId) =>
+    call('getVersionFiles', 'get_version_files', { machineId, versionId }),
+  getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
+  getLocalUserFiles: () => call('getLocalUserFiles', 'get_local_user_files'),
+  getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
+  getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
+  getMenu: () => call('getMenu', 'get_menu'),
+  getParamMeta: () => call('getParamMeta', 'get_param_meta'),
+  getMachineParams: (machineId, versionId) =>
+    call('getMachineParams', 'get_machine_params', { machineId, versionId }),
+
+  /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   getAppliedPreset: () => notWired('getAppliedPreset'),
-  getSlicerCopied: () => notWired('getSlicerCopied'),
   copyToSlicer: () => notWired('copyToSlicer'),
-  getPresetFiles: () => notWired('getPresetFiles'),
-  getMenu: () => notWired('getMenu'),
-  getParamMeta: () => notWired('getParamMeta'),
-  getMachineParams: () => notWired('getMachineParams'),
   downloadFiles: () => notWired('downloadFiles'),
 }
