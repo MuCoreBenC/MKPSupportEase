@@ -1,77 +1,157 @@
 /**
- * 工作台外壳（doc §7）。
+ * 工作台外壳 —— C14 版式（feat/b05-14b-c14-port，方案见 C14-PORT-PLAN.md）。
  *
- * # 三条纪律（照参考实现，它们是这套架构成立的前提）
+ * 版式来自试验场 C14 第十八轮定稿：
  *
- * 1. **树常驻，不是「当前对象选择器」。** 选中是两套：单击 = 切主选中
- *    （点机型行编基底，点版本行编覆盖）；勾选 = 加入对比，给矩阵当列。
- *    上一版把「当前机型 + 当前版本」做成全局上下文，等于强迫你一个一个改。
- * 2. **三个视角是视角不是步骤**，随便切，没有前后关系。
- * 3. **维护四项不属于任何机型版本，不受树的选中影响。** 渲染优先级：维护页 > 视角；
- *    点第二次同一项取消。
+ *  1. **左侧一级导航按工作流排序**（机型是起点，参数第二；作者：「为什么维护啊？
+ *     没必要分开」）—— 不分「维护」组，没有第二棵树。宽档可拖宽（64~320），
+ *     窄档退成图标一列，mini 档横排 chips。
+ *  2. **页面挂过就一直挂着**（`.pageSlot`，切走只是 `display: none`）—— 作者：
+ *     「我改了套餐里选的某一个版本，去看别的界面再点回来，它又变成新的了，这不行」。
+ *     非当前页的 element 用「冻结」缓存照原样复用（引用不变 → React 跳过那棵子树）。
+ *  3. **模态框挂 `.shellBody`**（导航 + 页面 + 状态栏那一整层）—— 遮罩盖住的就是
+ *     这个范围，标题栏（这里是 Tauri 原生窗口的系统栏）不在内。
+ *  4. **撤销 / 重做 / 未保存改动在状态栏** —— 全工作台一条栈（作者：「它是一种
+ *     全局的东西，要不就放在状态栏」）。
  *
  * # 外壳自己不做业务
  *
- * 它只做四件事：取数、算徽章、拼动作数组、分发到视角。状态、文案、能不能改
- * 全是后端算好的（doc §1 第二条铁律）。视角组件一律只收一个 prop —— 换实现不动外壳。
+ * 状态、文案、能不能改全部由后端算好（`wb_book` / `wb_words` / `wb_preflight`）。
+ * 外壳只做四件事：取数、把导航徽标算出来、拼撤销栈、分发到页面。
  *
- * # 撤销栈在会话内存里，但写必须走 IPC（doc §4.4）
+ * # 与原型的差别（都是真后端决定的，不是视觉偷懒）
  *
- * 栈里存的是后端返回的 `inverse`，撤销就是把它再交给 `wb_apply_draft`。
- * 前端自己算反向会在「原来是继承来的」这种情形上出错。
- * 第一版**不做跨重启的撤销历史**：关了重开草稿还在，但栈清空。
+ *  - 没有自绘标题栏 —— Tauri 原生窗口，标题栏归系统；
+ *  - 没有「演示数据」徽标与「恢复默认」—— 每一笔写都是真写盘；
+ *  - 导航徽标与「生成与发布」的读数来自 `wb_preflight`（每次写完重取一次），
+ *    不是前端把检查重跑一遍。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
+
+import { FieldLayer } from './components/field'
+import { useDensity } from './useDensity'
 import {
   isAppError,
   wb,
   type BookView,
   type Boot,
-  type ColRef,
+  type IssueReport,
   type Patch,
   type Refresh,
   type Words,
 } from './api'
-import { useDensity } from './useDensity'
-import { PageHeader, type Action, type Badge } from './shell/PageHeader'
-import { StatusBar } from './shell/StatusBar'
-import { StatusStrip } from './shell/StatusStrip'
-import { MachinesPage } from './views/MachinesPage'
-import { ParamDesk } from './views/ParamDesk'
-import { ParamsMatrix } from './views/ParamsMatrix'
+import { toasts } from './c14/toast'
+import { OverlayHostCtx } from './c14/overlayHost'
+import type { GotoFocus, PageId } from './c14/types'
+import HistoryModal from './c14/HistoryModal'
+import SplitterC14 from './c14/SplitterC14'
+import { useSplitWidth } from './c14/useSplitWidth'
+import MachinesPage from './views/MachinesPage'
+import ParamsPage from './views/ParamsPage'
+import BundlesPage from './views/BundlesPage'
+import AssetsPage from './views/AssetsPage'
+import BuildPage from './views/BuildPage'
+import SettingsPage from './views/SettingsPage'
+import s from './c14.module.css'
 
 /**
- * 五个视角。**是视角不是步骤。**
+ * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
+ * （P3 已接），不再有独立的「对比」页。
  *
- * 默认是「机型与版本」—— 它是最基础的那一件事：先有机型有版本，才谈得上调参数。
- * 上一轮的教训就是我把顺序做反了，先去打磨矩阵的排序与颜色，
- * 而系统连「加一个机型」的位置都没有。
- *
- * 「配方」是分组列表，矩阵退成「对比」（同时看几台机器的同一项）。
+ * `settings` 排在末尾：它不是一个业务页 —— 预设根固定是 `<repo>/presets`，
+ * 这一页只读地摆开数据根与子目录职责，导航角落那盏灯点它进来。
  */
-const VIEWS = [
-  { id: 'machines', label: '机型与版本' },
-  { id: 'params', label: '配方' },
-  { id: 'compare', label: '对比' },
-  { id: 'menu', label: '套餐与菜单' },
-  { id: 'build', label: '生成' },
-] as const
-type ViewId = (typeof VIEWS)[number]['id']
+interface NavItem {
+  id: PageId
+  label: string
+  icon: ReactNode
+  badge?: 'dirty' | 'build'
+}
 
-/** 维护四项。标题逐字「维护」 */
-const MAINTAIN = [
-  { id: 'fields', label: '字段定义' },
-  { id: 'stock', label: '仓库盘点' },
-  { id: 'fallback', label: '应急规则' },
-  { id: 'trash', label: '回收站' },
-] as const
-type MaintainId = (typeof MAINTAIN)[number]['id']
+const NAV: NavItem[] = [
+  /* 立方体 = 一台机器 */
+  {
+    id: 'machines',
+    label: '机型与版本',
+    icon: (
+      <>
+        <path d="M12 3 4 7.5v9L12 21l8-4.5v-9z" />
+        <path d="M4 7.5 12 12l8-4.5" />
+      </>
+    ),
+  },
+  /* 两根带滑块的横杆 = 调参数 */
+  {
+    id: 'params',
+    label: '参数台',
+    badge: 'dirty',
+    icon: (
+      <>
+        <path d="M4 8h16M4 16h16" />
+        <circle cx="9" cy="8" r="2.2" />
+        <circle cx="15" cy="16" r="2.2" />
+      </>
+    ),
+  },
+  /* 分格的箱子 = 一揽子资源 */
+  {
+    id: 'bundles',
+    label: '套餐',
+    icon: (
+      <>
+        <rect x="4" y="4" width="16" height="16" rx="1.5" />
+        <path d="M4 10h16M10 4v16" />
+      </>
+    ),
+  },
+  /* 盾牌 + 勾：检查 → 生成 → 发布按顺序走的一页（C14 合并了发布中心） */
+  {
+    id: 'build',
+    label: '生成与发布',
+    badge: 'build',
+    icon: (
+      <>
+        <path d="M12 3l8 3.5v6c0 4.2-3.4 7.4-8 8.5-4.6-1.1-8-4.3-8-8.5v-6z" />
+        <path d="m9 12 2.2 2.2L15.5 10" />
+      </>
+    ),
+  },
+  /* 一张图 = 素材文件 */
+  {
+    id: 'assets',
+    label: '资产库',
+    icon: (
+      <>
+        <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
+        <path d="m3.5 15.5 4.2-4.2 3 3 3.8-3.8 6 5.5" />
+      </>
+    ),
+  },
+  /* 齿轮 = 只读的设置（数据根与子目录职责） */
+  {
+    id: 'settings',
+    label: '设置',
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
+      </>
+    ),
+  },
+]
 
-/** 主选中：机型行（`uid` 为 null = 编基底）或版本行 */
+type NavId = NavItem['id']
+
+/** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
+const NAVW = { dft: 236, min: 64, max: 320 }
+
+/** 跨页定位载荷（C14 语义）：`key` 给套餐/资产页落到某一项（机型页 ④ 关联在用） */
 interface Focus {
   machineId: string
   uid: string | null
+  key?: string | null
 }
 
 interface UndoEntry {
@@ -80,47 +160,55 @@ interface UndoEntry {
 }
 
 export function WorkbenchApp() {
-  const shellRef = useRef<HTMLDivElement>(null)
-  useDensity(shellRef)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const density = useDensity(rootRef)
+  const toastList = useSyncExternalStore(toasts.subscribe, toasts.get)
 
   const [boot, setBoot] = useState<Boot | null>(null)
   const [words, setWords] = useState<Words | null>(null)
   const [book, setBook] = useState<BookView | null>(null)
+  const [report, setReport] = useState<IssueReport | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [view, setView] = useState<ViewId>('machines')
-  const [maintain, setMaintain] = useState<MaintainId | null>(null)
+  const [page, setPage] = useState<NavId>('machines')
   const [focus, setFocus] = useState<Focus | null>(null)
-  const [checked, setChecked] = useState<ColRef[]>([])
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  /** 定位页的 remount 代号：`goto` 过来是「换现场」，要重挂去读新的主选中 */
+  const [focusGen, setFocusGen] = useState(0)
+  /** 套餐 / 资产页的跨页预选（C14 的 GotoFocus：机型页 ④ 关联、套餐页反查都在用） */
+  const [bundleSel, setBundleSel] = useState<string | null>(null)
+  const [assetSel, setAssetSel] = useState<string | null>(null)
+  /** 资产页身份筛选的预选（检查报告的孤儿文件跳过来替人筛好「可选」） */
+  const [assetAssign, setAssetAssign] = useState<string | null>(null)
 
   /** 撤销 / 重做栈。会话内存，关窗就没 —— 草稿本身还在盘上 */
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   const [redoStack, setRedoStack] = useState<UndoEntry[]>([])
 
-  /**
-   * 「后端状态变过了」的计数器。**每写一次就 +1，与改了几处无关。**
-   *
-   * 原来这里传的是 `book.dirtyCount`，那是个错的信号：
-   * 「把一个版本覆盖从 disk 改成 tower」时，草稿里那一条**还在**（只是值换了），
-   * 脏计数一个不变 —— 于是矩阵不重取，格子上还显示 disk，
-   * 表现出来就是「这一项怎么都改不回去」。后端每次都写对了，是界面没刷新。
-   */
+  const [navW, setNavW] = useSplitWidth('nav', NAVW.dft, NAVW.min, NAVW.max)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  /** 模态框遮罩宿主（`.shellBody`）与当前页滚动区（页头按钮靠它对齐 `--sbw`） */
+  const [overlayEl, setOverlayEl] = useState<HTMLDivElement | null>(null)
+  const [slotEl, setSlotEl] = useState<HTMLDivElement | null>(null)
+
+  /** 「后端状态变过了」计数器：每写一次 +1，页面据此重取（理由见旧版的教训注释） */
   const [tick, setTick] = useState(0)
 
-  /** 从配方页跳到对比页时要定位的那一项 */
-  const [compareKey, setCompareKey] = useState<string | null>(null)
+  /* 页面常驻（C14 第十八轮）：第一次去才挂载，切走只藏起来 */
+  const [visited, setVisited] = useState<NavId[]>([page])
+  useEffect(() => {
+    setVisited((v) => (v.includes(page) ? v : [...v, page]))
+  }, [page])
+  const held = useRef<Partial<Record<NavId, ReactNode>>>({})
 
-  /** 出错时把 message 留下。`AppError` 与客户端共用同一套 */
   const fail = useCallback((e: unknown) => {
     setFatal(isAppError(e) ? `${e.message}${e.detail ? ` —— ${e.detail}` : ''}` : String(e))
   }, [])
 
-  /* 首屏三步：先 boot（上游缺失时也能显示数据根）→ 取词表 → 取整本。
-     用一个 ref 挡住第二次：`StrictMode` 在 dev 下会把每个 effect 跑两遍，
-     于是这三条命令全部发两次（日志里 `wb_boot` / `wb_words` 成对出现）。
-     **不摘 StrictMode** —— 它抓过真问题；挡在调用这一层更便宜 */
+  /* 首屏四步：boot（预设根定位不到也能显示数据根）→ 词表 → 整本 → 检查报告。
+     **预设根定位不到不再是一道门**：六页业务照常，只是依赖预设的读数留空，
+     问题横幅与「设置」页负责把数据根说清。ref 挡住 StrictMode 的第二遍（那三条命令全发两次） */
   const booted = useRef(false)
   useEffect(() => {
     if (booted.current) return
@@ -129,45 +217,62 @@ export function WorkbenchApp() {
       try {
         const b = await wb.boot()
         setBoot(b)
-        if (!b.info) return // 上游缺失：**不启动业务**（doc §15 第一条）
-        setWords(await wb.words())
-        setBook(await wb.book())
+        const [w, bk] = await Promise.all([wb.words(), wb.book()])
+        setWords(w)
+        setBook(bk)
+        // 参数台默认谁都不选（C14 第十七轮）：空态留白 + 文案，
+        // 「还没选」这个状态必须存在 —— 选中由左树那一下点击或 goto 产生
+        setReport(await wb.preflight())
       } catch (e) {
         fail(e)
       }
     })()
   }, [fail])
 
+  /** 检查报告重取。每次写完调一次 —— 一次手势一次 IPC，徽标与生成页读数跟着走 */
+  const refreshReport = useCallback(() => {
+    wb.preflight()
+      .then(setReport)
+      .catch(() => undefined)
+  }, [])
+
+  /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
+  const refreshBook = useCallback(() => {
+    wb.book()
+      .then(setBook)
+      .catch(() => undefined)
+    refreshReport()
+  }, [refreshReport])
+
   /**
-   * 走唯一写入口。
-   *
-   * `where` 说的是这次结果往哪个栈压：正向操作压撤销栈，撤销压重做栈，重做压撤销栈。
-   * 三种情形走同一条路径（doc §4.4 的那张图），所以只有一个函数 ——
-   * 分三份写的话，「撤销之后能不能重做」这件事会有三种写法。
-   *
-   * Task 14 的三种改法直接调它，`where: 'undo'`。
+   * `presets/` 改过之后（「重新加载」= 后端重开一次会话）：换 `Boot`，并把
+   * 整本与检查报告重取一遍 —— 预设数据变了会改这两处读数
+   */
+  const reloadBoot = useCallback(
+    (b: Boot) => {
+      setBoot(b)
+      refreshBook()
+    },
+    [refreshBook],
+  )
+
+  /**
+   * 走唯一写入口。`where` 说这次结果往哪个栈压（正向压撤销、撤销压重做、重做压撤销）
+   * —— 三种情形一条路径，分三份写「能不能重做」就会有三种写法。
    */
   const run = useCallback(
-    async (
-      label: string,
-      patches: Patch[],
-      where: 'undo' | 'redo',
-      /** 顺带要哪一页。给了就不用在这之后再问一次 —— 一次手势一次 IPC */
-      refresh?: Refresh,
-    ) => {
+    async (label: string, patches: Patch[], where: 'undo' | 'redo', refresh?: Refresh) => {
       setBusy(true)
       try {
         const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
         setTick((n) => n + 1)
-        // 不可撤销的手势（删除、生成记录）**不进栈**，否则栈里会有一条按不动的
+        refreshReport()
+        // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
           const entry = { label, patches: out.inverse }
-          if (where === 'undo') {
-            setUndoStack((s) => [...s, entry])
-          } else {
-            setRedoStack((s) => [...s, entry])
-          }
+          if (where === 'undo') setUndoStack((st) => [...st, entry])
+          else setRedoStack((st) => [...st, entry])
         }
         return out
       } catch (e) {
@@ -177,444 +282,595 @@ export function WorkbenchApp() {
         setBusy(false)
       }
     },
-    [fail],
+    [fail, refreshReport],
   )
 
   const undo = useCallback(async () => {
     const top = undoStack[undoStack.length - 1]
     if (!top) return
-    // 撤销的结果压进重做栈；成功之后才把它从撤销栈里去掉
     const out = await run(`撤销：${top.label}`, top.patches, 'redo')
-    if (out) setUndoStack((s) => s.slice(0, -1))
+    if (out) setUndoStack((st) => st.slice(0, -1))
   }, [undoStack, run])
 
   const redo = useCallback(async () => {
     const top = redoStack[redoStack.length - 1]
     if (!top) return
     const out = await run(`重做：${top.label}`, top.patches, 'undo')
-    if (out) setRedoStack((s) => s.slice(0, -1))
+    if (out) setRedoStack((st) => st.slice(0, -1))
   }, [redoStack, run])
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!book || book.dirtyCount === 0 || busy) return false
     setBusy(true)
     try {
       const out = await wb.save()
       setBook(out.view)
-      /* **uid 会变**（新建与移动都会），所以选中与勾选列要跟着改 ——
-         不改的话保存之后选中会指向一个不存在的 uid，界面上只表现为「选中莫名没了」 */
-      const remap = out.remap
-      if (Object.keys(remap).length > 0) {
-        setFocus((f) => (f?.uid && remap[f.uid] ? { ...f, uid: remap[f.uid] } : f))
-        setChecked((cs) =>
-          cs.map((c) =>
-            c.versionUid && remap[c.versionUid]
-              ? { ...c, versionUid: remap[c.versionUid] }
-              : c,
-          ),
-        )
-      }
-      // 保存之后撤销栈作废：栈里的反向 patch 指的是保存前那一份状态
       setUndoStack([])
       setRedoStack([])
       setTick((n) => n + 1)
+      refreshReport()
+      toasts.push('已保存 —— 草稿写进仓库文件了')
+      return true
     } catch (e) {
       fail(e)
+      return false
     } finally {
       setBusy(false)
     }
-  }, [fail])
+  }, [book, busy, fail, refreshReport])
 
   const discard = useCallback(async () => {
+    if (!book || book.dirtyCount === 0 || busy) return
     setBusy(true)
     try {
       setBook(await wb.discard())
       setUndoStack([])
       setRedoStack([])
       setTick((n) => n + 1)
+      refreshReport()
     } catch (e) {
       fail(e)
     } finally {
       setBusy(false)
     }
-  }, [fail])
+  }, [book, busy, fail, refreshReport])
 
-  /* ---------- 徽章与动作 ---------- */
+  /** 跨页定位（C14 语义）：跳过去并落上主选中；那一页重挂一次去读它 */
+  const goto = useCallback((view: string, foc?: GotoFocus) => {
+    const next = view as NavId
+    if (foc) {
+      if (next === 'params') {
+        /* 参数台的定位一定有机型语境；套餐/资产那两路才会带 null 过来。
+           `key` 一起带过去 —— 参数台落地后按它滚到那一项 + 闪一下 */
+        setFocus({ machineId: foc.machineId ?? '', uid: foc.uid, key: foc.key ?? null })
+        setFocusGen((g) => g + 1)
+      } else if (next === 'bundles') {
+        setBundleSel(foc.key ?? foc.uid ?? null)
+        setFocusGen((g) => g + 1)
+      } else if (next === 'assets') {
+        /* key = 'optional' 是检查报告「孤儿文件」的暗号：替人筛好身份，不是选中某条 */
+        setAssetAssign(foc.key === 'optional' ? 'optional' : null)
+        setAssetSel(foc.key === 'optional' ? null : (foc.key ?? null))
+        setFocusGen((g) => g + 1)
+      }
+    }
+    setPage(next)
+  }, [])
 
-  const badges: Badge[] = useMemo(() => {
-    if (!book || !words) return []
-    const b = book.badges
-    return [
-      { count: b.machines, label: '机型' },
-      { count: b.versions, label: '版本' },
-      {
-        count: b.baseItems,
-        label: `${words.level.machine.label} 项`,
-        title: '机型层钉着几项值。以前这里还要分开数「自有几项」，那一半删掉了',
-      },
-      {
-        count: b.overrideItems,
-        label: `${words.level.version.label} 项`,
-        title: '版本层加起来钉着几项值',
-      },
-    ]
-  }, [book, words])
+  /* 撤销 / 重做 / 保存的键盘入口装在外壳上 —— 撤销不是某几个页面的小功能 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        void undo()
+      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
+        e.preventDefault()
+        void redo()
+      } else if (k === 's') {
+        e.preventDefault()
+        void save()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo, save])
 
-  const actions: Action[] = useMemo(() => {
-    if (!book || !words) return []
-    const clean = book.dirtyCount === 0
-    const out: Action[] = []
+  /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
+  const dirty = (book?.dirtyCount ?? 0) > 0
+  useEffect(() => {
+    if (!dirty) return
+    const guard = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [dirty])
 
-    out.push(
-      undoStack.length === 0 || busy
-        ? {
-            id: 'undo',
-            label: '撤销',
-            disabled: true,
-            disabledReason: busy ? '正在处理上一步' : words.disabled.nothingToUndo,
-          }
-        : {
-            id: 'undo',
-            label: '撤销',
-            title: `撤销：${undoStack[undoStack.length - 1].label}`,
-            onClick: () => void undo(),
-          },
-    )
-    out.push(
-      redoStack.length === 0 || busy
-        ? {
-            id: 'redo',
-            label: '重做',
-            disabled: true,
-            disabledReason: busy ? '正在处理上一步' : '没有可以重做的操作',
-          }
-        : {
-            id: 'redo',
-            label: '重做',
-            title: `重做：${redoStack[redoStack.length - 1].label}`,
-            onClick: () => void redo(),
-          },
-    )
-    out.push(
-      clean || busy
-        ? {
-            id: 'discard',
-            label: '丢弃改动',
-            tone: 'danger',
-            disabled: true,
-            disabledReason: busy ? '正在处理上一步' : words.disabled.nothingToSave,
-          }
-        : {
-            id: 'discard',
-            label: '丢弃改动',
-            tone: 'danger',
-            title: `把这 ${book.dirtyCount} 处未保存的改动全部扔掉，回到上次保存的样子`,
-            onClick: () => void discard(),
-          },
-    )
-    out.push(
-      clean || busy
-        ? {
-            id: 'save',
-            label: '保存配方',
-            tone: 'primary',
-            disabled: true,
-            disabledReason: busy ? '正在处理上一步' : words.disabled.nothingToSave,
-          }
-        : {
-            id: 'save',
-            label: '保存配方',
-            tone: 'primary',
-            title: `把这 ${book.dirtyCount} 处改动写进仓库文件`,
-            onClick: () => void save(),
-          },
-    )
-    return out
-  }, [book, words, undoStack, redoStack, busy, undo, redo, discard, save])
+  /* 页头按钮与页面内容的右缘对齐：滚动条占的宽度量一次写进变量，不让页头去猜 */
+  useEffect(() => {
+    const el = slotEl
+    const root = rootRef.current
+    if (!el || !root) return
+    const read = () => {
+      const next = `${el.offsetWidth - el.clientWidth}px`
+      if (root.style.getPropertyValue('--sbw') !== next) root.style.setProperty('--sbw', next)
+    }
+    read()
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [slotEl])
 
-  /* ---------- 渲染 ---------- */
+  /* ---------- 导航徽标（C14 两级：只有阻断用红，待办/未保存是灰） ---------- */
 
-  const focusText = useMemo(() => {
-    // 「机型与版本」页没有"主选中"这个概念 —— 那是参数页的语义。
-    // 把它原样漏到这一页，底部就会常驻一句「没有主选中」，说的是另一页的事
-    if (view === 'machines') return '机型与版本 · 直接编辑 presets/machines/'
-    if (!focus || !book || !words) return '没有主选中'
-    const m = book.machines.find((x) => x.id === focus.machineId)
-    if (!m) return '没有主选中'
-    if (!focus.uid) return `主选中 ${m.display} · ${words.level.machine.label}`
-    const v = m.versions.find((x) => x.uid === focus.uid)
-    return `主选中 ${m.display} / ${v?.name ?? focus.uid}`
-  }, [view, focus, book, words])
+  const buildBadge = useMemo(() => {
+    if (!report) return { n: 0, block: false }
+    const n = report.issues.filter((i) => i.severity !== 'hint' && i.at.view === 'build').length
+    return { n, block: report.blocks > 0 }
+  }, [report])
 
-  return (
-    /* `data-page` 放在**根上**而不是 `.wb-body` 上：顶部那排操作按钮
-       （保存配方 / 丢弃改动 / 撤销 / 重做）与徽章都属于参数页那套草稿，
-       「机型与版本」页不走那套，所以它们在这一页不该出现 —— 摆着会让人以为
-       点「保存配方」能存下机型的改动。CSS 要能管到顶部，属性就得在顶部之上 */
-    <div className="wb" data-wb data-page={view} ref={shellRef}>
-      {boot && words && book ? (
-        <StatusStrip
-          recipePath={boot.roots.workbench}
-          distPath={boot.roots.dist}
-          save={book.save}
-          artifact={book.artifact}
-          lastBuild={book.lastBuild}
-          words={words}
-        />
-      ) : (
-        <div className="wb-strip wb-strip--loading">正在读上游与配方本…</div>
-      )}
+  const badgeOf = (b?: NavItem['badge']): { n: number; block: boolean } => {
+    if (b === 'dirty') return { n: dirty ? 1 : 0, block: false }
+    if (b === 'build') return buildBadge
+    return { n: 0, block: false }
+  }
 
-      <PageHeader
-        title="配方本"
-        subtitle="开发者工具 · 不随客户端交付"
-        badges={badges}
-        actions={actions}
-      />
+  /* ---------- 页头副标题 ---------- */
 
-      {fatal && <div className="wb-banner" data-tone="danger">{fatal}</div>}
+  const headSub = useMemo(() => {
+    if (!book) return ''
+    switch (page) {
+      case 'machines':
+        return `${book.badges.machines} 台机型 · ${book.badges.versions} 个版本`
+      case 'params':
+        return '改了先进草稿，保存才落盘'
+      case 'bundles':
+        return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
+      case 'build':
+        return report
+          ? `阻断 ${report.blocks} · 待办 ${report.todos} · 提示 ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
+          : ''
+      case 'assets':
+        return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+      case 'settings':
+        return '只读 —— 数据根与工作台子目录的职责'
+    }
+  }, [page, book, report])
 
-      {boot?.problem && (
-        <div className="wb-banner" data-tone="danger">
-          {boot.problem}
-          {boot.detail && <> —— <span className="wb-mono">{boot.detail}</span></>}
-          <br />
-          没有上游工作台不启动业务（字段定义、机型版本、交付资源全在它里面）。
-          可以用环境变量 <span className="wb-mono">MKPSE_PRESETS_DIR</span> 指过去，
-          改完点<button type="button" className="wb-link" onClick={() => location.reload()}>
-            重新加载
-          </button>。
-        </div>
-      )}
+  /* ---------- 页面渲染（挂载入口只有这一处） ---------- */
 
-      {book?.notices.map((n) => (
-        <div key={n} className="wb-banner" data-tone="warn">
-          {n}
-        </div>
-      ))}
+  const renderPage = (id: NavId): ReactNode => {
+    if (!book || !words) return null
+    switch (id) {
+      case 'machines':
+        return (
+          <MachinesPage
+            book={book}
+            words={words}
+            onGoto={goto}
+            onApply={async (label, patches) => {
+              await run(label, patches, 'undo')
+            }}
+            onSave={save}
+            onBookRefresh={refreshBook}
+          />
+        )
+      case 'params':
+        return (
+          <ParamsPage
+            key={focusGen}
+            book={book}
+            words={words}
+            initialFocus={focus}
+            tick={tick}
+            dirty={dirty}
+            onApply={async (label, patches, refresh) => {
+              const out = await run(label, patches, 'undo', refresh)
+              return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
+            }}
+            onSave={() => void save()}
+            onDiscard={() => void discard()}
+            onUndo={() => void undo()}
+            onGoto={goto}
+          />
+        )
+      case 'bundles':
+        return (
+          <BundlesPage
+            key={focusGen}
+            words={words}
+            tick={tick}
+            initialSel={bundleSel}
+            onGoto={goto}
+          />
+        )
+      case 'assets':
+        return (
+          <AssetsPage
+            key={focusGen}
+            words={words}
+            tick={tick}
+            initialSel={assetSel}
+            initialAssign={assetAssign}
+            onGoto={goto}
+            onApply={async (label, patches) => {
+              await run(label, patches, 'undo')
+            }}
+          />
+        )
+      case 'build':
+        if (!boot) return null
+        return (
+          <BuildPage
+            boot={boot}
+            book={book}
+            words={words}
+            report={report}
+            tick={tick}
+            onGoto={goto}
+            onApply={async (label, patches) => {
+              await run(label, patches, 'undo')
+            }}
+            onSave={save}
+            onBookRefresh={refreshBook}
+          />
+        )
+      case 'settings':
+        if (!boot) return null
+        return <SettingsPage boot={boot} />
+    }
+  }
+  const nowNode = renderPage(page)
+  useEffect(() => {
+    held.current[page] = nowNode
+  })
 
-      <div className="wb-body" data-page={view}>
-        <aside className="wb-side">
-          <div className="wb-side__head">配方本</div>
-          <div className="wb-side__list">
-            {book?.machines.map((m) => {
-              const open = !collapsed.has(m.id)
-              return (
-                <div key={m.id}>
-                  <div
-                    className="wb-row"
-                    data-kind="machine"
-                    data-focus={focus?.machineId === m.id && !focus.uid ? 'yes' : undefined}
-                  >
-                    <button
-                      type="button"
-                      className="wb-row__twist"
-                      aria-label={open ? `折叠 ${m.display}` : `展开 ${m.display}`}
-                      onClick={() =>
-                        setCollapsed((s) => {
-                          const next = new Set(s)
-                          if (next.has(m.id)) next.delete(m.id)
-                          else next.add(m.id)
-                          return next
-                        })
-                      }
-                    >
-                      {open ? '▾' : '▸'}
-                    </button>
-                    <input
-                      type="checkbox"
-                      /* **带机型** —— 同名版本在多个机型下都存在，只写版本名的话
-                         读屏软件念出来的三条「标准版」分不清是哪台机器 */
-                      aria-label={`把 ${m.display} 的机型基底加入对比`}
-                      checked={checked.some((c) => c.machineId === m.id && !c.versionUid)}
-                      onChange={(e) =>
-                        setChecked((cs) =>
-                          e.target.checked
-                            ? [...cs, { machineId: m.id, versionUid: null }]
-                            : cs.filter((c) => !(c.machineId === m.id && !c.versionUid)),
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="wb-row__name"
-                      onClick={() => {
-                        setFocus({ machineId: m.id, uid: null })
-                        setMaintain(null)
-                      }}
-                    >
-                      {m.display}
-                    </button>
-                    <span className="wb-tag" title={words?.build[m.build].explain ?? undefined}
-                      data-state={m.build === 'noResources' ? 'off' : m.build === 'built' ? 'ok' : 'warn'}>
-                      {words?.build[m.build].label}
-                    </span>
-                    <span className="wb-row__count">{m.items} 项</span>
-                  </div>
+  const navLabel = NAV.find((i) => i.id === page)?.label ?? ''
 
-                  {open &&
-                    m.versions.map((v) => (
-                      <div
-                        key={v.uid}
-                        className="wb-row"
-                        data-kind="version"
-                        data-focus={focus?.uid === v.uid ? 'yes' : undefined}
-                      >
-                        <span className="wb-row__twist" />
-                        <input
-                          type="checkbox"
-                          aria-label={`把 ${m.display} 的 ${v.name} 加入对比`}
-                          checked={checked.some((c) => c.versionUid === v.uid)}
-                          onChange={(e) =>
-                            setChecked((cs) =>
-                              e.target.checked
-                                ? [...cs, { machineId: m.id, versionUid: v.uid }]
-                                : cs.filter((c) => c.versionUid !== v.uid),
-                            )
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="wb-row__name"
-                          onClick={() => {
-                            setFocus({ machineId: m.id, uid: v.uid })
-                            setMaintain(null)
-                          }}
-                        >
-                          {v.name}
-                        </button>
-                        <span
-                          className="wb-tag"
-                          title={words?.build[v.build].explain ?? undefined}
-                          data-state={
-                            v.build === 'noResources'
-                              ? 'off'
-                              : v.build === 'built'
-                                ? 'ok'
-                                : 'warn'
-                          }
-                        >
-                          {words?.build[v.build].label}
-                        </span>
-                        <span className="wb-row__count">{v.items} 项</span>
-                      </div>
-                    ))}
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="wb-side__head">维护</div>
-          <div className="wb-side__maintain">
-            {MAINTAIN.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className="wb-mitem"
-                data-on={maintain === m.id ? 'yes' : undefined}
-                /* 点第二次同一项取消 —— 否则进了维护页就出不来 */
-                onClick={() => setMaintain((cur) => (cur === m.id ? null : m.id))}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="wb-main">
-          {/* 维护页 > 视角（第三条纪律）*/}
-          {maintain ? (
-            <>
-              <div className="wb-tabs">
-                <span className="wb-tab" data-on="yes">
-                  {MAINTAIN.find((m) => m.id === maintain)?.label}
+  const nav = (
+    <nav className={s.nav} aria-label="一级导航">
+      <div className={s.navList}>
+        {NAV.map((it) => {
+          const bd = badgeOf(it.badge)
+          return (
+            <button
+              key={it.id}
+              type="button"
+              className={`${s.navItem} ${page === it.id ? s.navItemOn : ''}`}
+              title={it.label}
+              onClick={() => setPage(it.id)}
+            >
+              <span className={s.navIcon} aria-hidden>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {it.icon}
+                </svg>
+              </span>
+              <span className={s.navLabel}>{it.label}</span>
+              {bd.n > 0 && (
+                <span
+                  className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
+                  title={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                >
+                  {bd.n}
                 </span>
-              </div>
-              <div className="wb-pane">
-                <p className="wb-todo">
-                  这一页在 Task 18 落地。后端已经就位：
-                  <span className="wb-mono"> wb_registry / wb_stock / wb_fallback / wb_trash</span>
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="wb-tabs">
-                {VIEWS.map((v) => (
-                  <button
-                    key={v.id}
-                    type="button"
-                    className="wb-tab"
-                    data-on={view === v.id ? 'yes' : undefined}
-                    onClick={() => setView(v.id)}
-                  >
-                    {v.label}
-                    {v.id === 'build' && book && (
-                      <span className="wb-badge wb-badge--mini">
-                        {book.buildRows.filter((r) => r.buildable).length}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="wb-pane">
-                {/* 最基础的那一页：有哪些机型、每台有哪些版本。
-                    「加一个机型 / 加一个版本」的位置就在这里 */}
-                {view === 'machines' && <MachinesPage />}
-                {/* 默认视角：这一版的分组列表。改一个值走一次 IPC，后端顺带把这一页带回来 */}
-                {view === 'params' &&
-                  words &&
-                  (focus ? (
-                    <ParamDesk
-                      machineId={focus.machineId}
-                      uid={focus.uid}
-                      where={focusText}
-                      words={words}
-                      tick={tick}
-                      onApply={async (label, patches, refresh) => {
-                        const out = await run(label, patches, 'undo', refresh)
-                        return { desk: out?.desk ?? null }
-                      }}
-                      onCompare={(key) => {
-                        setCompareKey(key)
-                        setView('compare')
-                      }}
-                    />
-                  ) : (
-                    <p className="wb-todo">在左边配方本里点一个机型或版本，这里编它的配方。</p>
-                  ))}
-                {/* 对比：同时看几台机器的同一项。**它不是默认** */}
-                {view === 'compare' && words && (
-                  <ParamsMatrix
-                    cols={checked}
-                    words={words}
-                    dirtyKey={tick}
-                    focusKey={compareKey}
-                    /* 三种改法全走这一条 —— 正向操作压撤销栈 */
-                    onApply={(label, patches) => run(label, patches, 'undo')}
-                  />
-                )}
-                {view === 'menu' && <p className="wb-todo">套餐与菜单在 Task 16 落地。</p>}
-                {view === 'build' && (
-                  <p className="wb-todo">生成视角在 Task 17 落地（含 Task 9 的校验三档）。</p>
-                )}
-              </div>
-            </>
-          )}
-        </section>
+              )}
+            </button>
+          )
+        })}
       </div>
 
-      {book && words ? (
-        <StatusBar
-          badges={book.badges}
-          focus={focusText}
-          save={book.save}
-          dirtyCount={book.dirtyCount}
-          snapshot={book.snapshot}
-          words={words}
+      {/*
+        唯一的预设真相源。灯 + 短句 + 附注；窄档只留灯（完整信息在 title 上）。
+        **点它进设置页** —— 那里只读地摆开三个数据根与子目录职责（没有可改的表单：
+        预设根固定是 `<repo>/presets`）
+      */}
+      <div
+        className={s.upstream}
+        role="button"
+        tabIndex={0}
+        title={
+          boot
+            ? `预设源 ${boot.roots.presets}\n配方本 ${boot.roots.workbench}\n交付 ${boot.roots.dist}\n点击查看设置`
+            : '正在读…'
+        }
+        onClick={() => setPage('settings')}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setPage('settings')
+          }
+        }}
+      >
+        <span className={s.upDot} data-on={!!boot} aria-hidden />
+        <span className={s.upText}>
+          <span className={s.upLine}>{boot ? '预设源' : '读取中'}</span>
+          <span className={s.upNote}>{boot ? boot.roots.presets : '正在读…'}</span>
+        </span>
+      </div>
+
+      {density !== 'compact' && density !== 'mini' && (
+        <SplitterC14
+          bodyRef={rootRef}
+          side="nav"
+          varName="--nav-w"
+          width={navW}
+          otherW={0}
+          defaultValue={NAVW.dft}
+          min={NAVW.min}
+          max={NAVW.max}
+          onCommit={setNavW}
+          label="导航栏"
+          className={s.pSplitNav}
         />
-      ) : (
-        <footer className="wb-foot" />
       )}
+    </nav>
+  )
+
+  return (
+    <div
+      ref={rootRef}
+      className={s.shell}
+      data-wb
+      data-no-chrome="yes"
+      data-page={page}
+      data-density={density}
+      style={{ '--nav-w': `${navW}px` } as CSSProperties}
+    >
+      {fatal && (
+        <div
+          className="wb-banner"
+          data-tone="danger"
+          style={{ position: 'absolute', top: 8, left: 12, right: 12, zIndex: 60 }}
+        >
+          {fatal}
+        </div>
+      )}
+
+      <OverlayHostCtx value={overlayEl}>
+        <FieldLayer>
+          <div className={s.shellBody} ref={setOverlayEl}>
+            <div className={s.body}>
+              {/* mini 档的页导航：侧栏整个藏掉之后，六个页面在这里还有入口 */}
+              {density === 'mini' && (
+                <nav className={s.mnav} aria-label="页面切换">
+                  {NAV.map((it) => {
+                    const bd = badgeOf(it.badge)
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className={`${s.mnavItem} ${page === it.id ? s.mnavItemOn : ''}`}
+                        title={it.label}
+                        onClick={() => setPage(it.id)}
+                      >
+                        <span className={s.navIcon} aria-hidden>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.6}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            {it.icon}
+                          </svg>
+                        </span>
+                        <span className={s.mnavLabel}>{it.label}</span>
+                        {bd.n > 0 && (
+                          <span
+                            className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
+                            title={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                          >
+                            {bd.n}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </nav>
+              )}
+              {nav}
+
+              <div className={s.main}>
+                <div className={s.head}>
+                  <div className={s.headT}>
+                    <h1>{navLabel}</h1>
+                    <span className={s.headSub}>{headSub}</span>
+                  </div>
+                  {/*
+                    保存三件常驻（C14）：改参数会让这里亮起来；「机型与版本」页的
+                    新增与删除是即时落盘的，不经过这三个按钮 —— 徽章只反映草稿。
+                  */}
+                  <div className={s.headOps}>
+                    <span
+                      className={`${s.tag} ${s.tagGhost}`}
+                      title={
+                        dirty
+                          ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
+                          : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                      }
+                    >
+                      {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
+                    </span>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      disabled={!dirty || busy}
+                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
+                      onClick={() => void discard()}
+                    >
+                      放弃
+                    </button>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+                      disabled={!dirty || busy}
+                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
+                      onClick={() => void save()}
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+
+                {/*
+                  这一条只剩**真正的开场失败**（今天只有「presets/ 定位不到」一种）。
+                  预设根固定是 `<repo>/presets`，没有可改的路径表单 —— 把目录补齐后
+                  点「重新加载」重开一次会话即可，不用重启应用；「设置页」进去只读地
+                  看三个数据根到底指哪
+                */}
+                {boot?.problem && (
+                  <div className="wb-banner" data-tone="danger" style={{ margin: '0 12px' }}>
+                    {boot.problem}
+                    {boot.detail && <> —— <span className="wb-mono">{boot.detail}</span></>}
+                    <br />
+                    确认仓库里的
+                    <span className="wb-mono">presets/</span>
+                    已就位，然后点
+                    <button
+                      type="button"
+                      className="wb-link"
+                      onClick={() => {
+                        wb.reload().then(reloadBoot).catch(fail)
+                      }}
+                    >
+                      重新加载
+                    </button>
+                    ，或去
+                    <button type="button" className="wb-link" onClick={() => setPage('settings')}>
+                      设置页
+                    </button>
+                    看数据根。
+                  </div>
+                )}
+
+                {/* 正文 = 一叠 pageSlot：去过的页一直挂着，切走的只是藏起来 */}
+                <div className={s.content}>
+                  {visited.map((id) => {
+                    const active = id === page
+                    return (
+                      <div
+                        key={id}
+                        className={s.pageSlot}
+                        hidden={!active}
+                        ref={active ? setSlotEl : undefined}
+                      >
+                        {active ? nowNode : held.current[id]}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 状态栏：三段读数 + 动作组（C14 版式；读数全部来自后端） */}
+            <div className={s.sb}>
+              <span className={s.sbSeg}>
+                <span className={`${s.dot} ${dirty ? s.dotDirty : ''}`} />
+                {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
+              </span>
+              <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
+              <span
+                className={`${s.sbSeg} ${s.sbMinor}`}
+                title={(words && book ? words.artifact[book.artifact].explain : undefined) ?? undefined}
+              >
+                {words && book ? words.artifact[book.artifact].label : '—'}
+              </span>
+              <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
+              <span
+                className={`${s.sbSeg} ${s.sbMinor}`}
+                title={(words && book ? words.snapshot[book.snapshot].explain : undefined) ?? undefined}
+              >
+                {words && book ? words.snapshot[book.snapshot].label : '—'}
+              </span>
+              <span className={s.sbOps}>
+                <button
+                  type="button"
+                  className={s.sbBtn}
+                  disabled={undoStack.length === 0 || busy}
+                  title={
+                    undoStack.length > 0
+                      ? `撤销：${undoStack[undoStack.length - 1].label}`
+                      : (words?.disabled.nothingToUndo ?? '没有可撤销的改动')
+                  }
+                  onClick={() => void undo()}
+                >
+                  撤销
+                </button>
+                <button
+                  type="button"
+                  className={s.sbBtn}
+                  disabled={redoStack.length === 0 || busy}
+                  title={
+                    redoStack.length > 0
+                      ? `重做：${redoStack[redoStack.length - 1].label}`
+                      : (words?.disabled.nothingToUndo ?? '没有可重做的改动')
+                  }
+                  onClick={() => void redo()}
+                >
+                  重做
+                </button>
+                <button
+                  type="button"
+                  className={`${s.sbBtn} ${dirty ? s.sbBtnOn : ''}`}
+                  title="看看这几处都改了什么 —— 每一格从什么值改成什么值"
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  未保存改动（{book?.dirtyCount ?? 0}）
+                </button>
+              </span>
+            </div>
+
+            <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
+
+            {/* Toast：右下角，压在模态遮罩之上（遮罩开着时「已撤销」这类提示还得看得见） */}
+            <div
+              style={{
+                position: 'absolute',
+                right: 14,
+                bottom: 42,
+                zIndex: 50,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                alignItems: 'flex-end',
+              }}
+            >
+              {toastList.map((t) => (
+                <div
+                  key={t.id}
+                  className={`${s.card} ${s.cardBody}`}
+                  style={{ padding: '8px 12px', fontSize: 12, boxShadow: 'var(--shadow)' }}
+                >
+                  {t.text}
+                  {t.action && (
+                    <button
+                      type="button"
+                      className={s.toastAct}
+                      onClick={() => {
+                        t.action?.run()
+                        toasts.close(t.id)
+                      }}
+                    >
+                      {t.action.label}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </FieldLayer>
+      </OverlayHostCtx>
     </div>
   )
 }

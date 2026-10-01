@@ -1,14 +1,32 @@
+import { NotImplementedError } from './errors'
 import type { CalibModel, MkpApi, Preset } from './contract'
+import {
+  allMachines,
+  allPresetFiles,
+  appliedPreset,
+  copyToSlicerIn,
+  localFileIds,
+  localUserFiles,
+  menuEntries,
+  paramMeta,
+  resolveParams,
+  resolveVersionFiles,
+  slicerCopied,
+} from './mockServer'
 
 /**
- * mock 实现：同一套契约，数据写死在本文件里。
+ * mock 实现：同一套契约，浏览器预览时由它作答。
  *
- * **这个文件是临时实现，不是数据层。** Rust 接管时替换的是 `mock.ts` → `rust.ts` 这一个文件，
- * 页面一行不动 —— 所以业务假数据必须住在这里，不能散到页面或 `src/app/constants/` 去。
+ * **这个文件是接线处，不是数据层。** 真机上换的是 `src/api/bridge.ts`（Rust 侧注入的那一份），
+ * 页面一行不动 —— 所以业务假数据不散在页面或 `src/app/constants/` 里。
  * 界面结构数据（页签、品牌/机型/版本三级选项）是另一回事，那些属于应用本身，在 `src/app/constants/`。
  *
- * 数据来自试验场的 `src/mock/mkpFull.ts` 与 `src/mock/testModels.ts`，只取本仓库真正用到的三份：
- * 预设索引、校准板清单、测试模型清单。那两个文件（549 + 100 行，含大量其他页面的假数据）不搬。
+ * 数据分两处，别混：
+ *
+ * - **本文件里**：校准页那三个方法（预设索引、校准板清单、三轴偏移）用的那几份手写常量。
+ * - **`src/api/mockServer/`**：预设页 / 参数页 / 同步页要读的那十二个方法，
+ *   由 `data/*.json` 的六份上游快照解析而来。那一整个目录是搬过来的假后端，
+ *   真机上由 Rust 侧接管，`mockServer/` 整个不再被引用。
  *
  * 刻意**不加延迟**。真实情况是「连接慢、下载快」，而这里连接这一步根本不存在 ——
  * 凭空塞一个 300ms 只会让每次选机型都闪一下骨架屏，那是假的慢，不是真的慢。
@@ -16,56 +34,49 @@ import type { CalibModel, MkpApi, Preset } from './contract'
  */
 
 /**
- * 按「打印件版本」索引的预设。键是 `src/app/constants/variants.ts` 里的 id。
+ * 按「打印件版本」索引的预设 —— `getPreset` 的夹具。
  *
- * 三个版本给三份不同的文件与偏移 —— 这样「换版本 → 文件名和 XYZ 真的都变了」在界面上看得见。
- * 每份带一个 model（`constants/models.ts` 的 id）：校准页的预设下拉选了某一份之后，
- * 要能反填「机型 + 打印件版本」两级，光有 variant 不够。三份都是 A1 mini 那台的文件。
+ * **这一份是 v023 时代留下的**：那三份全是 A1 mini 的，键（`std` / `fast-old` /
+ * `fast-260628`）来自已被替换掉的旧客户端常量表。每一份原来还带一个 `model` 字段，
+ * 是给旧校准页反填「机型 + 版本」两级用的 —— 那页换掉之后没有消费者了，已经拿掉。
+ *
+ * 客户端换成 A40 那一套之后，**页面不再调 `getPreset` 了** —— 它们走文件体系
+ * （`getMachines` / `getVersionFiles` / `getPresetFiles`），见 `src/app/calib/usePreset.ts`
+ * 文件头那段说明。契约里的 `getPreset` 留着（`bridge` 那头对应 Rust 的 `get_preset`），
+ * 所以这里继续给出一个像样的夹具，不删。
+ *
+ * 顺带记一笔：这个文件里原来还导出一份 `presetCatalog`，是给旧页面直接 import 的
+ * （"假数据从 api 层漏进页面"的唯一一处）。旧页面删掉之后它就没有消费者了，已随 P1c 收尾删除 ——
+ * 现在假数据的出口只剩 `mockApi` 这一张契约表。
  */
-const presetIndex: Record<string, Preset & { model: string }> = {
+const presetIndex: Record<string, Preset> = {
   std: {
     name: 'A1M.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1M.toml',
-    model: 'a1mini',
     axes: { x: -0.6, y: 22.4, z: 3.8 },
     speed: 60,
   },
   'fast-old': {
     name: 'A1MF.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml',
-    model: 'a1mini',
     axes: { x: -0.8, y: 22.8, z: 3.9 },
     speed: 65,
   },
   'fast-260628': {
     name: 'A1MF_260628.toml',
     path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF_260628.toml',
-    model: 'a1mini',
     axes: { x: -0.9, y: 23, z: 4 },
     speed: 70,
   },
 }
 
 /**
- * 预设目录 —— 界面上「有哪几份预设可选」。
+ * 校准板清单。
  *
- * 契约里暂时没有对应的方法（五个 command 已经定死，见 doc §4），所以这里以同步常量的形式
- * 暴露给校准头的下拉与两个页面的反填逻辑。Rust 接管时这条会变成第六个 command，
- * 届时改的仍然只是本文件与调用点的三行，不是页面结构。
+ * 契约里没有对应的"预设目录"方法，而旧版校准页的预设下拉需要一份候选表 ——
+ * 那时候这里以同步常量的形式导出过 `presetCatalog`。新版（A40）的预设候选走
+ * `getPresetFiles()` / `getMachines()`，所以那份常量已经退场（见 `presetIndex` 上面那段）。
  */
-export interface PresetCatalogEntry {
-  /** `constants/variants.ts` 里的 id，同时是 getPreset 的键 */
-  variant: string
-  name: string
-  path: string
-  /** `constants/models.ts` 里的 id —— 选了预设要能反填「机型 + 版本」两级 */
-  model: string
-}
-
-export const presetCatalog: PresetCatalogEntry[] = Object.entries(presetIndex).map(
-  ([variant, row]) => ({ variant, name: row.name, path: row.path, model: row.model }),
-)
-
 const calibModels: CalibModel[] = [
   { id: 'z', name: 'Z 轴校准', desc: '校准喷嘴高度与第一层，先打这个', size: '284 KB', ready: true },
   { id: 'xy', name: 'XY 校准', desc: '校准平面内的偏移，Z 轴之后打', size: '377 KB', ready: true },
@@ -97,5 +108,73 @@ export const mockApi: MkpApi = {
 
   async openModel(modelId) {
     console.info('[mock] openModel', modelId)
+  },
+
+  /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
+   *
+   * 数据来自 `src/api/mockServer/`：那份假后端把 `data/*.json` 的六份上游快照
+   * （机型目录 / 参数注册表 / 布局表 / 资产清单 / 套餐 / 切片器文件事实）
+   * 合成下面这些形状。6 台机型 / 10 个版本 / 74 条参数 / 43 条带条件。
+   *
+   * **只答产品仓契约里有的那十二个** —— 工作台那一侧的方法（配方本、套餐定义、
+   * 发布检查…）没有搬，契约里没有它们。真机上换成 Rust 侧实现时，换掉的是
+   * `mockServer/` 这一整个目录，下面这十二行一行不动。
+   */
+  async getMachines() {
+    return allMachines()
+  },
+
+  async getVersionFiles(machineId, versionId) {
+    /* null 的语义是「后端没有这个组合」，不是「这个组合下没文件」 */
+    return resolveVersionFiles(machineId, versionId)
+  },
+
+  async getLocalFiles() {
+    /* 固定演示集合 —— 假后端没有文件系统，见 mockServer/localFiles.ts 文件头 */
+    return localFileIds()
+  },
+
+  async getLocalUserFiles() {
+    /* 同样是一份手写的演示集合：用户自己放进预设目录的那些，云端没有它们 */
+    return localUserFiles()
+  },
+
+  async getAppliedPreset() {
+    /* null = 一套都还没应用。这是合法状态，不是错误 */
+    return appliedPreset()
+  },
+
+  async getSlicerCopied() {
+    return slicerCopied()
+  },
+
+  async copyToSlicer(assetId) {
+    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多 */
+    copyToSlicerIn(assetId)
+  },
+
+  async getPresetFiles() {
+    return allPresetFiles()
+  },
+
+  async getMenu() {
+    return menuEntries()
+  },
+
+  async getParamMeta() {
+    return paramMeta()
+  },
+
+  async getMachineParams(machineId, versionId) {
+    /* 已按机器过滤掉 machineFilter 不适用的、并排除 deprecated / hidden 的字段 */
+    return resolveParams(machineId, versionId)
+  },
+
+  /**
+   * 假后端对这个方法是**故意抛**的（浏览器里没有真网络），产品仓照同一条口径：
+   * 不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
+   */
+  async downloadFiles() {
+    throw new NotImplementedError('downloadFiles')
   },
 }

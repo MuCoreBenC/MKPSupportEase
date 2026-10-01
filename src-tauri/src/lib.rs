@@ -117,6 +117,24 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「机型与版本」那一页：读写 presets/machines/*.toml。
         // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
         app::machines::wb_machines,
+        // 「资产库」：读 `presets/assets.toml`（b05 Task 8），P4 起带三轴派生与筛选；
+        // 删除走数据层的反查守卫（有人引用整次拒绝）
+        app::assets::wb_assets,
+        app::assets::wb_asset_usage,
+        app::assets::wb_remove_asset,
+        // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
+        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）
+        app::bundles::wb_bundles,
+        app::bundles::wb_set_bundle_refs,
+        // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
+        app::build::wb_dist_strays,
+        app::build::wb_clean_dist_strays,
+        // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
+        app::machines::wb_copy_version,
+        app::wb_copy_recipe,
+        // 对照基线（b05 Task 14.9）：diff 只读 + 确认后同步（落点闸在 preset 内部）
+        app::build::wb_baseline_diff,
+        app::build::wb_sync_baseline,
         app::machines::wb_add_machine,
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,
@@ -126,8 +144,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
         app::wb_desk,
         app::wb_matrix,
-        app::wb_stock,
-        app::wb_fallback,
         app::wb_trash,
         app::wb_ui,
         app::wb_save_ui,

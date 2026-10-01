@@ -1,0 +1,169 @@
+/*
+ * 抽屉外壳的样式。定位一律 absolute（见 Drawer.tsx 的文件头）。
+ * 宽松尺度：--pad / --r-lg / --shadow-lift。
+ */
+
+/* 悬浮态的遮罩：不居中、不留内边距 —— 抽屉贴右边、通高 */
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  background: rgb(16 24 32 / 26%);
+}
+
+/*
+ * .hold 的宽度：`min(380px, 100%)` 写在 **.hold** 上、面板填满 .hold ——
+ * 原来面板自己 `width: min(380px, 100%)`，但 .hold 的收缩宽是按面板的 **max-content**
+ * 算的：历史条目里那些 nowrap 的行能把理想宽撑到 397px，面板却停在 380px，靠右
+ * 对齐后右侧留 17px 没人画底 —— 适配缩放下就是面板右边那条白带（作者：「右边还有
+ * 很多空白的地方，它应该紧贴右边」）。宽度上移之后这条缝从机制上不存在了。
+ * 受控宽度（拖宽/记住）由 Drawer 往 .hold 写内联样式，同样落在这条规则上。
+ */
+.hold {
+  display: flex;
+  /*
+   * 宽度上限里那个 `- 56px` 是给窗口左缘留的缝：真软件那条边是
+   * 拖窗口尺寸的热区，抽屉贴上去就和自己的拖宽热区（.grip）打架。
+   * 理由与数值写在 `Drawer.tsx` 的 EDGE_GAP 上；内联的受控宽度用同一个数。
+   */
+  width: min(380px, calc(100% - 56px));
+  min-height: 0;
+  max-width: 100%;
+}
+
+.panel,
+.pinned {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--surface-solid);
+}
+
+/* 悬浮：盖在内容上，贴死右边缘 */
+.panel {
+  position: relative; /* 左缘那条拖宽热区（.grip）的定位祖先 */
+  width: 100%;
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lift);
+}
+
+/*
+ * 左缘拖宽热区（作者：「左边能拖动拖动它的宽度」）——
+ * 逻辑在 shared/useDrawerWidth（BBS 抽屉同一套：三态吸附 + 双击/Home 复位）。
+ * 外观照 BBS 那条约定：6px 透明带、只有 cursor 变化；键盘聚焦显一条软绿带。
+ */
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.grip:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+}
+
+/* 固定：占住右侧一条，内容区让位，不用阴影（它不是浮在上面的东西） */
+.pinned {
+  position: relative;
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sub {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headActs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--text-1);
+}
+
+/* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」） */
+.close:focus-visible {
+  outline: none;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden auto;
+}
+
+.foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * mini：抽屉**不再吃满宽度**。
+ *
+ * 原来这里写着 `width: 100%`（"不留一条看不清的缝"）—— 那正是抽屉贴死窗口左缘的
+ * 来源，也正是作者要改掉的：他要的是反过来，**必须留出那条缝**。
+ * 现在宽高都由上面 `.hold` 的 `calc(100% - 56px)` 兜住，这里只剩面板填满 .hold。
+ */
+[data-density='mini'] .panel {
+  width: 100%;
+}

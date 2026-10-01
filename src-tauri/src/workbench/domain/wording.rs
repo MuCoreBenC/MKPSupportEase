@@ -284,8 +284,8 @@ pub const UNSUPPORTED: &str = "暂不支持";
 
 /// 值在格子里显示成什么。**格式化一律由后端做**，前端不碰（doc §8.3）。
 ///
-/// 三条：空串写「空」；开关写「开启 / 关闭」；有 `choices` 的写命中项的中文名 ——
-/// 界面上显示 `disk` 的话，用户得在一堆中文按钮里猜哪个是 `disk`
+/// 三条：空串写「空」；开关写「开启 / 关闭」；**string 档且带 `choices`** 的写命中项
+/// 的中文名 —— 界面上显示 `disk` 的话，用户得在一堆中文按钮里猜哪个是 `disk`
 pub fn value_text(param: &ParamDef, value: &Value) -> String {
     if param.value_type == ValueType::Bool {
         return match value {
@@ -294,7 +294,15 @@ pub fn value_text(param: &ParamDef, value: &Value) -> String {
             other => plain(other),
         };
     }
-    if let Some(hit) = param.choices.iter().find(|c| &c.value == value) {
+    // `choices` 是取值域**只有 string 这一档**（与 `validate.rs` 的
+    // `value_type == "string"`、`CellEditor` 的控件分派同一道门）：数值参数身上
+    // 挂着的不是可选值，别拿它的中文名盖掉「50 %」这种读数。
+    let hit = if param.value_type == ValueType::Text {
+        param.choices.iter().find(|c| &c.value == value)
+    } else {
+        None
+    };
+    if let Some(hit) = hit {
         return if hit.deprecated {
             // 当前值正好是废弃项时要标出来（doc §15）：它还能用，但不该继续用
             format!("{}（已废弃）", hit.label)
@@ -358,6 +366,10 @@ pub mod disabled {
         "G-code 不做批量：一段多行脚本被整体盖掉是不可逆的误操作，请逐列点开改";
     /// 有阻断时生成按钮全禁用
     pub const BUILD_BLOCKED: &str = "有阻断问题没解决，生成一定会出错";
+
+    /// 发布按钮的禁用句（P5）。生成的那句说「一定会出错」，发布说的是
+    /// 「交出去客户端会缺东西」—— 两道闸不是同一件事，不共用一句
+    pub const PUBLISH_BLOCKED: &str = "有阻断问题没解决，不许发布";
     /// 没有可生成的项
     pub const BUILD_NOTHING_TO_DO: &str = "所有产物都和当前配方一致，没有要生成的";
     /// 这一版没有可交付的产物
@@ -377,6 +389,47 @@ pub mod disabled {
     pub const NOTHING_TO_UNDO: &str = "没有可以撤销的操作";
     /// 这次手势不可撤销
     pub const NOT_UNDOABLE: &str = "删除和生成记录不进撤销栈；删掉的版本在回收站里";
+    /// 往一个已弃用的参数（或已弃用的选项档）里写值。**写闸设在 patch 校验这一处**，
+    /// 界面的 toast 与后端的拒绝共用这一句（C14 §五：说一句人话，不静默失败）
+    pub const DEPRECATED_WRITE_BLOCKED: &str = "已弃用，不能改（上游已标记）";
+
+    /// 删资产被反查拦下时那句话（P4 资产库拦截页）。产品语义里版本不直接引用资产
+    /// （版本 → 套餐 → 资产是间接的），所以是「机型引用」不是原型那句「当 MKP 用」
+    pub const DELETE_ASSET_IN_USE: &str =
+        "还有套餐装着它，或还有机型把它当图 / 图标用 —— 先解除引用";
+}
+
+/* ---------- 「已弃用」（C14 §五） ---------- */
+
+/// 上游注册表标了 `deprecated` 的那一档。判据在注册表那一格，措辞只此一处。
+///
+/// 刻意避开「已删除 / 无此参数」：它还在注册表里、值还读得到，
+/// 说「删了」会让人以为老配方里那个值也没了。
+pub mod deprecated {
+    /// 行上、抽屉里共用的那枚徽章
+    pub const PARAM_LABEL: &str = "已弃用";
+    /// 抽屉「状态」行与禁用控件的悬停解释
+    pub const PARAM_EXPLAIN: &str =
+        "上游已标记这一项不再使用 —— 值照旧读得到（老配方里可能还写着它），但不要再改它";
+    /// 选项级的那枚。说的不是「这个参数在退场」，是「这一档通向的东西已经在退场」
+    pub const CHOICE_LABEL: &str = "已弃用";
+    pub const CHOICE_EXPLAIN: &str =
+        "这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西";
+}
+
+/// 参数台一行上的状态（C14）：**值的出处 + 改没改**，四档。
+///
+/// 「已修改」单独一档：一笔没交出去的改动才是现在最要紧的事实，
+/// 它压过「值是谁给的」—— 保存之后标签自己会变回去。
+pub mod param_status {
+    pub const FACTORY_LABEL: &str = "出厂默认";
+    pub const FACTORY_EXPLAIN: &str = "注册表里的默认值，这台机器没改过、这个版本也没改过";
+    pub const MACHINE_LABEL: &str = "机型默认";
+    pub const MACHINE_EXPLAIN: &str = "来自这台机器的基底，这个版本自己没钉 —— 改基底它会跟着变";
+    pub const VERSION_LABEL: &str = "本版修改";
+    pub const VERSION_EXPLAIN: &str = "这个版本自己钉着的值，不跟随机型基底";
+    pub const DIRTY_LABEL: &str = "已修改";
+    pub const DIRTY_EXPLAIN: &str = "改了还没保存 —— 保存之后才会写进配方";
 }
 
 /* ---------- 「谁把我关了」 ---------- */
@@ -407,6 +460,13 @@ pub mod relate {
         format!("改不动：由「{label}」控制，需{need}")
     }
 
+    /// 行上的短提示（C14 §一/二）：「要 擦料方式 等于 擦料塔 才可改」。
+    /// `need` 只有「等于 擦料塔」半句，主语（卡住它的字段名）在这里补上 ——
+    /// 与 `blocked_note` 分开是因为场合不同：弹层要整句，行上只要短句。
+    pub fn blocked_hint(label: &str, need: &str) -> String {
+        format!("要 {label} {need} 才可改")
+    }
+
     /// 跳过去改那一项
     pub const GO_FIX_IT: &str = "去改那一项";
 
@@ -429,6 +489,16 @@ pub mod relate {
 
     /// 收起来的那几项点开看的入口
     pub const SHOW_ANYWAY: &str = "仍然展开看";
+
+    /// 对照矩阵差异格的悬停句（C14 第四轮）：差异由绿底承担，悬停才说基准是多少
+    pub fn base_value_is(text: &str) -> String {
+        format!("{}是 {text}", super::level_label(super::Level::Machine))
+    }
+
+    /// 对照矩阵格子的悬停句：这一台机型根本没有这个参数（跨机型并集里的「—」）
+    pub fn machine_lacks(machine: &str) -> String {
+        format!("{machine} 没有这个参数")
+    }
 }
 
 /* ---------- 不留白 ---------- */
@@ -445,6 +515,26 @@ pub const MATRIX_NO_MATCH: &str = "没有匹配的字段";
 pub const MATRIX_NO_COLS: &str = "在左边配方本里勾选机型或版本，勾中的会成为这里的列";
 /// 搜索一开，分类过滤让开（doc §8.1）
 pub const MATRIX_SEARCH_SPANS_ALL_TABS: &str = "搜索跨全部分类";
+
+/* ---------- 套餐 / 资产库两页（P4） ---------- */
+
+/// 套餐页没选中时的空态。**不留白** —— 空白会被读成「还没算」
+pub const SELECT_BUNDLE: &str = "左边选一个套餐";
+/// 资产库没选中时的空态
+pub const SELECT_ASSET: &str = "左边选一条文件，这里显示它被谁引用";
+
+/* ---------- 对照矩阵的状态列（C14 第四轮） ---------- */
+
+/// 状态列三档：格子里是词，悬停是解释。「差异/一致」说的都是
+/// 「勾选列 vs 基准机型的机型基底」这一件事。
+pub mod matrix_row {
+    pub const NOT_OWN: &str = "本机无此项";
+    pub const NOT_OWN_EXPLAIN: &str = "这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比";
+    pub const DIFF: &str = "差异";
+    pub const DIFF_EXPLAIN: &str = "有勾选列的值与机型基底不同 —— 绿底的那几格就是";
+    pub const SAME: &str = "一致";
+    pub const SAME_EXPLAIN: &str = "勾选列的值都与机型基底一致";
+}
 
 #[cfg(test)]
 mod tests {

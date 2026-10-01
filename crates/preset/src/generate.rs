@@ -1,0 +1,508 @@
+//! 生成器的**两个动作**：检查（只读）与写盘。
+//!
+//! # 为什么这些代码不在 `bin/gen_presets.rs` 里
+//!
+//! 原来整套「渲染 9 份 → 与入库产物逐字节比 → 扫多余产物」在 CLI 的 `run()` 里。
+//! 工作台（spec `recipe-workbench`）要用同一套：如果在命令那边再写一遍，
+//! 迟早会出现「CLI 绿、界面红」而两边都自称对。所以本模块是**唯一真源**，
+//! CLI 与 Tauri 命令都是它的薄壳。
+//!
+//! # 幂等仍然是硬约束
+//!
+//! 这里不许出现 `uuid::new_v4()` / `now()` / `SystemTime` —— `uuid` 与发布时间只能来自配方。
+//!
+//! 门禁是 `tests/write_discipline_scan.rs` 的 `the_generator_stays_pure`。
+//! 来源仓库那边是 `scripts/check_generator_purity.py`，**那个脚本没有跟着搬进来**，
+//! 所以这句话从 M4a 到现在一直指向一个不存在的文件 —— 指向空气的门禁比没有门禁更糟，
+//! 因为它让人以为有东西在看着。
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use crate::recipe::{Recipe, render};
+
+/// 一次检查的结论。
+///
+/// `first_diff` 是 `None` 才算通过。**只报第一处** —— 九份文件的全量差异是给
+/// `git diff` 看的，这里要的是「照着修哪一行」。
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckReport {
+    /// 比过几份。
+    pub checked: usize,
+    /// 第一处不同在哪（文件名 + 行号 + 两边原文）。
+    pub first_diff: Option<String>,
+}
+
+/// 仓库里那份配方的路径。
+///
+/// **`CARGO_MANIFEST_DIR` 是编译期常量**：它指向编译这个 crate 时的源码树。
+/// 也就是说 —— 从仓库工作副本跑起来的 debug 程序能找到配方，
+/// 而拷到别处的 `.app` 找不到（那正是我们要的：配方不随分发物走）。
+/// **拿不到文件时不 panic**：调用方要能把这条路径显示给人看。
+pub fn recipe_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/preset_recipes.toml")
+}
+
+/// 入库产物目录（`crates/preset/assets/presets/`）。**不是用户目录。**
+pub fn assets_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets")
+}
+
+/// 产物的文件名：`<机型 id>-<版本 id 小写>.toml`。
+///
+/// **这是全仓唯一的命名实现**（规范见 `docs/ARCHITECTURE.md` §10）。生成、发布、
+/// 消费端查找、目录 JSON 四方都走这一个函数；`src-tauri` 那边的
+/// `workbench::app::build::preset_file_name` 是它的薄壳，`PresetKey::file_name`
+/// 有变体那一档也转调这里（它无变体那一档是显式例外：老预设没有版本 id）。
+///
+/// 「唯一」由判据钉住：`naming_follows_the_one_rule`（规则本身）、
+/// `naming_matches_the_preset_crate`（跨 crate 的薄壳）、
+/// `pairing_goes_by_file_name`（产物与基线的名字集合相同）。
+///
+/// 之前是两份独立实现：这里直接拼 `{machine}-{variant}`，`src-tauri` 那边多做一次
+/// `to_lowercase()`。两处形状相同但没有编译器连着它们 —— 漂移只是时间问题，
+/// 而漂移的后果不是报错，是消费端找不到文件。
+///
+/// **小写在这里发生，只发生一次。** 配方里的变体本来就是小写（`standard` / `fast` /
+/// `fastv3.3`），所以对生成这一侧是恒等变换，九份产物的名字一个都不变；
+/// 机型 id 不动（`A1_MINI` 保持原样，它的下划线是身份的一部分）。
+///
+/// **刻意不沿用云端那批文件名**（`A1MF_260628.toml` 之类）：那些名字是另一套系统的，
+/// 照抄只会在用户目录里制造同名混淆。旧名到新身份的映射是一次性的迁移输入。
+pub fn file_name(machine: &str, variant: &str) -> String {
+    format!("{machine}-{}.toml", variant.to_lowercase())
+}
+
+/// 第一处不同在哪 —— 报告要能直接照着修（行号 + 两边原文）。
+pub fn first_diff(want: &str, got: &str) -> Option<String> {
+    for (i, (a, b)) in want.lines().zip(got.lines()).enumerate() {
+        if a != b {
+            return Some(format!("第 {} 行\n    入库的：{a}\n    生成的：{b}", i + 1));
+        }
+    }
+    if want.lines().count() != got.lines().count() {
+        return Some(format!(
+            "行数不同（入库 {} 行 / 生成 {} 行）",
+            want.lines().count(),
+            got.lines().count()
+        ));
+    }
+    (want != got).then(|| "只有行尾或结尾换行不同".to_string())
+}
+
+/// 入库目录里有没有配方不认的 `.toml`。
+///
+/// 机型改名之后，老产物会留在那儿被 `include_str!` 带走 —— 那种错在配方里看不出来。
+fn strays(dir: &Path, expected: &[String]) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".toml") && !expected.contains(n))
+        .collect();
+    out.sort();
+    out
+}
+
+/// 渲染全部组合并与入库产物逐字节比。**只读**，一个字节都不写。
+pub fn check_all(recipe: &Recipe, dir: &Path) -> Result<CheckReport, String> {
+    let mut checked = 0usize;
+    let mut expected = Vec::new();
+
+    for (machine, variant) in recipe.combos() {
+        let text = render(recipe, &machine, &variant)
+            .map_err(|e| format!("{machine}:{variant} 渲染失败：{e}"))?;
+        let name = file_name(&machine, &variant);
+        expected.push(name.clone());
+        // **产物缺一份不是「跑不动」，它是一种差异**（spec `time-machine-and-delete` §0）：
+        // 刚在工作台里加完一台机型时，它本来就还没有产物 —— 那是正常状态，
+        // 报成错误会让状态条留着上一次的绿字，屏幕上的数字就开始骗人。
+        let Ok(on_disk) = std::fs::read_to_string(dir.join(&name)) else {
+            return Ok(CheckReport {
+                checked,
+                first_diff: Some(format!(
+                    "配方里有 {machine}:{variant}，入库产物里还没有 {name} —— \
+                     跑 `--write`，或者在工作台点「重新生成入库产物」"
+                )),
+            });
+        };
+        if let Some(where_) = first_diff(&on_disk, &text) {
+            return Ok(CheckReport {
+                checked,
+                first_diff: Some(format!("{name} 与配方生成的结果不同 —— {where_}")),
+            });
+        }
+        checked += 1;
+    }
+
+    let strays = strays(dir, &expected);
+    if !strays.is_empty() {
+        return Ok(CheckReport {
+            checked,
+            first_diff: Some(format!(
+                "{} 里有配方不认的产物：{strays:?} —— 机型改名了？删掉它们",
+                dir.display()
+            )),
+        });
+    }
+    Ok(CheckReport {
+        checked,
+        first_diff: None,
+    })
+}
+
+/// 渲染全部组合并写进入库目录，返回写了几份。
+///
+/// 多余产物**不删**：删文件的动作不该藏在「生成」里。它们由 [`check_all`] 点名，人来删。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：写的是本 crate 自己的
+/// `assets/presets/`（`gen-presets` 这个**仓库内开发工具**的产出目录），不是用户数据、
+/// 也不是 `presets/` 真源。而且这条路只有显式 `--write` 才走得到，默认动作是 `--check`。
+/// 崩溃留半个文件的后果是"再跑一次 `--write`"，不是数据坏掉。
+///
+/// **退役条件**：Task 19 统一写盘入口落地后改成转调它；或 Task 18 把这批产物的
+/// 归属定案、这个开发工具随之退役。
+#[allow(clippy::disallowed_methods)]
+pub fn write_all(recipe: &Recipe, dir: &Path) -> Result<usize, String> {
+    let mut written = 0usize;
+    std::fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{e}", dir.display()))?;
+    for (machine, variant) in recipe.combos() {
+        let text = render(recipe, &machine, &variant)
+            .map_err(|e| format!("{machine}:{variant} 渲染失败：{e}"))?;
+        let path = dir.join(file_name(&machine, &variant));
+        std::fs::write(&path, &text).map_err(|e| format!("写 {} 失败：{e}", path.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// 对照基线目录（`crates/postprocess/tests/fixtures/presets/`）。
+///
+/// **这是内核判据的输入，也是「上一次审阅通过的样子」**。翻案之后（spec `recipe-workbench` §0）
+/// 它不再是真源：真源是配方，产物由配方生成，基线是产物的一份留影。
+pub fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/presets")
+}
+
+/// 目录里的 `.toml`，按**文件名**索引（`A1-standard.toml` → 路径）。
+///
+/// **配对按文件名，是 b05 Task 5 之后才成立的事。** 以前基线沿用云端那套名字
+/// （`A1F_260628.toml`），与产物名对不上，只能读文件头认身份（旧的 `pair_by_head`）。
+/// 基线改名之后两边名字都由 [`file_name`] 算出 —— **名字就是身份**，
+/// 于是配对不需要再读文件内容，能读到的第一处差异就是真差异。
+fn toml_files(dir: &Path) -> Result<BTreeMap<String, PathBuf>, String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("读不到 {}：{e}", dir.display()))?;
+    let mut out = BTreeMap::new();
+    for path in entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+    {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        out.insert(name, path);
+    }
+    Ok(out)
+}
+
+/// K-G0'：入库产物与对照基线九对九逐字节相同。
+///
+/// **配对按文件名**（b05 Task 5.2）：两边的名字都由 [`file_name`] 算出，
+/// 「同一份预设」现在等价于「同一个文件名」，所以这里一个字节的内容都不用先读。
+///
+/// **不看配方** —— 「产物与配方一致」是 [`check_all`] 的事。这一条只回答
+/// 「产物变过没有、变的那一处审阅过没有」。两条分开，红的时候才知道该修哪一头。
+pub fn check_baseline(assets: &Path, fixtures: &Path) -> Result<CheckReport, String> {
+    let made = toml_files(assets)?;
+    let base = toml_files(fixtures)?;
+    let mut checked = 0usize;
+
+    for (name, made_path) in &made {
+        let Some(base_path) = base.get(name) else {
+            return Ok(CheckReport {
+                checked,
+                first_diff: Some(format!(
+                    "{name} 在对照基线里没有对应的那一份 —— 新机型？确认过就同步基线"
+                )),
+            });
+        };
+        let a = std::fs::read_to_string(base_path).map_err(|e| format!("读不回来：{e}"))?;
+        let b = std::fs::read_to_string(made_path).map_err(|e| format!("读不回来：{e}"))?;
+        if let Some(where_) = first_diff(&a, &b) {
+            return Ok(CheckReport {
+                checked,
+                first_diff: Some(format!("{name}（基线 / 产物）不同 —— {where_}")),
+            });
+        }
+        checked += 1;
+    }
+
+    for name in base.keys() {
+        if !made.contains_key(name) {
+            return Ok(CheckReport {
+                checked,
+                first_diff: Some(format!(
+                    "对照基线里有 {name}，而配方生成不出这一份 —— 机型删了？基线也该跟"
+                )),
+            });
+        }
+    }
+    Ok(CheckReport {
+        checked,
+        first_diff: None,
+    })
+}
+
+/// [`sync_baseline`] 的落点闸：只允许两类目标目录。
+///
+/// 它是全仓**唯一**能改内核判据期望值的写盘点，所以"写到哪"也要钉住，
+/// 而不是只在文档里叮嘱一句：
+///
+/// - **真基线目录** [`fixtures_dir`]（产品路径）；
+/// - **系统临时目录之下**（判据路径 —— 那几条测试用 `tempfile::tempdir()`）。
+///
+/// 其他任何路径一律拒绝。误传一个仓库内别的目录，后果是"判据的期望值被悄悄换掉"，
+/// 而那种错在产物上看不出来 —— 与「禁止 `UPDATE_GOLDEN=1`」防的是同一件事。
+fn check_baseline_target(fixtures: &Path) -> Result<(), String> {
+    let target = fixtures
+        .canonicalize()
+        .map_err(|e| format!("基线目录不可用（{}）：{e}", fixtures.display()))?;
+    if fixtures_dir().canonicalize().ok().as_deref() == Some(target.as_path()) {
+        return Ok(());
+    }
+    if let Ok(tmp) = std::env::temp_dir().canonicalize()
+        && target.starts_with(&tmp)
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "拒绝把对照基线写到 {} —— 只允许 {}（真基线）或系统临时目录（判据用）",
+        target.display(),
+        fixtures_dir().display()
+    ))
+}
+
+/// 把入库产物同步成对照基线，返回同步了几份。
+///
+/// **它写的是内核判据的夹具**（`crates/postprocess/tests/fixtures/presets/`）——
+/// 也就是说这个函数**有能力改判据的期望值**。全仓能做到这件事的只有它一处。
+/// 迁移期那条"禁止 `UPDATE_GOLDEN=1`"的纪律讲的是同一件事：
+/// 把现状抄成期望，判据就从"证明"退化成"自比自"。
+///
+/// **这是一个需要人先看过 diff 的动作**（doc §0 的 ③）：它把「现在的产物」定成
+/// 「上一次审阅通过的样子」。自动化它等于把唯一的安全网拆了。
+///
+/// 落点由 [`check_baseline_target`] 咬住：只能写真基线目录或临时目录。
+///
+/// 基线那边的文件名**就是产物的文件名**（同一个 [`file_name`] 算出来的）——
+/// 内容相同就不写，所以「同步」只在真的变了的时候落笔。
+///
+/// **写盘豁免**（`clippy::disallowed_methods`）：见上 —— 它的风险不在"截断半个文件"，
+/// 而在"改了判据期望却没人看 diff"。兜着后者的是人工审阅、`git diff`
+/// 与上面那条落点断言。
+///
+/// **退役条件**：Task 18 把这批产物的归属定案（产物改由我们自己生成）之后，
+/// 这个函数与它的基线目录一起退役。
+#[allow(clippy::disallowed_methods)]
+pub fn sync_baseline(assets: &Path, fixtures: &Path) -> Result<usize, String> {
+    check_baseline_target(fixtures)?;
+    let made = toml_files(assets)?;
+    let mut synced = 0usize;
+    for (name, made_path) in &made {
+        let text = std::fs::read_to_string(made_path).map_err(|e| format!("读不回来：{e}"))?;
+        let target = fixtures.join(name);
+        if std::fs::read_to_string(&target).ok().as_deref() == Some(text.as_str()) {
+            continue; // 内容相同就不写：mtime 变动会让别的判据重跑
+        }
+        std::fs::write(&target, &text).map_err(|e| format!("写 {} 失败：{e}", target.display()))?;
+        synced += 1;
+    }
+    Ok(synced)
+}
+
+// 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
+// （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
+#[allow(clippy::disallowed_methods)]
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    fn recipe() -> Recipe {
+        let text = std::fs::read_to_string(recipe_path()).expect("仓库里的配方");
+        Recipe::parse(&text).expect("配方合法")
+    }
+
+    /// 命名规范（`docs/ARCHITECTURE.md` §10）的四条不变式。
+    ///
+    /// 这个函数现在是**全仓唯一**的命名实现，`src-tauri` 那边是薄壳。以前两处各拼一遍，
+    /// 而两份独立实现之间没有编译器 —— 这条判据就是那个编译器。
+    #[test]
+    fn naming_follows_the_one_rule() {
+        // ① 版本 id 小写化，且只在这里发生一次
+        assert_eq!(file_name("A1", "FASTV3.3"), "A1-fastv3.3.toml");
+        assert_eq!(file_name("A1", "fastv3.3"), "A1-fastv3.3.toml");
+
+        // ② 机型 id 原样保留 —— `A1_MINI` 的下划线是身份的一部分，不许跟着小写或被换成 `-`
+        assert_eq!(file_name("A1_MINI", "STANDARD"), "A1_MINI-standard.toml");
+
+        // ③ 分隔符是 `-`：机型 id 自己含 `_`，用 `_` 分隔会歧义
+        assert_eq!(file_name("P1S", "lite"), "P1S-lite.toml");
+
+        // ④ 对配方这一侧是恒等变换 —— 配方里的变体本来就是小写，
+        //    所以引入小写化没有改动任何一份入库产物的名字
+        for (machine, variant) in recipe().combos() {
+            assert_eq!(
+                variant,
+                variant.to_lowercase(),
+                "配方里的变体 {machine}:{variant} 不是小写 —— \
+                 小写化就不再是恒等变换，产物会改名"
+            );
+        }
+    }
+
+    /// 仅大小写不同的版本 id 会塌成同一个文件名。
+    ///
+    /// 这不是"可能冲突"，是**必然冲突**：`docs/ARCHITECTURE.md` §10.4 因此要求唯一性检查
+    /// 大小写不敏感。冲突的表现不是报错，是后写的产物静默覆盖先写的 —— 所以这里先把
+    /// 事实钉住，校验层（b05 Task 11）再据此拦。
+    #[test]
+    fn case_only_differences_collide() {
+        assert_eq!(file_name("A1", "Fast"), file_name("A1", "FAST"));
+        assert_eq!(file_name("A1", "fast"), file_name("A1", "FaSt"));
+    }
+
+    /// 入库产物与配方一致（与 `gen-presets --check` 同一条结论，这里从库里咬一次）。
+    #[test]
+    fn stored_presets_match_the_recipe() {
+        let report = check_all(&recipe(), &assets_dir()).expect("检查能跑完");
+        assert_eq!(
+            report.first_diff, None,
+            "入库产物与配方生成的结果不同：{:?}",
+            report.first_diff
+        );
+        assert_eq!(report.checked, 9, "9 个组合都要比过");
+    }
+
+    /// 写盘是幂等的：写两次、内容不变（防 uuid/时间溜进渲染路径）。
+    #[test]
+    fn writing_twice_changes_nothing() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let r = recipe();
+        assert_eq!(write_all(&r, dir.path()).expect("第一次写"), 9);
+        let first: Vec<String> = r
+            .combos()
+            .iter()
+            .map(|(m, v)| std::fs::read_to_string(dir.path().join(file_name(m, v))).expect("读回"))
+            .collect();
+        assert_eq!(write_all(&r, dir.path()).expect("第二次写"), 9);
+        for ((m, v), before) in r.combos().iter().zip(first) {
+            let after = std::fs::read_to_string(dir.path().join(file_name(m, v))).expect("读回");
+            assert_eq!(after, before, "{m}:{v} 两次生成的内容不同");
+        }
+    }
+
+    /// 多余产物要被点名（改机型名之后最容易留下的那种）。
+    #[test]
+    fn a_stray_product_is_named() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let r = recipe();
+        write_all(&r, dir.path()).expect("写产物");
+        std::fs::write(dir.path().join("A9-old.toml"), "# 老产物\n").expect("造一份多余的");
+        let report = check_all(&r, dir.path()).expect("检查能跑完");
+        let why = report.first_diff.expect("必须点名");
+        assert!(why.contains("A9-old.toml"), "实测：{why}");
+    }
+
+    /// **两边的文件名集合相同** —— 配对直接按名字（b05 Task 5）。
+    ///
+    /// 这条判据以前叫 `pairing_goes_by_head_not_by_file_name`，它的前提是
+    /// 「两边命名不同」（产物 `A1-fastv3.3.toml` ⇄ 基线 `A1F_260628.toml`），
+    /// 所以只能读文件头认身份；它还带一句 `assert_ne!` 预告「名字一样了要重写」。
+    /// 基线改名之后那一刻到了：名字由同一个 [`file_name`] 算出，
+    /// 于是改咬**集合相等** —— 少一份、多一份、名字写岔了都红，
+    /// 而 `check_baseline` 也从此不需要读第二个字节。
+    #[test]
+    fn pairing_goes_by_file_name() {
+        let made = toml_files(&assets_dir()).expect("产物能列出来");
+        let base = toml_files(&fixtures_dir()).expect("基线能列出来");
+        assert_eq!(made.len(), 9, "产物应有 9 份");
+        assert_eq!(base.len(), 9, "基线应有 9 份");
+        let made_names: BTreeSet<&String> = made.keys().collect();
+        let base_names: BTreeSet<&String> = base.keys().collect();
+        assert_eq!(
+            made_names, base_names,
+            "两边文件名集合不同 —— 只在一侧出现的那些就是配不上的那些"
+        );
+    }
+
+    /// K-G0'：产物与对照基线九对九逐字节相同。
+    #[test]
+    fn kg0p_products_match_the_baseline() {
+        let report = check_baseline(&assets_dir(), &fixtures_dir()).expect("能跑完");
+        assert_eq!(
+            report.first_diff, None,
+            "产物与对照基线不同：{:?}",
+            report.first_diff
+        );
+        assert_eq!(report.checked, 9, "9 对都要比过");
+    }
+
+    /// 基线里少一份 ⇒ 点名说「新机型？确认过就同步基线」，不是静默跳过。
+    #[test]
+    fn a_missing_baseline_is_named() {
+        let assets = tempfile::tempdir().expect("临时目录");
+        let base = tempfile::tempdir().expect("临时目录");
+        let r = recipe();
+        write_all(&r, assets.path()).expect("写产物");
+        // 基线只放 8 份：抄过去之后删掉一份
+        for (m, v) in r.combos() {
+            let name = file_name(&m, &v);
+            if name == "X1C-lite.toml" {
+                continue;
+            }
+            std::fs::copy(assets.path().join(&name), base.path().join(&name)).expect("抄一份");
+        }
+        let report = check_baseline(assets.path(), base.path()).expect("能跑完");
+        let why = report.first_diff.expect("必须点名");
+        assert!(why.contains("X1C-lite.toml"), "实测：{why}");
+    }
+
+    /// 同步基线：内容相同的不写（mtime 不动），改过的那一份写回去。
+    #[test]
+    fn syncing_the_baseline_only_writes_what_changed() {
+        let assets = tempfile::tempdir().expect("临时目录");
+        let base = tempfile::tempdir().expect("临时目录");
+        let r = recipe();
+        write_all(&r, assets.path()).expect("写产物");
+        write_all(&r, base.path()).expect("基线先与产物一致");
+        assert_eq!(
+            sync_baseline(assets.path(), base.path()).expect("同步"),
+            0,
+            "两边一致时一个字节都不该写"
+        );
+
+        // 扰动基线的**一行**，不是整份文件：整份换掉会让这份基线读不出内容，
+        // 那时红的是别的东西（构造/解析），而不是「基线与产物不同」—— 两回事。
+        let victim = base.path().join("A1-standard.toml");
+        let text = std::fs::read_to_string(&victim).expect("读基线");
+        std::fs::write(
+            &victim,
+            text.replace("speed_limit = 70", "speed_limit = 71"),
+        )
+        .expect("扰动基线");
+        assert_eq!(
+            sync_baseline(assets.path(), base.path()).expect("同步"),
+            1,
+            "只该写回那一份"
+        );
+        let report = check_baseline(assets.path(), base.path()).expect("能跑完");
+        assert_eq!(report.first_diff, None, "同步之后应当全等");
+    }
+}

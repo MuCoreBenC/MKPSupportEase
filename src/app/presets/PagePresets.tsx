@@ -1,0 +1,788 @@
+/*
+ * 预设（去标题 + 列随类型变 + 常驻操作列 + 两种「生效」分开）。
+ *
+ * # 版面
+ *
+ * ```
+ * ┌MKP 配置│切片器配置┐ ┌本地│云端┐        机型[A1 ▾]  [搜索…]
+ * ● 已应用 A1.toml · A1            定位                    共 4 项      ← MKP
+ * 喷嘴 全部 0.2 0.4 0.6   层高 全部 0.08 0.10 … 更多               ← 切片器
+ * 名称            机型   版本    时间   大小   来源   状态      操作
+ * A1.toml         A1    标准版  09-14  4.2 KB 官方   ● 已应用  已应用
+ * ────────────────────────────────────────────────────────────
+ * 仓库 20 · 本机 4 + 我的 3
+ * ```
+ *
+ * **两排工具栏**：第一排主工具栏（一级类型分段 + 二级位置分段靠左，
+ * 机型 + 搜索靠右），第二排轻筛选 —— MKP 是**全局唯一的已应用状态条**（不跟机型筛选走，
+ * 筛没了有「定位」），切片器是**喷嘴 / 层高筛选**（没有应用概念，不找替代状态）。
+ * 左右 padding 收到 `--page-x`（约 20–24px），与表格名称列同一条线。
+ *
+ * **页面里没有「预设」这两个字** —— 顶栏已经把「预设」高亮了，页面里再写一遍是重复。
+ *
+ * 上一版表格上方有**四条**横带（页头 / 机型版本 / 分段 / 提示），每条都 `flex-shrink: 0`，
+ * 挤掉的全是表格 —— mini 档实测表格只剩 40px，表头自己就 34px，一行都露不出来。
+ * 这一轮前三条压成一条工具条（窄档折两行），删掉的四样各有理由：
+ *
+ *   「预设」标题                 顶栏已经高亮了「预设」，重复
+ *   副标题「本地的就是本地的…」  那是设计说明，不是数据。规则要靠界面本身说清
+ *   「待下载 N 个」              它按机型算，而当前这张表是「MKP · 本地」—— 两个口径，
+ *                                数字和眼前的表对不上，那就是噪音。云端表每行自己标
+ *                                「未下载 / 已下载」，够了
+ *   「演示：当成本地有」开关      作者说删
+ *
+ * 右上角那个数是**当前这张表的真计数**（筛后）：「共 N 项」。不是「本地 4 · 云端 9」那种
+ * 两个口径并排 —— 眼前只有一张表，报第二张表的数只会让人去对一个看不见的东西。
+ * 搜索框里原来还有一枚「命中 N 条」，和「共 N 项」是同一个数，删掉了：同一个数字写两遍，
+ * 哪天算法改了就会有一处忘记跟。
+ *
+ * # 本地 / 云端是**两张互不相干的表**
+ *
+ *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ 你自己放进
+ *           预设目录的（`getLocalUserFiles()`，**云端没有它们**）
+ *   云端表  菜单上有什么官方文件（已分配 + 可选）。仅归档的一处都不出现
+ *
+ * 一个官方文件下载之后两张表里都有，那是对的：云端表说「仓库里有这个东西」，
+ * 本地表说「你机器上有这个东西」。两张表各回答一个问题，不合流。
+ *
+ * # 两种类型的「生效」是两件不同的事
+ *
+ * ```
+ * MKP     生效 = 设为当前配置       applyPreset()    已应用 / 未应用   操作 [应用]
+ * 切片器   生效 = 复制到切片器目录   copyToSlicer()   已复制 / 未复制   操作 [复制]
+ * ```
+ *
+ * 切片器 profile 光下到本机没用 —— 它得躺在切片器自己的 profile 目录里才生效。
+ * 这两个写在**假后端只改内存，刷新页面还原**，所以提示条里把这一句说出来。
+ *
+ * # 这一页说的话，逐个交代来源
+ *
+ *   文件清单 / 路径 / 类型   `api.getPresetFiles()`                      真（20 个）
+ *   套餐内 / 可单下          `PresetFileInfo.delivery`                   真（14 默认 / 6 可选）
+ *   属于哪个机型版本         `api.getVersionFiles()` + `machineIds`      真（就是「版本」那一列）
+ *   本机有哪些官方文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
+ *   我自己的文件             `api.getLocalUserFiles()`                   **演示集合**（同上，实测 3 个）
+ *   已应用                   `STORAGE.clientActive` 唯一底账（单条目）  真（**全局唯一**，落本机，刷新还在）
+ *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
+ *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
+ *   时间 / 大小              `PresetFileInfo.{modifiedText,sizeText}`    **假后端按 path 稳定推的演示值**，前端一行不编
+ *   与出厂不同 N 项          `getMachineParams` 里 origin === 'variant'  真（按已应用那个机型+版本算）
+ *   暂不支持                 `VersionFiles.incomplete` + `missing[]`     真（只有 A2L）
+ *   应用 / 复制              应用：`STORAGE.clientActive` 一个口（官方 / release 合流，落本机）
+ *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
+ *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
+ *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
+ *   **下载**                 `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
+ *   **复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接**
+ *                            ——                                         **契约里连签名都没有**，就地说缺什么
+ *
+ * 数据与判定都在 `presetTree.ts`（纯函数）与 `usePresetData.ts`（三态加载 + 两张表），
+ * 这个文件只管版面与动作。
+ *
+ * # 提示条那一格是约定
+ *
+ * 表格上方那一条：**以后所有提示与错误都走这个位置**，一次只显示一条，后来的替换前面的，
+ * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
+ */
+
+import { useRef, useState } from 'react'
+import { api, NotImplementedError } from '../../api'
+import type { FileRef } from '../../api'
+import { FieldLayer, FieldPopover } from '../../components/field'
+import { ContextMenu, useContextMenu } from '../../components/menu'
+import type { ContextMenuEntry } from '../../components/menu'
+import type { Density } from '../../hooks/useDensity'
+import PresetPicker from './PresetPicker'
+import PresetScopeBar from './PresetScopeBar'
+import PresetTable from './PresetTable'
+import {
+  DOWNLOAD_WHY,
+  MISSING_METHOD,
+  NO_ASSET_WHY,
+  STATUS_TEXT,
+  STATUS_WHY,
+  UNSUPPORTED_TEXT,
+  noContractText,
+  notImplementedText,
+} from './presetTree'
+import type {
+  PresetKindAxis,
+  PresetScopeAxis,
+  PresetLocalRow,
+  PresetTableRow,
+} from './presetTree'
+import type { ActiveEntry } from '../store/package'
+import { usePresetData, usePresetPage } from './usePresetData'
+import s from './PagePresets.module.css'
+
+
+interface Props {
+  density: Density
+  /**
+   * 右键「在 BBS 预设查看器中打开」的出口。外壳（App）给的 ——
+   * 切 tab 的状态住在那一层，这一页只负责把目标文件名交出去。
+   */
+  onOpenBbs?: (name: string) => void
+}
+
+const PLACEHOLDER: Record<Density, string> = {
+  ultra: '搜索文件名或路径…',
+  wide: '搜索文件名或路径…',
+  compact: '搜索文件…',
+  mini: '搜索…',
+}
+
+/** 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」 */
+interface Note {
+  text: string
+  bad: boolean
+}
+
+export default function PagePresets({ density, onOpenBbs }: Props) {
+  const data = usePresetData()
+  const page = usePresetPage(data)
+  const rootRef = useRef<HTMLDivElement>(null)
+  /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
+  const flashRef = useRef<HTMLDivElement>(null)
+
+  /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
+  const menu = useContextMenu<PresetTableRow>()
+  /*
+   * 展开详情的那一行（rowKey）。行上点击与右键菜单的「查看详情」共享同一个状态，
+   * 同一时刻只开一行 —— 与参数页的 expandedKey 同构。
+   */
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [note, setNote] = useState<Note | null>(null)
+  /*
+   * 正在做动作的那一行（rowKey）。只用来把那一颗按钮禁掉 —— 假后端是同进程的内存写，
+   * 这一下快到看不见；真后端上「应用」要写盘，连点两次就会发两个写。
+   * 不做全表遮罩：一行的动作不该把整张表锁住。
+   */
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+
+  /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLButtonElement>(null)
+
+  /*
+   * 状态条上的「定位」。
+   *
+   * 全局只有一个「已应用」，机型筛选可能正好把它筛没了 —— 作者不愿意看到
+   * 「筛完之后不知道哪套在生效」。点它清掉机型筛选（已应用一定在本地 MKP 表里），
+   * 等重画完把那一行滚到视口中央。它替代了原来页脚那个「已应用 … →」按钮：
+   * 客户端不知道「基底 / 出厂」这些工作台的概念，页脚那句话整个搬走了。
+   *
+   * 滚到之后**亮一下再慢慢退光**（作者：「就跟校准页那个的一样……差不多的
+   * 功能就复用，只是颜色不同」）。闪烁本体是 `s.locateFlash` 那块**盖在行上的普通
+   * div**：现量现设位置，Web Animations API 淡出（同款 1.8s、先停在 55%）后隐藏。
+   *
+   * 为什么不照抄校准页给行本身挂 class 跑 keyframes —— 这张表是折叠边框表，
+   * 在 tr/td 背景上跑动画，适配缩放下合成层缓存会留旧帧，行里就多出一条
+   * 若隐若现的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。
+   * div 的终态是 display:none，缓存与否无关紧要；表格内部从此没有动画。
+   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
+   */
+  const locateApplied = () => {
+    menu.close()
+    page.setKind('mkp')
+    page.setScope('local')
+    data.pickMachine('')
+    window.setTimeout(() => {
+      const root = rootRef.current
+      const overlay = flashRef.current
+      const row = root?.querySelector('tr[data-live="true"]') as HTMLElement | null
+      if (!root || !overlay || !row) return
+      /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
+      row.scrollIntoView({ block: 'center' })
+      const rr = row.getBoundingClientRect()
+      const pr = root.getBoundingClientRect()
+      overlay.style.left = `${rr.left - pr.left}px`
+      overlay.style.width = `${rr.width}px`
+      overlay.style.top = `${rr.top - pr.top}px`
+      overlay.style.height = `${rr.height}px`
+      overlay.style.display = 'block'
+      overlay.getAnimations().forEach((a) => a.cancel())
+      overlay
+        .animate(
+          [
+            { opacity: 1 },
+            { opacity: 1, offset: 0.55 },
+            { opacity: 0 },
+          ],
+          { duration: 1800, easing: 'ease-out' },
+        )
+        .onfinish = () => {
+          overlay.style.display = 'none'
+        }
+    }, 60)
+  }
+
+  /*
+   * 切机型 / 分段之前先关菜单：它指向的那一行可能已经不在了，
+   * 停在一个不存在的行上的菜单，点哪一项都是在对空气动手。
+   */
+  const pickMachine = (machineId: string) => {
+    menu.close()
+    data.pickMachine(machineId)
+  }
+
+
+  const setKind = (next: PresetKindAxis) => {
+    menu.close()
+    page.setKind(next)
+  }
+
+  const setScope = (next: PresetScopeAxis) => {
+    menu.close()
+    page.setScope(next)
+  }
+
+  // ——————————————————————————————————————————————————————————
+  // 菜单里的动作
+  // ——————————————————————————————————————————————————————————
+
+  /**
+   * 契约里**连签名都没有**的那几件事（复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接）。
+   *
+   * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
+   * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
+   */
+  const sayNoContract = (method: string, row: PresetTableRow) => {
+    setNote({ text: `${noContractText(method)}（${row.fileName}）`, bad: true })
+  }
+
+  /**
+   * 下载。两条路：
+   *
+   *   工作台发布的那一份（`releaseUid` 在）  → `downloadRelease(uid)`，**真的能下** ——
+   *     云端 Release 里的 TOML 落进本机 preset 目录，本地表跟着多出一行
+   *   官方仓库的文件                        → 契约里有签名，所以**照调**。
+   *     假后端一定抛 `NotImplementedError`，界面接住并显示「尚未实现：downloadFiles」
+   *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
+   */
+  const download = (row: PresetTableRow) => {
+    if (row.releaseUid !== undefined) {
+      setBusyKey(row.rowKey)
+      setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
+      data.downloadRelease(row.releaseUid).then(
+        () => {
+          setBusyKey(null)
+          setNote({ text: `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`, bad: false })
+        },
+        (e: unknown) => {
+          setBusyKey(null)
+          setNote({ text: `下载失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+        },
+      )
+      return
+    }
+    const ref: FileRef = { kind: row.kind, fileName: row.fileName, path: row.path }
+    setBusyKey(row.rowKey)
+    setNote({ text: `正在请壳下载 ${row.fileName}…`, bad: false })
+    api.downloadFiles([ref]).then(
+      () => {
+        /* 真后端接上以后走这一支。这一轮到不了这里 —— 假后端一定抛 */
+        setBusyKey(null)
+        setNote({ text: `已交给外壳下载 ${row.fileName}`, bad: false })
+      },
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({
+          text:
+            e instanceof NotImplementedError
+              ? `${notImplementedText('downloadFiles')}（${row.fileName}）`
+              : `下载失败：${e instanceof Error ? e.message : String(e)}`,
+          bad: true,
+        })
+      },
+    )
+  }
+
+  /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
+  const togglePin = (row: PresetTableRow) => {
+    page.togglePin(row.pinKey)
+    setNote({
+      text: row.pinned
+        ? `已取消置顶 ${row.fileName}（只影响这张表的顺序）`
+        : `已置顶 ${row.fileName}（只影响这张表的顺序，不是「设为当前」）`,
+      bad: false,
+    })
+  }
+
+  /**
+   * 操作列上那两个**真的能用**的动作。
+   *
+   * 一个路子：写底账 → 重读底账（`usePresetData` 的 `apply` / `copy` 里做的）。
+   * **MKP 应用成功不再发提示条**（作者：「这一行可以去掉了，因为上面有了」）——
+   * 已应用状态条就在同一屏上面，应用哪一份写在它身上，同一句话说两遍；
+   * 状态条的 `title` 里说清它是本机底账（刷新还在）。
+   * 切片器的复制成功照旧发：它没有状态条，行上的「已复制」只说状态、不说去了哪。
+   *
+   * 失败照抛出来说：假后端的两条校验（仓库里没这个 asset、类型对不上）就是从这里冒上来的，
+   * 真后端还会多两种（切片器路径没配、目标已存在）。不吞、不假装成功。
+   */
+  const runLive = (row: PresetLocalRow) => {
+    /* 切片器：照旧走契约那一个写（假后端内存，刷新还原），成功要发提示条 */
+    if (page.kind !== 'mkp') {
+      const slicerId = row.assetId
+      if (slicerId === undefined) return /* 到不了这里：切片器行必有 asset id */
+      setBusyKey(row.rowKey)
+      data.copy(slicerId).then(
+        () => {
+          setBusyKey(null)
+          setNote({
+            text: `已复制 ${row.fileName} 到切片器目录（假后端只改内存，刷新会还原）`,
+            bad: false,
+          })
+        },
+        (e: unknown) => {
+          setBusyKey(null)
+          setNote({ text: `复制失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+        },
+      )
+      return
+    }
+
+    /*
+     * MKP：「应用」只有一个写 —— 唯一底账 `STORAGE.clientActive`。
+     * release 行认 uid（`A1/STANDARD` 里拆出版本 id）、官方行认 assetId + 版本 id；
+     * 写的就是首页反填要读的那一条。
+     */
+    const entry: ActiveEntry | null =
+      row.releaseUid !== undefined
+        ? {
+            kind: 'release',
+            ref: row.releaseUid,
+            machineId: row.machineId,
+            versionId: row.releaseUid.split('/')[1] || null,
+            version: row.releaseVersion ?? null,
+          }
+        : row.assetId === undefined
+          ? null
+          : {
+              kind: 'official',
+              ref: row.assetId,
+              machineId: row.machineId,
+              versionId: row.versionIds?.[0] ?? null,
+              version: null,
+            }
+    if (entry === null) {
+      /* 到不了这里：没有 asset id 的行操作列上是灰字不是按钮。留着是因为类型上它可能是 undefined */
+      setNote({ text: `${row.fileName}：${NO_ASSET_WHY}`, bad: true })
+      return
+    }
+    setBusyKey(row.rowKey)
+    data.apply(entry).then(
+      () => setBusyKey(null),
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+      },
+    )
+  }
+
+
+  /**
+   * 「在 BBS 预设查看器中打开」的判据。
+   *
+   * 只看两件事：**是 BBS 工艺 profile**（`kind === 'bbs_profile'`）、**文件名是 .json**。
+   * MKP 配方是 toml、结构也完全不同；Orca 的 profile 虽然同源，但字段表是另一套，
+   * 那一页的 registry 对不上它 —— 与其显示一堆「未登记」，不如明说不支持。
+   * 判不出来时不弹错 —— 菜单项灰掉 + 带原因，让人知道这一行为什么不能点
+   * （灰一个项不说为什么，用户只会以为坏了）。
+   *
+   * 注意这**不保证**那一页一定找得到它：预设页走 src/api（MKP 自己的预设仓库），
+   * BBS 页走 public/bbs 与本机 BBS 目录，两边是两份清单。找不到由那一页在状态条说明。
+   */
+  const bbsWhyNot = (row: PresetTableRow): string | undefined => {
+    if (onOpenBbs === undefined) return '这一版的外壳没给跳转出口'
+    if (row.kind === 'mkp_preset') return '这是 MKP 配方（toml），不是 BBS 工艺预设'
+    if (row.kind !== 'bbs_profile') return '只认 BBS 的工艺预设，Orca 的字段表是另一套'
+    if (!row.fileName.toLowerCase().endsWith('.json')) return '不是 .json，BBS 查看器读不了'
+    return undefined
+  }
+
+  const bbsEntry = (row: PresetTableRow): ContextMenuEntry => ({
+    id: 'bbs',
+    label: '在 BBS 预设查看器中打开',
+    disabled: bbsWhyNot(row),
+    onSelect: () => onOpenBbs?.(row.fileName),
+  })
+
+  const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
+    if (row === null) return []
+
+    /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
+    if (row.scope === 'cloud') {
+      return [
+        { id: 'download', label: '下载', onSelect: () => download(row) },
+        {
+          id: 'link',
+          label: '复制链接',
+          onSelect: () => sayNoContract(MISSING_METHOD.link, row),
+        },
+        { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
+        bbsEntry(row),
+      ]
+    }
+
+    const official = row.origin === 'official'
+
+    return [
+      { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+      { id: 'copy', label: '复制', onSelect: () => sayNoContract(MISSING_METHOD.copy, row) },
+      {
+        id: 'rename',
+        label: '重命名',
+        /* 官方副本**只禁这一项**。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了 */
+        disabled: official ? '官方文件不能改名，复制一份再改' : undefined,
+        onSelect: () => sayNoContract(MISSING_METHOD.rename, row),
+      },
+      {
+        id: 'reveal',
+        label: '在文件夹中显示',
+        onSelect: () => sayNoContract(MISSING_METHOD.reveal, row),
+      },
+      { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
+      bbsEntry(row),
+      { separator: true },
+      {
+        id: 'remove',
+        label: '删除',
+        danger: true,
+        /*
+         * 官方文件的删除**放行**：它删了能重新下回来，不是不可逆。
+         * 两种话术必须不一样 —— 用户自己的文件删了没有任何地方能找回来。
+         */
+        confirm: {
+          question: `删除 ${row.fileName}？`,
+          detail: official
+            ? '删除后可以从云端重新下载。'
+            : '这是你自己的文件，云端没有备份，删了无法恢复。',
+        },
+        onSelect: () => sayNoContract(MISSING_METHOD.remove, row),
+      },
+    ]
+  }
+
+  if (data.loading) {
+    return (
+      <div className={s.page} data-density={density}>
+        <p className={s.loading}>正在读取预设仓库…</p>
+      </div>
+    )
+  }
+
+  if (data.error !== null) {
+    return (
+      <div className={s.page} data-density={density}>
+        <p className={s.loading}>加载失败：{data.error}</p>
+      </div>
+    )
+  }
+
+  const table = page.scope === 'local' ? page.local : page.cloud
+
+  /* 层高 chips 一排放不下的值收进「更多」（先摆 6 个） */
+  const layerMain = page.slicerFilters.layers.slice(0, 6)
+  const layerMore = page.slicerFilters.layers.slice(6)
+
+  return (
+    <div ref={rootRef} className={s.page} data-density={density}>
+      <FieldLayer>
+        {/*
+         * 一条工具条，**没有标题** —— 顶栏已经把「预设」高亮了。
+         * 宽档一行摆完（机型 · 两条分段 · 搜索 · 共 N 项），compact / mini 自动折两行
+         * （第一行机型 + 搜索，第二行两条分段 + 计数）——
+         * **一个控件都不藏进「更多」**：藏起来等于让人猜。
+         * 各段的先后由各自 CSS 里的 `order` 排，`.break` 是窄档那一下换行。
+         */}
+        {/*
+         * 工具栏区（主工具栏与轻筛选**合进一个换行容器**）——
+         * 一排排内容靠 `.tbBreak`（flex-basis: 100% 的零高断行）与各子项的 order 排位：
+         *
+         *   宽档        类型分段 位置分段(右) 机型 搜索 ┃ 已应用条│喷嘴 ┃ 层高 共N 台账
+         *   mini/compact  类型 位置 机型 ┃ 已应用条 搜索(右) ┃ 共N 台账
+         *                （切片器：喷嘴 搜索(右) ┃ 层高 共N 台账）
+         *
+         * mini 档搜索挪到下面状态条同一行的右端 —— 少占一行（作者本轮要求）。
+         * 各排左右都从 --page-x 起（content-left / 右线）。
+         */}
+        <div className={s.toolbar}>
+          <PresetScopeBar
+            kind={page.kind}
+            scope={page.scope}
+            onKind={setKind}
+            onScope={setScope}
+          />
+
+          <PresetPicker
+            machines={data.machines}
+            machineId={data.machineId}
+            onPick={pickMachine}
+          />
+
+          <div className={s.search}>
+            <input
+              className={s.input}
+              value={page.query}
+              placeholder={PLACEHOLDER[density]}
+              aria-label="搜索预设文件"
+              onChange={(e) => page.setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                /* ESC 清空但不失焦 —— 清完通常是想换个词继续打 */
+                if (e.key === 'Escape' && page.query !== '') {
+                  e.preventDefault()
+                  page.setQuery('')
+                }
+              }}
+            />
+            {page.query !== '' && (
+              <button
+                type="button"
+                className={s.clear}
+                aria-label="清空搜索"
+                onClick={() => page.setQuery('')}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          <span className={s.tbBreak} aria-hidden />
+
+          {page.kind === 'mkp' ? (
+            page.applied === null ? (
+              <span className={s.stripDim}>
+                还没有应用任何预设 —— 在下面挑一套 MKP 配置，点「应用」把它设为当前的
+              </span>
+            ) : (
+              <div
+                className={s.appliedStrip}
+                /* 应用成功的提示条撤了（作者：上面有了），这句说明跟着搬到这里。
+                   它落在本机（localStorage）—— 不再是「刷新会还原」 */
+                title="落在本机，刷新还在（本机底账）"
+              >
+                <span className={s.appliedDot} aria-hidden />
+                <span className={s.appliedText}>
+                  已应用 <b className={s.appliedName}>{page.appliedFileName}</b>
+                  <span className={s.appliedSep}>·</span>
+                  {page.appliedMachineText}
+                </span>
+                <button
+                  type="button"
+                  className={s.locateBtn}
+                  title="清掉机型筛选，把正在生效的那一行滚到眼前"
+                  onClick={locateApplied}
+                >
+                  定位
+                </button>
+              </div>
+            )
+          ) : (
+            <>
+              <div className={`${s.filterGroup} ${s.groupNozzle}`}>
+                <span className={s.filterLabel}>喷嘴</span>
+                <span className={s.chips}>
+                  <button
+                    type="button"
+                    className={s.chip}
+                    data-on={page.slicerFilters.nozzle === ''}
+                    onClick={() => page.slicerFilters.setNozzle('')}
+                  >
+                    全部
+                  </button>
+                  {page.slicerFilters.nozzles.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={s.chip}
+                      data-on={page.slicerFilters.nozzle === v}
+                      onClick={() => page.slicerFilters.setNozzle(v)}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </span>
+              </div>
+
+              <span className={`${s.tbBreak} ${s.tbBreak2}`} aria-hidden />
+
+              <div className={`${s.filterGroup} ${s.groupLayer}`}>
+                <span className={s.filterLabel}>层高</span>
+                <span className={s.chips}>
+                  <button
+                    type="button"
+                    className={s.chip}
+                    data-on={page.slicerFilters.layer === ''}
+                    onClick={() => page.slicerFilters.setLayer('')}
+                  >
+                    全部
+                  </button>
+                  {layerMain.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={s.chip}
+                      data-on={page.slicerFilters.layer === v}
+                      onClick={() => page.slicerFilters.setLayer(v)}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                  {layerMore.length > 0 && (
+                    <>
+                      <button
+                        ref={moreRef}
+                        type="button"
+                        className={s.chip}
+                        data-on={layerMore.includes(page.slicerFilters.layer)}
+                        onClick={() => setMoreOpen((v) => !v)}
+                      >
+                        更多 {moreOpen ? '⌃' : '⌄'}
+                      </button>
+                      {moreOpen && (
+                        <FieldPopover anchor={moreRef.current} onClose={() => setMoreOpen(false)}>
+                          <ul className={s.moreList}>
+                            {layerMore.map((v) => (
+                              <li key={v}>
+                                <button
+                                  type="button"
+                                  className={s.moreItem}
+                                  data-on={page.slicerFilters.layer === v}
+                                  onClick={() => {
+                                    page.slicerFilters.setLayer(v)
+                                    setMoreOpen(false)
+                                  }}
+                                >
+                                  {v}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </FieldPopover>
+                      )}
+                    </>
+                  )}
+                </span>
+              </div>
+            </>
+          )}
+
+          {/*
+           * 右端两样（作者：页脚那行白的整个去掉，内容放到这一行）：
+           * 「共 N 项」是这张表筛后的真行数；仓库台账是全局事实 —— 一道竖线隔开。
+           * 两样包进一个不拆分的 .meta：窄窗折行时**一起**走，台账的竖线不会落单。
+           *
+           * mini 档（456×420 这类小窗）：台账不再占位（CSS 隐掉），
+           * 它的数搬进「共 N 项」的 title —— 小窗里那一行高度留给表格，悬停仍看得到。
+           */}
+          <span className={s.meta}>
+            <span
+              className={s.counts}
+              title={
+                `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项` +
+                /* 小窗里台账整条隐掉了，数并进这句，免得连同它的说明一起消失 */
+                (density === 'mini'
+                  ? `。仓库 ${data.tree.totalFiles} 个官方文件（已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${data.userFiles.length} 个。${DOWNLOAD_WHY}`
+                  : '')
+              }
+            >
+              共 {table.rows.length} 项
+            </span>
+            <span
+              className={s.ledger}
+              title={`仓库里一共几个官方文件（已剔掉仅归档的）· 本机已有几个官方副本（getLocalFiles，演示集合）· 你自己的文件几个（getLocalUserFiles，云端没有它们）。${DOWNLOAD_WHY}`}
+            >
+              仓库 {data.tree.totalFiles} · 本机 {data.localIds.length} + 我的{' '}
+              {data.userFiles.length}
+            </span>
+          </span>
+        </div>
+
+        <div className={s.main}>
+          {page.unsupported ? (
+            /*
+             * 机型级「暂不支持」：这台机型下**所有版本**后端都没配资源（实测只有 A2L）。
+             * 两张表都不画、一个下载按钮都没有 —— 没配的东西无从下载。
+             * 灰色中性，不是错误色：它和网络失败、和「0 个文件」都要长得不一样，
+             * 所以这里写的是后端给的 missing[] 原文。
+             */
+            <div className={s.noneHold}>
+              <div className={s.none}>
+                <p className={s.noneHead}>
+                  <span className={s.noneBadge} title={STATUS_WHY.unavailable}>
+                    ● {STATUS_TEXT.unavailable}
+                  </span>
+                  {UNSUPPORTED_TEXT}
+                </p>
+                <ul className={s.noneList}>
+                  {page.missing.map((m) => (
+                    <li key={m} className={s.noneItem}>
+                      {m}
+                    </li>
+                  ))}
+                </ul>
+                <p className={s.noneFoot}>
+                  {data.machine?.display ?? data.machineId} 在机型目录里，但后端一行资源都没写
+                  （它的 {data.machine?.versions.length ?? 0} 个版本一个都没配）。
+                  这不是你这台机器的问题，也不是加载失败。
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {note !== null && (
+                <p className={note.bad ? s.noteBad : s.note} role="status">
+                  {note.text}
+                  <button
+                    type="button"
+                    className={s.noteClose}
+                    aria-label="关闭这条提示"
+                    onClick={() => setNote(null)}
+                  >
+                    ×
+                  </button>
+                </p>
+              )}
+
+              <PresetTable
+                scope={page.scope}
+                kind={page.kind}
+                rows={table.rows}
+                total={table.total}
+                query={page.query}
+                /* 整页三态在上面就拦住了，这里传的永远是 null —— 组件不假设调用方一定先拦 */
+                failure={data.error}
+                triggerProps={menu.triggerProps}
+                activeKey={menu.target?.rowKey ?? null}
+                expandedKey={expandedKey}
+                /* 点同一行收起、点别行换行 —— 与右键菜单「查看详情」和参数页同一条规则 */
+                onToggleExpand={(rowKey) => setExpandedKey((k) => (k === rowKey ? null : rowKey))}
+                /*
+                 * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
+                 * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
+                 */
+                busyKey={busyKey}
+                onLive={runLive}
+                onDownload={download}
+              />
+            </>
+          )}
+
+          {/* 查看详情不再是模态框 —— 点行展开下方的内容 */}
+        </div>
+
+        {/* 页脚整个去掉了：仓库台账搬上状态条那一行，
+            表格下面只留右键提示 —— 少一层白，页面到底就到底 */}
+
+        <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />
+      </FieldLayer>
+
+      {/* 「定位」的闪烁层：盖在被定位那一行上的普通 div，位置尺寸由 locateApplied
+          现量现设。为什么不闪行本身 —— 见 PagePresets.module.css 的 .locateFlash。 */}
+      <div ref={flashRef} className={s.locateFlash} />
+    </div>
+  )
+}
+

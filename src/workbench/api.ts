@@ -59,8 +59,6 @@ export type BbsSource = 'own' | 'inheritedFromMachine'
 export type Visibility = 'menu' | 'archiveOnly'
 /** `derive::CellKind` —— 三种，不是四种：「选中了升级成真控件」是前端的事 */
 export type CellKind = 'notApplicable' | 'gcode' | 'value'
-/** `upstream::ResourceType` */
-export type ResourceType = 'bbsProfile' | 'mkpPreset' | 'image'
 /** `registry::ValueType` */
 export type ValueType = 'float' | 'int' | 'bool' | 'string'
 /** `registry::UiComponent` */
@@ -72,32 +70,24 @@ export type BulkKind = 'detaching' | 'changing' | 'noChange'
 
 /* ---------- 启动 ---------- */
 
-/** `app::Roots`。`upstream` 为 null = 定位不到（是状态，不是错误） */
+/** `workbench::Roots`。**唯一的数据根是 `presets/`**，没有第二候选、不 fallback */
 export interface Roots {
+  /** 开发源数据根（仓库里的 `workbench/`） */
   workbench: string
+  /** 预设真相源（仓库里的 `presets/`） */
+  presets: string
+  /** 交付产物目录（仓库里的 `presets/dist/`） */
   dist: string
-  upstream: string | null
 }
 
-/** `app::UpstreamInfo`。`minimumClient` 为 null = **上游未声明** */
-export interface UpstreamInfo {
-  registryUpdated: string
-  manifestUpdated: string
-  channel: string
-  minimumClient: string | null
-  latestRelease: string | null
-  params: number
-  machines: number
-  deliverables: number
-  fallbacks: number
-}
-
-/** `app::Boot`。**上游缺失时也是成功返回**，界面要能在那个状态下显示数据根 */
+/** `app::Boot`。**预设根定位不到时也是一个成功返回**，界面要显示问题与数据根 */
 export interface Boot {
   roots: Roots
+  /** **真正的开场失败**（今天只剩「presets/ 定位不到」这一种）。null = 业务能跑 */
   problem: string | null
   detail: string | null
-  info: UpstreamInfo | null
+  /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
+  storeDirs: { name: string; role: string }[]
 }
 
 /* ---------- 整本 ---------- */
@@ -284,10 +274,21 @@ export interface Cell {
   blocked: BlockedBy[]
   /** 点开灰格子时显示的整句。**后端拼好的**，前端不组装 */
   blockedNote: string | null
+  /** 行上的短提示（C14）：「要 X 才可改」。与 `blockedNote` 同源不同场合 */
+  blockedHint: string | null
   /** 「去改那一项」跳到哪个字段。`null` = 不给跳转按钮 */
   jumpTo: string | null
+  /** 对照模式（C14 第四轮）：这一格的值与基准机型基底**不同**（绿底）。基准列恒 false */
+  differs: boolean
+  /** 差异格的悬停句（「机型基底是 X」）。后端拼好的 */
+  diffTip: string | null
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
   raw: unknown
+  /**
+   * 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
+   * 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+   */
+  rest: unknown
 }
 
 /** `derive::Row` */
@@ -310,7 +311,19 @@ export interface Row {
   controlNote: string | null
   gcode: boolean
   deprecated: boolean
+  /**
+   * 「改了影响谁」（C14 抽屉的作用域栏）。**配方台逐行给**；
+   * 矩阵的行跨多台机型、答不出「哪一台」，是 null
+   */
+  impact: DeskImpact | null
   cells: Cell[]
+}
+
+/** `derive::DeskImpact` —— 版本层编辑 targets 只有自己，followers 是跟着基底的其它版本 */
+export interface DeskImpact {
+  /** 「A1 / 标准版」这种，直接可显示 */
+  targets: string[]
+  followers: string[]
 }
 
 /** `derive::Matrix` */
@@ -321,14 +334,25 @@ export interface Matrix {
   note: string | null
   /** 空的时候写出为什么空，不留白 */
   emptyReason: string | null
+  /** 有任一勾选列与基准机型基底**不同**的行（C14 对照）。「仅显示差异」与状态列读它 */
+  diffKeys: string[]
+  /** 基准机型**没有**的参数行 —— 状态列写「本机无此项」 */
+  notOwnKeys: string[]
 }
 
 /* ---------- 配方台（默认视角） ---------- */
 
-/** `derive::Desk` —— 一个版本的分组列表 */
+/** `derive::Desk` —— 一个版本的分组列表（C14：列给全，右栏「各版本取值」直接用） */
 export interface Desk {
   /** 左栏。**不随搜索变** */
   nav: DeskNavTab[]
+  /**
+   * 基底 + 这一机型所有版本，各一列。行的 `cells` 与它**一一对应** ——
+   * 右栏「各版本取值」每层一行编辑控件，不用为选一个参数再问一次矩阵
+   */
+  cols: Col[]
+  /** 请求的那一层在 `cols` 里的下标。正文那格 = `row.cells[cur]` */
+  cur: number
   groups: DeskGroup[]
   /** 过滤前一共几项 */
   total: number
@@ -369,56 +393,7 @@ export interface DeskItem {
   offNote: string | null
 }
 
-/* ---------- 仓库盘点 / 回退 / 回收站 ---------- */
-
-/** `derive::StockRow` */
-export interface StockRow {
-  id: string
-  resourceType: ResourceType
-  machineId: string | null
-  fileName: string
-  relativePath: string
-  sha256: string
-  size: number
-  updatedAt: string
-  nozzle: string | null
-  layerHeight: string | null
-  assign: BbsAssign
-  /** **与 assign 正交**：可以已分配、同时不属于任何套餐 */
-  inAnyBundle: boolean
-  visibility: Visibility
-}
-
-/** `fallback::Rule` */
-export interface FallbackRule {
-  id: string
-  category: 'default' | 'infer' | 'migration' | 'override' | 'recovery'
-  trigger: string
-  from: string
-  to: string
-  enabled: boolean
-  severity: 'info' | 'warn'
-  desc: string
-  reportField: string
-}
-
-/** `app::FallbackGroup` */
-export interface FallbackGroup {
-  label: string
-  rules: FallbackRule[]
-}
-
-/** `app::FallbackTable` */
-export interface FallbackTable {
-  version: number
-  updated: string
-  /** 带换行的长文，**原样显示** */
-  guide: string
-  groups: FallbackGroup[]
-  disabled: string[]
-  emptyHint: string
-  readOnlyReason: string
-}
+/* ---------- 回收站 ---------- */
 
 /** `store::TrashEntry` */
 export interface TrashEntry {
@@ -648,11 +623,14 @@ export interface Words {
     | 'notApplicable'
     | 'bulkRefusesGcode'
     | 'buildBlocked'
+    | 'publishBlocked'
     | 'buildNothingToDo'
     | 'buildNoResources'
     | 'nothingToSave'
     | 'nothingToUndo'
-    | 'notUndoable',
+    | 'notUndoable'
+    | 'deprecatedWriteBlocked'
+    | 'deleteAssetInUse',
     string
   >
   empty: Record<
@@ -661,7 +639,9 @@ export interface Words {
     | 'noDisabledFallback'
     | 'matrixNoMatch'
     | 'matrixNoCols'
-    | 'matrixSearchSpansAllTabs',
+    | 'matrixSearchSpansAllTabs'
+    | 'selectBundle'
+    | 'selectAsset',
     string
   >
   /**
@@ -672,6 +652,14 @@ export interface Words {
   relate: Record<'goFixIt' | 'showAnyway', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
+  /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
+  paramStatus: Record<'factory' | 'machine' | 'version' | 'dirty', Word>
+  /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
+  paramDeprecated: Word
+  /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
+  paramDeprecatedChoice: Word
+  /** 对照矩阵状态列三档（C14 第四轮） */
+  matrixRow: Record<'notOwn' | 'diff' | 'same', Word>
 }
 
 /* ---------- 命令 ---------- */
@@ -685,14 +673,15 @@ export interface BrandView {
   logo: string | null
 }
 
-/** `machines::VersionView` —— 版本卡上那六格 */
+/** `machines::VersionView` —— 版本卡上那几格 */
 export interface VersionView {
   id: string
   name: string
-  presetFile: string | null
   recommendedBundle: string | null
   tag: string | null
   description: string | null
+  /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
+  hasRecipe: boolean
 }
 
 /** `machines::MachineView` */
@@ -706,7 +695,7 @@ export interface MachineView {
   externalAliases: string[]
   image: string | null
   icon: string | null
-  /** 有没有 `[dimensions]`。A2L 实测没有 */
+  /** 有没有 `[dimensions]` —— 界面上要能看出「这台还没配尺寸」 */
   hasDimensions: boolean
   /** 禁区块数。0 = 这台没有禁区文件 */
   zoneCount: number
@@ -723,11 +712,130 @@ export interface MachineList {
   root: string
 }
 
+/* ---------- 资产库（`app::assets` / `presets::assets`） ---------- */
+
+/**
+ * `presets::AssetKind` —— 资产类型集合（闸 G-3：切片器维度**开放**，模型保留）。
+ *
+ * 四个取值而不是三个：`image` 与 `icon` 是两种消费方式（一个是机型图、一个是矢量标记）。
+ * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
+ */
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile'
+
+/** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
+export interface AssetView {
+  id: string
+  kind: AssetKind
+  /** 归属机型；不属于任何机型时是 null */
+  machineId: string | null
+  name: string
+  /** 相对资产根（`public/assets/`）的一段 */
+  path: string
+  /** `/assets/<path>`。**用之前过 `assetUrl()`** —— 路径里可能有空格 */
+  url: string
+  /** 切片器（今天只有 `bbs`）与它下面的档位；只有 `slicerProfile` 才有 */
+  slicer: string | null
+  profile: string | null
+  /** 文件在不在。还没搬的话是 false —— 那是状态，不是错 */
+  present: boolean
+  /** 切片器三根轴之二：喷嘴。后端从路径的 `0.4mm` 那段派生；只有切片器条目有 */
+  nozzle: string | null
+  /** 三根轴之三：层高。后端从文件名尾部派生（`… 0.10.json` → `0.10`） */
+  layer: string | null
+  /** 交付身份三态。可见性（含草稿态）压过「进没进套餐」，与 stock 行上同口径 */
+  assign: BbsAssign
+}
+
+/** `assets::AssetList` */
+export interface AssetList {
+  assets: AssetView[]
+  /** 资产根的绝对路径 */
+  root: string
+  /** 喷嘴轴候选值。从全部切片器条目取，**不随筛选变** —— 选中一个值不能让别的选项消失 */
+  nozzles: string[]
+  /** 层高轴候选值。同上 */
+  layers: string[]
+  /** 过滤前一共几条 —— 页脚「筛出 X / Y 个」的 Y */
+  total: number
+  /** 全量里的「可选」条数（页脚读数，不随筛选变） */
+  optionalCount: number
+  /** 全量里的「仅归档」条数（页脚读数，不随筛选变） */
+  archiveCount: number
+}
+
+/** `assets::AssetUsageView` —— 「谁在用它」（Task 9.4，套餐那一档 Task 10） */
+export interface AssetUsageView {
+  id: string
+  /** 直接引用它的机型 */
+  machines: string[]
+  /** 引用它的套餐（`assetRefs` 写着这个 id 的）。**归属不是引用** ——
+   *  `p1s-icon` 归 P1S，但借它当图标的是另外两台 */
+  bundles: string[]
+}
+
+/** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
+export interface BundleRefView {
+  id: string
+  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设不建资产条目，MKP 组恒空） */
+  kind: AssetKind
+  /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
+  resolvable: boolean
+  /** 是不是 BBS 预设。每条套餐至少一条 true（MKP 与 BBS 成套配发） */
+  isBbs: boolean
+  /** 资产域登记的名字。解析不到时是空串 */
+  name: string
+  /** 文件在不在 */
+  present: boolean
+  /** 交付身份（在菜单 / 仅归档）。**含草稿态** —— 刚设还没保存的也看得见 */
+  visibility: Visibility
+}
+
+/** `bundles::BundleUserView` —— 指向这份套餐的一个版本（一版一套的主指向） */
+export interface BundleUserView {
+  machineId: string
+  versionId: string
+}
+
+/** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`，唯一真源） */
+export interface BundleView {
+  id: string
+  display: string
+  machineId: string
+  assetRefs: BundleRefView[]
+  /** 上一次改动日期（迁移照抄旧值；真改动由后端盖上当天） */
+  updatedAt: string | null
+  /** **一版一套**：`recommendedBundle` 指着这份套餐的版本 */
+  users: BundleUserView[]
+  /** `defaultBundle` 指着它的机型 —— 生成侧「版本没自己指」时回退的那一档 */
+  defaultFor: string[]
+}
+
+/** `bundles::BundleList` */
+export interface BundleList {
+  bundles: BundleView[]
+  /** 过滤前一共几份 —— 页脚「筛出 X / Y 个」的 Y */
+  total: number
+}
+
+/**
+ * 资产 URL。后端给的前缀只有一处（`/assets/`），这里只负责**编码一次** ——
+ * 实测 BBS 文件名里有空格（`MKPProcess A1 0.2 0.10.json`）。
+ */
+export const assetUrl = (url: string) => encodeURI(url)
+
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
-export type VersionField = 'name' | 'presetFile' | 'recommendedBundle' | 'tag' | 'description'
+export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
+
+/** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
+export interface BaselineDiffEntry {
+  fileName: string
+  status: 'same' | 'changed' | 'missingBaseline'
+  productSha: string
+  baselineSha: string | null
+}
 
 export const wb = {
   open: () => invoke<void>('wb_open'),
@@ -735,13 +843,10 @@ export const wb = {
   reload: () => invoke<Boot>('wb_reload'),
   words: () => invoke<Words>('wb_words'),
 
-
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
-  matrix: (cols: ColRef[], tab: string | null, query: string) =>
-    invoke<Matrix>('wb_matrix', { cols, tab, query }),
-  stock: () => invoke<StockRow[]>('wb_stock'),
-  fallback: () => invoke<FallbackTable>('wb_fallback'),
+  matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
+    invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
   ui: () => invoke<Record<string, unknown>>('wb_ui'),
   saveUi: (ui: Record<string, unknown>) => invoke<void>('wb_save_ui', { ui }),
@@ -751,6 +856,41 @@ export const wb = {
    * 清单与参数值不共用状态机
    */
   machines: () => invoke<MachineList>('wb_machines'),
+
+  /**
+   * 资产库清单（P4）。条目来自 `presets/assets.toml`（资产域①层），
+   * 类型 / 三根轴 / 交付身份 / 搜索在后端筛；选项表不随筛选变
+   */
+  assets: (
+    kind: string | null,
+    slicer: string | null,
+    nozzle: string | null,
+    layer: string | null,
+    assign: string | null,
+    query: string | null,
+  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, assign, query }),
+
+  /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
+  removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
+
+  /**
+   * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、
+   * 指向按一版一套分两档报；`query` 是 id / 显示名的子串筛选
+   */
+  bundles: (query: string | null) => invoke<BundleList>('wb_bundles', { query }),
+
+  /**
+   * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
+   * 悬空引用 / 「没有一条 BBS」在后端拦；`updatedAt` 由那次写盖上当天
+   */
+  setBundleRefs: (bundleId: string, assetIds: string[]) =>
+    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds }),
+
+  /**
+   * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，
+   * 界面上只表现为「那台机型的图没了」。删除守卫在数据层（`Presets::remove_asset`）
+   */
+  assetUsage: (assetId: string) => invoke<AssetUsageView>('wb_asset_usage', { assetId }),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。
@@ -817,4 +957,47 @@ export const wb = {
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   publish: () => invoke<PublishReport>('wb_publish'),
+
+  /**
+   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
+   * `recommendedBundle` 抄模板；
+   * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
+   */
+  copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>
+    invoke<MachineList>('wb_copy_version', {
+      machineId, templateVersionId, id, name,
+      tag: tag ?? null, description: description ?? null,
+    }),
+
+  /**
+   * 复制参数正文（b05 Task 14.5 / doc §4.3 第 7 步）：取模板版本的**完整有效配方**
+   * 钉成新版本的显式覆盖 —— **复制为独立版本，后续修改互不影响**。
+   * 缺失的参数不伪造（模板有效配方里没有的键继续继承 defaults）。
+   * 返回写入的键数。**前提**：新版本定义已存在（先 copyVersion）
+   */
+  copyRecipe: (machineId: string, templateVersionId: string, newVersionId: string) =>
+    invoke<number>('wb_copy_recipe', { machineId, templateVersionId, newVersionId }),
+
+  /**
+   * 对照基线 diff（b05 Task 14.9 第①步，**只读**）：九份产物 vs 基线目录，
+   * `status` ∈ `same | changed | missingBaseline`。**人看过这份清单再点同步**
+   */
+  baselineDiff: () => invoke<BaselineDiffEntry[]>('wb_baseline_diff'),
+  /**
+   * 同步对照基线（b05 Task 14.9 第②步，**显式写入动作**）：落点闸在
+   * `preset::sync_baseline` 内部（只认真 fixtures 或系统临时目录）。
+   * 内容相同的跳过，返回真正写入的份数
+   */
+  syncBaseline: () => invoke<number>('wb_sync_baseline'),
+
+  /**
+   * 交付目录的残留清单（b05 Task 13.4）：「不在本次交付集合内」的文件。
+   * **发布被残留拦下时先看这一条** —— 残留会被消费端真的下载到
+   */
+  distStrays: () => invoke<string[]>('wb_dist_strays'),
+  /**
+   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/dist/` 回收（保留相对路径），
+   * **不直接删**。清理完重新发布即可
+   */
+  cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
 }

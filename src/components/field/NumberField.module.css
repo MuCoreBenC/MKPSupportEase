@@ -1,0 +1,144 @@
+/*
+ * 聚焦约定：只加深边框，不加外圈光环（见 .tsx 的文件头）。
+ * 越界值靠 data-invalid 标红 —— 不夹取、不吞掉，让人看见自己打了个超范围的数。
+ *
+ * 高度钩子（A39 加的，改共用件的铁律：var(--x, 原值)，不设变量的稿一个像素不动）：
+ *   --num-h  框高。A39 的参数页在页面根上设 28px（对齐 C12 控件高度），
+ *            其余稿回落 34px 原值；compact/mini 的 30px 也是同一个钩子的回落值。
+ *            密表里的 sm 档（28px）是「这一块自己再收一档」，保持写死。
+ */
+
+.box {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--num-h, 34px);
+  padding-left: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  overflow: hidden; /* 箭头那一格要贴着圆角边 */
+}
+
+.box:focus-within {
+  border-color: var(--accent);
+}
+
+/* tokens.css 里没有告警色，这个红与 #32 各处「未保存红点」用的是同一个值 */
+.box[data-invalid='true'] {
+  border-color: #e5484d;
+  background: rgb(229 72 77 / 6%);
+}
+
+/* 改不动：看得见的虚线框 */
+.boxOff {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--num-h, 34px);
+  padding: 0 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  opacity: 0.7;
+}
+
+.boxOff .input {
+  cursor: not-allowed;
+}
+
+.input {
+  min-width: 40px;
+  border: 0;
+  background: transparent;
+  text-align: right;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/* 压掉 global.css 那条全局 input 聚焦环（它会在圆角框外画直角方块） */
+.input:focus,
+.input:focus-visible {
+  outline: none;
+}
+
+.unit {
+  display: flex;
+  align-items: center;
+  min-width: 26px;
+  padding: 0 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 步进器：框里的一小格，左边一条分隔线，上下两半各自可点 */
+.arrows {
+  display: flex;
+  flex-direction: column;
+  width: 22px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--line);
+}
+
+.arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.arrow + .arrow {
+  border-top: 1px solid var(--line);
+}
+
+.arrow:hover {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.arrow:active {
+  background: rgb(32 178 90 / 20%);
+}
+
+.arrow svg {
+  width: 9px;
+  height: 6px;
+}
+
+/* 密表里的格子 */
+.box[data-size='sm'],
+.boxOff[data-size='sm'] {
+  height: 28px;
+  padding-left: 7px;
+}
+
+.box[data-size='sm'] .input,
+.boxOff[data-size='sm'] .input {
+  font-size: calc(var(--fs-label) + 1px);
+}
+
+.box[data-size='sm'] .arrows,
+.boxOff[data-size='sm'] .arrows {
+  width: 18px;
+}
+
+[data-density='compact'] .box,
+[data-density='compact'] .boxOff {
+  height: var(--num-h, 30px);
+}
+
+/* mini 档收箭头：宽度真的不够，键盘上下键与滚轮仍然可用 */
+[data-density='mini'] .arrows {
+  display: none;
+}
+
+[data-density='mini'] .box,
+[data-density='mini'] .boxOff {
+  height: var(--num-h, 30px);
+  padding-right: 8px;
+}

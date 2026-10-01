@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn saving_then_loading_round_trips() {
         // 要写 presets，临时目录得活过那次写，所以整份交出来（见 `Fixture::into_parts`）
-        let (_dir, _up, mut presets) = Fixture::load().into_parts();
+        let (_dir, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
         let c = load(&s, &presets).unwrap().committed;
         let mut draft = Draft::default();
@@ -481,7 +481,7 @@ mod tests {
     /// **用户点了保存，值又变回去了，而且全程没有任何一步报错**。
     #[test]
     fn a_machine_level_edit_rewrites_the_promoted_version_keys() {
-        let (_dir, _up, mut presets) = Fixture::load().into_parts();
+        let (_dir, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
         let c = load(&s, &presets).unwrap().committed;
         let mut draft = Draft::default();
@@ -522,7 +522,7 @@ mod tests {
     /// 失去它们继承来的那个值 —— A1/FAST 没写这一项，它读的就是 `A1` 那条。
     #[test]
     fn a_version_level_edit_touches_only_its_own_key() {
-        let (_dir, _up, mut presets) = Fixture::load().into_parts();
+        let (_dir, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
         // 先手工写一个机型基底（**不经过草稿**），让下面那条版本改动成为唯一的改动来源
         presets
@@ -569,7 +569,7 @@ mod tests {
     /// 那里按 `Option` 的两个分支分岔，少一个分支就会把「继承」写成某个具体值。
     #[test]
     fn clearing_a_value_drops_the_key_not_sets_it_empty() {
-        let (_dir, _up, mut presets) = Fixture::load().into_parts();
+        let (_dir, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
         presets
             .set_variant("wiping.child", "A1", &serde_json::json!(3))
@@ -615,7 +615,7 @@ mod tests {
     /// 而且写出的是「已落盘 + 草稿」合并之后的结果
     #[test]
     fn visibility_and_built_records_round_trip_through_workbench_files() {
-        let (_dir, _up, mut presets) = Fixture::load().into_parts();
+        let (_dir, mut presets) = Fixture::load().into_parts();
         let (_d, s) = store();
         let c = load(&s, &presets).unwrap().committed;
         let mut draft = Draft::default();

@@ -35,6 +35,535 @@ export interface CalibModel {
   ready: boolean
 }
 
+
+/**
+ * 一个参数的值从哪来。
+ *
+ * `base` = 机型的基础配方（改它，这台机型的全部版本都会变）
+ * `variant` = 这个版本自己盖过的值（只影响这一个版本）
+ */
+export type ParamOrigin = 'base' | 'variant'
+
+/** 参数怎么显示、怎么改，全部由后端下发 —— 界面不写死任何键名与分组 */
+export interface RecipeParam {
+  /** 参数注册表里的稳定标识。TOML 路径会随分段调整而变，这个不会 */
+  key: string
+  label: string
+  /** 一句话说明，鼠标悬停时显示。注册表本来就有这份数据 */
+  desc: string
+  /** 分组名，来自注册表的 section —— 界面不自己造分类 */
+  group: string
+  unit?: string
+  control: 'number' | 'switch' | 'choice' | 'text'
+  /** control === 'choice' 时的可选项 */
+  choices?: { value: string; label: string }[]
+  min?: number
+  max?: number
+  step?: number
+  /** 当前值。**一律字符串** —— 单位换算与小数位数不该由界面再做一遍 */
+  value: string
+  origin: ParamOrigin
+  /** 只有 origin === 'variant' 时有：基础配方里的那个值，用来显示「还原成」与对照 */
+  baseValue?: string
+}
+
+/** 一台机型的一个版本（标准版 / 快拆版 / lite 版…） */
+export interface MachineVersion {
+  /** 'STANDARD' | 'FAST' | 'FASTV3.3' | 'LITE'，不是每台机型都有三档 */
+  id: string
+  /** 给人看的名字，'标准版' / '快拆版260628' */
+  name: string
+  /** 角标，'推荐' / '热门' / '最新'；没有就不显示 */
+  tag?: string
+  description?: string
+  /**
+   * 这个版本用哪一套 bundle。**空字符串 = 这个版本还没配**（上游的 A2L 就是这样），
+   * 不是出错 —— 界面该显示「未配置」。非空时保证 bundle 一定存在（后端启动时校验过）。
+   */
+  bundle: string
+}
+
+export interface BedSize {
+  width: number
+  depth: number
+}
+
+export interface MovementRange {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  maxZ: number
+}
+
+/** 可涂胶范围 + 擦料点的 X 坐标 */
+export interface GlueArea {
+  glueMinX: number
+  glueMaxX: number
+  glueMinY: number
+  glueMaxY: number
+  wipeX: number
+}
+
+/** 校准时笔尖要走的那几个点 */
+export interface CalibrationPoints {
+  lShapeBaseX: number
+  lShapeBaseY: number
+  xLineX: number
+  xLineY: number
+  xLineYEnd: number
+  yLineX: number
+  yLineXEnd: number
+  yLineY: number
+  zStartX: number
+  zStartY: number
+}
+
+export interface MachineFlags {
+  /** G-code 里用来认机型的那行注释 */
+  gcodeMarker: string
+  hasSecondFan: boolean
+}
+
+/**
+ * 机型尺寸。挂在机型上而不是版本上 —— 换快拆件不会改床身尺寸。
+ *
+ * 上游这里是 `map[string]any`，叶子字段连名字都不保证；这边逐个定死，
+ * 少一个字段就编译不过，省得界面上出现 `undefined mm`。
+ */
+export interface MachineDimensions {
+  bedSize: BedSize
+  movementRange: MovementRange
+  glueArea: GlueArea
+  calibration: CalibrationPoints
+  /** 边缘留白，mm */
+  edgeZone: number
+  flags: MachineFlags
+}
+
+export interface ZonePoint {
+  x: number
+  y: number
+}
+
+/** 禁区多边形。按需配置，不是每台机型都有 */
+export interface ForbiddenZone {
+  points: ZonePoint[]
+}
+
+export interface Machine {
+  /** 'A1' / 'A1_MINI' / 'P1S'…，规范形 `^[A-Z][A-Z0-9_]*$` */
+  id: string
+  /** 给人看的名字，'A1 mini' */
+  display: string
+  /** 品牌显示名，'拓竹 (Bambu Lab)' */
+  brand: string
+  /** 机型图 / 图标的文件名，前端自己拼资源路径 */
+  image: string
+  icon: string
+  /** 别名，用来认 G-code 里写的机型名（'A1MINI' / 'A1MC'…） */
+  aliases: string[]
+  versions: MachineVersion[]
+  /**
+   * `null` = **这台机型还没配尺寸**（上游的 A2L）。
+   * 不给空对象也不给 0 —— 那会让「没配」和「配成 0」长得一样。
+   */
+  dimensions: MachineDimensions | null
+  /** 没有禁区就是空数组。目前只有 P1S / P2S / X1C 有 */
+  forbiddenZones: ForbiddenZone[]
+}
+
+export type FileKind = 'mkp_preset' | 'bbs_profile' | 'orca_profile'
+
+/** 一个要下载/应用的具体文件 */
+export interface FileRef {
+  kind: FileKind
+  /** 界面上显示的文件名 */
+  fileName: string
+  /** 相对预设仓库根的路径，'presets/mkp/A1F_260628.toml' */
+  path: string
+  /**
+   * 下面两个**目前一定是 undefined**。
+   * 上游的资产清单里 sha256 和 size 全是空值，真值要到发布打 manifest 时才算出来。
+   * 宁可留空让界面显示「未知」，也不造一个看起来煞有介事的假数字。
+   */
+  size?: number
+  sha256?: string
+}
+
+/** 「这个版本要哪些文件」的答案 */
+export interface VersionFiles {
+  files: FileRef[]
+  /** true = 该有的文件没配齐。界面要说「未配置」，不是「0 个文件」 */
+  incomplete: boolean
+  /** 没配齐的具体原因，一条一句，可直接显示 */
+  missing: string[]
+}
+
+/**
+ * 本机文件的现状。**和机型清单分开给** ——
+ * 清单是静态的，状态会随下载变；混成一个字段会逼着每次下载完都重拉整张表。
+ *
+ * 四档的区别（B03 起改了字面量，见下）：
+ *
+ *   `unavailable`  后端就没配这个版本的文件（A2L）。**不是本机的问题**
+ *   `missing`      配了，本地还没有
+ *   `ready`        本地文件齐了，还没应用到切片器/配置
+ *   `applied`      已经应用生效
+ *
+ * B03 的改动只有两处：`unconfigured` 改名成 `unavailable`（「没配」是后端侧的事实，
+ * 用 un-configured 容易被读成「用户没配置」），`partial` 换成 `applied`。
+ * `partial`（本地有一半文件）这一档在假后端里从来没被返回过，也没有任何页面判过它 ——
+ * 留着只是给人一个可以编假进度的口子。反过来「下好了」与「应用了」是真的两件事，
+ * 那一档缺了才会逼界面自己猜。
+ */
+export type FilesState = 'unavailable' | 'missing' | 'ready' | 'applied'
+
+export interface ParamSection {
+  /** `space_offset` / `disk_action` …，与 param 的 layout.sectionId 对应 */
+  id: string
+  /** 中文名，'空间偏移' / '圆盘动作控制'。这个名字只在注册表里有，布局表那边没有 */
+  label: string
+  desc?: string
+  /** 这一组里有几条。**已按 machineFilter 与废弃过滤**，所以是这台机型真实看得到的条数 */
+  count: number
+}
+
+export interface ParamTab {
+  /** 'offset' | 'wiping' | 'fan' | 'glue' | 'gcode' | 'advanced' */
+  id: string
+  /** '偏移' | '擦料' | '风扇' | '涂胶' | '切换' | '更多' */
+  label: string
+  /** 这个分类下有几条（= 各 section 的 count 之和） */
+  count: number
+  sections: ParamSection[]
+}
+
+/**
+ * 一个参数的全部元信息 —— 键名、作用域、约束、布局、可见性条件。
+ *
+ * `RecipeParam` 给的是「怎么显示、值是多少」，这里给的是「它到底是什么」。
+ * 工作台的编辑抽屉和矩阵列头要这些，普通参数页不需要，所以分开拉。
+ */
+export interface ParamMeta {
+  key: string
+  /** TOML 里的键名 */
+  tomlKey: string
+  jsonKey: string
+  /** 后端配置结构里的字段名 */
+  configKey: string
+  /** TOML 节名（`toolhead` / `wiping`），与 sectionId 不是一回事 */
+  section: string
+  /** 布局分组 id */
+  sectionId: string
+  /** 组内顺序。可以是小数 */
+  order: number
+  scope: 'universal' | 'machine_specific'
+  variantMode?: 'shared' | 'per_variant'
+  valueType: 'float' | 'int' | 'bool' | 'string'
+  /** 'number' | 'switch' | 'segmented' | 'select' | 'gcode' —— 一共只有这五种 */
+  uiComponent: string
+  unit?: string
+  /** 写进 TOML 的行尾注释 */
+  tomlComment?: string
+  mergeGroup?: string
+  pinned?: boolean
+  deprecated?: boolean
+  /** 只对这些机型生效。上游是逗号字符串，这里已拆成数组；不限机型时不给这个字段 */
+  machineFilter?: string[]
+  /**
+   * 可见性条件。**判断放前端** —— 它依赖当前草稿值，是交互态不是数据。
+   * 只有一层，但被指向的字段自己也可能有条件，所以要顺着 key 往上递归。
+   */
+  showWhen?: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }
+}
+
+/** 一处「机型:版本」。倒查结果里到处要用它，所以单独一个名字 */
+export interface VersionRef {
+  machine: string
+  version: string
+}
+
+/** 预设仓库里的一个文件 */
+export interface PresetFileInfo {
+  /** asset id，等宽显示 */
+  id: string
+  fileName: string
+  /** 相对预设仓库根 */
+  path: string
+  kind: FileKind
+  /** 'process' 之类；mkp_preset 为空 */
+  category: string
+  machineIds: string[]
+  /** 只有 bbs_profile 有 —— MKP 的 .toml 是涂胶预设，本来就没有喷嘴层高这回事 */
+  nozzle?: string
+  layerHeight?: string
+  /** 被哪些 bundle 装着 */
+  inBundles: string[]
+  /** 被哪些「机型:版本」当作 MKP 预设 */
+  usedByVersions: VersionRef[]
+  /**
+   * 这个文件的**交付身份**。只有两种，没有第三种：
+   *
+   *   `default`   默认交付 —— 你为某个版本钦定的**最终资源**。用户点下载，后台自动下好。
+   *   `optional`  可选 —— 仓库里有、你没放进默认集。**在用户端的预设列表里看得到，用户自己手动下。**
+   *
+   * 判据不变（有没有被任何 bundle 装着、有没有被任何版本当 MKP 预设），换的是说法：
+   * 「没进默认集」是一个正常状态，不是「孤儿」也不是错误 —— 实测 4 个（全是 0.2mm 的
+   * 工艺 profile）。所以它不带警示色、不进 `checkResources()` 的问题清单，
+   * 但要在界面上显式可见（能筛、能看见数量），否则可选与默认就分不出来了。
+   */
+  delivery: 'default' | 'optional'
+  /**
+   * 文件大小，**已经格式化好的字符串**（`4.2 KB`）。
+   *
+   * 为什么叫 `sizeText` 而不是 `size`：`FileRef.size` 是 `number`（字节），而这一层给的是
+   * 一个可直接显示的串。同名不同类型会让 `PresetFileInfo` 不再结构兼容 `Pick<FileRef, 'size'>`，
+   * 实测直接把 A32 与 A34 两稿编译弄坏了 —— 冻结的稿不能因为新字段报错。
+   *
+   * **两种来源，用 `statFrom` 分开**（T16）：
+   *
+   *   `'file'`  bbs 这一档：真仓里那份文件的**真值**（`data/bbs_files.json` 的字节数与
+   *            上游 manifest 记的更新时间，由 `scripts/sync-bbs-presets.mjs` 核对过 sha256）
+   *   `'demo'`  其余：假后端按 `path` 稳定推出来的**演示值** —— 但同一个文件每次刷新都一样，
+   *            不是随机数。真后端要 `stat`（上游 `assets_index.json` 里 `size` 全是 0）
+   *
+   * 为什么不干脆不给演示值：整个界面还有一半是演示数据，列表上少了「大小」会让版面看起来没做完。
+   * 但**前端一行都不许自己编** —— 编在假后端，真后端接上时换掉的是一个函数，不是一堆界面代码。
+   */
+  sizeText?: string
+  /** 修改时间（`09-14` / ISO）。同上，两种来源见 `statFrom` */
+  modifiedText?: string
+  /**
+   * 上面那两格是哪来的。**缺省 = 不在这一档里**（自己的文件本来就没有这两个字段）。
+   *
+   * 这个记号的存在理由是「界面上不许说错话」：真值那两格的 tooltip 要说「来自仓库里那个
+   * 真文件」，演示值那两格照旧说「演示数据」。混在一列里靠猜是不行的。
+   */
+  statFrom?: 'file' | 'demo'
+}
+
+/**
+ * **用户自己的文件**（A34）。
+ *
+ * 和 `PresetFileInfo` 是两种东西，不要混：
+ *
+ *   `PresetFileInfo`  官方仓库里的文件。有 asset id、有交付身份、云端有一份权威副本
+ *   `LocalUserFile`   用户自己放进预设目录的文件。**云端没有它**，所以没有 asset id、
+ *                     没有 `delivery`、也不参与套餐与菜单
+ *
+ * 这是「本地的就是本地的，云端的就是云端的」这条规则在类型上的体现：用户端的预设页有
+ * 两张互不相干的表，本地表里能看到这种文件，云端表里永远看不到。
+ *
+ * 权限也因此不同：官方下载下来的副本**只读**（不能改名，删了能重新下回来），
+ * 这种文件可以随便改名，但删了就没有任何地方能找回来。
+ *
+ * **假后端返回一份固定演示集合**，见 `src/server/resolve/localFiles.ts`。
+ */
+export interface LocalUserFile {
+  /** 本机唯一。真后端用绝对路径的哈希，假后端直接写死一个 `user_` 前缀的串 */
+  id: string
+  fileName: string
+  /** 相对预设仓库根 */
+  path: string
+  kind: FileKind
+  /** 用户自己标的适用机型。可以是空数组 —— 他没标就是没标，不要替他猜 */
+  machineIds: string[]
+  /** 只有切片器 profile 才有。MKP 的涂胶预设没有喷嘴层高这回事 */
+  nozzle?: string
+  layerHeight?: string
+}
+
+/**
+ * **正在生效的那一套预设。全局唯一。**
+ *
+ * 这是 A34 这一轮纠正的一个模型错误。原来前端自己推：「当前机型 + 当前版本那个默认交付的
+ * MKP 预设」—— 于是切一下机型「已应用」就换一个，等于说这台机器同时应用着 6 套配置。
+ * 物理上不成立：涂胶笔同一时间只跑一套。
+ *
+ * 所以「已应用」不是一个可以从别的数据算出来的派生量，它是**一条独立的事实**，
+ * 只有后端知道（它读的是本机那份「当前配置」）。前端一律来问。
+ *
+ * `null` 不是错误 —— 新装的机器就是这个状态，界面要能把「还没有应用任何预设」
+ * 和「加载失败」分开说。
+ */
+export interface AppliedPreset {
+  /** 正在生效的那个 asset id */
+  assetId: string
+  path: string
+  /** 它属于哪个机型 / 版本 —— 参数页要编的就是这一套 */
+  machineId: string
+  versionId: string
+}
+
+/**
+ * 菜单的一条：这个文件对客户端公开到什么程度。
+ *
+ *   `bundled`   已分配 —— 在某个套餐里，客户端自动下
+ *   `optional`  可选 —— 在菜单上，客户端看得到、可手动下。**逐瓶指定**，不是「同机型的都算」
+ *   `archived`  仅归档 —— 不在菜单上，**客户端完全不知道它存在**
+ *
+ * 仓库里有 ≠ 客户端能拿到。不上菜单就下不了，这是这张表存在的全部理由。
+ */
+export interface MenuEntry {
+  /** asset id，与 `PresetFileInfo.id` 同一套标识 */
+  fileId: string
+  visibility: 'bundled' | 'optional' | 'archived'
+}
+
+/**
+ * 客户端数据包的兼容性声明。**值初始留空。**
+ *
+ * `minClientVersion` 的具体数字要客户端先给一份兼容性清单，工作台**不许瞎填一个版本号** ——
+ * 填了就等于对外承诺「这份数据在 x.y.z 以上都能用」，而没人验证过。
+ * 所以它初始就是 `null`，空着时由 `checkRecipe()` 报一条**待办**（不是阻断），
+ * 由 `getPublishIssues()` 报一条**阻断**（发布检查那一组，见下）。
+ *
+ * B04 补上了 `saveClientDataMeta` —— 有了写方法，那条永远填不上的待办才填得上。
+ */
+export interface ClientDataMeta {
+  schemaVersion: number
+  /** 空 = 还没填。生成前会报一条待办，发布前是一条阻断 */
+  minClientVersion: string | null
+}
+
+/** 摊平后的一个机型 —— 客户端不做继承推导 */
+export interface ClientMachine {
+  id: string
+  display: string
+  brand: string
+  dimensions: MachineDimensions | null
+  versions: {
+    id: string
+    name: string
+    tag?: string
+    description?: string
+    /** 这个版本的袋子里装什么。已按套餐摊平成文件清单 */
+    files: FileRef[]
+    /**
+     * 这个版本的参数值 —— **已经三层算完的有效值**，键是参数注册表的稳定 key。
+     *
+     * 客户端**看不到机型基底这一层存在**：它拿到的就是「这个版本用什么值」，
+     * 没有 origin、没有 baseValue、没有「哪一层给的」。那些是后厨的账。
+     */
+    values: Record<string, string>
+    /** true = 暂不支持该机型或版本（配方本上有名字，资源一行没写） */
+    unsupported: boolean
+  }[]
+}
+
+/** 参数的**显示**元信息。不含继承规则、不含机型基底与版本覆盖 */
+export interface ClientFieldDef {
+  key: string
+  label: string
+  desc?: string
+  unit?: string
+  control: RecipeParam['control']
+  /**
+   * 控件形态的**原始**名字（A40 补）：`number` / `switch` / `segmented` / `select` / `gcode`。
+   *
+   * 为什么 `control` 之外还要这一栏：`control` 是**给画控件用的四档**
+   * （number / switch / choice / text），分段与下拉都并成 `choice`、而 G-code 落成 `text`。
+   * 客户端于是只能靠「只有 gcode 会落到 text」这个**巧合**反推 G-code —— 巧合不该是契约。
+   * 这一栏把注册表的原词带出来，客户端要细分（分段 vs 下拉、G-code 块）就有据可依。
+   */
+  uiComponent: string
+  /**
+   * 值**本身**的类型（C15 / A40 补）。
+   *
+   * 与 `control` 不是一回事：`control` 回答「画什么控件」（number / switch / segmented /
+   * select / gcode），这一栏回答「值是什么」（float / int / bool / string）。
+   * 开关是 bool、下拉是 string —— 客户端要按类型校验、要显示「这是什么」，
+   * 就不能拿控件去猜。
+   */
+  valueType: 'float' | 'int' | 'bool' | 'string'
+  /**
+   * 可见性条件（C15 / A40 补）：要 `key` 这个字段等于（或不等于 / 大于）`value` 才显示。
+   *
+   * 这一条原来只活在工作台里 —— 客户端拿到包却没有它，只能自己写死「哪些参数属于
+   * 哪个模式」（模式开关：擦料方式 = 擦料塔 / 圆盘擦拭，选哪支显示哪支）。
+   * 判据由客户端算（它依赖当前值），**数据由包里带** —— 客户端不再猜业务规则。
+   */
+  showWhen?: ParamMeta['showWhen']
+  choices?: { value: string; label: string }[]
+  min?: number
+  max?: number
+  step?: number
+  /** 分组的中文名 */
+  group: string
+  /** 所属分类的中文名（`擦料`）。`tabId` 没有的老包靠它兜底 */
+  tab: string
+  /**
+   * 所属分类的 **id**（T8 补，可选）：`offset` / `wiping` / `fan` / `glue` / `gcode` / `advanced`。
+   *
+   * 为什么 `tab` 之外还要这一栏：`tab` 是**中文名**，客户端拿它当 id 用就会踩 locale 的坑
+   * （A40 分类条的图标表按英文 id 查，包里全是中文名，六个图标全塌成兜底那一个）。
+   * id 稳定、名字可翻译 —— 老包没有这一栏时客户端退回 `tab` 照跑（只加字段，不改老语义）。
+   */
+  tabId?: string
+}
+
+/**
+ * 一次发布的**另一个产物**：一份真正的预设文件（T7.1）。
+ *
+ * 作者把这件事说透了：「我们现在模拟的是『用户自己去下载一个 JSON 数据包』，但**真实客户端
+ * 应该是自动同步/更新发布数据，用户真正下载、安装、使用的是 TOML 预设**」。
+ *
+ * 所以一次发布同时产生两样东西，**属于同一个 preset identity**：
+ *
+ *   `ClientDataPackage`  客户端说明书 —— 自动同步，用户看不见「下载 JSON」这个动作
+ *   `ReleasePreset`      真正的 preset artifact —— 用户手动「获取预设」拿到它
+ *
+ * 不许出现「JSON 是 1.0.1、TOML 还是 1.0.0」这种原型层面的假链路。
+ */
+export interface ReleasePreset {
+  machineId: string
+  versionId: string
+  /** 本机落盘的文件名（注册表里那一栏 `presetFile`，比如 `A1.toml`） */
+  fileName: string
+  /** TOML 正文 */
+  content: string
+}
+
+/** 一次发布 = 说明书 + 若干份预设文件 */
+export interface Release {
+  /** 包版本（工作台发布时填的那个三段数字） */
+  version: string | null
+  at: string | null
+  package: ClientDataPackage
+  presets: ReleasePreset[]
+}
+
+export interface ClientDataPackage {
+  meta: ClientDataMeta
+  machines: ClientMachine[]
+  fields: ClientFieldDef[]
+  /** 柜台上单卖的：菜单里 optional 的那些 */
+  optionalFiles: FileRef[]
+  /**
+   * 输入指纹，用来判「已过期」。
+   *
+   * 把配方本 + 菜单 + 套餐 + 字段定义 + 兼容声明排序后 JSON 化再取的**稳定结构化摘要**，
+   * **不是文件哈希**，也不作完整性校验 —— 它只回答「现在的输入和上次生成时是不是同一份」。
+   *
+   * 刻意**没有 `generatedAt`**：假后端里没有可信的时间源（`Date.now()` 在这一层没意义，
+   * 产物也不落盘）。「上次生成」由调用方自己记。
+   */
+  inputsHash: string
+}
+
+/**
+ * 客户端要后端干的事。**这一份是产品仓的口径，不是试验场那份的照抄**：
+ * 试验场把四个轨（客户端 / 工作台 / 原型 / 测试端）的方法并在一张表里（38 个），
+ * 产品仓的用户端只用得到下面这些 —— 工作台那一套走自己的 `src/workbench/api.ts`（`wb_*`）。
+ *
+ * 命名规则：读用 get*，写用 save*，让壳去做的动作用动词（openModel / copyToSlicer）。
+ *
+ * 前四个是 v023 移植时就有的；「客户端接发布包」这一轮（P1）补的是后面十二个 ——
+ * 预设页 / 参数页 / 同步页三页要读的东西。**本轮只有 mock 答得上来**，
+ * 真机上没接的那几个由 bridge 抛 NotImplementedError（`src/api/errors.ts`），
+ * 界面上是一块「未接入」空态，不是白屏。
+ */
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -56,6 +585,53 @@ export interface MkpApi {
    * 前端不碰文件系统，也不关心它是下载还是命中缓存 —— 那是壳的事。
    */
   openModel(modelId: string): Promise<void>
+
+  /* ——— 机型与文件（预设页 / 同步页要读的） ——— */
+
+  /** 机型目录：品牌 → 机型 → 版本。客户端画三级选择用 */
+  getMachines(): Promise<Machine[]>
+
+  /**
+   * 某个「机型:版本」下配了哪些文件。
+   * `null` = 后端没有这个组合（不是空），与 `VersionFiles.files` 空数组是两件事。
+   */
+  getVersionFiles(machineId: string, versionId: string): Promise<VersionFiles | null>
+
+  /** 本机预设目录里**已经有的**文件名（官方那一批，固定演示集合） */
+  getLocalFiles(): Promise<string[]>
+
+  /** 用户自己放进预设目录的文件 */
+  getLocalUserFiles(): Promise<LocalUserFile[]>
+
+  /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
+  getAppliedPreset(): Promise<AppliedPreset | null>
+
+  /** 已经复制到切片器目录的那些（切片器文件的「生效」与 MKP 不是一回事） */
+  getSlicerCopied(): Promise<string[]>
+
+  /** 把一份切片器配置复制到切片器目录。写方法：真机上会落盘 */
+  copyToSlicer(assetId: string): Promise<void>
+
+  /** 预设仓库的清单（含交付身份 / 大小 / 修改时间） */
+  getPresetFiles(): Promise<PresetFileInfo[]>
+
+  /** 菜单表：每个文件对客户端公开到什么程度（bundled / optional / archived） */
+  getMenu(): Promise<MenuEntry[]>
+
+  /** 参数注册表（名字 / 类型 / 控件 / 选项 / 范围 / 条件 / 单位） */
+  getParamMeta(): Promise<ParamMeta[]>
+
+  /**
+   * 某一版参数的值与元数据。`versionId` 传 `null` = 只看机型基底。
+   * 客户端**不做继承推导** —— 这一份是后端摊平好的结果。
+   */
+  getMachineParams(machineId: string, versionId: string | null): Promise<RecipeParam[]>
+
+  /**
+   * 下载选中的文件（官方那一批）。
+   * 试验场的假后端对这个方法是**故意抛**的（那里没有真网络），真机上是 Rust 的活。
+   */
+  downloadFiles(refs: FileRef[]): Promise<void>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

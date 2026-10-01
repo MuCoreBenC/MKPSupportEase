@@ -1,0 +1,99 @@
+/* 一行参数。缩进 33px 是给组标题那个图标格让位（12 + 14 + 7），
+   不留的话行会顶着左边缘，看不出「组 → 行」的层级。 */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+  padding: 4px 12px 4px 33px;
+}
+
+/*
+ * 搜索命中的行。**不用黄底** —— 橙在这一页是「改动」的意思，再加一个高饱和色会打架。
+ * 一层很淡的底 + 左边一条 2px 的竖线：底色管「这一片有东西」，竖线管「具体是这一行」。
+ */
+.row[data-hit='true'] {
+  background: var(--bbs-hit);
+  box-shadow: inset 2px 0 0 var(--bbs-focus);
+}
+
+/* 标签里命中的那几个字。浏览器默认给 mark 刷黄底黑字，深色皮肤下会炸眼 —— 全覆盖掉 */
+.mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lbl {
+  flex-shrink: 0;
+  width: var(--bbs-label-w);
+  overflow: hidden;
+  color: var(--bbs-label);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 改动项：标签变橙。判定见 bbsMerge 的 sameValue() */
+.modified .lbl {
+  color: var(--bbs-orange);
+}
+
+/* toggle_field 为假：BBS 里这一行还在，只是控件不可用 —— 值照显示，别藏起来 */
+.greyed .lbl {
+  color: var(--bbs-disabled);
+}
+
+.greyed .reset,
+.greyed .resetSlot {
+  opacity: 0.45;
+}
+
+/* .reset 与 .resetSlot 必须等宽，否则改动行与未改动行的值列错开 */
+.reset,
+.resetSlot {
+  flex-shrink: 0;
+  width: 16px;
+  margin-right: 5px;
+}
+
+.reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reset svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* undo.svg 的橙色写死在 svg 里，color 对它不生效 —— hover 只能提亮。
+   展示模式下按钮是 disabled：**不灰掉、只是不提亮也不给手型** ——
+   它此刻的职责是「这一项被改过」的标记，不是一个失效的按钮。 */
+.reset:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.reset:disabled {
+  cursor: default;
+}
+
+.reset:focus-visible {
+  outline: 1px solid var(--bbs-focus);
+  outline-offset: 1px;
+}
+
+/* 数组值的变体角标 [1/2] */
+.variant {
+  color: var(--bbs-dim-2);
+  font-size: 11px;
+  white-space: nowrap;
+}

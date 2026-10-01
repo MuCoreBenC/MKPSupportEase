@@ -13,15 +13,48 @@ import ReactDOM from 'react-dom/client'
 
 import './tokens.css'
 import './workbench.css'
+import './c14tokens.css'
 import { WorkbenchApp } from './App'
+
+/* 开发桩：浏览器里没有 Tauri IPC 时装上（见 dev/mockBackend.ts 的文件头）。
+   真机 / 生产构建不装 —— import.meta.env.DEV 为 false 时这段连同模块都被摇掉 */
+if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+  const { installMockBackend } = await import('./dev/mockBackend')
+  installMockBackend()
+}
 
 const host = document.getElementById('workbench-root')
 if (!host) {
   throw new Error('找不到 #workbench-root —— workbench.html 与本文件对不上了')
 }
 
+/* TEMP-DEBUG: 启动错误直接写到页面上（排查完删掉） */
+window.addEventListener('error', (e) => {
+  host.textContent = `BOOT ERROR: ${e.message}\n${String(e.error?.stack ?? '').slice(0, 2400)}`
+})
+window.addEventListener('unhandledrejection', (e) => {
+  host.textContent = `BOOT REJECTION: ${String(e.reason).slice(0, 600)}`
+})
+
+class Boundary extends React.Component<{ children: React.ReactNode }, never> {
+  componentDidCatch(error: unknown, info: { componentStack?: string }) {
+    const host = document.getElementById('workbench-root')
+    if (host) {
+      const div = document.createElement('pre')
+      div.textContent =
+        'BOUNDARY: ' + String(error) + '\n' + (info.componentStack ?? '')
+      host.appendChild(div)
+    }
+  }
+  render() {
+    return this.props.children
+  }
+}
+
 ReactDOM.createRoot(host).render(
   <React.StrictMode>
-    <WorkbenchApp />
+    <Boundary>
+      <WorkbenchApp />
+    </Boundary>
   </React.StrictMode>,
 )

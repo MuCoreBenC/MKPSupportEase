@@ -1,0 +1,79 @@
+/* 带清空叉的搜索框。叉是自己画的 —— 浏览器原生那个位图藏掉（见 tsx 的文件头） */
+
+.box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* tabs 行那个固定宽；抽屉里那个撑满 */
+.box[data-variant='fixed'] {
+  flex-shrink: 0;
+  width: 200px;
+}
+
+.box[data-variant='fill'] {
+  display: flex;
+  width: 100%;
+}
+
+.input {
+  width: 100%;
+  /* 右边给叉留位：16 的按钮 + 两侧各 5 */
+  padding: 4px 24px 4px 7px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 3px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.input:focus-visible {
+  /* 焦点态只加深边框，不发光 */
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+/* 浏览器自带的那个清空按钮：形状颜色都归它、深色下是个灰位图 —— 不要 */
+.input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.clear {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--bbs-dim);
+  cursor: pointer;
+}
+
+.clear:hover {
+  color: var(--bbs-text);
+}
+
+.clear:focus-visible {
+  outline: 1px solid var(--bbs-focus);
+  outline-offset: 0;
+}
+
+.clear svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+/* 窄档：框本身窄到 120，叉照旧 16px，padding 已经留够 */
+@media (width <= 900px) {
+  .box[data-variant='fixed'] {
+    width: 140px;
+  }
+}

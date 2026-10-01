@@ -78,6 +78,14 @@ pub struct Words {
     pub relate: BTreeMap<&'static str, &'static str>,
     /// 崩溃快照三态。**与 `save` 不是一回事**
     pub snapshot: Table,
+    /// 参数台一行上的状态四档（C14）：dirty 压过 origin —— 改了还没保存是最要紧的事实
+    pub param_status: Table,
+    /// 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated`
+    pub param_deprecated: Word,
+    /// 「已弃用」选项级那一枚。判据是推出来的（见 `registry::deprecated_choice_values`）
+    pub param_deprecated_choice: Word,
+    /// 对照矩阵状态列三档（C14 第四轮）
+    pub matrix_row: Table,
 }
 
 /// 整张词表。开场取一次
@@ -182,11 +190,17 @@ fn words() -> Words {
             ("notApplicable", w::disabled::NOT_APPLICABLE),
             ("bulkRefusesGcode", w::disabled::BULK_REFUSES_GCODE),
             ("buildBlocked", w::disabled::BUILD_BLOCKED),
+            ("publishBlocked", w::disabled::PUBLISH_BLOCKED),
             ("buildNothingToDo", w::disabled::BUILD_NOTHING_TO_DO),
             ("buildNoResources", w::disabled::BUILD_NO_RESOURCES),
             ("nothingToSave", w::disabled::NOTHING_TO_SAVE),
             ("nothingToUndo", w::disabled::NOTHING_TO_UNDO),
             ("notUndoable", w::disabled::NOT_UNDOABLE),
+            (
+                "deprecatedWriteBlocked",
+                w::disabled::DEPRECATED_WRITE_BLOCKED,
+            ),
+            ("deleteAssetInUse", w::disabled::DELETE_ASSET_IN_USE),
         ]
         .into_iter()
         .collect(),
@@ -198,6 +212,8 @@ fn words() -> Words {
             ("matrixNoMatch", w::MATRIX_NO_MATCH),
             ("matrixNoCols", w::MATRIX_NO_COLS),
             ("matrixSearchSpansAllTabs", w::MATRIX_SEARCH_SPANS_ALL_TABS),
+            ("selectBundle", w::SELECT_BUNDLE),
+            ("selectAsset", w::SELECT_ASSET),
         ]
         .into_iter()
         .collect(),
@@ -216,6 +232,51 @@ fn words() -> Words {
         ]
         .into_iter()
         .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
+        .collect(),
+
+        param_status: [
+            (
+                "factory",
+                w::param_status::FACTORY_LABEL,
+                w::param_status::FACTORY_EXPLAIN,
+            ),
+            (
+                "machine",
+                w::param_status::MACHINE_LABEL,
+                w::param_status::MACHINE_EXPLAIN,
+            ),
+            (
+                "version",
+                w::param_status::VERSION_LABEL,
+                w::param_status::VERSION_EXPLAIN,
+            ),
+            (
+                "dirty",
+                w::param_status::DIRTY_LABEL,
+                w::param_status::DIRTY_EXPLAIN,
+            ),
+        ]
+        .into_iter()
+        .map(|(k, l, e)| (k, Word::new(l, e)))
+        .collect(),
+
+        param_deprecated: Word::new(w::deprecated::PARAM_LABEL, w::deprecated::PARAM_EXPLAIN),
+        param_deprecated_choice: Word::new(
+            w::deprecated::CHOICE_LABEL,
+            w::deprecated::CHOICE_EXPLAIN,
+        ),
+
+        matrix_row: [
+            (
+                "notOwn",
+                w::matrix_row::NOT_OWN,
+                w::matrix_row::NOT_OWN_EXPLAIN,
+            ),
+            ("diff", w::matrix_row::DIFF, w::matrix_row::DIFF_EXPLAIN),
+            ("same", w::matrix_row::SAME, w::matrix_row::SAME_EXPLAIN),
+        ]
+        .into_iter()
+        .map(|(k, l, e)| (k, Word::new(l, e)))
         .collect(),
     }
 }
@@ -287,6 +348,12 @@ mod tests {
         for v in [BulkKind::Detaching, BulkKind::Changing, BulkKind::NoChange] {
             check(&t.bulk_kind, serde_json::to_value(v).unwrap(), "BulkKind");
         }
+        for key in ["notOwn", "diff", "same"] {
+            assert!(
+                t.matrix_row.contains_key(key),
+                "matrixRow 的 {key} 不在词表里 —— 前端会查出 undefined"
+            );
+        }
     }
 
     /// 每个词都要有内容；有解释句的那些，解释句不能只是把词重复一遍
@@ -303,6 +370,8 @@ mod tests {
             &t.level,
             &t.visibility,
             &t.bulk_kind,
+            &t.param_status,
+            &t.matrix_row,
         ] {
             for (k, word) in table {
                 assert!(!word.label.trim().is_empty(), "{k} 没有词");
@@ -330,5 +399,16 @@ mod tests {
         assert_eq!(v["placeholder"]["blank"], "空");
         // `save` 这一档没有解释句 —— 为 null 而不是空串，前端才好判
         assert!(v["save"]["saved"]["explain"].is_null());
+        // 「已弃用」两档（C14 §五）：参数级说「这个参数在退场」，选项级说
+        // 「这一档通向的东西已经在退场」—— 两句话不能混成一句
+        assert_eq!(v["paramStatus"]["dirty"]["label"], "已修改");
+        assert_eq!(v["paramDeprecated"]["label"], "已弃用");
+        assert!(v["paramDeprecated"]["explain"].is_string());
+        assert_eq!(v["paramDeprecatedChoice"]["label"], "已弃用");
+        assert_ne!(
+            v["paramDeprecated"]["explain"], v["paramDeprecatedChoice"]["explain"],
+            "两档说的是两件事，解释句不该相同"
+        );
+        assert!(v["disabled"]["deprecatedWriteBlocked"].is_string());
     }
 }

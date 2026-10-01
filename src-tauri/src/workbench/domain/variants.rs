@@ -2,9 +2,9 @@
 //!
 //! # 它在整件事里的位置
 //!
-//! 上游的 `source/machines/*.toml` **一个参数覆盖块都没有**（实测：机型实体 TOML 只有
+//! 机型实体 TOML（`presets/machines/*.toml`）**一个参数覆盖块都没有**（实测：只有
 //! 身份字段 + `[dimensions]` + `[[versions]]`）。机型的参数差异全在
-//! `param_registry.json` 的 `params[].machineVariants` 这张表里，键有两种形态：
+//! `presets/registry/param_registry.toml` 的 `params[].machineVariants` 这张表里，键有两种形态：
 //!
 //! ```text
 //! "P1S"        纯机型键
@@ -41,7 +41,7 @@
 //! # 无损
 //!
 //! 对任意 `(机型, 版本, key)`，归并前后的有效值完全一致，只是记在哪一层不同。
-//! [`tests::merging_is_lossless_on_real_upstream`] 逐项验这件事 ——
+//! [`tests::merging_is_lossless_on_real_data`] 逐项验这件事 ——
 //! 因为"无损"是这套归并唯一不可让的性质：它一旦不成立，用户会看到某台机器的偏移
 //! 悄悄变了，而没有任何一步会报错。
 //!
@@ -155,7 +155,7 @@ pub fn digest(registry: &Registry, machine_id: &str, version_ids: &[String]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::domain::layer::{Layers, Origin};
+    use crate::workbench::domain::layer::Layers;
     use crate::workbench::paths;
 
     /// 造一份字段定义 + 一台机型的版本清单。字段定义走真的反序列化路径，
@@ -375,7 +375,6 @@ mod tests {
         let want: BTreeMap<&str, (usize, usize)> = [
             ("A1", (1, 9)),
             ("A1_MINI", (2, 6)),
-            ("A2L", (0, 0)),
             ("P1S", (5, 0)),
             ("P2S", (5, 0)),
             ("X1C", (5, 0)),
@@ -410,124 +409,6 @@ mod tests {
             a1.base.contains_key("toolhead.custom_mount_gcode"),
             "A1 基底那一项应该是 custom_mount_gcode，实际是 {:?}",
             a1.base.keys().collect::<Vec<_>>()
-        );
-
-        // A2L 的 0/0 单独说一句：它**不是**"读失败了"，是数据没给它写任何机型差异
-        let a2l = digest(
-            &p.registry,
-            "A2L",
-            &vids_of(p.catalog.machine("A2L").unwrap()),
-        );
-        assert!(a2l.base.is_empty() && a2l.override_count() == 0);
-        assert_eq!(a2l.versions.len(), 1, "它有一个版本，只是没有机型差异");
-
-        // 顺带验一件与 A2L 有关的事：参数**不缺**，全部落到出厂默认
-        let empty = Overrides::new();
-        let layers = Layers::new(&p.registry, "A2L", &empty, &empty);
-        let keys = p.registry.visible_keys("A2L");
-        assert!(!keys.is_empty(), "A2L 一个参数都看不到就说明过滤过头了");
-        for key in keys {
-            let r = layers
-                .effective(key)
-                .expect("A2L 的参数应该落到出厂默认，不是没有");
-            assert_eq!(r.origin, Origin::Factory);
-        }
-    }
-
-    /// **换 loader 的一次性对齐判据**（b04 Task 9.3）。
-    ///
-    /// 三层取值刚从上游那份 `content/param_registry.json` 换成我们的
-    /// `presets/registry/param_registry.toml`。两份数据本该等值（后者是前者的源），
-    /// 但"本该"不是判据 —— 值在换 loader 时悄悄变了的话，用户看到的是某台机器的偏移
-    /// 莫名不一样，而没有任何一步会报错。
-    ///
-    /// # 一处**已知且刻意保留**的差异：`0` 与 `0.0`
-    ///
-    /// 实测 42 条字段的 `defaultValue` 在旧 JSON 里是整数（`0`），在 TOML 里是浮点（`0.0`）。
-    /// 那是**旧 JSON 丢了信息**：源文件写的就是 `0.0`（`valueType = 'float'`），
-    /// 是构建那一步按 Go 的 `json.Marshal` 把它印成了 `0`。换回 TOML 等于把精度找回来。
-    ///
-    /// 所以这条判据按**数值**比，不按 JSON 表示比；但差异不许被悄悄吞掉：
-    /// 表示不同的那些会被数出来，数目为 0 时反而说明这条判据失去了对象。
-    ///
-    /// 已知的下游影响只有一处：`fingerprint()` 变了，于是所有版本在换源后会被判成
-    /// 「待生成」一次。那是对的 —— 字段定义的来源真的换了。
-    ///
-    /// **它是临时的** —— Task 12 把上游整个删掉时，这一条跟着删
-    #[test]
-    fn the_toml_and_the_retired_json_agree_on_every_value() {
-        let (Some(p), Some(up_root)) = (real(), paths::upstream_root()) else {
-            eprintln!("没同时定位到 presets 与上游，这条对齐检查未执行（不是通过）");
-            return;
-        };
-        let raw = std::fs::read_to_string(up_root.join("content").join("param_registry.json"))
-            .expect("读得到那份旧 JSON");
-        let json: serde_json::Value = serde_json::from_str(&raw).expect("合法 JSON");
-        let params = json["params"].as_array().expect("params 是数组");
-
-        assert_eq!(
-            params.len(),
-            p.registry.params().len(),
-            "两份数据的字段数不等"
-        );
-
-        /// 等值：数字按 f64 比（`0` 与 `0.0` 算相等），其余按原样比
-        fn same(a: &Value, b: &Value) -> bool {
-            match (a.as_f64(), b.as_f64()) {
-                (Some(x), Some(y)) => x == y,
-                _ => a == b,
-            }
-        }
-
-        let mut compared = 0usize;
-        let mut repr_only = 0usize;
-        for jp in params {
-            let key = jp["key"].as_str().expect("每条都有 key");
-            let ours = p
-                .registry
-                .param(key)
-                .unwrap_or_else(|| panic!("TOML 里没有 {key}"));
-
-            let theirs_default = &jp["defaultValue"];
-            assert!(
-                same(&ours.default_value, theirs_default),
-                "{key} 的出厂默认不一致：TOML {:?} / 旧 JSON {theirs_default:?}",
-                ours.default_value
-            );
-            if &ours.default_value != theirs_default {
-                repr_only += 1;
-            }
-            compared += 1;
-
-            for (name, ours_table) in [
-                ("machineVariants", &ours.machine_variants),
-                ("machineMinVariants", &ours.machine_min_variants),
-                ("machineMaxVariants", &ours.machine_max_variants),
-            ] {
-                let theirs = jp.get(name).and_then(|v| v.as_object());
-                let theirs_len = theirs.map_or(0, serde_json::Map::len);
-                assert_eq!(ours_table.len(), theirs_len, "{key} 的 {name} 键数不一致");
-                for (k, v) in ours_table {
-                    let want = theirs
-                        .and_then(|m| m.get(k))
-                        .unwrap_or_else(|| panic!("{key} 的 {name} 里旧数据没有键 {k}"));
-                    assert!(
-                        same(v, want),
-                        "{key} 的 {name}[{k}] 值不一致：{v:?} / {want:?}"
-                    );
-                    if v != want {
-                        repr_only += 1;
-                    }
-                    compared += 1;
-                }
-            }
-        }
-        assert!(compared > 0, "一个值都没比对到，判据在空转");
-        // 反空转的另一半：那 42 条整数/浮点差异**确实存在**。
-        // 一天它变成 0，说明比对对象换了（或者两份数据里有一份被谁改过），要重新看这条
-        assert!(
-            repr_only > 0,
-            "一条表示差异都没有 —— 上面那段关于 `0` 与 `0.0` 的说明已经失去对象，该重写了"
         );
     }
 }

@@ -1,0 +1,520 @@
+{
+  "brands": [
+    {
+      "id": "Bambu Lab",
+      "logo": "bambu-logo.png",
+      "name": "拓竹 (Bambu Lab)"
+    }
+  ],
+  "models": {
+    "Bambu Lab": [
+      {
+        "id": "A1",
+        "name": "",
+        "display": "A1",
+        "defaultBundle": "A1_STANDARD",
+        "externalAliases": [
+          "A1C",
+          "A1F"
+        ],
+        "image": "a1.webp",
+        "icon": "a1",
+        "versions": [
+          {
+            "id": "STANDARD",
+            "name": "标准版",
+            "presetFile": "A1.toml",
+            "recommendedBundle": "A1_STANDARD",
+            "tag": "推荐",
+            "description": "官方标准配置，适合大多数用户"
+          },
+          {
+            "id": "FAST",
+            "name": "快拆版6月以前",
+            "presetFile": "A1F.toml",
+            "recommendedBundle": "A1_FAST",
+            "tag": "热门",
+            "description": "支持快拆配件的改装配置"
+          },
+          {
+            "id": "FASTV3.3",
+            "name": "快拆版260628",
+            "presetFile": "A1F_260628.toml",
+            "recommendedBundle": "A1_FASTV3.3",
+            "tag": "最新",
+            "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          }
+        ]
+      },
+      {
+        "id": "A1_MINI",
+        "name": "",
+        "display": "A1 mini",
+        "defaultBundle": "A1_MINI_STANDARD",
+        "externalAliases": [
+          "A1MINI",
+          "A1M",
+          "A1MC",
+          "A1MQ",
+          "A1MF"
+        ],
+        "image": "a1_mini.webp",
+        "icon": "a1_mini",
+        "versions": [
+          {
+            "id": "STANDARD",
+            "name": "标准版",
+            "presetFile": "A1M.toml",
+            "recommendedBundle": "A1_MINI_STANDARD",
+            "tag": "推荐",
+            "description": "官方标准配置"
+          },
+          {
+            "id": "FAST",
+            "name": "快拆版6月以前",
+            "presetFile": "A1MF.toml",
+            "recommendedBundle": "A1_MINI_FAST",
+            "tag": "热门",
+            "description": "支持快拆配件的改装配置"
+          },
+          {
+            "id": "FASTV3.3",
+            "name": "快拆版260628",
+            "presetFile": "A1MF_260628.toml",
+            "recommendedBundle": "A1_MINI_FASTV3.3",
+            "tag": "最新",
+            "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          }
+        ]
+      },
+      {
+        "id": "A2L",
+        "name": "",
+        "display": "A2L",
+        "defaultBundle": "",
+        "externalAliases": [],
+        "image": "",
+        "icon": "a1",
+        "versions": [
+          {
+            "id": "STANDARD",
+            "name": "标准版",
+            "presetFile": "",
+            "recommendedBundle": "",
+            "tag": "",
+            "description": ""
+          }
+        ]
+      },
+      {
+        "id": "P1S",
+        "name": "",
+        "display": "P1S",
+        "defaultBundle": "P1S_default",
+        "externalAliases": [
+          "P1",
+          "P1SC",
+          "P1P",
+          "P1C"
+        ],
+        "image": "p1s.webp",
+        "icon": "p1s",
+        "versions": [
+          {
+            "id": "LITE",
+            "name": "lite版",
+            "presetFile": "P1.toml",
+            "recommendedBundle": "P1S_default",
+            "tag": "推荐",
+            "description": "群里开源的最新lite"
+          }
+        ]
+      },
+      {
+        "id": "P2S",
+        "name": "",
+        "display": "P2S",
+        "defaultBundle": "P2S_default",
+        "externalAliases": [
+          "P2"
+        ],
+        "image": "p2s.webp",
+        "icon": "p1s",
+        "versions": [
+          {
+            "id": "STANDARD",
+            "name": "标准版",
+            "presetFile": "P2.toml",
+            "recommendedBundle": "P2S_default",
+            "tag": "推荐",
+            "description": "未完成，没有打印机"
+          }
+        ]
+      },
+      {
+        "id": "X1C",
+        "name": "",
+        "display": "X1C",
+        "defaultBundle": "X1C_default",
+        "externalAliases": [
+          "X1",
+          "X1S",
+          "X1E",
+          "X1 Carbon",
+          "X1CARBON"
+        ],
+        "image": "x1c.webp",
+        "icon": "p1s",
+        "versions": [
+          {
+            "id": "LITE",
+            "name": "lite版",
+            "presetFile": "X1.toml",
+            "recommendedBundle": "X1C_default",
+            "tag": "推荐",
+            "description": "群里开源的最新lite"
+          }
+        ]
+      }
+    ]
+  },
+  "dimensions": {
+    "A1": {
+      "bedSize": {
+        "depth": 255,
+        "width": 260
+      },
+      "calibration": {
+        "lShapeBaseX": 68.21,
+        "lShapeBaseY": 126.373,
+        "xLineX": 114.523,
+        "xLineY": 104.83,
+        "xLineYEnd": 114.83,
+        "yLineX": 104.53,
+        "yLineXEnd": 114.53,
+        "yLineY": 114.83,
+        "zStartX": 68.21,
+        "zStartY": 126.373
+      },
+      "edgeZone": 10,
+      "flags": {
+        "gcodeMarker": ";===== machine: A1",
+        "hasSecondFan": false
+      },
+      "glueArea": {
+        "glueMaxX": 260,
+        "glueMaxY": 255,
+        "glueMinX": -40,
+        "glueMinY": 0,
+        "wipeX": 252
+      },
+      "movementRange": {
+        "maxX": 260,
+        "maxY": 255,
+        "maxZ": 999,
+        "minX": -40,
+        "minY": 0
+      }
+    },
+    "A1_MINI": {
+      "bedSize": {
+        "depth": 180,
+        "width": 180
+      },
+      "calibration": {
+        "lShapeBaseX": 30.21,
+        "lShapeBaseY": 88.373,
+        "xLineX": 76.523,
+        "xLineY": 66.83,
+        "xLineYEnd": 76.83,
+        "yLineX": 66.523,
+        "yLineXEnd": 76.523,
+        "yLineY": 76.83,
+        "zStartX": 30.21,
+        "zStartY": 88.373
+      },
+      "edgeZone": 10,
+      "flags": {
+        "gcodeMarker": ";===== machine: A1 mini",
+        "hasSecondFan": false
+      },
+      "glueArea": {
+        "glueMaxX": 180,
+        "glueMaxY": 180,
+        "glueMinX": -10,
+        "glueMinY": 0,
+        "wipeX": 160
+      },
+      "movementRange": {
+        "maxX": 180,
+        "maxY": 180,
+        "maxZ": 999,
+        "minX": -10,
+        "minY": 0
+      }
+    },
+    "P1S": {
+      "bedSize": {
+        "depth": 256,
+        "width": 256
+      },
+      "calibration": {
+        "lShapeBaseX": 68.21,
+        "lShapeBaseY": 126.373,
+        "xLineX": 114.523,
+        "xLineY": 104.83,
+        "xLineYEnd": 114.83,
+        "yLineX": 104.53,
+        "yLineXEnd": 114.53,
+        "yLineY": 112.83,
+        "zStartX": 68.21,
+        "zStartY": 126.373
+      },
+      "edgeZone": 10,
+      "flags": {
+        "gcodeMarker": ";===== machine: P1",
+        "hasSecondFan": true
+      },
+      "glueArea": {
+        "glueMaxX": 255,
+        "glueMaxY": 265,
+        "glueMinX": 0,
+        "glueMinY": 0,
+        "wipeX": 20
+      },
+      "movementRange": {
+        "maxX": 255,
+        "maxY": 265,
+        "maxZ": 999,
+        "minX": 0,
+        "minY": 0
+      }
+    },
+    "P2S": {
+      "bedSize": {
+        "depth": 256,
+        "width": 256
+      },
+      "calibration": {
+        "lShapeBaseX": 68.21,
+        "lShapeBaseY": 126.373,
+        "xLineX": 114.523,
+        "xLineY": 104.83,
+        "xLineYEnd": 114.83,
+        "yLineX": 104.53,
+        "yLineXEnd": 114.53,
+        "yLineY": 112.83,
+        "zStartX": 68.21,
+        "zStartY": 126.373
+      },
+      "edgeZone": 10,
+      "flags": {
+        "gcodeMarker": ";===== machine: P2",
+        "hasSecondFan": true
+      },
+      "glueArea": {
+        "glueMaxX": 256,
+        "glueMaxY": 265,
+        "glueMinX": 0,
+        "glueMinY": 0,
+        "wipeX": 20
+      },
+      "movementRange": {
+        "maxX": 256,
+        "maxY": 265,
+        "maxZ": 999,
+        "minX": 0,
+        "minY": 0
+      }
+    },
+    "X1C": {
+      "bedSize": {
+        "depth": 256,
+        "width": 255
+      },
+      "calibration": {
+        "lShapeBaseX": 68.21,
+        "lShapeBaseY": 126.373,
+        "xLineX": 114.523,
+        "xLineY": 104.83,
+        "xLineYEnd": 114.83,
+        "yLineX": 104.53,
+        "yLineXEnd": 114.53,
+        "yLineY": 112.83,
+        "zStartX": 68.21,
+        "zStartY": 126.373
+      },
+      "edgeZone": 10,
+      "flags": {
+        "gcodeMarker": ";===== machine: X1",
+        "hasSecondFan": true
+      },
+      "glueArea": {
+        "glueMaxX": 255,
+        "glueMaxY": 265,
+        "glueMinX": 0,
+        "glueMinY": 0,
+        "wipeX": 20
+      },
+      "movementRange": {
+        "maxX": 255,
+        "maxY": 265,
+        "maxZ": 999,
+        "minX": 0,
+        "minY": 0
+      }
+    }
+  },
+  "forbiddenZones": {
+    "P1S": [
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 5
+          },
+          {
+            "x": 0,
+            "y": 5
+          }
+        ]
+      },
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 28
+          },
+          {
+            "x": 0,
+            "y": 28
+          }
+        ]
+      }
+    ],
+    "P2S": [
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 5
+          },
+          {
+            "x": 0,
+            "y": 5
+          }
+        ]
+      },
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 28
+          },
+          {
+            "x": 0,
+            "y": 28
+          }
+        ]
+      }
+    ],
+    "X1C": [
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 0
+          },
+          {
+            "x": 240,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 14
+          },
+          {
+            "x": 238,
+            "y": 5
+          },
+          {
+            "x": 0,
+            "y": 5
+          }
+        ]
+      },
+      {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 0
+          },
+          {
+            "x": 18,
+            "y": 28
+          },
+          {
+            "x": 0,
+            "y": 28
+          }
+        ]
+      }
+    ]
+  }
+}

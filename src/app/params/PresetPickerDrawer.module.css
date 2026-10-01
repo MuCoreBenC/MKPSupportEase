@@ -1,0 +1,150 @@
+/*
+ * 预设抽屉的样式。
+ * absolute 挂在参数页的 `.main`（它是定位父级），**不用 fixed** —— 外壳上的一层
+ * transform 会让它成为 fixed 的包含块，量出来的坐标就全错。
+ * 颜色一律用项目既有 token：--accent / --accent-soft / --text-1~3 / --line / --surface-solid
+ * （这套里**没有** --brand 那一族，别凭印象写）。
+ */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border: 0;
+  background: rgb(16 24 32 / 18%);
+  cursor: default;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  /* 窗口窄的时候别把参数区挤没 */
+  max-width: 60%;
+  border-left: 1px solid var(--line);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 动作按钮用文字，不用图标。24px 高（小档按钮） */
+.close {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--surface-sunken);
+}
+
+.close:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0 14px;
+  overflow-y: auto;
+}
+
+.group {
+  margin-top: 4px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px 4px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.groupId {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--surface-sunken);
+}
+
+.item[data-current='true'] {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* 聚焦不再另画一圈：当前项有 accent-soft 底 + 加粗兜着 */
+.item:focus-visible {
+  outline: none;
+}
+
+.tick {
+  flex-shrink: 0;
+  width: 10px;
+  color: var(--accent-deep);
+}
+
+.name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 版本名右边那截：**这一项自己的** MKP 文件名（包里没配就退成 tag / id） */
+.note {
+  flex-shrink: 0;
+  max-width: 44%;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

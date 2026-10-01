@@ -1,13 +1,20 @@
 import { invoke } from '@tauri-apps/api/core'
 
+import { NotImplementedError } from './errors'
 import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
 
 /**
- * IPC 桥：把契约里的四个方法映射到 Rust 侧的四个 command。
+ * IPC 桥：把契约里的方法映射到 Rust 侧的 command。
  *
  * 命名两套、映射在这一处：TS 侧是 `getPreset`（前端习惯），Rust 侧是 `get_preset`
  * （Rust 习惯）。Tauri 会把 JS 传进去的 camelCase 参数名转成 snake_case，
  * 所以参数照常写 `{ variantId }`。
+ *
+ * 前四个方法（预设 / 偏移 / 校准板 / 打开模型）是 v023 移植时就接通的，走真 command。
+ * 「客户端接发布包」这一轮新增的十二个方法**产品仓后端还没有** —— 按仓里的纪律
+ * （HANDOFF 14.1：后端没有的命令**不渲染入口**），它们在真机上抛 `NotImplementedError`，
+ * 页面因此显示「本版未接入」那一块，而不是白屏、也不是假装成功。
+ * 浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
  * 是多一层没必要的间接：`invoke` 本身就是那座桥。
@@ -58,9 +65,40 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
   }
 }
 
+/**
+ * 一个**还没接**的接口。
+ *
+ * 不做成"返回空数组"：空数组与"后端说没有"在界面上长得一样，
+ * 而这两件事要分开（见 `errors.ts` 那段）。抛出来，页面上是一块写明方法名的空态。
+ *
+ * **必须是 async**：契约上这些方法返回 `Promise`，调用方把「失败」接在
+ * `.then(ok, err)` / `.catch` 上 —— 直接同步 throw 会绕过那条 reject 通道，
+ * 在 `Promise.all([api.getMachines(), ...])` 这种**数组字面量**处就炸穿出去
+ * （异常发生在 `Promise.all` 被调用之前），于是调用方的兜底永远收不到它。
+ * 落在 `useEffect` 里就是 React 渲染期异常，没有 error boundary 时整棵树卸载 ——
+ * 白屏，而不是这块「未接入」空态。async 之后异常才走 reject，兜底才接得住。
+ */
+async function notWired(method: MkpApiMethod): Promise<never> {
+  throw new NotImplementedError(method)
+}
+
 export const bridgeApi: MkpApi = {
   getPreset: (variantId) => call('getPreset', 'get_preset', { variantId }),
   saveOffsets: (axes) => call('saveOffsets', 'save_offsets', { axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
+
+  /* ——— 这一轮新增的十二个：Rust 侧还没有对应 command ——— */
+  getMachines: () => notWired('getMachines'),
+  getVersionFiles: () => notWired('getVersionFiles'),
+  getLocalFiles: () => notWired('getLocalFiles'),
+  getLocalUserFiles: () => notWired('getLocalUserFiles'),
+  getAppliedPreset: () => notWired('getAppliedPreset'),
+  getSlicerCopied: () => notWired('getSlicerCopied'),
+  copyToSlicer: () => notWired('copyToSlicer'),
+  getPresetFiles: () => notWired('getPresetFiles'),
+  getMenu: () => notWired('getMenu'),
+  getParamMeta: () => notWired('getParamMeta'),
+  getMachineParams: () => notWired('getMachineParams'),
+  downloadFiles: () => notWired('downloadFiles'),
 }

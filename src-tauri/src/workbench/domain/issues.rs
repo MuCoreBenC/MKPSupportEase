@@ -30,7 +30,13 @@
 
 use serde::Serialize;
 
+use preset::recipe::Recipe;
+
+use crate::workbench::presets::registry::ValueType;
+use crate::workbench::presets::AssetKind;
+
 use super::derive::Book;
+use super::patch::CatalogMachine;
 use super::visibility::Gate;
 use super::wording as w;
 
@@ -147,16 +153,52 @@ impl Report {
     }
 }
 
-/// 把整本过一遍。**纯函数**：同样的输入永远得到同样的输出
+/// 把整本过一遍。**纯函数**：同样的输入永远得到同样的输出。
+///
+/// 这是生成闸门（`wb_generate` 前的那道检查）用的版本：它不含「清单 ↔ 配方」对齐
+/// —— 因为生成**不读** `preset_recipes.toml`，配方对不上不影响工作台的任何产物。
+/// 预检（`wb_preflight`）要用 [`preflight`]，那里多查配方这一面。
 pub fn inspect(book: &Book<'_>) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
+    collect(book, &mut issues);
+    summarize(issues)
+}
 
-    compat(book, &mut issues);
-    machines(book, &mut issues);
-    versions(book, &mut issues);
-    upstream_data(book, &mut issues);
-    delivery(book, &mut issues);
+/// **预检全量**（b05 Task 11.8）：[`inspect`] 的全部 + 清单 ↔ 配方对齐
+/// （b05 Task 11.4 / 11.5 / 11.6）。
+///
+/// 配方文本由调用方给（真数据是 `preset::PRESET_RECIPES_TOML`）。**收 `Result`**
+/// 是刻意的：配方本身坏掉（读不回来 / 校验不过）是 gen-presets 那条链的问题，
+/// 它该成为预检报告里的**一条**，而不是让整个预检命令失败 —— 校验层停摆
+/// 等于把「数据坏了」变成「工具坏了」，后者更糟。
+pub fn preflight(book: &Book<'_>, recipe: Result<&Recipe, &str>) -> Report {
+    let mut issues: Vec<Issue> = Vec::new();
+    collect(book, &mut issues);
+    match recipe {
+        Ok(r) => recipe_alignment(book, r, &mut issues),
+        Err(e) => issues.push(Issue {
+            id: "recipe.unreadable".to_owned(),
+            severity: Severity::Hint,
+            title: "配方 preset_recipes.toml 读不回来".to_owned(),
+            detail: format!(
+                "{e}\n内置预设那条链（gen-presets）眼下用不了它，但工作台的其余检查\
+                 与生成照常 —— 这一轮先把别的看完。"
+            ),
+            at: Where::view(View::Build),
+        }),
+    }
+    summarize(issues)
+}
 
+/// 不依赖配方的那几类。生成闸门与预检共用
+fn collect(book: &Book<'_>, out: &mut Vec<Issue>) {
+    machines(book, out);
+    versions(book, out);
+    filter_ghosts(book, out);
+    delivery(book, out);
+}
+
+fn summarize(mut issues: Vec<Issue>) -> Report {
     // 阻断在前。列表顺序就是处理顺序 —— 待办排在阻断前面会让人先去填空，
     // 而那些空填完了照样生成不出来
     issues.sort_by(|a, b| a.severity.cmp(&b.severity).then(a.id.cmp(&b.id)));
@@ -171,23 +213,92 @@ pub fn inspect(book: &Book<'_>) -> Report {
     }
 }
 
-/// 兼容声明（doc §12）
-fn compat(book: &Book<'_>, out: &mut Vec<Issue>) {
-    if book.up.manifest.compat.minimum_client.is_none() {
-        out.push(Issue {
-            id: "compat.minimum_client".to_owned(),
-            severity: Severity::Todo,
-            title: format!("最低客户端版本{}", w::UNDECLARED),
-            // doc §12 那三条实测事实原样写进说明 —— 不写的话，看到这一条的人
-            // 第一反应会是「去哪儿填」，而答案是「不在我们这儿」
-            detail: "上游 manifest.json 的 minimumClient 是空串，version 也是空串，\
-                     全局只有 manifestVersion: 2 与 fallback_registry.version: 1 两个版本号。\
-                     也就是说上游现在**没有**声明「客户端要多新才能用这份数据」。\
-                     这不是我们该填的空，而是发布时要知道的事：\
-                     老客户端拿到新字段会静默忽略，而不是报错。"
-                .to_owned(),
-            at: Where::view(View::Build),
-        });
+/// 清单 ↔ 配方（`preset_recipes.toml`，G-1 方案甲）的三个方向
+/// （b05 Task 11.4 / 11.5 / 11.6）。
+///
+/// 为什么**全档待办**（warning）而不是阻断：工作台的 `render()` 读参数注册表，
+/// 不读配方 —— 这些不一致不影响工作台生成任何一份产物。它们伤的是 gen-presets
+/// 那条链（内置预设），而那条链构建时自己会报错（`gen-presets --check`）——
+/// 预检在这里报出来，正是 11.6 说的「参数源缺失报 warning，构建时才升为 error」。
+/// 三个方向：
+///
+/// 1. **机型存在、配方缺它**（11.5）：那台机器的内置预设链还没跟上；
+/// 2. **版本存在、配方缺变体**（11.6：「允许版本先存在，参数源后补」）；
+/// 3. **配方里有、清单不认**（11.5 反方向 + 11.4 的孤儿）：机型级（改了名/删了之后
+///    配方没跟上）与变体级（`机型:变体` 没有任何版本定义指向 —— 产物文件名由
+///    机型 id + 版本 id 小写算出，清单里没有那一版就没有那个名字）。
+///
+/// **占位机型（没有 `[dimensions]`）整台跳过**：不参与交付，两条链都没有它是闭合的
+/// —— 与 [`machines`] 里 A2L 那条「占位机型」提示同一口径。
+fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
+    let delivered: Vec<&CatalogMachine> = book
+        .machines()
+        .iter()
+        .filter(|m| m.has_dimensions)
+        .collect();
+    let combos: std::collections::BTreeSet<(String, String)> =
+        recipe.combos().into_iter().collect();
+
+    // 方向一 + 二：清单这边（参与交付的）每台机型、每个版本，配方都要认
+    for m in &delivered {
+        if !recipe.machines.iter().any(|r| r.name == m.id) {
+            out.push(Issue {
+                id: format!("recipe.missing_machine.{}", m.id),
+                severity: Severity::Todo,
+                title: format!("机型 {} 在配方 preset_recipes.toml 里没有条目", m.id),
+                detail: "内置预设那条链（gen-presets）生成不出这台的任何一份预设。\
+                         机型定义可以先建、配方正文后补，但补上之前它进不了内置预设，\
+                         那条链构建时会报错（11.6：预检 warning，构建时 error）。"
+                    .to_owned(),
+                at: Where::view(View::Build),
+            });
+        }
+        for vid in &m.version_ids {
+            if !combos.contains(&(m.id.clone(), vid.to_lowercase())) {
+                out.push(Issue {
+                    id: format!("recipe.missing_variant.{}.{}", m.id, vid),
+                    severity: Severity::Todo,
+                    title: format!("版本 {}:{} 在配方里没有对应的变体", m.id, vid),
+                    detail: "版本定义可以先存在，参数源后补（doc §9）—— 但补上之前 \
+                             内置预设那条链生成不出这一版的产物。产物文件名是 \
+                             机型 id + 版本 id 小写，配方变体按这个名字对上。"
+                        .to_owned(),
+                    at: Where::view(View::Build),
+                });
+            }
+        }
+    }
+
+    // 方向三：配方那边每台机型、每个变体，清单都要有对应的版本定义
+    for r in &recipe.machines {
+        let Some(m) = delivered.iter().find(|m| m.id == r.name) else {
+            out.push(Issue {
+                id: format!("recipe.unknown_machine.{}", r.name),
+                severity: Severity::Todo,
+                title: format!("配方 preset_recipes.toml 里的 {} 不在机型清单里", r.name),
+                detail: "这份正文连它的全部变体，再也进不了任何清单认的产物 —— \
+                         机型改了名或删了之后配方没跟上，就会留下这种孤儿（11.4）。\
+                         确认之后从配方里删掉这台，或者把机型清单补回来。"
+                    .to_owned(),
+                at: Where::view(View::Build),
+            });
+            continue;
+        };
+        for v in &r.variants {
+            if !m.version_ids.iter().any(|x| x.to_lowercase() == *v) {
+                out.push(Issue {
+                    id: format!("recipe.orphan_variant.{}.{}", r.name, v),
+                    severity: Severity::Todo,
+                    title: format!("配方里的变体 {}:{} 没有任何版本定义指向", r.name, v),
+                    detail: "它永远进不了产物：清单里没有那台机型的那一版。\
+                             gen-presets 会为它生成一份谁也不引用的内置预设 —— \
+                             生成不报错，所以只能在这里看见。确认之后从配方里删掉，\
+                             或把版本定义补回来。"
+                        .to_owned(),
+                    at: Where::view(View::Build),
+                });
+            }
+        }
     }
 }
 
@@ -310,8 +421,22 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
                 }
             }
 
-            // 枚举值不在选项里：**阻断**
-            if !p.choices.is_empty() && !p.choices.iter().any(|c| &c.value == hit.value) {
+            // 枚举值不在选项里：**阻断**。
+            //
+            // **`choices` 是取值域只有 string 这一档** —— 与 `validate.rs` 的
+            // `value_type == "string"` 同一道门。bool / float 参数身上挂着的
+            // 是显示文案与「预设档」，不是逼人选的取值域：
+            //
+            //   · bool：`'off'` / `'on'` 是显示文案，取值域由 bool 类型保证；
+            //     不跳过的话每台机器每个版本要误报六条阻断（wiping.* 五条 +
+            //     first_pen_revitalization_flag，b05 Task 11.2 实测）；
+            //   · float：`wiping.ironing_coverage_threshold` 挂 0/50/90 三条
+            //     预设档，而出厂默认就是 10.0 —— 照枚举查会把它判成阻断，
+            //     可它真身是一个能填的百分比。
+            if p.value_type == ValueType::Text
+                && !p.choices.is_empty()
+                && !p.choices.iter().any(|c| &c.value == hit.value)
+            {
                 out.push(Issue {
                     id: format!("choice.{}.{}", v.uid, key),
                     severity: Severity::Block,
@@ -351,16 +476,13 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
     }
 }
 
-/// 上游数据本身的问题：**一律提示，不阻断** ——
-/// 它们不是我们能修的，报成阻断会让工作台变成一个打不开的软件
-fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let known: Vec<&str> = book
-        .up
-        .catalog
-        .machines()
-        .iter()
-        .map(|m| m.id.as_str())
-        .collect();
+/// `machineFilter` 里认不出的机型：**一律提示，不阻断**。
+///
+/// 过滤里写着一台机型清单里没有的机型，多半是删机型时漏改了过滤。
+/// 这一项在那几台（不存在的）机型上会被当成不适用，而在真实机型上不受影响 ——
+/// 所以它不挡任何东西，只是留一处固定可见的地方
+fn filter_ghosts(book: &Book<'_>, out: &mut Vec<Issue>) {
+    let known: Vec<&str> = book.machines().iter().map(|m| m.id.as_str()).collect();
 
     for p in book.presets.registry.params() {
         let ghosts: Vec<&str> = p
@@ -378,7 +500,7 @@ fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
             title: format!("{} 的机型过滤里有认不出的机型", p.label),
             detail: format!(
                 "{} 不在机型清单里。这一项在那几台（不存在的）机型上会被当成不适用，\
-                 而在真实机型上不受影响。多半是上游删机型时漏改了过滤。",
+                 而在真实机型上不受影响。多半是删机型时漏改了过滤。",
                 ghosts.join("、")
             ),
             at: Where {
@@ -391,20 +513,31 @@ fn upstream_data(book: &Book<'_>, out: &mut Vec<Issue>) {
     }
 }
 
-/// 交付这一面
+/// 交付这一面：登记了、却没进任何套餐的**切片器预设**。
+///
+/// **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）
 fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let orphan: Vec<String> = book
-        .stock_rows()
-        .into_iter()
-        .filter(|r| !r.in_any_bundle)
-        .map(|r| r.file_name)
+    let bundled: std::collections::BTreeSet<String> = book
+        .presets
+        .bundles
+        .items()
+        .iter()
+        .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
+        .collect();
+    let orphan: Vec<&str> = book
+        .presets
+        .assets
+        .items()
+        .iter()
+        .filter(|a| a.kind == AssetKind::SlicerProfile)
+        .filter(|a| !bundled.contains(&a.id.to_lowercase()))
+        .map(|a| a.path.as_str())
         .collect();
     if !orphan.is_empty() {
-        // **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）
         out.push(Issue {
             id: "bundle.orphan_files".to_owned(),
             severity: Severity::Hint,
-            title: format!("有 {} 个文件没进任何套餐", orphan.len()),
+            title: format!("有 {} 个切片器预设没进任何套餐", orphan.len()),
             detail: format!(
                 "{} —— 客户看得到它们（除非标了仅归档），只是没有套餐推荐。\
                  仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。",
@@ -425,6 +558,173 @@ mod tests {
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
+
+    /* ---------- 清单 ↔ 配方（b05 Task 11.4 / 11.5 / 11.6） ---------- */
+
+    /// **三个方向各抓一条**（外加占位机型跳过的反例）。
+    ///
+    /// 配方用内联 TOML 而不是真数据：`Recipe::parse` 只保证**配方内部**自洽
+    /// （机型重名、覆盖键不存在这些它自己会拦），「配方 vs 清单」的不一致
+    /// 只能靠 recipe_alignment —— 所以这个测试能喂真配方永远写不出来的形状
+    #[test]
+    fn recipe_alignment_catches_every_direction() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        // 夹具清单：A1(STANDARD, FAST)、A2L(占位，无尺寸)、P1S(LITE)。
+        // body 用 TOML 双引号 + `\n` 转义（字面量串不支持跨行，见 recipe.rs minimal()）
+        let text = r##"
+release_time = '2026-01-01 00:00:00'
+
+[[machines]]
+name = 'A1'
+variants = ['standard']
+body = "# uuid: x\n# machine: A1\n[toolhead]\nspeed_limit = 70\n"
+
+[[machines]]
+name = 'P1S'
+variants = ['ghost_var', 'lite']
+body = "# uuid: x\n# machine: P1S\n[toolhead]\nspeed_limit = 70\n"
+
+[[machines]]
+name = 'GHOST_MACHINE'
+variants = ['x']
+body = "# uuid: x\n# machine: GHOST\n[toolhead]\nspeed_limit = 70\n"
+
+[overrides.'A1:standard']
+uuid = '11111111-1111-1111-1111-111111111111'
+
+[overrides.'P1S:ghost_var']
+uuid = '22222222-2222-2222-2222-222222222222'
+
+[overrides.'P1S:lite']
+uuid = '33333333-3333-3333-3333-333333333333'
+
+[overrides.'GHOST_MACHINE:x']
+uuid = '44444444-4444-4444-4444-444444444444'
+"##;
+        let recipe = Recipe::parse(text).expect("内联配方应该 parse 得过");
+        let mut out = Vec::new();
+        recipe_alignment(&book, &recipe, &mut out);
+
+        let ids: Vec<&str> = out.iter().map(|i| i.id.as_str()).collect();
+        // 方向三（配方有、清单不认的变体，11.4 孤儿）：P1S 认得，ghost_var 没人指向
+        assert!(
+            ids.contains(&"recipe.orphan_variant.P1S.ghost_var"),
+            "配方有、清单不认的变体（11.4 孤儿）：{ids:?}"
+        );
+        // 方向二（版本在、配方缺变体，11.6 的「允许先存在」）：A1 的 FAST
+        assert!(
+            ids.contains(&"recipe.missing_variant.A1.FAST"),
+            "清单版本在配方里没有对应变体：{ids:?}"
+        );
+        // 方向三（配方有、清单不认，11.5 反方向）：GHOST_MACHINE
+        assert!(
+            ids.contains(&"recipe.unknown_machine.GHOST_MACHINE"),
+            "配方里的机型清单不认：{ids:?}"
+        );
+        // 占位机型必须整台跳过：A2L 不在配方里，也不该因为「配方缺它」被报
+        assert!(
+            !ids.iter().any(|i| i.contains("A2L")),
+            "占位机型不参与交付，两条链都没有它是闭合的：{ids:?}"
+        );
+        // 「机型存在、配方缺机型条目」这一方向换个形状验：把 P1S 从配方里拿掉
+        let text2 = r##"
+release_time = '2026-01-01 00:00:00'
+
+[[machines]]
+name = 'A1'
+variants = ['standard', 'fast']
+body = "# uuid: x\n# machine: A1\n[toolhead]\nspeed_limit = 70\n"
+
+[overrides.'A1:standard']
+uuid = '11111111-1111-1111-1111-111111111111'
+
+[overrides.'A1:fast']
+uuid = '22222222-2222-2222-2222-222222222222'
+"##;
+        let recipe2 = Recipe::parse(text2).expect("内联配方应该 parse 得过");
+        let mut out2 = Vec::new();
+        recipe_alignment(&book, &recipe2, &mut out2);
+        assert!(
+            out2.iter().any(|i| i.id == "recipe.missing_machine.P1S"),
+            "清单机型在配方里没有条目：{:?}",
+            out2.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
+        );
+        // A1 全对齐，不该再报
+        assert!(
+            !out2.iter().any(|i| i.id.contains("A1")),
+            "对齐的部分不该报：{:?}",
+            out2.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// 全对齐的配方**一条都不该报** —— 少了这条，上面那条分不清「查过了没报」
+    /// 和「根本没查」
+    #[test]
+    fn recipe_alignment_stays_silent_when_everything_lines_up() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        let text = r##"
+release_time = '2026-01-01 00:00:00'
+
+[[machines]]
+name = 'A1'
+variants = ['standard', 'fast']
+body = "# uuid: x\n# machine: A1\n[toolhead]\nspeed_limit = 70\n"
+
+[[machines]]
+name = 'P1S'
+variants = ['lite']
+body = "# uuid: x\n# machine: P1S\n[toolhead]\nspeed_limit = 70\n"
+
+[overrides.'A1:standard']
+uuid = '11111111-1111-1111-1111-111111111111'
+
+[overrides.'A1:fast']
+uuid = '22222222-2222-2222-2222-222222222222'
+
+[overrides.'P1S:lite']
+uuid = '33333333-3333-3333-3333-333333333333'
+"##;
+        let recipe = Recipe::parse(text).expect("内联配方应该 parse 得过");
+        let mut out = Vec::new();
+        recipe_alignment(&book, &recipe, &mut out);
+        assert!(
+            out.is_empty(),
+            "全对齐却报了：{:?}",
+            out.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// `preflight` 的 Err 分支：配方读不回来是**报告里的一条**（Hint），
+    /// 其余检查照跑 —— 校验层停摆比数据坏了更糟
+    #[test]
+    fn an_unreadable_recipe_becomes_an_issue_not_a_failure() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        let r = preflight(&book, Err("配方读不回来（测试）"));
+        assert!(
+            r.issues
+                .iter()
+                .any(|i| i.id == "recipe.unreadable" && i.severity == Severity::Hint),
+            "实测：{:?}",
+            r.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>()
+        );
+        // 其余检查照跑：A2L 是占位机型，那条提示该在
+        assert!(
+            r.issues.iter().any(|i| i.id == "machine.dimensions.A2L"),
+            "配方坏了不该把别的检查一起带停"
+        );
+    }
 
     fn committed() -> Committed {
         let mut versions = BTreeMap::new();
@@ -458,7 +758,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
 
         assert_eq!(r.blocks, 0, "健康数据被判成阻断了：{:#?}", r.first_block());
         assert!(!r.blocked());
@@ -487,7 +787,7 @@ mod tests {
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert!(r.blocked(), "枚举值不存在该是阻断");
         let b = r.first_block().unwrap();
         assert_eq!(b.severity, Severity::Block);
@@ -495,11 +795,6 @@ mod tests {
         assert_eq!(b.at.key.as_deref(), Some("wiping.mode"));
         assert!(b.detail.contains("擦料塔"), "要列出真的选项：{}", b.detail);
 
-        // 待办：上游没声明最低客户端版本（夹具照真上游做的，minimumClient 是空串）
-        assert!(r
-            .issues
-            .iter()
-            .any(|i| i.id == "compat.minimum_client" && i.severity == Severity::Todo));
         // **提示（不是待办）：A2L 是占位机型。**
         //
         // 档位本身就是判据：`Todo` 会让出货检查每次都催一遍一件刻意没做的事，
@@ -525,7 +820,7 @@ mod tests {
             placeholder.detail
         );
 
-        // 提示：没进任何套餐的文件（夹具里只有一条 BBS 进了套餐，三个 MKP 都没进）
+        // 提示：没进任何套餐的切片器预设（夹具里只有一条 BBS 进了套餐）
         let hint = r
             .issues
             .iter()
@@ -552,7 +847,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert_eq!(r.issues[0].severity, Severity::Block);
         assert!(r.issues.windows(2).all(|w| w[0].severity <= w[1].severity));
     }
@@ -563,7 +858,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
 
         assert!(!r.issues.is_empty(), "一条都没有，下面的判据在空转");
         for i in &r.issues {
@@ -601,7 +896,7 @@ mod tests {
         )
         .unwrap();
 
-        let r = inspect(&Book::new(&f.up, &f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d));
         assert!(r.blocked(), "值不合法必须挡住生成");
         let hit = r
             .issues
@@ -622,5 +917,69 @@ mod tests {
             assert!(!seen.contains(&s.label()));
             seen.push(s.label());
         }
+    }
+
+    /// **真数据上的预检全量**（b05 Task 11.4–11.6，防空转的主判据）。
+    ///
+    /// 真机型清单 + 真配方：清单侧（真 presets）交付机型与版本同真配方**完全对齐**
+    /// → 配方类一条不该报，占位机型（无尺寸）跳过（不参与交付）
+    #[test]
+    fn the_real_recipe_and_catalog_line_up() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let real =
+            crate::workbench::presets::Presets::load_from(&root).expect("真 presets 必须读得通");
+        // 清单照 Book 的吃法走 Committed.catalog：从真 Catalog 转出 CatalogMachine
+        let catalog: Vec<CatalogMachine> = real
+            .catalog
+            .machines()
+            .iter()
+            .map(|m| CatalogMachine {
+                id: m.id.clone(),
+                display: m.display.clone(),
+                icon: m.icon.clone(),
+                default_bundle: m.default_bundle.clone(),
+                has_dimensions: m.has_dimensions,
+                version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+            })
+            .collect();
+        let delivered = catalog.iter().filter(|m| m.has_dimensions).count();
+        let versions: usize = catalog
+            .iter()
+            .filter(|m| m.has_dimensions)
+            .map(|m| m.version_ids.len())
+            .sum();
+        // 反空转前置：交付机型 5 台（A2L 占位在外）、版本 9 个 —— 少了说明清单变了
+        assert_eq!(
+            delivered, 5,
+            "参与交付的机型数变了（A2L 占位不算）—— 说清为什么再改判据"
+        );
+        assert_eq!(versions, 9, "交付版本数变了 —— 真配方那边是 9 个变体");
+
+        let committed = Committed {
+            catalog,
+            ..Default::default()
+        };
+        let draft = Draft::default();
+        let book = Book::new(&real, &committed, &draft);
+        let recipe =
+            Recipe::parse(preset::PRESET_RECIPES_TOML).expect("仓库里的配方真源必须 parse 得过");
+        assert_eq!(
+            recipe.combos().len(),
+            9,
+            "真配方的变体数变了 —— 清单与配方得一起动，这条判据逼着两边对表"
+        );
+
+        let mut out = Vec::new();
+        recipe_alignment(&book, &recipe, &mut out);
+        assert!(
+            out.is_empty(),
+            "真清单与真配方应当完全对齐，却报了：{:?}",
+            out.iter()
+                .map(|i| (i.id.as_str(), i.title.as_str()))
+                .collect::<Vec<_>>()
+        );
     }
 }

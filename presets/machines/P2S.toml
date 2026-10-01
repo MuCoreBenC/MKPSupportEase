@@ -4,8 +4,7 @@ display = 'P2S'
 brand = 'Bambu Lab'
 defaultBundle = 'P2S_default'
 externalAliases = ['P2']
-image = 'p2s.webp'
-icon = 'p1s'
+icon = 'p1s-icon'
 
 [dimensions]
 edgeZone = 10.0
@@ -47,7 +46,6 @@ minY = 0.0
 [[versions]]
 id = 'STANDARD'
 name = '标准版'
-presetFile = 'P2.toml'
 recommendedBundle = 'P2S_default'
 tag = '推荐'
 description = '未完成，没有打印机'

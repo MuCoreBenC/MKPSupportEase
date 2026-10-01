@@ -4,6 +4,17 @@ import { mockApi } from './mock'
 
 export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset } from './contract'
 export { isAppError } from './contract'
+export { NotImplementedError } from './errors'
+
+/*
+ * 剩下的类型一律整份转出去（`export type *`）——
+ * 「客户端接发布包」这一轮把机型 / 文件 / 参数表 / 说明书那一批类型都搬进了契约，
+ * 页面 import 的是 `'../../api'` 这个入口（不直接摸 `./contract` 的文件名），
+ * 在这里逐个列会因为「加一个字段就要改两处」而开始漏。
+ * `export type *` 只带类型、不带值 —— 值仍然只有 `api` / `apiSource` / `isAppError`
+ * / `NotImplementedError` 这几个明确出口。
+ */
+export type * from './contract'
 
 /**
  * 整个应用取后端的唯一入口。

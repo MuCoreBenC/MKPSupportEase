@@ -35,10 +35,14 @@ pub struct BrandView {
 pub struct VersionView {
     pub id: String,
     pub name: String,
-    pub preset_file: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
     pub description: Option<String>,
+    /// **参数正文已补**（b05 Task 14.4 / doc §4.3 第 6 步）：这个版本在
+    /// `param_registry.toml` 的 `machineVariants` 里有没有 `{机型}:{版本}` 形状的
+    /// 显式键。`false` = 纯继承基底，界面上标「参数源待补」——
+    /// **版本不因缺参数源而隐藏**（它的有效配方靠 defaults 兜底照样能渲染）
+    pub has_recipe: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,7 +57,7 @@ pub struct MachineView {
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
     pub icon: Option<String>,
-    /// 有没有 `[dimensions]`。A2L 实测没有 —— 界面上要能看出"这台还没配尺寸"
+    /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
     /// 禁区块数。0 = 这台没有禁区文件
     pub zone_count: usize,
@@ -104,6 +108,41 @@ pub fn wb_add_version(
         tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
         // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
         // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
+        Ok(list_of(&Presets::load()?))
+    })
+}
+
+/// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：选一个模板版本，
+/// 填新 id / 名称 / tag / 描述，保存时**只写版本定义** —— 不碰参数正文
+/// （那是 [`super::wb_copy_recipe`] 的独立动作，两步分离让每次写只落一个文件）。
+///
+/// `tag` / `description` 由前端拿模板值预填、人可改；`recommendedBundle` 抄模板。
+#[tauri::command]
+pub fn wb_copy_version(
+    machine_id: String,
+    template_version_id: String,
+    id: String,
+    name: String,
+    tag: Option<String>,
+    description: Option<String>,
+) -> Result<MachineList, AppError> {
+    traced("wb_copy_version", |_| {
+        let mut p = Presets::load()?;
+        p.catalog.machine_mut(&machine_id)?.copy_version(
+            &template_version_id,
+            &id,
+            &name,
+            tag.as_deref(),
+            description.as_deref(),
+        )?;
+        p.catalog.write_machine(&machine_id)?;
+        tracing::info!(
+            machine = %machine_id,
+            template = %template_version_id,
+            version = %id,
+            "从模板复制了一个版本（只写版本定义）"
+        );
+        // 从盘上重读再返回：**界面看到的应该是落盘的结果**
         Ok(list_of(&Presets::load()?))
     })
 }
@@ -236,13 +275,16 @@ fn list_of(p: &Presets) -> MachineList {
                 versions: m
                     .versions
                     .iter()
-                    .map(|v| VersionView {
-                        id: v.id.clone(),
-                        name: v.name.clone(),
-                        preset_file: v.preset_file.clone(),
-                        recommended_bundle: v.recommended_bundle.clone(),
-                        tag: v.tag.clone(),
-                        description: v.description.clone(),
+                    .map(|v| {
+                        let uid = format!("{}:{}", m.id, v.id);
+                        VersionView {
+                            id: v.id.clone(),
+                            name: v.name.clone(),
+                            recommended_bundle: v.recommended_bundle.clone(),
+                            tag: v.tag.clone(),
+                            description: v.description.clone(),
+                            has_recipe: p.registry.version_has_variants(&uid),
+                        }
                     })
                     .collect(),
                 file: m
@@ -278,11 +320,9 @@ mod tests {
             "A1.toml",
             "界面上要显示「我在改哪个文件」"
         );
-        // A2L：有版本、没尺寸、没禁区 —— 三个状态各自独立，界面要分别显示
-        let a2l = p.catalog.machine("A2L").expect("A2L 在");
-        assert!(!a2l.has_dimensions);
-        assert_eq!(p.catalog.zones("A2L").map_or(0, <[_]>::len), 0);
-        assert_eq!(a2l.versions.len(), 1);
+        // A1 有尺寸、无禁区；P1S 有禁区 —— 几个状态各自独立，界面要分别显示
+        assert!(a1.has_dimensions);
+        assert_eq!(p.catalog.zones("A1").map_or(0, <[_]>::len), 0);
         // P1S 有禁区
         assert!(p.catalog.zones("P1S").map_or(0, <[_]>::len) > 0);
     }

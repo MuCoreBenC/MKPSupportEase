@@ -22,6 +22,7 @@ use serde_json::Value;
 
 use super::derive::{Book, ColRef};
 use super::layer::Level;
+use super::patch::normalize_value;
 use super::visibility::{BlockedBy, Gate};
 use super::wording as w;
 
@@ -102,6 +103,9 @@ impl Book<'_> {
                 skipped: Vec::new(),
             };
         };
+        // 要与盘上那份比，就得和写入口看同一个类型：界面发来的 `-1`（整数）与
+        // 盘上的 `-1.0`（浮点）用 `==` 比不中，同一列会被误报成「改值」
+        let value = &normalize_value(&self.presets.registry, key, value);
 
         let mut out = BulkPreview {
             key: key.to_owned(),
@@ -121,7 +125,7 @@ impl Book<'_> {
 
         // 列序照配方本，与矩阵同一条规则：预览里的顺序要和表里的一致，
         // 否则用户得在两份不同顺序的清单之间对照
-        for col in self.matrix(cols, None, "").cols {
+        for col in self.matrix(cols, None, "", None).cols {
             let machine = col.machine.clone();
             let layers = match col.level {
                 Level::Machine => self.machine_layers(&col.machine_id),
@@ -156,10 +160,14 @@ impl Book<'_> {
                 continue;
             }
 
-            let before = layers.effective(key);
+            // 盘上那一份也归一到声明类型，理由见 [`normalize_value`]：两侧归一规则
+            // 不一样的话，界面发来的 `-1` 与盘上的 `-1.0` 会把「没有变化」报成「改值」
+            let before = layers
+                .effective(key)
+                .map(|b| normalize_value(&self.presets.registry, key, b.value));
             let had_own = layers.has_own(col.level, key);
-            let kind = match before {
-                Some(b) if b.value == value => BulkKind::NoChange,
+            let kind = match &before {
+                Some(b) if b == value => BulkKind::NoChange,
                 _ if had_own => BulkKind::Changing,
                 _ => BulkKind::Detaching,
             };
@@ -169,7 +177,7 @@ impl Book<'_> {
                 label: col.label.clone(),
                 level: col.level,
                 before: before
-                    .map(|b| w::value_text(p, b.value))
+                    .map(|b| w::value_text(p, &b))
                     .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
                 after: w::value_text(p, value),
                 kind,
@@ -244,7 +252,7 @@ mod tests {
         )
         .unwrap();
 
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
         let p = b.preview_bulk(
             "wiping.child",
             &serde_json::json!(66),
@@ -274,7 +282,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.only_p1s",
@@ -295,7 +303,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
         let target = cols(&[("A1", Some("A1/STANDARD")), ("A1", Some("A1/FAST"))]);
 
         // ① 这一层**没钉着**那个键 → 新增覆盖。`wiping.child` 在 `machineVariants`
@@ -315,8 +323,8 @@ mod tests {
             "{:#?}",
             p.effects
         );
-        assert_eq!(p.effects[0].before, "-1 mm");
-        assert_eq!(p.effects[0].after, "8 mm");
+        assert_eq!(p.effects[0].before, "-1.0 mm");
+        assert_eq!(p.effects[0].after, "8.0 mm");
 
         // ③ 落一个和 A1/STANDARD 现在一样的值 → 那一列没有变化
         let p = b.preview_bulk("toolhead.offset.x", &serde_json::json!(-1), &target);
@@ -342,14 +350,14 @@ mod tests {
             }],
         )
         .unwrap();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
         let p = b.preview_bulk(
             "toolhead.offset.x",
             &serde_json::json!(9),
             &cols(&[("A1", Some("A1/STANDARD"))]),
         );
         assert_eq!(p.effects[0].kind, BulkKind::Changing);
-        assert_eq!(p.effects[0].before, "2 mm");
+        assert_eq!(p.effects[0].before, "2.0 mm");
     }
 
     /// **G-code 拒绝批量**，并且说清为什么
@@ -358,7 +366,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
 
         let p = b.preview_bulk(
             "toolhead.script",
@@ -379,7 +387,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let b = super::super::Book::new(&f.up, &f.presets, &c, &d);
+        let b = super::super::Book::new(&f.presets, &c, &d);
         let shuffled = cols(&[
             ("P1S", Some("P1S/LITE")),
             ("A1", Some("A1/FAST")),
@@ -387,7 +395,7 @@ mod tests {
         ]);
 
         let matrix_order: Vec<String> = b
-            .matrix(&shuffled, None, "")
+            .matrix(&shuffled, None, "", None)
             .cols
             .into_iter()
             .map(|c| c.key)
@@ -407,7 +415,7 @@ mod tests {
         let f = Fixture::load();
         let c = committed();
         let d = Draft::default();
-        let p = super::super::Book::new(&f.up, &f.presets, &c, &d).preview_bulk(
+        let p = super::super::Book::new(&f.presets, &c, &d).preview_bulk(
             "toolhead.made_up",
             &serde_json::json!(1),
             &cols(&[("A1", None)]),

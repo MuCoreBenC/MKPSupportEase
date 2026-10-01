@@ -1,8 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { bbsFs } from './tools/dev-server/bbsFs.mjs'
 
 /*
- * 只有 react() 一个插件。
+ * 两个插件：react() 与 bbsFs()。
+ *
+ * `bbsFs()` 是 BBS 预设页的数据源 —— `GET /api/bbs/presets` 实时读本机 BBS 目录
+ * （本仓不打包那 285 个预设快照，见 C15-A40-PORT-PLAN §6-2）。它**只读**、只在 serve 期
+ * 存在（dev 与 preview 都挂，验收走的是 preview），`vite build` 的产物里没有它。
  *
  * 试验场那份还挂着 calibFs() 与 curvesFs() 两个 dev-server 插件 —— 它们提供
  * `/__calib/write`、`/__curves/write` 两个**无鉴权的写盘端点**，是标定工作台与
@@ -16,6 +21,10 @@ import react from '@vitejs/plugin-react'
  * - port: 5321 —— 刻意避开 5173~5180（Vite 默认及其顺延区，同机其它项目大概率占着）
  *   和 5432（PostgreSQL 默认）。改这个值必须同步改 src-tauri/tauri.conf.json 的 devUrl，
  *   两处不一致 = Tauri 窗口白屏。
+ *
+ *   工作台模式（workbench）另起 5322：两份 frontend 同源不同页，若共用 5321，
+ *   只要工作台的 vite 还在跑，`npm run tauri dev` 就必然撞上 `Port 5321 is in use`。
+ *   分开后两边可同时开，改 5322 同样要同步 src-tauri/tauri.workbench.conf.json 的 devUrl。
  * - open: false —— Tauri 会开自己的原生窗口，再开一个浏览器标签是多余的。
  * - host —— 只在 Tauri 需要时绑网卡（`TAURI_DEV_HOST` 由 tauri dev 在真机调试时注入），
  *   平时不绑，避免把 dev server 暴露给同网段。这与试验场的 `host: true` 是刻意的差别。
@@ -43,7 +52,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [react(), bbsFs()],
 
     build: {
       rollupOptions: { input },
@@ -51,7 +60,7 @@ export default defineConfig(({ mode }) => {
 
     server: {
       host: process.env.TAURI_DEV_HOST ?? false,
-      port: 5321,
+      port: withWorkbench ? 5322 : 5321,
       strictPort: true,
       open: false,
     },

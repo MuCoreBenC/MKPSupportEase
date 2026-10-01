@@ -105,16 +105,28 @@ recipes 是值。迁入前必须先回答：
 
 | 段 | 内容 | 验收 |
 |---|---|---|
-| **M0** | 比对 recipes 与我们的值（§4.1），定案写进 DATA-CONTRACT | 两边各生成一份 `A1-standard.toml`，差异逐项有结论 |
-| **M1** | 建 workspace 根 + `src-tauri` 变成成员 | `cargo test --features workbench` 仍 274 绿 |
-| **M2** | `core` → `crates/postprocess`，**纯移动 + 改包名**，不动逻辑 | 它自带的 20 个测试文件全绿 |
+| **M0** ✅ | 比对 recipes 与我们的值（§4.1），定案写进 DATA-CONTRACT | 结论：9 份逐行同集合，一处值差异都没有。**精确领头键清单**要到 `crates/preset` 进来之后才定（见 tasks.md 的 11.5/11.6） |
+| **M1** ✅ | 建 workspace 根 + `src-tauri` 变成成员；依赖版本统一到根 | 原有 **264**（`--features workbench`）/ **18**（默认）仍绿；`cargo tree -d` **不新增说不清的重复**。已落地：`70eed0c`（布局）+ `44c5ebe`（依赖统一） |
+| **M2a** | `core` → `crates/postprocess`，**原样复制**：连包名 `mkp-pp` / lib `mkp_pp` 都先不改 | 「搬运没搬错」的判据是**内容零 diff**：121 个文件（74 `.rs` + 47 数据/资产）逐文件 sha256 与源一致；`cargo test -p mkp-pp` 全绿 |
+| **M2b** | **单独一笔机械改名**：包 `mkpse-postprocess`、lib `postprocess`、bin `mkpse-pp`；`mkp_pp::` → `postprocess::`（实测 64 行 / 19 文件）+ 3 处 `CARGO_BIN_EXE_mkp-pp` | `rg mkp_pp` 零命中；改名前后逐文件 sha256 + **只允许出现机械替换**；测试条数与 M2a 相同 |
 | **M3** | 尺寸/别名/禁区改从 `presets/` 读（删掉那两个 JSON asset） | 125 字段等值那条判据从"跨仓比对"变成"同仓单一来源" |
 | **M4** | `preset` → `crates/preset`，改包名；`param_registry` 改读我们那份 | 它的 8 个测试文件全绿；注册表分岔那 4 处消失（只有一份了） |
 | **M5** | 生成器接上：`wb_generate` 产物经 `load_ir()` 复检 | **P2 那条纵向切片**：改一个值 → 生成 → `load_ir` 读通 → IR 里是新值 |
 | **M6** | 删 `upstream/` 整层 + 源码扫描断言（不许出现 `mkpse-presets` / `content/`） | 两种 feature 的 test + clippy + 前端 lint/build |
 | **M7** | 措辞清场：文档与注释里的「上游」「消费端」换掉 | 全仓搜不到把我们自己说成"下游"的地方 |
 
-M2 与 M4 是**纯移动**：一个字都不重写。理由是那 27 000 行里有大量真机验证过的行为，
+**M2a 与 M2b 为什么要拆两笔**（定案见
+[TASK-13-MIGRATION-INVENTORY.md](./TASK-13-MIGRATION-INVENTORY.md) §4）：
+
+打包成"纯移动 + 改包名"一笔的话，「搬运对不对」与「改名对不对」会混在同一条 diff 里 ——
+改名要动 19 个文件（含 3 个测试文件），那 20 个测试文件"全绿"就不再是搬运证据了。
+拆开之后两条判据各自独立：M2a 用**零 diff** 证明没搬错，M2b 用**只允许机械替换**证明没改错。
+哪一条红了就退哪一笔，不必怀疑另一笔。
+
+**这不是过渡别名**：M2b 一笔改完，仓库里从没有过 `pub use mkp_pp as postprocess` 这种
+东西 —— Task 13.3「不留过渡别名」的要求仍然满足。
+
+M2a 与 M4 是**纯移动**：一个字都不重写。理由是那 27 000 行里有大量真机验证过的行为，
 顺手"改好一点"等于把验证过的东西变成没验证过的。要改在 M3/M5 单独改，单独验。
 
 ## 6. 红线
@@ -128,9 +140,22 @@ M2 与 M4 是**纯移动**：一个字都不重写。理由是那 27 000 行里�
 - **不提前删 mkp-ssr 的目录**：迁完并且全绿之后，它还要留着当对照基线，
   直到 M5 的纵向切片过了。删不删那个仓库由你决定，代码里不再引用它就够了。
 
-## 7. 现在的状态
+## 7. 现在的状态（更新于 2026-09-24）
 
 - P0 审计：✅ 完成（AUDIT-EVIDENCE.md）
 - P1 契约：✅ 1.0，已核实的部分冻结（DATA-CONTRACT.md）
 - P2 纵向切片：⏸ 并进 M5（迁进来之后做，比跨仓跑更干净）
-- P3 迁入：**这份文件就是它的施工图，从 M0 开始**
+- P3 迁入：**进行中**
+  - **M0** ✅ 值等值结论已得（9 份逐行同集合，无值差异）。
+    尚欠：精确领头键清单与 `eprintln!` → `assert!` 两处收尾，
+    按 tasks.md 的 11.5/11.6 挂在 `crates/preset` 进来之后
+  - **M1** ✅ 已落地：`70eed0c`（workspace 布局）+ `44c5ebe`（依赖统一）。
+    本机与远端分支 `feat/b04-p3-migration`；三次 CI 全绿（默认与 workbench 两套）
+  - **M2a** ⏭ 下一步：原样复制 `core` → `crates/postprocess`，拿零 diff 当搬运证据
+  - **M2b / M3–M7**：待做
+
+  三条前置也已并入 main（PR #10，合并提交 `203c287`）：迁移盘点、
+  写盘纪律三方案定案（C 为主 + A1 为辅）、CI 覆盖 workbench。
+
+**注意**：本文件与 [TASK-13-MIGRATION-INVENTORY.md](./TASK-13-MIGRATION-INVENTORY.md)
+冲突时，以盘点为准 —— 它是后做的取证。M2 的表述已按盘点改成 M2a/M2b。

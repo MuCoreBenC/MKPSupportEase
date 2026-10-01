@@ -1,0 +1,174 @@
+/* 左侧抽屉。宽屏常驻、窄屏收起（data-open 由页面按密度档给） */
+
+/*
+ * `min-height: 0` 不是可选的：`.drawer` 是 `.body`（横向 flex）的 item，
+ * 高度本该被 stretch 到容器高度，但 flex item 的 `min-height` 默认 **auto**
+ * ——「不许比内容矮」——  于是 39 项列表把它撑到 ~1100px，`.list` 的 `flex: 1`
+ * 也就跟着是 1100px，`scrollHeight === clientHeight`，滚轮不该有反应。
+ * 详见 PageBbs.module.css 的 `.body` 那段注释。
+ */
+.drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  /* 宽度由页面上的 --bbs-drawer-w 给（可拖宽，落 localStorage）；兜底 280 */
+  width: var(--bbs-drawer-w, 280px);
+  /* 窗口窄到装不下时收窄抽屉，而不是把参数区挤成零宽 */
+  max-width: 60%;
+  border-right: 1px solid var(--bbs-line);
+  background: var(--bbs-panel-2);
+}
+
+/*
+ * 浮层态：浮在参数区左侧，参数区照常占满整宽。
+ * `position: absolute` 挂在 `.body` 上，**不是 fixed** —— 预览外壳 `.window` 上有
+ * transform，它是 fixed 的包含块（#33 那两个点不开的浮层就栽在这上面）。
+ */
+.drawer[data-mode='float'] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  max-width: 90%;
+  box-shadow: 6px 0 18px var(--bbs-shadow-menu);
+}
+
+.drawer[data-open='false'] {
+  display: none;
+}
+
+/* ===== 拖宽热区 =====
+   抽屉右边缘 6px 的透明带。**外观上什么都没有**，只有 cursor 变 —— 和文件管理器一样。
+   只有两种情况会显出一条 1px 细线：键盘聚焦（否则键盘用户不知道这里能调）、正在拖。 */
+.grip {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 25;
+  width: 6px;
+  cursor: col-resize;
+  /* 触屏上按住拖动不要被解释成滚动手势 */
+  touch-action: none;
+}
+
+.grip:focus-visible {
+  outline: none;
+}
+
+.grip:focus-visible::after,
+.drawer[data-dragging='true'] .grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 1px;
+  background: var(--bbs-focus);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--bbs-line);
+}
+
+/* 机型 / 喷嘴筛选的下拉。搜索框在 BbsSearchBox 里（两个框共用一套样式） */
+.pick {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 3px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.pick:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+.list {
+  flex: 1;
+  /* 同 .drawer：缺这条 flex:1 会算成内容高度，于是「没有可滚的内容」 */
+  min-height: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+}
+
+.group {
+  margin-top: 2px;
+  padding: 5px 10px 3px;
+  border-bottom: 1px solid var(--bbs-line);
+  color: var(--bbs-dim-2);
+  font-size: 11px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--bbs-menu-hover);
+}
+
+.item[data-on='true'] {
+  background: var(--bbs-menu-selected);
+}
+
+/* 别的机型的：点了会切到那台机型，所以不禁用，只弱化 */
+.item[data-off-model='true'] {
+  color: var(--bbs-dim);
+}
+
+.item:disabled {
+  color: var(--bbs-pm-disabled);
+  cursor: default;
+}
+
+.item:focus-visible {
+  outline: 1px solid var(--bbs-focus);
+  outline-offset: -1px;
+}
+
+.tick {
+  flex-shrink: 0;
+  width: 10px;
+  color: var(--bbs-green);
+}
+
+/* BBS 里改过的预设名前面有个 * */
+.star {
+  color: var(--bbs-orange);
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  padding: 8px 10px;
+  color: var(--bbs-dim);
+  font-size: 11.5px;
+}

@@ -1,3 +1,9 @@
+/*
+ * 首页与校准页到处在用 Btn 与 Badge，所以连着搬。
+ * 用不到的那几个（Compare / Revert / Field / NumberField / Segmented）也照原样留着 ——
+ * 搬迁，不做裁剪。
+ */
+
 import type { ReactNode } from 'react'
 import s from './ui.module.css'
 

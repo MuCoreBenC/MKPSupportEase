@@ -1,0 +1,147 @@
+/**
+ * C14 版式的设计变量（feat/b05-14b-c14-port）。
+ *
+ * 值照试验场 `src/styles/tokens.css` 原样搬 —— 那边是「同一个产品群的设计系统」，
+ * 这边只是**换了个作用域**：试验场挂在 `:root`（整个原型窗口），这里挂在
+ * `[data-wb]`（工作台外壳根），不污染客户端窗口的全局。
+ *
+ * `c14.module.css` 与搬过来的三套共用件（field / menu / modal）都读这里的
+ * 非前缀变量（`--fs-label`、`--danger`、`--surface-solid`…）；本仓原有的
+ * `tokens.css` 是 `--w-*` 前缀体系，两套并存、互不覆盖。
+ *
+ * 密度档随外壳根上的 `data-density` 走（App 的 `useDensity`，阈值 1600/1080/640，
+ * 与试验场同一组）。
+ */
+
+[data-wb] {
+  /* 底色 / 表面 */
+  --bg-1: #f7f9fa;
+  --bg-2: #eceff1;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-solid: #fff;
+  --surface-sunken: rgba(16, 24, 32, 0.035);
+  --card-face: #fbfcfd;
+
+  --line: rgba(16, 24, 32, 0.08);
+  --line-strong: rgba(16, 24, 32, 0.14);
+
+  /* 文本 */
+  --text-1: #1a2128;
+  --text-2: #6b7783;
+  --text-3: #9aa5b0;
+
+  /* 强调色（取自打印机绿色件） */
+  --accent: #20b25a;
+  --accent-deep: #17924a;
+  --accent-soft: rgba(32, 178, 90, 0.12);
+
+  /* 危险动作（删除这类不可逆的东西）。「灰色不是错误色」——缺失状态用 --text-3 */
+  --danger: #c8453c;
+  --danger-soft: rgba(200, 69, 60, 0.1);
+
+  /* 待补：语义是「这里还空着，但它不是错误」——不是把 --danger 借过来用 */
+  --warn: #c2790b;
+  --warn-soft: rgba(194, 121, 11, 0.12);
+
+  /* 阴影 / 圆角 */
+  --shadow: 0 8px 28px rgba(20, 32, 45, 0.06);
+  --shadow-lift: 0 18px 50px rgba(20, 32, 45, 0.12);
+  --r-lg: 16px;
+  --r-md: 12px;
+  --r-sm: 8px;
+
+  /* 窗口 chrome 高度：C14 版式不再自绘标题栏（Tauri 原生窗口），但模块里
+     还有引用，保留原值免得布局算错 */
+  --titlebar-h: 44px;
+  --titlebar-h-win: 38px;
+  --titlebar-h-mac: 52px;
+  --statusbar-h: 32px;
+
+  /* 随密度切换的量 */
+  --gap: 20px;
+  --pad: 18px;
+  --fs-metric: 26px;
+  --fs-label: 12px;
+  --fs-body: 13px;
+  --nav-w: 216px;
+  --card-r: var(--r-lg);
+  --icon: 18px;
+}
+
+[data-wb][data-density='ultra'] {
+  --gap: 24px;
+  --pad: 22px;
+  --fs-metric: 30px;
+  --fs-label: 12.5px;
+  --fs-body: 14px;
+  --nav-w: 236px;
+  --icon: 19px;
+}
+
+[data-wb][data-density='compact'] {
+  --gap: 14px;
+  --pad: 14px;
+  --fs-metric: 22px;
+  --fs-label: 11px;
+  --fs-body: 12.5px;
+  --nav-w: 64px;
+  --card-r: var(--r-md);
+  --icon: 17px;
+}
+
+[data-wb][data-density='mini'] {
+  --gap: 10px;
+  --pad: 11px;
+  --fs-metric: 19px;
+  --fs-label: 10px;
+  --fs-body: 12px;
+  --nav-w: 0px;
+  --card-r: var(--r-md);
+  --icon: 16px;
+}
+
+/* ---------- 共用件假定的元素基线 ---------- */
+
+/* 高度链：c14 版式的 `.shell` 写的是 height: 100%，要父级有高度才量得出来。
+   （试验场由 global.css 供给；工作台入口是 #workbench-root，这里补上。） */
+html,
+body,
+#workbench-root {
+  height: 100%;
+}
+
+/*
+ * 产品窗口没有自绘标题栏（Tauri 原生窗口），而 c14 版式的 `.shell` 网格是
+ * 「标题栏 + 标题栏以下整层」两行。外壳根带上 `data-no-chrome` 时收成一行 ——
+ * 不改模块本体（那一份照原型原样搬），产品侧的形状差异用一行覆写说清。
+ */
+[data-wb][data-no-chrome='yes'] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* 试验场 global.css 给全体 button 的复位；工作台原来只有 .wb-btn 一族有样式，
+   搬来的模态框 / 右键菜单 / 字段控件里有大量裸 button，没有这条会顶着 UA 底色。
+   **作用域圈在壳里，优先级必须也圈掉**：`:where(...)` 让这条只剩元素级（0,0,1）——
+   与原型的裸 `button` 复位同优先级，`.pTab` / `.pVrow` / `.seg` 这些单类内衬
+   （0,1,0）才赢得过它。写成 `[data-wb] button`（0,1,1）的话，页签、左树行、
+   分段选项、普通按钮的内衬会全部被它归零 —— P2 验收时「参数台不像 C14」的根因。 */
+:where([data-wb]) button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+:where([data-wb]) button:focus-visible,
+:where([data-wb]) input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 数值等宽，避免跳动（试验场 global.css 同名类的等价物，圈在壳内） */
+[data-wb] .tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}

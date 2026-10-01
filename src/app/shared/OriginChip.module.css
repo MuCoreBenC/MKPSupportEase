@@ -1,0 +1,28 @@
+/*
+ * 交付身份角标。两档色：默认交付 = 蓝（--axis-y），可选 = 中性灰。
+ * 宽松尺度：字号跟 --fs-label 走，不用工作台那套 --w-*。
+ */
+
+.chipDefault,
+.chipOptional {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: calc(var(--fs-label) - 0.5px);
+  white-space: nowrap;
+}
+
+/* 默认交付：蓝。它是「这个版本要的那一份」，需要与可选一眼分开 */
+.chipDefault {
+  border-color: rgb(59 130 246 / 22%);
+  background: rgb(59 130 246 / 10%);
+  color: #2563eb;
+}
+
+/* 可选：中性灰，**不是警示色** —— 没进默认集是身份，不是故障 */
+.chipOptional {
+  border-color: var(--line);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}

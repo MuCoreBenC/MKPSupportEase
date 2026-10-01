@@ -1,0 +1,53 @@
+/*
+ * 提示条的样式（报告页与设置页共用）。照预设页那一份的尺度与配色搬过来，
+ * 只去掉了它那条跟着表格的底边线 —— 这两页的提示条下面不是一张表。
+ *
+ *   中性（.note）    真的做了某件事（纯前端能完成的那些）
+ *   琥珀（.noteBad） **没接上**（契约里还没有这个方法）—— 不是操作失败，
+ *                    所以不上错误红；但也绝不许静默成功
+ */
+
+.note,
+.noteBad {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px calc(var(--pad) + 6px);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-label);
+  line-height: 1.6;
+}
+
+.note {
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+
+.noteBad {
+  background: #fff3e2;
+  color: #a86416;
+}
+
+.noteClose {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* 聚焦只加深边框，不加光环 */
+.noteClose:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
+}

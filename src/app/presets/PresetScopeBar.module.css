@@ -1,0 +1,99 @@
+/*
+ * 两条分段控件（同级尺码 + **拆开**）。
+ *
+ * 作者：「让 MKP配置/切片器配置 变小，跟本地/云端差不多高」「两组不要挨着」——
+ * 原本 38px 的那一级退回 32px；位置那条带 `.segPush`（auto 边距）归入右簇，
+ * 与机型 / 搜索挨在一起。左 = 我在看什么类型；右 = 我从哪里看、怎么筛。
+ *
+ * 配方同校准页 `.rail/.tab`：灰底槽（--surface-sunken、1px --line 边框、--r-sm 外圈、
+ * 3px 内衬）+ 选中段嵌白（--surface-solid + 8% 小阴影）。段 24px → 槽整体 32px。
+ */
+
+/* 一条分段控件 = 校准页 .rail 同款：灰底槽 + 嵌白 */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+/* 位置那条：auto 边距把它推到右簇（与机型 / 搜索挨着） */
+.segPush {
+  margin-left: auto;
+}
+
+.opt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: calc(var(--r-sm) - 2px);
+  font-size: var(--fs-body);
+  color: var(--text-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.opt:hover {
+  color: var(--text-2);
+}
+
+.opt[data-on='true'] {
+  background: var(--surface-solid);
+  color: var(--text-1);
+  font-weight: 600;
+  /* 校准页 .tab[data-on] 同款的小阴影 —— 「嵌在槽里」的立体感 */
+  box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
+}
+
+/* ---------- mini 排位（写在自家 module：PagePresets 的 .seg 够不着这里的哈希） ----------
+ * 类型分段 1、位置分段 2 —— 两条分段留在第一排，机型（order 3，在 Picker 的 module）
+ * 也在这排；搜索（PagePresets 的 order 7）落去状态条那排。段内衬收一档：
+ * 否则「类型+位置+机型」在 400px 上差 11px，机型会被挤折行。
+ */
+[data-density='mini'] .seg {
+  order: 1;
+}
+
+[data-density='mini'] .seg .opt {
+  padding: 0 9px;
+}
+
+[data-density='mini'] .segPush {
+  order: 2;
+}
+
+/*
+ * 原生 radio 留着（键盘左右键、读屏的「第几项」全靠它），只把圆点藏掉 ——
+ * 分段控件上再画一个圆点就成了「单选 + 胶囊」两套指示。铺满整段是为了点哪儿都算。
+ */
+.radio {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.radio:focus-visible {
+  outline: none;
+}
+
+/*
+ * 聚焦：**不再另画一圈**（作者：「点了之后，它不要有一个绿色描边」）。
+ * 这里的段是 label + 藏起来的 radio，radio 在 Chromium 里鼠标点击也命中 ：focus-visible，
+ * 原来用 ：focus-within 补的那条内描边于是每次点击都亮 —— 撤掉，选中态的
+ * 嵌白底 + 加粗就是焦点落在哪里的答案。
+ */
+
+/* ---------- 窄窗口：只排版，不改外观（折行走工具条自己的 flex-wrap） ---------- */

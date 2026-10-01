@@ -171,6 +171,26 @@ impl<'a> Layers<'a> {
         })
     }
 
+    /// 参数台这一屏的取值。与 [`Self::effective`] 的唯一差别：
+    /// **弃用的参数也查得到**（C14 §五：「值照旧读得到（老配方里可能还写着它）」，
+    /// 只是改不动、不进产物）。`machineFilter` 排除的照旧是 `None` ——
+    /// 那是「不适用」，与弃用是两回事。
+    pub fn view_effective(&self, key: &str) -> Option<ValueOrigin<'a>> {
+        let p = self.registry.param(key)?;
+        if !p.applies_to(self.machine_id) {
+            return None;
+        }
+        for (table, origin) in [(self.over, Origin::Version), (self.base, Origin::Machine)] {
+            if let Some(v) = table.get(key) {
+                return Some(ValueOrigin { value: v, origin });
+            }
+        }
+        Some(ValueOrigin {
+            value: &p.default_value,
+            origin: Origin::Factory,
+        })
+    }
+
     /// 这一层有没有**自己钉着**这个键 = 「挂回继承」点得下去吗。
     ///
     /// 「自己钉着」就是 `machineVariants` 里真的有一条形如 `A1`（机型层）

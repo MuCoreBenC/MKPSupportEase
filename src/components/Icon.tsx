@@ -27,6 +27,11 @@ export type IconName =
   | 'max'
   | 'restore'
   | 'close'
+  /* 客户端接发布包这一轮加的两枚（试验场 A40 的同名图标，路径逐字抄过来）：
+     download 给「同步」页签（它是同步中心，真正要动手的是「获取预设」）；
+     box 给「BBS 预设」页签 —— 它是外来的预设库，与「报告」的文档图标区分开。 */
+  | 'download'
+  | 'box'
 
 const paths: Record<IconName, string> = {
   home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
@@ -68,6 +73,8 @@ const paths: Record<IconName, string> = {
   restore: 'M6 9h9v9H6zM9 9V6h9v9h-3',
   close: 'M6 6l12 12M18 6 6 18',
   menu: 'M4 7h16M4 12h16M4 17h16',
+  download: 'M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 20h16',
+  box: 'M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16ZM3.3 7l8.7 5 8.7-5M12 22V12',
 }
 
 interface IconProps {

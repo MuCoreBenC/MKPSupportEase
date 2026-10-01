@@ -1,0 +1,164 @@
+{
+  "assets": [
+    {
+      "id": "a1_bbs_mkpprocess_a1_02_010",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "A1",
+      "fileName": "MKPProcess A1 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"
+    },
+    {
+      "id": "a1_bbs_mkpprocess_a1_04_020",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "A1",
+      "fileName": "MKPProcess A1 0.4 0.20.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json"
+    },
+    {
+      "id": "a1_mini_bbs_mkpprocess_a1_mini_02_010",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "A1_MINI",
+      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json"
+    },
+    {
+      "id": "a1_mini_bbs_mkpprocess_a1_mini_04_020",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "A1_MINI",
+      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json"
+    },
+    {
+      "id": "a1_mini_mkp_fast",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1_MINI",
+      "fileName": "A1MF.toml",
+      "relativePath": "presets/mkp/A1MF.toml"
+    },
+    {
+      "id": "a1_mini_mkp_fastv3.3",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1_MINI",
+      "fileName": "A1MF_260628.toml",
+      "relativePath": "presets/mkp/A1MF_260628.toml"
+    },
+    {
+      "id": "a1_mini_mkp_standard",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1_MINI",
+      "fileName": "A1M.toml",
+      "relativePath": "presets/mkp/A1M.toml"
+    },
+    {
+      "id": "a1_mkp_fast",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1",
+      "fileName": "A1F.toml",
+      "relativePath": "presets/mkp/A1F.toml"
+    },
+    {
+      "id": "a1_mkp_fastv3.3",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1",
+      "fileName": "A1F_260628.toml",
+      "relativePath": "presets/mkp/A1F_260628.toml"
+    },
+    {
+      "id": "a1_mkp_standard",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "A1",
+      "fileName": "A1.toml",
+      "relativePath": "presets/mkp/A1.toml"
+    },
+    {
+      "id": "a1_orca_orcaprocess_a1_02_010",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "A1",
+      "fileName": "OrcaProcess A1 0.2 0.10.json",
+      "relativePath": "presets/orca/Process/0.2mm/OrcaProcess A1 0.2 0.10.json"
+    },
+    {
+      "id": "p1s_bbs_mkpprocess_p1s_02_010",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "P1S",
+      "fileName": "MKPProcess P1S 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json"
+    },
+    {
+      "id": "p1s_bbs_mkpprocess_p1s_04_024",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "P1S",
+      "fileName": "MKPProcess P1S 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json"
+    },
+    {
+      "id": "p1s_mkp_lite",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "P1S",
+      "fileName": "P1.toml",
+      "relativePath": "presets/mkp/P1.toml"
+    },
+    {
+      "id": "p1s_orca_orcaprocess_p1s_04_024",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "P1S",
+      "fileName": "OrcaProcess P1S 0.4 0.24.json",
+      "relativePath": "presets/orca/Process/0.4mm/OrcaProcess P1S 0.4 0.24.json"
+    },
+    {
+      "id": "p2s_bbs_mkpprocess_p2s_04_024",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "P2S",
+      "fileName": "MKPProcess P2S 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json"
+    },
+    {
+      "id": "p2s_mkp_standard",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "P2S",
+      "fileName": "P2.toml",
+      "relativePath": "presets/mkp/P2.toml"
+    },
+    {
+      "id": "x1c_bbs_mkpprocess_x1_02_010",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "X1C",
+      "fileName": "MKPProcess X1 0.2 0.10.json",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json"
+    },
+    {
+      "id": "x1c_bbs_mkpprocess_x1_04_024",
+      "resourceType": "bbs_profile",
+      "category": "process",
+      "machineId": "X1C",
+      "fileName": "MKPProcess X1 0.4 0.24.json",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json"
+    },
+    {
+      "id": "x1c_mkp_lite",
+      "resourceType": "mkp_preset",
+      "category": "",
+      "machineId": "X1C",
+      "fileName": "X1.toml",
+      "relativePath": "presets/mkp/X1.toml"
+    }
+  ]
+}

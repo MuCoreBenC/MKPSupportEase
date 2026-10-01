@@ -1,0 +1,85 @@
+# workspace 根（b04 Task 13 / M1）。
+#
+# `src-tauri` 从这里起是一个**成员**，不再是独立 crate。这一步刻意**不动任何 Rust 代码** ——
+# 判据是「建了 workspace 之后，原有的 18 + 264 条判据仍然全绿」。
+#
+# 为什么现在就建：后处理内核与预设解析要迁进来（`crates/postprocess` / `crates/preset`），
+# 它们与 `src-tauri` 共用一批第三方依赖。版本不统一的话 `cargo tree -d` 会列出重复依赖，
+# 而那是迁移验收的一条判据（MIGRATION-PLAN §5 的 M1/M2）。
+#
+# `resolver = "2"`：virtual manifest 不写它会退回 resolver 1 并打警告。
+# 两个成员都是 edition 2021，所以 2 是对应档位 —— 源仓库那边是 edition 2024 + resolver 3，
+# 我们**不跟**：那要把 `rust-version` 抬到 1.97，而 1.77.2 是 Tauri 那一侧定的下限。
+[workspace]
+resolver = "2"
+# **显式列成员，不用 `crates/*` 通配**：目录还不存在时 glob 会让 cargo 直接报
+# "failed to load manifest for workspace member `.../crates/*`"，
+# 而这个报错看起来像清单写错了，不像"目录还没建"。
+members = ["crates/postprocess", "crates/preset", "src-tauri"]
+
+# **为「原样复制」准备的一组字段。**
+#
+# 后处理内核那份 `Cargo.toml` 是**一个字节都不改**搬过来的（M2a 的搬运证据就是这个），
+# 而它写的是 `version.workspace = true` / `edition.workspace = true` /
+# `rust-version.workspace = true` —— 所以这几个字段必须在这里存在，
+# 取值与它原来那份**逐字一致**（源仓库根：0.2.0 / 2024 / 1.97 / 不发布）。
+#
+# **只对写 `x.workspace = true` 的成员生效**：`src-tauri` 自己写着
+# `edition = "2021"` 与 `rust-version = "1.77.2"`，不受这里影响 ——
+# 1.77.2 是 Tauri 那一侧定的下限，不能跟着抬。
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+# 只有后处理内核（迁入后）会用 `[lints] workspace = true` 领这一组。
+#
+# `src-tauri` **刻意不领**：Tauri 的宏与 macOS 那几段 objc2 会碰到 `unsafe`，
+# 在那里 forbid 等于逼人加豁免属性，反而把违规藏进属性里（b04 Task 13.4）。
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# **版本只住在这里**，成员写 `workspace = true`。
+#
+# 为什么必须有这一段：迁入的后处理内核与 `src-tauri` 共用一批依赖，
+# 两边各写一份版本号的话，同一个 crate 会在依赖树里出现两次而没人发现 ——
+# 迁移验收里那条「`cargo tree -d` 不新增重复」就是盯这个。
+# （今天 `cargo tree -d` 本来就不空：53 条重复全在 Tauri 自己的树里，与迁移无关。）
+[workspace.dependencies]
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+
+# 这两个 feature **不是**优化项，是判据正确性开关，别动：
+#
+# - `float_roundtrip`：默认的浮点解析走「有效数字 as f64 ÷ 10^k」快路径，
+#   17 位有效数字上可差 1 ULP。后处理内核的参考值比对是**逐位**的
+#   （`reference_printtime` 拿 `to_bits()` 比），差 1 ULP 就是一片假红
+# - `preserve_order`：决定 `serde_json::Value` 的对象保持插入序还是按字母重排。
+#   内核的 IR 视图按迭代顺序展示，重排会把「读起来的逻辑」打散
+#
+# 代价要说清楚：开了它们，**我们自己的 `serde_json` 解析行为也跟着变了一档**。
+# 所以这一批的验证不是只看编译过 —— 见提交信息里那 18 + 264 条的结果。
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+
+# `toml` 取 **0.8**，不取更新的 1.x：后处理内核用的 `toml::Value` /
+# `toml::map::Map` / `Value::try_from` 都在 0.8 这一档。取 1.x 就得改它的代码，
+# 而 B2 那一批的搬运证据是「内容逐文件 sha256 与源一致」—— 改名与改代码
+# 不能和搬运混在同一条 diff 里（这是盘点里 B2/B3 拆两笔的同一个理由）。
+#
+# 我们自己那边用到的只有 `str::parse::<toml::Table>()` 与 `toml::to_string`，
+# 两个 API 在 0.8 上都有 —— 所以这是**单向**的让步，不需要谁改代码。
+toml = "0.8"
+
+sha2 = "0.10"
+# 写回保真那一套：`crates/preset`（改预设 / 改注册表区间）与 `src-tauri`
+# （工作台写回 `presets/*.toml`）都用它。**必须住在这里** —— 两边各写一份版本号，
+# 同一个 crate 就会在依赖树里出现两次，而那正是 `cargo tree -d` 那条判据盯的东西。
+# `serde` feature 是 `src-tauri` 那侧要的（`toml_edit::de`），并集不影响 preset。
+toml_edit = { version = "0.22", features = ["serde"] }
+# 这两个只给后处理内核那个命令行 bin 用（`--features` 挂在 bin 上）
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+tempfile = "3"

@@ -1,0 +1,85 @@
+{
+  "_note": "scripts/sync-bbs-presets.mjs 的产物，别手改。上游 = mkpse-presets 仓的 presets/bbs，是快照不是实时；页面上的大小与修改时间读的就是这里。",
+  "source": {
+    "repo": "G:\\project\\mkpse-next-v3\\mkpse-presets",
+    "commit": "2f83fa0",
+    "presetsDir": "presets/bbs",
+    "manifest": "manifest.json",
+    "syncedAt": "2026-09-30T13:24:43.766Z",
+    "copiedTo": "public/presets/bbs"
+  },
+  "files": [
+    {
+      "assetId": "a1_bbs_mkpprocess_a1_02_010",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "fileName": "MKPProcess A1 0.2 0.10.json",
+      "bytes": 1308,
+      "sha256": "2ba10a2d873744f97e75a1697fa9a054b58aacb772993d6d05e973f04fda5004",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "a1_mini_bbs_mkpprocess_a1_mini_02_010",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
+      "bytes": 1315,
+      "sha256": "567a018e5d1c66a573a4ad32cea04c6524858a74bfd6af7bc1f0263c45626c6f",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "p1s_bbs_mkpprocess_p1s_02_010",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "fileName": "MKPProcess P1S 0.2 0.10.json",
+      "bytes": 1906,
+      "sha256": "810d4441deef000106366220010d7ca48ae586ac52936af53c84dcb1b3dca8e1",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "x1c_bbs_mkpprocess_x1_02_010",
+      "relativePath": "presets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "fileName": "MKPProcess X1 0.2 0.10.json",
+      "bytes": 1904,
+      "sha256": "9d9737d18f8cea34d284031dd544b444a00e56c112a4d0ab74b0813f56e2e9ca",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "a1_bbs_mkpprocess_a1_04_020",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "fileName": "MKPProcess A1 0.4 0.20.json",
+      "bytes": 1332,
+      "sha256": "e4696732236194d4035635adce6abc01fe3efb01847249745f4a36c4f6d5977f",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "a1_mini_bbs_mkpprocess_a1_mini_04_020",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
+      "bytes": 1301,
+      "sha256": "1ae5318f97eeb95a3e804619d5102d1d851d06860e53a9a4899dad0db4d717ca",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "p1s_bbs_mkpprocess_p1s_04_024",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "fileName": "MKPProcess P1S 0.4 0.24.json",
+      "bytes": 1872,
+      "sha256": "264addc551633c553828492580eef74fc51f2690a127919ed8da051634d8bc2d",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "p2s_bbs_mkpprocess_p2s_04_024",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "fileName": "MKPProcess P2S 0.4 0.24.json",
+      "bytes": 1264,
+      "sha256": "124f8290aa007567af78d6058f95095e4787c02a30371acb56f489029168499e",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    },
+    {
+      "assetId": "x1c_bbs_mkpprocess_x1_04_024",
+      "relativePath": "presets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "fileName": "MKPProcess X1 0.4 0.24.json",
+      "bytes": 1925,
+      "sha256": "1fe7377c92d0f67bb8ed1cda16edb12c32a56e3cb4d864983eaccb6ced0a8fa4",
+      "updatedAt": "2026-08-18T02:04:59Z"
+    }
+  ]
+}

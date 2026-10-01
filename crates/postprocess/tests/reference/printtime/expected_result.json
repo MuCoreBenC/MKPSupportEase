@@ -1,0 +1,36 @@
+{
+  "TotalSeconds": 1379.1792865290581,
+  "ToolMovementSeconds": 773.1792865290581,
+  "PrepOverheadSeconds": 366,
+  "StartupOverheadSeconds": 240,
+  "BambuAnchorSeconds": 1008,
+  "PostProcessDeltaSeconds": null,
+  "Segments": 16668,
+  "ByType": {
+    "其他": {
+      "Seconds": 30.628301857287184,
+      "Count": 210,
+      "Percent": 3.9613453685215987
+    },
+    "其他挤出": {
+      "Seconds": 547.5652185422217,
+      "Count": 13441,
+      "Percent": 70.81995445071236
+    },
+    "回抽/换料": {
+      "Seconds": 0.6475721454270507,
+      "Count": 201,
+      "Percent": 0.083754461185079
+    },
+    "空驶移动": {
+      "Seconds": 149.92819398413152,
+      "Count": 2816,
+      "Percent": 19.391129146408765
+    },
+    "非运动等待(G4/M400)": {
+      "Seconds": 44.41000000000001,
+      "Count": 2,
+      "Percent": 5.743816573173416
+    }
+  }
+}

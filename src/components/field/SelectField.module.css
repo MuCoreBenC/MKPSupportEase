@@ -1,0 +1,153 @@
+/*
+ * 触发器与列表。聚焦只加深边框，不加外圈光环（与 NumberField 同一条约定）。
+ *
+ * 两个变量钩子（A39 加的，改共用件的铁律：`var(--x, 原值)`，不设变量的稿一个像素不动）：
+ *   --sel-h      触发器高度。A39 的参数页设 28px、预设页设 32px（对齐各页工具条），
+ *                其余稿回落 34px 原值；compact 档的 30px 也是同一个钩子的回落值
+ *   --sel-opt-r  下拉列表里选项的圆角。回落 6px 原值
+ */
+
+.wrap {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.trigger,
+.triggerOff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  height: var(--sel-h, 34px);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: var(--line-strong);
+  background: var(--card-face);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.triggerOff {
+  border-style: dashed;
+  background: var(--surface-sunken);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.trigger[data-size='sm'],
+.triggerOff[data-size='sm'] {
+  height: 28px;
+  padding: 0 6px 0 8px;
+}
+
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.caret,
+.caretUp {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+
+.caretUp {
+  transform: rotate(180deg);
+  color: var(--text-2);
+}
+
+/* 列表在 FieldPopover 里，定位由它给；这里只管长相与自身滚动 */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.opt,
+.optActive {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--sel-opt-r, 6px);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.optActive {
+  background: var(--accent-soft);
+}
+
+.opt:focus-visible,
+.optActive:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+.check {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--accent-deep);
+}
+
+.optLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * 已弃用的那一档（C13）：划一条线，红色（作者：灰色的线不明显）。
+ * 触发器上的值、列表里的那一项，两处同一个信号。
+ */
+.text[data-dep],
+.optLabel[data-dep] {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger, #c8453c);
+  text-decoration-thickness: 1px;
+}
+
+/* 选项右边那一列小字：「3 个版本共用」/「2 处自有」 */
+.note {
+  flex-shrink: 0;
+  padding-left: 10px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+}
+
+[data-density='compact'] .trigger,
+[data-density='compact'] .triggerOff {
+  height: var(--sel-h, 30px);
+}

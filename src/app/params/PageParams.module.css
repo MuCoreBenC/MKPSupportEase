@@ -1,0 +1,780 @@
+/*
+ * 参数页的骨架。
+ *
+ * 用户端是**宽松尺度**：`--pad` / `--gap` / `--fs-*` 照全局 tokens 走，
+ * 不套工作台那套密集的 `--w-*`。
+ *
+ * 几何对齐工作台那一版的参数台，**只作用这一页**（首页与标题栏保持全局 tokens，
+ * 摆法同「在页面根节点上覆写变量」的做法）。三组值：
+ *
+ *   圆角     --r-sm 4 / --r-md 3 / --r-lg 4（收紧值）。--card-r 必须在这里重写：
+ *            它在 :root 上已按全局 --r-lg 求过值，后代覆写 --r-lg 传不进去
+ *   控件高   28px（与工作台那一版同高）。--sel-h / --num-h 是共用 SelectField / NumberField
+ *            的回落钩子；--sel-opt-r 收下拉列表里选项的圆角
+ *   分段     --seg-* 对齐**校准页 .rail 那一家**（「切换器统一」），
+ *            但尺码用 28px 那一套（r 4 / 内 2 / 槽 2 / 竖 3 / 横 11 = 28px，
+ *            与页内控件一条线）—— 作者发话：「开关的高度格外的高…工作台那个没这么高」。
+ *            更早误用过校准页步骤条的大尺码（竖 5 横 13 槽 3 ≈ 34px），退回；
+ *            页面级的分类条是校准页原尺寸的高度变体，开关跟控件走 28px
+ * 不设这些变量的稿一个像素不动 —— 改共用件的铁律。
+ */
+
+.page {
+  /* 抽屉与确认弹层贴在这一页里，不飘到窗口外面（外壳上的一层 transform 会让 fixed 量错） */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+
+  --r-sm: 4px;
+  --r-md: 3px;
+  --r-lg: 4px;
+  --card-r: 4px;
+  --sel-h: 28px;
+  --sel-opt-r: 2px;
+  --num-h: 28px;
+  --seg-r: 4px;
+  --seg-in: 2px;
+  --seg-pad: 2px;
+  --seg-y: 3px;
+  --seg-x: 11px;
+}
+
+/* ---------- 顶部 ---------- */
+
+/* 作者圈着头部说「这些都可以往上移，压缩一下头部的高度」——
+   顶内衬从 pad+4 收到 pad-4，副标题贴上来，分类条一行的上下内衬收到 10px */
+.head {
+  flex-shrink: 0;
+  padding: calc(var(--pad) - 4px) calc(var(--pad) + 10px) 0;
+}
+
+.headTop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/*
+ * mini 档头部：**搜索在上面、修改历史在下面** —— 「修改历史」已经搬到
+ * 分类条那一行（见 PageParams.tsx 的 `historyInBar`），所以这一行只剩三件
+ * （标题 / 文件名 pill / 搜索框），一行放得下。
+ *
+ * 缝 12 → 8、搜索框允许收到 48px：实测 400 窗口下这三件加起来正好差这 12px。
+ * 仍然留着 `flex-wrap: wrap`（基类给的）当兜底 —— 真撑爆了宁可多一行，
+ * 也不要把文件名 pill 挤出窗口。
+ */
+[data-density='mini'] .headTop {
+  gap: 8px;
+}
+
+/*
+ * `margin-left: auto` —— **搜索框贴住标题行的右端**（作者：「小尺寸的时候
+ * 搜索靠右」）。原来只靠 `flex: 1 1 48px` 往右长，长到 160 的上限就停在那儿：
+ * 实测窗口 400 时它离右缘 22px、640 时离右缘 262px —— 同一个控件在小窗里飘，
+ * 谁的旁边都不算。改成 auto 边距吃掉剩下的空间，任何宽度都钉在右端。
+ * （预设页同一条要求：「搜索的，你需要把它往右靠呀」。）
+ *
+ * 上限 160 不动：作者原话是「窗口比较小的时候，搜索条还是不要这么长」，
+ * 贴右不是让它长大。
+ */
+[data-density='mini'] .searchSlot[data-row='head'] {
+  flex: 1 1 48px;
+  min-width: 48px;
+  margin-left: auto;
+}
+
+/* 「修改历史」在分类条那一行时不许被挤扁 —— 它和分类条是并排的两件 */
+[data-density='mini'] .bar .historyBtn {
+  flex-shrink: 0;
+  margin-left: 0;
+}
+
+.pageTitle {
+  margin: 0;
+  font-size: calc(var(--fs-metric) - 4px);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text-1);
+}
+
+.sub {
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/*
+ * 已应用的那一份不是当前看的这份时，副标题行尾缀一句「切换回已应用」。
+ * 琥珀字与 pill 同色系 —— 一行的两个信号（颜色 + 字）说的是同一件事。
+ * 只用动作、不点名（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标）。
+ * 可点的那个变体是按钮（名字都很像，一键回去、不靠认名字）：reset 成文字样子、
+ * hover 才画下划线；已应用那份不在包里时退成纯文字 span（同样吃这一套字色）。
+ */
+.usingNote {
+  margin-left: 10px;
+  color: var(--warn);
+}
+
+button.usingNote {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.usingNote:hover {
+  text-decoration: underline;
+}
+
+/* 机型 / 版本两个下拉挨在一起，窄窗口下各占一半 */
+/*
+ * 预设 pill：绿色文件名 chip + 「切换」小字，点开抽屉。
+ * 更早那两个下拉（`.picker`）已经去掉 —— 顶部只留这一件东西。
+ * 颜色用项目既有的 token：淡绿底 --accent-soft、绿字 --accent（**没有** --brand 这套）。
+ * 28px 高（与页内所有控件一条线）、圆角随页面 token 收到 4px。
+ */
+.presetPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 340px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.presetPill:hover {
+  border-color: var(--accent);
+}
+
+/* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」）—— hover 变绿留着 */
+.presetPill:focus-visible {
+  outline: none;
+}
+
+/*
+ * 看的那份**不是**正在使用的那份 —— 不画绿，换琥珀
+ * （作者：「我切换到不是正在用的时候，就不要用绿色，用琥珀色」）。
+ * 底 / 「切换」字 / hover 边框三处一起换；副标题行尾由 .usingNote 指路一句。
+ * 绿 = 在看的就是在用的（或还没应用过任何一份，没有可对比的对象）。
+ */
+.presetPillOff {
+  background: var(--warn-soft);
+}
+
+.presetPillOff:hover {
+  border-color: var(--warn);
+}
+
+.presetPillOff .presetSwitch {
+  color: var(--warn);
+}
+
+.presetName {
+  overflow: hidden;
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.presetSwitch {
+  flex-shrink: 0;
+  color: var(--accent-deep);
+  font-size: 11.5px;
+}
+
+/*
+ * mini：pill **不拉满整行**。原来 `width: 100%` 让它吃掉 340px、
+ * 把标题行挤成三行，作者对着截图问「它这上面这个绿色的，怎么变成这么长了」——
+ * 文件名 pill 的宽度应该由**文件名本身**决定，剩下多少空间是布局的事。
+ * `max-width` 由基础规则接管（340px），文件超长时 .presetName 自己省略。
+ */
+
+/*
+ * 「修改历史」入口：**右上角、margin-left:auto 顶到最右**。
+ * 原来入口是页脚那条「查看修改详情」下划线链接（.detailLink，已删）—— 参考布局
+ * 把它放在标题行右端，与文件概要卡腾出来的位置正好对上。同 presetPill 一族：
+ * 28px、1px --line 边框、圆角随页面 token（作者：圆角不动）。
+ */
+.historyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.historyBtn:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+
+/*
+ * 抽屉开着时这颗按钮要自己说出来（它是**开关**，不是「打开」）。
+ * 原来只有 hover 会变绿，鼠标一移开就看不出抽屉跟它有半点关系 —— 于是「再点一下
+ * 收起来」这件事既没有视觉根据，点下去也确实没反应（当时写的是 `setHistoryOpen(true)`）。
+ * 与分类条的选中段同一套绿：淡绿底 + 绿框 + 深绿字。
+ */
+.historyBtn[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.historyBtn:focus-visible {
+  outline: none;
+}
+
+
+
+/* ---------- 分类条 ---------- */
+
+.bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px calc(var(--pad) + 10px);
+  min-width: 0;
+}
+
+/*
+ * 搜索框的槽。
+ *
+ * 宽度是**页面布局**的事（它跟分类条怎么分这一行），所以四套档位宽度从
+ * `SearchField.module.css` 的 `.field` 搬到这里 —— `.field` 只管长相，
+ * 一律铺满这个槽。
+ *
+ * `data-row` 说它现在在哪一行：`bar` = 分类条那一行的右端（默认），
+ * `head` = 头部标题行（窄窗时搬上去，见 PageParams.tsx 的 searchInHead）。
+ *
+ * # 整体收窄一档（作者：「这个时候都有一点被压到了，可以适当减小搜索的宽度」）
+ *
+ *   280 → 260 / 240 → 216 / 160 → 132
+ *
+ * 起因是实测出来的一段：窗口 480 那档，分类条带着条数与名字、搜索框占 160，
+ * 两者加起来比这一行宽 **11px** —— 分类条只能横向滚（画面上就是右侧被啃掉一块）。
+ * 分类条那边同时改了退化规则（见 CategoryPills.module.css 的注释），
+ * 两边一起才把这一段救回来。占位文案在 132px 下仍然是「搜索…」，不截断。
+ */
+.searchSlot {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+[data-density='ultra'] .searchSlot[data-row='bar'] {
+  width: 260px;
+}
+
+[data-density='wide'] .searchSlot[data-row='bar'] {
+  width: 216px;
+}
+
+[data-density='compact'] .searchSlot[data-row='bar'] {
+  width: 132px;
+}
+
+/* mini：与 compact 同宽（132）—— 不再 `flex: 1` 吃光剩余空间 */
+[data-density='mini'] .searchSlot[data-row='bar'] {
+  width: 132px;
+}
+
+/*
+ * 头部标题行：宽度跟着剩下的空间走，上限照 compact 那档的 160 —— 挪上来是为了
+ * **不再跟分类条抢一行**，不是为了在标题行里长大。
+ *
+ * `flex-basis` 必须是个**小值**（96），不能写 `width: 100%`：flex 的换行判定用的是
+ * 收缩前的 hypothetical size，`width: 100%` 会被当成一整行宽，于是标题行直接折成
+ * 两行（实测 400px 窗口头部从 28px 变 68px）。给小 basis 才会「先挤在一起、
+ * 再按剩余空间收缩」。
+ */
+.searchSlot[data-row='head'] {
+  flex: 1 1 80px;
+  min-width: 0;
+  max-width: 160px;
+}
+
+.ok {
+  flex-shrink: 0;
+  margin: 0 calc(var(--pad) + 10px) 10px;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+}
+
+/* ---------- 卡片区 + 固定抽屉 ---------- */
+
+/*
+ * `.main` 是横向两列（左边整页内容 / 右边固定抽屉），底栏在它外面通栏。
+ * `position: relative` 是给悬浮抽屉的遮罩用的：遮罩挂在这一层就盖不到底栏，
+ * 窗口右下角那个 resize 手柄也就还点得到。
+ */
+.main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.left {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 测量层：**只量宽度，不参与分列**。
+ * 它永远存在，所以 ResizeObserver 观察的元素不会被换掉（根因见 PageParams.tsx 那段注释）。
+ * padding 一律留给里面的 .scroll / .dual —— 阈值判的是「卡片区有多宽」，
+ * 不该被这一层的内边距干扰。
+ */
+.bodyWrap {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 卡片之间留两倍 gap：靠留白让「这几条是一伙的」看得出来 */
+.scroll {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 calc(var(--pad) + 10px) calc(var(--pad) * 2);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 2);
+}
+
+/*
+ * 超宽窗口把卡片流摊成左右两列。分列由 JS 按字段数贪心平衡，
+ * 不用 CSS columns —— 那东西会把一张卡从中间劈开。
+ */
+.dual {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 calc(var(--pad) + 10px) calc(var(--pad) * 2);
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: calc(var(--gap) * 2);
+}
+
+.col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 2);
+}
+
+.empty {
+  margin: 8px 2px;
+  font-size: var(--fs-body);
+  color: var(--text-3);
+}
+
+/* 还在读数据包：整页一句话，不装成空表 */
+.loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pad);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 底栏 ---------- */
+
+.foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px calc(var(--pad) + 10px);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.footLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.footRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line-strong);
+}
+
+.state {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 全页唯一一种文字动作按钮 —— 动作一律用文字，不用图标。28px 高 */
+.textBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.textBtn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.textBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」） */
+.textBtn:focus-visible {
+  outline: none;
+}
+
+/*
+ * 只有图标的动作按钮（撤销 / 重做）。
+ * 与 `.textBtn` 同一个肤色，只把横内衬换成定宽 28 —— 两颗并排正好是这一行
+ * 28px 的控件高度，也比两颗文字按钮省出约 44px。图标 15px（笔画 1.5 在 15px 下
+ * 正好是 1px 描边，与全稿一致）。
+ */
+.iconBtn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.iconBtn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.iconBtn:focus-visible {
+  outline: none;
+}
+
+/*
+ * 「查看修改详情」是个链接样子的按钮 —— 它与旁边的「保存修改」不是一个量级的动作，
+ * 做成第二颗描边按钮会跟主按钮抢。
+ */
+/*
+ * 数字 chip：以前是 999px 胶囊 —— 加了数字之后作者发话了：
+ * 「圆的是后面没有数字的，现在加了数字，可能不能用这种圆的了，圆角小一点、偏矩形」。
+ * 改成导航徽标那样的近矩形（2px 圆角、等宽数字）。
+ * （现在挂在右上角「修改历史」按钮上，原页脚 .detailLink 入口已删。）
+ */
+.detailCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: calc(var(--fs-label) - 1px);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 主操作。28px 高（与页内控件同高），圆角随页面 token 收到 4px */
+.primary {
+  height: 28px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+/* ---------- 确认弹层 ---------- */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(16 24 32 / 26%);
+}
+
+.sheet {
+  width: 360px;
+  max-width: 100%;
+  padding: 20px;
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.sheetTitle {
+  margin: 0 0 8px;
+  font-size: calc(var(--fs-body) + 2px);
+  color: var(--text-1);
+}
+
+.sheetText {
+  margin: 0 0 18px;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.sheetFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- 保存确认里的改动清单 ---------- */
+
+.changeList {
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+
+.changeItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: var(--fs-label);
+}
+
+.changeItem + .changeItem {
+  border-top: 1px solid var(--line);
+}
+
+.changeLabel {
+  min-width: 0;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changeArrow {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.changeMore {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.ghost {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.danger {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: #e5484d;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* ---------- 窄窗口 ---------- */
+
+/*
+ * mini：底栏还是两行，但**分类条这一行不再把搜索框挤下去**（作者圈着
+ * 分类条右侧的空白：「这个搜索的，你可以不放到下面，你放到我红色圈起来的位置」）。
+ * 分类条自己会横向收缩（.group 有 overflow-x: auto），搜索框吃剩下的空间，
+ * 宽度随窗口连续变，不是固定值。缝从 12 收到 8，把空间留给搜索框。
+ */
+[data-density='mini'] .bar {
+  gap: 8px;
+}
+
+/*
+ * 底栏在 mini 档：**能一行就一行**，真挤不下才换行。
+ *
+ * 作者圈着「保存修改」那颗被拉满的按钮：「这个保存修改不要这么长啊……
+ * 就一直这么短就可以用一行了」。两处根因：
+ *   ① `.footLeft/.footRight` 写了 `width: 100%` —— 那是**无条件**把底栏折成两行，
+ *      哪怕一行放得下
+ *   ② `.primary` 写了 `flex: 1` —— 主按钮被拉满整行
+ * 现在只留「允许换行」，宽度交给内容：一行放得下（没有未保存改动时）就是一行；
+ * 状态文案变长（「N 处未保存 · 保存后会覆盖 xxx.toml」）挤不下了，整组右栏换到
+ * 第二行、靠 `margin-left: auto` 贴右 —— 和一行时是同一个位置，不跳到左边去。
+ */
+[data-density='mini'] .foot {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+[data-density='mini'] .footLeft {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+[data-density='mini'] .footRight {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+/*
+ * 状态文案是**唯一可以让位的一件**：它变长 / 变短（有没有未保存改动）不该让底栏
+ * 高度跳。`min-width: 0` 才允许它缩到内容宽以下，缩不过去就省略号 ——
+ * 配合上面那句 `nowrap`，底栏高度在 mini 档恒定。
+ */
+[data-density='mini'] .state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 主按钮宽度就是它的字（+ 内衬），不拉满 */
+[data-density='mini'] .primary {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+/*
+ * 没有数据包时的空态：它**不是错误**（红字），是「还没有东西可画」——
+ * 所以是一块居中说明 + 一条去获取数据包的路（作者要求：这一页不编假数据）。
+ */
+.emptyBox {
+  max-width: 560px;
+  margin: 48px auto 0;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  background: var(--bg-1, #fff);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0 0 8px;
+  font-size: calc(var(--fs-body) + 1px);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.emptyText {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.emptyBtn {
+  margin-top: 10px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--wb-primary, #2f6b4f);
+  border-radius: var(--r-sm);
+  background: var(--bg-1, #fff);
+  color: var(--wb-primary, #2f6b4f);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.emptyBtn:hover {
+  background: rgb(47 107 79 / 6%);
+}

@@ -1,0 +1,653 @@
+/*
+ * 预设表（列随类型变 + 常驻操作列）。宽松尺度：行两行高（名字 + 路径），
+ * 表头 34px。
+ *
+ * 对齐参数页那套几何，两件事：
+ *
+ * 1. **名称列缩进起死回生。** 原来的 `.thName` / `.name` 特异性 (0,1,0) 打不过
+ *    `.head th` / `.row td` 简写的 (0,1,1)，宽档整段 `calc(var(--pad) + 10px)` 缩进是**死的**
+ *    —— 实测表头与名称列都贴在 10px，而工具条在 calc(--pad + 10px)（ultra 32px）：
+ *    作者说的「没对齐」主因就是它。改成 `.head th.thName` / `.row td.name` 才压得住。
+ * 2. **徽章一律 tag 几何**（18px 高 / 0 6px 内衬 / 2px 圆角），
+ *    不再做 999px 胶囊；操作按钮 24px 高。语义色原样：官方灰 / 我的蓝 /
+ *    已应用绿 / 待下载蓝。
+ *
+ * 表头 `position: sticky` 是**硬要求**而不是装饰：全局 CSS 把滚动条宽度置成 0
+ * （幽灵滚动条约定，见 src/styles/global.css），滚起来没有任何位置参照。
+ *
+ * 列宽用 `table-layout: fixed` 定死，名字那一列吃掉剩下的宽度并省略号截断 ——
+ * 让浏览器自己算列宽的话，一个长文件名会把喷嘴层高挤成竖排。
+ *
+ * # 两套列，宽度预算各算一遍
+ *
+ * ```
+ * MKP 配置    名称 / 机型 / 版本 / 时间 / 大小 / 来源 / 状态 / 操作          7 列定死
+ * 切片器配置  名称 / 机型 / 喷嘴 / 层高 / 时间 / 大小 / 来源 / 状态 / 操作    8 列定死
+ * ```
+ *
+ * 版本与喷嘴 / 层高**只有一套会渲染**（见 PresetTable.tsx），所以两套的定死宽度总和
+ * 差得不多：切片器那一套多一列，但 `.thNum` 比 `.thVersion` 窄。
+ *
+ * mini 档（窗口 400px，表格容器实测 380–396）是最紧的一档：定死的那几列加起来必须留够名称列。
+ * 加不下的时候浏览器会按比例压缩定死的那几列（`table-layout: fixed` 不会横向溢出，
+ * 但内容会被压到省略号以内），所以每一格都 `overflow: hidden; text-overflow: ellipsis`——
+ * 宁可让一个字省略，也不让 `scrollWidth > clientWidth`：幽灵滚动条下看不见滚动条，
+ * 只会发现右边有字被裁掉。
+ */
+
+
+.hold {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+/* ---------- 表头 ---------- */
+
+.head th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line-strong);
+  /*
+   * 表头不再用纯白（--surface-solid）—— mini 档上「白色很显眼」，
+   * 用背景色又跟数据行分不开。取中间档：比数据行暗一档的中性灰，
+   * 一眼能认出「这一条是表头」，又不刺眼。**不透明** —— 表头 sticky，
+   * 半透明会让滚动的行从它底下透出来。
+   */
+  background: rgb(237 238 240);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* 见文件头的「试验场这一版」：必须带 .head th 才压得过上面的简写。
+   试验场这一版起左右基准线是 --page-x（20–24px），与工具栏两排、页脚同一条线 */
+.head th.thName {
+  padding-left: var(--page-x);
+}
+
+/* 机型：「A1 mini」是最长的一个（7 个字符） */
+.thMachine {
+  width: 88px;
+}
+
+/* 版本：一个名字，或者几个名字用 `·` 连起来（不够宽就截断，title 里是全的） */
+.thVersion {
+  width: 104px;
+}
+
+.thNum {
+  width: 64px;
+}
+
+.thTime {
+  width: 72px;
+}
+
+/*
+ * 来源：三枚 chip 里最长的是 release 的「工作台发布 · 1.0.0」——
+ * 实测内容约 106px（渲染 99.8px），原来的 72px 装不下，chip 又没兜底，
+ * 溢出 41px 压到操作列上（作者：「字和字都叠在一起」）。
+ * 加宽到放得下它（宽度从名称列的富余里拿，列一个不删）；窄档按 chip 自己的省略号兜底。
+ */
+.thOrigin {
+  width: 140px;
+}
+
+/* 操作：一颗文字按钮（应用 / 复制 / 下载）或者三个字的灰字。
+   按钮在列内**水平居中**（作者：「下面的按钮没有水平居中」），
+   原来的右线对齐让位 */
+.thAct {
+  width: 84px;
+}
+
+/* 表头「操作」与格子一起居中。`.thAct` 单写 text-align 是死的 ——
+   `.head th` 简写 (0,1,1) 压过 (0,1,0)，必须带 .head 前缀才生效
+   （同 .thName 的教训，见文件头那条对齐说明；实测表头文字中心偏左 14px） */
+.head th.thAct {
+  text-align: center;
+}
+
+/*
+ * 追加（作者：「其余的能不能做到水平居中」）：事实列
+ * （机型 / 版本 / 喷嘴 / 层高 / 时间 / 来源）的表头与格子一起居中 ——
+ * 它们都是等宽的小事实，居中读起来比贴左齐整；名称列是唯一的长文本，保持左对齐。
+ * 表头同样必须带 .head 前缀（同上）。
+ */
+.head th.thMachine,
+.head th.thVersion,
+.head th.thNum,
+.head th.thTime,
+.head th.thOrigin {
+  text-align: center;
+}
+
+/* ---------- 行 ---------- */
+
+.row {
+  border-bottom: 1px solid var(--line);
+  cursor: default;
+}
+
+.row:hover {
+  background: rgb(16 24 32 / 2%);
+}
+
+/*
+ * 正在生效的那一份：**文件名自己转绿**（几次返工之后推倒重来）。
+ *
+ * 这一轮之前试过的画法全栽在这张折叠边框表 + 适配缩放上，一笔账记在这：
+ *   ① td 的 inset box-shadow：Chromium 按格画出格，名称列底下渗出一条绿线；
+ *   ② td 整格渐变背景：适配缩放下绘制层的右缘/底缘描出发丝线；
+ *   ③ td position:relative 画 ::before：第一个格子一定位，行背景的格间传导断了，
+ *     主行右半条发白；
+ *   ④ td border-left + 内衬补偿：缩放下左缘/右缘仍有白缝。
+ * 结论：**别在表格内部画任何额外的层**。「哪一份在生效」让文件名自己说 ——
+ * 转绿加粗，和右侧「已应用」状态一左一右互相呼应，没有任何可出毛病的画布。
+ */
+.row[data-live='true'] .nameText {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+/* 菜单正开在这一行上 —— 弹出来之后要看得出问的是谁 */
+.row[data-active='true'] {
+  background: var(--accent-soft);
+}
+
+/* 聚焦不另画圈（作者：「好细的描边，很丑啊，不要描边」）——
+ * 折叠边框表里 tr 的 inset 描边会被 Chromium 按单元格画成一个个小方框，
+ * 比没有焦点指示更难看；行开合看展开箭头与打开底色就够了。 */
+.row:focus-visible {
+  outline: none;
+}
+
+/*
+ * 「定位」的闪烁**不在表格里**了。此前两版把 keyframes
+ * 铺在 tr / td 的背景上，适配缩放下合成层缓存会留旧帧 —— 行里多出一条若隐若现
+ * 的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。现在闪烁是盖在行上的
+ * 一块普通 div（见 PagePresets 的 s.locateFlash + locateApplied），表格内部
+ * 没有任何动画，缓存与否无关紧要。
+ */
+
+/*
+ * vertical-align 从 top 改 middle（作者：「右侧那些，垂直居中」）——
+ * 行是两行高（名字 + 路径），右侧的按钮 / 灰字 / 徽章原来全顶在行头。
+ * 名称列两行本来就把行高占满，middle 对它没有可见变化。
+ */
+.row td {
+  padding: 8px 10px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+
+/* ---------- 名称列 ---------- */
+
+/* 同上：带 .row td 才压得过 `.row td` 的简写 */
+.row td.name {
+  min-width: 0;
+  padding-left: var(--page-x);
+}
+
+.nameLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nameText {
+  min-width: 0;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  white-space: nowrap;
+}
+
+/* 「未标机型」是中性说明，不是警告 —— 用户没标就是没标 */
+.untagged {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.path {
+  display: block;
+  margin-top: 2px;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 机型 / 版本 / 喷嘴 / 层高 / 时间 / 大小 ---------- */
+
+/*
+ * 这几列**都只是事实，不是轴**。所以没有 hover、没有 cursor、没有任何可点的样子 ——
+ * 长得像能点的东西就会被点，点了没反应比不能点难受。
+ * 一律截断而不换行：换行会让两行高的行变成三行，整张表的节奏就散了。
+ * 随表头一起水平居中（见上面 `.head th.th*` 那条）。
+ */
+.machine,
+.version {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* 时间与大小：假后端推的演示值（title 里写明）。等宽数字，免得每行的小数点错开 */
+.stat {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 来源 ---------- */
+
+.origin {
+  text-align: center;
+  white-space: nowrap;
+}
+
+/*
+ * tag 几何 —— 18px 高 / 0 6px 内衬 / 2px 圆角，不再做胶囊。
+ *
+ * 从 inline-flex 改成 inline-block + line-height —— 窄档（compact / mini）的
+ * 来源列放不下「工作台发布 · 1.0.0」时按**省略号截断**，不再溢出压到操作列上
+ * （text-overflow 对 inline-flex 不生效）。`title` 里仍是全文。
+ */
+.originChip {
+  display: inline-block;
+  max-width: 100%;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+/* 「我的」用蓝（--axis-y 那支），和官方分得开；两者都不是警示色 */
+.originChip[data-origin='mine'] {
+  background: rgb(59 130 246 / 10%);
+  color: #2563eb;
+}
+
+/* 「工作台发布」用绿 —— 它跟「已应用」状态条同一支色：同一条链上来的东西 */
+.originChip[data-origin='release'] {
+  background: rgb(22 163 74 / 10%);
+  color: #16a34a;
+}
+
+/* ---------- 状态 ---------- */
+
+.state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  white-space: nowrap;
+}
+
+/* tag 几何，同 .originChip */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* 本地表 · 生效中（已应用 / 已复制）：绿 */
+.badge[data-state='live'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/*
+ * 中性那两档：本地表的「未应用 / 未复制」与云端表的「已下载」。
+ * **都不是错误色** —— 一个是「还没做那一步」，一个是「东西在你机器上而已」。
+ */
+.badge[data-state='idle'],
+.badge[data-state='have'] {
+  color: var(--text-2);
+}
+
+/* 云端表 · 未下载：蓝，它是一个待办，不是错误 */
+.badge[data-state='todo'] {
+  background: rgb(59 130 246 / 10%);
+  color: #2563eb;
+}
+
+.delivery {
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ---------- 操作列 ---------- */
+
+/* 在列内水平居中（同 .thAct） */
+.act {
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* 动作用**文字**不用图标（见项目约定）。聚焦只加深边框，不加光晕。24px 高 */
+.actBtn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.actBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.actBtn:focus-visible {
+  outline: none;
+}
+
+.actBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+/*
+ * 已经生效 / 已经下载的那一行：**灰字，不是按钮**。
+ * 已经在用的东西没有可点的动作，也不做「取消应用」—— 总得有一套在生效。
+ */
+.actDone {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 没有 asset id 的那一行（用户自己的文件）：一道短横 + title 说清为什么没有按钮 */
+.actNone {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---------- 行展开 ---------- */
+
+/*
+ * 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行。
+ * 打开的行与展开排**同铺一片打开色**，读作一整块；
+ * 点在按钮上不算展开 —— 按钮有自己的动作（见 .tsx 的 onClick 判据）。
+ */
+/*
+ * 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行。
+ * 打开色铺在**各自的 td 上**（与下方 detail 排同一套画法）—— tr 的行背景在这张
+ * 折叠边框表里传导不稳，前面几轮的白带全是它出的；td 底色从那以后没出过事。
+ * 顺带把悬停也解决了：`.row:hover` 的 2% 黑铺在 tr 上，被 td 底色压在下面，
+ * 打开的行**悬停时不会再被洗白**。
+ *
+ * # 打开色必须**不透明**，而且三处必须同一个值
+ *
+ * `.rowOpen td` / `.rowOpen` 的底边线 / `.expandRow td` 这三块拼起来才是「一整个绿块」。
+ * 它们原来都用 `--accent-soft`（12% 半透明），而**接缝那 1px 上叠了几层由渲染的
+ * 取整决定**：适配缩放（App.module.css 的 `transform: scale()`）落在非整数比例时，
+ * 那条缝上可能多叠一层（深线），也可能只落一层、把窗口底色露出来 ——
+ * 就是作者反复圈的那条白线（实测 rgb(228 241 235) = 12% 绿铺在窗口底色上的中间值，
+ * 两侧的行内是 rgb(216 235 226)）。两种面孔是同一个毛病，换机器 / 换窗口尺寸会换一种。
+ *
+ * 参数页的卡片早就栽过同一跟头并定下了修法：
+ * **改用不透明的等效合成色**。下面这个 rgb(216 235 226) 就是 12% 绿铺在窗口底色
+ * 上的结果（实测取值），三处**必须是同一个值** —— 不透明之后，接缝上无论取整把它
+ * 分给谁、抗锯齿把哪两处混在一起，混出来的都是它，缝从「颜色拼接问题」变成
+ * 「同一桶漆涂两遍」。代价是这块绿不再跟着窗口背景的渐变微调（表格这一带
+ * 渐变差 ≤3，肉眼无差），以及展开行的 hover / `data-active` 底色被压住 ——
+ * 那本来就是想要的效果（打开的行不再被洗白），菜单高亮在未展开的行上照旧。
+ */
+.rowOpen td {
+  background: rgb(216 235 226);
+}
+
+.rowOpen {
+  /* 行与详情排要**读作一整块**。分隔线**染成打开色而不是透明**——
+   * 透明的缝在适配缩放的非整数比例下会漏出底下的白卡底，就是行里那条若隐若现的
+   * 白线（作者：「窗口比较高就出现」）。染成同一色，缝本身就是绿的，无从漏白；
+   * 边框是折叠模式里画得最稳的东西（那条灰线在任何缩放下都没出过事）。
+   * 返工过一次：颜色换成**不透明**的等效色（同上），半透明的它正是那条线。 */
+  border-bottom-color: rgb(216 235 226);
+}
+
+.expandRow td {
+  padding: 2px var(--page-x) 12px;
+  background: rgb(216 235 226);
+  /*
+   * 又一次返工：**向上外扩 4px**，把接缝整个盖住。
+   *
+   * 前一次只把三处换成不透明色，颜色问题解决了，但那条缝还在：
+   * 折衷（非整数缩放 / 窗口被拖到半像素位置）下，1px 的边线只占 0.7–1 个物理像素，
+   * 而「数据行 td 的背景」与「展开排 td 的背景」各自按物理像素取整 —— 两者之间会
+   * 空出 1 个谁也不画的像素行，那里露出窗口底色，就是作者两次圈的同一条线
+   * （实测 (224 237 232) = 约 70% 绿 + 30% 底色，1–2 个像素高）。
+   * 给展开排往上外扩（不透明、同色）：4px 逻辑在最狠的缩放下（0.5×1.25）也还有
+   * 2 个物理像素，盖得住那条缝；多出来的部分叠在数据行的下边缘上 —— 同色，看不出来。
+   * 一开始只外扩 2px，实测在部分窗口位移下仍剩 1px、色差 4 的残迹，所以加到 4px。
+   */
+  box-shadow: 0 -4px 0 0 rgb(216 235 226);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+.factKey {
+  color: var(--text-2);
+}
+
+.factVal {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 空态与提示 ---------- */
+
+/* 三种空态共用这一块，话由 tsx 挑（筛空 / 本来没有 / 加载失败） */
+.empty {
+  margin: 0;
+  padding: calc(var(--pad) + 6px) var(--page-x);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px var(--page-x);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---------- 窄窗口 ---------- */
+
+/* 列宽收紧，但**一列都不藏** —— 藏掉的那一列就是界面在替用户决定他不需要它 */
+[data-density='compact'] .head th.thName,
+[data-density='compact'] .row td.name,
+[data-density='mini'] .head th.thName,
+[data-density='mini'] .row td.name {
+  padding-left: var(--pad);
+}
+
+/*
+ * compact（640–1080）：名称列还剩 150 上下，够看到文件名的主干。
+ * 机型 70 + 版本 84 + 时间 58 + 大小 62 + 来源 58 + 状态 92 + 操作 62 = 486（MKP）
+ * 机型 70 + 喷嘴/层高 48×2 + 时间 58 + 大小 62 + 来源 58 + 状态 92 + 操作 62 = 498（切片器）
+ */
+[data-density='compact'] .thMachine {
+  width: 70px;
+}
+
+[data-density='compact'] .thVersion {
+  width: 84px;
+}
+
+[data-density='compact'] .thNum {
+  width: 48px;
+}
+
+[data-density='compact'] .thTime {
+  width: 58px;
+}
+
+[data-density='compact'] .thOrigin {
+  width: 58px;
+}
+
+[data-density='compact'] .thAct {
+  /* 右线收窄（16px）后给「复制」按钮留够宽 */
+  width: 70px;
+}
+
+/*
+ * mini（窗口 400）：这一档字号也小一档（--fs-label 是 10px），所以格子能再收。
+ * 机型 46 + 版本 54 + 时间 44 + 大小 48 + 来源 44 + 状态 56 + 操作 46 = 338（MKP），
+ * 名称列还剩 40–58；切片器那一套多 12（喷嘴 34 + 层高 34 换掉版本 54），名称列再少一点。
+ * 再往下砍就该砍内容了，那不如让人把窗口拉宽 —— 所以这一档的每一格都靠省略号兜。
+ */
+[data-density='mini'] .thMachine {
+  width: 44px;
+}
+
+[data-density='mini'] .thVersion {
+  width: 48px;
+}
+
+[data-density='mini'] .thNum {
+  width: 30px;
+}
+
+[data-density='mini'] .thTime {
+  width: 40px;
+}
+
+
+[data-density='mini'] .thOrigin {
+  width: 38px;
+}
+
+
+[data-density='mini'] .thAct {
+  width: 40px;
+}
+
+/* mini 缝只有 5px：操作列收回小内衬，右线的对齐让位给宽度 */
+[data-density='mini'] .head th.thAct,
+[data-density='mini'] .row td.act {
+  padding-right: 5px;
+}
+
+[data-density='mini'] .row td {
+  padding: 6px 4px;
+}
+
+[data-density='mini'] .head th {
+  padding: 0 5px;
+}
+
+/* 两枚角标在 mini 收掉左右余量，否则一枚「已应用」就把 56px 的格子撑破（高度不变，只收左右） */
+[data-density='mini'] .originChip,
+[data-density='mini'] .badge {
+  padding: 0 4px;
+}
+
+[data-density='mini'] .actBtn {
+  height: 22px;
+  padding: 0 6px;
+}
+
+[data-density='mini'] .empty {
+  padding-left: var(--pad);
+  padding-right: var(--pad);
+}
+
+/* 提示那一行在 mini 也留着（它是右键菜单唯一的发现入口），只把上下余量收掉 */
+[data-density='mini'] .hint {
+  padding: 3px var(--pad);
+}

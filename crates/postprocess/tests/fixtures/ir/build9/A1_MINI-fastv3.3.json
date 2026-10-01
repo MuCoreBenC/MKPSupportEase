@@ -1,0 +1,196 @@
+{
+  "SchemaVersion": 1,
+  "Toolhead": {
+    "XOffset": -0.9,
+    "YOffset": 23,
+    "ZOffset": 4,
+    "MaxSpeed": 4200,
+    "CustomMountGcode": [
+      "G92 E0",
+      "G1 E-5 F1800",
+      "G92 E0",
+      "L801",
+      "M204 S10000",
+      "G1 X168 F30000",
+      "G1 X175 F10000",
+      "G1 X185 F10000",
+      "G1 X168 F30000",
+      "G1 F30000",
+      ""
+    ],
+    "CustomUnmountGcode": [
+      "M106 S[AUTO]",
+      "G1 X168 F30000",
+      "G1 X175 F10000",
+      "G1 X189 F10000",
+      "G1 X168 F6000",
+      "G1 F30000",
+      "L802",
+      "G92 E0",
+      "G1 E5.5 F1500",
+      "G92 E0",
+      "G1 F30000",
+      ""
+    ],
+    "NozzleSwitchTemperature": 0,
+    "GlueZOffset": -0.05,
+    "PrimeLength": 100,
+    "MKPRetract": -5,
+    "FirstPenRevitalizationFlag": false
+  },
+  "Wiping": {
+    "PreferredMode": "tower",
+    "Needed": false,
+    "Mode": "",
+    "WiperX": 20,
+    "WiperY": 20,
+    "TowerPrintSpeed": 200,
+    "NozzleCooling": false,
+    "FanSpeed": 255,
+    "SmallFeatureFactor": 1,
+    "TowerExtrudeRatio": 1,
+    "UserDryTime": 0,
+    "SupportExtrusionMultiplier": 0.8,
+    "OuterStructure": "rib"
+  },
+  "Tower": {
+    "UseTowers": false,
+    "ExtrudeRatio": 1,
+    "SafeZOffset": 0.7,
+    "TravelSpeed": 200,
+    "FastMode": "fast",
+    "GlueLayerSpeed": 35,
+    "SheathSpeed": 40,
+    "RibSpeedMode": "follow",
+    "RibSpeedValue": 40,
+    "CustomLayerHeight": "auto",
+    "WipeMode": "auto",
+    "FirstLayerFlow": 1,
+    "LayerCount": 0
+  },
+  "Disk": {
+    "StaggerMode": "off",
+    "StaggerAngle": 5,
+    "StaggerMaxAngle": 45,
+    "SwingMode": "spiral"
+  },
+  "Ironing": {
+    "Mode": "off",
+    "UsePath": true,
+    "ESumThreshold": 7.9,
+    "CoverageThreshold": 10,
+    "SuppressExpand": 0,
+    "SuppressExpandMode": "bbox",
+    "ExtrudeRatio": 0
+  },
+  "Glue": {
+    "ZOffset": -0.05,
+    "SparseRatio": 50,
+    "PassCount": 1,
+    "ZLiftHeight": 5,
+    "ZLiftHeightFirstLayers": 6,
+    "InterModelLiftHeight": 2,
+    "ZCompEnabled": false,
+    "ZCompMode": "bed",
+    "ZCompBed": {
+      "FrontLeft": 0,
+      "FrontRight": 0,
+      "BackLeft": 0,
+      "BackRight": 0
+    },
+    "ZCompPatch": {
+      "FrontLeft": 0,
+      "FrontRight": 0,
+      "BackLeft": 0,
+      "BackRight": 0
+    }
+  },
+  "Prime": {
+    "Enabled": true,
+    "Length": 100,
+    "TriggerLayers": 30,
+    "MinPathLength": 5,
+    "PerModel": false,
+    "EveryLayer": false
+  },
+  "Sheath": {
+    "BaseExpand": 5,
+    "WallWidth": 0.8,
+    "EnableHeight": 70,
+    "ConvergeLayers": 50
+  },
+  "Rib": {
+    "ExtraLength": 0,
+    "Width": 8,
+    "FilletWall": true,
+    "BottomFillStyle": "grid"
+  },
+  "Machine": {
+    "MaxX": 0,
+    "MinX": 0,
+    "MaxY": 0,
+    "MinY": 0,
+    "GlueMaxY": 0,
+    "GlueMinY": 0,
+    "GlueMaxX": 0,
+    "GlueMinX": 0,
+    "FirstLayerHeight": 0,
+    "TypicalLayerHeight": 0,
+    "NozzleDiameter": 0,
+    "TravelSpeed": 0,
+    "FirstLayerSpeed": 0,
+    "WallPrintSpeed": 0,
+    "RetractLength": 0,
+    "SupportInterfaceSpeed": 0,
+    "TreeSupport": false,
+    "MinSupportInterfaceEnabled": true,
+    "MachineType": "",
+    "GcodeMachineType": "",
+    "ForbiddenZones": null
+  },
+  "GCode": {
+    "MKPRetract": -5,
+    "MKPExtrude": 5.5,
+    "RefillExtrudeCommand": "G1 E5.5 F1500",
+    "WaitForDryingCommand": "",
+    "CustomGcodeEOwnership": true
+  },
+  "Filament": {
+    "Type": "PETG",
+    "Slicer": "BambuStudio"
+  },
+  "Safety": {
+    "L803LeakPrevent": false,
+    "DisableFrontCoverAlarm": false,
+    "Disable3rdLayerClogDetect": true,
+    "DisableTimelapse": true,
+    "UnsafeClose": true,
+    "AllowProceed": false,
+    "XYCalibration": "new",
+    "ZCalibration": "new",
+    "CalibrationExecutionMode": "print_then_calibrate",
+    "IsCalibrationMode": false
+  },
+  "Meta": {
+    "PresetName": "",
+    "NewPresetName": "",
+    "UpdateDate": "",
+    "CurrentSelectedPreset": "X1",
+    "Mail": "",
+    "TempZOffsetCalibr": 0,
+    "TempXOffsetCalibr": 0,
+    "TempYOffsetCalibr": 0
+  },
+  "Warnings": null,
+  "WarningDiagnostics": null,
+  "State": {
+    "InconsistentCount": 0,
+    "ThisLayerRevitalization": false,
+    "GlueBottomEnabled": false,
+    "GlueBottomDedupMode": "",
+    "BottomGlueEntries": null,
+    "SupportLayerZSet": null,
+    "CurrentFanSpeed": 0,
+    "CurrentFanSpeedSet": false
+  }
+}

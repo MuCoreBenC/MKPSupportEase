@@ -1,0 +1,74 @@
+[
+  {
+    "id": "A1_STANDARD",
+    "display": "官方推荐",
+    "machineId": "A1",
+    "assetRefs": [
+      "a1_bbs_mkpprocess_a1_04_020"
+    ]
+  },
+  {
+    "id": "A1_FAST",
+    "display": "官方推荐",
+    "machineId": "A1",
+    "assetRefs": [
+      "a1_bbs_mkpprocess_a1_04_020"
+    ]
+  },
+  {
+    "id": "A1_FASTV3.3",
+    "display": "官方推荐",
+    "machineId": "A1",
+    "assetRefs": [
+      "a1_bbs_mkpprocess_a1_04_020"
+    ]
+  },
+  {
+    "id": "A1_MINI_STANDARD",
+    "display": "官方推荐",
+    "machineId": "A1_MINI",
+    "assetRefs": [
+      "a1_mini_bbs_mkpprocess_a1_mini_04_020"
+    ]
+  },
+  {
+    "id": "A1_MINI_FAST",
+    "display": "官方推荐",
+    "machineId": "A1_MINI",
+    "assetRefs": [
+      "a1_mini_bbs_mkpprocess_a1_mini_04_020"
+    ]
+  },
+  {
+    "id": "A1_MINI_FASTV3.3",
+    "display": "官方推荐",
+    "machineId": "A1_MINI",
+    "assetRefs": [
+      "a1_mini_bbs_mkpprocess_a1_mini_04_020"
+    ]
+  },
+  {
+    "id": "P1S_default",
+    "display": "官方推荐",
+    "machineId": "P1S",
+    "assetRefs": [
+      "p1s_bbs_mkpprocess_p1s_04_024"
+    ]
+  },
+  {
+    "id": "P2S_default",
+    "display": "官方推荐",
+    "machineId": "P2S",
+    "assetRefs": [
+      "p2s_bbs_mkpprocess_p2s_04_024"
+    ]
+  },
+  {
+    "id": "X1C_default",
+    "display": "官方推荐",
+    "machineId": "X1C",
+    "assetRefs": [
+      "x1c_bbs_mkpprocess_x1_04_024"
+    ]
+  }
+]

@@ -1,0 +1,611 @@
+# 预设配方 —— **这一份是真源**（spec `recipe-workbench` §0 翻的案）。
+#
+# **一台机型一份正文**（spec `machine-owns-its-body`）：正文长在机型上，没有共享的模板。
+# 为什么不共享：借来的模板会让「这台机型漏写的键」静默拿到**别台机器**的值，
+# 而那种错在产物上看不出来（它「有值」），判据也咬不到（K-G7 只保证产物与配方一致）。
+# 删掉共享的东西之后，那类错没有表达方式了。
+#
+# 覆盖表**只有变体级**（键一律 `机型:变体`）：机型级那一层已经取消，
+# 一台机型共用的值就写在它自己的正文里。
+#
+# 改它 = 出新一批预设。改完要走完这条链，否则判据会红：
+#   ① 这个文件           ← 真源（手改，或用 `--recipe-window` 那扇工作台）
+#   ② crates/preset/assets/presets/            ← 生成物：`gen-presets --write`（判据 K-G7）
+#   ③ crates/postprocess/tests/fixtures/presets/ ← 对照基线：确认 diff 是你要的之后再同步（K-G0'）
+#
+# ②③ 两边的文件名**是同一个**：`{机型 id}-{版本 id 小写}.toml`，由 `generate::file_name`
+# 算出（规范见 `docs/ARCHITECTURE.md` §10）。b05 Task 5 之前基线沿用云端旧名
+# （`A1MF_260628.toml` 之类），两边对不上，配对只能读文件头；现在按名字直配，
+# 配对这一步不再读文件内容 —— 读到的第一处差异就是真差异。
+#
+# **③ 是唯一的安全网**：它守的不是「数值对」，而是「没有未经审阅的变化」。
+# 配方里一个数改错了不会有任何判据报红 —— 那种错只有 `git diff` 与真机打印看得出来。
+#
+# `uuid` 与 `release_time` 写死在这里 —— 生成时现取会让「重新生成逐字节相同」失效。
+
+
+release_time = '2026-08-19 01:38:13'
+
+[[machines]]
+name = 'A1'
+variants = ['fast', 'fastv3.3', 'standard']
+body = '''
+# uuid: f444aeaf-d447-453f-8871-cf7645c2d5df
+# release_time: 2026-08-19 01:38:13
+# machine: A1
+# variant: standard
+#胶笔配置
+
+[toolhead]
+offset = { x = -1, y = 18.6, z = 4 } # 笔尖偏移
+speed_limit = 70 # 涂胶速度限制 (mm/s)
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+G92 E0
+G1 E-5 F1800
+G92 E0
+L801
+M204 S10000
+G1 X256 F42000
+G1 X261 F10000
+G1 X267 F10000
+G1 X256 F42000
+G1 F42000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+M106 S[AUTO]
+G1 X256 F42000
+G1 X261 F10000
+G1 X271 F10000
+G1 X256 F5000
+G1 F42000
+L802
+G92 E0
+G1 E5.5 F1000
+G92 E0
+G1 F30000
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+
+[wiping]
+have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
+disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)
+disable_timelapse = true # 关闭延时摄影(A系列i3结构)
+disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
+disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
+disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
+disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
+fan_speed = 255 # 风扇速度 范围:0~255
+fast_tower_mode = "fast" # 擦料塔模式
+glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
+glue_pass_count = 1 # 涂胶次数 范围:1~10
+glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fr = 0 # 热床前右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_mode = "bed" # 补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)
+glue_z_compensation_patch_bl = 0 # 涂胶面后左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_br = 0 # 涂胶面后右角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
+glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
+glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
+ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
+ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
+ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
+min_support_interface_enabled = true # 最小支撑涂胶面过滤
+nozzle_cooling_flag = false # 涂胶期间是否降温
+outer_structure = "rib" # 外围结构(none/rib)
+prime_enabled = true # 润笔总开关
+prime_every_layer = false # 每层润笔
+prime_min_path_length = 5 # 润笔最小路径长度(mm) 范围:0~100
+prime_per_model = false # 每个模型都润笔
+prime_trigger_layers = 30 # 预涂触发层数 范围:0~999
+rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
+rib_fillet_wall = true # 外墙倒圆角
+rib_width = 8 # 斜肋宽度(mm) 范围:0~300
+small_feature_factor = 1 # 小特征因子 范围:0~2
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+tower_custom_layer_height = "auto" # 塔层高策略
+tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
+tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_rib_speed = "follow" # 斜肋打印速度模式
+tower_rib_speed_value = 40 # 斜肋自定义打印速度
+tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)
+tower_travel_speed = 200 # 塔刮擦速度(50~500mm/s)
+tower_wipe_mode = "auto" # 擦嘴策略
+use_ironing_path = true # 使用熨烫路径作为涂胶路径
+user_dry_time = 0 # 额外干燥时间
+wiper_x = 20 # 擦嘴塔X坐标(mm)
+wiper_y = 20 # 擦嘴塔Y坐标(mm)
+wipetower_speed = 200 # 擦嘴塔打印速度
+xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
+z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+'''
+
+[[machines]]
+name = 'A1_MINI'
+variants = ['fast', 'fastv3.3', 'standard']
+body = '''
+# uuid: 0fcddc38-55e9-4528-a3a9-898dbe1eb555
+# release_time: 2026-08-19 01:38:13
+# machine: A1_MINI
+# variant: standard
+#胶笔配置
+
+[toolhead]
+offset = { x = -0.3, y = 18.1, z = 4 } # 笔尖偏移
+speed_limit = 70 # 涂胶速度限制 (mm/s)
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+G92 E0
+G1 E-5 F1800
+G92 E0
+L801
+M204 S10000
+G1 X168 F30000
+G1 X175 F10000
+G1 X185 F10000
+G1 X168 F30000
+G1 F30000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+M106 S[AUTO]
+G1 X168 F30000
+G1 X175 F10000
+G1 X189 F10000
+G1 X168 F6000
+G1 F30000
+L802
+G92 E0
+G1 E5.5 F1500
+G92 E0
+G1 F30000
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+
+[wiping]
+have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
+disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)
+disable_timelapse = true # 关闭延时摄影(A系列i3结构)
+disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
+disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
+disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
+disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
+fan_speed = 255 # 风扇速度 范围:0~255
+fast_tower_mode = "fast" # 擦料塔模式
+glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
+glue_pass_count = 1 # 涂胶次数 范围:1~10
+glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fr = 0 # 热床前右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_mode = "bed" # 补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)
+glue_z_compensation_patch_bl = 0 # 涂胶面后左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_br = 0 # 涂胶面后右角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
+glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
+glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
+ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
+ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
+ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
+min_support_interface_enabled = true # 最小支撑涂胶面过滤
+nozzle_cooling_flag = false # 涂胶期间是否降温
+outer_structure = "rib" # 外围结构(none/rib)
+prime_enabled = true # 润笔总开关
+prime_every_layer = false # 每层润笔
+prime_min_path_length = 5 # 润笔最小路径长度(mm) 范围:0~100
+prime_per_model = false # 每个模型都润笔
+prime_trigger_layers = 30 # 预涂触发层数 范围:0~999
+rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
+rib_fillet_wall = true # 外墙倒圆角
+rib_width = 8 # 斜肋宽度(mm) 范围:0~300
+small_feature_factor = 1 # 小特征因子 范围:0~2
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+tower_custom_layer_height = "auto" # 塔层高策略
+tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
+tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_rib_speed = "follow" # 斜肋打印速度模式
+tower_rib_speed_value = 40 # 斜肋自定义打印速度
+tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)
+tower_travel_speed = 200 # 塔刮擦速度(50~500mm/s)
+tower_wipe_mode = "auto" # 擦嘴策略
+use_ironing_path = true # 使用熨烫路径作为涂胶路径
+user_dry_time = 0 # 额外干燥时间
+wiper_x = 20 # 擦嘴塔X坐标(mm)
+wiper_y = 20 # 擦嘴塔Y坐标(mm)
+wipetower_speed = 200 # 擦嘴塔打印速度
+xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
+z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+'''
+
+[[machines]]
+name = 'P1S'
+variants = ['lite']
+body = '''
+# uuid: a74d8791-9dd7-4867-a48f-df2fc44dd158
+# release_time: 2026-08-19 01:38:13
+# machine: P1S
+# variant: lite
+#胶笔配置
+
+[toolhead]
+offset = { x = -25.9, y = 14, z = 1.1 } # 笔尖偏移
+speed_limit = 70 # 涂胶速度限制 (mm/s)
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+L803;此处使喷嘴降温
+G92 E0;挤出机归零
+G1 E-10;长回抽
+G92 E0
+L801
+M204 S10000
+G1 X20 Y7 F30000;到驻点
+G1 X1 F300;推到X0，笔尖下落
+G1 X20 Y7 F30000;向左离开
+G1 F30000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+G92 E0
+G1 F30000
+G1 X246 Y0 ;到驻点
+G1 X256 F6000 ; 收笔
+G1 F30000
+L802
+G1 F1500
+G1 E10.7;填充回抽
+G1 F30000
+M106 P1 S[AUTO] ; 风扇
+;M106 P2 S100
+G1 X70 Y265 F30000;Wipe
+G1 E6;Wipe
+G1 X90 F30000;Wipe
+G1 X120 F30000;Wipe
+G1 X90 F30000;Wipe
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+
+[wiping]
+have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
+disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
+disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
+disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
+disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
+fan_speed = 255 # 风扇速度 范围:0~255
+fast_tower_mode = "fast" # 擦料塔模式
+glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
+glue_pass_count = 1 # 涂胶次数 范围:1~10
+glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fr = 0 # 热床前右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_mode = "bed" # 补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)
+glue_z_compensation_patch_bl = 0 # 涂胶面后左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_br = 0 # 涂胶面后右角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
+glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
+glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
+ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
+ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
+ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
+min_support_interface_enabled = true # 最小支撑涂胶面过滤
+nozzle_cooling_flag = false # 涂胶期间是否降温
+outer_structure = "rib" # 外围结构(none/rib)
+prime_enabled = true # 润笔总开关
+prime_every_layer = false # 每层润笔
+prime_min_path_length = 5 # 润笔最小路径长度(mm) 范围:0~100
+prime_per_model = false # 每个模型都润笔
+prime_trigger_layers = 30 # 预涂触发层数 范围:0~999
+rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
+rib_fillet_wall = true # 外墙倒圆角
+rib_width = 8 # 斜肋宽度(mm) 范围:0~300
+small_feature_factor = 1 # 小特征因子 范围:0~2
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+tower_custom_layer_height = "auto" # 塔层高策略
+tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
+tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_rib_speed = "follow" # 斜肋打印速度模式
+tower_rib_speed_value = 40 # 斜肋自定义打印速度
+tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)
+tower_travel_speed = 200 # 塔刮擦速度(50~500mm/s)
+tower_wipe_mode = "auto" # 擦嘴策略
+use_ironing_path = true # 使用熨烫路径作为涂胶路径
+user_dry_time = 0 # 额外干燥时间
+wiper_x = 20 # 擦嘴塔X坐标(mm)
+wiper_y = 20 # 擦嘴塔Y坐标(mm)
+wipetower_speed = 200 # 擦嘴塔打印速度
+xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
+z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+'''
+
+[[machines]]
+name = 'P2S'
+variants = ['standard']
+body = '''
+# uuid: 1bcd83d8-8255-4ab7-a402-2dd2500b05a3
+# release_time: 2026-08-19 01:38:13
+# machine: P2S
+# variant: standard
+#胶笔配置
+
+[toolhead]
+offset = { x = -25.9, y = 14, z = 1.1 } # 笔尖偏移
+speed_limit = 70 # 涂胶速度限制 (mm/s)
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+L803;此处使喷嘴降温
+G92 E0;挤出机归零
+G1 E-10;长回抽
+G92 E0
+L801
+M204 S10000
+G1 X20 Y7 F30000;到驻点
+G1 X1 F300;推到X0，笔尖下落
+G1 X20 Y7 F30000;向左离开
+G1 F30000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+G92 E0
+G1 F30000
+G1 X246 Y0 ;到驻点
+G1 X256 F6000 ; 收笔
+G1 F30000
+L802
+G1 F1500
+G1 E10.7;填充回抽
+G1 F30000
+M106 P1 S[AUTO] ; 风扇
+;M106 P2 S100
+G1 X70 Y265 F30000;Wipe
+G1 E6;Wipe
+G1 X90 F30000;Wipe
+G1 X120 F30000;Wipe
+G1 X90 F30000;Wipe
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+
+[wiping]
+have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
+disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
+disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
+disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
+disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
+fan_speed = 255 # 风扇速度 范围:0~255
+fast_tower_mode = "fast" # 擦料塔模式
+glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
+glue_pass_count = 1 # 涂胶次数 范围:1~10
+glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fr = 0 # 热床前右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_mode = "bed" # 补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)
+glue_z_compensation_patch_bl = 0 # 涂胶面后左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_br = 0 # 涂胶面后右角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
+glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
+glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
+ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
+ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
+ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
+min_support_interface_enabled = true # 最小支撑涂胶面过滤
+nozzle_cooling_flag = false # 涂胶期间是否降温
+outer_structure = "rib" # 外围结构(none/rib)
+prime_enabled = true # 润笔总开关
+prime_every_layer = false # 每层润笔
+prime_min_path_length = 5 # 润笔最小路径长度(mm) 范围:0~100
+prime_per_model = false # 每个模型都润笔
+prime_trigger_layers = 30 # 预涂触发层数 范围:0~999
+rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
+rib_fillet_wall = true # 外墙倒圆角
+rib_width = 8 # 斜肋宽度(mm) 范围:0~300
+small_feature_factor = 1 # 小特征因子 范围:0~2
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+tower_custom_layer_height = "auto" # 塔层高策略
+tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
+tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_rib_speed = "follow" # 斜肋打印速度模式
+tower_rib_speed_value = 40 # 斜肋自定义打印速度
+tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)
+tower_travel_speed = 200 # 塔刮擦速度(50~500mm/s)
+tower_wipe_mode = "auto" # 擦嘴策略
+use_ironing_path = true # 使用熨烫路径作为涂胶路径
+user_dry_time = 0 # 额外干燥时间
+wiper_x = 20 # 擦嘴塔X坐标(mm)
+wiper_y = 20 # 擦嘴塔Y坐标(mm)
+wipetower_speed = 200 # 擦嘴塔打印速度
+xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
+z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+'''
+
+[[machines]]
+name = 'X1C'
+variants = ['lite']
+body = '''
+# uuid: 4ee90c8e-8ab3-40f8-a240-7e6bb5c96984
+# release_time: 2026-08-19 01:38:13
+# machine: X1C
+# variant: lite
+#胶笔配置
+
+[toolhead]
+offset = { x = -25.9, y = 14, z = 1.1 } # 笔尖偏移
+speed_limit = 70 # 涂胶速度限制 (mm/s)
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+L803;此处使喷嘴降温
+G92 E0;挤出机归零
+G1 E-10;长回抽
+G92 E0
+L801
+M204 S10000
+G1 X20 Y7 F30000;到驻点
+G1 X1 F300;推到X0，笔尖下落
+G1 X20 Y7 F30000;向左离开
+G1 F30000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+G92 E0
+G1 F30000
+G1 X246 Y0 ;到驻点
+G1 X256 F6000 ; 收笔
+G1 F30000
+L802
+G1 F1500
+G1 E10.7;填充回抽
+G1 F30000
+M106 P1 S[AUTO] ; 风扇
+;M106 P2 S100
+G1 X70 Y265 F30000;Wipe
+G1 E6;Wipe
+G1 X90 F30000;Wipe
+G1 X120 F30000;Wipe
+G1 X90 F30000;Wipe
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+
+[wiping]
+have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
+disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
+disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
+disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
+disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
+fan_speed = 255 # 风扇速度 范围:0~255
+fast_tower_mode = "fast" # 擦料塔模式
+glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
+glue_pass_count = 1 # 涂胶次数 范围:1~10
+glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
+glue_z_compensation_bed_fr = 0 # 热床前右角Z补偿 范围:-0.2~0.2
+glue_z_compensation_mode = "bed" # 补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)
+glue_z_compensation_patch_bl = 0 # 涂胶面后左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_br = 0 # 涂胶面后右角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
+glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
+glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
+glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
+ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
+ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
+ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
+min_support_interface_enabled = true # 最小支撑涂胶面过滤
+nozzle_cooling_flag = false # 涂胶期间是否降温
+outer_structure = "rib" # 外围结构(none/rib)
+prime_enabled = true # 润笔总开关
+prime_every_layer = false # 每层润笔
+prime_min_path_length = 5 # 润笔最小路径长度(mm) 范围:0~100
+prime_per_model = false # 每个模型都润笔
+prime_trigger_layers = 30 # 预涂触发层数 范围:0~999
+rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
+rib_fillet_wall = true # 外墙倒圆角
+rib_width = 8 # 斜肋宽度(mm) 范围:0~300
+small_feature_factor = 1 # 小特征因子 范围:0~2
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+tower_custom_layer_height = "auto" # 塔层高策略
+tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
+tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_rib_speed = "follow" # 斜肋打印速度模式
+tower_rib_speed_value = 40 # 斜肋自定义打印速度
+tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)
+tower_travel_speed = 200 # 塔刮擦速度(50~500mm/s)
+tower_wipe_mode = "auto" # 擦嘴策略
+use_ironing_path = true # 使用熨烫路径作为涂胶路径
+user_dry_time = 0 # 额外干燥时间
+wiper_x = 20 # 擦嘴塔X坐标(mm)
+wiper_y = 20 # 擦嘴塔Y坐标(mm)
+wipetower_speed = 200 # 擦嘴塔打印速度
+xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
+z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+'''
+
+[overrides."A1:fast"]
+"uuid" = '4effcd9d-44c7-45e3-aedb-a9b1f6d06695'
+"toolhead.offset.x" = -0.7
+"toolhead.offset.y" = 26.3
+
+[overrides."A1:fastv3.3"]
+"uuid" = '748dfd7f-c487-43a5-b8c7-920ebc019ad0'
+"toolhead.custom_unmount_gcode" = '''
+M106 S[AUTO]
+G1 X256 F42000
+G1 X261 F10000
+G1 X273 F10000
+G1 X256 F5000
+G1 F42000
+L802
+G92 E0
+G1 E5.5 F1000
+G92 E0
+G1 F30000
+'''
+"toolhead.offset.x" = 0.1
+"toolhead.offset.y" = 24.4
+
+[overrides."A1:standard"]
+"uuid" = 'f444aeaf-d447-453f-8871-cf7645c2d5df'
+
+[overrides."A1_MINI:fast"]
+"uuid" = 'bebc0cb5-1a70-42a3-8a47-159a50af1bff'
+"toolhead.offset.x" = -0.5
+"toolhead.offset.y" = 24
+
+[overrides."A1_MINI:fastv3.3"]
+"uuid" = 'f3c0a6d7-2cf4-447e-93f8-822f97b35bc6'
+"toolhead.offset.x" = -0.9
+"toolhead.offset.y" = 23
+
+[overrides."A1_MINI:standard"]
+"uuid" = '0fcddc38-55e9-4528-a3a9-898dbe1eb555'
+"toolhead.offset.x" = -0.3
+"toolhead.offset.y" = 18.1
+
+[overrides."P1S:lite"]
+"uuid" = 'a74d8791-9dd7-4867-a48f-df2fc44dd158'
+
+[overrides."P2S:standard"]
+"uuid" = '1bcd83d8-8255-4ab7-a402-2dd2500b05a3'
+
+[overrides."X1C:lite"]
+"uuid" = '4ee90c8e-8ab3-40f8-a240-7e6bb5c96984'

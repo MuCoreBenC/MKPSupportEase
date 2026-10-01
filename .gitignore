@@ -2,6 +2,11 @@
 node_modules
 dist
 dist-ssr
+# 预设交付产物（人维护 presets/*.toml，机器生成 presets/dist/*）—— 不入库
+presets/dist/
+# 建了 workspace（b04 Task 13）之后，cargo 的产物目录在**仓库根**。
+# 老那一行留着：切换之前留下的 src-tauri/target 还在本机磁盘上，删不删由你
+target
 src-tauri/target
 
 # tsc -b 的增量编译缓存。每次 build 都重写，内容含本机绝对路径 ——
@@ -25,7 +30,20 @@ workbench/.draft/
 .DS_Store
 Thumbs.db
 
+# 探针跑出来的截图（scripts/probes/*.mjs 用 --shots / --shot 写这里）。
+# 它们是"这一次走查的现场"，不是设计稿：要看就当场看，入库只会攒一堆过期的图。
+# 试验场那边也是这个目录名与同一条规矩。
+tmp-shots/
+
+# 一次性脚本的临时落点（移植期间的对账、拼装脚本等）。跑完即删，
+# 留在这儿是为了万一被忘掉时不会混进提交。
+tmp-port/
+
 # 编辑器
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# 本机对照用的参考素材（如 mkpse-presets 的一份拷贝）。只读来看、不参与构建，
+# 刻意不入库 —— 它有自己的上游仓库，进来只会变成第二份真源。
+/local-reference/

@@ -1,0 +1,501 @@
+{
+  "_note": "由 tools/bbs-extract.mjs 从 Bambu Studio 源码生成，别手改 —— 改了下次重跑就没了。",
+  "bbs_version": "02.08.02.61",
+  "source": "G:\\BBS",
+  "tabs": [
+    {
+      "name_en": "Quality",
+      "name": "质量",
+      "icon": "empty",
+      "groups": [
+        {
+          "name_en": "Layer height",
+          "name": "层高",
+          "icon": "param_layer_height",
+          "fields": [
+            "layer_height",
+            "initial_layer_print_height",
+            "enable_mixed_color_sublayer"
+          ]
+        },
+        {
+          "name_en": "Line width",
+          "name": "线宽",
+          "icon": "param_line_width",
+          "fields": [
+            "line_width",
+            "initial_layer_line_width",
+            "outer_wall_line_width",
+            "inner_wall_line_width",
+            "top_surface_line_width",
+            "sparse_infill_line_width",
+            "internal_solid_infill_line_width",
+            "support_line_width"
+          ]
+        },
+        {
+          "name_en": "Seam",
+          "name": "接缝",
+          "icon": "param_seam",
+          "fields": [
+            "seam_position",
+            "seam_placement_away_from_overhangs",
+            "seam_gap",
+            "seam_slope_conditional",
+            "scarf_angle_threshold",
+            "seam_slope_entire_loop",
+            "seam_slope_steps",
+            "seam_slope_inner_walls",
+            "override_filament_scarf_seam_setting",
+            "seam_slope_type",
+            "seam_slope_start_height",
+            "seam_slope_gap",
+            "seam_slope_min_length",
+            "wipe_speed",
+            "role_base_wipe_speed"
+          ]
+        },
+        {
+          "name_en": "Precision",
+          "name": "精度",
+          "icon": "param_precision",
+          "fields": [
+            "slice_closing_radius",
+            "resolution",
+            "enable_arc_fitting",
+            "xy_hole_compensation",
+            "xy_contour_compensation",
+            "enable_circle_compensation",
+            "circle_compensation_manual_offset",
+            "elefant_foot_compensation",
+            "precise_outer_wall",
+            "precise_z_height"
+          ]
+        },
+        {
+          "name_en": "Ironing",
+          "name": "熨烫",
+          "icon": "param_ironing",
+          "fields": [
+            "ironing_type",
+            "ironing_pattern",
+            "ironing_speed",
+            "ironing_flow",
+            "ironing_spacing",
+            "ironing_inset",
+            "ironing_direction"
+          ]
+        },
+        {
+          "name_en": "Wall generator",
+          "name": "墙生成器",
+          "icon": "param_wall",
+          "fields": [
+            "wall_generator",
+            "wall_transition_angle",
+            "wall_transition_filter_deviation",
+            "wall_transition_length",
+            "wall_distribution_count",
+            "min_bead_width",
+            "min_feature_size"
+          ]
+        },
+        {
+          "name_en": "Advanced",
+          "name": "高级",
+          "icon": "param_advanced",
+          "fields": [
+            "wall_sequence",
+            "is_infill_first",
+            "bridge_flow",
+            "thick_bridges",
+            "counterbore_hole_bridging",
+            "print_flow_ratio",
+            "top_solid_infill_flow_ratio",
+            "initial_layer_flow_ratio",
+            "top_one_wall_type",
+            "top_area_threshold",
+            "only_one_wall_first_layer",
+            "detect_overhang_wall",
+            "smooth_speed_discontinuity_area",
+            "smooth_coefficient",
+            "reduce_crossing_wall",
+            "max_travel_detour_distance",
+            "avoid_crossing_wall_includes_support",
+            "z_direction_outwall_speed_continuous"
+          ]
+        }
+      ]
+    },
+    {
+      "name_en": "Strength",
+      "name": "强度",
+      "icon": "empty",
+      "groups": [
+        {
+          "name_en": "Walls",
+          "name": "墙",
+          "icon": "param_wall",
+          "fields": [
+            "wall_loops",
+            "alternate_extra_wall",
+            "embedding_wall_into_infill",
+            "detect_thin_wall"
+          ]
+        },
+        {
+          "name_en": "Top/bottom shells",
+          "name": "顶部/底部外壳",
+          "icon": "param_shell",
+          "fields": [
+            "interface_shells",
+            "top_surface_pattern",
+            "top_surface_density",
+            "top_shell_layers",
+            "top_shell_thickness",
+            "top_color_penetration_layers",
+            "bottom_surface_pattern",
+            "bottom_surface_density",
+            "bottom_shell_layers",
+            "bottom_shell_thickness",
+            "bottom_color_penetration_layers",
+            "infill_instead_top_bottom_surfaces",
+            "internal_solid_infill_pattern"
+          ]
+        },
+        {
+          "name_en": "Sparse infill",
+          "name": "稀疏填充",
+          "icon": "param_infill",
+          "fields": [
+            "sparse_infill_density",
+            "fill_multiline",
+            "sparse_infill_pattern",
+            "locked_skin_infill_pattern",
+            "skin_infill_density",
+            "locked_skeleton_infill_pattern",
+            "skeleton_infill_density",
+            "infill_lock_depth",
+            "skin_infill_depth",
+            "skin_infill_line_width",
+            "skeleton_infill_line_width",
+            "symmetric_infill_y_axis",
+            "infill_shift_step",
+            "sparse_infill_lattice_angle_1",
+            "sparse_infill_lattice_angle_2",
+            "infill_rotate_step",
+            "sparse_infill_anchor",
+            "sparse_infill_anchor_max",
+            "filter_out_gap_fill"
+          ]
+        },
+        {
+          "name_en": "Advanced",
+          "name": "高级",
+          "icon": "param_advanced",
+          "fields": [
+            "infill_wall_overlap",
+            "monotonic_travel_into_wall",
+            "infill_direction",
+            "bridge_angle",
+            "minimum_sparse_infill_area",
+            "infill_combination",
+            "detect_narrow_internal_solid_infill",
+            "ensure_vertical_shell_thickness",
+            "detect_floating_vertical_shell"
+          ]
+        }
+      ]
+    },
+    {
+      "name_en": "Speed",
+      "name": "速度",
+      "icon": "empty",
+      "groups": [
+        {
+          "name_en": "Initial layer speed",
+          "name": "首层速度",
+          "icon": "param_speed_first",
+          "fields": [
+            "initial_layer_speed",
+            "initial_layer_infill_speed"
+          ]
+        },
+        {
+          "name_en": "Other layers speed",
+          "name": "其他层速度",
+          "icon": "param_speed",
+          "fields": [
+            "outer_wall_speed",
+            "inner_wall_speed",
+            "small_perimeter_speed",
+            "small_perimeter_threshold",
+            "sparse_infill_speed",
+            "internal_solid_infill_speed",
+            "vertical_shell_speed",
+            "top_surface_speed",
+            "enable_overhang_speed",
+            "enable_height_slowdown",
+            "slowdown_start_height",
+            "slowdown_start_speed",
+            "slowdown_start_acc",
+            "slowdown_end_height",
+            "slowdown_end_speed",
+            "slowdown_end_acc",
+            "bridge_speed",
+            "gap_infill_speed",
+            "support_speed",
+            "support_interface_speed"
+          ]
+        },
+        {
+          "name_en": "Travel speed",
+          "name": "空驶速度",
+          "icon": "param_travel_speed",
+          "fields": [
+            "travel_speed"
+          ]
+        },
+        {
+          "name_en": "Acceleration",
+          "name": "加速度",
+          "icon": "param_acceleration",
+          "fields": [
+            "default_acceleration",
+            "travel_acceleration",
+            "travel_short_distance_acceleration",
+            "initial_layer_travel_acceleration",
+            "initial_layer_acceleration",
+            "outer_wall_acceleration",
+            "inner_wall_acceleration",
+            "top_surface_acceleration",
+            "sparse_infill_acceleration",
+            "accel_to_decel_enable",
+            "accel_to_decel_factor"
+          ]
+        },
+        {
+          "name_en": "Jerk(XY)",
+          "name": "抖动（XY轴）",
+          "icon": "param_acceleration",
+          "fields": [
+            "default_jerk",
+            "outer_wall_jerk",
+            "inner_wall_jerk",
+            "infill_jerk",
+            "top_surface_jerk",
+            "initial_layer_jerk",
+            "travel_jerk",
+            "max_volumetric_extrusion_rate_slope_positive",
+            "max_volumetric_extrusion_rate_slope_negative"
+          ]
+        }
+      ]
+    },
+    {
+      "name_en": "Support",
+      "name": "支撑",
+      "icon": "support",
+      "groups": [
+        {
+          "name_en": "Support",
+          "name": "支撑",
+          "icon": "param_support",
+          "fields": [
+            "enable_support",
+            "support_type",
+            "support_style",
+            "support_threshold_angle",
+            "support_on_build_plate_only",
+            "support_critical_regions_only",
+            "support_remove_small_overhang"
+          ]
+        },
+        {
+          "name_en": "Raft",
+          "name": "筏层",
+          "icon": "param_raft",
+          "fields": [
+            "raft_layers",
+            "raft_contact_distance"
+          ]
+        },
+        {
+          "name_en": "Support filament",
+          "name": "支撑耗材",
+          "icon": "param_support_filament",
+          "fields": [
+            "support_filament",
+            "support_interface_filament",
+            "support_interface_not_for_body"
+          ]
+        },
+        {
+          "name_en": "Support ironing",
+          "name": "支撑熨烫",
+          "icon": "param_ironing",
+          "fields": [
+            "enable_support_ironing",
+            "support_ironing_pattern",
+            "support_ironing_speed",
+            "support_ironing_flow",
+            "support_ironing_spacing",
+            "support_ironing_inset",
+            "support_ironing_direction"
+          ]
+        },
+        {
+          "name_en": "Advanced",
+          "name": "高级",
+          "icon": "param_advanced",
+          "fields": [
+            "raft_first_layer_density",
+            "raft_first_layer_expansion",
+            "tree_support_wall_count",
+            "support_top_z_distance",
+            "support_bottom_z_distance",
+            "support_base_pattern",
+            "support_base_pattern_spacing",
+            "support_angle",
+            "support_interface_top_layers",
+            "support_interface_bottom_layers",
+            "support_interface_pattern",
+            "support_interface_spacing",
+            "support_bottom_interface_spacing",
+            "support_expansion",
+            "support_object_xy_distance",
+            "top_z_overrides_xy_distance",
+            "support_object_first_layer_gap",
+            "bridge_no_support",
+            "max_bridge_length",
+            "independent_support_layer_height"
+          ]
+        },
+        {
+          "name_en": "Tree Support",
+          "name": "树状支撑",
+          "icon": "param_advanced",
+          "fields": [
+            "tree_support_branch_distance",
+            "tree_support_branch_diameter",
+            "tree_support_branch_angle",
+            "tree_support_branch_diameter_angle"
+          ]
+        }
+      ]
+    },
+    {
+      "name_en": "Others",
+      "name": "其他",
+      "icon": "advanced",
+      "groups": [
+        {
+          "name_en": "Bed adhension",
+          "name": "热床粘接",
+          "icon": "param_adhension",
+          "fields": [
+            "skirt_loops",
+            "skirt_height",
+            "skirt_distance",
+            "brim_type",
+            "brim_width",
+            "brim_object_gap"
+          ]
+        },
+        {
+          "name_en": "Prime tower",
+          "name": "擦料塔",
+          "icon": "param_tower",
+          "fields": [
+            "enable_prime_tower",
+            "prime_tower_skip_points",
+            "prime_tower_enable_framework",
+            "prime_tower_width",
+            "prime_tower_max_speed",
+            "prime_tower_brim_width",
+            "prime_tower_infill_gap",
+            "prime_tower_rib_wall",
+            "prime_tower_extra_rib_length",
+            "prime_tower_rib_width",
+            "prime_tower_fillet_wall",
+            "enable_tower_interface_features",
+            "wipe_tower_no_sparse_layers"
+          ]
+        },
+        {
+          "name_en": "Flush options",
+          "name": "换料冲刷选项",
+          "icon": "param_flush",
+          "fields": [
+            "flush_into_infill",
+            "flush_into_objects",
+            "flush_into_support"
+          ]
+        },
+        {
+          "name_en": "Special mode",
+          "name": "特殊模式",
+          "icon": "param_special",
+          "fields": [
+            "slicing_mode",
+            "print_sequence",
+            "spiral_mode",
+            "spiral_mode_smooth",
+            "spiral_mode_max_xy_smoothing",
+            "timelapse_type",
+            "fuzzy_skin",
+            "fuzzy_skin_mode",
+            "fuzzy_skin_noise_type",
+            "fuzzy_skin_point_distance",
+            "fuzzy_skin_thickness",
+            "fuzzy_skin_scale",
+            "fuzzy_skin_octaves",
+            "fuzzy_skin_persistence",
+            "fuzzy_skin_first_layer"
+          ]
+        },
+        {
+          "name_en": "Advanced",
+          "name": "高级",
+          "icon": "advanced",
+          "fields": [
+            "enable_wrapping_detection",
+            "enable_order_independent_overlap_carving",
+            "interlocking_beam",
+            "mmu_segmented_region_interlocking_depth",
+            "interlocking_beam_width",
+            "interlocking_orientation",
+            "interlocking_beam_layer_count",
+            "interlocking_depth",
+            "interlocking_boundary_avoidance",
+            "sparse_infill_filament",
+            "solid_infill_filament",
+            "wall_filament"
+          ]
+        },
+        {
+          "name_en": "G-code output",
+          "name": "G-code 输出",
+          "icon": "param_gcode",
+          "fields": [
+            "reduce_infill_retraction_mode",
+            "gcode_add_line_number",
+            "exclude_object"
+          ]
+        },
+        {
+          "name_en": "Post-processing scripts",
+          "name": "后处理脚本",
+          "icon": "param_gcode",
+          "fields": []
+        },
+        {
+          "name_en": "Notes",
+          "name": "注释",
+          "icon": "note",
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

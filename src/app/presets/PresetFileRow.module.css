@@ -1,0 +1,147 @@
+/*
+ * 一行预设文件。宽松尺度：行高 40+ px，字号跟 --fs-body / --fs-label 走。
+ * 三层缩进里它是最里面那一层，左边留出 26px 给版本层的展开标记让位。
+ */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px 8px 26px;
+  border-radius: var(--r-sm);
+}
+
+.row:hover {
+  background: var(--surface-sunken);
+}
+
+/* 正在生效的那一份：左边一道绿竖线。不铺整行底色 —— 那会和 hover 打架 */
+.row[data-applied='true'] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 类型角标：MKP / BBS。等宽，两种类型对得齐 */
+.kind {
+  flex-shrink: 0;
+  width: 42px;
+  padding: 2px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: var(--text-2);
+  text-align: center;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.name {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 路径用等宽小字：它是给人核对磁盘位置的，不是标题 */
+.path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size {
+  flex-shrink: 0;
+  width: 84px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.act {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.applied {
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  white-space: nowrap;
+}
+
+/* 动作一律用文字，不用图标 */
+.download {
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.download:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.download:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 聚焦不另画圈：hover 已经把边框变绿了 */
+.download:focus-visible {
+  outline: none;
+}
+
+.note {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* 「尚未实现」是就地的一句话，不是弹窗、也不是整页白屏 */
+.noteBad {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fff3e2;
+  font-size: var(--fs-label);
+  color: #a86416;
+  white-space: nowrap;
+}
+
+/* compact：大小那一栏收窄 */
+[data-density='compact'] .size {
+  width: 66px;
+}
+
+/*
+ * mini：大小那一栏让位（它是「未知」，信息量最低），路径留着 ——
+ * **可用的操作一个都不许藏**，所以下载按钮与「已应用」在任何档下都在。
+ */
+[data-density='mini'] .row {
+  padding-left: 16px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+[data-density='mini'] .size {
+  display: none;
+}
