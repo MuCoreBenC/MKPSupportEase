@@ -63,7 +63,7 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前配置（唯一底账 STORAGE.clientActive）  状态 已应用 / 未应用
+ * MKP     生效 = 设为当前配置（唯一底账 run/active-preset.json）  状态 已应用 / 未应用
  * 切片器   生效 = 复制到切片器目录（copyToSlicer）       状态 已复制 / 未复制
  * ```
  *
@@ -72,6 +72,7 @@
  */
 
 import type {
+  ActivePreset,
   FileKind,
   FileRef,
   FilesState,
@@ -82,7 +83,6 @@ import type {
   PresetFileInfo,
   VersionFiles,
 } from '../../api'
-import type { ActiveEntry } from '../store/package'
 
 /**
  * 用户自己放进预设目录的文件（`LocalUserFile`）。
@@ -183,7 +183,7 @@ export const LIVE_TEXT: Record<PresetKindAxis, { on: string; off: string }> = {
 
 export const LIVE_WHY: Record<PresetKindAxis, { on: string; off: string }> = {
   mkp: {
-    on: '已应用：本机底账（STORAGE.clientActive）说正在使用的就是它。**全局唯一** —— 换机型也不会变出第二个',
+    on: '已应用：唯一底账（使用中指针，run/active-preset.json）说正在使用的就是它。**全局唯一** —— 换机型也不会变出第二个',
     off: '未应用：文件在本机，但当前生效的是别的那一套。点「应用」把它设成当前的',
   },
   slicer: {
@@ -224,11 +224,11 @@ export const DOWNLOAD_WHY =
   '下载要写盘，契约里 downloadFiles 在假后端上直接抛 NotImplementedError —— 这里不假装下载成功'
 
 /**
- * 发布行的「下载」：这一条**是真的能下的**（`fetchPreset` 落到本机预设目录）——
+ * 发布行的「下载」：这一条**是真的能下的**（`downloadCatalogFile` 落进下载区 `mkp/`）——
  * 原来所有云端行共用官方那条「不假装下载成功」的说明，文案与行为不符，按行分流。
  */
 export const RELEASE_DOWNLOAD_WHY =
-  '从工作台发布里下载这一份到本机预设目录 —— 下载 ≠ 使用，生效要到本地表里点「应用」'
+  '从目录登记的交付清单里下载这一份到下载区 mkp/ —— 下载 ≠ 使用，生效要到本地表里点「应用」'
 
 /**
  * 发布行「时间 / 大小」两格的 title：这两样都是**真值**（发布时刻 / 下载时刻 /
@@ -242,7 +242,7 @@ export const RELEASE_TIME_WHY = {
 export const RELEASE_SIZE_WHY = '按这一份 TOML 的字节数算的'
 
 /**
- * 来源：这个文件是官方的、用户自己的，还是**工作台发布下来的**。
+ * 来源：这个文件是官方的、用户自己的，还是**目录登记的交付预设**。
  *
  * 权限也挂在这一列上：官方副本不能改名（复制一份再改），用户自己的文件删了没有任何地方能找回来。
  */
@@ -251,17 +251,17 @@ export type PresetOrigin = 'official' | 'mine' | 'release'
 export const ORIGIN_TEXT: Record<PresetOrigin, string> = {
   official: '官方',
   mine: '我的',
-  release: '工作台发布',
+  release: '官方交付',
 }
 
 export const ORIGIN_WHY: Record<PresetOrigin, string> = {
   official: '官方：仓库里那份文件下载到本机的副本。不能改名（复制一份再改），删了可以从云端重新下载',
   mine: '我的：你自己放进预设目录的文件，云端没有它。可以改名，但删了没有任何地方能找回来',
-  release: '工作台发布：工作台「生成与发布」发上来的 preset.toml。云端表只管下载，生效用本地那颗「应用」',
+  release: '官方交付：目录（catalog）里登记的交付预设，发布方写、客户端从下载区拿。云端表只管下载，生效用本地那颗「应用」',
 }
 
 /**
- * 来源列的一格：release 行要带上**包版本**（「工作台发布 · 1.0.0」），
+ * 来源列的一格：release 行要带上**来源 chip**（「官方交付」；新世界目录没有版本号概念，chip 不缀版本），
  * 官方 / 我的照常走那两张静态表 —— 查表给不了动态的那截，所以收成一个小函数。
  */
 export function originChip(row: {
@@ -354,7 +354,7 @@ export const STATUS_TEXT: Record<PresetStatus, string> = {
 
 export const STATUS_WHY: Record<PresetStatus, string> = {
   applied:
-    '已应用：本机有这个文件，而且本机底账（STORAGE.clientActive）说正在使用的就是它。全局唯一 —— 换机型也不会变出第二个',
+    '已应用：本机有这个文件，而且唯一底账（使用中指针）说正在使用的就是它。全局唯一 —— 换机型也不会变出第二个',
   ready: '本地有：getLocalFiles() 说本机已经有这个文件了（假后端给的是固定演示集合），还没应用',
   missing: '待下载：本机还没有这个文件',
   unavailable: '暂不支持该机型或版本：后端没有配这个机型的资源 —— 不是你这台机器的问题',
@@ -625,20 +625,24 @@ export function machinesInScope(tree: PresetTree, machineId: string): PresetMach
  * 一行文件现在是四档里的哪一档。
  *
  * `localIds` 是 `api.getLocalFiles()` 的结果（假后端给的是固定演示集合）。
- * `active` 是**唯一底账**（`STORAGE.clientActive`）读出来的那一条：**全表最多一份**，
- * 换机型也不会变出第二个。判据**只认它** —— 假后端的 `getAppliedPreset` 界面不再读。
+ * `active` 是**唯一底账**（新世界 `run/active-preset.json`，读自 `api.getActivePreset()`）：
+ * **全表最多一份**，换机型也不会变出第二个。判据**只认它**。
  *
  * 先判在不在本机，再判是不是正在使用的那一份 —— 「已应用」比「本地有」靠前，
  * 它是「本机有 + 正在用的就是它」。判据只剩这两条。
+ * 官方 MKP 行在树上没有 asset id（MKP 不进资产库，见 doc §12.5），它的「正在使用」
+ * 按文件名对 —— 目录里登记的交付文件与使用中指针说的是同一份文件名。
  */
 export function statusOf(
-  file: { id?: string },
+  file: { id?: string; kind: FileKind; fileName: string },
   localIds: Set<string>,
-  active: ActiveEntry | null,
+  active: ActivePreset | null,
 ): PresetStatus {
   const id = file.id
   if (id === undefined || !localIds.has(id)) return 'missing'
-  if (active !== null && active.kind === 'official' && id === active.ref) return 'applied'
+  if (active !== null && file.kind === 'mkp_preset' && file.fileName === active.fileName) {
+    return 'applied'
+  }
   return 'ready'
 }
 
@@ -706,7 +710,7 @@ export interface PresetRowBase {
   /**
    * 预设仓库里的 asset id。用户自己的文件与仓库里查不到的文件**没有**这个字段。
    *
-   * 「已应用」的判据就是拿它和唯一底账（`STORAGE.clientActive`）里那一条的 ref 比 ——
+   * 官方行不再是「应用」的对象（使用中指针只认 MKP 交付文件）—— 字段留给右键菜单与筛选用，
    * 所以它必须在行上（release 行走 uid，见 `releaseUid`）。
    */
   assetId?: string
@@ -752,13 +756,12 @@ export interface PresetRowBase {
   modifiedText?: string
   /** 上面那两格是哪来的。`undefined` = 这个来源没有这两格（自己的文件、release 行走别的口径） */
   statFrom?: 'file' | 'demo'
-  /** 唯一底账（`STORAGE.clientActive`）说正在使用的就是这一份。**全页最多一行** */
+  /** 唯一底账（使用中指针）说正在使用的就是这一份。**全页最多一行** */
   applied: boolean
   pinned: boolean
   /**
-   * 工作台发布的那一份预设。uid 形如 `A1/STANDARD` —— 「下载」与「应用」
-   * 都落在 `package` 的那两格（`STORAGE.clientPresets` / `STORAGE.clientActive`），
-   * 契约的 `applyPreset` 只认仓库 asset id，release 行没有它，所以动作认这一个。
+   * 目录登记的交付预设。uid 形如 `A1/STANDARD`（行键沿用）；「下载」与「应用」
+   * 两个动作认 **fileName**（目录登记的文件名 = 使用中指针的口径），
    */
   releaseUid?: string
   /** 它属于哪一次发布（包版本）。来源列那枚 chip 的动态那一截读它 */
@@ -769,7 +772,7 @@ export interface PresetRowBase {
 export interface PresetLocalRow extends PresetRowBase {
   scope: 'local'
   origin: PresetOrigin
-  /** 官方副本才有交付身份。用户自己的文件与工作台发布的云端没有它，所以**没有**这个字段 */
+  /** 官方副本才有交付身份。用户自己的文件与目录交付预设没有它，所以**没有**这个字段 */
   delivery?: PresetFileInfo['delivery']
   /**
    * 用到这个文件的版本 **id**（与 `versions` 显示名并排）。
@@ -788,7 +791,7 @@ export interface PresetLocalRow extends PresetRowBase {
   /**
    * 这一行**生效了没有**。两种类型判据不同（见 `LIVE_TEXT`）：
    *
-   *   MKP     是唯一底账（`STORAGE.clientActive`）里那一条 → 已应用 / 未应用
+   *   MKP     是唯一底账（使用中指针）里那一条 → 已应用 / 未应用
    *   切片器   `getSlicerCopied().includes(assetId)`   → 已复制 / 未复制
    *
    * 原来这里是四档 `status`，但本地表实际只有「生效 / 没生效」两档，而那四档里的
@@ -800,12 +803,12 @@ export interface PresetLocalRow extends PresetRowBase {
 export interface PresetCloudRow extends PresetRowBase {
   scope: 'cloud'
   /**
-   * 云端表上的东西：官方仓库的文件，或者**工作台发布的那一次 Release** 里的预设。
+   * 云端表上的东西：官方仓库的文件（切片器档），或者**目录登记的交付预设**（MKP 档）。
    * 用户自己的文件云端根本没有。
    */
   origin: 'official' | 'release'
   delivery: PresetFileInfo['delivery']
-  /** 在不在本机。官方文件看 `getLocalFiles()`，release 行看 `STORAGE.clientPresets` —— 两套底账，行上不说谎 */
+  /** 在不在本机。官方文件看 `getLocalFiles()`，release 行看下载区（`mkp/`，盘就是底账）—— 两套底账，行上不说谎 */
   downloaded: boolean
 }
 
@@ -841,37 +844,39 @@ export interface PresetRowsInput {
    * 和 `localIds` 是两件事 —— 在本机不等于切片器看得见它。切片器行的「生效」只看这一个。
    */
   slicerCopiedIds: Set<string>
-  /** 唯一底账（`STORAGE.clientActive`）里那一条。**全表最多一份**，null = 一套都还没应用 */
-  active: ActiveEntry | null
+  /** 唯一底账（新世界 `run/active-preset.json`）里那一条。**全表最多一份**，null = 一套都还没应用 */
+  active: ActivePreset | null
   kind: PresetKindAxis
   query: string
   pinned: Set<string>
   /**
-   * 工作台发布 —— 云端**最新一次** Release 摊开的预设文件。
-   * `usePresetData` 从 `store/package` 的 `listCloud()` 取；空数组 = 云端还没有工作台的发布。
+   * **目录（catalog）里登记的交付预设**（`kind = mkp_preset` 的文件条目）——
+   * 旧世界"云端最新一次 Release"的新世界对应物：发布方写进目录，消费方从这里看全量。
+   * `usePresetData` 从 `api.getRuntimeCatalog()` 取；空数组 = 目录里没有登记交付文件。
    */
   releasePresets: ReleasePresetSource[]
-  /** 本机 preset 目录里已有的那些（`STORAGE.clientPresets` 的值）。本地表的 release 行就是它们 */
+  /** 下载区（`mkp/`）里已有的那些。本地表的 release 行就是它们 */
   localReleases: ReleasePresetSource[]
-  /** 云端最新一次发布的包版本（来源列那枚 chip 用） */
+  /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
 }
 
 /**
- * 一份工作台发布的预设，摊平成行要用的形状。
- * 数据来自 `store/package`（云端 `listCloud()` / 本机 `presets()`），那层不改。
+ * 目录里登记的一份交付预设，摊平成行要用的形状。
+ *
+ * 数据来自新世界两端共用契约（`api.getRuntimeCatalog()` 的 `files` 域）——
+ * 大小是**发布时对产物真字节算的真值**（catalog 登记的），时间刻意没有
+ * （catalog 没有 `generatedAt`，没有可信时间源不编一个）。
  */
 export interface ReleasePresetSource {
-  /** `A1/STANDARD` 这种。下载 / 应用两个动作都认它 */
+  /** `A1/STANDARD` 这种。行键沿用；下载 / 应用两个动作认 `fileName` */
   uid: string
   machineId: string
   versionId: string
   fileName: string
-  /** TOML 正文。大小列按它的字节数算，不编 */
-  content: string
-  /** 时间列：云端是发布时刻，本地是获取时刻 */
-  at: string | null
-  /** 它属于哪一次发布（包版本） */
+  /** 目录登记的字节数（真值） */
+  size: number
+  /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
   releaseVersion: string | null
 }
 
@@ -973,9 +978,8 @@ function versionNameLookup(
 }
 
 /** TOML 正文的字节数 → 人话。与假后端 sizeText 的口径一致（KB 一位小数） */
-function tomlSizeText(content: string): string {
-  const bytes = new TextEncoder().encode(content).length
-  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`
+function sizeTextOf(size: number): string {
+  return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
 }
 
 /**
@@ -990,7 +994,7 @@ function tomlSizeText(content: string): string {
  * 我的那一半按用户自己标的适用机型筛，**没标的在任何机型下都列**（见 `untagged`）。
  *
  * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
- * （`STORAGE.clientActive`）里那一条，切片器看已复制到切片器目录的那个集合。
+ * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
  */
 export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
   const {
@@ -1077,27 +1081,26 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     }))
 
   /*
-   * 工作台发布的那些：下载之后它们就躺在本机 preset 目录（`STORAGE.clientPresets`），
-   * 本地表说的就是「本机磁盘上真有的文件」—— 所以这一半**只收下载过的**。
-   * 「生效」认唯一底账 `STORAGE.clientActive` 里那一条（与官方行合流，不再分两套）。
+   * 目录里登记的交付预设：下载之后它们就躺在下载区（`mkp/`，盘就是底账），
+   * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**只收已下载的**。
+   * 「生效」认唯一底账（新世界 `run/active-preset.json`）里那一条（与官方行合流，不分两套）。
    */
   const release = localReleases
     .filter(() => matchesKind(kind, 'mkp_preset'))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetLocalRow => {
-      const live = active !== null && active.kind === 'release' && active.ref === p.uid
+      const live = active !== null && active.fileName === p.fileName
       return {
         rowKey: `release:${machineId}:${p.uid}`,
-        /* 仓库里没有它，没有 assetId —— 「应用」认 releaseUid（页面里分流） */
+        /* 仓库里没有它，没有 assetId —— 「应用」认 fileName（页面里分流） */
         pinKey: `release:${p.uid}`,
         fileName: p.fileName,
-        path: `本机预设目录 · ${p.uid}`,
+        path: `下载区 mkp · ${p.uid}`,
         kind: 'mkp_preset',
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
-        sizeText: tomlSizeText(p.content),
-        modifiedText: p.at ?? undefined,
+        sizeText: sizeTextOf(p.size),
         applied: live,
         pinned: pinned.has(`release:${p.uid}`),
         scope: 'local',
@@ -1172,8 +1175,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         sizeText: f.sizeText,
         modifiedText: f.modifiedText,
         statFrom: f.statFrom,
-        applied:
-          active !== null && active.kind === 'official' && f.id !== undefined && f.id === active.ref,
+        /* 官方行没有「正在使用」这一说 —— 使用中指针只认 MKP 交付文件，剩下的官方行全是切片器档 */
+        applied: false,
         pinned: pinned.has(pinKey),
         scope: 'cloud',
         origin: 'official',
@@ -1183,26 +1186,26 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     })
 
   /*
-   * 工作台发布的那一份 Release —— 云端表上最新的几行。
-   * 与官方文件同列一个「来源」chip 区分；「已下载」看 `STORAGE.clientPresets`，
-   * 「正在生效」看唯一底账 `STORAGE.clientActive`。release 里全是 MKP 的 toml，切片器档自然一行都不出。
+   * 目录里登记的交付预设 —— 云端表上 MKP 的那几行。
+   * 与官方文件同列一个「来源」chip 区分；「已下载」看下载区（`mkp/`，盘就是底账），
+   * 「正在生效」看唯一底账（`run/active-preset.json`）。目录登记的全是 MKP 的 toml，
+   * 切片器档自然一行都不出。
    */
   const release = releasePresets
     .filter(() => matchesKind(kind, 'mkp_preset'))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetCloudRow => {
-      const live = active !== null && active.kind === 'release' && active.ref === p.uid
+      const live = active !== null && active.fileName === p.fileName
       return {
         rowKey: `release-cloud:${p.uid}`,
         pinKey: `release:${p.uid}`,
         fileName: p.fileName,
-        path: `工作台发布 / ${p.machineId} / ${p.versionId}`,
+        path: `官方交付 / ${p.machineId} / ${p.versionId}`,
         kind: 'mkp_preset',
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
-        sizeText: tomlSizeText(p.content),
-        modifiedText: p.at ?? undefined,
+        sizeText: sizeTextOf(p.size),
         applied: live,
         pinned: pinned.has(`release:${p.uid}`),
         scope: 'cloud',

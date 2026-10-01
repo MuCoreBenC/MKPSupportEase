@@ -37,7 +37,7 @@
  *
  * # 两种类型的「生效」是两件不同的事
  *
- *   MKP     状态 已应用 / 未应用   操作 [应用] → 唯一底账 `STORAGE.clientActive`
+ *   MKP     状态 已应用 / 未应用   操作 [应用] → 唯一底账（run/active-preset.json）
  *   切片器   状态 已复制 / 未复制   操作 [复制] → `api.copyToSlicer()`
  *   云端     状态 已下载 / 未下载   操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
  *

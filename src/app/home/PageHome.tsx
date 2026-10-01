@@ -109,7 +109,7 @@ export default function PageHome({ density }: PageHomeProps) {
   const catalog = useCatalog()
 
   /*
-   * 首页联动（预设页 → 首页）：目录就绪后对准「正在使用的那一条」（唯一底账 STORAGE.clientActive）——
+   * 首页联动（预设页 → 首页）：目录就绪后对准「正在使用的那一条」（唯一底账 run/active-preset.json）——
    * 预设页应用了哪一份，这里三级选择就反填成哪一台。active 的 machineId / versionId
    * 与选择器是**同一套 id**（不再有映射表），只跑一次：tab 切换会重挂，之后的手选不受影响。
    */
@@ -117,8 +117,10 @@ export default function PageHome({ density }: PageHomeProps) {
   useEffect(() => {
     if (restored.current || catalog.machines.length === 0) return
     restored.current = true
-    const next = selectionFromActive(catalog.machines)
-    if (next !== null) setSel(next)
+    /* 底账走 IPC（run/active-preset.json），异步读；读不到当"没有"，不反填 */
+    void selectionFromActive(catalog.machines).then((next) => {
+      if (next !== null) setSel(next)
+    })
   }, [catalog.machines])
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------

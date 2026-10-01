@@ -20,6 +20,10 @@
 > `client/` 目录删除、catalog 加厚出完整 definition、九条读命令换源。
 > §1 八环节里的"安装包资源管理"随之有了正面向：catalog 的 `assets` 域已登记
 > 19 条资产定义（载荷登记与下载仍欠，见 #3）。
+>
+> 2026-10-01 增补：**前端最大欠账 C4 收口**（见 §3.2 勾账）——localStorage 三格底账
+> （说明书 / 本机预设 / 使用中）退役，消费方（预设页 / 参数页 / 首页 / 校准页 / 同步页）
+> 全部切到新世界对应物。WebView 的 localStorage 从此只住纯前端偏好。
 
 两个改变判断的发现：
 
@@ -91,8 +95,8 @@
 | C1 | `api/contract.ts`（14 方法） | 前后端唯一约定 | 契约 | **保留**。`downloadFiles` 是物流"下载"环节的入口占位——它已经画在契约里，实现别另起炉灶 |
 | C2 | `api/index.ts` `bridge.ts` `mock.ts` `errors.ts` | 运行时探测走真桥或 mock | 契约 | **保留** |
 | C3 | `api/mockServer/*`（10 件） | 浏览器调试用的假后端（machines/params/bbs/files/resources） | ① 开发工具 | **保留**；真实下载落地后，其"云端 / 文件"两块对应退役 |
-| C4 | `api/storageKeys.ts` + 五格 localStorage（`cloud` / `a40.package` / `a40.presets` / `a40.active` / `pinned`） | **用户运行时数据住 WebView localStorage** | **违反铁律 4**（新发现，见 §0） | **收口**（最大一笔）：`package / presets / active` 三格迁 Internal 根（与 catalog、`mkp/` 汇合，走 `atomic_write`）；`cloud` 格是演示管道随 C7 退役；`pinned` 是纯前端偏好可留。键名集中处保留——改名只动这一处的设计是对的 |
-| C5 | `app/store/package.ts` | 客户端同步层：说明书自动同步 / 本机预设 / 使用中，三件互不混同 | ③ 的前端视图 | **保留职责模型**（三态分离与产品规则同构）；存储随 C4 迁移 |
+| C4 | `api/storageKeys.ts` + 五格 localStorage（`cloud` / `a40.package` / `a40.presets` / `a40.active` / `pinned`） | **用户运行时数据住 WebView localStorage** | **违反铁律 4**（新发现，见 §0） | **已收口 2026-10-01**：`package / presets / active` 三格删除，消费方切到新世界对应物（catalog / `mkp/` / `run/active-preset.json`，全部走 Rust 侧 `atomic_write`）——不是把 localStorage 搬个地方，是切到本来就位的数据。`cloud` 格是演示管道随 C7 退役；`pinned` 等纯前端偏好保留。**判据就是编译期**：三键从 `STORAGE` 删除后，任何再引用直接编译失败 |
+| C5 | `app/store/package.ts` | 客户端同步层：说明书自动同步 / 本机预设 / 使用中，三件互不混同 | ③ 的前端视图 | **已收口 2026-10-01（随 C4）**：三格底账整体退役，"三件互不混同"的职责模型由新世界对应物接手（catalog / `mkp/` / `run/` 使用中指针）；文件只剩时间格的格式化工具 |
 | C6 | `app/home/useCatalog.ts` | 首页消费真目录，不硬编码 | 首屏读本地 | **保留** |
 | C7 | `workbench/cloud.ts` | 模拟云端：静态快照 + localStorage 上传 | ① 演示管道 | **收口→退役**：真下载落地后整块删；`public/cloud/presets.json`（F7）随它走。`clientPackage.ts` 头注释自己写着"归宿是 Rust"——装配逻辑迁 R8 发布链路 |
 | C8 | `app/bbs/*` + `tools/dev-server/bbsFs.mjs` | BBS 页读**本机 Bambu Studio 目录**（serve 期端点，build 产物里不存在） | ① 开发/预览能力 | **保留**。注意两点已自洽：无鉴权端点的安全边界写在文件头；产品包里没有这个端点，页面是空态不是报错 |
@@ -171,5 +175,22 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   3. **旧世界退役**：`client/` 目录（defaults 13 份 include_str! + seed 铺盘）
      删除，启动铺盘只剩 catalog 一份（release 管道）。**总纲欠账 #1 收口**。
      判据 4（首屏唯一数据源 = catalog）在 Rust 侧由类型 + 判据钉死。
+
+- 2026-10-01：**C4 收口（第二圈）—— localStorage 三格底账退役**（本盘点最大欠账）。
+  1. **active 格 → `run/active-preset.json`**：预设页「应用」、首页与校准页反填、
+     参数页默认落点全部切 `api.getActivePreset / applyActivePreset`；
+     `ActiveEntry`（kind/ref 形状）退役，统一用契约的 `ActivePreset`（fileName +
+     SHA + intact），「已应用」判据变成文件名相等 —— 全表唯一在底账的形状里成立。
+  2. **presets 格 → `mkp/`**：预设页的"工作台发布"两列换成**目录交付**（catalog 的
+     files 域，大小是登记真值）+ 下载区（`getDownloadedFiles`，盘就是底账）；
+     下载走 `downloadCatalogFile`（新管道），旧世界 `fetchPreset`（TOML 正文塞
+     localStorage）退役。
+  3. **package 格 → catalog**：参数页整页数据源切 catalog 命令（页签/分组树从
+     `getRuntimeCatalog` 的 registry 摊、值走 `getMachineParams`、字段走
+     `getParamMeta`、文件名走 files 域）；同步页旧世界的"自动同步说明书"区退役，
+     catalog 的账就是那一页的账。
+  4. **判据在编译期**：三键从 `STORAGE` 删除，再引用直接 tsc 失败；
+     `ClientDataPackage`/`ReleasePreset` 类型保留（工作台侧还在用），
+     客户端消费面零引用。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

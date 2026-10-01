@@ -593,9 +593,53 @@ export interface RuntimeCatalogMachine {
 }
 
 /**
+ * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
+ * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
+ * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
+ */
+export interface CatalogParamDef {
+  key: string
+  /** 数据域分区（= key 前缀）。**不是界面分组** —— 分组看 layout.sectionId */
+  section: string
+  /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
+  layout: { order: number; sectionId: string }
+  deprecated?: boolean
+  machineFilter?: string[]
+}
+
+/** 页签与分组的元数据（中文名、顺序的唯一权威；`layout_schema` 全文没有 label） */
+export interface CatalogTabMeta {
+  id: string
+  label: string
+  order: number
+  icon?: string
+  sections: { id: string; label: string; order: number; description?: string }[]
+}
+
+/** 参数摆放（`layout_schema`：哪个参数落在哪个 section） */
+export interface CatalogLayoutTab {
+  id: string
+  sections: { id: string; items: { id: string; paramKey: string }[] }[]
+}
+
+/**
+ * catalog 的 definition 注册表部分（字段定义 + 页签元数据 + 参数摆放）。
+ * 参数页的页签/分组树从它摊 —— **首屏唯一数据源 = catalog**（总纲判据 4）。
+ */
+export interface CatalogRegistry {
+  params: CatalogParamDef[]
+  tabs: CatalogTabMeta[]
+  layout: CatalogLayoutTab[]
+}
+
+/**
  * 新数据世界的说明书（`<appDataDir>/catalog.json`，随安装包释放）。
  * 形状与 Rust 侧 `runtime::catalog::Catalog` 一一对应，两边没有编译器，
  * 对齐靠 `docs/DATA-ARCHITECTURE.md` 与判据测试。
+ *
+ * 第二圈加厚后 Rust 侧还序列化 definition（brands / 机型的完整字段 / assets /
+ * bundles / registry）。前端声明随消费面长出来：本轮先长 `registry`
+ * （参数页的页签/分组树从它摊），其余几域消费时再声明。
  */
 export interface RuntimeCatalog {
   catalogSchema: number
@@ -603,6 +647,7 @@ export interface RuntimeCatalog {
   revision: string
   machines: RuntimeCatalogMachine[]
   files: RuntimeCatalogFile[]
+  registry: CatalogRegistry
 }
 
 /**

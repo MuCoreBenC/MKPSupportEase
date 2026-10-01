@@ -4,14 +4,14 @@
  * # 与早先几版的区别只有一处：数据源
  *
  * 值模型、撤销重做、修改历史的语义照旧重建 —— 那套在之前的稿里已经调顺了，
- * 没有要改的理由。换掉的是数据：字段表不再来自手抄的注册表，分组不再是手抄的卡片
- * 切分，可见性条件不再是手抄的等值判断。全部走**下载来的那份数据包**：
+ * 没有要改的理由。换掉的是数据：C4 之前字段表来自 localStorage 那格"说明书"
+ * （`ClientDataPackage`），现在全部走**运行时 catalog**（总纲判据 4 的正面落点）：
  *
- *   字段与当前值        包里的 `fields` + `machines[].versions[].values`（只认包）
- *   分类 / 分组 / 条数   包里摊（`tabsOf`，按 `tabId` 认分类）
- *   键名 / showWhen     包里摊（`metaOf`）
- *   机型与版本          包里摊（`machinesOf`）
- *   这个版本的文件      包里摊（`version.files`，挑 `mkp_preset` 那份）
+ *   字段定义 / 条件      api.getParamMeta()（catalog 的 definition）
+ *   分类 / 分组 / 条数   catalog 的 registry 摊（`tabsOf`）
+ *   值与来源层          api.getMachineParams(m, v)（三层取值，按 combo 拉）
+ *   机型与版本          api.getMachines()
+ *   这个版本的文件      catalog 的 files 域（挑 `mkp_preset` 那份）
  *
  * 手抄表和真注册表的总数都是 67，但最后两类的切分完全不同（手抄：涂胶 31 / 更多 4，
  * 真注册表：涂胶 18 / 更多 17）。总数对得上所以一直没人发现 —— 这里以真注册表为准。
@@ -43,17 +43,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api } from '../../api'
 import type {
-  ClientDataPackage,
-  ClientFieldDef,
+  ActivePreset,
   Machine,
   MachineVersion,
   ParamMeta,
   ParamSection,
   ParamTab,
   RecipeParam,
+  RuntimeCatalog,
 } from '../../api'
-import { activeEntry, downloaded } from '../store/package'
 import type { FieldSchema } from '../../components/field'
 
 /** 一条字段定义。**刻意不带当前值** —— 值走 `valueOf()`，免得行数据里那份过期 */
@@ -126,7 +126,9 @@ interface EditStep {
 interface Catalog {
   machines: Machine[]
   metaByKey: Map<string, ParamMeta>
-  /** 每个组合的 MKP 文件名（`A1:STANDARD` → `A1.toml`）—— 从包里版本的 files 摊出来 */
+  /** 页签与分组（页面级，不分机型；从 catalog 的 definition 摊） */
+  tabs: ParamTab[]
+  /** 每个组合的 MKP 文件名（`A1:STANDARD` → `A1-fastv3.3.toml`）—— 从 catalog 的 files 摊出来 */
   fileByCombo: Map<string, string>
 }
 
@@ -147,125 +149,46 @@ interface ComboData {
 
 const OP_TEXT: Record<'eq' | 'neq' | 'gt', string> = { eq: '等于', neq: '不等于', gt: '大于' }
 
-/* ---------- 包 → 这一页要的形状（客户端不读 api，只认下载的那份包） ---------- */
+/* ---------- catalog → 这一页要的形状（唯一数据源 = catalog，总纲判据 4） ---------- */
 
 /**
- * 字段用哪种控件（本页内部按 `ParamMeta.uiComponent` 认五种）。
+ * catalog 的 definition → 页签与分组（名字、顺序、条数全部来自 catalog，客户端不排一遍）。
  *
- * **优先读包里那一栏原始 `uiComponent`**（合同里补的这一栏）：注册表的原词是什么就是什么，
- * 分段 / 下拉 / G-code 块都不必猜。
- *
- * 兜底那条路留给**早先下载、还在 localStorage 里的旧包**（那一版契约没有这一栏）：
- * 按 `control` 反推 —— `text` 只有 gcode 会落到、`choice` 当年是 segmented / select 合并的。
- * 兜底只为了让旧包还能打开，不是契约允许的用法。
+ * 只留**装参数**的 section：registry 里 27 个 section 有 11 个是设置页的 `component`
+ * 占位（一个参数都没有），按 27 个建分类会多出 12 个永远为空的页签 ——
+ * 与 Rust 侧 `ParamRegistry::param_tabs` 同一条过滤。参数归属按 **layout** 摊
+ * （`layout_schema` 的 items 是权威：哪个参数落在哪个 section），中文名取 `[[tabs]]`。
  */
-function uiOf(f: ClientFieldDef): string {
-  if (typeof f.uiComponent === 'string' && f.uiComponent !== '') return f.uiComponent
-  if (f.control === 'text') return 'gcode'
-  if (f.control === 'choice') return 'segmented'
-  return f.control
-}
-
-/**
- * 从包里给一个字段造一份 meta。
- *
- * **只用包里有的**：`valueType` / `showWhen` / `unit` / 控件。契约里没有的那几栏
- * （tomlKey / jsonKey / configKey / scope / pinned / machineFilter…）是工作台侧的事，
- * 客户端页面一处都不读 —— 这里填成最朴素的值，并在注释里点名，免得以后有人
- * 以为它们是真数据。`sectionId` 用「页签 · 分组」拼出来：包里给的是中文名，
- * 而这一页按 id 分组，两者必须一一对上。
- */
-function metaOf(f: ClientFieldDef, order: number, index: number): ParamMeta {
-  return {
-    key: f.key,
-    tomlKey: f.key,
-    jsonKey: f.key,
-    configKey: '',
-    section: f.tab,
-    sectionId: sectionIdOf(f),
-    order: index + order / 1000,
-    scope: 'universal',
-    valueType: f.valueType,
-    uiComponent: uiOf(f),
-    unit: f.unit,
-    showWhen: f.showWhen,
-  }
-}
-
-/** 分组 id：包里给的是中文分组名，这一页按 id 认组 —— 用「页签 + 分组」拼一个稳定的 */
-function sectionIdOf(f: ClientFieldDef): string {
-  return `${f.tab}/${f.group}`
-}
-
-/** 把包里的字段摊成这一页要的 `RecipeParam`（值来自所选机型+版本那一份） */
-function paramsOf(pkg: ClientDataPackage, machineId: string, versionId: string): RecipeParam[] {
-  const version = pkg.machines.find((m) => m.id === machineId)?.versions.find((v) => v.id === versionId)
-  const values = version?.values ?? {}
-  return pkg.fields.map((f) => ({
-    key: f.key,
-    label: f.label,
-    desc: f.desc ?? '',
-    group: f.group,
-    unit: f.unit,
-    control: f.control,
-    choices: f.choices,
-    min: f.min,
-    max: f.max,
-    step: f.step,
-    value: values[f.key] ?? '',
-    origin: 'base' as const,
-  }))
-}
-
-/**
- * 包 → 页签与分组（名字、顺序、条数全部来自包里，客户端不排一遍）。
- *
- * 页签 id 优先读包里的 `tabId`（英文 id 稳定、可翻译）；老包没有这一栏就退回
- * `tab`（中文名）当 id —— 两组字段在同一份包里一对一，混着用不会撞。
- */
-function tabsOf(pkg: ClientDataPackage): ParamTab[] {
-  const out: ParamTab[] = []
-  for (const f of pkg.fields) {
-    const tabId = f.tabId ?? f.tab
-    let tab = out.find((t) => t.id === tabId)
-    if (tab === undefined) {
-      tab = { id: tabId, label: f.tab, count: 0, sections: [] }
-      out.push(tab)
+function tabsOf(registry: RuntimeCatalog['registry']): ParamTab[] {
+  const paramKeys = new Set(registry.params.map((p) => p.key))
+  const itemsBySection = new Map<string, number>()
+  for (const tab of registry.layout) {
+    for (const sec of tab.sections) {
+      itemsBySection.set(
+        sec.id,
+        (itemsBySection.get(sec.id) ?? 0) + sec.items.filter((i) => paramKeys.has(i.paramKey)).length,
+      )
     }
-    tab.count += 1
-    const sectionId = sectionIdOf(f)
-    const sec = tab.sections.find((x) => x.id === sectionId)
-    if (sec === undefined) tab.sections.push({ id: sectionId, label: f.group, count: 1 })
-    else sec.count += 1
   }
-  return out
-}
 
-/**
- * 包里的机型 → 这一页要的 `Machine`（下游只用 id / display / versions）。
- *
- * `image` / `icon` / `aliases` / `forbiddenZones` 包里没有 —— 那几样是工作台侧的
- * 素材与硬件事实，参数页一处都不读，所以给最朴素的值，不假造图标名。
- */
-function machinesOf(pkg: ClientDataPackage): Machine[] {
-  return pkg.machines.map((m) => ({
-    id: m.id,
-    display: m.display,
-    brand: m.brand,
-    dimensions: m.dimensions,
-    forbiddenZones: [],
-    image: '',
-    icon: '',
-    aliases: [],
-    versions: m.versions.map((v) => ({
-      id: v.id,
-      name: v.name,
-      tag: v.tag,
-      description: v.description,
-      /* 包里没有「这个版本跟哪个套餐」—— 那是工作台的账，客户端只看摊平后的文件清单 */
-      bundle: '',
-    })),
-  }))
+  const out: { tab: ParamTab; order: number }[] = []
+  for (const meta of registry.tabs) {
+    const sections: ParamSection[] = meta.sections
+      .map((s) => ({ id: s.id, label: s.label, desc: s.description, count: itemsBySection.get(s.id) ?? 0 }))
+      .filter((s) => s.count > 0)
+    if (sections.length === 0) continue
+    out.push({
+      tab: {
+        id: meta.id,
+        label: meta.label,
+        count: sections.reduce((n, s) => n + s.count, 0),
+        sections,
+      },
+      order: meta.order,
+    })
+  }
+  /* 页签先后以 [[tabs]] 的 order 为准；没声明 order 的排最后 */
+  return out.sort((a, b) => a.order - b.order).map((x) => x.tab)
 }
 
 function testCondition(op: 'eq' | 'neq' | 'gt', actual: string, expected: string): boolean {
@@ -472,44 +395,59 @@ export function useParams(): Params {
   const [savedNote, setSavedNote] = useState<string | null>(null)
 
   /*
-   * 这一页的**唯一数据源 = 下载来的那份数据包**（作者定下的那条链）。
+   * 这一页的**唯一数据源 = catalog**（`<appDataDir>/catalog.json`，随安装包释放；
+   * 旧世界那格 localStorage 说明书已随 C4 退役）。页面上每一个字（页签名、分组名、
+   * 条数、类型、选项、条件、值）都只有一个出处：
    *
-   * 之前这里走 `api.getMachines()` / `api.getParamMeta()` —— 那是「客户端自己内置
-   * 一份说明书」。改成读包之后，页面上每一个字（页签名、分组名、条数、类型、选项、
-   * 条件、值）都只有一个出处：`STORAGE.clientPackage` 那一格
-   * （`src/api/storageKeys.ts`，值仍是试验场那个键名）。
-   * 没有包就**不编一份假的**，直说去哪儿拿。
+   *   机型与版本        api.getMachines()（catalog 兜底）
+   *   字段定义 / 条件    api.getParamMeta()（catalog 的 definition）
+   *   页签与分组        api.getRuntimeCatalog() 的 registry（中文名与顺序的唯一权威）
+   *   值                api.getMachineParams(m, v)（三层取值，按 combo 拉）
+   *   MKP 文件名        catalog 的 files 域
+   *
+   * 读不到目录就**不编一份假的**，直说数据源在哪。
    */
   useEffect(() => {
-    const cur = downloaded()
-    if (cur === null) {
-      setError('还没有数据包 —— 先去「同步」页从云端获取一份。')
-      return
-    }
-    const machines = machinesOf(cur.package)
-    const metaByKey = new Map<string, ParamMeta>()
-    cur.package.fields.forEach((f, i) => metaByKey.set(f.key, metaOf(f, 0, i)))
-    /* MKP 文件名按「机型:版本」建索引 —— 每个版本的 files 清单里挑出那一份 */
-    const fileByCombo = new Map<string, string>()
-    for (const m of cur.package.machines) {
-      for (const v of m.versions) {
-        const f = v.files.find((x) => x.kind === 'mkp_preset')
-        if (f !== undefined) fileByCombo.set(`${m.id}:${v.id}`, f.fileName)
+    let alive = true
+    void (async () => {
+      const [list, meta, world] = await Promise.all([
+        api.getMachines(),
+        api.getParamMeta(),
+        api.getRuntimeCatalog().catch(() => null),
+      ])
+      if (!alive) return
+      if (world === null) {
+        setError('读不到目录（catalog）—— 参数页的全部数据都从它出，先确认安装包完整。')
+        return
       }
-    }
-    setCatalog({ machines, metaByKey, fileByCombo })
-    /*
-     * 默认落在**正在用的那一份**：`STORAGE.clientActive` 说应用了哪台哪个版本，就从包里找它；
-     * 找不到（没应用过 / 包里没这台）才退回第一台 —— 与预设页「默认落在已应用那台」同一个理由。
-     * 原来写死"第一台"，应用了 P1S 再进这一页还是 A1（作者：「怎么一直是 a1」）。
-     */
-    const live = activeEntry()
-    const liveMachine = machines.find((m) => m.id === live?.machineId)
-    const liveVersion = liveMachine?.versions.find((v) => v.id === live?.versionId)
-    const home = liveMachine ?? machines[0]
-    const homeVersion = liveVersion ?? home?.versions[0]
-    if (home !== undefined && homeVersion !== undefined) {
-      setPick({ machineId: home.id, versionId: homeVersion.id })
+      const metaByKey = new Map<string, ParamMeta>(meta.map((m) => [m.key, m]))
+      /* MKP 文件名按「机型:版本」建索引 —— 目录里登记的交付文件就是那一份 */
+      const fileByCombo = new Map<string, string>()
+      for (const f of world.files) {
+        if (f.kind === 'mkp_preset') fileByCombo.set(`${f.machineId}:${f.versionId}`, f.fileName)
+      }
+      setCatalog({ machines: list, metaByKey, tabs: tabsOf(world.registry), fileByCombo })
+
+      /*
+       * 默认落在**正在用的那一份**：使用中指针（`run/active-preset.json`）说应用了哪台哪个版本，
+       * 就从目录里找它；找不到（没应用过 / 目录里没这台）才退回第一台 ——
+       * 与预设页「默认落在已应用那台」同一个理由。
+       * 原来写死"第一台"，应用了 P1S 再进这一页还是 A1（作者：「怎么一直是 a1」）。
+       */
+      const live = await api.getActivePreset().catch(() => null)
+      if (!alive) return
+      const liveMachine = list.find((m) => m.id === live?.machineId)
+      const liveVersion = liveMachine?.versions.find((v) => v.id === live?.versionId)
+      const home = liveMachine ?? list[0]
+      const homeVersion = liveVersion ?? home?.versions[0]
+      if (home !== undefined && homeVersion !== undefined) {
+        setPick({ machineId: home.id, versionId: homeVersion.id })
+      }
+    })().catch((e: unknown) => {
+      if (alive) setError(e instanceof Error ? e.message : String(e))
+    })
+    return () => {
+      alive = false
     }
   }, [])
 
@@ -526,20 +464,23 @@ export function useParams(): Params {
 
     const { machineId, versionId } = pick
     /*
-     * 布局、字段、值全部从包里摊出来。
-     * 文件名也从包里来：早先那一版把 files 写死成 null（理由是「那一栏一处都不读」），
+     * 布局、字段、值全部从 catalog 的命令摊出来。
+     * 文件名从目录的 files 域来：早先那一版把 files 写死成 null（理由是「那一栏一处都不读」），
      * 结果 pill / 底栏 / 保存确认 / 历史标题 / 「已保存到 X」五处全都读不到文件名，
-     * 只剩「机型 · 版本」可显示 —— 而包里的版本本来就带着文件清单。
+     * 只剩「机型 · 版本」可显示 —— 而目录本来就登记着每个版本的交付文件。
      */
-    const cur = downloaded()
     const data =
-      cur === null
+      catalog === null
         ? null
-        : {
-            tabs: tabsOf(cur.package),
-            params: paramsOf(cur.package, machineId, versionId),
-            fileLabel: catalog.fileByCombo.get(`${machineId}:${versionId}`) ?? null,
-          }
+        : api
+            .getMachineParams(machineId, versionId)
+            .then(
+              (params): { tabs: ParamTab[]; params: RecipeParam[]; fileLabel: string | null } => ({
+                tabs: catalog.tabs,
+                params,
+                fileLabel: catalog.fileByCombo.get(`${machineId}:${versionId}`) ?? null,
+              }),
+            )
     Promise.resolve(data)
       .then((res) => {
         if (!alive || res === null) return
@@ -918,30 +859,42 @@ export function useParams(): Params {
   )
 
   /*
-   * 「在看的是不是已应用的那份」：唯一底账 × 当前 combo，同步算、不占 state ——
-   * 它只由底账与 combo 决定，没有独立生命周期。依赖带 machineId / versionId：切组合时
-   * pick 先行、颜色立刻跟上，不等字段重拉完（`combo` 那一层只管字段，不影响颜色）。
-   * 底账只在依赖变化时读一次 localStorage（开页 / 切组合），不是每次 render。
+   * 「在看的是不是已应用的那份」：唯一底账 × 当前 combo。
+   * 底账走 IPC（`run/active-preset.json`），所以在依赖变化时读一次 state
+   * （开页 / 切组合）——与旧版"每次读一次 localStorage"同一个节奏，不是每次 render。
+   * 依赖带 machineId / versionId：切组合时 pick 先行、颜色立刻跟上，
+   * 不等字段重拉完（`combo` 那一层只管字段，不影响颜色）。
    *
-   * `canJump`：已应用那份在当前包里找得到才有「切换回」动作 —— 找不到时切过去会落到
+   * `canJump`：已应用那份在当前目录里找得到才有「切换回」动作 —— 找不到时切过去会落到
    * 一个空壳 combo（字段在、值全空），那是假信息，所以宁可不给动作、只陈述。
    */
+  const [active, setActive] = useState<ActivePreset | null>(null)
+  useEffect(() => {
+    let alive = true
+    void api
+      .getActivePreset()
+      .then((a) => {
+        if (alive) setActive(a)
+      })
+      .catch(() => {
+        if (alive) setActive(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [machineId, versionId])
+
   const activeUse = useMemo<ActiveUse | null>(() => {
-    const live = activeEntry()
-    if (live === null) return null
-    const liveMachine =
-      live.machineId === null ? undefined : catalog?.machines.find((m) => m.id === live.machineId)
-    const liveVersion =
-      live.versionId === null
-        ? undefined
-        : liveMachine?.versions.find((v) => v.id === live.versionId)
+    if (active === null) return null
+    const liveMachine = catalog?.machines.find((m) => m.id === active.machineId)
+    const liveVersion = liveMachine?.versions.find((v) => v.id === active.versionId)
     return {
-      onIt: live.machineId !== null && live.machineId === machineId && live.versionId === versionId,
-      machineId: live.machineId,
-      versionId: live.versionId,
+      onIt: active.machineId === machineId && active.versionId === versionId,
+      machineId: active.machineId,
+      versionId: active.versionId,
       canJump: liveMachine !== undefined && liveVersion !== undefined,
     }
-  }, [catalog, machineId, versionId])
+  }, [active, catalog, machineId, versionId])
 
   return {
     loading: error === null && (catalog === null || combo === null),

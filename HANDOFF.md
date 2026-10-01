@@ -9,11 +9,11 @@
 | 圈 | 内容 | 状态 |
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
-| 第二圈 | 每块地基做厚 | 🔄 **过半**：更新与归档 ✅、R11 共用契约 ✅、**catalog 加厚 + 换源收口（R3/R4/R5）✅（本文 §3）**；剩 localStorage 退役 / Delivery 加厚 / 判据 2 |
+| 第二圈 | 每块地基做厚 | 🔄 **大半**：更新与归档 ✅、R11 共用契约 ✅、catalog 加厚 + 换源（R3/R4/R5）✅、**C4 localStorage 三格退役 ✅（本文 §3）**；剩 Delivery 加厚 / 判据 2 |
 | 第三圈 | 所有业务接进新地基（Preset 全功能 / 模型 / BBS / 报告） | ⬜ 未开始 |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
-**整体 ≈ 35%。** 判断依据：两圈骨架 + 更新/归档 + 两端共用契约 + catalog 加厚换源都落了（默认 140 条 + workbench 321 条 Rust 测试、四条总纲判据落地 3 条），但云端仍是零依赖空位、localStorage 三格还住着用户数据、资产载荷的登记与下载还没接。
+**整体 ≈ 40%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 140 条 + workbench 321 条 Rust 测试、总纲判据落地 3 条）；但云端仍是零依赖空位、资产载荷的登记与下载还没接、业务侧（Preset 全功能 / 模型 / BBS / 报告）还没接进新地基。
 
 ## 1. 第一圈留下的东西（全部在 main 上）
 
@@ -46,13 +46,18 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
    - **加厚**：`runtime::Catalog` 长出完整 definition——brands / 机型的全部字段（含尺寸与禁区）/ assets（19）/ bundles（5）/ registry（74 条字段定义 + 页签元数据 + 布局）。definition 类型**直接复用** `presetdata` 的 serde 类型；revision 指纹把 definition 算进输入；`CATALOG_SCHEMA` 不升（加字段不升号，definition 全带 `#[serde(default)]`）。
    - **换源**：`ipc/presets.rs` 九条命令的 DTO 一个没动，数据源换成释放的 catalog（`<appDataDir>/catalog.json`，按**字节**缓存，目录换新自动失效——没有失效钩子可忘）。MKP 引用从此带真 size/SHA。三层取值提取成 `resolve::visible_keys_of / effective_of`，与 ParamRegistry 共用。
    - **退役**：`client/` 目录（13 份 `include_str!` + seed 铺盘）删除，启动铺盘只剩 catalog 一份。**总纲欠账 #1 收口，判据 4 落地**（`dto_builders_read_the_catalog_and_nothing_else`）。
-3. **C4：旧世界 localStorage 三格退役** —— `src/api/storageKeys.ts` 的 `a40.package / a40.presets / a40.active`（说明书/本机预设/使用中）。新世界的对应物已就位（catalog / mkp/ / run/active-preset.json），迁完删键。**这是盘点里最大的一笔欠账**，也是第二圈"做厚"的最后一块大头。
+3. ~~**C4：旧世界 localStorage 三格退役**~~ ✅（2026-10-01，本轮）：
+   - **active 格 → `run/active-preset.json`**：预设页「应用」/ 首页与校准页反填 / 参数页默认落点切 `getActivePreset` / `applyActivePreset`；`ActiveEntry`（kind/ref）退役，统一契约的 `ActivePreset`（fileName + SHA + intact），「已应用」判据 = 文件名相等。
+   - **presets 格 → `mkp/`**：预设页"工作台发布"两列换成**目录交付**（catalog.files，大小真值）+ 下载区（盘就是底账）；下载走 `downloadCatalogFile`；`fetchPreset`（TOML 正文塞 localStorage）退役。
+   - **package 格 → catalog**：参数页整页切 catalog 命令（页签/分组树从 `getRuntimeCatalog` 的 registry 摊——契约加厚了 `CatalogRegistry` 声明，mock 用同一批快照摊同形状）；同步页旧"自动同步说明书"区退役。
+   - **判据在编译期**：三键从 `STORAGE` 删除，再引用直接 tsc 失败。旧格数据不迁移——它们是演示管道的假数据，正式用户机上本来就是空的。
 4. **Delivery 再加厚** —— 下载进度、失败重试、并发；真云端 `Source` 实现（reqwest vs ureq 选型，零网络依赖的现状要打破，选型时考虑 `spawn_blocking`）。
 5. **判据 2** —— 启动零网络（先源码扫描）。
 
 ## 4. 续做入口（从哪接手）
 
-- **下一项 C4（localStorage 三格退役）**：前端 `src/api/storageKeys.ts` + `src/app/store/package.ts`（三态视图层保留，存储迁走）；新世界落点 = catalog（已进 Rust 缓存与命令）/ `mkp/` / `run/active-preset.json`（`runtime/state.rs`）。迁完删键 + 退役 `mockServer` 里对应的假数据格。
+- **下一项 Delivery 再加厚**：下载进度 / 失败重试 / 并发；真云端 `Source` 实现（reqwest vs ureq 选型，零网络依赖的现状要打破，选型时考虑 `spawn_blocking`）；随后判据 2（启动零网络，先源码扫描）。
+- 前端消费新世界的样板：预设页（`usePresetData.readRelease` = catalog.files + `getDownloadedFiles`，写走 `downloadCatalogFile` / `applyActivePreset` 后**重读底账**）；参数页（`useParams` = `getMachines` + `getParamMeta` + `getRuntimeCatalog` 的 registry 摊页签树 + `getMachineParams` 按 combo 拉值）。
 - 更新/归档：`runtime/delivery.rs` 的 `FileOnDisk` / `stale_files` / deliver 里的归档段；`runtime/release.rs` 的升级策略。
 - catalog（现在很厚了）：类型与构建在 `runtime/catalog.rs`（definition 复用 `presetdata` 的 serde 类型，改语义才升 `CATALOG_SCHEMA`）；消费端只读访问面在它的 impl 块。
 - 命令面：`src-tauri/src/ipc/catalog.rs`；**注册必须两份清单同步**（`lib.rs` 两个 `generate_handler!`）。
@@ -81,6 +86,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime/delivery` 9 条 | 校验在落盘前 / 防穿越 / 更新归档旧份 / 归档槽保最早 / 幂等 / Stale 可见 |
 | `runtime/state` 7 条 | 往返 / 缺省 None / 坏档 CORRUPTED / 未来代次拒 / 后应用赢 / 撤销幂等 / 漂移检测 |
 | `runtime/release` 4 条 | 首启铺 / 同版本不动 / 升级归档换新 / 归档槽保最早 / mkp/ 初始为空 |
+| `STORAGE` 三键已删（C4） | localStorage 不再住底账：`STORAGE.clientPackage / clientPresets / clientActive` 引用直接 tsc 失败——编译期判据 |
 | `scripts/check-bundle.mjs`（CI web job） | 判据 1：开发源 TOML / 模拟数据 / 工作台内容不进客户端安装包 |
 | `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
 
@@ -88,5 +94,6 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 
 - main 与 origin/main 同步，最新提交见 `git log`；CI 两个 job（web / rust）必须全绿。
 - 未入库的 untracked：无（`workbench/.draft/` 被 ignore 属预期）。
-- 本机开发源可用性：`crates/preset/assets/presets/` 存在时，同步页的下载/使用/更新全链路真机可跑；用户安装包里这些按钮诚实报"还没接"。
+- 本机开发源可用性：`crates/preset/assets/presets/` 存在时，同步页与预设页的下载/使用/更新全链路真机可跑；用户安装包里这些按钮诚实报"还没接"。
+- 前端底账全在 Internal 根（C4 后）：真机调试时 WebView 的 localStorage 只住偏好（置顶/搜索词），清掉不影响任何底账；旧的 `mkp.a40.*` 三格已无人读，残留可删。
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。

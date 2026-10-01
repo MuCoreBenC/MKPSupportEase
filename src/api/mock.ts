@@ -4,6 +4,7 @@ import {
   allMachines,
   allPresetFiles,
   appliedPreset,
+  catalogRegistry,
   copyToSlicerIn,
   localFileIds,
   localUserFiles,
@@ -182,9 +183,10 @@ export const mockApi: MkpApi = {
   },
 
   /**
-   * 新数据世界（第一圈）的浏览器演示。真机上 Rust 读的是释放进数据根的
-   * catalog.json（真数据、真 SHA）；浏览器里没有数据根，给一份同形状的最小演示 ——
+   * 新数据世界的浏览器演示。真机上 Rust 读的是释放进数据根的 catalog.json
+   * （真数据、真 SHA、真 definition）；浏览器里没有数据根，给一份同形状的最小演示 ——
    * 数字是编的，形状不编：页面按什么结构读，真机上就读得到。
+   * definition（registry）用同一批快照摊，参数页的页签/分组树在两种模式下同源。
    */
   async getRuntimeCatalog() {
     return {
@@ -212,6 +214,7 @@ export const mockApi: MkpApi = {
           size: 2048,
         },
       ],
+      registry: catalogRegistry(),
     }
   },
 

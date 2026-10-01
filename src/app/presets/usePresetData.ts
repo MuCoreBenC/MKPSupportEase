@@ -16,7 +16,7 @@
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
  *   用户自己的文件      api.getLocalUserFiles()                   → **固定演示集合**，实测 3 个（云端没有它们）
- *   当前使用的那一条    `store/package.activeEntry()`（`STORAGE.clientActive`）→ **全局唯一**，null = 一套都还没应用
+ *   当前使用的那一条    api.getActivePreset()（新世界底账 `run/active-preset.json`）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
  *   与出厂不同 N 项     api.getMachineParams(machineId, versionId) 里 origin === 'variant' 的条数
@@ -28,11 +28,11 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前使用        唯一底账 STORAGE.clientActive  状态 已应用 / 未应用
+ * MKP     生效 = 设为当前使用        唯一底账 run/active-preset.json  状态 已应用 / 未应用
  * 切片器   生效 = 复制到切片器的目录   api.copyToSlicer()     状态 已复制 / 未复制
  * ```
  *
- * MKP 那个写落在本机（localStorage），写完**重读底账**而不是自己在本地改状态：
+ * MKP 那个写走新世界的应用命令（IPC 落 `run/active-preset.json`），写完**重读底账**而不是自己在本地改状态：
  * 界面看到的「已应用」必须是底账答的，不是前端猜的 —— 那正是 A34 纠正过的那个错
  * （已应用不是派生量）。切片器照旧走契约（假后端只改内存，刷新还原）。
  *
@@ -46,8 +46,8 @@
  *
  * 原来的判据是「当前机型 + 当前版本那个默认交付的 MKP 预设」—— 切一下机型就换一个，
  * 等于说这台机器同时应用着 6 套配置。作者的原话：**「已应用只有一个，所有机型所有版本
- * 始终只有一个已应用」**。所以它现在是**唯一底账答的一条独立事实**（`STORAGE.clientActive`，
- * 单条目）：整张表里最多一行带 ● 已应用，切机型也不会变出第二个。
+ * 始终只有一个已应用」**。所以它现在是**唯一底账答的一条独立事实**（新世界
+ * `run/active-preset.json`）：整张表里最多一行带 ● 已应用，切机型也不会变出第二个。
  *
  * # 这一页与参数页各有一份「当前机型 / 版本」
  *
@@ -56,18 +56,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
-import type { Machine } from '../../api'
+import type { ActivePreset, Machine } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
-import {
-  activeEntry,
-  activatePreset,
-  fetchPreset,
-  latestOf,
-  listCloud,
-  presets as localReleasesOf,
-} from '../store/package'
-import type { ActiveEntry } from '../store/package'
 import type { ReleasePresetSource } from './presetTree'
 import {
   applySlicerFilters,
@@ -97,10 +88,10 @@ export interface PresetData {
   error: string | null
 
   /**
-   * 工作台发布：云端最新一次 Release + 本机 preset 目录的现况。
+   * 官方交付：目录（catalog）登记的交付预设全量 + 下载区（`mkp/`）现况。
    *
-   * 三格底账都在 `store/package`（`STORAGE.cloud` / `STORAGE.clientPresets` /
-   * `STORAGE.clientActive`），这一层只读不写；写走下面的 `downloadRelease` / `apply`。
+   * 两份底账都住 Internal 根：清单在 `catalog.json` 的 files 域（发布方写），
+   * 「已下载」在 `mkp/`（盘就是底账）。这一层只读不写；写走下面的 `downloadRelease` / `apply`。
    */
   release: ReleaseState
 
@@ -124,12 +115,12 @@ export interface PresetData {
    */
   userFiles: LocalUserFile[]
   /**
-   * 正在使用的**唯一那一条**：从 `STORAGE.clientActive` 读出来的，**全表最多一份**，
-   * `null` = 一套都还没应用（**不是错误**）。
+   * 正在使用的**唯一那一条**：从新世界底账（`run/active-preset.json`）读出来的，
+   * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
    *
-   * 官方行 / release 行应用后写着的都是它 —— 假后端的 `getAppliedPreset()` 界面不再读。
+   * 官方交付行应用后写着的都是它 —— 假后端的 `getAppliedPreset()` 界面不再读。
    */
-  active: ActiveEntry | null
+  active: ActivePreset | null
   /**
    * 哪些切片器 profile **已经复制到切片器的 profile 目录**了（asset id）。
    *
@@ -145,37 +136,39 @@ export interface PresetData {
    */
   pickMachine: (machineId: string) => void
   /**
-   * 把某一份设为当前使用的**那一条**（官方行 / release 行共用这一个写）。
+   * 把目录里登记的某一份交付预设设为**当前使用的那一条**。
    *
-   * 写 `STORAGE.clientActive`（唯一底账）**然后重读底账** —— 界面看到的永远是底账答的，
+   * 走新世界的应用命令（`api.applyActivePreset(fileName)`，Rust 侧校验 SHA 后写
+   * `run/active-preset.json`）**然后重读底账** —— 界面看到的永远是底账答的，
    * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    */
-  apply: (entry: ActiveEntry) => Promise<void>
+  apply: (fileName: string) => Promise<void>
   /** 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上 */
   copy: (assetId: string) => Promise<void>
   /**
-   * 「下载」工作台发布的那一份：云端 Release 里的 TOML → 本机 preset 目录。
+   * 「下载」目录里登记的那一份：走新世界下载管道（`api.downloadCatalogFile(fileName)`），
+   * 落进下载区 `mkp/`。
    *
    * 与官方文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
-   * 这一条走 `package.fetchPreset`，**真的能下**。失败照抛给页面说出来。
+   * 这一条**真的能下**。失败照抛给页面说出来。
    */
-  downloadRelease: (uid: string) => Promise<void>
+  downloadRelease: (fileName: string) => Promise<void>
 }
 
-/**
- * 工作台发布这一路的现况。云端一份、本机一份 —— 两件事分开。
- * （「正在用的」不在这里：它只有一个出处 `STORAGE.clientActive`，见 `PresetData.active`。）
- */
+  /**
+   * 「目录里登记的交付预设」这一路的现况。清单一份（catalog）、下载区一份 —— 两件事分开。
+   * （「正在用的」不在这里：它只有一个出处 `run/active-preset.json`，见 `PresetData.active`。）
+   */
 export interface ReleaseState {
-  /** 云端最新一次发布的包版本（`null` = 云端还没有工作台的发布） */
+  /** 目录指纹（两端共用契约的 revision；旧世界的"包版本"没有对应物，指纹更诚实） */
   version: string | null
-  /** 云端最新一次发布的时刻 */
+  /** 刻意恒 null：目录没有时间字段，没有可信时间源不编一个 */
   at: string | null
-  /** 云端这一次发布会里的预设文件 */
+  /** 目录里登记的交付预设（MKP 的全量） */
   presets: ReleasePresetSource[]
-  /** 本机 preset 目录里已有的（`STORAGE.clientPresets` 的值，本地表的 release 行就是它们） */
+  /** 下载区（`mkp/`）里已有的（本地表的 release 行就是它们） */
   localReleases: ReleasePresetSource[]
-  /** 本机已下载的 uid 集合 */
+  /** 已下载的 uid 集合 */
   localUids: string[]
 }
 
@@ -192,7 +185,7 @@ export function usePresetData(): PresetData {
   const [tree, setTree] = useState<PresetTree>({ machines: [], totalFiles: 0 })
   const [localIds, setLocalIds] = useState<string[]>([])
   const [userFiles, setUserFiles] = useState<LocalUserFile[]>([])
-  const [active, setActive] = useState<ActiveEntry | null>(null)
+  const [active, setActive] = useState<ActivePreset | null>(null)
   const [slicerCopied, setSlicerCopied] = useState<string[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -200,40 +193,31 @@ export function usePresetData(): PresetData {
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
 
   /**
-   * 把工作台发布这一路的现况读一遍。
+   * 把官方交付这一路的现况读一遍。
    *
-   * 全部来自 localStorage + 静态云端（`package` 那层），与 api 那几个读互不相干；
-   * 下载 / 应用之后**重读一遍**而不是本地改状态 —— 与上面 `apply` / `copy` 同一条规矩：
+   * 全部来自新世界的两份底账：清单读 `api.getRuntimeCatalog()` 的 files 域，
+   * 「已下载」读 `api.getDownloadedFiles()`（`mkp/`，盘就是底账）。
+   * 下载 / 应用之后**重读一遍**而不是本地改状态 —— 与 `copy` 同一条规矩：
    * 界面上看到的必须是底账答的，不是前端猜的。
    */
   const readRelease = useCallback(async (): Promise<ReleaseState> => {
-    const cloud = await listCloud()
-    const latest = latestOf(cloud)
-    const mine = localReleasesOf()
-    const cloudPresets: ReleasePresetSource[] = (latest?.presets ?? []).map((p) => ({
-      uid: `${p.machineId}/${p.versionId}`,
-      machineId: p.machineId,
-      versionId: p.versionId,
-      fileName: p.fileName,
-      content: p.content,
-      at: latest?.at ?? null,
-      releaseVersion: latest?.version ?? null,
+    const [catalog, mine] = await Promise.all([api.getRuntimeCatalog(), api.getDownloadedFiles()])
+    const downloaded = new Set(mine)
+    const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
+      uid: `${f.machineId}/${f.versionId}`,
+      machineId: f.machineId,
+      versionId: f.versionId,
+      fileName: f.fileName,
+      size: f.size,
+      releaseVersion: null,
     }))
-    const localList: ReleasePresetSource[] = Object.entries(mine).map(([uid, p]) => ({
-      uid,
-      machineId: p.machineId,
-      versionId: p.versionId,
-      fileName: p.fileName,
-      content: p.content,
-      at: p.at,
-      releaseVersion: p.version,
-    }))
+    const localList = listed.filter((p) => downloaded.has(p.fileName))
     return {
-      version: latest?.version ?? null,
-      at: latest?.at ?? null,
-      presets: cloudPresets,
+      version: catalog.revision,
+      at: null,
+      presets: listed,
       localReleases: localList,
-      localUids: Object.keys(mine),
+      localUids: localList.map((p) => p.uid),
     }
   }, [])
 
@@ -269,7 +253,7 @@ export function usePresetData(): PresetData {
 
       if (!alive) return
       /* 唯一底账读一次 —— 下面默认落地那台机型也要用它，所以在这里拿 */
-      const entry = activeEntry()
+      const entry = await api.getActivePreset().catch(() => null)
       setMachines(list)
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
       setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
@@ -294,16 +278,19 @@ export function usePresetData(): PresetData {
       setReady(true)
 
       /*
-       * 云端那一路**不挡首屏**。
+       * 官方交付那一路**不挡首屏**。
        *
-       * 它是这一页唯一一次网络往返（`/cloud/presets.json`，断网时失败当空、不报错）。
-       * 但这一页要看的是**本机那份注册表**答出来的表，没有理由让整页等它 ——
-       * 之前 `await readRelease()` 排在 `setReady(true)` 前面，表现就是"打开先转圈、
-       * 转完才出现"。现在先渲染，云端那一份回来了再补上那一列。
+       * 它是两条独立的读（catalog 清单 + 下载区），失败时 release 落成空态、页面照常渲染；
+       * 这一页要先看的「本机那份注册表」答出来的表，没有理由让整页等它。
        */
-      void readRelease().then((next) => {
-        if (alive) setRelease(next)
-      })
+      void readRelease()
+        .then((next) => {
+          if (alive) setRelease(next)
+        })
+        .catch(() => {
+          /* 官方交付那一路读不到（目录/下载区任一失败）就落空态，不挡首屏 —— 与三态纪律一致：
+             页面主体（注册表那几张表）已 ready，这里不升格成整页错误 */
+        })
     }
 
     load().catch((e: unknown) => {
@@ -330,15 +317,14 @@ export function usePresetData(): PresetData {
 
   /*
    * 两个写。**先写底账，再重读底账**，中间不插一句前端自己的推断 ——
-   * MKP 那份底账在本机（localStorage），这一个来回是即时的；真后端接上时这里该显示的
-   * 「正在应用…」由页面的提示条负责，不在这一层编。
+   * 底账在 Rust 侧（`mkp/` + `run/active-preset.json`），这一个来回是一次 IPC；
+   * 界面上看到的必须是底账答的，不是前端猜的。
    *
-   * 不 catch：失败要传到页面上说出来（切片器路径没配、目标已存在这两种真后端的失败
+   * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
    * 就是从这里冒上去的）。
    */
-  const apply = useCallback(async (entry: ActiveEntry) => {
-    activatePreset(entry) /* release 条目本机没有这一份时它自己不动 —— 底账的规矩，不在这里猜 */
-    setActive(activeEntry())
+  const apply = useCallback(async (fileName: string) => {
+    setActive(await api.applyActivePreset(fileName))
   }, [])
 
   const copy = useCallback(async (assetId: string) => {
@@ -347,16 +333,12 @@ export function usePresetData(): PresetData {
   }, [])
 
   /*
-   * 工作台发布那一路的「下载」。不 catch：失败传给页面说出来，
-   * 与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个 `apply`。）
+   * 官方交付那一路的「下载」：走新世界下载管道，落进下载区 `mkp/`。
+   * 不 catch：失败传给页面说出来，与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个。）
    */
   const downloadRelease = useCallback(
-    async (uid: string) => {
-      const cloud = await listCloud()
-      const latest = latestOf(cloud)
-      if (latest === null) throw new Error('云端暂时没有可下载的发布')
-      const got = fetchPreset(latest, uid)
-      if (got === null) throw new Error('云端这一次发布里没有打包这一份')
+    async (fileName: string) => {
+      await api.downloadCatalogFile(fileName)
       setRelease(await readRelease())
     },
     [readRelease],
@@ -458,11 +440,11 @@ export interface PresetPage {
   togglePin: (pinKey: string) => void
 
   /**
-   * 正在使用的**唯一那一条**（`STORAGE.clientActive`）。`null` = 一套都还没应用（**不是错误**）。
+   * 正在使用的**唯一那一条**（新世界底账 `run/active-preset.json`）。`null` = 一套都还没应用（**不是错误**）。
    *
    * 顶部状态条挂在它身上，**不跟着机型下拉走** —— 它是全局唯一的一条事实。
    */
-  applied: ActiveEntry | null
+  applied: ActivePreset | null
   /** 已应用那台机型的显示名。查不到就退回 id，不留空 */
   appliedMachineText: string
   /** 已应用那个文件的文件名（官方行查树、release 行查发布清单）。都查不到退回 ref */
@@ -597,16 +579,10 @@ export function usePresetPage(data: PresetData): PresetPage {
   const appliedFileName = useMemo((): string => {
     const entry = data.active
     if (entry === null) return ''
-    if (entry.kind === 'release') {
-      const hit =
-        data.release.localReleases.find((p) => p.uid === entry.ref) ??
-        data.release.presets.find((p) => p.uid === entry.ref)
-      return hit?.fileName ?? entry.ref
-    }
-    const node = entry.machineId === null ? undefined : machineNode(data.tree, entry.machineId)
-    const file = node?.versions.flatMap((v) => v.files).find((f) => f.id === entry.ref)
-    return file?.fileName ?? entry.ref
-  }, [data.active, data.release.localReleases, data.release.presets, data.tree])
+    /* 底账给的就是文件名；本地表 / 云端表都按它对（官方交付行与目录登记同名） */
+    const hit = data.release.presets.find((p) => p.fileName === entry.fileName)
+    return hit?.fileName ?? entry.fileName
+  }, [data.active, data.release.presets])
 
   return {
     unsupported: machineAt !== undefined && machineAt.unavailable,

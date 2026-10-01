@@ -93,13 +93,14 @@ export default function PageCalib() {
   /* ---------- 文件体系：三级与「文件」那一级的清单 ---------- */
   const catalog = useCatalog()
 
-  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填 */
+  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填（底账走 IPC，异步） */
   const restored = useRef(false)
   useEffect(() => {
     if (restored.current || catalog.machines.length === 0) return
     restored.current = true
-    const next = selectionFromActive(catalog.machines)
-    if (next !== null) setSel(next)
+    void selectionFromActive(catalog.machines).then((next) => {
+      if (next !== null) setSel(next)
+    })
   }, [catalog.machines])
 
   /* 「文件」这一级的清单与当前项的 id（`机型/版本`） */

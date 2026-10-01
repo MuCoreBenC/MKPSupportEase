@@ -1,4 +1,4 @@
-import type { ParamMeta, RecipeParam } from '../../api/contract'
+import type { CatalogRegistry, ParamMeta, RecipeParam } from '../../api/contract'
 import layoutJson from './data/layout_schema.json'
 import registryJson from './data/param_registry.json'
 import type { RawLayoutSchema, RawParam, RawParamRegistry } from './types'
@@ -167,4 +167,44 @@ export function paramMeta(): ParamMeta[] {
     }
     return meta
   })
+}
+
+/**
+ * catalog definition 的 registry 部分 —— 与 Rust `runtime::Catalog` 的 serde 形态同构。
+ *
+ * 浏览器演示的 `getRuntimeCatalog` 用它：参数页的页签/分组树从这份摊，与真机读
+ * `catalog.json` 的路径**同一个形状**。数据就是同一批快照（74 条字段 + 页签元数据 +
+ * 布局表），不另编一份 —— 快照改了这里跟着变，与真 catalog 的漂移只会来自快照本身过期。
+ */
+export function catalogRegistry(): CatalogRegistry {
+  return {
+    params: registry.params.map((p) => ({
+      key: p.key,
+      section: p.section,
+      layout: { order: p.layout.order, sectionId: p.layout.sectionId },
+      deprecated: p.deprecated === true,
+      machineFilter: p.machineFilter
+        ? p.machineFilter.split(',').map((s) => s.trim()).filter((s) => s !== '')
+        : [],
+    })),
+    tabs: registry.tabs.map((t) => ({
+      id: t.id,
+      label: t.label,
+      order: t.order ?? Number.MAX_VALUE,
+      icon: t.icon,
+      sections: (t.sections ?? []).map((s) => ({
+        id: s.id,
+        label: s.label,
+        order: s.order,
+        description: s.description,
+      })),
+    })),
+    layout: layout.tabs.map((t) => ({
+      id: t.id,
+      sections: (t.sections ?? []).map((s) => ({
+        id: s.id,
+        items: (s.items ?? []).map((i) => ({ id: i.id, paramKey: i.paramKey })),
+      })),
+    })),
+  }
 }

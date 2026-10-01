@@ -69,7 +69,7 @@ export default function App() {
       case 'params':
         return <PageParams density={density} onOpenPackage={() => setTab('sync')} />
       case 'sync':
-        return <PagePackage onOpenParams={() => setTab('params')} />
+        return <PagePackage />
       case 'bbs':
         return <PageBbs density={density} pending={pendingBbs} />
       case 'report':

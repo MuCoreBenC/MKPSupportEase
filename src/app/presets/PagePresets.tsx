@@ -62,13 +62,13 @@
  *   属于哪个机型版本         `api.getVersionFiles()` + `machineIds`      真（就是「版本」那一列）
  *   本机有哪些官方文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
  *   我自己的文件             `api.getLocalUserFiles()`                   **演示集合**（同上，实测 3 个）
- *   已应用                   `STORAGE.clientActive` 唯一底账（单条目）  真（**全局唯一**，落本机，刷新还在）
+ *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
  *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
  *   时间 / 大小              `PresetFileInfo.{modifiedText,sizeText}`    **假后端按 path 稳定推的演示值**，前端一行不编
  *   与出厂不同 N 项          `getMachineParams` 里 origin === 'variant'  真（按已应用那个机型+版本算）
  *   暂不支持                 `VersionFiles.incomplete` + `missing[]`     真（只有 A2L）
- *   应用 / 复制              应用：`STORAGE.clientActive` 一个口（官方 / release 合流，落本机）
+ *   应用 / 复制              应用：唯一底账一个口（交付行合流，IPC 落 run/）
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
  *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
@@ -111,7 +111,6 @@ import type {
   PresetLocalRow,
   PresetTableRow,
 } from './presetTree'
-import type { ActiveEntry } from '../store/package'
 import { usePresetData, usePresetPage } from './usePresetData'
 import s from './PagePresets.module.css'
 
@@ -254,8 +253,8 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   /**
    * 下载。两条路：
    *
-   *   工作台发布的那一份（`releaseUid` 在）  → `downloadRelease(uid)`，**真的能下** ——
-   *     云端 Release 里的 TOML 落进本机 preset 目录，本地表跟着多出一行
+   *   目录登记的交付预设（`releaseUid` 在）  → `downloadRelease(fileName)`，**真的能下** ——
+   *     走新世界下载管道落进下载区 `mkp/`，本地表跟着多出一行
    *   官方仓库的文件                        → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`，界面接住并显示「尚未实现：downloadFiles」
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
@@ -264,7 +263,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     if (row.releaseUid !== undefined) {
       setBusyKey(row.rowKey)
       setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
-      data.downloadRelease(row.releaseUid).then(
+      data.downloadRelease(row.fileName).then(
         () => {
           setBusyKey(null)
           setNote({ text: `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`, bad: false })
@@ -344,35 +343,18 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     }
 
     /*
-     * MKP：「应用」只有一个写 —— 唯一底账 `STORAGE.clientActive`。
-     * release 行认 uid（`A1/STANDARD` 里拆出版本 id）、官方行认 assetId + 版本 id；
-     * 写的就是首页反填要读的那一条。
+     * MKP：「应用」只有一个写 —— 唯一底账（新世界 `run/active-preset.json`）。
+     * 只有目录登记的交付行能应用：动作认 **fileName**（目录登记的文件名 =
+     * 使用中指针的口径 = 首页反填要读的那一条）。Rust 侧会校验"已下载且 SHA 对得上"，
+     * 没下载 / 字节漂了都应用不成，错误原样冒给提示条。
      */
-    const entry: ActiveEntry | null =
-      row.releaseUid !== undefined
-        ? {
-            kind: 'release',
-            ref: row.releaseUid,
-            machineId: row.machineId,
-            versionId: row.releaseUid.split('/')[1] || null,
-            version: row.releaseVersion ?? null,
-          }
-        : row.assetId === undefined
-          ? null
-          : {
-              kind: 'official',
-              ref: row.assetId,
-              machineId: row.machineId,
-              versionId: row.versionIds?.[0] ?? null,
-              version: null,
-            }
-    if (entry === null) {
-      /* 到不了这里：没有 asset id 的行操作列上是灰字不是按钮。留着是因为类型上它可能是 undefined */
+    if (row.releaseUid === undefined) {
+      /* 到不了这里：MKP 档的本地表只有交付行有操作按钮。留着防形状变化时静默出错 */
       setNote({ text: `${row.fileName}：${NO_ASSET_WHY}`, bad: true })
       return
     }
     setBusyKey(row.rowKey)
-    data.apply(entry).then(
+    data.apply(row.fileName).then(
       () => setBusyKey(null),
       (e: unknown) => {
         setBusyKey(null)
