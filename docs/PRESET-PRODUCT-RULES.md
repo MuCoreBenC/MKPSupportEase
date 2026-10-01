@@ -1,6 +1,7 @@
 # Preset 产品规则
 
 > **这份文档管产品行为：**本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 / 状态流转。
+> **数据与文件的四层归属是根规则：**`docs/DATA-ARCHITECTURE.md`。
 > **工程约束查另一份：**`docs/ARCHITECTURE.md`（Tauri / 两层数据根 / IPC / trace / 原子写 / 权限 scope）。
 
 ---

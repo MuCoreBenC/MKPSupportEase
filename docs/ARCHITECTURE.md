@@ -1,6 +1,7 @@
 # SupportEase 工程约束
 
 > **这份文档管工程：**Tauri 结构、两层数据根、IPC 契约、trace、原子写、权限边界。
+> **数据与文件的四层归属是根规则：**`docs/DATA-ARCHITECTURE.md`——本文 §4 的两根是第③层的内部结构。
 > **产品行为查另一份：**`docs/PRESET-PRODUCT-RULES.md`（本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 / 状态流转）。
 > git 纪律与发版流程见 `docs/GIT-WORKFLOW.md`。间距与动画原则见 `docs/DESIGN-SPACING.md`，上游 3D 资产契约见 `docs/3D-ASSET-CONTRACT.md`。
 > **版本身份与文件命名规范见本文 §10** —— 工作台、构建器、发布器、消费端共用那一套。
