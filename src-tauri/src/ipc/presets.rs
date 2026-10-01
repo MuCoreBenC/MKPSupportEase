@@ -33,8 +33,17 @@
 //!
 //! `PresetFileInfo.sizeText` / `modifiedText` / `statFrom` 一律省略 —— 本机没有这些
 //! 文件本体，编不出来也不该编。界面拿不到就写「未知」，那是对的（契约本来就是可选的）。
+//!
+//! # 这几条读为什么是 `async` 的
+//!
+//! Tauri 把**同步**命令放在主线程上跑、一条一条排队；`async` 的才丢进异步运行时并发跑。
+//! 预设页一打开会同时发二十多条读，串行的话总耗时就是各条之和，页面得干等好几秒 ——
+//! 用户看到的正是"打开先转圈、转完才出来"。
+//!
+//! 这些命令只读 [`load_presets`] 缓存里的解析结果，彼此没有共享可变状态，并发是安全的。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -52,16 +61,50 @@ use super::traced;
 
 /* ---------- 数据根 ---------- */
 
+/// 解析结果的缓存 —— **一个根只解析一次**。
+///
+/// # 为什么非有不可
+///
+/// 预设页一打开会发二十多条读（每个机型:版本两条），而每条读都要
+/// [`Presets::load_from`] 一遍 —— 那是把 13 份 TOML（含 56 KB 的注册表）重新解析、
+/// 重新建索引。二十几条串起来就是好几秒。用户看到的是"页面一直在转、转完才出来"，
+/// 会以为在下载。**这些命令一条网络都不碰**，慢的纯粹是重复解析。
+///
+/// # 缓存的边界
+///
+/// 缓存的是**定义**（TOML 解析结果），不是"文件在不在"：[`crate::presetdata::Assets::present`]
+/// 每次调用都真去 `is_file()`，所以下载回来的文件立刻看得见，不会因为这个缓存变旧。
+/// 将来若有命令**改写** `presets/*.toml`，必须调 [`forget_cached_presets`] ——
+/// 否则改完这一屏还是旧的。
+///
+/// 键是数据根而不是"有没有缓存过"：同一进程里客户端只有一个根，这张表事实上最多一条；
+/// 用 Vec 是为了测试里能并发拿两个临时根。
+static PRESETS_CACHE: Mutex<Vec<(PathBuf, Arc<Presets>)>> = Mutex::new(Vec::new());
+
+/// 丢掉缓存的解析结果。**任何写 `presets/*.toml` 的命令都必须调它**。
+pub fn forget_cached_presets() {
+    PRESETS_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
 /// 读客户端那一份预设数据。**载荷根 = 预设根本身**。
 ///
 /// 定义（`assets.toml` 的 `path`）与载荷（文件本体）在仓库里是两个地方
 /// （`presets/` ↔ `public/assets/`）；客户端这一轮**只释放定义、不释放文件本体**，
 /// 所以载荷根指到预设根上，[`crate::presetdata::Assets::present`] 一律为 false ——
 /// 界面上表现为"文件还没到"，而不是一个查不出来的状态。
-fn load_presets(app: &AppHandle) -> Result<Presets, AppError> {
+fn load_presets(app: &AppHandle) -> Result<Arc<Presets>, AppError> {
     let root = paths::presets_root(app)?;
+    let mut cache = PRESETS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, hit)) = cache.iter().find(|(r, _)| *r == root) {
+        return Ok(Arc::clone(hit));
+    }
     let mut p = Presets::load_from(&root)?;
     p.set_asset_root(&root);
+    let p = Arc::new(p);
+    cache.push((root, Arc::clone(&p)));
     Ok(p)
 }
 
@@ -204,7 +247,7 @@ pub struct MachineDto {
 
 /// 机型清单。前端预设页的三级树、首页的机型卡片都读它
 #[tauri::command]
-pub fn get_machines(app: AppHandle) -> Result<Vec<MachineDto>, AppError> {
+pub async fn get_machines(app: AppHandle) -> Result<Vec<MachineDto>, AppError> {
     traced("getMachines", |_| {
         let preset = load_presets(&app)?;
         // 品牌显示名：机型文件里写的是 id（`Bambu Lab`），给人看的是 `拓竹 (Bambu Lab)`
@@ -291,7 +334,7 @@ pub struct VersionFilesDto {
 
 /// 「这个机型这个版本要哪些文件」。机型或版本不存在 → `None`（不是出错）
 #[tauri::command]
-pub fn get_version_files(
+pub async fn get_version_files(
     app: AppHandle,
     machine_id: String,
     version_id: String,
@@ -398,7 +441,7 @@ fn bundles_of(preset: &Presets, asset_id: &str) -> Vec<String> {
 
 /// 云端表：仓库里那些**可下载的预设文件**（只出切片器预设，见文件头）
 #[tauri::command]
-pub fn get_preset_files(app: AppHandle) -> Result<Vec<PresetFileInfoDto>, AppError> {
+pub async fn get_preset_files(app: AppHandle) -> Result<Vec<PresetFileInfoDto>, AppError> {
     traced("getPresetFiles", |_| {
         let preset = load_presets(&app)?;
         Ok(preset
@@ -442,7 +485,7 @@ pub struct MenuEntryDto {
 /// 菜单：哪些官方文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
 /// **本轮没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的
 #[tauri::command]
-pub fn get_menu(app: AppHandle) -> Result<Vec<MenuEntryDto>, AppError> {
+pub async fn get_menu(app: AppHandle) -> Result<Vec<MenuEntryDto>, AppError> {
     traced("getMenu", |_| {
         let preset = load_presets(&app)?;
         Ok(preset
@@ -504,7 +547,7 @@ pub struct ParamMetaDto {
 
 /// 全部参数的元信息。**不过滤** —— 界面要能看到废弃的参数为什么不显示
 #[tauri::command]
-pub fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppError> {
+pub async fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppError> {
     traced("getParamMeta", |_| {
         let preset = load_presets(&app)?;
         Ok(preset
@@ -583,7 +626,7 @@ pub struct RecipeParamDto {
 /// 有效值与工作台一致；只有被上提过的键，来源标签两者不同（工作台说机型、这里说版本），
 /// 而前端本来就是按"版本键在不在"判 `origin` 的，所以这里的口径与它一致。
 #[tauri::command]
-pub fn get_machine_params(
+pub async fn get_machine_params(
     app: AppHandle,
     machine_id: String,
     version_id: Option<String>,
@@ -666,7 +709,7 @@ pub fn get_machine_params(
 /// 这一轮只释放了定义、没释放文件本体，所以恒为 `[]` —— 那是"还没下载"，
 /// 与"读不出来"是两件事。
 #[tauri::command]
-pub fn get_local_files(app: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn get_local_files(app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| {
         let preset = load_presets(&app)?;
         Ok(preset
@@ -731,5 +774,14 @@ mod tests {
             format!("presets/mkp/{name}"),
             "presets/mkp/A1-fastv3.3.toml"
         );
+    }
+
+    /// 缓存能清掉。将来**写** `presets/*.toml` 的命令要靠这条把旧的解析结果丢掉，
+    /// 所以它不是摆设：先钉住"调得动、调完还是空的"。
+    #[test]
+    fn cache_is_empty_after_forget() {
+        forget_cached_presets();
+        let cache = PRESETS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(cache.is_empty());
     }
 }

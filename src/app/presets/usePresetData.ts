@@ -270,7 +270,6 @@ export function usePresetData(): PresetData {
       if (!alive) return
       /* 唯一底账读一次 —— 下面默认落地那台机型也要用它，所以在这里拿 */
       const entry = activeEntry()
-      setRelease(await readRelease())
       setMachines(list)
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
       setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
@@ -293,6 +292,18 @@ export function usePresetData(): PresetData {
         setAt({ machineId: home.id, versionId: homeVersion.id })
       }
       setReady(true)
+
+      /*
+       * 云端那一路**不挡首屏**。
+       *
+       * 它是这一页唯一一次网络往返（`/cloud/presets.json`，断网时失败当空、不报错）。
+       * 但这一页要看的是**本机那份注册表**答出来的表，没有理由让整页等它 ——
+       * 之前 `await readRelease()` 排在 `setReady(true)` 前面，表现就是"打开先转圈、
+       * 转完才出现"。现在先渲染，云端那一份回来了再补上那一列。
+       */
+      void readRelease().then((next) => {
+        if (alive) setRelease(next)
+      })
     }
 
     load().catch((e: unknown) => {
