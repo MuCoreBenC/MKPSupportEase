@@ -177,4 +177,38 @@ export const mockApi: MkpApi = {
   async downloadFiles() {
     throw new NotImplementedError('downloadFiles')
   },
+
+  /**
+   * 新数据世界（第一圈）的浏览器演示。真机上 Rust 读的是释放进数据根的
+   * catalog.json（真数据、真 SHA）；浏览器里没有数据根，给一份同形状的最小演示 ——
+   * 数字是编的，形状不编：页面按什么结构读，真机上就读得到。
+   */
+  async getRuntimeCatalog() {
+    return {
+      catalogSchema: 1,
+      revision: 'mock000000000000',
+      machines: [
+        {
+          id: 'A1',
+          display: 'A1',
+          brand: '拓竹 (Bambu Lab)',
+          versions: [
+            { id: 'STANDARD', name: '标准版' },
+            { id: 'FAST', name: '快拆版6月以前' },
+          ],
+        },
+      ],
+      files: [
+        {
+          kind: 'mkp_preset',
+          fileName: 'A1-standard.toml',
+          path: 'mkp/A1-standard.toml',
+          machineId: 'A1',
+          versionId: 'STANDARD',
+          sha256: '0'.repeat(64),
+          size: 2048,
+        },
+      ],
+    }
+  },
 }

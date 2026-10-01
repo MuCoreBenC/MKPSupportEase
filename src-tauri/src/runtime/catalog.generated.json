@@ -1,0 +1,160 @@
+{
+  "catalogSchema": 1,
+  "revision": "70cdf8edf779ab6e",
+  "machines": [
+    {
+      "id": "A1",
+      "display": "A1",
+      "brand": "拓竹 (Bambu Lab)",
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版"
+        },
+        {
+          "id": "FAST",
+          "name": "快拆版6月以前"
+        },
+        {
+          "id": "FASTV3.3",
+          "name": "快拆版260628"
+        }
+      ]
+    },
+    {
+      "id": "A1_MINI",
+      "display": "A1 mini",
+      "brand": "拓竹 (Bambu Lab)",
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版"
+        },
+        {
+          "id": "FAST",
+          "name": "快拆版6月以前"
+        },
+        {
+          "id": "FASTV3.3",
+          "name": "快拆版260628"
+        }
+      ]
+    },
+    {
+      "id": "P1S",
+      "display": "P1S",
+      "brand": "拓竹 (Bambu Lab)",
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版"
+        }
+      ]
+    },
+    {
+      "id": "P2S",
+      "display": "P2S",
+      "brand": "拓竹 (Bambu Lab)",
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版"
+        }
+      ]
+    },
+    {
+      "id": "X1C",
+      "display": "X1C",
+      "brand": "拓竹 (Bambu Lab)",
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-standard.toml",
+      "path": "mkp/A1-standard.toml",
+      "machineId": "A1",
+      "versionId": "STANDARD",
+      "sha256": "0b19feaa67a77d2f0e61dfcf1c9d0ae1632c0ddb53db030c417b61ed00b69359",
+      "size": 4299
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-fast.toml",
+      "path": "mkp/A1-fast.toml",
+      "machineId": "A1",
+      "versionId": "FAST",
+      "sha256": "522eb884c820bcaee35574d6ccf0522861031cf16aad0b26fca461512025a7cd",
+      "size": 4297
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-fastv3.3.toml",
+      "path": "mkp/A1-fastv3.3.toml",
+      "machineId": "A1",
+      "versionId": "FASTV3.3",
+      "sha256": "3426fd38ddc1389f3d1a893ed9f0a6faa3a5aba9f3a0c97411ef76aef5e530bf",
+      "size": 4300
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-standard.toml",
+      "path": "mkp/A1_MINI-standard.toml",
+      "machineId": "A1_MINI",
+      "versionId": "STANDARD",
+      "sha256": "26d1aad549bc76c66bd362de8f6adc84caf7ccf0f5ffcb3f0a25ebda61435286",
+      "size": 4306
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-fast.toml",
+      "path": "mkp/A1_MINI-fast.toml",
+      "machineId": "A1_MINI",
+      "versionId": "FAST",
+      "sha256": "115e061f72014f7680adde6f4dfd2345f6acf7499dd247e4b8f1354f95f7cd43",
+      "size": 4300
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-fastv3.3.toml",
+      "path": "mkp/A1_MINI-fastv3.3.toml",
+      "machineId": "A1_MINI",
+      "versionId": "FASTV3.3",
+      "sha256": "f4e51d8f889637e80e7321bc73e440f84fa4060855af09bb0d4ef657e6d1a06f",
+      "size": 4304
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "P1S-lite.toml",
+      "path": "mkp/P1S-lite.toml",
+      "machineId": "P1S",
+      "versionId": "LITE",
+      "sha256": "bed23fb6b45e680a7fd520a8ae4669402ffe2385930035fbab73bfb666dd3025",
+      "size": 4362
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "P2S-standard.toml",
+      "path": "mkp/P2S-standard.toml",
+      "machineId": "P2S",
+      "versionId": "STANDARD",
+      "sha256": "df96bda82aa41fdbbd89e6a066369f0827179b3df987b494bbf80b97b396fdf3",
+      "size": 4366
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "X1C-lite.toml",
+      "path": "mkp/X1C-lite.toml",
+      "machineId": "X1C",
+      "versionId": "LITE",
+      "sha256": "17ca04c3c51035b30df54939354f9b21ea9aee827a5a9000cfc25b44273f6772",
+      "size": 4362
+    }
+  ]
+}

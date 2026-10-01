@@ -14,6 +14,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import s from './PagePackage.module.css'
+import { api } from '../../api'
+import type { RuntimeCatalog } from '../../api/contract'
 import {
   autoSync,
   latestOf,
@@ -86,6 +88,9 @@ export default function PagePackage({ onOpenParams }: Props) {
   const [cloud, setCloud] = useState<CloudEntry[]>([])
   const [cur, setCur] = useState<SyncedPackage | null>(null)
   const [status, setStatus] = useState<SyncStatus | 'syncing'>('syncing')
+  /* 新数据世界（第一圈）：随包 catalog 读一条真实数据。与旧世界的同步**互不拖累** ——
+     一边失败另一边照常显示，catch 成 null 由界面说「读不到」 */
+  const [world, setWorld] = useState<RuntimeCatalog | null>(null)
   /* 获取 / 使用之后重新读一遍本机状态（localStorage 不是响应式的） */
   const [tick, setTick] = useState(0)
 
@@ -96,10 +101,12 @@ export default function PagePackage({ onOpenParams }: Props) {
       /* ① 说明书：进页面自己去看一眼云端，指纹不同就换掉 */
       const r = await autoSync()
       const list = await listCloud()
+      const w = await api.getRuntimeCatalog().catch(() => null)
       if (!alive) return
       setCloud(list)
       setCur(r.local)
       setStatus(r.status)
+      setWorld(w)
     })()
     return () => {
       alive = false
@@ -166,6 +173,42 @@ export default function PagePackage({ onOpenParams }: Props) {
           <p className={`${s.note} ${s.staleNote}`}>刚把这台机器上的说明书换成了云端最新那一份。</p>
         )}
       </section>
+
+      {/*
+        新数据世界（第一圈骨架）：随包 catalog 的真实读数。
+        与上面旧世界的演示同步摆在一起 —— 新旧交接的账，一眼看得见。
+        文件列表未来长成下载入口（第一圈只展示，不发任何网络请求）。
+      */}
+      {world !== null && (
+        <section className={s.section}>
+          <div className={s.secTitle}>数据骨架（新）</div>
+          <div className={s.kv}>
+            <span className={s.key}>catalog</span>
+            <span className={s.val}>
+              schema {world.catalogSchema} · 指纹 {world.revision}
+            </span>
+          </div>
+          <div className={s.kv}>
+            <span className={s.key}>机型</span>
+            <span className={s.val}>
+              {world.machines.length} 台 ·{' '}
+              {world.machines.reduce((n, m) => n + m.versions.length, 0)} 个版本
+            </span>
+          </div>
+          <div className={s.kv}>
+            <span className={s.key}>文件</span>
+            <span className={s.val}>
+              {world.files.length} 份在目录里登记，落在下载区 mkp/ —— 用户没下载的，盘上就没有
+            </span>
+          </div>
+          {world.files.length > 0 && (
+            <p className={s.note}>
+              第一份真实文件：<b>{world.files[0].fileName}</b>（SHA{' '}
+              {world.files[0].sha256.slice(0, 12)}…，{world.files[0].size} 字节）
+            </p>
+          )}
+        </section>
+      )}
 
       {/*
         这一页不再摆「每个版本」的 TOML —— 预设（下载 / 应用）整段搬去「预设」页

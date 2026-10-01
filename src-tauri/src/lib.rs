@@ -28,6 +28,9 @@ pub mod obs;
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
 pub mod presetdata;
+/// **新数据世界**（第一圈骨架）：随包 catalog 的释放口 + 下载区/说明书的落点规则。
+/// 与 [`client`] 的旧世界并存，收口次序见 `docs/DATA-INVENTORY.md` §4。
+pub mod runtime;
 
 // 后厨工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
 // 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
@@ -73,6 +76,16 @@ pub fn run() {
             match seeded {
                 Ok(r) => tracing::info!(report = %r.summary(), "内置默认预设已就位"),
                 Err(e) => tracing::warn!("内置默认预设没就位：{e}"),
+            }
+
+            /* 新数据世界（第一圈）：随包 catalog 释放进内部根 + 建出空的下载区。
+            与上面的旧铺盘**并存**，收口后旧的那段退场（docs/DATA-INVENTORY.md §4）。
+            同样只补缺失、失败只告警不挡启动。 */
+            match fsx::paths::internal_root(&handle)
+                .and_then(|root| runtime::release::release_catalog(&root))
+            {
+                Ok(r) => tracing::info!(report = %r.summary(), "运行时 catalog 已就位"),
+                Err(e) => tracing::warn!("运行时 catalog 没就位：{e}"),
             }
 
             /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
@@ -126,6 +139,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_local_files,
         ipc::presets::get_local_user_files,
         ipc::presets::get_slicer_copied,
+        // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
+        ipc::catalog::get_runtime_catalog,
     ])
 }
 
@@ -147,6 +162,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_local_files,
         ipc::presets::get_local_user_files,
         ipc::presets::get_slicer_copied,
+        // 新数据世界（第一圈）：与上面那份清单保持一字不差
+        ipc::catalog::get_runtime_catalog,
         // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、

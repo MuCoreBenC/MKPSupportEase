@@ -564,6 +564,43 @@ export interface ClientDataPackage {
  * 真机上没接的那几个由 bridge 抛 NotImplementedError（`src/api/errors.ts`），
  * 界面上是一块「未接入」空态，不是白屏。
  */
+
+/* ——— 新数据世界（第一圈）：随包 catalog —— ——— */
+
+/**
+ * 运行时目录里的**一份交付文件**。`path` 是相对内部数据根的落点（下载区 `mkp/`）——
+ * 下载它就该落到那；`sha256` / `size` 是发布时对产物真字节算的，将来下载完拿它校验。
+ */
+export interface RuntimeCatalogFile {
+  kind: string
+  fileName: string
+  path: string
+  machineId: string
+  versionId: string
+  sha256: string
+  size: number
+}
+
+export interface RuntimeCatalogMachine {
+  id: string
+  display: string
+  brand: string
+  versions: { id: string; name: string }[]
+}
+
+/**
+ * 新数据世界的说明书（`<appDataDir>/catalog.json`，随安装包释放）。
+ * 形状与 Rust 侧 `runtime::catalog::Catalog` 一一对应，两边没有编译器，
+ * 对齐靠 `docs/DATA-ARCHITECTURE.md` 与判据测试。
+ */
+export interface RuntimeCatalog {
+  catalogSchema: number
+  /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
+  revision: string
+  machines: RuntimeCatalogMachine[]
+  files: RuntimeCatalogFile[]
+}
+
 export interface MkpApi {
   /**
    * 取某个打印件版本对应的预设。
@@ -632,6 +669,12 @@ export interface MkpApi {
    * 试验场的假后端对这个方法是**故意抛**的（那里没有真网络），真机上是 Rust 的活。
    */
   downloadFiles(refs: FileRef[]): Promise<void>
+
+  /**
+   * 新数据世界的目录（第一圈骨架）。读运行时释放进数据根的那份 catalog.json，
+   * 零网络 —— 与 getMachines（旧世界解析 TOML 树）并存，收口后由它接班。
+   */
+  getRuntimeCatalog(): Promise<RuntimeCatalog>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

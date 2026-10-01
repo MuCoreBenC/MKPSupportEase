@@ -7,6 +7,7 @@
 //! 唯一真的落盘的是 [`save_offsets`] —— 它作为 `fsx::atomic` 的第一个真实调用点。
 //! 数据形状与 `src/api/contract.ts` 一一对应，将来换成读文件时前端一行不用改。
 
+pub mod catalog;
 pub mod presets;
 
 use serde::{Deserialize, Serialize};

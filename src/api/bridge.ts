@@ -103,6 +103,9 @@ export const bridgeApi: MkpApi = {
   getMachineParams: (machineId, versionId) =>
     call('getMachineParams', 'get_machine_params', { machineId, versionId }),
 
+  /* ——— 新数据世界（第一圈）：运行时 catalog，走真 command ——— */
+  getRuntimeCatalog: () => call('getRuntimeCatalog', 'get_runtime_catalog'),
+
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   getAppliedPreset: () => notWired('getAppliedPreset'),
   copyToSlicer: () => notWired('copyToSlicer'),
