@@ -1,11 +1,17 @@
 //! 释放口：把安装包里嵌着的 catalog 铺进内部根（层② → 层③）。
 //!
-//! # 只补缺失
+//! # 释放策略（第二圈起：这就是"升级"本身）
 //!
-//! 已有的一份一个字节都不动；内容与嵌入的那份不同就**只报不覆盖** ——
-//! 它要么被用户改过、要么是上一个版本装的。替用户决定哪份该赢是不负责任的，
-//! 覆盖策略等真正的升级流程（第二圈：更新 / 归档）一起定。这与旧世界
-//! [`crate::client::paths::seed_if_absent`] 的政策一字不差，是有意保持一致。
+//! - 盘上没有 → 铺一份（首次启动）；
+//! - 盘上与随包**逐字节一致** → 不动（最常见：同一个版本再开一次）；
+//! - 盘上与随包**不同** → 旧份归档进 `archive/catalog.json`，换上随包新份。
+//!
+//! 第三条与旧世界 [`crate::client::paths::seed_if_absent`] 的"只报不覆盖"**刻意分手**：
+//! 那边铺的是可能被用户改过的定义；这边是 catalog——**程序管理的说明书**，
+//! 它的唯一主人是程序（总纲 §3），用户没有"自己那份 catalog"一说。软件升级带来新
+//! catalog 时，旧份归档、新份生效，这就是更新流程本身；归档槽保留**最早**一份，
+//! 可回溯、不静默丢。换 catalog 之后文件层面的旧版本怎么办，是 [`super::delivery`]
+//! 的事（Stale → 重走管道 → 旧文件归档）。
 //!
 //! # 顺带建出空的 `mkp/`
 //!
@@ -17,24 +23,24 @@ use std::path::Path;
 use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
 
-use super::paths::{catalog_file, mkp_dir};
+use super::paths::{archive_dir, catalog_file, mkp_dir};
 use super::EMBEDDED_CATALOG;
 
 #[derive(Debug, Default)]
 pub struct ReleaseReport {
-    /// 这次真写下去的（首次启动，或文件被删了）
+    /// 这次真写下去的（首次启动、文件被删、或随包带来了新版本）
     pub written: bool,
-    /// 已经在了、但内容与嵌入的那份不同。只报，不动盘
-    pub drifted: bool,
+    /// 盘上的旧份被归档了（= 这是一次升级）
+    pub archived: bool,
 }
 
 impl ReleaseReport {
     /// 一行给日志看的话
     pub fn summary(&self) -> String {
-        match (self.written, self.drifted) {
-            (true, _) => "catalog 已释放".to_owned(),
-            (false, true) => "catalog 保留盘上那份（与随包的不同，只报不改）".to_owned(),
-            (false, false) => "catalog 已是最新".to_owned(),
+        match (self.written, self.archived) {
+            (true, true) => "catalog 已更新（旧份归档进 archive/）".to_owned(),
+            (true, false) => "catalog 已释放".to_owned(),
+            (false, _) => "catalog 已是最新".to_owned(),
         }
     }
 }
@@ -47,16 +53,36 @@ pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
 
     let path = catalog_file(root);
     match std::fs::read(&path) {
-        Ok(existing) => Ok(ReleaseReport {
-            written: false,
-            drifted: existing != EMBEDDED_CATALOG,
-        }),
+        // 最常见的路：同一个版本再开一次，一个字节都不动
+        Ok(existing) if existing == EMBEDDED_CATALOG => Ok(ReleaseReport::default()),
+        // 盘上有、但与随包不同：升级（或文件被手动动过）。旧份归档——归档槽保留最早一份，
+        // 槽位已有就不覆盖；然后换上随包新份
+        Ok(old) => {
+            let archive = archive_dir(root).join("catalog.json");
+            std::fs::create_dir_all(archive.parent().expect("归档路径必有父目录")).map_err(
+                |e| {
+                    AppError::io(format!("建不出归档目录：{}", archive.display()))
+                        .with_detail(e.to_string())
+                },
+            )?;
+            let archived = if archive.exists() {
+                true
+            } else {
+                atomic_write(&archive, &old)?;
+                true
+            };
+            atomic_write(&path, EMBEDDED_CATALOG)?;
+            Ok(ReleaseReport {
+                written: true,
+                archived,
+            })
+        }
         // 读不到（多半是还没有）就铺一份。真读不了（权限）时下面的写会报出真原因
         Err(_) => {
             atomic_write(&path, EMBEDDED_CATALOG)?;
             Ok(ReleaseReport {
                 written: true,
-                drifted: false,
+                archived: false,
             })
         }
     }
@@ -67,31 +93,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn releases_then_keeps_then_reports_drift() {
+    fn releases_then_keeps_same_version() {
         let d = tempfile::tempdir().unwrap();
 
         // 首次：写下去
         let r = release_catalog(d.path()).unwrap();
-        assert!(r.written && !r.drifted);
+        assert!(r.written && !r.archived);
         assert_eq!(
             std::fs::read(catalog_file(d.path())).unwrap(),
             EMBEDDED_CATALOG,
             "铺下去的就是随包那份"
         );
 
-        // 已在：一个字节不动
+        // 已在且一致：一个字节不动
         let r = release_catalog(d.path()).unwrap();
-        assert!(!r.written && !r.drifted);
+        assert!(!r.written && !r.archived);
+    }
 
-        // 盘上的被改过：只报，不覆盖（测试写盘也走唯一出口，clippy 的禁列一视同仁）
-        let drifted = "# 用户改过的\n".as_bytes();
-        atomic_write(catalog_file(d.path()).as_path(), drifted).unwrap();
+    /// 升级：盘上那份与随包不同 → 旧份进 archive/，盘上换成随包新份
+    #[test]
+    fn drift_archives_the_old_catalog_then_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        release_catalog(d.path()).unwrap();
+
+        // 模拟"上一个版本装的旧 catalog"（或被手动动过的——同一个处理）
+        let old = "# 旧版本的 catalog\n".as_bytes();
+        atomic_write(catalog_file(d.path()).as_path(), old).unwrap();
+
         let r = release_catalog(d.path()).unwrap();
-        assert!(!r.written && r.drifted, "不同要说出来");
+        assert!(r.written && r.archived, "这是一次升级");
         assert_eq!(
             std::fs::read(catalog_file(d.path())).unwrap(),
-            drifted,
-            "已有的一份一个字节都不许动"
+            EMBEDDED_CATALOG,
+            "盘上换成随包新份"
+        );
+        assert_eq!(
+            std::fs::read(archive_dir(d.path()).join("catalog.json")).unwrap(),
+            old,
+            "旧份在归档里原样躺着，可回溯"
+        );
+    }
+
+    /// 归档槽保留最早一份：两次升级，archive/ 里还是第一份旧 catalog
+    #[test]
+    fn archive_slot_keeps_the_earliest_catalog() {
+        let d = tempfile::tempdir().unwrap();
+        release_catalog(d.path()).unwrap();
+
+        let older = "# 更旧的 catalog\n".as_bytes();
+        atomic_write(catalog_file(d.path()).as_path(), older).unwrap();
+        release_catalog(d.path()).unwrap(); // 第一次升级：older 进归档
+
+        let newer = "# 次旧的 catalog\n".as_bytes();
+        atomic_write(catalog_file(d.path()).as_path(), newer).unwrap();
+        release_catalog(d.path()).unwrap(); // 第二次升级：归档槽已占，不覆盖
+
+        assert_eq!(
+            std::fs::read(archive_dir(d.path()).join("catalog.json")).unwrap(),
+            older,
+            "历史不被后浪抹掉"
         );
     }
 

@@ -93,6 +93,7 @@ export default function PagePackage({ onOpenParams }: Props) {
   const [world, setWorld] = useState<RuntimeCatalog | null>(null)
   /* 下载区现状（盘就是底账）+ 下载按钮的失败说明（第一圈浏览器里没有源，如实亮出来） */
   const [downloaded, setDownloaded] = useState<string[] | null>(null)
+  const [stale, setStale] = useState<string[] | null>(null)
   const [downloadErr, setDownloadErr] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   /* 使用中指针（全局唯一；intact=false 说明盘上的文件漂了，照实说） */
@@ -109,6 +110,7 @@ export default function PagePackage({ onOpenParams }: Props) {
       const list = await listCloud()
       const w = await api.getRuntimeCatalog().catch(() => null)
       const d = await api.getDownloadedFiles().catch(() => null)
+      const s = await api.getStaleFiles().catch(() => null)
       const a = await api.getActivePreset().catch(() => null)
       if (!alive) return
       setCloud(list)
@@ -116,6 +118,7 @@ export default function PagePackage({ onOpenParams }: Props) {
       setStatus(r.status)
       setWorld(w)
       setDownloaded(d)
+      setStale(s)
       setActive(a)
     })()
     return () => {
@@ -139,9 +142,10 @@ export default function PagePackage({ onOpenParams }: Props) {
     }
   }, [world, downloading])
 
-  /* 使用 / 撤销。成功后整个新世界区块重读一遍（下载区 + 指针） */
+  /* 使用 / 撤销 / 更新之后，新世界区块整个重读一遍（下载区 + 过时清单 + 指针） */
   const refreshWorld = useCallback(async () => {
     setDownloaded(await api.getDownloadedFiles().catch(() => null))
+    setStale(await api.getStaleFiles().catch(() => null))
     setActive(await api.getActivePreset().catch(() => null))
   }, [])
 
@@ -167,6 +171,24 @@ export default function PagePackage({ onOpenParams }: Props) {
       setDownloadErr((e as { message?: string }).message ?? '撤销没成，原因没说清')
     }
   }, [refreshWorld])
+
+  /* 更新 = 对每一份过时文件重跑一遍下载管道：旧份自动归档，没有单独的更新代码路径 */
+  const tryUpdate = useCallback(async () => {
+    if (stale === null || stale.length === 0 || downloading) return
+    setDownloading(true)
+    setDownloadErr(null)
+    try {
+      for (const name of stale) {
+        await api.downloadCatalogFile(name)
+      }
+      await refreshWorld()
+    } catch (e) {
+      setDownloadErr((e as { message?: string }).message ?? '更新没成，原因没说清')
+      await refreshWorld()
+    } finally {
+      setDownloading(false)
+    }
+  }, [stale, downloading, refreshWorld])
 
   const latest = latestOf(cloud)
   const layout = useMemo(() => (cur === null ? [] : layoutOf(cur.package)), [cur])
@@ -271,6 +293,16 @@ export default function PagePackage({ onOpenParams }: Props) {
             </span>
           </div>
           <div className={s.kv}>
+            <span className={s.key}>有更新</span>
+            <span className={s.val}>
+              {stale === null
+                ? '—'
+                : stale.length === 0
+                  ? '没有，都是最新'
+                  : `${stale.length} 份可以更新（换新前旧份自动归档）`}
+            </span>
+          </div>
+          <div className={s.kv}>
             <span className={s.key}>当前使用</span>
             <span className={s.val}>
               {active === null
@@ -304,6 +336,11 @@ export default function PagePackage({ onOpenParams }: Props) {
                 使用第一份
               </button>
             )
+          )}
+          {stale !== null && stale.length > 0 && (
+            <button type="button" className={s.btn} onClick={tryUpdate} disabled={downloading}>
+              {downloading ? '正在更新……' : `更新这 ${stale.length} 份到最新`}
+            </button>
           )}
           {downloadErr !== null && (
             <p className={`${s.note} ${s.staleNote}`}>下载没成：{downloadErr}</p>

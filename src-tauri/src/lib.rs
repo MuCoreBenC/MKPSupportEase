@@ -146,6 +146,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         ipc::catalog::clear_active_preset,
+        ipc::catalog::get_stale_files,
     ])
 }
 
@@ -174,6 +175,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         ipc::catalog::clear_active_preset,
+        ipc::catalog::get_stale_files,
         // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、

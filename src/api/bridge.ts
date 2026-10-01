@@ -106,6 +106,7 @@ export const bridgeApi: MkpApi = {
   /* ——— 新数据世界（第一圈）：运行时 catalog + 下载管道，走真 command ——— */
   getRuntimeCatalog: () => call('getRuntimeCatalog', 'get_runtime_catalog'),
   getDownloadedFiles: () => call('getDownloadedFiles', 'get_downloaded_files'),
+  getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
   downloadCatalogFile: (fileName) =>
     call('downloadCatalogFile', 'download_runtime_file', { fileName }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),

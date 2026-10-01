@@ -14,6 +14,9 @@ pub const CATALOG_FILE: &str = "catalog.json";
 /// 下载区的目录名。相对**内部根**。初始为空 —— 用户下载了什么才有什么
 pub const MKP_DIR: &str = "mkp";
 
+/// 归档区的目录名。相对**内部根**。换版本时旧份进这里，不删（总纲十问 #9）
+pub const ARCHIVE_DIR: &str = "archive";
+
 /// 运行时说明书：`<appDataDir>/catalog.json`
 pub fn catalog_file(root: &Path) -> PathBuf {
     root.join(CATALOG_FILE)
@@ -22,4 +25,9 @@ pub fn catalog_file(root: &Path) -> PathBuf {
 /// 下载区：`<appDataDir>/mkp`
 pub fn mkp_dir(root: &Path) -> PathBuf {
     root.join(MKP_DIR)
+}
+
+/// 归档区：`<appDataDir>/archive`（内部结构与下载区同形：`archive/mkp/<文件名>`）
+pub fn archive_dir(root: &Path) -> PathBuf {
+    root.join(ARCHIVE_DIR)
 }

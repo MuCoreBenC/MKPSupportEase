@@ -1,71 +1,85 @@
-# 交接计划：Task 14 工作台接通（MKPSupportEase）
+# 交接：数据架构重做 —— 第一圈完成，第二圈进行中
 
-> 起草时间：2026-09-24
-> 适用分支：`feat/b04-p3-migration`（注：仓库里任务文档称 b05，分支名是 b04-p3，同一件事）
-> 起草人上下文：14a 后端链路已闭环并提交 `f4ced5c`，工作区干净，尚未推送。
+> 更新时间：2026-10-01
+> 适用分支：`main`（只认 CI 绿的 tip；推送用 `ALLOW_PUSH_MAIN=1`，提交用 `ALLOW_COMMIT_ON_MAIN=1`——本地闸，见 §5）
+> 上下文：按《四圈舞步》重做数据架构。**根规则**是 `docs/DATA-ARCHITECTURE.md`（四层世界 + 四条铁律 + 十问 + 准入问句），**对账单**是 `docs/DATA-INVENTORY.md`（43 件现状逐件归位 + 收口进展日志）。这两份先读，本文只讲"现在在哪、接下来去哪"。
 
-## 1. 当前进度（已闭环的部分 = 14a）
+## 0. 进度总览
 
-| 子项 | 状态 | 落点 |
-|------|------|------|
-| 14.3 复制已有版本 | ✅ | `presets/catalog.rs::copy_version` + `app/machines.rs::wb_copy_version` + 公共 `validate_new_version_id` |
-| 14.4 参数源待补 | ✅ | `presets/registry.rs::version_has_variants`（只看 `machineVariants`）+ `app/mod.rs::VersionView.hasRecipe` |
-| 14.5 参数正文复制 | ✅ | `app/mod.rs::wb_copy_recipe`（领域体 `copy_recipe` 可测）|
-| 14.9 基线 diff + 同步 | ✅ | `app/build.rs::wb_baseline_diff` / `wb_sync_baseline` |
-| 14.1 六页面映射 | ⏳ 勘察完成，menu/build 待前端 | — |
-| 14.2 闸门交互约束 | ⏳ 后端硬闸已就位，仅剩前端按钮 | — |
-| 14.6 资产选择模态框 | ⏳ 接 `wb_assets` | — |
-| 14.7 workbench 子目录职责 | ⏳ 待定 | — |
-| 14.8 端到端 11 步验收 | ⏳ 待 14c | — |
+| 圈 | 内容 | 状态 |
+|---|---|---|
+| 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
+| 第二圈 | 每块地基做厚 | 🔄 **刚开始**：更新与归档已落（本文 §3），manifest 契约 / catalog 加厚 / localStorage 退役未动 |
+| 第三圈 | 所有业务接进新地基（Preset 全功能 / 模型 / BBS / 报告） | ⬜ 未开始 |
+| 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
-`Task 14` 整体复选框按纪律**未勾**（子项 Completion 记在 `.comate/specs/b05-content-pipeline-charter/tasks.md`，整体收口时再勾）。
+**整体 ≈ 25%。** 判断依据：第一圈是骨架（六块全绿、139 条 Rust 测试、四条总纲判据落地 2 条），但 catalog 还只有"清单"没有"完整定义"，云端是零依赖的空位，旧世界（`client/` 铺 13 份源 TOML + localStorage 三格）原样并存未退役。
 
-## 2. 上次收尾停在哪（无半截改动）
+## 1. 第一圈留下的东西（全部在 main 上）
 
-14a 是完整闭环，没有改动留在某个文件里。按时间顺序最后动过的几个点：
+| 块 | 落点 | 一句话 |
+|---|---|---|
+| ① 数据世界 | `src-tauri/src/runtime/`（mod/paths/release/catalog/delivery/state） | 新世界的落点、释放口、说明书、管道、状态全在这一个模块 |
+| ② 最小 Catalog | `cargo run --bin gen-catalog` → `src-tauri/src/runtime/catalog.generated.json` | 读 `presets/` 源 + `crates/preset/assets/presets/` 入库产物真字节（SHA/大小），编进二进制；判据测试守"重建逐字节一致" |
+| ③ 文件系统 | 复用 `fsx/`（两根 + 防穿越 + atomic_write）+ `runtime/paths.rs`（catalog.json / mkp/ / archive/ 落点） | 业务不许自拼目录名；新增子目录先改总纲 |
+| ④ Delivery | `runtime/delivery.rs`：`Source` trait + `deliver` + `FileOnDisk` 三分态 | 源可插拔（现只有 LocalDirSource）；SHA/大小校验在落盘前；更新=重跑管道，旧份自动归档 |
+| ⑤ 用户状态 | `runtime/state.rs` | 规则：一种状态一个文件、住 `run/` 下、atomic 写、坏档不静默。第一个住客：使用中指针（`run/active-preset.json`，全局唯一在构造上成立，带应用时刻 SHA 可查漂移） |
+| ⑥ 页面闭环 | 同步页「数据骨架（新）」区（`src/app/pages/PagePackage.tsx`） | 读数 + 下载 + 使用/撤销 + 更新，全走新 API（`get_runtime_catalog` / `download_runtime_file` / `get_downloaded_files` / `get_stale_files` / `get_active_preset` / `apply_active_preset` / `clear_active_preset`——两份命令清单同步注册） |
 
-1. **代码收尾**：`src-tauri/src/workbench/app/mod.rs`（`wb_copy_recipe` + `VersionView.hasRecipe` + 14.5 判据）+ `src/app/api.ts`（`BaselineDiffEntry`、`VersionView.hasRecipe` 类型）。
-2. **写纪律判据收尾**：`src-tauri/src/workbench/presets/.../write_discipline_scan.rs`，把 `build.rs`（14.9 授权入口）与 `lib.rs`（命令注册清单）登记进 `the_baseline_has_exactly_one_write_path` 的 ALLOWED 白名单。
-3. **文档收尾**：`.comate/specs/b05-content-pipeline-charter/tasks.md` 的 14a 子项注记。
+## 2. 怎么验证（每一轮都要全绿才推）
 
-## 3. 还剩什么（按优先级）
+```bash
+cargo test                                   # 139 条（在仓库根跑，workspace 全成员）
+cargo clippy --all-targets -- -D warnings    # 两种 feature 都要：默认 + --features workbench
+cargo fmt --check                            # CI 有格式 job
+npm run build && npm run check:bundle        # 前端构建 + 判据 1（安装包产物扫描）
+npx eslint <改过的文件>                       # CI 跑全量 lint
+```
 
-### 14b 前端接通（最大块，未启动）
-- **14.1** 六页面收口：机型 / 配方 / 对比三视角已接后台；**menu / build 两个视角还没接通**（doc §4.2 映射）。
-- **14.2** 闸门按钮约束：后端硬闸（`wb_generate` / `wb_publish` 开头的 `inspect` + `first_block`）已就位，14b 只做**前端按钮禁用 / 约束**（检查未过不给生成、生成未过不给发布）。
-- **14.6** 资产选择走资产库模态框，复用已就位的 `wb_assets`（零消费），不让人手填路径。
-- **14.7** `workbench/` 五个子目录真正投入使用：`bbs/` 零读写、`.snapshots/` 只写不读，定职责（`machines/.draft/.trash` 在用）。
+改了 `presets/` 源或交付产物后必须 `cargo run --bin gen-catalog` 重生成，否则判据测试 `embedded_matches_rebuild` 红。
 
-### 14c 端到端验收
-- **14.8** 跑通 doc §4.3 全部 11 步作为验收场景。
+## 3. 第二圈还剩什么（按建议顺序）
 
-### 独立遗留（非阻塞）
-- **AGENTS.md**：独立后续任务，已登记未动。
-- **`presetFile` 字段**：仍可编辑，G-2 / 16.3 收口时同步删/锁（14.3 复制已刻意不抄它）。
-- **9.3a** BBS 文件名里的旧云端代号，待 Task 12 命名时一起谈。
+1. **R11：manifest 升为两端共用契约** —— 交付格式定义现在躺在 `src-tauri/src/workbench/app/dist.rs` 头注释里（manifest v3 的设计：全部交付文件的哈希清单、残留拦截）。把它提为工作台（发布方）与 `runtime/`（消费方）共用的类型，先于一切网络代码。**注意作者裁决：新命名不背 "v3" 的名字。**
+2. **catalog 加厚 + 换源收口（R3/R4/R5）** —— catalog 现在只有机型/版本/文件清单，要长出完整定义（参数注册表、布局、套餐、资产）才能让客户端第一屏只读 catalog；然后 `client/defaults.rs`（include_str! 13 份源 TOML）与 `client/paths.rs`（seed）退役，`ipc/presets.rs::load_presets` 换源。这是总纲欠账 #1 的正主。
+3. **C4：旧世界 localStorage 三格退役** —— `src/api/storageKeys.ts` 的 `a40.package / a40.presets / a40.active`（说明书/本机预设/使用中）。新世界的对应物已就位（catalog / mkp/ / run/active-preset.json），迁完删键。**这是盘点里最大的一笔欠账**。
+4. **Delivery 再加厚** —— 下载进度、失败重试、并发；真云端 `Source` 实现（reqwest vs ureq 选型，零网络依赖的现状要打破，选型时考虑 `spawn_blocking`）。
+5. **判据 2 / 4** —— 启动零网络（先源码扫描）、首屏唯一数据源 = catalog（随换源落地自然成立）。
 
 ## 4. 续做入口（从哪接手）
 
-- 前端六页面：`src/app/`（menu / build 视角，对照 doc §4.2 映射表）。
-- 资产模态框：接 `wb_assets`（`src/app/api.ts` 已有 `assets()` + `assetUrl()`）。
-- 闸门 UI：消费 `wb_generate` / `wb_publish` 的 `inspect` 结果做按钮约束。
-- 端到端验收：在 `src-tauri/.../tests/` 或工作台测试里，对着 doc §4.3 的 11 步走查。
+- 更新/归档（本轮刚落）：`runtime/delivery.rs` 的 `FileOnDisk` / `stale_files` / deliver 里的归档段；`runtime/release.rs` 的升级策略（盘上 catalog 与随包不同 → 旧份归档、新份生效）。
+- catalog 加厚：`runtime/catalog.rs::build_from_repo`（加字段不升 `CATALOG_SCHEMA`，改语义才升）。
+- 命令面：`src-tauri/src/ipc/catalog.rs`；**注册必须两份清单同步**（`lib.rs` 两个 `generate_handler!`）。
+- 换源：`src-tauri/src/ipc/presets.rs::load_presets`（现在的缓存机制 `forget_cached_presets` 就是给这一天留的）。
+- 假云端退役：`src/workbench/cloud.ts` + `src/workbench/fixtures/cloud-presets.json`（静态快照已挪出 public/，客户端产物已无假数据，判据 1 盯着）。
 
-## 5. 已知纪律 / 不要碰
+## 5. 已知纪律 / 不要碰（每一条都是踩过的坑）
 
-- **基线写入口唯一**：`wb_sync_baseline` → `preset::generate::sync_baseline`，落点闸在其内部，src-tauri 不经手路径。写纪律判据 `the_baseline_has_exactly_one_write_path` 是**活白名单**（相等断言），搬入口会红。
-- **版本复制只写版本定义（单文件）**，天然避开 16.2 事务空白；抄 `recommendedBundle`，**不抄 `presetFile`**（G-2 悬空名拒绝扩散）。
-- **14.5 是「独立快照」（裁决 A）**：复制 = 取模板完整有效配方（`layer.keys()` = 全部可见键，defaults⊕基底⊕覆盖归并）经 `apply_values` 批量钉成新版本显式覆盖。**缺失参数不伪造**、**无效配方进不了 layers**。改模板版本层 / 改机型基底后，快照版因自身显式值挡住传播——这是与"只复制自有覆盖"的实质差异证据。
-- 14.3 刚落盘的版本不在会话缓存里，`wb_copy_recipe` 走**盘上现读**是唯一判定依据。
+- **总纲准入问句**（`DATA-ARCHITECTURE.md` §6）：任何新文件/新功能先答"属于哪一层？谁是唯一主人？什么时候允许联网？"答不出先改文档。
+- **四条铁律**：开发文件不当运行时数据库；云端不参与首屏；用户没下载的不预置（catalog 是唯一例外——它是软件本体）；运行时只认自己的运行时数据。
+- **clippy 禁列对测试也生效**（CI 是 `--all-targets`）：测试里写盘用 `fsx::atomic::atomic_write`，`std::fs::write` 会红。
+- **`b"..."` 字节串装不下中文**：含中文用 `"…".as_bytes()`。
+- **cargo fmt 是 CI 的独立 job**：推前跑 `cargo fmt`。
+- **`presets/dist/` 是本机产物，不入库**；判据/构建器的输入用入库真身 `crates/preset/assets/presets/`（9 份，`BUILTIN_PRESETS` 编的就是它）。
+- **新旧世界并存、互不读写**（`client/` ↔ `runtime/`）；收口一条勾一条，同步更新 `DATA-INVENTORY.md` §4 与总纲 §4。
+- **`workbench/.snapshots/` 已入库**（`.gitignore` 的既定政策：除 `.draft/` 外入库）；`.codebuddy/` 已 ignore；`.trae/documents/` 留库（被代码注释引用）。
+- **仓库有并行会话在动**：推送前先 `git fetch`；合并冲突大概率在 `ipc/presets.rs` / `usePresetData.ts`（预设页是热点）。
 
-## 6. 已落地验收判据（别删）
+## 6. 判据清单（全是活的，别删）
 
-- 14.5：`copied_recipe_is_an_independent_snapshot`（①两边逐键一致；②改模板版本层与改基底后快照均不变；③hasRecipe 翻转；④键数 = 模板有效配方键数）。
-- 14.9：真数据基线 9 条全 `same`；`the_baseline_has_exactly_one_write_path` 白名单；`tests/baseline_stays_untouched_on_the_generate_path.rs`（含反空转 `the_snapshot_notices_a_change`）。
-- 写纪律：`write_discipline_scan.rs`。
+| 判据 | 守什么 |
+|---|---|
+| `runtime::tests::embedded_matches_rebuild` | 编进二进制的 catalog = 重新构建的那份（源/产物改了没重跑 gen-catalog 就红） |
+| `runtime/delivery` 9 条 | 校验在落盘前 / 防穿越 / 更新归档旧份 / 归档槽保最早 / 幂等 / Stale 可见 |
+| `runtime/state` 7 条 | 往返 / 缺省 None / 坏档 CORRUPTED / 未来代次拒 / 后应用赢 / 撤销幂等 / 漂移检测 |
+| `runtime/release` 4 条 | 首启铺 / 同版本不动 / 升级归档换新 / 归档槽保最早 / mkp/ 初始为空 |
+| `client/paths` seed 测试 | 旧世界的 mkp/ 初始为空（铁律 3 在旧世界的影子，收口 C4 时随旧世界一起退役） |
+| `scripts/check-bundle.mjs`（CI web job） | 判据 1：开发源 TOML / 模拟数据 / 工作台内容不进客户端安装包 |
+| `crates/preset/tests/builtin_presets_match_dir` | 旧世界判据，仍有效 |
 
 ## 7. 仓库状态速记
 
-- 分支 `feat/b04-p3-migration` 本地领先 `origin` 17 个提交（含 14a 的 `f4ced5c`），本 HANDOFF 提交后一并推送。
-- `.comate/`（spec / 记忆文档）已正常入库，未被忽略；`workbench/` 被 gitignore 属预期。
-- 推送目标就是本分支，**不合并 main**。
+- main 与 origin/main 同步，最新提交见 `git log`；CI 两个 job（web / rust）必须全绿。
+- 未入库的 untracked：无（`workbench/.draft/` 被 ignore 属预期）。
+- 本机开发源可用性：`crates/preset/assets/presets/` 存在时，同步页的下载/使用/更新全链路真机可跑；用户安装包里这些按钮诚实报"还没接"。

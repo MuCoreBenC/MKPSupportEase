@@ -225,6 +225,10 @@ export const mockApi: MkpApi = {
     return []
   },
 
+  async getStaleFiles() {
+    return []
+  },
+
   /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原。
      没有文件落地，所以 apply 只对已"模拟下载"的文件开——这里没有，恒拒，如实 */
   async getActivePreset() {

@@ -702,6 +702,12 @@ export interface MkpApi {
   getDownloadedFiles(): Promise<string[]>
 
   /**
+   * 有更新的文件名：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
+   * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
+   */
+  getStaleFiles(): Promise<string[]>
+
+  /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。
    */
   getActivePreset(): Promise<ActivePreset | null>

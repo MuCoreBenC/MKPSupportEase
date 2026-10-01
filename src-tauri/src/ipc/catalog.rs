@@ -79,6 +79,17 @@ pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<String>, AppErro
     })
 }
 
+/// 有更新的文件名（盘上在、字节与目录不一样）。"更新"就是对这些再跑一遍下载——
+/// 旧份自动归档，没有单独的更新代码路径
+#[tauri::command]
+pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
+    traced("getStaleFiles", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        Ok(runtime::delivery::stale_files(&root, &catalog))
+    })
+}
+
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */
 
 /// 给界面的使用中状态：指针 + 从目录反查出来的机型/版本 + 文件是否还是当时那份
