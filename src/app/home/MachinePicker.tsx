@@ -16,7 +16,7 @@
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Badge } from '../ui/Controls'
-import { FADE_MS } from './devDefaults'
+import { useDevDefaults } from './devDefaults'
 import s from './MachinePicker.module.css'
 
 /** 三级里的一行。值都是契约 id，标签才是给人看的 */
@@ -129,7 +129,8 @@ export default function MachinePicker({
   // 可见性是纯派生值：三行都常驻在 DOM 里、位置由布局定死，切的只有 data-on。
   // 所以不需要任何 state / ref 去记「该给哪一组播动画」—— 过渡由 CSS transition 接管，
   // 外部（HeroFade 换图）引发的额外重渲染算出同一个 data-on，什么都不会发生。
-  const vars = { '--fade-ms': `${FADE_MS}ms` } as CSSProperties
+  const { fadeMs } = useDevDefaults()
+  const vars = { '--fade-ms': `${fadeMs}ms` } as CSSProperties
 
   return (
     <div className={s.stack} style={vars}>

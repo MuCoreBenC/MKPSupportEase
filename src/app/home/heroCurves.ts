@@ -104,6 +104,24 @@ export function evalNudge(w: number, h: number): { nudgeX: number; nudgeY: numbe
   }
 }
 
+/**
+ * 这一刻大图该多大、偏多少。
+ *
+ * 试验场 A41 起这个 hook 吃调试面板的曲线（devStore）；产品不带面板，按 A41 README
+ * 预写的接法：**换成 evalFill / evalNudge 的结果** —— 那两个纯函数就是这里算的东西，
+ * 也是唯一用到上面那六个数组的地方。没调过面板与照抄写死是同一个结果，所以两条路
+ * 算出来的数一致。
+ */
+export function useHeroCurves(win: { w: number; h: number }): {
+  fill: number
+  nudgeX: number
+  nudgeY: number
+} {
+  const fill = evalFill(win.w, win.h)
+  const nudge = evalNudge(win.w, win.h)
+  return { fill, nudgeX: nudge.nudgeX, nudgeY: nudge.nudgeY }
+}
+
 /** 往上找最外层带 data-density 的那个节点：应用的根，它就是整个应用窗口 */
 function appRootOf(el: HTMLElement): HTMLElement {
   let found = el

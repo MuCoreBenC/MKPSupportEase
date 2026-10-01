@@ -1,9 +1,16 @@
 /*
  * 向导的卡片翻页：推入 / 退回 / 露出卡 / 页条。
  *
- * 调试面板那两个值换成了常量：glideMs → GLIDE_MS、showHit → SHOW_HIT；
- * 向调试面板上报页码的 reportPage 那条 effect 删掉了（面板不属于产品）。
- * 动画时长与热区可见性因此是定值，与面板的默认值一致。
+ * 调试面板那两个值（翻页时长 / 热区）A41 起在试验场又从面板取（`useDevDefaults`）——
+ * A39 / A40 把它们写死成常量，面板上那两个按钮对它们空转；A41 兼作「调动画速度的
+ * 试验田」。产品仓的接法（A41 README 预写）：hook 直接吃常量（见 devDefaults.ts），
+ * 值仍是定值，与面板的默认值一致。
+ * 页码**不**走 reportPage（那是 devStore 的接口，面板不属于产品），A41 起改成把
+ * `data-deck-index` / `data-deck-total` 挂在 .deck 上 —— 面板与探针从 DOM 上读，
+ * 两边零耦合（试验场见 src/dev/panelScope.ts；产品里探针也用得上）。
+ * 推入收尾的 settleTailMs（blur 归零那段要等完，见组件内注释）产品这边本来有一条
+ * 写死 GLIDE_MS 的同源修复（未提交），A41 已把它收编成随 hook 值缩放的版本 ——
+ * 以 a41 为准。
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
@@ -14,7 +21,7 @@ import type {
   ReactNode,
 } from 'react'
 import type { Density } from '../../hooks/useDensity'
-import { GLIDE_MS, SHOW_HIT } from './devDefaults'
+import { useDevDefaults } from './devDefaults'
 import DeckLayerContext, { type DeckLayerInfo } from './DeckLayerContext'
 import s from './SlideDeck.module.css'
 
@@ -40,11 +47,17 @@ export interface DeckHandle {
   jumpTo: (index: number) => void
 }
 
-const ENTER_MS = 200
 const RAIL_FLASH_MS = 1200
 
 /** 退出层永远是 out：不随 phase 变，单独提出来省一次 memo */
 const EXIT_INFO: DeckLayerInfo = { layer: 'exit', phase: 'out' }
+
+/**
+ * 预览卡那一层的内容身份（peek-in 与 peek-out 共用）：按**卡片层**来画
+ * （缩过的白底、虚焦压暗），phase 恒为 idle —— 与它静止时一模一样，
+ * 只是外层容器多一条滑入 / 滑出的动画。
+ */
+const PEEK_INFO: DeckLayerInfo = { layer: 'card', phase: 'idle' }
 
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && /^(input|select|textarea)$/i.test(t.tagName)
@@ -80,9 +93,39 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
   { sheets, density, canLeave },
   ref,
 ) {
+  /* 面板那两个值：翻页时长与热区。面板里点一下立刻生效（产品仓里是常量） */
+  const { glideMs, showHit } = useDevDefaults()
+
+  /*
+   * 卡片推入时，内容（.frame）那条动画的尾段专门用来让 blur 从 2.4px 线性归零
+   * （frame-settle 的 80% → 100%），遮住 Windows Chromium 合成层切换时的文字跳变。
+   * JS 的 setPhase('idle') 定时器必须等到这段也播完，否则 data-phase 提前切走、
+   * CSS 动画被中断，blur 瞬间跳 0 —— 改了等于没改。
+   *
+   * 0.2 = 1.0 − 0.8，对应 frame-settle 关键帧里 80%→100% 那一段。
+   */
+  const settleTailMs = Math.round(glideMs * 0.2)
+
+  /*
+   * 补位滑入的时长：与 CSS 里 `.card[data-entering='true']` 那条
+   * `calc(var(--glide-ms) * 0.35)` 是同一个数 —— JS 得等它播完才摘 data-entering，
+   * 摘早了会把动画掐掉（那就又回到"突然出现"）。
+   *
+   * 只有**跨页淡入**（fadeTo，页条拖拽 / 跨多页）走这一条：那一档没有推入过程，
+   * 预览卡是换页之后才补上来的。推入（go('next')）不用它 —— 那条路上新预览卡
+   * 是跟着推入**一起**滑进来的（peek-in 那一层），到换层时它已经在位了。
+   */
+  const peekInMs = Math.round(glideMs * 0.35)
+
   const [index, setIndex] = useState(0)
   const [phase, setPhase] = useState<Phase>('idle')
   const [exitSheet, setExitSheet] = useState<Sheet | null>(null)
+  /*
+   * 退回时右侧那张预览卡：它换页那一瞬就该"跟着这一页一起往右走"，而不是被替掉。
+   * 所以把**换页前**的那一张、连同它的让位结论一起存下来，多渲染一层，让它把
+   * 退场动画走完（层名 peek-out，见 SlideDeck 的 CSS 与下面那段渲染注释）。
+   */
+  const [exitPeek, setExitPeek] = useState<{ sheet: Sheet; peek: boolean } | null>(null)
   const [entering, setEntering] = useState(false)
   const [railFlash, setRailFlash] = useState(false)
   const [railDrag, setRailDrag] = useState(false)
@@ -160,27 +203,37 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
           window.setTimeout(() => {
             setIndex(target)
             setPhase('idle')
-            setEntering(true)
             busy.current = false
-          }, GLIDE_MS),
+          }, glideMs + settleTailMs),
         )
-        timers.current.push(window.setTimeout(() => setEntering(false), GLIDE_MS + ENTER_MS))
         return
       }
 
       // 返回：当前页缩小、退回右边缘变成卡片；平面立刻换成上一页
       setExitSheet(sheets[index])
+      /*
+       * 右侧那张预览卡同样要退场：它现在是 `.card` 里装的 sheets[index+1]，
+       * 换页那一瞬就会被换成"上一页"的预览 —— 不放这一层，它就是原地消失。
+       * 让位结论也一起存：那是它此刻真实的让位状态，换页之后不能按新 index 重算。
+       */
+      const leavingPeek = sheets[index + 1]
+      setExitPeek(
+        leavingPeek
+          ? { sheet: leavingPeek, peek: peekRef.current > 0 && index + 2 < sheets.length }
+          : null,
+      )
       setIndex(target)
       setPhase('out')
       timers.current.push(
         window.setTimeout(() => {
           setExitSheet(null)
+          setExitPeek(null)
           setPhase('idle')
           busy.current = false
-        }, GLIDE_MS),
+        }, glideMs),
       )
     },
-    [canLeave, index, sheets],
+    [canLeave, index, sheets, glideMs, settleTailMs],
   )
 
   /** 直接换页 + 交叉淡入：跨多页与页条拖动用，不走推入动画 */
@@ -191,12 +244,13 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
       timers.current = []
       busy.current = false
       setExitSheet(null)
+      setExitPeek(null)
       setPhase('idle')
       setIndex(target)
       setEntering(true)
-      timers.current.push(window.setTimeout(() => setEntering(false), ENTER_MS))
+      timers.current.push(window.setTimeout(() => setEntering(false), peekInMs))
     },
-    [canLeave, index],
+    [canLeave, index, peekInMs],
   )
 
   const jumpTo = useCallback(
@@ -240,6 +294,16 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
   const hasPrev = index > 0
   const cardSheet = sheets[index + 1]
   const showCard = cardSheet && peeking && phase !== 'out'
+
+  /**
+   * 推入时**下下页**那张预览卡（层名 peek-in）。
+   *
+   * 它只在推入动画期间存在：跟着卡片一起从右缘外滑进露出位，卡片填满左边的那一刻
+   * 它同时也到位 —— 所以换层时卡片层接手的是"已经在那儿"的一张卡，不用再补滑一次
+   * （早先那版就是补滑，观感是"最后再单独出现一下"）。见 SlideDeck 的 peek-in 那条。
+   */
+  const peekInSheet = sheets[index + 2]
+  const showPeekIn = phase === 'in' && peeking && peekInSheet !== undefined
 
   /**
    * 「第 i 页的右边会不会被露出卡盖住」。CardFrame 拿这个结论决定要不要让位 ——
@@ -293,9 +357,12 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
       ref={deckRef}
       className={s.deck}
       data-density={density}
+      /* 面板与探针从这两个属性读「现在第几页」（零耦合，见 dev/panelScope） */
+      data-deck-index={index}
+      data-deck-total={sheets.length}
       /* 这一个数把「露多少」贯穿到全部几何：卡的平移、卡面的缩放、右侧热区宽、
          以及 CardFrame 的让位量（--chrome-peek）。四处只有这一个来源 */
-      style={{ '--glide-ms': `${GLIDE_MS}ms`, '--peek-ratio': peek } as CSSProperties}
+      style={{ '--glide-ms': `${glideMs}ms`, '--peek-ratio': peek } as CSSProperties}
     >
       {/*
         每层按「层名 + sheet.id」挂 key：换 id 是为了不让 React 按位置复用上一页的
@@ -334,6 +401,27 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
         </div>
       )}
 
+      {/*
+        跟着推入一起滑进来的那张预览卡（下下页）：**在卡片层之上**（同 z-index，DOM 顺序说话），
+        这样卡片往里滑的时候，右侧那一条缝里看到的是它，而不是卡片自己。
+        推入结束（phase 翻 idle）它就卸掉 —— 那一瞬卡片层接手的正是同一张、同一位置。
+      */}
+      {showPeekIn && (
+        <div
+          key={`peek-in-${peekInSheet.id}`}
+          className={s.card}
+          data-layer="card"
+          data-phase="idle"
+          data-peek-in="true"
+          data-peek={peekAt(index + 2) ? 'true' : undefined}
+          aria-hidden="true"
+        >
+          <div className={s.face} />
+
+          <DeckLayerContext.Provider value={PEEK_INFO}>{peekInSheet.node}</DeckLayerContext.Provider>
+        </div>
+      )}
+
       {exitSheet && peeking && (
         <div
           key={`exit-${exitSheet.id}`}
@@ -352,12 +440,38 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
         </div>
       )}
 
+      {/*
+        退场的那张预览卡：**换页前**装在 .card 里的那一张，让它把"往右滑出去"走完。
+        它排在退出层**之后**（同一个 z-index 2，DOM 顺序说话）：换页那一瞬退出层是全屏的，
+        盖住了整块 deck —— 不放在它上面的话，右侧那张卡还是一闪就没了。
+
+        层身份用 data-layer='card' + data-phase='idle'：这是"静止的露出卡"那一条，
+        内容照旧是虚焦 + 压暗 + 缩过的，只是外层容器多一条 peek-out 动画（见 CSS）。
+      */}
+      {exitPeek && peeking && (
+        <div
+          key={`peek-out-${exitPeek.sheet.id}`}
+          className={s.card}
+          data-layer="card"
+          data-phase="idle"
+          data-peek-out="true"
+          data-peek={exitPeek.peek ? 'true' : undefined}
+          aria-hidden="true"
+        >
+          <div className={s.face} />
+
+          <DeckLayerContext.Provider value={PEEK_INFO}>
+            {exitPeek.sheet.node}
+          </DeckLayerContext.Provider>
+        </div>
+      )}
+
 
       {hasNext && peeking && (
         <button
           type="button"
           className={s.zoneNext}
-          data-show={SHOW_HIT}
+          data-show={showHit}
           onClick={() => go('next')}
           onMouseDown={noMultiClickSelect}
           aria-label="下一页"
@@ -368,7 +482,7 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
       <button
         type="button"
         className={s.zonePrev}
-        data-show={SHOW_HIT}
+        data-show={showHit}
         disabled={!hasPrev}
         onClick={() => go('prev')}
         onMouseDown={noMultiClickSelect}

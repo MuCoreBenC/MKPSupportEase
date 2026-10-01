@@ -34,7 +34,7 @@ import CopyAction from './CopyAction'
 import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
 import type { Density } from '../../hooks/useDensity'
-import { FADE_MS } from './devDefaults'
+import { useDevDefaults } from './devDefaults'
 import { pickArt } from './heroArt'
 import { useArtLayers } from './useArtLayers'
 import {
@@ -94,6 +94,8 @@ interface PageHomeProps {
 
 export default function PageHome({ density }: PageHomeProps) {
   const deckRef = useRef<DeckHandle>(null)
+  /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
+  const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
 
   const [openModel, setOpenModel] = useState<string | null>(null)
@@ -377,7 +379,7 @@ export default function PageHome({ density }: PageHomeProps) {
           /* 同样不给眉标题：卡里三组标题（品牌 / 机型 / 打印件版本）已经说明这是在选机型。
              去掉后 data-bare-top 生效，「品牌」正好抬到原来眉标题那行字的高度 */
           <CardFrame
-            style={{ '--fade-ms': `${FADE_MS}ms` } as CSSProperties}
+            style={{ '--fade-ms': `${fadeMs}ms` } as CSSProperties}
             peekSafe
             navs={[{ label: '回主页', onClick: () => deckRef.current?.jumpTo(0) }]}
             actions={[
@@ -594,6 +596,7 @@ export default function PageHome({ density }: PageHomeProps) {
       draft,
       drop,
       entryLabel,
+      fadeMs,
       layers,
       modelName,
       modelOptions,

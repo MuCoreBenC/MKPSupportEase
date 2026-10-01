@@ -34,6 +34,9 @@
    * 系数 0.25 比 --peek-face 的 0.3 小：文字的缩放比白底醒目得多，
    * 同样的幅度会显得过头；5%（p = 0.2 时 0.95）是"看得出在放大"与"不像在抽搐"之间。
    * p → 0 时同样趋近 1，"连续出场"那条性质不变。
+   *
+   * 这个变量与下面那组虚焦值是从 **v023 那一代数**收回来 ——
+   * A39 / A40 两稿都没有，露出的下一页是完整实色、原尺寸的。见 README。
    */
   --peek-content: calc(1 - 0.25 * var(--peek-ratio));
 
@@ -77,11 +80,22 @@
 
 
 
-/* 当前内容：平面，没有任何卡片外壳，也不参与动画 */
+/*
+ * 当前内容：平面，没有任何卡片外壳，也不参与动画。
+ *
+ * will-change: transform 必须与 .card 一致（那边是它的另一半）—— 否则卡片→平面那一刻
+ * Chromium 会从"合成层位图化"切回"直接绘制"，同一批文字的亚像素取整在两条路径下不同，
+ * 肉眼看到 1-2px 的"定住之后跳一下"（Windows/WebView2 真机录屏实测；
+ * macOS 的 Core Animation 两条路径取整策略一致，不受影响）。
+ *
+ * 给这棵子树里的某一层补 translateZ(0) 代替不了它：换层时被换掉的正是"哪一层在合成"
+ * 这件事本身，父层没提升，子层的位图就得重画一次。
+ */
 .plane {
   position: absolute;
   inset: 0;
   z-index: 1;
+  will-change: transform;
 }
 
 /*
@@ -118,9 +132,20 @@
     0 1px 2px rgb(20 32 45 / 6%);
 }
 
-/* 补位时淡入，避免凭空出现 */
+/*
+ * 补位：预览卡从**右缘外**滑到露出位。
+ *
+ * 走这条的只有**跨页淡入**（页条拖拽 / 跨多页）：那一档没有推入过程，预览卡是换页之后
+ * 才补上来的。起手在 translateX(100%)（整张卡在 deck 右缘之外，deck 是 overflow: hidden，
+ * 一个字都看不见），终点与静态值 translateX(--peek-shift) 逐像素相同，所以不会补跳一下。
+ *
+ * 时长 0.35×glide、曲线与 card-slide 同一条。JS 那边（peekInMs）等它播完才摘 data-entering，
+ * 两处必须同源 —— 摘早了会把动画掐断，那就又回到"啪地出现"。
+ *
+ * 推入（.card[data-phase='in']）不走这条，见下面的 peek-in —— 那边是**跟着推入一起**滑进来的。
+ */
 .card[data-entering='true'] {
-  animation: card-enter 0.2s ease-out;
+  animation: card-enter calc(var(--glide-ms) * 0.35) cubic-bezier(0.32, 0.68, 0.12, 1);
 }
 
 /*
@@ -254,11 +279,64 @@
 
 @keyframes card-enter {
   from {
-    opacity: 0;
+    transform: translateX(100%);
   }
 
   to {
-    opacity: 1;
+    transform: translateX(var(--peek-shift));
+  }
+}
+
+/*
+ * 推入：新的预览卡（下下页）跟着推入**一起**从右缘外滑进露出位。
+ *
+ * 窗口与曲线都抄 card-slide（推入那条）：卡片填满左边的那一刻，这张同时也到位 ——
+ * 作者的口径是"出现到最后的时候一起出现，不要最后再单独出现一下"。
+ *
+ * 它与 card-slide 同窗口同曲线，但行程只有 100% - --peek-shift（露出那一段宽），
+ * 因为它的终点是露出位、不是 0。所以两张卡是"同时开始、同时结束、走不同距离"。
+ */
+.card[data-peek-in='true'] {
+  animation: peek-in calc(var(--glide-ms) * 0.6) cubic-bezier(0.32, 0.68, 0.12, 1) both;
+}
+
+@keyframes peek-in {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(var(--peek-shift));
+  }
+}
+
+/*
+ * 退回：右侧那张预览卡跟着这一页一起往右走 —— 同步缩、同步滑，不许原地被替掉。
+ *
+ * 它本来就是一张静止的露出卡（.card 的静态位），所以这里只动**外层容器**：
+ *
+ *   0  → 45%    原地缩到 --peek-face  —— 与白底 face-shrink 同窗口同曲线
+ *   45% → 100%  往右滑 --peek-shift    —— 与当前页 card-slide-out 同窗口同曲线
+ *
+ * 位移写成 `var(--peek-shift) * 2`：当前页这一趟走的正是 --peek-shift（露出比例那一份），
+ * 这张卡跟它同速同距 —— "被这一页推出去"在几何上是真的，换个露出比例也不走样。
+ * 终点落在 deck 右缘之外，所以它是滑出画面，不是淡出（作者：不要突然消失）。
+ */
+.card[data-peek-out='true'] {
+  animation: peek-out var(--glide-ms) cubic-bezier(0.32, 0.68, 0.12, 1);
+}
+
+@keyframes peek-out {
+  0% {
+    transform: translateX(var(--peek-shift)) scale(1);
+  }
+
+  45% {
+    transform: translateX(var(--peek-shift)) scale(var(--peek-face));
+  }
+
+  100% {
+    transform: translateX(calc(var(--peek-shift) * 2)) scale(var(--peek-face));
   }
 }
 
@@ -378,7 +456,10 @@
   .card[data-phase='in'] .face,
   .card[data-phase='out'] .face,
   .card[data-phase='in'] .face::before,
-  .card[data-phase='out'] .face::before {
+  .card[data-phase='out'] .face::before,
+  .card[data-entering='true'],
+  .card[data-peek-in='true'],
+  .card[data-peek-out='true'] {
     animation-duration: 0.16s;
     animation-delay: 0s;
   }

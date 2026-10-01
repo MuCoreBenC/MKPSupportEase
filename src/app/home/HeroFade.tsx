@@ -3,10 +3,12 @@
  *
  * # 为什么比试验场那份少一半
  *
- * 试验场那份有一半是调试面板的编辑面：拖图写微移曲线、滚轮写尺寸曲线、Ctrl+Z 撤销 / 重做、
+ * A31 那份有一半是调试面板的编辑面：拖图写微移曲线、滚轮写尺寸曲线、Ctrl+Z 撤销 / 重做、
  * 网格吸附、拖动读数、以及往面板上报槽位与大图的实测尺寸。那些全部经试验场自己的 devStore，
  * 调试面板不属于产品，所以整块没有搬过来，只留下产品要的那一半：
- * **按曲线把图摆好 + 换图时两层交叉淡入**。
+ * **按曲线把图摆好 + 换图时两层交叉淡入**。A41 起试验场那边曲线值又从面板取了回来
+ * （`useHeroCurvesA41`），产品仓的同名 hook 是同一个口 —— 只是它直接吃写死的基线
+ * （见 heroCurves），**拖动 / 滚轮写曲线那一半仍然不做** —— 那才是「面板的编辑面」。
  *
  * 去掉的东西在试验场的默认状态下本来也不生效：面板的「编辑锁」默认是锁上的（editLock 默认
  * true），拖动 / 滚轮 / 双击复位都被那道锁挡着；网格与拖动读数默认不显形。
@@ -16,7 +18,9 @@
  *
  * # 尺寸与位置从哪来
  *
- * 那六条曲线写死在 `heroCurves` 里（值来自试验场的基线，见那边的文件头）。
+ * 还是那六条曲线 —— 见 `heroCurves`。试验场 A41 起从调试面板取（面板里没调过时
+ * 就是那份基线）；产品里 `useHeroCurves` 直接吃写死的那份，要调就改那个文件。
+ * 横轴是「应用窗口的逻辑宽高」：自己量 —— 往上找最外层带 data-density 的节点。
  *
  * CSS Module 是逐字搬过来的，所以里面 `.grid` / `.readout` 两组规则现在没人用了，
  * 没有删 —— 保持与试验场那份一致。
@@ -25,7 +29,7 @@
 import type { CSSProperties } from 'react'
 
 import type { ArtLayer } from './useArtLayers'
-import { evalFill, evalNudge, useWinSize } from './heroCurves'
+import { useHeroCurves, useWinSize } from './heroCurves'
 
 import s from './HeroFade.module.css'
 
@@ -45,23 +49,24 @@ interface HeroFadeProps {
  */
 export default function HeroFade({ layers, onSettle, onDrop, alt }: HeroFadeProps) {
   const { size: win, ref: boxRef } = useWinSize()
+  /* 尺寸与微移的曲线来自面板：调一下当场就变（产品仓里是写死的那份） */
+  const { fill, nudgeX, nudgeY } = useHeroCurves(win)
 
   // 什么都没选：槽位彻底空着，一个节点都不留
   if (layers.length === 0) return null
 
-  const fill = evalFill(win.w, win.h)
-  const nudge = evalNudge(win.w, win.h)
   const top = layers[layers.length - 1]
 
   return (
-    <div ref={boxRef} className={s.box}>
+    /* data-hero：调试面板据此判断「大图在不在场」—— 曲线那一档才有意义（见 dev/panelScope） */
+    <div ref={boxRef} className={s.box} data-hero="on">
       <figure
         className={s.hero}
         style={
           {
             '--hero-fill': fill,
-            '--nx': nudge.nudgeX,
-            '--ny': nudge.nudgeY,
+            '--nx': nudgeX,
+            '--ny': nudgeY,
             '--fade-ms': `${FADE_MS}ms`,
           } as CSSProperties
         }
