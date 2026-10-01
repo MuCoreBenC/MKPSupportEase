@@ -41,7 +41,8 @@ impl ReleaseReport {
 
 pub fn release_catalog(root: &Path) -> Result<ReleaseReport, AppError> {
     std::fs::create_dir_all(mkp_dir(root)).map_err(|e| {
-        AppError::io(format!("建不出下载区：{}", mkp_dir(root).display())).with_detail(e.to_string())
+        AppError::io(format!("建不出下载区：{}", mkp_dir(root).display()))
+            .with_detail(e.to_string())
     })?;
 
     let path = catalog_file(root);
@@ -82,9 +83,9 @@ mod tests {
         let r = release_catalog(d.path()).unwrap();
         assert!(!r.written && !r.drifted);
 
-        // 盘上的被改过：只报，不覆盖（字节串字面量装不下中文，用 as_bytes）
+        // 盘上的被改过：只报，不覆盖（测试写盘也走唯一出口，clippy 的禁列一视同仁）
         let drifted = "# 用户改过的\n".as_bytes();
-        std::fs::write(catalog_file(d.path()), drifted).unwrap();
+        atomic_write(catalog_file(d.path()).as_path(), drifted).unwrap();
         let r = release_catalog(d.path()).unwrap();
         assert!(!r.written && r.drifted, "不同要说出来");
         assert_eq!(

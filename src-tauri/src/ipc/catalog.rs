@@ -24,8 +24,9 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
             Ok(bytes) => bytes,
             Err(_) => {
                 runtime::release::release_catalog(&root)?;
-                std::fs::read(&path)
-                    .map_err(|e| AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string()))?
+                std::fs::read(&path).map_err(|e| {
+                    AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
+                })?
             }
         };
         runtime::Catalog::parse(&bytes)

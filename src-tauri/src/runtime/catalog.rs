@@ -106,7 +106,11 @@ impl Catalog {
 pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
     let presets_dir = repo_root.join("presets");
     let presets = crate::presetdata::Presets::load_from(&presets_dir)?;
-    let assets = repo_root.join("crates").join("preset").join("assets").join("presets");
+    let assets = repo_root
+        .join("crates")
+        .join("preset")
+        .join("assets")
+        .join("presets");
 
     // 品牌显示名：机型文件里写的是 id，给人看的是 brands.toml 里的名字（与 get_machines 同一条）
     let brands: HashMap<&str, &str> = presets
@@ -209,7 +213,11 @@ mod tests {
         let catalog = build_from_repo(&repo_root()).expect("构建不该失败");
         assert_eq!(catalog.machines.len(), 5, "5 台机型");
         assert_eq!(
-            catalog.machines.iter().map(|m| m.versions.len()).sum::<usize>(),
+            catalog
+                .machines
+                .iter()
+                .map(|m| m.versions.len())
+                .sum::<usize>(),
             9,
             "9 个版本，每个版本一份交付产物"
         );

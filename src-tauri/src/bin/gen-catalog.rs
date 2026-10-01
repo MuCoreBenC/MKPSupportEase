@@ -45,7 +45,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "已写出 {}（{} 台机型 / {} 个版本 / {} 份文件，revision {}）",
         out.display(),
         catalog.machines.len(),
-        catalog.machines.iter().map(|m| m.versions.len()).sum::<usize>(),
+        catalog
+            .machines
+            .iter()
+            .map(|m| m.versions.len())
+            .sum::<usize>(),
         catalog.files.len(),
         catalog.revision
     );
