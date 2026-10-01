@@ -1,6 +1,35 @@
+import { rmSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { bbsFs } from './tools/dev-server/bbsFs.mjs'
+
+/*
+ * 已经接进 catalog、走「下载管道」的资产，**不再随客户端产物分发**。
+ *
+ * 以前 `public/` 里有什么就进什么包 —— 于是"开发仓库里有这份文件"变成了
+ * "用户安装包里也带一份"。第三圈起它们归 catalog 管（带 SHA / 大小、按需下载进 `mkp/`），
+ * 包里那份副本就成了第二个真源：**盘上哪份是对的，从此有两个答案。**
+ *
+ * 这里只摘**已经接进管道的那几类**（接一类加一行），没接的（整机图那一类 UI 装饰）
+ * 暂时还在包里 —— 等它们也接进来，这份清单就是空的时候，`public/` 那整个目录
+ * 也可以搬走。判据 1（`scripts/check-bundle.mjs`）盯着这件事：清单里有的却出现在产物里就红。
+ */
+const DELIVERED_ASSET_DIRS = ['bbs']
+
+/** 从客户端构建产物里摘掉上面那几类资产的副本。**工作台构建不摘** —— 那是开发态工具 */
+function dropDeliveredAssets(enabled: boolean) {
+  return {
+    name: 'drop-delivered-assets',
+    apply: 'build' as const,
+    closeBundle() {
+      if (!enabled) return
+      for (const dir of DELIVERED_ASSET_DIRS) {
+        rmSync(resolve('dist/assets', dir), { recursive: true, force: true })
+      }
+    },
+  }
+}
 
 /*
  * 两个插件：react() 与 bbsFs()。
@@ -52,7 +81,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), bbsFs()],
+    plugins: [react(), bbsFs(), dropDeliveredAssets(!withWorkbench)],
 
     build: {
       rollupOptions: { input },

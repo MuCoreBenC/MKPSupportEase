@@ -805,6 +805,14 @@ export interface MkpApi {
   ): Promise<DownloadOutcome[]>
 
   /**
+   * 读一份**已经下载**的交付文件的正文（第三圈起，资产也从这里读）。
+   *
+   * 前端不碰文件系统，所以要有这一条；只认 catalog 登记过的落点，
+   * 没下载就是 NOT_FOUND —— 那时界面该说"还没下载"，而不是渲染一个空壳。
+   */
+  readDownloadedText(fileName: string): Promise<string>
+
+  /**
    * 当前数据源。`null` = 还没配（既没填过、也没有出厂默认值）——
    * 这时下载与检查更新都会拒绝执行并说明去哪儿配。
    */

@@ -792,7 +792,7 @@ mod tests {
             .find(|f| f.kind == "mkp_preset")
             .expect("MKP 引用必须在");
         assert_eq!(mkp.file_name, "A1-fastv3.3.toml");
-        assert_eq!(mkp.path, "mkp/A1-fastv3.3.toml", "落点相对内部根");
+        assert_eq!(mkp.path, "mkp/presets/A1-fastv3.3.toml", "落点相对内部根");
         assert!(mkp.size.unwrap_or(0) > 0, "大小是登记的真值");
         assert_eq!(mkp.sha256.as_deref().map(str::len), Some(64));
         // 切片器那支跟着套餐走：A1_default 至少一条 BBS

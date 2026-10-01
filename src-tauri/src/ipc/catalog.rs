@@ -113,6 +113,40 @@ pub struct DownloadTick {
     pub message: Option<String>,
 }
 
+/// 读一份**已经下载**的交付文件的正文（前端不碰文件系统，所以要有这一条）。
+///
+/// **只认 catalog 登记过的落点**：入参是文件名，落点由目录给（`resolve_in` 再过一道防穿越）。
+/// 于是"能不能读"只有一个答案来源——目录说有这份、盘上也在，才读得出来。
+///
+/// 这一刀只服务**文本类**资源（BBS 配置就是 JSON）：字节不是 UTF-8 就如实报错，
+/// 不猜编码、不做半截解码。图片 / 模型那一类将来要么走 asset 协议、要么另加一条口子。
+#[tauri::command]
+pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<String, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("readDownloadedText", |_| {
+            let root = internal_root(&app)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == file_name)
+                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+
+            let target = crate::fsx::paths::resolve_in(&root, &file.path)?;
+            let bytes = std::fs::read(&target).map_err(|_| {
+                AppError::not_found(format!(
+                    "{file_name} 还不在本机——先下载，再读它（下载区初始是空的）"
+                ))
+            })?;
+            String::from_utf8(bytes).map_err(|_| {
+                AppError::corrupted(format!("{file_name} 不是 UTF-8 文本，这一条读不出来"))
+            })
+        })
+    });
+    task.await
+        .map_err(|e| AppError::internal("读文件没跑到终局").with_detail(e.to_string()))?
+}
+
 /// 把 catalog 里登记的一份文件从数据源拉进下载区（`mkp/`）。
 ///
 /// 文件在哪 = [地址](remote_base) + catalog 记的相对位置，地址在 catalog 之外

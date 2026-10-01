@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "4b752253f579132f",
+  "revision": "ec7f90d4b10089f9",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -4607,7 +4607,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1-standard.toml",
-      "path": "mkp/A1-standard.toml",
+      "path": "mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
       "sha256": "0b19feaa67a77d2f0e61dfcf1c9d0ae1632c0ddb53db030c417b61ed00b69359",
@@ -4616,7 +4616,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1-fast.toml",
-      "path": "mkp/A1-fast.toml",
+      "path": "mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
       "sha256": "522eb884c820bcaee35574d6ccf0522861031cf16aad0b26fca461512025a7cd",
@@ -4625,7 +4625,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1-fastv3.3.toml",
-      "path": "mkp/A1-fastv3.3.toml",
+      "path": "mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
       "sha256": "3426fd38ddc1389f3d1a893ed9f0a6faa3a5aba9f3a0c97411ef76aef5e530bf",
@@ -4634,7 +4634,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-standard.toml",
-      "path": "mkp/A1_MINI-standard.toml",
+      "path": "mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
       "sha256": "26d1aad549bc76c66bd362de8f6adc84caf7ccf0f5ffcb3f0a25ebda61435286",
@@ -4643,7 +4643,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fast.toml",
-      "path": "mkp/A1_MINI-fast.toml",
+      "path": "mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
       "sha256": "115e061f72014f7680adde6f4dfd2345f6acf7499dd247e4b8f1354f95f7cd43",
@@ -4652,7 +4652,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fastv3.3.toml",
-      "path": "mkp/A1_MINI-fastv3.3.toml",
+      "path": "mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
       "sha256": "f4e51d8f889637e80e7321bc73e440f84fa4060855af09bb0d4ef657e6d1a06f",
@@ -4661,7 +4661,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "P1S-lite.toml",
-      "path": "mkp/P1S-lite.toml",
+      "path": "mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
       "sha256": "bed23fb6b45e680a7fd520a8ae4669402ffe2385930035fbab73bfb666dd3025",
@@ -4670,7 +4670,7 @@
     {
       "kind": "mkp_preset",
       "fileName": "P2S-standard.toml",
-      "path": "mkp/P2S-standard.toml",
+      "path": "mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
       "sha256": "df96bda82aa41fdbbd89e6a066369f0827179b3df987b494bbf80b97b396fdf3",
@@ -4679,11 +4679,92 @@
     {
       "kind": "mkp_preset",
       "fileName": "X1C-lite.toml",
-      "path": "mkp/X1C-lite.toml",
+      "path": "mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
       "sha256": "17ca04c3c51035b30df54939354f9b21ea9aee827a5a9000cfc25b44273f6772",
       "size": 4362
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "2ba10a2d873744f97e75a1697fa9a054b58aacb772993d6d05e973f04fda5004",
+      "size": 1308
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 0.4 0.20.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "e4696732236194d4035635adce6abc01fe3efb01847249745f4a36c4f6d5977f",
+      "size": 1332
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "567a018e5d1c66a573a4ad32cea04c6524858a74bfd6af7bc1f0263c45626c6f",
+      "size": 1315
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "1ae5318f97eeb95a3e804619d5102d1d851d06860e53a9a4899dad0db4d717ca",
+      "size": 1301
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P1S 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "810d4441deef000106366220010d7ca48ae586ac52936af53c84dcb1b3dca8e1",
+      "size": 1906
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P1S 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "264addc551633c553828492580eef74fc51f2690a127919ed8da051634d8bc2d",
+      "size": 1872
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P2S 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "machineId": "P2S",
+      "versionId": "",
+      "sha256": "124f8290aa007567af78d6058f95095e4787c02a30371acb56f489029168499e",
+      "size": 1264
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess X1 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "machineId": "X1C",
+      "versionId": "",
+      "sha256": "9d9737d18f8cea34d284031dd544b444a00e56c112a4d0ab74b0813f56e2e9ca",
+      "size": 1904
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess X1 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "machineId": "X1C",
+      "versionId": "",
+      "sha256": "1fe7377c92d0f67bb8ed1cda16edb12c32a56e3cb4d864983eaccb6ced0a8fa4",
+      "size": 1925
     }
   ]
 }

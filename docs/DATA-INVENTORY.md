@@ -216,4 +216,21 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      三道闸——网络符号只许住 `runtime/net.rs`、程序的 `.setup()` 段零联网、
      `src/api/` 不许绕过 IPC 自己发 HTTP。挂 CI web job，干净过并用种脏实测过。
 
+- 2026-10-01：**第三圈第一刀 —— BBS 配置纳入统一资产入口**（作者圈定：先吃资产，不为兼容旧体系保留旧名）。
+  1. **catalog 认识它**：新增 `runtime::catalog::kind`（`mkp_preset` / `bbs_config`）与落点规矩
+     `mkp/<kind 目录>/…`；9 份预设的落点随之统一到 `mkp/presets/…`（旧形状 `mkp/<文件名>` 退役）。
+     BBS 那 9 份由构建器从 `presets/assets.toml` 的 `slicerProfile` 条目 + 载荷真字节算出
+     SHA / 大小登记进来（**定义与载荷分家**：定义是①，字节是构建期读出来的）。
+  2. **同一条管道**：与预设共用 `deliver`（校验在落盘前 / 防穿越 / 旧份归档 / 盘当底账），
+     **没有为资产新增下载系统**。端到端判据是真 HTTP → SHA → 落 `mkp/bbs/Process/0.2mm/…`。
+  3. **随包副本退役**：客户端产物不再带 `assets/bbs/`（`vite.config.ts` 的
+     `DELIVERED_ASSET_DIRS` + 判据 1 的同一份清单两处同步）；dev / 工作台模式照旧能取到。
+  4. **消费面切换**：新增 `read_downloaded_text`（前端不碰文件系统，只认 catalog 登记的落点，
+     没下载就 NOT_FOUND）；BBS 页改从 `mkp/bbs/` 载入，一份都没下载时页面如实说
+     "产品配置 N 份，还没下载"，不摆点不动的假入口。
+  5. **顺手修掉一个真 bug**：资产文件名带空格（`MKPProcess A1 0.2 0.10.json`），
+     拼 URL 不编码会直接 `invalid uri character` —— 编码收在 `source::join_url` 一处（判据盯着）。
+  6. 判据：catalog 侧新增「种类与落点」「文件名与落点唯一」「大小 = 盘上真字节」三条；
+     随包退役由判据 1 的 `assets/bbs/` 那条守。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

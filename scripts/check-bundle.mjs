@@ -47,6 +47,11 @@ const FORBIDDEN = [
 
   // 内置预设的入库目录（crates/preset/assets/presets）：它编进二进制，不以文件形式随前端产物走
   [/(^|\/)presets\/.+\.toml$/, '交付预设文件（编在二进制里，不该出现在前端产物）'],
+
+  // 已接进 catalog 的资产：它们归 catalog 管（带 SHA / 大小，按需下载进 mkp/），
+  // 包里再带一份就是第二个真源。新增一类资产进管道，这里就多一行（与 vite.config.ts
+  // 的 DELIVERED_ASSET_DIRS 同一份清单，改一处就要改另一处）
+  [/\/assets\/bbs\//, '已走下载管道的 BBS 资产（不该再随包分发）'],
 ]
 
 function walk(dir, prefix = '') {

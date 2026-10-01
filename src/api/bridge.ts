@@ -134,6 +134,8 @@ export const bridgeApi: MkpApi = {
     call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
   downloadCatalogFiles: (fileNames, onTick) =>
     call('downloadCatalogFiles', 'download_runtime_files', withTick({ fileNames }, onTick)),
+  readDownloadedText: (fileName) =>
+    call('readDownloadedText', 'read_downloaded_text', { fileName }),
   getPresetSource: () => call('getPresetSource', 'get_preset_source'),
   setPresetSource: (baseUrl) =>
     call('setPresetSource', 'set_preset_source', { baseUrl }),

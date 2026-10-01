@@ -60,7 +60,7 @@
 | --- | --- |
 | 程序本体 + 前端产物 | 二进制与 vite 产物 |
 | **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身。**它不带云端地址** —— 见 §1④ 的分工 |
-| 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放 |
+| 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放。**登记后不再随前端产物分发**：它是"产品开发出来的资源"，与 MKP 预设一样走 catalog → Source → Delivery → `mkp/<kind>/…`（第三圈的做法） |
 | 内置预设 | 随软件发布的成品内容（现 9 份，入库产物目录 `crates/preset/assets/presets`，判据锚定），在 catalog 里标"内置" |
 
 | 禁止 | 理由 |
@@ -77,7 +77,10 @@
 ```text
 <appDataDir>/
 ├── catalog.json   说明书运行时副本（首启从安装包释放 / 校验，程序只读）
-├── mkp/           下载区：云端下载的原件 + 外部导入的原件。初始为空，下载了什么才有什么
+├── mkp/           产品资源区：**从外部取得、由程序管理的原件**（云端下载的 + 外部导入的）。
+│                  初始为空，下载了什么才有什么（铁律 3）。**按种类分层、不按来源分层**：
+│                  mkp/presets/ · mkp/bbs/ · mkp/models/ … —— 新增一种资源就多一个 kind 与一个目录，
+│                  不再出现"今天 assets/、明天 cloud/、后天 models/"那种各起一套
 ├── archive/       更新后旧版本的归档（不删）
 ├── index/         索引
 ├── logs/          按天滚动日志
@@ -159,7 +162,7 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- |
 | 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
-| 3 | `public/assets/bbs/Process/` 9 份 JSON 裸进安装包 | 半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知 | 发布构建登记进 catalog |
+| 3 | ~~`public/assets/bbs/Process/` 9 份 JSON 裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈第一刀）**：BBS 切片器预设登记进 catalog（`kind=bbs_config`，落点 `mkp/bbs/…`），客户端按需下载，随包副本退役。模型 / 图标下一刀照同一条路走 |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
 | 5 | 下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/` | 命名欠账，职责是同一个（下载原件区） | 以本文 `mkp/` 为准收口；`PRESET-PRODUCT-RULES.md` 录入正文时同步 |
 | 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |

@@ -81,7 +81,7 @@ impl<'a> GetPlan<'a> {
 
 /// 传到哪一步了。**只有四个阶段** —— 刻意没有"校验中 / 落盘中"：
 /// 那两步发生在管道内部（SHA 校验与原子写是一次 `deliver` 调用的内部行为），
-/// 这一层拿不到它们的时机。与其报一个凭 guessed 的时刻，不如只报真知道的事。
+/// 这一层拿不到它们的时机。与其报一个猜出来的时刻，不如只报真知道的事。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Connecting,
@@ -395,7 +395,7 @@ mod tests {
                         break;
                     }
                     let Ok(mut stream) = stream else { continue };
-                    // 请求头读到空行就算读完（这只够 intangible GET，够用）
+                    // 请求头读到空行就算读完（这只够最朴素的 GET，够用）
                     let mut head = Vec::new();
                     let mut byte = [0u8; 1];
                     while head.len() < 64 * 1024 {
@@ -625,9 +625,9 @@ mod tests {
     /// 目录条目：SHA 与大小都对 `content` 负责（远端与期望值由此同源）
     fn entry(name: &str, content: &[u8]) -> CatalogFile {
         CatalogFile {
-            kind: "mkp_preset".to_owned(),
+            kind: super::super::catalog::kind::PRESET.to_owned(),
             file_name: name.to_owned(),
-            path: format!("mkp/{name}"),
+            path: format!("mkp/presets/{name}"),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
             sha256: super::super::catalog::hex(&sha2::Sha256::digest(content)),
@@ -658,7 +658,7 @@ mod tests {
 
         assert_eq!(
             target,
-            super::super::paths::mkp_dir(root.path()).join("A1-standard.toml"),
+            super::super::paths::mkp_dir(root.path()).join("presets/A1-standard.toml"),
             "落在目录说的那个位置"
         );
         assert_eq!(std::fs::read(&target).expect("读到"), content);
@@ -666,6 +666,44 @@ mod tests {
             super::super::delivery::file_status(root.path(), &file),
             FileOnDisk::Current,
             "盘上当底账：下完立刻查得到"
+        );
+    }
+
+    /// 第三圈第一刀的端到端：**BBS 配置走同一条管道**（真 HTTP → SHA → 落 `mkp/bbs/…`）。
+    ///
+    /// 这条守的是"新增一种资源不再新增一套下载系统"：除了 `kind` 与落点目录，
+    /// 它与预设那一支走的是**同一个 `deliver`、同一道 SHA 闸、同一套归档**。
+    #[test]
+    fn bbs_config_rides_the_same_pipeline() {
+        let content = "{\"type\":\"process\",\"version\":\"0.2\"}\n"
+            .as_bytes()
+            .to_vec();
+        let file = CatalogFile {
+            kind: super::super::catalog::kind::BBS_CONFIG.to_owned(),
+            file_name: "MKPProcess A1 0.2 0.10.json".to_owned(),
+            path: "mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json".to_owned(),
+            machine_id: "A1".to_owned(),
+            version_id: String::new(),
+            sha256: super::super::catalog::hex(&sha2::Sha256::digest(&content)),
+            size: content.len() as u64,
+        };
+        let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
+        let root = fresh_root();
+
+        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let target =
+            super::super::delivery::deliver(root.path(), &file, &source).expect("该走得通");
+
+        assert_eq!(
+            target,
+            root.path()
+                .join("mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"),
+            "BBS 配置落在 mkp/bbs/ 下，与预设分开"
+        );
+        assert_eq!(std::fs::read(&target).expect("读到"), content);
+        assert_eq!(
+            super::super::delivery::file_status(root.path(), &file),
+            FileOnDisk::Current
         );
     }
 

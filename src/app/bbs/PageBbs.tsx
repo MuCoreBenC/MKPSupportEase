@@ -39,6 +39,7 @@ import { MODEL_ALL } from './bbsSource'
 import { coverage } from './bbsToggleRules'
 import { useSessionState } from '../shared/useSessionState'
 import { useBbsData } from './useBbsData'
+import { useBbsDelivered } from './useBbsDelivered'
 import { useBbsDrawer } from './useBbsDrawer'
 import { useBbsPreset } from './useBbsPreset'
 import type { BbsPresetDoc, BbsViewMode } from './bbsTypes'
@@ -57,6 +58,8 @@ const RULES_NOTE = `条件显隐规则 ${RULES.rules} 条、覆盖 ${RULES.keys}
 export default function PageBbs({ density, pending }: Props) {
   const data = useBbsData()
   const preset = useBbsPreset(data)
+  /* 产品资源区（mkp/bbs/）：第三圈起，这一页的产品配置从下载区来，不再是随包副本 */
+  const delivered = useBbsDelivered()
 
   /* 落 localStorage 的偏好：档位与主题。键名全收在 `src/api/storageKeys.ts` */
   const [viewMode, setViewMode] = useStickyState<BbsViewMode>(STORAGE.clientBbsView, 'all')
@@ -332,6 +335,44 @@ export default function PageBbs({ density, pending }: Props) {
 
         {data.sourceMode === 'live' && (
           <button type="button" className={s.btn} onClick={data.rescan}>重扫本机</button>
+        )}
+
+        {/*
+          产品资源区。**只列已经下载的** —— 没下载的那几份不给入口，点了才是骗人。
+          空的时候说清"目录里有几份、还没下载"，那是这一页第一次出现
+          「外部资源要先下载」这件事，不能拿一个空下拉糊过去。
+        */}
+        {delivered.downloaded.length > 0 ? (
+          <select
+            className={s.pick}
+            value=""
+            title="从下载区 mkp/bbs/ 里载入一份产品自带的切片器配置"
+            onChange={(ev) => {
+              const fileName = ev.target.value
+              ev.target.value = ''
+              if (fileName === '') return
+              void delivered.read(fileName).then(
+                (doc) => preset.importDoc(fileName, doc),
+                (err: unknown) => setLocalNote(`${fileName}：读不出来（${String(err)}）`),
+              )
+            }}
+          >
+            <option value="">载入产品配置…</option>
+            {delivered.downloaded.map((f) => (
+              <option key={f.fileName} value={f.fileName}>
+                {f.machineId === '' ? f.fileName : `${f.machineId} · ${f.fileName}`}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            className={s.pickNote}
+            title={delivered.note !== '' ? delivered.note : '去「同步」页下载 BBS 配置'}
+          >
+            {delivered.listed.length > 0
+              ? `产品配置 ${delivered.listed.length} 份，还没下载`
+              : '产品资源区里没有 BBS 配置'}
+          </span>
         )}
 
         <button

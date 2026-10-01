@@ -114,15 +114,61 @@ pub struct CatalogMachine {
     pub zones: Vec<crate::presetdata::Zone>,
 }
 
+/// 交付文件的**种类**（第三圈第一刀起不止一种）。
+///
+/// 这里的规矩是：**新增一种外部资源 = 加一个常量 + 一个落点目录**，不新增一套
+/// 存储体系、不新增一条下载路径。管道、校验、归档、进度全是既有的那些 ——
+/// "以后新增资源不再新增一套下载系统"就是靠这一处常量表成立的。
+/// 层①的资产载荷根（`presets/assets.toml` 里 `path` 的基准），相对仓库根。
+///
+/// **它不是运行时数据**：这里是构建期算 SHA/大小的地方，与运行时的下载区(`mkp/`)是两回事。
+/// 第三圈把它从 `public/` 底下挪走之后，只改这一处常量即可。
+const REPO_ASSET_ROOT: &str = "public/assets";
+
+pub mod kind {
+    /// MKP 预设（随软件发布的成品内容）
+    pub const PRESET: &str = "mkp_preset";
+    /// 切片器预设。今天只有 BBS（`slicer = 'bbs'`、档位 `profile = 'process'`）
+    pub const BBS_CONFIG: &str = "bbs_config";
+}
+
+/// 一种 kind 在下载区里的目录名。**下载区按种类分层，不按来源分层**
+///
+/// （同一个来源送来预设和 BBS 配置，落点也不混在一起：盘上的目录结构要能回答
+/// "这一格是干什么用的"，那是给人看的，也是给将来清理用的。）
+fn kind_dir(kind: &str) -> &'static str {
+    match kind {
+        kind::PRESET => "presets",
+        kind::BBS_CONFIG => "bbs",
+        _ => "other",
+    }
+}
+
+/// 资产的落点：`mkp/<kind 目录>/<资产在载荷根里的相对路径去掉类型前缀>`。
+///
+/// 资产在仓库里是 `bbs/Process/0.2mm/….json`（前缀与 kind 目录同名），落到下载区
+/// 就是 `mkp/bbs/Process/0.2mm/….json` —— **目录名换了个基准，相对形状没变**，
+/// 将来工作台发布那边按同一形状产出，两边就自然对得上。
+fn asset_dest(kind: &str, asset_path: &str) -> String {
+    let rest = asset_path
+        .split_once('/')
+        .map(|(_, tail)| tail)
+        .unwrap_or(asset_path);
+    format!("mkp/{}/{rest}", kind_dir(kind))
+}
+
 /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
-/// 没下载就没有；下载了才出现在 `mkp/`）
+/// 没下载就没有；下载了才出现在 `mkp/`）。
+///
+/// 落点形状统一为 `mkp/<kind 目录>/…`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogFile {
-    /// 第一圈只有 `mkp_preset` 一种
     pub kind: String,
+    /// 界面上的名字与下载时用的键。**必须唯一** —— 批量下载按它分辨"哪一份成了"
     pub file_name: String,
     pub path: String,
+    /// 归属机型。**非预设类的资产没有版本概念时为空串**（空串 = 不适用，不是"没查出来"）
     pub machine_id: String,
     pub version_id: String,
     /// 对**交付产物真字节**算的 —— 不是对源 TOML。下载后的校验（产品规则 §10）拿它当期望值
@@ -160,7 +206,11 @@ impl Catalog {
     /// 每个机型版本都必须配齐产物，缺一份就失败 —— 宁可红着，不让目录里出现
     /// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
     pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
-        let presets = crate::presetdata::Presets::load_from(&repo_root.join("presets"))?;
+        let mut presets = crate::presetdata::Presets::load_from(&repo_root.join("presets"))?;
+        // 资产载荷根（`presets/assets.toml` 里 `path` 的基准）。**只有构建期有仓库时才给得出** ——
+        // 用户机器上那份定义还在，但载荷没有：那种时候资产一律表现为"还没下载"，
+        // catalog 里登记的是"应该有这些文件"，不是"这些文件已经在了"。
+        presets.set_asset_root(&repo_root.join(REPO_ASSET_ROOT));
         let assets = repo_root
             .join("crates")
             .join("preset")
@@ -249,8 +299,8 @@ impl Catalog {
                     continue;
                 };
                 files.push(CatalogFile {
-                    kind: "mkp_preset".to_owned(),
-                    path: format!("mkp/{file_name}"),
+                    kind: kind::PRESET.to_owned(),
+                    path: format!("mkp/{}/{}", kind_dir(kind::PRESET), file_name),
                     file_name,
                     machine_id: m.id.clone(),
                     version_id: v.id.clone(),
@@ -258,6 +308,45 @@ impl Catalog {
                     size: bytes.len() as u64,
                 });
             }
+        }
+
+        // 资产载荷（第三圈第一刀：切片器预设 / BBS）。
+        // **登记的是盘上真文件的字节**：定义说有、文件不在 = 缺失（交给调用方裁决严格还是宽松），
+        // 绝不登记一个"应该在但没见到"的条目——那等于把期望值编进目录里。
+        for asset in presets.assets.items() {
+            if asset.kind != crate::presetdata::AssetKind::SlicerProfile {
+                continue;
+            }
+            let Ok(full) = presets.assets.resolve(asset) else {
+                missing.push(format!(
+                    "资产 {}（{}）：这一侧没有资产载荷根",
+                    asset.id, asset.path
+                ));
+                continue;
+            };
+            let Ok(bytes) = std::fs::read(&full) else {
+                missing.push(format!("资产 {}（{}）：载荷文件不在", asset.id, asset.path));
+                continue;
+            };
+            let Some(file_name) = Path::new(&asset.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+            else {
+                missing.push(format!(
+                    "资产 {}（{}）：路径取不出文件名",
+                    asset.id, asset.path
+                ));
+                continue;
+            };
+            files.push(CatalogFile {
+                kind: kind::BBS_CONFIG.to_owned(),
+                path: asset_dest(kind::BBS_CONFIG, &asset.path),
+                file_name,
+                machine_id: asset.machine_id.clone().unwrap_or_default(),
+                version_id: String::new(),
+                sha256: hex(&Sha256::digest(&bytes)),
+                size: bytes.len() as u64,
+            });
         }
 
         (
@@ -402,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_five_machines_and_nine_files() {
+    fn builds_machines_and_files_of_every_kind() {
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
         assert_eq!(catalog.machines.len(), 5, "5 台机型");
         assert_eq!(
@@ -414,19 +503,100 @@ mod tests {
             9,
             "9 个版本，每个版本一份交付产物"
         );
-        assert_eq!(catalog.files.len(), 9);
         assert_eq!(catalog.revision.len(), 16, "指纹取 16 位");
 
-        // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml，落在 mkp/ 下
+        // 预设：9 份，落点 mkp/presets/ 下
+        let presets: Vec<&CatalogFile> = catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == kind::PRESET)
+            .collect();
+        assert_eq!(presets.len(), 9, "每个版本一份预设");
+        assert!(
+            presets.iter().all(|f| f.path.starts_with("mkp/presets/")),
+            "预设一律落在 mkp/presets/ 下：{:?}",
+            presets.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+
+        // 资产（第三圈第一刀：BBS 切片器预设）：**与 presets/assets.toml 里的
+        // slicerProfile 条数对齐** —— 少登记一条就是"目录说有、下载不到"
+        let bbs: Vec<&CatalogFile> = catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == kind::BBS_CONFIG)
+            .collect();
+        let in_toml = crate::presetdata::Presets::load_from(&repo_root().join("presets"))
+            .expect("源读得出来")
+            .assets
+            .items()
+            .iter()
+            .filter(|a| a.kind == crate::presetdata::AssetKind::SlicerProfile)
+            .count();
+        assert_eq!(bbs.len(), in_toml, "BBS 条目数与资产台账对齐");
+        assert!(!bbs.is_empty(), "资产台账里确有切片器预设");
+
+        // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
         let a1_fast = catalog
             .files
             .iter()
             .find(|f| f.machine_id == "A1" && f.version_id == "FASTV3.3")
             .expect("A1/FASTV3.3 该有交付产物");
         assert_eq!(a1_fast.file_name, "A1-fastv3.3.toml");
-        assert_eq!(a1_fast.path, "mkp/A1-fastv3.3.toml");
+        assert_eq!(a1_fast.path, "mkp/presets/A1-fastv3.3.toml");
         assert_eq!(a1_fast.sha256.len(), 64, "SHA256 的 hex 长度");
         assert!(a1_fast.size > 0);
+    }
+
+    /// **每一份交付文件都要能唯一定位**（`file_name` 是下载与"已下载"的键）。
+    ///
+    /// 这条守的是将来接更多资产时的那个坑：两个目录下都叫 `process.json` 的话，
+    /// 批量下载的结果与"已下载清单"会串在一起 —— 而那种错在界面上表现为
+    /// "点了这一份、勾上的是那一份"。
+    #[test]
+    fn every_file_has_a_unique_name_and_destination() {
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
+
+        let mut names = std::collections::HashSet::new();
+        for f in &catalog.files {
+            assert!(
+                names.insert(f.file_name.as_str()),
+                "文件名撞车：{}",
+                f.file_name
+            );
+            assert!(f.path.starts_with("mkp/"), "落点必须在下载区里：{}", f.path);
+            assert!(!f.path.contains(".."), "落点不许有 `..`：{}", f.path);
+        }
+        let mut paths = std::collections::HashSet::new();
+        for f in &catalog.files {
+            assert!(paths.insert(f.path.as_str()), "落点撞车：{}", f.path);
+        }
+    }
+
+    /// **SHA 是对真字节算的**：目录里记的大小，必须等于盘上那个文件的大小。
+    /// 这条防的是"登记了但没读文件"（比如把 0 或者占位值写进去）—— 那会让
+    /// 下载后的校验永远对不上，而且错在最难查的地方。
+    #[test]
+    fn file_sizes_match_the_bytes_on_disk() {
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
+        let repo = repo_root();
+
+        for f in catalog.files.iter().filter(|f| f.kind == kind::BBS_CONFIG) {
+            let on_disk = repo.join(REPO_ASSET_ROOT).join(
+                f.path
+                    .strip_prefix("mkp/bbs/")
+                    .map(|tail| format!("bbs/{tail}"))
+                    .unwrap_or_default(),
+            );
+            let bytes = std::fs::read(&on_disk)
+                .unwrap_or_else(|e| panic!("载荷 {} 读不出来：{e}", on_disk.display()));
+            assert_eq!(bytes.len() as u64, f.size, "{} 的大小", f.file_name);
+            assert_eq!(
+                hex(&Sha256::digest(&bytes)),
+                f.sha256,
+                "{} 的 SHA",
+                f.file_name
+            );
+        }
     }
 
     /// **加厚判据：definition 真的进了 catalog。**
@@ -467,7 +637,7 @@ mod tests {
 
         // 访问面：file_of 是 MKP 引用的唯一出处（不再按命名规则重算）
         let f = catalog.file_of("A1", "FASTV3.3").expect("file_of 要找得到");
-        assert_eq!(f.path, "mkp/A1-fastv3.3.toml");
+        assert_eq!(f.path, "mkp/presets/A1-fastv3.3.toml");
         assert!(catalog.file_of("A1", "NOPE").is_none());
     }
 

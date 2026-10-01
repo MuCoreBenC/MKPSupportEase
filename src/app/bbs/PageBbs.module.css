@@ -171,6 +171,25 @@
   display: none;
 }
 
+/* 产品资源区的下拉：与旁边的按钮同高，窄的时候让文案自己省略 */
+.pick {
+  max-width: 200px;
+  padding: 4px 6px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 4px;
+  background: var(--bbs-field);
+  color: var(--bbs-text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+/* 「还没下载」那句：是**状态**不是错误 —— 用弱一档的字色，不抢错误提示的注意力 */
+.pickNote {
+  color: var(--bbs-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
 /* ===== 主体 =====
  *
  * `min-height: 0` 这一条在这一层和下面每一层都必须有，缺一层滚动就整个失效：

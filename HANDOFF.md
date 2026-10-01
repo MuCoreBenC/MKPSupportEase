@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 所有业务接进新地基（Preset 全功能 / 模型 / BBS / 报告） | ⬜ 未开始（下一个出口见 §4） |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | 🔄 **第一刀已落地**：BBS 配置（见 §3） |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 45%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 163 条 + workbench 344 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实。剩下的是业务侧（Preset 全功能 / 模型 / BBS / 报告）还没接进新地基。
@@ -59,9 +59,24 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
    - **进度与并发**：一次调用一路 Tauri `Channel` 水位；批量走 `download_runtime_files` + `deliver_all`（固定 4 条道，**并发在 Rust 侧**，前端不发明并发与汇总口径），返回按请求顺序、**逐份给结局**。
 5. ~~**判据 2**~~ ✅（2026-10-01，本轮）：`scripts/check-zero-network.mjs`（`npm run check:zero-network`，挂 CI web job）。三道闸：网络符号只许住 `runtime/net.rs` / 程序 `.setup()` 段零联网 / `src/api/` 不许绕过 IPC 自己发 HTTP。干净过、种脏能抓，两方向都实测。**它是源码扫描，不是运行时判据** —— 间接调用（A 调 B、B 最终联网）抓不到，那条留给将来在代理层补。
 
+## 3.5 第三圈：统一资产入口（按作者定的三步走）
+
+1. **资产载荷全部纳入 catalog**（先不谈官方源 / Gitee 最终用哪个）
+   - ✅ **第一刀：BBS 配置**（本次）——“Catalog → kind=bbs_config → Source → Delivery → SHA → `mkp/bbs/`” 闭环；
+     随包副本从客户端产物退役；BBS 页改从下载区载入。**判据：真 HTTP 拉一份 BBS 配置落进 `mkp/bbs/…`**。
+   - ⬜ 模型（`assets/models/`）、图标（`assets/icons/`）：同一条路，各加一个 kind + 一个落点目录。
+   - ⬜ 整机图那一类 UI 装饰：要么接进管道（kind=image），要么干脆剥离资产台账搬进 `src/app/assets/`
+     —— **现在是唯一还在随包的资产类**（判据 1 的清单里加上就红）。
+2. ⬜ **发布接上**：`presets/` → publish → catalog / manifest → 发布源。产出要明确回答
+   "这次发布了什么 / 叫什么 / path 是什么 / SHA / 大小 / 什么 kind"；`MKPSE_PRESET_SOURCE` 只决定"发到哪"。
+   **工作台 dist 现在还是 `assets/…` 布局，与客户端 `mkp/…` 不同形 —— 这一刀必须对齐**，
+   否则将来 URL 拼得上、落点却对不上（已登记在 §5）。
+3. ⬜ **Preset 成为第一个完整消费者**：发现 → 下载 → 本地文件 → 页面，再一层层加
+   下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本。
+
 ## 4. 续做入口（从哪接手）
 
-- **第二圈收口了，下一站是第三圈**：业务侧接进新地基（Preset 全功能 / 模型 / BBS / 报告）。第一件推荐是**资产载荷**（模型 / 图标 / BBS 配置）走 catalog 登记 + 同一条下载管道——管道的语义（校验在落盘前 / 防穿越 / 旧份归档 / 盘当底账）已经就位接一根新的 `kind` 比再发明一套便宜得多；第二件是官方源 / Gitee 的**真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`），那是一次产品决定不是代码决定。
+- **第三圈在走，下一刀是"模型 + 图标"照 BBS 那条路接进来**（各加一个 kind 与一个落点目录，管道不动）；再之后是 §3.5 第 2 步：把工作台发布的布局从 `assets/…` 对齐成 `mkp/…`。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等发布那一刀做。
 - **下载这条链的入口**：`ipc::catalog::download_runtime_file`（一份，带 `Channel` 进度）与 `download_runtime_files`（一份清单，逐份结局）；源由 `runtime::source::current_base_url` 给出；字节在生产后走 `runtime::delivery::deliver`。
 - 前端消费新世界的样板：预设页（`usePresetData.readRelease` = catalog.files + `getDownloadedFiles`，写走 `downloadCatalogFiles` / `applyActivePreset` 后**重读底账**）；参数页（`useParams` = `getMachines` + `getParamMeta` + `getRuntimeCatalog` 的 registry 摊页签树 + `getMachineParams` 按 combo 拉值）。
 - 更新/归档：`runtime/delivery.rs` 的 `FileOnDisk` / `stale_files` / deliver 里的归档段；`runtime/release.rs` 的升级策略。
@@ -91,6 +106,10 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **`workbench/.snapshots/` 已入库**（`.gitignore` 的既定政策：除 `.draft/` 外入库）；`.codebuddy/` 已 ignore；`.trae/documents/` 留库（被代码注释引用）。
 - **仓库有并行会话在动**：推送前先 `git fetch`；合并冲突大概率在 `ipc/presets.rs` / `usePresetData.ts`（预设页是热点）。
 - **真机下载要先配数据源**：C4 之后的下载不再探测仓库路径 —— 没配 `Preset Source`（同步页那格）时，下载 / 检查更新都会拒绝并说明去哪儿配。**这是对的**，不是 bug：用户机器上本来就没有仓库。开发期要验真，把本地静态目录（如 `python3 -m http.server`）的地址填进去即可。
+- **随包资产退役是"接一类摘一类"**：`vite.config.ts` 的 `DELIVERED_ASSET_DIRS` 与
+  `scripts/check-bundle.mjs` 的 `assets/bbs/` 是**同一份清单的两处**，加一类就改两处（判据会盯着另一处）。
+- **下载区按 kind 分层**（`mkp/presets/`、`mkp/bbs/`…）：新增资源只加 [`runtime::catalog::kind`] 一个常量
+  + [`kind_dir`] 一个分支。**不要**为某一种资源另开一个目录另写一套下载 —— 那是这一圈唯一的硬规矩。
 
 ## 6. 判据清单（全是活的，别删）
 

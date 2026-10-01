@@ -232,6 +232,11 @@ export const mockApi: MkpApi = {
     }))
   },
 
+  /** 浏览器里没有下载区，也就没有"已经下载的文件"可读：如实拒，不返回空串充数 */
+  async readDownloadedText() {
+    throw new NotImplementedError('readDownloadedText：浏览器里没有下载区')
+  },
+
   /** 浏览器模式下数据源既读不到也配不了：如实答"没配"，页面据此把配置入口说清楚 */
   async getPresetSource() {
     return null

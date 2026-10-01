@@ -137,11 +137,33 @@ pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
 ///
 /// 两边各自可能带斜杠（人多敲一个、路径以 `/` 开头都常见），在这里抹一次，
 /// 免得下游出现 `a//b` 这种"看起来对但服务端不认"的地址。
+/// 路径段的百分号编码。**保留 `/`**（那是路径分隔符），其余按 RFC 3986 逐字节编码。
+///
+/// 为什么必须做这件事：资产的文件名里**实测有空格**（`MKPProcess A1 0.2 0.10.json`），
+/// 不编码的话拼出来的 URL 在网络层才炸（`invalid uri character`），而那个报错指向
+/// HTTP 客户端，往回查到"文件名带个空格"要大半天。编码放在拼地址这一处，
+/// 于是"怎么拼"和"怎么编"只有一个答案。
+pub fn encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char)
+            }
+            // 中文文件名也是逐字节编码（UTF-8 的百分号形式，服务端按同一套解）
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// 下载地址 = 数据源的 base + 目录记的相对位置。
+/// **位置在这里编码一次**（不许调用方各编各的，也不许编两次）
 pub fn join_url(base_url: &str, path: &str) -> String {
     format!(
         "{}/{}",
         base_url.trim_end_matches('/'),
-        path.trim_start_matches('/')
+        encode_path(path.trim_start_matches('/'))
     )
 }
 
@@ -151,6 +173,29 @@ mod tests {
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().expect("临时目录建不出来")
+    }
+
+    /// 拼出来的地址必须是一个**合法 URL**。文件名里的空格是实测存在的
+    /// （BBS 配置：`MKPProcess A1 0.2 0.10.json`），漏了编码就是网络层的怪错
+    #[test]
+    fn join_url_encodes_the_path_but_keeps_the_slashes() {
+        assert_eq!(
+            join_url(
+                "https://example.com/mkp",
+                "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"
+            ),
+            "https://example.com/mkp/bbs/Process/0.2mm/MKPProcess%20A1%200.2%200.10.json"
+        );
+        // 地址自身不动：它已经是一个 URL 了，再编一次会把 `:` `/` 也吃掉
+        assert_eq!(
+            join_url("https://example.com/", "catalog.json"),
+            "https://example.com/catalog.json"
+        );
+        // 中文文件名：逐字节编码，服务端按 UTF-8 解回来
+        assert_eq!(
+            encode_path("mkp/bbs/中文.json"),
+            "mkp/bbs/%E4%B8%AD%E6%96%87.json"
+        );
     }
 
     /// 存进去再读出来必须还是那份——这条看着弱，但它钉的是"写的那套格式就是读的那套"
