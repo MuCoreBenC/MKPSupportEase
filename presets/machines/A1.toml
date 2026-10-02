@@ -6,6 +6,11 @@ defaultBundle = 'A1_default'
 externalAliases = ['A1C', 'A1F']
 icon = 'a1-icon'
 
+# 这台机型能用的打印板（引用 `presets/plates/*.toml` 的 id），以及默认用哪一块。
+# 塔地图按 `defaultPlateId` 选板画底衬；板自带几何，机型只持引用。
+plateIds = ['single-latch-256']
+defaultPlateId = 'single-latch-256'
+
 [dimensions]
 edgeZone = 10.0
 

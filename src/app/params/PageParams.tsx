@@ -33,9 +33,12 @@ import HistoryDrawer from './HistoryDrawer'
 import type { DrawerMode, HistoryView } from './HistoryDrawer'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import ParamCard from './ParamCard'
+import type { TowerSlot } from './ParamCard'
 import PresetPickerDrawer from './PresetPickerDrawer'
 import SearchField from './SearchField'
 import Icon from '../shell/icons'
+import TowerMap from './TowerMap'
+import type { TowerCoreProps } from './TowerCoreSvg'
 import { useParams, valueText } from './useParams'
 import type { ParamDef } from './useParams'
 import s from './PageParams.module.css'
@@ -49,6 +52,95 @@ interface ShownCard {
   title: string
   subtitle?: string
   fields: ParamDef[]
+}
+
+/** 塔体固定 19.58mm —— 参考程序的原值；包围盒 = 塔体 + 外围结构最大扩展量 × 2 */
+const TOWER_BODY_MM = 19.58
+/** 塔身画布固定画成 44px，mm → px 的比例由它定（TowerCoreSvg 的既定尺寸） */
+const TOWER_CORE_PX = 44
+
+/** TOML 原文 → 数字。空着 / 不是数时给一个安全的默认，别让 NaN 进几何 */
+function towerNumOf(raw: string, fallback: number): number {
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * 造「擦料塔位置与打印」卡的塔地图槽位（ParamCard 的 `tower` prop）。
+ *
+ * 数据全部现读包与值层，没有一处手抄：
+ *   热床尺寸    `machine.dimensions`（包里带；没配尺寸时退回 256×256 / 留白 10mm）
+ *   塔位置      `wiping.wiper_x / wiper_y` —— **包围盒左下角**，机器坐标 y 向上
+ *   外围结构    `wiping.outer_structure` + rib_* / sheath_base_expand
+ *   板轮廓      按机型的 `defaultPlateId` 从 catalog 的 plates 查（没配板就退回圆角矩形）
+ *
+ * 拖拽与轴输入的提交都走这一页的 `u.apply`：一次手势一条撤销、还原胶囊指已保存值。
+ */
+function towerSlotOf(u: ReturnType<typeof useParams>): TowerSlot | undefined {
+  const dims = u.machine?.dimensions ?? null
+  const xDef = u.defOf('wiping.wiper_x')
+  const yDef = u.defOf('wiping.wiper_y')
+  if (xDef === undefined || yDef === undefined) return undefined
+  const width = dims !== null && dims.bedSize.width > 0 ? dims.bedSize.width : 256
+  const depth = dims !== null && dims.bedSize.depth > 0 ? dims.bedSize.depth : 256
+  const edgeZone = dims?.edgeZone ?? 10
+
+  /*
+   * 统一包围盒（参考程序同一条公式）：扩展量取三种外围结构里最大的 ——
+   * 护套按底层膨胀量、斜肋按 45° 摆放的水平投影（额外长度 / √2 + 宽度 / 2√2）。
+   * 三种模式下塔方块一样大，左下角坐标是同一个含义。
+   */
+  const outerRaw = u.valueOf('wiping.outer_structure')
+  const outerVal = outerRaw === 'rib' || outerRaw === 'sheath' ? outerRaw : 'brim'
+  const ribWidthMm = Math.max(0, towerNumOf(u.valueOf('wiping.rib_width'), 0))
+  const ribExtraLengthMm = Math.max(0, towerNumOf(u.valueOf('wiping.rib_extra_length'), 0))
+  const ribFilletWall = u.valueOf('wiping.rib_fillet_wall') === 'true'
+  const sheathExpand = Math.max(0, towerNumOf(u.valueOf('wiping.sheath_base_expand'), 5))
+  const ribExpand = ribExtraLengthMm / Math.SQRT2 + ribWidthMm / (2 * Math.SQRT2)
+  const maxExpand = Math.max(sheathExpand, ribExpand)
+  const vm = TOWER_CORE_PX / TOWER_BODY_MM
+
+  const core: TowerCoreProps = {
+    outerVal,
+    isRibVisible: outerVal === 'rib' && ribWidthMm > 0,
+    ribWidthMm,
+    ribExtraLengthMm,
+    ribFilletWall,
+    vbOffset: -maxExpand * vm,
+    vbSize: TOWER_CORE_PX + maxExpand * vm * 2,
+    vm,
+    brimLoopCount: 5,
+  }
+
+  /* 板按机型的默认板选（`defaultPlateId` → catalog.plates）—— 不按机型 id 硬编码；
+     没配板就 undefined（画布退回圆角矩形，与参考程序对无板机型的处置一致） */
+  const plate = u.plateOf()
+
+  return {
+    xKey: xDef.key,
+    yKey: yDef.key,
+    render: (xDef, yDef, side) => (
+      <TowerMap
+        bedW={width}
+        bedD={depth}
+        edgeZone={edgeZone}
+        towerSize={TOWER_BODY_MM + maxExpand * 2}
+        x={towerNumOf(u.valueOf(xDef.key), 0)}
+        y={towerNumOf(u.valueOf(yDef.key), 0)}
+        savedX={towerNumOf(u.savedValueOf(xDef.key), 0)}
+        savedY={towerNumOf(u.savedValueOf(yDef.key), 0)}
+        core={core}
+        plate={plate}
+        side={side}
+        onCommit={(nx, ny) =>
+          u.apply('移动擦料塔', [
+            { key: xDef.key, value: String(nx) },
+            { key: yDef.key, value: String(ny) },
+          ])
+        }
+      />
+    ),
+  }
 }
 
 /** 双列：贪心按高度平衡，卡片高度用字段数近似 */
@@ -467,6 +559,9 @@ export default function PageParams({ density }: Props) {
 
   const closeHistory = () => setHistoryOpen(false)
 
+  /** 擦料塔地图的供数（见 towerSlotOf）：坐标字段不在 / 没配尺寸时是 undefined，坐标行照旧 */
+  const tower = towerSlotOf(u)
+
   const renderCards = (cards: ShownCard[]) =>
     cards.map(({ id, title, subtitle, fields }) => (
       <ParamCard
@@ -482,6 +577,10 @@ export default function PageParams({ density }: Props) {
         factoryOf={u.factoryOf}
         dirtyOf={u.dirtyOf}
         blockedByOf={u.blockedBy}
+        /* 分支摊开 / 折叠的判据（A43 移植） */
+        condOn={u.condOn}
+        /* 擦料塔地图槽位：坐标两字段都在这张卡时才生效（见 ParamCard） */
+        tower={tower}
         expandedKey={expandedDetailKey}
         onToggleExpand={(key) => setExpandedDetailKey((prev) => (prev === key ? null : key))}
         onEdit={u.edit}
@@ -767,6 +866,11 @@ export default function PageParams({ density }: Props) {
             </div>
 
             {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
+            {/*
+              写值闸拦下一次改动（2026-10-02）：改的是弃用字段 / 弃用选项。
+              说一句人话 —— 原子拒绝（整次动作没发生），不是「跳过那几条、其余照写」。
+            */}
+            {u.gateNote !== null && <p className={s.warn}>{u.gateNote}</p>}
             {/*
               草稿那一行的状态（参数页底座）：改的值**当场写进草稿 TOML**，
               所以关掉软件再回来还在。写失败要看得见 —— 不能只有界面上改了、盘上没改。

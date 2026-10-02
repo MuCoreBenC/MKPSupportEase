@@ -58,7 +58,8 @@ use crate::error::AppError;
 pub use assets::{Asset, AssetKind, Assets};
 pub use bundles::{Bundle, Bundles};
 pub use catalog::{
-    Brand, Catalog, Dimensions, Machine, MachineField, MachineVersion, VersionField, Zone,
+    Brand, Catalog, Dimensions, Machine, MachineField, MachineVersion, Plate, PlateFrame,
+    VersionField, Zone,
 };
 pub use registry::{
     LayoutTab, ParamDef, ParamRegistry, SectionMeta, ShowOp, ShowWhen, TabMeta, UiComponent,
@@ -431,6 +432,59 @@ impl Presets {
         Ok(())
     }
 
+    /// **机型引用的板必须都能落地**（2026-10-02，与 [`Self::check_asset_refs`] 同一范式）。
+    ///
+    /// 三条：
+    ///
+    /// 1. `plateIds` 的每一项都要解析到 `presets/plates/*.toml` 里一块真实的板 ——
+    ///    悬空引用只表现为「塔地图那层不出」，没有任何东西报错，所以升级成 error；
+    /// 2. `defaultPlateId` 若写了，必须在 `plateIds` 里（默认板不在可用板列表里是打字错误）；
+    /// 3. `defaultPlateId` 若写了，必须解析到真实板（同第 1 条）。
+    ///    没有 `plateIds` 却写了 `defaultPlateId` 也归到第 2 条 —— 那条默认板无处可依。
+    fn check_plate_refs(&self) -> Result<(), AppError> {
+        for m in self.catalog.machines() {
+            for id in &m.plate_ids {
+                if self.catalog.plate(id).is_none() {
+                    return Err(AppError::corrupted(format!(
+                        "机型 {} 的 plateIds 指向一个不存在的板：{id}",
+                        m.id
+                    ))
+                    .with_detail(
+                        "板定义在 presets/plates/*.toml（一板一文件）。\
+                         id 打错的后果是塔地图那一层静默消失"
+                            .to_owned(),
+                    ));
+                }
+            }
+            let Some(default) = m
+                .default_plate_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            if !m.plate_ids.iter().any(|id| id == default) {
+                return Err(AppError::corrupted(format!(
+                    "机型 {} 的 defaultPlateId（{default}）不在 plateIds 里",
+                    m.id
+                ))
+                .with_detail(
+                    "默认板必须是这台机型 plateIds 里的一块 —— 否则塔地图会去选一块这台机器用不了的板"
+                        .to_owned(),
+                ));
+            }
+            if self.catalog.plate(default).is_none() {
+                return Err(AppError::corrupted(format!(
+                    "机型 {} 的 defaultPlateId 指向一个不存在的板：{default}",
+                    m.id
+                ))
+                .with_detail("板定义在 presets/plates/*.toml（一板一文件）".to_owned()));
+            }
+        }
+        Ok(())
+    }
+
     /// **套餐域的引用必须都能落地**（b05 Task 10.5 / 10.7 / 10.8）。
     ///
     /// 三条，方向各不同：
@@ -654,6 +708,8 @@ impl Presets {
         self.assets.check_against_machines(&machines)?;
         // 反方向：机型引用的资产 id 必须存在（b05 Task 9 / 8.6）
         self.check_asset_refs()?;
+        // 机型引用的板 id 必须存在（2026-10-02，与 check_asset_refs 同一范式）
+        self.check_plate_refs()?;
         // 套餐域：机型/版本 → 套餐、套餐 → 机型、套餐 → 资产（b05 Task 10.5/10.7/10.8）
         self.check_bundle_refs()?;
 
@@ -901,6 +957,46 @@ mod tests {
         // 反空转：真数据里 5 条图标引用（整机图 2026-10-01 剥离台账后不再占这一档）
         // —— 少于 5 条就是漏查了
         assert!(checked >= 5, "只查了 {checked} 条引用 —— 这条判据在空转");
+    }
+
+    /// **机型引用的板必须能解析到真实的一块板**（2026-10-02，③）。
+    ///
+    /// 真数据里 5 台机型各引 1 块板（A1/P1S/P2S/X1C → 单卡舌，A1_MINI → 双卡舌），
+    /// 目录里恰好 2 块（去重后）。这条同时钉住「引用可解析」与「去重生效」。
+    #[test]
+    fn every_machine_plate_ref_points_at_a_real_plate() {
+        let Some(p) = real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        // 目录里 2 块板，id 是稳定主键
+        let ids: Vec<&str> = p.catalog.plates().map(|x| x.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["dual-latch-180", "single-latch-256"],
+            "去重后 2 块板"
+        );
+
+        let mut checked = 0usize;
+        for m in p.catalog.machines() {
+            for id in &m.plate_ids {
+                assert!(
+                    p.catalog.plate(id).is_some(),
+                    "{} 的 plateIds 指向一个不存在的板 {id}",
+                    m.id
+                );
+                checked += 1;
+            }
+            if let Some(default) = m.default_plate_id.as_deref() {
+                assert!(
+                    m.plate_ids.iter().any(|id| id == default),
+                    "{} 的默认板 {default} 不在自己的 plateIds 里",
+                    m.id
+                );
+                assert!(p.catalog.plate(default).is_some(), "默认板要能被解析");
+            }
+        }
+        assert_eq!(checked, 5, "5 台机型各引一块板 —— 少查就是空转");
     }
 
     /// **改一份套餐的文件清单**（b05 Task 14 / P4）：真写盘 + `updatedAt` 盖新值、

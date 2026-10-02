@@ -75,24 +75,115 @@
   color: var(--text-2);
 }
 
-.code {
+/*
+ * 代码模式 = 行号槽 + 着色层 + 透明输入框（A43 移植，照工作台 C15 那套）。
+ *
+ * 三层**必须同一把尺子**：字体、字号、行高、内衬写在 `.codeTa, .codePre, .codeNum`
+ * 共用的一条里，只改一处；少一样字就错位。框高由 React 按行数算好写在行内样式上
+ * （12.5 × 1.75 一行），所以容器高度是定值，行号槽「内容比框高长」也不会把框撑开
+ * —— 超出 hidden，跟着输入框的 scrollTop 走（见 GcodeBlock 的 syncScroll）。
+ */
+.codeEd {
+  position: relative;
+  display: flex;
   width: 100%;
-  padding: 12px 14px;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-sunken);
+}
+
+.codeEd:focus-within {
+  border-color: var(--accent);
+}
+
+.codeBox {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 行号槽：自己不滚，跟着输入框的 scrollTop 走 */
+.codeNum {
+  flex: none;
+  overflow: hidden;
+  color: var(--text-3);
+  border-right: 1px solid var(--line);
+  text-align: right;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 三层共同的那把尺子 —— 改这里就是三层一起改，只改一层就会错位 */
+.codeTa,
+.codePre,
+.codeNum {
+  margin: 0;
+  padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.75;
-  color: var(--text-1);
-  resize: vertical;
+  /* 不换行：着色层与输入层的折行算法不一样，折了就错位（G-code 一行一条，长了横向滚） */
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
-/* 盖掉 global.css 那条全局聚焦环（直角方块）：聚焦只加深边框 */
-.code:focus,
-.code:focus-visible {
+.codePre {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* 字是着色层画的 —— 输入框的字透明，看得见的颜色全在这一层 */
+  color: var(--text-1);
+  /* 只读的展示层，别拦着底下输入框的点击 */
+  pointer-events: none;
+}
+
+.codeTa {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 字交给着色层画：只留光标与选区 */
+  color: transparent;
+  background: transparent;
+  border: 0;
   outline: none;
-  border-color: var(--accent);
+  /* 右下角的 UA 拖拽手柄写的是行内样式，改了回不去 —— 锁掉 */
+  resize: none;
+  caret-color: var(--text-1);
+  overflow: auto;
+}
+
+.codeTa:disabled {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 选区照旧给一层底色 —— 字透明，选区里看到的还是着色层那些颜色 */
+.codeTa::selection {
+  background: var(--accent-soft);
+}
+
+/*
+ * 上色的三类（`arg` / 空白不上色，跟着正文色走）：
+ * 指令给工作台蓝、`[AUTO]` 变量给橙（与 --warn 同源：都是「这里不是字面量」的记号）、
+ * 注释压成灰斜体（真数据里是中文，`L803;此处使喷嘴降温`）。
+ */
+.tokCmd {
+  color: #2f74dd;
+  font-weight: 600;
+}
+
+.tokVar {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.tokCmt {
+  color: var(--text-3);
+  font-style: italic;
 }
 
 .lines {

@@ -4,6 +4,12 @@
   display: flex;
   flex-direction: column;
   scroll-margin-top: 12px;
+
+  /*
+   * 成为查询容器：下面纯 G-code 对卡的并排/竖排由**卡自己的宽度**决定
+   * （同 .tower 给塔地图的那套，卡有多宽它自己知道，不问档位）。
+   */
+  container-type: inline-size;
 }
 
 /* 卡片标题在卡外面 —— 旧程序就是这样，标题像给一叠纸贴的标签 */
@@ -25,42 +31,143 @@
 }
 
 /*
- * 嵌套子块：比卡片更暗一档、四周留边，让「它是挂在上一行下面的」一眼看出来。
- * 上边不留白 —— 它必须紧贴**条件行**，中间空一道就不像一条依赖了。
+ * 受控参数树（A43 · 装订子卡）。
  *
- * 把底色从 --surface-sunken（3.5%）提到 6%：作者圈着受控参数块两侧说
- * 「点开了之后背景没变，有点突兀」—— 3.5% 在用户端的行距上读不出来，整块看上去
- * 和普通行一样白，只剩左右两条灰色细带，倒成了没来由的缝。6% 让「灰底跟着
- * 条件参数出现」这件事本身看得见（「不适用的行整行灰下去」是同一个意图）。
+ *   .tree   每支一个的容器：只管承载「叶子 + 子卡 + 折叠条」与展开态的绿缝；
+ *           自己没有边距没有底色 —— 留白全是子卡（.grp）的 margin。
+ *   .grp    1px 圆角子卡：孩子们装在卡里，条件小签骑在卡沿上 —— 关系不用线说。
+ *   .accBody grid-rows 动画壳：摊开 1fr / 收拢 0fr，240ms；收拢时行还挂在 DOM 里
+ *           （overflow hidden 裁掉），所以切支是「同一支收起来」，不是卸载再挂一遍。
+ *   .fold   折叠条（卡头，「▸ N 项参数 · 行名…」）。点了就是把条件参数改成那一支的值。
+ *
+ * 绿缝：条件行展开（ⓘ）时容器铺绿当「缝」，子卡原样嵌在缝里。缝的 12px 从子卡的
+ * 16px 边距里挪进来（16 = 12 + 4），行的位置展开前后一像素不动。
  */
-/*
- * 子块两层：`.sub` 容器只管定位（原来那圈缝），`.subWell` 是灰框本体
- * （底色/描边/圆角/内距 —— 作者定稿：这些不用变）。
- * 分两层的理由：条件行展开时容器铺打开态绿底当"缝"，灰框在绿底里原样嵌着 ——
- * 一层做不出「外圈变色、框不变」（box-shadow 外扩还会把圆角放大成 15px 的圆角圈，
- * 作者：「背景下面不应该是圆角」）。
- */
-.sub {
-  margin: 0 12px 12px;
+.tree {
+  min-width: 0;
 }
 
-.subWell {
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  /* 不透明等效色（= 6% 黑铺在卡面 #fbfcfd 上的结果）：展开态它垫在绿底上，
-     半透明会泛绿 —— 作者定稿「灰色的背景不用变」，渲染必须与改动前逐像素相同 */
-  background: rgb(237 238 240);
-  overflow: hidden;
-}
-
-/*
- * 条件行展开：容器 margin 清零、padding 顶替缝宽，绿底（不透明等效色，叠在同色上
- * 不变色，理由见前）铺满左右与底部的缝 —— 四角直角，灰框原样嵌在里面。
- */
-[data-open='true'] + .sub {
-  margin: 0 0 12px;
-  padding: 0 12px 12px;
+.tree[data-seam='true'] {
+  padding: 0 12px 16px;
   background: rgb(225 243 233);
+}
+
+/* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管 */
+.tree[data-seam='true'] > .branch {
+  margin-left: 4px;
+  margin-right: 4px;
+  margin-bottom: 0;
+}
+
+/*
+ * 支（手风琴头）：一张卡、一根签、一条常驻卡头。
+ *   .branch  支的定位架：**签挂在这里** —— 在卡外、在任何 overflow:hidden 之外，
+ *            收拢摊开它都一像素不动；卡的上缘也钉死 —— 变的只有卡身高度。
+ *   .grp     卡本体：收拢 = 虚线灰 + 只剩卡头；摊开 = 实线白 + 卡头下面的参数行。
+ *   .fold    常驻卡头。收拢时点了 = 切到这一支（写值）；摊开时 disabled。
+ */
+.branch {
+  position: relative;
+  margin: 4px 16px 16px;
+}
+
+/* 条件小签：骑在卡沿上，背景吃掉身下那截边线 */
+.tag {
+  position: absolute;
+  top: -8px;
+  left: 15px; /* 支架无边框，+1px 对齐旧卡沿内的 14px */
+  z-index: 1;
+  padding: 0 6px;
+  background: var(--card-face);
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.grp {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card-face);
+  transition: background-color 0.24s cubic-bezier(0.32, 0.68, 0.12, 1);
+}
+
+/* 收拢态的支：虚线灰卡 */
+.grpOff {
+  border-style: dashed;
+  background: rgba(16, 24, 32, 0.018);
+}
+
+/*
+ * 常驻卡头（真按钮，能聚焦能 Tab）。字体用 --fs-label 对齐行里的注记那一档；
+ * 禁用（条件不是 eq / 条件行被关着 / 条件行弃用 / 这支已摊开）只是点不动，样子不变。
+ */
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 18px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold:disabled {
+  cursor: default;
+}
+
+.fold:focus-visible {
+  outline: 1px solid var(--accent-deep);
+  outline-offset: -1px;
+}
+
+/* 摊开时 ▸ 转成 ▾ —— 头自己不动，只有箭头翻身 */
+.foldMark {
+  flex-shrink: 0;
+  transition: transform 0.24s cubic-bezier(0.32, 0.68, 0.12, 1);
+}
+
+.fold[aria-expanded='true'] .foldMark {
+  transform: rotate(90deg);
+}
+
+.foldCount {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.foldHint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 卡头下面的参数行：0fr ↔ 1fr（收旧摊新就靠它） */
+.accBody {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows 0.24s cubic-bezier(0.32, 0.68, 0.12, 1),
+    visibility 0s 0.24s;
+}
+
+.accBodyOpen {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition:
+    grid-template-rows 0.24s cubic-bezier(0.32, 0.68, 0.12, 1),
+    visibility 0s;
+}
+
+/* overflow hidden 让 grid 项的自动最小尺寸归零 —— 0fr 才收得拢 */
+.accBody > div {
+  overflow: hidden;
 }
 
 /* 整块控件（G-code 编辑器）自己带边距 */
@@ -72,12 +179,48 @@
   border-top: 1px solid var(--line);
 }
 
-[data-density='mini'] .sub {
-  margin: 0 8px 8px;
+/*
+ * 纯 G-code 对卡（「切换」分类的装载 / 卸载胶箱）：宽卡并排、窄卡竖排。
+ * 卡宽 ≥ 880 时两只编辑器各分一半，分隔线从横的转成竖的；窄卡自动留在竖排。
+ */
+@container (min-width: 880px) {
+  .card[data-gcode-pair='true'] .body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card[data-gcode-pair='true'] .block + .block {
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
 }
 
-/* mini 的缝是 8px,绿圈同步收窄（同一个不透明等效色,理由见上） */
-[data-density='mini'] [data-open='true'] + .sub {
-  margin: 0 0 8px;
-  padding: 0 8px 8px;
+/*
+ * 塔地图槽位：擦料塔画布替下 X/Y 两行后住在这里，内距与 .block 同一套。
+ * 下边线补上分隔 —— 行与行之间的线靠 ParamRow 的 `data-sep`，塔块插进去之后
+ * 那条链本来也是断的（分隔线跟着摆放走，不再靠相邻选择器）。
+ */
+.tower {
+  container-type: inline-size;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 塔块后面要是没有别的行（卡里只有坐标两字段），这条线就是多余的 */
+.tower:last-child {
+  border-bottom: 0;
+}
+
+/* mini 档的支窄一档：边距 16 → 12，卡头的内衬跟着收 */
+[data-density='mini'] .branch {
+  margin: 4px 12px 12px;
+}
+
+[data-density='mini'] .fold {
+  padding: 8px 14px;
+}
+
+/* mini 的缝是 8px（同一个补偿口径：8 + 4 = 12，行不动）；底也跟着收 16 → 12 */
+[data-density='mini'] .tree[data-seam='true'] {
+  padding: 0 8px 12px;
 }

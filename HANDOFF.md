@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）→ 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；**Bootstrap 官方源接通**（第十七刀）→「同步系统」从用户功能降为内部基础设施；**参数页底座 ①–④ 完成**（PR #22 = `2da318c`：补 `toml_key` / `patch_preset_toml` / 参数页接草稿链 / 操作记录底座）；「分享」不做、单文件「导出」暂缓（见 §5）；**当前阶段还剩两块**：① 修改历史 UI（独立原型）②「设置 → 备份与恢复」（ZIP）——**做完这两块再统一整理**（见 §3.5「整理那一刀」） |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）→ 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；**Bootstrap 官方源接通**（第十七刀）→「同步系统」从用户功能降为内部基础设施；**参数页底座 ①–④ 完成**（PR #22 = `2da318c`：补 `toml_key` / `patch_preset_toml` / 参数页接草稿链 / 操作记录底座）；「分享」不做、单文件「导出」暂缓（见 §5）；**A43 参数页移植收口**（2026-10-02，分支 `feat/a43-params-port`：deprecated 显示但只读 / 受控参数树 / Plate 独立实体 / 塔地图消费 Plate，见 §3.5）；**当前阶段还剩两块**：① 修改历史 UI（独立原型）②「设置 → 备份与恢复」（ZIP）——**做完这两块再统一整理**（见 §3.5「整理那一刀」） |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -632,11 +632,49 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
          契约无 / `src/app/` 零消费。**这不是为 A43 硬造字段**（真数据里本来就有）。
        - **塔可以直接接**：A43 塔现算用的 5 个 key（`wiping.outer_structure` / `rib_width` /
          `rib_extra_length` / `rib_fillet_wall` / `sheath_base_expand`）**在 A 真注册表里全有** ✅。
-       - **要补的契约**：`MachineDimensions.plate`（A 两侧都无）+ `bedOutline` 几何常量（搬 A43）。
        - **模型/3MF**：A = "有资产（3 个真 .3mf）/ 契约弱（`FileKind` 不含 model）/ UI 全缺"，
          **单独一刀**，不混进参数页 UI。
-       - **施工顺序**：① `deprecated` 链路 → ② 参数页 UI → ③ 塔地图 → ④ 模型/3MF。
-       - **待作者裁决只剩两条**：`plate` 的真实来源是哪份数据；塔参数已自查**全有**（无需裁决）。
+       - **施工顺序**：① `deprecated` 链路 → ② 参数页 UI → ③ Plate → ④ 塔地图 → ⑤ 模型/3MF。
+       - **四件事全部拍完**（2026-10-02）：①范围（①②③ + 塔地图一并做）②Plate 引用=**数组+默认值**
+         ③板数据放 `presets/plates/*.toml`④字段级 `deprecated` = **显示但只读**（下面的新铁律）。
+       - **①–④ 已在 `feat/a43-params-port` 上一轮做完**（见 §3.5「A43 参数页移植收口」）。
+
+     #### ★ 新铁律：`deprecated` = **显示 ≠ 可编辑 ≠ 会进入新产物**（作者 2026-10-02）
+
+     作者裁决：`deprecated` 表示该字段**已退出正常编辑 / 产物生成，但仍属于已知参数**，
+     所以参数页**继续展示它的历史状态**。理由原话要点：「不是单纯把旧参数清理掉，
+     而是**有后处理功能**」—— 直接从参数页消失反而会让用户不知道它去哪了。
+
+     ```text
+     deprecated 参数
+       ├── 参数定义：存在
+       ├── 参数页：显示（行名红线 + 「已弃用」徽章）
+       ├── 用户编辑：禁止（控件只读 + 写值闸原子拒绝 + 一句人话）
+       └── 新 TOML：不生成
+     ```
+
+     **实现约束（不许偷改既有语义）**：`getMachineParams`（`visible_keys_of` / `effective_of`）
+     **照旧排除**弃用字段、不下发其值 —— 不动；参数页的**字段清单改从 definition 通道取**
+     （`catalog.registry.params` → `useParams` 的 `registryParams`），配方通道只补值，
+     值读不到就空、**不伪造**。选项级弃用映射到既有共用件 `FieldOption.deprecated`（划线），
+     **不新造第二个信号**。
+
+     ### A43 参数页移植收口（2026-10-02，分支 `feat/a43-params-port`）
+
+     **口径**：搬的是 A43 的**前端实现经验**，不是它的数据假设；数据一律接 A 的真实来源。
+     一整刀连续施工，**①②③④ 一轮做完**（原计划里塔地图排在后面，作者本轮点名一并做）。
+
+     | 段 | 落地 |
+     | --- | --- |
+     | ① `deprecated` | 后端双 DTO（`RecipeParamDto` / `ChoiceDto`）带标记；**字段清单改从 definition 取**；`ParamRow` 红线 + 「已弃用」徽章 + 只读；写值闸在 `apply`（唯一出口）原子拒绝；判据 = `ipc::presets::tests::deprecated_flags_travel_through_definition_channel_only` |
+     | ② 参数页 UI | `ParamCard` **重写为受控参数树**（`buildTree` / 装订子卡 / 条件小签 / 折叠统一=条件满不满足 / 手风琴头 240ms）；`ParamRow` 加 `sep`+`data-off`+`data-dep`；`GcodeBlock` 三层代码编辑器 + 新 `gcode.ts`；`PageParams` 接 `condOn`/`tower`；**`useParams` 不搬**（只加 `condOn`/`plateOf`/`gateNote`/`deprecated`/`registryParams`） |
+     | ③ Plate | 新增 `presets/plates/*.toml`（**2 块去重**：单卡舌 256 / 双卡舌 180）；五份机器加 `plateIds`+`defaultPlateId`；Rust `Plate`/`PlateFrame`/`load_plates`/`Catalog.plates()`/`check_plate_refs`；runtime catalog 带 `plates`；契约 + mock 镜像 |
+     | ④ 塔地图 | 新增 `TowerMap.tsx` + `TowerCoreSvg.tsx`（逐字移植）；按 `defaultPlateId` 选板、参数值现算；**不留 `?? machineId` 兜底**（无板 = 画布退回圆角矩形） |
+
+     **验收**：Rust 263 + workbench 452 全绿；双 feature clippy `-D warnings`；前端 build / bundle /
+     zero-network / tsc / lint 全绿；探针 `params-settings.mjs` **22 条判定**（新增弃用 / 塔地图两条），
+     两档尺寸 0 console error。截图 `tmp-shots/a43-tower.png` / `a43-dep.png`。
+     **验收记录见 `docs/A43-PARAMS-PORT-LEDGER.md` §9。**
 
      ### 当前阶段：参数页底座 —— 还剩两块（**做完这两块再统一整理**）
 
@@ -803,7 +841,9 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 |---|---|
 | `runtime::tests::embedded_matches_rebuild` | 编进二进制的 catalog = 重新构建的那份（源/产物改了没重跑 gen-catalog 就红） |
 | `runtime::catalog` 5 条 | 5 机型 9 文件 / definition 随目录走（15 资产 5 套餐 74 字段，反空转计数 + 与台账逐条对齐） / **资产台账里已无 image 类**（整机图剥离的判据）/ **JSON 往返无损** / 指纹跟输入（含 definition） / 拒未来代次 |
-| `ipc::presets` 判据 | **DTO 构建只吃 catalog（判据 4 的钉子）** / 缓存按字节配对与自失效 |
+| `ipc::presets` 判据 | **DTO 构建只吃 catalog（判据 4 的钉子）** / 缓存按字节配对与自失效 / **`deprecated_flags_travel_through_definition_channel_only`（① 的钉子：definition 通道带 7 条字段级 / 配方通道**0 条**（排除语义没被偷改）/ 选项级 1 条「护套」走配方通道）** |
+| `runtime::catalog::tests::plates_ride_along_and_machine_refs_resolve`（③ 的钉子） | 板随 catalog 下发（2 块去重：单卡舌 256 / 双卡舌 180，几何 + frame 一格不少）/ 机型引用可解析 / 默认板在自己 `plateIds` 里 / **指纹跟着板定义走**（改几何 revision 就变） |
+| `presetdata::tests::every_machine_plate_ref_points_at_a_real_plate`（③ 的钉子） | 真数据里 5 台机型各引 1 块板、目录恰好 2 块（去重生效）；`check_plate_refs` 把悬空引用 / 默认板越界升级成 error |
 | `runtime/delivery` 13 条 | 校验在落盘前 / 防穿越 / 更新归档旧份 / 归档槽保最早 / 幂等 / Stale 可见 / **批量：每份都落盘 / 结果按请求顺序 / 坏档不拖累别人 / 空清单不动手** |
 | `runtime/net` 12 条 | **真 HTTP 拿到字节** / 水位单调且带文件名 / **抖一次真重试成功（不是数次数）** / 重试有上限 / 404 不重试 / 撒谎的字节不重试 / 不回答的服务端不会吊死调用方 / Source 拼的是 catalog 的 path / 清单与文件同地址 / 阶段词稳定 |
 | `runtime/source` 7 条 | 往返 / 没配不是坏档 / 坏档不静默 / 未来代次拒 / 空地址不写盘 / **只放出站 HTTP（挡住 file:// 等）** / 拼 URL 容错 |
@@ -832,7 +872,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
-| `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |
+| `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· **① 弃用字段显示但只读（摊开的弃用行有「已弃用」徽章 + 控件全 disabled）** · **④ 塔地图按默认板画出板轮廓并替下 X/Y 行（svg「塔」+ 板 evenodd 路径 + 槽位含坐标行）** · 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |
 | `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / **第十三层：右键「在 Finder 中显示」只给「我的文件」（官方那份灰掉带原因）、点了如实说失败（浏览器里没有文件管理器、真机上的样子说清楚）、不碰「已应用」** / **第十五层：分类边界（MKP 档不许有 `.svg` 与 `MKPProcess` 切片器配置、切片器档要出现 catalog 交付行且动作是「下载」、台账「仓库 N」跟着档走两档不同数）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记

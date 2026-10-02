@@ -61,6 +61,41 @@ pub struct Zone {
     pub points: Vec<(f64, f64)>,
 }
 
+/// 可打印区在板轮廓坐标里的位置（mm）。**归 [`Plate`] 所有** ——
+/// 机型 `[dimensions].bedSize` 是涂胶 / 运动口径（A1 记的是 260×255），
+/// 真可打印区是这里（256×256）。塔地图必须活在可打印区里。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlateFrame {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// 一块打印板。**独立于机型的实体**：机型只引用 id（[`Machine::plate_ids`]），
+/// 几何住在这里。数据源 = `presets/plates/*.toml`（一板一文件，与 `machines/*.toml` 同构）。
+///
+/// 坐标是板件自身的毫米：原点在板的**后缘左角**（y 向下指前缘）。`path` 含卡舌与把手，
+/// 孔洞子路径靠 evenodd 镂空；`body_path` 是不含卡舌 / 把手的板身。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plate {
+    /// 稳定主键（`single-latch-256` / `dual-latch-180`）。机型的 `plateIds` 指向它
+    pub id: String,
+    /// 给人看的名字（`单卡舌 256`）
+    pub name: String,
+    /// 板件外轮廓宽（viewBox 宽）
+    pub w: f64,
+    /// 板件外轮廓深（viewBox 高）
+    pub d: f64,
+    pub frame: PlateFrame,
+    /// 板身路径（不含卡舌 / 把手）
+    pub body_path: String,
+    /// 完整外轮廓（含卡舌 / 把手）
+    pub path: String,
+}
+
 /* ---------- 机型尺寸：`[dimensions]` 全族 ----------
  *
  * 这一族字段的读者是客户端预设页（它要画床身、禁区与校准点）与工作台的尺寸页。
@@ -214,6 +249,11 @@ pub struct Machine {
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
     pub icon: Option<String>,
+    /// 这台机型能用的打印板（`presets/plates/*.toml` 的 id）。空 = 没有板规格
+    /// （塔地图那一层不出，画布退回圆角矩形）。**只持引用，不持几何** —— 几何归 [`Plate`]。
+    pub plate_ids: Vec<String>,
+    /// 默认用哪一块板（塔地图按它选）。`None` = 没指定（有 `plate_ids` 时取第一块兜底由消费侧决定）
+    pub default_plate_id: Option<String>,
     /// 机型文件里有没有 `[dimensions]`。**占位机型整台跳过**（工作台的交付可达性用它）
     pub has_dimensions: bool,
     /// `[dimensions]` 的逐格视图。`None` = 这台机型还没有那一节。
@@ -509,6 +549,8 @@ pub struct Catalog {
     machines: Vec<Machine>,
     /// 机型 ID → 禁区。只有三台机器有
     zones: BTreeMap<String, Vec<Zone>>,
+    /// 板 ID → 打印板几何。整目录可以不存在（还没有板规格也是合法状态）
+    plates: BTreeMap<String, Plate>,
     /// 数据根。**新建机型要在这里落文件** ——
     /// 从已有机型的路径反推是不行的：一台机型都没有的时候就推不出来了
     root: PathBuf,
@@ -530,10 +572,12 @@ impl Catalog {
                 .collect::<Vec<_>>(),
         )?;
         let zones = load_zones(&root.join("forbidden_zones"))?;
+        let plates = load_plates(&root.join("plates"))?;
         Ok(Self {
             brands,
             machines,
             zones,
+            plates,
             root: root.to_path_buf(),
         })
     }
@@ -562,6 +606,16 @@ impl Catalog {
 
     pub fn zones(&self, machine_id: &str) -> Option<&[Zone]> {
         self.zones.get(machine_id).map(Vec::as_slice)
+    }
+
+    /// 全部打印板（按 id 排序）。
+    pub fn plates(&self) -> impl Iterator<Item = &Plate> {
+        self.plates.values()
+    }
+
+    /// 按 id 找板。**机型的 `plateIds` 引用就是在这里解析的**
+    pub fn plate(&self, id: &str) -> Option<&Plate> {
+        self.plates.get(id)
     }
 
     /// 全部 `机型:版本` 键。`param_registry.toml` 的 `machineVariants`
@@ -678,6 +732,9 @@ impl Catalog {
             external_aliases: Vec::new(),
             image: None,
             icon: None,
+            // 新建机型不带板 —— 板是后来按需挂的（与 has_dimensions: false 同一口径）
+            plate_ids: Vec::new(),
+            default_plate_id: None,
             has_dimensions: false,
             dimensions: None,
             versions: Vec::new(),
@@ -862,6 +919,17 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                 .unwrap_or_default(),
             image: s("image"),
             icon: s("icon"),
+            // 板引用（与 `externalAliases` 同法读字符串数组）。读不出就是空 = 没板
+            plate_ids: doc
+                .get("plateIds")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            default_plate_id: s("defaultPlateId"),
             has_dimensions: dimensions.is_some(),
             dimensions,
             versions,
@@ -1020,6 +1088,84 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
             })
             .unwrap_or_default();
         out.insert(machine.to_owned(), zones);
+    }
+    Ok(out)
+}
+
+/// 读 `plates/` 目录里的打印板。**与 [`load_zones`] 同构**：目录可以整个不存在
+/// （还没有板规格是合法状态）。
+///
+/// 与 `load_zones` 的差别只有一处：**主键取自文件内的 `id` 字段**，不是文件名 ——
+/// 板是独立实体，id 是它的稳定身份，将来重命名文件不该改身份。
+fn load_plates(dir: &Path) -> Result<BTreeMap<String, Plate>, AppError> {
+    let mut out = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(out);
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    files.sort();
+
+    for file in files {
+        let doc = parse(&file)?;
+        let id = doc
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::corrupted(format!("{} 里没有 id", file.display()))
+                    .with_detail("板文件的第一行就该是 id = '...'".to_owned())
+            })?;
+        let num = |k: &str| -> Result<f64, AppError> {
+            doc.get(k)
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了数字 {k}", file.display())))
+        };
+        let s = |k: &str| {
+            doc.get(k)
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+                .filter(|v| !v.is_empty())
+        };
+        let frame = doc
+            .get("frame")
+            .and_then(|i| i.as_table())
+            .ok_or_else(|| AppError::corrupted(format!("{} 缺了 [frame]", file.display())))?;
+        let fnum = |k: &str| -> Result<f64, AppError> {
+            frame
+                .get(k)
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .ok_or_else(|| {
+                    AppError::corrupted(format!("{} 的 [frame] 缺了数字 {k}", file.display()))
+                })
+        };
+        let plate = Plate {
+            id: id.clone(),
+            name: s("name").unwrap_or_else(|| id.clone()),
+            w: num("w")?,
+            d: num("d")?,
+            frame: PlateFrame {
+                x: fnum("x")?,
+                y: fnum("y")?,
+                w: fnum("w")?,
+                h: fnum("h")?,
+            },
+            body_path: s("bodyPath")
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 bodyPath", file.display())))?,
+            path: s("path")
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 path", file.display())))?,
+        };
+        if out.insert(id.clone(), plate).is_some() {
+            return Err(
+                AppError::corrupted(format!("板 id 重复：{id}")).with_detail(
+                    "两块板用了同一个 id —— plateIds 引用会指到哪一块就不确定了".to_owned(),
+                ),
+            );
+        }
     }
     Ok(out)
 }

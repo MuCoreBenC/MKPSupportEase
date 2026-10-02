@@ -239,6 +239,87 @@ plateId = 'single-latch-256'
 
 ---
 
+## 9. 收口（2026-10-02，①②③④ 一轮做完）
+
+**分支** `feat/a43-params-port` · 一整刀连续施工、最后一个 PR。
+
+### 9.1 裁决落定（原「待作者裁决」两条都拍完了）
+
+1. **Plate 引用形态 = 数组 + 默认值**：`plateIds = ['single-latch-256']` + `defaultPlateId`，
+   一台机型可挂多块板（不是单值 `plateId`）。
+2. **板数据放 `presets/plates/*.toml`**（一板一文件，与 `machines/*.toml` 同构），
+   不选 `registry/plates.toml`。
+3. **塔地图本轮一并做**（原计划排在后面）。
+
+### 9.2 ① deprecated：**显示 ≠ 可编辑 ≠ 会进入新产物**（作者新铁律）
+
+作者裁决原话要点：`deprecated` = 该字段已退出正常编辑 / 产物生成，**但仍是已知参数**，
+所以参数页继续展示它的历史状态。「不是单纯把旧参数清理掉，而是有后处理功能」——
+直接从参数页消失反而会让用户不知道它去哪了。
+
+```text
+显示 ≠ 可编辑 ≠ 会进入新产物     ← 三件事必须分开
+deprecated 参数
+  ├── 参数定义：存在
+  ├── 参数页：显示（红线 + 「已弃用」徽章）
+  ├── 用户编辑：禁止（控件只读 + 写值闸原子拒绝）
+  └── 新 TOML：不生成（getMachineParams 照旧排除）
+```
+
+**实现方式（不偷改既有语义）**：
+- `getMachineParams`（配方通道，`visible_keys_of` / `effective_of`）**照旧排除弃用字段** —— 不动。
+- 参数页的**字段清单改从 definition 通道取**（`catalog.registry.params`，新增 `Catalog.registryParams`；
+  它带 label/desc/unit/uiComponent/valueType/choices，够渲染一行）。弃用字段值本体拿不到
+  （配方不下发）→ 展示走 `savedValueOf` 兜底，读不到就空，**不伪造**。
+- 字段级标记走 `ParamMeta.deprecated`（已下发）；选项级走配方通道的 `ChoiceDto.deprecated`
+  （`ParamMetaDto` 不带 choices），映射到既有共用件 `FieldOption.deprecated`（划线），**不新造第二个信号**。
+- 写值闸在 `useParams.apply`（**唯一出口**）：弃用字段 / 弃用选项 → **原子拒绝**整次动作 + 说一句人话
+  （`gateNote`）；目标值 == 已保存值时放行（老文件里写着「护套」的那份要能退回）。
+
+**落地判据**：Rust `ipc::presets::tests::deprecated_flags_travel_through_definition_channel_only`
+（definition 通道 7 条 + 配方通道 0 条 + 选项级 1 条）；
+前端探针 `params-settings.mjs`「弃用字段显示但只读（红线 + 「已弃用」徽章 + 控件禁用）」。
+
+### 9.3 ② 参数页 UI 增量（diff 驱动移植）
+
+| 文件 | 增量 | 状态 |
+| --- | --- | --- |
+| `ParamCard.tsx` + `.module.css` | **重写为受控参数树**：`buildTree()` 归组（只吃字段定义）、装订子卡、条件小签、折叠统一（判据 = 条件满不满足 `condOn`）、手风琴头（`grid-template-rows 0fr↔1fr` 240ms）、塔地图槽位 | ✅ |
+| `ParamRow.tsx` + `.module.css` | `sep` 显式分隔线（树把相邻链断了）+ `data-off` 压暗 + `data-dep` 弃用（红线 / 徽章 / 只读）+ 展开详情「状态」一格 | ✅ |
+| `GcodeBlock.tsx` + `.module.css` | 代码模式升级成三层（行号槽 + 着色层 + 透明输入框），解析收敛到新 `gcode.ts` | ✅ |
+| `PageParams.tsx` | 接移植后的 `ParamCard`（传 `condOn` / `tower`） | ✅ |
+| **`useParams.ts`** | **不搬**（A 领先）；只加 `condOn` / `plateOf` / `gateNote` / `deprecated` / `registryParams` | ✅ |
+
+### 9.4 ③ Plate 四条链
+
+| 段 | 落地 |
+| --- | --- |
+| 数据源 | **新增** `presets/plates/single-latch-256.toml`（258×276，frame 1/8.5/256/256）、`dual-latch-180.toml`（184×197.1，frame 2/8/180/180） |
+| 机型引用 | 五份 `machines/*.toml` 加 `plateIds` + `defaultPlateId`（A1/P1S/P2S/X1C → 单卡舌；A1_MINI → 双卡舌） |
+| Rust | `Plate` / `PlateFrame` + `load_plates`（照 `load_zones`，**id 取文件内字段**）+ `Machine.plate_ids/default_plate_id` + `Catalog.plates()/plate()` |
+| 引用校验 | `check_plate_refs`（照 `check_asset_refs`）：悬空引用 / 默认板不在 plateIds 里 / 默认板悬空 → error |
+| 产物 | `runtime::Catalog.plates` + `CatalogMachine.plate_ids/default_plate_id`；`revision_of` 输入加 plates；`cargo run --bin gen-catalog` 已重跑 |
+| 契约 | `Plate` / `PlateFrame`、`Machine.plateIds/defaultPlateId`、`RuntimeCatalog.plates`、`CatalogParamDef` 补显示格子 |
+| IPC | `MachineDto.plate_ids/default_plate_id`；`getRuntimeCatalog` 已带整 catalog，**无新命令** |
+
+### 9.5 ④ 塔地图
+
+- 新增 `src/app/params/TowerMap.tsx` + `.module.css`、`TowerCoreSvg.tsx`（从 A43 逐字移植，
+  三种外围结构 brim / 斜肋 / 护套 + 圆角 / 偏移算法一行未动）。
+- 数据全接 A：热床 `machine.dimensions`、塔位置 `wiping.wiper_x/wiper_y`、外围结构 5 个 key
+  （**已核对在 A 真注册表里全有**）、板按 `defaultPlateId` 从 `catalog.plates` 查。
+- A43 的 `dims?.plate ?? machineId` 兜底**不保留**：没板就是没板，画布退回圆角矩形。
+- 挂进 `PageParams` 的 `towerSlotOf(u)` → `ParamCard` 的 `tower` 槽位。
+
+### 9.6 验收
+
+- Rust：`cargo test`（262 条）+ `cargo test --features workbench --lib` 全绿；双 feature clippy `-D warnings`。
+- 前端：`npm run build && check:bundle && check:zero-network`、`npx tsc -b`、`npm run lint` 全绿。
+- 探针 `params-settings.mjs`：**22 条判定**（含新增弃用 / 塔地图两条），两档尺寸 0 console error。
+- 截图：`tmp-shots/a43-tower.png`（塔地图 + 装订子卡）、`tmp-shots/a43-dep.png`（弃用行红线 + 徽章 + 只读）。
+
+---
+
 ## 8. 附：本账的证据位置
 
 - A43 参数页依赖：`a43/params/useParamsA43.ts:178-247,509-546,642-646,774-794`、

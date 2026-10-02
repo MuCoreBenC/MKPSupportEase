@@ -163,6 +163,81 @@ for (const size of SIZES) {
     await page.waitForTimeout(200)
   }
 
+  /* ①d 弃用字段「显示，但只读」（2026-10-02，① deprecated 链路） */
+  /*
+   * 作者裁决：**显示 ≠ 可编辑 ≠ 会进入新产物**。参数页的字段清单以 definition 为准，
+   * 弃用字段照常列（红线 + 「已弃用」徽章），控件只读、写值闸拒绝，但它不进新 TOML。
+   *
+   * 判据：
+   *   · 有一个分类里出现 `[data-dep]` 行（真注册表 7 条字段级弃用，集中在「擦料塔」
+   *     与「胶料」两类），且行名带删除线、行里有一枚「已弃用」；
+   *   · 那行的控件是 disabled（改不动）；
+   *   · 点它的分段（弃用触发条件）不产生改动（写值闸把它按住了）。
+   */
+  let depOk = false
+  let depNote = '没找到 [data-dep] 行'
+  {
+    const tabs = await page
+      .locator('[role="tablist"][aria-label="参数分类"] [role="tab"]')
+      .all()
+    for (const t of tabs) {
+      await t.click()
+      await page.waitForTimeout(250)
+      const n = await page.locator('[data-dep]').count()
+      if (n === 0) continue
+      const info = await page.evaluate(() => {
+        /*
+         * 弃用行有的摊开成子卡、有的折在收拢的分支里（分支收拢时只有卡头，没有控件）。
+         * 取**第一枚带「已弃用」徽章的那一行** —— 那才是摊开的、能验只读的行。
+         */
+        const rows = [...document.querySelectorAll('[data-dep]')]
+        const row = rows.find((r) =>
+          [...r.querySelectorAll('*')].some(
+            (el) => el.children.length === 0 && el.textContent?.trim() === '已弃用',
+          ),
+        )
+        if (row === undefined) return null
+        const label = row.querySelector('span[class*="label"]')?.textContent ?? ''
+        const controls = [...row.querySelectorAll('input,button[role="radio"]')]
+        const allDisabled = controls.length > 0 && controls.every((el) => el.disabled)
+        return { label, badge: true, allDisabled, controls: controls.length, total: rows.length }
+      })
+      if (info !== null) {
+        depOk = info.badge && info.allDisabled
+        depNote = `${info.total} 行弃用 · ${info.label} · 控件 ${info.controls} 个全禁用 ${info.allDisabled}`
+      }
+      break
+    }
+  }
+  check(tag, '弃用字段显示但只读（红线 + 「已弃用」徽章 + 控件禁用）', depOk, depNote)
+
+  /* ①e 塔地图消费 Plate（2026-10-02，④）：有板机型画出板轮廓 + 塔方块 + 可拖拽槽位 */
+  /*
+   * 守三件事：
+   *   · 参数页出现塔地图（svg 里有「塔」字 + 板轮廓 evenodd 路径）；
+   *   · 板是按机型的 defaultPlateId 从 catalog 的 plates 查到的（画出来了 = 查到了）；
+   *   · 地图槽位替下了 X/Y 两行的排布（右列里还有 X/Y 坐标行）。
+   */
+  let towerOk = false
+  let towerNote = '没找到塔地图'
+  {
+    const tabs = await page
+      .locator('[role="tablist"][aria-label="参数分类"] [role="tab"]')
+      .all()
+    for (const t of tabs) {
+      await t.click()
+      await page.waitForTimeout(200)
+      const hasTower = await page.locator('svg text').filter({ hasText: '塔' }).count()
+      if (hasTower === 0) continue
+      const plate = await page.locator('svg path[fill-rule="evenodd"]').count()
+      const txt = (await mainText(page)) ?? ''
+      towerOk = plate > 0 && txt.includes('擦料塔位置') && txt.includes('擦料塔X坐标')
+      towerNote = `塔画布在 · 板轮廓 ${plate} · 槽位含坐标行 ${txt.includes('擦料塔X坐标')}`
+      break
+    }
+  }
+  check(tag, '塔地图按默认板画出轮廓并替下 X/Y 行（消费 catalog.plates）', towerOk, towerNote)
+
   /* ② 设置页：高级设置 → 预设数据源（同步页退役后，这一格搬到了这儿） */
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await mainText(page)).includes('预设数据源'), 8000)

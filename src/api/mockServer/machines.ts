@@ -1,5 +1,6 @@
 import type { ForbiddenZone, Machine, MachineDimensions, MachineVersion } from '../../api/contract'
 import catalogJson from './data/machine_catalog.json'
+import { plateRefsOf } from './plates'
 import type { RawCatalog, RawDimensions, RawModel, RawVersion } from './types'
 
 /**
@@ -60,6 +61,8 @@ function build(): Machine[] {
         image: model.image,
         icon: model.icon,
         aliases: model.externalAliases,
+        // 板引用与真数据同源（演示常量，见 plates.ts）
+        ...plateRefsOf(model.id),
         versions: model.versions.map((v) => toVersion(model, v)),
         dimensions: toDimensions(catalog.dimensions[model.id]),
         forbiddenZones: toForbiddenZones(model.id),

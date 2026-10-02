@@ -63,8 +63,14 @@ export interface RecipeParam {
   group: string
   unit?: string
   control: 'number' | 'switch' | 'choice' | 'text'
-  /** control === 'choice' 时的可选项 */
-  choices?: { value: string; label: string }[]
+  /**
+   * control === 'choice' 时的可选项。
+   *
+   * `deprecated`（选项级弃用，2026-10-02）：上游把某一档标成「正在退场」。**不是**字段级弃用
+   * —— 参数本身还是活的，只是这一个取值不许再被写成新值（老文件里存着的照旧读得到、能还原）。
+   * 客户端把它映射到共用的 `FieldOption.deprecated`（划线），不自己造第二个弃用信号。
+   */
+  choices?: { value: string; label: string; deprecated?: boolean }[]
   min?: number
   max?: number
   step?: number
@@ -73,6 +79,15 @@ export interface RecipeParam {
   origin: ParamOrigin
   /** 只有 origin === 'variant' 时有：基础配方里的那个值，用来显示「还原成」与对照 */
   baseValue?: string
+  /**
+   * 字段级弃用（2026-10-02）：该字段已退出正常编辑 / 产物生成，但**仍属于已知参数**，
+   * 所以参数页继续展示它的历史状态。
+   *
+   * 显示 ≠ 可编辑 ≠ 会进入新产物 —— 参数定义存在 / 参数页显示 / 用户编辑禁止 /
+   * 新 TOML 不生成。客户端靠 `ParamMeta.deprecated` 判（定义通道那边带），这一栏是
+   * 配方通道的镜像：`getMachineParams` 照旧**排除**弃用字段，所以这里正常恒为 undefined。
+   */
+  deprecated?: boolean
 }
 
 /** 一台机型的一个版本（标准版 / 快拆版 / lite 版…） */
@@ -159,6 +174,42 @@ export interface ForbiddenZone {
   points: ZonePoint[]
 }
 
+/**
+ * 可打印区在板轮廓坐标里的位置（mm）。**归 `Plate` 所有**。
+ *
+ * 机型 `MachineDimensions.bedSize` 是涂胶 / 运动口径（A1 记的是 260×255），
+ * 真可打印区是这里（256×256）。塔地图必须活在可打印区里。
+ */
+export interface PlateFrame {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * 一块打印板（2026-10-02）。**独立于机型的实体**：机型只引用 id（`plateIds`），
+ * 几何住在这里，随 catalog 的 `plates` 域下发（`RuntimeCatalog.plates`）。
+ *
+ * 坐标是板件自身的毫米：原点在板的**后缘左角**（y 向下指前缘）。`path` 含卡舌与把手，
+ * 孔洞子路径靠 evenodd 镂空；`bodyPath` 是不含卡舌 / 把手的板身。
+ */
+export interface Plate {
+  /** 稳定主键（`single-latch-256` / `dual-latch-180`）。机型的 `plateIds` 指向它 */
+  id: string
+  /** 给人看的名字（`单卡舌 256`） */
+  name: string
+  /** 板件外轮廓宽（viewBox 宽） */
+  w: number
+  /** 板件外轮廓深（viewBox 高） */
+  d: number
+  frame: PlateFrame
+  /** 板身路径（不含卡舌 / 把手） */
+  bodyPath: string
+  /** 完整外轮廓（含卡舌 / 把手） */
+  path: string
+}
+
 export interface Machine {
   /** 'A1' / 'A1_MINI' / 'P1S'…，规范形 `^[A-Z][A-Z0-9_]*$` */
   id: string
@@ -171,6 +222,13 @@ export interface Machine {
   icon: string
   /** 别名，用来认 G-code 里写的机型名（'A1MINI' / 'A1MC'…） */
   aliases: string[]
+  /**
+   * 这台机型能用的打印板 id（去 `RuntimeCatalog.plates` 里按 id 查板）。
+   * 空数组 = 没有板规格（塔地图那一层不出）。**机型只持引用，不持几何**
+   */
+  plateIds: string[]
+  /** 默认用哪一块板（塔地图按它选）；`null` = 没指定 */
+  defaultPlateId: string | null
   versions: MachineVersion[]
   /**
    * `null` = **这台机型还没配尺寸**（上游的 A2L）。
@@ -595,7 +653,8 @@ export interface ClientFieldDef {
    * 判据由客户端算（它依赖当前值），**数据由包里带** —— 客户端不再猜业务规则。
    */
   showWhen?: ParamMeta['showWhen']
-  choices?: { value: string; label: string }[]
+  /** `deprecated` 是选项级弃用（某一档退场），与字段级弃用不是一回事，见 `RecipeParam.choices` */
+  choices?: { value: string; label: string; deprecated?: boolean }[]
   min?: number
   max?: number
   step?: number
@@ -748,6 +807,12 @@ export interface DeliveryTrust {
  * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
  * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
  * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
+ *
+ * 2026-10-02（① deprecated 链路）：参数页的**字段清单改从 definition 取**（作者裁决：
+ * 弃用字段「显示，但只读」）—— 所以这里补上渲染一行所需的显示格子（label / desc / unit /
+ * uiComponent / valueType / choices / min / max / step）。这些 JSON 里本来就有，
+ * 只是从前没声明。**这是 definition 通道**，与配方通道（`getMachineParams`，
+ * 排除弃用字段）各司其职。
  */
 export interface CatalogParamDef {
   key: string
@@ -755,8 +820,21 @@ export interface CatalogParamDef {
   section: string
   /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
   layout: { order: number; sectionId: string }
+  label: string
+  desc: string
+  unit?: string
+  /** `number` / `switch` / `segmented` / `select` / `gcode` —— 控件形态的原词 */
+  uiComponent: string
+  valueType: 'float' | 'int' | 'bool' | 'string'
+  /** 选项级弃用在 `Choice.deprecated` 上（那一档正在退场） */
+  choices?: { value: string; label: string; deprecated?: boolean }[]
+  min?: number
+  max?: number
+  step?: number
   deprecated?: boolean
+  /** 只对这些机型生效；空数组 = 不限机型 */
   machineFilter?: string[]
+  showWhen?: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }
 }
 
 /** 页签与分组的元数据（中文名、顺序的唯一权威；`layout_schema` 全文没有 label） */
@@ -800,6 +878,8 @@ export interface RuntimeCatalog {
   machines: RuntimeCatalogMachine[]
   files: RuntimeCatalogFile[]
   registry: CatalogRegistry
+  /** 打印板（2026-10-02）：机型持引用（`Machine.plateIds`），几何住这里，按 id 查 */
+  plates: Plate[]
 }
 
 /**

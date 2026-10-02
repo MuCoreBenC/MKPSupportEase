@@ -219,6 +219,12 @@ pub struct MachineDto {
     pub image: String,
     pub icon: String,
     pub aliases: Vec<String>,
+    /// 这台机型能用的打印板 id（去 `getRuntimeCatalog().plates` 里按 id 查）。
+    /// 空 = 没有板规格（塔地图那一层不出）。**机型只持引用，不持几何**
+    pub plate_ids: Vec<String>,
+    /// 默认用哪一块板（塔地图按它选）；`null` = 没指定
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_plate_id: Option<String>,
     pub versions: Vec<VersionDto>,
     /// `null` = 这台机型还没配尺寸。不给空对象也不给 0
     pub dimensions: Option<Dimensions>,
@@ -240,6 +246,8 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
             image: m.image.clone().unwrap_or_default(),
             icon: m.icon.clone().unwrap_or_default(),
             aliases: m.external_aliases.clone(),
+            plate_ids: m.plate_ids.clone(),
+            default_plate_id: m.default_plate_id.clone(),
             versions: m
                 .versions
                 .iter()
@@ -587,6 +595,13 @@ pub async fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppErro
 pub struct ChoiceDto {
     pub value: String,
     pub label: String,
+    /// **选项级弃用**（`Choice.deprecated`）：参数没废、某个选项废了。
+    ///
+    /// 真上游里就有这一档（`wiping.outer_structure` 的 `sheath` = 护套），不是为界面硬造的。
+    /// 界面上它**可点但不可存**（点开能看，写值闸拦下）—— 与字段级弃用"整行改不动"是两回事，
+    /// 所以两者不能合成一个布尔。
+    #[serde(skip_serializing_if = "is_false")]
+    pub deprecated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -623,6 +638,13 @@ pub struct RecipeParamDto {
     /// 只有 `origin === "variant"` 时有：基础配方里的那个值
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_value: Option<String>,
+    /// **字段级弃用**（`ParamDef.deprecated`）：这一整项在真上游里标了废弃。
+    ///
+    /// 与 [`ParamMetaDto::deprecated`] **同一个值、同一处出处**（`ParamDef.deprecated`）——
+    /// 两条通道都带是因为用的地方不同：参数页拿这份渲染"行名红线 + 已弃用徽章 + 控件改不动"。
+    /// 真上游里 7 条（`param_registry.toml`），不是为界面硬造的。
+    #[serde(skip_serializing_if = "is_false")]
+    pub deprecated: bool,
 }
 
 /// 一张配方（某个机型 + 某个版本）的全部参数值。
@@ -700,6 +722,7 @@ fn machine_params_dto(
                     .map(|c| ChoiceDto {
                         value: to_text(&c.value),
                         label: c.label.clone(),
+                        deprecated: c.deprecated,
                     })
                     .collect()
             }),
@@ -710,6 +733,8 @@ fn machine_params_dto(
             origin: if is_variant { "variant" } else { "base" },
             // 被版本盖过才带「还原成」的那个值：先看机型层有没有钉着，没有才是出厂默认
             base_value: is_variant.then(|| to_text(base.get(key).unwrap_or(&p.default_value))),
+            // 字段级弃用：与 [`ParamMetaDto::deprecated`] 同源同值（`ParamDef.deprecated`）
+            deprecated: p.deprecated,
         });
     }
     Ok(out)
@@ -890,6 +915,83 @@ mod tests {
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();
         assert!(err.message.contains("NOPE"));
+    }
+
+    /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。
+    ///
+    /// 真上游 `param_registry.toml` 里 8 处：7 字段级 + 1 选项级（`wiping.outer_structure`
+    /// 的 `sheath` = 护套）。作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为
+    /// 三件分开的事，于是这里的期望形状是：
+    ///
+    /// - **definition 通道**（`ParamMetaDto`）：带 7 条字段级弃用 —— 参数页靠它列字段、
+    ///   画红线徽章（「显示」）；
+    /// - **配方通道**（`RecipeParamDto`）：**一条字段级弃用都不下发** —— `visible_keys_of`
+    ///   的排除语义不许被偷改（不进入新产物）；配方里出现的每一条只能是被排除后剩下的活字段，
+    ///   它的 `deprecated` 必须恒为 false（否则就是「悄悄塞回来了」）；
+    /// - **选项级**弃用**只能**走配方通道（`ChoiceDto`，因为 `ParamMetaDto` 不带 `choices`）：
+    ///   护套那一档必须带着标记下来（「显示」），但它自己所在的那条 `wiping.outer_structure` 仍是活字段。
+    #[test]
+    fn deprecated_flags_travel_through_definition_channel_only() {
+        let catalog = catalog();
+
+        // —— 字段级：definition 通道带 7 条（真注册表口径）——
+        let meta = param_meta_dto(&catalog);
+        let meta_deprecated: Vec<&str> = meta
+            .iter()
+            .filter(|p| p.deprecated)
+            .map(|p| p.key.as_str())
+            .collect();
+        assert_eq!(
+            meta_deprecated.len(),
+            7,
+            "真注册表 7 条字段级弃用：{meta_deprecated:?}"
+        );
+
+        // —— 配方通道：一条字段级弃用都不许有（排除语义没被偷改）——
+        let params = machine_params_dto(&catalog, "A1", Some("FASTV3.3")).expect("A1 的配方");
+        let leaked: Vec<&str> = params
+            .iter()
+            .filter(|p| p.deprecated)
+            .map(|p| p.key.as_str())
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "配方通道不许下发字段级弃用（那是 definition 通道的活）：{leaked:?}"
+        );
+        // 配方里每一条都能在定义表里找到，且凡是定义侧标了弃用的，配方侧绝不出现
+        for p in &params {
+            if let Some(m) = meta.iter().find(|m| m.key == p.key) {
+                assert!(!m.deprecated, "{} 已被定义侧标弃用却出现在配方里", p.key);
+                assert!(!p.deprecated, "{} 配方侧也不许带弃用标记", p.key);
+            }
+        }
+        // 反向钉子：定义侧那 7 条，一条都不许出现在配方里
+        for key in &meta_deprecated {
+            assert!(
+                !params.iter().any(|p| p.key == *key),
+                "{key} 是弃用字段，不该进配方产物"
+            );
+        }
+
+        // —— 选项级：真数据 1 处（护套那一档），只能走配方通道 ——
+        let outer = params
+            .iter()
+            .find(|p| p.key == "wiping.outer_structure")
+            .expect("擦料外结构在配方里");
+        // 它自己是活字段（选项级弃用不是字段级弃用）
+        assert!(
+            !outer.deprecated,
+            "outer_structure 是活字段，弃用的是它的一个选项"
+        );
+        let choices = outer.choices.as_ref().expect("它是 choice 控件");
+        let dep: Vec<&str> = choices
+            .iter()
+            .filter(|c| c.deprecated)
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(dep, vec!["sheath"], "选项级弃用只有护套那一档");
+        // 其余选项一个都不许被误标（这是「选项级」而不是「参数级」的钉子）
+        assert!(choices.iter().filter(|c| c.deprecated).count() < choices.len());
     }
 
     /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。

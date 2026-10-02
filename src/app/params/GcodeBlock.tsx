@@ -18,8 +18,9 @@
  * 没见过的写法）在视图模式下整行按纯文本显示 —— 猜错了会把要发给打印机的指令改坏。
  */
 
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SegmentedField } from '../../components/field'
+import { tokenizeGcodeLine } from './gcode'
 import type { ParamDef } from './useParams'
 import s from './GcodeBlock.module.css'
 
@@ -41,7 +42,6 @@ const MODES = [
 ]
 
 const IS_COMMAND = /^[A-Za-z]\d+$/
-const MAX_ROWS = 14
 
 interface Parsed {
   raw: string
@@ -69,6 +69,36 @@ export default function GcodeBlock({
 }: Props) {
   const [mode, setMode] = useState('view')
   const lines = parse(value)
+
+  /*
+   * 代码模式的三层：行号槽 + 着色层 + 透明输入框（A43 移植，工作台 C15 那套）。
+   * 行号槽自己不滚，跟着输入框的 scrollTop 走 —— 这一支 ref 就是那条链。
+   */
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
+  const numRef = useRef<HTMLDivElement | null>(null)
+
+  const srcLines = useMemo(() => value.split('\n'), [value])
+  const highlighted = useMemo(
+    () =>
+      srcLines.map((line) => {
+        const i = line.indexOf(';')
+        return tokenizeGcodeLine(line, i < 0 ? null : i)
+      }),
+    [srcLines],
+  )
+
+  /* 三层同一把尺子（字体/行高/内衬写在 CSS 共用的一条里）：框高 = 行数 × 行高 + 上下内衬 */
+  const CODE_LINE_H = 12.5 * 1.75
+  const CODE_CHROME = 20
+  const codeH = Math.max(1, srcLines.length) * CODE_LINE_H + CODE_CHROME
+
+  /* 行号槽跟着输入框滚 —— 行号槽 overflow hidden，靠这里把它的内容挪上去 */
+  const syncScroll = () => {
+    if (numRef.current !== null && taRef.current !== null) {
+      numRef.current.scrollTop = taRef.current.scrollTop
+    }
+  }
+  useEffect(syncScroll, [value])
 
   const replaceParam = (lineAt: number, paramAt: number, next: string) => {
     const copy = lines.map((l, i) => {
@@ -114,15 +144,41 @@ export default function GcodeBlock({
       <p className={s.desc}>{def.desc}</p>
 
       {mode === 'code' ? (
-        <textarea
-          className={s.code}
-          value={value}
-          spellCheck={false}
-          disabled={disabled}
-          aria-label={`${def.label} 代码`}
-          rows={Math.min(lines.length + 1, MAX_ROWS)}
-          onChange={(e) => onEdit(def.key, e.target.value)}
-        />
+        /*
+         * 三层代码编辑器（A43 移植）：行号槽 + 着色层 + 透明输入框。
+         * 框高按行数算成定值写在这里（不是 rows），行号槽「内容比框高长」也撑不开框。
+         */
+        <div className={s.codeEd} style={{ height: `${codeH}px` }}>
+          <div ref={numRef} className={s.codeNum} aria-hidden style={{ height: `${codeH}px` }}>
+            {srcLines.map((_, i) => (
+              <div key={i}>{i + 1}</div>
+            ))}
+          </div>
+          <div className={s.codeBox}>
+            <pre className={s.codePre} aria-hidden>
+              {highlighted.map((tokens, i) => (
+                <div key={i}>
+                  {tokens.map((t, j) => (
+                    <span key={j} className={t.cls === undefined ? undefined : s[t.cls]}>
+                      {t.text}
+                    </span>
+                  ))}
+                  {tokens.length === 0 && '\u00a0'}
+                </div>
+              ))}
+            </pre>
+            <textarea
+              ref={taRef}
+              className={s.codeTa}
+              value={value}
+              spellCheck={false}
+              disabled={disabled}
+              aria-label={`${def.label} 代码`}
+              onScroll={syncScroll}
+              onChange={(e) => onEdit(def.key, e.target.value)}
+            />
+          </div>
+        </div>
       ) : (
         <ol className={s.lines}>
           {lines.map((line, i) => (

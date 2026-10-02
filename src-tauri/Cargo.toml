@@ -7,6 +7,10 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/MuCoreBenC/MKPSupportEase"
 edition = "2021"
 rust-version = "1.77.2"
+# 这个 crate 里有两个 bin（`mkp-support-ease` 本体 + `gen-catalog` 生成器）。
+# 不写这一行，`cargo run`（tauri dev / tauri build 走的就是它）会以
+# "could not determine which binary to run" 拒绝启动 —— 本体是默认的那个。
+default-run = "mkp-support-ease"
 
 [lib]
 # 名字里的下划线是 crate 名规范；main.rs 按这个名字调 run()
@@ -40,7 +44,11 @@ tauri = { version = "2.9.1", features = ["macos-private-api"] }
 # 操作系统的事 —— 挑官方 plugin 而不是自己拼 rfd，是因为"在哪个线程弹窗、取消怎么
 # 回来"这些平台差异由它包掉。它只在用户点「导入文件…」时弹一个原生对话框；
 # 复制由我们自己的导入核心做（源文件全程只读，去处只有 presets-mine/）。
-tauri-plugin-dialog = "2"
+#
+# 版本 `2.8` 是**与 npm 那半对齐**的（`@tauri-apps/plugin-dialog@2.8.1`）：
+# `tauri dev` 会查两端的 major/minor，错档就报 "version mismatched Tauri packages"。
+# 升级时两端成对升（见 ARCHITECTURE §6）。
+tauri-plugin-dialog = "2.8"
 
 # 在系统文件管理器里"显示并选中"（第十三层：文件外部管理的第一半）。
 #

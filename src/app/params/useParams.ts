@@ -47,11 +47,13 @@ import { api, errorText } from '../../api'
 import type {
   ActiveOrigin,
   ActivePreset,
+  CatalogParamDef,
   Machine,
   MachineVersion,
   ParamMeta,
   ParamSection,
   ParamTab,
+  Plate,
   RecipeParam,
   RuntimeCatalog,
 } from '../../api'
@@ -69,6 +71,17 @@ export interface ParamDef {
   /** 交给 FieldControl 的形状 */
   field: FieldSchema
   meta?: ParamMeta
+  /**
+   * 字段级弃用（2026-10-02，作者裁决）：该字段已退出正常编辑 / 产物生成，但仍是已知参数，
+   * 所以参数页**照常显示**它的历史状态。
+   *
+   * **显示 ≠ 可编辑 ≠ 会进入新产物**：行照常列（红线 + 「已弃用」徽章），但控件只读、
+   * 写值闸拒绝、也不再有新 TOML（`getMachineParams` 本就排除它）。
+   *
+   * 判据来源 = `meta.deprecated`（定义通道，也就是 `getParamMeta`）—— 与配方通道无关；
+   * 配方通道不下发弃用字段，所以它的 `RecipeParam.deprecated` 正常恒为假。
+   */
+  deprecated: boolean
 }
 
 /** 一个字段在分类 / 分组结构里的位置。搜索结果要写清命中项属于哪一组 */
@@ -149,6 +162,19 @@ interface EditStep {
 interface Catalog {
   machines: Machine[]
   metaByKey: Map<string, ParamMeta>
+  /**
+   * 打印板，按 id 索引（2026-10-02，③）。塔地图按机型的 `defaultPlateId` 从这里查板；
+   * 查不到就退回「无板」（画布退回圆角矩形）。
+   */
+  platesById: Map<string, Plate>
+  /**
+   * **字段清单的权威**（definition 通道，`catalog.registry.params`）。
+   *
+   * 2026-10-02（作者裁决）：弃用字段「显示，但只读」—— 参数页的 defs 要以它为准来列字段，
+   * 而不是只看配方通道（`getMachineParams` 会排除弃用字段）。它带 label / desc / choices /
+   * uiComponent / valueType，正好够渲染一行；值本体仍走配方通道的 `baseByKey`。
+   */
+  registryParams: Map<string, CatalogParamDef>
   /** 页签与分组（页面级，不分机型；从 catalog 的 definition 摊） */
   tabs: ParamTab[]
   /** 每个组合的 MKP 文件名（`A1:STANDARD` → `A1-fastv3.3.toml`）—— 从 catalog 的 files 摊出来 */
@@ -258,6 +284,20 @@ function controlOf(
 ): FieldSchema['control'] {
   if (meta?.uiComponent === 'gcode') return 'gcode'
   return control
+}
+
+/**
+ * 定义侧的 `uiComponent` 原词 → 契约的四档 `control`。
+ *
+ * 只在**配方通道没给这条**（弃用字段）时才走这里 —— 那种情况没有 `RecipeParam.control`
+ * 可用，只能从定义侧的 `uiComponent` 摊。映射与后端 `machine_params_dto` 同口径：
+ * `segmented` / `select` 都并成 `choice`，`gcode` 落成 `gcode`（共用件自己画块）。
+ */
+function controlFromUi(ui: string): 'number' | 'switch' | 'choice' | 'text' {
+  if (ui === 'switch') return 'switch'
+  if (ui === 'segmented' || ui === 'select') return 'choice'
+  if (ui === 'gcode') return 'text'
+  return 'number'
 }
 
 /**
@@ -376,6 +416,10 @@ export interface Params {
   isVisible: (key: string) => boolean
   /** 现在是哪个父字段的条件没满足。可见时返回 null */
   blockedBy: (key: string) => BlockedBy | null
+  /** 一个条件此刻满不满足 —— ParamCard 的分支摊开 / 折叠判据 */
+  condOn: (cond: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }) => boolean
+  /** 当前机型的默认打印板（塔地图选板）；没配板就是 undefined */
+  plateOf: () => Plate | undefined
 
   /** 唯一写入口。一次调用 = 一条撤销 + 一条日志 */
   apply: (label: string, patches: Patch[]) => void
@@ -399,6 +443,8 @@ export interface Params {
   save: () => void
   /** 保存成功后的那一行绿字；null = 不显示 */
   savedNote: string | null
+  /** 写值闸拦下一次改动时那句人话（弃用字段 / 弃用选项）；`null` = 不显示 */
+  gateNote: string | null
   undo: () => void
   redo: () => void
   canUndo: boolean
@@ -461,6 +507,12 @@ export function useParams(): Params {
   const [draftError, setDraftError] = useState<string | null>(null)
   /** 保存后那份用户文件的路径（`presets-mine/…`），用来在页面提示"存到哪了" */
   const [saveResult, setSaveResult] = useState<string | null>(null)
+  /**
+   * 写值闸拦下一次改动时那句人话（2026-10-02）。`null` = 没在提示。
+   *
+   * 与 `savedNote`（保存成功的绿字）分开：这是**拒绝**，语气与位置都不同。
+   */
+  const [gateNote, setGateNote] = useState<string | null>(null)
 
   /**
    * **保存**：把草稿提交成"我的预设"（官方线另存 / 用户线写回）。
@@ -542,6 +594,12 @@ export function useParams(): Params {
         return
       }
       const metaByKey = new Map<string, ParamMeta>(meta.map((m) => [m.key, m]))
+      /* 字段清单的权威（definition 通道）—— 弃用字段也在这里，参数页靠它列全 */
+      const registryParams = new Map<string, CatalogParamDef>(
+        world.registry.params.map((p) => [p.key, p]),
+      )
+      /* 打印板按 id 索引（塔地图按机型 defaultPlateId 查） */
+      const platesById = new Map<string, Plate>((world.plates ?? []).map((p) => [p.id, p]))
       /* MKP 文件名按「机型:版本」建索引 —— 目录里登记的交付文件就是那一份 */
       const fileByCombo = new Map<string, string>()
       for (const f of world.files) {
@@ -584,6 +642,8 @@ export function useParams(): Params {
       setCatalog({
         machines: list,
         metaByKey,
+        registryParams,
+        platesById,
         tabs: tabsOf(world.registry),
         fileByCombo,
         editTargetByCombo,
@@ -663,49 +723,100 @@ export function useParams(): Params {
         const baseByKey = new Map<string, string>()
         const factoryByKey = new Map<string, string>()
 
-        for (const p of params) {
-          const meta = catalog.metaByKey.get(p.key)
-          const sectionId = meta?.sectionId ?? p.group
-          const def: ParamDef = {
-            key: p.key,
-            label: p.label,
-            desc: p.desc,
-            group: p.group,
-            sectionId,
-            /* 区间的 unit（风扇速度的 `0-255`）在这里就落掉，见 unitOf */
-            unit: unitOf(p.unit),
-            meta,
-            field: {
-              key: p.key,
-              label: p.label,
-              desc: p.desc,
-              control: controlOf(p.control, meta),
-              unit: unitOf(p.unit),
-              min: p.min,
-              max: p.max,
-              step: p.step,
-              choices: p.choices,
-            },
-          }
-          defs.push(def)
-          defByKey.set(p.key, def)
-          baseByKey.set(p.key, normalizeRaw(p.value, meta?.valueType))
-          /* 出厂值：被版本盖过的那几条带 baseValue，没盖过的 value 本身就是出厂值 */
-          factoryByKey.set(
-            p.key,
-            normalizeRaw(p.origin === 'variant' ? p.baseValue : p.value, meta?.valueType),
-          )
-
+        /* 把某个 key 登记进分类 / 分组索引 */
+        const place = (key: string, sectionId: string): void => {
           const tab = tabs.find((t) => t.sections.some((sec) => sec.id === sectionId))
           const section = tab?.sections.find((sec) => sec.id === sectionId)
           if (tab !== undefined && section !== undefined) {
-            placeByKey.set(p.key, {
+            placeByKey.set(key, {
               tabId: tab.id,
               tabLabel: tab.label,
               sectionId: section.id,
               sectionLabel: section.label,
             })
           }
+        }
+
+        /*
+         * **字段清单以 definition 通道为准**（2026-10-02，作者裁决）。
+         *
+         * 配方通道（`getMachineParams`）按既有语义**排除**弃用字段、也不下发它们的值 ——
+         * 这一点**不改**（显示 ≠ 会进入新产物）。但参数页要列全：弃用不是删除，值还在、
+         * 读得到，「藏起来的后果是用户以为这个参数不存在，然后去别处找」。
+         *
+         * 于是这一轮遍历 `catalog.registry.params`（定义侧）来建 defs：
+         *   · 属于本机型的（`machineFilter` 空 = 不限；非空且不含本机 → 不列）
+         *   · 若配方通道给了这条（活字段），label / desc / 值以配方为准（那是这个 combo 的实况）
+         *   · 若配方通道**没有**这条（弃用字段被排除），label / desc / 选项 / 控制形态
+         *     从定义侧拿，值本体拿不到 —— `baseByKey` 不填，展示值走 `savedValueOf` 兜底
+         *     （草稿 TOML 正文里若有就读到，没有就空），**不伪造一个数**。
+         *
+         * 判据：**参数定义存在 / 参数页显示 / 用户编辑禁止 / 新 TOML 不生成** —— 四件事分开。
+         */
+        const recipeByKey = new Map(params.map((p) => [p.key, p]))
+        const defOfKeys: string[] = []
+        for (const def of catalog.registryParams.values()) {
+          /* 机型过滤：定义侧限定了机型、且不含本机 → 这台机型根本不认识它，不列 */
+          if (def.machineFilter !== undefined && def.machineFilter.length > 0) {
+            if (!def.machineFilter.includes(machineId)) continue
+          }
+          defOfKeys.push(def.key)
+        }
+
+        for (const key of defOfKeys) {
+          const rd = catalog.registryParams.get(key)
+          if (rd === undefined) continue
+          const p = recipeByKey.get(key)
+          const meta = catalog.metaByKey.get(key)
+          const sectionId = meta?.sectionId ?? rd.layout.sectionId
+          /*
+           * 活字段（配方带了）用配方的显示信息与值；弃用字段（配方没带）退到定义侧。
+           * `unit` 一律过 `unitOf`（风扇速度那条把 min/max 塞进了 unit 位）。
+           */
+          const label = p?.label ?? rd.label
+          const desc = p?.desc ?? rd.desc
+          const isDeprecated = p === undefined || p.deprecated === true || meta?.deprecated === true
+          const def: ParamDef = {
+            key,
+            label,
+            desc,
+            group: p?.group ?? rd.layout.sectionId,
+            sectionId,
+            unit: unitOf(p?.unit ?? rd.unit),
+            meta,
+            deprecated: isDeprecated,
+            field: {
+              key,
+              label,
+              desc,
+              control: controlOf(p?.control ?? controlFromUi(rd.uiComponent), meta),
+              unit: unitOf(p?.unit ?? rd.unit),
+              min: p?.min ?? rd.min,
+              max: p?.max ?? rd.max,
+              step: p?.step ?? rd.step,
+              /*
+               * 选项级弃用映射到共用件的 `FieldOption.deprecated`（划线）。**不新造第二个信号**
+               * （FieldOption.deprecated 早就在，SegmentedField / SelectField 已经在画）。
+               */
+              choices: (p?.choices ?? rd.choices)?.map((c) => ({
+                value: c.value,
+                label: c.label,
+                deprecated: c.deprecated === true ? true : undefined,
+              })),
+            },
+          }
+          defs.push(def)
+          defByKey.set(key, def)
+          /* 值本体只对活字段有（弃用字段配方通道不下发 → 不填，展示走兜底） */
+          if (p !== undefined) {
+            baseByKey.set(key, normalizeRaw(p.value, meta?.valueType))
+            /* 出厂值：被版本盖过的那几条带 baseValue，没盖过的 value 本身就是出厂值 */
+            factoryByKey.set(
+              key,
+              normalizeRaw(p.origin === 'variant' ? p.baseValue : p.value, meta?.valueType),
+            )
+          }
+          place(key, sectionId)
         }
 
         /* 组内顺序读注册表的 order（可以是小数），没有就保持后端给的顺序 */
@@ -793,6 +904,37 @@ export function useParams(): Params {
   const isVisible = useCallback((key: string) => findBlocked(key) === null, [findBlocked])
 
   /**
+   * 一个条件**现在满不满足** —— ParamCard 的分支摊开 / 折叠判据（A43 移植）。
+   *
+   * 与 `findBlocked` 同一跳：条件参数被 `machineFilter` 排除（这台机型没有它）时返回
+   * **true**（不适用 = 不算被关着），否则照 `testCondition` 真值判。
+   */
+  const condOn = useCallback(
+    (cond: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }): boolean => {
+      const parent = defOf(cond.key)
+      if (parent === undefined) return true
+      const expected = normalizeRaw(cond.value, parent.meta?.valueType)
+      return testCondition(cond.op, valueOf(cond.key), expected)
+    },
+    [defOf, valueOf],
+  )
+
+  /**
+   * 当前机型的**默认打印板**（塔地图选板用，2026-10-02）。
+   *
+   * 按 `machine.defaultPlateId` 从 catalog 的 plates 里查；没配板 / 查不到就 `undefined`
+   * （塔地图那一层不出，画布退回圆角矩形）—— **不保留「按机型 id 兜底」那条老路**
+   * （无板就是无板）。
+   */
+  const plateOf = useCallback((): Plate | undefined => {
+    if (catalog === null) return undefined
+    const m = catalog.machines.find((x) => x.id === machineId)
+    const id = m?.defaultPlateId ?? null
+    if (id === null) return undefined
+    return catalog.platesById.get(id)
+  }, [catalog, machineId])
+
+  /**
    * 唯一写入口。
    *
    * 「改成与已保存值相同」= 撤掉草稿，而不是记一条「改成一样」的假改动；
@@ -800,6 +942,37 @@ export function useParams(): Params {
    */
   const apply = useCallback(
     (label: string, patches: Patch[]) => {
+      /*
+       * **写值闸**（2026-10-02，作者裁决）：弃用字段 / 弃用选项不许写新值。
+       *
+       * 闸设在**唯一出口**而不是各控件 —— 以后新增入口（折叠条切换、地图、预设、批量）
+       * 不必各写各的规矩。两个口子：
+       *
+       *   · 目标值**就是已保存值**时放行 —— 老配方里本来就写着「护套」的那份文件，
+       *     还原 chip 要能退回去（值还在、读得到；拦它等于把用户锁在自己的文件外）。
+       *   · 整个动作**原子拒绝**，不做「弃用的那几条跳过、其余照写」的半套 ——
+       *     半套会让一次点击产生看不懂的半截效果。
+       */
+      const dep = patches.find(
+        (p) =>
+          p.value !== undefined &&
+          p.value !== savedValueOf(p.key) &&
+          (defOf(p.key)?.deprecated === true ||
+            defOf(p.key)?.field.choices?.some((c) => c.deprecated === true && c.value === p.value)),
+      )
+      if (dep !== undefined) {
+        const def = defOf(dep.key)
+        const choice = def?.field.choices?.find(
+          (c) => c.deprecated === true && c.value === dep.value,
+        )
+        setGateNote(
+          choice !== undefined
+            ? `${def?.label ?? dep.key} 的「${choice.label}」已弃用，不能改（上游已标记）`
+            : `${def?.label ?? dep.key} 已弃用，不能改（上游已标记）`,
+        )
+        return
+      }
+
       const patch: Record<string, string | undefined> = {}
       const before: Record<string, string | undefined> = {}
       const items: HistoryItem[] = []
@@ -843,6 +1016,8 @@ export function useParams(): Params {
       setFuture([]) // 新动作把「重做」那一支剪掉，撤销栈的通例
       setLog([...log, { id, no: id, action: label, items, state: 'draft', batch: null }])
       setSavedNote(null)
+      /* 这次写成功 → 上一次的拦截提示收掉 */
+      setGateNote(null)
 
       /*
        * **落进草稿 TOML**（参数页底座 ③）：这一屏的内存改动同步写进 `run/draft-preset.json`
@@ -1166,6 +1341,8 @@ export function useParams(): Params {
     changedCount,
     isVisible,
     blockedBy: findBlocked,
+    condOn,
+    plateOf,
     apply,
     edit,
     editingPreset,
@@ -1175,6 +1352,7 @@ export function useParams(): Params {
     restoreDefaults,
     save,
     savedNote,
+    gateNote,
     undo,
     redo,
     canUndo: past.length > 0,

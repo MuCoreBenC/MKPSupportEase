@@ -62,6 +62,10 @@ pub struct Catalog {
     /// 字段定义与界面布局（参数表 74 条 + 页签/分组元数据 + 参数摆放）
     #[serde(default)]
     pub registry: CatalogRegistry,
+    /// 打印板（2026-10-02）：机型只持引用（`plateIds`），几何在这里。
+    /// 塔地图按 `defaultPlateId` 从这一份里按 id 查板
+    #[serde(default)]
+    pub plates: Vec<crate::presetdata::Plate>,
     /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
     /// 没下载就没有；下载了才出现在 `mkp/`）
     pub files: Vec<CatalogFile>,
@@ -109,6 +113,12 @@ pub struct CatalogMachine {
     pub image: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// 这台机型能用的打印板 id（`plates` 域里按 id 查）。空 = 没有板规格
+    #[serde(default)]
+    pub plate_ids: Vec<String>,
+    /// 默认用哪一块板（塔地图按它选）。`None` = 没指定
+    #[serde(default)]
+    pub default_plate_id: Option<String>,
     /// `None` = 占位机型，还没配 `[dimensions]`
     #[serde(default)]
     pub dimensions: Option<Dimensions>,
@@ -325,6 +335,8 @@ impl Catalog {
                 external_aliases: m.external_aliases.clone(),
                 image: m.image.clone(),
                 icon: m.icon.clone(),
+                plate_ids: m.plate_ids.clone(),
+                default_plate_id: m.default_plate_id.clone(),
                 dimensions: m.dimensions.clone(),
                 versions: m.versions.clone(),
                 zones: presets
@@ -404,6 +416,7 @@ impl Catalog {
                     tabs: presets.registry.tabs().to_vec(),
                     layout: presets.registry.layout().to_vec(),
                 },
+                plates: presets.catalog.plates().cloned().collect(),
                 files,
             },
             missing,
@@ -501,6 +514,7 @@ fn revision_of(catalog: &Catalog) -> String {
         assets: &'a [Asset],
         bundles: &'a [Bundle],
         registry: &'a CatalogRegistry,
+        plates: &'a [crate::presetdata::Plate],
         files: &'a [CatalogFile],
     }
     let bytes = serde_json::to_vec(&Payload {
@@ -509,6 +523,7 @@ fn revision_of(catalog: &Catalog) -> String {
         assets: &catalog.assets,
         bundles: &catalog.bundles,
         registry: &catalog.registry,
+        plates: &catalog.plates,
         files: &catalog.files,
     })
     .unwrap_or_default();
@@ -633,6 +648,86 @@ mod tests {
         assert_eq!(a1_fast.path, "mkp/presets/A1-fastv3.3.toml");
         assert_eq!(a1_fast.sha256.len(), 64, "SHA256 的 hex 长度");
         assert!(a1_fast.size > 0);
+    }
+
+    /// **打印板随 catalog 下发，机型的引用都能落地**（2026-10-02，③ 的判据）。
+    ///
+    /// 板是独立实体：几何只住 `presets/plates/*.toml`，机型只持引用。这条钉四件事：
+    ///   ① 目录里真有 2 块板，几何（w/d/frame/path/bodyPath）一格不少；
+    ///   ② 每台写 `plateIds` 的机型，每一项都能在 `plates` 里查到；
+    ///   ③ `defaultPlateId` 必须在自己的 `plateIds` 里（否则塔地图会去选一块用不了的板）；
+    ///   ④ A43 那 5 个机型映射去重成了 2 块（A1/P1S/P2S/X1C 同一块、A1_MINI 另一块）。
+    #[test]
+    fn plates_ride_along_and_machine_refs_resolve() {
+        let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
+
+        assert_eq!(catalog.plates.len(), 2, "两个机型映射去重成 2 块板");
+        let by_id: std::collections::HashMap<&str, &crate::presetdata::Plate> =
+            catalog.plates.iter().map(|p| (p.id.as_str(), p)).collect();
+        let single = by_id.get("single-latch-256").expect("单卡舌那块在");
+        assert_eq!((single.w, single.d), (258.0, 276.0));
+        assert_eq!(
+            (
+                single.frame.x,
+                single.frame.y,
+                single.frame.w,
+                single.frame.h
+            ),
+            (1.0, 8.5, 256.0, 256.0),
+            "可打印区归板（机型 bedSize 是涂胶/运动口径 260×255，不是这个）"
+        );
+        assert!(single.body_path.starts_with('M') && single.path.starts_with('M'));
+        assert!(single.path.contains('Z'), "轮廓是闭合路径");
+
+        let dual = by_id.get("dual-latch-180").expect("双卡舌那块在");
+        assert_eq!((dual.w, dual.d), (184.0, 197.1));
+        assert_eq!((dual.frame.w, dual.frame.h), (180.0, 180.0));
+
+        // 每一台机型的引用都能落地
+        for m in &catalog.machines {
+            for id in &m.plate_ids {
+                assert!(
+                    by_id.contains_key(id.as_str()),
+                    "{} 的板 {id} 要能查到",
+                    m.id
+                );
+            }
+            if let Some(default) = m.default_plate_id.as_deref() {
+                assert!(
+                    m.plate_ids.iter().any(|id| id == default),
+                    "{} 的默认板必须在自己的 plateIds 里",
+                    m.id
+                );
+            }
+        }
+
+        // A43 的映射去重：四台同一块、A1_MINI 另一块
+        let expect: &[(&str, &str)] = &[
+            ("A1", "single-latch-256"),
+            ("P1S", "single-latch-256"),
+            ("P2S", "single-latch-256"),
+            ("X1C", "single-latch-256"),
+            ("A1_MINI", "dual-latch-180"),
+        ];
+        for (mid, plate) in expect {
+            let m = catalog
+                .machine(mid)
+                .unwrap_or_else(|| panic!("{mid} 在目录里"));
+            assert_eq!(
+                m.default_plate_id.as_deref(),
+                Some(*plate),
+                "{mid} 的默认板"
+            );
+        }
+
+        // 指纹要跟着板定义走：改一块板的几何，revision 就该变
+        let mut tweaked = catalog.clone();
+        tweaked.plates[0].w += 1.0;
+        assert_ne!(
+            super::revision_of(&tweaked),
+            catalog.revision,
+            "板几何变了指纹就必须变（否则会拿到过期的目录）"
+        );
     }
 
     /// **每一份交付文件都要能唯一定位**（`file_name` 是下载与"已下载"的键）。

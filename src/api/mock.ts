@@ -9,6 +9,7 @@ import type {
 } from './contract'
 import {
   allMachines,
+  allPlates,
   allPresetFiles,
   catalogRegistry,
   copyToSlicerIn,
@@ -768,6 +769,7 @@ export const mockApi: MkpApi = {
         },
       ],
       registry: catalogRegistry(),
+      plates: allPlates(),
     }
   },
 

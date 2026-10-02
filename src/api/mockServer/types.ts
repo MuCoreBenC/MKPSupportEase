@@ -155,6 +155,8 @@ export interface RawParamLayout {
 export interface RawChoice {
   value: string
   label: string
+  /** 选项级弃用（实测 1 条：`wiping.outer_structure` 的 `sheath` = 护套） */
+  deprecated?: boolean
 }
 
 /**

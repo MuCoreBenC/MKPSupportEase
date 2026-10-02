@@ -6,6 +6,10 @@ defaultBundle = 'A1_MINI_default'
 externalAliases = ['A1MINI', 'A1M', 'A1MC', 'A1MQ', 'A1MF']
 icon = 'a1_mini-icon'
 
+# A1 mini 用双卡舌 180 那块板 —— 塔地图按 defaultPlateId 选板
+plateIds = ['dual-latch-180']
+defaultPlateId = 'dual-latch-180'
+
 [dimensions]
 edgeZone = 10.0
 
