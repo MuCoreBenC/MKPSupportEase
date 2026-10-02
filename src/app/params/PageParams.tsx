@@ -767,6 +767,19 @@ export default function PageParams({ density }: Props) {
             </div>
 
             {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
+            {/*
+              草稿那一行的状态（参数页底座）：改的值**当场写进草稿 TOML**，
+              所以关掉软件再回来还在。写失败要看得见 —— 不能只有界面上改了、盘上没改。
+              没有可编辑目标时（这个 combo 没配 MKP）也说一句，别让人以为改了会保存。
+            */}
+            {u.draftError !== null && (
+              <p className={s.warn}>草稿没写进磁盘：{u.draftError}</p>
+            )}
+            {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (
+              <p className={s.warn}>
+                这个版本没配 MKP 预设文件 —— 改动不会保存在任何文件里（只在这一屏）
+              </p>
+            )}
 
             {/*
               测量层与分列容器**分开的两层**：
@@ -806,7 +819,6 @@ export default function PageParams({ density }: Props) {
               view={historyView}
               history={u.history}
               groups={u.historyByBatch}
-              defOf={u.defOf}
               onView={setHistoryView}
               onMode={setHistoryMode}
               onClose={closeHistory}
@@ -1009,7 +1021,6 @@ export default function PageParams({ density }: Props) {
           view={historyView}
           history={u.history}
           groups={u.historyByBatch}
-          defOf={u.defOf}
           onView={setHistoryView}
           onMode={setHistoryMode}
           onClose={closeHistory}

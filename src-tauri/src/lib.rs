@@ -137,6 +137,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::read_user_preset_text,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
         ipc::mine::begin_preset_edit,
+        ipc::mine::patch_preset_draft,
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
@@ -193,6 +194,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::read_user_preset_text,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
         ipc::mine::begin_preset_edit,
+        ipc::mine::patch_preset_draft,
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,

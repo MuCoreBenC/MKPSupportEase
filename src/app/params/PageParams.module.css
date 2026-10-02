@@ -325,6 +325,14 @@ button.usingNote:hover {
   color: var(--accent-deep);
 }
 
+/* 草稿那一行没落盘 / 这份没有可编辑文件时的提示（比 .ok 显眼一档，是"要处理"的话） */
+.warn {
+  margin: 0 var(--pad) 10px;
+  font-size: var(--fs-label);
+  /* 与 `.danger` 那颗按钮同一个红 —— 项目里没有 --danger 变量，直接写值 */
+  color: #d13438;
+}
+
 /* ---------- 卡片区 + 固定抽屉 ---------- */
 
 /*

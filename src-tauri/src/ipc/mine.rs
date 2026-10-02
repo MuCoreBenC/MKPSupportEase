@@ -282,6 +282,40 @@ pub async fn put_preset_draft(app: AppHandle, text: String) -> Result<(), AppErr
     })
 }
 
+/// **按参数 key 改草稿里的一个值**（参数页底座 ③）—— 字段级写回，不重生成整份。
+///
+/// 与 [`put_preset_draft`] 的分工：那条是"把界面上那一整份正文写进去"（编辑器逐字改的场景），
+/// 这条是"我只改这一个字段"（参数页用控件改值的场景）—— 后者**不碰**注释、键序、
+/// 别人的行，只把那一处换掉。两条都只动 `run/draft-preset.json` 的正文，
+/// 官方原件与下载区全程不碰。
+///
+/// 定位与取值形态归 [`crate::presetdata::patch`]：它拿**字段定义**把 `param_key`
+/// 翻成 `(section, toml_key)`，并按 `valueType` 决定写成数字 / 布尔 / 字符串。
+/// 字段定义从**运行时 catalog** 来（`<appDataDir>/catalog.json` 的 `registry`）——
+/// 客户端不读仓库、也没有 `ParamRegistry` 那套编辑侧状态。
+#[tauri::command]
+pub async fn patch_preset_draft(
+    app: AppHandle,
+    param_key: String,
+    value: String,
+) -> Result<(), AppError> {
+    traced("patchPresetDraft", |_| {
+        let root = internal_root(&app)?;
+        let draft = runtime::state::load_draft(&root)?
+            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，改不了参数"))?;
+        let catalog = runtime::load_released_catalog(&root)?;
+
+        let patched = crate::presetdata::patch::patch_preset_toml(
+            &draft.text,
+            &catalog.registry.params,
+            &crate::presetdata::patch::FieldEdit::new(param_key, value),
+        )?;
+        /* 只换正文 —— 来源与打开那一刻的指纹保持不动（与 put 同一条规矩） */
+        runtime::state::save_draft(&root, &draft.subject(), &draft.source_sha256, &patched)?;
+        Ok(())
+    })
+}
+
 /// 放弃这次编辑：丢掉临时文件。
 ///
 /// 这一步**天生安全**：官方原件与下载区全程没被碰过，所以"放弃"只是扔掉一份草稿

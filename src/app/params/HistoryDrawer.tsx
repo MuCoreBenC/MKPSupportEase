@@ -6,7 +6,9 @@
  *   1. 外壳换成 `Drawer`（`position: absolute`，见那个文件的文件头）
  *   2. 视图切换用共用件 `SegmentedField` —— 归一之后「分段选择器长什么样」
  *      只该有一处定义
- *   3. 字段名与值的翻译读 `useParams` 的 `defOf` / `valueText`，不再读手抄表
+ *   3. **每条改动自带上下文**（操作记录底座 ④）：参数名 / 分类 / 分组 / 单位都是
+ *      `HistoryItem` 成形那一刻的快照，这里**不再回查当前 combo 的字段定义**——
+ *      切了机型/版本、目录更新之后，历史条目照样说得清"当时改的是哪一项"。
  *
  * # 保留的两个主张
  *
@@ -19,8 +21,7 @@
 import { SegmentedField } from '../../components/field'
 import Drawer from '../shared/Drawer'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
-import { valueText } from './useParams'
-import type { HistoryEntry, HistoryGroup, ParamDef } from './useParams'
+import type { HistoryEntry, HistoryGroup } from './useParams'
 import s from './HistoryDrawer.module.css'
 
 export type HistoryView = 'live' | 'batch'
@@ -42,7 +43,6 @@ interface Props {
   view: HistoryView
   history: HistoryEntry[]
   groups: HistoryGroup[]
-  defOf: (key: string) => ParamDef | undefined
   onView: (v: HistoryView) => void
   onMode: (m: DrawerMode) => void
   onClose: () => void
@@ -70,32 +70,43 @@ export default function HistoryDrawer({
   view,
   history,
   groups,
-  defOf,
   onView,
   onMode,
   onClose,
   onRevert,
 }: Props) {
+  /*
+   * 一条改动 → 两句：
+   *   上句 **上下文**：`分类 / 分组 · 参数名`（就是"哪个分类 → 哪个参数"，历史缺的那点信息）
+   *   下句 **值**：`旧 → 新`（带单位；单位也来自快照，不回查定义）
+   * 两项以上时上句改成"共 N 项"，避免拿第一项冒充整条动作。
+   */
   const describe = (entry: HistoryEntry) => {
     const first = entry.items[0]
-    if (first === undefined) return { line: entry.action, extra: null as string | null }
-    const def = defOf(first.key)
-    return {
-      line: `${def?.label ?? first.key} ： ${valueText(def, first.from)} → ${valueText(def, first.to)}`,
-      extra: entry.items.length > 1 ? `同一动作还改了 ${entry.items.length - 1} 项` : null,
-    }
+    if (first === undefined) return { ctx: entry.action, line: entry.action }
+    const many = entry.items.length > 1
+    const where = [first.tab, first.section].filter((x) => x !== '').join(' / ')
+    const ctx = many
+      ? `${first.label} 等 ${entry.items.length} 项`
+      : where === ''
+        ? first.label
+        : `${where} · ${first.label}`
+    const unit = first.unit ?? ''
+    const line = many
+      ? `共 ${entry.items.length} 项（含 ${first.label} ${first.from} → ${first.to}）`
+      : `${first.from}${unit} → ${first.to}${unit}`
+    return { ctx, line }
   }
 
   const row = (entry: HistoryEntry) => {
-    const { line, extra } = describe(entry)
+    const { ctx, line } = describe(entry)
     return (
       <li key={entry.id} className={entry.state === 'undone' ? s.itemOff : s.item}>
         <span className={s.no}>#{entry.no}</span>
         <span className={s.text}>
-          <span className={s.line}>{line}</span>
+          <span className={s.line}>{ctx}</span>
           <span className={s.meta}>
-            {entry.action}
-            {extra !== null ? ` · ${extra}` : ''}
+            {line} · {entry.action}
           </span>
         </span>
         <span className={entry.state === 'saved' ? s.badgeSaved : s.badge}>

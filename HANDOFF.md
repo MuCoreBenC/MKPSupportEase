@@ -529,6 +529,80 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      - **未碰** `src/api/mock.ts`（客户端另一套 mock，不扩大范围）。
      - **顺带发现（未修）**：`scripts/probes/workbench-build.mjs:225` 引用一个**不存在的
        「钉住」按钮**，跑到【二】参数台必挂 —— C15→A40 移植遗留的预存问题，与这两刀无关。
+     - ✅ **第二十刀：offset 内联表拆成三个独立字段**（PR #20 = `7a10f8b`，2026-10-02）
+     - **作者裁决**：趁参数页底层重做，把 TOML 结构一次定清楚 ——「**一个参数一个明确字段**」，
+       不再为兼容旧文件保留特殊结构。`[toolhead] offset = { x, y, z }` → `offset_x/y/z`。
+     - 改动面（46 文件）：`crates/preset`（**删 `ToolheadOffset` 结构体**；
+       `EDITABLE_KEYS` 77→79 键；`build`/`validate`/`write`）/ 注册表三条 `tomlKey` 各自唯一
+       （不再共享 `offset`）/ 37 处产物+夹具+配方（**三行都带 `tomlComment`**）/
+       `catalog.generated.json` 重新生成（revision `e373b773c82c0daa`）/ workbench 渲染基线。
+     - **刻意不兼容旧格式**（作者："不兼容，不需要管"）：删两条依赖**仓库外**旧文件的判据 ——
+       `load_ir.rs::the_real_user_preset_loads`、`ranges.rs` 里扫 `~/Documents/MKPSupportSSR` 那段。
+     - **关键**：IR 层（`postprocess/src/ir/types.rs`）本来就是三个独立字段 → 改动收敛在
+       「TOML ↔ preset crate ↔ 注册表」一圈，**不碰后处理管线**。
+     - **踩坑记录**：改完字段名后 `embedded_matches_rebuild` 红 → 必须重跑
+       `cargo run --bin gen-catalog`；`our_render_matches_the_machine_verified_baseline` 红 →
+       产物三行都要带 `tomlComment`（渲染器按注册表给 y/z 也带）。
+     - **遗留（未清）**：`jsonKey`/`mergeGroup`/`subfieldsOrder` 这套「共享 tomlKey = 内联表」
+       机制已**无人使用**（拆完即死代码），留待清理刀。
+     - ✅ **参数页底座第一阶段 ① `RecipeParamDto` 下发 `toml_key`**（PR #21 = `8d82373`）
+     - 施工前核清三事实：DTO 定义 `ipc/presets.rs:594` / `machine_params_dto`；
+       `toml_key` 来自 `ParamDef.toml_key`；前端 `ParamMeta.tomlKey` **早已存在** ——
+       所以①不是"从零加字段"，而是让**同一条数据走两条通道**（元信息 + 配方值）。
+     - 改动：`RecipeParamDto.toml_key` + TS `RecipeParam.tomlKey` + 假后端 `resolveParams`；
+       测试钉住"配方通道与元信息通道的 `toml_key` 必须是**同一个值**（不是两份真相）"。
+     - **刻意不激活** `jsonKey`/`mergeGroup`/`subfieldsOrder`（已是死代码）。
+     - ⏳ **下一步 = ② `patch_preset_toml`**：按 `toml_key` 用 `toml_edit` 改草稿 TOML 的某个字段
+       （保注释/顺序/格式，**不重新生成整份**）。签名 `patch_preset_toml(text, param_key, value)` ——
+       收**注册表主键**（如 `toolhead.offset.x`），不收裸 toml 键、不收 section（定位由注册表派生）。
+     - ✅ **② 已落地**（分支 `feat/parameter-draft-foundation`，2026-10-02）：
+       新增 `src-tauri/src/presetdata/patch.rs` ——
+       `patch_preset_toml(raw, &reg, &FieldEdit{param_key, value}) -> 新正文`。
+     - **住在 `presetdata` 而不是 `crates/preset`**：后者（`mkpse-preset`）是 workbench-only 的
+       optional 依赖，而参数页是**客户端默认构建**就要用 —— 拉进来会破坏隔离边界。
+       `toml_edit` 在 `presetdata` 本就可用（它读注册表就靠它）。
+     - **定位靠注册表**：`param_key` → `ParamRegistry::param()` 拿 `(section, toml_key)`。
+       不拆 `param_key` 去猜（那会把 `offset_x` 猜回 `offset.x`，正是 PR #20 拆掉的东西）。
+     - **形态由 `valueType` 定**（float/int/bool/text），**不由"有没有 choices"定**
+       （`prime_enabled` 选项写 off/on 但 TOML 里是布尔）；多行自动渲染 `"""…"""`。
+     - **只改已存在的键**：段/字段缺了各自如实拒（不凭空造），**保注释/键序/格式**
+       （decor 从旧值搬到新值上）。7 条单测拿**真注册表**跑。
+     - **下一步 = ③ 参数页接草稿链**：打开 → `begin_preset_edit`；改值 → `patch_preset_toml`；
+       保存 → `commit_preset_draft`。之后 ④ 操作记录底座（先不做历史 UI）。
+     - ✅ **③ 已落地**（分支 `feat/parameter-draft-foundation`，2026-10-02）：参数页接上了草稿链。
+     - **产品语义（作者定，解耦）**：**当前应用**（`active-preset.json`）只决定"默认打开哪一份"；
+       **当前编辑**是参数页自己的状态。"用户切机型/版本 = 换编辑目标，**不等于应用它**"——
+       改 P1S 不动 `active-preset`。两概念在 `useParams` 里各是一个变量，不互相写。
+     - **后端**：新增 IPC `patch_preset_draft(paramKey, value)`（`ipc/mine.rs`）——
+       读 `run/draft-preset.json` → `presetdata::patch::patch_preset_toml` → 写回草稿正文。
+       `patch_preset_toml` 改成收 `&[ParamDef]`（不再收 `&ParamRegistry`）：字段定义有两个来源
+       （工作台 `ParamRegistry` / 客户端 catalog 的 `CatalogRegistry`），算法只认那张表。
+     - **前端**（`useParams`）：`editingPreset`（编辑目标，从 `catalog.editTargetByCombo` 查）+
+       `patchDraft`（`apply`/`undo`/`redo` 每次改动都落草稿）+ `commitDraft`（`save` 时提交）。
+       `editTargetByCombo` 官方线来自 catalog 的 files，用户线来自 `getUserPresetFiles`（血统反推机型/版本）。
+     - **页面**：草稿没写进磁盘 / 这个 combo 没配 MKP 时，各显示一行红字（`PageParams.module.css` 的 `.warn`）。
+     - **修了一个 mock 夹具漂移**：`param_registry.json` 快照 + `MOCK_OFFICIAL_TEXT` 还停在
+       `offset = { x, y, z }` 的旧形状（PR #20 之后没同步）→ 参数页改 offset 会报
+       "草稿的 [toolhead] 里没有 offset"。已同步成 `offset_x/y/z`（探针 ①b 节逮到的）。
+     - 验证：`cargo test` 260 · workbench lib 449 · 双 feature clippy · fmt · tsc · lint ·
+       build + check:bundle + check:zero-network · 探针 `params-settings.mjs` **18 条全绿**
+       （含新增 ①b 节）/ `presets.mjs` 全绿。
+     - ✅ **④ 操作记录底座已落地**（同一分支，2026-10-02）：
+       `HistoryItem` 现在**成形那一刻就快照上下文**（`label` / `tab` / `section` / `unit`），
+       渲染时**不再回查当前 combo 的字段定义** —— 回查有两个毛病：切机型/版本后那个 key
+       可能不存在（只剩裸 key，正是"历史没上下文"的根因）、目录更新会改写"过去的事实"。
+       历史一条现在读作：`偏移 / 空间偏移 · X 轴偏移` + `-1mm → 1.23mm · 改 X 轴偏移`。
+       `HistoryDrawer` 的 `defOf` 参数删掉（不再需要）。
+       **本轮只做底座，不做历史页面**（作者：历史 UI 是第二阶段独立原型）。
+       验证：`params-settings.mjs` 新增 ①c 节（历史条目带分类/参数名）→ **20 条全绿**。
+     - ✅ **参数页底座第一阶段（①–④）全部完成** —— 整刀待统一推送 / PR / CI（新流程）。
+     - **参数页底座第一阶段全貌（作者定，施工中）**：
+       ①`RecipeParamDto` 下发 `toml_key`（**已完成**）②客户端 patch 能力 ③参数页接草稿链
+       （打开 → `begin_preset_edit`；改值 → patch；保存 → `commit_preset_draft`）
+       ④**操作记录底座**（结构化操作，为 Undo/Redo/**后续历史 UI** 供数；**先不做历史页面**）。
+       —— 第二阶段才做「修改历史」的独立 HTML 原型。**B（保存=另存）与 C（草稿跨页/重启）
+       本就是同一件事**（都在"持久化 TOML 草稿"里）。
+       作者原话要点：**参数编辑 = 编辑一份 TOML**，不是"改参数对象再想办法重新生成 TOML"。
 
      ## 4. 续做入口（从哪接手）
 

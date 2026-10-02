@@ -45,6 +45,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
 import type {
+  ActiveOrigin,
   ActivePreset,
   Machine,
   MachineVersion,
@@ -86,10 +87,32 @@ export interface BlockedBy {
   need: string
 }
 
+/**
+ * 一条改动（操作记录底座 ④）。
+ *
+ * **成形那一刻就把显示要用的上下文快照下来**（`label` / `tab` / `section` / `unit`），
+ * 而不是等到渲染时回查当前 combo 的字段定义 —— 回查有两个毛病：
+ *
+ *   ① 切了机型 / 版本之后，历史条目里的 key 在新 combo 里可能**根本不存在**，
+ *      于是那一条就显示成裸 key（`toolhead.offset.x`），正是"历史没上下文"的根因；
+ *   ② 定义会随目录（catalog）更新而变，而"当时我改的是哪一项、它叫什么"是**过去的事实**，
+ *      不该被后来的改名改写。
+ *
+ * 值本身（`from` / `to`）也从一开始就是**文本**：它记录的是"当时框里写的是什么"，
+ * 不是"现在按新定义应该显示成什么"。渲染成 ``` `-1 → -1.5` ``` 这种句子是界面的事。
+ */
 export interface HistoryItem {
   key: string
   from: string
   to: string
+  /** 参数中文名（如 `X 轴偏移`）。查不到定义时退回 key —— 但那是异常，不是常态 */
+  label: string
+  /** 分类（页签名，如 `偏移`） */
+  tab: string
+  /** 分组（section 名，如 `空间偏移`） */
+  section: string
+  /** 单位（如 `mm`）；没有就是 `null` */
+  unit: string | null
 }
 
 export interface HistoryEntry {
@@ -130,6 +153,16 @@ interface Catalog {
   tabs: ParamTab[]
   /** 每个组合的 MKP 文件名（`A1:STANDARD` → `A1-fastv3.3.toml`）—— 从 catalog 的 files 摊出来 */
   fileByCombo: Map<string, string>
+  /**
+   * 每个组合对应的**可编辑文件身份**（参数页底座 ③）。
+   *
+   * 参数页要改一份文件就得知道三件事：文件名、哪条线、用户线的落点 ——
+   * `beginPresetEdit` 正是要这三个。官方线落点恒 `null`（由目录给），用户线给 `path`。
+   *
+   * 官方那一半从 catalog 的 files 摊（`kind === 'mkp_preset'`）；用户那一半从
+   * `getUserPresetFiles` 来（我那份认的是 `path`，机型/版本从文件名反推）。
+   */
+  editTargetByCombo: Map<string, { fileName: string; origin: ActiveOrigin; path: string | null }>
 }
 
 interface ComboData {
@@ -347,6 +380,18 @@ export interface Params {
   /** 唯一写入口。一次调用 = 一条撤销 + 一条日志 */
   apply: (label: string, patches: Patch[]) => void
   edit: (key: string, value: string) => void
+
+  /**
+   * **正在编辑的那一份预设**（参数页底座 ③）—— 文件名 + 哪条线 + 用户线落点。
+   * `null` = 这个 combo 没有可编辑的文件（没配 MKP / 目录里认不出）。
+   *
+   * 它与"当前应用"是**两个概念**：编辑目标跟着 combo 走，改它**不动** `active-preset`。
+   */
+  editingPreset: { fileName: string; origin: ActiveOrigin; path: string | null } | null
+  /** 草稿没落盘时的原因（一行话）；正常是 `null` */
+  draftError: string | null
+  /** 保存后那份用户文件的路径（`presets-mine/…`），用来在页面提示"存到哪了" */
+  saveResult: string | null
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
   /** 底栏的「恢复默认值」：全部退回出厂值，算一次动作，撤销一下就全回来 */
@@ -395,6 +440,82 @@ export function useParams(): Params {
   const [savedNote, setSavedNote] = useState<string | null>(null)
 
   /*
+   * **正在编辑的那一份预设**（参数页底座 ③；作者 2026-10-02 定的语义）。
+   *
+   * 两个概念要分清，它们**解耦**：
+   *
+   *   当前应用（`active-preset.json`）—— 决定参数页**默认打开哪一份**，仅此而已
+   *   当前编辑（这里）              —— 参数页实际正在改的那一份
+   *
+   * 用户切机型 / 版本只换**编辑目标**，**不等于应用它**；改 `P1S` 不会动 `active-preset`。
+   * 没有应用任何预设、目录里也没有对应文件时它是 `null` —— 那时没有默认目标（页面照实说）。
+   *
+   * `origin` 决定改的是官方线还是用户线：官方线保存会**另存**成"我那份"，用户线**写回它自己**。
+   */
+  const [editingPreset, setEditingPreset] = useState<{
+    fileName: string
+    origin: ActiveOrigin
+    path: string | null
+  } | null>(null)
+  /** 编辑目标的草稿有没有真的落到盘上（后端 `run/draft-preset.json`） */
+  const [draftError, setDraftError] = useState<string | null>(null)
+  /** 保存后那份用户文件的路径（`presets-mine/…`），用来在页面提示"存到哪了" */
+  const [saveResult, setSaveResult] = useState<string | null>(null)
+
+  /**
+   * **保存**：把草稿提交成"我的预设"（官方线另存 / 用户线写回）。
+   *
+   * 真值落在用户根（后端 `commit_preset_draft`），本地那一层只是"这一屏看得到的改动"。
+   * 没有编辑目标时如实说，不假装保存了。
+   *
+   * 定义在这里（早于 `save`）是为了让 `save` 在渲染期就能引用到它。
+   */
+  const commitDraft = useCallback(() => {
+    setEditingPreset((cur) => {
+      if (cur === null) {
+        setSavedNote('这份没有可保存的目标（没配 MKP 文件或还没选）')
+        return cur
+      }
+      void api.commitPresetDraft().then(
+        (done) => {
+          setDraftError(null)
+          setSavedNote(
+            cur.origin === 'mine'
+              ? `已写回 ${done.fileName}`
+              : done.replaced
+                ? `已保存成 ${done.fileName}（覆盖了上一份）`
+                : `已另存为 ${done.fileName}`,
+          )
+          setSaveResult(done.path)
+        },
+        (e: unknown) => setSavedNote(`保存失败：${errorText(e)}`),
+      )
+      return cur
+    })
+  }, [])
+
+  /*
+   * **改一个值就写进草稿**（字段级 patch，参数页底座 ③，不重生成整份）。
+   *
+   * 每次改动直接调一次 `patch_preset_draft` —— 不做防抖：参数页的控件是
+   * 步进器 / 下拉 / 开关（一次点击 = 一次确定的值），不像文本编辑器要按字节流。
+   * 失败只记进 `draftError`（页面显示一行），**不回滚界面值** —— 用户看到的仍是他刚改的；
+   * "真机上草稿没写进去"这件事要看得见，而不是悄悄弹回去。
+   *
+   * 定义在这里（而不是挨着它用的那几个回调）是为了让 `apply` 能引用到它：
+   * `useCallback` 依赖的是**运行时**的绑定，而下面的 `apply` 在渲染期就建好了。
+   */
+  const patchDraft = useCallback(
+    (key: string, value: string) => {
+      void api.patchPresetDraft(key, value).then(
+        () => setDraftError(null),
+        (e: unknown) => setDraftError(errorText(e)),
+      )
+    },
+    [],
+  )
+
+  /*
    * 这一页的**唯一数据源 = catalog**（`<appDataDir>/catalog.json`，随安装包释放；
    * 旧世界那格 localStorage 说明书已随 C4 退役）。页面上每一个字（页签名、分组名、
    * 条数、类型、选项、条件、值）都只有一个出处：
@@ -426,7 +547,47 @@ export function useParams(): Params {
       for (const f of world.files) {
         if (f.kind === 'mkp_preset') fileByCombo.set(`${f.machineId}:${f.versionId}`, f.fileName)
       }
-      setCatalog({ machines: list, metaByKey, tabs: tabsOf(world.registry), fileByCombo })
+      /*
+       * 可编辑的文件身份（参数页底座 ③）：官方线从目录的 files 摊；用户线从
+       * `getUserPresetFiles` 来 —— **同一个 combo 用户线优先**（用户自己那份就是他实际在用的）。
+       * 用户文件没有机型/版本元数据，靠 `sourceOf` 的血统 / 文件名反推（与预设页同一套）。
+       */
+      const editTargetByCombo = new Map<
+        string,
+        { fileName: string; origin: ActiveOrigin; path: string | null }
+      >()
+      for (const f of world.files) {
+        if (f.kind === 'mkp_preset') {
+          editTargetByCombo.set(`${f.machineId}:${f.versionId}`, {
+            fileName: f.fileName,
+            origin: 'official',
+            path: null,
+          })
+        }
+      }
+      const mine = await api.getUserPresetFiles().catch(() => [])
+      if (!alive) return
+      for (const f of mine) {
+        /*
+         * 我那份的机型/版本从**血统**认（`basedOn*` 指向官方来源那一版）；认不出就跳过 ——
+         * 认不出的那份在预设页照常列，只是不对应任何 combo，所以不进这张表（别硬塞一格）。
+         */
+        const { basedOnMachineId: mid, basedOnVersionId: vid } = f
+        if (mid !== null && vid !== null && f.kind === 'mkp_preset') {
+          editTargetByCombo.set(`${mid}:${vid}`, {
+            fileName: f.fileName,
+            origin: 'mine',
+            path: f.path,
+          })
+        }
+      }
+      setCatalog({
+        machines: list,
+        metaByKey,
+        tabs: tabsOf(world.registry),
+        fileByCombo,
+        editTargetByCombo,
+      })
 
       /*
        * 默认落在**正在用的那一份**：使用中指针（`run/active-preset.json`）说应用了哪台哪个版本，
@@ -650,10 +811,20 @@ export function useParams(): Params {
         if (current === target) continue
         patch[p.key] = target
         before[p.key] = current
+        /*
+         * 上下文**当场快照**（操作记录底座 ④）：参数名 / 分类 / 分组 / 单位。
+         * 之后切机型、目录更新都不改写这一条 —— 它记的是"当时我改的是哪一项、它叫什么"。
+         */
+        const def = defOf(p.key)
+        const place = placeOf(p.key)
         items.push({
           key: p.key,
           from: current ?? savedValue,
           to: target ?? savedValue,
+          label: def?.label ?? p.key,
+          tab: place?.tabLabel ?? '',
+          section: place?.sectionLabel ?? def?.group ?? '',
+          unit: def?.unit ?? null,
         })
       }
 
@@ -672,8 +843,20 @@ export function useParams(): Params {
       setFuture([]) // 新动作把「重做」那一支剪掉，撤销栈的通例
       setLog([...log, { id, no: id, action: label, items, state: 'draft', batch: null }])
       setSavedNote(null)
+
+      /*
+       * **落进草稿 TOML**（参数页底座 ③）：这一屏的内存改动同步写进 `run/draft-preset.json`
+       * 的正文，于是切页 / 关掉软件再回来都还在。`value === undefined`（撤回保存值）
+       * 用「已保存值」回写 —— 草稿里该是这个值，不是"没有这一项"。
+       *
+       * 一次 `apply` 可能带多项（如"恢复默认值"几十项）→ 逐项 patch。
+       * 后端只改那一处、不重生成整份，所以多次调用是叠加的，不会互相冲掉。
+       */
+      for (const [key, value] of Object.entries(patch)) {
+        patchDraft(key, value ?? savedValueOf(key))
+      }
     },
-    [draft, log, past, savedValueOf, seq],
+    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq],
   )
 
   const edit = useCallback(
@@ -714,7 +897,11 @@ export function useParams(): Params {
     setFuture([...future, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'undone' } : e)))
     setSavedNote(null)
-  }, [draft, future, log, past])
+    /* 撤销也要落进草稿 TOML（否则关掉再回来，"撤了的那一步"又回来了） */
+    for (const [key, value] of Object.entries(step.before)) {
+      patchDraft(key, value ?? savedValueOf(key))
+    }
+  }, [draft, future, log, past, patchDraft, savedValueOf])
 
   const redo = useCallback(() => {
     const step = future[future.length - 1]
@@ -729,7 +916,11 @@ export function useParams(): Params {
     setPast([...past, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'draft' } : e)))
     setSavedNote(null)
-  }, [draft, future, log, past])
+    /* 重做同样要落进草稿 TOML */
+    for (const [key, value] of Object.entries(step.patch)) {
+      patchDraft(key, value ?? savedValueOf(key))
+    }
+  }, [draft, future, log, past, patchDraft, savedValueOf])
 
   const at = `${machineId}:${versionId}`
   const savedBatches = batchesByCombo.get(at) ?? 0
@@ -742,6 +933,11 @@ export function useParams(): Params {
    */
   const save = useCallback(() => {
     if (combo === null) return
+    /*
+     * **先落盘**：把草稿提交成"我的预设"（官方线另存 / 用户线写回，后端 `commit_preset_draft`）。
+     * 本地这一层只是"这一屏看得到的已保存值"，真值在用户根 —— 两句状态由 `commitDraft` 写。
+     */
+    commitDraft()
     const nextSaved = new Map(saved)
     for (const [key, value] of Object.entries(draft)) {
       nextSaved.set(cellKey(combo.machineId, combo.versionId, key), value)
@@ -753,8 +949,7 @@ export function useParams(): Params {
     setPast([])
     setFuture([])
     setLog(log.map((e) => (e.state === 'draft' ? { ...e, state: 'saved', batch } : e)))
-    setSavedNote(`已保存到 ${combo.fileLabel ?? `${combo.machineId} · ${combo.versionId}`}`)
-  }, [at, batchesByCombo, combo, draft, log, saved, savedBatches])
+  }, [at, batchesByCombo, commitDraft, combo, draft, log, saved, savedBatches])
 
   /** 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销） */
   const revertEntry = useCallback(
@@ -896,6 +1091,54 @@ export function useParams(): Params {
     }
   }, [active, catalog, machineId, versionId])
 
+  /*
+   * **编辑目标**：当前 combo 对应的那一份文件（参数页底座 ③）。
+   *
+   * 默认由"正在应用的那一份"决定（`catalog.editTargetByCombo` 里那张表按 combo 查）；
+   * 用户切机型/版本 = 换目标，**不动 active-preset** —— 编辑与应用解耦。
+   * combo 对应不到任何文件（如 A2L 没配 MKP）就是 `null`：页面照实说"这份没法改"。
+   */
+  const editingTarget = useMemo(() => {
+    if (catalog === null || machineId === '' || versionId === '') return null
+    return catalog.editTargetByCombo.get(`${machineId}:${versionId}`) ?? null
+  }, [catalog, machineId, versionId])
+
+  /*
+   * combo 一换就**重开草稿**（`beginPresetEdit`）：把那份文件的正文读进草稿链，
+   * 于是"改到一半关掉再回来"接着改（后端按"同一份"认草稿，`reused`）。
+   *
+   * 切 combo 时**先把上一条的未保存改动丢掉** —— 与页面现有"切组合清草稿"同一语义
+   * （作者："面板上写的是'这次打开之后'"）。保存过的已经落用户根，不受影响。
+   */
+  useEffect(() => {
+    if (editingTarget === null) {
+      setEditingPreset(null)
+      return
+    }
+    let alive = true
+    setDraftError(null)
+    void api
+      .beginPresetEdit(editingTarget.fileName, editingTarget.origin, editingTarget.path ?? undefined)
+      .then(
+        (d) => {
+          if (!alive) return
+          setEditingPreset({
+            fileName: d.sourceFileName,
+            origin: d.origin,
+            path: d.path,
+          })
+        },
+        (e: unknown) => {
+          if (!alive) return
+          setEditingPreset(null)
+          setDraftError(errorText(e))
+        },
+      )
+    return () => {
+      alive = false
+    }
+  }, [editingTarget])
+
   return {
     loading: error === null && (catalog === null || combo === null),
     error,
@@ -925,6 +1168,9 @@ export function useParams(): Params {
     blockedBy: findBlocked,
     apply,
     edit,
+    editingPreset,
+    draftError,
+    saveResult,
     revertToSaved,
     restoreDefaults,
     save,
