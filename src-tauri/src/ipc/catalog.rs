@@ -41,10 +41,36 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetSourceDto {
+    /// **当前生效**的入口地址（设置文件优先，其次内置默认）。
+    /// 第十七刀起两种来源的语义不同、界面要说清：手动 = 数据源根（根下就有
+    /// `catalog.json`）；内置 = **Bootstrap 地址**（指向 `source.json`，见 `runtime::source`）
     pub base_url: String,
     /// `true` = 用户在界面里填的（写进了设置文件）；`false` = 构建期注入的出厂默认值，还没被人动过。
     /// 界面据此把"默认值"与"你选的"分开说——不然用户不知道当前的地址是自己改的还是出厂的
     pub from_user: bool,
+    /// 构建期注入的默认地址（`MKPSE_PRESET_SOURCE`，工作台配置在构建时合并进它），
+    /// 没有就是 `null`。**单独给一份**：有用户覆盖时 `base_url` 是覆盖值，
+    /// 光看它分不出"撤掉覆盖之后会回到什么"—— 设置页「使用内置官方源」那一格要说的正是这句话
+    pub builtin: Option<String>,
+}
+
+/// 生效值的装配：设置文件优先 → 内置默认 → 都没有就是 `null`。
+/// **只写这一处**（get 与 clear 共用）—— 各写一遍迟早有一份忘带新字段
+fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
+    let builtin = runtime::source::builtin_default();
+    match runtime::source::current_entry(root)? {
+        Some(runtime::source::SourceEntry::Direct { base_url }) => Ok(Some(PresetSourceDto {
+            base_url,
+            from_user: true,
+            builtin,
+        })),
+        Some(runtime::source::SourceEntry::Bootstrap { url }) => Ok(Some(PresetSourceDto {
+            base_url: url,
+            from_user: false,
+            builtin,
+        })),
+        None => Ok(None),
+    }
 }
 
 /// 当前数据源。`null` = 一个都没配（既没有设置文件，也没有出厂默认值）—
@@ -53,23 +79,15 @@ pub struct PresetSourceDto {
 pub async fn get_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
     traced("getPresetSource", |_| {
         let root = internal_root(&app)?;
-        if let Some(stored) = runtime::source::load_source(&root)? {
-            return Ok(Some(PresetSourceDto {
-                base_url: stored.base_url,
-                from_user: true,
-            }));
-        }
-        Ok(
-            runtime::source::builtin_default().map(|base_url| PresetSourceDto {
-                base_url,
-                from_user: false,
-            }),
-        )
+        source_dto(&root)
     })
 }
 
-/// 换数据源：写完立刻生效（下一次下载就用新的），并显示 writing 出来的那份。
+/// 换数据源：写完立刻生效（下一次下载就用新的），并显示写出来的那一份。
 /// 地址不合法在这一层就被拒：来自 `normalize_base_url`
+///
+/// **空地址不是"清除"**（那是 [`clear_preset_source`] 的事）：这里拒空，
+/// 语义保持"填一个地址进来"这一件事（见 `runtime::source::save_source` 的注释）
 #[tauri::command]
 pub async fn set_preset_source(
     app: AppHandle,
@@ -81,22 +99,31 @@ pub async fn set_preset_source(
         Ok(PresetSourceDto {
             base_url: saved.base_url,
             from_user: true,
+            builtin: runtime::source::builtin_default(),
         })
     })
 }
 
-/// 当前数据源的地址 —— 今天所有联网动作（下载 / 检查更新 / 应用更新）的唯一入口。
+/// 撤掉用户覆盖：删掉设置文件（幂等），返回删除之后生效的值（有内置给内置，没有就是 `null`）。
 ///
-/// **没配就报错，并且要说清去哪儿配**：这一步最容易被写成 `NOT_FOUND`（那是"目录里
-/// 没有这个文件"的意思）或干脆返回一个空结果。两者都会让界面显示一句用户无从行动的话。
-fn remote_base(root: &Path) -> Result<String, AppError> {
-    let stored = runtime::source::current_base_url(root)?;
-    stored.ok_or_else(|| {
-        AppError::not_implemented(
-            "还没配置数据源地址：去「同步」页填一个（官方源 / Gitee / 自己的服务器都行）",
-        )
+/// 「回到内置默认」只有这一条路 —— 空地址不许写盘（见 `runtime::source::save_source`），
+/// 原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作
+/// （2026-10-02「同步」页退役时，从"填地址"这一格旁边分出来的）
+#[tauri::command]
+pub async fn clear_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
+    traced("clearPresetSource", |_| {
+        let root = internal_root(&app)?;
+        runtime::source::clear_source(&root)?;
+        source_dto(&root)
     })
 }
+
+/*
+ * 「远端在哪」的解析（原来那个 `remote_base`）搬进了 `runtime::source`：
+ * 第十七刀起入口有两种（手动根 / 内置 Bootstrap），解析要读 `source.json` ——
+ * 那是 source 模块的知识，不是这一层的。所有联网动作（下载 / 检查更新 / 应用更新）
+ * 都从 `runtime::source::resolve_source(&root)?` 出发，拿 `base_url` 或 `catalog_url`。
+ */
 
 /// 一次下载的水位（走 Channel 送回调用方那条 IPC —— 一次调用一路流式事件，
 /// 不是全局广播：将来的"任务中心"要的是另一件事，等它真来了再说）
@@ -180,7 +207,8 @@ pub async fn download_runtime_file(
                     None,
                 );
             };
-            let remote = runtime::net::RemoteSource::new(remote_base(&root)?, &forward);
+            let resolved = runtime::source::resolve_source(&root)?;
+            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
             let outcome = runtime::delivery::deliver(&root, file, &remote);
 
             match &outcome {
@@ -260,7 +288,8 @@ pub async fn download_runtime_files(
                     None,
                 );
             };
-            let remote = runtime::net::RemoteSource::new(remote_base(&root)?, &forward);
+            let resolved = runtime::source::resolve_source(&root)?;
+            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
 
             let report = |outcome: &runtime::delivery::FileOutcome| {
                 let size = wanted
@@ -562,7 +591,9 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
 ///
 /// ```text
 /// official  目录里有这一份 + 盘上字节与目录登记逐字节一致（没下载 / 被改过 / 是旧版本 —— 都不许应用）
-/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
+/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有 + 能读成一份 TOML
+///           （第九层的**文件级**检查；**不看 SHA** —— 用户自己改过是正常事，
+///           能不能用看"现在还能不能读"，见 `runtime::mine::read_preset_text`）
 /// ```
 #[tauri::command]
 pub async fn apply_active_preset(
@@ -611,11 +642,12 @@ pub async fn apply_active_preset(
                         "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
                     )));
                 }
-                let target = crate::fsx::paths::resolve_in(&user, &rel)?;
-                let bytes = std::fs::read(&target).map_err(|_| {
-                    AppError::not_found(format!("{rel} 不在本机了——它可能已经被移走或删掉"))
-                })?;
-                let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+                /*
+                 * 第九层的文件级检查在读的那一步里（能读 + UTF-8 + TOML 语法）——
+                 * 外部改过但仍是能读的 TOML 照常能用，**这里不比 SHA**（那是官方线的规矩）。
+                 */
+                let text = runtime::mine::read_preset_text(&user, &rel)?;
+                let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
                 runtime::state::save_active_mine(&root, &rel, &digest)?
             }
         };
@@ -651,7 +683,8 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            let bytes = runtime::net::get_manifest(&remote_base(&root)?)?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
             let remote = runtime::Catalog::parse(&bytes)?;
             let local = runtime::load_released_catalog(&root)?;
             let r = runtime::update::check(&local, &remote);
@@ -673,7 +706,8 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("applyRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            let bytes = runtime::net::get_manifest(&remote_base(&root)?)?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
             let report = runtime::release::release_bytes(&root, &bytes)?;
             Ok(report.summary())
         })

@@ -1,0 +1,4796 @@
+{
+  "catalogSchema": 1,
+  "revision": "620bb442d24db768",
+  "brands": [
+    {
+      "id": "Bambu Lab",
+      "name": "拓竹 (Bambu Lab)",
+      "logo": "bambu-logo.png"
+    }
+  ],
+  "machines": [
+    {
+      "id": "A1",
+      "display": "A1",
+      "name": "",
+      "brand": "拓竹 (Bambu Lab)",
+      "defaultBundle": "A1_default",
+      "externalAliases": [
+        "A1C",
+        "A1F"
+      ],
+      "image": null,
+      "icon": "a1-icon",
+      "dimensions": {
+        "bedSize": {
+          "width": 260.0,
+          "depth": 255.0
+        },
+        "movementRange": {
+          "minX": -40.0,
+          "maxX": 260.0,
+          "minY": 0.0,
+          "maxY": 255.0,
+          "maxZ": 999.0
+        },
+        "glueArea": {
+          "glueMinX": -40.0,
+          "glueMaxX": 260.0,
+          "glueMinY": 0.0,
+          "glueMaxY": 255.0,
+          "wipeX": 252.0
+        },
+        "calibration": {
+          "lShapeBaseX": 68.21,
+          "lShapeBaseY": 126.373,
+          "xLineX": 114.523,
+          "xLineY": 104.83,
+          "xLineYEnd": 114.83,
+          "yLineX": 104.53,
+          "yLineXEnd": 114.53,
+          "yLineY": 114.83,
+          "zStartX": 68.21,
+          "zStartY": 126.373
+        },
+        "edgeZone": 10.0,
+        "flags": {
+          "gcodeMarker": ";===== machine: A1",
+          "hasSecondFan": false
+        }
+      },
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版",
+          "recommendedBundle": "A1_default",
+          "tag": "推荐",
+          "description": "官方标准配置，适合大多数用户"
+        },
+        {
+          "id": "FAST",
+          "name": "快拆版6月以前",
+          "recommendedBundle": "A1_default",
+          "tag": "热门",
+          "description": "支持快拆配件的改装配置"
+        },
+        {
+          "id": "FASTV3.3",
+          "name": "快拆版260628",
+          "recommendedBundle": "A1_default",
+          "tag": "最新",
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+        }
+      ],
+      "zones": []
+    },
+    {
+      "id": "A1_MINI",
+      "display": "A1 mini",
+      "name": "",
+      "brand": "拓竹 (Bambu Lab)",
+      "defaultBundle": "A1_MINI_default",
+      "externalAliases": [
+        "A1MINI",
+        "A1M",
+        "A1MC",
+        "A1MQ",
+        "A1MF"
+      ],
+      "image": null,
+      "icon": "a1_mini-icon",
+      "dimensions": {
+        "bedSize": {
+          "width": 180.0,
+          "depth": 180.0
+        },
+        "movementRange": {
+          "minX": -10.0,
+          "maxX": 180.0,
+          "minY": 0.0,
+          "maxY": 180.0,
+          "maxZ": 999.0
+        },
+        "glueArea": {
+          "glueMinX": -10.0,
+          "glueMaxX": 180.0,
+          "glueMinY": 0.0,
+          "glueMaxY": 180.0,
+          "wipeX": 160.0
+        },
+        "calibration": {
+          "lShapeBaseX": 30.21,
+          "lShapeBaseY": 88.373,
+          "xLineX": 76.523,
+          "xLineY": 66.83,
+          "xLineYEnd": 76.83,
+          "yLineX": 66.523,
+          "yLineXEnd": 76.523,
+          "yLineY": 76.83,
+          "zStartX": 30.21,
+          "zStartY": 88.373
+        },
+        "edgeZone": 10.0,
+        "flags": {
+          "gcodeMarker": ";===== machine: A1 mini",
+          "hasSecondFan": false
+        }
+      },
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版",
+          "recommendedBundle": "A1_MINI_default",
+          "tag": "推荐",
+          "description": "官方标准配置"
+        },
+        {
+          "id": "FAST",
+          "name": "快拆版6月以前",
+          "recommendedBundle": "A1_MINI_default",
+          "tag": "热门",
+          "description": "支持快拆配件的改装配置"
+        },
+        {
+          "id": "FASTV3.3",
+          "name": "快拆版260628",
+          "recommendedBundle": "A1_MINI_default",
+          "tag": "最新",
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+        }
+      ],
+      "zones": []
+    },
+    {
+      "id": "P1S",
+      "display": "P1S",
+      "name": "",
+      "brand": "拓竹 (Bambu Lab)",
+      "defaultBundle": "P1S_default",
+      "externalAliases": [
+        "P1",
+        "P1SC",
+        "P1P",
+        "P1C"
+      ],
+      "image": null,
+      "icon": "p1s-icon",
+      "dimensions": {
+        "bedSize": {
+          "width": 256.0,
+          "depth": 256.0
+        },
+        "movementRange": {
+          "minX": 0.0,
+          "maxX": 255.0,
+          "minY": 0.0,
+          "maxY": 265.0,
+          "maxZ": 999.0
+        },
+        "glueArea": {
+          "glueMinX": 0.0,
+          "glueMaxX": 255.0,
+          "glueMinY": 0.0,
+          "glueMaxY": 265.0,
+          "wipeX": 20.0
+        },
+        "calibration": {
+          "lShapeBaseX": 68.21,
+          "lShapeBaseY": 126.373,
+          "xLineX": 114.523,
+          "xLineY": 104.83,
+          "xLineYEnd": 114.83,
+          "yLineX": 104.53,
+          "yLineXEnd": 114.53,
+          "yLineY": 112.83,
+          "zStartX": 68.21,
+          "zStartY": 126.373
+        },
+        "edgeZone": 10.0,
+        "flags": {
+          "gcodeMarker": ";===== machine: P1",
+          "hasSecondFan": true
+        }
+      },
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版",
+          "recommendedBundle": "P1S_default",
+          "tag": "推荐",
+          "description": "群里开源的最新lite"
+        }
+      ],
+      "zones": [
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              240.0,
+              0.0
+            ],
+            [
+              240.0,
+              14.0
+            ],
+            [
+              238.0,
+              14.0
+            ],
+            [
+              238.0,
+              5.0
+            ],
+            [
+              0.0,
+              5.0
+            ]
+          ]
+        },
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              18.0,
+              0.0
+            ],
+            [
+              18.0,
+              28.0
+            ],
+            [
+              0.0,
+              28.0
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "P2S",
+      "display": "P2S",
+      "name": "",
+      "brand": "拓竹 (Bambu Lab)",
+      "defaultBundle": "P2S_default",
+      "externalAliases": [
+        "P2"
+      ],
+      "image": null,
+      "icon": "p1s-icon",
+      "dimensions": {
+        "bedSize": {
+          "width": 256.0,
+          "depth": 256.0
+        },
+        "movementRange": {
+          "minX": 0.0,
+          "maxX": 256.0,
+          "minY": 0.0,
+          "maxY": 265.0,
+          "maxZ": 999.0
+        },
+        "glueArea": {
+          "glueMinX": 0.0,
+          "glueMaxX": 256.0,
+          "glueMinY": 0.0,
+          "glueMaxY": 265.0,
+          "wipeX": 20.0
+        },
+        "calibration": {
+          "lShapeBaseX": 68.21,
+          "lShapeBaseY": 126.373,
+          "xLineX": 114.523,
+          "xLineY": 104.83,
+          "xLineYEnd": 114.83,
+          "yLineX": 104.53,
+          "yLineXEnd": 114.53,
+          "yLineY": 112.83,
+          "zStartX": 68.21,
+          "zStartY": 126.373
+        },
+        "edgeZone": 10.0,
+        "flags": {
+          "gcodeMarker": ";===== machine: P2",
+          "hasSecondFan": true
+        }
+      },
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版",
+          "recommendedBundle": "P2S_default",
+          "tag": "推荐",
+          "description": "未完成，没有打印机"
+        }
+      ],
+      "zones": [
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              240.0,
+              0.0
+            ],
+            [
+              240.0,
+              14.0
+            ],
+            [
+              238.0,
+              14.0
+            ],
+            [
+              238.0,
+              5.0
+            ],
+            [
+              0.0,
+              5.0
+            ]
+          ]
+        },
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              18.0,
+              0.0
+            ],
+            [
+              18.0,
+              28.0
+            ],
+            [
+              0.0,
+              28.0
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "X1C",
+      "display": "X1C",
+      "name": "",
+      "brand": "拓竹 (Bambu Lab)",
+      "defaultBundle": "X1C_default",
+      "externalAliases": [
+        "X1",
+        "X1S",
+        "X1E",
+        "X1 Carbon",
+        "X1CARBON"
+      ],
+      "image": null,
+      "icon": "p1s-icon",
+      "dimensions": {
+        "bedSize": {
+          "width": 255.0,
+          "depth": 256.0
+        },
+        "movementRange": {
+          "minX": 0.0,
+          "maxX": 255.0,
+          "minY": 0.0,
+          "maxY": 265.0,
+          "maxZ": 999.0
+        },
+        "glueArea": {
+          "glueMinX": 0.0,
+          "glueMaxX": 255.0,
+          "glueMinY": 0.0,
+          "glueMaxY": 265.0,
+          "wipeX": 20.0
+        },
+        "calibration": {
+          "lShapeBaseX": 68.21,
+          "lShapeBaseY": 126.373,
+          "xLineX": 114.523,
+          "xLineY": 104.83,
+          "xLineYEnd": 114.83,
+          "yLineX": 104.53,
+          "yLineXEnd": 114.53,
+          "yLineY": 112.83,
+          "zStartX": 68.21,
+          "zStartY": 126.373
+        },
+        "edgeZone": 10.0,
+        "flags": {
+          "gcodeMarker": ";===== machine: X1",
+          "hasSecondFan": true
+        }
+      },
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版",
+          "recommendedBundle": "X1C_default",
+          "tag": "推荐",
+          "description": "群里开源的最新lite"
+        }
+      ],
+      "zones": [
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              240.0,
+              0.0
+            ],
+            [
+              240.0,
+              14.0
+            ],
+            [
+              238.0,
+              14.0
+            ],
+            [
+              238.0,
+              5.0
+            ],
+            [
+              0.0,
+              5.0
+            ]
+          ]
+        },
+        {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              18.0,
+              0.0
+            ],
+            [
+              18.0,
+              28.0
+            ],
+            [
+              0.0,
+              28.0
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "id": "a1-icon",
+      "type": "icon",
+      "machineId": "A1",
+      "name": "A1 图标",
+      "path": "icons/a1.svg"
+    },
+    {
+      "id": "a1_mini-icon",
+      "type": "icon",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 图标",
+      "path": "icons/a1_mini.svg"
+    },
+    {
+      "id": "p1s-icon",
+      "type": "icon",
+      "machineId": "P1S",
+      "name": "P1S 图标（P2S / X1C 共用）",
+      "path": "icons/p1s.svg"
+    },
+    {
+      "id": "mkp-support-test-models",
+      "type": "model",
+      "name": "MKP 支撑测试模型（多模型拼盘）",
+      "path": "models/MKP_support_test_models.3mf"
+    },
+    {
+      "id": "precise-calibration",
+      "type": "model",
+      "name": "精密校准模型",
+      "path": "models/Precise_Calibration.3mf"
+    },
+    {
+      "id": "zoffset-calibration",
+      "type": "model",
+      "name": "Z 轴偏移校准模型",
+      "path": "models/ZOffset_Calibration.3mf"
+    },
+    {
+      "id": "a1-bbs-02-010",
+      "type": "slicerProfile",
+      "machineId": "A1",
+      "name": "A1：0.2 喷头 0.10 层高",
+      "path": "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "a1-bbs-04-020",
+      "type": "slicerProfile",
+      "machineId": "A1",
+      "name": "A1：0.4 喷头 0.20 层高",
+      "path": "bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "a1_mini-bbs-02-010",
+      "type": "slicerProfile",
+      "machineId": "A1_MINI",
+      "name": "A1 mini：0.2 喷头 0.10 层高",
+      "path": "bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "a1_mini-bbs-04-020",
+      "type": "slicerProfile",
+      "machineId": "A1_MINI",
+      "name": "A1 mini：0.4 喷头 0.20 层高",
+      "path": "bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "p1s-bbs-02-010",
+      "type": "slicerProfile",
+      "machineId": "P1S",
+      "name": "P1S：0.2 喷头 0.10 层高",
+      "path": "bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "p1s-bbs-04-024",
+      "type": "slicerProfile",
+      "machineId": "P1S",
+      "name": "P1S：0.4 喷头 0.24 层高",
+      "path": "bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "p2s-bbs-04-024",
+      "type": "slicerProfile",
+      "machineId": "P2S",
+      "name": "P2S：0.4 喷头 0.24 层高",
+      "path": "bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "x1c-bbs-02-010",
+      "type": "slicerProfile",
+      "machineId": "X1C",
+      "name": "X1C：0.2 喷头 0.10 层高",
+      "path": "bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "slicer": "bbs",
+      "profile": "process"
+    },
+    {
+      "id": "x1c-bbs-04-024",
+      "type": "slicerProfile",
+      "machineId": "X1C",
+      "name": "X1C：0.4 喷头 0.24 层高",
+      "path": "bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "slicer": "bbs",
+      "profile": "process"
+    }
+  ],
+  "bundles": [
+    {
+      "id": "A1_default",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "A1_MINI_default",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "P1S_default",
+      "display": "官方推荐",
+      "machineId": "P1S",
+      "assetRefs": [
+        "p1s-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "P2S_default",
+      "display": "官方推荐",
+      "machineId": "P2S",
+      "assetRefs": [
+        "p2s-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "X1C_default",
+      "display": "官方推荐",
+      "machineId": "X1C",
+      "assetRefs": [
+        "x1c-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    }
+  ],
+  "registry": {
+    "params": [
+      {
+        "key": "toolhead.MKP_retract",
+        "configKey": "MKPRetract",
+        "tomlKey": "MKP_retract",
+        "jsonKey": "MKP_retract",
+        "label": "回抽长度",
+        "desc": "涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析",
+        "tomlComment": "回抽长度(mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 200.0,
+          "sectionId": "motion"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.custom_mount_gcode",
+        "configKey": "CustomMountGcode",
+        "tomlKey": "custom_mount_gcode",
+        "jsonKey": "custom_mount_gcode",
+        "label": "装载胶箱 G-code",
+        "desc": "用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量",
+        "tomlComment": "自定义工具头获取 G-code",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.5,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+          "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000",
+          "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000",
+          "X1C:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.custom_unmount_gcode",
+        "configKey": "CustomUnmountGcode",
+        "tomlKey": "custom_unmount_gcode",
+        "jsonKey": "custom_unmount_gcode",
+        "label": "卸载胶箱 G-code",
+        "desc": "用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量",
+        "tomlComment": "自定义工具头收起 G-code",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X273 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:STANDARD": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "P1S:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
+          "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
+          "X1C:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disable_3rd_layer_clog_detect",
+        "configKey": "Disable3rdLayerClogDetect",
+        "tomlKey": "disable_3rd_layer_clog_detect",
+        "jsonKey": "disable_3rd_layer_clog_detect",
+        "label": "关闭第三层裹头检测",
+        "desc": "开启后移除第三层裹头检测段。仅对A1/A1 mini机型有效",
+        "tomlComment": "关闭第三层裹头检测(A1/A1 mini)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "machine_specific",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "machine_specific"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "shared",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disable_front_cover_alarm",
+        "configKey": "DisableFrontCoverAlarm",
+        "tomlKey": "disable_front_cover_alarm",
+        "jsonKey": "disable_front_cover_alarm",
+        "label": "强制关闭前盖脱落报警",
+        "desc": "开启后将强制关闭前盖脱落报警。仅对P1系列机型有效",
+        "tomlComment": "关闭第三层裹头检测(A1/A1 mini)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "machine_specific",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "machine_specific"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "shared",
+        "machineFilter": [
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disable_timelapse",
+        "configKey": "DisableTimelapse",
+        "tomlKey": "disable_timelapse",
+        "jsonKey": "disable_timelapse",
+        "label": "关闭延时摄影",
+        "desc": "开启后移除延时摄影段(SKIPTYPE: timelapse)。仅对i3结构的A系列机型有效",
+        "tomlComment": "关闭延时摄影(A系列i3结构)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "machine_specific",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "machine_specific"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "shared",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disk_stagger_angle",
+        "configKey": "DiskStaggerAngle",
+        "tomlKey": "disk_stagger_angle",
+        "jsonKey": "disk_stagger_angle",
+        "label": "错开角度",
+        "desc": "每层圆盘旋转偏移的角度（0-30°）",
+        "tomlComment": "圆盘错开角度(度) 范围:0~30",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 5.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 41.0,
+          "sectionId": "disk_action"
+        },
+        "min": 0.0,
+        "max": 30.0,
+        "step": 1.0,
+        "unit": "°",
+        "parentKey": "wiping.disk_stagger_mode",
+        "showWhen": {
+          "key": "wiping.disk_stagger_mode",
+          "op": "neq",
+          "value": "off"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disk_stagger_max_angle",
+        "configKey": "DiskStaggerMaxAngle",
+        "tomlKey": "disk_stagger_max_angle",
+        "jsonKey": "disk_stagger_max_angle",
+        "label": "最大偏移角度",
+        "desc": "摆动的最大偏移角度（10-90°）",
+        "tomlComment": "圆盘最大偏移角度(度) 范围:10~90",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 45.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 42.0,
+          "sectionId": "disk_action"
+        },
+        "min": 10.0,
+        "max": 90.0,
+        "step": 1.0,
+        "unit": "°",
+        "parentKey": "wiping.disk_stagger_mode",
+        "showWhen": {
+          "key": "wiping.disk_stagger_mode",
+          "op": "neq",
+          "value": "off"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disk_stagger_mode",
+        "configKey": "DiskStaggerMode",
+        "tomlKey": "disk_stagger_mode",
+        "jsonKey": "disk_stagger_mode",
+        "label": "错开模式",
+        "desc": "关闭：不旋转 | 开启：始终错开 | 自动：小层高时自动错开",
+        "tomlComment": "圆盘错开模式(off/on/auto)",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "off",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 40.0,
+          "sectionId": "disk_action"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "disk"
+        },
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          },
+          {
+            "label": "自动",
+            "value": "auto",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.disk_stagger_swing_mode",
+        "configKey": "DiskStaggerSwingMode",
+        "tomlKey": "disk_stagger_swing_mode",
+        "jsonKey": "disk_stagger_swing_mode",
+        "label": "摆动模式",
+        "desc": "旋转楼梯：单向累加到达最大值后回卷 | 锯齿摆动：到最大值后反向折返",
+        "tomlComment": "圆盘摆动模式(spiral/oscillate)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "spiral",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 43.0,
+          "sectionId": "disk_action"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.disk_stagger_mode",
+        "showWhen": {
+          "key": "wiping.disk_stagger_mode",
+          "op": "neq",
+          "value": "off"
+        },
+        "choices": [
+          {
+            "label": "旋转楼梯",
+            "value": "spiral",
+            "deprecated": false
+          },
+          {
+            "label": "锯齿摆动",
+            "value": "oscillate",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.fan_speed",
+        "configKey": "FanSpeed",
+        "tomlKey": "fan_speed",
+        "jsonKey": "fan_speed",
+        "label": "风扇速度",
+        "desc": "风扇 PWM 速度 (0-255)，控制冷却风量",
+        "tomlComment": "风扇速度 范围:0~255",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 255.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "fan_control"
+        },
+        "min": 0.0,
+        "max": 255.0,
+        "step": 1.0,
+        "unit": "0-255",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.fast_tower_mode",
+        "configKey": "FastTowerMode",
+        "tomlKey": "fast_tower_mode",
+        "jsonKey": "fast_tower_mode",
+        "label": "擦料塔速度与质量",
+        "desc": "快速：最大层高打印，仅涂胶面层慢速擦嘴 | 跟随模型：层高与模型一致 | 自定义：自定义层高和擦嘴策略",
+        "tomlComment": "擦料塔模式",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "fast",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 31.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [
+          {
+            "label": "快速",
+            "value": "fast",
+            "deprecated": false
+          },
+          {
+            "label": "跟随模型",
+            "value": "follow",
+            "deprecated": false
+          },
+          {
+            "label": "自定义",
+            "value": "custom",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.first_pen_revitalization_flag",
+        "configKey": "FirstPenRevitalizationFlag",
+        "tomlKey": "first_pen_revitalization_flag",
+        "jsonKey": "first_pen_revitalization_flag",
+        "label": "首笔活化",
+        "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效",
+        "tomlComment": "首笔活化标志",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_inter_model_lift_height",
+        "configKey": "GlueInterModelLiftHeight",
+        "tomlKey": "glue_inter_model_lift_height",
+        "jsonKey": "glue_inter_model_lift_height",
+        "label": "涂胶区域间Z轴抬升高度",
+        "desc": "模型间跳转 + 段间跳转微抬合并控制。涂胶区域间移动和段间跳转均使用此高度",
+        "tomlComment": "模型间/段间跳转Z抬升高度(mm) 范围:2~5",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 2.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "z_lift"
+        },
+        "min": 2.0,
+        "max": 5.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_pass_count",
+        "configKey": "GluePassCount",
+        "tomlKey": "glue_pass_count",
+        "jsonKey": "glue_pass_count",
+        "label": "涂胶次数",
+        "desc": "同一区域的涂胶遍数，多次涂胶可增加粘合力但延长打印时间",
+        "tomlComment": "涂胶次数 范围:1~10",
+        "valueType": "int",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "glue_params"
+        },
+        "min": 1.0,
+        "max": 10.0,
+        "step": 1.0,
+        "unit": "次",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_sparse_ratio",
+        "configKey": "GlueSparseRatio",
+        "tomlKey": "glue_sparse_ratio",
+        "jsonKey": "glue_sparse_ratio",
+        "label": "涂胶稀疏比",
+        "desc": "小喷嘴(≤0.3mm)涂胶路径稀疏比例，0=不稀疏，50=隔行删除(默认)，100=仅保留首尾",
+        "tomlComment": "涂胶稀疏比(%)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 50.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 9.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_bed_bl",
+        "configKey": "GlueZCompensationBedBL",
+        "tomlKey": "glue_z_compensation_bed_bl",
+        "jsonKey": "glue_z_compensation_bed_bl",
+        "label": "热床-后左补偿",
+        "desc": "热床模式下后左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "tomlComment": "热床后左角Z补偿 范围:-0.2~0.2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 4.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.2,
+        "max": 0.2,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "bed"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_bed_br",
+        "configKey": "GlueZCompensationBedBR",
+        "tomlKey": "glue_z_compensation_bed_br",
+        "jsonKey": "glue_z_compensation_bed_br",
+        "label": "热床-后右补偿",
+        "desc": "热床模式下后右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "tomlComment": "热床后右角Z补偿 范围:-0.2~0.2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 5.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.2,
+        "max": 0.2,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "bed"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_bed_fl",
+        "configKey": "GlueZCompensationBedFL",
+        "tomlKey": "glue_z_compensation_bed_fl",
+        "jsonKey": "glue_z_compensation_bed_fl",
+        "label": "热床-前左补偿",
+        "desc": "热床模式下前左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "tomlComment": "热床前左角Z补偿 范围:-0.2~0.2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.2,
+        "max": 0.2,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "bed"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_bed_fr",
+        "configKey": "GlueZCompensationBedFR",
+        "tomlKey": "glue_z_compensation_bed_fr",
+        "jsonKey": "glue_z_compensation_bed_fr",
+        "label": "热床-前右补偿",
+        "desc": "热床模式下前右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "tomlComment": "热床前右角Z补偿 范围:-0.2~0.2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 3.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.2,
+        "max": 0.2,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "bed"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_enabled",
+        "configKey": "GlueZCompensationEnabled",
+        "tomlKey": "glue_z_compensation_enabled",
+        "jsonKey": "glue_z_compensation_enabled",
+        "label": "涂胶方向补偿",
+        "desc": "开启后涂胶 Z 会根据 X/Y 位置按 4 角补偿值进行双线性插值，解决特定方向涂不上胶的问题。补偿范围自动外扩 2mm 避免边缘突变",
+        "tomlComment": "涂胶方向补偿开关: false=关闭, true=开启(按4角双线性插值)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_mode",
+        "configKey": "GlueZCompensationMode",
+        "tomlKey": "glue_z_compensation_mode",
+        "jsonKey": "glue_z_compensation_mode",
+        "label": "补偿范围模式",
+        "desc": "热床范围：针对整个热床物理面积补偿，适合床面本身倾斜（范围 ±0.2mm，外扩 2mm）；涂胶面范围：针对每层每个连续涂胶区域的包围盒补偿，适合模型局部不平（范围 ±0.1mm，外扩 2mm）",
+        "tomlComment": "补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "bed",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.glue_z_compensation_enabled",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [
+          {
+            "label": "热床范围",
+            "value": "bed",
+            "deprecated": false
+          },
+          {
+            "label": "涂胶面范围",
+            "value": "patch",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_patch_bl",
+        "configKey": "GlueZCompensationPatchBL",
+        "tomlKey": "glue_z_compensation_patch_bl",
+        "jsonKey": "glue_z_compensation_patch_bl",
+        "label": "涂胶面-后左补偿",
+        "desc": "涂胶面模式下后左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "tomlComment": "涂胶面后左角Z补偿 范围:-0.1~0.1",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 8.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.1,
+        "max": 0.1,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "patch"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_patch_br",
+        "configKey": "GlueZCompensationPatchBR",
+        "tomlKey": "glue_z_compensation_patch_br",
+        "jsonKey": "glue_z_compensation_patch_br",
+        "label": "涂胶面-后右补偿",
+        "desc": "涂胶面模式下后右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "tomlComment": "涂胶面后右角Z补偿 范围:-0.1~0.1",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 9.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.1,
+        "max": 0.1,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "patch"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_patch_fl",
+        "configKey": "GlueZCompensationPatchFL",
+        "tomlKey": "glue_z_compensation_patch_fl",
+        "jsonKey": "glue_z_compensation_patch_fl",
+        "label": "涂胶面-前左补偿",
+        "desc": "涂胶面模式下前左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "tomlComment": "涂胶面前左角Z补偿 范围:-0.1~0.1",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 6.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.1,
+        "max": 0.1,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "patch"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_compensation_patch_fr",
+        "configKey": "GlueZCompensationPatchFR",
+        "tomlKey": "glue_z_compensation_patch_fr",
+        "jsonKey": "glue_z_compensation_patch_fr",
+        "label": "涂胶面-前右补偿",
+        "desc": "涂胶面模式下前右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "tomlComment": "涂胶面前右角Z补偿 范围:-0.1~0.1",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 7.0,
+          "sectionId": "glue_z_compensation"
+        },
+        "min": -0.1,
+        "max": 0.1,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_compensation_mode",
+        "showWhen": {
+          "key": "wiping.glue_z_compensation_mode",
+          "op": "eq",
+          "value": "patch"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_lift_height",
+        "configKey": "GlueZLiftHeight",
+        "tomlKey": "glue_z_lift_height",
+        "jsonKey": "glue_z_lift_height",
+        "label": "涂胶Z轴抬升高度",
+        "desc": "涂胶前/后抬笔高度。换笔芯后涂胶前抬笔 + 涂胶结束抬笔使用此高度。前3层使用子参数'前3层抬升高度'",
+        "tomlComment": "涂胶Z抬升高度(mm) 范围:5~10",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 5.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "z_lift"
+        },
+        "min": 5.0,
+        "max": 10.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_z_lift_height_first_layers",
+        "configKey": "GlueZLiftHeightFirstLayers",
+        "tomlKey": "glue_z_lift_height_first_layers",
+        "jsonKey": "glue_z_lift_height_first_layers",
+        "label": "前3层抬升高度",
+        "desc": "前3层涂胶前/后抬笔的额外高度，用于首层附着稳定。与涂胶Z轴抬升高度叠加使用",
+        "tomlComment": "前3层抬升高度(mm) 范围:6~10",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 6.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "z_lift"
+        },
+        "min": 6.0,
+        "max": 10.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": "wiping.glue_z_lift_height",
+        "showWhen": {
+          "key": "wiping.glue_z_lift_height",
+          "op": "gt",
+          "value": "0"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.glue_z_offset",
+        "configKey": "GlueZOffset",
+        "tomlKey": "glue_z_offset",
+        "jsonKey": "glue_z_offset",
+        "label": "涂胶Z偏移",
+        "desc": "涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面",
+        "tomlComment": "涂胶Z偏移(mm) 范围:-5~2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": -0.05,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "glue_params"
+        },
+        "min": -5.0,
+        "max": 5.0,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.have_wiping_components",
+        "configKey": "UseWipingTowers",
+        "tomlKey": "have_wiping_components",
+        "jsonKey": "have_wiping_components",
+        "label": "擦料方式",
+        "desc": "选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘",
+        "tomlComment": "使用擦嘴塔而非擦嘴组件",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "tower",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 10.0,
+          "sectionId": "wiping_method"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "擦料塔",
+            "value": "tower",
+            "deprecated": false
+          },
+          {
+            "label": "圆盘擦拭",
+            "value": "disk",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "wiping.ironing_coverage_threshold",
+        "configKey": "IroningCoverageThreshold",
+        "tomlKey": "ironing_coverage_threshold",
+        "jsonKey": "ironing_coverage_threshold",
+        "label": "熨烫覆盖阈值",
+        "desc": "熨烫面占支撑面的最低路径长度比例，低于此值时回退到支撑面",
+        "tomlComment": "熨烫覆盖率阈值(%) 范围:0~100",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 10.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 3.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "%",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "value": 0.0,
+            "deprecated": false
+          },
+          {
+            "label": "稀疏一半",
+            "value": 50.0,
+            "deprecated": false
+          },
+          {
+            "label": "稀疏90%",
+            "value": 90.0,
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.ironing_e_sum_threshold",
+        "configKey": "IroningESumThreshold",
+        "tomlKey": "ironing_e_sum_threshold",
+        "jsonKey": "ironing_e_sum_threshold",
+        "label": "熨烫挤出阈值",
+        "desc": "当熨烫段挤出总量超过此阈值时自动移除熨烫（仅在自动模式下生效）",
+        "tomlComment": "熨烫E总和阈值 范围:0~100",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 7.9,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 100.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": "wiping.ironing_mode",
+        "showWhen": {
+          "key": "wiping.ironing_mode",
+          "op": "eq",
+          "value": "auto"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.ironing_mode",
+        "configKey": "IroningMode",
+        "tomlKey": "ironing_mode",
+        "jsonKey": "ironing_mode",
+        "label": "支撑面熨烫",
+        "desc": "控制支撑面上层熨烫的保留/移除：关闭=始终移除熨烫挤出；开启=始终保留；自动=根据挤出量阈值判断",
+        "tomlComment": "熨烫模式: off=始终移除, on=始终保留, auto=自动判断",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "off",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          },
+          {
+            "label": "自动",
+            "value": "auto",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.ironing_suppress_expand",
+        "configKey": "IroningSuppressExpand",
+        "tomlKey": "ironing_suppress_expand",
+        "jsonKey": "ironing_suppress_expand",
+        "label": "熨烫抑制扩展范围",
+        "desc": "已激活熨烫段包围盒向外扩展的距离，0为关闭扩展",
+        "tomlComment": "熨烫抑制扩展(mm) 范围:0~20",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 4.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 20.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.ironing_suppress_expand_mode",
+        "configKey": "IroningSuppressExpandMode",
+        "tomlKey": "ironing_suppress_expand_mode",
+        "jsonKey": "ironing_suppress_expand_mode",
+        "label": "熨烫抑制扩展模式",
+        "desc": "熨烫抑制区域的扩展方式：包围盒外扩=沿XY轴均匀外扩；质心半径外扩=从质心向外径向扩展",
+        "tomlComment": "熨烫抑制扩展模式(bbox/centroid)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "bbox",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 5.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.ironing_suppress_expand",
+        "showWhen": {
+          "key": "wiping.ironing_suppress_expand",
+          "op": "gt",
+          "value": "0"
+        },
+        "choices": [
+          {
+            "label": "包围盒外扩",
+            "value": "bbox",
+            "deprecated": false
+          },
+          {
+            "label": "质心半径外扩",
+            "value": "centroid",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.min_support_interface_enabled",
+        "configKey": "MinSupportInterfaceEnabled",
+        "tomlKey": "min_support_interface_enabled",
+        "jsonKey": "min_support_interface_enabled",
+        "label": "最小支撑涂胶面过滤",
+        "desc": "启用后过滤掉过小的支撑涂胶面，避免无效涂胶",
+        "tomlComment": "最小支撑涂胶面过滤",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 8.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.nozzle_cooling_flag",
+        "configKey": "NozzleCoolingFlag",
+        "tomlKey": "nozzle_cooling_flag",
+        "jsonKey": "nozzle_cooling_flag",
+        "label": "涂胶期间降温",
+        "desc": "涂胶期间降低喷嘴温度以防止胶水因过热而滴漏",
+        "tomlComment": "涂胶期间是否降温",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "fan_control"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.offset.x",
+        "configKey": "XOffset",
+        "tomlKey": "offset",
+        "jsonKey": "x",
+        "label": "X 轴偏移",
+        "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 100.0,
+          "sectionId": "space_offset"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": -0.7,
+          "A1:FASTV3.3": 0.1,
+          "A1:STANDARD": -1.0,
+          "A1_MINI:FAST": -0.5,
+          "A1_MINI:FASTV3.3": -0.9,
+          "A1_MINI:STANDARD": -0.3,
+          "P1S:LITE": -25.9,
+          "P2S:STANDARD": -25.9,
+          "X1C:LITE": -25.9
+        },
+        "machineMinVariants": {
+          "P1S:LITE": -50.0,
+          "P2S:STANDARD": -50.0,
+          "X1C:LITE": -50.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 50.0,
+          "P2S:STANDARD": 50.0,
+          "X1C:LITE": 50.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": {
+          "subfieldsOrder": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      },
+      {
+        "key": "toolhead.offset.y",
+        "configKey": "YOffset",
+        "tomlKey": "offset",
+        "jsonKey": "y",
+        "label": "Y 轴偏移",
+        "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 150.0,
+          "sectionId": "space_offset"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 26.3,
+          "A1:FASTV3.3": 24.4,
+          "A1:STANDARD": 18.6,
+          "A1_MINI:FAST": 24.0,
+          "A1_MINI:FASTV3.3": 23.0,
+          "A1_MINI:STANDARD": 18.1,
+          "P1S:LITE": 14.0,
+          "P2S:STANDARD": 14.0,
+          "X1C:LITE": 14.0
+        },
+        "machineMinVariants": {
+          "P1S:LITE": -50.0,
+          "P2S:STANDARD": -50.0,
+          "X1C:LITE": -50.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 50.0,
+          "P2S:STANDARD": 50.0,
+          "X1C:LITE": 50.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.offset.z",
+        "configKey": "ZOffset",
+        "tomlKey": "offset",
+        "jsonKey": "z",
+        "label": "Z 轴偏移",
+        "desc": "涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 4.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 200.0,
+          "sectionId": "space_offset"
+        },
+        "min": 0.0,
+        "max": 20.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "P1S": 1.1,
+          "P1S:LITE": 1.1,
+          "P2S": 1.1,
+          "P2S:STANDARD": 1.1,
+          "X1C": 1.1,
+          "X1C:LITE": 1.1
+        },
+        "machineMinVariants": {
+          "P1S:LITE": 0.0,
+          "P2S:STANDARD": 0.0,
+          "X1C:LITE": 0.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 20.0,
+          "P2S:STANDARD": 20.0,
+          "X1C:LITE": 20.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "wiping.outer_structure",
+        "configKey": "OuterStructure",
+        "tomlKey": "outer_structure",
+        "jsonKey": "outer_structure",
+        "label": "外围结构",
+        "desc": "选择擦料塔外围结构类型：无=不生成外围；斜肋外墙=在塔外侧生成斜肋支撑；护套=包裹塔体外围防止倒塌",
+        "tomlComment": "外围结构(none/rib)",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "rib",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 50.0,
+          "sectionId": "tower_structure"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [
+          {
+            "label": "brim",
+            "value": "brim",
+            "deprecated": false
+          },
+          {
+            "label": "斜肋外墙",
+            "value": "rib",
+            "deprecated": false
+          },
+          {
+            "label": "护套",
+            "value": "sheath",
+            "deprecated": true
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.prime_enabled",
+        "configKey": "PrimeEnabled",
+        "tomlKey": "prime_enabled",
+        "jsonKey": "prime_enabled",
+        "label": "启用润笔",
+        "desc": "润笔总开关，关闭后所有润笔相关参数不显示且润笔逻辑不执行",
+        "tomlComment": "润笔总开关",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.prime_every_layer",
+        "configKey": "PrimeEveryLayer",
+        "tomlKey": "prime_every_layer",
+        "jsonKey": "prime_every_layer",
+        "label": "每层润笔",
+        "desc": "开启后每层涂胶前都触发润笔，与润笔触发层数互斥",
+        "tomlComment": "每层润笔",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 6.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.prime_length",
+        "configKey": "PrimeLength",
+        "tomlKey": "prime_length",
+        "jsonKey": "prime_length",
+        "label": "润笔路径长度",
+        "desc": "长时间未涂胶后重新润笔的路径长度，确保胶水充分流出",
+        "tomlComment": "预涂长度(mm) 范围:0~500",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 100.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": 0.0,
+        "max": 500.0,
+        "step": 10.0,
+        "unit": "mm",
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.prime_min_path_length",
+        "configKey": "PrimeMinPathLength",
+        "tomlKey": "prime_min_path_length",
+        "jsonKey": "prime_min_path_length",
+        "label": "润笔最小路径长度",
+        "desc": "触发润笔的最小路径长度阈值，路径长度小于此值时不触发润笔",
+        "tomlComment": "润笔最小路径长度(mm) 范围:0~100",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 5.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 3.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": 0.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "mm",
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.prime_per_model",
+        "configKey": "PrimePerModel",
+        "tomlKey": "prime_per_model",
+        "jsonKey": "prime_per_model",
+        "label": "每个模型都润笔",
+        "desc": "开启后每个模型的涂胶前都执行润笔，关闭则每层只润笔一次",
+        "tomlComment": "每个模型都润笔",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 5.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.prime_trigger_layers",
+        "configKey": "PrimeTriggerLayers",
+        "tomlKey": "prime_trigger_layers",
+        "jsonKey": "prime_trigger_layers",
+        "label": "润笔触发层数",
+        "desc": "超过此层数未涂胶时自动触发润笔",
+        "tomlComment": "预涂触发层数 范围:0~999",
+        "valueType": "int",
+        "uiComponent": "number",
+        "defaultValue": 30.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 4.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": 0.0,
+        "max": 999.0,
+        "step": 1.0,
+        "unit": "层",
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.rib_extra_length",
+        "configKey": "RibExtraLength",
+        "tomlKey": "rib_extra_length",
+        "jsonKey": "rib_extra_length",
+        "label": "斜肋额外长度",
+        "desc": "斜肋外墙的额外延伸长度，0为不延伸",
+        "tomlComment": "斜肋额外长度(mm) 范围:0~300",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 53.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 0.0,
+        "max": 300.0,
+        "step": 1.0,
+        "unit": "mm",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "rib"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.rib_fillet_wall",
+        "configKey": "RibFilletWall",
+        "tomlKey": "rib_fillet_wall",
+        "jsonKey": "rib_fillet_wall",
+        "label": "外墙倒圆角",
+        "desc": "斜肋外墙是否倒圆角",
+        "tomlComment": "外墙倒圆角",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 55.0,
+          "sectionId": "tower_structure"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "rib"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.rib_width",
+        "configKey": "RibWidth",
+        "tomlKey": "rib_width",
+        "jsonKey": "rib_width",
+        "label": "斜肋宽度",
+        "desc": "斜肋外墙的宽度",
+        "tomlComment": "斜肋宽度(mm) 范围:0~300",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 8.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 54.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 0.0,
+        "max": 300.0,
+        "step": 1.0,
+        "unit": "mm",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "rib"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.sheath_base_expand",
+        "configKey": "SheathBaseExpand",
+        "tomlKey": "sheath_base_expand",
+        "jsonKey": "sheath_base_expand",
+        "label": "护套底层膨胀量",
+        "desc": "护套底层相对塔体的单边膨胀量",
+        "tomlComment": "鞘底扩展(mm) 范围:0~20",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 5.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 58.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 0.0,
+        "max": 20.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "sheath"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.sheath_converge_layers",
+        "configKey": "SheathConvergeLayers",
+        "tomlKey": "sheath_converge_layers",
+        "jsonKey": "sheath_converge_layers",
+        "label": "护套收敛层数",
+        "desc": "护套从底层膨胀逐渐收敛到塔体外轮廓的层数",
+        "tomlComment": "鞘收敛层数 范围:1~200",
+        "valueType": "int",
+        "uiComponent": "number",
+        "defaultValue": 50.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 60.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 1.0,
+        "max": 200.0,
+        "step": 1.0,
+        "unit": "层",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "sheath"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.sheath_enable_height",
+        "configKey": "SheathEnableHeight",
+        "tomlKey": "sheath_enable_height",
+        "jsonKey": "sheath_enable_height",
+        "label": "护套自动启用高度",
+        "desc": "自动模式下，模型高度超过此值时启用护套",
+        "tomlComment": "鞘启用高度(mm) 范围:0~300",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 70.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 57.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 0.0,
+        "max": 300.0,
+        "step": 5.0,
+        "unit": "mm",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "sheath"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.sheath_wall_width",
+        "configKey": "SheathWallWidth",
+        "tomlKey": "sheath_wall_width",
+        "jsonKey": "sheath_wall_width",
+        "label": "护套壁宽",
+        "desc": "护套壁的宽度",
+        "tomlComment": "鞘壁宽(mm) 范围:0.2~3",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.8,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 59.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 0.2,
+        "max": 3.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "sheath"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.small_feature_factor",
+        "configKey": "SmallFeatureFactor",
+        "tomlKey": "small_feature_factor",
+        "jsonKey": "small_feature_factor",
+        "label": "小特征因子",
+        "desc": "小特征速度系数 = MaxSpeed × 此值。值越小(如0.5)小特征越精细但更慢",
+        "tomlComment": "小特征因子 范围:0~2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "glue_params"
+        },
+        "min": 0.1,
+        "max": 2.0,
+        "step": 0.05,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.speed_limit",
+        "configKey": "MaxSpeed",
+        "tomlKey": "speed_limit",
+        "jsonKey": "speed_limit",
+        "label": "涂胶速度限制",
+        "desc": "涂胶笔的最大移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步",
+        "tomlComment": "涂胶速度限制 (mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 70.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 100.0,
+          "sectionId": "motion"
+        },
+        "min": 10.0,
+        "max": 500.0,
+        "step": 5.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "wiping.support_extrusion_multiplier",
+        "configKey": "SupportExtrusionMultiplier",
+        "tomlKey": "support_extrusion_multiplier",
+        "jsonKey": "support_extrusion_multiplier",
+        "label": "支撑挤出倍率",
+        "desc": "支撑材料的挤出倍率，影响支撑密度和拆除难度",
+        "tomlComment": "支撑体挤出倍率",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.8,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "glue_advanced_motion"
+        },
+        "min": 0.1,
+        "max": 3.0,
+        "step": 0.05,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_custom_layer_height",
+        "configKey": "TowerCustomLayerHeight",
+        "tomlKey": "tower_custom_layer_height",
+        "jsonKey": "tower_custom_layer_height",
+        "label": "塔层高策略",
+        "desc": "自定义模式下的擦料塔层高策略",
+        "tomlComment": "塔层高策略",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "auto",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 34.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.fast_tower_mode",
+        "showWhen": {
+          "key": "wiping.fast_tower_mode",
+          "op": "eq",
+          "value": "custom"
+        },
+        "choices": [
+          {
+            "label": "最小层高",
+            "value": "min",
+            "deprecated": false
+          },
+          {
+            "label": "最大层高",
+            "value": "max",
+            "deprecated": false
+          },
+          {
+            "label": "自适应",
+            "value": "auto",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_extrude_ratio",
+        "configKey": "TowerExtrudeRatio",
+        "tomlKey": "tower_extrude_ratio",
+        "jsonKey": "tower_extrude_ratio",
+        "label": "擦料塔挤出倍率",
+        "desc": "擦料塔出胶量比例，值越大出胶越多。会被处理器动态计算覆盖",
+        "tomlComment": "支撑体挤出倍率",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 22.0,
+          "sectionId": "tower_position"
+        },
+        "min": 0.1,
+        "max": 3.0,
+        "step": 0.05,
+        "unit": null,
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_first_layer_flow",
+        "configKey": "TowerFirstLayerFlow",
+        "tomlKey": "tower_first_layer_flow",
+        "jsonKey": "tower_first_layer_flow",
+        "label": "擦料塔首层流量",
+        "desc": "擦料塔首层护套和斜肋的挤出流量比例，1.0为标准流量",
+        "tomlComment": "擦料塔首层流量 范围:0.5~2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 30.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": 0.5,
+        "max": 2.0,
+        "step": 0.1,
+        "unit": null,
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_glue_layer_speed",
+        "configKey": "TowerGlueLayerSpeed",
+        "tomlKey": "tower_glue_layer_speed",
+        "jsonKey": "tower_glue_layer_speed",
+        "label": "涂胶面层速度",
+        "desc": "涂胶面层的塔体打印速度",
+        "tomlComment": "涂胶面层速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 35.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 33.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": 5.0,
+        "max": 200.0,
+        "step": 5.0,
+        "unit": "mm/s",
+        "parentKey": "wiping.fast_tower_mode",
+        "showWhen": {
+          "key": "wiping.fast_tower_mode",
+          "op": "eq",
+          "value": "custom"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_rib_speed",
+        "configKey": "TowerRibSpeed",
+        "tomlKey": "tower_rib_speed",
+        "jsonKey": "tower_rib_speed",
+        "label": "斜肋打印速度",
+        "desc": "跟随塔：使用塔体打印速度 | 自定义：指定斜肋打印速度",
+        "tomlComment": "斜肋打印速度模式",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "follow",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 51.0,
+          "sectionId": "tower_structure"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "rib"
+        },
+        "choices": [
+          {
+            "label": "跟随塔",
+            "value": "follow",
+            "deprecated": false
+          },
+          {
+            "label": "自定义",
+            "value": "custom",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_rib_speed_value",
+        "configKey": "TowerRibSpeedValue",
+        "tomlKey": "tower_rib_speed_value",
+        "jsonKey": "tower_rib_speed_value",
+        "label": "自定义速度",
+        "desc": "斜肋外墙的自定义打印速度",
+        "tomlComment": "斜肋自定义打印速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 40.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 52.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 5.0,
+        "max": 200.0,
+        "step": 5.0,
+        "unit": "mm/s",
+        "parentKey": "wiping.tower_rib_speed",
+        "showWhen": {
+          "key": "wiping.tower_rib_speed",
+          "op": "eq",
+          "value": "custom"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_safe_z_offset",
+        "configKey": "TowerSafeZOffset",
+        "tomlKey": "tower_safe_z_offset",
+        "jsonKey": "tower_safe_z_offset",
+        "label": "塔安全Z偏移",
+        "desc": "擦料塔安全Z偏移距离，范围0.3~5.0mm",
+        "tomlComment": "塔安全Z偏移(0.3~5.0mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.7,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 36.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": 0.3,
+        "max": 5.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_sheath_speed",
+        "configKey": "TowerSheathSpeed",
+        "tomlKey": "tower_sheath_speed",
+        "jsonKey": "tower_sheath_speed",
+        "label": "护套打印速度",
+        "desc": "护套的打印速度",
+        "tomlComment": "护套打印速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 40.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 56.0,
+          "sectionId": "tower_structure"
+        },
+        "min": 5.0,
+        "max": 200.0,
+        "step": 5.0,
+        "unit": "mm/s",
+        "parentKey": "wiping.outer_structure",
+        "showWhen": {
+          "key": "wiping.outer_structure",
+          "op": "eq",
+          "value": "sheath"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": true,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_travel_speed",
+        "configKey": "TowerTravelSpeed",
+        "tomlKey": "tower_travel_speed",
+        "jsonKey": "tower_travel_speed",
+        "label": "塔刮擦速度",
+        "desc": "擦料塔刮擦移动速度，范围50~500mm/s",
+        "tomlComment": "塔刮擦速度(50~500mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 200.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 23.0,
+          "sectionId": "tower_position"
+        },
+        "min": 50.0,
+        "max": 500.0,
+        "step": 10.0,
+        "unit": "mm/s",
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.tower_wipe_mode",
+        "configKey": "TowerWipeMode",
+        "tomlKey": "tower_wipe_mode",
+        "jsonKey": "tower_wipe_mode",
+        "label": "擦嘴策略",
+        "desc": "开启：每层都擦嘴 | 关闭：包括涂胶面都不擦 | 自动：仅涂胶面层擦嘴",
+        "tomlComment": "擦嘴策略",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "auto",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 35.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": "wiping.fast_tower_mode",
+        "showWhen": {
+          "key": "wiping.fast_tower_mode",
+          "op": "eq",
+          "value": "custom"
+        },
+        "choices": [
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          },
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "自动",
+            "value": "auto",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.use_ironing_path",
+        "configKey": "UseIroningPath",
+        "tomlKey": "use_ironing_path",
+        "jsonKey": "use_ironing_path",
+        "label": "涂胶面使用熨烫路径",
+        "desc": "开启后，涂胶面优先使用熨烫段的 XY 路径；熨烫覆盖不足的区域自动回退到支撑面路径",
+        "tomlComment": "使用熨烫路径作为涂胶路径",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": true,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.user_dry_time",
+        "configKey": "UserDryTime",
+        "tomlKey": "user_dry_time",
+        "jsonKey": "user_dry_time",
+        "label": "额外干燥时间",
+        "desc": "涂胶后额外等待干燥的时间 (秒)，让胶水充分固化",
+        "tomlComment": "额外干燥时间",
+        "valueType": "int",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "fan_control"
+        },
+        "min": 0.0,
+        "max": 300.0,
+        "step": 1.0,
+        "unit": "秒",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.wiper_x",
+        "configKey": "WiperX",
+        "tomlKey": "wiper_x",
+        "jsonKey": "wiper_x",
+        "label": "擦料塔X坐标",
+        "desc": "擦料塔在热床上的X坐标位置 (mm)",
+        "tomlComment": "擦嘴塔X坐标(mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 20.0,
+        "scope": "machine_specific",
+        "section": "wiping",
+        "layout": {
+          "order": 20.0,
+          "sectionId": "tower_position"
+        },
+        "min": 10.0,
+        "max": 226.0,
+        "step": 1.0,
+        "unit": "mm",
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": "shared",
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {
+          "A1:FAST": 10.0,
+          "A1:STANDARD": 10.0,
+          "A1_MINI:FAST": 10.0,
+          "A1_MINI:FASTV3.3": 10.0,
+          "A1_MINI:STANDARD": 10.0,
+          "P1S:LITE": 10.0,
+          "P2S:STANDARD": 10.0,
+          "X1C:LITE": 10.0
+        },
+        "machineMaxVariants": {
+          "A1:FAST": 226.0,
+          "A1:STANDARD": 226.0,
+          "A1_MINI:FAST": 150.0,
+          "A1_MINI:FASTV3.3": 150.0,
+          "A1_MINI:STANDARD": 150.0,
+          "P1S:LITE": 226.0,
+          "P2S:STANDARD": 226.0,
+          "X1C:LITE": 226.0
+        },
+        "mergeGroup": "wiper",
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.wiper_y",
+        "configKey": "WiperY",
+        "tomlKey": "wiper_y",
+        "jsonKey": "wiper_y",
+        "label": "擦料塔Y坐标",
+        "desc": "擦料塔在热床上的Y坐标位置 (mm)",
+        "tomlComment": "擦嘴塔Y坐标(mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 20.0,
+        "scope": "machine_specific",
+        "section": "wiping",
+        "layout": {
+          "order": 21.0,
+          "sectionId": "tower_position"
+        },
+        "min": 10.0,
+        "max": 226.0,
+        "step": 1.0,
+        "unit": "mm",
+        "parentKey": "wiping.have_wiping_components",
+        "showWhen": {
+          "key": "wiping.have_wiping_components",
+          "op": "eq",
+          "value": "tower"
+        },
+        "choices": [],
+        "variantMode": "shared",
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {
+          "A1:FAST": 10.0,
+          "A1_MINI:FAST": 10.0,
+          "A1_MINI:FASTV3.3": 10.0,
+          "A1_MINI:STANDARD": 10.0,
+          "P1S:LITE": 10.0,
+          "P2S:STANDARD": 10.0,
+          "X1C:LITE": 10.0
+        },
+        "machineMaxVariants": {
+          "A1:FAST": 226.0,
+          "A1_MINI:FAST": 150.0,
+          "A1_MINI:FASTV3.3": 150.0,
+          "A1_MINI:STANDARD": 150.0,
+          "P1S:LITE": 226.0,
+          "P2S:STANDARD": 226.0,
+          "X1C:LITE": 226.0
+        },
+        "mergeGroup": "wiper",
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.wipetower_speed",
+        "configKey": "WipeTowerPrintSpeed",
+        "tomlKey": "wipetower_speed",
+        "jsonKey": "wipetower_speed",
+        "label": "塔体打印速度",
+        "desc": "非涂胶面层的塔体打印速度",
+        "tomlComment": "擦嘴塔打印速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 200.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 32.0,
+          "sectionId": "safety_advanced"
+        },
+        "min": 10.0,
+        "max": 500.0,
+        "step": 10.0,
+        "unit": "mm/s",
+        "parentKey": "wiping.fast_tower_mode",
+        "showWhen": {
+          "key": "wiping.fast_tower_mode",
+          "op": "eq",
+          "value": "custom"
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.xy_calibration_mode",
+        "configKey": "XYCalibrationMode",
+        "tomlKey": "xy_calibration_mode",
+        "jsonKey": "xy_calibration_mode",
+        "label": "XY校准模式",
+        "desc": "XY校准模式：默认或新型",
+        "tomlComment": "XY校准模式(default=默认,new=新型)",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "new",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "machine_specific"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "默认",
+            "value": "default",
+            "deprecated": false
+          },
+          {
+            "label": "新型",
+            "value": "new",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.z_calibration_mode",
+        "configKey": "ZCalibrationMode",
+        "tomlKey": "z_calibration_mode",
+        "jsonKey": "z_calibration_mode",
+        "label": "Z校准模式",
+        "desc": "Z校准模式：默认或新型",
+        "tomlComment": "Z校准模式(default=默认,new=新型)",
+        "valueType": "string",
+        "uiComponent": "segmented",
+        "defaultValue": "new",
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 3.0,
+          "sectionId": "machine_specific"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "默认",
+            "value": "default",
+            "deprecated": false
+          },
+          {
+            "label": "新型",
+            "value": "new",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      }
+    ],
+    "tabs": [
+      {
+        "id": "offset",
+        "label": "偏移",
+        "order": 10.0,
+        "icon": "wrench",
+        "sections": [
+          {
+            "id": "space_offset",
+            "label": "空间偏移",
+            "description": "工具头空间偏移参数",
+            "order": 100.0
+          },
+          {
+            "id": "motion",
+            "label": "运动与挤出",
+            "description": "运动速度与挤出参数",
+            "order": 200.0
+          }
+        ]
+      },
+      {
+        "id": "wiping",
+        "label": "擦料",
+        "order": 20.0,
+        "icon": "layers",
+        "sections": [
+          {
+            "id": "wiping_method",
+            "label": "擦料方式",
+            "description": "擦料方式选择（擦料塔/圆盘擦拭）",
+            "order": 0.0
+          },
+          {
+            "id": "tower_position",
+            "label": "擦料塔位置与打印",
+            "description": "擦料塔位置与打印参数",
+            "order": 1.0
+          },
+          {
+            "id": "safety_advanced",
+            "label": "安全与高级参数",
+            "description": "安全与高级擦料塔参数",
+            "order": 2.0
+          },
+          {
+            "id": "tower_structure",
+            "label": "塔结构加强",
+            "description": "擦料塔结构加强参数",
+            "order": 3.0
+          },
+          {
+            "id": "disk_action",
+            "label": "圆盘动作控制",
+            "description": "圆盘擦拭动作控制参数",
+            "order": 4.0
+          }
+        ]
+      },
+      {
+        "id": "fan",
+        "label": "风扇",
+        "order": 30.0,
+        "icon": "fan",
+        "sections": [
+          {
+            "id": "fan_control",
+            "label": "温控与风扇",
+            "description": "温控与风扇参数",
+            "order": 0.0
+          }
+        ]
+      },
+      {
+        "id": "glue",
+        "label": "涂胶",
+        "order": 40.0,
+        "icon": "paintbrush",
+        "sections": [
+          {
+            "id": "glue_advanced_motion",
+            "label": "高级运动调控",
+            "description": "涂胶高级运动调控参数",
+            "order": 0.0
+          },
+          {
+            "id": "glue_ironing",
+            "label": "支撑面熨烫",
+            "description": "支撑面熨烫与稀疏涂胶参数",
+            "order": 1.0
+          },
+          {
+            "id": "glue_z_compensation",
+            "label": "涂胶方向补偿",
+            "description": "涂胶 Z 方向补偿参数",
+            "order": 2.0
+          }
+        ]
+      },
+      {
+        "id": "gcode",
+        "label": "切换",
+        "order": 50.0,
+        "icon": "terminal",
+        "sections": [
+          {
+            "id": "custom_gcode",
+            "label": "自定义G-code",
+            "description": "自定义 G-code 指令",
+            "order": 0.0
+          }
+        ]
+      },
+      {
+        "id": "advanced",
+        "label": "更多",
+        "order": 60.0,
+        "icon": "sliders",
+        "sections": [
+          {
+            "id": "pen_revitalization",
+            "label": "润笔",
+            "description": "润笔与首笔活化参数",
+            "order": 0.0
+          },
+          {
+            "id": "glue_params",
+            "label": "涂胶参数",
+            "description": "涂胶基础参数",
+            "order": 1.0
+          },
+          {
+            "id": "z_lift",
+            "label": "Z轴抬升",
+            "description": "Z 轴抬升高度参数",
+            "order": 2.0
+          },
+          {
+            "id": "machine_specific",
+            "label": "机型专属",
+            "description": "机型专属参数",
+            "order": 3.0
+          }
+        ]
+      },
+      {
+        "id": "internal",
+        "label": "内部参数",
+        "order": 70.0,
+        "icon": "settings",
+        "sections": []
+      },
+      {
+        "id": "settings",
+        "label": "软件设置",
+        "order": 80.0,
+        "icon": null,
+        "sections": [
+          {
+            "id": "appearance",
+            "label": "外观",
+            "description": null,
+            "order": 100.0
+          },
+          {
+            "id": "update",
+            "label": "软件更新",
+            "description": null,
+            "order": 200.0
+          },
+          {
+            "id": "interaction",
+            "label": "辅助交互",
+            "description": null,
+            "order": 300.0
+          },
+          {
+            "id": "slicer",
+            "label": "切片器",
+            "description": null,
+            "order": 400.0
+          },
+          {
+            "id": "post_process",
+            "label": "后处理",
+            "description": null,
+            "order": 500.0
+          },
+          {
+            "id": "calibration",
+            "label": "校准",
+            "description": null,
+            "order": 600.0
+          },
+          {
+            "id": "bed_glue",
+            "label": "热床预涂胶",
+            "description": null,
+            "order": 700.0
+          },
+          {
+            "id": "cache_management",
+            "label": "缓存管理",
+            "description": null,
+            "order": 800.0
+          },
+          {
+            "id": "data_maintenance",
+            "label": "数据维护",
+            "description": null,
+            "order": 900.0
+          },
+          {
+            "id": "uninstall_cleanup",
+            "label": "卸载清理",
+            "description": null,
+            "order": 1000.0
+          },
+          {
+            "id": "performance",
+            "label": "性能（DEV）",
+            "description": null,
+            "order": 1100.0
+          }
+        ]
+      }
+    ],
+    "layout": [
+      {
+        "id": "offset",
+        "sections": [
+          {
+            "id": "space_offset",
+            "items": [
+              {
+                "id": "item_0_0_1",
+                "paramKey": "toolhead.offset.x"
+              },
+              {
+                "id": "item_0_0_0",
+                "paramKey": "toolhead.offset.y"
+              },
+              {
+                "id": "item_0_0_2",
+                "paramKey": "toolhead.offset.z"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "motion",
+            "items": [
+              {
+                "id": "item_0_1_0",
+                "paramKey": "toolhead.speed_limit"
+              },
+              {
+                "id": "item_0_1_1",
+                "paramKey": "toolhead.MKP_retract"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "wiping",
+        "sections": [
+          {
+            "id": "wiping_method",
+            "items": [
+              {
+                "id": "item_1_0_0",
+                "paramKey": "wiping.have_wiping_components"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "tower_position",
+            "items": [
+              {
+                "id": "item_1_1_0",
+                "paramKey": "wiping.wiper_x"
+              },
+              {
+                "id": "item_1_1_1",
+                "paramKey": "wiping.wiper_y"
+              },
+              {
+                "id": "item_1_1_2",
+                "paramKey": "wiping.tower_extrude_ratio"
+              },
+              {
+                "id": "item_1_1_3",
+                "paramKey": "wiping.tower_travel_speed"
+              }
+            ],
+            "component": "tower-map",
+            "showWhen": {
+              "key": "wiping.have_wiping_components",
+              "op": "eq",
+              "value": "tower"
+            },
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "safety_advanced",
+            "items": [
+              {
+                "id": "item_1_2_0",
+                "paramKey": "wiping.tower_first_layer_flow"
+              },
+              {
+                "id": "item_1_2_1",
+                "paramKey": "wiping.fast_tower_mode"
+              },
+              {
+                "id": "item_1_2_2",
+                "paramKey": "wiping.wipetower_speed"
+              },
+              {
+                "id": "item_1_2_3",
+                "paramKey": "wiping.tower_glue_layer_speed"
+              },
+              {
+                "id": "item_1_2_4",
+                "paramKey": "wiping.tower_custom_layer_height"
+              },
+              {
+                "id": "item_1_2_5",
+                "paramKey": "wiping.tower_wipe_mode"
+              },
+              {
+                "id": "item_1_2_6",
+                "paramKey": "wiping.tower_safe_z_offset"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "tower_structure",
+            "items": [
+              {
+                "id": "item_1_3_0",
+                "paramKey": "wiping.outer_structure"
+              },
+              {
+                "id": "item_1_3_1",
+                "paramKey": "wiping.tower_rib_speed"
+              },
+              {
+                "id": "item_1_3_2",
+                "paramKey": "wiping.tower_rib_speed_value"
+              },
+              {
+                "id": "item_1_3_3",
+                "paramKey": "wiping.rib_extra_length"
+              },
+              {
+                "id": "item_1_3_4",
+                "paramKey": "wiping.rib_width"
+              },
+              {
+                "id": "item_1_3_5",
+                "paramKey": "wiping.rib_fillet_wall"
+              },
+              {
+                "id": "item_1_3_6",
+                "paramKey": "wiping.tower_sheath_speed"
+              },
+              {
+                "id": "item_1_3_7",
+                "paramKey": "wiping.sheath_enable_height"
+              },
+              {
+                "id": "item_1_3_8",
+                "paramKey": "wiping.sheath_base_expand"
+              },
+              {
+                "id": "item_1_3_9",
+                "paramKey": "wiping.sheath_wall_width"
+              },
+              {
+                "id": "item_1_3_10",
+                "paramKey": "wiping.sheath_converge_layers"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "disk_action",
+            "items": [
+              {
+                "id": "item_1_4_0",
+                "paramKey": "wiping.disk_stagger_mode"
+              },
+              {
+                "id": "item_1_4_1",
+                "paramKey": "wiping.disk_stagger_angle"
+              },
+              {
+                "id": "item_1_4_2",
+                "paramKey": "wiping.disk_stagger_max_angle"
+              },
+              {
+                "id": "item_1_4_3",
+                "paramKey": "wiping.disk_stagger_swing_mode"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "fan",
+        "sections": [
+          {
+            "id": "fan_control",
+            "items": [
+              {
+                "id": "item_2_0_0",
+                "paramKey": "wiping.nozzle_cooling_flag"
+              },
+              {
+                "id": "item_2_0_1",
+                "paramKey": "wiping.fan_speed"
+              },
+              {
+                "id": "item_2_0_2",
+                "paramKey": "wiping.user_dry_time"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "glue",
+        "sections": [
+          {
+            "id": "glue_advanced_motion",
+            "items": [
+              {
+                "id": "item_3_0_0",
+                "paramKey": "wiping.support_extrusion_multiplier"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "glue_ironing",
+            "items": [
+              {
+                "id": "item_3_1_0",
+                "paramKey": "wiping.ironing_mode"
+              },
+              {
+                "id": "item_3_1_1",
+                "paramKey": "wiping.ironing_e_sum_threshold"
+              },
+              {
+                "id": "item_3_1_2",
+                "paramKey": "wiping.use_ironing_path"
+              },
+              {
+                "id": "item_3_1_3",
+                "paramKey": "wiping.ironing_coverage_threshold"
+              },
+              {
+                "id": "item_3_1_4",
+                "paramKey": "wiping.ironing_suppress_expand"
+              },
+              {
+                "id": "item_3_1_5",
+                "paramKey": "wiping.ironing_suppress_expand_mode"
+              },
+              {
+                "id": "item_3_1_6",
+                "paramKey": "wiping.min_support_interface_enabled"
+              },
+              {
+                "id": "item_3_1_7",
+                "paramKey": "wiping.glue_sparse_ratio"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "glue_z_compensation",
+            "items": [
+              {
+                "id": "item_3_2_0",
+                "paramKey": "wiping.glue_z_compensation_enabled"
+              },
+              {
+                "id": "item_3_2_1",
+                "paramKey": "wiping.glue_z_compensation_mode"
+              },
+              {
+                "id": "item_3_2_2",
+                "paramKey": "wiping.glue_z_compensation_bed_fl"
+              },
+              {
+                "id": "item_3_2_3",
+                "paramKey": "wiping.glue_z_compensation_bed_fr"
+              },
+              {
+                "id": "item_3_2_4",
+                "paramKey": "wiping.glue_z_compensation_bed_bl"
+              },
+              {
+                "id": "item_3_2_5",
+                "paramKey": "wiping.glue_z_compensation_bed_br"
+              },
+              {
+                "id": "item_3_2_6",
+                "paramKey": "wiping.glue_z_compensation_patch_fl"
+              },
+              {
+                "id": "item_3_2_7",
+                "paramKey": "wiping.glue_z_compensation_patch_fr"
+              },
+              {
+                "id": "item_3_2_8",
+                "paramKey": "wiping.glue_z_compensation_patch_bl"
+              },
+              {
+                "id": "item_3_2_9",
+                "paramKey": "wiping.glue_z_compensation_patch_br"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "gcode",
+        "sections": [
+          {
+            "id": "custom_gcode",
+            "items": [
+              {
+                "id": "item_4_0_0",
+                "paramKey": "toolhead.custom_mount_gcode"
+              },
+              {
+                "id": "item_4_0_1",
+                "paramKey": "toolhead.custom_unmount_gcode"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "advanced",
+        "sections": [
+          {
+            "id": "pen_revitalization",
+            "items": [
+              {
+                "id": "item_5_0_0",
+                "paramKey": "toolhead.first_pen_revitalization_flag"
+              },
+              {
+                "id": "item_5_0_1",
+                "paramKey": "wiping.prime_enabled"
+              },
+              {
+                "id": "item_5_0_2",
+                "paramKey": "toolhead.prime_length"
+              },
+              {
+                "id": "item_5_0_3",
+                "paramKey": "wiping.prime_min_path_length"
+              },
+              {
+                "id": "item_5_0_4",
+                "paramKey": "wiping.prime_trigger_layers"
+              },
+              {
+                "id": "item_5_0_5",
+                "paramKey": "wiping.prime_per_model"
+              },
+              {
+                "id": "item_5_0_6",
+                "paramKey": "wiping.prime_every_layer"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "glue_params",
+            "items": [
+              {
+                "id": "item_5_1_0",
+                "paramKey": "wiping.small_feature_factor"
+              },
+              {
+                "id": "item_5_1_1",
+                "paramKey": "toolhead.glue_z_offset"
+              },
+              {
+                "id": "item_5_1_2",
+                "paramKey": "wiping.glue_pass_count"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "z_lift",
+            "items": [
+              {
+                "id": "item_5_2_0",
+                "paramKey": "wiping.glue_z_lift_height"
+              },
+              {
+                "id": "item_5_2_1",
+                "paramKey": "wiping.glue_z_lift_height_first_layers"
+              },
+              {
+                "id": "item_5_2_2",
+                "paramKey": "wiping.glue_inter_model_lift_height"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
+            "id": "machine_specific",
+            "items": [
+              {
+                "id": "item_5_3_0",
+                "paramKey": "wiping.disable_front_cover_alarm"
+              },
+              {
+                "id": "item_5_3_1",
+                "paramKey": "wiping.disable_3rd_layer_clog_detect"
+              },
+              {
+                "id": "item_5_3_2",
+                "paramKey": "wiping.disable_timelapse"
+              },
+              {
+                "id": "item_5_3_3",
+                "paramKey": "wiping.xy_calibration_mode"
+              },
+              {
+                "id": "item_5_3_4",
+                "paramKey": "wiping.z_calibration_mode"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          }
+        ]
+      },
+      {
+        "id": "internal",
+        "sections": []
+      },
+      {
+        "id": "settings",
+        "sections": [
+          {
+            "id": "appearance",
+            "items": [],
+            "component": "appearance-section",
+            "showWhen": null,
+            "layout": "component",
+            "width": "full",
+            "visible": null
+          },
+          {
+            "id": "update",
+            "items": [],
+            "component": "update-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "interaction",
+            "items": [],
+            "component": "interaction-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "slicer",
+            "items": [],
+            "component": "slicer-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "post_process",
+            "items": [],
+            "component": "post-process-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "calibration",
+            "items": [],
+            "component": "calibration-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "bed_glue",
+            "items": [],
+            "component": "bed-glue-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "cache_management",
+            "items": [],
+            "component": "cache-management-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "data_maintenance",
+            "items": [],
+            "component": "data-maintenance-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "uninstall_cleanup",
+            "items": [],
+            "component": "uninstall-cleanup-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": null
+          },
+          {
+            "id": "performance",
+            "items": [],
+            "component": "performance-card",
+            "showWhen": null,
+            "layout": "component",
+            "width": "half",
+            "visible": "DEV"
+          }
+        ]
+      }
+    ]
+  },
+  "files": [
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-standard.toml",
+      "path": "mkp/presets/A1-standard.toml",
+      "machineId": "A1",
+      "versionId": "STANDARD",
+      "sha256": "439c48134a39d58bb791c2347cfb4b45f6d13985b19660a573980989060d6835",
+      "size": 4299
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-fast.toml",
+      "path": "mkp/presets/A1-fast.toml",
+      "machineId": "A1",
+      "versionId": "FAST",
+      "sha256": "fad1a4c3952a868b7e5614051b2ab43b011cc0d032708959b0b0df6b487f93c0",
+      "size": 4297
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1-fastv3.3.toml",
+      "path": "mkp/presets/A1-fastv3.3.toml",
+      "machineId": "A1",
+      "versionId": "FASTV3.3",
+      "sha256": "df29f0483ce0c4e17ba6f8ac472f845f68a20ca625d144d4772cf27d343fb2f7",
+      "size": 4300
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-standard.toml",
+      "path": "mkp/presets/A1_MINI-standard.toml",
+      "machineId": "A1_MINI",
+      "versionId": "STANDARD",
+      "sha256": "447c55d221e713f65140d6dbeeadf401c964a72e441fd21af2b23f73d652b20c",
+      "size": 4306
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-fast.toml",
+      "path": "mkp/presets/A1_MINI-fast.toml",
+      "machineId": "A1_MINI",
+      "versionId": "FAST",
+      "sha256": "0eec6443bb097e7445cd5243a2305c828cb4146fc86401d07c84a1508e7e2bf9",
+      "size": 4300
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "A1_MINI-fastv3.3.toml",
+      "path": "mkp/presets/A1_MINI-fastv3.3.toml",
+      "machineId": "A1_MINI",
+      "versionId": "FASTV3.3",
+      "sha256": "5815a821e2da3f1125a6d4706ce4b1dfe5661b9550a111927a2fb14144a4ad54",
+      "size": 4304
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "P1S-lite.toml",
+      "path": "mkp/presets/P1S-lite.toml",
+      "machineId": "P1S",
+      "versionId": "LITE",
+      "sha256": "95871dd12369446ece524858f9973962b663a33190e593138dad738a97bbf119",
+      "size": 4362
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "P2S-standard.toml",
+      "path": "mkp/presets/P2S-standard.toml",
+      "machineId": "P2S",
+      "versionId": "STANDARD",
+      "sha256": "67983636c8f107be6e26af2e567809f517a743acbc0b74fdcb84252eecb807f1",
+      "size": 4366
+    },
+    {
+      "kind": "mkp_preset",
+      "fileName": "X1C-lite.toml",
+      "path": "mkp/presets/X1C-lite.toml",
+      "machineId": "X1C",
+      "versionId": "LITE",
+      "sha256": "484823e9c2f9a6cd2a3621beb46f23d1f6c83269dcab2f9896cb71611b7d1936",
+      "size": 4361
+    },
+    {
+      "kind": "icon",
+      "fileName": "a1.svg",
+      "path": "mkp/icons/a1.svg",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "68024611b1c1aaf2ef0f0b3f2476f0e53ec78adade8770d89d6c8a350e0d9d83",
+      "size": 386
+    },
+    {
+      "kind": "icon",
+      "fileName": "a1_mini.svg",
+      "path": "mkp/icons/a1_mini.svg",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "8cfe37d585d7604d2493a67469e11b4b699784120ff00989ef3338e45caa1046",
+      "size": 363
+    },
+    {
+      "kind": "icon",
+      "fileName": "p1s.svg",
+      "path": "mkp/icons/p1s.svg",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "87604671835eeccb73ac11196253e360756e4196382d6b93b48bed1d046db2f7",
+      "size": 324
+    },
+    {
+      "kind": "model",
+      "fileName": "MKP_support_test_models.3mf",
+      "path": "mkp/models/MKP_support_test_models.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "8486199771d639a0e761707a216b204073a9f267d8c37b29dce6bf115ff029aa",
+      "size": 3317913
+    },
+    {
+      "kind": "model",
+      "fileName": "Precise_Calibration.3mf",
+      "path": "mkp/models/Precise_Calibration.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "9d7b373d3aa90fe2e68a6760d54e1bbd8d4a9259006959665ac91cdee68b4f32",
+      "size": 385969
+    },
+    {
+      "kind": "model",
+      "fileName": "ZOffset_Calibration.3mf",
+      "path": "mkp/models/ZOffset_Calibration.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "773b65b0dcdf09472c013bd4eec0edff94372e795dd50d1db99d9cef85f9490c",
+      "size": 290327
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "2ba10a2d873744f97e75a1697fa9a054b58aacb772993d6d05e973f04fda5004",
+      "size": 1308
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 0.4 0.20.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "machineId": "A1",
+      "versionId": "",
+      "sha256": "e4696732236194d4035635adce6abc01fe3efb01847249745f4a36c4f6d5977f",
+      "size": 1332
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "567a018e5d1c66a573a4ad32cea04c6524858a74bfd6af7bc1f0263c45626c6f",
+      "size": 1315
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "machineId": "A1_MINI",
+      "versionId": "",
+      "sha256": "1ae5318f97eeb95a3e804619d5102d1d851d06860e53a9a4899dad0db4d717ca",
+      "size": 1301
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P1S 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "810d4441deef000106366220010d7ca48ae586ac52936af53c84dcb1b3dca8e1",
+      "size": 1906
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P1S 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "machineId": "P1S",
+      "versionId": "",
+      "sha256": "264addc551633c553828492580eef74fc51f2690a127919ed8da051634d8bc2d",
+      "size": 1872
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess P2S 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "machineId": "P2S",
+      "versionId": "",
+      "sha256": "124f8290aa007567af78d6058f95095e4787c02a30371acb56f489029168499e",
+      "size": 1264
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess X1 0.2 0.10.json",
+      "path": "mkp/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "machineId": "X1C",
+      "versionId": "",
+      "sha256": "9d9737d18f8cea34d284031dd544b444a00e56c112a4d0ab74b0813f56e2e9ca",
+      "size": 1904
+    },
+    {
+      "kind": "bbs_config",
+      "fileName": "MKPProcess X1 0.4 0.24.json",
+      "path": "mkp/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "machineId": "X1C",
+      "versionId": "",
+      "sha256": "1fe7377c92d0f67bb8ed1cda16edb12c32a56e3cb4d864983eaccb6ced0a8fa4",
+      "size": 1925
+    }
+  ]
+}

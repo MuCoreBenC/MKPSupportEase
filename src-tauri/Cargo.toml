@@ -15,6 +15,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
+# build.rs 要读工作台配置（`workbench/bootstrap.json`）把官方源注入二进制 ——
+# 那是仓库里唯一一处"发布到哪"的真相（见 build.rs 头注释）
+serde_json.workspace = true
 
 # 后厨工作台（B03）。**不在 default 里**是这一整套隔离的根：不带这个 feature 编译时，
 # src 下的 workbench 子树连编译都不会被碰，给用户的二进制里搜不到任何工作台命令名。
@@ -30,6 +33,22 @@ workbench = ["dep:time", "dep:mkpse-preset"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
+
+# 系统文件选择器（第十二层：**通用导入入口**的"选择文件"那一半）。
+#
+# 为什么值得引入：导入入口是通用的（以后「备份与恢复」继续复用它），而"选文件"是
+# 操作系统的事 —— 挑官方 plugin 而不是自己拼 rfd，是因为"在哪个线程弹窗、取消怎么
+# 回来"这些平台差异由它包掉。它只在用户点「导入文件…」时弹一个原生对话框；
+# 复制由我们自己的导入核心做（源文件全程只读，去处只有 presets-mine/）。
+tauri-plugin-dialog = "2"
+
+# 在系统文件管理器里"显示并选中"（第十三层：文件外部管理的第一半）。
+#
+# 三个平台各有一套做法（macOS `open -R` 那一类、Windows `explorer /select,`、
+# Linux 的 FileManager1）—— 由官方 plugin 包掉平台差异，我们只给一个绝对路径。
+# **只在 Rust 侧调**（自己的命令体里），所以不需要给它开任何 capability：
+# 前端能调的只有我们那条 `reveal_in_folder`，路径先过用户根那两道闸。
+tauri-plugin-opener = "2"
 # 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
 # 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
 serde.workspace = true

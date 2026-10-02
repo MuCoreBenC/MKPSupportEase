@@ -88,7 +88,67 @@ pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
 pub const MANIFEST_FILE: &str = "manifest.json";
 /// 新世界目录的固定文件名（两端共用契约：与客户端 `runtime::Catalog` 同 schema）
-pub const NEW_CATALOG_FILE: &str = "catalog.json";
+/// —— **与 [`crate::runtime::source::CATALOG_FILE`] 同一个值**（直接引用它：
+/// 同一份名字写在两处，迟早有一处改了另一处没改）
+pub const NEW_CATALOG_FILE: &str = crate::runtime::source::CATALOG_FILE;
+/// 官方源入口文件（Bootstrap）的固定名。客户端拿它解析"catalog 在哪、文件根在哪"
+/// （见 `runtime::source::parse_bootstrap`）——第十七刀起它是发布产物的一部分
+pub const SOURCE_FILE: &str = "source.json";
+
+/// Bootstrap 的正文：**就两件事** —— schema 代次 + catalog 在哪。
+///
+/// `baseUrl` **不写**（客户端缺省理解成"与 source.json 同目录"）：同一份 dist 推到
+/// 哪里都对；将来要把文件根指向别的 CDN 时才由人加它 —— 那正是 Bootstrap 存在的意义
+/// （换部署只改它，客户端不重发）。
+pub fn bootstrap_json() -> serde_json::Value {
+    serde_json::json!({
+        "sourceSchema": crate::runtime::source::BOOTSTRAP_SCHEMA,
+        "catalog": NEW_CATALOG_FILE,
+    })
+}
+
+/// 官方源（Bootstrap）地址的**规范化** —— 工作台输入侧的唯一一处。
+///
+/// - **GitHub 的 blob 页地址**（人从浏览器地址栏复制的那个）→ raw 直取地址：
+///   `https://github.com/<owner>/<repo>/blob/<ref>/<path>`
+///   → `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`
+///   （ref 里有斜杠的罕见分支名不猜——那种情况请直接填 raw 地址）
+/// - 已经是 `raw.githubusercontent.com` / 别的 http(s)：原样通过（自建源合法）
+/// - `github.com` 但**不是 blob 页**（仓库首页 / tree 目录页）→ 拒，说清"那是个目录"
+/// - 其余（非 http(s)）→ 拒
+pub fn normalize_bootstrap_url(raw: &str) -> Result<String, AppError> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_argument("Bootstrap 地址是空的"));
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+    {
+        let parts: Vec<&str> = rest.split('/').collect();
+        /* github.com/<owner>/<repo>/blob/<ref>/<path…> */
+        if parts.len() >= 5 && parts[2] == "blob" && !parts[4].is_empty() {
+            return Ok(format!(
+                "https://raw.githubusercontent.com/{}/{}/{}/{}",
+                parts[0],
+                parts[1],
+                parts[3],
+                parts[4..].join("/")
+            ));
+        }
+        return Err(AppError::invalid_argument(
+            "这是 GitHub 的仓库 / 目录页，不是一个文件 —— 请填指向 source.json 的 blob 链接（我们会自动转成 raw）",
+        )
+        .with_detail(format!("收到：{trimmed}")));
+    }
+    let ok = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+    if !ok {
+        return Err(AppError::invalid_argument(format!(
+            "Bootstrap 地址只认 http:// 或 https://，填进来的是 {trimmed}"
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
 
 /// content 子树的三份文件（相对交付根）
 pub const CONTENT_FILES: [&str; 3] = [
@@ -351,7 +411,8 @@ pub fn write_content(
 /// **交付集合**（13.1）：本次发布应当存在于交付目录的全部文件（**相对交付根的路径**）。
 ///
 /// 它是从引用关系**算出来**的：`content/` 三份自产、`manifest.json` 自产、
-/// `catalog.json` 自产、资产来自引用可达集（落点 = catalog 的 `files[].path`）、
+/// `catalog.json` 自产、`source.json` 自产（第十七刀：客户端拿它解析远端在哪）、
+/// 资产来自引用可达集（落点 = catalog 的 `files[].path`）、
 /// `mkp/presets/<file_name>` 来自「有产物的版本」（产物名由命名函数算出）。
 /// 残留在语义上就是「目录里有、这个集合里没有」。
 ///
@@ -362,6 +423,7 @@ pub fn deliverable_set(book: &Book<'_>) -> BTreeSet<String> {
     set.extend(CONTENT_FILES.map(str::to_owned));
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
+    set.insert(SOURCE_FILE.to_owned());
     for a in referenced_assets(book) {
         // 落点与客户端同源（[`crate::runtime::catalog::dest_of_asset`]）；
         // 台账里不登记的那一类不进交付集合
@@ -603,9 +665,12 @@ pub fn publish_into(
             .map(|f| (f.path.as_str(), f))
             .collect();
     for rel in expected.iter() {
-        if rel == MANIFEST_FILE || rel == NEW_CATALOG_FILE || CONTENT_FILES.contains(&rel.as_str())
+        if rel == MANIFEST_FILE
+            || rel == NEW_CATALOG_FILE
+            || rel == SOURCE_FILE
+            || CONTENT_FILES.contains(&rel.as_str())
         {
-            continue; // 自产的三类不在说明书里（说明书自己就是其中之一）
+            continue; // 自产的几类不在说明书里（说明书自己、Bootstrap、目录类都是）
         }
         let Some(f) = registered.get(rel.as_str()) else {
             return Err(AppError::internal(format!(
@@ -635,13 +700,15 @@ pub fn publish_into(
         }
     }
 
-    // 清单与目录收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
+    // 清单、目录与 Bootstrap 收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
     let new_catalog_text = new_catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
     crate::fsx::atomic::atomic_write(
         &dist_root.join(NEW_CATALOG_FILE),
         new_catalog_text.as_bytes(),
     )?;
+    /* Bootstrap：客户端"官方内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
+    crate::fsx::atomic::atomic_write_json(&dist_root.join(SOURCE_FILE), &bootstrap_json())?;
 
     Ok(PublishOutcome {
         files: assets.len(),
@@ -917,13 +984,14 @@ mod tests {
         f.presets.set_asset_root(asset_root.path());
         let book = Book::new(&f.presets, &c, &d);
 
-        // 交付集合（13.1）：content 3 + manifest + catalog.json + 夹具资产 3 + mkp 产物 3。
-        // 夹具可达集有 4 条，`a1-image` 是 image 类 —— **不登记进交付**（整机图那条规则）
+        // 交付集合（13.1）：content 3 + manifest + catalog.json + source.json +
+        // 夹具资产 3 + mkp 产物 3。夹具可达集有 4 条，`a1-image` 是 image 类 ——
+        // **不登记进交付**（整机图那条规则）
         let expected = deliverable_set(&book);
         assert_eq!(
             expected.len(),
-            11,
-            "content 3 + manifest 1 + catalog.json 1 + assets 3（image 类不进）+ mkp 3"
+            12,
+            "content 3 + manifest 1 + catalog.json 1 + source.json 1 + assets 3（image 类不进）+ mkp 3"
         );
         assert!(expected.contains("mkp/presets/A1-standard.toml"));
         assert!(expected.contains("mkp/bbs/A1/process.json"));
@@ -934,6 +1002,10 @@ mod tests {
         assert!(
             expected.contains(NEW_CATALOG_FILE),
             "新世界目录在交付集合里"
+        );
+        assert!(
+            expected.contains(SOURCE_FILE),
+            "Bootstrap（source.json）在交付集合里"
         );
 
         let dist = tempfile::tempdir().unwrap();
@@ -1069,6 +1141,7 @@ mod tests {
             .filter(|rel| {
                 rel != MANIFEST_FILE
                     && rel != NEW_CATALOG_FILE
+                    && rel != SOURCE_FILE
                     && !CONTENT_FILES.contains(&rel.as_str())
             })
             .collect();
@@ -1114,11 +1187,13 @@ mod tests {
         let book = Book::new(&real, &c, &d);
 
         let expected = deliverable_set(&book);
-        // 反空转锚点：content 3 + manifest 1 + catalog.json 1 + 资产 8 + mkp 9（五台机型全部有套餐）= 22
+        // 反空转锚点：content 3 + manifest 1 + catalog.json 1 + source.json 1 + 资产 8
+        // + mkp 9（五台机型全部有套餐）= 23
         assert_eq!(
             expected.len(),
-            22,
-            "交付集合条数变了 —— 说清为什么（整机图剥离台账后资产从 11 条降到 8 条）"
+            23,
+            "交付集合条数变了 —— 说清为什么（整机图剥离台账后资产从 11 条降到 8 条；\
+             第十七刀起多一份 Bootstrap source.json）"
         );
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
         // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状
@@ -1263,5 +1338,71 @@ mod tests {
             assert_eq!(bytes.len() as u64, f.size, "{rel} 的大小");
             assert_eq!(sha256_of(&bytes), f.sha256, "{rel} 的 SHA");
         }
+    }
+
+    /* ---------- 第十七刀：Bootstrap（规范化 / 生成 / 两端形状） ---------- */
+
+    /// GitHub blob 页 → raw 直链（人会从浏览器地址栏复制的那一种）；raw / 自建源原样
+    #[test]
+    fn blob_urls_turn_into_raw_urls() {
+        assert_eq!(
+            normalize_bootstrap_url(
+                "https://github.com/MuCoreBenC/MKPSupportEase/blob/main/release/presets/source.json"
+            )
+            .expect("blob 页该转成 raw"),
+            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/release/presets/source.json"
+        );
+        assert_eq!(
+            normalize_bootstrap_url(
+                "  https://raw.githubusercontent.com/o/r/main/x/source.json/  "
+            )
+            .expect("raw 原样（只收拾空白与尾斜杠）"),
+            "https://raw.githubusercontent.com/o/r/main/x/source.json"
+        );
+        assert_eq!(
+            normalize_bootstrap_url("http://127.0.0.1:8000/source.json").expect("自建源合法"),
+            "http://127.0.0.1:8000/source.json"
+        );
+    }
+
+    /// 目录页 / 仓库首页 / 非 http(s) —— 拒（"那不是文件"这件事要说得出）
+    #[test]
+    fn directory_pages_and_non_http_are_refused() {
+        for bad in [
+            "https://github.com/MuCoreBenC/MKPSupportEase",
+            "https://github.com/MuCoreBenC/MKPSupportEase/tree/main/presets",
+            "file:///Users/me/source.json",
+            "/Users/me/source.json",
+            "   ",
+        ] {
+            let e = normalize_bootstrap_url(bad).unwrap_err();
+            assert_eq!(
+                e.code,
+                crate::error::ErrorCode::InvalidArgument,
+                "拒绝：{bad}"
+            );
+        }
+    }
+
+    /// 生成的 Bootstrap 就两件事；`baseUrl` **不写**（缺省 = 同目录）；
+    /// 而且**客户端解析器认得发布侧写的这一份**（两端同一形状，一边写一边读，钉住）
+    #[test]
+    fn bootstrap_json_is_minimal_and_readable_by_the_client_parser() {
+        let v = bootstrap_json();
+        assert_eq!(v["sourceSchema"], crate::runtime::source::BOOTSTRAP_SCHEMA);
+        assert_eq!(v["catalog"], NEW_CATALOG_FILE);
+        assert_eq!(v["catalog"], crate::runtime::source::CATALOG_FILE);
+        assert!(
+            v.get("baseUrl").is_none(),
+            "缺省 = 与 source.json 同目录 —— 发布侧不写它"
+        );
+
+        let parsed = crate::runtime::source::parse_bootstrap(
+            "https://host/x/source.json",
+            v.to_string().as_bytes(),
+        )
+        .expect("客户端解析器认得发布侧写的这一份");
+        assert_eq!(parsed.base_url, "https://host/x");
+        assert_eq!(parsed.catalog_url, "https://host/x/catalog.json");
     }
 }

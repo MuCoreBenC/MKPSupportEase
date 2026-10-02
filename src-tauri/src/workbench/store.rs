@@ -52,6 +52,9 @@ impl Store {
     pub const DRAFT_REL: &'static str = ".draft/book.json";
     /// 界面状态（折叠 / 页签 / 勾选）。本机状态，不入库
     pub const UI_REL: &'static str = ".draft/ui.json";
+    /// 官方源（Bootstrap）配置：**发布产物发到哪**（唯一一处）。**入库** —— 换机器 / CI
+    /// 都该拿到同一个发布地址；`build.rs` 构建时读它注入客户端（见 `src-tauri/build.rs`）
+    pub const BOOTSTRAP_REL: &'static str = "bootstrap.json";
 
     /// 真仓库里的那一份
     pub fn open() -> Result<Self, AppError> {

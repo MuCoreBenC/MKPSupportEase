@@ -1,19 +1,99 @@
 /**
- * 「设置」页 —— **只读**。
+ * 「设置」页 —— 数据根只读 + **一块可编辑的配置**（官方源）。
  *
- * 本仓的预设真相源固定是 `<repo>/presets`（没有第二候选、不 fallback、路径不可配），
- * 所以这一页没有表单：它把外壳已经拿到的 `Boot` 摆开，让人一眼看清工作台在读哪几个根、
- * 工作台子目录各自谁写谁读 —— 排查「读错了目录 / 数据长在哪」的那种问题用。
+ * 数据根（presets / workbench / dist）**不可配**：本仓的预设真相源固定是
+ * `<repo>/presets`（没有第二候选、不 fallback），所以这一页把它们摆开，让人一眼看清
+ * 工作台在读哪几个根、工作台子目录各自谁写谁读 —— 排查「读错了目录 / 数据长在哪」
+ * 的那种问题用。上游根与回退规则那两块**已经整层删掉**（`HANDOFF.md`），照实不摆。
  *
- * 上游根与回退规则那两块**已经整层删掉**（`HANDOFF.md`）：它们不再是可配置项，
- * 这一页也照实不摆它们。
+ * 2026-10-02（第十七刀）起多了一块**可编辑**的：「官方源（Bootstrap）」——
+ * 发布产物发到哪。它是**工作台唯一一处"发布到哪"**（入库的
+ * `workbench/bootstrap.json`）；客户端构建时由 `build.rs` 读它注入默认源
+ * （`npm run tauri dev` 也吃它）。GitHub 的 blob 页链接会被后端规范成 raw 直链。
  */
+import { useState } from 'react'
+
+import { isAppError, wb } from '../api'
 import type { Boot } from '../api'
 import s from '../c14.module.css'
 
 export default function SettingsPage({ boot }: { boot: Boot }) {
+  /* 官方源那格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
+     下次 wb_boot 会带回同一份） */
+  const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
+  const [saved, setSaved] = useState<string | null>(boot.bootstrapUrl)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const save = async () => {
+    if (busy) return
+    setBusy(true)
+    setNote(null)
+    try {
+      const stored = await wb.setBootstrap(bootstrap.trim())
+      setSaved(stored)
+      setBootstrap(stored)
+      setNote({ text: `已保存：${stored}（重启 dev / 重打正式包后客户端才吃得到）`, bad: false })
+    } catch (e) {
+      setNote({
+        text: isAppError(e) ? e.message : e instanceof Error ? e.message : String(e),
+        bad: true,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>官方源（Bootstrap）</b>
+          <span className={s.cardNote}>发布产物发到哪 —— 工作台唯一一处；客户端构建时编进去</span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              发布出去的 <span className={s.mono}>presets/dist/</span> 推到哪里 —— 客户端拿它那口
+              <span className={s.mono}> source.json </span>找回目录与文件。
+              <b>GitHub 的 blob 链接会自动转成 raw 直链</b>；自建源（
+              <span className={s.mono}>http://…</span>）原样收下。
+              入库（<span className={s.mono}>workbench/bootstrap.json</span>）：换机器、CI 拿的都是同一份。
+            </p>
+            <div className={s.vrow}>
+              <input
+                className={s.inp}
+                value={bootstrap}
+                onChange={(e) => setBootstrap(e.target.value)}
+                placeholder="https://github.com/…/blob/main/release/presets/source.json"
+                aria-label="官方源（Bootstrap）地址"
+              />
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnPrimary}`}
+                disabled={busy || bootstrap.trim() === '' || bootstrap.trim() === saved}
+                onClick={() => void save()}
+              >
+                {busy ? '保存中……' : '保存'}
+              </button>
+            </div>
+            <p className={s.vhelp}>
+              当前：
+              {saved === null ? (
+                '还没配 —— 客户端构建时不会注入默认源（下载会如实说「没配」）'
+              ) : (
+                <span className={s.mono}>{saved}</span>
+              )}
+            </p>
+            {note && (
+              <p className={s.vhelp} style={note.bad ? { color: 'var(--danger)' } : undefined}>
+                {note.text}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>数据根</b>

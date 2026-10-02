@@ -324,6 +324,36 @@ pub struct Boot {
     pub detail: Option<String>,
     /// 工作台子目录的职责（14.7）
     pub store_dirs: Vec<StoreDirRole>,
+    /// 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+    /// `None` = 还没配 —— 客户端构建时就不会注入默认源（`build.rs` 读同一份文件）。
+    /// **它只对应"工作台配置"这一份**：改了要重新构建客户端才生效（编译期注入）
+    pub bootstrap_url: Option<String>,
+}
+
+/// `workbench/bootstrap.json` 的形状（`wb_set_bootstrap` 写、`boot_inner` 读、
+/// `src-tauri/build.rs` 也读同一个字段）。**一处定义**，三处引用
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapConfig {
+    pub bootstrap_url: String,
+}
+
+/// 读工作台配置里的官方源。**读不出 / 坏档 = `None` + 日志一条**：
+/// 它是可选配置，挡不住开场（修法：在工作台里再保存一次覆盖它，或手动删掉整个文件）。
+/// 与"坏档不静默"不冲突 —— 不静默的那一位是日志
+fn read_bootstrap_url() -> Option<String> {
+    let store = Store::open().ok()?;
+    match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "官方源配置") {
+        Ok(Some(cfg)) => {
+            let url = cfg.bootstrap_url.trim().to_owned();
+            (!url.is_empty()).then_some(url)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(error = %e.message, "官方源配置读不出来，按「还没配」处理");
+            None
+        }
+    }
 }
 
 /// 工作台子目录的职责（14.7）。**谁写它、谁读它、能不能当编辑对象**，
@@ -369,6 +399,28 @@ pub fn wb_reload() -> Result<Boot, AppError> {
     boot_inner()
 }
 
+/// 记下官方源（Bootstrap）地址 —— **工作台里唯一一处"发布到哪"**（写入库的
+/// `workbench/bootstrap.json`）。
+///
+/// **不进制 draft 体系**：它不是配方内容（没有撤销 / 差异 / 快照可言），是一次单值
+/// 配置写；界面上是「设置」页的一格，改完当场回显。
+/// 校验与规范化在 [`dist::normalize_bootstrap_url`]（GitHub blob 页 → raw 直链）。
+/// **对客户端生效要重新构建**（`build.rs` 构建期读同一份文件注入）——返回值只是回显。
+#[tauri::command]
+pub fn wb_set_bootstrap(url: String) -> Result<String, AppError> {
+    traced("wb_set_bootstrap", |_| {
+        let normalized = dist::normalize_bootstrap_url(&url)?;
+        let store = Store::open()?;
+        store.write_doc(
+            Store::BOOTSTRAP_REL,
+            &BootstrapConfig {
+                bootstrap_url: normalized.clone(),
+            },
+        )?;
+        Ok(normalized)
+    })
+}
+
 /// 开场那一段。先算出三个数据根，再开一次会话（`presets/` 定位不到才会是 problem）
 fn boot_inner() -> Result<Boot, AppError> {
     match (|| -> Result<Boot, AppError> {
@@ -387,6 +439,7 @@ fn boot_inner() -> Result<Boot, AppError> {
             problem: None,
             detail: None,
             store_dirs: store_dir_roles(),
+            bootstrap_url: read_bootstrap_url(),
         })
     })() {
         Ok(boot) => Ok(boot),
@@ -405,6 +458,8 @@ fn boot_inner() -> Result<Boot, AppError> {
             problem: Some(e.message),
             detail: e.detail,
             store_dirs: store_dir_roles(),
+            /* 官方源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
+            bootstrap_url: read_bootstrap_url(),
         }),
     }
 }

@@ -43,7 +43,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../../api'
+import { api, errorText } from '../../api'
 import type {
   ActivePreset,
   Machine,
@@ -444,7 +444,7 @@ export function useParams(): Params {
         setPick({ machineId: home.id, versionId: homeVersion.id })
       }
     })().catch((e: unknown) => {
-      if (alive) setError(e instanceof Error ? e.message : String(e))
+      if (alive) setError(errorText(e))
     })
     return () => {
       alive = false
@@ -569,7 +569,7 @@ export function useParams(): Params {
       })
       .catch((e: unknown) => {
         if (!alive) return
-        setError(e instanceof Error ? e.message : String(e))
+        setError(errorText(e))
       })
 
     return () => {

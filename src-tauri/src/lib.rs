@@ -45,6 +45,12 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     with_commands(tauri::Builder::default())
+        /* 系统文件选择器（第十二层：通用导入入口的"选择文件"那一半）。
+        权限只开 `dialog:allow-open`（默认 capability），别的一律不给 */
+        .plugin(tauri_plugin_dialog::init())
+        /* 在文件管理器里显示（第十三层）。**只在 Rust 侧调**（我们自己的命令体里），
+        所以不需要给它开任何 capability —— 前端够不着它的命令面 */
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -115,7 +121,6 @@ Tauri 的 API 形状决定的，不是这里想省事；把它放在相邻的两
 #[cfg(not(feature = "workbench"))]
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
-        ipc::get_preset,
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
@@ -135,6 +140,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
+        ipc::mine::rename_user_preset,
+        ipc::mine::delete_user_preset,
+        // 第十三层：文件外部管理（在 Finder / 资源管理器里选中这一份）
+        ipc::mine::reveal_in_folder,
+        // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
+        ipc::mine::copy_user_preset,
+        // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
+        ipc::import::stage_import,
+        ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
@@ -154,6 +169,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
+        ipc::catalog::clear_preset_source,
     ])
 }
 
@@ -161,7 +177,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     use workbench::app;
     b.invoke_handler(tauri::generate_handler![
-        ipc::get_preset,
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
@@ -181,6 +196,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 第十层：用户文件管理（与上面那份清单一字不差）
+        ipc::mine::rename_user_preset,
+        ipc::mine::delete_user_preset,
+        // 第十三层：文件外部管理（与上面那份清单一字不差）
+        ipc::mine::reveal_in_folder,
+        // 第十一层：另存为一份新的（与上面那份清单一字不差）
+        ipc::mine::copy_user_preset,
+        // 第十二层：通用导入入口（与上面那份清单一字不差）
+        ipc::import::stage_import,
+        ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
@@ -200,13 +225,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
-        // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
-        // 其余全是读、查（只读推演）、或一件明确的事。
+        ipc::catalog::clear_preset_source,
+        // 后厨工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
+        // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
+        // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、
         // 差异列表、状态一致性每一件都要挨个改十几处。
         app::wb_open,
         app::wb_boot,
         app::wb_reload,
+        app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——

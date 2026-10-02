@@ -10,10 +10,10 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者的**七层**）**全部收口**（2026-10-02，见 §3.5） |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）→ 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；**Bootstrap 官方源接通**（第十七刀，2026-10-02）→「同步系统」从用户功能降为内部基础设施（构建期注入 · 进预设后台检查一次 · 只换 catalog 不自动下载）；「分享」不做、单文件「导出」暂缓（见 §5）；下一个真块是「设置 → 备份与恢复」（ZIP，复用第十二层入口） |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
-**整体 ≈ 45%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
+**整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
 
 ## 1. 第一圈留下的东西（全部在 main 上）
 
@@ -24,7 +24,7 @@
 | ③ 文件系统 | 复用 `fsx/`（两根 + 防穿越 + atomic_write）+ `runtime/paths.rs`（catalog.json / mkp/ / archive/ 落点） | 业务不许自拼目录名；新增子目录先改总纲 |
 | ④ Delivery | `runtime/delivery.rs`：`Source` trait + `deliver` + `FileOnDisk` 三分态 | 源可插拔（现只有 LocalDirSource）；SHA/大小校验在落盘前；更新=重跑管道，旧份自动归档 |
 | ⑤ 用户状态 | `runtime/state.rs` | 规则：一种状态一个文件、住 `run/` 下、atomic 写、坏档不静默。第一个住客：使用中指针（`run/active-preset.json`，全局唯一在构造上成立，带应用时刻 SHA 可查漂移） |
-| ⑥ 页面闭环 | 同步页「数据骨架（新）」区（`src/app/pages/PagePackage.tsx`） | 读数 + 下载 + 使用/撤销 + 更新，全走新 API（`get_runtime_catalog` / `download_runtime_file` / `get_downloaded_files` / `get_stale_files` / `get_active_preset` / `apply_active_preset` / `clear_active_preset`——两份命令清单同步注册） |
+| ⑥ 页面闭环 | ~~同步页「数据骨架（新）」区~~（2026-10-02 随「同步」页退役删除；能力早已化入预设页的下载 / 应用那一套）| 读数 + 下载 + 使用/撤销 + 更新，全走新 API（`get_runtime_catalog` / `download_runtime_file` / `get_downloaded_files` / `get_stale_files` / `get_active_preset` / `apply_active_preset` / `clear_active_preset`——两份命令清单同步注册） |
 
 ## 2. 怎么验证（每一轮都要全绿才推）
 
@@ -98,6 +98,27 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
    6. ✅ **官方文件异常修改检测**（SHA 报警：不许应用 / 不许编辑 / 不许复制，只能重下）
    7. ✅ **官方更新与用户修改并存**（用户那份也是真 Preset：能应用；血统随文件走；
       "官方换版了、你这份基于旧版"说得明白 —— 见下）
+   8. ✅ **继续编辑我自己那份**（2026-10-02）—— 见下
+   9. ✅ **用户文件的合法性 / 外部修改检测**（2026-10-02，本次）—— 见下。
+      **口径（作者 2026-10-02 定，别再回问）**：客户端**不复制 `mkpse-preset` 的 schema**、
+      不建第二套 Preset 真相；第九层只做**文件级**（存在 + 在 `presets-mine/` 内 + 防穿越 /
+      防符号链接逃逸 + 能读 + UTF-8 + TOML 语法能解析）；**语义合法性**（"是不是一份合法
+      MKP Preset"：结构 / 参数）不在客户端判，留给真正的 Preset 能力在应用 / 编辑入口上回答；
+      **外部修改 ≠ 报警** —— 用户那份本来就允许改，只看"现在还能不能用"、**不比 SHA**。
+      已同步写进总纲 §1③。
+  10. ⬜ **用户文件管理（重命名 / 删除）** —— 它已经是"我的文件"，自然会有这两件事；
+      尤其自动名字 `A1-standard（已修改）.toml` 用户多半想改。
+      **注意：这是真正的用户数据操作，单独设计**（第十层），不在第八层顺手做
+  11. ⬜ **另存为一份新的用户 Preset**（`A1-standard（已修改）.toml` → `A1-standard-我的高速版.toml`）——
+      两份独立 Preset，都基于同一个官方版本
+  12. ⬜ **导入 / 分享用户 Preset** —— 它已经是一份完整 TOML，分享天然成立：
+      只要"合法 TOML + 是 MKP Preset"就能进用户目录，不必知道是不是本程序产生的
+   - ⬜ **「把我的修改合并到新版官方」—— 作者 2026-10-02 降级：暂不做，不进当前主线**。
+     理由（原文要点记在这里）：删除 / 新增 / 字段重构 / 冲突 / 合并后生成第三份文件都很麻烦，
+     而收益没那么大；它会把 Preset 系统突然变成"版本迁移工具"，不是一个自然的下一层。
+     将来真要做，也更可能是**"以新版官方为基础重新修改"**（让用户自己重新调），
+     而不是程序猜怎么把两个版本揉成一个 —— 程序负责可靠地保存 / 识别 / 应用用户的 Preset。
+     （第七层拍板时它叫"第八层"，现在这个编号让给"继续编辑我自己那份"。）
    - ✅ **第一层：下载状态 + 更新**（2026-10-02）——交付行现在答得出「**这一份在本机是什么样**」：
      未下载 / 已下载 / **需更新**（盘上有、字节与目录不符）。
      三态来自**两个读的组合**（`getDownloadedFiles` = 与目录一致、`getStaleFiles` = 不一致），
@@ -207,34 +228,341 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         `outdated` **不是坏文件**：行上多一枚中性的「基于旧版官方」（不是警示色），
         展开详情「基于」那一格说全（`A1 · 快拆版6月以前 · 官方已换新版`）；
         状态条上正在用的若是我的那份，多一枚「我的文件」（它不跟着官方更新）。
-        **把改动挪到新版（合并）不在这一层做** —— 那是下一层。
+        **把改动挪到新版（合并）作者已降级为"暂不做"**（见上面第 8 条之后那一段）。
       - 判据：`runtime::lineage` 7 条（副本 = 来源 + 三行 / 副本再拷替换旧血统 / CRLF /
         没有 release_time 就两行 / 往返 / 缺一半也是血统 / 形近键不误命中）+
         `workbench::lineage_parity` 3 条（两端逐字节一致）+ `mine` 三条（血统读得出 /
         官方换版 → `outdated` / 说不清那几档）+ `state` 五条（官方线按目录解析 /
         旧档 = 官方线 / 用户线能应用 / 越界的落点不解析 / 两条线互相覆盖）+
         探针第 5g 节（我那份有「应用」、点了状态条说得出「我的文件」、徽章与「基于」那格）。
+   - ✅ **第八层：继续编辑我自己那份**（2026-10-02，本次）—— 用户线的最后一段闭环：
 
-## 4. 续做入口（从哪接手）
+     ```text
+     我的 A1-standard（已修改）.toml ──改这份──▶ run/draft-preset.json ──保存──▶ 写回它自己
+     ```
 
-- **七层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
-  （能读能列 / 能另存 / **能被应用** / 说得清基于哪一版官方）都通了。下一步是**第八层**，
-  两件事（作者还没定先后，两条都登记在案）：
-  1. **把用户改动挪到新版官方上（合并 / 更新用户副本）** —— 这就是第七层作者特意
-     留在外面那件事。底座已经有了：血统里记着 `based_on_sha256`（当初的基线摘要），
-     工作台侧还有 `preset::lineage::diff`（三份文本进、五档差异出：只有官方变了 /
-     只有我改了 / 两边都改了 / 官方新增 / 官方移除）。**开工前先问一件事**：
-     这个合并是客户端做、还是工作台做（它会想把 `mkpse-preset` 拉进默认构建，
-     与"客户端不许 `use preset`"那条隔离纪律冲突）。
-  2. **在应用内继续编辑用户自己那份** —— 今天"改这份"只服务官方交付文件（另存成新的一份）；
-     改我那份要么回写同一个文件、要么再另存一份，**那是新增一条写用户根的路径**，
-     要单独一层（现在写用户根只有 `commit_draft` 一处）。
+     **不会产生** `（已修改）2.toml` / `（再次修改）.toml` —— 就是"编辑自己的文件 → 保存回自己"。
+     落地（三块）：
+     - **写用户根从此有两条路，不许合并成一个"存一下"**：`mine::commit_draft`（另存，第 5 层）
+       与 `mine::save_back`（写回自己，本次）。区别只有两件事：**落点是原来那条路径**、
+       **三行血统照抄文件里原来那三行**（出处没变）—— 所以血统里的摘要不会变成
+       "我自己改过的字节"，那份仍然说得清自己从哪一版官方派生。
+       两条共用 `lineage` 的"剪掉 → 重新插入"（`splice_lineage`），于是
+       **"打开又保存、什么都没改" = 文件逐字节不变**（判据咬着）。
+     - **两条线同一个入口**：`begin_preset_edit(fileName, origin?, path?)`（与
+       `apply_active_preset` 同一形状 —— 官方线认文件名、用户线认路径）；
+       "接着上次改"也按同一把钥匙（`DraftSubject`：两条线同名很正常，只比文件名会把
+       A 的草稿接到 B 上）。用户线的前置只有两条：**是 TOML** 与**盘上真有** ——
+       **它不查 SHA**：用户那份本来就是允许改的，"字节必须还是当初那一份"是官方线的规矩
+       （"它现在还是不是一份能被识别的 Preset"是第九层的事）。
+       编辑期间那份被移走 / 删掉了 ⇒ `save_back` **拒绝并说清**，不去别处新建一份。
+     - **界面只有两句话不同**：同一颗「改这份」、同一个编辑器抽屉；官方线是
+       「保存为用户文件」（另存一份新的），用户线是「保存回我这份」（写回同一个文件）。
+       编辑器里给的是**正文**（三行血统是程序的元数据，不是用户该改的内容）——
+       两条线打开抽屉看到的是同一副样子；保存时那三行由 `save_back` 照抄回去，
+       所以用户在编辑器里删掉它们也不会把出处弄丢。
+     - 判据：`runtime::mine` 写回 5 条（**同一路径不产生第二份 + 血统照抄** /
+       没改就逐字节不变 / 本来没血统就不编一个 / 被移走了拒绝且不新建 / 只认那一格）+
+       `runtime::state` 两条（两条线钥匙不同 / 旧档 = 官方线）+
+       `runtime::lineage` 四条（写回保留出处 / 没改就字节不变 / 无血统不编 / CRLF）+
+       探针第 5h 节（我那份有「改这份」、编辑器里没有血统、按钮说「保存回我这份」、
+       存完没有多出一份、「基于旧版官方」那枚与那三行都还在）。
+     - ✅ **第九层：用户文件的合法性 / 外部修改检测**（2026-10-02，本次）—— **架构边界由作者
+      定死**（原文要点见 §5 与总纲 §1③）：**客户端不复制 `mkpse-preset` 的 schema、不建
+      第二套 Preset 真相**；这一层只做**文件级**检查 —— 语义那一档（"是不是一份合法
+      MKP Preset"：结构 / 参数）留给真正的 Preset 能力在应用 / 编辑入口上回答
+      （默认构建不编 `mkpse-preset` 的隔离纪律不为此破例）。
+
+      判据（作者原文四条）：
+
+      ```text
+      正常：存在 + 路径在 presets-mine/ 内 + TOML 能读   → 照常应用 / 编辑
+      损坏：文件在，但 TOML 读不出来                     → 显示「文件无法读取」→ 不许应用 / 编辑
+      不是 MKP Preset：TOML 能读、语义解析不过           → 客户端不判（留给真正的 Preset 能力）
+      外部改过但仍是能读的 TOML                          → 照常使用，**不因 SHA 报警**
+      ```
+
+      落地（两块）：
+      - **`runtime::mine` 长出文件级状态**：`MineState`（`ok` / `unreadable`，**只此两档** ——
+        没有"是不是合法 Preset"那一档）+ `toml_syntax_reason`（`toml_edit` 解析，
+        **报得出第几行第几列**）+ `read_preset_text`（读 + UTF-8 + TOML 语法，**应用 / 编辑
+        两个入口共用这一处**，不许各写一遍）。扫盘时每个 `.toml` 候选都算出状态；
+        **符号链接逃逸在扫盘就先拦**（与读正文 / 应用 / 编辑同一道 `resolve_in`；
+        指向用户根外的，**一个字节都不读**，血统也不读）。非预设候选（`.json`）没有这一档
+        （`state: null`）。DTO 加 `state` / `stateDetail` 两个字段。
+      - **界面**：读不出来的那份**照常列在表里**、名字旁边一枚琥珀色「文件无法读取」
+        （title 里带后端给的原因，如"TOML 语法不对（第 3 行第 1 列）"）；**「应用」与
+        「改这份」都不给**（不给必被后端拒的按钮），展开详情里多一格「文件」。
+        **「看正文」照旧给** —— 读它不算"用"，用户要能看着它去修。
+      - 判据：`runtime::mine` 第九层 5 条新增（坏 TOML 画成读不出来且报行号 / 非 UTF-8
+        读不出来 / **根外符号链接一个字节都不读**（根内链接照常）/ 应用与编辑入口拦下坏
+        TOML 而看正文照旧 / **外部改过仍合法 = 正常（不比 SHA）**）+ 既有 2 条搭上 `state`
+        断言 + 探针第 5i 节（坏的那份画得出「文件无法读取」、没有「应用」也没有「改这份」、
+        角标带原因；能读的那份不受牵连）。
+   - ✅ **第十层：用户文件管理（重命名 / 删除）**（2026-10-02，本次）—— 范围由作者卡死：
+     **只做重命名 + 删除**，不做导入 / 另存为 / 批量 / 文件夹管理；**不给用户文件套"归档"**
+     （作者原话：官方 `archive/` 是版本更新的历史；用户自己删自己的文件**就是真删除**，
+     不搞第二套"用户历史管理系统"）。
+
+     规矩（逐条）：
+     - **重命名 = 只动名字**：内容 / 那三行血统 / TOML **一个字节不重写**；只换名字不换目录；
+       新名字不许空 / 不许带路径分隔符 / 后缀保持原样（改名不改类别）；落点已有东西**不覆盖**
+       （同一个文件除外 —— 大小写只差一档的改名要放行）。改完还是同一份 Preset。
+     - **正在使用的那一份也能改名**：`run/active-preset.json` 里那条指针**跟着改名**
+       （路径与文件名换成新的，**指纹原样** —— 字节没变，摘要当然不动）；
+       **有草稿的也能改名**：`run/draft-preset.json` 跟着改名（用户线认路径，
+       「接着上次改」不接丢）—— 这两条 repoint 在 `runtime::state`（纯函数，有判据）。
+       两本状态账**先读出来**：坏档就不动文件（宁可原地不动，也不留悬空指针）。
+     - **删除 = 真删除**（没有垃圾桶、没有归档）。两道硬闸在入口：**正在使用的不许删**
+       （删了「使用中」就指向一份不存在的文件）、**还有没保存的草稿的不许删**
+       （删了草稿就永远存不回去）。菜单里对「正在使用」的行已经灰掉带原因，后端仍会再拦一次。
+     - 范围卡死：只换名字**不换目录**（跨文件夹搬动是"文件夹管理"，不在这一层）；
+       官方那两份（仓库文件 / 交付预设）的改名与删除这一层都不做（菜单按 origin 灰掉、
+       各说各的原因）。
+     - 判据：`runtime::mine` 第十层 9 条 + `runtime::state` repoint 3 条 + 探针第 5j 节
+       （见 §6；改名只动名字且状态不变 / 删除二次确认与消失 / 正在使用的不给删 /
+       改名不断「已应用」、草稿跟着走）。
+   - ✅ **第十一层：另存为一份新的**（2026-10-02，本次）—— 只解决一个问题：
+     **我的文件 → 我的文件**（与第八层"官方 → 我的文件"分开）。作者把边界定死：
+     **不做任何"智能"** —— 名字由用户明确指定（抽屉**不预填**）、目标存在就拒绝
+     （不覆盖、**不自动改名**）；**一个状态都不碰**（不改使用中指针、不迁移草稿、
+     不建草稿、不进 archive）；新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 /
+     删除 / 应用）。
+
+     规矩（逐条）：
+     - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算血统
+       （来源已经是用户文件，重算会把"从哪一版官方派生"说错）；原文件一个字节不动；
+     - 名字过**同一套门槛**（与改名共用 `check_new_name`：不许空 / 不许带路径分隔符 /
+       后缀保持原样）；只换名字不换目录（新的一份落在原来那一格）；落点已有东西就拒。
+     - 它**不读内容、不查状态**（"纯文件操作"，与改名 / 删除同族）：连读不出来的那份
+       也能复制，复制出来还是读不出来的（状态照实）。
+     - 范围卡死：官方那两份的副本走「改这份」→ 保存（菜单按 origin 灰掉、说清那条路）；
+       内容存疑的字节不许换个名字继续活着（第 6 层，那一句优先）。
+     - 判据：`runtime::mine` 第十一层 6 条 + 探针第 5k 节（见 §6；不预填 / 字节复制 /
+       血统原样 / 不覆盖不自动改名 / 不碰使用中与草稿）。
+   - ✅ **第十二层：通用文件导入入口**（2026-10-02，本次）—— 作者把这一层定成
+     **"外部文件如何安全进入应用"，Preset 只是第一个消费者**（原话：「第十二层负责
+     '外部文件如何安全进入应用'，而不是'实现 Preset 导入'」）。以后「设置 → 备份与恢复」
+     的 ZIP / 备份包复用同一套接收机制（拖拽、选择器、重名处理、边界检查），
+     所以入口**不挂在预设页**：
+
+     ```text
+     App ── 通用导入入口 ──┬── 文件选择器（plugin-dialog；权限只开 dialog:allow-open）
+                           └── 拖拽（真机：Tauri 原生拖拽事件给路径；浏览器：HTML5 拖拽）
+                                ↓
+                          runtime::import（注册表认领 → 落点检查 → 复制进 presets-mine/）
+                                ↓
+                          现在只注册了 Preset（.toml）；ZIP / 备份包以后往这加
+     ```
+
+     边界（逐条定死）：
+     - **源文件只读**：不改、不删、不移；复制 = 读字节 → 原子写进用户根；
+     - **落点固定 `presets-mine/`**，不给用户选目录；新名字过改名 / 另存为**同一套门槛**；
+     - **内容按字节复制**：有血统三行原样带过去，没有**允许导入、不编造来源**；
+     - **不校验 TOML 内容**：能不能当 Preset 用是后面 Preset 语义入口的事 ——
+       **"导入不是安装 Preset，只是把外部文件纳入我的文件所有权范围"**（作者原话，判据）；
+     - **重名不是失败，是改名流程**：`stage_import` 说 `collision` → 界面开
+       「导入：有同名文件」那一格（输入框预填原名，用户改到可用名才能继续；
+       **不覆盖、不自动改名**）；取消 = 这些没进来，别的照常进（一份错不拖累别人）；
+     - **ZIP / 备份包现在不处理**：注册表没有认领它的导入器 ⇒ 如实说"收不了"，
+       **不许被当成预设复制进用户根**；`.json` 现在也不收（只认 `.toml`）；
+     - **一个状态都不碰**：不改使用中指针、不迁移 / 不创建草稿、不进 archive。
+     - 工程接线：`tauri-plugin-dialog`（Cargo）+ JS 包 `@tauri-apps/plugin-dialog` +
+       `.plugin(init)` + `capabilities/default.json` **只加 `dialog:allow-open`**。
+     - 判据：`runtime::import` 8 条 + 探针第 5l 节（见 §6）。
+   - ✅ **第十三层：文件外部管理（只做「在 Finder 中显示」）**（2026-10-02，本次）——
+     作者把这一块定性为"用户文件本已经是真文件，**不再造第二套分享 / 导出**"：
+     - **在 Finder 中显示**（Windows 上就是文件资源管理器）：右键打开系统文件管理器
+       **并选中**这一份 —— 之后复制 / 压缩 / 发人 / 备份全随用户，**不经过 SupportEase
+       的业务逻辑**（"文件外部管理"的含义就这一句）。只给「我的文件」（官方那两份住
+       程序自己管的下载区 / 或还没下载 —— 菜单里灰掉带原因）；**读不出来的那份也能
+       显示**（文件管理同族：打开文件夹不吃内容）；**一个状态都不碰**；成功**没有提示条**
+       （文件管理器窗口本身就是回执），失败如实说。平台话术：macOS「在 Finder 中显示」/
+       Windows「在文件资源管理器中显示」。
+     - **导出**：作者定过定义（"把我的文件复制到用户指定的位置" —— 原文件不动、不改
+       Active / 草稿 / archive、同名进改名流程不覆盖）但**决定暂缓**：Finder 已经解决
+       "拿出去"；真正有产品意义的导出是以后「设置 → 备份与恢复 → 导出备份 ZIP」。
+     - **"分享"整块不做**（作者裁决）：我的文件本来就是真文件，再造分享就是重复的
+       复制 / 导出逻辑。
+     - 工程接线：`tauri-plugin-opener`（Cargo）+ `.plugin(init)` —— **只在 Rust 侧调**
+       （`app.opener().reveal_item_in_dir`），所以**不加任何 capability**。
+     - 判据：`runtime::mine::reveal_target` 3 条 + 探针第 5m 节（见 §6）。
+     - ✅ **第十五层：预设页数据边界修正**（2026-10-02，本次）—— 作者拿截图点名三件事，
+     一个**纯前端批次**（Rust 一个字没动），把"两个 Tab 后端没有真正分流"修掉：
+     - **两档按 catalog 的 `kind` 分流**（不靠扩展名猜；`catalogKindToFileKind` 一处映射）：
+       `mkp_preset` → MKP 配置；`bbs_config` / `orca_config` → 切片器配置；
+       **图标（`icon`）/ 模型（`model`）哪一档都不出现** —— 登记在目录里 ≠ 进预设页。
+       修的是 release 行那条**没写下来的前提**（"catalog 登记的只有预设"）：作者截图里
+       `a1.svg` 与 `MKPProcess ….json` 全混在「MKP 配置 → 云端」表里（`ReleasePresetSource`
+       带上 `kind`，两档的过滤跟着数据走）。
+     - **台账「仓库 N」跟档**：`PresetTree.fileCounts` 把两支来源（`getVersionFiles` 的 MKP +
+       `getPresetFiles` 的切片器）合起来按 path 去重、按 kind 计数 —— 旧 `totalFiles` 只数 repo
+       一支（MKP 档下显示的是切片器的数）。「我的 N」也跟档（判据与本地表 mine 行同一条）；
+       「本机 N」仍是官方副本总数（`getLocalFiles` 老契约，真机还没接）。「共 N 项」本来就对
+       （表 bug 修完它自己就对了 —— MKP 档 3 项 / 切片器档 2 项）。
+     - **下载错误展开**：`下载失败：[object Object]` 的病根是各页各写各的
+       `e instanceof Error ? e.message : String(e)`，而跨 IPC 的错误是 `AppError`
+       （普通对象、不是 `Error` 实例）—— 统一成 `api.errorText()`（`AppError` → `message`；
+       19 处，含参数页 / 导入那一侧）。**后端错误结构一个字没动**。
+     - **顺手修一个"点了没反应"的按钮**：切片器那一类的**交付行**（catalog 登记、能下载）
+       在本地表里原来画「复制」——`runLive` 里 `assetId` 是 undefined 直接 return、点了静静
+       没反应；现在给灰字 + 说明（`SLICER_RELEASE_WHY`）；云端那一行的「下载 / 更新」照旧真能下。
+     - **不做（登记为"以后"）**：切片器交付行的**喷嘴 / 层高**（catalog.files 现在不带这两个
+       字段，表里如实「—」——要显示得先给交付行补字段，另案）；`PresetFileRow.tsx` 是**死组件**
+       （零引用，清扫遗留，另案删）。
+     - 判据：探针新增第 2b 节（分类边界：MKP 档不许有 `.svg` / `.json`、切片器档要有 catalog
+       交付行且动作是「下载」、台账两档不同数）+ mock 补 `bbs_config` / `icon` 各一条
+       （真机 catalog 里长这样，浏览器里也能验）；`PRESET-PRODUCT-RULES.md` §1 / §2 / §4
+       跟着补三笔（核准记录里记了）。
+     - ✅ **第十六刀：「同步」页退役 + 最小设置页**（2026-10-02，本次）—— 作者裁决：
+     "普通用户完全不需要'同步'这个概念；数据源配置降级成设置页里的开发后门。"
+     同步页（数据源 / catalog 调试账 / 下载第一份 / 检查更新）是开发验证面板，不是产品页面：
+     - **删**：导航「同步」+ `src/app/pages/`（`PagePackage.tsx` / 它的 css / 一个零引用的
+       `pages.module.css` 死文件 —— 目录随页面清空）；参数页空态那颗「去「同步」页获取一份」
+       跳转（没去处了）；工作台 `BuildPage` / `cloud.ts` / `clientPackage.ts` 与前端
+       `contract` / `mock` / `storageKeys` 里"客户端「同步」页读的就是这一格"那套**失效指针**
+       （C4 起客户端就不读 `STORAGE.cloud`，那一格只归工作台）。
+     - **搬**：数据源那一格 → **设置页 · 高级设置 · 预设数据源**（内置官方源 / 手动指定
+       （开发 / 排查）/ 恢复内置默认）。写动作全走按钮（不做"一选就写"的隐式动作）；
+       「空地址不写盘」的语义不变。
+     - **新增一条命令** `clear_preset_source`：「回到内置默认」只能靠删设置文件
+       （`save_source` 拒空 = 不许制造第三种状态）—— 原来只有"用户手删文件"这个出口，
+       现在是一次显式动作（幂等）。`PresetSourceDto` 加 `builtin` 一格：有覆盖时 `baseUrl`
+       是覆盖值，界面得说得出"撤掉覆盖会回到什么"。
+     - **保留（一个字没动）**：`check_remote_update` / `apply_remote_update` /
+       `run/preset-source.json` / 下载管道 / catalog —— 检查更新现在**暂时没有 UI 入口**，
+       Bootstrap 那一刀「预设页进入时后台检查一次」接上。
+     - `remote_base` 的"去哪儿填"改指设置页；mock 的数据源改**内存镜像**（校验消息与真机
+       同一套）。
+     - 判据：`params-sync.mjs` → **`params-settings.mjs`**（参数页那半保留 + 设置页数据源
+       全流程：当前状态如实 / 手动指定应用（尾斜杠砍掉，与真机 `normalize` 同一套）/
+       非法地址如实拒 / 恢复内置默认能撤回），两档 **14 条全绿**；`tabs.mjs` **7 页签**
+       （设置成真页面）；`chain.mjs` 第 ③ 步改点设置页，两档 **10/10 绿**；Rust
+       `source::clear_source` 2 条新测试（撤覆盖 / 幂等）。
+     - ✅ **第十七刀：Bootstrap 官方源接通**（2026-10-02，本次）—— 作者裁决：
+     "整个'同步系统'从一个用户功能，变成内部基础设施。"链路定死：
+     `工作台填 Bootstrap 地址 → 构建期注入 → 客户端读 source.json 拿 catalog + 文件根 →
+     进预设后台检查一次 → 有新版才换本地 catalog → 用户点"下载"才下载文件`。
+     - **两个入口，语义故意不同**（`runtime::source` 模块头）：
+       **手动覆盖**（设置页，`run/preset-source.json`）= **数据源根**（根下直接是
+       catalog.json，开发 / 排查通道，不联网）；**内置**（构建期注入）= **Bootstrap 地址**
+       （指向 source.json，正式通道）——**覆盖优先**，两条路解析成**同一形状**
+       `ResolvedSource`（catalog_url + base_url），下游只认它、不各自拼 URL。
+     - **注入**（`src-tauri/build.rs`）：`MKPSE_PRESET_SOURCE` 环境变量 > 工作台配置
+       `workbench/bootstrap.json`（`wb_set_bootstrap` 写，**入库**）> 都没有 = 没配。
+       `rerun-if-changed` 登记它；**改了要重新构建**（dev 重启 `tauri dev`）。
+     - **接 GitHub**：`dist::normalize_bootstrap_url` —— **blob 页 → raw 直链**
+       （`github.com/o/r/blob/ref/path` → `raw.githubusercontent.com/o/r/ref/path`）；
+       已经是 raw / 别的 http(s) 原样过（自建源合法）；github 但非 blob 页（仓库 / 目录页）
+       如实拒并说"那是个目录"。工作台「设置」页**只有这一格可编辑**（其余数据根只读）。
+     - **发布产物**（`dist::bootstrap_json` + `SOURCE_FILE`）：`source.json` 就两件事
+       （`sourceSchema` + `catalog`），**不写 baseUrl**（客户端缺省理解成"同目录"——
+       同一份 dist 推到哪里都对）；它进交付集合、收尾随 catalog / manifest 一起原子写。
+       `NEW_CATALOG_FILE` 直接引用 `runtime::source::CATALOG_FILE`（同一份名字不再写两处）。
+     - **客户端解析**（`parse_bootstrap`，纯函数、可单测）：代次认不得 / catalog 绝对 URL /
+       `..` / baseUrl 非 http(s) 一律拒；`directory_of` 从 `source.json` 的 URL 回退目录。
+     - **进入预设后台检查一次**（本次补的最后一段，`usePresetData`）：
+       **先画本地 catalog，再在后台 `checkRemoteUpdate`**（不挡首屏）——
+       模块级 `checkedBootstrapThisRun` 保证**本次运行只一次**（切 tab 来回不重发，
+       关掉 App 再开才重置）；**有新版才 `applyRemoteUpdate`**（换本地 catalog）**再重读那一路**；
+       **绝不自动下载任何预设文件**；**失败静默**（没内置源 / 离线 / 远端没部署都是开发期
+       正常状态，不许让预设页报错或弹条子）—— 启动仍**零网络**。
+     - 判据：Rust `source::parse_bootstrap` / `directory_of` / `dist::normalize_bootstrap_url`
+       / `bootstrap_json` 一组新测试（含"发布侧写的那份客户端解析器读得动"两端互钉）；
+       探针 `presets.mjs` 新增第 5n 节（进入预设不挡首屏 / 失败静默 / 不自动下载）。
+       全绿：`cargo test` 253、`--features workbench --lib` 441、双 feature clippy 干净、
+       探针通过、`check:bundle` / `check:zero-network` 干净。
+     - **保留（第十七刀一个字没动）**：设置页「手动指定数据源」继续是开发 / 排查覆盖。
+     - ⏳ **第十八刀：官方预设真实交付链**（进行中的后一半）—— 前一半已落地：
+     - **发布动作定案**（2026-10-02 作者裁决）：`presets/dist/` 是 **main 上的正式交付目录**
+       （不再是"本地构建产物、不入库"）。客户端 Bootstrap = 
+       `raw.githubusercontent.com/.../main/presets/dist/source.json`。
+     - **`.gitignore` 两处改判**：撤掉 `presets/dist/` 那条忽略；**并把裸 `dist` 锚定成 `/dist`**
+       —— 裸 `dist` 会匹配任意层级，把 `presets/dist/` 也一起吞了（撤第 6 行不起作用，
+       真正拦它的是第 3 行那个裸 `dist`）。根 `dist/` 是 Vite 输出，仍忽略。
+     - **`scripts/publish-presets.mjs` + `npm run publish:presets`**：发布动作 = **一次性分支
+       → PR**，**不碰 main 直推闸门**（闸②无条件拦，ruleset 再拦）。**刻意不复用
+       `release.mjs`**（那条是软件版本发布：版本号 / tag / 完整 CI 链；预设数据是另一条线）。
+     - 发布前五道校验（不过就一个字节都不写）：①产物存在 ②`source.json` 认得
+       ③`catalog.json` 每条 `path` 真存在 ④**SHA / 大小对真字节** ⑤manifest 与 catalog
+       交叉核对（防半成品）。这是 `publish_into` 收尾那段的**进库前副本** —— 两侧都错才可能漏。
+     - 两个真实 bug 在写的时候踩到并修掉（值得记）：**① `run()` 会 `.trim()`**，
+       而 porcelain 是 `XY<space>path`（` M path` 首字符是空格）—— trim 后再按偏移切会把
+       `presets/…` 切成 `resets/…`，过滤静默失效（加 `runRaw` 不 trim 的读法）；
+       **② 工作区检查必须排除 `presets/dist/`** —— 首次发布时它本就是未跟踪的，
+       拿它自己的状态拦自己 = 死锁；且要用 `--untracked-files=all`（默认只报顶层目录）。
+     - 验证：在 `/tmp` 隔离仓库造完整产物，跑通全绿路径（校验 → 分支 → 提交 → push）
+       与四条拒绝路径（缺 source.json / path 不存在 / SHA 失配 / manifest 脱节），
+       真仓库未被污染。
+     - **下一步（第十八刀后半，待作者在工作台点一次「发布」）**：
+       `presets/dist/` 现在只有 `mkp/presets/*.toml`（`wb_generate` 产物），**没有
+       `source.json` / `catalog.json` / `manifest.json`**（`wb_publish` 才写这三个）。
+       所以要先在工作台 **生成 → 发布**，再 `npm run publish:presets`，合并 PR，
+       最后跑真实 raw → catalog → 单文件下载闭环。
+
+     ## 4. 续做入口（从哪接手）
+
+- **总盘点在 `docs/PROJECT-AUDIT.md`**（2026-10-02）：把 HANDOFF / 总纲 / 工程约束 /
+  产品规则 / 现有页面对了一遍，列成**已完成 / 半完成 / 未开始 / 已废弃**四类
+  （按作者 ①–⑩ 排：备份恢复 / 设置页 / Preset 产品能力 / 机器型号 / 校准测试 /
+  加工记录 / 状态收尾 / 云交付验收 / 跨平台 / 旧世界清理），外加**文档自身的欠账**
+  与建议次序。**接手前先读它** —— 它说的"半完成"是"差哪一半"，不是"没做"。
+- **清扫批次完成（2026-10-02，⑩ 的一小刀，只清残留不动功能）**：
+  - **死 API 两处清除**：`get_preset`（首圈的硬编码表 `preset_of` —— Rust 命令 + 两份注册清单 +
+    假后端夹具 + 测试一起删；首页/校准页早已走文件体系）与 `getAppliedPreset`
+    （契约方法 + 假后端演示集合 + bridge 的 `notWired`；`AppliedPreset` 类型一并删）。
+    真机 `notWired` 只剩 `copyToSlicer` / `downloadFiles` 两条（那两条**是有消费者的未接**，
+    不是残留）。bridge 头注释同步改写。
+  - **两个探针重写（同场病：C4 收口时一起烂的）**：
+    - `chain.mjs`（P6 联动）：客户端那半（同步→下载→应用）在浏览器里**结构性走不通**
+      （C4 底账进 Internal 根 + 真数据源；mock 没有盘没有源）——恒 FAIL 的死键断言
+      （`mkp.a40.package` / `mkp.a40.active`）与旧链换成真行为：**工作台生成 → 上传
+      （整份 release）→ 刷新那一格还在 → 客户端同步页如实说"catalog 随包走"**；
+      两档 10/10 绿。"全选待生成"超时**复现不了**（按文件头三步构建即可跑通；
+      A41 那次大概是拿没有桩的产物跑的）。客户端那半条链的覆盖在
+      `params-sync.mjs` / `presets.mjs` + 真机验收（⑧ 的清单）。
+      （2026-10-02 晚：「同步」页退役 —— `chain.mjs` 第 ③ 步换到设置页；
+      `params-sync.mjs` → `params-settings.mjs`。**收口一层要回头把相关探针跑一遍**，
+      这条又应验一次。）
+    - `params-sync.mjs`（P3/P4）：走的老流程（参数页空态 → 去同步页获取一份 → 互跳）
+      也没了 —— 参数页现在**直接读 catalog**、同步页不再有"自动同步 / 去看参数页"。
+      重写成两页各自的现状（参数页照 catalog 画 / 同步页口径与账），两档 12/12 绿。
+  - **文档刷新**：README（现状段 + 文档地图）· `ARCHITECTURE.md` §1/§3/§4/§6/§9/§10.5 ·
+    总纲 §4 欠账 #5 收口（`mkp/` 命名）、#4 记为**半收口**（catalog 已统一登记 9 份，
+    但没有"内置"标记）。
+  - **产品规则反写**：`PRESET-PRODUCT-RULES.md` 19 节正文按**已落地行为**写齐
+    （含 §17 留一条"启动对账要不要做"待作者定）—— **待作者逐节核准**，核准记录记在文末。
+  - **schema 裁决**：`AssetKind::Image` **保留 + 登记**（复审依据写进 `presetdata/assets.rs`）。
+- **十三收尾走完，用户文件这一整套正式收口**（2026-10-02）：官方线（下载 / 状态 / 批量 /
+  归档 / 可信度）与用户线（能读能列 / 能另存 / **能被应用** / **能被改并写回自己** /
+  **读不出来就拦在应用·编辑门口（文件级检查，不比 SHA）** / **能改名、能删、能另存为一份
+  新的**）都通了，**导入入口**（外部 → 我的文件）与**外部管理**（Finder 里显示）也立起来了。
+  整套生命周期：**官方 → 我的文件 → 编辑 / 另存 / 改名 / 删除 / 应用 / 导入 → Finder 管理**。
+  **「分享」不做、「单文件导出」暂缓**（理由与将来出口见 §5）；**下一个真块是
+  「设置 → 备份与恢复」**（ZIP 备份 / 恢复）—— 到那时复用第十二层那套通用导入入口，
+  不需要再重造接收机制。
+- **第九层登记一条边界（不是漏做）**：**语义合法性**（"是不是一份合法 MKP Preset"：
+  结构 / 参数对不对）**客户端不判** —— 判据只到文件级（能读 + UTF-8 + TOML 语法）。
+  含义：TOML 能读但不是 MKP 预设的文件（以及空文件 / 只有注释的 TOML）现在会显示为正常；
+  要堵它得让真正的 Preset 能力接到应用 / 编辑入口上（`mkpse-preset` 的事，默认构建的
+  隔离纪律不为它破例）。**"用户文件被外面改过"也不再是任何形式的报警**：只要仍是能读的
+  TOML 就照常能用 —— 与之对照的官方线 SHA 报警（第六层）一个字没动。
+- **第十层登记两条边界（不是漏做）**：① **用户文件没有"归档"** —— 用户删自己的文件
+  就是真删除（官方线的 `archive/` 是版本更新历史，不给用户搞第二套）；② **改名只换名字、
+  不换目录** —— 跨文件夹搬动属于"文件夹管理"，将来真要做单独设计。
+- **第十一层登记边界（不是漏做）**：① 复制**不设内容门槛**（连读不出来的 / 非 TOML 的
+  都能复制，复制出来状态照实）—— 与改名 / 删除同族的纯文件操作；② **不做"复制后自动改名"**
+  —— 目标存在就拒、让用户自己换名字（作者定死）；③ 跨文件夹复制也不做（同"文件夹管理"）。
+- **第十二层登记边界（不是漏做）**：① 导入**不校验内容**（TOML 语法坏 / 二进制都收 ——
+  "能不能用"归 Preset 语义入口，判据：导入不是安装 Preset）；② **ZIP / 备份包现在不处理**
+  （注册表留了认领的口子；设置页「备份与恢复」到那一层再注册导入器）；③ `.json` 现在也
+  不收（要收就在注册表加一条）。
 - **第七层留下的一条可收口项**（不影响功能，登记）：血统三行的文本逻辑现在两份实现
   （`runtime::lineage` 与 `preset::lineage`），靠 `workbench::lineage_parity` 钉住。
-  更彻底的一条路是把它下移到共享小 crate、两边转调 —— 与第八层的 1 一起裁更省事。
+  更彻底的一条路是把它下移到共享小 crate、两边转调。
 
 - **第三圈第 2 步的布局对齐已完成**（2026-10-02）：交付根相对路径 = 客户端下载区的相对路径（`mkp/…`），两端共用 `runtime::catalog::dest_of_asset`。**下一步是 §3.5 第 3 步：Preset 成为第一个完整消费者**（发现 → 下载 → 本地文件 → 页面，再逐层加下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本）。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等那一刀做。
-- **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。
+- **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。**2026-10-02 清扫批次复审：保留 + 登记（去留已明确）** —— 确认它不是纯未使用枚举（`runtime::catalog` 的"不登记"分支与判据都在引用），也不是旧残留（剥离是改判）；删除属另案 schema 清理。理由写进 `presetdata/assets.rs` 的 `AssetKind` 头注释。
 - **下载这条链的入口**：`ipc::catalog::download_runtime_file`（一份，带 `Channel` 进度）与 `download_runtime_files`（一份清单，逐份结局）；源由 `runtime::source::current_base_url` 给出；字节在生产后走 `runtime::delivery::deliver`。
 - 前端消费新世界的样板：预设页（`usePresetData.readRelease` = catalog.files + `getDownloadedFiles`，写走 `downloadCatalogFiles` / `applyActivePreset` 后**重读底账**）；参数页（`useParams` = `getMachines` + `getParamMeta` + `getRuntimeCatalog` 的 registry 摊页签树 + `getMachineParams` 按 combo 拉值）。
 - 更新/归档：`runtime/delivery.rs` 的 `FileOnDisk` / `stale_files` / deliver 里的归档段；`runtime/release.rs` 的升级策略。
@@ -261,6 +589,21 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   ③ 守住当前这一圈的边界 → ④ 选改动更小、下一条最容易接的那个。
   **决定与理由写进台账**（本文件 §3 / §5 或 `DATA-INVENTORY.md` 的进展日志），
   不要在汇报里写成"要不要我做"的问句。作者定舞步，这一侧负责把舞步跳完整。
+- **不许给第九层复制 Preset schema**（2026-10-02 作者定死，写进总纲 §1③）：客户端对
+  用户文件只做**文件级**检查（能读 + UTF-8 + TOML 语法），**不复制 `mkpse-preset` 的
+  结构 / 参数规则、不建第二套 Preset 真相**；语义合法性留给真正的 Preset 能力在
+  应用 / 编辑入口上回答。"以后 schema 改一次要改两边"的平行真相，正是这次重建一直在
+  消灭的东西。
+- **导入入口是通用的，别在页面里造专属拖拽**（第十二层，作者定死）：接收机制（拖拽 /
+  文件选择器 / 重名改名 / 边界检查）住在 App 层 `FileImportProvider` 与 `runtime::import`；
+  页面只消费 `pickFiles` 与 `revision`。以后「备份与恢复」复用同一套，不另写一份。
+- **不做"分享"、不做单文件"导出"**（第十三层，2026-10-02 作者裁决）：**「我的文件」本来
+  就是真文件**（`Documents/SupportEase/presets-mine/`），再造一套分享 / 导出就是把复制 /
+  导出逻辑写第二遍；"拿出去"由「在 Finder 中显示」解决。将来真要做导出，**是
+  「设置 → 备份与恢复 → 导出备份 ZIP」**（把多种运行数据打包，有产品意义），不是复制一个
+  TOML —— 到那时复用第十二层的通用入口。**若哪天仍要"单文件导出"，定义照作者给的**：
+  把我的文件复制到用户指定的位置 —— 原文件不动、不改 Active / 草稿 / archive、同名进
+  改名流程（不覆盖）。
 - **总纲准入问句**（`DATA-ARCHITECTURE.md` §6）：任何新文件/新功能先答"属于哪一层？谁是唯一主人？什么时候允许联网？"答不出先改文档。
 - **四条铁律**：开发文件不当运行时数据库；云端不参与首屏；用户没下载的不预置（catalog 是唯一例外——它是软件本体）；运行时只认自己的运行时数据。
 - **clippy 禁列对测试也生效**（CI 是 `--all-targets`）：测试里写盘用 `fsx::atomic::atomic_write`，`std::fs::write` 会红。
@@ -273,7 +616,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **~~新旧世界并存、互不读写~~（已收口）**：`client/` 目录删除，客户端只读 catalog、工作台读仓库源，仍互不读写；收口一条勾一条，同步更新 `DATA-INVENTORY.md` §4 与总纲 §4。
 - **`workbench/.snapshots/` 已入库**（`.gitignore` 的既定政策：除 `.draft/` 外入库）；`.codebuddy/` 已 ignore；`.trae/documents/` 留库（被代码注释引用）。
 - **仓库有并行会话在动**：推送前先 `git fetch`；合并冲突大概率在 `ipc/presets.rs` / `usePresetData.ts`（预设页是热点）。
-- **真机下载要先配数据源**：C4 之后的下载不再探测仓库路径 —— 没配 `Preset Source`（同步页那格）时，下载 / 检查更新都会拒绝并说明去哪儿配。**这是对的**，不是 bug：用户机器上本来就没有仓库。开发期要验真，把本地静态目录（如 `python3 -m http.server`）的地址填进去即可。
+- **真机下载要先配数据源**：C4 之后的下载不再探测仓库路径 —— 没配数据源时，下载 / 检查更新都会拒绝并说明去哪儿配。**这是对的**，不是 bug：用户机器上本来就没有仓库。开发期要验真，把本地静态目录（如 `python3 -m http.server`）的地址填进 **设置 → 高级设置 → 预设数据源**（「同步」页 2026-10-02 退役后那一格搬到了这里）；正式构建由 `MKPSE_PRESET_SOURCE` 编入默认值（Bootstrap 那一刀把它接到工作台）。
 - **随包资产退役是"接一类摘一类"**：`vite.config.ts` 的 `DELIVERED_ASSET_DIRS` 与
   `scripts/check-bundle.mjs` 的 `assets/<类>/` 是**同一份清单的两处**，加一类就改两处（判据会盯着另一处）。
   今天这份清单恰好覆盖 `public/assets/` 下台账管的全部三类（bbs / models / icons）。
@@ -311,19 +654,29 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::delivery` 归档 3 条 | `archived_files_is_empty_before_anything_was_archived`（没归档过 = 空表，不是错误）/ `…lists_what_the_update_pushed_aside`（列出来的按它自己的路径能读回**旧版本的原字节**）/ `…reflects_the_single_archive_slot`（连升两版仍只列一份 = 最早那份：**归档 ≠ 每次更新的历史**） |
 | `runtime::mine` 用户线 4 条 | `mine_files_is_empty_when_the_user_has_nothing`（一份都没有 = 空表，不是错误）/ `…lists_what_the_user_put_there`（路径相对用户根、按升序、子目录也算、只出 `presets-mine/`）/ `kind_is_only_claimed_when_the_extension_says_so`（`.json` **照实认不出**）/ `only_the_mine_subdir_is_readable`（读正文只认那一格：`exports/`、`..`、目录本身都拒） |
 | `runtime::mine` 另存 2 条 | `commit_writes_the_edited_copy_and_leaves_the_official_alone`（**核心不变式**：另存只写用户根、官方原件字节不变、下载区文件数不变、再存是覆盖它自己）/ `the_committed_copy_shows_up_in_mine_files`（另存出来的那份接着就能被列出来、读得回来） |
+| `runtime::mine` 写回 5 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_lineage`（**核心不变式**：**同一路径、不产生第二份**，血统照抄 —— 摘要不许变成"我自己改过的字节"）/ `saving_back_an_untouched_file_changes_nothing`（没改就逐字节不变）/ `saving_back_a_file_without_lineage_invents_none`（本来没血统就不编一个）/ `saving_back_refuses_when_the_file_is_gone`（被移走了**拒绝且不新建**）/ `saving_back_stays_in_the_mine_dir` |
+| `runtime::mine` 第九层 5 条（文件级：能读 + UTF-8 + TOML 语法） | `a_broken_toml_shows_up_as_unreadable`（坏 TOML → `unreadable`，原因**报得出第几行**）/ `a_non_utf8_file_is_unreadable_too` / `an_escaping_symlink_is_never_read`（**指向用户根外的链接一个字节都不读**（血统也不读）；根内链接照常能用）/ `read_preset_text_blocks_the_broken_one_but_viewing_still_works`（应用 · 编辑两个入口共用这一处闸；**看正文照旧** —— 读它不算"用"）/ `an_external_edit_that_still_parses_is_fine`（**不比 SHA**：外部改过但仍是能读的 TOML = 正常）。既有 `mine_files_lists…` / `the_committed_copy_shows_up_in_mine_files` 搭上 `state` 断言 |
+| `runtime::mine` 第十层 9 条（改名 / 删除） | `renaming_keeps_the_bytes_and_the_lineage`（**核心不变式**：**字节一个不动**、血统原样、旧名字没了新名字在；子目录里的份留在子目录）/ `renaming_refuses_a_name_that_changes_the_kind_or_has_a_path`（换后缀 / 带路径 / `.` / `..` / 空全拒，原文件原地不动）/ `renaming_never_overwrites`（落点有东西就拒，被撞的那份一个字节没动）/ `renaming_to_the_same_name_is_a_no_op` / `deleting_really_deletes`（**真删除**：不在了，而且没有多出旁的东西）/ `deleting_refuses_while_it_is_the_active_one`（正在使用的拒；正在使用的是**别人**照删）/ `deleting_refuses_while_a_draft_is_open`（有草稿的拒；草稿改的是**别人**照删）/ `the_delete_gates_only_apply_to_the_mine_line`（官方线的指针 / 草稿挡不住）/ `deleting_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::state` 跟改名 3 条（第十层） | `the_active_pointer_follows_a_rename`（路径与文件名换新、**指纹原样**；不指着它的、官方线的指针一概不动）/ `the_draft_follows_a_rename`（草稿路径与来源名换新，**正文与打开时指纹原样**；换完再点「改这份」还是接上这一份）/ `repointing_nothing_is_a_no_op`（没有那两本账 = 没跟，不是错误） |
+| `runtime::mine` 第十一层 6 条（另存为一份新的） | `copying_keeps_the_bytes_and_the_lineage`（**核心不变式**：新的一份与原来**逐字节相同**（血统原样带过去）、原文件一个字节不动；子目录里的份复制出来还在子目录）/ `copying_uses_the_same_name_gate`（与改名同一套：换后缀 / 带路径 / `.` / `..` / 空全拒）/ `copying_never_overwrites_and_never_renames_itself`（**不覆盖**（被撞的与源都一个字节没动）、**也不自动改名**（名字和原来一样也拒））/ `copying_touches_no_state_at_all`（**一个状态都不碰**：使用中指针与草稿都还在原来那份上）/ `copying_does_not_require_readable_text`（不读内容：二进制那份照样原样复制）/ `copying_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::import` 第十二层 8 条（通用导入入口） | `staging_says_ready_collision_and_rejected`（能收 / 重名 / 收不了各带原因；**同一批里重名的也认**）/ `importing_copies_the_bytes_and_leaves_the_source_alone`（**核心不变式**：字节复制、**源文件一个字节不动**；进来就是一份正常用户文件）/ `importing_does_not_invent_a_lineage`（没有血统**不编造**）/ `importing_does_not_reject_invalid_toml`（**不校验内容**：坏的照样进得来，第九层再如实说它读不出来）/ `importing_never_overwrites`（不覆盖，被撞的与源都一个字节没动）/ `importing_uses_the_same_name_gate_for_a_new_name`（重名改名走同一套门槛）/ `importing_touches_no_state`（使用中指针与草稿都不动）/ `importing_creates_the_mine_dir_when_missing`（全新安装也能进） |
+| `runtime::mine` 第十三层 3 条（在文件管理器里显示） | `revealing_resolves_the_file_inside_the_user_root`（**核心不变式**：解析出用户根里那个**绝对路径**；**读不出来的也能显示**（文件管理同族）；子目录里的也认）/ `revealing_stays_in_the_mine_dir`（`exports/`、`../` 一概拒 —— 与改名 / 删除同一道闸）/ `revealing_a_missing_file_says_so`（外面删了就说找不到，不去猜） |
+| `runtime::state` 草稿两条线 2 条（第八层） | `a_draft_knows_which_line_it_belongs_to`（**同名不同线 ≠ 同一份**：「接着改」不许接错）/ `an_older_draft_file_is_still_the_official_line`（旧档 = 官方线，**不升 schema**） |
+| `runtime::lineage` 写回 4 条（第八层） | `saving_back_keeps_the_original_lineage` / `saving_an_untouched_copy_changes_nothing` / `saving_back_without_lineage_writes_no_lineage` / `saving_back_keeps_the_line_endings` |
 | `runtime::delivery` 可信度 5 条（第 6 层） | `a_clean_copy_is_current_and_not_reported`（没问题就不报警）/ `tampered_bytes_are_not_recognized`（哪儿都对不上 = 异常，且没有证据可指）/ `a_copy_of_the_archived_version_is_recognized_as_old`（**认得出旧版本**，证据是归档里那条路径）/ `a_version_from_the_archived_catalog_is_recognized_as_old`（归档槽被占了也认得出更早那一版）/ `official_text_refuses_bytes_that_drifted`（**不许拿漂了的字节当原文改**） |
 | `runtime::state` 草稿 4 条 | `draft_roundtrips_and_clears`（存/读/丢，丢是幂等）/ `absent_draft_is_none_not_error` / `corrupted_draft_is_an_error`（坏档不静默）/ `draft_and_active_are_separate_files`（**改一份 ≠ 在用它**：两个状态文件互不干扰） |
 | `runtime::lineage` 7 条（第七层，客户端那份血统） | `the_copy_is_the_source_plus_three_lines`（**副本 = 来源 + 三行**，剪掉逐字节相同）/ `copying_a_copy_replaces_the_old_lineage`（不叠加）/ `crlf_source_keeps_crlf` / `a_source_without_release_time_gets_two_lines`（不知道就别写）/ `lineage_roundtrips_and_absence_is_none`（没有血统 = `None`，不是空壳）/ `a_half_lineage_is_still_a_lineage` / `a_lookalike_key_is_not_matched`（`# based_on_extra` 不许被当成 `based_on`） |
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
-| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「复制」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
+| `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / **第十三层：右键「在 Finder 中显示」只给「我的文件」（官方那份灰掉带原因）、点了如实说失败（浏览器里没有文件管理器、真机上的样子说清楚）、不碰「已应用」** / **第十五层：分类边界（MKP 档不许有 `.svg` 与 `MKPProcess` 切片器配置、切片器档要出现 catalog 交付行且动作是「下载」、台账「仓库 N」跟着档走两档不同数）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
 
 - main 与 origin/main 同步，最新提交见 `git log`；CI 两个 job（web / rust）必须全绿。
 - 未入库的 untracked：无（`workbench/.draft/` 被 ignore 属预期）。
-- **下载要配数据源（本轮起）**：真机上先在同步页填 `Preset Source` 那个地址（官方源 / Gitee / 本地 `python3 -m http.server` 都行），下载与检查更新才能跑；没填时它们拒绝执行并说明去哪儿填——不猜 URL、不假装成功。`MKPSE_PRESET_SOURCE=<url>` 可把默认值编进二进制。
+- **下载要配数据源**：真机上在 **设置 → 高级设置 → 预设数据源** 填地址（官方源 / Gitee / 本地 `python3 -m http.server` 都行），下载与检查更新才能跑；没填时它们拒绝执行并说明去哪儿填——不猜 URL、不假装成功。`MKPSE_PRESET_SOURCE=<url>` 可把默认值编进二进制（设置页的「恢复内置默认」撤掉用户覆盖、回到它）。
 - 前端底账全在 Internal 根（C4 后）：真机调试时 WebView 的 localStorage 只住偏好（置顶/搜索词），清掉不影响任何底账；旧的 `mkp.a40.*` 三格已无人读，残留可删。
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
@@ -332,13 +685,19 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   （**不是** `mkp/`：那是下载区，判据是"每个文件都在目录里登记"，塞 `.tmp` 进去就污染交付那层）。
   保存 = 另存成 `<Documents>/SupportEase/presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
   四条命令：`begin_preset_edit` / `put_preset_draft` / `discard_preset_draft` / `commit_preset_draft`。
-  界面：本地表与云端表的交付行（**与目录一致**的那种）展开详情里有「改这份」→ 编辑器抽屉；
-  关掉抽屉**不丢**（草稿在盘上，回头点「改这份」接着改），丢草稿只有 footer 那颗「放弃这次编辑」。
+  界面：本地表与云端表的交付行（**与目录一致**的那种）**与我自己那份**的展开详情里
+  都有「改这份」→ 编辑器抽屉；关掉抽屉**不丢**（草稿在盘上，回头点「改这份」接着改），
+  丢草稿只有 footer 那颗「放弃这次编辑」。
+  **保存去哪由这份草稿改的是哪一份决定**（第八层）：官方线另存成 `（已修改）`、
+  用户线**写回它自己**（同一路径，不产生第二份）。
 - **用户自己那一份住哪**：`~/Documents/SupportEase/presets-mine/`（**用户根**，与内部根分开 ——
   程序管的数据不放 Documents，因为 iCloud 会把文件驱逐成占位 stub，见 `fsx::paths`）。
-  两条只读命令：`get_user_preset_files`（列，**带血统与"基于哪一版官方"的判定**）/
-  `read_user_preset_text`（读正文，**只认那一格**）；写只有 `commit_preset_draft`（另存）。
-  界面上它在本地表里（「我的文件」那一半，展开详情里有「看正文」→ 抽屉，只读）。
+  两条只读命令：`get_user_preset_files`（列，**带血统、"基于哪一版官方"的判定与
+  第九层的文件级状态 `state` / `stateDetail`**）/ `read_user_preset_text`（读正文，
+  **只认那一格**）；**写用户根只有两条**
+  （都在 `runtime::mine`，官方原件与下载区一概不碰）：`commit_draft`（另存，第 5 层）/
+  `save_back`（写回自己，第 8 层）。
+  界面上它在本地表里（「我的文件」那一半，展开详情里有「看正文」与「改这份」）。
   认不出的类别（`.json`）照实写「认不出是哪一类」，在任何类型档下都列。
 - **血统三行写在文件里**（第七层）：另存出来的那份 = 草稿正文 + 头注释块里三行
   （`# based_on: mkp/presets/A1-standard.toml` / `# based_on_release_time:` / `# based_on_sha256:`），
@@ -353,7 +712,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   两道闸各按自己的线；`applyActivePreset` 的 `origin` 缺省 `official`，老的调用点不用改。
 - **"基于旧版官方"不是坏文件**：`mine::based_on` 拿血统里的 `based_on_sha256` 与目录里
   来源那一份比，得 `current` / `outdated` / `unknown`；`outdated` 的行上多一枚中性徽章
-  （不是警示色），详情里那格写全来源。**合并（把改动挪到新版）是第八层的事，不许偷偷做掉。**
+  （不是警示色），详情里那格写全来源。**"把改动挪到新版"（合并）作者 2026-10-02 已降级为
+  暂不做的高级功能**（见 §3.5 第 8 条之后那一段）；第八层现在是"继续编辑我自己那份"。
 - **归档（`archive/`）住哪、怎么来的**：`<appDataDir>/archive/` + **交付根相对路径**
   （`archive/mkp/presets/A1-fast.toml`）—— 与 `mkp/` 同形，所以"归档里这份是谁"不用猜：
   去掉前缀与目录里哪一份同位，就是谁。只有"换版本"往里放东西，**保留最早一份**（不覆盖、不删）。
@@ -376,7 +736,14 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   `npx vite preview --port 4173 --strictPort` → 开 `http://localhost:4173/` 的「预设」页 ——
   交付行按假后端的**固定演示集合**画四档（`A1-standard.toml` 已下载、`A1-fast.toml` 旧版本、
   `A1mini-standard.toml` 内容异常 —— 最后一份在「全部机型」档下才看得到）；
-  点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
+  用户线三份演示：`我的 A1 涂胶.toml`（基于旧版官方、能应用能改、能改名）、`Process_0.2mm.json`
+  （认不出哪一类）、**`坏了的涂胶.toml`（第九层：画「文件无法读取」、不给应用 / 改这份）**；
+  右键「我的文件」还有**重命名**（只动名字，字节一个不动）与**删除**（二次确认；正在使用的不给删）
+  —— 第十层；以及**另存为一份新的**（字节复制、血统原样带过去、不覆盖、不自动改名）—— 第十一层；
+  工具栏「**导入文件…**」与**把文件拖进窗口**走的是通用导入入口（第十二层，假后端给演示路径 /
+  假路径）：重名的会开「导入：有同名文件」改名格，ZIP 如实说收不了；
+  右键「**在 Finder 中显示**」在浏览器里会如实说"没有文件管理器"（真机上打开并选中，
+  第十三层）；点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
   自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
   **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。
 - **交付根（`presets/dist/`）的布局**：`catalog.json` + `manifest.json` 在根，产品资源一律在 `mkp/…`

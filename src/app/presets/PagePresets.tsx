@@ -36,6 +36,11 @@
  * 搜索框里原来还有一枚「命中 N 条」，和「共 N 项」是同一个数，删掉了：同一个数字写两遍，
  * 哪天算法改了就会有一处忘记跟。
  *
+ * 它右边那格台账：**「仓库」与「我的」两个数跟着当前类型档走**（MKP 档数 MKP 的、
+ * 切片器档数切片器的；图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字
+ * 混进某一档的语境里只会让人对不上（作者 2026-10-02 点名「仓库 9」）。
+ * 「本机」仍是官方副本的总数（老契约 `getLocalFiles` 的读数，id 集合分不出类型）。
+ *
  * # 本地 / 云端是**两张互不相干的表**
  *
  *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ **用户线**
@@ -84,8 +89,17 @@
  *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
  *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
  *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
+ *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
+ *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
+ *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
+ *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
+ *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
+ *   **导入文件…**（工具栏）    `FileImportProvider`（App 层）               真（第十二层：通用导入入口 ——
+ *                            选择器 + 拖拽进窗口；重名开改名那一格。这一页只是第一个消费者）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
- *   **复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接**
+ *   **在 Finder 中显示**（我的文件） `api.revealInFolder()`                  真（第十三层：打开系统文件管理器**并选中**；
+ *                            平台话术在 Windows 上是「在文件资源管理器中显示」。之后复制 / 压缩 / 发人随用户）
+ *   **复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
  *
  * 数据与判定都在 `presetTree.ts`（纯函数）与 `usePresetData.ts`（三态加载 + 两张表），
@@ -98,16 +112,19 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { api, NotImplementedError } from '../../api'
-import type { ArchivedFile, FileRef } from '../../api'
+import { api, errorText, NotImplementedError } from '../../api'
+import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
+/* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 pickFiles 与 revision */
+import { useFileImport } from '../import/useFileImport'
 import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
-/* 下载过程与逐份结局的措辞：与同步页**同一份**（`shared/download.ts`）—— 同一件事一处文案 */
+import { detectPlatform } from '../../hooks/usePlatform'
+/* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
 import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'
@@ -116,9 +133,14 @@ import {
   ARCHIVE_DRAWER,
   ARCHIVE_WHY,
   EDIT_TEXT,
+  MINE_COPY,
   MINE_DRAWER,
+  MINE_EDIT_TEXT,
+  MINE_RENAME,
   DOWNLOAD_WHY,
   MISSING_METHOD,
+  mineCountOfAxis,
+  treeCountOfAxis,
   NO_ASSET_WHY,
   RELEASE_SUSPECT_WHY,
   STATUS_TEXT,
@@ -156,6 +178,13 @@ const PLACEHOLDER: Record<Density, string> = {
   mini: '搜索…',
 }
 
+/*
+ * 「在文件管理器里显示」在这一页的话术（第十三层）：作者写的是「在 Finder 中显示」，
+ * Windows 上那是文件资源管理器 —— 标签按平台换，动作同一条。
+ */
+const REVEAL_LABEL =
+  detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
+
 /**
  * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
  *
@@ -170,7 +199,13 @@ interface Note {
 }
 
 export default function PagePresets({ density, onOpenBbs }: Props) {
-  const data = usePresetData()
+  /*
+   * 通用导入入口（第十二层）停在 App 层；预设页是它的**第一个消费者** ——
+   * 这里拿两样：`pickFiles`（工具栏那颗「导入文件…」）与 `revision`
+   * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
+   */
+  const imp = useFileImport()
+  const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
   const rootRef = useRef<HTMLDivElement>(null)
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
@@ -227,13 +262,32 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
    * （用户可能还在打字，提示条会闪）。
    */
   const [editing, setEditing] = useState<{
+    /** 改的是哪一条线 —— 保存按钮说什么、保存之后那句话说什么都由它决定 */
+    origin: ActiveOrigin
     sourceFileName: string
+    /** 用户线的落点（`null` = 官方线，落点由目录给） */
+    path: string | null
     text: string
     reused: boolean
     draftError: string | null
   } | null>(null)
   /** 上一次真正落到临时文件里的正文。用它判断"值不值得再存一次" */
   const savedTextRef = useRef<string>('')
+
+  /*
+   * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：`null` = 关着。
+   * `kind` 决定说哪一套话、按哪颗按钮、成功怎么说 —— 形状一模一样。
+   * 改名预填现在这个名字；另存为**不预填**（作者：名字由用户明确指定，不做自动起名）。
+   * 名字的门槛（空 / 路径 / 后缀 / 不覆盖）全在后端，这里不重复判断；
+   * 失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
+   */
+  const [naming, setNaming] = useState<{
+    kind: 'rename' | 'copy'
+    row: PresetTableRow
+    name: string
+    busy: boolean
+    error: string | null
+  } | null>(null)
 
   /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
   const [moreOpen, setMoreOpen] = useState(false)
@@ -317,7 +371,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那几件事（复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接）。
+   * 契约里**连签名都没有**的那一件事（复制链接）——
+   * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
+   * 在文件管理器里显示在第十三层，都不在这里。
    *
    * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
@@ -364,7 +420,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           },
           (e: unknown) => {
             setBusyKey(null)
-            setNote({ text: `${verb}失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+            setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
           },
         )
       return
@@ -389,7 +445,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           text:
             e instanceof NotImplementedError
               ? `${notImplementedText('downloadFiles')}（${row.fileName}）`
-              : `下载失败：${e instanceof Error ? e.message : String(e)}`,
+              : `下载失败：${errorText(e)}`,
           bad: true,
         })
       },
@@ -433,7 +489,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         },
         (e: unknown) => {
           setNote({
-            text: `这一批没能发出去（一份都没下）：${e instanceof Error ? e.message : String(e)}`,
+            text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
             bad: true,
           })
         },
@@ -455,7 +511,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         setBody({
           path,
           text: null,
-          error: e instanceof Error ? e.message : String(e),
+          error: errorText(e),
           loading: false,
         }),
     )
@@ -492,19 +548,22 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
-   * **开始改这一份**：让后端把官方正文复制进临时文件，然后把编辑器打开。
+   * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 前置条件全在后端拦（只改 MKP 预设 / 盘上得真有那一份）—— 这里不重复判断。
-   * 同来源的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
+   * 两条线**同一个入口**（与「应用」同一形状）：官方线交文件名、用户线还要交路径
+   * （用户目录里可以自己分文件夹）。前置条件全在后端拦 —— 这里不重复判断。
+   * 同一份的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
     setViewer(null)
-    data.beginEdit(row.fileName).then(
+    data.beginEdit(row.fileName, row.origin === 'mine' ? 'mine' : 'official', row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
         setEditing({
+          origin: draft.origin,
           sourceFileName: draft.sourceFileName,
+          path: draft.path,
           text: draft.text,
           reused: draft.reused,
           draftError: null,
@@ -512,7 +571,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       },
       (e: unknown) => {
         setNote({
-          text: `改不了 ${row.fileName}：${e instanceof Error ? e.message : String(e)}`,
+          text: `改不了 ${row.fileName}：${errorText(e)}`,
           bad: true,
         })
       },
@@ -536,7 +595,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           setEditing((cur) =>
             cur === null
               ? cur
-              : { ...cur, draftError: e instanceof Error ? e.message : String(e) },
+              : { ...cur, draftError: errorText(e) },
           ),
       )
     }, 700)
@@ -551,27 +610,128 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         setNote({ text: '已放弃这次编辑 —— 官方原件从头到尾没有被改过', bad: false })
       },
       (e: unknown) =>
-        setNote({ text: `放弃不了：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+        setNote({ text: `放弃不了：${errorText(e)}`, bad: true }),
     )
   }
 
-  /** 保存为用户文件：另存进 `presets-mine/`，然后关掉编辑器（本地表跟着多出那一份） */
+  /**
+   * 保存：官方线**另存**进 `presets-mine/`（本地表跟着多出那一份）；
+   * 用户线**写回它自己**（第八层：同一个文件，不会多出一份）。
+   */
   const commitEdit = () => {
+    const mine = editing?.origin === 'mine'
     data.commitDraft().then(
       (done) => {
         setEditing(null)
         setNote({
-          text: done.replaced
-            ? EDIT_TEXT.savedAgain(done.fileName)
-            : EDIT_TEXT.saved(done.fileName, done.path),
+          text: mine
+            ? MINE_EDIT_TEXT.savedBack(done.fileName, done.path)
+            : done.replaced
+              ? EDIT_TEXT.savedAgain(done.fileName)
+              : EDIT_TEXT.saved(done.fileName, done.path),
           bad: false,
         })
       },
       (e: unknown) =>
         setNote({
-          text: `没存上：${e instanceof Error ? e.message : String(e)}`,
+          text: `没存上：${errorText(e)}`,
           bad: true,
         }),
+    )
+  }
+
+  /**
+   * **重命名我自己那一份**（第十层）：只改名字，**字节一个不动**。
+   *
+   * 菜单里点进来先开这一口抽屉（初值 = 现在的文件名），确定才交给后端 ——
+   * 名字的门槛与"使用中指针、这一份的草稿跟着改名"都在那里（页面不重复判断）。
+   */
+  const openRename = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    setEditing(null)
+    setNaming({ kind: 'rename', row, name: row.fileName, busy: false, error: null })
+  }
+
+  /**
+   * **另存为一份新的**（第十一层）：我的文件 → 我的文件，按字节复制。
+   *
+   * 名字**不预填** —— 作者定死：用户明确指定目标名字，目标存在就拒绝、让他自己换；
+   * 不做"复制后自动改名"这种智能行为。别的规矩（血统原样带过去 / 不覆盖 / 不碰状态）
+   * 都在后端。
+   */
+  const openCopyAs = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    setEditing(null)
+    setNaming({ kind: 'copy', row, name: '', busy: false, error: null })
+  }
+
+  /** 起名字抽屉那一颗按钮（改名 / 另存为共用这一条提交路） */
+  const submitNaming = () => {
+    if (naming === null || naming.busy) return
+    const name = naming.name.trim()
+    if (name === '') {
+      setNaming({ ...naming, error: '新名字不能是空的' })
+      return
+    }
+    setNaming({ ...naming, busy: true, error: null })
+    const ask =
+      naming.kind === 'rename'
+        ? data.rename(naming.row.path, name)
+        : data.copyAsNew(naming.row.path, name)
+    ask.then(
+      (done) => {
+        setNaming(null)
+        setNote({
+          text:
+            naming.kind === 'rename'
+              ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
+              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+          bad: false,
+        })
+      },
+      (e: unknown) =>
+        setNaming((cur) =>
+          cur === null
+            ? cur
+            : { ...cur, busy: false, error: errorText(e) },
+        ),
+    )
+  }
+
+  /**
+   * **删除我自己那一份**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
+   *
+   * 二次确认长在菜单里（`danger` + `confirm`，问句带着这一行的名字）；这里只管执行。
+   * 两道闸在后端：**正在使用的不许删、还有没保存的草稿的不许删** —— 原话进提示条。
+   * 菜单那一项对「正在使用」的行已经灰掉带原因，后端仍会再拦一次（两道都在）。
+   */
+  const runRemove = (row: PresetTableRow) => {
+    setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
+    data.remove(row.path).then(
+      () =>
+        setNote({
+          text: `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
+          bad: false,
+        }),
+      (e: unknown) =>
+        setNote({ text: `没删成：${errorText(e)}`, bad: true }),
+    )
+  }
+
+  /**
+   * **在文件管理器里显示**（第十三层 · 文件外部管理）：打开 Finder / 资源管理器**并选中**
+   * 这份用户文件 —— 之后复制 / 压缩 / 发人 / 备份都随用户，不经过 SupportEase 的业务逻辑。
+   *
+   * **成功没有提示条**：文件管理器窗口本身就是回执；失败照实说（浏览器里没有文件管理器、
+   * 文件被外面删了）。
+   */
+  const runReveal = (row: PresetTableRow) => {
+    data.reveal(row.path).then(
+      () => undefined,
+      (e: unknown) =>
+        setNote({ text: `没打开：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -614,7 +774,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         },
         (e: unknown) => {
           setBusyKey(null)
-          setNote({ text: `复制失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+          setNote({ text: `复制失败：${errorText(e)}`, bad: true })
         },
       )
       return
@@ -631,7 +791,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         () => setBusyKey(null),
         (e: unknown) => {
           setBusyKey(null)
-          setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+          setNote({ text: `应用失败：${errorText(e)}`, bad: true })
         },
       )
       return
@@ -653,7 +813,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       () => setBusyKey(null),
       (e: unknown) => {
         setBusyKey(null)
-        setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+        setNote({ text: `应用失败：${errorText(e)}`, bad: true })
       },
     )
   }
@@ -686,6 +846,52 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     onSelect: () => onOpenBbs?.(row.fileName),
   })
 
+  /**
+   * 「重命名」为什么不能点（第十层）。只有**我的文件**能改 ——
+   * 官方线那两份各有各的原因，都要说出来（灰一个项不说为什么，用户只会以为坏了）。
+   */
+  const renameWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return row.origin === 'release'
+      ? '官方交付那份不能改名 —— 下载 / 应用 / 读正文都认目录登记的文件名；要改内容用「改这份」另存出你自己的一份'
+      : '官方文件不能改名，复制一份再改'
+  }
+
+  /**
+   * 「另存为一份新的」为什么不能点（第十一层）：只有**我的文件**之间能复制 ——
+   * 官方那份的副本要经过「改这份」→ 保存（那条链才把副本落成你自己的一份）。
+   */
+  const copyWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return '官方那份的副本走「改这份」→ 保存（会另存成你自己的一份）；这一层只在「我的文件」之间复制'
+  }
+
+  /**
+   * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
+   * 官方那两份住在程序自己管的下载区（本地表），或者根本还没下载（仓库表）。
+   */
+  const revealWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return row.scope === 'local'
+      ? '官方那份住程序自己管的下载区 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
+      : '官方原件还没下载到本机 —— 没有能显示的地方'
+  }
+
+  /**
+   * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
+   * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
+   */
+  const removeWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin !== 'mine') {
+      return row.origin === 'release'
+        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新 / 重新下载」修它'
+        : '官方文件不在这里删 —— 能删的只有你自己那份（用户根里的）'
+    }
+    return row.scope === 'local' && row.live
+      ? '正在使用的那一份不能直接删 —— 先换成别的配置（或撤销使用），再删它'
+      : undefined
+  }
+
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
@@ -709,10 +915,15 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       ]
     }
 
-    const official = row.origin === 'official'
-
-    /* 临时编辑的入口：只有"与目录一致"的交付行有（它才有正文可改，且内容不存疑） */
-    const canEdit = row.origin === 'release' && row.releaseState === 'ok'
+    /*
+     * 临时编辑的入口（两条线）：
+     * 交付行只有"与目录一致"的那一份有（它才有正文可改，且内容不存疑）；
+     * 我自己那份：认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
+     * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
+     */
+    const canEdit =
+      (row.origin === 'release' && row.kind === 'mkp_preset' && row.releaseState === 'ok') ||
+      (row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable')
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
@@ -727,21 +938,28 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         : []),
       {
         id: 'copy',
-        label: '复制',
-        disabled: suspect ? RELEASE_SUSPECT_WHY : undefined,
-        onSelect: () => sayNoContract(MISSING_METHOD.copy, row),
+        label: '另存为一份新的',
+        /*
+         * 第十一层：**我的文件 → 我的文件**（按字节复制、血统原样带过去）。
+         * 官方那两份的副本走「改这份」→ 保存；内容存疑的字节不许换个名字继续活着
+         * （第三圈第 6 层）—— 那一句优先。
+         */
+        disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
+        onSelect: () => openCopyAs(row),
       },
       {
         id: 'rename',
         label: '重命名',
-        /* 官方副本**只禁这一项**。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了 */
-        disabled: official ? '官方文件不能改名，复制一份再改' : undefined,
-        onSelect: () => sayNoContract(MISSING_METHOD.rename, row),
+        /* 第十层：只有「我的文件」能改名（只动名字、字节一个不动） */
+        disabled: renameWhyNot(row),
+        onSelect: () => openRename(row),
       },
       {
         id: 'reveal',
-        label: '在文件夹中显示',
-        onSelect: () => sayNoContract(MISSING_METHOD.reveal, row),
+        label: REVEAL_LABEL,
+        /* 第十三层：只有「我的文件」能这样打开（打开的是系统文件管理器，不是我们的界面） */
+        disabled: revealWhyNot(row),
+        onSelect: () => runReveal(row),
       },
       { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
       bbsEntry(row),
@@ -750,17 +968,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         id: 'remove',
         label: '删除',
         danger: true,
-        /*
-         * 官方文件的删除**放行**：它删了能重新下回来，不是不可逆。
-         * 两种话术必须不一样 —— 用户自己的文件删了没有任何地方能找回来。
-         */
+        /* 第十层：只有「我的文件」能删；正在使用的那份连菜单都不给点（后端还会再拦一次） */
+        disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
-          detail: official
-            ? '删除后可以从云端重新下载。'
-            : '这是你自己的文件，云端没有备份，删了无法恢复。',
+          detail:
+            '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。',
         },
-        onSelect: () => sayNoContract(MISSING_METHOD.remove, row),
+        onSelect: () => runRemove(row),
       },
     ]
   }
@@ -857,6 +1072,19 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
               </button>
             )}
           </div>
+
+          {/*
+           * 「导入文件…」是**通用导入入口**（第十二层，住在 App 层）的第一个触发点：
+           * 这里只拿它的 `pickFiles`；拖拽那一半在任何页面都生效（把文件拖进窗口就行）。
+           */}
+          <button
+            type="button"
+            className={s.importBtn}
+            title="把外部文件导入「我的文件」（现在收 .toml 预设；也可以直接把文件拖进窗口）"
+            onClick={imp.pickFiles}
+          >
+            导入文件…
+          </button>
 
           <span className={s.tbBreak} aria-hidden />
 
@@ -1006,18 +1234,26 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项` +
                 /* 小窗里台账整条隐掉了，数并进这句，免得连同它的说明一起消失 */
                 (density === 'mini'
-                  ? `。仓库 ${data.tree.totalFiles} 个官方文件（已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${data.mine.length} 个。${DOWNLOAD_WHY}`
+                  ? `。仓库里这一档类型一共 ${treeCountOfAxis(data.tree, page.kind)} 个官方文件（全机型，已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${mineCountOfAxis(data.mine, page.kind)} 个。${DOWNLOAD_WHY}`
                   : '')
               }
             >
               共 {table.rows.length} 项
             </span>
+            {/*
+             * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
+             * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
+             * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
+             * 图标 / 模型不归这一页，哪个数里都不含它们。
+             * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
+             * 真机上还没接），id 集合分不出类型，先如实写全量。
+             */}
             <span
               className={s.ledger}
-              title={`仓库里一共几个官方文件（已剔掉仅归档的）· 本机已有几个官方副本（getLocalFiles，演示集合）· 你自己的文件几个（getUserPresetFiles，扫 presets-mine；云端没有它们）。${DOWNLOAD_WHY}`}
+              title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
             >
-              仓库 {data.tree.totalFiles} · 本机 {data.localIds.length} + 我的{' '}
-              {data.mine.length}
+              仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
+              {mineCountOfAxis(data.mine, page.kind)}
             </span>
           </span>
         </div>
@@ -1217,22 +1453,30 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
           {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
-           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存为用户文件」。
+           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存」。
+           *
+           * 两条线共用这一个抽屉，只有两句话不同（保存成什么、保存到哪）：
+           * 官方线「保存为用户文件」= 另存一份新的；用户线「保存回我这份」= 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
            * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
            */}
           <Drawer
             open={editing !== null}
-            title={EDIT_TEXT.title}
-            subtitle={editing === null ? undefined : editing.sourceFileName}
+            title={editing?.origin === 'mine' ? MINE_EDIT_TEXT.title : EDIT_TEXT.title}
+            subtitle={
+              editing === null
+                ? undefined
+                : /* 用户线说落点（他自己可能分了文件夹）：官方线只说文件名 */
+                  (editing.path ?? editing.sourceFileName)
+            }
             footer={
               <>
                 <button type="button" className={s.editGhost} onClick={discardEdit}>
                   {EDIT_TEXT.discard}
                 </button>
                 <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                  {EDIT_TEXT.commit}
+                  {editing?.origin === 'mine' ? MINE_EDIT_TEXT.commit : EDIT_TEXT.commit}
                 </button>
               </>
             }
@@ -1240,7 +1484,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           >
             {editing !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>{EDIT_TEXT.note}</p>
+                <p className={s.editNote}>
+                  {editing.origin === 'mine' ? MINE_EDIT_TEXT.note : EDIT_TEXT.note}
+                </p>
                 {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
                 <textarea
                   className={s.editArea}
@@ -1255,6 +1501,70 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                   <p className={s.editErr}>
                     {EDIT_TEXT.draftFailed}
                     {editing.draftError}
+                  </p>
+                )}
+              </div>
+            )}
+          </Drawer>
+
+          {/*
+           * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：
+           * 两个动作都只传一个名字，字节与状态全在后端管 —— 这里没有"保存内容"这回事。
+           *
+           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖 / 不自动改名），
+           * 这里只把用户输入的字带过去；失败原话**留在抽屉里**（别把他刚打的字盖掉）。
+           * 改名预填现在这个名字（改名后使用中指针与草稿在后端跟着走）；
+           * 另存为**不预填**（名字由用户明确指定）。
+           */}
+          <Drawer
+            open={naming !== null}
+            title={naming?.kind === 'copy' ? MINE_COPY.title : MINE_RENAME.title}
+            subtitle={naming?.row.path}
+            footer={
+              <>
+                <button type="button" className={s.editGhost} onClick={() => setNaming(null)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={s.editPrimary}
+                  disabled={naming?.busy === true}
+                  onClick={submitNaming}
+                >
+                  {naming?.kind === 'copy' ? MINE_COPY.commit : MINE_RENAME.commit}
+                </button>
+              </>
+            }
+            onClose={() => setNaming(null)}
+          >
+            {naming !== null && (
+              <div className={s.edit}>
+                <p className={s.editNote}>
+                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
+                </p>
+                {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
+                  <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
+                )}
+                <input
+                  className={s.renameInput}
+                  value={naming.name}
+                  spellCheck={false}
+                  aria-label="新的文件名"
+                  placeholder={naming.kind === 'copy' ? '新文件名' : undefined}
+                  autoFocus
+                  onChange={(e) =>
+                    setNaming((cur) =>
+                      cur === null ? cur : { ...cur, name: e.target.value, error: null },
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') submitNaming()
+                  }}
+                />
+                {naming.error !== null && (
+                  <p className={s.editErr}>
+                    {naming.kind === 'copy' ? '没另存成：' : '没改成：'}
+                    {naming.error}
                   </p>
                 )}
               </div>

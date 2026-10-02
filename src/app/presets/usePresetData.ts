@@ -55,7 +55,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../../api'
+import { api, errorText } from '../../api'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -65,6 +65,7 @@ import type {
   DownloadTick,
   Machine,
   PresetDraft,
+  UserFileIdentity,
 } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
@@ -73,6 +74,7 @@ import {
   applySlicerFilters,
   archivedIds,
   buildPresetTree,
+  catalogKindToFileKind,
   cloudRows,
   localRows,
   machineNode,
@@ -134,10 +136,11 @@ export interface PresetData {
    */
   mine: UserPresetFile[]
   /**
-   * 正在使用的**唯一那一条**：从新世界底账（`run/active-preset.json`）读出来的，
+   * 正在使用的**唯一那一条**：从底账（`run/active-preset.json`）读出来的，
    * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
    *
-   * 官方交付行应用后写着的都是它 —— 假后端的 `getAppliedPreset()` 界面不再读。
+   * 官方交付行应用后写着的都是它 —— 这是「使用中」的唯一来源
+   * （旧契约 `getAppliedPreset` 与假后端那份演示值 2026-10-02 清扫时已删）。
    */
   active: ActivePreset | null
   /**
@@ -196,16 +199,45 @@ export interface PresetData {
   ) => Promise<DownloadOutcome[]>
 
   /**
-   * **开始改一份**官方交付预设：把正文复制进临时文件（官方原件一动不动）。
+   * **开始改一份**预设：把正文复制进临时文件（原件一动不动）。
+   * 两条线一个入口：官方线交文件名，用户线还要交路径（用户目录里可以自己分文件夹）。
    * `reused` = 接着上次那半截改。
    */
-  beginEdit: (fileName: string) => Promise<PresetDraft>
+  beginEdit: (
+    fileName: string,
+    origin?: ActiveOrigin,
+    path?: string,
+  ) => Promise<PresetDraft>
   /** 把改动写进临时文件（界面边改边存 —— 改到一半关掉也还在） */
   putDraft: (text: string) => Promise<void>
-  /** 放弃这次编辑（丢草稿；官方原件与下载区全程没被碰过，所以它天生安全） */
+  /** 放弃这次编辑（丢草稿；原件与下载区全程没被碰过，所以它天生安全） */
   discardDraft: () => Promise<void>
-  /** 另存成用户自己的文件，然后**重读用户线**（本地表跟着多出那一份） */
+  /**
+   * 存进用户根：官方线**另存**成一份新的、用户线**写回它自己**（第八层）。
+   * 存完**重读用户线** —— 官方线那一份要跟着出现在本地表里，用户线要跟着变时刻与大小。
+   */
   commitDraft: () => Promise<CommittedDraft>
+  /**
+   * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读用户线**
+   * （列表立刻以磁盘为准），顺手重读使用中指针（它正指着这一份时会跟着改）。
+   */
+  rename: (path: string, newName: string) => Promise<UserFileIdentity>
+  /**
+   * **另存为一份新的**（第十一层）：把我自己那一份按字节复制成同一格里另一份新的用户文件。
+   * 回来**重读用户线**（新文件要出现在表里）；**不重读使用中指针** —— 这一层不碰它
+   * （原文件一个字节不动，复制出来的那份也不会自称"使用中"）。
+   */
+  copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
+  /**
+   * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
+   * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
+   */
+  remove: (path: string) => Promise<void>
+  /**
+   * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
+   * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
+   */
+  reveal: (path: string) => Promise<void>
 }
 
   /**
@@ -217,7 +249,7 @@ export interface ReleaseState {
   version: string | null
   /** 刻意恒 null：目录没有时间字段，没有可信时间源不编一个 */
   at: string | null
-  /** 目录里登记的交付预设（MKP 的全量） */
+  /** 目录里登记的交付文件（**预设页认的那两类**：MKP + 切片器；源头已按 kind 分好类别） */
   presets: ReleasePresetSource[]
   /** 下载区（`mkp/`）里已有、**且与目录登记一致**的（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
@@ -246,9 +278,56 @@ const EMPTY_RELEASE: ReleaseState = {
   localUids: [],
 }
 
-export function usePresetData(): PresetData {
+/**
+ * 「本次运行已经检查过 Bootstrap 了吗」——**模块作用域**，所以它跟着这次 App 运行，
+ * 不跟着这一页挂载。
+ *
+ * 这就是第十七刀那条判据的实现：**进入「预设」后台检查一次，本次运行只一次**。
+ * 用户从 MKP 配置 → 切片器配置 → 搜索 来回切，页面反复挂载卸载，但这条只会走一次；
+ * 关掉 App 再打开（页面重载）才重置。用会话态（`useSessionState`）不行 —— 那个是
+ * 「切 tab 不失忆」，语义是"这一屏看到哪"，不是"这次运行做没做过一件事"。
+ */
+let checkedBootstrapThisRun = false
+
+/**
+ * 进入「预设」后的**后台检查**一次远端目录（第十七刀）。
+ *
+ * 判据（作者 2026-10-02）：
+ *
+ *   - **只检查目录指纹**（`checkRemoteUpdate`，比的是 revision），不碰任何预设文件；
+ *   - 有变化才 `applyRemoteUpdate` —— 换的是**本地那一份 catalog**（旧目录自动归档），
+ *     **绝不自动下载预设文件**（用户点了"下载"才下）；
+ *   - 本次运行只做一次（`checkedBootstrapThisRun`）；
+ *   - **失败静默**：没内置源 / 没联网 / 远端还没部署都是开发期的正常状态，
+ *     不许因此让预设页报错或弹提示（启动零网络那条纪律的延伸：这里只是"路过时问一声"）。
+ *
+ * 返回是否**真的更新了**（调用方据此刷新目录；没变化返回 false）。
+ */
+async function checkBootstrapOnce(): Promise<boolean> {
+  if (checkedBootstrapThisRun) return false
+  checkedBootstrapThisRun = true
+  try {
+    const check = await api.checkRemoteUpdate()
+    if (check.upToDate) return false
+    await api.applyRemoteUpdate()
+    return true
+  } catch {
+    /* 没配源 / 离线 / 远端没部署：都不该让预设页出问题 —— 静默略过 */
+    return false
+  }
+}
+
+/**
+ * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
+ * 导入落进 `presets-mine/` 之后，「我的文件」那张表要立刻以磁盘为准，不靠切页刷新。
+ * 首页（`PageHome`）不给这个参数：它不看用户线那张表。
+ */
+export function usePresetData(importRevision = 0): PresetData {
   const [machines, setMachines] = useState<Machine[]>([])
-  const [tree, setTree] = useState<PresetTree>({ machines: [], totalFiles: 0 })
+  const [tree, setTree] = useState<PresetTree>({
+    machines: [],
+    fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 },
+  })
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
@@ -298,15 +377,28 @@ export function usePresetData(): PresetData {
       if (!driftedSet.has(fileName)) return 'missing'
       return verdicts.get(fileName) === 'old' ? 'old' : 'tampered'
     }
-    const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
-      uid: `${f.machineId}/${f.versionId}`,
-      machineId: f.machineId,
-      versionId: f.versionId,
-      fileName: f.fileName,
-      size: f.size,
-      releaseVersion: null,
-      state: stateOf(f.fileName),
-    }))
+    /*
+     * **分类判据是 catalog 的 `kind`**，不是扩展名、也不是"目录里只有预设"那个旧假设：
+     * 预设页认的两类（MKP / 切片器）留下、带上类别；图标 / 模型等资源**不进这一页**
+     * —— 它们由自己的资源体系消费。2026-10-02 作者截图里 `a1.svg` 和
+     * `MKPProcess ….json` 混在「MKP 配置」表里，就是这一层没看 `kind` 造成的。
+     */
+    const listed: ReleasePresetSource[] = catalog.files.flatMap((f) => {
+      const kind = catalogKindToFileKind(f.kind)
+      if (kind === null) return []
+      return [
+        {
+          uid: `${f.machineId}/${f.versionId}`,
+          machineId: f.machineId,
+          versionId: f.versionId,
+          fileName: f.fileName,
+          kind,
+          size: f.size,
+          releaseVersion: null,
+          state: stateOf(f.fileName),
+        },
+      ]
+    })
     /* 判据用 fileName：盘就是底账，盘上认的文件名 = 目录登记的文件名（不是 id、不是路径） */
     const localList = listed.filter((p) => p.state === 'ok')
     const staleList = listed.filter((p) => p.state === 'old' || p.state === 'tampered')
@@ -382,10 +474,25 @@ export function usePresetData(): PresetData {
        *
        * 它是两条独立的读（catalog 清单 + 下载区），失败时 release 落成空态、页面照常渲染；
        * 这一页要先看的「本机那份注册表」答出来的表，没有理由让整页等它。
+       *
+       * **先画本地 catalog（下面这次 readRelease），再在后台检查 Bootstrap**（第十七刀）：
+       * 顺序不能反 —— 用户一进预设页看到的必须是本地那份（离线也看得到），
+       * 后台检查只是"路过时问一声远端有没有新版"，不问到就把页面挂住。
        */
       void readRelease()
-        .then((next) => {
-          if (alive) setRelease(next)
+        .then(async (next) => {
+          if (!alive) return
+          setRelease(next)
+          /*
+           * 后台检查一次（本次运行只一次，见 `checkBootstrapOnce`）。
+           * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
+           * 的分档要跟着以新目录为准）。它不返回脏数据：换的是盘上的 catalog，读的是同一套契约。
+           */
+          const changed = await checkBootstrapOnce()
+          if (changed && alive) {
+            const refreshed = await readRelease().catch(() => null)
+            if (refreshed !== null && alive) setRelease(refreshed)
+          }
         })
         .catch(() => {
           /* 官方交付那一路读不到（目录/下载区任一失败）就落空态，不挡首屏 —— 与三态纪律一致：
@@ -395,13 +502,13 @@ export function usePresetData(): PresetData {
 
     load().catch((e: unknown) => {
       if (!alive) return
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorText(e))
     })
 
     return () => {
       alive = false
     }
-  }, [readRelease])
+  }, [readRelease, importRevision])
 
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
@@ -453,7 +560,11 @@ export function usePresetData(): PresetData {
    * 全是薄薄一层转发 —— 判定不在前端（哪一份能改、草稿在哪、存成什么名字，都由后端答）。
    * 只有**另存之后**多做一件事：重读用户线（本地表里那一半「我的文件」要跟着变）。
    */
-  const beginEdit = useCallback((fileName: string) => api.beginPresetEdit(fileName), [])
+  const beginEdit = useCallback(
+    (fileName: string, origin: ActiveOrigin = 'official', path?: string) =>
+      api.beginPresetEdit(fileName, origin, path),
+    [],
+  )
 
   const putDraft = useCallback((text: string) => api.putPresetDraft(text), [])
 
@@ -463,6 +574,35 @@ export function usePresetData(): PresetData {
     const done = await api.commitPresetDraft()
     setMine(await api.getUserPresetFiles())
     return done
+  }, [])
+
+  /*
+   * 第十层：两条用户文件管理。同一条路子 —— 写底账 → **重读底账**：
+   * 改名之后使用中指针可能跟着改了名，所以顺手重读一遍（界面显示的永远是底账答的）；
+   * 删除不碰使用中指针（正在使用的不给删），只重读用户线。
+   */
+  const rename = useCallback(async (path: string, newName: string) => {
+    const done = await api.renameUserPreset(path, newName)
+    setMine(await api.getUserPresetFiles())
+    setActive(await api.getActivePreset().catch(() => null))
+    return done
+  }, [])
+
+  const remove = useCallback(async (path: string) => {
+    await api.deleteUserPreset(path)
+    setMine(await api.getUserPresetFiles())
+  }, [])
+
+  /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
+  const copyAsNew = useCallback(async (path: string, newName: string) => {
+    const done = await api.copyUserPreset(path, newName)
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
+
+  /* 在文件管理器里显示（第十三层）：纯外部动作 —— 不重读、不改任何状态 */
+  const reveal = useCallback(async (path: string) => {
+    await api.revealInFolder(path)
   }, [])
 
   /*
@@ -505,6 +645,10 @@ export function usePresetData(): PresetData {
     putDraft,
     discardDraft,
     commitDraft,
+    rename,
+    remove,
+    copyAsNew,
+    reveal,
   }
 }
 

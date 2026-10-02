@@ -272,6 +272,26 @@
   white-space: nowrap;
 }
 
+/*
+ * 「文件无法读取」那一枚（第九层：我那份读不出来 —— 编码 / TOML 语法 / 指向用户根之外）。
+ *
+ * 与上一枚的中性色分开：这一枚说的是**这份现在用不了**。琥珀（--warn）不是 --danger：
+ * 文件是用户自己的，程序只是读不出来（读得出来仍照常能用）—— 没有动它，也没有不可逆的事。
+ */
+.unreadable {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  background: var(--warn-soft);
+  font-size: var(--fs-label);
+  color: var(--warn);
+  white-space: nowrap;
+}
+
 .path {
   display: block;
   margin-top: 2px;

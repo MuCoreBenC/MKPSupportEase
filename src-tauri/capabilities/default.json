@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "核心权限 + 窗口拖动/改大小/动作。前端不碰文件系统 —— 读写都经过 src-tauri 的命令，fsx::paths::resolve 把路径夹在两个数据根内，所以不需要 fs:default 也不需要逐条 fs 权限。core:window:allow-start-dragging 是前端手动调 startDragging() 的前提（不再用 data-tauri-drag-region —— Tauri 的 drag.js 在 Windows 上会吞掉 mouseup 导致双击最大化极难触发，所以拖动由 useTitlebarDrag 自己接管）。core:window:allow-start-resize-dragging 是内侧 resize 命中区（ResizeEdges）调 startResizeDragging() 的前提 —— decorations: false 之后系统的 resize 边框在窗口之外，不补内侧就抓不到。core:default 包含的 core:window:default 全是只读查询（is-*、get-*），不含 minimize / maximize / close 等动作命令。macOS 上三颗键由系统交通灯接管不经 IPC，所以动作权限只在 Windows 上有实际意义。",
+  "description": "核心权限 + 窗口拖动/改大小/动作 + 文件选择器。前端不碰文件系统 —— 读写都经过 src-tauri 的命令，fsx::paths::resolve 把路径夹在两个数据根内，所以不需要 fs:default 也不需要逐条 fs 权限。core:window:allow-start-dragging 是前端手动调 startDragging() 的前提（不再用 data-tauri-drag-region —— Tauri 的 drag.js 在 Windows 上会吞掉 mouseup 导致双击最大化极难触发，所以拖动由 useTitlebarDrag 自己接管）。core:window:allow-start-resize-dragging 是内侧 resize 命中区（ResizeEdges）调 startResizeDragging() 的前提 —— decorations: false 之后系统的 resize 边框在窗口之外，不补内侧就抓不到。core:default 包含的 core:window:default 全是只读查询（is-*、get-*），不含 minimize / maximize / close 等动作命令。macOS 上三颗键由系统交通灯接管不经 IPC，所以动作权限只在 Windows 上有实际意义。dialog:allow-open 是第十二层「通用导入入口」的文件选择器那一半 —— 只开「选文件」（allow-open），不开保存框 / 消息框；选回来的路径交给 stage_import / commit_import，源文件只读。",
   "windows": [
     "main"
   ],
@@ -13,6 +13,7 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "dialog:allow-open"
   ]
 }

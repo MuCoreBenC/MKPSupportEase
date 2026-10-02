@@ -81,6 +81,7 @@ import type {
   Machine,
   MachineVersion,
   MenuEntry,
+  MineState,
   PresetFileInfo,
   UserPresetFile,
   VersionFiles,
@@ -387,9 +388,70 @@ export const EDIT_TEXT = {
   savedAgain: (name: string) => `已保存：${name} —— 盖掉了上一次那份（你改的一直是同一份）`,
 } as const
 
-/** 「改这份」那颗按钮的说明 */
+/** 「改这份」那颗按钮的说明（官方线） */
 export const EDIT_WHY =
   '修改：把这一份的正文复制进临时文件再改 —— 官方原件不会被改动（只有云端换版本能替换它）'
+
+/**
+ * **用户线**那份的「改这份」（第八层）：同一个编辑器抽屉、**同一条临时文件链**，
+ * 只有两句话不一样 —— 保存的不是"另存成一份新的"，而是**写回你自己那一份**：
+ *
+ * ```text
+ * 我的 A1-standard（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己
+ * ```
+ *
+ * 于是不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
+ * 它基于哪一版官方写在文件里（那三行），保存时**原样保留** —— 改的是参数，不是出处。
+ */
+export const MINE_EDIT_TEXT = {
+  cell: '修改',
+  open: '改这份',
+  title: '改我自己这份',
+  note:
+    '改的是**临时文件**：保存时才写回你自己那一份（**同一个文件**，不会多出一份）。' +
+    '它基于哪一版官方写在文件里 —— 保存时原样保留，你改的是参数、不是出处。',
+  commit: '保存回我这份',
+  /** 写回之后那句（`path` 说清写回哪去了） */
+  savedBack: (name: string, path: string) => `已保存回我自己那一份：${name}（${path}）`,
+} as const
+
+/** 用户线「改这份」那颗按钮的说明 */
+export const MINE_EDIT_WHY =
+  '修改：把我自己这份的正文复制进临时文件再改 —— 保存时写回同一个文件（不会多出一份）'
+
+/**
+ * **第十层**：重命名那一口抽屉的话（删除的二次确认在菜单里，话术在菜单项上）。
+ *
+ * 只改名、不动字节：内容 / 那三行血统 / TOML 都不重写 —— 改完还是同一份预设。
+ * 正在使用的那一份也能改名（使用中指针跟着走，不断）；有草稿的那一份也能改名
+ * （草稿跟着走，「接着上次改」不接丢）。删除另说 —— 那两道闸在菜单与后端。
+ */
+export const MINE_RENAME = {
+  title: '重命名',
+  note:
+    '只改名字：文件内容、那三行血统、TOML 都**不动** —— 改完还是同一份预设，只是换了个叫法。' +
+    '后缀要保持原样（.toml 还是 .toml）；这里只改名字，不搬文件夹。',
+  liveNote: '它正在使用 —— 「已应用」那条底账会跟着改名，不会断。',
+  commit: '改名',
+} as const
+
+/**
+ * **第十一层**：另存为一份新的那一口抽屉的话。
+ *
+ * 我的文件 → 我的文件（与第八层"官方 → 我的文件"那条另存分开）：**按字节复制**、
+ * 那三行 `# based_on` 血统**原样带过去**（不重算 —— 来源已经是用户文件）；原文件一个字节不动。
+ * 名字由用户自己起 —— **不预填、不自动改名**（作者：目标存在就拒绝，让他自己换名字）；
+ * **一个状态都不碰**：不改「已应用」、草稿也留在原来那份上。
+ */
+export const MINE_COPY = {
+  title: '另存为一份新的',
+  note:
+    '把我这份**按字节**复制成同一格里另一份新的用户文件 —— 原文件一个字节不动，' +
+    '新的那份从诞生起就是独立的一份（之后能自己编辑 / 改名 / 删除 / 应用）。' +
+    '那三行 `# based_on` 血统原样带过去（来源已经是用户文件，不重算）。' +
+    '名字由你来起：不能和原来一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
+  commit: '另存为',
+} as const
 
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
@@ -434,7 +496,7 @@ export const MINE_DRAWER = {
   note:
     '这是**你自己的文件**（住 ~/Documents/SupportEase/presets-mine）：云端没有它，' +
     '所以没有 SHA、不属于任何版本、也不参与套餐。官方换版本不会动它；' +
-    '改它也永远不回写官方原件。这一层只能看 —— 改它要等"临时编辑 → 保存"那一层。',
+    '改它（同一格里的「改这份」）写回的是它自己，永远不回写官方原件。',
 } as const
 
 /** 「看正文」那颗按钮的说明（展开详情里的 title） */
@@ -510,6 +572,25 @@ export const MINE_NOT_PRESET_WHY =
   '这一份认不出来是 MKP 预设（切片器那两类都是 .json，光看扩展名分不出是 bbs 还是 orca）—— ' +
   '能被使用的只有 TOML 预设'
 
+/**
+ * **第九层**：读不出来的那一份（行上那一枚角标）。
+ *
+ * 与官方线的「内容存疑」是**两回事**：官方线要 SHA（与目录登记逐字节一致才可信），
+ * 用户线只看**文件级**（能读 + UTF-8 + TOML 语法）—— 外部改过一轮但仍是能读的 TOML
+ * 照常能用，**不因 SHA 报警**。"是不是一份合法 MKP Preset"（结构 / 参数）不在客户端判：
+ * 那要真正的 Preset 解析能力，留给"应用 / 编辑"这类真正要解析的入口。
+ */
+export const MINE_UNREADABLE_TEXT = '文件无法读取'
+
+/** 那一枚角标 / 灰掉的动作格的 title。`detail` 是后端给的人话原因（比如语法错在第几行） */
+export function mineUnreadableWhy(detail: string | null | undefined): string {
+  return (
+    `${MINE_UNREADABLE_TEXT}${detail == null ? '' : `：${detail}`} —— ` +
+    '这一份现在不能应用、也不能改（先把它改回一份能读的 TOML，或者删掉它）。' +
+    '它还是你自己的文件：程序只如实说读不出来，不动它'
+  )
+}
+
 /** 归档抽屉里的那几句话 */
 export const ARCHIVE_DRAWER = {
   title: '旧版本',
@@ -579,13 +660,13 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
  *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
  *
  * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * 这一轮不许往契约里加方法（不在范围内），所以这里只是一句话，不是一个调用。
+ * **用户文件那四件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
+ * `deleteUserPreset`）、另存为一份新的（原来「复制」那个格子）是第十一层
+ * （`copyUserPreset`）、在文件管理器里显示（原来「在文件夹中显示」）是第十三层
+ * （`revealInFolder`）—— 都只对「我的文件」生效。这里剩下的一件是真的还没有，
+ * 哪天要加，方法名照这个写。
  */
 export const MISSING_METHOD = {
-  copy: 'copyLocalFile',
-  rename: 'renameLocalFile',
-  remove: 'deleteLocalFile',
-  reveal: 'revealInFolder',
   link: 'getFileUrl',
 }
 
@@ -694,8 +775,18 @@ export interface PresetMachineNode {
 
 export interface PresetTree {
   machines: PresetMachineNode[]
-  /** 预设仓库里一共几个文件（已剔掉仅归档的）—— 与树上出现几行是两回事 */
-  totalFiles: number
+  /**
+   * 仓库里**每一类**各有几个文件（按 path 去重；已剔掉仅归档的）。
+   *
+   * 台账那一格「仓库 N」读它 —— **数字跟着当前类型档走**：
+   * MKP 档数 MKP 的、切片器档数切片器的，不把别的类型的数混进来
+   * （作者 2026-10-02：「'仓库 9' 这种全 catalog 数字不应该混在当前类型的业务语境里」）。
+   *
+   * 原来那一格是 `totalFiles`（只数 repo 一支 = 切片器资产）：在 MKP 档下显示的是
+   * 切片器的数 —— 树是两个来源合成的（`getVersionFiles` 的 MKP + `getPresetFiles`
+   * 的切片器），只数一支答不上"仓库里有什么"。
+   */
+  fileCounts: Record<FileKind, number>
 }
 
 /** 建树时每个「机型:版本」要喂进来的三样东西 */
@@ -827,7 +918,25 @@ export function buildPresetTree(
     return { machine, versions, ...countsOfMachine(versions) }
   })
 
-  return { machines: machineNodes, totalFiles: visible.length }
+  /*
+   * 「仓库里每一类几个」：把树上全部文件按 kind 数一遍，**按 path 去重**
+   * （同一个 BBS 被三个版本共用只算一个 —— 与 `countsOfMachine` 同一条去重键）。
+   * 两个来源合起来数才是完整的：MKP 那一支来自 `getVersionFiles`（不在 `visible` 里），
+   * 切片器那一支来自 repo —— 只数一支就是旧 `totalFiles` 的病。
+   */
+  const fileCounts: Record<FileKind, number> = { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 }
+  const counted = new Set<string>()
+  for (const m of machineNodes) {
+    for (const v of m.versions) {
+      for (const f of v.files) {
+        if (counted.has(f.path)) continue
+        counted.add(f.path)
+        fileCounts[f.kind] += 1
+      }
+    }
+  }
+
+  return { machines: machineNodes, fileCounts }
 }
 
 /** 机型层的三个数 */
@@ -1089,6 +1198,16 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnSource?: string | null
   /** 来源那份现在对应哪台机型的哪一版（人话，已按名字查好）。认不出是 `null` */
   basedOnOfficial?: string | null
+  /**
+   * **第九层**：这一份用户文件的**文件级**状态（只有 `mine` 行有它）。
+   *
+   * `'unreadable'`（读不出来：编码 / TOML 语法 / 指向用户根之外）→ 名称列画
+   * 「文件无法读取」，**「应用」与「改这份」都不给**（不给必被后端拒的按钮）；
+   * `'ok'` 照常。认不出是哪一类的行没有这一档（`undefined`）。
+   */
+  mineState?: MineState
+  /** 读不出来时后端给的那句人话原因（角标与动作格的 title 用它） */
+  mineStateDetail?: string | null
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1144,9 +1263,10 @@ export interface PresetRowsInput {
   query: string
   pinned: Set<string>
   /**
-   * **目录（catalog）里登记的交付预设**（`kind = mkp_preset` 的文件条目）——
+   * **目录（catalog）里登记的交付文件**（预设页认的那两类：MKP + 切片器）——
    * 旧世界"云端最新一次 Release"的新世界对应物：发布方写进目录，消费方从这里看全量。
-   * `usePresetData` 从 `api.getRuntimeCatalog()` 取；空数组 = 目录里没有登记交付文件。
+   * `usePresetData` 从 `api.getRuntimeCatalog()` 取，**已在源头按 kind 分好类别**
+   * （图标 / 模型不进这个数组）；空数组 = 目录里没有登记预设页的文件。
    */
   releasePresets: ReleasePresetSource[]
   /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`ReleaseFileState = ok`） */
@@ -1188,6 +1308,14 @@ export interface ReleasePresetSource {
   machineId: string
   versionId: string
   fileName: string
+  /**
+   * 这一份归预设页的哪一类（catalog 的 `kind` 经 [`catalogKindToFileKind`] 映射）。
+   *
+   * 老形状里没有它 —— 于是"catalog 登记的只有预设"这个**没写下来的前提**被当成了
+   * 事实：catalog 长出新种类（BBS 配置 / 图标 / 模型）之后，MKP 档把 `.json`
+   * 和 `.svg` 全列了出来（2026-10-02 作者截图）。现在类别跟着数据走，两档按它分流。
+   */
+  kind: FileKind
   /** 目录登记的字节数（真值） */
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
@@ -1255,6 +1383,73 @@ function machineFiles(machines: PresetMachineNode[]): MachineFile[] {
 function matchesKind(axis: PresetKindAxis, kind: FileKind): boolean {
   return axis === 'mkp' ? kind === 'mkp_preset' : kind !== 'mkp_preset'
 }
+
+/**
+ * **catalog 里的 `kind` → 预设页的行类别**。两档分流的唯一判据，不靠扩展名猜。
+ *
+ * catalog 的 `kind` 是发布方对**资源种类**的登记（`runtime::catalog::kind` 那四个），
+ * 预设页的 `FileKind` 是"这一行显示在哪一档"的类别 —— 中间这一层两端的词表不同，
+ * 映射只写在这里一处：
+ *
+ *   `mkp_preset`   → `mkp_preset`   MKP 配置那一档
+ *   `bbs_config`   → `bbs_profile`  切片器配置那一档（BBS 是切片器的一种）
+ *   `orca_config`  → `orca_profile` 同上（Orca 的配置。今天还没有这种文件，位置先留着）
+ *   `icon` / `model` / 其余 → `null`
+ *
+ * **返回 `null` = 不归预设页**：图标是界面素材、模型是校准资源，各自由自己的资源体系
+ * 消费。这里不列它们，而不是"认不出"——认不出是用户文件那一档的事
+ * （`FileKind | null` 里的 `null`，两处含义不同，别混）。
+ *
+ * 这就是 2026-10-02 那张截图的修法：`a1.svg`（icon）与 `MKPProcess ….json`
+ * （bbs_config）混进"MKP 配置 → 云端"表里 —— 因为 release 行当年默认
+ * "catalog 里登记的只有预设"，一个 kind 都没看。
+ */
+export function catalogKindToFileKind(kind: string): FileKind | null {
+  switch (kind) {
+    case 'mkp_preset':
+      return 'mkp_preset'
+    case 'bbs_config':
+      return 'bbs_profile'
+    case 'orca_config':
+      return 'orca_profile'
+    default:
+      return null
+  }
+}
+
+/**
+ * 台账那一格「仓库 N」：**当前类型档**在仓库里一共有几个文件（全机型）。
+ *
+ * 判据与两张表同一套（`matchesKind`）：MKP 档数 MKP 的，切片器档数切片器的
+ * （bbs + orca）。图标 / 模型既不算进来也不出现在表里 —— 它们不归这一页。
+ */
+export function treeCountOfAxis(tree: PresetTree, axis: PresetKindAxis): number {
+  const kinds: FileKind[] = axis === 'mkp' ? ['mkp_preset'] : ['bbs_profile', 'orca_profile']
+  return kinds.reduce((n, k) => n + tree.fileCounts[k], 0)
+}
+
+/**
+ * 台账那一格「我的 N」：用户自己的文件里**属于当前档**的个数。
+ *
+ * 判据与本地表 mine 行的过滤是同一条（`localRows` 里那 `.filter`）：**认不出类别的
+ * （`.json`）两档都算** —— 它在任何档下都列在表里，计数也要跟着列，藏起来就等于
+ * 对它说"你没这份文件"。
+ */
+export function mineCountOfAxis(mine: UserPresetFile[], axis: PresetKindAxis): number {
+  return mine.filter((f) => f.kind === null || matchesKind(axis, f.kind)).length
+}
+
+/**
+ * 切片器那一类的**交付行**（catalog 登记、能下载）在本地表里为什么没有操作按钮。
+ *
+ * 它不能被「应用」（使用中指针只认 MKP 预设）；「复制到切片器目录」那条路只认
+ * 资产库里的 asset id（切片器那一侧的写还没接，见 `docs/PROJECT-AUDIT.md` ③）——
+ * 原来这里画的是「复制」，点了**静静没反应**。给一个点了没反应的按钮，与
+ * "点了必报错"同罪：不给。
+ */
+export const SLICER_RELEASE_WHY =
+  '切片器配置不参与「应用」——它的生效要把它复制进切片器自己的目录，那条写动作还没接（见 PROJECT-AUDIT ③）。' +
+  '这一份已经在本地了，没有可点的动作；要重新下一份干净的，到云端表那一行点「下载 / 更新」'
 
 /**
  * 置顶的排最前，其余按文件名。
@@ -1426,6 +1621,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
+        /*
+         * 第九层：文件级状态。**读不出来的照样列出来**（藏起来等于说他没这份文件），
+         * 只是不给「应用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
+         * 认不出是哪一类的没有这一档（`null` → `undefined`）。
+         */
+        mineState: f.state ?? undefined,
+        mineStateDetail: f.stateDetail,
       }
     })
 
@@ -1439,11 +1641,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
   const onDisk = [...localReleases, ...staleReleases]
 
   const release = onDisk
-    .filter(() => matchesKind(kind, 'mkp_preset'))
+    .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetLocalRow => {
       const state = p.state
-      const live = active !== null && active.fileName === p.fileName
+      /* 交付行只有 MKP 那一类能被「应用」（使用中指针认的一直是 MKP 交付文件）——
+         切片器那一类的交付行没有"生效"这回事，`live` 恒 false */
+      const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
       return {
         /*
          * 行键与置顶键都用 **fileName**，不用 `uid`（`机型/版本`）。
@@ -1460,7 +1664,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         fileName: p.fileName,
         /* 第二行小字：把人引到盘上的落点；盘上那份不对劲时把那件事写在这里 */
         path: releasePathText(p),
-        kind: 'mkp_preset',
+        kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
@@ -1549,16 +1753,17 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     })
 
   /*
-   * 目录里登记的交付预设 —— 云端表上 MKP 的那几行。
+   * 目录里登记的交付文件（catalog 的 files 域）—— 云端表上它们那几行。
    * 与官方文件同列一个「来源」chip 区分；「已下载」看下载区（`mkp/`，盘就是底账），
-   * 「正在生效」看唯一底账（`run/active-preset.json`）。目录登记的全是 MKP 的 toml，
-   * 切片器档自然一行都不出。
+   * 「正在生效」看唯一底账（`run/active-preset.json`）。**按 `kind` 分流**：
+   * MKP 档只列 MKP 预设、切片器档只列 BBS / Orca 的配置 —— 不靠扩展名猜；
+   * 图标 / 模型在数据层就被 `catalogKindToFileKind` 挡掉了（不归这一页）。
    */
   const release = releasePresets
-    .filter(() => matchesKind(kind, 'mkp_preset'))
+    .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetCloudRow => {
-      const live = active !== null && active.fileName === p.fileName
+      const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
       /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
       const state = p.state
       return {
@@ -1567,7 +1772,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         path: `官方交付 / ${p.machineId} / ${p.versionId}`,
-        kind: 'mkp_preset',
+        kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],

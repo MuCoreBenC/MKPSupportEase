@@ -27,11 +27,27 @@
 //! 坏档报 `CORRUPTED` 不静默。它也**不进 localStorage**——C4 之后 localStorage 只住
 //! 纯前端偏好，而这份地址最终要交给 Rust 侧去发起下载。
 //!
+//! # 两种入口（第十七刀起）
+//!
+//! "当前用哪个远端"有两个来源，语义**故意不同**：
+//!
+//! ```text
+//! 手动覆盖（设置页 → 高级设置）  = 一个数据源根：根下就是 catalog.json 与各文件
+//!                                 （开发 / 排查通道：本地 http.server、自建镜像…）
+//! 内置（构建期注入）            = 一个 Bootstrap 地址：指向 source.json，
+//!                                 由它说"catalog 在哪、文件下载根在哪"
+//!                                 （正式通道：换部署位置只改 source.json，客户端不重发）
+//! ```
+//!
+//! 覆盖优先。两条路解析出来的是**同一个形状**（[`ResolvedSource`]：catalog 地址 +
+//! 文件下载根），下游（下载 / 检查更新 / 应用更新）只认它，不各自拼 URL。
+//!
 //! # 没有地址时怎么办
 //!
-//! **如实说还没配置，不编一个 URL 出来假装能下。** 默认地址允许由构建方注入
-//! （`MKPSE_PRESET_SOURCE=<url>`），注入了才有默认值；官方源 / Gitee 的真实地址
-//! 现在还不归这个文件管——那是一次产品决定，不是这里猜的东西。
+//! **如实说还没配置，不编一个 URL 出来假装能下。** 默认地址由构建方注入：
+//! 环境变量 `MKPSE_PRESET_SOURCE` > 工作台配置（`workbench/bootstrap.json`，
+//! 见 `src-tauri/build.rs`）—— 注入了才有默认值。正常构建内置的是**官方 Bootstrap**；
+//! "没配"只该发生在开发构建（既没注入也没手动指定）。
 
 use std::path::{Path, PathBuf};
 
@@ -45,8 +61,19 @@ use super::paths::SOURCE_FILE;
 /// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）
 pub const SOURCE_SCHEMA: u32 = 1;
 
-/// 构建方可注入的默认地址（`MKPSE_PRESET_SOURCE`）。**变量没设就是没配**，
-/// 落到产品上的表现是下载命令诚实报「还没配置数据源地址」
+/// 目录（catalog）在远端根里的固定名字 —— **直接模式**的约定；
+/// Bootstrap 模式由 `source.json` 自己说，客户端不猜。发布侧引用同一常量
+/// （见 `workbench::app::dist` 的 `NEW_CATALOG_FILE`）
+pub const CATALOG_FILE: &str = "catalog.json";
+
+/// Bootstrap（`source.json`）的 schema 代次。认不得就拒绝 —— 不猜新版长什么样。
+/// 注意它与上面的 [`SOURCE_SCHEMA`] 是两回事：那是**这台机器上设置文件**的代次，
+/// 这是**发布出去那一口文件**的协议代次
+pub const BOOTSTRAP_SCHEMA: u32 = 1;
+
+/// 构建方可注入的默认地址（`MKPSE_PRESET_SOURCE`）—— **第十七刀起语义是 Bootstrap
+/// 地址**（指向 `source.json` 的文件地址），不再是"直接根"。**变量没设就再看工作台
+/// 配置**（那是 build.rs 的事，到这里时已经被合并成一个值）。
 const DEFAULT_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE");
 
 /// 当前选中的远端数据源
@@ -56,6 +83,41 @@ pub struct PresetSource {
     pub source_schema: u32,
     /// 数据源根地址（`https://example.com/mkp-content/`）。末尾不带斜杠——见 [`normalize_base_url`]
     pub base_url: String,
+}
+
+/// 当前这一台机器的"远端入口"（覆盖优先，见模块头）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceEntry {
+    /// 手动指定：**一个数据源根** —— 根下就有 `catalog.json` 与各文件。
+    /// 开发 / 排查通道（本地 http.server、自建镜像…），不读任何 Bootstrap
+    Direct { base_url: String },
+    /// 构建期注入：**Bootstrap 地址** —— 指向 `source.json`，
+    /// 由它说"catalog 在哪、文件下载根在哪"。正式通道
+    Bootstrap { url: String },
+}
+
+/// 解析出来的"远端在哪"：两个地址都定了。**所有联网动作的唯一出发点**
+/// （下载 / 检查更新 / 应用更新都从它拿地址，不各自拼 URL）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedSource {
+    /// catalog 的完整 URL（检查 / 应用更新取它）
+    pub catalog_url: String,
+    /// 文件下载根（`join_url(base, file.path)` 的那个 base）
+    pub base_url: String,
+}
+
+/// Bootstrap（`source.json`）说的两件事 —— **发布侧**（`workbench::app::dist`）写它，
+/// 客户端读它。形状小到只有这些：多说一个字都是两端要一起改的契约
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapFile {
+    source_schema: u32,
+    /// catalog 相对 Bootstrap 所在目录的路径（要相对、不许 `..`、不许绝对 URL）
+    catalog: String,
+    /// 文件下载根：省略 / `null` = 与 Bootstrap 同目录；给了必须是绝对 http(s)。
+    /// **发布侧不写它**（同一份 dist 推到哪里都对），换 CDN 时才有它的用场
+    #[serde(default)]
+    base_url: Option<String>,
 }
 
 /// 设置文件的落点：`<appDataDir>/run/preset-source.json`
@@ -99,19 +161,125 @@ pub fn save_source(root: &Path, raw_base_url: &str) -> Result<PresetSource, AppE
     Ok(source)
 }
 
+/// 撤掉用户覆盖：删掉设置文件（幂等）。
+///
+/// 「回到内置默认」只有这一条路 —— [`save_source`] 拒绝空地址（写空 = 制造第三种状态），
+/// 所以原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作。
+/// 删完生效什么（内置默认 / 没配）由 [`current_base_url`] 回答，不在这里替它说。
+pub fn clear_source(root: &Path) -> Result<(), AppError> {
+    match std::fs::remove_file(source_file(root)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(AppError::io("撤掉数据源覆盖失败").with_detail(e.to_string())),
+    }
+}
+
 /// 构建期注入的默认地址（没注就是 `None`）。界面用它区分"出厂默认值"与"用户改过的"，
 /// 免得读一次之后分不清当前地址是自己选的还是出厂的
 pub fn builtin_default() -> Option<String> {
     DEFAULT_BASE_URL.map(str::to_owned)
 }
 
-/// 当前生效的地址：**设置文件优先，其次构建期注入的默认值，都没有就是没配。**
+/// 当前生效的**入口**：设置文件优先，其次构建期注入的默认值，都没有就是没配。
 ///
 /// 返回 `None` 的那一路要被界面原样说出来——那是唯一诚实的答案。
-pub fn current_base_url(root: &Path) -> Result<Option<String>, AppError> {
-    let stored = load_source(root)?.map(|s| s.base_url);
-    let resolved = stored.or_else(builtin_default);
-    Ok(resolved)
+pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
+    if let Some(stored) = load_source(root)? {
+        return Ok(Some(SourceEntry::Direct {
+            base_url: stored.base_url,
+        }));
+    }
+    Ok(builtin_default().map(|url| SourceEntry::Bootstrap { url }))
+}
+
+/// 把入口解析成"远端在哪"。
+///
+/// - 手动覆盖（Direct）：直接根 —— `{根}/catalog.json` 与各文件都在它下面，**不联网**；
+/// - 内置（Bootstrap）：**读 `source.json`**（一次很小的网络请求），按它说的算 ——
+///   部署位置变了只改它，客户端不用重发。
+pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
+    match entry {
+        SourceEntry::Direct { base_url } => Ok(ResolvedSource {
+            catalog_url: join_url(&base_url, CATALOG_FILE),
+            base_url,
+        }),
+        SourceEntry::Bootstrap { url } => {
+            let bytes = crate::runtime::net::get_bytes(
+                &url,
+                &crate::runtime::net::GetPlan::new("source.json"),
+                &crate::runtime::net::noop_tick,
+            )?;
+            parse_bootstrap(&url, &bytes)
+        }
+    }
+}
+
+/// 这台机器上的远端入口 → 两个地址；**没配就报错、并且说清去哪儿配**。
+pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
+    let entry = current_entry(root)?.ok_or_else(|| {
+        AppError::not_implemented(
+            "这个构建没有内置官方源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
+        )
+    })?;
+    resolve_entry(entry)
+}
+
+/// 解析 `source.json`（[`BootstrapFile`]）成两个地址。**纯函数**（字节已由调用方取回）——
+/// 联网那一小步在 [`resolve_entry`] 里，这里全部能单测。
+pub fn parse_bootstrap(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppError> {
+    let file: BootstrapFile = serde_json::from_slice(bytes).map_err(|e| {
+        AppError::corrupted("Bootstrap（source.json）解析不了").with_detail(format!("{url} / {e}"))
+    })?;
+    if file.source_schema != BOOTSTRAP_SCHEMA {
+        return Err(AppError::corrupted(format!(
+            "Bootstrap 的格式代次认不了：文件是 {}，程序认 {}",
+            file.source_schema, BOOTSTRAP_SCHEMA
+        ))
+        .with_detail(url.to_owned()));
+    }
+    let catalog = file.catalog.trim();
+    if catalog.is_empty()
+        || catalog.starts_with("http://")
+        || catalog.starts_with("https://")
+        || catalog.contains("..")
+    {
+        return Err(AppError::corrupted(
+            "Bootstrap 里的 catalog 路径不合法（要相对路径、不许 ..）",
+        )
+        .with_detail(format!("{url} / catalog = {:?}", file.catalog)));
+    }
+    let base_url = match file.base_url.as_deref() {
+        /* 显式给的：与手动填的根走同一套收拾规矩（砍尾斜杠、只认 http(s)） */
+        Some(raw) => normalize_base_url(raw)?,
+        /* 省略 = 与 Bootstrap 同目录 —— 发布产物推到哪里都对 */
+        None => directory_of(url)?,
+    };
+    Ok(ResolvedSource {
+        catalog_url: join_url(&base_url, catalog),
+        base_url,
+    })
+}
+
+/// `https://host/a/b/source.json` → `https://host/a/b`。
+/// 只认 http(s)、scheme 后面要有 host；"https://host" 这种没有路径段的形状也拒
+/// （它不是一个"文件地址"，回退不出目录）
+fn directory_of(url: &str) -> Result<String, AppError> {
+    let bad =
+        || AppError::invalid_argument(format!("Bootstrap 地址不像一个 http(s) 文件地址：{url}"));
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .ok_or_else(bad)?;
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(bad());
+    }
+    /* scheme 双斜杠之后的第一个 '/' 才是目录的分界（8 = "https://" 的长度） */
+    let idx = url.rfind('/').filter(|&i| i >= 8).ok_or_else(bad)?;
+    let dir = url[..idx].trim_end_matches('/');
+    if dir.ends_with(':') {
+        return Err(bad());
+    }
+    Ok(dir.to_owned())
 }
 
 /// 把人填进来的地址收拾干净：去首尾空白、砍掉末尾多余的斜杠。
@@ -214,11 +382,31 @@ mod tests {
         );
     }
 
-    /// 没配过 ≠ 坏了：文件不在就是 `None`，不报错（默认值的分支由 `current_base_url` 管）
+    /// 没配过 ≠ 坏了：文件不在就是 `None`，不报错（默认值的分支由 `current_entry` 管）
     #[test]
     fn missing_file_is_not_corrupted() {
         let dir = root();
         assert_eq!(load_source(dir.path()).expect("没配过不该报错"), None);
+    }
+
+    /// 撤覆盖 = 删文件：撤完 load 就是 `None`（回不回内置默认由 `current_entry` 管）
+    #[test]
+    fn clearing_removes_the_override() {
+        let dir = root();
+        save_source(dir.path(), "https://cdn.example.com/mkp").expect("写设置");
+        assert!(load_source(dir.path()).expect("读设置").is_some());
+
+        clear_source(dir.path()).expect("撤覆盖不该失败");
+        assert_eq!(load_source(dir.path()).expect("读设置"), None);
+        assert!(!source_file(dir.path()).exists());
+    }
+
+    /// 撤一个本来就没有的覆盖 = 幂等（与"撤销使用"同一条规矩：没有不是错）
+    #[test]
+    fn clearing_when_nothing_was_set_is_fine() {
+        let dir = root();
+        clear_source(dir.path()).expect("没有覆盖时撤覆盖也不该失败");
+        assert_eq!(load_source(dir.path()).expect("读设置"), None);
     }
 
     /// 坏档不静默：字节坏了要说出来，不能当成"没配"让用户再选一次却依然读不出
@@ -243,6 +431,90 @@ mod tests {
 
         let e = load_source(dir.path()).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
+    }
+
+    /* ---------- 第十七刀：Bootstrap（source.json）的解析 ---------- */
+
+    /// 最完整的一份：显式 baseUrl + 相对 catalog —— 两个地址都按它说的算
+    #[test]
+    fn bootstrap_gives_both_addresses() {
+        let r = parse_bootstrap(
+            "https://raw.githubusercontent.com/o/r/main/release/presets/source.json",
+            br#"{"sourceSchema": 1, "catalog": "catalog.json", "baseUrl": "https://cdn.example.com/mkp"}"#,
+        )
+        .expect("好档该解析得动");
+        assert_eq!(r.base_url, "https://cdn.example.com/mkp");
+        assert_eq!(r.catalog_url, "https://cdn.example.com/mkp/catalog.json");
+    }
+
+    /// 省略 baseUrl = 与 Bootstrap 同目录 —— 发布产物推到哪里都对（工作台就不写它）
+    #[test]
+    fn bootstrap_defaults_the_base_to_its_own_directory() {
+        let r = parse_bootstrap(
+            "https://raw.githubusercontent.com/o/r/main/release/presets/source.json",
+            br#"{"sourceSchema": 1, "catalog": "catalog.json"}"#,
+        )
+        .expect("缺省 baseUrl 该走「同目录」");
+        assert_eq!(
+            r.base_url,
+            "https://raw.githubusercontent.com/o/r/main/release/presets"
+        );
+        assert_eq!(
+            r.catalog_url,
+            "https://raw.githubusercontent.com/o/r/main/release/presets/catalog.json"
+        );
+    }
+
+    /// 代次认不得 / catalog 越过目录 / catalog 写成绝对 URL / baseUrl 不是 http(s) ——
+    /// 一律如实拒，不猜（catalog 的 `..` 会被 URL 层解释成向上爬，等于换了一份目录）
+    #[test]
+    fn bootstrap_bad_shapes_are_refused() {
+        let url = "https://host/a/source.json";
+        for bad in [
+            r#"{"sourceSchema": 99, "catalog": "catalog.json"}"#,
+            r#"{"sourceSchema": 1, "catalog": ""}"#,
+            r#"{"sourceSchema": 1, "catalog": "../outside.json"}"#,
+            r#"{"sourceSchema": 1, "catalog": "https://elsewhere.example.com/catalog.json"}"#,
+            r#"{"sourceSchema": 1, "catalog": "catalog.json", "baseUrl": "file:///tmp"}"#,
+            r#"不是 JSON"#,
+        ] {
+            assert!(
+                parse_bootstrap(url, bad.as_bytes()).is_err(),
+                "{bad} 该被拒"
+            );
+        }
+    }
+
+    /// 目录回退的边界：host 后面的第一段才是目录；没有路径段 / 没有 host 都拒
+    #[test]
+    fn directory_fallback_edges() {
+        assert_eq!(
+            directory_of("https://host/source.json").expect("host 根"),
+            "https://host"
+        );
+        assert_eq!(
+            directory_of("https://host/a/b/source.json").expect("两层"),
+            "https://host/a/b"
+        );
+        for bad in [
+            "https://host",
+            "https://",
+            "source.json",
+            "file:///a/source.json",
+        ] {
+            assert!(directory_of(bad).is_err(), "{bad} 该被拒");
+        }
+    }
+
+    /// 手动覆盖那一路不联网、目录名按约定直接拼上
+    #[test]
+    fn direct_entry_joins_the_conventional_catalog_name() {
+        let r = resolve_entry(SourceEntry::Direct {
+            base_url: "https://cdn.example.com/mkp".to_owned(),
+        })
+        .expect("直接模式不联网，不该失败");
+        assert_eq!(r.base_url, "https://cdn.example.com/mkp");
+        assert_eq!(r.catalog_url, "https://cdn.example.com/mkp/catalog.json");
     }
 
     /// 空地址不许写盘：它会制造"配了但等于没配"的第三种状态

@@ -1,9 +1,15 @@
 import { NotImplementedError } from './errors'
-import type { ActivePreset, CalibModel, MkpApi, Preset, UserPresetFile } from './contract'
+import type {
+  ActiveOrigin,
+  ActivePreset,
+  CalibModel,
+  MkpApi,
+  PresetSource,
+  UserPresetFile,
+} from './contract'
 import {
   allMachines,
   allPresetFiles,
-  appliedPreset,
   catalogRegistry,
   copyToSlicerIn,
   localFileIds,
@@ -23,8 +29,8 @@ import {
  *
  * 数据分两处，别混：
  *
- * - **本文件里**：校准页那三个方法（预设索引、校准板清单、三轴偏移）用的那几份手写常量。
- * - **`src/api/mockServer/`**：预设页 / 参数页 / 同步页要读的那十二个方法，
+ * - **本文件里**：校准页那几个方法（校准板清单、三轴偏移）用的那几份手写常量。
+ * - **`src/api/mockServer/`**：预设页 / 参数页要读的那十二个方法，
  *   由 `data/*.json` 的六份上游快照解析而来。那一整个目录是搬过来的假后端，
  *   真机上由 Rust 侧接管，`mockServer/` 整个不再被引用。
  *
@@ -33,42 +39,12 @@ import {
  * 保留 async 只为形状一致：调用方必须按"这是个 Promise"来写，将来换成 IPC 才不用改。
  */
 
-/**
- * 按「打印件版本」索引的预设 —— `getPreset` 的夹具。
- *
- * **这一份是 v023 时代留下的**：那三份全是 A1 mini 的，键（`std` / `fast-old` /
- * `fast-260628`）来自已被替换掉的旧客户端常量表。每一份原来还带一个 `model` 字段，
- * 是给旧校准页反填「机型 + 版本」两级用的 —— 那页换掉之后没有消费者了，已经拿掉。
- *
- * 客户端换成 A40 那一套之后，**页面不再调 `getPreset` 了** —— 它们走文件体系
- * （`getMachines` / `getVersionFiles` / `getPresetFiles`），见 `src/app/calib/usePreset.ts`
- * 文件头那段说明。契约里的 `getPreset` 留着（`bridge` 那头对应 Rust 的 `get_preset`），
- * 所以这里继续给出一个像样的夹具，不删。
- *
- * 顺带记一笔：这个文件里原来还导出一份 `presetCatalog`，是给旧页面直接 import 的
- * （"假数据从 api 层漏进页面"的唯一一处）。旧页面删掉之后它就没有消费者了，已随 P1c 收尾删除 ——
- * 现在假数据的出口只剩 `mockApi` 这一张契约表。
+/*
+ * **v023 那份「按打印件版本索引的预设」夹具（`presetIndex`）随 `getPreset` 一起删了**
+ * （2026-10-02 清扫）：三份全是 A1 mini 的、键来自已被替换掉的旧常量表；客户端换成
+ * 文件体系之后页面就不再调它（见 `src/app/calib/usePreset.ts` 文件头），只剩这条死契约
+ * 在引用。这里保留一笔记录，不再留夹具 —— 留一份没人读的假数据，下一次盘点又要猜它能不能删。
  */
-const presetIndex: Record<string, Preset> = {
-  std: {
-    name: 'A1M.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1M.toml',
-    axes: { x: -0.6, y: 22.4, z: 3.8 },
-    speed: 60,
-  },
-  'fast-old': {
-    name: 'A1MF.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml',
-    axes: { x: -0.8, y: 22.8, z: 3.9 },
-    speed: 65,
-  },
-  'fast-260628': {
-    name: 'A1MF_260628.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF_260628.toml',
-    axes: { x: -0.9, y: 23, z: 4 },
-    speed: 70,
-  },
-}
 
 /**
  * 校准板清单。
@@ -86,6 +62,9 @@ const calibModels: CalibModel[] = [
 /** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
 let mockActive: ActivePreset | null = null
 
+/** 浏览器演示用的数据源覆盖（内存态，刷新即还原；真数据在 Rust 侧 run/preset-source.json） */
+let mockSource: PresetSource | null = null
+
 /*
  * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
  *
@@ -101,6 +80,9 @@ const mockMine: UserPresetFile[] = [
     size: 2048,
     modifiedUnix: 1780000000,
     kind: 'mkp_preset',
+    /* 第九层：能读 + TOML 语法过（演示正文是合法 TOML）→ 照常有「应用 / 改这份」 */
+    state: 'ok',
+    stateDetail: null,
     basedOn: 'outdated',
     basedOnLabel: 'mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-05-29 04:26:12',
@@ -114,6 +96,28 @@ const mockMine: UserPresetFile[] = [
     size: 1024,
     modifiedUnix: 1780003600,
     kind: null,
+    /* 认不出是哪一类 → 没有"能不能当预设用"这一档（与真机同形状） */
+    state: null,
+    stateDetail: null,
+    basedOn: 'unknown',
+    basedOnLabel: null,
+    basedOnRelease: null,
+    basedOnMachineId: null,
+    basedOnVersionId: null,
+  },
+  {
+    /*
+     * 第九层的演示：**TOML 语法坏了** → 行上画「文件无法读取」，并且**不给**
+     * 「应用」与「改这份」（真机上后端的文件级检查同样会把这两条拒掉）。
+     * 注意它照常列在表里 —— 藏起来等于对用户说他没这份文件。
+     */
+    path: 'presets-mine/坏了的涂胶.toml',
+    fileName: '坏了的涂胶.toml',
+    size: 1536,
+    modifiedUnix: 1780007200,
+    kind: 'mkp_preset',
+    state: 'unreadable',
+    stateDetail: 'TOML 语法不对（第 3 行第 1 列）',
     basedOn: 'unknown',
     basedOnLabel: null,
     basedOnRelease: null,
@@ -121,14 +125,80 @@ const mockMine: UserPresetFile[] = [
     basedOnVersionId: null,
   },
 ]
-/** 正文库：只有**这份会话里另存出来的**才有（真机上每一份都能读）。键 = 相对用户根的路径 */
+/** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
 const mockMineText = new Map<string, string>()
-/** 编辑中的那一份（真机上是 `run/draft-preset.json`） */
-let mockDraft: { sourceFileName: string; text: string; updatedUnix: number } | null = null
+
+/**
+ * 用户文件新名字的门槛（与 Rust 侧 `mine::check_new_name` 同一套）：
+ * 给一口人话原因，没有就是过。改名（第十层）与另存为一份新的（第十一层）共用这一处。
+ */
+function mockNameProblem(oldName: string, newName: string): string | null {
+  const name = newName.trim()
+  if (name === '') return '新名字不能是空的'
+  if (name.includes('/') || name.includes('\\')) {
+    return '新名字不能带路径 —— 这一层只改名字，不搬文件夹'
+  }
+  if (name === '.' || name === '..') return '这个名字不是一个文件名'
+  const ext = (n: string): string => {
+    const i = n.lastIndexOf('.')
+    return i <= 0 ? '' : n.slice(i).toLowerCase()
+  }
+  if (ext(name) !== ext(oldName)) {
+    return '后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）'
+  }
+  return null
+}
+
+/** 外部路径取文件名（与 Rust 侧 `runtime::import::base_name` 同一件事） */
+function mockBaseName(source: string): string {
+  const parts = source.split(/[/\\]/)
+  return parts[parts.length - 1] ?? source
+}
+/** 编辑中的那一份（真机上是 `run/draft-preset.json`）。`path` 只有用户线才有 */
+let mockDraft: {
+  origin: ActiveOrigin
+  sourceFileName: string
+  path: string | null
+  text: string
+  updatedUnix: number
+} | null = null
 
 /** 演示正文。真机上它是官方原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
 const MOCK_OFFICIAL_TEXT =
   '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节\n涂胶宽度 = 1.2\n起始延时 = 0.5\n'
+
+/** 假后端给"导入进来的那份"种的演示正文：**没有血统** —— 外部文件没有 based_on，也不编造 */
+const MOCK_IMPORTED_TEXT = '# 从外部导进来的（假后端演示正文）\n"涂胶宽度" = 1.0\n'
+
+/*
+ * 三行血统（真机上由 `runtime::lineage` 管：另存时写、写回时照抄）。
+ * 假后端没有那一套，只做**文本形状上的同一件事**：编辑器里给正文、保存时把原来那三行抄回去。
+ */
+const lineageLinesOf = (text: string) =>
+  text.split('\n').filter((line) => line.startsWith('# based_on'))
+const withoutLineage = (text: string) =>
+  text.split('\n').filter((line) => !line.startsWith('# based_on')).join('\n')
+
+/* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上）。
+   键带引号是因为它得**真的是 TOML** —— 它那条 state 说 `ok`，演示也要自洽 */
+mockMineText.set(
+  'presets-mine/我的 A1 涂胶.toml',
+  [
+    '# 我自己的这一份（假后端演示正文）',
+    '# based_on: mkp/presets/A1-fast.toml',
+    '# based_on_release_time: 2026-05-29 04:26:12',
+    `# based_on_sha256: ${'0'.repeat(64)}`,
+    '"涂胶宽度" = 1.1',
+    '"起始延时" = 0.4',
+    '',
+  ].join('\n'),
+)
+/* 坏了那份也种一份正文：**看正文照旧读得出来**（用户要能看着它去修）——
+   只有「应用 / 改这份」被拦（真机上是后端的文件级检查拦的） */
+mockMineText.set(
+  'presets-mine/坏了的涂胶.toml',
+  ['# 坏了的演示（假后端演示正文）', '[toolhead]', 'offset_x = (1', ''].join('\n'),
+)
 
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -150,16 +220,10 @@ const MOCK_DOWNLOADED = ['A1-standard.toml']
 const MOCK_STALE = ['A1-fast.toml', 'A1mini-standard.toml']
 
 export const mockApi: MkpApi = {
-  async getPreset(variantId) {
-    const row = presetIndex[variantId]
-    if (!row) return null
-    return { name: row.name, path: row.path, axes: row.axes, speed: row.speed }
-  },
-
   /*
-   * 只记一条日志，不回写 presetIndex。
+   * 只记一条日志，不假装持久化。
    *
-   * 想过在内存里留一份"已保存的偏移"让 getPreset 读回来，但那一份没有归属 ——
+   * 想过在内存里留一份"已保存的偏移"让界面读回来，但那一份没有归属 ——
    * 契约里 saveOffsets 不带 variantId（写的是当前机器的配置，不是某份预设文件），
    * 于是在 A 预设上保存、切到 B 会看见 A 的数。宁可这一轮不假装持久化：
    * 界面自己有 saved 状态，看得见"存下去了"，真正的落盘等 Rust 侧。
@@ -220,11 +284,45 @@ export const mockApi: MkpApi = {
    * 临时编辑那条链：内存里真的走一遍（改的是临时文件，官方原件一动不动）。
    * 与真机同一个形状 —— 直道里的分岔只有一条：正文来自演示常量而不是 `mkp/` 里的字节。
    */
-  async beginPresetEdit(fileName) {
-    if (mockDraft !== null && mockDraft.sourceFileName === fileName) {
-      return { ...mockDraft, reused: true }
+  async beginPresetEdit(fileName, origin = 'official', path) {
+    /* 两条线的钥匙：官方线认文件名，用户线认路径（用户目录里同名很正常） */
+    if (mockDraft !== null && mockDraft.origin === origin && mockDraft.sourceFileName === fileName) {
+      if (origin === 'official' || mockDraft.path === (path ?? null)) {
+        return { ...mockDraft, reused: true }
+      }
     }
-    mockDraft = { sourceFileName: fileName, text: MOCK_OFFICIAL_TEXT, updatedUnix: nowSec() }
+    if (origin === 'mine') {
+      const rel = path ?? ''
+      /* 第九层：读不出来的那份**不给改**（与真机同一个入口闸；消息形状也对齐后端） */
+      const entry = mockMine.find((f) => f.path === rel)
+      if (entry?.state === 'unreadable') {
+        throw new Error(
+          `${rel} 读不出来：${entry.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+        )
+      }
+      const raw = mockMineText.get(rel)
+      if (raw === undefined) {
+        throw new NotImplementedError(
+          `beginPresetEdit：浏览器里只有那份演示正文能改（${rel} 没有正文）`,
+        )
+      }
+      /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
+      mockDraft = {
+        origin,
+        sourceFileName: fileName,
+        path: rel,
+        text: withoutLineage(raw),
+        updatedUnix: nowSec(),
+      }
+      return { ...mockDraft, reused: false }
+    }
+    mockDraft = {
+      origin,
+      sourceFileName: fileName,
+      path: null,
+      text: MOCK_OFFICIAL_TEXT,
+      updatedUnix: nowSec(),
+    }
     return { ...mockDraft, reused: false }
   },
 
@@ -237,9 +335,29 @@ export const mockApi: MkpApi = {
     mockDraft = null
   },
 
-  /** 另存成 `presets-mine/<原名>（已修改）.toml` —— 与 Rust 侧 `mine::edited_name` 同一条规则 */
+  /** 官方线：另存成 `presets-mine/<原名>（已修改）.toml`（与 Rust 侧 `mine::edited_name` 同一条规则） */
   async commitPresetDraft() {
     if (mockDraft === null) throw new Error('现在没有正在改的那一份，没得存')
+
+    /*
+     * 用户线（第八层）：**写回它自己** —— 同一个路径、同一份文件，不产生第二份；
+     * 血统**照抄原来那三行**（出处没变）。与 Rust 侧 `mine::save_back` 同一件事。
+     */
+    if (mockDraft.origin === 'mine') {
+      const rel = mockDraft.path ?? ''
+      const old = mockMineText.get(rel)
+      if (old === undefined) {
+        throw new NotImplementedError(`commitPresetDraft：${rel} 已经没有正文可写回`)
+      }
+      const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
+      const fileName = rel.slice(rel.lastIndexOf('/') + 1)
+      const at = mockMine.findIndex((f) => f.path === rel)
+      if (at >= 0) mockMine[at] = { ...mockMine[at], size: text.length, modifiedUnix: nowSec() }
+      mockMineText.set(rel, text)
+      mockDraft = null
+      return { path: rel, fileName, size: text.length, replaced: true }
+    }
+
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-mine/${fileName}`
     /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */
@@ -253,6 +371,9 @@ export const mockApi: MkpApi = {
       size,
       modifiedUnix: nowSec(),
       kind: 'mkp_preset',
+      /* 刚存出来的那份：假后端不解析 TOML，按演示口径记"能读"（真机上是后端算的） */
+      state: 'ok',
+      stateDetail: null,
       /* 刚存出来的这份就是基于**当前**目录那一版（演示里那份恰好对得上目录） */
       basedOn: 'current',
       basedOnLabel: label,
@@ -270,9 +391,192 @@ export const mockApi: MkpApi = {
     return { path, fileName, size, replaced }
   },
 
-  async getAppliedPreset() {
-    /* null = 一套都还没应用。这是合法状态，不是错误 */
-    return appliedPreset()
+  /*
+   * 第十层：用户文件管理（改名 / 删除）。与真机同一套规矩，在内存里走一遍 ——
+   * 改名要看得见"使用中指针与草稿跟着走"，删除要看得见两道闸（正在使用的 / 还有草稿的）。
+   */
+  async renameUserPreset(path, newName) {
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const problem = mockNameProblem(hit.fileName, newName)
+    if (problem !== null) throw new Error(problem)
+    const name = newName.trim()
+    const dir = path.slice(0, path.length - hit.fileName.length)
+    const newPath = `${dir}${name}`
+    if (newPath !== path && mockMine.some((f) => f.path === newPath)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    if (newPath !== path) {
+      /* 使用中指针跟着改（指纹原样 —— 字节没动）；草稿跟着改（「接着上次改」不接丢） */
+      if (mockActive?.origin === 'mine' && mockActive.path === path) {
+        mockActive = { ...mockActive, path: newPath, fileName: name }
+      }
+      if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
+        mockDraft = { ...mockDraft, path: newPath, sourceFileName: name }
+      }
+      hit.path = newPath
+      hit.fileName = name
+      const text = mockMineText.get(path)
+      if (text !== undefined) {
+        mockMineText.delete(path)
+        mockMineText.set(newPath, text)
+      }
+    }
+    return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 第十一层：另存为一份新的（我的文件 → 我的文件）。与真机同一套规矩：
+   * **字节复制**（正文与血统原样带过去）→ 新的一份从诞生起就是独立的；
+   * 名字由用户自己起（不自动改名）：和原来一样 / 已存在同名都拒；
+   * **一个状态都不碰** —— 使用中指针与草稿都还留在原来那份上。
+   */
+  async copyUserPreset(path, newName) {
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const problem = mockNameProblem(hit.fileName, newName)
+    if (problem !== null) throw new Error(problem)
+    const name = newName.trim()
+    const dir = path.slice(0, path.length - hit.fileName.length)
+    const newPath = `${dir}${name}`
+    if (newPath === path) throw new Error('新名字和原来一样 —— 复制要起个不同的名字')
+    if (mockMine.some((f) => f.path === newPath)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    const text = mockMineText.get(path)
+    if (text !== undefined) mockMineText.set(newPath, text)
+    mockMine.push({ ...hit, path: newPath, fileName: name, modifiedUnix: nowSec() })
+    return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 第十二层：通用导入入口（假后端的演示）。
+   * 真机上源是**真路径**（拖拽 / 系统选择器给的），复制的是它的字节；
+   * 假后端里那些外部路径不是真文件 —— 给一份演示正文，其余规矩与真机一致：
+   * 只收 .toml、重名不覆盖（改名由界面走）、**一个状态都不碰**。
+   */
+  async pickImportFiles() {
+    /* 浏览器里没有系统选择器：给一份"从选择器来的"演示路径（不撞现有的那种） */
+    return ['/（文件选择器演示）/从选择器导进来.toml']
+  },
+  async stageImport(sources) {
+    const taken = new Set(mockMine.map((f) => f.fileName))
+    return sources.map((source) => {
+      const fileName = mockBaseName(source)
+      if (fileName === '') {
+        return {
+          source,
+          fileName: source,
+          state: 'rejected',
+          reason: '这个路径里没有文件名 —— 它不是一份能导入的文件',
+        }
+      }
+      if (!/\.toml$/i.test(fileName)) {
+        return {
+          source,
+          fileName,
+          state: 'rejected',
+          reason:
+            '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器（ZIP / 备份包以后再说）',
+        }
+      }
+      if (taken.has(fileName)) return { source, fileName, state: 'collision', reason: null }
+      taken.add(fileName)
+      return { source, fileName, state: 'ready', reason: null }
+    })
+  },
+  async commitImport(items) {
+    const outcomes: {
+      source: string
+      ok: boolean
+      path: string
+      fileName: string
+      message: string
+    }[] = []
+    for (const item of items) {
+      const fileName = mockBaseName(item.source)
+      if (!/\.toml$/i.test(fileName)) {
+        outcomes.push({
+          source: item.source,
+          ok: false,
+          path: '',
+          fileName,
+          message: '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器',
+        })
+        continue
+      }
+      let name = fileName
+      if (item.newName !== undefined) {
+        const problem = mockNameProblem(fileName, item.newName)
+        if (problem !== null) {
+          outcomes.push({ source: item.source, ok: false, path: '', fileName, message: problem })
+          continue
+        }
+        name = item.newName.trim()
+      }
+      const path = `presets-mine/${name}`
+      if (mockMine.some((f) => f.path === path)) {
+        outcomes.push({
+          source: item.source,
+          ok: false,
+          path: '',
+          fileName: name,
+          message: `已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`,
+        })
+        continue
+      }
+      mockMineText.set(path, MOCK_IMPORTED_TEXT)
+      mockMine.push({
+        path,
+        fileName: name,
+        size: MOCK_IMPORTED_TEXT.length,
+        modifiedUnix: nowSec(),
+        kind: 'mkp_preset',
+        state: 'ok',
+        stateDetail: null,
+        basedOn: 'unknown',
+        basedOnLabel: null,
+        basedOnRelease: null,
+        basedOnMachineId: null,
+        basedOnVersionId: null,
+      })
+      outcomes.push({ source: item.source, ok: true, path, fileName: name, message: '' })
+    }
+    return outcomes
+  },
+
+  /*
+   * 第十三层：在文件管理器里显示。浏览器里没有 Finder / 资源管理器，假后端的"文件"
+   * 也只是内存里一条记录 —— 前三步（只认我的文件 / 找得到 / 文件在不在）照真机走，
+   * 最后一步如实说它在真机上的样子（不假装打开了）。
+   */
+  async revealInFolder(path) {
+    if (!path.startsWith('presets-mine/')) {
+      throw new Error('只给「我的文件」显示 —— 官方那两份住程序自己管的目录')
+    }
+    if (!mockMine.some((f) => f.path === path)) {
+      throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）`)
+    }
+    throw new Error(
+      `假后端没有文件系统 —— 真机上这一步会打开 Finder / 资源管理器并选中「${path}」`,
+    )
+  },
+
+  async deleteUserPreset(path) {
+    const i = mockMine.findIndex((f) => f.path === path)
+    if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (mockActive?.origin === 'mine' && mockActive.path === path) {
+      throw new Error(
+        `${path} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。先换成别的配置、或者撤销使用，再来删`,
+      )
+    }
+    if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
+      throw new Error(
+        `${path} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删`,
+      )
+    }
+    mockMine.splice(i, 1)
+    mockMineText.delete(path)
   },
 
   async getSlicerCopied() {
@@ -365,6 +669,34 @@ export const mockApi: MkpApi = {
           sha256: '2'.repeat(64),
           size: 2048,
         },
+        {
+          /*
+           * 切片器那一类的交付文件（`bbs_config`）：预设页按 `kind` 把它分流进
+           * 「切片器配置 → 云端」——MKP 档**不列它**（真机 catalog 里它们占 9 条，
+           * 2026-10-02 作者截图里混进 MKP 表的就有它）。
+           */
+          kind: 'bbs_config',
+          fileName: 'MKPProcess A1 0.4 0.20.json',
+          path: 'mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
+          machineId: 'A1',
+          versionId: '',
+          sha256: '3'.repeat(64),
+          size: 1332,
+        },
+        {
+          /*
+           * 图标（`icon`）：**不归预设页** —— 它是资源，由自己的资源体系消费。
+           * 登记在 catalog 里只为钉住一条判据：「登记了」不等于「预设页要显示」
+           * （同截图的 `a1.svg`）。
+           */
+          kind: 'icon',
+          fileName: 'a1.svg',
+          path: 'mkp/icons/a1.svg',
+          machineId: 'A1',
+          versionId: '',
+          sha256: '4'.repeat(64),
+          size: 2400,
+        },
       ],
       registry: catalogRegistry(),
     }
@@ -389,13 +721,31 @@ export const mockApi: MkpApi = {
     throw new NotImplementedError('readDownloadedText：浏览器里没有下载区')
   },
 
-  /** 浏览器模式下数据源既读不到也配不了：如实答"没配"，页面据此把配置入口说清楚 */
+  /*
+   * 数据源（设置页那一格）：真机写 `run/preset-source.json`，浏览器里没有盘 ——
+   * 这一档走**内存镜像**（与用户目录 / 使用中指针同一套口径：能走通的就真走，走不通的如实说）。
+   * 演示口径：这个假后端**没有内置默认源**（真机的内置是构建期注进来的），
+   * 所以「使用内置官方源」在这里 = 回到"没配"。
+   */
   async getPresetSource() {
-    return null
+    return mockSource
   },
 
-  async setPresetSource() {
-    throw new NotImplementedError('setPresetSource：浏览器模式的数据源只读，配不了')
+  async setPresetSource(baseUrl) {
+    /* 校验与真机 `runtime::source::normalize_base_url` 同一套（连消息也照抄）：
+       只认 http(s)、砍尾斜杠、空地址拒绝 */
+    const url = baseUrl.trim().replace(/\/+$/, '')
+    if (url === '') throw new Error('数据源地址是空的')
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw new Error(`数据源地址只认 http:// 或 https://，填进来的是 ${url}`)
+    }
+    mockSource = { baseUrl: url, fromUser: true, builtin: null }
+    return mockSource
+  },
+
+  async clearPresetSource() {
+    mockSource = null
+    return null
   },
 
   /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：
@@ -467,6 +817,12 @@ export const mockApi: MkpApi = {
     }
     const hit = mockMine.find((f) => f.path === path)
     if (hit === undefined) throw new Error(`用户目录里没有 ${path ?? '(没给路径)'}`)
+    /* 第九层：读不出来的那份**不许应用**（真机入口闸会拒；消息形状对齐后端） */
+    if (hit.state === 'unreadable') {
+      throw new Error(
+        `${hit.path} 读不出来：${hit.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+      )
+    }
     mockActive = {
       origin: 'mine',
       fileName: hit.fileName,

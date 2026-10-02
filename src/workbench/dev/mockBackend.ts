@@ -394,6 +394,9 @@ function bundleListOf(query: string | null) {
   }
 }
 
+/** 官方源（Bootstrap）：`wb_set_bootstrap` 写它（浏览器里存内存）。真机写 workbench/bootstrap.json */
+let mockBootstrap: string | null = null
+
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
   return {
@@ -405,6 +408,7 @@ function mockBoot(): Json {
     problem: null,
     detail: null,
     storeDirs: STORE_DIRS,
+    bootstrapUrl: mockBootstrap,
   }
 }
 
@@ -1056,6 +1060,16 @@ export function installMockBackend() {
         return Promise.resolve({})
       case 'wb_save_ui':
         return Promise.resolve(null)
+      case 'wb_set_bootstrap': {
+        const url = String(args?.url ?? '').trim()
+        if (url === '') {
+          return Promise.reject({ code: 'INVALID', message: 'Bootstrap 地址是空的', traceId: 'mock' })
+        }
+        /* 演示桩不做 GitHub blob → raw 的规范化（那是真后端 `dist::normalize_bootstrap_url`
+           的活）—— 存原样；真机存下去的是转好的 raw 直链 */
+        mockBootstrap = url
+        return Promise.resolve(url)
+      }
       case 'wb_reload':
         return Promise.resolve(mockBoot())
       default:

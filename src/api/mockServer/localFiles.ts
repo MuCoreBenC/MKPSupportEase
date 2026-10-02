@@ -1,4 +1,3 @@
-import type { AppliedPreset } from '../../api/contract'
 import { allPresetFiles } from './resources'
 
 /*
@@ -77,43 +76,13 @@ export function localFileIds(): string[] {
 // 正在生效的那一套（全局唯一）
 // ——————————————————————————————————————————————————————————————
 
-/**
- * **正在生效的那一套预设。整个程序只有一个。**
- *
- * 前端自己推「当前机型 + 当前版本那个默认交付的 MKP 预设」是不行的：切一下机型就换一个，
- * 等于说这台机器同时应用着 6 套配置。涂胶笔同一时间只跑一套，所以这是一条**独立的事实**，
- * 归后端答。
- *
- * 演示值挑的是 `a1_mkp_standard`（A1 / 标准版），理由是它同时也在上面那份「本机已有」
- * 集合里 —— 这样默认落地那一屏能看到「已应用」，而不是「配着它但还没下」。
- *
- * 真后端要读本机那份当前配置（MKP 自己的 state 文件），**不是**猜哪个是默认交付的。
- * 想演示「一套都还没应用」把这里改成 `null` 即可，界面上会走另一条文案。
+/*
+ * 「正在生效的那一套」（v023 的 `appliedPreset` / `DEMO_APPLIED` 演示集合）随
+ * 契约方法 `getAppliedPreset` 一起删了（2026-10-02 清扫）：
+ * 现在「使用中」只有一个来源 —— `run/active-preset.json`（`mockApi.getActivePreset`），
+ * 界面也不再读那份按 asset id 编的演示值。
+ * 留一笔记录，不再留夹具（没人读的假数据，下次盘点就得再猜一次它能不能删）。
  */
-const DEMO_APPLIED: { assetId: string; machineId: string; versionId: string } | null = {
-  assetId: 'a1_mkp_standard',
-  machineId: 'A1',
-  versionId: 'STANDARD',
-}
-
-/**
- * 正在生效的那一套。`null` = 一套都还没应用（**不是错误**）。
- *
- * 机型 / 版本从这个 asset 的倒查结果推 —— 查不到就当没应用：
- * 编一个空壳出来只会让界面显示一个不存在的文件。
- */
-export function appliedPreset(): AppliedPreset | null {
-  if (DEMO_APPLIED === null) return null
-  const hit = allPresetFiles().find((f) => f.id === DEMO_APPLIED.assetId)
-  if (hit === undefined) return null
-  const ref = hit.usedByVersions[0]
-  return {
-    assetId: hit.id,
-    path: hit.path,
-    machineId: ref?.machine ?? hit.machineIds[0] ?? '',
-    versionId: ref?.version ?? '',
-  }
-}
 
 // ——————————————————————————————————————————————————————————————
 // 已复制到切片器目录的

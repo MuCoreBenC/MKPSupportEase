@@ -49,8 +49,9 @@
  *                   `mkp/presets/*.toml` —— 交付根下的落点，与客户端下载区同形），
  *                   TOML 正文走 `wb_preview_toml`（**真 Rust 渲染器**）
  *   ③ 查看 JSON     这次发布的那份**说明书原样**（`ClientDataPackage`）+ `wb_publish` 的返回
- *   ③ 上传到云端    整个 release（说明书 + 预设文件）写进 `STORAGE.cloud` ——
- *                   客户端「同步」页读的就是这一格，联动这条链到此闭合
+ *   ③ 上传到云端    整个 release（说明书 + 预设文件）写进 `STORAGE.cloud`（模拟云端）——
+ *                   **这一格只有工作台读**：客户端 C4 起就不读它（底账进 Internal 根、
+ *                   目录随安装包走），2026-10-02「同步」页退役后客户端那一侧连页面都没有了
  *
  * # 说明书生成器这本账
  *
@@ -344,7 +345,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
    * 上传到云端（模拟）。**整个 release 一起上去** —— 说明书 + 那几份 `preset.toml`，
    * 同属一个 preset identity（「JSON 是 1.0.1、TOML 还是 1.0.0」这种假链路不许出现）。
    *
-   * 落点是 `STORAGE.cloud`：客户端「同步」页读的是**同一格**，联动这条链就靠它。
+   * 落点是 `STORAGE.cloud`（模拟云端）。**不是"客户端会读"的那一格** —— 客户端 C4 起
+   * 不读它（catalog 随包走），「同步」页 2026-10-02 也退役了；这里留下的真行为只有
+   * "上传 → 刷新还在"（工作台这一端的产物）。
    * 包版本取上面那一格算出来的数（上游声明 +0.0.1 起步 / 手点快捷），
    * 上传的那一刻由这一侧记进目录项。
    */
@@ -370,8 +373,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
       setPkg(release.package)
       setCloud(await listCloud())
       toasts.push(
-        `已上传云端：说明书 ${release.package.fields.length} 个字段 + ${release.presets.length} 份预设文件`
-        + '（客户端「同步」页读的就是这一格）',
+        `已上传云端（模拟）：说明书 ${release.package.fields.length} 个字段 + ${release.presets.length} 份预设文件`
+        + '（这一格只有工作台读）',
       )
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
@@ -801,7 +804,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   disabled={upBusy || pkg === null}
                   title={pkg === null
                     ? (pkgErr ?? '说明书还在装，等它出来再传')
-                    : `把整份 release 传上去：说明书 + ${artifacts.length} 份 preset.toml。客户端「同步」页读的就是这一格`}
+                    : `把整份 release 传上去：说明书 + ${artifacts.length} 份 preset.toml（模拟云端；这一格只有工作台读）`}
                   onClick={() => void upload()}
                 >
                   {upBusy ? '正在上传……' : '上传到云端'}
@@ -843,7 +846,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
               <p className={s.note}>
                 上面这几份是<strong>读</strong>出来的：静态那一份来自 public/cloud/presets.json
                 （别人发过的种子，来源标「云端已有」），「我刚传的」那几份来自 localStorage 的
-                <span className={s.mono}> mkp.cloud.presets </span>—— 客户端读的也是这同一格。
+                <span className={s.mono}> mkp.cloud.presets </span>—— 客户端<strong>不</strong>读这一格。
               </p>
               <p className={s.note}>
                 「上传到云端」把<strong>整份 release</strong> 写进下面这一格：说明书
@@ -853,11 +856,10 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                 上传的时刻由这一侧记进目录项。
               </p>
               <p className={s.note}>
-                <strong>客户端读的是同一格</strong>（<span className={s.mono}>src/app/store/package.ts</span>
-                里的 <span className={s.mono}>STORAGE.cloud</span>）：客户端「同步」页进页就把这份
-                说明书自动同步下来（指纹一样就一个字不动），预设页的云端表随之多出几行
-                「工作台发布 · x.y.z」—— 在那儿<strong>下载</strong>到本机预设目录，再到本地表点
-                <strong>应用</strong>生效。这条链就是「工作台生成 → 上传 → 客户端同步 → 下载 → 应用」。
+                这里是<strong>工作台这一端</strong>的口径（2026-10-02 校准）：上传 → 刷新还在，
+                一次一格整 release。<strong>客户端不再与这一格联动</strong> —— C4 起它的底账
+                全在 Internal 根（catalog 随安装包走），「同步」页也退役了；客户端那一侧
+                「工作台发布 → 下载 → 应用」的现状与验收在 `docs/PROJECT-AUDIT.md` ⑧。
               </p>
             </div>
           </div>
@@ -1010,8 +1012,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
       >
         <div className={s.vstack}>
           <p className={s.note}>
-            这一格就是「上传到云端」传出去的那一份（<span className={s.mono}>CloudEntry.package</span>），
-            客户端「同步」页自动拉走的就是它。<span className={s.mono}>release</span> 那一栏把
+            这一格就是「上传到云端」传出去的那一份（<span className={s.mono}>CloudEntry.package</span>）——
+            <strong>客户端不读它</strong>（C4 起目录随安装包走；「同步」页 2026-10-02 退役），
+            这是演示管道的落点。<span className={s.mono}>release</span> 那一栏把
             这一次发布的<strong>两样产物</strong>合起来看：说明书 + N 份 preset.toml
             —— 同属一个 preset identity，不会出现「JSON 是一版、TOML 是另一版」。
           </p>
@@ -1047,14 +1050,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
           open
           size="lg"
           title={`预设文件 ${tomlOpen.fileName}`}
-          subtitle={`${tomlOpen.uid} —— 这才是用户「获取预设」拿到的那一份`}
+          subtitle={`${tomlOpen.uid} —— 客户端在「预设」页按份下载的就是这一份`}
           onClose={() => setTomlOpen(null)}
         >
           <div className={s.vstack}>
             <p className={s.note}>
               正文由后端的生成器现出（wb_preview_toml 就是生成产物那台渲染器）——
-              不是前端拼一份「大概长这样」。客户端那条链上，说明书是<strong>自动同步</strong>的，
-              这一份要用户点「获取预设」。
+              不是前端拼一份「大概长这样」。客户端那边的口径（2026-10-02）：说明书随安装包
+              走，这一份在「预设」页的云端表按份下载。
             </p>
             <textarea
               className={s.pkgJson}

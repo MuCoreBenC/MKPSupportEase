@@ -31,6 +31,17 @@
 //! 逐字节不动，注释、键序、`offset` 的 inline table、`"""` 多行字面量原样保留。
 //! **不许"读成结构体再写出来"** —— 那会把用户预设里约 70 条注释全抹掉。
 //!
+//! # 两条写路（只有"那三行从哪来"不一样）
+//!
+//! ```text
+//! make_copy                建副本：三行从**来源**算（来源全文摘要 + 来源的 release_time）
+//! rewrite_keeping_lineage  写回自己：三行**照抄文件里原来那三行**（出处没变）
+//! ```
+//!
+//! 所以「改我那份 → 保存」**不会**产生 `（已修改）2.toml`，也不会把血统改成"基于我自己"——
+//! 出处还是当初那一版官方（第八层）。两条写路共用同一个插入规则（[`splice_lineage`]），
+//! 于是"保存一份没改过的副本"= 文件逐字节不变。
+//!
 //! # 为什么这一段有两份实现（客户端 / 工作台）
 //!
 //! 工作台那份在 `crates/preset/src/lineage.rs`（那份还带 `DiffState`/`diff` 等要
@@ -86,33 +97,82 @@ pub fn sha256_hex(content: &str) -> String {
 /// 来源本身已经带血统时（副本再拷副本），旧的三行会被**换掉**而不是叠加：
 /// 叠加之后只有第一条读得出来，血统就成了骗人的。
 pub fn make_copy(src_text: &str, based_on: &str) -> String {
-    let sha = sha256_hex(src_text);
-    let release_time = parse_release_time_from_content(src_text);
-    let nl = if src_text.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
+    let body = strip_lineage_lines(src_text);
+    let lineage = Lineage {
+        based_on: Some(based_on.to_owned()),
+        based_on_release_time: parse_release_time_from_content(src_text),
+        based_on_sha256: Some(sha256_hex(src_text)),
     };
+    let block = lineage_block(&lineage, newline_of(&body));
+    splice_lineage(&body, &block)
+}
 
-    let stripped = strip_lineage_lines(src_text);
-    let at = header_block_end(&stripped);
+/// **保存回同一份**（第八层）：把编辑后的正文写回它自己，**出处那三行原样保留**。
+///
+/// 与 [`make_copy`] 的区别只有一件事：**那三行的来源**。
+/// 建副本是"我从哪来"（从**来源**算：来源的全文摘要 + 来源的 `release_time`）；
+/// 写回自己时出处没变，所以**照抄文件里原来那三行** —— 重新算的话，
+/// 摘要会变成"我自己那份改过的字节"，血统就说不出它是从哪一版官方派生的了。
+///
+/// `existing` 是 `None`（这份文件本来就没有血统：手工拷的 / 别的程序写出来的）⇒
+/// 正文原样写回，**不编一个出处**。
+///
+/// 另一条用途：**保存一份没改过的副本 = 文件逐字节不变**（下面那条判据咬着），
+/// 因为插入位置与内容都与原来那次插入一致。
+pub fn rewrite_keeping_lineage(edited_text: &str, existing: Option<&Lineage>) -> String {
+    let body = strip_lineage_lines(edited_text);
+    let Some(lineage) = existing else {
+        return body;
+    };
+    let block = lineage_block(lineage, newline_of(&body));
+    splice_lineage(&body, &block)
+}
 
-    let mut block = String::new();
-    block.push_str(&format!("# based_on: {based_on}{nl}"));
-    if let Some(rt) = release_time {
-        block.push_str(&format!("# based_on_release_time: {rt}{nl}"));
-    }
-    block.push_str(&format!("# based_on_sha256: {sha}{nl}"));
-
-    let mut out = String::with_capacity(stripped.len() + block.len());
-    out.push_str(&stripped[..at]);
-    out.push_str(&block);
-    out.push_str(&stripped[at..]);
+/// 三行血统的文本（每行带换行）。**缺谁就不写谁** —— 不知道的东西不许拿默认值假装知道。
+fn lineage_block(lineage: &Lineage, nl: &str) -> String {
+    let mut out = String::new();
+    let mut push = |key: &str, value: Option<&str>| {
+        if let Some(v) = value.filter(|v| !v.is_empty()) {
+            out.push_str(&format!("# {key}: {v}{nl}"));
+        }
+    };
+    push("based_on", lineage.based_on.as_deref());
+    push(
+        "based_on_release_time",
+        lineage.based_on_release_time.as_deref(),
+    );
+    push("based_on_sha256", lineage.based_on_sha256.as_deref());
     out
 }
 
+/// 把血统三行插到正文的**头注释块末尾**（正文其余字节一个都不动）
+fn splice_lineage(body: &str, block: &str) -> String {
+    if block.is_empty() {
+        return body.to_owned();
+    }
+    let at = header_block_end(body);
+    let mut out = String::with_capacity(body.len() + block.len());
+    out.push_str(&body[..at]);
+    out.push_str(block);
+    out.push_str(&body[at..]);
+    out
+}
+
+/// 这份文本用哪个行尾（跟着它自己，别混进另一种）
+fn newline_of(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 /// 把已有的 `# based_on*` 行整行删掉（含行尾），其余字节原样。
-fn strip_lineage_lines(text: &str) -> String {
+///
+/// **两条写路的公共前半段**（剪掉 → 重新插入），也用于"打开我那份进编辑器"
+/// （第八层：编辑器里给的是**正文**，那三行是程序的元数据，不是用户该改的内容）。
+/// 判据用它比较"剪完是否与来源逐字节相同"。
+pub fn strip_lineage_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (line, term) in lines_with_terminators(text) {
         if is_lineage_line(line) {
@@ -351,5 +411,71 @@ offset = { x = -1, y = 18.6, z = 4 } # 笔尖偏移
         let text = format!("# based_on_extra: nope\n# based_on: mkp/presets/A1.toml\n{SRC}");
         let got = parse_lineage_from_content(&text).expect("有一项就算有");
         assert_eq!(got.based_on.as_deref(), Some("mkp/presets/A1.toml"));
+    }
+
+    /* ---------- 写回自己（第八层） ---------- */
+
+    /// **出处不变**：写回时那三行照抄原来的 —— 摘要不许变成"我自己改过的字节"
+    #[test]
+    fn saving_back_keeps_the_original_lineage() {
+        let copy = make_copy(SRC, "mkp/presets/A1-standard.toml");
+        let lineage = parse_lineage_from_content(&copy).expect("副本该有血统");
+        let edited = strip_lineage_for_compare(&copy).replace("-1", "-2");
+
+        let saved = rewrite_keeping_lineage(&edited, Some(&lineage));
+
+        assert_eq!(
+            strip_lineage_for_compare(&saved),
+            edited,
+            "正文就是改过的那份"
+        );
+        let after = parse_lineage_from_content(&saved).expect("血统还在");
+        assert_eq!(after, lineage, "出处那三行一个字都没变");
+        assert_ne!(
+            after.based_on_sha256.as_deref(),
+            Some(sha256_hex(&edited).as_str()),
+            "摘要要是**来源**那份全文的，不是我自己改过的字节 —— 否则血统就说不出从哪一版来"
+        );
+    }
+
+    /// **保存一份没改过的副本 = 文件逐字节不变**（两条写路共用同一个插入规则）
+    #[test]
+    fn saving_an_untouched_copy_changes_nothing() {
+        let copy = make_copy(SRC, "mkp/presets/A1-standard.toml");
+        let lineage = parse_lineage_from_content(&copy).expect("副本该有血统");
+
+        assert_eq!(
+            rewrite_keeping_lineage(strip_lineage_for_compare(&copy).as_str(), Some(&lineage)),
+            copy,
+            "打开又保存、什么都没改，文件必须逐字节不变"
+        );
+    }
+
+    /// 没有血统的那份（手工拷的 / 别的程序写的）写回时**不编一个出处**
+    #[test]
+    fn saving_back_without_lineage_writes_no_lineage() {
+        let saved = rewrite_keeping_lineage(SRC, None);
+        assert_eq!(saved, SRC);
+        assert_eq!(parse_lineage_from_content(&saved), None);
+    }
+
+    /// 行尾跟着**正文自己**：CRLF 的那份改了再存还是 CRLF，不许混进裸 `\n`
+    #[test]
+    fn saving_back_keeps_the_line_endings() {
+        let copy = make_copy(&SRC.replace('\n', "\r\n"), "mkp/presets/A1-standard.toml");
+        let lineage = parse_lineage_from_content(&copy).expect("副本该有血统");
+        let body = strip_lineage_for_compare(&copy).replace("-1", "-2");
+
+        let saved = rewrite_keeping_lineage(&body, Some(&lineage));
+        let block: String = saved
+            .lines()
+            .filter(|l| l.trim_start().starts_with("# based_on"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(block.contains("# based_on:"), "三行还在");
+        assert!(
+            saved.contains("# based_on: mkp/presets/A1-standard.toml\r\n"),
+            "插回去的三行也要是 CRLF"
+        );
     }
 }

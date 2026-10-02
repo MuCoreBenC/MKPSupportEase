@@ -90,7 +90,11 @@ import {
   MINE_APPLY_WHY,
   MINE_BODY_WHY,
   MINE_DRAWER,
+  MINE_EDIT_TEXT,
+  MINE_EDIT_WHY,
   MINE_NOT_PRESET_WHY,
+  MINE_UNREADABLE_TEXT,
+  mineUnreadableWhy,
   DOWNLOAD_WHY,
   EDIT_TEXT,
   EDIT_WHY,
@@ -106,6 +110,7 @@ import {
   LIVE_WHY,
   NO_ASSET_WHY,
   NO_STAT_WHY,
+  SLICER_RELEASE_WHY,
   originChip,
   UNKNOWN,
   versionsText,
@@ -155,7 +160,10 @@ interface Props {
   onOpenArchive: (row: PresetTableRow) => void
   /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**） */
   onOpenMine: (row: PresetTableRow) => void
-  /** 开始改这一份（临时编辑那条链）—— 只有"与目录一致"的交付行给这个入口 */
+  /**
+   * 开始改这一份（临时编辑那条链）。两条线共一个入口：
+   * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
+   */
   onEdit: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
@@ -340,6 +348,18 @@ export default function PresetTable({
                           {BASED_ON_TEXT.outdated}
                         </span>
                       )}
+                      {/*
+                       * 第九层：读不出来的那一份（编码 / TOML 语法 / 指向用户根之外）——
+                       * 一眼看得见；为什么读不出来在 title 里。**照常列出来**，不藏。
+                       */}
+                      {row.scope === 'local' && row.mineState === 'unreadable' && (
+                        <span
+                          className={s.unreadable}
+                          title={mineUnreadableWhy(row.mineStateDetail)}
+                        >
+                          {MINE_UNREADABLE_TEXT}
+                        </span>
+                      )}
                     </span>
                     {/* 第二行等宽小字：给人核对磁盘位置的，不是标题 */}
                     <span className={s.path} title={row.path}>
@@ -402,9 +422,18 @@ export default function PresetTable({
                         /*
                          * **用户自己那份也能被应用**（第七层）：与官方那份同一个入口、
                          * 同一条底账 —— "只读"是文件归属的属性，不是"能不能被使用"的属性。
-                         * 认不出是 MKP 预设的那几份（`.json`）不给按钮，只说明为什么。
+                         * 两档不给按钮（不给必报错的按钮）：认不出是 MKP 预设的（`.json`），
+                         * 以及**第九层读不出来的**（后端 `read_preset_text` 的第一关就会拒）。
                          */
-                        row.kind === 'mkp_preset' ? (
+                        row.kind !== 'mkp_preset' ? (
+                          <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
+                            {DASH_}
+                          </span>
+                        ) : row.mineState === 'unreadable' ? (
+                          <span className={s.actNone} title={mineUnreadableWhy(row.mineStateDetail)}>
+                            {DASH_}
+                          </span>
+                        ) : (
                           <button
                             type="button"
                             className={s.actBtn}
@@ -414,11 +443,18 @@ export default function PresetTable({
                           >
                             {ACTION_TEXT.mkp}
                           </button>
-                        ) : (
-                          <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
-                            {DASH_}
-                          </span>
                         )
+                      ) : row.releaseUid !== undefined && row.kind !== 'mkp_preset' ? (
+                        /*
+                         * 切片器那一类的交付行（catalog 登记、能下载）在本地表里**没有可点的动作**：
+                         * 不能「应用」（使用中指针只认 MKP 预设）；「复制」那条路只认资产库的
+                         * asset id —— 原来这里画的是「复制」，点了**静静没反应**
+                         * （`runLive` 里 assetId 是 undefined 就 return）。给一个点了没反应的
+                         * 按钮，与"点了必报错"同罪：不给。
+                         */
+                        <span className={s.actNone} title={SLICER_RELEASE_WHY}>
+                          {DASH_}
+                        </span>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
                         /* 官方副本没有 asset id 时也应用不了（契约那两个写只认 asset id） */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
@@ -519,6 +555,22 @@ export default function PresetTable({
                         )}
 
                         {/*
+                         * 第九层：读不出来那一份，把"为什么"写在原地（原因来自后端）。
+                         * 它只是读不出来 —— 文件还是用户自己的，程序不动它。
+                         */}
+                        {row.origin === 'mine' && row.mineState === 'unreadable' && (
+                          <>
+                            <dt className={s.factKey}>文件</dt>
+                            <dd
+                              className={s.factVal}
+                              title={mineUnreadableWhy(row.mineStateDetail)}
+                            >
+                              {MINE_UNREADABLE_TEXT}
+                            </dd>
+                          </>
+                        )}
+
+                        {/*
                          * 状态：交付预设那一档说的是**本机那一份的三态**（未下载 / 已下载 /
                          * 需更新），其余来源说"生效没生效"。两件事不混一句
                          * ——「已应用」不等于"本机这份是对的"，所以需更新时两个都写。
@@ -586,11 +638,14 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 临时编辑的入口：**只有"与目录一致"的交付行**给 ——
+                         * 临时编辑的入口：**只有"与目录一致"的 MKP 交付行**给 ——
                          * 没下载（missing）就没有正文可改；需更新（stale）那一份的内容本身存疑，
-                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）。
+                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）；
+                         * 切片器那一类也不是预设正文，改无从谈起。
                          */}
-                        {row.origin === 'release' && row.releaseState === 'ok' && (
+                        {row.origin === 'release' &&
+                          row.kind === 'mkp_preset' &&
+                          row.releaseState === 'ok' && (
                           <>
                             <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
                             <dd className={s.factVal}>
@@ -607,9 +662,12 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 用户线那一份：**只读**的正文入口。
-                         * 改它 / 另存都要先经过"改这份"那条链（点它会另存出一份自己的）——
-                         * 这里只给看，不给就地改官方那一份。
+                         * 用户线那一份：**看正文** + **改这份**（第八层）。
+                         * 两条都是它自己的入口：改的是临时文件，保存时**写回它自己**
+                         * （不另存一份新的、也不碰官方原件）。
+                         * 认不出是哪一类的那份（`.json`）不给「改」—— 这一层只改 TOML 预设；
+                         * **第九层读不出来的**也不给（改的入口同样过文件级检查）。
+                         * 看正文照旧给：用户要能看着它去修（读它不算"用"）。
                          */}
                         {row.origin === 'mine' && (
                           <>
@@ -622,6 +680,23 @@ export default function PresetTable({
                                 onClick={() => onOpenMine(row)}
                               >
                                 {MINE_DRAWER.open}
+                              </button>
+                            </dd>
+                          </>
+                        )}
+                        {row.origin === 'mine' &&
+                          row.kind === 'mkp_preset' &&
+                          row.mineState !== 'unreadable' && (
+                          <>
+                            <dt className={s.factKey}>{MINE_EDIT_TEXT.cell}</dt>
+                            <dd className={s.factVal}>
+                              <button
+                                type="button"
+                                className={s.factLink}
+                                title={MINE_EDIT_WHY}
+                                onClick={() => onEdit(row)}
+                              >
+                                {MINE_EDIT_TEXT.open}
                               </button>
                             </dd>
                           </>

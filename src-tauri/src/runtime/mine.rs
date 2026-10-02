@@ -23,20 +23,43 @@
 //! 于是"官方换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
 //! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
 //!
-//! # 读在上面，写只在一处
+//! # 第九层：文件级的"能不能用"（**不复制 Preset schema**）
 //!
-//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写只有 [`commit_draft`] 一处**
-//! （另存成用户那份，第 5 层）。"在应用内继续编辑用户自己那份"还没做（登记在案）——
-//! 那会新增一条**写用户根**的路径，要单独一层。今天真机上 `presets-mine/` 多半是空的 ——
-//! **空是合法状态，不是错误**。
+//! 用户文件与官方文件的可信规则**本来就不同**（作者 2026-10-02 定的口径）：
+//!
+//! - 官方线要 **SHA**：盘上那份与目录登记逐字节一致才可信（见 [`super::delivery`]）；
+//! - 用户线**只看文件级**：路径在 `presets-mine/` 里 + 能读 + 是 UTF-8 + **TOML 语法能解析**。
+//!   外部修改是**正常事**（他拿 VS Code 改一行不是异常），**不因 SHA 变化报警**。
+//!
+//! 这里**不判"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对）—— 那是 Preset 语义，
+//! 属 `mkpse-preset`；默认构建**不编**那个 crate（隔离纪律，那是 workbench feature 的事），
+//! 所以这一层**不许**复制一份 schema 来判结构 / 参数。语义那一档留给"应用 / 编辑"这类
+//! 真正要解析的入口上的真正 Preset 能力（HANDOFF §3.5 第 9 层）。
+//!
+//! # 读在上面，写只有两条（都是"写我自己的文件"）
+//!
+//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有两个函数**，
+//! 对应两条**不同**的事，不许合并成一个"存一下"：
+//!
+//! ```text
+//! commit_draft  另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
+//! save_back     写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
+//! ```
+//!
+//! 两条共用一句话：**官方原件（`mkp/` 与下载区）一概不碰**。区别只在"落点是谁"与
+//! "那三行血统从哪来"：另存是新的一份、血统从**来源**算；写回还是同一份、血统
+//! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
+//! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 use crate::fsx::paths::MINE_DIR;
 
+use super::catalog::kind::PRESET;
 use super::catalog::Catalog;
 use super::lineage::{self, Lineage};
+use super::state::{ActiveOrigin, ActivePreset, PresetDraft};
 
 /// 读血统时最多看文件头这么多字节。
 ///
@@ -60,6 +83,12 @@ pub struct MineFile {
     /// 它从哪一份官方、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
     /// （手工拷的、或别的程序写出来的）—— **不是错误**
     pub lineage: Option<Lineage>,
+    /// 第九层的**文件级**状态（见 [`MineState`]）。`None` = 不是预设候选
+    /// （[`kind_of`] 认不出是哪一类），它没有"能不能当预设用"这一档
+    pub state: Option<MineState>,
+    /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
+    /// 能用 / 不适用时是 `None`
+    pub state_detail: Option<String>,
 }
 
 /// 这份用户文件**基于的官方版本**现在怎么样了。
@@ -75,6 +104,29 @@ pub enum BasedOn {
     Outdated,
     /// 说不清：没有血统，或血统指的那一份已经不在目录里（换源 / 下线 / 改过名）
     Unknown,
+}
+
+/// 第九层：这份用户文件**文件级**上能不能被安全使用。
+///
+/// 三档里只有两档 —— 别在这里加"是不是一份合法 MKP Preset"那一档：语义不在客户端判
+/// （见模块头；判据见 [`toml_syntax_reason`] 与 [`read_preset_text`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MineState {
+    /// 存在 + 路径在用户根里 + 能读 + 是 UTF-8 + TOML 语法能解析
+    Ok,
+    /// 读不出来：读盘失败 / 不是 UTF-8 / TOML 语法不对 / 指向用户根之外。
+    /// 界面上这一档显示"文件无法读取"，**不许应用 / 编辑**（原因在 `state_detail`）
+    Unreadable,
+}
+
+impl MineState {
+    /// 跨 IPC 的稳定词（serde 到界面就是这两个；前端契约里同名）
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MineState::Ok => "ok",
+            MineState::Unreadable => "unreadable",
+        }
+    }
 }
 
 /// 读一份文件的头注释（最多 [`LINEAGE_READ_LIMIT`] 字节）拿血统。
@@ -155,6 +207,48 @@ pub fn kind_of(file_name: &str) -> Option<&'static str> {
         .then_some("mkp_preset")
 }
 
+/// TOML 语法这一关（**文件级**，不是 Preset schema）：能解析 ⇒ `None`；不能 ⇒ 一句人话原因。
+///
+/// 用的是客户端本来就在编的 `toml_edit`（`presetdata` 读 `presets/*.toml` 同一条管线）——
+/// 只回答"这是不是一段能读的 TOML"，**不回答"是不是一份 MKP 预设"**。
+pub fn toml_syntax_reason(text: &str) -> Option<String> {
+    let err = text.parse::<toml_edit::DocumentMut>().err()?;
+    let at = err.span().and_then(|span| {
+        let upto = text.get(..span.start)?;
+        let line = upto.matches('\n').count() + 1;
+        let col = upto
+            .rsplit('\n')
+            .next()
+            .map_or(1, |l| l.chars().count() + 1);
+        Some((line, col))
+    });
+    Some(match at {
+        Some((line, col)) => format!("TOML 语法不对（第 {line} 行第 {col} 列）"),
+        None => "TOML 语法不对".to_owned(),
+    })
+}
+
+/// 一份认得出的预设候选（`.toml`）的文件级判定：能读 + UTF-8 + TOML 语法。
+/// 读不出来给一句人话原因（**读盘都失败**和**语法不对**分开说）。
+fn preset_file_state(path: &Path) -> (Option<MineState>, Option<String>) {
+    let Ok(bytes) = std::fs::read(path) else {
+        return (
+            Some(MineState::Unreadable),
+            Some("读不出来（文件不在了 / 读不动）".to_owned()),
+        );
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return (
+            Some(MineState::Unreadable),
+            Some("不是 UTF-8 文本，读不出来".to_owned()),
+        );
+    };
+    match toml_syntax_reason(&text) {
+        None => (Some(MineState::Ok), None),
+        Some(reason) => (Some(MineState::Unreadable), Some(reason)),
+    }
+}
+
 /// 用户自己的文件有哪些（**按路径升序** —— `read_dir` 的顺序是文件系统说的，不稳定，
 /// 界面要一个每次刷新都一样的表）。
 ///
@@ -185,10 +279,36 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
+            let kind = kind_of(&file_name);
+            /*
+             * 第九层：先过"路径合法"这道闸（与读正文 / 应用 / 编辑同一道 `resolve_in`）——
+             * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（血统也一样不读）。
+             * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
+             */
+            let (lineage, state, state_detail) =
+                match crate::fsx::paths::resolve_in(user_root, &rel) {
+                    Err(_) => (
+                        None,
+                        (kind == Some(PRESET)).then_some(MineState::Unreadable),
+                        (kind == Some(PRESET)).then(|| {
+                            "它指向 presets-mine/ 外面 —— 程序不读用户根外面的东西".to_owned()
+                        }),
+                    ),
+                    Ok(real) => {
+                        let (state, detail) = if kind == Some(PRESET) {
+                            preset_file_state(&real)
+                        } else {
+                            (None, None)
+                        };
+                        (lineage_of_file(&real), state, detail)
+                    }
+                };
             out.push(MineFile {
                 path: rel,
-                kind: kind_of(&file_name),
-                lineage: lineage_of_file(&path),
+                kind,
+                lineage,
+                state,
+                state_detail,
                 file_name,
                 size: meta.len(),
                 modified_unix: meta
@@ -263,6 +383,75 @@ pub fn commit_draft(
     })
 }
 
+/// **把编辑后的正文写回它自己**（第八层）：**同一个路径、同一份文件，不产生第二份**。
+///
+/// 与 [`commit_draft`]（另存）只有两处不同：
+///
+/// - **落点是原来那条路径**，不是派生的新名字 —— 用户改的就是"我那份"，
+///   所以不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
+/// - **三行血统照抄文件里原来那三行**（出处没变，见
+///   [`super::lineage::rewrite_keeping_lineage`]）—— 保存之后它仍然说得清
+///   "我从哪一版官方派生"，也不会因为重算摘要变成"基于我自己改过的字节"。
+///   这份本来就没有血统（手工拷的 / 别的程序写出来的）⇒ 照实不写，**不编一个出处**。
+///
+/// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**：不去别处新建一份（那不是用户点的
+/// 那个"保存"），也不假装存成了。
+pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+        )));
+    }
+    /* 血统是**这份文件自己的属性**：先读出来再照抄回去（读不出来 = 它本来就没有） */
+    let lineage = lineage_of_file(&target);
+    let body = super::lineage::rewrite_keeping_lineage(text, lineage.as_ref());
+    crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
+    Ok(Committed {
+        path: rel.to_owned(),
+        file_name: target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| rel.to_owned()),
+        size: body.len() as u64,
+        /* 写的就是原来那一份所在的位置：当然是覆盖 */
+        replaced: true,
+    })
+}
+
+/// 读用户自己那份的正文（**只认 `presets-mine/`**，见 [`check_mine_prefix`]）。
+///
+/// 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来，不装成空正文。
+pub fn read_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    let bytes = std::fs::read(&target)
+        .map_err(|_| AppError::not_found(format!("找不到 {rel} —— 它可能已经被移走或删掉了")))?;
+    String::from_utf8(bytes)
+        .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+}
+
+/// 第九层：读一份用户预设，并过**文件级**检查（能读 + UTF-8 + TOML 语法）。
+///
+/// 应用 / 编辑两个入口都走它 —— 检查只有一处，不许各写一遍。**它不查 SHA**：
+/// 用户那份本来就是允许改的，"还能不能被认成一份能读的 TOML"才是用户线的可信度问题。
+/// **它也不判 Preset 结构**（那要真正的 Preset 能力，见模块头）。
+pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
+    let text = read_text(user_root, rel)?;
+    if let Some(err) = text.parse::<toml_edit::DocumentMut>().err() {
+        let reason = toml_syntax_reason(&text).unwrap_or_else(|| "TOML 语法不对".to_owned());
+        return Err(AppError::corrupted(format!(
+            "{rel} 读不出来：{reason} —— 这一份现在不能应用、也不能改；先把它改回一份能读的 TOML"
+        ))
+        .with_detail(format!(
+            "第九层（文件级检查）：能读 + UTF-8 + TOML 语法；不判\"是不是合法 MKP Preset\"（语义）。\
+             解析器原文：{err}"
+        )));
+    }
+    Ok(text)
+}
+
 /// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
@@ -280,6 +469,218 @@ pub fn check_mine_prefix(rel: &str) -> Result<(), AppError> {
     crate::fsx::paths::check_relative(rel)
 }
 
+/* ---------- 第十层：用户文件管理（重命名 / 删除）—— 只动名字或删掉，不动字节 ---------- */
+
+/// 一份用户文件的落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileIdentity {
+    pub path: String,
+    pub file_name: String,
+}
+
+/// 新文件名的门槛：只在这层管"是不是一个像样的名字"。
+///
+/// - 空白去掉后不许空；不许带路径分隔符（**只改名字，不换目录** —— 跨文件夹搬动是
+///   "文件夹管理"，不在这层）；不许 `.` / `..`；
+/// - **后缀保持原样**（`.toml` 还是 `.toml`）—— 改名 / 复制都不该改变它算哪一类
+///   （类别的判据是 [`kind_of`]，它只看后缀）。
+pub(crate) fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
+    let name = new_name.trim();
+    if name.is_empty() {
+        return Err(AppError::invalid_argument("新名字不能是空的"));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(AppError::invalid_argument(
+            "新名字不能带路径 —— 这一层只改名字，不搬文件夹",
+        ));
+    }
+    if name == "." || name == ".." {
+        return Err(AppError::invalid_argument("这个名字不是一个文件名"));
+    }
+    let ext = |n: &str| {
+        Path::new(n)
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+    };
+    if ext(name) != ext(old_name) {
+        return Err(AppError::invalid_argument(
+            "后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）",
+        ));
+    }
+    Ok(name.to_owned())
+}
+
+/// 两个路径是不是同一个文件。只用来放行"大小写只差一档的改名"（见 [`rename_file`]）；
+/// 别的平台退化成"不是"—— 那一边这种改名会被当成重名挡下，宁可响。
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => ma.dev() == mb.dev() && ma.ino() == mb.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_file(_a: &Path, _b: &Path) -> bool {
+    false
+}
+
+/// **重命名**一份用户文件（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+/// TOML 都不重写（判据逐字节盯着）。改完还是同一份 Preset、还是同一类。
+///
+/// 使用中指针与草稿的跟改名不在这里做（那是 [`super::state`] 那两条 repoint 的事）——
+/// 这一层只碰用户根里的文件。
+pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
+    check_mine_prefix(rel)?;
+    let old = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !old.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        )));
+    }
+    let old_name = rel.rsplit('/').next().unwrap_or(rel);
+    let new_name = check_new_name(old_name, new_name)?;
+    /* 只换名字，不换目录：`presets-mine/我的/x.toml` 改完还在 `我的/` 里 */
+    let dir = rel.strip_suffix(old_name).unwrap_or("presets-mine/");
+    let new_rel = format!("{dir}{new_name}");
+    check_mine_prefix(&new_rel)?;
+    if new_rel == rel {
+        return Ok(FileIdentity {
+            path: new_rel,
+            file_name: new_name,
+        });
+    }
+    let new_path = crate::fsx::paths::resolve_in(user_root, &new_rel)?;
+    /*
+     * 不覆盖：落点已经有东西就拒绝。**同一个文件**除外 —— 大小写只差一档的改名
+     * 在大小写不敏感的文件系统（macOS 默认）上"落点已存在"指的正是它自己。
+     */
+    if new_path.exists() && !same_file(&old, &new_path) {
+        return Err(AppError::invalid_argument(format!(
+            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        )));
+    }
+    std::fs::rename(&old, &new_path)
+        .map_err(|e| AppError::io(format!("{rel} 改名没成")).with_detail(e.to_string()))?;
+    Ok(FileIdentity {
+        path: new_rel,
+        file_name: new_name,
+    })
+}
+
+/// **另存为一份新的**（第十一层）：把 `rel` 那一份**按字节**复制成同一格里另一份新的用户文件。
+///
+/// 与第八层"官方 → 我的文件"那条另存分开（那条改的是内容、要重写血统）—— 这一层是
+/// **我的文件 → 我的文件**，而且**不做任何"智能"**：
+///
+/// - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算
+///   （来源已经是用户文件，重算会把"从哪一版官方派生"说错）；原文件一个字节不动；
+/// - 新名字过[同一套门槛](check_new_name)（不许空 / 不许带路径 / 后缀保持原样）；
+///   落点已有东西就**拒绝**（不覆盖、也**不自动改名** —— 名字由用户自己换）；
+/// - **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
+///   新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
+///
+/// 它不读内容、不查状态（"纯文件操作"，与改名 / 删除同族）：连读不出来的那份也能复制，
+/// 复制出来还是读不出来的（状态照实）。
+pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
+    check_mine_prefix(rel)?;
+    let old = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !old.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        )));
+    }
+    let old_name = rel.rsplit('/').next().unwrap_or(rel);
+    let new_name = check_new_name(old_name, new_name)?;
+    /* 只换名字，不换目录：新的一份落在原来那一格（与改名同一条规矩） */
+    let dir = rel.strip_suffix(old_name).unwrap_or("presets-mine/");
+    let new_rel = format!("{dir}{new_name}");
+    check_mine_prefix(&new_rel)?;
+    if new_rel == rel {
+        return Err(AppError::invalid_argument(
+            "新名字和原来一样 —— 复制要起个不同的名字",
+        ));
+    }
+    let new_path = crate::fsx::paths::resolve_in(user_root, &new_rel)?;
+    if new_path.exists() {
+        return Err(AppError::invalid_argument(format!(
+            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        )));
+    }
+    let bytes = std::fs::read(&old)
+        .map_err(|e| AppError::io(format!("{rel} 读不出来")).with_detail(e.to_string()))?;
+    /* 写盘走全仓唯一那个出口（`clippy.toml` 禁 `std::fs::write`） */
+    crate::fsx::atomic::atomic_write(&new_path, &bytes)?;
+    Ok(FileIdentity {
+        path: new_rel,
+        file_name: new_name,
+    })
+}
+
+/// **删除**一份用户文件（第十层）：**真删除** —— 没有垃圾桶，也没有归档
+/// （作者 2026-10-02 定死：`archive/` 是官方版本生命周期的一部分，用户自己删自己的文件
+/// 不搞第二套"用户历史"）。
+///
+/// 两道硬闸都在入口（`active` / `draft` 由调用方从 `run/` 读出来传进来）：
+///
+/// - **正在使用的那一份不许删**：删了 `run/active-preset.json` 就指向一份不存在的文件
+///   （悬空的"使用中"）。先换用别的配置、或者撤销使用，再来删；
+/// - **还有没保存的草稿不许删**：删了那张草稿就成一张永远存不回去的纸（写回要文件在）。
+///   先「保存回我这份」或「放弃这次编辑」，再来删。
+pub fn delete_file(
+    user_root: &Path,
+    rel: &str,
+    active: Option<&ActivePreset>,
+    draft: Option<&PresetDraft>,
+) -> Result<(), AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        )));
+    }
+    if let Some(state) = active {
+        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
+            return Err(AppError::invalid_argument(format!(
+                "{rel} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。\
+                 先换成别的配置、或者撤销使用，再来删"
+            )));
+        }
+    }
+    if let Some(state) = draft {
+        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
+            return Err(AppError::invalid_argument(format!(
+                "{rel} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删"
+            )));
+        }
+    }
+    std::fs::remove_file(&target)
+        .map_err(|e| AppError::io(format!("{rel} 删不掉")).with_detail(e.to_string()))?;
+    Ok(())
+}
+
+/// **在文件管理器里显示**要用的落点（第十三层 · 文件外部管理的第一半）：
+/// 把一份用户文件解析成盘上的绝对路径 —— 打开窗口是系统的事（`ipc::mine::reveal_in_folder`
+/// 交给 `tauri-plugin-opener`），这一层只管"解析得对、门槛不破"。
+///
+/// 与改名 / 删除**同族**（纯文件操作）：
+/// - 只认「我的文件」那一格（`presets-mine/` 前缀 + [`crate::fsx::paths::resolve_in`]
+///   两道闸，含符号链接逃逸）；
+/// - **读不出来的那份也能显示** —— 它只是一份文件，打开文件夹不吃内容；
+/// - 文件不在了（外面删的）就说找不到（列表以磁盘为准，不去猜）。
+pub fn reveal_target(user_root: &Path, rel: &str) -> Result<PathBuf, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）"
+        )));
+    }
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +689,10 @@ mod tests {
     fn write(root: &Path, rel: &str, text: &str) {
         crate::fsx::atomic::atomic_write(&root.join(rel), text.as_bytes()).unwrap();
     }
+
+    /// 一份**语法上**过得去的 TOML。第九层的文件级检查只看语法（能读 + UTF-8 + TOML），
+    /// **不看 Preset 结构** —— 结构 / 参数是语义，客户端不判（模块头那一段）。
+    const VALID_TOML: &str = "[toolhead]\noffset_x = 1.0\n";
 
     /// 造一份目录登记（SHA/大小都对得上），用来试「基于的官方那一版现在是什么样」
     fn entry_bytes(name: &str, content: &str) -> super::super::catalog::CatalogFile {
@@ -319,25 +724,35 @@ mod tests {
     }
 
     /// 盘当底账：用户放进去了什么就列什么。路径**相对用户根**（`presets-mine/…`），
-    /// 大小与时刻是真值；子目录里的也算
+    /// 大小与时刻是真值；子目录里的也算。**第九层**：`.toml` 带上文件级状态，
+    /// 认不出的 `.json` 没有这一档（`None`，它本来就不是预设候选）
     #[test]
     fn mine_files_lists_what_the_user_put_there() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1-fast.toml", "涂胶 = 1");
-        write(root.path(), "presets-mine/我的/另存.toml", "涂胶 = 2");
+        write(root.path(), "presets-mine/A1-fast.toml", VALID_TOML);
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        write(root.path(), "presets-mine/切片器.json", "{}");
         write(root.path(), "exports/不该看见.json", "{}");
 
         let got = mine_files(root.path());
         let paths: Vec<&str> = got.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
-            vec!["presets-mine/A1-fast.toml", "presets-mine/我的/另存.toml",],
+            vec![
+                "presets-mine/A1-fast.toml",
+                "presets-mine/切片器.json",
+                "presets-mine/我的/另存.toml",
+            ],
             "按路径升序、只出 presets-mine 里的、子目录也出"
         );
         assert_eq!(got[0].file_name, "A1-fast.toml");
-        assert_eq!(got[0].size, "涂胶 = 1".len() as u64);
+        assert_eq!(got[0].size, VALID_TOML.len() as u64);
         assert!(got[0].modified_unix.is_some(), "时刻要带上");
         assert_eq!(got[0].kind, Some("mkp_preset"), ".toml 认得出来是 MKP 预设");
+        assert_eq!(got[0].state, Some(MineState::Ok), "能读 + TOML 语法过");
+        assert_eq!(got[0].state_detail, None);
+        assert_eq!(got[1].kind, None, ".json 认不出是哪一类");
+        assert_eq!(got[1].state, None, "认不出的没有\"能不能当预设用\"这一档");
     }
 
     /// **认不出就不认**：`.json` 可能是 bbs 也可能是 orca，光看扩展名分不出
@@ -432,12 +847,23 @@ mod tests {
     fn the_committed_copy_shows_up_in_mine_files() {
         let user = tempfile::tempdir().unwrap();
         let label = "mkp/presets/A1-standard.toml";
-        let done = commit_draft(user.path(), "我的 A1 涂胶.toml", label, "涂胶宽度 = 1.3").unwrap();
+        let done = commit_draft(
+            user.path(),
+            "我的 A1 涂胶.toml",
+            label,
+            VALID_TOML.trim_end(),
+        )
+        .unwrap();
 
         let listed = mine_files(user.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].path, done.path);
         assert_eq!(listed[0].kind, Some("mkp_preset"), ".toml 认得出");
+        assert_eq!(
+            listed[0].state,
+            Some(MineState::Ok),
+            "另存出来的那份：第九层的文件级检查过（能读 + TOML 语法）"
+        );
         assert_eq!(
             listed[0]
                 .lineage
@@ -447,6 +873,94 @@ mod tests {
             "列出来的时候就把血统读出来了"
         );
         assert!(check_mine_prefix(&done.path).is_ok(), "落点在那一格里");
+    }
+
+    /* ---------- 写回自己（第八层：改我那份 → 保存） ---------- */
+
+    /// **这一层的核心不变式**：改我那份 → 保存 = **写回同一份** ——
+    /// 不产生 `（已修改）2.toml`，血统还是当初那三行（出处没变）
+    #[test]
+    fn saving_back_writes_the_same_file_and_keeps_the_lineage() {
+        let user = tempfile::tempdir().unwrap();
+        let label = "mkp/presets/A1-standard.toml";
+        let done = commit_draft(user.path(), "A1-standard.toml", label, "涂胶宽度 = 1.0").unwrap();
+        let lineage = lineage_of_file(&user.path().join(&done.path)).expect("副本该有血统");
+        let edited = "涂胶宽度 = 1.4";
+
+        let back = save_back(user.path(), &done.path, edited).unwrap();
+
+        assert_eq!(back.path, done.path, "还是同一条路径，没有第二份");
+        assert_eq!(back.file_name, done.file_name);
+        assert!(back.replaced, "写的就是原来那一份所在的位置");
+        assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+
+        let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
+        assert_eq!(
+            lineage::strip_lineage_for_compare(&after),
+            edited,
+            "正文就是改过的那份"
+        );
+        assert_eq!(
+            lineage_of_file(&user.path().join(&back.path)),
+            Some(lineage),
+            "出处那三行一个字都没变 —— 不会变成\"基于我自己改过的字节\""
+        );
+    }
+
+    /// **什么都没改就什么都没发生**：打开又保存，文件逐字节不变
+    #[test]
+    fn saving_back_an_untouched_file_changes_nothing() {
+        let user = tempfile::tempdir().unwrap();
+        let done = commit_draft(
+            user.path(),
+            "A1-standard.toml",
+            "mkp/presets/A1-standard.toml",
+            "涂胶宽度 = 1.0",
+        )
+        .unwrap();
+        let before = std::fs::read(user.path().join(&done.path)).unwrap();
+        let body = lineage::strip_lineage_for_compare(&String::from_utf8_lossy(&before));
+
+        save_back(user.path(), &done.path, &body).unwrap();
+
+        assert_eq!(
+            std::fs::read(user.path().join(&done.path)).unwrap(),
+            before,
+            "打开又保存：逐字节不变"
+        );
+    }
+
+    /// 本来就没有血统的那份（手工拷的 / 别的程序写的）写回时**不编一个出处**
+    #[test]
+    fn saving_back_a_file_without_lineage_invents_none() {
+        let user = tempfile::tempdir().unwrap();
+        write(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.0");
+
+        let back = save_back(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.2").unwrap();
+
+        let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
+        assert_eq!(after, "涂胶宽度 = 1.2", "没有血统就不写血统");
+        assert_eq!(lineage_of_file(&user.path().join(&back.path)), None);
+    }
+
+    /// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**，不去别处新建一份
+    #[test]
+    fn saving_back_refuses_when_the_file_is_gone() {
+        let user = tempfile::tempdir().unwrap();
+        let e = save_back(user.path(), "presets-mine/已经不在了.toml", "涂胶 = 1").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+        assert!(
+            !user.path().join("presets-mine/已经不在了.toml").exists(),
+            "没有顺手建一份出来"
+        );
+    }
+
+    /// 写回也只认用户自己那一格：`exports/`、`../` 一概不碰
+    #[test]
+    fn saving_back_stays_in_the_mine_dir() {
+        let user = tempfile::tempdir().unwrap();
+        assert!(save_back(user.path(), "exports/x.toml", "涂胶 = 1").is_err());
+        assert!(save_back(user.path(), "../x.toml", "涂胶 = 1").is_err());
     }
 
     /* ---------- 基于官方哪一版（第七层：官方换版了没有） ---------- */
@@ -545,5 +1059,530 @@ mod tests {
         );
         assert!(check_mine_prefix("../secret.toml").is_err());
         assert!(check_mine_prefix("presets-mine/../../secret.toml").is_err());
+    }
+
+    /* ---------- 第九层：文件级检查（能读 + UTF-8 + TOML 语法；语义不在这里判） ---------- */
+
+    /// 语法坏的那一份：**列出来、照实说读不出来**（不藏起来，也不画成正常），
+    /// 原因要指得出是哪一行 —— 用户照着去修
+    #[test]
+    fn a_broken_toml_shows_up_as_unreadable() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/坏的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+
+        let got = mine_files(root.path());
+        let good = got.iter().find(|f| f.file_name == "好的.toml").unwrap();
+        assert_eq!(good.state, Some(MineState::Ok));
+        let broken = got.iter().find(|f| f.file_name == "坏的.toml").unwrap();
+        assert_eq!(broken.state, Some(MineState::Unreadable));
+        let why = broken.state_detail.as_deref().unwrap_or_default();
+        assert!(why.contains("第 2 行"), "原因要说得出在哪一行：{why}");
+    }
+
+    /// 非 UTF-8 的那一份：也是"读不出来"（不是"没血统"那种附加信息的缺 —— 这份是用不了）
+    #[test]
+    fn a_non_utf8_file_is_unreadable_too() {
+        let root = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("presets-mine/二进制的.toml"),
+            &[0xff, 0xfe, 0x00, 0x01],
+        )
+        .unwrap();
+
+        let got = mine_files(root.path());
+        assert_eq!(got[0].state, Some(MineState::Unreadable));
+        assert!(got[0]
+            .state_detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("UTF-8"));
+    }
+
+    /// 符号链接**指向用户根外面**：认得出名字，但**一个字节都不读**（血统也不读），
+    /// 状态是"读不出来"并说清为什么；根**内**的链接不算逃逸，照常能用
+    #[cfg(unix)]
+    #[test]
+    fn an_escaping_symlink_is_never_read() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write(
+            outside.path(),
+            "别人的.toml",
+            "# based_on: mkp/presets/别人的.toml\n[toolhead]\noffset_x = 1.0\n",
+        );
+        std::fs::create_dir_all(root.path().join("presets-mine")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("别人的.toml"),
+            root.path().join("presets-mine/跑出去.toml"),
+        )
+        .unwrap();
+        write(root.path(), "presets-mine/真的在的.toml", VALID_TOML);
+        std::os::unix::fs::symlink(
+            root.path().join("presets-mine/真的在的.toml"),
+            root.path().join("presets-mine/指回自己.toml"),
+        )
+        .unwrap();
+
+        let got = mine_files(root.path());
+        let escaping = got.iter().find(|f| f.file_name == "跑出去.toml").unwrap();
+        assert_eq!(escaping.state, Some(MineState::Unreadable));
+        assert!(
+            escaping
+                .state_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("外面"),
+            "原因要说清它指向外面"
+        );
+        assert_eq!(
+            escaping.lineage, None,
+            "根外的头一个字节都不读（血统也不许读出来）"
+        );
+
+        let inside = got.iter().find(|f| f.file_name == "指回自己.toml").unwrap();
+        assert_eq!(inside.state, Some(MineState::Ok), "根内链接照常能用");
+        assert_eq!(inside.lineage, None, "那份没有血统，链接也变不出血统来");
+    }
+
+    /// 应用 / 编辑那一道读：坏 TOML 被拦下（带着原因），但**看正文照旧**读得出来
+    /// （用户要能看着它去修）
+    #[test]
+    fn read_preset_text_blocks_the_broken_one_but_viewing_still_works() {
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path(),
+            "presets-mine/坏的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+
+        let ok = read_preset_text(root.path(), "presets-mine/好的.toml").unwrap();
+        assert_eq!(ok, VALID_TOML);
+
+        let err = read_preset_text(root.path(), "presets-mine/坏的.toml").unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Corrupted);
+        assert!(err.message.contains("读不出来"), "{}", err.message);
+        assert!(
+            err.message.contains("不能应用、也不能改"),
+            "要说清这一份现在用不了：{}",
+            err.message
+        );
+
+        assert_eq!(
+            read_text(root.path(), "presets-mine/坏的.toml").unwrap(),
+            "[toolhead]\noffset_x = (1",
+            "看正文不是\"用\"：坏文件也要读得出来，用户才能看着它去修"
+        );
+    }
+
+    /// **不拿 SHA 说话**：用户在外面改过一轮（字节全变了），只要还是能读的 TOML，
+    /// 照常通过 —— 第九层检的不是"和当初一样"，是"现在还能不能用"
+    #[test]
+    fn an_external_edit_that_still_parses_is_fine() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/我的.toml", VALID_TOML);
+        /* 拿别处的编辑器改过：改内容、写回（字节与上一行完全不同） */
+        write(
+            root.path(),
+            "presets-mine/我的.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+
+        let got = mine_files(root.path());
+        assert_eq!(got[0].state, Some(MineState::Ok));
+        assert!(read_preset_text(root.path(), "presets-mine/我的.toml").is_ok());
+    }
+
+    /* ---------- 第十层：改名 / 删除（只动名字或删掉，不动字节） ---------- */
+
+    /// 改名：**字节一个不动**（血统原样），旧名字没了、新名字在；
+    /// 子目录里的那份改完还在同一个子目录
+    #[test]
+    fn renaming_keeps_the_bytes_and_the_lineage() {
+        let root = tempfile::tempdir().unwrap();
+        let with_lineage = "# based_on: mkp/presets/A1-standard.toml\n[toolhead]\noffset_x = 1.0\n";
+        write(root.path(), "presets-mine/我的 A1.toml", with_lineage);
+        let before = format!(
+            "{:?}",
+            lineage_of_file(&root.path().join("presets-mine/我的 A1.toml"))
+        );
+
+        let done = rename_file(root.path(), "presets-mine/我的 A1.toml", "A1-高速版.toml").unwrap();
+        assert_eq!(done.path, "presets-mine/A1-高速版.toml");
+        assert_eq!(done.file_name, "A1-高速版.toml");
+        assert!(
+            !root.path().join("presets-mine/我的 A1.toml").exists(),
+            "旧名字那边不该还在"
+        );
+        let new_path = root.path().join("presets-mine/A1-高速版.toml");
+        assert_eq!(
+            std::fs::read(&new_path).unwrap(),
+            with_lineage.as_bytes(),
+            "字节一个不动"
+        );
+        assert_eq!(
+            format!("{:?}", lineage_of_file(&new_path)),
+            before,
+            "血统跟着文件走，改名动不了它"
+        );
+
+        /* 子目录里的那份：改完还在同一个子目录 */
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        let done = rename_file(root.path(), "presets-mine/我的/另存.toml", "另存-2.toml").unwrap();
+        assert_eq!(done.path, "presets-mine/我的/另存-2.toml");
+    }
+
+    /// 改名不改类别：换后缀被拒；带路径分隔符 / `.` / `..` / 空名字被拒；拒了之后原文件原地不动
+    #[test]
+    fn renaming_refuses_a_name_that_changes_the_kind_or_has_a_path() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+
+        for bad in ["A1.json", "A1", "A1.TOMLX"] {
+            let e = rename_file(root.path(), "presets-mine/A1.toml", bad).unwrap_err();
+            assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument, "{bad}");
+        }
+        for bad in ["子目录/A1.toml", "..", "  ", "A1\\x.toml"] {
+            assert!(
+                rename_file(root.path(), "presets-mine/A1.toml", bad).is_err(),
+                "{bad} 这种名字该被拒"
+            );
+        }
+        assert!(
+            root.path().join("presets-mine/A1.toml").exists(),
+            "拒了之后原文件必须还在原地"
+        );
+    }
+
+    /// **不覆盖**：落点已经有东西就拒绝，被撞的那份一个字节没动
+    #[test]
+    fn renaming_never_overwrites() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/B1.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+
+        let e = rename_file(root.path(), "presets-mine/A1.toml", "B1.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不覆盖"), "{}", e.message);
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/B1.toml")).unwrap(),
+            "[wiping]\nspeed = 80\n".as_bytes(),
+            "被撞的那份一个字节没动"
+        );
+        assert!(root.path().join("presets-mine/A1.toml").exists());
+    }
+
+    /// 改成同一个名字（前后空白去掉之后一样）：原地不动，不报错
+    #[test]
+    fn renaming_to_the_same_name_is_a_no_op() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        let done = rename_file(root.path(), "presets-mine/A1.toml", " A1.toml ").unwrap();
+        assert_eq!(done.path, "presets-mine/A1.toml");
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/A1.toml")).unwrap(),
+            VALID_TOML.as_bytes()
+        );
+    }
+
+    /// 删除是**真删除**：文件不在了，而且没有多出旁的东西（没有垃圾桶、没有归档）
+    #[test]
+    fn deleting_really_deletes() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+
+        delete_file(root.path(), "presets-mine/A1.toml", None, None).unwrap();
+        assert!(!root.path().join("presets-mine/A1.toml").exists());
+        let left: Vec<String> = std::fs::read_dir(root.path().join("presets-mine"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(left.is_empty(), "删掉就是删掉，不留档：{left:?}");
+    }
+
+    /// **正在使用的那一份不许删**（删了「使用中」就悬空）；正在用的是**别人**，照常删
+    #[test]
+    fn deleting_refuses_while_it_is_the_active_one() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
+        let active =
+            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+                .unwrap();
+
+        let e = delete_file(root.path(), "presets-mine/A1.toml", Some(&active), None).unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("正在使用"), "{}", e.message);
+        assert!(
+            root.path().join("presets-mine/A1.toml").exists(),
+            "拒了就不许动它"
+        );
+
+        delete_file(root.path(), "presets-mine/B1.toml", Some(&active), None).unwrap();
+        assert!(!root.path().join("presets-mine/B1.toml").exists());
+    }
+
+    /// **还有没保存的草稿不许删**（删了草稿就永远存不回去）；草稿改的是**别人**，照常删
+    #[test]
+    fn deleting_refuses_while_a_draft_is_open() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
+        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        let draft =
+            crate::runtime::state::save_draft(root.path(), &subject, "sha", "正文").unwrap();
+
+        let e = delete_file(root.path(), "presets-mine/A1.toml", None, Some(&draft)).unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("草稿"), "{}", e.message);
+        assert!(root.path().join("presets-mine/A1.toml").exists());
+
+        delete_file(root.path(), "presets-mine/B1.toml", None, Some(&draft)).unwrap();
+        assert!(!root.path().join("presets-mine/B1.toml").exists());
+    }
+
+    /// 两道闸只认用户线：官方线的指针 / 草稿（哪怕路径字段撞上）挡不住删用户文件
+    #[test]
+    fn the_delete_gates_only_apply_to_the_mine_line() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        let mut official =
+            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+                .unwrap();
+        official.origin = ActiveOrigin::Official;
+        let mut draft = crate::runtime::state::save_draft(
+            root.path(),
+            &crate::runtime::state::DraftSubject::official("A1.toml"),
+            "sha",
+            "正文",
+        )
+        .unwrap();
+        draft.path = Some("presets-mine/A1.toml".to_owned());
+
+        delete_file(
+            root.path(),
+            "presets-mine/A1.toml",
+            Some(&official),
+            Some(&draft),
+        )
+        .unwrap();
+        assert!(!root.path().join("presets-mine/A1.toml").exists());
+    }
+
+    /// 删除和改名一样只在 `presets-mine/` 那一格里：越界路径一概拒
+    #[test]
+    fn deleting_stays_in_the_mine_dir() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "exports/别动我.txt", "x");
+        assert!(delete_file(root.path(), "exports/别动我.txt", None, None).is_err());
+        assert!(delete_file(root.path(), "../外面.txt", None, None).is_err());
+        assert!(root.path().join("exports/别动我.txt").exists());
+    }
+
+    /* ---------- 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制） ---------- */
+
+    /// 复制是**字节复制**：新文件与原来那份逐字节相同（内容与血统原样带过去）、
+    /// 原文件不动；子目录里的那份复制出来还在同一个子目录
+    #[test]
+    fn copying_keeps_the_bytes_and_the_lineage() {
+        let root = tempfile::tempdir().unwrap();
+        let with_lineage = "# based_on: mkp/presets/A1-standard.toml\n[toolhead]\noffset_x = 1.0\n";
+        write(root.path(), "presets-mine/我的 A1.toml", with_lineage);
+
+        let done = copy_as_new(
+            root.path(),
+            "presets-mine/我的 A1.toml",
+            "我的 A1-第二份.toml",
+        )
+        .unwrap();
+        assert_eq!(done.path, "presets-mine/我的 A1-第二份.toml");
+        assert_eq!(done.file_name, "我的 A1-第二份.toml");
+        let new_path = root.path().join("presets-mine/我的 A1-第二份.toml");
+        assert_eq!(
+            std::fs::read(&new_path).unwrap(),
+            with_lineage.as_bytes(),
+            "字节复制：内容与血统一个字节不差"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/我的 A1.toml")).unwrap(),
+            with_lineage.as_bytes(),
+            "原文件一个字节不动"
+        );
+        assert_eq!(
+            format!("{:?}", lineage_of_file(&new_path)),
+            format!(
+                "{:?}",
+                lineage_of_file(&root.path().join("presets-mine/我的 A1.toml"))
+            ),
+            "血统原样带过去（不重算）"
+        );
+
+        /* 子目录里的那份：复制出来还在同一个子目录 */
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        let done =
+            copy_as_new(root.path(), "presets-mine/我的/另存.toml", "另存-副本.toml").unwrap();
+        assert_eq!(done.path, "presets-mine/我的/另存-副本.toml");
+    }
+
+    /// 复制与改名同一套名字门槛：换后缀 / 带路径 / `.` / `..` / 空全拒
+    #[test]
+    fn copying_uses_the_same_name_gate() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        for bad in ["A1.json", "子目录/A1.toml", "..", "  "] {
+            assert!(
+                copy_as_new(root.path(), "presets-mine/A1.toml", bad).is_err(),
+                "{bad} 这种名字该被拒"
+            );
+        }
+    }
+
+    /// **不覆盖**（目标已有就拒，被撞的那份与源都一个字节没动）；
+    /// **也不自动改名**（名字和原来一样也拒 —— 复制要起个不同的名字）
+    #[test]
+    fn copying_never_overwrites_and_never_renames_itself() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/B1.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+
+        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "B1.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不覆盖"), "{}", e.message);
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/B1.toml")).unwrap(),
+            "[wiping]\nspeed = 80\n".as_bytes(),
+            "被撞的那份一个字节没动"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/A1.toml")).unwrap(),
+            VALID_TOML.as_bytes()
+        );
+
+        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "A1.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不同的名字"), "{}", e.message);
+    }
+
+    /// 复制**一个状态都不碰**：使用中指针还是指着原来那份、草稿也还在原来那份上；
+    /// 新文件不会自称"使用中"，也没有跟着冒出一张草稿
+    #[test]
+    fn copying_touches_no_state_at_all() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        let active =
+            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+                .unwrap();
+        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        crate::runtime::state::save_draft(root.path(), &subject, "sha", "改到一半").unwrap();
+
+        copy_as_new(root.path(), "presets-mine/A1.toml", "A1-第二份.toml").unwrap();
+
+        let after_active = crate::runtime::state::load_active(root.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_active.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "使用中没动"
+        );
+        assert_eq!(after_active.file_name, active.file_name);
+        let after_draft = crate::runtime::state::load_draft(root.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_draft.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "草稿没被迁移"
+        );
+        assert_eq!(after_draft.text, "改到一半");
+    }
+
+    /// 复制的对象是**文件**，不是"能被读成 TOML 的文本"：二进制那份照样原样复制
+    /// （与改名 / 删除同族：纯文件操作，不设内容门槛）
+    #[test]
+    fn copying_does_not_require_readable_text() {
+        let root = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("presets-mine/二进制的.toml"),
+            &[0xff, 0xfe, 0x00, 0x01],
+        )
+        .unwrap();
+
+        let done = copy_as_new(
+            root.path(),
+            "presets-mine/二进制的.toml",
+            "二进制的-副本.toml",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(&done.path)).unwrap(),
+            &[0xff, 0xfe, 0x00, 0x01]
+        );
+    }
+
+    /// 复制和改名一样只在 `presets-mine/` 那一格里：越界路径一概拒
+    #[test]
+    fn copying_stays_in_the_mine_dir() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "exports/别动我.txt", "x");
+        assert!(copy_as_new(root.path(), "exports/别动我.txt", "副本.txt").is_err());
+        assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
+    }
+
+    /* ---------- 第十三层：在文件管理器里显示（只解析落点，窗口是系统的事） ---------- */
+
+    /// 解析出来的是用户根里那个**绝对路径**；读不出来的那份也能显示（文件管理同族）；
+    /// 子目录里的那份也认
+    #[test]
+    fn revealing_resolves_the_file_inside_the_user_root() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/能读的.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/读不出的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+
+        let target = reveal_target(root.path(), "presets-mine/能读的.toml").unwrap();
+        assert!(target.is_absolute(), "给系统的是绝对路径");
+        assert!(target.ends_with("presets-mine/能读的.toml"));
+        /* 坏的那份照样显示 —— 打开文件夹不吃内容 */
+        assert!(reveal_target(root.path(), "presets-mine/读不出的.toml").is_ok());
+
+        /* 子目录里的那份也认（用户可能自己分文件夹放） */
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        let nested = reveal_target(root.path(), "presets-mine/我的/另存.toml").unwrap();
+        assert!(nested.ends_with("presets-mine/我的/另存.toml"));
+    }
+
+    /// 只认「我的文件」那一格：`exports/`、`../` 一概拒（与改名 / 删除同一道闸）
+    #[test]
+    fn revealing_stays_in_the_mine_dir() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "exports/别动我.txt", "x");
+        assert!(reveal_target(root.path(), "exports/别动我.txt").is_err());
+        assert!(reveal_target(root.path(), "../外面.toml").is_err());
+    }
+
+    /// 文件不在了（外面删的）就说找不到 —— 不去猜、不去别处找
+    #[test]
+    fn revealing_a_missing_file_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let e = reveal_target(root.path(), "presets-mine/不存在.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+        assert!(e.message.contains("找不到"), "{}", e.message);
     }
 }

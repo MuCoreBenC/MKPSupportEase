@@ -1,9 +1,19 @@
 # 依赖与产物
 node_modules
-dist
-dist-ssr
-# 预设交付产物（人维护 presets/*.toml，机器生成 presets/dist/*）—— 不入库
-presets/dist/
+# Vite 的输出目录（**只指根上那一个**）。锚定 `/` 是必须的：裸 `dist` 会匹配任意
+# 层级的 dist 目录，于是把 `presets/dist/`（正式交付目录，见下）也一起吞了 ——
+# 第十八刀撤掉 `presets/dist/` 那条忽略却不起作用，就是被这一行拦的。
+/dist
+/dist-ssr
+# 预设交付产物 presets/dist/ **入库**（2026-10-02 第十八刀改判）。
+#
+# 旧裁决是"不入库"——那时把它当成一次性本地构建产物。现在产品契约变了：
+# 它是 **main 上的正式远端交付目录**，客户端 Bootstrap 读的就是
+# `raw.githubusercontent.com/.../main/presets/dist/source.json`。
+# 所以它必须进库。发布动作 = `npm run publish:presets`（校验 → 一次性分支 → PR → main）。
+#
+# 注意与 `presets/` 源数据的区别：源数据（*.toml / machines/ / registry/）是人维护的；
+# `presets/dist/` 是机器生成的产物，**只由发布命令动它**，别手工改。
 # 建了 workspace（b04 Task 13）之后，cargo 的产物目录在**仓库根**。
 # 老那一行留着：切换之前留下的 src-tauri/target 还在本机磁盘上，删不删由你
 target

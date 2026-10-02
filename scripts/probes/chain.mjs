@@ -1,5 +1,34 @@
 /*
- * P6 探针：**联动端到端** —— 工作台生成 → 上传云端 → 客户端同步 → 下载 → 应用。
+ * P6 探针：**工作台发布这一端**（生成 → 上传）＋ 客户端那一端的边界。
+ *
+ * # 这条链现在的真实形态（2026-10-02 重写）
+ *
+ * 原版走的是「工作台生成 → 上传 → 客户端同步 → 下载 → 应用」五步，两个入口同源、
+ * 共用一格 `localStorage`。**客户端那半条链已经结构性走不通**（不是键名过期那么简单）：
+ *
+ *   · 客户端的底账在 C4 收口时整体搬进了 Internal 根（catalog / `mkp/` / `run/`），
+ *     WebView 的 localStorage 不再住任何底账；
+ *   · 真机的同步 / 下载走**真数据源**（HTTP + 真盘）；浏览器里的假后端没有盘、也没有源，
+ *     下载会如实抛「浏览器里没有下载区」—— 那是对的，不是 bug。
+ *
+ * 所以这一份现在守两头：
+ *
+ *   工作台端   ① 勾「待生成」→ 生成 → ② 报的是真说明书的数（机型 / 版本 / 字段 / 带条件）
+ *              ② 点「上传到云端」→ 写进 `mkp.cloud.presets`（整份 release：说明书 + N 份 TOML）
+ *                → **刷新页面那一份还在**（这条管道工作台这一端真正的产物）
+ *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源；也不假装与工作台那一格联动）
+ *
+ * 客户端那半条链（下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
+ *   · `params-settings.mjs`  参数页照目录渲染、设置页「预设数据源」那一格全流程能走
+ *   · `presets.mjs`          下载如实拒、应用用户文件、「已应用」状态
+ *   · 真机那条链（工作台发布 `presets/dist` → 数据源地址 → 客户端下载 → 应用）
+ *     只在真机上跑得通 —— 归 `docs/PROJECT-AUDIT.md` ⑧「云端交付最终验收」的清单。
+ *     （2026-10-02：客户端「同步」页整页退役 —— 以前这里点的就是它；数据源那一格
+ *     搬去了设置页，客户端与工作台 `mkp.cloud.presets` 那一格的"没关系"没变。）
+ *
+ * **上次的教训也写在这儿**：原版最后几条断言读 `mkp.a40.package` / `mkp.a40.active` ——
+ * 那是 C4 退役的底账键，恒为 null（那几条早已结构性 FAIL，A41 记账里"在 main 上就红"
+ * 就有它们）。**读退役结构的探针比没有探针更糟：它红着，于是没人再看它。**
  *
  * # 为什么打的是 development + esnext 那一份（而不是 `npm run build:workbench` 的产物）
  *
@@ -9,22 +38,15 @@
  * **带了桩的那一份**单独打给探针用：
  *
  *   npm run build:workbench                                                    # 生产产物（闸门）
- *   $env:NODE_ENV='development'; $env:BUILD_WORKBENCH='1'
- *   npx vite build --target esnext --outDir node_modules/.cache/wb-probe/dist --emptyOutDir
+ *   NODE_ENV=development BUILD_WORKBENCH=1 npx vite build --target esnext \
+ *     --outDir node_modules/.cache/wb-probe/dist --emptyOutDir
  *   npx vite preview --outDir node_modules/.cache/wb-probe/dist --port 4174 --strictPort
  *   node scripts/probes/chain.mjs [http://localhost:4174]
  *
- * 两个入口**同源**（`index.html` 与 `workbench.html` 都挂在 4174 上），所以共用一格
- * `localStorage` —— 那正是这条链的物理形态（真实世界是同一台机器上的两个窗口）。
+ * 两个入口**同源**（`index.html` 与 `workbench.html` 都挂在 4174 上）。
  * 探针自己不起服务，**用完把 4174 那台关掉**。
  *
- * 每档尺寸一个全新 context（localStorage 空的 = 还没传过、还没同步过）：
- *   ① 工作台：勾「待生成」→ 生成 → ② 卡里报的是真说明书（机型 / 版本 / 字段 / 带条件）
- *   ② 工作台：点「上传到云端」→ 那一格真写进去了，且是**整份 release**（说明书 + N 份 TOML）
- *   ③ 客户端「同步」页：自动同步 → 状态「刚刚同步到最新」，**报的数与工作台同一份**
- *   ④ 客户端「预设」页云端表：多出「工作台发布 · x.y.z」几行 → 点「下载」→ 变「已下载」
- *   ⑤ 客户端「预设」页本地表：那一行在 → 点「应用」→ 变「已应用」
- *
+ * 每档尺寸一个全新 context（localStorage 空的 = 还没传过、还没同步过）。
  * 两档尺寸：Ultra 1760×900 / Compact 900×640。
  */
 import { mkdir } from 'node:fs/promises'
@@ -58,13 +80,24 @@ const flat = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
 const wbText = (page) => page.evaluate(() => document.querySelector('[class*="shellBody"]')?.innerText ?? '')
 const appText = (page) => page.evaluate(() => (document.querySelector('main')?.innerText ?? ''))
 
-/** 客户端本机那一份说明书的指纹（`STORAGE.clientPackage` 那一格） */
-const hashOf = (page) =>
+/** 云端那一格（`STORAGE.cloud`）里最后一份 release —— 工作台上传的产物 */
+const cloudEntryOf = (page) =>
   page.evaluate(() => {
-    const raw = localStorage.getItem('mkp.a40.package')
+    const raw = localStorage.getItem('mkp.cloud.presets')
     if (raw === null) return null
     try {
-      return JSON.parse(raw)?.package?.inputsHash ?? null
+      const list = JSON.parse(raw)
+      const e = list[list.length - 1]
+      return {
+        name: e.name,
+        version: e.version,
+        at: e.at,
+        presets: e.presets.length,
+        files: e.presets.map((p) => `${p.machineId}/${p.versionId}=${p.fileName}`),
+        fields: e.package.fields.length,
+        machines: e.package.machines.length,
+        hash: e.package.inputsHash,
+      }
     } catch {
       return null
     }
@@ -80,7 +113,7 @@ async function until(fn, ms = 5000) {
   }
 }
 
-/** 把两页的控制台 / 网络都盯上 —— 这一条链跨两个页面，哪一边红都算失败 */
+/** 把两页的控制台 / 网络都盯上 —— 这条链跨两个页面，哪一边红都算失败 */
 function wire(tag, page) {
   page.on('console', (m) => {
     if (m.type() !== 'error') return
@@ -103,7 +136,7 @@ for (const size of SIZES) {
   const tag = size.tag
   const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height } })
 
-  /* ---------- ①② 工作台：生成 → 上传 ---------- */
+  /* ---------- ① 工作台：生成 ---------- */
   const wbPage = await ctx.newPage()
   wire(tag, wbPage)
   await wbPage.goto(`${base}/workbench.html`, { waitUntil: 'load' })
@@ -114,7 +147,8 @@ for (const size of SIZES) {
 
   await wbPage.getByRole('button', { name: '全选待生成', exact: true }).first().click()
   await wbPage.getByRole('button', { name: /^生成 \d+ 项$/ }).first().click()
-  await until(async () => /preset\.toml × \d+ 份/.test(await wbText(wbPage)))
+  const built = await until(async () => /preset\.toml × \d+ 份/.test(await wbText(wbPage)))
+  const builtCount = Number(/preset\.toml × (\d+) 份/.exec(flat(await wbText(wbPage)))?.[1] ?? '0')
 
   const wbNumbers = /(\d+) 台机型 (\d+) 个版本 (\d+) 个字段 带条件 (\d+) 可选文件 (\d+)/.exec(
     flat(await wbText(wbPage)),
@@ -122,30 +156,16 @@ for (const size of SIZES) {
   check(
     tag,
     '① 工作台 ② 报的是真说明书（机型 / 版本 / 字段 / 带条件）',
-    wbNumbers !== null,
+    built && wbNumbers !== null,
     wbNumbers?.slice(1).join(' / ') ?? '没找到那几个数',
   )
   const [nMachines, nVersions, nFields, nConds] = wbNumbers?.slice(1, 5) ?? []
 
+  /* ---------- ② 工作台：上传 ---------- */
   await wbPage.getByRole('button', { name: '上传到云端', exact: true }).first().click()
   const wrote = await until(async () =>
     (await wbPage.evaluate(() => localStorage.getItem('mkp.cloud.presets')))?.includes('工作台发布') === true)
-  const entry = await wbPage.evaluate(() => {
-    const raw = localStorage.getItem('mkp.cloud.presets')
-    if (raw === null) return null
-    const list = JSON.parse(raw)
-    const e = list[list.length - 1]
-    return {
-      name: e.name,
-      version: e.version,
-      at: e.at,
-      presets: e.presets.length,
-      files: e.presets.map((p) => `${p.machineId}/${p.versionId}=${p.fileName}`),
-      fields: e.package.fields.length,
-      machines: e.package.machines.length,
-      hash: e.package.inputsHash,
-    }
-  })
+  const entry = await cloudEntryOf(wbPage)
   check(
     tag,
     '② 上传写进那一格，且是整份 release（说明书 + N 份 TOML）',
@@ -153,98 +173,56 @@ for (const size of SIZES) {
     JSON.stringify(entry),
   )
   if (entry === null) {
-    /* 后面几步全都要读这一份，没有它就没法继续 —— 报出来直接换档 */
-    check(tag, '③ 客户端同步（前一步没数据，跳过）', false, '上传没成功')
+    /* 后面两步全都要读这一份，没有它就没法继续 —— 报出来直接换档 */
+    check(tag, '② 上传的份数与生成报的一致（前一步没数据，跳过）', false, '上传没成功')
     await ctx.close()
     continue
   }
+  check(
+    tag,
+    '② 上传的份数与生成报的一致',
+    builtCount > 0 && entry.presets === builtCount,
+    `生成报 ${builtCount} 份 / 上传里 ${entry.presets} 份`,
+  )
 
-  /* ---------- ③ 客户端：自动同步 ---------- */
+  /* 刷新工作台页：那一份还在（这条管道工作台这一端真正的产物） */
+  await wbPage.reload({ waitUntil: 'load' })
+  await wbPage.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
+  const after = await cloudEntryOf(wbPage)
+  check(
+    tag,
+    '② 刷新之后那一格还在，且是同一份（留在机器上）',
+    after !== null && after.hash === entry.hash,
+    after === null ? '刷新后那一格空了' : `${after.hash} vs ${entry.hash}`,
+  )
+  await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-upload.png` })
+
+  /* ---------- ③ 客户端：那一端的边界（浏览器里不再读工作台那一格） ---------- */
   const appPage = await ctx.newPage()
   wire(tag, appPage)
   await appPage.goto(`${base}/index.html`, { waitUntil: 'load' })
   await appPage.waitForSelector('header nav', { timeout: 15000 })
-  await appPage.getByRole('button', { name: '同步', exact: true }).first().click()
-  const synced = await until(async () => {
-    const t = await appText(appPage)
-    return t.includes('刚刚同步到最新') || t.includes('已是最新')
-  }, 8000)
-  const syncText = flat(await appText(appPage))
+  await appPage.getByRole('button', { name: '设置', exact: true }).first().click()
+  await until(async () => (await appText(appPage)).includes('预设数据源'), 8000)
+  const setText = flat(await appText(appPage))
   /*
-   * 那一行状态在两种写法之间：**两次 effect** 的产物。
-   * `main.tsx` 挂着 `<StrictMode>`，挂载期 effect 跑两遍 —— 第一遍真同步（写进本机那一格），
-   * 第二遍再看已经是同一份指纹，于是报「已是最新」。两句都说明「本机与云端是同一份」，
-   * 所以这里两个都收；真正硬的判据是下面那条**指纹相等**。
+   * 客户端的底账现在是 catalog（随安装包走、程序管版本）；数据源那一格只答"下载去哪拿"
+   * —— 真实来源由构建注入（Bootstrap 那一刀），今天浏览器里如实说"没配"。
+   * **不再断言**「同步下来的是工作台刚发的那一份」：那是 C4 之前的结构
+   * （客户端读 `mkp.cloud.presets`），现在客户端与那一格没有关系。
+   * （2026-10-02 起客户端那一头的落点是**设置页** —— 「同步」页整页退役。）
    */
-  check(tag, '③ 客户端自动同步了（本机与云端是同一份）', synced, syncText.slice(0, 70))
   check(
     tag,
-    '③ 同步下来那份说明书与工作台那份**同指纹**',
-    (await hashOf(appPage)) === entry.hash,
-    `客户端 ${await hashOf(appPage)} / 工作台 ${entry.hash}`,
+    '③ 设置页的数据源那一格如实（浏览器里「还没配置」；不假装与工作台那一格联动）',
+    setText.includes('预设数据源') && setText.includes('还没配置'),
+    setText.slice(0, 80),
   )
-  check(
-    tag,
-    '③ 同步下来的是工作台刚发的那一份',
-    syncText.includes(entry.name) && syncText.includes(`包版本 ${entry.version}`),
-    `找「${entry.name}」`,
-  )
-  const pkgSummary = `${nMachines} 台机型 · ${nVersions} 个版本 · 说明书 ${nFields} 个字段（带条件 ${nConds}）`
-  check(
-    tag,
-    '③ 客户端报的数与工作台是同一份',
-    syncText.includes(pkgSummary),
-    `要「${pkgSummary}」，页面上是「${/台机型[^·]*·[^·]*·[^·]*/.exec(syncText)?.[0] ?? '（没找到）'}」`,
-  )
-  await appPage.screenshot({ path: `${shotDir}/chain-${tag}-sync.png` })
-
-  /* ---------- ④ 预设页 · 云端表：下载 ---------- */
-  await appPage.getByRole('button', { name: '预设', exact: true }).first().click()
-  await appPage.locator('main input[type="radio"][name="preset-kind"][value="mkp"]').click({ force: true })
-  await appPage.waitForTimeout(200)
-  await appPage.locator('main input[type="radio"][name="preset-scope"][value="cloud"]').click({ force: true })
-  await appPage.waitForTimeout(300)
-
-  const cloudRel = appPage.locator('main tbody tr').filter({ hasText: '工作台发布' })
-  const relCount = await cloudRel.count()
-  check(tag, '④ 云端表多出「工作台发布」几行', relCount >= 1, `行数 ${relCount}（上传了 ${entry.presets} 份）`)
-  if (relCount >= 1) {
-    const row0 = cloudRel.first()
-    const rowText = flat(await row0.innerText())
-    await row0.getByRole('button', { name: '下载', exact: true }).click()
-    const downloaded = await until(async () => flat(await row0.innerText()).includes('已下载'), 8000)
-    check(tag, '④ 点「下载」之后那一行变「已下载」', downloaded, `原样：「${rowText}」`)
-    await appPage.screenshot({ path: `${shotDir}/chain-${tag}-cloud.png` })
-  } else {
-    check(tag, '④ 点「下载」之后那一行变「已下载」', false, '没有可下载的行')
-  }
-
-  /* ---------- ⑤ 预设页 · 本地表：应用 ---------- */
-  await appPage.locator('main input[type="radio"][name="preset-scope"][value="local"]').click({ force: true })
-  await appPage.waitForTimeout(300)
-  const localRel = appPage.locator('main tbody tr').filter({ hasText: '工作台发布' })
-  const localCount = await localRel.count()
-  check(tag, '⑤ 下载之后本地表也有它了（下载 ≠ 使用，两格分开）', localCount >= 1, `行数 ${localCount}`)
-  if (localCount >= 1) {
-    const row0 = localRel.first()
-    await row0.getByRole('button', { name: '应用', exact: true }).click()
-    const applied = await until(async () => flat(await row0.innerText()).includes('已应用'), 8000)
-    check(tag, '⑤ 点「应用」之后那一行变「已应用」', applied, flat(await row0.innerText()))
-    const active = await appPage.evaluate(() => localStorage.getItem('mkp.a40.active'))
-    check(
-      tag,
-      '⑤ 唯一底账（STORAGE.clientActive）里记的是这一份',
-      active !== null && active.includes('release'),
-      (active ?? 'null').slice(0, 90),
-    )
-    await appPage.screenshot({ path: `${shotDir}/chain-${tag}-applied.png` })
-  } else {
-    check(tag, '⑤ 点「应用」之后那一行变「已应用」', false, '本地表里没有那一行')
-  }
+  await appPage.screenshot({ path: `${shotDir}/chain-${tag}-settings.png` })
 
   console.log(
-    `${tag.padEnd(8)} 工作台 ${nMachines} 机型 / ${nVersions} 版本 / ${nFields} 字段 · `
-    + `上传 ${entry.presets} 份 TOML（${entry.name}）· 客户端同步 → 下载 → 应用`,
+    `${tag.padEnd(8)} 工作台 ${nMachines} 机型 / ${nVersions} 版本 / ${nFields} 字段（带条件 ${nConds}）· `
+    + `上传 ${entry.presets} 份 TOML（${entry.name}）· 客户端边界如实`,
   )
   await ctx.close()
 }
@@ -262,4 +240,7 @@ if (problems.length > 0) {
   for (const p of problems) console.log(`  - ${p}`)
   process.exit(1)
 }
-console.log('联动一条链走通：工作台生成 → 上传 → 客户端同步 → 下载 → 应用（两档尺寸 0 console error / 0 个 >=400）')
+console.log(
+  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（数据源那一格说真话）'
+  + ' —— 两档尺寸 0 console error / 0 个 >=400',
+)

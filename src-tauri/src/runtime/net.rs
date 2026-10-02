@@ -36,7 +36,7 @@ use crate::error::AppError;
 
 use super::catalog::CatalogFile;
 use super::delivery::Source;
-use super::source::join_url;
+use super::source::{join_url, CATALOG_FILE};
 
 /// 一次请求的总时间上限（含连接与传完整个响应体）
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -303,11 +303,10 @@ fn tick(stage: Stage, file_name: &str, received: u64, total: Option<u64>, on_tic
     });
 }
 
-/// 远端的清单（manifest）。与文件本体走**同一个地址概念**——换源只改一处，
-/// 不会出现"清单在这个源、文件在另一个源"的错位
-pub fn get_manifest(base_url: &str) -> Result<Vec<u8>, AppError> {
-    let url = join_url(base_url, "catalog.json");
-    get_bytes(&url, &GetPlan::new("catalog.json"), &noop_tick)
+/// 远端的目录（catalog）。**收完整 URL** —— 地址怎么来的（手动根拼的 / Bootstrap
+/// 说的）不归它管：那是 [`super::source::resolve_source`] 的事，它只负责取。
+pub fn get_catalog(catalog_url: &str) -> Result<Vec<u8>, AppError> {
+    get_bytes(catalog_url, &GetPlan::new(CATALOG_FILE), &noop_tick)
 }
 
 /* ------------------------------- 远端的 Source 实现 ------------------------------- */
@@ -761,13 +760,13 @@ mod tests {
         );
     }
 
-    /// 清单与文件走同一个地址概念：换源不会一半换了另一半没换
+    /// 目录收取：地址由调用方定好（`resolve_source` 拼的 / Bootstrap 说的），这里只取
     #[test]
-    fn manifest_comes_from_the_same_base_url() {
+    fn catalog_comes_from_the_given_url() {
         let manifest = r#"{"catalogSchema":1}"#.as_bytes().to_vec();
         let server = TestServer::start(vec![Reply::Bytes(manifest.clone())]);
 
-        let got = get_manifest(&format!("http://{}", server.addr)).expect("该拿到清单");
+        let got = get_catalog(&format!("http://{}/catalog.json", server.addr)).expect("该拿到目录");
 
         assert_eq!(got, manifest);
         assert_eq!(server.hits(), 1);

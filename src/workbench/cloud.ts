@@ -12,7 +12,9 @@
  *             且该快照与我们的假后端同源同一批上游 JSON）。快照随源码打包、只进工作台构建
  *             （原来放 public/ 会混进客户端安装包，数据总纲欠账 #2）。
  *   我刚上传的 `localStorage[STORAGE.cloud]` —— 演示用。真后端是写文件 + 推云端，
- *             这里换成 localStorage，**同一个键让客户端也读得到** —— 联动就靠这一格。
+ *             这里换成 localStorage。**注意：客户端并不读这一格**（C4 起它的底账全在
+ *             Internal 根、目录随安装包走；2026-10-02「同步」页退役后那一侧连页面都没了）
+ *             —— 当年"同一个键让两端联动"的前提已经不在，这一格现在只归工作台自己。
  *             上传的是**整个 release**（说明书 + N 份 TOML），由 `clientPackage.ts` 现装，
  *             入口是 `BuildPage` 的「上传到云端」。
  *
@@ -35,8 +37,9 @@ import staticSnapshot from './fixtures/cloud-presets.json'
  *
  * 两样东西同属一个 preset identity，一起放在这儿：
  *
- *   `package`  说明书（`ClientDataPackage`）—— 客户端**自动同步**它，用户看不见这个动作
- *   `presets`  真正的预设文件（TOML）—— 客户端要**用户点「获取预设」**才拿得到
+ *   `package`  说明书（`ClientDataPackage`）—— 客户端的目标形态是**自动获取**它
+ *              （Bootstrap 那一刀；今天客户端读的是随安装包走的 catalog，不读这里）
+ *   `presets`  真正的预设文件（TOML）—— 客户端在「预设」页按份下载
  *
  * 所以列表里那「一份」不是「一个 JSON 文件」，是「一次发布」。
  */

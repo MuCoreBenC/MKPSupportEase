@@ -42,11 +42,6 @@ import s from './PageParams.module.css'
 
 interface Props {
   density: Density
-  /**
-   * 没同步到数据包时那个空态里的「去同步页获取一份」。
-   * 不给就只显示说明 —— 这一页不自己造一条切换页签的路。
-   */
-  onOpenPackage?: () => void
 }
 
 interface ShownCard {
@@ -235,7 +230,7 @@ function useWidth(): [(el: HTMLElement | null) => void, number] {
   return [attach, width]
 }
 
-export default function PageParams({ density, onOpenPackage }: Props) {
+export default function PageParams({ density }: Props) {
   const u = useParams()
 
   const [categoryId, setCategoryId] = useState('')
@@ -590,28 +585,25 @@ export default function PageParams({ density, onOpenPackage }: Props) {
   }
 
   /*
-   * 没有数据包时的样子。
+   * 读不到目录（catalog）时的样子。
    *
-   * 这一页的每一个字都来自同步来的那份包 —— 一份都没有时就**没有页面可言**，
-   * 所以这里不是「加载失败」那种红字（那是「本该有却没有」），而是一个空态：
-   * 一句人话 + 一条直接去获取的路。原来那句「加载失败：」是照更早那一版的壳抄的，
-   * 而那一版走 `api.*`（客户端内置，不会没有），语义根本不一样。
+   * 这一页画什么（页签、分组、每条的控件与类型、什么条件下显示）全部来自目录 ——
+   * 读不到它就**没有页面可言**，所以这里不是「加载失败」那种红字（那是「本该有却没有」），
+   * 而是一个空态：一句人话 + 后端给的原因。
+   * 原来这里还有一颗「去「同步」页获取一份」—— 那一页 2026-10-02 退役（数据源配置
+   * 降级成设置页里的开发后门），这条跳转没有去处，删掉。那句「加载失败：」是照更早
+   * 那一版的壳抄的，而那一版走 `api.*`（客户端内置，不会没有），语义根本不一样。
    */
   if (u.error !== null) {
     return (
       <div className={s.page} data-density={density}>
         <div className={s.emptyBox}>
-          <h2 className={s.emptyTitle}>还没有数据包</h2>
+          <h2 className={s.emptyTitle}>读不到参数目录</h2>
           <p className={s.emptyText}>
-            参数页画什么（页签、分组、每条的控件与类型、什么条件下显示）全部来自同步来的
-            那份数据包 —— 一份都没有时，这一页没有东西可画，也不编一份假的。
+            参数页画什么（页签、分组、每条的控件与类型、什么条件下显示）全部来自随安装包
+            走的那份目录（catalog）—— 读不到它时，这一页没有东西可画，也不编一份假的。
           </p>
           <p className={s.emptyText}>{u.error}</p>
-          {onOpenPackage && (
-            <button type="button" className={s.emptyBtn} onClick={onOpenPackage}>
-              去「同步」页获取一份
-            </button>
-          )}
         </div>
       </div>
     )

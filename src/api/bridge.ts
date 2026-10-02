@@ -1,4 +1,5 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 
 import { NotImplementedError } from './errors'
 import {
@@ -12,15 +13,15 @@ import {
 /**
  * IPC 桥：把契约里的方法映射到 Rust 侧的 command。
  *
- * 命名两套、映射在这一处：TS 侧是 `getPreset`（前端习惯），Rust 侧是 `get_preset`
- * （Rust 习惯）。Tauri 会把 JS 传进去的 camelCase 参数名转成 snake_case，
- * 所以参数照常写 `{ variantId }`。
+ * 命名两套、映射在这一处：TS 侧 camelCase（前端习惯），Rust 侧 snake_case（Rust 习惯）。
+ * Tauri 会把 JS 传进去的 camelCase 参数名转成 snake_case，所以参数照常写 `{ path }`。
  *
- * 前四个方法（预设 / 偏移 / 校准板 / 打开模型）是 v023 移植时就接通的，走真 command。
+ * 偏移 / 校准板 / 打开模型是 v023 移植时就接通的，走真 command（`get_preset` 那一条
+ * 2026-10-02 清扫时删除：首圈的硬编码表，页面早已改走文件体系）。
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
- * 还剩三个写盘 / 应用 / 下载的（`getAppliedPreset` / `copyToSlicer` / `downloadFiles`）
- * 后端还没有：按仓里的纪律（HANDOFF 14.1：后端没有的命令**不渲染入口**），
+ * 还剩两个写盘 / 下载的（`copyToSlicer` / `downloadFiles`）后端还没有：
+ * 按仓里的纪律（HANDOFF 14.1：后端没有的命令**不渲染入口**），
  * 它们在真机上抛 `NotImplementedError`，页面因此显示「本版未接入」那一块，
  * 而不是白屏、也不是假装成功。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
@@ -108,7 +109,6 @@ async function notWired(method: MkpApiMethod): Promise<never> {
 }
 
 export const bridgeApi: MkpApi = {
-  getPreset: (variantId) => call('getPreset', 'get_preset', { variantId }),
   saveOffsets: (axes) => call('saveOffsets', 'save_offsets', { axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
@@ -121,11 +121,40 @@ export const bridgeApi: MkpApi = {
   /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine） */
   getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
   readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
-  /* 临时编辑那条链：改的是临时文件，官方原件全程不动（另存才落用户根） */
-  beginPresetEdit: (fileName) => call('beginPresetEdit', 'begin_preset_edit', { fileName }),
+  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */
+  beginPresetEdit: (fileName, origin, path) =>
+    call('beginPresetEdit', 'begin_preset_edit', { fileName, origin, path }),
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
+  /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
+  renameUserPreset: (path, newName) =>
+    call('renameUserPreset', 'rename_user_preset', { path, newName }),
+  deleteUserPreset: (path) => call('deleteUserPreset', 'delete_user_preset', { path }),
+  /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
+  copyUserPreset: (path, newName) =>
+    call('copyUserPreset', 'copy_user_preset', { path, newName }),
+  /*
+   * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
+   * 这里管的是"选择器 + 两段式导入"：
+   * · 选择器走 plugin-dialog 的 `open`（权限只开了 `dialog:allow-open`）；
+   * 取消 = 空数组（不是错误）。源文件全程只读 —— 复制是 Rust 侧的事。
+   */
+  pickImportFiles: async () => {
+    const picked = await open({
+      multiple: true,
+      title: '选择要导入的文件',
+      filters: [
+        { name: '预设文件', extensions: ['toml'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    return picked === null ? [] : Array.isArray(picked) ? picked : [picked]
+  },
+  stageImport: (sources) => call('stageImport', 'stage_import', { sources }),
+  commitImport: (items) => call('commitImport', 'commit_import', { items }),
+  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「我的文件」上做） */
+  revealInFolder: (path) => call('revealInFolder', 'reveal_in_folder', { path }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),
@@ -151,6 +180,7 @@ export const bridgeApi: MkpApi = {
   getPresetSource: () => call('getPresetSource', 'get_preset_source'),
   setPresetSource: (baseUrl) =>
     call('setPresetSource', 'set_preset_source', { baseUrl }),
+  clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
@@ -160,7 +190,6 @@ export const bridgeApi: MkpApi = {
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
 
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
-  getAppliedPreset: () => notWired('getAppliedPreset'),
   copyToSlicer: () => notWired('copyToSlicer'),
   downloadFiles: () => notWired('downloadFiles'),
 }

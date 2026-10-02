@@ -378,6 +378,15 @@ export interface PresetFileInfo {
  */
 export type BasedOn = 'current' | 'outdated' | 'unknown'
 
+/**
+ * 用户文件的**文件级**状态（第九层）：`ok` = 能读 + 是 UTF-8 + TOML 语法能解析；
+ * `unreadable` = 读不出来（编码 / TOML 语法 / 指向用户根之外）。
+ *
+ * **它不回答"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对 —— 那是 Preset 语义，
+ * 客户端不复制那份 schema）；外部修改过但仍是能读的 TOML ⇒ 照常 `ok`，**不因 SHA 报警**。
+ */
+export type MineState = 'ok' | 'unreadable'
+
 export interface UserPresetFile {
   /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
   path: string
@@ -392,6 +401,16 @@ export interface UserPresetFile {
    * 是 bbs 还是 orca，所以照实认不出。界面上认不出的那一档**在任何类型档下都列**。
    */
   kind: FileKind | null
+  /**
+   * 第九层的**文件级**状态（见 [`MineState`]）。`unreadable` 的界面上说"文件无法读取"，
+   * **不许应用 / 编辑**；不是预设候选（认不出是哪一类）时是 `null`
+   */
+  state: MineState | null
+  /**
+   * 用不了时后端给的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
+   * 能用 / 不适用是 `null`
+   */
+  stateDetail: string | null
   /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
   basedOn: BasedOn
   /** 血统里记的来源（`mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
@@ -406,21 +425,23 @@ export interface UserPresetFile {
 /**
  * **编辑中的那一份**（临时文件）。全局唯一 —— 同一时刻只改一份。
  *
- * 它是"临时编辑"这条链的第一步（总纲 §1③）：
+ * 它是"临时编辑"这条链的第一步（总纲 §1③）。**两条线**的第一步：
  *
  * ```text
- * mkp/presets/A1-fast.toml     官方原件 —— 编辑全程一动不动
- *        │ 点「改这份」：正文复制出来
- *        ▼
- * run/draft-preset.json        临时文件（用户改的是它；改到一半关掉也还在）
- *        │ 点「保存为用户文件」
- *        ▼
- * presets-mine/A1-fast（已修改）.toml
+ * 官方线   mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
+ * 用户线   presets-mine/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
  * ```
+ *
+ * 改的永远是**临时文件**（`run/draft-preset.json`，改到一半关掉也还在）；
+ * 原件全程一动不动，官方那份只有"云端换版本"能替换它。
  */
 export interface PresetDraft {
-  /** 从哪一份改出来的（下载区里的文件名） */
+  /** 改的是哪一条线（官方交付文件 / 我自己那份）—— 保存按钮说什么由它决定 */
+  origin: ActiveOrigin
+  /** 从哪一份改出来的。官方线是 `mkp/` 里的文件名；用户线是给人看的文件名（落点看 `path`） */
   sourceFileName: string
+  /** **用户线**的落点（相对用户根）：保存时写回这里。官方线是 `null`（落点由目录给） */
+  path: string | null
   /** 正文：用户改到哪算哪 */
   text: string
   /** 最后改动时刻（UTC epoch 秒） */
@@ -439,26 +460,42 @@ export interface CommittedDraft {
   replaced: boolean
 }
 
-/**
- * **正在生效的那一套预设。全局唯一。**
- *
- * 这是 A34 这一轮纠正的一个模型错误。原来前端自己推：「当前机型 + 当前版本那个默认交付的
- * MKP 预设」—— 于是切一下机型「已应用」就换一个，等于说这台机器同时应用着 6 套配置。
- * 物理上不成立：涂胶笔同一时间只跑一套。
- *
- * 所以「已应用」不是一个可以从别的数据算出来的派生量，它是**一条独立的事实**，
- * 只有后端知道（它读的是本机那份「当前配置」）。前端一律来问。
- *
- * `null` 不是错误 —— 新装的机器就是这个状态，界面要能把「还没有应用任何预设」
- * 和「加载失败」分开说。
- */
-export interface AppliedPreset {
-  /** 正在生效的那个 asset id */
-  assetId: string
+/** 一份用户文件的新落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状） */
+export interface UserFileIdentity {
+  /** 落点（相对**用户根**，`presets-mine/…`） */
   path: string
-  /** 它属于哪个机型 / 版本 —— 参数页要编的就是这一套 */
-  machineId: string
-  versionId: string
+  fileName: string
+}
+
+/** 落点检查的一档（第十二层）：`ready` 能收 / `collision` 重名 / `rejected` 收不了（带原因） */
+export type ImportStage = 'ready' | 'collision' | 'rejected'
+
+/** 一份外部文件的落点检查结果 */
+export interface StagedImport {
+  /** 用户给的那个外部路径（原样带回，只为对号入座；界面不显示它） */
+  source: string
+  /** 源文件名（落点的默认名字） */
+  fileName: string
+  state: ImportStage
+  /** `rejected` 的原因（可直接显示）；别的档是 null */
+  reason: string | null
+}
+
+/** 提交导入的一份：`newName` 只在"重名、用户改了名"时给 */
+export interface ImportItem {
+  source: string
+  newName?: string
+}
+
+/** 导入的逐份结局（与下载同一副规矩：一份出错不拖累别人） */
+export interface ImportOutcome {
+  source: string
+  ok: boolean
+  /** 落进用户根之后的相对路径（`presets-mine/…`）；失败是空串 */
+  path: string
+  fileName: string
+  /** 失败原因（可直接显示）；成功是空串 */
+  message: string
 }
 
 /**
@@ -625,7 +662,8 @@ export interface ClientDataPackage {
  * 命名规则：读用 get*，写用 save*，让壳去做的动作用动词（openModel / copyToSlicer）。
  *
  * 前四个是 v023 移植时就有的；「客户端接发布包」这一轮（P1）补的是后面十二个 ——
- * 预设页 / 参数页 / 同步页三页要读的东西。**本轮只有 mock 答得上来**，
+ * 预设页 / 参数页要读的东西（「同步」页 2026-10-02 退役，它当时读的
+ * `getPresetSource` / `setPresetSource` 现在归设置页）。**本轮只有 mock 答得上来**，
  * 真机上没接的那几个由 bridge 抛 NotImplementedError（`src/api/errors.ts`），
  * 界面上是一块「未接入」空态，不是白屏。
  */
@@ -830,18 +868,15 @@ export interface PresetSource {
   baseUrl: string
   /** `true` = 用户在界面里填的；`false` = 构建期注入的出厂默认值 */
   fromUser: boolean
+  /**
+   * 构建期注入的默认地址（没有 = `null`）。
+   * **单独一格**：有用户覆盖时 `baseUrl` 是覆盖值 —— 这一格回答"撤掉覆盖之后会回到什么"，
+   * 设置页「使用内置官方源」那句副文案要的正是它
+   */
+  builtin: string | null
 }
 
 export interface MkpApi {
-  /**
-   * 取某个打印件版本对应的预设。
-   *
-   * 返回 `null` 是「没有这一份」（新增了机型版本但后端还没配预设），不是出错 ——
-   * 调用方把它当"什么都没选"处理，不要拿半份数据糊弄。
-   * 真出错（连不上、文件坏了）走 reject。
-   */
-  getPreset(variantId: string): Promise<Preset | null>
-
   /** 把校准好的三轴偏移写回配置。三轴一起写，不按页分 */
   saveOffsets(axes: Axes): Promise<void>
 
@@ -854,7 +889,7 @@ export interface MkpApi {
    */
   openModel(modelId: string): Promise<void>
 
-  /* ——— 机型与文件（预设页 / 同步页要读的） ——— */
+  /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 
   /** 机型目录：品牌 → 机型 → 版本。客户端画三级选择用 */
   getMachines(): Promise<Machine[]>
@@ -886,12 +921,18 @@ export interface MkpApi {
   readUserPresetText(path: string): Promise<string>
 
   /**
-   * **开始改一份官方交付预设**：把正文复制进临时文件，**官方原件一动不动**。
+   * **开始改一份预设**：把正文复制进临时文件，**原件一动不动**。
    *
-   * 两条前置（都在后端拦）：只改 MKP 预设（TOML）；盘上得真有那一份（没下载就先下载）。
-   * 已经有同一来源的草稿 → **接着改**（`reused: true`），不覆盖用户的改动。
+   * 两条线走同一个入口（`origin` 缺省 `official`，与 [`applyActivePreset`] 同一形状）：
+   * 官方线认**文件名**（目录的键），用户线认**路径**（用户目录里可以自己分文件夹）。
+   *
+   * 前置都在后端拦：只改 MKP 预设（TOML）；官方线还要求盘上这份与目录逐字节一致
+   * （第六层：旧版本 / 被改过的不许改）；用户线只要求盘上真有 —— **它不查 SHA**，
+   * 用户那份本来就是允许改的。
+   *
+   * 已经有同一份的草稿 → **接着改**（`reused: true`），不覆盖用户的改动。
    */
-  beginPresetEdit(fileName: string): Promise<PresetDraft>
+  beginPresetEdit(fileName: string, origin?: ActiveOrigin, path?: string): Promise<PresetDraft>
 
   /** 把改动写进临时文件（界面边改边存）。**只动正文** —— 来源与那一刻的指纹不动 */
   putPresetDraft(text: string): Promise<void>
@@ -900,19 +941,90 @@ export interface MkpApi {
   discardPresetDraft(): Promise<void>
 
   /**
-   * **另存成用户自己的文件**：`presets-mine/<原名>（已修改）<后缀>`，然后丢掉草稿。
+   * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
+   * 官方线**另存**成 `presets-mine/<原名>（已修改）<后缀>`（原件全程不动）；
+   * 用户线**写回它自己** —— 同一个路径、同一份文件，不产生第二份（第八层）。
    *
-   * 写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
+   * 官方线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
    * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
-   * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）。
+   * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）；
+   * 用户线写回时那三行**照抄原来那三行**（出处没变）。
    *
    * 不碰官方原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
-   * 再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）。
+   * 官方线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
+   * 用户线写的就是原来那一份所在的位置（`replaced` 恒为 true）。
    */
   commitPresetDraft(): Promise<CommittedDraft>
 
-  /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
-  getAppliedPreset(): Promise<AppliedPreset | null>
+  /**
+   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+   * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-mine/` 那一格内）；
+   * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
+   * 落点已经有东西就拒绝（**不覆盖**）。
+   *
+   * 后端还会把两本状态账跟着改：**正指着它的使用中指针**（路径与文件名换成新的，指纹原样）
+   * 与**这一份的草稿**（用户线认路径，「接着上次改」不接丢）。失败原话冒上来。
+   */
+  renameUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+
+  /**
+   * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
+   *
+   * 与第八层"官方 → 我的文件"那条另存分开：这一层是**我的文件 → 我的文件** ——
+   * 原文件一个字节不动；内容与那三行 `based_on*` 血统**原样带过去**（来源已经是用户文件，
+   * 不重算血统 —— 重算会把"从哪一版官方派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
+   * （**不覆盖、也不自动改名** —— 名字由用户自己换）。
+   *
+   * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
+   * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
+   */
+  copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+
+  /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
+
+  /**
+   * **导入第一段：看落点**（拖拽与文件选择器都走这里）。只检查、不动盘；
+   * 重名（`collision`）只如实说，**不自动改名** —— 名字由用户在界面上改。
+   * `rejected` 带原因（现在只收 `.toml` 预设；ZIP / 备份包还没有认领它的导入器）。
+   */
+  stageImport(sources: string[]): Promise<StagedImport[]>
+
+  /**
+   * **导入第二段：真的复制进 `presets-mine/`**。逐份独立（一份出错不拖累别人）：
+   * 源文件只读；**不覆盖**（`newName` 走改名那套名字门槛）；**内容按字节复制、不校验 TOML**
+   * （能不能当 Preset 用是后面 Preset 语义入口的事 —— 导入不是"安装 Preset"；
+   * 有血统三行原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
+   * 不迁移 / 不建草稿、不进 archive）。
+   */
+  commitImport(items: ImportItem[]): Promise<ImportOutcome[]>
+
+  /**
+   * 打开系统文件选择器（多选）。用户取消 = 空数组（不是错误）。
+   * 这是"通用入口"的一半：拖拽那一半住在 App 层（`FileImportProvider`）。
+   */
+  pickImportFiles(): Promise<string[]>
+
+  /* ---------- 第十三层：文件外部管理 ---------- */
+
+  /**
+   * **在文件管理器里显示**：打开 Finder（Windows 上是文件资源管理器）并**选中**这份
+   * 用户文件 —— 之后复制 / 压缩 / 发给别人 / 备份都随用户，**不经过 SupportEase 的业务逻辑**
+   * （"文件外部管理"的含义就这一句；不另造一套"分享 / 导出"）。
+   *
+   * 只认「我的文件」（照旧过用户根那两道闸）；**读不出来的那份也能显示**
+   * （文件管理同族：它只是一份文件，打开文件夹不吃内容）；**不改任何状态**
+   * （使用中指针 / 草稿 / archive 一个都不碰）。文件被外面删了会如实报找不到。
+   */
+  revealInFolder(path: string): Promise<void>
+
+  /**
+   * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档
+   * （`archive/` 是官方版本生命周期的一部分；用户自己删自己的文件就结束）。
+   *
+   * 两道硬闸在后端：**正在使用的不许删**（删了「使用中」就指向一份不存在的文件）、
+   * **还有没保存的草稿的不许删**（删了草稿就永远存不回去）。失败原话冒上来。
+   */
+  deleteUserPreset(path: string): Promise<void>
 
   /** 已经复制到切片器目录的那些（切片器文件的「生效」与 MKP 不是一回事） */
   getSlicerCopied(): Promise<string[]>
@@ -979,11 +1091,22 @@ export interface MkpApi {
   /**
    * 当前数据源。`null` = 还没配（既没填过、也没有出厂默认值）——
    * 这时下载与检查更新都会拒绝执行并说明去哪儿配。
+   *
+   * 读者是**设置页**（「高级设置 → 预设数据源」）—— 普通用户不需要来这里：
+   * 官方地址由构建方注入（Bootstrap 那一刀），这一格留的是开发 / 排查的后门。
    */
   getPresetSource(): Promise<PresetSource | null>
 
-  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝 */
+  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝（**空地址在这里就拒**） */
   setPresetSource(baseUrl: string): Promise<PresetSource>
+
+  /**
+   * 撤掉用户覆盖（回到内置默认 / 没配）：删掉这台机器上的那份设置，幂等。
+   *
+   * **"回到内置"只能靠删** —— [`setPresetSource`] 拒空地址（写空 = 第三种状态）；
+   * 返回撤完之后生效的值（有内置给内置，没有就是 `null`），界面直接换账。
+   */
+  clearPresetSource(): Promise<PresetSource | null>
 
   /**
    * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
