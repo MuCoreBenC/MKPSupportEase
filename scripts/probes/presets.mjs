@@ -1142,6 +1142,123 @@ console.log(`[第十一层 · 不覆盖] 表里叫这个名字的行：${collisi
 if (collisionCount !== 1) problems.push('撞名被拒之后表里不许悄悄多出东西')
 await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
 
+/* ---------- 5l. 第十二层：通用导入入口（选择器 / 拖拽 → 我的文件） ---------- */
+/*
+ * 守五件事：
+ *   ① 工具栏「导入文件…」：选择器（假后端给一条演示路径）→ 结果条说"导入了 1 份" →
+ *      新的一份**立刻**出现在「我的文件」里（列表以磁盘为准，不用切页刷新）；
+ *   ② 拖进窗口（探针里造一个 File）：重名的那份进**改名那一格**，输入框预填原来那个名字；
+ *      改成可用的名字 →「继续导入」→ 进来；原来那份一个字节不动；
+ *   ③ 重名不覆盖、不自动改名：指到一个还会撞的名字 → 格子里出原因，表里不许悄悄多出东西；
+ *   ④ ZIP 不收：`.zip` 不许被当成预设复制进「我的文件」，结果条如实说"收不了"；
+ *   ⑤ 导入不是"安装 Preset"：它不碰「已应用」（原来那份照样是它）。
+ *
+ * 真机上更硬的判据在 Rust 侧：`runtime::import` 那 8 条（字节复制 / 源文件只读 /
+ * 不覆盖 / 不校验 TOML / 不碰任何状态 / 注册表只收 .toml / 落点建目录）。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+const bannerText = async () => {
+  const raw = await page.locator('[role="status"]').first().textContent()
+  return (raw ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/* ① 选择器：点「导入文件…」→ 假后端给一条演示路径 → 直接导进来 */
+await page.getByRole('button', { name: '导入文件…' }).click()
+await page.waitForTimeout(500)
+const pickedBanner = await bannerText()
+console.log(`\n[第十二层 · 选择器] 结果条：${pickedBanner}`)
+if (!pickedBanner.includes('导入了 1 份')) {
+  problems.push('选择器导入之后结果条该说「导入了 1 份」')
+}
+const afterPick = await actions()
+const pickedRow = afterPick.find((r) => r.name.includes('从选择器导进来.toml'))
+console.log(
+  `[第十二层 · 选择器] 新行：${pickedRow === undefined ? '(没出现)' : `${pickedRow.name} → ${pickedRow.action}`}`,
+)
+if (pickedRow === undefined) {
+  problems.push('导入进来的那份该立刻出现在「我的文件」里（列表以磁盘为准）')
+} else if (!pickedRow.action.includes('应用')) {
+  problems.push('导入进来的那份该是一份正常用户文件（操作列该有「应用」）')
+}
+
+/* ② 拖入一份与「我的 A1 涂胶-高速版.toml」同名的：进改名那一格 */
+const dropFile = async (name, content) => {
+  const dt = await page.evaluateHandle(
+    ([n, c]) => {
+      const transfer = new DataTransfer()
+      transfer.items.add(new File([c], n, { type: 'text/plain' }))
+      return transfer
+    },
+    [name, content],
+  )
+  await page.dispatchEvent('body', 'dragover', { dataTransfer: dt })
+  await page.waitForTimeout(150)
+  const veilShown = (await page.getByText('松开：把文件导入').count()) > 0
+  await page.dispatchEvent('body', 'drop', { dataTransfer: dt })
+  await page.waitForTimeout(500)
+  return veilShown
+}
+const veilShown = await dropFile('我的 A1 涂胶-高速版.toml', '# 拖进来的一份\n"涂胶宽度" = 9.9\n')
+console.log(`[第十二层 · 拖入] 拖到窗口上时的提示遮罩：${veilShown ? '出来了' : '没有'}`)
+if (!veilShown) problems.push('拖到窗口上该给一句"松开：把文件导入"的提示')
+const importDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
+const dlgCount = await importDlg.count()
+console.log(`[第十二层 · 拖入 · 重名] 改名那一格：${dlgCount > 0 ? '出来了' : '没有'}`)
+if (dlgCount === 0) {
+  problems.push('拖入重名的那份该开「导入：有同名文件」那一格')
+}
+const importPrefill = await importDlg
+  .getByLabel('新的文件名：我的 A1 涂胶-高速版.toml')
+  .inputValue()
+console.log(`[第十二层 · 拖入 · 重名] 输入框初值：${importPrefill}`)
+if (importPrefill !== '我的 A1 涂胶-高速版.toml') {
+  problems.push(`重名格子的输入框该预填原来那个名字，实测「${importPrefill}」`)
+}
+await importDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-拖进来的.toml')
+await importDlg.getByRole('button', { name: '继续导入' }).click()
+await page.waitForTimeout(500)
+const afterDrag = await actions()
+const draggedRow = afterDrag.find((r) => r.name.includes('我的 A1 涂胶-拖进来的.toml'))
+const stillThere = afterDrag.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+console.log(
+  `[第十二层 · 拖入 · 改名后] ${draggedRow === undefined ? '(没进来)' : draggedRow.name}；原来那份：${stillThere === undefined ? '(不见了！)' : '还在'}`,
+)
+if (draggedRow === undefined) problems.push('改名之后那份该导进来')
+if (stillThere === undefined) problems.push('重名导入不许动原来那份')
+if ((await importDlg.count()) > 0) problems.push('全部进来之后那一格该自己关掉')
+if (stillThere !== undefined && !stillThere.action.includes('已应用')) {
+  problems.push(`导入不该碰「已应用」，实测操作列「${stillThere.action}」`)
+}
+
+/* ③ 重名不覆盖、不自动改名：指到一个还会撞的名字，格子里出原因；取消 = 一份都不多 */
+await dropFile('我的 A1 涂胶-高速版.toml', '# 再来一次\n')
+const retryDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
+await retryDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-第二份.toml')
+await retryDlg.getByRole('button', { name: '继续导入' }).click()
+await page.waitForTimeout(500)
+const retryText = ((await retryDlg.textContent()) ?? '').replace(/\s+/g, ' ')
+console.log(`[第十二层 · 不覆盖] 撞名后的格子：${retryText.includes('已经有一份叫') ? '出原因了' : '没出原因'}`)
+if (!retryText.includes('已经有一份叫')) problems.push('撞名该被拒并说清（不覆盖、不自动改名）')
+await retryDlg.getByRole('button', { name: '取消导入' }).click()
+await page.waitForTimeout(300)
+const afterCancel = await actions()
+const secondCopies = afterCancel.filter((r) => r.name.includes('我的 A1 涂胶-第二份.toml'))
+console.log(`[第十二层 · 不覆盖] 取消后「第二份」的行数：${secondCopies.length}（该是 1）`)
+if (secondCopies.length !== 1) problems.push('取消导入不该在表里多出东西')
+
+/* ④ ZIP 不收：不进「我的文件」，结果条如实说 */
+await dropFile('备份.zip', 'PK')
+const zipBanner = await bannerText()
+console.log(`[第十二层 · ZIP] 结果条：${zipBanner}`)
+if (!zipBanner.includes('收不了')) problems.push('ZIP 该被如实拒收（还没有认领它的导入器）')
+if ((await actions()).some((r) => r.name.includes('备份.zip'))) {
+  problems.push('ZIP 不许被当成预设复制进「我的文件」')
+}
+await page.screenshot({ path: `${shotDir}/presets-import.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -1207,5 +1324,6 @@ console.log(
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
     '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
     '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
+    '导入入口（第十二层）：选择器能进、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '控制台没有 error',
 )

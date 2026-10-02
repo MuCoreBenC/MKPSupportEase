@@ -13,6 +13,9 @@ import PageHome from './home/PageHome'
 import PagePackage from './pages/PagePackage'
 import PageParams from './params/PageParams'
 import PagePresets from './presets/PagePresets'
+/* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
+   拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
+import { FileImportProvider, ImportBanner } from './import/FileImport'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -83,19 +86,25 @@ export default function App() {
 
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
-      {/* 浮层层要在最外面：它给所有弹出物提供挂载点与坐标基准 */}
-      <FieldLayer>
-        <TopTabs
-          tabs={tabs}
-          active={tab}
-          onChange={setTab}
-          density={density}
-          platform={PLATFORM}
-          fluid
-        />
+      {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
+      <FileImportProvider>
+        {/* 浮层层要在最外面：它给所有弹出物提供挂载点与坐标基准 */}
+        <FieldLayer>
+          <TopTabs
+            tabs={tabs}
+            active={tab}
+            onChange={setTab}
+            density={density}
+            platform={PLATFORM}
+            fluid
+          />
 
-        <main className={s.body}>{renderPage()}</main>
-      </FieldLayer>
+          {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
+          <ImportBanner />
+
+          <main className={s.body}>{renderPage()}</main>
+        </FieldLayer>
+      </FileImportProvider>
 
       {/* Windows 的 decorations: false 之后系统 resize 边框在可见窗口之外，
           补一圈内侧命中区让抓取带跨在边界上。macOS 不需要——系统管 resize */}

@@ -467,6 +467,37 @@ export interface UserFileIdentity {
   fileName: string
 }
 
+/** 落点检查的一档（第十二层）：`ready` 能收 / `collision` 重名 / `rejected` 收不了（带原因） */
+export type ImportStage = 'ready' | 'collision' | 'rejected'
+
+/** 一份外部文件的落点检查结果 */
+export interface StagedImport {
+  /** 用户给的那个外部路径（原样带回，只为对号入座；界面不显示它） */
+  source: string
+  /** 源文件名（落点的默认名字） */
+  fileName: string
+  state: ImportStage
+  /** `rejected` 的原因（可直接显示）；别的档是 null */
+  reason: string | null
+}
+
+/** 提交导入的一份：`newName` 只在"重名、用户改了名"时给 */
+export interface ImportItem {
+  source: string
+  newName?: string
+}
+
+/** 导入的逐份结局（与下载同一副规矩：一份出错不拖累别人） */
+export interface ImportOutcome {
+  source: string
+  ok: boolean
+  /** 落进用户根之后的相对路径（`presets-mine/…`）；失败是空串 */
+  path: string
+  fileName: string
+  /** 失败原因（可直接显示）；成功是空串 */
+  message: string
+}
+
 /**
  * **正在生效的那一套预设。全局唯一。**
  *
@@ -972,6 +1003,30 @@ export interface MkpApi {
    * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
    */
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+
+  /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
+
+  /**
+   * **导入第一段：看落点**（拖拽与文件选择器都走这里）。只检查、不动盘；
+   * 重名（`collision`）只如实说，**不自动改名** —— 名字由用户在界面上改。
+   * `rejected` 带原因（现在只收 `.toml` 预设；ZIP / 备份包还没有认领它的导入器）。
+   */
+  stageImport(sources: string[]): Promise<StagedImport[]>
+
+  /**
+   * **导入第二段：真的复制进 `presets-mine/`**。逐份独立（一份出错不拖累别人）：
+   * 源文件只读；**不覆盖**（`newName` 走改名那套名字门槛）；**内容按字节复制、不校验 TOML**
+   * （能不能当 Preset 用是后面 Preset 语义入口的事 —— 导入不是"安装 Preset"；
+   * 有血统三行原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
+   * 不迁移 / 不建草稿、不进 archive）。
+   */
+  commitImport(items: ImportItem[]): Promise<ImportOutcome[]>
+
+  /**
+   * 打开系统文件选择器（多选）。用户取消 = 空数组（不是错误）。
+   * 这是"通用入口"的一半：拖拽那一半住在 App 层（`FileImportProvider`）。
+   */
+  pickImportFiles(): Promise<string[]>
 
   /**
    * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档

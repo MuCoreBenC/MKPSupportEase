@@ -30,6 +30,14 @@ workbench = ["dep:time", "dep:mkpse-preset"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
+
+# 系统文件选择器（第十二层：**通用导入入口**的"选择文件"那一半）。
+#
+# 为什么值得引入：导入入口是通用的（以后「备份与恢复」继续复用它），而"选文件"是
+# 操作系统的事 —— 挑官方 plugin 而不是自己拼 rfd，是因为"在哪个线程弹窗、取消怎么
+# 回来"这些平台差异由它包掉。它只在用户点「导入文件…」时弹一个原生对话框；
+# 复制由我们自己的导入核心做（源文件全程只读，去处只有 presets-mine/）。
+tauri-plugin-dialog = "2"
 # 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
 # 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
 serde.workspace = true

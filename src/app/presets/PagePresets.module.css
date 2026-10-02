@@ -132,6 +132,34 @@
   color: var(--text-1);
 }
 
+/*
+ * 「导入文件…」（第十二层）：通用导入入口在这一页的触发点。
+ * 与批量那颗按钮同一档（同一套变量，两处看起来是一家人）；宽度自适应、不抢行的空间。
+ * mini 档它排到最后一行（order 10，见文件末尾的窄窗口段）。
+ */
+.importBtn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.importBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.importBtn:focus-visible {
+  outline: none;
+}
+
 /* ---------- 轻筛选 / 状态区（在同一个换行容器里） ---------- */
 
 /* MKP 的已应用状态条：全局唯一的一条事实，不跟机型筛选走。
@@ -957,4 +985,9 @@
 
 [data-density='mini'] .groupLayer {
   order: 9;
+}
+
+/* 「导入文件…」在 mini 排到最后（层高那一排的末尾），不挤前面几段的直线 */
+[data-density='mini'] .importBtn {
+  order: 10;
 }

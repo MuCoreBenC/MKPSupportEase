@@ -271,7 +271,12 @@ const EMPTY_RELEASE: ReleaseState = {
   localUids: [],
 }
 
-export function usePresetData(): PresetData {
+/**
+ * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
+ * 导入落进 `presets-mine/` 之后，「我的文件」那张表要立刻以磁盘为准，不靠切页刷新。
+ * 首页（`PageHome`）不给这个参数：它不看用户线那张表。
+ */
+export function usePresetData(importRevision = 0): PresetData {
   const [machines, setMachines] = useState<Machine[]>([])
   const [tree, setTree] = useState<PresetTree>({ machines: [], totalFiles: 0 })
   const [localIds, setLocalIds] = useState<string[]>([])
@@ -426,7 +431,7 @@ export function usePresetData(): PresetData {
     return () => {
       alive = false
     }
-  }, [readRelease])
+  }, [readRelease, importRevision])
 
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })

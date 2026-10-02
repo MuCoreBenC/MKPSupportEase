@@ -45,6 +45,9 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     with_commands(tauri::Builder::default())
+        /* 系统文件选择器（第十二层：通用导入入口的"选择文件"那一半）。
+        权限只开 `dialog:allow-open`（默认 capability），别的一律不给 */
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -140,6 +143,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::delete_user_preset,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
+        // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
+        ipc::import::stage_import,
+        ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
@@ -191,6 +197,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::delete_user_preset,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
+        // 第十二层：通用导入入口（与上面那份清单一字不差）
+        ipc::import::stage_import,
+        ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,

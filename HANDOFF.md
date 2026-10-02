@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十一层已收口**（2026-10-02，见 §3.5）—— 第十二层（导入 / 分享）未开始 |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层全部收口**（2026-10-02，见 §3.5）—— 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用）；「分享」（我的文件 → 外部）还没做 |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -340,15 +340,46 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        内容存疑的字节不许换个名字继续活着（第 6 层，那一句优先）。
      - 判据：`runtime::mine` 第十一层 6 条 + 探针第 5k 节（见 §6；不预填 / 字节复制 /
        血统原样 / 不覆盖不自动改名 / 不碰使用中与草稿）。
+   - ✅ **第十二层：通用文件导入入口**（2026-10-02，本次）—— 作者把这一层定成
+     **"外部文件如何安全进入应用"，Preset 只是第一个消费者**（原话：「第十二层负责
+     '外部文件如何安全进入应用'，而不是'实现 Preset 导入'」）。以后「设置 → 备份与恢复」
+     的 ZIP / 备份包复用同一套接收机制（拖拽、选择器、重名处理、边界检查），
+     所以入口**不挂在预设页**：
+
+     ```text
+     App ── 通用导入入口 ──┬── 文件选择器（plugin-dialog；权限只开 dialog:allow-open）
+                           └── 拖拽（真机：Tauri 原生拖拽事件给路径；浏览器：HTML5 拖拽）
+                                ↓
+                          runtime::import（注册表认领 → 落点检查 → 复制进 presets-mine/）
+                                ↓
+                          现在只注册了 Preset（.toml）；ZIP / 备份包以后往这加
+     ```
+
+     边界（逐条定死）：
+     - **源文件只读**：不改、不删、不移；复制 = 读字节 → 原子写进用户根；
+     - **落点固定 `presets-mine/`**，不给用户选目录；新名字过改名 / 另存为**同一套门槛**；
+     - **内容按字节复制**：有血统三行原样带过去，没有**允许导入、不编造来源**；
+     - **不校验 TOML 内容**：能不能当 Preset 用是后面 Preset 语义入口的事 ——
+       **"导入不是安装 Preset，只是把外部文件纳入我的文件所有权范围"**（作者原话，判据）；
+     - **重名不是失败，是改名流程**：`stage_import` 说 `collision` → 界面开
+       「导入：有同名文件」那一格（输入框预填原名，用户改到可用名才能继续；
+       **不覆盖、不自动改名**）；取消 = 这些没进来，别的照常进（一份错不拖累别人）；
+     - **ZIP / 备份包现在不处理**：注册表没有认领它的导入器 ⇒ 如实说"收不了"，
+       **不许被当成预设复制进用户根**；`.json` 现在也不收（只认 `.toml`）；
+     - **一个状态都不碰**：不改使用中指针、不迁移 / 不创建草稿、不进 archive。
+     - 工程接线：`tauri-plugin-dialog`（Cargo）+ JS 包 `@tauri-apps/plugin-dialog` +
+       `.plugin(init)` + `capabilities/default.json` **只加 `dialog:allow-open`**。
+     - 判据：`runtime::import` 8 条 + 探针第 5l 节（见 §6）。
 
 ## 4. 续做入口（从哪接手）
 
-- **十一层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
+- **十二层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
   （能读能列 / 能另存 / **能被应用** / **能被改并写回自己** / **读不出来就拦在应用·编辑
-  门口（文件级检查，不比 SHA）** / **能改名、能删、能另存为一份新的**）都通了。
-  **下一步是第十二层：导入**（外部文件进入 `presets-mine` 并成为真正的用户 Preset）——
-  完成之后整套用户文件生命周期闭环：官方下载 → 另存为用户文件 → 继续编辑 → 另存为另一份
-  → 重命名 → 应用 → 删除 → 导入 / 分享。分享与用户文件"长什么样"的对外口径也在那一层一起看。
+  门口（文件级检查，不比 SHA）** / **能改名、能删、能另存为一份新的**）都通了，
+  **导入入口**（外部 → 我的文件）也立起来了 —— **整套用户文件生命周期闭环**：
+  创建（官方 → 我的文件 / 我的文件 → 我的文件 / 外部 → 我的文件）、修改（编辑 → 保存回
+  原文件）、管理（改名 / 删除）、使用（应用）。**下一个是"分享"**：从「我的文件」向外
+  输出（不碰官方交付体系）—— 设计到那一层再定。
 - **第九层登记一条边界（不是漏做）**：**语义合法性**（"是不是一份合法 MKP Preset"：
   结构 / 参数对不对）**客户端不判** —— 判据只到文件级（能读 + UTF-8 + TOML 语法）。
   含义：TOML 能读但不是 MKP 预设的文件（以及空文件 / 只有注释的 TOML）现在会显示为正常；
@@ -361,6 +392,10 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **第十一层登记边界（不是漏做）**：① 复制**不设内容门槛**（连读不出来的 / 非 TOML 的
   都能复制，复制出来状态照实）—— 与改名 / 删除同族的纯文件操作；② **不做"复制后自动改名"**
   —— 目标存在就拒、让用户自己换名字（作者定死）；③ 跨文件夹复制也不做（同"文件夹管理"）。
+- **第十二层登记边界（不是漏做）**：① 导入**不校验内容**（TOML 语法坏 / 二进制都收 ——
+  "能不能用"归 Preset 语义入口，判据：导入不是安装 Preset）；② **ZIP / 备份包现在不处理**
+  （注册表留了认领的口子；设置页「备份与恢复」到那一层再注册导入器）；③ `.json` 现在也
+  不收（要收就在注册表加一条）。
 - **第七层留下的一条可收口项**（不影响功能，登记）：血统三行的文本逻辑现在两份实现
   （`runtime::lineage` 与 `preset::lineage`），靠 `workbench::lineage_parity` 钉住。
   更彻底的一条路是把它下移到共享小 crate、两边转调。
@@ -398,6 +433,9 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   结构 / 参数规则、不建第二套 Preset 真相**；语义合法性留给真正的 Preset 能力在
   应用 / 编辑入口上回答。"以后 schema 改一次要改两边"的平行真相，正是这次重建一直在
   消灭的东西。
+- **导入入口是通用的，别在页面里造专属拖拽**（第十二层，作者定死）：接收机制（拖拽 /
+  文件选择器 / 重名改名 / 边界检查）住在 App 层 `FileImportProvider` 与 `runtime::import`；
+  页面只消费 `pickFiles` 与 `revision`。以后「备份与恢复」复用同一套，不另写一份。
 - **总纲准入问句**（`DATA-ARCHITECTURE.md` §6）：任何新文件/新功能先答"属于哪一层？谁是唯一主人？什么时候允许联网？"答不出先改文档。
 - **四条铁律**：开发文件不当运行时数据库；云端不参与首屏；用户没下载的不预置（catalog 是唯一例外——它是软件本体）；运行时只认自己的运行时数据。
 - **clippy 禁列对测试也生效**（CI 是 `--all-targets`）：测试里写盘用 `fsx::atomic::atomic_write`，`std::fs::write` 会红。
@@ -453,6 +491,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::mine` 第十层 9 条（改名 / 删除） | `renaming_keeps_the_bytes_and_the_lineage`（**核心不变式**：**字节一个不动**、血统原样、旧名字没了新名字在；子目录里的份留在子目录）/ `renaming_refuses_a_name_that_changes_the_kind_or_has_a_path`（换后缀 / 带路径 / `.` / `..` / 空全拒，原文件原地不动）/ `renaming_never_overwrites`（落点有东西就拒，被撞的那份一个字节没动）/ `renaming_to_the_same_name_is_a_no_op` / `deleting_really_deletes`（**真删除**：不在了，而且没有多出旁的东西）/ `deleting_refuses_while_it_is_the_active_one`（正在使用的拒；正在使用的是**别人**照删）/ `deleting_refuses_while_a_draft_is_open`（有草稿的拒；草稿改的是**别人**照删）/ `the_delete_gates_only_apply_to_the_mine_line`（官方线的指针 / 草稿挡不住）/ `deleting_stays_in_the_mine_dir`（越界路径拒） |
 | `runtime::state` 跟改名 3 条（第十层） | `the_active_pointer_follows_a_rename`（路径与文件名换新、**指纹原样**；不指着它的、官方线的指针一概不动）/ `the_draft_follows_a_rename`（草稿路径与来源名换新，**正文与打开时指纹原样**；换完再点「改这份」还是接上这一份）/ `repointing_nothing_is_a_no_op`（没有那两本账 = 没跟，不是错误） |
 | `runtime::mine` 第十一层 6 条（另存为一份新的） | `copying_keeps_the_bytes_and_the_lineage`（**核心不变式**：新的一份与原来**逐字节相同**（血统原样带过去）、原文件一个字节不动；子目录里的份复制出来还在子目录）/ `copying_uses_the_same_name_gate`（与改名同一套：换后缀 / 带路径 / `.` / `..` / 空全拒）/ `copying_never_overwrites_and_never_renames_itself`（**不覆盖**（被撞的与源都一个字节没动）、**也不自动改名**（名字和原来一样也拒））/ `copying_touches_no_state_at_all`（**一个状态都不碰**：使用中指针与草稿都还在原来那份上）/ `copying_does_not_require_readable_text`（不读内容：二进制那份照样原样复制）/ `copying_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::import` 第十二层 8 条（通用导入入口） | `staging_says_ready_collision_and_rejected`（能收 / 重名 / 收不了各带原因；**同一批里重名的也认**）/ `importing_copies_the_bytes_and_leaves_the_source_alone`（**核心不变式**：字节复制、**源文件一个字节不动**；进来就是一份正常用户文件）/ `importing_does_not_invent_a_lineage`（没有血统**不编造**）/ `importing_does_not_reject_invalid_toml`（**不校验内容**：坏的照样进得来，第九层再如实说它读不出来）/ `importing_never_overwrites`（不覆盖，被撞的与源都一个字节没动）/ `importing_uses_the_same_name_gate_for_a_new_name`（重名改名走同一套门槛）/ `importing_touches_no_state`（使用中指针与草稿都不动）/ `importing_creates_the_mine_dir_when_missing`（全新安装也能进） |
 | `runtime::state` 草稿两条线 2 条（第八层） | `a_draft_knows_which_line_it_belongs_to`（**同名不同线 ≠ 同一份**：「接着改」不许接错）/ `an_older_draft_file_is_still_the_official_line`（旧档 = 官方线，**不升 schema**） |
 | `runtime::lineage` 写回 4 条（第八层） | `saving_back_keeps_the_original_lineage` / `saving_an_untouched_copy_changes_nothing` / `saving_back_without_lineage_writes_no_lineage` / `saving_back_keeps_the_line_endings` |
 | `runtime::delivery` 可信度 5 条（第 6 层） | `a_clean_copy_is_current_and_not_reported`（没问题就不报警）/ `tampered_bytes_are_not_recognized`（哪儿都对不上 = 异常，且没有证据可指）/ `a_copy_of_the_archived_version_is_recognized_as_old`（**认得出旧版本**，证据是归档里那条路径）/ `a_version_from_the_archived_catalog_is_recognized_as_old`（归档槽被占了也认得出更早那一版）/ `official_text_refuses_bytes_that_drifted`（**不许拿漂了的字节当原文改**） |
@@ -461,7 +500,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
-| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
 
@@ -531,6 +570,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   （认不出哪一类）、**`坏了的涂胶.toml`（第九层：画「文件无法读取」、不给应用 / 改这份）**；
   右键「我的文件」还有**重命名**（只动名字，字节一个不动）与**删除**（二次确认；正在使用的不给删）
   —— 第十层；以及**另存为一份新的**（字节复制、血统原样带过去、不覆盖、不自动改名）—— 第十一层；
+  工具栏「**导入文件…**」与**把文件拖进窗口**走的是通用导入入口（第十二层，假后端给演示路径 /
+  假路径）：重名的会开「导入：有同名文件」改名格，ZIP 如实说收不了；
   点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
   自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
   **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。

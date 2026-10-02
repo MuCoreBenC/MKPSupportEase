@@ -484,7 +484,7 @@ pub struct FileIdentity {
 ///   "文件夹管理"，不在这层）；不许 `.` / `..`；
 /// - **后缀保持原样**（`.toml` 还是 `.toml`）—— 改名 / 复制都不该改变它算哪一类
 ///   （类别的判据是 [`kind_of`]，它只看后缀）。
-fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
+pub(crate) fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
     let name = new_name.trim();
     if name.is_empty() {
         return Err(AppError::invalid_argument("新名字不能是空的"));

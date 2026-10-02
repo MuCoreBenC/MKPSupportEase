@@ -1,4 +1,5 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 
 import { NotImplementedError } from './errors'
 import {
@@ -134,6 +135,25 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
+  /*
+   * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
+   * 这里管的是"选择器 + 两段式导入"：
+   * · 选择器走 plugin-dialog 的 `open`（权限只开了 `dialog:allow-open`）；
+   * 取消 = 空数组（不是错误）。源文件全程只读 —— 复制是 Rust 侧的事。
+   */
+  pickImportFiles: async () => {
+    const picked = await open({
+      multiple: true,
+      title: '选择要导入的文件',
+      filters: [
+        { name: '预设文件', extensions: ['toml'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    return picked === null ? [] : Array.isArray(picked) ? picked : [picked]
+  },
+  stageImport: (sources) => call('stageImport', 'stage_import', { sources }),
+  commitImport: (items) => call('commitImport', 'commit_import', { items }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

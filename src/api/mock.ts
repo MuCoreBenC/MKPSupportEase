@@ -176,6 +176,12 @@ function mockNameProblem(oldName: string, newName: string): string | null {
   }
   return null
 }
+
+/** 外部路径取文件名（与 Rust 侧 `runtime::import::base_name` 同一件事） */
+function mockBaseName(source: string): string {
+  const parts = source.split(/[/\\]/)
+  return parts[parts.length - 1] ?? source
+}
 /** 编辑中的那一份（真机上是 `run/draft-preset.json`）。`path` 只有用户线才有 */
 let mockDraft: {
   origin: ActiveOrigin
@@ -188,6 +194,9 @@ let mockDraft: {
 /** 演示正文。真机上它是官方原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
 const MOCK_OFFICIAL_TEXT =
   '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节\n涂胶宽度 = 1.2\n起始延时 = 0.5\n'
+
+/** 假后端给"导入进来的那份"种的演示正文：**没有血统** —— 外部文件没有 based_on，也不编造 */
+const MOCK_IMPORTED_TEXT = '# 从外部导进来的（假后端演示正文）\n"涂胶宽度" = 1.0\n'
 
 /*
  * 三行血统（真机上由 `runtime::lineage` 管：另存时写、写回时照抄）。
@@ -472,6 +481,102 @@ export const mockApi: MkpApi = {
     if (text !== undefined) mockMineText.set(newPath, text)
     mockMine.push({ ...hit, path: newPath, fileName: name, modifiedUnix: nowSec() })
     return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 第十二层：通用导入入口（假后端的演示）。
+   * 真机上源是**真路径**（拖拽 / 系统选择器给的），复制的是它的字节；
+   * 假后端里那些外部路径不是真文件 —— 给一份演示正文，其余规矩与真机一致：
+   * 只收 .toml、重名不覆盖（改名由界面走）、**一个状态都不碰**。
+   */
+  async pickImportFiles() {
+    /* 浏览器里没有系统选择器：给一份"从选择器来的"演示路径（不撞现有的那种） */
+    return ['/（文件选择器演示）/从选择器导进来.toml']
+  },
+  async stageImport(sources) {
+    const taken = new Set(mockMine.map((f) => f.fileName))
+    return sources.map((source) => {
+      const fileName = mockBaseName(source)
+      if (fileName === '') {
+        return {
+          source,
+          fileName: source,
+          state: 'rejected',
+          reason: '这个路径里没有文件名 —— 它不是一份能导入的文件',
+        }
+      }
+      if (!/\.toml$/i.test(fileName)) {
+        return {
+          source,
+          fileName,
+          state: 'rejected',
+          reason:
+            '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器（ZIP / 备份包以后再说）',
+        }
+      }
+      if (taken.has(fileName)) return { source, fileName, state: 'collision', reason: null }
+      taken.add(fileName)
+      return { source, fileName, state: 'ready', reason: null }
+    })
+  },
+  async commitImport(items) {
+    const outcomes: {
+      source: string
+      ok: boolean
+      path: string
+      fileName: string
+      message: string
+    }[] = []
+    for (const item of items) {
+      const fileName = mockBaseName(item.source)
+      if (!/\.toml$/i.test(fileName)) {
+        outcomes.push({
+          source: item.source,
+          ok: false,
+          path: '',
+          fileName,
+          message: '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器',
+        })
+        continue
+      }
+      let name = fileName
+      if (item.newName !== undefined) {
+        const problem = mockNameProblem(fileName, item.newName)
+        if (problem !== null) {
+          outcomes.push({ source: item.source, ok: false, path: '', fileName, message: problem })
+          continue
+        }
+        name = item.newName.trim()
+      }
+      const path = `presets-mine/${name}`
+      if (mockMine.some((f) => f.path === path)) {
+        outcomes.push({
+          source: item.source,
+          ok: false,
+          path: '',
+          fileName: name,
+          message: `已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`,
+        })
+        continue
+      }
+      mockMineText.set(path, MOCK_IMPORTED_TEXT)
+      mockMine.push({
+        path,
+        fileName: name,
+        size: MOCK_IMPORTED_TEXT.length,
+        modifiedUnix: nowSec(),
+        kind: 'mkp_preset',
+        state: 'ok',
+        stateDetail: null,
+        basedOn: 'unknown',
+        basedOnLabel: null,
+        basedOnRelease: null,
+        basedOnMachineId: null,
+        basedOnVersionId: null,
+      })
+      outcomes.push({ source: item.source, ok: true, path, fileName: name, message: '' })
+    }
+    return outcomes
   },
 
   async deleteUserPreset(path) {

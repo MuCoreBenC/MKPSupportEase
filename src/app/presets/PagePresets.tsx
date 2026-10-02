@@ -89,6 +89,8 @@
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
+ *   **导入文件…**（工具栏）    `FileImportProvider`（App 层）               真（第十二层：通用导入入口 ——
+ *                            选择器 + 拖拽进窗口；重名开改名那一格。这一页只是第一个消费者）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
  *   **在文件夹中显示 / 复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
@@ -108,6 +110,8 @@ import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
+/* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 pickFiles 与 revision */
+import { useFileImport } from '../import/useFileImport'
 import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
@@ -178,7 +182,13 @@ interface Note {
 }
 
 export default function PagePresets({ density, onOpenBbs }: Props) {
-  const data = usePresetData()
+  /*
+   * 通用导入入口（第十二层）停在 App 层；预设页是它的**第一个消费者** ——
+   * 这里拿两样：`pickFiles`（工具栏那颗「导入文件…」）与 `revision`
+   * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
+   */
+  const imp = useFileImport()
+  const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
   const rootRef = useRef<HTMLDivElement>(null)
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
@@ -1017,6 +1027,19 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
               </button>
             )}
           </div>
+
+          {/*
+           * 「导入文件…」是**通用导入入口**（第十二层，住在 App 层）的第一个触发点：
+           * 这里只拿它的 `pickFiles`；拖拽那一半在任何页面都生效（把文件拖进窗口就行）。
+           */}
+          <button
+            type="button"
+            className={s.importBtn}
+            title="把外部文件导入「我的文件」（现在收 .toml 预设；也可以直接把文件拖进窗口）"
+            onClick={imp.pickFiles}
+          >
+            导入文件…
+          </button>
 
           <span className={s.tbBreak} aria-hidden />
 

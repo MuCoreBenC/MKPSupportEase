@@ -1,0 +1,166 @@
+/*
+ * 通用导入入口（第十二层）自己的形状：拖拽遮罩 + 结果条 + 重名改名那一格。
+ * 全局 token（颜色 / 圆角 / 字号）见 src/styles；这里只写这一层的东西。
+ */
+
+/* ---------- 拖拽遮罩（覆盖整个外壳；不吃事件，drop 要落到窗口监听上） ---------- */
+
+.veil {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  display: grid;
+  place-items: center;
+  background: rgb(20 30 42 / 14%);
+  pointer-events: none;
+}
+
+.veilText {
+  margin: 0;
+  padding: 10px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+
+/* ---------- 结果条（标签栏与内容之间，in-flow：不遮内容、也不自己消失） ---------- */
+
+.banner {
+  flex-shrink: 0;
+  padding: 8px var(--page-x);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.bannerBad {
+  background: #fff3e2;
+}
+
+.bannerText {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.bannerClose {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.bannerClose:hover {
+  color: var(--text-1);
+}
+
+.bannerLine {
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---------- 重名改名那一格 ---------- */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rowCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.rowHead {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.rowHead b {
+  color: var(--text-1);
+}
+
+.rowInput {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+}
+
+.rowInput:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.rowErr {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: #fff3e2;
+  color: #a86416;
+  font-size: var(--fs-label);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+/* ---------- 抽屉底部那两颗（与预设页抽屉同一副形状） ---------- */
+
+.ghost {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.ghost:hover {
+  border-color: var(--text-3);
+}
+
+.primary {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.primary:hover {
+  filter: brightness(1.05);
+}
+
+.primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
