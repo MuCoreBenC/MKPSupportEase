@@ -48,6 +48,14 @@ export type ParamOrigin = 'base' | 'variant'
 export interface RecipeParam {
   /** 参数注册表里的稳定标识。TOML 路径会随分段调整而变，这个不会 */
   key: string
+  /**
+   * 这个参数在 MKP 预设 TOML 里对应的**字段名**（`offset_x` / `speed_limit`…）。
+   *
+   * 与 `ParamMeta.tomlKey` 同值同源（`ParamDef.toml_key`）—— 两条通道都带着它，是因为
+   * 用的地方不同：参数页拿这一份改值（字段级 patch 要它）。**一一对应**一个 TOML 字段
+   * （2026-10-02 起 `offset = { x, y, z }` 已拆成 `offset_x/y/z`，不再有共享 tomlKey 的形状）。
+   */
+  tomlKey: string
   label: string
   /** 一句话说明，鼠标悬停时显示。注册表本来就有这份数据 */
   desc: string

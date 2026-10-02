@@ -89,6 +89,8 @@ function toRecipeParam(param: RawParam, machineId: string, versionId: string | n
 
   return {
     key: param.key,
+    /* 与 `paramMeta()` 同源（注册表的 tomlKey）—— 形状与真后端 `RecipeParamDto` 一致 */
+    tomlKey: param.tomlKey,
     label: param.label,
     desc: param.desc,
     group: sectionLabel.get(param.layout.sectionId) ?? param.layout.sectionId,
