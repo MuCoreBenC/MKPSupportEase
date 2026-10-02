@@ -103,17 +103,85 @@ A 的真实数据链（catalog / 草稿链 / 编辑目标 / 操作记录）
 
 ---
 
-## 4. `plate` / 板轮廓（塔地图的前置）
+## 4. Plate（打印板）—— **作者 2026-10-02 定死的概念**
 
-| 段 | 状态 | 要动 |
+> **Plate 是独立于机型的实体。机器只引用一个 `plateId`，不再用机型 ID 推导板子。**
+> 这样以后增加板子不会把机器模型和板子模型绑死，将来"同一台机器可选多块板"也不会破坏模型。
+
+```text
+Machine
+  ├─ id: "A1"
+  ├─ display: "A1"
+  └─ plateId: "single-latch-256"     ← 引用，不是推导
+
+Plate
+  ├─ id: "single-latch-256"          ← 描述性名字，**不做机型耦合命名**（不叫 `a1-plate`）
+  ├─ name: "单卡舌 256"
+  ├─ w / d: 板件外轮廓尺寸（mm）
+  ├─ frame: { x, y, w, h }           ← 可打印区在轮廓坐标里的位置
+  ├─ bodyPath: 板身路径（不含卡舌/把手）
+  └─ path: 完整外轮廓（含卡舌/把手，孔洞靠 evenodd）
+```
+
+**板 id 命名规范（避免机型耦合）**：
+
+```toml
+[[plates]]
+id = 'single-latch-256'    # 单背卡舌 + 前缘把手，256 可打印区
+name = '单卡舌 256'
+
+[[plates]]
+id = 'dual-latch-180'      # 两只背卡舌，180 可打印区
+name = '双卡舌 180'
+```
+
+**机器侧**：
+
+```toml
+id = 'A1'
+plateId = 'single-latch-256'
+```
+
+→ 于是 `A1` / `P1S` / `P2S` / `X1C` / 未来的 `A2L` 都可能指向**同一块板**，
+而"同一台机器换板"只是改一个引用。
+
+### 4.1 A 侧的现状：**从零开凿**（四条链全无）
+
+| 段 | 现状 | 要动 |
 | --- | --- | --- |
-| Rust `Dimensions`（`presetdata/catalog.rs`） | ❌ 无 `plate` | 加字段 + 从机器数据带出 |
-| TS `MachineDimensions`（`contract.ts:142-150`） | ❌ 无 | 加 `plate?: string` |
-| 机器数据源 | ❓ **待确认**：板规格 id 该由哪份数据提供（`presets/machines/`？catalog？） | **需要作者定"真实来源"** |
-| `bedOutline` 几何 | ❌ A 无 | 搬 A43 的路径数据（那是**几何常量**，不是假业务数据） |
+| 板数据源 | ❌ **无**（`presets/machines/A1.toml` 无任何 plate 键） | **新增**（位置见 §4.2） |
+| Rust `Dimensions`（`presetdata/catalog.rs:135-145`） | ❌ 无 | `Machine` 加 `plate_id: Option<String>` |
+| 机器加载（`load_machines` :792-874 / `load_dimensions` :901-979） | ❌ 无 | 读 `plateId` |
+| TS 契约（`contract.ts:142-150, 162-182`） | ❌ 无 | `Machine.plateId?: string` |
+| IPC / catalog 产物 | ❌ 无 | 跟着 catalog 带出 |
+| 板几何常量 | ❌ 无 | 搬 A43 的 `bedOutlineA43.ts`（**几何常量**，非假业务数据） |
+| 前端消费 | ❌ 无 | 塔地图（下一刀） |
 
-> **`bedOutline` 与 `plate` 的区别**：前者是**几何常量**（板长什么样，官方图纸尺寸），
-> 搬过来即可；后者是**数据契约字段**（哪台机用哪块板），**要从 A 的真机器数据出**。
+### 4.2 板数据放哪（**待作者定**）
+
+现有两种范式都在用：
+
+| 候选 | 形态 | 像谁 |
+| --- | --- | --- |
+| `presets/plates/*.toml` | 一板一文件，目录扫描 | **像 `machines/*.toml` / `forbidden_zones/*.toml`** |
+| `presets/registry/plates.toml` | 一份集中定义，`[[plates]]` 数组表 | 像 `param_registry.toml` |
+
+**A43 的板几何是"生成物"**（`scripts/bed-outline.mjs` 从官方板件模型扫出来的路径），
+而 A 里**没有那个生成脚本、也没有源模型**（`assets-src/bed/` 不在 A）。
+
+所以 `bodyPath` / `path` 这两条长路径**要么搬常量、要么把生成脚本一起搬过来**（待定，见下）。
+
+### 4.3 A43 的板 id 是机型耦合的（**要改掉的**）
+
+`bedOutlineA43.ts` 的键是 `A1` / `A1_MINI` / `P1S` / `P2S` / `X1C`，其中
+**P1S / P2S / X1C 与 A1 的几何逐字节相同**（只是复制了三份）—— 实际只有 **2 块板**：
+
+| A43 键 | 真实 | 应改成 |
+| --- | --- | --- |
+| `A1` / `P1S` / `P2S` / `X1C`（几何相同） | 单卡舌 256 | `single-latch-256` |
+| `A1_MINI` | 双卡舌 180 | `dual-latch-180` |
+
+→ 搬到 A 时**按新命名去重**（2 块，不是 5 块），机器各引用一个 id。
 
 ---
 
@@ -146,22 +214,28 @@ A 的真实数据链（catalog / 草稿链 / 编辑目标 / 操作记录）
 
 ---
 
-## 7. 建议的施工顺序
+## 7. 施工顺序（**作者 2026-10-02 定：Plate 排在塔地图之前**）
+
+作者原话：「不是先把 `bedOutline` 硬搬过来，再想办法认板子，而是**先把 Plate 作为真实数据契约
+补起来**，然后塔地图消费它。」
 
 ```
 ① 补 deprecated 链路（重跑 gen-catalog + IPC 两处 + 契约两处 + 前端消费）
         ↓  （这是搬 ParamCard 的前置：弃用 UI 要它）
 ② 搬参数页 UI：ParamCard / ParamRow / GcodeBlock / PageParams 增量
         ↓  （useParams 保留 A 的；只搬 UI 表现）
-③ 塔地图：补 plate 契约 + 搬 bedOutline（几何常量）+ TowerMap / TowerCoreSvg
+③ Plate 正式进入 A 的机器数据
+        ↓  machine.plateId → plate registry / geometry
+        ↓
+   塔地图：TowerMap / TowerCoreSvg / bedOutline（消费 Plate）
         ↓
 ④ 【单独一刀】模型 / 3MF：补 kind 契约 + 客户端 UI
 ```
 
-**待作者裁决的只有两条**（其余都可自行推进）：
+**待作者裁决只剩一条**：**板数据放哪**（`presets/plates/*.toml` 一板一文件 /
+`presets/registry/plates.toml` 集中一份 —— §4.2 两个候选，都能贴合现有范式）。
 
-1. **`plate` 的真实来源**：板规格 id 该由哪份真数据提供？（§4）
-2. **塔现算用到的参数 key**：A 真注册表里是否都存在？（§5）—— 我可以先自查，缺的报给你。
+**已自查、无需裁决**：塔现算的 5 个参数 key 在 A 真注册表里**全都有**（§5）。
 
 ---
 
