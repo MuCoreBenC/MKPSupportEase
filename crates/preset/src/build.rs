@@ -68,9 +68,9 @@ pub fn build(
 
     // ---- Toolhead ----
     ir.toolhead.max_speed = cfg.toolhead.speed_limit * 60.0;
-    ir.toolhead.x_offset = cfg.toolhead.offset.x;
-    ir.toolhead.y_offset = cfg.toolhead.offset.y;
-    ir.toolhead.z_offset = cfg.toolhead.offset.z;
+    ir.toolhead.x_offset = cfg.toolhead.offset_x;
+    ir.toolhead.y_offset = cfg.toolhead.offset_y;
+    ir.toolhead.z_offset = cfg.toolhead.offset_z;
     ir.toolhead.custom_mount_gcode = split_gcode_lines(&cfg.toolhead.custom_mount_gcode);
     ir.toolhead.custom_unmount_gcode = split_gcode_lines(&cfg.toolhead.custom_unmount_gcode);
     ir.toolhead.nozzle_switch_temperature = 0.0;

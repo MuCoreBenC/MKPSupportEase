@@ -257,7 +257,9 @@ mod tests {
 # variant: standard
 
 [toolhead]
-offset = { x = -1, y = 18.6, z = 4 } # 笔尖偏移
+offset_x = -1
+offset_y = 18.6
+offset_z = 4 # 笔尖偏移
 ";
 
     #[test]

@@ -846,7 +846,9 @@ mod tests {
             .iter()
             .find(|p| p.key == "toolhead.offset.x")
             .expect("基础字段在");
-        assert_eq!(offset_x.toml_key, "offset");
+        /* 2026-10-02：`offset = { x, y, z }` 内联表拆成三个独立字段后，
+        这一条的 tomlKey 是它自己的 `offset_x`（不再与 y/z 共享 `offset`） */
+        assert_eq!(offset_x.toml_key, "offset_x");
         assert_eq!(offset_x.value_type, ValueType::Float);
         assert_eq!(offset_x.ui_component, UiComponent::Number);
 

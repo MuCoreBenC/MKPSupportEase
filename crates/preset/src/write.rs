@@ -70,13 +70,14 @@ fn invalid(message: String) -> PostprocError {
 /// 而 `model.rs` 的 serde 键才是「程序到底能读回什么」的事实
 /// （全体 `deny_unknown_fields`）。注册表只提供元数据（类型/量程/中文名）。
 ///
-/// 计数：**77 个 serde 键 → 79 行**（`offset` 是 inline table，展成 x/y/z 三行）。
+/// 计数：**79 个 serde 键**（2026-10-02：`offset = { x, y, z }` 拆成三个独立字段
+/// `offset_x/y/z` 之后，一行对一个键，不再有"一个键展成三行"这回事）。
 /// 判据 K-P6 用**双向差集**把这份清单与 `model.rs` 咬住：任一边加了字段都会红。
 pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("toolhead", "speed_limit"),
-    ("toolhead", "offset.x"),
-    ("toolhead", "offset.y"),
-    ("toolhead", "offset.z"),
+    ("toolhead", "offset_x"),
+    ("toolhead", "offset_y"),
+    ("toolhead", "offset_z"),
     ("toolhead", "MKP_retract"),
     ("toolhead", "custom_mount_gcode"),
     ("toolhead", "custom_unmount_gcode"),

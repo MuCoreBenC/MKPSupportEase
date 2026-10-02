@@ -16,8 +16,11 @@
 //!    收窄成「除新增标记行外逐字节相同」比原判据更强 —— 它同时证明了标记是纯增量，
 //!    没有顺带移动或改写任何一行原有输出。处置与 `end_to_end.rs` / `process_with_ir.rs` 一致。
 //! 2. **硬错误判据**：机型别名不认识 / 预设头缺 `# machine:` 各自报什么码。
-//! 3. **真实预设**：用户机器上的 `~/Documents/MKPSupportSSR/presets/mkp/A1MF.toml`
-//!    能过 `load_ir`。它在仓库外 ⇒ 不存在时**响亮跳过**（打印路径与原因，不静默 return）。
+//!
+//! 2026-10-02：原来还有第 3 条「仓库外那份真实预设（`~/Documents/MKPSupportSSR/…/A1MF.toml`）
+//! 能过 `load_ir`」—— 已删除。那是**旧格式**（`offset = { x, y, z }` 内联表）的兼容性判据，
+//! 而内联表已拆成 `offset_x/y/z` 三个独立字段，程序**刻意不兼容旧文件**（新项目、无存量用户、
+//! 不引兼容层）。留着它只会把"新程序读不了旧文件"当成回归红。
 //!
 //! 伪随机序列是**进程级**状态（见 `crates/postprocess/tests/process_with_ir.rs` 的文件头），
 //! 所以整链那条在跑之前 reset，且用一把锁串行。
@@ -44,9 +47,6 @@ fn lock_sequence() -> MutexGuard<'static, ()> {
 fn core_path(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../postprocess/{rel}"))
 }
-
-/// 用户机器上的真实预设（仓库外资产）。
-const REAL_PRESET: &str = "/Users/wzy/Documents/MKPSupportSSR/presets/mkp/A1MF.toml";
 
 /// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
 /// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
@@ -164,63 +164,5 @@ fn a_missing_machine_header_is_a_hard_error() {
         "E_CFG_PARSE_001",
         "缺头注释的错误码是对外契约，实测 {}：{err}",
         err.code()
-    );
-}
-
-#[test]
-fn the_real_user_preset_loads() {
-    let path = Path::new(REAL_PRESET);
-    if !path.is_file() {
-        // 响亮跳过：点名缺什么，不静默通过（AGENTS.md §6.1）。
-        eprintln!(
-            "SKIP the_real_user_preset_loads：仓库外资产不存在 {REAL_PRESET}\n\
-             这条判据需要用户机器上的真实预设目录；它缺失时本用例**没有验证任何东西**。"
-        );
-        return;
-    }
-    let ir = preset::load_ir(path, None).expect("真实预设必须能过 load_ir");
-    // 这份文件名 `A1MF.toml` **不跟着夹具改名**：它是用户目录里那份（云端旧命名），
-    // 不是我们的产物。`preset_name` 照实取实际路径的文件名 —— 判据说的是这件事。
-    assert_eq!(ir.meta.preset_name, "A1MF.toml");
-    assert!(
-        !ir.machine.machine_type.is_empty() && ir.machine.max_x > 0.0,
-        "真实预设的机型与运动范围必须被填上，实测 machine_type={:?} max_x={}",
-        ir.machine.machine_type,
-        ir.machine.max_x
-    );
-
-    // **这条钉的是一处刻意的不对称，不是 bug**：`load_ir` 不调 `fill_defaults`
-    // （时机是「G-code 元数据提取之后」，由 pass1 调 —— `pass1/mod.rs:1275`），
-    // 所以刚出炉的 IR 里层高/喷嘴等零值兜底字段**还是 0**。
-    // 而 CLI 那条路（`config::load`，`config.rs:75`）**当场就跑了** fill_defaults。
-    // 后果：GUI 想展示「生效层高」不能直接读这里的值，得自己先 fill 一份副本。
-    // 这条判据存在的意义就是让下一个人别把 0 当成搬运错误。
-    assert!(
-        ir.machine.first_layer_height == 0.0 && ir.machine.typical_layer_height == 0.0,
-        "load_ir 之后层高应仍为 0（fill_defaults 未跑），实测 {}/{}",
-        ir.machine.first_layer_height,
-        ir.machine.typical_layer_height
-    );
-    let mut filled = ir.clone();
-    postprocess::ir::fill_defaults(&mut filled);
-    assert!(
-        filled.machine.first_layer_height == 0.2 && filled.machine.typical_layer_height == 0.2,
-        "fill_defaults 之后层高应是 0.2/0.2，实测 {}/{}",
-        filled.machine.first_layer_height,
-        filled.machine.typical_layer_height
-    );
-
-    eprintln!(
-        "真实预设 {}：机型 {} / X {:.1}..{:.1} / Y {:.1}..{:.1} / 禁区 {} 处 / \
-         层高（fill 之后）{:.3}/{:.3}",
-        ir.meta.preset_name,
-        ir.machine.machine_type,
-        ir.machine.min_x,
-        ir.machine.max_x,
-        ir.machine.min_y,
-        ir.machine.max_y,
-        ir.machine.forbidden_zones.len(),
-        filled.machine.first_layer_height,
-        filled.machine.typical_layer_height
     );
 }

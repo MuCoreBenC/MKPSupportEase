@@ -172,7 +172,9 @@ mod tests {
 # release_time: 2026-08-19 01:38:13
 # machine: A1
 [toolhead]
-offset = { x = -1, y = 18.6, z = 4 }
+offset_x = -1
+offset_y = 18.6
+offset_z = 4
 speed_limit = 70
 MKP_retract = 0
 first_pen_revitalization_flag = false
@@ -205,7 +207,7 @@ glue_z_compensation_enabled = false
         assert_eq!(f.machine, "A1");
         assert_eq!(f.release_time.as_deref(), Some("2026-08-19 01:38:13"));
         assert_eq!(f.config.toolhead.speed_limit, 70.0);
-        assert_eq!(f.config.toolhead.offset.y, 18.6);
+        assert_eq!(f.config.toolhead.offset_y, 18.6);
         assert_eq!(f.config.wiping.wiper_x, 20.0);
         assert!(f.config.wiping.rib_fillet_wall);
     }

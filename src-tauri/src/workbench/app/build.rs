@@ -911,22 +911,25 @@ mod tests {
         // 就是一个值，而我们产出的是一份带表头的文档
         let parsed: toml::Table = r.text.parse().expect("产出来的必须是合法 TOML");
         let toolhead = &parsed["toolhead"];
-        // 三个共享 tomlKey 的参数合成内联表，成员名取 jsonKey。
-        // **整数不写小数点** —— 上游真产物就是 `offset = { x = -1, y = 18.6, z = 4 }`
+        /*
+         * 三轴偏移：**三个独立字段**（2026-10-02 从共享 tomlKey 的内联表 `offset = { x, y, z }`
+         * 拆出来）。所以这里读的是 `offset_x/y/z` 三个裸键，不再是 `toolhead["offset"]["x"]`。
+         * **整数不写小数点** —— 上游真产物就是 `offset_x = -1`。
+         */
         assert_eq!(
-            toolhead["offset"]["x"].as_integer(),
+            toolhead["offset_x"].as_integer(),
             Some(-1),
             "A1:STANDARD 的上游覆盖"
         );
-        assert_eq!(toolhead["offset"]["y"].as_float(), Some(18.6));
-        assert_eq!(toolhead["offset"]["z"].as_integer(), Some(4));
+        assert_eq!(toolhead["offset_y"].as_float(), Some(18.6));
+        assert_eq!(toolhead["offset_z"].as_integer(), Some(4));
         // G-code 走多行字符串
         assert!(toolhead["script"].as_str().is_some());
         assert_eq!(parsed["wiping"]["mode"].as_str(), Some("tower"));
-        // 行尾注释要在
+        // 行尾注释要在（挂在 offset_x 那一行上）
         assert!(
-            r.text.contains("} # 笔尖偏移"),
-            "内联表的注释丢了：\n{}",
+            r.text.contains("# 笔尖偏移"),
+            "偏移那一行的行尾注释丢了：\n{}",
             r.text
         );
     }

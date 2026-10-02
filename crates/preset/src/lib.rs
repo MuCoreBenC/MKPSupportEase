@@ -52,8 +52,7 @@ pub use build::{CalibrationExecMode, build};
 /// 而不是各拼一遍字符串。
 pub use generate::file_name as preset_file_name;
 pub use model::{
-    IntOrFloat, Lineage, PresetFile, PresetKey, TomlConfig, ToolheadConfig, ToolheadOffset,
-    WipingConfig,
+    IntOrFloat, Lineage, PresetFile, PresetKey, TomlConfig, ToolheadConfig, WipingConfig,
 };
 pub use read::{
     parse_lineage_from_content, parse_variant_from_content, read_preset, read_preset_from_bytes,
