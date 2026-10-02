@@ -35,7 +35,9 @@ G1 F30000
 """
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 prime_length = 100 # 预涂长度(mm) 范围:0~500
-offset = { x = -0.9, y = 23, z = 4 } # 笔尖偏移
+offset_x = -0.9 # 笔尖偏移
+offset_y = 23 # 笔尖偏移
+offset_z = 4 # 笔尖偏移
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 MKP_retract = 0 # 回抽长度(mm)
 

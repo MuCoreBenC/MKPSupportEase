@@ -240,8 +240,10 @@ fn params() -> serde_json::Value {
     serde_json::json!({
         "params": [
             {
+                // 三轴偏移：**各自一个独立 tomlKey**（2026-10-02 从共享 `offset` 内联表拆出来）。
+                // 上游真实形状已经是一项一字段，这里跟着改 —— 夹具跟注册表同形。
                 "key": "toolhead.offset.x", "configKey": "XOffset",
-                "tomlKey": "offset", "jsonKey": "x",
+                "tomlKey": "offset_x", "jsonKey": "offset_x",
                 "label": "X 轴偏移", "desc": "喷嘴在 X 上的偏移", "tomlComment": "笔尖偏移",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 0.0,
                 "scope": "machine_specific", "section": "toolhead",
@@ -254,12 +256,9 @@ fn params() -> serde_json::Value {
                     "P1S:LITE": -25.9
                 }
             },
-            // y 与 z 与 x **共享 tomlKey**：渲染时要合成内联表
-            // `offset = { x = …, y = …, z = … }`，成员名取 jsonKey。
-            // 这是上游真实的形状（toolhead.offset.x/y/z 的 tomlKey 都是 offset）
             {
                 "key": "toolhead.offset.y", "configKey": "YOffset",
-                "tomlKey": "offset", "jsonKey": "y",
+                "tomlKey": "offset_y", "jsonKey": "offset_y",
                 "label": "Y 轴偏移", "desc": "", "tomlComment": "笔尖偏移",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 18.6,
                 "scope": "machine_specific", "section": "toolhead",
@@ -268,7 +267,7 @@ fn params() -> serde_json::Value {
             },
             {
                 "key": "toolhead.offset.z", "configKey": "ZOffset",
-                "tomlKey": "offset", "jsonKey": "z",
+                "tomlKey": "offset_z", "jsonKey": "offset_z",
                 "label": "Z 轴偏移", "desc": "", "tomlComment": "笔尖偏移",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 4.0,
                 "scope": "machine_specific", "section": "toolhead",

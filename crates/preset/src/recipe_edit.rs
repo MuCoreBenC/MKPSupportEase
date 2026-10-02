@@ -439,7 +439,7 @@ mod tests {
         let after = set_override(
             &before,
             "A1:fast",
-            "toolhead.offset.y",
+            "toolhead.offset_y",
             &DraftValue::Float(26.4),
         )
         .expect("写回");
@@ -450,7 +450,7 @@ mod tests {
             "K-W3 红：应当只有一行变，实测变了 {changed:?}"
         );
         assert!(
-            after.contains("\"toolhead.offset.y\" = 26.4"),
+            after.contains("\"toolhead.offset_y\" = 26.4"),
             "K-W3 红：新值不在文件里"
         );
         println!("K-W3 绿：只有第 {} 行变了", changed[0]);
@@ -509,7 +509,7 @@ mod tests {
         let after = set_override(
             &before,
             "A1:fast",
-            "toolhead.offset.y",
+            "toolhead.offset_y",
             &DraftValue::Float(26.4),
         )
         .expect("写回");
@@ -545,8 +545,8 @@ mod tests {
         );
         let mut variant_fields = BTreeMap::new();
         let mut f = BTreeMap::new();
-        f.insert("toolhead.offset.x".to_string(), DraftValue::Float(-1.0));
-        f.insert("toolhead.offset.y".to_string(), DraftValue::Float(18.6));
+        f.insert("toolhead.offset_x".to_string(), DraftValue::Float(-1.0));
+        f.insert("toolhead.offset_y".to_string(), DraftValue::Float(18.6));
         variant_fields.insert("standard".to_string(), f);
 
         let draft = MachineDraft {

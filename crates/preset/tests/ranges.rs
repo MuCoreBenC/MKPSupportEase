@@ -191,32 +191,20 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     assert!(targets.len() >= 9, "反空转：fixture 至少 9 份");
     let fixtures = targets.len();
 
-    // 5 份**真实用户预设**：只在这台机器上存在 ⇒ 有就跑、没有就跳过并报数。
-    // 判据不能依赖用户目录（别人机器上会假红），但在这里跑到了就得说清跑了几份。
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    let real_dir = home.join("Documents/MKPSupportSSR/presets/mkp");
-    let mut real = 0;
-    if real_dir.is_dir() {
-        for entry in std::fs::read_dir(&real_dir).expect("读真实预设目录") {
-            let p = entry.expect("目录项").path();
-            if p.extension().is_some_and(|x| x == "toml") {
-                targets.push(p);
-                real += 1;
-            }
-        }
-    }
+    /*
+     * 2026-10-02：原来这里还会把 `~/Documents/MKPSupportSSR/presets/mkp` 下那 5 份
+     * **真实用户预设**也一起 load_ir。已删除 —— 那些是**旧格式**（`offset = { x, y, z }`
+     * 内联表），而内联表已拆成 `offset_x/y/z`；程序刻意不兼容旧文件（新项目、无存量用户、
+     * 不引兼容层），把它们扫进来只会让判据在"新程序读不了旧文件"上变红。
+     * 现在只对**仓库里的 fixture** 要求能读（那是我们的产物，与新格式同步演进）。
+     */
 
     for p in &targets {
         preset::load_ir(p, None)
             .unwrap_or_else(|e| panic!("K-R1 红：{} 读不出来了：{e}", p.display()));
     }
 
-    println!(
-        "K-R1 绿：{} 份预设换真源后照旧 load_ir 成功（fixture {fixtures} + 真实用户预设 {real}）",
-        targets.len()
-    );
+    println!("K-R1 绿：{fixtures} 份 fixture 换真源后照旧 load_ir 成功");
 }
 
 #[test]

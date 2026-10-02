@@ -94,9 +94,9 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     let w = &cfg.wiping;
     Some(match config_key {
         // ---- toolhead（11 键）----
-        "XOffset" => ConfigVal::F64(t.offset.x),
-        "YOffset" => ConfigVal::F64(t.offset.y),
-        "ZOffset" => ConfigVal::F64(t.offset.z),
+        "XOffset" => ConfigVal::F64(t.offset_x),
+        "YOffset" => ConfigVal::F64(t.offset_y),
+        "ZOffset" => ConfigVal::F64(t.offset_z),
         "MaxSpeed" => ConfigVal::F64(t.speed_limit),
         "MKPRetract" => ConfigVal::F64(t.mkp_retract),
         "FirstPenRevitalizationFlag" => ConfigVal::Bool(t.first_pen_revitalization_flag),
@@ -214,9 +214,9 @@ pub fn validate_config(cfg: &TomlConfig) -> Result<(), PostprocError> {
     tracing::info!(
         "配置校验通过: SpeedLimit={}, Offset=({},{},{}), Wiper=({},{})",
         go_float(t.speed_limit),
-        go_float(t.offset.x),
-        go_float(t.offset.y),
-        go_float(t.offset.z),
+        go_float(t.offset_x),
+        go_float(t.offset_y),
+        go_float(t.offset_z),
         go_float(w.wiper_x),
         go_float(w.wiper_y)
     );
@@ -320,7 +320,7 @@ mod tests {
     /// 从 TOML 文本构造 config（serde 面 = engine 实际吃的同一解析路径）。
     fn cfg_from(extra_wiping: &str) -> TomlConfig {
         let text = format!(
-            "[toolhead]\nspeed_limit = 200\noffset = {{ x = -1, y = 18.6, z = 4 }}\n\
+            "[toolhead]\nspeed_limit = 200\noffset_x = -1\noffset_y = 18.6\noffset_z = 4\n\
              MKP_retract = 0\n\n[wiping]\nhave_wiping_components = \"tower\"\n\
              wiper_x = 20\nwiper_y = 140\nwipetower_speed = 80\n{extra_wiping}"
         );
@@ -379,14 +379,14 @@ mod tests {
         let reg = load_param_registry();
 
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.x = 51.0;
+        cfg.toolhead.offset_x = 51.0;
         assert_eq!(
             msg(validate_against_registry(&cfg, &reg, "A1", None).unwrap_err()),
             "param toolhead.offset.x value 51 is out of range [-50, 50]"
         );
 
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.y = -50.5;
+        cfg.toolhead.offset_y = -50.5;
         assert_eq!(
             msg(validate_against_registry(&cfg, &reg, "A1", None).unwrap_err()),
             "param toolhead.offset.y value -50.5 is out of range [-50, 50]"
@@ -395,7 +395,7 @@ mod tests {
         // offset.z：注册表比原来的硬编码**更严**（`0..20` vs `|z| ≤ 20`）——
         // 负值现在会被拒，这是收紧，照实断言。
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.z = -0.1;
+        cfg.toolhead.offset_z = -0.1;
         assert_eq!(
             msg(validate_against_registry(&cfg, &reg, "A1", None).unwrap_err()),
             "param toolhead.offset.z value -0.1 is out of range [0, 20]"
@@ -423,8 +423,8 @@ mod tests {
     fn validate_config_boundary_values_pass() {
         let reg = load_param_registry();
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.x = 50.0;
-        cfg.toolhead.offset.z = 20.0;
+        cfg.toolhead.offset_x = 50.0;
+        cfg.toolhead.offset_z = 20.0;
         cfg.wiping.wiper_x = 226.0;
         cfg.wiping.wiper_y = 226.0;
         validate_config(&cfg).expect("第一层只看速度");
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn registry_rejects_offset_independent_of_layer_one() {
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.x = -60.0;
+        cfg.toolhead.offset_x = -60.0;
         // 第一层先红（|X|>50）；把第一层挪开，直接打第二层
         let err = validate_against_registry(&cfg, &load_param_registry(), "A1", None).unwrap_err();
         assert_eq!(
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn registry_zero_values_are_exempt() {
         let mut cfg = cfg_from("");
-        cfg.toolhead.offset.x = 0.0;
+        cfg.toolhead.offset_x = 0.0;
         cfg.wiping.glue_z_comp_bed_fl = 0.0;
         validate_against_registry(&cfg, &load_param_registry(), "A1", None).expect("零值应豁免");
     }

@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "3a47cf1201f89525",
+  "revision": "e373b773c82c0daa",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -2164,7 +2164,7 @@
       {
         "key": "toolhead.offset.x",
         "configKey": "XOffset",
-        "tomlKey": "offset",
+        "tomlKey": "offset_x",
         "jsonKey": "x",
         "label": "X 轴偏移",
         "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
@@ -2228,7 +2228,7 @@
       {
         "key": "toolhead.offset.y",
         "configKey": "YOffset",
-        "tomlKey": "offset",
+        "tomlKey": "offset_y",
         "jsonKey": "y",
         "label": "Y 轴偏移",
         "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准",
@@ -2286,7 +2286,7 @@
       {
         "key": "toolhead.offset.z",
         "configKey": "ZOffset",
-        "tomlKey": "offset",
+        "tomlKey": "offset_z",
         "jsonKey": "z",
         "label": "Z 轴偏移",
         "desc": "涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离",
@@ -4582,8 +4582,8 @@
       "path": "mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "0b19feaa67a77d2f0e61dfcf1c9d0ae1632c0ddb53db030c417b61ed00b69359",
-      "size": 4299
+      "sha256": "720fa7093600a9a13e92f81494ed671e6d352ea677a14ad1e6c2a262c80317df",
+      "size": 4335
     },
     {
       "kind": "mkp_preset",
@@ -4591,8 +4591,8 @@
       "path": "mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "522eb884c820bcaee35574d6ccf0522861031cf16aad0b26fca461512025a7cd",
-      "size": 4297
+      "sha256": "336a3b074a2cffa2ef4ea60ec994ab0ba2ff01a9223ac38f5513aa6f8996c8f9",
+      "size": 4333
     },
     {
       "kind": "mkp_preset",
@@ -4600,8 +4600,8 @@
       "path": "mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "3426fd38ddc1389f3d1a893ed9f0a6faa3a5aba9f3a0c97411ef76aef5e530bf",
-      "size": 4300
+      "sha256": "d3e76d6d653ad79af231821ad30bb1dc976d7e73fc6fd10c7521b2c9c9e2e5c6",
+      "size": 4336
     },
     {
       "kind": "mkp_preset",
@@ -4609,8 +4609,8 @@
       "path": "mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "26d1aad549bc76c66bd362de8f6adc84caf7ccf0f5ffcb3f0a25ebda61435286",
-      "size": 4306
+      "sha256": "4d08af6645c7d4ac0f38d2e7ce4428427c36f76151f7f9d1873d249d0c5a5741",
+      "size": 4342
     },
     {
       "kind": "mkp_preset",
@@ -4618,8 +4618,8 @@
       "path": "mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "115e061f72014f7680adde6f4dfd2345f6acf7499dd247e4b8f1354f95f7cd43",
-      "size": 4300
+      "sha256": "d59b14212c041e7442fc941488ebce248a9684ead31862b734d275b5a6900319",
+      "size": 4336
     },
     {
       "kind": "mkp_preset",
@@ -4627,8 +4627,8 @@
       "path": "mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "f4e51d8f889637e80e7321bc73e440f84fa4060855af09bb0d4ef657e6d1a06f",
-      "size": 4304
+      "sha256": "179ca599d926f09f835d10cef967631a6a415934d8f38eae0f735a95ff5de276",
+      "size": 4340
     },
     {
       "kind": "mkp_preset",
@@ -4636,8 +4636,8 @@
       "path": "mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "bed23fb6b45e680a7fd520a8ae4669402ffe2385930035fbab73bfb666dd3025",
-      "size": 4362
+      "sha256": "a66837f14f63205bb1939560f1a44d5923b86b7d149dfdb33e3f48ec76e7045c",
+      "size": 4398
     },
     {
       "kind": "mkp_preset",
@@ -4645,8 +4645,8 @@
       "path": "mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "df96bda82aa41fdbbd89e6a066369f0827179b3df987b494bbf80b97b396fdf3",
-      "size": 4366
+      "sha256": "538afc662ec1dcbe598b5964beea5c63fd66ea33990595801e0512d9c458c6bf",
+      "size": 4402
     },
     {
       "kind": "mkp_preset",
@@ -4654,8 +4654,8 @@
       "path": "mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "17ca04c3c51035b30df54939354f9b21ea9aee827a5a9000cfc25b44273f6772",
-      "size": 4362
+      "sha256": "8c4f10a5155a3f77299217226ff9278d47199d43d6a8050e91c07817fae9c796",
+      "size": 4398
     },
     {
       "kind": "icon",

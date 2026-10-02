@@ -114,25 +114,35 @@ fn kp2_one_edit_changes_exactly_one_line() {
 }
 
 #[test]
-fn kp2b_inline_table_and_multiline_keep_their_shape() {
+fn kp2b_scalar_and_multiline_keep_their_shape() {
     let path = fixtures_dir().join("A1_MINI-fast.toml");
     let raw = std::fs::read_to_string(&path).expect("读预设");
 
-    // inline table 内部改一个分量：整块不许被重写，行尾注释要留着
+    /*
+     * 改一个普通标量字段：那一行换了值，行尾注释要留着（其余行逐字节不变）。
+     *
+     * 2026-10-02：这里原来测的是"改 inline table `offset = { x, y, z }` 的一个分量"——
+     * 那个结构已经拆成 `offset_x/y/z` 三个独立字段了（理由见 `crates/preset/src/model.rs`），
+     * 所以这一条改测拆出来的 `offset_z`：它现在是普通标量，走的正是"标量改值"这条路。
+     */
     let out = apply_edits(
         &raw,
-        &[Edit::new("toolhead", "offset.z", EditValue::Float(4.5))],
+        &[Edit::new("toolhead", "offset_z", EditValue::Float(4.5))],
     )
-    .expect("改 inline table 分量");
+    .expect("改 offset_z");
     let line = out
         .lines()
-        .find(|l| l.trim_start().starts_with("offset ="))
-        .expect("offset 那一行还在");
+        .find(|l| l.trim_start().starts_with("offset_z ="))
+        .expect("offset_z 那一行还在");
     assert!(
-        line.contains("{ x =") && line.contains("z = 4.5") && line.contains('#'),
-        "K-P2b 红：inline table 形态或行尾注释被破坏：`{line}`"
+        line.contains("4.5") && line.contains('#'),
+        "K-P2b 红：值没换成 4.5，或行尾注释被破坏：`{line}`"
     );
-    assert_eq!(parse(&out).toolhead.offset.z, 4.5);
+    assert!(
+        !out.contains("offset = {"),
+        "K-P2b 红：inline table 形态又回来了（它已经拆成三个独立字段）"
+    );
+    assert_eq!(parse(&out).toolhead.offset_z, 4.5);
 
     // 多行 G-code：写回仍是 `"""` 字面量，且读回来的内容与写进去的一致
     let gcode = "G92 E0\nG1 E-5 F1800\n";

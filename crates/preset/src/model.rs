@@ -14,19 +14,24 @@ pub enum IntOrFloat {
     F64(f64),
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ToolheadOffset {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ToolheadConfig {
     pub speed_limit: f64,
-    pub offset: ToolheadOffset,
+    /*
+     * 笔尖偏移三轴：**三个独立字段**（2026-10-02 从内联表 `offset = { x, y, z }` 拆出来）。
+     *
+     * 旧形状要在客户端侧养一套"多条参数共享一个 tomlKey、再靠 jsonKey 区分子字段"的机制 ——
+     * 而真实语义就是三个独立参数，那套机制等于为一份历史文件在**新项目**里留兼容层。
+     * 现在没有存量用户、文件全部自动生成，所以直接定成一项一字段：
+     * 参数 key `toolhead.offset.x` ↔ TOML `offset_x`，一一对应，没有中间层。
+     */
+    #[serde(default)]
+    pub offset_x: f64,
+    #[serde(default)]
+    pub offset_y: f64,
+    #[serde(default)]
+    pub offset_z: f64,
     /// 大小写混排键名（不是 snake_case），逐字对照 dto 标签。
     #[serde(rename = "MKP_retract", default)]
     pub mkp_retract: f64,
