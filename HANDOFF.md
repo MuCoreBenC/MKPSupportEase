@@ -499,6 +499,36 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        `source.json` / `catalog.json` / `manifest.json`**（`wb_publish` 才写这三个）。
        所以要先在工作台 **生成 → 发布**，再 `npm run publish:presets`，合并 PR，
        最后跑真实 raw → catalog → 单文件下载闭环。
+     - ✅ **第十八刀后半：真实交付闭环已验通**（2026-10-02）
+     - 作者在工作台点「生成 → 发布」后，`presets/dist/` 齐 22 个文件 →
+       `npm run publish:presets` 走五道校验 → PR #15 → squash `869dd5f` 进 main。
+       真实 raw 已验：`raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/dist/`
+       的 `source.json` → `catalog.json`（revision `620bb442d24db768`）→
+       `mkp/presets/A1-standard.toml`，**SHA + size 与 catalog 完全一致**（客户端校验会过）。
+     - **脚本判据修正（重要）**：第一版要求 `catalog.json` **每条 path** 盘上存在 → **误拦**。
+       真相：catalog 是整个目录（24 条，含可达性收窄掉的 3 个 3mf + 4 个 0.2mm 切片器），
+       **进交付的只有被引用可达那批**（manifest 17 条 / 交付 17 个文件）。
+       "必须存在" + SHA 校验**只对 manifest** 做。
+     - **CI 抓到的真 bug**：`build.rs` 用 `serde_json` 但 `[build-dependencies]` 漏了它 ——
+       本地靠主 crate 依赖缓存蒙混，CI 干净环境 `error[E0433]`（修于 `2e4e791`）。
+       教训：**`src-tauri/Cargo.toml` 里的 build-dependency 属于功能本体，不是"在途依赖版本"**。
+     - ⏳ **剩最后一步**：写 `workbench/bootstrap.json`（**入库**）——
+       这是"官方源指向哪"的产品配置，属作者裁决范围。写完 `tauri dev`/正式构建即自动注入。
+     - ✅ **第十九刀：Bootstrap 输入契约 + 工作台去隐式 mock**（2026-10-02）
+     - **输入契约**（PR #16 = `06295d8`）：**只填仓库地址就够** ——
+       `github.com/o/r` / `.git` 克隆地址 → 自动补 `main/presets/dist/source.json` 的 raw；
+       blob 页按人指的转；raw / 自建源原样；`tree/…` 目录页 / 空 / 非 http(s) 拒。
+       `.git` 只是克隆地址的写法，不是产品语义。改在 `dist::normalize_bootstrap_url`（3 组单测）。
+     - **桩不再隐式装**（PR #17 = `6148afe`）：`main.tsx` 默认**不装**桩，只有 URL 带
+       `?mock=1` 才装 —— 桩是**探针的测试后端**，不是产品运行时能力。
+       `tauri:workbench:dev` 现在**永远走真 Tauri IPC**。
+     - **设置页加「重新读取」**：调 `wb.reload()` 从磁盘重读 `workbench/bootstrap.json`
+       并回填界面 —— 界面之外改过它时用它看真相。placeholder 改中性示例。
+     - 验证：`chain.mjs` **17/17 全绿**；`cargo test` 253 / workbench lib 442 / 双 feature clippy /
+       fmt / tsc / lint / build + build:workbench + check:bundle + check:zero-network 全绿。
+     - **未碰** `src/api/mock.ts`（客户端另一套 mock，不扩大范围）。
+     - **顺带发现（未修）**：`scripts/probes/workbench-build.mjs:225` 引用一个**不存在的
+       「钉住」按钮**，跑到【二】参数台必挂 —— C15→A40 移植遗留的预存问题，与这两刀无关。
 
      ## 4. 续做入口（从哪接手）
 
