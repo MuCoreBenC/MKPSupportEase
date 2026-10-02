@@ -9,7 +9,12 @@
  * 2026-10-02（第十七刀）起多了一块**可编辑**的：「官方源（Bootstrap）」——
  * 发布产物发到哪。它是**工作台唯一一处"发布到哪"**（入库的
  * `workbench/bootstrap.json`）；客户端构建时由 `build.rs` 读它注入默认源
- * （`npm run tauri dev` 也吃它）。GitHub 的 blob 页链接会被后端规范成 raw 直链。
+ * （`npm run tauri dev` 也吃它）。
+ *
+ * 输入口径（作者 2026-10-02 定死的产品契约）：**只填仓库地址就够** ——
+ * GitHub 仓库地址 / `.git` 克隆地址都会被后端补成 `main/presets/dist/source.json`
+ * 的 raw 直链；blob 页按人指的转；raw / 自建源原样。用户不必知道
+ * `raw.githubusercontent.com` / `blob` / `presets/dist` / `source.json` 里的任何一个。
  */
 import { useState } from 'react'
 
@@ -56,8 +61,10 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             <p className={s.vhelp}>
               发布出去的 <span className={s.mono}>presets/dist/</span> 推到哪里 —— 客户端拿它那口
               <span className={s.mono}> source.json </span>找回目录与文件。
-              <b>GitHub 的 blob 链接会自动转成 raw 直链</b>；自建源（
-              <span className={s.mono}>http://…</span>）原样收下。
+              <b>填仓库地址就够</b>（GitHub 仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
+              我们会自动补成发布入口的 raw 直链。
+              也收：指向 <span className={s.mono}>source.json</span> 的 blob 链接（转 raw）、
+              自建源（<span className={s.mono}>http://…</span> 原样）。
               入库（<span className={s.mono}>workbench/bootstrap.json</span>）：换机器、CI 拿的都是同一份。
             </p>
             <div className={s.vrow}>
@@ -65,7 +72,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 className={s.inp}
                 value={bootstrap}
                 onChange={(e) => setBootstrap(e.target.value)}
-                placeholder="https://github.com/…/blob/main/release/presets/source.json"
+                placeholder="https://github.com/MuCoreBenC/MKPSupportEase"
                 aria-label="官方源（Bootstrap）地址"
               />
               <button
