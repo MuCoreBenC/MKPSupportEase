@@ -621,6 +621,22 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        搬预设页时**用 A 的 `UserPresetFile` / `ActivePreset`**。
      - **两边一起删**：「同步」页（A 已退役，B 后续也删）。
      - **注定分叉**：B 的稿号体系是**工作方式**，搬的是"挑中的那一稿**前端**"，不是整个稿号体系。
+     - **移植账见 `docs/A43-PARAMS-PORT-LEDGER.md`**（2026-10-02，逐项"A43 需要什么 → A 真实来源"）。
+       口径（作者定）：**搬的是 A43 的前端实现经验，不是它的数据假设**。
+       - **A 的参数页本来就与 A43 同源**（同名同构），A43 是继续演进的版本 → 是**增量移植**。
+       - **`useParams` 不搬**（A 那份领先：草稿链 / 编辑目标 / 操作记录是 A43 没有的）；
+         搬 `ParamCard`(206→416) / `PageParams` / `ParamRow` / `GcodeBlock` + A43 独有 3 文件
+         （`TowerMap` / `TowerCoreSvg` / `bedOutline`）。
+       - **`deprecated` 上游早就真了**（真 TOML 8 处：7 字段级 + 1 选项级「护套」），
+         断在下游：`catalog.generated.json` 需重生成 / IPC `RecipeParamDto` 无 / IPC `ChoiceDto` 无 /
+         契约无 / `src/app/` 零消费。**这不是为 A43 硬造字段**（真数据里本来就有）。
+       - **塔可以直接接**：A43 塔现算用的 5 个 key（`wiping.outer_structure` / `rib_width` /
+         `rib_extra_length` / `rib_fillet_wall` / `sheath_base_expand`）**在 A 真注册表里全有** ✅。
+       - **要补的契约**：`MachineDimensions.plate`（A 两侧都无）+ `bedOutline` 几何常量（搬 A43）。
+       - **模型/3MF**：A = "有资产（3 个真 .3mf）/ 契约弱（`FileKind` 不含 model）/ UI 全缺"，
+         **单独一刀**，不混进参数页 UI。
+       - **施工顺序**：① `deprecated` 链路 → ② 参数页 UI → ③ 塔地图 → ④ 模型/3MF。
+       - **待作者裁决只剩两条**：`plate` 的真实来源是哪份数据；塔参数已自查**全有**（无需裁决）。
 
      ### 当前阶段：参数页底座 —— 还剩两块（**做完这两块再统一整理**）
 
