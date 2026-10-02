@@ -85,8 +85,34 @@ async function until(fn, ms = 3000) {
 
 /** 页面里有没有这段可见文字 */
 const hasText = (needle) => mainText().then((t) => text(t).includes(needle))
+/** 模态框里的字（框是 portal 到 shellBody 的，读 [role=dialog] 那一段） */
+const dialogText = () =>
+  page.evaluate(() => document.querySelector('[role="dialog"]')?.innerText ?? '')
 
-await page.goto(url, { waitUntil: 'load' })
+/* —— 切页立刻有反馈（2026-10-02）：整本没回来时先画骨架屏，不是黑屏 —— */
+/*
+ * 守作者那条验收：「点了等一段时间它才显示是不对的，它必须立马显示，就是那个反馈」。
+ * 判据：一条慢命令占着时，页面上有 `[data-skeleton]`（骨架），且**导航已经画出来**。
+ * 用 CDP 的 CPU 节流造"慢"（真机后端慢时走的是同一条路：`renderPage` 在 `book/words`
+ * 没到时返回骨架而不是 null）。
+ */
+{
+  const client = await page.context().newCDPSession(page)
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 20 })
+  await page.goto(url, { waitUntil: 'commit' })
+  const earlySkel = await until(
+    () => page.locator('[data-skeleton]').count().then((n) => n > 0),
+    10000,
+  )
+  const earlyShell = await page.locator('nav[aria-label="一级导航"]').count()
+  say(earlySkel && earlyShell > 0, `整本回来之前先画骨架屏（不是黑屏）—— 骨架 ${earlySkel} · 导航已在`)
+  if (!earlySkel) problems.push('数据没到时不画骨架屏（点了没反馈）')
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+  /* 放开节流，等真内容顶上（骨架应当消失） */
+  await page.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
+  await until(() => page.locator('[data-skeleton]').count().then((n) => n === 0), 10000)
+}
+
 /* 工作台外壳没有 `<header>`（那是客户端顶栏）—— 它是一级导航 + `.shellBody` 正文 */
 await page.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
 await page.waitForSelector('[class*="shellBody"]', { timeout: 15000 })
@@ -152,11 +178,50 @@ await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000
 const seeded = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
 say(seeded === 'preset.toml × 1 份', `开局产物名单跟着后端 buildRows 走：${seeded}`)
 if (seeded !== 'preset.toml × 1 份') problems.push('开局产物名单与 buildRows 对不上')
+/* —— 选择：已生成也能勾 + 一个「全选」（2026-10-02，作者点名） —— */
+{
+  const boxes = await page.locator('#t-build input[type="checkbox"]').count()
+  const off = await page.locator('#t-build input[type="checkbox"][disabled]').count()
+  say(boxes > 0 && off === 0, `已生成的行也能勾（勾选框 ${boxes} 个、被禁的 ${off} 个）`)
+  if (boxes === 0 || off > 0) problems.push('已生成的行还是勾不上')
+  const hasAll = (await page.getByRole('button', { name: '全选', exact: true }).count()) > 0
+  say(hasAll, '「全选」按钮在（与「全选待生成」并存）')
+  if (!hasAll) problems.push('缺少「全选」按钮')
+  /* 点「全选」= 勾上所有能勾的（含已生成） */
+  await page.getByRole('button', { name: '全选', exact: true }).first().click()
+  await page.waitForTimeout(150)
+  const allChecked = await page.locator('#t-build input[type="checkbox"]:checked').count()
+  say(allChecked === boxes, `「全选」勾上全部 ${allChecked}/${boxes} 行`)
+  if (allChecked !== boxes) problems.push('「全选」没勾满')
+}
+
 await page.getByRole('button', { name: '全选待生成', exact: true }).first().click()
 await page.getByRole('button', { name: /^生成 \d+ 项$/ }).first().click()
+
+/* —— 生成前确认（2026-10-02）：点「生成」**不写盘**，先弹 diff 确认框 —— */
+await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+const dlgReady = await until(async () => (await dialogText()).includes('生成前确认'), 5000)
+const dlgBody = await dialogText()
+const dlgSeen = await dlgReady
+const hasList = (await page.locator('[role="dialog"] nav[aria-label="要生成的文件"] button').count()) > 0
+say(dlgSeen && hasList, `点生成先弹确认框（不是直接覆盖）：${text(dlgBody).slice(0, 60)}`)
+if (!dlgSeen || !hasList) problems.push('生成前没有弹 diff 确认框')
+/* 还没确认 —— 产物名单此时**不该**已经变了（改盘发生在确认之后） */
+const beforeConfirm = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
+say(beforeConfirm === 'preset.toml × 1 份', `确认之前不写盘，产物名单还是开局那份：${beforeConfirm}`)
+if (beforeConfirm !== 'preset.toml × 1 份') problems.push('还没确认就把盘写了（预演应是只读）')
+if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-generate-diff.png` })
+/* 点确认 → 框切成结果页 → 点「完成」关掉 */
+await page.getByRole('button', { name: '确认生成', exact: true }).first().click()
+const doneShown = await until(async () => (await dialogText()).includes('生成完成'), 5000)
+say(doneShown, '确认之后框内换成结果页（写了几份 / 几份未变）')
+if (!doneShown) problems.push('确认之后没看到结果页')
+await page.getByRole('button', { name: '完成', exact: true }).first().click()
+await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
+
 const gotArtifacts = await until(() => hasText('preset.toml × 2 份'))
 const artLine = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
-say(gotArtifacts, `勾上待生成那一版并生成之后：${artLine}`)
+say(gotArtifacts, `确认生成之后：${artLine}`)
 if (!gotArtifacts) problems.push('生成之后产物名单没跟上')
 
 /* —— ② 现在报的是**真包**：那几个数从现装的那份说明书上数 —— */

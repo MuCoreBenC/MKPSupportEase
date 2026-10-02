@@ -284,6 +284,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
         app::build::wb_preview_toml,
+        // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
+        app::build::wb_generate_preview,
         app::build::wb_generate,
         app::build::wb_revert_preview,
         app::build::wb_publish,

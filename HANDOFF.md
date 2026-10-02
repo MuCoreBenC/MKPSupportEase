@@ -690,6 +690,124 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         （注册表已留认领口子：现在只认 `.toml`，ZIP / 备份包往里加一个导入器）。
         **这是 PROJECT-AUDIT 建议次序里的第一个真块**（排 ①）。
 
+     ### 生成前确认（2026-10-02，工作台「生成与发布」页）
+
+     **起因**：作者在客户端预设页看到「下载失败：`A1-fastv3.3.toml` 的响应比目录登记的大
+     （目录记 4300 字节，远端已经给了 4336 字节以上）」，转到工作台问「生成的时候如果原本已经
+     存在了呢，我不希望他直接就这样子点了生成就生成」。
+
+     **查出那条报错的真因（长期有效）**：`#20`（`7a10f8b`，offset 内联表拆成 `offset_x/y/z`）
+     改了 `presets/dist/mkp/presets/` 里 9 份交付 TOML（每份 +36 字节），**但没有重跑
+     `npm run publish:presets`** —— 于是 `presets/dist/catalog.json` / `manifest.json` 里的
+     `size`/`sha256` 还是 `#15` 的旧值。实测 9/9 全部对不上；`git status presets/dist/` 干净
+     ⇒ **main 上就是这样，客户端字节校验（判据 2）正确工作，发布侧漏了一步**。
+     → **修法**：发布侧重跑 `npm run publish:presets`（重建 SHA/size → 一次性分支 → PR）。
+
+     **本轮落地（工作台侧）**：`wb_generate` 是**直接原子覆盖**的，中间插一道确认：
+     ```
+     点「生成」→ wb_generate_preview（只算不写）→ 模态框（清单 + 行级 diff）
+               → 确认生成 → wb_generate 真写 → 框内换结果页 → 完成
+     ```
+     - **后端**：新增 `wb_generate_preview(scope)`（`build.rs`），与 `wb_generate` **共用
+       `planned_todos`**（同一批 + 同一套跳过理由）+ 同一道 `issues::inspect` 闸；
+       新增 `DiffState`（added/modified/unchanged）+ `PreviewFile/PreviewReport`；
+       手写最简**行级 LCS diff**（`diff_lines`，剥前缀/后缀 + 中间段 LCS；**不引第三方 diff 库**）；
+       `preview_one` 判：磁盘读不到 → added（全绿）/ 逐字节相同 → unchanged / 否则 modified。
+       `wb_generate` 本身**一行没改**（原子性 + `same_payload` 保留）。
+     - **前端**：新增 `views/GenerateDiffModal.tsx` + `.module.css`（**「清单 + 详情」两栏**，
+       不是把 N 份竖着堆 —— 作者点名）；有变化的排前、无变化折成「N 份无变化」可展开；
+       行内未变段折成「… N 行未变 …」可点开；确认后框不关、换成结果页（读 `wb_generate` 的
+       `written`/`unchanged`/`skipped`）。`BuildPage` 的生成按钮改走 `openGenerate → confirmGenerate`。
+     - **演示桩**：`dev/mockBackend.ts` 加 `wb_generate_preview`（按 `builtRecords` 造同形报告）。
+     - **判据**：Rust 7 条（含 **`preview_never_touches_the_disk`**）+ 探针
+       `workbench-build.mjs` 的生成前确认四断言（点生成先弹框 / 确认前不写盘 / 确认后换结果页 / 名单才跟上）。
+     - **口径**：预演**一个字节都不写**（`DiffLines` 拿真文本比，不用 `same_payload` 的"跳过
+       `release_time`"等价 —— 那是判"要不要重写"的口径，不是给人看 diff 的口径）。
+
+     ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
+
+     **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，
+     必须立马显示，就是那个反馈。等待的时候可以用骨架屏」；并「已生成过了他就不让选择了，是不对的。
+     那个按钮也不能只是『待生成』，还得给我一个全选按钮」。
+
+     **① 切页立刻显示（骨架屏）**
+     - **真因**：`App.renderPage` 在 `!book || !words` 时**返回 `null`** —— 整本（`wb_book`）
+       没回来之前，点导航**什么都不显示**（黑屏）。
+     - **改法**：新增 `components/Skeleton.tsx`（+ `.module.css`）—— 按页给一具骨架
+       （机型/参数/套餐/资产 = 两栏，生成/设置 = 一叠卡）；`renderPage` 的
+       `!book || !words` 改成 `skeletonFor(id)`；`build`/`settings` 的 `!boot` 同样给骨架。
+     - **② 卡不阻塞**：`BuildPage` 的 `collectInputs()`（6 条读 + 每台机型一条 `wb_desk`）
+       本来就是后台 `useEffect`，页面壳早就画出；它的「包里有什么」在装的时候改摆**骨架条**
+       （`.chipSkel`）而不是一个空 chip。
+     - **判据**：探针用 CDP CPU 节流造"慢"，断言「整本回来之前先画骨架屏（不是黑屏）+ 导航已在」。
+
+     **② 生成页：已生成也能勾 + 「全选」**
+     - 后端的 `row.buildable` 只覆盖 `stale | neverBuilt`（那是「要不要进**默认**生成队列」的口径）；
+       而 `planned_todos` 在 `Scope::Picked` 下**本来就收任何 uid**（内容没变走 `unchanged`、不重写）。
+       → 所以「已生成不让勾」**只是前端用了 `buildable` 当勾选闸**，后端早就支持重生成。
+     - **改法**：前端加 `pickable(r) = r.state !== 'noResources'`（只有"压根没配方"那种真不能生成），
+       勾选框改用它；补 **「全选」**（勾所有能勾的，含已生成）与 **「全不选」**，
+       与既有「全选待生成」并存（两颗问的是不同问题：一个"哪些还没生成"、一个"全部"）。
+     - 作者口径补充：「**就算它没有变化，我也可以重新去生成一次，反正我就是想看到那个模态框**」。
+     - **判据**：探针断言「已生成的行也能勾（0 个被禁）」「「全选」勾上全部 N/N 行」。
+
+     ### 性能修复：`ParamRegistry::fingerprint()` 缓存（2026-10-02）
+
+     **症状**（作者）：「点击了生成与发布的页面，还是像一瞬间被冻结住了，过了好一会才有反应」。
+
+     **实测定位**（临时 `perf_probe` test，拿**真 `presets/` + 真 `workbench/` store** 量，
+     不是小夹具 —— 夹具量不出问题）：
+
+     | 操作 | 修前 | 修后 |
+     | --- | --- | --- |
+     | `book_view()` | **321 ms** | **14 ms** |
+     | `build_rows()` | **79 ms** | **12 ms** |
+     | `registry.fingerprint()` ×27 | 230 ms | 0 ms |
+
+     **根因**：`presetdata/resolve.rs` 的 `Layers::fingerprint()` 里每次都调
+     `self.registry.fingerprint()` —— 它**序列化 74 条定义 + 整本布局再 SHA256**（8.5ms/次）。
+     而 `book_view` / `build_rows` 按版本反复取它（每版 3 次 × 9 版 = **27 次**）。
+     这个值**整份会话对所有机型所有版本都一样**，重算纯浪费。
+
+     **修法（作者拍板：最小改动、不扩大战线）**：`ParamRegistry` 加
+     `fingerprint_cache: std::sync::OnceLock<String>`，`fingerprint()` 改成
+     `get_or_init(..).clone()` —— 仍是 `&self`、**返回值逐字节不变**，只是不再重算。
+     **不动 `Layers` / `build_state` / `book_view` 的业务逻辑**；**不动 `effective_recipe()`**
+     （剩下那 ~10ms 留着，若真机仍卡再单独拆）。
+
+     **判据**：新增 `presetdata::registry::tests::fingerprint_is_cached_but_per_registry`
+     （同一实例取 1000 次同值 / 同数据另一实例同值 / 重载后数据变了跟着变）。
+
+     **收尾**：临时 `perf_probe` 已删（测试数回到 264 + 460），`workbench/built.json`
+     （测量时 `Ctx::open` 写的）已清。
+
+     ### 根本修复：只读命令改异步（2026-10-02，作者点名"不要修补补"）
+
+     上一刀（缓存注册表指纹）只把 `book_view` 从 321ms 降到 14ms，作者**仍然觉得"顿一下"**，
+     并给出了正确方向：「**能不能让这个页面显示出来再说？像那些游戏，优先显示了再改后面的。**」
+
+     **真正的根因**（Tauri 官方文档原文）：**不带 `async` 的命令在主线程上执行，
+     除非写成 `#[tauri::command(async)]`** —— 而主线程就是 webview 渲染那条线程。
+     所以后端同步命令算多久，**整个界面就冻多久**：骨架屏画不出来、导航点不动。
+
+     > 这不是"算得快不快"的问题，是"**在哪条线程上算**"的问题。
+     > 算 14ms 还是 320ms 都是同一种病，只是轻重不同。缓存治标，这条治本。
+
+     **改法**：**21 条只读命令**加 `#[tauri::command(async)]`（函数体照旧同步、无 await，
+     所以 `traced` 那个 `!Send` 的 span guard 不受影响；`with_ctx` 的 `std::sync::Mutex`
+     在 worker 线程上同步拿锁，不阻塞主线程、无跨 await 持锁 → 不会死锁）。
+     - **改 async 的 21 条读命令**：`wb_boot` `wb_words` `wb_book` `wb_registry` `wb_matrix`
+       `wb_desk` `wb_trash` `wb_ui` `wb_preview_bulk` `wb_diff_draft` `wb_preflight`
+       `wb_preview_toml` `wb_generate_preview` `wb_revert_preview` `wb_dist_strays`
+       `wb_baseline_diff` `wb_assets` `wb_asset_usage` `wb_bundles` `wb_machines` `wb_version_orphans`
+     - **故意不动的 20 条写命令**（`wb_apply_draft` / `wb_save` / `wb_generate` / `wb_publish` …）：
+       要落盘、要和草稿的锁配合，改异步是另一件要单独评估的事。
+     - 前端**一个字没改**（本来就是 `await`）；上轮的骨架屏现在才真正生效 —— 主线程空出来了。
+
+     **判据**：`workbench::app::tests::read_commands_are_async_so_they_never_freeze_the_window`
+     —— 源码扫描，那 21 条读命令有一条没写 `(async)` 就红（已实测反向验证：把 `wb_book`
+     改回同步，这条立刻报 `["wb_book"]`）。
+
      ### 整理那一刀（**排在上述两块之后**，先记着别现在做）
 
      - **死文件 / 死代码**：`jsonKey`/`mergeGroup`/`subfieldsOrder` 这套「共享 tomlKey = 内联表」
@@ -870,6 +988,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::state` 草稿 4 条 | `draft_roundtrips_and_clears`（存/读/丢，丢是幂等）/ `absent_draft_is_none_not_error` / `corrupted_draft_is_an_error`（坏档不静默）/ `draft_and_active_are_separate_files`（**改一份 ≠ 在用它**：两个状态文件互不干扰） |
 | `runtime::lineage` 7 条（第七层，客户端那份血统） | `the_copy_is_the_source_plus_three_lines`（**副本 = 来源 + 三行**，剪掉逐字节相同）/ `copying_a_copy_replaces_the_old_lineage`（不叠加）/ `crlf_source_keeps_crlf` / `a_source_without_release_time_gets_two_lines`（不知道就别写）/ `lineage_roundtrips_and_absence_is_none`（没有血统 = `None`，不是空壳）/ `a_half_lineage_is_still_a_lineage` / `a_lookalike_key_is_not_matched`（`# based_on_extra` 不许被当成 `based_on`） |
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
+| `workbench::app::build` 生成前预演 7 条（2026-10-02） | **`preview_never_touches_the_disk`（核心不变式：预演一个字节都不写 —— 新增的那份不被创建、已有的原字节不动）** / `a_new_file_shows_every_line_as_added`（新增全绿）/ `an_identical_file_has_no_diff_lines` / `a_changed_line_shows_one_removed_and_one_added`（删在前增在后，与 git 同序）/ `an_inserted_line_shows_only_an_added` / `a_deleted_line_shows_only_a_removed` / `the_counts_match_the_line_kinds`（新增/修改/无变化三档 + `+N −N` 计数） |
+| `scripts/probes/workbench-build.mjs`（**手工**，非 CI） | 生成与发布页（① 生成 / ② 数据包 / 查看 JSON / 查看 TOML / 版本轴 / 云端那一格）· **切页立刻显示（2026-10-02）：整本没回来时先画骨架屏（不是黑屏）+ 导航已在** · **生成页放开选择：已生成的行也能勾（0 个被禁）+「全选」勾满 N/N** · **生成前确认：点「生成」先弹 diff 确认框（不是直接覆盖）· 确认**之前**不写盘 · 确认之后框内换结果页 · 确认之后产物名单才跟上** · 参数台增量。**注意**：`button[title*="钉住"]` 那一处是**预存红**（按钮已删，见 §3.5 整理那一刀）—— 不是本文改动引入的 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
 | `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· **① 弃用字段显示但只读（摊开的弃用行有「已弃用」徽章 + 控件全 disabled）** · **④ 塔地图按默认板画出板轮廓并替下 X/Y 行（svg「塔」+ 板 evenodd 路径 + 槽位含坐标行）** · 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |

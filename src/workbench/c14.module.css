@@ -908,6 +908,14 @@
   padding: 0 2px 0 8px;
 }
 
+/* 「包里有什么」在装说明书时的一排骨架条（2026-10-02）—— 与 chip 同一行高，不跳版 */
+.chipSkel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+}
+
 .chipMain {
   font-size: var(--fs-label);
   color: var(--text-2);

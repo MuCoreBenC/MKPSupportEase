@@ -31,6 +31,7 @@ import type { CSSProperties, ReactNode } from 'react'
 
 
 import { FieldLayer } from './components/field'
+import PageSkeleton from './components/Skeleton'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -442,8 +443,35 @@ export function WorkbenchApp() {
 
   /* ---------- 页面渲染（挂载入口只有这一处） ---------- */
 
+  /*
+   * 整本 / 词表还没到 —— **别返回 null**。
+   *
+   * 之前这里 `return null`，于是点导航要等 `wb_book` + `wb_words` 回来才有画面，
+   * 作者的验收是「必须立马显示，就是那个反馈」。改成**按页给一具骨架**：
+   * 壳（页头 / 卡片框 / 行槽）立刻出来，数据一到整体换成真内容。
+   *
+   * 每页的形状给个大致对得上的（机型页两栏 / 生成页一叠卡）—— 骨架是占位，不是预览图。
+   */
+  const skeletonFor = (id: NavId): ReactNode => {
+    switch (id) {
+      case 'machines':
+        return <PageSkeleton layout="cols" cards={2} rows={7} label="机型与版本正在加载" />
+      case 'params':
+        return <PageSkeleton layout="cols" cards={2} rows={8} label="参数台正在加载" />
+      case 'bundles':
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="套餐正在加载" />
+      case 'build':
+        return <PageSkeleton layout="flow" cards={3} rows={5} label="生成与发布正在加载" />
+      case 'assets':
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="资产库正在加载" />
+      case 'settings':
+        return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
+    }
+  }
+
   const renderPage = (id: NavId): ReactNode => {
-    if (!book || !words) return null
+    /* 数据没到先给骨架（不再黑屏）—— 见 skeletonFor 的注 */
+    if (!book || !words) return skeletonFor(id)
     switch (id) {
       case 'machines':
         return (
@@ -502,7 +530,8 @@ export function WorkbenchApp() {
           />
         )
       case 'build':
-        if (!boot) return null
+        /* `boot` 比整本晚到的那一瞬也给骨架（别在整本已到之后又黑一下） */
+        if (!boot) return skeletonFor('build')
         return (
           <BuildPage
             boot={boot}
@@ -519,7 +548,7 @@ export function WorkbenchApp() {
           />
         )
       case 'settings':
-        if (!boot) return null
+        if (!boot) return skeletonFor('settings')
         return <SettingsPage boot={boot} />
     }
   }

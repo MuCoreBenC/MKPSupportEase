@@ -921,6 +921,55 @@ export function installMockBackend() {
         if (at >= 0) ASSETS.splice(at, 1)
         return Promise.resolve(assetListOf(null, null, null, null, null, null))
       }
+      case 'wb_generate_preview': {
+        /*
+         * 生成前预演（2026-10-02）。真机由 Rust 的 `build::preview_one` 逐份与磁盘比；
+         * 这里按 `builtRecords`（"这台之前生成过没有"）造一份同形的报告，好让确认框在
+         * 浏览器里能验收。**演示数据不冒充真渲染器**：正文头一行写着这是开发桩。
+         *
+         *   · 没生成过 → added（正文全绿）
+         *   · 生成过   → unchanged（只占清单一行）
+         */
+        const scope = args?.scope as string | { picked: string[] }
+        const rows = buildBook().buildRows as { uid: string; buildable: boolean; state: string }[]
+        const picked =
+          typeof scope === 'string'
+            ? rows.filter((r) => r.buildable && (scope === 'all' || r.state === 'stale')).map((r) => r.uid)
+            : (scope?.picked ?? [])
+        const files: unknown[] = []
+        const skipped: [string, string][] = []
+        let toWrite = 0
+        let unchangedN = 0
+        for (const uid of picked) {
+          const row = rows.find((r) => r.uid === uid)
+          if (!row || !row.buildable) {
+            skipped.push([uid, '这台机型还没配尺寸（占位），不参与交付'])
+            continue
+          }
+          const fileName = `${uid.replace('/', '-')}.toml`
+          if (builtRecords.has(uid)) {
+            unchangedN += 1
+            files.push({ uid, fileName, state: 'unchanged', lines: [], added: 0, removed: 0 })
+          } else {
+            toWrite += 1
+            const text = [
+              '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
+              `# machine: ${uid.split('/')[0]}`,
+              '',
+              '[demo]',
+            ]
+            files.push({
+              uid,
+              fileName,
+              state: 'added',
+              lines: text.map((t, i) => ({ kind: 'added', text: t, no: i + 1 })),
+              added: text.length,
+              removed: 0,
+            })
+          }
+        }
+        return Promise.resolve({ files, skipped, toWrite, unchanged: unchangedN, blocked: null })
+      }
       case 'wb_generate': {
         const scope = args?.scope as string | { picked: string[] }
         const rows = buildBook().buildRows as { uid: string; buildable: boolean; state: string }[]

@@ -67,8 +67,10 @@ import type {
   BaselineDiffEntry,
   BookView,
   Boot,
+  GenerateReport,
   Issue,
   IssueReport,
+  PreviewReport,
   PublishReport,
   Words,
 } from '../api'
@@ -79,6 +81,8 @@ import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
+import { Line } from '../components/Skeleton'
+import GenerateDiffModal from './GenerateDiffModal'
 import { CLIENT_COMPAT, minClientOf, verdictTextOf } from '../compat'
 import { buildClientPackage, buildRelease, collectInputs } from '../clientPackage'
 import { cloudSummary, listCloud, removeFromCloud, uploadToCloud } from '../cloud'
@@ -171,10 +175,38 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
   const [pkgErr, setPkgErr] = useState<string | null>(null)
   /** 正在上传（装说明书的读命令有六次 `wb_desk`，按钮要压得住重复点） */
   const [upBusy, setUpBusy] = useState(false)
+  /*
+   * 生成前确认（2026-10-02）：点「生成」先开这个框，看 diff 再确认。
+   *
+   *   preview === undefined  框没开
+   *   preview === null       框开着，预演还没算回来（或算挂了 —— 看 previewErr）
+   *   preview 是报告        算回来了，可以确认
+   *   genDone 非 null        已经生成完，框切成结果页
+   *
+   * `genPicked` 记下"这一轮要生成哪些" —— 预演与确认必须同一批（草稿落盘会重取
+   * book，`ids` 可能就变了，所以不能在确认那一刻再读一遍）。
+   */
+  const [genPicked, setGenPicked] = useState<string[] | null>(null)
+  const [genPreview, setGenPreview] = useState<PreviewReport | null>(null)
+  const [genPreviewErr, setGenPreviewErr] = useState<string | null>(null)
+  const [genBusy, setGenBusy] = useState(false)
+  const [genDone, setGenDone] = useState<GenerateReport | null>(null)
 
   const blocked = (report?.blocks ?? 0) > 0
   const dirty = book.dirtyCount > 0
   const ids = Object.keys(picked).filter((k) => picked[k])
+
+  /*
+   * 「这一行能不能勾」= **不是「没有可生成的东西」那一档**（作者 2026-10-02）。
+   *
+   * 后端的 `row.buildable` 只覆盖 `stale | neverBuilt`（那是「要不要进**默认**生成队列」
+   * 的口径）；而**已生成也能重生成** —— `planned_todos` 在 `Scope::Picked` 下本来就收
+   * 任何 uid，内容没变就走 `unchanged`、不重写。作者要的是「就算没变化，我也想走一遍确认框」。
+   *
+   * 所以勾选只看 `NoResources`（这台压根没配方，生成出来是空的）。`buildable` 仍用于
+   * 「全选待生成」那颗按钮 —— 那两个是不同的问题，别合成一个。
+   */
+  const pickable = (r: (typeof rows)[number]) => r.state !== 'noResources'
 
   /*
    * 包版本（C15）：建议值从 1.0.0 起步（第一版不做加法 —— 「从 1.0.0 加一格」是那三枚快捷的事）。
@@ -264,26 +296,55 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     if (g) onGoto(g.view, g.focus)
   }
 
-  /** 生成。勾中的行按当前已保存的配方整批生成 —— 后端原子：任一项算不出则整批不动 */
-  const generate = async () => {
+  /**
+   * 生成第一步：**先预演，不写盘**。勾中的行按当前已保存的配方算一遍，与磁盘上现存的
+   * 逐份比，把报告喂给确认框。
+   *
+   * 作者 2026-10-02 定的规矩：点「生成」不许当场覆盖 —— 先看 diff、确认了才写。
+   * 预演走 `wb_generate_preview`（后端只算不写），与真生成同一批 `todo`、同一道闸。
+   */
+  const openGenerate = async () => {
     if (!ids.length) return
-    /* 草稿不干净先落盘 —— 生成读的是**已保存**的配方（一个按钮两个动作，顺序规定死） */
+    /* 草稿不干净先落盘 —— 预演读的也是**已保存**的配方（与生成同一条顺序规矩） */
     if (dirty && !(await onSave())) return
+    const picked = [...ids]
+    setGenPicked(picked)
+    setGenPreview(null)
+    setGenPreviewErr(null)
+    setGenDone(null)
     try {
-      const rep = await wb.generate({ picked: ids })
+      setGenPreview(await wb.generatePreview({ picked }))
+    } catch (e) {
+      setGenPreviewErr(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 生成第二步：确认。真写盘，然后把框切成结果页 */
+  const confirmGenerate = async () => {
+    if (genPicked === null) return
+    setGenBusy(true)
+    try {
+      const rep = await wb.generate({ picked: genPicked })
       // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）
       await onApply(`生成记录：${rep.written.length + rep.unchanged.length} 份`, [rep.mark])
-      const parts = [
-        rep.written.length > 0 ? `写出 ${rep.written.length} 份` : null,
-        rep.unchanged.length > 0 ? `${rep.unchanged.length} 份内容没变、跳过重写` : null,
-        ...rep.skipped.map(([uid, why]) => `跳过 ${uid}（${why}）`),
-      ].filter((x): x is string => x !== null)
-      toasts.push(`已生成：${parts.join('；') || '没有可生成的项'}`)
+      setGenDone(rep)
       setPicked({})
       onBookRefresh()
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
+      /* 真写挂了就把框关了 —— 结果页是给"成功"用的，别拿它兜错误 */
+      closeGenerate()
+    } finally {
+      setGenBusy(false)
     }
+  }
+
+  /** 关掉确认框（取消 / 结果页「完成」都走这里） */
+  const closeGenerate = () => {
+    setGenPicked(null)
+    setGenPreview(null)
+    setGenPreviewErr(null)
+    setGenDone(null)
   }
 
   /** 发布。后端还有两道硬闸：检查阻断 + 残留拦截（一个字节都不许在带残留时写出） */
@@ -458,10 +519,16 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   style={{ cursor: 'pointer' }}
                   className={s.row}
                 >
+                  {/*
+                   * **已生成的行也能勾**（作者 2026-10-02）：后端本来就允许重生成 ——
+                   * 内容没变就是 unchanged、不重写；而作者要的是"就算没变化我也想走一遍
+                   * 确认框"。所以勾选只按 buildable 拦（机型没尺寸那种真不能生成），
+                   * 不再看 state。
+                   */}
                   <input
                     type="checkbox"
                     checked={!!picked[r.uid]}
-                    disabled={!r.buildable}
+                    disabled={!pickable(r)}
                     title={r.disabledReason ?? undefined}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setPicked({ ...picked, [r.uid]: e.target.checked })}
@@ -494,18 +561,44 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
               </Fragment>
             ))}
             <div className={s.bar} style={{ marginTop: 12 }}>
+              {/*
+               * 两颗全选（作者 2026-10-02）：
+               *   全选待生成  只勾 stale / neverBuilt —— 日常那一颗（`buildable` 的口径）
+               *   全选        勾**所有能勾的**（含已生成）—— 要"重走一遍确认框"时用它
+               * 两颗并存不是重复：一个问"哪些还没生成"，一个问"全部"。
+              */}
               <button
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
                 onClick={() => {
                   const next: Record<string, boolean> = {}
                   for (const r of rows) {
-                    if (r.buildable && (r.state === 'neverBuilt' || r.state === 'stale')) next[r.uid] = true
+                    if (r.buildable) next[r.uid] = true
                   }
                   setPicked(next)
                 }}
               >
                 全选待生成
+              </button>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => {
+                  const next: Record<string, boolean> = {}
+                  for (const r of rows) {
+                    if (pickable(r)) next[r.uid] = true
+                  }
+                  setPicked(next)
+                }}
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => setPicked({})}
+              >
+                全不选
               </button>
               <span className={s.grow} />
               <button
@@ -513,7 +606,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
                 disabled={!ids.length || blocked}
                 title={blocked ? words.disabled.buildBlocked : undefined}
-                onClick={() => void generate()}
+                onClick={() => void openGenerate()}
               >
                 生成 {ids.length} 项
               </button>
@@ -664,8 +757,17 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                       #{pkg.inputsHash}
                     </span>
                   </>
+                ) : pkgErr !== null ? (
+                  <span className={s.chip}>{pkgErr}</span>
                 ) : (
-                  <span className={s.chip}>{pkgErr ?? '正在装说明书……'}</span>
+                  /* 说明书在装（`collectInputs` 串着 6 条读 + 每台机型一条 wb_desk）——
+                     这里摆骨架条，别让这一块看起来是空的。卡框早就画出来了。 */
+                  <span className={s.chipSkel} aria-label="正在装说明书" aria-busy="true">
+                    <Line w="64px" h={11} />
+                    <Line w="56px" h={11} />
+                    <Line w="60px" h={11} />
+                    <Line w="72px" h={11} />
+                  </span>
                 )}
               </div>
               <p className={s.note}>
@@ -1043,6 +1145,18 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
           />
         </div>
       </ModalC14>
+
+      {/* 生成前确认（2026-10-02）：点「生成」不再当场覆盖 —— 先看 diff、确认了才写 */}
+      {genPicked !== null && (
+        <GenerateDiffModal
+          report={genPreview}
+          error={genPreviewErr}
+          busy={genBusy}
+          done={genDone}
+          onConfirm={() => void confirmGenerate()}
+          onClose={closeGenerate}
+        />
+      )}
 
       {/* 另一半发布物：用户真正下载的那一份 —— 正文来自后端的渲染器 */}
       {tomlOpen !== null && (

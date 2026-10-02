@@ -84,7 +84,7 @@ const PUBLISH_CHANNEL: &str = "stable";
 ///
 /// 生成闸门（[`issues::inspect`]，`wb_generate` 里那道）**刻意不含**配方对齐：
 /// 生成读参数注册表，不读配方，对不上不影响工作台的产物（见 `issues.rs` 那边的说明）。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
@@ -372,6 +372,50 @@ pub struct GenerateReport {
     pub mark: Patch,
 }
 
+/// 这次要生成哪些（`todo`）与跳过了哪些（带原因）。
+///
+/// **`wb_generate` 与 `wb_generate_preview` 共用这一处** —— 预演必须与真生成算的是
+/// 同一批、同一套跳过理由，否则"确认过的"和"真写的"就会是两回事。
+fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, String)>) {
+    let rows = book.build_rows();
+    let wanted: Vec<&str> = match scope {
+        Scope::Stale => rows
+            .iter()
+            .filter(|r| r.buildable)
+            .map(|r| r.uid.as_str())
+            .collect(),
+        Scope::All => rows.iter().map(|r| r.uid.as_str()).collect(),
+        Scope::Picked(uids) => uids.iter().map(String::as_str).collect(),
+    };
+
+    let mut skipped: Vec<(String, String)> = Vec::new();
+    let mut todo: Vec<String> = Vec::new();
+    for uid in wanted {
+        // **没有床身尺寸的机型：跳过时说真因。**
+        //
+        // 这一台生成出来也用不了 —— 消费端读预设时会在内置尺寸表里查不到它，
+        // 然后拒掉整份配方（不是少一项检查）。b04 的 P0 审计查明了这件事。
+        // 原来它走的是「暂无资源」那条通用话术，而那句话让人去找资源，
+        // 方向是错的：要补的是尺寸。
+        let no_dims = book
+            .version(uid)
+            .and_then(|v| book.machines().iter().find(|m| m.id == v.machine_id))
+            .is_some_and(|m| !m.has_dimensions);
+        if no_dims {
+            skipped.push((uid.to_owned(), w::disabled::BUILD_NO_DIMENSIONS.to_owned()));
+            continue;
+        }
+        match rows.iter().find(|r| r.uid == uid) {
+            Some(r) if r.state == w::BuildState::NoResources => {
+                skipped.push((uid.to_owned(), w::disabled::BUILD_NO_RESOURCES.to_owned()))
+            }
+            Some(_) => todo.push(uid.to_owned()),
+            None => skipped.push((uid.to_owned(), "这一版不在树上".to_owned())),
+        }
+    }
+    (todo, skipped)
+}
+
 /// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门
 #[tauri::command]
 pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
@@ -386,46 +430,11 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
                     .with_detail(format!("{}：{}", b.title, b.detail)));
             }
 
-            let rows = book.build_rows();
-            let wanted: Vec<&str> = match &scope {
-                Scope::Stale => rows
-                    .iter()
-                    .filter(|r| r.buildable)
-                    .map(|r| r.uid.as_str())
-                    .collect(),
-                Scope::All => rows.iter().map(|r| r.uid.as_str()).collect(),
-                Scope::Picked(uids) => uids.iter().map(String::as_str).collect(),
-            };
-
-            let mut skipped: Vec<(String, String)> = Vec::new();
-            let mut todo: Vec<&str> = Vec::new();
-            for uid in wanted {
-                // **没有床身尺寸的机型：跳过时说真因。**
-                //
-                // 这一台生成出来也用不了 —— 消费端读预设时会在内置尺寸表里查不到它，
-                // 然后拒掉整份配方（不是少一项检查）。b04 的 P0 审计查明了这件事。
-                // 原来它走的是「暂无资源」那条通用话术，而那句话让人去找资源，
-                // 方向是错的：要补的是尺寸。
-                let no_dims = book
-                    .version(uid)
-                    .and_then(|v| book.machines().iter().find(|m| m.id == v.machine_id))
-                    .is_some_and(|m| !m.has_dimensions);
-                if no_dims {
-                    skipped.push((uid.to_owned(), w::disabled::BUILD_NO_DIMENSIONS.to_owned()));
-                    continue;
-                }
-                match rows.iter().find(|r| r.uid == uid) {
-                    Some(r) if r.state == w::BuildState::NoResources => {
-                        skipped.push((uid.to_owned(), w::disabled::BUILD_NO_RESOURCES.to_owned()))
-                    }
-                    Some(_) => todo.push(uid),
-                    None => skipped.push((uid.to_owned(), "这一版不在树上".to_owned())),
-                }
-            }
+            let (todo, skipped) = planned_todos(&book, &scope);
 
             // ① 全部算完。**任一项算不出来则整批不动**
             let mut rendered: Vec<Rendered> = Vec::with_capacity(todo.len());
-            for uid in todo {
+            for uid in &todo {
                 rendered.push(render(&book, uid)?);
             }
 
@@ -482,7 +491,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
 }
 
 /// 单独看一份产物的文本（生成前确认、看差异都用它）
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
@@ -490,6 +499,268 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
             Ok(render(&Book::new(&ctx.presets, &c, &d), &uid)?.text)
         })
     })
+}
+
+/* ---------- 生成前预演（生成前确认那一步） ---------- */
+
+/// 一份文件的预演结论。
+///
+/// 三个状态就是「点生成会怎样」的全部可能：
+///   · `added`    —— 磁盘上还没有这一份（首次生成 / 被清理过）：正文全绿
+///   · `modified` —— 有这一份，但这次算出来的和它不一样：会**原子替换**
+///   · `unchanged`—— 逐字节相同，不会重写（与 [`same_payload`] 同一件事，只是这里比真文本）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffState {
+    Added,
+    Modified,
+    Unchanged,
+}
+
+/// 行级 diff 的一种行。
+///
+/// **判据比的是真文本，不是 [`same_payload`] 那个"跳过 release_time"的等价** ——
+/// 预演是给人看的，头里那一行时间戳确实会变，就该如实显示出来。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    /// `context` 没变 / `added` 这次新有 / `removed` 这次没有
+    pub kind: DiffLineKind,
+    pub text: String,
+    /// 第几行（1 起；`removed` 记它在**磁盘旧版**里的行号，其余记新版的）
+    pub no: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+/// 一份产物的预演：状态 + 行级差异 + 计数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewFile {
+    pub uid: String,
+    pub file_name: String,
+    pub state: DiffState,
+    /// 行级差异（含未变的上下文行）—— `unchanged` 时是空表（界面只显示"无变化"）
+    pub lines: Vec<DiffLine>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// 预演报告。跳过的项照实列出（与 `wb_generate` 同一套原因）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewReport {
+    pub files: Vec<PreviewFile>,
+    pub skipped: Vec<(String, String)>,
+    /// 会被写盘的份数（`added` + `modified`）
+    pub to_write: usize,
+    /// 不变的份数
+    pub unchanged: usize,
+    /// 有阻断时的唯一原因（与 `wb_generate` 同一道闸，前端照它压按钮）
+    pub blocked: Option<String>,
+}
+
+/// **生成前预演**：把这次要写的产物都算出来，与磁盘上现存的逐份比，给出行级 diff。
+///
+/// **一个字节都不写** —— 它就是 [`wb_generate`] 的彩排：同一批 `todo`（同一套跳过理由）、
+/// 同一处渲染、同一处落点（`<dist>/mkp/presets/`），只是把"写"换成"读出来比"。
+/// 界面上「点生成 → 先看这个 → 再点确认」的第二步靠它。
+///
+/// 阻断也照实报（`blocked` 非空 = 生成会被拒），不假装能生成。
+#[tauri::command(async)]
+pub fn wb_generate_preview(scope: Scope) -> Result<PreviewReport, AppError> {
+    traced("wb_generate_preview", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
+
+            // 生成闸门与 `wb_generate` 是同一道：有阻断就如实说，不往下算
+            let report = issues::inspect(&book);
+            if let Some(b) = report.first_block() {
+                return Ok(PreviewReport {
+                    files: Vec::new(),
+                    skipped: Vec::new(),
+                    to_write: 0,
+                    unchanged: 0,
+                    blocked: Some(format!("{}：{}", b.title, b.detail)),
+                });
+            }
+
+            let (todo, skipped) = planned_todos(&book, &scope);
+            let dist = paths::dist_root()?
+                .join(super::dist::MKP_DIR)
+                .join("presets");
+
+            let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
+            let mut to_write = 0usize;
+            let mut unchanged = 0usize;
+            for uid in &todo {
+                let r = render(&book, uid)?;
+                let existing = std::fs::read_to_string(dist.join(&r.file_name)).ok();
+                let pf = preview_one(&r, existing.as_deref());
+                match pf.state {
+                    DiffState::Unchanged => unchanged += 1,
+                    _ => to_write += 1,
+                }
+                files.push(pf);
+            }
+
+            Ok(PreviewReport {
+                files,
+                skipped,
+                to_write,
+                unchanged,
+                blocked: None,
+            })
+        })
+    })
+}
+
+/// 比一份：磁盘读得到且逐字节相同 → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
+fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
+    let (state, lines) = match existing {
+        None => (DiffState::Added, diff_added(&r.text)),
+        Some(old) if old == r.text => (DiffState::Unchanged, Vec::new()),
+        Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
+    };
+    let added = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Added)
+        .count();
+    let removed = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Removed)
+        .count();
+    PreviewFile {
+        uid: r.uid.clone(),
+        file_name: r.file_name.clone(),
+        state,
+        lines,
+        added,
+        removed,
+    }
+}
+
+/// 新增一份：每一行都是 `added`（界面全绿，不折叠）
+fn diff_added(text: &str) -> Vec<DiffLine> {
+    text.lines()
+        .enumerate()
+        .map(|(i, t)| DiffLine {
+            kind: DiffLineKind::Added,
+            text: t.to_owned(),
+            no: i + 1,
+        })
+        .collect()
+}
+
+/// 行级 diff：先剥掉两端的公共行，中间那段做最简 LCS，再拼回来。
+///
+/// **不引第三方 diff 库**（守"不引入新依赖"）。TOML 一行一条、行数在几十到几百，
+/// 这个 O(n·m) 的 LCS 在这里毫无压力。剥前缀/后缀是为了让"只改了一行"这种常见情形
+/// 退化成"一大段 context + 一两行变化"，避免整份文件都进 LCS。
+fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+
+    // 公共前缀
+    let mut head = 0;
+    while head < a.len() && head < b.len() && a[head] == b[head] {
+        head += 1;
+    }
+    // 公共后缀（不越过头）
+    let mut tail = 0;
+    while tail < a.len() - head
+        && tail < b.len() - head
+        && a[a.len() - 1 - tail] == b[b.len() - 1 - tail]
+    {
+        tail += 1;
+    }
+
+    let mid_a = &a[head..a.len() - tail];
+    let mid_b = &b[head..b.len() - tail];
+
+    let mut out: Vec<DiffLine> = Vec::with_capacity(a.len().max(b.len()) + mid_a.len());
+    for (i, t) in a[..head].iter().enumerate() {
+        out.push(DiffLine {
+            kind: DiffLineKind::Context,
+            text: (*t).to_owned(),
+            no: i + 1,
+        });
+    }
+    lcs_diff(mid_a, mid_b, head + 1, head + 1, &mut out);
+    for (i, t) in a[a.len() - tail..].iter().enumerate() {
+        out.push(DiffLine {
+            kind: DiffLineKind::Context,
+            text: (*t).to_owned(),
+            no: a.len() - tail + i + 1,
+        });
+    }
+    out
+}
+
+/// 中间那段的最简 LCS（标准 DP + 回溯），产出 `context` / `added` / `removed` 三种行。
+fn lcs_diff(a: &[&str], b: &[&str], a_base: usize, b_base: usize, out: &mut Vec<DiffLine>) {
+    let n = a.len();
+    let m = b.len();
+    // dp[i][j] = a[i..] 与 b[j..] 的最长公共子序列长度
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            out.push(DiffLine {
+                kind: DiffLineKind::Context,
+                text: a[i].to_owned(),
+                no: a_base + i,
+            });
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            out.push(DiffLine {
+                kind: DiffLineKind::Removed,
+                text: a[i].to_owned(),
+                no: a_base + i,
+            });
+            i += 1;
+        } else {
+            out.push(DiffLine {
+                kind: DiffLineKind::Added,
+                text: b[j].to_owned(),
+                no: b_base + j,
+            });
+            j += 1;
+        }
+    }
+    while i < n {
+        out.push(DiffLine {
+            kind: DiffLineKind::Removed,
+            text: a[i].to_owned(),
+            no: a_base + i,
+        });
+        i += 1;
+    }
+    while j < m {
+        out.push(DiffLine {
+            kind: DiffLineKind::Added,
+            text: b[j].to_owned(),
+            no: b_base + j,
+        });
+        j += 1;
+    }
 }
 
 /* ---------- 恢复配方 ---------- */
@@ -519,7 +790,7 @@ pub struct RevertChange {
 }
 
 /// 「恢复到上次成功生成时的配方」。**只算不写** —— 写走唯一那条入口
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
@@ -648,7 +919,7 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
 ///
 /// 「不在本次交付集合内」的文件，按字典序。发布被残留拦下时，界面先给这一条
 /// 让人看清是什么，再决定要不要清理。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
     traced("wb_dist_strays", |_| {
         with_ctx(|ctx| {
@@ -707,7 +978,7 @@ pub struct BaselineDiffEntry {
 /// 为什么产物侧用 `BUILTIN_PRESETS` 而不是读盘：那张表有判据
 /// （`builtin_presets_match_dir`）保证与入库目录**一份不差**，编译进二进制
 /// 意味着"发布者看到的"与"用户二进制里带的"是同一份。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_baseline_diff() -> Result<Vec<BaselineDiffEntry>, AppError> {
     traced("wb_baseline_diff", |_| {
         Ok(baseline_diff_against(&preset::generate::fixtures_dir()))
@@ -1411,5 +1682,125 @@ mod tests {
             got, want,
             "产物名与消费端认的那一批不一致 —— 它会找不到文件，而两边都不报错"
         );
+    }
+
+    /* ---------- 生成前预演：行级 diff ---------- */
+
+    /// 逐行的 `(kind, 文本)`，方便断言时只写关心的部分。
+    fn kinds(lines: &[DiffLine]) -> Vec<(&'static str, &str)> {
+        lines
+            .iter()
+            .map(|l| {
+                let k = match l.kind {
+                    DiffLineKind::Context => "=",
+                    DiffLineKind::Added => "+",
+                    DiffLineKind::Removed => "-",
+                };
+                (k, l.text.as_str())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_new_file_shows_every_line_as_added() {
+        let out = diff_added("a\nb\nc");
+        assert_eq!(kinds(&out), vec![("+", "a"), ("+", "b"), ("+", "c")]);
+        // 行号从 1 起、连续
+        assert_eq!(out.iter().map(|l| l.no).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn an_identical_file_has_no_diff_lines() {
+        // 预演那层用的是逐字节比较（不是 same_payload），所以这里走的是"完全相同"
+        assert!(diff_lines("x\ny", "x\ny")
+            .iter()
+            .all(|l| l.kind == DiffLineKind::Context));
+    }
+
+    #[test]
+    fn a_changed_line_shows_one_removed_and_one_added() {
+        let out = diff_lines("a\nold\nc", "a\nnew\nc");
+        // 与 git diff 同一套顺序：删在前、增在后
+        assert_eq!(
+            kinds(&out),
+            vec![("=", "a"), ("-", "old"), ("+", "new"), ("=", "c")],
+            "变的那一行要一删一增，前后未变的行保持 context"
+        );
+    }
+
+    #[test]
+    fn an_inserted_line_shows_only_an_added() {
+        let out = diff_lines("a\nc", "a\nb\nc");
+        assert_eq!(kinds(&out), vec![("=", "a"), ("+", "b"), ("=", "c")]);
+    }
+
+    #[test]
+    fn a_deleted_line_shows_only_a_removed() {
+        let out = diff_lines("a\nb\nc", "a\nc");
+        assert_eq!(kinds(&out), vec![("=", "a"), ("-", "b"), ("=", "c")]);
+    }
+
+    #[test]
+    fn the_counts_match_the_line_kinds() {
+        // preview_one 的 added/removed 计数直接数行 —— 与界面上的「+N −N」是同一个数
+        let r = Rendered {
+            uid: "A1/standard".to_owned(),
+            file_name: "A1-standard.toml".to_owned(),
+            text: "a\nnew\nc\n".to_owned(),
+            fingerprint: String::new(),
+            snapshot: BTreeMap::new(),
+        };
+
+        let added = preview_one(&r, None);
+        assert_eq!(added.state, DiffState::Added);
+        assert_eq!((added.added, added.removed), (3, 0));
+
+        let same = preview_one(&r, Some("a\nnew\nc\n"));
+        assert_eq!(same.state, DiffState::Unchanged);
+        assert!(
+            same.lines.is_empty(),
+            "无变化不往回带行（界面只显示「无变化」）"
+        );
+        assert_eq!((same.added, same.removed), (0, 0));
+
+        let changed = preview_one(&r, Some("a\nold\nc\n"));
+        assert_eq!(changed.state, DiffState::Modified);
+        assert_eq!((changed.added, changed.removed), (1, 1));
+    }
+
+    /// **预演一个字节都不写** —— 它就是 `wb_generate` 的彩排。
+    ///
+    /// 这里用一个真实渲染器（`render`）产出的文本，落到临时目录：跑完预演后，
+    /// 磁盘上的字节与预演前**逐字节相同**（新增的那份不会被预演创建出来）。
+    #[test]
+    fn preview_never_touches_the_disk() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        let r = render(&book, "A1/STANDARD").unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(&r.file_name);
+
+        // 磁盘上还没有 → 预演判「新增」，但**不会把它写出来**
+        let added = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(added.state, DiffState::Added);
+        assert!(!target.exists(), "预演不许创建任何文件");
+
+        // 放一份**不同**的内容进去：预演判「修改」，且原字节一个不动
+        crate::fsx::atomic::atomic_write(&target, b"# old\n").unwrap();
+        let before = std::fs::read(&target).unwrap();
+        let modified = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(modified.state, DiffState::Modified);
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            before,
+            "预演不许改任何文件"
+        );
+
+        // 放成与渲染结果逐字节相同：预演判「不变」
+        crate::fsx::atomic::atomic_write(&target, r.text.as_bytes()).unwrap();
+        let unchanged = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(unchanged.state, DiffState::Unchanged);
     }
 }

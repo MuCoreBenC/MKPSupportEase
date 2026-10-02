@@ -563,6 +563,42 @@ export interface GenerateReport {
   mark: Patch
 }
 
+/** `build::DiffState` —— 点生成会怎样 */
+export type DiffState = 'added' | 'modified' | 'unchanged'
+
+/** `build::DiffLineKind` */
+export type DiffLineKind = 'context' | 'added' | 'removed'
+
+/** `build::DiffLine`（**行级文本 diff**，与上面 `app::DiffLine` 那条字段级差异不是一回事） */
+export interface PreviewDiffLine {
+  kind: DiffLineKind
+  text: string
+  /** 1 起（`removed` 记旧版行号，其余记新版） */
+  no: number
+}
+
+/** `build::PreviewFile` —— 一份产物的预演 */
+export interface PreviewFile {
+  uid: string
+  fileName: string
+  state: DiffState
+  /** `unchanged` 时是空表 */
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+}
+
+/** `build::PreviewReport` —— **只算不写**，生成前确认那一步 */
+export interface PreviewReport {
+  files: PreviewFile[]
+  skipped: [string, string][]
+  /** 会写盘的份数（added + modified） */
+  toWrite: number
+  unchanged: number
+  /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
+  blocked: string | null
+}
+
 /** `build::RevertChange` */
 export interface RevertChange {
   key: string
@@ -962,6 +998,9 @@ export const wb = {
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   previewToml: (uid: string) => invoke<string>('wb_preview_toml', { uid }),
+  /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
+  generatePreview: (scope: BuildScope) =>
+    invoke<PreviewReport>('wb_generate_preview', { scope }),
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   publish: () => invoke<PublishReport>('wb_publish'),

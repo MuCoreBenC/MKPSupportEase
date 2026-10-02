@@ -1,0 +1,108 @@
+/*
+ * 骨架屏样式（2026-10-02）。
+ *
+ * 灰条自己呼吸（`pulse`），不靠 JS 计时 —— 数据没到时看得见"在加载"。
+ * 只用工作台已有的 token（`--w-line` / `--w-card` / `--w-r-card`），不新造变量。
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 2px;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 16px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  background: var(--w-card);
+  overflow: hidden;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--w-line);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--w-line);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* 行首那个方块（勾选框 / 头像位） */
+.square {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--w-line);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.line {
+  display: inline-block;
+  flex: none;
+  border-radius: 4px;
+  background: var(--w-line);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* 呼吸：两层之间来回，别闪 —— 闪烁比静止更累眼 */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 降低动效偏好：只留静止的灰条 */
+@media (prefers-reduced-motion: reduce) {
+  .line,
+  .square {
+    animation: none;
+  }
+}
