@@ -78,7 +78,7 @@ pub struct MachineList {
 }
 
 /// 机型与版本清单。**这一页唯一的读入口**
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_machines() -> Result<MachineList, AppError> {
     traced("wb_machines", |_| Ok(list_of(&load_presets()?)))
 }
@@ -171,7 +171,7 @@ pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<Mach
 /// 在版本删掉之后会指向一个不存在的对象，而那种损坏**不报错** ——
 /// 解析照样通过，只是那一项在那台机器上悄悄不生效了。
 /// 所以要在删之前摆给人看，而不是删完让他自己发现
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<String>, AppError> {
     traced("wb_version_orphans", |_| {
         Ok(load_presets()?.orphans_if_version_removed(&machine_id, &version_id))

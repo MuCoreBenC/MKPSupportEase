@@ -387,7 +387,7 @@ fn store_dir_roles() -> Vec<StoreDirRole> {
 }
 
 /// 三个数据根。界面开场调它。**唯一的数据根是 `presets/`**
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_boot() -> Result<Boot, AppError> {
     traced("wb_boot", |_| boot_inner())
 }
@@ -467,7 +467,7 @@ fn boot_inner() -> Result<Boot, AppError> {
 
 /* ---------- 读 ---------- */
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_book() -> Result<BookView, AppError> {
     traced("wb_book", |_| {
         with_ctx(|ctx| {
@@ -524,7 +524,7 @@ pub struct ChoiceView {
     pub deprecated: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_registry() -> Result<RegistryView, AppError> {
     traced("wb_registry", |_| {
         with_ctx(|ctx| {
@@ -578,7 +578,7 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
 
 /// 一屏矩阵。列由前端勾选给出，**顺序由后端按配方本重排**；
 /// `baseMachineId`（对照模式的基准机型）驱动差异判据与行序 —— 见 [`derive::Matrix`]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_matrix(
     cols: Vec<ColRef>,
     tab: Option<String>,
@@ -601,7 +601,7 @@ pub fn wb_matrix(
 /// 配方台一屏（默认视角）：一个版本的分组列表。
 ///
 /// 矩阵是它的对比工具，不是默认 —— 一屏几十列的表格不好看也不好改
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_desk(
     machine_id: String,
     uid: Option<String>,
@@ -621,12 +621,12 @@ pub fn wb_desk(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_trash() -> Result<Vec<TrashEntry>, AppError> {
     traced("wb_trash", |_| with_ctx(|ctx| ctx.store.trash_entries()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_ui() -> Result<Value, AppError> {
     traced("wb_ui", |_| with_ctx(|ctx| storage::read_ui(&ctx.store)))
 }
@@ -640,7 +640,7 @@ pub fn wb_save_ui(ui: Value) -> Result<(), AppError> {
 
 /* ---------- 查（只读推演） ---------- */
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preview_bulk(
     key: String,
     value: Value,
@@ -670,7 +670,7 @@ pub struct DiffLine {
     pub kind: &'static str,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
     traced("wb_diff_draft", |_| {
         with_ctx(|ctx| {
@@ -1652,5 +1652,91 @@ mod tests {
                 assert!(cell.origin_explain.is_some(), "来源要带一句「改了会怎样」");
             }
         }
+    }
+
+    /* ---------- 读命令必须异步（2026-10-02 的性能修复，防回退） ---------- */
+
+    /// **只读命令一律 `#[tauri::command(async)]`。**
+    ///
+    /// # 为什么这条必须有机器拦着
+    ///
+    /// Tauri 官方文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
+    /// `#[tauri::command(async)]`**。而主线程就是 webview 渲染那个线程 ——
+    /// 同步命令算多久，**整个界面就冻结多久**：骨架屏画不出来、导航点不动，
+    /// 用户看到的就是"像被冻住了，过了好一会才有反应"（作者原话）。
+    ///
+    /// 这不是"再优化一点"的问题，是**别的线程算、主线程继续画**的问题：
+    /// 只要命令还在主线程上，算 14ms 还是 320ms 都是同一种病，只是轻重不同。
+    /// 所以新增一条读命令**忘了写 `(async)`** 就是把这个病又带回来 —— 用源码扫描拦住。
+    ///
+    /// 写命令**故意不在这张单子里**：它们要落盘、要和草稿的锁打配合，改异步是另一
+    /// 件要单独评估的事（`wb_apply_draft` / `wb_save` / `wb_generate` …）。
+    #[test]
+    fn read_commands_are_async_so_they_never_freeze_the_window() {
+        /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
+        const READ: &[&str] = &[
+            "wb_boot",
+            "wb_words",
+            "wb_book",
+            "wb_registry",
+            "wb_matrix",
+            "wb_desk",
+            "wb_trash",
+            "wb_ui",
+            "wb_preview_bulk",
+            "wb_diff_draft",
+            "wb_preflight",
+            "wb_preview_toml",
+            "wb_generate_preview",
+            "wb_revert_preview",
+            "wb_dist_strays",
+            "wb_baseline_diff",
+            "wb_assets",
+            "wb_asset_usage",
+            "wb_bundles",
+            "wb_machines",
+            "wb_version_orphans",
+        ];
+
+        // 路径用 CARGO_MANIFEST_DIR 拼（不用 file!()：建了 workspace 之后它的基准会变）
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("workbench")
+            .join("app");
+        let mut sources = String::new();
+        for name in [
+            "mod.rs",
+            "build.rs",
+            "assets.rs",
+            "bundles.rs",
+            "machines.rs",
+            "words.rs",
+        ] {
+            sources.push_str(
+                &std::fs::read_to_string(app.join(name))
+                    .unwrap_or_else(|e| panic!("读不到 {name}：{e}")),
+            );
+            sources.push('\n');
+        }
+
+        let mut missing: Vec<&str> = Vec::new();
+        for fn_name in READ {
+            // 找 `#[tauri::command...]` 紧跟着 `pub fn <fn_name>` 的那一处，看它带不带 (async)
+            let needle = format!("pub fn {fn_name}(");
+            let at = sources.find(&needle).unwrap_or_else(|| {
+                panic!("源码里找不到读命令 {fn_name} —— 单子过时了（改了名或删了？）")
+            });
+            // 往回退到最近的那个 #[tauri::command 属性
+            let head = &sources[..at];
+            let attr_at = head.rfind("#[tauri::command").expect("前面一定有属性");
+            let attr = &sources[attr_at..at];
+            if !attr.contains("(async)") {
+                missing.push(fn_name);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些读命令还跑在主线程上（算多久界面就冻多久）—— 加 `#[tauri::command(async)]`：{missing:?}"
+        );
     }
 }

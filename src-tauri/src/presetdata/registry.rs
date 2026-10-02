@@ -305,6 +305,19 @@ pub struct ParamRegistry {
     file: PathBuf,
     layout_doc: DocumentMut,
     layout_file: PathBuf,
+    /// 全表指纹的**一次性缓存**（2026-10-02）。
+    ///
+    /// # 为什么要有它
+    ///
+    /// [`fingerprint`](Self::fingerprint) 进有效配方的哈希（见 `Layers::fingerprint`），
+    /// 而 `Layers::fingerprint()` 在 `book_view` / `build_rows` 里按版本被调 O(版本数) 次
+    /// —— 真数据实测：一次 `registry.fingerprint()` = 8.5ms（序列化 74 条定义 + 整本布局
+    /// 再 SHA256），27 次就是 230ms，`wb_book` 于是卡住 320ms（作者："像被冻结住了"）。
+    ///
+    /// 但**这张表构造完就不再变**（唯一改它的路径是 `load_from` 重建整个 `ParamRegistry`），
+    /// 一份会话里对所有机型 / 所有版本都是**同一个值** —— 重算纯属浪费。
+    /// 缓存成 `OnceLock`：`fingerprint()` 仍是 `&self`，返回值一字不变，只是不再重算。
+    fingerprint_cache: std::sync::OnceLock<String>,
 }
 
 /// 手写而不是 `#[derive(Debug)]`：派生版会把 74 条参数定义连同布局整本打印出来，
@@ -356,6 +369,7 @@ impl ParamRegistry {
             file,
             layout_doc,
             layout_file,
+            fingerprint_cache: std::sync::OnceLock::new(),
         };
         out.check_consistency()?;
         Ok(out)
@@ -675,16 +689,24 @@ impl ParamRegistry {
     }
 
     /// 全表指纹。进有效配方的 hash —— 否则改了字段定义，产物不会变成"待生成"
+    ///
+    /// **算一次就缓存**（见 `fingerprint_cache` 字段的注）：这张表构造完不再变，
+    /// 一份会话里对谁都是同一个值，而它在 `book_view` / `build_rows` 里被按版本反复取。
+    /// 返回值与不缓存时逐字节相同 —— 只是不再重算那 8.5ms 的序列化 + SHA256。
     pub fn fingerprint(&self) -> String {
-        use sha2::{Digest, Sha256};
-        let payload = serde_json::json!({
-            "params": &self.params,
-            "tabs": &self.tabs,
-            "layout": &self.layout,
-        });
-        let mut h = Sha256::new();
-        h.update(serde_json::to_vec(&payload).unwrap_or_default());
-        format!("{:x}", h.finalize())
+        self.fingerprint_cache
+            .get_or_init(|| {
+                use sha2::{Digest, Sha256};
+                let payload = serde_json::json!({
+                    "params": &self.params,
+                    "tabs": &self.tabs,
+                    "layout": &self.layout,
+                });
+                let mut h = Sha256::new();
+                h.update(serde_json::to_vec(&payload).unwrap_or_default());
+                format!("{:x}", h.finalize())
+            })
+            .clone()
     }
 
     /* ---------- 写回 ---------- */
@@ -1244,6 +1266,36 @@ mod tests {
         p2["params"][0]["step"] = serde_json::json!(0.05);
         let (_d2, b) = load(p2, l);
         assert_ne!(before, b.unwrap().fingerprint());
+    }
+
+    /// 指纹缓存（2026-10-02 的性能修复）：反复取**逐字节相同**，重载后仍跟着数据走。
+    ///
+    /// 守两件事：
+    ///   · 缓存不许改变返回值 —— 同一个注册表取一万次都是同一个串（`book_view` 里按版本
+    ///     反复取，取错一次「已生成 / 待生成」就全乱）；
+    ///   · 缓存是**每份注册表各一份**，不是全局 —— 重载后数据变了，指纹必须跟着变
+    ///     （否则改了字段定义，产物永远显示「已生成」）。
+    #[test]
+    fn fingerprint_is_cached_but_per_registry() {
+        let (p, l) = good();
+        let (_d1, a) = load(p.clone(), l.clone());
+        let a = a.unwrap();
+        let first = a.fingerprint();
+
+        // 同一个实例反复取：稳定
+        for _ in 0..1000 {
+            assert_eq!(a.fingerprint(), first);
+        }
+
+        // 另一份、同样数据：值相同（缓存不是"随机盐"）
+        let (_d2, b) = load(p.clone(), l.clone());
+        assert_eq!(b.unwrap().fingerprint(), first);
+
+        // 重载后数据改了：新实例的指纹跟着变（缓存没有跨实例粘住旧值）
+        let mut p2 = p;
+        p2["params"][0]["step"] = serde_json::json!(0.05);
+        let (_d3, c) = load(p2, l);
+        assert_ne!(c.unwrap().fingerprint(), first);
     }
 
     /// 文件不在时是 NOT_FOUND 且写明是哪个文件 —— 不是静默空表

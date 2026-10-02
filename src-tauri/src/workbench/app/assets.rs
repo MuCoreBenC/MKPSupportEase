@@ -264,7 +264,7 @@ fn sort_numeric(values: &mut Vec<String>) {
 }
 
 /// 资产库清单。类型 / 三根轴 / 交付身份 / 搜索全部在这里筛
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_assets(
     kind: Option<String>,
     slicer: Option<String>,
@@ -318,7 +318,7 @@ pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
 
 /// 「谁在用它」（b05 Task 9.4）。删资产之前先问这一条 ——
 /// 删掉一张还被机型引用着的图，界面上只表现为"那台机型的图没了"
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_asset_usage(asset_id: String) -> Result<AssetUsageView, AppError> {
     traced("wb_asset_usage", |_| {
         let presets = load_presets()?;

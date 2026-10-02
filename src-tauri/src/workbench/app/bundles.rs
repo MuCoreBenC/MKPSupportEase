@@ -179,7 +179,7 @@ fn list_of(
 }
 
 /// 套餐清单。refs 带解析结果与交付身份，指向关系按一版一套分两档报
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
     traced("wb_bundles", |_| {
         with_ctx(|ctx| {

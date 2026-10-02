@@ -89,7 +89,7 @@ pub struct Words {
 }
 
 /// 整张词表。开场取一次
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_words() -> Result<Words, AppError> {
     traced("wb_words", |_| Ok(words()))
 }
