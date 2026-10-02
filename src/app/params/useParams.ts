@@ -87,10 +87,32 @@ export interface BlockedBy {
   need: string
 }
 
+/**
+ * 一条改动（操作记录底座 ④）。
+ *
+ * **成形那一刻就把显示要用的上下文快照下来**（`label` / `tab` / `section` / `unit`），
+ * 而不是等到渲染时回查当前 combo 的字段定义 —— 回查有两个毛病：
+ *
+ *   ① 切了机型 / 版本之后，历史条目里的 key 在新 combo 里可能**根本不存在**，
+ *      于是那一条就显示成裸 key（`toolhead.offset.x`），正是"历史没上下文"的根因；
+ *   ② 定义会随目录（catalog）更新而变，而"当时我改的是哪一项、它叫什么"是**过去的事实**，
+ *      不该被后来的改名改写。
+ *
+ * 值本身（`from` / `to`）也从一开始就是**文本**：它记录的是"当时框里写的是什么"，
+ * 不是"现在按新定义应该显示成什么"。渲染成 ``` `-1 → -1.5` ``` 这种句子是界面的事。
+ */
 export interface HistoryItem {
   key: string
   from: string
   to: string
+  /** 参数中文名（如 `X 轴偏移`）。查不到定义时退回 key —— 但那是异常，不是常态 */
+  label: string
+  /** 分类（页签名，如 `偏移`） */
+  tab: string
+  /** 分组（section 名，如 `空间偏移`） */
+  section: string
+  /** 单位（如 `mm`）；没有就是 `null` */
+  unit: string | null
 }
 
 export interface HistoryEntry {
@@ -789,10 +811,20 @@ export function useParams(): Params {
         if (current === target) continue
         patch[p.key] = target
         before[p.key] = current
+        /*
+         * 上下文**当场快照**（操作记录底座 ④）：参数名 / 分类 / 分组 / 单位。
+         * 之后切机型、目录更新都不改写这一条 —— 它记的是"当时我改的是哪一项、它叫什么"。
+         */
+        const def = defOf(p.key)
+        const place = placeOf(p.key)
         items.push({
           key: p.key,
           from: current ?? savedValue,
           to: target ?? savedValue,
+          label: def?.label ?? p.key,
+          tab: place?.tabLabel ?? '',
+          section: place?.sectionLabel ?? def?.group ?? '',
+          unit: def?.unit ?? null,
         })
       }
 
@@ -824,7 +856,7 @@ export function useParams(): Params {
         patchDraft(key, value ?? savedValueOf(key))
       }
     },
-    [draft, log, past, patchDraft, savedValueOf, seq],
+    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq],
   )
 
   const edit = useCallback(

@@ -819,7 +819,6 @@ export default function PageParams({ density }: Props) {
               view={historyView}
               history={u.history}
               groups={u.historyByBatch}
-              defOf={u.defOf}
               onView={setHistoryView}
               onMode={setHistoryMode}
               onClose={closeHistory}
@@ -1022,7 +1021,6 @@ export default function PageParams({ density }: Props) {
           view={historyView}
           history={u.history}
           groups={u.historyByBatch}
-          defOf={u.defOf}
           onView={setHistoryView}
           onMode={setHistoryMode}
           onClose={closeHistory}

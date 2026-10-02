@@ -587,6 +587,15 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
      - 验证：`cargo test` 260 · workbench lib 449 · 双 feature clippy · fmt · tsc · lint ·
        build + check:bundle + check:zero-network · 探针 `params-settings.mjs` **18 条全绿**
        （含新增 ①b 节）/ `presets.mjs` 全绿。
+     - ✅ **④ 操作记录底座已落地**（同一分支，2026-10-02）：
+       `HistoryItem` 现在**成形那一刻就快照上下文**（`label` / `tab` / `section` / `unit`），
+       渲染时**不再回查当前 combo 的字段定义** —— 回查有两个毛病：切机型/版本后那个 key
+       可能不存在（只剩裸 key，正是"历史没上下文"的根因）、目录更新会改写"过去的事实"。
+       历史一条现在读作：`偏移 / 空间偏移 · X 轴偏移` + `-1mm → 1.23mm · 改 X 轴偏移`。
+       `HistoryDrawer` 的 `defOf` 参数删掉（不再需要）。
+       **本轮只做底座，不做历史页面**（作者：历史 UI 是第二阶段独立原型）。
+       验证：`params-settings.mjs` 新增 ①c 节（历史条目带分类/参数名）→ **20 条全绿**。
+     - ✅ **参数页底座第一阶段（①–④）全部完成** —— 整刀待统一推送 / PR / CI（新流程）。
      - **参数页底座第一阶段全貌（作者定，施工中）**：
        ①`RecipeParamDto` 下发 `toml_key`（**已完成**）②客户端 patch 能力 ③参数页接草稿链
        （打开 → `begin_preset_edit`；改值 → patch；保存 → `commit_preset_draft`）

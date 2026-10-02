@@ -139,6 +139,30 @@ for (const size of SIZES) {
     editTargetOk ? '' : '参数页说"这个版本没配 MKP 预设文件"',
   )
 
+  /* ①c 操作记录带上下文（参数页底座 ④）：历史条目说得出"分类 → 参数 → 旧 → 新" */
+  /*
+   * 守一件事：历史条目**自带上下文**（分类 / 参数名 / 单位都是成形那一刻的快照），
+   * 不是渲染时回查当前 combo —— 那样切了机型/版本就只剩一个裸 key。
+   * 判据：打开修改历史，条目里同时出现**分类名**与**参数名**（如"空间偏移" + "X 轴偏移"）。
+   */
+  if (draftOk) {
+    await page.getByRole('button', { name: /修改历史/ }).first().click()
+    await page.waitForTimeout(500)
+    const hist = (await mainText(page)) ?? ''
+    const hasItem = /#1/.test(hist)
+    const hasCtx = hist.includes('空间偏移') && hist.includes('X 轴偏移')
+    check(
+      tag,
+      '修改历史条目带上下文（分类 / 参数名都在，不是裸 key）',
+      hasItem && hasCtx,
+      hist.slice(Math.max(0, hist.indexOf('#1')), hist.indexOf('#1') + 80),
+    )
+    /* 关掉抽屉，别影响后面的设置页那一节 */
+    const closeBtn = page.locator('[aria-label="关闭"]').first()
+    if ((await closeBtn.count()) > 0) await closeBtn.click().catch(() => {})
+    await page.waitForTimeout(200)
+  }
+
   /* ② 设置页：高级设置 → 预设数据源（同步页退役后，这一格搬到了这儿） */
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await mainText(page)).includes('预设数据源'), 8000)
