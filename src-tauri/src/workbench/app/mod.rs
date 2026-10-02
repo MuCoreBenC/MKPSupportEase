@@ -404,7 +404,8 @@ pub fn wb_reload() -> Result<Boot, AppError> {
 ///
 /// **不进制 draft 体系**：它不是配方内容（没有撤销 / 差异 / 快照可言），是一次单值
 /// 配置写；界面上是「设置」页的一格，改完当场回显。
-/// 校验与规范化在 [`dist::normalize_bootstrap_url`]（GitHub blob 页 → raw 直链）。
+/// 校验与规范化在 [`dist::normalize_bootstrap_url`]（**仓库地址 → 默认发布入口的 raw**；
+/// blob 页按人指的转；raw / 自建源原样 —— 见那个函数的输入契约表）。
 /// **对客户端生效要重新构建**（`build.rs` 构建期读同一份文件注入）——返回值只是回显。
 #[tauri::command]
 pub fn wb_set_bootstrap(url: String) -> Result<String, AppError> {

@@ -847,7 +847,7 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
-  /** 写官方源（Bootstrap）；返回**存的规范化值**（GitHub blob 页会被转成 raw） */
+  /** 写官方源（Bootstrap）；返回**存的规范化值**（仓库地址 → 默认发布入口的 raw；blob 页转 raw） */
   setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
   words: () => invoke<Words>('wb_words'),
 

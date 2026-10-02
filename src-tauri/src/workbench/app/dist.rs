@@ -107,15 +107,30 @@ pub fn bootstrap_json() -> serde_json::Value {
     })
 }
 
+/// 官方源（Bootstrap）默认分支与**默认交付路径**：仓库地址补成 `main/<这里>`
+/// （`source.json` 在交付根里，见模块头）。
+///
+/// 这是**产品契约的一半**："我有一个仓库" → 系统自己去 `main` 的交付目录找 Bootstrap。
+/// 用户不必知道 `raw.githubusercontent.com` / `blob` / `presets/dist` / `source.json`
+/// 中的任何一个 —— 那正是 Bootstrap 作为内部机制的意义。
+const DEFAULT_REF: &str = "main";
+/// 交付根相对仓库根的路径（`presets/dist`），与 `paths::dist_root()` 同一处布局
+const DIST_REL_PATH: &str = "presets/dist";
+
 /// 官方源（Bootstrap）地址的**规范化** —— 工作台输入侧的唯一一处。
 ///
-/// - **GitHub 的 blob 页地址**（人从浏览器地址栏复制的那个）→ raw 直取地址：
-///   `https://github.com/<owner>/<repo>/blob/<ref>/<path>`
-///   → `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`
-///   （ref 里有斜杠的罕见分支名不猜——那种情况请直接填 raw 地址）
-/// - 已经是 `raw.githubusercontent.com` / 别的 http(s)：原样通过（自建源合法）
-/// - `github.com` 但**不是 blob 页**（仓库首页 / tree 目录页）→ 拒，说清"那是个目录"
-/// - 其余（非 http(s)）→ 拒
+/// 产品契约（作者 2026-10-02 定死）——**用户只表达"我有一个仓库"，其余是系统的事**：
+///
+/// | 输入 | 结果 |
+/// | --- | --- |
+/// | GitHub 仓库地址 `https://github.com/<o>/<r>` | ✅ 补成 `main/presets/dist/source.json` 的 raw |
+/// | GitHub `.git` 克隆地址 `https://github.com/<o>/<r>.git` | ✅ 同上（`.git` 只是写法，去掉即可） |
+/// | GitHub blob 页 `…/blob/<ref>/<path>` | ✅ 按人指的那份转 raw（尊重他显式的选择） |
+/// | 已是 raw / 别的 http(s)（自建源） | ✅ 原样（只收拾空白与尾斜杠） |
+/// | GitHub `tree/…` 目录页 | ❌ 拒（无法表达"要哪个发布入口"） |
+/// | 空 / 非 http(s) | ❌ 拒 |
+///
+/// **`.git` 不是产品语义**：它只是 GitHub 克隆地址的一种写法，规范化时去掉。
 pub fn normalize_bootstrap_url(raw: &str) -> Result<String, AppError> {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -125,19 +140,42 @@ pub fn normalize_bootstrap_url(raw: &str) -> Result<String, AppError> {
         .strip_prefix("https://github.com/")
         .or_else(|| trimmed.strip_prefix("http://github.com/"))
     {
-        let parts: Vec<&str> = rest.split('/').collect();
-        /* github.com/<owner>/<repo>/blob/<ref>/<path…> */
-        if parts.len() >= 5 && parts[2] == "blob" && !parts[4].is_empty() {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() < 2 {
+            return Err(AppError::invalid_argument(
+                "这不是一个 GitHub 仓库地址 —— 要 <owner>/<repo> 两段",
+            )
+            .with_detail(format!("收到：{trimmed}")));
+        }
+        let owner = parts[0];
+        /* 仓库名可能带 `.git` 后缀（克隆地址的写法）—— 去掉，它不是产品语义 */
+        let repo = parts[1].strip_suffix(".git").unwrap_or(parts[1]);
+        if repo.is_empty() {
+            return Err(
+                AppError::invalid_argument("这不是一个 GitHub 仓库地址 —— 仓库名是空的")
+                    .with_detail(format!("收到：{trimmed}")),
+            );
+        }
+
+        /* ① 仓库地址（两段，且第二段就是那个仓库）：补默认 ref + 默认交付路径 */
+        if parts.len() == 2 {
             return Ok(format!(
-                "https://raw.githubusercontent.com/{}/{}/{}/{}",
-                parts[0],
-                parts[1],
+                "https://raw.githubusercontent.com/{owner}/{repo}/{DEFAULT_REF}/{DIST_REL_PATH}/{SOURCE_FILE}"
+            ));
+        }
+
+        /* ② blob 页：人显式指了哪一份（含 ref 与路径），按他指的转 —— 尊重显式选择 */
+        if parts[2] == "blob" && parts.len() >= 5 {
+            return Ok(format!(
+                "https://raw.githubusercontent.com/{owner}/{repo}/{}/{}",
                 parts[3],
                 parts[4..].join("/")
             ));
         }
+
+        /* ③ 其余（`tree/…` 目录页、仓库下的别的路径）→ 拒：说不清"要哪个发布入口" */
         return Err(AppError::invalid_argument(
-            "这是 GitHub 的仓库 / 目录页，不是一个文件 —— 请填指向 source.json 的 blob 链接（我们会自动转成 raw）",
+            "这是 GitHub 的目录页，不是一个文件 —— 请填**仓库地址**（我们会自动定位发布入口），或指向 source.json 的 blob 链接",
         )
         .with_detail(format!("收到：{trimmed}")));
     }
@@ -1342,15 +1380,42 @@ mod tests {
 
     /* ---------- 第十七刀：Bootstrap（规范化 / 生成 / 两端形状） ---------- */
 
-    /// GitHub blob 页 → raw 直链（人会从浏览器地址栏复制的那一种）；raw / 自建源原样
+    /// **仓库地址** → 默认 `main/presets/dist/source.json` 的 raw ——
+    /// 用户只表达"我有一个仓库"，ref 与交付路径由系统补（Bootstrap 是内部机制）。
+    /// `.git` 只是克隆地址的一种写法，不是产品语义，去掉即可。
+    #[test]
+    fn repo_urls_get_the_default_delivery_entry() {
+        let want = "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/dist/source.json";
+        for input in [
+            "https://github.com/MuCoreBenC/MKPSupportEase",
+            "https://github.com/MuCoreBenC/MKPSupportEase/",
+            "https://github.com/MuCoreBenC/MKPSupportEase.git",
+            "  https://github.com/MuCoreBenC/MKPSupportEase.git/  ",
+        ] {
+            assert_eq!(
+                normalize_bootstrap_url(input).unwrap_or_else(|e| panic!("{input} 该被接受：{e}")),
+                want,
+                "输入：{input}"
+            );
+        }
+    }
+
+    /// **blob 页**按人显式指的转 raw（尊重他的选择，不强行拉回默认路径）；
+    /// **raw / 自建源**原样（只收拾空白与尾斜杠）。
     #[test]
     fn blob_urls_turn_into_raw_urls() {
         assert_eq!(
             normalize_bootstrap_url(
-                "https://github.com/MuCoreBenC/MKPSupportEase/blob/main/release/presets/source.json"
+                "https://github.com/MuCoreBenC/MKPSupportEase/blob/main/presets/dist/source.json"
             )
             .expect("blob 页该转成 raw"),
-            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/release/presets/source.json"
+            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/dist/source.json"
+        );
+        /* 人指了别的路径也照办 —— 不因为"默认是 A"就把显式的 B 改掉 */
+        assert_eq!(
+            normalize_bootstrap_url("https://github.com/o/r/blob/dev/x/y/source.json")
+                .expect("blob 页该转成 raw"),
+            "https://raw.githubusercontent.com/o/r/dev/x/y/source.json"
         );
         assert_eq!(
             normalize_bootstrap_url(
@@ -1365,12 +1430,15 @@ mod tests {
         );
     }
 
-    /// 目录页 / 仓库首页 / 非 http(s) —— 拒（"那不是文件"这件事要说得出）
+    /// **目录页 / 非 http(s) / 空** —— 拒（"那不是文件"这件事要说得出）。
+    /// `tree/…` 与仓库地址的区别是：前者说不清"要哪个发布入口"，后者有默认入口。
     #[test]
     fn directory_pages_and_non_http_are_refused() {
         for bad in [
-            "https://github.com/MuCoreBenC/MKPSupportEase",
             "https://github.com/MuCoreBenC/MKPSupportEase/tree/main/presets",
+            "https://github.com/MuCoreBenC/MKPSupportEase/tree/main",
+            "https://github.com/MuCoreBenC",
+            "https://github.com/MuCoreBenC/MKPSupportEase/blob/main",
             "file:///Users/me/source.json",
             "/Users/me/source.json",
             "   ",

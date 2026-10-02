@@ -197,6 +197,37 @@ for (const size of SIZES) {
   )
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-upload.png` })
 
+  /* ---------- ②b. 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
+  /*
+   * 守第十七/十八刀定的**输入契约**：用户只表达"我有一个仓库"，其余是系统的事。
+   *   ① 那格在、提示语说清"填仓库地址就够"（不是只认 blob 页）；
+   *   ② 仓库地址**能被接受并保存**（浏览器桩不做 GitHub → raw 规范化 —— 那是真后端
+   *      `dist::normalize_bootstrap_url` 的活，它有 3 组单元测试钉着；这里只验 UI 收得下）；
+   *   ③ 空地址**存不进去**（按钮压住 / 如实拒）。
+   */
+  await wbPage.getByRole('button', { name: '设置', exact: true }).first().click()
+  const setReady = await until(async () => (await wbText(wbPage)).includes('官方源（Bootstrap）'), 8000)
+  const wbSetText = flat(await wbText(wbPage))
+  check(
+    tag,
+    '②b 工作台设置页有「官方源（Bootstrap）」，且说明"填仓库地址就够"',
+    setReady && wbSetText.includes('填仓库地址就够'),
+    wbSetText.slice(0, 80),
+  )
+  const urlInput = wbPage.getByLabel('官方源（Bootstrap）地址')
+  await urlInput.fill('https://github.com/MuCoreBenC/MKPSupportEase.git')
+  /* 「保存」有两个：外壳那颗（草稿保存，此刻禁用）+ 这一格自己那颗。
+     用输入框的**后续兄弟**定位，别用 .first() —— 那会点到外壳那颗上。 */
+  await wbPage.locator('input[aria-label="官方源（Bootstrap）地址"] ~ button').first().click()
+  const saved = await until(async () => (await wbText(wbPage)).includes('已保存：'), 5000)
+  check(
+    tag,
+    '②b 仓库 .git 克隆地址能被接受并保存（UI 收得下；规范化是真后端的活）',
+    saved,
+    '',
+  )
+  await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-settings.png` })
+
   /* ---------- ③ 客户端：那一端的边界（浏览器里不再读工作台那一格） ---------- */
   const appPage = await ctx.newPage()
   wire(tag, appPage)
