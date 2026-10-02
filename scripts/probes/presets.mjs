@@ -613,14 +613,14 @@ const copyItem = await page.evaluate(() => {
   const ul = document.querySelector('[role="menu"]')
   if (ul === null) return null
   const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
-    (b) => (b.textContent ?? '').trim() === '复制',
+    (b) => (b.textContent ?? '').trim() === '另存为一份新的',
   )
   return btn === undefined ? null : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
 })
-console.log(`[认不出] 右键「复制」：${copyItem === null ? '没有这一项' : `灰=${copyItem.disabled} 原因「${copyItem.why}」`}`)
-if (copyItem === null) problems.push('右键菜单里没有「复制」这一项')
+console.log(`[认不出] 右键「另存为一份新的」：${copyItem === null ? '没有这一项' : `灰=${copyItem.disabled} 原因「${copyItem.why}」`}`)
+if (copyItem === null) problems.push('右键菜单里没有「另存为一份新的」这一项')
 else if (!copyItem.disabled) problems.push('内容存疑的那一份不许复制，菜单里该是灰的')
-else if (!copyItem.why.includes('不许')) problems.push(`灰掉的「复制」要带原因（不许复制），实测「${copyItem.why}」`)
+else if (!copyItem.why.includes('不许')) problems.push(`灰掉的「另存为一份新的」要带原因（不许复制），实测「${copyItem.why}」`)
 await page.screenshot({ path: `${shotDir}/presets-trust.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
@@ -1004,6 +1004,144 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
 
+/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制） ---------- */
+/*
+ * 守五件事：
+ *   ① 只有「我的文件」这一项能点（官方那份灰掉带原因：副本走「改这份」→ 保存）；
+ *   ② 名字由**用户自己起**：抽屉**不预填**；
+ *   ③ 复制出来的是**独立的新文件**：新的一行在、旧的一行不动；血统原样带过去
+ *      （新那份行上照样「基于旧版官方」）；内容按字节复制（新那份正文里还是改过的字）；
+ *   ④ **不碰任何状态**：原来那份照样「已应用」；新那份不会自称使用中；也没把草稿顺走
+ *      （再点「改这份」不是「上次改到一半」）；
+ *   ⑤ **不覆盖、不自动改名**：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西。
+ *
+ * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不覆盖 /
+ * 不碰状态）+ `copying_touches_no_state_at_all` 那几条。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+/* ① 官方那一份：这一项灰掉、带原因 */
+const officialTr11 = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'A1-standard.toml' })
+  .first()
+await officialTr11.click({ button: 'right' })
+await page.waitForTimeout(250)
+const copyBoundary = await page.evaluate(() => {
+  const ul = document.querySelector('[role="menu"]')
+  if (ul === null) return null
+  const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
+    (b) => (b.textContent ?? '').trim() === '另存为一份新的',
+  )
+  return btn === undefined
+    ? null
+    : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
+})
+console.log(
+  `\n[第十一层 · 边界] 官方那份右键「另存为一份新的」：${copyBoundary === null ? '没有这一项' : `灰=${copyBoundary.disabled} 原因「${copyBoundary.why}」`}`,
+)
+if (copyBoundary === null) problems.push('右键菜单里没有「另存为一份新的」这一项')
+else if (!copyBoundary.disabled || !copyBoundary.why.includes('改这份')) {
+  problems.push('官方那份的「另存为一份新的」该灰掉并说清走「改这份」→ 保存')
+}
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+/* ② 我自己那份：名字不预填；③ 复制出一份新的独立文件 */
+const liveTr11 = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .first()
+await liveTr11.click({ button: 'right' })
+await page.waitForTimeout(250)
+await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
+await page.waitForTimeout(300)
+const copyDlg = page.getByRole('dialog', { name: '另存为一份新的' })
+const copyInput = copyDlg.getByLabel('新的文件名')
+const copyPrefill = await copyInput.inputValue()
+console.log(
+  `[第十一层 · 另存] 输入框初值：${copyPrefill === '' ? '(空 —— 名字由用户自己起)' : `「${copyPrefill}」(不该预填)`}`,
+)
+if (copyPrefill !== '') problems.push('另存为的名字该由用户自己起（输入框不该预填）')
+await copyInput.fill('我的 A1 涂胶-第二份.toml')
+await copyDlg.getByRole('button', { name: '另存为' }).click()
+await page.waitForTimeout(400)
+const afterCopy = await actions()
+const copied = afterCopy.find((r) => r.name.includes('我的 A1 涂胶-第二份.toml'))
+const original = afterCopy.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+console.log(`[第十一层 · 另存] 新的一份：${copied === undefined ? '(没出现)' : copied.name}`)
+console.log(
+  `[第十一层 · 另存] 原来那份：${original === undefined ? '(不见了)' : `${original.name} → ${original.action}`}`,
+)
+if (copied === undefined) {
+  problems.push('另存之后新的一份该出现在表里')
+} else {
+  if (!copied.name.includes('基于旧版官方')) {
+    problems.push('血统该原样带过去（新那份行上照样「基于旧版官方」）')
+  }
+  if (copied.action.includes('已应用')) {
+    problems.push('新那份不该自称「使用中」（这一层不碰 Active）')
+  }
+}
+if (original === undefined) {
+  problems.push('另存不该动原文件（原来那行该还在）')
+} else if (!original.action.includes('已应用')) {
+  problems.push(`另存不该断原文件的「已应用」，实测操作列「${original.action}」`)
+}
+
+/* ④ 新那份的正文 = 原来那份的字节（5h 改过的字还在）；且不是"接着上次改"（草稿没被顺走） */
+const copiedTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶-第二份.toml' })
+  .first()
+await copiedTr.click()
+await page.waitForTimeout(300)
+await page.locator('main tbody dl').getByRole('button', { name: '改这份' }).click()
+await page.waitForTimeout(400)
+const copiedEditor = await page.evaluate(() => {
+  const dlg = document.querySelector('[role="dialog"]')
+  const area = dlg?.querySelector('textarea')
+  return {
+    whole: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    text: area?.value ?? '',
+  }
+})
+const copiedTextOk = copiedEditor.text.includes('涂胶宽度 = 1.8')
+const copiedReused = copiedEditor.whole.includes('上次改到一半')
+console.log(
+  `[第十一层 · 另存] 新那份正文带着原来改过的字：${copiedTextOk ? '是' : '否'}；接着上次改：${copiedReused ? '是（不该）' : '否'}`,
+)
+if (!copiedTextOk) problems.push('按字节复制：新那份的正文该还是原来那份的字节（含改过的字）')
+if (copiedReused) problems.push('另存不该把原来那份的草稿顺走（新那份是全新的一份）')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+/* ⑤ 不覆盖、不自动改名：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西 */
+await copiedTr.click({ button: 'right' })
+await page.waitForTimeout(250)
+await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
+await page.waitForTimeout(300)
+const collisionDlg = page.getByRole('dialog', { name: '另存为一份新的' })
+await collisionDlg.getByLabel('新的文件名').fill('我的 A1 涂胶-高速版.toml')
+await collisionDlg.getByRole('button', { name: '另存为' }).click()
+await page.waitForTimeout(400)
+const collisionErr = await collisionDlg.textContent()
+const collisionShown = (collisionErr ?? '').includes('已经有一份叫')
+console.log(`[第十一层 · 不覆盖] 撞名后的抽屉：${collisionShown ? '出原因了' : '没出原因'}`)
+if (!collisionShown) problems.push('撞名该被拒并说清（不覆盖、不自动改名）')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+const finalRows = await actions()
+const collisionCount = finalRows.filter((r) => r.name.includes('我的 A1 涂胶-高速版.toml')).length
+console.log(`[第十一层 · 不覆盖] 表里叫这个名字的行：${collisionCount}（该是 1）`)
+if (collisionCount !== 1) problems.push('撞名被拒之后表里不许悄悄多出东西')
+await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -1068,5 +1206,6 @@ console.log(
     '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
     '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
+    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
     '控制台没有 error',
 )

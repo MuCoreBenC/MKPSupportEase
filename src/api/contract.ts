@@ -460,9 +460,9 @@ export interface CommittedDraft {
   replaced: boolean
 }
 
-/** 重命名成功后的新身份（第十层）：新的落点 + 新的文件名 */
-export interface RenamedUserPreset {
-  /** 新的落点（相对**用户根**，`presets-mine/…`） */
+/** 一份用户文件的新落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状） */
+export interface UserFileIdentity {
+  /** 落点（相对**用户根**，`presets-mine/…`） */
   path: string
   fileName: string
 }
@@ -958,7 +958,20 @@ export interface MkpApi {
    * 后端还会把两本状态账跟着改：**正指着它的使用中指针**（路径与文件名换成新的，指纹原样）
    * 与**这一份的草稿**（用户线认路径，「接着上次改」不接丢）。失败原话冒上来。
    */
-  renameUserPreset(path: string, newName: string): Promise<RenamedUserPreset>
+  renameUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+
+  /**
+   * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
+   *
+   * 与第八层"官方 → 我的文件"那条另存分开：这一层是**我的文件 → 我的文件** ——
+   * 原文件一个字节不动；内容与那三行 `based_on*` 血统**原样带过去**（来源已经是用户文件，
+   * 不重算血统 —— 重算会把"从哪一版官方派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
+   * （**不覆盖、也不自动改名** —— 名字由用户自己换）。
+   *
+   * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
+   * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
+   */
+  copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
   /**
    * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档

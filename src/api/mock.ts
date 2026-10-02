@@ -155,6 +155,27 @@ const mockMine: UserPresetFile[] = [
 ]
 /** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
 const mockMineText = new Map<string, string>()
+
+/**
+ * 用户文件新名字的门槛（与 Rust 侧 `mine::check_new_name` 同一套）：
+ * 给一口人话原因，没有就是过。改名（第十层）与另存为一份新的（第十一层）共用这一处。
+ */
+function mockNameProblem(oldName: string, newName: string): string | null {
+  const name = newName.trim()
+  if (name === '') return '新名字不能是空的'
+  if (name.includes('/') || name.includes('\\')) {
+    return '新名字不能带路径 —— 这一层只改名字，不搬文件夹'
+  }
+  if (name === '.' || name === '..') return '这个名字不是一个文件名'
+  const ext = (n: string): string => {
+    const i = n.lastIndexOf('.')
+    return i <= 0 ? '' : n.slice(i).toLowerCase()
+  }
+  if (ext(name) !== ext(oldName)) {
+    return '后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）'
+  }
+  return null
+}
 /** 编辑中的那一份（真机上是 `run/draft-preset.json`）。`path` 只有用户线才有 */
 let mockDraft: {
   origin: ActiveOrigin
@@ -402,19 +423,9 @@ export const mockApi: MkpApi = {
   async renameUserPreset(path, newName) {
     const hit = mockMine.find((f) => f.path === path)
     if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const problem = mockNameProblem(hit.fileName, newName)
+    if (problem !== null) throw new Error(problem)
     const name = newName.trim()
-    if (name === '') throw new Error('新名字不能是空的')
-    if (name.includes('/') || name.includes('\\')) {
-      throw new Error('新名字不能带路径 —— 这一层只改名字，不搬文件夹')
-    }
-    if (name === '.' || name === '..') throw new Error('这个名字不是一个文件名')
-    const ext = (n: string): string => {
-      const i = n.lastIndexOf('.')
-      return i <= 0 ? '' : n.slice(i).toLowerCase()
-    }
-    if (ext(name) !== ext(hit.fileName)) {
-      throw new Error('后缀要保持原样 —— 改名不改它是哪一类（.toml 还是 .toml）')
-    }
     const dir = path.slice(0, path.length - hit.fileName.length)
     const newPath = `${dir}${name}`
     if (newPath !== path && mockMine.some((f) => f.path === newPath)) {
@@ -436,6 +447,30 @@ export const mockApi: MkpApi = {
         mockMineText.set(newPath, text)
       }
     }
+    return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 第十一层：另存为一份新的（我的文件 → 我的文件）。与真机同一套规矩：
+   * **字节复制**（正文与血统原样带过去）→ 新的一份从诞生起就是独立的；
+   * 名字由用户自己起（不自动改名）：和原来一样 / 已存在同名都拒；
+   * **一个状态都不碰** —— 使用中指针与草稿都还留在原来那份上。
+   */
+  async copyUserPreset(path, newName) {
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const problem = mockNameProblem(hit.fileName, newName)
+    if (problem !== null) throw new Error(problem)
+    const name = newName.trim()
+    const dir = path.slice(0, path.length - hit.fileName.length)
+    const newPath = `${dir}${name}`
+    if (newPath === path) throw new Error('新名字和原来一样 —— 复制要起个不同的名字')
+    if (mockMine.some((f) => f.path === newPath)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    const text = mockMineText.get(path)
+    if (text !== undefined) mockMineText.set(newPath, text)
+    mockMine.push({ ...hit, path: newPath, fileName: name, modifiedUnix: nowSec() })
     return { path: newPath, fileName: name }
   },
 

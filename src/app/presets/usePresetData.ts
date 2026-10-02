@@ -65,7 +65,7 @@ import type {
   DownloadTick,
   Machine,
   PresetDraft,
-  RenamedUserPreset,
+  UserFileIdentity,
 } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
@@ -219,7 +219,13 @@ export interface PresetData {
    * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读用户线**
    * （列表立刻以磁盘为准），顺手重读使用中指针（它正指着这一份时会跟着改）。
    */
-  rename: (path: string, newName: string) => Promise<RenamedUserPreset>
+  rename: (path: string, newName: string) => Promise<UserFileIdentity>
+  /**
+   * **另存为一份新的**（第十一层）：把我自己那一份按字节复制成同一格里另一份新的用户文件。
+   * 回来**重读用户线**（新文件要出现在表里）；**不重读使用中指针** —— 这一层不碰它
+   * （原文件一个字节不动，复制出来的那份也不会自称"使用中"）。
+   */
+  copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
    * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
    * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
@@ -505,6 +511,13 @@ export function usePresetData(): PresetData {
     setMine(await api.getUserPresetFiles())
   }, [])
 
+  /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
+  const copyAsNew = useCallback(async (path: string, newName: string) => {
+    const done = await api.copyUserPreset(path, newName)
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
+
   /*
    * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
@@ -547,6 +560,7 @@ export function usePresetData(): PresetData {
     commitDraft,
     rename,
     remove,
+    copyAsNew,
   }
 }
 

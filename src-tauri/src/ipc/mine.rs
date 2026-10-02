@@ -133,13 +133,13 @@ pub struct CommittedDraftDto {
     pub replaced: bool,
 }
 
-/// 重命名成功后的新身份（第十层）
+/// 一份用户文件的新落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RenamedUserPresetDto {
-    /// 新的落点（相对**用户根**，`presets-mine/…`）
+pub struct UserFileIdentityDto {
+    /// 落点（相对**用户根**，`presets-mine/…`）
     pub path: String,
-    /// 新的文件名
+    /// 文件名
     pub file_name: String,
 }
 
@@ -370,7 +370,7 @@ pub async fn rename_user_preset(
     app: AppHandle,
     path: String,
     new_name: String,
-) -> Result<RenamedUserPresetDto, AppError> {
+) -> Result<UserFileIdentityDto, AppError> {
     traced("renameUserPreset", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
@@ -402,7 +402,32 @@ pub async fn rename_user_preset(
                 .with_detail(e.to_string())
             })?;
 
-        Ok(RenamedUserPresetDto {
+        Ok(UserFileIdentityDto {
+            path: done.path,
+            file_name: done.file_name,
+        })
+    })
+}
+
+/// **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
+///
+/// 与第八层"官方 → 我的文件"那条另存分开：这一层是**我的文件 → 我的文件** ——
+/// 原文件一个字节不动；内容与那三行 `# based_on*` 血统**原样带过去**（来源已经是用户文件，
+/// 不重算血统 —— 重算会把"从哪一版官方派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
+/// （不覆盖、也不自动改名 —— 名字由用户自己换）。
+///
+/// **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive。
+/// 它也不读内容、不查状态 —— 名字由 [`runtime::mine::copy_as_new`] 那边把关。
+#[tauri::command]
+pub async fn copy_user_preset(
+    app: AppHandle,
+    path: String,
+    new_name: String,
+) -> Result<UserFileIdentityDto, AppError> {
+    traced("copyUserPreset", |_| {
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let done = runtime::mine::copy_as_new(&user_root, &path, &new_name)?;
+        Ok(UserFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
         })

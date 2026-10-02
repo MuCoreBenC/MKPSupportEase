@@ -131,6 +131,9 @@ export const bridgeApi: MkpApi = {
   renameUserPreset: (path, newName) =>
     call('renameUserPreset', 'rename_user_preset', { path, newName }),
   deleteUserPreset: (path) => call('deleteUserPreset', 'delete_user_preset', { path }),
+  /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
+  copyUserPreset: (path, newName) =>
+    call('copyUserPreset', 'copy_user_preset', { path, newName }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

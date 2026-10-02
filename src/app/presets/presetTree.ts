@@ -435,6 +435,24 @@ export const MINE_RENAME = {
   commit: '改名',
 } as const
 
+/**
+ * **第十一层**：另存为一份新的那一口抽屉的话。
+ *
+ * 我的文件 → 我的文件（与第八层"官方 → 我的文件"那条另存分开）：**按字节复制**、
+ * 那三行 `# based_on` 血统**原样带过去**（不重算 —— 来源已经是用户文件）；原文件一个字节不动。
+ * 名字由用户自己起 —— **不预填、不自动改名**（作者：目标存在就拒绝，让他自己换名字）；
+ * **一个状态都不碰**：不改「已应用」、草稿也留在原来那份上。
+ */
+export const MINE_COPY = {
+  title: '另存为一份新的',
+  note:
+    '把我这份**按字节**复制成同一格里另一份新的用户文件 —— 原文件一个字节不动，' +
+    '新的那份从诞生起就是独立的一份（之后能自己编辑 / 改名 / 删除 / 应用）。' +
+    '那三行 `# based_on` 血统原样带过去（来源已经是用户文件，不重算）。' +
+    '名字由你来起：不能和原来一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
+  commit: '另存为',
+} as const
+
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
@@ -642,11 +660,12 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
  *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
  *
  * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * **重命名与删除不在这一档了**（第十层接上了真方法 `renameUserPreset` / `deleteUserPreset`，
- * 只对「我的文件」生效）；这里剩下的三件是真的还没有，哪天要加，方法名照这个写。
+ * **用户文件那三件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
+ * `deleteUserPreset`）；另存为一份新的（原来「复制」那个格子）是第十一层
+ * （`copyUserPreset`）—— 都只对「我的文件」生效。这里剩下的两件是真的还没有，
+ * 哪天要加，方法名照这个写。
  */
 export const MISSING_METHOD = {
-  copy: 'copyLocalFile',
   reveal: 'revealInFolder',
   link: 'getFileUrl',
 }

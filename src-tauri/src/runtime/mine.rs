@@ -471,9 +471,9 @@ pub fn check_mine_prefix(rel: &str) -> Result<(), AppError> {
 
 /* ---------- 第十层：用户文件管理（重命名 / 删除）—— 只动名字或删掉，不动字节 ---------- */
 
-/// 重命名一份用户文件的结果：新的落点（相对用户根）与新的文件名
+/// 一份用户文件的落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状）
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Renamed {
+pub struct FileIdentity {
     pub path: String,
     pub file_name: String,
 }
@@ -482,7 +482,7 @@ pub struct Renamed {
 ///
 /// - 空白去掉后不许空；不许带路径分隔符（**只改名字，不换目录** —— 跨文件夹搬动是
 ///   "文件夹管理"，不在这层）；不许 `.` / `..`；
-/// - **后缀保持原样**（`.toml` 还是 `.toml`）—— 改名不该改变它算哪一类
+/// - **后缀保持原样**（`.toml` 还是 `.toml`）—— 改名 / 复制都不该改变它算哪一类
 ///   （类别的判据是 [`kind_of`]，它只看后缀）。
 fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
     let name = new_name.trim();
@@ -504,7 +504,7 @@ fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
     };
     if ext(name) != ext(old_name) {
         return Err(AppError::invalid_argument(
-            "后缀要保持原样 —— 改名不改它是哪一类（.toml 还是 .toml）",
+            "后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）",
         ));
     }
     Ok(name.to_owned())
@@ -531,7 +531,7 @@ fn same_file(_a: &Path, _b: &Path) -> bool {
 ///
 /// 使用中指针与草稿的跟改名不在这里做（那是 [`super::state`] 那两条 repoint 的事）——
 /// 这一层只碰用户根里的文件。
-pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<Renamed, AppError> {
+pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
     check_mine_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
@@ -546,7 +546,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<Rename
     let new_rel = format!("{dir}{new_name}");
     check_mine_prefix(&new_rel)?;
     if new_rel == rel {
-        return Ok(Renamed {
+        return Ok(FileIdentity {
             path: new_rel,
             file_name: new_name,
         });
@@ -563,7 +563,56 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<Rename
     }
     std::fs::rename(&old, &new_path)
         .map_err(|e| AppError::io(format!("{rel} 改名没成")).with_detail(e.to_string()))?;
-    Ok(Renamed {
+    Ok(FileIdentity {
+        path: new_rel,
+        file_name: new_name,
+    })
+}
+
+/// **另存为一份新的**（第十一层）：把 `rel` 那一份**按字节**复制成同一格里另一份新的用户文件。
+///
+/// 与第八层"官方 → 我的文件"那条另存分开（那条改的是内容、要重写血统）—— 这一层是
+/// **我的文件 → 我的文件**，而且**不做任何"智能"**：
+///
+/// - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算
+///   （来源已经是用户文件，重算会把"从哪一版官方派生"说错）；原文件一个字节不动；
+/// - 新名字过[同一套门槛](check_new_name)（不许空 / 不许带路径 / 后缀保持原样）；
+///   落点已有东西就**拒绝**（不覆盖、也**不自动改名** —— 名字由用户自己换）；
+/// - **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
+///   新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
+///
+/// 它不读内容、不查状态（"纯文件操作"，与改名 / 删除同族）：连读不出来的那份也能复制，
+/// 复制出来还是读不出来的（状态照实）。
+pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
+    check_mine_prefix(rel)?;
+    let old = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !old.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        )));
+    }
+    let old_name = rel.rsplit('/').next().unwrap_or(rel);
+    let new_name = check_new_name(old_name, new_name)?;
+    /* 只换名字，不换目录：新的一份落在原来那一格（与改名同一条规矩） */
+    let dir = rel.strip_suffix(old_name).unwrap_or("presets-mine/");
+    let new_rel = format!("{dir}{new_name}");
+    check_mine_prefix(&new_rel)?;
+    if new_rel == rel {
+        return Err(AppError::invalid_argument(
+            "新名字和原来一样 —— 复制要起个不同的名字",
+        ));
+    }
+    let new_path = crate::fsx::paths::resolve_in(user_root, &new_rel)?;
+    if new_path.exists() {
+        return Err(AppError::invalid_argument(format!(
+            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        )));
+    }
+    let bytes = std::fs::read(&old)
+        .map_err(|e| AppError::io(format!("{rel} 读不出来")).with_detail(e.to_string()))?;
+    /* 写盘走全仓唯一那个出口（`clippy.toml` 禁 `std::fs::write`） */
+    crate::fsx::atomic::atomic_write(&new_path, &bytes)?;
+    Ok(FileIdentity {
         path: new_rel,
         file_name: new_name,
     })
@@ -1317,5 +1366,159 @@ mod tests {
         assert!(delete_file(root.path(), "exports/别动我.txt", None, None).is_err());
         assert!(delete_file(root.path(), "../外面.txt", None, None).is_err());
         assert!(root.path().join("exports/别动我.txt").exists());
+    }
+
+    /* ---------- 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制） ---------- */
+
+    /// 复制是**字节复制**：新文件与原来那份逐字节相同（内容与血统原样带过去）、
+    /// 原文件不动；子目录里的那份复制出来还在同一个子目录
+    #[test]
+    fn copying_keeps_the_bytes_and_the_lineage() {
+        let root = tempfile::tempdir().unwrap();
+        let with_lineage = "# based_on: mkp/presets/A1-standard.toml\n[toolhead]\noffset_x = 1.0\n";
+        write(root.path(), "presets-mine/我的 A1.toml", with_lineage);
+
+        let done = copy_as_new(
+            root.path(),
+            "presets-mine/我的 A1.toml",
+            "我的 A1-第二份.toml",
+        )
+        .unwrap();
+        assert_eq!(done.path, "presets-mine/我的 A1-第二份.toml");
+        assert_eq!(done.file_name, "我的 A1-第二份.toml");
+        let new_path = root.path().join("presets-mine/我的 A1-第二份.toml");
+        assert_eq!(
+            std::fs::read(&new_path).unwrap(),
+            with_lineage.as_bytes(),
+            "字节复制：内容与血统一个字节不差"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/我的 A1.toml")).unwrap(),
+            with_lineage.as_bytes(),
+            "原文件一个字节不动"
+        );
+        assert_eq!(
+            format!("{:?}", lineage_of_file(&new_path)),
+            format!(
+                "{:?}",
+                lineage_of_file(&root.path().join("presets-mine/我的 A1.toml"))
+            ),
+            "血统原样带过去（不重算）"
+        );
+
+        /* 子目录里的那份：复制出来还在同一个子目录 */
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        let done =
+            copy_as_new(root.path(), "presets-mine/我的/另存.toml", "另存-副本.toml").unwrap();
+        assert_eq!(done.path, "presets-mine/我的/另存-副本.toml");
+    }
+
+    /// 复制与改名同一套名字门槛：换后缀 / 带路径 / `.` / `..` / 空全拒
+    #[test]
+    fn copying_uses_the_same_name_gate() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        for bad in ["A1.json", "子目录/A1.toml", "..", "  "] {
+            assert!(
+                copy_as_new(root.path(), "presets-mine/A1.toml", bad).is_err(),
+                "{bad} 这种名字该被拒"
+            );
+        }
+    }
+
+    /// **不覆盖**（目标已有就拒，被撞的那份与源都一个字节没动）；
+    /// **也不自动改名**（名字和原来一样也拒 —— 复制要起个不同的名字）
+    #[test]
+    fn copying_never_overwrites_and_never_renames_itself() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/B1.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+
+        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "B1.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不覆盖"), "{}", e.message);
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/B1.toml")).unwrap(),
+            "[wiping]\nspeed = 80\n".as_bytes(),
+            "被撞的那份一个字节没动"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("presets-mine/A1.toml")).unwrap(),
+            VALID_TOML.as_bytes()
+        );
+
+        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "A1.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不同的名字"), "{}", e.message);
+    }
+
+    /// 复制**一个状态都不碰**：使用中指针还是指着原来那份、草稿也还在原来那份上；
+    /// 新文件不会自称"使用中"，也没有跟着冒出一张草稿
+    #[test]
+    fn copying_touches_no_state_at_all() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        let active =
+            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+                .unwrap();
+        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        crate::runtime::state::save_draft(root.path(), &subject, "sha", "改到一半").unwrap();
+
+        copy_as_new(root.path(), "presets-mine/A1.toml", "A1-第二份.toml").unwrap();
+
+        let after_active = crate::runtime::state::load_active(root.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_active.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "使用中没动"
+        );
+        assert_eq!(after_active.file_name, active.file_name);
+        let after_draft = crate::runtime::state::load_draft(root.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_draft.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "草稿没被迁移"
+        );
+        assert_eq!(after_draft.text, "改到一半");
+    }
+
+    /// 复制的对象是**文件**，不是"能被读成 TOML 的文本"：二进制那份照样原样复制
+    /// （与改名 / 删除同族：纯文件操作，不设内容门槛）
+    #[test]
+    fn copying_does_not_require_readable_text() {
+        let root = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("presets-mine/二进制的.toml"),
+            &[0xff, 0xfe, 0x00, 0x01],
+        )
+        .unwrap();
+
+        let done = copy_as_new(
+            root.path(),
+            "presets-mine/二进制的.toml",
+            "二进制的-副本.toml",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(&done.path)).unwrap(),
+            &[0xff, 0xfe, 0x00, 0x01]
+        );
+    }
+
+    /// 复制和改名一样只在 `presets-mine/` 那一格里：越界路径一概拒
+    #[test]
+    fn copying_stays_in_the_mine_dir() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "exports/别动我.txt", "x");
+        assert!(copy_as_new(root.path(), "exports/别动我.txt", "副本.txt").is_err());
+        assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
     }
 }

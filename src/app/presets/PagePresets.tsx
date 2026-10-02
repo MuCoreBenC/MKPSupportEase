@@ -87,8 +87,10 @@
  *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
+ *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
+ *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
- *   **复制 / 在文件夹中显示 / 复制链接**
+ *   **在文件夹中显示 / 复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
  *
  * 数据与判定都在 `presetTree.ts`（纯函数）与 `usePresetData.ts`（三态加载 + 两张表），
@@ -119,6 +121,7 @@ import {
   ARCHIVE_DRAWER,
   ARCHIVE_WHY,
   EDIT_TEXT,
+  MINE_COPY,
   MINE_DRAWER,
   MINE_EDIT_TEXT,
   MINE_RENAME,
@@ -245,11 +248,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const savedTextRef = useRef<string>('')
 
   /*
-   * **重命名抽屉**（第十层）。`null` = 关着；开着时装着那一行的初值、输入框里的值与失败原因。
-   * 只改名字、**字节一个不动** —— 名字的门槛（空 / 路径 / 后缀 / 不覆盖）全在后端，
-   * 这里不重复判断；失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
+   * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：`null` = 关着。
+   * `kind` 决定说哪一套话、按哪颗按钮、成功怎么说 —— 形状一模一样。
+   * 改名预填现在这个名字；另存为**不预填**（作者：名字由用户明确指定，不做自动起名）。
+   * 名字的门槛（空 / 路径 / 后缀 / 不覆盖）全在后端，这里不重复判断；
+   * 失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
    */
-  const [renaming, setRenaming] = useState<{
+  const [naming, setNaming] = useState<{
+    kind: 'rename' | 'copy'
     row: PresetTableRow
     name: string
     busy: boolean
@@ -338,8 +344,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那几件事（复制 / 在文件夹中显示 / 复制链接）——
-   * 重命名与删除在第十层接上了（`renameUserPreset` / `deleteUserPreset`），不在这里。
+   * 契约里**连签名都没有**的那两件事（在文件夹中显示 / 复制链接）——
+   * 用户文件那三件都已经接上了：重命名与删除在第十层（`renameUserPreset` /
+   * `deleteUserPreset`），另存为一份新的在第十一层（`copyUserPreset`），不在这里。
    *
    * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
@@ -616,27 +623,49 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     menu.close()
     setViewer(null)
     setEditing(null)
-    setRenaming({ row, name: row.fileName, busy: false, error: null })
+    setNaming({ kind: 'rename', row, name: row.fileName, busy: false, error: null })
   }
 
-  const submitRename = () => {
-    if (renaming === null || renaming.busy) return
-    const name = renaming.name.trim()
+  /**
+   * **另存为一份新的**（第十一层）：我的文件 → 我的文件，按字节复制。
+   *
+   * 名字**不预填** —— 作者定死：用户明确指定目标名字，目标存在就拒绝、让他自己换；
+   * 不做"复制后自动改名"这种智能行为。别的规矩（血统原样带过去 / 不覆盖 / 不碰状态）
+   * 都在后端。
+   */
+  const openCopyAs = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    setEditing(null)
+    setNaming({ kind: 'copy', row, name: '', busy: false, error: null })
+  }
+
+  /** 起名字抽屉那一颗按钮（改名 / 另存为共用这一条提交路） */
+  const submitNaming = () => {
+    if (naming === null || naming.busy) return
+    const name = naming.name.trim()
     if (name === '') {
-      setRenaming({ ...renaming, error: '新名字不能是空的' })
+      setNaming({ ...naming, error: '新名字不能是空的' })
       return
     }
-    setRenaming({ ...renaming, busy: true, error: null })
-    data.rename(renaming.row.path, name).then(
+    setNaming({ ...naming, busy: true, error: null })
+    const ask =
+      naming.kind === 'rename'
+        ? data.rename(naming.row.path, name)
+        : data.copyAsNew(naming.row.path, name)
+    ask.then(
       (done) => {
-        setRenaming(null)
+        setNaming(null)
         setNote({
-          text: `已改名：${renaming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`,
+          text:
+            naming.kind === 'rename'
+              ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
+              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
       (e: unknown) =>
-        setRenaming((cur) =>
+        setNaming((cur) =>
           cur === null
             ? cur
             : { ...cur, busy: false, error: e instanceof Error ? e.message : String(e) },
@@ -787,6 +816,15 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
+   * 「另存为一份新的」为什么不能点（第十一层）：只有**我的文件**之间能复制 ——
+   * 官方那份的副本要经过「改这份」→ 保存（那条链才把副本落成你自己的一份）。
+   */
+  const copyWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return '官方那份的副本走「改这份」→ 保存（会另存成你自己的一份）；这一层只在「我的文件」之间复制'
+  }
+
+  /**
    * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
    * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
    */
@@ -847,9 +885,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         : []),
       {
         id: 'copy',
-        label: '复制',
-        disabled: suspect ? RELEASE_SUSPECT_WHY : undefined,
-        onSelect: () => sayNoContract(MISSING_METHOD.copy, row),
+        label: '另存为一份新的',
+        /*
+         * 第十一层：**我的文件 → 我的文件**（按字节复制、血统原样带过去）。
+         * 官方那两份的副本走「改这份」→ 保存；内容存疑的字节不许换个名字继续活着
+         * （第三圈第 6 层）—— 那一句优先。
+         */
+        disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
+        onSelect: () => openCopyAs(row),
       },
       {
         id: 'rename',
@@ -1389,55 +1432,65 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           </Drawer>
 
           {/*
-           * **重命名抽屉**（第十层）：只改名字，**字节一个不动** —— 没有"保存内容"这回事。
+           * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：
+           * 两个动作都只传一个名字，字节与状态全在后端管 —— 这里没有"保存内容"这回事。
            *
-           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖），
+           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖 / 不自动改名），
            * 这里只把用户输入的字带过去；失败原话**留在抽屉里**（别把他刚打的字盖掉）。
-           * 正在使用 / 有草稿的那一份也能改名 —— 使用中指针与草稿在后端跟着走。
+           * 改名预填现在这个名字（改名后使用中指针与草稿在后端跟着走）；
+           * 另存为**不预填**（名字由用户明确指定）。
            */}
           <Drawer
-            open={renaming !== null}
-            title={MINE_RENAME.title}
-            subtitle={renaming?.row.path}
+            open={naming !== null}
+            title={naming?.kind === 'copy' ? MINE_COPY.title : MINE_RENAME.title}
+            subtitle={naming?.row.path}
             footer={
               <>
-                <button type="button" className={s.editGhost} onClick={() => setRenaming(null)}>
+                <button type="button" className={s.editGhost} onClick={() => setNaming(null)}>
                   取消
                 </button>
                 <button
                   type="button"
                   className={s.editPrimary}
-                  disabled={renaming?.busy === true}
-                  onClick={submitRename}
+                  disabled={naming?.busy === true}
+                  onClick={submitNaming}
                 >
-                  {MINE_RENAME.commit}
+                  {naming?.kind === 'copy' ? MINE_COPY.commit : MINE_RENAME.commit}
                 </button>
               </>
             }
-            onClose={() => setRenaming(null)}
+            onClose={() => setNaming(null)}
           >
-            {renaming !== null && (
+            {naming !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>{MINE_RENAME.note}</p>
-                {renaming.row.scope === 'local' && renaming.row.live && (
+                <p className={s.editNote}>
+                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
+                </p>
+                {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
                 )}
                 <input
                   className={s.renameInput}
-                  value={renaming.name}
+                  value={naming.name}
                   spellCheck={false}
                   aria-label="新的文件名"
+                  placeholder={naming.kind === 'copy' ? '新文件名' : undefined}
                   autoFocus
                   onChange={(e) =>
-                    setRenaming((cur) =>
+                    setNaming((cur) =>
                       cur === null ? cur : { ...cur, name: e.target.value, error: null },
                     )
                   }
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitRename()
+                    if (e.key === 'Enter') submitNaming()
                   }}
                 />
-                {renaming.error !== null && <p className={s.editErr}>没改成：{renaming.error}</p>}
+                {naming.error !== null && (
+                  <p className={s.editErr}>
+                    {naming.kind === 'copy' ? '没另存成：' : '没改成：'}
+                    {naming.error}
+                  </p>
+                )}
               </div>
             )}
           </Drawer>
