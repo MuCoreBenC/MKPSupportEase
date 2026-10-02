@@ -57,7 +57,7 @@ export function shortStatText(raw: string | undefined): string | undefined {
   return t === null ? raw : `${t.mo}-${t.d}`
 }
 
-/** 展开面板 / 同步页：带年份；有时刻就缀 `HH:mm`（老值没有年份就只给月-日，不编） */
+/** 展开面板（预设页）：带年份；有时刻就缀 `HH:mm`（老值没有年份就只给月-日，不编） */
 export function longStatText(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined
   const t = parseStatDate(raw)

@@ -6,9 +6,12 @@ MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 
 Tauri 2 + React 18 + TypeScript。**预设这一条生命周期已经收口**：官方线（下载 / 状态 /
 批量 / 归档 / 可信度）与用户线（能读能列 / 能应用 / 能改并写回 / 改名 / 删除 / 另存 /
 导入 / 在 Finder 中显示）都通了，导入入口与下载管道走同一个数据世界（Catalog + Source +
-Delivery，底账全在 Internal 根，localStorage 不再住任何底账）。首页向导、校准页、
-参数页、同步页、BBS 查看器都是真数据流；**报告页 / 设置页还是空态**（`PagePlaceholder`，
-明说"本版未接入"）。落地现状全景（含还没做的）见 [`docs/PROJECT-AUDIT.md`](docs/PROJECT-AUDIT.md)。
+Delivery，底账全在 Internal 根，localStorage 不再住任何底账）。首页向导、预设页、校准页、
+参数页、BBS 查看器、设置页（最小版：高级设置 → 预设数据源）都是真数据流；
+**报告页还是空态**（`PagePlaceholder`，明说"本版未接入"）。
+**「同步」页已退役**（2026-10-02 作者裁决）：普通用户不需要"同步"这个概念 ——
+catalog 随包走、更新是内部机制；数据源配置降级成设置页里的开发后门。
+落地现状全景（含还没做的）见 [`docs/PROJECT-AUDIT.md`](docs/PROJECT-AUDIT.md)。
 
 ## 跑起来
 

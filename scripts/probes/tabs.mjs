@@ -1,5 +1,6 @@
 /*
- * 页签骨架探针（P1 的验收）：浏览器的 8 个页签能不能点开、有没有把控制台点红。
+ * 页签骨架探针（P1 的验收）：浏览器的 7 个页签能不能点开、有没有把控制台点红。
+ * （原来 8 个：2026-10-02「同步」整页退役，那一格撤掉 —— 见 `constants/tabs.ts`。）
  *
  * 用法（先起 dev 预览，再跑它）：
  *   npm run dev            # 固定 5321，strictPort
@@ -19,7 +20,7 @@ import { chromium } from 'playwright-core'
 const url = process.argv[2]?.startsWith('http') ? process.argv[2] : 'http://localhost:5321/'
 const wantShot = process.argv.includes('--shot')
 
-const TABS = ['首页', '预设', '校准', '参数', '同步', 'BBS 预设', '报告', '设置']
+const TABS = ['首页', '预设', '校准', '参数', 'BBS 预设', '报告', '设置']
 
 const browser = await chromium.launch({ channel: 'msedge' })
 const page = await browser.newPage({ viewport: { width: 1760, height: 900 } })
@@ -85,7 +86,7 @@ for (const label of TABS) {
   )
 
   if (wantShots) {
-    const slug = { 首页: 'home', 预设: 'preset', 校准: 'calib', 参数: 'params', 同步: 'sync', 'BBS 预设': 'bbs', 报告: 'report', 设置: 'settings' }[label]
+    const slug = { 首页: 'home', 预设: 'preset', 校准: 'calib', 参数: 'params', 'BBS 预设': 'bbs', 报告: 'report', 设置: 'settings' }[label]
     await page.screenshot({ path: `${shotDir}/${slug}.png` })
   }
 }

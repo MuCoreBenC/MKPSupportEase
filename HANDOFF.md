@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**（2026-10-02，见 §3.5）—— 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；「分享」不做、单文件「导出」暂缓（见 §5）；下一个真块是「设置 → 备份与恢复」（ZIP，复用第十二层入口） |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）—— 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；「同步」不再是一个用户概念（数据源配置降级成设置页里的开发后门）；「分享」不做、单文件「导出」暂缓（见 §5）；下一个真块是「设置 → 备份与恢复」（ZIP，复用第十二层入口） |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -24,7 +24,7 @@
 | ③ 文件系统 | 复用 `fsx/`（两根 + 防穿越 + atomic_write）+ `runtime/paths.rs`（catalog.json / mkp/ / archive/ 落点） | 业务不许自拼目录名；新增子目录先改总纲 |
 | ④ Delivery | `runtime/delivery.rs`：`Source` trait + `deliver` + `FileOnDisk` 三分态 | 源可插拔（现只有 LocalDirSource）；SHA/大小校验在落盘前；更新=重跑管道，旧份自动归档 |
 | ⑤ 用户状态 | `runtime/state.rs` | 规则：一种状态一个文件、住 `run/` 下、atomic 写、坏档不静默。第一个住客：使用中指针（`run/active-preset.json`，全局唯一在构造上成立，带应用时刻 SHA 可查漂移） |
-| ⑥ 页面闭环 | 同步页「数据骨架（新）」区（`src/app/pages/PagePackage.tsx`） | 读数 + 下载 + 使用/撤销 + 更新，全走新 API（`get_runtime_catalog` / `download_runtime_file` / `get_downloaded_files` / `get_stale_files` / `get_active_preset` / `apply_active_preset` / `clear_active_preset`——两份命令清单同步注册） |
+| ⑥ 页面闭环 | ~~同步页「数据骨架（新）」区~~（2026-10-02 随「同步」页退役删除；能力早已化入预设页的下载 / 应用那一套）| 读数 + 下载 + 使用/撤销 + 更新，全走新 API（`get_runtime_catalog` / `download_runtime_file` / `get_downloaded_files` / `get_stale_files` / `get_active_preset` / `apply_active_preset` / `clear_active_preset`——两份命令清单同步注册） |
 
 ## 2. 怎么验证（每一轮都要全绿才推）
 
@@ -414,8 +414,33 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        交付行且动作是「下载」、台账两档不同数）+ mock 补 `bbs_config` / `icon` 各一条
        （真机 catalog 里长这样，浏览器里也能验）；`PRESET-PRODUCT-RULES.md` §1 / §2 / §4
        跟着补三笔（核准记录里记了）。
+     - ✅ **第十六刀：「同步」页退役 + 最小设置页**（2026-10-02，本次）—— 作者裁决：
+     "普通用户完全不需要'同步'这个概念；数据源配置降级成设置页里的开发后门。"
+     同步页（数据源 / catalog 调试账 / 下载第一份 / 检查更新）是开发验证面板，不是产品页面：
+     - **删**：导航「同步」+ `src/app/pages/`（`PagePackage.tsx` / 它的 css / 一个零引用的
+       `pages.module.css` 死文件 —— 目录随页面清空）；参数页空态那颗「去「同步」页获取一份」
+       跳转（没去处了）；工作台 `BuildPage` / `cloud.ts` / `clientPackage.ts` 与前端
+       `contract` / `mock` / `storageKeys` 里"客户端「同步」页读的就是这一格"那套**失效指针**
+       （C4 起客户端就不读 `STORAGE.cloud`，那一格只归工作台）。
+     - **搬**：数据源那一格 → **设置页 · 高级设置 · 预设数据源**（内置官方源 / 手动指定
+       （开发 / 排查）/ 恢复内置默认）。写动作全走按钮（不做"一选就写"的隐式动作）；
+       「空地址不写盘」的语义不变。
+     - **新增一条命令** `clear_preset_source`：「回到内置默认」只能靠删设置文件
+       （`save_source` 拒空 = 不许制造第三种状态）—— 原来只有"用户手删文件"这个出口，
+       现在是一次显式动作（幂等）。`PresetSourceDto` 加 `builtin` 一格：有覆盖时 `baseUrl`
+       是覆盖值，界面得说得出"撤掉覆盖会回到什么"。
+     - **保留（一个字没动）**：`check_remote_update` / `apply_remote_update` /
+       `run/preset-source.json` / 下载管道 / catalog —— 检查更新现在**暂时没有 UI 入口**，
+       Bootstrap 那一刀「预设页进入时后台检查一次」接上。
+     - `remote_base` 的"去哪儿填"改指设置页；mock 的数据源改**内存镜像**（校验消息与真机
+       同一套）。
+     - 判据：`params-sync.mjs` → **`params-settings.mjs`**（参数页那半保留 + 设置页数据源
+       全流程：当前状态如实 / 手动指定应用（尾斜杠砍掉，与真机 `normalize` 同一套）/
+       非法地址如实拒 / 恢复内置默认能撤回），两档 **14 条全绿**；`tabs.mjs` **7 页签**
+       （设置成真页面）；`chain.mjs` 第 ③ 步改点设置页，两档 **10/10 绿**；Rust
+       `source::clear_source` 2 条新测试（撤覆盖 / 幂等）。
 
-## 4. 续做入口（从哪接手）
+     ## 4. 续做入口（从哪接手）
 
 - **总盘点在 `docs/PROJECT-AUDIT.md`**（2026-10-02）：把 HANDOFF / 总纲 / 工程约束 /
   产品规则 / 现有页面对了一遍，列成**已完成 / 半完成 / 未开始 / 已废弃**四类
@@ -436,6 +461,9 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       两档 10/10 绿。"全选待生成"超时**复现不了**（按文件头三步构建即可跑通；
       A41 那次大概是拿没有桩的产物跑的）。客户端那半条链的覆盖在
       `params-sync.mjs` / `presets.mjs` + 真机验收（⑧ 的清单）。
+      （2026-10-02 晚：「同步」页退役 —— `chain.mjs` 第 ③ 步换到设置页；
+      `params-sync.mjs` → `params-settings.mjs`。**收口一层要回头把相关探针跑一遍**，
+      这条又应验一次。）
     - `params-sync.mjs`（P3/P4）：走的老流程（参数页空态 → 去同步页获取一份 → 互跳）
       也没了 —— 参数页现在**直接读 catalog**、同步页不再有"自动同步 / 去看参数页"。
       重写成两页各自的现状（参数页照 catalog 画 / 同步页口径与账），两档 12/12 绿。
@@ -528,7 +556,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - **~~新旧世界并存、互不读写~~（已收口）**：`client/` 目录删除，客户端只读 catalog、工作台读仓库源，仍互不读写；收口一条勾一条，同步更新 `DATA-INVENTORY.md` §4 与总纲 §4。
 - **`workbench/.snapshots/` 已入库**（`.gitignore` 的既定政策：除 `.draft/` 外入库）；`.codebuddy/` 已 ignore；`.trae/documents/` 留库（被代码注释引用）。
 - **仓库有并行会话在动**：推送前先 `git fetch`；合并冲突大概率在 `ipc/presets.rs` / `usePresetData.ts`（预设页是热点）。
-- **真机下载要先配数据源**：C4 之后的下载不再探测仓库路径 —— 没配 `Preset Source`（同步页那格）时，下载 / 检查更新都会拒绝并说明去哪儿配。**这是对的**，不是 bug：用户机器上本来就没有仓库。开发期要验真，把本地静态目录（如 `python3 -m http.server`）的地址填进去即可。
+- **真机下载要先配数据源**：C4 之后的下载不再探测仓库路径 —— 没配数据源时，下载 / 检查更新都会拒绝并说明去哪儿配。**这是对的**，不是 bug：用户机器上本来就没有仓库。开发期要验真，把本地静态目录（如 `python3 -m http.server`）的地址填进 **设置 → 高级设置 → 预设数据源**（「同步」页 2026-10-02 退役后那一格搬到了这里）；正式构建由 `MKPSE_PRESET_SOURCE` 编入默认值（Bootstrap 那一刀把它接到工作台）。
 - **随包资产退役是"接一类摘一类"**：`vite.config.ts` 的 `DELIVERED_ASSET_DIRS` 与
   `scripts/check-bundle.mjs` 的 `assets/<类>/` 是**同一份清单的两处**，加一类就改两处（判据会盯着另一处）。
   今天这份清单恰好覆盖 `public/assets/` 下台账管的全部三类（bbs / models / icons）。
@@ -581,13 +609,14 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
+| `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |
 | `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / **第十三层：右键「在 Finder 中显示」只给「我的文件」（官方那份灰掉带原因）、点了如实说失败（浏览器里没有文件管理器、真机上的样子说清楚）、不碰「已应用」** / **第十五层：分类边界（MKP 档不许有 `.svg` 与 `MKPProcess` 切片器配置、切片器档要出现 catalog 交付行且动作是「下载」、台账「仓库 N」跟着档走两档不同数）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
 
 - main 与 origin/main 同步，最新提交见 `git log`；CI 两个 job（web / rust）必须全绿。
 - 未入库的 untracked：无（`workbench/.draft/` 被 ignore 属预期）。
-- **下载要配数据源（本轮起）**：真机上先在同步页填 `Preset Source` 那个地址（官方源 / Gitee / 本地 `python3 -m http.server` 都行），下载与检查更新才能跑；没填时它们拒绝执行并说明去哪儿填——不猜 URL、不假装成功。`MKPSE_PRESET_SOURCE=<url>` 可把默认值编进二进制。
+- **下载要配数据源**：真机上在 **设置 → 高级设置 → 预设数据源** 填地址（官方源 / Gitee / 本地 `python3 -m http.server` 都行），下载与检查更新才能跑；没填时它们拒绝执行并说明去哪儿填——不猜 URL、不假装成功。`MKPSE_PRESET_SOURCE=<url>` 可把默认值编进二进制（设置页的「恢复内置默认」撤掉用户覆盖、回到它）。
 - 前端底账全在 Internal 根（C4 后）：真机调试时 WebView 的 localStorage 只住偏好（置顶/搜索词），清掉不影响任何底账；旧的 `mkp.a40.*` 三格已无人读，残留可删。
 - **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。

@@ -367,7 +367,7 @@ export default function PageBbs({ density, pending }: Props) {
         ) : (
           <span
             className={s.pickNote}
-            title={delivered.note !== '' ? delivered.note : '去「同步」页下载 BBS 配置'}
+            title={delivered.note !== '' ? delivered.note : '去「预设」页的「切片器配置」下载 BBS 配置'}
           >
             {delivered.listed.length > 0
               ? `产品配置 ${delivered.listed.length} 份，还没下载`

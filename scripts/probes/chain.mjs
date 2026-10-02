@@ -16,13 +16,15 @@
  *   工作台端   ① 勾「待生成」→ 生成 → ② 报的是真说明书的数（机型 / 版本 / 字段 / 带条件）
  *              ② 点「上传到云端」→ 写进 `mkp.cloud.presets`（整份 release：说明书 + N 份 TOML）
  *                → **刷新页面那一份还在**（这条管道工作台这一端真正的产物）
- *   客户端端   ③ 同步页在浏览器里如实说「catalog 随安装包走」（不再假装与工作台那一格联动）
+ *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源；也不假装与工作台那一格联动）
  *
- * 客户端那半条链（同步 → 下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
- *   · `params-sync.mjs`   同步页画得出来、参数页照包渲染
- *   · `presets.mjs`       下载如实拒、应用用户文件、「已应用」状态
+ * 客户端那半条链（下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
+ *   · `params-settings.mjs`  参数页照目录渲染、设置页「预设数据源」那一格全流程能走
+ *   · `presets.mjs`          下载如实拒、应用用户文件、「已应用」状态
  *   · 真机那条链（工作台发布 `presets/dist` → 数据源地址 → 客户端下载 → 应用）
  *     只在真机上跑得通 —— 归 `docs/PROJECT-AUDIT.md` ⑧「云端交付最终验收」的清单。
+ *     （2026-10-02：客户端「同步」页整页退役 —— 以前这里点的就是它；数据源那一格
+ *     搬去了设置页，客户端与工作台 `mkp.cloud.presets` 那一格的"没关系"没变。）
  *
  * **上次的教训也写在这儿**：原版最后几条断言读 `mkp.a40.package` / `mkp.a40.active` ——
  * 那是 C4 退役的底账键，恒为 null（那几条早已结构性 FAIL，A41 记账里"在 main 上就红"
@@ -200,21 +202,23 @@ for (const size of SIZES) {
   wire(tag, appPage)
   await appPage.goto(`${base}/index.html`, { waitUntil: 'load' })
   await appPage.waitForSelector('header nav', { timeout: 15000 })
-  await appPage.getByRole('button', { name: '同步', exact: true }).first().click()
-  await until(async () => (await appText(appPage)).includes('catalog'), 8000)
-  const syncText = flat(await appText(appPage))
+  await appPage.getByRole('button', { name: '设置', exact: true }).first().click()
+  await until(async () => (await appText(appPage)).includes('预设数据源'), 8000)
+  const setText = flat(await appText(appPage))
   /*
-   * 客户端的底账现在是 catalog（随安装包走、程序管版本）—— 浏览器里也该这么说。
+   * 客户端的底账现在是 catalog（随安装包走、程序管版本）；数据源那一格只答"下载去哪拿"
+   * —— 真实来源由构建注入（Bootstrap 那一刀），今天浏览器里如实说"没配"。
    * **不再断言**「同步下来的是工作台刚发的那一份」：那是 C4 之前的结构
    * （客户端读 `mkp.cloud.presets`），现在客户端与那一格没有关系。
+   * （2026-10-02 起客户端那一头的落点是**设置页** —— 「同步」页整页退役。）
    */
   check(
     tag,
-    '③ 同步页如实说「catalog 随安装包走」（不再假装与工作台那一格联动）',
-    syncText.includes('catalog') && syncText.includes('随安装包走'),
-    syncText.slice(0, 80),
+    '③ 设置页的数据源那一格如实（浏览器里「还没配置」；不假装与工作台那一格联动）',
+    setText.includes('预设数据源') && setText.includes('还没配置'),
+    setText.slice(0, 80),
   )
-  await appPage.screenshot({ path: `${shotDir}/chain-${tag}-sync.png` })
+  await appPage.screenshot({ path: `${shotDir}/chain-${tag}-settings.png` })
 
   console.log(
     `${tag.padEnd(8)} 工作台 ${nMachines} 机型 / ${nVersions} 版本 / ${nFields} 字段（带条件 ${nConds}）· `
@@ -237,6 +241,6 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（catalog 随包走）'
+  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（数据源那一格说真话）'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )

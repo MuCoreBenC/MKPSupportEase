@@ -538,4 +538,16 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   5. **schema 裁决**：`presetdata::AssetKind::Image` **保留 + 登记**（形态分类、不是残留；
      删除属另案 schema 清理）—— 复审依据写进 `assets.rs` 头注释。
 
+- 2026-10-02：**「同步」页退役 + 最小设置页**（第十五 / 十六两刀的收口，作者裁决）：
+  1. **预设页数据边界**（第十五刀）：两档按 catalog 的 `kind` 分流（`mkp_preset` → MKP、
+     `bbs_config` / `orca_config` → 切片器、`icon` / `model` 不归这一页）；台账跟着档走。
+  2. **「同步」页整页退役**（第十六刀）：导航少一格（7 个）、`src/app/pages/` 清空；
+     **数据源那一格搬进设置页**（高级设置 → 预设数据源）—— 它是 `run/preset-source.json`
+     的唯一界面入口（新的"家"），新增 `clear_preset_source` 撤覆盖；
+     `check_remote_update` / `apply_remote_update` / 下载管道 / catalog 一个字没动
+     （检查更新暂时没有 UI 入口，Bootstrap 那一刀接上）。
+  3. **数据归属未变**：`run/preset-source.json` 仍住 Internal 根、仍"设置文件 → 内置默认
+     → 没有就是没配"三段解析；`STORAGE.cloud` 那格**只归工作台**（客户端 C4 起不读，
+     这次把工作台里"客户端读这一格"的失效指针一并校准）。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

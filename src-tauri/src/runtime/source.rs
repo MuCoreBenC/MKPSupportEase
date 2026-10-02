@@ -99,6 +99,19 @@ pub fn save_source(root: &Path, raw_base_url: &str) -> Result<PresetSource, AppE
     Ok(source)
 }
 
+/// 撤掉用户覆盖：删掉设置文件（幂等）。
+///
+/// 「回到内置默认」只有这一条路 —— [`save_source`] 拒绝空地址（写空 = 制造第三种状态），
+/// 所以原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作。
+/// 删完生效什么（内置默认 / 没配）由 [`current_base_url`] 回答，不在这里替它说。
+pub fn clear_source(root: &Path) -> Result<(), AppError> {
+    match std::fs::remove_file(source_file(root)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(AppError::io("撤掉数据源覆盖失败").with_detail(e.to_string())),
+    }
+}
+
 /// 构建期注入的默认地址（没注就是 `None`）。界面用它区分"出厂默认值"与"用户改过的"，
 /// 免得读一次之后分不清当前地址是自己选的还是出厂的
 pub fn builtin_default() -> Option<String> {
@@ -219,6 +232,26 @@ mod tests {
     fn missing_file_is_not_corrupted() {
         let dir = root();
         assert_eq!(load_source(dir.path()).expect("没配过不该报错"), None);
+    }
+
+    /// 撤覆盖 = 删文件：撤完 load 就是 `None`（回不回内置默认由 `current_base_url` 管）
+    #[test]
+    fn clearing_removes_the_override() {
+        let dir = root();
+        save_source(dir.path(), "https://cdn.example.com/mkp").expect("写设置");
+        assert!(load_source(dir.path()).expect("读设置").is_some());
+
+        clear_source(dir.path()).expect("撤覆盖不该失败");
+        assert_eq!(load_source(dir.path()).expect("读设置"), None);
+        assert!(!source_file(dir.path()).exists());
+    }
+
+    /// 撤一个本来就没有的覆盖 = 幂等（与"撤销使用"同一条规矩：没有不是错）
+    #[test]
+    fn clearing_when_nothing_was_set_is_fine() {
+        let dir = root();
+        clear_source(dir.path()).expect("没有覆盖时撤覆盖也不该失败");
+        assert_eq!(load_source(dir.path()).expect("读设置"), None);
     }
 
     /// 坏档不静默：字节坏了要说出来，不能当成"没配"让用户再选一次却依然读不出

@@ -124,7 +124,7 @@ import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
-/* 下载过程与逐份结局的措辞：与同步页**同一份**（`shared/download.ts`）—— 同一件事一处文案 */
+/* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
 import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'

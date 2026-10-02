@@ -41,10 +41,34 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetSourceDto {
+    /// **当前生效**的地址（设置文件优先，其次内置默认）
     pub base_url: String,
     /// `true` = 用户在界面里填的（写进了设置文件）；`false` = 构建期注入的出厂默认值，还没被人动过。
     /// 界面据此把"默认值"与"你选的"分开说——不然用户不知道当前的地址是自己改的还是出厂的
     pub from_user: bool,
+    /// 构建期注入的默认地址（`MKPSE_PRESET_SOURCE`），没有就是 `null`。
+    /// **单独给一份**：有用户覆盖时 `base_url` 是覆盖值，光看它分不出"撤掉覆盖之后会回到什么"
+    /// —— 设置页「使用内置官方源」那一格要说的正是这句话
+    pub builtin: Option<String>,
+}
+
+/// 生效值的装配：设置文件优先 → 内置默认 → 都没有就是 `null`。
+/// **只写这一处**（get 与 clear 共用）—— 各写一遍迟早有一份忘带新字段
+fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
+    match runtime::source::load_source(root)? {
+        Some(stored) => Ok(Some(PresetSourceDto {
+            base_url: stored.base_url,
+            from_user: true,
+            builtin: runtime::source::builtin_default(),
+        })),
+        None => Ok(
+            runtime::source::builtin_default().map(|base_url| PresetSourceDto {
+                base_url,
+                from_user: false,
+                builtin: runtime::source::builtin_default(),
+            }),
+        ),
+    }
 }
 
 /// 当前数据源。`null` = 一个都没配（既没有设置文件，也没有出厂默认值）—
@@ -53,23 +77,15 @@ pub struct PresetSourceDto {
 pub async fn get_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
     traced("getPresetSource", |_| {
         let root = internal_root(&app)?;
-        if let Some(stored) = runtime::source::load_source(&root)? {
-            return Ok(Some(PresetSourceDto {
-                base_url: stored.base_url,
-                from_user: true,
-            }));
-        }
-        Ok(
-            runtime::source::builtin_default().map(|base_url| PresetSourceDto {
-                base_url,
-                from_user: false,
-            }),
-        )
+        source_dto(&root)
     })
 }
 
-/// 换数据源：写完立刻生效（下一次下载就用新的），并显示 writing 出来的那份。
+/// 换数据源：写完立刻生效（下一次下载就用新的），并显示写出来的那一份。
 /// 地址不合法在这一层就被拒：来自 `normalize_base_url`
+///
+/// **空地址不是"清除"**（那是 [`clear_preset_source`] 的事）：这里拒空，
+/// 语义保持"填一个地址进来"这一件事（见 `runtime::source::save_source` 的注释）
 #[tauri::command]
 pub async fn set_preset_source(
     app: AppHandle,
@@ -81,7 +97,22 @@ pub async fn set_preset_source(
         Ok(PresetSourceDto {
             base_url: saved.base_url,
             from_user: true,
+            builtin: runtime::source::builtin_default(),
         })
+    })
+}
+
+/// 撤掉用户覆盖：删掉设置文件（幂等），返回删除之后生效的值（有内置给内置，没有就是 `null`）。
+///
+/// 「回到内置默认」只有这一条路 —— 空地址不许写盘（见 `runtime::source::save_source`），
+/// 原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作
+/// （2026-10-02「同步」页退役时，从"填地址"这一格旁边分出来的）
+#[tauri::command]
+pub async fn clear_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
+    traced("clearPresetSource", |_| {
+        let root = internal_root(&app)?;
+        runtime::source::clear_source(&root)?;
+        source_dto(&root)
     })
 }
 
@@ -93,7 +124,7 @@ fn remote_base(root: &Path) -> Result<String, AppError> {
     let stored = runtime::source::current_base_url(root)?;
     stored.ok_or_else(|| {
         AppError::not_implemented(
-            "还没配置数据源地址：去「同步」页填一个（官方源 / Gitee / 自己的服务器都行）",
+            "还没配置数据源地址：去「设置 → 高级设置 → 预设数据源」填一个（官方源 / Gitee / 自己的服务器都行）",
         )
     })
 }

@@ -662,7 +662,8 @@ export interface ClientDataPackage {
  * 命名规则：读用 get*，写用 save*，让壳去做的动作用动词（openModel / copyToSlicer）。
  *
  * 前四个是 v023 移植时就有的；「客户端接发布包」这一轮（P1）补的是后面十二个 ——
- * 预设页 / 参数页 / 同步页三页要读的东西。**本轮只有 mock 答得上来**，
+ * 预设页 / 参数页要读的东西（「同步」页 2026-10-02 退役，它当时读的
+ * `getPresetSource` / `setPresetSource` 现在归设置页）。**本轮只有 mock 答得上来**，
  * 真机上没接的那几个由 bridge 抛 NotImplementedError（`src/api/errors.ts`），
  * 界面上是一块「未接入」空态，不是白屏。
  */
@@ -867,6 +868,12 @@ export interface PresetSource {
   baseUrl: string
   /** `true` = 用户在界面里填的；`false` = 构建期注入的出厂默认值 */
   fromUser: boolean
+  /**
+   * 构建期注入的默认地址（没有 = `null`）。
+   * **单独一格**：有用户覆盖时 `baseUrl` 是覆盖值 —— 这一格回答"撤掉覆盖之后会回到什么"，
+   * 设置页「使用内置官方源」那句副文案要的正是它
+   */
+  builtin: string | null
 }
 
 export interface MkpApi {
@@ -882,7 +889,7 @@ export interface MkpApi {
    */
   openModel(modelId: string): Promise<void>
 
-  /* ——— 机型与文件（预设页 / 同步页要读的） ——— */
+  /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 
   /** 机型目录：品牌 → 机型 → 版本。客户端画三级选择用 */
   getMachines(): Promise<Machine[]>
@@ -1084,11 +1091,22 @@ export interface MkpApi {
   /**
    * 当前数据源。`null` = 还没配（既没填过、也没有出厂默认值）——
    * 这时下载与检查更新都会拒绝执行并说明去哪儿配。
+   *
+   * 读者是**设置页**（「高级设置 → 预设数据源」）—— 普通用户不需要来这里：
+   * 官方地址由构建方注入（Bootstrap 那一刀），这一格留的是开发 / 排查的后门。
    */
   getPresetSource(): Promise<PresetSource | null>
 
-  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝 */
+  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝（**空地址在这里就拒**） */
   setPresetSource(baseUrl: string): Promise<PresetSource>
+
+  /**
+   * 撤掉用户覆盖（回到内置默认 / 没配）：删掉这台机器上的那份设置，幂等。
+   *
+   * **"回到内置"只能靠删** —— [`setPresetSource`] 拒空地址（写空 = 第三种状态）；
+   * 返回撤完之后生效的值（有内置给内置，没有就是 `null`），界面直接换账。
+   */
+  clearPresetSource(): Promise<PresetSource | null>
 
   /**
    * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。

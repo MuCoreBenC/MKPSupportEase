@@ -4,6 +4,7 @@ import type {
   ActivePreset,
   CalibModel,
   MkpApi,
+  PresetSource,
   UserPresetFile,
 } from './contract'
 import {
@@ -29,7 +30,7 @@ import {
  * 数据分两处，别混：
  *
  * - **本文件里**：校准页那几个方法（校准板清单、三轴偏移）用的那几份手写常量。
- * - **`src/api/mockServer/`**：预设页 / 参数页 / 同步页要读的那十二个方法，
+ * - **`src/api/mockServer/`**：预设页 / 参数页要读的那十二个方法，
  *   由 `data/*.json` 的六份上游快照解析而来。那一整个目录是搬过来的假后端，
  *   真机上由 Rust 侧接管，`mockServer/` 整个不再被引用。
  *
@@ -60,6 +61,9 @@ const calibModels: CalibModel[] = [
 
 /** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
 let mockActive: ActivePreset | null = null
+
+/** 浏览器演示用的数据源覆盖（内存态，刷新即还原；真数据在 Rust 侧 run/preset-source.json） */
+let mockSource: PresetSource | null = null
 
 /*
  * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
@@ -717,13 +721,31 @@ export const mockApi: MkpApi = {
     throw new NotImplementedError('readDownloadedText：浏览器里没有下载区')
   },
 
-  /** 浏览器模式下数据源既读不到也配不了：如实答"没配"，页面据此把配置入口说清楚 */
+  /*
+   * 数据源（设置页那一格）：真机写 `run/preset-source.json`，浏览器里没有盘 ——
+   * 这一档走**内存镜像**（与用户目录 / 使用中指针同一套口径：能走通的就真走，走不通的如实说）。
+   * 演示口径：这个假后端**没有内置默认源**（真机的内置是构建期注进来的），
+   * 所以「使用内置官方源」在这里 = 回到"没配"。
+   */
   async getPresetSource() {
-    return null
+    return mockSource
   },
 
-  async setPresetSource() {
-    throw new NotImplementedError('setPresetSource：浏览器模式的数据源只读，配不了')
+  async setPresetSource(baseUrl) {
+    /* 校验与真机 `runtime::source::normalize_base_url` 同一套（连消息也照抄）：
+       只认 http(s)、砍尾斜杠、空地址拒绝 */
+    const url = baseUrl.trim().replace(/\/+$/, '')
+    if (url === '') throw new Error('数据源地址是空的')
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw new Error(`数据源地址只认 http:// 或 https://，填进来的是 ${url}`)
+    }
+    mockSource = { baseUrl: url, fromUser: true, builtin: null }
+    return mockSource
+  },
+
+  async clearPresetSource() {
+    mockSource = null
+    return null
   },
 
   /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：
