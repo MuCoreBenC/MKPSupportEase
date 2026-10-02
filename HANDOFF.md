@@ -395,6 +395,29 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   （按作者 ①–⑩ 排：备份恢复 / 设置页 / Preset 产品能力 / 机器型号 / 校准测试 /
   加工记录 / 状态收尾 / 云交付验收 / 跨平台 / 旧世界清理），外加**文档自身的欠账**
   与建议次序。**接手前先读它** —— 它说的"半完成"是"差哪一半"，不是"没做"。
+- **清扫批次完成（2026-10-02，⑩ 的一小刀，只清残留不动功能）**：
+  - **死 API 两处清除**：`get_preset`（首圈的硬编码表 `preset_of` —— Rust 命令 + 两份注册清单 +
+    假后端夹具 + 测试一起删；首页/校准页早已走文件体系）与 `getAppliedPreset`
+    （契约方法 + 假后端演示集合 + bridge 的 `notWired`；`AppliedPreset` 类型一并删）。
+    真机 `notWired` 只剩 `copyToSlicer` / `downloadFiles` 两条（那两条**是有消费者的未接**，
+    不是残留）。bridge 头注释同步改写。
+  - **两个探针重写（同场病：C4 收口时一起烂的）**：
+    - `chain.mjs`（P6 联动）：客户端那半（同步→下载→应用）在浏览器里**结构性走不通**
+      （C4 底账进 Internal 根 + 真数据源；mock 没有盘没有源）——恒 FAIL 的死键断言
+      （`mkp.a40.package` / `mkp.a40.active`）与旧链换成真行为：**工作台生成 → 上传
+      （整份 release）→ 刷新那一格还在 → 客户端同步页如实说"catalog 随包走"**；
+      两档 10/10 绿。"全选待生成"超时**复现不了**（按文件头三步构建即可跑通；
+      A41 那次大概是拿没有桩的产物跑的）。客户端那半条链的覆盖在
+      `params-sync.mjs` / `presets.mjs` + 真机验收（⑧ 的清单）。
+    - `params-sync.mjs`（P3/P4）：走的老流程（参数页空态 → 去同步页获取一份 → 互跳）
+      也没了 —— 参数页现在**直接读 catalog**、同步页不再有"自动同步 / 去看参数页"。
+      重写成两页各自的现状（参数页照 catalog 画 / 同步页口径与账），两档 12/12 绿。
+  - **文档刷新**：README（现状段 + 文档地图）· `ARCHITECTURE.md` §1/§3/§4/§6/§9/§10.5 ·
+    总纲 §4 欠账 #5 收口（`mkp/` 命名）、#4 记为**半收口**（catalog 已统一登记 9 份，
+    但没有"内置"标记）。
+  - **产品规则反写**：`PRESET-PRODUCT-RULES.md` 19 节正文按**已落地行为**写齐
+    （含 §17 留一条"启动对账要不要做"待作者定）—— **待作者逐节核准**，核准记录记在文末。
+  - **schema 裁决**：`AssetKind::Image` **保留 + 登记**（复审依据写进 `presetdata/assets.rs`）。
 - **十三收尾走完，用户文件这一整套正式收口**（2026-10-02）：官方线（下载 / 状态 / 批量 /
   归档 / 可信度）与用户线（能读能列 / 能另存 / **能被应用** / **能被改并写回自己** /
   **读不出来就拦在应用·编辑门口（文件级检查，不比 SHA）** / **能改名、能删、能另存为一份
@@ -424,7 +447,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   更彻底的一条路是把它下移到共享小 crate、两边转调。
 
 - **第三圈第 2 步的布局对齐已完成**（2026-10-02）：交付根相对路径 = 客户端下载区的相对路径（`mkp/…`），两端共用 `runtime::catalog::dest_of_asset`。**下一步是 §3.5 第 3 步：Preset 成为第一个完整消费者**（发现 → 下载 → 本地文件 → 页面，再逐层加下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本）。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等那一刀做。
-- **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。
+- **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。**2026-10-02 清扫批次复审：保留 + 登记（去留已明确）** —— 确认它不是纯未使用枚举（`runtime::catalog` 的"不登记"分支与判据都在引用），也不是旧残留（剥离是改判）；删除属另案 schema 清理。理由写进 `presetdata/assets.rs` 的 `AssetKind` 头注释。
 - **下载这条链的入口**：`ipc::catalog::download_runtime_file`（一份，带 `Channel` 进度）与 `download_runtime_files`（一份清单，逐份结局）；源由 `runtime::source::current_base_url` 给出；字节在生产后走 `runtime::delivery::deliver`。
 - 前端消费新世界的样板：预设页（`usePresetData.readRelease` = catalog.files + `getDownloadedFiles`，写走 `downloadCatalogFiles` / `applyActivePreset` 后**重读底账**）；参数页（`useParams` = `getMachines` + `getParamMeta` + `getRuntimeCatalog` 的 registry 摊页签树 + `getMachineParams` 按 combo 拉值）。
 - 更新/归档：`runtime/delivery.rs` 的 `FileOnDisk` / `stale_files` / deliver 里的归档段；`runtime/release.rs` 的升级策略。

@@ -499,28 +499,6 @@ export interface ImportOutcome {
 }
 
 /**
- * **正在生效的那一套预设。全局唯一。**
- *
- * 这是 A34 这一轮纠正的一个模型错误。原来前端自己推：「当前机型 + 当前版本那个默认交付的
- * MKP 预设」—— 于是切一下机型「已应用」就换一个，等于说这台机器同时应用着 6 套配置。
- * 物理上不成立：涂胶笔同一时间只跑一套。
- *
- * 所以「已应用」不是一个可以从别的数据算出来的派生量，它是**一条独立的事实**，
- * 只有后端知道（它读的是本机那份「当前配置」）。前端一律来问。
- *
- * `null` 不是错误 —— 新装的机器就是这个状态，界面要能把「还没有应用任何预设」
- * 和「加载失败」分开说。
- */
-export interface AppliedPreset {
-  /** 正在生效的那个 asset id */
-  assetId: string
-  path: string
-  /** 它属于哪个机型 / 版本 —— 参数页要编的就是这一套 */
-  machineId: string
-  versionId: string
-}
-
-/**
  * 菜单的一条：这个文件对客户端公开到什么程度。
  *
  *   `bundled`   已分配 —— 在某个套餐里，客户端自动下
@@ -892,15 +870,6 @@ export interface PresetSource {
 }
 
 export interface MkpApi {
-  /**
-   * 取某个打印件版本对应的预设。
-   *
-   * 返回 `null` 是「没有这一份」（新增了机型版本但后端还没配预设），不是出错 ——
-   * 调用方把它当"什么都没选"处理，不要拿半份数据糊弄。
-   * 真出错（连不上、文件坏了）走 reject。
-   */
-  getPreset(variantId: string): Promise<Preset | null>
-
   /** 把校准好的三轴偏移写回配置。三轴一起写，不按页分 */
   saveOffsets(axes: Axes): Promise<void>
 
@@ -1049,9 +1018,6 @@ export interface MkpApi {
    * **还有没保存的草稿的不许删**（删了草稿就永远存不回去）。失败原话冒上来。
    */
   deleteUserPreset(path: string): Promise<void>
-
-  /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
-  getAppliedPreset(): Promise<AppliedPreset | null>
 
   /** 已经复制到切片器目录的那些（切片器文件的「生效」与 MKP 不是一回事） */
   getSlicerCopied(): Promise<string[]>

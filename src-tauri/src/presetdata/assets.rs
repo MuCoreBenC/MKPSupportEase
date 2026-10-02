@@ -56,6 +56,13 @@ pub const ASSETS_FILE: &str = "assets.toml";
 /// 而"进不进台账"是另一条判断——判据是 [`crate::runtime::catalog`] 里那句
 /// "台账里已无 image 类"，不是这里少一个枚举取值。
 ///
+/// **2026-10-02 复审结论：保留（去留已明确，别再问"要不要顺手删"）。** 三条依据：
+/// ① 它不是"纯未使用枚举" —— [`crate::runtime::catalog`] 的"不登记"分支、
+/// "台账里已无 image 类"判据、工作台机型页/资产页那两个**如实为空**的入口都在引用它；
+/// ② 也不是旧世界残留 —— 剥离是**改判**（图是界面素材，不是产品数据资源），用代码写着拒绝；
+/// ③ 要删就是一次 schema 清理（动公开契约 `Machine.image`、mock、工作台两页、判据），
+/// 属另案，不顺手做。
+///
 /// **没有 `mkpPreset`**：那一条按 doc §12.5 不建条目（见模块头）。这个 enum 是那句话的
 /// 结构化版本 —— 想登记 MKP 预设得先改这里，而改这里要过一次 review。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

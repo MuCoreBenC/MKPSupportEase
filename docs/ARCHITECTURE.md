@@ -5,15 +5,23 @@
 > **产品行为查另一份：**`docs/PRESET-PRODUCT-RULES.md`（本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 / 状态流转）。
 > git 纪律与发版流程见 `docs/GIT-WORKFLOW.md`。间距与动画原则见 `docs/DESIGN-SPACING.md`，上游 3D 资产契约见 `docs/3D-ASSET-CONTRACT.md`。
 > **版本身份与文件命名规范见本文 §10** —— 工作台、构建器、发布器、消费端共用那一套。
+>
+> **现状段 2026-10-02 刷新**（§1 / §3 / §4 / §6 / §9 / §10.5）：第一圈写的"五个 command /
+> 四页占位 / 云端未开始"已经全部过期 —— 工程纪律一条没变，变的是跑到了哪一步。
+> 落地现状的全景在 `docs/PROJECT-AUDIT.md`。
 
 ---
 
 ## 1. 这是什么
 
 MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 打测试件，外加预设管理与后处理报告。
-离线工具，不联机控制打印机。
+离线工具，不联机控制打印机（**唯一的出站网络是"检查更新 / 下载"**，见 `docs/DATA-ARCHITECTURE.md` §2 问题 7）。
 
-技术栈：Tauri 2 + React 18 + TypeScript + Vite，Rust 侧负责文件系统与将来的云端同步。
+技术栈：Tauri 2 + React 18 + TypeScript + Vite，Rust 侧负责文件系统与云端交付管道
+（Catalog / Source / Delivery 一个世界）。
+
+**两个入口同一套源码**：客户端（`index.html`）与工作台（`workbench.html`，开发工具，
+`--mode workbench` 或 `BUILD_WORKBENCH=1` 才进构建，`check:bundle` 盯着它不进客户端安装包）。
 
 ## 2. 命名分层
 
@@ -31,18 +39,16 @@ MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 
 ```text
 src/                      前端
 ├── api/                  与后端之间唯一的约定
-│   ├── contract.ts       只有类型：MkpApi 五个方法 + AppError
-│   ├── mock.ts           临时实现（浏览器里跑的那份）
-│   ├── bridge.ts         Tauri 实现：invoke 五个 command
-│   └── index.ts          运行时探测走哪一份
-├── app/                  应用本身（唯一的界面，没有"稿号"）
+│   ├── contract.ts       契约：MkpApi（约 40 个方法）+ 全部 DTO 类型 + AppError
+│   ├── mock.ts           ／ mockServer/：浏览器里跑的假后端（真机上整个不再被引用）
+│   ├── bridge.ts         Tauri 实现：把契约映射到 invoke（命名两套只在这一处翻译）
+│   └── index.ts          运行时探测走哪一份（`__TAURI_INTERNALS__`，不是构建期 DEV）
+├── app/                  客户端界面（8 页签）
 │   ├── App.tsx           根组件：页签 + 页面
-│   ├── pages/            PageHome（五步向导）/ PageCalib（校准）
-│   ├── components/       这一版界面自己的组件
-│   ├── ui/               通用控件（Btn / Badge / Modal …）
-│   ├── constants/        界面结构数据：页签、品牌 / 机型 / 版本、后处理脚本
-│   └── heroCurves.ts     大图尺寸与微移的固化曲线
-├── components/Icon.tsx   跨界面共用的图标
+│   ├── home/ presets/ params/ calib/ bbs/ pages/    真页面（数据一律经 src/api）
+│   ├── components/ ui/ constants/                   组件 / 通用控件 / 界面结构数据
+│   └── assets/           界面展示素材（品牌 logo / 机型整机图 / 测试模型合影）
+├── workbench/            工作台（开发工具；只进 workbench 构建，判据 1 盯着）
 ├── hooks/                useDensity（密度档）/ usePlatform / useWindowSize
 ├── calib/                标定板的生成产物（.generated.ts，别手改）
 └── styles/               tokens.css + global.css
@@ -52,17 +58,24 @@ src-tauri/                Rust 侧
 ├── src/obs/tracing.rs    trace id + 按天滚动日志
 ├── src/fsx/paths.rs      两层数据根 + 防穿越
 ├── src/fsx/atomic.rs     唯一的写盘出口
-├── src/ipc/mod.rs        五个 command
+├── src/runtime/          数据世界：catalog / delivery / net / source / state / release / mine / import
+├── src/ipc/              命令面：mod（校准三件）/ presets / mine / catalog / import
 ├── clippy.toml           禁用直接写盘的方法
-└── capabilities/         权限（目前只有 core:default）
+└── capabilities/         权限（core:default + dialog:allow-open 一条）
 ```
+
+**报告页 / 设置页目前是空态**（`PagePlaceholder`，明说"本版未接入"，不是白屏）——
+落地现状全景见 `docs/PROJECT-AUDIT.md`。
 
 ## 4. 两层数据根
 
 | 根 | 位置 | 放什么 | 子目录 |
 | --- | --- | --- | --- |
-| Internal | `appDataDir()` | 程序管理的：云端原件、归档、索引、日志、运行状态 | `cloud/ archive/ index/ logs/ run/` |
-| User | `documentDir()/SupportEase` | 用户自己要看要拷的：预设副本、导出、报告 | `exports/ reports/ presets-mine/` |
+| Internal | `appDataDir()` | 程序管理的：说明书（catalog）、下载原件、归档、索引、日志、运行状态 | `catalog.json · mkp/ archive/ index/ logs/ run/` |
+| User | `documentDir()/SupportEase` | 用户自己要看要拷的：预设副本、导出、报告 | `presets-mine/ exports/ reports/` |
+
+**两棵树的每一格归属与流动是总纲的事**（`docs/DATA-ARCHITECTURE.md` §1③ 是白名单）——
+给第③层新增任何子目录，**先改那份文档**，再写代码。
 
 **为什么不都放 Documents**：macOS 开了「桌面与文档」iCloud 同步后，Documents 里的文件会被驱逐成
 占位 stub —— 读出来内容不对，会把 Preset 的 SHA 失效判定变成误报。程序管理的数据不能放在
@@ -95,21 +108,23 @@ POSIX 原子）→ fsync 父目录。任何一步失败，目标文件都还是�
 
 ## 6. IPC 契约
 
-五个 command，形状定义在 `src/api/contract.ts`，Rust 侧在 `src-tauri/src/ipc/mod.rs`：
+**契约是 `src/api/contract.ts` 的 `MkpApi`（约 40 个方法），Rust 侧按域分在 `src-tauri/src/ipc/`：**
 
-| TS | Rust command | 作用 |
+| 域 | Rust 文件 | 覆盖 |
 | --- | --- | --- |
-| `getPreset(variantId)` | `get_preset` | 取某个打印件版本的预设；`null` = 没有这一份（不是出错） |
-| `saveOffsets(axes)` | `save_offsets` | 三轴偏移落盘（走 `atomic_write`） |
-| `getCalibModels()` | `get_calib_models` | 校准板清单 |
-| `openModel(modelId)` | `open_model` | 让壳去打开模型文件 |
-| `getTestModels()` | `get_test_models` | 测试模型清单 |
+| 校准三件 | `ipc/mod.rs` | `save_offsets`（原子写第一个真实调用点）/ `get_calib_models`（静态清单）/ `open_model`（只记日志，未实现下载与打开） |
+| 预设读 | `ipc/presets.rs` | 机型 / 版本 / 文件 / 菜单 / 参数元信息与取值（DTO 构建只吃 catalog） |
+| 用户线 | `ipc/mine.rs` | 列 / 读正文 / 编辑四条（草稿）/ 另存 / 写回 / 改名 / 删除 / 导入 / **在文件管理器里显示** |
+| 目录与下载 | `ipc/catalog.rs` | 运行时 catalog / 下载区与归档读 / 使用中指针 / 应用 / 数据源地址 / 检查与更新远端 |
 
 命名两套、映射只在 `bridge.ts` 一处：TS 侧 camelCase，Rust 侧 snake_case。
+**注册必须两份清单同步**（`lib.rs` 两个 `generate_handler!`，客户端 / 工作台各一份，
+两份里客户端那条一字不差）。
 
-**前端永不碰文件系统。** 所以 `capabilities/default.json` 里只有 `core:default` ——
-既不需要 `fs:default`，也不需要逐条 fs 权限。将来真要用 `plugin-fs`（比如「在 Finder 里显示」），
-在那里按命令加，并把 scope 限到两个数据根。
+**前端永不碰文件系统。** `capabilities/default.json` 里只有 `core:default` + `dialog:allow-open`
+一条（通用导入入口的"选择文件"）。**在文件管理器里显示**（第十三层）走 `tauri-plugin-opener`，
+但**只在 Rust 侧自己的命令体里调** —— 前端够不着插件命令面，所以不需要给它开 capability。
+将来若真要用 `plugin-fs`，按命令加，并把 scope 限到两个数据根。
 
 ### 走 mock 还是走 Rust
 
@@ -188,14 +203,20 @@ Chromium 的连击计数被打断，双击最大化要点得极快才触发。
   Stylelint 有一条规则专门拦这件事；
 - `overflow` 不许写成内联 style（ESLint 的 `no-restricted-syntax` 拦），否则绕过 Stylelint 检查。
 
-## 9. 本轮明确没做
+## 9. 现状：还没做的（2026-10-02 刷新）
 
-- 预设管理、参数页、设置页、报告页 —— 四个页签在，内容是占位页（`PagePlaceholder`）；
-- 标题栏窗口按钮（最小化 / 最大化 / 关闭）已接通真实 IPC（`src/app/window.ts`），
-  Windows 上走自绘撑满式 caption button（`TopTabs`），macOS 上由系统交通灯接管。
-  Snap Layouts（悬停最大化键弹 Win11 布局菜单）尚未做，需要 Rust 侧接 `WM_NCHITTEST`；
-- 云端同步、SHA 校验、归档 —— 产品规则已经定稿（见 `PRESET-PRODUCT-RULES.md`），实现未开始；
-- 撤销重做栈：不做通用 command pattern，将来在需要的地方用「编辑前快照 + 单层撤销」。
+> 第一圈这句"本轮明确没做"下面列的已全部过期（预设管理 / 云端同步 / SHA / 归档后来都做了）。
+> 逐条落地现状在 `docs/PROJECT-AUDIT.md`（四类清单），这里只留"工程侧还欠的"几句：
+
+- **报告页 / 设置页**还是空态（`PagePlaceholder`）；设置页是「备份与恢复」的下一个家；
+- **参数页的"保存"不落盘**（只并进前端内存的已保存层）；**切片器的"复制到切片器目录"
+  真机未接**（`bridge` 里 `copyToSlicer` / `downloadFiles` 两个 `notWired`，页面如实说）；
+- **`open_model` 只记日志**：测试模型的"下载 → 打开"链路缺最后一段（3mf 已经在 catalog）；
+- Snap Layouts（Windows 悬停最大化键弹 Win11 布局菜单）尚未做，需要 Rust 侧接 `WM_NCHITTEST`；
+- 撤销重做栈：不做通用 command pattern，将来在需要的地方用「编辑前快照 + 单层撤销」；
+- **首圈的 `get_preset` 死命令已于 2026-10-02 清扫批次删除**（连同假后端夹具）——
+  页面早已改走文件体系；同批清了 `getAppliedPreset`、重写了 `chain.mjs` / `params-sync.mjs`
+  两个对退役结构（老底账键 / 老"获取数据包"流）的探针。
 
 ## 10. 版本身份与文件命名规范
 
@@ -246,7 +267,7 @@ Chromium 的连击计数被打断，双击最大化要点得极快才触发。
 | 套 | 样本 | 曾经在哪 | 现状 |
 | --- | --- | --- | --- |
 | A 产物命名 | `A1-fastv3.3.toml` | 入库产物目录、`BUILTIN_PRESETS` | 标准 |
-| B 云端历史命名 | `A1F_260628.toml` | 对照基线目录、机型定义的 `presetFile`、IR 夹具 | 已从**基线夹具**消失（b05 Task 5）；`presetFile` 待删（G-2）；旧仓与用户目录里仍是这些名字 |
+| B 云端历史命名 | `A1F_260628.toml` | 对照基线目录、机型定义的 `presetFile`、IR 夹具 | 已从**基线夹具**消失（b05 Task 5）；**`presetFile` 已从代码删除（G-2 已办，2026-10-02 核对全仓无命中）**；旧仓与用户目录里仍是这些名字 |
 | C 消费端期望 | `A1-fastv3.3.toml` | 发布路径（多做一次 `to_lowercase()`） | 标准，且与 A **合并成同一份实现**（b05 Task 2） |
 
 A 与 C 形状相同但曾是两份独立实现，B 与 C 对不上——**后果不是报错，是消费端找不到文件**。

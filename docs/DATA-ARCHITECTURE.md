@@ -312,8 +312,8 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
 | 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图不作为该类收口，而是改判归属、剥离台账**（第三刀，见下） |
 | 3b | ~~`public/assets/printers/` 的整机图：登记进 catalog 还是留在包外，一直悬着~~ | ~~归属未定~~ | **已收口 2026-10-01（第三圈第三刀）**：判定它不是产品数据资源而是**界面展示素材**（用户不下载、不更新、不管理它），于是**从资产台账剥离**：文件搬去 `src/app/assets/printers/`（vite 资源管线随程序本体走），`presets/assets.toml` 的 4 条 `image` 与机型文件的 `image` 引用清掉（19 → 15 条定义）。判据从"别忘了整机图"换向为**「资产台账里已无 image 类」**。遗留：schema 层的 `AssetKind::Image` 与机型 `image` 字段保留而值为空（要不要连 schema 一起收掉，另裁） |
-| 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | catalog 统一登记所有预设，内置的标"内置" |
-| 5 | 下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/` | 命名欠账，职责是同一个（下载原件区） | 以本文 `mkp/` 为准收口；`PRESET-PRODUCT-RULES.md` 录入正文时同步 |
+| 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | **半收口（2026-10-02 核对）**：catalog 已统一登记全部 9 份预设（`files[]`，`embedded_matches_rebuild` 判据盯着），但条目上**没有"内置"这一标记**、`BUILTIN_PRESETS` 作为编译期常量仍独立可达（判据 `builtin_presets_match_dir` 锚它）。要勾这一条 = 给 `CatalogFile` 加"内置"标记并让判据改锚 catalog；登记为**小口子**，不阻塞任何业务 |
+| 5 | ~~下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/`~~ | ~~命名欠账~~ | **已收口 2026-10-02**：产品规则正文按本文 `mkp/` 重写（`PRESET-PRODUCT-RULES.md` 的"反写"版，见该文件头），全仓不再有 `cloud/` 这个下载区叫法 |
 | 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |
 
 ## 5. 判据：怎么知道没人违反

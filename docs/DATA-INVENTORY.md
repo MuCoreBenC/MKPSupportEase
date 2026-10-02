@@ -518,4 +518,24 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   读死键（`mkp.a40.package` / `active`，C4 已退役）与 `get_preset` 死命令
   （首圈硬编码表 `preset_of`，前端早已不调）—— 都在那份文档 §2⑩。
 
+- 2026-10-02：**⑩ 清扫批次（作者点名的"先清扫小刀"，只清残留不动功能）**：
+  1. **死 API 清除**：`get_preset`（首圈硬编码表 `preset_of`；Rust 命令 + 两份注册清单 +
+     假后端夹具 + 测试）与 `getAppliedPreset`（契约 + 假后端演示集合 + `notWired` +
+     `AppliedPreset` 类型）—— 首页/校准页早已改走文件体系，只有测试与注册清单还在引用。
+     真机 `notWired` 剩 `copyToSlicer` / `downloadFiles` 两条（**有消费者的未接**，不是残留）。
+  2. **两个探针重写（同场病）**：`chain.mjs` —— 客户端那半（同步→下载→应用）在浏览器里
+     **结构性走不通**（C4 底账进 Internal 根 + 真数据源），恒 FAIL 的死键断言
+     （`mkp.a40.package`/`active`）换成真行为（工作台生成→上传→刷新还在；同步页如实说
+     catalog 随包走），两档 10/10 绿；"全选待生成"超时复现不了（按文件头三步构建即可）。
+     `params-sync.mjs` —— 老流程（参数页空态 → 去同步页获取一份 → 互跳）也没了，
+     重写成两页现状（参数页照 catalog 画 / 同步页口径与账），两档 12/12 绿。
+     客户端那半条链的覆盖在 `presets.mjs` / `home-flow.mjs` / `tabs.mjs` + 真机验收。
+  3. **文档刷新**：README / `ARCHITECTURE.md`（§1·§3·§4·§6·§9·§10.5）/ 本文件的 R9 口径；
+     总纲 §4 **#5 收口**（`mkp/` 命名）、**#4 记为半收口**（catalog 已统一登记 9 份、
+     `embedded_matches_rebuild` 盯着；只差"内置"标记）。
+  4. **产品规则反写**：`PRESET-PRODUCT-RULES.md` 19 节正文按已落地行为写齐
+     （每节标依据；§17 留一条"启动对账要不要做"待作者定）—— **待作者逐节核准**。
+  5. **schema 裁决**：`presetdata::AssetKind::Image` **保留 + 登记**（形态分类、不是残留；
+     删除属另案 schema 清理）—— 复审依据写进 `assets.rs` 头注释。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

@@ -30,7 +30,6 @@ export { catalogRegistry, paramMeta, resolveParams } from './params'
 export { allPresetFiles } from './resources'
 export { menuEntries } from './menu'
 export {
-  appliedPreset,
   copyToSlicerIn,
   localFileIds,
   slicerCopied,

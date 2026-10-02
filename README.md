@@ -1,10 +1,14 @@
 # SupportEase
 
-MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 打测试件。离线工具，不联机控制打印机。
+MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 打测试件。离线工具，不联机控制打印机
+（唯一的出站网络是"检查更新 / 下载"，见数据总纲）。
 
-Tauri 2 + React 18 + TypeScript。目前是**骨架**：首页向导与校准页是完整的，
-预设 / 参数 / 报告 / 设置四页是占位页；Rust 侧的五个 command 返回硬编码数据，
-唯一真的落盘的是三轴偏移（走原子写）。
+Tauri 2 + React 18 + TypeScript。**预设这一条生命周期已经收口**：官方线（下载 / 状态 /
+批量 / 归档 / 可信度）与用户线（能读能列 / 能应用 / 能改并写回 / 改名 / 删除 / 另存 /
+导入 / 在 Finder 中显示）都通了，导入入口与下载管道走同一个数据世界（Catalog + Source +
+Delivery，底账全在 Internal 根，localStorage 不再住任何底账）。首页向导、校准页、
+参数页、同步页、BBS 查看器都是真数据流；**报告页 / 设置页还是空态**（`PagePlaceholder`，
+明说"本版未接入"）。落地现状全景（含还没做的）见 [`docs/PROJECT-AUDIT.md`](docs/PROJECT-AUDIT.md)。
 
 ## 跑起来
 
@@ -26,12 +30,16 @@ npm run release      # 发版：校验 → 开 PR → 等 CI → squash 合并 �
 cd src-tauri && cargo test && cargo clippy -- -D warnings
 ```
 
-## 三份文档
+## 文档地图
 
 | 文档 | 管什么 |
 | --- | --- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 工程约束：目录结构、两层数据根、IPC 契约、错误与 trace、原子写、权限边界 |
+| [`docs/DATA-ARCHITECTURE.md`](docs/DATA-ARCHITECTURE.md) | **根规则**：四层世界 + 四条铁律 + 十问 + 准入问句（每个文件属于哪一层、谁是唯一主人） |
 | [`docs/PRESET-PRODUCT-RULES.md`](docs/PRESET-PRODUCT-RULES.md) | 产品规则：本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 / 状态流转 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 工程约束：目录结构、两层数据根、IPC 契约、错误与 trace、原子写、权限边界 |
+| [`docs/PROJECT-AUDIT.md`](docs/PROJECT-AUDIT.md) | **落地现状总盘点**：已完成 / 半完成 / 未开始 / 已废弃 四类（接手前先读） |
+| [`docs/DATA-INVENTORY.md`](docs/DATA-INVENTORY.md) | 对账单：现有代码与文件按总纲逐件归位 + 收口进展日志 |
+| [`HANDOFF.md`](HANDOFF.md) | 交接：现在在哪、接下来去哪、纪律与判据清单 |
 | [`docs/GIT-WORKFLOW.md`](docs/GIT-WORKFLOW.md) | 八道本地闸 + 服务端 ruleset + 发版流程 |
 
 另外两份是从试验场原样搬来的：[`docs/DESIGN-SPACING.md`](docs/DESIGN-SPACING.md)（间距与动画原则）、

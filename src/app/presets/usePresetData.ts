@@ -135,10 +135,11 @@ export interface PresetData {
    */
   mine: UserPresetFile[]
   /**
-   * 正在使用的**唯一那一条**：从新世界底账（`run/active-preset.json`）读出来的，
+   * 正在使用的**唯一那一条**：从底账（`run/active-preset.json`）读出来的，
    * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
    *
-   * 官方交付行应用后写着的都是它 —— 假后端的 `getAppliedPreset()` 界面不再读。
+   * 官方交付行应用后写着的都是它 —— 这是「使用中」的唯一来源
+   * （旧契约 `getAppliedPreset` 与假后端那份演示值 2026-10-02 清扫时已删）。
    */
   active: ActivePreset | null
   /**

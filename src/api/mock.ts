@@ -4,13 +4,11 @@ import type {
   ActivePreset,
   CalibModel,
   MkpApi,
-  Preset,
   UserPresetFile,
 } from './contract'
 import {
   allMachines,
   allPresetFiles,
-  appliedPreset,
   catalogRegistry,
   copyToSlicerIn,
   localFileIds,
@@ -30,7 +28,7 @@ import {
  *
  * 数据分两处，别混：
  *
- * - **本文件里**：校准页那三个方法（预设索引、校准板清单、三轴偏移）用的那几份手写常量。
+ * - **本文件里**：校准页那几个方法（校准板清单、三轴偏移）用的那几份手写常量。
  * - **`src/api/mockServer/`**：预设页 / 参数页 / 同步页要读的那十二个方法，
  *   由 `data/*.json` 的六份上游快照解析而来。那一整个目录是搬过来的假后端，
  *   真机上由 Rust 侧接管，`mockServer/` 整个不再被引用。
@@ -40,42 +38,12 @@ import {
  * 保留 async 只为形状一致：调用方必须按"这是个 Promise"来写，将来换成 IPC 才不用改。
  */
 
-/**
- * 按「打印件版本」索引的预设 —— `getPreset` 的夹具。
- *
- * **这一份是 v023 时代留下的**：那三份全是 A1 mini 的，键（`std` / `fast-old` /
- * `fast-260628`）来自已被替换掉的旧客户端常量表。每一份原来还带一个 `model` 字段，
- * 是给旧校准页反填「机型 + 版本」两级用的 —— 那页换掉之后没有消费者了，已经拿掉。
- *
- * 客户端换成 A40 那一套之后，**页面不再调 `getPreset` 了** —— 它们走文件体系
- * （`getMachines` / `getVersionFiles` / `getPresetFiles`），见 `src/app/calib/usePreset.ts`
- * 文件头那段说明。契约里的 `getPreset` 留着（`bridge` 那头对应 Rust 的 `get_preset`），
- * 所以这里继续给出一个像样的夹具，不删。
- *
- * 顺带记一笔：这个文件里原来还导出一份 `presetCatalog`，是给旧页面直接 import 的
- * （"假数据从 api 层漏进页面"的唯一一处）。旧页面删掉之后它就没有消费者了，已随 P1c 收尾删除 ——
- * 现在假数据的出口只剩 `mockApi` 这一张契约表。
+/*
+ * **v023 那份「按打印件版本索引的预设」夹具（`presetIndex`）随 `getPreset` 一起删了**
+ * （2026-10-02 清扫）：三份全是 A1 mini 的、键来自已被替换掉的旧常量表；客户端换成
+ * 文件体系之后页面就不再调它（见 `src/app/calib/usePreset.ts` 文件头），只剩这条死契约
+ * 在引用。这里保留一笔记录，不再留夹具 —— 留一份没人读的假数据，下一次盘点又要猜它能不能删。
  */
-const presetIndex: Record<string, Preset> = {
-  std: {
-    name: 'A1M.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1M.toml',
-    axes: { x: -0.6, y: 22.4, z: 3.8 },
-    speed: 60,
-  },
-  'fast-old': {
-    name: 'A1MF.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml',
-    axes: { x: -0.8, y: 22.8, z: 3.9 },
-    speed: 65,
-  },
-  'fast-260628': {
-    name: 'A1MF_260628.toml',
-    path: 'C:\\Users\\WZY\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF_260628.toml',
-    axes: { x: -0.9, y: 23, z: 4 },
-    speed: 70,
-  },
-}
 
 /**
  * 校准板清单。
@@ -248,16 +216,10 @@ const MOCK_DOWNLOADED = ['A1-standard.toml']
 const MOCK_STALE = ['A1-fast.toml', 'A1mini-standard.toml']
 
 export const mockApi: MkpApi = {
-  async getPreset(variantId) {
-    const row = presetIndex[variantId]
-    if (!row) return null
-    return { name: row.name, path: row.path, axes: row.axes, speed: row.speed }
-  },
-
   /*
-   * 只记一条日志，不回写 presetIndex。
+   * 只记一条日志，不假装持久化。
    *
-   * 想过在内存里留一份"已保存的偏移"让 getPreset 读回来，但那一份没有归属 ——
+   * 想过在内存里留一份"已保存的偏移"让界面读回来，但那一份没有归属 ——
    * 契约里 saveOffsets 不带 variantId（写的是当前机器的配置，不是某份预设文件），
    * 于是在 A 预设上保存、切到 B 会看见 A 的数。宁可这一轮不假装持久化：
    * 界面自己有 saved 状态，看得见"存下去了"，真正的落盘等 Rust 侧。
@@ -611,11 +573,6 @@ export const mockApi: MkpApi = {
     }
     mockMine.splice(i, 1)
     mockMineText.delete(path)
-  },
-
-  async getAppliedPreset() {
-    /* null = 一套都还没应用。这是合法状态，不是错误 */
-    return appliedPreset()
   },
 
   async getSlicerCopied() {

@@ -121,7 +121,6 @@ Tauri 的 API 形状决定的，不是这里想省事；把它放在相邻的两
 #[cfg(not(feature = "workbench"))]
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
-        ipc::get_preset,
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
@@ -177,7 +176,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     use workbench::app;
     b.invoke_handler(tauri::generate_handler![
-        ipc::get_preset,
         ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
