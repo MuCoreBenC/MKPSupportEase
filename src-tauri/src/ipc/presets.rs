@@ -593,6 +593,16 @@ pub struct ChoiceDto {
 #[serde(rename_all = "camelCase")]
 pub struct RecipeParamDto {
     pub key: String,
+    /// 这个参数在 MKP 预设 TOML 里对应的**字段名**（`offset_x` / `speed_limit`…）。
+    ///
+    /// 与 [`ParamMetaDto::toml_key`] 是同一个值、同一处出处（`ParamDef.toml_key`），
+    /// 两条通道都带上是因为**用的地方不同**：参数页拿 `getMachineParams` 的这份去改值
+    /// （字段级 patch 要它），而元信息那条通道服务于别的界面。多带一个字段比让前端
+    /// 再从 `ParamMeta` 里 join 一次便宜，也不会产生第二个真相 —— 值是同一份。
+    ///
+    /// 2026-10-02 起它**一一对应**一个 TOML 字段（`offset = { x, y, z }` 已拆成
+    /// `offset_x/y/z`），不再有"多条参数共享一个 tomlKey"那种形状。
+    pub toml_key: String,
     pub label: String,
     pub desc: String,
     pub group: String,
@@ -675,6 +685,7 @@ fn machine_params_dto(
         let is_variant = eff.origin == crate::presetdata::resolve::Origin::Version;
         out.push(RecipeParamDto {
             key: p.key.clone(),
+            toml_key: p.toml_key.clone(),
             label: p.label.clone(),
             desc: p.desc.clone(),
             group: catalog
@@ -860,6 +871,16 @@ mod tests {
             .find(|p| p.key == "toolhead.offset.x")
             .expect("偏移 X 在配方里");
         assert_eq!(x.group, "空间偏移", "分组名来自 [[tabs]] 的元数据");
+        /*
+         * 配方这一条通道也要带 `toml_key`（字段级 patch 用它在草稿 TOML 里定位）——
+         * 与 `param_meta_dto` 那份**同值同源**（都是 `ParamDef.toml_key`）。
+         * 2026-10-02：`offset = { x, y, z }` 拆开后，它一一对应一个 TOML 字段。
+         */
+        assert_eq!(x.toml_key, "offset_x");
+        assert_eq!(
+            x.toml_key, offset_x.toml_key,
+            "配方通道与元信息通道的 toml_key 必须是同一个值（不是两份真相）"
+        );
         // 真数据里 A1:FASTV3.3 把这一项钉在 0.1（版本层）——三层取值要读出覆盖
         assert_eq!(x.value, "0.1");
         assert_eq!(x.origin, "variant");
