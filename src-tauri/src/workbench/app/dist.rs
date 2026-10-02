@@ -79,10 +79,10 @@ use crate::workbench::domain::BuildState;
 use crate::workbench::presets::{Asset, AssetKind};
 
 /// 交付根下的**产品资源区**：与客户端下载区 `mkp/` 同名同形（见模块头）。
-/// 交付集合里每一个文件都落在它下面，相对路径 = catalog 的 `files[].path`
-pub const MKP_DIR: &str = "mkp";
-/// MKP 产物在交付根里的子目录（对应客户端 `kind_dir(mkp_preset)` 那一格）
-pub const MKP_PRESETS_DIR: &str = "mkp/presets";
+/// 交付集合里每一个文件都落在它下面，相对路径 = catalog 的 `files[].path`。
+/// 常量本体住在 [`crate::workbench::paths`] —— 读侧（生成状态兜底）也要用，
+/// 这里 re-export 保持原引用不断。
+pub use crate::workbench::paths::{MKP_DIR, MKP_PRESETS_DIR};
 /// 目录类 JSON 的子目录
 pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
@@ -197,7 +197,8 @@ pub const CONTENT_FILES: [&str; 3] = [
 
 /* ---------- 三份目录 JSON 的形状 ---------- */
 
-/// 12.3：套餐。字段就是 `bundles.toml` 那五个，一个不多 ——
+/// 12.3：套餐。字段就是 `bundles.toml` 那五个 + `presets`（2026-10-03：套餐挂
+/// MKP 预设走 uid 直引，**文件可以还没生成**）——
 /// 消费端按 `assetRefs` join [`assets_index_json`] 的 id
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,6 +207,7 @@ struct BundleEntry<'a> {
     display: &'a str,
     machine_id: &'a str,
     asset_refs: &'a [String],
+    presets: &'a [String],
     updated_at: &'a Option<String>,
 }
 
@@ -346,7 +348,7 @@ pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
     serde_json::json!({ "brands": brands, "machines": machines })
 }
 
-/// 12.3：套餐目录。`bundles.toml` 的直出 —— 那边五个字段就是契约
+/// 12.3：套餐目录。`bundles.toml` 的直出 —— 那边五个字段 + `presets` 就是契约
 pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
     let bundles: Vec<BundleEntry<'_>> = book
         .presets
@@ -358,6 +360,7 @@ pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
             display: &b.display,
             machine_id: &b.machine_id,
             asset_refs: &b.asset_refs,
+            presets: &b.presets,
             updated_at: &b.updated_at,
         })
         .collect();
@@ -739,12 +742,8 @@ pub fn publish_into(
     }
 
     // 清单、目录与 Bootstrap 收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
-    let new_catalog_text = new_catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
-    crate::fsx::atomic::atomic_write(
-        &dist_root.join(NEW_CATALOG_FILE),
-        new_catalog_text.as_bytes(),
-    )?;
+    write_catalog_json(dist_root, book)?;
     /* Bootstrap：客户端"官方内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
     crate::fsx::atomic::atomic_write_json(&dist_root.join(SOURCE_FILE), &bootstrap_json())?;
 
@@ -753,6 +752,100 @@ pub fn publish_into(
         assets_copied: content.assets_copied,
         presets: presets_count,
     })
+}
+
+/// **只重算 catalog.json**（不动 manifest / source）—— [`publish_into`] 的目录那一半。
+///
+/// 为什么生成也要它（作者 2026-10-03）：`wb_generate` 直接把新产物写进交付根，
+/// 清单要是不跟上，dist 就处于「文件是新的、目录记的还是旧的」—— 客户端按目录
+/// 登记的字节做下载校验，必挂（真机踩了两回：「下载失败：响应比目录登记的大」）。
+/// 生成收尾把目录重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 /
+/// 渠道，发布台账）仍归发布写 —— 生成不替发布定稿。
+///
+/// 目录里的资产条目**按源字节算 SHA**（[`Catalog::build_from_presets_lenient`] 的
+/// 口径）—— 所以调用方要先把引用资产补进交付根（`write_content`），否则就是
+/// 「目录登记了，文件不在」。
+pub fn write_catalog_json(dist_root: &Path, book: &Book<'_>) -> Result<usize, AppError> {
+    let catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
+        book.presets,
+        &dist_root.join(MKP_PRESETS_DIR),
+    );
+    let count = catalog.files.len();
+    let text = catalog.to_pretty_json()?;
+    crate::fsx::atomic::atomic_write(&dist_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
+    Ok(count)
+}
+
+/// **交付目录的自查**（预检的「清单 ↔ 文件」一档）：拿**交付集合** —— 客户端真会
+/// 去取的那批（[`deliverable_set`]，引用可达的） —— 在交付根里逐份对：文件在不在、
+/// 字节与目录登记对不对。
+///
+/// **只查交付集合，不查 catalog 的全部登记**：目录的登记面**刻意比交付面宽**
+/// （让客户端认识所有资产；没被版本 / 套餐引用的资产「登记但不发」—— 例如没进
+/// 套餐的切片器预设、没被版本引用的 3mf）。那是设计，不是不一致（作者 2026-10-03：
+/// 「我看了文件夹，确实不在了，我从来没有主动删过」—— 它们从没进过 dist）。
+/// 集合外的登记条目一律跳过。
+///
+/// **只读**；修复动作是「在工作台生成一次（资产补齐 + 目录重算）」或重跑发布。
+pub fn audit_catalog(dist_root: &Path, book: &Book<'_>) -> Result<(), String> {
+    let Ok(bytes) = std::fs::read(dist_root.join(NEW_CATALOG_FILE)) else {
+        return Ok(()); // 目录还没立起来（没发布过也没生成过）—— 没什么可对的
+    };
+    let catalog: crate::runtime::catalog::Catalog = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("catalog.json 读不出来（{e}）—— 客户端按它做下载校验，坏了要重算"))?;
+    let registered: std::collections::BTreeMap<&str, &crate::runtime::catalog::CatalogFile> =
+        catalog.files.iter().map(|f| (f.path.as_str(), f)).collect();
+    // 自产：content 三份 + catalog.json（生成与发布都会写）—— 只查在不在。
+    // manifest.json / source.json 是**发布台账**，没发布过就没有 —— 不算不一致
+    let self_made: std::collections::BTreeSet<&str> = CONTENT_FILES
+        .iter()
+        .copied()
+        .chain([NEW_CATALOG_FILE])
+        .collect();
+    let publish_only: std::collections::BTreeSet<&str> =
+        [MANIFEST_FILE, SOURCE_FILE].into_iter().collect();
+
+    let mut bad: Vec<String> = Vec::new();
+    for rel in deliverable_set(book) {
+        if publish_only.contains(rel.as_str()) {
+            continue;
+        }
+        if self_made.contains(rel.as_str()) {
+            if !dist_root.join(&rel).exists() {
+                bad.push(format!("{rel}（该发的自产文件不在）"));
+            }
+            continue;
+        }
+        let Some(f) = registered.get(rel.as_str()) else {
+            bad.push(format!("{rel}（要交付，目录却没登记）"));
+            continue;
+        };
+        match std::fs::read(dist_root.join(&rel)) {
+            // 与上面 f 同一份 path（集合元素就是目录里的 path）
+            Err(_) => bad.push(format!("{}（要交付，文件不在）", f.path)),
+            Ok(b) => {
+                if b.len() as u64 != f.size {
+                    bad.push(format!(
+                        "{}（目录记 {} 字节，实际 {} 字节）",
+                        f.path,
+                        f.size,
+                        b.len()
+                    ));
+                } else if sha256_of(&b) != f.sha256 {
+                    bad.push(format!("{}（大小相同，字节不同）", f.path));
+                }
+            }
+        }
+    }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} 份与目录登记不一致：{}",
+            bad.len(),
+            bad.join("；")
+        ))
+    }
 }
 
 fn sha256_of(bytes: &[u8]) -> String {
@@ -992,6 +1085,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 交付自查：**只查交付集合** —— 目录登记面比交付面宽是**设计**。
+    ///
+    /// 作者 2026-10-03 的困惑：下面说「有、没进套餐的切片器预设」，上面说
+    /// 「目录登记了，文件不在」—— 那是同一批文件的两个层面（源里有 / 交付面上没有），
+    /// 它们**从发布那次起就没进过 dist**，不是被谁删的。自查不该报它们，
+    /// 只报「要交付的那批」对不上。
+    #[test]
+    fn audit_only_checks_the_delivery_set() {
+        let mut f = Fixture::load();
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        f.presets.set_asset_root(asset_root.path());
+        let book = Book::new(&f.presets, &c, &d);
+
+        let dist = tempfile::tempdir().unwrap();
+        write_content(dist.path(), asset_root.path(), &book).expect("资产落盘");
+        // 产物落点直接用交付集合给的名字（与 wb_generate 同一套命名）
+        for rel in deliverable_set(&book)
+            .iter()
+            .filter(|p| p.starts_with("mkp/presets/"))
+        {
+            crate::fsx::atomic::atomic_write(
+                &dist.path().join(rel),
+                format!("# preset {rel}").as_bytes(),
+            )
+            .unwrap();
+        }
+        write_catalog_json(dist.path(), &book).expect("目录重算");
+
+        // 交付集合内都对得上 → 过（目录里还登记着"登记但不发"的那些，跳过）
+        assert!(audit_catalog(dist.path(), &book).is_ok());
+
+        // 拖一份**交付集合内**的字节 → 抓到，且说得出是哪一份
+        let rel = deliverable_set(&book)
+            .into_iter()
+            .find(|p| p.starts_with("mkp/bbs/"))
+            .expect("夹具有一条 BBS 在交付集合里");
+        crate::fsx::atomic::atomic_write(&dist.path().join(&rel), "# 被动过".as_bytes()).unwrap();
+        let err = audit_catalog(dist.path(), &book).unwrap_err();
+        assert!(err.contains(&rel) && err.contains("目录记"), "{}", err);
     }
 
     /* ---------- 发布（b05 Task 13） ---------- */

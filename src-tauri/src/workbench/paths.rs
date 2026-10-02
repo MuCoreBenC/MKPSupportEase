@@ -26,7 +26,12 @@ const WORKBENCH_DIR: &str = "workbench";
 const PRESETS_DIR: &str = "presets";
 /// 交付产物的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/dist/*`：
 /// 源与产物各占一层，一眼分得清哪个是手写的。
-const DIST_SUBDIR: &str = "dist";
+pub(crate) const DIST_SUBDIR: &str = "dist";
+/// 交付根下的**产品资源区**：与客户端下载区 `mkp/` 同名同形（见 `app::dist` 模块头）。
+/// 住在 paths 是因为**读侧也要用**（生成状态兜底要 stat 磁盘上的产物），不能只让写侧认得。
+pub const MKP_DIR: &str = "mkp";
+/// MKP 产物在交付根里的子目录（对应客户端 `kind_dir(mkp_preset)` 那一格）
+pub const MKP_PRESETS_DIR: &str = "mkp/presets";
 /// 资产根的名字（`public/` 下）。见 [`assets_root`]
 const ASSET_DIR: &str = "assets";
 
@@ -58,11 +63,17 @@ pub fn workbench_root() -> Result<PathBuf, AppError> {
 
 /// 发布目录：`<repo>/presets/dist`。发布动作才会往里写，读状态时不需要它存在
 pub fn dist_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join(PRESETS_DIR).join(DIST_SUBDIR);
+    let root = dist_root_path();
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出发布目录：{}", root.display())).with_detail(e.to_string())
     })?;
     Ok(root)
+}
+
+/// 交付根的**只读**定位（不建目录）：读状态用 —— 只有生成 / 发布才需要它存在。
+/// 路径与 [`dist_root`] 同一处算出，不许第二处自拼。
+pub fn dist_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR).join(DIST_SUBDIR)
 }
 
 /// 把相对路径解析到开发源数据根内，越界一律 `PERMISSION_DENIED`

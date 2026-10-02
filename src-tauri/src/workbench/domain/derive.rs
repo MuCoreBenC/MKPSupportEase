@@ -314,6 +314,14 @@ impl<'a> Book<'a> {
             return BuildState::NoResources;
         }
         let Some(rec) = self.built.get(uid) else {
+            // 生成记录里没有这一版 —— 但磁盘上可能躺着以前生成的产物
+            //（记录丢了：快照回退 / 换机器 / 清过 store）。这时候说「未生成」
+            // 是在撒谎：客户端现在就能下载到那份旧的。归成 Stale ——
+            // 有旧的，且至少对不上「现在会算出来的这份」，该重新生成。
+            // （真机踩过：预演说 9 份全是「修改」，版本行却全说「未生成」。）
+            if self.product_on_disk(uid) {
+                return BuildState::Stale;
+            }
             return BuildState::NeverBuilt;
         };
         match self.version_layers(uid) {
@@ -351,6 +359,22 @@ impl<'a> Book<'a> {
 
     pub fn last_build(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.stamp.as_str())
+    }
+
+    /// 磁盘的交付根里有没有这一版的产物文件（只 stat，不读内容、不算哈希）。
+    ///
+    /// 路径与生成 / 发布写盘同源（`paths` 的 `DIST_SUBDIR` + `MKP_PRESETS_DIR`，
+    /// 根用 `presets.root()` —— 与本 `Book` 读的数据同一棵树），不许第二处自拼。
+    fn product_on_disk(&self, uid: &str) -> bool {
+        let Some(v) = self.version(uid) else {
+            return false;
+        };
+        self.presets
+            .root()
+            .join(crate::workbench::paths::DIST_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&v.mkp_file)
+            .exists()
     }
 
     /* ---------- 视图 ---------- */
@@ -1795,6 +1819,44 @@ mod tests {
             }],
         )
         .unwrap();
+        assert_eq!(
+            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            BuildState::Stale
+        );
+    }
+
+    /// 生成记录丢了而磁盘上产物还在：说「待重新生成」，不说「未生成」。
+    ///
+    /// `built` 是"我们记的账"，磁盘是"真发生的事" —— 账丢了（快照回退 / 换机器 /
+    /// 清过 store）而产物还在时，树上说「未生成」、预演却说「修改」，两个事实源
+    /// 打架（作者真机踩过）。兜底：stat 一下交付根里的产物文件。
+    #[test]
+    fn build_state_falls_back_to_the_disk_when_the_record_is_gone() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+
+        // 没记录、磁盘上也没有 → 未生成
+        assert_eq!(
+            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            BuildState::NeverBuilt
+        );
+
+        // 磁盘上摆一份旧产物（与生成写盘同形：presets 根 + dist + mkp/presets）
+        let mkp_file = Book::new(&f.presets, &c, &d)
+            .version("A1/STANDARD")
+            .expect("fixture 里有 A1/STANDARD")
+            .mkp_file
+            .clone();
+        let target = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DIST_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp_file);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&target, "# 以前生成的旧产物\n".as_bytes()).unwrap();
+
         assert_eq!(
             Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Stale

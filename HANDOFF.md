@@ -723,6 +723,103 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        `workbench-build.mjs` 的生成前确认四断言（点生成先弹框 / 确认前不写盘 / 确认后换结果页 / 名单才跟上）。
      - **口径**：预演**一个字节都不写**（`DiffLines` 拿真文本比，不用 `same_payload` 的"跳过
        `release_time`"等价 —— 那是判"要不要重写"的口径，不是给人看 diff 的口径）。
+     - **增量（同日晚，作者看着确认框点名两处）**：
+       · **「完整 / 对比」切换**：标题行右侧多一个两段切换（`Modal` 新增 `headerExtra`
+         工具位 —— 各处框都能往标题行空白里放小切换了），**默认「完整」** = 选中那份的
+         **新文件全文**（丢弃 `removed`、按新行号排回，无红绿底）；切「对比」才是原来的
+         行级 diff。作者原话「就看完整的不看对比的」。
+       · **行号口径**：后端 `removed` 行记**旧文件**行号、其余记**新文件**行号，以前混排在
+         同一列（39、40 然后跳 41、42，作者看不懂）—— 现在 `removed` 行号槽留空
+         （「−」符已说明它是删的），一列只剩「新文件第几行」一套语义。**后端没动**。
+       · **模态框滚动穿透**：滚到框内滚动容器的头、或鼠标落在遮罩空白处，会滚到背后页面
+         —— `Modal` 的遮罩（补 `overflow: hidden` 让它成为滚动链最后一环；代价：框贴到
+         遮罩边时投影被裁一点）与 `.body`、确认框的 `.list`/`.detail` 全部
+         `overscroll-behavior: contain`。修在 `Modal` 一处，二十几处框都受益。
+       · 探针新增三断言：详情默认「完整」/ 切「对比」见行级 diff / 切回「完整」见全文。
+    - **增量之二（同日再晚，作者追着框点名「还是滚动不了」）**：
+      · **滚不动的真因在 `.panes` 自己**：它是 grid + `max-height` —— grid 的 auto 行在
+        max-height 约束下**仍按内容高算**，超高部分被 `overflow: hidden` 裁掉、栏内
+        永远不出滚动条（折叠视图内容矮没触发；完整视图一展开必现）。**改成 flex**：
+        容器 max-height 约束下栏被压进容器高，栏自己出滚动条。实测（playwright 注
+        120 行）：`detail scroll=2578 / client=410`，滚轮后 `scrollTop 0→400→2168` 到底。
+      · **footer 按钮统一**：`GenerateDiffModal` 自养的那套圆角按钮是全工作台唯一的
+        例外（其他框全用 `c14.module.css` 的矩形标准按钮）—— 弃掉自养套件，改用
+        `c.btn` / `c.btnPrimary` / `c.grow`。作者：「右下角的按钮都长得一样、位置
+        一样，是矩形」。**工作台的统一模态框 = `ModalC14`（外壳 `.shellBody` 宿主 +
+        `components/modal`），这一轮没有第二套，标题行还多了 `headerExtra` 工具位。**
+      · **「未生成」判定补了磁盘兜底**（机型与版本页版本行全说「未生成」、预演却说
+        9 份全是「修改」—— 两个事实源打架）：`build_state` 在 `built` 表没记录时
+        **stat 一下交付根的产物文件**（`presets.root()/dist/mkp/presets/<产物名>`），
+        有 → `Stale`（待重新生成 = 有旧的），没有 → 照旧 `NeverBuilt`。路径源收进
+        `paths`（`dist_root_path()` 只读版 + `MKP_DIR`/`MKP_PRESETS_DIR` 从
+        `app::dist` 挪到 `paths`，`app::dist` re-export），**读侧不许第二处自拼**。
+        判据 `build_state_falls_back_to_the_disk_when_the_record_is_gone`。
+        **真机要重启工作台才生效**（Rust 侧改动）。
+    - **增量之三（同日深夜，作者看着 diff 截图点名）**：
+      · **对比视图不省略**：作者改了口径 ——「对比的不要省略吧，还是就像这种一样正常的」
+        （指的是编辑器里那种整份摊开的 diff）。行内「… N 行未变 …」折叠删掉，所有行
+        平铺（未变的也在、不带行号符号），对比与完整的差别只剩红绿底。
+        探针断言文案跟着改（「整份摊开、不省略」）。
+      · **检查卡补「旧版待重新生成」提示**：作者问「有旧版待生成新的的时候，为什么
+        左侧检查里没有提示」—— 确实没有：`issues::collect` 只查数据矛盾/空/套餐孤儿，
+        不看产物新旧。`delivery` 里补一条**汇总提示**（`build.stale_versions`，提示档
+        —— 旧产物客户端还能下载到，不是要填的空；stale 可能一连十几个版本，逐版一条
+        会淹掉检查卡）：「有 N 个版本的产物是旧的」+ 列 uid，去处理落生成页。
+        判据 `stale_versions_show_up_as_a_hint`（跟得上时没有这条 / 改配方后有且是提示档）。
+        **Rust 侧，真机要重启工作台生效。**
+    - **增量之四（2026-10-03，作者对着三张截图点名）**：
+      · **「待生成」改「待更新」**（`wording`：`BuildState::Stale` 与 `ArtifactState::Stale`）——
+        这一档的前提是磁盘上有旧产物，词必须把「有旧的」说出来，与「未生成」分得开。
+        演示桩词表同步。**生成页行上的状态签贴右**（以前紧跟名字，名字一长一短就歪）。
+      · **渲染段内键序 = tomlKey 字母序（大小写不敏感）**：作者点名「明明都是 O 开头的
+        offset 都是一起的，生成的时候却改变了它的顺序」—— 以前按界面顺序（`layout.order`）
+        排，注册表条目一挪、产物键序就漂（M0 登记过的段内键序差异，这次作者拍板）。
+        字母序谁都能预期：offset_x/y/z 永远连着，**生成不再改变没改过的行的位置**。
+        判据 `sections_are_sorted_by_key_name_so_the_order_never_drifts`。
+        **注意**：基线 9 份（手写历史序）与此序不同 —— 下次生成 diff 里会看到一次性的
+        键序搬移（值不变），属预期；内置预设那条链（gen-presets）重跑时同序。
+      · **生成收尾自动重算 catalog.json（治本）**：作者第三问 = 客户端「下载失败：响应比
+        目录登记的大」再现 —— 根因是 `7a10f8b`（PR #20）改了 9 份交付 TOML **没重发清单**，
+        catalog 记的 size/sha 全是旧值，客户端字节校验必挂。修法不是检查卡报阻断
+        （作者先说要阻断，但 `blocked` 同时压死**生成与发布**两颗按钮，而重算清单恰是
+        修复动作 —— 等于堵死修复的路），而是**让记录永远跟着文件走**：
+        `wb_generate` 写完产物后调 `dist::write_catalog_json` 重算 catalog.json
+        （manifest / source 仍归发布写）。工作台自己从此不再产出不一致；
+        绕过工作台的手改/脚本改由预检新增的**交付自查**兜住：
+        `dist::audit_catalog`（拿客户端口径逐份对 size+SHA）→
+        `issues::preflight` 第三参 → 报**待办** `dist.catalog_mismatch`（显眼、进计数、
+        不挡闸）。判据 `audit_passes_when_the_files_match_the_catalog` /
+        `audit_catches_a_drifted_file` / `a_mismatched_delivery_catalog_is_a_todo`。
+      · **⚠️ `7a10f8b` 的遗留还在 GitHub main 上**：本轮改动只修「以后」；把 main 上
+        那份不一致修掉要跑 `npm run publish:presets`（重算 catalog/manifest → 一次性
+        分支 → PR）。**先提交本轮代码**，再跑发布脚本（它要求干净工作区）。
+    - **增量之五（2026-10-03，作者重启后两点追击）**：
+      · **待办「没办法解决」的真相**：目录里的资产条目**按源字节算 SHA**
+        （`Catalog::build_from_presets_lenient` 的口径）—— 重算后 models / BBS 那 7 份
+        **还是登记着、dist 里还是没有**（从来没人把它们复制进去），所以照着待办文案
+        「生成一次」做了也消不掉。修法：`wb_generate` 收尾在重算目录**之前**先
+        `write_content` 把引用资产补进交付根 —— 生成一次 = 文件补齐 + 目录重算，
+        两头对上，待办自动消失。`write_catalog_json` 注释补了这条依赖。
+      · **时间显示转本机时区**：后端 stamp 刻意存 UTC ISO（跨时区一致，注释写明
+        「界面上要显示本地时间由前端去转」），**前端漏了转** —— 生成页行、机型页
+        版本卡两处补 `localStamp()`（`2026-10-02T16:30:09Z` → `2026-10-03 00:30`）。
+        解析不动原样回（老记录可能不是 ISO）。
+    - **⚠️ 新增待办（作者 2026-10-03 裁决：第三刀部分作废）**：**整机图归属重做**
+      —— 作者原话：「那一刀就是错了，不显示到工作台直接硬编码进客户端完全不好，
+      不会编程的用户怎么改图片呢？那不进云端也可以在工作台看到选择才对」。三条裁定：
+      ① **文件住 `presets/assets/printers/`**（不是 `src/app/assets/printers/`）；
+      作者追加「在 assets 吧，到时候 3mf 也要放」⇒ **所有产品数据资源统一搬
+      `presets/assets/<kind>/`（models / icons / bbs / printers）**，`public/` 那个
+      资产目录之后退役**（作者问「public 文件夹是不是以后不需要了」—— 是）。
+      ② **到客户端 = 构建期从数据目录复制进客户端资源**（保留「不进 dist、不下载」）；
+      ③ **交付身份新增 `bundled` 档**（台账登记、工作台可管，**明确不进交付集合、
+      不被下载**），与「在菜单 / 仅归档」并列。
+      施工清单（下一刀）：搬目录 + `paths::assets_root()` 改指 `presets/assets` +
+      `assets.toml` 补 4 条 image + `Visibility` 加 `Bundled` 档 +
+      `deliverable_set` / `collect` **按档位拦**（不再按 kind 拦）+ 构建期复制那一步 +
+      判据换向（第三刀「台账里已无 image 类」→「image 类在台账里但不进交付集合」；
+      `check:bundle` 那类"包里没有裸资产"的断言跟着改）+ 客户端首页消费路径跟着搬 +
+      `cargo run --bin gen-catalog` + 探针回归。
 
      ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 

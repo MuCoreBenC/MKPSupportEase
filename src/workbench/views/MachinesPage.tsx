@@ -67,6 +67,18 @@ const vidOf = (machineId: string, versionId: string) => `${machineId}/${versionI
 /** 机型 / 版本 id 的即时格式提示（真闸在后端；这里只让明显打错的当场现形） */
 const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
 
+/**
+ * 后端记录的是 **UTC ISO 串**（`2026-10-02T16:30:09Z`，刻意跨时区一致），
+ * 给人看要转**本机时区**（作者 2026-10-03：「应该用东八区的时间，或者电脑的时区」）。
+ * 解析不动就原样回（老记录可能不是 ISO）。
+ */
+const localStamp = (iso: string): string => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 /** 生成态四档的样式（C14 的 tag 类名表） */
 const STATE_TAG: Record<string, string> = {
   built: s.tagBuildBuilt,
@@ -946,7 +958,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
                   </span>
                   <span className={s.cardNote}>{words.build[pickedNode.build].explain}</span>
                   {pickedNode.lastBuild !== null && (
-                    <span className={s.cardNote}>上次生成 {pickedNode.lastBuild}</span>
+                    <span className={s.cardNote}>上次生成 {localStamp(pickedNode.lastBuild)}</span>
                   )}
                 </div>
                 <div className={s.kv}>

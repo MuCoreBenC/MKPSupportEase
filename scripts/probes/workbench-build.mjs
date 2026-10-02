@@ -210,6 +210,27 @@ if (!dlgSeen || !hasList) problems.push('生成前没有弹 diff 确认框')
 const beforeConfirm = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
 say(beforeConfirm === 'preset.toml × 1 份', `确认之前不写盘，产物名单还是开局那份：${beforeConfirm}`)
 if (beforeConfirm !== 'preset.toml × 1 份') problems.push('还没确认就把盘写了（预演应是只读）')
+/* —— 头部「完整 / 对比」切换（2026-10-02）：默认看完整正文，想看差异再切「对比」 —— */
+const viewGroup = page.locator('[role="dialog"] [aria-label="详情显示方式"]')
+const hasToggle = (await viewGroup.count()) > 0
+const pressedOn = hasToggle ? await viewGroup.locator('[aria-pressed="true"]').first().textContent() : ''
+say(hasToggle && pressedOn === '完整', `详情默认「完整」视图（标题行右侧切换）：${pressedOn || '（没有切换）'}`)
+if (!hasToggle || pressedOn !== '完整') problems.push('详情切换缺失或默认不是「完整」')
+await viewGroup.getByRole('button', { name: '对比', exact: true }).click()
+const diffSeen = await until(
+  async () =>
+    (await page.locator('[role="dialog"] [class*="lineAdd"], [role="dialog"] [class*="lineDel"]').count()) > 0,
+  3000,
+)
+say(diffSeen, '切到「对比」看到行级 diff（整份摊开、不省略）')
+if (!diffSeen) problems.push('对比视图没有行级 diff')
+await viewGroup.getByRole('button', { name: '完整', exact: true }).click()
+const fullBack = await until(
+  async () => (await page.locator('[role="dialog"] [class*="lineCtx"]').count()) > 0,
+  3000,
+)
+say(fullBack, '切回「完整」恢复新文件全文（无红绿底）')
+if (!fullBack) problems.push('完整视图没有全文')
 if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-generate-diff.png` })
 /* 点确认 → 框切成结果页 → 点「完成」关掉 */
 await page.getByRole('button', { name: '确认生成', exact: true }).first().click()

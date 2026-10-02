@@ -59,7 +59,9 @@ impl BuildState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Built => "已生成",
-            Self::Stale => "待生成",
+            // 「待更新」而不是「待生成」（作者 2026-10-03）：这一档的前提是
+            // **磁盘上有旧产物** —— 词必须把"有旧的"说出来，与「未生成」分得开
+            Self::Stale => "待更新",
             Self::NeverBuilt => "未生成",
             Self::NoResources => "暂无资源",
         }
@@ -97,7 +99,8 @@ impl ArtifactState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Fresh => "已生成",
-            Self::Stale => "待生成",
+            // 与 BuildState::Stale 同一条裁决：有旧产物的待重做，词里要见「旧」
+            Self::Stale => "待更新",
             Self::Missing => "未生成",
         }
     }

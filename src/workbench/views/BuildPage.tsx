@@ -151,6 +151,18 @@ function stampNow(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/**
+ * 后端记录的是 **UTC ISO 串**（`2026-10-02T16:30:09Z`，刻意跨时区一致），
+ * 给人看要转**本机时区**（作者 2026-10-03：「应该用东八区的时间，或者电脑的时区」）。
+ * 解析不动就原样回（老记录可能不是 ISO）。
+ */
+function localStamp(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 export default function BuildPage({ boot, book, words, report, tick, onGoto, onApply, onSave, onBookRefresh }: Props) {
   const rows = book.buildRows
   const [picked, setPicked] = useState<Record<string, boolean>>({})
@@ -536,14 +548,15 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                   />
                   <span className={`${s.mono} ${s.rowMeta}`}>{r.uid}</span>
                   <span className={s.rowName}>{r.name}</span>
+                  {/* 状态签贴右（作者 2026-10-03：以前紧跟名字，名字一长一短就歪歪扭扭） */}
+                  <span className={s.grow} />
                   <span
                     className={`${s.tag} ${STATE_TAG[r.state]}`}
                     title={words.build[r.state].explain ?? undefined}
                   >
                     {words.build[r.state].label}
                   </span>
-                  <span className={s.grow} />
-                  <span className={s.rowMeta}>{r.lastBuild ?? '—'}</span>
+                  <span className={s.rowMeta}>{r.lastBuild ? localStamp(r.lastBuild) : '—'}</span>
                 </div>
                 {/* 详情是行的**兄弟**不是行里右侧的一个格（C14 第二十七轮） */}
                 {openRow === r.uid && (

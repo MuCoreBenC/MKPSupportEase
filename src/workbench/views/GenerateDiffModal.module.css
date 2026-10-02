@@ -7,10 +7,12 @@
 
 .panes {
   container-type: inline-size;
-  display: grid;
-  grid-template-columns: minmax(200px, 260px) 1fr;
+  display: flex;
   gap: 0;
-  /* 框内高度封顶，两栏各自滚 —— 免得一份几百行的 diff 把模态框顶穿 */
+  /* 框内高度封顶，两栏各自滚 —— 免得一份几百行的 diff 把模态框顶穿。
+     这里必须是 flex 不能是 grid：grid 的 auto 行在 max-height 约束下仍按
+     内容高算（超出被 overflow 裁掉、栏内永远不出滚动条 —— 完整视图一展开
+     就滚不动），flex 会把栏压进容器高，栏自己出滚动条。 */
   max-height: min(62vh, 560px);
   border: 1px solid var(--w-line);
   border-radius: var(--w-r-card);
@@ -20,10 +22,13 @@
 /* ---------- 左：文件清单 ---------- */
 
 .list {
+  flex: 0 1 260px;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  min-width: 200px;
   overflow: auto;
+  /* 滚到头断在这，不许链到背后页面（与 Modal 遮罩的 contain 同一件事） */
+  overscroll-behavior: contain;
   border-right: 1px solid var(--w-line);
   background: var(--w-card-inner);
 }
@@ -127,10 +132,12 @@
 /* ---------- 右：详情（行级 diff） ---------- */
 
 .detail {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .detailHead {
@@ -223,29 +230,39 @@
   overflow-wrap: normal;
 }
 
-/* 未变段折叠条 */
-.foldBlock {
-  display: contents;
+/* ---------- 头部：「完整 / 对比」切换 ---------- */
+
+/* 两段小切换，住在模态框标题行右侧（Modal 的 headerExtra 工具位） */
+.viewToggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn, 6px);
 }
 
-.foldRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 2px 14px 2px 6px;
+.viewBtn {
+  padding: 4px 12px;
   border: 0;
-  border-block: 1px solid var(--w-line);
-  background: rgb(16 24 32 / 3%);
+  background: var(--w-card);
   font: inherit;
-  font-size: 11.5px;
-  color: var(--w-text-3);
-  text-align: left;
+  font-size: 12px;
+  color: var(--w-text-2);
   cursor: pointer;
 }
 
-.foldRow:hover {
-  background: rgb(16 24 32 / 6%);
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--w-line);
+}
+
+.viewBtn:hover {
+  color: var(--w-text-1);
+}
+
+.viewBtnOn,
+.viewBtnOn:hover {
+  background: var(--w-primary-soft);
+  font-weight: 500;
+  color: var(--w-primary);
 }
 
 /* ---------- 空态 / 错误 ---------- */
@@ -269,47 +286,28 @@
 
 /* ---------- 底部 ---------- */
 
-.foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
+/* 说明小字。按钮本体用 c14.module.css 的标准 .btn / .btnPrimary（全工作台一种长相），
+   撑开用它的 .grow —— 这里不再自养第二套按钮。 */
 .footNote {
-  flex: 1 1 auto;
   font-size: 12px;
   color: var(--w-text-3);
 }
 
-.btn,
-.btnPrimary {
-  padding: 7px 16px;
-  border-radius: var(--w-r-card);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-}
+/* ---------- 窄框：两栏退成一栏 ---------- */
 
-.btn {
-  border: 1px solid var(--w-line);
-  background: var(--w-card);
-  color: var(--w-text-1);
-}
+@container (max-width: 560px) {
+  .panes {
+    flex-direction: column;
+    max-height: none;
+  }
 
-.btnPrimary {
-  border: 1px solid var(--w-primary);
-  background: var(--w-primary);
-  color: #fff;
+  .list {
+    flex: none;
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--w-line);
+  }
 }
-
-.btnPrimary:disabled,
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* ---------- 结果页 ---------- */
 
 .result {
   display: flex;
@@ -373,19 +371,4 @@
 
 .dotSkipped {
   background: #d08a2a;
-}
-
-/* ---------- 窄框：两栏退成一栏 ---------- */
-
-@container (max-width: 560px) {
-  .panes {
-    grid-template-columns: 1fr;
-    max-height: none;
-  }
-
-  .list {
-    max-height: 180px;
-    border-right: 0;
-    border-bottom: 1px solid var(--w-line);
-  }
 }

@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn serializes_into_a_lookup_table() {
         let v = serde_json::to_value(words()).unwrap();
-        assert_eq!(v["build"]["stale"]["label"], "待生成");
+        assert_eq!(v["build"]["stale"]["label"], "待更新");
         assert!(v["build"]["stale"]["explain"].is_string());
         assert_eq!(v["origin"]["machine"]["label"], "机型");
         assert_eq!(v["level"]["machine"]["label"], "机型基底");

@@ -2,9 +2,11 @@
 //!
 //! # 套餐是什么
 //!
-//! **套餐的内容就是 BBS 引用**（doc §12.4 的决定性事实，五个机型各一份、
-//! `assetRefs` 里各一条 BBS 预设）。它不是"预设的集合"——预设的路径由命名规则算出
-//! （doc §12.5：不为 MKP 预设建条目），套餐管的是**配发内容**。
+//! **套餐 = 配发的 MKP 预设 + 配发的 BBS 引用**。BBS 走资产库（`assetRefs`，doc §12.4）；
+//! MKP 预设**不进资产库**（doc §12.5 的本义：它不是资产库里的东西，它是生成产物），
+//! 但**套餐要能装它** —— 按版本的 uid 直引（`presets` 字段，作者 2026-10-03 裁决：
+//! 「mkp 文件不存在的时候都可以放进套餐里面」—— 预设是生成产物，先生成后落盘，
+//! 套餐先挂上名字是合法状态）。
 //!
 //! # 为什么必须成套配发
 //!
@@ -13,14 +15,16 @@
 //! （doc §12.4）。**发了 MKP 预设不发配套 BBS 预设，用户打出来的结果是错的** ——
 //! 所以加载期就拦「套餐里一条 BBS 都没有」，见 [`super::Presets::check_bundle_refs`]。
 //!
-//! # 字段就是旧数据那五个，一个不多一个不少
+//! # 字段：旧数据那五个 + `presets`
 //!
 //! 旧仓 `source/bundles/*_default.toml` 实测：`id` / `display` / `machineId` /
-//! `assetRefs` / `updatedAt`。这一版**照实搬**（裁决：先确认真实结构，不造默认值）。
+//! `assetRefs` / `updatedAt`。这一版**照实搬**（裁决：先确认真实结构，不造默认值）；
+//! `presets` 是 2026-10-03 按作者裁决补的（缺省空，旧文件不用动）。
 //!
 //! 刻意**不写**的：
 //!
-//! - **不写 MKP 预设的路径**：那条路径由命名规则算出（doc §12.5），登记一份就是冗余；
+//! - **不写 MKP 预设的产物路径**：那条路径由命名规则算出（doc §12.5），套餐里存
+//!   uid 就够；
 //! - **不写 `nozzle` / `layerHeight`**：旧仓那份 `source/preset_registry.toml` 有它们，
 //!   但那是**交付索引**要用的字段（消费端按喷头/层高挑预设），属于 Task 12 ——
 //!   在这里再存一份就是第二份真相，而且它一定先过期。
@@ -55,6 +59,11 @@ pub struct Bundle {
     /// 引用的资产 id 列表。**至少一条，且至少一条是 BBS 预设**（见模块头）
     #[serde(default)]
     pub asset_refs: Vec<String>,
+    /// 配发的 MKP 预设（**版本 uid**，如 `A1/STANDARD`）。**文件不存在也能挂** ——
+    /// 预设是生成产物，套餐先挂名字、生成之后文件才落（作者 2026-10-03）。
+    /// 空数组合法；每条必须解析到机型目录里的一个版本，且机型与本套餐一致
+    #[serde(default)]
+    pub presets: Vec<String>,
     /// 上一次改动日期（旧数据里是 `2026-07-12`）。
     /// **迁移不改内容，所以日期照旧** —— 写上今天就是把"搬了个文件"记成"改了套餐"
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -131,6 +140,7 @@ impl Bundles {
                 .iter()
                 .map(|s| s.trim().to_owned())
                 .collect(),
+            presets: bundle.presets.iter().map(|s| s.trim().to_owned()).collect(),
             updated_at: bundle.updated_at,
         };
         if let Some(prev) = self.get(&candidate.id) {
@@ -151,6 +161,13 @@ impl Bundles {
             refs.push(r.as_str());
         }
         t["assetRefs"] = toml_edit::value(refs);
+        if !candidate.presets.is_empty() {
+            let mut ps = toml_edit::Array::new();
+            for p in &candidate.presets {
+                ps.push(p.as_str());
+            }
+            t["presets"] = toml_edit::value(ps);
+        }
         if let Some(d) = &candidate.updated_at {
             t["updatedAt"] = super::literal_str(d);
         }
@@ -192,6 +209,7 @@ impl Bundles {
         &mut self,
         id: &str,
         refs: &[String],
+        presets: &[String],
         now_iso8601: &str,
     ) -> Result<(), AppError> {
         let want = id.trim().to_lowercase();
@@ -202,12 +220,14 @@ impl Bundles {
             .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?;
 
         let trimmed: Vec<String> = refs.iter().map(|s| s.trim().to_owned()).collect();
+        let trimmed_presets: Vec<String> = presets.iter().map(|s| s.trim().to_owned()).collect();
         // 影子条目借 check_one 的同一套判据，免得两条路分岔
         self.check_one(&Bundle {
             id: self.items[idx].id.clone(),
             display: self.items[idx].display.clone(),
             machine_id: self.items[idx].machine_id.clone(),
             asset_refs: trimmed.clone(),
+            presets: trimmed_presets.clone(),
             updated_at: None,
         })?;
 
@@ -231,10 +251,21 @@ impl Bundles {
                 list.push(r.as_str());
             }
             table["assetRefs"] = toml_edit::value(list);
+            // MKP 组：空就整字段拿掉（别在文件里留 `presets = []` 的噪音）
+            if trimmed_presets.is_empty() {
+                table.remove("presets");
+            } else {
+                let mut ps = toml_edit::Array::new();
+                for p in &trimmed_presets {
+                    ps.push(p.as_str());
+                }
+                table["presets"] = toml_edit::value(ps);
+            }
             // 只改内存的话下一次 write 会把旧值写回去 —— 文档面一起改（同 drop_asset_refs）
             table["updatedAt"] = super::literal_str(&today);
         }
         self.items[idx].asset_refs = trimmed;
+        self.items[idx].presets = trimmed_presets;
         self.items[idx].updated_at = Some(today);
         Ok(())
     }
@@ -368,6 +399,29 @@ impl Bundles {
             }
             seen.push(key);
         }
+        // MKP 组的形状（uid 列表）：同一套「不留空串、不留重复」。
+        // 「uid 解析得到一个真版本、机型对得上」是跨文件判据，在
+        // [`super::Presets::check_bundle_refs`] / `set_bundle_refs` 里拦
+        let mut seen_presets: Vec<String> = Vec::new();
+        for p in &b.presets {
+            let key = p.trim().to_lowercase();
+            if key.is_empty() {
+                return Err(AppError::invalid_argument(format!(
+                    "套餐 {} 的 presets 里有一项是空的",
+                    b.id
+                ))
+                .with_detail(
+                    "要「没有」就整条去掉，别留空串 —— 空串读成「填过但填了个空」".to_owned(),
+                ));
+            }
+            if seen_presets.contains(&key) {
+                return Err(AppError::invalid_argument(format!(
+                    "套餐 {} 的 presets 里有重复项：{p}",
+                    b.id
+                )));
+            }
+            seen_presets.push(key);
+        }
         Ok(())
     }
 }
@@ -474,6 +528,7 @@ mod tests {
             display: "官方推荐".to_owned(),
             machine_id: "P1S".to_owned(),
             asset_refs: vec!["p1s-bbs-04-024".to_owned()],
+            presets: vec!["P1S/LITE".to_owned()],
             updated_at: Some("2026-07-12".to_owned()),
         })
         .expect("加一条");
@@ -487,6 +542,7 @@ mod tests {
             display: "官方推荐".to_owned(),
             machine_id: "A1".to_owned(),
             asset_refs: vec!["a1-bbs-04-020".to_owned()],
+            presets: Vec::new(),
             updated_at: None,
         })
         .expect_err("同 id 再插一条必须被拦");
@@ -495,6 +551,7 @@ mod tests {
             display: "官方推荐".to_owned(),
             machine_id: "A1".to_owned(),
             asset_refs: Vec::new(),
+            presets: Vec::new(),
             updated_at: None,
         })
         .expect_err("空套餐必须被拦");
@@ -536,15 +593,15 @@ mod tests {
         let now = "2026-10-01T00:00:00Z";
 
         // 查无此套餐：大小写对不上也算没有（get 的口径是大小写不敏感，这里同一条）
-        assert!(b.set_refs("no_such", &["x".to_owned()], now).is_err());
+        assert!(b.set_refs("no_such", &["x".to_owned()], &[], now).is_err());
 
         // 空列表被拦（check_one：套餐的内容就是 BBS 引用），文件一个字节都不动
         let before = b.to_toml();
-        assert!(b.set_refs("A1_default", &[], now).is_err());
+        assert!(b.set_refs("A1_default", &[], &[], now).is_err());
         assert_eq!(b.to_toml(), before, "被拦下就不该动文件");
 
         // 正路径：换一条 + updatedAt 盖今天；重读得到
-        b.set_refs("a1_default", &["a1-bbs-02-010".to_owned()], now)
+        b.set_refs("a1_default", &["a1-bbs-02-010".to_owned()], &[], now)
             .expect("换一条");
         assert_eq!(
             b.get("A1_default").expect("还在").asset_refs,
@@ -572,6 +629,47 @@ mod tests {
             again.get("a1_default").expect("在").updated_at.as_deref(),
             Some("2026-07-12")
         );
+    }
+
+    /// `presets`（套餐挂 MKP 预设，作者 2026-10-03）：**文件不存在也能挂**（预设是
+    /// 生成产物，套餐先挂名字、生成之后文件才落）；空组整字段拿掉，别留噪音
+    #[test]
+    fn preset_refs_round_trip_and_stay_optional() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        put(dir.path(), one("A1_default", "'a1-bbs-04-020'"));
+        let mut b = Bundles::load_from(dir.path()).expect("读得通");
+        let now = "2026-10-03T00:00:00Z";
+
+        b.set_refs(
+            "A1_default",
+            &["a1-bbs-04-020".to_owned()],
+            &["A1/STANDARD".to_owned()],
+            now,
+        )
+        .expect("挂一条 MKP");
+        assert_eq!(
+            b.get("A1_default").expect("还在").presets,
+            vec!["A1/STANDARD".to_owned()]
+        );
+        let text = b.to_toml();
+        assert!(text.contains("A1/STANDARD"), "{}", text);
+
+        // 空组 = 字段整条拿掉（别留 `presets = []` 的噪音），重读得到空
+        b.set_refs("A1_default", &["a1-bbs-04-020".to_owned()], &[], now)
+            .expect("摘掉");
+        assert!(b.get("A1_default").expect("还在").presets.is_empty());
+        assert!(!b.to_toml().contains("presets"), "{}", b.to_toml());
+
+        // 形状：空串项拦下（与 assetRefs 同一套）
+        let err = b
+            .set_refs(
+                "A1_default",
+                &["a1-bbs-04-020".to_owned()],
+                &[" ".to_owned()],
+                now,
+            )
+            .expect_err("空串项必须被拦");
+        assert!(err.message.contains("空"), "实测：{}", err.message);
     }
 
     /// `drop_asset_refs`：内存与**文档面**一起改，写回重读确实少了；

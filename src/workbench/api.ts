@@ -838,12 +838,34 @@ export interface BundleUserView {
   versionId: string
 }
 
+/** `bundles::PresetRefView` —— 套餐里挂着的一条 MKP 预设（uid 直引，不经过资产库） */
+export interface PresetRefView {
+  /** 版本 uid（`A1/STANDARD`），与 `bundles.toml` 的 `presets` 字段同形 */
+  uid: string
+  /** 产物文件名（命名规则算出的那份）。没生成过也有 —— 名字是算出来的 */
+  fileName: string
+  /** 磁盘上有没有这份产物。false = 挂了名字还没生成，不是错误 */
+  generated: boolean
+}
+
+/** `bundles::PresetCandidate` —— MKP 组的候选：一棵能生成的版本 */
+export interface PresetCandidate {
+  uid: string
+  /** 「机型 版本名」，给人看的 */
+  name: string
+  fileName: string
+  /** 原始状态档（built / stale / neverBuilt / noResources），词由词表挑 */
+  state: 'built' | 'stale' | 'neverBuilt' | 'noResources'
+}
+
 /** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`，唯一真源） */
 export interface BundleView {
   id: string
   display: string
   machineId: string
   assetRefs: BundleRefView[]
+  /** 配发的 MKP 预设（uid 直引，**文件可不存在** —— 作者 2026-10-03） */
+  presets: PresetRefView[]
   /** 上一次改动日期（迁移照抄旧值；真改动由后端盖上当天） */
   updatedAt: string | null
   /** **一版一套**：`recommendedBundle` 指着这份套餐的版本 */
@@ -857,6 +879,8 @@ export interface BundleList {
   bundles: BundleView[]
   /** 过滤前一共几份 —— 页脚「筛出 X / Y 个」的 Y */
   total: number
+  /** MKP 组的候选池：能生成的版本（文件不存在也能先挂） */
+  presetCandidates: PresetCandidate[]
 }
 
 /**
@@ -925,10 +949,12 @@ export const wb = {
 
   /**
    * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
-   * 悬空引用 / 「没有一条 BBS」在后端拦；`updatedAt` 由那次写盖上当天
+   * 悬空引用 / 「没有一条 BBS」/ preset uid 不是本机型真版本在后端拦；
+   * preset uid 指向的**文件可以还没生成**（预设是生成产物，套餐先挂名字）；
+   * `updatedAt` 由那次写盖上当天
    */
-  setBundleRefs: (bundleId: string, assetIds: string[]) =>
-    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds }),
+  setBundleRefs: (bundleId: string, assetIds: string[], presetUids: string[]) =>
+    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds, presetUids }),
 
   /**
    * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，

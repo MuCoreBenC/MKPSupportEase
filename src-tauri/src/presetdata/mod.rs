@@ -559,6 +559,36 @@ impl Presets {
                         .to_owned(),
                 ));
             }
+
+            // MKP 组（uid 直引）：必须解析到本机型的一个真版本。**文件不存在没关系**
+            //（预设是生成产物，作者 2026-10-03：套餐可以先挂名字）—— 挂错机型 /
+            // 打错 id 才是错，那会让客户端配发到一份谁也不认识的预设
+            for uid in &b.presets {
+                let (mid, vid) = uid.split_once('/').ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "套餐 {} 的 presets 里有一项不是「机型/版本」的写法：{uid}",
+                        b.id
+                    ))
+                })?;
+                let m = self.catalog.machine(mid.trim()).ok_or_else(|| {
+                    AppError::corrupted(format!(
+                        "套餐 {} 的 presets 指向一个不存在的机型：{uid}",
+                        b.id
+                    ))
+                })?;
+                if !m.versions.iter().any(|v| v.id == vid.trim()) {
+                    return Err(AppError::corrupted(format!(
+                        "套餐 {} 的 presets 指向一个不存在的版本：{uid}",
+                        b.id
+                    )));
+                }
+                if !mid.eq_ignore_ascii_case(&b.machine_id) {
+                    return Err(AppError::corrupted(format!(
+                        "套餐 {} 是给 {} 配的，却挂着别家机型的预设：{uid}",
+                        b.id, b.machine_id
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -581,6 +611,7 @@ impl Presets {
         &mut self,
         bundle_id: &str,
         refs: &[String],
+        preset_uids: &[String],
         now_iso8601: &str,
     ) -> Result<bool, AppError> {
         let Some(cur) = self.bundles.get(bundle_id) else {
@@ -592,7 +623,8 @@ impl Presets {
                     .zip(b.iter())
                     .all(|(x, y)| x.trim().to_lowercase() == y.trim().to_lowercase())
         };
-        if same(&cur.asset_refs, refs) {
+        let presets_same = same(&cur.presets, preset_uids);
+        if same(&cur.asset_refs, refs) && presets_same {
             return Ok(false);
         }
 
@@ -619,8 +651,36 @@ impl Presets {
                     .to_owned(),
             ));
         }
+        // MKP 组：uid 必须解析到**本机型**的一个真版本 —— 文件不存在没关系
+        //（预设是生成产物，套餐先挂名字），挂错机型 / 打错 id 才是错
+        for uid in preset_uids {
+            let (mid, vid) = uid.split_once('/').ok_or_else(|| {
+                AppError::invalid_argument(format!(
+                    "套餐 {bundle_id} 的 presets 里有一项不是「机型/版本」的写法：{uid}"
+                ))
+            })?;
+            let m = self.catalog.machine(mid.trim()).ok_or_else(|| {
+                AppError::invalid_argument(format!(
+                    "套餐 {bundle_id} 的 presets 指向一个不存在的机型：{uid}"
+                ))
+            })?;
+            if !m.versions.iter().any(|v| v.id == vid.trim()) {
+                return Err(AppError::invalid_argument(format!(
+                    "套餐 {bundle_id} 的 presets 指向一个不存在的版本：{uid}"
+                )));
+            }
+            if !mid.eq_ignore_ascii_case(&self.bundles.get(bundle_id).expect("上面取过").machine_id)
+            {
+                return Err(AppError::invalid_argument(format!(
+                    "套餐 {} 是给 {} 配的，却挂着别家机型的预设：{uid}",
+                    bundle_id,
+                    self.bundles.get(bundle_id).expect("上面取过").machine_id
+                )));
+            }
+        }
 
-        self.bundles.set_refs(bundle_id, refs, now_iso8601)?;
+        self.bundles
+            .set_refs(bundle_id, refs, preset_uids, now_iso8601)?;
         self.bundles.write()?;
         Ok(true)
     }
@@ -1018,7 +1078,7 @@ mod tests {
 
         // 内容没变：Ok(false)，文件一个字节都不动（updatedAt 不许被空操作刷新）
         let changed = presets
-            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()], &now())
+            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()], &[], &now())
             .expect("没变也是成功的");
         assert!(!changed);
         assert_eq!(
@@ -1032,6 +1092,7 @@ mod tests {
             .set_bundle_refs(
                 "a1_default",
                 &["p1s-bbs-02-010".to_owned(), "a1-bbs-04-020".to_owned()],
+                &[],
                 &now(),
             )
             .expect("换内容");
@@ -1055,7 +1116,7 @@ mod tests {
 
         // 悬空引用被拦；拦下之后文件还是刚才那份
         let err = presets
-            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()], &now())
+            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()], &[], &now())
             .expect_err("悬空引用必须被拦");
         assert!(err.message.contains("不存在"), "实测：{}", err.message);
         assert_eq!(
@@ -1066,19 +1127,58 @@ mod tests {
 
         // 只装图片不装 BBS 也被拦（10.8 成套配发）
         let err = presets
-            .set_bundle_refs("A1_default", &["a1-image".to_owned()], &now())
+            .set_bundle_refs("A1_default", &["a1-image".to_owned()], &[], &now())
             .expect_err("没有 BBS 必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
         // 空列表同一条判据的另一端：加载期拦空 assetRefs，这里拦写出去的空套餐
         let err = presets
-            .set_bundle_refs("A1_default", &[], &now())
+            .set_bundle_refs("A1_default", &[], &[], &now())
             .expect_err("空套餐必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
+        // **挂一条 MKP 预设**（作者 2026-10-03：文件不存在也能先挂 —— 预设是生成
+        // 产物，套餐先挂名字）；但 uid 必须是**本机型**的真版本
+        let changed = presets
+            .set_bundle_refs(
+                "A1_default",
+                &["a1-bbs-04-020".to_owned()],
+                &["A1/STANDARD".to_owned()],
+                &now(),
+            )
+            .expect("文件不存在也能挂");
+        assert!(changed);
+        let on_disk = std::fs::read_to_string(&file).expect("读盘");
+        assert!(
+            on_disk.contains("A1/STANDARD"),
+            "套餐的 presets 要真落盘：{on_disk}"
+        );
+
+        // 别家机型的预设不许挂进 A1 的套餐
+        let err = presets
+            .set_bundle_refs(
+                "A1_default",
+                &["a1-bbs-04-020".to_owned()],
+                &["P1S/LITE".to_owned()],
+                &now(),
+            )
+            .expect_err("别家机型的预设必须被拦");
+        assert!(err.message.contains("机型"), "实测：{}", err.message);
+
+        // 打错的 uid（版本不存在）拦下
+        let err = presets
+            .set_bundle_refs(
+                "A1_default",
+                &["a1-bbs-04-020".to_owned()],
+                &["A1/NOPE".to_owned()],
+                &now(),
+            )
+            .expect_err("不存在的版本必须被拦");
+        assert!(err.message.contains("不存在"), "实测：{}", err.message);
+
         // 查无此套餐
         assert!(presets
-            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()], &now())
+            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()], &[], &now())
             .is_err());
     }
 

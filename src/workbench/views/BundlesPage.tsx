@@ -18,8 +18,10 @@
  *  - **新建 / 复制 / 编辑 / 删除套餐没有接**：后端没有这些命令（新建的写入口
  *    在数据层、命令还没开；删除/改名要连带更新机型文件里的引用，模型没定）。
  *    对应的按钮与右键菜单**不渲染**，待裁决项记在 C14-PORT-PLAN §4。
- *  - **MKP 组恒空**：MKP 预设不建资产条目（doc §12.5）—— 套餐的内容就是
- *    BBS 引用（doc §12.4），空组照实说，不装作有货。
+ *  - **MKP 组走 uid 直引**：MKP 预设不进资产库（doc §12.5 的本义），但套餐**能装它**
+ *    （作者 2026-10-03：「mkp 文件不存在的时候都可以放进套餐里面」—— 预设是生成
+ *    产物，套餐先挂名字，生成之后文件自动补上）。候选 = 能生成的版本，BBS 一侧
+ *    的「至少一条」不因此放松（成套配发）。
  *  - **指向分两档报**：版本层（users，改指向动的是它）与机型默认
  *    （defaultFor，生成侧的回退）分开列 —— 混在一起的话「改套餐会动到谁」数不清。
  *  - **没有跨页撤销**：清单编辑即时落盘，Ctrl+Z 只管参数草稿（机型页同款文案）。
@@ -148,9 +150,9 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
   }
 
   /** 换整份清单（移出一条 / 模态框确认都走它）。后端校验不过会整次拒绝 */
-  const setRefs = async (bundleId: string, ids: string[], done: string) => {
+  const setRefs = async (bundleId: string, ids: string[], presetUids: string[], done: string) => {
     try {
-      setList(await wb.setBundleRefs(bundleId, ids))
+      setList(await wb.setBundleRefs(bundleId, ids, presetUids))
       toasts.push(done)
     } catch (e) {
       say(e)
@@ -171,6 +173,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               void setRefs(
                 cur.id,
                 cur.assetRefs.filter((r) => r.id !== assetId).map((r) => r.id),
+                cur.presets.map((p) => p.uid),
                 `已把 ${assetId} 移出 ${cur.id}`,
               )
             },
@@ -301,14 +304,38 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               )}
 
               <div className={s.group}>
-                <div className={s.groupHead}>MKP 预设（{cur.assetRefs.filter((r) => r.kind !== 'slicerProfile').length}）</div>
-                {/* MKP 预设不建资产条目（doc §12.5）—— 这一组在真数据上恒空，照实说 */}
+                <div className={s.groupHead}>MKP 预设（{cur.presets.length}）</div>
+                {/* MKP 预设不进资产库（doc §12.5 的本义），但套餐**能装它**：
+                    uid 直引，文件还没生成也能先挂（作者 2026-10-03） */}
+                {cur.presets.map((p) => (
+                  <div key={p.uid} className={s.fileRow} {...fMenu.triggerProps(p.uid)}>
+                    <span className={`${s.fileName} ${s.mono}`}>{p.uid}</span>
+                    <span className={s.tag}>MKP</span>
+                    {!p.generated && <span className={s.tag}>未生成</span>}
+                    <span className={s.cardNote}>{p.fileName}</span>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() =>
+                        void setRefs(
+                          cur.id,
+                          cur.assetRefs.map((x) => x.id),
+                          cur.presets.filter((x) => x.uid !== p.uid).map((x) => x.uid),
+                          `已把 ${p.uid} 移出 ${cur.id}`,
+                        )
+                      }
+                    >
+                      移出
+                    </button>
+                  </div>
+                ))}
+                {/* 旧数据里 assetRefs 可能挂着图标 / 模型类资产 —— 照实显示 */}
                 {cur.assetRefs
                   .filter((r) => r.kind !== 'slicerProfile')
                   .map((r) => (
                     <div key={r.id} className={s.fileRow} {...fMenu.triggerProps(r.id)}>
                       <span className={`${s.fileName} ${s.mono}`}>{r.name || r.id}</span>
-                      <span className={s.tag}>MKP</span>
+                      <span className={s.tag}>{r.kind}</span>
                       {r.visibility === 'archiveOnly' && (
                         <span className={`${s.tag} ${s.tagDanger}`}>仅归档</span>
                       )}
@@ -319,6 +346,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                           void setRefs(
                             cur.id,
                             cur.assetRefs.filter((x) => x.id !== r.id).map((x) => x.id),
+                            cur.presets.map((x) => x.uid),
                             `已把 ${r.id} 移出 ${cur.id}`,
                           )
                         }
@@ -327,9 +355,10 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                       </button>
                     </div>
                   ))}
-                {!cur.assetRefs.some((r) => r.kind !== 'slicerProfile') && (
+                {cur.presets.length === 0 && !cur.assetRefs.some((r) => r.kind !== 'slicerProfile') && (
                   <p className={s.note} style={{ margin: 0 }}>
-                    一个都没装 —— MKP 预设不进资产库登记（doc §12.5），套餐里也写不了它
+                    一个都没装 —— 点「改套餐内容…」挂 MKP 预设（文件还没生成也能先挂，
+                    生成之后文件自动补上）
                   </p>
                 )}
               </div>
@@ -352,6 +381,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                           void setRefs(
                             cur.id,
                             cur.assetRefs.filter((x) => x.id !== r.id).map((x) => x.id),
+                            cur.presets.map((x) => x.uid),
                             `已把 ${r.id} 移出 ${cur.id}`,
                           )
                         }
@@ -502,13 +532,15 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
         open={resOpen !== null}
         bundle={list.bundles.find((b) => b.id === resOpen) ?? null}
         assets={assets}
+        presetCandidates={list.presetCandidates}
         onCancel={() => setResOpen(null)}
-        onConfirm={(mkpIds, slicerIds) => {
+        onConfirm={(presetUids, slicerIds) => {
           if (resOpen === null) return
           void setRefs(
             resOpen,
-            [...mkpIds, ...slicerIds],
-            `已把套餐 ${resOpen} 的清单更新（MKP ${mkpIds.length} · 切片器 ${slicerIds.length}）`,
+            slicerIds,
+            presetUids,
+            `已把套餐 ${resOpen} 的清单更新（MKP ${presetUids.length} · 切片器 ${slicerIds.length}）`,
           )
           setResOpen(null)
         }}

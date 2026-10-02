@@ -42,6 +42,11 @@ export interface ModalProps {
   /** 底部一条。没有就不画那一条边 */
   footer?: ReactNode
   /**
+   * 标题行右侧的空白位（关闭按钮左边）。确认框那种「想在头上放个小切换」的
+   * （如生成前确认的「完整 / 对比」）用它，不用各自改外壳。
+   */
+  headerExtra?: ReactNode
+  /**
    * 框的宽度档。`sm` 看一眼就关的（详情）· `md` 要读的（确认 / 表单）· `lg` 向导。
    * 不给自由数值 —— 三档已经够，给了数值各处就会长出十种宽度。
    */
@@ -69,6 +74,7 @@ export default function Modal({
   title,
   subtitle,
   footer,
+  headerExtra,
   size = 'md',
   closeOnScrim = true,
   host = null,
@@ -158,6 +164,7 @@ export default function Modal({
             <strong className={s.title}>{title}</strong>
             {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
           </span>
+          {headerExtra !== undefined && <div className={s.headExtra}>{headerExtra}</div>}
           <button type="button" className={s.close} title={closeTitle} onClick={onClose}>
             关闭
           </button>

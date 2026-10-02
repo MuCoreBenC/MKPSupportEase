@@ -93,7 +93,10 @@ pub fn wb_preflight() -> Result<Report, AppError> {
             let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
-            Ok(issues::preflight(&book, recipe_ref))
+            // 交付目录的「清单 ↔ 文件」自查在 app 层做（要摸盘），结果作为一条交给预检
+            let delivery =
+                super::dist::audit_catalog(&crate::workbench::paths::dist_root_path(), &book);
+            Ok(issues::preflight(&book, recipe_ref, delivery))
         })
     })
 }
@@ -178,6 +181,16 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
                 Some((_, v)) => v.push(p),
                 None => groups.push((p.toml_key.as_str(), vec![p])),
             }
+        }
+
+        // 段内键序 = **tomlKey 字母序**（大小写不敏感）。作者 2026-10-03：
+        // 「明明都是 O 开头的 offset 都是一起的，生成的时候却改变了它的顺序」——
+        // 以前按界面顺序（layout.order）排，注册表条目一挪、产物键序就漂，
+        // diff 里满屏错位。字母序谁都能预期：offset_x/y/z 永远连在一起，
+        // 生成不再改变没改过的那些行的位置。
+        groups.sort_by_key(|g| g.0.to_lowercase());
+        for params in groups.iter_mut() {
+            params.1.sort_by_key(|p| p.json_key.to_lowercase());
         }
 
         for (toml_key, params) in groups {
@@ -467,6 +480,21 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
                 )?;
                 fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
             }
+
+            // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
+            // 跟上，dist 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
+            //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
+            // 重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 / 渠道）仍归
+            // 发布写 —— 生成不替发布定稿。
+            //
+            // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
+            // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
+            // ×7）。先补文件、再重算目录，两头对上。
+            let dist_root = paths::dist_root()?;
+            if let Ok(asset_root) = paths::assets_root() {
+                super::dist::write_content(&dist_root, &asset_root, &book)?;
+            }
+            super::dist::write_catalog_json(&dist_root, &book)?;
 
             let stamp = clock::now_iso8601();
             tracing::info!(
@@ -1390,6 +1418,38 @@ mod tests {
                 order_only.len()
             );
         }
+    }
+
+    /// 段内键序 = **tomlKey 字母序**（大小写不敏感）—— 生成不许改变没改过的行的位置。
+    ///
+    /// 作者 2026-10-03：「明明都是 O 开头的 offset 都是一起的，生成的时候却改变了
+    /// 它的顺序」—— 以前按界面顺序排，注册表一挪条目产物键序就漂。
+    #[test]
+    fn sections_are_sorted_by_key_name_so_the_order_never_drifts() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        let r = render(&book, "A1/STANDARD").unwrap();
+
+        // 抠出 [toolhead] 段的键（小写化后必须已经有序）
+        let seg = r
+            .text
+            .split("[toolhead]\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .take_while(|l| !l.starts_with('[') && !l.is_empty())
+            .filter_map(|l| l.split('=').next())
+            .map(|k| k.trim().to_lowercase())
+            .collect::<Vec<_>>();
+        assert!(
+            seg.len() >= 2,
+            "fixture 的 toolhead 段该有几个键：{:?}",
+            seg
+        );
+        let mut sorted = seg.clone();
+        sorted.sort();
+        assert_eq!(seg, sorted, "段内键要按字母序：{:?}", seg);
     }
 
     /// 同样的输入**产出同样的字节**（除了时间戳那一行）——

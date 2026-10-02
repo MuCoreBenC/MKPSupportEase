@@ -16,10 +16,24 @@
  * 作者点名：「多很多个文件的话，那就不应该把所有文件都这样子竖着显示出来，而是应该
  * 用一个列表……点了列表就可以看仔细看每一个单独的」。
  *
- *   ┌ 文件清单 ┐ ┌ 选中那份的行级 diff ┐
- *   │ 有变化的在前 │ │ 变的行展开，其余「… N 行未变 …」可点开 │
+ *   ┌ 文件清单 ┐ ┌ 选中那份的 diff / 全文 ┐
+ *   │ 有变化的在前 │ │ 整份摊开（对比 = 红绿底，完整 = 素底）│
  *   │ 无变化的折叠 │ │ │
  *   └──────────┘ └──────────────────────┘
+ *
+ * # 「完整 / 对比」切换（作者 2026-10-02，默认完整）
+ *
+ * 作者原话：「diff 的效果我不喜欢……加一个切换吧，就看完整的不看对比的」。于是标题行
+ * 右侧多一个两段切换（`Modal` 的 `headerExtra`）：
+ *   · 完整（默认）—— 选中那份的**新文件全文**，逐行带新文件行号，没有红绿底；
+ *   · 对比 —— 上面的行级 diff。
+ * 行号口径也顺手修了：后端 `removed` 行记的是**旧文件行号**、其余记**新文件行号**，
+ * 以前混排在同一列里（39、40 然后跳 41、42），人看不懂 —— 现在 `removed` 行行号
+ * 槽留空（「−」符已经说明了它是删掉的），列里只剩一套「新文件第几行」的语义。
+ *
+ * 对比视图**不省略**（作者同日晚又改的口径：「对比的不要省略吧，还是就像这种一样
+ * 正常的」—— 指的是编辑器里那种整份摊开的 diff）：所有行平铺，未变的也在，
+ * 之前那套「… N 行未变 …」折叠删了。跟「完整」的差别只剩红绿底。
  *
  * 三档状态（后端 `DiffState`）：
  *   · 新增    磁盘上还没有这一份 —— 正文**全绿**，不折叠（没变化可言）
@@ -41,6 +55,7 @@
 import { useMemo, useState } from 'react'
 import ModalC14 from '../c14/ModalC14'
 import type { GenerateReport, PreviewDiffLine, PreviewFile, PreviewReport } from '../api'
+import c from '../c14.module.css'
 import s from './GenerateDiffModal.module.css'
 
 interface Props {
@@ -67,11 +82,16 @@ function rankOf(state: PreviewFile['state']): number {
   return state === 'unchanged' ? 1 : 0
 }
 
+/** 详情区显示哪种：完整正文（默认）或与磁盘现存的行级对比 */
+type DetailView = 'full' | 'diff'
+
 export default function GenerateDiffModal({ report, error, busy, done, onConfirm, onClose }: Props) {
   /** 清单里选中的那份（默认第一份有变化的） */
   const [sel, setSel] = useState<string | null>(null)
   /** 无变化那一组展开没有 */
   const [showUnchanged, setShowUnchanged] = useState(false)
+  /** 详情视图：作者 2026-10-02 —— 默认看完整的，想看差异再切「对比」 */
+  const [view, setView] = useState<DetailView>('full')
 
   const files = useMemo(() => report?.files ?? [], [report])
 
@@ -98,11 +118,9 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
         closeOnScrim={false}
         onClose={onClose}
         footer={
-          <div className={s.foot}>
-            <button type="button" className={s.btnPrimary} onClick={onClose}>
-              完成
-            </button>
-          </div>
+          <button type="button" className={`${c.btn} ${c.btnPrimary}`} onClick={onClose}>
+            完成
+          </button>
         }
       >
         <div className={s.result}>
@@ -184,8 +202,28 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
       subtitle={subtitle}
       closeOnScrim={false}
       onClose={onClose}
+      headerExtra={
+        <div className={s.viewToggle} role="group" aria-label="详情显示方式">
+          <button
+            type="button"
+            className={view === 'full' ? `${s.viewBtn} ${s.viewBtnOn}` : s.viewBtn}
+            aria-pressed={view === 'full'}
+            onClick={() => setView('full')}
+          >
+            完整
+          </button>
+          <button
+            type="button"
+            className={view === 'diff' ? `${s.viewBtn} ${s.viewBtnOn}` : s.viewBtn}
+            aria-pressed={view === 'diff'}
+            onClick={() => setView('diff')}
+          >
+            对比
+          </button>
+        </div>
+      }
       footer={
-        <div className={s.foot}>
+        <>
           <span className={s.footNote}>
             {changed.length > 0 ? (
               <>
@@ -195,13 +233,19 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
               <>没有哪一份会变 —— 点了也不会重写任何文件</>
             )}
           </span>
-          <button type="button" className={s.btn} onClick={onClose} disabled={busy}>
+          <span className={c.grow} />
+          <button type="button" className={c.btn} onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button type="button" className={s.btnPrimary} onClick={onConfirm} disabled={!canConfirm}>
+          <button
+            type="button"
+            className={`${c.btn} ${c.btnPrimary}`}
+            onClick={onConfirm}
+            disabled={!canConfirm}
+          >
             {busy ? '生成中…' : '确认生成'}
           </button>
-        </div>
+        </>
       }
     >
       {error !== null && (
@@ -296,7 +340,7 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                 {current.state === 'unchanged' ? (
                   <p className={s.empty}>这一份和磁盘上的一模一样，不会重写。</p>
                 ) : (
-                  <DiffLines lines={current.lines} mode={current.state} />
+                  <DiffLines lines={current.lines} mode={current.state} view={view} />
                 )}
               </>
             )}
@@ -310,66 +354,62 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
 }
 
 /**
- * 行级 diff 的展示：**变的行展开，其余折成「… N 行未变 …」**（可点开）。
+ * 详情正文：`view === 'full'` 给新文件全文，`'diff'` 给整份摊开的对比（见文件头注释）。
  *
- * 这就是作者要的「变的先显示、其他省略、可以点开看」——在**一份文件内部**的粒度。
- * 折叠只折连续未变的段；段头写行数，点一下就摊开那一整段。
+ * 行号口径：`removed` 行在后端记的是**旧文件**行号，其余记**新文件**行号 ——
+ * 所以 `removed` 行的行号槽留空（「−」符已经说明它是删掉的），保证一列里
+ * 只有一套「新文件第几行」的语义，不再出现 39、40 跳 41、42 的看不懂。
  */
-function DiffLines({ lines, mode }: { lines: PreviewDiffLine[]; mode: PreviewFile['state'] }) {
-  /* 把连续的同种行切成段：context 段可折叠，added / removed 段永远摊开 */
-  const blocks = useMemo(() => {
-    const out: { kind: PreviewDiffLine['kind']; lines: PreviewDiffLine[] }[] = []
-    for (const l of lines) {
-      const last = out[out.length - 1]
-      if (last !== undefined && last.kind === l.kind) last.lines.push(l)
-      else out.push({ kind: l.kind, lines: [l] })
-    }
-    return out
-  }, [lines])
+function DiffLines({
+  lines,
+  mode,
+  view,
+}: {
+  lines: PreviewDiffLine[]
+  mode: PreviewFile['state']
+  view: DetailView
+}) {
+  /*
+   * 完整视图的行 = 丢弃 `removed`（旧文件才有的行），剩下的 context / added
+   * 就是新文件全文；后端按 diff 序输出（删在前、增在后），这里按新行号排回去。
+   * 新文件行号唯一 → 可以直接当 key。
+   */
+  const fullRows = useMemo(
+    () =>
+      lines
+        .filter((l) => l.kind !== 'removed')
+        .slice()
+        .sort((a, b) => a.no - b.no),
+    [lines],
+  )
 
-  /* 默认展开「未变段」的头尾各一小截？——不，作者要的是「变的先显示、其他省略」：
-     默认**全折**，只留一行计数可点开。新增（mode==='added'）不折 —— 没有"未变"可言。 */
-  const [open, setOpen] = useState<Record<number, boolean>>({})
-
-  return (
-    <div className={s.diff} data-mode={mode}>
-      {blocks.map((b, i) => {
-        if (b.kind === 'context') {
-          const isOpen = open[i] ?? false
-          return (
-            <div key={i} className={s.foldBlock}>
-              <button
-                type="button"
-                className={s.foldRow}
-                aria-expanded={isOpen}
-                onClick={() => setOpen((v) => ({ ...v, [i]: !isOpen }))}
-              >
-                <span className={s.caret} aria-hidden>
-                  {isOpen ? '▾' : '▸'}
-                </span>
-                … {b.lines.length} 行未变 …
-              </button>
-              {isOpen &&
-                b.lines.map((l) => (
-                  <div key={l.no} className={s.lineCtx}>
-                    <span className={s.gutter} aria-hidden />
-                    <span className={s.lineNo}>{l.no}</span>
-                    <code className={s.lineTxt}>{l.text === '' ? '\u00a0' : l.text}</code>
-                  </div>
-                ))}
-            </div>
-          )
-        }
-        return b.lines.map((l) => (
-          <div key={`${i}-${l.no}`} className={l.kind === 'added' ? s.lineAdd : s.lineDel}>
-            <span className={s.gutter} aria-hidden>
-              {l.kind === 'added' ? '+' : '−'}
-            </span>
+  if (view === 'full') {
+    return (
+      <div className={s.diff}>
+        {fullRows.map((l) => (
+          <div key={l.no} className={s.lineCtx}>
+            <span className={s.gutter} aria-hidden />
             <span className={s.lineNo}>{l.no}</span>
             <code className={s.lineTxt}>{l.text === '' ? '\u00a0' : l.text}</code>
           </div>
-        ))
-      })}
+        ))}
+      </div>
+    )
+  }
+
+  /* 对比视图：**不省略** —— 后端给的每一行（含未变的 context）都平铺出来，
+     与「完整」的差别只剩红绿底。行序就是后端的 diff 序（删在前、增在后，与 git 同序）。 */
+  return (
+    <div className={s.diff} data-mode={mode}>
+      {lines.map((l, i) => (
+        <div key={`${i}-${l.kind}-${l.no}`} className={l.kind === 'added' ? s.lineAdd : l.kind === 'removed' ? s.lineDel : s.lineCtx}>
+          <span className={s.gutter} aria-hidden>
+            {l.kind === 'added' ? '+' : l.kind === 'removed' ? '−' : ''}
+          </span>
+          <span className={s.lineNo}>{l.kind === 'removed' ? '' : l.no}</span>
+          <code className={s.lineTxt}>{l.text === '' ? '\u00a0' : l.text}</code>
+        </div>
+      ))}
     </div>
   )
 }

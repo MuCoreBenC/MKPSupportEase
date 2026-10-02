@@ -33,13 +33,13 @@ type Json = Record<string, unknown>
 const WORDS: Json = {
   build: {
     built: { label: '已生成', explain: '磁盘里的生成物和当前配方一致，不用重新生成' },
-    stale: { label: '待重新生成', explain: '磁盘里的生成物跟当前配方不一致了 —— 生成之后客户端才会拿到新的' },
+    stale: { label: '待更新', explain: '磁盘里已经有上一版产物，配方改过了还没重新生成 —— 生成之后客户端才会拿到新的' },
     neverBuilt: { label: '未生成', explain: '还没生成过，客户端现在下载不到这一版' },
     noResources: { label: '配方文件缺失', explain: '这个版本没有配方文件 —— 这是异常，不是正常状态：版本一建出来就该带着配方文件。参数照样能看能改，但生成不了' },
   },
   artifact: {
     fresh: { label: '已生成', explain: '所有该有产物的版本都是最新的' },
-    stale: { label: '待重新生成', explain: '有版本的配方改过了，产物还没跟上' },
+    stale: { label: '待更新', explain: '有版本的配方改过了，产物还没跟上' },
     missing: { label: '未生成', explain: '一个产物都还没生成过' },
   },
   save: { saved: { label: '已保存', explain: null }, dirty: { label: '未保存', explain: null } },
@@ -323,11 +323,19 @@ const ASSETS: FixtureRef[] = [
   { id: 'a1-orca-02-010', kind: 'slicerProfile', slicer: 'orca', profile: 'process', name: 'A1：Orca 0.2 喷头 0.10 层高（可选）', path: 'orca/Process/0.2mm/OrcaProcess A1 0.2 0.10.json' },
 ]
 
-/** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST） */
-const BUNDLES: { id: string; display: string; machineId: string; assetRefs: string[]; updatedAt: string | null }[] = [
-  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-bbs-04-020'], updatedAt: '2026-07-12' },
-  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
-  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
+/** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST）。
+ *  `presets` = 套餐挂的 MKP 预设（**版本 uid 直引，文件可不存在** —— 作者 2026-10-03） */
+const BUNDLES: {
+  id: string
+  display: string
+  machineId: string
+  assetRefs: string[]
+  presets: string[]
+  updatedAt: string | null
+}[] = [
+  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-bbs-04-020'], presets: ['A1/STANDARD'], updatedAt: '2026-07-12' },
+  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-bbs-02-010', 'a1-orca-02-010'], presets: ['A1/FAST'], updatedAt: '2026-07-12' },
+  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], presets: [], updatedAt: '2026-07-12' },
 ]
 
 /** 可见性（含草稿态）：fileId → 'archiveOnly'。写路径与 save 都落这里 */
@@ -396,11 +404,22 @@ function bundleListOf(query: string | null) {
           visibility: pendingVis.get(r) ?? 'menu',
         }
       }),
+      presets: b.presets.map((uid) => ({
+        uid,
+        fileName: `${uid.split('/')[0].toLowerCase()}-${uid.split('/')[1].toLowerCase()}.toml`,
+        generated: true,
+      })),
       users: versions.filter((v) => (v.recommendedBundle ?? '').toLowerCase() === b.id.toLowerCase())
         .map((v) => ({ machineId: v.machineId, versionId: v.id })),
       defaultFor: MACHINE_VIEWS.filter((m) => (m.defaultBundle ?? '').toLowerCase() === b.id.toLowerCase()).map((m) => m.id),
     })),
     total: BUNDLES.length,
+    presetCandidates: versions.map((v) => ({
+      uid: `${v.machineId}/${v.id}`,
+      name: `${v.machineId} ${v.id}`,
+      fileName: `${v.machineId.toLowerCase()}-${v.id.toLowerCase()}.toml`,
+      state: 'built' as const,
+    })),
   }
 }
 
@@ -891,12 +910,14 @@ export function installMockBackend() {
       case 'wb_set_bundle_refs': {
         const bundleId = args?.bundleId as string
         const ids = (args?.assetIds as string[]) ?? []
+        const presetUids = (args?.presetUids as string[]) ?? []
         const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
         if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
         if (!ids.some((id) => ASSETS.find((x) => x.id === id)?.kind === 'slicerProfile')) {
           return Promise.reject({ code: 'INVALID', message: `套餐 ${bundleId} 的 assetRefs 里没有一条 BBS 预设`, traceId: 'mock' })
         }
         b.assetRefs = ids
+        b.presets = presetUids
         b.updatedAt = '今天（演示）'
         return Promise.resolve(bundleListOf(null))
       }

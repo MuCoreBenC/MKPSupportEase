@@ -33,7 +33,9 @@ use serde::Serialize;
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::clock;
+use crate::workbench::domain::derive::Book;
 use crate::workbench::domain::patch::Visibility;
+use crate::workbench::domain::wording::BuildState;
 use crate::workbench::presets::{AssetKind, Presets};
 
 use super::{state, with_ctx, with_ctx_mut};
@@ -73,6 +75,8 @@ pub struct BundleView {
     pub display: String,
     pub machine_id: String,
     pub asset_refs: Vec<BundleRefView>,
+    /// 配发的 MKP 预设（uid 直引，**文件可不存在** —— 作者 2026-10-03）
+    pub presets: Vec<PresetRefView>,
     /// 上一次改动日期（迁移照抄旧值；真改动由 `set_refs` 盖新值）
     pub updated_at: Option<String>,
     /// **一版一套**：`recommendedBundle` 指着这份套餐的版本
@@ -88,6 +92,33 @@ pub struct BundleList {
     pub bundles: Vec<BundleView>,
     /// 过滤前一共几份 —— 页脚「筛出 X / Y 个」的 Y
     pub total: usize,
+    /// MKP 组的候选池：能生成的版本（作者 2026-10-03：套餐要能挂 MKP 预设，
+    /// **文件不存在也能先挂** —— 预设是生成产物，生成之后文件才落）
+    pub preset_candidates: Vec<PresetCandidate>,
+}
+
+/// 套餐里挂着的一条 MKP 预设（uid 直引，不经过资产库 —— doc §12.5 的本义）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetRefView {
+    /// 版本 uid（`A1/STANDARD`），与 `bundles.toml` 的 `presets` 字段同形
+    pub uid: String,
+    /// 产物文件名（命名规则算出的那份）。没生成过也有 —— 名字是算出来的
+    pub file_name: String,
+    /// 磁盘上有没有这份产物。false = 挂了名字还没生成，不是错误
+    pub generated: bool,
+}
+
+/// MKP 组的候选：一棵版本（能生成的），带当前生成态
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetCandidate {
+    pub uid: String,
+    /// 「机型 版本名」，给人看的
+    pub name: String,
+    pub file_name: String,
+    /// 原始状态档（built / stale / neverBuilt / noResources），词由前端词表挑
+    pub state: BuildState,
 }
 
 /// committed ⊕ draft 的可见性合并（与 `Book` 里 stock_rows 用的同一条口径）：
@@ -107,12 +138,25 @@ fn visibility_of(
 /// 视图组装。`query` 是 id / 显示名的子串筛选（大小写不敏感），命令与测试共用
 fn list_of(
     presets: &Presets,
+    book: &Book<'_>,
     committed: &std::collections::BTreeMap<String, Visibility>,
     draft: &std::collections::BTreeMap<String, Visibility>,
     query: Option<&str>,
 ) -> BundleList {
     let q = query.unwrap_or_default().trim().to_lowercase();
     let all = presets.bundles.items();
+    // MKP 组的候选池：能生成的版本（含还没生成过的 —— 文件不存在也能先挂）
+    let preset_candidates: Vec<PresetCandidate> = book
+        .build_rows()
+        .iter()
+        .filter(|r| r.buildable)
+        .map(|r| PresetCandidate {
+            uid: r.uid.clone(),
+            name: format!("{} {}", r.machine, r.name),
+            file_name: r.mkp_file.clone().unwrap_or_default(),
+            state: r.state,
+        })
+        .collect();
     let bundles = all
         .iter()
         .filter(|b| {
@@ -166,6 +210,20 @@ fn list_of(
                 display: b.display.clone(),
                 machine_id: b.machine_id.clone(),
                 asset_refs: refs,
+                // MKP 组：uid 直引。文件在不在照实说（挂了名字还没生成 = false，
+                // 不是错误 —— 作者 2026-10-03：套餐可以先挂）
+                presets: b
+                    .presets
+                    .iter()
+                    .map(|uid| PresetRefView {
+                        uid: uid.clone(),
+                        file_name: book
+                            .version(uid)
+                            .map(|v| v.mkp_file.clone())
+                            .unwrap_or_default(),
+                        generated: book.build_state(uid) == BuildState::Built,
+                    })
+                    .collect(),
                 updated_at: b.updated_at.clone(),
                 users,
                 default_for,
@@ -175,6 +233,7 @@ fn list_of(
     BundleList {
         bundles,
         total: all.len(),
+        preset_candidates,
     }
 }
 
@@ -183,11 +242,13 @@ fn list_of(
 pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
     traced("wb_bundles", |_| {
         with_ctx(|ctx| {
-            let (committed, draft, _) = state(ctx)?;
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
             Ok(list_of(
                 &ctx.presets,
-                &committed.visibility,
-                &draft.visibility,
+                &book,
+                &c.visibility,
+                &d.visibility,
                 query.as_deref(),
             ))
         })
@@ -197,23 +258,32 @@ pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
 /// 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，回一份新的清单。
 ///
 /// 校验在领域层（[`crate::workbench::presets::Presets::set_bundle_refs`]）：
-/// 每条 ref 都要解析到真实资产、改完至少一条 BBS、内容没变不写盘。
+/// 每条 ref 都要解析到真实资产、每条 preset uid 都要解析到**本机型**的真版本
+///（**文件不存在没关系** —— 预设是生成产物，作者 2026-10-03：套餐先挂名字）、
+/// 改完至少一条 BBS、内容没变不写盘。
 /// `updatedAt` 由那次写盖上当天 —— 内容变了就是改了套餐。
 #[tauri::command]
 pub fn wb_set_bundle_refs(
     bundle_id: String,
     asset_ids: Vec<String>,
+    preset_uids: Vec<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_set_bundle_refs", |_| {
         with_ctx_mut(|ctx| {
             // 时间戳由工作台这一侧给（时间源只有 `clock` 一处，见它的模块头）
-            ctx.presets
-                .set_bundle_refs(&bundle_id, &asset_ids, &clock::now_iso8601())?;
-            let (committed, draft, _) = state(ctx)?;
+            ctx.presets.set_bundle_refs(
+                &bundle_id,
+                &asset_ids,
+                &preset_uids,
+                &clock::now_iso8601(),
+            )?;
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
             Ok(list_of(
                 &ctx.presets,
-                &committed.visibility,
-                &draft.visibility,
+                &book,
+                &c.visibility,
+                &d.visibility,
                 None,
             ))
         })

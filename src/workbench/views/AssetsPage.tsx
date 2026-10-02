@@ -58,7 +58,10 @@ const KIND_LABEL: Record<string, string> = {
   slicerProfile: '切片器',
 }
 
-/** 筛选轴的类型化包装 —— 全部走命令参数，本地不复算 */
+/** 筛选轴的类型化包装 —— 全部走命令参数，本地不复算。
+ *  `image`（整机图）**回到台账**：作者 2026-10-03 改判 —— 第三刀把它挪进客户端
+ *  源码是错的（不会编程的用户改不了图）。它仍然**不进云端交付**，但必须
+ *  在工作台看得见、选得着 */
 type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile'
 type Assign = 'all' | 'assigned' | 'optional' | 'archiveOnly'
 

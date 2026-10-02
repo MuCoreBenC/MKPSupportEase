@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "679967fba8de17f9",
+  "revision": "10920fb1a47db6b8",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -642,6 +642,7 @@
       "assetRefs": [
         "a1-bbs-04-020"
       ],
+      "presets": [],
       "updatedAt": "2026-07-12"
     },
     {
@@ -651,6 +652,7 @@
       "assetRefs": [
         "a1_mini-bbs-04-020"
       ],
+      "presets": [],
       "updatedAt": "2026-07-12"
     },
     {
@@ -660,6 +662,7 @@
       "assetRefs": [
         "p1s-bbs-04-024"
       ],
+      "presets": [],
       "updatedAt": "2026-07-12"
     },
     {
@@ -669,6 +672,7 @@
       "assetRefs": [
         "p2s-bbs-04-024"
       ],
+      "presets": [],
       "updatedAt": "2026-07-12"
     },
     {
@@ -678,6 +682,7 @@
       "assetRefs": [
         "x1c-bbs-04-024"
       ],
+      "presets": [],
       "updatedAt": "2026-07-12"
     }
   ],

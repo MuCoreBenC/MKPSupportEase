@@ -39,6 +39,7 @@ use super::derive::Book;
 use super::patch::CatalogMachine;
 use super::visibility::Gate;
 use super::wording as w;
+use super::wording::BuildState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,13 +166,17 @@ pub fn inspect(book: &Book<'_>) -> Report {
 }
 
 /// **预检全量**（b05 Task 11.8）：[`inspect`] 的全部 + 清单 ↔ 配方对齐
-/// （b05 Task 11.4 / 11.5 / 11.6）。
+/// （b05 Task 11.4 / 11.5 / 11.6）+ 交付目录的「清单 ↔ 文件」自查。
 ///
-/// 配方文本由调用方给（真数据是 `preset::PRESET_RECIPES_TOML`）。**收 `Result`**
-/// 是刻意的：配方本身坏掉（读不回来 / 校验不过）是 gen-presets 那条链的问题，
-/// 它该成为预检报告里的**一条**，而不是让整个预检命令失败 —— 校验层停摆
-/// 等于把「数据坏了」变成「工具坏了」，后者更糟。
-pub fn preflight(book: &Book<'_>, recipe: Result<&Recipe, &str>) -> Report {
+/// 配方文本与交付自查的结果**都由调用方给、都收 `Result`** —— 这是刻意的：
+/// 它们是磁盘上的事实，domain 的检查保持纯函数；而且坏了（配方读不回来 /
+/// 目录对不上）该成为预检报告里的**一条**，而不是让整个预检命令失败 ——
+/// 校验层停摆等于把「数据坏了」变成「工具坏了」，后者更糟。
+pub fn preflight(
+    book: &Book<'_>,
+    recipe: Result<&Recipe, &str>,
+    delivery: Result<(), String>,
+) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
     collect(book, &mut issues);
     match recipe {
@@ -183,6 +188,23 @@ pub fn preflight(book: &Book<'_>, recipe: Result<&Recipe, &str>) -> Report {
             detail: format!(
                 "{e}\n内置预设那条链（gen-presets）眼下用不了它，但工作台的其余检查\
                  与生成照常 —— 这一轮先把别的看完。"
+            ),
+            at: Where::view(View::Build),
+        }),
+    }
+    match delivery {
+        Ok(()) => {}
+        Err(detail) => issues.push(Issue {
+            id: "dist.catalog_mismatch".to_owned(),
+            // **待办，不是阻断**（作者 2026-10-03 要求把这条升硬 —— 但不能是阻断）：
+            // 阻断会压住生成与发布两颗按钮，而「重算清单」恰恰是修复动作 ——
+            // 等于把修复的路堵死。待办显眼、进计数、不挡闸。
+            severity: Severity::Todo,
+            title: "交付目录的清单和文件对不上".to_owned(),
+            detail: format!(
+                "{detail}\n客户端按目录登记的字节做下载校验，对不上就是下载必挂\
+                 （「响应比目录登记的大」）。在工作台生成一次（清单会跟着重算），\
+                 或重跑预设数据发布，让记录与文件回到同一代。"
             ),
             at: Where::view(View::Build),
         }),
@@ -513,9 +535,11 @@ fn filter_ghosts(book: &Book<'_>, out: &mut Vec<Issue>) {
     }
 }
 
-/// 交付这一面：登记了、却没进任何套餐的**切片器预设**。
+/// 交付这一面：登记了、却没进任何套餐的**切片器预设**；有旧版待重新生成的提示。
 ///
-/// **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）
+/// **提示，不是待办**：不分配给谁是一种正常的交付身份（doc §10.2）；
+/// 旧产物客户端还能下载到，也不是坏数据 —— 但作者点名（2026-10-02）：
+/// 「有旧的、新的没生成」这件事该在检查卡里看见，不能只在生成页数出来。
 fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
     let bundled: std::collections::BTreeSet<String> = book
         .presets
@@ -544,6 +568,29 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
                 orphan.join("、")
             ),
             at: Where::view(View::Menu),
+        });
+    }
+
+    // 旧版待重新生成的提示：磁盘上的产物是上次生成的，配方已经改过了。
+    // 聚合成一条（stale 可能一连十几个版本，逐版一条会把检查卡淹掉），
+    // 「去处理」落在生成页 —— 那里能一眼看全、勾一批重新生成。
+    let stale: Vec<String> = book
+        .versions()
+        .iter()
+        .filter(|v| book.build_state(&v.uid) == BuildState::Stale)
+        .map(|v| v.uid.clone())
+        .collect();
+    if !stale.is_empty() {
+        out.push(Issue {
+            id: "build.stale_versions".to_owned(),
+            severity: Severity::Hint,
+            title: format!("有 {} 个版本的产物是旧的", stale.len()),
+            detail: format!(
+                "{} —— 配方改过之后还没重新生成，客户端现在下载到的是上一版。\
+                 去生成页勾上重新生成，客户端才会拿到新的。",
+                stale.join("、")
+            ),
+            at: Where::view(View::Build),
         });
     }
 
@@ -711,7 +758,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let d = Draft::default();
         let book = Book::new(&f.presets, &c, &d);
 
-        let r = preflight(&book, Err("配方读不回来（测试）"));
+        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()));
         assert!(
             r.issues
                 .iter()
@@ -850,6 +897,110 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let r = inspect(&Book::new(&f.presets, &c, &d));
         assert_eq!(r.issues[0].severity, Severity::Block);
         assert!(r.issues.windows(2).all(|w| w[0].severity <= w[1].severity));
+    }
+
+    /// 交付目录的清单与文件对不上 → 预检里是一条**待办**。
+    ///
+    /// 作者 2026-10-03 要求把这条升硬（「不应该显示提示，而应该是阻断」）——
+    /// 但不能真放阻断：阻断会压住生成与发布两颗按钮，而「重算清单」恰恰是
+    /// 修复动作，等于把修复的路堵死。待办显眼、进计数、不挡闸。
+    #[test]
+    fn a_mismatched_delivery_catalog_is_a_todo() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        let r = preflight(
+            &book,
+            Err("配方读不回来（测试）"),
+            Err("1 份与目录登记不一致：mkp/presets/A1-standard.toml（目录记 4299 字节，实际 4335 字节）".to_owned()),
+        );
+        let todo = r
+            .issues
+            .iter()
+            .find(|i| i.id == "dist.catalog_mismatch")
+            .expect("清单对不上，这条该在");
+        assert_eq!(
+            todo.severity,
+            Severity::Todo,
+            "不挡生成也不挡发布 —— 修复动作正是重算清单"
+        );
+        assert!(
+            todo.detail.contains("4299"),
+            "要带着自查给的明细：{}",
+            todo.detail
+        );
+        // 配方也坏时两条互不吞
+        assert!(r.issues.iter().any(|i| i.id == "recipe.unreadable"));
+
+        // 自查过了就没有这条
+        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()));
+        assert!(r.issues.iter().all(|i| i.id != "dist.catalog_mismatch"));
+    }
+
+    /// 有旧版待重新生成时，检查卡要给一条提示（作者 2026-10-02：
+    /// 「有旧的、然后新的未生成」这件事只在生成页数得出来，左侧检查里没有）。
+    ///
+    /// **提示档不是待办**：旧产物客户端还能下载到，不是坏数据也不是要填的空。
+    #[test]
+    fn stale_versions_show_up_as_a_hint() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+
+        // 先按当前配方「生成」一次（记下指纹）
+        let fp = Book::new(&f.presets, &c, &d)
+            .version_layers("A1/STANDARD")
+            .unwrap()
+            .fingerprint();
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::MarkBuilt {
+                uids: vec!["A1/STANDARD".to_owned()],
+                stamp: "2026-01-01T00:00:00Z".to_owned(),
+                fingerprints: [("A1/STANDARD".to_owned(), fp)].into_iter().collect(),
+            }],
+        )
+        .unwrap();
+
+        // 产物跟得上配方 → 没有这条提示
+        let r = inspect(&Book::new(&f.presets, &c, &d));
+        assert!(r.issues.iter().all(|i| i.id != "build.stale_versions"));
+
+        // 改一个值 → 旧了 → 提示出现：提示档、点得出数量、列得出是哪几版
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: crate::workbench::domain::Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        let r = inspect(&Book::new(&f.presets, &c, &d));
+        let hint = r
+            .issues
+            .iter()
+            .find(|i| i.id == "build.stale_versions")
+            .expect("改了配方没重新生成，这条该在");
+        assert_eq!(
+            hint.severity,
+            Severity::Hint,
+            "旧版还能用，是「值得知道」不是「要人去填的空」"
+        );
+        assert!(hint.title.contains('1'), "要点出数量：{}", hint.title);
+        assert!(
+            hint.detail.contains("A1/STANDARD"),
+            "要列得出是哪几版：{}",
+            hint.detail
+        );
+        assert_eq!(hint.at.view, View::Build, "去处理要落在生成页");
     }
 
     /// 每条都要说得出「去哪儿」与「怎么办」
