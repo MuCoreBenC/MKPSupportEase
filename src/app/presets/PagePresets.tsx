@@ -36,6 +36,11 @@
  * 搜索框里原来还有一枚「命中 N 条」，和「共 N 项」是同一个数，删掉了：同一个数字写两遍，
  * 哪天算法改了就会有一处忘记跟。
  *
+ * 它右边那格台账：**「仓库」与「我的」两个数跟着当前类型档走**（MKP 档数 MKP 的、
+ * 切片器档数切片器的；图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字
+ * 混进某一档的语境里只会让人对不上（作者 2026-10-02 点名「仓库 9」）。
+ * 「本机」仍是官方副本的总数（老契约 `getLocalFiles` 的读数，id 集合分不出类型）。
+ *
  * # 本地 / 云端是**两张互不相干的表**
  *
  *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ **用户线**
@@ -107,7 +112,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { api, NotImplementedError } from '../../api'
+import { api, errorText, NotImplementedError } from '../../api'
 import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
@@ -134,6 +139,8 @@ import {
   MINE_RENAME,
   DOWNLOAD_WHY,
   MISSING_METHOD,
+  mineCountOfAxis,
+  treeCountOfAxis,
   NO_ASSET_WHY,
   RELEASE_SUSPECT_WHY,
   STATUS_TEXT,
@@ -413,7 +420,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           },
           (e: unknown) => {
             setBusyKey(null)
-            setNote({ text: `${verb}失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+            setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
           },
         )
       return
@@ -438,7 +445,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           text:
             e instanceof NotImplementedError
               ? `${notImplementedText('downloadFiles')}（${row.fileName}）`
-              : `下载失败：${e instanceof Error ? e.message : String(e)}`,
+              : `下载失败：${errorText(e)}`,
           bad: true,
         })
       },
@@ -482,7 +489,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         },
         (e: unknown) => {
           setNote({
-            text: `这一批没能发出去（一份都没下）：${e instanceof Error ? e.message : String(e)}`,
+            text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
             bad: true,
           })
         },
@@ -504,7 +511,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         setBody({
           path,
           text: null,
-          error: e instanceof Error ? e.message : String(e),
+          error: errorText(e),
           loading: false,
         }),
     )
@@ -564,7 +571,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       },
       (e: unknown) => {
         setNote({
-          text: `改不了 ${row.fileName}：${e instanceof Error ? e.message : String(e)}`,
+          text: `改不了 ${row.fileName}：${errorText(e)}`,
           bad: true,
         })
       },
@@ -588,7 +595,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           setEditing((cur) =>
             cur === null
               ? cur
-              : { ...cur, draftError: e instanceof Error ? e.message : String(e) },
+              : { ...cur, draftError: errorText(e) },
           ),
       )
     }, 700)
@@ -603,7 +610,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         setNote({ text: '已放弃这次编辑 —— 官方原件从头到尾没有被改过', bad: false })
       },
       (e: unknown) =>
-        setNote({ text: `放弃不了：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+        setNote({ text: `放弃不了：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -627,7 +634,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       },
       (e: unknown) =>
         setNote({
-          text: `没存上：${e instanceof Error ? e.message : String(e)}`,
+          text: `没存上：${errorText(e)}`,
           bad: true,
         }),
     )
@@ -688,7 +695,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         setNaming((cur) =>
           cur === null
             ? cur
-            : { ...cur, busy: false, error: e instanceof Error ? e.message : String(e) },
+            : { ...cur, busy: false, error: errorText(e) },
         ),
     )
   }
@@ -709,7 +716,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           bad: false,
         }),
       (e: unknown) =>
-        setNote({ text: `没删成：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+        setNote({ text: `没删成：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -724,7 +731,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     data.reveal(row.path).then(
       () => undefined,
       (e: unknown) =>
-        setNote({ text: `没打开：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+        setNote({ text: `没打开：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -767,7 +774,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         },
         (e: unknown) => {
           setBusyKey(null)
-          setNote({ text: `复制失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+          setNote({ text: `复制失败：${errorText(e)}`, bad: true })
         },
       )
       return
@@ -784,7 +791,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         () => setBusyKey(null),
         (e: unknown) => {
           setBusyKey(null)
-          setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+          setNote({ text: `应用失败：${errorText(e)}`, bad: true })
         },
       )
       return
@@ -806,7 +813,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       () => setBusyKey(null),
       (e: unknown) => {
         setBusyKey(null)
-        setNote({ text: `应用失败：${e instanceof Error ? e.message : String(e)}`, bad: true })
+        setNote({ text: `应用失败：${errorText(e)}`, bad: true })
       },
     )
   }
@@ -915,7 +922,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
     const canEdit =
-      (row.origin === 'release' && row.releaseState === 'ok') ||
+      (row.origin === 'release' && row.kind === 'mkp_preset' && row.releaseState === 'ok') ||
       (row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable')
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
@@ -1227,18 +1234,26 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项` +
                 /* 小窗里台账整条隐掉了，数并进这句，免得连同它的说明一起消失 */
                 (density === 'mini'
-                  ? `。仓库 ${data.tree.totalFiles} 个官方文件（已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${data.mine.length} 个。${DOWNLOAD_WHY}`
+                  ? `。仓库里这一档类型一共 ${treeCountOfAxis(data.tree, page.kind)} 个官方文件（全机型，已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${mineCountOfAxis(data.mine, page.kind)} 个。${DOWNLOAD_WHY}`
                   : '')
               }
             >
               共 {table.rows.length} 项
             </span>
+            {/*
+             * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
+             * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
+             * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
+             * 图标 / 模型不归这一页，哪个数里都不含它们。
+             * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
+             * 真机上还没接），id 集合分不出类型，先如实写全量。
+             */}
             <span
               className={s.ledger}
-              title={`仓库里一共几个官方文件（已剔掉仅归档的）· 本机已有几个官方副本（getLocalFiles，演示集合）· 你自己的文件几个（getUserPresetFiles，扫 presets-mine；云端没有它们）。${DOWNLOAD_WHY}`}
+              title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
             >
-              仓库 {data.tree.totalFiles} · 本机 {data.localIds.length} + 我的{' '}
-              {data.mine.length}
+              仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
+              {mineCountOfAxis(data.mine, page.kind)}
             </span>
           </span>
         </div>

@@ -55,7 +55,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../../api'
+import { api, errorText } from '../../api'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -74,6 +74,7 @@ import {
   applySlicerFilters,
   archivedIds,
   buildPresetTree,
+  catalogKindToFileKind,
   cloudRows,
   localRows,
   machineNode,
@@ -248,7 +249,7 @@ export interface ReleaseState {
   version: string | null
   /** 刻意恒 null：目录没有时间字段，没有可信时间源不编一个 */
   at: string | null
-  /** 目录里登记的交付预设（MKP 的全量） */
+  /** 目录里登记的交付文件（**预设页认的那两类**：MKP + 切片器；源头已按 kind 分好类别） */
   presets: ReleasePresetSource[]
   /** 下载区（`mkp/`）里已有、**且与目录登记一致**的（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
@@ -284,7 +285,10 @@ const EMPTY_RELEASE: ReleaseState = {
  */
 export function usePresetData(importRevision = 0): PresetData {
   const [machines, setMachines] = useState<Machine[]>([])
-  const [tree, setTree] = useState<PresetTree>({ machines: [], totalFiles: 0 })
+  const [tree, setTree] = useState<PresetTree>({
+    machines: [],
+    fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 },
+  })
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
@@ -334,15 +338,28 @@ export function usePresetData(importRevision = 0): PresetData {
       if (!driftedSet.has(fileName)) return 'missing'
       return verdicts.get(fileName) === 'old' ? 'old' : 'tampered'
     }
-    const listed: ReleasePresetSource[] = catalog.files.map((f) => ({
-      uid: `${f.machineId}/${f.versionId}`,
-      machineId: f.machineId,
-      versionId: f.versionId,
-      fileName: f.fileName,
-      size: f.size,
-      releaseVersion: null,
-      state: stateOf(f.fileName),
-    }))
+    /*
+     * **分类判据是 catalog 的 `kind`**，不是扩展名、也不是"目录里只有预设"那个旧假设：
+     * 预设页认的两类（MKP / 切片器）留下、带上类别；图标 / 模型等资源**不进这一页**
+     * —— 它们由自己的资源体系消费。2026-10-02 作者截图里 `a1.svg` 和
+     * `MKPProcess ….json` 混在「MKP 配置」表里，就是这一层没看 `kind` 造成的。
+     */
+    const listed: ReleasePresetSource[] = catalog.files.flatMap((f) => {
+      const kind = catalogKindToFileKind(f.kind)
+      if (kind === null) return []
+      return [
+        {
+          uid: `${f.machineId}/${f.versionId}`,
+          machineId: f.machineId,
+          versionId: f.versionId,
+          fileName: f.fileName,
+          kind,
+          size: f.size,
+          releaseVersion: null,
+          state: stateOf(f.fileName),
+        },
+      ]
+    })
     /* 判据用 fileName：盘就是底账，盘上认的文件名 = 目录登记的文件名（不是 id、不是路径） */
     const localList = listed.filter((p) => p.state === 'ok')
     const staleList = listed.filter((p) => p.state === 'old' || p.state === 'tampered')
@@ -431,7 +448,7 @@ export function usePresetData(importRevision = 0): PresetData {
 
     load().catch((e: unknown) => {
       if (!alive) return
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorText(e))
     })
 
     return () => {

@@ -665,6 +665,34 @@ export const mockApi: MkpApi = {
           sha256: '2'.repeat(64),
           size: 2048,
         },
+        {
+          /*
+           * 切片器那一类的交付文件（`bbs_config`）：预设页按 `kind` 把它分流进
+           * 「切片器配置 → 云端」——MKP 档**不列它**（真机 catalog 里它们占 9 条，
+           * 2026-10-02 作者截图里混进 MKP 表的就有它）。
+           */
+          kind: 'bbs_config',
+          fileName: 'MKPProcess A1 0.4 0.20.json',
+          path: 'mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
+          machineId: 'A1',
+          versionId: '',
+          sha256: '3'.repeat(64),
+          size: 1332,
+        },
+        {
+          /*
+           * 图标（`icon`）：**不归预设页** —— 它是资源，由自己的资源体系消费。
+           * 登记在 catalog 里只为钉住一条判据：「登记了」不等于「预设页要显示」
+           * （同截图的 `a1.svg`）。
+           */
+          kind: 'icon',
+          fileName: 'a1.svg',
+          path: 'mkp/icons/a1.svg',
+          machineId: 'A1',
+          versionId: '',
+          sha256: '4'.repeat(64),
+          size: 2400,
+        },
       ],
       registry: catalogRegistry(),
     }

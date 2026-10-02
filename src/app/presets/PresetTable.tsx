@@ -110,6 +110,7 @@ import {
   LIVE_WHY,
   NO_ASSET_WHY,
   NO_STAT_WHY,
+  SLICER_RELEASE_WHY,
   originChip,
   UNKNOWN,
   versionsText,
@@ -443,6 +444,17 @@ export default function PresetTable({
                             {ACTION_TEXT.mkp}
                           </button>
                         )
+                      ) : row.releaseUid !== undefined && row.kind !== 'mkp_preset' ? (
+                        /*
+                         * 切片器那一类的交付行（catalog 登记、能下载）在本地表里**没有可点的动作**：
+                         * 不能「应用」（使用中指针只认 MKP 预设）；「复制」那条路只认资产库的
+                         * asset id —— 原来这里画的是「复制」，点了**静静没反应**
+                         * （`runLive` 里 assetId 是 undefined 就 return）。给一个点了没反应的
+                         * 按钮，与"点了必报错"同罪：不给。
+                         */
+                        <span className={s.actNone} title={SLICER_RELEASE_WHY}>
+                          {DASH_}
+                        </span>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
                         /* 官方副本没有 asset id 时也应用不了（契约那两个写只认 asset id） */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
@@ -626,11 +638,14 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 临时编辑的入口：**只有"与目录一致"的交付行**给 ——
+                         * 临时编辑的入口：**只有"与目录一致"的 MKP 交付行**给 ——
                          * 没下载（missing）就没有正文可改；需更新（stale）那一份的内容本身存疑，
-                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）。
+                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）；
+                         * 切片器那一类也不是预设正文，改无从谈起。
                          */}
-                        {row.origin === 'release' && row.releaseState === 'ok' && (
+                        {row.origin === 'release' &&
+                          row.kind === 'mkp_preset' &&
+                          row.releaseState === 'ok' && (
                           <>
                             <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
                             <dd className={s.factVal}>

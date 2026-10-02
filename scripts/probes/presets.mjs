@@ -147,6 +147,84 @@ if (mkpLocal.heads.join() === slicerLocal.heads.join()) {
   problems.push('MKP 与切片器的表头一样（列应该随类型变）')
 }
 
+/** 每一行的文件名 + 操作列那一格（按钮取按钮文字，灰字取文字） */
+const actions = () =>
+  page.evaluate(() => {
+    const rows = [...document.querySelectorAll('main tbody tr')].filter(
+      (r) => r.querySelector('td:not([colspan])') !== null,
+    )
+    return rows.map((r) => {
+      const name = r.querySelector('td')?.innerText.replace(/\s+/g, ' ').trim() ?? ''
+      const last = [...r.querySelectorAll('td')].pop()
+      const btn = last?.querySelector('button')
+      return {
+        name,
+        action: btn ? btn.innerText.trim() : (last?.innerText.replace(/\s+/g, ' ').trim() ?? ''),
+      }
+    })
+  })
+
+/* ---------- 2b. 分类边界：两档各认哪些（按 catalog 的 kind，不靠扩展名猜） ---------- */
+/*
+ * 守三件事：
+ *   ① MKP 档只认 `mkp_preset`：catalog 里登记的切片器配置（`.json`）与图标（`.svg`）
+ *      一行都不许出现在 MKP 那两张表里（2026-10-02 作者截图抓到的混排）；
+ *   ② 切片器档也不含图标，而且 **catalog 登记的切片器交付行**要出现、动作是「下载」
+ *      （它是真能下的那一支 —— 官方资产行那颗是死按钮）；
+ *   ③ 台账「仓库 N」跟着当前档数：两档各数各的类型，不混成一个全 catalog 的数。
+ *
+ * 真机上这一刀的现场：MKP 档 → 目录登记的 9 份 `.toml`；切片器档 → 9 份 `bbs_config`；
+ * `a1.svg`（icon）与 `*.3mf`（model）哪一档都不出现 —— 它们不归预设页。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'cloud').click({ force: true })
+await page.waitForTimeout(300)
+const mkpCloudRows2 = await actions()
+console.log(
+  `\n[分类边界 · MKP 云端] ${mkpCloudRows2.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`,
+)
+if (mkpCloudRows2.some((r) => r.name.includes('.svg'))) {
+  problems.push('MKP 档云端混进了图标（.svg 不归预设页）')
+}
+if (mkpCloudRows2.some((r) => r.name.includes('MKPProcess'))) {
+  problems.push('MKP 档云端混进了切片器配置（那是切片器档的）')
+}
+const mkpLedger = (await facts()).counts
+
+await rad('preset-kind', 'slicer').click({ force: true })
+await page.waitForTimeout(300)
+const slicerCloudRows2 = await actions()
+console.log(
+  `[分类边界 · 切片器云端] ${slicerCloudRows2.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`,
+)
+if (slicerCloudRows2.some((r) => r.name.includes('.svg'))) {
+  problems.push('切片器档云端混进了图标（.svg 不归预设页）')
+}
+const bbsReleaseRow = slicerCloudRows2.find((r) => r.name.includes('MKPProcess A1 0.4 0.20.json'))
+console.log(`[分类边界] catalog 登记的切片器交付行：${bbsReleaseRow?.action ?? '(没这一行)'}`)
+if (bbsReleaseRow === undefined) {
+  problems.push('切片器档云端没有 catalog 登记的切片器交付行（它该按 kind 分流到这里）')
+} else if (!/下载|更新|重新下载/.test(bbsReleaseRow.action)) {
+  problems.push(`切片器交付行的动作该是「下载」那一支（真能下），实测「${bbsReleaseRow.action}」`)
+}
+const slicerLedger = (await facts()).counts
+
+/*
+ * 台账：mock 里两档的「仓库 N」是两个不同的数（各数各的类型）。
+ * 相同 = 要么在数全量、要么这个断言要跟着演示数据改 —— 两种情况都该有人来看一眼。
+ */
+const ledgerNum = (t) => /仓库 (\d+)/.exec(t)?.[1] ?? ''
+console.log(
+  `[分类边界 · 台账] MKP 档「仓库 ${ledgerNum(mkpLedger)}」 切片器档「仓库 ${ledgerNum(slicerLedger)}」`,
+)
+if (ledgerNum(mkpLedger) === '' || ledgerNum(mkpLedger) === ledgerNum(slicerLedger)) {
+  problems.push('台账「仓库 N」该跟着当前档数（两档是各自类型的数，不该相同）')
+}
+
+/* 回到 MKP 档：后面的节按它走 */
+await rad('preset-kind', 'mkp').click({ force: true })
+await page.waitForTimeout(200)
+
 /* ---------- 3. 回本地，点行展开 ---------- */
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(250)
@@ -189,23 +267,6 @@ await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(200)
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
-
-/** 每一行的文件名 + 操作列那一格（按钮取按钮文字，灰字取文字） */
-const actions = () =>
-  page.evaluate(() => {
-    const rows = [...document.querySelectorAll('main tbody tr')].filter(
-      (r) => r.querySelector('td:not([colspan])') !== null,
-    )
-    return rows.map((r) => {
-      const name = r.querySelector('td')?.innerText.replace(/\s+/g, ' ').trim() ?? ''
-      const last = [...r.querySelectorAll('td')].pop()
-      const btn = last?.querySelector('button')
-      return {
-        name,
-        action: btn ? btn.innerText.trim() : (last?.innerText.replace(/\s+/g, ' ').trim() ?? ''),
-      }
-    })
-  })
 
 const localActions = await actions()
 console.log(`\n[交付四态 · 本地表] ${localActions.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)

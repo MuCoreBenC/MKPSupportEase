@@ -30,7 +30,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 
-import { api } from '../../api'
+import { api, errorText } from '../../api'
 import type { ImportItem, ImportOutcome, StagedImport } from '../../api'
 import Drawer from '../shared/Drawer'
 import { inTauri } from '../window'
@@ -63,10 +63,6 @@ export function ImportBanner() {
       ))}
     </div>
   )
-}
-
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
 }
 
 /** 重名那一格里的一行 */
@@ -154,7 +150,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
           })
         }
       } catch (e) {
-        note({ text: `导入没走成：${errText(e)}`, bad: true, lines: [] })
+        note({ text: `导入没走成：${errorText(e)}`, bad: true, lines: [] })
       } finally {
         busyRef.current = false
         setBusy(false)
@@ -209,7 +205,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
         })
       }
     } catch (e) {
-      note({ text: `导入没走成：${errText(e)}`, bad: true, lines: [] })
+      note({ text: `导入没走成：${errorText(e)}`, bad: true, lines: [] })
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -231,7 +227,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
   const pickFiles = useCallback(() => {
     void api.pickImportFiles().then(
       (paths) => void importPaths(paths),
-      (e: unknown) => note({ text: `打不开文件选择器：${errText(e)}`, bad: true, lines: [] }),
+      (e: unknown) => note({ text: `打不开文件选择器：${errorText(e)}`, bad: true, lines: [] }),
     )
   }, [importPaths, note])
 
