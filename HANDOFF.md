@@ -569,6 +569,24 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        （decor 从旧值搬到新值上）。7 条单测拿**真注册表**跑。
      - **下一步 = ③ 参数页接草稿链**：打开 → `begin_preset_edit`；改值 → `patch_preset_toml`；
        保存 → `commit_preset_draft`。之后 ④ 操作记录底座（先不做历史 UI）。
+     - ✅ **③ 已落地**（分支 `feat/parameter-draft-foundation`，2026-10-02）：参数页接上了草稿链。
+     - **产品语义（作者定，解耦）**：**当前应用**（`active-preset.json`）只决定"默认打开哪一份"；
+       **当前编辑**是参数页自己的状态。"用户切机型/版本 = 换编辑目标，**不等于应用它**"——
+       改 P1S 不动 `active-preset`。两概念在 `useParams` 里各是一个变量，不互相写。
+     - **后端**：新增 IPC `patch_preset_draft(paramKey, value)`（`ipc/mine.rs`）——
+       读 `run/draft-preset.json` → `presetdata::patch::patch_preset_toml` → 写回草稿正文。
+       `patch_preset_toml` 改成收 `&[ParamDef]`（不再收 `&ParamRegistry`）：字段定义有两个来源
+       （工作台 `ParamRegistry` / 客户端 catalog 的 `CatalogRegistry`），算法只认那张表。
+     - **前端**（`useParams`）：`editingPreset`（编辑目标，从 `catalog.editTargetByCombo` 查）+
+       `patchDraft`（`apply`/`undo`/`redo` 每次改动都落草稿）+ `commitDraft`（`save` 时提交）。
+       `editTargetByCombo` 官方线来自 catalog 的 files，用户线来自 `getUserPresetFiles`（血统反推机型/版本）。
+     - **页面**：草稿没写进磁盘 / 这个 combo 没配 MKP 时，各显示一行红字（`PageParams.module.css` 的 `.warn`）。
+     - **修了一个 mock 夹具漂移**：`param_registry.json` 快照 + `MOCK_OFFICIAL_TEXT` 还停在
+       `offset = { x, y, z }` 的旧形状（PR #20 之后没同步）→ 参数页改 offset 会报
+       "草稿的 [toolhead] 里没有 offset"。已同步成 `offset_x/y/z`（探针 ①b 节逮到的）。
+     - 验证：`cargo test` 260 · workbench lib 449 · 双 feature clippy · fmt · tsc · lint ·
+       build + check:bundle + check:zero-network · 探针 `params-settings.mjs` **18 条全绿**
+       （含新增 ①b 节）/ `presets.mjs` 全绿。
      - **参数页底座第一阶段全貌（作者定，施工中）**：
        ①`RecipeParamDto` 下发 `toml_key`（**已完成**）②客户端 patch 能力 ③参数页接草稿链
        （打开 → `begin_preset_edit`；改值 → patch；保存 → `commit_preset_draft`）

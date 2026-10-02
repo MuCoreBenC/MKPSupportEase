@@ -32,7 +32,7 @@ use toml_edit::{DocumentMut, Item, Value};
 
 use crate::error::AppError;
 
-use super::registry::{ParamDef, ParamRegistry, ValueType};
+use super::registry::{ParamDef, ValueType};
 
 /// 一次字段改动：**参数 key**（注册表主键，如 `toolhead.offset.x`）+ 目标值的**字符串形式**。
 ///
@@ -57,11 +57,16 @@ impl FieldEdit {
 /// 把 `param_key` 映射到这份文件里的位置：**数据域分区 + 字段名**。
 ///
 /// `param_key` 是注册表主键，形状必然是 `<section>.<名字…>`（如 `toolhead.offset.x`）。
-/// section 取注册表给的 `section`、字段名取注册表给的 `toml_key` —— 这两个才是权威，
+/// section 取字段定义里的 `section`、字段名取 `toml_key` —— 这两个才是权威，
 /// 不靠拆 `param_key` 去猜（`offset_x` 与 `offset.x` 对不上，那正是 PR #20 拆内联表
 /// 要解决的问题；按 key 后半段猜会又把它猜回去）。
-fn locate<'a>(reg: &'a ParamRegistry, param_key: &str) -> Result<&'a ParamDef, AppError> {
-    reg.param(param_key).ok_or_else(|| {
+///
+/// **收 `&[ParamDef]` 而不是 `&ParamRegistry`**：定义有两个来源 —— 工作台侧的
+/// [`ParamRegistry`]（带写回状态）与客户端 catalog 里的 [`CatalogRegistry`]
+/// （纯数据）。改值的算法只认"key → (section, toml_key)"这张表，两边都给得出来，
+/// 所以这里只要最窄的那一样，不绑定某一个容器。
+fn locate<'a>(defs: &'a [ParamDef], param_key: &str) -> Result<&'a ParamDef, AppError> {
+    defs.iter().find(|p| p.key == param_key).ok_or_else(|| {
         AppError::invalid_argument(format!("不认识这个参数：{param_key}"))
             .with_detail("它不在参数注册表里 —— 参数页不该发来一个注册表里没有的 key")
     })
@@ -101,13 +106,15 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
 
 /// 改一个字段，返回**新的整份正文**。
 ///
+/// `defs` 是字段定义表（工作台的 `ParamRegistry::params()` 或客户端 catalog 的
+/// `CatalogRegistry::params` 都行 —— 见 [`locate`]）。
 /// 失败一律不动原文（返回 `Err`，调用方手里的旧正文还是好的）。
 pub fn patch_preset_toml(
     raw: &str,
-    reg: &ParamRegistry,
+    defs: &[ParamDef],
     edit: &FieldEdit,
 ) -> Result<String, AppError> {
-    let def = locate(reg, &edit.param_key)?;
+    let def = locate(defs, &edit.param_key)?;
     let section = def.section.clone();
     let toml_key = def.toml_key.clone();
 
@@ -161,6 +168,7 @@ pub fn patch_preset_toml(
 
 #[cfg(test)]
 mod tests {
+    use super::super::registry::ParamRegistry;
     use super::*;
 
     /// **真注册表**（`<repo>/presets/registry/param_registry.toml`）——
@@ -187,8 +195,12 @@ mode = \"tower\"
     /// **保真**：换了值，注释 / 键序 / 其它行一个字节不动。
     #[test]
     fn patches_one_value_and_keeps_everything_else() {
-        let out = patch_preset_toml(DOC, &reg(), &FieldEdit::new("toolhead.offset.x", "-1.5"))
-            .expect("改 offset_x");
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.x", "-1.5"),
+        )
+        .expect("改 offset_x");
 
         let line = out
             .lines()
@@ -223,7 +235,7 @@ mode = \"tower\"
     fn bool_is_written_as_a_bool_not_a_quoted_string() {
         let out = patch_preset_toml(
             DOC,
-            &reg(),
+            reg().params(),
             &FieldEdit::new("toolhead.first_pen_revitalization_flag", "on"),
         )
         .expect("开关值 on → true");
@@ -237,12 +249,20 @@ mode = \"tower\"
     /// 整数按 int 写（`70`），浮点按 float 写（`-1.5`，不丢小数）。
     #[test]
     fn numbers_keep_their_type() {
-        let out = patch_preset_toml(DOC, &reg(), &FieldEdit::new("toolhead.speed_limit", "80"))
-            .expect("改整数");
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.speed_limit", "80"),
+        )
+        .expect("改整数");
         assert!(out.contains("speed_limit = 80"), "\n{out}");
 
-        let out = patch_preset_toml(DOC, &reg(), &FieldEdit::new("toolhead.offset.x", "-1.5"))
-            .expect("改浮点");
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.x", "-1.5"),
+        )
+        .expect("改浮点");
         assert!(out.contains("offset_x = -1.5"), "\n{out}");
     }
 
@@ -251,7 +271,7 @@ mode = \"tower\"
     fn multiline_text_becomes_a_literal_string() {
         let out = patch_preset_toml(
             DOC,
-            &reg(),
+            reg().params(),
             &FieldEdit::new("toolhead.custom_mount_gcode", "G1 X0\nG1 Y0\n"),
         )
         .expect("改 G-code");
@@ -262,15 +282,20 @@ mode = \"tower\"
     /// 类型不对 → 如实拒（不是静默写下坏值）。
     #[test]
     fn wrong_value_type_is_refused() {
-        let e = patch_preset_toml(DOC, &reg(), &FieldEdit::new("toolhead.speed_limit", "快"))
-            .unwrap_err();
+        let e = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.speed_limit", "快"),
+        )
+        .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
     }
 
     /// **注册表里没有这个 key** → 如实拒（参数页不该发来一个注册表里没有的 key）。
     #[test]
     fn unknown_key_is_refused() {
-        let e = patch_preset_toml(DOC, &reg(), &FieldEdit::new("toolhead.nope", "1")).unwrap_err();
+        let e = patch_preset_toml(DOC, reg().params(), &FieldEdit::new("toolhead.nope", "1"))
+            .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(e.message.contains("不认识这个参数"), "{}", e.message);
     }
@@ -284,7 +309,7 @@ mode = \"tower\"
         /* 整段不在（`toolhead.x_offset` 确实在注册表里，但这份草稿没有 [toolhead]） */
         let no_section = patch_preset_toml(
             "[wiping]\nmode = \"tower\"\n",
-            &reg(),
+            reg().params(),
             &FieldEdit::new("toolhead.offset.x", "-1"),
         )
         .unwrap_err();
@@ -298,7 +323,7 @@ mode = \"tower\"
         /* 段在、但这个字段不在（草稿的 [toolhead] 只有 speed_limit） */
         let no_field = patch_preset_toml(
             "[toolhead]\nspeed_limit = 70\n",
-            &reg(),
+            reg().params(),
             &FieldEdit::new("toolhead.offset.x", "-1"),
         )
         .unwrap_err();

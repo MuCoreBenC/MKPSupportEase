@@ -1080,7 +1080,7 @@
       "configKey": "XOffset",
       "defaultValue": 0,
       "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
-      "jsonKey": "x",
+      "jsonKey": "offset_x",
       "key": "toolhead.offset.x",
       "label": "X 轴偏移",
       "layout": {
@@ -1117,16 +1117,9 @@
       "scope": "machine_specific",
       "section": "toolhead",
       "selectable": true,
-      "serialization": {
-        "subfieldsOrder": [
-          "x",
-          "y",
-          "z"
-        ]
-      },
       "step": 0.05,
       "tomlComment": "笔尖偏移",
-      "tomlKey": "offset",
+      "tomlKey": "offset_x",
       "uiComponent": "number",
       "unit": "mm",
       "valueType": "float",
@@ -1136,7 +1129,7 @@
       "configKey": "YOffset",
       "defaultValue": 0,
       "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准",
-      "jsonKey": "y",
+      "jsonKey": "offset_y",
       "key": "toolhead.offset.y",
       "label": "Y 轴偏移",
       "layout": {
@@ -1175,7 +1168,7 @@
       "selectable": true,
       "step": 0.05,
       "tomlComment": "笔尖偏移",
-      "tomlKey": "offset",
+      "tomlKey": "offset_y",
       "uiComponent": "number",
       "unit": "mm",
       "valueType": "float",
@@ -1185,7 +1178,7 @@
       "configKey": "ZOffset",
       "defaultValue": 4,
       "desc": "涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离",
-      "jsonKey": "z",
+      "jsonKey": "offset_z",
       "key": "toolhead.offset.z",
       "label": "Z 轴偏移",
       "layout": {
@@ -1221,7 +1214,7 @@
       "selectable": true,
       "step": 0.05,
       "tomlComment": "笔尖偏移",
-      "tomlKey": "offset",
+      "tomlKey": "offset_z",
       "uiComponent": "number",
       "unit": "mm",
       "valueType": "float",

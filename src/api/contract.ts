@@ -945,6 +945,18 @@ export interface MkpApi {
   /** 把改动写进临时文件（界面边改边存）。**只动正文** —— 来源与那一刻的指纹不动 */
   putPresetDraft(text: string): Promise<void>
 
+  /**
+   * **按参数 key 改草稿里的一个值**（参数页底座：字段级写回）。
+   *
+   * 与 [`putPresetDraft`] 的分工：那条是"把界面上那一整份正文写进去"（编辑器逐字改的场景）；
+   * 这条是"我只改这一个字段"（参数页用控件改值的场景）—— 后者**不碰**注释、键序、
+   * 别的行，只把那一处换掉。两条都只动草稿正文，官方原件与下载区全程不碰。
+   *
+   * `paramKey` 是**注册表主键**（如 `toolhead.offset.x`），不是 TOML 字段名 ——
+   * 定位与取值形态（数字 / 布尔 / 字符串）归后端按字段定义决定，前端不拼 TOML 字面量。
+   */
+  patchPresetDraft(paramKey: string, value: string): Promise<void>
+
   /** 放弃这次编辑：丢掉临时文件（幂等；官方原件与下载区全程没被碰过，所以它天生安全） */
   discardPresetDraft(): Promise<void>
 

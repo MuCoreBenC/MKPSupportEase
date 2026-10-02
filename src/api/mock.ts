@@ -165,7 +165,18 @@ let mockDraft: {
 
 /** 演示正文。真机上它是官方原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
 const MOCK_OFFICIAL_TEXT =
-  '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节\n涂胶宽度 = 1.2\n起始延时 = 0.5\n'
+  [
+    '# 假后端的演示正文 —— 真机上这里是官方原件（mkp/…）的字节',
+    '[toolhead]',
+    'speed_limit = 70 # 速度上限(mm/s)',
+    'offset_x = -1 # 笔尖偏移',
+    'offset_y = 18.6 # 笔尖偏移',
+    'offset_z = 4 # 笔尖偏移',
+    '',
+    '[wiping]',
+    'mode = "tower"',
+    '',
+  ].join('\n')
 
 /** 假后端给"导入进来的那份"种的演示正文：**没有血统** —— 外部文件没有 based_on，也不编造 */
 const MOCK_IMPORTED_TEXT = '# 从外部导进来的（假后端演示正文）\n"涂胶宽度" = 1.0\n'
@@ -201,6 +212,26 @@ mockMineText.set(
 )
 
 const nowSec = () => Math.floor(Date.now() / 1000)
+
+/**
+ * 把一个控件值写成 TOML 字面量（假后端版）。
+ *
+ * 与真后端 `presetdata::patch::to_toml_value` **同一条规则**：形态由 `valueType` 定，
+ * 不由"有没有 choices"定（`prime_enabled` 选项写 off/on，但 TOML 里是布尔）。
+ */
+function literalFor(raw: string, valueType: string): string {
+  const t = raw.trim()
+  switch (valueType) {
+    case 'int':
+    case 'float':
+      return t
+    case 'bool':
+      return ['true', '1', 'on', 'yes'].includes(t.toLowerCase()) ? 'true' : 'false'
+    default:
+      /* 文本 / G-code：带换行就写多行字面量，否则普通串 */
+      return t.includes('\n') ? `"""\n${t}"""` : `"${t.replace(/"/g, '\\"')}"`
+  }
+}
 
 /*
  * 浏览器里的「下载区」：三份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
@@ -329,6 +360,44 @@ export const mockApi: MkpApi = {
   async putPresetDraft(text) {
     if (mockDraft === null) throw new Error('现在没有正在改的那一份')
     mockDraft = { ...mockDraft, text, updatedUnix: nowSec() }
+  },
+
+  /**
+   * 按参数 key 改草稿里的一个值（参数页底座）。
+   *
+   * 假后端做的与真后端**同一件事**：查字段定义拿 `(section, toml_key)`，把那一行换掉。
+   * 但**不做保真**（注释 / 键序）—— 那是 `toml_edit` 的活，浏览器里没有；
+   * 这里按行替换已经很够探针用（探针量的是"改值这条路通不通"，不是格式保真）。
+   * 真机上的保真由 `presetdata::patch` 的 7 条单测钉着。
+   */
+  async patchPresetDraft(paramKey, value) {
+    if (mockDraft === null) throw new Error('现在没有正在改的那一份，改不了参数')
+    const def = paramMeta().find((p) => p.key === paramKey)
+    if (def === undefined) throw new Error(`不认识这个参数：${paramKey}`)
+    const { section, tomlKey, valueType } = def
+    const literal = literalFor(value, valueType)
+    /* 找 `[section]` 那一段，在段内替换 `<tomlKey> = …` 那一行 */
+    const lines = mockDraft.text.split('\n')
+    let inSection = false
+    let done = false
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim()
+      if (t.startsWith('[')) {
+        inSection = t === `[${section}]`
+        continue
+      }
+      if (inSection && t.startsWith(`${tomlKey} =`)) {
+        const hash = lines[i].indexOf('#')
+        const comment = hash >= 0 ? ` ${lines[i].slice(hash).trim()}` : ''
+        lines[i] = `${tomlKey} = ${literal}${comment}`
+        done = true
+        break
+      }
+    }
+    if (!done) {
+      throw new Error(`草稿的 [${section}] 里没有 ${tomlKey}`)
+    }
+    mockDraft = { ...mockDraft, text: lines.join('\n'), updatedUnix: nowSec() }
   },
 
   async discardPresetDraft() {

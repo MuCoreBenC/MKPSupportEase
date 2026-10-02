@@ -111,6 +111,34 @@ for (const size of SIZES) {
   )
   await page.screenshot({ path: `${shotDir}/wire-params-${tag}.png` })
 
+  /* ①b 参数页接草稿链（参数页底座 ③）：改一个值 → 当场 patch 草稿 TOML，不报错 */
+  /*
+   * 守两件事：
+   *   ① 参数页有**编辑目标**（当前 combo 的 MKP 文件）——没有它改值就只是内存改动；
+   *   ② 改一个值之后**没有"草稿没写进磁盘"那行红字** —— 说明 patchPresetDraft 这条路通了
+   *      （假后端按 tomlKey 改草稿正文，与真后端 `presetdata::patch` 同一件事）。
+   * 真机上的保真与形态由 `presetdata::patch` 的 7 条单测钉着，这里量的是"接线通不通"。
+   */
+  const targets = await page.evaluate(() =>
+    (document.querySelector('main')?.innerText ?? '').includes('这个版本没配 MKP 预设文件'),
+  )
+  const editTargetOk = !targets
+  const numRow = page.locator('[data-key] input').first()
+  let draftOk = true
+  if ((await numRow.count()) > 0) {
+    await numRow.fill('1.23')
+    await numRow.blur().catch(() => {})
+    await page.waitForTimeout(500)
+    const after = (await mainText(page)) ?? ''
+    draftOk = !after.includes('草稿没写进磁盘')
+  }
+  check(
+    tag,
+    '参数页有编辑目标、改值当场写进草稿 TOML（没有"草稿没写进磁盘"那行）',
+    editTargetOk && draftOk,
+    editTargetOk ? '' : '参数页说"这个版本没配 MKP 预设文件"',
+  )
+
   /* ② 设置页：高级设置 → 预设数据源（同步页退役后，这一格搬到了这儿） */
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await mainText(page)).includes('预设数据源'), 8000)

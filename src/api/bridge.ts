@@ -125,6 +125,8 @@ export const bridgeApi: MkpApi = {
   beginPresetEdit: (fileName, origin, path) =>
     call('beginPresetEdit', 'begin_preset_edit', { fileName, origin, path }),
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
+  patchPresetDraft: (paramKey, value) =>
+    call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
