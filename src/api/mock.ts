@@ -579,6 +579,23 @@ export const mockApi: MkpApi = {
     return outcomes
   },
 
+  /*
+   * 第十三层：在文件管理器里显示。浏览器里没有 Finder / 资源管理器，假后端的"文件"
+   * 也只是内存里一条记录 —— 前三步（只认我的文件 / 找得到 / 文件在不在）照真机走，
+   * 最后一步如实说它在真机上的样子（不假装打开了）。
+   */
+  async revealInFolder(path) {
+    if (!path.startsWith('presets-mine/')) {
+      throw new Error('只给「我的文件」显示 —— 官方那两份住程序自己管的目录')
+    }
+    if (!mockMine.some((f) => f.path === path)) {
+      throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）`)
+    }
+    throw new Error(
+      `假后端没有文件系统 —— 真机上这一步会打开 Finder / 资源管理器并选中「${path}」`,
+    )
+  },
+
   async deleteUserPreset(path) {
     const i = mockMine.findIndex((f) => f.path === path)
     if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)

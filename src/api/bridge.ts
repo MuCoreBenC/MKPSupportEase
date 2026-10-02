@@ -154,6 +154,8 @@ export const bridgeApi: MkpApi = {
   },
   stageImport: (sources) => call('stageImport', 'stage_import', { sources }),
   commitImport: (items) => call('commitImport', 'commit_import', { items }),
+  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「我的文件」上做） */
+  revealInFolder: (path) => call('revealInFolder', 'reveal_in_folder', { path }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

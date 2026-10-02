@@ -1259,6 +1259,93 @@ if ((await actions()).some((r) => r.name.includes('备份.zip'))) {
 }
 await page.screenshot({ path: `${shotDir}/presets-import.png` })
 
+/* ---------- 5m. 第十三层：文件外部管理（在 Finder 中显示） ---------- */
+/*
+ * 守三件事：
+ *   ① 只有「我的文件」这一项能点（官方那份灰掉带原因：它住程序自己管的下载区）；
+ *   ② 点它走的是**真的那条动作** —— 浏览器里没有文件管理器、假后端的"文件"也只是内存里
+ *      一条，所以假后端如实说这一步在真机上的样子（不假装打开了）；
+ *   ③ 它不碰任何状态：点完原来那份照样「已应用」。
+ *
+ * 真机上更硬的判据在 Rust 侧：`mine::reveal_target`（两道闸 / 读不出来的也能显示 /
+ * 外面删了就说找不到）那三条。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+/* 菜单里那一项按"…中显示"结尾找 —— 标签按平台换（Finder / 文件资源管理器），动作同一条 */
+const revealItemOf = () =>
+  page.evaluate(() => {
+    const ul = document.querySelector('[role="menu"]')
+    if (ul === null) return null
+    const btn = [...ul.querySelectorAll('[role="menuitem"]')].find((b) =>
+      (b.textContent ?? '').trim().endsWith('中显示'),
+    )
+    return btn === undefined
+      ? null
+      : {
+          label: (btn.textContent ?? '').trim(),
+          disabled: btn.getAttribute('data-on') !== '1',
+          why: btn.getAttribute('title') ?? '',
+        }
+  })
+
+/* ① 官方那份：灰掉带原因 */
+const officialTr13 = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'A1-standard.toml' })
+  .first()
+await officialTr13.click({ button: 'right' })
+await page.waitForTimeout(250)
+const officialReveal = await revealItemOf()
+console.log(
+  `\n[第十三层 · 边界] 官方那份右键「${officialReveal?.label ?? '?'}」：${officialReveal === null ? '没有这一项' : `灰=${officialReveal.disabled} 原因「${officialReveal.why}」`}`,
+)
+if (officialReveal === null) problems.push('右键菜单里没有「…中显示」这一项')
+else if (!officialReveal.disabled || officialReveal.why === '') {
+  problems.push('官方那份的「…中显示」该灰掉并说清原因')
+}
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+/* ② 我的那份：能点；点了如实说"浏览器里没有文件管理器" */
+const mineTr13 = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .first()
+await mineTr13.click({ button: 'right' })
+await page.waitForTimeout(250)
+const mineReveal = await revealItemOf()
+console.log(
+  `[第十三层 · 我的文件] 「${mineReveal?.label ?? '?'}」：${mineReveal === null ? '没有这一项' : `灰=${mineReveal.disabled}`}`,
+)
+if (mineReveal === null || mineReveal.disabled) {
+  problems.push('「我的文件」的「…中显示」该能点')
+} else {
+  await page.getByRole('menuitem', { name: /中显示$/ }).click()
+  await page.waitForTimeout(400)
+  const revealNote = await page.evaluate(() =>
+    (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  )
+  console.log(`[第十三层 · 我的文件] 点完提示条：${revealNote}`)
+  if (!revealNote.includes('没打开')) {
+    problems.push(`浏览器里没有文件管理器，该如实说「没打开」，实测提示条「${revealNote}」`)
+  }
+  if (!revealNote.includes('真机上')) {
+    problems.push(`该说清这一步在真机上的样子（打开文件管理器并选中），实测「${revealNote}」`)
+  }
+}
+
+/* ③ 它不碰任何状态：原来那份照样「已应用」 */
+const stillActive13 = (await actions()).find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+if (stillActive13 === undefined || !stillActive13.action.includes('已应用')) {
+  problems.push('「…中显示」不该碰「已应用」')
+}
+await page.screenshot({ path: `${shotDir}/presets-reveal.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -1325,5 +1412,6 @@ console.log(
     '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
     '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
     '导入入口（第十二层）：选择器能进、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
+    '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
     '控制台没有 error',
 )

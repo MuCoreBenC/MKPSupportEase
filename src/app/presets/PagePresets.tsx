@@ -92,7 +92,9 @@
  *   **导入文件…**（工具栏）    `FileImportProvider`（App 层）               真（第十二层：通用导入入口 ——
  *                            选择器 + 拖拽进窗口；重名开改名那一格。这一页只是第一个消费者）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
- *   **在文件夹中显示 / 复制链接**
+ *   **在 Finder 中显示**（我的文件） `api.revealInFolder()`                  真（第十三层：打开系统文件管理器**并选中**；
+ *                            平台话术在 Windows 上是「在文件资源管理器中显示」。之后复制 / 压缩 / 发人随用户）
+ *   **复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
  *
  * 数据与判定都在 `presetTree.ts`（纯函数）与 `usePresetData.ts`（三态加载 + 两张表），
@@ -116,6 +118,7 @@ import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
+import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞：与同步页**同一份**（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
 import PresetPicker from './PresetPicker'
@@ -167,6 +170,13 @@ const PLACEHOLDER: Record<Density, string> = {
   compact: '搜索文件…',
   mini: '搜索…',
 }
+
+/*
+ * 「在文件管理器里显示」在这一页的话术（第十三层）：作者写的是「在 Finder 中显示」，
+ * Windows 上那是文件资源管理器 —— 标签按平台换，动作同一条。
+ */
+const REVEAL_LABEL =
+  detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
 
 /**
  * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
@@ -354,9 +364,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那两件事（在文件夹中显示 / 复制链接）——
-   * 用户文件那三件都已经接上了：重命名与删除在第十层（`renameUserPreset` /
-   * `deleteUserPreset`），另存为一份新的在第十一层（`copyUserPreset`），不在这里。
+   * 契约里**连签名都没有**的那一件事（复制链接）——
+   * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
+   * 在文件管理器里显示在第十三层，都不在这里。
    *
    * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
@@ -703,6 +713,21 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     )
   }
 
+  /**
+   * **在文件管理器里显示**（第十三层 · 文件外部管理）：打开 Finder / 资源管理器**并选中**
+   * 这份用户文件 —— 之后复制 / 压缩 / 发人 / 备份都随用户，不经过 SupportEase 的业务逻辑。
+   *
+   * **成功没有提示条**：文件管理器窗口本身就是回执；失败照实说（浏览器里没有文件管理器、
+   * 文件被外面删了）。
+   */
+  const runReveal = (row: PresetTableRow) => {
+    data.reveal(row.path).then(
+      () => undefined,
+      (e: unknown) =>
+        setNote({ text: `没打开：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+    )
+  }
+
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
   const togglePin = (row: PresetTableRow) => {
     page.togglePin(row.pinKey)
@@ -835,6 +860,17 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
+   * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
+   * 官方那两份住在程序自己管的下载区（本地表），或者根本还没下载（仓库表）。
+   */
+  const revealWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return row.scope === 'local'
+      ? '官方那份住程序自己管的下载区 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
+      : '官方原件还没下载到本机 —— 没有能显示的地方'
+  }
+
+  /**
    * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
    * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
    */
@@ -913,8 +949,10 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       },
       {
         id: 'reveal',
-        label: '在文件夹中显示',
-        onSelect: () => sayNoContract(MISSING_METHOD.reveal, row),
+        label: REVEAL_LABEL,
+        /* 第十三层：只有「我的文件」能这样打开（打开的是系统文件管理器，不是我们的界面） */
+        disabled: revealWhyNot(row),
+        onSelect: () => runReveal(row),
       },
       { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
       bbsEntry(row),

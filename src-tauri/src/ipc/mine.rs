@@ -10,11 +10,14 @@
 //! 第十层再加两条**管理**命令：`rename_user_preset`（只改名字，字节一个不动；正指着它的
 //! 使用中指针与该份的草稿跟着改）与 `delete_user_preset`（**真删除** —— 没有垃圾桶、
 //! 没有归档；正在使用 / 还有草稿的不给删，两道闸在 [`runtime::mine::delete_file`]）。
+//! 第十三层收尾一条 **外部管理**：`reveal_in_folder`（在 Finder / 资源管理器里选中这一份）
+//! —— 之后复制 / 压缩 / 发人 / 备份都随用户，不经过 SupportEase 的业务逻辑。
 //! 今天真机上这两条读多半返回空 —— **空是合法状态，不是错误**（用户一份都没另存过）。
 //! 它在界面上就是本地表里那一半「我的文件」：看得见、认得出、看得了、也能改。
 
 use serde::Serialize;
 use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 use crate::fsx::paths::internal_root;
@@ -447,6 +450,25 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
         let active = runtime::state::load_active(&root)?;
         let draft = runtime::state::load_draft(&root)?;
         runtime::mine::delete_file(&user_root, &path, active.as_ref(), draft.as_ref())
+    })
+}
+
+/// **在文件管理器里显示**（第十三层 · 文件外部管理的第一半）：打开 Finder / 资源管理器
+/// 并**选中**这份用户文件 —— 拿出去（复制 / 压缩 / 发人 / 备份）全由用户自己来，
+/// 不经过 SupportEase 的业务逻辑（"文件外部管理"的含义就这一句）。
+///
+/// - 只认「我的文件」：路径先过用户根那两道闸（[`runtime::mine::reveal_target`]）；
+/// - **读不出来的那份也能显示**（文件管理同族：它只是一份文件，打开文件夹不吃内容）；
+/// - **一个状态都不碰**：不改使用中指针、不迁移草稿、不进 archive（它只是打开一个窗口）；
+/// - 插件只在 Rust 侧调（`dialog:allow-open` 那种 capability 这里不需要）。
+#[tauri::command]
+pub async fn reveal_in_folder(app: AppHandle, path: String) -> Result<(), AppError> {
+    traced("revealInFolder", |_| {
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let target = runtime::mine::reveal_target(&user_root, &path)?;
+        app.opener()
+            .reveal_item_in_dir(&target)
+            .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
     })
 }
 

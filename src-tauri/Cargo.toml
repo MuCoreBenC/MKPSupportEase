@@ -38,6 +38,14 @@ tauri = { version = "2.9.1", features = ["macos-private-api"] }
 # 回来"这些平台差异由它包掉。它只在用户点「导入文件…」时弹一个原生对话框；
 # 复制由我们自己的导入核心做（源文件全程只读，去处只有 presets-mine/）。
 tauri-plugin-dialog = "2"
+
+# 在系统文件管理器里"显示并选中"（第十三层：文件外部管理的第一半）。
+#
+# 三个平台各有一套做法（macOS `open -R` 那一类、Windows `explorer /select,`、
+# Linux 的 FileManager1）—— 由官方 plugin 包掉平台差异，我们只给一个绝对路径。
+# **只在 Rust 侧调**（自己的命令体里），所以不需要给它开任何 capability：
+# 前端能调的只有我们那条 `reveal_in_folder`，路径先过用户根那两道闸。
+tauri-plugin-opener = "2"
 # 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
 # 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
 serde.workspace = true

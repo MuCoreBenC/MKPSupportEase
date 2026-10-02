@@ -231,6 +231,11 @@ export interface PresetData {
    * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
    */
   remove: (path: string) => Promise<void>
+  /**
+   * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
+   * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
+   */
+  reveal: (path: string) => Promise<void>
 }
 
   /**
@@ -523,6 +528,11 @@ export function usePresetData(importRevision = 0): PresetData {
     return done
   }, [])
 
+  /* 在文件管理器里显示（第十三层）：纯外部动作 —— 不重读、不改任何状态 */
+  const reveal = useCallback(async (path: string) => {
+    await api.revealInFolder(path)
+  }, [])
+
   /*
    * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
@@ -566,6 +576,7 @@ export function usePresetData(importRevision = 0): PresetData {
     rename,
     remove,
     copyAsNew,
+    reveal,
   }
 }
 

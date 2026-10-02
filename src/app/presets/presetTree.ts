@@ -660,13 +660,13 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
  *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
  *
  * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * **用户文件那三件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
- * `deleteUserPreset`）；另存为一份新的（原来「复制」那个格子）是第十一层
- * （`copyUserPreset`）—— 都只对「我的文件」生效。这里剩下的两件是真的还没有，
+ * **用户文件那四件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
+ * `deleteUserPreset`）、另存为一份新的（原来「复制」那个格子）是第十一层
+ * （`copyUserPreset`）、在文件管理器里显示（原来「在文件夹中显示」）是第十三层
+ * （`revealInFolder`）—— 都只对「我的文件」生效。这里剩下的一件是真的还没有，
  * 哪天要加，方法名照这个写。
  */
 export const MISSING_METHOD = {
-  reveal: 'revealInFolder',
   link: 'getFileUrl',
 }
 

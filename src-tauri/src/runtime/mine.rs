@@ -51,7 +51,7 @@
 //! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
 //! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 use crate::fsx::paths::MINE_DIR;
@@ -659,6 +659,26 @@ pub fn delete_file(
     std::fs::remove_file(&target)
         .map_err(|e| AppError::io(format!("{rel} 删不掉")).with_detail(e.to_string()))?;
     Ok(())
+}
+
+/// **在文件管理器里显示**要用的落点（第十三层 · 文件外部管理的第一半）：
+/// 把一份用户文件解析成盘上的绝对路径 —— 打开窗口是系统的事（`ipc::mine::reveal_in_folder`
+/// 交给 `tauri-plugin-opener`），这一层只管"解析得对、门槛不破"。
+///
+/// 与改名 / 删除**同族**（纯文件操作）：
+/// - 只认「我的文件」那一格（`presets-mine/` 前缀 + [`crate::fsx::paths::resolve_in`]
+///   两道闸，含符号链接逃逸）；
+/// - **读不出来的那份也能显示** —— 它只是一份文件，打开文件夹不吃内容；
+/// - 文件不在了（外面删的）就说找不到（列表以磁盘为准，不去猜）。
+pub fn reveal_target(user_root: &Path, rel: &str) -> Result<PathBuf, AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）"
+        )));
+    }
+    Ok(target)
 }
 
 #[cfg(test)]
@@ -1520,5 +1540,49 @@ mod tests {
         write(root.path(), "exports/别动我.txt", "x");
         assert!(copy_as_new(root.path(), "exports/别动我.txt", "副本.txt").is_err());
         assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
+    }
+
+    /* ---------- 第十三层：在文件管理器里显示（只解析落点，窗口是系统的事） ---------- */
+
+    /// 解析出来的是用户根里那个**绝对路径**；读不出来的那份也能显示（文件管理同族）；
+    /// 子目录里的那份也认
+    #[test]
+    fn revealing_resolves_the_file_inside_the_user_root() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/能读的.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/读不出的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+
+        let target = reveal_target(root.path(), "presets-mine/能读的.toml").unwrap();
+        assert!(target.is_absolute(), "给系统的是绝对路径");
+        assert!(target.ends_with("presets-mine/能读的.toml"));
+        /* 坏的那份照样显示 —— 打开文件夹不吃内容 */
+        assert!(reveal_target(root.path(), "presets-mine/读不出的.toml").is_ok());
+
+        /* 子目录里的那份也认（用户可能自己分文件夹放） */
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        let nested = reveal_target(root.path(), "presets-mine/我的/另存.toml").unwrap();
+        assert!(nested.ends_with("presets-mine/我的/另存.toml"));
+    }
+
+    /// 只认「我的文件」那一格：`exports/`、`../` 一概拒（与改名 / 删除同一道闸）
+    #[test]
+    fn revealing_stays_in_the_mine_dir() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "exports/别动我.txt", "x");
+        assert!(reveal_target(root.path(), "exports/别动我.txt").is_err());
+        assert!(reveal_target(root.path(), "../外面.toml").is_err());
+    }
+
+    /// 文件不在了（外面删的）就说找不到 —— 不去猜、不去别处找
+    #[test]
+    fn revealing_a_missing_file_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let e = reveal_target(root.path(), "presets-mine/不存在.toml").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::NotFound);
+        assert!(e.message.contains("找不到"), "{}", e.message);
     }
 }

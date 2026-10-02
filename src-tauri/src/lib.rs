@@ -48,6 +48,9 @@ pub fn run() {
         /* 系统文件选择器（第十二层：通用导入入口的"选择文件"那一半）。
         权限只开 `dialog:allow-open`（默认 capability），别的一律不给 */
         .plugin(tauri_plugin_dialog::init())
+        /* 在文件管理器里显示（第十三层）。**只在 Rust 侧调**（我们自己的命令体里），
+        所以不需要给它开任何 capability —— 前端够不着它的命令面 */
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -141,6 +144,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
         ipc::mine::rename_user_preset,
         ipc::mine::delete_user_preset,
+        // 第十三层：文件外部管理（在 Finder / 资源管理器里选中这一份）
+        ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
@@ -195,6 +200,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 第十层：用户文件管理（与上面那份清单一字不差）
         ipc::mine::rename_user_preset,
         ipc::mine::delete_user_preset,
+        // 第十三层：文件外部管理（与上面那份清单一字不差）
+        ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
