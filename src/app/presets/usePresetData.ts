@@ -65,6 +65,7 @@ import type {
   DownloadTick,
   Machine,
   PresetDraft,
+  RenamedUserPreset,
 } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
@@ -214,6 +215,16 @@ export interface PresetData {
    * 存完**重读用户线** —— 官方线那一份要跟着出现在本地表里，用户线要跟着变时刻与大小。
    */
   commitDraft: () => Promise<CommittedDraft>
+  /**
+   * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读用户线**
+   * （列表立刻以磁盘为准），顺手重读使用中指针（它正指着这一份时会跟着改）。
+   */
+  rename: (path: string, newName: string) => Promise<RenamedUserPreset>
+  /**
+   * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
+   * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
+   */
+  remove: (path: string) => Promise<void>
 }
 
   /**
@@ -478,6 +489,23 @@ export function usePresetData(): PresetData {
   }, [])
 
   /*
+   * 第十层：两条用户文件管理。同一条路子 —— 写底账 → **重读底账**：
+   * 改名之后使用中指针可能跟着改了名，所以顺手重读一遍（界面显示的永远是底账答的）；
+   * 删除不碰使用中指针（正在使用的不给删），只重读用户线。
+   */
+  const rename = useCallback(async (path: string, newName: string) => {
+    const done = await api.renameUserPreset(path, newName)
+    setMine(await api.getUserPresetFiles())
+    setActive(await api.getActivePreset().catch(() => null))
+    return done
+  }, [])
+
+  const remove = useCallback(async (path: string) => {
+    await api.deleteUserPreset(path)
+    setMine(await api.getUserPresetFiles())
+  }, [])
+
+  /*
    * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
    */
@@ -517,6 +545,8 @@ export function usePresetData(): PresetData {
     putDraft,
     discardDraft,
     commitDraft,
+    rename,
+    remove,
   }
 }
 

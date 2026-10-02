@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**九层已收口**（2026-10-02，见 §3.5）—— 第十层（用户文件管理：重命名 / 删除）未开始 |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十层已收口**（2026-10-02，见 §3.5）—— 第十一层（另存为一份新的）未开始 |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -299,21 +299,46 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         TOML 而看正文照旧 / **外部改过仍合法 = 正常（不比 SHA）**）+ 既有 2 条搭上 `state`
         断言 + 探针第 5i 节（坏的那份画得出「文件无法读取」、没有「应用」也没有「改这份」、
         角标带原因；能读的那份不受牵连）。
+   - ✅ **第十层：用户文件管理（重命名 / 删除）**（2026-10-02，本次）—— 范围由作者卡死：
+     **只做重命名 + 删除**，不做导入 / 另存为 / 批量 / 文件夹管理；**不给用户文件套"归档"**
+     （作者原话：官方 `archive/` 是版本更新的历史；用户自己删自己的文件**就是真删除**，
+     不搞第二套"用户历史管理系统"）。
 
-     ## 4. 续做入口（从哪接手）
+     规矩（逐条）：
+     - **重命名 = 只动名字**：内容 / 那三行血统 / TOML **一个字节不重写**；只换名字不换目录；
+       新名字不许空 / 不许带路径分隔符 / 后缀保持原样（改名不改类别）；落点已有东西**不覆盖**
+       （同一个文件除外 —— 大小写只差一档的改名要放行）。改完还是同一份 Preset。
+     - **正在使用的那一份也能改名**：`run/active-preset.json` 里那条指针**跟着改名**
+       （路径与文件名换成新的，**指纹原样** —— 字节没变，摘要当然不动）；
+       **有草稿的也能改名**：`run/draft-preset.json` 跟着改名（用户线认路径，
+       「接着上次改」不接丢）—— 这两条 repoint 在 `runtime::state`（纯函数，有判据）。
+       两本状态账**先读出来**：坏档就不动文件（宁可原地不动，也不留悬空指针）。
+     - **删除 = 真删除**（没有垃圾桶、没有归档）。两道硬闸在入口：**正在使用的不许删**
+       （删了「使用中」就指向一份不存在的文件）、**还有没保存的草稿的不许删**
+       （删了草稿就永远存不回去）。菜单里对「正在使用」的行已经灰掉带原因，后端仍会再拦一次。
+     - 范围卡死：只换名字**不换目录**（跨文件夹搬动是"文件夹管理"，不在这一层）；
+       官方那两份（仓库文件 / 交付预设）的改名与删除这一层都不做（菜单按 origin 灰掉、
+       各说各的原因）。
+     - 判据：`runtime::mine` 第十层 9 条 + `runtime::state` repoint 3 条 + 探针第 5j 节
+       （见 §6；改名只动名字且状态不变 / 删除二次确认与消失 / 正在使用的不给删 /
+       改名不断「已应用」、草稿跟着走）。
 
-- **九层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
+## 4. 续做入口（从哪接手）
+
+- **十层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
   （能读能列 / 能另存 / **能被应用** / **能被改并写回自己** / **读不出来就拦在应用·编辑
-  门口（文件级检查，不比 SHA）**）都通了。
-  **下一步是第十层：用户文件管理（重命名 / 删除）** —— 它已经是"我的文件"，尤其自动名字
-  `A1-standard（已修改）.toml` 用户多半想改；**这是真正的用户数据操作，单独设计**（不在
-  前面任何一层顺手做）。之后是第十一层（另存为一份新的）与第十二层（导入 / 分享）。
+  门口（文件级检查，不比 SHA）** / **能改名、能删**）都通了。
+  **下一步是第十一层：另存为一份新的用户 Preset** —— 在「改这份 / 另存」这条链之外，
+  用户还想凭空再造一份；设计到那一层再做。之后是第十二层（导入 / 分享）。
 - **第九层登记一条边界（不是漏做）**：**语义合法性**（"是不是一份合法 MKP Preset"：
   结构 / 参数对不对）**客户端不判** —— 判据只到文件级（能读 + UTF-8 + TOML 语法）。
   含义：TOML 能读但不是 MKP 预设的文件（以及空文件 / 只有注释的 TOML）现在会显示为正常；
   要堵它得让真正的 Preset 能力接到应用 / 编辑入口上（`mkpse-preset` 的事，默认构建的
   隔离纪律不为它破例）。**"用户文件被外面改过"也不再是任何形式的报警**：只要仍是能读的
   TOML 就照常能用 —— 与之对照的官方线 SHA 报警（第六层）一个字没动。
+- **第十层登记两条边界（不是漏做）**：① **用户文件没有"归档"** —— 用户删自己的文件
+  就是真删除（官方线的 `archive/` 是版本更新历史，不给用户搞第二套）；② **改名只换名字、
+  不换目录** —— 跨文件夹搬动属于"文件夹管理"，将来真要做单独设计。
 - **第七层留下的一条可收口项**（不影响功能，登记）：血统三行的文本逻辑现在两份实现
   （`runtime::lineage` 与 `preset::lineage`），靠 `workbench::lineage_parity` 钉住。
   更彻底的一条路是把它下移到共享小 crate、两边转调。
@@ -403,6 +428,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::mine` 另存 2 条 | `commit_writes_the_edited_copy_and_leaves_the_official_alone`（**核心不变式**：另存只写用户根、官方原件字节不变、下载区文件数不变、再存是覆盖它自己）/ `the_committed_copy_shows_up_in_mine_files`（另存出来的那份接着就能被列出来、读得回来） |
 | `runtime::mine` 写回 5 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_lineage`（**核心不变式**：**同一路径、不产生第二份**，血统照抄 —— 摘要不许变成"我自己改过的字节"）/ `saving_back_an_untouched_file_changes_nothing`（没改就逐字节不变）/ `saving_back_a_file_without_lineage_invents_none`（本来没血统就不编一个）/ `saving_back_refuses_when_the_file_is_gone`（被移走了**拒绝且不新建**）/ `saving_back_stays_in_the_mine_dir` |
 | `runtime::mine` 第九层 5 条（文件级：能读 + UTF-8 + TOML 语法） | `a_broken_toml_shows_up_as_unreadable`（坏 TOML → `unreadable`，原因**报得出第几行**）/ `a_non_utf8_file_is_unreadable_too` / `an_escaping_symlink_is_never_read`（**指向用户根外的链接一个字节都不读**（血统也不读）；根内链接照常能用）/ `read_preset_text_blocks_the_broken_one_but_viewing_still_works`（应用 · 编辑两个入口共用这一处闸；**看正文照旧** —— 读它不算"用"）/ `an_external_edit_that_still_parses_is_fine`（**不比 SHA**：外部改过但仍是能读的 TOML = 正常）。既有 `mine_files_lists…` / `the_committed_copy_shows_up_in_mine_files` 搭上 `state` 断言 |
+| `runtime::mine` 第十层 9 条（改名 / 删除） | `renaming_keeps_the_bytes_and_the_lineage`（**核心不变式**：**字节一个不动**、血统原样、旧名字没了新名字在；子目录里的份留在子目录）/ `renaming_refuses_a_name_that_changes_the_kind_or_has_a_path`（换后缀 / 带路径 / `.` / `..` / 空全拒，原文件原地不动）/ `renaming_never_overwrites`（落点有东西就拒，被撞的那份一个字节没动）/ `renaming_to_the_same_name_is_a_no_op` / `deleting_really_deletes`（**真删除**：不在了，而且没有多出旁的东西）/ `deleting_refuses_while_it_is_the_active_one`（正在使用的拒；正在使用的是**别人**照删）/ `deleting_refuses_while_a_draft_is_open`（有草稿的拒；草稿改的是**别人**照删）/ `the_delete_gates_only_apply_to_the_mine_line`（官方线的指针 / 草稿挡不住）/ `deleting_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::state` 跟改名 3 条（第十层） | `the_active_pointer_follows_a_rename`（路径与文件名换新、**指纹原样**；不指着它的、官方线的指针一概不动）/ `the_draft_follows_a_rename`（草稿路径与来源名换新，**正文与打开时指纹原样**；换完再点「改这份」还是接上这一份）/ `repointing_nothing_is_a_no_op`（没有那两本账 = 没跟，不是错误） |
 | `runtime::state` 草稿两条线 2 条（第八层） | `a_draft_knows_which_line_it_belongs_to`（**同名不同线 ≠ 同一份**：「接着改」不许接错）/ `an_older_draft_file_is_still_the_official_line`（旧档 = 官方线，**不升 schema**） |
 | `runtime::lineage` 写回 4 条（第八层） | `saving_back_keeps_the_original_lineage` / `saving_an_untouched_copy_changes_nothing` / `saving_back_without_lineage_writes_no_lineage` / `saving_back_keeps_the_line_endings` |
 | `runtime::delivery` 可信度 5 条（第 6 层） | `a_clean_copy_is_current_and_not_reported`（没问题就不报警）/ `tampered_bytes_are_not_recognized`（哪儿都对不上 = 异常，且没有证据可指）/ `a_copy_of_the_archived_version_is_recognized_as_old`（**认得出旧版本**，证据是归档里那条路径）/ `a_version_from_the_archived_catalog_is_recognized_as_old`（归档槽被占了也认得出更早那一版）/ `official_text_refuses_bytes_that_drifted`（**不许拿漂了的字节当原文改**） |
@@ -411,7 +438,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
-| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「复制」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「复制」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
 
@@ -477,9 +504,10 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   `npx vite preview --port 4173 --strictPort` → 开 `http://localhost:4173/` 的「预设」页 ——
   交付行按假后端的**固定演示集合**画四档（`A1-standard.toml` 已下载、`A1-fast.toml` 旧版本、
   `A1mini-standard.toml` 内容异常 —— 最后一份在「全部机型」档下才看得到）；
-  用户线三份演示：`我的 A1 涂胶.toml`（基于旧版官方、能应用能改）、`Process_0.2mm.json`
+  用户线三份演示：`我的 A1 涂胶.toml`（基于旧版官方、能应用能改、能改名）、`Process_0.2mm.json`
   （认不出哪一类）、**`坏了的涂胶.toml`（第九层：画「文件无法读取」、不给应用 / 改这份）**；
-  点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
+  右键「我的文件」还有**重命名**（只动名字，字节一个不动）与**删除**（二次确认；正在使用的不给删）
+  —— 第十层；点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
   自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
   **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。
 - **交付根（`presets/dist/`）的布局**：`catalog.json` + `manifest.json` 在根，产品资源一律在 `mkp/…`

@@ -460,6 +460,13 @@ export interface CommittedDraft {
   replaced: boolean
 }
 
+/** 重命名成功后的新身份（第十层）：新的落点 + 新的文件名 */
+export interface RenamedUserPreset {
+  /** 新的落点（相对**用户根**，`presets-mine/…`） */
+  path: string
+  fileName: string
+}
+
 /**
  * **正在生效的那一套预设。全局唯一。**
  *
@@ -941,6 +948,26 @@ export interface MkpApi {
    * 用户线写的就是原来那一份所在的位置（`replaced` 恒为 true）。
    */
   commitPresetDraft(): Promise<CommittedDraft>
+
+  /**
+   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+   * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-mine/` 那一格内）；
+   * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
+   * 落点已经有东西就拒绝（**不覆盖**）。
+   *
+   * 后端还会把两本状态账跟着改：**正指着它的使用中指针**（路径与文件名换成新的，指纹原样）
+   * 与**这一份的草稿**（用户线认路径，「接着上次改」不接丢）。失败原话冒上来。
+   */
+  renameUserPreset(path: string, newName: string): Promise<RenamedUserPreset>
+
+  /**
+   * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档
+   * （`archive/` 是官方版本生命周期的一部分；用户自己删自己的文件就结束）。
+   *
+   * 两道硬闸在后端：**正在使用的不许删**（删了「使用中」就指向一份不存在的文件）、
+   * **还有没保存的草稿的不许删**（删了草稿就永远存不回去）。失败原话冒上来。
+   */
+  deleteUserPreset(path: string): Promise<void>
 
   /** 正在生效的那一套。**全局唯一**，null = 一套都还没应用（不是错误） */
   getAppliedPreset(): Promise<AppliedPreset | null>

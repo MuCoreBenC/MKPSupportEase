@@ -419,6 +419,22 @@ export const MINE_EDIT_TEXT = {
 export const MINE_EDIT_WHY =
   '修改：把我自己这份的正文复制进临时文件再改 —— 保存时写回同一个文件（不会多出一份）'
 
+/**
+ * **第十层**：重命名那一口抽屉的话（删除的二次确认在菜单里，话术在菜单项上）。
+ *
+ * 只改名、不动字节：内容 / 那三行血统 / TOML 都不重写 —— 改完还是同一份预设。
+ * 正在使用的那一份也能改名（使用中指针跟着走，不断）；有草稿的那一份也能改名
+ * （草稿跟着走，「接着上次改」不接丢）。删除另说 —— 那两道闸在菜单与后端。
+ */
+export const MINE_RENAME = {
+  title: '重命名',
+  note:
+    '只改名字：文件内容、那三行血统、TOML 都**不动** —— 改完还是同一份预设，只是换了个叫法。' +
+    '后缀要保持原样（.toml 还是 .toml）；这里只改名字，不搬文件夹。',
+  liveNote: '它正在使用 —— 「已应用」那条底账会跟着改名，不会断。',
+  commit: '改名',
+} as const
+
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
@@ -626,12 +642,11 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
  *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
  *
  * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * 这一轮不许往契约里加方法（不在范围内），所以这里只是一句话，不是一个调用。
+ * **重命名与删除不在这一档了**（第十层接上了真方法 `renameUserPreset` / `deleteUserPreset`，
+ * 只对「我的文件」生效）；这里剩下的三件是真的还没有，哪天要加，方法名照这个写。
  */
 export const MISSING_METHOD = {
   copy: 'copyLocalFile',
-  rename: 'renameLocalFile',
-  remove: 'deleteLocalFile',
   reveal: 'revealInFolder',
   link: 'getFileUrl',
 }

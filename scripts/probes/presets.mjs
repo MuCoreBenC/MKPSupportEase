@@ -860,6 +860,150 @@ if (goodEntry === undefined) {
 }
 await page.screenshot({ path: `${shotDir}/presets-mine-unreadable.png` })
 
+/* ---------- 5j. 第十层：用户文件管理（重命名 / 删除） ---------- */
+/*
+ * 守四件事：
+ *   ① 重命名 = 只换名字：行上的名字跟着变、**状态不变**（坏的那份改名后照样画「文件无法读取」——
+ *      字节没动）；旧名字那一行没了；
+ *   ② 删除要**二次确认**（菜单里那个问句），确认完那一行从表里消失 —— 真删除，没有留档；
+ *   ③ 正在使用的那一份**不给删**（右键里「删除」灰掉、带原因）；
+ *   ④ 改名**不断使用中**：正在使用那份改完名，行上照样「已应用」（指针跟着走）；
+ *      改到一半关掉的那份草稿也跟着走 —— 再点「改这份」还是「上次改到一半的那一份」。
+ *
+ * 真机上更硬的判据在 Rust 侧：`mine::rename_file`（字节一个不动 / 不覆盖 / 不改后缀）、
+ * `mine::delete_file`（两道闸：正在使用的 / 还有草稿的）、`state` 两条 repoint。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+const rows10 = await actions()
+if (rows10.find((r) => r.name.includes('坏了的涂胶.toml')) === undefined) {
+  problems.push('第十层要从「坏了的涂胶.toml」开始（它没在表里）')
+}
+
+/* ① 重命名：把坏的那份改个名字 —— 名字变了、状态不变（还是「文件无法读取」） */
+const brokenTr10 = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '坏了的涂胶.toml' })
+  .first()
+await brokenTr10.click({ button: 'right' })
+await page.waitForTimeout(250)
+await page.getByRole('menuitem', { name: '重命名' }).click()
+await page.waitForTimeout(300)
+const renameDlg = page.getByRole('dialog', { name: '重命名' })
+const renameInput = renameDlg.getByLabel('新的文件名')
+const prefill = await renameInput.inputValue()
+console.log(`\n[第十层 · 改名] 输入框初值：${prefill}`)
+if (prefill !== '坏了的涂胶.toml') problems.push(`改名输入框该预填现在的名字，实测「${prefill}」`)
+await renameInput.fill('坏了的涂胶-改过名.toml')
+await renameDlg.getByRole('button', { name: '改名' }).click()
+await page.waitForTimeout(400)
+const afterRename = await actions()
+const renamed = afterRename.find((r) => r.name.includes('坏了的涂胶-改过名.toml'))
+console.log(`[第十层 · 改名] 改完：${renamed === undefined ? '(新名字没出现)' : renamed.name}`)
+if (renamed === undefined) {
+  problems.push('改完名之后表里该有新名字那一行')
+} else if (!renamed.name.includes('文件无法读取')) {
+  problems.push('改名只动名字：坏的那份改完名也该还是「文件无法读取」（字节没动）')
+}
+if (afterRename.some((r) => r.name.includes('坏了的涂胶.toml') && !r.name.includes('改过名'))) {
+  problems.push('改完名之后旧名字那一行该没了')
+}
+
+/* ② 删除：先二次确认，再删掉这一行（它没人用、没草稿 —— 真的删得掉） */
+const renamedTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '坏了的涂胶-改过名.toml' })
+  .first()
+await renamedTr.click({ button: 'right' })
+await page.waitForTimeout(250)
+await page.getByRole('menuitem', { name: '删除' }).click()
+await page.waitForTimeout(250)
+const askDlg = page.getByRole('dialog', { name: '删除 坏了的涂胶-改过名.toml？' })
+const askCount = await askDlg.count()
+console.log(`[第十层 · 删除] 二次确认：${askCount > 0 ? '出来了' : '没有'}`)
+if (askCount === 0) problems.push('删除要先弹二次确认（不可逆的事必须显式选一个）')
+await askDlg.getByRole('button', { name: '删除' }).click()
+await page.waitForTimeout(400)
+const afterDelete = await actions()
+console.log(`[第十层 · 删除] 删完还在吗：${afterDelete.some((r) => r.name.includes('坏了的涂胶')) ? '还在' : '没了'}`)
+if (afterDelete.some((r) => r.name.includes('坏了的涂胶'))) {
+  problems.push('删完那一行该从表里消失（列表以磁盘为准）')
+}
+
+/* ③ 正在使用的那一份不给删（菜单项灰掉、带原因） */
+const liveTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶.toml' })
+  .first()
+await liveTr.click({ button: 'right' })
+await page.waitForTimeout(250)
+const removeItem = await page.evaluate(() => {
+  const ul = document.querySelector('[role="menu"]')
+  if (ul === null) return null
+  const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
+    (b) => (b.textContent ?? '').trim() === '删除',
+  )
+  return btn === undefined
+    ? null
+    : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
+})
+console.log(
+  `[第十层 · 删除闸] 正在使用那份右键「删除」：${removeItem === null ? '没有这一项' : `灰=${removeItem.disabled} 原因「${removeItem.why}」`}`,
+)
+if (removeItem === null) problems.push('右键菜单里没有「删除」这一项')
+else if (!removeItem.disabled || !removeItem.why.includes('正在使用')) {
+  problems.push('正在使用的那一份「删除」该灰掉并说清原因')
+}
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+/* ④ 改名不断使用中 + 草稿跟着走：先在这份上起一份草稿（打开编辑器再关掉，草稿留在盘上），
+      然后改名 —— 「已应用」不该断；再点「改这份」还是「上次改到一半的那一份」 */
+await liveTr.click()
+await page.waitForTimeout(300)
+await page.getByRole('button', { name: '改这份' }).click()
+await page.waitForTimeout(400)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+await liveTr.click({ button: 'right' })
+await page.waitForTimeout(250)
+await page.getByRole('menuitem', { name: '重命名' }).click()
+await page.waitForTimeout(300)
+await page.getByRole('dialog', { name: '重命名' }).getByLabel('新的文件名').fill('我的 A1 涂胶-高速版.toml')
+await page.getByRole('dialog', { name: '重命名' }).getByRole('button', { name: '改名' }).click()
+await page.waitForTimeout(500)
+const afterLiveRename = await actions()
+const liveRenamed = afterLiveRename.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+console.log(
+  `[第十层 · 改名 · 使用中] ${liveRenamed === undefined ? '(新名字没出现)' : liveRenamed.name} → ${liveRenamed?.action ?? ''}`,
+)
+if (liveRenamed === undefined) {
+  problems.push('正在使用那份改完名该还在表里')
+} else if (!liveRenamed.action.includes('已应用')) {
+  problems.push(`改名不该断「已应用」（使用中指针该跟着走），实测操作列「${liveRenamed.action}」`)
+}
+const liveRenamedTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .first()
+await liveRenamedTr.click()
+await page.waitForTimeout(300)
+await page.getByRole('button', { name: '改这份' }).click()
+await page.waitForTimeout(400)
+const reusedText = await page.getByRole('dialog', { name: '改我自己这份' }).textContent()
+const reused = (reusedText ?? '').includes('上次改到一半')
+console.log(`[第十层 · 改名 · 草稿] 再点「改这份」：${reused ? '接着上次改（草稿跟着走了）' : '没接上'}`)
+if (!reused) problems.push('改名之后草稿该跟着走（再点「改这份」要说「上次改到一半的那一份」）')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -923,5 +1067,6 @@ console.log(
   '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
     '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
+    '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
     '控制台没有 error',
 )

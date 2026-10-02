@@ -127,6 +127,10 @@ export const bridgeApi: MkpApi = {
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
+  /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
+  renameUserPreset: (path, newName) =>
+    call('renameUserPreset', 'rename_user_preset', { path, newName }),
+  deleteUserPreset: (path) => call('deleteUserPreset', 'delete_user_preset', { path }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

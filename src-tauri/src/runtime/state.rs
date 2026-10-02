@@ -343,15 +343,22 @@ pub fn save_draft(
     source_sha256: &str,
     text: &str,
 ) -> Result<PresetDraft, AppError> {
-    let draft = PresetDraft {
-        draft_schema: DRAFT_SCHEMA,
-        origin: subject.origin,
-        source_file_name: subject.file_name.clone(),
-        path: subject.path.clone(),
-        source_sha256: source_sha256.to_owned(),
-        text: text.to_owned(),
-        updated_unix: now_unix(),
-    };
+    write_draft(
+        root,
+        PresetDraft {
+            draft_schema: DRAFT_SCHEMA,
+            origin: subject.origin,
+            source_file_name: subject.file_name.clone(),
+            path: subject.path.clone(),
+            source_sha256: source_sha256.to_owned(),
+            text: text.to_owned(),
+            updated_unix: now_unix(),
+        },
+    )
+}
+
+/// 草稿的实际落盘（`save_draft` 与"跟改名"共用这一处，序列化不许各写一遍）
+fn write_draft(root: &Path, draft: PresetDraft) -> Result<PresetDraft, AppError> {
     let json = serde_json::to_vec_pretty(&draft)
         .map_err(|e| AppError::internal("草稿序列化失败").with_detail(e.to_string()))?;
     atomic_write(&draft_file(root), &json)?;
@@ -365,6 +372,63 @@ pub fn clear_draft(root: &Path) -> Result<(), AppError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(AppError::io("丢掉草稿失败").with_detail(e.to_string())),
     }
+}
+
+/* ---------- 第十层：用户文件改过名之后，两本状态账跟着走 ---------- */
+
+/// **使用中指针跟改名**：只动"正指着这一份"的那条**用户线**指针 —— 路径与文件名换成新的，
+/// **指纹原样**（文件一个字节没动，摘要当然不动）。别的指针（官方的、指着别人那份的）一概不动。
+///
+/// `active` 由调用方从 [`load_active`] 读出来传进来（读不出来就不该走到这里 —— 坏档不静默）。
+/// 返回 `true` = 指针确实跟了。
+pub fn repoint_active_mine(
+    root: &Path,
+    active: Option<&ActivePreset>,
+    old_rel: &str,
+    new_rel: &str,
+    new_file_name: &str,
+) -> Result<bool, AppError> {
+    let Some(state) = active else {
+        return Ok(false);
+    };
+    if state.origin != ActiveOrigin::Mine || state.path.as_deref() != Some(old_rel) {
+        return Ok(false);
+    }
+    write_active(
+        root,
+        ActivePreset {
+            file_name: new_file_name.to_owned(),
+            path: Some(new_rel.to_owned()),
+            ..state.clone()
+        },
+    )?;
+    Ok(true)
+}
+
+/// **草稿跟改名**：只动"改的是这一份"的那条草稿 ——「接着上次改」不接丢
+/// （用户线认路径，与 [`DraftSubject`] 同一把钥匙）。正文与打开时刻的指纹原样不动。
+///
+/// 返回 `true` = 草稿确实跟了。
+pub fn repoint_draft_mine(
+    root: &Path,
+    draft: Option<&PresetDraft>,
+    old_rel: &str,
+    new_rel: &str,
+    new_file_name: &str,
+) -> Result<bool, AppError> {
+    let Some(state) = draft else { return Ok(false) };
+    if state.origin != ActiveOrigin::Mine || state.path.as_deref() != Some(old_rel) {
+        return Ok(false);
+    }
+    write_draft(
+        root,
+        PresetDraft {
+            source_file_name: new_file_name.to_owned(),
+            path: Some(new_rel.to_owned()),
+            ..state.clone()
+        },
+    )?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -697,5 +761,121 @@ mod tests {
         let state = load_active(d.path()).unwrap().expect("该有一份");
         assert_eq!(state.origin, ActiveOrigin::Mine);
         assert_eq!(state.file_name, "另存.toml");
+    }
+
+    /* ---------- 第十层：改名之后，两本状态账跟着走 ---------- */
+
+    /// 使用中指针跟改名：路径与文件名换成新的，**指纹不动**（文件一个字节没改）；
+    /// 不指着这一份的、以及官方线的指针，一概不动
+    #[test]
+    fn the_active_pointer_follows_a_rename() {
+        let d = tempfile::tempdir().unwrap();
+        let saved = save_active_mine(d.path(), "presets-mine/旧名.toml", "sha-abc").unwrap();
+
+        let moved = repoint_active_mine(
+            d.path(),
+            Some(&saved),
+            "presets-mine/旧名.toml",
+            "presets-mine/新名.toml",
+            "新名.toml",
+        )
+        .unwrap();
+        assert!(moved, "正指着这一份：该跟");
+        let after = load_active(d.path()).unwrap().unwrap();
+        assert_eq!(after.path.as_deref(), Some("presets-mine/新名.toml"));
+        assert_eq!(after.file_name, "新名.toml");
+        assert_eq!(after.sha256, "sha-abc", "字节没动，指纹当然不动");
+
+        /* 不指着这一份 → 一个字都不动 */
+        assert!(!repoint_active_mine(
+            d.path(),
+            Some(&after),
+            "presets-mine/别人.toml",
+            "presets-mine/换了.toml",
+            "换了.toml"
+        )
+        .unwrap());
+        assert_eq!(
+            load_active(d.path()).unwrap().unwrap().path.as_deref(),
+            Some("presets-mine/新名.toml")
+        );
+
+        /* 官方线指针：哪怕文件名撞上，也不归这条规则管 */
+        let official = save_active(d.path(), &entry("旧名.toml", b"x")).unwrap();
+        assert!(!repoint_active_mine(
+            d.path(),
+            Some(&official),
+            "presets-mine/旧名.toml",
+            "presets-mine/新名2.toml",
+            "新名2.toml"
+        )
+        .unwrap());
+        let still = load_active(d.path()).unwrap().unwrap();
+        assert_eq!(still.origin, ActiveOrigin::Official);
+        assert_eq!(still.path, None);
+    }
+
+    /// 没有那两本账时 repoint 回一句"没跟"，不是错误（改名的文件本来就可能没人用、没在改）
+    #[test]
+    fn repointing_nothing_is_a_no_op() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!repoint_active_mine(
+            d.path(),
+            None,
+            "presets-mine/a.toml",
+            "presets-mine/b.toml",
+            "b.toml"
+        )
+        .unwrap());
+        assert!(!repoint_draft_mine(
+            d.path(),
+            None,
+            "presets-mine/a.toml",
+            "presets-mine/b.toml",
+            "b.toml"
+        )
+        .unwrap());
+    }
+
+    /// 草稿跟改名：「接着上次改」不接丢 —— 换完名字后钥匙（origin + 路径）要从新名字上认出来，
+    /// 正文与打开时刻的指纹原样
+    #[test]
+    fn the_draft_follows_a_rename() {
+        let d = tempfile::tempdir().unwrap();
+        let subject = DraftSubject::mine("旧名.toml", "presets-mine/旧名.toml");
+        let saved = save_draft(d.path(), &subject, "sha-abc", "涂胶宽度 = 1.2").unwrap();
+
+        assert!(repoint_draft_mine(
+            d.path(),
+            Some(&saved),
+            "presets-mine/旧名.toml",
+            "presets-mine/新名.toml",
+            "新名.toml"
+        )
+        .unwrap());
+        let after = load_draft(d.path()).unwrap().unwrap();
+        assert_eq!(after.path.as_deref(), Some("presets-mine/新名.toml"));
+        assert_eq!(after.source_file_name, "新名.toml");
+        assert_eq!(after.text, "涂胶宽度 = 1.2", "改到一半的正文原样");
+        assert_eq!(after.source_sha256, "sha-abc");
+        assert_eq!(
+            after.subject(),
+            DraftSubject::mine("新名.toml", "presets-mine/新名.toml"),
+            "换完名字，再点「改这份」还是接上这一份"
+        );
+
+        /* 改的是别人那份 → 不动 */
+        assert!(!repoint_draft_mine(
+            d.path(),
+            Some(&after),
+            "presets-mine/别人.toml",
+            "presets-mine/别的.toml",
+            "别的.toml"
+        )
+        .unwrap());
+        assert_eq!(
+            load_draft(d.path()).unwrap().unwrap().path.as_deref(),
+            Some("presets-mine/新名.toml")
+        );
     }
 }

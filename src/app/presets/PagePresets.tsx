@@ -84,8 +84,11 @@
  *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
  *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
  *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
+ *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
+ *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
+ *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
- *   **复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接**
+ *   **复制 / 在文件夹中显示 / 复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
  *
  * 数据与判定都在 `presetTree.ts`（纯函数）与 `usePresetData.ts`（三态加载 + 两张表），
@@ -118,6 +121,7 @@ import {
   EDIT_TEXT,
   MINE_DRAWER,
   MINE_EDIT_TEXT,
+  MINE_RENAME,
   DOWNLOAD_WHY,
   MISSING_METHOD,
   NO_ASSET_WHY,
@@ -240,6 +244,18 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   /** 上一次真正落到临时文件里的正文。用它判断"值不值得再存一次" */
   const savedTextRef = useRef<string>('')
 
+  /*
+   * **重命名抽屉**（第十层）。`null` = 关着；开着时装着那一行的初值、输入框里的值与失败原因。
+   * 只改名字、**字节一个不动** —— 名字的门槛（空 / 路径 / 后缀 / 不覆盖）全在后端，
+   * 这里不重复判断；失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
+   */
+  const [renaming, setRenaming] = useState<{
+    row: PresetTableRow
+    name: string
+    busy: boolean
+    error: string | null
+  } | null>(null)
+
   /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLButtonElement>(null)
@@ -322,7 +338,8 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那几件事（复制 / 重命名 / 删除 / 在文件夹中显示 / 复制链接）。
+   * 契约里**连签名都没有**的那几件事（复制 / 在文件夹中显示 / 复制链接）——
+   * 重命名与删除在第十层接上了（`renameUserPreset` / `deleteUserPreset`），不在这里。
    *
    * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
@@ -589,6 +606,64 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     )
   }
 
+  /**
+   * **重命名我自己那一份**（第十层）：只改名字，**字节一个不动**。
+   *
+   * 菜单里点进来先开这一口抽屉（初值 = 现在的文件名），确定才交给后端 ——
+   * 名字的门槛与"使用中指针、这一份的草稿跟着改名"都在那里（页面不重复判断）。
+   */
+  const openRename = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    setEditing(null)
+    setRenaming({ row, name: row.fileName, busy: false, error: null })
+  }
+
+  const submitRename = () => {
+    if (renaming === null || renaming.busy) return
+    const name = renaming.name.trim()
+    if (name === '') {
+      setRenaming({ ...renaming, error: '新名字不能是空的' })
+      return
+    }
+    setRenaming({ ...renaming, busy: true, error: null })
+    data.rename(renaming.row.path, name).then(
+      (done) => {
+        setRenaming(null)
+        setNote({
+          text: `已改名：${renaming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`,
+          bad: false,
+        })
+      },
+      (e: unknown) =>
+        setRenaming((cur) =>
+          cur === null
+            ? cur
+            : { ...cur, busy: false, error: e instanceof Error ? e.message : String(e) },
+        ),
+    )
+  }
+
+  /**
+   * **删除我自己那一份**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
+   *
+   * 二次确认长在菜单里（`danger` + `confirm`，问句带着这一行的名字）；这里只管执行。
+   * 两道闸在后端：**正在使用的不许删、还有没保存的草稿的不许删** —— 原话进提示条。
+   * 菜单那一项对「正在使用」的行已经灰掉带原因，后端仍会再拦一次（两道都在）。
+   */
+  const runRemove = (row: PresetTableRow) => {
+    setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
+    data.remove(row.path).then(
+      () =>
+        setNote({
+          text: `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
+          bad: false,
+        }),
+      (e: unknown) =>
+        setNote({ text: `没删成：${e instanceof Error ? e.message : String(e)}`, bad: true }),
+    )
+  }
+
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
   const togglePin = (row: PresetTableRow) => {
     page.togglePin(row.pinKey)
@@ -700,6 +775,32 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     onSelect: () => onOpenBbs?.(row.fileName),
   })
 
+  /**
+   * 「重命名」为什么不能点（第十层）。只有**我的文件**能改 ——
+   * 官方线那两份各有各的原因，都要说出来（灰一个项不说为什么，用户只会以为坏了）。
+   */
+  const renameWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin === 'mine') return undefined
+    return row.origin === 'release'
+      ? '官方交付那份不能改名 —— 下载 / 应用 / 读正文都认目录登记的文件名；要改内容用「改这份」另存出你自己的一份'
+      : '官方文件不能改名，复制一份再改'
+  }
+
+  /**
+   * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
+   * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
+   */
+  const removeWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin !== 'mine') {
+      return row.origin === 'release'
+        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新 / 重新下载」修它'
+        : '官方文件不在这里删 —— 能删的只有你自己那份（用户根里的）'
+    }
+    return row.scope === 'local' && row.live
+      ? '正在使用的那一份不能直接删 —— 先换成别的配置（或撤销使用），再删它'
+      : undefined
+  }
+
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
@@ -722,8 +823,6 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         bbsEntry(row),
       ]
     }
-
-    const official = row.origin === 'official'
 
     /*
      * 临时编辑的入口（两条线）：
@@ -755,9 +854,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
       {
         id: 'rename',
         label: '重命名',
-        /* 官方副本**只禁这一项**。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了 */
-        disabled: official ? '官方文件不能改名，复制一份再改' : undefined,
-        onSelect: () => sayNoContract(MISSING_METHOD.rename, row),
+        /* 第十层：只有「我的文件」能改名（只动名字、字节一个不动） */
+        disabled: renameWhyNot(row),
+        onSelect: () => openRename(row),
       },
       {
         id: 'reveal',
@@ -771,17 +870,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         id: 'remove',
         label: '删除',
         danger: true,
-        /*
-         * 官方文件的删除**放行**：它删了能重新下回来，不是不可逆。
-         * 两种话术必须不一样 —— 用户自己的文件删了没有任何地方能找回来。
-         */
+        /* 第十层：只有「我的文件」能删；正在使用的那份连菜单都不给点（后端还会再拦一次） */
+        disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
-          detail: official
-            ? '删除后可以从云端重新下载。'
-            : '这是你自己的文件，云端没有备份，删了无法恢复。',
+          detail:
+            '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。',
         },
-        onSelect: () => sayNoContract(MISSING_METHOD.remove, row),
+        onSelect: () => runRemove(row),
       },
     ]
   }
@@ -1288,6 +1384,60 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                     {editing.draftError}
                   </p>
                 )}
+              </div>
+            )}
+          </Drawer>
+
+          {/*
+           * **重命名抽屉**（第十层）：只改名字，**字节一个不动** —— 没有"保存内容"这回事。
+           *
+           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖），
+           * 这里只把用户输入的字带过去；失败原话**留在抽屉里**（别把他刚打的字盖掉）。
+           * 正在使用 / 有草稿的那一份也能改名 —— 使用中指针与草稿在后端跟着走。
+           */}
+          <Drawer
+            open={renaming !== null}
+            title={MINE_RENAME.title}
+            subtitle={renaming?.row.path}
+            footer={
+              <>
+                <button type="button" className={s.editGhost} onClick={() => setRenaming(null)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={s.editPrimary}
+                  disabled={renaming?.busy === true}
+                  onClick={submitRename}
+                >
+                  {MINE_RENAME.commit}
+                </button>
+              </>
+            }
+            onClose={() => setRenaming(null)}
+          >
+            {renaming !== null && (
+              <div className={s.edit}>
+                <p className={s.editNote}>{MINE_RENAME.note}</p>
+                {renaming.row.scope === 'local' && renaming.row.live && (
+                  <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
+                )}
+                <input
+                  className={s.renameInput}
+                  value={renaming.name}
+                  spellCheck={false}
+                  aria-label="新的文件名"
+                  autoFocus
+                  onChange={(e) =>
+                    setRenaming((cur) =>
+                      cur === null ? cur : { ...cur, name: e.target.value, error: null },
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') submitRename()
+                  }}
+                />
+                {renaming.error !== null && <p className={s.editErr}>没改成：{renaming.error}</p>}
               </div>
             )}
           </Drawer>

@@ -4,9 +4,12 @@
 //! 这一条是**另一条线**（总纲 §1③「预设 TOML 的一生」），两条不许混：
 //! 官方原件不可变、用户修改另存、用户那份**永远不回写官方原件**。
 //!
-//! 四条写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分两条路：
+//! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分两条路：
 //! `begin_preset_edit` 改的是**临时文件**（`run/draft-preset.json`），`commit_preset_draft`
 //! 才落到用户根 —— 官方那份 → **另存**成 `（已修改）`；我那份 → **写回自己**（第八层）。
+//! 第十层再加两条**管理**命令：`rename_user_preset`（只改名字，字节一个不动；正指着它的
+//! 使用中指针与该份的草稿跟着改）与 `delete_user_preset`（**真删除** —— 没有垃圾桶、
+//! 没有归档；正在使用 / 还有草稿的不给删，两道闸在 [`runtime::mine::delete_file`]）。
 //! 今天真机上这两条读多半返回空 —— **空是合法状态，不是错误**（用户一份都没另存过）。
 //! 它在界面上就是本地表里那一半「我的文件」：看得见、认得出、看得了、也能改。
 
@@ -128,6 +131,16 @@ pub struct CommittedDraftDto {
     pub size: u64,
     /// 盖掉了一份同名的用户文件（第二次保存就是这种）
     pub replaced: bool,
+}
+
+/// 重命名成功后的新身份（第十层）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedUserPresetDto {
+    /// 新的落点（相对**用户根**，`presets-mine/…`）
+    pub path: String,
+    /// 新的文件名
+    pub file_name: String,
 }
 
 /// **开始改一份预设**：把正文复制进临时文件（`run/draft-preset.json`），**原件一动不动**。
@@ -339,6 +352,76 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             size: done.size,
             replaced: done.replaced,
         })
+    })
+}
+
+/// **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** ——
+/// 内容、那三行血统、TOML 都不重写；改完还是同一份 Preset（判据逐字节盯着）。
+///
+/// 三件事按顺序做：
+/// ① 文件改名（[`runtime::mine::rename_file`]：名字的门槛、"不覆盖"、只换名字不换目录都在那里）；
+/// ② **使用中指针跟着改**（正指着这一份时才动；指纹原样 —— 字节没变）；
+/// ③ **这一份的草稿跟着改**（用户线认路径，「接着上次改」不接丢）。
+///
+/// 两本状态账**先读出来**：坏档就什么都不做（宁可原地不动，也不留悬空指针）。
+/// ②③ 都在文件改名之后；万一它们失败，说清"文件其实已经改了名"，别让用户以为白点了。
+#[tauri::command]
+pub async fn rename_user_preset(
+    app: AppHandle,
+    path: String,
+    new_name: String,
+) -> Result<RenamedUserPresetDto, AppError> {
+    traced("renameUserPreset", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let active = runtime::state::load_active(&root)?;
+        let draft = runtime::state::load_draft(&root)?;
+
+        let done = runtime::mine::rename_file(&user_root, &path, &new_name)?;
+
+        runtime::state::repoint_active_mine(
+            &root,
+            active.as_ref(),
+            &path,
+            &done.path,
+            &done.file_name,
+        )
+        .map_err(|e| {
+            AppError::internal(format!(
+                "底账没跟上（使用中指针）—— 文件其实已经改名为 {}；重新「应用」一次那一份就能对齐",
+                done.file_name
+            ))
+            .with_detail(e.to_string())
+        })?;
+        runtime::state::repoint_draft_mine(&root, draft.as_ref(), &path, &done.path, &done.file_name)
+            .map_err(|e| {
+                AppError::internal(format!(
+                    "底账没跟上（没保存的那份草稿）—— 文件其实已经改名为 {}；再点一次「改这份」会从新名字上重来",
+                    done.file_name
+                ))
+                .with_detail(e.to_string())
+            })?;
+
+        Ok(RenamedUserPresetDto {
+            path: done.path,
+            file_name: done.file_name,
+        })
+    })
+}
+
+/// **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
+///
+/// 两道硬闸（都在 [`runtime::mine::delete_file`]）：**正在使用的不许删**（删了「使用中」
+/// 就指向一份不存在的文件）、**还有没保存的草稿的不许删**（删了草稿就永远存不回去）。
+/// 两本状态账先读出来（坏档不静默）；删完列表以磁盘为准（界面回来重读用户线）。
+#[tauri::command]
+pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppError> {
+    traced("deleteUserPreset", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let active = runtime::state::load_active(&root)?;
+        let draft = runtime::state::load_draft(&root)?;
+        runtime::mine::delete_file(&user_root, &path, active.as_ref(), draft.as_ref())
     })
 }
 

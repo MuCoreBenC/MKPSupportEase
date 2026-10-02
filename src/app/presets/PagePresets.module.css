@@ -623,6 +623,27 @@
   border-color: var(--accent);
 }
 
+/*
+ * 重命名抽屉里那一个单行输入（第十层）。与正文框同一副样子，只是高度按一行来；
+ * 输入的是**文件名**（不是路径）—— 等宽是为了让空格 / 后缀一眼看清。
+ */
+.renameInput {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text);
+}
+
+.renameInput:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .editErr {
   margin: 0;
   padding: 6px 10px;
@@ -663,6 +684,14 @@
 
 .editPrimary:hover {
   filter: brightness(1.05);
+}
+
+/* 正在提交（改名那一下）时两颗都点不动：灰下去，别只靠浏览器的默认样子 */
+.editGhost:disabled,
+.editPrimary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
 }
 
 .editGhost:focus-visible,

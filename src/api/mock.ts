@@ -395,6 +395,67 @@ export const mockApi: MkpApi = {
     return { path, fileName, size, replaced }
   },
 
+  /*
+   * 第十层：用户文件管理（改名 / 删除）。与真机同一套规矩，在内存里走一遍 ——
+   * 改名要看得见"使用中指针与草稿跟着走"，删除要看得见两道闸（正在使用的 / 还有草稿的）。
+   */
+  async renameUserPreset(path, newName) {
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const name = newName.trim()
+    if (name === '') throw new Error('新名字不能是空的')
+    if (name.includes('/') || name.includes('\\')) {
+      throw new Error('新名字不能带路径 —— 这一层只改名字，不搬文件夹')
+    }
+    if (name === '.' || name === '..') throw new Error('这个名字不是一个文件名')
+    const ext = (n: string): string => {
+      const i = n.lastIndexOf('.')
+      return i <= 0 ? '' : n.slice(i).toLowerCase()
+    }
+    if (ext(name) !== ext(hit.fileName)) {
+      throw new Error('后缀要保持原样 —— 改名不改它是哪一类（.toml 还是 .toml）')
+    }
+    const dir = path.slice(0, path.length - hit.fileName.length)
+    const newPath = `${dir}${name}`
+    if (newPath !== path && mockMine.some((f) => f.path === newPath)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    if (newPath !== path) {
+      /* 使用中指针跟着改（指纹原样 —— 字节没动）；草稿跟着改（「接着上次改」不接丢） */
+      if (mockActive?.origin === 'mine' && mockActive.path === path) {
+        mockActive = { ...mockActive, path: newPath, fileName: name }
+      }
+      if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
+        mockDraft = { ...mockDraft, path: newPath, sourceFileName: name }
+      }
+      hit.path = newPath
+      hit.fileName = name
+      const text = mockMineText.get(path)
+      if (text !== undefined) {
+        mockMineText.delete(path)
+        mockMineText.set(newPath, text)
+      }
+    }
+    return { path: newPath, fileName: name }
+  },
+
+  async deleteUserPreset(path) {
+    const i = mockMine.findIndex((f) => f.path === path)
+    if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (mockActive?.origin === 'mine' && mockActive.path === path) {
+      throw new Error(
+        `${path} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。先换成别的配置、或者撤销使用，再来删`,
+      )
+    }
+    if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
+      throw new Error(
+        `${path} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删`,
+      )
+    }
+    mockMine.splice(i, 1)
+    mockMineText.delete(path)
+  },
+
   async getAppliedPreset() {
     /* null = 一套都还没应用。这是合法状态，不是错误 */
     return appliedPreset()

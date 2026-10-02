@@ -135,6 +135,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
+        ipc::mine::rename_user_preset,
+        ipc::mine::delete_user_preset,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
@@ -181,6 +184,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 第十层：用户文件管理（与上面那份清单一字不差）
+        ipc::mine::rename_user_preset,
+        ipc::mine::delete_user_preset,
         ipc::presets::get_slicer_copied,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
