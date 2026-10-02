@@ -81,6 +81,7 @@ import type {
   Machine,
   MachineVersion,
   MenuEntry,
+  MineState,
   PresetFileInfo,
   UserPresetFile,
   VersionFiles,
@@ -536,6 +537,25 @@ export const MINE_APPLY_WHY =
 export const MINE_NOT_PRESET_WHY =
   '这一份认不出来是 MKP 预设（切片器那两类都是 .json，光看扩展名分不出是 bbs 还是 orca）—— ' +
   '能被使用的只有 TOML 预设'
+
+/**
+ * **第九层**：读不出来的那一份（行上那一枚角标）。
+ *
+ * 与官方线的「内容存疑」是**两回事**：官方线要 SHA（与目录登记逐字节一致才可信），
+ * 用户线只看**文件级**（能读 + UTF-8 + TOML 语法）—— 外部改过一轮但仍是能读的 TOML
+ * 照常能用，**不因 SHA 报警**。"是不是一份合法 MKP Preset"（结构 / 参数）不在客户端判：
+ * 那要真正的 Preset 解析能力，留给"应用 / 编辑"这类真正要解析的入口。
+ */
+export const MINE_UNREADABLE_TEXT = '文件无法读取'
+
+/** 那一枚角标 / 灰掉的动作格的 title。`detail` 是后端给的人话原因（比如语法错在第几行） */
+export function mineUnreadableWhy(detail: string | null | undefined): string {
+  return (
+    `${MINE_UNREADABLE_TEXT}${detail == null ? '' : `：${detail}`} —— ` +
+    '这一份现在不能应用、也不能改（先把它改回一份能读的 TOML，或者删掉它）。' +
+    '它还是你自己的文件：程序只如实说读不出来，不动它'
+  )
+}
 
 /** 归档抽屉里的那几句话 */
 export const ARCHIVE_DRAWER = {
@@ -1116,6 +1136,16 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnSource?: string | null
   /** 来源那份现在对应哪台机型的哪一版（人话，已按名字查好）。认不出是 `null` */
   basedOnOfficial?: string | null
+  /**
+   * **第九层**：这一份用户文件的**文件级**状态（只有 `mine` 行有它）。
+   *
+   * `'unreadable'`（读不出来：编码 / TOML 语法 / 指向用户根之外）→ 名称列画
+   * 「文件无法读取」，**「应用」与「改这份」都不给**（不给必被后端拒的按钮）；
+   * `'ok'` 照常。认不出是哪一类的行没有这一档（`undefined`）。
+   */
+  mineState?: MineState
+  /** 读不出来时后端给的那句人话原因（角标与动作格的 title 用它） */
+  mineStateDetail?: string | null
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1453,6 +1483,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
+        /*
+         * 第九层：文件级状态。**读不出来的照样列出来**（藏起来等于说他没这份文件），
+         * 只是不给「应用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
+         * 认不出是哪一类的没有这一档（`null` → `undefined`）。
+         */
+        mineState: f.state ?? undefined,
+        mineStateDetail: f.stateDetail,
       }
     })
 

@@ -23,6 +23,19 @@
 //! 于是"官方换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
 //! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
 //!
+//! # 第九层：文件级的"能不能用"（**不复制 Preset schema**）
+//!
+//! 用户文件与官方文件的可信规则**本来就不同**（作者 2026-10-02 定的口径）：
+//!
+//! - 官方线要 **SHA**：盘上那份与目录登记逐字节一致才可信（见 [`super::delivery`]）；
+//! - 用户线**只看文件级**：路径在 `presets-mine/` 里 + 能读 + 是 UTF-8 + **TOML 语法能解析**。
+//!   外部修改是**正常事**（他拿 VS Code 改一行不是异常），**不因 SHA 变化报警**。
+//!
+//! 这里**不判"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对）—— 那是 Preset 语义，
+//! 属 `mkpse-preset`；默认构建**不编**那个 crate（隔离纪律，那是 workbench feature 的事），
+//! 所以这一层**不许**复制一份 schema 来判结构 / 参数。语义那一档留给"应用 / 编辑"这类
+//! 真正要解析的入口上的真正 Preset 能力（HANDOFF §3.5 第 9 层）。
+//!
 //! # 读在上面，写只有两条（都是"写我自己的文件"）
 //!
 //! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有两个函数**，
@@ -43,6 +56,7 @@ use std::path::Path;
 use crate::error::AppError;
 use crate::fsx::paths::MINE_DIR;
 
+use super::catalog::kind::PRESET;
 use super::catalog::Catalog;
 use super::lineage::{self, Lineage};
 
@@ -68,6 +82,12 @@ pub struct MineFile {
     /// 它从哪一份官方、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
     /// （手工拷的、或别的程序写出来的）—— **不是错误**
     pub lineage: Option<Lineage>,
+    /// 第九层的**文件级**状态（见 [`MineState`]）。`None` = 不是预设候选
+    /// （[`kind_of`] 认不出是哪一类），它没有"能不能当预设用"这一档
+    pub state: Option<MineState>,
+    /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
+    /// 能用 / 不适用时是 `None`
+    pub state_detail: Option<String>,
 }
 
 /// 这份用户文件**基于的官方版本**现在怎么样了。
@@ -83,6 +103,29 @@ pub enum BasedOn {
     Outdated,
     /// 说不清：没有血统，或血统指的那一份已经不在目录里（换源 / 下线 / 改过名）
     Unknown,
+}
+
+/// 第九层：这份用户文件**文件级**上能不能被安全使用。
+///
+/// 三档里只有两档 —— 别在这里加"是不是一份合法 MKP Preset"那一档：语义不在客户端判
+/// （见模块头；判据见 [`toml_syntax_reason`] 与 [`read_preset_text`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MineState {
+    /// 存在 + 路径在用户根里 + 能读 + 是 UTF-8 + TOML 语法能解析
+    Ok,
+    /// 读不出来：读盘失败 / 不是 UTF-8 / TOML 语法不对 / 指向用户根之外。
+    /// 界面上这一档显示"文件无法读取"，**不许应用 / 编辑**（原因在 `state_detail`）
+    Unreadable,
+}
+
+impl MineState {
+    /// 跨 IPC 的稳定词（serde 到界面就是这两个；前端契约里同名）
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MineState::Ok => "ok",
+            MineState::Unreadable => "unreadable",
+        }
+    }
 }
 
 /// 读一份文件的头注释（最多 [`LINEAGE_READ_LIMIT`] 字节）拿血统。
@@ -163,6 +206,48 @@ pub fn kind_of(file_name: &str) -> Option<&'static str> {
         .then_some("mkp_preset")
 }
 
+/// TOML 语法这一关（**文件级**，不是 Preset schema）：能解析 ⇒ `None`；不能 ⇒ 一句人话原因。
+///
+/// 用的是客户端本来就在编的 `toml_edit`（`presetdata` 读 `presets/*.toml` 同一条管线）——
+/// 只回答"这是不是一段能读的 TOML"，**不回答"是不是一份 MKP 预设"**。
+pub fn toml_syntax_reason(text: &str) -> Option<String> {
+    let err = text.parse::<toml_edit::DocumentMut>().err()?;
+    let at = err.span().and_then(|span| {
+        let upto = text.get(..span.start)?;
+        let line = upto.matches('\n').count() + 1;
+        let col = upto
+            .rsplit('\n')
+            .next()
+            .map_or(1, |l| l.chars().count() + 1);
+        Some((line, col))
+    });
+    Some(match at {
+        Some((line, col)) => format!("TOML 语法不对（第 {line} 行第 {col} 列）"),
+        None => "TOML 语法不对".to_owned(),
+    })
+}
+
+/// 一份认得出的预设候选（`.toml`）的文件级判定：能读 + UTF-8 + TOML 语法。
+/// 读不出来给一句人话原因（**读盘都失败**和**语法不对**分开说）。
+fn preset_file_state(path: &Path) -> (Option<MineState>, Option<String>) {
+    let Ok(bytes) = std::fs::read(path) else {
+        return (
+            Some(MineState::Unreadable),
+            Some("读不出来（文件不在了 / 读不动）".to_owned()),
+        );
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return (
+            Some(MineState::Unreadable),
+            Some("不是 UTF-8 文本，读不出来".to_owned()),
+        );
+    };
+    match toml_syntax_reason(&text) {
+        None => (Some(MineState::Ok), None),
+        Some(reason) => (Some(MineState::Unreadable), Some(reason)),
+    }
+}
+
 /// 用户自己的文件有哪些（**按路径升序** —— `read_dir` 的顺序是文件系统说的，不稳定，
 /// 界面要一个每次刷新都一样的表）。
 ///
@@ -193,10 +278,36 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
+            let kind = kind_of(&file_name);
+            /*
+             * 第九层：先过"路径合法"这道闸（与读正文 / 应用 / 编辑同一道 `resolve_in`）——
+             * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（血统也一样不读）。
+             * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
+             */
+            let (lineage, state, state_detail) =
+                match crate::fsx::paths::resolve_in(user_root, &rel) {
+                    Err(_) => (
+                        None,
+                        (kind == Some(PRESET)).then_some(MineState::Unreadable),
+                        (kind == Some(PRESET)).then(|| {
+                            "它指向 presets-mine/ 外面 —— 程序不读用户根外面的东西".to_owned()
+                        }),
+                    ),
+                    Ok(real) => {
+                        let (state, detail) = if kind == Some(PRESET) {
+                            preset_file_state(&real)
+                        } else {
+                            (None, None)
+                        };
+                        (lineage_of_file(&real), state, detail)
+                    }
+                };
             out.push(MineFile {
                 path: rel,
-                kind: kind_of(&file_name),
-                lineage: lineage_of_file(&path),
+                kind,
+                lineage,
+                state,
+                state_detail,
                 file_name,
                 size: meta.len(),
                 modified_unix: meta
@@ -320,6 +431,26 @@ pub fn read_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
         .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
 }
 
+/// 第九层：读一份用户预设，并过**文件级**检查（能读 + UTF-8 + TOML 语法）。
+///
+/// 应用 / 编辑两个入口都走它 —— 检查只有一处，不许各写一遍。**它不查 SHA**：
+/// 用户那份本来就是允许改的，"还能不能被认成一份能读的 TOML"才是用户线的可信度问题。
+/// **它也不判 Preset 结构**（那要真正的 Preset 能力，见模块头）。
+pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
+    let text = read_text(user_root, rel)?;
+    if let Some(err) = text.parse::<toml_edit::DocumentMut>().err() {
+        let reason = toml_syntax_reason(&text).unwrap_or_else(|| "TOML 语法不对".to_owned());
+        return Err(AppError::corrupted(format!(
+            "{rel} 读不出来：{reason} —— 这一份现在不能应用、也不能改；先把它改回一份能读的 TOML"
+        ))
+        .with_detail(format!(
+            "第九层（文件级检查）：能读 + UTF-8 + TOML 语法；不判\"是不是合法 MKP Preset\"（语义）。\
+             解析器原文：{err}"
+        )));
+    }
+    Ok(text)
+}
+
 /// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
@@ -345,6 +476,10 @@ mod tests {
     fn write(root: &Path, rel: &str, text: &str) {
         crate::fsx::atomic::atomic_write(&root.join(rel), text.as_bytes()).unwrap();
     }
+
+    /// 一份**语法上**过得去的 TOML。第九层的文件级检查只看语法（能读 + UTF-8 + TOML），
+    /// **不看 Preset 结构** —— 结构 / 参数是语义，客户端不判（模块头那一段）。
+    const VALID_TOML: &str = "[toolhead]\noffset_x = 1.0\n";
 
     /// 造一份目录登记（SHA/大小都对得上），用来试「基于的官方那一版现在是什么样」
     fn entry_bytes(name: &str, content: &str) -> super::super::catalog::CatalogFile {
@@ -376,25 +511,35 @@ mod tests {
     }
 
     /// 盘当底账：用户放进去了什么就列什么。路径**相对用户根**（`presets-mine/…`），
-    /// 大小与时刻是真值；子目录里的也算
+    /// 大小与时刻是真值；子目录里的也算。**第九层**：`.toml` 带上文件级状态，
+    /// 认不出的 `.json` 没有这一档（`None`，它本来就不是预设候选）
     #[test]
     fn mine_files_lists_what_the_user_put_there() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1-fast.toml", "涂胶 = 1");
-        write(root.path(), "presets-mine/我的/另存.toml", "涂胶 = 2");
+        write(root.path(), "presets-mine/A1-fast.toml", VALID_TOML);
+        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
+        write(root.path(), "presets-mine/切片器.json", "{}");
         write(root.path(), "exports/不该看见.json", "{}");
 
         let got = mine_files(root.path());
         let paths: Vec<&str> = got.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
-            vec!["presets-mine/A1-fast.toml", "presets-mine/我的/另存.toml",],
+            vec![
+                "presets-mine/A1-fast.toml",
+                "presets-mine/切片器.json",
+                "presets-mine/我的/另存.toml",
+            ],
             "按路径升序、只出 presets-mine 里的、子目录也出"
         );
         assert_eq!(got[0].file_name, "A1-fast.toml");
-        assert_eq!(got[0].size, "涂胶 = 1".len() as u64);
+        assert_eq!(got[0].size, VALID_TOML.len() as u64);
         assert!(got[0].modified_unix.is_some(), "时刻要带上");
         assert_eq!(got[0].kind, Some("mkp_preset"), ".toml 认得出来是 MKP 预设");
+        assert_eq!(got[0].state, Some(MineState::Ok), "能读 + TOML 语法过");
+        assert_eq!(got[0].state_detail, None);
+        assert_eq!(got[1].kind, None, ".json 认不出是哪一类");
+        assert_eq!(got[1].state, None, "认不出的没有\"能不能当预设用\"这一档");
     }
 
     /// **认不出就不认**：`.json` 可能是 bbs 也可能是 orca，光看扩展名分不出
@@ -489,12 +634,23 @@ mod tests {
     fn the_committed_copy_shows_up_in_mine_files() {
         let user = tempfile::tempdir().unwrap();
         let label = "mkp/presets/A1-standard.toml";
-        let done = commit_draft(user.path(), "我的 A1 涂胶.toml", label, "涂胶宽度 = 1.3").unwrap();
+        let done = commit_draft(
+            user.path(),
+            "我的 A1 涂胶.toml",
+            label,
+            VALID_TOML.trim_end(),
+        )
+        .unwrap();
 
         let listed = mine_files(user.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].path, done.path);
         assert_eq!(listed[0].kind, Some("mkp_preset"), ".toml 认得出");
+        assert_eq!(
+            listed[0].state,
+            Some(MineState::Ok),
+            "另存出来的那份：第九层的文件级检查过（能读 + TOML 语法）"
+        );
         assert_eq!(
             listed[0]
                 .lineage
@@ -690,5 +846,142 @@ mod tests {
         );
         assert!(check_mine_prefix("../secret.toml").is_err());
         assert!(check_mine_prefix("presets-mine/../../secret.toml").is_err());
+    }
+
+    /* ---------- 第九层：文件级检查（能读 + UTF-8 + TOML 语法；语义不在这里判） ---------- */
+
+    /// 语法坏的那一份：**列出来、照实说读不出来**（不藏起来，也不画成正常），
+    /// 原因要指得出是哪一行 —— 用户照着去修
+    #[test]
+    fn a_broken_toml_shows_up_as_unreadable() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+        write(
+            root.path(),
+            "presets-mine/坏的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+
+        let got = mine_files(root.path());
+        let good = got.iter().find(|f| f.file_name == "好的.toml").unwrap();
+        assert_eq!(good.state, Some(MineState::Ok));
+        let broken = got.iter().find(|f| f.file_name == "坏的.toml").unwrap();
+        assert_eq!(broken.state, Some(MineState::Unreadable));
+        let why = broken.state_detail.as_deref().unwrap_or_default();
+        assert!(why.contains("第 2 行"), "原因要说得出在哪一行：{why}");
+    }
+
+    /// 非 UTF-8 的那一份：也是"读不出来"（不是"没血统"那种附加信息的缺 —— 这份是用不了）
+    #[test]
+    fn a_non_utf8_file_is_unreadable_too() {
+        let root = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("presets-mine/二进制的.toml"),
+            &[0xff, 0xfe, 0x00, 0x01],
+        )
+        .unwrap();
+
+        let got = mine_files(root.path());
+        assert_eq!(got[0].state, Some(MineState::Unreadable));
+        assert!(got[0]
+            .state_detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("UTF-8"));
+    }
+
+    /// 符号链接**指向用户根外面**：认得出名字，但**一个字节都不读**（血统也不读），
+    /// 状态是"读不出来"并说清为什么；根**内**的链接不算逃逸，照常能用
+    #[cfg(unix)]
+    #[test]
+    fn an_escaping_symlink_is_never_read() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write(
+            outside.path(),
+            "别人的.toml",
+            "# based_on: mkp/presets/别人的.toml\n[toolhead]\noffset_x = 1.0\n",
+        );
+        std::fs::create_dir_all(root.path().join("presets-mine")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("别人的.toml"),
+            root.path().join("presets-mine/跑出去.toml"),
+        )
+        .unwrap();
+        write(root.path(), "presets-mine/真的在的.toml", VALID_TOML);
+        std::os::unix::fs::symlink(
+            root.path().join("presets-mine/真的在的.toml"),
+            root.path().join("presets-mine/指回自己.toml"),
+        )
+        .unwrap();
+
+        let got = mine_files(root.path());
+        let escaping = got.iter().find(|f| f.file_name == "跑出去.toml").unwrap();
+        assert_eq!(escaping.state, Some(MineState::Unreadable));
+        assert!(
+            escaping
+                .state_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("外面"),
+            "原因要说清它指向外面"
+        );
+        assert_eq!(
+            escaping.lineage, None,
+            "根外的头一个字节都不读（血统也不许读出来）"
+        );
+
+        let inside = got.iter().find(|f| f.file_name == "指回自己.toml").unwrap();
+        assert_eq!(inside.state, Some(MineState::Ok), "根内链接照常能用");
+        assert_eq!(inside.lineage, None, "那份没有血统，链接也变不出血统来");
+    }
+
+    /// 应用 / 编辑那一道读：坏 TOML 被拦下（带着原因），但**看正文照旧**读得出来
+    /// （用户要能看着它去修）
+    #[test]
+    fn read_preset_text_blocks_the_broken_one_but_viewing_still_works() {
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path(),
+            "presets-mine/坏的.toml",
+            "[toolhead]\noffset_x = (1",
+        );
+        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+
+        let ok = read_preset_text(root.path(), "presets-mine/好的.toml").unwrap();
+        assert_eq!(ok, VALID_TOML);
+
+        let err = read_preset_text(root.path(), "presets-mine/坏的.toml").unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Corrupted);
+        assert!(err.message.contains("读不出来"), "{}", err.message);
+        assert!(
+            err.message.contains("不能应用、也不能改"),
+            "要说清这一份现在用不了：{}",
+            err.message
+        );
+
+        assert_eq!(
+            read_text(root.path(), "presets-mine/坏的.toml").unwrap(),
+            "[toolhead]\noffset_x = (1",
+            "看正文不是\"用\"：坏文件也要读得出来，用户才能看着它去修"
+        );
+    }
+
+    /// **不拿 SHA 说话**：用户在外面改过一轮（字节全变了），只要还是能读的 TOML，
+    /// 照常通过 —— 第九层检的不是"和当初一样"，是"现在还能不能用"
+    #[test]
+    fn an_external_edit_that_still_parses_is_fine() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/我的.toml", VALID_TOML);
+        /* 拿别处的编辑器改过：改内容、写回（字节与上一行完全不同） */
+        write(
+            root.path(),
+            "presets-mine/我的.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+
+        let got = mine_files(root.path());
+        assert_eq!(got[0].state, Some(MineState::Ok));
+        assert!(read_preset_text(root.path(), "presets-mine/我的.toml").is_ok());
     }
 }

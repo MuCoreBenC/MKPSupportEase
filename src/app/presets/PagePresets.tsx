@@ -728,11 +728,12 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     /*
      * 临时编辑的入口（两条线）：
      * 交付行只有"与目录一致"的那一份有（它才有正文可改，且内容不存疑）；
-     * 我自己那份都能改 —— 认不出是哪一类的（`.json`）不给，这一层只改 TOML 预设。
+     * 我自己那份：认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
+     * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
     const canEdit =
       (row.origin === 'release' && row.releaseState === 'ok') ||
-      (row.origin === 'mine' && row.kind === 'mkp_preset')
+      (row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable')
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，

@@ -789,6 +789,77 @@ if (!mineBody.includes('# based_on:')) problems.push('写回之后血统那三�
 await page.keyboard.press('Escape')
 await page.waitForTimeout(250)
 
+/* ---------- 5i. 第九层：用户文件的文件级状态（读不出来 → 不许应用 / 编辑） ---------- */
+/*
+ * 守三件事：
+ *   ① TOML 语法坏的那一份**照常列在表里**、行上画得出「文件无法读取」（藏起来 = 说他没这份文件）；
+ *   ② 它**没有「应用」**（操作列是灰字不是按钮），展开详情里**没有「改这份」** ——
+ *      后端会在入口拒的按钮，界面不给（"不给必报错的按钮"那条口径）；
+ *   ③ 能读的那一份不受牵连：不因此多出任何角标。
+ *
+ * 这一层看的是"还能不能读"（能读 + UTF-8 + TOML 语法），**不是 SHA** —— 外部修改过
+ * 但仍是能读的 TOML 照常能用，不报警。真机上更硬的判据在 Rust 侧（`runtime::mine` 的
+ * 文件级检查 + 应用 / 编辑两个入口的闸）。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+
+const nineActions = await actions()
+const brokenEntry = nineActions.find((r) => r.name.includes('坏了的涂胶.toml'))
+console.log(
+  `\n[第九层] 坏的那一份 → ${brokenEntry?.name ?? '(没这一行)'} → ${brokenEntry?.action ?? '(没有)'}`,
+)
+if (brokenEntry === undefined) {
+  problems.push('读不出来的那一份该照常列在本地表里（藏起来等于说他没这份文件）')
+} else {
+  if (!brokenEntry.name.includes('文件无法读取')) {
+    problems.push(`坏的那一份名字旁边该有「文件无法读取」，实测行内容「${brokenEntry.name}」`)
+  }
+  if (brokenEntry.action.includes('应用')) {
+    problems.push(`坏的那一份不许给「应用」（后端会在入口拒），实测操作列「${brokenEntry.action}」`)
+  }
+}
+
+const brokenTr = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: '坏了的涂胶.toml' })
+  .first()
+/* 角标 title 里带后端给的原因（"TOML 语法不对（第 3 行第 1 列）"）—— 为什么读不出来要看得到。
+   认 `span[title]`：上面那层 `.nameLine` 是普通 span（没 title），不认它就选到父级去了 */
+const brokenBadgeWhy = await brokenTr
+  .locator('span[title]')
+  .filter({ hasText: '文件无法读取' })
+  .first()
+  .getAttribute('title')
+console.log(`[第九层] 角标 title：${brokenBadgeWhy ?? '(没有)'}`)
+if (!(brokenBadgeWhy ?? '').includes('TOML')) {
+  problems.push(`角标 title 该带后端给的原因（TOML 语法错在哪），实测「${brokenBadgeWhy ?? ''}」`)
+}
+
+await brokenTr.click()
+await page.waitForTimeout(300)
+const brokenFacts = await factOf()
+console.log(
+  `[第九层] 展开详情「文件」= ${brokenFacts['文件'] ?? '(没有这一格)'}｜状态=${brokenFacts['状态'] ?? '(没有)'}`,
+)
+if (!(brokenFacts['文件'] ?? '').includes('无法读取')) {
+  problems.push(`展开详情该有一格说「文件无法读取」，实测「${brokenFacts['文件'] ?? '(没有)'}」`)
+}
+const brokenEditCount = await page.getByRole('button', { name: '改这份' }).count()
+console.log(`[第九层] 展开详情里「改这份」按钮：${brokenEditCount} 个（这一份读不出来，该是 0）`)
+if (brokenEditCount > 0) problems.push('读不出来的那一份不该有「改这份」（入口会拒）')
+
+/* 能读的那一份不受牵连：没有「文件无法读取」这一枚 */
+const goodEntry = nineActions.find((r) => r.name.includes('我的 A1 涂胶.toml'))
+if (goodEntry === undefined) {
+  problems.push('能读的那一份该照常在表里')
+} else if (goodEntry.name.includes('文件无法读取')) {
+  problems.push(`能读的那一份不该被画成读不出来，实测行内容「${goodEntry.name}」`)
+}
+await page.screenshot({ path: `${shotDir}/presets-mine-unreadable.png` })
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -851,5 +922,6 @@ if (problems.length > 0) {
 console.log(
   '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
     '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
+    '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
     '控制台没有 error',
 )

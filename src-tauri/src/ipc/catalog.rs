@@ -562,7 +562,9 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
 ///
 /// ```text
 /// official  目录里有这一份 + 盘上字节与目录登记逐字节一致（没下载 / 被改过 / 是旧版本 —— 都不许应用）
-/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
+/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有 + 能读成一份 TOML
+///           （第九层的**文件级**检查；**不看 SHA** —— 用户自己改过是正常事，
+///           能不能用看"现在还能不能读"，见 `runtime::mine::read_preset_text`）
 /// ```
 #[tauri::command]
 pub async fn apply_active_preset(
@@ -611,11 +613,12 @@ pub async fn apply_active_preset(
                         "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
                     )));
                 }
-                let target = crate::fsx::paths::resolve_in(&user, &rel)?;
-                let bytes = std::fs::read(&target).map_err(|_| {
-                    AppError::not_found(format!("{rel} 不在本机了——它可能已经被移走或删掉"))
-                })?;
-                let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+                /*
+                 * 第九层的文件级检查在读的那一步里（能读 + UTF-8 + TOML 语法）——
+                 * 外部改过但仍是能读的 TOML 照常能用，**这里不比 SHA**（那是官方线的规矩）。
+                 */
+                let text = runtime::mine::read_preset_text(&user, &rel)?;
+                let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
                 runtime::state::save_active_mine(&root, &rel, &digest)?
             }
         };

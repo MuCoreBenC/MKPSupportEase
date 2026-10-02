@@ -32,6 +32,15 @@ pub struct UserPresetFileDto {
     /// 认得出是哪一类就给；**认不出是 `null`**（见 [`runtime::mine::kind_of`]）。
     /// 界面上认不出的那一档**在任何类型档下都列** —— 不藏，也不替用户猜
     pub kind: Option<String>,
+    /// 第九层的**文件级**状态：`ok` / `unreadable`；`null` = 不是预设候选（认不出是哪一类）。
+    ///
+    /// **它不判"是不是一份合法 MKP Preset"** —— 那是 Preset 语义（客户端不复制 schema，
+    /// 见 [`runtime::mine`] 模块头）。`unreadable` 在界面上说"文件无法读取"，
+    /// **不许应用 / 编辑**；外部修改过但仍是能读的 TOML ⇒ 照常是 `ok`，**不因 SHA 报警**
+    pub state: Option<String>,
+    /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
+    /// 能用 / 不适用是 `null`
+    pub state_detail: Option<String>,
     /// 它当初基于的官方那一版，和目录里**现在**这一版是不是同一份：
     /// `current` / `outdated` / `unknown`（见 [`runtime::mine::BasedOn`]）。
     ///
@@ -81,6 +90,8 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                     size: f.size,
                     modified_unix: f.modified_unix,
                     kind: f.kind.map(str::to_owned),
+                    state: f.state.map(|s| s.as_str().to_owned()),
+                    state_detail: f.state_detail,
                 }
             })
             .collect())
@@ -137,9 +148,11 @@ pub struct CommittedDraftDto {
 ///     存疑内容的原文，而另存之后它还会变成"我改过的那一份"）。判定在
 ///     [`runtime::delivery::official_text`] 一处，界面不许自己再判一次。
 ///
-/// 用户线只有两条前置：**是 TOML**（`.json` 认不出是哪一类，不给改）与**盘上真有**
-/// （被移走 / 删掉了照实说）。它**不查 SHA** —— 用户那份本来就是允许改的，
-/// "字节必须还是当初那一份"是官方线的规矩（"它现在还是不是一份合法 Preset"是第九层的事）。
+/// 用户线三条前置：**是 TOML**（`.json` 认不出是哪一类，不给改）、**盘上真有**
+/// （被移走 / 删掉了照实说）、**过第九层的文件级检查**（能读 + UTF-8 + TOML 语法，
+/// 见 [`runtime::mine::read_preset_text`]）。它**不查 SHA** —— 用户那份本来就是允许改的，
+/// "字节必须还是当初那一份"是官方线的规矩；**语义合法性**（"是不是一份合法 MKP Preset"）
+/// 不在客户端判，留给真正的 Preset 能力在应用 / 编辑入口上回答。
 ///
 /// 已经有一份**同一份**的草稿时：**接着改**（`reused: true`），不覆盖用户的改动
 /// （那种情况不读盘上的字节，所以上面官方线第三条不成立）。
@@ -188,7 +201,8 @@ pub async fn begin_preset_edit(
                         "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
                     )));
                 }
-                let raw = runtime::mine::read_text(&user_root, rel)?;
+                /* 第九层：读不出来（编码 / TOML 语法）就不许改 —— 检查在读的那一步里 */
+                let raw = runtime::mine::read_preset_text(&user_root, rel)?;
                 let sha = runtime::lineage::sha256_hex(&raw);
                 /*
                  * 编辑器里给的是**正文**（那三行血统是程序的元数据，不是用户该改的内容）——

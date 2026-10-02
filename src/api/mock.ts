@@ -108,6 +108,9 @@ const mockMine: UserPresetFile[] = [
     size: 2048,
     modifiedUnix: 1780000000,
     kind: 'mkp_preset',
+    /* 第九层：能读 + TOML 语法过（演示正文是合法 TOML）→ 照常有「应用 / 改这份」 */
+    state: 'ok',
+    stateDetail: null,
     basedOn: 'outdated',
     basedOnLabel: 'mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-05-29 04:26:12',
@@ -121,6 +124,28 @@ const mockMine: UserPresetFile[] = [
     size: 1024,
     modifiedUnix: 1780003600,
     kind: null,
+    /* 认不出是哪一类 → 没有"能不能当预设用"这一档（与真机同形状） */
+    state: null,
+    stateDetail: null,
+    basedOn: 'unknown',
+    basedOnLabel: null,
+    basedOnRelease: null,
+    basedOnMachineId: null,
+    basedOnVersionId: null,
+  },
+  {
+    /*
+     * 第九层的演示：**TOML 语法坏了** → 行上画「文件无法读取」，并且**不给**
+     * 「应用」与「改这份」（真机上后端的文件级检查同样会把这两条拒掉）。
+     * 注意它照常列在表里 —— 藏起来等于对用户说他没这份文件。
+     */
+    path: 'presets-mine/坏了的涂胶.toml',
+    fileName: '坏了的涂胶.toml',
+    size: 1536,
+    modifiedUnix: 1780007200,
+    kind: 'mkp_preset',
+    state: 'unreadable',
+    stateDetail: 'TOML 语法不对（第 3 行第 1 列）',
     basedOn: 'unknown',
     basedOnLabel: null,
     basedOnRelease: null,
@@ -152,7 +177,8 @@ const lineageLinesOf = (text: string) =>
 const withoutLineage = (text: string) =>
   text.split('\n').filter((line) => !line.startsWith('# based_on')).join('\n')
 
-/* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上） */
+/* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上）。
+   键带引号是因为它得**真的是 TOML** —— 它那条 state 说 `ok`，演示也要自洽 */
 mockMineText.set(
   'presets-mine/我的 A1 涂胶.toml',
   [
@@ -160,10 +186,16 @@ mockMineText.set(
     '# based_on: mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-05-29 04:26:12',
     `# based_on_sha256: ${'0'.repeat(64)}`,
-    '涂胶宽度 = 1.1',
-    '起始延时 = 0.4',
+    '"涂胶宽度" = 1.1',
+    '"起始延时" = 0.4',
     '',
   ].join('\n'),
+)
+/* 坏了那份也种一份正文：**看正文照旧读得出来**（用户要能看着它去修）——
+   只有「应用 / 改这份」被拦（真机上是后端的文件级检查拦的） */
+mockMineText.set(
+  'presets-mine/坏了的涂胶.toml',
+  ['# 坏了的演示（假后端演示正文）', '[toolhead]', 'offset_x = (1', ''].join('\n'),
 )
 
 const nowSec = () => Math.floor(Date.now() / 1000)
@@ -265,6 +297,13 @@ export const mockApi: MkpApi = {
     }
     if (origin === 'mine') {
       const rel = path ?? ''
+      /* 第九层：读不出来的那份**不给改**（与真机同一个入口闸；消息形状也对齐后端） */
+      const entry = mockMine.find((f) => f.path === rel)
+      if (entry?.state === 'unreadable') {
+        throw new Error(
+          `${rel} 读不出来：${entry.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+        )
+      }
       const raw = mockMineText.get(rel)
       if (raw === undefined) {
         throw new NotImplementedError(
@@ -336,6 +375,9 @@ export const mockApi: MkpApi = {
       size,
       modifiedUnix: nowSec(),
       kind: 'mkp_preset',
+      /* 刚存出来的那份：假后端不解析 TOML，按演示口径记"能读"（真机上是后端算的） */
+      state: 'ok',
+      stateDetail: null,
       /* 刚存出来的这份就是基于**当前**目录那一版（演示里那份恰好对得上目录） */
       basedOn: 'current',
       basedOnLabel: label,
@@ -550,6 +592,12 @@ export const mockApi: MkpApi = {
     }
     const hit = mockMine.find((f) => f.path === path)
     if (hit === undefined) throw new Error(`用户目录里没有 ${path ?? '(没给路径)'}`)
+    /* 第九层：读不出来的那份**不许应用**（真机入口闸会拒；消息形状对齐后端） */
+    if (hit.state === 'unreadable') {
+      throw new Error(
+        `${hit.path} 读不出来：${hit.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+      )
+    }
     mockActive = {
       origin: 'mine',
       fileName: hit.fileName,

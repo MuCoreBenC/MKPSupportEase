@@ -378,6 +378,15 @@ export interface PresetFileInfo {
  */
 export type BasedOn = 'current' | 'outdated' | 'unknown'
 
+/**
+ * 用户文件的**文件级**状态（第九层）：`ok` = 能读 + 是 UTF-8 + TOML 语法能解析；
+ * `unreadable` = 读不出来（编码 / TOML 语法 / 指向用户根之外）。
+ *
+ * **它不回答"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对 —— 那是 Preset 语义，
+ * 客户端不复制那份 schema）；外部修改过但仍是能读的 TOML ⇒ 照常 `ok`，**不因 SHA 报警**。
+ */
+export type MineState = 'ok' | 'unreadable'
+
 export interface UserPresetFile {
   /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
   path: string
@@ -392,6 +401,16 @@ export interface UserPresetFile {
    * 是 bbs 还是 orca，所以照实认不出。界面上认不出的那一档**在任何类型档下都列**。
    */
   kind: FileKind | null
+  /**
+   * 第九层的**文件级**状态（见 [`MineState`]）。`unreadable` 的界面上说"文件无法读取"，
+   * **不许应用 / 编辑**；不是预设候选（认不出是哪一类）时是 `null`
+   */
+  state: MineState | null
+  /**
+   * 用不了时后端给的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
+   * 能用 / 不适用是 `null`
+   */
+  stateDetail: string | null
   /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
   basedOn: BasedOn
   /** 血统里记的来源（`mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */

@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**八层已收口**（2026-10-02，见 §3.5）—— 第九层（用户文件的合法性 / 外部修改检测）未开始 |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**九层已收口**（2026-10-02，见 §3.5）—— 第十层（用户文件管理：重命名 / 删除）未开始 |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -98,10 +98,14 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
    6. ✅ **官方文件异常修改检测**（SHA 报警：不许应用 / 不许编辑 / 不许复制，只能重下）
    7. ✅ **官方更新与用户修改并存**（用户那份也是真 Preset：能应用；血统随文件走；
       "官方换版了、你这份基于旧版"说得明白 —— 见下）
-   8. ✅ **继续编辑我自己那份**（2026-10-02，本次）—— 见下
-   9. ⬜ **用户文件的合法性 / 外部修改检测**（**判据与官方线不同**：官方线要求"字节必须还是
-      当初那一份"⇒ SHA；用户线只要求"现在还是一份能被识别的 Preset"⇒ TOML + Preset 结构 ——
-      用户那份本来就是允许改的，它在 Finder / VS Code 里被改是正常事）
+   8. ✅ **继续编辑我自己那份**（2026-10-02）—— 见下
+   9. ✅ **用户文件的合法性 / 外部修改检测**（2026-10-02，本次）—— 见下。
+      **口径（作者 2026-10-02 定，别再回问）**：客户端**不复制 `mkpse-preset` 的 schema**、
+      不建第二套 Preset 真相；第九层只做**文件级**（存在 + 在 `presets-mine/` 内 + 防穿越 /
+      防符号链接逃逸 + 能读 + UTF-8 + TOML 语法能解析）；**语义合法性**（"是不是一份合法
+      MKP Preset"：结构 / 参数）不在客户端判，留给真正的 Preset 能力在应用 / 编辑入口上回答；
+      **外部修改 ≠ 报警** —— 用户那份本来就允许改，只看"现在还能不能用"、**不比 SHA**。
+      已同步写进总纲 §1③。
   10. ⬜ **用户文件管理（重命名 / 删除）** —— 它已经是"我的文件"，自然会有这两件事；
       尤其自动名字 `A1-standard（已修改）.toml` 用户多半想改。
       **注意：这是真正的用户数据操作，单独设计**（第十层），不在第八层顺手做
@@ -263,22 +267,56 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        `runtime::lineage` 四条（写回保留出处 / 没改就字节不变 / 无血统不编 / CRLF）+
        探针第 5h 节（我那份有「改这份」、编辑器里没有血统、按钮说「保存回我这份」、
        存完没有多出一份、「基于旧版官方」那枚与那三行都还在）。
+     - ✅ **第九层：用户文件的合法性 / 外部修改检测**（2026-10-02，本次）—— **架构边界由作者
+      定死**（原文要点见 §5 与总纲 §1③）：**客户端不复制 `mkpse-preset` 的 schema、不建
+      第二套 Preset 真相**；这一层只做**文件级**检查 —— 语义那一档（"是不是一份合法
+      MKP Preset"：结构 / 参数）留给真正的 Preset 能力在应用 / 编辑入口上回答
+      （默认构建不编 `mkpse-preset` 的隔离纪律不为此破例）。
 
-## 4. 续做入口（从哪接手）
+      判据（作者原文四条）：
 
-- **八层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
-  （能读能列 / 能另存 / **能被应用** / **能被改并写回自己** / 说得清基于哪一版官方）都通了。
-  **下一步是第九层：用户文件的合法性 / 外部修改检测** —— 判据与官方线**不同**：
-  官方线要"字节必须还是当初那一份"（SHA），用户线只要"它现在还是一份能被识别的 Preset"
-  （TOML + Preset 结构），因为用户那份**本来就是允许改的**（Finder / VS Code 改它都正常）。
-  底盘已经就位：草稿里记着打开那一刻的指纹（`PresetDraft.source_sha256`），
-  **第九层要回答的是"编辑期间 / 应用前它是否被外面动过"**，以及"它还是不是一份 MKP 预设"。
-  ⚠️ 开工前要确认一件事（属于"产品行为变了"那一类）：客户端**默认构建不编 `mkpse-preset`**，
-  所以"是不是合法 Preset"要么在客户端另写一个极小解析面、要么只做 TOML 语法层 ——
-  这是产品取舍，得问作者。
+      ```text
+      正常：存在 + 路径在 presets-mine/ 内 + TOML 能读   → 照常应用 / 编辑
+      损坏：文件在，但 TOML 读不出来                     → 显示「文件无法读取」→ 不许应用 / 编辑
+      不是 MKP Preset：TOML 能读、语义解析不过           → 客户端不判（留给真正的 Preset 能力）
+      外部改过但仍是能读的 TOML                          → 照常使用，**不因 SHA 报警**
+      ```
+
+      落地（两块）：
+      - **`runtime::mine` 长出文件级状态**：`MineState`（`ok` / `unreadable`，**只此两档** ——
+        没有"是不是合法 Preset"那一档）+ `toml_syntax_reason`（`toml_edit` 解析，
+        **报得出第几行第几列**）+ `read_preset_text`（读 + UTF-8 + TOML 语法，**应用 / 编辑
+        两个入口共用这一处**，不许各写一遍）。扫盘时每个 `.toml` 候选都算出状态；
+        **符号链接逃逸在扫盘就先拦**（与读正文 / 应用 / 编辑同一道 `resolve_in`；
+        指向用户根外的，**一个字节都不读**，血统也不读）。非预设候选（`.json`）没有这一档
+        （`state: null`）。DTO 加 `state` / `stateDetail` 两个字段。
+      - **界面**：读不出来的那份**照常列在表里**、名字旁边一枚琥珀色「文件无法读取」
+        （title 里带后端给的原因，如"TOML 语法不对（第 3 行第 1 列）"）；**「应用」与
+        「改这份」都不给**（不给必被后端拒的按钮），展开详情里多一格「文件」。
+        **「看正文」照旧给** —— 读它不算"用"，用户要能看着它去修。
+      - 判据：`runtime::mine` 第九层 5 条新增（坏 TOML 画成读不出来且报行号 / 非 UTF-8
+        读不出来 / **根外符号链接一个字节都不读**（根内链接照常）/ 应用与编辑入口拦下坏
+        TOML 而看正文照旧 / **外部改过仍合法 = 正常（不比 SHA）**）+ 既有 2 条搭上 `state`
+        断言 + 探针第 5i 节（坏的那份画得出「文件无法读取」、没有「应用」也没有「改这份」、
+        角标带原因；能读的那份不受牵连）。
+
+     ## 4. 续做入口（从哪接手）
+
+- **九层走完了**（2026-10-02）：官方线（下载 / 状态 / 批量 / 归档 / 可信度）与用户线
+  （能读能列 / 能另存 / **能被应用** / **能被改并写回自己** / **读不出来就拦在应用·编辑
+  门口（文件级检查，不比 SHA）**）都通了。
+  **下一步是第十层：用户文件管理（重命名 / 删除）** —— 它已经是"我的文件"，尤其自动名字
+  `A1-standard（已修改）.toml` 用户多半想改；**这是真正的用户数据操作，单独设计**（不在
+  前面任何一层顺手做）。之后是第十一层（另存为一份新的）与第十二层（导入 / 分享）。
+- **第九层登记一条边界（不是漏做）**：**语义合法性**（"是不是一份合法 MKP Preset"：
+  结构 / 参数对不对）**客户端不判** —— 判据只到文件级（能读 + UTF-8 + TOML 语法）。
+  含义：TOML 能读但不是 MKP 预设的文件（以及空文件 / 只有注释的 TOML）现在会显示为正常；
+  要堵它得让真正的 Preset 能力接到应用 / 编辑入口上（`mkpse-preset` 的事，默认构建的
+  隔离纪律不为它破例）。**"用户文件被外面改过"也不再是任何形式的报警**：只要仍是能读的
+  TOML 就照常能用 —— 与之对照的官方线 SHA 报警（第六层）一个字没动。
 - **第七层留下的一条可收口项**（不影响功能，登记）：血统三行的文本逻辑现在两份实现
   （`runtime::lineage` 与 `preset::lineage`），靠 `workbench::lineage_parity` 钉住。
-  更彻底的一条路是把它下移到共享小 crate、两边转调 —— 与第九层那件事一起裁更省事。
+  更彻底的一条路是把它下移到共享小 crate、两边转调。
 
 - **第三圈第 2 步的布局对齐已完成**（2026-10-02）：交付根相对路径 = 客户端下载区的相对路径（`mkp/…`），两端共用 `runtime::catalog::dest_of_asset`。**下一步是 §3.5 第 3 步：Preset 成为第一个完整消费者**（发现 → 下载 → 本地文件 → 页面，再逐层加下载状态 / 更新 / 修改 / 归档 / SHA 异常 / 用户版本）。**官方源 / Gitee 的真实地址**落进发布流水线（`MKPSE_PRESET_SOURCE`）是产品决定，等那一刀做。
 - **整机图那一刀的遗留（已登记，不是漏做）**：`presetdata::AssetKind::Image` 变体与机型 `image` 字段还在（值为空）。**schema 暂不清理**（2026-10-02 定）："现在没有数据"不等于"这个概念永远不存在"，保持 schema 稳定，将来确认不用了再单独做一次 schema 清理（会连带改前端契约 `Machine.image`、mock、工作台机型页与资产页）。工作台的"机型图"筛选页签与机型图下拉现在**如实为空**（台账里确实没有这一类），不是坏了。界面素材已全部搬离 `public/`（整机图 + 测试模型合影），`public/` 只剩载荷根与 BBS 页元数据。
@@ -308,6 +346,11 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   ③ 守住当前这一圈的边界 → ④ 选改动更小、下一条最容易接的那个。
   **决定与理由写进台账**（本文件 §3 / §5 或 `DATA-INVENTORY.md` 的进展日志），
   不要在汇报里写成"要不要我做"的问句。作者定舞步，这一侧负责把舞步跳完整。
+- **不许给第九层复制 Preset schema**（2026-10-02 作者定死，写进总纲 §1③）：客户端对
+  用户文件只做**文件级**检查（能读 + UTF-8 + TOML 语法），**不复制 `mkpse-preset` 的
+  结构 / 参数规则、不建第二套 Preset 真相**；语义合法性留给真正的 Preset 能力在
+  应用 / 编辑入口上回答。"以后 schema 改一次要改两边"的平行真相，正是这次重建一直在
+  消灭的东西。
 - **总纲准入问句**（`DATA-ARCHITECTURE.md` §6）：任何新文件/新功能先答"属于哪一层？谁是唯一主人？什么时候允许联网？"答不出先改文档。
 - **四条铁律**：开发文件不当运行时数据库；云端不参与首屏；用户没下载的不预置（catalog 是唯一例外——它是软件本体）；运行时只认自己的运行时数据。
 - **clippy 禁列对测试也生效**（CI 是 `--all-targets`）：测试里写盘用 `fsx::atomic::atomic_write`，`std::fs::write` 会红。
@@ -359,6 +402,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::mine` 用户线 4 条 | `mine_files_is_empty_when_the_user_has_nothing`（一份都没有 = 空表，不是错误）/ `…lists_what_the_user_put_there`（路径相对用户根、按升序、子目录也算、只出 `presets-mine/`）/ `kind_is_only_claimed_when_the_extension_says_so`（`.json` **照实认不出**）/ `only_the_mine_subdir_is_readable`（读正文只认那一格：`exports/`、`..`、目录本身都拒） |
 | `runtime::mine` 另存 2 条 | `commit_writes_the_edited_copy_and_leaves_the_official_alone`（**核心不变式**：另存只写用户根、官方原件字节不变、下载区文件数不变、再存是覆盖它自己）/ `the_committed_copy_shows_up_in_mine_files`（另存出来的那份接着就能被列出来、读得回来） |
 | `runtime::mine` 写回 5 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_lineage`（**核心不变式**：**同一路径、不产生第二份**，血统照抄 —— 摘要不许变成"我自己改过的字节"）/ `saving_back_an_untouched_file_changes_nothing`（没改就逐字节不变）/ `saving_back_a_file_without_lineage_invents_none`（本来没血统就不编一个）/ `saving_back_refuses_when_the_file_is_gone`（被移走了**拒绝且不新建**）/ `saving_back_stays_in_the_mine_dir` |
+| `runtime::mine` 第九层 5 条（文件级：能读 + UTF-8 + TOML 语法） | `a_broken_toml_shows_up_as_unreadable`（坏 TOML → `unreadable`，原因**报得出第几行**）/ `a_non_utf8_file_is_unreadable_too` / `an_escaping_symlink_is_never_read`（**指向用户根外的链接一个字节都不读**（血统也不读）；根内链接照常能用）/ `read_preset_text_blocks_the_broken_one_but_viewing_still_works`（应用 · 编辑两个入口共用这一处闸；**看正文照旧** —— 读它不算"用"）/ `an_external_edit_that_still_parses_is_fine`（**不比 SHA**：外部改过但仍是能读的 TOML = 正常）。既有 `mine_files_lists…` / `the_committed_copy_shows_up_in_mine_files` 搭上 `state` 断言 |
 | `runtime::state` 草稿两条线 2 条（第八层） | `a_draft_knows_which_line_it_belongs_to`（**同名不同线 ≠ 同一份**：「接着改」不许接错）/ `an_older_draft_file_is_still_the_official_line`（旧档 = 官方线，**不升 schema**） |
 | `runtime::lineage` 写回 4 条（第八层） | `saving_back_keeps_the_original_lineage` / `saving_an_untouched_copy_changes_nothing` / `saving_back_without_lineage_writes_no_lineage` / `saving_back_keeps_the_line_endings` |
 | `runtime::delivery` 可信度 5 条（第 6 层） | `a_clean_copy_is_current_and_not_reported`（没问题就不报警）/ `tampered_bytes_are_not_recognized`（哪儿都对不上 = 异常，且没有证据可指）/ `a_copy_of_the_archived_version_is_recognized_as_old`（**认得出旧版本**，证据是归档里那条路径）/ `a_version_from_the_archived_catalog_is_recognized_as_old`（归档槽被占了也认得出更早那一版）/ `official_text_refuses_bytes_that_drifted`（**不许拿漂了的字节当原文改**） |
@@ -367,7 +411,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
-| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「复制」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「复制」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / 控制台无 error、无 ≥400 响应。跑法见 §7；截图落 `tmp-shots/`（已 gitignore） |
 
 ## 7. 仓库状态速记
 
@@ -389,8 +433,9 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   用户线**写回它自己**（同一路径，不产生第二份）。
 - **用户自己那一份住哪**：`~/Documents/SupportEase/presets-mine/`（**用户根**，与内部根分开 ——
   程序管的数据不放 Documents，因为 iCloud 会把文件驱逐成占位 stub，见 `fsx::paths`）。
-  两条只读命令：`get_user_preset_files`（列，**带血统与"基于哪一版官方"的判定**）/
-  `read_user_preset_text`（读正文，**只认那一格**）；**写用户根只有两条**
+  两条只读命令：`get_user_preset_files`（列，**带血统、"基于哪一版官方"的判定与
+  第九层的文件级状态 `state` / `stateDetail`**）/ `read_user_preset_text`（读正文，
+  **只认那一格**）；**写用户根只有两条**
   （都在 `runtime::mine`，官方原件与下载区一概不碰）：`commit_draft`（另存，第 5 层）/
   `save_back`（写回自己，第 8 层）。
   界面上它在本地表里（「我的文件」那一半，展开详情里有「看正文」与「改这份」）。
@@ -432,6 +477,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   `npx vite preview --port 4173 --strictPort` → 开 `http://localhost:4173/` 的「预设」页 ——
   交付行按假后端的**固定演示集合**画四档（`A1-standard.toml` 已下载、`A1-fast.toml` 旧版本、
   `A1mini-standard.toml` 内容异常 —— 最后一份在「全部机型」档下才看得到）；
+  用户线三份演示：`我的 A1 涂胶.toml`（基于旧版官方、能应用能改）、`Process_0.2mm.json`
+  （认不出哪一类）、**`坏了的涂胶.toml`（第九层：画「文件无法读取」、不给应用 / 改这份）**；
   点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
   自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
   **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。
