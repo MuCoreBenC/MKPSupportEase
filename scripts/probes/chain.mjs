@@ -33,8 +33,9 @@
  * # 为什么打的是 development + esnext 那一份（而不是 `npm run build:workbench` 的产物）
  *
  * 与 `scripts/probes/workbench-build.mjs` 同一条理由（那文件头里写全了）：开发桩只在
- * `import.meta.env.DEV` 时装，生产产物里既没有 Tauri IPC 也没有桩，整页读不到后端数据 ——
- * 那时量的不是页面，是白屏。所以浏览器验收分两步：生产那一份报体积（闸门），
+ * `import.meta.env.DEV` **且 URL 带 `?mock=1`** 时装（2026-10-02 起 —— 真机不再自动装桩），
+ * 生产产物里既没有 Tauri IPC 也没有桩，整页读不到后端数据 —— 那时量的不是页面，是白屏。
+ * 本探针打开工作台时**自己带上 `?mock=1`**。所以浏览器验收分两步：生产那一份报体积（闸门），
  * **带了桩的那一份**单独打给探针用：
  *
  *   npm run build:workbench                                                    # 生产产物（闸门）
@@ -132,6 +133,37 @@ function wire(tag, page) {
 
 const browser = await chromium.launch({ channel: 'msedge' })
 
+/* ---------- 〇. 不带 `?mock=1` → **不许假装能跑**（2026-10-02 定的口径） ---------- */
+/*
+ * 这条守的是"桩不是产品运行时能力"：正常人（或 `tauri:workbench:dev` 的浏览器降级）
+ * 打开 workbench.html 时没有 Tauri IPC，此时**必须如实失败**，不许装上一层夹具
+ * 让人以为"能跑、数据是真的"。以前是"dev 且没 Tauri 就自动装"，于是浏览器里打开
+ * 看着能用、实际读的是手写数据 —— "改了配置界面没变"就是这么来的。
+ *
+ * 判据很硬：不带 mock 时，工作台**不该**出现带夹具数据的一级导航（那是桩装上了的证据）。
+ */
+{
+  const bare = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const p = await bare.newPage()
+  await p.goto(`${base}/workbench.html`, { waitUntil: 'load' })
+  await p.waitForTimeout(1500)
+  const t = await p.evaluate(() => document.body.innerText.replace(/\s+/g, ' '))
+  /*
+   * 判据不能是"导航在不在"——外壳是静态的，没有后端也照渲染（实测如此）。
+   * 真正的证据是**数据**：桩特有的那份夹具值（假路径 `C:\dev\presets`）**不该出现**，
+   * 而页面里该出现「读取中」那种如实空态。
+   */
+  const looksLikeMock = t.includes('C:\\dev\\presets')
+  const honest = t.includes('读取中') || t.includes('正在读')
+  check(
+    'nomock',
+    '〇 不带 ?mock=1 时工作台**不装桩**（没有夹具数据，只剩如实空态）',
+    !looksLikeMock && honest,
+    looksLikeMock ? '出现了桩的夹具值（C:\\dev\\presets）—— 桩仍在自动装' : t.slice(0, 60),
+  )
+  await bare.close()
+}
+
 for (const size of SIZES) {
   const tag = size.tag
   const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height } })
@@ -139,7 +171,9 @@ for (const size of SIZES) {
   /* ---------- ① 工作台：生成 ---------- */
   const wbPage = await ctx.newPage()
   wire(tag, wbPage)
-  await wbPage.goto(`${base}/workbench.html`, { waitUntil: 'load' })
+  /* `?mock=1`：开发桩不再自动装（2026-10-02 起 —— 真机永远走真 Tauri IPC；
+     桩是**探针的测试后端**，得自己显式要。见 src/workbench/main.tsx） */
+  await wbPage.goto(`${base}/workbench.html?mock=1`, { waitUntil: 'load' })
   await wbPage.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
   await wbPage.locator('button[title="生成与发布"]').first().click()
   const wbReady = await until(async () => (await wbText(wbPage)).includes('② 客户端数据包'))
@@ -226,6 +260,22 @@ for (const size of SIZES) {
     saved,
     '',
   )
+
+  /*
+   * ④ 「重新读取」= 从磁盘重读（`wb.reload()`）。
+   * 先在输入框里敲一段**没保存**的垃圾，再点重新读取 —— 它该被磁盘那份**覆盖掉**，
+   * 这一条量的正是"看到的是磁盘真相，不是我敲进去的东西"。
+   */
+  await urlInput.fill('https://example.com/not-saved')
+  await wbPage.getByRole('button', { name: '重新读取', exact: true }).first().click()
+  const reread = await until(async () => (await wbText(wbPage)).includes('已从磁盘重读'), 5000)
+  const afterReread = await urlInput.inputValue()
+  check(
+    tag,
+    '②b 「重新读取」把输入框里没保存的内容清掉、换回磁盘那份（看真相）',
+    reread && afterReread !== 'https://example.com/not-saved',
+    `重读后输入框=${afterReread || '(空)'}`,
+  )
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-settings.png` })
 
   /* ---------- ③ 客户端：那一端的边界（浏览器里不再读工作台那一格） ---------- */
@@ -272,6 +322,7 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（数据源那一格说真话）'
+  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（数据源那一格说真话）；'
+  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「重新读取」能从磁盘看真相'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )

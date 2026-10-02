@@ -5,9 +5,11 @@
  * # 为什么探针打的是 development + esnext 的那一份（而不是 `npm run build:workbench` 的产物）
  *
  * `workbench.html` 只在 `npm run build:workbench`（`vite build --mode workbench`）里进包，
- * 而**开发桩只在 `import.meta.env.DEV` 时装**（见 `src/workbench/main.tsx`）：production
- * 构建的页面没有 Tauri IPC、也没有桩，整页读不到任何后端数据 —— 那时候探针量的不是页面，
- * 是白屏（实测：`TypeError: Cannot read properties of undefined (reading 'invoke')`）。
+ * 而**开发桩只在 `import.meta.env.DEV` 且 URL 带 `?mock=1` 时装**（2026-10-02 起；
+ * 见 `src/workbench/main.tsx`）：production 构建的页面没有 Tauri IPC、也没有桩，
+ * 整页读不到任何后端数据 —— 那时候探针量的不是页面，是白屏（实测：
+ * `TypeError: Cannot read properties of undefined (reading 'invoke')`）。
+ * 本探针**自己给 URL 补 `?mock=1`**（传进来的地址上已有就不重复加）。
  * 生产产物不该有桩，所以这不是要去修的 bug，而是**验收路径**的问题：`npm run dev`
  * （DEV=true、有桩）在这台机器上被 `target/` 两棵构建树（5.8 万文件）拖死，HTTP 全超时。
  *
@@ -32,7 +34,13 @@ import { mkdir } from 'node:fs/promises'
 
 import { chromium } from 'playwright-core'
 
-const url = process.argv[2]?.startsWith('http') ? process.argv[2] : 'http://localhost:4174/workbench.html'
+/*
+ * `?mock=1`：开发桩不再自动装（2026-10-02 起 —— 真机 `tauri:workbench:dev` 永远走真
+ * Tauri IPC；桩是**探针的测试后端**，得自己显式要，见 src/workbench/main.tsx）。
+ * 传进来的 URL 上若已经带 `mock` 就不重复加。
+ */
+const rawUrl = process.argv[2]?.startsWith('http') ? process.argv[2] : 'http://localhost:4174/workbench.html'
+const url = /[?&]mock=/.test(rawUrl) ? rawUrl : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}mock=1`
 const wantShots = process.argv.includes('--shots')
 const shotDir = 'tmp-shots'
 

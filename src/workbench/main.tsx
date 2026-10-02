@@ -16,9 +16,22 @@ import './workbench.css'
 import './c14tokens.css'
 import { WorkbenchApp } from './App'
 
-/* 开发桩：浏览器里没有 Tauri IPC 时装上（见 dev/mockBackend.ts 的文件头）。
-   真机 / 生产构建不装 —— import.meta.env.DEV 为 false 时这段连同模块都被摇掉 */
-if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+/*
+ * 测试桩：**只有显式要求才装**（`?mock=1`），这是 2026-10-02 定的口径。
+ *
+ * 以前是「dev 且没有 Tauri 就自动装」—— 那让"浏览器里打开工作台"看起来能跑，
+ * 实际上读的是一份手写夹具，**与真盘上的 workbench/bootstrap.json 毫无关系**：
+ * 在终端改了配置文件，界面照旧显示夹具里的旧值，人会以为"改没生效"。
+ * 现在默认**一条路**：真机没有 Tauri 就如实报错，不再拿夹具冒充后端。
+ *
+ * 桩不是产品运行时的能力，是**探针的测试后端**（`scripts/probes/chain.mjs` 等）：
+ * 它们跑在 vite preview + 浏览器里，本来就该显式说"我需要桩"。
+ *   · `tauri:workbench:dev` / 生产构建 → **永不装**（这段被 `import.meta.env.DEV` 摇掉）
+ *   · `vite preview` + `?mock=1`      → 装（只服务探针）
+ */
+const wantsMock =
+  import.meta.env.DEV && new URLSearchParams(window.location.search).get('mock') === '1'
+if (wantsMock) {
   const { installMockBackend } = await import('./dev/mockBackend')
   installMockBackend()
 }
