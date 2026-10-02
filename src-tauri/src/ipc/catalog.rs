@@ -41,33 +41,35 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetSourceDto {
-    /// **当前生效**的地址（设置文件优先，其次内置默认）
+    /// **当前生效**的入口地址（设置文件优先，其次内置默认）。
+    /// 第十七刀起两种来源的语义不同、界面要说清：手动 = 数据源根（根下就有
+    /// `catalog.json`）；内置 = **Bootstrap 地址**（指向 `source.json`，见 `runtime::source`）
     pub base_url: String,
     /// `true` = 用户在界面里填的（写进了设置文件）；`false` = 构建期注入的出厂默认值，还没被人动过。
     /// 界面据此把"默认值"与"你选的"分开说——不然用户不知道当前的地址是自己改的还是出厂的
     pub from_user: bool,
-    /// 构建期注入的默认地址（`MKPSE_PRESET_SOURCE`），没有就是 `null`。
-    /// **单独给一份**：有用户覆盖时 `base_url` 是覆盖值，光看它分不出"撤掉覆盖之后会回到什么"
-    /// —— 设置页「使用内置官方源」那一格要说的正是这句话
+    /// 构建期注入的默认地址（`MKPSE_PRESET_SOURCE`，工作台配置在构建时合并进它），
+    /// 没有就是 `null`。**单独给一份**：有用户覆盖时 `base_url` 是覆盖值，
+    /// 光看它分不出"撤掉覆盖之后会回到什么"—— 设置页「使用内置官方源」那一格要说的正是这句话
     pub builtin: Option<String>,
 }
 
 /// 生效值的装配：设置文件优先 → 内置默认 → 都没有就是 `null`。
 /// **只写这一处**（get 与 clear 共用）—— 各写一遍迟早有一份忘带新字段
 fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
-    match runtime::source::load_source(root)? {
-        Some(stored) => Ok(Some(PresetSourceDto {
-            base_url: stored.base_url,
+    let builtin = runtime::source::builtin_default();
+    match runtime::source::current_entry(root)? {
+        Some(runtime::source::SourceEntry::Direct { base_url }) => Ok(Some(PresetSourceDto {
+            base_url,
             from_user: true,
-            builtin: runtime::source::builtin_default(),
+            builtin,
         })),
-        None => Ok(
-            runtime::source::builtin_default().map(|base_url| PresetSourceDto {
-                base_url,
-                from_user: false,
-                builtin: runtime::source::builtin_default(),
-            }),
-        ),
+        Some(runtime::source::SourceEntry::Bootstrap { url }) => Ok(Some(PresetSourceDto {
+            base_url: url,
+            from_user: false,
+            builtin,
+        })),
+        None => Ok(None),
     }
 }
 
@@ -116,18 +118,12 @@ pub async fn clear_preset_source(app: AppHandle) -> Result<Option<PresetSourceDt
     })
 }
 
-/// 当前数据源的地址 —— 今天所有联网动作（下载 / 检查更新 / 应用更新）的唯一入口。
-///
-/// **没配就报错，并且要说清去哪儿配**：这一步最容易被写成 `NOT_FOUND`（那是"目录里
-/// 没有这个文件"的意思）或干脆返回一个空结果。两者都会让界面显示一句用户无从行动的话。
-fn remote_base(root: &Path) -> Result<String, AppError> {
-    let stored = runtime::source::current_base_url(root)?;
-    stored.ok_or_else(|| {
-        AppError::not_implemented(
-            "还没配置数据源地址：去「设置 → 高级设置 → 预设数据源」填一个（官方源 / Gitee / 自己的服务器都行）",
-        )
-    })
-}
+/*
+ * 「远端在哪」的解析（原来那个 `remote_base`）搬进了 `runtime::source`：
+ * 第十七刀起入口有两种（手动根 / 内置 Bootstrap），解析要读 `source.json` ——
+ * 那是 source 模块的知识，不是这一层的。所有联网动作（下载 / 检查更新 / 应用更新）
+ * 都从 `runtime::source::resolve_source(&root)?` 出发，拿 `base_url` 或 `catalog_url`。
+ */
 
 /// 一次下载的水位（走 Channel 送回调用方那条 IPC —— 一次调用一路流式事件，
 /// 不是全局广播：将来的"任务中心"要的是另一件事，等它真来了再说）
@@ -211,7 +207,8 @@ pub async fn download_runtime_file(
                     None,
                 );
             };
-            let remote = runtime::net::RemoteSource::new(remote_base(&root)?, &forward);
+            let resolved = runtime::source::resolve_source(&root)?;
+            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
             let outcome = runtime::delivery::deliver(&root, file, &remote);
 
             match &outcome {
@@ -291,7 +288,8 @@ pub async fn download_runtime_files(
                     None,
                 );
             };
-            let remote = runtime::net::RemoteSource::new(remote_base(&root)?, &forward);
+            let resolved = runtime::source::resolve_source(&root)?;
+            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
 
             let report = |outcome: &runtime::delivery::FileOutcome| {
                 let size = wanted
@@ -685,7 +683,8 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            let bytes = runtime::net::get_manifest(&remote_base(&root)?)?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
             let remote = runtime::Catalog::parse(&bytes)?;
             let local = runtime::load_released_catalog(&root)?;
             let r = runtime::update::check(&local, &remote);
@@ -707,7 +706,8 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("applyRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            let bytes = runtime::net::get_manifest(&remote_base(&root)?)?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
             let report = runtime::release::release_bytes(&root, &bytes)?;
             Ok(report.summary())
         })

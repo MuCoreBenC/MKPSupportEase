@@ -226,13 +226,15 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
-        // 后厨工作台（doc §6 的新契约）。**写只有 wb_apply_draft 一条** ——
-        // 其余全是读、查（只读推演）、或一件明确的事。
+        // 后厨工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
+        // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
+        // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、
         // 差异列表、状态一致性每一件都要挨个改十几处。
         app::wb_open,
         app::wb_boot,
         app::wb_reload,
+        app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——

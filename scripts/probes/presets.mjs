@@ -36,6 +36,9 @@ const BENIGN = [
   /未实现的接口: downloadCatalogFile/,
   /未实现的接口: readArchivedText/,
   /未实现的接口: readUserPresetText/,
+  /* 第十七刀：进入预设会后台检查一次远端目录（Bootstrap）。浏览器里没有远端（假后端必抛），
+     这一条是**设计成要发生的** —— 页面把它静默吞掉（第 5n 节正是断言"静默"） */
+  /未实现的接口: checkRemoteUpdate/,
 ]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
@@ -1407,6 +1410,42 @@ if (stillActive13 === undefined || !stillActive13.action.includes('已应用')) 
 }
 await page.screenshot({ path: `${shotDir}/presets-reveal.png` })
 
+/* ---------- 5n. 第十七刀：进入预设后台检查一次 Bootstrap（失败静默） ---------- */
+/*
+ * 守三件事：
+ *   ① 进入预设页**不因后台检查而报错/卡住** —— 本地 catalog 立刻画出来（首屏不等远端）；
+ *   ② 后台检查失败（浏览器里没有远端 / 没内置源）**静默**：不许把预设页升格成整页错误，
+ *      也不许弹一条"检查更新失败"的提示条（启动零网络那条纪律的延伸：这里只是"路过问一声"）；
+ *   ③ **绝不自动下载**：整页跑完一遍，一张表里不该出现任何"正在下载 / 已下载"的副作用
+ *      （下载只有用户点那颗按钮才发生）。
+ *
+ * 假后端里 `checkRemoteUpdate` 必抛未实现（浏览器没有远端）—— 那条 error 已在 BENIGN
+ * 里放行，所以"控制台有没有 error"这一节不受它牵连。真机那条更硬的判据在 Rust 侧：
+ * `check_remote_update` / `apply_remote_update` 只换本地 catalog、不碰 mkp/ 里的文件。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(400)
+/* 上一节（第十三层）留下的提示条先关掉 —— 这里要看的是"后台检查会不会自己冒出一条" */
+const closeNote = page.locator('main [role="status"] button[aria-label="关闭这条提示"]')
+if ((await closeNote.count()) > 0) await closeNote.first().click()
+await page.waitForTimeout(500)
+const bootstrapFact = await page.evaluate(() => ({
+  text: (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  status: document.querySelector('main [role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+  rows: document.querySelectorAll('main tbody tr td:not([colspan])').length,
+}))
+console.log(`\n[第十七刀 · Bootstrap 后台检查] 提示条：${bootstrapFact.status || '(没有 —— 静默)'}`)
+if (!bootstrapFact.text.includes('已应用')) {
+  problems.push('后台检查失败不该整页报错：本地那一份状态条该照常在')
+}
+if (/检查更新失败|加载失败|Bootstrap|源/.test(bootstrapFact.status)) {
+  problems.push(`后台检查失败该静默（不许冒出提示条），实测「${bootstrapFact.status}」`)
+}
+if (bootstrapFact.rows === 0) {
+  problems.push('后台检查不该挡首屏：本地表该立刻有行')
+}
+
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
@@ -1474,5 +1513,6 @@ console.log(
     '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
     '导入入口（第十二层）：选择器能进、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
+    'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +
     '控制台没有 error',
 )

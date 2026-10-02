@@ -10,7 +10,7 @@
 |---|---|---|
 | 第一圈 | 骨架全立起来：数据世界 / 最小 Catalog / 文件系统 / Delivery 骨架 / 用户数据 / 页面闭环 | ✅ **100%**（六块全通，2026-10-01） |
 | 第二圈 | 每块地基做厚 | ✅ **100%**（六项全通，2026-10-01：更新与归档 / R11 共用契约 / catalog 加厚换源 / **C4 localStorage 退役** / **Delivery 加厚（真数据源上线）** / **判据 2 启动零网络**） |
-| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）—— 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；「同步」不再是一个用户概念（数据源配置降级成设置页里的开发后门）；「分享」不做、单文件「导出」暂缓（见 §5）；下一个真块是「设置 → 备份与恢复」（ZIP，复用第十二层入口） |
+| 第三圈 | 统一资产入口（Catalog + Source + Delivery 一个世界），再让发布成为生产者，最后 Preset 成为第一个完整消费者 | ✅ 第 1、2 步收口；第 3 步（Preset 消费者）**十二层 + 第十三层收尾全部收口**、**第十五层（预设页数据边界修正）收口**、**「同步」页退役 + 最小设置页**（2026-10-02，见 §3.5）→ 用户文件生命周期闭环（创建 / 修改 / 管理 / 使用 / 外部管理）；**Bootstrap 官方源接通**（第十七刀，2026-10-02）→「同步系统」从用户功能降为内部基础设施（构建期注入 · 进预设后台检查一次 · 只换 catalog 不自动下载）；「分享」不做、单文件「导出」暂缓（见 §5）；下一个真块是「设置 → 备份与恢复」（ZIP，复用第十二层入口） |
 | 第四圈 | 完整产品行为（三状态流转 / 冲突 / SHA 异常边界 / UI 状态） | ⬜ 未开始 |
 
 **整体 ≈ 50%。** 判断依据：数据架构的四条主链（说明书=catalog、下载=mkp/、使用中=run/、更新=归档管道）全部收进 Internal 根，localStorage 不再住任何底账（默认 168 条 + workbench 349 条 Rust 测试、总纲判据落地 4 条）；**下载端与"零网络依赖"这条旧账也清了**——真数据源（HTTP）已经接进管道，"能不能联网"不再是空位、而是一个有判据的事实；**资产这一侧也分干净了**：产品数据资源走 Catalog + Delivery（第三圈第 1 步收口），界面展示素材随程序本体、不进台账。剩下的是业务侧（Preset 全功能 / 报告）还没接进新地基。
@@ -439,6 +439,66 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
        非法地址如实拒 / 恢复内置默认能撤回），两档 **14 条全绿**；`tabs.mjs` **7 页签**
        （设置成真页面）；`chain.mjs` 第 ③ 步改点设置页，两档 **10/10 绿**；Rust
        `source::clear_source` 2 条新测试（撤覆盖 / 幂等）。
+     - ✅ **第十七刀：Bootstrap 官方源接通**（2026-10-02，本次）—— 作者裁决：
+     "整个'同步系统'从一个用户功能，变成内部基础设施。"链路定死：
+     `工作台填 Bootstrap 地址 → 构建期注入 → 客户端读 source.json 拿 catalog + 文件根 →
+     进预设后台检查一次 → 有新版才换本地 catalog → 用户点"下载"才下载文件`。
+     - **两个入口，语义故意不同**（`runtime::source` 模块头）：
+       **手动覆盖**（设置页，`run/preset-source.json`）= **数据源根**（根下直接是
+       catalog.json，开发 / 排查通道，不联网）；**内置**（构建期注入）= **Bootstrap 地址**
+       （指向 source.json，正式通道）——**覆盖优先**，两条路解析成**同一形状**
+       `ResolvedSource`（catalog_url + base_url），下游只认它、不各自拼 URL。
+     - **注入**（`src-tauri/build.rs`）：`MKPSE_PRESET_SOURCE` 环境变量 > 工作台配置
+       `workbench/bootstrap.json`（`wb_set_bootstrap` 写，**入库**）> 都没有 = 没配。
+       `rerun-if-changed` 登记它；**改了要重新构建**（dev 重启 `tauri dev`）。
+     - **接 GitHub**：`dist::normalize_bootstrap_url` —— **blob 页 → raw 直链**
+       （`github.com/o/r/blob/ref/path` → `raw.githubusercontent.com/o/r/ref/path`）；
+       已经是 raw / 别的 http(s) 原样过（自建源合法）；github 但非 blob 页（仓库 / 目录页）
+       如实拒并说"那是个目录"。工作台「设置」页**只有这一格可编辑**（其余数据根只读）。
+     - **发布产物**（`dist::bootstrap_json` + `SOURCE_FILE`）：`source.json` 就两件事
+       （`sourceSchema` + `catalog`），**不写 baseUrl**（客户端缺省理解成"同目录"——
+       同一份 dist 推到哪里都对）；它进交付集合、收尾随 catalog / manifest 一起原子写。
+       `NEW_CATALOG_FILE` 直接引用 `runtime::source::CATALOG_FILE`（同一份名字不再写两处）。
+     - **客户端解析**（`parse_bootstrap`，纯函数、可单测）：代次认不得 / catalog 绝对 URL /
+       `..` / baseUrl 非 http(s) 一律拒；`directory_of` 从 `source.json` 的 URL 回退目录。
+     - **进入预设后台检查一次**（本次补的最后一段，`usePresetData`）：
+       **先画本地 catalog，再在后台 `checkRemoteUpdate`**（不挡首屏）——
+       模块级 `checkedBootstrapThisRun` 保证**本次运行只一次**（切 tab 来回不重发，
+       关掉 App 再开才重置）；**有新版才 `applyRemoteUpdate`**（换本地 catalog）**再重读那一路**；
+       **绝不自动下载任何预设文件**；**失败静默**（没内置源 / 离线 / 远端没部署都是开发期
+       正常状态，不许让预设页报错或弹条子）—— 启动仍**零网络**。
+     - 判据：Rust `source::parse_bootstrap` / `directory_of` / `dist::normalize_bootstrap_url`
+       / `bootstrap_json` 一组新测试（含"发布侧写的那份客户端解析器读得动"两端互钉）；
+       探针 `presets.mjs` 新增第 5n 节（进入预设不挡首屏 / 失败静默 / 不自动下载）。
+       全绿：`cargo test` 253、`--features workbench --lib` 441、双 feature clippy 干净、
+       探针通过、`check:bundle` / `check:zero-network` 干净。
+     - **保留（第十七刀一个字没动）**：设置页「手动指定数据源」继续是开发 / 排查覆盖。
+     - ⏳ **第十八刀：官方预设真实交付链**（进行中的后一半）—— 前一半已落地：
+     - **发布动作定案**（2026-10-02 作者裁决）：`presets/dist/` 是 **main 上的正式交付目录**
+       （不再是"本地构建产物、不入库"）。客户端 Bootstrap = 
+       `raw.githubusercontent.com/.../main/presets/dist/source.json`。
+     - **`.gitignore` 两处改判**：撤掉 `presets/dist/` 那条忽略；**并把裸 `dist` 锚定成 `/dist`**
+       —— 裸 `dist` 会匹配任意层级，把 `presets/dist/` 也一起吞了（撤第 6 行不起作用，
+       真正拦它的是第 3 行那个裸 `dist`）。根 `dist/` 是 Vite 输出，仍忽略。
+     - **`scripts/publish-presets.mjs` + `npm run publish:presets`**：发布动作 = **一次性分支
+       → PR**，**不碰 main 直推闸门**（闸②无条件拦，ruleset 再拦）。**刻意不复用
+       `release.mjs`**（那条是软件版本发布：版本号 / tag / 完整 CI 链；预设数据是另一条线）。
+     - 发布前五道校验（不过就一个字节都不写）：①产物存在 ②`source.json` 认得
+       ③`catalog.json` 每条 `path` 真存在 ④**SHA / 大小对真字节** ⑤manifest 与 catalog
+       交叉核对（防半成品）。这是 `publish_into` 收尾那段的**进库前副本** —— 两侧都错才可能漏。
+     - 两个真实 bug 在写的时候踩到并修掉（值得记）：**① `run()` 会 `.trim()`**，
+       而 porcelain 是 `XY<space>path`（` M path` 首字符是空格）—— trim 后再按偏移切会把
+       `presets/…` 切成 `resets/…`，过滤静默失效（加 `runRaw` 不 trim 的读法）；
+       **② 工作区检查必须排除 `presets/dist/`** —— 首次发布时它本就是未跟踪的，
+       拿它自己的状态拦自己 = 死锁；且要用 `--untracked-files=all`（默认只报顶层目录）。
+     - 验证：在 `/tmp` 隔离仓库造完整产物，跑通全绿路径（校验 → 分支 → 提交 → push）
+       与四条拒绝路径（缺 source.json / path 不存在 / SHA 失配 / manifest 脱节），
+       真仓库未被污染。
+     - **下一步（第十八刀后半，待作者在工作台点一次「发布」）**：
+       `presets/dist/` 现在只有 `mkp/presets/*.toml`（`wb_generate` 产物），**没有
+       `source.json` / `catalog.json` / `manifest.json`**（`wb_publish` 才写这三个）。
+       所以要先在工作台 **生成 → 发布**，再 `npm run publish:presets`，合并 PR，
+       最后跑真实 raw → catalog → 单文件下载闭环。
 
      ## 4. 续做入口（从哪接手）
 

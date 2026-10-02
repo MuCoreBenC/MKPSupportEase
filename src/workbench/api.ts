@@ -88,6 +88,12 @@ export interface Boot {
   detail: string | null
   /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
   storeDirs: { name: string; role: string }[]
+  /**
+   * 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+   * null = 还没配 —— 客户端构建时就不会注入默认源（见 `src-tauri/build.rs`）。
+   * 改了要**重新构建客户端**才生效（编译期注入）；`wb_set_bootstrap` 写它
+   */
+  bootstrapUrl: string | null
 }
 
 /* ---------- 整本 ---------- */
@@ -841,6 +847,8 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
+  /** 写官方源（Bootstrap）；返回**存的规范化值**（GitHub blob 页会被转成 raw） */
+  setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
   words: () => invoke<Words>('wb_words'),
 
   book: () => invoke<BookView>('wb_book'),

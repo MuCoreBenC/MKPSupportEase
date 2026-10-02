@@ -1,0 +1,49 @@
+{
+  "bundles": [
+    {
+      "id": "A1_default",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "A1_MINI_default",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "P1S_default",
+      "display": "官方推荐",
+      "machineId": "P1S",
+      "assetRefs": [
+        "p1s-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "P2S_default",
+      "display": "官方推荐",
+      "machineId": "P2S",
+      "assetRefs": [
+        "p2s-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    },
+    {
+      "id": "X1C_default",
+      "display": "官方推荐",
+      "machineId": "X1C",
+      "assetRefs": [
+        "x1c-bbs-04-024"
+      ],
+      "updatedAt": "2026-07-12"
+    }
+  ]
+}

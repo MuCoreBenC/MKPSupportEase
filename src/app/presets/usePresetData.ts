@@ -279,6 +279,45 @@ const EMPTY_RELEASE: ReleaseState = {
 }
 
 /**
+ * 「本次运行已经检查过 Bootstrap 了吗」——**模块作用域**，所以它跟着这次 App 运行，
+ * 不跟着这一页挂载。
+ *
+ * 这就是第十七刀那条判据的实现：**进入「预设」后台检查一次，本次运行只一次**。
+ * 用户从 MKP 配置 → 切片器配置 → 搜索 来回切，页面反复挂载卸载，但这条只会走一次；
+ * 关掉 App 再打开（页面重载）才重置。用会话态（`useSessionState`）不行 —— 那个是
+ * 「切 tab 不失忆」，语义是"这一屏看到哪"，不是"这次运行做没做过一件事"。
+ */
+let checkedBootstrapThisRun = false
+
+/**
+ * 进入「预设」后的**后台检查**一次远端目录（第十七刀）。
+ *
+ * 判据（作者 2026-10-02）：
+ *
+ *   - **只检查目录指纹**（`checkRemoteUpdate`，比的是 revision），不碰任何预设文件；
+ *   - 有变化才 `applyRemoteUpdate` —— 换的是**本地那一份 catalog**（旧目录自动归档），
+ *     **绝不自动下载预设文件**（用户点了"下载"才下）；
+ *   - 本次运行只做一次（`checkedBootstrapThisRun`）；
+ *   - **失败静默**：没内置源 / 没联网 / 远端还没部署都是开发期的正常状态，
+ *     不许因此让预设页报错或弹提示（启动零网络那条纪律的延伸：这里只是"路过时问一声"）。
+ *
+ * 返回是否**真的更新了**（调用方据此刷新目录；没变化返回 false）。
+ */
+async function checkBootstrapOnce(): Promise<boolean> {
+  if (checkedBootstrapThisRun) return false
+  checkedBootstrapThisRun = true
+  try {
+    const check = await api.checkRemoteUpdate()
+    if (check.upToDate) return false
+    await api.applyRemoteUpdate()
+    return true
+  } catch {
+    /* 没配源 / 离线 / 远端没部署：都不该让预设页出问题 —— 静默略过 */
+    return false
+  }
+}
+
+/**
  * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
  * 导入落进 `presets-mine/` 之后，「我的文件」那张表要立刻以磁盘为准，不靠切页刷新。
  * 首页（`PageHome`）不给这个参数：它不看用户线那张表。
@@ -435,10 +474,25 @@ export function usePresetData(importRevision = 0): PresetData {
        *
        * 它是两条独立的读（catalog 清单 + 下载区），失败时 release 落成空态、页面照常渲染；
        * 这一页要先看的「本机那份注册表」答出来的表，没有理由让整页等它。
+       *
+       * **先画本地 catalog（下面这次 readRelease），再在后台检查 Bootstrap**（第十七刀）：
+       * 顺序不能反 —— 用户一进预设页看到的必须是本地那份（离线也看得到），
+       * 后台检查只是"路过时问一声远端有没有新版"，不问到就把页面挂住。
        */
       void readRelease()
-        .then((next) => {
-          if (alive) setRelease(next)
+        .then(async (next) => {
+          if (!alive) return
+          setRelease(next)
+          /*
+           * 后台检查一次（本次运行只一次，见 `checkBootstrapOnce`）。
+           * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
+           * 的分档要跟着以新目录为准）。它不返回脏数据：换的是盘上的 catalog，读的是同一套契约。
+           */
+          const changed = await checkBootstrapOnce()
+          if (changed && alive) {
+            const refreshed = await readRelease().catch(() => null)
+            if (refreshed !== null && alive) setRelease(refreshed)
+          }
         })
         .catch(() => {
           /* 官方交付那一路读不到（目录/下载区任一失败）就落空态，不挡首屏 —— 与三态纪律一致：
