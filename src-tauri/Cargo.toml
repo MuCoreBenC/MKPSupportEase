@@ -15,6 +15,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
+# build.rs 要读工作台配置（`workbench/bootstrap.json`）把官方源注入二进制 ——
+# 那是仓库里唯一一处"发布到哪"的真相（见 build.rs 头注释）
+serde_json.workspace = true
 
 # 后厨工作台（B03）。**不在 default 里**是这一整套隔离的根：不带这个 feature 编译时，
 # src 下的 workbench 子树连编译都不会被碰，给用户的二进制里搜不到任何工作台命令名。
