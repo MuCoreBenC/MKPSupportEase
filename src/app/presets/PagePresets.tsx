@@ -818,6 +818,30 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     )
   }
 
+  /**
+   * **撤销应用**：把「当前使用的那一条」撤掉（`api.clearActivePreset()`）。
+   *
+   * 与「应用」对称：写底账 → 重读底账。**幂等**（后端对"本来就没在应用"就是成功），
+   * **一个文件都不碰** —— 撤掉的是"哪一份在生效"这个指向。
+   * 状态条会跟着变回「还没有应用任何预设」那一段，那就是它的主要反馈；
+   * 这里另发一条提示条是为了说清那句最容易误解的话：**撤销 ≠ 删除**。
+   */
+  const runClearApply = () => {
+    setBusyKey('__clear-apply__')
+    data.clearApply().then(
+      () => {
+        setBusyKey(null)
+        setNote({
+          text: '已撤销应用 —— 现在没有生效的 MKP 配置（那份文件还在，随时可以再应用）',
+          bad: false,
+        })
+      },
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `撤销应用失败：${errorText(e)}`, bad: true })
+      },
+    )
+  }
 
   /**
    * 「在 BBS 预设查看器中打开」的判据。
@@ -933,6 +957,14 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+      /*
+       * **撤销应用**（本轮补的前端入口；后端 `clear_active_preset` 早有）——
+       * 只在"正在使用的那一行"上出现：别的行没有可撤的指向。
+       * 它**不是删除** —— 文件留在原处、随时能再应用，所以话术与「删除」明显分开。
+       */
+      ...(row.scope === 'local' && row.live
+        ? [{ id: 'clear-apply', label: '撤销应用', onSelect: () => runClearApply() }]
+        : []),
       ...(canEdit
         ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
         : []),
@@ -1126,6 +1158,20 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                   onClick={locateApplied}
                 >
                   定位
+                </button>
+                {/*
+                 * **撤销应用**（本轮补的前端入口）—— 后端 `clear_active_preset` 早就有了，
+                 * 少的只是这一颗按钮。它撤掉的是"哪一份在生效"这个指向，**不是删除**：
+                 * 文件留在原处、随时能再应用回来，所以话术要说清这一点。
+                 */}
+                <button
+                  type="button"
+                  className={s.locateBtn}
+                  disabled={busyKey === '__clear-apply__'}
+                  title="把当前生效的配置撤掉（人回到「没有应用任何预设」）—— 那份文件不会被删，随时能再应用"
+                  onClick={runClearApply}
+                >
+                  {busyKey === '__clear-apply__' ? '撤销中……' : '撤销应用'}
                 </button>
               </div>
             )

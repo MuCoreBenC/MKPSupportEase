@@ -168,6 +168,14 @@ export interface PresetData {
    * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    */
   apply: (fileName: string, origin?: ActiveOrigin, path?: string) => Promise<void>
+  /**
+   * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
+   *
+   * 与 `apply` 同一条规矩（写底账 → 重读底账）；幂等：本来就没在应用也不报错
+   * （后端 `clear_active` 对"文件不在"就是成功）。**它不碰任何文件** ——
+   * 撤掉的是"哪一份在生效"这个指向，磁盘上的预设一个字节不动。
+   */
+  clearApply: () => Promise<void>
   /** 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上 */
   copy: (assetId: string) => Promise<void>
   /**
@@ -537,6 +545,11 @@ export function usePresetData(importRevision = 0): PresetData {
     [],
   )
 
+  const clearApply = useCallback(async () => {
+    await api.clearActivePreset()
+    setActive(await api.getActivePreset())
+  }, [])
+
   const copy = useCallback(async (assetId: string) => {
     await api.copyToSlicer(assetId)
     setSlicerCopied(await api.getSlicerCopied())
@@ -636,6 +649,7 @@ export function usePresetData(importRevision = 0): PresetData {
     pick,
     pickMachine,
     apply,
+    clearApply,
     copy,
     release,
     archived,
