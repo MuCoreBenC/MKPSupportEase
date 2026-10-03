@@ -44,6 +44,12 @@ export interface FieldSchema {
   max?: number
   step?: number
   choices?: FieldOption[]
+  /**
+   * `choice` 控件摆成哪副样子（参数定义里的 `uiComponent` 说的算）：
+   * `segmented` → 摊开、`select` → 下拉。不给就按场合自判（row 摊开 / cell 收起）
+   * —— 老稿不认识这个字段，一个像素不动。
+   */
+  choiceLayout?: 'inline' | 'dropdown'
 }
 
 /**

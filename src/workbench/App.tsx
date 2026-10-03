@@ -32,6 +32,7 @@ import type { CSSProperties, ReactNode } from 'react'
 
 import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
+import { modalShortcutGate } from './components/modal'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -39,6 +40,8 @@ import {
   type BookView,
   type Boot,
   type IssueReport,
+  type MetaApplied,
+  type ParamMetaEdit,
   type Patch,
   type Refresh,
   type Words,
@@ -155,10 +158,18 @@ interface Focus {
   key?: string | null
 }
 
-interface UndoEntry {
-  label: string
-  patches: Patch[]
-}
+/**
+ * 撤销栈上的一条。**两种改动共用一个入口**（状态栏那两颗按钮 + Cmd+Z），所以
+ * 条目自带「怎么倒回去」：
+ *
+ *   patches  值的改动 —— 反向 patch 交回 `wb.applyDraft`，后端算它自己的反向；
+ *   meta     参数定义的改动（即时落盘那一路）—— **自带改前/改后两份整包**，
+ *            撤销交改前、重做交改后，不用现算反向。label 写明「定义 · 某参数」，
+ *            与值那条在栈里各说各的。
+ */
+type UndoEntry =
+  | { kind: 'patches'; label: string; patches: Patch[] }
+  | { kind: 'meta'; label: string; key: string; before: ParamMetaEdit; after: ParamMetaEdit }
 
 /**
  * 状态条上的数据根怎么显示（2026-10-03，作者：「左下角的也是，没必要显示这个吧，这么长」）。
@@ -283,7 +294,7 @@ export function WorkbenchApp() {
         refreshReport()
         // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
-          const entry = { label, patches: out.inverse }
+          const entry: UndoEntry = { kind: 'patches', label, patches: out.inverse }
           if (where === 'undo') setUndoStack((st) => [...st, entry])
           else setRedoStack((st) => [...st, entry])
         }
@@ -298,19 +309,63 @@ export function WorkbenchApp() {
     [fail, refreshReport],
   )
 
+  /*
+   * meta 条目（参数定义）的执行：把条目里指定的那份整包交回去，成了就把这条
+   * 压进对面那摞（撤销压重做、重做压撤销）。定义是即时落盘 —— 一次调用就是
+   * 一次成败，失败就原地不动。
+   */
+  const runMeta = useCallback(
+    async (
+      entry: Extract<UndoEntry, { kind: 'meta' }>,
+      dir: 'before' | 'after',
+      toStack: 'undo' | 'redo',
+    ): Promise<boolean> => {
+      setBusy(true)
+      try {
+        await wb.setParamMeta(entry.key, entry[dir])
+        /* 注册表变了：参数台按 tick 重取（注册表 / 配方台 / 矩阵三处派生跟着走） */
+        setTick((n) => n + 1)
+        refreshReport()
+        if (toStack === 'undo') setUndoStack((st) => [...st, entry])
+        else setRedoStack((st) => [...st, entry])
+        return true
+      } catch (e) {
+        fail(e)
+        return false
+      } finally {
+        setBusy(false)
+      }
+    },
+    [fail, refreshReport],
+  )
+
+  /** 参数台「编辑定义」保存成功后交上来的一条：压进撤销栈（改前/改后都在手上） */
+  const pushMeta = useCallback((m: MetaApplied) => {
+    setUndoStack((st) => [...st, { kind: 'meta', ...m }])
+    setRedoStack([])
+  }, [])
+
   const undo = useCallback(async () => {
     const top = undoStack[undoStack.length - 1]
     if (!top) return
+    if (top.kind === 'meta') {
+      if (await runMeta(top, 'before', 'redo')) setUndoStack((st) => st.slice(0, -1))
+      return
+    }
     const out = await run(`撤销：${top.label}`, top.patches, 'redo')
     if (out) setUndoStack((st) => st.slice(0, -1))
-  }, [undoStack, run])
+  }, [undoStack, run, runMeta])
 
   const redo = useCallback(async () => {
     const top = redoStack[redoStack.length - 1]
     if (!top) return
+    if (top.kind === 'meta') {
+      if (await runMeta(top, 'after', 'undo')) setRedoStack((st) => st.slice(0, -1))
+      return
+    }
     const out = await run(`重做：${top.label}`, top.patches, 'undo')
     if (out) setRedoStack((st) => st.slice(0, -1))
-  }, [redoStack, run])
+  }, [redoStack, run, runMeta])
 
   const save = useCallback(async (): Promise<boolean> => {
     if (!book || book.dirtyCount === 0 || busy) return false
@@ -370,10 +425,13 @@ export function WorkbenchApp() {
     setPage(next)
   }, [])
 
-  /* 撤销 / 重做 / 保存的键盘入口装在外壳上 —— 撤销不是某几个页面的小功能 */
+  /* 撤销 / 重做 / 保存的键盘入口装在外壳上 —— 撤销不是某几个页面的小功能。
+     模态框开着（且没让路）就不穿透：框里的事框里自己管（G-code 框让路），
+     不然 Cmd+Z 改的是遮罩后面看不见的草稿（作者的实测） */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
+      if (modalShortcutGate.blocking()) return
       const k = e.key.toLowerCase()
       if (k === 'z' && !e.shiftKey) {
         e.preventDefault()
@@ -511,6 +569,7 @@ export function WorkbenchApp() {
               const out = await run(label, patches, 'undo', refresh)
               return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
+            onMetaApplied={pushMeta}
             onSave={() => void save()}
             onDiscard={() => void discard()}
             onUndo={() => void undo()}

@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "23beb5e2261a5ae4",
+  "revision": "86d7adea2c3c8c3a",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -468,7 +468,7 @@
         {
           "id": "LITE",
           "name": "lite版",
-          "recommendedBundle": "A1_MINI_STANDARD",
+          "recommendedBundle": "X1C_default",
           "tag": "推荐",
           "description": "群里开源的最新lite",
           "image": null

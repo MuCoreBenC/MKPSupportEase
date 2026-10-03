@@ -175,6 +175,7 @@ fn control_of(c: UiComponent) -> &'static str {
         UiComponent::Segmented => "choice",
         UiComponent::Select => "choice",
         UiComponent::Gcode => "text",
+        UiComponent::Text => "text",
     }
 }
 

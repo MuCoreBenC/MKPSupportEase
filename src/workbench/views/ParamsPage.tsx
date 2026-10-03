@@ -62,6 +62,8 @@ import {
   type Desk,
   type DeskGroup,
   type Matrix,
+  type MetaApplied,
+  type ParamMetaEdit,
   type Patch,
   type Refresh,
   type RegistryView,
@@ -118,6 +120,8 @@ interface Props {
     patches: Patch[],
     refresh?: Refresh,
   ) => Promise<{ desk: Desk | null; matrix: Matrix | null }>
+  /** 「编辑定义」保存成功后交一条给外壳 —— 压进撤销栈（改前/改后整包） */
+  onMetaApplied: (m: MetaApplied) => void
   /** 外壳的保存 / 放弃 / 撤销 */
   onSave: () => void
   onDiscard: () => void
@@ -128,7 +132,7 @@ interface Props {
 
 export default memo(ParamsPage)
 
-function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, onDiscard, onUndo, onGoto }: Props) {
+function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onSave, onDiscard, onUndo, onGoto }: Props) {
   /* 定位只看挂载时的那一次 —— 之后就是普通的本页状态 */
   const init = initialFocus ?? null
   /*
@@ -212,13 +216,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     [],
   )
 
-  /* 注册表（参数的元数据）。开场取一次 */
+  /*
+   * 注册表（参数的元数据）。开场取一次；此后外壳每写一笔（tick 拨一格）就
+   * 重取 —— 定义编辑的撤销/重做走外壳那条栈，回来时只有 tick 会动，注册表
+   * 得自己跟上（值的改动顺带重取一次很便宜，注册表就这么几十条）。
+   */
   useEffect(() => {
     void wb
       .registry()
       .then(setRegistry)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [])
+  }, [tick])
 
   const paramOf = useCallback(
     (key: string) => registry?.params.find((p) => p.key === key) ?? null,
@@ -314,6 +322,20 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     if (layerUid === null) return `${m?.display ?? mid} · ${words.level.machine.label}`
     const v = m?.versions.find((x) => x.uid === layerUid)
     return `${m?.display ?? mid} / ${v?.name ?? layerUid}`
+  }
+
+  /**
+   * 「编辑定义」的确认保存（2026-10-03 第二轮）：落盘、把改前/改后两份整包
+   * 交给外壳压撤销栈（状态栏那颗「撤销」管得到定义了）、关框。抛错原样抛回
+   * —— 模态框留着框，把话摆出来。
+   */
+  const commitDef = async (key: string, before0: ParamView, edit: ParamMetaEdit) => {
+    const next = await wb.setParamMeta(key, edit)
+    onMetaApplied({ label: `定义 · ${edit.label}`, key, before: metaOf(before0), after: edit })
+    setRegistry(next)
+    setDefEditKey(null)
+    setMetaTick((t) => t + 1)
+    toasts.push(`定义已写回 param_registry.toml · ${edit.label}`, { label: '撤销', run: onUndo })
   }
 
   /** 写值的统一入口：手势前拦弃用、按 valueType 归位，然后走外壳的 apply */
@@ -484,6 +506,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
   /* 右栏按需出现：选了参数就有。没选参数时整栏收起，不摆一块空面板占位置 */
   const selParam = sel !== null ? (paramOf(sel) ?? null) : null
+  /** 「编辑定义」正在改的那条（null = 关着） */
+  const defParam = defEditKey !== null ? paramOf(defEditKey) : null
   const selRow =
     sel !== null ? (mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)) : null
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
@@ -1247,20 +1271,18 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
       {/*
         参数定义编辑（2026-10-03）：名称/单位/值类型/控件/范围/步进/出厂默认/
-        属于/前置条件/弃用。即时落盘 —— 回来的注册表直接顶掉旧的，三处派生
-        数据靠 `metaTick` 重取。
+        可选项（含逐条弃用）/适用机型/属于/前置条件/弃用。确认保存才落盘 ——
+        落盘成功把改前/改后整包交给外壳压撤销栈；回来的注册表直接顶掉旧的，
+        三处派生数据靠 `metaTick` 重取。
       */}
-      {defEditKey !== null && (
+      {defEditKey !== null && defParam !== null && (
         <ParamDefModal
           paramKey={defEditKey}
-          param={paramOf(defEditKey)}
+          param={defParam}
           params={registry?.params ?? []}
+          machines={book.machines.map((m) => ({ id: m.id, display: m.display }))}
           onClose={() => setDefEditKey(null)}
-          onSaved={(next) => {
-            setRegistry(next)
-            setDefEditKey(null)
-            setMetaTick((t) => t + 1)
-          }}
+          onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
         />
       )}
     </div>
@@ -1490,6 +1512,30 @@ function ParamLine({
 }
 
 /* ---------- 纯函数小工具 ---------- */
+
+/**
+ * 「这条参数现在的定义」→ 一份整包载荷。`commitDef` 在保存前拿它拍**改前**
+ * 快照 —— 外壳撤销栈上那条 meta 条目的改前半边就是它（改后半边是这次真正
+ * 交上去的载荷）。
+ */
+function metaOf(p: ParamView): ParamMetaEdit {
+  return {
+    label: p.label,
+    desc: p.desc,
+    unit: p.unit,
+    valueType: p.valueType,
+    uiComponent: p.uiComponent,
+    defaultValue: p.defaultValue,
+    min: p.min,
+    max: p.max,
+    step: p.step,
+    parentKey: p.parentKey,
+    showWhen: p.showWhen,
+    deprecated: p.deprecated,
+    choices: p.choices,
+    machineFilter: [...p.machineFilter],
+  }
+}
 
 /**
  * **整卡收起该怎么说**（C15 A2）。返回 `null` = 不收起来（照旧铺行）。

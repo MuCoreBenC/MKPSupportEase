@@ -32,6 +32,7 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { modalShortcutGate } from './shortcutGate'
 import s from './Modal.module.css'
 
 export interface ModalProps {
@@ -65,6 +66,12 @@ export interface ModalProps {
   host?: HTMLElement | null
   /** 页眉那枚「关闭」的悬停说明 —— 关闭不总是「放弃」，有草稿语义的稿要写清 */
   closeTitle?: string
+  /**
+   * 开着的时候**外壳的撤销/重做/保存快捷键要不要照常工作**（2026-10-03）。
+   * 默认不 —— 框开着 Cmd+Z 却在改遮罩后面的草稿，就是「撤销穿透」；
+   * 只给自己的写都进外壳栈的框（G-code 模态框）传 true。
+   */
+  shellShortcuts?: boolean
   onClose: () => void
   children: ReactNode
 }
@@ -79,6 +86,7 @@ export default function Modal({
   closeOnScrim = true,
   host = null,
   closeTitle,
+  shellShortcuts = false,
   onClose,
   children,
 }: ModalProps) {
@@ -88,6 +96,13 @@ export default function Modal({
 
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+
+  /* 快捷键闸：开一票、关一票 —— 外壳的 Cmd+Z / Cmd+S 在 `blocking()` 时装没听见 */
+  useEffect(() => {
+    if (!open) return
+    modalShortcutGate.enter(shellShortcuts)
+    return () => modalShortcutGate.exit(shellShortcuts)
+  }, [open, shellShortcuts])
 
   useEffect(() => {
     if (!open) {

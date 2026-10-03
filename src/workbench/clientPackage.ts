@@ -76,6 +76,7 @@ const CLIENT_CONTROL: Record<UiComponent, ClientFieldDef['control']> = {
   segmented: 'choice',
   select: 'choice',
   gcode: 'text',
+  text: 'text',
 }
 
 /** 交给客户端的值一律字符串 —— 契约里 `choices[].value` 与 `showWhen.value` 都是 string */

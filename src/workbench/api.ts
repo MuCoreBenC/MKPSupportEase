@@ -63,8 +63,8 @@ export type Visibility = 'menu' | 'archiveOnly'
 export type CellKind = 'notApplicable' | 'gcode' | 'value'
 /** `registry::ValueType` */
 export type ValueType = 'float' | 'int' | 'bool' | 'string'
-/** `registry::UiComponent` */
-export type UiComponent = 'number' | 'switch' | 'segmented' | 'select' | 'gcode'
+/** `registry::UiComponent` —— `text` 是编辑器给的第六种（字符串清掉可选项后的自由文本） */
+export type UiComponent = 'number' | 'switch' | 'segmented' | 'select' | 'gcode' | 'text'
 /** `visibility::BlockScope` */
 export type BlockScope = 'field' | 'section'
 /** `preview::BulkKind` */
@@ -259,6 +259,21 @@ export interface ParamMetaEdit {
   parentKey: string | null
   showWhen: ShowWhen | null
   deprecated: boolean
+  /** 可选项整表 —— 字符串枚举在这里编辑；其他类型原样带回（预设档不丢） */
+  choices: ChoiceView[]
+  /** 适用机型。空 = 不限机型 */
+  machineFilter: string[]
+}
+
+/**
+ * 参数台「编辑定义」交到外壳的一条（2026-10-03）。外壳把它压进撤销栈：
+ * 撤销交 `before`、重做交 `after`，两份都是整包载荷，不用现算反向。
+ */
+export interface MetaApplied {
+  label: string
+  key: string
+  before: ParamMetaEdit
+  after: ParamMetaEdit
 }
 
 /* ---------- 矩阵 ---------- */

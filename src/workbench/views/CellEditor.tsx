@@ -56,6 +56,23 @@ export default function CellEditor({
    * 上游标的与推出来的并集），这里只把它转成共用件认的 `FieldOption.deprecated`
    * —— 分段选择器与下拉都给那一档划线，两处不用各写一遍。
    */
+  /*
+   * 控件分派（2026-10-03 收紧）：`uiComponent` 说了算，但**值类型得配得上** ——
+   *
+   *   switch     只认 bool。float 参数挂开关是假控件：点了写 true/false，
+   *              归位成 NaN，行上永远不亮（作者实测「它实际上根本没有换一套」）。
+   *              类型不配就当没有这个字段，落到按类型画的那一档。
+   *   segmented  摊开的分段、select 下拉 —— 只认 string 且有可选项；
+   *              谁是分段谁是下拉由 `choiceLayout` 一直传到共用件（此前两者
+   *              画成一样，「改成下拉也不下拉」就是从这里来的）。
+   *   number     只认 float/int。
+   *   text       兜底（自由文本、以及一切老数据里配不上号的组合）。
+   *
+   * 编辑定义那边的后端校验（`registry::set_param_meta`）用同一张表拦新数据 ——
+   * 这里兜底是因为盘上可能还躺着历史形状。
+   */
+  const isNum = param.valueType === 'float' || param.valueType === 'int'
+  const hasChoices = param.valueType === 'string' && param.choices.length > 0
   const field: FieldSchema = {
     key: param.key,
     label: param.label,
@@ -71,13 +88,15 @@ export default function CellEditor({
     control:
       param.uiComponent === 'gcode'
         ? 'gcode'
-        : param.uiComponent === 'switch'
+        : param.uiComponent === 'switch' && param.valueType === 'bool'
           ? 'switch'
-          : param.valueType === 'string' && param.choices.length > 0
+          : hasChoices && (param.uiComponent === 'segmented' || param.uiComponent === 'select')
             ? 'choice'
-            : param.uiComponent === 'number'
+            : param.uiComponent === 'number' && isNum
               ? 'number'
               : 'text',
+    choiceLayout:
+      param.uiComponent === 'segmented' ? 'inline' : param.uiComponent === 'select' ? 'dropdown' : undefined,
     unit: param.unit ?? undefined,
     min: param.min ?? undefined,
     max: param.max ?? undefined,

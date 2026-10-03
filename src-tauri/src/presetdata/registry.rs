@@ -63,7 +63,9 @@ pub enum ValueType {
     Text,
 }
 
-/// `uiComponent`。**实测只有这五种**，没有第六种
+/// `uiComponent`。实测源里是五种；第六种 `text` 是**编辑器给的** ——
+/// 字符串参数清掉可选项之后总得有个诚实的落点（自由文本），不能逼人挂着
+/// 分段控件配空表
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UiComponent {
@@ -72,6 +74,7 @@ pub enum UiComponent {
     Segmented,
     Select,
     Gcode,
+    Text,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +232,14 @@ pub struct ParamMetaEdit {
     pub parent_key: Option<String>,
     pub show_when: Option<ShowWhen>,
     pub deprecated: bool,
+    /// 可选项整表（`[[params.choices]]`）。字符串枚举在模态框里编辑；
+    /// 其他类型身上挂的几条（bool 的开/关叫法、数字的预设档）界面不给编辑、
+    /// 原样带回 —— 这里不区分，整表照写
+    #[serde(default)]
+    pub choices: Vec<Choice>,
+    /// 适用机型。空 = 不限机型（与 [`ParamDef::machine_filter`] 同一口径）
+    #[serde(default)]
+    pub machine_filter: Vec<String>,
 }
 
 
@@ -805,7 +816,7 @@ impl ParamRegistry {
     /* ---------- 定义编辑（2026-10-03，作者：「弃用是谁决定的？我没办法改」） ---------- */
 
     /// 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
-    /// 出厂默认 / 属于 / 前置条件 / 弃用），就地写进 `[[params]]` 本体。
+    /// 出厂默认 / 属于 / 前置条件 / 弃用 / 可选项 / 适用机型），就地写进 `[[params]]` 本体。
     ///
     /// # 为什么不走 `machineVariants` 那条路
     ///
@@ -818,10 +829,16 @@ impl ParamRegistry {
     ///   · 名称不能为空；步进得是正数；min ≤ max（缺一边不限）；
     ///   · `defaultValue` 与 `valueType` 对得上（复用 [`to_toml_value`] 的口径 ——
     ///     写不进 TOML 的默认值就是非法的）；枚举参数的默认值得是选项之一；
+    ///   · **控件 × 值类型的组合得画得出真的**：bool→开关、float/int→步进框、
+    ///     string→分段/下拉（要有可选项）/文本（不能带可选项）/G-code ——
+    ///     开关挂在 float 上那种「点了不切换」的假控件当场拒收；
+    ///   · 可选项每条得有名字、值不能空、值不能重复（下拉里两行一个键是假选项）；
     ///   · `parentKey` 得存在、不能是自己、父项自己不能再有父项（层级只有两级）、
     ///     已经有儿子挂着的不能再去当儿子；
     ///   · `showWhen.key` 得存在且不能指着自己。**值不校验** —— 实测里就有
     ///     字符串化的数字（`"0"`），`visibility` 比较前会按被指向字段的类型归一。
+    ///   · `machineFilter` 只做 trim / 去空 / 去重 —— 机型号打没打对注册表管不着
+    ///     （界面给的是勾选框，这层错不到哪去；孤儿键有 preflight 提示兜着）。
     ///
     /// 值类型的改动**不迁移**已有的 machineVariants：类型是「它是什么」，
     /// 改了类型旧值就按新类型解释 —— 这是作者自己在模态框里按的按钮。
@@ -879,10 +896,86 @@ impl ParamRegistry {
         }
         // 再按新类型试写一遍 —— 非整数的 int 当场拒
         let default_item = to_toml_value(&edit.default_value, edit.value_type, key)?;
-        if edit.value_type == ValueType::Text && !self.params[at].choices.is_empty() {
+        // 控件 × 值类型的合法组合（实测数据里也只有这几种搭配）。不合法的组合
+        // 不是「先存着以后再说」—— 画出来的控件是假的：开关挂在 float 上点了
+        // 只会弹提示不切换（作者：「它实际上根本没有换一套」），当场拒收
+        match edit.ui_component {
+            UiComponent::Switch if edit.value_type != ValueType::Bool => {
+                return Err(AppError::invalid_argument(format!(
+                    "开关只认 true/false —— {} 的参数用步进框（数字）",
+                    value_type_str(edit.value_type)
+                )));
+            }
+            UiComponent::Number if !matches!(edit.value_type, ValueType::Float | ValueType::Int) => {
+                return Err(AppError::invalid_argument(format!(
+                    "步进框只配数字（float/int）—— 这条是 {}",
+                    value_type_str(edit.value_type)
+                )));
+            }
+            UiComponent::Segmented | UiComponent::Select if edit.value_type != ValueType::Text => {
+                return Err(AppError::invalid_argument(format!(
+                    "分段/下拉只配字符串枚举 —— 这条是 {}",
+                    value_type_str(edit.value_type)
+                )));
+            }
+            UiComponent::Segmented | UiComponent::Select if edit.choices.is_empty() => {
+                return Err(AppError::invalid_argument(
+                    "分段/下拉得先有可选项 —— 先在「可选项」里加几条",
+                ));
+            }
+            UiComponent::Gcode if edit.value_type != ValueType::Text => {
+                return Err(AppError::invalid_argument(format!(
+                    "G-code 编辑器只配字符串 —— 这条是 {}",
+                    value_type_str(edit.value_type)
+                )));
+            }
+            UiComponent::Gcode if !edit.choices.is_empty() => {
+                return Err(AppError::invalid_argument(
+                    "G-code 是自由代码，不吃可选项 —— 要分段就换分段控件",
+                ));
+            }
+            UiComponent::Text => {
+                if edit.value_type != ValueType::Text {
+                    return Err(AppError::invalid_argument(format!(
+                        "文本框只配字符串 —— 这条是 {}，数字用步进框",
+                        value_type_str(edit.value_type)
+                    )));
+                }
+                if !edit.choices.is_empty() {
+                    return Err(AppError::invalid_argument(
+                        "文本框不吃可选项 —— 要分段/下拉就换控件，要自由输入就清空可选项",
+                    ));
+                }
+            }
+            _ => {}
+        }
+        // 可选项这一表自己的门：每条得有名字、值不能空、值不能重复。
+        // 重复的值在下拉里是两行一个键 —— 选哪个都落到同一档，是假选项
+        let mut seen = std::collections::HashSet::new();
+        for (i, c) in edit.choices.iter().enumerate() {
+            let n = i + 1;
+            if c.label.trim().is_empty() {
+                return Err(AppError::invalid_argument(format!(
+                    "第 {n} 条可选项没写名字"
+                )));
+            }
+            let vkey = json_key(&c.value);
+            if c.value.is_null() || vkey.is_empty() {
+                return Err(AppError::invalid_argument(format!(
+                    "第 {n} 条可选项（{}）没有值",
+                    c.label.trim()
+                )));
+            }
+            if !seen.insert(vkey) {
+                return Err(AppError::invalid_argument(format!(
+                    "第 {n} 条可选项（{}）的值跟前面重复了",
+                    c.label.trim()
+                )));
+            }
+        }
+        if edit.value_type == ValueType::Text && !edit.choices.is_empty() {
             let want = json_key(&edit.default_value);
-            if !self
-                .params[at]
+            if !edit
                 .choices
                 .iter()
                 .any(|c| json_key(&c.value) == want)
@@ -942,6 +1035,34 @@ impl ParamRegistry {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
+        // 可选项整表先备好（值转换是会失败的 —— 失败就什么都不许动）。
+        // 「缺一行 = false」（与弃用同一条口径）—— 不弃用的不写 deprecated 键
+        let choices_arr = if edit.choices.is_empty() {
+            None
+        } else {
+            let mut arr = toml_edit::ArrayOfTables::new();
+            for (i, c) in edit.choices.iter().enumerate() {
+                let mut tbl = toml_edit::Table::new();
+                tbl["value"] = choice_value_item(&c.value, key, i + 1)?;
+                tbl["label"] = toml_edit::value(c.label.trim());
+                if c.deprecated {
+                    tbl["deprecated"] = toml_edit::value(true);
+                }
+                arr.push(tbl);
+            }
+            Some(toml_edit::Item::ArrayOfTables(arr))
+        };
+        // 适用机型：trim、去空、去重。空 = 不限机型（文件里删键）
+        let machine_filter = {
+            let mut out: Vec<String> = Vec::new();
+            for id in &edit.machine_filter {
+                let id = id.trim();
+                if !id.is_empty() && !out.iter().any(|x| x == id) {
+                    out.push(id.to_owned());
+                }
+            }
+            out
+        };
 
         /* ---------- 文件。到这里全是不会失败的赋值 ---------- */
         let t = self.param_table_mut(at, key)?;
@@ -994,6 +1115,20 @@ impl ParamRegistry {
         } else {
             t.remove("deprecated");
         }
+        // 可选项与适用机型都是「整表换」—— 增删改哪一条走的都是同一条路
+        match choices_arr {
+            Some(item) => {
+                t["choices"] = item;
+            }
+            None => {
+                t.remove("choices");
+            }
+        }
+        if machine_filter.is_empty() {
+            t.remove("machineFilter");
+        } else {
+            t["machineFilter"] = toml_edit::value(machine_filter.join(","));
+        }
 
         /* ---------- 内存 ---------- */
         let p = &mut self.params[at];
@@ -1009,6 +1144,8 @@ impl ParamRegistry {
         p.parent_key = edit.parent_key;
         p.show_when = edit.show_when;
         p.deprecated = edit.deprecated;
+        p.choices = edit.choices;
+        p.machine_filter = machine_filter;
         Ok(())
     }
 
@@ -1125,6 +1262,7 @@ fn ui_component_str(v: UiComponent) -> &'static str {
         UiComponent::Segmented => "segmented",
         UiComponent::Select => "select",
         UiComponent::Gcode => "gcode",
+        UiComponent::Text => "text",
     }
 }
 
@@ -1149,6 +1287,24 @@ fn scalar_item(v: &Value, key: &str) -> Result<toml_edit::Item, AppError> {
         }),
         _ => Err(AppError::invalid_argument(format!(
             "{key} 的前置条件值只能是字符串 / 数字 / 布尔，见到 {v}"
+        ))),
+    }
+}
+
+/// 可选项的值写回文件的那一项。与 `scalar_item` 只差一处：**整数按整数写**
+/// （`0` 不许漂成 `0.0`）—— 可选项是照抄原文的东西，表示一动就天天出无谓 diff
+fn choice_value_item(v: &Value, key: &str, n: usize) -> Result<toml_edit::Item, AppError> {
+    match v {
+        Value::String(s) => Ok(super::literal_str(s)),
+        Value::Bool(b) => Ok(toml_edit::value(*b)),
+        Value::Number(num) => match num.as_i64() {
+            Some(i) => Ok(toml_edit::value(i)),
+            None => num.as_f64().map(toml_edit::value).ok_or_else(|| {
+                AppError::invalid_argument(format!("{key} 第 {n} 条可选项的值 {v} 不是有限数字"))
+            }),
+        },
+        _ => Err(AppError::invalid_argument(format!(
+            "{key} 第 {n} 条可选项的值只能是字符串 / 数字 / 布尔，见到 {v}"
         ))),
     }
 }
@@ -2239,7 +2395,9 @@ mod tests {
         (params, layout)
     }
 
-    /// 一份「全空」的编辑载荷：只给名字，其余都是要清掉的
+    /// 一份「全空」的编辑载荷：只给名字，其余都是要清掉的。
+    /// `choices` / `machine_filter` 同一口径 —— 空表就是清空，模态框那边
+    /// 永远整表带回
     fn meta_edit(label: &str) -> ParamMetaEdit {
         ParamMetaEdit {
             label: label.to_owned(),
@@ -2254,7 +2412,23 @@ mod tests {
             parent_key: None,
             show_when: None,
             deprecated: false,
+            choices: Vec::new(),
+            machine_filter: Vec::new(),
         }
+    }
+
+    /// 一条可选项（测试里手写三件套太啰嗦）
+    fn choice(label: &str, value: Value, deprecated: bool) -> Choice {
+        Choice {
+            label: label.to_owned(),
+            value,
+            deprecated,
+        }
+    }
+
+    /// 夹具临时目录里那份注册表文件
+    fn to_file(root: &std::path::Path) -> std::path::PathBuf {
+        root.join("registry").join("param_registry.toml")
     }
 
     /// 一次定义编辑：改的每一格**重读盘之后都在**，diff 只落在一个块里
@@ -2366,6 +2540,170 @@ mod tests {
         );
     }
 
+    /// 可选项与适用机型整表换：改了要落盘（含逐条弃用）、机型清单 trim + 去重、
+    /// 数字预设档的表示不漂、清空 = 删键
+    #[test]
+    fn choices_and_machine_filter_round_trip() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // 一改：a.y 弃用「关」、加一条「半开」；机型清单带空格与重复 —— 归一
+        r.set_param_meta(
+            "a.y",
+            ParamMetaEdit {
+                value_type: ValueType::Text,
+                ui_component: UiComponent::Select,
+                default_value: serde_json::json!("on"),
+                choices: vec![
+                    choice("开", serde_json::json!("on"), false),
+                    choice("关", serde_json::json!("off"), true),
+                    choice("半开", serde_json::json!("half"), false),
+                ],
+                machine_filter: vec!["A1".into(), " P1S ".into(), "A1".into()],
+                ..meta_edit("a.y")
+            },
+        )
+        .expect("改得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(d.path()).expect("改完还得读得通");
+        let py = again.param("a.y").unwrap();
+        assert_eq!(py.choices.len(), 3, "加的那条没落盘");
+        assert_eq!(py.choices[1].label, "关");
+        assert!(py.choices[1].deprecated, "逐条弃用没落盘");
+        assert!(!py.choices[0].deprecated, "没弃用的不许带 deprecated 键");
+        assert_eq!(py.machine_filter, ["A1", "P1S"], "trim 与去重都没做");
+
+        // 二改：a.x 挂两条数字预设档 —— 整数就写整数（0 不许漂成 0.0）
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                choices: vec![
+                    choice("关", serde_json::json!(0), false),
+                    choice("一半", serde_json::json!(50), false),
+                ],
+                ..meta_edit("a.x")
+            },
+        )
+        .unwrap();
+        r.write_back().unwrap();
+        let txt = std::fs::read_to_string(to_file(d.path())).unwrap();
+        assert!(txt.contains("value = 0\n"), "整数预设档漂成了小数：{txt}");
+        assert!(!txt.contains("value = 0.0"));
+
+        // 三改：可选项与机型清单都清空 —— 文件里删键（控件跟着换成文本框才合法）
+        r.set_param_meta(
+            "a.y",
+            ParamMetaEdit {
+                value_type: ValueType::Text,
+                ui_component: UiComponent::Text,
+                default_value: serde_json::json!("自由"),
+                choices: Vec::new(),
+                machine_filter: Vec::new(),
+                ..meta_edit("a.y")
+            },
+        )
+        .unwrap();
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).unwrap();
+        let py = again.param("a.y").unwrap();
+        assert!(py.choices.is_empty(), "清了还在内存里");
+        assert!(py.machine_filter.is_empty());
+        let txt = again.to_toml();
+        assert!(!txt.contains("machineFilter"), "机型清单清了还留着键");
+        assert!(!txt.contains("'半开'"), "清掉的可选项还留在文件里");
+        // a.x 的预设档不受牵连 —— 整表换只换自己那一条
+        assert_eq!(again.param("a.x").unwrap().choices.len(), 2);
+    }
+
+    /// 控件 × 值类型的组合得画得出真的：开关挂在 float 上（点了不切换的那种）、
+    /// 步进框挂在 bool 上、分段没有可选项、文本框带着可选项 —— 全拒
+    #[test]
+    fn meta_edit_rejects_control_combos_that_draw_fake_controls() {
+        let (p, l) = editable();
+        let (_d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // 开关 + float —— 作者实测的那一手：「改成了开关，点了没切换」
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    ui_component: UiComponent::Switch,
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("开关"), "{}", e.message);
+
+        // 步进框 + bool
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    value_type: ValueType::Bool,
+                    ui_component: UiComponent::Number,
+                    default_value: serde_json::json!(true),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("步进框"), "{}", e.message);
+
+        // 分段 + 字符串但没有可选项
+        let e = r
+            .set_param_meta(
+                "a.y",
+                ParamMetaEdit {
+                    value_type: ValueType::Text,
+                    ui_component: UiComponent::Segmented,
+                    default_value: serde_json::json!("on"),
+                    ..meta_edit("a.y")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("可选项"), "{}", e.message);
+
+        // 文本框 + 带着可选项（要么换控件，要么清空）
+        let e = r
+            .set_param_meta(
+                "a.y",
+                ParamMetaEdit {
+                    value_type: ValueType::Text,
+                    ui_component: UiComponent::Text,
+                    default_value: serde_json::json!("on"),
+                    choices: vec![choice("开", serde_json::json!("on"), false)],
+                    ..meta_edit("a.y")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("文本框"), "{}", e.message);
+
+        // 可选项的值重复 —— 下拉里两行一个键是假选项
+        let e = r
+            .set_param_meta(
+                "a.y",
+                ParamMetaEdit {
+                    value_type: ValueType::Text,
+                    ui_component: UiComponent::Select,
+                    default_value: serde_json::json!("on"),
+                    choices: vec![
+                        choice("开", serde_json::json!("on"), false),
+                        choice("又是开", serde_json::json!("on"), false),
+                    ],
+                    ..meta_edit("a.y")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("重复"), "{}", e.message);
+
+        // 拒了就一格不动
+        assert_eq!(r.param("a.x").unwrap().ui_component, UiComponent::Number);
+        assert_eq!(r.param("a.y").unwrap().ui_component, UiComponent::Select);
+    }
+
     /// 默认值得跟值类型对得上；枚举的默认值得是选项之一。拒了之后**一格不动**
     #[test]
     fn meta_edit_rejects_defaults_that_do_not_fit_the_type() {
@@ -2385,7 +2723,7 @@ mod tests {
             .unwrap_err();
         assert!(e.message.contains("对不上"), "{}", e.message);
 
-        // 枚举的默认值不在选项里
+        // 枚举的默认值不在选项里（照模态框的口径：可选项整表带回）
         let e = r
             .set_param_meta(
                 "a.y",
@@ -2393,6 +2731,10 @@ mod tests {
                     value_type: ValueType::Text,
                     ui_component: UiComponent::Select,
                     default_value: serde_json::json!("mid"),
+                    choices: vec![
+                        choice("开", serde_json::json!("on"), false),
+                        choice("关", serde_json::json!("off"), false),
+                    ],
                     ..meta_edit("a.y")
                 },
             )

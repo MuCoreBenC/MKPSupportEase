@@ -296,8 +296,10 @@ mod tests {
         }
         assert!(sections_total >= 8, "sections 总数过少：{sections_total}");
 
-        // 快照实测词表（grep 盘点）：UI 生成器按它分派控件，出现未知类型先红这里
-        const UI_COMPONENTS: [&str; 6] = ["number", "gcode", "switch", "segmented", "select", ""];
+        // 快照实测词表（grep 盘点）：UI 生成器按它分派控件，出现未知类型先红这里。
+        // `text` 是编辑器给的第六种（字符串清掉可选项之后的自由文本落点）
+        const UI_COMPONENTS: [&str; 7] =
+            ["number", "gcode", "switch", "segmented", "select", "text", ""];
         const VALUE_TYPES: [&str; 5] = ["float", "string", "bool", "int", ""];
         let section_ids: Vec<String> = reg
             .tabs

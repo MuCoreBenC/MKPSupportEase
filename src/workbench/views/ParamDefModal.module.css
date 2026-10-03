@@ -126,6 +126,82 @@
   opacity: 0.55;
 }
 
+.btn:disabled {
+  opacity: 0.45;
+}
+
+/* 可选项一行：值 / 显示名 / 弃用 / 删。值是等宽短词 —— 窄列对得齐 */
+.choiceRow {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.choiceRow + .choiceRow {
+  margin-top: 6px;
+}
+
+.choiceDep {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 0 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.choiceDel {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  font-size: var(--fs-body);
+  line-height: 1;
+  color: var(--text-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.choiceDel:hover {
+  color: var(--danger);
+  border-color: var(--line);
+}
+
+.addChoice {
+  margin-top: 8px;
+}
+
+/* 适用机型：一排勾选。一个都不勾 = 全部机型（与 machineFilter 空表同一口径） */
+.machines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.machineChip {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.machineId {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.note {
+  margin: 6px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
 .hint {
   margin: 14px 0 0;
   font-size: var(--fs-label);

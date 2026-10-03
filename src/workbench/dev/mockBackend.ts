@@ -152,6 +152,8 @@ interface FixtureParam {
   choices: { label: string; value: string; deprecated: boolean }[]
   showWhen: { key: string; op: 'eq' | 'neq' | 'gt'; value: unknown } | null
   parentKey: string | null
+  /** 空 = 不限机型（真源里是逗号串，这里按拆好的数组存） */
+  machineFilter: string[]
   depth: number
   deprecated: boolean
 }
@@ -171,6 +173,7 @@ const p = (over: Partial<FixtureParam> & { key: string; label: string }): Fixtur
   choices: [],
   showWhen: null,
   parentKey: null,
+  machineFilter: [],
   depth: 0,
   deprecated: false,
   ...over,
@@ -994,7 +997,7 @@ function buildRegistry(): Json {
       defaultValue: pdef.defaultValue, defaultText: valueText(pdef, pdef.defaultValue),
       min: pdef.min, max: pdef.max, step: pdef.step, unit: pdef.unit,
       choices: pdef.choices, showWhen: pdef.showWhen, parentKey: pdef.parentKey,
-      machineFilter: [], deprecated: pdef.deprecated,
+      machineFilter: pdef.machineFilter ?? [], deprecated: pdef.deprecated,
     })),
   }
 }
