@@ -68,3 +68,11 @@ export const NEED_PRESET =
 
 /** 一格偏移的文本。没值就是一条横杠 —— 不拿旧数字或默认值冒充 */
 export const axisText = (axes: Axes | null, k: Axis) => (axes ? `${axes[k].toFixed(2)} mm` : '—')
+
+/*
+ * Z 步板下的两行文案（G06-8 四轮攒下的原话，一句不改）。
+ * 「校准」tab 与首页向导的 Z 卡共用这一份 —— 第二个人要用时只能搬走，不能各写一遍。
+ */
+export const Z_LEGEND = '← 抬高笔尖 ｜ 降低笔尖 →'
+export const Z_TIP =
+  '校准的时候感觉都没涂上胶水 → 点最右边的格子（-0.5，降低笔尖），或者手动把上面的 Z 改小一点'

@@ -1,0 +1,180 @@
+/*
+ * 三轴读数（可编辑）的皮 —— 从 G06-8 的页皮里拆出独立成件（收编进 A44）。
+ * 字号用调用方可覆盖的变量留口子：HUD 台面（PageCalibA44）在窄档按容器查询收紧。
+ */
+
+.readings {
+  margin: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(14px, 2vw, 40px);
+}
+
+.axis {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* 3px + .field 的上内衬 3px = 标签到数字 6px，与原版读数同一档 */
+  gap: 3px;
+}
+
+/* 轴名行：当前轴转绿（与原版同一条规则：三个数一样大，只拿颜色分当前页） */
+.axisLabel {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.axisLabel label {
+  cursor: pointer;
+}
+
+.axis[data-minor='false'] .axisLabel {
+  color: var(--accent-deep);
+}
+
+/*
+ * 值行贴着轴名的左缘（第三轮「字没对齐」的根因）：`<dd>` 有浏览器默认的
+ * margin-inline-start: 40px，三个数各自往右缩一截 —— 归零。
+ */
+.axisValue {
+  margin: 0;
+}
+
+.dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  visibility: hidden;
+}
+
+.dot[data-on='true'] {
+  visibility: visible;
+}
+
+/*
+ * 「原 x.xx」：有基准就常显（10-03 作者：只改过才冒出来等于校准页没有这个角标）。
+ * 宽高常驻占位、只切 visibility —— 版面一动不动，这条不变；变的是它从 span 成了
+ * button（改过的轴是还原入口，点一下整轴退回已保存值），按钮的默认皮在这里清掉。
+ */
+.axisFrom {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  font-family: inherit;
+  letter-spacing: inherit;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  visibility: hidden;
+  cursor: default;
+}
+
+.axisFrom[data-on='true'] {
+  visibility: visible;
+}
+
+/* 改过的那一轴：chip 转绿（与该轴变绿的数值同色）= 能按，hover 加下划线点破 */
+.axisFrom[data-act='revert'] {
+  color: var(--accent-deep);
+  cursor: pointer;
+}
+
+.axisFrom[data-act='revert']:hover {
+  text-decoration: underline;
+}
+
+.axisFrom[data-act='revert']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/*
+ * 读数框（②）：数字与 mm 住在**同一颗可点**里（label 包住 input 与单位，
+ * 轴名 htmlFor 也能聚焦）。**平时无边框无底色** —— 就是原版那种大字 + mm 的轻
+ * 的样子（第一版画成常驻实心框，作者：「xyz的不好看」）；hover / 聚焦才显出一颗
+ * 宽松的框，框罩住数字和 mm 整体，不再是从前那个贴着数字的小方框。
+ * 反馈与全应用的输入框同一套：hover 加深边框、聚焦转绿、只读不亮。
+ */
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  /* 负 margin 把内衬撑到框外：数字仍落在轴名的左缘（原版位置），聚焦框才有多余量 */
+  margin: 0 -10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: text;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.field:not([data-readonly='true']):hover {
+  border-color: var(--line-strong);
+  background: var(--surface-solid);
+}
+
+.field:not([data-readonly='true']):focus-within {
+  border-color: var(--accent);
+  background: rgb(255 255 255 / 70%);
+}
+
+.field[data-readonly='true'] {
+  cursor: default;
+}
+
+.fieldInput {
+  width: 4.2em;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: clamp(14px, 1.6vw, 17px);
+  /* 左对齐（与原版读数一致）：数字贴着轴名左缘，位数变化不挪窝 */
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.fieldInput:focus {
+  outline: none;
+}
+
+.fieldInput::-webkit-inner-spin-button,
+.fieldInput::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 改过的那一轴：新值换色加粗（跟原版 .axis[data-changed] 同一条规则） */
+.axis[data-changed='true'] .fieldInput {
+  font-weight: 600;
+  color: var(--accent-deep);
+}
+
+.unit {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* 还没有值：一条横杠。宽度按框那一格给，切到有值时不跳 */
+.axisBlank {
+  display: inline-block;
+  min-width: 6em;
+  color: var(--text-3);
+}

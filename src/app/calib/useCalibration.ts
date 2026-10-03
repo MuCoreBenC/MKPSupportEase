@@ -45,6 +45,8 @@ export interface Calibration {
   pickXY: (id: string) => void
   typeAxis: (axis: Axis, raw: string) => void
   revertAxis: (axis: Axis) => void
+  /** 点「原 x.xx」：这一轴整个退回已保存值 —— 手输的与板上点出来的一起清 */
+  resetAxis: (axis: Axis) => void
   clearAll: () => void
   commitAll: () => void
 }
@@ -204,6 +206,18 @@ export function useCalibration(preset: PresetState): Calibration {
   /** Esc：把这一轴退回"板上点出来 / 已保存"的值 */
   const revertAxis = useCallback((k: Axis) => dropTyped(k), [dropTyped])
 
+  /* 点「原 x.xx」（作者 10-03：点了就变回原本的）：还原比 Esc 更彻底 ——
+     手输值与板上点出来的选中一起清，草稿回到 saved。Esc 只退手输、留着点选，
+     是"我在打字，退回点的那格"的语义；点 chip 是"这一轴我不要改了"。 */
+  const resetAxis = useCallback(
+    (k: Axis) => {
+      dropTyped(k)
+      if (k === 'z') setZPick(null)
+      else setXyPick((prev) => ({ ...prev, [k]: null }))
+    },
+    [dropTyped],
+  )
+
   /**
    * 保存：把**全部草稿轴**写进已保存那一份，不分页，同时交给后端落盘。
    *
@@ -240,6 +254,7 @@ export function useCalibration(preset: PresetState): Calibration {
     pickXY,
     typeAxis,
     revertAxis,
+    resetAxis,
     clearAll,
     commitAll,
   }

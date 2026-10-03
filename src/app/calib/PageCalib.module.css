@@ -1,99 +1,53 @@
 /*
- * 「校准」tab 的版面：平铺一列。
- *
- * 与向导那两张校准卡刻意长得不一样 —— 卡片翻页那套（固定高、板子按 cqh 连续缩放、
- * 露出卡与退出层）是为"被一步步推着走"设计的；从 tab 进来的人是回来改一个数，
- * 给他一条从上到下读的列、可滚动，不要再翻页。
- *
- * 一条左基线：步骤条、读数、板框的左缘全对齐在同一竖线上；
- * 动作那一组反过来贴右边缘（页首一行的右端），四个按钮的位置不随板子高度漂移。
+ * 「校准」tab 的皮 —— HUD 台面（G06-10 收编，10-03 作者定稿）。
+ * 没有页首行：.hudTop（步骤条 + 预设 pill）/ .hudBoard（板子占满）/ .hudBottom
+ * （可编辑读数 + 动作组）三段；Z 步视口锁板子比例、说明两行 cqw 跟板等比；
+ * 下缘容器查询两档收紧（600×500 起一行）。覆盖 PlateZoom（手柄直角实白 ⇔ 居中）
+ * 的两条沿用；挑自 G06-8～G06-10 四轮抽卡判词。
  */
-.page {
+.root {
+  position: relative;
   height: 100%;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--pad) clamp(14px, 2.4vw, 28px);
-
-  /*
-   * 卡面：与首页那张卡同一个变量、同一个位置感（都是"标题栏以下的整块内容区"）。
-   * 这一页原来没有背景、直接透出 body 的渐变，于是首页是白卡、校准 tab 是灰底，
-   * 切 tab 跳一下色。表面统一之后只剩内容在变。
-   */
-  background: var(--card-face);
-
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: clamp(10px, 1.4vh, 16px);
+  min-width: 0;
 }
 
-
-
-/* ---------- 页首：步骤条 + 动作 ---------- */
-
-/*
- * 页首第一行：步骤条贴左基线，预设下拉在它右边。
- *
- * 预设原来自己占一整行、而这一行右半边空着 —— 合并之后整页少一行，
- * 省下的高度全给板子（这一页最缺的就是高度）。
- * 「测试模型」那一步没有读数行，它的动作组也挂在这一行的右端。
- */
-.top {
-  width: 100%;
+.hud {
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: auto;
+  background: var(--card-face);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 上缘 ---------- */
+
+.hudTop {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px clamp(10px, 1.6vw, 20px);
+  gap: 8px 14px;
+  padding: 12px clamp(14px, 2vw, 24px) 8px;
 }
 
-/* 中间那格：有地方就伸展，地方不够先让它收（下限 200 是"预设文件 + 一个文件名"读得出来的宽度） */
-.presetSlot {
-  flex: 1 1 200px;
-  min-width: 0;
-  max-width: 420px;
-}
-
-/*
- * 页首第二行：三轴读数（左） + 这一步的动作（右）。
- *
- * 按**底边**对齐而不是居中：读数是"标签 + 数值"两层、比按钮高，
- * 居中对齐时按钮会浮在读数中间，看起来不像同一行。
- */
-.headRow {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px clamp(10px, 1.6vw, 20px);
-}
-
-
-
-/* ---------- 步骤条 ---------- */
-
-
-/*
- * 三步平排的一行。不做序号圆点与连线：那是"流程图"的语言，
- * 这一页三步之间没有先后强制关系（回来只改 XY 是常事）。
- */
+/* 步骤条：G06-8 的凹槽直角照旧（外 4 内 2） */
 .rail {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: 4px;
   background: var(--surface-sunken);
 }
 
 .tab {
   appearance: none;
   border: 0;
-  border-radius: calc(var(--r-sm) - 2px);
+  border-radius: 2px;
   padding: 6px clamp(10px, 1.2vw, 16px);
   background: transparent;
   color: var(--text-2);
@@ -116,48 +70,117 @@
   box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
 }
 
-/* ---------- 读数条 ---------- */
-
 /*
- * CalibHead 里的预设行与读数条自己是 `width: fit-content; margin-inline: auto`
- * （向导那边要居中），直接放进这一列会飘到中间、脱离左基线。
- * 外面套一个同样 fit-content 的壳：auto 边距在壳的宽度里"居中"，结果就是贴左。
- * 不去改那份共用 CSS —— 它同时管着向导里的落位动画，那是为落位抖动调出来的。
+ * 预设 pill（G06-8 定稿形态）。10-03 作者裁决：切换预设不用这么显眼，
+ * 绿底让给「打开模型」—— pill 退成实白。
  */
-.head {
-  width: fit-content;
-  max-width: 100%;
+.presetPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  max-width: 340px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-solid);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
 }
 
-/* ---------- 板子 ---------- */
+.presetPill:hover {
+  border-color: var(--text-3);
+}
 
-/*
- * 一条细边框把「板名 + 板 + 提示」收成一组，与向导里的 .step 同一个道理：
- * 列里全是左对齐的文字行，没有这个框，板子和读数会糊成一片。
- *
- * flex: 1 —— 吃掉页面剩下的全部高度，三步切换时框的上下边缘都在同一位置、下边缘贴底。
- * 板子的尺寸不在这里算了：交给 PlateZoom 的 fill 模式按容器剩余宽高连续换算
- * （原来那条 `(100cqh − 205px) / 53.545` 的 205 是要人维护的版面常数，已经删掉）。
- */
-.plateBox {
-  width: 100%;
-  min-width: 0;
-  flex: 1 1 auto;
+.presetPill:focus-visible {
+  outline: none;
+}
+
+.presetPillOff {
+  background: var(--surface-sunken);
+}
+
+.presetPillOff .presetName {
+  color: var(--text-3);
+}
+
+.presetPillOff:hover {
+  border-color: var(--text-3);
+}
+
+.presetPillOff .presetSwitch {
+  color: var(--text-3);
+}
+
+.presetName {
+  overflow: hidden;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.presetSwitch {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+/* ---------- 台面 ---------- */
+
+.hudBoard {
+  flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: clamp(10px, 1.2vh, 14px);
-  /* 14% 黑而不是 8%：卡面是白的，8% 那条线在白底上基本看不见 */
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
-
+  padding: 2px clamp(14px, 2vw, 24px) 6px;
   /*
-   * 不铺底色：卡面已经是白的，再叠一层同色只是多一个图层。
-   * 板子自己那层白 bbox 也在 PlateZoom 里抽掉了 —— 整块区域只有一种白，没有缝。
+   * 台面自己是容器：说明两行的字号用 cqw 跟着**板子的实际宽**走 ——
+   * Z 板是宽扁条，窗一小板子就缩，字若固定 12/13px 就会比板子里刻的字还大
+   * （作者：「文字感觉都比图片大了」）。cqw 让它们等比。
    */
-  background: transparent;
+  container-type: inline-size;
+}
+
+/*
+ * Z 步：视口锁板子自己的比例（136.219 × 34.019，取自产物 VIEW_BOX），
+ * 说明两行才贴得住板下（同 G06-8）；盒子改内容高、整块在台面里居中。
+ */
+.hudBoard[data-step='z'] {
+  justify-content: center;
+}
+
+.hudBoard[data-step='z'] > [class*='box'] {
+  flex: 0 1 auto;
+}
+
+.hudBoard[data-step='z'] [class*='viewport'] {
+  flex: 0 1 auto;
+  aspect-ratio: 136.219 / 34.019;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.legend {
+  margin: 0;
+  text-align: center;
+  /* 跟板宽等比（cqw of .hudBoard）：正常 ~11px，窄窗缩到 9px —— 与板内刻字同档 */
+  font-size: clamp(9px, 0.92cqw, 12px);
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.tip {
+  margin: 0;
+  text-align: center;
+  /* 同上；窄窗一行放得下，不再折行盖过板子 */
+  font-size: clamp(9.5px, 1cqw, 13px);
+  line-height: 1.5;
+  color: var(--text-2);
 }
 
 .note {
@@ -167,9 +190,132 @@
   color: var(--text-3);
 }
 
-/* ---------- 动作组 ---------- */
+/* ---------- 测试模型那一步（作者第四轮定稿：不要背景，两侧留白） ---------- */
 
-/* 一行按钮，自己不换行（要换是 .top 整块换）；状态位跟在最左，常驻占位不顶走按钮 */
+/*
+ * 一列三行：用途一句 / 合影 / 场景一句。合影 img 自己做 flex 项
+ * （flex:1 + min-height:0 + object-fit: contain）—— 盒子撑满中段、位图在盒内
+ * 等比缩放，任何窗高都完整显示（旧版 max-height:100% 在 grid 行里解不开约束的
+ * 裁剪老毛病根治）。模糊铺底试过一版被否（清晰图白底与模糊层之间有看得见的边界），
+ * 撤干净 —— 两侧留白就是留白。
+ */
+.models {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 clamp(14px, 2vw, 24px) 10px;
+}
+
+.lead {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.modelsImg {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+}
+
+.caption {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* ---------- 下缘 ---------- */
+
+.hudBottom {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 6px clamp(14px, 2vw, 24px) 14px;
+  /* 窄窗「读数一行按钮一行」地折行很难受（作者原话）—— 按实测宽度收紧两侧，保证一行 */
+  container-type: inline-size;
+}
+
+/*
+ * 两档收紧（容器 = .hudBottom 实测宽）：
+ *   ≤880px  读数与按钮同步缩一号（值 14px / 框内衬 8 / 按钮 24px）
+ *   ≤660px  再收一档：「原 x.xx」占位撤掉、间距更紧
+ * 读数件是 G06-8 的 module，从这里只能按元素结构罩（dl > div > …），不动那边。
+ */
+@container (max-width: 880px) {
+  .hudBottom dl {
+    gap: 10px 20px;
+  }
+
+  .hudBottom dt label {
+    font-size: 10px;
+  }
+
+  .hudBottom dt > span {
+    font-size: 9.5px;
+  }
+
+  .hudBottom dd label {
+    padding: 2px 8px;
+    margin: 0 -8px;
+  }
+
+  .hudBottom dd input {
+    font-size: 14px;
+  }
+
+  .hudBottom dd label > span {
+    font-size: 10px;
+  }
+
+  .hudBottom .actions {
+    gap: 6px;
+  }
+
+  .hudBottom .actions button {
+    height: 24px;
+    padding: 0 10px;
+    font-size: 11.5px;
+  }
+
+  .hudBottom .actions .state {
+    font-size: 10.5px;
+    min-width: 2.8em;
+  }
+}
+
+@container (max-width: 660px) {
+  .hudBottom dl {
+    gap: 8px 14px;
+  }
+
+  .hudBottom dt > span {
+    display: none;
+  }
+
+  .hudBottom dd label {
+    padding: 2px 6px;
+    margin: 0 -6px;
+  }
+
+  .hudBottom dd input {
+    font-size: 13px;
+  }
+
+  .hudBottom .actions button {
+    height: 22px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+}
+
 .actions {
   margin-left: auto;
   display: flex;
@@ -180,57 +326,10 @@
 .state {
   font-size: var(--fs-label);
   color: var(--text-3);
-  /* 没有状态时仍占一行字的宽高：文本进出不该让按钮行跳一下 */
   min-width: 3.2em;
   visibility: hidden;
 }
 
 .state[data-on='true'] {
   visibility: visible;
-}
-
-/* ---------- 测试模型那一步 ---------- */
-
-/* 与两块板同一个道理：这一段也吃掉页面剩下的高度，图在里面居中撑满 */
-.models {
-  width: 100%;
-  min-width: 0;
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: clamp(8px, 1.2vh, 14px);
-}
-
-.lead {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--text-2);
-}
-
-/*
- * 合影图：吃掉这一段剩下的高度，上下左右居中，`contain` 保证不裁切。
- * 不再给 max-height 的固定上限 —— 那条 clamp(150px, 42vh, 380px) 让图在大窗里
- * 停在 380px，下面空一大片；现在它跟着框一起长，与两块板的行为一致。
- * 不给边框不给底色 —— 这一屏只有"要不要打开"一个决定，图是插图不是卡片。
- */
-.hero {
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-}
-
-.heroImg {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.caption {
-  margin: 0;
-  font-size: var(--fs-label);
-  line-height: 1.5;
-  color: var(--text-3);
 }
