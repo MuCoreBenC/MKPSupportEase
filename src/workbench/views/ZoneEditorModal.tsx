@@ -15,8 +15,10 @@
  *
  * # 干净画布
  *
- * 默认只画床身轮廓 + 网格 + 多边形的边；选中某块才出现顶点手柄，**坐标标签只标
- * 当前悬停 / 拖着的那一个点** —— 一屏全是手柄与数字，反而看不清形状（旧面板的原则）。
+ * 默认只画床身轮廓 + 网格 + 多边形的边；**顶点手柄默认不画** —— 悬停到选中的
+ * 块上、拖着顶点、或正在右边改某个点的坐标时才出现。亮着的那一个点（悬停 /
+ * 拖动 / 正在编辑的）实心放大，头顶跟一块圆角坐标牌（旧面板的设计原则，照抄）。
+ * 右边坐标行用的是参数台同款 `NumberField`（大箭头步进 / 滚轮 / 键入）。
  *
  * # 加点只有两条路（2026-10-03 作者那刀：画布空白处点击**不再**加点）
  *
@@ -36,6 +38,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import { isAppError, wb } from '../api'
 import type { MachineView, ZonePolygon } from '../api'
+import { NumberField } from '../components/field'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
 import s from './ZoneEditorModal.module.css'
@@ -68,8 +71,11 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const [past, setPast] = useState<P[][][]>([])
   const [future, setFuture] = useState<P[][][]>([])
   const [sel, setSel] = useState<number | null>(null)
-  /** 坐标标签只跟一个点：悬停或拖着的那一个（对应选中块里的下标） */
+  /** 亮着的那一个点：悬停 / 拖着 / 正在右边改它坐标的那一个（选中块里的下标） */
   const [activePt, setActivePt] = useState<number | null>(null)
+  /** 顶点手柄默认不画 —— 悬停到选中的块上、或正在编辑坐标时才出现 */
+  const [hoverPoly, setHoverPoly] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [busy, setBusy] = useState(false)
   /**
@@ -88,6 +94,8 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     setFuture([])
     setSel(machine?.zones.length ? 0 : null)
     setActivePt(null)
+    setHoverPoly(false)
+    setDragging(false)
     setZoom(1)
     setBusy(false)
     setCursor(null)
@@ -176,6 +184,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     e.stopPropagation()
     setSel(zi)
     setActivePt(pi)
+    setDragging(true)
     dragRef.current = {
       zone: zi,
       point: pi,
@@ -211,8 +220,9 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const onCanvasUp = (e: ReactPointerEvent<SVGSVGElement>) => {
     const d = dragRef.current
     dragRef.current = null
+    setDragging(false)
     if (svgRef.current?.hasPointerCapture(e.pointerId)) svgRef.current.releasePointerCapture(e.pointerId)
-    // 松手时光标若已不在那个顶点上，把它脚下的坐标标签收掉
+    // 松手时光标若已不在那个顶点上，把它脚下的坐标牌收掉
     if (d !== null && activePt !== null) {
       const at = toBed(e)
       const pt = zones[d.zone]?.[d.point]
@@ -237,12 +247,14 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     commit([...zones, fresh])
     setSel(zones.length)
     setActivePt(null)
+    setHoverPoly(false)
   }
 
   const removeZone = (i: number) => {
     commit(zones.filter((_, k) => k !== i))
     setSel((cur) => (cur === null ? null : cur === i ? null : cur > i ? cur - 1 : cur))
     setActivePt(null)
+    setHoverPoly(false)
   }
 
   const duplicateZone = (i: number) => {
@@ -254,6 +266,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     commit([...zones, copy])
     setSel(zones.length)
     setActivePt(null)
+    setHoverPoly(false)
   }
 
   /** 列表里的「添加点」：加在末点→首点那条收口边的中点（跟点边插入同一口径） */
@@ -315,6 +328,10 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
 
   /* 鼠标悬停时能看出"点了会加在哪"（选中某块时才有意义） */
   const cursorHint = cursor !== null && sel !== null ? `${cursor[0]}, ${cursor[1]}` : ''
+
+  /* 顶点手柄半径 / 坐标牌离顶点的距离（随床身大小缩放） */
+  const handleR = Math.max(2.2, Math.min(bed.width, bed.depth) / 90)
+  const labelOff = Math.max(4, Math.min(bed.width, bed.depth) / 42)
 
   return (
     <ModalC14
@@ -420,71 +437,92 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                 <line key={i} {...g} className={s.grid} />
               ))}
 
-              {zones.map((z, i) => (
-                <g key={i}>
-                  <polygon
-                    points={pointsAttr(z)}
-                    className={`${s.poly} ${i === sel ? s.polyOn : ''}`}
-                    onClick={() => {
-                      setSel(i)
-                      setActivePt(null)
-                    }}
-                  />
-                  {/* 选中那块的"点边加顶点"热区：透明粗边，压在面上、顶点手柄下 */}
-                  {i === sel &&
-                    z.length > 0 &&
-                    z.map(([x, y], j) => {
-                      const [nx, ny] = z[(j + 1) % z.length]
-                      return (
-                        <line
-                          key={j}
-                          x1={x}
-                          y1={bed.depth - y}
-                          x2={nx}
-                          y2={bed.depth - ny}
-                          className={s.edgeHit}
-                          strokeWidth={Math.max(2.5, Math.min(bed.width, bed.depth) / 36)}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const at = toBed(e)
-                            if (at !== null) insertPoint(i, j, at)
-                          }}
-                        />
-                      )
-                    })}
-                  {/* 顶点手柄与坐标只在选中的那一块上出现；坐标只标悬停 / 拖着的那一个 */}
-                  {i === sel &&
-                    z.map(([x, y], j) => (
-                      <g key={j}>
-                        <circle
-                          cx={x}
-                          cy={bed.depth - y}
-                          r={Math.max(2.2, Math.min(bed.width, bed.depth) / 90)}
-                          className={s.handle}
-                          onPointerDown={onVertexDown(i, j)}
-                          onPointerEnter={() => setActivePt(j)}
-                          onPointerLeave={() => {
-                            if (dragRef.current === null) setActivePt((cur) => (cur === j ? null : cur))
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault()
-                            removePoint(i, j)
-                          }}
-                        />
-                        {j === activePt && (
-                          <text
-                            x={x}
-                            y={bed.depth - y - Math.max(4, Math.min(bed.width, bed.depth) / 42)}
-                            className={s.handleText}
-                            textAnchor="middle"
-                          >
-                            {x}, {y}
-                          </text>
-                        )}
-                      </g>
-                    ))}
-                </g>
-              ))}
+              {zones.map((z, i) => {
+                /* 顶点手柄默认不画（画布要干净）—— 悬停到选中的块上、拖着顶点、
+                   或正在右边改某个点的坐标时才出现；亮着的那一个带坐标牌 */
+                const showHandles = i === sel && (hoverPoly || dragging || activePt !== null)
+                return (
+                  <g
+                    key={i}
+                    onPointerEnter={i === sel ? () => setHoverPoly(true) : undefined}
+                    onPointerLeave={i === sel ? () => setHoverPoly(false) : undefined}
+                  >
+                    <polygon
+                      points={pointsAttr(z)}
+                      className={`${s.poly} ${i === sel ? s.polyOn : ''}`}
+                      onClick={() => {
+                        setSel(i)
+                        setActivePt(null)
+                        /* 指针就压在这块上：选中即亮出手柄，不用再蹭一下鼠标 */
+                        setHoverPoly(true)
+                      }}
+                    />
+                    {/* 选中那块的"点边加顶点"热区：看不见，但一直能点（压在面上、手柄下） */}
+                    {i === sel &&
+                      z.length > 0 &&
+                      z.map(([x, y], j) => {
+                        const [nx, ny] = z[(j + 1) % z.length]
+                        return (
+                          <line
+                            key={j}
+                            x1={x}
+                            y1={bed.depth - y}
+                            x2={nx}
+                            y2={bed.depth - ny}
+                            className={s.edgeHit}
+                            strokeWidth={Math.max(2.5, Math.min(bed.width, bed.depth) / 36)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const at = toBed(e)
+                              if (at !== null) insertPoint(i, j, at)
+                            }}
+                          />
+                        )
+                      })}
+                    {showHandles &&
+                      z.map(([x, y], j) => {
+                        const py = bed.depth - y
+                        const lit = j === activePt
+                        const label = `${x}, ${y}`
+                        const boxW = label.length * 2 + 2.8
+                        return (
+                          <g key={j}>
+                            <circle
+                              cx={x}
+                              cy={py}
+                              r={lit ? handleR * 1.5 : handleR}
+                              className={lit ? `${s.handle} ${s.handleOn}` : s.handle}
+                              onPointerDown={onVertexDown(i, j)}
+                              onPointerEnter={() => setActivePt(j)}
+                              onPointerLeave={() => {
+                                if (dragRef.current === null) setActivePt((cur) => (cur === j ? null : cur))
+                              }}
+                              onContextMenu={(e) => {
+                                e.preventDefault()
+                                removePoint(i, j)
+                              }}
+                            />
+                            {lit && (
+                              <>
+                                <rect
+                                  className={s.tagBox}
+                                  x={Math.max(0.6, Math.min(bed.width - boxW - 0.6, x - boxW / 2))}
+                                  y={py - labelOff - 3.8}
+                                  width={boxW}
+                                  height={4.8}
+                                  rx={1.2}
+                                />
+                                <text x={x} y={py - labelOff - 0.7} className={s.handleText} textAnchor="middle">
+                                  {label}
+                                </text>
+                              </>
+                            )}
+                          </g>
+                        )
+                      })}
+                  </g>
+                )
+              })}
             </svg>
           </div>
 
@@ -512,6 +550,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                 onClick={() => {
                   setSel(i)
                   setActivePt(null)
+                  setHoverPoly(false)
                 }}
                 title="选中这块（画布上高亮，才能编辑顶点）"
               >
@@ -527,44 +566,58 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                   删除
                 </button>
               </div>
-              {/* 点开看坐标（每一格都能改；改完立刻画到画布上） */}
+              {/* 点开看坐标：参数台同款的步进框（箭头 / 滚轮 / 键入都行）。
+                  正在改哪个点，画布上哪个点亮起 —— 用 onFocus/onBlur 冒泡挂在这行上 */}
               {i === sel && (
                 <div className={s.coords}>
                   {z.map(([x, y], j) => (
-                    <div key={j} className={s.coordRow}>
+                    <div
+                      key={j}
+                      className={s.coordRow}
+                      onFocus={() => setActivePt(j)}
+                      onBlur={() => setActivePt((cur) => (cur === j ? null : cur))}
+                    >
                       <span className={s.coordIdx}>#{j + 1}</span>
-                      <input
-                        className={s.coordInput}
-                        type="number"
-                        step="any"
-                        value={String(x)}
-                        aria-label={`禁区 ${i + 1} 第 ${j + 1} 点 X`}
-                        onChange={(e) => {
-                          const nx = Number(e.target.value)
-                          if (!Number.isFinite(nx)) return
-                          setZones((prev) =>
-                            prev.map((q, qi) =>
-                              qi === i ? q.map((p, pi) => (pi === j ? [nx, p[1]] as P : p)) : q,
-                            ),
-                          )
-                        }}
-                      />
-                      <input
-                        className={s.coordInput}
-                        type="number"
-                        step="any"
-                        value={String(y)}
-                        aria-label={`禁区 ${i + 1} 第 ${j + 1} 点 Y`}
-                        onChange={(e) => {
-                          const ny = Number(e.target.value)
-                          if (!Number.isFinite(ny)) return
-                          setZones((prev) =>
-                            prev.map((q, qi) =>
-                              qi === i ? q.map((p, pi) => (pi === j ? [p[0], ny] as P : p)) : q,
-                            ),
-                          )
-                        }}
-                      />
+                      <span className={s.coordNum}>
+                        <NumberField
+                          value={x}
+                          label={`禁区 ${i + 1} 第 ${j + 1} 点 X`}
+                          unit="mm"
+                          min={0}
+                          max={bed.width}
+                          step={0.1}
+                          decimals={1}
+                          size="sm"
+                          focusOnBoxClick
+                          onChange={(nx) =>
+                            setZones((prev) =>
+                              prev.map((q, qi) =>
+                                qi === i ? q.map((p, pi) => (pi === j ? [nx, p[1]] as P : p)) : q,
+                              ),
+                            )
+                          }
+                        />
+                      </span>
+                      <span className={s.coordNum}>
+                        <NumberField
+                          value={y}
+                          label={`禁区 ${i + 1} 第 ${j + 1} 点 Y`}
+                          unit="mm"
+                          min={0}
+                          max={bed.depth}
+                          step={0.1}
+                          decimals={1}
+                          size="sm"
+                          focusOnBoxClick
+                          onChange={(ny) =>
+                            setZones((prev) =>
+                              prev.map((q, qi) =>
+                                qi === i ? q.map((p, pi) => (pi === j ? [p[0], ny] as P : p)) : q,
+                              ),
+                            )
+                          }
+                        />
+                      </span>
                       <button
                         type="button"
                         className={s.coordDel}

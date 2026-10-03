@@ -136,7 +136,8 @@ body,
 
 :where([data-wb]) button:focus-visible,
 :where([data-wb]) input:focus-visible {
-  outline: 2px solid var(--accent);
+  /* 2026-10-03 作者那一刀：聚焦环不要绿的，统一跟 --wb-primary 走 */
+  outline: 2px solid var(--wb-primary);
   outline-offset: 2px;
 }
 

@@ -104,6 +104,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   const [machineId, setMachineId] = useState('')
   const [pickedVid, setPickedVid] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
+  /** 尺寸卡的明细（移动范围 / 涂胶 / 标定点 / 标志位）：默认收起，常看的只有床身和禁区 */
+  const [dimsAll, setDimsAll] = useState(false)
   const menu = useContextMenu<string>()
 
   /* —— 弹窗 —— */
@@ -1062,6 +1064,16 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             >
               编辑禁区{m.zoneCount > 0 ? `（${m.zoneCount}）` : ''}
             </button>
+            {m.dimensions !== null && (
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                title="移动范围 / 边缘涂胶 / 标定点 / 标志位这四组读数，收着不占地方"
+                onClick={() => setDimsAll((v) => !v)}
+              >
+                {dimsAll ? '收起明细' : '全部明细'}
+              </button>
+            )}
           </div>
           <div className={s.cardBody}>
             {m.dimensions === null ? (
@@ -1077,73 +1089,78 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
                   </span>
                 </div>
 
-                <div className={s.group}>
-                  <div className={s.groupHead}>移动范围 (movementRange)</div>
-                  <div className={s.kv}>
-                    <span className={s.kvKey}>X (minX / maxX)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.movementRange.minX} / {m.dimensions.movementRange.maxX}
-                    </span>
-                    <span className={s.kvKey}>Y (minY / maxY)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.movementRange.minY} / {m.dimensions.movementRange.maxY}
-                    </span>
-                    <span className={s.kvKey}>Z 最大值 (maxZ)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.movementRange.maxZ}</span>
-                  </div>
-                </div>
+                {/* 默认收起的四组：点「全部明细」展开（编辑尺寸模态框里也都有） */}
+                {dimsAll && (
+                  <>
+                    <div className={s.group}>
+                      <div className={s.groupHead}>移动范围 (movementRange)</div>
+                      <div className={s.kv}>
+                        <span className={s.kvKey}>X (minX / maxX)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.movementRange.minX} / {m.dimensions.movementRange.maxX}
+                        </span>
+                        <span className={s.kvKey}>Y (minY / maxY)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.movementRange.minY} / {m.dimensions.movementRange.maxY}
+                        </span>
+                        <span className={s.kvKey}>Z 最大值 (maxZ)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.movementRange.maxZ}</span>
+                      </div>
+                    </div>
 
-                <div className={s.group}>
-                  <div className={s.groupHead}>边缘与涂胶 (edgeZone / glueArea)</div>
-                  <div className={s.kv}>
-                    <span className={s.kvKey}>边缘范围 (edgeZone)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.edgeZone} mm</span>
-                    <span className={s.kvKey}>涂胶 X (min / max)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.glueArea.glueMinX} / {m.dimensions.glueArea.glueMaxX}
-                    </span>
-                    <span className={s.kvKey}>涂胶 Y (min / max)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.glueArea.glueMinY} / {m.dimensions.glueArea.glueMaxY}
-                    </span>
-                    <span className={s.kvKey}>擦料 X (wipeX)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.glueArea.wipeX}</span>
-                  </div>
-                </div>
+                    <div className={s.group}>
+                      <div className={s.groupHead}>边缘与涂胶 (edgeZone / glueArea)</div>
+                      <div className={s.kv}>
+                        <span className={s.kvKey}>边缘范围 (edgeZone)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.edgeZone} mm</span>
+                        <span className={s.kvKey}>涂胶 X (min / max)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.glueArea.glueMinX} / {m.dimensions.glueArea.glueMaxX}
+                        </span>
+                        <span className={s.kvKey}>涂胶 Y (min / max)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.glueArea.glueMinY} / {m.dimensions.glueArea.glueMaxY}
+                        </span>
+                        <span className={s.kvKey}>擦料 X (wipeX)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.glueArea.wipeX}</span>
+                      </div>
+                    </div>
 
-                <div className={s.group}>
-                  <div className={s.groupHead}>标定点 (calibration)</div>
-                  <div className={s.kv}>
-                    <span className={s.kvKey}>L 形基点 X / Y</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.calibration.lShapeBaseX} / {m.dimensions.calibration.lShapeBaseY}
-                    </span>
-                    <span className={s.kvKey}>Z 起点 X / Y (zStart)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.calibration.zStartX} / {m.dimensions.calibration.zStartY}
-                    </span>
-                    <span className={s.kvKey}>X 线 (xLineX / Y / YEnd)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.calibration.xLineX} / {m.dimensions.calibration.xLineY} /{' '}
-                      {m.dimensions.calibration.xLineYEnd}
-                    </span>
-                    <span className={s.kvKey}>Y 线 (yLineX / XEnd / Y)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>
-                      {m.dimensions.calibration.yLineX} / {m.dimensions.calibration.yLineXEnd} /{' '}
-                      {m.dimensions.calibration.yLineY}
-                    </span>
-                  </div>
-                </div>
+                    <div className={s.group}>
+                      <div className={s.groupHead}>标定点 (calibration)</div>
+                      <div className={s.kv}>
+                        <span className={s.kvKey}>L 形基点 X / Y</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.calibration.lShapeBaseX} / {m.dimensions.calibration.lShapeBaseY}
+                        </span>
+                        <span className={s.kvKey}>Z 起点 X / Y (zStart)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.calibration.zStartX} / {m.dimensions.calibration.zStartY}
+                        </span>
+                        <span className={s.kvKey}>X 线 (xLineX / Y / YEnd)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.calibration.xLineX} / {m.dimensions.calibration.xLineY} /{' '}
+                          {m.dimensions.calibration.xLineYEnd}
+                        </span>
+                        <span className={s.kvKey}>Y 线 (yLineX / XEnd / Y)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {m.dimensions.calibration.yLineX} / {m.dimensions.calibration.yLineXEnd} /{' '}
+                          {m.dimensions.calibration.yLineY}
+                        </span>
+                      </div>
+                    </div>
 
-                <div className={s.group}>
-                  <div className={s.groupHead}>标志位 (flags)</div>
-                  <div className={s.kv}>
-                    <span className={s.kvKey}>G-code 标记 (gcodeMarker)</span>
-                    <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.flags.gcodeMarker}</span>
-                    <span className={s.kvKey}>有第二风扇 (hasSecondFan)</span>
-                    <span className={s.kvVal}>{m.dimensions.flags.hasSecondFan ? '是' : '否'}</span>
-                  </div>
-                </div>
+                    <div className={s.group}>
+                      <div className={s.groupHead}>标志位 (flags)</div>
+                      <div className={s.kv}>
+                        <span className={s.kvKey}>G-code 标记 (gcodeMarker)</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>{m.dimensions.flags.gcodeMarker}</span>
+                        <span className={s.kvKey}>有第二风扇 (hasSecondFan)</span>
+                        <span className={s.kvVal}>{m.dimensions.flags.hasSecondFan ? '是' : '否'}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className={s.group}>
                   <div className={s.groupHead}>禁区</div>

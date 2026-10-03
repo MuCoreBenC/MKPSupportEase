@@ -1337,7 +1337,7 @@
 
 .cellEd:focus-within input,
 .cellEd:focus-within select {
-  border-color: var(--accent);
+  border-color: var(--wb-primary);
 }
 
 /* 数字那层壳（`.edCell` 包着共用件的 `.box`）：框与底全撤，吃满格子 */
@@ -2258,7 +2258,7 @@
 }
 
 .filter:focus {
-  border-color: var(--accent);
+  border-color: var(--wb-primary);
   outline: none;
 }
 
@@ -4141,7 +4141,7 @@
 }
 
 .pGbig:focus-visible {
-  outline: 1px solid var(--accent-deep);
+  outline: 1px solid var(--wb-primary-deep);
   outline-offset: -1px;
 }
 

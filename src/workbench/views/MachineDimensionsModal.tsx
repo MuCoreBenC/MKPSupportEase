@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type { MachineDimensions, MachineView } from '../api'
+import { NumberField } from '../components/field'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
 import s from './MachineDimensionsModal.module.css'
@@ -75,14 +76,12 @@ const clone = (d: MachineDimensions): MachineDimensions => ({
   flags: { ...d.flags },
 })
 
-/** 数字输入框的空串 / 非法值都当 0（后端还会再校验一次有限性与床身非零） */
-const num = (v: string): number => {
-  if (v.trim() === '') return 0
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
-}
-
-/** 一格：标签（带原始键名）+ 数字输入 */
+/**
+ * 一格：标签（带原始键名）+ 步进框（参数台同款 NumberField）。
+ *
+ * `decimals={3}`：标定点那几个实测值有三位小数（126.373），键入不许被四舍五入吃掉；
+ * 箭头一次走 0.1mm。范围不设 —— 移动范围 / 涂胶下限本来就是负数，夹了反而碍事。
+ */
 function Field({
   label,
   keyName,
@@ -100,13 +99,13 @@ function Field({
         {label}
         <em className={s.fieldKey}>{keyName}</em>
       </span>
-      <input
-        className={s.num}
-        type="number"
-        step="any"
-        value={String(value)}
-        aria-label={`${label} (${keyName})`}
-        onChange={(e) => onEdit(num(e.target.value))}
+      <NumberField
+        value={value}
+        label={`${label} (${keyName})`}
+        unit="mm"
+        step={0.1}
+        decimals={3}
+        onChange={onEdit}
       />
     </label>
   )

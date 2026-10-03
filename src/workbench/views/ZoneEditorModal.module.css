@@ -2,8 +2,8 @@
  * 禁区编辑器（2026-10-03，照旧面板 mkppanel 的 ZoneEditorModal）。
  *
  * 版式：左画布（55%）+ 右列表（45%），工具条在画布上方、状态在框脚。
- * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块才出现顶点，
- * 坐标标签只标悬停 / 拖着的那一个点。
+ * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块悬停上去（或正在
+ * 改它的坐标）才出现顶点手柄，坐标牌只跟亮着的那一个点。
  */
 
 .wrap {
@@ -112,9 +112,25 @@
   cursor: grabbing;
 }
 
+/* 亮着的那一个：实心蓝、大一号（正在悬停 / 拖动 / 编辑它的坐标） */
+.handleOn {
+  fill: var(--wb-primary);
+  stroke: var(--surface-solid);
+  stroke-width: 0.7;
+}
+
+/* 坐标牌：亮着那个点头顶的圆角小矩形 */
+.tagBox {
+  fill: var(--surface-solid);
+  stroke: var(--wb-primary);
+  stroke-width: 0.45;
+  pointer-events: none;
+}
+
 .handleText {
-  font-size: 3.4px;
-  fill: var(--text-2);
+  font-size: 3.2px;
+  font-weight: 600;
+  fill: var(--wb-primary-deep);
   pointer-events: none;
 }
 
@@ -241,27 +257,20 @@
   color: var(--text-3);
 }
 
-.coordInput {
-  /* 两格平分行宽：够宽好点，也不挤删除键 */
+/* NumberField 的壳按内容自适应 —— 在这里撑满半行，框内输入框跟着拉长 */
+.coordNum {
+  display: flex;
   flex: 1;
   min-width: 0;
-  padding: 3px 8px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-body);
-  color: var(--text-1);
-  text-align: left;
-  background: var(--surface-solid);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  /* 步进小箭头太难点了 —— 藏掉（键盘上下键仍然能用） */
-  appearance: textfield;
-  -moz-appearance: textfield;
 }
 
-.coordInput::-webkit-outer-spin-button,
-.coordInput::-webkit-inner-spin-button {
-  margin: 0;
-  -webkit-appearance: none;
+.coordNum > span {
+  flex: 1;
+}
+
+.coordNum > span > input {
+  flex: 1;
+  width: auto !important;
 }
 
 .coordDel {
