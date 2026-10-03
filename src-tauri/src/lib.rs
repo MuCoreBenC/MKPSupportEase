@@ -249,6 +249,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 删除走数据层的反查守卫（有人引用整次拒绝）
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
+        // 资产检查面板（第四刀）：选中一条才问 —— 重字段（SHA-256 / 尺寸）要读真实字节
+        app::assets::wb_asset_inspect,
+        // 「在访达中显示」：前端只传资产 id，路径由后端算（只读、只开窗口、不碰状态）
+        app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
         app::assets::wb_set_asset_delivery,
         // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。

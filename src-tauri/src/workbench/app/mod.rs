@@ -1693,6 +1693,9 @@ mod tests {
             "wb_baseline_diff",
             "wb_assets",
             "wb_asset_usage",
+            "wb_asset_inspect",
+            // 「在访达中显示」不写任何应用状态（只开系统文件管理器）—— 也归读这一档
+            "wb_reveal_asset",
             "wb_bundles",
             "wb_machines",
             "wb_version_orphans",

@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { AssetList, AssetView, Words } from '../api'
+import type { AssetInspectView, AssetList, AssetView, Words } from '../api'
 import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
@@ -60,6 +60,13 @@ const KIND_LABEL: Record<string, string> = {
   mkPreset: 'MKP 预设',
 }
 
+/** 字节数给人看的写法（检查面板「大小」那一格）：B / KB / MB 一位小数 */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 /** 筛选轴的类型化包装 —— 全部走命令参数，本地不复算。
  *  `image`（整机图）**回到台账**：作者 2026-10-03 改判 —— 第三刀把它挪进客户端
  *  源码是错的（不会编程的用户改不了图）。它仍然**不进云端交付**，但必须
@@ -71,6 +78,8 @@ type Assign = 'all' | 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
+  /** 检查面板（第四刀）：盘上那个文件的样子 —— 选中一条才问（重字段要读真实字节） */
+  const [inspect, setInspect] = useState<AssetInspectView | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
   const [kind, setKind] = useState<Kind>('all')
   const [assign, setAssign] = useState<Assign>((initialAssign as Assign) ?? 'all')
@@ -127,7 +136,28 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     }
   }, [sel, list])
 
+  /** 检查面板读数（第四刀）。**只依赖选中** —— 搜索框逐键重取清单时不再重读字节
+   *  （重的是 SHA-256 / 3.2 MB 的模型）；换选中才重新问 */
+  useEffect(() => {
+    if (!sel) {
+      setInspect(null)
+      return
+    }
+    let alive = true
+    setInspect(null)
+    wb.assetInspect(sel)
+      .then((v) => {
+        if (alive) setInspect(v)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [sel])
+
   const cur: AssetView | undefined = list?.assets.find((a) => a.id === sel)
+  /** 读数对着当前选中吗（换选中 / 读失败时那一块说「正在读……」，不摆旧数据） */
+  const insp = inspect !== null && cur !== undefined && inspect.id === cur.id ? inspect : null
 
   /* 预选的条目可能刚被删了，或者没带预选 —— 回落到第一个（C14 同一条）。
      只在没选中时自动挑，别跟人手点的 selection 打架 */
@@ -439,6 +469,34 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   ? `切片器 · ${(cur.slicer ?? 'bbs') === 'orca' ? 'Orca' : 'BBS'}${cur.profile ? ` · ${cur.profile}` : ''}`
                   : KIND_LABEL[cur.kind]}
               </span>
+              {/*
+               * 「在访达中显示」（第四刀）：**前端只传资产 id**，路径由后端算
+               * （参照客户端 `reveal_in_folder` 的纪律：只读、只开窗口、不碰状态）。
+               * 文件不在时不给一个必被拒的按钮 —— 灰掉并把原因写在 title 里
+               */}
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                disabled={insp === null || !insp.exists}
+                title={
+                  insp === null
+                    ? '正在读文件信息……'
+                    : insp.exists
+                      ? '打开系统文件管理器并选中这个文件'
+                      : '文件不在，没什么可显示的（期望路径在「资产检查」里）'
+                }
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await wb.revealAsset(cur.id)
+                    } catch (e) {
+                      toasts.push(isAppError(e) ? e.message : String(e))
+                    }
+                  })()
+                }}
+              >
+                在访达中显示
+              </button>
               <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setConfirm('delete')}>
                 删除
               </button>
@@ -473,8 +531,10 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                     </span>
                   </>
                 )}
-                <span className={s.kvKey}>路径</span>
-                <span className={`${s.kvVal} ${s.mono}`}>{cur.path}</span>
+                <span className={s.kvKey}>台账路径</span>
+                <span className={`${s.kvVal} ${s.mono}`}>
+                  {cur.path || <span className={s.kvDim}>（生成产物，没有源 path —— 看下面的「产物路径」）</span>}
+                </span>
                 <span className={s.kvKey}>适用机型</span>
                 <span className={s.kvVal}>
                   {cur.machineId ? (
@@ -555,6 +615,79 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 <p className={s.note} style={{ margin: 0 }}>
                   版本不直接引用资产 —— 它经由套餐拿到（一版一套），所以「被谁当 MKP 用」
                   在套餐那一份上看。
+                </p>
+              </div>
+
+              {/*
+               * —— 资产检查（第四刀，作者锁定的字段清单）——
+               * 详情卡从「登记表」变成「资产检查面板」：盘上那个文件到底是什么样，
+               * 它自己说。这几格的读数单独一条命令、**选中才问**（SHA-256 与大小要读
+               * 真实字节，模型 3.2 MB —— 并进列表就是每敲一个字读几 MB）。
+               */}
+              <div className={s.group}>
+                <div className={s.groupHead}>资产检查</div>
+                {insp === null ? (
+                  <p className={s.note} style={{ marginTop: 0 }}>
+                    正在读盘上那个文件……
+                  </p>
+                ) : (
+                  <div className={s.kv}>
+                    <span className={s.kvKey}>真实文件名</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {insp.fileName}
+                      {cur.kind === 'mkPreset' && (
+                        <span className={s.cardNote}>（产物名，命名规则算出）</span>
+                      )}
+                    </span>
+                    <span className={s.kvKey}>{insp.exists ? '源文件路径' : '期望路径'}</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {insp.absPath}
+                      {!insp.exists && (
+                        <span className={s.cardNote}>（文件不在，这就是它该在的地方）</span>
+                      )}
+                    </span>
+                    {insp.productPath !== null && (
+                      <>
+                        <span className={s.kvKey}>产物路径</span>
+                        <span className={`${s.kvVal} ${s.mono}`}>
+                          {insp.productPath}
+                          <span className={s.cardNote}>（相对仓库根）</span>
+                        </span>
+                      </>
+                    )}
+                    <span className={s.kvKey}>格式</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {insp.format ?? <span className={s.kvDim}>没有扩展名</span>}
+                    </span>
+                    <span className={s.kvKey}>尺寸</span>
+                    <span className={s.kvVal}>
+                      {insp.width !== null && insp.height !== null ? (
+                        <span className={s.mono}>
+                          {insp.width} × {insp.height}
+                        </span>
+                      ) : (
+                        <span className={s.kvDim}>不是图片 / 读不出</span>
+                      )}
+                    </span>
+                    <span className={s.kvKey}>大小</span>
+                    <span className={s.kvVal}>
+                      {insp.bytes !== null ? formatBytes(insp.bytes) : <span className={s.kvDim}>—</span>}
+                    </span>
+                    <span className={s.kvKey}>SHA-256</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {insp.sha256 ?? <span className={s.kvDim}>—</span>}
+                    </span>
+                    <span className={s.kvKey}>状态</span>
+                    <span className={s.kvVal}>
+                      {cur.kind === 'mkPreset' && cur.buildState !== null
+                        ? `${words.build[cur.buildState]?.label ?? cur.buildState} · 产物文件${insp.exists ? '在' : '不在'}`
+                        : `登记着 · 文件${insp.exists ? '在' : '不在'}`}
+                    </span>
+                  </div>
+                )}
+                <p className={s.note}>
+                  这几格是盘上那个文件的读数（SHA-256 与大小要读真实字节，所以选中才问一次）。
+                  台账里不存这些 —— 不存第二份真相。
                 </p>
               </div>
 

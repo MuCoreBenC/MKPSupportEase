@@ -405,12 +405,54 @@ function assetListOf(kind: string | null, slicer: string | null, nozzle: string 
   const numeric = (xs: string[]) => [...new Set(xs)].sort((x, y) => parseFloat(x) - parseFloat(y))
   return {
     assets: filtered,
-    root: 'C:\\dev\\public\\assets',
+    root: 'C:\\dev\\presets\\assets',
     nozzles: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.nozzle).map((a) => a.nozzle as string)),
     layers: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.layer).map((a) => a.layer as string)),
     total: all.length,
     optionalCount: all.filter((a) => a.identity === 'optional').length,
     archiveCount: all.filter((a) => a.identity === 'archiveOnly').length,
+  }
+}
+
+/** 演示用的"源文件字节的 SHA-256"：真机上由后端读字节算 —— 这里只要形如 64 位 hex */
+function mockSha(id: string): string {
+  const hex = '0123456789abcdef'
+  let out = ''
+  for (let i = 0; i < 64; i += 1) out += hex[(id.charCodeAt(i % id.length) + i) % 16]
+  return out
+}
+
+/**
+ * `wb_asset_inspect` 的演示读数（第四刀）—— 与真机同形：
+ * 普通资产指向**源文件**（`presets/assets/<path>`）、mkPreset 指向**产物**
+ * （`presets/dist/mkp/presets/A1-standard.toml`，一份已生成、一份还没）。
+ * 文件不在的那一条给期望路径 + 空读数（照真机的口径）。
+ */
+function assetInspectOf(a: FixtureRef) {
+  const toWin = (p: string) => p.replace(/\//g, '\\')
+  if (a.kind === 'mkPreset') {
+    const versionId = a.id.endsWith('-fast') ? 'FAST' : 'STANDARD'
+    const fileName = `A1-${versionId.toLowerCase()}.toml`
+    // 演示：一份产物已生成、一份还没 —— 与列表里的 buildState 同一套演示事实
+    const exists = a.id === 'a1-standard'
+    const productPath = `presets/dist/mkp/presets/${fileName}`
+    return {
+      id: a.id, fileName, absPath: `C:\\dev\\${toWin(productPath)}`, exists,
+      bytes: exists ? 4312 : null, sha256: exists ? mockSha(a.id) : null,
+      width: null, height: null, format: 'toml', productPath,
+    }
+  }
+  const fileName = a.path.split('/').pop() ?? a.path
+  const format = fileName.includes('.') ? (fileName.split('.').pop() ?? '').toLowerCase() : null
+  const image = a.kind === 'image'
+  const icon = a.kind === 'icon'
+  return {
+    id: a.id, fileName, absPath: `C:\\dev\\presets\\assets\\${toWin(a.path)}`, exists: true,
+    bytes: image ? 95232 : icon ? 1824 : a.kind === 'model' ? 3355443 : 12048,
+    sha256: mockSha(a.id), format,
+    width: image ? 1024 : icon ? 24 : null,
+    height: image ? 768 : icon ? 24 : null,
+    productPath: null,
   }
 }
 
@@ -1189,6 +1231,21 @@ export function installMockBackend() {
         ).map((m) => m.id)
         const bundles = BUNDLES.filter((b) => b.assetRefs.includes(assetId)).map((b) => b.id)
         return Promise.resolve({ id: assetId, machines, bundles })
+      }
+      case 'wb_asset_inspect': {
+        const assetId = args?.assetId as string
+        const a = ASSETS.find((x) => x.id === assetId)
+        if (!a) return Promise.reject({ code: 'NOT_FOUND', message: `没有资产 ${assetId}`, traceId: 'mock' })
+        return Promise.resolve(assetInspectOf(a))
+      }
+      case 'wb_reveal_asset': {
+        // 演示后端没有系统文件管理器 —— 如实说（真机上这一条会打开它并选中文件）。
+        // 探针断言的就是「演示里点它要说实话」，不是静默成功
+        return Promise.reject({
+          code: 'NOT_IMPLEMENTED',
+          message: '浏览器演示里没有系统文件管理器 —— 真机上会打开它并选中这个文件',
+          traceId: 'mock',
+        })
       }
       case 'wb_apply_draft': {
         const patches = (args?.patches as Json[]) ?? []

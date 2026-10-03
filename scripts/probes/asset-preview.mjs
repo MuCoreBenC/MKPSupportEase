@@ -162,6 +162,77 @@ say(
 if (previews === 0) problems.push('资产库一行预览图都没渲染（image / icon 这两类都不见了？）')
 if (broken.length > 0) problems.push(`${broken.length} 行预览没画出来（破图）`)
 
+/* —— 资产检查面板（第四刀）：真实文件名 / 绝对路径 / SHA-256 / 尺寸 / 产物路径 ——
+ *
+ * 读数来自 `wb_asset_inspect`（**选中才问**）。桩给的是确定性演示值（a1-image
+ * 1024 × 768 / 93.0 KB）。「在访达中显示」在浏览器演示里必须**如实失败**
+ * （没有系统文件管理器）—— 与客户端探针那条 Finder 断言同一态度：不许静默成功。 */
+const cardText = () =>
+  page.evaluate(() => {
+    // 外壳把别的页的卡片也留在 DOM 里（实测 4 个 cardBody）—— 按「资产检查」
+    // 这块认卡，别拿第一张（那是机型页的）
+    const el = [...document.querySelectorAll('[class*="cardBody"]')].find((e) =>
+      (e.innerText ?? '').includes('资产检查'),
+    )
+    return el === undefined ? '' : (el.innerText ?? '').replace(/\s+/g, ' ')
+  })
+const selectAsset = async (id, want, ms = 4000) => {
+  await page.locator(`[id="t-asset-${id}"]`).first().click()
+  return until(async () => (await cardText()).includes(want), ms)
+}
+const note = (ok, label, detail = '') => {
+  say(ok, label, detail)
+  if (!ok) problems.push(label)
+}
+
+/* ① 普通资产：源文件那一套读数 */
+// 等的必须是**只有检查面板才会写出来的那一串**（台账路径那一行也有 a1.webp）
+const imageShown = await selectAsset('a1-image', 'C:\\dev\\presets\\assets\\printers\\a1.webp')
+const imageText = await cardText()
+note(imageShown, '检查面板：选中机型图，真实文件名 a1.webp 读得出来')
+note(
+  imageText.includes('源文件路径') &&
+    imageText.includes('C:\\dev\\presets\\assets\\printers\\a1.webp'),
+  '检查面板：源绝对路径整条摆出来（可选中复制）',
+)
+note(
+  imageText.includes('webp') && imageText.includes('1024 × 768') && imageText.includes('93.0 KB'),
+  '检查面板：格式 / 尺寸 / 大小三格有读数',
+)
+note(/\b[0-9a-f]{64}\b/.test(imageText), '检查面板：SHA-256 是 64 位小写 hex')
+
+/* ②「在访达中显示」：文件在 → 可用；演示后端没有文件管理器 → 如实失败 */
+const revealBtn = page.locator('button', { hasText: '在访达中显示' }).first()
+const revealEnabled = await revealBtn.isEnabled()
+await revealBtn.click()
+const honestFail = await until(() =>
+  page.evaluate(() => (document.body.innerText ?? '').includes('没有系统文件管理器')),
+)
+note(
+  revealEnabled && honestFail,
+  '「在访达中显示」：文件在时可用；浏览器演示里如实失败（不静默成功）',
+)
+
+/* ③ MKP 预设：没有源文件，面板给的是**产物**（名字 + 相对仓库根的产物路径） */
+const mkShown = await selectAsset('a1-standard', 'presets/dist/mkp/presets/A1-standard.toml')
+const mkText = await cardText()
+note(
+  mkShown && mkText.includes('A1-standard.toml'),
+  '检查面板：MKP 预设给的是产物（A1-standard.toml + 产物路径）',
+)
+
+/* ④ 产物还没生成：给期望路径 + 按钮灰掉（不给必被拒的按钮） */
+const missingShown = await selectAsset('a1-fast', 'A1-fast.toml')
+const missingText = await cardText()
+const missingBtnDisabled = await page
+  .locator('button', { hasText: '在访达中显示' })
+  .first()
+  .isDisabled()
+note(
+  missingShown && missingText.includes('期望路径') && missingBtnDisabled,
+  '检查面板：产物没生成时改成期望路径，显示按钮灰掉',
+)
+
 /* —— 结算 `/assets/` 请求那一档 —— */
 const bad = [...realResponses.entries()].filter(([, s]) => s < 200 || s >= 300)
 say(

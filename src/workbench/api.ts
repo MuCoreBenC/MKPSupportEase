@@ -843,6 +843,38 @@ export interface AssetUsageView {
   bundles: string[]
 }
 
+/**
+ * `assets::AssetInspectView` —— **资产检查面板**（第四刀，选中一条才问）。
+ *
+ * 它不并进 [`AssetView`]（列表里那一条）：最贵的两格（`sha256` / `bytes`）要读真实
+ * 字节（模型 3.2 MB），而列表每次筛选 / 搜索词一变就重取 —— 把哈希算进列表就是
+ * "每敲一个字读几 MB"。所以与 `assetUsage` 同一形状：**选中才问**。
+ *
+ * 两条线各说各的落点：普通资产 = 源文件（`presets/assets/<path>`）；`mkPreset` =
+ * 生成产物（`fileName` 是产物名、`absPath` 是产物文件、`productPath` 相对仓库根）。
+ * **文件不存在时 `absPath` 同时就是"期望路径"** —— 界面按 `exists` 换标题。
+ */
+export interface AssetInspectView {
+  id: string
+  /** 真实文件名（盘上那个名字）。普通资产 = `path` 的文件名；`mkPreset` = 产物名 */
+  fileName: string
+  /** 盘上绝对路径（普通 = 源文件；`mkPreset` = 产物文件）。**文件不存在时它是期望路径** */
+  absPath: string
+  /** 文件在不在这条链的期望位置 */
+  exists: boolean
+  /** 文件大小（字节）；不存在时 null */
+  bytes: number | null
+  /** **源文件字节**的 SHA-256（小写 hex，与交付侧同一算法）；不存在时 null */
+  sha256: string | null
+  /** 图片像素尺寸 / viewBox（webp / png / svg 读得出时给）；非图片或读不出 = null */
+  width: number | null
+  height: number | null
+  /** 格式（小写扩展名：`webp` / `svg` / `3mf` / `json` / `toml`…） */
+  format: string | null
+  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/dist/mkp/presets/<产物名>` */
+  productPath: string | null
+}
+
 /** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
 export interface BundleRefView {
   id: string
@@ -991,6 +1023,19 @@ export const wb = {
    * 界面上只表现为「那台机型的图没了」。删除守卫在数据层（`Presets::remove_asset`）
    */
   assetUsage: (assetId: string) => invoke<AssetUsageView>('wb_asset_usage', { assetId }),
+
+  /**
+   * **资产检查面板**的数据（第四刀）：真实文件名 / 绝对路径 / SHA-256 / 尺寸 / 格式 /
+   * 大小 / 产物路径。只读；选中一条问一次（理由见 [`AssetInspectView`]）
+   */
+  assetInspect: (assetId: string) => invoke<AssetInspectView>('wb_asset_inspect', { assetId }),
+
+  /**
+   * 「在访达中显示」：打开系统文件管理器**并选中**这一条。
+   * **前端只传资产 id** —— 路径由后端自己算（不给前端传任意路径的机会）；
+   * 只读、只开窗口、不碰任何状态。文件不在时后端如实拒绝（附期望路径）
+   */
+  revealAsset: (assetId: string) => invoke<void>('wb_reveal_asset', { assetId }),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。

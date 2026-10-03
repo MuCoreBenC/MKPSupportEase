@@ -235,7 +235,8 @@ impl Assets {
         let root = self.asset_root.as_ref().ok_or_else(|| {
             AppError::not_found("这一侧没有资产载荷根").with_detail(
                 "资产文件本体与定义分家：定义在 presets/assets.toml，载荷在 \
-                 public/assets/。没有载荷根时按「文件还没到」处理，不要猜路径"
+                 presets/assets/（2026-10-03 前是 public/assets/，资产链第一刀搬的）。\
+                 没有载荷根时按「文件还没到」处理，不要猜路径"
                     .to_owned(),
             )
         })?;

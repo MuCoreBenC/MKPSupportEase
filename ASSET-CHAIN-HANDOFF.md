@@ -4,8 +4,8 @@
 > `HANDOFF.md`（§0 进度 / §3.5 第三圈 / §5 纪律 / §6 判据清单），你就知道现在到哪了、
 > 哪些规矩不能破、下一刀从哪儿下刀、怎么验证。
 >
-> 分支 `feat/client-assets-pipeline`（**本地，尚未推送**，5 个提交，见下）。
-> 工作区干净。
+> 分支 `feat/client-assets-pipeline`（**本地，尚未推送**）：资产链这一串 = 8 个提交，
+> 整支相对 `origin/main` 一共 15 个（见 §2）。工作区干净。
 
 ---
 
@@ -16,16 +16,21 @@
 并且让工作台与客户端**都只面向源数据**。
 
 起点是作者看到的现象：「客户端 `npm run build` 会主动清掉工作台 dev 要用的那份资产 ⇒ 工作台全破图」。
+后面几刀又把**消费端**收了进来：客户端取图改台账驱动 + 图位分层（版本 / 机型 / 品牌图），
+工作台资产库从"登记表"变成**资产检查面板**（真实文件名 / 绝对路径 / SHA-256 / 尺寸 +
+「在访达中显示」）。
 
 ## 2. 分支与提交
 
 ```
-b40c813  资产域：整机图回台账（bundled 档）+ 资产根收敛 presets/assets     ← 上一刀的收尾，先推了
+b40c813  资产域：整机图回台账（bundled 档）+ 资产根收敛 presets/assets     ← 上一刀的收尾
 8114885  随包资产同步链：台账 delivery → 对账同步 → client-assets → vite 装配   ← 第一刀
 6cd13ae  台账：增量之八 + §0 进度总览
 1394a89  客户端取图改台账驱动 + 机型第二个图位                            ← 第二刀
 7a98060  图位分层第一片：版本图位（缺则回落机型图）
 823863a  图位分层第二片：品牌 logo 正式进资产体系
+c9c673a  交接文档：资产交付链与图位分层（本文件初版）
+本条      资产检查面板（第四刀）：wb_asset_inspect + wb_reveal_asset + 详情卡重排    ← hash 见 `git log -1`
 ```
 
 **按纪律还没推送**（一整刀一个分支连续施工，最后统一 PR）。要推就
@@ -74,7 +79,7 @@ client-assets/                 唯一随包交付根（生成物、不入库）
 9. `public/` 只剩 `public/bbs/**`（上游提取物、工作台不编辑、随包）。**不追求"所有 JSON 搬出 public"** ——
    判据是"每个目录职责明确"，不是扩展名。
 
-## 5. 下一刀（作者已锁定范围，独立一刀）：资产检查面板
+## 5. 第四刀（已落地）：资产检查面板
 
 **动机**：作者看着工作台资产库说「为什么右侧详细信息里没有文件的真实文件名、连路径也没有，
 我还希望能用系统的文件管理器查看位置」。目标是把详情卡从"登记表"变成**资产检查面板**。
@@ -109,9 +114,25 @@ client-assets/                 唯一随包交付根（生成物、不入库）
   `src-tauri/capabilities/workbench.json` 里开权限（客户端那条就是这么做的）。
 - `mkPreset` 也要能定位（指向它的产物文件），产品一致性上说得通。
 
-**建议的落点**：`wb_assets` 的 `AssetView` 加字段（`fileName` / `absPath` / `exists` /
-`bytes` / `sha256` / `width` / `height` / `format` / `productPath`），
-详情卡重排 + 一个 `wb_reveal_asset(id)` 命令 + 一条探针断言。
+**当初建议的落点**（`wb_assets` 的 `AssetView` 加字段 + 详情卡重排 + `wb_reveal_asset(id)`）：
+**字段表照做，但"加进列表"这一半没照做** —— 见下面「实际落点」。
+
+### 实际落点（本条提交，与建议的差别 + 理由）
+
+1. **重读数单开一条命令 `wb_asset_inspect(assetId)`（选中才问），不并进 `AssetView`**。
+   理由：`sha256` / `bytes` 要读真实字节（模型实测 3.2 MB），而列表每次筛选 / 搜索词一变
+   就重取（搜索框逐键触发）—— 并进去就是"每敲一个字读 4 MB"。它与 `wb_asset_usage`
+   同一形状。前端的 effect **只依赖选中**（不依赖 list），换选中才重新问。
+2. **`wb_reveal_asset(assetId)`**：前端只传 id，路径后端算（源根 + 台账 `path` / 产物路径）；
+   只读、只开窗口、不碰状态；文件不在如实拒绝并附期望路径；界面那一侧按钮同时灰掉、
+   原因写进 title（不给必被拒的按钮）。**插件只在 Rust 侧调，`capabilities` 不用改**。
+3. **`mkPreset` 指向产物**：产物名走 `build::preset_file_name`（与生成端同一个函数）、
+   `productPath` 相对仓库根、`absPath` 绝对；产物没生成 → 读数全空 + 期望路径 +
+   状态说「未生成 · 产物文件不在」。
+4. **尺寸读文件头**（png / webp / svg viewBox）；读不出如实 `None`。svg 的小数四舍五入
+   （品牌字标 485.05 × 175.15 → 485 × 175）。
+5. **演示桩（`?mock=1`）**：同形读数 + 「在访达中显示」**如实失败**（没有系统文件管理器）——
+   探针断言的就是这句实话。
 
 ## 6. 深色模式那天：logo 的两色怎么落
 
@@ -140,7 +161,7 @@ cargo clean -p mkp-support-ease
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --features workbench -- -D warnings
 cargo test                                    # 期望 631 通过
-cargo test --features workbench --lib          # 期望 473 / 146 / 77
+cargo test --features workbench --lib          # 期望 478 / 146 / 77（第四刀 +5 条：检查面板）
 
 # 前端
 npx tsc -b
@@ -162,7 +183,7 @@ npm run build:workbench                          # 生产产物，体积闸
 BUILD_WORKBENCH=1 NODE_ENV=development npx vite build --target esnext \
   --outDir node_modules/.cache/wb-probe/dist --emptyOutDir
 npx vite preview --outDir node_modules/.cache/wb-probe/dist --port 4174 --strictPort &
-node scripts/probes/asset-preview.mjs http://localhost:4174/workbench.html
+node scripts/probes/asset-preview.mjs http://localhost:4174/workbench.html   # 含检查面板 6 条断言
 node scripts/probes/workbench-build.mjs "http://localhost:4174/workbench.html?mock=1"
 ```
 
@@ -185,6 +206,8 @@ node scripts/probes/workbench-build.mjs "http://localhost:4174/workbench.html?mo
 | **判据条数变了要说清为什么** | 资产 28→29、image 档 4→5、随包身份 4→5、品牌图那条 —— 每处都写了理由。别为了让测试绿而改数 |
 | **`replace_in_file` 偶发"参数缺失"** | 工具抽风时改用 `python3` 脚本改文件（同一处改动，别绕） |
 | 注释里也有同样的字面量 | 反向测试改台账时 `replace` 打到了文件头注释里的示例行 —— 改真条目前先确认唯一性 |
+| **`[class*="cardBody"]` 不止一张** | 工作台外壳把别的页的卡片也留在 DOM 里（实测 4 张）——`querySelector` 拿的第一张是机型页的。探针要按「资产检查」这块认卡（第四刀先红后绿的那一脚） |
+| **重读数别挂进列表 DTO** | SHA-256 / 大小要读真实字节（模型 3.2 MB），而列表逐键重取 ⇒ 单开"选中才问"的读命令（见 §5 落点 1） |
 
 ## 9. 文件地图（改哪件事去看哪个文件）
 
@@ -198,23 +221,23 @@ node scripts/probes/workbench-build.mjs "http://localhost:4174/workbench.html?mo
 | `src/app/home/useCatalog.ts` | 首页那三个读：`getMachines` + `getPresetFiles` + `getRuntimeCatalog`（后者出 `assets` / `brands`） |
 | `src/api/contract.ts` | 客户端契约：`Machine.image/imageVariant`、`MachineVersion.image`、`CatalogAsset`、`RuntimeCatalogBrand` |
 | `src/workbench/views/MachinesPage.tsx` | 机型图 / 图标 / 版本图三个素材格与选择器 |
-| `src/workbench/views/AssetsPage.tsx` | **资产库详情卡 —— 下一刀要大改这里** |
+| `src/workbench/views/AssetsPage.tsx` | 资产库页：列表 / 筛选 / 详情卡（**检查面板 + 「在访达中显示」**都在这一张卡上） |
 | `src-tauri/src/presetdata/catalog.rs` | 机型与版本的字段、`MachineField` / `VersionField`、写回（值面 + 文档面两份，一起改） |
 | `src-tauri/src/presetdata/mod.rs` | `check_asset_refs`（机型 / 版本 / 品牌三处引用校验都在这） |
-| `src-tauri/src/workbench/app/assets.rs` | `wb_assets` 的 `AssetView` —— 下一刀加字段的地方 |
+| `src-tauri/src/workbench/app/assets.rs` | `wb_assets` 的 `AssetView` + **`wb_asset_inspect`**（检查面板读数 / 文件头尺寸读取器）+ **`wb_reveal_asset`**（在访达中显示） |
+| `src/workbench/dev/mockBackend.ts` | 工作台演示桩（`?mock=1`）的检查面板读数 + 「在访达中显示」如实失败 |
 | `src-tauri/src/workbench/app/machines.rs` | 工作台机型页 DTO（含 `VersionView.image`） |
-| `scripts/probes/asset-preview.mjs` | 资产库预览判据（逐行走，`naturalWidth > 0`，按源文件存在与否分档） |
+| `scripts/probes/asset-preview.mjs` | 资产库判据（逐行走 `naturalWidth > 0` + **检查面板 6 条**：文件名 / 绝对路径 / SHA / 尺寸 / 在访达中显示 / 产物路径） |
 | `scripts/probes/home-flow.mjs` | 首页判据；`--pick` 末尾有三条**分层大图**断言 |
-| `HANDOFF.md` 增量之八/九/十 | 这一串的正式登记（已提交） |
+| `HANDOFF.md` 增量之八～十一 | 这一串的正式登记（已提交） |
 
 ## 10. 还没做的（明确清单）
 
-1. **资产检查面板**（下一刀，范围见 §5）。
-2. **深色模式的两色 logo**（见 §6）。
-3. **`catalog` 24 份 vs 交付根 17 份**那条裂纹（`referenced_assets` 决定"发不发"，
+1. **深色模式的两色 logo**（见 §6）。
+2. **`catalog` 24 份 vs 交付根 17 份**那条裂纹（`referenced_assets` 决定"发不发"，
    `delivery` 只有一票否决；客户端预设页会列出 4 份下不到的 0.2mm BBS）—— 独立一刀。
-4. **BBS 页预设清单在真机没有端点**（只来自 serve 期 `/api/bbs/presets`）—— 独立一刀。
-5. `presets/dist/` 那一版 catalog 的 definition 要等下一次工作台「生成 / 发布」才带上新字段。
-6. 工作台浏览器桩没实现 `setVersionField` / `setMachineField`（既有缺口，演示里改不动字段）。
-7. 工作台**没有品牌图那一格**（第三刀只做了客户端链路 + 数据；工作台侧品牌图暂不可编辑）。
-8. 分支**未推送**、**未开 PR**。
+3. **BBS 页预设清单在真机没有端点**（只来自 serve 期 `/api/bbs/presets`）—— 独立一刀。
+4. `presets/dist/` 那一版 catalog 的 definition 要等下一次工作台「生成 / 发布」才带上新字段。
+5. 工作台浏览器桩没实现 `setVersionField` / `setMachineField`（既有缺口，演示里改不动字段）。
+6. 工作台**没有品牌图那一格**（第三刀只做了客户端链路 + 数据；工作台侧品牌图暂不可编辑）。
+7. 分支**未推送**、**未开 PR**。
