@@ -1,11 +1,11 @@
 {
   "catalogSchema": 1,
-  "revision": "74be27aba82b16ed",
+  "revision": "4a416d67670725d8",
   "brands": [
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
-      "logo": "bambu-logo.png"
+      "logo": "bambu-lab-logo"
     }
   ],
   "machines": [
@@ -20,6 +20,7 @@
         "A1F"
       ],
       "image": "a1-image",
+      "imageVariant": null,
       "icon": "a1-icon",
       "plateIds": [
         "single-latch-256"
@@ -68,21 +69,24 @@
           "name": "标准版",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置，适合大多数用户"
+          "description": "官方标准配置，适合大多数用户",
+          "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "recommendedBundle": "A1_FAST",
           "tag": "热门",
-          "description": "支持快拆配件的改装配置"
+          "description": "支持快拆配件的改装配置",
+          "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "image": null
         }
       ],
       "zones": []
@@ -101,6 +105,7 @@
         "A1MF"
       ],
       "image": "a1_mini-image",
+      "imageVariant": "a1_mini-variant-image",
       "icon": "a1_mini-icon",
       "plateIds": [
         "dual-latch-180"
@@ -149,21 +154,24 @@
           "name": "标准版",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置"
+          "description": "官方标准配置",
+          "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
-          "description": "支持快拆配件的改装配置"
+          "description": "支持快拆配件的改装配置",
+          "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "image": null
         }
       ],
       "zones": []
@@ -181,6 +189,7 @@
         "P1C"
       ],
       "image": "p1s-image",
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -229,7 +238,8 @@
           "name": "lite版",
           "recommendedBundle": "P1S_default",
           "tag": "推荐",
-          "description": "群里开源的最新lite"
+          "description": "群里开源的最新lite",
+          "image": null
         }
       ],
       "zones": [
@@ -293,6 +303,7 @@
         "P2"
       ],
       "image": null,
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -341,7 +352,8 @@
           "name": "标准版",
           "recommendedBundle": "P2S_default",
           "tag": "推荐",
-          "description": "未完成，没有打印机"
+          "description": "未完成，没有打印机",
+          "image": null
         }
       ],
       "zones": [
@@ -409,6 +421,7 @@
         "X1CARBON"
       ],
       "image": null,
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -455,9 +468,10 @@
         {
           "id": "LITE",
           "name": "lite版",
-          "recommendedBundle": "A1_MINI_STANDARD",
+          "recommendedBundle": "X1C_default",
           "tag": "推荐",
-          "description": "群里开源的最新lite"
+          "description": "群里开源的最新lite",
+          "image": null
         }
       ],
       "zones": [
@@ -543,6 +557,13 @@
       "machineId": "P1S",
       "name": "P1S 外观图",
       "path": "printers/p1s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "bambu-lab-logo",
+      "type": "image",
+      "name": "Bambu Lab 字标",
+      "path": "brands/bambu-lab-logo.svg",
       "delivery": "bundled"
     },
     {
@@ -3863,8 +3884,8 @@
         "scope": "universal",
         "section": "wiping",
         "layout": {
-          "order": 2.0,
-          "sectionId": "machine_specific"
+          "order": 1.0,
+          "sectionId": "calibration"
         },
         "min": null,
         "max": null,
@@ -3908,8 +3929,8 @@
         "scope": "universal",
         "section": "wiping",
         "layout": {
-          "order": 3.0,
-          "sectionId": "machine_specific"
+          "order": 2.0,
+          "sectionId": "calibration"
         },
         "min": null,
         "max": null,
@@ -4078,10 +4099,16 @@
             "order": 2.0
           },
           {
+            "id": "calibration",
+            "label": "校准",
+            "description": "校准模式选择（不分机型）",
+            "order": 3.0
+          },
+          {
             "id": "machine_specific",
             "label": "机型专属",
             "description": "机型专属参数",
-            "order": 3.0
+            "order": 4.0
           }
         ]
       },
@@ -4627,6 +4654,24 @@
             "visible": null
           },
           {
+            "id": "calibration",
+            "items": [
+              {
+                "id": "item_5_3_3",
+                "paramKey": "wiping.xy_calibration_mode"
+              },
+              {
+                "id": "item_5_3_4",
+                "paramKey": "wiping.z_calibration_mode"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
             "id": "machine_specific",
             "items": [
               {
@@ -4640,14 +4685,6 @@
               {
                 "id": "item_5_3_2",
                 "paramKey": "wiping.disable_timelapse"
-              },
-              {
-                "id": "item_5_3_3",
-                "paramKey": "wiping.xy_calibration_mode"
-              },
-              {
-                "id": "item_5_3_4",
-                "paramKey": "wiping.z_calibration_mode"
               }
             ],
             "component": null,
@@ -4805,7 +4842,7 @@
       "path": "mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "4c6ca36416790d9b8b738f2b1a2e031a9ada8edf17526716e26191c3c5b5c596",
+      "sha256": "d3b5aeed32772053b6bf96b225d05cb2036aaa4697e5e01d2d37b6d6e32a331a",
       "size": 4335
     },
     {
@@ -4814,7 +4851,7 @@
       "path": "mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "90de848f6db61ad23db2f90d956de12d527e31f715fa390b271e1bb97e956d3d",
+      "sha256": "ff5b322ce4e4743a694a075362b32f47edfa58ff75d03757780dc950eed40a18",
       "size": 4333
     },
     {
@@ -4823,7 +4860,7 @@
       "path": "mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "23702b82c0398aa0709eecd68d8281284a480c165a358015126204a0ce04edfb",
+      "sha256": "73b7a9b8fbc86b153bb70cfc554470deb1895f8651ecde3cdcacdf3dbc4474a2",
       "size": 4336
     },
     {
@@ -4832,7 +4869,7 @@
       "path": "mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "59df831b20724c0566dc786d967326a6ea507e2fa2be17b576dae5881e663f92",
+      "sha256": "bdd13dc5959982ae85705baae9b57c3284375c65a23210d75b2f1e629bf17cf1",
       "size": 4342
     },
     {
@@ -4841,7 +4878,7 @@
       "path": "mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "f6a60444bec9a26c21865d9176c5e7b50666df8d17909e7de2c8b5fa2f121b35",
+      "sha256": "2914fae9304be75d8113ef832ba0633e8fa6781c1b4e12f370eac35a1e638eb8",
       "size": 4336
     },
     {
@@ -4850,7 +4887,7 @@
       "path": "mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "e3b0d65c149e97feb89ed04987297446279c128558f1d237aa907b693ce13dde",
+      "sha256": "8cf47b7a098004b72db035f83f849625bb71a6f6166c4c5606fb7423741dd0d3",
       "size": 4340
     },
     {
@@ -4859,7 +4896,7 @@
       "path": "mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "2391ca9037abc58787e77681b5b1d60a94d07ed78a6fc341d444126aee768f0e",
+      "sha256": "81f56489df37e3e837fcd75a6e5c17a03fde0f572e1d5e72e02279a18c7dc7db",
       "size": 4398
     },
     {
@@ -4868,7 +4905,7 @@
       "path": "mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "9214958fb41f7826aa68d05859d035ed788bbfacf2b145283e1e6cc9c3e042b4",
+      "sha256": "38df311bafb4f65ad75e0e74b28cfb3418a208fe7f121964a95f13f85b379935",
       "size": 4402
     },
     {
@@ -4877,7 +4914,7 @@
       "path": "mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "a5deec743bc4c694e1c9d728a0cd9feaf62136cfb87d85e07d14f3bd3ca2071f",
+      "sha256": "896e828baf2213fe719c2ed685dcef973aac500296e267bd1148290f850b8539",
       "size": 4398
     },
     {

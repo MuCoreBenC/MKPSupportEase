@@ -13,6 +13,29 @@
 let openCount = 0
 let bypassCount = 0
 
+/**
+ * 开着的模态框按**打开顺序**记号 —— 嵌套框（编辑定义里再开「选择适用机型」）
+ * 按 Esc 只该关最上面那一层，不然一次 Esc 把两层全关了，底下的草稿跟着丢。
+ */
+let seq = 0
+const openTokens: number[] = []
+
+export const modalStack = {
+  push(): number {
+    const token = ++seq
+    openTokens.push(token)
+    return token
+  },
+  pop(token: number): void {
+    const i = openTokens.indexOf(token)
+    if (i >= 0) openTokens.splice(i, 1)
+  },
+  /** true = 这个记号是最上面那层（只有它接 Esc） */
+  isTop(token: number): boolean {
+    return openTokens[openTokens.length - 1] === token
+  },
+}
+
 export const modalShortcutGate = {
   enter(shellShortcuts: boolean): void {
     openCount += 1

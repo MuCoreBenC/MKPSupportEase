@@ -127,10 +127,16 @@ description = 'Z 轴抬升高度参数'
 order = 2.0
 
 [[tabs.sections]]
+id = 'calibration'
+label = '校准'
+description = '校准模式选择（不分机型）'
+order = 3.0
+
+[[tabs.sections]]
 id = 'machine_specific'
 label = '机型专属'
 description = '机型专属参数'
-order = 3.0
+order = 4.0
 
 [[tabs]]
 id = 'internal'
@@ -2428,8 +2434,8 @@ value = 'new'
 label = '新型'
 
 [params.layout]
-sectionId = 'machine_specific'
-order = 2.0
+sectionId = 'calibration'
+order = 1.0
 
 [[params]]
 key = 'wiping.z_calibration_mode'
@@ -2456,5 +2462,5 @@ value = 'new'
 label = '新型'
 
 [params.layout]
-sectionId = 'machine_specific'
-order = 3.0
+sectionId = 'calibration'
+order = 2.0

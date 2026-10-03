@@ -166,9 +166,10 @@ pub fn inspect(book: &Book<'_>) -> Report {
 }
 
 /// **预检全量**（b05 Task 11.8）：[`inspect`] 的全部 + 清单 ↔ 配方对齐
-/// （b05 Task 11.4 / 11.5 / 11.6）+ 交付目录的「清单 ↔ 文件」自查。
+/// （b05 Task 11.4 / 11.5 / 11.6）+ 交付目录的「清单 ↔ 文件」自查
+/// + 内嵌目录（编译进安装包那份）的新旧自查。
 ///
-/// 配方文本与交付自查的结果**都由调用方给、都收 `Result`** —— 这是刻意的：
+/// 配方文本、交付自查与内嵌目录的结果**都由调用方给、都收 `Result`** —— 这是刻意的：
 /// 它们是磁盘上的事实，domain 的检查保持纯函数；而且坏了（配方读不回来 /
 /// 目录对不上）该成为预检报告里的**一条**，而不是让整个预检命令失败 ——
 /// 校验层停摆等于把「数据坏了」变成「工具坏了」，后者更糟。
@@ -176,6 +177,7 @@ pub fn preflight(
     book: &Book<'_>,
     recipe: Result<&Recipe, &str>,
     delivery: Result<(), String>,
+    embedded: Result<(), String>,
 ) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
     collect(book, &mut issues);
@@ -205,6 +207,23 @@ pub fn preflight(
                 "{detail}\n客户端按目录登记的字节做下载校验，对不上就是下载必挂\
                  （「响应比目录登记的大」）。在工作台生成一次（清单会跟着重算），\
                  或重跑预设数据发布，让记录与文件回到同一代。"
+            ),
+            at: Where::view(View::Build),
+        }),
+    }
+    match embedded {
+        Ok(()) => {}
+        Err(detail) => issues.push(Issue {
+            id: "embedded.catalog_stale".to_owned(),
+            // 待办而不是阻断：它挡不住工作台生成任何产物 —— 伤的是**客户端首屏**
+            // （安装包里编译死的那份 catalog）。重新生成是修复动作，别把路堵死。
+            severity: Severity::Todo,
+            title: "内嵌目录（客户端首屏那份）落后于仓库数据".to_owned(),
+            detail: format!(
+                "{detail}\n安装包里编译死的 catalog.generated.json 是客户端首启释放的\
+                 说明书 —— 改了 presets/ 或交付产物之后没重新生成，装出来的客户端\
+                 首屏就是旧数据。跑一遍 `cargo run --bin gen-catalog` 重新生成，\
+                 重新构建安装包，这条就消。"
             ),
             at: Where::view(View::Build),
         }),
@@ -758,7 +777,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let d = Draft::default();
         let book = Book::new(&f.presets, &c, &d);
 
-        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()));
+        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()), Ok(()));
         assert!(
             r.issues
                 .iter()
@@ -915,6 +934,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
             &book,
             Err("配方读不回来（测试）"),
             Err("1 份与目录登记不一致：mkp/presets/A1-standard.toml（目录记 4299 字节，实际 4335 字节）".to_owned()),
+            Ok(()),
         );
         let todo = r
             .issues
@@ -935,8 +955,45 @@ uuid = '33333333-3333-3333-3333-333333333333'
         assert!(r.issues.iter().any(|i| i.id == "recipe.unreadable"));
 
         // 自查过了就没有这条
-        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()));
+        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()), Ok(()));
         assert!(r.issues.iter().all(|i| i.id != "dist.catalog_mismatch"));
+    }
+
+    /// 内嵌目录（安装包里编译死的那份 catalog）落后于仓库数据 = 一条待办。
+    /// 它挡不住工作台的任何产物，伤的是客户端首屏 —— 重新生成（gen-catalog）
+    /// 是修复动作，所以跟交付清单那条同一口径：待办，不是阻断。
+    #[test]
+    fn a_stale_embedded_catalog_is_a_todo() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        let r = preflight(
+            &book,
+            Err("配方读不回来（测试）"),
+            Ok(()),
+            Err("安装包里编译的那份，与按当前 presets/ 重新构建出来的不一致".to_owned()),
+        );
+        let todo = r
+            .issues
+            .iter()
+            .find(|i| i.id == "embedded.catalog_stale")
+            .expect("内嵌目录过期，这条该在");
+        assert_eq!(
+            todo.severity,
+            Severity::Todo,
+            "不挡生成 —— 修复动作是重新生成，别把路堵死"
+        );
+        assert!(
+            todo.detail.contains("gen-catalog"),
+            "要把修复动作写清楚：{}",
+            todo.detail
+        );
+
+        // 一致就没有这条
+        let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()), Ok(()));
+        assert!(r.issues.iter().all(|i| i.id != "embedded.catalog_stale"));
     }
 
     /// 有旧版待重新生成时，检查卡要给一条提示（作者 2026-10-02：

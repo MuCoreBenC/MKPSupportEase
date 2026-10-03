@@ -61,6 +61,7 @@ import {
   type ColRef,
   type Desk,
   type DeskGroup,
+  type MachineList,
   type Matrix,
   type MetaApplied,
   type ParamMetaEdit,
@@ -508,6 +509,27 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   const selParam = sel !== null ? (paramOf(sel) ?? null) : null
   /** 「编辑定义」正在改的那条（null = 关着） */
   const defParam = defEditKey !== null ? paramOf(defEditKey) : null
+  /*
+   * 「适用机型」选择器的候选（品牌 + 机型清单）。定义框开着才取一次 ——
+   * 挂了会重取的钩子就多一次 IPC；这里一次够用（品牌/机型清单不跟草稿走）。
+   */
+  const [machineList, setMachineList] = useState<MachineList | null>(null)
+  useEffect(() => {
+    if (defEditKey === null) {
+      setMachineList(null)
+      return
+    }
+    let dead = false
+    void wb
+      .machines()
+      .then((m) => {
+        if (!dead) setMachineList(m)
+      })
+      .catch(() => undefined)
+    return () => {
+      dead = true
+    }
+  }, [defEditKey])
   const selRow =
     sel !== null ? (mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)) : null
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
@@ -1280,7 +1302,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           paramKey={defEditKey}
           param={defParam}
           params={registry?.params ?? []}
-          machines={book.machines.map((m) => ({ id: m.id, display: m.display }))}
+          machineList={machineList}
           onClose={() => setDefEditKey(null)}
           onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
         />

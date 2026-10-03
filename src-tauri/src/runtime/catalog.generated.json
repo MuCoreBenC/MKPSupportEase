@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "86d7adea2c3c8c3a",
+  "revision": "e4d449e2f6283d11",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -3884,8 +3884,8 @@
         "scope": "universal",
         "section": "wiping",
         "layout": {
-          "order": 2.0,
-          "sectionId": "machine_specific"
+          "order": 1.0,
+          "sectionId": "calibration"
         },
         "min": null,
         "max": null,
@@ -3929,8 +3929,8 @@
         "scope": "universal",
         "section": "wiping",
         "layout": {
-          "order": 3.0,
-          "sectionId": "machine_specific"
+          "order": 2.0,
+          "sectionId": "calibration"
         },
         "min": null,
         "max": null,
@@ -4099,10 +4099,16 @@
             "order": 2.0
           },
           {
+            "id": "calibration",
+            "label": "校准",
+            "description": "校准模式选择（不分机型）",
+            "order": 3.0
+          },
+          {
             "id": "machine_specific",
             "label": "机型专属",
             "description": "机型专属参数",
-            "order": 3.0
+            "order": 4.0
           }
         ]
       },
@@ -4648,6 +4654,24 @@
             "visible": null
           },
           {
+            "id": "calibration",
+            "items": [
+              {
+                "id": "item_5_3_3",
+                "paramKey": "wiping.xy_calibration_mode"
+              },
+              {
+                "id": "item_5_3_4",
+                "paramKey": "wiping.z_calibration_mode"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
             "id": "machine_specific",
             "items": [
               {
@@ -4661,14 +4685,6 @@
               {
                 "id": "item_5_3_2",
                 "paramKey": "wiping.disable_timelapse"
-              },
-              {
-                "id": "item_5_3_3",
-                "paramKey": "wiping.xy_calibration_mode"
-              },
-              {
-                "id": "item_5_3_4",
-                "paramKey": "wiping.z_calibration_mode"
               }
             ],
             "component": null,

@@ -96,9 +96,32 @@ pub fn wb_preflight() -> Result<Report, AppError> {
             // 交付目录的「清单 ↔ 文件」自查在 app 层做（要摸盘），结果作为一条交给预检
             let delivery =
                 super::dist::audit_catalog(&crate::workbench::paths::dist_root_path(), &book);
-            Ok(issues::preflight(&book, recipe_ref, delivery))
+            // 内嵌目录（编译进安装包的那份）跟仓库数据对不对得上也是盘上的事实 ——
+            // 同一条路交给预检：坏了自己成为报告里的一条，不让整个预检失败
+            let embedded = audit_embedded_catalog();
+            Ok(issues::preflight(&book, recipe_ref, delivery, embedded))
         })
     })
+}
+
+/// 内嵌目录自查：`catalog.generated.json`（编译进二进制、客户端首启释放的那份）
+/// 与当前仓库重新构建出来的那份是否**逐字节一致**。
+///
+/// 之前只有一条 Rust 单测（`runtime::tests::embedded_matches_rebuild`）盯着 ——
+/// 红在 `cargo test` 里，检查页上没人提。现在预检把这件事摆上桌面：
+/// 改了 presets/（或交付产物）没跑 `cargo run --bin gen-catalog`，装出来的
+/// 客户端首屏拿的还是旧数据 —— 这是发布前该知道的事。
+fn audit_embedded_catalog() -> Result<(), String> {
+    let repo = crate::workbench::paths::repo_root();
+    let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)
+        .map_err(|e| format!("重新构建内嵌目录失败：{}", e.message))?;
+    let json = catalog
+        .to_pretty_json()
+        .map_err(|e| format!("内嵌目录序列化失败：{}", e.message))?;
+    if json.as_bytes() == crate::runtime::EMBEDDED_CATALOG {
+        return Ok(());
+    }
+    Err("安装包里编译的那份，与按当前 presets/ 重新构建出来的不一致".to_owned())
 }
 
 /* ---------- 渲染 ---------- */

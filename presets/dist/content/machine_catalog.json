@@ -3,7 +3,7 @@
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
-      "logo": "bambu-logo.png"
+      "logo": "bambu-lab-logo"
     }
   ],
   "machines": [
@@ -147,7 +147,7 @@
           "id": "LITE",
           "name": "lite版",
           "tag": "推荐",
-          "recommendedBundle": "A1_MINI_STANDARD",
+          "recommendedBundle": "X1C_default",
           "mkpPresetAssetId": "X1C-lite.toml"
         }
       ]

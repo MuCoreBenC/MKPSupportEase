@@ -32,7 +32,7 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { modalShortcutGate } from './shortcutGate'
+import { modalShortcutGate, modalStack } from './shortcutGate'
 import s from './Modal.module.css'
 
 export interface ModalProps {
@@ -93,15 +93,23 @@ export default function Modal({
   const boxRef = useRef<HTMLDivElement>(null)
   /* 关掉之后焦点要还回去，不然键盘用户会掉到文档开头 */
   const returnTo = useRef<HTMLElement | null>(null)
+  /** 开框时领的栈序号 —— Esc 只归最上面那层（嵌套框见 modalStack） */
+  const stackToken = useRef<number | null>(null)
 
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
-  /* 快捷键闸：开一票、关一票 —— 外壳的 Cmd+Z / Cmd+S 在 `blocking()` 时装没听见 */
+  /* 快捷键闸 + 栈序号：开一票、关一票 —— 外壳的 Cmd+Z / Cmd+S 在 blocking() 时装没听见 */
   useEffect(() => {
     if (!open) return
     modalShortcutGate.enter(shellShortcuts)
-    return () => modalShortcutGate.exit(shellShortcuts)
+    const token = modalStack.push()
+    stackToken.current = token
+    return () => {
+      modalShortcutGate.exit(shellShortcuts)
+      modalStack.pop(token)
+      stackToken.current = null
+    }
   }, [open, shellShortcuts])
 
   useEffect(() => {
@@ -121,7 +129,11 @@ export default function Modal({
   useEffect(() => {
     if (!open) return
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current()
+      if (e.key !== 'Escape') return
+      /* 嵌套框只关最上面那层 —— 底下的框连着人家正在改的东西 */
+      const token = stackToken.current
+      if (token !== null && !modalStack.isTop(token)) return
+      closeRef.current()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

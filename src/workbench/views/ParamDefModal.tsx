@@ -35,12 +35,14 @@
  * 校验的权威在后端（`registry::set_param_meta`）；这里先拦一道只是少挨一次错。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { isAppError } from '../api'
-import type { ParamMetaEdit, ParamView, ShowOp, UiComponent, ValueType } from '../api'
+import type { MachineList, ParamMetaEdit, ParamView, ShowOp, UiComponent, ValueType } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
+import { usePaintSelectC14 } from '../c14/usePaintSelect'
+import c from '../c14.module.css'
 import s from './ParamDefModal.module.css'
 
 interface Props {
@@ -50,8 +52,11 @@ interface Props {
   param: ParamView | null
   /** 全部参数 —— 「属于」「前置条件」的候选从这里来 */
   params: ParamView[]
-  /** 机型清单 —— 「适用机型」勾选框的候选（来自整本） */
-  machines: { id: string; display: string }[]
+  /**
+   * 机型与品牌清单（「适用机型」选择器的候选，打开定义框时现取）。
+   * `null` = 还没读到 —— 选择器里如实说一句，不给假清单。
+   */
+  machineList: MachineList | null
   onClose: () => void
   /**
    * 确认保存：整包载荷交回页面 —— 那边负责调 `wb.setParamMeta` 落盘、把
@@ -248,9 +253,15 @@ function errorOf(d: Draft): string | null {
 const COALESCE_MS = 400
 const HISTORY_MAX = 100
 
-export default function ParamDefModal({ paramKey, param, params, machines, onClose, onCommit }: Props) {
+/** 空选集的常量（钩子要一份稳定的输入，草稿还没起时用它） */
+const NO_MACHINES = new Set<string>()
+
+export default function ParamDefModal({ paramKey, param, params, machineList, onClose, onCommit }: Props) {
   const [form, setForm] = useState<FormState | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 「选择适用机型」的嵌套框（参照套餐选版：模态框里的模态框，树状多选） */
+  const [pickOpen, setPickOpen] = useState(false)
+  const pickTreeRef = useRef<HTMLDivElement>(null)
 
   /*
    * 每次打开（或换了参数）都从「当前那份定义」重新起草 —— 上次取消的不该还留着。
@@ -288,6 +299,29 @@ export default function ParamDefModal({ paramKey, param, params, machines, onClo
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [paramKey])
+
+  /*
+   * 「适用机型」的按住刷选（usePaintSelectC14 —— 参数台左树、套餐选版同一副引擎：
+   * 按下某行拖过去，经过哪行改哪行；模式在按下那一刻定死）。
+   * 钩子只能装在早退之前，而 edit 在草稿就绪之后才有意义 —— 中间隔一层 ref。
+   */
+  const applyFilterRef = useRef<(next: Set<string>) => void>(() => {})
+  const allMachineIds = useMemo(
+    () => (machineList?.machines ?? []).map((m) => m.id),
+    [machineList],
+  )
+  usePaintSelectC14({
+    ref: pickTreeRef,
+    ids: allMachineIds,
+    selected: form === null ? NO_MACHINES : new Set(form.draft.machineFilter),
+    onChange: (next) => applyFilterRef.current(next),
+    preview: (el, on) => {
+      el.classList.toggle(String(c.pVrowOn), on)
+      el.setAttribute('aria-checked', String(on))
+      el.firstElementChild?.setAttribute('data-on', String(on))
+    },
+    enabled: pickOpen,
+  })
 
   if (paramKey === null || param === null || form === null) return null
 
@@ -393,6 +427,70 @@ export default function ParamDefModal({ paramKey, param, params, machines, onClo
     }
   }
   saveRef.current = () => void save()
+
+  /* 刷选/勾选的提交口 —— 钩子经由 ref 调到这里（草稿就绪后才有意义） */
+  const applyMachineFilter = (next: Set<string>) =>
+    edit('machineFilter', (d) => {
+      d.machineFilter = [...next]
+    })
+  applyFilterRef.current = applyMachineFilter
+
+  /* —— 适用机型选择器的素材与摘要 —— */
+  const machineById = new Map((machineList?.machines ?? []).map((m) => [m.id, m]))
+  const totalMachines = machineList?.machines.length ?? 0
+  const pickedNames = draft.machineFilter.map((id) => machineById.get(id)?.display ?? id)
+  const machineSummary =
+    draft.machineFilter.length === 0
+      ? '全部机型（不限）'
+      : totalMachines > 0 && draft.machineFilter.length === totalMachines
+        ? `全部机型（${totalMachines} 台全勾）`
+        : pickedNames.length <= 3
+          ? `${pickedNames.join('、')} —— ${pickedNames.length} 台`
+          : `${pickedNames.slice(0, 3).join('、')} 等 —— ${pickedNames.length} 台`
+
+  /** 选择器的一行（与参数台左树 / 套餐选版同一副长相：勾 + 名字 + id） */
+  const machineRow = (m: { id: string; display: string }) => {
+    const on = draft.machineFilter.includes(m.id)
+    return (
+      <button
+        key={m.id}
+        type="button"
+        className={`${c.pVrow} ${on ? c.pVrowOn : ''}`}
+        role="checkbox"
+        aria-checked={on}
+        /* 刷选引擎按它认行（usePaintSelectC14 的 attr） */
+        data-sel={m.id}
+        onClick={() =>
+          edit('machineFilter', (d) => {
+            d.machineFilter = on
+              ? d.machineFilter.filter((x) => x !== m.id)
+              : [...d.machineFilter, m.id]
+          })
+        }
+      >
+        <span className={c.pVmark} data-on={on} aria-hidden>
+          <svg
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m2.6 6.3 2.4 2.4L9.5 3.9" />
+          </svg>
+        </span>
+        <span className={c.pVtext}>
+          <span className={c.pVname}>{m.display || m.id}</span>
+          <span className={c.pVid}>{m.id}</span>
+        </span>
+      </button>
+    )
+  }
+
+  /* 品牌分组（多品牌时一组的树；没有品牌挂在谁下面的，兜进「未归品牌」别弄丢） */
+  const brandedIds = new Set(machineList?.brands.flatMap((b) => b.machines) ?? [])
+  const orphanMachines = (machineList?.machines ?? []).filter((m) => !brandedIds.has(m.id))
 
   /* 控件候选跟着值类型与可选项走 —— 「改成了下拉却不下拉」就是从这里堵死的 */
   const controlOptions = controlCandidates(draft.valueType, draft.choices.length)
@@ -827,31 +925,26 @@ export default function ParamDefModal({ paramKey, param, params, machines, onClo
         <div className={s.groupHead}>
           适用机型<em className={s.fieldKey}>machineFilter</em>
         </div>
-        <div className={s.machines}>
-          {machines.map((m) => {
-            const on = draft.machineFilter.includes(m.id)
-            return (
-              <label key={m.id} className={s.machineChip}>
-                <input
-                  type="checkbox"
-                  className={s.check}
-                  checked={on}
-                  aria-label={`适用于 ${m.display}`}
-                  onChange={() =>
-                    edit('machineFilter', (d) => {
-                      d.machineFilter = on
-                        ? d.machineFilter.filter((x) => x !== m.id)
-                        : [...d.machineFilter, m.id]
-                    })
-                  }
-                />
-                {m.display}
-                <span className={s.machineId}>{m.id}</span>
-              </label>
-            )
-          })}
-        </div>
-        <p className={s.note}>一个都不勾 = 全部机型。摘掉某台机型的话，它身上已写的值会变成孤儿（检查页有提示）。</p>
+        {/*
+          机型多、品牌多的时候一横排勾选框摆不下（作者的实测意见）——
+          收进一枚按钮，点开才是模态框里的模态框：按品牌分组的树状多选，
+          与套餐「选择版本」同一副长相，按住还能刷选。
+        */}
+        <button
+          type="button"
+          className={s.pickerBtn}
+          aria-haspopup="dialog"
+          title="点开挑机型 —— 可多选，按住拖过去整批勾上/摘掉"
+          onClick={() => setPickOpen(true)}
+        >
+          <span className={s.pickerText}>{machineSummary}</span>
+          <span className={s.pickerCaret} aria-hidden>
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </span>
+        </button>
+        <p className={s.note}>一个都不选 = 全部机型。摘掉某台机型的话，它身上已写的值会变成孤儿（检查页有提示）。</p>
       </div>
 
       <div className={s.group}>
@@ -877,6 +970,53 @@ export default function ParamDefModal({ paramKey, param, params, machines, onClo
         覆盖值不会跟着迁移；非字符串参数身上挂的可选项是预设档（bool 的开/关叫法、数字的
         快捷档），这里不给编辑、保存时原样保留。
       </p>
+
+      {/*
+        「选择适用机型」—— 模态框里的模态框（套餐选版同款）：按品牌分组的树，
+        点一下勾/摘，按住拖过去整批刷（usePaintSelectC14）。Esc 只关这一层，
+        外面那框的草稿不动（modalStack 的栈序）。
+      */}
+      <ModalC14
+        open={pickOpen}
+        title={`选择适用机型 · ${param.label}`}
+        subtitle="点一下勾/摘；按住拖过去整批刷。一个都不选 = 全部机型"
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setPickOpen(false)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setPickOpen(false)}>
+              完成（{draft.machineFilter.length} 台）
+            </button>
+          </>
+        }
+      >
+        {machineList === null ? (
+          <p className={s.note}>机型清单还没读到 —— 关掉这个框再开一次就有了。</p>
+        ) : (
+          <div className={s.pickTree} ref={pickTreeRef}>
+            {machineList.brands.map((b) => (
+              <div key={b.id} className={c.pMg}>
+                <div className={c.pMgName}>
+                  {b.name || b.id}
+                  <em>{b.machines.length}</em>
+                </div>
+                {b.machines.map((mid) => machineRow(machineById.get(mid) ?? { id: mid, display: mid }))}
+              </div>
+            ))}
+            {orphanMachines.length > 0 && (
+              <div className={c.pMg}>
+                <div className={c.pMgName}>
+                  未归品牌
+                  <em>{orphanMachines.length}</em>
+                </div>
+                {orphanMachines.map((m) => machineRow(m))}
+              </div>
+            )}
+          </div>
+        )}
+      </ModalC14>
     </ModalC14>
   )
 }

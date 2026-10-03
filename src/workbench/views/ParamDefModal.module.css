@@ -173,26 +173,44 @@
   margin-top: 8px;
 }
 
-/* 适用机型：一排勾选。一个都不勾 = 全部机型（与 machineFilter 空表同一口径） */
-.machines {
+/* 适用机型选择器的触发钮：长得像下拉（点开才是模态框里的模态框） */
+.pickerBtn {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-}
-
-.machineChip {
-  display: flex;
-  gap: 5px;
+  flex: 1;
+  gap: 8px;
   align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 5px 10px;
   font-size: var(--fs-body);
   color: var(--text-1);
+  text-align: left;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.pickerBtn:hover {
+  border-color: var(--line-strong);
+}
+
+.pickerText {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.machineId {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-label);
+.pickerCaret {
+  flex: none;
   color: var(--text-3);
+}
+
+/* 选择器的树：与参数台左树同一副长相（pV* 类住在 c14.module.css），这里只管容器 */
+.pickTree {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 280px;
 }
 
 .note {
