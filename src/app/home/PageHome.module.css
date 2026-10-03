@@ -163,7 +163,7 @@
 /* 校准列：一页只放一块板，比信息列宽；整列靠左，与眉标题共用同一条左基线。
    --plate-scale 是两块板共用的 px/mm（以 Z 板撑满列为基准），两块板同比才不会一粗一细 */
 .calib {
-  /* 列 = 内容区宽度：于是预设下拉、板块框、底部按钮组三条右缘落在同一条线上 */
+  /* 列 = 内容区宽度：板块框与底部按钮组两条右缘落在同一条线上（预设行已在卡片右上角） */
   --col-w: 100%;
 
   /*
@@ -173,9 +173,9 @@
    *
    * 板子宽度 = 「这一页除板子以外固定占掉的那 270px 之外，还剩多少高度」× 板子的宽高比。
    * Z 板是 4:1，所以剩 1px 高就能多 4px 宽；宽度这一头由 CalibPlate 自己的
-   * width: min(100%, …) 截住 —— 于是高窗里板子直接吃满框内宽、右缘与下拉 / 按钮对齐，
+   * width: min(100%, …) 截住 —— 于是高窗里板子直接吃满框内宽、右缘与按钮对齐，
    * 矮窗里由高度说了算、连续变小，两段都没有断点。
-   * 扣除量从 300 降到 270：弹性垫片删掉之后列本身矮了一截，量出来还有 30px 余量。
+   * 扣除量这一轮从 300 降到 270：弹性垫片删掉之后列本身矮了一截，量出来还有 30px 余量。
    * 为什么不是 250 —— 细扫到 1400×540 那一档会溢出 16px：宽窗里板子是被框内宽截住的
    * （板宽 976 时高度就有 244），高度这一头的余量比窄窗小得多，扣除量得按最紧的那一档定。
    */
@@ -198,14 +198,16 @@
   margin-inline: 0;
 
   /*
-   * 竖向：贴顶，下面剩多少空多少。
+   * 竖向：列在"眉标题之下、底部按钮之上"这段里**居中**（作者 10-03：「中间的往下
+   * 移一点，居中一点」—— 原来上贴顶、下面空一大截，读数和板子像浮在卡顶）。
    *
    * 原来是两条弹性垫片（上 1 份 / 下 3 份）想让大窗留一点呼吸，但垫片自己是 flex 子项：
    * 剩余空间归零时它高度是 0、gap 却照收 —— 小窗里眉标题与预设行之间凭空多出一个 gap
-   * （实测 10-16px，就是那段"突然出现的空白"）。垫片删掉，改成只靠这一条 margin：
-   * 上贴顶（0）、下吃掉全部剩余（auto），于是任何窗高下上空白都只剩卡片的上内边距。
+   * （实测 10-16px，就是那段"突然出现的空白"）。垫片删掉后改成 margin：现在上下都是
+   * auto，有剩余就两半均分（往下挪半截），没剩余就归零 —— 眉标题照旧不被压，
+   * 溢出走 .info 自己的 overflow 滚动。
    */
-  margin-top: 0;
+  margin-top: auto;
   margin-bottom: auto;
   align-items: stretch;
   text-align: left;
@@ -269,15 +271,15 @@
    * 上限 760px 是唯一的"别再长了"（900 高那档函数值 553，还远没到）。
    *
    * 扣除量拆成变量，两种状态各一档（见下面 data-hint 那条）：
-   *   · 常驻 142px = 122（预设行 + 框头 + 内边距 + gap）+ 20（底部胶囊那一圈的呼吸）
-   *     那 20px 是补的：实测「列底到胶囊顶」在 684×420 是 −11.7、860×640 是 −4 ——
-   *     取到预设的正常路径上，内容本来就已经压在胶囊上了
-   *   · 没取到预设时再让 47px（提示行实测 39.1 + 框内 gap 8）
+   *   · 常驻 86px：预设行（挪去卡片右上角）与框头（缩放手柄退场）都撤了之后，
+   *     实测剩余的「框头零行 + 内边距 + gap」—— Mini/Wide/Compact 三档富余 99-111px，
+   *     收 60 留 40 上下做跨机呼吸（0.79 那条斜线原样，只把截距往下移）
+   *   · 没取到预设时再让 43px（提示行实测 39.1 + 框内 gap 8 收整）
    * `--xy-fixed-vh` 是 vh 兜底那一支的同一个量（真实视口比容器高一截，所以数值大 38px）。
    */
   --xy-floor: 120px;
-  --xy-fixed: 146px;
-  --xy-fixed-vh: 184px;
+  --xy-fixed: 86px;
+  --xy-fixed-vh: 124px;
 
   --xy-plate: clamp(var(--xy-floor), calc(100vh * 0.79 - var(--xy-fixed-vh)), 760px);
   --plate-scale: calc(var(--xy-plate) / 53.545);
@@ -291,10 +293,10 @@
    *
    * XY 板是方的，跟 Z 板那条 4:1 的横条不同 —— 上下排时它右边永远空着一大片，
    * 而三个数正好能站进那一片里。于是这一页改成两列：左列是板块框，右列是三个数竖排。
-   * 预设行横跨两列，仍然是整页最上面那一条。
+   * （预设行已挪去卡片右上角，两行轨道里只有一行有内容。）
    *
    * 只给 data-plate='xy'：第三页那条横板本来就吃满列宽，右边没有空地可用。
-   * 行列位置全部写死、不靠 DOM 顺序 —— DOM 仍是「预设 / 读数 / 板」，
+   * 行列位置全部写死、不靠 DOM 顺序 —— DOM 仍是「读数 / 板」，
    * 于是缝里那一档（下面的 display: flex 回退）不用换一套顺序，AxisBar 的 FLIP 也不受影响。
    */
   display: grid;
@@ -313,13 +315,11 @@
    * 下限 `min(100%, 340px)`：扁窗里框头「XY 偏移校准板 + 打开模型」一行不折的量，
    * 带 min(100%, …) 是为了列本身不足 340 时按列宽让、不横向溢出。
    *
-   * 两头各一条 `minmax(0, 1fr)` 空轨道（xy-row-center）。
+   * 两头各一条 `minmax(0, 1fr)` 空轨道，是这一轮的改动（xy-row-center）。
    * 原来只有右边一条 `1fr`，剩余宽全部堆在右侧 —— 实测左富余恒为 0、右富余 20-391px，
    * 屏幕上就是"板和读数挤在左边、右边空一大片"。两条对称空轨道把同一段剩余宽对半分：
    * 富余大就居中，富余归零时两条一起收到 0、整组自动回到 --chrome-x 那条左基线，
    * 中间没有任何阈值（连续，符合"绝不按断点跳"这条）。
-   * 预设行仍是 `grid-column: 1 / -1`，`-1` 现在指第五条轨道的右缘 —— 两种状态下
-   * 都等于内容右缘，所以下拉与底部胶囊的右缘照旧同线（实测差 0）。
    *
    * 左列上限还带一条 `100% - 190px`：先把读数块要的位置留出来再给板子。190 = 读数块在最大
    * 字号档的实测需求 146px + 间隙 40px 再取整。窄窗里下限 340 仍然优先（minmax 的规矩），
@@ -368,24 +368,18 @@
  */
 .calib[data-plate='xy'][data-hint='true'] {
   --xy-floor: 100px;
-  --xy-fixed: 189px;
-  --xy-fixed-vh: 227px;
-}
-
-/* 预设行横跨全部轨道：`-1` 指最后一条空轨道的右缘，富余为 0 或对半分时都等于内容右缘，
-   所以下拉右缘与底部胶囊右缘照旧同线（实测差 0） */
-.calib[data-plate='xy'] > .calibPreset {
-  grid-column: 1 / -1;
-  grid-row: 1;
+  --xy-fixed: 129px;
+  --xy-fixed-vh: 167px;
 }
 
 /*
  * 左列的框贴着板子：宽度由上面那条轨道定，这里只指位置。
  * 第 1 条轨道是左侧空轨道，所以板块框从第 2 条开始。
+ * （预设行已挪去卡片右上角：step / axes 都上移到第 1 行，不再给空行付一段 row-gap。）
  */
 .calib[data-plate='xy'] > .step {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
 }
 
 /* 右列：三个数竖排，与左侧板块框一起竖直居中（行高 = 框高，所以 center 就落在框的中线上）。
@@ -394,7 +388,7 @@
    字号与横排是同一套，只换排布 */
 .calib[data-plate='xy'] > .axes {
   grid-column: 4;
-  grid-row: 2;
+  grid-row: 1;
   align-self: center;
   justify-self: center;
 
@@ -499,6 +493,66 @@
   background: #fff;
 }
 
+/*
+ * 预设 pill（挂在卡片右上角，CardFrame 的 corner）：文件名 + 切换，实白 4px 直角。
+ * 10-03 作者裁决：切换预设不用这么显眼，绿底让给「打开模型」—— 那才是这一步的主入口。
+ * 上面的原生下拉不再由首页渲染（PresetLineA44 还在，g06-7 抽卡稿挂着它），样式留着不删。
+ */
+.presetPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 340px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-solid);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.presetPill:hover {
+  border-color: var(--text-3);
+}
+
+.presetPill:focus-visible {
+  outline: none;
+}
+
+.presetPillOff {
+  background: var(--surface-sunken);
+}
+
+.presetPillOff .presetFileName {
+  color: var(--text-3);
+}
+
+.presetPillOff:hover {
+  border-color: var(--text-3);
+}
+
+.presetPillOff .presetSwitch {
+  color: var(--text-3);
+}
+
+.presetFileName {
+  overflow: hidden;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.presetSwitch {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
 /* 选择机型页列尾的预设块：常驻，选之前是横杠占位 —— 位置固定，取到之后不跳版 */
 .pickerPreset {
   width: min(100%, 360px);
@@ -506,18 +560,45 @@
   border-top: 1px solid var(--line);
 }
 
-/* 原始值跟在标签右侧：改动时出现，但宽高常驻占位（只切 visibility），版面不动。
-   10.5px 灰字、tabular-nums —— 和 .axisLabel 是同一行（flex），不会把值行撑宽 */
+/*
+ * 「原 x.xx」跟在标签右侧：有基准就常显（10-03 作者：只改过才冒出来等于没有这个角标），
+ * 宽高常驻占位、只切 visibility —— 版面一动不动，这条不变。
+ * 10-03 起它是 button（改过的轴 = 还原入口，点一下整轴退回已保存值）：
+ * 按钮的默认皮清掉，继承与原 span 同款的字（family / letter-spacing 按钮不吃，要显式给）。
+ */
 .axisFrom {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  font-family: inherit;
+  letter-spacing: inherit;
   font-size: 10.5px;
   font-weight: 400;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   visibility: hidden;
+  cursor: default;
 }
 
 .axisFrom[data-on='true'] {
   visibility: visible;
+}
+
+/* 改过的那一轴：chip 转绿（与该轴变绿的数值同色）= 能按，hover 加下划线点破 */
+.axisFrom[data-act='revert'] {
+  color: var(--accent-deep);
+  cursor: pointer;
+}
+
+.axisFrom[data-act='revert']:hover {
+  text-decoration: underline;
+}
+
+.axisFrom[data-act='revert']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 
 /* 值行的输入框：宽度固定、tabular-nums，位数变化不改宽度。
@@ -549,21 +630,49 @@
   margin: 0;
 }
 
-/* 只有能改的那个才给 hover / focus 反馈：缝里的露出卡、退出层、还没取到预设时都是
-   只读框，鼠标掠过不该亮边框（否则"看起来能改、其实不能"） */
-.axisInput:not([readonly]):hover {
-  border-color: var(--line-strong);
+/*
+ * 大热区（作者 10-03：「首页编辑范围有点小，做成校准页那样的大一点的触发热区」）：
+ * 数字与 mm 住进同一颗 label —— 整颗框、mm、乃至轴名（htmlFor）点下去都是聚焦。
+ * 框平时无边框（跟纯文本一样安静），hover / 聚焦才显一颗宽松的框，罩住数字和 mm 整体；
+ * padding 3px 10px + margin 0 -10px 把内衬撑到框外 —— 数字仍贴轴名左缘，不挪窝。
+ * 只有能改的那个给反馈：缝里的露出卡、退出层、还没取到预设时都是只读框，鼠标掠过不亮。
+ */
+.axisField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  margin: 0 -10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: text;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
 }
 
-.axisInput:not([readonly]):focus {
+.axisField:not([data-readonly='true']):hover {
+  border-color: var(--line-strong);
+  background: var(--surface-solid);
+}
+
+.axisField:not([data-readonly='true']):focus-within {
   border-color: var(--accent);
   background: rgb(255 255 255 / 70%);
 }
 
+.axisField[data-readonly='true'] {
+  cursor: default;
+}
+
+/* mm 与数字同行同字号（继承）：看着小是 x-height 的错觉；nowrap，不跟数字拆行 */
+.axisUnit {
+  white-space: nowrap;
+}
 
 /*
  * 只留一圈：global.css 里有一条全局 `input:focus-visible { outline: 2px solid var(--accent) }`，
- * 与上面那圈 accent 边框叠起来就是两圈。global.css 全仓共用，不动它，
+ * 与上面那圈 accent 边框叠起来就是两圈。global.css 跨版本共用（v001-v019 都吃它），不动它，
  * 只在这个输入框上关掉外圈 —— 留边框那一圈：它在盒内，不会把旁边的「mm」往外推。
  */
 .axisInput:focus-visible {
@@ -641,8 +750,10 @@
 }
 
 /*
- * 板子这一块围起来：一条细边框把「标题 + 说明 + 板 + 刻度」收成一组。
- * 直排之后全列都是左对齐的文字行，没有这个框，板子和上面的读数会糊成一片。
+ * 板子这一块。原来一圈细边框 + 白底把它装成一个容器（把「标题 + 说明 + 板 + 刻度」
+ * 收成一组，不然直排的全列文字行里板子和读数糊成一片）—— 10-03 作者裁决去掉：
+ * 「下面没有那种容器装起来的感觉」，与「校准」tab 的 HUD 台面同一语言。
+ * 只撤皮：内边距、gap、版面几何原样（板子尺寸公式与落位动画都挂在这块上，不能动）。
  */
 .step {
   width: 100%;
@@ -657,9 +768,6 @@
    * 所以这一档想让板子再大，唯一的来源就是这两侧的内边距 —— 16px 降到 12px 直接多 8px 宽。
    */
   padding: clamp(10px, 1.2vh, 12px);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgb(255 255 255 / 55%);
 
   /*
    * 与下面那条板子 SVG 同一个道理，但针对的是**这一块自己**：卡片层里 .step 有 step-in 的
@@ -687,11 +795,16 @@
  * translateZ(0) 而不是 will-change: transform：后者是提示、浏览器可以不理，前者是确定的层提升。
  * 代价：静止态的板子从此走位图化那条路（与动画期一致），细线可能比原来糙半像素 ——
  * 这是"统一到其中一种"的必然结果，反过来（让动画期也直接绘制）做不到。
- * 只挂在向导页的后代选择器上，CalibPlate 自己那份 CSS 被多个页面共用，不碰。
+ * 只挂在 v021 的后代选择器上，CalibPlate 自己那份 CSS 被 v014-v020 共用，不碰。
  */
 .step svg {
   transform: translateZ(0);
 }
+
+/*
+ * 缩放手柄已整个退场（10-03 作者：拖动缩放不要了，占地方）—— 缩放改走
+ * Shift / Ctrl + 滚轮与触屏双指捏合（都写在 PlateZoom 里），皮上再没有要罩的按钮。
+ */
 
 
 .note {
@@ -701,6 +814,27 @@
   line-height: 1.7;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Z 步板下的两行文案（10-03 作者：「首页也缺那个文案」—— 与「校准」tab 同一句原话，
+ * 字挂在 calibAxesA44 里共用）。居中贴板下；不参与板宽公式的话列会溢出，
+ * 扣减量在 .calib 的 --plate-fixed(-vh) 里跟着让（见那条的注释）。
+ */
+.legend {
+  margin: 0;
+  text-align: center;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.tip {
+  margin: 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
 }
 
 /* 大图槽位：宽高由布局给出，图在其中自动适配 */
@@ -924,7 +1058,7 @@
 
 /*
  * 扁窗（模拟窗 520 高上下）：把板子那一块的内边距与列间距压一档。
- * 说明文字已经删干净了（只剩"没取到预设"那一行，它必须一直可见），
+ * 说明文字这一轮已经删干净了（只剩"没取到预设"那一行，它必须一直可见），
  * 所以这里不再有隐藏文案的规则。
  */
 @container home (max-height: 520px) {
@@ -956,9 +1090,9 @@
   }
 
   /*
-   * 欢迎页同一件事。
+   * 欢迎页同一件事（第三十二轮）。
    *
-   * HomeGuide 里那条同值断点已经把插图本体（`.stage`）收掉了，但**插图那一格
+   * HomeGuideA44 里那条同值断点已经把插图本体（`.stage`）收掉了，但**插图那一格
    * 没跟着收** —— `.welcomeArt` 还按 `flex: 1 1 320px` 占着 250px 宽的空位，
    * 于是欢迎文案被挤成 147px 的一小条贴在左上角（实测 456×420：welcome 409 /
    * copy 147 / art 250 且高 0）。作者：「它为什么现在靠到左上角了」。
@@ -1094,19 +1228,10 @@
  */
 
 /*
- * 那一行预设文件名不跟到缝里去（在 20% 宽的缝里它会折成三四行）。
- * 但也不能直接不渲染：脱离文档流就行 —— FLIP 的终点必须等于对应状态的真实版面。
- *   · 缝里（露出卡静止态）：藏起来，不占高度
- *   · 退回时：同样从第 0 帧就透明（与板子同一条静态规则）
+ * 预设行在缝里 / 退出层的藏显规则随它挪家一起退役了（10-03）：预设入口现在是
+ * 卡片右上角的 corner pill（CardFrameA44.module.css 里 [data-layer] 那两条管藏显），
+ * 内容列里不再有这一行。
  */
-[data-layer='card']:not([data-phase='in']) .calibPreset,
-[data-layer='exit'] .calibPreset {
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  pointer-events: none;
-  opacity: 0;
-}
 /*
  * 三轴读数：折叠的前 45% 它是**静止**的（位移要等 frame-tuck 的时间窗，见 flip.ts 的 delay）。
  * 板子与文件名第一帧就没了，这段静止本来剩「一整片空白版面里唯一一块数字」，很跳。

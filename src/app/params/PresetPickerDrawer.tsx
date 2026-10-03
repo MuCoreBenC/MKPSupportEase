@@ -40,6 +40,11 @@ interface Props {
   fileOf: (machineId: string, versionId: string) => string | null
   onPick: (machineId: string, versionId: string) => void
   onClose: () => void
+  /**
+   * 从哪一缘出。默认右（参数页）；首页传 'left' —— 右边常驻露出卡，抽屉没地方，
+   * 挂左缘、缝换到右边（与试验台同款）。
+   */
+  side?: 'left' | 'right'
 }
 
 export default function PresetPickerDrawer({
@@ -50,6 +55,7 @@ export default function PresetPickerDrawer({
   fileOf,
   onPick,
   onClose,
+  side = 'right',
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -76,7 +82,7 @@ export default function PresetPickerDrawer({
       {/* 遮罩：点一下关掉。它在抽屉之下（z-index 见 css） */}
       <button type="button" className={s.scrim} aria-label="关闭预设列表" onClick={onClose} />
 
-      <div className={s.drawer} ref={panelRef} role="dialog" aria-label="选择预设">
+      <div className={s.drawer} data-side={side} ref={panelRef} role="dialog" aria-label="选择预设">
         <div className={s.head}>
           <span className={s.title}>选择预设</span>
           <button type="button" className={s.close} onClick={onClose}>关闭</button>

@@ -1,12 +1,14 @@
 /*
- * 首页。
+ * 首页 —— 从 v029/pages/PageMachineV029 整份搬来的那一页（A31 上看到的就是它）。
  *
- * 三处与试验场那份不同：
- *   1. 删掉了调试钩子：`useDevState().fadeMs` 换成常量 FADE_MS。
- *   2. 三级选择与「文件」那一级都消费**文件体系**（`useCatalog` 的
- *      getMachines + getPresetFiles；取件与三轴走 `usePreset`）—— 手编表退场。
- *   3. `src/calib/*.generated` 那份板子坐标是共享资产，照旧直接 import。
+ * 这一轮的目的是**找回原样**，所以只做了三件事：
+ *   1. 改名：文件名 / 组件名 / 引用的每一个件与 CSS Module 加 A44 后缀。
+ *   2. 改 import：全部指向 A44 内部（`../calib/*`、`../ui/*`、`./*`），
+ *      `src/calib/*.generated` 那份板子坐标是共享资产，照旧直接 import。
+ *   3. 删掉 `src/dev/devStore` 那处调试钩子：`useDevState().fadeMs` 换成常量 FADE_MS。
  *
+ * 数据（T10 起）：三级选择与「文件」那一级都消费**文件体系**（`useCatalog` 的
+ * getMachines + getPresetFiles；取件与三轴走 `usePreset`）—— 手编表退场。
  * 作者点名的效果：「A1 就是 A1（A1.toml），P1S 的版本就是 LITE」。
  * 版面、动画、注释一行没动。
  */
@@ -25,6 +27,7 @@ import { selectionFromActive } from './activeSelection'
 import { uidOfFile, useCatalog } from './useCatalog'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
+import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import HeroFade from './HeroFade'
 import CardFrame from './CardFrame'
 import CalibHead from '../calib/CalibHead'
@@ -40,15 +43,16 @@ import { useArtLayers } from './useArtLayers'
 import {
   AXIS_ROWS,
   NEED_PRESET,
+  Z_LEGEND,
+  Z_TIP,
   axisText,
   xyHitLabel,
   zHitLabel,
 } from '../calib/calibAxes'
 import { useCalibration } from '../calib/useCalibration'
 import { usePreset } from '../calib/usePreset'
-/* 第五步那张合影：**界面自带素材**（不是产品数据资源，不进 Catalog / Delivery）。
-   2026-10-01 起与机型整机图同一条规矩：从 `public/models/` 搬进 `src/app/assets/hero/`，
-   改走 vite 资源管线（import 回来带内容哈希），取图不再经过 `public/` 直通 */
+/* 第五步那张合影：**界面自带素材**（不进 Catalog / Delivery），
+   从 `src/app/assets/hero/` 走 vite 资源管线（import 回来带内容哈希） */
 import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 
@@ -69,7 +73,7 @@ const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
 /**
  * 后处理脚本里那段可执行文件路径。契约里没有它（真值在桌面壳那一侧），
- * 先沿用原来那串模板；`--Toml` 后面的路径跟着**当前那份文件**走。
+ * 先沿用原来那串模板；`--Toml` 后面的路径跟着**当前那份文件**走（T10）。
  */
 const MKP_EXE = 'G:\\project\\mkp-ssr\\target\\debug\\mkp-ssr.exe'
 
@@ -107,14 +111,16 @@ export default function PageHome({ density }: PageHomeProps) {
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
   /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
+  /* 预设抽屉（与「校准」tab 同一颗）：pill 点开，从左缘出 */
+  const [pickerOpen, setPickerOpen] = useState(false)
   // 保存 / 放弃之后自己发起的那一次跳转不该再被拦
   const bypass = useRef(false)
 
-  /* ---------- 文件体系：三级清单与「文件」那一级都从这里来 ---------- */
+  /* ---------- 文件体系：三级清单与「文件」那一级都从这里来（T10） ---------- */
   const catalog = useCatalog()
 
   /*
-   * 首页联动（预设页 → 首页）：目录就绪后对准「正在使用的那一条」（唯一底账 run/active-preset.json）——
+   * T9/T10 联动（预设页 → 首页）：目录就绪后对准「正在使用的那一条」（唯一底账 mkp.a44.active）——
    * 预设页应用了哪一份，这里三级选择就反填成哪一台。active 的 machineId / versionId
    * 与选择器是**同一套 id**（不再有映射表），只跑一次：tab 切换会重挂，之后的手选不受影响。
    */
@@ -149,11 +155,12 @@ export default function PageHome({ density }: PageHomeProps) {
     pickXY,
     typeAxis,
     revertAxis,
+    resetAxis,
     clearAll,
     commitAll,
   } = calib
 
-  // 那个 Modal 不认 Esc，这里补上：Esc = 取消
+  // v005 那个 Modal 不认 Esc，这里补上：Esc = 取消
   useEffect(() => {
     if (openModel === null && pending === null && presetAsk === null) return
     const onKey = (e: KeyboardEvent) => {
@@ -235,6 +242,17 @@ export default function PageHome({ density }: PageHomeProps) {
   const currentUid =
     sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
 
+  /* 抽屉每一项自己的文件名（T11）—— 与「校准」tab 同一颗查询 */
+  const fileOf = useCallback(
+    (machineId: string, versionId: string) => {
+      const hit = catalog.presets.find((f) =>
+        f.usedByVersions.some((r) => r.machine === machineId && r.version === versionId),
+      )
+      return hit?.fileName ?? null
+    },
+    [catalog.presets],
+  )
+
   /* 校准页的预设下拉：一份预设文件唯一对应一处「机型 + 版本」，所以「选文件」= 反填三级选择 ——
      于是回到第二页，品牌 / 机型 / 版本已经是这份文件对应的那一套，不用再手点一遍 */
   const applyPreset = useCallback(
@@ -315,7 +333,7 @@ export default function PageHome({ density }: PageHomeProps) {
                     <p className={p.path} title={presetInfo?.path}>
                       {presetName ?? '—'}
                     </p>
-                    {/* 脚本里的 --Toml 跟着当前那份文件走；还没取到就先不摆这颗按钮 */}
+                    {/* 脚本里的 --Toml 跟着当前那份文件走（T10）；还没取到就先不摆这颗按钮 */}
                     {presetInfo && (
                       <CopyAction
                         text={`"${MKP_EXE}" --Toml "${presetInfo.path}" --Gcode`}
@@ -339,7 +357,7 @@ export default function PageHome({ density }: PageHomeProps) {
             </div>
 
             <div className={p.slot}>
-              {/* density 不再传给它：试验场那个入参只喂调试面板的「按档覆盖」开关（默认关着），
+              {/* density 不再传给它：A31 那个入参只喂调试面板的「按档覆盖」开关（默认关着），
                   面板删了它也就没有意义 —— 尺寸照旧由窗口与曲线算 */}
               <HeroFade layers={layers} onSettle={settle} onDrop={drop} alt={artAlt} />
             </div>
@@ -429,7 +447,25 @@ export default function PageHome({ density }: PageHomeProps) {
             peekSafe
             tag={dirty ? '未保存' : savedNote ? '已保存' : undefined}
             tagTone={dirty ? 'accent' : 'muted'}
-            topAction={{ label: '打开模型', onClick: () => setOpenModel('Z 偏移校准板') }}
+            /* 打开模型是这一步的主入口（作者 10-03：绿底给打开模型，预设 pill 退暗） */
+            topAction={{
+              label: '打开模型',
+              accent: true,
+              onClick: () => setOpenModel('Z 偏移校准板'),
+            }}
+            corner={
+              /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
+                 没取到文件名时退成「选择预设」的灰态 */
+              <button
+                type="button"
+                className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
+                onClick={() => setPickerOpen(true)}
+                title="点击选择预设"
+              >
+                <span className={p.presetFileName}>{presetName ?? '选择预设'}</span>
+                <span className={p.presetSwitch}>切换</span>
+              </button>
+            }
             navs={[{ label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) }]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
@@ -448,6 +484,7 @@ export default function PageHome({ density }: PageHomeProps) {
               data-hint={saved ? undefined : 'true'}
               data-scroll
             >
+              {/* 预设入口已挪到卡片右上角（corner），内容列只留三轴读数 */}
               <CalibHead
                 saved={saved}
                 draft={draft}
@@ -458,13 +495,17 @@ export default function PageHome({ density }: PageHomeProps) {
                 presetOptions={presetOptions}
                 onPickPreset={pickPreset}
                 canEdit={canPick}
+                showPreset={false}
                 onType={typeAxis}
                 onRevert={revertAxis}
+                onReset={resetAxis}
               />
 
               <section className={p.step}>
-                {/* 板名与缩放手柄同一行，由 PlateZoom 自己排 */}
-                <PlateZoom resetKey="z" title="Z 偏移校准板">
+                {/* 板名撤了（作者 10-03：容器感去掉，与「校准」tab 同一语言）——
+                    眉标题那行已写着「Z 偏移校准」，再挂一块板名是复读。
+                    手柄留在原位（title="" 渲染零高 h3），只跟着收编的皮换直角实白 */}
+                <PlateZoom resetKey="z" title="">
                   <CalibPlate
                     model="zoffset"
                     theme={PLATE_THEME}
@@ -474,6 +515,9 @@ export default function PageHome({ density }: PageHomeProps) {
                     hitLabel={zHitLabel}
                   />
                 </PlateZoom>
+                {/* G06-8 攒下的两行文案，与「校准」tab 同一句原话（作者 10-03：首页也缺这个） */}
+                <p className={p.legend}>{Z_LEGEND}</p>
+                <p className={p.tip}>{Z_TIP}</p>
                 {/* 没取到预设时点板子不产生读数，这一行是唯一的解释，必须留。
                     其余说明去掉了：点了哪一格、改成多少，上面三轴读数里的「旧 → 新」已经说完 */}
                 {!saved && <p className={p.note}>{NEED_PRESET}</p>}
@@ -490,7 +534,23 @@ export default function PageHome({ density }: PageHomeProps) {
             peekSafe
             tag={dirty ? '未保存' : savedNote ? '已保存' : undefined}
             tagTone={dirty ? 'accent' : 'muted'}
-            topAction={{ label: '打开模型', onClick: () => setOpenModel('XY 偏移校准板') }}
+            topAction={{
+              label: '打开模型',
+              accent: true,
+              onClick: () => setOpenModel('XY 偏移校准板'),
+            }}
+            corner={
+              /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
+              <button
+                type="button"
+                className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
+                onClick={() => setPickerOpen(true)}
+                title="点击选择预设"
+              >
+                <span className={p.presetFileName}>{presetName ?? '选择预设'}</span>
+                <span className={p.presetSwitch}>切换</span>
+              </button>
+            }
             navs={[
               {
                 label: '上一步',
@@ -524,13 +584,15 @@ export default function PageHome({ density }: PageHomeProps) {
                 presetOptions={presetOptions}
                 onPickPreset={pickPreset}
                 canEdit={canPick}
+                showPreset={false}
                 onType={typeAxis}
                 onRevert={revertAxis}
+                onReset={resetAxis}
               />
 
               <section className={p.step}>
-                {/* 板名与缩放手柄同一行，由 PlateZoom 自己排 */}
-                <PlateZoom resetKey="xy" title="XY 偏移校准板">
+                {/* 同 Z 步：去容器、去板名，手柄直角实白；XY 板内自带整段说明，不给字 */}
+                <PlateZoom resetKey="xy" title="">
                   <CalibPlate
                     model="precise"
                     theme={PLATE_THEME}
@@ -616,6 +678,7 @@ export default function PageHome({ density }: PageHomeProps) {
       presetName,
       presetOptions,
       ready,
+      resetAxis,
       revertAxis,
       saved,
       savedNote,
@@ -632,6 +695,26 @@ export default function PageHome({ density }: PageHomeProps) {
   return (
     <div className={p.page} data-density={density}>
       <SlideDeck ref={deckRef} sheets={sheets} density={density} canLeave={canLeave} />
+
+      {/* 预设抽屉：从左缘出（右边常驻露出卡，没地方）。换预设的确认（有草稿先问一句）
+          走 pickPreset，与下拉时代同一条路；抽屉挂在 .page（container 的布局包含块）上 */}
+      <PresetPickerDrawer
+        side="left"
+        open={pickerOpen}
+        machines={catalog.machines.map((m) => ({
+          id: m.id,
+          display: m.display,
+          versions: m.versions.map((v) => ({ id: v.id, name: v.name, tag: v.tag ?? null })),
+        }))}
+        machineId={sel.model ?? ''}
+        versionId={sel.variant ?? ''}
+        fileOf={fileOf}
+        onPick={(m, v) => {
+          setPickerOpen(false)
+          pickPreset(`${m}/${v}`)
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {openModel && (
         <Modal

@@ -1,5 +1,6 @@
 /*
- * 首页向导每一页的卡片外壳。
+ * 从 v029/components/CardFrame 整份搬来（向导每一页的卡片外壳）。
+ * 改的只有名字：文件名 / 组件名 / 导出的 Capsule 类型 / CSS Module 加 A44 后缀。
  */
 
 import type { CSSProperties, ReactNode } from 'react'
@@ -33,8 +34,15 @@ interface CardFrameProps {
    *
    * 由 CardFrame 自己画，页面只给文字与回调：它得和 22px 的行盒一样高，
    * 不然眉标题的 y 会跟着变 —— 那条"全站同坐标"就破了（见 .eyebrow 的注释）。
+   * accent = 绿底浅色一档（校准卡的「打开模型」是这一步的主入口，作者 10-03）。
    */
-  topAction?: { label: string; onClick: () => void }
+  topAction?: { label: string; onClick: () => void; accent?: boolean }
+  /**
+   * 卡片右上角的一小块（首页校准卡的预设 pill 走这里）：绝对定位、不占位，
+   * 右缘跟 --chrome-x 与"给露出卡让位"那一段（--chrome-peek）对齐，
+   * 露出卡 / 退出层里不显形（见 css 里 [data-layer] 那两条）。
+   */
+  corner?: ReactNode
   /** 导航胶囊，恒显、占最前面几格：第一格全站同坐标。上一步在左、下一步在右 */
   navs: Capsule[]
   /** 随状态出现的胶囊，追加在导航右侧，出现时不推动任何已有元素 */
@@ -78,6 +86,7 @@ export default function CardFrame({
   tag,
   tagTone = 'accent',
   topAction,
+  corner,
   navs,
   actions,
   peekSafe,
@@ -103,6 +112,7 @@ export default function CardFrame({
             <button
               type="button"
               className={s.topBtn}
+              data-accent={topAction.accent ? 'true' : undefined}
               onMouseDown={noFocus}
               onClick={topAction.onClick}
             >
@@ -116,6 +126,8 @@ export default function CardFrame({
           )}
         </p>
       )}
+
+      {corner && <div className={s.corner}>{corner}</div>}
 
       {children}
 
