@@ -53,7 +53,8 @@ pub struct Catalog {
     #[serde(default)]
     pub machines: Vec<CatalogMachine>,
     /// 资产定义（图标 / 模型 / 切片器预设的登记，总纲欠账 #3 的登记面）。
-    /// **没有整机图**：它是界面的展示素材，2026-10-01 从台账剥离进 `src/app/assets/`
+    /// 整机图**在**这里（`type = 'Image'`，2026-10-03 恢复登记）：它随包但不进
+    /// `files[]` —— 那是 `dest_of_asset` 按交付档位拦的，不按类型拦。
     #[serde(default)]
     pub assets: Vec<Asset>,
     /// 套餐定义（一版一套：MKP 与配套 BBS 的成套配发关系）

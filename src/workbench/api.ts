@@ -784,7 +784,10 @@ export interface AssetView {
   display: string
   /** 台账登记的名字（不是显示真源，详情卡里作对照） */
   name: string
-  /** 相对资产根（`public/assets/`）的一段 */
+  /**
+   * 相对**资产源根**（`presets/assets/`）的一段 —— 工作台读的是源，与交付档位无关。
+   * 它同时就是 `/assets/` 那条 URL 的后半截（`url` 由后端拼，前端只 encode）
+   */
   path: string
   /** `/assets/<path>`。**用之前过 `assetUrl()`** —— 路径里可能有空格 */
   url: string

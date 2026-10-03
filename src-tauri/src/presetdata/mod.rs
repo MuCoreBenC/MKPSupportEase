@@ -85,11 +85,12 @@ pub(crate) fn repo_presets_root() -> Option<PathBuf> {
         .then_some(root)
 }
 
-/// **测试专用的**仓库资产载荷根：`<repo>/public/assets`。
+/// **测试专用的**仓库资产载荷根：`<repo>/presets/assets`。
 ///
 /// 与 [`repo_presets_root`] 同一条理由：只为"拿真数据当判据"的测试存在。
-/// 定义与载荷在仓库里本来就分家（`presets/assets.toml` ↔ `public/assets/`），
-/// 所以运行时的载荷根必须由调用方给（[`Presets::set_asset_root`]）。
+/// 定义与载荷都在 `presets/` 下（`presets/assets.toml` ↔ `presets/assets/<kind>/`，
+/// 2026-10-03 起同根），但运行时的载荷根**仍由调用方给**
+/// （[`Presets::set_asset_root`]）—— 客户端那一侧根本没有载荷根。
 #[cfg(test)]
 pub(crate) fn repo_assets_root() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -305,10 +306,11 @@ impl Presets {
 
     /// 资产**载荷**根（`path` 那一栏的基准）。**可选，且由调用方给**。
     ///
-    /// 定义（`presets/assets.toml`）与载荷（资产文件本体）本来就是两个地方：
-    /// 工作台那份在仓库的 `public/assets/`，而客户端这一轮**只释放定义、不释放文件本体**，
-    /// 所以它压根没有载荷根 —— 这时 [`Assets::present`] 一律为 false，
-    /// 界面上表现为"文件还没到"，而不是一个查不出来的状态。
+    /// 定义（`presets/assets.toml`）与载荷（资产文件本体）是两个概念，即使今天同根：
+    /// 工作台给的载荷根是仓库的 `presets/assets/`，而客户端这一轮
+    /// **只释放定义、不释放文件本体**，所以它压根没有载荷根 —— 这时
+    /// [`Assets::present`] 一律为 false，界面上表现为"文件还没到"，
+    /// 而不是一个查不出来的状态。
     pub fn set_asset_root(&mut self, root: &Path) {
         self.assets.set_asset_root(root);
     }

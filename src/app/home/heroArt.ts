@@ -11,9 +11,11 @@
  * 2026-10-01 第三刀曾把它们从台账剥离、硬编码进 `src/app/assets/`，那是**错的**：
  * 「不会编程的用户怎么改图片呢」—— 已作废。
  *
- * 到客户端的方式：**构建期从数据目录复制进这里**（`scripts/copy-assets.mjs`，
- * 落点就是下面那几个 import 路径；那个目录是生成物，不入库）。客户端**不下载**
- * 也不更新它们 —— 用户不换机器就不需要换图，而换图的人有权在工作台里换。
+ * 到客户端的方式：**构建期由随包资产同步器对账产出交付根**
+ * （`tools/assets/sync.mjs`：台账 `delivery = 'bundled'` 的条目 → `client-assets/`，
+ * 每次构建自动跑，没变就 skip），下面四条 import 经 vite 别名 `@client-assets` 读它
+ * ——那个目录是生成物，不入库，删掉也能重建。客户端**不下载**也不更新它们：
+ * 用户不换机器就不需要换图，而换图的人有权在工作台里换。
  * 判据在 `runtime::catalog::dest_of_asset`（**按交付档位拦**，不按类型拦）。
  *
  * # 显式表 + 回落链
@@ -21,13 +23,17 @@
  * 没有照 `Machine.image` 那个字段拼路径：它是**资产 id**，而 id 到文件的映射要走
  * 资产根的解析（且 bundled 档的文件客户端拿不到 URL —— 不在 catalog 的 files[] 里）。
  * 显式表也比"拼一个可能不存在的名字"稳：机器名与文件名本来就对不齐。
- * 数据侧改了图 → `npm run build` 跑一次复制 → 这里换成新图。
+ *
+ * **这张表还是第二刀的活儿**（改成从 catalog 的 `assets[]` 按 id → path 取）。
+ * 在那之前它有个已知代价：台账里**减少**一条 bundled（或改它的路径），同步器会把
+ * 文件从交付根删掉，而这里的 import 还指着它 ⇒ **构建会红**（不是静默破图）。
+ * 那一刀落地后这条约束才消失 —— 现在它是"fail loudly"，可以接受。
  */
 
-import a1 from '../assets/printers/a1.webp'
-import a1mini from '../assets/printers/a1mini.webp'
-import a1miniVariant from '../assets/printers/a1mini-variant.webp'
-import p1s from '../assets/printers/p1s.webp'
+import a1 from '@client-assets/assets/printers/a1.webp'
+import a1mini from '@client-assets/assets/printers/a1mini.webp'
+import a1miniVariant from '@client-assets/assets/printers/a1mini-variant.webp'
+import p1s from '@client-assets/assets/printers/p1s.webp'
 import { BAMBU_LOGO_DARK } from '../assets/bambuLogo'
 import type { Selection } from './MachinePicker'
 
