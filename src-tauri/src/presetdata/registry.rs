@@ -212,6 +212,26 @@ impl ParamDef {
     }
 }
 
+/// 一次「参数定义」编辑的载荷 —— `wb_set_param_meta` 整包提交（模态框一次
+/// 保存改的可能不止一格）。`None` 的意思是**这一格清空**（文件里删键），不是「不动」。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamMetaEdit {
+    pub label: String,
+    pub desc: String,
+    pub unit: Option<String>,
+    pub value_type: ValueType,
+    pub ui_component: UiComponent,
+    pub default_value: Value,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    pub parent_key: Option<String>,
+    pub show_when: Option<ShowWhen>,
+    pub deprecated: bool,
+}
+
+
 /* ---------- 分组元数据（中文名与顺序的唯一权威） ---------- */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -782,6 +802,216 @@ impl ParamRegistry {
         Ok(())
     }
 
+    /* ---------- 定义编辑（2026-10-03，作者：「弃用是谁决定的？我没办法改」） ---------- */
+
+    /// 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
+    /// 出厂默认 / 属于 / 前置条件 / 弃用），就地写进 `[[params]]` 本体。
+    ///
+    /// # 为什么不走 `machineVariants` 那条路
+    ///
+    /// 值覆盖（[`Self::set_variant`]）改的是「某台机型上它是多少」，定义改的是
+    /// 「它是什么」。后者直接改 `[[params]]` 的字段本身 —— 与 doc §1「我们就是
+    /// 这份数据的编辑器」同一个道理：不加覆盖层。
+    ///
+    /// # 校验（全在动文件之前 —— 校验不过就不许碰到一半）
+    ///
+    ///   · 名称不能为空；步进得是正数；min ≤ max（缺一边不限）；
+    ///   · `defaultValue` 与 `valueType` 对得上（复用 [`to_toml_value`] 的口径 ——
+    ///     写不进 TOML 的默认值就是非法的）；枚举参数的默认值得是选项之一；
+    ///   · `parentKey` 得存在、不能是自己、父项自己不能再有父项（层级只有两级）、
+    ///     已经有儿子挂着的不能再去当儿子；
+    ///   · `showWhen.key` 得存在且不能指着自己。**值不校验** —— 实测里就有
+    ///     字符串化的数字（`"0"`），`visibility` 比较前会按被指向字段的类型归一。
+    ///
+    /// 值类型的改动**不迁移**已有的 machineVariants：类型是「它是什么」，
+    /// 改了类型旧值就按新类型解释 —— 这是作者自己在模态框里按的按钮。
+    pub fn set_param_meta(&mut self, key: &str, edit: ParamMetaEdit) -> Result<(), AppError> {
+        let at = *self
+            .index
+            .get(key)
+            .ok_or_else(|| AppError::invalid_argument(format!("字段定义里没有 {key}")))?;
+
+        let label = edit.label.trim();
+        if label.is_empty() {
+            return Err(AppError::invalid_argument("名称不能是空的"));
+        }
+        for (name, v) in [("最小", edit.min), ("最大", edit.max)] {
+            if let Some(v) = v {
+                if !v.is_finite() {
+                    return Err(AppError::invalid_argument(format!(
+                        "{name}值得是个有限数字，见到 {v}"
+                    )));
+                }
+            }
+        }
+        if let (Some(min), Some(max)) = (edit.min, edit.max) {
+            if min > max {
+                return Err(AppError::invalid_argument(format!(
+                    "范围反了：最小 {min} 比最大 {max} 还大"
+                )));
+            }
+        }
+        if let Some(s) = edit.step {
+            if !s.is_finite() || s <= 0.0 {
+                return Err(AppError::invalid_argument(format!(
+                    "步进得是正数，见到 {s}"
+                )));
+            }
+        }
+        // 出厂默认先过类型门（`to_toml_value` 只把数字当类型看 —— 字符串挂到
+        // float 上它也照收，那里管的是「写得进 TOML」，这里管的是「类型说得通」）
+        match (&edit.default_value, edit.value_type) {
+            (Value::Number(_), ValueType::Float) => {}
+            (Value::Number(n), ValueType::Int) if n.is_i64() || n.is_u64() => {}
+            (Value::Bool(_), ValueType::Bool) => {}
+            (Value::String(_), ValueType::Text) => {}
+            (v, t) => {
+                return Err(AppError::invalid_argument(format!(
+                    "{key} 的出厂默认 {v} 与值类型 {}（{}）对不上",
+                    value_type_str(t),
+                    match t {
+                        ValueType::Float | ValueType::Int => "要数字",
+                        ValueType::Bool => "要 true/false",
+                        ValueType::Text => "要字符串",
+                    }
+                )));
+            }
+        }
+        // 再按新类型试写一遍 —— 非整数的 int 当场拒
+        let default_item = to_toml_value(&edit.default_value, edit.value_type, key)?;
+        if edit.value_type == ValueType::Text && !self.params[at].choices.is_empty() {
+            let want = json_key(&edit.default_value);
+            if !self
+                .params[at]
+                .choices
+                .iter()
+                .any(|c| json_key(&c.value) == want)
+            {
+                return Err(AppError::invalid_argument(format!(
+                    "出厂默认 {want:?} 不在这条参数的可选项里 —— 枚举的默认值得是选项之一"
+                )));
+            }
+        }
+        if let Some(pk) = &edit.parent_key {
+            if pk == key {
+                return Err(AppError::invalid_argument(format!(
+                    "{key} 不能自己是自己的父项"
+                )));
+            }
+            let parent = self
+                .param(pk)
+                .ok_or_else(|| AppError::invalid_argument(format!("父项 {pk} 不在字段定义里")))?;
+            if parent.parent_key.is_some() {
+                return Err(AppError::invalid_argument(format!(
+                    "{pk} 自己就是别人的子项 —— 层级只有两级，不能再往下挂"
+                )));
+            }
+            if self.params.iter().any(|p| p.parent_key.as_deref() == Some(key)) {
+                return Err(AppError::invalid_argument(format!(
+                    "{key} 自己已经挂着子项 —— 不能再去当别人的子项"
+                )));
+            }
+        }
+        if let Some(sw) = &edit.show_when {
+            if sw.key == key {
+                return Err(AppError::invalid_argument(format!(
+                    "{key} 的前置条件不能指着自己 —— 那永远不成立"
+                )));
+            }
+            if !self.index.contains_key(&sw.key) {
+                return Err(AppError::invalid_argument(format!(
+                    "前置条件指向的 {} 不在字段定义里",
+                    sw.key
+                )));
+            }
+        }
+        // 前置条件子表整块先备好（值转换是会失败的 —— 失败就什么都不许动）
+        let show_when_item = match &edit.show_when {
+            Some(sw) => {
+                let mut s = toml_edit::Table::new();
+                s["key"] = toml_edit::value(sw.key.as_str());
+                s["op"] = toml_edit::value(show_op_str(sw.op));
+                s["value"] = scalar_item(&sw.value, key)?;
+                Some(toml_edit::Item::Table(s))
+            }
+            None => None,
+        };
+        let unit = edit
+            .unit
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
+        /* ---------- 文件。到这里全是不会失败的赋值 ---------- */
+        let t = self.param_table_mut(at, key)?;
+        t["label"] = toml_edit::value(label);
+        t["desc"] = toml_edit::value(edit.desc.as_str());
+        match &unit {
+            Some(u) => t["unit"] = toml_edit::value(u.as_str()),
+            None => {
+                t.remove("unit");
+            }
+        }
+        t["valueType"] = toml_edit::value(value_type_str(edit.value_type));
+        t["uiComponent"] = toml_edit::value(ui_component_str(edit.ui_component));
+        t["defaultValue"] = default_item;
+        match edit.min {
+            Some(m) => t["min"] = toml_edit::value(m),
+            None => {
+                t.remove("min");
+            }
+        }
+        match edit.max {
+            Some(m) => t["max"] = toml_edit::value(m),
+            None => {
+                t.remove("max");
+            }
+        }
+        match edit.step {
+            Some(s) => t["step"] = toml_edit::value(s),
+            None => {
+                t.remove("step");
+            }
+        }
+        match &edit.parent_key {
+            Some(pk) => t["parentKey"] = toml_edit::value(pk.as_str()),
+            None => {
+                t.remove("parentKey");
+            }
+        }
+        match show_when_item {
+            Some(item) => {
+                t.insert("showWhen", item);
+            }
+            None => {
+                t.remove("showWhen");
+            }
+        }
+        // 「缺一行 = false」（实测真数据里没有 false 占位）—— 弃用解除就删键
+        if edit.deprecated {
+            t["deprecated"] = toml_edit::value(true);
+        } else {
+            t.remove("deprecated");
+        }
+
+        /* ---------- 内存 ---------- */
+        let p = &mut self.params[at];
+        p.label = label.to_owned();
+        p.desc = edit.desc;
+        p.unit = unit;
+        p.value_type = edit.value_type;
+        p.ui_component = edit.ui_component;
+        p.default_value = edit.default_value;
+        p.min = edit.min;
+        p.max = edit.max;
+        p.step = edit.step;
+        p.parent_key = edit.parent_key;
+        p.show_when = edit.show_when;
+        p.deprecated = edit.deprecated;
+        Ok(())
+    }
+
     /// 文件里第 `at` 个 `[[params]]` 块。
     ///
     /// 下标通用是因为 `self.params` 与文件里的顺序来自**同一次解析**；
@@ -873,6 +1103,53 @@ fn to_toml_value(
         },
         serde_json::Value::String(s) => Ok(super::literal_str(s)),
         _ => Err(bad_type()),
+    }
+}
+
+/// `ValueType` 写回文件时的原文。与 serde 的 `rename_all = "lowercase"` +
+/// `Text → "string"` 一口同音 —— 手写两份就该是一份的意思
+fn value_type_str(v: ValueType) -> &'static str {
+    match v {
+        ValueType::Float => "float",
+        ValueType::Int => "int",
+        ValueType::Bool => "bool",
+        ValueType::Text => "string",
+    }
+}
+
+/// `UiComponent` 写回文件时的原文（serde `rename_all = "lowercase"`）
+fn ui_component_str(v: UiComponent) -> &'static str {
+    match v {
+        UiComponent::Number => "number",
+        UiComponent::Switch => "switch",
+        UiComponent::Segmented => "segmented",
+        UiComponent::Select => "select",
+        UiComponent::Gcode => "gcode",
+    }
+}
+
+/// `ShowOp` 写回文件时的原文（serde `rename_all = "lowercase"`）
+fn show_op_str(op: ShowOp) -> &'static str {
+    match op {
+        ShowOp::Eq => "eq",
+        ShowOp::Neq => "neq",
+        ShowOp::Gt => "gt",
+    }
+}
+
+/// `showWhen.value` 写回文件的那一项。与 `to_toml_value` 不同：**不按某个
+/// valueType 归一** —— 前置条件的值跟着被指向字段走，而实测里就有字符串化的
+/// 数字（`"0"`），原样保留才是忠实转写；`visibility` 比较前会自己归一
+fn scalar_item(v: &Value, key: &str) -> Result<toml_edit::Item, AppError> {
+    match v {
+        Value::String(s) => Ok(super::literal_str(s)),
+        Value::Bool(b) => Ok(toml_edit::value(*b)),
+        Value::Number(n) => n.as_f64().map(toml_edit::value).ok_or_else(|| {
+            AppError::invalid_argument(format!("{key} 的前置条件值 {v} 不是有限数字"))
+        }),
+        _ => Err(AppError::invalid_argument(format!(
+            "{key} 的前置条件值只能是字符串 / 数字 / 布尔，见到 {v}"
+        ))),
     }
 }
 
@@ -1918,6 +2195,415 @@ mod tests {
             before,
             std::fs::metadata(&path).unwrap().modified().unwrap(),
             "空批次动了文件的 mtime"
+        );
+    }
+
+    /* ---------- 定义编辑（`wb_set_param_meta` 的数据层，2026-10-03） ---------- */
+
+    /// 一份「改得动」的小注册表：一条 float 父项、一条挂在它下面的子项、
+    /// 一条带选项的枚举 —— 定义编辑的判据在这三条上都够使了
+    fn editable() -> (Value, Value) {
+        let mut params = serde_json::json!({
+            "params": [
+                param("a.mode", "s1", 1.0),
+                param("a.x", "s1", 2.0),
+                param("a.y", "s1", 3.0),
+            ],
+            "tabs": [{
+                "id": "t1", "label": "页签一", "order": 10,
+                "sections": [{ "id": "s1", "label": "分组一", "order": 0 }]
+            }],
+            "updated": "2026-01-01 00:00:00",
+        });
+        // a.x 挂在 a.mode 下、被它的一档开着；a.y 是枚举
+        params["params"][1]["parentKey"] = serde_json::json!("a.mode");
+        params["params"][1]["showWhen"] =
+            serde_json::json!({ "key": "a.mode", "op": "eq", "value": 1 });
+        params["params"][2]["valueType"] = serde_json::json!("string");
+        params["params"][2]["uiComponent"] = serde_json::json!("select");
+        params["params"][2]["defaultValue"] = serde_json::json!("on");
+        params["params"][2]["choices"] = serde_json::json!([
+            { "label": "开", "value": "on" },
+            { "label": "关", "value": "off" },
+        ]);
+        let layout = serde_json::json!({
+            "tabs": [{ "id": "t1", "sections": [{
+                "id": "s1",
+                "items": [
+                    { "id": "i0", "paramKey": "a.mode" },
+                    { "id": "i1", "paramKey": "a.x" },
+                    { "id": "i2", "paramKey": "a.y" },
+                ],
+            }] }],
+        });
+        (params, layout)
+    }
+
+    /// 一份「全空」的编辑载荷：只给名字，其余都是要清掉的
+    fn meta_edit(label: &str) -> ParamMetaEdit {
+        ParamMetaEdit {
+            label: label.to_owned(),
+            desc: String::new(),
+            unit: None,
+            value_type: ValueType::Float,
+            ui_component: UiComponent::Number,
+            default_value: serde_json::json!(0),
+            min: None,
+            max: None,
+            step: None,
+            parent_key: None,
+            show_when: None,
+            deprecated: false,
+        }
+    }
+
+    /// 一次定义编辑：改的每一格**重读盘之后都在**，diff 只落在一个块里
+    #[test]
+    fn a_meta_edit_round_trips_to_disk() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+        let before = r.to_toml();
+
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "横移".into(),
+                desc: "改过的说明".into(),
+                unit: Some("mm".into()),
+                default_value: serde_json::json!(4),
+                min: Some(0.0),
+                max: Some(10.0),
+                step: Some(0.5),
+                parent_key: Some("a.mode".into()),
+                show_when: Some(ShowWhen {
+                    key: "a.mode".into(),
+                    op: ShowOp::Neq,
+                    value: serde_json::json!("off"),
+                }),
+                deprecated: true,
+                ..meta_edit("横移")
+            },
+        )
+        .expect("定义改得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(d.path()).expect("改完还得读得通");
+        let p = again.param("a.x").unwrap();
+        assert_eq!(p.label, "横移");
+        assert_eq!(p.desc, "改过的说明");
+        assert_eq!(p.unit.as_deref(), Some("mm"));
+        assert_eq!(
+            p.default_value,
+            serde_json::json!(4.0),
+            "float 的默认值得按浮点读回"
+        );
+        assert_eq!(p.min, Some(0.0));
+        assert_eq!(p.max, Some(10.0));
+        assert_eq!(p.step, Some(0.5));
+        assert!(p.deprecated);
+        assert_eq!(p.parent_key.as_deref(), Some("a.mode"));
+        let sw = p.show_when.as_ref().unwrap();
+        assert_eq!(sw.key, "a.mode");
+        assert_eq!(sw.op, ShowOp::Neq);
+        assert_eq!(sw.value, serde_json::json!("off"));
+
+        // 邻居一格没动
+        assert_eq!(again.param("a.y").unwrap().label, "a.y");
+
+        let (removed, inserted) = one_edit_only(&before, &again.to_toml());
+        assert!(!removed.contains("[[params]]"), "波及了别的字段块：{removed:?}");
+        assert!(
+            !inserted.contains("[[params]]"),
+            "插入段跨到了别的字段：{inserted:?}"
+        );
+    }
+
+    /// 清空是**删键**：`None` 的格子整行消失；弃用解除不写 `false` 占位 ——
+    /// 与真数据「缺一行才是 false」的口径一致
+    #[test]
+    fn clearing_meta_fields_removes_the_keys() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+        // 先给 a.x 添满（parentKey / showWhen 是夹具里就有的）
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                unit: Some("mm".into()),
+                min: Some(0.0),
+                max: Some(10.0),
+                step: Some(0.5),
+                parent_key: Some("a.mode".into()),
+                show_when: Some(ShowWhen {
+                    key: "a.mode".into(),
+                    op: ShowOp::Eq,
+                    value: serde_json::json!(1),
+                }),
+                deprecated: true,
+                ..meta_edit("a.x")
+            },
+        )
+        .unwrap();
+        r.write_back().unwrap();
+
+        // 再一把全清掉
+        r.set_param_meta("a.x", meta_edit("a.x")).unwrap();
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("清完还得读得通");
+        let p = again.param("a.x").unwrap();
+        assert_eq!(p.unit, None);
+        assert_eq!(p.min, None);
+        assert_eq!(p.max, None);
+        assert_eq!(p.step, None);
+        assert_eq!(p.parent_key, None);
+        assert!(p.show_when.is_none());
+        assert!(!p.deprecated);
+        assert!(
+            !again.to_toml().contains("deprecated = true"),
+            "false 被写成了占位行"
+        );
+    }
+
+    /// 默认值得跟值类型对得上；枚举的默认值得是选项之一。拒了之后**一格不动**
+    #[test]
+    fn meta_edit_rejects_defaults_that_do_not_fit_the_type() {
+        let (p, l) = editable();
+        let (_d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // float 挂个字符串默认
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    default_value: serde_json::json!("x"),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("对不上"), "{}", e.message);
+
+        // 枚举的默认值不在选项里
+        let e = r
+            .set_param_meta(
+                "a.y",
+                ParamMetaEdit {
+                    value_type: ValueType::Text,
+                    ui_component: UiComponent::Select,
+                    default_value: serde_json::json!("mid"),
+                    ..meta_edit("a.y")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("可选项"), "{}", e.message);
+
+        assert_eq!(r.param("a.x").unwrap().label, "a.x", "拒了还动了内存");
+        assert_eq!(r.param("a.y").unwrap().label, "a.y", "拒了还动了内存");
+    }
+
+    /// 父项判据：不存在 / 是自己 / 父项也是子项 / 自己已经挂着儿子 —— 全拒
+    #[test]
+    fn meta_edit_rejects_parents_that_break_two_levels() {
+        let (p, l) = editable();
+        let (_d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    parent_key: Some("ghost".into()),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("不在字段定义里"), "{}", e.message);
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    parent_key: Some("a.x".into()),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("自己"), "{}", e.message);
+
+        // 先让 a.y 当 a.mode 的儿子（它自己没有儿子，这一步合法），
+        // 再让 a.x 挂到 a.y 下面 —— 三层了，拒
+        r.set_param_meta(
+            "a.y",
+            ParamMetaEdit {
+                parent_key: Some("a.mode".into()),
+                ..meta_edit("a.y")
+            },
+        )
+        .unwrap();
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    parent_key: Some("a.y".into()),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("两级"), "{}", e.message);
+
+        // a.mode 已经挂着 a.x —— 它不能再去当别人的儿子
+        let e = r
+            .set_param_meta(
+                "a.mode",
+                ParamMetaEdit {
+                    parent_key: Some("a.y".into()),
+                    ..meta_edit("a.mode")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("子项"), "{}", e.message);
+    }
+
+    /// 前置条件得指着一条真实存在的参数，且不能指着自己；值**不校验** ——
+    /// 实测里就有字符串化的数字，归一是 visibility 的事
+    #[test]
+    fn meta_edit_checks_show_when_but_leaves_its_value_alone() {
+        let (p, l) = editable();
+        let (_d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    show_when: Some(ShowWhen {
+                        key: "ghost".into(),
+                        op: ShowOp::Eq,
+                        value: serde_json::json!(1),
+                    }),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("不在字段定义里"), "{}", e.message);
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    show_when: Some(ShowWhen {
+                        key: "a.x".into(),
+                        op: ShowOp::Eq,
+                        value: serde_json::json!(1),
+                    }),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("自己"), "{}", e.message);
+
+        // 字符串化的数字照收 —— 那是实测真数据里的形状
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                show_when: Some(ShowWhen {
+                    key: "a.mode".into(),
+                    op: ShowOp::Gt,
+                    value: serde_json::json!("0"),
+                }),
+                ..meta_edit("a.x")
+            },
+        )
+        .expect("字符串化的数字是合法的前置条件值");
+    }
+
+    /// 数值与名字的门禁：范围反了、步进非正、名称空白 —— 全拒
+    #[test]
+    fn meta_edit_rejects_bad_numbers_and_a_blank_label() {
+        let (p, l) = editable();
+        let (_d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    min: Some(5.0),
+                    max: Some(1.0),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("范围反了"), "{}", e.message);
+
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    step: Some(0.0),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert!(e.message.contains("正数"), "{}", e.message);
+
+        let e = r
+            .set_param_meta("a.x", meta_edit("   "))
+            .unwrap_err();
+        assert!(e.message.contains("名称"), "{}", e.message);
+
+        assert_eq!(r.param("a.x").unwrap().label, "a.x", "拒了还动了内存");
+    }
+
+    /// 真文件上的定义编辑：值覆盖丰富的块也一样只动自己那一个块
+    #[test]
+    fn a_meta_edit_on_the_real_file_touches_one_block_only() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let key = "toolhead.MKP_retract";
+        let vt = r.param(key).unwrap().value_type;
+        let uc = r.param(key).unwrap().ui_component;
+        let dv = r.param(key).unwrap().default_value.clone();
+        let before = r.to_toml();
+
+        r.set_param_meta(
+            key,
+            ParamMetaEdit {
+                label: "回抽长度（改）".into(),
+                unit: Some("cm".into()),
+                step: Some(0.1),
+                deprecated: true,
+                value_type: vt,
+                ui_component: uc,
+                default_value: dv,
+                ..meta_edit("回抽长度（改）")
+            },
+        )
+        .expect("真数据上改得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        let p = again.param(key).unwrap();
+        assert_eq!(p.label, "回抽长度（改）");
+        assert_eq!(p.unit.as_deref(), Some("cm"));
+        assert_eq!(p.step, Some(0.1));
+        assert!(p.deprecated);
+        // 值覆盖一张不少
+        assert_eq!(
+            p.machine_variants,
+            r.param(key).unwrap().machine_variants,
+            "定义编辑动了值覆盖"
+        );
+
+        let (removed, inserted) = one_edit_only(&before, &again.to_toml());
+        assert!(!removed.contains("[[params]]"), "波及了别的字段块：{removed:?}");
+        assert!(
+            !inserted.contains("[[params]]"),
+            "插入段跨到了别的字段：{inserted:?}"
         );
     }
 }

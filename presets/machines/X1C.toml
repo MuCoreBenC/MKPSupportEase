@@ -50,6 +50,6 @@ minY = 0.0
 [[versions]]
 id = 'LITE'
 name = 'lite版'
-recommendedBundle = 'A1_MINI_STANDARD'
 tag = '推荐'
 description = '群里开源的最新lite'
+recommendedBundle = 'X1C_default'

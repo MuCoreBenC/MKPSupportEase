@@ -3478,6 +3478,23 @@
   font-style: normal;
 }
 
+/* 「收起来」（2026-10-03）：被条件关着又被摊开的卡，卡头右侧的出口。
+   幽灵按钮 —— 卡头本来就是弱区，按钮抢过行就本末倒置了 */
+.pFoldBtn {
+  padding: 1px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pFoldBtn:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
 /*
  * 「模式开关整卡收起」（C15 A2）：整卡一行都改不动时，行全收起来，卡头下面只留
  * 后端那一句 + 「仍然展开看」。那一句原本住在每一行上（`.pRowBlock`），
@@ -3651,6 +3668,33 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-3);
+}
+
+/* 「基本信息」标题行：左标题、右「编辑定义」（2026-10-03）。同一行是因为
+   那颗按钮改的就是这一段里的格子 —— 入口长在它管的那片地上 */
+.pDSecTitleRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.pDSecTitleRow .pDSecTitle {
+  margin-bottom: 0;
+}
+
+.pDefEdit {
+  padding: 0;
+  font-size: var(--fs-label);
+  color: var(--wb-primary-deep);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pDefEdit:hover {
+  text-decoration: underline;
 }
 
 .pDVal {

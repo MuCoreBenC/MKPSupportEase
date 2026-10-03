@@ -239,6 +239,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
+        // 参数定义编辑（2026-10-03 作者：「弃用是谁决定的？我没办法改」）：
+        // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
+        // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿
+        app::wb_set_param_meta,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
         app::words::wb_words,

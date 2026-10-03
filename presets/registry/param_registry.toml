@@ -2273,12 +2273,12 @@ order = 2.0
 
 [[params]]
 key = 'wiping.wiper_x'
-label = '擦料塔X坐标'
-desc = '擦料塔在热床上的X坐标位置 (mm)'
+label = "擦料塔X坐标"
+desc = "擦料塔在热床上的X坐标位置 (mm)"
 tomlKey = 'wiper_x'
-unit = 'mm'
-valueType = 'float'
-uiComponent = 'number'
+unit = "mm"
+valueType = "float"
+uiComponent = "number"
 defaultValue = 20.0
 section = 'wiping'
 configKey = 'WiperX'
@@ -2292,7 +2292,7 @@ step = 1.0
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '擦嘴塔X坐标(mm)'
-parentKey = 'wiping.have_wiping_components'
+parentKey = "wiping.have_wiping_components"
 
 [params.machineMinVariants]
 'A1:FAST' = 10.0
@@ -2319,8 +2319,8 @@ sectionId = 'tower_position'
 order = 20.0
 
 [params.showWhen]
-key = 'wiping.have_wiping_components'
-op = 'eq'
+key = "wiping.have_wiping_components"
+op = "eq"
 value = 'tower'
 
 [[params]]

@@ -198,10 +198,13 @@ export interface ChoiceView {
   deprecated: boolean
 }
 
+/** `registry::ShowOp` —— 实测只有三种 */
+export type ShowOp = 'eq' | 'neq' | 'gt'
+
 /** `registry::ShowWhen` */
 export interface ShowWhen {
   key: string
-  op: 'eq' | 'neq' | 'gt'
+  op: ShowOp
   value: unknown
 }
 
@@ -236,6 +239,26 @@ export interface RegistryView {
   updated: string
   tabs: TabMeta[]
   params: ParamView[]
+}
+
+/**
+ * `registry::ParamMetaEdit` —— 一次「参数定义」编辑的整包载荷（2026-10-03）。
+ * 模态框一次保存改的可能不止一格，所以整包提交；`null` = **清空**那一格
+ * （文件里删键），不是「不动」。
+ */
+export interface ParamMetaEdit {
+  label: string
+  desc: string
+  unit: string | null
+  valueType: ValueType
+  uiComponent: UiComponent
+  defaultValue: unknown
+  min: number | null
+  max: number | null
+  step: number | null
+  parentKey: string | null
+  showWhen: ShowWhen | null
+  deprecated: boolean
 }
 
 /* ---------- 矩阵 ---------- */
@@ -695,7 +718,7 @@ export interface Words {
    * 带变量的整句在后端就拼好了（`Row.controlNote` / `Cell.blockedNote`）——
    * 前端不拿模板填空，模板一分两处迟早分岔
    */
-  relate: Record<'goFixIt' | 'showAnyway', string>
+  relate: Record<'goFixIt' | 'showAnyway' | 'foldBack', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
   /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
@@ -1031,6 +1054,13 @@ export const wb = {
 
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
+  /**
+   * 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
+   * 出厂默认 / 属于 / 前置条件 / 弃用）。**即时落盘**（与机型尺寸那套一致），
+   * 不走参数草稿 —— 定义与值在撤销语义上不是一件事。返回重读后的注册表
+   */
+  setParamMeta: (key: string, edit: ParamMetaEdit) =>
+    invoke<RegistryView>('wb_set_param_meta', { key, edit }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),

@@ -1,0 +1,134 @@
+/*
+ * 参数定义编辑模态框（2026-10-03）。排版骨架与 `MachineDimensionsModal.module.css`
+ * 同一套（组头 + 两列网格 + 标签带原始键名），多出来的只有文本框 / 下拉两种
+ * 控件的宽度档 —— 共用类留在 `c14.module.css`，这里不复制按钮那几颗。
+ */
+
+.group + .group {
+  margin-top: 14px;
+}
+
+.groupHead {
+  padding: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+/* 两列网格。带 wide 的那格（名称 / 说明 / 出厂默认 / 属于）占满一行 */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.fieldLabel {
+  display: flex;
+  flex: 0 0 128px;
+  gap: 6px;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: right;
+}
+
+/* 原始键名：小一号、灰一点 —— 对着源文件能看上号，又不抢中文标签的视线 */
+.fieldKey {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.txt {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.txt:focus {
+  border-color: var(--wb-primary);
+  outline: none;
+}
+
+.sel {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.sel:focus {
+  border-color: var(--wb-primary);
+  outline: none;
+}
+
+.check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--wb-primary);
+}
+
+.warn {
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}
+
+.hint {
+  margin: 14px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}

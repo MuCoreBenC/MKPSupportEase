@@ -106,7 +106,7 @@ const WORDS: Json = {
     selectBundle: '左边选一个套餐',
     selectAsset: '左边选一条文件，这里显示它被谁引用',
   },
-  relate: { goFixIt: '去改那一项', showAnyway: '仍然展开看' },
+  relate: { goFixIt: '去改那一项', showAnyway: '仍然展开看', foldBack: '收起来' },
   snapshot: {
     current: { label: '快照已跟上', explain: '停手之后已经写过一次崩溃快照，现在崩了也不丢' },
     pending: { label: '待落盘', explain: '刚改的还在内存里，停手 2 秒后会写一次快照' },
@@ -1107,6 +1107,16 @@ export function installMockBackend() {
         m.dimensions = dims
         m.hasDimensions = true
         return Promise.resolve(machineListOf())
+      }
+      case 'wb_set_param_meta': {
+        /* 演示桩：同名的那条改掉就回。真机的校验（类型门 / 两级层级 / 枚举默认）
+           在 registry::set_param_meta —— 桩里不做第二套 */
+        const key = args?.key as string
+        const e = args?.edit as Partial<FixtureParam>
+        const target = PARAMS.find((x) => x.key === key)
+        if (!target) return Promise.reject({ code: 'NOT_FOUND', message: `字段定义里没有 ${key}`, traceId: 'mock' })
+        Object.assign(target, e)
+        return Promise.resolve(buildRegistry())
       }
       case 'wb_set_machine_zones': {
         const machineId = args?.machineId as string

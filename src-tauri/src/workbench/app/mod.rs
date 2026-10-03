@@ -64,7 +64,9 @@ use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::load_presets;
-use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
+use crate::workbench::presets::registry::{
+    ParamDef, ParamMetaEdit, ShowWhen, TabMeta, UiComponent, ValueType,
+};
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
 use crate::workbench::{paths, Roots};
@@ -527,16 +529,44 @@ pub struct ChoiceView {
 #[tauri::command(async)]
 pub fn wb_registry() -> Result<RegistryView, AppError> {
     traced("wb_registry", |_| {
-        with_ctx(|ctx| {
-            let reg = &ctx.presets.registry;
-            Ok(RegistryView {
-                updated: reg.updated().to_owned(),
-                tabs: reg.param_tabs(),
-                params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
-            })
+        with_ctx(|ctx| Ok(registry_view(&ctx.presets.registry)))
+    })
+}
+
+/// 注册表视图。`wb_registry` 与 `wb_set_param_meta` 共用一份拼法
+fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView {
+    RegistryView {
+        updated: reg.updated().to_owned(),
+        tabs: reg.param_tabs(),
+        params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
+    }
+}
+
+/// **改一条参数的定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
+/// 出厂默认 / 属于 / 前置条件 / 弃用）。
+///
+/// # 即时落盘，不进参数草稿栈（与机型尺寸 / 禁区那套一致）
+///
+/// 定义与值在撤销语义上不是一件事：值的撤销是「把那一格改回去」，定义的撤销是
+/// 「把一段定义整个改回去」—— 混进同一个栈里，两边的「撤销一步」都说不清。
+///
+/// # 写完整份重读
+///
+/// 定义一变，注册表指纹就变了（它进「待生成」的判定），而指纹缓存是
+/// **构造完不再变**的 —— 换掉整份 [`Presets`] 是唯一让指纹跟上改动的方式，
+/// 顺带保证内存与盘重新对表。返回重读后的注册表视图。
+#[tauri::command(async)]
+pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryView, AppError> {
+    traced("wb_set_param_meta", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.registry.set_param_meta(&key, edit)?;
+            ctx.presets.registry.write_back()?;
+            ctx.presets = ctx.presets.reload()?;
+            Ok(registry_view(&ctx.presets.registry))
         })
     })
 }
+
 
 fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
     // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集，

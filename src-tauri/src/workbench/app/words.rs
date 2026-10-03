@@ -233,6 +233,7 @@ fn words() -> Words {
         relate: [
             ("goFixIt", w::relate::GO_FIX_IT),
             ("showAnyway", w::relate::SHOW_ANYWAY),
+            ("foldBack", w::relate::FOLD_BACK),
         ]
         .into_iter()
         .collect(),

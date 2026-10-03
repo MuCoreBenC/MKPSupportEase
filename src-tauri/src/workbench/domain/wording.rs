@@ -544,6 +544,10 @@ pub mod relate {
     /// 收起来的那几项点开看的入口
     pub const SHOW_ANYWAY: &str = "仍然展开看";
 
+    /// 摊开之后把它收回去的那颗（2026-10-03 作者：「展开了之后，还有按钮可以
+    /// 把它折回来」）—— 与 [`SHOW_ANYWAY`] 是一对：一个入口、一个出口
+    pub const FOLD_BACK: &str = "收起来";
+
     /// 对照矩阵差异格的悬停句（C14 第四轮）：差异由绿底承担，悬停才说基准是多少
     pub fn base_value_is(text: &str) -> String {
         format!("{}是 {text}", super::level_label(super::Level::Machine))

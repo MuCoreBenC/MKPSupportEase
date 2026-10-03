@@ -80,6 +80,7 @@ import BatchEdit from './BatchEdit'
 import type { BatchTarget } from './BatchEdit'
 import CellEditor from './CellEditor'
 import CompareMatrix from './CompareMatrix'
+import ParamDefModal from './ParamDefModal'
 import ParamDetail, { StatusTag } from './ParamDetail'
 import s from '../c14.module.css'
 
@@ -153,8 +154,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   /**
    * 「仍然展开看」摊开的那几张卡（C15 A2）。**只装 session 里点开过的** ——
    * 收不收起来每次渲染按后端给的行态现判，所以条件一变回来，卡自己就正常了。
+   * 2026-10-03 作者：「展开了之后，还有按钮可以把它折回来」—— 摊开的卡上
+   * 长一颗「收起来」，点了就把这一张从这里请出去（收起判据照旧在后端字段里）。
    */
   const [openedCards, setOpenedCards] = useState<string[]>([])
+  /** 正在编辑定义的参数（2026-10-03。「编辑定义」模态框，null = 关着） */
+  const [defEditKey, setDefEditKey] = useState<string | null>(null)
+  /**
+   * 定义落盘的计数。定义一变，行的分组/文案/可改性都可能变 —— 挂进三处
+   * 派生数据的 effect 里当一次「手动 tick」（`tick` 是外壳的，只管值）
+   */
+  const [metaTick, setMetaTick] = useState(0)
   /** 对照模式右栏的两页签：false = 参数详情，true = 批量修改 */
   const [batchTab, setBatchTab] = useState(false)
   /** 多行 G-code 的模态框：存「哪一层」—— 按钮只在框右上角那枚（C14 第八轮） */
@@ -255,7 +265,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .desk(machineId, target === BASE ? null : target, tabSel, q)
       .then(setDesk)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [mode, machineId, target, tabSel, q, tick])
+  }, [mode, machineId, target, tabSel, q, tick, metaTick])
 
   /*
    * 「去处理」带过来的定位（C14 第二十四轮 / C15 同款）：等这一屏配方台读完，
@@ -282,7 +292,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .matrix(compareColRefs, tabSel, q, baseMachineId)
       .then(setMatrix)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [mode, compareColRefs, tabSel, q, baseMachineId, tick])
+  }, [mode, compareColRefs, tabSel, q, baseMachineId, tick, metaTick])
 
   /* 对照模式右栏「参数详情」的数据：基准机型的全部层（选了参数才取） */
   useEffect(() => {
@@ -294,7 +304,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .desk(baseMachineId, target === BASE ? null : target, null, '')
       .then(setDrawerDesk)
       .catch(() => setDrawerDesk(null))
-  }, [mode, sel, baseMachineId, target, tick])
+  }, [mode, sel, baseMachineId, target, tick, metaTick])
 
   /** 机器的中文名（对照模式的层标签用） */
 
@@ -904,6 +914,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                          * 模式开关整卡收起（C15 A2）：整卡现在一行都改不动就收起行，
                          * 只留后端那句 + 「仍然展开看」。判据见文件头那一节 ——
                          * 一句话说：**判据全在后端给的字段里**（`offNote` / `blockedHint`）。
+                         * 摊开之后卡头长一颗「收起来」（2026-10-03）—— 出口与入口是一对。
                          */
                         const note = collapseNoteOf(g, desk.cur, q.trim() !== '')
                         if (note !== null && !openedCards.includes(g.sectionId)) {
@@ -935,6 +946,12 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                                 mid: machineId ?? '',
                                 uid: target === BASE ? null : target,
                               })
+                            }
+                            onCollapse={
+                              note !== null
+                                ? () =>
+                                    setOpenedCards((prev) => prev.filter((id) => id !== g.sectionId))
+                                : undefined
                             }
                           />
                         )
@@ -1120,6 +1137,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                   onClose={() => setSel(null)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
+                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（即时落盘） */
+                  onEditDef={selParam ? () => setDefEditKey(sel) : undefined}
                   /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
                   onOpenGcode={(key, layerUid) => {
                     const mid =
@@ -1225,6 +1244,25 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
           onClose={() => setGcodeOpen(null)}
         />
       )}
+
+      {/*
+        参数定义编辑（2026-10-03）：名称/单位/值类型/控件/范围/步进/出厂默认/
+        属于/前置条件/弃用。即时落盘 —— 回来的注册表直接顶掉旧的，三处派生
+        数据靠 `metaTick` 重取。
+      */}
+      {defEditKey !== null && (
+        <ParamDefModal
+          paramKey={defEditKey}
+          param={paramOf(defEditKey)}
+          params={registry?.params ?? []}
+          onClose={() => setDefEditKey(null)}
+          onSaved={(next) => {
+            setRegistry(next)
+            setDefEditKey(null)
+            setMetaTick((t) => t + 1)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1287,6 +1325,7 @@ function GroupCard({
   onPick,
   onWrite,
   onOpenGcode,
+  onCollapse,
 }: {
   group: DeskGroup
   cur: number
@@ -1307,12 +1346,27 @@ function GroupCard({
     beforeRaw?: string,
   ) => void
   onOpenGcode: (key: string) => void
+  /**
+   * 「收起来」（2026-10-03）：这张卡被条件关着、又被「仍然展开看」摊开时才有 ——
+   * 点了回到收起态。条件已经变回来了（`offNote` 没了）就不给：正常卡没有「收」可言
+   */
+  onCollapse?: () => void
 }) {
   return (
     <section className={s.pGroup}>
       <header className={s.pGroupHead}>
         <span>{group.label}</span>
         <em>{group.count}</em>
+        {onCollapse && (
+          <button
+            type="button"
+            className={s.pFoldBtn}
+            title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
+            onClick={onCollapse}
+          >
+            {words.relate.foldBack}
+          </button>
+        )}
       </header>
       {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
       {group.items
