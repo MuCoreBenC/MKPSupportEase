@@ -1,16 +1,17 @@
 /*
- * 预设那一行 + 三轴读数条，首页与校准页共用。
+ * 从 v029/components/CalibHead 整份搬来（预设那一行 + 三轴读数条，两页共用）。
  *
- * 两处与试验场那份不同：
- *   1. `useDevState().glideMs` 换成常量 GLIDE_MS（调试面板不属于产品）。
- *   2. 预设下拉的选项换成**真实文件**（`getPresetFiles()` 里 9 份 MKP，见 PresetLine），
- *      由页面传进来 —— 这一层不自己拉数据。
+ * 改了两处：
+ *   1. 名字与 import：AxisBar / PresetLine / CalibHead 加 A44 后缀，
+ *      样式仍然借用首页那份 CSS Module（现在叫 `../home/PageHomeA44.module.css`）——
+ *      理由见下面原注释：那里面有一批上下文选择器，抄成新文件会静悄悄失效。
+ *   2. `useDevState().glideMs` 换成常量 GLIDE_MS（调试面板不属于产品）。
  *
- * 样式仍然借用首页那份 CSS Module（`../home/PageHome.module.css`）——
- * 理由见下面原注释：那里面有一批上下文选择器，抄成新文件会静悄悄失效。
+ * T10：预设下拉的选项换成**真实文件**（`getPresetFiles()` 里 9 份 MKP，见 PresetLine），
+ * 由页面传进来 —— 这一层不自己拉数据。
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useDeckLayer } from '../home/DeckLayerContext'
 import Skeleton from '../home/Skeleton'
 import { GLIDE_MS } from '../home/devDefaults'
@@ -24,7 +25,7 @@ import type { PresetState } from './usePreset'
  * 所以这里拿到的 .axes / .axisInput 与向导页里的是**同一批类名**，两处长得一模一样。
  * 更要紧的是那一页里还有一批上下文选择器（`.calib[data-plate='xy'] > .axes`、
  * `[data-layer='exit'] .calibPreset` …）——把这几段 CSS 搬到新文件会让它们哈希不上、
- * 在向导里静悄悄失效，而那些规则正是为落位抖动调出来的，不能动。
+ * 在向导里静悄悄失效，而那些规则正是落位抖动那一轮调出来的，不能动。
  */
 import p from '../home/PageHome.module.css'
 
@@ -55,6 +56,7 @@ export function AxisBar({
   canType = false,
   onType,
   onRevert,
+  onReset,
 }: {
   saved: Axes | null
   draft: Axes | null
@@ -73,9 +75,17 @@ export function AxisBar({
   canType?: boolean
   onType?: (axis: Axis, raw: string) => void
   onRevert?: (axis: Axis) => void
+  /** 点「原 x.xx」：这一轴整个退回已保存值（手输 + 板上点选一起清） */
+  onReset?: (axis: Axis) => void
 }) {
   const ref = useRef<HTMLDListElement>(null)
   const prev = useRef<{ orient: 'col' | 'row'; pos: Pos[] } | null>(null)
+  /*
+   * 每个实例自己的 id 前缀：轴名 label（htmlFor）与值框都要指到**自己这一份**的输入框。
+   * 向导里当前卡与露出卡 / 退出层会同时各挂一份 AxisBar，静态 id 会撞车 ——
+   * label 点下去可能聚焦到缝里那份只读框上。
+   */
+  const uid = useId()
   /*
    * 正在打字的那一轴 + 它的原始输入串。
    *
@@ -99,6 +109,30 @@ export function AxisBar({
     if (buf.text.trim() === '' || !Number.isFinite(n)) return
     if (n.toFixed(2) !== draft[buf.k].toFixed(2)) setBuf(null)
   }, [buf, draft])
+
+  /*
+   * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
+   * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
+   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   * 挂在 dl 上做委托：三颗输入框共用一个监听，轴从 data-axis 读。
+   */
+  useEffect(() => {
+    const root = ref.current
+    if (!root || !canType || !onType) return
+    const onWheel = (e: WheelEvent) => {
+      const input = e.target instanceof HTMLInputElement ? e.target : null
+      if (!input || input.readOnly || input.type !== 'number') return
+      const k = input.dataset.axis
+      if (k !== 'x' && k !== 'y' && k !== 'z') return
+      e.preventDefault()
+      const cur = Number(input.value)
+      if (!Number.isFinite(cur)) return
+      const next = Math.min(50, Math.max(-50, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
+      onType(k, next.toFixed(2))
+    }
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
+  }, [canType, onType])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -145,23 +179,39 @@ export function AxisBar({
     <dl className={p.axes} ref={ref} data-orient={orient}>
       {AXIS_ROWS.map(([label, k]) => {
         const changed = view === 'value' && saved !== null && draft !== null && draft[k] !== saved[k]
+        const hasBase = view === 'value' && saved !== null
         /* 非当前轴压小：Z 页压 X / Y，XY 页压 Z。两页都还看得见三个数，
            但"这一页在校哪个"不用读眉标题也知道 */
         const minor = activeAxis ? (activeAxis === 'z' ? k !== 'z' : k === 'z') : false
+        const id = `${uid}-${k}`
+        const revertible = changed && canType
         return (
           <div className={p.axis} key={k} data-changed={changed} data-minor={minor}>
             <dt className={p.axisLabel}>
-              {label}
+              {/* 轴名也是热区的一部分：点它一样聚焦（G06-8 的整列可点，作者 10-03 点名要带上首页） */}
+              <label htmlFor={id}>{label}</label>
               <i className={p.dot} data-on={changed} aria-hidden={!changed} />
               {/*
                 原始值跟在标签右侧，不再占值行。
                 常驻占位、只切 visibility：标签行的宽高在"改没改过"之间一个像素都不动，
                 值行也就不会因为多出「旧 →」那一段而变宽（实测原来一点就 +60px，
                 窄窗里把「mm」挤出卡片）。
+
+                10-03 起它同时是还原入口（作者：点了就变回原本的）：有基准就常显
+                （只在改动后才冒出来等于没有），改过的那一轴可点 —— 整轴退回已保存值，
+                手输的与板上点出来的一起清。没改动 / 只读时 disabled。
               */}
-              <span className={p.axisFrom} data-on={changed} aria-hidden={!changed}>
+              <button
+                type="button"
+                className={p.axisFrom}
+                data-on={hasBase}
+                data-act={changed ? 'revert' : undefined}
+                disabled={!revertible}
+                title={revertible && saved ? `点一下还原成 ${saved[k].toFixed(2)}` : undefined}
+                onClick={revertible ? () => onReset?.(k) : undefined}
+              >
                 原 {saved ? saved[k].toFixed(2) : '0.00'}
-              </span>
+              </button>
             </dt>
             <dd className={p.axisValue}>
               {view === 'value' && draft ? (
@@ -176,41 +226,55 @@ export function AxisBar({
                     不能改时用 readOnly 而不是 disabled：disabled 会压成半透明（原来那条
                     `.axisInput:disabled { opacity: .5 }`），那又是第三种长相。
                     tabIndex -1 是第二层保险 —— 露出卡与退出层本来就被 SlideDeck 标了 inert。
+
+                    数字与 mm 住进同一颗 label（作者 10-03：「首页编辑范围有点小，做成校准页
+                    那样的大热区」—— G06-8 的做法：整颗框、mm、轴名点下去都是聚焦，框平时
+                    无边框，hover / 聚焦才显一颗宽松的框；padding 3px 10px + margin 0 -10px
+                    把内衬撑到框外，数字仍贴轴名左缘不挪窝）。
                   */}
-                  <input
-                    className={p.axisInput}
-                    type="number"
-                    step="0.01"
-                    min={-50}
-                    max={50}
-                    inputMode="decimal"
-                    aria-label={`${label}（毫米）`}
-                    readOnly={!canType}
-                    tabIndex={canType ? undefined : -1}
-                    value={buf?.k === k ? buf.text : draft[k].toFixed(2)}
-                    onChange={
-                      canType
-                        ? (e) => {
-                            setBuf({ k, text: e.target.value })
-                            onType?.(k, e.target.value)
-                          }
-                        : undefined
-                    }
-                    onBlur={canType ? () => setBuf(null) : undefined}
-                    onKeyDown={
-                      canType
-                        ? (e) => {
-                            if (e.key === 'Enter') e.currentTarget.blur()
-                            if (e.key === 'Escape') {
-                              setBuf(null)
-                              onRevert?.(k)
-                              e.currentTarget.blur()
+                  <label
+                    className={p.axisField}
+                    htmlFor={id}
+                    data-readonly={!canType}
+                    title={canType ? undefined : '先选一份预设再改'}
+                  >
+                    <input
+                      id={id}
+                      className={p.axisInput}
+                      type="number"
+                      step="0.01"
+                      min={-50}
+                      max={50}
+                      inputMode="decimal"
+                      aria-label={`${label}（毫米）`}
+                      data-axis={k}
+                      readOnly={!canType}
+                      tabIndex={canType ? undefined : -1}
+                      value={buf?.k === k ? buf.text : draft[k].toFixed(2)}
+                      onChange={
+                        canType
+                          ? (e) => {
+                              setBuf({ k, text: e.target.value })
+                              onType?.(k, e.target.value)
                             }
-                          }
-                        : undefined
-                    }
-                  />{' '}
-                  mm
+                          : undefined
+                      }
+                      onBlur={canType ? () => setBuf(null) : undefined}
+                      onKeyDown={
+                        canType
+                          ? (e) => {
+                              if (e.key === 'Enter') e.currentTarget.blur()
+                              if (e.key === 'Escape') {
+                                setBuf(null)
+                                onRevert?.(k)
+                                e.currentTarget.blur()
+                              }
+                            }
+                          : undefined
+                      }
+                    />
+                    <span className={p.axisUnit}>mm</span>
+                  </label>
                 </>
               ) : view === 'loading' ? (
                 <Skeleton label="正在取预设" />
@@ -228,10 +292,10 @@ export function AxisBar({
 /**
  * 「预设文件」那一行。
  *
- * 可以直接在这里换：一个整行宽的下拉，选了之后由页面反填「机型 + 打印件版本」，
+ * 从 v0.0.20 起可以直接在这里换：一个整行宽的下拉，选了之后由页面反填「机型 + 打印件版本」，
  * 所以在校准页换预设等于把前面那两级也改了。
  *
- * 选项是**真实文件体系**里那 9 份 MKP（`getPresetFiles()` 的倒查给出每份的 机型/版本），
+ * T10：选项换成**真实文件体系**里那 9 份 MKP（`getPresetFiles()` 的倒查给出每份的 机型/版本），
  * 不再读手编的 presetIndex；`value` 也换成同一套 id（`机型/版本`，与工作台发布 uid 同形状）。
  * 名字未知时停在占位项上，位置固定、不跳版。
  *
@@ -247,7 +311,7 @@ export function PresetLine({
   state: PresetState
   /** 当前选中那份文件的 id：`机型/版本` */
   value: string | null
-  /** 全部 MKP 预设文件（来自 `useCatalog` 的 presets） */
+  /** 全部 MKP 预设文件（来自 `useCatalogA44` 的 presets） */
   options: { uid: string; name: string }[]
   onPick: (uid: string) => void
 }) {
@@ -308,6 +372,7 @@ export default function CalibHead({
   showPreset = true,
   onType,
   onRevert,
+  onReset,
 }: {
   saved: Axes | null
   draft: Axes | null
@@ -316,19 +381,23 @@ export default function CalibHead({
   activeAxis: 'z' | 'xy'
   /** 当前那份文件的 id（`机型/版本`）—— 一份文件对应一处机型 + 版本 */
   presetUid: string | null
-  /** 全部 MKP 预设文件 —— 预设下拉的选项（页面从 useCatalog 取） */
+  /** 全部 MKP 预设文件 —— 预设下拉的选项（页面从 useCatalogA44 取） */
   presetOptions: { uid: string; name: string }[]
   onPickPreset: (uid: string) => void
   /** 取到预设才有基准可改（与"点板子不产生读数"同一条规则） */
   canEdit: boolean
   /**
    * 要不要带上「预设文件」那一行。
-   * 「校准」tab 传 false —— 它把预设下拉挪到页首那一行自己渲染（见 PageCalib）。
-   * 向导不传：那边的预设行还参与卡片层的淡入淡出与缝里的藏显，不能拆出去。
+   * 首页与「校准」tab 都传 false —— 预设入口已经不在内容列里：
+   * 「校准」tab 的 pill 在页首那行自己渲染（见 PageCalibA44），首页的 pill 在卡片右上角
+   * （CardFrame 的 corner，见 PageHomeA44）。向导不传时也不再有人用 —— PresetLine
+   * 留着给 g06-7 抽卡稿。
    */
   showPreset?: boolean
   onType: (axis: Axis, raw: string) => void
   onRevert: (axis: Axis) => void
+  /** 点「原 x.xx」：这一轴整个退回已保存值 */
+  onReset?: (axis: Axis) => void
 }) {
   const { layer, phase } = useDeckLayer()
   const offPlane = layer !== 'plane'
@@ -364,6 +433,7 @@ export default function CalibHead({
         canType={canType}
         onType={onType}
         onRevert={onRevert}
+        onReset={onReset}
       />
     </>
   )

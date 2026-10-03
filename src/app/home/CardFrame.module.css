@@ -149,6 +149,41 @@
   color: var(--text-1);
 }
 
+/* 绿底浅色一档（校准卡的「打开模型」）：主入口的份量，比素胶囊醒目一档 */
+.topBtn[data-accent='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.topBtn[data-accent='true']:hover {
+  border-color: var(--accent-deep);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/*
+ * 卡片右上角的一小块（首页校准卡的预设 pill）。与眉标题同一条 y（--chrome-y），
+ * 右缘对齐 --chrome-x；peekSafe 的卡跟着 --chrome-peek 一起退，
+ * 不然 pill 会钻到露出卡底下去（.pills 那条注释里量过同一个坑）。
+ */
+.corner {
+  position: absolute;
+  top: var(--chrome-y);
+  right: calc(var(--chrome-x) + var(--chrome-peek, 0px));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+
+/* 露出卡 / 退出层里不显形：缝里只有 20% 宽，右上角这一块放不下也不该能点 */
+[data-layer='card']:not([data-phase='in']) .corner,
+[data-layer='exit'] .corner {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 徽标挂在标题右侧固定间距：不占位，出现消失都不动版面。
    line-height 也要写死 —— 让整颗（含边框）矮于 .eyebrow 的 22px 行盒 */
 .tag {
@@ -265,12 +300,12 @@
 /*
  * 给右侧露出的那张卡让位（按需开启：只有传了 peekSafe 的卡才让）。
  *
- * 这里把"露多少"收成了一个量：SlideDeck 按 deck 实测宽度算出 `--peek-ratio`
+ * 本稿把"露多少"收成了一个量：SlideDeck 按 deck 实测宽度算出 `--peek-ratio`
  * （520 起 0、640 满 0.2，每 6px 多 1%）并下发。让位量因此直接由它算：
  *
  *   要让的 = 被卡盖住的那一段（p × 容器宽） − 一口呼吸
  *
- * 旧写法是**两条手工拟合的斜坡**：有卡档 `(100cqw − 480) × 0.85`，
+ * 老稿这里是**两条手工拟合的斜坡**：有卡档 `(100cqw − 480) × 0.85`，
  * 再加一条 mini 档的"提前让位" `(100cqw − 520) × 0.896`（0.896 = 107.52 / 120，
  * 专门算出来让它在 640 处与有卡档接上）。那两个系数存在的唯一原因是
  * 卡的出现是个布尔跳变、CSS 又问不到它 —— 现在卡自己连续出场，斜坡不用拟合了，
@@ -334,7 +369,7 @@
    * "框已经到位、字还在飘"，两个 CSS 文件里各写一条也一样会打架。
    *
    * `scale(var(--peek-content))` 就是"内容偏小"的那一半 —— 只有白底 `.face` 会缩的话，
-   * 观感是卡框在长、字没动（见 SlideDeck.module.css 里 --peek-content 那段）。
+   * 观感是卡框在长、字没动（见 SlideDeckA44.module.css 里 --peek-content 那段）。
    */
   transform: translateX(var(--pane-shift)) scale(var(--peek-content, 1));
 
@@ -402,16 +437,16 @@
  *
  *   位移   0%  → 60%   回到 0                    —— 与 card-slide 同窗口同曲线
  *   缩放   0%  → 60%   保持偏小；60% → 80% 长到 1 —— 与白底 face-grow 同窗口
- *   亮度   0%  → 60%   保持压暗；60% → 80% 回到 1
+ *   亮度   0%  → 60%   保持压暗；60%  → 80% 回到 1
  *   模糊   0%  → 80%   **保持** 2.4px；80% → 100% 才归零
  *
  * 60 / 80 这两个界不是随手取的，它们是"卡框长完"的两个时刻（glide = 720 时是 432ms / 576ms）：
  * 缩放段必须与白底的 face-grow 同窗口同曲线，错开就是"卡框先长、字后长"——
- * 那正是 SlideDeck 里专门修过的毛病，所以这里不跟着旧版的 85% 走
- * （旧稿的白底是 0.6G → 0.85G 长完，本稿被压成 0.6G → 0.8G）。
+ * 那正是 SlideDeck 里专门修过的毛病，所以这里不跟着老稿的 85% 走
+ * （老稿的白底是 0.6G → 0.85G 长完，本稿被压成 0.6G → 0.8G）。
  *
  * 模糊留到最后 20% 才消，是为了遮住落位那一瞬的亚像素重排（Windows Chromium 在合成层
- * 切换时会重新栅格化文字）；那一段的 linear 是从旧版搬来的 —— 曲线收尾落在模糊上会
+ * 切换时会重新栅格化文字）；那一段的 linear 是老稿的写法 —— 曲线收尾落在模糊上会
  * "糊着突然变清"，线性过渡更像对焦。
  *
  * 注意：**模糊是这一稿卡顿的第一嫌疑**（大面积 filter 每帧重新合成）。
