@@ -134,11 +134,17 @@ body,
   cursor: pointer;
 }
 
-:where([data-wb]) button:focus-visible,
-:where([data-wb]) input:focus-visible {
-  /* 2026-10-03 作者那一刀：聚焦环不要绿的，统一跟 --wb-primary 走 */
+:where([data-wb]) button:focus-visible {
   outline: 2px solid var(--wb-primary);
   outline-offset: 2px;
+}
+
+/* 文本框的聚焦学 .inp：细边转蓝 + 一圈微光（2026-10-03 作者那一刀：
+   实心 2px 蓝环太亮 —— 要的是"很细的微微的边缘发光"那一种） */
+:where([data-wb]) input:focus-visible {
+  border-color: var(--wb-primary);
+  outline: 2px solid var(--wb-primary-soft);
+  outline-offset: 0;
 }
 
 /* 数值等宽，避免跳动（试验场 global.css 同名类的等价物，圈在壳内） */

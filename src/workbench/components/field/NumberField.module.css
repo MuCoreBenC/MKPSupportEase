@@ -21,6 +21,9 @@
 
 .box:focus-within {
   border-color: var(--wb-primary);
+  /* 跟 .inp 一个口吻：细边转蓝 + 一圈微光，不要实心粗环 */
+  outline: 2px solid var(--wb-primary-soft);
+  outline-offset: 0;
 }
 
 /* tokens.css 里没有告警色，这个红与 #32 各处「未保存红点」用的是同一个值 */

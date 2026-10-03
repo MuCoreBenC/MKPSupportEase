@@ -2,8 +2,8 @@
  * 禁区编辑器（2026-10-03，照旧面板 mkppanel 的 ZoneEditorModal）。
  *
  * 版式：左画布（55%）+ 右列表（45%），工具条在画布上方、状态在框脚。
- * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块悬停上去（或正在
- * 改它的坐标）才出现顶点手柄，坐标牌只跟亮着的那一个点。
+ * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；悬停 / 选中只让线段变色，
+ * 点不被画出来 —— 只亮正在编辑 / 拖着的那一个，它头顶跟一块圆角坐标牌。
  */
 
 .wrap {
@@ -101,6 +101,18 @@
   stroke-width: 1.6;
 }
 
+/* 悬停只让线段变色，不出现点（作者那一刀）：没选中的块泛蓝邀请点一下，
+   选中的块再粗一点；压在面上的透明边热区也算在 g 里，贴着线悬停同样生效 */
+.zoneG:hover .poly {
+  stroke: var(--wb-primary);
+  stroke-width: 1.3;
+}
+
+.zoneG:hover .polyOn {
+  stroke: var(--danger);
+  stroke-width: 2;
+}
+
 .handle {
   fill: var(--surface-solid);
   stroke: var(--wb-primary);
@@ -112,23 +124,23 @@
   cursor: grabbing;
 }
 
-/* 亮着的那一个：实心蓝、大一号（正在悬停 / 拖动 / 编辑它的坐标） */
+/* 亮着的那一个：实心蓝、大一号（正在编辑它的坐标 / 正拖着 / 刚加上的） */
 .handleOn {
   fill: var(--wb-primary);
   stroke: var(--surface-solid);
   stroke-width: 0.7;
 }
 
-/* 坐标牌：亮着那个点头顶的圆角小矩形 */
+/* 坐标牌：亮着那个点头顶的圆角小矩形（作者嫌小 —— 放大到肉眼舒服的一档） */
 .tagBox {
   fill: var(--surface-solid);
   stroke: var(--wb-primary);
-  stroke-width: 0.45;
+  stroke-width: 0.5;
   pointer-events: none;
 }
 
 .handleText {
-  font-size: 3.2px;
+  font-size: 8px;
   font-weight: 600;
   fill: var(--wb-primary-deep);
   pointer-events: none;

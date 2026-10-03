@@ -15,10 +15,9 @@
  *
  * # 干净画布
  *
- * 默认只画床身轮廓 + 网格 + 多边形的边；**顶点手柄默认不画** —— 悬停到选中的
- * 块上、拖着顶点、或正在右边改某个点的坐标时才出现。亮着的那一个点（悬停 /
- * 拖动 / 正在编辑的）实心放大，头顶跟一块圆角坐标牌（旧面板的设计原则，照抄）。
- * 右边坐标行用的是参数台同款 `NumberField`（大箭头步进 / 滚轮 / 键入）。
+ * 默认只画床身轮廓 + 网格 + 多边形的边；悬停 / 选中只让**线段变色**，不冒出点。
+ * 画布上**只有亮着的那一个点**：正在右边改它的坐标、正拖着它、或刚加上的那个 ——
+ * 实心放大，头顶跟一块圆角坐标牌。右边坐标行用的是参数台同款 `NumberField`。
  *
  * # 加点只有两条路（2026-10-03 作者那刀：画布空白处点击**不再**加点）
  *
@@ -71,11 +70,9 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const [past, setPast] = useState<P[][][]>([])
   const [future, setFuture] = useState<P[][][]>([])
   const [sel, setSel] = useState<number | null>(null)
-  /** 亮着的那一个点：悬停 / 拖着 / 正在右边改它坐标的那一个（选中块里的下标） */
+  /** 亮着的那一个点：正在右边改它坐标、正拖着它、或刚加上的那个（选中块里的下标）。
+   *  画布上**只有这一个**点 —— 悬停只让线段变色，不冒出别的点 */
   const [activePt, setActivePt] = useState<number | null>(null)
-  /** 顶点手柄默认不画 —— 悬停到选中的块上、或正在编辑坐标时才出现 */
-  const [hoverPoly, setHoverPoly] = useState(false)
-  const [dragging, setDragging] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [busy, setBusy] = useState(false)
   /**
@@ -94,8 +91,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     setFuture([])
     setSel(machine?.zones.length ? 0 : null)
     setActivePt(null)
-    setHoverPoly(false)
-    setDragging(false)
     setZoom(1)
     setBusy(false)
     setCursor(null)
@@ -184,7 +179,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     e.stopPropagation()
     setSel(zi)
     setActivePt(pi)
-    setDragging(true)
     dragRef.current = {
       zone: zi,
       point: pi,
@@ -220,7 +214,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const onCanvasUp = (e: ReactPointerEvent<SVGSVGElement>) => {
     const d = dragRef.current
     dragRef.current = null
-    setDragging(false)
     if (svgRef.current?.hasPointerCapture(e.pointerId)) svgRef.current.releasePointerCapture(e.pointerId)
     // 松手时光标若已不在那个顶点上，把它脚下的坐标牌收掉
     if (d !== null && activePt !== null) {
@@ -247,14 +240,12 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     commit([...zones, fresh])
     setSel(zones.length)
     setActivePt(null)
-    setHoverPoly(false)
   }
 
   const removeZone = (i: number) => {
     commit(zones.filter((_, k) => k !== i))
     setSel((cur) => (cur === null ? null : cur === i ? null : cur > i ? cur - 1 : cur))
     setActivePt(null)
-    setHoverPoly(false)
   }
 
   const duplicateZone = (i: number) => {
@@ -266,7 +257,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     commit([...zones, copy])
     setSel(zones.length)
     setActivePt(null)
-    setHoverPoly(false)
   }
 
   /** 列表里的「添加点」：加在末点→首点那条收口边的中点（跟点边插入同一口径） */
@@ -329,9 +319,8 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   /* 鼠标悬停时能看出"点了会加在哪"（选中某块时才有意义） */
   const cursorHint = cursor !== null && sel !== null ? `${cursor[0]}, ${cursor[1]}` : ''
 
-  /* 顶点手柄半径 / 坐标牌离顶点的距离（随床身大小缩放） */
+  /* 顶点手柄半径（随床身大小缩放） */
   const handleR = Math.max(2.2, Math.min(bed.width, bed.depth) / 90)
-  const labelOff = Math.max(4, Math.min(bed.width, bed.depth) / 42)
 
   return (
     <ModalC14
@@ -427,6 +416,11 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               viewBox={viewBox}
               preserveAspectRatio="xMidYMid meet"
               style={{ transform: `scale(${zoom})` }}
+              onPointerDown={() => {
+                /* 按在手柄上那颗会 stopPropagation，走不到这里 —— 所以按到别处
+                   （床身 / 块面）就是"不编辑那个点了"，把亮着的点收掉 */
+                if (dragRef.current === null) setActivePt(null)
+              }}
               onPointerMove={onCanvasMove}
               onPointerUp={onCanvasUp}
               onPointerLeave={() => setCursor(null)}
@@ -438,23 +432,14 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               ))}
 
               {zones.map((z, i) => {
-                /* 顶点手柄默认不画（画布要干净）—— 悬停到选中的块上、拖着顶点、
-                   或正在右边改某个点的坐标时才出现；亮着的那一个带坐标牌 */
-                const showHandles = i === sel && (hoverPoly || dragging || activePt !== null)
                 return (
-                  <g
-                    key={i}
-                    onPointerEnter={i === sel ? () => setHoverPoly(true) : undefined}
-                    onPointerLeave={i === sel ? () => setHoverPoly(false) : undefined}
-                  >
+                  <g key={i} className={s.zoneG}>
                     <polygon
                       points={pointsAttr(z)}
                       className={`${s.poly} ${i === sel ? s.polyOn : ''}`}
                       onClick={() => {
                         setSel(i)
                         setActivePt(null)
-                        /* 指针就压在这块上：选中即亮出手柄，不用再蹭一下鼠标 */
-                        setHoverPoly(true)
                       }}
                     />
                     {/* 选中那块的"点边加顶点"热区：看不见，但一直能点（压在面上、手柄下） */}
@@ -479,44 +464,34 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                           />
                         )
                       })}
-                    {showHandles &&
+                    {/* 画布上只有亮着的那一个点（正在改它的坐标 / 正拖着 / 刚加上的） */}
+                    {i === sel &&
                       z.map(([x, y], j) => {
+                        if (j !== activePt) return null
                         const py = bed.depth - y
-                        const lit = j === activePt
                         const label = `${x}, ${y}`
-                        const boxW = label.length * 2 + 2.8
+                        const boxW = label.length * 4.7 + 7
+                        const boxH = 11
+                        /* 牌子默认顶在点上方；贴着床身上沿时翻到点下方 */
+                        const boxY = py - 4 - boxH >= 0.6 ? py - 4 - boxH : py + 4
+                        const boxX = Math.max(0.6, Math.min(bed.width - boxW - 0.6, x - boxW / 2))
                         return (
                           <g key={j}>
                             <circle
                               cx={x}
                               cy={py}
-                              r={lit ? handleR * 1.5 : handleR}
-                              className={lit ? `${s.handle} ${s.handleOn}` : s.handle}
+                              r={handleR * 1.6}
+                              className={`${s.handle} ${s.handleOn}`}
                               onPointerDown={onVertexDown(i, j)}
-                              onPointerEnter={() => setActivePt(j)}
-                              onPointerLeave={() => {
-                                if (dragRef.current === null) setActivePt((cur) => (cur === j ? null : cur))
-                              }}
                               onContextMenu={(e) => {
                                 e.preventDefault()
                                 removePoint(i, j)
                               }}
                             />
-                            {lit && (
-                              <>
-                                <rect
-                                  className={s.tagBox}
-                                  x={Math.max(0.6, Math.min(bed.width - boxW - 0.6, x - boxW / 2))}
-                                  y={py - labelOff - 3.8}
-                                  width={boxW}
-                                  height={4.8}
-                                  rx={1.2}
-                                />
-                                <text x={x} y={py - labelOff - 0.7} className={s.handleText} textAnchor="middle">
-                                  {label}
-                                </text>
-                              </>
-                            )}
+                            <rect className={s.tagBox} x={boxX} y={boxY} width={boxW} height={boxH} rx={2} />
+                            <text x={boxX + boxW / 2} y={boxY + 8} className={s.handleText} textAnchor="middle">
+                              {label}
+                            </text>
                           </g>
                         )
                       })}
@@ -527,7 +502,8 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
           </div>
 
           <p className={s.hint}>
-            先在右边选一块 → 点块的边插入顶点、拖顶点挪位置（收 0.1mm）、右键顶点删掉它；列表里也有「添加点」。
+            先在右边选一块 → 点块的边插入顶点；点某行的坐标框，画布上亮出那个点 —— 拖它挪位置（收
+            0.1mm）、右键删掉它；列表里也有「添加点」。
             {sel === null && ' 现在没有选中的块 —— 点右边任意一块，或先「添加禁区」。'}
           </p>
         </div>
@@ -550,7 +526,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                 onClick={() => {
                   setSel(i)
                   setActivePt(null)
-                  setHoverPoly(false)
                 }}
                 title="选中这块（画布上高亮，才能编辑顶点）"
               >
@@ -575,7 +550,10 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                       key={j}
                       className={s.coordRow}
                       onFocus={() => setActivePt(j)}
-                      onBlur={() => setActivePt((cur) => (cur === j ? null : cur))}
+                      onBlur={() => {
+                        /* 拖那个点之前输入框会先失焦 —— 这一下别把亮着的点掐灭 */
+                        if (dragRef.current === null) setActivePt((cur) => (cur === j ? null : cur))
+                      }}
                     >
                       <span className={s.coordIdx}>#{j + 1}</span>
                       <span className={s.coordNum}>
