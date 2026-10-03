@@ -591,14 +591,6 @@
   color: var(--text-3);
 }
 
-.hint {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 6px var(--page-x);
-  font-size: var(--fs-label);
-  color: var(--text-3);
-}
-
 /* ---------- 窄窗口 ---------- */
 
 /* 列宽收紧，但**一列都不藏** —— 藏掉的那一列就是界面在替用户决定他不需要它 */

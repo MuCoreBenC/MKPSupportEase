@@ -1,5 +1,26 @@
 /*
- * 校准板的缩放视口。手势逻辑一行没动。
+ * 从 v029/components/PlateZoom 整份搬来（校准板的缩放视口）。
+ *
+ * 10-03 作者裁决：**拖动缩放手柄整个退场**（「不要了，也不好用，还占位置了」），
+ * 缩放改走两条看不见的路：
+ *   - **Shift / Ctrl + 滚轮**：以光标为不动点缩放。Ctrl 那一路在触控板上就是
+ *     双指捏合（系统把它翻译成 ctrlKey + wheel），所以桌面触控板不用另做手势；
+ *   - **触摸屏双指开合**：pointer events 记两根手指，按「中点不动 + 间距比例」
+ *     重算倍率与位移，中点走动连带平移。
+ * 空白处按住拖 = 平移（只在放大后有效）；双击复位；板上的格子永远先响应点选。
+ *
+ * ## 为什么不用 transform: scale()
+ *
+ * `scale()` 既不重排也不重绘：浏览器把这一层按**当前（×1）分辨率**栅格化成位图，
+ * 再把位图拉大 —— 放大后的字是"放大的像素"，所以发虚；改一下窗口尺寸让层失效、
+ * 重新栅格化，就又清晰了（这正是肉眼看到的现象）。
+ *
+ * 所以这里是**真的把 SVG 变大**：放大期间给内层一个 `width = 基准宽 × 倍率`，
+ * 里面那块板跟着层宽走，SVG 按新尺寸重新绘制，第一帧就是清晰的矢量。
+ * 位移仍用 `translate` —— 纯位移不涉及重采样，不会发虚。
+ *
+ * 代价是放大时要真重排重绘（板子是两三百个静态 path，实测可以接受），
+ * 换来的是"放大之后能读"这件事本身成立。
  */
 
 import {
@@ -8,7 +29,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -21,11 +41,8 @@ const MAX = 6
 /** 判定"这是拖动不是点击"的位移。小于它仍是一次点击 */
 const THRESHOLD = 4
 
-/** 手柄横拖多少像素换一个 e 倍（≈×2.72） */
+/** 滚轮一格 / 手指捏合的映射基准：多少像素换一个 e 倍（≈×2.72） */
 const SPAN = 240
-
-/** 键盘一下调多少（手柄可聚焦，方向键也能改倍率） */
-const KEY_STEP = 1.15
 
 /**
  * 放大之后额外允许拖出视口的比例（视口对应边长的 35%）。
@@ -43,7 +60,7 @@ const REST: View = { k: 1, x: 0, y: 0 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-/** 热区：点它是"选一格"，绝不能被拖动手势截走 */
+/** 热区：点它是"选一格"，绝不能被手势截走 */
 const HIT = '[data-hit="true"], [role="button"]'
 
 interface Drag {
@@ -60,7 +77,7 @@ interface Drag {
 }
 
 export interface PlateZoomProps {
-  /** 板名。这一行由本组件渲染 —— 缩放手柄要和它并排 */
+  /** 板名。给了非空标题才渲染标题行（手柄已退场，空串 = 整行都没有） */
   title?: ReactNode
   /** 这个值一变就复位（换步 / 换板不该带着 ×4 进下一页） */
   resetKey?: string | number
@@ -68,7 +85,7 @@ export interface PlateZoomProps {
    * 撑满外层剩下的高度，并让板子按"容器还剩多少"连续算尺寸（见 CSS 里的 data-fill 那一组）。
    *
    * 按需开启：向导那两页的板子尺寸是一整套调死的公式（`--plate-w` / `--xy-plate`）、
-   * 还牵着卡片翻页的落位动画，动它就会动到那套落位。所以只有「校准」tab 传 fill。
+   * 还牵着卡片翻页的落位动画，动它就是动那一轮的成果。所以只有「校准」tab 传 fill。
    */
   fill?: boolean
   /** 这块板的毫米尺寸。fill 模式用它换算 px/mm —— 是模型的物理尺寸，不是版面常数 */
@@ -83,29 +100,6 @@ export interface PlateZoomProps {
   children: ReactNode
 }
 
-/**
- * 校准板的缩放视口。
- *
- * 三条互不重叠的规则：
- *
- * - **标题行右端的手柄**：按住左右拖 = 放大 / 缩小（右拖放大），双击或按 Esc 复位，
- *   方向键也能调。缩放的入口只有这一个 —— 板子本体不带缩放手势，免得和点格子抢。
- * - **板子上的空白**：按住拖 = 平移。只在真的放大过之后才有效果（否则位移被夹回 0）。
- * - **热区**：`pointerdown` 直接放行，不进任何手势。点选的手感与没有这个组件时一模一样。
- *
- * ## 为什么不用 transform: scale()
- *
- * `scale()` 既不重排也不重绘：浏览器把这一层按**当前（×1）分辨率**栅格化成位图，
- * 再把位图拉大 —— 放大后的字是"放大的像素"，所以发虚；改一下窗口尺寸让层失效、
- * 重新栅格化，就又清晰了（这正是肉眼看到的现象）。
- *
- * 所以这里是**真的把 SVG 变大**：放大期间给内层一个 `width = 基准宽 × 倍率`，
- * 里面那块板跟着层宽走，SVG 按新尺寸重新绘制，第一帧就是清晰的矢量。
- * 位移仍用 `translate` —— 纯位移不涉及重采样，不会发虚。
- *
- * 代价是放大时要真重排重绘（板子是两三百个静态 path，实测可以接受），
- * 换来的是"放大之后能读"这件事本身成立。
- */
 export default function PlateZoom({
   title,
   resetKey,
@@ -119,9 +113,13 @@ export default function PlateZoom({
   const [view, setView] = useState<View>(REST)
   /** ×1 时量下来的自然尺寸。放大期间不更新 —— 那时候量到的是放大后的值 */
   const [base, setBase] = useState<{ w: number; h: number } | null>(null)
-  const [drag, setDrag] = useState<null | 'zoom' | 'pan'>(null)
-  const gesture = useRef<(Drag & { mode: 'zoom' | 'pan' }) | null>(null)
-  /** 拖过之后那一次 click 要吃掉，否则松手顺手点亮一格 */
+  const [drag, setDrag] = useState<null | 'pan' | 'pinch'>(null)
+  const gesture = useRef<Drag | null>(null)
+  /** 双指捏合：两根手指的实时位置（down 起 rec，up / cancel 删）。鼠标只有一根指针，进不来 */
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  /** 捏合起始量：两指间距、中点（相对视口中心）与当时的视图。中点不动 + 间距定倍率 */
+  const pinch = useRef<{ d0: number; m0: { x: number; y: number }; view0: View } | null>(null)
+  /** 拖过 / 捏过之后那一次 click 要吃掉，否则松手顺手点亮一格 */
   const swallow = useRef(false)
 
   const kRef = useRef(view.k)
@@ -175,7 +173,55 @@ export default function PlateZoom({
 
   const reset = useCallback(() => setView(REST), [])
 
-  const begin = (e: ReactPointerEvent<HTMLElement>, mode: 'zoom' | 'pan') => {
+  /**
+   * 以一个不动点缩放（滚轮与捏合共用）。ax / ay 是**视口内**坐标：
+   * 缩放前后"压在不动点下面的那个内容点"必须是同一个 —— 解出来就是
+   * `x' = a − (a − x)·ratio`（a = 不动点相对视口中心，ratio = 新旧倍率之比）。
+   * 不动点取光标（滚轮）或两指中点（捏合），比"永远围着中心缩"更合手感。
+   */
+  const zoomAt = useCallback(
+    (ax: number, ay: number, factor: number) => {
+      const vp = vpRef.current
+      if (!vp || !base) return
+      const r = vp.getBoundingClientRect()
+      setView((v) => {
+        const k = clamp(v.k * factor, 1, MAX)
+        const ratio = k / v.k
+        const cx = ax - r.width / 2
+        const cy = ay - r.height / 2
+        return clampPan(
+          { k, x: cx - (cx - v.x) * ratio, y: cy - (cy - v.y) * ratio },
+          r.width,
+          r.height,
+          base.w,
+          base.h,
+        )
+      })
+    },
+    [base, clampPan],
+  )
+
+  /*
+   * Shift / Ctrl + 滚轮 = 缩放。Ctrl 那一路在触控板上就是双指捏合 —— 系统把捏合
+   * 翻译成 ctrlKey + wheel 上来，preventDefault 掉浏览器自己的页面缩放，板子接手。
+   * React 的 onWheel 是被动监听（preventDefault 不生效），这里手动挂非被动监听。
+   * Shift + 滚轮在部分系统上把增量放进 deltaX（横向滚轮位），deltaY 空了就取它。
+   */
+  useEffect(() => {
+    const vp = vpRef.current
+    if (!vp) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey && !e.ctrlKey) return
+      e.preventDefault()
+      const r = vp.getBoundingClientRect()
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX
+      zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-delta / SPAN))
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false })
+    return () => vp.removeEventListener('wheel', onWheel)
+  }, [zoomAt])
+
+  const beginPan = (e: ReactPointerEvent<HTMLElement>) => {
     const vp = vpRef.current
     if (!vp || !base) return
     const r = vp.getBoundingClientRect()
@@ -184,7 +230,6 @@ export default function PlateZoom({
       sx: e.clientX,
       sy: e.clientY,
       from: view,
-      vw: r.width,
       /*
        * 视口的实测高度。
        * 非 fill：放大期间高度被钉成 base.h，×1 时也等于 base.h，两种情况都与实测一致。
@@ -192,29 +237,100 @@ export default function PlateZoom({
        *       用 base.h 会把可拖范围按板子高度算，纵向拖到一半就被夹住。
        */
       vh: r.height,
+      vw: r.width,
       bw: base.w,
       bh: base.h,
       moved: false,
-      mode,
     }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
-  const onHandleDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
-    if (e.button !== 0 || !e.isPrimary) return
-    begin(e, 'zoom')
-    setDrag('zoom')
-  }
-
   const onViewportDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !e.isPrimary) return
+    if (e.button !== 0) return
+    const vp = vpRef.current
+    if (!vp) return
+
+    /*
+     * 新手势开始就清掉上一场的 swallow：它要吞的那次 click 在 up 与这次 down 之间
+     * 就该来（来了已被捕获阶段消费掉）；捏合之后浏览器通常**不发** click，
+     * 标记留着就成了"下一次点格子没反应"的哑弹 —— 10-03 冒烟抓到的。
+     */
+    swallow.current = false
+
+    /*
+     * 触摸：记下每根手指，第二根落下就进捏合（中点 + 间距，见 onMove）。
+     * 单指不在 touch 上开平移 —— 放大后的挪动交给捏合的中点位移，单指留给点格子。
+     * 第二根手指才 setPointerCapture：第一根不拦，格子上的轻点照常收到 click；
+     * 进了捏合再拦，两根手指的后续事件都归视口，不会漏到格子上去。
+     */
+    if (e.pointerType === 'touch') {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pointers.current.size === 2) {
+        const [p1, p2] = [...pointers.current.values()]
+        const r = vp.getBoundingClientRect()
+        pinch.current = {
+          d0: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+          m0: {
+            x: (p1.x + p2.x) / 2 - r.left - r.width / 2,
+            y: (p1.y + p2.y) / 2 - r.top - r.height / 2,
+          },
+          view0: view,
+        }
+        gesture.current = null
+        try {
+          vp.setPointerCapture(e.pointerId)
+        } catch {
+          /* 指针可能已经离场：捏合靠 map 里的坐标照算，捕获丢了只是拖出视口收不到 */
+        }
+        setDrag('pinch')
+      }
+      return
+    }
+
     /* 热区不进手势：点格子这件事优先，拖动只发生在空白处 */
     if ((e.target as Element).closest(HIT)) return
-    begin(e, 'pan')
+    if (!e.isPrimary) return
+    beginPan(e)
     setDrag('pan')
   }
 
   const onMove = (e: ReactPointerEvent<HTMLElement>) => {
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    }
+
+    const pin = pinch.current
+    if (pin) {
+      const vp = vpRef.current
+      if (!vp || !base || pointers.current.size < 2) return
+      const [p1, p2] = [...pointers.current.values()]
+      const d = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+      if (d <= 0) return
+      const r = vp.getBoundingClientRect()
+      const k = clamp(pin.view0.k * (d / pin.d0), 1, MAX)
+      const kr = k / pin.view0.k
+      const m1 = {
+        x: (p1.x + p2.x) / 2 - r.left - r.width / 2,
+        y: (p1.y + p2.y) / 2 - r.top - r.height / 2,
+      }
+      /* 起始中点压着的内容点，现在要压在当前中点下：位移 = 中点走动 + 倍率放大两段 */
+      setView(
+        clampPan(
+          {
+            k,
+            x: m1.x - (pin.m0.x - pin.view0.x) * kr,
+            y: m1.y - (pin.m0.y - pin.view0.y) * kr,
+          },
+          r.width,
+          r.height,
+          base.w,
+          base.h,
+        ),
+      )
+      swallow.current = true
+      return
+    }
+
     const g = gesture.current
     if (!g || g.id !== e.pointerId) return
     const dx = e.clientX - g.sx
@@ -224,26 +340,26 @@ export default function PlateZoom({
       g.moved = true
     }
 
-    if (g.mode === 'zoom') {
-      const k = clamp(g.from.k * Math.exp(dx / SPAN), 1, MAX)
-      /*
-       * 保持视口中心那一点不动。居中布局下这就是"位移按倍率等比放大"一行：
-       * 位移 0 = 居中，内容围着自己的中心长大，所以中心那一点本来就不动。
-       * （左上角原点的那套 `cx - (cx - x) * ratio` 在这里是错的算法。）
-       */
-      const ratio = k / g.from.k
-      setView(clampPan({ k, x: g.from.x * ratio, y: g.from.y * ratio }, g.vw, g.vh, g.bw, g.bh))
-    } else {
-      setView(
-        clampPan({ k: g.from.k, x: g.from.x + dx, y: g.from.y + dy }, g.vw, g.vh, g.bw, g.bh),
-      )
-    }
+    /*
+     * 平移：位移就是手指的位移，夹回可拖范围即可（居中原点，见 clampPan）。
+     */
+    setView(clampPan({ k: g.from.k, x: g.from.x + dx, y: g.from.y + dy }, g.vw, g.vh, g.bw, g.bh))
   }
 
   const onUp = (e: ReactPointerEvent<HTMLElement>) => {
+    pointers.current.delete(e.pointerId)
+
+    /* 捏合里抬起一根：捏合结束，剩下的那一根不接棒（点格子要重新落） */
+    if (pinch.current && pointers.current.size < 2) {
+      pinch.current = null
+      gesture.current = null
+      setDrag(null)
+      return
+    }
+
     const g = gesture.current
     if (!g || g.id !== e.pointerId) return
-    if (g.moved && g.mode === 'pan') swallow.current = true
+    if (g.moved) swallow.current = true
     gesture.current = null
     setDrag(null)
   }
@@ -258,61 +374,22 @@ export default function PlateZoom({
 
   const zoomed = view.k > 1
 
-  /** 手柄的键盘通道：方向键调倍率、Esc / Home 复位 */
-  const onHandleKey = (e: ReactKeyboardEvent) => {
-    const vp = vpRef.current
-    if (!vp || !base) return
-    const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? KEY_STEP : 1 / KEY_STEP
-    if (['ArrowRight', 'ArrowUp', 'ArrowLeft', 'ArrowDown'].includes(e.key)) {
-      e.preventDefault()
-      const k = clamp(view.k * step, 1, MAX)
-      const r = vp.getBoundingClientRect()
-      const ratio = k / view.k
-      /* 与手柄拖动同一个算法：居中布局下位移等比缩放即可（见 onMove 里的注释） */
-      setView(
-        clampPan({ k, x: view.x * ratio, y: view.y * ratio }, r.width, r.height, base.w, base.h),
-      )
-      return
-    }
-    if (e.key === 'Escape' || e.key === 'Home') {
-      e.preventDefault()
-      reset()
-    }
-  }
-
   return (
     <div className={s.box} data-fill={fill ? 'true' : undefined}>
-      <div className={s.head}>
-        {title !== undefined && <h3 className={s.title}>{title}</h3>}
-        <button
-          type="button"
-          className={s.handle}
-          data-on={zoomed ? 'true' : undefined}
-          data-active={drag === 'zoom' ? 'true' : undefined}
-          title="按住左右拖动缩放，双击复位"
-          aria-label={`缩放，当前 ${view.k.toFixed(1)} 倍`}
-          onPointerDown={onHandleDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-          onDoubleClick={reset}
-          onKeyDown={onHandleKey}
-        >
-          <span className={s.arrow} aria-hidden="true">
-            ⇔
-          </span>
-          {zoomed ? `×${view.k.toFixed(1)} · 双击复位` : '拖动缩放'}
-        </button>
-      </div>
+      {title ? (
+        <div className={s.head}>
+          <h3 className={s.title}>{title}</h3>
+        </div>
+      ) : null}
 
       <div
         ref={vpRef}
         className={s.viewport}
         data-fill={fill ? 'true' : undefined}
         data-zoomed={zoomed ? 'true' : undefined}
-        data-dragging={drag === 'pan' ? 'true' : undefined}
+        data-dragging={drag ? 'true' : undefined}
         /*
-         * 非 fill（向导）：放大期间把高度钉在 ×1 时的值 —— 内层真的变高，不钉住板框会被顶开。
+         * 非 fill：放大期间把高度钉在 ×1 时的值 —— 内层真的变高，不钉住板框会被顶开。
          * fill：高度本来就由布局给（撑满外层剩余高度），不用也不能钉。
          * mm 两个数交给 CSS 换算 px/mm，见 .viewport[data-fill] .layer。
          */

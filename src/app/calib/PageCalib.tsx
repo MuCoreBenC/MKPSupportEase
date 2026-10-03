@@ -1,31 +1,36 @@
 /*
- * 校准页。
+ * 「校准」tab —— **HUD 台面**（G06-10 收编，10-03 作者定稿）。
  *
- * `src/calib/*.generated` 那份板子坐标是共享资产，照旧直接 import。
- * 这一页原本不吃 devStore，所以没有调试钩子要删。
+ * 没有页首行：控件贴四缘 —— 上左步骤条、上右预设 pill（点开右侧抽屉）、
+ * 下左可编辑读数、下右动作组；板子占满其余全部。
  *
- * 预设下拉与三级反填走**真实文件体系**（`useCatalog`：getMachines + getPresetFiles），
- * 与首页向导那边同一份数据源 —— 下拉里每一份都是仓库里真实存在的那份文件（A1.toml 是 A1 的）。
+ *   Z 步   视口锁板子比例（136.219 × 34.019），说明两行贴板下（字号 cqw 跟板等比）
+ *   XY 步  方板吃满剩余高居中（板内自带整段说明，不给字）
+ *   测试模型  合影 contain 永不裁剪（作者：「无论怎么拉窗口都不应该被裁剪」），
+ *          无背景（模糊铺底试过被否：「还是不要背景了」）
+ *
+ * 读数 = CalibReadings（点文字一样编辑 / Esc 还原）；预设 = pill + 右抽屉
+ * （PresetPickerDrawer，与参数页同颗）。壳最小窗 600×500（App.tsx），
+ * 下缘在任何宽度一行（容器查询两档收紧）。其余（弹窗 / 状态机）沿用 v029 那套。
  */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CalibPlate from './CalibPlate'
 import { VIEW_BOX as Z_VIEW_BOX } from '../../calib/zoffset-calibration.generated'
 import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generated'
-import CalibHead, { PresetLine } from './CalibHead'
 import PlateZoom from './PlateZoom'
+import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
 import { api } from '../../api'
-import type { CalibModel } from '../../api/contract'
 import { selectionFromActive } from '../home/activeSelection'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
-import { AXIS_ROWS, NEED_PRESET, xyHitLabel, zHitLabel } from './calibAxes'
+import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
 import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
-/* 测试模型那一屏的合影：**界面自带素材**（不是产品数据资源，不进 Catalog / Delivery）。
-   与首页第五步用的是同一张，2026-10-01 从 `public/models/` 搬进 `src/app/assets/hero/` */
+import CalibReadings from './CalibReadings'
+/* 测试模型那一屏的合影：**界面自带素材**（不进 Catalog / Delivery）。
+   与首页第五步用的是同一张，从 `src/app/assets/hero/` import */
 import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 import s from './PageCalib.module.css'
@@ -37,20 +42,12 @@ const EMPTY: Selection = { brand: null, model: null, variant: null }
 
 type Step = 'z' | 'xy' | 'models'
 
-/** 三步各自的页名、板子、以及对应的校准件 id（后端 calibModels 里的 id） */
 const STEPS: { id: Step; label: string }[] = [
   { id: 'z', label: 'Z 偏移校准' },
   { id: 'xy', label: 'XY 偏移校准' },
   { id: 'models', label: '测试模型' },
 ]
 
-/*
- * 三步各自的板子、页名、校准件 id 与命中读名。
- *
- * `mm` 取自产物自己的 VIEW_BOX（不是手抄的数）：PlateZoom 的 fill 模式拿它把
- * "框还剩多少宽高"换算成 px/mm。手抄过一次，XY 板抄成了 53.545 见方、实际是
- * 53.545 × 54.18，于是板子比框高 1.2%、上下各被裁掉 3px —— 探针量出来才发现。
- */
 const PLATE = {
   z: {
     axis: 'z',
@@ -70,34 +67,18 @@ const PLATE = {
   },
 } as const
 
-/**
- * 八个测试模型共用同一个 3mf，所以「打开」只有一个对象 —— 传一个固定 id，
- * 页面上也就只给一个按钮，别让人以为每个模型各有一份下载。
- */
 const TEST_MODEL_ID = 'test-models'
 
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
-/**
- * 「校准」tab。
- *
- * 与向导第三 / 四 / 五页是**同一套实现**：读数条与预设下拉是同一个 CalibHead，
- * 板子是同一个 CalibPlate，状态机是同一个 useCalibration，模型入口走同一个 api.openModel。
- * 区别只有版面 —— 这里是平铺一列、上面一条步骤条，不套 SlideDeck 的卡片翻页：
- * 从 tab 进来的人是"回来改一个数"，不该被按步骤推着走。
- *
- * 状态与向导那份不互通（各是一个 hook 实例）：在向导里点了一格没保存，
- * 不该让这一页的数也跟着变。
- */
 export default function PageCalib() {
   const [step, setStep] = useState<Step>('z')
   const [sel, setSel] = useState<Selection>(EMPTY)
 
-  /* ---------- 文件体系：三级与「文件」那一级的清单 ---------- */
   const catalog = useCatalog()
 
-  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填（底账走 IPC，异步） */
+  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填 */
   const restored = useRef(false)
   useEffect(() => {
     if (restored.current || catalog.machines.length === 0) return
@@ -107,7 +88,6 @@ export default function PageCalib() {
     })
   }, [catalog.machines])
 
-  /* 「文件」这一级的清单与当前项的 id（`机型/版本`） */
   const presetOptions = useMemo(
     () =>
       catalog.presets.flatMap((f) => {
@@ -134,35 +114,32 @@ export default function PageCalib() {
     pickXY,
     typeAxis,
     revertAxis,
+    resetAxis,
     clearAll,
     commitAll,
   } = useCalibration(preset)
 
-  /** 校准件清单：给板框标题用（板名以后端那份为准） */
-  const [plates, setPlates] = useState<CalibModel[]>([])
+  /* 预设抽屉（与 G06-8 同一颗） */
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  /* 开页就取一次、之后不再变的静态数据 */
-  useEffect(() => {
-    let alive = true
-    api.getCalibModels().then(
-      (list) => {
-        if (alive) setPlates(list)
-      },
-      (err: unknown) => console.error('[calib] 取校准件清单失败', err),
-    )
-    return () => {
-      alive = false
-    }
-  }, [])
+  const fileOf = useCallback(
+    (machineId: string, versionId: string) => {
+      const hit = catalog.presets.find((f) =>
+        f.usedByVersions.some((r) => r.machine === machineId && r.version === versionId),
+      )
+      return hit?.fileName ?? null
+    },
+    [catalog.presets],
+  )
 
-  /** 要打开哪一个模型（弹窗里确认之后才真的让壳去开） */
+  const currentFileName = currentUid && sel.model !== null && sel.variant !== null
+    ? fileOf(sel.model, sel.variant)
+    : null
+
   const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
-  /** 有未保存改动时拦下的那次换步 */
   const [pending, setPending] = useState<Step | null>(null)
-  /** 有未保存改动时拦下的那次换预设 */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
 
-  // 那个 Modal 不认 Esc，这里补上：Esc = 取消
   useEffect(() => {
     if (opening === null && pending === null && presetAsk === null) return
     const onKey = (e: KeyboardEvent) => {
@@ -175,7 +152,6 @@ export default function PageCalib() {
     return () => window.removeEventListener('keydown', onKey)
   }, [opening, pending, presetAsk])
 
-  /** 换步：有草稿先问一次（与向导的换页拦截同一条规则） */
   const go = useCallback(
     (next: Step) => {
       if (next === step) return
@@ -188,7 +164,6 @@ export default function PageCalib() {
     [dirty, step],
   )
 
-  /* 「选预设」= 反填三级选择：一份预设文件唯一对应一处「机型 + 版本」，机型从目录里查 */
   const applyPreset = useCallback(
     (uid: string) => {
       const [machineId, versionId] = uid.split('/')
@@ -200,9 +175,6 @@ export default function PageCalib() {
     [catalog.machines],
   )
 
-  /* 换预设会把草稿作废（草稿是相对上一份预设点出来的增量），所以先问一次。
-     只给「取消 / 放弃改动并换」两条路：换了预设 saved 会被新预设的值覆盖，
-     这时候提供「保存并换」是骗人的 —— 存下去的数立刻就被顶掉了 */
   const pickPreset = useCallback(
     (uid: string) => {
       if (!uid || uid === currentUid) return
@@ -216,21 +188,16 @@ export default function PageCalib() {
   )
 
   const plate = step === 'models' ? null : PLATE[step]
-  const plateInfo = plate ? plates.find((m) => m.id === plate.calibId) : undefined
 
-  /*
-   * 这一步的动作组。校准两步里它与三轴读数同一行（读数在左、按钮在右），
-   * 「测试模型」那一步没有读数，于是直接挂在页首那一行的右端。
-   */
   const actions = plate ? (
     <div className={s.actions}>
-      {/* 状态位在按钮左侧、常驻占位：它进出时不该把右边两个按钮顶来顶去 */}
       <span className={s.state} data-on={dirty || savedNote}>
         {dirty ? '未保存' : savedNote ? '已保存' : ''}
       </span>
-      {/* 不写文件大小：与向导里那两个「打开模型」一字不差，
-          大小对"要不要点"这件事没有影响，写上去只是让按钮忽宽忽窄 */}
-      <Btn onClick={() => setOpening({ id: plate.calibId, name: plate.title })}>打开模型</Btn>
+      {/* 打开模型是这一步的主入口（作者 10-03：绿底给打开模型，预设 pill 退暗） */}
+      <Btn variant="accent" onClick={() => setOpening({ id: plate.calibId, name: plate.title })}>
+        打开模型
+      </Btn>
       <Btn variant="ghost" disabled={!dirty} onClick={clearAll}>
         放弃改动
       </Btn>
@@ -238,124 +205,145 @@ export default function PageCalib() {
         保存
       </Btn>
     </div>
-  ) : (
-    <div className={s.actions}>
-      <Btn variant="primary" onClick={() => setOpening({ id: TEST_MODEL_ID, name: '测试模型' })}>
-        打开测试模型
-      </Btn>
-    </div>
+  ) : null
+
+  const plateView = plate && (
+    <PlateZoom resetKey={step} title="" fill mm={plate.mm}>
+      <CalibPlate
+        model={plate.model}
+        theme={PLATE_THEME}
+        label={plate.title}
+        onPick={step === 'z' ? pickZ : pickXY}
+        picked={step === 'z' ? zSelected : xySelected}
+        hitLabel={plate.hitLabel}
+      />
+    </PlateZoom>
   )
 
   return (
-    <div className={s.page}>
-      {/*
-       * 页首两行：
-       *   第一行  步骤条（左） + 预设文件（中）
-       *   第二行  三轴读数（左） + 这一步的动作（右，底边与读数对齐）
-       *
-       * 动作原来压在板框下方靠左，板子一高就被推到折叠线以下，要保存得先往下滚；
-       * 读数原来自己一行、按钮又在上一行的右端，中间空一大块。合成这两行之后
-       * 既不空、也不随内容高度漂移。
-       */}
-      <div className={s.top}>
-        <div className={s.rail} role="tablist" aria-label="校准步骤">
-          {STEPS.map((it) => (
+    <div className={s.root}>
+      <div className={s.hud}>
+        {/*
+         * 上缘：步骤条贴左；预设 pill 贴右（「测试模型」那一步换成它的动作按钮）。
+         */}
+        <div className={s.hudTop}>
+          <div className={s.rail} role="tablist" aria-label="校准步骤">
+            {STEPS.map((it) => (
+              <button
+                key={it.id}
+                type="button"
+                role="tab"
+                aria-selected={it.id === step}
+                className={s.tab}
+                data-on={it.id === step}
+                onMouseDown={noFocus}
+                onClick={() => go(it.id)}
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>
+
+          {plate && (
             <button
-              key={it.id}
               type="button"
-              role="tab"
-              aria-selected={it.id === step}
-              className={s.tab}
-              data-on={it.id === step}
-              onMouseDown={noFocus}
-              onClick={() => go(it.id)}
+              className={currentFileName ? s.presetPill : `${s.presetPill} ${s.presetPillOff}`}
+              onClick={() => setPickerOpen(true)}
+              title="点击选择预设"
             >
-              {it.label}
+              <span className={s.presetName}>{currentFileName ?? '选择预设'}</span>
+              <span className={s.presetSwitch}>切换</span>
             </button>
-          ))}
+          )}
+
+          {!plate && (
+            <Btn
+              variant="primary"
+              onClick={() => setOpening({ id: TEST_MODEL_ID, name: '测试模型' })}
+            >
+              打开测试模型
+            </Btn>
+          )}
         </div>
 
-        {plate && (
-          /* 预设下拉挪到页首：原来它自己占一整行，而这一行右边本来空着 */
-          <div className={s.presetSlot}>
-            <PresetLine
-              state={preset}
-              value={currentUid}
-              options={presetOptions}
-              onPick={pickPreset}
-            />
+        {/*
+         * 台面：板子占满其余全部。
+         * Z 步视口锁板子比例（136.219 × 34.019）+ 说明两行紧贴板下；
+         * XY 方板吃满剩余高居中（板内自带整段说明，不给字）。
+         */}
+        {plate ? (
+          <div className={s.hudBoard} data-step={step}>
+            {plateView}
+            {step === 'z' && (
+              <>
+                <p className={s.legend}>{Z_LEGEND}</p>
+                <p className={s.tip}>{Z_TIP}</p>
+              </>
+            )}
           </div>
-        )}
-
-        {!plate && actions}
-      </div>
-
-
-      {plate ? (
-        <>
-          {/* 第二行：读数在左、动作在右。
-              读数条自己是 width: fit-content + margin auto（向导那边要居中），
-              所以外面套一个 fit-content 的壳，它就落在这一页的左基线上 */}
-          <div className={s.headRow}>
-            <div className={s.head}>
-              <CalibHead
-                saved={saved}
-                draft={draft}
-                preset={preset}
-                view={view}
-                activeAxis={plate.axis}
-                presetUid={currentUid}
-                presetOptions={presetOptions}
-                onPickPreset={pickPreset}
-                canEdit={canPick}
-                showPreset={false}
-                onType={typeAxis}
-                onRevert={revertAxis}
-              />
-            </div>
-            {actions}
-          </div>
-
-          <section className={s.plateBox}>
-            {/* 板名与缩放手柄是同一行，由 PlateZoom 自己排；
-                fill：框吃掉剩余高度、板子按框的剩余宽高连续算尺寸并居中 */}
-            <PlateZoom resetKey={step} title={plateInfo?.name ?? plate.title} fill mm={plate.mm}>
-              <CalibPlate
-                model={plate.model}
-                theme={PLATE_THEME}
-                label={plate.title}
-                onPick={step === 'z' ? pickZ : pickXY}
-                picked={step === 'z' ? zSelected : xySelected}
-                hitLabel={plate.hitLabel}
-              />
-            </PlateZoom>
-            {/* 没取到预设时点板子不产生读数，这一行是唯一的解释，必须留 */}
-            {!saved && <p className={s.note}>{NEED_PRESET}</p>}
-          </section>
-        </>
-      ) : (
-        <section className={s.models}>
-          <p className={s.lead}>打印这套模型，检查校准结果。</p>
-          {/*
-           * 一张合影 + 一句话，与向导第五步同一套版面。
-           *
-           * 原来这里是八张走马灯大卡（编号、标签、缩略图、用时 / 耗材、每张一个按钮）——
-           * 可八张卡打开的是同一个 3mf（TEST_MODEL_ID），走马灯页脚自己都这么写着，
-           * 那"每张各有一份下载"的暗示是假的；这一屏要做的决定只有一个：要不要打开。
-           */}
-          <div className={s.hero}>
+        ) : (
+          <div className={s.models}>
+            {/*
+             * 合影不裁剪（作者要求：怎么拉窗都完整显示），但也**不要背景**——
+             * 模糊铺底的方案试过一版：清晰图自身的白底与模糊层之间总有一条看得见的
+             * 边界（板内绿色晕开出画框），作者判了「还是不要背景了」—— 宁可两侧留白。
+             * 不裁剪的实现：img 自己做 flex 项（flex:1 + min-height:0），
+             * object-fit: contain 的盒子撑满中段，位图在盒内等比缩放，无百分比陷阱
+             * （旧版 max-height:100% 在 grid 行里解不开约束，矮窗下被裁的老毛病根治）。
+             */}
+            <p className={s.lead}>打印这套模型，检查校准结果。</p>
             <img
-              className={s.heroImg}
+              className={s.modelsImg}
               src={heroPile}
               srcSet={`${heroPile} 1x, ${heroPile2x} 2x`}
               alt="测试模型"
               draggable={false}
             />
+            <p className={s.caption}>鱼尾曲面 · 支撑涂胶 · 球形 · 方块 — 一套 3mf 覆盖全部校准场景</p>
           </div>
-          <p className={s.caption}>鱼尾曲面 · 支撑涂胶 · 球形 · 方块 — 一套 3mf 覆盖全部校准场景</p>
-        </section>
-      )}
+        )}
 
+        {/*
+         * 下缘：三轴读数（可编辑，复用 G06-8 那颗）贴左；动作组贴右。
+         * 放不下整体折行（窄窗读数一行、按钮一行），不再各占一角硬碰。
+         */}
+        {plate && (
+          <div className={s.hudBottom}>
+            <CalibReadings
+              saved={saved}
+              draft={draft}
+              view={view}
+              activeAxis={plate.axis}
+              canType={canPick}
+              onType={typeAxis}
+              onRevert={revertAxis}
+              onReset={resetAxis}
+            />
+            {!saved && <p className={s.note}>{NEED_PRESET}</p>}
+            {actions}
+          </div>
+        )}
+      </div>
+
+      {/*
+       * 预设抽屉：挂在 .root（定位父级）而不是会滚的 .hud。
+       */}
+      <PresetPickerDrawer
+        open={pickerOpen}
+        machines={catalog.machines.map((m) => ({
+          id: m.id,
+          display: m.display,
+          versions: m.versions.map((v) => ({ id: v.id, name: v.name, tag: v.tag ?? null })),
+        }))}
+        machineId={sel.model ?? ''}
+        versionId={sel.variant ?? ''}
+        fileOf={fileOf}
+        onPick={(m, v) => {
+          setPickerOpen(false)
+          pickPreset(`${m}/${v}`)
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {opening !== null && (
         <Modal
@@ -367,7 +355,6 @@ export default function PageCalib() {
               <Btn
                 variant="primary"
                 onClick={() => {
-                  /* 不等结果、不 catch：没接后端时 api 会抛并在控制台点名（见 src/api/index.ts） */
                   void api.openModel(opening.id)
                   setOpening(null)
                 }}
