@@ -617,10 +617,11 @@ if (editBtnCount === 0) {
 await rad('preset-kind', 'mkp').click({ force: true })
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(250)
-/* 那两份演示分属两台机型：切到「全部机型」才同屏看得到（本机的东西不该被机型选择藏起来） */
-await page.getByRole('button', { name: '机型' }).click()
+/* 那两份演示分属两台机型：切到「全部机型」才同屏看得到（本机的东西不该被机型筛选藏起来）。
+   机型筛选现在是融合 pill 的右拍（漏斗），菜单是 FieldPopover 里的普通按钮 —— 不再是 select 的 option */
+await page.locator('button[aria-haspopup="true"]').first().click()
 await page.waitForTimeout(200)
-await page.getByRole('option', { name: /全部机型/ }).click()
+await page.getByRole('button', { name: /全部机型/ }).click()
 await page.waitForTimeout(400)
 
 const trustRows = await actions()
@@ -689,10 +690,10 @@ await page.screenshot({ path: `${shotDir}/presets-trust.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
-/* 回到 A1：后面几节按这台机型看（选项顺序＝下拉给的顺序：全部机型 排第一档，接着第一台机型） */
-await page.getByRole('button', { name: '机型' }).click()
+/* 回到 A1：后面几节按这台机型看（菜单顺序＝漏斗给的顺序：全部机型 排第一档，接着第一台机型） */
+await page.locator('button[aria-haspopup="true"]').first().click()
 await page.waitForTimeout(200)
-await page.getByRole('option').nth(1).click()
+await page.getByRole('button', { name: /^A1 A1$/ }).click()
 await page.waitForTimeout(350)
 
 /* ---------- 5g. 我那份能被使用，而且说得清基于哪一版官方（第七层） ---------- */
@@ -1446,66 +1447,36 @@ if (bootstrapFact.rows === 0) {
   problems.push('后台检查不该挡首屏：本地表该立刻有行')
 }
 
-/* ---------- 5o. 撤销应用（本轮补的前端入口；后端 clear_active_preset 早有） ---------- */
+/* ---------- 5o. 「撤销应用」退役（作者 2026-10-04 裁决：不做取消应用，总得有一套在生效） ---------- */
 /*
- * 守四件事：
- *   ① 状态条上那颗「撤销应用」在（后端能力早就有，以前只是没有界面入口）；
- *   ② 点它 → 状态条回到「还没有应用任何预设」那一段（指向被撤掉了）；
- *   ③ **它不是删除**：那份文件照常还在表里、还能再应用（这条最容易误解，所以单独量）；
- *   ④ 再应用回来 → 状态条又说得出来（幂等、可来回）。
+ * 守两件事：
+ *   ① 界面上**没有**「撤销应用」—— 机型下拉 / 已应用状态条 / 定位按钮三件并成一颗
+ *      融合 pill 之后，这个入口不再存在（作者原话：「没必要存在，不管它了，就用 A44 的」。
+ *      后端 `clear_active_preset` 命令与数据层 `clearApply` 能力照旧在，只是没有界面入口）；
+ *   ② pill 左拍照常说得出正在生效的是谁 —— 撤的入口没了，「哪一套在生效」这个事实
+ *      反而要更醒目（信息不随入口退役而丢）。
  *
- * 真机上更硬的判据在 Rust 侧：`runtime::state::clear_active`（删状态文件；文件本来就不在
- * 也算成功）+ `ipc::clear_active_preset`。
+ * 能力侧的判据在 Rust 侧照旧：`runtime::state::clear_active` + `ipc::clear_active_preset`
+ * —— 命令保留，探针不再量它的 UI（已经没有 UI 可点）。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
 
-const clearBtn = page.getByRole('button', { name: '撤销应用' })
-const clearCount = await clearBtn.count()
-console.log(`\n[撤销应用] 状态条上的按钮：${clearCount} 个`)
-if (clearCount === 0) {
-  problems.push('状态条上该有「撤销应用」（后端 clear_active_preset 早有，缺的只是入口）')
-} else {
-  const appliedName = await page.evaluate(() => {
-    const el = document.querySelector('main [class*="appliedName"]')
-    return el === null ? '' : el.textContent.trim()
-  })
-  await clearBtn.first().click()
-  await page.waitForTimeout(600)
-  const afterClear = await page.evaluate(() =>
-    (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 260),
-  )
-  console.log(`[撤销应用] 撤销之后（前 260 字）：${afterClear}`)
-  if (!afterClear.includes('还没有应用任何预设')) {
-    problems.push('撤销应用之后状态条该回到「还没有应用任何预设」')
-  }
-  /* ③ 撤销 ≠ 删除：那一行还在，操作列还能"应用"回来 */
-  const rowAfterClear = (await actions()).find((r) => r.name.includes(appliedName))
-  if (rowAfterClear === undefined) {
-    problems.push('撤销应用**不是删除**：那份文件该还在表里')
-  } else if (rowAfterClear.action.includes('已应用')) {
-    problems.push('撤销之后那一行不该还写「已应用」')
-  }
-  /* ④ 再应用回来 */
-  if (rowAfterClear !== undefined) {
-    const tr = page
-      .locator('main tbody tr')
-      .filter({ has: page.locator('td:not([colspan])') })
-      .filter({ hasText: appliedName })
-      .first()
-    await tr.getByRole('button', { name: '应用' }).click()
-    await page.waitForTimeout(600)
-    const reApplied = await page.evaluate(() =>
-      (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
-    )
-    console.log(`[撤销应用] 再应用回来：${reApplied.includes('已应用') ? '已应用' : '(没成)'}`)
-    if (!reApplied.includes('已应用')) {
-      problems.push('撤销之后该能再应用回来（幂等、可来回）')
-    }
-  }
-  await page.screenshot({ path: `${shotDir}/presets-clear-apply.png` })
+const clearCount = await page.getByRole('button', { name: '撤销应用' }).count()
+console.log(`\n[撤销应用退役] 界面上的「撤销应用」按钮：${clearCount} 个`)
+if (clearCount !== 0) {
+  problems.push('「撤销应用」已退役（作者 2026-10-04：不做取消应用，总得有一套在生效）——界面上不该再有它')
 }
+const pillText = await page.evaluate(() => {
+  const el = document.querySelector('main [class*="pill"]')
+  return el === null ? '' : (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+})
+console.log(`[撤销应用退役] pill 左拍：${pillText}`)
+if (!pillText.includes('已应用')) {
+  problems.push('融合 pill 左拍该说得出「已应用 <文件名>」（撤了入口，事实反而要更醒目）')
+}
+await page.screenshot({ path: `${shotDir}/presets-pill.png` })
 
 /* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
 /*
@@ -1575,6 +1546,6 @@ console.log(
     '导入入口（第十二层）：选择器能进、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
     'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +
-    '撤销应用（本轮补的前端入口）：撤掉指向但不删文件、还能再应用回来，' +
+    '撤销应用退役（作者 2026-10-04：不做取消应用，总得有一套在生效；融合 pill 左拍说得出正在生效的那一套），' +
     '控制台没有 error',
 )

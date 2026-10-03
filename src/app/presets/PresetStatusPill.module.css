@@ -1,0 +1,273 @@
+/*
+ * 融合 pill 的皮（G07-1 收编；2026-10-04 从试验台收编进产品，与 A44 原件同几何）。
+ *
+ * 两拍：外圈 1px --line 边框、--r-sm 圆角、淡绿底 --accent-soft（绿 = 正在生效）。
+ * 右拍（机型筛选）在 pill 里退化成无边框的一段（`.pill .filterBtn`），
+ * 独立漏斗（切片器工具条上那颗）才是带边框的完整按钮（`.filterBtn` 本体）。
+ */
+
+.pill {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  max-width: 400px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+}
+
+.pill:hover {
+  border-color: var(--accent);
+}
+
+/* ---------- 左拍：已应用信息，点击 = 定位 ---------- */
+
+.left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px 0 0 3px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.left:hover {
+  background: rgb(32 178 90 / 8%);
+}
+
+/* 一套都还没应用：左拍退化成一句说明 —— 不可点，也不是错误色 */
+.left[data-empty='true'] {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.left[data-empty='true']:hover {
+  background: transparent;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.dotOff {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.label {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.name {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.mach {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/*
+ * 「我的文件」那一小枚（产品仓补的，A44 原件没有）：正在使用的是用户自己那份
+ * （第七层）。与旧状态条上那一枚同义，只是住处搬进了左拍 ——
+ * 它要说清"现在跑的这份不跟着官方更新"，所以必须在左拍上单独看得见。
+ */
+.mine {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.divider {
+  flex-shrink: 0;
+  align-self: stretch;
+  margin: 4px 0;
+  border-left: 1px solid rgb(23 146 74 / 25%);
+}
+
+/* ---------- 右拍：机型筛选 ----------
+ *
+ * 独立漏斗 = 带边框的完整按钮（切片器工具条上用）；
+ * pill 里那颗由下面的 `.pill .filterBtn` 覆写成右拍（无边框、透明底、撑满 pill 高）。
+ */
+
+.hold {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.filterBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.filterBtn:hover {
+  border-color: var(--text-3);
+}
+
+/* 筛上了（不是「全部机型」）：漏斗转绿、边框一起转 —— 筛选在生效这件事要看得见 */
+.filterBtn[data-filt='true'] {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.filterBtn:focus-visible {
+  outline: none;
+}
+
+.funnel {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--text-2);
+}
+
+.filterBtn[data-filt='true'] .funnel {
+  color: var(--accent-deep);
+}
+
+.filterName {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.caret {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+/* pill 里的那一颗：退化成右拍 —— 无边框、透明底、撑满 pill 高，hover 一层绿 */
+.pill .filterBtn {
+  height: auto;
+  align-self: stretch;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+}
+
+.pill .filterBtn:hover {
+  background: rgb(32 178 90 / 8%);
+  border-color: transparent;
+}
+
+.pill .filterBtn[data-filt='true'] {
+  border-color: transparent;
+}
+
+/* ---------- 菜单（FieldPopover 只管定位，框和影自己画） ---------- */
+
+.menu {
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 26px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--surface-sunken);
+}
+
+.item[data-on='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.check {
+  position: absolute;
+  left: 9px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--accent-deep);
+  visibility: hidden;
+}
+
+.item[data-on='true'] .check {
+  visibility: visible;
+}
+
+.mid {
+  margin-left: auto;
+  padding-left: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
