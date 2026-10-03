@@ -483,11 +483,19 @@ pub struct MenuEntryDto {
 }
 
 /// 菜单：哪些官方文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
-/// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的
+/// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的。
+///
+/// **`bundled` 交付档的资产不进这个菜单**（作者 2026-10-03）：那是「随包不下载」的那一档
+/// —— 客户端根本下载不到它（不在 catalog 的 `files[]` 里），菜单里列出来只会让
+/// 用户点一个拿不到的东西。它在**工作台的资产库**里照常可见可管。
 fn menu_dto(catalog: &runtime::Catalog) -> Vec<MenuEntryDto> {
     catalog
         .assets
         .iter()
+        .filter(|a| a.delivery != crate::presetdata::assets::Delivery::Bundled)
+        // MKP 预设在菜单里也不出现：它不是一份「下载区文件」—— 它的产物条目由生成侧
+        // 登记进 files[]，客户端按那 9 条走（作者 2026-10-03）
+        .filter(|a| a.kind != crate::presetdata::AssetKind::MkPreset)
         .map(|a| MenuEntryDto {
             file_id: a.id.clone(),
             visibility: if bundles_of(catalog, &a.id).is_empty() {
@@ -830,7 +838,7 @@ mod tests {
         assert_eq!(mkp.path, "mkp/presets/A1-fastv3.3.toml", "落点相对内部根");
         assert!(mkp.size.unwrap_or(0) > 0, "大小是登记的真值");
         assert_eq!(mkp.sha256.as_deref().map(str::len), Some(64));
-        // 切片器那支跟着套餐走：A1_default 至少一条 BBS
+        // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
             "切片器配置要跟着套餐出来"
@@ -855,7 +863,13 @@ mod tests {
             .find(|p| p.id == "a1-bbs-04-020")
             .expect("A1 的 BBS 条目在");
         assert_eq!(a1_bbs.delivery, "default", "被套餐装着的是 default");
-        assert!(a1_bbs.in_bundles.contains(&"A1_default".to_owned()));
+        assert!(
+            a1_bbs.in_bundles.contains(&"A1_STANDARD".to_owned())
+                && a1_bbs.in_bundles.contains(&"A1_FAST".to_owned())
+                && a1_bbs.in_bundles.contains(&"A1_FASTV3.3".to_owned()),
+            "A1 的三个版本共用这条 BBS，三份套餐都在 in_bundles 里：{:?}",
+            a1_bbs.in_bundles
+        );
         assert_eq!(a1_bbs.nozzle.as_deref(), Some("0.4"), "喷嘴从路径段读出");
 
         // —— 菜单：可见性跟着套餐走 ——
@@ -868,11 +882,15 @@ mod tests {
         };
         assert_eq!(vis("a1-bbs-04-020"), "bundled");
         assert_eq!(vis("a1-icon"), "optional", "图标不被套餐引用");
-        // 菜单里没有整机图那一类：2026-10-01 它已从资产台账剥离（界面的展示素材，
-        // 不归 Catalog）—— 菜单逐条来自 `catalog.assets`，台账没有的就不会出现
+        // 整机图在台账里（bundled 档，2026-10-03 回到台账）—— 但**不进客户端菜单**：
+        // 客户端下载不到它（不在 files[]），菜单里列出来只会让人点一个拿不到的东西
         assert!(
-            catalog.asset("a1-image").is_none(),
-            "整机图不在 catalog 里了"
+            catalog.asset("a1-image").is_some(),
+            "整机图在 catalog 的资产定义里（bundled 档）"
+        );
+        assert!(
+            !menu.iter().any(|m| m.file_id == "a1-image"),
+            "bundled 档不进客户端菜单"
         );
 
         // —— 参数元信息：全部 74 条，含废弃 ——

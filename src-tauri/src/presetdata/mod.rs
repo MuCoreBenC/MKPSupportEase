@@ -94,7 +94,7 @@ pub(crate) fn repo_presets_root() -> Option<PathBuf> {
 pub(crate) fn repo_assets_root() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()?
-        .join("public")
+        .join("presets")
         .join("assets");
     root.is_dir().then_some(root)
 }
@@ -559,36 +559,6 @@ impl Presets {
                         .to_owned(),
                 ));
             }
-
-            // MKP 组（uid 直引）：必须解析到本机型的一个真版本。**文件不存在没关系**
-            //（预设是生成产物，作者 2026-10-03：套餐可以先挂名字）—— 挂错机型 /
-            // 打错 id 才是错，那会让客户端配发到一份谁也不认识的预设
-            for uid in &b.presets {
-                let (mid, vid) = uid.split_once('/').ok_or_else(|| {
-                    AppError::corrupted(format!(
-                        "套餐 {} 的 presets 里有一项不是「机型/版本」的写法：{uid}",
-                        b.id
-                    ))
-                })?;
-                let m = self.catalog.machine(mid.trim()).ok_or_else(|| {
-                    AppError::corrupted(format!(
-                        "套餐 {} 的 presets 指向一个不存在的机型：{uid}",
-                        b.id
-                    ))
-                })?;
-                if !m.versions.iter().any(|v| v.id == vid.trim()) {
-                    return Err(AppError::corrupted(format!(
-                        "套餐 {} 的 presets 指向一个不存在的版本：{uid}",
-                        b.id
-                    )));
-                }
-                if !mid.eq_ignore_ascii_case(&b.machine_id) {
-                    return Err(AppError::corrupted(format!(
-                        "套餐 {} 是给 {} 配的，却挂着别家机型的预设：{uid}",
-                        b.id, b.machine_id
-                    )));
-                }
-            }
         }
         Ok(())
     }
@@ -611,7 +581,6 @@ impl Presets {
         &mut self,
         bundle_id: &str,
         refs: &[String],
-        preset_uids: &[String],
         now_iso8601: &str,
     ) -> Result<bool, AppError> {
         let Some(cur) = self.bundles.get(bundle_id) else {
@@ -623,8 +592,7 @@ impl Presets {
                     .zip(b.iter())
                     .all(|(x, y)| x.trim().to_lowercase() == y.trim().to_lowercase())
         };
-        let presets_same = same(&cur.presets, preset_uids);
-        if same(&cur.asset_refs, refs) && presets_same {
+        if same(&cur.asset_refs, refs) {
             return Ok(false);
         }
 
@@ -651,38 +619,260 @@ impl Presets {
                     .to_owned(),
             ));
         }
-        // MKP 组：uid 必须解析到**本机型**的一个真版本 —— 文件不存在没关系
-        //（预设是生成产物，套餐先挂名字），挂错机型 / 打错 id 才是错
-        for uid in preset_uids {
-            let (mid, vid) = uid.split_once('/').ok_or_else(|| {
-                AppError::invalid_argument(format!(
-                    "套餐 {bundle_id} 的 presets 里有一项不是「机型/版本」的写法：{uid}"
-                ))
-            })?;
-            let m = self.catalog.machine(mid.trim()).ok_or_else(|| {
-                AppError::invalid_argument(format!(
-                    "套餐 {bundle_id} 的 presets 指向一个不存在的机型：{uid}"
-                ))
-            })?;
-            if !m.versions.iter().any(|v| v.id == vid.trim()) {
-                return Err(AppError::invalid_argument(format!(
-                    "套餐 {bundle_id} 的 presets 指向一个不存在的版本：{uid}"
-                )));
-            }
-            if !mid.eq_ignore_ascii_case(&self.bundles.get(bundle_id).expect("上面取过").machine_id)
-            {
-                return Err(AppError::invalid_argument(format!(
-                    "套餐 {} 是给 {} 配的，却挂着别家机型的预设：{uid}",
-                    bundle_id,
-                    self.bundles.get(bundle_id).expect("上面取过").machine_id
-                )));
-            }
-        }
 
-        self.bundles
-            .set_refs(bundle_id, refs, preset_uids, now_iso8601)?;
+        self.bundles.set_refs(bundle_id, refs, now_iso8601)?;
         self.bundles.write()?;
         Ok(true)
+    }
+
+    /// **新建一条套餐**（作者 2026-10-03：套餐页补 CRUD —— C15 的能力，产品侧真写）。
+    ///
+    /// 同 [`Self::set_bundle_refs`] 的两道闸：引用都要解析得到、至少一条 BBS
+    /// （10.8 成套配发 —— 所以新建时就得挑内容，不能落一份空套餐出去）。
+    /// id 走 [`bundles::check_bundle_id`] 的门槛且不与现有套餐撞（大小写不敏感）。
+    pub fn add_bundle(
+        &mut self,
+        id: &str,
+        machine_id: &str,
+        display: &str,
+        refs: &[String],
+        now_iso8601: &str,
+    ) -> Result<(), AppError> {
+        bundles::check_bundle_id(id)?;
+        if self.bundles.get(id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 id 已经存在：{id}"
+            )));
+        }
+        if self.catalog.machine(machine_id).is_none() {
+            return Err(AppError::not_found(format!("没有机型 {machine_id}")));
+        }
+        if display.trim().is_empty() {
+            return Err(AppError::invalid_argument(
+                "套餐要有给人看的名字（display）",
+            ));
+        }
+        self.check_bundle_content(id, refs)?;
+        self.bundles.add(Bundle {
+            id: id.trim().to_owned(),
+            display: display.trim().to_owned(),
+            machine_id: machine_id.trim().to_owned(),
+            asset_refs: refs.iter().map(|s| s.trim().to_owned()).collect(),
+            updated_at: Some(now_iso8601.get(..10).unwrap_or(now_iso8601).to_owned()),
+        })?;
+        self.bundles.write()?;
+        Ok(())
+    }
+
+    /// **改一条套餐的 id 与/或显示名**。
+    ///
+    /// id 被机型文件引用着（`defaultBundle` / `recommendedBundle`）—— 改 id 就要
+    /// **连带重指**那 14 处引用，否则那些机型文件指向一条不存在的套餐（静默损坏）。
+    /// 先改本文件、再逐台重指重写，两边都过了才算改了。
+    pub fn rename_bundle(
+        &mut self,
+        id: &str,
+        new_id: &str,
+        display: Option<&str>,
+        now_iso8601: &str,
+    ) -> Result<(), AppError> {
+        self.bundles.rename(id, new_id, display, now_iso8601)?;
+        // 引用重指（大小写不敏感对上旧 id 的都换）。先在内存里改、逐台落盘
+        let old = id.trim().to_lowercase();
+        let same =
+            |v: &Option<String>| v.as_deref().is_some_and(|s| s.trim().to_lowercase() == old);
+        let touched: Vec<String> = self
+            .catalog
+            .machines()
+            .iter()
+            .filter(|m| {
+                same(&m.default_bundle) || m.versions.iter().any(|v| same(&v.recommended_bundle))
+            })
+            .map(|m| m.id.clone())
+            .collect();
+        for mid in &touched {
+            {
+                let m = self.catalog.machine_mut(mid)?;
+                if same(&m.default_bundle) {
+                    m.set_default_bundle(Some(new_id))?;
+                }
+                let vids: Vec<String> = m
+                    .versions
+                    .iter()
+                    .filter(|v| same(&v.recommended_bundle))
+                    .map(|v| v.id.clone())
+                    .collect();
+                for vid in vids {
+                    m.set_version_field(&vid, VersionField::RecommendedBundle, Some(new_id))?;
+                }
+            }
+            self.catalog.write_machine(mid)?;
+        }
+        self.bundles.write()?;
+        Ok(())
+    }
+
+    /// **复制一条套餐**：内容（assetRefs）与归属照抄，id 必须是新的。
+    /// 复制出来的那份**不被任何版本指着** —— 指向是要人显式改的动作
+    pub fn copy_bundle(
+        &mut self,
+        id: &str,
+        new_id: &str,
+        display: Option<&str>,
+        now_iso8601: &str,
+    ) -> Result<(), AppError> {
+        bundles::check_bundle_id(new_id)?;
+        let src = self
+            .bundles
+            .get(id)
+            .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?
+            .clone();
+        if self.bundles.get(new_id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 id 已经存在：{new_id}"
+            )));
+        }
+        self.bundles.add(Bundle {
+            id: new_id.trim().to_owned(),
+            display: display
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&src.display)
+                .to_owned(),
+            machine_id: src.machine_id.clone(),
+            asset_refs: src.asset_refs.clone(),
+            updated_at: Some(now_iso8601.get(..10).unwrap_or(now_iso8601).to_owned()),
+        })?;
+        self.bundles.write()?;
+        Ok(())
+    }
+
+    /// **删一条套餐**。被机型默认或任何版本指着时**整次拒绝**并点名 ——
+    /// 静默删掉会让那些版本生成时一条 BBS 都拿不到（10.8 的静默漏洞）。
+    /// 出路：去套餐页把指向逐个取消（版本回到机型默认），或改指别的套餐
+    pub fn remove_bundle(&mut self, id: &str) -> Result<(), AppError> {
+        let want = id.trim().to_lowercase();
+        let same = |v: &Option<String>| {
+            v.as_deref()
+                .is_some_and(|s| s.trim().to_lowercase() == want)
+        };
+        let mut holders: Vec<String> = Vec::new();
+        for m in self.catalog.machines() {
+            if same(&m.default_bundle) {
+                holders.push(format!("机型 {} 的 defaultBundle", m.id));
+            }
+            for v in &m.versions {
+                if same(&v.recommended_bundle) {
+                    holders.push(format!("版本 {}/{}", m.id, v.id));
+                }
+            }
+        }
+        if !holders.is_empty() {
+            return Err(
+                AppError::invalid_argument(format!("套餐 {id} 还被引用着，不能删"))
+                    .with_detail(holders.join("、")),
+            );
+        }
+        self.bundles.remove(id)?;
+        self.bundles.write()?;
+        Ok(())
+    }
+
+    /// 改一条资产的**交付档位**（`download` ↔ `bundled`），落盘。
+    /// 守卫在 [`Assets::set_delivery`]（mkPreset 不许随包）
+    pub fn set_asset_delivery(&mut self, id: &str, delivery: &str) -> Result<(), AppError> {
+        let d = match delivery.trim() {
+            "download" => crate::presetdata::assets::Delivery::Download,
+            "bundled" => crate::presetdata::assets::Delivery::Bundled,
+            other => {
+                return Err(AppError::invalid_argument(format!(
+                    "交付档位只有 download / bundled，收到：{other}"
+                )))
+            }
+        };
+        self.assets.set_delivery(id, d)?;
+        self.assets.write()?;
+        Ok(())
+    }
+
+    /// 新建套餐那两道闸（[`Self::add_bundle`] 与 [`Self::set_bundle_refs`] 共用）：
+    /// 每条引用都解析得到、至少一条 BBS
+    fn check_bundle_content(&self, bundle_id: &str, refs: &[String]) -> Result<(), AppError> {
+        let mut has_bbs = false;
+        for r in refs {
+            let a = self.assets.get(r.trim()).ok_or_else(|| {
+                AppError::invalid_argument(format!(
+                    "套餐 {bundle_id} 的 assetRef 指向一个不存在的资产：{r}"
+                ))
+                .with_detail("资产定义在 presets/assets.toml；引用必须先在资产库里登记".to_owned())
+            })?;
+            if a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs") {
+                has_bbs = true;
+            }
+        }
+        if !has_bbs {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 {bundle_id} 的 assetRefs 里没有一条 BBS 预设"
+            ))
+            .with_detail(
+                "套餐的内容就是 BBS 引用（doc §12.4）：MKP 预设与其配套 BBS 预设必须\
+                 成套配发，发了 MKP 不发 BBS，用户打出来的结果是错的"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// **把一批版本指到这份套餐**（作者 2026-10-03：多选 + 确认）。
+    ///
+    /// 一次手势 = 一次落盘序列：逐台机型文件改 `recommendedBundle`，
+    /// **已经指着它的跳过**（空操作不写盘）。返回真正改动的 uid 列表 ——
+    /// 界面拿它回答「哪些被影响了」。
+    ///
+    /// **不限机型**（作者：「不应该限制」）：一版一套的约束只有「一个版本只指
+    /// 一个套餐」，套餐可以被任何版本指向。
+    pub fn assign_versions(
+        &mut self,
+        bundle_id: &str,
+        uids: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        if self.bundles.get(bundle_id).is_none() {
+            return Err(AppError::not_found(format!("查无此套餐：{bundle_id}")));
+        }
+        // 先整套查一遍：任何一条不合格就一个字节都不写（同 set_bundle_refs 的纪律）
+        let mut plan: Vec<(String, String, String)> = Vec::new();
+        for uid in uids {
+            let (mid, vid) = uid.trim().split_once('/').ok_or_else(|| {
+                AppError::invalid_argument(format!("版本 uid 形状不对：{uid}（要 机型/版本）"))
+            })?;
+            let m = self
+                .catalog
+                .machine(mid)
+                .ok_or_else(|| AppError::not_found(format!("版本 {uid} 的机型 {mid} 不存在")))?;
+            if !m.versions.iter().any(|v| v.id == vid) {
+                return Err(AppError::not_found(format!("{mid} 没有叫 {vid} 的版本")));
+            }
+            plan.push((mid.to_owned(), vid.to_owned(), uid.trim().to_owned()));
+        }
+
+        let mut changed: Vec<String> = Vec::new();
+        for (mid, vid, uid) in plan {
+            {
+                let m = self.catalog.machine_mut(&mid)?;
+                if m.versions
+                    .iter()
+                    .find(|v| v.id == vid)
+                    .and_then(|v| v.recommended_bundle.as_deref())
+                    .is_some_and(|s| s.trim().eq_ignore_ascii_case(bundle_id))
+                {
+                    continue; // 已经指着它 —— 空操作
+                }
+                m.set_version_field(&vid, VersionField::RecommendedBundle, Some(bundle_id))?;
+            }
+            self.catalog.write_machine(&mid)?;
+            changed.push(uid);
+        }
+        Ok(changed)
     }
 
     /// **谁在用它**（b05 Task 9.4，套餐那一档 b05 Task 10）：删资产之前必须先问这一条。
@@ -766,6 +956,35 @@ impl Presets {
         // 资产条目归属的机型必须存在（b05 Task 8）。与下面那条同一类错：
         // 写一个不存在的机型 id，界面上只表现为"这台机型的图没了"，没有任何东西报错
         self.assets.check_against_machines(&machines)?;
+        // MKP 预设的「归属版本」必须真实存在（作者 2026-10-03：这一类靠
+        // machineId + versionId 定位那一版的产物）—— 指向不存在的版本，界面上只会
+        // 表现为「这一版没有徽章」，而没有任何东西报错
+        for a in self.assets.items() {
+            if a.kind != crate::presetdata::AssetKind::MkPreset {
+                continue;
+            }
+            let (Some(mid), Some(vid)) = (
+                a.machine_id.as_deref().map(str::trim),
+                a.version_id.as_deref().map(str::trim),
+            ) else {
+                continue; // 形状那条（check_one）已经报过了
+            };
+            let known = self
+                .catalog
+                .machine(mid)
+                .is_some_and(|m| m.versions.iter().any(|v| v.id == vid));
+            if !known {
+                return Err(AppError::corrupted(format!(
+                    "资产 {} 归属的版本不存在：{mid}/{vid}",
+                    a.id
+                ))
+                .with_detail(
+                    "MKP 预设在台账里靠「机型 + 版本」定位那一版的产物 —— \
+                     版本 id 写错的话它指向的是空气"
+                        .to_owned(),
+                ));
+            }
+        }
         // 反方向：机型引用的资产 id 必须存在（b05 Task 9 / 8.6）
         self.check_asset_refs()?;
         // 机型引用的板 id 必须存在（2026-10-02，与 check_asset_refs 同一范式）
@@ -833,6 +1052,289 @@ mod tests {
     fn real() -> Option<Presets> {
         let root = repo_presets_root()?;
         Some(Presets::load_from(&root).expect("presets/ 里的机型目录读不齐"))
+    }
+
+    /* ---------- 套餐 CRUD（2026-10-03，夹具级） ---------- *
+     * 全部写在 `workbench` feature 下：夹具与时间源都住在工作台那一侧，
+     * 这一层刻意不认它们（写路径的日期由调用方给）—— 与
+     * `set_bundle_refs_replaces_the_list_or_refuses` 同一条理由 */
+
+    #[cfg(feature = "workbench")]
+    fn now() -> String {
+        crate::workbench::clock::now_iso8601()
+    }
+
+    /// 新建的四道闸 + 正路径。**新建时就得挑内容**：落一份空套餐出去，
+    /// 下一次加载就会被「成套配发」判据拦住 —— 所以闸在写之前而不是读的时候
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn a_new_bundle_needs_a_bbs_a_real_machine_and_a_free_id() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+
+        // 空内容 / 没有 BBS / 引用不存在 / 机型不存在 / id 撞 —— 各拦一次
+        assert!(p.add_bundle("A1_NEW", "A1", "新套餐", &[], &now()).is_err());
+        assert!(p
+            .add_bundle("A1_NEW", "A1", "新套餐", &["a1-icon".to_owned()], &now())
+            .is_err());
+        assert!(p
+            .add_bundle("A1_NEW", "A1", "新套餐", &["ghost".to_owned()], &now())
+            .is_err());
+        assert!(p
+            .add_bundle(
+                "A1_NEW",
+                "NOPE",
+                "新套餐",
+                &["a1-bbs-04-020".to_owned()],
+                &now()
+            )
+            .is_err());
+        assert!(p
+            .add_bundle(
+                "A1_default",
+                "A1",
+                "新套餐",
+                &["a1-bbs-04-020".to_owned()],
+                &now()
+            )
+            .is_err());
+
+        // 正路径：落盘重读真的有了，refs 照抄
+        p.add_bundle(
+            "A1_NEW",
+            "A1",
+            "新套餐",
+            &[
+                "a1-standard-bbs-placeholder".to_owned(),
+                "a1-bbs-04-020".to_owned(),
+            ],
+            &now(),
+        )
+        .expect_err("夹具里没有 mkPreset 资产，先只用 BBS");
+        p.add_bundle(
+            "A1_NEW",
+            "A1",
+            "新套餐",
+            &["a1-bbs-04-020".to_owned(), "p1s-bbs-02-010".to_owned()],
+            &now(),
+        )
+        .expect("新建");
+        let again = Presets::load_from(p.root()).expect("重读");
+        let b = again.bundles.get("A1_NEW").expect("落盘之后重读得到");
+        assert_eq!(b.machine_id, "A1");
+        assert_eq!(b.asset_refs.len(), 2);
+    }
+
+    /// **改 id 要连带重指机型文件**：defaultBundle 与各版本的 recommendedBundle
+    /// 一起换、一起落盘 —— 只改 bundles.toml 的话，机型文件指向一条不存在的套餐
+    /// （静默损坏：生成时那条 BBS 就没了）
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn renaming_a_bundle_repoints_the_machine_files() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+
+        p.rename_bundle("A1_default", "A1_BASE", Some("基础套餐"), &now())
+            .expect("改名");
+        let again = Presets::load_from(p.root()).expect("重读");
+        let a1 = again.catalog.machine("A1").expect("A1 在");
+        assert_eq!(
+            a1.default_bundle.as_deref(),
+            Some("A1_BASE"),
+            "机型默认跟着改"
+        );
+        for v in &a1.versions {
+            assert_eq!(
+                v.recommended_bundle.as_deref(),
+                Some("A1_BASE"),
+                "版本 {} 的指向跟着改",
+                v.id
+            );
+        }
+        assert_eq!(
+            again.bundles.get("A1_BASE").expect("新 id 在").display,
+            "基础套餐"
+        );
+        assert!(again.bundles.get("A1_default").is_none(), "旧 id 没了");
+        let expected_today = now();
+        assert_eq!(
+            again.bundles.get("A1_BASE").unwrap().updated_at.as_deref(),
+            Some(expected_today[..10].to_owned()).as_deref(),
+            "内容变了 updatedAt 要盖今天"
+        );
+    }
+
+    /// 复制：内容照抄、id 必须是新的、**复制出来的那份没人指着**
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn copying_a_bundle_keeps_the_refs_and_stays_unreferenced() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        p.copy_bundle("A1_default", "A1_COPY", None, &now())
+            .expect("复制");
+        let mut again = Presets::load_from(p.root()).expect("重读");
+        let src = again.bundles.get("A1_default").expect("原份还在");
+        let copied = again.bundles.get("A1_COPY").expect("新份在");
+        assert_eq!(copied.asset_refs, src.asset_refs, "内容照抄");
+        assert_eq!(copied.machine_id, src.machine_id);
+        // 没有任何机型 / 版本指着它
+        for m in again.catalog.machines() {
+            assert_ne!(m.default_bundle.as_deref(), Some("A1_COPY"));
+            for v in &m.versions {
+                assert_ne!(v.recommended_bundle.as_deref(), Some("A1_COPY"));
+            }
+        }
+        assert!(
+            again
+                .copy_bundle("A1_default", "A1_COPY", None, &now())
+                .is_err(),
+            "撞 id 拒"
+        );
+    }
+
+    /// 删除：被机型默认或版本指着时整次拒绝并点名；解除之后真删掉
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn removing_a_bundle_refuses_while_pointed_at() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        let err = p
+            .remove_bundle("A1_default")
+            .expect_err("夹具里 A1 的默认与两版都指着它");
+        assert!(err
+            .detail
+            .clone()
+            .unwrap_or_default()
+            .contains("A1/STANDARD"));
+        // 解除所有指向之后删得掉，重读真没了
+        for vid in ["STANDARD", "FAST"] {
+            p.catalog
+                .machine_mut("A1")
+                .unwrap()
+                .set_version_field(vid, VersionField::RecommendedBundle, None)
+                .unwrap();
+        }
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_default_bundle(None)
+            .unwrap();
+        p.catalog.write_machine("A1").unwrap();
+        p.remove_bundle("A1_default").expect("删掉");
+        assert!(Presets::load_from(p.root())
+            .expect("重读")
+            .bundles
+            .get("A1_default")
+            .is_none());
+    }
+
+    /// 交付档位：download ↔ bundled 一起改内存与文档面；mkPreset 不许随包
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn assigning_versions_moves_a_batch_and_skips_the_ones_already_there() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+
+        // 坏输入整次拒绝：套餐不存在 / uid 形状不对 / 机型或版本不存在
+        assert!(p
+            .assign_versions("no_such", &["P1S/LITE".to_owned()])
+            .is_err());
+        assert!(p
+            .assign_versions("A1_default", &["P1S".to_owned()])
+            .is_err());
+        assert!(p
+            .assign_versions("A1_default", &["GHOST/LITE".to_owned()])
+            .is_err());
+        assert!(p
+            .assign_versions("A1_default", &["P1S/NOPE".to_owned()])
+            .is_err());
+
+        // 跨机型批量：夹具里 A1 两版本来就指着 A1_default（所以它们是「跳过」那两档），
+        // 真正改的只有 P1S/LITE
+        let changed = p
+            .assign_versions(
+                "A1_default",
+                &[
+                    "P1S/LITE".to_owned(),
+                    "A1/FAST".to_owned(),
+                    "A1/STANDARD".to_owned(),
+                ],
+            )
+            .expect("批量指向");
+        assert_eq!(changed, vec!["P1S/LITE".to_owned()], "已指着的不算改动");
+
+        let again = Presets::load_from(p.root()).expect("重读");
+        assert_eq!(
+            again
+                .catalog
+                .machine("P1S")
+                .unwrap()
+                .versions
+                .first()
+                .unwrap()
+                .recommended_bundle
+                .as_deref(),
+            Some("A1_default"),
+            "跨机型也指得过去（作者：不应该限制）"
+        );
+        // 全都指过来之后再指一次 = 空操作，一个字节都不动
+        let before = std::fs::read_to_string(p.catalog.machine("P1S").unwrap().file()).unwrap();
+        let again_changed = p
+            .assign_versions("A1_default", &["P1S/LITE".to_owned()])
+            .expect("再指一次");
+        assert!(again_changed.is_empty(), "已经指着的不算改动");
+        assert_eq!(
+            std::fs::read_to_string(p.catalog.machine("P1S").unwrap().file()).unwrap(),
+            before,
+            "空操作不该动文件"
+        );
+    }
+
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn set_delivery_moves_between_tiers_and_refuses_mk_preset() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        p.set_asset_delivery("a1-icon", "bundled").expect("设随包");
+        let again = Presets::load_from(p.root()).expect("重读");
+        assert_eq!(
+            again.assets.get("a1-icon").expect("在").delivery,
+            crate::presetdata::assets::Delivery::Bundled,
+            "落盘之后重读得到"
+        );
+        // 改回去：文档面上那条键被删掉（回到缺省 download）
+        p.set_asset_delivery("a1-icon", "download").expect("改回");
+        assert_eq!(
+            Presets::load_from(p.root())
+                .expect("重读")
+                .assets
+                .get("a1-icon")
+                .expect("在")
+                .delivery,
+            crate::presetdata::assets::Delivery::Download
+        );
+
+        // mkPreset 不许设成随包（产物不在资产根，没有随包复制这条路径）——
+        // 造一份只有 mkPreset 的台账来验这道闸
+        let dir = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(
+            &dir.path().join(assets::ASSETS_FILE),
+            "[[assets]]\nid = 'a1-std'\ntype = 'mkPreset'\nmachineId = 'A1'\nversionId = 'STANDARD'\nname = 'A1 标准版预设'\n".as_bytes(),
+        )
+        .unwrap();
+        let mut assets = assets::Assets::load_from(dir.path()).unwrap();
+        assert!(
+            assets
+                .set_delivery("a1-std", crate::presetdata::assets::Delivery::Bundled)
+                .is_err(),
+            "mkPreset 设随包必须被拦"
+        );
+        assert!(
+            assets
+                .set_delivery("a1-std", crate::presetdata::assets::Delivery::Download)
+                .is_ok(),
+            "mkPreset 保持按需下载是合法动作"
+        );
     }
 
     /// **产物命名规则的那份副本必须与生成器一致。**
@@ -1078,7 +1580,7 @@ mod tests {
 
         // 内容没变：Ok(false)，文件一个字节都不动（updatedAt 不许被空操作刷新）
         let changed = presets
-            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()], &[], &now())
+            .set_bundle_refs("A1_default", &["a1-bbs-04-020".to_owned()], &now())
             .expect("没变也是成功的");
         assert!(!changed);
         assert_eq!(
@@ -1092,7 +1594,6 @@ mod tests {
             .set_bundle_refs(
                 "a1_default",
                 &["p1s-bbs-02-010".to_owned(), "a1-bbs-04-020".to_owned()],
-                &[],
                 &now(),
             )
             .expect("换内容");
@@ -1116,7 +1617,7 @@ mod tests {
 
         // 悬空引用被拦；拦下之后文件还是刚才那份
         let err = presets
-            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()], &[], &now())
+            .set_bundle_refs("A1_default", &["ghost-asset".to_owned()], &now())
             .expect_err("悬空引用必须被拦");
         assert!(err.message.contains("不存在"), "实测：{}", err.message);
         assert_eq!(
@@ -1127,58 +1628,19 @@ mod tests {
 
         // 只装图片不装 BBS 也被拦（10.8 成套配发）
         let err = presets
-            .set_bundle_refs("A1_default", &["a1-image".to_owned()], &[], &now())
+            .set_bundle_refs("A1_default", &["a1-image".to_owned()], &now())
             .expect_err("没有 BBS 必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
         // 空列表同一条判据的另一端：加载期拦空 assetRefs，这里拦写出去的空套餐
         let err = presets
-            .set_bundle_refs("A1_default", &[], &[], &now())
+            .set_bundle_refs("A1_default", &[], &now())
             .expect_err("空套餐必须被拦");
         assert!(err.message.contains("BBS"), "实测：{}", err.message);
 
-        // **挂一条 MKP 预设**（作者 2026-10-03：文件不存在也能先挂 —— 预设是生成
-        // 产物，套餐先挂名字）；但 uid 必须是**本机型**的真版本
-        let changed = presets
-            .set_bundle_refs(
-                "A1_default",
-                &["a1-bbs-04-020".to_owned()],
-                &["A1/STANDARD".to_owned()],
-                &now(),
-            )
-            .expect("文件不存在也能挂");
-        assert!(changed);
-        let on_disk = std::fs::read_to_string(&file).expect("读盘");
-        assert!(
-            on_disk.contains("A1/STANDARD"),
-            "套餐的 presets 要真落盘：{on_disk}"
-        );
-
-        // 别家机型的预设不许挂进 A1 的套餐
-        let err = presets
-            .set_bundle_refs(
-                "A1_default",
-                &["a1-bbs-04-020".to_owned()],
-                &["P1S/LITE".to_owned()],
-                &now(),
-            )
-            .expect_err("别家机型的预设必须被拦");
-        assert!(err.message.contains("机型"), "实测：{}", err.message);
-
-        // 打错的 uid（版本不存在）拦下
-        let err = presets
-            .set_bundle_refs(
-                "A1_default",
-                &["a1-bbs-04-020".to_owned()],
-                &["A1/NOPE".to_owned()],
-                &now(),
-            )
-            .expect_err("不存在的版本必须被拦");
-        assert!(err.message.contains("不存在"), "实测：{}", err.message);
-
         // 查无此套餐
         assert!(presets
-            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()], &[], &now())
+            .set_bundle_refs("no_such", &["a1-bbs-04-020".to_owned()], &now())
             .is_err());
     }
 
@@ -1332,11 +1794,11 @@ mod tests {
             checked >= 14,
             "只查了 {checked} 处 bundle 引用 —— 这条判据在空转"
         );
-        // 5 台机各一条套餐，条数变了要在提交里说清为什么
+        // 一版一套（2026-10-03）：9 份套餐各被引用着，条数变了要在提交里说清为什么
         assert_eq!(
             named.len(),
-            5,
-            "引用到的套餐数：{named:?} —— 旧仓实测 5 份（A1/A1_MINI/P1S/P2S/X1C 各一）"
+            9,
+            "引用到的套餐数：{named:?} —— A1 / A1_MINI 各三份 + P1S / P2S / X1C 各一份"
         );
     }
 
@@ -1354,8 +1816,8 @@ mod tests {
         let items = p.bundles.items();
         assert_eq!(
             items.len(),
-            5,
-            "旧仓实测 5 份套餐 —— 条数变了就在提交里说清为什么"
+            9,
+            "一版一套（2026-10-03，照 C15 模型重排）—— 条数变了就在提交里说清为什么"
         );
 
         let mut bbs_total = 0usize;
@@ -1389,16 +1851,23 @@ mod tests {
                 }
             }
         }
-        // 反空转：5 条套餐各引 1 条 BBS（实测），BBS 引用总数为 0 说明上面的判定路径没走通
+        // 反空转：9 条套餐各引 1 条 BBS（实测），BBS 引用总数为 0 说明上面的判定路径没走通
         assert!(
-            bbs_total >= 5,
-            "5 条套餐只对上 {bbs_total} 条 BBS 引用 —— 10.8 的判定在空转"
+            bbs_total >= 9,
+            "9 条套餐只对上 {bbs_total} 条 BBS 引用 —— 10.8 的判定在空转"
         );
 
-        // **反查实测**（10.4 判据的反向）：`a1-bbs-04-020` 只被 A1_default 引用；
+        // **反查实测**（10.4 判据的反向）：`a1-bbs-04-020` 被 A1 的三份套餐各装一次；
         // 换个大小写查同一个资产，结果必须一致
         let u = p.asset_usage("a1-bbs-04-020").expect("反查");
-        assert_eq!(u.bundles, vec!["A1_default".to_owned()]);
+        assert_eq!(
+            u.bundles,
+            vec![
+                "A1_STANDARD".to_owned(),
+                "A1_FAST".to_owned(),
+                "A1_FASTV3.3".to_owned()
+            ]
+        );
         let u2 = p.asset_usage("A1-BBS-04-020").expect("反查（大写）");
         assert_eq!(u, u2, "反查是大小写不敏感的");
         // 图标那一档不被套餐引用：归属 ≠ 引用

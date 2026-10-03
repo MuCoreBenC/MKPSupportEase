@@ -60,7 +60,7 @@
 | F2 | `presets/dist/` | 发布器产物暂存（实际已有 `mkp/presets/` 9 份；content JSON / manifest / catalog.json 是设计稿、尚未生成）。**布局与客户端落点同形**（2026-10-02 对齐）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
 | F2b | `crates/preset/assets/presets/`（9 份，入库） | **入库产物目录**：`BUILTIN_PRESETS` 编进二进制的同一批真字节 | ① 的②半成品真身 | **保留**；构建器与判据都认它 |
 | F3 | `public/assets/icons\|models`（+ `bbs/` 见 F4） | 图标 / 3mf 模型的**载荷**，随 vite 进包（工作台按 URL 直取） | ② 内置资源（源） | **收口**：第三圈第二刀已登记进 catalog（`kind=icon` / `kind=model`），客户端按需下载进 `mkp/icons/` `mkp/models/`，随包副本退役 |
-| F3b | ~~`public/assets/printers/`~~ → `src/app/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前的判定是"② 内置资源"，**2026-10-01 改判**：它是**界面展示素材**（不是产品数据资源） | **已收口 2026-10-01（第三刀）**：从资产台账（`presets/assets.toml` 的 4 条 `image`）剥离，搬进 `src/app/assets/`，由 vite 资源管线随程序本体走；机型文件的 `image` 引用一并清空。判据：`runtime::catalog`「台账里已无 image 类」 |
+| F3b | `presets/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前判成"② 内置资源"，2026-10-01 又改判成"界面素材搬进源码"，**两版都作废** | **已收口 2026-10-03**：作者指出「不会编程的用户怎么改图片呢」—— 第三刀把它硬编码进客户端源码是错的。文件回数据侧 `presets/assets/printers/`，台账 4 条 `image` 恢复登记，用 **`delivery = 'bundled'`** 表达「不进云端交付、随包不下载」，到客户端靠构建期复制（`scripts/copy-assets.mjs`）。判据：`runtime::catalog::dest_of_asset`「整机图在台账里、且不进 files[]」 |
 | F4 | `public/assets/bbs/Process/`（9 份 JSON） | BBS 切片配置成品 | ② 内置资源 | **已收口 2026-10-01（第一刀）**：登记进 catalog（`kind=bbs_config`），落点 `mkp/bbs/…`，随包副本退役 |
 | F5 | `public/bbs/`（PROVENANCE / registry / layout / defaults / icons / _sync.json） | BBS 页元数据（提取器产物，随本仓分发） | ② 内置资源 | **保留**；与 F4 同一批登记（这几份是 BBS 页的界面数据，不是下载资源） |
 | F6 | ~~`public/models/hero_pile*.webp`~~ → `src/app/assets/hero/` | 首页第五步 / 校准页测试模型那一屏的合影 | 界面展示素材（不是产品数据资源） | **已收口 2026-10-01（第三刀顺手搬）**：与 F3b 同一条规则、同一层（`src/app/assets/hero/`），改走 vite 资源管线；**不登记进资产台账**。搬完后 `public/` 里不再有界面素材 |

@@ -56,11 +56,14 @@ const FORBIDDEN = [
   [/\/assets\/icons\//, '已走下载管道的图标（不该再随包分发）'],
 
   // 注意：**界面自带素材不在这份清单的管辖里，也不需要靠目录名堵** ——
-  // 品牌 logo、机型整机图、首页 / 校准页那张 hero 合影，2026-10-01 起都住
-  // `src/app/assets/`（`bambuLogo.ts` / `printers/` / `hero/`），由 vite 资源管线打进
-  // `dist/assets/*.webp`（带内容哈希），与品牌 logo 同一档。
-  // `public/` 从此只剩两样：台账管的载荷根 `assets/{bbs,icons,models}`，与 BBS 页元数据 `bbs/`。
-  // 归属的判据在 Rust 侧（`runtime::catalog`：「资产台账里已无 image 类」），不在这里。
+  // 品牌 logo、首页 / 校准页那张 hero 合影住 `src/app/assets/`，由 vite 资源管线打进
+  // `dist/assets/*.webp`（带内容哈希）。
+  // 机型整机图 2026-10-03 换了个来法：文件在 `presets/assets/printers/`（台账登记、
+  // `delivery = 'bundled'`），构建期由 `scripts/copy-assets.mjs` 复制进 `src/app/assets/printers/`
+  // → 同样以带哈希的 `dist/assets/*.webp` 进包，**客户端不下载它**（不在 catalog files[]）。
+  // `public/` 从此只剩 BBS 页元数据 `bbs/`（客户端构建时连 `assets/` 都不拷 ——
+  // 资产从云端下载，拷贝它就是那份「随包副本」）。
+  // 归属的判据在 Rust 侧（`runtime::catalog::dest_of_asset`：按交付档位拦），不在这里。
 ]
 
 function walk(dir, prefix = '') {

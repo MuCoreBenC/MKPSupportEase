@@ -23,6 +23,8 @@ use crate::ipc::traced;
 use crate::workbench::load_presets;
 use crate::workbench::presets::{MachineField, Presets, VersionField};
 
+use super::with_ctx_mut;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrandView {
@@ -94,6 +96,12 @@ pub fn wb_machines() -> Result<MachineList, AppError> {
 ///
 /// 代价写明白：**没有撤销**。所以校验要严（ID 字符集、重名），
 /// 而写入用原子写（同目录临时文件 + rename），半个文件的 TOML 比没有更糟。
+/// 写命令统一走 `Ctx`：**改的是 `Ctx` 里那份 `Presets`**（资产库 / 套餐页的读视图
+/// 建在它上面），落盘之后两边看到的就是同一个事实。以前这里各自 `load_presets()`
+/// fresh 一份来改 —— 落盘是对的，但 `Ctx` 里的机型清单还是启动时的旧指向，
+/// 套餐页「被哪些版本指向」于是纹丝不动（作者截图点名「改了没反应」）。
+/// 返回值仍从盘上重读：**界面看到的应该是落盘的结果**。
+
 #[tauri::command]
 pub fn wb_add_version(
     machine_id: String,
@@ -101,15 +109,17 @@ pub fn wb_add_version(
     name: String,
 ) -> Result<MachineList, AppError> {
     traced("wb_add_version", |_| {
-        let mut p = load_presets()?;
-        p.catalog
-            .machine_mut(&machine_id)?
-            .add_version(&id, &name)?;
-        p.catalog.write_machine(&machine_id)?;
-        tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
-        // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
-        // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .add_version(&id, &name)?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
+            // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
+            // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 
@@ -128,23 +138,24 @@ pub fn wb_copy_version(
     description: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_copy_version", |_| {
-        let mut p = load_presets()?;
-        p.catalog.machine_mut(&machine_id)?.copy_version(
-            &template_version_id,
-            &id,
-            &name,
-            tag.as_deref(),
-            description.as_deref(),
-        )?;
-        p.catalog.write_machine(&machine_id)?;
-        tracing::info!(
-            machine = %machine_id,
-            template = %template_version_id,
-            version = %id,
-            "从模板复制了一个版本（只写版本定义）"
-        );
-        // 从盘上重读再返回：**界面看到的应该是落盘的结果**
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            ctx.presets.catalog.machine_mut(&machine_id)?.copy_version(
+                &template_version_id,
+                &id,
+                &name,
+                tag.as_deref(),
+                description.as_deref(),
+            )?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            tracing::info!(
+                machine = %machine_id,
+                template = %template_version_id,
+                version = %id,
+                "从模板复制了一个版本（只写版本定义）"
+            );
+            // 从盘上重读再返回：**界面看到的应该是落盘的结果**
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 
@@ -156,12 +167,13 @@ pub fn wb_copy_version(
 #[tauri::command]
 pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<MachineList, AppError> {
     traced("wb_add_machine", |_| {
-        let mut p = load_presets()?;
-        p.catalog.add_machine(&id, &brand, &display)?;
-        tracing::info!(machine = %id, "建了一台机型");
-        // 重读盘再返回：**界面看到的是落盘的结果**。
-        // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            ctx.presets.catalog.add_machine(&id, &brand, &display)?;
+            tracing::info!(machine = %id, "建了一台机型");
+            // 重读盘再返回：**界面看到的是落盘的结果**。
+            // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 
@@ -183,26 +195,30 @@ pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<
 #[tauri::command]
 pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<MachineList, AppError> {
     traced("wb_remove_version", |_| {
-        let mut p = load_presets()?;
-        // 先记下来再删 —— 删完就查不出它被谁引用了
-        let orphans = p.orphans_if_version_removed(&machine_id, &version_id);
-        p.catalog
-            .machine_mut(&machine_id)?
-            .remove_version(&version_id)?;
-        p.catalog.write_machine(&machine_id)?;
-        if orphans.is_empty() {
-            tracing::info!(machine = %machine_id, version = %version_id, "删了一个版本");
-        } else {
-            // 留下孤儿是**要留痕**的事，不能只在界面上闪一下
-            tracing::warn!(
-                machine = %machine_id,
-                version = %version_id,
-                orphans = orphans.len(),
-                keys = %orphans.join(","),
-                "删了一个版本，留下了孤儿引用"
-            );
-        }
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            // 先记下来再删 —— 删完就查不出它被谁引用了
+            let orphans = ctx
+                .presets
+                .orphans_if_version_removed(&machine_id, &version_id);
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .remove_version(&version_id)?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            if orphans.is_empty() {
+                tracing::info!(machine = %machine_id, version = %version_id, "删了一个版本");
+            } else {
+                // 留下孤儿是**要留痕**的事，不能只在界面上闪一下
+                tracing::warn!(
+                    machine = %machine_id,
+                    version = %version_id,
+                    orphans = orphans.len(),
+                    keys = %orphans.join(","),
+                    "删了一个版本，留下了孤儿引用"
+                );
+            }
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 
@@ -218,14 +234,14 @@ pub fn wb_set_version_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_version_field", |_| {
-        let mut p = load_presets()?;
-        p.catalog.machine_mut(&machine_id)?.set_version_field(
-            &version_id,
-            field,
-            value.as_deref(),
-        )?;
-        p.catalog.write_machine(&machine_id)?;
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .set_version_field(&version_id, field, value.as_deref())?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 
@@ -237,12 +253,14 @@ pub fn wb_set_machine_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_field", |_| {
-        let mut p = load_presets()?;
-        p.catalog
-            .machine_mut(&machine_id)?
-            .set_field(field, value.as_deref())?;
-        p.catalog.write_machine(&machine_id)?;
-        Ok(list_of(&load_presets()?))
+        with_ctx_mut(|ctx| {
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .set_field(field, value.as_deref())?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            Ok(list_of(&load_presets()?))
+        })
     })
 }
 

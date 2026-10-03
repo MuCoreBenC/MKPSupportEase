@@ -61,3 +61,7 @@ tmp-port/
 # AI 工具的本机记忆/状态（codebuddy 等）。设计文档若被代码引用会放 .trae/documents/
 # ——那是文档，这个是工具自己的笔记，入库只会变成另一份会漂移的底账
 .codebuddy/
+
+# 构建期从 presets/assets 复制进来的（生成物，2026-10-03 bundled 档）
+src/app/assets/printers/
+public/assets/

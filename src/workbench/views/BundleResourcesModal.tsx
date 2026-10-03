@@ -8,16 +8,18 @@
  *
  * # 与原型的差别（真后端决定）
  *
- * 套餐的唯一真源是 `presets/bundles.toml`（Task 13.6）。它有两类配发内容：
- * **MKP 预设**（`presets` 字段，**版本 uid 直引** —— 不经过资产库，doc §12.5 的本义；
- * 作者 2026-10-03：**文件不存在也能先挂** —— 预设是生成产物，生成之后文件才落）
- * 和 **BBS 引用**（`assetRefs`，走资产库）。两个页签各管一类。
+ * 套餐的唯一真源是 `presets/bundles.toml`（Task 13.6），内容是**一份** `assetRefs`：
+ * 切片器预设（`type = 'slicerProfile'`）与 **MKP 预设**（`type = 'mkPreset'`，2026-10-03
+ * 按作者「为什么资产库里面不放 mkp 预设」进的资产库）都在里面。两个页签是这份清单的两半。
  *
- * 保存交出**两个完整清单**，写盘由调用方做（`wb.setBundleRefs`，一次手势落一个文件）。
+ * **文件在不在都能选**（作者：「不只是没文件的时候可以选择，有文件也要可以选择」）：
+ * MKP 预设条目恒在资产库里，「有没有生成」是生成页四档状态的事，不拦选用。
+ *
+ * 保存交出**一个完整清单**，写盘由调用方做（`wb.setBundleRefs`，一次手势落一个文件）。
  */
 import { useEffect, useState } from 'react'
 
-import type { AssetList, AssetView, BundleView, PresetCandidate } from '../api'
+import type { AssetList, AssetView, BundleView } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import s from '../c14.module.css'
 
@@ -26,25 +28,16 @@ type ResTab = 'mkp' | 'slicer'
 
 interface Props {
   open: boolean
-  /** 资产库清单（切片器页签的候选池）。还在加载时框里说明状态 */
+  /** 资产库清单（两个页签的候选池：mkPreset / slicerProfile）。还在加载时框里说明状态 */
   assets: AssetList | null
-  /** MKP 页签的候选池：能生成的版本（文件不存在也能先挂） */
-  presetCandidates: PresetCandidate[]
   /** 改哪份套餐。null = 还没选套餐（框里会说清楚怎么做，保存禁用） */
   bundle: BundleView | null
   onCancel: () => void
-  /** 交出**两个完整清单**（MKP 的 uid 列表 / BBS 的资产 id 列表），由调用方决定怎么落盘 */
-  onConfirm: (presetUids: string[], slicerIds: string[]) => void
+  /** 交出**一个完整清单**（资产 id 列表），由调用方决定怎么落盘 */
+  onConfirm: (assetIds: string[]) => void
 }
 
-export default function BundleResourcesModal({
-  open,
-  assets,
-  presetCandidates,
-  bundle,
-  onCancel,
-  onConfirm,
-}: Props) {
+export default function BundleResourcesModal({ open, assets, bundle, onCancel, onConfirm }: Props) {
   const [tab, setTab] = useState<ResTab>('mkp')
   const [mkp, setMkp] = useState<string[]>([])
   const [slicer, setSlicer] = useState<string[]>([])
@@ -57,13 +50,16 @@ export default function BundleResourcesModal({
   useEffect(() => {
     if (!open) return
     setTab('mkp')
-    setMkp((bundle?.presets ?? []).map((p) => p.uid))
+    // MKP 预设那半 = assetRefs 里 kind 为 mkPreset 的（其余几类不进这两个页签）
+    setMkp((bundle?.assetRefs ?? []).filter((r) => r.kind === 'mkPreset').map((r) => r.id))
     setSlicer((bundle?.assetRefs ?? []).filter((r) => r.kind === 'slicerProfile').map((r) => r.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bundleId])
 
   const pool: AssetView[] =
-    assets?.assets.filter((a) => (tab === 'mkp' ? false : a.kind === 'slicerProfile')) ?? []
+    assets?.assets.filter((a) =>
+      tab === 'mkp' ? a.kind === 'mkPreset' : a.kind === 'slicerProfile',
+    ) ?? []
   const chosen = tab === 'mkp' ? mkp : slicer
   const toggle = (id: string) => {
     const flip = (cur: string[]) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])
@@ -97,7 +93,7 @@ export default function BundleResourcesModal({
             className={`${s.btn} ${s.btnPrimary}`}
             disabled={bundle === null}
             title={bundle === null ? '先选一个套餐' : undefined}
-            onClick={() => onConfirm(mkp, slicer)}
+            onClick={() => onConfirm([...mkp, ...slicer])}
           >
             保存
           </button>
@@ -142,23 +138,34 @@ export default function BundleResourcesModal({
           </div>
 
           {tab === 'mkp' ? (
-            /* MKP 预设走 uid 直引（不经过资产库）—— 文件没生成也能先挂，
-               生成之后文件自动补上（作者 2026-10-03 的裁决） */
+            /* MKP 预设（资产库里的 `mkPreset` 类）—— **文件在不在都能选**：
+               「有没有生成」是生成页的状态，不拦这里挂（作者 2026-10-03） */
             <div className={s.bunList}>
-              {presetCandidates.map((c) => (
-                <label key={c.uid} className={s.fileRow}>
-                  <input
-                    type="checkbox"
-                    checked={mkp.includes(c.uid)}
-                    onChange={() => toggle(c.uid)}
-                  />
-                  <span className={`${s.fileName} ${s.mono}`}>{c.name}</span>
-                  {c.state !== 'built' && <span className={s.tag}>未生成</span>}
-                  <span className={s.cardNote}>{c.fileName}</span>
-                </label>
-              ))}
-              {presetCandidates.length === 0 && (
-                <p className={s.note}>还没有能生成的版本 —— 先去机型与版本页建。</p>
+              {!assets && <p className={s.note}>资产库还在读……</p>}
+              {assets &&
+                pool.map((a) => (
+                  <label key={a.id} className={s.fileRow}>
+                    <input
+                      type="checkbox"
+                      checked={mkp.includes(a.id)}
+                      onChange={() => toggle(a.id)}
+                    />
+                    <span className={`${s.fileName} ${s.mono}`}>{a.display || a.id}</span>
+                    {a.buildState !== null && a.buildState !== 'built' && (
+                      <span className={s.tag}>
+                        {a.buildState === 'neverBuilt'
+                          ? '待生成'
+                          : a.buildState === 'stale'
+                            ? '待更新'
+                            : '暂无资源'}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              {assets && pool.length === 0 && (
+                <p className={s.note}>
+                  资产库里还没有 MKP 预设登记 —— 去资产库登记（那里也能看到每份的生成状态）。
+                </p>
               )}
             </div>
           ) : (
@@ -172,7 +179,7 @@ export default function BundleResourcesModal({
                       checked={chosen.includes(a.id)}
                       onChange={() => toggle(a.id)}
                     />
-                    <span className={`${s.fileName} ${s.mono}`}>{a.name}</span>
+                    <span className={`${s.fileName} ${s.mono}`}>{a.display}</span>
                     {/* 括号里是来源标注：切片器这一类文件目前来自 BBS 体系 */}
                     <span className={s.tag}>{a.slicer === 'orca' ? 'Orca' : '(BBS)'}</span>
                     <span className={s.tag}>{a.machineId ?? '通用'}</span>

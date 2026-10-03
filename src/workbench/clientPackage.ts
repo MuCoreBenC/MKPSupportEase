@@ -244,10 +244,10 @@ export function clientFieldsOf(inp: PackageInputs): ClientFieldDef[] {
   return out
 }
 
-/** 柜台上单卖的：可见（`assign === 'optional'`，= 不入任何套餐）、又不是「仅归档」的那些 */
+/** 柜台上单卖的：身份「可选」（= 不入任何套餐、非随包）、又不是「仅归档」的那些 */
 export function optionalFilesOf(inp: PackageInputs): FileRef[] {
   return inp.assets
-    .filter((a) => a.kind === 'slicerProfile' && a.assign === 'optional')
+    .filter((a) => a.kind === 'slicerProfile' && a.identity === 'optional')
     .map(fileRefOfAsset)
     .filter((f): f is FileRef => f !== undefined)
 }

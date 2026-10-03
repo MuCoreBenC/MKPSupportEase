@@ -53,6 +53,8 @@ export type ArtifactState = 'fresh' | 'stale' | 'missing'
 export type SaveState = 'saved' | 'dirty'
 /** `wording::BbsAssign` */
 export type BbsAssign = 'assigned' | 'optional' | 'archiveOnly'
+/** `wording::AssetIdentity` —— 资产交付身份四态（作者 2026-10-03 定的模型） */
+export type AssetIdentity = 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 /** `wording::BbsSource` */
 export type BbsSource = 'own' | 'inheritedFromMachine'
 /** `patch::Visibility` */
@@ -649,6 +651,8 @@ export interface Words {
   artifact: Record<ArtifactState, Word>
   save: Record<SaveState, Word>
   bbsAssign: Record<BbsAssign, Word>
+  /** 资产交付身份四态（进套餐 / 可选 / 随包 / 仅归档） */
+  identity: Record<AssetIdentity, Word>
   bbsSource: Record<BbsSource, Word>
   origin: Record<Origin, Word>
   level: Record<Level, Word>
@@ -761,8 +765,11 @@ export interface MachineList {
  *
  * 四个取值而不是三个：`image` 与 `icon` 是两种消费方式（一个是机型图、一个是矢量标记）。
  * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
+ *
+ * `image`（整机图）2026-10-03 回到台账（第三刀的剥离已作废）：它用
+ * `delivery = 'bundled'` 表达「不进云端交付、但工作台可管可换图」。
  */
-export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile'
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
 
 /** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
 export interface AssetView {
@@ -770,6 +777,12 @@ export interface AssetView {
   kind: AssetKind
   /** 归属机型；不属于任何机型时是 null */
   machineId: string | null
+  /** 归属版本（只 `mkPreset` 类有）—— 界面拿它跳到那一版 */
+  versionId: string | null
+  /** **显示名（一律真名）**：MKP 预设 = 版本名、切片器 = 文件名，其余 = 登记名。
+   *  界面上显示这一格 */
+  display: string
+  /** 台账登记的名字（不是显示真源，详情卡里作对照） */
   name: string
   /** 相对资产根（`public/assets/`）的一段 */
   path: string
@@ -784,8 +797,15 @@ export interface AssetView {
   nozzle: string | null
   /** 三根轴之三：层高。后端从文件名尾部派生（`… 0.10.json` → `0.10`） */
   layer: string | null
-  /** 交付身份三态。可见性（含草稿态）压过「进没进套餐」，与 stock 行上同口径 */
-  assign: BbsAssign
+  /** **交付身份四态**（进套餐 / 可选 / 随包 / 仅归档；判定在后端一处：
+   *  归档 > 随包 > 进套餐 > 可选） */
+  identity: AssetIdentity
+  /** 交付档位（作者 2026-10-03）：`download` = 客户端按需下载（默认）、
+   *  `bundled` = **随包不下载**（整机图：工作台可管可换图，客户端不下载不更新） */
+  delivery: 'download' | 'bundled'
+  /** **生成状态**（只 `mkPreset` 类有，与生成页同一套判据）：没生成过 = 待生成；
+   *  生成过、参数改完还没重新生成 = **待更新**。其余四类恒 null */
+  buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
 }
 
 /** `assets::AssetList` */
@@ -818,7 +838,7 @@ export interface AssetUsageView {
 /** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
 export interface BundleRefView {
   id: string
-  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设不建资产条目，MKP 组恒空） */
+  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设 2026-10-03 进了资产库） */
   kind: AssetKind
   /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
   resolvable: boolean
@@ -826,8 +846,10 @@ export interface BundleRefView {
   isBbs: boolean
   /** 资产域登记的名字。解析不到时是空串 */
   name: string
-  /** 文件在不在 */
+  /** 文件在不在。**MKP 预设按生成状态判**（产物不在资产根里） */
   present: boolean
+  /** **生成状态**（只 `mkPreset` 类有，与生成页 / 资产库同一套判据），其余类恒 null */
+  buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
   /** 交付身份（在菜单 / 仅归档）。**含草稿态** —— 刚设还没保存的也看得见 */
   visibility: Visibility
 }
@@ -838,34 +860,12 @@ export interface BundleUserView {
   versionId: string
 }
 
-/** `bundles::PresetRefView` —— 套餐里挂着的一条 MKP 预设（uid 直引，不经过资产库） */
-export interface PresetRefView {
-  /** 版本 uid（`A1/STANDARD`），与 `bundles.toml` 的 `presets` 字段同形 */
-  uid: string
-  /** 产物文件名（命名规则算出的那份）。没生成过也有 —— 名字是算出来的 */
-  fileName: string
-  /** 磁盘上有没有这份产物。false = 挂了名字还没生成，不是错误 */
-  generated: boolean
-}
-
-/** `bundles::PresetCandidate` —— MKP 组的候选：一棵能生成的版本 */
-export interface PresetCandidate {
-  uid: string
-  /** 「机型 版本名」，给人看的 */
-  name: string
-  fileName: string
-  /** 原始状态档（built / stale / neverBuilt / noResources），词由词表挑 */
-  state: 'built' | 'stale' | 'neverBuilt' | 'noResources'
-}
-
 /** `bundles::BundleView` —— 套餐域①层的一条定义（`presets/bundles.toml`，唯一真源） */
 export interface BundleView {
   id: string
   display: string
   machineId: string
   assetRefs: BundleRefView[]
-  /** 配发的 MKP 预设（uid 直引，**文件可不存在** —— 作者 2026-10-03） */
-  presets: PresetRefView[]
   /** 上一次改动日期（迁移照抄旧值；真改动由后端盖上当天） */
   updatedAt: string | null
   /** **一版一套**：`recommendedBundle` 指着这份套餐的版本 */
@@ -879,8 +879,6 @@ export interface BundleList {
   bundles: BundleView[]
   /** 过滤前一共几份 —— 页脚「筛出 X / Y 个」的 Y */
   total: number
-  /** MKP 组的候选池：能生成的版本（文件不存在也能先挂） */
-  presetCandidates: PresetCandidate[]
 }
 
 /**
@@ -934,12 +932,16 @@ export const wb = {
     slicer: string | null,
     nozzle: string | null,
     layer: string | null,
-    assign: string | null,
+    identity: string | null,
     query: string | null,
-  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, assign, query }),
+  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, identity, query }),
 
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
+
+  /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  setAssetDelivery: (assetId: string, delivery: 'download' | 'bundled') =>
+    invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
 
   /**
    * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、
@@ -949,12 +951,32 @@ export const wb = {
 
   /**
    * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
-   * 悬空引用 / 「没有一条 BBS」/ preset uid 不是本机型真版本在后端拦；
-   * preset uid 指向的**文件可以还没生成**（预设是生成产物，套餐先挂名字）；
+   * 悬空引用 / 「没有一条 BBS」在后端拦；MKP 预设也在 `assetIds` 里
+   * （2026-10-03 进资产库，`type = 'mkPreset'`，**文件在不在都能选**）；
    * `updatedAt` 由那次写盖上当天
    */
-  setBundleRefs: (bundleId: string, assetIds: string[], presetUids: string[]) =>
-    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds, presetUids }),
+  setBundleRefs: (bundleId: string, assetIds: string[]) =>
+    invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds }),
+
+  /** 新建一条套餐。**至少一条 BBS**（成套配发），id 不许与现有撞（大小写不敏感） */
+  addBundle: (id: string, machineId: string, display: string, assetIds: string[]) =>
+    invoke<BundleList>('wb_add_bundle', { id, machineId, display, assetIds }),
+
+  /** 编辑一条套餐：改 id 与/或显示名。**改 id 连带重指机型文件里的引用** */
+  renameBundle: (bundleId: string, newId: string, display: string | null) =>
+    invoke<BundleList>('wb_rename_bundle', { bundleId, newId, display }),
+
+  /** 复制一条套餐：内容照抄、id 必须是新的；复制出来的那份没人指着 */
+  copyBundle: (bundleId: string, newId: string, display: string | null) =>
+    invoke<BundleList>('wb_copy_bundle', { bundleId, newId, display }),
+
+  /** **把一批版本指到这份套餐**（多选 + 确认）。不限机型；已经指着它的跳过。
+   *  即时落盘，界面在确认前先摆影响预览 */
+  assignBundleVersions: (bundleId: string, uids: string[]) =>
+    invoke<BundleList>('wb_assign_bundle_versions', { bundleId, uids }),
+
+  /** 删一条套餐。被机型默认或版本指着时整次拒绝并点名（界面转拦截页） */
+  removeBundle: (bundleId: string) => invoke<BundleList>('wb_remove_bundle', { bundleId }),
 
   /**
    * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，

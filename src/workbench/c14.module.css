@@ -1412,7 +1412,14 @@
 
 .split {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  /*
+   * 左栏宽度**可拖**（作者 2026-10-03：像参数台那样能拖）—— 挂在变量上，
+   * 分隔条拖动时直接覆写它，state 只在松手时落一次（见 `SplitterC14`）。
+   * 变量没给（别的页面复用这个类时）落回 300px。
+   */
+  grid-template-columns: var(--split-w, 300px) minmax(0, 1fr);
+  /* 分隔条是绝对定位（`.splitSplit`），落点靠这个容器 */
+  position: relative;
   /*
    * 整页定高、左右**各自滚**（C14 第二十三轮，作者：「左侧的这个列表，不要受到
    * 右边的滚动的影响……就都跟那个参数台的一样，左侧的是自己的滚动」）：
@@ -2365,6 +2372,12 @@
 /* 详情栏线：贴在详情栏左缘那条 border-left 上（栏内缘有 12px 内衬，盖不到内容） */
 .pSplitAside {
   right: calc(var(--p-aside-w, 360px) - 4.5px);
+}
+
+/* `.split` 两栏页（资产库 / 套餐 / 机型与版本）的左栏线：贴左栏右缘，
+   位置跟着 `--split-w` 走 —— 复用 `.pSplit` 的命中区与吸附手感 */
+.splitSplit {
+  left: calc(var(--split-w, 300px) - 4.5px);
 }
 
 /* 宽度读数牌：只在拖动中出现，跟着线走 */

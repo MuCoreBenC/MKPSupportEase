@@ -136,8 +136,9 @@ pub struct CatalogMachine {
 /// 层①的资产载荷根（`presets/assets.toml` 里 `path` 的基准），相对仓库根。
 ///
 /// **它不是运行时数据**：这里是构建期算 SHA/大小的地方，与运行时的下载区(`mkp/`)是两回事。
-/// 第三圈把它从 `public/` 底下挪走之后，只改这一处常量即可。
-const REPO_ASSET_ROOT: &str = "public/assets";
+/// 2026-10-03 从 `public/assets` 搬到 `presets/assets`（作者：「在 assets 吧，到时候 3mf
+/// 也要放」—— 产品数据资源住一起；`public/` 那个资产目录之后退役）。
+const REPO_ASSET_ROOT: &str = "presets/assets";
 
 pub mod kind {
     /// MKP 预设（随软件发布的成品内容）
@@ -166,17 +167,20 @@ fn kind_dir(kind: &str) -> &'static str {
 
 /// 资产台账里的类型 → 目录里的 kind。
 ///
-/// **返回 `None` 就是不登记**。今天只有 `Image` 走这一支 —— 而它已经不是"暂不登记"，
-/// 而是**台账里根本不该有它**：整机图 2026-10-01 从台账剥离，搬进 `src/app/assets/`
-/// （界面的展示素材，随程序本体走）。这一支留在 match 里是因为
-/// [`crate::presetdata::AssetKind`] 仍是四类枚举，编译器要求穷尽 ——
-/// **源里再出现 `type = 'image'` 就会静默不登记**，所以判据钉着"台账里已无 image 类"。
+/// **返回 `None` 就是不登记**：那是**目录里没有落点**的类型（今天的 `Image` ——
+/// 下载区没有「图片」这一段）。注意判据是**类型**，不是交付档位：**`bundled` 档
+/// （整机图）照样走这一支**，只是被 [`dest_of_asset`] 在更早一步按档位拦掉
+/// （作者 2026-10-03：「不进云端但要在工作台看得见选得着」）。
 fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static str> {
     match asset_kind {
         crate::presetdata::AssetKind::SlicerProfile => Some(kind::BBS_CONFIG),
         crate::presetdata::AssetKind::Model => Some(kind::MODEL),
         crate::presetdata::AssetKind::Icon => Some(kind::ICON),
         crate::presetdata::AssetKind::Image => None,
+        // MKP 预设的产物文件**已经**作为 catalog 的 files 条目进来了（生成侧算的，
+        // 命名规则落点 `mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
+        // 再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）
+        crate::presetdata::AssetKind::MkPreset => None,
     }
 }
 
@@ -204,8 +208,19 @@ fn asset_dest(kind: &str, asset_path: &str) -> String {
 /// 客户端也点了下载，文件落到别的目录，或者根本 404。所以在发布侧调用这一处，
 /// 不自己 `format!` 一遍。
 ///
-/// 返回 `None` = 台账里这一类不登记（今天只剩 `Image`，它已从台账剥离）。
+/// 返回 `None` = 这一份**不进交付集合**（客户端不会去 URL 取它）。两种情形：
+///
+/// 1. **交付档位是 `bundled`**（作者 2026-10-03）—— 台账里登记、工作台可管，
+///    但它**随程序包带进客户端、不下载不更新**（整机图）。这是主路径。
+/// 2. **类型在下载区没有落点**（今天的 `Image`）—— 目录里没有「图片」这一段。
+///
+/// 判据是**档位**而不是「台账里不该有它」：2026-10-01 第三刀曾把整机图从台账剥离、
+/// 搬进客户端源码，作者 2026-10-03 判为**错**（「不会编程的用户改不了图」）——
+/// 今天它回到台账，用 `bundled` 档表达「不进云端但在工作台可管」。
 pub fn dest_of_asset(asset: &crate::presetdata::Asset) -> Option<String> {
+    if asset.delivery == crate::presetdata::assets::Delivery::Bundled {
+        return None;
+    }
     kind_of_asset(asset.kind).map(|kind| asset_dest(kind, &asset.path))
 }
 
@@ -605,18 +620,34 @@ mod tests {
             );
         }
 
-        // **整机图不在台账里**（2026-10-01 裁决）：它是界面的展示素材，不是产品数据资源。
-        // 这条判据守着那条边界 —— 它既防"哪天顺手登记回来"（那样 catalog 会多出一类
-        // 用户既不能下载也不需要更新的东西），也防上面那个数组悄悄把 Image 加回来。
-        let images_in_toml = source
+        // **整机图在台账里，但用 `bundled` 档不进交付**（作者 2026-10-03 改判，撤销
+        // 2026-10-01 第三刀的剥离）。这条判据守的就是那条边界：
+        //   - 台账里**要**有它（工作台要看得见、选得着 —— 硬编码进客户端源码是错的，
+        //     不会编程的用户改不了图）；
+        //   - catalog 的 `files[]` 里**要没有**它（不进云端交付，客户端不下载）。
+        // 拦的地方是 `dest_of_asset`（**按交付档位拦**，不是按类型拦）。
+        let images = source
             .assets
             .items()
             .iter()
             .filter(|a| a.kind == crate::presetdata::AssetKind::Image)
-            .count();
-        assert_eq!(
-            images_in_toml, 0,
-            "资产台账里已无 image 类：整机图住 src/app/assets/printers/（界面素材，不归 Catalog）"
+            .collect::<Vec<_>>();
+        assert!(
+            !images.is_empty(),
+            "整机图在台账里（bundled 档）—— 第三刀把它搬进客户端源码是错的，已作废"
+        );
+        assert!(
+            images
+                .iter()
+                .all(|a| a.delivery == crate::presetdata::assets::Delivery::Bundled),
+            "整机图一律 bundled 档：台账登记、工作台可管，但不进云端交付"
+        );
+        assert!(
+            !catalog
+                .files
+                .iter()
+                .any(|f| images.iter().any(|a| f.path.ends_with(&a.path))),
+            "整机图不进 catalog 的 files[]（bundled 档 = 客户端不下载）"
         );
         assert!(
             !catalog
@@ -626,7 +657,7 @@ mod tests {
             "下载区没有 images 这一类：整机图不进 Delivery"
         );
         // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
-        // 今天 15 条 = 9 BBS + 3 图标 + 3 模型；整机图剥离时它从 19 降到 15
+        // 今天 28 条 = 9 MKP 预设 + 4 整机图（bundled）+ 9 BBS + 3 图标 + 3 模型
         assert_eq!(
             catalog.assets.len(),
             source.assets.items().len(),
@@ -634,8 +665,9 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            15,
-            "实测 15 条（9 BBS + 3 图标 + 3 模型）—— 条数变了要核对台账再改这里的期望"
+            28,
+            "实测 28 条（9 MKP 预设 + 4 整机图 + 9 BBS + 3 图标 + 3 模型）—— 2026-10-03
+             两类回到台账（mkPreset / bundled image），条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -798,10 +830,16 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            15,
-            "实测 15 条资产定义（9 BBS + 3 图标 + 3 模型）—— 整机图 2026-10-01 剥离台账，19→15"
+            28,
+            "实测 28 条资产定义（9 MKP 预设 + 4 整机图 + 9 BBS + 3 图标 + 3 模型）——
+             2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类，
+             登记归属不登记路径；两者都不进 files[]）"
         );
-        assert_eq!(catalog.bundles.len(), 5, "实测 5 份套餐");
+        assert_eq!(
+            catalog.bundles.len(),
+            9,
+            "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一（照 C15 模型重排）"
+        );
         assert_eq!(catalog.registry.params.len(), 74, "实测 74 条字段定义");
         assert!(
             !catalog.registry.tabs.is_empty() && !catalog.registry.layout.is_empty(),

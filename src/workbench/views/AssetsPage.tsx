@@ -34,6 +34,7 @@ import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
 import ModalC14 from '../c14/ModalC14'
 import { locateAnchor } from '../c14/locate'
+import { useSplitRail } from '../c14/SplitRail'
 import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import s from '../c14.module.css'
@@ -56,14 +57,16 @@ const KIND_LABEL: Record<string, string> = {
   icon: '图标',
   model: '模型',
   slicerProfile: '切片器',
+  mkPreset: 'MKP 预设',
 }
 
 /** 筛选轴的类型化包装 —— 全部走命令参数，本地不复算。
  *  `image`（整机图）**回到台账**：作者 2026-10-03 改判 —— 第三刀把它挪进客户端
  *  源码是错的（不会编程的用户改不了图）。它仍然**不进云端交付**，但必须
  *  在工作台看得见、选得着 */
-type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile'
-type Assign = 'all' | 'assigned' | 'optional' | 'archiveOnly'
+type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
+/** 交付身份四态（作者 2026-10-03 定的模型）：进套餐 / 可选 / 随包 / 仅归档 */
+type Assign = 'all' | 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 
 export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
@@ -79,6 +82,9 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
   const [confirm, setConfirm] = useState<'archive' | 'delete' | null>(null)
   const [pageErr, setPageErr] = useState<string | null>(null)
   const aMenu = useContextMenu<string>()
+  /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const rail = useSplitRail('assets', bodyRef)
 
   const load = useCallback(
     (k: Kind, a: Assign, sl: string, nz: string, ly: string, query: string) => {
@@ -148,12 +154,26 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
 
   /** 写可见性（草稿入口 + 刷新）。入口闸在 setVis：有人引用的「仅归档」先过确认框 */
   const applyVis = async (id: string, v: 'menu' | 'archiveOnly') => {
-    await onApply(`把 ${id} 设为${v === 'menu' ? '上菜单' : '仅归档'}`, [
+    await onApply(`把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}`, [
       { kind: 'setVisibility', fileId: id, visibility: v },
     ])
-    toasts.push(`已把 ${id} 设为${v === 'menu' ? '上菜单' : '仅归档'}（改了先进草稿，保存才落盘）`)
-    /* 可见性连着三态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
+    toasts.push(`已把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}（改了先进草稿，保存才落盘）`)
+    /* 可见性连着四态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
     load(kind, assign, slicer, nozzle, layer, q)
+  }
+
+  /** 改交付档位（download ↔ bundled）。即时落盘（清单编辑，不走参数草稿） */
+  const applyDelivery = async (id: string, v: 'download' | 'bundled') => {
+    try {
+      setList(await wb.setAssetDelivery(id, v))
+      toasts.push(
+        v === 'bundled'
+          ? `已把 ${id} 设为随包（构建期打进客户端，客户端不再单独下载）`
+          : `已把 ${id} 改回按需下载（客户端预设页看得到、可手动下）`,
+      )
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
   }
 
   /** 改交付身份。唯一走参数草稿的动作：进外壳那条撤销栈，「仅归档」有拦截确认 */
@@ -190,10 +210,10 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
         return [
           {
             id: 'vis',
-            label: row?.assign === 'archiveOnly' ? '改成上菜单' : '改成仅归档…',
+            label: row?.identity === 'archiveOnly' ? '改回可选' : '改成仅归档…',
             onSelect: () => {
               setSel(id)
-              void setVis(id, row?.assign === 'archiveOnly' ? 'menu' : 'archiveOnly')
+              void setVis(id, row?.identity === 'archiveOnly' ? 'menu' : 'archiveOnly')
             },
           },
           { separator: true },
@@ -219,7 +239,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
   const listeds = list.assets
 
   return (
-    <div className={s.split}>
+    <div className={s.split} ref={bodyRef} style={rail.style}>
       <div>
         <div className={s.topRow}>
           <input
@@ -241,6 +261,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               ['icon', '图标'],
               ['model', '模型'],
               ['slicerProfile', '切片器'],
+              ['mkPreset', 'MKP 预设'],
             ] as const
           ).map(([k, label]) => (
             <button
@@ -257,9 +278,10 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
           {(
             [
               ['all', '全部身份'],
-              ['assigned', words.bbsAssign.assigned.label],
-              ['optional', words.bbsAssign.optional.label],
-              ['archiveOnly', words.bbsAssign.archiveOnly.label],
+              ['inBundle', words.identity.inBundle.label],
+              ['optional', words.identity.optional.label],
+              ['bundled', words.identity.bundled.label],
+              ['archiveOnly', words.identity.archiveOnly.label],
             ] as const
           ).map(([k, label]) => (
             <button
@@ -350,9 +372,30 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               onClick={() => setSel(a.id)}
               {...aMenu.triggerProps(a.id)}
             >
-              <span className={`${s.rowName} ${s.mono}`}>{a.name}</span>
+              <span className={`${s.rowName} ${s.mono}`}>{a.display}</span>
               <span className={s.tag}>{KIND_LABEL[a.kind]}</span>
-              <span className={s.tag}>{words.bbsAssign[a.assign].label}</span>
+              {/* 同名版本会撞（三台机型都有「标准版」）—— 行上补一个机型小签 */}
+              {a.machineId && a.kind === 'mkPreset' && (
+                <span className={`${s.tag} ${s.tagGhost}`}>{a.machineId}</span>
+              )}
+              {a.buildState !== null && (
+                /* 生成状态（作者 2026-10-03）：没生成过 = 待生成；参数改了没重新生成 = 待更新。
+                   词与判据都取生成页那一套 —— 这里只是把同一件事显示在资产库里 */
+                <span
+                  className={s.tag}
+                  title={words.build[a.buildState]?.explain ?? '这一版的产物还没生成'}
+                >
+                  {words.build[a.buildState]?.label ?? a.buildState}
+                </span>
+              )}
+              {/* 交付身份四态一行一个词（进套餐 / 可选 / 随包 / 仅归档）——
+                  不再「已分配/可选/仅归档 + 随包」两套轴各说各的 */}
+              <span
+                className={s.tag}
+                title={words.identity[a.identity].explain ?? undefined}
+              >
+                {words.identity[a.identity].label}
+              </span>
             </button>
           ))}
         </div>
@@ -390,7 +433,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
         ) : (
           <div className={s.card}>
             <div className={s.cardHead}>
-              <h2>{cur.name}</h2>
+              <h2>{cur.display}</h2>
               <span className={s.cardNote}>
                 {cur.kind === 'slicerProfile'
                   ? `切片器 · ${(cur.slicer ?? 'bbs') === 'orca' ? 'Orca' : 'BBS'}${cur.profile ? ` · ${cur.profile}` : ''}`
@@ -404,6 +447,32 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               <div className={s.kv}>
                 <span className={s.kvKey}>id</span>
                 <span className={`${s.kvVal} ${s.mono}`}>{cur.id}</span>
+                {/* 名字的真源摆出来：MKP 预设 = 版本名（去版本页改）；切片器 = 文件名 */}
+                {cur.kind === 'mkPreset' && (
+                  <>
+                    <span className={s.kvKey}>名字来自</span>
+                    <span className={s.kvVal}>
+                      版本名称
+                      <button
+                        type="button"
+                        className={`${s.btn} ${s.btnSm}`}
+                        onClick={() =>
+                          onGoto('machines', {
+                            machineId: cur.machineId,
+                            uid: `${cur.machineId}/${cur.versionId ?? ''}`,
+                            key: null,
+                          })
+                        }
+                        title="去「机型与版本」页改这一版的名字（资产库显示的是同一个值）"
+                      >
+                        在版本页改
+                      </button>
+                      {cur.name !== cur.display && (
+                        <span className={s.cardNote}>台账登记名：{cur.name}</span>
+                      )}
+                    </span>
+                  </>
+                )}
                 <span className={s.kvKey}>路径</span>
                 <span className={`${s.kvVal} ${s.mono}`}>{cur.path}</span>
                 <span className={s.kvKey}>适用机型</span>
@@ -431,7 +500,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   ) : cur.kind === 'image' || cur.kind === 'icon' ? (
                     <img
                       src={encodeURI(cur.url)}
-                      alt={cur.name}
+                      alt={cur.display}
                       loading="lazy"
                       style={{ maxWidth: 200, maxHeight: 120, display: 'block', borderRadius: 4 }}
                     />
@@ -490,26 +559,71 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               </div>
 
               <div className={s.group}>
-                <div className={s.groupHead}>交付身份（菜单两档）</div>
-                <div className={s.bar}>
-                  {(['menu', 'archiveOnly'] as const).map((v) => {
-                    const on = v === 'menu' ? cur.assign !== 'archiveOnly' : cur.assign === 'archiveOnly'
-                    return (
-                      <button
-                        key={v}
-                        type="button"
-                        className={`${s.btn} ${s.btnSm} ${on ? s.btnOn : ''}`}
-                        onClick={() => void setVis(cur.id, v)}
-                      >
-                        {v === 'menu' ? '上菜单' : '仅归档'}
-                      </button>
-                    )
-                  })}
-                  <span className={s.cardNote}>
-                    「仅归档」= 客户端完全不知道这个文件存在
+                <div className={s.groupHead}>
+                  交付身份 ·{' '}
+                  <span className={s.cardNote} style={{ display: 'inline' }}>
+                    {words.identity[cur.identity].label}
                   </span>
                 </div>
-                <p className={s.note}>{words.bbsAssign[cur.assign].explain}</p>
+                <p className={s.note} style={{ marginTop: 0 }}>
+                  {words.identity[cur.identity].explain}
+                </p>
+                <div className={s.bar}>
+                  {/*
+                   * 三个动作**恒定给出、按当前态高亮/禁用**（作者 2026-10-03：
+                   * 「怎么不同文件不同，我觉得这样也不应该限制」—— 按钮对每一类
+                   * 都一样；能不能成由后端判（例如 MKP 预设的产物在交付根，构建期
+                   * 没有复制路径 → 那一格点了会如实被拒，而不是界面上先不给）。
+                   */}
+                  {cur.identity === 'inBundle' && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() => onGoto('bundles', { machineId: null, uid: usage?.bundles[0] ?? null, key: null })}
+                      disabled={!usage?.bundles.length}
+                      title={usage?.bundles.length ? undefined : '反查还没回来'}
+                    >
+                      去套餐页看谁装着它
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`${s.btn} ${cur.identity === 'bundled' ? s.btnOn : ''}`}
+                    disabled={cur.identity === 'bundled'}
+                    onClick={() => void applyDelivery(cur.id, 'bundled')}
+                  >
+                    设为随包
+                  </button>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${cur.identity === 'archiveOnly' ? s.btnOn : ''}`}
+                    disabled={cur.identity === 'archiveOnly'}
+                    onClick={() => void setVis(cur.id, 'archiveOnly')}
+                  >
+                    设为仅归档
+                  </button>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${cur.identity === 'optional' || cur.identity === 'inBundle' ? s.btnOn : ''}`}
+                    disabled={cur.identity !== 'archiveOnly'}
+                    onClick={() => {
+                      /* 随包 → 可选 = 改回按需下载（动交付档位）；仅归档 → 可选 = 解除归档 */
+                      if (cur.delivery === 'bundled') void applyDelivery(cur.id, 'download')
+                      else void setVis(cur.id, 'menu')
+                    }}
+                    title={
+                      cur.delivery === 'bundled'
+                        ? '改回按需下载：客户端预设页看得到、可手动下'
+                        : '解除归档：回到可选'
+                    }
+                  >
+                    {cur.delivery === 'bundled' ? '改回按需下载' : '改回可选'}
+                  </button>
+                </div>
+                <p className={s.note}>
+                  「仅归档」= 客户端完全不知道这个文件存在；「随包」= 构建期把文件带进客户端，
+                  不下载不更新、页面也不出现；「进套餐」在套餐页管 —— 那是「哪一版配发什么」的事。
+                </p>
               </div>
             </div>
           </div>
@@ -617,6 +731,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
           </p>
         )}
       </ModalC14>
+      {rail.handle}
     </div>
   )
 }

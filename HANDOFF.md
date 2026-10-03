@@ -814,12 +814,52 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       ② **到客户端 = 构建期从数据目录复制进客户端资源**（保留「不进 dist、不下载」）；
       ③ **交付身份新增 `bundled` 档**（台账登记、工作台可管，**明确不进交付集合、
       不被下载**），与「在菜单 / 仅归档」并列。
-      施工清单（下一刀）：搬目录 + `paths::assets_root()` 改指 `presets/assets` +
-      `assets.toml` 补 4 条 image + `Visibility` 加 `Bundled` 档 +
-      `deliverable_set` / `collect` **按档位拦**（不再按 kind 拦）+ 构建期复制那一步 +
-      判据换向（第三刀「台账里已无 image 类」→「image 类在台账里但不进交付集合」；
-      `check:bundle` 那类"包里没有裸资产"的断言跟着改）+ 客户端首页消费路径跟着搬 +
-      `cargo run --bin gen-catalog` + 探针回归。
+      - **增量之六：整机图归属重做落地**（2026-10-03，作者三条裁定全部执行）：
+        - **文件搬回数据侧**：`public/assets/{bbs,icons,models}` + `src/app/assets/printers/`
+          → **`presets/assets/<kind>/`**（git mv）。`paths::assets_root()`、`presetdata::repo_assets_root()`、
+          `runtime::catalog::REPO_ASSET_ROOT` 三处定位同时改指。
+        - **台账恢复 4 条 `image`**（id 与旧版一致：`a1-image` / `a1_mini-image` /
+          `a1_mini-variant-image` / `p1s-image`），A1 / A1_MINI / P1S 三个机型文件
+          的 `image` 字段一并恢复。
+        - **交付身份新增 `bundled` 档**（`presetdata::assets::Delivery`：`download` 默认 /
+          `bundled`）。判据改成**按档位拦**：`runtime::catalog::dest_of_asset` 见 bundled
+          返 None → 不进 catalog files[] / 不进交付集合 / 不复制进 dist（**按类型拦的那支
+          留在 `kind_of_asset`，因为下载区本来就没有「图片」这一段**）。
+        - **构建期到客户端**：`scripts/copy-assets.mjs`（build / build:workbench 前置）
+          做两件事 —— ① bundled 档复制进 `src/app/assets/printers/`（客户端静态 import 的
+          落点，那目录是生成物、已 gitignore）；② 带 `workbench` 参数时把整个资产根复制进
+          `public/assets/`（**只有工作台需要** `/assets/` 直通做预览；客户端从云端下载，
+          拷贝它就是那份「随包副本」—— 客户端包因此从 20 个文件降到 15 个）。
+        - **工作台看得见选得着**：资产库「机型图」分类恢复、列表与详情显示「随包」标、
+          机型页「换一张…」重新有候选（4 条）；`wb_assets` 的 DTO 带 `delivery`。
+          客户端菜单**过滤掉 bundled**（客户端下载不到它，列出来只会让人点一个拿不到的东西）。
+        - 判据换向：「资产台账里已无 image 类」→ **「整机图在台账里、且不进 files[]」**
+          （catalog.rs / assets.rs / paths.rs / check-bundle / DATA-INVENTORY /
+          DATA-ARCHITECTURE / 演示桩的注释与条数锚点全部更新，19 条 = 4 整机图 + 9 BBS +
+          3 图标 + 3 模型；可达集 11 = 那 11 条里 4 条是 bundled，`assets_copied` 仍 8）。
+        - 验证：Rust 467 全绿、clippy 0、tsc/eslint/stylelint 过、`npm run build` +
+          `check:bundle` 绿（15 个文件）、探针【一】29 条全绿。
+    - **增量之七：MKP 预设进资产库（作者 2026-10-03「为什么资产库里面不放 mkp 预设」）**
+      —— **同一天先做成了 uid 直引（`bundles.toml` 的 `presets` 字段），当天按这句裁决作废**：
+      - **资产域新增 `type = 'mkPreset'`**（`AssetKind::MkPreset`）：登记 9 条
+        （id = 产物名的 kebab：`a1-standard` / `a1-fastv3.3` / `a1_mini-…` / `p1s-lite` /
+        `p2s-standard` / `x1c-lite`）。**不写 `path`**（文件是生成产物，路径由命名规则
+        算出 —— 写进来就是第二份会过期的真相），改写 `machineId` + **`versionId`**
+        （新字段）；跨文件校验加了「归属版本必须真实存在」。
+      - **文件在不在都能登记、都能被套餐选中**（作者：「不只是没文件的时候可以选择，
+        有文件也要可以选择」）—— 「有没有生成」是生成页那四档状态的事，不由资产域管。
+        资产库列表与详情带**生成状态徽章**（`buildState` → 与生成页同一套判据与词：
+        **待生成 / 待更新 / 已生成 / 暂无资源**）。
+      - **套餐回到一份 `assetRefs`**：MKP 预设走资产引用，`bundles.toml` 的 `presets`
+        字段与 `wb_set_bundle_refs` 的 `presetUids` 参数**全部回滚**（两套引用机制并存
+        只会让人问「我到底该在哪挂」）。`BundleResourcesModal` 的 MKP 页签 = 资产库里
+        `kind === 'mkPreset'` 的条目，勾选态跟 `assetRefs` 走。
+      - catalog：`kind_of_asset(MkPreset) → None`（产物那 9 条 files 已经在了，不登记第二份）；
+        客户端菜单过滤 `mkPreset`（它不是下载区文件）。资产 19 → **28 条**（+9）。
+      - 顺带修：`npm run build`（客户端）现在会**清掉**上一次工作台构建留下的
+        `public/assets/` 直通副本 —— 留着会被 vite 原样拷进安装包（随包副本回归）。
+      - 验证：Rust 466 全绿（少了 1 条 = 作废的 uid 直引判据）、clippy 0、前端检查过、
+        探针 29 条全绿、`check:bundle` 绿（15 个文件）。
 
      ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 

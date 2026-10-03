@@ -203,6 +203,57 @@ impl BbsAssign {
     }
 }
 
+/// **资产交付身份四态**（作者 2026-10-03 定的模型）：
+///
+/// 1. **进套餐** —— 客户端首页消费：用户点了版本，套餐里的文件跟着自动下载；
+/// 2. **可选** —— 不进套餐，客户端预设页看得到（按 kind 自动分到 MKP / 切片器档）、
+///    手动下载；模型类不在预设页、但在客户端同样是手动下载；
+/// 3. **随包** —— 两个页面都不出现，构建期打进客户端程序包（机型图这类自动消费的）；
+/// 4. **仅归档** —— 没用了但不舍得删，客户端完全不消费。
+///
+/// 判定优先级：归档 > 随包 > 进套餐 > 可选（同一条资产几个信号都在时，按这个序说话）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssetIdentity {
+    /// 进套餐：客户端首页按版本自动下载
+    InBundle,
+    /// 可选：客户端看得到，手动下载
+    Optional,
+    /// 随包：构建期打进客户端，两个页面都不出现
+    Bundled,
+    /// 仅归档：客户端不消费
+    ArchiveOnly,
+}
+
+impl AssetIdentity {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::InBundle => "inBundle",
+            Self::Optional => "optional",
+            Self::Bundled => "bundled",
+            Self::ArchiveOnly => "archiveOnly",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::InBundle => "进套餐",
+            Self::Optional => "可选",
+            Self::Bundled => "随包",
+            Self::ArchiveOnly => "仅归档",
+        }
+    }
+
+    pub fn explain(self) -> &'static str {
+        match self {
+            Self::InBundle => "客户端首页按版本自动下载 —— 进套餐在套餐页管，资产库不直接设",
+            Self::Optional => "客户端预设页看得到，用户手动下载",
+            Self::Bundled => "构建期随程序包带进客户端，不下载不更新，页面上也不出现",
+            Self::ArchiveOnly => "仓库里留着，客户端完全不消费",
+        }
+    }
+}
+
 /// 一个版本的 BBS 是自己挑的还是跟着机型默认
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

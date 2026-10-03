@@ -27,7 +27,7 @@ use crate::workbench::domain::patch::Visibility;
 use crate::workbench::domain::preview::BulkKind;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::wording::{
-    ArtifactState, BbsAssign, BbsSource, BuildState, SaveState,
+    ArtifactState, AssetIdentity, BbsAssign, BbsSource, BuildState, SaveState,
 };
 
 /// 一个词 + 它的解释句。**解释句写「改了会怎样」，不是「这个状态怎么算的」**
@@ -63,6 +63,8 @@ pub struct Words {
     pub artifact: Table,
     pub save: Table,
     pub bbs_assign: Table,
+    /// **资产交付身份四态**（进套餐 / 可选 / 随包 / 仅归档）—— 资产库筛选与详情卡用
+    pub identity: Table,
     pub bbs_source: Table,
     pub origin: Table,
     pub level: Table,
@@ -124,6 +126,16 @@ fn words() -> Words {
             ("assigned", BbsAssign::Assigned),
             ("optional", BbsAssign::Optional),
             ("archiveOnly", BbsAssign::ArchiveOnly),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
+        .collect(),
+
+        identity: [
+            ("inBundle", AssetIdentity::InBundle),
+            ("optional", AssetIdentity::Optional),
+            ("bundled", AssetIdentity::Bundled),
+            ("archiveOnly", AssetIdentity::ArchiveOnly),
         ]
         .into_iter()
         .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
@@ -329,6 +341,18 @@ mod tests {
         ] {
             check(&t.bbs_assign, serde_json::to_value(v).unwrap(), "BbsAssign");
         }
+        for v in [
+            AssetIdentity::InBundle,
+            AssetIdentity::Optional,
+            AssetIdentity::Bundled,
+            AssetIdentity::ArchiveOnly,
+        ] {
+            check(
+                &t.identity,
+                serde_json::to_value(v).unwrap(),
+                "AssetIdentity",
+            );
+        }
         for v in [BbsSource::Own, BbsSource::InheritedFromMachine] {
             check(&t.bbs_source, serde_json::to_value(v).unwrap(), "BbsSource");
         }
@@ -365,6 +389,7 @@ mod tests {
             &t.artifact,
             &t.save,
             &t.bbs_assign,
+            &t.identity,
             &t.bbs_source,
             &t.origin,
             &t.level,

@@ -197,9 +197,9 @@ pub const CONTENT_FILES: [&str; 3] = [
 
 /* ---------- 三份目录 JSON 的形状 ---------- */
 
-/// 12.3：套餐。字段就是 `bundles.toml` 那五个 + `presets`（2026-10-03：套餐挂
-/// MKP 预设走 uid 直引，**文件可以还没生成**）——
-/// 消费端按 `assetRefs` join [`assets_index_json`] 的 id
+/// 12.3：套餐。字段就是 `bundles.toml` 那五个 ——
+/// 消费端按 `assetRefs` join [`assets_index_json`] 的 id（MKP 预设也在 `assetRefs` 里：
+/// 它 2026-10-03 进了资产库，`type = 'mkPreset'`）
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BundleEntry<'a> {
@@ -207,7 +207,6 @@ struct BundleEntry<'a> {
     display: &'a str,
     machine_id: &'a str,
     asset_refs: &'a [String],
-    presets: &'a [String],
     updated_at: &'a Option<String>,
 }
 
@@ -360,7 +359,6 @@ pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
             display: &b.display,
             machine_id: &b.machine_id,
             asset_refs: &b.asset_refs,
-            presets: &b.presets,
             updated_at: &b.updated_at,
         })
         .collect();
@@ -1008,13 +1006,11 @@ mod tests {
 
     /// **真数据上的交付集**（12.6 的真数据版 + 防空转锚点）。
     ///
-    /// 锚点来自真数据的两个数：图标 3（P2S/X1C 借 p1s-icon）、
-    /// BBS 5（五条套餐各一条 0.4mm）→ 可达集 **8**；三份模型与
-    /// 四份 0.2mm BBS 没被引用，**刻意不进交付**（Task 13 的可达性分析收窄它们，
-    /// 集合本身不变）。12.6 逐条：索引引用的每个文件都在交付目录真实存在。
-    ///
-    /// 机型图那 3 条 2026-10-01 也随之离场 —— 整机图从资产台账剥离（它是界面素材，
-    /// 不进 Catalog / Delivery），机型的 `image` 字段照实为空，可达集里自然没有它。
+    /// 锚点来自真数据的几个数：图标 3（P2S/X1C 借 p1s-icon）、
+    /// BBS 5（九条套餐引用的是同 5 条 0.4mm）、**mkPreset 9**（2026-10-03 一版一套，
+    /// 套餐 assetRefs 装上了那一版的预设登记 —— 它们没有落点、不进索引与交付）
+    /// → 可达集 **20**；三份模型与四份 0.2mm BBS 没被引用，**刻意不进交付**。
+    /// 12.6 逐条：索引引用的每个文件都在交付目录真实存在。
     #[test]
     fn the_real_delivery_set_matches_the_real_references() {
         let Some(root) = crate::workbench::paths::presets_root() else {
@@ -1030,7 +1026,7 @@ mod tests {
         let d = crate::workbench::domain::patch::Draft::default();
         let book = Book::new(&real, &c, &d);
 
-        // JSON 条数锚点：5 台机型、9 个版本、5 条套餐
+        // JSON 条数锚点：5 台机型、9 个版本、9 条套餐（一版一套）
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().unwrap();
         assert_eq!(machines.len(), 5, "真数据 5 台机型");
@@ -1039,30 +1035,54 @@ mod tests {
             .map(|m| m["versions"].as_array().unwrap().len())
             .sum();
         assert_eq!(versions, 9, "版本总数变了 —— 说清为什么再改判据");
-        assert_eq!(bundles_json(&book)["bundles"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            bundles_json(&book)["bundles"].as_array().unwrap().len(),
+            9,
+            "一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一"
+        );
 
-        // 可达集 8 = 图标 3 + BBS 5；模型与 0.2mm BBS 刻意不进
-        // （机型图那 3 条随"整机图剥离台账"离场：机型的 image 字段照实为空）
+        // 可达集 20 = 整机图 3（bundled 档：被机型 image 字段引用，但 dest 为 None ——
+        // 不复制、不下载、构建期随包）+ 图标 3 + BBS 5 + mkPreset 9（无落点）；
+        // 模型与 0.2mm BBS 刻意不进
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            8,
-            "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么"
+            20,
+            "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么\
+             （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20）"
         );
         assert!(
             referenced.iter().all(|a| a.kind != AssetKind::Model),
             "模型没被任何内容引用，不进交付（doc §7 原则 1）"
         );
+        // 整机图被引用但**不进交付集合**（bundled 档：客户端不下载）；
+        // mkPreset 同样无落点 —— 它的产物文件由生成侧按 `mkp/presets/…` 登记，
+        // 台账这条只是「哪一版叫什么」的归属，不登记第二份
+        for kind in [AssetKind::Image, AssetKind::MkPreset] {
+            assert!(
+                referenced
+                    .iter()
+                    .filter(|a| a.kind == kind)
+                    .all(|a| crate::runtime::catalog::dest_of_asset(a).is_none()),
+                "{kind:?} 类被引用但不进交付集合（无落点）"
+            );
+        }
         let bbs = referenced
             .iter()
             .filter(|a| a.kind == AssetKind::SlicerProfile)
             .count();
-        assert_eq!(bbs, 5, "BBS 引用 = 套餐 assetRefs 合计，5 条套餐各 1 条");
+        assert_eq!(
+            bbs, 5,
+            "BBS 引用去重后 5 条（A1 / A1_MINI 各三份套餐共用一条）"
+        );
 
         // 落盘（真资产根 → 临时交付根），12.6 逐条核对 + assetRefs join 闭合
         let dist = tempfile::tempdir().unwrap();
         let out = write_content(dist.path(), &asset_root, &book).expect("真数据落盘");
-        assert_eq!(out.assets_copied, 8, "可达集 8 条，一条不少一条不多");
+        assert_eq!(
+            out.assets_copied, 8,
+            "有落点的可达资产 8 条（图标 3 + BBS 5），一条不少一条不多"
+        );
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
             // 落点是 `mkp/<kind 目录>/…`（交付根相对），直接查盘
@@ -1077,6 +1097,20 @@ mod tests {
             .collect();
         for b in book.presets.bundles.items() {
             for r in &b.asset_refs {
+                let Some(a) = book.presets.assets.get(r) else {
+                    panic!("套餐 {} 引用不存在的资产 {r}", b.id);
+                };
+                if crate::runtime::catalog::dest_of_asset(a).is_none() {
+                    // mkPreset（无落点）不在索引里 —— 它的产物条目由生成侧登记，
+                    // 索引再有它就是同一个文件两条真相
+                    assert!(
+                        !index_ids.iter().any(|i| i.eq_ignore_ascii_case(r)),
+                        "套餐 {} 引用的 {} 没有落点，不该出现在资产索引里",
+                        b.id,
+                        r
+                    );
+                    continue;
+                }
                 assert!(
                     index_ids.iter().any(|i| i.eq_ignore_ascii_case(r)),
                     "套餐 {} 引用的 {} 不在资产索引里 —— 引用集漏了它",

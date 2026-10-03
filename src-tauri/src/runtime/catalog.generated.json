@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "10920fb1a47db6b8",
+  "revision": "7adf16851fafc9ed",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -14,12 +14,12 @@
       "display": "A1",
       "name": "",
       "brand": "拓竹 (Bambu Lab)",
-      "defaultBundle": "A1_default",
+      "defaultBundle": "A1_STANDARD",
       "externalAliases": [
         "A1C",
         "A1F"
       ],
-      "image": null,
+      "image": "a1-image",
       "icon": "a1-icon",
       "plateIds": [
         "single-latch-256"
@@ -66,21 +66,21 @@
         {
           "id": "STANDARD",
           "name": "标准版",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
           "description": "官方标准配置，适合大多数用户"
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_FAST",
           "tag": "热门",
           "description": "支持快拆配件的改装配置"
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
         }
@@ -92,7 +92,7 @@
       "display": "A1 mini",
       "name": "",
       "brand": "拓竹 (Bambu Lab)",
-      "defaultBundle": "A1_MINI_default",
+      "defaultBundle": "A1_MINI_STANDARD",
       "externalAliases": [
         "A1MINI",
         "A1M",
@@ -100,7 +100,7 @@
         "A1MQ",
         "A1MF"
       ],
-      "image": null,
+      "image": "a1_mini-image",
       "icon": "a1_mini-icon",
       "plateIds": [
         "dual-latch-180"
@@ -147,21 +147,21 @@
         {
           "id": "STANDARD",
           "name": "标准版",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
           "description": "官方标准配置"
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
           "description": "支持快拆配件的改装配置"
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
         }
@@ -180,7 +180,7 @@
         "P1P",
         "P1C"
       ],
-      "image": null,
+      "image": "p1s-image",
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -455,7 +455,7 @@
         {
           "id": "LITE",
           "name": "lite版",
-          "recommendedBundle": "X1C_default",
+          "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
           "description": "群里开源的最新lite"
         }
@@ -514,43 +514,162 @@
   ],
   "assets": [
     {
+      "id": "a1-image",
+      "type": "image",
+      "machineId": "A1",
+      "name": "A1 外观图",
+      "path": "printers/a1.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "a1_mini-image",
+      "type": "image",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 外观图",
+      "path": "printers/a1mini.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "a1_mini-variant-image",
+      "type": "image",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 外观图（快拆版）",
+      "path": "printers/a1mini-variant.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "p1s-image",
+      "type": "image",
+      "machineId": "P1S",
+      "name": "P1S 外观图",
+      "path": "printers/p1s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "a1-standard",
+      "type": "mkPreset",
+      "machineId": "A1",
+      "name": "A1 标准版预设",
+      "path": "",
+      "versionId": "STANDARD",
+      "delivery": "download"
+    },
+    {
+      "id": "a1-fast",
+      "type": "mkPreset",
+      "machineId": "A1",
+      "name": "A1 高速版预设",
+      "path": "",
+      "versionId": "FAST",
+      "delivery": "download"
+    },
+    {
+      "id": "a1-fastv3.3",
+      "type": "mkPreset",
+      "machineId": "A1",
+      "name": "A1 快拆版 260628 预设",
+      "path": "",
+      "versionId": "FASTV3.3",
+      "delivery": "download"
+    },
+    {
+      "id": "a1_mini-standard",
+      "type": "mkPreset",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 标准版预设",
+      "path": "",
+      "versionId": "STANDARD",
+      "delivery": "download"
+    },
+    {
+      "id": "a1_mini-fast",
+      "type": "mkPreset",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 高速版预设",
+      "path": "",
+      "versionId": "FAST",
+      "delivery": "download"
+    },
+    {
+      "id": "a1_mini-fastv3.3",
+      "type": "mkPreset",
+      "machineId": "A1_MINI",
+      "name": "A1 mini 快拆版 260628 预设",
+      "path": "",
+      "versionId": "FASTV3.3",
+      "delivery": "download"
+    },
+    {
+      "id": "p1s-lite",
+      "type": "mkPreset",
+      "machineId": "P1S",
+      "name": "P1S lite 版预设",
+      "path": "",
+      "versionId": "LITE",
+      "delivery": "download"
+    },
+    {
+      "id": "p2s-standard",
+      "type": "mkPreset",
+      "machineId": "P2S",
+      "name": "P2S 标准版预设",
+      "path": "",
+      "versionId": "STANDARD",
+      "delivery": "download"
+    },
+    {
+      "id": "x1c-lite",
+      "type": "mkPreset",
+      "machineId": "X1C",
+      "name": "X1C lite 版预设",
+      "path": "",
+      "versionId": "LITE",
+      "delivery": "download"
+    },
+    {
       "id": "a1-icon",
       "type": "icon",
       "machineId": "A1",
       "name": "A1 图标",
-      "path": "icons/a1.svg"
+      "path": "icons/a1.svg",
+      "delivery": "download"
     },
     {
       "id": "a1_mini-icon",
       "type": "icon",
       "machineId": "A1_MINI",
       "name": "A1 mini 图标",
-      "path": "icons/a1_mini.svg"
+      "path": "icons/a1_mini.svg",
+      "delivery": "download"
     },
     {
       "id": "p1s-icon",
       "type": "icon",
       "machineId": "P1S",
       "name": "P1S 图标（P2S / X1C 共用）",
-      "path": "icons/p1s.svg"
+      "path": "icons/p1s.svg",
+      "delivery": "download"
     },
     {
       "id": "mkp-support-test-models",
       "type": "model",
       "name": "MKP 支撑测试模型（多模型拼盘）",
-      "path": "models/MKP_support_test_models.3mf"
+      "path": "models/MKP_support_test_models.3mf",
+      "delivery": "download"
     },
     {
       "id": "precise-calibration",
       "type": "model",
       "name": "精密校准模型",
-      "path": "models/Precise_Calibration.3mf"
+      "path": "models/Precise_Calibration.3mf",
+      "delivery": "download"
     },
     {
       "id": "zoffset-calibration",
       "type": "model",
       "name": "Z 轴偏移校准模型",
-      "path": "models/ZOffset_Calibration.3mf"
+      "path": "models/ZOffset_Calibration.3mf",
+      "delivery": "download"
     },
     {
       "id": "a1-bbs-02-010",
@@ -559,7 +678,8 @@
       "name": "A1：0.2 喷头 0.10 层高",
       "path": "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "a1-bbs-04-020",
@@ -568,7 +688,8 @@
       "name": "A1：0.4 喷头 0.20 层高",
       "path": "bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "a1_mini-bbs-02-010",
@@ -577,7 +698,8 @@
       "name": "A1 mini：0.2 喷头 0.10 层高",
       "path": "bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "a1_mini-bbs-04-020",
@@ -586,7 +708,8 @@
       "name": "A1 mini：0.4 喷头 0.20 层高",
       "path": "bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "p1s-bbs-02-010",
@@ -595,7 +718,8 @@
       "name": "P1S：0.2 喷头 0.10 层高",
       "path": "bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "p1s-bbs-04-024",
@@ -604,7 +728,8 @@
       "name": "P1S：0.4 喷头 0.24 层高",
       "path": "bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "p2s-bbs-04-024",
@@ -613,7 +738,8 @@
       "name": "P2S：0.4 喷头 0.24 层高",
       "path": "bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "x1c-bbs-02-010",
@@ -622,7 +748,8 @@
       "name": "X1C：0.2 喷头 0.10 层高",
       "path": "bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     },
     {
       "id": "x1c-bbs-04-024",
@@ -631,59 +758,100 @@
       "name": "X1C：0.4 喷头 0.24 层高",
       "path": "bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
       "slicer": "bbs",
-      "profile": "process"
+      "profile": "process",
+      "delivery": "download"
     }
   ],
   "bundles": [
     {
-      "id": "A1_default",
+      "id": "A1_STANDARD",
       "display": "官方推荐",
       "machineId": "A1",
       "assetRefs": [
+        "a1-standard",
         "a1-bbs-04-020"
       ],
-      "presets": [],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
-      "id": "A1_MINI_default",
+      "id": "A1_FAST",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-fast",
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_FASTV3.3",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-fastv3.3",
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_STANDARD",
       "display": "官方推荐",
       "machineId": "A1_MINI",
       "assetRefs": [
+        "a1_mini-standard",
         "a1_mini-bbs-04-020"
       ],
-      "presets": [],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_FAST",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-fast",
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_FASTV3.3",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-fastv3.3",
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "P1S_default",
       "display": "官方推荐",
       "machineId": "P1S",
       "assetRefs": [
+        "p1s-lite",
         "p1s-bbs-04-024"
       ],
-      "presets": [],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "P2S_default",
       "display": "官方推荐",
       "machineId": "P2S",
       "assetRefs": [
+        "p2s-standard",
         "p2s-bbs-04-024"
       ],
-      "presets": [],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "X1C_default",
       "display": "官方推荐",
       "machineId": "X1C",
       "assetRefs": [
+        "x1c-lite",
         "x1c-bbs-04-024"
       ],
-      "presets": [],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     }
   ],
   "registry": {

@@ -33,7 +33,8 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::workbench::domain::{BbsAssign, Visibility};
+use crate::workbench::domain::wording::{AssetIdentity, BuildState};
+use crate::workbench::domain::Visibility;
 use crate::workbench::load_presets;
 use crate::workbench::paths;
 use crate::workbench::presets::{AssetKind, Presets};
@@ -47,6 +48,23 @@ pub struct AssetView {
     pub kind: AssetKind,
     /// 归属机型；不属于任何机型时是 `null`
     pub machine_id: Option<String>,
+    /// 归属版本（**只 `mkPreset` 类有** —— 那一类靠「机型 + 版本」定位它的产物）。
+    /// 界面拿它跳到「机型与版本」页的那一版（改名字改的是同一个字段）
+    pub version_id: Option<String>,
+    /// **给人看的名字 —— 一律用真名**（作者 2026-10-03：「这些预设的名字不是真实的
+    /// 名字，我希望显示原本的真实名字 / 版本名称」）：
+    ///
+    /// | 类 | 显示名 | 真源（能改的地方） |
+    /// |---|---|---|
+    /// | `mkPreset` | **版本名称**（`标准版` / `快拆版6月以前`） | 机型与版本页的「版本名称」 |
+    /// | `slicerProfile` | **文件名**（`MKPProcess A1 mini 0.4 0.20`） | 资产根里的文件 |
+    /// | 其余三类 | 台账登记的 `name` | 资产台账 |
+    ///
+    /// 界面显示这一格；[`Self::name`] 保留登记名作副行对照。派生不出来时如实
+    /// 回落登记名（不显示空白）
+    pub display: String,
+    /// 台账登记的名字（`presets/assets.toml` 的 `name`）。**不是显示真源** ——
+    /// 留着是为了详情卡能对照「登记名叫什么」
     pub name: String,
     /// 相对资产根的一段
     pub path: String,
@@ -60,8 +78,19 @@ pub struct AssetView {
     pub nozzle: Option<String>,
     /// 三根轴之三：层高。从文件名尾部的数字派生（`… 0.10.json` → `0.10`）
     pub layer: Option<String>,
-    /// 交付身份三态。可见性（含草稿态）压过「进没进套餐」，两件事正交
-    pub assign: BbsAssign,
+    /// **交付身份四态**（作者 2026-10-03 定的模型，判定在 [`identity_of`]）：
+    /// 进套餐 / 可选 / 随包 / 仅归档
+    pub identity: AssetIdentity,
+    /// **交付档位**（作者 2026-10-03）：`download` = 客户端按需下载（默认）、
+    /// `bundled` = **随包不下载**（整机图：台账里可管、可换图，客户端不下载）。
+    /// 四态视图里的「随包」就是它给的；与可见性正交，视图按优先级合成一个身份
+    pub delivery: crate::presetdata::assets::Delivery,
+    /// **生成状态**（作者 2026-10-03，只 `mkPreset` 类有）：这一版的产物处于
+    /// 「未生成 / 待更新 / 已生成 / 暂无资源」哪一档 —— 与生成页**同一套判据**
+    /// （快照指纹比对，不看文件时间）。资产库列表与详情照它显示徽章：
+    /// 没生成过 = 待生成；生成过、参数改完还没重新生成 = **待更新**。
+    /// 其余四类恒为 `null`（它们的"文件在不在"由 `present` 说）
+    pub build_state: Option<crate::workbench::domain::wording::BuildState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,14 +158,65 @@ fn slicer_axes(kind: AssetKind, path: &str) -> (Option<String>, Option<String>) 
     (nozzle, layer)
 }
 
-/// 交付身份三态。与 `Book::stock_rows` 那条同口径：可见性压过「进没进套餐」
-fn assign_of(vis: Visibility, in_bundle: bool) -> BbsAssign {
+/// **显示名的派生，只写这一处**（作者 2026-10-03：资产库的名字要用真名）。
+///
+/// - `mkPreset` → **版本名称**（`machines/{机型}.toml` 的 `versions[].name`）。
+///   台账里那条 `name`（当初写死的「A1 标准版预设」）是**会过期的第二份真相** ——
+///   版本改名之后它不会跟着变，所以不拿它当显示名。真源改的地方是「机型与版本」页
+///   的版本名称，两边显示的是同一个值（后端也是同一个字段）。
+/// - `slicerProfile` → **文件名去掉扩展名**（`MKPProcess A1 mini 0.4 0.20.json`
+///   → `MKPProcess A1 mini 0.4 0.20`）。台账里手写的「A1 mini：0.4 喷头 0.20 层高」
+///   同样不是真名。
+/// - 其余三类（整机图 / 图标 / 模型）→ 台账登记名（它们没有别的真源）。
+///
+/// 派生不出来（版本名空 / 文件没有 path）时如实回落到登记名，不显示空白
+pub(super) fn display_name(presets: &Presets, a: &crate::workbench::presets::Asset) -> String {
+    match a.kind {
+        AssetKind::MkPreset => {
+            let (Some(mid), Some(vid)) = (
+                a.machine_id.as_deref().map(str::trim),
+                a.version_id.as_deref().map(str::trim),
+            ) else {
+                return a.name.clone();
+            };
+            presets
+                .catalog
+                .machine(mid)
+                .and_then(|m| m.versions.iter().find(|v| v.id == vid))
+                .map(|v| v.name.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| a.name.clone())
+        }
+        AssetKind::SlicerProfile => a
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&a.path)
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&a.name)
+            .to_owned(),
+        _ => a.name.clone(),
+    }
+}
+
+/// **四态身份的判定，只写这一处**（作者 2026-10-03 定的模型）：
+/// 归档 > 随包 > 进套餐 > 可选。可见性与交付档位在数据上正交，
+/// 视图按这个优先级合成一个身份说话
+fn identity_of(
+    vis: Visibility,
+    delivery: crate::presetdata::assets::Delivery,
+    in_bundle: bool,
+) -> AssetIdentity {
     if vis == Visibility::ArchiveOnly {
-        BbsAssign::ArchiveOnly
+        AssetIdentity::ArchiveOnly
+    } else if delivery == crate::presetdata::assets::Delivery::Bundled {
+        AssetIdentity::Bundled
     } else if in_bundle {
-        BbsAssign::Assigned
+        AssetIdentity::InBundle
     } else {
-        BbsAssign::Optional
+        AssetIdentity::Optional
     }
 }
 
@@ -145,13 +225,14 @@ fn assign_of(vis: Visibility, in_bundle: bool) -> BbsAssign {
 #[allow(clippy::too_many_arguments)]
 fn list_of(
     presets: &Presets,
+    book: &crate::workbench::domain::derive::Book<'_>,
     committed: &std::collections::BTreeMap<String, Visibility>,
     draft: &std::collections::BTreeMap<String, Visibility>,
     kind: Option<AssetKind>,
     slicer: Option<&str>,
     nozzle: Option<&str>,
     layer: Option<&str>,
-    assign: Option<BbsAssign>,
+    identity: Option<AssetIdentity>,
     query: Option<&str>,
 ) -> AssetList {
     // 装着它的套餐集合（bundles.toml 反查，大小写不敏感）
@@ -178,11 +259,11 @@ fn list_of(
     sort_numeric(&mut layers);
 
     let q = query.unwrap_or_default().trim().to_lowercase();
-    // 全量的三态计数（页脚读数，不随筛选变）与逐条的归属，一次循环算完
+    // 全量的四态计数（页脚读数，不随筛选变）与逐条的身份，一次循环算完
     let mut total = 0usize;
     let mut optional_count = 0usize;
     let mut archive_count = 0usize;
-    let mut assign_of_all: std::collections::BTreeMap<String, BbsAssign> =
+    let mut identity_of_all: std::collections::BTreeMap<String, AssetIdentity> =
         std::collections::BTreeMap::new();
     for a in presets.assets.items() {
         total += 1;
@@ -191,13 +272,13 @@ fn list_of(
             .or_else(|| committed.get(&a.id))
             .copied()
             .unwrap_or(Visibility::Menu);
-        let asg = assign_of(vis, bundled.contains(&a.id.to_lowercase()));
-        match asg {
-            BbsAssign::Optional => optional_count += 1,
-            BbsAssign::ArchiveOnly => archive_count += 1,
-            BbsAssign::Assigned => {}
+        let idt = identity_of(vis, a.delivery, bundled.contains(&a.id.to_lowercase()));
+        match idt {
+            AssetIdentity::Optional => optional_count += 1,
+            AssetIdentity::ArchiveOnly => archive_count += 1,
+            _ => {}
         }
-        assign_of_all.insert(a.id.to_lowercase(), asg);
+        identity_of_all.insert(a.id.to_lowercase(), idt);
     }
 
     let assets = presets
@@ -212,8 +293,8 @@ fn list_of(
                 && layer.map_or(true, |x| l.as_deref() == Some(x))
         })
         .filter(|a| {
-            assign.map_or(true, |want| {
-                assign_of_all.get(&a.id.to_lowercase()) == Some(&want)
+            identity.map_or(true, |want| {
+                identity_of_all.get(&a.id.to_lowercase()) == Some(&want)
             })
         })
         .filter(|a| {
@@ -221,22 +302,42 @@ fn list_of(
         })
         .map(|a| {
             let (nozzle, layer) = slicer_axes(a.kind, &a.path);
+            // 生成状态：只有 MKP 预设类有（那一版的产物处于哪一档）
+            let build_state = if a.kind == AssetKind::MkPreset {
+                let uid = format!(
+                    "{}/{}",
+                    a.machine_id.as_deref().unwrap_or_default(),
+                    a.version_id.as_deref().unwrap_or_default()
+                );
+                Some(book.build_state(&uid))
+            } else {
+                None
+            };
             AssetView {
                 id: a.id.clone(),
                 kind: a.kind,
                 machine_id: a.machine_id.clone(),
+                version_id: a.version_id.clone(),
+                display: display_name(presets, a),
                 name: a.name.clone(),
                 path: a.path.clone(),
                 url: format!("/assets/{}", a.path),
                 slicer: a.slicer.clone(),
                 profile: a.profile.clone(),
-                present: presets.assets.present(a),
                 nozzle,
                 layer,
-                assign: assign_of_all
+                identity: identity_of_all
                     .get(&a.id.to_lowercase())
                     .copied()
-                    .unwrap_or(BbsAssign::Optional),
+                    .unwrap_or(AssetIdentity::Optional),
+                delivery: a.delivery,
+                // MKP 预设在资产库里就是「那一版的登记」—— 文件在不在看生成状态
+                // （`present` 对它没有意义：产物不在资产根里）
+                present: match a.kind {
+                    AssetKind::MkPreset => build_state.is_some_and(|s| s == BuildState::Built),
+                    _ => presets.assets.present(a),
+                },
+                build_state,
             }
         })
         .collect();
@@ -263,31 +364,63 @@ fn sort_numeric(values: &mut Vec<String>) {
     values.dedup();
 }
 
-/// 资产库清单。类型 / 三根轴 / 交付身份 / 搜索全部在这里筛
+/// 资产库清单。类型 / 三根轴 / 交付身份四态 / 搜索全部在这里筛
 #[tauri::command(async)]
 pub fn wb_assets(
     kind: Option<String>,
     slicer: Option<String>,
     nozzle: Option<String>,
     layer: Option<String>,
-    assign: Option<String>,
+    identity: Option<String>,
     query: Option<String>,
 ) -> Result<AssetList, AppError> {
     traced("wb_assets", |_| {
         with_ctx(|ctx| {
             let (committed, draft, _) = state(ctx)?;
             let kind = kind.as_deref().and_then(parse_kind);
-            let assign = assign.as_deref().and_then(parse_assign);
+            let identity = identity.as_deref().and_then(parse_identity);
+            let book =
+                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
             Ok(list_of(
                 &ctx.presets,
+                &book,
                 &committed.visibility,
                 &draft.visibility,
                 kind,
                 slicer.as_deref(),
                 nozzle.as_deref(),
                 layer.as_deref(),
-                assign,
+                identity,
                 query.as_deref(),
+            ))
+        })
+    })
+}
+
+/// 改一条资产的交付档位（`download` ↔ `bundled`）。**即时落盘**（清单编辑，
+/// 不走参数草稿），回一份新的清单。
+///
+/// 校验：资产要存在；**mkPreset 不许设成 bundled** —— 它的文件是生成产物、
+/// 落点在交付根 `mkp/presets/`，没有「随包复制」这条路径
+#[tauri::command]
+pub fn wb_set_asset_delivery(asset_id: String, delivery: String) -> Result<AssetList, AppError> {
+    traced("wb_set_asset_delivery", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.set_asset_delivery(&asset_id, &delivery)?;
+            let (committed, draft, _) = state(ctx)?;
+            let book =
+                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            Ok(list_of(
+                &ctx.presets,
+                &book,
+                &committed.visibility,
+                &draft.visibility,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             ))
         })
     })
@@ -301,8 +434,11 @@ pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
         with_ctx_mut(|ctx| {
             ctx.presets.remove_asset(&asset_id)?;
             let (committed, draft, _) = state(ctx)?;
+            let book =
+                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
             Ok(list_of(
                 &ctx.presets,
+                &book,
                 &committed.visibility,
                 &draft.visibility,
                 None,
@@ -337,18 +473,23 @@ fn parse_kind(s: &str) -> Option<AssetKind> {
         AssetKind::Icon,
         AssetKind::Model,
         AssetKind::SlicerProfile,
+        // mkPreset 2026-10-03 进了台账 —— 漏了它的话「MKP 预设」那档会被当成
+        // 「这一轴不过滤」，列表把整机图 / 图标全放出来（作者截图点名）
+        AssetKind::MkPreset,
     ]
     .into_iter()
     .find(|k| k.key() == s)
 }
 
-fn parse_assign(s: &str) -> Option<BbsAssign> {
-    match s {
-        "assigned" => Some(BbsAssign::Assigned),
-        "optional" => Some(BbsAssign::Optional),
-        "archiveOnly" => Some(BbsAssign::ArchiveOnly),
-        _ => None,
-    }
+fn parse_identity(s: &str) -> Option<AssetIdentity> {
+    [
+        AssetIdentity::InBundle,
+        AssetIdentity::Optional,
+        AssetIdentity::Bundled,
+        AssetIdentity::ArchiveOnly,
+    ]
+    .into_iter()
+    .find(|k| k.key() == s)
 }
 
 #[cfg(test)]
@@ -365,8 +506,9 @@ mod tests {
         let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            15,
-            "图标 3 + 模型 3 + BBS 9 —— 整机图 2026-10-01 剥离台账（19→15），条数变了要说清为什么"
+            28,
+            "MKP 预设 9 + 整机图 4 + 图标 3 + 模型 3 + BBS 9 —— 2026-10-03：整机图回到台账
+             （bundled 档）、MKP 预设也进了台账（mkPreset 类），条数变了要说清为什么"
         );
 
         let missing: Vec<&str> = list
@@ -444,26 +586,87 @@ mod tests {
             .all(|a| a.nozzle.as_deref() == Some("0.4")));
     }
 
-    /// 交付身份三态在真数据上的分布：5 条套餐各引 1 条 BBS → 恰好 5 条已分配；
-    /// 机型图 / 图标 / 没进套餐的 BBS → 可选。**没人动过可见性，不该有仅归档**
+    /// **类型轴每档都筛得干净**：选中一档就只出那一档。
+    /// mkPreset 那档是作者截图点名的 bug —— parse_kind 漏了它，选中「MKP 预设」
+    /// 被当成「不过滤」，整机图 / 图标全放出来
     #[test]
-    fn the_real_assign_states_match_bundle_membership() {
-        let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
-        let assigned = list
-            .assets
-            .iter()
-            .filter(|a| a.assign == BbsAssign::Assigned)
-            .count();
+    fn the_kind_axis_filters_each_kind_cleanly() {
+        let all = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let want_of = [
+            (AssetKind::Image, 4usize),
+            (AssetKind::Icon, 3),
+            (AssetKind::Model, 3),
+            (AssetKind::SlicerProfile, 9),
+            (AssetKind::MkPreset, 9),
+        ];
+        for (kind, want) in want_of {
+            let got = wb_assets(Some(kind.key().to_owned()), None, None, None, None, None)
+                .unwrap_or_else(|e| panic!("按 {} 筛：{e}", kind.key()));
+            assert_eq!(
+                got.assets.len(),
+                want,
+                "{} 档条数变了就说清为什么",
+                kind.key()
+            );
+            assert!(
+                got.assets.iter().all(|a| a.kind == kind),
+                "{} 档里混进了别的类型：{:?}",
+                kind.key(),
+                got.assets
+                    .iter()
+                    .filter(|a| a.kind != kind)
+                    .map(|a| a.id.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+        // 「全部」= 五档之和
         assert_eq!(
-            assigned, 5,
-            "5 条套餐各引一条 BBS —— 进套餐的就 5 条；条数变了就核对 bundles.toml 再改这里的期望"
+            all.assets.len(),
+            want_of.iter().map(|(_, n)| n).sum::<usize>()
         );
-        assert!(
+    }
+
+    /// **四态身份在真数据上的分布**（作者 2026-10-03 定的模型）：
+    /// 进套餐 14（9 条 mkPreset + 5 条被套餐引用的 BBS）、随包 4（整机图）、
+    /// 仅归档 0（没人动过可见性）、其余可选 10
+    #[test]
+    fn the_real_identity_states_match_the_model() {
+        use AssetIdentity::{ArchiveOnly, Bundled, InBundle, Optional};
+        let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let count = |want: AssetIdentity| {
             list.assets
                 .iter()
-                .all(|a| a.assign != BbsAssign::ArchiveOnly),
-            "没人动过可见性 —— 出现仅归档说明草稿/交付层串了"
+                .filter(|a| a.identity == want)
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>()
+        };
+        let in_bundle = count(InBundle);
+        assert_eq!(
+            in_bundle.len(),
+            14,
+            "9 条 mkPreset + 5 条被套餐引用的 BBS —— 条数变了就核对 bundles.toml 再改这里的期望：{in_bundle:?}"
         );
+        assert!(
+            in_bundle.contains(&"a1-standard") && in_bundle.contains(&"a1-bbs-04-020"),
+            "MKP 预设进套餐后也是「进套餐」身份"
+        );
+        let bundled = count(Bundled);
+        assert_eq!(bundled.len(), 4, "四条整机图是随包档：{bundled:?}");
+        assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
+        assert_eq!(
+            count(Optional).len(),
+            10,
+            "28 - 14 进套餐 - 4 随包 = 10 可选（图标 3 + 模型 3 + 没进套餐的 BBS 4）"
+        );
+
+        // 身份轴筛选：每一档筛出来都恰好是那一档
+        let filtered =
+            wb_assets(None, None, None, None, Some("bundled".to_owned()), None).expect("按随包筛");
+        assert!(filtered
+            .assets
+            .iter()
+            .all(|a| a.identity == AssetIdentity::Bundled));
+        assert_eq!(filtered.assets.len(), 4);
     }
 
     /// 反查在真数据上也说得清是谁在用（b05 Task 9.4）

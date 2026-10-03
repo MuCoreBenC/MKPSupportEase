@@ -96,15 +96,15 @@ export default function AssetPicker({ open, title, options, value, onCancel, onP
               type="button"
               className={`${s.imgCell} ${a.id === picked ? s.imgCellOn : ''}`}
               aria-pressed={a.id === picked}
-              title={a.present ? a.name : `${a.name} —— 文件还没搬进资产库`}
+              title={a.present ? a.display : `${a.display} —— 文件还没搬进资产库`}
               onClick={() => setPicked(a.id)}
             >
               {a.present ? (
-                <img src={assetUrl(a.url)} alt={a.name} loading="lazy" />
+                <img src={assetUrl(a.url)} alt={a.display} loading="lazy" />
               ) : (
                 <span className={s.assetThumbPh}>未搬</span>
               )}
-              <span className={`${s.imgName} ${s.mono}`}>{a.name}</span>
+              <span className={`${s.imgName} ${s.mono}`}>{a.display}</span>
             </button>
           ))}
         </div>
@@ -121,7 +121,7 @@ export default function AssetPicker({ open, title, options, value, onCancel, onP
             <img
               key={pickedView.id}
               src={assetUrl(pickedView.url)}
-              alt={pickedView.name}
+              alt={pickedView.display}
               onLoad={(e) =>
                 setPixels(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight}`)
               }
@@ -129,7 +129,7 @@ export default function AssetPicker({ open, title, options, value, onCancel, onP
             />
           ) : (
             <span className={s.pickPh}>
-              {pickedView.name} 的文件还没搬进资产库 —— 选它界面上会显示占位说明
+              {pickedView.display} 的文件还没搬进资产库 —— 选它界面上会显示占位说明
             </span>
           )
         ) : (

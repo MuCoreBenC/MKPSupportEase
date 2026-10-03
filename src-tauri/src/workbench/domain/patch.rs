@@ -100,11 +100,16 @@ pub enum Patch {
         /// `None` = 删键 = 挂回继承
         value: Option<Value>,
     },
+    /// 蛇形字段要用 `rename` 逐个指到 camelCase —— 枚举上的 `rename_all`
+    /// 只作用于**变体名**，管不到变体的字段（前端发 `fileId`，漏了它就是
+    /// 「missing field file_id」，资产库的设归档整个是坏的）
     SetVisibility {
+        #[serde(rename = "fileId")]
         file_id: String,
         visibility: Visibility,
     },
     SetBundle {
+        #[serde(rename = "bundleId")]
         bundle_id: String,
         presets: Vec<String>,
         bbs: Vec<String>,

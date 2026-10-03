@@ -48,6 +48,12 @@ const WORDS: Json = {
     optional: { label: '可选', explain: '没进任何套餐，客户端能手动下' },
     archiveOnly: { label: '仅归档', explain: '客户端完全不知道这个文件存在' },
   },
+  identity: {
+    inBundle: { label: '进套餐', explain: '客户端首页按版本自动下载 —— 进套餐在套餐页管，资产库不直接设' },
+    optional: { label: '可选', explain: '客户端预设页看得到，用户手动下载' },
+    bundled: { label: '随包', explain: '构建期随程序包带进客户端，不下载不更新，页面上也不出现' },
+    archiveOnly: { label: '仅归档', explain: '仓库里留着，客户端完全不消费' },
+  },
   bbsSource: {
     own: { label: '本版本单独一份', explain: '这个版本自己挑的曲线清单' },
     inheritedFromMachine: { label: '跟随机型', explain: '用机型默认那份清单' },
@@ -307,13 +313,18 @@ const MACHINE_VIEWS = [
   },
 ]
 
-type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string }
+type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string; delivery?: 'download' | 'bundled' }
 
 /** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算。
- * **没有 image 类**（2026-10-01 起）：整机图已从资产台账剥离、搬进 `src/app/assets/printers/`，
- * 这个夹具跟着真台账走 —— 否则浏览器里跑工作台会看到一个后端已经不存在的一类。 */
+ *  **image 类回来了**（2026-10-03，撤销第三刀的剥离）：整机图在台账里，用
+ *  `delivery: 'bundled'` 表达「随包不下载」—— 台账可管可换图，客户端不下载。 */
 const ASSETS: FixtureRef[] = [
+  { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp', delivery: 'bundled' },
+  { id: 'a1_mini-image', kind: 'image', slicer: null, profile: null, name: 'A1 mini 外观图', path: 'printers/a1mini.webp', delivery: 'bundled' },
+  { id: 'p1s-image', kind: 'image', slicer: null, profile: null, name: 'P1S 外观图', path: 'printers/p1s.webp', delivery: 'bundled' },
   { id: 'a1-icon', kind: 'icon', slicer: null, profile: null, name: 'A1 图标', path: 'icons/a1.svg' },
+  { id: 'a1-standard', kind: 'mkPreset', slicer: null, profile: null, name: 'A1 标准版预设', path: '' },
+  { id: 'a1-fast', kind: 'mkPreset', slicer: null, profile: null, name: 'A1 高速版预设', path: '' },
   { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
   { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
   { id: 'a1-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json' },
@@ -325,17 +336,10 @@ const ASSETS: FixtureRef[] = [
 
 /** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST）。
  *  `presets` = 套餐挂的 MKP 预设（**版本 uid 直引，文件可不存在** —— 作者 2026-10-03） */
-const BUNDLES: {
-  id: string
-  display: string
-  machineId: string
-  assetRefs: string[]
-  presets: string[]
-  updatedAt: string | null
-}[] = [
-  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-bbs-04-020'], presets: ['A1/STANDARD'], updatedAt: '2026-07-12' },
-  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-bbs-02-010', 'a1-orca-02-010'], presets: ['A1/FAST'], updatedAt: '2026-07-12' },
-  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], presets: [], updatedAt: '2026-07-12' },
+const BUNDLES: { id: string; display: string; machineId: string; assetRefs: string[]; updatedAt: string | null }[] = [
+  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-standard', 'a1-bbs-04-020'], updatedAt: '2026-07-12' },
+  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-fast', 'a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
+  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
 ]
 
 /** 可见性（含草稿态）：fileId → 'archiveOnly'。写路径与 save 都落这里 */
@@ -354,16 +358,35 @@ function slicerAxes(path: string): { nozzle: string | null; layer: string | null
 const inBundleSet = () =>
   new Set(BUNDLES.flatMap((b) => b.assetRefs.map((r) => r.toLowerCase())))
 
-function assetListOf(kind: string | null, slicer: string | null, nozzle: string | null, layer: string | null, assign: string | null, query: string | null) {
+function assetListOf(kind: string | null, slicer: string | null, nozzle: string | null, layer: string | null, identity: string | null, query: string | null) {
   const bundled = inBundleSet()
   const rows = ASSETS.map((a) => {
     const axes = slicerAxes(a.path)
     const vis = pendingVis.get(a.id) ?? 'menu'
-    const asg = vis === 'archiveOnly' ? 'archiveOnly' : bundled.has(a.id.toLowerCase()) ? 'assigned' : 'optional'
+    const delivery = a.delivery ?? 'download'
+    // 四态身份，判定与真机同一优先级：归档 > 随包 > 进套餐 > 可选
+    const idt =
+      vis === 'archiveOnly' ? 'archiveOnly'
+      : delivery === 'bundled' ? 'bundled'
+      : bundled.has(a.id.toLowerCase()) ? 'inBundle'
+      : 'optional'
     return {
       id: a.id, kind: a.kind, machineId: a.id.startsWith('a1-') && a.kind !== 'model' ? 'A1' : a.id.startsWith('p1s-') ? 'P1S' : null,
+      versionId: a.kind === 'mkPreset' ? 'STANDARD' : null,
+      // 显示名一律真名：MKP 预设 = 版本名、切片器 = 文件名（与后端同一口径）
+      display:
+        a.kind === 'mkPreset'
+          ? (MACHINE_VIEWS.find((m) => m.id === 'A1')?.versions.find((v) => v.id === 'STANDARD')?.name ?? a.name)
+          : a.kind === 'slicerProfile'
+            ? (a.path.split('/').pop() ?? a.path).replace(/\.json$/i, '')
+            : a.name,
       name: a.name, path: a.path, url: `/assets/${a.path}`, slicer: a.slicer, profile: a.profile,
-      present: true, nozzle: axes.nozzle, layer: axes.layer, assign: asg,
+      // MKP 预存在资产库里恒有登记；「有没有生成」由生成页那套判据说（演示：一份已生成、
+      // 一份待生成）—— 作者 2026-10-03：「文件在不在都能选，徽章说生成到哪一步了」
+      present: a.kind === 'mkPreset' ? a.id === 'a1-standard' : true,
+      buildState: a.kind === 'mkPreset' ? (a.id === 'a1-standard' ? 'built' : 'neverBuilt') : null,
+      nozzle: axes.nozzle, layer: axes.layer, identity: idt,
+      delivery,
     }
   })
   const q = (query ?? '').trim().toLowerCase()
@@ -373,7 +396,7 @@ function assetListOf(kind: string | null, slicer: string | null, nozzle: string 
     (slicer === null || a.slicer === slicer) &&
     (nozzle === null || a.nozzle === nozzle) &&
     (layer === null || a.layer === layer) &&
-    (assign === null || a.assign === assign) &&
+    (identity === null || a.identity === identity) &&
     (q === '' || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)),
   )
   const numeric = (xs: string[]) => [...new Set(xs)].sort((x, y) => parseFloat(x) - parseFloat(y))
@@ -383,8 +406,8 @@ function assetListOf(kind: string | null, slicer: string | null, nozzle: string 
     nozzles: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.nozzle).map((a) => a.nozzle as string)),
     layers: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.layer).map((a) => a.layer as string)),
     total: all.length,
-    optionalCount: all.filter((a) => a.assign === 'optional').length,
-    archiveCount: all.filter((a) => a.assign === 'archiveOnly').length,
+    optionalCount: all.filter((a) => a.identity === 'optional').length,
+    archiveCount: all.filter((a) => a.identity === 'archiveOnly').length,
   }
 }
 
@@ -400,26 +423,18 @@ function bundleListOf(query: string | null) {
         return {
           id: r, kind: a?.kind ?? 'slicerProfile', resolvable: a !== undefined,
           isBbs: a?.kind === 'slicerProfile' && a.slicer === 'bbs',
-          name: a?.name ?? '', present: a !== undefined,
+          name: a?.name ?? '',
+          // MKP 预设的「在不在」按生成状态判（与真机同口径）；演示：一份已生成、一份待生成
+          present: a !== undefined && (a.kind !== 'mkPreset' || a.id === 'a1-standard'),
+          buildState: a?.kind === 'mkPreset' ? (a.id === 'a1-standard' ? 'built' : 'neverBuilt') : null,
           visibility: pendingVis.get(r) ?? 'menu',
         }
       }),
-      presets: b.presets.map((uid) => ({
-        uid,
-        fileName: `${uid.split('/')[0].toLowerCase()}-${uid.split('/')[1].toLowerCase()}.toml`,
-        generated: true,
-      })),
       users: versions.filter((v) => (v.recommendedBundle ?? '').toLowerCase() === b.id.toLowerCase())
         .map((v) => ({ machineId: v.machineId, versionId: v.id })),
       defaultFor: MACHINE_VIEWS.filter((m) => (m.defaultBundle ?? '').toLowerCase() === b.id.toLowerCase()).map((m) => m.id),
     })),
     total: BUNDLES.length,
-    presetCandidates: versions.map((v) => ({
-      uid: `${v.machineId}/${v.id}`,
-      name: `${v.machineId} ${v.id}`,
-      fileName: `${v.machineId.toLowerCase()}-${v.id.toLowerCase()}.toml`,
-      state: 'built' as const,
-    })),
   }
 }
 
@@ -910,15 +925,92 @@ export function installMockBackend() {
       case 'wb_set_bundle_refs': {
         const bundleId = args?.bundleId as string
         const ids = (args?.assetIds as string[]) ?? []
-        const presetUids = (args?.presetUids as string[]) ?? []
         const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
         if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
         if (!ids.some((id) => ASSETS.find((x) => x.id === id)?.kind === 'slicerProfile')) {
           return Promise.reject({ code: 'INVALID', message: `套餐 ${bundleId} 的 assetRefs 里没有一条 BBS 预设`, traceId: 'mock' })
         }
         b.assetRefs = ids
-        b.presets = presetUids
         b.updatedAt = '今天（演示）'
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_add_bundle': {
+        const id = (args?.id as string)?.trim() ?? ''
+        const machineId = args?.machineId as string
+        const display = args?.display as string
+        const ids = (args?.assetIds as string[]) ?? []
+        if (!id || /\s|[/]/.test(id)) return Promise.reject({ code: 'INVALID', message: '套餐 id 不能为空、不能含空白或 /', traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === id.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${id}`, traceId: 'mock' })
+        }
+        if (!ids.some((x) => ASSETS.find((a) => a.id === x)?.kind === 'slicerProfile')) {
+          return Promise.reject({ code: 'INVALID', message: '套餐的 assetRefs 里没有一条 BBS 预设', traceId: 'mock' })
+        }
+        BUNDLES.push({ id, display: display || '官方推荐', machineId, assetRefs: ids, updatedAt: '今天（演示）' })
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_rename_bundle': {
+        const bundleId = args?.bundleId as string
+        const newId = (args?.newId as string)?.trim() ?? ''
+        const display = args?.display as string | null
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        if (!newId || /\s|[/]/.test(newId)) return Promise.reject({ code: 'INVALID', message: '套餐 id 不能为空、不能含空白或 /', traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === newId.toLowerCase() && x !== b)) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${newId}`, traceId: 'mock' })
+        }
+        b.id = newId
+        if (display) b.display = display
+        b.updatedAt = '今天（演示）'
+        // 演示桩里的机型指向也跟着重指（真机由 Presets::rename_bundle 连带改机型文件）
+        for (const m of MACHINE_VIEWS) {
+          if (m.defaultBundle?.toLowerCase() === bundleId.toLowerCase()) m.defaultBundle = newId
+          for (const v of m.versions) {
+            if ((v.recommendedBundle ?? '').toLowerCase() === bundleId.toLowerCase()) v.recommendedBundle = newId
+          }
+        }
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_copy_bundle': {
+        const bundleId = args?.bundleId as string
+        const newId = (args?.newId as string)?.trim() ?? ''
+        const display = args?.display as string | null
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === newId.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${newId}`, traceId: 'mock' })
+        }
+        BUNDLES.push({ id: newId, display: display || b.display, machineId: b.machineId, assetRefs: [...b.assetRefs], updatedAt: '今天（演示）' })
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_assign_bundle_versions': {
+        const bundleId = args?.bundleId as string
+        const uids = (args?.uids as string[]) ?? []
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        for (const uid of uids) {
+          const [mid, vid] = uid.split('/')
+          const m = MACHINE_VIEWS.find((x) => x.id.toLowerCase() === mid?.toLowerCase())
+          const v = m?.versions.find((x) => x.id.toLowerCase() === vid?.toLowerCase())
+          if (!m || !v) {
+            return Promise.reject({ code: 'NOT_FOUND', message: `没有这个版本：${uid}`, traceId: 'mock' })
+          }
+          v.recommendedBundle = bundleId
+        }
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_remove_bundle': {
+        const bundleId = args?.bundleId as string
+        const versions = MACHINE_VIEWS.flatMap((m) => m.versions.map((v) => ({ m, v })))
+        const holders = [
+          ...MACHINE_VIEWS.filter((m) => (m.defaultBundle ?? '').toLowerCase() === bundleId.toLowerCase()).map((m) => `机型 ${m.id} 的 defaultBundle`),
+          ...versions.filter(({ v }) => (v.recommendedBundle ?? '').toLowerCase() === bundleId.toLowerCase()).map(({ m, v }) => `版本 ${m.id}/${v.id}`),
+        ]
+        if (holders.length) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 ${bundleId} 还被引用着，不能删`, detail: holders.join('、'), traceId: 'mock' })
+        }
+        const at = BUNDLES.findIndex((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (at >= 0) BUNDLES.splice(at, 1)
         return Promise.resolve(bundleListOf(null))
       }
       case 'wb_assets':
@@ -928,10 +1020,21 @@ export function installMockBackend() {
             (args?.slicer as string | null) ?? null,
             (args?.nozzle as string | null) ?? null,
             (args?.layer as string | null) ?? null,
-            (args?.assign as string | null) ?? null,
+            (args?.identity as string | null) ?? null,
             (args?.query as string | null) ?? null,
           ),
         )
+      case 'wb_set_asset_delivery': {
+        const assetId = args?.assetId as string
+        const delivery = args?.delivery as 'download' | 'bundled'
+        const a = ASSETS.find((x) => x.id === assetId)
+        if (!a) return Promise.reject({ code: 'NOT_FOUND', message: `没有资产 ${assetId}`, traceId: 'mock' })
+        if (a.kind === 'mkPreset' && delivery === 'bundled') {
+          return Promise.reject({ code: 'INVALID', message: `资产 ${assetId} 是 MKP 预设登记，不能设成随包`, traceId: 'mock' })
+        }
+        a.delivery = delivery
+        return Promise.resolve(assetListOf(null, null, null, null, null, null))
+      }
       case 'wb_remove_asset': {
         const assetId = args?.assetId as string
         const used = BUNDLES.some((b) => b.assetRefs.includes(assetId)) || assetId === 'a1-icon'

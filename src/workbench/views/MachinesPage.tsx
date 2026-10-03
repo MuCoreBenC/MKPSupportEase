@@ -23,7 +23,7 @@
  *  - **机型图 / 图标是资产 id**（Task 8.6），挑选走资产库选择器（14.6：
  *    不让人手填路径）。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
@@ -46,6 +46,7 @@ import ModalC14 from '../c14/ModalC14'
 import PickOrType from '../c14/PickOrType'
 import { fieldState, machineFieldLabels, placeholderText } from '../c14/labels'
 import { toasts } from '../c14/toast'
+import { useSplitRail } from '../c14/SplitRail'
 import type { GotoFocus } from '../c14/types'
 import s from '../c14.module.css'
 
@@ -88,6 +89,9 @@ const STATE_TAG: Record<string, string> = {
 }
 
 export default function MachinesPage({ book, words, onGoto, onApply, onSave, onBookRefresh }: Props) {
+  /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const rail = useSplitRail('machines', bodyRef)
   const [list, setList] = useState<MachineList | null>(null)
   const [assets, setAssets] = useState<AssetList | null>(null)
   const [bundles, setBundles] = useState<BundleList | null>(null)
@@ -538,7 +542,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   }
 
   return (
-    <div className={s.split}>
+    <div className={s.split} ref={bodyRef} style={rail.style}>
       {/* —— 左列：筛选 + 机型行 —— */}
       <div className={s.side}>
         <div className={s.topRow}>
@@ -1146,27 +1150,34 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
         }
       >
         <div className={s.bunList}>
-          {bundles.bundles
-            .filter((b) => b.machineId === m.id)
-            .map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                className={`${s.row} ${bunPick === b.id ? s.rowPick : ''}`}
-                onClick={() => setBunPick(b.id)}
-              >
-                <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
-                <span className={s.rowName}>{b.display || '—'}</span>
-                <span className={s.rowMeta}>
-                  MKP {b.assetRefs.filter((r) => !r.isBbs).length} · 切片器{' '}
-                  {b.assetRefs.filter((r) => r.isBbs).length}
-                </span>
-                {b.id === picked?.recommendedBundle && <span className={`${s.tag} ${s.tagGhost}`}>当前</span>}
-              </button>
-            ))}
-          {!bundles.bundles.some((b) => b.machineId === m.id) && (
+          {/*
+           * **不限机型**（作者 2026-10-03：「不应该限制」）：一版一套的约束只有一条
+           * —— 一个版本只指一个套餐；套餐可以被任何版本的指向。
+           * 本机型的排前面（常用），别家的排后面、行上带归属标注。
+           */}
+          {[
+            ...bundles.bundles.filter((b) => b.machineId === m.id),
+            ...bundles.bundles.filter((b) => b.machineId !== m.id),
+          ].map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={`${s.row} ${bunPick === b.id ? s.rowPick : ''}`}
+              onClick={() => setBunPick(b.id)}
+            >
+              <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
+              <span className={s.rowName}>{b.display || '—'}</span>
+              <span className={s.rowMeta}>
+                {b.machineId !== m.id && `归属 ${b.machineId} · `}
+                MKP {b.assetRefs.filter((r) => !r.isBbs).length} · 切片器{' '}
+                {b.assetRefs.filter((r) => r.isBbs).length}
+              </span>
+              {b.id === picked?.recommendedBundle && <span className={`${s.tag} ${s.tagGhost}`}>当前</span>}
+            </button>
+          ))}
+          {!bundles.bundles.length && (
             <p className={s.note} style={{ margin: 0 }}>
-              这台机型名下还没有套餐（套餐归属机型，版本指过去）—— 套餐页（P4）是建它的地方。
+              还没有任何套餐 —— 套餐页的「新建套餐」是建它的地方。
             </p>
           )}
         </div>
@@ -1521,6 +1532,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
           </>
         )}
       </ModalC14>
+      {rail.handle}
     </div>
   )
 }

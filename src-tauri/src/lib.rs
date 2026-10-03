@@ -250,10 +250,17 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
         app::assets::wb_remove_asset,
+        app::assets::wb_set_asset_delivery,
         // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
-        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）
+        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）；
+        // 2026-10-03 起新建 / 编辑（改 id 连带重指机型文件）/ 复制 / 删除（被指着整次拒绝）
         app::bundles::wb_bundles,
         app::bundles::wb_set_bundle_refs,
+        app::bundles::wb_add_bundle,
+        app::bundles::wb_rename_bundle,
+        app::bundles::wb_copy_bundle,
+        app::bundles::wb_assign_bundle_versions,
+        app::bundles::wb_remove_bundle,
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,

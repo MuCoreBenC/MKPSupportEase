@@ -97,9 +97,11 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// **界面数据**，两类东西混在一层，`path` 就说不清"这条资产属于谁管"。约定是「我们管的资产全在
 /// `public/assets/` 里，别的 `public/` 文件不许被 `presets/assets.toml` 引用」。
 ///
-/// 2026-10-01 起，本来混在 `public/` 里的**界面素材**全部搬走了（整机图 → `src/app/assets/printers/`、
-/// hero 合影 → `src/app/assets/hero/`）：它们随程序本体、走 vite 资源管线，不归台账。
-/// 于是这个根下只剩台账真正管的三类：`bbs/` `icons/` `models/` —— 这一层从此不再有两种东西。
+/// 2026-10-03 从 `public/assets` 搬到 `presets/assets`（作者：「在 assets 吧，到时候 3mf
+/// 也要放」—— 产品数据资源住一起）：现在这个根下是台账管的全部分类
+/// `bbs/` `icons/` `models/` `printers/`。
+/// **`printers/`（整机图）是 `bundled` 档**：台账登记、工作台可管，但**不进云端交付**
+/// —— 到客户端靠构建期复制（`scripts/copy-assets.mjs`）。
 ///
 /// # 目录按需建
 ///
@@ -108,7 +110,7 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// "还没搬过资产"要落成一个真实存在的空目录（`public/assets/.gitkeep` 占着），
 /// 而不是一个查不出来的状态。
 pub fn assets_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join("public").join(ASSET_DIR);
+    let root = repo_root().join(PRESETS_DIR).join(ASSET_DIR);
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出资产目录：{}", root.display())).with_detail(e.to_string())
     })?;

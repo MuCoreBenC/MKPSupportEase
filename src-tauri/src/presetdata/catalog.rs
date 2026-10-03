@@ -511,6 +511,23 @@ impl Machine {
         Ok(())
     }
 
+    /// 改机型默认套餐。`None` = 删键（这台没有默认了）。
+    ///
+    /// **谁引用着旧 id 由调用方管**（`Presets::rename_bundle` 重指后调它）——
+    /// 这里只管本文件的值面与文档面一起改（与 [`Self::set_field`] 同一条纪律：
+    /// 只改值面的话，下一次 `to_toml` 会把旧值写回去）
+    pub fn set_default_bundle(&mut self, id: Option<&str>) -> Result<(), AppError> {
+        let val = id.map(str::trim).filter(|s| !s.is_empty());
+        match val {
+            Some(s) => self.doc["defaultBundle"] = literal_str(s),
+            None => {
+                self.doc.remove("defaultBundle");
+            }
+        }
+        self.default_bundle = val.map(str::to_owned);
+        Ok(())
+    }
+
     /// 改机型自己的一格。`None`/空 = 删键（同 [`Self::set_version_field`]）
     pub fn set_field(&mut self, field: MachineField, value: Option<&str>) -> Result<(), AppError> {
         let val = value.map(str::trim).filter(|s| !s.is_empty());

@@ -42,4 +42,4 @@ pub use patch::{Committed, Draft, Patch, Visibility};
 pub use preview::BulkPreview;
 pub use variants::{digest, Digested};
 pub use visibility::{BlockScope, BlockedBy, Gate};
-pub use wording::{ArtifactState, BbsAssign, BbsSource, BuildState, SaveState};
+pub use wording::{ArtifactState, AssetIdentity, BbsAssign, BbsSource, BuildState, SaveState};
