@@ -291,17 +291,23 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     locateAnchor(`t-param-${key}`, { row: true })
   }, [init, desk, mode])
 
-  /* 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮） */
+  /*
+   * 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮）。
+   * **tab 不递给后端**（2026-10-03）：矩阵一律取全量行，领域过滤挪到下面
+   * `shownMatrix` 与「仅显示差异」同一处做 —— 之前 tab 一递，页签计数只能
+   * 从过滤后的行里数，点了哪个领域其余页签就被数成 0 滤没了（作者：
+   * 「必须返回到全部才能看到其他」）。附带的好处：切领域不再过一遍后端。
+   */
   useEffect(() => {
     if (mode !== 'compare' || compareColRefs.length === 0) {
       setMatrix(null)
       return
     }
     void wb
-      .matrix(compareColRefs, tabSel, q, baseMachineId)
+      .matrix(compareColRefs, null, q, baseMachineId)
       .then(setMatrix)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [mode, compareColRefs, tabSel, q, baseMachineId, tick, metaTick])
+  }, [mode, compareColRefs, q, baseMachineId, tick, metaTick])
 
   /* 对照模式右栏「参数详情」的数据：基准机型的全部层（选了参数才取） */
   useEffect(() => {
@@ -377,9 +383,13 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
 
     const level = layerUid !== null ? 'version' : 'machine'
     const owner = layerUid ?? ownerMachineId
+    /*
+     * 矩阵的刷新同样取全量（tab 过滤在前端）—— 写一笔回来要是带着旧 tab，
+     * 页签条立刻又塌回「全部 + 当前」两个了。
+     */
     const applyRefresh: Refresh =
       refreshKind === 'matrix'
-        ? { page: 'matrix', cols: compareColRefs, tab: tabSel, query: q }
+        ? { page: 'matrix', cols: compareColRefs, tab: null, query: q }
         : refresh
     const out = await onApply(`${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`, [
       { kind: 'setValue', level, owner, key: row.key, value },
@@ -697,11 +707,31 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   }
 
   /** 对照矩阵喂给视图的行（「仅显示差异」在这里滤） */
+  const searching = q.trim() !== ''
+  /*
+   * 领域（tab）过滤也在这里滤 —— 行身上带着后端给的 `tabId`，与「仅显示差异」
+   * 是同一处版面决定。搜索态不按领域收窄（后端的规矩就是搜索跨全部分类，
+   * doc §8.1），跟后端那份过滤对齐。
+   */
   const shownMatrix = matrix
-    ? diffOnly
-      ? { ...matrix, rows: matrix.rows.filter((r) => matrix.diffKeys.includes(r.key)) }
-      : matrix
+    ? {
+        ...matrix,
+        rows: matrix.rows
+          .filter((r) => searching || tabSel === null || r.tabId === tabSel)
+          .filter((r) => !diffOnly || matrix.diffKeys.includes(r.key)),
+      }
     : null
+  /*
+   * 页签条计数数的行：跟着「仅显示差异」走（与旧账一致），唯独**不吃当前
+   * 领域那一刀** —— 领域过滤只管正文。不然点了哪个领域，其余页签就从过滤
+   * 后的行里被数成 0，整条页签只剩「全部 + 当前」（作者：「必须返回到全部
+   * 才能看到其他」）。
+   */
+  const tabCountRows = matrix
+    ? diffOnly
+      ? matrix.rows.filter((r) => matrix.diffKeys.includes(r.key))
+      : matrix.rows
+    : []
 
   return (
     <div className={s.pPage}>
@@ -1060,7 +1090,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                   >
                     全部 <em>{shownMatrix.totalRows}</em>
                   </button>
-                  {tabCountsOf(shownMatrix, registry).map((t) => (
+                  {tabCountsOf(tabCountRows, registry).map((t) => (
                     <button
                       key={t.id}
                       type="button"
@@ -1617,14 +1647,17 @@ function cellAtCol(matrix: Matrix, col: Col, key: string) {
   return row && ci >= 0 ? (row.cells[ci] ?? null) : null
 }
 
-/** 对照矩阵的页签（后端矩阵不带 nav，计数从行本身数） */
+/**
+ * 对照矩阵的页签（后端矩阵不带 nav，计数从行本身数）。行源由调用处给 ——
+ * 必须是**没被当前领域滤过**的那份（见 `tabCountRows`），不然页签会塌。
+ */
 function tabCountsOf(
-  matrix: Matrix,
+  rows: Row[],
   registry: RegistryView | null,
 ): { id: string; label: string; count: number }[] {
   if (registry === null) return []
   const count = new Map<string, number>()
-  for (const r of matrix.rows) {
+  for (const r of rows) {
     if (r.tabId === null) continue
     count.set(r.tabId, (count.get(r.tabId) ?? 0) + 1)
   }
