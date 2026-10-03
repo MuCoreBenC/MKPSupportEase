@@ -319,16 +319,89 @@ const machineListOf = () => ({
   root: 'C:\\dev\\MKPSupportEase\\presets',
 })
 
+/**
+ * 尺寸六组夹具（与真数据 A1 逐格同形 —— 探针要拿它跟界面上的读数对）。
+ *
+ * 六组**一个不少**：文件里 `[dimensions]` 是全有或全无，这里照同一口径造。
+ */
+const A1_DIMENSIONS = {
+  bedSize: { width: 260, depth: 255 },
+  movementRange: { minX: -40, maxX: 260, minY: 0, maxY: 255, maxZ: 999 },
+  edgeZone: 10,
+  glueArea: { glueMinX: -40, glueMaxX: 260, glueMinY: 0, glueMaxY: 255, wipeX: 252 },
+  calibration: {
+    lShapeBaseX: 68.21, lShapeBaseY: 126.373,
+    xLineX: 114.523, xLineY: 104.83, xLineYEnd: 114.83,
+    yLineX: 104.53, yLineXEnd: 114.53, yLineY: 114.83,
+    zStartX: 68.21, zStartY: 126.373,
+  },
+  flags: { gcodeMarker: ';===== machine: A1', hasSecondFan: false },
+}
+
+/** P1S 的尺寸（床身 256×256 —— 禁区画布的 viewBox 就是它） */
+const P1S_DIMENSIONS = {
+  bedSize: { width: 256, depth: 256 },
+  movementRange: { minX: 0, maxX: 255, minY: 0, maxY: 265, maxZ: 999 },
+  edgeZone: 10,
+  glueArea: { glueMinX: 0, glueMaxX: 255, glueMinY: 0, glueMaxY: 265, wipeX: 20 },
+  calibration: {
+    lShapeBaseX: 68.21, lShapeBaseY: 126.373,
+    xLineX: 114.523, xLineY: 104.83, xLineYEnd: 114.83,
+    yLineX: 104.53, yLineXEnd: 114.53, yLineY: 112.83,
+    zStartX: 68.21, zStartY: 126.373,
+  },
+  flags: { gcodeMarker: ';===== machine: P1', hasSecondFan: true },
+}
+
+/** P1S 的两块禁区（点序与真数据 `forbidden_zones/P1S.toml` 同形：6 点 + 4 点） */
+const P1S_ZONES: { points: [number, number][] }[] = [
+  {
+    points: [
+      [0, 0], [240, 0], [240, 14], [238, 14], [238, 5], [0, 5],
+    ],
+  },
+  {
+    points: [
+      [0, 0], [18, 0], [18, 28], [0, 28],
+    ],
+  },
+]
+
 /** 机型夹具带上一版一套的指向（MachinesPage 也要用） */
-const MACHINE_VIEWS = [
+const MACHINE_VIEWS: {
+  id: string; display: string; name: string; brand: string;
+  defaultBundle: string | null; externalAliases: string[]; image: string | null;
+  icon: string | null; hasDimensions: boolean;
+  dimensions: typeof A1_DIMENSIONS | null;
+  zoneCount: number; zones: { points: [number, number][] }[]; file: string;
+  versions: { id: string; name: string; recommendedBundle: string | null; tag: string | null; description: string | null; image: string | null; hasRecipe: boolean }[];
+}[] = [
   {
     id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
     defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
-    hasDimensions: true, zoneCount: 0, file: 'A1.toml',
+    hasDimensions: true, dimensions: A1_DIMENSIONS, zoneCount: 0, zones: [], file: 'A1.toml',
     versions: [
       // `image` = 这一版专属的外观图（资产 id）。`null` = 回落机型图（第三刀的默认）
       { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, image: null, hasRecipe: true },
       { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, image: 'a1_mini-variant-image', hasRecipe: true },
+    ],
+  },
+  {
+    // 第二台（有禁区）—— 禁区编辑器与「移到品牌…」都要有第二条才量得出来
+    id: 'P1S', display: 'P1S', name: 'P1S', brand: 'Bambu Lab',
+    defaultBundle: 'P1S_default', externalAliases: ['P1'], image: 'p1s-image', icon: null,
+    hasDimensions: true, dimensions: P1S_DIMENSIONS, zoneCount: 2, zones: P1S_ZONES, file: 'P1S.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', recommendedBundle: 'P1S_default', tag: '推荐', description: null, image: null, hasRecipe: true },
+    ],
+  },
+  {
+    // 占位机型（没尺寸）—— 「尺寸卡显示说明而不是报错」那一档
+    id: 'A2L', display: 'A2L', name: 'A2L', brand: 'Bambu Lab',
+    defaultBundle: null, externalAliases: [], image: null, icon: null,
+    hasDimensions: false, dimensions: null, zoneCount: 0, zones: [], file: 'A2L.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', recommendedBundle: null, tag: null, description: null, image: null, hasRecipe: false },
     ],
   },
 ]
@@ -1010,6 +1083,44 @@ export function installMockBackend() {
           return Promise.reject({ code: 'INVALID', message: `已经有一个叫 ${id} 的品牌`, traceId: 'mock' })
         }
         BRANDS.push({ id, name, logo: null })
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_move_machine_to_brand': {
+        const machineId = args?.machineId as string
+        const brandId = (args?.brandId as string).trim()
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        // 目标品牌必须真的存在 —— 与真机同一条校验（打错一个字会留下悬空归属）
+        const b = BRANDS.find((x) => x.id.toLowerCase() === brandId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `没有品牌 ${brandId}`, traceId: 'mock' })
+        m.brand = b.id
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_set_machine_dimensions': {
+        const machineId = args?.machineId as string
+        const dims = args?.dimensions as typeof A1_DIMENSIONS
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        if (!(dims?.bedSize?.width > 0) || !(dims?.bedSize?.depth > 0)) {
+          return Promise.reject({ code: 'INVALID', message: '床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图', traceId: 'mock' })
+        }
+        m.dimensions = dims
+        m.hasDimensions = true
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_set_machine_zones': {
+        const machineId = args?.machineId as string
+        const zones = (args?.zones as { points: [number, number][] }[]) ?? []
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        for (const [i, z] of zones.entries()) {
+          if (z.points.length < 3) {
+            return Promise.reject({ code: 'INVALID', message: `第 ${i + 1} 块禁区只有 ${z.points.length} 个点 —— 少于 3 个围不出面`, traceId: 'mock' })
+          }
+        }
+        // 空数组 = 删掉禁区文件（真机口径：清空是删文件，不是留个空文件）
+        m.zones = zones
+        m.zoneCount = zones.length
         return Promise.resolve(machineListOf())
       }
       case 'wb_bundles':

@@ -249,6 +249,14 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 即时落盘（同机型那一套）；品牌图是资产 id，清空回落内置字标
         app::machines::wb_set_brand_field,
         app::machines::wb_add_brand,
+        // 移动机型（2026-10-03 作者：「把某一个机型移到其他品牌下，就是那种正常的移动」）：
+        // 只改机型文件的 brand 一格（复用 wb_set_machine_field 那条路），
+        // 多一道「目标品牌真的存在」的校验 —— 打错一个字会在盘上留下悬空的归属
+        app::machines::wb_move_machine_to_brand,
+        // 尺寸六组（照旧面板移植）：整张 [dimensions] 一次写回，全零可选组由后端剔除
+        app::machines::wb_set_machine_dimensions,
+        // 禁区：空数组 = 删掉 forbidden_zones/<id>.toml（清空是删文件，不是留个空文件）
+        app::machines::wb_set_machine_zones,
         // 「资产库」：读 `presets/assets.toml`（b05 Task 8），P4 起带三轴派生与筛选；
         // 删除走数据层的反查守卫（有人引用整次拒绝）
         app::assets::wb_assets,

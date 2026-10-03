@@ -1480,6 +1480,127 @@
 }
 
 /*
+ * 品牌树（2026-10-03，作者：「我想象中的就像那种树状的感觉一样…很明显的能看到
+ * 他们的父子关系。现在这种这么割裂」）。
+ *
+ * 三层：`.treeParent`（品牌行：折叠三角 + 名字）/ `.treeKids`（机型那一层，缩进）/
+ * `.treeKid`（机型行）。视觉沿用参数台左树：分组头小字加粗、行悬停变色、选中蓝底；
+ * 缩进用一条浅竖线暗示层级，不再垫任何背景色块（作者刚在别的弹窗里点名过"没必要加背景"）。
+ */
+.treeList {
+  gap: 0;
+  padding: 4px 6px 6px;
+}
+
+.treeGroup + .treeGroup {
+  margin-top: 2px;
+}
+
+.treeParent {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.treeParent:hover {
+  background: var(--surface-sunken);
+}
+
+.treeParentOn {
+  background: var(--wb-primary-soft);
+}
+
+/* 折叠三角：一个 18px 的小方块，收着指右、展着指下 */
+.treeTwist {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  color: var(--text-3);
+  border-radius: var(--r-sm);
+}
+
+.treeTwist:hover {
+  color: var(--text-1);
+}
+
+.treeTwist svg {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.12s ease;
+}
+
+.treeTwist svg[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+.treeParentName {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 6px 4px 0;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-2);
+  text-align: left;
+}
+
+.treeMeta {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+/* 机型那一层：左侧一条浅竖线 + 缩进，层级的唯一记号（不垫底色） */
+.treeKids {
+  margin-left: 9px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.treeKid {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.treeKid:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.treeKid:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.treeKidOn {
+  color: var(--wb-primary-deep);
+  font-weight: 500;
+  background: var(--wb-primary-soft);
+}
+
+/* 这家品牌下一台机器都没有（合法状态：刚建完品牌） */
+.treeEmpty {
+  padding: 4px 8px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/*
  * 左列里的分段小标题（2026-10-03）：一个名单里有两类条目（品牌 / 机型）时，
  * 用一条小标题分开；标题右边的按钮（新增品牌）自己靠右
  */

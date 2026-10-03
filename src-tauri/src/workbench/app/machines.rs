@@ -16,12 +16,14 @@
 //! 这一页又不是每秒刷新的东西，所以**用简单换正确**。
 //! （`param_registry.toml` 那 56 KB 不在这一页的读取面里。）
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::load_presets;
-use crate::workbench::presets::{BrandField, MachineField, Presets, VersionField};
+use crate::workbench::presets::{
+    BrandField, Dimensions, MachineField, Presets, VersionField, Zone,
+};
 
 use super::with_ctx_mut;
 
@@ -71,12 +73,29 @@ pub struct MachineView {
     pub icon: Option<String>,
     /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
+    /// **`[dimensions]` 的逐格视图**（2026-10-03 尺寸卡六组）。`None` = 这台没配尺寸
+    /// （与 `has_dimensions` 同一件事，两处都在 `list_of` 里一次读出）
+    pub dimensions: Option<Dimensions>,
     /// 禁区块数。0 = 这台没有禁区文件
     pub zone_count: usize,
+    /// **禁区的原始点**（画布要用）。空数组 = 没有禁区文件 ——
+    /// 与 `zone_count == 0` 同一件事（同一处算出，不会各说各话）
+    pub zones: Vec<ZoneView>,
     pub versions: Vec<VersionView>,
     /// 它自己那个 toml 文件的名字（`A1.toml`）。**给人看的**，
     /// 让"我在改哪个文件"这件事不用猜
     pub file: String,
+}
+
+/// 一块禁区（画布上的一个多边形）。形状与 `presetdata::Zone` 一一对应。
+///
+/// **`Serialize` 与 `Deserialize` 都要**：出参（清单里的 `zones`）走前者，
+/// 入参（`wb_set_machine_zones` 的 `zones`）走后者 —— 同一个形状两处都用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoneView {
+    /// `[x, y]` 点对，机器坐标 mm（原点在床身前左角、y 向上）
+    pub points: Vec<(f64, f64)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -296,6 +315,113 @@ pub fn wb_set_brand_field(
     })
 }
 
+/// **把一台机型挪到另一个品牌下**（2026-10-03，作者：「把某一个机型移到其他品牌下，
+/// 就是那种正常的移动」）。
+///
+/// 落点极窄：**只改机型文件的 `brand` 一格**（复用 [`wb_set_machine_field`] 那条路，
+/// 值面 + 文档面一起改）。品牌侧的 `machines` 列表是**反查**，不落盘 ——
+/// 所以不存在"两份归属"要同步的问题。
+///
+/// 多出来的一件事是**校验目标品牌真的存在**：手动改一格时前端给的是下拉里的选项，
+/// 而移动是一次显式动作，打错一个字就会在盘上留下一个悬空的 `brand` 值
+/// （界面上那台机器会从所有分组里消失，因为没有一个品牌认领它）。
+#[tauri::command]
+pub fn wb_move_machine_to_brand(
+    machine_id: String,
+    brand_id: String,
+) -> Result<MachineList, AppError> {
+    traced("wb_move_machine_to_brand", |_| {
+        with_ctx_mut(|ctx| {
+            let target = brand_id.trim();
+            let brand = ctx
+                .presets
+                .catalog
+                .brand(target)
+                .ok_or_else(|| AppError::not_found(format!("没有品牌 {target}")))?;
+            // 写进文件的是品牌**自己的 id 写法**（大小写可能与传进来的不同）
+            let canonical = brand.id.clone();
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .set_field(MachineField::Brand, Some(&canonical))?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            Ok(list_of(&load_presets()?))
+        })
+    })
+}
+
+/// **写一台机型的整张 `[dimensions]`**（六组：床身 / 移动范围 / 边缘 / 涂胶 / 标定点 / 标志位）。
+///
+/// 写命令（不带 `async`，与这一页其余几条一致）：落盘 + 回一份新清单。
+/// 校验在数据层（[`Dimensions::check_finite`]）：床身宽深必须为正、其余数字必须有限
+/// —— `NaN` / 无穷大写进 TOML 之后**每一次读都失败**，现场却已经没了。
+///
+/// 全零的可选组由 `set_dimensions` 剔除（口径写死在后端一处，前端那颗只是为了少发几个字节）。
+#[tauri::command]
+pub fn wb_set_machine_dimensions(
+    machine_id: String,
+    dimensions: Dimensions,
+) -> Result<MachineList, AppError> {
+    traced("wb_set_machine_dimensions", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets
+                .catalog
+                .machine_mut(&machine_id)?
+                .set_dimensions(dimensions)?;
+            ctx.presets.catalog.write_machine(&machine_id)?;
+            Ok(list_of(&load_presets()?))
+        })
+    })
+}
+
+/// **写一台机型的禁区**。空数组 = 删掉 `forbidden_zones/<id>.toml`（清空是删文件，
+/// 不是留一个空文件 —— 见 `presetdata::Catalog::set_zones` 的理由）。
+///
+/// 三道校验都在这里（数据层只管落盘）：每块至少 3 点（少于 3 点围不出面）、
+/// 坐标必须有限、块数上限 32（防手滑把整屏点都塞进来 —— 这个数字是"人画得出来的
+/// 禁区数量"的上界，不是技术限制）。
+#[tauri::command]
+pub fn wb_set_machine_zones(
+    machine_id: String,
+    zones: Vec<ZoneView>,
+) -> Result<MachineList, AppError> {
+    traced("wb_set_machine_zones", |_| {
+        const MIN_POINTS: usize = 3;
+        const MAX_ZONES: usize = 32;
+        if zones.len() > MAX_ZONES {
+            return Err(AppError::invalid_argument(format!(
+                "一块机型的禁区最多 {MAX_ZONES} 块（收到 {}）",
+                zones.len()
+            )));
+        }
+        let mut out: Vec<Zone> = Vec::with_capacity(zones.len());
+        for (i, z) in zones.iter().enumerate() {
+            if z.points.len() < MIN_POINTS {
+                return Err(AppError::invalid_argument(format!(
+                    "第 {} 块禁区只有 {} 个点 —— 少于 {MIN_POINTS} 个围不出面",
+                    i + 1,
+                    z.points.len()
+                )));
+            }
+            for (x, y) in &z.points {
+                if !x.is_finite() || !y.is_finite() {
+                    return Err(AppError::invalid_argument(format!(
+                        "第 {} 块禁区里有非有限坐标",
+                        i + 1
+                    )));
+                }
+            }
+            out.push(Zone {
+                points: z.points.clone(),
+            });
+        }
+        with_ctx_mut(|ctx| {
+            ctx.presets.catalog.set_zones(&machine_id, out)?;
+            Ok(list_of(&load_presets()?))
+        })
+    })
+}
+
 /// 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，回一份新的清单。
 ///
 /// 与「新增机型」不同：品牌全住一个 `brands.toml`，这里是往 `[[brands]]` 里加一段 ——
@@ -346,7 +472,19 @@ fn list_of(p: &Presets) -> MachineList {
                 image_variant: m.image_variant.clone(),
                 icon: m.icon.clone(),
                 has_dimensions: m.has_dimensions,
+                dimensions: m.dimensions.clone(),
+                // 禁区两格**从同一个来源算出**（一处取，一处 len）——
+                // 分开算迟早会漂成「说有 2 块但画不出来」
                 zone_count: p.catalog.zones(&m.id).map_or(0, <[_]>::len),
+                zones: p
+                    .catalog
+                    .zones(&m.id)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|z| ZoneView {
+                        points: z.points.clone(),
+                    })
+                    .collect(),
                 versions: m
                     .versions
                     .iter()

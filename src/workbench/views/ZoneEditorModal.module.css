@@ -1,0 +1,299 @@
+/*
+ * 禁区编辑器（2026-10-03，照旧面板 mkppanel 的 ZoneEditorModal）。
+ *
+ * 版式：左画布（55%）+ 右列表（45%），工具条在画布上方、状态在框脚。
+ * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块才出现顶点与坐标。
+ */
+
+.wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ---------- 左：画布 ---------- */
+
+.canvasPane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.tool {
+  padding: 3px 9px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.tool:hover:not(:disabled) {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.tool:disabled {
+  opacity: 0.45;
+}
+
+/* 把前后的按钮组拉开（撤销那一组离"添加/删除"远一点） */
+.toolGap {
+  flex: 1;
+}
+
+.zoom {
+  min-width: 42px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.canvasBox {
+  /* 画布是正方形（床身多半是方的），给它一个上限免得在小窗里顶破框 */
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.canvas {
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1 / 1;
+  /* 缩放走 transform：不改 viewBox，网格与顶点一起放大，坐标系不动 */
+  transform-origin: center;
+  transition: transform 0.1s ease;
+}
+
+.bed {
+  fill: var(--surface-solid);
+  stroke: var(--line-strong);
+  stroke-width: 0.8;
+}
+
+.grid {
+  stroke: var(--line);
+  stroke-width: 0.4;
+}
+
+.poly {
+  fill: var(--danger-soft, rgb(239 68 68 / 12%));
+  stroke: var(--danger);
+  stroke-width: 0.9;
+  cursor: pointer;
+}
+
+.polyOn {
+  fill: var(--danger-soft, rgb(239 68 68 / 20%));
+  stroke-width: 1.6;
+}
+
+.handle {
+  fill: var(--surface-solid);
+  stroke: var(--wb-primary);
+  stroke-width: 0.9;
+  cursor: grab;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+.handleText {
+  font-size: 3.4px;
+  fill: var(--text-2);
+  pointer-events: none;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ---------- 右：列表 ---------- */
+
+.listPane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.listHead {
+  padding-bottom: 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.empty {
+  padding: 10px 2px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.item {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.itemOn {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-soft);
+}
+
+.itemHead {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+}
+
+.itemName {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.itemMeta {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.itemBad {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.itemActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mini {
+  padding: 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.mini:hover {
+  border-color: var(--line-strong);
+}
+
+.miniDanger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 坐标表：选中那块才展开 */
+.coords {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.coordRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.coordIdx {
+  width: 22px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.coordInput {
+  width: 66px;
+  padding: 1px 5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: right;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.coordDel {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  border-radius: 2px;
+}
+
+.coordDel:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* ---------- 框脚 ---------- */
+
+.status {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.warn {
+  margin: 12px 0 0;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}

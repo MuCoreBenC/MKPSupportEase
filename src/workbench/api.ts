@@ -739,6 +739,78 @@ export interface VersionView {
   hasRecipe: boolean
 }
 
+/*
+ * 机型尺寸六组（`presetdata::Dimensions`）—— 字段名与外层契约 `src/api/contract.ts`
+ * 的 `MachineDimensions` 一一对应（后端注释里写死的那条口径），中间没有翻译层。
+ */
+
+/** 床身尺寸，mm */
+export interface BedSize {
+  width: number
+  depth: number
+}
+
+/** 喷头可达范围，mm */
+export interface MovementRange {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  maxZ: number
+}
+
+/** 可涂胶范围 + 擦料点的 X 坐标 */
+export interface GlueArea {
+  glueMinX: number
+  glueMaxX: number
+  glueMinY: number
+  glueMaxY: number
+  wipeX: number
+}
+
+/** 校准时笔尖要走的那几个点 */
+export interface CalibrationPoints {
+  lShapeBaseX: number
+  lShapeBaseY: number
+  xLineX: number
+  xLineY: number
+  xLineYEnd: number
+  yLineX: number
+  yLineXEnd: number
+  yLineY: number
+  zStartX: number
+  zStartY: number
+}
+
+/** 机型标记 */
+export interface MachineFlags {
+  /** G-code 里用来认机型的那行注释 */
+  gcodeMarker: string
+  hasSecondFan: boolean
+}
+
+/**
+ * 一台机型的尺寸（六组）。
+ *
+ * ★ **六组在文件里是全有或全无**（后端 `load_dimensions` 的口径）：`[dimensions]`
+ * 在，六个子表就都得在。所以这里六个字段都不是可选的 —— 界面上「没配尺寸」
+ * 是整张表缺席（`MachineView.dimensions === null`），不是某几组缺。
+ */
+export interface MachineDimensions {
+  bedSize: BedSize
+  movementRange: MovementRange
+  edgeZone: number
+  glueArea: GlueArea
+  calibration: CalibrationPoints
+  flags: MachineFlags
+}
+
+/** 一块禁区（画布上的一个多边形）。机器坐标 mm：原点在床身前左角、y 向上 */
+export interface ZonePolygon {
+  /** `[x, y]` 点对。**点序是有环序的** —— 不许排序 */
+  points: [number, number][]
+}
+
 /** `machines::MachineView` */
 export interface MachineView {
   id: string
@@ -752,8 +824,12 @@ export interface MachineView {
   icon: string | null
   /** 有没有 `[dimensions]` —— 界面上要能看出「这台还没配尺寸」 */
   hasDimensions: boolean
+  /** **`[dimensions]` 的逐格视图**（尺寸卡六组）。`null` = 这台没配尺寸 */
+  dimensions: MachineDimensions | null
   /** 禁区块数。0 = 这台没有禁区文件 */
   zoneCount: number
+  /** **禁区的原始点**（画布要用）。空数组与 `zoneCount === 0` 是同一件事 */
+  zones: ZonePolygon[]
   versions: VersionView[]
   /** 它自己那个 toml 文件名（`A1.toml`）。**给人看的**，让「我在改哪个文件」不用猜 */
   file: string
@@ -1072,6 +1148,27 @@ export const wb = {
 
   /** 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，撞名（含仅大小写不同）当场拒 */
   addBrand: (id: string, name: string) => invoke<MachineList>('wb_add_brand', { id, name }),
+
+  /**
+   * **把一台机型挪到另一个品牌下**。只改机型文件的 `brand` 一格（品牌侧是反查）。
+   * 目标品牌不存在时如实拒 —— 打错一个字会在盘上留下一个悬空的归属
+   */
+  moveMachineToBrand: (machineId: string, brandId: string) =>
+    invoke<MachineList>('wb_move_machine_to_brand', { machineId, brandId }),
+
+  /**
+   * **写一台机型的整张 `[dimensions]`**（六组一起）。即时落盘。
+   * 校验在后端：床身宽深必须为正、数字必须有限；全零的可选组由后端写零值（不删子表）
+   */
+  setMachineDimensions: (machineId: string, dimensions: MachineDimensions) =>
+    invoke<MachineList>('wb_set_machine_dimensions', { machineId, dimensions }),
+
+  /**
+   * **写一台机型的禁区**。空数组 = 删掉 `forbidden_zones/<id>.toml`
+   * （清空是删文件，不是留一个空文件）。每块 ≥ 3 点、块数 ≤ 32 由后端把关
+   */
+  setMachineZones: (machineId: string, zones: ZonePolygon[]) =>
+    invoke<MachineList>('wb_set_machine_zones', { machineId, zones }),
 
   /**
    * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**
