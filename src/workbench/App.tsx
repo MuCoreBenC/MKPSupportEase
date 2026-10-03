@@ -160,6 +160,18 @@ interface UndoEntry {
   patches: Patch[]
 }
 
+/**
+ * 状态条上的数据根怎么显示（2026-10-03，作者：「左下角的也是，没必要显示这个吧，这么长」）。
+ *
+ * 完整绝对路径放在 `title` 里（悬停能看到全部），行上只留**最后两段** ——
+ * `…/projects/MKPSupportEase/presets` → `MKPSupportEase/presets`：够认出是哪份仓库，
+ * 又不会把窄档的导航栏撑宽（实测撑宽之后那一块会溢出到内容区上，压着页脚）。
+ */
+const shortRoot = (p: string): string => {
+  const parts = p.split(/[/\\]/).filter((s) => s !== '')
+  return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : p
+}
+
 export function WorkbenchApp() {
   const rootRef = useRef<HTMLDivElement>(null)
   const density = useDensity(rootRef)
@@ -623,7 +635,8 @@ export function WorkbenchApp() {
         <span className={s.upDot} data-on={!!boot} aria-hidden />
         <span className={s.upText}>
           <span className={s.upLine}>{boot ? '预设源' : '读取中'}</span>
-          <span className={s.upNote}>{boot ? boot.roots.presets : '正在读…'}</span>
+          {/* 行上只留仓库名 + 目录名（见 `shortRoot`）；完整路径在整块的 title 上 */}
+          <span className={s.upNote}>{boot ? shortRoot(boot.roots.presets) : '正在读…'}</span>
         </span>
       </div>
 

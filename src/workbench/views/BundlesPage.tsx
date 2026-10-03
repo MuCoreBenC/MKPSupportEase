@@ -370,22 +370,40 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                 type="button"
                 /* 「去处理」定位的锚点（locateAnchor 按它滚 + 闪） */
                 id={`t-bundle-${b.id}`}
-                className={`${s.row} ${sel === b.id ? s.rowOn : ''}`}
+                className={`${s.row} ${s.rowStack} ${sel === b.id ? s.rowOn : ''}`}
                 onClick={() => setSel(b.id)}
                 {...bMenu.triggerProps(b.id)}
               >
-                <span className={s.rowName}>{b.id}</span>
-                <span className={s.rowMeta}>{b.assetRefs.length} 个文件</span>
-                {/* 版本数标色（作者 2026-10-03）：0 / 1 个是常态（绿），多个说明
-                    好几台机型/版本共用这一份 —— 那是要提醒看一眼的事（红） */}
-                {b.users.length > 1 ? (
-                  <span className={`${s.tag} ${s.tagDanger}`}>{b.users.length} 个版本</span>
-                ) : b.users.length === 1 ? (
-                  <span className={s.rowMeta}>1 个版本</span>
-                ) : (
-                  /* 没人用不是错误 —— 刚建好还没挂上去就是这样 */
-                  <span className={`${s.tag} ${s.tagGhost}`}>没人用</span>
-                )}
+                {/*
+                 * 两行摆（作者 2026-10-03 截图点名的两件事一起治）：
+                 * 上面一行 = **显示名**（主）+ 版本数（0/1 常态灰、多个红）；
+                 * 下面一行 = id + 装了几个文件 —— 四个事实挤一行时，
+                 * 显示名会被省略成「官…」（实测），也正是「名字左边右边都很像」的病根。
+                 */}
+                <span className={s.rowTop}>
+                  <span className={s.rowName}>{b.display || b.id}</span>
+                  {b.users.length > 1 ? (
+                    <span className={`${s.tag} ${s.tagDanger}`} title="好几个版本指着它">
+                      {b.users.length} 个版本用它
+                    </span>
+                  ) : b.users.length === 1 ? (
+                    <span className={s.rowMeta}>1 个版本用它</span>
+                  ) : (
+                    /* 没人用不是错误 —— 刚建好还没挂上去就是这样 */
+                    <span
+                      className={`${s.tag} ${s.tagGhost}`}
+                      title="没有版本指着它（大家都走机型默认）"
+                    >
+                      没人用它
+                    </span>
+                  )}
+                </span>
+                <span className={s.rowBottom}>
+                  <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
+                  <span className={s.rowMeta} title="这份套餐装了几份文件（MKP 预设 + 切片器）">
+                    装了 {b.assetRefs.length} 个文件
+                  </span>
+                </span>
                 {bad && <span className={`${s.tag} ${s.tagDanger}`}>含归档文件</span>}
               </button>
             )
@@ -415,8 +433,9 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
         ) : (
           <div className={s.card}>
             <div className={s.cardHead}>
-              <h2>{cur.id}</h2>
-              <span className={s.cardNote}>{cur.display}</span>
+              {/* 大标题 = 显示名，id 退成附注（与机型页「A1 + A1.toml」同一排法） */}
+              <h2>{cur.display || cur.id}</h2>
+              <span className={s.cardNote}>{cur.id}</span>
               <button type="button" className={s.btn} onClick={() => { setEditId(cur.id); setEditDisplay(cur.display); setEditing(true) }}>
                 编辑
               </button>
@@ -646,11 +665,15 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                       const now = bundleOf(uid)
                       return (
                         <span key={uid} className={s.chip}>
-                          {uid}
-                          <span className={s.cardNote}>
+                          {/* uid 与「它现在指着谁」之间要有分隔与间距 —— 贴在一起时
+                              `X1C/LITEA1_MINI_STANDARD` 读起来是一串（作者截图点名） */}
+                          <span className={s.mono}>{uid}</span>
+                          <span className={s.chipNow}>
                             {now.trim().toLowerCase() === cur.id.toLowerCase()
                               ? '已经指着它'
-                              : now || '还没配（走机型默认）'}
+                              : now
+                                ? `→ 现在：${now}`
+                                : '→ 走机型默认'}
                           </span>
                           <button
                             type="button"
@@ -856,7 +879,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       {/* —— 选择版本（多选；不限机型） —— */}
       <ModalC14
         open={assignPickOpen}
-        title={`选择版本 · ${cur?.id ?? ''}`}
+        title={`选择版本 · ${cur ? `${cur.display || cur.id}（${cur.id}）` : ''}`}
         subtitle="可以多选；一个套餐可以被多个版本指，一个版本只指一个套餐"
         size="md"
         onClose={() => setAssignPickOpen(false)}
@@ -869,38 +892,72 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
           </>
         }
       >
-        <div className={s.bunList}>
-          {allUids.map((u) => {
-            const on = assignPicks.includes(u.uid)
-            const now = u.bundle
-            return (
-              <label key={u.uid} className={`${s.row} ${s.rowPick}`} style={{ cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() =>
-                    setAssignPicks(on ? assignPicks.filter((x) => x !== u.uid) : [...assignPicks, u.uid])
-                  }
-                />
-                <span className={`${s.mono} ${s.rowMeta}`}>{u.uid}</span>
-                <span className={s.rowMeta}>
-                  {cur && now.trim().toLowerCase() === cur.id.toLowerCase()
-                    ? '已经指着它'
-                    : now || '还没配（走机型默认）'}
-                </span>
-                {cur && cur.machineId !== u.machineId && (
-                  <span className={`${s.tag} ${s.tagGhost}`}>归属 {cur.machineId} 的套餐</span>
-                )}
-              </label>
-            )
-          })}
+        {/*
+         * 树状列出（作者 2026-10-03：「我希望的是像参数台这样的显示 …… 像树状显示一样」）：
+         * 机型一行组头、版本在下面缩进 —— 与参数台左树同一副长相（同样的类）。
+         * 之前每行把 `机型/版本` 与版本 id 都摊两遍、还各自垫了背景色，两件事一起被点名。
+         */}
+        <div className={s.pickTree}>
+          {machines.machines.map((m) => (
+            <div key={m.id} className={s.pMg}>
+              <div className={s.pMgName}>
+                {m.display || m.id}
+                <em>{m.versions.length}</em>
+              </div>
+              {m.versions.map((v) => {
+                const uid = `${m.id}/${v.id}`
+                const on = assignPicks.includes(uid)
+                const now = (v.recommendedBundle ?? '').trim()
+                return (
+                  <button
+                    key={uid}
+                    type="button"
+                    className={s.pVrow}
+                    role="checkbox"
+                    aria-checked={on}
+                    /* 点整行 = 勾 / 取消（与左树同一条交互） */
+                    onClick={() =>
+                      setAssignPicks(
+                        on ? assignPicks.filter((x) => x !== uid) : [...assignPicks, uid],
+                      )
+                    }
+                  >
+                    {/* 那一枚勾常驻渲染、由 CSS 按 data-on 显隐（参数台同一颗，非圆） */}
+                    <span className={s.pVmark} data-on={on} aria-hidden>
+                      <svg
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="m2.6 6.3 2.4 2.4L9.5 3.9" />
+                      </svg>
+                    </span>
+                    <span className={s.pVtext}>
+                      <span className={s.pVname}>{v.name || v.id}</span>
+                      <span className={s.pVid}>{uid}</span>
+                    </span>
+                    <span className={s.pickNow}>
+                      {now === ''
+                        ? '走机型默认'
+                        : cur && now.toLowerCase() === cur.id.toLowerCase()
+                          ? '已经指着它'
+                          : `现在：${now}`}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </div>
       </ModalC14>
 
       {/* —— 影响预览：确认之前把「谁会被改」摆出来 —— */}
       <ModalC14
         open={assignConfirm}
-        title={`确认指向 · ${cur?.id ?? ''}`}
+        title={`确认指向 · ${cur ? `${cur.display || cur.id}（${cur.id}）` : ''}`}
         subtitle="一个套餐可以被多个版本指 —— 改了指向之后，这些版本的生成与发布都会跟着走"
         size="md"
         onClose={() => setAssignConfirm(false)}

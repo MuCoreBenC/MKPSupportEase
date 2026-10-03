@@ -251,6 +251,34 @@ impl MachineField {
     }
 }
 
+/// 品牌身上可以改的那几格。`id` 不在这里（它是身份 —— 改了要连带动机型里的引用，
+/// 与机型 id 同一类事，那一刀不在这一片）。
+///
+/// 2026-10-03（作者：「品牌也要像机型一样能编辑 —— 品牌图、显示名，不管客户端
+/// 消不消费都提供」）：品牌从"一个只在机型下拉里出现的字符串"升成一等条目。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrandField {
+    /// 显示名（对着人读的那个：`拓竹 (Bambu Lab)`）
+    Name,
+    /// 品牌图 = **资产 id**（不是文件名）。清空 = 删键 —— 消费侧回落内置字标
+    Logo,
+}
+
+impl BrandField {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Logo => "logo",
+        }
+    }
+
+    /// 哪几格**不许清空**：显示名空了之后品牌卡上只剩一个 id
+    fn required(self) -> bool {
+        matches!(self, Self::Name)
+    }
+}
+
 /// 一台机型。`pub` 字段是只读视图，写回看 [`Machine::to_toml`]
 pub struct Machine {
     pub id: String,
@@ -588,6 +616,10 @@ impl Machine {
 #[derive(Debug)]
 pub struct Catalog {
     brands: Vec<Brand>,
+    /// `brands.toml` 的**文档面**：写品牌那几格时值面与它一起改
+    /// （只改值面的话，下次写回会把旧值写回去，而文件里那段解释 logo 的注释也会丢）。
+    /// 与机型各自持一份 `doc` 是同一条纪律
+    brands_doc: DocumentMut,
     machines: Vec<Machine>,
     /// 机型 ID → 禁区。只有三台机器有
     zones: BTreeMap<String, Vec<Zone>>,
@@ -600,7 +632,7 @@ pub struct Catalog {
 
 impl Catalog {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
-        let brands = load_brands(&root.join("brands.toml"))?;
+        let (brands, brands_doc) = load_brands(&root.join("brands.toml"))?;
         let machines = load_machines(&root.join("machines"))?;
         check_unique_ids(
             &machines
@@ -617,6 +649,7 @@ impl Catalog {
         let plates = load_plates(&root.join("plates"))?;
         Ok(Self {
             brands,
+            brands_doc,
             machines,
             zones,
             plates,
@@ -626,6 +659,128 @@ impl Catalog {
 
     pub fn brands(&self) -> &[Brand] {
         &self.brands
+    }
+
+    /// 按 id 找品牌。**大小写不敏感**（与 `Assets::get` / `Bundles::get` 同一口径）——
+    /// 品牌 id 不是文件名，`Bambu Lab` 这种带空格大小写的写法是既成事实
+    pub fn brand(&self, id: &str) -> Option<&Brand> {
+        let want = id.trim();
+        self.brands.iter().find(|b| b.id.eq_ignore_ascii_case(want))
+    }
+
+    /// 要改它的时候用这个（`Result` 而不是 `Option`，理由同 [`Self::machine_mut`]）
+    pub fn brand_mut(&mut self, id: &str) -> Result<&mut Brand, AppError> {
+        let want = id.trim().to_owned();
+        self.brands
+            .iter_mut()
+            .find(|b| b.id.eq_ignore_ascii_case(&want))
+            .ok_or_else(|| AppError::not_found(format!("没有品牌 {id}")))
+    }
+
+    /// 改品牌的一格。`None` = 删键（同 [`Machine::set_field`]）。
+    ///
+    /// **值面与文档面一起改**：只改值面的话下一次 `write_brands()` 会把旧值写回去；
+    /// 而 `brands.toml` 里那段解释 `logo` 的注释必须原样留住。
+    pub fn set_brand_field(
+        &mut self,
+        id: &str,
+        field: BrandField,
+        value: Option<&str>,
+    ) -> Result<(), AppError> {
+        let val = value.map(str::trim).filter(|s| !s.is_empty());
+        if val.is_none() && field.required() {
+            return Err(AppError::invalid_argument(format!(
+                "{} 不能清空",
+                match field {
+                    BrandField::Name => "显示名",
+                    BrandField::Logo => "品牌图",
+                }
+            )));
+        }
+        // 文档面：按 id 找到那一段 `[[brands]]`（与值面同一条匹配规则）
+        let arr = self
+            .brands_doc
+            .get_mut("brands")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+        let t = arr
+            .iter_mut()
+            .find(|t| {
+                t.get("id")
+                    .and_then(|i| i.as_str())
+                    .is_some_and(|s| s.eq_ignore_ascii_case(id.trim()))
+            })
+            .ok_or_else(|| AppError::corrupted(format!("brands.toml 里找不到品牌 {id}")))?;
+        match val {
+            Some(s) => t[field.key()] = literal_str(s),
+            None => {
+                t.remove(field.key());
+            }
+        }
+        // 值面
+        let owned = val.map(str::to_owned);
+        let b = self.brand_mut(id)?;
+        match field {
+            BrandField::Name => b.name = owned.unwrap_or_default(),
+            BrandField::Logo => b.logo = owned,
+        }
+        Ok(())
+    }
+
+    /// 新建一个品牌 = 往 `brands.toml` 的 `[[brands]]` 里加一段。
+    ///
+    /// 与 [`Self::add_machine`] 的风险不同：这里**不新建文件**（品牌全住一个
+    /// `brands.toml`），所以是"改内存 + 显式写"，不会覆盖任何别的东西。
+    /// id 也不查字符集 —— 它不是文件名（真数据里叫 `Bambu Lab`，带空格与大小写），
+    /// 只查「非空 + 不撞已有品牌（大小写不敏感）」。
+    pub fn add_brand(&mut self, id: &str, name: &str) -> Result<(), AppError> {
+        let id = id.trim();
+        let name = name.trim();
+        if id.is_empty() {
+            return Err(AppError::invalid_argument("品牌 id 不能为空"));
+        }
+        if name.is_empty() {
+            return Err(AppError::invalid_argument("显示名不能为空"));
+        }
+        if self.brand(id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "已经有一个叫 {id} 的品牌"
+            )));
+        }
+        // 文档面：`brands` 段可能整段不存在（一份空文件 / 新仓库）
+        if self
+            .brands_doc
+            .get("brands")
+            .and_then(toml_edit::Item::as_array_of_tables)
+            .is_none()
+        {
+            self.brands_doc["brands"] = toml_edit::ArrayOfTables::new().into();
+        }
+        let arr = self
+            .brands_doc
+            .get_mut("brands")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+        let mut t = toml_edit::Table::new();
+        t["id"] = literal_str(id);
+        t["name"] = literal_str(name);
+        arr.push(t);
+        // 值面
+        self.brands.push(Brand {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            logo: None,
+        });
+        Ok(())
+    }
+
+    /// 把 `brands.toml` 写回（原子写）。**没改过就逐字节等于读进来那份** ——
+    /// 文档面只被动过被改的那几格
+    pub fn write_brands(&self) -> Result<(), AppError> {
+        atomic_write(
+            &self.root.join("brands.toml"),
+            self.brands_doc.to_string().as_bytes(),
+        )
     }
 
     pub fn machines(&self) -> &[Machine] {
@@ -796,12 +951,13 @@ fn parse(path: &Path) -> Result<DocumentMut, AppError> {
     super::parse_text(&text, path)
 }
 
-fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
+/// 读品牌 + **把文档面一起带回来**（值面与文档面两份，见 [`Catalog::brands_doc`]）
+fn load_brands(path: &Path) -> Result<(Vec<Brand>, DocumentMut), AppError> {
     let doc = parse(path)?;
     let Some(arr) = doc.get("brands").and_then(|i| i.as_array_of_tables()) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), doc));
     };
-    Ok(arr
+    let brands = arr
         .iter()
         .filter_map(|t| {
             Some(Brand {
@@ -818,7 +974,8 @@ fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
                     .filter(|s| !s.is_empty()),
             })
         })
-        .collect())
+        .collect();
+    Ok((brands, doc))
 }
 
 /// 新版本 id 的公共校验（`add_version` 与 `copy_version` 同一条，免得两条路分岔）：
@@ -1292,6 +1449,106 @@ mod tests {
         c2.write_machine("A1").expect("写回");
         let after = std::fs::read_to_string(c2.machine("A1").unwrap().file()).unwrap();
         assert_eq!(before, after, "没改任何东西的一次写回改变了文件");
+    }
+
+    /// **品牌的写回是"值面 + 文档面"两份一起走的**（2026-10-03，品牌可编辑）：
+    /// 没改 -> 逐字节一样；改了一格 -> 落盘、重读得到新值，而**注释一行不少**
+    /// （`brands.toml` 里那段解释 logo 的注释是最容易被这类写路径悄悄吃掉的）。
+    #[test]
+    fn editing_a_brand_keeps_the_file_comments() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        let file = tmp.path().join("brands.toml");
+
+        // 没改过的一次写回：逐字节一样
+        let before = std::fs::read_to_string(&file).unwrap();
+        c2.write_brands().expect("写回");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "没改任何东西的一次写回改变了 brands.toml"
+        );
+
+        // 改显示名与品牌图：落盘、重读得到，注释还在
+        let comments_before = before
+            .lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count();
+        assert!(comments_before > 0, "真 brands.toml 本来就带注释");
+        c2.set_brand_field("Bambu Lab", BrandField::Name, Some("拓竹科技"))
+            .expect("改显示名");
+        c2.set_brand_field("bambu lab", BrandField::Logo, Some("bambu-lab-logo"))
+            .expect("改品牌图（id 匹配大小写不敏感）");
+        c2.write_brands().expect("写回");
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            after
+                .lines()
+                .filter(|l| l.trim_start().starts_with('#'))
+                .count(),
+            comments_before,
+            "写回吃掉了注释：\n{after}"
+        );
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        let b = again.brand("Bambu Lab").expect("还在");
+        assert_eq!(b.name, "拓竹科技");
+        assert_eq!(b.logo.as_deref(), Some("bambu-lab-logo"));
+
+        // 清空品牌图 = 删键（不是写空串）；清空显示名当场拒
+        c2.set_brand_field("Bambu Lab", BrandField::Logo, None)
+            .expect("清空品牌图");
+        c2.write_brands().expect("写回");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("logo ="), "清空要删键：\n{text}");
+        assert!(Catalog::load_from(tmp.path())
+            .unwrap()
+            .brand("Bambu Lab")
+            .unwrap()
+            .logo
+            .is_none());
+        let err = c2
+            .set_brand_field("Bambu Lab", BrandField::Name, None)
+            .expect_err("显示名不许清空");
+        assert!(err.message.contains("不能清空"), "实测：{}", err.message);
+    }
+
+    /// 新建品牌：加一段 `[[brands]]`、落盘、重读得到；撞名的（**仅大小写不同也算**）
+    /// 与空 id / 空显示名一律当场拒
+    #[test]
+    fn adding_a_brand_appends_and_refuses_collisions() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        let count_before = c2.brands().len();
+
+        c2.add_brand("  Other Lab  ", "别家 (Other Lab)")
+            .expect("新建");
+        assert_eq!(c2.brands().len(), count_before + 1);
+        assert_eq!(c2.brand("other lab").unwrap().name, "别家 (Other Lab)");
+        c2.write_brands().expect("写回");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert!(again.brand("Other Lab").is_some(), "重读得到");
+        assert_eq!(
+            again
+                .brands()
+                .iter()
+                .filter(|b| b.id.eq_ignore_ascii_case("bambu lab"))
+                .count(),
+            1,
+            "原来那条没被碰"
+        );
+
+        let err = c2.add_brand("other LAB", "撞了").expect_err("撞名");
+        assert!(err.message.contains("已经有一个"), "实测：{}", err.message);
+        let err = c2.add_brand("", "空 id").expect_err("空 id");
+        assert!(err.message.contains("不能为空"), "实测：{}", err.message);
+        let err = c2.add_brand("X", "  ").expect_err("空显示名");
+        assert!(err.message.contains("不能为空"), "实测：{}", err.message);
     }
 
     /// 把机型目录复制到临时目录，**在副本上改**，不碰真数据

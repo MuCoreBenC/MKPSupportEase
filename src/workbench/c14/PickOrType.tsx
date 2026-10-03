@@ -15,18 +15,34 @@ import s from '../c14.module.css'
 /** 用一个不可能撞车的值当「自定义…」的标记 */
 const CUSTOM = '\u0000custom'
 
+/** 选项：纯字符串 = value 与 label 相同；给对象则分开（品牌的 value 是 id、label 是显示名） */
+type Option = string | { value: string; label: string; note?: string }
+
 interface Props {
   label: string
-  options: string[]
+  options: Option[]
   value: string
   /** 值为空时下拉上显示什么（如「未填」） */
   emptyLabel?: string
+  /**
+   * 允不允许「自定义…」（默认允许）。**品牌那一格关掉它**：品牌已经是一等条目了，
+   * 手打一个 id 只会打出一个没有定义的悬空引用 —— 新增品牌走品牌卡上的「新增品牌」
+   */
+  allowCustom?: boolean
   onChange: (next: string) => void
 }
 
-export default function PickOrType({ label, options, value, emptyLabel, onChange }: Props) {
+export default function PickOrType({
+  label,
+  options,
+  value,
+  emptyLabel,
+  allowCustom = true,
+  onChange,
+}: Props) {
   /* 当前值不在清单里（刚手打进去的），那就直接停在输入模式，别让人以为它被改掉了 */
   const [typing, setTyping] = useState(false)
+  const rich = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
 
   if (typing) {
     return (
@@ -52,8 +68,8 @@ export default function PickOrType({ label, options, value, emptyLabel, onChange
       value={value}
       options={[
         ...(value ? [] : [{ value: '', label: emptyLabel ?? '未填' }]),
-        ...options.map((o) => ({ value: o, label: o })),
-        { value: CUSTOM, label: '自定义…', note: '打一个新的' },
+        ...rich.map((o) => ({ value: o.value, label: o.label, note: o.note })),
+        ...(allowCustom ? [{ value: CUSTOM, label: '自定义…', note: '打一个新的' }] : []),
       ]}
       onChange={(next) => {
         if (next === CUSTOM) {

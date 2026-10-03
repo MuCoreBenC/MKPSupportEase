@@ -129,6 +129,15 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   const [evTag, setEvTag] = useState('')
   const [evDesc, setEvDesc] = useState('')
 
+  /* —— 品牌（2026-10-03，作者：「在这一页多加一个品牌吧，右侧也是一样可以编辑，
+        品牌图、显示名，不管客户端消不消费都提供」）——
+     左列选中的是品牌还是机型：`brandId` 非空 = 在看那个品牌。 */
+  const [brandId, setBrandId] = useState<string | null>(null)
+  const [addBrandOpen, setAddBrandOpen] = useState(false)
+  const [nbId, setNbId] = useState('')
+  const [nbName, setNbName] = useState('')
+  const [logoOpen, setLogoOpen] = useState(false)
+
   /* —— 取数 —— */
   const loadAll = useCallback(() => {
     void (async () => {
@@ -190,6 +199,15 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   )
 
   const q = filter.trim().toLowerCase()
+  /** 品牌行（同一个筛选框管两边：品牌按 id / 显示名匹） */
+  const listedBrands = useMemo(() => {
+    const all = list?.brands ?? []
+    return q
+      ? all.filter(
+          (b) => b.id.toLowerCase().includes(q) || b.name.toLowerCase().includes(q),
+        )
+      : all
+  }, [list, q])
   const listed = useMemo(() => {
     const all = list?.machines ?? []
     return q
@@ -211,6 +229,22 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
     if (!m) return
     try {
       setList(await wb.setMachineField(m.id, field, value))
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /**
+   * 左列是不是在看一个品牌（2026-10-03：品牌进了这一页）。
+   * 品牌卡与机型卡共用一个右栏 —— 选中品牌时右侧换成品牌卡
+   */
+  const curBrand = list?.brands.find((b) => b.id === brandId) ?? undefined
+
+  /** 改品牌的一格（显示名 / 品牌图）。**即时落盘**，回一份新清单 */
+  const saveBrand = async (field: 'name' | 'logo', value: string | null) => {
+    if (!curBrand) return
+    try {
+      setList(await wb.setBrandField(curBrand.id, field, value))
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -372,7 +406,17 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   const visibleCount = registry.params.filter(
     (p) => p.machineFilter.length === 0 || p.machineFilter.includes(m.id),
   ).length
-  const brandOptions = list.brands.map((b) => b.name)
+  /**
+   * 品牌选项：**值写 id、标签显示显示名**（数据里 `machine.brand` 存的是品牌 id ——
+   * 2026-10-03 之前这里给的是 `b.name`，选一次就会把显示名写进机型文件，是条静默的脏写）。
+   */
+  const brandOptions = list.brands.map((b) => ({
+    value: b.id,
+    label: b.name || b.id,
+    note: b.name && b.name !== b.id ? b.id : undefined,
+  }))
+  /** 这一格能对上一条品牌吗（对得上才给「看品牌」那颗按钮） */
+  const brandOf = (id: string) => list.brands.find((b) => b.id.toLowerCase() === id.trim().toLowerCase())
   const imageOptions = assets.assets.filter((a) => a.kind === 'image')
   const iconOptions = assets.assets.filter((a) => a.kind === 'icon')
   const assetById = (id: string | null) =>
@@ -555,8 +599,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
           <input
             className={s.filter}
             value={filter}
-            placeholder="筛机型（id / 显示名 / 品牌）"
-            aria-label="筛选机型"
+            placeholder="筛品牌 / 机型（id / 显示名）"
+            aria-label="筛选品牌与机型"
             onChange={(e) => setFilter(e.target.value)}
           />
           <button
@@ -565,7 +609,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             title="新增一台机型 —— 建一个 presets/machines/ 下的新文件，三格都必填"
             onClick={() => {
               setAddId('')
-              setAddBrand(list.brands[0]?.name ?? '')
+              // 机型的 brand 字段写着品牌的 **id**（不是显示名）—— 默认给第一家
+              setAddBrand(list.brands[0]?.id ?? '')
               setAddDisplay('')
               setAddOpen(true)
             }}
@@ -573,6 +618,48 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             新增机型
           </button>
         </div>
+
+        {/*
+         * 品牌（2026-10-03，作者）：「在这一页多加一个品牌吧，右侧也是一样可以编辑，
+         * 品牌图、显示名，不管客户端消不消费都提供」。品牌与机型是两类条目，
+         * 用一个列表区分两条小标题分开 —— 点品牌看品牌卡，点机型看机型卡。
+         */}
+        <div className={s.listHead}>
+          品牌
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnSm}`}
+            title="新建一个品牌 —— 往 presets/brands.toml 的 [[brands]] 里加一段（品牌图后配）"
+            onClick={() => {
+              setNbId('')
+              setNbName('')
+              setAddBrandOpen(true)
+            }}
+          >
+            新增品牌
+          </button>
+        </div>
+        <div className={s.list}>
+          {listedBrands.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              id={`t-brand-${b.id}`}
+              className={`${s.row} ${b.id === brandId ? s.rowOn : ''}`}
+              onClick={() => setBrandId(b.id)}
+            >
+              <span className={s.rowName}>{b.name || b.id}</span>
+              <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
+              <span className={s.rowMeta}>{b.machines.length} 台机型</span>
+              {!b.logo && <span className={`${s.tag} ${s.tagGhost}`}>没配图</span>}
+            </button>
+          ))}
+          {!listedBrands.length && (
+            <div className={s.sum}>没有匹配「{filter}」的品牌</div>
+          )}
+        </div>
+
+        <div className={s.listHead}>机型</div>
         <div className={s.list}>
           {listed.map((x) => {
             const t = todoOf(x)
@@ -580,10 +667,13 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
               <button
                 key={x.id}
                 type="button"
-                className={`${s.row} ${x.id === m.id ? s.rowOn : ''}`}
+                /* 探针与跨页定位的锚点（与 `t-brand-*` / `t-bundle-*` / `t-asset-*` 同一套命名） */
+                id={`t-machine-${x.id}`}
+                className={`${s.row} ${brandId === null && x.id === m.id ? s.rowOn : ''}`}
                 onClick={() => {
                   setMachineId(x.id)
                   setPickedVid(null)
+                  setBrandId(null)
                 }}
               >
                 <span className={s.rowName}>{x.display || x.id}</span>
@@ -599,15 +689,15 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
               </button>
             )
           })}
+          {!listed.length && (
+            <div className={s.sum}>
+              没有匹配「{filter}」的机型{' '}
+              <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setFilter('')}>
+                清空筛选
+              </button>
+            </div>
+          )}
         </div>
-        {!listed.length && (
-          <div className={s.sum}>
-            没有匹配「{filter}」的机型{' '}
-            <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setFilter('')}>
-              清空筛选
-            </button>
-          </div>
-        )}
         <div className={s.sum}>
           {listed.length === list.machines.length
             ? `${list.machines.length} 台机型 · ${list.machines.reduce((n, x) => n + x.versions.length, 0)} 个版本`
@@ -619,8 +709,87 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
         </div>
       </div>
 
-      {/* —— 右侧：四张卡 —— */}
+      {/* —— 右侧：品牌卡 或 机型的四张卡 —— */}
       <div className={s.detail}>
+        {curBrand !== undefined ? (
+          /*
+           * 品牌卡（2026-10-03）。字段是作者逐条点的：**显示名 / 品牌图 / 这个品牌的机型**。
+           * 机型的「品牌」那一格写的是品牌 id，反查由后端算（前端只摆结果）。
+           */
+          <div className={s.card}>
+            <div className={s.cardHead}>
+              <h2>{curBrand.name || curBrand.id}</h2>
+              <span className={s.cardNote}>{curBrand.id}</span>
+              <span className={s.cardNote}>presets/brands.toml</span>
+            </div>
+            <div className={s.cardBody}>
+              <div className={s.kv}>
+                <span className={s.kvKey}>显示名</span>
+                <span className={s.kvVal}>
+                  <input
+                    className={s.inp}
+                    defaultValue={curBrand.name}
+                    key={`bname-${curBrand.id}-${curBrand.name}`}
+                    aria-label="品牌显示名"
+                    onBlur={(e) => {
+                      const next = e.target.value.trim()
+                      if (next !== curBrand.name) void saveBrand('name', next)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                    }}
+                  />
+                  {!curBrand.name.trim() && <TodoValue />}
+                </span>
+
+                <span className={s.kvKey}>内部名</span>
+                <span className={`${s.kvVal} ${s.mono}`}>{curBrand.id}</span>
+
+                <span className={s.kvKey}>品牌图</span>
+                <span className={s.kvVal}>
+                  <AssetField
+                    label="品牌图"
+                    asset={assets.assets.find((a) => a.id === curBrand.logo) ?? null}
+                    onOpen={() => setLogoOpen(true)}
+                  />
+                  {/* 说明里别写 markdown 的星号 —— JSX 不认识它，会原样落到界面上 */}
+                  <span className={s.cardNote}>
+                    留空 = 客户端回落内置字标（这一格存的是资产 id，换图去资产库）
+                  </span>
+                </span>
+              </div>
+
+              <div className={s.group}>
+                <div className={s.groupHead}>这个品牌下的机型（{curBrand.machines.length}）</div>
+                <div className={s.chips}>
+                  {curBrand.machines.length ? (
+                    curBrand.machines.map((mid) => (
+                      <button
+                        key={mid}
+                        type="button"
+                        className={s.chip}
+                        title="去机型卡看它"
+                        onClick={() => {
+                          setMachineId(mid)
+                          setBrandId(null)
+                        }}
+                      >
+                        {mid}
+                      </button>
+                    ))
+                  ) : (
+                    <span className={s.kvDim}>没有机型归这个品牌</span>
+                  )}
+                </div>
+                <p className={s.note}>
+                  机型的「品牌」那一格写着这个品牌的 id —— 反查在后端算，这里只摆结果。
+                  改归属去机型的身份卡。
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* 身份 */}
         <div className={s.card}>
           <div className={s.cardHead}>
@@ -666,6 +835,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
                   options={brandOptions}
                   value={m.brand}
                   emptyLabel={`选一个品牌…（空着会标「${fieldState.needsInput}」）`}
+                  /* 品牌是一等条目了 —— 手打 id 只会打出悬空引用；新增品牌走左列那颗按钮 */
+                  allowCustom={false}
                   onChange={(next) => {
                     if (!next.trim()) {
                       toasts.push('品牌不许清空 —— 它是身份的一部分')
@@ -674,6 +845,16 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
                     void saveMachine('brand', next)
                   }}
                 />
+                {brandOf(m.brand) !== undefined && (
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnSm}`}
+                    title="去品牌卡看它（显示名与品牌图在那一张卡上改）"
+                    onClick={() => setBrandId(brandOf(m.brand)!.id)}
+                  >
+                    看品牌
+                  </button>
+                )}
                 {!m.brand.trim() && <TodoValue />}
               </span>
 
@@ -810,7 +991,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
               </p>
             )}
             <p className={s.note}>
-              新增与删除**立刻写入文件**（没有草稿也没有撤销，删之前会先问孤儿引用）；
+              新增与删除立刻写入文件（没有草稿也没有撤销，删之前会先问孤儿引用）；
               复制走两条命令：先版本定义，勾了才拷参数正文。
             </p>
           </div>
@@ -1134,6 +1315,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             </div>
           </div>
         )}
+        </>
+        )}
       </div>
 
       <ContextMenu at={menu.at} entries={entries} onClose={menu.close} />
@@ -1201,6 +1384,93 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             </p>
           )}
         </div>
+      </ModalC14>
+
+      {/* —— 品牌图（资产 id；与机型图 / 图标同一个选择器） —— */}
+      {curBrand !== undefined && (
+        <AssetPicker
+          open={logoOpen}
+          title={`选择品牌图 · ${curBrand.id}`}
+          options={imageOptions}
+          value={curBrand.logo}
+          onCancel={() => setLogoOpen(false)}
+          onPick={(next) => {
+            void saveBrand('logo', next)
+            toasts.push(next ? `品牌图指到资产 ${next}` : '已清空品牌图（客户端回落内置字标）')
+            setLogoOpen(false)
+          }}
+        />
+      )}
+
+      {/* —— 新增品牌（2026-10-03）：id + 显示名；品牌图后配 —— */}
+      <ModalC14
+        open={addBrandOpen}
+        title="新增品牌"
+        subtitle="照 wb_add_brand(id, name) —— 往 presets/brands.toml 的 [[brands]] 里加一段并立刻写入"
+        size="sm"
+        closeOnScrim={false}
+        onClose={() => setAddBrandOpen(false)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setAddBrandOpen(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={nbId.trim() === '' || nbName.trim() === ''}
+              title={
+                nbId.trim() === ''
+                  ? 'id 不能空'
+                  : nbName.trim() === ''
+                    ? '显示名不能空'
+                    : undefined
+              }
+              onClick={() => {
+                void (async () => {
+                  try {
+                    setList(await wb.addBrand(nbId.trim(), nbName.trim()))
+                    toasts.push(`已新增品牌 ${nbId.trim()} —— presets/brands.toml 已写入`)
+                    setAddBrandOpen(false)
+                    setBrandId(nbId.trim())
+                    onBookRefresh()
+                  } catch (e) {
+                    failToast(e)
+                  }
+                })()
+              }}
+            >
+              新增品牌
+            </button>
+          </>
+        }
+      >
+        <label className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>品牌 id</span>
+          <input
+            className={s.inp}
+            value={nbId}
+            placeholder="Bambu Lab"
+            aria-label="品牌 id"
+            onChange={(e) => setNbId(e.target.value)}
+          />
+          <span className={s.inpHint}>
+            id 是机型「品牌」那一格引用的东西（真数据里叫 `Bambu Lab`，带空格与大小写都可以）
+          </span>
+          <span className={s.kvKey}>显示名</span>
+          <input
+            className={s.inp}
+            value={nbName}
+            placeholder="给人看的名字，例如 拓竹 (Bambu Lab)"
+            aria-label="品牌显示名"
+            onChange={(e) => setNbName(e.target.value)}
+          />
+        </label>
+        <p className={s.note}>
+          撞名（含只差大小写）由后端当场拒。新建的品牌还没有品牌图 ——
+          建完在右边那张卡上配（留空 = 客户端回落内置字标）。
+        </p>
       </ModalC14>
 
       {/* —— 素材选择器：机型图 / 图标 / 版本图（都是资产 id，只从库里挑） —— */}
@@ -1303,6 +1573,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
             options={brandOptions}
             value={addBrand}
             emptyLabel="选一个品牌…"
+            allowCustom={false}
             onChange={setAddBrand}
           />
           <span className={s.kvKey}>
@@ -1322,7 +1593,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
           真后端逐格校验，空着建不出来。新建的机型还没有尺寸（占位机型），
           没版本、不参与交付 —— 检查与生成页会给一条说明而不是报错。
           <br />
-          同名文件已存在时**不会被覆盖**，后端会直接报错。
+          同名文件已存在时不会被覆盖，后端会直接报错。
         </p>
       </ModalC14>
 

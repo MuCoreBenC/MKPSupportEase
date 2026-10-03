@@ -300,6 +300,25 @@ const pending = new Map<string, unknown>()
 
 /* ---------- 套餐 / 资产 / 回退夹具（P4 三页的形状镜像；判定照后端文档现算） ---------- */
 
+/**
+ * 品牌夹具（2026-10-03：品牌升成一等条目 —— 机型与版本页可编辑显示名与品牌图）。
+ * 与真数据同形：机型的 `brand` 字段写着品牌的 **id**（`Bambu Lab` 这个字符串既是 id
+ * 也是真数据里那份 id），`logo` 是**资产 id**（不是文件名）。
+ */
+const BRANDS: { id: string; name: string; logo: string | null }[] = [
+  { id: 'Bambu Lab', name: '拓竹 (Bambu Lab)', logo: 'bambu-lab-logo' },
+]
+
+/** 机型清单（含品牌反查 —— 与真机同一条口径，前端不复算关系） */
+const machineListOf = () => ({
+  brands: BRANDS.map((b) => ({
+    ...b,
+    machines: MACHINE_VIEWS.filter((m) => m.brand.toLowerCase() === b.id.toLowerCase()).map((m) => m.id),
+  })),
+  machines: MACHINE_VIEWS,
+  root: 'C:\\dev\\MKPSupportEase\\presets',
+})
+
 /** 机型夹具带上一版一套的指向（MachinesPage 也要用） */
 const MACHINE_VIEWS = [
   {
@@ -489,10 +508,11 @@ let mockBootstrap: string | null = null
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
   return {
+    // 与真机同一个形状：`<仓库>/presets`（状态条上只摆最后两段，见 App.shortRoot）
     roots: {
-      workbench: 'C:\\dev\\workbench',
-      presets: 'C:\\dev\\presets',
-      dist: 'C:\\dev\\presets\\dist',
+      workbench: 'C:\\dev\\MKPSupportEase\\workbench',
+      presets: 'C:\\dev\\MKPSupportEase\\presets',
+      dist: 'C:\\dev\\MKPSupportEase\\presets\\dist',
     },
     problem: null,
     detail: null,
@@ -964,7 +984,34 @@ export function installMockBackend() {
           emptyHint: '都过了 —— 没有阻断、没有待办、没有提示',
         })
       case 'wb_machines':
-        return Promise.resolve({ brands: [], machines: MACHINE_VIEWS, root: 'C:\\dev\\workbench' })
+        return Promise.resolve(machineListOf())
+      case 'wb_set_brand_field': {
+        const brandId = args?.brandId as string
+        const field = args?.field as 'name' | 'logo'
+        const value = (args?.value as string | null) ?? null
+        const b = BRANDS.find((x) => x.id.toLowerCase() === brandId.trim().toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `没有品牌 ${brandId}`, traceId: 'mock' })
+        if (field === 'name') {
+          if (!value || !value.trim()) {
+            return Promise.reject({ code: 'INVALID', message: '显示名 不能清空', traceId: 'mock' })
+          }
+          b.name = value.trim()
+        } else {
+          b.logo = value && value.trim() !== '' ? value.trim() : null
+        }
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_add_brand': {
+        const id = (args?.id as string).trim()
+        const name = (args?.name as string).trim()
+        if (id === '') return Promise.reject({ code: 'INVALID', message: '品牌 id 不能为空', traceId: 'mock' })
+        if (name === '') return Promise.reject({ code: 'INVALID', message: '显示名不能为空', traceId: 'mock' })
+        if (BRANDS.some((x) => x.id.toLowerCase() === id.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `已经有一个叫 ${id} 的品牌`, traceId: 'mock' })
+        }
+        BRANDS.push({ id, name, logo: null })
+        return Promise.resolve(machineListOf())
+      }
       case 'wb_bundles':
         return Promise.resolve(bundleListOf((args?.query as string | null) ?? null))
       case 'wb_set_bundle_refs': {

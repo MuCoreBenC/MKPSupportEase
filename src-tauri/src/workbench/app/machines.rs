@@ -21,7 +21,7 @@ use serde::Serialize;
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::load_presets;
-use crate::workbench::presets::{MachineField, Presets, VersionField};
+use crate::workbench::presets::{BrandField, MachineField, Presets, VersionField};
 
 use super::with_ctx_mut;
 
@@ -29,8 +29,12 @@ use super::with_ctx_mut;
 #[serde(rename_all = "camelCase")]
 pub struct BrandView {
     pub id: String,
+    /// 显示名（对着人读的那个：`拓竹 (Bambu Lab)`）。空 = 没填过，界面回落显示 id
     pub name: String,
+    /// 品牌图 = **资产 id**（不是文件名）。`None` = 没配 —— 消费侧回落内置字标
     pub logo: Option<String>,
+    /// 这个品牌下的机型 id（反查）。**归属不是引用**：机型 `brand` 字段写着它
+    pub machines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +273,44 @@ pub fn wb_set_machine_field(
     })
 }
 
+/// 改品牌的一格（`name` / `logo`）。**即时落盘**（同机型那一套：没有草稿、没有撤销）。
+///
+/// 品牌图是**资产 id** —— 与机型的图 / 图标同一条口径（挑选走资产选择器，不手填路径）；
+/// 清空 = 删键（消费侧回落内置字标，那是兜底不是常态）。
+///
+/// 2026-10-03（作者：「品牌也要像机型一样能编辑，不管客户端消不消费都提供」）。
+#[tauri::command]
+pub fn wb_set_brand_field(
+    brand_id: String,
+    field: BrandField,
+    value: Option<String>,
+) -> Result<MachineList, AppError> {
+    traced("wb_set_brand_field", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets
+                .catalog
+                .set_brand_field(&brand_id, field, value.as_deref())?;
+            ctx.presets.catalog.write_brands()?;
+            Ok(list_of(&load_presets()?))
+        })
+    })
+}
+
+/// 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，回一份新的清单。
+///
+/// 与「新增机型」不同：品牌全住一个 `brands.toml`，这里是往 `[[brands]]` 里加一段 ——
+/// 不新建文件、不覆盖任何东西（那个「create_new 占路径」的风险在这里不存在）。
+#[tauri::command]
+pub fn wb_add_brand(id: String, name: String) -> Result<MachineList, AppError> {
+    traced("wb_add_brand", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.catalog.add_brand(&id, &name)?;
+            ctx.presets.catalog.write_brands()?;
+            Ok(list_of(&load_presets()?))
+        })
+    })
+}
+
 fn list_of(p: &Presets) -> MachineList {
     MachineList {
         brands: p
@@ -279,6 +321,14 @@ fn list_of(p: &Presets) -> MachineList {
                 id: b.id.clone(),
                 name: b.name.clone(),
                 logo: b.logo.clone(),
+                // 「哪些机型是这个品牌的」—— 反查在后端一处算（前端不复判任何一条关系）
+                machines: p
+                    .catalog
+                    .machines()
+                    .iter()
+                    .filter(|m| m.brand.eq_ignore_ascii_case(&b.id))
+                    .map(|m| m.id.clone())
+                    .collect(),
             })
             .collect(),
         machines: p
@@ -351,5 +401,26 @@ mod tests {
         assert_eq!(p.catalog.zones("A1").map_or(0, <[_]>::len), 0);
         // P1S 有禁区
         assert!(p.catalog.zones("P1S").map_or(0, <[_]>::len) > 0);
+
+        // 品牌：真数据里只有一家，五台机型全归它（「哪些机型是这个品牌的」在后端算）
+        let list = list_of(&p);
+        let b = list
+            .brands
+            .iter()
+            .find(|b| b.id == "Bambu Lab")
+            .expect("Bambu Lab 在清单里");
+        assert_eq!(b.name, "拓竹 (Bambu Lab)", "显示名是给人读的那个");
+        assert_eq!(
+            b.machines.len(),
+            5,
+            "五台机型都归这个品牌 —— 条数变了就说清为什么：{:?}",
+            b.machines
+        );
+        assert!(b.machines.contains(&"A1".to_owned()));
+        assert_eq!(
+            b.logo.as_deref(),
+            Some("bambu-lab-logo"),
+            "品牌图 = 资产 id"
+        );
     }
 }

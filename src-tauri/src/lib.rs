@@ -245,6 +245,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「机型与版本」那一页：读写 presets/machines/*.toml。
         // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
         app::machines::wb_machines,
+        // 品牌（2026-10-03 作者：「品牌也要像机型一样能编辑」）：显示名 + 品牌图，
+        // 即时落盘（同机型那一套）；品牌图是资产 id，清空回落内置字标
+        app::machines::wb_set_brand_field,
+        app::machines::wb_add_brand,
         // 「资产库」：读 `presets/assets.toml`（b05 Task 8），P4 起带三轴派生与筛选；
         // 删除走数据层的反查守卫（有人引用整次拒绝）
         app::assets::wb_assets,

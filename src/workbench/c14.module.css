@@ -479,8 +479,16 @@
   background: var(--wb-ok);
 }
 
+/*
+ * 文本块必须**能缩 + 会截**（2026-10-03，作者截图：「碰到一起了」）。
+ *
+ * 病根：`/Users/…/presets` 整条路径是一个不可断的"词"（CSS 不在 `/` 处断行），
+ * flex 项默认 `min-width: auto` 就不肯缩到它下面 —— 于是这一块被撑出导航栏、
+ * 压在内容区上。`min-width: 0` + `overflow: hidden` + 下面那条省略号，三件一起才治住。
+ */
 .upText {
   min-width: 0;
+  overflow: hidden;
 }
 
 .upLine {
@@ -489,7 +497,10 @@
 
 .upNote {
   display: block;
+  overflow: hidden;
   color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .upstreamOff {
@@ -919,6 +930,15 @@
 .chipMain {
   font-size: var(--fs-label);
   color: var(--text-2);
+}
+
+/*
+ * chip 里「它现在指着谁」那一截（2026-10-03）：与 uid 之间要留出间距 ——
+ * 贴在一起时 `X1C/LITEA1_MINI_STANDARD` 读起来是一串（作者截图点名：「碰到一起了」）
+ */
+.chipNow {
+  margin-left: 6px;
+  color: var(--text-3);
 }
 
 .chipMain:hover {
@@ -1459,6 +1479,25 @@
   border-radius: var(--r-md);
 }
 
+/*
+ * 左列里的分段小标题（2026-10-03）：一个名单里有两类条目（品牌 / 机型）时，
+ * 用一条小标题分开；标题右边的按钮（新增品牌）自己靠右
+ */
+.listHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 8px 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.listHead .btn {
+  margin-left: auto;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -1471,6 +1510,30 @@
 
 .row:hover {
   background: var(--surface-sunken);
+}
+
+/*
+ * 两行版的行（2026-10-03）：名字一行、附注一行。
+ * 套餐行上有四个事实（显示名 / id / 装了几个文件 / 几个版本用它）——
+ * 挤一行时显示名会被省略成「官…」，于是拆两行，谁都不抢谁的位置。
+ */
+.rowStack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.rowTop,
+.rowBottom {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.rowStack .rowName {
+  flex: 1;
+  min-width: 0;
 }
 
 .rowOn {
@@ -1653,8 +1716,16 @@
 
 .addRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
   margin-top: 12px;
+}
+
+/* 行里那段说明文字要能自己占一行并折行 —— 否则它会把整行撑宽、被卡片右侧裁掉 */
+.addRow .cardNote {
+  flex: 1 1 16em;
+  min-width: 0;
 }
 
 .addRow .sel,
@@ -4323,6 +4394,24 @@
   color: var(--accent-deep);
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+/*
+ * 「选择版本」弹窗里那棵树（2026-10-03，作者：「我希望的是像参数台这样的显示 …
+ * 像树状显示一样」）：机型一行组头、版本缩进在下面，行里不再垫背景色。
+ * 行/勾/组头都是参数台左树那几颗类（`.pVrow` / `.pVmark` / `.pMg`），这里只管滚动。
+ */
+.pickTree {
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+/* 树行右侧「它现在指着谁」那一句：灰字、贴右，不要框（框留给左树里"正在改的那一版"） */
+.pickNow {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 /* 选择套餐弹窗里的候选清单 —— 装了几个文件是挑套餐时真正要看的东西 */

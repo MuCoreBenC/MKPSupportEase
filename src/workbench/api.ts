@@ -712,11 +712,15 @@ export interface Words {
 
 /* ---------- 机型与版本（`app::machines`） ---------- */
 
-/** `machines::BrandView` */
+/** `machines::BrandView` —— 品牌从"机型下拉里的一个字符串"升成一等条目（2026-10-03） */
 export interface BrandView {
   id: string
+  /** 显示名（`拓竹 (Bambu Lab)`）。空 = 没填过，界面回落显示 id */
   name: string
+  /** 品牌图 = **资产 id**（不是文件名）。`null` = 没配，消费侧回落内置字标 */
   logo: string | null
+  /** **这个品牌下的机型**（反查，后端算）。机型 `brand` 字段写着它的 id */
+  machines: string[]
 }
 
 /** `machines::VersionView` —— 版本卡上那几格 */
@@ -1058,6 +1062,16 @@ export const wb = {
   /** 改机型自己的一格。`display` / `brand` 不许清空 */
   setMachineField: (machineId: string, field: MachineField, value: string | null) =>
     invoke<MachineList>('wb_set_machine_field', { machineId, field, value }),
+
+  /**
+   * 改品牌的一格（`name` / `logo`）。**即时落盘**（同机型那一套：没有草稿、没有撤销）。
+   * `logo = null` 是**清空**（删键，消费侧回落内置字标）；`name` 不许清空
+   */
+  setBrandField: (brandId: string, field: 'name' | 'logo', value: string | null) =>
+    invoke<MachineList>('wb_set_brand_field', { brandId, field, value }),
+
+  /** 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，撞名（含仅大小写不同）当场拒 */
+  addBrand: (id: string, name: string) => invoke<MachineList>('wb_add_brand', { id, name }),
 
   /**
    * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**

@@ -58,8 +58,8 @@ use crate::error::AppError;
 pub use assets::{Asset, AssetKind, Assets};
 pub use bundles::{Bundle, Bundles};
 pub use catalog::{
-    Brand, Catalog, Dimensions, Machine, MachineField, MachineVersion, Plate, PlateFrame,
-    VersionField, Zone,
+    Brand, BrandField, Catalog, Dimensions, Machine, MachineField, MachineVersion, Plate,
+    PlateFrame, VersionField, Zone,
 };
 pub use registry::{
     LayoutTab, ParamDef, ParamRegistry, SectionMeta, ShowOp, ShowWhen, TabMeta, UiComponent,
