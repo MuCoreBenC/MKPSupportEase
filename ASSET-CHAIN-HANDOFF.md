@@ -239,5 +239,8 @@ node scripts/probes/workbench-build.mjs "http://localhost:4174/workbench.html?mo
 3. **BBS 页预设清单在真机没有端点**（只来自 serve 期 `/api/bbs/presets`）—— 独立一刀。
 4. `presets/dist/` 那一版 catalog 的 definition 要等下一次工作台「生成 / 发布」才带上新字段。
 5. 工作台浏览器桩没实现 `setVersionField` / `setMachineField`（既有缺口，演示里改不动字段）。
-6. 工作台**没有品牌图那一格**（第三刀只做了客户端链路 + 数据；工作台侧品牌图暂不可编辑）。
-7. 分支**未推送**、**未开 PR**。
+6. 分支**未推送**、**未开 PR**。
+
+> **追记（2026-10-03，另一条分支 `feat/wb-brands-readability`）**：上面第 6 条已落地 ——
+> 品牌图那一格连同整个「品牌」条目进了机型与版本页（`wb_set_brand_field` / `wb_add_brand`）；
+> 那条分支从本分支上切出，两串可以分开 PR。
