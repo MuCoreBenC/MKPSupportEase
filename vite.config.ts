@@ -1,24 +1,19 @@
-import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { bbsFs } from './tools/dev-server/bbsFs.mjs'
 import { mkpAssets } from './tools/assets/plugin.mjs'
 
 /*
- * 客户端随包资源的别名：`@client-assets/<...>` → `<repo>/client-assets/<...>`。
+ * 随包资产的路由：**没有别名**（2026-10-03 第二刀撤掉了 `@client-assets`）。
  *
- * 那个目录是**生成物**（`tools/assets/sync.mjs` 从 `presets/assets.toml` 的
- * `delivery = 'bundled'` 条目对账产出的"客户端随包资产交付结果"），不入库 —— 所以
- * **类型侧不能依赖它存在**：`*.webp` 的声明来自 `vite/client`（`src/vite-env.d.ts`），
- * tsc 不会去磁盘上找那个文件，`tsc -b` 在没同步过的机器上照样过。
+ * 客户端不再 import 交付根 —— 它按台账（`catalog.assets[]` 的 id → `path`）拼
+ * `/assets/<path>` 去取，装配步骤把同一棵树铺进 `dist/assets/`（`tools/assets/plugin.mjs`）。
+ * 别名是"把生成物当模块引"的那条老路，随显式 import 表一起退场：
+ * 留着它只会让下一个人以为客户端还认识具体文件。
  *
- * 谁在用：`src/app/home/heroArt.ts` 的四条整机图 import（第二刀改成台账驱动后，
- * 这条别名还会留着 —— 那时由装配步骤把同一棵树铺进 dist）。
- *
- * `@` 前缀与 `@tauri-apps/*` 不冲突（vite 的别名解析比 node_modules 优先，
- * 且这里只匹配 `@client-assets` 这一个前缀）。
+ * 这一条也顺带解掉了"生成目录不存在时 `tsc -b` 会不会红"那类问题：
+ * 客户端源码不再指向任何生成物。
  */
-const clientAssetsDir = fileURLToPath(new URL('./client-assets', import.meta.url))
 
 /*
  * 三个插件：react()、bbsFs() 与随包资产流水线 mkpAssets()。
@@ -71,10 +66,6 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), bbsFs(), mkpAssets({ workbench: withWorkbench })],
-
-    resolve: {
-      alias: { '@client-assets': clientAssetsDir },
-    },
 
     build: {
       rollupOptions: { input },

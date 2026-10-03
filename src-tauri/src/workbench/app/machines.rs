@@ -59,6 +59,8 @@ pub struct MachineView {
     pub default_bundle: Option<String>,
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
+    /// 第二个图位（快拆版外观图）。今天只有 A1 mini 有 —— 见 `presetdata::Machine::image_variant`
+    pub image_variant: Option<String>,
     pub icon: Option<String>,
     /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
@@ -288,6 +290,7 @@ fn list_of(p: &Presets) -> MachineList {
                 default_bundle: m.default_bundle.clone(),
                 external_aliases: m.external_aliases.clone(),
                 image: m.image.clone(),
+                image_variant: m.image_variant.clone(),
                 icon: m.icon.clone(),
                 has_dimensions: m.has_dimensions,
                 zone_count: p.catalog.zones(&m.id).map_or(0, <[_]>::len),

@@ -415,7 +415,11 @@ impl Presets {
     ///   现在由 `wb_assets` 的 `present: false` 说出来，校验层接手后升成一条 warning。
     fn check_asset_refs(&self) -> Result<(), AppError> {
         for m in self.catalog.machines() {
-            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+            for (field, value) in [
+                ("image", &m.image),
+                ("imageVariant", &m.image_variant),
+                ("icon", &m.icon),
+            ] {
                 let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
                     continue;
                 };
@@ -1492,13 +1496,17 @@ mod tests {
             return;
         };
         let Some(asset_root) = repo_assets_root() else {
-            eprintln!("没定位到 <repo>/public/assets，这条检查未执行（不是通过）");
+            eprintln!("没定位到 <repo>/presets/assets，这条检查未执行（不是通过）");
             return;
         };
         p.set_asset_root(&asset_root);
         let mut checked = 0usize;
         for m in p.catalog.machines() {
-            for (field, value) in [("image", &m.image), ("icon", &m.icon)] {
+            for (field, value) in [
+                ("image", &m.image),
+                ("imageVariant", &m.image_variant),
+                ("icon", &m.icon),
+            ] {
                 let Some(id) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
                     continue;
                 };

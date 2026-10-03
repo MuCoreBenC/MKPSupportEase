@@ -58,7 +58,9 @@ function build(): Machine[] {
         // 上游六台机型的 name 全是空串，所以 display 才是唯一可用的显示名
         display: model.display || model.id,
         brand: brandName.get(brandId) ?? brandId,
+        // 资产 id（不是文件名）：界面按 id 去 `RuntimeCatalog.assets[]` 查 path
         image: model.image,
+        imageVariant: model.imageVariant ?? '',
         icon: model.icon,
         aliases: model.externalAliases,
         // 板引用与真数据同源（演示常量，见 plates.ts）

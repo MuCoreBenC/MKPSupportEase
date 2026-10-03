@@ -768,6 +768,47 @@ export const mockApi: MkpApi = {
           size: 2400,
         },
       ],
+      /*
+       * 资产登记（真机那份来自 `presets/assets.toml`）。**图片这一档用真 id + 真 path**：
+       * 首页大图按 id 查 path 再拼 `/assets/<path>`（2026-10-03 第二刀），
+       * 而那几个文件在构建期真被装配进 dist（`tools/assets/plugin.mjs`）——
+       * 所以浏览器演示里的大图是**真取到了**，不是画个占位。
+       * 其余几档（MKP 产物 / 切片器配置）只登记、不在这里给文件。
+       */
+      assets: [
+        {
+          id: 'a1-image',
+          type: 'image',
+          machineId: 'A1',
+          name: 'A1 外观图',
+          path: 'printers/a1.webp',
+          delivery: 'bundled',
+        },
+        {
+          id: 'a1_mini-image',
+          type: 'image',
+          machineId: 'A1_MINI',
+          name: 'A1 mini 外观图',
+          path: 'printers/a1mini.webp',
+          delivery: 'bundled',
+        },
+        {
+          id: 'a1_mini-variant-image',
+          type: 'image',
+          machineId: 'A1_MINI',
+          name: 'A1 mini 外观图（快拆版）',
+          path: 'printers/a1mini-variant.webp',
+          delivery: 'bundled',
+        },
+        {
+          id: 'p1s-image',
+          type: 'image',
+          machineId: 'P1S',
+          name: 'P1S 外观图',
+          path: 'printers/p1s.webp',
+          delivery: 'bundled',
+        },
+      ],
       registry: catalogRegistry(),
       plates: allPlates(),
     }

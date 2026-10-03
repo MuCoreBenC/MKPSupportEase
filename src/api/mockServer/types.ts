@@ -35,7 +35,13 @@ export interface RawModel {
   /** 机型级默认 bundle。版本级的 recommendedBundle 优先 */
   defaultBundle: string
   externalAliases: string[]
+  /**
+   * **资产 id**（不是文件名）：与真后端 `machines_dto` 同一口径 —— 界面拿它去
+   * `RuntimeCatalog.assets[]` 里查 `path`（2026-10-03 第二刀起）。空串 = 这台没有图
+   */
   image: string
+  /** 第二个图位（快拆版外观图）。缺省 = 没有 */
+  imageVariant?: string
   icon: string
   versions: RawVersion[]
 }

@@ -107,11 +107,15 @@ pub struct CatalogMachine {
     /// 外部别名（`A1C` / `A1F` 这种）。**不许与任何机型 ID 相撞**（构建源已保证）
     #[serde(default)]
     pub external_aliases: Vec<String>,
-    /// **资产 id**（不是路径）：机型图。整机图 2026-10-01 从台账剥离之后，
-    /// 源里 **一律不再写它**（照实为空），界面用自己的素材表（`src/app/home/heroArt.ts`）。
-    /// 字段留着是给"将来真有产品级的机型图要按需下载"留的位置；今天没有任何机型写它。
+    /// **资产 id**（不是路径）：机型图。2026-10-03 起源里真写它
+    /// （`image = 'a1-image'`，指向台账 `type = 'image'` 的那条），客户端按 id 查
+    /// `assets[]` 拿 `path` 拼 `/assets/<path>` —— **不再有第二张表**。
     #[serde(default)]
     pub image: Option<String>,
+    /// **第二个图位**：装了快拆件那张外观图（今天只有 A1 mini 有）。客户端在选到版本
+    /// 那一级显示它，缺则回落 `image`。见 `presetdata::Machine::image_variant`
+    #[serde(default)]
+    pub image_variant: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
     /// 这台机型能用的打印板 id（`plates` 域里按 id 查）。空 = 没有板规格
@@ -350,6 +354,7 @@ impl Catalog {
                 default_bundle: m.default_bundle.clone(),
                 external_aliases: m.external_aliases.clone(),
                 image: m.image.clone(),
+                image_variant: m.image_variant.clone(),
                 icon: m.icon.clone(),
                 plate_ids: m.plate_ids.clone(),
                 default_plate_id: m.default_plate_id.clone(),

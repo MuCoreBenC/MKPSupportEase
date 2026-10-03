@@ -8,6 +8,11 @@ icon = 'a1_mini-icon'
 # 整机图（bundled 档：工作台可换图，构建期随包，不进云端交付）
 image = 'a1_mini-image'
 
+# 第二张图（装了快拆件那台）：客户端在**选到版本这一级**显示它，缺则回落上面那张。
+# 2026-10-03 之前这条关系只活在客户端的 heroArt.ts 显式表里（数据侧看不见、
+# 工作台换不掉，而台账里那张图谁都不引用）—— 收进机型文件才是它该在的地方。
+imageVariant = 'a1_mini-variant-image'
+
 # A1 mini 用双卡舌 180 那块板 —— 塔地图按 defaultPlateId 选板
 plateIds = ['dual-latch-180']
 defaultPlateId = 'dual-latch-180'

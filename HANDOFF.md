@@ -903,6 +903,44 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         `build` + `check:bundle`（15 个文件干净）+ `check:zero-network`、客户端探针全绿、
         工作台探针【一】全 ok（【二】是已知预存红 `button[title*="钉住"]`）。
 
+    - **增量之九：客户端改成台账驱动取图 + 机型第二个图位（2026-10-03，分支同前）**
+      —— 作者：「**客户端不再知道 `a1.webp` 这些具体文件，只认识 catalog 里的 asset id**」，
+      并给了五个验收点（import 消失 / 没有第二张表 / URL 必须来自 `catalog.assets[].path` /
+      源缺失仍红 / 改 path 后请求跟着变）。
+      - **读图链路**：`catalog.assets[]` → 资产 id → `asset.path` → `/assets/<path>`
+        （`heroArt.ts` 的 `assetUrlOf` + `pickArt`）。**4 条 import 与 `MODEL_ART` 整张表删掉**，
+        `@client-assets` 别名一并撤销（源码不再指向任何生成物）。
+      - **机型第二个图位**：`Machine.imageVariant`（= 装了快拆件那张外观图）——
+        2026-10-03 之前这条关系只活在客户端硬编码表里，**台账里那张图谁都不引用**；
+        现在 `presets/machines/A1_MINI.toml` 引用它、工作台可换（`MachineField::ImageVariant`），
+        跨文件校验（`check_asset_refs`）也把它算进去了。
+      - **契约订正**：`Machine.image` 的注释原来写着「文件名，前端自己拼资源路径」（旧世界的话），
+        改成**资产 id**；`RuntimeCatalog` 补 `assets?:`（**可选** —— 盘上那份 catalog.json
+        可能还是旧版，没有这一栏；缺了只是图回落 logo，不挡机型与版本）。
+      - **链路侧**：客户端构建也装配 `delivery = 'bundled'` 进 `dist/assets/<path>`（URL 同形、
+        **不带哈希** ⇒ 同一条资产在包里只有一份）；**dev 两边读的东西有意不同**：
+        客户端读**交付根** `client-assets/`（与打包后一致），工作台读**源** `presets/assets/`
+        （后厨要看得见任何登记资产）。
+      - **桩数据跟上**：`machine_catalog.json` 的 `image` 从文件名改成资产 id（P2S / X1C 那个
+        根本不存在的 `p2s.webp` / `x1c.webp` 清空 —— 那是移植时留下的错路）；
+        `mock.ts` 的 `getRuntimeCatalog()` 补 `assets[]`（**真 id + 真 path**，于是浏览器演示里的
+        大图是真取到的，不是画个占位）。
+      - **判据**：`home-flow.mjs --pick` 补两条**分层大图**断言（`a1mini.webp` /
+        `a1mini-variant.webp`）—— 量的是 `naturalWidth`，断的是「URL 是不是台账里的那个 path」。
+      - **五个验收点的实测**：③ URL = `/assets/printers/p1s.webp`（探针实测，无哈希名）；
+        ④ 源文件缺失 → 构建红并报出是哪条资产 + 怎么修；⑤ 改台账 path → 内嵌 catalog 的
+        revision 变（`ad1b1189…` → `25da03d6…`）+ **交付根删掉旧文件**（同步日志
+        `删除 1（printers/a1.webp）`）+ 装配跟着变；另在浏览器侧只改桩数据的一个 path，
+        客户端请求就变成 `/assets/printers/p1s.webp` 且断言变红（证明它跟着数据走、判据是活的）。
+      - **客户端 dev 的分源实测**：取到的字节与 `client-assets/` 逐字节一致；把交付根搬走 → 404，
+        搬回 → 200（证明客户端 dev 读的是交付根，与工作台 dev 读源正好对照）。
+      - 验证：Rust 默认 **631** / workbench **473+146+77**、双 feature clippy **0 警告**、
+        `tsc -b`、eslint + stylelint、`build` + `check:bundle`（15 干净）+ `check:zero-network`、
+        四个探针（home-flow / presets / workbench-build【一】/ asset-preview）全绿。
+      - 顺手记一笔：`presets/dist/catalog.json` 那一版的 definition 还没带 `imageVariant` ——
+        **不用手改**：它由工作台「生成 / 发布」重算（`write_catalog_json` 的调用者就那两个），
+        而发布收尾本来就会重算一遍，所以到发布那一刻一定与源同代。
+
      ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 
      **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，

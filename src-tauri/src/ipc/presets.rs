@@ -216,7 +216,10 @@ pub struct MachineDto {
     pub id: String,
     pub display: String,
     pub brand: String,
+    /// **资产 id**（不是文件名）：机型图。前端去 catalog 的 `assets[]` 里查 `path`
     pub image: String,
+    /// 第二个图位（快拆版外观图）。`""` = 没有 —— 前端回落 [`Self::image`]
+    pub image_variant: String,
     pub icon: String,
     pub aliases: Vec<String>,
     /// 这台机型能用的打印板 id（去 `getRuntimeCatalog().plates` 里按 id 查）。
@@ -244,6 +247,7 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
             // collect 时已经从 brands 换算成显示名（`拓竹 (Bambu Lab)`），直接用
             brand: m.brand.clone(),
             image: m.image.clone().unwrap_or_default(),
+            image_variant: m.image_variant.clone().unwrap_or_default(),
             icon: m.icon.clone().unwrap_or_default(),
             aliases: m.external_aliases.clone(),
             plate_ids: m.plate_ids.clone(),

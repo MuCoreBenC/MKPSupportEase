@@ -17,7 +17,7 @@
           "A1C",
           "A1F"
         ],
-        "image": "a1.webp",
+        "image": "a1-image",
         "icon": "a1",
         "versions": [
           {
@@ -58,7 +58,8 @@
           "A1MQ",
           "A1MF"
         ],
-        "image": "a1_mini.webp",
+        "image": "a1_mini-image",
+        "imageVariant": "a1_mini-variant-image",
         "icon": "a1_mini",
         "versions": [
           {
@@ -117,7 +118,7 @@
           "P1P",
           "P1C"
         ],
-        "image": "p1s.webp",
+        "image": "p1s-image",
         "icon": "p1s",
         "versions": [
           {
@@ -138,7 +139,7 @@
         "externalAliases": [
           "P2"
         ],
-        "image": "p2s.webp",
+        "image": "",
         "icon": "p1s",
         "versions": [
           {
@@ -163,7 +164,7 @@
           "X1 Carbon",
           "X1CARBON"
         ],
-        "image": "x1c.webp",
+        "image": "",
         "icon": "p1s",
         "versions": [
           {

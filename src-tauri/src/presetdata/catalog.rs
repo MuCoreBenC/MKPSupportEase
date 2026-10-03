@@ -218,6 +218,8 @@ pub enum MachineField {
     Brand,
     Name,
     Image,
+    /// 第二个图位（快拆版外观图）。见 [`Machine::image_variant`]
+    ImageVariant,
     Icon,
 }
 
@@ -228,6 +230,7 @@ impl MachineField {
             Self::Brand => "brand",
             Self::Name => "name",
             Self::Image => "image",
+            Self::ImageVariant => "imageVariant",
             Self::Icon => "icon",
         }
     }
@@ -248,6 +251,13 @@ pub struct Machine {
     /// 外部别名（`A1C` / `A1F` 这种）。**不许与任何机型 ID 相撞**
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
+    /// **第二个图位**：同一台机器「装了快拆件」那张外观图（`a1_mini-variant-image`）。
+    /// 客户端在**选到版本这一级**时显示它，缺则回落 `image`。
+    ///
+    /// 2026-10-03 之前这条关系只活在客户端的 `heroArt.ts` 显式表里 —— 数据侧看不见、
+    /// 工作台换不掉，而台账里那张图谁都不引用。第二刀把它收进机型文件：
+    /// 「这台机器有两张图」是机型自己的事，不是界面的事。
+    pub image_variant: Option<String>,
     pub icon: Option<String>,
     /// 这台机型能用的打印板（`presets/plates/*.toml` 的 id）。空 = 没有板规格
     /// （塔地图那一层不出，画布退回圆角矩形）。**只持引用，不持几何** —— 几何归 [`Plate`]。
@@ -553,6 +563,7 @@ impl Machine {
             MachineField::Brand => self.brand = owned.unwrap_or_default(),
             MachineField::Name => self.name = owned.unwrap_or_default(),
             MachineField::Image => self.image = owned,
+            MachineField::ImageVariant => self.image_variant = owned,
             MachineField::Icon => self.icon = owned,
         }
         Ok(())
@@ -736,7 +747,7 @@ impl Catalog {
         doc["display"] = literal_str(display);
         doc["brand"] = literal_str(brand);
         // 其余字段**一个都不写**：`name` / `defaultBundle` / `externalAliases` /
-        // `image` / `icon` / `[dimensions]` / `[[versions]]` 都留空。
+        // `image` / `imageVariant` / `icon` / `[dimensions]` / `[[versions]]` 都留空。
         // 写成空串或空数组会让界面显示成"填过但填了个空"，和"还没填"是两件事
         atomic_write(&file, doc.to_string().as_bytes())?;
 
@@ -748,6 +759,7 @@ impl Catalog {
             default_bundle: None,
             external_aliases: Vec::new(),
             image: None,
+            image_variant: None,
             icon: None,
             // 新建机型不带板 —— 板是后来按需挂的（与 has_dimensions: false 同一口径）
             plate_ids: Vec::new(),
@@ -935,6 +947,7 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                 })
                 .unwrap_or_default(),
             image: s("image"),
+            image_variant: s("imageVariant"),
             icon: s("icon"),
             // 板引用（与 `externalAliases` 同法读字符串数组）。读不出就是空 = 没板
             plate_ids: doc

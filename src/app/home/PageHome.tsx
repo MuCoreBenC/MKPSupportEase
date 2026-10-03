@@ -267,7 +267,8 @@ export default function PageHome({ density }: PageHomeProps) {
   const modelNode = catalog.machines.find((m) => m.id === sel.model)
   const modelName = modelNode?.display ?? null
   const variantName = modelNode?.versions.find((v) => v.id === sel.variant)?.name ?? null
-  const art = useMemo(() => pickArt(sel), [sel])
+  /* 大图：机型写的是资产 id，文件在哪由 catalog 的 assets[] 说（见 heroArt 的文件头） */
+  const art = useMemo(() => pickArt(sel, modelNode, catalog.assets), [sel, modelNode, catalog.assets])
   const { layers, settle, drop } = useArtLayers(art)
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物

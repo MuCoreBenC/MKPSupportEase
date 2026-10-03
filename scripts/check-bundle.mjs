@@ -62,12 +62,15 @@ const FORBIDDEN = [
   // 注意：**界面自带素材不在这份清单的管辖里，也不需要靠目录名堵** ——
   // 品牌 logo、首页 / 校准页那张 hero 合影住 `src/app/assets/`，由 vite 资源管线打进
   // `dist/assets/*.webp`（带内容哈希）。
-  // 机型整机图 2026-10-03 第二版来法：文件在 `presets/assets/printers/`（台账登记、
-  // `delivery = 'bundled'`），构建期由 `tools/assets/sync.mjs` 对账同步进交付根
-  // `client-assets/`（生成物、不入库），`heroArt.ts` 经别名 `@client-assets` import
-  // → 同样以带哈希的 `dist/assets/*.webp` 进包，**客户端不下载它**（不在 catalog files[]）。
-  // `public/` 从此只剩 BBS 页元数据 `bbs/`；`public/assets/` 与
-  // `src/app/assets/printers/` 两个旧落点同刀退役（一个东西两个落点 = 两个答案）。
+  // 机型整机图 2026-10-03 第三版来法（第二刀）：文件在 `presets/assets/printers/`
+  // （台账登记、`delivery = 'bundled'`），构建期由 `tools/assets/sync.mjs` 对账同步进交付根
+  // `client-assets/`（生成物、不入库），再由 `tools/assets/plugin.mjs` 在 **build 收尾装配进
+  // `dist/assets/<path>`**（URL 同形、不带哈希）。客户端取图是**台账驱动**的：
+  // `catalog.assets[]` 的 id → `path` → `/assets/<path>`，**源码里没有 import、也不认识文件名**
+  // —— 所以这几张图在包里出现的位置就是数据里写的那个 path，**客户端不下载它**
+  // （不在 catalog files[]）。
+  // `public/` 从此只剩 BBS 页元数据 `bbs/`；`public/assets/`、`src/app/assets/printers/`
+  // 与 `@client-assets` 别名三个旧落点先后退役（一个东西两个落点 = 两个答案）。
   // 归属的判据在 Rust 侧（`runtime::catalog::dest_of_asset`：按交付档位拦），不在这里。
 ]
 

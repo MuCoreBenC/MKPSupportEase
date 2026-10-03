@@ -217,8 +217,18 @@ export interface Machine {
   display: string
   /** 品牌显示名，'拓竹 (Bambu Lab)' */
   brand: string
-  /** 机型图 / 图标的文件名，前端自己拼资源路径 */
+  /**
+   * **资产 id**（不是文件名，也不是路径）：整机图。去 `RuntimeCatalog.assets` 里按 id 查
+   * `path`，拼 `/assets/<path>` —— 客户端不再认识 `a1.webp` 这种具体文件（2026-10-03 第二刀）。
+   * 空串 = 这台机型没有图（界面回落品牌 logo）
+   */
   image: string
+  /**
+   * **第二个图位**：装了快拆件那张外观图（今天只有 A1 mini 有）。
+   * 客户端在**选到版本这一级**显示它；空串/查不到则回落 `image`。
+   * 这条关系 2026-10-03 之前只活在 `heroArt.ts` 的硬编码表里 —— 现在住机型文件
+   */
+  imageVariant: string
   icon: string
   /** 别名，用来认 G-code 里写的机型名（'A1MINI' / 'A1MC'…） */
   aliases: string[]
@@ -871,12 +881,45 @@ export interface CatalogRegistry {
  * bundles / registry）。前端声明随消费面长出来：本轮先长 `registry`
  * （参数页的页签/分组树从它摊），其余几域消费时再声明。
  */
+/**
+ * 资产登记（`presets/assets.toml` 的 definition 面，随 catalog 下发）。
+ *
+ * **客户端只认识 id，不认识文件**：机型写 `image = 'a1-image'`，这里给
+ * `path = 'printers/a1.webp'`，界面拼 `/assets/<path>` 去取 ——
+ * 改图/换图都在数据侧发生，TS 一行不动（2026-10-03 第二刀）。
+ */
+export interface CatalogAsset {
+  /** 主键，**大小写不敏感**唯一 */
+  id: string
+  /** `'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'` */
+  type: string
+  /** 归属机型；不属于任何机型时不给这个字段 */
+  machineId?: string
+  /** 给人看的登记名 */
+  name: string
+  /** 相对资产根的路径。`mkPreset` 类留空（产物路径由命名规则算） */
+  path: string
+  /** 归属版本（`mkPreset` 类专有） */
+  versionId?: string
+  slicer?: string
+  profile?: string
+  /** `download` = 进交付集合按需下载；`bundled` = 随包不下载（构建期进客户端资源） */
+  delivery: 'download' | 'bundled'
+}
+
 export interface RuntimeCatalog {
   catalogSchema: number
   /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
   revision: string
   machines: RuntimeCatalogMachine[]
   files: RuntimeCatalogFile[]
+  /**
+   * 资产登记：界面按 id 查 path（见 [`CatalogAsset`]）。
+   *
+   * **可选**：客户端读的是盘上那份 catalog.json，它可能还是旧版本释放的
+   * （那一版里没有这一栏）。缺了就是「图认不出文件在哪」⇒ 回落品牌 logo，不是错误。
+   */
+  assets?: CatalogAsset[]
   registry: CatalogRegistry
   /** 打印板（2026-10-02）：机型持引用（`Machine.plateIds`），几何住这里，按 id 查 */
   plates: Plate[]

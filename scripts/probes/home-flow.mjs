@@ -161,6 +161,41 @@ if (process.argv.includes('--pick')) {
   console.log(`  图片   ${imgs.length} 张：${imgs.map((i) => `${i.src}(${i.natural}px)`).join(' · ') || '（一张都没有）'}`)
   const broken = imgs.filter((i) => i.natural === 0)
   if (broken.length > 0) problems.push(`图片没加载成功（路径或文件不对）：${JSON.stringify(broken)}`)
+
+  /*
+   * 再走一遍**两个选择层级**，把「快拆版第二图位」钉住（2026-10-03 第二刀）：
+   *
+   *   选到机型（还没选版本）→ `printers/a1mini.webp`
+   *   再选到版本            → `printers/a1mini-variant.webp`   ← 机型文件的 `imageVariant`
+   *
+   * 这两个 URL 都是**台账 path**（`catalog.assets[]` 的 id → `path` → `/assets/<path>`），
+   * 不是构建期写死的模块路径 —— 所以这条断子在"工作台换图 / 换指向"之后依然成立，
+   * 而在客户端又回去认识具体文件名时会红。
+   *
+   * 量法同前：**停在选择那一页时 DOM 里没有 `<img>`**（那张卡还没挂），必须回主页才量得到。
+   */
+  const artAt = async (steps, expect) => {
+    if (!(await clickText('更换机型'))) {
+      problems.push('量分层大图时找不到「更换机型」')
+      return
+    }
+    for (const step of steps) await clickText(step)
+    if (!(await clickText('回主页'))) {
+      problems.push('量分层大图时找不到「回主页」')
+      return
+    }
+    await page.waitForTimeout(1600)
+    const srcs = await page.evaluate(() =>
+      [...document.querySelectorAll('img')].map((i) => i.getAttribute('src') ?? ''),
+    )
+    const hit = srcs.find((s) => s.includes('/assets/')) ?? null
+    console.log(`  分层大图 ${hit ?? '（一张都没有）'}（期待 ${expect}）`)
+    if (hit !== expect) {
+      problems.push(`分层大图不对：期待 ${expect}，实际 ${hit ?? '（一张都没有）'}`)
+    }
+  }
+  await artAt(['A1 mini'], '/assets/printers/a1mini.webp')
+  await artAt(['标准版'], '/assets/printers/a1mini-variant.webp')
 }
 
 /* 校准页 */

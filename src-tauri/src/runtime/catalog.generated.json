@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "7adf16851fafc9ed",
+  "revision": "ad1b1189418ac3be",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -20,6 +20,7 @@
         "A1F"
       ],
       "image": "a1-image",
+      "imageVariant": null,
       "icon": "a1-icon",
       "plateIds": [
         "single-latch-256"
@@ -101,6 +102,7 @@
         "A1MF"
       ],
       "image": "a1_mini-image",
+      "imageVariant": "a1_mini-variant-image",
       "icon": "a1_mini-icon",
       "plateIds": [
         "dual-latch-180"
@@ -181,6 +183,7 @@
         "P1C"
       ],
       "image": "p1s-image",
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -293,6 +296,7 @@
         "P2"
       ],
       "image": null,
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
@@ -409,6 +413,7 @@
         "X1CARBON"
       ],
       "image": null,
+      "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
         "single-latch-256"
