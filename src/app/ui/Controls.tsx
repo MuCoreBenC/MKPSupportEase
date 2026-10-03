@@ -131,12 +131,13 @@ export function Btn({
   onClick,
 }: {
   children: ReactNode
-  variant?: 'default' | 'primary' | 'ghost' | 'danger'
+  variant?: 'default' | 'accent' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
   onClick?: () => void
 }) {
   const cls = [
     s.btn,
+    variant === 'accent' ? s.btnAccent : '',
     variant === 'primary' ? s.btnPrimary : '',
     variant === 'ghost' ? s.btnGhost : '',
     variant === 'danger' ? s.btnDanger : '',

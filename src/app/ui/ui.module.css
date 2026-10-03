@@ -315,6 +315,24 @@
   color: #fff;
 }
 
+/*
+ * 强调（accent）：绿底主入口 —— 校准 HUD 的「打开模型」（G06-10：作者点名
+ * 「绿底给打开模型，预设 pill 退暗」）。与 primary（墨底）分两档：这一页要的
+ * 是"主入口"的绿，不是"提交"的墨。
+ */
+.btnAccent {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.btnAccent:hover {
+  border-color: var(--accent-deep);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
 .btnGhost {
   border-color: transparent;
   color: var(--text-2);
