@@ -3,7 +3,7 @@
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
-      "logo": "bambu-logo.png"
+      "logo": "bambu-lab-logo"
     }
   ],
   "machines": [
@@ -15,30 +15,30 @@
         "A1C",
         "A1F"
       ],
-      "image": null,
+      "image": "a1-image",
       "icon": "a1-icon",
-      "defaultBundle": "A1_default",
+      "defaultBundle": "A1_STANDARD",
       "hasDimensions": true,
       "versions": [
         {
           "id": "STANDARD",
           "name": "标准版",
           "tag": "推荐",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_STANDARD",
           "mkpPresetAssetId": "A1-standard.toml"
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "tag": "热门",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_FAST",
           "mkpPresetAssetId": "A1-fast.toml"
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "tag": "最新",
-          "recommendedBundle": "A1_default",
+          "recommendedBundle": "A1_FASTV3.3",
           "mkpPresetAssetId": "A1-fastv3.3.toml"
         }
       ]
@@ -54,30 +54,30 @@
         "A1MQ",
         "A1MF"
       ],
-      "image": null,
+      "image": "a1_mini-image",
       "icon": "a1_mini-icon",
-      "defaultBundle": "A1_MINI_default",
+      "defaultBundle": "A1_MINI_STANDARD",
       "hasDimensions": true,
       "versions": [
         {
           "id": "STANDARD",
           "name": "标准版",
           "tag": "推荐",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_STANDARD",
           "mkpPresetAssetId": "A1_MINI-standard.toml"
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "tag": "热门",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_FAST",
           "mkpPresetAssetId": "A1_MINI-fast.toml"
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "tag": "最新",
-          "recommendedBundle": "A1_MINI_default",
+          "recommendedBundle": "A1_MINI_FASTV3.3",
           "mkpPresetAssetId": "A1_MINI-fastv3.3.toml"
         }
       ]
@@ -92,7 +92,7 @@
         "P1P",
         "P1C"
       ],
-      "image": null,
+      "image": "p1s-image",
       "icon": "p1s-icon",
       "defaultBundle": "P1S_default",
       "hasDimensions": true,
