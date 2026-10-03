@@ -90,6 +90,26 @@ name = 'P1S 外观图'
 path = 'printers/p1s.webp'
 delivery = 'bundled'
 
+# ---------------- 公共素材（不属于任何机型） ----------------
+#
+# 2026-10-03（作者：「品牌 Logo 也应该正式进入资产体系」）：品牌图与机型图、版本图
+# 一样，是**台账里的一条资产**，业务数据只引用它的 id（`presets/brands.toml` 的
+# `logo = 'bambu-lab-logo'`）。
+#
+# **不写 `machineId`** = 公共素材（`Asset` 的字段说明早就预留了这条路）。
+# 它随包（客户端要显示、且不该从云端下载）⇒ `delivery = 'bundled'`。
+#
+# 颜色：原文件靠 `currentColor` 随外层 CSS 变色，而 `<img src>` 是独立文档、拿不到
+# 外层颜色 —— 随包资产只能一色。这一条固化**深色**那版（浅色底用）。将来真出现深色底，
+# 那是**另一条资产**（`bambu-lab-logo-light`），不是"换个 fill"。
+
+[[assets]]
+id = 'bambu-lab-logo'
+type = 'image'
+name = 'Bambu Lab 字标'
+path = 'brands/bambu-lab-logo.svg'
+delivery = 'bundled'
+
 # ---------------- MKP 预设（mkpPreset） ----------------
 #
 # 2026-10-03（作者：「为什么资产库里面不放 mkp 预设」）：**一切配发内容都在资产库里有

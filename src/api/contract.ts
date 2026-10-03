@@ -769,6 +769,16 @@ export interface RuntimeCatalogFile {
   size: number
 }
 
+/** 品牌（`presets/brands.toml` 那一行）。`logo` 是**资产 id**，不是文件名 */
+export interface RuntimeCatalogBrand {
+  /** `'Bambu Lab'` —— 稳定 id */
+  id: string
+  /** `'拓竹 (Bambu Lab)'` —— 给人看的显示名（机型上的 `brand` 就是它） */
+  name: string
+  /** 品牌图的资产 id；空/查不到 = 回落内置字标 */
+  logo: string | null
+}
+
 export interface RuntimeCatalogMachine {
   id: string
   display: string
@@ -920,6 +930,13 @@ export interface RuntimeCatalog {
   /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
   revision: string
   machines: RuntimeCatalogMachine[]
+  /**
+   * 品牌（含品牌图的**资产 id**）：机型与版本都没有图时回落到品牌图，再回落才是内置字标。
+   * 2026-10-03 起品牌图正式进资产体系（`presets/brands.toml` 的 `logo` 引用资产 id）。
+   *
+   * 可选：盘上那份 catalog.json 可能还是旧版（那时 `assets` 也没有）。
+   */
+  brands?: RuntimeCatalogBrand[]
   files: RuntimeCatalogFile[]
   /**
    * 资产登记：界面按 id 查 path（见 [`CatalogAsset`]）。

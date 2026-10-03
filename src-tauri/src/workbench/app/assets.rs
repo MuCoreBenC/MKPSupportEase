@@ -506,9 +506,11 @@ mod tests {
         let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            28,
-            "MKP 预设 9 + 整机图 4 + 图标 3 + 模型 3 + BBS 9 —— 2026-10-03：整机图回到台账
-             （bundled 档）、MKP 预设也进了台账（mkPreset 类），条数变了要说清为什么"
+            29,
+            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 3 + BBS 9 ——
+             2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
+             品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
+             条数变了要说清为什么"
         );
 
         let missing: Vec<&str> = list
@@ -593,7 +595,8 @@ mod tests {
     fn the_kind_axis_filters_each_kind_cleanly() {
         let all = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         let want_of = [
-            (AssetKind::Image, 4usize),
+            // image 档 5 = 整机图 4 + 品牌字标 1（2026-10-03 品牌图正式进台账）
+            (AssetKind::Image, 5usize),
             (AssetKind::Icon, 3),
             (AssetKind::Model, 3),
             (AssetKind::SlicerProfile, 9),
@@ -651,12 +654,16 @@ mod tests {
             "MKP 预设进套餐后也是「进套餐」身份"
         );
         let bundled = count(Bundled);
-        assert_eq!(bundled.len(), 4, "四条整机图是随包档：{bundled:?}");
+        assert_eq!(
+            bundled.len(),
+            5,
+            "四条整机图 + 品牌字标是随包档（品牌图 2026-10-03 进台账）：{bundled:?}"
+        );
         assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
         assert_eq!(
             count(Optional).len(),
             10,
-            "28 - 14 进套餐 - 4 随包 = 10 可选（图标 3 + 模型 3 + 没进套餐的 BBS 4）"
+            "29 - 14 进套餐 - 5 随包 = 10 可选（图标 3 + 模型 3 + 没进套餐的 BBS 4）"
         );
 
         // 身份轴筛选：每一档筛出来都恰好是那一档
@@ -666,7 +673,11 @@ mod tests {
             .assets
             .iter()
             .all(|a| a.identity == AssetIdentity::Bundled));
-        assert_eq!(filtered.assets.len(), 4);
+        assert_eq!(
+            filtered.assets.len(),
+            5,
+            "按随包身份筛 = 4 张整机图 + 品牌字标（品牌图 2026-10-03 进台账）"
+        );
     }
 
     /// 反查在真数据上也说得清是谁在用（b05 Task 9.4）

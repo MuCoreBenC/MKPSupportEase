@@ -267,8 +267,11 @@ export default function PageHome({ density }: PageHomeProps) {
   const modelNode = catalog.machines.find((m) => m.id === sel.model)
   const modelName = modelNode?.display ?? null
   const variantName = modelNode?.versions.find((v) => v.id === sel.variant)?.name ?? null
-  /* 大图：机型写的是资产 id，文件在哪由 catalog 的 assets[] 说（见 heroArt 的文件头） */
-  const art = useMemo(() => pickArt(sel, modelNode, catalog.assets), [sel, modelNode, catalog.assets])
+  /* 大图：图位分层 品牌 → 机型 → 版本（版本缺则回落机型），URL 全部来自台账 path */
+  const art = useMemo(
+    () => pickArt(sel, modelNode, catalog.assets, catalog.brands),
+    [sel, modelNode, catalog.assets, catalog.brands],
+  )
   const { layers, settle, drop } = useArtLayers(art)
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物

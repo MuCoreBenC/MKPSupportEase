@@ -671,9 +671,10 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            28,
-            "实测 28 条（9 MKP 预设 + 4 整机图 + 9 BBS + 3 图标 + 3 模型）—— 2026-10-03
-             两类回到台账（mkPreset / bundled image），条数变了要核对台账再改这里的期望"
+            29,
+            "实测 29 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
+             2026-10-03 三类进台账（mkPreset / bundled image / 品牌图），条数变了要核对台账
+             再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -836,9 +837,9 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            28,
-            "实测 28 条资产定义（9 MKP 预设 + 4 整机图 + 9 BBS + 3 图标 + 3 模型）——
-             2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类，
+            29,
+            "实测 29 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
+             2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
              登记归属不登记路径；两者都不进 files[]）"
         );
         assert_eq!(

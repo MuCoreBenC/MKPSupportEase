@@ -1,11 +1,11 @@
 {
   "catalogSchema": 1,
-  "revision": "e821f7a7f4d7272a",
+  "revision": "23beb5e2261a5ae4",
   "brands": [
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
-      "logo": "bambu-logo.png"
+      "logo": "bambu-lab-logo"
     }
   ],
   "machines": [
@@ -557,6 +557,13 @@
       "machineId": "P1S",
       "name": "P1S 外观图",
       "path": "printers/p1s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "bambu-lab-logo",
+      "type": "image",
+      "name": "Bambu Lab 字标",
+      "path": "brands/bambu-lab-logo.svg",
       "delivery": "bundled"
     },
     {

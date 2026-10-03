@@ -320,6 +320,8 @@ type FixtureRef = { id: string; kind: string; slicer: string | null; profile: st
  *  **image 类回来了**（2026-10-03，撤销第三刀的剥离）：整机图在台账里，用
  *  `delivery: 'bundled'` 表达「随包不下载」—— 台账可管可换图，客户端不下载。 */
 const ASSETS: FixtureRef[] = [
+  /* 品牌字标（2026-10-03 品牌图正式进台账）：**公共素材**，不写 machineId */
+  { id: 'bambu-lab-logo', kind: 'image', slicer: null, profile: null, name: 'Bambu Lab 字标', path: 'brands/bambu-lab-logo.svg', delivery: 'bundled' },
   { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp', delivery: 'bundled' },
   { id: 'a1_mini-image', kind: 'image', slicer: null, profile: null, name: 'A1 mini 外观图', path: 'printers/a1mini.webp', delivery: 'bundled' },
   { id: 'p1s-image', kind: 'image', slicer: null, profile: null, name: 'P1S 外观图', path: 'printers/p1s.webp', delivery: 'bundled' },

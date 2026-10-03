@@ -199,6 +199,13 @@ if (process.argv.includes('--pick')) {
   }
   await artAt(['A1 mini'], '/assets/printers/a1mini.webp')
   await artAt(['标准版'], '/assets/printers/a1mini.webp')
+  /*
+   * 第三级：**品牌图**（图位分层的最下一层）。A2L 没有机型图也没有版本图 ⇒ 回落品牌图，
+   * 而品牌图**也在台账里**（`brands.toml` 的 `logo` 引用资产 id `bambu-lab-logo`），
+   * 所以它同样是 `/assets/<台账 path>`，**不是**那个内置 data URI 字标。
+   * 内置字标只在"台账没配品牌图 / 认不出那张图"时兜底（老版本 catalog.json 那条路）。
+   */
+  await artAt(['A2L'], '/assets/brands/bambu-lab-logo.svg')
 }
 
 /* 校准页 */

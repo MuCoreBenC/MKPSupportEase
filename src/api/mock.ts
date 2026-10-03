@@ -776,6 +776,14 @@ export const mockApi: MkpApi = {
        * 其余几档（MKP 产物 / 切片器配置）只登记、不在这里给文件。
        */
       assets: [
+        /* 品牌字标（2026-10-03 品牌图正式进资产体系）：**不写 machineId** = 公共素材 */
+        {
+          id: 'bambu-lab-logo',
+          type: 'image',
+          name: 'Bambu Lab 字标',
+          path: 'brands/bambu-lab-logo.svg',
+          delivery: 'bundled',
+        },
         {
           id: 'a1-image',
           type: 'image',
@@ -810,6 +818,8 @@ export const mockApi: MkpApi = {
         },
       ],
       registry: catalogRegistry(),
+      /* 品牌（含品牌图的资产 id）—— 客户端在机型与版本都没图时回落到它 */
+      brands: [{ id: 'Bambu Lab', name: '拓竹 (Bambu Lab)', logo: 'bambu-lab-logo' }],
       plates: allPlates(),
     }
   },

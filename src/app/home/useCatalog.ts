@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
-import type { CatalogAsset, Machine, PresetFileInfo } from '../../api/contract'
+import type { CatalogAsset, Machine, PresetFileInfo, RuntimeCatalogBrand } from '../../api/contract'
 
 export interface Catalog {
   /** 机型目录（含品牌与版本），按目录顺序 */
@@ -33,6 +33,8 @@ export interface Catalog {
    * 资产登记读的是运行时那份 catalog.json，它比 TOML 树晚一步（也可能还没换新）。
    */
   assets: CatalogAsset[]
+  /** 品牌（含品牌图的资产 id）。同样拉不到就是空 —— 大图再回落内置字标 */
+  brands: RuntimeCatalogBrand[]
 }
 
 /** 「文件」这一级的 id：`机型/版本`，与工作台发布 uid 同一形状 */
@@ -45,6 +47,7 @@ export function useCatalog(): Catalog {
   const [machines, setMachines] = useState<Machine[]>([])
   const [presets, setPresets] = useState<PresetFileInfo[]>([])
   const [assets, setAssets] = useState<CatalogAsset[]>([])
+  const [brands, setBrands] = useState<RuntimeCatalogBrand[]>([])
 
   useEffect(() => {
     let alive = true
@@ -64,7 +67,9 @@ export function useCatalog(): Catalog {
        而机型与版本必须照常显形。老版本的 catalog.json 里没有这一栏，按空处理 */
     api.getRuntimeCatalog().then(
       (c) => {
-        if (alive) setAssets(c.assets ?? [])
+        if (!alive) return
+        setAssets(c.assets ?? [])
+        setBrands(c.brands ?? [])
       },
       (err: unknown) => {
         console.error('[catalog] 资产登记拉取失败（大图回落品牌 logo）', err)
@@ -75,5 +80,5 @@ export function useCatalog(): Catalog {
     }
   }, [])
 
-  return { machines, presets, assets }
+  return { machines, presets, assets, brands }
 }

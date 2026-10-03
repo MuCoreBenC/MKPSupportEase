@@ -453,6 +453,23 @@ impl Presets {
                 }
             }
         }
+        /* 品牌图（`brands.toml` 的 `logo`）同样是跨文件引用：打错字的后果是**静默回落内置字标** */
+        for b in self.catalog.brands() {
+            let Some(id) = b.logo.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            if self.assets.get(id).is_none() {
+                return Err(AppError::corrupted(format!(
+                    "品牌 {} 的 logo 指向一个不存在的资产：{id}",
+                    b.id
+                ))
+                .with_detail(
+                    "资产定义在 presets/assets.toml。品牌图打错的后果是**静默回落成内置字标** \
+                     —— 界面上看不出是打错了字还是压根没配"
+                        .to_owned(),
+                ));
+            }
+        }
         Ok(())
     }
 

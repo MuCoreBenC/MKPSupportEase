@@ -105,10 +105,14 @@ fn write_presets(root: &Path) {
         crate::fsx::atomic::atomic_write(&root.join(rel), text.as_bytes()).unwrap();
     };
 
+    // 品牌：**不写 `logo`**（2026-10-03）。它曾经写着一个早就不存在的文件名
+    // `bambu-logo.png`，而今天 `logo` 是**资产 id**、加载期要过 `check_asset_refs`
+    // （品牌图打错字的后果是静默回落内置字标，界面上看不出来）——
+    // 真数据那边品牌图已经是台账里的一条资产（`bambu-lab-logo`），
+    // 夹具这两条资产与品牌图无关，就不配它。
     t(
         "brands.toml",
-        "[[brands]]\nid = 'Bambu Lab'\nname = '拓竹 (Bambu Lab)'\nlogo = 'bambu-logo.png'\n"
-            .to_owned(),
+        "[[brands]]\nid = 'Bambu Lab'\nname = '拓竹 (Bambu Lab)'\n".to_owned(),
     );
     // 资产定义（b05 Task 8）：两条 —— 一条图片（归 A1）、一条切片器预设（归 P1S），
     // 两种类型都走到。`path` 指向夹具资产根里**不存在**的文件是合法的：
