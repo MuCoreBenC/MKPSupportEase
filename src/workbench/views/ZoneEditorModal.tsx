@@ -15,8 +15,15 @@
  *
  * # 干净画布
  *
- * 默认只画床身轮廓 + 网格 + 多边形的边；**选中某块才显示顶点与坐标** ——
- * 一屏全是手柄与数字，反而看不清形状（旧面板的设计原则，照抄）。
+ * 默认只画床身轮廓 + 网格 + 多边形的边；选中某块才出现顶点手柄，**坐标标签只标
+ * 当前悬停 / 拖着的那一个点** —— 一屏全是手柄与数字，反而看不清形状（旧面板的原则）。
+ *
+ * # 加点只有两条路（2026-10-03 作者那刀：画布空白处点击**不再**加点）
+ *
+ * 旧版"点画布任意处 = 加顶点"有两个坑：想拖顶点松手时浏览器补发的 click 会
+ * 落进加点逻辑（每拖一次多一个点）；随手一点床身就多出个野点。现在：
+ * 点选中块的**边**插入顶点（插在点的那条边上），或列表里的「添加点」（加在
+ * 收口边中点）。拖 / 删不变：拖顶点挪位置，右键顶点删掉。
  *
  * # 落盘
  *
@@ -61,10 +68,15 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const [past, setPast] = useState<P[][][]>([])
   const [future, setFuture] = useState<P[][][]>([])
   const [sel, setSel] = useState<number | null>(null)
+  /** 坐标标签只跟一个点：悬停或拖着的那一个（对应选中块里的下标） */
+  const [activePt, setActivePt] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
   const [busy, setBusy] = useState(false)
-  /** 正在拖第几块的最后一个点（拖拽期间的中间态不进历史栈 —— 松手才推一次） */
-  const dragRef = useRef<{ zone: number; point: number } | null>(null)
+  /**
+   * 正在拖第几块的哪个点。`before` 是拖拽起点的快照：第一次真挪动才压进历史栈
+   * （点一下不挪 = 不留无意义的一步撤销）；`orig` 用来判断"真挪动了"。
+   */
+  const dragRef = useRef<{ zone: number; point: number; orig: P; before: P[][]; pushed: boolean } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   /** 光标处的机器坐标（状态栏显示用） */
   const [cursor, setCursor] = useState<P | null>(null)
@@ -75,6 +87,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     setPast([])
     setFuture([])
     setSel(machine?.zones.length ? 0 : null)
+    setActivePt(null)
     setZoom(1)
     setBusy(false)
     setCursor(null)
@@ -135,9 +148,9 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     return () => window.removeEventListener('keydown', onKey)
   }, [machineId, undo, redo, commit, zones, sel])
 
-  /* —— 坐标换算（只在这个文件里写一次）—— */
+  /* —— 坐标换算（只在这个文件里写一次；pointer / click 事件都带 clientXY）—— */
   const toBed = useCallback(
-    (e: ReactPointerEvent<SVGSVGElement | SVGPolygonElement>): P | null => {
+    (e: { clientX: number; clientY: number }): P | null => {
       const el = svgRef.current
       if (el === null) return null
       const r = el.getBoundingClientRect()
@@ -152,21 +165,24 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
   const flat = (zs: P[][]) => zs.map((points) => ({ points }))
 
   /* —— 画布操作 —— */
-  const onCanvasClick = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (dragRef.current !== null) return
-    if (sel === null) return
-    const at = toBed(e)
-    if (at === null) return
-    const next = zones.map((z, i) => (i === sel ? [...z, at] : z))
-    commit(next)
+  /** 点边插入顶点：插在被点的那条边中间（比"画布上哪儿都能加"不容易出野点） */
+  const insertPoint = (zi: number, after: number, at: P) => {
+    const np: P = [round1(at[0]), round1(at[1])]
+    commit(zones.map((q, i) => (i === zi ? [...q.slice(0, after + 1), np, ...q.slice(after + 1)] : q)))
+    setActivePt(after + 1)
   }
 
   const onVertexDown = (zi: number, pi: number) => (e: ReactPointerEvent<SVGCircleElement>) => {
     e.stopPropagation()
     setSel(zi)
-    dragRef.current = { zone: zi, point: pi }
-    // 拖拽起点压进历史栈（一次拖拽 = 一步撤销）
-    setPast((p) => [...p.slice(-49), zones.map((z) => z.map((q) => [...q] as P))])
+    setActivePt(pi)
+    dragRef.current = {
+      zone: zi,
+      point: pi,
+      orig: zones[zi][pi],
+      before: zones.map((z) => z.map((q) => [...q] as P)),
+      pushed: false,
+    }
     setFuture([])
     svgRef.current?.setPointerCapture(e.pointerId)
   }
@@ -177,17 +193,32 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     setCursor([round1(at[0]), round1(at[1])])
     const d = dragRef.current
     if (d === null) return
+    // 第一次真挪动了才把起点快照压进历史栈（一次拖拽 = 一步撤销）
+    const snapped: P = [round1(at[0]), round1(at[1])]
+    if (!d.pushed && (snapped[0] !== d.orig[0] || snapped[1] !== d.orig[1])) {
+      d.pushed = true
+      setPast((p) => [...p.slice(-49), d.before])
+      setFuture([])
+    }
     // 拖拽期间只改草稿（不进历史栈 —— 起点已经压过一次了）
     setZones((prev) =>
       prev.map((z, i) =>
-        i === d.zone ? z.map((q, j) => (j === d.point ? [round1(at[0]), round1(at[1])] as P : q)) : z,
+        i === d.zone ? z.map((q, j) => (j === d.point ? snapped : q)) : z,
       ),
     )
   }
 
   const onCanvasUp = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current
     dragRef.current = null
     if (svgRef.current?.hasPointerCapture(e.pointerId)) svgRef.current.releasePointerCapture(e.pointerId)
+    // 松手时光标若已不在那个顶点上，把它脚下的坐标标签收掉
+    if (d !== null && activePt !== null) {
+      const at = toBed(e)
+      const pt = zones[d.zone]?.[d.point]
+      const near = at !== null && pt !== undefined && Math.hypot(at[0] - pt[0], at[1] - pt[1]) < 4
+      if (!near) setActivePt(null)
+    }
   }
 
   /* —— 列表操作 —— */
@@ -205,11 +236,13 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     ]
     commit([...zones, fresh])
     setSel(zones.length)
+    setActivePt(null)
   }
 
   const removeZone = (i: number) => {
     commit(zones.filter((_, k) => k !== i))
     setSel((cur) => (cur === null ? null : cur === i ? null : cur > i ? cur - 1 : cur))
+    setActivePt(null)
   }
 
   const duplicateZone = (i: number) => {
@@ -220,6 +253,17 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
     const copy: P[] = src.map(([x, y]) => [round1(Math.min(bed.width, x + shift)), round1(y)] as P)
     commit([...zones, copy])
     setSel(zones.length)
+    setActivePt(null)
+  }
+
+  /** 列表里的「添加点」：加在末点→首点那条收口边的中点（跟点边插入同一口径） */
+  const addPoint = (zi: number) => {
+    const z = zones[zi]
+    if (z === undefined || z.length < 2) return
+    const a = z[z.length - 1]
+    const b = z[0]
+    commit(zones.map((q, i) => (i === zi ? [...q, [round1((a[0] + b[0]) / 2), round1((a[1] + b[1]) / 2)] as P] : q)))
+    setActivePt(z.length)
   }
 
   const removePoint = (zi: number, pi: number) => {
@@ -369,7 +413,6 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               onPointerMove={onCanvasMove}
               onPointerUp={onCanvasUp}
               onPointerLeave={() => setCursor(null)}
-              onClick={onCanvasClick}
             >
               {/* 床身 */}
               <rect x={0} y={0} width={bed.width} height={bed.depth} className={s.bed} />
@@ -382,12 +425,34 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                   <polygon
                     points={pointsAttr(z)}
                     className={`${s.poly} ${i === sel ? s.polyOn : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
+                    onClick={() => {
                       setSel(i)
+                      setActivePt(null)
                     }}
                   />
-                  {/* 只画"点"这件事：顶点手柄与坐标只在选中的那一块上出现 */}
+                  {/* 选中那块的"点边加顶点"热区：透明粗边，压在面上、顶点手柄下 */}
+                  {i === sel &&
+                    z.length > 0 &&
+                    z.map(([x, y], j) => {
+                      const [nx, ny] = z[(j + 1) % z.length]
+                      return (
+                        <line
+                          key={j}
+                          x1={x}
+                          y1={bed.depth - y}
+                          x2={nx}
+                          y2={bed.depth - ny}
+                          className={s.edgeHit}
+                          strokeWidth={Math.max(2.5, Math.min(bed.width, bed.depth) / 36)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const at = toBed(e)
+                            if (at !== null) insertPoint(i, j, at)
+                          }}
+                        />
+                      )
+                    })}
+                  {/* 顶点手柄与坐标只在选中的那一块上出现；坐标只标悬停 / 拖着的那一个 */}
                   {i === sel &&
                     z.map(([x, y], j) => (
                       <g key={j}>
@@ -397,19 +462,25 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                           r={Math.max(2.2, Math.min(bed.width, bed.depth) / 90)}
                           className={s.handle}
                           onPointerDown={onVertexDown(i, j)}
+                          onPointerEnter={() => setActivePt(j)}
+                          onPointerLeave={() => {
+                            if (dragRef.current === null) setActivePt((cur) => (cur === j ? null : cur))
+                          }}
                           onContextMenu={(e) => {
                             e.preventDefault()
                             removePoint(i, j)
                           }}
                         />
-                        <text
-                          x={x}
-                          y={bed.depth - y - Math.max(4, Math.min(bed.width, bed.depth) / 42)}
-                          className={s.handleText}
-                          textAnchor="middle"
-                        >
-                          {x}, {y}
-                        </text>
+                        {j === activePt && (
+                          <text
+                            x={x}
+                            y={bed.depth - y - Math.max(4, Math.min(bed.width, bed.depth) / 42)}
+                            className={s.handleText}
+                            textAnchor="middle"
+                          >
+                            {x}, {y}
+                          </text>
+                        )}
                       </g>
                     ))}
                 </g>
@@ -418,7 +489,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
           </div>
 
           <p className={s.hint}>
-            先在右边选一块 → 在画布上点一下加顶点、拖顶点挪位置（收 0.1mm）、右键顶点删掉它。
+            先在右边选一块 → 点块的边插入顶点、拖顶点挪位置（收 0.1mm）、右键顶点删掉它；列表里也有「添加点」。
             {sel === null && ' 现在没有选中的块 —— 点右边任意一块，或先「添加禁区」。'}
           </p>
         </div>
@@ -438,7 +509,10 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               <button
                 type="button"
                 className={s.itemHead}
-                onClick={() => setSel(i)}
+                onClick={() => {
+                  setSel(i)
+                  setActivePt(null)
+                }}
                 title="选中这块（画布上高亮，才能编辑顶点）"
               >
                 <span className={s.itemName}>禁区 {i + 1}</span>
@@ -501,6 +575,14 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                       </button>
                     </div>
                   ))}
+                  <button
+                    type="button"
+                    className={s.addPoint}
+                    title="加在末点→首点那条收口边的中点（画布上也可以直接点边插入）"
+                    onClick={() => addPoint(i)}
+                  >
+                    + 添加点
+                  </button>
                 </div>
               )}
             </div>

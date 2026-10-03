@@ -2,7 +2,8 @@
  * 禁区编辑器（2026-10-03，照旧面板 mkppanel 的 ZoneEditorModal）。
  *
  * 版式：左画布（55%）+ 右列表（45%），工具条在画布上方、状态在框脚。
- * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块才出现顶点与坐标。
+ * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；选中某块才出现顶点，
+ * 坐标标签只标悬停 / 拖着的那一个点。
  */
 
 .wrap {
@@ -117,6 +118,14 @@
   pointer-events: none;
 }
 
+/* 选中块的"点边加顶点"热区：透明粗描边，只吃边上的点击（面上、手柄下） */
+.edgeHit {
+  fill: none;
+  stroke: rgb(0 0 0 / 0%);
+  pointer-events: stroke;
+  cursor: crosshair;
+}
+
 .hint {
   margin: 8px 0 0;
   font-size: var(--fs-label);
@@ -213,7 +222,7 @@
 .coords {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed var(--line);
@@ -221,41 +230,69 @@
 
 .coordRow {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
 .coordIdx {
   width: 22px;
+  flex: none;
   font-size: var(--fs-label);
   color: var(--text-3);
 }
 
 .coordInput {
-  width: 66px;
-  padding: 1px 5px;
+  /* 两格平分行宽：够宽好点，也不挤删除键 */
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-label);
+  font-size: var(--fs-body);
   color: var(--text-1);
-  text-align: right;
+  text-align: left;
   background: var(--surface-solid);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
+  /* 步进小箭头太难点了 —— 藏掉（键盘上下键仍然能用） */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.coordInput::-webkit-outer-spin-button,
+.coordInput::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
 .coordDel {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  font-size: 12px;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
   color: var(--text-3);
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
 .coordDel:hover {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+/* 「添加点」：不用回画布也能加，虚线一整条占满行宽 */
+.addPoint {
+  margin-top: 2px;
+  padding: 5px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.addPoint:hover {
+  color: var(--wb-primary);
+  border-color: var(--wb-primary);
 }
 
 /* ---------- 框脚 ---------- */
