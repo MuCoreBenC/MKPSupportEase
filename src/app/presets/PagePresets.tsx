@@ -4,19 +4,33 @@
  * # 版面
  *
  * ```
- * ┌MKP 配置│切片器配置┐ ┌本地│云端┐        机型[A1 ▾]  [搜索…]
- * ● 已应用 A1.toml · A1            定位                    共 4 项      ← MKP
- * 喷嘴 全部 0.2 0.4 0.6   层高 全部 0.08 0.10 … 更多               ← 切片器
- * 名称            机型   版本    时间   大小   来源   状态      操作
- * A1.toml         A1    标准版  09-14  4.2 KB 官方   ● 已应用  已应用
- * ────────────────────────────────────────────────────────────
- * 仓库 20 · 本机 4 + 我的 3
+ * ┌MKP 配置│切片器配置┐ ┌本地│云端┐ [搜索…] ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  ← MKP
+ * 喷嘴 全部 0.2 0.4 0.6   层高 全部 0.08 0.10 … 更多                        ← 切片器
+ * 名称            机型   版本    时间   来源   操作
+ * A1.toml         A1    标准版  09-14  官方   已应用
+ * ├────────────────────────────────────────────┤
+ * 右键任意一行还有…        共 4 项 │ 仓库 20 · 本机 4 + 我的 3   ← 页脚
  * ```
  *
- * **两排工具栏**：第一排主工具栏（一级类型分段 + 二级位置分段靠左，
- * 机型 + 搜索靠右），第二排轻筛选 —— MKP 是**全局唯一的已应用状态条**（不跟机型筛选走，
- * 筛没了有「定位」），切片器是**喷嘴 / 层高筛选**（没有应用概念，不找替代状态）。
- * 左右 padding 收到 `--page-x`（约 20–24px），与表格名称列同一条线。
+ * **融合 pill（G07-1 收编，A44 三轮定稿；2026-10-04 进产品）**：原来的「机型下拉
+ * （`PresetPicker`）+ 已应用状态条 + 定位按钮」三件并成一颗 PresetStatusPill ——
+ * 左拍「● 已应用 A1.toml · A1」是信息（带「已应用」两个字，作者第二轮点名保留），
+ * **点它 = 定位**：清掉机型筛选、把正在生效那行滚到眼前闪一下，不写「定位」两个字
+ * （作者第三轮）；右拍「▽ A1 ▾」是**机型筛选**（漏斗菜单，有「全部机型」一档）——
+ * 机型是**筛选**，不是切换（作者第二轮纠正：「这个是个筛选的……不能再用抽屉了」）。
+ * 三个事实（在生效的是谁 / 怎么找回它 / 看哪个机型）融进一颗件，机型信息从此只出现
+ * 这一次 —— `PresetPicker` 下拉整个退场。切片器没有「已应用」，它的筛选以**独立漏斗**
+ * 留在搜索左边（PresetStatusPill 的 named export），不硬凑成一颗。
+ *
+ * **「撤销应用」退役（作者 2026-10-04 裁决）**：不做取消应用 —— 总得有一套在生效。
+ * 后端 `clear_active_preset` 命令与数据层的 `clearApply` 照旧在（能力不删），
+ * 只是从此没有界面入口；pill 左拍上的「已应用」就是唯一的事实。
+ *
+ * **计数与台账住页脚（G07-1 的 4 号）**：工具条右端的「共 N 项 │ 仓库…」搬到表格下面
+ * 那条页脚，与右键提示同行 —— 工具条上只剩分段、搜索、导入与 pill。**compact / mini
+ * 的 MKP 档例外**：那一档第二排只有 pill 一个件太空，作者点名「小窗模式把它移到这上
+ * 面」—— 计数与台账回到 pill 右边那一排，页脚只留右键提示；切片器的筛选排本来就满
+ * （喷嘴 / 层高 chips），它的计数与台账任何档都住页脚。
  *
  * **页面里没有「预设」这两个字** —— 顶栏已经把「预设」高亮了，页面里再写一遍是重复。
  *
@@ -126,8 +140,8 @@ import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
-import PresetPicker from './PresetPicker'
 import PresetScopeBar from './PresetScopeBar'
+import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
@@ -171,11 +185,12 @@ interface Props {
   onOpenBbs?: (name: string) => void
 }
 
+/* 四档同一句（与参数页搜索框同一条规矩）：跨任何分界，框里的字都不换 */
 const PLACEHOLDER: Record<Density, string> = {
-  ultra: '搜索文件名或路径…',
-  wide: '搜索文件名或路径…',
+  ultra: '搜索文件…',
+  wide: '搜索文件…',
   compact: '搜索文件…',
-  mini: '搜索…',
+  mini: '搜索文件…',
 }
 
 /*
@@ -819,31 +834,6 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   }
 
   /**
-   * **撤销应用**：把「当前使用的那一条」撤掉（`api.clearActivePreset()`）。
-   *
-   * 与「应用」对称：写底账 → 重读底账。**幂等**（后端对"本来就没在应用"就是成功），
-   * **一个文件都不碰** —— 撤掉的是"哪一份在生效"这个指向。
-   * 状态条会跟着变回「还没有应用任何预设」那一段，那就是它的主要反馈；
-   * 这里另发一条提示条是为了说清那句最容易误解的话：**撤销 ≠ 删除**。
-   */
-  const runClearApply = () => {
-    setBusyKey('__clear-apply__')
-    data.clearApply().then(
-      () => {
-        setBusyKey(null)
-        setNote({
-          text: '已撤销应用 —— 现在没有生效的 MKP 配置（那份文件还在，随时可以再应用）',
-          bad: false,
-        })
-      },
-      (e: unknown) => {
-        setBusyKey(null)
-        setNote({ text: `撤销应用失败：${errorText(e)}`, bad: true })
-      },
-    )
-  }
-
-  /**
    * 「在 BBS 预设查看器中打开」的判据。
    *
    * 只看两件事：**是 BBS 工艺 profile**（`kind === 'bbs_profile'`）、**文件名是 .json**。
@@ -957,14 +947,6 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
-      /*
-       * **撤销应用**（本轮补的前端入口；后端 `clear_active_preset` 早有）——
-       * 只在"正在使用的那一行"上出现：别的行没有可撤的指向。
-       * 它**不是删除** —— 文件留在原处、随时能再应用，所以话术与「删除」明显分开。
-       */
-      ...(row.scope === 'local' && row.live
-        ? [{ id: 'clear-apply', label: '撤销应用', onSelect: () => runClearApply() }]
-        : []),
       ...(canEdit
         ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
         : []),
@@ -1043,28 +1025,106 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   const layerMain = page.slicerFilters.layers.slice(0, 6)
   const layerMore = page.slicerFilters.layers.slice(6)
 
+  /*
+   * 搜索框。两种类型共用这一个节点，只是排位不同：MKP 在 pill 左边、切片器在漏斗右边
+   * （G07-1 定稿的排位）。**固定 180px**，全档一样 —— 作者原话：「这个搜索有点长吧」，
+   * 不设 flex、不设 min-width，它就是 180，谁也别拉它；mini 档 CSS 收到 130。
+   */
+  const searchNode = (
+    <div className={s.search}>
+      <input
+        className={s.input}
+        value={page.query}
+        placeholder={PLACEHOLDER[density]}
+        aria-label="搜索预设文件"
+        onChange={(e) => page.setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          /* ESC 清空但不失焦 —— 清完通常是想换个词继续打 */
+          if (e.key === 'Escape' && page.query !== '') {
+            e.preventDefault()
+            page.setQuery('')
+          }
+        }}
+      />
+      {page.query !== '' && (
+        <button
+          type="button"
+          className={s.clear}
+          aria-label="清空搜索"
+          onClick={() => page.setQuery('')}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+
+  /*
+   * 「导入文件…」是**通用导入入口**（第十二层，住在 App 层）的第一个触发点：
+   * 这里只拿它的 `pickFiles`；拖拽那一半在任何页面都生效（把文件拖进窗口就行）。
+   * A44 稿上没有它（试验台没有导入这一层）—— 收编时保留，两种类型都排在搜索右边。
+   */
+  const importNode = (
+    <button
+      type="button"
+      className={s.importBtn}
+      title="把外部文件导入「我的文件」（现在收 .toml 预设；也可以直接把文件拖进窗口）"
+      onClick={imp.pickFiles}
+    >
+      导入文件…
+    </button>
+  )
+
+  /*
+   * 「共 N 项」+ 仓库台账（G07-1 的 4 号：住页脚，与右键提示同行；
+   * compact / mini 的 MKP 档由工具栏渲染这一份，页脚那份不画 —— 见 .foot 的说明）。
+   * **包成一个不拆分的整体** —— 窄窗折行时两样一起走，台账的竖线永远不会落单
+   * （作者圈过那半截孤线）。
+   *
+   * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
+   * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
+   * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
+   * 图标 / 模型不归这一页，哪个数里都不含它们。
+   * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
+   * 真机上还没接），id 集合分不出类型，先如实写全量。
+   */
+  const metaNode = (
+    <span className={s.meta}>
+      <span
+        className={s.counts}
+        title={`当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`}
+      >
+        共 {table.rows.length} 项
+      </span>
+      <span
+        className={s.ledger}
+        title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
+      >
+        仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
+        {mineCountOfAxis(data.mine, page.kind)}
+      </span>
+    </span>
+  )
+
   return (
     <div ref={rootRef} className={s.page} data-density={density}>
       <FieldLayer>
         {/*
-         * 一条工具条，**没有标题** —— 顶栏已经把「预设」高亮了。
-         * 宽档一行摆完（机型 · 两条分段 · 搜索 · 共 N 项），compact / mini 自动折两行
-         * （第一行机型 + 搜索，第二行两条分段 + 计数）——
+         * 工具栏区（G07-1 收编：融合 pill + 计数台账住页脚）——
+         *
+         *   MKP    宽档    类型分段 位置分段(右) 搜索 导入 pill(右)
+         *          compact 第一排：类型 位置 搜索 导入；第二排：pill + 计数台账
+         *   切片器  宽档    类型分段 位置分段(右) 漏斗 搜索 导入；第二排：chips
+         *
+         * pill = PresetStatusPill：左拍「● 已应用 …」点击 = 定位（清筛选 + 闪行），
+         * 右拍 = 机型筛选漏斗。切片器没有「已应用」，它的筛选是独立漏斗
+         * （PresetMachineFilter，就是 pill 的右拍单拎出来），排在搜索左边。
+         * 计数与台账住页脚（.foot）；compact / mini 的 MKP 档搬回 pill 右边
+         * （作者：「小窗模式把它移到这上面」—— 那一排只有 pill 一个件太空）。
          * **一个控件都不藏进「更多」**：藏起来等于让人猜。
-         * 各段的先后由各自 CSS 里的 `order` 排，`.break` 是窄档那一下换行。
+         * 换行靠 flex-wrap 自然折 + .tbBreak（切片器 chips 恒在第二排）。
          */}
-        {/*
-         * 工具栏区（主工具栏与轻筛选**合进一个换行容器**）——
-         * 一排排内容靠 `.tbBreak`（flex-basis: 100% 的零高断行）与各子项的 order 排位：
-         *
-         *   宽档        类型分段 位置分段(右) 机型 搜索 ┃ 已应用条│喷嘴 ┃ 层高 共N 台账
-         *   mini/compact  类型 位置 机型 ┃ 已应用条 搜索(右) ┃ 共N 台账
-         *                （切片器：喷嘴 搜索(右) ┃ 层高 共N 台账）
-         *
-         * mini 档搜索挪到下面状态条同一行的右端 —— 少占一行（作者本轮要求）。
-         * 各排左右都从 --page-x 起（content-left / 右线）。
-         */}
-        <div className={s.toolbar}>
+        <div className={s.toolbar} data-kind={page.kind}>
           <PresetScopeBar
             kind={page.kind}
             scope={page.scope}
@@ -1072,110 +1132,37 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
             onScope={setScope}
           />
 
-          <PresetPicker
-            machines={data.machines}
-            machineId={data.machineId}
-            onPick={pickMachine}
-          />
-
-          <div className={s.search}>
-            <input
-              className={s.input}
-              value={page.query}
-              placeholder={PLACEHOLDER[density]}
-              aria-label="搜索预设文件"
-              onChange={(e) => page.setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                /* ESC 清空但不失焦 —— 清完通常是想换个词继续打 */
-                if (e.key === 'Escape' && page.query !== '') {
-                  e.preventDefault()
-                  page.setQuery('')
-                }
-              }}
-            />
-            {page.query !== '' && (
-              <button
-                type="button"
-                className={s.clear}
-                aria-label="清空搜索"
-                onClick={() => page.setQuery('')}
-              >
-                ×
-              </button>
-            )}
-          </div>
-
-          {/*
-           * 「导入文件…」是**通用导入入口**（第十二层，住在 App 层）的第一个触发点：
-           * 这里只拿它的 `pickFiles`；拖拽那一半在任何页面都生效（把文件拖进窗口就行）。
-           */}
-          <button
-            type="button"
-            className={s.importBtn}
-            title="把外部文件导入「我的文件」（现在收 .toml 预设；也可以直接把文件拖进窗口）"
-            onClick={imp.pickFiles}
-          >
-            导入文件…
-          </button>
+          {page.kind === 'mkp' ? (
+            <>
+              {searchNode}
+              {importNode}
+              <PresetStatusPill
+                applied={page.applied}
+                appliedFileName={page.appliedFileName}
+                appliedMachineText={page.appliedMachineText}
+                appliedIsMine={page.appliedIsMine}
+                onLocate={locateApplied}
+                machines={data.machines}
+                machineId={data.machineId}
+                onPick={pickMachine}
+              />
+              {(density === 'compact' || density === 'mini') && metaNode}
+            </>
+          ) : (
+            <>
+              <PresetMachineFilter
+                machines={data.machines}
+                machineId={data.machineId}
+                onPick={pickMachine}
+              />
+              {searchNode}
+              {importNode}
+            </>
+          )}
 
           <span className={s.tbBreak} aria-hidden />
 
-          {page.kind === 'mkp' ? (
-            page.applied === null ? (
-              <span className={s.stripDim}>
-                还没有应用任何预设 —— 在下面挑一套 MKP 配置，点「应用」把它设为当前的
-              </span>
-            ) : (
-              <div
-                className={s.appliedStrip}
-                /* 应用成功的提示条撤了（作者：上面有了），这句说明跟着搬到这里。
-                   它落在本机（localStorage）—— 不再是「刷新会还原」 */
-                title="落在本机，刷新还在（本机底账）"
-              >
-                <span className={s.appliedDot} aria-hidden />
-                <span className={s.appliedText}>
-                  已应用 <b className={s.appliedName}>{page.appliedFileName}</b>
-                  <span className={s.appliedSep}>·</span>
-                  {page.appliedMachineText}
-                </span>
-                {/*
-                 * 正在使用的是**你自己那份**（第七层：两条线都能成为使用中的那一份）。
-                 * 这一小句不能省：用户得看得出"现在跑的不是官方那份"——
-                 * 它不跟着官方更新。
-                 */}
-                {page.appliedIsMine && (
-                  <span
-                    className={s.appliedMine}
-                    title="正在使用的是你自己那份（presets-mine/…）—— 官方怎么更新都不会动它"
-                  >
-                    我的文件
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className={s.locateBtn}
-                  title="清掉机型筛选，把正在生效的那一行滚到眼前"
-                  onClick={locateApplied}
-                >
-                  定位
-                </button>
-                {/*
-                 * **撤销应用**（本轮补的前端入口）—— 后端 `clear_active_preset` 早就有了，
-                 * 少的只是这一颗按钮。它撤掉的是"哪一份在生效"这个指向，**不是删除**：
-                 * 文件留在原处、随时能再应用回来，所以话术要说清这一点。
-                 */}
-                <button
-                  type="button"
-                  className={s.locateBtn}
-                  disabled={busyKey === '__clear-apply__'}
-                  title="把当前生效的配置撤掉（人回到「没有应用任何预设」）—— 那份文件不会被删，随时能再应用"
-                  onClick={runClearApply}
-                >
-                  {busyKey === '__clear-apply__' ? '撤销中……' : '撤销应用'}
-                </button>
-              </div>
-            )
-          ) : (
+          {page.kind !== 'mkp' && (
             <>
               <div className={`${s.filterGroup} ${s.groupNozzle}`}>
                 <span className={s.filterLabel}>喷嘴</span>
@@ -1265,43 +1252,6 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
             </>
           )}
 
-          {/*
-           * 右端两样（作者：页脚那行白的整个去掉，内容放到这一行）：
-           * 「共 N 项」是这张表筛后的真行数；仓库台账是全局事实 —— 一道竖线隔开。
-           * 两样包进一个不拆分的 .meta：窄窗折行时**一起**走，台账的竖线不会落单。
-           *
-           * mini 档（456×420 这类小窗）：台账不再占位（CSS 隐掉），
-           * 它的数搬进「共 N 项」的 title —— 小窗里那一行高度留给表格，悬停仍看得到。
-           */}
-          <span className={s.meta}>
-            <span
-              className={s.counts}
-              title={
-                `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项` +
-                /* 小窗里台账整条隐掉了，数并进这句，免得连同它的说明一起消失 */
-                (density === 'mini'
-                  ? `。仓库里这一档类型一共 ${treeCountOfAxis(data.tree, page.kind)} 个官方文件（全机型，已剔掉仅归档的）· 本机 ${data.localIds.length} 个官方副本 · 我的 ${mineCountOfAxis(data.mine, page.kind)} 个。${DOWNLOAD_WHY}`
-                  : '')
-              }
-            >
-              共 {table.rows.length} 项
-            </span>
-            {/*
-             * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
-             * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
-             * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
-             * 图标 / 模型不归这一页，哪个数里都不含它们。
-             * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
-             * 真机上还没接），id 集合分不出类型，先如实写全量。
-             */}
-            <span
-              className={s.ledger}
-              title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
-            >
-              仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
-              {mineCountOfAxis(data.mine, page.kind)}
-            </span>
-          </span>
         </div>
 
         <div className={s.main}>
@@ -1618,8 +1568,21 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           </Drawer>
         </div>
 
-        {/* 页脚整个去掉了：仓库台账搬上状态条那一行，
-            表格下面只留右键提示 —— 少一层白，页面到底就到底 */}
+        {/*
+         * 页脚（G07-1 的 4 号收编）：右键提示与「共 N 项 │ 仓库…」同一条 ——
+         * 工具条右端那组搬到这里，工具条上只剩分段、搜索与 pill。
+         * compact / mini 的 MKP 档例外：计数与台账回 pill 右边（见工具栏），
+         * 这一档的页脚只留右键提示；切片器的筛选排本来就满，它任何档都住页脚。
+         * 「暂不支持」时没有表可右键，提示不画（计数与台账照旧 —— 那是全局事实）。
+         */}
+        <div className={s.foot}>
+          {!page.unsupported && (
+            <span className={s.footHint}>
+              右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）
+            </span>
+          )}
+          {(density === 'ultra' || density === 'wide' || page.kind === 'slicer') && metaNode}
+        </div>
 
         <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />
       </FieldLayer>

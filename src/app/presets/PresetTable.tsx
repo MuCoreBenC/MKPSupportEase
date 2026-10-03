@@ -717,10 +717,6 @@ export default function PresetTable({
 
         {rows.length === 0 && <p className={s.empty}>{emptyText()}</p>}
       </div>
-
-      <p className={s.hint}>
-        右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）
-      </p>
     </div>
   )
 }

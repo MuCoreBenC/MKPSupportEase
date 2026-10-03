@@ -2,23 +2,28 @@
  * 预设页的骨架。与参数页同一套宽松尺度（`--pad` / `--fs-*`），
  * 不套工作台那套密集的 `--w-*` —— 两边的密度取向不同。
  *
- * # 上面是**两排工具栏**
+ * # 上面是工具栏 + 下面是页脚（G07-1 收编，2026-10-04 从 A44 收进产品）
  *
  * ```
- * ┌MKP 配置│切片器配置┐ ┌本地│云端┐        机型[A1 ▾]  [搜索…]
- * ● 已应用 A1.toml · A1   [定位]                        共 4 项   ← MKP
- * 喷嘴 全部 0.2 0.4 …     层高 全部 0.08 … 更多                    ← 切片器
+ * ┌MKP 配置│切片器配置┐ ┌本地│云端┐ [搜索…] ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  ← MKP
+ * 喷嘴 全部 0.2 0.4 0.6   层高 全部 0.08 0.10 … 更多                        ← 切片器
  * ├────────────────────────────────────────────┤
- * 名称            机型   版本    时间   大小   来源   状态      操作
+ * 名称            机型   版本    时间   来源   操作
+ * ├────────────────────────────────────────────┤
+ * 右键任意一行还有…        共 4 项 │ 仓库 20 · 本机 4 + 我的 3   ← 页脚
  * ```
  *
- * 第一排主工具栏：一级类型分段（38px / 16px 字）+ 二级位置分段（32px）靠左，
- * 机型 + 搜索（32px）靠右 —— 左右都占住，不再「控件漂在空白里」。
- * 第二排轻筛选：MKP 是全局唯一的**已应用状态条**（不跟机型筛选走，筛没了有「定位」），
- * 切片器是**喷嘴 / 层高筛选**（没有应用概念，也不找替代状态 —— 作者定的规则）。
+ * 工具条上一颗**融合 pill**（PresetStatusPill）：左拍「● 已应用 …」点击 = 定位
+ * （清机型筛选 + 滚到眼前闪一下），右拍 = 机型筛选漏斗 —— 机型下拉、已应用状态条、
+ * 定位按钮三件并成一颗（作者三轮判词见 PagePresets.tsx 的文件头）。
+ * 切片器没有「已应用」，它的机型筛选是独立漏斗，与搜索同排。
  *
- * **左右一条线**：`--page-x`（约 20–24px）从工具栏贯到表格名称列与页脚，
- * 比原来的 `--pad + 10px`（28–32px）收一档 —— 作者：「收到跟表格名称列更严格地对齐」。
+ * **计数与台账住页脚（G07-1 的 4 号）**：「共 N 项 │ 仓库…」与右键提示同一条，
+ * 工具条右端从此只剩分段、搜索、导入与 pill。compact / mini 的 MKP 档例外：那一档
+ * 第二排只有 pill 一个件太空，作者点名「小窗模式把它移到这上面」—— 计数与台账回
+ * pill 右边，页脚只留右键提示；切片器的筛选排本来就满，任何档都住页脚。
+ *
+ * **左右一条线**：`--page-x`（约 20–24px）从工具栏贯到表格名称列与页脚。
  *
  * **一个控件都不藏进「更多」**（搜索收进「更多」的只有层高的溢出值）。
  */
@@ -52,8 +57,9 @@
 
 /*
  * 主工具栏与轻筛选**合进一个换行容器** —— 各排靠 `.tbBreak`
- * （flex-basis: 100% 的零高断行）切开，mini 档再用 order 把搜索挪到状态条
- * 同一行的右端（少占一行）。分隔线画在容器底部：工具栏与表格才是两个层次。
+ * （flex-basis: 100% 的零高断行）切开；data-kind 挂在容器上：
+ * mini 档切片器的排位要按它换（见文件尾的窄窗段）。
+ * 分隔线画在容器底部：工具栏与表格才是两个层次。
  * 每排左右都从 --page-x 起（content-left / 右线）。
  */
 .toolbar {
@@ -134,7 +140,8 @@
 
 /*
  * 「导入文件…」（第十二层）：通用导入入口在这一页的触发点。
- * 与批量那颗按钮同一档（同一套变量，两处看起来是一家人）；宽度自适应、不抢行的空间。
+ * A44 稿上没有它（试验台没有导入这一层），收编时保留：与批量那颗按钮同一档
+ * （同一套变量，两处看起来是一家人）；宽度自适应、不抢行的空间。
  * mini 档它排到最后一行（order 10，见文件末尾的窄窗口段）。
  */
 .importBtn {
@@ -162,96 +169,12 @@
 
 /* ---------- 轻筛选 / 状态区（在同一个换行容器里） ---------- */
 
-/* MKP 的已应用状态条：全局唯一的一条事实，不跟机型筛选走。
-   自适应宽度 —— 只包住内容，不拉通整行（作者：「为什么要拉这么长」） */
-.appliedStrip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-  height: 28px;
-  padding: 0 4px 0 10px;
-  border-radius: var(--r-sm);
-  background: var(--accent-soft);
-}
-
-.appliedDot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.appliedText {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-}
-
-.appliedName {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.appliedSep {
-  margin: 0 2px;
-  color: var(--text-3);
-}
-
-/*
- * 「我的文件」那一小枚：正在使用的是用户自己那份（不是官方交付那份）。
- *
- * 与表里「我的」来源 chip 同一层意思，但状态条独立成条 —— 它要说清"现在跑的这份
- * 不跟着官方更新"，所以必须在状态条上单独看得见。
- */
-.appliedMine {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  margin-left: 6px;
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-/* 「定位」：清掉机型筛选，把正在生效的那一行滚到眼前 */
-.locateBtn {
-  flex-shrink: 0;
-  margin-left: auto;
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--accent);
-  border-radius: 2px;
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: var(--fs-label);
-  color: var(--accent-deep);
-  cursor: pointer;
-}
-
-.locateBtn:hover {
-  color: var(--accent);
-}
-
-.locateBtn:focus-visible {
-  outline: none;
-}
-
 /*
  * 「定位」的闪烁层：**一块盖在行上的普通 div**，不进表格 ——
  * 折叠边框表内部（tr/td 背景）跑任何 keyframes，适配缩放下合成层缓存都会留
  * 旧帧，读起来就是行里若隐若现的白带。div 的终态是 display:none，缓存与否
  * 无关紧要。位置由 locateApplied 现量现设（相对 .page，它本就是 relative）。
+ * 入口现在是融合 pill 的左拍（G07-1 收编）—— 原来那颗「定位」按钮退场。
  */
 .locateFlash {
   position: absolute;
@@ -259,13 +182,6 @@
   display: none;
   background: rgb(32 178 90 / 20%);
   pointer-events: none;
-}
-
-/* 一套都还没应用：中性说明，不是错误 */
-.stripDim {
-  min-width: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
 }
 
 /*
@@ -374,9 +290,10 @@
 }
 
 /*
- * 右端信息组：「共 N 项」+ 仓库台账。**包成一个不拆分的整体** ——
- * 窄窗折行时两样一起走，台账的竖线永远不会落单（作者圈过那半截孤线）。
- * margin-left: auto 把整组顶到右线。
+ * 「共 N 项」+ 仓库台账（G07-1 的 4 号：住在页脚，与右键提示同行；
+ * compact / mini 的 MKP 档由工具栏渲染这一份，页脚那份不画 —— 见 .foot 的说明）。
+ * **包成一个不拆分的整体** —— 窄窗折行时两样一起走，台账的竖线永远不会落单
+ * （作者圈过那半截孤线）。margin-left: auto 把整组顶到右线。
  */
 .meta {
   display: inline-flex;
@@ -395,7 +312,7 @@
   white-space: nowrap;
 }
 
-/* 仓库台账：从页脚搬上来（页脚那行白的整个去掉），与「共 N 项」一道竖线隔开 */
+/* 仓库台账：与「共 N 项」一道竖线隔开；两个数都跟着当前类型档走（见 tsx） */
 .ledger {
   flex-shrink: 0;
   padding-left: 12px;
@@ -404,6 +321,34 @@
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* ---------- 页脚（G07-1 的 4 号：右键提示 + 计数台账同一条） ---------- */
+
+/*
+ * 表格下面那一条。第五轮它被整个去掉（内容搬上状态条），4 号收编又把它请回来：
+ * 右键提示在左，「共 N 项 │ 仓库…」在右（.meta 的 auto 边距顶到右线）——
+ * 工具条上从此只剩分段、搜索、导入与 pill。
+ * compact / mini 的 MKP 档这里只画提示（计数与台账在工具栏的 pill 右边）；
+ * 「暂不支持」时没有表可右键，提示不画，计数与台账照旧（全局事实）。
+ */
+.foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px var(--page-x);
+  border-top: 1px solid var(--line);
+}
+
+.footHint {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* ---------- 内容区（提示条 + 一张表） ---------- */
@@ -440,8 +385,7 @@
  *   中性（.note）    真的做了（置顶 / 取消置顶），或正在请壳做
  *   琥珀（.noteBad） **没接上**（尚未实现 / 契约里还没有这个方法）—— 不是操作失败，
  *                    所以不上错误红；但也绝不许静默成功
- */
-/*
+ *
  * 提示条：**主句一行 + 逐份结局若干行**（批量里没成的那几份各占一行）。
  * 所以外层是竖排容器，主句自己那一行还要摆那颗关闭按钮（`margin-left: auto` 靠它）。
  */
@@ -474,6 +418,37 @@
 
 .noteItem:last-child {
   padding-bottom: 7px;
+}
+
+.note {
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+
+.noteBad {
+  background: #fff3e2;
+  color: #a86416;
+}
+
+.noteClose {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+.noteClose:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
 }
 
 /* ---------- 「旧版本」抽屉（归档区那一面） ---------- */
@@ -778,37 +753,6 @@
   cursor: default;
 }
 
-.note {
-  background: var(--surface-sunken);
-  color: var(--text-2);
-}
-
-.noteBad {
-  background: #fff3e2;
-  color: #a86416;
-}
-
-.noteClose {
-  flex-shrink: 0;
-  margin-left: auto;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  color: inherit;
-  cursor: pointer;
-}
-
-.noteClose:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px currentcolor;
-}
-
 /* ---------- 详情模态框里的字段表 ---------- */
 
 .facts {
@@ -918,76 +862,40 @@
 }
 
 /*
- * mini：**两排**（456×420 这类小窗）。
- *
- * 作者划掉了原来第三排那截「共 1 项 · 仓库 20 · 本机 4 + 我的 3」，说
- * 「可以变成两行的……也可以把它压窄一点」。所以这一档的排位重排成：
- *
- *   行 1  类型分段 ┊ 位置分段 … 机型（.picker 的 order 3，写在它自己的 module）
- *   行 2  已应用条 ┊ 喷嘴 … 搜索(130) … 共 N 项
- *
- * 三处变化：
- *   · 机型从最末一排挪到第一排右端 —— 那半行本来就空着；
- *   · 搜索 order 7 → 6，与状态条/喷嘴同排，宽度 150 → 130（作者：压窄一点）；
- *   · 台账（仓库 N · 本机 N + 我的 N）不再单独占一排：CSS 隐掉，
- *     内容搬进「共 N 项」的 title（见 PagePresets.tsx）—— 小窗里它值一行高度，
- *     而它是三档全局事实，悬停看得到就够，不算消失。
- *
- * 断行 2（tbBreak2）仍在切片器的喷嘴与层高之间：层高照旧另起一排。
- * 注意 .seg / .segPush / .picker 的 order 写在它们**自己的 module** 里
- * （CSS Modules 类名按文件哈希，跨 module 的类选择器够不着）。
+ * mini：搜索收窄到 130（第三十一轮，作者：「可以把它压窄一点」）——
+ * 宽档仍是固定 180。compact（600×500 这类）不收：类型分段 + 位置分段 + 搜索
+ * 在第一排摆得下。
  */
-[data-density='mini'] .tbBreak {
-  order: 4;
-}
-
-[data-density='mini'] .appliedStrip {
-  order: 5;
-}
-
-[data-density='mini'] .groupNozzle {
-  order: 5;
-}
-
-[data-density='mini'] .stripDim {
-  order: 5;
-}
-
 [data-density='mini'] .search {
-  order: 6;
-  margin-left: auto;
   width: 130px;
 }
 
 /*
- * 「共 N 项」与搜索同行。
- *
- * 这里要去掉宽档那条 `margin-left: auto` —— 搜索自己就带着
- * `margin-left: auto`，两个 auto 会**平分**剩余空间，于是搜索被停在半路：
- * 实测 456px 窗口下状态条到 803、搜索 853–983（左边空 50、右边到「共 N 项」还有 50）。
- * 作者：「搜索的，你需要把它往右靠呀」。
- *
- * 改成 meta 不吃空间、由搜索的 auto 吃掉 —— 搜索贴住右端，「共 N 项」紧跟它右边。
+ * mini 的切片器排位（「搜索跟喷嘴同行」）：搜索 order 6 落到喷嘴那一行，
+ * 层高照旧另起一排。MKP 那一档不掺和 —— pill 与计数台账自然落到第二排
+ * （DOM 顺序就是排位）。这组规则只在切片器生效：容器上的 data-kind 是作用域。
  */
-[data-density='mini'] .meta {
-  order: 7;
-  margin-left: 0;
+[data-density='mini'] .toolbar[data-kind='slicer'] .tbBreak {
+  order: 4;
 }
 
-/* 台账在 mini 档不占位（内容在「共 N 项」的 title 里） */
-[data-density='mini'] .ledger {
-  display: none;
+[data-density='mini'] .toolbar[data-kind='slicer'] .groupNozzle {
+  order: 5;
 }
 
-[data-density='mini'] .tbBreak2 {
+[data-density='mini'] .toolbar[data-kind='slicer'] .search {
+  order: 6;
+}
+
+[data-density='mini'] .toolbar[data-kind='slicer'] .tbBreak2 {
   order: 8;
 }
 
-[data-density='mini'] .groupLayer {
+[data-density='mini'] .toolbar[data-kind='slicer'] .groupLayer {
   order: 9;
 }
 
-/* 「导入文件…」在 mini 排到最后（层高那一排的末尾），不挤前面几段的直线 */
+/* 「导入文件…」在 mini 排到最后一行（层高那一排的末尾），不挤前面几段的直线 */
 [data-density='mini'] .importBtn {
   order: 10;
 }
