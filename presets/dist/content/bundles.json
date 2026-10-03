@@ -1,49 +1,94 @@
 {
   "bundles": [
     {
-      "id": "A1_default",
+      "id": "A1_STANDARD",
       "display": "官方推荐",
       "machineId": "A1",
       "assetRefs": [
+        "a1-standard",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
-      "id": "A1_MINI_default",
+      "id": "A1_FAST",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-fast",
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_FASTV3.3",
+      "display": "官方推荐",
+      "machineId": "A1",
+      "assetRefs": [
+        "a1-fastv3.3",
+        "a1-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_STANDARD",
       "display": "官方推荐",
       "machineId": "A1_MINI",
       "assetRefs": [
+        "a1_mini-standard",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_FAST",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-fast",
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
+    },
+    {
+      "id": "A1_MINI_FASTV3.3",
+      "display": "官方推荐",
+      "machineId": "A1_MINI",
+      "assetRefs": [
+        "a1_mini-fastv3.3",
+        "a1_mini-bbs-04-020"
+      ],
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "P1S_default",
       "display": "官方推荐",
       "machineId": "P1S",
       "assetRefs": [
+        "p1s-lite",
         "p1s-bbs-04-024"
       ],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "P2S_default",
       "display": "官方推荐",
       "machineId": "P2S",
       "assetRefs": [
+        "p2s-standard",
         "p2s-bbs-04-024"
       ],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     },
     {
       "id": "X1C_default",
       "display": "官方推荐",
       "machineId": "X1C",
       "assetRefs": [
+        "x1c-lite",
         "x1c-bbs-04-024"
       ],
-      "updatedAt": "2026-07-12"
+      "updatedAt": "2026-10-03"
     }
   ]
 }
