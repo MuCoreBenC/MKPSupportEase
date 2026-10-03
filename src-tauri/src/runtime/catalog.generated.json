@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "ad1b1189418ac3be",
+  "revision": "e821f7a7f4d7272a",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -69,21 +69,24 @@
           "name": "标准版",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置，适合大多数用户"
+          "description": "官方标准配置，适合大多数用户",
+          "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "recommendedBundle": "A1_FAST",
           "tag": "热门",
-          "description": "支持快拆配件的改装配置"
+          "description": "支持快拆配件的改装配置",
+          "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "image": null
         }
       ],
       "zones": []
@@ -151,21 +154,24 @@
           "name": "标准版",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置"
+          "description": "官方标准配置",
+          "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
-          "description": "支持快拆配件的改装配置"
+          "description": "支持快拆配件的改装配置",
+          "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本"
+          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "image": null
         }
       ],
       "zones": []
@@ -232,7 +238,8 @@
           "name": "lite版",
           "recommendedBundle": "P1S_default",
           "tag": "推荐",
-          "description": "群里开源的最新lite"
+          "description": "群里开源的最新lite",
+          "image": null
         }
       ],
       "zones": [
@@ -345,7 +352,8 @@
           "name": "标准版",
           "recommendedBundle": "P2S_default",
           "tag": "推荐",
-          "description": "未完成，没有打印机"
+          "description": "未完成，没有打印机",
+          "image": null
         }
       ],
       "zones": [
@@ -462,7 +470,8 @@
           "name": "lite版",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
-          "description": "群里开源的最新lite"
+          "description": "群里开源的最新lite",
+          "image": null
         }
       ],
       "zones": [

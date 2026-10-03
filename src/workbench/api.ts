@@ -726,6 +726,11 @@ export interface VersionView {
   recommendedBundle: string | null
   tag: string | null
   description: string | null
+  /**
+   * 这一版专属的外观图（**资产 id**）。`null` = 回落机型图（`MachineView.image`）——
+   * 界面上要说明白那是回落，不是"没配"
+   */
+  image: string | null
   /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
   hasRecipe: boolean
 }
@@ -891,7 +896,7 @@ export interface BundleList {
 export const assetUrl = (url: string) => encodeURI(url)
 
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
-export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description'
+export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description' | 'image'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'

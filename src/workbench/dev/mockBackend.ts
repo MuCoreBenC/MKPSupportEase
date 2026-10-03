@@ -307,8 +307,9 @@ const MACHINE_VIEWS = [
     defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
     hasDimensions: true, zoneCount: 0, file: 'A1.toml',
     versions: [
-      { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
-      { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, hasRecipe: true },
+      // `image` = 这一版专属的外观图（资产 id）。`null` = 回落机型图（第三刀的默认）
+      { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, image: null, hasRecipe: true },
+      { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, image: 'a1_mini-variant-image', hasRecipe: true },
     ],
   },
 ]

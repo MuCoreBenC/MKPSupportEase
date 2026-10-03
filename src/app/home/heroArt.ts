@@ -19,19 +19,23 @@
  * 这也正是这里**不再有 import** 的原因：URL 必须来自 `catalog.assets[].path`，
  * 而不是某个构建期写死的模块路径 —— 写死的那个就是「第二张表」。
  *
- * # 回落链：快拆版整机 → 整机 → 品牌 logo → 空
+ * # 回落链：版本图 → 机型图 → 品牌字标 → 空
  *
- * 前两级都是**选择层级**：选了机型看整机图，再选了版本看「装了快拆件那张」
- * （`Machine.imageVariant`，今天只有 A1 mini 有）。
+ * 图位分三层（作者 2026-10-03 定）：**品牌图 / 机型图 / 版本图**，**版本没有图就回落机型图**
+ * —— 「标准版」与「快拆版」是同一台机器下两个独立的版本实体，各自有各自的图。
  *
- * 第二张图 2026-10-03 之前硬编码在本文件（`MODEL_ART.A1_MINI.withVariant`）——数据侧
- * 看不见、工作台换不掉，而台账里那张图谁都不引用。现在它住机型文件：
- * 「这台机器有两张图」是机型自己的事，不是界面的事。
+ * - 版本图 = `sel.variant` 选中的那一版的 `image`（**选到版本这一级**才看它）
+ * - 机型图 = `machine.image`
+ * - 品牌字标 = `BRAND_ART`（**内置兜底**：台账里没配品牌图、或那张图认不出来时用）
+ *
+ * `Machine.imageVariant`（装了快拆件那张）**不在这条链里** —— 那是**硬件外观变体**，
+ * 与版本不是一回事（作者裁定：不要拿它冒充版本）。它的数据留在机型文件里，
+ * 等将来有了真正的变体模型再说。
  *
  * 缺图一路往下落，不白屏：查不到 id / 那条资产没有 `path` / 机型压根没写 `image`
- * （A2L、P2S、X1C 今天就是）⇒ 品牌 logo。P2S / X1C 以前这里写着不存在的
+ * （A2L、P2S、X1C 今天就是）⇒ 品牌字标。P2S / X1C 以前这里写着不存在的
  * `/assets/printers/p2s.webp`：SPA 回落成 index.html，`<img>` 静默不显示，
- * 页签点得开、控制台也干净 —— 那条错路已经随显式表一起没了。
+ * 页签点得开、控制台也干净 —— 那条错路已随显式表一起没了。
  */
 
 import type { CatalogAsset, Machine } from '../../api/contract'
@@ -65,15 +69,15 @@ export function assetUrlOf(assets: CatalogAsset[], id: string | null | undefined
   return path === '' ? null : `/assets/${encodeURI(path)}`
 }
 
-/** 回落链：版本级图位 → 机型图 → 品牌 logo → 空 */
+/** 回落链：版本图 → 机型图 → 品牌字标 → 空 */
 export function pickArt(
   sel: Selection,
   machine: Machine | undefined,
   assets: CatalogAsset[],
 ): HeroArt | null {
-  /* 第二张图只在**选到版本**这一级才看（与旧表 `sel.variant && art.withVariant` 同一条件） */
-  const deep = sel.variant ? assetUrlOf(assets, machine?.imageVariant) : null
-  const photo = deep ?? assetUrlOf(assets, machine?.image)
+  /* 版本图只在**选到版本**这一级才看；那一版没配图就回落机型图（不是"没图"） */
+  const version = sel.variant ? machine?.versions.find((v) => v.id === sel.variant) : undefined
+  const photo = assetUrlOf(assets, version?.image) ?? assetUrlOf(assets, machine?.image)
   if (photo !== null) return { src: photo, kind: 'photo' }
 
   const logo = sel.brand ? BRAND_ART[sel.brand] : undefined

@@ -17,6 +17,8 @@ export interface RawBrand {
 }
 
 export interface RawVersion {
+  /** **这一版专属的外观图**（资产 id）。缺省 = 回落机型图 —— 演示数据里今天都没配 */
+  image?: string
   id: string
   name: string
   /** MKP 预设的文件名。**空字符串 = 没配**（A2L 就是空的） */

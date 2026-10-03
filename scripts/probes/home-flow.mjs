@@ -163,14 +163,17 @@ if (process.argv.includes('--pick')) {
   if (broken.length > 0) problems.push(`图片没加载成功（路径或文件不对）：${JSON.stringify(broken)}`)
 
   /*
-   * 再走一遍**两个选择层级**，把「快拆版第二图位」钉住（2026-10-03 第二刀）：
+   * 再走一遍**两个选择层级**，把图位分层钉住（2026-10-03 第三刀）：
    *
-   *   选到机型（还没选版本）→ `printers/a1mini.webp`
-   *   再选到版本            → `printers/a1mini-variant.webp`   ← 机型文件的 `imageVariant`
+   *   选到机型（还没选版本）→ `printers/a1mini.webp`   ← 机型图
+   *   再选到版本            → `printers/a1mini.webp`   ← **版本没配图 ⇒ 回落机型图**
+   *
+   * 两条期待值相同是**故意的**：图位分层是「品牌图 / 机型图 / 版本图，版本缺则回落机型」，
+   * 而 A1 mini 的 `STANDARD` 今天**没有**版本图 —— 所以第三级理应与第二级同图。
+   * 哪天给那一版配了版本图，这条断言会红，那正是它该红的时候（改数据要改判据）。
    *
    * 这两个 URL 都是**台账 path**（`catalog.assets[]` 的 id → `path` → `/assets/<path>`），
-   * 不是构建期写死的模块路径 —— 所以这条断子在"工作台换图 / 换指向"之后依然成立，
-   * 而在客户端又回去认识具体文件名时会红。
+   * 不是构建期写死的模块路径 —— 在客户端又回去认识具体文件名时，这条断言会红。
    *
    * 量法同前：**停在选择那一页时 DOM 里没有 `<img>`**（那张卡还没挂），必须回主页才量得到。
    */
@@ -195,7 +198,7 @@ if (process.argv.includes('--pick')) {
     }
   }
   await artAt(['A1 mini'], '/assets/printers/a1mini.webp')
-  await artAt(['标准版'], '/assets/printers/a1mini-variant.webp')
+  await artAt(['标准版'], '/assets/printers/a1mini.webp')
 }
 
 /* 校准页 */

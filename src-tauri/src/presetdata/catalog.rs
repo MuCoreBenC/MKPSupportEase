@@ -53,6 +53,14 @@ pub struct MachineVersion {
     pub tag: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// **这一版专属的外观图**（资产 id）。**缺 = 回落机型图**（不是"没图"）。
+    ///
+    /// 2026-10-03（作者定层级：品牌图 / 机型图 / 版本图，版本缺则回落机型）：
+    /// 「标准版」与「快拆版」是同一台机器下的两个版本实体，各自可以有各自的图。
+    /// 这与 [`Machine::image_variant`] 是两件事 —— 那个是**硬件外观变体**（装了快拆件），
+    /// 不与版本混。
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 /// 一块禁区 —— 一串点围成的多边形
@@ -192,6 +200,8 @@ pub enum VersionField {
     RecommendedBundle,
     Tag,
     Description,
+    /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
+    Image,
 }
 
 impl VersionField {
@@ -199,6 +209,7 @@ impl VersionField {
         match self {
             Self::Name => "name",
             Self::RecommendedBundle => "recommendedBundle",
+            Self::Image => "image",
             Self::Tag => "tag",
             Self::Description => "description",
         }
@@ -415,6 +426,8 @@ impl Machine {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
+            image: None,
         });
         Ok(())
     }
@@ -517,6 +530,7 @@ impl Machine {
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
             VersionField::Description => v.description = owned,
+            VersionField::Image => v.image = owned,
         }
         Ok(())
     }
@@ -923,6 +937,7 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
                             description: g("description"),
+                            image: g("image"),
                         })
                     })
                     .collect()

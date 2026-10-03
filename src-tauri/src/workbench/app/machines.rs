@@ -41,6 +41,9 @@ pub struct VersionView {
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
     pub description: Option<String>,
+    /// **这一版专属的外观图**（资产 id）。`None` = 回落机型图（`Machine::image`）——
+    /// 界面上要说明白那是回落，不是"没配"
+    pub image: Option<String>,
     /// **参数正文已补**（b05 Task 14.4 / doc §4.3 第 6 步）：这个版本在
     /// `param_registry.toml` 的 `machineVariants` 里有没有 `{机型}:{版本}` 形状的
     /// 显式键。`false` = 纯继承基底，界面上标「参数源待补」——
@@ -305,6 +308,7 @@ fn list_of(p: &Presets) -> MachineList {
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
                             description: v.description.clone(),
+                            image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),
                         }
                     })

@@ -122,6 +122,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   const [bunPick, setBunPick] = useState('')
   const [imgOpen, setImgOpen] = useState(false)
   const [iconOpen, setIconOpen] = useState(false)
+  /** 版本专属外观图（第三刀：图位分层 品牌 → 机型 → 版本，版本缺则回落机型） */
+  const [verImgOpen, setVerImgOpen] = useState(false)
   const [editVOpen, setEditVOpen] = useState<string | null>(null)
   const [evName, setEvName] = useState('')
   const [evTag, setEvTag] = useState('')
@@ -215,7 +217,11 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
   }
 
   /** 改版本的一格。同上 */
-  const saveVersion = async (versionId: string, field: 'name' | 'tag' | 'description' | 'recommendedBundle', value: string | null) => {
+  const saveVersion = async (
+    versionId: string,
+    field: 'name' | 'tag' | 'description' | 'recommendedBundle' | 'image',
+    value: string | null,
+  ) => {
     if (!m) return
     try {
       setList(await wb.setVersionField(m.id, versionId, field, value))
@@ -917,6 +923,20 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
                       }}
                     />
                   </span>
+
+                  {/* 这一版专属的外观图。**留空 = 回落机型图**（作者定的默认）——
+                      界面上说清那是回落，别让人以为"没配"是坏了 */}
+                  <span className={s.kvKey}>版本图</span>
+                  <span className={s.kvVal}>
+                    <AssetField
+                      label="版本图"
+                      asset={assetById(picked.image)}
+                      onOpen={() => setVerImgOpen(true)}
+                    />
+                    <span className={s.cardNote}>
+                      留空就用这台机型的图（图位分层：品牌 → 机型 → 版本，版本缺则回落机型）
+                    </span>
+                  </span>
                 </div>
               </div>
 
@@ -1183,7 +1203,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
         </div>
       </ModalC14>
 
-      {/* —— 素材选择器：机型图 / 图标（都是资产 id，只从库里挑） —— */}
+      {/* —— 素材选择器：机型图 / 图标 / 版本图（都是资产 id，只从库里挑） —— */}
       <AssetPicker
         open={imgOpen}
         title={`选择机型图 · ${m.id}`}
@@ -1196,6 +1216,20 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
           setImgOpen(false)
         }}
       />
+      {picked !== undefined && (
+        <AssetPicker
+          open={verImgOpen}
+          title={`选择版本图 · ${m.id} / ${picked.id}`}
+          options={imageOptions}
+          value={picked.image}
+          onCancel={() => setVerImgOpen(false)}
+          onPick={(next) => {
+            void saveVersion(picked.id, 'image', next)
+            toasts.push(next ? `这一版的图指到资产 ${next}` : '已清空版本图（回落机型图）')
+            setVerImgOpen(false)
+          }}
+        />
+      )}
       <AssetPicker
         open={iconOpen}
         title={`选择图标 · ${m.id}`}

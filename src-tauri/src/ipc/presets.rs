@@ -195,6 +195,8 @@ pub struct VersionDto {
     pub description: Option<String>,
     /// 空串 = 这个版本还没配套餐（与契约同一口径）
     pub bundle: String,
+    /// **这一版专属的外观图**（资产 id）。空串 = 回落机型图（不是"没图"）
+    pub image: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,6 +265,8 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
                     bundle: non_empty(v.recommended_bundle.as_deref().unwrap_or_default())
                         .or_else(|| non_empty(m.default_bundle.as_deref().unwrap_or_default()))
                         .unwrap_or_default(),
+                    // 资产 id；空 = 回落机型图（客户端那条链自己回落）
+                    image: v.image.clone().unwrap_or_default(),
                 })
                 .collect(),
             dimensions: m.dimensions.clone(),

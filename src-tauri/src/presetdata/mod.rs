@@ -434,6 +434,24 @@ impl Presets {
                     ));
                 }
             }
+            /* 版本级那一格（`[[versions]] image`）与机型级同一把尺：打错字的后果一样
+            —— 那一版的图静默回落成机型图，看不出是打错了还是没配 */
+            for v in &m.versions {
+                let Some(id) = v.image.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                if self.assets.get(id).is_none() {
+                    return Err(AppError::corrupted(format!(
+                        "机型 {} 的版本 {} 的 image 指向一个不存在的资产：{id}",
+                        m.id, v.id
+                    ))
+                    .with_detail(
+                        "资产定义在 presets/assets.toml。版本图打错的后果是**静默回落成机型图** \
+                         —— 界面上看不出是打错了字还是压根没配"
+                            .to_owned(),
+                    ));
+                }
+            }
         }
         Ok(())
     }

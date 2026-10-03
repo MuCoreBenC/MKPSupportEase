@@ -104,6 +104,14 @@ export interface MachineVersion {
    * 不是出错 —— 界面该显示「未配置」。非空时保证 bundle 一定存在（后端启动时校验过）。
    */
   bundle: string
+  /**
+   * **这一版专属的外观图**（**资产 id**，不是文件名）：去 `RuntimeCatalog.assets` 里按 id 查
+   * `path`。**空字符串 = 回落机型图**（`Machine.image`）—— 不是"这一版没图"。
+   *
+   * 图位分层（作者 2026-10-03）：品牌图 → 机型图 → 版本图，版本缺则回落机型。
+   * 「标准版」与「快拆版」是同一台机器下两个独立的版本实体，各自有各自的图。
+   */
+  image: string
 }
 
 export interface BedSize {

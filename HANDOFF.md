@@ -941,6 +941,36 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         **不用手改**：它由工作台「生成 / 发布」重算（`write_catalog_json` 的调用者就那两个），
         而发布收尾本来就会重算一遍，所以到发布那一刻一定与源同代。
 
+    - **增量之十：图位分层 · 版本图位（2026-10-03，第三刀第一片）**
+      —— 作者定层级：**品牌图 / 机型图 / 版本图，版本没有图就回落机型图**；
+      「标准版」与「快拆版」是同一台机器下两个独立的版本实体，各自有各自的图。
+      并且：**`imageVariant`（装了快拆件那张）不与版本混** —— 它是**硬件外观变体**，
+      客户端选择层级不再用它（数据留在机型文件里，等将来有真正的变体模型再说）。
+      - **`[[versions]]` 新增 `image`（资产 id）**：`MachineVersion` / `VersionField::Image`
+        （可清空 = 回落）/ 客户端 `MachineVersion.image` / 工作台 `VersionView.image` +
+        版本详情卡那一格素材格与选择器（`VersionField` 加 `'image'`）。
+      - **跨文件校验把版本这一格也算进去**（`check_asset_refs`）：版本图打错字的后果是
+        **静默回落成机型图** —— 界面上看不出是打错了还是压根没配，所以升级成 error。
+      - **客户端回落链**（`heroArt.pickArt`）：`版本图 → 机型图 → 品牌字标 → 空`；
+        品牌图那一半（把 logo 抽成资产、`RuntimeCatalog.brands`）留给本刀第二片。
+      - **判据**：`home-flow.mjs --pick` 的分层断言改成「第二级与第三级**同图**」——
+        A1 mini 的 `STANDARD` 今天没有版本图，理应回落机型图；哪天给那一版配了版本图，
+        这条断言会红，**那正是它该红的时候**（改数据要改判据）。
+      - **能力反向验证**：临时给 `A1_MINI/STANDARD` 配 `image = 'a1_mini-variant-image'` →
+        catalog 的 `versions[].image` 带上（revision 变）→ 客户端第三级真的换成
+        `/assets/printers/a1mini-variant.webp`、第二级仍是机型图，断言如实变红 ⇒
+        版本图**被认**、回落**只在该回落时**发生。验完已还原。
+      - 验证：Rust 默认 **631** / workbench **473+146+77**、双 feature clippy **0 警告**、
+        `tsc -b`、eslint + stylelint、`build` + `check:bundle`（15 干净）+ `check:zero-network`、
+        四个探针全绿。**顺带记一条判据的功劳**：中途还原了 `A1_MINI.toml` 却忘了重算内嵌
+        catalog，`embedded_matches_rebuild` 当场把 `cargo test` 拉红 —— 那条判据不是装饰。
+      - **本刀第二片（未做）**：品牌 logo 进资产体系 —— `src/app/assets/bambuLogo.ts` 那个
+        **双色 data URI 抽成 `presets/assets/brands/` 里的真文件**（实测**只有深色一版在被用**，
+        `BAMBU_LOGO_LIGHT` 是死导出 ⇒ 没有颜色取舍）+ 台账登记一条（`type='image'`、
+        **不写 `machineId`** = 公共素材，`Asset` 文档早就预留了这条路）+
+        `brands.toml` 的 `logo` 从那个**早就不存在的文件名**改成资产 id +
+        `RuntimeCatalog` 补 `brands`（客户端要靠它查品牌图）+ 客户端链上「品牌图 → 内置字标兜底」。
+
      ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 
      **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，

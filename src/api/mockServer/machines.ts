@@ -29,6 +29,8 @@ function toVersion(model: RawModel, raw: RawVersion): MachineVersion {
     tag: raw.tag || undefined,
     description: raw.description || undefined,
     bundle: raw.recommendedBundle || model.defaultBundle || '',
+    // 版本专属外观图（资产 id）：空串 = 回落机型图（演示数据今天一条都没配）
+    image: raw.image || '',
   }
 }
 
