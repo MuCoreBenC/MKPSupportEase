@@ -65,7 +65,7 @@ export function localFileIds(): string[] {
 
 /*
  * 这一支（旧 `getLocalUserFiles` 的演示集合）已随 2026-10-02 的换源退役：
- * 用户自己的文件是**用户线**，住 `~/Documents/SupportEase/presets-mine/`，
+ * 用户自己的文件是**用户线**，住 `<appDataDir>/user/presets-mine/`，
  * 由 `runtime::mine` + `ipc::mine` 那两条读回答（盘就是底账，没有演示集合）。
  * 浏览器模式下的演示数据在 `src/api/mock.ts` 的 `getUserPresetFiles` 里。
  *

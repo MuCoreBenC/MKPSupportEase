@@ -1,4 +1,4 @@
-//! 用户线的两条读：**用户自己的预设文件**（`~/Documents/SupportEase/presets-mine/`）。
+//! 用户线的两条读：**用户自己的预设文件**（`<appDataDir>/user/presets-mine/`）。
 //!
 //! 官方线的读在 [`crate::ipc::catalog`] 里（`mkp/` 下载区、`archive/` 归档区）；
 //! 这一条是**另一条线**（总纲 §1③「预设 TOML 的一生」），两条不许混：

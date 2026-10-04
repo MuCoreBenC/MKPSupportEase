@@ -72,7 +72,7 @@ let mockSource: PresetSource | null = null
  *
  * 为什么让它在内存里真的能走通：编辑那条链（改 → 临时文件 → 另存）是这一层最需要被看见的
  * 东西；只抛"未实现"的话，浏览器里连编辑器长什么样、保存之后表格怎么变都验不了。
- * 真机上它是 `~/Documents/SupportEase/presets-mine/`，盘就是底账。
+ * 真机上它是 `<appDataDir>/user/presets-mine/`，盘就是底账。
  */
 const mockMine: UserPresetFile[] = [
   {

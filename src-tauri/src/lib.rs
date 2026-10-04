@@ -133,7 +133,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 Documents/SupportEase/presets-mine）
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
         ipc::mine::get_user_preset_files,
         ipc::mine::read_user_preset_text,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
@@ -193,7 +193,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 Documents/SupportEase/presets-mine）
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
         ipc::mine::get_user_preset_files,
         ipc::mine::read_user_preset_text,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件

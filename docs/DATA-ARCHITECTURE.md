@@ -76,7 +76,7 @@
 
 ### ③ 用户本地 —— 两根（承 `ARCHITECTURE.md` §4）
 
-**Internal 根**（`appDataDir()`，程序管理；不放 Documents 的原因见 §4 的 iCloud 驱逐问题）：
+**Internal 根**（`appDataDir()`，程序管理）：
 
 ```text
 <appDataDir>/
@@ -94,14 +94,23 @@
                    `mkp/` 的判据是"盘上每个文件都在目录里登记"，塞 `.tmp` 进去就污染交付那一层）
 ```
 
-**User 根**（`Documents/SupportEase/`，用户自己要看要拷的）：
+**User 根**（`<appDataDir>/user/`，用户自己要看要拷的）：
 
 ```text
-Documents/SupportEase/
+<appDataDir>/user/
 ├── presets-mine/  用户修改的预设副本（可自由改，与云端脱钩）
 ├── exports/       导出
 └── reports/       报告
 ```
+
+★ **两个根都住 `appDataDir`（作者 2026-10-05 拍，用户根由 `Documents/SupportEase` 搬来）**。
+两条理由都是真机踩出来的：
+
+1. macOS 的 `~/Documents` 受 TCC 保护 —— 程序第一次进去会弹「要访问你的文稿文件夹」，
+   而这个程序**不需要用户的 Documents**（2026-10-05：用户点开预设页就被问了一次）；
+2. 开了「桌面与文档」iCloud 同步后，Documents 里的文件会被驱逐成占位 stub ——
+   读出来内容不对，会把 Preset 的 SHA 失效判定变成误报（见 §4）。
+   **程序写的文件不放在一个会被系统悄悄搬走的地方。**
 
 给③新增任何子目录，**必须先改这份文档**，再写代码。
 
@@ -163,7 +172,7 @@ MKP TOML"（`mkp/` 初始为空是铁律 3）。工作台生成的是 ③ 的交
                                          临时文件（.tmp，不落进 mkp/）
                                                    │ 点「保存」（另存）
                                                    ▼
-                    Documents/SupportEase/presets-mine/A1MF_260701（已修改）.toml
+                    <appDataDir>/user/presets-mine/A1MF_260701（已修改）.toml
                                                    │ 再改也只改这一份
                                                    ▼
                                    **永远不回写官方原件**

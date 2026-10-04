@@ -118,7 +118,7 @@ export const bridgeApi: MkpApi = {
   getVersionFiles: (machineId, versionId) =>
     call('getVersionFiles', 'get_version_files', { machineId, versionId }),
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
-  /* 用户线：用户自己的预设（住 Documents/SupportEase/presets-mine） */
+  /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-mine） */
   getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
   readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
   /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */

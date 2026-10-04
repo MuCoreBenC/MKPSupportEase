@@ -19,7 +19,7 @@
 //! | `get_slicer_copied` | 本轮恒为空集合 |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
-//! 不住 catalog 也不住内部根 —— 它在 `Documents/SupportEase/presets-mine/`，
+//! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-mine/`，
 //! 由 [`crate::ipc::mine::get_user_preset_files`] / `read_user_preset_text` 那两条读回答。
 //! 旧命令恒空、且旧 DTO 里的「用户自己标的适用机型」在新世界里没有来源（没人能标），
 //! 留着就是两套口径。

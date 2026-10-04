@@ -1568,7 +1568,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     })
 
   /*
-   * **用户线**：用户自己放进 `presets-mine/` 的那些（`~/Documents/SupportEase/`）。
+   * **用户线**：用户自己放进 `presets-mine/` 的那些（`<appDataDir>/user/`）。
    *
    * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
    * 也没有 SHA 可比。所以它们只活在这一张本地表里，云端表永远看不到。
