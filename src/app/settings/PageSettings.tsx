@@ -168,7 +168,9 @@ export default function PageSettings() {
             ) : update?.hasUpdate === true ? (
               <span className={s.updateFresh}>有新版本 SupportEase</span>
             ) : update !== null ? (
-              <span className={s.updateIdle}>已是最新版本</span>
+              /* ★ 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）——
+                 与「有新版本」同一个绿；「没查到」才是灰的（不是坏消息，是不知道）。 */
+              <span className={s.updateLatest}>已是最新版本</span>
             ) : (
               <span className={s.updateIdle}>这次没能查到更新</span>
             )}
