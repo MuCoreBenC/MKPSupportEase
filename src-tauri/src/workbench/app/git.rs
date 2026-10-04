@@ -185,13 +185,29 @@ impl Git {
         self.push_ref_authenticated(&target, username, token)
     }
 
-    /// **带认证**推**任意 ref**（第四刀：推 tag 用）。
+    /// **带认证**推**任意 ref 到 `origin`**（第四刀：推 tag 用）。
     ///
     /// 与 [`Self::push_authenticated`] 同一条命令行形状、同一套凭据纪律
     /// （Token 不进 URL / 清掉全局 helper / `GIT_TERMINAL_PROMPT=0`）——
     /// 差别只是不再把参数解释成"分支"，`refs/tags/v0.0.2` 这类也推得动。
     pub fn push_ref_authenticated(
         &self,
+        refspec: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<(), AppError> {
+        self.push_ref_to_authenticated("origin", refspec, username, token)
+    }
+
+    /// **带认证**推**任意 ref 到指定远端**（远端给 **URL**，不要求本机配过这个 remote）。
+    ///
+    /// ★ 为什么需要"按 URL 推"（2026-10-05，作者定"后续走 Gitee"）：软件版本要发到**几个**
+    /// 仓库去 —— GitHub 放 Release 与 tag，**Gitee 放数据源**（国内直连的那一份）。
+    /// 本机不一定配了 `gitee` 这个 remote（也不该要求开发者配），而发布目标已经写在
+    /// 发布账户配置里了（`repository_url`）—— **按那个 URL 推**，配置是唯一真值。
+    pub fn push_ref_to_authenticated(
+        &self,
+        remote: &str,
         refspec: &str,
         username: &str,
         token: &str,
@@ -208,7 +224,7 @@ impl Git {
                 &header,
                 "push",
                 "-u",
-                "origin",
+                remote,
                 refspec,
             ])
             .current_dir(&self.repo)

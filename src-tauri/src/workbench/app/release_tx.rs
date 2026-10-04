@@ -449,14 +449,34 @@ pub fn run(
         git.pull_ff("origin", base)?;
         git.tag(&tag, &format!("{tag} {}", opts.notes.trim()))?;
         match target {
-            Some(t) => {
-                git.push_ref_authenticated(&format!("refs/tags/{tag}"), &t.username, &t.token)?
-            }
+            Some(t) => git.push_ref_to_authenticated(
+                &t.repository_url,
+                &format!("refs/tags/{tag}"),
+                &t.username,
+                &t.token,
+            )?,
             None => git.push_tag(&tag)?,
         }
         report
             .summary
             .push_str(&format!("已切到 {base} 并在 tip 上打 {tag}、推送。"));
+
+        // ★★ **主线也推一份到发布仓库**（2026-10-05，作者定"后续走 Gitee"）：
+        //   客户端的**数据源**读的就是仓库里的 `presets/dist/` 与 `presets/release.json`
+        //   （`raw/<branch>/…`）。只推 tag 的话，tag 在、main 上的数据源没过去 ——
+        //   国内客户端连上 Gitee 之后看到的仍是上一版目录。
+        //   这一步是**幂等**的：同一笔 main 推两次，第二次是 no-op。
+        if let Some(t) = target {
+            git.push_ref_to_authenticated(
+                &t.repository_url,
+                &format!("refs/heads/{base}"),
+                &t.username,
+                &t.token,
+            )?;
+            report.summary.push_str(&format!(
+                "已把 {base} 推到发布仓库（数据源与 release.json 随之过去）。"
+            ));
+        }
     } else {
         report.summary.push_str("tag 已存在，沿用。");
     }
