@@ -1,5 +1,6 @@
 /*
- * 工作台 C15 增量探针：**生成与发布页**（发布物 / 查看 JSON / 查看 TOML / 版本轴 / 云端那一格）
+ * 工作台 C15 增量探针：**生成与发布页**（发布物 / 查看 TOML / 生成前确认 / 产物名单）
+ * （2026-10-04：「说明书 JSON / 版本轴 / 云端那一格」随 `ClientDataPackage` 退役一并去掉）
  * 与**参数台的两处版面增量**（模式开关整卡收起 · 抽屉说清类型）。
  *
  * # 为什么探针打的是 development + esnext 的那一份（而不是 `npm run build:workbench` 的产物）
@@ -123,56 +124,20 @@ console.log('-'.repeat(96))
 
 /* ============================ 一、生成与发布 ============================ */
 
-console.log('\n【一】生成与发布（C15：发布物 / 查看 JSON / 查看 TOML / 版本轴 / 云端）')
+console.log('\n【一】生成与发布（发布物 / 查看 TOML / 生成前确认 / 产物名单）')
 /* 用 title 认导航项：带徽标的那几项可访问名字会多出一个数字（「生成与发布 1」） */
 await page.locator('button[title="生成与发布"]').first().click()
-await until(() => hasText('② 客户端数据包'))
+await until(() => hasText('② 发布预设'))
 const buildText = text(await mainText())
 console.log(`页面可见文字（前 600 字）：\n${buildText.slice(0, 600)}`)
 
-for (const needle of ['① 生成', '② 客户端数据包', '三个版本，各管一件事', '客户端兼容性清单', '③ 发布', '本次发布的发布物', '云端 preset 文件夹（模拟）']) {
+/* 「② 发布」在 2026-10-04 明确成「② 发布预设」（区分"发预设"与"发软件版本"）——
+   探针跟着改名（退役旧文案必须同步裁读它的那一段） */
+for (const needle of ['① 生成', '② 发布预设', '本次发布的发布物', '③ 对照基线']) {
   const ok = await hasText(needle)
   say(ok, `这一页写着「${needle}」`)
   if (!ok) problems.push(`生成与发布页缺少「${needle}」`)
 }
-
-/* —— 包版本的三枚快捷：点一下那个数要跟着变（不是个死按钮） —— */
-/* 那一格里的「建议值」是一个**整段就是 x.y.z** 的 span（三枚按钮的文本带 +，不会误认） */
-const verText = () =>
-  page.evaluate(() => {
-    const box = document.querySelector('#t-pkg-ver')
-    if (!box) return ''
-    const hit = [...box.querySelectorAll('span')]
-      .map((e) => (e.textContent ?? '').trim())
-      .find((t) => /^\d+\.\d+\.\d+$/.test(t))
-    return hit ?? ''
-  })
-const before = await verText()
-await page.locator('#t-pkg-ver button', { hasText: '+0.1.0' }).first().click()
-const after = await verText()
-say(before !== '' && after !== '' && before !== after, `包版本快捷（+0.1.0）：${before || '（空）'} → ${after || '（空）'}`)
-if (before === after) problems.push('包版本快捷点了没反应')
-
-/* —— 最低客户端版本那一格：说明书装出来之后，「自动判断」要给出一个数 —— */
-const minClient = text(await page.evaluate(() => document.querySelector('#t-min-client')?.innerText ?? ''))
-console.log(`最低客户端版本那一格：${minClient.slice(0, 260)}`)
-const autoVer = /自动判断：\d+\.\d+\.\d+/.exec(minClient)?.[0] ?? '（没找到）'
-const minOk = minClient.includes('客户端兼容性清单') && autoVer.startsWith('自动判断：')
-say(minOk, `自动判断给出了数：${autoVer}（依据是那一张兼容性清单）`)
-if (!minOk) problems.push('最低客户端版本那一格没给出自动判断的结论')
-
-/* —— 查看 JSON：弹出来的这一份就是**要传出去的那份说明书** —— */
-await page.getByRole('button', { name: '查看 JSON', exact: true }).first().click()
-await page.waitForSelector('[role="dialog"] textarea', { timeout: 5000 })
-const json = await page.evaluate(() => document.querySelector('[role="dialog"] textarea')?.value ?? '')
-const jsonOk =
-  json.includes('"clientPackage"') && !json.includes('"clientPackage": null') &&
-  json.includes('"inputsHash"') && json.includes('"release"')
-say(jsonOk, `查看 JSON：${json.length} 字符，clientPackage 是真包（带 inputsHash）`, json.split('\n').slice(0, 2).join(' '))
-if (!jsonOk) problems.push('查看 JSON 里没有真说明书')
-if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-json.png` })
-await page.getByRole('button', { name: '关闭', exact: true }).first().click()
-await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
 
 /* —— 发布物：产物名单与 TOML 正文都该出来（开发桩开局已经生成过 A1/STANDARD 一版） —— */
 const seeded = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
@@ -245,14 +210,6 @@ const artLine = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '
 say(gotArtifacts, `确认生成之后：${artLine}`)
 if (!gotArtifacts) problems.push('生成之后产物名单没跟上')
 
-/* —— ② 现在报的是**真包**：那几个数从现装的那份说明书上数 —— */
-const pkgChips = /(\d+) 台机型 (\d+) 个版本 (\d+) 个字段 带条件 (\d+) 可选文件 (\d+)/.exec(text(await mainText()))
-say(pkgChips !== null, `「包里有什么」从这份包上数：${pkgChips?.slice(1).join(' / ') ?? '（没找到）'}`)
-if (pkgChips === null) problems.push('「包里有什么」没报出真包的计数')
-const pkgChip = /说明书 × 1 · \d+ 字段（带条件 \d+）/.exec(text(await mainText()))?.[0] ?? '（没找到）'
-say(pkgChip.startsWith('说明书 × 1'), `③ 发布物里那一枚说明书报的是真包：${pkgChip}`)
-if (!pkgChip.startsWith('说明书 × 1')) problems.push('③ 的说明书 chip 没报出真包')
-
 await page.getByRole('button', { name: '查看 TOML', exact: true }).first().click()
 await page.waitForSelector('[role="dialog"] textarea', { timeout: 5000 })
 const toml = await page.evaluate(() => document.querySelector('[role="dialog"] textarea')?.value ?? '')
@@ -263,43 +220,77 @@ if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-toml.png` })
 await page.getByRole('button', { name: '关闭', exact: true }).first().click()
 await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
 
-/* —— 云端那一格：静态种子读得到；「上传到云端」按得动并真写进那一格 —— */
-const upload = page.getByRole('button', { name: '上传到云端', exact: true }).first()
-const uploadDisabled = await upload.isDisabled()
-const cloudBefore = await page.evaluate(() => localStorage.getItem('mkp.cloud.presets'))
-say(
-  !uploadDisabled && cloudBefore === null,
-  `上传到云端：可以按（说明书已装出来）· 传之前 localStorage[mkp.cloud.presets]=${cloudBefore ?? 'null'}`,
-)
-if (uploadDisabled) problems.push('上传到云端按不动（说明书装出来了就该能按）')
-
-/* 云端**读**的那一半要是真的：静态种子（public/cloud/presets.json）该在这一格里 */
-const cloudSeeded = await until(() => hasText('云端已有'))
-const cloudText = text(await mainText())
-const seedSummary = /说明书 \d+ 个字段（带条件 \d+）· 预设文件 \d+ 份/.exec(cloudText)?.[0] ?? '（没找到）'
-say(cloudSeeded, `云端读得到静态种子那一份：「云端已有」+ ${seedSummary}`)
-if (!cloudSeeded) problems.push('云端读不到静态种子（public/cloud/presets.json）')
-say(await hasText('这一格现在是空的') === false, '云端非空时不再摆「这一格现在是空的」')
 if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-page.png` })
 
-/* 真按一下：整份 release（说明书 + 预设文件）写进 STORAGE.cloud —— 客户端读的就是这一格 */
-await upload.click()
-const wrote = await until(async () =>
-  (await page.evaluate(() => localStorage.getItem('mkp.cloud.presets')))?.includes('工作台发布') === true)
-const uploaded = await page.evaluate(() => {
-  const raw = localStorage.getItem('mkp.cloud.presets')
-  if (raw === null) return null
-  const list = JSON.parse(raw)
-  const e = list[list.length - 1]
-  return { n: list.length, name: e.name, version: e.version, presets: e.presets.length, fields: e.package.fields.length }
-})
-say(
-  wrote && uploaded !== null && uploaded.presets > 0,
-  `上传：${uploaded?.name} · 预设文件 ${uploaded?.presets} 份 · 说明书 ${uploaded?.fields} 字段 · 云端共 ${uploaded?.n} 条`,
-)
-if (!wrote) problems.push('上传到云端没写进 localStorage')
-if ((uploaded?.presets ?? 0) === 0) problems.push('上传的 release 里一份预设文件都没有')
-console.log(`[上传] 客户端要读的那一格：${JSON.stringify(uploaded)}`)
+/* —— 发布闸（第二刀）：点「发布」先开闸，十五项逐项打勾，全绿才给往下走 —— */
+{
+  const dialog = page.locator('[role="dialog"]')
+  await page.getByRole('button', { name: '发布', exact: true }).first().click()
+  await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+  const shown = await until(async () => (await dialogText()).includes('发布闸'), 5000)
+  say(shown, '点「发布」先开发布闸（不是直接发）')
+  if (!shown) problems.push('点发布没有先开发布闸')
+
+  const rows = await dialog.locator('[role="listitem"]').count()
+  say(rows === 15, `发布闸摆出十五项逐项打勾：${rows} 项`)
+  if (rows !== 15) problems.push(`发布闸不是十五项（${rows}）`)
+
+  const gate = text(await dialogText())
+  /* 第三刀之后 ⑫ 真跑了：它要报出结构代次与最低客户端版本（不再是「未实现」） */
+  const structureRow = gate.includes('结构代次') && gate.includes('最低正式客户端版本')
+  say(structureRow, '⑫ 报出结构代次与最低客户端版本（第三刀：这一项真跑了）')
+  if (!structureRow) problems.push('发布闸 ⑫ 没报出结构代次 / 最低客户端版本')
+
+  /* 桩里 ④ 有 1 个残留 ⇒ `dist/no-strays` 是红的 ⇒ 这颗按钮不该亮 */
+  const blockedRun = await dialog
+    .getByRole('button', { name: '确认发布', exact: true })
+    .isDisabled()
+  say(blockedRun, '有 Blocker 红时「确认发布」不亮（全绿才给往下走）')
+  if (!blockedRun) problems.push('有 Blocker 红时「确认发布」还是亮的')
+  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-gate.png` })
+
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
+
+  /* 清掉残留再开一次 —— 「全绿才亮」这条规矩得看得见 */
+  await page.getByRole('button', { name: '清理残留', exact: true }).first().click()
+  const cleaned = await until(() => hasText('没有残留'))
+  say(cleaned, '清理残留之后 ④ 说没有残留了')
+  if (!cleaned) problems.push('清理残留之后 ④ 没跟着变')
+
+  await page.getByRole('button', { name: '发布', exact: true }).first().click()
+  await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+  await until(async () => (await dialogText()).includes('发布闸'), 5000)
+  const canRun = await page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '确认发布', exact: true })
+    .isEnabled()
+  say(canRun, '残留清掉之后闸全绿，「确认发布」亮了')
+  if (!canRun) problems.push('闸全绿了「确认发布」还是不亮')
+  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-gate-green.png` })
+
+  /*
+   * 确认发布：闸自己关掉，② 卡记上这次**发布事务**的一笔。
+   *
+   * 第三刀下半起，「发布」是一次**事务**（审计 → 生成 → 定稿 → git → PR），
+   * ② 卡那格记的是事务结果的 `summary`（不再是老的"最低客户端版本"那句）——
+   * 桩走向成功那一路，所以那句话里有"已建 PR"。
+   */
+  await page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '确认发布', exact: true })
+    .click()
+  const recorded = await until(() => hasText('本次发布落下'))
+  const gone = (await page.locator('[role="dialog"]').count()) === 0
+  say(recorded && gone, '点「确认发布」→ 闸关掉、② 卡记上这一笔')
+  if (!recorded || !gone) problems.push('确认发布之后闸没关，或 ② 卡没记上')
+
+  /* 事务回执：桩里走到 reviewOpened —— ② 卡那句 summary 要说清"建了 PR" */
+  const receipt = await until(() => hasText('已建 PR'))
+  say(receipt, '② 卡的回执说的是**发布事务**的结果（含「已建 PR」）')
+  if (!receipt) problems.push('发布回执里没有事务结果（已建 PR）')
+  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-done.png` })
+}
 
 /* ============================ 二、参数台 ============================ */
 

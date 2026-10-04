@@ -174,10 +174,11 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
         .map_err(|e| AppError::internal("读文件没跑到终局").with_detail(e.to_string()))?
 }
 
-/// 把 catalog 里登记的一份文件从数据源拉进下载区（`mkp/`）。
+/// 把 catalog 里登记的一份文件从数据源拉进**它自己的落点**。
 ///
+/// 落点 = `catalog.path`（唯一路径语义）—— 没有固定的"下载区根"，目录按需建。
 /// 文件在哪 = [地址](remote_base) + catalog 记的相对位置，地址在 catalog 之外
-/// ——换源不用重发说明书。字节对不上 SHA 就整个拒绝——`mkp/` 里不会出现坏文件。
+/// ——换源不用重发说明书。字节对不上 SHA 就整个拒绝——落点上不会出现坏文件。
 ///
 /// 网络与磁盘都是阻塞 IO，丢进线程池：命令体跑在异步运行时上，直接阻塞会把整个运行时堵住。
 #[tauri::command]
@@ -196,7 +197,9 @@ pub async fn download_runtime_file(
                 .find(|f| f.file_name == file_name)
                 .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
 
-            let expected = file.size;
+            // 目录给了期望大小就用它当水位总量；没给（随包 bootstrap 目录）就照实
+            // 不报百分比 —— `total: None` 在界面上是"不知道还有多少"，不是 0
+            let expected = file.expected_size();
             let forward = |tick: &runtime::net::Tick| {
                 send_tick(
                     &on_tick,
@@ -216,8 +219,8 @@ pub async fn download_runtime_file(
                     &on_tick,
                     runtime::net::Stage::Done,
                     &file_name,
+                    expected.unwrap_or(0),
                     expected,
-                    Some(expected),
                     None,
                 ),
                 Err(e) => send_tick(
@@ -225,7 +228,7 @@ pub async fn download_runtime_file(
                     runtime::net::Stage::Failed,
                     &file_name,
                     0,
-                    Some(expected),
+                    expected,
                     Some(e.message.clone()),
                 ),
             }
@@ -292,10 +295,12 @@ pub async fn download_runtime_files(
             let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
 
             let report = |outcome: &runtime::delivery::FileOutcome| {
+                // 期望大小是 `Option`（随包 bootstrap 目录不登记它）：拿不到就报
+                // "不知道总量"，不是报 0（`total: None` 界面上是另一句话）
                 let size = wanted
                     .iter()
                     .find(|f| f.file_name == outcome.file_name)
-                    .map(|f| f.size);
+                    .and_then(|f| f.expected_size());
                 let stage = if outcome.ok {
                     runtime::net::Stage::Done
                 } else {
@@ -388,7 +393,7 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
 pub struct DeliveryTrustDto {
     pub file_name: String,
     pub verdict: String,
-    /// `old` 且归档区里有它字节时给（`archive/mkp/presets/A1-fast.toml`）—— 界面据此
+    /// `old` 且归档区里有它字节时给（`archive/dist/mkp/presets/A1-fast.toml`）—— 界面据此
     /// 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
     pub archived_path: Option<String>,
 }
@@ -418,7 +423,7 @@ pub async fn get_delivery_trust(app: AppHandle) -> Result<Vec<DeliveryTrustDto>,
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivedFileDto {
-    /// 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来
+    /// 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来
     pub path: String,
     pub file_name: String,
     pub size: u64,
@@ -448,9 +453,10 @@ pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, 
         Ok(runtime::delivery::archived_files(&root)
             .into_iter()
             .map(|a| {
-                /* 认人靠"同位"：`archive/mkp/presets/x.toml` ↔ 目录里的 `mkp/presets/x.toml`
-                （同名，新字节）。**不解析文件名**去猜机型版本 —— 名字规则将来会变，
-                而"归档这份与目录里哪一份同位"是一个不需要额外知识的事实 */
+                /* 认人靠"同位"：`archive/dist/mkp/presets/x.toml` ↔ 目录里的
+                `dist/mkp/presets/x.toml`（同形，新字节）。**不解析文件名**去猜机型
+                版本 —— 名字规则将来会变，而"归档这份与目录里哪一份同位"
+                是一个不需要额外知识的事实 */
                 let known = a
                     .path
                     .strip_prefix(&prefix)
@@ -616,16 +622,20 @@ pub async fn apply_active_preset(
                     .find(|f| f.file_name == file_name)
                     .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
 
-                // 应用的是盘上那份：字节得真的在、且与目录对得上（没下载/被删/漂了都不许应用）
+                // 应用的是盘上那份：字节得真的在；**目录给了期望值**的还要与它对得上
+                // （没下载/被删/漂了都不许应用）。随包 bootstrap 目录没登记 SHA ——
+                // 那种情况下盘上有就允许应用（字节的权威判定归 OTA 目录生效后那次下载）
                 let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
                     AppError::not_found(format!("{file_name} 还不在本机——先下载，再使用"))
                 })?;
-                let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
-                if digest != file.sha256 {
-                    return Err(AppError::sha_mismatch(format!(
-                        "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— \
-                         先「更新」或「重新下载」换一份干净的"
-                    )));
+                if let Some(want) = file.expected_sha() {
+                    let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+                    if digest != want {
+                        return Err(AppError::sha_mismatch(format!(
+                            "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— \
+                             先「更新」或「重新下载」换一份干净的"
+                        )));
+                    }
                 }
                 runtime::state::save_active(&root, file)?
             }
@@ -674,6 +684,9 @@ pub struct RemoteUpdateDto {
     pub up_to_date: bool,
     pub local_revision: String,
     pub remote_revision: String,
+    /// 本构建读不读得懂这一代远端目录（能力优先、版本兜底，见 `runtime::structure::can_read`）。
+    /// ★ 与 `upToDate` 回答的是两件不同的事（"有没有更新" vs "读不读得懂"）。
+    pub readable: bool,
 }
 
 /// 对远端目录检查更新：**清单从数据源来**（`<base>/catalog.json`），与文件本体同一个
@@ -692,6 +705,7 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
                 up_to_date: r.up_to_date,
                 local_revision: r.local_revision,
                 remote_revision: r.remote_revision,
+                readable: r.readable,
             })
         })
     });
@@ -701,6 +715,10 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
 
 /// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
 /// 「有更新」里，用既有的下载管道拉新——更新没有第三条路径。
+///
+/// ★ **读不懂就不采用**：远端这一代结构本构建读不了时（[`runtime::structure::can_read`] 为假），
+/// 这里返回 [`AppError::not_supported`]，**在 `release_bytes` 之前就退出** —— 不落盘、不归档、
+/// 本机目录零改动。"不下载不使用"的落点就在这里（作者定的产品规则 B/C）。
 #[tauri::command]
 pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
@@ -708,10 +726,91 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
             let root = internal_root(&app)?;
             let resolved = runtime::source::resolve_source(&root)?;
             let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
+            let remote = runtime::Catalog::parse(&bytes)?;
+
+            /* 先判定再落盘：读不懂就整次拒绝，盘上那份目录一个字节都不动。
+            message 只写用户能懂的话 —— 结构签名 / 最低版本这些词不许出现在这里（禁区） */
+            if !runtime::structure::can_read(
+                &remote.structure_signature,
+                remote.min_client_version.as_deref(),
+            ) {
+                return Err(
+                    AppError::not_supported("此预设需要更新版 SupportEase").with_detail(format!(
+                        "远端目录结构签名 {} 本构建读不了（minClient={:?}）",
+                        remote.structure_signature, remote.min_client_version
+                    )),
+                );
+            }
+
             let report = runtime::release::release_bytes(&root, &bytes)?;
             Ok(report.summary())
         })
     });
     task.await
         .map_err(|e| AppError::internal("应用远端目录没跑到终局").with_detail(e.to_string()))?
+}
+
+/* ---------- 软件更新（`release.json`）—— 与预设数据**两条链** ---------- */
+
+/// 当前客户端版本号（构建期 `CARGO_PKG_VERSION`，唯一真值）。
+///
+/// 设置页「软件更新」块要显示"当前版本 → 最新版本"，这是它拿"当前版本"的唯口子 ——
+/// 版本号**不许在前端再写一遍**（那是第二处真值）。
+#[tauri::command]
+pub async fn get_app_version() -> Result<String, AppError> {
+    Ok(runtime::structure::APP_VERSION.to_owned())
+}
+
+/// 检查**软件**更新（`release.json`）—— 与预设数据链完全分开的一条。
+///
+/// - 只读、`async`、**不在启动 / 首屏路径**（设置页打开时才调；铁律 2：云端不参与首屏）；
+/// - 信息源地址 = 数据源解析出的两个地址的**上一级**（`release.json` 住发布根
+///   `presets/` 之外，见 `runtime::source::RELEASE_FILE`）；
+/// - 远端没有这一份 / 没联网时**如实拒绝**（`NOT_FOUND` / `IO`）—— 由调用方决定说还是略过，
+///   这一层不编一份"已是最新"糊过去。
+#[tauri::command]
+pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("checkSoftwareUpdate", |_| {
+            let root = internal_root(&app)?;
+            let resolved = runtime::source::resolve_source(&root)?;
+
+            /* release.json 住发布根（presets/）之外：从 base_url（文件下载根 = presets/dist）
+            上去两级就是仓库根发布位置。手写死三级最容易在换部署时错位，
+            所以用 source 的目录回退规矩，从 base_url 推它自己的"上一级" */
+            let release_url = runtime::source::release_url(&resolved.base_url)?;
+            let bytes = runtime::net::get_release(&release_url)?;
+            let info = runtime::release_info::parse(&bytes)?;
+            Ok(SoftwareUpdateDto::from(runtime::release_info::to_update(
+                &info,
+            )))
+        })
+    });
+    task.await
+        .map_err(|e| AppError::internal("检查软件更新没跑到终局").with_detail(e.to_string()))?
+}
+
+/// 给界面的软件更新状态（与 `runtime::release_info::SoftwareUpdate` 同形，camelCase）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoftwareUpdateDto {
+    pub has_update: bool,
+    pub current_version: String,
+    pub latest_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+impl From<runtime::release_info::SoftwareUpdate> for SoftwareUpdateDto {
+    fn from(u: runtime::release_info::SoftwareUpdate) -> Self {
+        Self {
+            has_update: u.has_update,
+            current_version: u.current_version,
+            latest_version: u.latest_version,
+            notes: u.notes,
+            url: u.url,
+        }
+    }
 }

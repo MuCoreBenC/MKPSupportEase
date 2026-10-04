@@ -1919,6 +1919,28 @@
   min-width: 0;
 }
 
+/* 发布账户表单里每行左边那个短标签（仓库地址 / 用户名 / Token） */
+.vlabel {
+  flex: none;
+  width: 64px;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+}
+
+/* 已配置的 Token：显示一串掩码点（**假的填充**，不是空的）—— 点它才进编辑态。
+   借 `.inp` 的框样式，但它是按钮，不是输入框，所以补一下文字对齐与字距。 */
+.tokenMask {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-2);
+  letter-spacing: 2px;
+  background: transparent;
+}
+
 .vstatic {
   font-size: var(--fs-body);
   font-weight: 600;

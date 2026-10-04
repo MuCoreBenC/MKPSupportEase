@@ -663,10 +663,154 @@ export interface PublishReport {
   stamp: string
   root: string
   files: number
-  /** null = 上游未声明。**不编一个版本号出来** */
+  /**
+   * 这次发出去的目录登记的**最低正式客户端版本**（结构规则表里对当前结构签名那条）。
+   *
+   * `null` 只该出现在「这一代还没登记」时 —— 那种情况发布闸 ⑫ 会先拦住。
+   * **不编一个版本号出来**（要登记就得有人去规则表里签字）
+   */
   minimumClient: string | null
   todos: number
   hints: number
+}
+
+/* ---------- 发布闸（`app::audit`，第二刀） ---------- */
+
+/**
+ * `audit::AuditStatus` —— 一项的结论四态。
+ *
+ * ★ `skipped` **不许当 `pass` 画**：它说的是「这一项今天还没跑」。
+ * 把"没实现"画成绿勾，比画成红叉更危险（作者定的口径）
+ */
+export type AuditStatus = 'pass' | 'fail' | 'warn' | 'skipped'
+
+/** `audit::AuditSeverity` —— 分量。**只有 `blocker` 红了才拦发布** */
+export type AuditSeverity = 'blocker' | 'warning'
+
+/** `audit::AuditItem` —— 发布闸里的一行（一项检查） */
+export interface AuditItem {
+  /** 稳定 id（`docs/PUBLISH-ARCHITECTURE.md` §5.2）。界面按它 key 住，列表不会每次重排 */
+  id: string
+  name: string
+  status: AuditStatus
+  severity: AuditSeverity
+  /** 一句话说清「红了是什么、在哪」。通过时也写（那时的结论） */
+  details: string
+  affectedFiles: string[]
+  /** 界面上那颗「去修」的入口 */
+  fixHint: string
+}
+
+/**
+ * `audit::PublishAudit` —— 一次发布闸的全部结果。
+ *
+ * **这是"能不能往下走"的唯一答案来源**：`canPublish` 为假时，任何 commit / push / PR
+ * 都不许发生。界面不许自己再算一遍（那正是这把刀要治的老病根）
+ */
+export interface PublishAudit {
+  items: AuditItem[]
+  filesAdded: number
+  filesChanged: number
+  filesRemoved: number
+  /**
+   * 这一代结构要求的**最低正式客户端版本**（`presets/structure-signatures.toml` 里登记的）。
+   *
+   * `null` = ⑫ 没给出答案（签名没登记 / 规则表读不出来）—— 那种情况 ⑫ 已经是 Blocker，
+   * `canPublish` 已经是 false。**不编一个版本号出来**
+   */
+  minVersion: string | null
+  canPublish: boolean
+}
+
+/* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
+
+/**
+ * `publish_tx::PublishStage` —— 一次发布事务走到哪一步了。
+ *
+ * ★ 这是**工作台自己的发布状态模型**：GitHub 的 PR / Gitee 的 MR / 各自的 CI 方言
+ * 在后端就被收敛成这一档（见 `ReviewState` / `ChecksSummary`）。前端**不认识任何平台方言**。
+ */
+export type PublishStage =
+  | 'blockedAudit'
+  | 'generated'
+  | 'committed'
+  | 'pushed'
+  | 'reviewOpened'
+  | 'statusRead'
+
+/** `platform::ReviewState` —— PR/MR 的统一状态（方言已收敛） */
+export type ReviewState = 'open' | 'merged' | 'closed' | 'unknown'
+
+/** `platform::ChecksSummary` —— CI 汇总的统一档 */
+export type ChecksSummary = 'pending' | 'passed' | 'failed' | 'none' | 'unknown'
+
+/** `platform::RemoteReview` —— 一份 PR/MR 的平台无关快照 */
+export interface RemoteReview {
+  platform: string
+  number: number
+  url: string
+  state: ReviewState
+  checks: ChecksSummary
+  title: string
+  head: string
+  base: string
+}
+
+/** `publish_tx::PublishTxReport` —— 一轮发布事务的结果（阶段的快照） */
+export interface PublishTxReport {
+  stage: PublishStage
+  auditPassed: number
+  auditFailed: number
+  generated: number
+  unchanged: number
+  committedPaths: string[]
+  review: RemoteReview | null
+  branch: string | null
+  files: number
+  summary: string
+}
+
+/** `publish_tx::TxOptions` —— 发布事务的开关（一般用默认：一次点击走完全程） */
+export interface TxOptions {
+  /** 只审计 + 生成 + 定稿 + 报"会提交什么"，不 commit / push / 建 PR */
+  dryRun?: boolean
+  /** 提交推送之后要不要建 PR/MR（默认 true） */
+  openReview?: boolean
+  /** 目标分支（PR 的 base）；空 = main */
+  base?: string
+}
+
+/** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
+export interface CredentialStatus {
+  platform: string
+  configured: boolean
+  hint: string | null
+}
+
+/**
+ * `publish_tx::PlatformAccountView` —— 一个平台在设置页里的完整视图。
+ *
+ * `repositoryUrl` / `username` 来自 `<appDataDir>/publish-account.json`（配置）；
+ * `hasToken` / `tokenHint` 来自系统 Keychain（**只有真假 + 尾号，没有原值**）。
+ */
+export interface PlatformAccountView {
+  platform: string
+  repositoryUrl: string
+  username: string
+  hasToken: boolean
+  tokenHint: string | null
+}
+
+/** `publish_tx::PublishAccount` —— 设置页「发布账户」那块读的现状（GitHub / Gitee 对称） */
+export interface PublishAccount {
+  /** 每个平台一格 */
+  platforms: PlatformAccountView[]
+  /** 当前工作目录的远端 URL（给用户对照"是不是这个仓库"） */
+  remoteUrl: string | null
+  /** 当前远端是否与已配置的某个平台一致（发布前的一致性提示） */
+  remoteMatchesConfig: boolean
+  /** 当前分支 */
+  branch: string | null
 }
 
 /* ---------- 状态词 ---------- */
@@ -1063,6 +1207,8 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
+  /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
+  appVersion: () => invoke<string>('wb_app_version'),
   /** 写官方源（Bootstrap）；返回**存的规范化值**（仓库地址 → 默认发布入口的 raw；blob 页转 raw） */
   setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
   words: () => invoke<Words>('wb_words'),
@@ -1260,7 +1406,34 @@ export const wb = {
     invoke<PreviewReport>('wb_generate_preview', { scope }),
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
-  publish: () => invoke<PublishReport>('wb_publish'),
+  /**
+   * **发布闸**（第二刀）：十五项逐项结果。
+   *
+   * ★ 与工作台点【发布】是**同一个 Rust 核心**（`audit::publish_audit`）——
+   * 界面只负责画，不负责判。`canPublish` 为假时**不许**往下走
+   */
+  publishAudit: () => invoke<PublishAudit>('wb_publish_audit'),
+  /**
+   * **发布事务**（第三刀下半）：唯一对外的发布动作。
+   *
+   * ★ 它内部串完 `审计 → 生成 → 定稿 → 本地 git → 平台 PR/MR` —— 前端**不再有**
+   * 独立的「生成」「创建 PR」按钮。返回的是**阶段快照**（走到哪、停在哪、为什么）。
+   * 不给 `opts` 就是默认全开（一次点击走完全程）。
+   */
+  publish: (opts?: TxOptions) => invoke<PublishTxReport>('wb_publish', { opts: opts ?? null }),
+  /** 发布账户现状（只读）：每个平台的仓库地址 / 用户名 / 有无 Token */
+  publishAccount: () => invoke<PublishAccount>('wb_publish_account'),
+  /** 存一个平台的**发布目标**（仓库地址 + 用户名，进 publish-account.json；**不含 Token**） */
+  setPublishAccount: (platform: string, repositoryUrl: string, username: string) =>
+    invoke<PlatformAccountView>('wb_set_publish_account', { platform, repositoryUrl, username }),
+  /** 存一个平台的 Token（**只进不出**：写 Keychain，返回里没有原值） */
+  setPublishToken: (platform: string, token: string) =>
+    invoke<PlatformAccountView>('wb_set_publish_token', { platform, token }),
+  /** 清一个平台的发布账户（配置 + 凭据一起清；幂等） */
+  clearPublishAccount: (platform: string) =>
+    invoke<PlatformAccountView>('wb_clear_publish_account', { platform }),
+  /** **手动回读**一份 PR/MR 的状态（快照 + 手动刷新；不做后台轮询） */
+  publishStatus: (number: number) => invoke<RemoteReview>('wb_publish_status', { number }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

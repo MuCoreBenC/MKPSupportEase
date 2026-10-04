@@ -33,17 +33,35 @@
 //! 与矩阵单元格**一模一样**。再建一套 DTO 等于给同一件事写两个形状，
 //! 迟早只改其中一个。所以字段详情走 `wb_matrix(cols=[那一列])`。
 
+/// **发布账户配置**（第三刀下半）：`repositoryUrl` + `username`，住
+/// `<appDataDir>/publish-account.json`（**不含 token**；token 住 Keychain）。
+/// 发布目标由它决定，`git remote` 只作校验
+pub mod account;
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
 pub mod assets;
+/// **发布闸**（第二刀）：发布前的唯一入口判定器。**它是 Rust 核心** ——
+/// 工作台界面 / 将来的 CLI / `cargo test` 判据调的都是 `publish_audit` 这一个函数，
+/// 界面不许自己再实现一套检查
+pub mod audit;
 pub mod build;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
+/// 发布账户凭据（第三刀下半）：每平台一份 Token，住**系统 Keychain**，前端拿不到原值
+pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod dist;
+/// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
+pub mod git;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;
+/// 代码托管平台出口（第三刀下半）：GitHub / Gitee 的 PR/MR + CI，**自持凭据**
+/// （被批准的第二个网络出口，见模块文档）
+pub mod platform;
+/// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
+/// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
+pub mod publish_tx;
 pub mod storage;
 pub mod words;
 
@@ -401,6 +419,20 @@ pub fn wb_reload() -> Result<Boot, AppError> {
     boot_inner()
 }
 
+/// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
+///
+/// 「生成与发布」页那块**只读的「软件版本」**展示位用它 —— 与客户端 `get_app_version`
+/// **同一个常量**（[`crate::runtime::structure::APP_VERSION`]），不是第二处真值。
+///
+/// ★ 它只报"当前装的是哪一版"，**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
+/// （见 `docs/RELEASE-TRANSACTIONS.md`），本轮不实现。
+#[tauri::command(async)]
+pub fn wb_app_version() -> Result<String, AppError> {
+    traced("wb_app_version", |_| {
+        Ok(crate::runtime::structure::APP_VERSION.to_owned())
+    })
+}
+
 /// 记下官方源（Bootstrap）地址 —— **工作台里唯一一处"发布到哪"**（写入库的
 /// `workbench/bootstrap.json`）。
 ///
@@ -569,7 +601,6 @@ pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryVie
         })
     })
 }
-
 
 fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
     // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集，
@@ -1723,6 +1754,8 @@ mod tests {
             "wb_generate_preview",
             "wb_revert_preview",
             "wb_dist_strays",
+            // 发布闸（第二刀）：只算不写 —— 与 `publish_audit` 是同一件事的两个壳
+            "wb_publish_audit",
             "wb_baseline_diff",
             "wb_assets",
             "wb_asset_usage",

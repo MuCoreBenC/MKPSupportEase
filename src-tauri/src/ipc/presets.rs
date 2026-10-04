@@ -129,11 +129,18 @@ fn file_name_of(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
-/// 切片器条目的类型。契约只有三种 `FileKind`，切片器这一档只有 bbs / orca 两个来源
-fn file_kind(a: &Asset) -> &'static str {
+/// 切片器条目的类型。契约只有三种 `FileKind`，切片器这一档只有 bbs / orca 两个来源。
+///
+/// **返回 `None` = 这一条不属于切片器档**（今天只有 MKP 预设的台账条目）——
+/// 以前这里是 `_ => "bbs_profile"` 兜底，于是 `path` 为空的 MKP 台账条目被贴成
+/// `bbs_profile` 混进了切片器表（2026-10-04 修的「presets/ 幽灵行」）。
+/// 判定改成显式匹配：认不出就说认不出，不猜。
+fn file_kind(a: &Asset) -> Option<&'static str> {
     match a.slicer.as_deref() {
-        Some("orca") => "orca_profile",
-        _ => "bbs_profile",
+        Some("orca") => Some("orca_profile"),
+        Some("bbs") | None => Some("bbs_profile"),
+        // MKP 预设与切片器不是一回事：它由 `catalog.files` 的 mkp_preset 条目承载
+        Some(_) => None,
     }
 }
 
@@ -338,12 +345,14 @@ fn version_files_dto(
 
     // —— MKP 预设一支：catalog 登记的交付文件。条目缺席 = 交付集合里就没有这份
     match catalog.file_of(machine_id, version_id) {
+        // 期望值原样透给界面（随包 bootstrap 目录下是 `None` —— 那一侧不登记 SHA，
+        // 界面据此显示"还不知道大小/指纹"，不是显示 0 / 空串）
         Some(f) => files.push(FileRefDto {
             kind: "mkp_preset",
             file_name: f.file_name.clone(),
             path: f.path.clone(),
-            size: Some(f.size),
-            sha256: Some(f.sha256.clone()),
+            size: f.size,
+            sha256: f.sha256.clone(),
         }),
         None => missing.push(format!(
             "{machine_id} / {version_id} 在目录里没有登记交付文件"
@@ -370,18 +379,42 @@ fn version_files_dto(
             )),
             Some(bundle) => {
                 for r in &bundle.asset_refs {
-                    match catalog.asset(r) {
+                    let a = match catalog.asset(r) {
                         None => {
-                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id))
+                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id));
+                            continue;
                         }
-                        Some(a) => files.push(FileRefDto {
-                            kind: file_kind(a),
-                            file_name: file_name_of(&a.path),
-                            path: format!("presets/{}", a.path),
-                            size: None,
-                            sha256: None,
-                        }),
-                    }
+                        Some(a) => a,
+                    };
+                    /*
+                     * 套餐的 `assetRefs` 是**混合**的：它同时引用切片器配置与 MKP 预设。
+                     * 切片器表只装切片器文件 —— MKP 那一支由上面的 `catalog.file_of` 出
+                     * （带真 path / size / SHA）。认不出类型的（`file_kind` = `None`）
+                     * 与 path 为空的**都不进这张表**：进它就是一行主名空、落点写成
+                     * `presets/` 的幽灵（2026-10-04）。
+                     */
+                    let Some(kind) = file_kind(a) else {
+                        continue;
+                    };
+                    let Some(path) = non_empty(&a.path) else {
+                        continue;
+                    };
+                    /*
+                     * 落点取**与 `catalog.files[].path` 同一处算法**（发布根基准
+                     * `assets/…`，2026-10-04 唯一路径语义）—— 界面上不许再出现
+                     * `presets/…` 这第三套写法。拿不到落点（`bundled` 档 / 这类没有落点）
+                     * = 这一份不进交付，切片器表里也不该有它。
+                     */
+                    let Some(dest) = crate::runtime::catalog::dest_of_asset(a) else {
+                        continue;
+                    };
+                    files.push(FileRefDto {
+                        kind,
+                        file_name: file_name_of(&path),
+                        path: dest,
+                        size: None,
+                        sha256: None,
+                    });
                 }
             }
         },
@@ -451,14 +484,21 @@ fn preset_files_dto(catalog: &runtime::Catalog) -> Vec<PresetFileInfoDto> {
         .assets
         .iter()
         .filter(|a| a.kind == AssetKind::SlicerProfile)
-        .map(|a| {
+        .filter_map(|a| {
+            /*
+             * 落点取**与 `catalog.files[].path` 同一处算法**（发布根基准 `assets/…`）。
+             * 拿不到 = 这一份不进交付（`bundled` 档），云端表里也就没有它。
+             */
+            let path = crate::runtime::catalog::dest_of_asset(a)?;
             let in_bundles = bundles_of(catalog, &a.id);
             let (nozzle, layer_height) = slicer_axes(&a.path);
-            PresetFileInfoDto {
+            Some(PresetFileInfoDto {
                 id: a.id.clone(),
                 file_name: file_name_of(&a.path),
-                path: format!("presets/{}", a.path),
-                kind: file_kind(a),
+                path,
+                // 上面刚按 `SlicerProfile` 滤过，`file_kind` 不可能给 `None` —— 真给了
+                // 说明「切片器类型」与「切片器文件档」这两处口径分岔了，当场炸比静默贴错好
+                kind: file_kind(a).expect("SlicerProfile 条目必须能定出切片器 FileKind"),
                 category: a.profile.clone().unwrap_or_default(),
                 machine_ids: a.machine_id.clone().into_iter().collect(),
                 nozzle,
@@ -471,7 +511,7 @@ fn preset_files_dto(catalog: &runtime::Catalog) -> Vec<PresetFileInfoDto> {
                 in_bundles,
                 // 没有 MKP 资产条目（doc §12.5），所以这一栏恒空
                 used_by_versions: Vec::new(),
-            }
+            })
         })
         .collect()
 }
@@ -817,9 +857,13 @@ mod tests {
 
     /// **DTO 构建吃的是 catalog（换源判据）。**
     ///
-    /// 九条命令的映射层全部从真 catalog 出数：机型、版本文件（MKP 带真 size/SHA）、
-    /// 参数元信息、配方值。任何一条从别的来源出数（TOML、硬编码），这条就失守 ——
-    /// 那正是「首屏唯一数据源 = catalog」（总纲判据 4）在 Rust 侧的钉子
+    /// 九条命令的映射层全部从真 catalog 出数：机型、版本文件、参数元信息、配方值。
+    /// 任何一条从别的来源出数（TOML、硬编码），这条就失守 ——
+    /// 那正是「首屏唯一数据源 = catalog」（总纲判据 4）在 Rust 侧的钉子。
+    ///
+    /// 注：这条用的是**随包 `catalog()`**，交付文件条目在它上面**不带期望值**
+    /// （`size`/`sha256` = `None`，见 `runtime::catalog::CatalogFile`）—— 那是发布侧的事。
+    /// 这里只咬"条目出得来、名字与落点对得上"。
     #[test]
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
@@ -835,7 +879,7 @@ mod tests {
         assert!(a1.forbidden_zones.is_empty(), "A1 没有禁区");
         assert_eq!(a1.versions.len(), 3);
 
-        // —— 版本文件：MKP 那支从 catalog 文件条目出，带真 size 与 SHA ——
+        // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
         let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
         assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
         let mkp = vf
@@ -844,14 +888,55 @@ mod tests {
             .find(|f| f.kind == "mkp_preset")
             .expect("MKP 引用必须在");
         assert_eq!(mkp.file_name, "A1-fastv3.3.toml");
-        assert_eq!(mkp.path, "mkp/presets/A1-fastv3.3.toml", "落点相对内部根");
-        assert!(mkp.size.unwrap_or(0) > 0, "大小是登记的真值");
-        assert_eq!(mkp.sha256.as_deref().map(str::len), Some(64));
+        assert_eq!(
+            mkp.path, "dist/mkp/presets/A1-fastv3.3.toml",
+            "落点是发布根基准（B 类在 dist/ 下），也是客户端内部落点"
+        );
+        // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串
+        assert_eq!(mkp.size, None, "随包目录不登记 size");
+        assert_eq!(mkp.sha256, None, "随包目录不登记 SHA");
         // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
             "切片器配置要跟着套餐出来"
         );
+        /*
+         * **切片器档里不许出现幽灵行**（2026-10-04）：
+         * 套餐的 `assetRefs` 是混合的 —— MKP 预设那条的 `path` 是空串。
+         * 以前它被 `_ => "bbs_profile"` 兜底贴成切片器文件，落点写成 `presets/`、
+         * 主名是空串，在界面上就是一行「presets/」。
+         * 判据：切片器那一支每一条都得有真文件名、落点都得是发布根基准的 `assets/…`
+         * （与 `catalog.files[].path` 同形 —— 2026-10-04 起界面上只有这一套写法）。
+         */
+        for f in vf.files.iter().filter(|f| f.kind != "mkp_preset") {
+            assert!(!f.file_name.is_empty(), "切片器条目主名不许为空：{f:?}");
+            assert_ne!(f.path, "assets/", "切片器条目的落点不许是空的 assets/");
+            assert!(
+                f.path.starts_with("assets/") && f.path.len() > "assets/".len(),
+                "切片器落点要在 assets/ 下指到真文件：{f:?}"
+            );
+        }
+        // 每台机型都与 A1 同形：切片器档一条幽灵都不许有
+        for m in machines.iter() {
+            for v in &m.versions {
+                let Some(vf) = version_files_dto(&catalog, &m.id, &v.id) else {
+                    continue;
+                };
+                assert!(
+                    vf.files
+                        .iter()
+                        .filter(|f| f.kind != "mkp_preset")
+                        .all(|f| !f.file_name.is_empty() && f.path != "assets/"),
+                    "{}/{} 的切片器档里有幽灵行：{:?}",
+                    m.id,
+                    v.id,
+                    vf.files
+                        .iter()
+                        .filter(|f| f.file_name.is_empty() || f.path == "assets/")
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
 
         // 不存在的机型/版本 → None（不是出错）
         assert!(version_files_dto(&catalog, "NOPE", "X").is_none());

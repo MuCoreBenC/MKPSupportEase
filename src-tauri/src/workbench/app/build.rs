@@ -452,92 +452,105 @@ fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, S
     (todo, skipped)
 }
 
-/// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门
+/// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门。
+///
+/// ★ 它是 [`generate_with`] 的薄壳（`with_ctx` + trace）。真正的写在那个收 `&Ctx`
+/// 的自由函数里 —— **发布事务要复用同一台生成器**，而它已经在 `with_ctx` 里了
+/// （锁不可重入），只能调自由函数。
 #[tauri::command]
 pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
+        with_ctx(|ctx| generate_with(ctx, &scope))
+    })
+}
 
-            let report = issues::inspect(&book);
-            if let Some(b) = report.first_block() {
-                return Err(AppError::invalid_argument(w::disabled::BUILD_BLOCKED)
-                    .with_detail(format!("{}：{}", b.title, b.detail)));
-            }
+/// 生成的**锁无关内核**：给定一份会话，按 scope 把产物写进 `dist/mkp/presets/` 并重算目录。
+///
+/// 与 [`preview_with`] 是同一条理由（见那里）：「生成前预演」与「真生成」、
+/// 「发布事务里的生成」必须是**同一批 todo、同一处渲染、同一处落点**。
+/// 命令壳只负责 `with_ctx` + trace。
+///
+/// ⚠ **它会写盘**（产物 + 快照 + catalog）。调用方负责先过闸（[`issues::inspect`]）。
+pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = Book::new(&ctx.presets, &c, &d);
 
-            let (todo, skipped) = planned_todos(&book, &scope);
+    let report = issues::inspect(&book);
+    if let Some(b) = report.first_block() {
+        return Err(AppError::invalid_argument(w::disabled::BUILD_BLOCKED)
+            .with_detail(format!("{}：{}", b.title, b.detail)));
+    }
 
-            // ① 全部算完。**任一项算不出来则整批不动**
-            let mut rendered: Vec<Rendered> = Vec::with_capacity(todo.len());
-            for uid in &todo {
-                rendered.push(render(&book, uid)?);
-            }
+    let (todo, skipped) = planned_todos(&book, scope);
 
-            // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
-            // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
-            let dist = paths::dist_root()?
-                .join(super::dist::MKP_DIR)
-                .join("presets");
-            let mut written = Vec::new();
-            let mut unchanged = Vec::new();
-            let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
+    // ① 全部算完。**任一项算不出来则整批不动**
+    let mut rendered: Vec<Rendered> = Vec::with_capacity(todo.len());
+    for uid in &todo {
+        rendered.push(render(&book, uid)?);
+    }
 
-            for r in &rendered {
-                let target = dist.join(&r.file_name);
-                let existing = std::fs::read_to_string(&target).ok();
-                if existing
-                    .as_deref()
-                    .is_some_and(|old| same_payload(old, &r.text))
-                {
-                    unchanged.push(r.uid.clone());
-                } else {
-                    crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
-                    written.push(r.uid.clone());
-                }
-                // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
-                let v = book.version(&r.uid).expect("刚才渲染过");
-                ctx.store.write_doc(
-                    &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
-                    &r.snapshot,
-                )?;
-                fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
-            }
+    // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
+    // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
+    let dist = paths::dist_root()?
+        .join(super::dist::MKP_DIR)
+        .join("presets");
+    let mut written = Vec::new();
+    let mut unchanged = Vec::new();
+    let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
 
-            // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
-            // 跟上，dist 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
-            //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
-            // 重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 / 渠道）仍归
-            // 发布写 —— 生成不替发布定稿。
-            //
-            // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
-            // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
-            // ×7）。先补文件、再重算目录，两头对上。
-            let dist_root = paths::dist_root()?;
-            if let Ok(asset_root) = paths::assets_root() {
-                super::dist::write_content(&dist_root, &asset_root, &book)?;
-            }
-            super::dist::write_catalog_json(&dist_root, &book)?;
+    for r in &rendered {
+        let target = dist.join(&r.file_name);
+        let existing = std::fs::read_to_string(&target).ok();
+        if existing
+            .as_deref()
+            .is_some_and(|old| same_payload(old, &r.text))
+        {
+            unchanged.push(r.uid.clone());
+        } else {
+            crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
+            written.push(r.uid.clone());
+        }
+        // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
+        let v = book.version(&r.uid).expect("刚才渲染过");
+        ctx.store.write_doc(
+            &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
+            &r.snapshot,
+        )?;
+        fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+    }
 
-            let stamp = clock::now_iso8601();
-            tracing::info!(
-                written = written.len(),
-                unchanged = unchanged.len(),
-                skipped = skipped.len(),
-                "生成完成"
-            );
-            Ok(GenerateReport {
-                mark: Patch::MarkBuilt {
-                    uids: fingerprints.keys().cloned().collect(),
-                    stamp: stamp.clone(),
-                    fingerprints,
-                },
-                stamp,
-                written,
-                unchanged,
-                skipped,
-            })
-        })
+    // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
+    // 跟上，dist 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
+    //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
+    // 重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 / 渠道）仍归
+    // 发布写 —— 生成不替发布定稿。
+    //
+    // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
+    // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
+    // ×7）。先补文件、再重算目录，两头对上。
+    let dist_root = paths::dist_root()?;
+    if let Ok(asset_root) = paths::assets_root() {
+        super::dist::write_content(&dist_root, &asset_root, &book)?;
+    }
+    super::dist::write_catalog_json(&dist_root, &book)?;
+
+    let stamp = clock::now_iso8601();
+    tracing::info!(
+        written = written.len(),
+        unchanged = unchanged.len(),
+        skipped = skipped.len(),
+        "生成完成"
+    );
+    Ok(GenerateReport {
+        mark: Patch::MarkBuilt {
+            uids: fingerprints.keys().cloned().collect(),
+            stamp: stamp.clone(),
+            fingerprints,
+        },
+        stamp,
+        written,
+        unchanged,
+        skipped,
     })
 }
 
@@ -627,49 +640,59 @@ pub struct PreviewReport {
 #[tauri::command(async)]
 pub fn wb_generate_preview(scope: Scope) -> Result<PreviewReport, AppError> {
     traced("wb_generate_preview", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
+        with_ctx(|ctx| preview_with(ctx, &scope))
+    })
+}
 
-            // 生成闸门与 `wb_generate` 是同一道：有阻断就如实说，不往下算
-            let report = issues::inspect(&book);
-            if let Some(b) = report.first_block() {
-                return Ok(PreviewReport {
-                    files: Vec::new(),
-                    skipped: Vec::new(),
-                    to_write: 0,
-                    unchanged: 0,
-                    blocked: Some(format!("{}：{}", b.title, b.detail)),
-                });
-            }
+/// 预演的**锁无关内核**：给定一份会话，把这次要写的产物都算出来。
+///
+/// ★ 这一层存在的唯一理由是**「一个入口」**：界面上的「生成前预演」与**发布闸**
+/// （[`super::audit`]）必须算同一件事。而发布闸本身已经在 `with_ctx` 里，`with_ctx`
+/// 的锁**不可重入** —— 闸里再调一次 `wb_generate_preview` 命令就是自己把自己锁死。
+/// 所以「同一台渲染器」落在这一层，**不落在命令壳上**；命令壳只负责 `with_ctx` + trace。
+///
+/// 只读：`dist_root_path` 不建目录，缺文件按「新增」算，不顺手造出一个 `mkp/presets/`。
+pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewReport, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = Book::new(&ctx.presets, &c, &d);
 
-            let (todo, skipped) = planned_todos(&book, &scope);
-            let dist = paths::dist_root()?
-                .join(super::dist::MKP_DIR)
-                .join("presets");
+    // 生成闸门与 `wb_generate` 是同一道：有阻断就如实说，不往下算
+    let report = issues::inspect(&book);
+    if let Some(b) = report.first_block() {
+        return Ok(PreviewReport {
+            files: Vec::new(),
+            skipped: Vec::new(),
+            to_write: 0,
+            unchanged: 0,
+            blocked: Some(format!("{}：{}", b.title, b.detail)),
+        });
+    }
 
-            let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
-            let mut to_write = 0usize;
-            let mut unchanged = 0usize;
-            for uid in &todo {
-                let r = render(&book, uid)?;
-                let existing = std::fs::read_to_string(dist.join(&r.file_name)).ok();
-                let pf = preview_one(&r, existing.as_deref());
-                match pf.state {
-                    DiffState::Unchanged => unchanged += 1,
-                    _ => to_write += 1,
-                }
-                files.push(pf);
-            }
+    let (todo, skipped) = planned_todos(&book, scope);
+    let dist = paths::dist_root_path()
+        .join(super::dist::MKP_DIR)
+        .join("presets");
 
-            Ok(PreviewReport {
-                files,
-                skipped,
-                to_write,
-                unchanged,
-                blocked: None,
-            })
-        })
+    let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
+    let mut to_write = 0usize;
+    let mut unchanged = 0usize;
+    for uid in &todo {
+        let r = render(&book, uid)?;
+        let existing = std::fs::read_to_string(dist.join(&r.file_name)).ok();
+        let pf = preview_one(&r, existing.as_deref());
+        match pf.state {
+            DiffState::Unchanged => unchanged += 1,
+            _ => to_write += 1,
+        }
+        files.push(pf);
+    }
+
+    Ok(PreviewReport {
+        files,
+        skipped,
+        to_write,
+        unchanged,
+        blocked: None,
     })
 }
 
@@ -913,55 +936,122 @@ pub struct PublishReport {
     pub stamp: String,
     pub root: String,
     pub files: usize,
-    /// 上游没声明最低客户端版本时是 `None`，界面写「未声明」。**不编一个版本号出来**
+    /// 这次发出去的目录登记的**最低正式客户端版本**（结构规则表里对当前结构签名那条）。
+    ///
+    /// 以前这一格是"上游 manifest 声明了吗"，上游删掉之后恒空；现在它有真来源，
+    /// 而且**不要求那个版本已经发布**（Dev 场景，见 `runtime::structure`）。
+    /// `None` 只该出现在"这一代还没登记"时 —— 那种情况发布闸会先拦住。
     pub minimum_client: Option<String>,
     /// 待办与提示**不挡发布**，但要在报告里列出来
     pub todos: usize,
     pub hints: usize,
 }
 
-/// 发布：把 `presets/dist/` 里的产物连同清单一起定稿。
+/// **发布闸**：发布前那十五项的逐项结果（第二刀）。
 ///
-/// **清单最后写**：先写资源、最后写指向它们的清单。反过来的话，中途失败会留下一份
-/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现。
+/// 它**只读**：不写盘、不动 git、不发网络请求。界面拿它画那个逐项打勾的框，
+/// 往下走的那颗按钮只在 `can_publish` 为真时亮 —— **任何一项 Blocker 红了
+/// 就不许往下走**（作者定的硬规矩）。
 ///
-/// 闸门顺序（b05 Task 13）：**校验阻断**（`issues::inspect`，13.3）→
-/// **残留拦截**（`publish_into` 开头扫描，13.4：有残留一个字节都不写）→
-/// 内容与 manifest（13.6/13.7）。落盘细节全部在 [`super::dist::publish_into`]。
+/// 与 [`wb_publish`] 共用同一个会话上下文，所以"闸里看到的"就是"发布会写出去的"。
+///
+/// ★ **命令壳是薄的**：算的是 [`super::audit::publish_audit`]，界面与 `cargo test`
+/// 判据调的是同一个函数（「界面不许自己再实现一套检查」）。
+#[tauri::command(async)]
+pub fn wb_publish_audit() -> Result<super::audit::PublishAudit, AppError> {
+    traced("wb_publish_audit", |_| super::audit::publish_audit())
+}
+
+/// **发布事务**（第三刀下半）：把「审计 → 生成 → 定稿 → 本地 git → 平台 PR/MR」跑成一次手势。
+///
+/// ★ 这是**唯一对外的发布动作**：`wb_generate` / `wb_publish_audit` 都是它的**内部步骤**
+/// （前端不摆「生成」「创建 PR」按钮）。事务内核见 [`super::publish_tx::run`] ——
+/// **锁无关**（只收 `&Ctx`），因为 `with_ctx` 锁不可重入（回头调命令壳会自锁）。
+///
+/// 发布目标（平台 / 仓库 / 用户名 / Token）在**锁外**从发布账户配置解析（[`resolve_publish`]）；
+/// **没有配发布账户**时退化成"只生成 + 定稿 + 本地推送"，如实说"没建 PR" ——
+/// 那是"还没配账户"，不是失败。
 #[tauri::command]
-pub fn wb_publish() -> Result<PublishReport, AppError> {
+pub fn wb_publish(
+    app: tauri::AppHandle,
+    opts: Option<super::publish_tx::TxOptions>,
+) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
+        let opts = opts.unwrap_or_default();
+        // 发布目标 + 平台客户端在锁外构造（读配置 / Keychain / remote，都不碰会话）
+        let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
         with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
-            let report = issues::inspect(&book);
-            if let Some(b) = report.first_block() {
-                return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
-                    .with_detail(format!("{}：{}", b.title, b.detail)));
-            }
+            super::publish_tx::run(
+                ctx,
+                &opts,
+                target.as_ref(),
+                hosting.as_ref().map(|h| h.as_ref()),
+                None,
+            )
+        })
+    })
+}
 
-            let root = paths::dist_root()?;
-            let asset_root = paths::assets_root()?;
-            // 渠道是发布常量；最低客户端与版本原本跟着上游 manifest 的 compat 走，
-            // 上游整层删掉之后没有来源 —— **照实留空**，不编一个版本号出来
-            let meta = super::dist::PublishMeta {
-                stamp: clock::now_iso8601(),
-                channel: PUBLISH_CHANNEL.to_owned(),
-                minimum_client: String::new(),
-                version: String::new(),
-            };
-            let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
-            let stamp = meta.stamp;
+/// 解析发布目标 + 造平台客户端（都在锁外）。
+///
+/// - 配了发布账户 → 解析出 [`PublishTarget`] 并按平台造 `Hosting`（用配置里的 Token）；
+/// - **没配**（或配得不完整）→ 两者都是 `None` —— 事务退化成"生成 + 定稿 + 本地推送"，
+///   **不报错**（"还没配账户"是正常状态，不是失败）。
+fn resolve_publish(
+    app: &tauri::AppHandle,
+    platform: Option<&str>,
+) -> (
+    Option<super::publish_tx::PublishTarget>,
+    Option<Box<dyn super::platform::Hosting>>,
+) {
+    let Ok(root) = crate::fsx::paths::internal_root(app) else {
+        return (None, None);
+    };
+    let Ok(target) = super::publish_tx::resolve_target(&root, platform) else {
+        // 没配 / 配不完整：不报错，退化成纯本地推送
+        return (None, None);
+    };
+    let hosting: Box<dyn super::platform::Hosting> = match target.platform.as_str() {
+        "github" => Box::new(super::platform::github::GitHub::new(target.token.clone())),
+        "gitee" => Box::new(super::platform::gitee::Gitee::new(target.token.clone())),
+        _ => return (Some(target), None),
+    };
+    (Some(target), Some(hosting))
+}
 
-            tracing::info!(files = out.files, at = %stamp, "发布完成");
-            Ok(PublishReport {
-                stamp,
-                root: root.display().to_string(),
-                files: out.files,
-                minimum_client: None,
-                todos: report.todos,
-                hints: report.hints,
-            })
+/// **旧发布壳**（第三刀上半及以前）：只把 `presets/dist/` 定稿，不生成、不动 git。
+///
+/// 已被 [`wb_publish`] 事务取代，**不再是前端入口**。留着它是因为它仍是"定稿"这一步的
+/// 可单测入口（发布事务内核走的是同一段 `publish_into`）。前端只用 `wb_publish`。
+#[allow(dead_code)]
+fn publish_deliverable_only() -> Result<PublishReport, AppError> {
+    with_ctx(|ctx| {
+        let (c, d, _) = state(ctx)?;
+        let book = Book::new(&ctx.presets, &c, &d);
+        let report = issues::inspect(&book);
+        if let Some(b) = report.first_block() {
+            return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
+                .with_detail(format!("{}：{}", b.title, b.detail)));
+        }
+
+        let root = paths::dist_root()?;
+        let asset_root = paths::assets_root()?;
+        let meta = super::dist::PublishMeta {
+            stamp: clock::now_iso8601(),
+            channel: PUBLISH_CHANNEL.to_owned(),
+            version: String::new(),
+        };
+        let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+        let stamp = meta.stamp;
+
+        tracing::info!(files = out.files, at = %stamp, "发布完成");
+        Ok(PublishReport {
+            stamp,
+            root: root.display().to_string(),
+            files: out.files,
+            minimum_client: out.minimum_client.clone(),
+            todos: report.todos,
+            hints: report.hints,
         })
     })
 }
@@ -976,7 +1066,7 @@ pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::deliverable_set(&book);
+            let expected = super::dist::dist_expected_set(&book);
             Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
         })
     })
@@ -990,7 +1080,7 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::deliverable_set(&book);
+            let expected = super::dist::dist_expected_set(&book);
             let root = paths::dist_root()?;
             let strays = super::dist::scan_strays(&root, &expected);
             if strays.is_empty() {

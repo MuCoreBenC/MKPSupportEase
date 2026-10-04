@@ -36,7 +36,7 @@ use crate::error::AppError;
 
 use super::catalog::CatalogFile;
 use super::delivery::Source;
-use super::source::{join_url, CATALOG_FILE};
+use super::source::{join_url, CATALOG_FILE, RELEASE_FILE};
 
 /// 一次请求的总时间上限（含连接与传完整个响应体）
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -309,6 +309,13 @@ pub fn get_catalog(catalog_url: &str) -> Result<Vec<u8>, AppError> {
     get_bytes(catalog_url, &GetPlan::new(CATALOG_FILE), &noop_tick)
 }
 
+/// 远端的**软件发布信息**（`release.json`）。与 [`get_catalog`] 同形、同一个取名口 ——
+/// 这一层只负责"取字节"，`release.json` 与 catalog 的**语义差别**（一个是软件版本、
+/// 一个是预设数据）不在这一层表达，那是 [`super::release_info`] 的事。
+pub fn get_release(release_url: &str) -> Result<Vec<u8>, AppError> {
+    get_bytes(release_url, &GetPlan::new(RELEASE_FILE), &noop_tick)
+}
+
 /* ------------------------------- 远端的 Source 实现 ------------------------------- */
 
 /// 网络源：把 catalog 登记的 (`path`) 与配置的地址拼成一个 URL，然后 GET。
@@ -339,7 +346,8 @@ impl Source for RemoteSource<'_> {
         let url = join_url(&self.base_url, &file.path);
         let plan = GetPlan {
             file_name: &file.file_name,
-            expect_size: Some(file.size),
+            // 期望大小是 `Option`（随包 bootstrap 目录不登记它）：没有就不设水位
+            expect_size: file.expected_size(),
             ..GetPlan::new(&file.file_name)
         };
         get_bytes(&url, &plan, self.on_tick)
@@ -616,7 +624,11 @@ mod tests {
         let got = source.fetch(&file).expect("Source 该拿到字节");
 
         assert_eq!(got, content);
-        assert_eq!(got.len() as u64, file.size, "size 顺手当上限使");
+        assert_eq!(
+            Some(got.len() as u64),
+            file.expected_size(),
+            "size 顺手当上限使"
+        );
     }
 
     /* ---------- 端到端：把「下载」这件事从头走到尾 ---------- */
@@ -626,18 +638,17 @@ mod tests {
         CatalogFile {
             kind: super::super::catalog::kind::PRESET.to_owned(),
             file_name: name.to_owned(),
-            path: format!("mkp/presets/{name}"),
+            path: format!("{}/{name}", super::super::catalog::PRESET_DEST_DIR),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
-            sha256: super::super::catalog::hex(&sha2::Sha256::digest(content)),
-            size: content.len() as u64,
+            sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(content))),
+            size: Some(content.len() as u64),
         }
     }
 
     fn fresh_root() -> tempfile::TempDir {
-        let root = tempfile::tempdir().expect("临时目录建不出来");
-        std::fs::create_dir_all(super::super::paths::mkp_dir(root.path())).expect("下载区建不出来");
-        root
+        // 交付面不再有"预建的下载区根"：目录由 `deliver` 按 `catalog.path` 落盘时按需建
+        tempfile::tempdir().expect("临时目录建不出来")
     }
 
     /// 这一轮唯一能证明「客户端真的能从远端把文件拿回来落到下载区」的那条。
@@ -657,8 +668,8 @@ mod tests {
 
         assert_eq!(
             target,
-            super::super::paths::mkp_dir(root.path()).join("presets/A1-standard.toml"),
-            "落在目录说的那个位置"
+            super::super::paths::released_file(root.path(), &file.path),
+            "落在 catalog.path 说的那个位置（唯一路径语义）"
         );
         assert_eq!(std::fs::read(&target).expect("读到"), content);
         assert_eq!(
@@ -668,7 +679,8 @@ mod tests {
         );
     }
 
-    /// 第三圈第一刀的端到端：**BBS 配置走同一条管道**（真 HTTP → SHA → 落 `mkp/bbs/…`）。
+    /// 第三圈第一刀的端到端：**BBS 配置走同一条管道**（真 HTTP → SHA → 落在
+    /// `catalog.path` 说的那一格，A 类是 `assets/bbs/…`）。
     ///
     /// 这条守的是"新增一种资源不再新增一套下载系统"：除了 `kind` 与落点目录，
     /// 它与预设那一支走的是**同一个 `deliver`、同一道 SHA 闸、同一套归档**。
@@ -680,11 +692,11 @@ mod tests {
         let file = CatalogFile {
             kind: super::super::catalog::kind::BBS_CONFIG.to_owned(),
             file_name: "MKPProcess A1 0.2 0.10.json".to_owned(),
-            path: "mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json".to_owned(),
+            path: "assets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json".to_owned(),
             machine_id: "A1".to_owned(),
             version_id: String::new(),
-            sha256: super::super::catalog::hex(&sha2::Sha256::digest(&content)),
-            size: content.len() as u64,
+            sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(&content))),
+            size: Some(content.len() as u64),
         };
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
@@ -696,8 +708,8 @@ mod tests {
         assert_eq!(
             target,
             root.path()
-                .join("mkp/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"),
-            "BBS 配置落在 mkp/bbs/ 下，与预设分开"
+                .join("assets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"),
+            "BBS 配置落在 assets/bbs/ 下（`catalog.path` 说的那一格），与预设分开"
         );
         assert_eq!(std::fs::read(&target).expect("读到"), content);
         assert_eq!(
@@ -714,11 +726,11 @@ mod tests {
         let file = CatalogFile {
             kind: super::super::catalog::kind::MODEL.to_owned(),
             file_name: "MKP_support_test_models.3mf".to_owned(),
-            path: "mkp/models/MKP_support_test_models.3mf".to_owned(),
+            path: "assets/models/MKP_support_test_models.3mf".to_owned(),
             machine_id: String::new(),
             version_id: String::new(),
-            sha256: super::super::catalog::hex(&sha2::Sha256::digest(&content)),
-            size: content.len() as u64,
+            sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(&content))),
+            size: Some(content.len() as u64),
         };
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
@@ -729,7 +741,8 @@ mod tests {
 
         assert_eq!(
             target,
-            root.path().join("mkp/models/MKP_support_test_models.3mf")
+            root.path()
+                .join("assets/models/MKP_support_test_models.3mf")
         );
         assert_eq!(std::fs::read(&target).expect("读到"), content);
     }
@@ -753,9 +766,7 @@ mod tests {
             "对不上字节 = 拒绝"
         );
         assert!(
-            !super::super::paths::mkp_dir(root.path())
-                .join("A1-standard.toml")
-                .exists(),
+            !super::super::paths::released_file(root.path(), &file.path).exists(),
             "坏字节连碰盘的机会都没有"
         );
     }

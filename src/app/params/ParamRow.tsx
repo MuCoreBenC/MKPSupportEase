@@ -253,7 +253,7 @@ export default function ParamRow({
           </dd>
           {/*
             「值类型」—— 作者点名要的那一栏：「string，bool 之类的，都在抽屉里面，
-            显示的」。它来自**下载来的包里**（`ClientFieldDef.valueType`），不是客户端猜的：
+            显示的」。它来自**运行时 catalog 的字段定义**（`ParamDef.valueType`），不是客户端猜的：
             控件（开关 / 分段 / 步进器）说的是「画成什么」，类型说的是「值是什么」，
             两者不是一回事（开关是 bool，下拉是 string）。
           */}

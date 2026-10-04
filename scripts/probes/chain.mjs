@@ -1,34 +1,33 @@
 /*
- * P6 探针：**工作台发布这一端**（生成 → 上传）＋ 客户端那一端的边界。
+ * P6 探针：**工作台发布这一端**（生成 → 报出真实产物）＋ 客户端那一端的边界。
  *
- * # 这条链现在的真实形态（2026-10-02 重写）
+ * # 这条链现在的真实形态（2026-10-04 第二次重写）
  *
- * 原版走的是「工作台生成 → 上传 → 客户端同步 → 下载 → 应用」五步，两个入口同源、
- * 共用一格 `localStorage`。**客户端那半条链已经结构性走不通**（不是键名过期那么简单）：
+ * 原版走的是「工作台生成 → 上传到云端 → 客户端同步 → 下载 → 应用」五步，两个入口同源、
+ * 共用一格 `localStorage`。**这一整条在 2026-10-04 随 `ClientDataPackage` 退役消失**：
  *
+ *   · 「上传到云端」那个按钮与 `mkp.cloud.presets` 那一格**已经不存在** —— 模拟云端是一份
+ *     **假的发布契约**（真契约是 `catalog.path` + Git，见 `docs/PUBLISH-ARCHITECTURE.md`）；
  *   · 客户端的底账在 C4 收口时整体搬进了 Internal 根（catalog / `mkp/` / `run/`），
- *     WebView 的 localStorage 不再住任何底账；
- *   · 真机的同步 / 下载走**真数据源**（HTTP + 真盘）；浏览器里的假后端没有盘、也没有源，
+ *     真机的同步 / 下载走**真数据源**（HTTP + 真盘）；浏览器里的假后端没有盘、也没有源，
  *     下载会如实抛「浏览器里没有下载区」—— 那是对的，不是 bug。
  *
  * 所以这一份现在守两头：
  *
- *   工作台端   ① 勾「待生成」→ 生成 → ② 报的是真说明书的数（机型 / 版本 / 字段 / 带条件）
- *              ② 点「上传到云端」→ 写进 `mkp.cloud.presets`（整份 release：说明书 + N 份 TOML）
- *                → **刷新页面那一份还在**（这条管道工作台这一端真正的产物）
- *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源；也不假装与工作台那一格联动）
+ *   工作台端   ① 勾「待生成」→ 生成 → ② 卡的产物名单报出**真产物份数**
+ *              ② 设置页「官方源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
+ *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源，也不假装联动）
  *
  * 客户端那半条链（下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
  *   · `params-settings.mjs`  参数页照目录渲染、设置页「预设数据源」那一格全流程能走
  *   · `presets.mjs`          下载如实拒、应用用户文件、「已应用」状态
  *   · 真机那条链（工作台发布 `presets/dist` → 数据源地址 → 客户端下载 → 应用）
  *     只在真机上跑得通 —— 归 `docs/PROJECT-AUDIT.md` ⑧「云端交付最终验收」的清单。
- *     （2026-10-02：客户端「同步」页整页退役 —— 以前这里点的就是它；数据源那一格
- *     搬去了设置页，客户端与工作台 `mkp.cloud.presets` 那一格的"没关系"没变。）
  *
- * **上次的教训也写在这儿**：原版最后几条断言读 `mkp.a40.package` / `mkp.a40.active` ——
- * 那是 C4 退役的底账键，恒为 null（那几条早已结构性 FAIL，A41 记账里"在 main 上就红"
- * 就有它们）。**读退役结构的探针比没有探针更糟：它红着，于是没人再看它。**
+ * **上次的教训也写在这儿**（同一处栽过两次）：原版断言读 `mkp.a40.package` / `active`、
+ * 后来读 `mkp.cloud.presets` —— 都是**已经退役的结构**，于是那些条目恒 FAIL，
+ * 谁也不再点开看它。**读退役结构的探针比没有探针更糟：它红着，于是没人再看它。**
+ * 所以退役一个结构时，**必须同时裁掉读它的那一段探针**（本次就是这么做的）。
  *
  * # 为什么打的是 development + esnext 那一份（而不是 `npm run build:workbench` 的产物）
  *
@@ -80,29 +79,6 @@ const flat = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
 /** 工作台的正文在 `.shellBody` 里（这一页没有 `<main>`：那是客户端顶栏那一套） */
 const wbText = (page) => page.evaluate(() => document.querySelector('[class*="shellBody"]')?.innerText ?? '')
 const appText = (page) => page.evaluate(() => (document.querySelector('main')?.innerText ?? ''))
-
-/** 云端那一格（`STORAGE.cloud`）里最后一份 release —— 工作台上传的产物 */
-const cloudEntryOf = (page) =>
-  page.evaluate(() => {
-    const raw = localStorage.getItem('mkp.cloud.presets')
-    if (raw === null) return null
-    try {
-      const list = JSON.parse(raw)
-      const e = list[list.length - 1]
-      return {
-        name: e.name,
-        version: e.version,
-        at: e.at,
-        presets: e.presets.length,
-        files: e.presets.map((p) => `${p.machineId}/${p.versionId}=${p.fileName}`),
-        fields: e.package.fields.length,
-        machines: e.package.machines.length,
-        hash: e.package.inputsHash,
-      }
-    } catch {
-      return null
-    }
-  })
 
 /** 等一个条件成立（后端是内存桩，一般是一两帧的事） */
 async function until(fn, ms = 5000) {
@@ -176,62 +152,38 @@ for (const size of SIZES) {
   await wbPage.goto(`${base}/workbench.html?mock=1`, { waitUntil: 'load' })
   await wbPage.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
   await wbPage.locator('button[title="生成与发布"]').first().click()
-  const wbReady = await until(async () => (await wbText(wbPage)).includes('② 客户端数据包'))
+  const wbReady = await until(async () => (await wbText(wbPage)).includes('② 发布'))
   if (!wbReady) problems.push(`${tag} 工作台没进「生成与发布」`)
 
+  /* 生成前先记下产物名单 —— 生成之后它必须跟着长（② 卡报的就是真产物份数） */
+  const before = Number(/preset\.toml × (\d+) 份/.exec(flat(await wbText(wbPage)))?.[1] ?? '0')
   await wbPage.getByRole('button', { name: '全选待生成', exact: true }).first().click()
   await wbPage.getByRole('button', { name: /^生成 \d+ 项$/ }).first().click()
-  const built = await until(async () => /preset\.toml × \d+ 份/.test(await wbText(wbPage)))
+  /* 生成不写盘到确认之后：过一道「生成前确认」框（点确认 → 结果页 → 完成） */
+  await wbPage.waitForSelector('[role="dialog"]', { timeout: 5000 })
+  await wbPage.getByRole('button', { name: '确认生成', exact: true }).first().click()
+  await until(async () =>
+    (
+      await wbPage.evaluate(() => document.querySelector('[role="dialog"]')?.innerText ?? '')
+    ).includes('生成完成'),
+  )
+  await wbPage.getByRole('button', { name: '完成', exact: true }).first().click()
+  await wbPage.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
+
+  const built = await until(async () => {
+    const n = Number(/preset\.toml × (\d+) 份/.exec(flat(await wbText(wbPage)))?.[1] ?? '0')
+    return n > before
+  })
   const builtCount = Number(/preset\.toml × (\d+) 份/.exec(flat(await wbText(wbPage)))?.[1] ?? '0')
-
-  const wbNumbers = /(\d+) 台机型 (\d+) 个版本 (\d+) 个字段 带条件 (\d+) 可选文件 (\d+)/.exec(
-    flat(await wbText(wbPage)),
-  )
   check(
     tag,
-    '① 工作台 ② 报的是真说明书（机型 / 版本 / 字段 / 带条件）',
-    built && wbNumbers !== null,
-    wbNumbers?.slice(1).join(' / ') ?? '没找到那几个数',
+    '① 工作台：生成之后产物名单跟着长（② 卡报的是真产物份数）',
+    built && builtCount > before,
+    `生成前 ${before} 份 → 生成后 ${builtCount} 份`,
   )
-  const [nMachines, nVersions, nFields, nConds] = wbNumbers?.slice(1, 5) ?? []
+  await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-build.png` })
 
-  /* ---------- ② 工作台：上传 ---------- */
-  await wbPage.getByRole('button', { name: '上传到云端', exact: true }).first().click()
-  const wrote = await until(async () =>
-    (await wbPage.evaluate(() => localStorage.getItem('mkp.cloud.presets')))?.includes('工作台发布') === true)
-  const entry = await cloudEntryOf(wbPage)
-  check(
-    tag,
-    '② 上传写进那一格，且是整份 release（说明书 + N 份 TOML）',
-    wrote && entry !== null && entry.presets > 0 && entry.fields > 0,
-    JSON.stringify(entry),
-  )
-  if (entry === null) {
-    /* 后面两步全都要读这一份，没有它就没法继续 —— 报出来直接换档 */
-    check(tag, '② 上传的份数与生成报的一致（前一步没数据，跳过）', false, '上传没成功')
-    await ctx.close()
-    continue
-  }
-  check(
-    tag,
-    '② 上传的份数与生成报的一致',
-    builtCount > 0 && entry.presets === builtCount,
-    `生成报 ${builtCount} 份 / 上传里 ${entry.presets} 份`,
-  )
-
-  /* 刷新工作台页：那一份还在（这条管道工作台这一端真正的产物） */
-  await wbPage.reload({ waitUntil: 'load' })
-  await wbPage.waitForSelector('nav[aria-label="一级导航"]', { timeout: 15000 })
-  const after = await cloudEntryOf(wbPage)
-  check(
-    tag,
-    '② 刷新之后那一格还在，且是同一份（留在机器上）',
-    after !== null && after.hash === entry.hash,
-    after === null ? '刷新后那一格空了' : `${after.hash} vs ${entry.hash}`,
-  )
-  await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-upload.png` })
-
-  /* ---------- ②b. 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
+  /* ---------- ② 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
   /*
    * 守第十七/十八刀定的**输入契约**：用户只表达"我有一个仓库"，其余是系统的事。
    *   ① 那格在、提示语说清"填仓库地址就够"（不是只认 blob 页）；
@@ -244,7 +196,7 @@ for (const size of SIZES) {
   const wbSetText = flat(await wbText(wbPage))
   check(
     tag,
-    '②b 工作台设置页有「官方源（Bootstrap）」，且说明"填仓库地址就够"',
+    '② 设置页有「官方源（Bootstrap）」，且说明"填仓库地址就够"',
     setReady && wbSetText.includes('填仓库地址就够'),
     wbSetText.slice(0, 80),
   )
@@ -256,13 +208,13 @@ for (const size of SIZES) {
   const saved = await until(async () => (await wbText(wbPage)).includes('已保存：'), 5000)
   check(
     tag,
-    '②b 仓库 .git 克隆地址能被接受并保存（UI 收得下；规范化是真后端的活）',
+    '② 仓库 .git 克隆地址能被接受并保存（UI 收得下；规范化是真后端的活）',
     saved,
     '',
   )
 
   /*
-   * ④ 「重新读取」= 从磁盘重读（`wb.reload()`）。
+   * ② 「重新读取」= 从磁盘重读（`wb.reload()`）。
    * 先在输入框里敲一段**没保存**的垃圾，再点重新读取 —— 它该被磁盘那份**覆盖掉**，
    * 这一条量的正是"看到的是磁盘真相，不是我敲进去的东西"。
    */
@@ -272,7 +224,7 @@ for (const size of SIZES) {
   const afterReread = await urlInput.inputValue()
   check(
     tag,
-    '②b 「重新读取」把输入框里没保存的内容清掉、换回磁盘那份（看真相）',
+    '② 「重新读取」把输入框里没保存的内容清掉、换回磁盘那份（看真相）',
     reread && afterReread !== 'https://example.com/not-saved',
     `重读后输入框=${afterReread || '(空)'}`,
   )
@@ -302,8 +254,8 @@ for (const size of SIZES) {
   await appPage.screenshot({ path: `${shotDir}/chain-${tag}-settings.png` })
 
   console.log(
-    `${tag.padEnd(8)} 工作台 ${nMachines} 机型 / ${nVersions} 版本 / ${nFields} 字段（带条件 ${nConds}）· `
-    + `上传 ${entry.presets} 份 TOML（${entry.name}）· 客户端边界如实`,
+    `${tag.padEnd(8)} 工作台产物 ${before} → ${builtCount} 份（② 卡真产物份数）· `
+    + `设置页官方源收得下 / 重新读取看真相 · 客户端边界如实`,
   )
   await ctx.close()
 }
@@ -322,7 +274,7 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '工作台发布这一端走通：生成 → 上传（整份 release，刷新还在）；客户端那一端如实（数据源那一格说真话）；'
-  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「重新读取」能从磁盘看真相'
+  '工作台发布这一端走通：生成 → ② 卡报出真产物份数；客户端那一端如实（数据源那一格说真话）；'
+  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「官方源」收得下 / 「重新读取」能从磁盘看真相'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )

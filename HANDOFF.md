@@ -1102,6 +1102,455 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         与本刀无关；基线（stash 后）在 `钉住` 那步就中断，跑不到后面那两条，故未能对照，
         登记为独立观察项）。
 
+    - **增量之十四：catalog 生命周期收口 + 预设页两个实机问题（2026-10-04，分支
+      `feat/catalog-lifecycle-cleanup`）** —— 起因是作者两张客户端截图：切片器档出现 5 行
+      「presets/」、MKP 预设「下载失败：内容对不上」。作者随后纠正了第一版报告的归因
+      （**"客户端内置预设文件" ≠ "客户端内置预设目录"**；MKP TOML / BBS JSON 都是云端下载资源，
+      随包那份只是 bootstrap 目录，不能拿它永久当下载校验依据）—— 这一条把归因改写成
+      「**不是两批 TOML 不一致，而是下载校验用的是旧/bootstrap 目录，而 OTA 目录没生效**」。
+      - **① 切片器档「presets/」幽灵行**（`ipc/presets.rs::version_files_dto`）：套餐的
+        `assetRefs` 是**混合**的，MKP 预设那条 `path` 是空串；它被 `file_kind` 的
+        `_ => "bbs_profile"` 兜底贴成切片器文件，落点写成 `format!("presets/{}", "")` = `presets/`、
+        主名是空串 ⇒ 界面上一行「presets/」（同机型多版本按 path 去重 ⇒ 5 行）。
+        改法：`file_kind` 返回 `Option`，**认不出就说认不出**（去掉兜底）；切片器一支跳过
+        `MkPreset` 与空 path；`preset_files_dto` 那处 `expect` 成显式不可能分支。
+      - **② ★★ 启动覆盖 OTA 目录（真 bug，本次核心）**：`lib.rs::setup` 每次启动都调
+        `runtime::release::release_catalog`（= `release_bytes(EMBEDDED)`，**升级语义**：
+        盘上不同就换成随包那份）。时序变成
+        `启动铺 EMBEDDED(A) → OTA 成功写成 B → 再启动又铺回 A → 下载拿 A 的旧 SHA 比云端 B 的文件 → SHA_MISMATCH`。
+        **下载链本身是正确的**（`download_runtime_file` → `load_released_catalog` 读的是盘上
+        `Internal/catalog.json`；`apply_remote_update` 也确实原子替换了它）—— 坏的是**启动**
+        把它覆盖回去。改法：`release.rs` 拆出 **`ensure_released`（只铺空位，有就一个字节不动）**
+        给启动与 `load_released_catalog_bytes` 的兜底用；`release_bytes` 留给 `apply_remote_update`。
+        判据：`startup_never_overwrites_an_ota_catalog` + `the_startup_path_only_ever_ensures_never_upgrades`
+        （源码扫描：`lib.rs` 里 `release::` 之后只能是 `ensure_released`）。
+      - **③ SHA 不匹配两种话**（`delivery::sha_mismatch_message`）：本机目录 revision ≠ 远端 →
+        说「本地目录停在 X，云端已是 Y —— 先点『检查更新』刷新目录再下载」；两 revision 相同却字节
+        不符才是源头坏件；取不到远端（离线）退回保守说法，**不拿本机目录当"远端"**。
+      - **④ ★ 随包 catalog 去交付文件 SHA**（`CatalogFile.sha256/size` 改 `Option`，
+        `build_from_repo` 走 `FileHashes::None`）：随包那份不再拿 `crates/preset/assets/presets/`
+        的构建用 TOML 算 SHA（那份期望值注定与云端不同步）；期望值归 OTA / 发布侧目录。
+        `gen-catalog` 重跑后随包 24 份文件**一份 SHA 都不带**。连带改的消费点：
+        `deliver` / `file_status` / `inspect` / `official_text` / `other_known_versions` /
+        `save_active`（改用盘上真字节算指纹）/ `mine::based_on` / `apply_active_preset` /
+        进度水位 / `dist.rs` 发布侧核对（发布侧**必须**有期望值，没有当场报错）。
+        新判据：`bundled_catalog_lists_files_without_expecting_their_bytes`、
+        `published_catalog_expects_the_real_bytes`、
+        `delivers_without_checking_when_the_catalog_expects_nothing`、
+        `stale_catalog_gets_a_different_message_than_a_bad_file`。
+      - **⑤ 契约落进总纲**：`docs/DATA-ARCHITECTURE.md` §1③ 新增「catalog 的一生：
+        bootstrap → OTA → 当前」+ 三条硬规矩（启动绝不覆盖 / 期望值只来自当前 / 对不上报目录过期）。
+      - **清理**：核查 98 条 Rust 命令**零死命令**；`bridge.ts` 两个 `notWired`
+        （`copyToSlicer` / `downloadFiles`）是**契约内待接入口**（mock 有实现、界面有调用点），
+        **不是死代码，保留**。注释按"留结论、删过程"压缩了本轮新增的几段长注释，
+        并修掉 `catalog.rs` 一处**错位注释**（`REPO_ASSET_ROOT` 的说明被贴在 `kind` 文档块里）。
+      - 判据：Rust 默认 **284**、workbench lib **499 + 146 + 77**；双 feature clippy 0 警告、
+        `fmt`、`tsc -b`、eslint + stylelint、`build`（随包 5 份）+ `check:bundle`（16 干净）+
+        `check:zero-network` 全绿。
+      - **待作者裁决**：`A41-PORT-NOTES.md`（2026-10-01 那次移植的过程账，已进主线）只被记忆文件
+        引用 = 孤立死文档，建议删（**删文档是产品取舍，未擅动**）。
+        → **2026-10-04 作者裁决：删**。已删除（该轮工作早已进主线，账留在 HANDOFF 与记忆里）。
+
+    - **增量之十五：交付面契约文档 + 两条欠账（2026-10-04，同一分支）** —— 作者看第二张截图
+      （切片器档 A1 机型下点 0.2mm BBS → 「下载失败：远端还没有这份文件」）追问"这个路径到底是谁决定的"，
+      并要一份**完整文档**（放 `docs/`，不是聊天里列）。查清如下：
+      - **① 路径不是硬编码**：`mkp/<kind 目录>/<台账 path 去掉第一段>`，唯一算法 =
+        `runtime::catalog::dest_of_asset`（两端共用；客户端拼 URL、工作台拼 dist 落点）。
+        台账（`presets/assets.toml`）登记 `path`，其余全自动。`dest_of_asset` 返回 `None` 两种：
+        `delivery='bundled'`（随包）/ 该 kind 无落点（今天的 `image`）。
+      - **② 「远端还没有这份文件」真因 = 登记面 ≠ 实体面**（**未修**）：
+        `presets/dist/catalog.json` 登记了 4 条 0.2mm，但 `presets/dist/mkp/bbs/Process/0.2mm/`
+        **目录根本不存在**。`referenced_assets`（决定复制哪些）= 机型 image/icon + **套餐 assetRefs**；
+        `build_from_presets_lenient`（决定登记哪些）= 全部有落点的 download 资产。0.2mm 没被任何套餐引用
+        ⇒ 没复制；但登记了 ⇒ 客户端看得见、点得动、**必然 404**。`dist.rs:795-798` 那段的"登记面刻意比交付面宽"
+        在"客户端只看不下载"前提下成立，但客户端把它们渲染成了可点的下载按钮。
+        修法候选：A 实体面补齐（**倾向**：登记即承诺）／B 登记面收窄。
+      - **③ 发布闸缺口**（作者点名）：现在没有"点一下、逐项打勾、全绿才允许推送"的发布闸。
+        现有检查（`audit_catalog` / `deliverable_set` / `dist_strays` / `version_orphans` / `wb_preflight`）
+        是**散落且不阻断**的；**`登记面 == 实体面` 这条检查不存在**（0.2mm 就是这么漏的）。
+      - **④ `minVersion` / 结构代次不存在**：只有 `catalogSchema: u32`（`runtime/catalog.rs:41`，加字段不升号）。
+        "结构变了 → 最小客户端版本跟着变 → 智能判定"是**空白**。
+      - **⑤ 发布走 PR 还是本地**：现状是**两半靠人接** —— 工作台只写 `presets/dist/`（+ 按钮）；
+        入库（git commit）你在 IDE 做；推分支 + 开 PR 走 `npm run publish:presets` 或手动；
+        合并你在 GitHub 点；**工作台不感知 PR 状态**。
+      - **产出文档**：`docs/PRESET-DELIVERY-CONTRACT.md`（路径三层 / 幽灵行 / 404 真假两说 / 发布现状 /
+        还缺什么 / 判据表）；总纲 §4 欠账清单补 3 条（第 7/8/9 条）。
+      - **删档**：`A41-PORT-NOTES.md` 按作者裁决删除。
+
+    - **增量之十六：发布链重定义（2026-10-04，作者三轮澄清后定稿）** —— 作者指出
+      `dist/mkp/bbs/...` 这种副本本身就不该存在：「一个文件不该因为被某个 MKP 使用就复制一份」。
+      三条裁决：**① A 类资产不复制**（`presets/assets/` 是唯一实体）**② `catalog.path` 相对发布根**
+      （**发布根 = `presets/`**；台账 `path` 相对资产根，发布时由 `kind_dir` 补 `assets/` 前缀）
+      **③ 保留薄 `dist/`**（只放 B 类渲染产物 `mkp/presets/*.toml` + catalog/source/manifest 元数据）。
+      - **唯一基准规则**：`下载 URL = baseUrl + catalog.path`；**`catalog.path` 同时是"取哪"与"落哪"**。
+        ★ 已核实可行性：`source.json` 的 `baseUrl` **缺省 = 与 source.json 同目录 = `presets/dist/`**，
+        A 类资产在 `presets/assets/`（兄弟目录），所以 `catalog.path` 以 `assets/` 开头就拼得对 ——
+        **发布侧不需要改 source.json 的写法**。
+      - **A/B 裁决作废**：共同前提（"`catalog.path` 必须指向 `dist/mkp/…`"）本身是错的；
+        C 定下后"登记面 ≠ 实体面"这个说法**自动消失**（登记面与实体面本来就是同一个面）。
+      - **★ 结构性障碍（唯一真取舍，待裁）**：客户端现在只有一个内部根、落点规则是
+        `<appDataDir>/mkp/<kind>/…`；A 类改指 `assets/…` 后会在 `<appDataDir>` 下多出 `assets/`，
+        连带影响 `paths::mkp_dir` / 归档结构 / `mkp_dir_is_created_empty` / 信任扫描面 / `get_local_files`。
+        两条出路：**甲 = 落点也跟 `catalog.path` 走**（`<appDataDir>/<path>`，"一个字段管一切"，我倾向）；
+        **乙 = `catalog.path` 只做 URL 尾段、落点另算**（客户端布局不变，但"取哪/放哪"分成两套规则）。
+      - **发布定位**：Git 仓库本身即发布物（`assets/` 同时是源与云端资产，无复制）。
+        工作台负责全程：检查 → 生成 → commit → push → 建 PR → 回读 CI 状态；
+        **合并第一版仍留给你在 GitHub 点**（不可逆动作留给有审计的平台）。
+      - **发布闸**：`PublishAudit { items: Vec<AuditItem> }`（id/name/status/severity/details/
+        affected_files/fix_hint）+ 十五项逐项打勾 + 全绿才亮「创建发布 PR」。
+        `wb_generate` / `wb_publish` 将来收进内部实现，对外只暴露一个【发布】。
+      - **minVersion**：机器算**结构签名**（只加可选字段时签名不变）+ **显式规则表**（人工登记
+        "签名→最低版本"）+ 查不到签名就**禁止发布**；客户端拿到目录先比再下（而不是走到下载才报 404）。
+      - **产出文档**：**`docs/PUBLISH-ARCHITECTURE.md`（新建，本文是发布链的根规则）**；
+        `docs/PRESET-DELIVERY-CONTRACT.md` 降级为**问题档案**（§3.1 的 A/B 已废、§5 已被取代）；
+        总纲 §4 欠账第 7/8/9 条按新裁决重写；总纲文件头挂上本文档指引。
+      - **落地三刀**（各自独立可验收，第一刀是地基）：① 路径语义切换（`dest_of_asset` 改发布根基准 +
+        A 类不复制进 dist + 客户端落点跟改）② 发布闸（`wb_publish_preflight` + `PublishGateModal`）
+        ③ minVersion + PR 建单/回读。**第一刀里"客户端落点"的甲/乙取舍必须最先定。**
+    - **增量之十七：第一刀「路径语义切换」开工（2026-10-04，分支 `feat/param-def-controls-undo`）**
+      —— **客户端落点裁甲**（`<appDataDir>/<catalog.path>`：一个字段同时管"取哪"与"放哪"）。
+      规则源头仍是 `docs/PUBLISH-ARCHITECTURE.md`（§1.2 / §3.2），本文只记**任务与进度**。
+
+      **任务清单（4/4）**：
+
+      | # | 任务 | 状态 | 验收（判据） |
+      |---|---|---|---|
+      | 1 | **路径语义收敛**：`catalog.path` 同时定义云端位置与客户端落点，不再有 kind→目录 的第二套映射 | ✅ | `dest_of_asset` = `assets/<台账 path>`；B 类 = `dist/mkp/presets/<file>`；`kind_dir` 那套路由已消失 |
+      | 2 | **A 类不再复制进 dist** + 清理 `presets/dist/mkp/{bbs,icons}` | ✅ | `write_content` 只体检不落盘；8 份副本 `git rm`；`dist/` 只剩 `mkp/presets/` + 元数据；manifest / assets_index 的 `relativePath` 改 `assets/…`、`dist/mkp/presets/…` |
+      | 3 | **客户端落点改 `<appDataDir>/<catalog.path>`**（下载 / 归档 / 信任扫描 / 本地文件视图跟改） | ✅ | `paths::released_file` 是唯一实现处；归档 `<archive>/<path>` 同形；`resolve_in` 防穿越仍在；`mkp_dir` 已退役 |
+      | 4 | **B 类渲染产物仍在 `dist/mkp/presets/`**；随包目录与 `gen-catalog` 同步 | ✅ | `PRESET_DEST_DIR` = `dist/mkp/presets`；`catalog.generated.json` 与 `presets/dist/catalog.json` 同一代（`embedded_matches_rebuild` 绿） |
+
+      **★ 第 6 条判据（作者拍板，与本刀同一 commit）**：**`based_on` 不引旧路径兼容层**。
+      老用户文件里记的 `mkp/presets/…` 在新目录（`dist/mkp/presets/…`）下**认不出就是 `unknown`**，
+      不回填、不按文件名猜；**不许伪造 `current` / `outdated`**。老文件一个字节不动，
+      照旧能读、能改、能应用 —— 掉的只是「基于哪一版」那句判断。
+      判据：`runtime/mine.rs::an_old_shaped_based_on_is_unknown_and_never_guessed`
+      （血统摘要与目录里那一份**完全相同**，唯一让答案变 `Unknown` 的是路径形状）。
+
+      **本刀实际落地的改动（2）：**
+      - **三条说旧规则的判据改口径**：`runtime/catalog.rs` 漏改的 `starts_with("mkp/presets/")` →
+        `PRESET_DEST_DIR`；`dist.rs` 的 `dist_expected_set` 期望 7→**9**（注释里 3+1+1+1+3 的算式原本就写错）；
+        `dist.rs` 那条「写盘 8 条资产」**反过来钉** —— `write_content` 之后 dist 下除三份目录 JSON 外
+        **零交付文件**（A 类原地交付），核心那一半（登记面每一条在发布根取得到、字节对得上）保留。
+      - **UI 收掉第三套路径**：`ipc/presets.rs` 的 `version_files_dto` / `preset_files_dto` 给界面的
+        `presets/<台账 path>` 改成 `dest_of_asset` 同形的 `assets/<台账 path>`；幽灵行判据跟着改口径。
+      - **发布脚本换基准**：`scripts/publish-presets.mjs` 的交付文件存在性 / 读真字节改以
+        **发布根 `presets/`** 为基准（`PUBLISH` 常量）；`source.json` 的 `catalog` 字段仍是
+        「相对 source.json 所在目录」，保持 `DIST` 基准不动。实跑：五道校验全过（17 条交付文件
+        在发布根里真存在、SHA / 大小对得上）。
+      - **注释与 mock 清扫**：`mkp/bbs` / `mkp/presets` / `mkp/icons` / `archive/mkp/…` 全部换成新形状
+        （BBS 页、`presetTree.ts`、`contract.ts`、`mock.ts`、mockBackend、`runtime/mod.rs` 与 `state.rs`
+        的布局示意、`dist.rs` 模块头目录图、`workbench/paths.rs` 的 `kind_dir` 注释）。
+      - **`presets/dist/` 重出到同一代**：`git rm` 掉 `mkp/bbs`(5) + `mkp/icons`(3)，
+        再走一次 `wb_publish`（与工作台点【发布】同一条命令）重出 catalog / manifest / assets_index。
+        重出后 `catalog.json` 24 条：A 类 `assets/…`、B 类 `dist/mkp/presets/…`，**全部带真 SHA / 大小**；
+        `dist/` 下只剩 `mkp/presets/*.toml`(9) + 元数据。
+        ★ 顺带收掉的老账：**4 份 0.2mm BBS 与 3 份模型现在真能取到了**（以前登记了却不在交付面；
+        新语义下它们原地住在 `presets/assets/`，取得到）。
+
+      **遗留裂纹（本刀之后已清掉，见增量之十八）**：旧 `ClientDataPackage` 那一套
+      模拟云端镜像已**直接退役**，没有迁移成兼容结构。
+
+    - **增量之十八：旧 `ClientDataPackage` 直接退役（2026-10-04，作者拍板，同一分支）**
+      —— 作者的原话：**「现在已经有一个真实发布契约了，再保留一套『假的云端数据结构』
+      只会让以后的人继续误以为 `presets/mkp/...` 还是合法路径。直接退役，不要留悬案。」**
+      - **删掉的四个模块**：`src/workbench/clientPackage.ts`（说明书生成器）、
+        `src/workbench/cloud.ts`（模拟云端）、`src/workbench/compat.ts`（兼容性清单 / 自动判断）、
+        `src/workbench/fixtures/cloud-presets.json`（108 KB 静态快照）。
+      - **契约清掉六个类型**：`ClientDataMeta` / `ClientMachine` / `ClientFieldDef` /
+        `ReleasePreset` / `Release` / `ClientDataPackage`（`src/api/contract.ts`）；
+        `STORAGE.cloud`（`mkp.cloud.presets`）一并删。
+      - **界面**：生成与发布页去掉「② 客户端数据包」（包版本三枚快捷 / 最低客户端版本 /
+        兼容性清单 / 包里有什么）、「查看 JSON」弹窗、「云端 preset 文件夹（模拟）」那一格
+        与「上传到云端」；**卡片重新编号**（① 生成 / ② 发布 / ③ 对照基线 / ④ 交付残留 /
+        ⑤ 回收站 / ⑥ 子目录职责）。② 发布只留**真发布物**：产物名单（`BuildRow.mkpFile`，
+        即 `dist/mkp/presets/*.toml`）+ 查看 TOML（`wb_preview_toml`）+ 本次发布落了多少文件。
+      - **探针**：`scripts/probes/workbench-build.mjs` 去掉包版本 / 最低客户端版本 /
+        查看 JSON / 包里有什么 / 云端那一格 / 上传那六段。
+      - **没做的**：`src/app/presets/presetTree.ts` 的「云端表」是**另一个概念**
+        （catalog 登记面，不是模拟云端），不动；`src/app/store/package.ts` 只剩时间格式化，不动。
+      - 验证：`tsc -b` / `eslint` / `stylelint` / `npm run build` / `build:workbench` /
+        `check:bundle` / `check:zero-network` 全绿。
+
+    - **增量之十九：第二刀「发布闸」—— `PublishAudit` 成为唯一入口判定器（2026-10-04，同一分支）**
+      —— 规则源头 `docs/PUBLISH-ARCHITECTURE.md` §5；本文只记实现与判据。
+
+      **核心口径**：发布闸不是"再做一遍零散检查"，而是**唯一入口判定器**：
+      `【发布】→ PublishAudit → 十五项逐项打勾 → 全绿 → 生成 → commit → push → PR`，
+      **任何一项 Blocker 红，绝不许进 commit / push / PR**。
+
+      - **Rust 核心 `src-tauri/src/workbench/app/audit.rs`（新）**：
+        `publish_audit() -> Result<PublishAudit, AppError>` 是**唯一判定函数**；十五项 = 十五个
+        `AuditItem`，**加一项检查只加一个 item、不改流程**。分档 `Pass | Fail | Warn | Skipped` +
+        分量 `Blocker | Warning`；`can_publish` ⟺ **没有任何 Blocker 是 Fail**（这条等式唯一的落点）。
+        ★ `Skipped` 是刻意留的一档（⑫ `version/structure`）—— 把"没实现"伪装成"通过"比红色更危险。
+      - **两个壳、同一件事**：命令 `wb_publish_audit`（`app/build.rs`，`(async)` 薄壳，进了只读命令登记）
+        与 `cargo test` 判据调的是同一个 `publish_audit()`。**界面不许自己再实现一套检查**（老病根）。
+      - **一次真自锁（已修）**：闸本身在 `with_ctx` 里，而 `with_ctx` 的锁**不可重入** ——
+        ⑤ 最初直接调 `wb_generate_preview` 命令，等于自己把自己挂死。修法：预演拆出**锁无关内核**
+        `build::preview_with(ctx, &Scope)`，命令壳与发布闸共用它（`wb_generate_preview` 收成三行）。
+      - **只读到底**：新增 `paths::assets_root_path()`（不建目录 —— `assets_root()` 会 `create_dir_all`），
+        `preview_with` 也改走 `dist_root_path()`：自称"不写盘"的闸不该顺手造目录。
+      - **两项按数据实情纠正**：⑨ `no_phantoms` 只查**要交付**的那几条（`Image` / `MkPreset` 本来就不持
+        path —— 原样会把 9 条 MKP 预设全判成幽灵）；② `refs_resolve` 补齐真在的引用面
+        （机型三图位 `image` / `imageVariant` / `icon` + 各版本图 + 品牌 `logo`）。
+      - **界面 `PublishGateModal`（新）**：点②的「发布」**先开闸**（不再直接发）—— 十五项逐项打勾、
+        红的排最前、「去修」写在行里、「重新检查」可反复跑（只读）；底下「确认发布」只在 `canPublish`
+        为真时亮。**没摆「创建 PR」**（第三刀才做，不摆点不动的假按钮）。
+      - **前端只画不判**：`wb.publishAudit()` + `AuditItem` / `PublishAudit` 契约（`src/workbench/api.ts`）。
+        浏览器桩 `wb_publish_audit` 跟着 `mockStrays` 走（清理残留 → 闸由红转绿），两项桩不互相打脸。
+      - **判据**（`cargo test --features workbench --lib`）：
+        `the_gate_lists_every_item_and_only_opens_when_no_blocker_fails`（形状 + 闸门 + `Skipped` 只许在⑫）、
+        `publish_audit_all_blockers_pass`（**壳与核心是同一个判定** + `can_publish` ⟺ 无 Blocker 红）。
+      - **探针**（`scripts/probes/workbench-build.mjs`）：点发布先开闸 → 十五项 → ⑫ 写「未实现」→
+        有残留时「确认发布」不亮 → 清理残留后转亮 → 点确认闸关掉、② 卡记上；
+        截图落 `tmp-shots/wb-publish-gate*.png`。
+      - 验证：`cargo fmt` / 双 feature `clippy -- -D warnings` / `cargo test` + `--lib`（502 条）/
+        `tsc -b` / `eslint` / `stylelint` / `npm run build` / `build:workbench` / `check:bundle` /
+        `check:zero-network` 全绿。**预存红照旧**：探针「钉住」（按钮已删）+ 生成页产物名单条数那条。
+      - **还没做的（第三刀）**：⑫ 结构签名 + `minVersion` 规则表；`wb_generate` / `wb_publish` 收进内部
+        实现（对外只暴露一个【发布】）；commit / push / 建 PR / CI 状态回读。**合并仍留给人**。
+
+    - **增量之二十：第三刀上半「结构签名 + minVersion 规则表」—— 发布闸不再有 Skipped（2026-10-04）**
+      —— 规则源头 `docs/PUBLISH-ARCHITECTURE.md` §5.3（已按实现重写）；本文只记实现与判据。
+
+      **核心口径**（作者定的两条）：① **不让程序猜"这次改动破不破坏兼容"** —— 那永远是产品判断；
+      ② **机器算得出来的自动算，算不出来的必须有人签过字**。于是这件事拆成两半：
+
+      ```
+      ① 结构签名        —— 机器算（runtime/structure.rs，从类型真值探）
+      ② 签名 → 最低版本 —— 人登记（presets/structure-signatures.toml）
+      查不到 ② = Blocker Fail = 禁止发布（不猜）
+      ```
+
+      - **签名怎么算（★ 这块的巧处）**：签名只收「**必填**字段的模板路径 + JSON 形态」，
+        而"必填"是**探出来**的 —— 拿真 catalog 的 JSON，删掉某字段再解析一遍：
+        还成功 = 有 `#[serde(default)]`（可选），失败 = 必填。这条是**构造性**的（一份能解析
+        成功的 JSON，它缺席的键必然可选），不是启发式。于是：
+        **加可选字段 → 签名不变**（用户要的那条）；加必填字段 / 可选改必填 / 类型变 → 签名变。
+        - 探针写**扫描式模板**（`machines[*].zones[*]`）而不是 `[0]`：免得"第 0 台机型没禁区"
+          这种数据事实让探针落空；`every_probe_template_resolves` 再钉"每个模板都落到了东西上"。
+        - 签名用**模板路径**（不是具体下标）—— 否则"前面插一台机型"就会让签名变、规则表被刷爆。
+        - 判据 `the_signature_does_not_depend_on_which_sample_it_is_taken_from`：随包那份与
+          仓库重建那份各算一遍，必须相等（钉死"签名与数据无关"）。
+      - **机器看不出来的那半**：路径语义 / asset kind 语义 / 客户端读取方式 / 数据的解释方式 ——
+        类型上一模一样，所以由 **`STRUCTURE_EPOCH`**（人显式 +1）记。本次那一刀（落点从
+        `mkp/…` 改成发布根基准）就是它的第一个理由。判据 `the_epoch_is_part_of_the_signature`。
+      - **规则表 `presets/structure-signatures.toml`（新，进仓库）**：`signature` / `minClient` / `note`；
+        解析器在 `structure::RuleTable`（重复签名 / 空 minClient / 签名位数不对都报 `CORRUPTED`，
+        **不许静默当空表**；文件不存在才当空表）。第一条登记 `cb1080919d39b2bd → 0.0.1`。
+        ★ `minClient` **不要求那个版本已经发布** —— 那是 Dev 场景要的缝（§5.3）。
+      - **⑫ 真跑（Blocker）**：`audit::structure_gate` —— ① 规则表有主吗 ② 本构建读得懂吗
+        （签名 ∈ `SUPPORTED_SIGNATURES`）。**查不到就把该登记的那一行印在详情/`fixHint` 里**，
+        `affectedFiles` 指到规则表。judged 三条：真仓库这一代 Pass 且报得出 minClient、
+        没规则表时必须 Blocker Fail、闸门等价式不变。**十五项现在一项 Skipped 都没有**
+        （那条 `skipped.is_empty()` 留着当"哪天有新项没实现"的报警器）。
+      - **写进发布物**：`Catalog` 加 `structureSignature` + `minClientVersion`（都 `#[serde(default)]`，
+        **不进 `revision_of`** —— 它们是结构的函数不是内容）。`finalize()` 从**自己**算签名
+        （不是从随包那份 —— 那是上一代）。manifest 的 `minimumClient` 改成**同一格**做唯一来源
+        （`PublishMeta.minimum_client` 删掉：两个来源必然漂）。`write_catalog_json` 也同一条路。
+      - **顺手清掉的悬案**：`compat.minimum_client` 那条待办（"上游 manifest 的 minimumClient
+        是空串"）随上游一起退役 —— 桩与 `BuildPage` 里那段特例都删了（现在每条 issue 都有「去处理」）。
+        ② 卡的回执加一格「最低客户端 0.0.1」。
+      - **判据**（`runtime::structure` 15 条 + `audit` 2 条）：Rust 默认 **300**、workbench lib **519**。
+      - **重出 dist 元数据**：一条一次性集成测试驱动 `wb_publish()`（跑完即删，见台账纪律）——
+        `presets/dist/{catalog,manifest}.json` 已同代（catalog 带签名、manifest `minimumClient`
+        从空串变 `0.0.1`）。
+      - **还没做（第三刀下半）**：客户端侧「先比再下」（`apply_remote_update` 拒读不懂的数据 +
+        「有新版 SupportEase」提示的落点）—— 规则**核心**已经在 `structure::can_read`
+        （能力优先、版本兜底）且判据齐；**UI 那句话住哪一格还没定**（不塞进现有的 `error`）。
+        再往后才是 commit / push / 建 PR / 回读 CI。**合并仍留给人**。
+
+    - **增量之二十一：第三刀下半「两条链」—— 软件更新（release.json）+ 数据读不懂（NOT_SUPPORTED）（2026-10-04）**
+      —— 规则源头 `docs/PUBLISH-ARCHITECTURE.md` §5.3.1（新）与 §7；本文只记实现与判据。
+
+      **作者三个裁决**（本节按它落的字）：① 软件更新信息源 = `release.json`，住发布根 `presets/`
+      **之外**，**不进 catalog / manifest / 发布闸**，暂不接 GitHub Releases；② 不兼容预设走
+      **甲案（目录级）**——只在 catalog 这层判，预设页**不主动宣传**（列表照常、不整表标红），
+      只在真读不懂时出现那两句话 + 「去更新」；③ 新增第九档 `NOT_SUPPORTED`。**两条链不合并**。
+
+      **链一 · 数据读不懂（先比再下）**
+      - `runtime/update.rs`：`RemoteUpdate` 加 `readable`（`can_read(remote.structure_signature,
+        remote.min_client_version)`）。★ 它与 `up_to_date` 答的是**两件不同的事**
+        （"有没有新目录" vs "这一代我读不读得懂"），判据 `the_update_check_reports_readability`
+        钉"指纹不同但读不懂"时两字段各自成立、不互相覆盖。
+      - `ipc/catalog.rs::apply_remote_update`：**在 `release_bytes` 之前**先 `can_read`，
+        读不懂 → `AppError::not_supported(...)`，**不落盘、不归档、本机目录零改动**
+        （判据 `an_unreadable_remote_catalog_is_refused_not_applied`）。`check_remote_update`
+        的 DTO 加 `readable`（原三字段不动）。
+      - `error.rs`：加 `ErrorCode::NotSupported` + `AppError::not_supported`；message 只写用户能懂的话，
+        **不含**签名 / minClient / schema（技术细节进 `detail`）。用例表加 `(NotSupported, "NOT_SUPPORTED")`，
+        判据 `not_supported_is_its_own_error_code`（且 `≠ CORRUPTED / ≠ INTERNAL`）。
+        `contract.ts` 的 `ErrorCode` 联合加 `'NOT_SUPPORTED'`（两份声明靠这条测试钉）。
+      - 前端：`usePresetData` 新增独立状态 `needsNewerClient`（**不是 `error`**）——
+        `checkBootstrapOnce` 先看 `readable`，为假或捕获到 `NOT_SUPPORTED` 时**不换目录、不落页级错误**，
+        只把它立起来。预设页在状态条位置出现「**此预设需要更新版 SupportEase** / 当前客户端版本过旧，
+        暂不支持此预设文件。」+「**去更新**」（`App` 给 `onOpenSettings` 出口）——**列表照常**。
+
+      **链二 · 软件版本（独立）**
+      - 仓库根新增 `release.json`（`{releaseSchema, version, notes, url}`）；`runtime/source.rs` 加
+        `RELEASE_FILE` + `release_url(base_url)`（从文件下载根往**上恰好一级**，`…/presets/dist`
+        → `…/presets/release.json`；host 根如实拒）。
+      - `runtime/net.rs` 加 `get_release(url)`（复用 `get_bytes`，网络只住这一处）；
+        `runtime/release_info.rs`（新）：`ReleaseInfo` + `parse`（坏 JSON / 代次认不出 / 空版本 → `CORRUPTED`，
+        **不静默当"没更新"**）+ `compare`（复用 `structure::version_at_least`，版本比较只有一处实现）。
+      - 命令 `get_app_version`（返回 `Cargo.toml` 同源版本号，前端拿"当前版本"的唯一口子）+
+        `check_software_update`（只读、`async`、**只打开设置页时才调**，铁律 2：云端不参与首屏）；
+        `lib.rs` 两个 `with_commands` 一字不差地都加了这两条。
+      - 设置页 `PageSettings` 新增第一块「软件更新」：「有新版本 SupportEase」/「已是最新版本」/
+        「这次没能查到更新」三态 + 版本对照 + 「查看更新」/「重新检查」；「高级设置」降为第二块。
+      - 契约：`contract.ts` 加 `SoftwareUpdate` 类型 + `MkpApi.getAppVersion/checkSoftwareUpdate`；
+        `bridge.ts` 两条；`mock.ts` 给演示值（含"有新版"）。
+
+      - **判据**：Rust 默认 **311**（+11）、workbench lib **530**（+11）。新增
+        `not_supported_is_its_own_error_code` / `the_update_check_reports_readability` /
+        `release_json_is_its_own_source_not_preset_data` / `software_version_compares_by_semver_and_ignores_dev_suffix`
+        / `a_missing_source_reports_up_to_date_with_the_real_version` / `release_url_is_one_level_above_the_file_root`
+        / `broken_json_is_corrupted_not_silently_up_to_date` 等。
+      - **验证**：`cargo fmt` / 双 feature `clippy -- -D warnings` / `cargo test` + `--lib` /
+        `tsc -b` / `eslint` / `stylelint` / `npm run build` / `check:bundle` / `check:zero-network` 全绿。
+      - **还没做（第三刀下半剩下的）**：`wb_generate` / `wb_publish` 收进内部实现（对外只暴露一个【发布】）；
+        工作台 commit / push / 建 PR / 回读 CI。**合并仍留给人**。
+
+    - **增量之二十二：第三刀下半「发布事务」—— 单一入口把发布做成一次事务（2026-10-04）**
+      —— 规则源头 `docs/PUBLISH-ARCHITECTURE.md` §7.1（新）；本文只记实现与判据。
+
+      **作者边界**（这刀的全部意义）：`【发布】` 是**唯一的用户动作** ——
+      `wb_generate` / 「创建 PR」都**降为内部步骤**。摆出「生成 / 发布 / 创建 PR」三个按钮，
+      就退化成"给开发者包了一层 CLI"，那不是桌面产品。**合并留给平台网页**。
+
+      **一次「发布」的事务链**（`workbench/app/publish_tx.rs::run`，**只收 `&Ctx` 的锁无关内核**）：
+      `PublishAudit`（任一 Blocker 红 → 停在审计、**零写入**）→ `build::generate_with`（生成降内部）
+      → `dist::publish_into`（定稿）→ 本地 git（白名单 stage → commit → push）→ 平台 create_review。
+      ★ `with_ctx` **不可重入**：链内只调自由函数，绝不回头调命令壳 ——
+      判据 `the_transaction_chain_never_calls_a_command_shell`（源码扫描）钉住。
+
+      - **本地 git**（`workbench/app/git.rs`，新）：子进程 `git`（参数显式数组，不拼 shell）；
+        `status` / `diff_stat` / `stage_allowed` / `commit` / `push` / `has_staged` / `remote_url` / `branch`。
+        ★ **只 stage 白名单**（`STAGE_ALLOWLIST` = `presets/dist/` + 规则表 + 台账），**永不 `git add -A`**
+        （判据 `stage_paths_are_an_explicit_allowlist` + 真仓库的 `a_real_repo_only_commits_the_allowlisted_paths`）。
+      - **平台出口**（`workbench/app/platform/{mod,github,gitee}.rs`，新）：`trait Hosting`
+        （`create_review` / `get_review`）；GitHub 走 REST、Gitee 走 OpenAPI，**都复用既有 `ureq`**（不新增 HTTP crate）。
+        **平台从 git remote 推断**（`detect_platform`）；**方言收敛**（`collapse_state` / `collapse_checks`）——
+        GitHub 的 PR/check-runs 与 Gitee 的 MR/status 各自多档 → 统一 `ReviewState` / `ChecksSummary`，
+        **前端不认识任何平台方言**。★ Gitee 按公开 API 实现；作者说后续给旧版配置地址再单独做事实核对
+        （不翻旧代码猜）；要改只动 `gitee.rs` 一个文件。
+        ★ 这是**新开的第二个被批准的网络出口**：`check:zero-network` 第①道闸放宽为
+        "网络只住 `runtime/net.rs` **与** `workbench/app/platform/`"。
+      - **凭据**（`workbench/app/credentials.rs`，新）：**每平台一份**，住**系统 Keychain**
+        （新依赖 `keyring`，挂 workbench feature），**绝不**写 config.toml / localStorage / .env；
+        前端只知道"配没配"+ 尾号提示（判据 `credentials_never_echo_the_token`）。
+        trait `SecretStore`：真机 `KeychainStore`，判据 `MemoryStore`。
+      - **命令面**（`lib.rs` workbench 分支）：`wb_publish(opts)` 改为**发布事务**（返回阶段快照
+        `PublishTxReport`）；新增 `wb_publish_account`（平台推断 + 凭据有无，只读 async）/
+        `wb_set_publish_token` / `wb_clear_publish_token`（只进不出）/ `wb_publish_status`（**手动回读**，
+        不做后台轮询）。旧的"只定稿"壳 `publish_deliverable_only` 留着当可单测入口，**前端不再用**。
+      - **前端收口**：`BuildPage` 的 `publish()` 只调一次 `wb.publish()`、② 卡记事务 `summary`；
+        `SettingsPage` 新增「发布账户」块（平台推断显示 + 每平台存/清 Token + 尾号提示）；
+        `api.ts` 补事务/状态/账户方法与类型；`mockBackend.ts` 补桩（走向成功那一路，含建 PR）。
+      - **判据**：Rust 默认 **311**、workbench lib **552**（+22）。新增 `the_transaction_chain_never_calls_a_command_shell`
+        / `stage_paths_are_an_explicit_allowlist` / `a_real_repo_only_commits_the_allowlisted_paths`
+        / `detect_platform_maps_remote_urls` / `parse_owner_repo_handles_https_and_ssh`
+        / `remote_state_collapses_platform_dialects` / `checks_summary_collapses_to_four_buckets`
+        / `credentials_never_echo_the_token` / `each_platform_has_its_own_credential` 等。
+      - **验证**：`cargo fmt` / 双 feature `clippy -- -D warnings` / `cargo test` + `--lib` / `tsc -b` /
+        `eslint` / `stylelint` / `npm run build` / `build:workbench` / `check:bundle` / `check:zero-network` 全绿。
+        工作台探针 `workbench-build.mjs` 全过（发布事务回执那一条已改成认"已建 PR"）；
+        **已知预存红照旧**：生成页「× 3 份」那条 + 参数台「钉住」（按钮已删）。
+      - **还没做**：CI 状态的后台轮询（作者明确要**快照 + 手动刷新**，不做轮询）；
+        旧版发布账户配置 → 新版的事实核对（等作者给地址）。**合并仍留给人**。
+
+    - **增量之二十三：发布账户补完整 + Git 认证自持（2026-10-04）**
+      —— 规则源头 `docs/PUBLISH-ARCHITECTURE.md` §7.2（新）；本文只记实现与判据。
+
+      **背景**：作者看过旧版 mkppanel（Go/Wails，`/Users/wzy/projects/mkpse-workspace/mkpse-next_v3/mkppanel`）
+      后**不重裁**已定的三项（PR/MR 终点 · 每平台一份 Keychain · SupportEase 自持认证），
+      只把**发布账户补完整**。旧版真正值得吸收的 = "凭据由工作台管理、支持 GitHub/Gitee、发布链是一个
+      完整事务"；**Tag 晋升**（`git_promote.go` 的 dev→main squash + annotated tag）与
+      **token 拼 URL**（`git_push.go::buildAuthURL`）**不继承**。
+
+      **配置与秘密分离**：
+      - 新 `workbench/app/account.rs`：`<appDataDir>/publish-account.json`，每平台
+        `{repositoryUrl, username}`（**无 token、无 email**）；缺文件 = 空配置，坏 JSON = `CORRUPTED`
+        （不静默当"没配"）。`check_platform_matches` 校验"GitHub 格里别填 gitee 地址"（认不出的自建源不硬拒）。
+        判据 `publish_account_config_never_stores_a_token` / `config_roundtrips_and_a_missing_file_is_empty`
+        / `a_future_schema_is_refused` / `a_mismatched_platform_is_refused`。
+      - Token 仍住 Keychain（`credentials.rs` 不变），每平台一份。
+
+      **Git 认证自持**（`git.rs`）：
+      - 新 `pub fn push_authenticated(branch, username, token)`：
+        `git -c credential.helper= -c http.extraHeader="Authorization: Basic <base64(user:token)>" push -u origin <branch>`。
+        ★ Token **不进 remote URL**；★ `credential.helper=`（空值）**清掉全局 helper ⇒ 不读用户已存凭据**；
+        ★ 环境 `GIT_TERMINAL_PROMPT=0`；★ 失败 detail **不带** header 参数。base64 **手写**（不引 crate）。
+      - 新 `pub fn remote_matches(repository_url)` + `normalize_repo_url_for_compare`（https/ssh/.git/大小写归一）。
+        判据 `git_push_authenticates_without_putting_the_token_in_the_url` / `base64_encodes_known_vectors`
+        / `repo_url_normalization_makes_equivalent_addresses_match` / `remote_matches_compares_the_configured_repository`。
+
+      **发布目标来自配置**（`publish_tx.rs` / `build.rs`）：
+      - 新 `PublishTarget{platform, repository_url, username, token, owner, repo}` + `resolve_target(root, platform?)`
+        （命令壳里解析：读配置 + Keychain + remote 校验）；`run()` 加 `target` / `repo_root` 参数，
+        push 走 `push_authenticated`、建 PR 的 owner/repo 来自**配置**（不再 `parse_owner_repo(remote)`）。
+      - `TxOptions` 加 `platform: Option<String>`（`None` = 自动挑：唯一配好的 / 或多个时取"与 remote 一致"的）。
+      - 命令：`wb_publish(app, opts)`、`wb_publish_account(app)`、`wb_set_publish_account(app, platform, repositoryUrl, username)`、
+        `wb_set_publish_token(platform, token)`、`wb_clear_publish_account(app, platform)`、`wb_publish_status(app, number)`
+        —— **都收 `AppHandle`**（`<appDataDir>` 只有它拿得到）。`lib.rs` workbench 分支同步登记。
+        `PublishAccount` DTO 改成 `{platforms:[{platform,repositoryUrl,username,hasToken,tokenHint}], remoteUrl, remoteMatchesConfig, branch}`。
+        ★ 没配发布账户时 `resolve_publish` 返回 `None` —— 事务退化成"生成+定稿+本地推送"，**不报错**。
+
+      **前端**：`SettingsPage` 发布账户块做成 **GitHub/Gitee 对称三格表单**（仓库地址 / 用户名 / Token），
+      磁盘真值回显 + Token 尾号 + 必填校验（未填时保存不亮）+ 保存后清空 Token 输入框；`api.ts` 契约同步
+      （`PlatformAccountView` / `PublishAccount` 新形状 + `setPublishAccount` / `clearPublishAccount`）；
+      `mockBackend.ts` 桩同步；`c14.module.css` 加 `.vlabel`。
+
+      - **判据**：Rust 默认 **311**、workbench lib **562**（+10）。
+      - **验证**：`cargo fmt` / 双 feature `clippy -- -D warnings` / `cargo test` + `--lib` / `tsc -b` /
+        `eslint`+`stylelint` / `npm run build` / `check:bundle` / `check:zero-network` 全绿。
+        工作台探针 `workbench-build.mjs` 发布事务那条保持绿（**预存红照旧**：生成页「× 3 份」+ 参数台「钉住」）。
+        agent-browser 实机验收设置页：**三格表单、回显、尾号、必填禁用、一致性提示 ✓** 全对
+        （截图 `tmp-shots/publish-account-form.png`）。
+      - ★ **取代一条旧原则**：上一轮"不为平台新增配置文件"作废 —— `publish-account.json` 是必要的
+        机器本地发布配置（不进仓库、不含密钥），已写进 §7.2。
+      - **还没做**：CI 状态后台轮询（作者要快照+手动刷新，不做）；旧版发布账户配置 → 新版事实核对（等作者给地址）。
+
+    - **增量之二十四：发布闸 ⑬ 本地校验修复 + ⑮ 闸门修复 + 「发布预设 / 软件版本」语义澄清（2026-10-04）**
+      —— 规则源头：`docs/RELEASE-TRANSACTIONS.md`（**新**，两层事务合同）+ `PUBLISH-ARCHITECTURE.md` §5 补注。
+
+      **① 修 `source/correct`（⑬）本地校验**（作者真机踩到：合法的 `dist/source.json` 被判"解析不出来"）
+      - 根因：`source_correct` 把**本地文件路径**喂给远端解析器 `parse_bootstrap`，它在 `baseUrl` 缺省时
+        要 `directory_of(url)` 从 **http(s) URL** 回退目录 —— 本地路径不是 URL ⇒ 报错 ⇒ 闸红。
+      - 修法：`runtime/source.rs` 加 `pub fn validate_bootstrap_local(bytes) -> Result<String>`（**不要求 URL**，
+        返回 trim 后 catalog 相对路径）+ 私有 `check_catalog_rel`（catalog 相对路径合法性，**与 `parse_bootstrap` 共用一处**）；
+        `source_correct` 改调它（**不再传本地路径给 `parse_bootstrap`**），失败文案用 `e.message`，通过时说"认得出来，指向 <rel>"。
+      - 判据：`source_correct_accepts_a_local_bootstrap_without_a_url` / `a_broken_bootstrap_is_still_refused_locally`
+        / `local_validation_matches_what_the_remote_parser_accepts_first`；既有 `bootstrap_*` 三条保持绿。
+
+      **② 修 `can_publish` 漏判 ⑮ `git/clean`**（真 bug，实测 `can_publish=true` 而 `blockers=1`）
+      - 根因：`publish_audit()` 里 `can_publish` 在 `items.push(git)` **之前**就算完了 ⇒ ⑮ 不参与闸门，
+        脏工作区时闸仍亮「确认发布」，**绕过**「除交付产物外工作区必须干净」那条保护。
+      - 修法：把 `let can_publish = ...` 整体移到 `items.push(git);` **之后**（一行搬家，不改任何检查函数）。
+      - 结果：`can_publish` 与 `blockers()` 严格等价 —— 两条真仓库判据
+        `publish_audit_all_blockers_pass` / `the_gate_lists_every_item_and_only_opens_when_no_blocker_fails`
+        **由红转绿**（本轮 workbench lib 565 全绿）。
+
+      **③ 「发布预设 / 软件版本」语义澄清**（作者定：工作台那颗按钮做的是"发预设"，不是"发软件版本"）
+      - `BuildPage` ② 卡标题「② 发布」→「**② 发布预设**」，卡注改为"把本次预设与数据变更提交到远端仓库；
+        合并后，客户端即可获取这些更新"；按钮仍叫「发布」（不动 `PublishGateModal` 与探针按钮断言）。
+      - 新增**只读**「软件版本」块（当前已安装 <版本> / 尚未有新的软件版本 + 一句"预设更新不需要新安装包"）；
+        **本轮不放「发布新版本」按钮**（点不动的假按钮比不摆更糟）。
+      - 新命令 `wb_app_version`（`#[tauri::command(async)]`，返回 `structure::APP_VERSION`，与客户端 `get_app_version` 同源），
+        `lib.rs` workbench 分支登记；`api.ts` 加 `appVersion()`、`mockBackend.ts` 补桩。
+      - 探针 `workbench-build.mjs` 第 134 行断言 `'② 发布'` → `'② 发布预设'`（退役旧文案同步裁探针）。
+      - **新文档 `docs/RELEASE-TRANSACTIONS.md`**：两层事务（发布预设 / 发布软件版本）、变更分类（数据类 vs 程序类）、
+        小改动怎么办（Latest vs 正式 Release）、tag 何时打、`release.json` 位置、两仓关系、状态模型、
+        「发布」按钮可点条件（唯一来源 = `can_publish`，含 ⑮）。
+
+      - **判据**：Rust 默认 **314**、workbench lib **565**（两条真仓库判据由红转绿）。
+      - **验证**：`cargo fmt` / 双 feature `clippy -- -D warnings` / `cargo test` + `--lib` / `tsc -b` /
+        `eslint`+`stylelint` / `npm run build` / `check:bundle` / `check:zero-network` / `build:workbench` 全绿。
+        探针 `workbench-build.mjs` ② 卡改名后**发布流程全过**（预存红照旧：生成页「× 3 份」）。
+        agent-browser 实机验收：② 区显示「发布预设」+ 只读「软件版本」块 ✓（截图 `tmp-shots/publish-preset-vs-software-version.png`）。
+      - **还没做**：「发布软件版本」整层（tag / Release / 上传安装包 / release.json 联动）—— **单独立刀**。
+
     ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 
      **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，
@@ -1449,7 +1898,11 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   第十三层）；点「更新」会如实报「未实现的接口」（浏览器里没有盘、没有源）。
   自动化跑一遍：`node scripts/probes/presets.mjs`（要 `playwright-core` + Edge；截图落 `tmp-shots/`）。
   **别用 dev（5321）**：那台 watcher 会扫 `target/` 下几万个文件，自己把自己拖死（探针文件头也这么说）。
-- **交付根（`presets/dist/`）的布局**：`catalog.json` + `manifest.json` 在根，产品资源一律在 `mkp/…`
-  （`mkp/presets/` 是 `wb_generate` 落的、其余按 kind 分目录）——**与客户端下载区同形**。
-  本机换过布局时，旧目录里的文件会成"残留"：发布页有清理（进 `workbench/.trash/dist/`），
-  也可以直接把 `presets/dist/mkp/presets/` 之外的东西清掉重发（它本来就不入库）。
+- **交付根（`presets/dist/`）的布局**（2026-10-04 第一刀之后）：**发布根是 `presets/`**，
+  `catalog.path` 相对它 —— A 类资产原地住在 `presets/assets/…`（**不复制进 dist**），
+  B 类渲染产物落在 `presets/dist/mkp/presets/…`。于是 `dist/` 下只有
+  `catalog.json` / `manifest.json` / `source.json` / `content/**` / `mkp/presets/*.toml`
+  —— **客户端落点与 `catalog.path` 同形**（A 类 `<appDataDir>/assets/…`、
+  B 类 `<appDataDir>/dist/mkp/presets/…`）。换过布局时旧文件会成"残留"：
+  发布页有清理（进 `workbench/.trash/dist/`），`wb_publish` 也会先拦残留再动字节。
+  规则源头见 `docs/PUBLISH-ARCHITECTURE.md`。

@@ -242,7 +242,6 @@ pub struct ParamMetaEdit {
     pub machine_filter: Vec<String>,
 }
 
-
 /* ---------- 分组元数据（中文名与顺序的唯一权威） ---------- */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -906,7 +905,9 @@ impl ParamRegistry {
                     value_type_str(edit.value_type)
                 )));
             }
-            UiComponent::Number if !matches!(edit.value_type, ValueType::Float | ValueType::Int) => {
+            UiComponent::Number
+                if !matches!(edit.value_type, ValueType::Float | ValueType::Int) =>
+            {
                 return Err(AppError::invalid_argument(format!(
                     "步进框只配数字（float/int）—— 这条是 {}",
                     value_type_str(edit.value_type)
@@ -975,11 +976,7 @@ impl ParamRegistry {
         }
         if edit.value_type == ValueType::Text && !edit.choices.is_empty() {
             let want = json_key(&edit.default_value);
-            if !edit
-                .choices
-                .iter()
-                .any(|c| json_key(&c.value) == want)
-            {
+            if !edit.choices.iter().any(|c| json_key(&c.value) == want) {
                 return Err(AppError::invalid_argument(format!(
                     "出厂默认 {want:?} 不在这条参数的可选项里 —— 枚举的默认值得是选项之一"
                 )));
@@ -999,7 +996,11 @@ impl ParamRegistry {
                     "{pk} 自己就是别人的子项 —— 层级只有两级，不能再往下挂"
                 )));
             }
-            if self.params.iter().any(|p| p.parent_key.as_deref() == Some(key)) {
+            if self
+                .params
+                .iter()
+                .any(|p| p.parent_key.as_deref() == Some(key))
+            {
                 return Err(AppError::invalid_argument(format!(
                     "{key} 自己已经挂着子项 —— 不能再去当别人的子项"
                 )));
@@ -2486,7 +2487,10 @@ mod tests {
         assert_eq!(again.param("a.y").unwrap().label, "a.y");
 
         let (removed, inserted) = one_edit_only(&before, &again.to_toml());
-        assert!(!removed.contains("[[params]]"), "波及了别的字段块：{removed:?}");
+        assert!(
+            !removed.contains("[[params]]"),
+            "波及了别的字段块：{removed:?}"
+        );
         assert!(
             !inserted.contains("[[params]]"),
             "插入段跨到了别的字段：{inserted:?}"
@@ -2891,9 +2895,7 @@ mod tests {
             .unwrap_err();
         assert!(e.message.contains("正数"), "{}", e.message);
 
-        let e = r
-            .set_param_meta("a.x", meta_edit("   "))
-            .unwrap_err();
+        let e = r.set_param_meta("a.x", meta_edit("   ")).unwrap_err();
         assert!(e.message.contains("名称"), "{}", e.message);
 
         assert_eq!(r.param("a.x").unwrap().label, "a.x", "拒了还动了内存");
@@ -2942,7 +2944,10 @@ mod tests {
         );
 
         let (removed, inserted) = one_edit_only(&before, &again.to_toml());
-        assert!(!removed.contains("[[params]]"), "波及了别的字段块：{removed:?}");
+        assert!(
+            !removed.contains("[[params]]"),
+            "波及了别的字段块：{removed:?}"
+        );
         assert!(
             !inserted.contains("[[params]]"),
             "插入段跨到了别的字段：{inserted:?}"

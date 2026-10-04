@@ -26,7 +26,8 @@ pub mod obs;
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
 pub mod presetdata;
-/// **新数据世界**：随包 catalog 的释放口 + 下载区/说明书的落点规则。
+/// **新数据世界**：随包 catalog 的释放口 + 说明书 / 交付文件的落点规则
+/// （落点 = `catalog.path`，见 [`runtime::paths`]）。
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
@@ -72,13 +73,13 @@ pub fn run() {
                 }
             }
 
-            /* 运行时 catalog：随包那份释放进内部根 + 建出空的下载区。
-            这是安装包 → 用户本地（层② → 层③）的唯一铺盘：客户端首屏的全部定义
-            （机型 / 资产 / 套餐 / 字段定义 / 布局）都从这一份出数。盘上已有且一致就
-            一个字节不动；不同（升级）就旧份归档、新份生效（runtime::release）。
+            /* 运行时 catalog：随包那份**只铺底**（层② → 层③ 的铺盘）。
+            交付面不预建任何目录 —— 落点由 `catalog.path` 定，下载那一刻按需建。
+            ★ 必须走 `ensure_released`（盘上没有才写）—— catalog 是 OTA 数据，用升级语义
+            铺盘会让每次启动覆盖掉 OTA 拿到的新目录，下载随即 SHA 不匹配（2026-10-04 修）。
             失败只告警不挡启动：界面会显示「读不到说明书」，那是能据以行动的状态。 */
             match fsx::paths::internal_root(&handle)
-                .and_then(|root| runtime::release::release_catalog(&root))
+                .and_then(|root| runtime::release::ensure_released(&root))
             {
                 Ok(r) => tracing::info!(report = %r.summary(), "运行时 catalog 已就位"),
                 Err(e) => tracing::warn!("运行时 catalog 没就位：{e}"),
@@ -168,6 +169,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
+        // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
+        ipc::catalog::get_app_version,
+        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -225,6 +229,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
+        // 软件更新（release.json）—— 与上面那份清单一字不差
+        ipc::catalog::get_app_version,
+        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -313,8 +320,19 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_preview_toml,
         // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
         app::build::wb_generate_preview,
+        // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
+        app::wb_app_version,
         app::build::wb_generate,
         app::build::wb_revert_preview,
+        // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
+        app::build::wb_publish_audit,
+        // **发布事务**（第三刀下半）：唯一对外的发布动作 —— 审计 → 生成 → 定稿 → git → PR
         app::build::wb_publish,
+        // 发布账户 / 状态（第三刀下半）：仓库地址 + 用户名（配置）+ Token（Keychain，只进不出）+ 手动回读 PR/MR
+        app::publish_tx::wb_publish_account,
+        app::publish_tx::wb_set_publish_account,
+        app::publish_tx::wb_set_publish_token,
+        app::publish_tx::wb_clear_publish_account,
+        app::publish_tx::wb_publish_status,
     ])
 }

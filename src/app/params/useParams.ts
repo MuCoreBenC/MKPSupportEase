@@ -5,7 +5,8 @@
  *
  * 值模型、撤销重做、修改历史的语义照旧重建 —— 那套在之前的稿里已经调顺了，
  * 没有要改的理由。换掉的是数据：C4 之前字段表来自 localStorage 那格"说明书"
- * （`ClientDataPackage`），现在全部走**运行时 catalog**（总纲判据 4 的正面落点）：
+ * （`ClientDataPackage` —— 那套 2026-10-04 已随模拟云端一起退役），
+ * 现在全部走**运行时 catalog**（总纲判据 4 的正面落点）：
  *
  *   字段定义 / 条件      api.getParamMeta()（catalog 的 definition）
  *   分类 / 分组 / 条数   catalog 的 registry 摊（`tabsOf`）

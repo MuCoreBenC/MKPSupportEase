@@ -618,6 +618,95 @@ const TRASH = [
   { file: '20260928-T-10-12-45__A1__OLDVER', deletedStamp: '20260928-T-10-12-45', machineId: 'A1', versionId: 'OLDVER' },
 ]
 
+/** dist 面的残留（`wb_dist_strays` 读它、「清理残留」清它）—— 桩里可变，好让发布闸跟着动 */
+let mockStrays: string[] = ['mkp/presets/old_file.toml']
+
+/** 发布闸一行（`audit::AuditItem` 的桩形状） */
+interface MockAuditItem {
+  id: string
+  name: string
+  status: string
+  severity: string
+  details: string
+  affectedFiles: string[]
+  fixHint: string
+}
+
+/** 演示用的结构代次与签名（真值由 Rust 的 `runtime::structure` 从类型算出来） */
+const MOCK_EPOCH = 1
+const MOCK_SIGNATURE = 'cb1080919d39b2bd'
+
+/** 十五项的编号与名字照 `docs/PUBLISH-ARCHITECTURE.md` §5.2（id 是契约） */
+const AUDIT_ROWS: [string, string][] = [
+  ['sources/complete', '源数据完整'],
+  ['refs/resolve', '引用都能落地'],
+  ['assets/exist', 'A 类资产的文件真在'],
+  ['assets/path-unique', 'catalog.path 唯一且不越界'],
+  ['presets/renderable', 'B 类预设能成功渲染'],
+  ['presets/rendered', '渲染产物真在交付目录里'],
+  ['catalog/matches-files', '登记的每一条都取得到'],
+  ['catalog/sha-size', 'SHA / 大小对真字节算且一致'],
+  ['catalog/no-phantoms', '没有幽灵条目'],
+  ['dist/no-strays', '交付目录里没有残留'],
+  ['bundles/closure', '套餐引用闭包完整'],
+  ['version/structure', '结构代次与最低客户端版本'],
+  ['source/correct', 'Bootstrap（source.json）正确'],
+  ['manifest/correct', 'manifest 与交付集合一致'],
+  ['git/clean', 'Git 工作区干净'],
+]
+
+/**
+ * 发布闸（第二刀）的桩。
+ *
+ * ★ **判定不在这一层**：真判据是 Rust 的 `audit::publish_audit`（界面与 `cargo test`
+ * 调的是同一个函数）。这一份只是让浏览器里那个框能验收 —— 所以结论按桩自己那份数据给，
+ * 至少 `dist/no-strays` 要跟着 [`mockStrays`] 走，别让两项桩互相打脸。
+ */
+function mockAudit(): Json {
+  const items: MockAuditItem[] = AUDIT_ROWS.map(([id, name]) => {
+    if (id === 'version/structure') {
+      // 第三刀之后这一项**真跑了**（不再是 Skipped）—— 桩照它的结论形态给一份
+      return {
+        id,
+        name,
+        status: 'pass',
+        severity: 'blocker',
+        details: `结构代次 ${MOCK_EPOCH} · 签名 ${MOCK_SIGNATURE} · 最低正式客户端版本 0.0.1（演示桩）`,
+        affectedFiles: [],
+        fixHint: '演示桩：这一项的真判据在 Rust（`runtime::structure` + 规则表）',
+      }
+    }
+    if (id === 'dist/no-strays' && mockStrays.length > 0) {
+      return {
+        id,
+        name,
+        status: 'fail',
+        severity: 'blocker',
+        details: `${mockStrays.length} 个残留文件`,
+        affectedFiles: [...mockStrays],
+        fixHint: '点「清理残留」（进 workbench/.trash/dist/<时间戳>/，可还原）',
+      }
+    }
+    return {
+      id,
+      name,
+      status: 'pass',
+      severity: 'blocker',
+      details: '演示桩：这一项按「全过」给',
+      affectedFiles: [],
+      fixHint: '演示桩没有真判据 —— 真机由 Rust 的 audit::publish_audit 说了算',
+    }
+  })
+  return {
+    items,
+    filesAdded: 12,
+    filesChanged: 3,
+    filesRemoved: 0,
+    minVersion: '0.0.1',
+    canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
+  }
+}
+
 const splitKey = (raw: string) => {
   const [level, owner, ...rest] = raw.split('|')
   return { level: level as 'machine' | 'version', owner, key: rest.join('|') }
@@ -1010,6 +1099,9 @@ export function installMockBackend() {
     switch (cmd) {
       case 'wb_boot':
         return Promise.resolve(mockBoot())
+      /* 「软件版本」展示位：桩里报与真机同源的那个演示版本号 */
+      case 'wb_app_version':
+        return Promise.resolve('0.0.1')
       case 'wb_words':
         return Promise.resolve(WORDS)
       case 'wb_book':
@@ -1038,14 +1130,6 @@ export function installMockBackend() {
       case 'wb_preflight':
         return Promise.resolve({
           issues: [
-            {
-              id: 'compat.minimum_client',
-              severity: 'todo',
-              title: '最低客户端版本未声明',
-              detail:
-                '上游 manifest.json 的 minimumClient 是空串 —— 上游现在没有声明「客户端要多新才能用这份数据」。这不是我们该填的空，而是发布时要知道的事。',
-              at: { view: 'build', machineId: null, uid: null, key: null },
-            },
             {
               id: 'bundle.orphan_files',
               severity: 'hint',
@@ -1343,14 +1427,92 @@ export function installMockBackend() {
           },
         })
       }
+      case 'wb_publish_audit':
+        return Promise.resolve(mockAudit())
+      /*
+       * 发布事务（第三刀下半）：一次调用走完审计 → 生成 → 定稿 → 本地 git → 平台 PR。
+       * 桩走向**成功那一路**（演示"一条龙"是什么样）。真机由 Rust 的
+       * `publish_tx::run` 跑；平台方言在那个模块里被收敛成统一的 ReviewState / ChecksSummary。
+       */
       case 'wb_publish':
         return Promise.resolve({
-          stamp: '2026-09-30 12:30:00（演示）',
-          root: 'C:\\dev\\dist',
+          stage: 'reviewOpened',
+          auditPassed: 15,
+          auditFailed: 0,
+          generated: 9,
+          unchanged: 0,
+          committedPaths: ['presets/dist/', 'presets/structure-signatures.toml', 'presets/assets.toml'],
+          review: {
+            platform: 'github',
+            number: 128,
+            url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
+            state: 'open',
+            checks: 'pending',
+            title: '发布：交付产物 21 份',
+            head: 'publish/0.0.2',
+            base: 'main',
+          },
+          branch: 'publish/0.0.2',
           files: 21,
-          minimumClient: null,
-          todos: 1,
-          hints: 2,
+          summary: '已生成 9 份、定稿 21 份产物。已提交并推送到 `publish/0.0.2`。已建 PR !128。',
+        })
+      /* 发布账户现状（演示）：GitHub 配好了、Gitee 还没配（尾号提示不是原值） */
+      case 'wb_publish_account':
+        return Promise.resolve({
+          platforms: [
+            {
+              platform: 'github',
+              repositoryUrl: 'git@github.com:MuCoreBenC/MKPSupportEase.git',
+              username: 'MuCoreBenC',
+              hasToken: true,
+              tokenHint: '…d4e5',
+            },
+            { platform: 'gitee', repositoryUrl: '', username: '', hasToken: false, tokenHint: null },
+          ],
+          remoteUrl: 'git@github.com:MuCoreBenC/MKPSupportEase.git',
+          remoteMatchesConfig: true,
+          branch: 'publish/0.0.2',
+        })
+      case 'wb_set_publish_account': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: String(args?.repositoryUrl ?? ''),
+          username: String(args?.username ?? ''),
+          hasToken: false,
+          tokenHint: null,
+        })
+      }
+      case 'wb_set_publish_token': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: '',
+          username: '',
+          hasToken: true,
+          tokenHint: '…ab12',
+        })
+      }
+      case 'wb_clear_publish_account': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: '',
+          username: '',
+          hasToken: false,
+          tokenHint: null,
+        })
+      }
+      case 'wb_publish_status':
+        return Promise.resolve({
+          platform: 'github',
+          number: Number(args?.number ?? 128),
+          url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
+          state: 'open',
+          checks: 'passed',
+          title: '发布：交付产物 21 份',
+          head: 'publish/0.0.2',
+          base: 'main',
         })
       case 'wb_preview_toml': {
         /*
@@ -1390,9 +1552,12 @@ export function installMockBackend() {
         return Promise.resolve(n)
       }
       case 'wb_dist_strays':
-        return Promise.resolve(['mkp/presets/old_file.toml'])
-      case 'wb_clean_dist_strays':
-        return Promise.resolve(1)
+        return Promise.resolve([...mockStrays])  // dist 面的残留（dist 相对）
+      case 'wb_clean_dist_strays': {
+        const n = mockStrays.length
+        mockStrays = []
+        return Promise.resolve(n)
+      }
       case 'wb_trash':
         return Promise.resolve(TRASH)
       case 'wb_asset_usage': {

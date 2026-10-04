@@ -99,6 +99,20 @@ function die(message, rollback = []) {
 /** 交付根（相对仓库根）。.gitignore 不再忽略它 —— 它就是 main 上的正式交付目录 */
 const DIST_REL = 'presets/dist'
 const DIST = join(ROOT, DIST_REL)
+/**
+ * ★ **发布根**（相对仓库根）= `catalog.path` 的基准（2026-10-04 裁决 C/甲）。
+ *
+ * `catalog.path`（与 manifest 的 `relativePath`）**同时是"云端取哪"与"客户端放哪"**：
+ *
+ *   A 类（BBS / 模型 / 图标）  `assets/…`          → 原地住在 `presets/assets/…`（不复制进 dist）
+ *   B 类（MKP 渲染产物）       `dist/mkp/presets/…` → 住在 `presets/dist/mkp/presets/…`
+ *
+ * 所以**校验交付文件时一律以发布根 `presets/` 为基准**，不是 `presets/dist/`。
+ * 唯一例外是 `source.json` 的 `catalog` 字段：它的语义是"相对 source.json 所在目录"，
+ * 那一处仍以 `DIST` 为基准。
+ */
+const PUBLISH_REL = 'presets'
+const PUBLISH = join(ROOT, PUBLISH_REL)
 /** 与 dist.rs 的常量同值。改这里必须同时改 Rust 侧 —— 但它们是**契约**，不是偏好 */
 const CATALOG_FILE = 'catalog.json'
 const SOURCE_FILE = 'source.json'
@@ -209,18 +223,21 @@ ok(`${CATALOG_FILE}：${files.length} 条 path 形状合法（非空、无 ..）
  * 是设计，不是漏洞）。所以：
  *
  *   · 只在 catalog、不在 manifest 的条目 → **允许不发**（客户端够不着它）；
- *   · manifest 里的每一条 → **必须**在交付根里真存在（客户端够得着，缺了就是 404）。
+ *   · manifest 里的每一条 → **必须**在**发布根**下真存在（客户端够得着，缺了就是 404）。
  *
  * 判据写错的表现：发布一份**完全正常**的产物，脚本却报
  * "catalog 登记了 mkp/models/xxx.3mf，但交付根里没有这份文件" —— 而那份模型本来就
  * 没进任何套餐。真踩到过：首次发布被这条误拦。
+ *
+ * ★ 2026-10-04 起基准是**发布根 `presets/`**（`PUBLISH`），不是交付根 `presets/dist/`：
+ * manifest 的 `relativePath` 与 `catalog.path` 同值、同基准（A 类 `assets/…` 不在 dist 里）。
  */
 const manifestPaths = new Set(
   manifest.assets.map((a) => String(a?.relativePath ?? '').replace(/^\/+/, '')).filter((p) => p !== ''),
 )
 let missingDeliverables = []
 for (const rel of manifestPaths) {
-  if (!existsSync(join(DIST, rel))) missingDeliverables.push(rel)
+  if (!existsSync(join(PUBLISH, rel))) missingDeliverables.push(rel)
 }
 if (missingDeliverables.length > 0) {
   die(
@@ -229,7 +246,7 @@ if (missingDeliverables.length > 0) {
       '\n    这些是**要发出去**的文件，客户端会按「数据源地址 + path」去取 → 用户点下载会 404',
   )
 }
-ok(`${MANIFEST_FILE}：${manifestPaths.size} 条交付文件全部在交付根里真存在`)
+ok(`${MANIFEST_FILE}：${manifestPaths.size} 条交付文件全部在发布根里真存在`)
 
 /* ================================================================================
  * 4. manifest 与 catalog 交叉核对（防半成品 / 防两账脱节）
@@ -271,7 +288,8 @@ if (deliverableFiles.length !== manifestPaths.size) {
 let checked = 0
 for (const f of deliverableFiles) {
   const rel = f.path.replace(/^\/+/, '')
-  const bytes = readFileSync(join(DIST, rel))
+  /* 发布根基准（A 类 `assets/…` 不在 dist 里）—— 与上面那条存在性检查同一个锚点 */
+  const bytes = readFileSync(join(PUBLISH, rel))
   if (typeof f.size !== 'number' || bytes.length !== f.size) {
     die(`${f.path} 大小对不上：catalog 说 ${f.size}，盘上是 ${bytes.length}`)
   }

@@ -5,6 +5,7 @@ import type {
   CalibModel,
   MkpApi,
   PresetSource,
+  SoftwareUpdate,
   UserPresetFile,
 } from './contract'
 import {
@@ -85,7 +86,7 @@ const mockMine: UserPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'outdated',
-    basedOnLabel: 'mkp/presets/A1-fast.toml',
+    basedOnLabel: 'dist/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
@@ -197,7 +198,7 @@ mockMineText.set(
   'presets-mine/我的 A1 涂胶.toml',
   [
     '# 我自己的这一份（假后端演示正文）',
-    '# based_on: mkp/presets/A1-fast.toml',
+    '# based_on: dist/mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-05-29 04:26:12',
     `# based_on_sha256: ${'0'.repeat(64)}`,
     '"涂胶宽度" = 1.1',
@@ -431,7 +432,7 @@ export const mockApi: MkpApi = {
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-mine/${fileName}`
     /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */
-    const label = `mkp/presets/${mockDraft.sourceFileName}`
+    const label = `dist/mkp/presets/${mockDraft.sourceFileName}`
     const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${mockDraft.text}`
     const size = text.length
     const replaced = mockMine.some((f) => f.path === path)
@@ -714,7 +715,7 @@ export const mockApi: MkpApi = {
         {
           kind: 'mkp_preset',
           fileName: 'A1-standard.toml',
-          path: 'mkp/presets/A1-standard.toml',
+          path: 'dist/mkp/presets/A1-standard.toml',
           machineId: 'A1',
           versionId: 'STANDARD',
           sha256: '0'.repeat(64),
@@ -723,7 +724,7 @@ export const mockApi: MkpApi = {
         {
           kind: 'mkp_preset',
           fileName: 'A1-fast.toml',
-          path: 'mkp/presets/A1-fast.toml',
+          path: 'dist/mkp/presets/A1-fast.toml',
           machineId: 'A1',
           versionId: 'FAST',
           sha256: '1'.repeat(64),
@@ -733,7 +734,7 @@ export const mockApi: MkpApi = {
           /* 「内容异常」那一档的演示：盘上有它、但与目录对不上，而且哪儿都查不出它是哪一版 */
           kind: 'mkp_preset',
           fileName: 'A1mini-standard.toml',
-          path: 'mkp/presets/A1mini-standard.toml',
+          path: 'dist/mkp/presets/A1mini-standard.toml',
           machineId: 'A1_MINI',
           versionId: 'STANDARD',
           sha256: '2'.repeat(64),
@@ -747,7 +748,7 @@ export const mockApi: MkpApi = {
            */
           kind: 'bbs_config',
           fileName: 'MKPProcess A1 0.4 0.20.json',
-          path: 'mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
+          path: 'assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
           machineId: 'A1',
           versionId: '',
           sha256: '3'.repeat(64),
@@ -761,7 +762,7 @@ export const mockApi: MkpApi = {
            */
           kind: 'icon',
           fileName: 'a1.svg',
-          path: 'mkp/icons/a1.svg',
+          path: 'assets/icons/a1.svg',
           machineId: 'A1',
           versionId: '',
           sha256: '4'.repeat(64),
@@ -889,7 +890,7 @@ export const mockApi: MkpApi = {
    */
   async getDeliveryTrust() {
     return [
-      { fileName: 'A1-fast.toml', verdict: 'old' as const, archivedPath: 'archive/mkp/presets/A1-fast.toml' },
+      { fileName: 'A1-fast.toml', verdict: 'old' as const, archivedPath: 'archive/dist/mkp/presets/A1-fast.toml' },
       { fileName: 'A1mini-standard.toml', verdict: 'tampered' as const, archivedPath: null },
     ]
   },
@@ -902,7 +903,7 @@ export const mockApi: MkpApi = {
   async getArchivedFiles() {
     return [
       {
-        path: 'archive/mkp/presets/A1-fast.toml',
+        path: 'archive/dist/mkp/presets/A1-fast.toml',
         fileName: 'A1-fast.toml',
         size: 2048,
         modifiedUnix: 1780000000,
@@ -970,4 +971,28 @@ export const mockApi: MkpApi = {
   async applyRemoteUpdate() {
     throw new NotImplementedError('applyRemoteUpdate：浏览器里没有远端目录')
   },
+
+  /*
+   * 软件更新（release.json）：与预设数据是**两条链**。
+   * 浏览器里演示"当前版本"与一个固定的假发布状态 —— 形状不编（字段与真后端同形），
+   * 值是演示值。真机上这两个口子住 Rust 侧（`ipc::catalog`）。
+   */
+  async getAppVersion() {
+    return MOCK_APP_VERSION
+  },
+
+  async checkSoftwareUpdate(): Promise<SoftwareUpdate> {
+    /* 演示：比当前版本更新一档 —— 设置页因此显示「有新版本 SupportEase」。
+       想演示「已是最新版本」，把 hasUpdate 改成 false、latestVersion 设成 currentVersion */
+    return {
+      hasUpdate: true,
+      currentVersion: MOCK_APP_VERSION,
+      latestVersion: '0.0.2',
+      notes: '演示：更新检查是独立的一条链（release.json），与预设数据无关。',
+      url: 'https://example.com/supportease/releases',
+    }
+  },
 }
+
+/** mock 版的"当前版本"：与演示的"最新版本"配合出一个好看的对照 */
+const MOCK_APP_VERSION = '0.0.1'

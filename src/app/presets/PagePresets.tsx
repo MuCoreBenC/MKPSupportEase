@@ -183,6 +183,14 @@ interface Props {
    * 切 tab 的状态住在那一层，这一页只负责把目标文件名交出去。
    */
   onOpenBbs?: (name: string) => void
+  /**
+   * 「此预设需要更新版 SupportEase」那句提示里「去更新」的出口：跳到设置页的软件更新块。
+   *
+   * ★ 跳转的出口由外壳给（页签状态住在那儿），这一页只说"我要去设置"。
+   *   注意这条链是**读不懂数据**（要升级客户端），与设置页那条"有没有新版本"是两条链 ——
+   *   这里只把用户送过去，不替设置页说话。
+   */
+  onOpenSettings?: () => void
 }
 
 /* 四档同一句（与参数页搜索框同一条规矩）：跨任何分界，框里的字都不换 */
@@ -213,7 +221,7 @@ interface Note {
   lines?: string[]
 }
 
-export default function PagePresets({ density, onOpenBbs }: Props) {
+export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Props) {
   /*
    * 通用导入入口（第十二层）停在 App 层；这一页拿 `revision`
    * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
@@ -1298,6 +1306,33 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                   >
                     {batchBusy ? '处理中…' : batch.label}
                   </button>
+                </div>
+              )}
+
+              {/*
+                「远端这一代读不懂」那一句（第三刀下半，作者定的产品规则 B）。
+                ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给我的这份我读不了"。
+                  **列表照常**（没有整表标红、没有逐行"不兼容"标签），只在这一格多一句提示。
+                文案照抄作者原话，按钮只有一个去处：设置页的软件更新块。
+              */}
+              {data.needsNewerClient && (
+                <div className={s.noteBad} role="status">
+                  <p className={s.noteMain}>
+                    <span>
+                      <strong>此预设需要更新版 SupportEase</strong>
+                      <br />
+                      当前客户端版本过旧，暂不支持此预设文件。
+                    </span>
+                    {onOpenSettings !== undefined && (
+                      <button
+                        type="button"
+                        className={s.noteAction}
+                        onClick={onOpenSettings}
+                      >
+                        去更新
+                      </button>
+                    )}
+                  </p>
                 </div>
               )}
 

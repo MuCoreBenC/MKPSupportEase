@@ -58,7 +58,7 @@ const RULES_NOTE = `条件显隐规则 ${RULES.rules} 条、覆盖 ${RULES.keys}
 export default function PageBbs({ density, pending }: Props) {
   const data = useBbsData()
   const preset = useBbsPreset(data)
-  /* 产品资源区（mkp/bbs/）：第三圈起，这一页的产品配置从下载区来，不再是随包副本 */
+  /* 交付面（`assets/bbs/…`）：第三圈起，这一页的产品配置从下载区来，不再是随包副本 */
   const delivered = useBbsDelivered()
 
   /* 落 localStorage 的偏好：档位与主题。键名全收在 `src/api/storageKeys.ts` */
@@ -346,7 +346,7 @@ export default function PageBbs({ density, pending }: Props) {
           <select
             className={s.pick}
             value=""
-            title="从下载区 mkp/bbs/ 里载入一份产品自带的切片器配置"
+            title="从下载区 assets/bbs/ 里载入一份产品自带的切片器配置"
             onChange={(ev) => {
               const fileName = ev.target.value
               ev.target.value = ''

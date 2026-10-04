@@ -83,7 +83,8 @@ export default function CellEditor({
      * `value_type == "string"` 同一道门）；float 参数身上挂着的几条是
      * 「预设档」，不是逼人选的是非题。`wiping.ironing_coverage_threshold`
      * 就是这种：unit % · 0~100 · 步进 1，画出来必须是一个能填的百分比框，
-     * 而不是三选一（客户端那一版同一口径：`clientPackage.ts` 的 `CLIENT_CONTROL`）。
+     * 而不是三选一（客户端那一版同一口径：控件原词 `uiComponent` 说了算，
+     * 不拿「有没有 choices」反推）。
      */
     control:
       param.uiComponent === 'gcode'

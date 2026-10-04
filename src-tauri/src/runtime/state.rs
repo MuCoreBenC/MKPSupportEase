@@ -22,7 +22,7 @@
 //! # 两条线都能进来（第七层，2026-10-02 作者定）
 //!
 //! ```text
-//! 官方线  云端 → mkp/…        只读，只有"云端换版本"能替换它   ┐
+//! 官方线  云端 → <catalog.path>  只读，只有"云端换版本"能替换它  ┐
 //!                                                          ├─ 都能成为使用中
 //! 用户线  另存 → presets-mine/ 用户自己可改，不属任何官方版本  ┘
 //! ```
@@ -58,7 +58,7 @@ const ACTIVE_FILE: &str = "run/active-preset.json";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActiveOrigin {
-    /// 官方线：目录（catalog）登记的交付文件（`mkp/…`）
+    /// 官方线：目录（catalog）登记的交付文件（落点 = `catalog.path`）
     #[default]
     Official,
     /// 用户线：用户自己那份（`presets-mine/…`）
@@ -109,15 +109,31 @@ pub fn load_active(root: &Path) -> Result<Option<ActivePreset>, AppError> {
     Ok(Some(state))
 }
 
-/// 记下"用这一份官方的"。`file` 来自 catalog（名字与 SHA 都是目录登记的），整份替换旧的。
+/// 记下"用这一份官方的"。`file` 来自 catalog，整份替换旧的。
+///
+/// # 指纹从哪来（2026-10-04）
+///
+/// 目录登记了期望值（发布侧 / OTA 目录）就直接用它；没登记（随包 bootstrap 目录，
+/// `sha256 = None`）就**对盘上那份真字节算一次** —— 使用中状态是"我当时用的正是这份
+/// 字节"的凭证，不能因为目录这一侧没记就留空。算不出（文件其实不在）就报错：
+/// 调用方（`use_active_preset`）本来就已经先确认过字节在盘上。
 pub fn save_active(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
+    let sha256 = match file.expected_sha() {
+        Some(want) => want.to_owned(),
+        None => {
+            let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
+                AppError::not_found(format!("{} 还不在本机 —— 先下载，再使用", file.file_name))
+            })?;
+            super::catalog::hex(&Sha256::digest(&bytes))
+        }
+    };
     write_active(
         root,
         ActivePreset {
             active_schema: ACTIVE_SCHEMA,
             origin: ActiveOrigin::Official,
             file_name: file.file_name.clone(),
-            sha256: file.sha256.clone(),
+            sha256,
             path: None,
         },
     )
@@ -229,8 +245,9 @@ const DRAFT_FILE: &str = "run/draft-preset.json";
 /// presets-mine/A1-fast（已修改）.toml
 /// ```
 ///
-/// **为什么不跟官方原件同目录**（示意里那个 `A1MF_260701.tmp.toml`）：`mkp/` 是**下载区**，
-/// 它的判据是"盘上每个文件都在目录里登记"（[`super::delivery::stale_files`] 就是靠这条
+/// **为什么不跟官方原件同目录**（示意里那个 `A1MF_260701.tmp.toml`）：交付文件的落点
+/// 由 `catalog.path` 定（A 类 `assets/…`、B 类 `dist/mkp/presets/…`），它的判据是
+/// "盘上每个文件都在目录里登记"（[`super::delivery::stale_files`] 就是靠这条
 /// 认陈旧文件的）—— 往里塞一个 `.tmp`，它立刻变成"目录里没有的陈旧文件"，
 /// 污染交付那一层的每一条判据。草稿是**运行状态**（"我正在改哪一份"），住 `run/`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -443,8 +460,8 @@ mod tests {
             path: format!("mkp/presets/{name}"),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
-            sha256: hex(&Sha256::digest(content)),
-            size: content.len() as u64,
+            sha256: Some(hex(&Sha256::digest(content))),
+            size: Some(content.len() as u64),
         }
     }
 

@@ -33,7 +33,7 @@ serde_json.workspace = true
 # 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
 [features]
 default = []
-workbench = ["dep:time", "dep:mkpse-preset"]
+workbench = ["dep:time", "dep:mkpse-preset", "dep:keyring"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -74,6 +74,13 @@ uuid = { version = "1", features = ["v7"] }
 # 只有 workbench feature 用得到的：发布时间戳（`clock`）。
 # optional = true 的意思是"默认构建里本 crate 用不上它"。
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+
+# **发布账户凭据**（第三刀下半）：Token 住系统钥匙串（macOS Keychain / Windows Credential
+# Manager / Linux Secret Service），**绝不写明文文件**。
+#
+# **只在 workbench feature 下**：发布是工作台的能力，客户端的依赖图里不该出现它
+# （与 `time` / `mkpse-preset` 同一条隔离纪律）。
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
 # 指纹（`presetdata::resolve::Layers::fingerprint`）与预设体摘要都要它。
 # 它本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的成本是零。
 sha2.workspace = true

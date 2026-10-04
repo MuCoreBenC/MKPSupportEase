@@ -15,11 +15,21 @@
 //! │   ├── machine_catalog.json        机型 + 版本 + 关系（12.2）
 //! │   ├── bundles.json                套餐 + 包含什么（12.3）
 //! │   └── assets_index.json           资产清单 + 位置 + 归属（12.4）
-//! └── mkp/                            产品资源区 —— **与客户端下载区同名同形**
-//!     ├── presets/<preset_file_name>  MKP 产物（`wb_generate` 落的，9 份起）
-//!     ├── bbs/Process/…               切片器配置
-//!     ├── models/…                    3mf 模型
-//!     └── icons/…                     机型图标
+//! └── mkp/presets/<preset_file_name>  **B 类渲染产物**（`wb_generate` 落的，9 份起）
+//! ```
+//!
+//! ★ **2026-10-04「唯一路径语义」（裁决 C/甲）之后，`dist/` 只装两类东西**：
+//! 上面这些**自产元数据**与 **B 类渲染产物**（源里没有实体、必须落盘的那几份 TOML）。
+//! **A 类资产（BBS / 模型 / 图标）不在这里** —— 它们原地住在 `presets/assets/…`，
+//! `catalog.path` 直接指过去（`assets/…`，相对**发布根 `presets/`**）。
+//! 所以发布根下的形状是：
+//!
+//! ```text
+//! presets/                 ← 发布根（`catalog.path` 的基准）
+//! ├── assets/…             ← A 类：唯一实体，不复制（不再有 dist/mkp/{bbs,icons,models}）
+//! └── dist/
+//!     ├── catalog.json / manifest.json / source.json / content/**
+//!     └── mkp/presets/…    ← B 类：渲染产物（`catalog.path` = `dist/mkp/presets/…`）
 //! ```
 //!
 //! **落点由 catalog 说了算**：交付集合里每一个文件的相对路径，都等于它在
@@ -30,7 +40,8 @@
 //! 所以 [`publish_into`] 收尾时**逐条核对**盘上真字节（见那个函数的最后一段）。
 //!
 //! **`mkp/presets/` 子层保留**（不收成 `mkp/` 一层）：MKP 预设与 BBS 预设是两类预设
-//! （G-3 的切片器开放维度），子层给「按预设类型」留位置，与客户端 `kind_dir` 的分层一致。
+//! （G-3 的切片器开放维度），子层给「按预设类型」留位置。它同时也是客户端那一侧的
+//! 落点形状（`catalog.path` 的 `dist/` 之后那一段），改名就会两边不同形。
 //!
 //! # 12.5 「文件名字段全部由命名函数算出」的边界
 //!
@@ -396,8 +407,8 @@ pub fn assets_index_json(assets: &[Asset]) -> serde_json::Value {
 pub struct DistContent {
     /// 三份目录 JSON（machine_catalog / bundles / assets_index）
     pub content_files: usize,
-    /// 复制进交付根 `mkp/…` 的资产文件数
-    pub assets_copied: usize,
+    /// 体检通过的 A 类资产数（**不复制**，只确认载荷根里真有那份文件；2026-10-04 起）
+    pub assets_checked: usize,
 }
 
 /// 写三份目录 JSON，并把引用可达的资产从资产根复制进交付根（`mkp/<kind 目录>/…`）。
@@ -424,52 +435,68 @@ pub fn write_content(
     crate::fsx::atomic::atomic_write_json(&content.join("bundles.json"), &bundles)?;
     crate::fsx::atomic::atomic_write_json(&content.join("assets_index.json"), &index)?;
 
-    let mut copied = 0usize;
+    /*
+     * ★ A 类资产**不复制**（2026-10-04 作者裁决 C/甲）。
+     *
+     * A 类（BBS / 模型 / 图标）在 `presets/assets/` 就是唯一实体，`catalog.path`
+     * 直接指它（`assets/…`，相对发布根 `presets/`）—— 云端取的就是这一份，
+     * 再复制一份进 `dist/` 等于让同一份字节有第二个真相（那正是 404 与
+     * "登记面 ≠ 实体面"的根）。
+     *
+     * 这里保留的是**体检**：确认每一条能交付的资产，它的文件真的在载荷根里。
+     * 缺了当场报错（发布不该发一个取不到的 promise），但**不写任何东西到 dist**。
+     * 发布闸的「登记面 == 实体面」那一项（`docs/PUBLISH-ARCHITECTURE.md` §5.2 ⑦）
+     * 检查的就是这件事。
+     */
+    let mut checked = 0usize;
     for a in &referenced {
         // 不登记的那一类不进交付（与 catalog / 资产索引同一口径）
-        let Some(rel) = crate::runtime::catalog::dest_of_asset(a) else {
+        if crate::runtime::catalog::dest_of_asset(a).is_none() {
             continue;
-        };
+        }
         let src = asset_root.join(&a.path);
-        let bytes = std::fs::read(&src).map_err(|e| {
-            AppError::not_found(format!("资产 {} 的文件不在：{}", a.id, src.display()))
-                .with_detail(e.to_string())
-        })?;
-        crate::fsx::atomic::atomic_write(&dist_root.join(&rel), &bytes)?;
-        copied += 1;
+        if !src.is_file() {
+            return Err(AppError::not_found(format!(
+                "资产 {} 的文件不在：{}",
+                a.id,
+                src.display()
+            ))
+            .with_detail(
+                "A 类资产在发布根下原地交付（不复制进 dist）—— 文件必须在载荷根里真实存在"
+                    .to_owned(),
+            ));
+        }
+        checked += 1;
     }
 
     Ok(DistContent {
         content_files: 3,
-        assets_copied: copied,
+        assets_checked: checked,
     })
 }
 
 /* ---------- 发布（b05 Task 13） ---------- */
 
-/// **交付集合**（13.1）：本次发布应当存在于交付目录的全部文件（**相对交付根的路径**）。
+/// **`dist/` 里该有什么**（13.1）：本次发布应当存在于交付目录的全部文件，
+/// 相对 `dist/` 的路径。
 ///
-/// 它是从引用关系**算出来**的：`content/` 三份自产、`manifest.json` 自产、
-/// `catalog.json` 自产、`source.json` 自产（第十七刀：客户端拿它解析远端在哪）、
-/// 资产来自引用可达集（落点 = catalog 的 `files[].path`）、
-/// `mkp/presets/<file_name>` 来自「有产物的版本」（产物名由命名函数算出）。
-/// 残留在语义上就是「目录里有、这个集合里没有」。
+/// ★ 2026-10-04（裁决 C/甲）起，这里**只含 dist 自己的东西**：
 ///
-/// **集合里每个路径都是客户端会按 URL 去取的那个相对位置** —— 交付根就是数据源地址
-/// 指向的根，所以这份集合同时是"发布出去的东西"与"客户端能取到的东西"两份清单。
-pub fn deliverable_set(book: &Book<'_>) -> BTreeSet<String> {
+/// - `content/` 三份自产 · `manifest.json` · `catalog.json` · `source.json`；
+/// - **B 类渲染产物** `mkp/presets/<file_name>`（源里没有实体，必须落 dist）。
+///
+/// **A 类资产不在这个集合里** —— 它们原地住在 `presets/assets/`，不复制进 dist。
+/// 所以这份集合的用途是 `scan_strays`（扫 dist 残留）：*残留 = dist 里有、这里没有*。
+///
+/// 想查"客户端能不能取到某条 catalog 条目"用的是另一个函数
+/// （[`every_registered_path_is_reachable`] 那一路），判据是 **发布根 + `catalog.path`**
+/// 而不是 dist —— 两者的面不一样，别混。
+pub fn dist_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
     set.extend(CONTENT_FILES.map(str::to_owned));
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
     set.insert(SOURCE_FILE.to_owned());
-    for a in referenced_assets(book) {
-        // 落点与客户端同源（[`crate::runtime::catalog::dest_of_asset`]）；
-        // 台账里不登记的那一类不进交付集合
-        if let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) {
-            set.insert(rel);
-        }
-    }
     for v in book.versions() {
         // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
         if book.build_state(&v.uid) == BuildState::NoResources {
@@ -560,12 +587,16 @@ pub struct DistAsset {
 }
 
 /// 发布的元信息（从调用方带进来：clock 与渠道常量都不属于交付层）。
-/// 最低客户端与版本原先是上游 manifest 的 `compat`，上游删掉后没有来源、照实留空
+///
+/// `version` 原先是上游 manifest 的包版本，上游删掉后没有来源、照实留空。
+///
+/// **最低客户端版本不在这一格里**（2026-10-04）：它只有一个来源 —— 结构规则表里对
+/// 当前结构签名的那条登记，由 [`publish_into`] 自己查（见那里）。放两份必然漂，
+/// 而"漂"的表现是发出去的目录说一套、manifest 说另一套。
 #[derive(Debug, Clone)]
 pub struct PublishMeta {
     pub stamp: String,
     pub channel: String,
-    pub minimum_client: String,
     pub version: String,
 }
 
@@ -578,6 +609,9 @@ pub struct PublishOutcome {
     pub assets_copied: usize,
     /// 其中 mkp 产物条目数
     pub presets: usize,
+    /// 这次发出去的目录里的**最低正式客户端版本**（结构规则表登记的）。
+    /// `None` = 这一代还没登记 —— 发布闸会拦住这件事，所以正常路径上不会是 `None`
+    pub minimum_client: Option<String>,
 }
 
 /// **发布核心**（13.1–13.8）：闸门在命令层（[`super::build::wb_publish`] 先跑校验），
@@ -596,7 +630,7 @@ pub fn publish_into(
     book: &Book<'_>,
     meta: &PublishMeta,
 ) -> Result<PublishOutcome, AppError> {
-    let expected = deliverable_set(book);
+    let expected = dist_expected_set(book);
 
     // 13.4：**先扫残留，再动任何一个字节**。带着残留写新内容，
     // 等于默认「这批历史产物是好的」—— 而没人验证过它
@@ -640,7 +674,8 @@ pub fn publish_into(
             resource_type: "mkp_preset".to_owned(),
             machine_id: v.machine_id.clone(),
             file_name: name,
-            relative_path: rel,
+            // 发布根相对的完整路径（B 类在 `dist/` 下）—— 与 `catalog.path` 同一基准
+            relative_path: format!("dist/{rel}"),
         });
         presets_count += 1;
     }
@@ -650,10 +685,14 @@ pub fn publish_into(
         let Some(rel) = crate::runtime::catalog::dest_of_asset(a) else {
             continue;
         };
-        // 刚在上面 write_content 复制过，读不到属于内部错误 —— 但还是带上 id 报
-        let bytes = std::fs::read(dist_root.join(&rel)).map_err(|e| {
-            AppError::not_found(format!("资产 {} 的文件不在交付目录", a.id))
-                .with_detail(e.to_string())
+        /*
+         * ★ A 类资产**从载荷根读**（2026-10-04 裁决 C/甲）：它是原地交付的，
+         * `dist/` 里没有它的副本。这里算的 SHA / size 就是"客户端按
+         * `baseUrl + assets/…` 取到的那份字节" —— 与 catalog 登记的期望值同源。
+         */
+        let bytes = std::fs::read(asset_root.join(&a.path)).map_err(|e| {
+            AppError::not_found(format!("资产 {} 的文件不在载荷根", a.id))
+                .with_detail(format!("{}：{e}", asset_root.join(&a.path).display()))
         })?;
         let file_name = a.path.rsplit('/').next().unwrap_or(&a.path).to_owned();
         assets.push(DistAsset {
@@ -667,25 +706,43 @@ pub fn publish_into(
         });
     }
 
-    let manifest = serde_json::json!({
-        "manifestVersion": 3,
-        "channel": meta.channel,
-        "updated": meta.stamp,
-        // **上游未声明就照实留空**，不编一个版本号出来（doc §12）
-        "minimumClient": meta.minimum_client,
-        "version": meta.version,
-        "assets": assets,
-    });
+    // 发布根（`presets/`）—— `catalog.path` 的基准，也是结构规则表的家
+    let publish_root = dist_root
+        .parent()
+        .expect("dist 必有父目录（发布根 presets/）");
 
     // **新世界的目录**（两端共用契约）：与客户端 `runtime::Catalog` 同一个类型、
     // 同一个 schema、同一套指纹。工作台发布的是"远端那份"，客户端检查/应用更新
     // 就是对两个 revision 做比较——不再有第二种清单格式。
     // 宽松构建：没有产物的版本合法（交付集合本来就不含它）。产物目录给的就是
     // 交付根里那一格（`mkp/presets/`）——**与客户端落点同形**，不再有一层自己的坐标系。
-    let new_catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
+    let mut new_catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
         &dist_root.join(MKP_PRESETS_DIR),
     );
+
+    /*
+     * **最低客户端版本只有一个来源**：结构规则表（`presets/structure-signatures.toml`）
+     * 里对**当前结构签名**的那一条登记。
+     *
+     * 以前这一格抄的是上游 manifest 的 `compat`；上游删掉之后它就成了一直为空的死字段
+     * （没人填、也没人读）。现在它 = `catalog.minClientVersion`，而发布闸 ⑫ 会拦住
+     * "签名还没登记"的发布 —— 所以**发出去的这一格不会缺**，也不会是编出来的。
+     *
+     * 查不到就留空串（不猜）。真出得来这种情况，说明有人绕过了闸 —— 那正是要看见的。
+     */
+    let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
+    new_catalog.apply_min_client(&rules);
+    let minimum_client = new_catalog.min_client_version.clone().unwrap_or_default();
+
+    let manifest = serde_json::json!({
+        "manifestVersion": 3,
+        "channel": meta.channel,
+        "updated": meta.stamp,
+        "minimumClient": minimum_client,
+        "version": meta.version,
+        "assets": assets,
+    });
 
     // **收尾核对**（2026-10-02）：本次发出去的每一份文件，说明书里都登记了、字节也对得上。
     //
@@ -703,31 +760,48 @@ pub fn publish_into(
             .iter()
             .map(|f| (f.path.as_str(), f))
             .collect();
-    for rel in expected.iter() {
-        if rel == MANIFEST_FILE
-            || rel == NEW_CATALOG_FILE
-            || rel == SOURCE_FILE
-            || CONTENT_FILES.contains(&rel.as_str())
-        {
-            continue; // 自产的几类不在说明书里（说明书自己、Bootstrap、目录类都是）
+    /*
+     * ★ 收尾核对改成**按 `catalog.path` 在发布根下逐条核对**（2026-10-04 裁决 C/甲）。
+     *
+     * 以前是"拿 dist 里的文件去说明书里找登记"，那预设了"发布物全在 dist 里"。
+     * 现在 A 类原地住在 `presets/assets/`，所以核对方向必须反过来：
+     *
+     *   说明书登记的每一条 → `发布根 + catalog.path` 处有没有那份文件、字节对不对
+     *
+     * 这正是发布闸第 ⑦ 项「登记面 == 实体面」（`PUBLISH-ARCHITECTURE.md` §5.2）——
+     * 它在这里就已经跑了一遍，而且是**阻断式**的（对不上就不写 manifest）。
+     *
+     * 还有一个**反向**的核对（dist 里有没有多发的）：由 `scan_strays` 用
+     * [`dist_expected_set`] 做，见本函数开头。
+     */
+    for f in new_catalog.files.iter() {
+        if f.kind == crate::runtime::catalog::kind::PRESET {
+            continue; // B 类下面单独核（它的 SHA 由生成侧写进目录，见 write_catalog_json）
         }
-        let Some(f) = registered.get(rel.as_str()) else {
-            return Err(AppError::internal(format!(
-                "交付了 {rel}，但说明书里没有登记它"
-            ))
-            .with_detail(
-                "客户端只认 catalog 的 `files[].path`：登记漏了就等于这份文件发出去也没人能取到"
-                    .to_owned(),
-            ));
-        };
-        let bytes = std::fs::read(dist_root.join(rel)).map_err(|e| {
-            AppError::internal(format!("目录登记了 {}，交付根里却没有这份文件", f.path))
+        let on_disk = publish_root.join(&f.path);
+        let bytes = std::fs::read(&on_disk).map_err(|e| {
+            AppError::internal(format!("目录登记了 {}，发布根里却没有这份文件", f.path))
                 .with_detail(format!(
-                    "客户端会按「数据源地址 + {}」去取 —— 发布布局必须与 catalog 的 path 对齐：{e}",
-                    f.path
+                    "客户端会按「数据源地址 + {}」去取 —— 它必须真实存在于发布根（{}）：{e}",
+                    f.path,
+                    on_disk.display()
                 ))
         })?;
-        if bytes.len() as u64 != f.size || sha256_of(&bytes) != f.sha256 {
+        /*
+         * 发布侧**必须**有期望值：远端目录是下载校验的权威（随包 bootstrap 目录才不登记）。
+         * `None` 出现在这里说明这份 catalog 不是发布侧构建的 —— 那是接线错误，当场报出来，
+         * 不能默认通过（默认通过 = 发一份没人能校验的目录出去）。
+         */
+        let (Some(want_size), Some(want_sha)) = (f.expected_size(), f.expected_sha()) else {
+            return Err(AppError::internal(format!(
+                "{} 在发布目录里没有登记 SHA / 大小 —— 远端目录必须为下载校验背书",
+                f.path
+            ))
+            .with_detail(
+                "只有随包 bootstrap 目录才允许不登记期望值；发布产物必须逐份登记".to_owned(),
+            ));
+        };
+        if bytes.len() as u64 != want_size || sha256_of(&bytes) != want_sha {
             return Err(AppError::internal(format!(
                 "{} 的字节与目录登记的不一致（大小或 SHA）",
                 f.path
@@ -739,6 +813,43 @@ pub fn publish_into(
         }
     }
 
+    /*
+     * B 类（MKP 预设产物）单独核：它们落在 `dist/mkp/presets/`，SHA 由生成侧写进目录。
+     * 同样按 `catalog.path` 定位 —— 与 A 类同一条规则，只是根不同（发布根 vs dist）。
+     * 这一支跑完，`manifest` 才会写；任何一条取不到就是"发了一个取不到的 promise"。
+     */
+    for v in book.versions() {
+        if book.build_state(&v.uid) == BuildState::NoResources {
+            continue;
+        }
+        let rel = format!("{MKP_PRESETS_DIR}/{}", v.mkp_file);
+        let catalog_path = format!("dist/{rel}");
+        let on_disk = dist_root.join(&rel);
+        let bytes = std::fs::read(&on_disk).map_err(|e| {
+            AppError::internal(format!("产物 {} 不在交付根里", v.mkp_file)).with_detail(format!(
+                "{} 不存在：{e}。先在生成视角里生成，再发布",
+                on_disk.display()
+            ))
+        })?;
+        let Some(f) = registered.get(catalog_path.as_str()) else {
+            return Err(AppError::internal(format!(
+                "产物 {rel} 发出来了，但说明书里没有登记 {}",
+                catalog_path
+            ))
+            .with_detail(
+                "客户端只认 catalog 的 `files[].path`：漏登记 = 发出去也没人取得到".to_owned(),
+            ));
+        };
+        if let Some(want) = f.expected_sha() {
+            if sha256_of(&bytes) != want {
+                return Err(AppError::internal(format!(
+                    "{} 的字节与目录登记的不一致（SHA）",
+                    f.path
+                )));
+            }
+        }
+    }
+
     // 清单、目录与 Bootstrap 收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
     crate::fsx::atomic::atomic_write_json(&dist_root.join(MANIFEST_FILE), &manifest)?;
     write_catalog_json(dist_root, book)?;
@@ -747,8 +858,9 @@ pub fn publish_into(
 
     Ok(PublishOutcome {
         files: assets.len(),
-        assets_copied: content.assets_copied,
+        assets_copied: content.assets_checked,
         presets: presets_count,
+        minimum_client: new_catalog.min_client_version.clone(),
     })
 }
 
@@ -764,37 +876,46 @@ pub fn publish_into(
 /// 口径）—— 所以调用方要先把引用资产补进交付根（`write_content`），否则就是
 /// 「目录登记了，文件不在」。
 pub fn write_catalog_json(dist_root: &Path, book: &Book<'_>) -> Result<usize, AppError> {
-    let catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
+    let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
         &dist_root.join(MKP_PRESETS_DIR),
     );
+    // 最低客户端版本与发布侧同一个来源（规则表）—— 生成与发布写出来的目录**同一代**，
+    // 不许因为"谁先跑"而一个带这一格一个不带
+    if let Some(publish_root) = dist_root.parent() {
+        let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
+        catalog.apply_min_client(&rules);
+    }
     let count = catalog.files.len();
     let text = catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write(&dist_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
     Ok(count)
 }
 
-/// **交付目录的自查**（预检的「清单 ↔ 文件」一档）：拿**交付集合** —— 客户端真会
-/// 去取的那批（[`deliverable_set`]，引用可达的） —— 在交付根里逐份对：文件在不在、
-/// 字节与目录登记对不对。
+/// **交付面的自查**（预检的「清单 ↔ 文件」一档）：三件事一起对 ——
+/// 自产文件在不在 dist、**登记的每一条**在发布根下取不取得到且字节对不对、dist 有没有残留。
 ///
-/// **只查交付集合，不查 catalog 的全部登记**：目录的登记面**刻意比交付面宽**
-/// （让客户端认识所有资产；没被版本 / 套餐引用的资产「登记但不发」—— 例如没进
-/// 套餐的切片器预设、没被版本引用的 3mf）。那是设计，不是不一致（作者 2026-10-03：
-/// 「我看了文件夹，确实不在了，我从来没有主动删过」—— 它们从没进过 dist）。
-/// 集合外的登记条目一律跳过。
+/// ★ **2026-10-04 起口径改成「登记面 == 实体面」**（裁决 C/甲）：不再"只查交付集合"。
+/// 现在**catalog 登记的每一条**都要在 `发布根 + catalog.path` 处真能取到 ——
+/// A 类查 `presets/`（原地交付），B 类查 `presets/dist/`（渲染产物）。
 ///
-/// **只读**；修复动作是「在工作台生成一次（资产补齐 + 目录重算）」或重跑发布。
+/// 旧的"登记面刻意比交付面宽"那句话作废了：那是"复制进 dist"时代的说法，
+/// 也正是 0.2mm 那 4 份登记了却取不到的根源（`PUBLISH-ARCHITECTURE.md` §3）。
+///
+/// **只读**；修复动作是「在工作台生成一次」或重跑发布。
 pub fn audit_catalog(dist_root: &Path, book: &Book<'_>) -> Result<(), String> {
     let Ok(bytes) = std::fs::read(dist_root.join(NEW_CATALOG_FILE)) else {
         return Ok(()); // 目录还没立起来（没发布过也没生成过）—— 没什么可对的
     };
     let catalog: crate::runtime::catalog::Catalog = serde_json::from_slice(&bytes)
         .map_err(|e| format!("catalog.json 读不出来（{e}）—— 客户端按它做下载校验，坏了要重算"))?;
-    let registered: std::collections::BTreeMap<&str, &crate::runtime::catalog::CatalogFile> =
-        catalog.files.iter().map(|f| (f.path.as_str(), f)).collect();
-    // 自产：content 三份 + catalog.json（生成与发布都会写）—— 只查在不在。
-    // manifest.json / source.json 是**发布台账**，没发布过就没有 —— 不算不一致
+
+    let publish_root = match dist_root.parent() {
+        Some(p) => p,
+        None => return Err("交付根没有父目录（发布根）—— 布局不对".to_owned()),
+    };
+
+    // 自产：content 三份 + catalog.json（生成与发布都会写）—— 只查在不在 dist 里
     let self_made: std::collections::BTreeSet<&str> = CONTENT_FILES
         .iter()
         .copied()
@@ -804,49 +925,58 @@ pub fn audit_catalog(dist_root: &Path, book: &Book<'_>) -> Result<(), String> {
         [MANIFEST_FILE, SOURCE_FILE].into_iter().collect();
 
     let mut bad: Vec<String> = Vec::new();
-    for rel in deliverable_set(book) {
-        if publish_only.contains(rel.as_str()) {
-            continue;
+
+    // ① 自产文件（都在 dist 里）
+    for rel in self_made.iter() {
+        if !dist_root.join(rel).exists() {
+            bad.push(format!("{rel}（该发的自产文件不在）"));
         }
-        if self_made.contains(rel.as_str()) {
-            if !dist_root.join(&rel).exists() {
-                bad.push(format!("{rel}（该发的自产文件不在）"));
-            }
-            continue;
-        }
-        let Some(f) = registered.get(rel.as_str()) else {
-            bad.push(format!("{rel}（要交付，目录却没登记）"));
-            continue;
-        };
-        match std::fs::read(dist_root.join(&rel)) {
-            // 与上面 f 同一份 path（集合元素就是目录里的 path）
-            Err(_) => bad.push(format!("{}（要交付，文件不在）", f.path)),
+    }
+    // ② **登记的每一条**：按 `发布根 + path` 定位（A 类在 presets/，B 类在 presets/dist/）
+    for f in catalog.files.iter() {
+        let on_disk = publish_root.join(&f.path);
+        match std::fs::read(&on_disk) {
+            Err(_) => bad.push(format!(
+                "{}（登记了，发布根里取不到：{}）",
+                f.path,
+                on_disk.display()
+            )),
             Ok(b) => {
-                if b.len() as u64 != f.size {
+                if f.expected_sha().is_none() || f.expected_size().is_none() {
+                    bad.push(format!("{}（目录没登记 SHA / 大小）", f.path));
+                } else if Some(b.len() as u64) != f.expected_size() {
                     bad.push(format!(
-                        "{}（目录记 {} 字节，实际 {} 字节）",
+                        "{}（目录记 {:?} 字节，实际 {} 字节）",
                         f.path,
-                        f.size,
+                        f.expected_size(),
                         b.len()
                     ));
-                } else if sha256_of(&b) != f.sha256 {
+                } else if Some(sha256_of(&b).as_str()) != f.expected_sha() {
                     bad.push(format!("{}（大小相同，字节不同）", f.path));
                 }
             }
         }
     }
+    // ③ dist 残留：`dist/` 里有、本次发布会发的东西里没有的（dist 面，不含 A 类）
+    for rel in scan_strays(dist_root, &dist_expected_set(book)) {
+        if publish_only.contains(rel.as_str()) {
+            continue; // manifest / source 是发布台账，生成视角下还没写，不算残留
+        }
+        bad.push(format!("{rel}（交付目录里的残留）"));
+    }
+
     if bad.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "{} 份与目录登记不一致：{}",
+            "{} 处与目录登记不一致：{}",
             bad.len(),
             bad.join("；")
         ))
     }
 }
 
-fn sha256_of(bytes: &[u8]) -> String {
+pub(crate) fn sha256_of(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(bytes);
@@ -950,8 +1080,9 @@ mod tests {
 
     /// **12.6 判据（夹具级）**：write_content 落盘后，引用的每个文件
     /// 都在交付目录里真实存在；缺文件的资产要在发布侧报错而不是静默跳过
+    /// ★ A 类资产**不复制进 dist**（2026-10-04 裁决 C/甲），只做"文件真在"的体检。
     #[test]
-    fn write_content_copies_every_referenced_file_and_the_index_tells_the_truth() {
+    fn write_content_checks_a_class_assets_without_copying_them() {
         let f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
@@ -974,25 +1105,34 @@ mod tests {
         let out = write_content(dist.path(), asset_root.path(), &book).expect("落盘");
         assert_eq!(out.content_files, 3);
         // 可达集 4 条（a1-image + a1-icon + p1s-icon + a1-bbs-04-020），但 **image 类
-        // 不登记进交付**（就是整机图那一档）—— 所以真正落盘的是 3 条：
-        // 与真台账「整机图剥离」同一条规则，夹具这一条是它的反空转锚点
-        assert_eq!(out.assets_copied, 3);
+        // 不登记进交付**（就是整机图那一档）—— 所以体检过的是 3 条
+        assert_eq!(out.assets_checked, 3);
+        // ★ 但它们**一个字节都不该出现在 dist 里** —— 这就是"唯一源"
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            assert!(
+                !dist.path().join(&rel).exists(),
+                "A 类资产不许被复制进 dist：{rel}"
+            );
+        }
 
         // 三份 JSON 真的在盘上
         for name in ["machine_catalog.json", "bundles.json", "assets_index.json"] {
             assert!(dist.path().join("content").join(name).is_file(), "{name}");
         }
-        // 12.6：资产索引引用的每一条都在交付目录里真实存在 ——
-        // 索引里的 `path` 就是**交付根相对的落点**（`mkp/…`），直接拿它查盘
+        // 12.6（2026-10-04 改口径）：资产索引里的 `path` 是**发布根相对**的
+        // （`assets/…`），文件在**载荷根**里原地 —— 不再有 dist 副本可查。
         let idx = assets_index_json(&referenced_assets(&book));
         for a in idx["assets"].as_array().unwrap() {
             let rel = a["path"].as_str().unwrap();
             assert!(
-                rel.starts_with(&format!("{MKP_DIR}/")),
-                "索引里的落点要落进 mkp/：{rel}"
+                rel.starts_with("assets/"),
+                "索引里的落点要以 assets/ 开头（发布根基准）：{rel}"
             );
-            let p = dist.path().join(rel);
-            assert!(p.is_file(), "索引里的 {} 没有落在交付目录", a["id"]);
+            let src = asset_root.path().join(rel.trim_start_matches("assets/"));
+            assert!(src.is_file(), "索引里的 {} 在载荷根里不存在", a["id"]);
         }
 
         // 缺文件的资产：发布必须拦下，且要说清是哪一条
@@ -1076,18 +1216,32 @@ mod tests {
             "BBS 引用去重后 5 条（A1 / A1_MINI 各三份套餐共用一条）"
         );
 
-        // 落盘（真资产根 → 临时交付根），12.6 逐条核对 + assetRefs join 闭合
+        // 落盘（真资产根 → 临时交付根）：A 类**只体检不复制**（裁决 C/甲），
+        // 12.6 逐条核对 + assetRefs join 闭合
         let dist = tempfile::tempdir().unwrap();
         let out = write_content(dist.path(), &asset_root, &book).expect("真数据落盘");
         assert_eq!(
-            out.assets_copied, 8,
+            out.assets_checked, 8,
             "有落点的可达资产 8 条（图标 3 + BBS 5），一条不少一条不多"
         );
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
-            // 落点是 `mkp/<kind 目录>/…`（交付根相对），直接查盘
-            let p = dist.path().join(a["path"].as_str().unwrap());
-            assert!(p.is_file(), "索引里的 {} 没有落在交付目录", a["id"]);
+            // 索引里的 path 是**发布根相对**（`assets/…`），文件在载荷根；
+            // 而 dist 里**不该有**它的副本 —— 两条都钉住
+            let rel = a["path"].as_str().unwrap();
+            assert!(
+                rel.starts_with("assets/"),
+                "索引落点要以 assets/ 开头：{rel}"
+            );
+            assert!(
+                asset_root.join(rel.trim_start_matches("assets/")).is_file(),
+                "索引里的 {} 在载荷根里不存在",
+                a["id"]
+            );
+            assert!(
+                !dist.path().join(rel).exists(),
+                "A 类资产不许出现在 dist 里：{rel}"
+            );
         }
         let index_ids: Vec<&str> = idx["assets"]
             .as_array()
@@ -1121,14 +1275,12 @@ mod tests {
         }
     }
 
-    /// 交付自查：**只查交付集合** —— 目录登记面比交付面宽是**设计**。
+    /// ★ **登记面 == 实体面**（2026-10-04 裁决 C/甲的核心判据）。
     ///
-    /// 作者 2026-10-03 的困惑：下面说「有、没进套餐的切片器预设」，上面说
-    /// 「目录登记了，文件不在」—— 那是同一批文件的两个层面（源里有 / 交付面上没有），
-    /// 它们**从发布那次起就没进过 dist**，不是被谁删的。自查不该报它们，
-    /// 只报「要交付的那批」对不上。
+    /// 旧口径是"只查交付集合"（登记面刻意比交付面宽）；现在**每一条登记都要取得到**，
+    /// 判据面是 **发布根 + `catalog.path`**：A 类查 `presets/`、B 类查 `presets/dist/`。
     #[test]
-    fn audit_only_checks_the_delivery_set() {
+    fn audit_requires_every_registered_path_to_exist() {
         let mut f = Fixture::load();
         let c = committed();
         let d = crate::workbench::domain::patch::Draft::default();
@@ -1144,32 +1296,55 @@ mod tests {
         f.presets.set_asset_root(asset_root.path());
         let book = Book::new(&f.presets, &c, &d);
 
-        let dist = tempfile::tempdir().unwrap();
-        write_content(dist.path(), asset_root.path(), &book).expect("资产落盘");
-        // 产物落点直接用交付集合给的名字（与 wb_generate 同一套命名）
-        for rel in deliverable_set(&book)
+        /*
+         * 造出**发布根**形状：`<root>/assets/…`（A 类，载荷根原地）+ `<root>/dist/…`。
+         * 新语义下 `audit_catalog` 按「发布根 + catalog.path」核 —— 所以要这样搭。
+         */
+        let publish_root = tempfile::tempdir().unwrap();
+        let dist = publish_root.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        write_content(&dist, asset_root.path(), &book).expect("三份 JSON");
+        for rel in dist_expected_set(&book)
             .iter()
             .filter(|p| p.starts_with("mkp/presets/"))
         {
-            crate::fsx::atomic::atomic_write(
-                &dist.path().join(rel),
-                format!("# preset {rel}").as_bytes(),
-            )
-            .unwrap();
+            crate::fsx::atomic::atomic_write(&dist.join(rel), format!("# preset {rel}").as_bytes())
+                .unwrap();
         }
-        write_catalog_json(dist.path(), &book).expect("目录重算");
+        write_catalog_json(&dist, &book).expect("目录重算");
 
-        // 交付集合内都对得上 → 过（目录里还登记着"登记但不发"的那些，跳过）
-        assert!(audit_catalog(dist.path(), &book).is_ok());
+        // A 类「实体」在发布根里 —— 把载荷根的内容摆过去（它就是原地交付的那份）
+        let assets_on_publish_root = publish_root.path().join("assets");
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            let dst = publish_root.path().join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+        }
+        let _ = assets_on_publish_root;
 
-        // 拖一份**交付集合内**的字节 → 抓到，且说得出是哪一份
-        let rel = deliverable_set(&book)
+        // 每一条登记都取得到 → 过
+        assert!(
+            audit_catalog(&dist, &book).is_ok(),
+            "全齐时该过：{:?}",
+            audit_catalog(&dist, &book)
+        );
+
+        // 把发布根里**某一条 A 类资产**删掉 → 必须抓到（这就是 0.2mm 那种形状）
+        let victim = referenced_assets(&book)
             .into_iter()
-            .find(|p| p.starts_with("mkp/bbs/"))
-            .expect("夹具有一条 BBS 在交付集合里");
-        crate::fsx::atomic::atomic_write(&dist.path().join(&rel), "# 被动过".as_bytes()).unwrap();
-        let err = audit_catalog(dist.path(), &book).unwrap_err();
-        assert!(err.contains(&rel) && err.contains("目录记"), "{}", err);
+            .find_map(|a| crate::runtime::catalog::dest_of_asset(&a))
+            .expect("夹具有一条 A 类资产");
+        std::fs::remove_file(publish_root.path().join(&victim)).unwrap();
+        let err = audit_catalog(&dist, &book).unwrap_err();
+        assert!(
+            err.contains(&victim) && err.contains("取不到"),
+            "登记了却取不到必须报出来：{err}"
+        );
     }
 
     /* ---------- 发布（b05 Task 13） ---------- */
@@ -1203,17 +1378,18 @@ mod tests {
         // 交付集合（13.1）：content 3 + manifest + catalog.json + source.json +
         // 夹具资产 3 + mkp 产物 3。夹具可达集有 4 条，`a1-image` 是 image 类 ——
         // **不登记进交付**（整机图那条规则）
-        let expected = deliverable_set(&book);
+        // dist 面（2026-10-04 起**不含 A 类资产** —— 它们原地交付）
+        let expected = dist_expected_set(&book);
         assert_eq!(
             expected.len(),
-            12,
-            "content 3 + manifest 1 + catalog.json 1 + source.json 1 + assets 3（image 类不进）+ mkp 3"
+            9,
+            "content 3 + manifest 1 + catalog.json 1 + source.json 1 + mkp 产物 3 = 9\
+             （A 类不在 dist 面：它原地住在发布根的 assets/ 下）"
         );
         assert!(expected.contains("mkp/presets/A1-standard.toml"));
-        assert!(expected.contains("mkp/bbs/A1/process.json"));
         assert!(
-            !expected.iter().any(|p| p.contains("printers/")),
-            "整机图（image 类）不进交付集合：{expected:?}"
+            !expected.iter().any(|p| p.starts_with("assets/")),
+            "A 类资产不进 dist 面：{expected:?}"
         );
         assert!(
             expected.contains(NEW_CATALOG_FILE),
@@ -1224,46 +1400,58 @@ mod tests {
             "Bootstrap（source.json）在交付集合里"
         );
 
-        let dist = tempfile::tempdir().unwrap();
+        // ★ 发布根形状：`<publish_root>/dist`（发布物）+ `<publish_root>/assets`（A 类原地）
+        let publish_root = tempfile::tempdir().unwrap();
+        let dist = publish_root.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            let dst = publish_root.path().join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+        }
         // 夹具三版的 mkp 产物（wb_generate 的等价物：文件在，内容任意）；
         // 落点就是 `wb_generate` 落的那一格
         for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
             crate::fsx::atomic::atomic_write(
-                &dist.path().join(MKP_PRESETS_DIR).join(name),
+                &dist.join(MKP_PRESETS_DIR).join(name),
                 format!("# preset {name}").as_bytes(),
             )
             .unwrap();
         }
 
         // **残留拦截**（13.4）：放一个不在集合内的文件 → 中止，且不写任何东西
-        crate::fsx::atomic::atomic_write(&dist.path().join("stale.json"), b"old").unwrap();
+        crate::fsx::atomic::atomic_write(&dist.join("stale.json"), b"old").unwrap();
         let meta = PublishMeta {
             stamp: "2026-09-24T00:00:00Z".to_owned(),
             channel: "stable".to_owned(),
-            minimum_client: String::new(),
             version: String::new(),
         };
-        let err = publish_into(dist.path(), asset_root.path(), &book, &meta)
-            .expect_err("有残留必须中止发布");
+        let err =
+            publish_into(&dist, asset_root.path(), &book, &meta).expect_err("有残留必须中止发布");
         assert!(err.message.contains("残留"), "实测：{}", err.message);
         assert!(
             err.detail.unwrap_or_default().contains("stale.json"),
             "要列出残留是哪个文件"
         );
-        assert!(!dist.path().join("manifest.json").exists(), "不写 manifest");
+        assert!(!dist.join("manifest.json").exists(), "不写 manifest");
         assert_eq!(
-            std::fs::read(dist.path().join("stale.json")).unwrap(),
+            std::fs::read(dist.join("stale.json")).unwrap(),
             b"old",
             "中止发布时一个字节都不该动"
         );
 
         // **清理残留**（13.5）：进回收站（保留相对路径），不直接删
         let trash = tempfile::tempdir().unwrap();
-        let strays = scan_strays(dist.path(), &expected);
+        let strays = scan_strays(&dist, &expected);
         assert_eq!(strays, vec!["stale.json"]);
-        let moved = clean_strays(dist.path(), &strays, trash.path(), "20260924").unwrap();
+        let moved = clean_strays(&dist, &strays, trash.path(), "20260924").unwrap();
         assert_eq!(moved, 1);
-        assert!(!dist.path().join("stale.json").exists());
+        assert!(!dist.join("stale.json").exists());
         assert_eq!(
             std::fs::read(trash.path().join("dist/20260924/stale.json")).unwrap(),
             b"old",
@@ -1272,12 +1460,12 @@ mod tests {
 
         // **重发成功**：manifest v3、无 bundles 字段（第二份套餐列表删掉了）、
         // 条目 = mkp 3 + 资产 3（可达 4 条里 image 类不进）
-        let out = publish_into(dist.path(), asset_root.path(), &book, &meta).expect("发布");
+        let out = publish_into(&dist, asset_root.path(), &book, &meta).expect("发布");
         assert_eq!(out.presets, 3);
         assert_eq!(out.assets_copied, 3);
         assert_eq!(out.files, 6);
 
-        let manifest_text = std::fs::read_to_string(dist.path().join("manifest.json")).unwrap();
+        let manifest_text = std::fs::read_to_string(dist.join("manifest.json")).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
         assert_eq!(manifest["manifestVersion"], 3, "结构变了就升版本");
         assert!(
@@ -1288,7 +1476,7 @@ mod tests {
         // **新世界目录**：与客户端同 schema、指纹非空、条目 = 有产物的版本；
         // 内容字节的 SHA 与 dist 里真实字节一致（消费端将来拿它当校验期望值）
         let new_catalog = crate::runtime::Catalog::parse(
-            &std::fs::read(dist.path().join(NEW_CATALOG_FILE)).expect("catalog.json 该被写出"),
+            &std::fs::read(dist.join(NEW_CATALOG_FILE)).expect("catalog.json 该被写出"),
         )
         .expect("发布产出的 catalog.json 必须是合法目录");
         assert_eq!(
@@ -1303,14 +1491,17 @@ mod tests {
              夹具载荷根里也没造它的文件，两条 image 类不登记"
         );
         for f in &new_catalog.files {
-            // 按**目录登记的 path** 去盘上取（不是按 file_name 拼）——
-            // 客户端就是这么取的：数据源地址 + path。拼错方向在这条上就红
-            let bytes = std::fs::read(dist.path().join(&f.path))
-                .unwrap_or_else(|e| panic!("目录登记了 {}，盘上没有：{e}", f.path));
+            /*
+             * 按目录登记的 path 去**发布根**取（不是按 file_name 拼，也不在 dist 里找）——
+             * 客户端就是这么取的：数据源地址 + path。A 类在 `<发布根>/assets/`，
+             * B 类在 `<发布根>/dist/mkp/presets/` —— 同一套 path 语义，两个落点。
+             */
+            let bytes = std::fs::read(publish_root.path().join(&f.path))
+                .unwrap_or_else(|e| panic!("目录登记了 {}，发布根上没有：{e}", f.path));
             use sha2::{Digest, Sha256};
             assert_eq!(
-                crate::runtime::catalog::hex(&Sha256::digest(&bytes)),
-                f.sha256
+                Some(crate::runtime::catalog::hex(&Sha256::digest(&bytes)).as_str()),
+                f.expected_sha()
             );
         }
 
@@ -1321,13 +1512,13 @@ mod tests {
         assert_eq!(assets.len(), 6);
         for a in assets {
             let rel = a["relativePath"].as_str().unwrap();
-            // 发布布局的锚点：每一份交付文件都落在 `mkp/…` 下（客户端下载区的形状）
+            // 发布布局的锚点：相对**发布根**（A 类 `assets/…`、B 类 `dist/mkp/presets/…`）
             assert!(
-                rel.starts_with(&format!("{MKP_DIR}/")),
-                "交付文件必须在 mkp/ 下：{rel}"
+                rel.starts_with("assets/") || rel.starts_with("dist/"),
+                "交付文件的 relativePath 是发布根相对的：{rel}"
             );
-            let p = dist.path().join(rel);
-            let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} 不在交付目录", a["id"]));
+            let p = publish_root.path().join(rel);
+            let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} 不在发布根", a["id"]));
             let h = format!("{:x}", Sha256::digest(&bytes));
             assert_eq!(a["sha256"], h, "{} 的哈希与真实字节不符", a["id"]);
             assert_eq!(a["size"], bytes.len() as u64);
@@ -1345,11 +1536,11 @@ mod tests {
         }
 
         let mut actual: Vec<PathBuf> = Vec::new();
-        collect_files(dist.path(), &mut actual);
+        collect_files(&dist, &mut actual);
         let mut actual_rel: Vec<String> = actual
             .iter()
             .map(|p| {
-                p.strip_prefix(dist.path())
+                p.strip_prefix(&dist)
                     .unwrap()
                     .to_string_lossy()
                     .replace('\\', "/")
@@ -1362,14 +1553,22 @@ mod tests {
             })
             .collect();
         actual_rel.sort();
+        /*
+         * 只比 **dist 面**（B 类）：manifest 里的 A 类条目相对发布根是 `assets/…`，
+         * 而 dist 里本来就没有它们 —— 拿整个 manifest 去比会误判。
+         */
         let mut listed: Vec<String> = assets
             .iter()
             .map(|a| a["relativePath"].as_str().unwrap().to_owned())
+            // B 类的 relativePath 是 `dist/mkp/presets/…`（发布根相对），
+            // 比的是 dist 面 ⇒ 去掉 `dist/` 那一段再比
+            .filter(|rel| rel.starts_with("dist/"))
+            .map(|rel| rel["dist/".len()..].to_owned())
             .collect();
         listed.sort();
         assert_eq!(
             actual_rel, listed,
-            "交付目录里的文件与 manifest 条目必须一一对应"
+            "交付目录里的文件与 manifest 的 dist 面条目必须一一对应"
         );
     }
 
@@ -1402,14 +1601,13 @@ mod tests {
         let d = crate::workbench::domain::patch::Draft::default();
         let book = Book::new(&real, &c, &d);
 
-        let expected = deliverable_set(&book);
-        // 反空转锚点：content 3 + manifest 1 + catalog.json 1 + source.json 1 + 资产 8
-        // + mkp 9（五台机型全部有套餐）= 23
+        let expected = dist_expected_set(&book);
+        // 反空转锚点（2026-10-04 改口径后）：content 3 + manifest 1 + catalog.json 1
+        // + source.json 1 + mkp 9（五台机型全部有套餐）= 15 —— **A 类资产不在 dist 面**
         assert_eq!(
             expected.len(),
-            23,
-            "交付集合条数变了 —— 说清为什么（整机图剥离台账后资产从 11 条降到 8 条；\
-             第十七刀起多一份 Bootstrap source.json）"
+            15,
+            "dist 面条数变了 —— 说清为什么（裁决 C/甲后 A 类资产原地交付，不再进 dist）"
         );
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
         // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状
@@ -1441,17 +1639,9 @@ mod tests {
             9,
             "9 版都有套餐 → 9 份 mkp 产物，少一条说明集合在空转"
         );
-        assert_eq!(
-            expected
-                .iter()
-                .filter(|p| p.starts_with("mkp/bbs/"))
-                .count(),
-            5,
-            "BBS 进交付的只有套餐引用的 5 条"
-        );
         assert!(
-            !expected.iter().any(|p| p.contains("models/")),
-            "模型没被引用，不进交付（13.2）"
+            !expected.iter().any(|p| p.starts_with("assets/")),
+            "★ A 类资产（BBS / 模型 / 图标）不进 dist 面 —— 原地交付（裁决 C/甲）"
         );
 
         // 空目录零残留（还没发布过是正常状态，不是错误）
@@ -1464,10 +1654,15 @@ mod tests {
     /// 这条是这一刀要防的那种错：发布侧曾经自己拼一套（`assets/<载荷 path>` +
     /// `presets/mkp/<名字>`），而客户端认的落点是 `mkp/<kind 目录>/…` ——
     /// **URL 拼得上、落点对不上**：上传成功、用户点了下载却 404，
-    /// 而且两边各自"看着都对"。所以判据不做字符串锚点，直接对真字节：
+    /// 而且两边各自"看着都对"。所以判据不做字符串锚点，直接对真字节。
     ///
-    /// - 目录登记的每个相对位置，盘上真有那份文件，且大小 / SHA 一致；
-    /// - 反过来，写盘面与登记面**逐一对应**（没有登记了没写的，也没有写了没登记的）。
+    /// ★ 2026-10-04 裁决 C/甲之后，**"写盘面"这一半改了意思**：
+    /// A 类资产**原地交付**（`presets/assets/…` 就是它唯一的实体），`write_content`
+    /// 只体检不复制 —— 于是 dist 里除三份目录 JSON 外**零交付文件**，而"登记面"
+    /// 的每一条都在 `发布根 + catalog.path` 处取得到真字节。两半都钉住：
+    ///
+    /// - dist 里不该出现任何 A 类副本（复制 = 同一份字节两个真相）；
+    /// - 目录登记的每一条，在发布根下真有那份文件、SHA / 大小与登记一致。
     #[test]
     fn the_published_layout_lands_where_the_catalog_says() {
         let Some(root) = crate::workbench::paths::presets_root() else {
@@ -1523,36 +1718,50 @@ mod tests {
             .collect();
         written.sort();
 
-        // 反空转：真数据里进交付的是 8 条资产（图标 3 + BBS 5）—— 整机图不在其中
-        assert_eq!(
-            written.len(),
-            8,
-            "写盘面该是 8 条资产（图标 3 + BBS 5）：{written:?}"
-        );
+        // ★ **A 类一个字节都不进 dist**：它原地住在发布根的 `assets/` 下
+        // （这里是 `write_content` 之后 —— 它只体检、不复制）
         assert!(
-            written
-                .iter()
-                .all(|p| p.starts_with(&format!("{MKP_DIR}/"))),
-            "交付文件都该落在 mkp/ 下：{written:?}"
+            written.is_empty(),
+            "A 类资产原地交付，dist 里一条副本都不该有：{written:?}"
         );
 
-        // **本条判据的核心**：盘上每一份文件，说明书里都按同一个相对路径登记着，
+        /*
+         * **发布根** = 资产载荷根的上一级（`presets/assets` 往上一级就是 `presets/`）。
+         * A 类原地交付，所以 `发布根 + catalog.path` 正好是载荷根里那份真文件 ——
+         * 与客户端 `baseUrl + path` 取的是同一处。
+         */
+        let publish_root = asset_root
+            .parent()
+            .expect("资产载荷根必有父目录（发布根 presets/）");
+        assert!(
+            publish_root.join("assets").is_dir(),
+            "发布根下就该有 assets/ 那一层：{}",
+            publish_root.display()
+        );
+
+        // **本条判据的核心**：目录登记的每一条，在发布根下都取得到，
         // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
-        let registered: std::collections::HashMap<&str, &crate::runtime::catalog::CatalogFile> =
-            catalog.files.iter().map(|f| (f.path.as_str(), f)).collect();
         assert_eq!(
             catalog.files.len(),
             15,
-            "反空转：说明书登记台账全部 15 条（9 BBS + 3 图标 + 3 模型），交付只发可达的 8 条"
+            "反空转：说明书登记台账全部 15 条（9 BBS + 3 图标 + 3 模型）；\
+             没跑 wb_generate 所以没有 mkp 产物条目（宽松构建跳过）"
         );
-        for rel in &written {
-            let f = registered
-                .get(rel.as_str())
-                .unwrap_or_else(|| panic!("交付了 {rel}，说明书里却没有登记"));
-            let bytes = std::fs::read(dist.path().join(rel))
-                .unwrap_or_else(|e| panic!("读不到 {rel}: {e}"));
-            assert_eq!(bytes.len() as u64, f.size, "{rel} 的大小");
-            assert_eq!(sha256_of(&bytes), f.sha256, "{rel} 的 SHA");
+        for f in &catalog.files {
+            let bytes = std::fs::read(publish_root.join(&f.path))
+                .unwrap_or_else(|e| panic!("目录登记了 {}，发布根上取不到：{e}", f.path));
+            assert_eq!(
+                Some(bytes.len() as u64),
+                f.expected_size(),
+                "{} 的大小",
+                f.path
+            );
+            assert_eq!(
+                Some(sha256_of(&bytes).as_str()),
+                f.expected_sha(),
+                "{} 的 SHA",
+                f.path
+            );
         }
     }
 

@@ -70,6 +70,21 @@ pub struct Catalog {
     /// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
     /// 没下载就没有；下载了才出现在 `mkp/`）
     pub files: Vec<CatalogFile>,
+    /// **结构代次签名**（`runtime::structure`）——「这批数据是什么结构」的机器真值。
+    ///
+    /// 客户端拿它跟自己的 `SUPPORTED_SIGNATURES` 对：命中就说明"这个构建有读懂它的
+    /// 代码"，**不看版本号**（Dev 场景：安装包还没发出去也不该把自己锁死）。
+    ///
+    /// `#[serde(default)]` 是刻意的：老客户端读到这一格不认识也该照常解析（旧版的
+    /// 判断只剩 [`Catalog::min_client_version`] 那条路）。**不进 [`revision_of`]** ——
+    /// 它是结构的函数，内容不变它就不变，没理由惊动"检查更新"。
+    #[serde(default)]
+    pub structure_signature: String,
+    /// **最低正式客户端版本**（`presets/structure-signatures.toml` 里登记的）——
+    /// "读得懂这一代的最老那个正式版"。`None` = 规则表还没登记这一代
+    /// （发布闸会拦住，所以**发出去的目录里不会缺它**）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_client_version: Option<String>,
 }
 
 /// catalog 里 definition 的注册表部分：字段定义 + 分组元数据 + 参数摆放。
@@ -133,18 +148,34 @@ pub struct CatalogMachine {
     pub zones: Vec<crate::presetdata::Zone>,
 }
 
-/// 交付文件的**种类**（第三圈第一刀起不止一种）。
-///
-/// 这里的规矩是：**新增一种外部资源 = 加一个常量 + 一个落点目录**，不新增一套
-/// 存储体系、不新增一条下载路径。管道、校验、归档、进度全是既有的那些 ——
-/// "以后新增资源不再新增一套下载系统"就是靠这一处常量表成立的。
 /// 层①的资产载荷根（`presets/assets.toml` 里 `path` 的基准），相对仓库根。
 ///
-/// **它不是运行时数据**：这里是构建期算 SHA/大小的地方，与运行时的下载区(`mkp/`)是两回事。
-/// 2026-10-03 从 `public/assets` 搬到 `presets/assets`（作者：「在 assets 吧，到时候 3mf
-/// 也要放」—— 产品数据资源住一起；`public/` 那个资产目录之后退役）。
+/// **它不是运行时数据**：构建期从它读产物、算 SHA/大小。
+/// 2026-10-03 从 `public/assets` 搬来（产品数据资源住一起；`public/` 那个资产目录之后退役）。
 const REPO_ASSET_ROOT: &str = "presets/assets";
 
+/// **发布根**（`catalog.path` 的基准）—— 相对仓库根。
+///
+/// ★ 2026-10-04 定：**发布根 = `presets/`**。客户端 `baseUrl` 锚在 `source.json`
+/// 所在目录（`presets/dist/`），而 `catalog.path` 是相对发布根的 ——
+/// 两者拼起来正好是云端真实位置。
+pub(crate) const REPO_PUBLISH_ROOT: &str = "presets";
+
+/// 资产在发布根下的第一段目录名：`assets/<台账 path>`。
+///
+/// ★ **这一段不能省**：`baseUrl` = `.../presets/dist/`，A 类资产在 `.../presets/assets/` ——
+/// 兄弟目录，必须靠这个前缀跳到正确位置。见 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
+const ASSET_PREFIX: &str = "assets";
+
+/// B 类渲染产物（MKP 预设 TOML）在发布根下的目录：`dist/mkp/presets/`。
+///
+/// 与 [`ASSET_PREFIX`] 对称：A 类原地不动，B 类落在 `dist/` 里（它源里没有实体）。
+pub const PRESET_DEST_DIR: &str = "dist/mkp/presets";
+
+/// 交付文件的**种类**（第三圈第一刀起不止一种）。
+///
+/// 规矩：**新增一种外部资源 = 加一个常量 + 一个落点目录**，不新增存储体系、不新增下载路径。
+/// 管道、校验、归档、进度全是既有的那些。
 pub mod kind {
     /// MKP 预设（随软件发布的成品内容）
     pub const PRESET: &str = "mkp_preset";
@@ -156,83 +187,80 @@ pub mod kind {
     pub const ICON: &str = "icon";
 }
 
-/// 一种 kind 在下载区里的目录名。**下载区按种类分层，不按来源分层**
-///
-/// （同一个来源送来预设、BBS 配置和图标，落点也不混在一起：盘上的目录结构要能回答
-/// "这一格是干什么用的"，那是给人看的，也是给将来清理用的。）
-fn kind_dir(kind: &str) -> &'static str {
-    match kind {
-        kind::PRESET => "presets",
-        kind::BBS_CONFIG => "bbs",
-        kind::MODEL => "models",
-        kind::ICON => "icons",
-        _ => "other",
-    }
-}
-
 /// 资产台账里的类型 → 目录里的 kind。
 ///
-/// **返回 `None` 就是不登记**：那是**目录里没有落点**的类型（今天的 `Image` ——
-/// 下载区没有「图片」这一段）。注意判据是**类型**，不是交付档位：**`bundled` 档
-/// （整机图）照样走这一支**，只是被 [`dest_of_asset`] 在更早一步按档位拦掉
-/// （作者 2026-10-03：「不进云端但要在工作台看得见选得着」）。
+/// **返回 `None` 就是不登记**。今天两种：
+///
+/// - `Image`：图片**不进下载面**（整机图 / 品牌图都走 `bundled` 档随包，
+///   客户端靠构建期装配拿它们，不按 URL 取）；
+/// - `MkPreset`：MKP 预设的产物文件**已经**作为 `files` 条目进来了（B 类，
+///   生成侧算的，落点 `dist/mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
+///   再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）。
+///
+/// 注意判据是**类型**，不是交付档位：`bundled` 档照样走这一支，只是被
+/// [`dest_of_asset`] 在更早一步按档位拦掉。
 fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static str> {
     match asset_kind {
         crate::presetdata::AssetKind::SlicerProfile => Some(kind::BBS_CONFIG),
         crate::presetdata::AssetKind::Model => Some(kind::MODEL),
         crate::presetdata::AssetKind::Icon => Some(kind::ICON),
         crate::presetdata::AssetKind::Image => None,
-        // MKP 预设的产物文件**已经**作为 catalog 的 files 条目进来了（生成侧算的，
-        // 命名规则落点 `mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
-        // 再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）
         crate::presetdata::AssetKind::MkPreset => None,
     }
 }
 
-/// 资产的落点：`mkp/<kind 目录>/<资产在载荷根里的相对路径去掉类型前缀>`。
+/// 资产在**发布根**下的相对路径：`assets/<台账 path>`。
 ///
-/// 资产在仓库里是 `bbs/Process/0.2mm/….json`（前缀与 kind 目录同名），落到下载区
-/// 就是 `mkp/bbs/Process/0.2mm/….json` —— **目录名换了个基准，相对形状没变**，
-/// 将来工作台发布那边按同一形状产出，两边就自然对得上。
-fn asset_dest(kind: &str, asset_path: &str) -> String {
-    let rest = asset_path
-        .split_once('/')
-        .map(|(_, tail)| tail)
-        .unwrap_or(asset_path);
-    format!("mkp/{}/{rest}", kind_dir(kind))
+/// # 唯一路径语义（2026-10-04 作者裁决 C，**甲**）
+///
+/// 这一个值同时是**三件事**，没有第二套路由规则：
+///
+/// ```text
+/// catalog.path │
+///              ├─ 云端取哪：  <publish-root>/assets/…      （Git 仓库里的真实位置）
+///              └─ 本地放哪：  <appDataDir>/assets/…        （下载落点，同一相对路径）
+/// ```
+///
+/// **它不再按 kind 猜目录**。以前是 `mkp/<kind 目录>/<去掉类型前缀>` —— 那让
+/// 同一份字节在云端与本地各有一套算法，任何目录调整都得改两处。现在台账 `path`
+/// 的基准是**资产载荷根**（`presets/assets/`），而载荷根相对发布根就是 `assets/`，
+/// 所以只补这一段前缀，形状原样保留。
+///
+/// ★ `assets/` 这一段不能省：客户端 `baseUrl` 锚在 `source.json` 所在目录
+/// （`presets/dist/`），而 A 类资产在 `presets/assets/` —— 兄弟目录，故必须带
+/// `assets/` 才拼得对。见 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
+fn asset_dest(asset_path: &str) -> String {
+    format!("{ASSET_PREFIX}/{asset_path}")
 }
 
-/// 一条资产在**下载区 / 交付根**的落点：`mkp/<kind 目录>/…`。
+/// 一条资产在**发布根 / 客户端内部根**下的落点：`assets/<台账 path>`。
 ///
-/// **两端共用这一处算法**（2026-10-02）——这是"发布方与消费方说同一种语言"的落点那半句：
-///
-/// - 客户端：拿它算 [`CatalogFile::path`]，下载地址 = 数据源地址 + 它；
-/// - 工作台发布：拿它算这条资产该复制到交付根的哪个相对位置（`dist/mkp/…`）。
-///
-/// 两套拼接一定会漂，而漂的表现是「URL 拼得上、落点却对不上」——上传成功了、
-/// 客户端也点了下载，文件落到别的目录，或者根本 404。所以在发布侧调用这一处，
-/// 不自己 `format!` 一遍。
+/// **两端共用这一处算法**（客户端拼 URL 与落点、工作台发布复制）。
 ///
 /// 返回 `None` = 这一份**不进交付集合**（客户端不会去 URL 取它）。两种情形：
 ///
 /// 1. **交付档位是 `bundled`**（作者 2026-10-03）—— 台账里登记、工作台可管，
-///    但它**随程序包带进客户端、不下载不更新**（整机图）。这是主路径。
-/// 2. **类型在下载区没有落点**（今天的 `Image`）—— 目录里没有「图片」这一段。
-///
-/// 判据是**档位**而不是「台账里不该有它」：2026-10-01 第三刀曾把整机图从台账剥离、
-/// 搬进客户端源码，作者 2026-10-03 判为**错**（「不会编程的用户改不了图」）——
-/// 今天它回到台账，用 `bundled` 档表达「不进云端但在工作台可管」。
+///    但它**随程序包带进客户端、不下载不更新**（整机图 / 品牌图）。这是主路径。
+/// 2. **类型在下载面没有落点**（今天的 `Image`，与上一条重叠但判据不同）。
 pub fn dest_of_asset(asset: &crate::presetdata::Asset) -> Option<String> {
     if asset.delivery == crate::presetdata::assets::Delivery::Bundled {
         return None;
     }
-    kind_of_asset(asset.kind).map(|kind| asset_dest(kind, &asset.path))
+    kind_of_asset(asset.kind).map(|_| asset_dest(&asset.path))
 }
 
-/// 一份交付文件。`path` 是相对**内部根**的落点 —— 下载它就该落到那（铁律 3：
-/// 没下载就没有；下载了才出现在 `mkp/`）。
+/// 一份交付文件的**身份与落点**：有这一份、它叫什么、下载它该落到哪。
 ///
-/// 落点形状统一为 `mkp/<kind 目录>/…`。
+/// # 期望值是可选的（2026-10-04）
+///
+/// `sha256` / `size` 只在**发布侧**登记（工作台对 `dist/` 真字节算 —— 远端目录是下载
+/// 校验的权威）。**随包 bootstrap 目录不登记它们**：交付产物的字节不在这一侧，
+/// 拿构建用 TOML 算出来的 SHA 只是自找不同步（它会落后于云端、把下载判成 `SHA_MISMATCH`）。
+///
+/// `None` = "这一侧不该为它背书"，与 `Some` 的"这是权威期望值"是两回事，类型上分得开。
+/// 详见总纲 §1③「catalog 的一生：bootstrap → OTA → 当前」。
+///
+/// `path` 是相对**内部根**的落点（铁律 3），形状统一为 `mkp/<kind 目录>/…`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogFile {
@@ -243,9 +271,24 @@ pub struct CatalogFile {
     /// 归属机型。**非预设类的资产没有版本概念时为空串**（空串 = 不适用，不是"没查出来"）
     pub machine_id: String,
     pub version_id: String,
-    /// 对**交付产物真字节**算的 —— 不是对源 TOML。下载后的校验（产品规则 §10）拿它当期望值
-    pub sha256: String,
-    pub size: u64,
+    /// 交付产物真字节的期望值（产品规则 §10 的校验用它）。`None` = 这一侧不登记
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+impl CatalogFile {
+    /// 下载校验的期望值。`None` **不是"校验通过"**，是"这份期望值不在这一侧"——
+    /// 调用方据此跳过字节校验，交给 OTA 目录生效后的那次下载。
+    pub fn expected_sha(&self) -> Option<&str> {
+        self.sha256.as_deref()
+    }
+
+    /// 期望大小（也当下载水位用）。`None` = 这一侧不知道，不设上限
+    pub fn expected_size(&self) -> Option<u64> {
+        self.size
+    }
 }
 
 impl Catalog {
@@ -278,7 +321,8 @@ impl Catalog {
     /// 每个机型版本都必须配齐产物，缺一份就失败 —— 宁可红着，不让目录里出现
     /// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
     pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
-        let mut presets = crate::presetdata::Presets::load_from(&repo_root.join("presets"))?;
+        let mut presets =
+            crate::presetdata::Presets::load_from(&repo_root.join(REPO_PUBLISH_ROOT))?;
         // 资产载荷根（`presets/assets.toml` 里 `path` 的基准）。**只有构建期有仓库时才给得出** ——
         // 用户机器上那份定义还在，但载荷没有：那种时候资产一律表现为"还没下载"，
         // catalog 里登记的是"应该有这些文件"，不是"这些文件已经在了"。
@@ -288,18 +332,42 @@ impl Catalog {
             .join("preset")
             .join("assets")
             .join("presets");
-        Self::build_from_presets(&presets, &assets)
+        /*
+         * **随包 bootstrap 目录：不读交付产物字节、不算 SHA**（2026-10-04）。
+         *
+         * `artifacts_dir`（`crates/preset/assets/presets/`）是构建用 TOML，不是客户端内置的
+         * 最终资源（`mkp/` 初始为空是铁律 3）。以前拿它的真字节算 SHA 写进随包目录，
+         * 那份期望值注定与云端不同步、下载必 `SHA_MISMATCH`。
+         *
+         * 于是走 `FileHashes::None`：条目照出（`get_version_files` 要用），`sha256`/`size`
+         * 留 `None` —— 期望值归 OTA 目录。产物存在性另有判据守着（`gen-presets --check`）。
+         */
+        let (catalog, missing) = Self::collect(&presets, &assets, FileHashes::None);
+        if let Some(first) = missing.first() {
+            return Err(AppError::not_found(format!(
+                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            )));
+        }
+        // 随包那份也要带「最低正式客户端版本」—— 客户端首启释放的就是它。
+        // 查不到就留空：这一层不裁决"能不能发"（那是发布闸 ⑫ 的事）。
+        let rules = crate::runtime::structure::RuleTable::load_from_repo(repo_root)?;
+        let mut catalog = catalog.finalize();
+        catalog.apply_min_client(&rules);
+        Ok(catalog)
     }
 
-    /// 从**已加载的预设源 + 一个产物目录**构建。这是两端共用的构建本体：
-    /// - 安装包侧（[`Catalog::build_from_repo`]）：产物目录 = 入库产物，**严格**——缺一份就失败；
+    /// 从**已加载的预设源 + 一个产物目录**构建（**发布侧**语义）。
+    ///
+    /// - 安装包侧已改走 [`Catalog::build_from_repo`]（随包 bootstrap 目录，不算 SHA）；
     /// - 发布侧（工作台 `wb_publish`）：产物目录 = `dist/mkp/presets`（与客户端落点同形），
     ///   **宽松**——没有产物的版本是合法状态（交付集合本来就不含它），跳过。
+    ///
+    /// 保留这个严格版是**给手工/未来的严格发布**用；当前工作台只调宽松版。
     pub fn build_from_presets(
         presets: &crate::presetdata::Presets,
         artifacts_dir: &Path,
     ) -> Result<Catalog, AppError> {
-        let (catalog, missing) = Self::collect(presets, artifacts_dir);
+        let (catalog, missing) = Self::collect(presets, artifacts_dir, FileHashes::FromArtifacts);
         if let Some(first) = missing.first() {
             return Err(AppError::not_found(format!(
                 "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
@@ -308,12 +376,14 @@ impl Catalog {
         Ok(catalog.finalize())
     }
 
-    /// 宽松版：没有产物的版本合法，只登记真实存在的产物。工作台发布 `dist/catalog.json` 用它
+    /// 宽松版：没有产物的版本合法，只登记真实存在的产物。工作台发布 `dist/catalog.json` 用它。
+    ///
+    /// **对真字节算 SHA**（发布侧是期望值的权威）。
     pub fn build_from_presets_lenient(
         presets: &crate::presetdata::Presets,
         artifacts_dir: &Path,
     ) -> Catalog {
-        let (catalog, _) = Self::collect(presets, artifacts_dir);
+        let (catalog, _) = Self::collect(presets, artifacts_dir, FileHashes::FromArtifacts);
         catalog.finalize()
     }
 
@@ -322,9 +392,13 @@ impl Catalog {
     /// definition 直接从已加载的 [`crate::presetdata::Presets`] 抄——那里是**加载期校验过**
     /// 的定义（id 唯一、引用落地、布局双射），catalog 不做第二次校验：同一份数据两套门禁,
     /// 就会有两套不同的答案。
+    ///
+    /// [`FileHashes`] 说**交付文件的期望值这一侧该不该算**：发布侧对真字节算
+    /// （`FromArtifacts`），随包 bootstrap 侧不算（`None`）。见 [`CatalogFile`] 的说明。
     fn collect(
         presets: &crate::presetdata::Presets,
         artifacts_dir: &Path,
+        hashes: FileHashes,
     ) -> (Catalog, Vec<String>) {
         // 品牌显示名：机型文件里写的是 id，给人看的是 brands.toml 里的名字（与 get_machines 同一条）
         let brands: std::collections::HashMap<&str, &str> = presets
@@ -369,18 +443,21 @@ impl Catalog {
 
             for v in &m.versions {
                 let file_name = crate::presetdata::mkp_file_name(&m.id, &v.id);
-                let Ok(bytes) = std::fs::read(artifacts_dir.join(&file_name)) else {
-                    missing.push(format!("{} / {}（{}）", m.id, v.id, file_name));
-                    continue;
+                let (sha256, size) = match file_read(artifacts_dir, &file_name, hashes) {
+                    Ok(hit) => hit,
+                    Err(e) => {
+                        missing.push(format!("{} / {}（{}）", m.id, v.id, e));
+                        continue;
+                    }
                 };
                 files.push(CatalogFile {
                     kind: kind::PRESET.to_owned(),
-                    path: format!("mkp/{}/{}", kind_dir(kind::PRESET), file_name),
+                    path: format!("{PRESET_DEST_DIR}/{file_name}"),
                     file_name,
                     machine_id: m.id.clone(),
                     version_id: v.id.clone(),
-                    sha256: hex(&Sha256::digest(&bytes)),
-                    size: bytes.len() as u64,
+                    sha256,
+                    size,
                 });
             }
         }
@@ -399,10 +476,6 @@ impl Catalog {
                 ));
                 continue;
             };
-            let Ok(bytes) = std::fs::read(&full) else {
-                missing.push(format!("资产 {}（{}）：载荷文件不在", asset.id, asset.path));
-                continue;
-            };
             let Some(file_name) = Path::new(&asset.path)
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -413,14 +486,26 @@ impl Catalog {
                 ));
                 continue;
             };
+            let (sha256, size) = match hashes {
+                // 发布侧：对载荷真字节算期望值
+                FileHashes::FromArtifacts => match std::fs::read(&full) {
+                    Ok(bytes) => (Some(hex(&Sha256::digest(&bytes))), Some(bytes.len() as u64)),
+                    Err(_) => {
+                        missing.push(format!("资产 {}（{}）：载荷文件不在", asset.id, asset.path));
+                        continue;
+                    }
+                },
+                // 随包侧：不算 —— 期望值归 OTA 目录（见 [`CatalogFile`]）
+                FileHashes::None => (None, None),
+            };
             files.push(CatalogFile {
                 kind: kind.to_owned(),
-                path: asset_dest(kind, &asset.path),
+                path: asset_dest(&asset.path),
                 file_name,
                 machine_id: asset.machine_id.clone().unwrap_or_default(),
                 version_id: String::new(),
-                sha256: hex(&Sha256::digest(&bytes)),
-                size: bytes.len() as u64,
+                sha256,
+                size,
             });
         }
 
@@ -439,16 +524,34 @@ impl Catalog {
                 },
                 plates: presets.catalog.plates().cloned().collect(),
                 files,
+                // 两格都由 `finalize` 收口（签名从自己算；最低版本由发布侧查规则表填）
+                structure_signature: String::new(),
+                min_client_version: None,
             },
             missing,
         )
     }
 
-    /// 指纹收口。构建路径（严格/宽松）与将来的手工组装都从这里过——
-    /// revision 的算法只有这一处
+    /// 收口。构建路径（严格/宽松）与将来的手工组装都从这里过 ——
+    /// revision 与结构签名的算法各只有这一处。
+    ///
+    /// 签名的样本是**自己**（`to_value(&self)`）而不是随包那份：随包那份是上一代的
+    /// 产物，拿它算出来的是上一代的结构 —— 那正好会漏掉"这一次改了结构"。
+    /// 自指没问题：`structureSignature` 有 `#[serde(default)]`，它进不了必填清单。
     pub(crate) fn finalize(mut self) -> Catalog {
+        self.structure_signature = crate::runtime::structure::signature_of_catalog(&self);
         self.revision = revision_of(&self);
         self
+    }
+
+    /// 把规则表登记的最低客户端版本填进来（发布侧与构建侧各调一次）。
+    ///
+    /// **查不到就留 `None`** —— 这一层不裁决"能不能发"，那是发布闸 ⑫ 的事。
+    /// 但发出去的目录不会缺它：闸红着就出不了门。
+    pub fn apply_min_client(&mut self, rules: &crate::runtime::structure::RuleTable) {
+        self.min_client_version = rules
+            .rule_of(&self.structure_signature)
+            .map(|r| r.min_client.clone());
     }
 
     /* ---------- 消费端的只读访问面（ipc/presets 的九条命令从这里出数） ---------- */
@@ -556,6 +659,37 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// 交付文件的期望值（`sha256` / `size`）这一侧该不该算。
+///
+/// 两个构建入口各选一边，见 [`CatalogFile`] 的长注释：
+/// - [`FileHashes::FromArtifacts`] —— 发布侧（产物就在手边，期望值的权威）；
+/// - [`FileHashes::None`] —— 随包 bootstrap 侧（产物不在这一侧，期望值归 OTA 目录）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileHashes {
+    FromArtifacts,
+    None,
+}
+
+/// 一份入库产物的 `(sha256, size)`：**算不算**由 [`FileHashes`] 定，
+/// **在不在**两种情况都要查（"版本在、文件没有"是静默的坑，两种目录都不许出现）。
+fn file_read(
+    dir: &Path,
+    file_name: &str,
+    hashes: FileHashes,
+) -> Result<(Option<String>, Option<u64>), String> {
+    match hashes {
+        FileHashes::FromArtifacts => match std::fs::read(dir.join(file_name)) {
+            Ok(bytes) => Ok((Some(hex(&Sha256::digest(&bytes))), Some(bytes.len() as u64))),
+            Err(_) => Err(file_name.to_owned()),
+        },
+        // 随包侧只确认存在性（不读字节）——期望值归 OTA 目录
+        FileHashes::None => match dir.join(file_name).exists() {
+            true => Ok((None, None)),
+            false => Err(file_name.to_owned()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,7 +717,7 @@ mod tests {
         );
         assert_eq!(catalog.revision.len(), 16, "指纹取 16 位");
 
-        // 预设：9 份，落点 mkp/presets/ 下
+        // 预设：9 份，落点 `dist/mkp/presets/` 下（发布根基准，B 类）
         let presets: Vec<&CatalogFile> = catalog
             .files
             .iter()
@@ -591,8 +725,10 @@ mod tests {
             .collect();
         assert_eq!(presets.len(), 9, "每个版本一份预设");
         assert!(
-            presets.iter().all(|f| f.path.starts_with("mkp/presets/")),
-            "预设一律落在 mkp/presets/ 下：{:?}",
+            presets
+                .iter()
+                .all(|f| f.path.starts_with(&format!("{PRESET_DEST_DIR}/"))),
+            "预设一律落在 {PRESET_DEST_DIR}/ 下：{:?}",
             presets.iter().map(|f| &f.path).collect::<Vec<_>>()
         );
 
@@ -615,14 +751,15 @@ mod tests {
             let got = catalog.files.iter().filter(|f| f.kind == want).count();
             assert_eq!(got, in_toml, "{want} 的条目数与资产台账对齐");
             assert!(got > 0, "{want} 这一类台账里确实有货");
+            // ★ 唯一路径语义（2026-10-04）：一律落在 `assets/<台账 path>` 下 ——
+            // 不再按 kind 分目录（那是第二套路由规则，已废）
             assert!(
                 catalog
                     .files
                     .iter()
                     .filter(|f| f.kind == want)
-                    .all(|f| f.path.starts_with(&format!("mkp/{}/", kind_dir(want)))),
-                "{want} 一律落在 mkp/{}/ 下",
-                kind_dir(want)
+                    .all(|f| f.path.starts_with(&format!("{ASSET_PREFIX}/"))),
+                "{want} 一律落在 {ASSET_PREFIX}/ 下（发布根基准）"
             );
         }
 
@@ -684,9 +821,27 @@ mod tests {
             .find(|f| f.machine_id == "A1" && f.version_id == "FASTV3.3")
             .expect("A1/FASTV3.3 该有交付产物");
         assert_eq!(a1_fast.file_name, "A1-fastv3.3.toml");
-        assert_eq!(a1_fast.path, "mkp/presets/A1-fastv3.3.toml");
-        assert_eq!(a1_fast.sha256.len(), 64, "SHA256 的 hex 长度");
-        assert!(a1_fast.size > 0);
+        assert_eq!(a1_fast.path, "dist/mkp/presets/A1-fastv3.3.toml");
+        /*
+         * ★ **随包 bootstrap 目录不登记交付文件期望值**（2026-10-04）。
+         *
+         * 这条以前断言 `sha256` 是 64 位 hex —— 那正是旧语义（拿构建用 TOML 的真字节
+         * 算 SHA 写进随包目录），于是那份期望值注定与云端不同步、下载必 `SHA_MISMATCH`。
+         * 现在 `build_from_repo` 走 `FileHashes::None`：条目照出（还给 `get_version_files`
+         * 用），但期望值留空，归 OTA 目录。判据反过来咬"没有期望值"。
+         */
+        assert!(
+            a1_fast.expected_sha().is_none() && a1_fast.expected_size().is_none(),
+            "随包 bootstrap 目录不许登记交付文件期望值：{a1_fast:?}"
+        );
+        // 但"有这一份 + 叫什么 + 落哪"三件事实都得对（去 SHA 不是去条目）
+        assert!(a1_fast.file_name.ends_with(".toml"));
+        // 落点是**发布根基准**（B 类渲染产物在 `dist/` 下），同时就是客户端内部落点
+        assert!(
+            a1_fast.path.starts_with(PRESET_DEST_DIR),
+            "B 类产物一律落在 {PRESET_DEST_DIR}/ 下：{}",
+            a1_fast.path
+        );
     }
 
     /// **打印板随 catalog 下发，机型的引用都能落地**（2026-10-02，③ 的判据）。
@@ -785,7 +940,11 @@ mod tests {
                 "文件名撞车：{}",
                 f.file_name
             );
-            assert!(f.path.starts_with("mkp/"), "落点必须在下载区里：{}", f.path);
+            assert!(
+                f.path.starts_with("assets/") || f.path.starts_with("dist/"),
+                "落点必须是发布根基准（assets/ 或 dist/）：{}",
+                f.path
+            );
             assert!(!f.path.contains(".."), "落点不许有 `..`：{}", f.path);
         }
         let mut paths = std::collections::HashSet::new();
@@ -794,32 +953,91 @@ mod tests {
         }
     }
 
-    /// **SHA 是对真字节算的**：目录里记的大小，必须等于盘上那个文件的大小。
-    /// 这条防的是"登记了但没读文件"（比如把 0 或者占位值写进去）—— 那会让
-    /// 下载后的校验永远对不上，而且错在最难查的地方。
+    /// **随包 bootstrap 目录：登记条目、不登记期望值**（2026-10-04 起）。
+    ///
+    /// 这条以前叫 `file_sizes_match_the_bytes_on_disk`，防的是"登记了 size/SHA 但没读
+    /// 文件"。现在随包侧**根本不登记** `size`/`sha256`（见 [`CatalogFile`]）——
+    /// 那条职责落到发布侧（工作台 `wb_publish` 对 `dist/` 真字节算）。
+    ///
+    /// 于是这条改成钉**去 SHA 之后仍成立的三件事**：
+    ///   ① 每一份交付文件都有条目（去 SHA ≠ 去条目）；
+    ///   ② 条目上 `size`/`sha256` 一律 `None`（随包侧不许编期望值）；
+    ///   ③ 条目的载荷**在盘上真的存在**（`crates/preset/assets/…`）——
+    ///      这条仍有价值：它防"目录列了一份没有的产物"，与 SHA 无关。
     #[test]
-    fn file_sizes_match_the_bytes_on_disk() {
+    fn bundled_catalog_lists_files_without_expecting_their_bytes() {
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
         let repo = repo_root();
 
-        // 资产类：按资产台账里的 `path` 回查盘上的真字节（文件名可能重名，路径不会）
         let source =
             crate::presetdata::Presets::load_from(&repo.join("presets")).expect("源读得出来");
         for f in catalog.files.iter().filter(|f| f.kind != kind::PRESET) {
+            assert!(
+                f.expected_sha().is_none() && f.expected_size().is_none(),
+                "随包侧不许登记期望值：{}",
+                f.file_name
+            );
             let asset = source
                 .assets
                 .items()
                 .iter()
-                .find(|a| asset_dest(kind_of_asset(a.kind).unwrap_or(""), &a.path) == f.path)
+                .find(|a| asset_dest(&a.path) == f.path)
                 .unwrap_or_else(|| panic!("{} 在资产台账里找不到", f.path));
+            /*
+             * ★ 「登记面 == 实体面」的核心判据：`catalog.path` 去掉 `assets/` 前缀就是
+             * 载荷根里的相对位置 —— 它必须真的在。发布侧那一半由
+             * `workbench::app::dist::audit_catalog` 与 `publish_into` 的收尾核对守着。
+             */
             let on_disk = repo.join(REPO_ASSET_ROOT).join(&asset.path);
-            let bytes = std::fs::read(&on_disk)
-                .unwrap_or_else(|e| panic!("载荷 {} 读不出来：{e}", on_disk.display()));
-            assert_eq!(bytes.len() as u64, f.size, "{} 的大小", f.file_name);
+            assert!(
+                on_disk.is_file(),
+                "目录列了这一份，载荷却不在：{}（{}）",
+                f.path,
+                on_disk.display()
+            );
             assert_eq!(
-                hex(&Sha256::digest(&bytes)),
-                f.sha256,
-                "{} 的 SHA",
+                f.path,
+                format!("{ASSET_PREFIX}/{}", asset.path),
+                "catalog.path 必须是「发布根基准」：assets/ + 台账 path"
+            );
+        }
+    }
+
+    /// **发布侧算真期望值**：产物在 `artifacts_dir` 里时，`sha256`/`size` 就是对真字节算的。
+    ///
+    /// 这条是上一条的镜像：随包侧不登记，发布侧**必须**登记（远端目录是下载期望值的权威）。
+    /// 两边都不登记 = 下载永远没有依据。
+    #[test]
+    fn published_catalog_expects_the_real_bytes() {
+        let repo = repo_root();
+        let presets =
+            crate::presetdata::Presets::load_from(&repo.join("presets")).expect("源读得出来");
+        let artifacts = repo
+            .join("crates")
+            .join("preset")
+            .join("assets")
+            .join("presets");
+        let catalog = Catalog::build_from_presets_lenient(&presets, &artifacts);
+
+        let mkp: Vec<&CatalogFile> = catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == kind::PRESET)
+            .collect();
+        assert!(!mkp.is_empty(), "发布侧该登记 MKP 交付文件");
+        for f in mkp {
+            let bytes = std::fs::read(artifacts.join(&f.file_name))
+                .unwrap_or_else(|e| panic!("产物 {} 读不出来：{e}", f.file_name));
+            assert_eq!(
+                f.expected_size(),
+                Some(bytes.len() as u64),
+                "{} 的大小",
+                f.file_name
+            );
+            assert_eq!(
+                f.expected_sha(),
+                Some(hex(&Sha256::digest(&bytes)).as_str()),
+                "{} 的 SHA 要对真字节算",
                 f.file_name
             );
         }
@@ -873,7 +1091,7 @@ mod tests {
 
         // 访问面：file_of 是 MKP 引用的唯一出处（不再按命名规则重算）
         let f = catalog.file_of("A1", "FASTV3.3").expect("file_of 要找得到");
-        assert_eq!(f.path, "mkp/presets/A1-fastv3.3.toml");
+        assert_eq!(f.path, "dist/mkp/presets/A1-fastv3.3.toml");
         assert!(catalog.file_of("A1", "NOPE").is_none());
     }
 
@@ -904,7 +1122,8 @@ mod tests {
         let b = Catalog::build_from_repo(&repo_root()).unwrap();
         assert_eq!(a.revision, b.revision, "同样的输入，指纹必须一样");
 
-        a.files[0].sha256 = "0".repeat(64);
+        // 交付文件的期望值变了 → 指纹得跟着变（发布侧换了一版产物就是这种情形）
+        a.files[0].sha256 = Some("0".repeat(64));
         a.revision = revision_of(&a);
         assert_ne!(a.revision, b.revision, "文件字节变了，指纹得跟着变");
 

@@ -27,12 +27,13 @@ const PRESETS_DIR: &str = "presets";
 /// 交付产物的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/dist/*`：
 /// 源与产物各占一层，一眼分得清哪个是手写的。
 pub(crate) const DIST_SUBDIR: &str = "dist";
-/// 交付根下的**产品资源区**：与客户端下载区 `mkp/` 同名同形（见 `app::dist` 模块头）。
+/// 交付根下的**产品资源区**：与客户端 `catalog.path` 里的那一段同名同形
+/// （B 类是 `dist/mkp/presets/…`，见 `app::dist` 模块头）。
 /// 住在 paths 是因为**读侧也要用**（生成状态兜底要 stat 磁盘上的产物），不能只让写侧认得。
 pub const MKP_DIR: &str = "mkp";
-/// MKP 产物在交付根里的子目录（对应客户端 `kind_dir(mkp_preset)` 那一格）
+/// MKP 产物在交付根里的子目录（**相对交付根**：`catalog.path` = `dist/` + 这一格）
 pub const MKP_PRESETS_DIR: &str = "mkp/presets";
-/// 资产根的名字（`public/` 下）。见 [`assets_root`]
+/// 资产根的名字（`presets/` 下）。见 [`assets_root`]
 const ASSET_DIR: &str = "assets";
 
 /// 开发源数据根下首次启动就建齐的子目录。**这份清单是唯一的** ——
@@ -110,11 +111,20 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// "还没搬过资产"要落成一个真实存在的空目录（`public/assets/.gitkeep` 占着），
 /// 而不是一个查不出来的状态。
 pub fn assets_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join(PRESETS_DIR).join(ASSET_DIR);
+    let root = assets_root_path();
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出资产目录：{}", root.display())).with_detail(e.to_string())
     })?;
     Ok(root)
+}
+
+/// 资产根的**只读**定位（不建目录）—— 判据与闸用它。
+///
+/// 与 [`dist_root_path`] 同一条理由：**读一件事不该顺手造出一个目录**。
+/// 发布闸明写「只读：不写盘」，所以它必须走这一条而不是 [`assets_root`]。
+/// 路径与 [`assets_root`] 同一处算出，不许第二处自拼。
+pub fn assets_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR).join(ASSET_DIR)
 }
 
 /// 预设数据的根：`<repo>/presets`。**唯一的预设真相源** ——

@@ -190,6 +190,9 @@ export const bridgeApi: MkpApi = {
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
+  /* ——— 软件更新（release.json）—— 与预设数据两条链 ——— */
+  getAppVersion: () => call('getAppVersion', 'get_app_version'),
+  checkSoftwareUpdate: () => call('checkSoftwareUpdate', 'check_software_update'),
 
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   copyToSlicer: () => notWired('copyToSlicer'),

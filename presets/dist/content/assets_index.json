@@ -5,7 +5,7 @@
       "type": "icon",
       "machineId": "A1",
       "name": "A1 图标",
-      "path": "mkp/icons/a1.svg",
+      "path": "assets/icons/a1.svg",
       "slicer": null,
       "profile": null
     },
@@ -14,7 +14,7 @@
       "type": "icon",
       "machineId": "A1_MINI",
       "name": "A1 mini 图标",
-      "path": "mkp/icons/a1_mini.svg",
+      "path": "assets/icons/a1_mini.svg",
       "slicer": null,
       "profile": null
     },
@@ -23,7 +23,7 @@
       "type": "icon",
       "machineId": "P1S",
       "name": "P1S 图标（P2S / X1C 共用）",
-      "path": "mkp/icons/p1s.svg",
+      "path": "assets/icons/p1s.svg",
       "slicer": null,
       "profile": null
     },
@@ -32,7 +32,7 @@
       "type": "slicerProfile",
       "machineId": "A1",
       "name": "A1：0.4 喷头 0.20 层高",
-      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -41,7 +41,7 @@
       "type": "slicerProfile",
       "machineId": "A1_MINI",
       "name": "A1 mini：0.4 喷头 0.20 层高",
-      "path": "mkp/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -50,7 +50,7 @@
       "type": "slicerProfile",
       "machineId": "P1S",
       "name": "P1S：0.4 喷头 0.24 层高",
-      "path": "mkp/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -59,7 +59,7 @@
       "type": "slicerProfile",
       "machineId": "P2S",
       "name": "P2S：0.4 喷头 0.24 层高",
-      "path": "mkp/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -68,7 +68,7 @@
       "type": "slicerProfile",
       "machineId": "X1C",
       "name": "X1C：0.4 喷头 0.24 层高",
-      "path": "mkp/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process"
     }

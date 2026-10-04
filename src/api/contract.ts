@@ -265,9 +265,10 @@ export interface FileRef {
   /** 界面上显示的文件名 */
   fileName: string
   /**
-   * 文件落点：MKP 预设相对**内部数据根**（'mkp/A1-fastv3.3.toml'，即下载区的登记落点）；
-   * 切片器配置相对**预设仓库根**（'presets/bbs/…'，前端按它拼内置资源 URL）。
-   * 前端只把它当标识/去重键用，不拿它拼本机路径。
+   * 文件落点 = **`catalog.path`**（唯一路径语义，2026-10-04）：
+   * MKP 预设是 `dist/mkp/presets/A1-fastv3.3.toml`、切片器配置是 `assets/bbs/…`，
+   * **同一串既是云端取哪、也是客户端放哪**。前端只把它当标识 / 去重键用，
+   * 不拿它拼本机路径、也不拿它拼 URL。
    */
   path: string
   /**
@@ -497,7 +498,7 @@ export interface UserPresetFile {
   stateDetail: string | null
   /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
   basedOn: BasedOn
-  /** 血统里记的来源（`mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
+  /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
   basedOnLabel: string | null
   /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */
   basedOnRelease: string | null
@@ -512,7 +513,7 @@ export interface UserPresetFile {
  * 它是"临时编辑"这条链的第一步（总纲 §1③）。**两条线**的第一步：
  *
  * ```text
- * 官方线   mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
+ * 官方线   dist/mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
  * 用户线   presets-mine/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
  * ```
  *
@@ -598,148 +599,6 @@ export interface MenuEntry {
 }
 
 /**
- * 客户端数据包的兼容性声明。**值初始留空。**
- *
- * `minClientVersion` 的具体数字要客户端先给一份兼容性清单，工作台**不许瞎填一个版本号** ——
- * 填了就等于对外承诺「这份数据在 x.y.z 以上都能用」，而没人验证过。
- * 所以它初始就是 `null`，空着时由 `checkRecipe()` 报一条**待办**（不是阻断），
- * 由 `getPublishIssues()` 报一条**阻断**（发布检查那一组，见下）。
- *
- * B04 补上了 `saveClientDataMeta` —— 有了写方法，那条永远填不上的待办才填得上。
- */
-export interface ClientDataMeta {
-  schemaVersion: number
-  /** 空 = 还没填。生成前会报一条待办，发布前是一条阻断 */
-  minClientVersion: string | null
-}
-
-/** 摊平后的一个机型 —— 客户端不做继承推导 */
-export interface ClientMachine {
-  id: string
-  display: string
-  brand: string
-  dimensions: MachineDimensions | null
-  versions: {
-    id: string
-    name: string
-    tag?: string
-    description?: string
-    /** 这个版本的袋子里装什么。已按套餐摊平成文件清单 */
-    files: FileRef[]
-    /**
-     * 这个版本的参数值 —— **已经三层算完的有效值**，键是参数注册表的稳定 key。
-     *
-     * 客户端**看不到机型基底这一层存在**：它拿到的就是「这个版本用什么值」，
-     * 没有 origin、没有 baseValue、没有「哪一层给的」。那些是后厨的账。
-     */
-    values: Record<string, string>
-    /** true = 暂不支持该机型或版本（配方本上有名字，资源一行没写） */
-    unsupported: boolean
-  }[]
-}
-
-/** 参数的**显示**元信息。不含继承规则、不含机型基底与版本覆盖 */
-export interface ClientFieldDef {
-  key: string
-  label: string
-  desc?: string
-  unit?: string
-  control: RecipeParam['control']
-  /**
-   * 控件形态的**原始**名字（A40 补）：`number` / `switch` / `segmented` / `select` / `gcode`。
-   *
-   * 为什么 `control` 之外还要这一栏：`control` 是**给画控件用的四档**
-   * （number / switch / choice / text），分段与下拉都并成 `choice`、而 G-code 落成 `text`。
-   * 客户端于是只能靠「只有 gcode 会落到 text」这个**巧合**反推 G-code —— 巧合不该是契约。
-   * 这一栏把注册表的原词带出来，客户端要细分（分段 vs 下拉、G-code 块）就有据可依。
-   */
-  uiComponent: string
-  /**
-   * 值**本身**的类型（C15 / A40 补）。
-   *
-   * 与 `control` 不是一回事：`control` 回答「画什么控件」（number / switch / segmented /
-   * select / gcode），这一栏回答「值是什么」（float / int / bool / string）。
-   * 开关是 bool、下拉是 string —— 客户端要按类型校验、要显示「这是什么」，
-   * 就不能拿控件去猜。
-   */
-  valueType: 'float' | 'int' | 'bool' | 'string'
-  /**
-   * 可见性条件（C15 / A40 补）：要 `key` 这个字段等于（或不等于 / 大于）`value` 才显示。
-   *
-   * 这一条原来只活在工作台里 —— 客户端拿到包却没有它，只能自己写死「哪些参数属于
-   * 哪个模式」（模式开关：擦料方式 = 擦料塔 / 圆盘擦拭，选哪支显示哪支）。
-   * 判据由客户端算（它依赖当前值），**数据由包里带** —— 客户端不再猜业务规则。
-   */
-  showWhen?: ParamMeta['showWhen']
-  /** `deprecated` 是选项级弃用（某一档退场），与字段级弃用不是一回事，见 `RecipeParam.choices` */
-  choices?: { value: string; label: string; deprecated?: boolean }[]
-  min?: number
-  max?: number
-  step?: number
-  /** 分组的中文名 */
-  group: string
-  /** 所属分类的中文名（`擦料`）。`tabId` 没有的老包靠它兜底 */
-  tab: string
-  /**
-   * 所属分类的 **id**（T8 补，可选）：`offset` / `wiping` / `fan` / `glue` / `gcode` / `advanced`。
-   *
-   * 为什么 `tab` 之外还要这一栏：`tab` 是**中文名**，客户端拿它当 id 用就会踩 locale 的坑
-   * （A40 分类条的图标表按英文 id 查，包里全是中文名，六个图标全塌成兜底那一个）。
-   * id 稳定、名字可翻译 —— 老包没有这一栏时客户端退回 `tab` 照跑（只加字段，不改老语义）。
-   */
-  tabId?: string
-}
-
-/**
- * 一次发布的**另一个产物**：一份真正的预设文件（T7.1）。
- *
- * 作者把这件事说透了：「我们现在模拟的是『用户自己去下载一个 JSON 数据包』，但**真实客户端
- * 应该是自动同步/更新发布数据，用户真正下载、安装、使用的是 TOML 预设**」。
- *
- * 所以一次发布同时产生两样东西，**属于同一个 preset identity**：
- *
- *   `ClientDataPackage`  客户端说明书 —— 自动同步，用户看不见「下载 JSON」这个动作
- *   `ReleasePreset`      真正的 preset artifact —— 用户手动「获取预设」拿到它
- *
- * 不许出现「JSON 是 1.0.1、TOML 还是 1.0.0」这种原型层面的假链路。
- */
-export interface ReleasePreset {
-  machineId: string
-  versionId: string
-  /** 本机落盘的文件名（注册表里那一栏 `presetFile`，比如 `A1.toml`） */
-  fileName: string
-  /** TOML 正文 */
-  content: string
-}
-
-/** 一次发布 = 说明书 + 若干份预设文件 */
-export interface Release {
-  /** 包版本（工作台发布时填的那个三段数字） */
-  version: string | null
-  at: string | null
-  package: ClientDataPackage
-  presets: ReleasePreset[]
-}
-
-export interface ClientDataPackage {
-  meta: ClientDataMeta
-  machines: ClientMachine[]
-  fields: ClientFieldDef[]
-  /** 柜台上单卖的：菜单里 optional 的那些 */
-  optionalFiles: FileRef[]
-  /**
-   * 输入指纹，用来判「已过期」。
-   *
-   * 把配方本 + 菜单 + 套餐 + 字段定义 + 兼容声明排序后 JSON 化再取的**稳定结构化摘要**，
-   * **不是文件哈希**，也不作完整性校验 —— 它只回答「现在的输入和上次生成时是不是同一份」。
-   *
-   * 刻意**没有 `generatedAt`**：假后端里没有可信的时间源（`Date.now()` 在这一层没意义，
-   * 产物也不落盘）。「上次生成」由调用方自己记。
-   */
-  inputsHash: string
-}
-
-/**
  * 客户端要后端干的事。**这一份是产品仓的口径，不是试验场那份的照抄**：
  * 试验场把四个轨（客户端 / 工作台 / 原型 / 测试端）的方法并在一张表里（38 个），
  * 产品仓的用户端只用得到下面这些 —— 工作台那一套走自己的 `src/workbench/api.ts`（`wb_*`）。
@@ -794,7 +653,7 @@ export interface RuntimeCatalogMachine {
  * （另存成另一份文件），永远不回写官方原件。
  */
 export interface ArchivedFile {
-  /** 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
+  /** 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
   path: string
   /** 文件名。与它对应的交付文件同名：换版本换的是字节，不是名字 */
   fileName: string
@@ -825,7 +684,7 @@ export interface DeliveryTrust {
    */
   verdict: 'old' | 'tampered'
   /**
-   * `old` 且归档区里有它字节时给（`archive/mkp/presets/A1-fast.toml`）—— 界面据此
+   * `old` 且归档区里有它字节时给（`archive/dist/mkp/presets/A1-fast.toml`）—— 界面据此
    * 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
    */
   archivedPath: string | null
@@ -989,6 +848,35 @@ export interface RemoteUpdateCheck {
   upToDate: boolean
   localRevision: string
   remoteRevision: string
+  /**
+   * 本客户端**读得懂这一代远端目录吗**（能力优先、版本兜底，见 `runtime::structure::can_read`）。
+   *
+   * `false` = 远端有这一代数据，但当前客户端不具备读它的能力 —— 此时**不该采用**它
+   * （`applyRemoteUpdate` 会拒绝并抛 `NOT_SUPPORTED`）。用户要做的不是"再下一遍"，
+   * 而是**去升级客户端**。★ 它是"能不能读"，不是"有没有新版本"（后者是 `upToDate`）。
+   */
+  readable: boolean
+}
+
+/**
+ * **软件更新**状态（`release.json`）——与预设数据**完全两条链**。
+ *
+ * 它回答的是「有没有新版本的 SupportEase 这个软件」，与"预设数据能不能读"（`RemoteUpdateCheck`）
+ * 是**两个不同的系统**，两个入口（设置页 / 预设页提示），**不混成一句话**。
+ *
+ * 信息源 = 仓库根的 `release.json`（`presets/` 外），**不属于** catalog / manifest。
+ */
+export interface SoftwareUpdate {
+  /** 有没有比当前更新的正式版本 */
+  hasUpdate: boolean
+  /** 当前客户端版本（来自构建期，唯一真值） */
+  currentVersion: string
+  /** 最新正式版本（没有 release.json 时回落成 `currentVersion`） */
+  latestVersion: string
+  /** 更新说明；没有就是 `undefined` */
+  notes?: string
+  /** 去哪更新 / 看详情；没有就是 `undefined` */
+  url?: string
 }
 
 /**
@@ -1350,8 +1238,26 @@ export interface MkpApi {
   /**
    * 应用远端目录：旧目录归档、新目录生效。之后照常走「有更新」→ 下载，
    * 没有第三条更新路径。
+   *
+   * ★ 若远端这一代**读不懂**（`RemoteUpdateCheck.readable === false`），本命令
+   * **不落盘、不归档、不采用**，返回 `NOT_SUPPORTED` —— "下载前拦"的落点。
    */
   applyRemoteUpdate(): Promise<void>
+
+  /**
+   * 当前客户端版本号（来自构建期 `CARGO_PKG_VERSION`，唯一真值）。
+   *
+   * 设置页「软件更新」块要显示"当前版本 → 最新版本"，这是它拿"当前版本"的唯一口子。
+   */
+  getAppVersion(): Promise<string>
+
+  /**
+   * 检查**软件**更新（`release.json`）—— 与预设数据链**完全分开**。
+   *
+   * 只读、不在启动/首屏路径上（设置页打开时才调；铁律：云端不参与首屏）。
+   * 信息源不可达时**如实拒绝**（`IO` / `NOT_FOUND`），由调用方决定说还是略过。
+   */
+  checkSoftwareUpdate(): Promise<SoftwareUpdate>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */
@@ -1372,6 +1278,13 @@ export type ErrorCode =
   | 'IO'
   | 'NOT_IMPLEMENTED'
   | 'INTERNAL'
+  /**
+   * 客户端**读不懂**这一代数据：文件没坏、也不是下载失败，是能力不足。
+   *
+   * 与 `CORRUPTED` / `INTERNAL` 严格分开：那两个是"数据/程序出了问题"，这一档是
+   * "这份数据是新结构，当前客户端还不具备读它的能力" —— 用户要做的是**去升级客户端**。
+   */
+  | 'NOT_SUPPORTED'
 
 /**
  * 跨 IPC 边界的错误。
