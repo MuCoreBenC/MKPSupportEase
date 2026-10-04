@@ -507,7 +507,9 @@ pub fn run(
     /* ---------- ⑨ 写 `release.json` → 它自己的分支与 PR（**合并留给人**） ---------- */
 
     let info_rel = write_release_info(repo_root, &version, &opts.notes, &release.url)?;
-    let info_branch = format!("release/{tag}");
+    // ★ 分支名必须带合规前缀（`chore/`）—— 本机闸门⑥ 会拒没有前缀的分支名
+    //   （`release/0.0.1` 这种在提交那一步会被钩子挡下来，白跑一趟）。
+    let info_branch = format!("chore/release-{tag}");
     // 新分支从**当前**提交起（此刻人在 main 上、main 已含 ① 的合并结果）
     git.switch_new(&info_branch)?;
     let staged = git.stage_allowed_in(std::slice::from_ref(&info_rel), &RELEASE_STAGE_ALLOWLIST)?;
