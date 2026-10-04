@@ -44,11 +44,28 @@ pub const API_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// 平台 API 专用的 `ureq` Agent（带超时）。GitHub / Gitee **共用这一处** ——
 /// 超时口径只写一遍，将来调也只调这里。
 pub(super) fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(API_TIMEOUT))
-        .timeout_connect(Some(API_CONNECT_TIMEOUT))
-        .build()
-        .into()
+    agent_with(API_TIMEOUT)
+}
+
+/// 上传专用的 `ureq` Agent（总时长 [`UPLOAD_TIMEOUT`]，连接仍是 [`API_CONNECT_TIMEOUT`]）。
+pub(super) fn upload_agent() -> ureq::Agent {
+    agent_with(UPLOAD_TIMEOUT)
+}
+
+/// 带超时 **+ 系统代理** 的 Agent。**两个出口共用这一处**（与客户端 `runtime/net.rs`
+/// 读的是同一个 [`crate::runtime::net::system_proxy_url`]）——
+/// 本机配了代理却只有一半出口认它，是最难查的一类"有时通有时不通"。
+fn agent_with(global: Duration) -> ureq::Agent {
+    let mut builder = ureq::Agent::config_builder()
+        .timeout_global(Some(global))
+        .timeout_connect(Some(API_CONNECT_TIMEOUT));
+    if let Some(url) = crate::runtime::net::system_proxy_url() {
+        match ureq::Proxy::new(url.as_str()) {
+            Ok(proxy) => builder = builder.proxy(Some(proxy)),
+            Err(e) => tracing::warn!("系统代理地址认不出（按直连走）：{url}（{e}）"),
+        }
+    }
+    builder.build().into()
 }
 
 /// 评审（GitHub 叫 PR、Gitee 叫 MR）在**工作台这一侧**的统一状态。
@@ -132,15 +149,6 @@ pub struct ReviewId {
 /// 而没有上限的上传在断网时会挂到天荒地老（与"没有超时就没有尽头"同一条纪律）。
 /// 15 分钟是"家用宽带传一个 dmg"的宽松上界 —— 真到不了会如实报错，不假装还在传。
 pub const UPLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-
-/// 上传专用的 `ureq` Agent（总时长 [`UPLOAD_TIMEOUT`]，连接仍是 [`API_CONNECT_TIMEOUT`]）。
-pub(super) fn upload_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(UPLOAD_TIMEOUT))
-        .timeout_connect(Some(API_CONNECT_TIMEOUT))
-        .build()
-        .into()
-}
 
 /// 建一个 Release 要的东西（第四刀）。
 #[derive(Debug, Clone)]

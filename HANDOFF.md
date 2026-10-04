@@ -2031,3 +2031,42 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
   ahead_behind / switch / pull_ff / tag / push_tag / tag_exists / is_clean / rev_parse_short。
 - 工作台：② 卡「软件版本」从只读块升级为**入口**（`ReleaseGateModal`：闸 → 回执 → 历史三段）；
   历史独立成 `<appDataDir>/release-history.json`（**与 `publish-history.json` 两本账**）。
+
+----
+
+## 增量之二十六 · 0.0.2：三项真机修复（图标 / 系统代理 / 用户根搬出 Documents）
+
+装了 0.0.1 之后作者真机踩到三件事，一次改完（分支 `feat/0.0.2-fixes`）：
+
+### ① 应用图标换成正式那张
+
+`npm run tauri -- icon <1024×1024 png>` 重出 `src-tauri/icons/` 全套（含 `icon.icns`）。
+**android/ 与 ios/ 两套产物删掉** —— 这个项目不做移动端，留着只是让人以为要发。
+
+### ② HTTP 出口**自动用系统代理**
+
+- 真机症状：0.0.1 客户端取 `source.json` / `release.json` 报
+  `invalid peer certificate: UnknownIssuer`；同一个地址在浏览器与 `curl` 里通 ——
+  差的就是那两个走了**系统代理**，我们没有。
+- 改：`runtime/net.rs` 新增 `system_proxy_url()`（环境变量 `HTTPS_PROXY`/`ALL_PROXY`/`HTTP_PROXY`
+  → macOS `scutil --proxy`），**两个 HTTP 出口共用**：客户端 `net::agent_with` 与工作台
+  `platform::agent_with`（含上传那只）。认不出的代理地址只 warn 并按直连走，不让整次下载失败。
+- 判据：`scutil_https_proxy_is_read` / `a_disabled_scutil_proxy_is_not_used`（把
+  `HTTPSEnable : 0` 当 1 是这类解析最容易犯的错）/ `scutil_socks_proxy_is_read_too` /
+  `unreadable_scutil_output_means_no_proxy` / `env_proxy_is_preferred_and_empty_values_are_skipped` /
+  `a_usable_proxy_url_is_accepted_by_ureq`（防"解析对了但构造失败，症状与没加一样"）。
+  ★ 其它平台这轮只走环境变量 —— 第一阶段只发 macOS 安装包，不为"以后可能要"提前读注册表。
+  ★ ureq 的 socks 需要 `socks-proxy` feature（未开）⇒ socks 地址认不出会 warn 直连，不崩。
+
+### ③ 用户根搬出 `~/Documents`（作者拍）
+
+- 症状：点开预设页弹 macOS 的「要访问你的文稿文件夹」—— 用户根在 `Documents/SupportEase`。
+- 改：`fsx::paths::user_root()` = **`<appDataDir>/user`**（与内部根并排，仍是独立一层，
+  只是落点从系统目录换成程序目录）。旧目录是空的，**没有存量数据、不做迁移**。
+- 判据 `the_user_root_never_touches_documents`（源码扫描；★ 扫 `document_dir(` **带括号**、
+  且字符串**拼出来再比** —— 直接写那个名字这条断言会把自己撞红）。
+- 文档：总纲 §1③ 两根那一段改写（"程序写的文件不放在一个会被系统悄悄搬走的地方"）；
+  `ipc/mine.rs` / `runtime/mine.rs` / `ipc/presets.rs` / `lib.rs` / `bridge.ts` / `contract.ts` /
+  `mock.ts` / `localFiles.ts` / `presetTree.ts` 里那句 `Documents/SupportEase/…` 一并改口径。
+
+**这三件都是程序改动 ⇒ 走「发布软件版本」链发 0.0.2**（正好是第四刀第二段的验收对象）。

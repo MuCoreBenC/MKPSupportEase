@@ -948,7 +948,7 @@ export interface MkpApi {
   getLocalFiles(): Promise<string[]>
 
   /**
-   * **用户自己的预设文件**（用户线，`~/Documents/SupportEase/presets-mine/`）。
+   * **用户自己的预设文件**（用户线，`<appDataDir>/user/presets-mine/`）。
    *
    * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
    * 一份都没有 = 空数组，**不是错误**。

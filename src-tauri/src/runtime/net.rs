@@ -248,11 +248,128 @@ fn build_agent() -> ureq::Agent {
 }
 
 fn agent_with(global: Duration, connect: Duration) -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
+    let mut builder = ureq::Agent::config_builder()
         .timeout_global(Some(global))
-        .timeout_connect(Some(connect))
-        .build();
-    config.into()
+        .timeout_connect(Some(connect));
+    if let Some(url) = system_proxy_url() {
+        match ureq::Proxy::new(url.as_str()) {
+            Ok(proxy) => builder = builder.proxy(Some(proxy)),
+            Err(e) => {
+                // 认不出的代理地址**不该让整次下载失败** —— 直连还可能通
+                tracing::warn!("系统代理地址认不出（按直连走）：{url}（{e}）")
+            }
+        }
+    }
+    builder.build().into()
+}
+
+/* ------------------------------- 系统代理 ------------------------------- */
+
+/// **系统里配的那个代理**（`http://host:port` / `socks5://host:port`）；没有配就是 `None`。
+///
+/// # 为什么必须读它
+///
+/// 程序自己直连时，本机配了代理的用户会拿到一个**答不上来的远端**：
+/// 真机表现是 `invalid peer certificate: UnknownIssuer`（2026-10-05 的 0.0.1 客户端），
+/// 而同一个地址在浏览器 / `curl` 里是通的 —— 差别就在那两个走了系统代理、我们没有。
+/// 用户不会为我们的程序单独再配一次网络。
+///
+/// # 顺序
+///
+/// ```text
+/// 环境变量（HTTPS_PROXY / ALL_PROXY / HTTP_PROXY）→ macOS 的 scutil --proxy
+/// ```
+///
+/// 环境变量优先：它是**用户显式**说出口的，比系统设置更具体。
+/// 其它平台（Linux / Windows）这一步只走环境变量 —— 第一阶段只发 macOS 安装包，
+/// 不为"以后可能要"提前把注册表也读进来。
+pub fn system_proxy_url() -> Option<String> {
+    if let Some(url) = proxy_from_env(&|k| std::env::var(k).ok()) {
+        return Some(url);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(text) = scutil_proxy_text() {
+            return parse_scutil_proxy(&text);
+        }
+    }
+    None
+}
+
+/// 环境变量里的代理。`lookup` 注入是为了**能测**（测试进程改全局环境变量会互相干扰）。
+///
+/// https 的那几个先看：我们要取的都是 `https://` 地址；`ALL_PROXY` 兜最后。
+pub fn proxy_from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    for key in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ] {
+        if let Some(v) = lookup(key) {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// macOS：`scutil --proxy` 的原始输出。拿不到就 `None`（不报错 —— 没有代理是合法的）。
+#[cfg(target_os = "macos")]
+fn scutil_proxy_text() -> Option<String> {
+    let out = std::process::Command::new("scutil")
+        .args(["--proxy"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
+/// 解析 `scutil --proxy` 的输出（`<dictionary> { HTTPSProxy : 127.0.0.1 ... }`）。
+///
+/// ★ **纯函数**：这一整段是"读系统设置"里唯一值得测的部分 —— 子进程那一步测不出什么，
+/// 而"哪些键算开了代理"极易写错（把 `HTTPSEnable : 0` 当成 1 就是所有人都连不通）。
+///
+/// 三种都认：**HTTPS → SOCKS → HTTP**（HTTPS 优先，因为我们要取的都是 https 地址）。
+pub fn parse_scutil_proxy(text: &str) -> Option<String> {
+    let map = scutil_keys(text);
+    for (enable, host, port, scheme) in [
+        ("HTTPSEnable", "HTTPSProxy", "HTTPSPort", "http"),
+        ("SOCKSEnable", "SOCKSProxy", "SOCKSPort", "socks5"),
+        ("HTTPEnable", "HTTPProxy", "HTTPPort", "http"),
+    ] {
+        if map.get(enable).map(|v| v == "1").unwrap_or(false) {
+            if let (Some(h), Some(p)) = (map.get(host), map.get(port)) {
+                if !h.is_empty() && !p.is_empty() {
+                    return Some(format!("{scheme}://{h}:{p}"));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `scutil` 输出里的 `键 : 值` 收成一张表（只收这两种形状，别的行一律略过）。
+fn scutil_keys(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        map.insert(key.to_owned(), value.to_owned());
+    }
+    map
 }
 
 fn content_length(headers: &ureq::http::HeaderMap) -> Option<u64> {
@@ -811,6 +928,82 @@ mod tests {
             "没实现超时的话这里会一直等下去：{:?}",
             started.elapsed()
         );
+    }
+
+    /* ---------- 系统代理（2026-10-05：真机那条 UnknownIssuer 逼出来的） ---------- */
+
+    /// macOS `scutil --proxy` 的输出：开了 HTTPS 代理 —— 拿它的地址
+    #[test]
+    fn scutil_https_proxy_is_read() {
+        let text =
+            "<dictionary> {\n  HTTPSEnable : 1\n  HTTPSProxy : 127.0.0.1\n  HTTPSPort : 7890\n}";
+        assert_eq!(
+            parse_scutil_proxy(text).as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+    }
+
+    /// ★ **关掉的不算** —— 把 `HTTPSEnable : 0` 当成 1 是这类解析最容易犯的错，
+    /// 后果是所有人（包括没开代理的）都连不上，而且看不出来是这里错了
+    #[test]
+    fn a_disabled_scutil_proxy_is_not_used() {
+        let text =
+            "<dictionary> {\n  HTTPSEnable : 0\n  HTTPSProxy : 127.0.0.1\n  HTTPSPort : 7890\n}";
+        assert_eq!(parse_scutil_proxy(text), None);
+    }
+
+    /// 只开了 SOCKS：如实给 socks5（认不出的那一头会 warn 直连，不会崩）
+    #[test]
+    fn scutil_socks_proxy_is_read_too() {
+        let text =
+            "<dictionary> {\n  SOCKSEnable : 1\n  SOCKSProxy : 127.0.0.1\n  SOCKSPort : 1080\n}";
+        assert_eq!(
+            parse_scutil_proxy(text).as_deref(),
+            Some("socks5://127.0.0.1:1080")
+        );
+    }
+
+    /// 认不出的输出 = 没有代理（**不猜**，直连还可能通）
+    #[test]
+    fn unreadable_scutil_output_means_no_proxy() {
+        assert_eq!(parse_scutil_proxy(""), None);
+        assert_eq!(parse_scutil_proxy("no such service"), None);
+        assert_eq!(parse_scutil_proxy("HTTPSEnable : 1"), None, "缺地址就不算");
+    }
+
+    /// 环境变量：https 那几个先看，**空串不算**（设了却没值 = 没设）
+    #[test]
+    fn env_proxy_is_preferred_and_empty_values_are_skipped() {
+        let env = [("HTTP_PROXY", ""), ("HTTPS_PROXY", "http://127.0.0.1:7890")];
+        let lookup = |k: &str| {
+            env.iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(
+            proxy_from_env(&lookup).as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+
+        let empty = [("HTTPS_PROXY", "   ")];
+        let lookup = |k: &str| {
+            empty
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(
+            proxy_from_env(&lookup),
+            None,
+            "环境变量设了却是空白 ⇒ 当作没设"
+        );
+    }
+
+    /// 一个能用的代理地址，ureq 认得出来（**这条防的是"加了代理却从来没生效"** ——
+    /// 解析写对了但构造失败，症状与没加一模一样）
+    #[test]
+    fn a_usable_proxy_url_is_accepted_by_ureq() {
+        assert!(ureq::Proxy::new("http://127.0.0.1:7890").is_ok());
     }
 
     /// `Stage` 的词是发给界面看的形状：界面照着字符串分支，不用猜 Rust 枚举的顺序

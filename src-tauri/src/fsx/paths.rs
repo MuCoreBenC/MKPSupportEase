@@ -1,10 +1,17 @@
 //! 两层数据根 + 防穿越。
 //!
-//! **为什么分两层**：程序自己管的东西（云端原件、归档、索引、日志、运行状态）放 `appDataDir`；
-//! 用户自己要看要拷的东西（预设副本、导出、报告）放 Documents 下的 `SupportEase/`。
-//! 不把前者也塞进 Documents 的原因很具体：macOS 开了「桌面与文档」iCloud 同步后，
-//! Documents 里的文件会被驱逐成占位 stub —— 读出来内容不对，会把 Preset 的 SHA 失效判定
-//! 变成误报。程序管理的数据不能放在一个会被系统悄悄搬走的地方。
+//! **为什么分两层**：程序自己管的东西（云端原件、归档、索引、日志、运行状态）放内部根；
+//! 用户自己要看要拷的东西（预设副本、导出、报告）放**用户根**。
+//!
+//! ★ **两个根都住 `appDataDir`（作者 2026-10-05 拍：用户根从 `~/Documents/SupportEase`
+//! 搬进程序自己的文件夹）**。两个理由，都是真机踩出来的：
+//! 1. macOS 的 `~/Documents` 受 TCC 保护 —— 程序第一次进去会弹「要访问你的文稿文件夹」，
+//!    而这个程序**根本不需要用户的 Documents**（2026-10-05：用户点开预设页就被问了一次）；
+//! 2. 开了「桌面与文档」iCloud 同步后，Documents 里的文件会被驱逐成占位 stub ——
+//!    读出来内容不对，会把 Preset 的 SHA 失效判定变成误报。
+//!
+//! 用户根住在 `<appDataDir>/user`：它**仍然是独立的一层**（路径语义、防穿越都不变），
+//! 只是**落点**从系统目录换成程序目录。用户想拿自己的预设，去「在 Finder 中显示」。
 //!
 //! **防穿越**：所有相对路径都必须经过 [`resolve`]。拒绝绝对路径、拒绝 `..`、拼完还要再确认
 //! 结果仍在根内（符号链接能绕过前两条，所以第三条是必须的）。
@@ -21,7 +28,8 @@ use crate::error::AppError;
 pub enum Root {
     /// `appDataDir` —— 程序管理，用户不该手动进去改
     Internal,
-    /// `~/Documents/SupportEase` —— 给用户看的
+    /// 给用户看的那一份（预设副本 / 导出 / 报告）。**也住 `appDataDir`** ——
+    /// 见模块头：它不该去碰 `~/Documents`（TCC 弹窗 + iCloud 驱逐）
     User,
 }
 
@@ -33,8 +41,11 @@ pub const MINE_DIR: &str = "presets-mine";
 /// 用户根下首次启动就建齐的子目录
 const USER_DIRS: [&str; 3] = ["exports", "reports", MINE_DIR];
 
-/// 用户可见目录的名字。与窗口标题一致 —— 这个目录是给用户看的，就该叫产品名
-const USER_DIR_NAME: &str = "SupportEase";
+/// 用户根在**应用数据目录**下的那一个子目录（`<appDataDir>/user`）。
+///
+/// ★ 它与内部根**并排**，不在内部根里再套一层 `user/…` 之外的东西 ——
+/// 两个根都是 `appDataDir` 的一级子树，谁也不会误把对方的文件当自己的。
+const USER_ROOT_DIR: &str = "user";
 
 pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let root = app
@@ -45,12 +56,12 @@ pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(root)
 }
 
+/// 用户根：`<appDataDir>/user`。
+///
+/// ★ **不碰 `~/Documents`** —— 那个目录在 macOS 上受 TCC 保护（一进去就弹「要访问你的
+/// 文稿文件夹」），而这里放的是程序替用户存的文件，不是用户自己摆在文稿里的东西。
 pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
-    let root = app
-        .path()
-        .document_dir()
-        .map_err(|e| AppError::io("找不到「文档」目录").with_detail(e.to_string()))?
-        .join(USER_DIR_NAME);
+    let root = internal_root(app)?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS)?;
     Ok(root)
 }
@@ -207,6 +218,29 @@ mod tests {
 
         let e = resolve_in(d.path(), "escape/secret.txt").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::PermissionDenied);
+    }
+
+    /// ★ **用户根不许碰 `~/Documents`**（作者 2026-10-05 拍）。
+    ///
+    /// 真机代价很具体：macOS 上第一次进 Documents 会弹「要访问你的文稿文件夹」，
+    /// 而这个程序根本不需要用户的文稿目录 —— 用户点开预设页就被问了一次。
+    /// 这条是**源码扫描**：把系统的那个文档目录 API 写回来，它当场报红。
+    ///
+    /// ★ 扫**调用**（带左括号）而不是名字：只扫名字的话，这条注释自己就会把它撞红。
+    #[test]
+    fn the_user_root_never_touches_documents() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/fsx/paths.rs"))
+            .expect("读得到本文件");
+        // 拼出来再比：**直接写那个名字的话，这一行自己就在被扫的文本里**（自撞）。
+        let needle = format!("document{}(", "_dir");
+        assert!(
+            !src.contains(&needle),
+            "用户根不许用系统的文档目录 —— 一碰它就要弹系统授权框"
+        );
+        assert!(
+            src.contains("USER_ROOT_DIR"),
+            "用户根应该落在 appDataDir 下一个具名子目录里"
+        );
     }
 
     /// 目标文件还不存在是正常情况（第一次写），不能判成越界
