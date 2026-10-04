@@ -1580,6 +1580,39 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       `tsc -b` / lint / `build` / `check:bundle` / `check:zero-network` 全绿。
       **真机复跑（作者再点一次发布）是这条修复的最终验收**。
 
+    - **增量之二十六：发布事务收尾（回执屏 / 发布历史 / 软件内合并 / Token 会话缓存）**
+
+      背景：复跑成功（**PR #27** 开出，事务 6 秒返回），但作者点完发现三件事：
+      "关掉模态框再打开又是新的"、"要去浏览器合并吗、浏览器没登录怎么办"、
+      "还是要我输两次密码"。这一刀只做**收尾体验**，不碰软件版本发布那一层。
+
+      1. **发布回执屏**：`PublishGateModal` 成功后**不再关框**，就地切成回执 —— 阶段链
+         （发布检查 → 生成 → 提交 `08ec040` → 推送 → PR #27 → CI → 合并）+ **PR 地址可点**
+         （新命令 `wb_open_external`，只放行 `http(s)`）+「刷新状态」（复用 `wb_publish_status`，
+         **不轮询**）+【合并】。`PublishTxReport` 只增一个 `commit`（短 sha，取自 `git rev-parse`）。
+         ② 卡多两颗按钮：「查看发布结果」（把上次那份回执**再打开**，不重跑十五项）与「发布历史」。
+      2. **软件内合并**：`Hosting::merge_review`（GitHub / Gitee 同形 `PUT …/pulls/{n}/merge`，
+         走带超时的 `platform::agent()`）+ 命令 `wb_merge_review`（`async`，进 IO 单子）。
+         作者拍的规则：**一律 squash**、**不强制等 CI** —— CI 没跑完 / 已经红了都在二次确认里
+         说清（`CI 尚未完成 —— 确定继续合并吗？`），合完**回读**真状态。合同 §1.1 第 8 步随之更新。
+      3. **发布历史**：`app/history.rs` + `<appDataDir>/publish-history.json`（与发布账户同形的
+         存储规矩：schema + atomic_write + 坏档 `CORRUPTED` 不静默；**不是配置**，删了只丢展示）。
+         写入点在**壳层** `wb_publish` 收尾（内核不碰 `AppHandle`）；新命令 `wb_publish_history`。
+         界面 `HistoryModal`：最新在前、每条一个「刷新」手动回读；**打开时读一次，不轮询**。
+         合并成功时把新状态**写回**历史里那一条（`history::update_review`）。
+      4. **Token 会话缓存**：`credentials::CachedStore` + `session()`（进程一份）—— 一次程序运行
+         **至多读一次**系统钥匙串；`set` / `clear` 同步失效；**不改 Keychain 的存储方式**。
+      5. **⑮ `git/clean` 的 CI 红**（作者裁决 B）：取不到 Git / 取不到分支（CI 的游离 HEAD 检出）
+         从 `skip` 改 **`pass`** 并写明"该检查不适用" —— **保持「Blocker 不许 Skipped」原判据不变**。
+         新判据 `a_gitless_workspace_marks_git_clean_as_not_applicable`；规则写进
+         `RELEASE-TRANSACTIONS.md` §7（⑮ 的适用范围）。
+      6. 探针 `workbench-build.mjs` 同步：发布段改成量回执 / 合并 / 历史（三条新截图落 `tmp-shots/`）；
+         **裁掉读退役结构的「钉住」那一段**（那个把手只在收起态才叫「钉住」，点了会让探针挂住整段）。
+
+      **验证**：fmt / 双 feature clippy / 默认 **314** + workbench lib **574** / `tsc -b` / lint /
+      `build` / `check:bundle` / `check:zero-network` 全绿；探针实机走查 —— 回执 / 合并二次确认 /
+      已合并 / 重开回执 / 历史三条 / 手动刷新 全过（仅剩预存红「生成之后产物名单没跟上」）。
+
     ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 
      **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，

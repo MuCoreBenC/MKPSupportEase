@@ -109,6 +109,14 @@ impl Git {
         Ok(())
     }
 
+    /// 当前 HEAD 的短 sha（`git rev-parse --short HEAD`）—— 发布回执里显示"提交了哪一笔"。
+    pub fn head_short(&self) -> Result<String, AppError> {
+        Ok(self
+            .run(&["rev-parse", "--short", "HEAD"])?
+            .trim()
+            .to_owned())
+    }
+
     /// 推分支（`git push -u origin <branch>`）。`branch` 为空 = 用当前分支。
     ///
     /// **不带认证** —— 只在凭据已由别处（如 CI 的 credential helper）提供时用。

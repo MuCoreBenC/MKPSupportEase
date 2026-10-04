@@ -74,6 +74,7 @@ import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
 import GenerateDiffModal from './GenerateDiffModal'
 import PublishGateModal from './PublishGateModal'
+import HistoryModal from './HistoryModal'
 import s from '../c14.module.css'
 
 interface Props {
@@ -138,6 +139,13 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
    * 这一页只负责把结果摆出来
    */
   const [gateOpen, setGateOpen] = useState(false)
+  /**
+   * 带着"上一次的发布结果"打开闸那屏（②卡的「查看发布结果」）。
+   * 非 null ⇒ 直接进**发布回执**视图，不重跑十五项 —— 那是过去那一刻的快照。
+   */
+  const [gateReport, setGateReport] = useState<PublishTxReport | null>(null)
+  /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [baseline, setBaseline] = useState<BaselineDiffEntry[] | null>(null)
   const [strays, setStrays] = useState<string[] | null>(null)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof wb.trash>> | null>(null)
@@ -290,12 +298,16 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     /*
      * 发布事务：审计 → 生成 → 定稿 → 本地 git → 平台 PR。
      * 这里**只发一次**、只把阶段快照摆出来 —— 前端不再串「生成 / 发布 / 建 PR」三个动作。
+     *
+     * ★ 返回值交回给闸那屏：它拿这份快照就地切成**发布回执**（阶段链 + PR 地址 + 合并）。
+     * 这一屏也留一份 —— 关掉模态框之后，②卡还能「查看发布结果」再打开。
      */
     const rep = await wb.publish()
     setLastPublish(rep)
     /* 发布改了交付目录 → 让外壳重取（④ 残留与 ③ 基线跟着刷新） */
     onBookRefresh()
     toasts.push(rep.summary)
+    return rep
   }
 
   /** 同步对照基线（14.9 第②步）。前提：人看过上面的 diff 清单 */
@@ -522,6 +534,28 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                 （十五项逐项打勾，全绿才给往下走）；带残留时后端一个字节都不写。
               </span>
               <span className={s.grow} />
+              {/* 上一次发布的结果还在 —— 一次点击回到那份回执（不是每次都是空的新面板） */}
+              {lastPublish !== null && (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnSm}`}
+                  title="看上一次发布的回执：走到哪一步、PR 多少号、合没合"
+                  onClick={() => {
+                    setGateReport(lastPublish)
+                    setGateOpen(true)
+                  }}
+                >
+                  查看发布结果
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                title="历次发布的回执（本地记录；每条可手动刷新）"
+                onClick={() => setHistoryOpen(true)}
+              >
+                发布历史
+              </button>
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
@@ -531,7 +565,10 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                     ? words.disabled.publishBlocked
                     : '先过发布闸：十五项逐项打勾，全绿才给发布'
                 }
-                onClick={() => setGateOpen(true)}
+                onClick={() => {
+                  setGateReport(null)
+                  setGateOpen(true)
+                }}
               >
                 发布
               </button>
@@ -550,9 +587,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                     ? 'preset.toml — 未生成'
                     : `preset.toml × ${artifacts.length} 份`}
                 </span>
-                <span className={s.chip}>
+                <span className={s.chip} title={lastPublish?.summary}>
                   {lastPublish
-                    ? `本次发布落下 ${lastPublish.files} 个文件 · ${lastPublish.summary}`
+                    ? `本次发布落下 ${lastPublish.files} 个文件${lastPublish.commit ? ` · ${lastPublish.commit}` : ''}${lastPublish.review ? ` → PR #${lastPublish.review.number}` : ''}`
                     : '本会话还没发布过'}
                 </span>
               </div>
@@ -759,10 +796,24 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
         />
       )}
 
-      {/* 发布闸（第二刀）：点「发布」先过这一道，全绿才给按「确认发布」 */}
+      {/* 发布闸 + 回执（第二 / 四刀）：点「发布」先过闸；发完就地留在回执上 */}
       {gateOpen && (
-        <PublishGateModal onClose={() => setGateOpen(false)} onPublish={publish} />
+        <PublishGateModal
+          onClose={() => {
+            setGateOpen(false)
+            setGateReport(null)
+          }}
+          onPublish={publish}
+          initialReport={gateReport}
+          onMerged={(r) =>
+            /* 合并之后把②卡那份快照也更新掉 —— 免得「查看发布结果」还写着"等待合并" */
+            setLastPublish((prev) => (prev === null ? prev : { ...prev, review: r }))
+          }
+        />
       )}
+
+      {/* 发布历史：本地回执日志（`publish-history.json`），最新在前 */}
+      {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} />}
 
       {/* 另一半发布物：用户真正下载的那一份 —— 正文来自后端的渲染器 */}
       {tomlOpen !== null && (

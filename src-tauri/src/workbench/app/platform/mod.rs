@@ -27,7 +27,7 @@ pub mod github;
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
@@ -54,7 +54,7 @@ pub(super) fn agent() -> ureq::Agent {
 /// 评审（GitHub 叫 PR、Gitee 叫 MR）在**工作台这一侧**的统一状态。
 ///
 /// 平台方言（`opened` / `active` / `merged` / `declined`…）由 [`collapse_state`] 收敛到这一档。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewState {
     /// 开着（GitHub `open` / `opened`，Gitee `active`）
@@ -68,7 +68,7 @@ pub enum ReviewState {
 }
 
 /// CI 检查汇总，工作台这一侧的档。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChecksSummary {
     /// 还没出结果 / 正在跑
@@ -84,7 +84,10 @@ pub enum ChecksSummary {
 }
 
 /// 一份评审的**平台无关**快照。前端只拿它画状态条。
-#[derive(Debug, Clone, Serialize)]
+///
+/// ★ 也进**发布历史**（`publish-history.json`）⇒ 需要能反序列化回来（`Deserialize`）、
+/// 也要能比较（回执往返判据用 `PartialEq`）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteReview {
     /// 平台 id：`"github"` | `"gitee"`
@@ -136,6 +139,37 @@ pub trait Hosting {
 
     /// 回读一份 PR / MR 的状态（PR state + 检查汇总一起取）
     fn get_review(&self, id: &ReviewId) -> Result<RemoteReview, AppError>;
+
+    /// 合并一份 PR / MR（见 [`MergeMethod`]）。
+    ///
+    /// ★ **只在用户显式点过「合并」之后调**：没有自动合并、没有定时合并。
+    /// ★ **CI 不是前置条件**（作者 2026-10-04 拍：不强制等 CI —— CI 状态由界面在
+    /// 二次确认里说清，决定权在人）。平台自己有保护规则时会如实报错，不掩盖。
+    fn merge_review(&self, id: &ReviewId, method: MergeMethod) -> Result<RemoteReview, AppError>;
+}
+
+/// 合并方式。**只留 Squash 一档**（作者 2026-10-04 拍）。
+///
+/// 不摆 merge commit / rebase：摆出来就得解释三种历史的差别，而工作台这条链的目的
+/// 是"发布 → 看结果 → 合并"，不是教人挑合并策略。将来真要加，加在这里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMethod {
+    Squash,
+}
+
+impl MergeMethod {
+    /// 平台方言里的名字（GitHub 与 Gitee 都收 `squash`）。
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            MergeMethod::Squash => "squash",
+        }
+    }
+}
+
+/// 合并请求的 API 路径。**纯函数**（两个平台同形：都是 `pulls`）—— 端点写错比报错更难查，
+/// 判据钉它。
+pub fn merge_path(owner: &str, repo: &str, number: u64) -> String {
+    format!("/repos/{owner}/{repo}/pulls/{number}/merge")
 }
 
 /// 从 git remote URL 推断平台。**纯函数**，判据钉它。
@@ -284,5 +318,15 @@ mod tests {
         assert_eq!(collapse_checks("failure"), ChecksSummary::Failed);
         assert_eq!(collapse_checks("none"), ChecksSummary::None);
         assert_eq!(collapse_checks("huh"), ChecksSummary::Unknown);
+    }
+
+    /// 合并：**只有 squash 一档**；端点路径两个平台同形（写错端点比报错更难查）。
+    #[test]
+    fn merge_is_squash_only_and_the_path_is_shared() {
+        assert_eq!(MergeMethod::Squash.wire_name(), "squash");
+        assert_eq!(
+            merge_path("MuCoreBenC", "MKPSupportEase", 27),
+            "/repos/MuCoreBenC/MKPSupportEase/pulls/27/merge"
+        );
     }
 }

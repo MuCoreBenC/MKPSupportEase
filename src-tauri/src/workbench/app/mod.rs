@@ -53,6 +53,7 @@ pub mod credentials;
 pub mod dist;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
+pub mod history;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;
@@ -1770,6 +1771,9 @@ mod tests {
             "wb_bundles",
             "wb_machines",
             "wb_version_orphans",
+            // 发布收尾（回执屏）：只读一份回执日志；「查看 PR」只开系统浏览器，不写应用状态
+            "wb_publish_history",
+            "wb_open_external",
         ];
 
         /// 这一批**碰网络或系统 Keychain**（发布事务那几条）—— 同样必须 `(async)`。
@@ -1784,6 +1788,7 @@ mod tests {
             "wb_set_publish_token",
             "wb_clear_publish_account",
             "wb_publish_status",
+            "wb_merge_review",
         ];
 
         // 路径用 CARGO_MANIFEST_DIR 拼（不用 file!()：建了 workspace 之后它的基准会变）

@@ -766,6 +766,8 @@ export interface PublishTxReport {
   committedPaths: string[]
   review: RemoteReview | null
   branch: string | null
+  /** 这次发布提交的短 sha（没有提交 = null，如实说） */
+  commit: string | null
   files: number
   summary: string
 }
@@ -778,6 +780,37 @@ export interface TxOptions {
   openReview?: boolean
   /** 目标分支（PR 的 base）；空 = main */
   base?: string
+  /** 发到哪个平台（`github` / `gitee`）；不填 = 自动挑（见发布账户配置） */
+  platform?: string | null
+}
+
+/**
+ * `history::PublishRecord` —— 一条发布回执（`<appDataDir>/publish-history.json` 里的一条）。
+ *
+ * ★ 它是**写入那一刻的快照**：PR/MR 的状态之后会变。要看现在走到哪，拿编号去
+ * `publishStatus` **手动刷新**（作者定死：状态是"看一看"，不做轮询）。
+ */
+export interface PublishRecord {
+  at: string
+  /**
+   * 走到 / 停在哪一阶段。写入时是 `PublishStage` 的线上名；读的时候按字符串收 ——
+   * 将来版本写了新阶段，不该让整份历史读不出来（界面自己回落成"认不出"）
+   */
+  stage: string
+  branch: string | null
+  commit: string | null
+  review: RemoteReview | null
+  files: number
+  generated: number
+  auditPassed: number
+  auditFailed: number
+  summary: string
+}
+
+/** `history::PublishHistory` —— 回执日志（最新在前） */
+export interface PublishHistory {
+  historySchema: number
+  records: PublishRecord[]
 }
 
 /** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
@@ -1434,6 +1467,18 @@ export const wb = {
     invoke<PlatformAccountView>('wb_clear_publish_account', { platform }),
   /** **手动回读**一份 PR/MR 的状态（快照 + 手动刷新；不做后台轮询） */
   publishStatus: (number: number) => invoke<RemoteReview>('wb_publish_status', { number }),
+  /**
+   * **合并**一份 PR/MR（squash）—— 人在回执屏上**显式点过**才调。
+   *
+   * ★ 口径（作者 2026-10-04 拍）：一律 squash；**不强制等 CI** —— "CI 没跑完 / 已经红了"
+   * 的二次确认在界面做，这里不重复设闸。合完返回**回读后的真状态**（应落到 `merged`）。
+   */
+  mergeReview: (number: number, platform?: string | null) =>
+    invoke<RemoteReview>('wb_merge_review', { number, platform: platform ?? null }),
+  /** 发布历史（只读）：最近若干次「发布预设」事务的回执，**最新在前** */
+  publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
+  /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
+  openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

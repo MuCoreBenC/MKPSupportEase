@@ -334,5 +334,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::publish_tx::wb_set_publish_token,
         app::publish_tx::wb_clear_publish_account,
         app::publish_tx::wb_publish_status,
+        // 合并（作者 2026-10-04 拍：squash、不强制等 CI）—— 用户显式点过才走
+        app::publish_tx::wb_merge_review,
+        // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
+        app::build::wb_publish_history,
+        app::build::wb_open_external,
     ])
 }

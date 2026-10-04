@@ -9,6 +9,7 @@
 //! | 建 PR | `POST /repos/{o}/{r}/pulls` | `POST /repos/{o}/{r}/pulls` |
 //! | 状态字段 | `state` + `merged` 布尔 | `state`：`open`/`merged`/`closed` |
 //! | 检查 | `/commits/{sha}/status` | `/repos/{o}/{r}/commits/{sha}/status`（同形） |
+//! | 合并 | `PUT /pulls/{n}/merge` | `PUT /pulls/{n}/merge`（同形；`merge_method` 走 body） |
 //!
 //! ★ **接口细节（字段名 / 端点）按 Gitee 公开 API 实现**；作者说后续会给旧版地址做一次
 //! "旧版配置 → 新版配置"的事实核对 —— 那时若发现字段名不一致，改这一个文件即可
@@ -24,7 +25,8 @@ use serde_json::Value;
 use crate::error::AppError;
 
 use super::{
-    collapse_checks, collapse_state, ChecksSummary, Hosting, RemoteReview, ReviewId, ReviewSpec,
+    collapse_checks, collapse_state, ChecksSummary, Hosting, MergeMethod, RemoteReview, ReviewId,
+    ReviewSpec,
 };
 
 fn api_base() -> String {
@@ -84,6 +86,21 @@ impl Gitee {
             .map_err(transport)?;
         read_json(resp)
     }
+
+    /// PUT（body 里带 access_token）—— 合并 MR 用它。
+    fn put(&self, path: &str, mut body: Value) -> Result<Value, AppError> {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("access_token".to_owned(), Value::String(self.token.clone()));
+        }
+        let url = format!("{}{}", api_base(), path);
+        let resp = super::agent()
+            .put(&url)
+            .header("User-Agent", "SupportEase")
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(transport)?;
+        read_json(resp)
+    }
 }
 
 /// 读一个 `ureq` 响应体并解析成 JSON。
@@ -127,6 +144,16 @@ impl Hosting for Gitee {
             review.checks = self.checks_for_sha(&id.owner, &id.repo, sha)?;
         }
         Ok(review)
+    }
+
+    fn merge_review(&self, id: &ReviewId, method: MergeMethod) -> Result<RemoteReview, AppError> {
+        // 与 GitHub 同形：`PUT /repos/{o}/{r}/pulls/{n}/merge`，body 带 `merge_method`。
+        // ★ Gitee 的字段名 / 端点按公开 API 形状实现，**待作者给旧版配置后事实核对**
+        //   （与建 PR / 状态回读同一条免责；只改这一个文件）。
+        let body = serde_json::json!({ "merge_method": method.wire_name() });
+        self.put(&super::merge_path(&id.owner, &id.repo, id.number), body)?;
+        // 合完回读：Gitee 的 `state` 会变成 `merged`（[`collapse_state`] 已认）
+        self.get_review(id)
     }
 }
 

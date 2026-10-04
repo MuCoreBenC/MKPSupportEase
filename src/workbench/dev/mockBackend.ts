@@ -1453,6 +1453,7 @@ export function installMockBackend() {
             base: 'main',
           },
           branch: 'publish/0.0.2',
+          commit: '08ec040',
           files: 21,
           summary: '已生成 9 份、定稿 21 份产物。已提交并推送到 `publish/0.0.2`。已建 PR !128。',
         })
@@ -1503,17 +1504,100 @@ export function installMockBackend() {
           tokenHint: null,
         })
       }
-      case 'wb_publish_status':
+      case 'wb_publish_status': {
+        // 演示脚本：#128 已经合了；别的编号回读一律"CI 已经跑完" —— 刷新看得出变化
+        const n = Number(args?.number ?? 128)
         return Promise.resolve({
           platform: 'github',
-          number: Number(args?.number ?? 128),
-          url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
-          state: 'open',
+          number: n,
+          url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${n}`,
+          state: n === 128 ? 'merged' : 'open',
           checks: 'passed',
           title: '发布：交付产物 21 份',
           head: 'publish/0.0.2',
           base: 'main',
         })
+      }
+      /* 合并（演示）：一律 squash，回读后落到 merged —— 与真机同一条口径 */
+      case 'wb_merge_review':
+        return Promise.resolve({
+          platform: 'github',
+          number: Number(args?.number ?? 128),
+          url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${Number(args?.number ?? 128)}`,
+          state: 'merged',
+          checks: 'passed',
+          title: '发布：交付产物 21 份',
+          head: 'publish/0.0.2',
+          base: 'main',
+        })
+      /*
+       * 发布历史（演示）：三条 —— 已合并 / 等待合并 / 停在发布检查。
+       * 真机读 `<appDataDir>/publish-history.json`（`history::load`）。
+       */
+      case 'wb_publish_history':
+        return Promise.resolve({
+          historySchema: 1,
+          records: [
+            {
+              at: '2026-10-04T14:02:00+08:00',
+              stage: 'statusRead',
+              branch: 'publish/0.0.2',
+              commit: '08ec040',
+              review: {
+                platform: 'github',
+                number: 128,
+                url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
+                state: 'merged',
+                checks: 'passed',
+                title: '发布：交付产物 21 份',
+                head: 'publish/0.0.2',
+                base: 'main',
+              },
+              files: 21,
+              generated: 0,
+              auditPassed: 15,
+              auditFailed: 0,
+              summary: '已生成 0 份、定稿 21 份产物。已提交并推送到 `publish/0.0.2`。已建 PR !128。',
+            },
+            {
+              at: '2026-10-04T11:20:00+08:00',
+              stage: 'reviewOpened',
+              branch: 'feat/demo',
+              commit: '1a2b3c4',
+              review: {
+                platform: 'github',
+                number: 127,
+                url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/127',
+                state: 'open',
+                checks: 'pending',
+                title: '发布：交付产物 18 份',
+                head: 'feat/demo',
+                base: 'main',
+              },
+              files: 18,
+              generated: 9,
+              auditPassed: 15,
+              auditFailed: 0,
+              summary: '已生成 9 份、定稿 18 份产物。已提交并推送到 `feat/demo`。已建 PR !127。',
+            },
+            {
+              at: '2026-10-03T18:44:00+08:00',
+              stage: 'blockedAudit',
+              branch: null,
+              commit: null,
+              review: null,
+              files: 0,
+              generated: 0,
+              auditPassed: 14,
+              auditFailed: 1,
+              summary: '发布闸没全绿 —— 一个字节都没写。先照「去修」把红项处理掉',
+            },
+          ],
+        })
+      /* 打开系统浏览器（演示）：桩里只记一笔，不真开 */
+      case 'wb_open_external':
+        console.info('[mock] openExternal', args?.url)
+        return Promise.resolve(undefined)
       case 'wb_preview_toml': {
         /*
          * 单独看一份产物的正文。**真产物由 Rust 的 `build::render()` 出**（段名取

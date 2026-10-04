@@ -93,6 +93,20 @@ pub enum PublishStage {
     StatusRead,
 }
 
+impl PublishStage {
+    /// 线上 / 历史文件里的名字（与 serde 的 camelCase 形状**逐字一致**；判据钉它）。
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            PublishStage::BlockedAudit => "blockedAudit",
+            PublishStage::Generated => "generated",
+            PublishStage::Committed => "committed",
+            PublishStage::Pushed => "pushed",
+            PublishStage::ReviewOpened => "reviewOpened",
+            PublishStage::StatusRead => "statusRead",
+        }
+    }
+}
+
 /// 一轮发布事务的结果。
 ///
 /// ★ 它是**阶段的快照**，不是"最终结论"：事务可能停在任何一步（审计红 / 建 PR 失败），
@@ -115,6 +129,8 @@ pub struct PublishTxReport {
     pub review: Option<RemoteReview>,
     /// 本机 git 分支（给前端显示"发到哪个分支"）
     pub branch: Option<String>,
+    /// 这次发布提交的短 sha（回执里显示"提交了哪一笔"；没提交 = `None`，如实说）
+    pub commit: Option<String>,
     /// 交付根的产物份数
     pub files: usize,
     /// 这一步的一句话说明（给状态条）
@@ -217,6 +233,7 @@ pub fn run(
             committed_paths: Vec::new(),
             review: None,
             branch: None,
+            commit: None,
             files: 0,
             summary: "发布闸没全绿 —— 一个字节都没写。先照「去修」把红项处理掉".to_owned(),
         });
@@ -247,6 +264,7 @@ pub fn run(
         committed_paths: Vec::new(),
         review: None,
         branch: None,
+        commit: None,
         files: out.files,
         summary: format!(
             "已生成 {} 份、定稿 {} 份产物。",
@@ -287,6 +305,8 @@ pub fn run(
 
     let message = commit_message(out.files, gen.written.len());
     git.commit(&message)?;
+    // 回执要显示"提交了哪一笔"。取不到 sha 不影响发布本身 —— 那是展示，不是闸
+    report.commit = git.head_short().ok();
     report.stage = PublishStage::Committed;
 
     /*
@@ -379,7 +399,7 @@ pub struct PublishAccount {
 /// 组装一个平台的视图（配置 + 凭据状态）。
 fn view_for(
     cfg: &super::account::PublishAccountConfig,
-    creds: &super::credentials::Credentials<super::credentials::KeychainStore>,
+    creds: &super::credentials::Session,
     platform: &str,
 ) -> Result<PlatformAccountView, AppError> {
     let acct = cfg.get(platform);
@@ -399,10 +419,10 @@ pub fn wb_publish_account(app: tauri::AppHandle) -> Result<PublishAccount, AppEr
     crate::ipc::traced("wb_publish_account", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
         let cfg = super::account::load(&root)?;
-        let creds = super::credentials::Credentials::new(super::credentials::KeychainStore);
+        let creds = super::credentials::session();
         let platforms = super::credentials::PLATFORMS
             .iter()
-            .map(|p| view_for(&cfg, &creds, p))
+            .map(|p| view_for(&cfg, creds, p))
             .collect::<Result<Vec<_>, _>>()?;
 
         let git = super::git::Git::at_repo_root();
@@ -457,8 +477,8 @@ pub fn wb_set_publish_account(
         cfg.set(&platform, Some(account));
         super::account::save(&root, &cfg)?;
 
-        let creds = super::credentials::Credentials::new(super::credentials::KeychainStore);
-        view_for(&cfg, &creds, &platform)
+        let creds = super::credentials::session();
+        view_for(&cfg, creds, &platform)
     })
 }
 
@@ -472,7 +492,7 @@ pub fn wb_set_publish_token(
 ) -> Result<PlatformAccountView, AppError> {
     crate::ipc::traced("wb_set_publish_token", |_| {
         super::credentials::ensure_known(&platform)?;
-        let creds = super::credentials::Credentials::new(super::credentials::KeychainStore);
+        let creds = super::credentials::session();
         creds.set_token(&platform, &token)?;
         let status = creds.status(&platform)?;
         Ok(PlatformAccountView {
@@ -500,9 +520,9 @@ pub fn wb_clear_publish_account(
         cfg.set(&platform, None);
         super::account::save(&root, &cfg)?;
 
-        let creds = super::credentials::Credentials::new(super::credentials::KeychainStore);
+        let creds = super::credentials::session();
         creds.clear(&platform)?;
-        view_for(&cfg, &creds, &platform)
+        view_for(&cfg, creds, &platform)
     })
 }
 
@@ -528,6 +548,46 @@ pub fn wb_publish_status(app: tauri::AppHandle, number: u64) -> Result<RemoteRev
     })
 }
 
+/// **合并**一份 PR/MR（squash）—— 用户在回执屏上**显式点过「合并」**才调。
+///
+/// 口径（作者 2026-10-04 拍）：
+/// - **一律 squash**（不摆方式选择）；
+/// - **不强制等 CI** —— "CI 没跑完 / 已经红了"的二次确认在界面做，这里不重复设闸；
+/// - 合完**回读**一份真状态返回（`state` 应落到 `merged`；平台拒合时 4xx 原样报错）。
+///
+/// ★ `(async)`：碰网络（IO 单子）。
+#[tauri::command(async)]
+pub fn wb_merge_review(
+    app: tauri::AppHandle,
+    number: u64,
+    platform: Option<String>,
+) -> Result<RemoteReview, AppError> {
+    crate::ipc::traced("wb_merge_review", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        let target = resolve_target(&root, platform.as_deref())?;
+        let id = super::platform::ReviewId {
+            owner: target.owner,
+            repo: target.repo,
+            number,
+        };
+        let method = super::platform::MergeMethod::Squash;
+        let merged = match target.platform.as_str() {
+            "github" => {
+                super::platform::github::GitHub::new(target.token).merge_review(&id, method)
+            }
+            "gitee" => super::platform::gitee::Gitee::new(target.token).merge_review(&id, method),
+            other => Err(AppError::invalid_argument(format!("不认识的平台：{other}"))),
+        }?;
+
+        // 合并是**我们亲手造成的状态变化** —— 顺手把它记回发布历史（记账不必问网络）。
+        // 记不上不影响结论：已经合了就是合了；下次「刷新」还能看到真状态。
+        if let Ok(root) = crate::fsx::paths::internal_root(&app) {
+            let _ = super::history::update_review(&root, &merged);
+        }
+        Ok(merged)
+    })
+}
+
 /* ---------- 发布目标的解析（命令壳用；内核只收解析好的 PublishTarget） ---------- */
 
 /// 从发布账户配置 + Keychain 解析出**发布目标**。
@@ -542,7 +602,7 @@ pub fn resolve_target(
     platform: Option<&str>,
 ) -> Result<PublishTarget, AppError> {
     let cfg = super::account::load(root)?;
-    let creds = super::credentials::Credentials::new(super::credentials::KeychainStore);
+    let creds = super::credentials::session();
 
     // 候选：配完整的账户（仓库地址 + 用户名都有）
     let mut candidates: Vec<(String, super::account::PlatformAccount)> = Vec::new();
@@ -615,9 +675,25 @@ pub fn collapse_review_state(raw: &str) -> ReviewState {
 mod tests {
     use super::*;
 
-    /// 阶段枚举的线上形状（降成 camelCase 字符串）—— 前端按它画状态条。
+    /// 阶段枚举的线上形状（降成 camelCase 字符串）—— 前端按它画状态条，
+    /// 发布历史按它落盘。**`wire_name()` 必须与 serde 逐字一致**（两处写法不许漂）。
     #[test]
     fn publish_stages_serialize_as_camel_case() {
+        for stage in [
+            PublishStage::BlockedAudit,
+            PublishStage::Generated,
+            PublishStage::Committed,
+            PublishStage::Pushed,
+            PublishStage::ReviewOpened,
+            PublishStage::StatusRead,
+        ] {
+            let wire = serde_json::to_value(stage).unwrap();
+            assert_eq!(
+                wire.as_str().unwrap(),
+                stage.wire_name(),
+                "{stage:?} 的两种写法漂了"
+            );
+        }
         let s = serde_json::to_value(PublishStage::ReviewOpened).unwrap();
         assert_eq!(s, "reviewOpened");
         let s = serde_json::to_value(PublishStage::BlockedAudit).unwrap();

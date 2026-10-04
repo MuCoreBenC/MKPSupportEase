@@ -529,6 +529,21 @@ publish_into        （定稿 catalog / manifest / source）
    - **平台 HTTP 一律走 `platform::agent()`**（带 `API_TIMEOUT=30s` / `API_CONNECT_TIMEOUT=10s`）——
      **没有超时就没有尽头**；发布链上的网络调用不许用裸 `ureq::get/post`。
 
+5. **回执与历史**（2026-10-04，发布事务收尾那一刀）：
+   - **回执** = `PublishTxReport` 的阶段快照；界面（`PublishGateModal` 的第二段视图）只画不判 ——
+     阶段链、PR 地址、CI 档位全来自后端。PR 地址交给系统浏览器走 `wb_open_external`
+     （**只放行 `http(s)`** —— 那个口子只该开这么窄）。
+   - **历史** = `<appDataDir>/publish-history.json`（`app/history.rs`）：与 `publish-account.json`
+     同形（`*Schema` 代次 + `atomic_write` + 坏档 `CORRUPTED` 不静默；缺文件 = 空）。
+     **它不是配置** —— 删掉只丢展示，不影响发布能力。写入点在**壳层**（`wb_publish` 收尾写一条），
+     因为写它要 `AppHandle` 拿 appDataDir；内核 `publish_tx::run` **不碰 AppHandle**（见上面第 2 条）。
+   - **合并** = `Hosting::merge_review`（两个平台同形：`PUT /repos/{o}/{r}/pulls/{n}/merge`）：
+     一律 **squash**、**不强制等 CI**（口径源头 = `RELEASE-TRANSACTIONS.md` §1.1 第 8 步）；
+     **只在人显式点过之后调**，合完**回读**一份真状态。
+   - **Token 会话缓存** = `credentials::session()`（进程一份；`CachedStore` 包着 `KeychainStore`）：
+     一次程序运行**至多读一次**系统钥匙串（dev 下每读一次都可能弹授权框），`set` / `clear`
+     同步失效；**不改 Keychain 的存储方式与内容**。
+
 **平台抽象与统一状态模型**（`workbench/app/platform/mod.rs`）：
 
 - `trait Hosting` = 平台同一张脸：`create_review` / `get_review`；

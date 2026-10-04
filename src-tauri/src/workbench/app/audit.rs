@@ -798,20 +798,32 @@ fn manifest_correct(dist: &std::path::Path) -> AuditItem {
 /// `presets/dist/` 必须排除 —— 它就是这次要提交的产物本身，拿它的未跟踪状态
 /// 去拦自己的发布是个死锁（与 `scripts/publish-presets.mjs` 同一条口径）。
 fn git_clean() -> AuditItem {
+    git_clean_at(&paths::repo_root())
+}
+
+/// ⑮ 的本体：**在给定的工作目录上**判（发布时 = 真仓库；判据里 = 临时造的目录）。
+fn git_clean_at(repo: &std::path::Path) -> AuditItem {
     let item = AuditItem::base(
         "git/clean",
         "Git 工作区干净",
         AuditSeverity::Blocker,
         "把无关改动提交或收起来；从 main 起发（一次性分支由发布流程自己建）",
     );
-    let repo = paths::repo_root();
-    let branch = git(&repo, &["symbolic-ref", "--short", "HEAD"]);
+    let branch = git(repo, &["symbolic-ref", "--short", "HEAD"]);
     let dirty = git(
-        &repo,
+        repo,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     );
     let (Some(branch), Some(dirty)) = (branch, dirty) else {
-        return item.skip("这台机器上取不到 git（`git` 不在 PATH 或不是 Git 仓库）—— 不假装通过");
+        // ★ **这一格不适用**：取不到 Git、或取不到分支名（CI 的游离 HEAD 检出是常见形状）。
+        //   不是"工作区干净"（不能伪造），也不是 Skipped（Blocker 不许靠 Skipped 混过去）——
+        //   如实说"本环境执行不了这条检查"，**发布阻断责任归有 Git 工作区的真实发布环境**
+        //   （作者 2026-10-04 裁决；见 `docs/RELEASE-TRANSACTIONS.md` §6 那一句）。
+        //   老写法这里是 skip ⇒ PR 上 rust job 恒红（2026-10-04 PR #27 实测）。
+        return item.pass(
+            "当前执行环境不是可用的 Git 工作区（`git` 不可用 / 不是仓库 / 游离 HEAD）\
+             —— 无法检查工作区变更，该检查不适用",
+        );
     };
     let outside: Vec<String> = dirty
         .split('\0')
@@ -1063,6 +1075,74 @@ mod tests {
             core.can_publish,
             core.blockers() == 0,
             "「能不能发布」必须等于「没有任何 Blocker 红」"
+        );
+    }
+
+    /// ★ 取不到 Git 的工作区里，⑮ 是 **Pass（该检查不适用）** —— 不是 Skipped、也不是"干净"。
+    ///
+    /// 为什么必须有这一条：CI（`pull_request` 是游离 HEAD 检出）里 ⑮ 取不到分支名 —— 老写法
+    /// 走 `skip`，撞上「Blocker 不许 Skipped」那条总闸 ⇒ **PR 上 rust job 恒红**
+    /// （2026-10-04 PR #27 实测，本地却恒绿）。裁决（作者 2026-10-04）：
+    /// 这一格在"本环境执行不了"时如实说明并放行，**发布阻断责任归有 Git 工作区的真实发布环境**。
+    #[test]
+    fn a_gitless_workspace_marks_git_clean_as_not_applicable() {
+        let run_git = |dir: &std::path::Path, args: &[&str]| -> bool {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+
+        // ① 不是 Git 仓库的目录（临时目录的常态）—— CI 的真实形状之一
+        let dir = tempfile::tempdir().expect("临时目录");
+        let item = git_clean_at(dir.path());
+        assert_eq!(
+            item.status,
+            AuditStatus::Pass,
+            "取不到 Git ⇒ 该检查不适用（Pass）：{}",
+            item.details
+        );
+        if !run_git(dir.path(), &["rev-parse", "--git-dir"]) {
+            // 只有在"确实不在任何仓库里"时才钉文案（临时目录万一落在仓库里就不冤枉它）
+            assert!(
+                item.details.contains("不适用") && item.details.contains("Git 工作区"),
+                "结论要把话说清楚（不是 Git 工作区 / 该检查不适用），不许写成\"工作区干净\"：{}",
+                item.details
+            );
+        }
+
+        // ② 游离 HEAD（CI 检出的另一种形状）：仍是 Pass
+        let dir = tempfile::tempdir().expect("临时目录");
+        // 初始分支不叫 main：本机装了「禁止在 main 直接提交」的全局钩子（CI 上没有，
+        // 但这条判据要在两边都绿）；`gpgsign=false` 同理 —— 别让本机全局配置左右判据。
+        if !run_git(dir.path(), &["init", "-q", "-b", "topic"]) {
+            return; // 这台机器没有 git ⇒ ① 已经覆盖了"取不到"那一支
+        }
+        assert!(run_git(
+            dir.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ]
+        ));
+        assert!(run_git(dir.path(), &["checkout", "-q", "--detach"]));
+        let item = git_clean_at(dir.path());
+        assert_eq!(
+            item.status,
+            AuditStatus::Pass,
+            "游离 HEAD ⇒ 该检查不适用（Pass）：{}",
+            item.details
         );
     }
 }

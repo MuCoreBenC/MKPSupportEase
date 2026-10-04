@@ -22,7 +22,8 @@ use serde_json::Value;
 use crate::error::AppError;
 
 use super::{
-    collapse_checks, collapse_state, ChecksSummary, Hosting, RemoteReview, ReviewId, ReviewSpec,
+    collapse_checks, collapse_state, ChecksSummary, Hosting, MergeMethod, RemoteReview, ReviewId,
+    ReviewSpec,
 };
 
 /// GitHub API 基址（可用环境变量覆盖给企业版 / 测试假服务器）。
@@ -81,6 +82,20 @@ impl GitHub {
             .map_err(transport)?;
         read_json(resp)
     }
+
+    /// PUT 一个 API 路径（带 JSON body）—— 合并 PR 用它。
+    fn put(&self, path: &str, body: Value) -> Result<Value, AppError> {
+        let url = format!("{}{}", api_base(), path);
+        let resp = super::agent()
+            .put(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "SupportEase")
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(transport)?;
+        read_json(resp)
+    }
 }
 
 /// 读一个 `ureq` 响应体并解析成 JSON（与 `runtime/net.rs` 同一条 `into_reader` 取法）。
@@ -120,6 +135,15 @@ impl Hosting for GitHub {
             review.checks = self.checks_for_sha(&id.owner, &id.repo, &sha)?;
         }
         Ok(review)
+    }
+
+    fn merge_review(&self, id: &ReviewId, method: MergeMethod) -> Result<RemoteReview, AppError> {
+        // `PUT /repos/{o}/{r}/pulls/{n}/merge`，body `{"merge_method":"squash"}`。
+        // 平台拒合（不可合并 / 有保护规则 / head 变了）会落成 4xx → `transport` 如实报错。
+        let body = serde_json::json!({ "merge_method": method.wire_name() });
+        self.put(&super::merge_path(&id.owner, &id.repo, id.number), body)?;
+        // 合完**回读**一份：调用方拿到的是"合并之后的真状态"，不是我们自己拼的
+        self.get_review(id)
     }
 }
 

@@ -270,26 +270,123 @@ if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-page.png` })
   if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-gate-green.png` })
 
   /*
-   * 确认发布：闸自己关掉，② 卡记上这次**发布事务**的一笔。
+   * 确认发布：**不再直接关框** —— 就地切成「发布回执」（第四刀：治的就是
+   * "关掉再打开又是新的"）。② 卡同时记上这一笔。
    *
    * 第三刀下半起，「发布」是一次**事务**（审计 → 生成 → 定稿 → git → PR），
-   * ② 卡那格记的是事务结果的 `summary`（不再是老的"最低客户端版本"那句）——
-   * 桩走向成功那一路，所以那句话里有"已建 PR"。
+   * 桩走向成功那一路：commit `08ec040`、PR #128、CI 还在跑。
    */
   await page
     .locator('[role="dialog"]')
     .getByRole('button', { name: '确认发布', exact: true })
     .click()
-  const recorded = await until(() => hasText('本次发布落下'))
-  const gone = (await page.locator('[role="dialog"]').count()) === 0
-  say(recorded && gone, '点「确认发布」→ 闸关掉、② 卡记上这一笔')
-  if (!recorded || !gone) problems.push('确认发布之后闸没关，或 ② 卡没记上')
 
-  /* 事务回执：桩里走到 reviewOpened —— ② 卡那句 summary 要说清"建了 PR" */
-  const receipt = await until(() => hasText('已建 PR'))
-  say(receipt, '② 卡的回执说的是**发布事务**的结果（含「已建 PR」）')
-  if (!receipt) problems.push('发布回执里没有事务结果（已建 PR）')
-  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-done.png` })
+  const receiptShown = await until(async () => (await dialogText()).includes('发布回执'), 6000)
+  say(receiptShown, '点「确认发布」→ 就地切到「发布回执」（不再把框关掉）')
+  if (!receiptShown) problems.push('确认发布之后没有进发布回执')
+
+  const receiptText = text(await dialogText())
+  const chain =
+    receiptText.includes('发布检查') &&
+    receiptText.includes('生成') &&
+    receiptText.includes('提交') &&
+    receiptText.includes('推送') &&
+    receiptText.includes('PR #128')
+  say(chain, '回执摆出阶段链：发布检查 / 生成 / 提交 / 推送 / PR #128')
+  if (!chain) problems.push('发布回执的阶段链不全')
+
+  const commitSha = receiptText.includes('08ec040')
+  say(commitSha, '回执给出**提交号**（08ec040）')
+  if (!commitSha) problems.push('发布回执没给提交号')
+
+  const prAddr = receiptText.includes('github.com/MuCoreBenC/MKPSupportEase/pull/128')
+  say(prAddr, '回执给出 **PR 地址**')
+  if (!prAddr) problems.push('发布回执没给 PR 地址')
+
+  const recorded = await until(() => hasText('本次发布落下'))
+  say(recorded, '② 卡同时记上这一笔（本次发布落下 … · 08ec040 → PR #128）')
+  if (!recorded) problems.push('发布之后 ② 卡没记上')
+  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-receipt.png` })
+
+  /* —— 合并（作者 2026-10-04 拍：squash、不强制等 CI；CI 没跑完要二次确认）—— */
+  const mergeBtn = page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '合并 #128', exact: true })
+  const hasMerge = (await mergeBtn.count()) > 0
+  say(hasMerge, '回执上有「合并 #128」入口（软件内合并）')
+  if (!hasMerge) problems.push('回执上没有合并按钮')
+  if (hasMerge) {
+    await mergeBtn.click()
+    const confirmShown = await until(async () => (await dialogText()).includes('CI 尚未完成'), 3000)
+    say(confirmShown, 'CI 还在跑时点合并 → 二次确认如实说「CI 尚未完成」')
+    if (!confirmShown) problems.push('CI 未完成时点合并没有二次确认（或文案不对）')
+
+    await page
+      .locator('[role="dialog"]')
+      .getByRole('button', { name: '确定合并', exact: true })
+      .click()
+    const merged = await until(async () => (await dialogText()).includes('已合并'), 5000)
+    say(merged, '合并走通 → 回执显示「已合并」（桩回读 state=merged）')
+    if (!merged) problems.push('合并之后回执没显示已合并')
+    if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-merged.png` })
+  }
+
+  /*
+   * 关掉再开：那份回执还在（「查看发布结果」），且**不重跑十五项**。
+   * ★ 「关闭」有两颗（框头那颗 × 与页脚那颗）—— 取第一颗，别撞 Playwright 的严格模式。
+   */
+  await page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '关闭', exact: true })
+    .first()
+    .click()
+  await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
+  await page.getByRole('button', { name: '查看发布结果', exact: true }).first().click()
+  const reopened = await until(async () => {
+    const t = text(await dialogText())
+    return t.includes('发布回执') && !t.includes('十五项')
+  }, 5000)
+  say(reopened, '关掉之后「查看发布结果」还能打开那份回执（不是空的新面板）')
+  if (!reopened) problems.push('关掉之后打不回那份回执')
+  await page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '关闭', exact: true })
+    .first()
+    .click()
+  await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
+
+  /* —— 发布历史（本地回执日志：打开读一次；每条一个手动「刷新」，不轮询）—— */
+  await page.getByRole('button', { name: '发布历史', exact: true }).first().click()
+  await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+  const histShown = await until(async () => (await dialogText()).includes('条回执'), 5000)
+  say(histShown, '「发布历史」列出本地回执（打开时读一次）')
+  if (!histShown) problems.push('发布历史没列出记录')
+
+  const histRows = await page.locator('[role="dialog"] [role="listitem"]').count()
+  say(histRows >= 3, `历史里摆出 ${histRows} 条回执（桩给 3 条）`)
+  if (histRows < 3) problems.push(`发布历史条数不对（${histRows}）`)
+
+  const histText = text(await dialogText())
+  const mergedRow = histText.includes('已合并')
+  say(mergedRow, '历史里看得到「✓ 已合并」')
+  if (!mergedRow) problems.push('历史里没有已合并那条')
+
+  const row127 = page.locator('[role="dialog"] [role="listitem"]', { hasText: 'PR #127' })
+  if ((await row127.count()) > 0) {
+    await row127.getByRole('button', { name: '刷新', exact: true }).click()
+    const refreshed = await until(async () => text(await row127.innerText()).includes('CI 通过'), 4000)
+    say(refreshed, '每条「刷新」手动回读一次状态（#127：CI 运行中 → 通过）')
+    if (!refreshed) problems.push('历史里点「刷新」没有回读到新状态')
+  } else {
+    problems.push('历史里找不到 #127 那条（刷新那条判不了）')
+  }
+  if (wantShots) await page.screenshot({ path: `${shotDir}/wb-publish-history.png` })
+  await page
+    .locator('[role="dialog"]')
+    .getByRole('button', { name: '关闭', exact: true })
+    .first()
+    .click()
+  await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
 }
 
 /* ============================ 二、参数台 ============================ */
@@ -298,8 +395,11 @@ console.log('\n【二】参数台（C15 A2 整卡收起 · B1 抽屉说清类型
 await page.locator('button[title="参数台"]').first().click()
 await page.waitForTimeout(200)
 
-/* 左树默认收起：点把手钉住，再选 A1 / 标准版 */
-await page.locator('button[title*="钉住"]').first().click()
+/*
+ * 左树**默认就是钉住的**（作者 2026-10-04 起：「一进来就看得见机型与版本这棵树」）——
+ * 老探针那句"左树默认收起、点把手钉住"随那个默认一起退役：现在没有可点的「钉住」把手，
+ * 把手只在**收起态**才叫「钉住机型与版本」（点击会超时挂住整段探针）。
+ */
 await page.waitForSelector('nav[aria-label="机型与版本"] button', { timeout: 5000 })
 await page
   .locator('nav[aria-label="机型与版本"] button')

@@ -983,7 +983,7 @@ pub fn wb_publish(
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / Keychain / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
-        with_ctx(|ctx| {
+        let report = with_ctx(|ctx| {
             super::publish_tx::run(
                 ctx,
                 &opts,
@@ -991,7 +991,67 @@ pub fn wb_publish(
                 hosting.as_ref().map(|h| h.as_ref()),
                 None,
             )
-        })
+        })?;
+
+        // 收尾：把这次回执落进**发布历史**（作者 2026-10-04）。
+        // - 壳层做：写历史要 `AppHandle` 拿 appDataDir，而事务内核不碰 AppHandle（锁纪律）；
+        // - **只记真发生过的**：被闸拦下（零写入）与 `dry_run`（演练）都不记 —— 回执不是"我点过"，
+        //   是"发生过什么"；
+        // - 历史写失败**不许**把一次成功的发布说成失败：如实在 summary 上补一句，照样返回。
+        let mut report = report;
+        if !opts.dry_run && report.stage != super::publish_tx::PublishStage::BlockedAudit {
+            match crate::fsx::paths::internal_root(&app) {
+                Ok(root) => {
+                    let record = super::history::PublishRecord::from_report(
+                        &report,
+                        crate::workbench::clock::now_iso8601(),
+                    );
+                    if let Err(e) = super::history::append(&root, record) {
+                        report
+                            .summary
+                            .push_str(&format!("（发布历史没记上：{}）", e.message));
+                    }
+                }
+                Err(e) => report
+                    .summary
+                    .push_str(&format!("（发布历史没记上：{}）", e.message)),
+            }
+        }
+        Ok(report)
+    })
+}
+
+/// **发布历史**（只读、`async`）：最近若干次「发布预设」事务的回执，**最新在前**。
+///
+/// 界面开场读一次；每条"现在走到哪"由 [`super::publish_tx::wb_publish_status`] **手动刷新**
+/// （作者定死：状态是"看一看"，不是常驻任务 —— **不做轮询**）。
+#[tauri::command(async)]
+pub fn wb_publish_history(
+    app: tauri::AppHandle,
+) -> Result<super::history::PublishHistory, AppError> {
+    traced("wb_publish_history", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        super::history::load(&root)
+    })
+}
+
+/// **在系统浏览器里打开一个 URL**（回执屏的「查看 PR」）。
+///
+/// ★ 只放行 `http(s)://`：这是个"把字符串变成系统动作"的口子，白名单要窄。
+/// 与 `wb_reveal_asset` 同一条取向：不写任何应用状态，只开系统程序。
+/// ★ `(async)`：命令一律不占主线程（读命令那条规矩的同一个理由）。
+#[tauri::command(async)]
+pub fn wb_open_external(app: tauri::AppHandle, url: String) -> Result<(), AppError> {
+    traced("wb_open_external", |_| {
+        let u = url.trim();
+        if !(u.starts_with("https://") || u.starts_with("http://")) {
+            return Err(AppError::invalid_argument(
+                "只允许打开 http(s) 链接 —— 别的形状不交给系统",
+            ));
+        }
+        tauri_plugin_opener::OpenerExt::opener(&app)
+            .open_url(u, None::<&str>)
+            .map_err(|e| AppError::io("打不开浏览器").with_detail(e.to_string()))
     })
 }
 
