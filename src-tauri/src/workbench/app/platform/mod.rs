@@ -126,6 +126,98 @@ pub struct ReviewId {
     pub number: u64,
 }
 
+/// **上传安装包**的总时间上限（第四刀）。
+///
+/// ★ 它与 [`API_TIMEOUT`] **刻意不是一个数**：一个 dmg 几十 MB，30 秒装不下；
+/// 而没有上限的上传在断网时会挂到天荒地老（与"没有超时就没有尽头"同一条纪律）。
+/// 15 分钟是"家用宽带传一个 dmg"的宽松上界 —— 真到不了会如实报错，不假装还在传。
+pub const UPLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// 上传专用的 `ureq` Agent（总时长 [`UPLOAD_TIMEOUT`]，连接仍是 [`API_CONNECT_TIMEOUT`]）。
+pub(super) fn upload_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(UPLOAD_TIMEOUT))
+        .timeout_connect(Some(API_CONNECT_TIMEOUT))
+        .build()
+        .into()
+}
+
+/// 建一个 Release 要的东西（第四刀）。
+#[derive(Debug, Clone)]
+pub struct ReleaseSpec {
+    pub owner: String,
+    pub repo: String,
+    /// tag 名（**带 `v` 前缀**：`v0.0.2`）—— 与 git tag 逐字一致，Release 因此挂在那一笔上
+    pub tag_name: String,
+    /// Release 标题（给人在网页上看到的那一句）
+    pub name: String,
+    /// 正文（发布说明）
+    pub body: String,
+}
+
+/// 建好的 Release（平台无关）。`id` 是上传 asset 要用的那个号。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRelease {
+    /// 平台 id：`"github"` | `"gitee"`
+    pub platform: String,
+    pub id: u64,
+    pub tag_name: String,
+    /// 网页地址（**进 `release.json` 的 `url`** —— 客户端「查看更新」点开的就是它）
+    pub url: String,
+}
+
+/// 上传一个安装包要的东西。**文件按路径给**（不把字节塞进这个结构）——
+/// dmg 有几十 MB，传引用而不是值，也让"上传前先确认文件在不在"有地方落。
+#[derive(Debug, Clone)]
+pub struct AssetUpload {
+    pub owner: String,
+    pub repo: String,
+    pub release_id: u64,
+    /// 上传后在 Release 页面上显示的文件名（`SupportEase_0.0.2_aarch64.dmg`）
+    pub name: String,
+    /// `Content-Type`（按扩展名定，见 [`content_type_for`]）
+    pub content_type: String,
+    /// 本地绝对路径
+    pub path: std::path::PathBuf,
+}
+
+/// 上传完成的结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadedAsset {
+    pub name: String,
+    /// 字节数（回执里显示"传了多大"）
+    pub size: u64,
+    /// 下载直链
+    pub url: String,
+}
+
+/// 安装包文件名 → `Content-Type`。**纯函数**（判据钉它）。
+///
+/// 只认第一阶段会产出的那两种（`.dmg` / `.app` 打成的 zip）；认不出 → 通用二进制类型，
+/// **不猜**（猜错的代价是用户下下来打不开，而报错至少还能看见）。
+pub fn content_type_for(file_name: &str) -> &'static str {
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".dmg") {
+        "application/x-apple-diskimage"
+    } else if lower.ends_with(".zip") {
+        "application/zip"
+    } else if lower.ends_with(".msi") {
+        "application/x-msi"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+/// **安装包命名**（第四刀 · 作者裁决 ⑤：沿用项目既有风格，不另造体系）。
+///
+/// `SupportEase_0.0.2_aarch64.dmg` —— 产品名 + 版本 + 架构，与 Tauri 自己产出的
+/// 文件名（含 `universal` / 机型后缀）对齐。
+pub fn asset_name(product: &str, version: &str, arch: &str, ext: &str) -> String {
+    format!("{product}_{version}_{arch}.{ext}")
+}
+
 /// 一个代码托管平台的**同一张脸**。GitHub / Gitee 各实现一份。
 ///
 /// 只收 `&self`（凭据在构造时注入）：网络调用是同步的（`ureq`），
@@ -159,6 +251,43 @@ pub trait Hosting {
         head: &str,
         base: &str,
     ) -> Result<Option<RemoteReview>, AppError>;
+
+    /// 基于一个 **已经推上去的 tag** 建 Release（第四刀）。
+    ///
+    /// ★ 顺序是"先有 tag 再有 Release"：Release 挂在 tag 上，tag 挂在 main 的 tip 上。
+    /// 倒过来的后果是 Release 指着一个还不存在的提交。
+    fn create_release(&self, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
+        let _ = spec;
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /// 往一个 Release 上**传安装包**（二进制 body，第四刀）。
+    ///
+    /// ★ 与 JSON 出口不是一回事：body 是文件字节、超时走 [`UPLOAD_TIMEOUT`]。
+    fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
+        let _ = up;
+        Err(platform_not_supported(self.kind()))
+    }
+}
+
+/// **平台 id → 平台客户端**。**两张入口（工作台 / CLI）共用这一张映射表** ——
+/// 抽屉只开一次，加第三个平台时改一处就够。认不出 → `None`（由调用方如实报，不猜）。
+pub fn hosting(kind: &str, token: String) -> Option<Box<dyn Hosting>> {
+    match kind {
+        "github" => Some(Box::new(github::GitHub::new(token))),
+        "gitee" => Some(Box::new(gitee::Gitee::new(token))),
+        _ => None,
+    }
+}
+
+/// 「这个平台暂不支持软件 Release」的**统一说法**（第四刀）。
+///
+/// ★ **如实报，不假装支持**：Gitee 没有把 Release API 接进来之前，调用它要得到一个
+/// 明确的"没做"，而不是一次假装成功的空返回 —— 假装成功的后果是用户以为发布了。
+pub fn platform_not_supported(platform: &str) -> AppError {
+    AppError::not_implemented(format!(
+        "{platform} 这一支还没接「发布软件版本」（Release / 上传安装包）"
+    ))
 }
 
 /// 「这一支上开着的 PR / MR」的列表查询串。**纯函数**（两个平台参数名同形：`state` /
@@ -340,6 +469,40 @@ mod tests {
         assert_eq!(collapse_checks("failure"), ChecksSummary::Failed);
         assert_eq!(collapse_checks("none"), ChecksSummary::None);
         assert_eq!(collapse_checks("huh"), ChecksSummary::Unknown);
+    }
+
+    /// **安装包命名**沿用项目既有风格（产品名 + 版本 + 架构），不另造体系。
+    #[test]
+    fn asset_name_is_product_version_arch() {
+        assert_eq!(
+            asset_name("SupportEase", "0.0.2", "aarch64", "dmg"),
+            "SupportEase_0.0.2_aarch64.dmg"
+        );
+    }
+
+    /// `.dmg` 必须是 Apple 磁盘镜像那个类型 —— 猜错的代价是用户下下来打不开。
+    /// 认不出时用通用二进制类型，**不猜**。
+    #[test]
+    fn content_type_maps_installer_extensions_without_guessing() {
+        assert_eq!(
+            content_type_for("SupportEase_0.0.2_aarch64.dmg"),
+            "application/x-apple-diskimage"
+        );
+        assert_eq!(content_type_for("x.zip"), "application/zip");
+        assert_eq!(content_type_for("x.msi"), "application/x-msi");
+        assert_eq!(
+            content_type_for("mystery.bin"),
+            "application/octet-stream",
+            "认不出就用通用二进制类型"
+        );
+    }
+
+    /// **没接的平台如实报"不支持"**，不返回假成功 —— 假装成功的后果是用户以为发布了。
+    #[test]
+    fn an_unsupported_platform_says_so() {
+        let e = platform_not_supported("gitee");
+        assert_eq!(e.code, crate::error::ErrorCode::NotImplemented);
+        assert!(e.message.contains("gitee"));
     }
 
     /// 合并：**只有 squash 一档**；端点路径两个平台同形（写错端点比报错更难查）。

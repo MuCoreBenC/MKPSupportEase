@@ -74,6 +74,7 @@ import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
 import GenerateDiffModal from './GenerateDiffModal'
 import PublishGateModal from './PublishGateModal'
+import ReleaseGateModal from './ReleaseGateModal'
 import HistoryModal from './HistoryModal'
 import s from '../c14.module.css'
 
@@ -146,6 +147,11 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
   const [gateReport, setGateReport] = useState<PublishTxReport | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
+  /*
+   * **发布软件版本**的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
+   * 「发布预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
+   */
+  const [releaseGateOpen, setReleaseGateOpen] = useState(false)
   const [baseline, setBaseline] = useState<BaselineDiffEntry[] | null>(null)
   const [strays, setStrays] = useState<string[] | null>(null)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof wb.trash>> | null>(null)
@@ -646,11 +652,19 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                 当前：已安装 <span className={s.mono}>{appVersion ?? '未知'}</span>
               </span>
               <span className={s.grow} />
-              <span className={s.cardNote}>尚未有新的软件版本</span>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnPrimary}`}
+                onClick={() => setReleaseGateOpen(true)}
+                title="先过一道闸（分支 / 工作区 / 版本号 / tag / 平台），全绿才发"
+              >
+                发布软件版本
+              </button>
             </div>
             <p className={s.note}>
               预设更新**不需要**新的安装包 —— 走上面的「发布预设」即可。只有改动程序本身
               （Rust / React / 数据读取能力 / 客户端功能）才需要发布一个软件版本。
+              发完还要**合并 release.json 那个 PR** —— 客户端才看得到新版本。
             </p>
           </div>
         </div>
@@ -814,6 +828,17 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
 
       {/* 发布历史：本地回执日志（`publish-history.json`），最新在前 */}
       {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} />}
+
+      {/*
+        发布软件版本的闸 → 回执 → 历史（第四刀）。
+        ★ 与上面那个 `PublishGateModal` 是**两道闸**：这道发安装包，那道发预设。
+      */}
+      {releaseGateOpen && (
+        <ReleaseGateModal
+          onClose={() => setReleaseGateOpen(false)}
+          currentVersion={appVersion}
+        />
+      )}
 
       {/* 另一半发布物：用户真正下载的那一份 —— 正文来自后端的渲染器 */}
       {tomlOpen !== null && (

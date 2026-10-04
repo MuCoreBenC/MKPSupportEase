@@ -17,6 +17,16 @@ default-run = "mkp-support-ease"
 name = "mkp_support_ease_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# 「发布软件版本」的命令行入口（第四刀）。
+#
+# ★ `required-features`：它整份活在 workbench 那一档里 —— 给用户的二进制（默认 feature）
+# **编不到这个文件**，也就不会把"发布"这两个字带进客户端。与 `src/workbench/**`
+# 那道闸是同一条思路，只是这道由 cargo 站在编译期守着。
+[[bin]]
+name = "release"
+path = "src/bin/release.rs"
+required-features = ["workbench"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 # build.rs 要读工作台配置（`workbench/bootstrap.json`）把官方源注入二进制 ——

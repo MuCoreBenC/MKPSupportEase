@@ -339,5 +339,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
         app::build::wb_publish_history,
         app::build::wb_open_external,
+        // ★ **发布软件版本**（第四刀）：闸 / 事务 / 历史各一条 —— 与 CLI 同一个内核
+        app::release_tx::wb_release_preflight,
+        app::release_tx::wb_release_software,
+        app::release_tx::wb_release_history,
     ])
 }

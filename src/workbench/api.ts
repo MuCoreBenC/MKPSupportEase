@@ -813,6 +813,118 @@ export interface PublishHistory {
   records: PublishRecord[]
 }
 
+/* ---------- 第四刀：发布**软件版本**（与「发布预设」两条链，各有各的类型） ---------- */
+
+/** `release_tx::ReleaseStage` 的线上名（camelCase，与后端 `wire_name()` 逐字一致） */
+export type ReleaseStage =
+  | 'blockedPreflight'
+  | 'ready'
+  | 'versionBumped'
+  | 'committed'
+  | 'pushed'
+  | 'reviewOpened'
+  | 'merged'
+  | 'tagged'
+  | 'built'
+  | 'releaseCreated'
+  | 'assetUploaded'
+  | 'infoCommitted'
+  | 'infoPushed'
+  | 'infoReviewOpened'
+
+/** `platform::RemoteRelease` —— 建好的 Release（网页地址是用户点开的那一页） */
+export interface RemoteRelease {
+  platform: string
+  id: number
+  tagName: string
+  url: string
+}
+
+/** `release_tx::ArtifactInfo` —— 构建出来的安装包 */
+export interface ArtifactInfo {
+  name: string
+  size: number
+  path: string
+}
+
+/** `release_tx::ReleaseOptions` —— 发布软件版本的开关 */
+export interface ReleaseOptions {
+  /** 目标版本号（`x.y.z`，不带 v）；不填 = 沿用当前真值 */
+  version?: string | null
+  /** 一句话说明（进 Release 正文与 `release.json` 的 notes） */
+  notes?: string
+  /** PR 的 base；空 = main */
+  base?: string
+  /** 只预检，不动一个字节 */
+  dryRun?: boolean
+  /** 建了 PR 之后接着合并（人在界面上点过「确认发布」才有） */
+  merge?: boolean
+  /** 构建 macOS 安装包（默认开） */
+  build?: boolean
+  openReview?: boolean
+}
+
+/** `release_tx::PreflightItem` —— 闸里的一格 */
+export interface PreflightItem {
+  id: string
+  label: string
+  /** `pass` / `fail` */
+  status: string
+  detail: string
+}
+
+/** `release_tx::ReleasePreflight` —— 发布软件版本的闸（**只读**，点几次都没副作用） */
+export interface ReleasePreflight {
+  items: PreflightItem[]
+  canRelease: boolean
+  currentVersion: string
+  tag: string
+  branch: string
+  hasAccount: boolean
+}
+
+/** `release_tx::ReleaseTxReport` —— 一轮「发布软件版本」的结果（阶段快照） */
+export interface ReleaseTxReport {
+  stage: ReleaseStage
+  version: string
+  tag: string
+  branch: string | null
+  commit: string | null
+  review: RemoteReview | null
+  release: RemoteRelease | null
+  artifact: ArtifactInfo | null
+  /** ② `release.json` 那一笔所在的分支 */
+  infoBranch: string | null
+  /** ② 的 PR —— **它由人合并**，合并完客户端才看得到新版本 */
+  infoReview: RemoteReview | null
+  committedPaths: string[]
+  infoCommittedPaths: string[]
+  blockedReasons: string[]
+  summary: string
+}
+
+/** `release_history::ReleaseRecord` —— 一条软件版本发布回执 */
+export interface ReleaseRecord {
+  at: string
+  stage: string
+  version: string
+  tag: string
+  branch: string | null
+  commit: string | null
+  review: RemoteReview | null
+  release: RemoteRelease | null
+  artifact: ArtifactInfo | null
+  infoBranch: string | null
+  infoReview: RemoteReview | null
+  summary: string
+}
+
+/** `release_history::ReleaseHistory` —— 软件版本发布历史（**最新在前**） */
+export interface ReleaseHistory {
+  historySchema: number
+  records: ReleaseRecord[]
+}
+
 /** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
 export interface CredentialStatus {
   platform: string
@@ -1479,6 +1591,24 @@ export const wb = {
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
+
+  /**
+   * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
+   *
+   * ★ 它与「发布预设」的闸（`publishAudit`）是**两道不同的闸**：这道看的是
+   * 分支 / 工作区 / 版本号一致 / tag 有没有被占 / 平台支不支持软件 Release。
+   */
+  releasePreflight: (version?: string | null) =>
+    invoke<ReleasePreflight>('wb_release_preflight', { version: version ?? null }),
+  /**
+   * **发布软件版本**（一次手势）—— 与 CLI（`src-tauri/src/bin/release.rs`）**同一个内核**。
+   *
+   * ★ 这一趟会**构建安装包并上传**（以分钟计），所以按钮要显示"发布中"，不是转圈就算了。
+   */
+  releaseSoftware: (opts: ReleaseOptions) =>
+    invoke<ReleaseTxReport>('wb_release_software', { opts }),
+  /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
+  releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

@@ -40,6 +40,23 @@ pub const STAGE_ALLOWLIST: [&str; 3] = [
     "presets/assets.toml",
 ];
 
+/// **「发布软件版本」那条链**的 stage 白名单（第四刀）。
+///
+/// ★ 两份清单**刻意分开**（两条链不混）：这里是"版本号那一笔 + `release.json`"，
+/// 上面那份是预设交付产物。**发布预设绝不会提交 `presets/release.json`**，
+/// 反过来也不会 —— 各自只认识自己那一批，混入另一条链的产物进不去索引。
+///
+/// 清单里每一条都是**派生或发布物**：`src-tauri/Cargo.toml` 是版本真值那一格，
+/// 其余三个是它的派生结果（见 [`super::version`]），`presets/release.json` 是
+/// 上传成功后才写的发布信息。源码（`src/**` / `src-tauri/src/**`）一个都不在里头。
+pub const RELEASE_STAGE_ALLOWLIST: [&str; 5] = [
+    "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
+    "package.json",
+    "Cargo.lock",
+    "presets/release.json",
+];
+
 /// 一条 git 命令的结果：成功 = stdout（已 trim 掉尾换行），失败 = 带 stderr 的 `AppError`。
 ///
 /// **与 ⑮ 里那个只返回 `Option<String>` 的 `git()` 不同**：那个是"探测"（没有 git 就当
@@ -92,7 +109,22 @@ impl Git {
     /// 第二道闸。就算调用方一时手滑传了 `presets/assets/foo.png`，也进不去索引。
     /// 返回真正 stage 了的路径（相对仓库根），空 = 没有可提交的。
     pub fn stage_allowed(&self, candidates: &[String]) -> Result<Vec<String>, AppError> {
-        let allowed: Vec<&String> = candidates.iter().filter(|p| is_allowed(p)).collect();
+        self.stage_allowed_in(candidates, &STAGE_ALLOWLIST)
+    }
+
+    /// 按**指定的**白名单 stage（「发布软件版本」用 [`RELEASE_STAGE_ALLOWLIST`]）。
+    ///
+    /// 清单作参数而不是再写一个函数：过滤规则只有[`is_allowed_in`]一处实现，
+    /// 两条链共用同一道闸，只是喂进去的清单不同。
+    pub fn stage_allowed_in(
+        &self,
+        candidates: &[String],
+        allowlist: &[&str],
+    ) -> Result<Vec<String>, AppError> {
+        let allowed: Vec<&String> = candidates
+            .iter()
+            .filter(|p| is_allowed_in(p, allowlist))
+            .collect();
         if allowed.is_empty() {
             return Ok(Vec::new());
         }
@@ -150,6 +182,20 @@ impl Git {
         token: &str,
     ) -> Result<(), AppError> {
         let target = self.resolve_branch(branch)?;
+        self.push_ref_authenticated(&target, username, token)
+    }
+
+    /// **带认证**推**任意 ref**（第四刀：推 tag 用）。
+    ///
+    /// 与 [`Self::push_authenticated`] 同一条命令行形状、同一套凭据纪律
+    /// （Token 不进 URL / 清掉全局 helper / `GIT_TERMINAL_PROMPT=0`）——
+    /// 差别只是不再把参数解释成"分支"，`refs/tags/v0.0.2` 这类也推得动。
+    pub fn push_ref_authenticated(
+        &self,
+        refspec: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<(), AppError> {
         let basic = base64_encode(format!("{username}:{token}").as_bytes());
         let header = format!("http.extraHeader=Authorization: Basic {basic}");
         let out = Command::new("git")
@@ -163,7 +209,7 @@ impl Git {
                 "push",
                 "-u",
                 "origin",
-                &target,
+                refspec,
             ])
             .current_dir(&self.repo)
             // 禁交互：没有 TTY 时 git 会尝试提示，这里直接关掉（防挂死）
@@ -192,6 +238,106 @@ impl Git {
     pub fn remote_matches(&self, repository_url: &str) -> Result<bool, AppError> {
         let actual = self.remote_url()?;
         Ok(normalize_repo_url(&actual) == normalize_repo_url(repository_url))
+    }
+
+    /* ---------- 「发布软件版本」那一半（第四刀） ----------
+     *
+     * 发布预设那条链只 commit / push 当前分支；发软件版本还要**切分支、打 tag、推 tag**，
+     * 以及"主线到底齐不齐"的判定。全部走同一个 `run`（显式参数数组），不另开一条路。
+     */
+
+    /// 拉远端的最新引用（`git fetch <remote> --tags --prune`）。
+    ///
+    /// ★ **判定"主线齐不齐"之前必须先 fetch**：不 fetch 的 `origin/main` 是上次拉到的样子，
+    /// 拿它当"远端现状"会得出一个过期的、偏乐观的结论。
+    pub fn fetch(&self, remote: &str) -> Result<(), AppError> {
+        self.run(&["fetch", remote, "--tags", "--prune"])?;
+        Ok(())
+    }
+
+    /// 两个引用谁领先多少：`(本地独有的提交数, 远端独有的提交数)`。
+    ///
+    /// `git rev-list --left-right --count <a>...<b>` —— 输出形如 `2\t0`。
+    /// 「确认主线」用它回答"要发的代码都在 main 上了吗"。
+    pub fn ahead_behind(&self, left: &str, right: &str) -> Result<(usize, usize), AppError> {
+        let out = self.run(&[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{left}...{right}"),
+        ])?;
+        let mut parts = out.split_whitespace();
+        let a = parts.next().and_then(|s| s.parse().ok());
+        let b = parts.next().and_then(|s| s.parse().ok());
+        match (a, b) {
+            (Some(a), Some(b)) => Ok((a, b)),
+            _ => Err(AppError::io("读不出 ahead/behind 计数").with_detail(out)),
+        }
+    }
+
+    /// 切到已有分支（`git switch <branch>`）。
+    ///
+    /// ★ 它会**改变开发者工作区的当前分支** —— 调用方（事务内核 / 界面）必须
+    /// **事先把这件事说清楚**，不许悄悄切（作者 2026-10-04 的"破坏性命令要讲明白"）。
+    pub fn switch(&self, branch: &str) -> Result<(), AppError> {
+        self.run(&["switch", branch])?;
+        Ok(())
+    }
+
+    /// 新建并切到一条分支（`git switch -c <branch>`）。
+    pub fn switch_new(&self, branch: &str) -> Result<(), AppError> {
+        self.run(&["switch", "-c", branch])?;
+        Ok(())
+    }
+
+    /// 快进拉取（`git pull --ff-only <remote> <branch>`）。
+    ///
+    /// ★ **只许 ff-only**：非快进的 pull 会在本地造一个合并提交，而"tag 打在 main 的 tip 上"
+    /// 要求 main 的 tip 就是远端那一笔 —— 有合并提交的话，打出来的 tag 指的就不是远端那一笔。
+    pub fn pull_ff(&self, remote: &str, branch: &str) -> Result<(), AppError> {
+        self.run(&["pull", "--ff-only", remote, branch])?;
+        Ok(())
+    }
+
+    /// 打一个**带注释**的 tag（`git tag -a <name> -m <message>`）。
+    ///
+    /// ★ 纪律（作者定死，**与 `scripts/release.mjs` 同一条**）：tag 必须打在 **main 的 tip 上**。
+    /// 分支上打的 tag 指向一个不在 main 历史里的提交（squash 会重写提交）——
+    /// 那是"看起来发了，其实 main 上没有"的那一类错。
+    pub fn tag(&self, name: &str, message: &str) -> Result<(), AppError> {
+        self.run(&["tag", "-a", name, "-m", message])?;
+        Ok(())
+    }
+
+    /// 这个 tag 存不存在（`git rev-parse -q --verify refs/tags/<name>`）。
+    pub fn tag_exists(&self, name: &str) -> Result<bool, AppError> {
+        Ok(self
+            .try_run(&["rev-parse", "-q", "--verify", &format!("refs/tags/{name}")])?
+            .is_some())
+    }
+
+    /// 推一个 tag（`git push origin refs/tags/<name>`，**不带认证**）。
+    ///
+    /// 只在凭据已由别处提供时用；发布事务走 [`Self::push_ref_authenticated`]。
+    pub fn push_tag(&self, name: &str) -> Result<(), AppError> {
+        self.run(&["push", "origin", &format!("refs/tags/{name}")])?;
+        Ok(())
+    }
+
+    /// 解析一个引用的短 sha（`git rev-parse --short <what>`）。
+    ///
+    /// 「这个 tag 指的到底是哪一笔」用它回答 —— 版本号撞车时，只有它分得清
+    /// "这一版发出去过"与"上一次事务的续跑"。
+    pub fn rev_parse_short(&self, what: &str) -> Result<String, AppError> {
+        Ok(self.run(&["rev-parse", "--short", what])?.trim().to_owned())
+    }
+
+    /// 工作区干不干净（`git status --porcelain` 为空）。
+    ///
+    /// 发布软件版本要提交**版本号那一批**，工作区里混着别的东西就说不清了 ——
+    /// 与发布闸 ⑮ `git/clean` 同一条道理，只是这里的清单换成[`RELEASE_STAGE_ALLOWLIST`]。
+    pub fn is_clean(&self) -> Result<bool, AppError> {
+        Ok(self.run(&["status", "--porcelain"])?.trim().is_empty())
     }
 
     fn resolve_branch(&self, branch: &str) -> Result<String, AppError> {
@@ -229,6 +375,21 @@ impl Git {
             .to_owned())
     }
 
+    /// 探测：跑一条 git 命令，**跑不通 = `None`**（不报错）。
+    ///
+    /// 给"存不存在"这类问题用（tag / 引用在不在）—— 那不是失败，是一个答案。
+    fn try_run(&self, args: &[&str]) -> Result<Option<String>, AppError> {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&self.repo)
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+    }
+
     /// 跑一条 git 命令。参数显式数组；工作目录固定仓库根。
     fn run(&self, args: &[&str]) -> Result<String, AppError> {
         let out = Command::new("git")
@@ -250,8 +411,13 @@ impl Git {
 
 /// 路径在不在 stage 白名单里。**前缀匹配**（`presets/dist/` 收下它下头的一切）。
 pub fn is_allowed(path: &str) -> bool {
+    is_allowed_in(path, &STAGE_ALLOWLIST)
+}
+
+/// 同一道闸，喂进去的清单由调用方定（两条链各一份，见 [`RELEASE_STAGE_ALLOWLIST`]）。
+pub fn is_allowed_in(path: &str, allowlist: &[&str]) -> bool {
     let p = path.trim().trim_matches('"');
-    STAGE_ALLOWLIST
+    allowlist
         .iter()
         .any(|a| p == a.trim_end_matches('/') || p.starts_with(a))
 }
