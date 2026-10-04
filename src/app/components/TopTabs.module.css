@@ -27,8 +27,7 @@
   padding-right: 0;
 }
 
-.bar[data-platform='macos'] .tabs,
-.bar[data-platform='macos'] .iconTabs {
+.bar[data-platform='macos'] .tabs {
   flex: 0 1 auto;
   margin-left: auto;
   justify-content: flex-end;
@@ -105,6 +104,18 @@
   right: 9px;
 }
 
+/* mini（600 最小窗）与 compact 同一套收紧 —— 文字页签在窄窗也放得下
+   （mini 曾整条换成图标页签，2026-10-04 退役：文字版放得下，不再收图标） */
+.bar[data-density='mini'] .tab {
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.bar[data-density='mini'] .tab[data-on='true']::after {
+  left: 9px;
+  right: 9px;
+}
+
 /* 连续模式：页签内边距与字号随标题栏宽度平滑变化，抵消 compact 档位跳变 */
 .bar[data-fluid='true'] .tabs {
   --tab-pad: clamp(9px, 1.1vw, 12px);
@@ -132,48 +143,6 @@
   }
 }
 
-
-/* 迷你档：图标页签。不吃满宽度 —— 富余留给标题栏拖动。
-   窄到放不下时横向滑动；滚动条由 global.css 的幽灵滚动条统一隐藏，这里不重复覆盖 */
-.iconTabs {
-  flex: 0 1 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  height: 100%;
-  overflow-x: auto;
-}
-
-/* 选中态与宽窗页签同一套：文字/图标色 + 2px 下划线，不另发明胶囊或描边 */
-.iconTab {
-  position: relative;
-  flex-shrink: 0;
-  width: 26px;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-  transition: color 0.14s ease;
-}
-
-.iconTab:hover {
-  color: var(--text-2);
-}
-
-.iconTab[data-on='true'] {
-  color: var(--text-1);
-}
-
-.iconTab[data-on='true']::after {
-  content: '';
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: -1px;
-  height: 2px;
-  background: var(--accent);
-}
 
 /* 全屏子视图（报告）的标题：替代整条页签条 */
 .title {
