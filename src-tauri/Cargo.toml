@@ -110,7 +110,7 @@ sha2.workspace = true
 # 换来的是「开发文件不当运行时数据库」这条铁律的最后一公里——以前
 # `download_runtime_file` 得探测仓库绝对路径（`crates/preset/assets/presets`）才跑得通，
 # 那不是产品行为，是脚手架。
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+ureq = { version = "3", default-features = false, features = ["rustls", "multipart"] }
 
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #

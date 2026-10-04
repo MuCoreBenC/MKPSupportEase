@@ -25,8 +25,8 @@ use serde_json::Value;
 use crate::error::AppError;
 
 use super::{
-    collapse_checks, collapse_state, ChecksSummary, Hosting, MergeMethod, RemoteReview, ReviewId,
-    ReviewSpec,
+    collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
+    RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
 };
 
 fn api_base() -> String {
@@ -184,6 +184,70 @@ impl Hosting for Gitee {
         }
         Ok(Some(review))
     }
+
+    /* ---------- Release + 安装包（第四刀；Gitee 这一支 2026-10-05 接上） ---------- */
+
+    /// 建 Release：`POST /repos/{o}/{r}/releases`，body 里 `tag_name` / `name` / `body`。
+    ///
+    /// ★ 与 GitHub 的差别**只在认证位置**（这里是 body 内的 `access_token`，那边是
+    ///   Bearer header），走 [`Gitee::post`] 那同一条出口 —— 不另开一条 HTTP 路径。
+    fn create_release(&self, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
+        let body = serde_json::json!({
+            "tag_name": spec.tag_name,
+            "name": spec.name,
+            "body": spec.body,
+        });
+        let v = self.post(
+            &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
+            body,
+        )?;
+        release_from_json(&v)
+    }
+
+    /// 上传安装包：`POST /repos/{o}/{r}/releases/{id}/attach_files`，**multipart 表单**。
+    ///
+    /// ★ 这一支与 GitHub **完全不同形**：那边是裸二进制 body + 文件名走查询串，
+    ///   这边是 `multipart/form-data`（字段名 `file`）。文件**流式**从路径读
+    ///   （`Form::file`），不整个进内存；总时长走 [`super::UPLOAD_TIMEOUT`]。
+    fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
+        let size = std::fs::metadata(&up.path)
+            .map_err(|e| {
+                AppError::io("读不到要上传的安装包")
+                    .with_detail(format!("{}：{e}", up.path.display()))
+            })?
+            .len();
+        let form = ureq::unversioned::multipart::Form::new()
+            .text("access_token", self.token.as_str())
+            .file("file", &up.path)
+            .map_err(|e| AppError::io("读不了要上传的安装包").with_detail(e.to_string()))?;
+        let url = format!(
+            "{}/repos/{}/{}/releases/{}/attach_files",
+            api_base(),
+            up.owner,
+            up.repo,
+            up.release_id
+        );
+        let resp = super::upload_agent()
+            .post(&url)
+            .header("User-Agent", "SupportEase")
+            .send(form)
+            .map_err(transport)?;
+        // ★ Gitee 这一支的响应**可能没有 body**（204 / 空对象）—— 读成 `Null` 而不是
+        //   报「响应不是合法 JSON」：附件到底传没传成功，以 HTTP 状态为准。
+        let v = read_json_lenient(resp)?;
+        let download = v
+            .get("browser_download_url")
+            .or_else(|| v.get("html_url"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            // 拿不到直链就据"tag 在哪个仓库"拼一个页面地址（那个地址一定存在）
+            .unwrap_or_else(|| format!("https://gitee.com/{}/{}/releases", up.owner, up.repo));
+        Ok(UploadedAsset {
+            name: up.name.clone(),
+            size,
+            url: download,
+        })
+    }
 }
 
 impl Gitee {
@@ -202,6 +266,47 @@ impl Gitee {
         let raw = v.get("state").and_then(Value::as_str).unwrap_or("");
         Ok(collapse_checks(raw))
     }
+}
+
+/// 读一个响应体并解析成 JSON，**空 body 宽容成 `Null`**。
+///
+/// Gitee 的 `attach_files` 成功时可能回 204 或空对象 —— 那不是错误（以状态码为准）。
+/// 另有一处出口仍要严格：[`read_json`]。
+fn read_json_lenient(resp: ureq::http::Response<ureq::Body>) -> Result<Value, AppError> {
+    let mut reader = resp.into_body().into_reader();
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(&mut reader, &mut body)
+        .map_err(|e| AppError::io("读 Gitee 响应失败").with_detail(e.to_string()))?;
+    if body.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(&body)
+        .map_err(|e| AppError::corrupted("Gitee 响应不是合法 JSON").with_detail(e.to_string()))
+}
+
+/// Release JSON → [`RemoteRelease`]。Gitee 与 GitHub 同形给 `id` / `tag_name`，
+/// 页面地址字段名可能是 `html_url` 或 `url`（两个都收）。
+fn release_from_json(v: &Value) -> Result<RemoteRelease, AppError> {
+    let id = v.get("id").and_then(Value::as_u64).ok_or_else(|| {
+        AppError::corrupted("Gitee Release 响应里没有 id").with_detail(v.to_string())
+    })?;
+    let tag_name = v
+        .get("tag_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let url = v
+        .get("html_url")
+        .or_else(|| v.get("url"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    Ok(RemoteRelease {
+        platform: "gitee".to_owned(),
+        id,
+        tag_name,
+        url,
+    })
 }
 
 /// PR JSON → [`RemoteReview`]。Gitee 的 `state` 直接给 `open`/`merged`/`closed`。
@@ -304,6 +409,55 @@ mod tests {
         assert_eq!(
             review_from_json(&v).unwrap_err().code,
             crate::error::ErrorCode::Corrupted
+        );
+    }
+
+    /* ---------- Release（第四刀；Gitee 这一支） ---------- */
+
+    /// Release 响应 → 平台无关形状。**页面地址两个字段名都收**（`html_url` / `url`）。
+    #[test]
+    fn gitee_release_json_becomes_the_unified_shape() {
+        let v = serde_json::json!({
+            "id": 42, "tag_name": "v0.0.3",
+            "html_url": "https://gitee.com/o/r/releases/tag/v0.0.3"
+        });
+        let r = release_from_json(&v).unwrap();
+        assert_eq!(r.id, 42);
+        assert_eq!(r.platform, "gitee");
+        assert_eq!(r.tag_name, "v0.0.3");
+        assert_eq!(r.url, "https://gitee.com/o/r/releases/tag/v0.0.3");
+    }
+
+    /// 没有 `id` 的响应 = 平台答的不是"建好了" —— 报 `CORRUPTED`，不当成功。
+    #[test]
+    fn a_release_without_an_id_is_corrupted() {
+        assert_eq!(
+            release_from_json(&serde_json::json!({ "tag_name": "v0.0.3" }))
+                .unwrap_err()
+                .code,
+            crate::error::ErrorCode::Corrupted
+        );
+    }
+
+    /// ★ Gitee 这一支**实现了** Release 与附件上传（2026-10-05 接上，此前是"如实报不支持"）。
+    /// 判据只钉"不再是默认那两句" —— 真实调用要 Gitee 站点与 Token，测不了。
+    #[test]
+    fn gitee_now_answers_the_release_calls() {
+        // trait 默认实现会返回 `not_implemented`；能构造出 Gitee 客户端就说明走的是 impl
+        let g = Gitee::new("t");
+        let spec = ReleaseSpec {
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+            tag_name: "v0.0.3".to_owned(),
+            name: "SupportEase v0.0.3".to_owned(),
+            body: "b".to_owned(),
+        };
+        // 不真发请求：只验证它**不是**默认实现那个错误
+        let err = g.create_release(&spec).unwrap_err();
+        assert_ne!(
+            err.code,
+            crate::error::ErrorCode::NotImplemented,
+            "Gitee 这一支不该再是「暂不支持」"
         );
     }
 }
