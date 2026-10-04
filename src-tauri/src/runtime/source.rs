@@ -58,8 +58,13 @@ use crate::fsx::atomic::atomic_write;
 
 use super::paths::SOURCE_FILE;
 
-/// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）
-pub const SOURCE_SCHEMA: u32 = 1;
+/// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）。
+///
+/// ★ **2**（2026-10-05，作者拍"两个官方源 + 收起的自定义"）：从"一个地址"改成
+/// **"选哪一个源"** —— 语义变了，所以升号。
+/// **读 1 代老档不是兼容层**：1 代那个 `baseUrl` 就是"用户手填的地址"，
+/// 它的含义在新模型里**正好是 `custom`**（`customUrl`）。不猜、不迁移、不回填。
+pub const SOURCE_SCHEMA: u32 = 2;
 
 /// 目录（catalog）在远端根里的固定名字 —— **直接模式**的约定；
 /// Bootstrap 模式由 `source.json` 自己说，客户端不猜。发布侧引用同一常量
@@ -83,21 +88,121 @@ pub const BOOTSTRAP_SCHEMA: u32 = 1;
 /// 配置**（那是 build.rs 的事，到这里时已经被合并成一个值）。
 const DEFAULT_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE");
 
+/// **第二个内置源**（Gitee）的 Bootstrap 地址（`MKPSE_PRESET_SOURCE_GITEE`）。
+///
+/// ★ 为什么是两个而不是"一个地址 + 用户自己改"（作者 2026-10-05）：国内直连 Gitee、
+///   直连 GitHub 要靠代理 —— **两个都是官方源，用户只管选**。
+///   没注入就不出现在界面里（不硬编一个地址进来：那会把"部署在哪"这件事写死在客户端）。
+const GITEE_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE_GITEE");
+
+/// 自定义源的**两种形状**（作者 2026-10-05 真机踩出来的）。
+///
+/// ```text
+/// 根（root）      https://host/presets/dist/            根下就有 catalog.json 与各文件
+/// Bootstrap       https://host/presets/dist/source.json  由它说 catalog 与文件根在哪
+/// ```
+///
+/// ★ **同一个"官方地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）
+///   —— 而手动指定这条路原本只认前者，于是"填官方地址反而不能用内置的"（0.0.2 真机）。
+///   所以：**保存时两种都探一次，认出来哪一个记在盘上**（[`CustomShape::Unset`] = 还没探过）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CustomShape {
+    /// 还没探过（老档、或刚写下来还没联网）：**运行时自适应**（先根后 Bootstrap）
+    #[default]
+    Unset,
+    /// 数据源根
+    Root,
+    /// `source.json` 地址
+    Bootstrap,
+}
+
+/// 用户在三个值里选哪一个（盘上就存这个）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceMode {
+    /// 内置：Gitee（国内直连）
+    Gitee,
+    /// 内置：GitHub
+    Github,
+    /// 自定义（折叠在高级设置里的那一个）
+    Custom,
+}
+
+impl SourceMode {
+    /// 线上名（盘上写的就是它）。**认不出 → `None`**（不猜：宁可报"认不出"，
+    /// 也不要悄悄落到某个源上——那会让用户以为自己在用 A、其实在用 B）。
+    ///
+    /// 顺带 **trim**（调用方不必各写一遍；前后空格是"复制地址"最常见的脏东西）。
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "gitee" => Some(Self::Gitee),
+            "github" => Some(Self::Github),
+            "custom" => Some(Self::Custom),
+            _ => None,
+        }
+    }
+
+    /// 界面上给用户看的那一句（**产品文案只有这一处**）。
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gitee => "Gitee（国内直连）",
+            Self::Github => "GitHub",
+            Self::Custom => "自定义地址",
+        }
+    }
+
+    /// 这个模式下"生效的地址"从哪来：内置看构建期注入，自定义看盘上那份。
+    pub fn builtin_url(self) -> Option<&'static str> {
+        match self {
+            Self::Gitee => GITEE_BASE_URL,
+            Self::Github => DEFAULT_BASE_URL,
+            Self::Custom => None,
+        }
+    }
+}
+
+/// 出厂默认选哪个。
+///
+/// ★ 0.0.3 先是 **GitHub**（Gitee 镜像还没全部就绪，默认指过去等于把用户往取不到
+///   数据的地方带）；Gitee 内容确认就绪后的下一版再翻成 [`SourceMode::Gitee`]。
+pub const DEFAULT_MODE: SourceMode = SourceMode::Github;
+
+/// 两个内置源（给界面摆两个固定选项用；没注入的那个**不出现**）。
+pub fn builtin_sources() -> Vec<(SourceMode, String)> {
+    [
+        (SourceMode::Gitee, GITEE_BASE_URL),
+        (SourceMode::Github, DEFAULT_BASE_URL),
+    ]
+    .into_iter()
+    .filter_map(|(mode, url)| url.map(|u| (mode, u.to_owned())))
+    .collect()
+}
+
 /// 当前选中的远端数据源
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetSource {
     pub source_schema: u32,
-    /// 数据源根地址（`https://example.com/mkp-content/`）。末尾不带斜杠——见 [`normalize_base_url`]
-    pub base_url: String,
+    /// 用户选了哪一个（`gitee` / `github` / `custom`）
+    pub mode: SourceMode,
+    /// `mode = custom` 时的那份地址（其余模式为 `null`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
+    /// 自定义那份地址是**哪种形状**（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）
+    #[serde(default)]
+    pub custom_shape: CustomShape,
 }
 
 /// 当前这一台机器的"远端入口"（覆盖优先，见模块头）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceEntry {
-    /// 手动指定：**一个数据源根** —— 根下就有 `catalog.json` 与各文件。
-    /// 开发 / 排查通道（本地 http.server、自建镜像…），不读任何 Bootstrap
-    Direct { base_url: String },
+    /// 手动指定：**用户填的那份地址** + 它是哪种形状。
+    /// 开发 / 排查通道（本地 http.server、自建镜像、另一个官方源…）。
+    ///
+    /// ★ `shape` 是探出来的那一种（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）：
+    /// **同一个地址两种读法**（根 / `source.json`）都能认，见 [`probe_custom_shape`]。
+    Custom { url: String, shape: CustomShape },
     /// 构建期注入：**Bootstrap 地址** —— 指向 `source.json`，
     /// 由它说"catalog 在哪、文件下载根在哪"。正式通道
     Bootstrap { url: String },
@@ -142,6 +247,11 @@ pub fn load_source(root: &Path) -> Result<Option<PresetSource>, AppError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(AppError::io("读不到数据源设置").with_detail(e.to_string())),
     };
+    // ★ **1 代老档**（2026-10-05 之前只有 `baseUrl`）：它的含义**正好**是"用户手填的
+    //   地址" = 新模型里的 `custom`。这不是兼容层、也不猜：那份地址本来就是用户填的。
+    if let Some(old) = read_v1(&bytes)? {
+        return Ok(Some(old));
+    }
     let source: PresetSource = serde_json::from_slice(&bytes)
         .map_err(|e| AppError::corrupted("数据源设置读不出来").with_detail(e.to_string()))?;
     if source.source_schema != SOURCE_SCHEMA {
@@ -153,19 +263,149 @@ pub fn load_source(root: &Path) -> Result<Option<PresetSource>, AppError> {
     Ok(Some(source))
 }
 
-/// 记下"当前用这个源"。整份替换（地址就一条，写新盖旧）。
+/// 1 代档（`{sourceSchema: 1, baseUrl}`）读成 2 代的自定义源。**不是 1 代 → `None`**。
+fn read_v1(bytes: &[u8]) -> Result<Option<PresetSource>, AppError> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Ok(None); // 连 JSON 都不是 → 交给下面的 2 代解析去报错
+    };
+    if v.get("sourceSchema").and_then(|x| x.as_u64()) != Some(1) {
+        return Ok(None);
+    }
+    let Some(base) = v.get("baseUrl").and_then(|x| x.as_str()) else {
+        return Err(AppError::corrupted(
+            "数据源设置是老格式，但里面没有地址 —— 认不出这一份要连到哪",
+        ));
+    };
+    Ok(Some(PresetSource {
+        source_schema: SOURCE_SCHEMA,
+        mode: SourceMode::Custom,
+        custom_url: Some(normalize_base_url(base)?),
+        // ★ 老档**没探过形状** → `Unset` → 运行时自适应（先根后 Bootstrap）。
+        //   0.0.2 之前用户手填 `source.json` 地址的那些档，就是这样被救回来的。
+        custom_shape: CustomShape::Unset,
+    }))
+}
+
+/// 记下"当前用这个源"。整份替换（写新盖旧）。
 ///
-/// 空地址在这里就拒绝写盘：写进去等于制造一个"配了但配成空"的第三种状态，
-/// 下游要为它单独想一套分支。**想回到没配的状态，删掉那个文件**（用户可手删）。
-pub fn save_source(root: &Path, raw_base_url: &str) -> Result<PresetSource, AppError> {
+/// `mode = custom` 时地址**必须给且合法**（空地址在这里就拒：写进去等于制造一个
+/// "配了但配成空"的第三种状态，下游要为它单独想一套分支）。
+/// 内置两个模式**不许带地址**（带了说明调用方糊涂了 —— 内置地址是构建期注入的）。
+pub fn save_source(
+    root: &Path,
+    mode: SourceMode,
+    raw_custom_url: Option<&str>,
+) -> Result<PresetSource, AppError> {
+    save_source_with(root, mode, raw_custom_url, CustomShape::Unset)
+}
+
+/// [`save_source`] 的完整形状版：**形状已经探出来时**连它一起写（省掉一次网络）。
+pub fn save_source_with(
+    root: &Path,
+    mode: SourceMode,
+    raw_custom_url: Option<&str>,
+    custom_shape: CustomShape,
+) -> Result<PresetSource, AppError> {
+    let custom_url = match mode {
+        SourceMode::Custom => Some(normalize_base_url(raw_custom_url.unwrap_or_default())?),
+        _ => {
+            if raw_custom_url
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+            {
+                return Err(AppError::invalid_argument(
+                    "选内置源的时候不用给地址 —— 地址是程序自带的",
+                ));
+            }
+            None
+        }
+    };
     let source = PresetSource {
         source_schema: SOURCE_SCHEMA,
-        base_url: normalize_base_url(raw_base_url)?,
+        mode,
+        custom_url,
+        custom_shape: if mode == SourceMode::Custom {
+            custom_shape
+        } else {
+            CustomShape::Unset
+        },
     };
     let json = serde_json::to_vec_pretty(&source)
         .map_err(|e| AppError::internal("数据源设置序列化失败").with_detail(e.to_string()))?;
     atomic_write(&source_file(root), &json)?;
     Ok(source)
+}
+
+/// **探一个自定义地址是哪种形状**（真联网，两次机会：先根、再 `source.json`）。
+///
+/// ★ 顺序有讲究：**先试根** —— 根那一次不额外花请求（`{地址}/catalog.json` 本来
+///   就要取）；不成再当 Bootstrap 读一次 `source.json`。
+/// **两条都不通** → 如实报错，并把两条各自的失败原因都摆出来（只说"不行"等于让用户猜）。
+/// **Bootstrap 形状下，这个地址可能是哪一个文件**（纯函数，判据钉它）。
+///
+/// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
+///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
+///   （2026-10-05 真机：手动指定"官方地址"反而不通，就是这一处）。
+/// 所以：**原样先试**，不成再在根上补文件名。
+fn bootstrap_candidates(url: &str) -> Vec<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let mut out = Vec::new();
+    if trimmed.ends_with(SOURCE_FILE_NAME) {
+        out.push(trimmed.to_owned());
+    }
+    let base = normalize_base_url(trimmed).unwrap_or_else(|_| trimmed.to_owned());
+    let appended = format!("{base}/{SOURCE_FILE_NAME}");
+    if !out.contains(&appended) {
+        out.push(appended);
+    }
+    out
+}
+
+/// 探一个自定义地址是哪种形状（真联网：先根、再按 [`bootstrap_candidates`] 试 Bootstrap）。
+///
+/// ★ 顺序有讲究：**先试根** —— 根那一次不额外花请求（`{地址}/catalog.json` 本来
+///   就要取）；不成再当 Bootstrap 读。
+/// **都不通** → 如实报错，并把每次尝试的原因都摆出来（只说"不行"等于让用户猜）。
+pub fn probe_custom_shape(url: &str) -> Result<(CustomShape, ResolvedSource), AppError> {
+    let base = normalize_base_url(url)?;
+    // ① 先当"数据源根"
+    let as_root = ResolvedSource {
+        catalog_url: join_url(&base, CATALOG_FILE),
+        base_url: base.clone(),
+    };
+    if let Ok(resolved) = fetch_and_accept(&as_root) {
+        return Ok((CustomShape::Root, resolved));
+    }
+    // ② 再当 Bootstrap（原样 / 补文件名两种）
+    let mut reasons = Vec::new();
+    for candidate in bootstrap_candidates(url) {
+        match parse_source_json(&candidate).and_then(|r| fetch_and_accept(&r)) {
+            Ok(resolved) => return Ok((CustomShape::Bootstrap, resolved)),
+            Err(e) => reasons.push(format!("{candidate}（{e}）")),
+        }
+    }
+    Err(AppError::invalid_argument(format!(
+        "这个地址下面取不到预设目录：当作数据源根试过（{base}/{CATALOG_FILE}），\
+         当作 {SOURCE_FILE_NAME} 试了 {} 次也不通 —— {}",
+        reasons.len(),
+        reasons.join("；")
+    )))
+}
+
+/// `source.json` 的**文件**名（`RELEASE_FILE` 是 `release.json`，两者别混 —— 这个坑
+/// 名字上就分不开，所以给它一个自己的常量）。
+const SOURCE_FILE_NAME: &str = "source.json";
+
+/// 取一次 catalog 并确认它是**一份可用的目录**（解析过了才算）。
+fn fetch_and_accept(resolved: &ResolvedSource) -> Result<ResolvedSource, AppError> {
+    let bytes = crate::runtime::net::get_bytes(
+        &resolved.catalog_url,
+        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
+        &crate::runtime::net::noop_tick,
+    )?;
+    crate::runtime::Catalog::parse(&bytes)
+        .map_err(|e| AppError::corrupted("取到的不是一份可用的预设目录").with_detail(e.message))?;
+    Ok(resolved.clone())
 }
 
 /// 撤掉用户覆盖：删掉设置文件（幂等）。
@@ -187,38 +427,310 @@ pub fn builtin_default() -> Option<String> {
     DEFAULT_BASE_URL.map(str::to_owned)
 }
 
-/// 当前生效的**入口**：设置文件优先，其次构建期注入的默认值，都没有就是没配。
+/// **当前选的是哪一个**（没写过设置 = 出厂默认 [`DEFAULT_MODE`]）。
+pub fn current_mode(root: &Path) -> Result<SourceMode, AppError> {
+    Ok(load_source(root)?.map_or(DEFAULT_MODE, |s| s.mode))
+}
+
+/// 当前生效的**入口**：按选中的模式解析（内置两个走构建期注入的 Bootstrap 地址，
+/// 自定义走盘上那份地址 + **记下来的形状**），内置地址一个都没注入 → 没配。
 ///
 /// 返回 `None` 的那一路要被界面原样说出来——那是唯一诚实的答案。
 pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
-    if let Some(stored) = load_source(root)? {
-        return Ok(Some(SourceEntry::Direct {
-            base_url: stored.base_url,
-        }));
+    let stored = load_source(root)?;
+    let mode = stored.as_ref().map_or(DEFAULT_MODE, |s| s.mode);
+    if mode == SourceMode::Custom {
+        return Ok(match stored {
+            Some(s) => s.custom_url.map(|url| SourceEntry::Custom {
+                url,
+                shape: s.custom_shape,
+            }),
+            // 选了自定义却没地址 = 用户删了输入框里的字。**不静默回落**到默认源：
+            // 那会让界面显示"用 Gitee"、实际连的是别的地方。
+            None => None,
+        });
     }
-    Ok(builtin_default().map(|url| SourceEntry::Bootstrap { url }))
+    Ok(mode.builtin_url().map(|url| SourceEntry::Bootstrap {
+        url: url.to_owned(),
+    }))
+}
+
+#[cfg(test)]
+mod two_source_tests {
+    //! **双源 + 自适应形状**的判据（2026-10-05）。
+    //!
+    //! 重点是最后那条：0.0.2 真机里用户把**官方 `source.json` 地址**填进「手动指定」
+    //! 反而不能用（手动那条只认"数据源根"），而内置官方源同一个地址是通的 ——
+    //! 那不是用户错，是我们把"一个地址有两种读法"当成了两种东西。
+
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn dir() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    /// 1 代老档（只有 `baseUrl`）读成**自定义源** —— 那份地址本来就是用户手填的
+    #[test]
+    fn the_v1_file_reads_as_a_custom_source() {
+        let d = dir();
+        atomic_write(
+            &source_file(d.path()),
+            br#"{"sourceSchema":1,"baseUrl":"https://example.com/presets/dist/"}"#,
+        )
+        .unwrap();
+
+        let s = load_source(d.path()).unwrap().expect("老档该读得出来");
+        assert_eq!(s.mode, SourceMode::Custom);
+        assert_eq!(
+            s.custom_url.as_deref(),
+            Some("https://example.com/presets/dist")
+        );
+        assert_eq!(
+            s.custom_shape,
+            CustomShape::Unset,
+            "老档没探过形状 → 运行时自适应（这才救得回填了 source.json 地址的那份）"
+        );
+    }
+
+    /// 选内置源的时候不许带地址（带了说明调用方糊涂了）
+    #[test]
+    fn a_builtin_mode_refuses_an_address() {
+        let d = dir();
+        let e = save_source(d.path(), SourceMode::Github, Some("https://x.example/")).unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+    }
+
+    /// 选了自定义却**没地址** → 没有入口。**不许静默回落到内置源** ——
+    /// 那会让界面显示"自定义"、实际连着别的地方
+    #[test]
+    fn a_custom_mode_without_an_address_has_no_entry() {
+        let d = dir();
+        save_source(d.path(), SourceMode::Custom, None).unwrap_err(); // 空地址直接拒
+                                                                      // 手工造一份"有 mode、没地址"的档（模拟手改坏的文件）
+        atomic_write(
+            &source_file(d.path()),
+            br#"{"sourceSchema":2,"mode":"custom","customShape":"root"}"#,
+        )
+        .unwrap();
+        assert!(
+            current_entry(d.path()).unwrap().is_none(),
+            "没有地址就没有入口 —— 界面会据此报错，不静默用默认源"
+        );
+    }
+
+    /// 模式 id 是契约：认这三个，别的**不猜**
+    #[test]
+    fn only_three_source_modes_are_recognized() {
+        assert_eq!(SourceMode::parse("github"), Some(SourceMode::Github));
+        assert_eq!(SourceMode::parse(" gitee "), Some(SourceMode::Gitee));
+        assert_eq!(SourceMode::parse("custom"), Some(SourceMode::Custom));
+        assert_eq!(SourceMode::parse("gitee2"), None);
+        assert_eq!(SourceMode::parse(""), None);
+    }
+
+    /// ★ **同一个地址，两种读法都认**（这次真机 bug 的钉子）。
+    ///
+    /// 服务端只有一个合法 catalog，摆在 `/catalog.json`；`/source.json` 也在（它指向
+    /// 那个 catalog）。于是：
+    /// - 填**根** → 探成 `Root`；
+    /// - 填 **`source.json` 地址** → 根那次 404 → 探成 `Bootstrap`。
+    ///
+    /// 两条都通 —— 用户填哪一种都能用，这正是"填官方地址反而不通"的修法。
+    #[test]
+    fn a_custom_url_is_read_as_a_root_or_as_a_source_json() {
+        let server = TinyServer::start();
+        let root_url = server.url("");
+
+        let (root_shape, resolved) = probe_custom_shape(&root_url).expect("当根该通");
+        assert_eq!(root_shape, CustomShape::Root);
+        assert!(resolved.catalog_url.ends_with("/catalog.json"));
+
+        // 同一个服务，"填 source.json 地址"（用户最常复制的那一串）
+        let bootstrap_url = server.url(SOURCE_FILE_NAME);
+        let (shape, resolved) = probe_custom_shape(&bootstrap_url).expect("当 source.json 也该通");
+        assert_eq!(shape, CustomShape::Bootstrap);
+        assert_eq!(
+            resolved.catalog_url,
+            format!("{root_url}catalog.json"),
+            "Bootstrap 形状下两个地址都由 source.json 说"
+        );
+    }
+
+    /// 两条都不通 → 拒绝，且**两条的原因都摆出来**（只说"不行"等于让用户猜）
+    #[test]
+    fn an_unusable_address_is_refused_with_both_reasons() {
+        let server = TinyServer::start_empty();
+        let e = probe_custom_shape(&server.url("")).unwrap_err();
+        let text = format!("{}{}", e.message, e.detail.unwrap_or_default());
+        assert!(text.contains("catalog.json"), "说了根那条为什么：{text}");
+        assert!(
+            text.contains(SOURCE_FILE_NAME),
+            "说了 source.json 那条为什么：{text}"
+        );
+    }
+
+    /// 判据用的最小 HTTP 服务端：**只按路径答两种内容**，其余 404。
+    ///
+    /// 手写 `std::net` 而不是引服务端框架：它属于判据脚手架，不属于产品架构。
+    struct TinyServer {
+        addr: std::net::SocketAddr,
+        stop: Arc<AtomicBool>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TinyServer {
+        /// `catalog` = 摆一份合法 catalog（根与 `source.json` 都在）
+        fn start() -> Self {
+            Self::spawn(true)
+        }
+
+        /// 什么都没有（两条都该失败）
+        fn start_empty() -> Self {
+            Self::spawn(false)
+        }
+
+        fn spawn(with_files: bool) -> Self {
+            use std::io::{Read as _, Write as _};
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("端口绑不上");
+            let addr = listener.local_addr().expect("拿不到地址");
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stop);
+            let worker = std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if worker_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let Ok(mut stream) = stream else { continue };
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while head.len() < 8192 {
+                        match stream.read(&mut byte) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                head.push(byte[0]);
+                                if head.ends_with(b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&head).to_string();
+                    let body: Option<&str> = if !with_files {
+                        None
+                    } else if text.starts_with("GET /catalog.json") {
+                        Some(r#"{"catalogSchema":1,"revision":"r1","files":[]}"#)
+                    } else if text.starts_with("GET /source.json") {
+                        Some(r#"{"sourceSchema":1,"catalog":"catalog.json"}"#)
+                    } else {
+                        None
+                    };
+                    let response = match body {
+                        Some(b) => format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}",
+                            b.len()
+                        ),
+                        None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_owned(),
+                    };
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                }
+            });
+            Self {
+                addr,
+                stop,
+                worker: Some(worker),
+            }
+        }
+
+        fn url(&self, file: &str) -> String {
+            format!("http://{}/{file}", self.addr)
+        }
+    }
+
+    impl Drop for TinyServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            let _ = std::net::TcpStream::connect(self.addr);
+            if let Some(h) = self.worker.take() {
+                let _ = h.join();
+            }
+        }
+    }
 }
 
 /// 把入口解析成"远端在哪"。
 ///
-/// - 手动覆盖（Direct）：直接根 —— `{根}/catalog.json` 与各文件都在它下面，**不联网**；
-/// - 内置（Bootstrap）：**读 `source.json`**（一次很小的网络请求），按它说的算 ——
-///   部署位置变了只改它，客户端不用重发。
+/// - 自定义（[`SourceEntry::Custom`]）：**按记下来的形状**读；形状还没探过（老档）
+///   就**自适应**：先当根，根下取不到 catalog 再当 `source.json` 读
+///   —— 这正是 0.0.2 那个"填官方地址反而不通"的修法；
+/// - 内置（[`SourceEntry::Bootstrap`]）：**读 `source.json`**（一次很小的网络请求），
+///   按它说的算 —— 部署位置变了只改它，客户端不用重发。
 pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
     match entry {
-        SourceEntry::Direct { base_url } => Ok(ResolvedSource {
-            catalog_url: join_url(&base_url, CATALOG_FILE),
-            base_url,
-        }),
-        SourceEntry::Bootstrap { url } => {
-            let bytes = crate::runtime::net::get_bytes(
-                &url,
-                &crate::runtime::net::GetPlan::new("source.json"),
-                &crate::runtime::net::noop_tick,
-            )?;
-            parse_bootstrap(&url, &bytes)
+        SourceEntry::Custom { url, shape } => {
+            let base = normalize_base_url(&url)?;
+            match shape {
+                CustomShape::Root => Ok(ResolvedSource {
+                    catalog_url: join_url(&base, CATALOG_FILE),
+                    base_url: base,
+                }),
+                CustomShape::Bootstrap => {
+                    // ★ 原样先试（用户复制来的地址通常已经带着 `source.json`）
+                    let mut last = None;
+                    for candidate in bootstrap_candidates(&url) {
+                        match parse_source_json(&candidate) {
+                            Ok(r) => return Ok(r),
+                            Err(e) => last = Some(e),
+                        }
+                    }
+                    Err(last.expect("候选表不为空（至少会补一个文件名）"))
+                }
+                // ★ 自适应：两条都试，报错时把两次尝试的原因都摆出来
+                //   （只说"不行"等于让用户猜）
+                CustomShape::Unset => {
+                    let as_root = ResolvedSource {
+                        catalog_url: join_url(&base, CATALOG_FILE),
+                        base_url: base.clone(),
+                    };
+                    match crate::runtime::net::get_bytes(
+                        &as_root.catalog_url,
+                        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
+                        &crate::runtime::net::noop_tick,
+                    ) {
+                        Ok(_) => Ok(as_root),
+                        Err(root_err) => {
+                            let mut reasons = Vec::new();
+                            for candidate in bootstrap_candidates(&url) {
+                                if let Err(e) = parse_source_json(&candidate) {
+                                    reasons.push(format!("{candidate}（{e}）"));
+                                }
+                            }
+                            Err(AppError::invalid_argument(format!(
+                                "这个地址既不是数据源根（{base}/{CATALOG_FILE}：{root_err}），\
+                                 也不是一个可读的 {SOURCE_FILE_NAME} —— {}",
+                                reasons.join("；")
+                            )))
+                        }
+                    }
+                }
+            }
         }
+        SourceEntry::Bootstrap { url } => parse_source_json(&url),
     }
+}
+
+/// 取一个 Bootstrap（`source.json`）并解析成两个地址。
+/// **内置与自定义的 Bootstrap 形状共用这一处**（少一处就少一处不一致）。
+fn parse_source_json(url: &str) -> Result<ResolvedSource, AppError> {
+    let bytes = crate::runtime::net::get_bytes(
+        url,
+        &crate::runtime::net::GetPlan::new(SOURCE_FILE_NAME),
+        &crate::runtime::net::noop_tick,
+    )?;
+    parse_bootstrap(url, &bytes)
 }
 
 /// 这台机器上的远端入口 → 两个地址；**没配就报错、并且说清去哪儿配**。
@@ -229,6 +741,29 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
         )
     })?;
     resolve_entry(entry)
+}
+
+/// **探一次当前这个源**：解析入口 + 真去取一次 catalog。
+///
+/// ★ 它是"换源之前先看一眼"的实现（作者 2026-10-05：用户容易输错地址）：
+/// **取不到就整次拒绝**，而不是"先存上再说" —— 错地址留在设置里比"没配"更难查。
+/// 自定义源探的是 `{地址}/catalog.json`（那一条是"直接根"语义）；内置源探的是它
+/// 自己在 `source.json` 里说的那个 catalog 地址。
+pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
+    let entry = current_entry(root)?.ok_or_else(|| {
+        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个官方源，或填一个地址")
+    })?;
+    let resolved = resolve_entry(entry)?;
+    let bytes = crate::runtime::net::get_bytes(
+        &resolved.catalog_url,
+        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
+        &crate::runtime::net::noop_tick,
+    )?;
+    // 解析一次：能取到但不是合法目录，那也是"这个地址不对"（用户看得懂的话）
+    crate::runtime::Catalog::parse(&bytes).map_err(|e| {
+        AppError::corrupted("这个地址下面不是一份可用的预设目录").with_detail(e.message)
+    })?;
+    Ok(resolved)
 }
 
 /// 解析 `source.json`（[`BootstrapFile`]）成两个地址。**纯函数**（字节已由调用方取回）——
@@ -444,14 +979,18 @@ mod tests {
     #[test]
     fn roundtrips_the_chosen_source() {
         let dir = root();
-        let saved =
-            save_source(dir.path(), "https://cdn.example.com/mkp/").expect("写设置不该失败");
+        let saved = save_source(
+            dir.path(),
+            SourceMode::Custom,
+            Some("https://cdn.example.com/mkp/"),
+        )
+        .expect("写设置不该失败");
         let loaded = load_source(dir.path()).expect("读设置不该失败");
 
         assert_eq!(loaded, Some(saved));
         assert_eq!(
-            loaded.expect("刚写完的").base_url,
-            "https://cdn.example.com/mkp",
+            loaded.expect("刚写完的").custom_url.as_deref(),
+            Some("https://cdn.example.com/mkp"),
             "末尾多余的斜杠在写盘前就砍掉了"
         );
     }
@@ -467,7 +1006,12 @@ mod tests {
     #[test]
     fn clearing_removes_the_override() {
         let dir = root();
-        save_source(dir.path(), "https://cdn.example.com/mkp").expect("写设置");
+        save_source(
+            dir.path(),
+            SourceMode::Custom,
+            Some("https://cdn.example.com/mkp"),
+        )
+        .expect("写设置");
         assert!(load_source(dir.path()).expect("读设置").is_some());
 
         clear_source(dir.path()).expect("撤覆盖不该失败");
@@ -624,13 +1168,14 @@ mod tests {
         }
     }
 
-    /// 手动覆盖那一路不联网、目录名按约定直接拼上
+    /// 自定义源探成**根**之后那一路不联网、目录名按约定直接拼上
     #[test]
-    fn direct_entry_joins_the_conventional_catalog_name() {
-        let r = resolve_entry(SourceEntry::Direct {
-            base_url: "https://cdn.example.com/mkp".to_owned(),
+    fn a_custom_root_joins_the_conventional_catalog_name() {
+        let r = resolve_entry(SourceEntry::Custom {
+            url: "https://cdn.example.com/mkp".to_owned(),
+            shape: CustomShape::Root,
         })
-        .expect("直接模式不联网，不该失败");
+        .expect("根形状不联网，不该失败");
         assert_eq!(r.base_url, "https://cdn.example.com/mkp");
         assert_eq!(r.catalog_url, "https://cdn.example.com/mkp/catalog.json");
     }
@@ -639,7 +1184,7 @@ mod tests {
     #[test]
     fn empty_base_url_is_refused_before_writing() {
         let dir = root();
-        let e = save_source(dir.path(), "   ").unwrap_err();
+        let e = save_source(dir.path(), SourceMode::Custom, Some("   ")).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(!source_file(dir.path()).exists(), "拒绝时不留半个文件");
     }

@@ -180,8 +180,10 @@ export const bridgeApi: MkpApi = {
   readDownloadedText: (fileName) =>
     call('readDownloadedText', 'read_downloaded_text', { fileName }),
   getPresetSource: () => call('getPresetSource', 'get_preset_source'),
-  setPresetSource: (baseUrl) =>
-    call('setPresetSource', 'set_preset_source', { baseUrl }),
+  // ★ 双源（2026-10-05）：选的是 `mode`；`customUrl` 只在 `custom` 时有意义。
+  //   参数名用 `mode` / `customUrl`（Rust 侧 `Option<String>` 收 `customUrl`）。
+  setPresetSource: (mode, customUrl) =>
+    call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */

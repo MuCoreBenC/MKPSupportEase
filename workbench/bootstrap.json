@@ -1,3 +1,4 @@
 {
-  "bootstrapUrl": "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/dist/source.json"
+  "bootstrapUrl": "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/dist/source.json",
+  "giteeBootstrapUrl": "https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/dist/source.json"
 }

@@ -20,9 +20,12 @@
  *  - 这里留下的是**开发 / 排查的后门**：临时把下载指向本地 `python3 -m http.server`
  *    或别的源。默认状态就是"没被碰过"（内置默认 / 没配），普通用户什么都不用动。
  *
- * 交互：两个单选只管**选哪条路**，写动作全部走按钮（不做"一选就写"的隐式动作）——
- * 「手动指定」填地址再按「应用」；「使用内置官方源」按「恢复内置默认」撤掉覆盖
- * （只有存在覆盖时才出现这颗按钮 —— 没有可撤的东西就不摆一颗点了没事干的按钮）。
+ * 交互：**两个官方源摆成固定单选**（Gitee / GitHub，作者 2026-10-05 拍），
+ * 自定义地址**收在最后那一档**里 —— 用户没有输错地址的机会，这是防错的第一道；
+ * 第二道在后端：**保存前先探一次**，取不到就整次拒绝（错地址留在设置里比"没配"更难查）。
+ *
+ * 写动作全部走按钮（不做"一选就写"的隐式动作）：选自定义填地址再按「应用」；
+ * 已经是默认那一档时，按钮不出现（没有可撤的东西就不摆一颗点了没事干的按钮）。
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -31,12 +34,16 @@ import { api, errorText } from '../../api'
 import type { PresetSource, SoftwareUpdate } from '../../api/contract'
 import s from './PageSettings.module.css'
 
-type Mode = 'builtin' | 'manual'
+/**
+ * 选的是**哪一个源**（`github` / `gitee` / `custom`）—— 与后端 `SourceMode` 一一对应，
+ * **id 是契约**。作者 2026-05 拍：两个官方源 + 收起的自定义。
+ */
+type Mode = 'github' | 'gitee' | 'custom'
 
 export default function PageSettings() {
   const [source, setSource] = useState<PresetSource | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
-  const [mode, setMode] = useState<Mode>('builtin')
+  const [mode, setMode] = useState<Mode>('github')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
@@ -56,9 +63,9 @@ export default function PageSettings() {
     try {
       const got = await api.getPresetSource()
       setSource(got)
-      /* 初值跟着生效值走：有覆盖 = 手动那一档；内置 / 没配 = 内置那一档 */
-      setMode(got?.fromUser === true ? 'manual' : 'builtin')
-      setDraft(got?.baseUrl ?? '')
+      /* 初值跟着生效值走：选了自定义 = 自定义那一档；其余 = 出厂默认那个内置源 */
+      setMode((got?.mode ?? 'github') as Mode)
+      setDraft(got?.mode === 'custom' ? (got?.address ?? '') : '')
     } catch (e) {
       setSource(null)
       setLoadErr(errorText(e))
@@ -102,24 +109,18 @@ export default function PageSettings() {
     setNote(null)
   }
 
-  /* 当前生效的那一句账：读不出来 / 没配 / 你指定 / 内置默认 —— 四种都要说得出 */
+  /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
   const currentText =
     loadErr !== null
       ? `读不出来：${loadErr}`
       : source === null
         ? '还没配置 —— 下载与检查更新会先如实拒绝，并说明去哪儿配'
-        : source.fromUser
-          ? `你指定：${source.baseUrl}`
-          : `内置默认：${source.baseUrl}`
+        : source.mode === 'custom'
+          ? `你指定：${source.address === '' ? '（还没填地址）' : source.address}`
+          : `${source.label}：${source.address}`
 
-  /* 「使用内置官方源」那格的副文案：内置是什么，没有就如实说没有 */
-  const builtinText =
-    source?.builtin != null
-      ? `内置地址：${source.builtin}`
-      : '这个构建没有内置官方源（选它 = 回到「没配」）'
-
-  /* 「恢复内置默认」可不可点：只有"存在用户覆盖"时才有的撤 */
-  const canClear = source !== null && source.fromUser
+  /* 「恢复默认」可不可点：只有"现在不是出厂默认那一档"时才有的撤 */
+  const canClear = source !== null && source.mode !== source.defaultMode
   const canSet = draft.trim() !== ''
 
   const apply = async () => {
@@ -127,23 +128,16 @@ export default function PageSettings() {
     setBusy(true)
     setNote(null)
     try {
-      if (mode === 'builtin') {
-        const got = await api.clearPresetSource()
+      if (mode === 'custom') {
+        // 自定义：**先探后落盘**（后端做），取不到会整次拒绝并说明为什么
+        const got = await api.setPresetSource('custom', draft.trim())
         setSource(got)
-        setDraft(got?.baseUrl ?? '')
-        setNote({
-          text:
-            got === null
-              ? '已撤掉你填的地址 —— 这个构建没有内置官方源，现在就是「没配」'
-              : `已回到内置默认：${got.baseUrl}`,
-          bad: false,
-        })
-      } else {
-        const got = await api.setPresetSource(draft.trim())
-        setSource(got)
-        setDraft(got.baseUrl)
-        setNote({ text: `已应用：${got.baseUrl}`, bad: false })
+        setNote({ text: `已应用：${got.address}`, bad: false })
+        return
       }
+      const got = await api.setPresetSource(mode)
+      setSource(got)
+      setNote({ text: `已切到：${got.label}（${got.address}）`, bad: false })
     } catch (e) {
       setNote({ text: errorText(e), bad: true })
     } finally {
@@ -217,45 +211,76 @@ export default function PageSettings() {
         <div className={s.field}>
           <div className={s.fieldTitle}>预设数据源</div>
           <p className={s.fieldNote}>
-            默认使用内置官方源。仅用于开发测试或排查问题时，临时指定其他数据源。
+            两个都是官方源，选一个就行（国内选 Gitee 更稳）。自定义地址只在开发 / 排查时用。
           </p>
 
-          <label className={s.radio}>
-            <input
-              type="radio"
-              name="preset-source"
-              checked={mode === 'builtin'}
-              onChange={() => pick('builtin')}
-              disabled={busy}
-            />
-            <span>使用内置官方源</span>
-          </label>
-          <p className={s.hint}>{builtinText}</p>
-          {mode === 'builtin' && canClear && (
+          {/* ★ 两个固定单选 = 防错第一道：用户没有输错地址的机会 */}
+          {(source?.builtin ?? []).map((b) => (
+            <label key={b.id} className={s.radio}>
+              <input
+                type="radio"
+                name="preset-source"
+                checked={mode === b.id}
+                onChange={() => pick(b.id as Mode)}
+                disabled={busy}
+              />
+              <span>
+                {b.label}
+                {b.id === source?.defaultMode ? '（默认）' : ''}
+              </span>
+            </label>
+          ))}
+          {(source?.builtin ?? []).map((b) => (
+            <p key={`${b.id}-hint`} className={s.hint}>
+              {b.address}
+            </p>
+          ))}
+          {mode !== 'custom' && canClear && (
             <div className={s.row}>
-              <button type="button" className={s.btn} onClick={() => void apply()} disabled={busy}>
-                {busy ? '正在恢复……' : '恢复内置默认'}
+              <button
+                type="button"
+                className={s.btn}
+                onClick={async () => {
+                  /* 撤掉选择 = 回到出厂默认那一档（写动作走按钮，不做"一选就写"） */
+                  if (busy || source === null) return
+                  setBusy(true)
+                  setNote(null)
+                  try {
+                    const got = await api.setPresetSource(source.defaultMode)
+                    setSource(got)
+                    setMode(got.mode as Mode)
+                    setNote({ text: `已回到默认：${got.label}`, bad: false })
+                  } catch (e) {
+                    setNote({ text: errorText(e), bad: true })
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+                disabled={busy}
+              >
+                {busy ? '正在恢复……' : '恢复默认'}
               </button>
             </div>
           )}
 
+          {/* 收起的自定义：默认不展开（普通用户不需要看见输入框） */}
           <label className={s.radio}>
             <input
               type="radio"
               name="preset-source"
-              checked={mode === 'manual'}
-              onChange={() => pick('manual')}
+              checked={mode === 'custom'}
+              onChange={() => pick('custom')}
               disabled={busy}
             />
-            <span>手动指定（开发 / 排查）</span>
+            <span>自定义地址（开发 / 排查）</span>
           </label>
-          {mode === 'manual' && (
+          {mode === 'custom' && (
             <div className={s.row}>
               <input
                 className={s.input}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="https://…"
+                placeholder="https://…/presets/dist/ 或 …/source.json"
                 aria-label="数据源地址"
               />
               <button
@@ -264,9 +289,14 @@ export default function PageSettings() {
                 onClick={() => void apply()}
                 disabled={busy || !canSet}
               >
-                {busy ? '正在应用……' : '应用'}
+                {busy ? '正在检查……' : '应用'}
               </button>
             </div>
+          )}
+          {mode === 'custom' && (
+            <p className={s.hint}>
+              数据源根与 source.json 地址都认；应用前会先探一次，取不到就不改。
+            </p>
           )}
         </div>
 

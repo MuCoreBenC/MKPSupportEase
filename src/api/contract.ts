@@ -907,17 +907,41 @@ export interface DownloadOutcome {
   message: string
 }
 
-/** 当前数据源（出厂默认值或用户填的都算） */
+/**
+ * 一个**内置官方源**（作者 2026-10-05 拍"两个官方源"）。
+ *
+ * 界面摆两个固定单选就靠它 —— **用户没有输错地址的机会，这是防错的第一道**。
+ */
+export interface BuiltinPresetSource {
+  /** `github` / `gitee` —— **id 是契约**（盘上存的就是它，别改） */
+  id: string
+  /** 给用户看的那一句（如「Gitee（国内直连）」） */
+  label: string
+  /** 这个源的 Bootstrap 地址（指向 `source.json`） */
+  address: string
+}
+
+/**
+ * 当前数据源（**用户选的是哪一个**，不是一个地址）
+ *
+ * - `mode`：`github` / `gitee` / `custom` —— 用户在三个里选，不手输；
+ * - `address`：当前生效的入口地址（自定义时可能是"数据源根"，也可能是 `source.json`
+ *   地址 —— **后端两种都认**，见 `runtime::source::CustomShape`）。
+ */
 export interface PresetSource {
-  baseUrl: string
-  /** `true` = 用户在界面里填的；`false` = 构建期注入的出厂默认值 */
+  mode: string
+  /** 模式名（给用户看的那一句） */
+  label: string
+  /** 当前生效的入口地址；空串 = 选了自定义但还没填 */
+  address: string
+  /** `true` = 用户自己填的（`custom`） */
   fromUser: boolean
-  /**
-   * 构建期注入的默认地址（没有 = `null`）。
-   * **单独一格**：有用户覆盖时 `baseUrl` 是覆盖值 —— 这一格回答"撤掉覆盖之后会回到什么"，
-   * 设置页「使用内置官方源」那句副文案要的正是它
-   */
-  builtin: string | null
+  /** 两个内置源（没注入的那个不出现） */
+  builtin: BuiltinPresetSource[]
+  /** 出厂默认是哪一个（`github`）—— 「恢复默认」那一句要说清它是什么 */
+  defaultMode: string
+  /** 出厂默认那个源的地址 */
+  builtinDefault: string | null
 }
 
 export interface MkpApi {
@@ -1153,8 +1177,14 @@ export interface MkpApi {
    */
   getPresetSource(): Promise<PresetSource | null>
 
-  /** 换数据源：填进来就生效，下一次下载用它。地址不合法由后端拒绝（**空地址在这里就拒**） */
-  setPresetSource(baseUrl: string): Promise<PresetSource>
+  /**
+   * 换数据源：**先探一次，通了才落盘**（作者 2026-10-05：用户容易输错地址）。
+   *
+   * - 内置两个源（`mode = 'github' | 'gitee'`）：地址是程序自带的，不联网不探；
+   * - `mode = 'custom'`：**数据源根**与 **`source.json` 地址两种都认**（用户复制来的
+   *   通常就是后者），取不到就整次拒绝 —— 错地址留在设置里比"没配"更难查。
+   */
+  setPresetSource(mode: string, customUrl?: string | null): Promise<PresetSource>
 
   /**
    * 撤掉用户覆盖（回到内置默认 / 没配）：删掉这台机器上的那份设置，幂等。
