@@ -361,25 +361,50 @@ fn bootstrap_candidates(url: &str) -> Vec<String> {
     out
 }
 
+/// **取字节的注入点**（判据用假的，产品的门只用真的）。
+///
+/// ★ 为什么有这一层：形状判定（根还是 `source.json`）本质是"依次试几个 URL，看哪个
+///   能取到东西"。把它写成"直接调 `net::get_bytes`"的话，判据就得**开一个本地端口**
+///   才能跑 —— 而客户端产品不许开端口（`check:zero-network` 那道闸会报红，2026-10-05
+///   真被它抓过一次）。**注入取字节的动作，判据就能在纯内存里跑完整条判定。**
+pub type FetchBytes<'a> = &'a dyn Fn(&str, &str) -> Result<Vec<u8>, AppError>;
+
+/// 真的那份取字节（产品路径唯一入口：网络只住 `net`）。
+fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
+    crate::runtime::net::get_bytes(
+        url,
+        &crate::runtime::net::GetPlan::new(what),
+        &crate::runtime::net::noop_tick,
+    )
+}
+
 /// 探一个自定义地址是哪种形状（真联网：先根、再按 [`bootstrap_candidates`] 试 Bootstrap）。
 ///
 /// ★ 顺序有讲究：**先试根** —— 根那一次不额外花请求（`{地址}/catalog.json` 本来
 ///   就要取）；不成再当 Bootstrap 读。
 /// **都不通** → 如实报错，并把每次尝试的原因都摆出来（只说"不行"等于让用户猜）。
 pub fn probe_custom_shape(url: &str) -> Result<(CustomShape, ResolvedSource), AppError> {
+    probe_custom_shape_with(url, &real_fetch)
+}
+
+/// [`probe_custom_shape`] 的注入版（判据走它，**不开端口**）。
+pub fn probe_custom_shape_with(
+    url: &str,
+    fetch: FetchBytes<'_>,
+) -> Result<(CustomShape, ResolvedSource), AppError> {
     let base = normalize_base_url(url)?;
     // ① 先当"数据源根"
     let as_root = ResolvedSource {
         catalog_url: join_url(&base, CATALOG_FILE),
         base_url: base.clone(),
     };
-    if let Ok(resolved) = fetch_and_accept(&as_root) {
+    if let Ok(resolved) = fetch_and_accept(fetch, &as_root) {
         return Ok((CustomShape::Root, resolved));
     }
     // ② 再当 Bootstrap（原样 / 补文件名两种）
     let mut reasons = Vec::new();
     for candidate in bootstrap_candidates(url) {
-        match parse_source_json(&candidate).and_then(|r| fetch_and_accept(&r)) {
+        match parse_source_json_with(fetch, &candidate).and_then(|r| fetch_and_accept(fetch, &r)) {
             Ok(resolved) => return Ok((CustomShape::Bootstrap, resolved)),
             Err(e) => reasons.push(format!("{candidate}（{e}）")),
         }
@@ -397,12 +422,11 @@ pub fn probe_custom_shape(url: &str) -> Result<(CustomShape, ResolvedSource), Ap
 const SOURCE_FILE_NAME: &str = "source.json";
 
 /// 取一次 catalog 并确认它是**一份可用的目录**（解析过了才算）。
-fn fetch_and_accept(resolved: &ResolvedSource) -> Result<ResolvedSource, AppError> {
-    let bytes = crate::runtime::net::get_bytes(
-        &resolved.catalog_url,
-        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
-        &crate::runtime::net::noop_tick,
-    )?;
+fn fetch_and_accept(
+    fetch: FetchBytes<'_>,
+    resolved: &ResolvedSource,
+) -> Result<ResolvedSource, AppError> {
+    let bytes = fetch(&resolved.catalog_url, CATALOG_FILE)?;
     crate::runtime::Catalog::parse(&bytes)
         .map_err(|e| AppError::corrupted("取到的不是一份可用的预设目录").with_detail(e.message))?;
     Ok(resolved.clone())
@@ -464,8 +488,6 @@ mod two_source_tests {
     //! 那不是用户错，是我们把"一个地址有两种读法"当成了两种东西。
 
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
@@ -540,20 +562,27 @@ mod two_source_tests {
     /// 两条都通 —— 用户填哪一种都能用，这正是"填官方地址反而不通"的修法。
     #[test]
     fn a_custom_url_is_read_as_a_root_or_as_a_source_json() {
-        let server = TinyServer::start();
-        let root_url = server.url("");
+        // 假取字节：目录里有两个文件（`/catalog.json` 与 `/source.json`），别的 404。
+        // ★ 判据**不开端口**（客户端产品不许开端口，`check:zero-network` 守着那道闸）——
+        //   形状判定做成"可注入的取字节"，就能在纯内存里跑完整条判定。
+        let fetch = fake_fetch(&["dist/catalog.json", "dist/source.json"]);
+        let root_url = "https://mirror.example/presets/dist";
 
-        let (root_shape, resolved) = probe_custom_shape(&root_url).expect("当根该通");
+        let (root_shape, resolved) = probe_custom_shape_with(root_url, &fetch).expect("当根该通");
         assert_eq!(root_shape, CustomShape::Root);
-        assert!(resolved.catalog_url.ends_with("/catalog.json"));
+        assert!(
+            resolved.catalog_url.ends_with("/catalog.json"),
+            "根形状：catalog 就在根下面，不多花请求"
+        );
 
-        // 同一个服务，"填 source.json 地址"（用户最常复制的那一串）
-        let bootstrap_url = server.url(SOURCE_FILE_NAME);
-        let (shape, resolved) = probe_custom_shape(&bootstrap_url).expect("当 source.json 也该通");
+        // ★ 用户复制来的地址**本身带着 source.json**（0.0.2 真机就是这条路不通的）
+        let bootstrap_url = "https://mirror.example/presets/dist/source.json";
+        let (shape, resolved) =
+            probe_custom_shape_with(bootstrap_url, &fetch).expect("当 source.json 也该通");
         assert_eq!(shape, CustomShape::Bootstrap);
         assert_eq!(
             resolved.catalog_url,
-            format!("{root_url}catalog.json"),
+            format!("{root_url}/catalog.json"),
             "Bootstrap 形状下两个地址都由 source.json 说"
         );
     }
@@ -561,8 +590,9 @@ mod two_source_tests {
     /// 两条都不通 → 拒绝，且**两条的原因都摆出来**（只说"不行"等于让用户猜）
     #[test]
     fn an_unusable_address_is_refused_with_both_reasons() {
-        let server = TinyServer::start_empty();
-        let e = probe_custom_shape(&server.url("")).unwrap_err();
+        // 目录里什么都没有：根那条与 source.json 那条都要试、都要说清为什么
+        let fetch = fake_fetch(&[]);
+        let e = probe_custom_shape_with("https://empty.example/presets/dist/", &fetch).unwrap_err();
         let text = format!("{}{}", e.message, e.detail.unwrap_or_default());
         assert!(text.contains("catalog.json"), "说了根那条为什么：{text}");
         assert!(
@@ -571,91 +601,31 @@ mod two_source_tests {
         );
     }
 
-    /// 判据用的最小 HTTP 服务端：**只按路径答两种内容**，其余 404。
-    ///
-    /// 手写 `std::net` 而不是引服务端框架：它属于判据脚手架，不属于产品架构。
-    struct TinyServer {
-        addr: std::net::SocketAddr,
-        stop: Arc<AtomicBool>,
-        worker: Option<std::thread::JoinHandle<()>>,
-    }
-
-    impl TinyServer {
-        /// `catalog` = 摆一份合法 catalog（根与 `source.json` 都在）
-        fn start() -> Self {
-            Self::spawn(true)
-        }
-
-        /// 什么都没有（两条都该失败）
-        fn start_empty() -> Self {
-            Self::spawn(false)
-        }
-
-        fn spawn(with_files: bool) -> Self {
-            use std::io::{Read as _, Write as _};
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("端口绑不上");
-            let addr = listener.local_addr().expect("拿不到地址");
-            let stop = Arc::new(AtomicBool::new(false));
-            let worker_stop = Arc::clone(&stop);
-            let worker = std::thread::spawn(move || {
-                for stream in listener.incoming() {
-                    if worker_stop.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let Ok(mut stream) = stream else { continue };
-                    let mut head = Vec::new();
-                    let mut byte = [0u8; 1];
-                    while head.len() < 8192 {
-                        match stream.read(&mut byte) {
-                            Ok(0) | Err(_) => break,
-                            Ok(_) => {
-                                head.push(byte[0]);
-                                if head.ends_with(b"\r\n\r\n") {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    let text = String::from_utf8_lossy(&head).to_string();
-                    let body: Option<&str> = if !with_files {
-                        None
-                    } else if text.starts_with("GET /catalog.json") {
-                        Some(r#"{"catalogSchema":1,"revision":"r1","files":[]}"#)
-                    } else if text.starts_with("GET /source.json") {
-                        Some(r#"{"sourceSchema":1,"catalog":"catalog.json"}"#)
-                    } else {
-                        None
-                    };
-                    let response = match body {
-                        Some(b) => format!(
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}",
-                            b.len()
-                        ),
-                        None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                            .to_owned(),
-                    };
-                    let _ = stream.write_all(response.as_bytes());
-                    let _ = stream.flush();
-                }
-            });
-            Self {
-                addr,
-                stop,
-                worker: Some(worker),
-            }
-        }
-
-        fn url(&self, file: &str) -> String {
-            format!("http://{}/{file}", self.addr)
-        }
-    }
-
-    impl Drop for TinyServer {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
-            let _ = std::net::TcpStream::connect(self.addr);
-            if let Some(h) = self.worker.take() {
-                let _ = h.join();
+    /// 判据用的**假取字节**：目录里有哪几个文件就答哪几个，其余一律 404。
+    fn fake_fetch(
+        files: &'static [&'static str],
+    ) -> impl Fn(&str, &str) -> Result<Vec<u8>, AppError> + 'static {
+        move |url: &str, what: &str| {
+            // ★ 只看**最后两段**（`dist/catalog.json` 这样的形状）：
+            //   前缀千变万化不该影响判定，但 `…/source.json/catalog.json` 的最后两段是
+            //   `source.json/catalog.json` —— 它必须 404，否则"当根试"会误判成功
+            //   （那正是真机上"填 source.json 地址"不通的那条路）。
+            let path = url
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.find('/').map(|i| &rest[i..]))
+                .unwrap_or("");
+            let mut tail: Vec<&str> = path.rsplit('/').filter(|s| !s.is_empty()).take(2).collect();
+            tail.reverse();
+            let tail = tail.join("/");
+            let hit = files.iter().any(|f| tail == *f);
+            match hit {
+                true => Ok(match what {
+                    CATALOG_FILE => br#"{"catalogSchema":1,"revision":"r1","files":[]}"#.to_vec(),
+                    SOURCE_FILE_NAME => br#"{"sourceSchema":1,"catalog":"catalog.json"}"#.to_vec(),
+                    other => panic!("判据不该问 {other}"),
+                }),
+                false => Err(AppError::io("404").with_detail(url.to_owned())),
             }
         }
     }
@@ -725,11 +695,12 @@ pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
 /// 取一个 Bootstrap（`source.json`）并解析成两个地址。
 /// **内置与自定义的 Bootstrap 形状共用这一处**（少一处就少一处不一致）。
 fn parse_source_json(url: &str) -> Result<ResolvedSource, AppError> {
-    let bytes = crate::runtime::net::get_bytes(
-        url,
-        &crate::runtime::net::GetPlan::new(SOURCE_FILE_NAME),
-        &crate::runtime::net::noop_tick,
-    )?;
+    parse_source_json_with(&real_fetch, url)
+}
+
+/// [`parse_source_json`] 的注入版。
+fn parse_source_json_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSource, AppError> {
+    let bytes = fetch(url, SOURCE_FILE_NAME)?;
     parse_bootstrap(url, &bytes)
 }
 

@@ -2111,3 +2111,10 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
 `an_unusable_address_is_refused_with_both_reasons`。
 判据里那个 `TinyServer` 是手写 `std::net` 的最小服务端（只按路径答两种内容）——
 它属于**判据脚手架**，不进产品架构。
+
+**★ 判据不许开端口（2026-10-05 CI 抓到的）**：形状判定第一版写成"起一个本地 `TcpListener`
+当假服务器"，`check:zero-network` 当场报红（`启动零网络扫描`：原始套接字 / TCP 监听 / TCP 连接）。
+那是对的 —— **客户端产品不开端口，判据也算客户端**。改成**注入取字节的动作**
+（`FetchBytes` + `probe_custom_shape_with` / `parse_source_json_with`），判据在纯内存里跑完整条判定，
+产品的门仍走 `net::get_bytes` 唯一出口。假 fetch 只看 URL 的**最后两段**
+（`…/source.json/catalog.json` 必须 404 —— 那正是真机上"填 source.json 地址"不通的那条路）。
