@@ -1613,6 +1613,12 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       `build` / `check:bundle` / `check:zero-network` 全绿；探针实机走查 —— 回执 / 合并二次确认 /
       已合并 / 重开回执 / 历史三条 / 手动刷新 全过（仅剩预存红「生成之后产物名单没跟上」）。
 
+      **补（交接）**：第四刀「发布软件版本」的施工计划另起一份 **`PUBLISH-KNIFE4-HANDOFF.md`**
+      （本文件不重复它的内容）：八步现状与缺口、现成件清单（★ `scripts/release.mjs` 已管版本号四处 +
+      PR + 等 CI + 合并 + tag；设置页三态已完）、**六条待作者拍板**、五步施工顺序。
+      ★ 最硬的一条：**`release.json` 现在住仓库根，而客户端会去 `…/presets/release.json` 找**
+      （`source::release_url`：base 往上恰好一级）—— 开工前先定落点。
+
       **补（作者真机踩到）**：合并之前再点一次「发布」，`create_review` 落 **HTTP 422**
       （平台不许同一个 head→base 开两份 PR）—— 而 commit + push 其实已经成功。
       这是**发布可重跑**缺的一块：`Hosting::find_open_review`（`GET …/pulls?state=open&head=o:branch&base=…`）
