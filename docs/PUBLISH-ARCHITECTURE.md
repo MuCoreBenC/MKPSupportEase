@@ -516,6 +516,19 @@ publish_into        （定稿 catalog / manifest / source）
    localStorage / .env；前端只知道"**配没配**"+ 一个尾号提示（判据
    `credentials_never_echo_the_token`）。
 
+4. ★ **锁与线程边界**（2026-10-04 真机事故后补的硬规矩 —— 点一次发布，窗口直接挂死）：
+   - **`wb_publish` 必须 `#[tauri::command(async)]`**：它读 Keychain（系统弹密码框）、
+     起 git 子进程、发平台 HTTP，**跑在主线程上就是整个窗口一动不动**。凡"碰网络 /
+     Keychain"的命令同理 —— 它们在 `read_commands_are_async_so_they_never_freeze_the_window`
+     的 `IO` 单子上，忘了 `(async)` 就红。
+   - **事务内核只许调锁无关自由函数**：`with_ctx` 的锁**不可重入** —— 事务里回头调
+     `audit::publish_audit()`（它自己会 `with_ctx`）就是**自锁挂死**（不是报错）。
+     审计因此拆成 `audit_with(ctx)`（锁无关内核）+ `publish_audit()`（入口薄壳），
+     与 `build::preview_with` / `generate_with` 同形；判据
+     `the_transaction_chain_never_calls_a_command_shell` 把"**取锁入口**"和命令壳一起拦。
+   - **平台 HTTP 一律走 `platform::agent()`**（带 `API_TIMEOUT=30s` / `API_CONNECT_TIMEOUT=10s`）——
+     **没有超时就没有尽头**；发布链上的网络调用不许用裸 `ureq::get/post`。
+
 **平台抽象与统一状态模型**（`workbench/app/platform/mod.rs`）：
 
 - `trait Hosting` = 平台同一张脸：`create_review` / `get_review`；

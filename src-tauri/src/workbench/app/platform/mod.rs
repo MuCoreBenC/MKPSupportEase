@@ -25,9 +25,31 @@
 pub mod gitee;
 pub mod github;
 
+use std::time::Duration;
+
 use serde::Serialize;
 
 use crate::error::AppError;
+
+/// 平台 API 一次请求的**总时间上限**（含连接与读完响应体）。
+///
+/// ★ **必须有值**：发布事务是"点一次、等结果"的一条链 —— 网络不给答案时它必须落成
+/// 一个错误，而不是转圈到天荒地老（与 `runtime/net.rs` 同一条纪律；2026-10-04 真机上
+/// 吃过一次"没有超时就没有尽头"的亏）。
+pub const API_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 连接建立的上限。比总时短 —— 连不上是最常见的一类故障，不该让人等满 30 秒
+pub const API_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 平台 API 专用的 `ureq` Agent（带超时）。GitHub / Gitee **共用这一处** ——
+/// 超时口径只写一遍，将来调也只调这里。
+pub(super) fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(API_TIMEOUT))
+        .timeout_connect(Some(API_CONNECT_TIMEOUT))
+        .build()
+        .into()
+}
 
 /// 评审（GitHub 叫 PR、Gitee 叫 MR）在**工作台这一侧**的统一状态。
 ///

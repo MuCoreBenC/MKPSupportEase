@@ -60,7 +60,10 @@ impl Gitee {
         let url = format!("{}{}", api_base(), path);
         let sep = if path.contains('?') { '&' } else { '?' };
         let full = format!("{url}{sep}access_token={}", self.token);
-        let resp = ureq::get(&full)
+        // ★ 走带超时的 Agent（[`super::agent`]）—— 与 GitHub 同一条纪律：
+        //   裸 `ureq::get` 没有超时，网络不给答案就会一直挂着。
+        let resp = super::agent()
+            .get(&full)
             .header("User-Agent", "SupportEase")
             .call()
             .map_err(transport)?;
@@ -73,7 +76,8 @@ impl Gitee {
             obj.insert("access_token".to_owned(), Value::String(self.token.clone()));
         }
         let url = format!("{}{}", api_base(), path);
-        let resp = ureq::post(&url)
+        let resp = super::agent()
+            .post(&url)
             .header("User-Agent", "SupportEase")
             .header("Content-Type", "application/json")
             .send(body.to_string())

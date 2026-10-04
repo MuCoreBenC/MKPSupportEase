@@ -971,7 +971,10 @@ pub fn wb_publish_audit() -> Result<super::audit::PublishAudit, AppError> {
 /// 发布目标（平台 / 仓库 / 用户名 / Token）在**锁外**从发布账户配置解析（[`resolve_publish`]）；
 /// **没有配发布账户**时退化成"只生成 + 定稿 + 本地推送"，如实说"没建 PR" ——
 /// 那是"还没配账户"，不是失败。
-#[tauri::command]
+/// ★ `(async)` 不是性能优化，是正确性：这条命令要读 Keychain（系统弹密码框）、
+/// 起 git 子进程、发平台 HTTP —— 跑在主线程上就是"整个窗口一动不动"
+/// （2026-10-04 真机事故；与上面「读命令必须异步」同一条病，只是它更重）。
+#[tauri::command(async)]
 pub fn wb_publish(
     app: tauri::AppHandle,
     opts: Option<super::publish_tx::TxOptions>,

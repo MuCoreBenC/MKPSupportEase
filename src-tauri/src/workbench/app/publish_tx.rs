@@ -193,8 +193,10 @@ pub fn run(
     hosting: Option<&dyn Hosting>,
     repo_root: Option<PathBuf>,
 ) -> Result<PublishTxReport, AppError> {
-    // ① 审计：唯一入口判定器（与工作台界面的闸、cargo test 判据同一个函数）
-    let audit = super::audit::publish_audit()?;
+    // ① 审计：唯一入口判定器（与工作台界面的闸、cargo test 判据同一个函数）。
+    //    ★ 调**锁无关内核** `audit_with`，不是 `publish_audit` —— 事务跑在 `with_ctx` 里，
+    //    那个入口会再取一次（不可重入的）锁 = 自锁挂死（2026-10-04 真机卡死的根因）。
+    let audit = super::audit::audit_with(ctx)?;
     let passed = audit
         .items
         .iter()
@@ -427,7 +429,9 @@ pub fn wb_publish_account(app: tauri::AppHandle) -> Result<PublishAccount, AppEr
 /// 存一个平台的**发布目标**（仓库地址 + 用户名，进 `publish-account.json`）。
 ///
 /// Token **不在这里** —— 它走 [`wb_set_publish_token`] 进 Keychain（配置与秘密分离）。
-#[tauri::command]
+///
+/// ★ `(async)`：它会读 Keychain（系统可能弹密码框）—— 绝不能占着主线程。
+#[tauri::command(async)]
 pub fn wb_set_publish_account(
     app: tauri::AppHandle,
     platform: String,
@@ -459,7 +463,9 @@ pub fn wb_set_publish_account(
 }
 
 /// 存一个发布 Token（**只进不出**：写 Keychain，返回的状态里没有原值）。
-#[tauri::command]
+///
+/// ★ `(async)`：写 Keychain 同样可能弹系统框（更新他人建的条目要授权）—— 不占主线程。
+#[tauri::command(async)]
 pub fn wb_set_publish_token(
     platform: String,
     token: String,
@@ -480,7 +486,9 @@ pub fn wb_set_publish_token(
 }
 
 /// 清一个平台的**发布账户**（配置 + Keychain 凭据，都清；幂等）。
-#[tauri::command]
+///
+/// ★ `(async)`：删 Keychain 条目可能弹系统框 —— 不占主线程。
+#[tauri::command(async)]
 pub fn wb_clear_publish_account(
     app: tauri::AppHandle,
     platform: String,
@@ -662,11 +670,16 @@ mod tests {
 
         // 只看**调用**（`名字(`），跳过定义行（`pub fn 名字(`）与注释行。命令壳在别处定义，
         // 这里出现 `名字(` 基本就是调用。
+        //
+        // ★ 最后一味不是命令壳，是**会自己取锁的入口函数**：`audit::publish_audit` 是
+        //   `with_ctx(audit_with)` 的薄壳 —— 事务里回头调它 = 再取一次不可重入的锁，
+        //   同样是自锁挂死。**这一类名字（"取锁入口"）和命令壳同罪**，一起拦。
         let shells = [
             "wb_generate(",
             "wb_publish(",
             "wb_publish_audit(",
             "wb_generate_preview(",
+            "publish_audit(",
         ];
         for shell in shells {
             let mut hits = Vec::new();

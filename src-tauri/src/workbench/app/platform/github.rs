@@ -56,7 +56,10 @@ impl GitHub {
     /// GET 一个 API 路径，解析成 JSON。
     fn get(&self, path: &str) -> Result<Value, AppError> {
         let url = format!("{}{}", api_base(), path);
-        let resp = ureq::get(&url)
+        // ★ 走带超时的 Agent（[`super::agent`]）—— 裸 `ureq::get` 没有超时，
+        //   网络不给答案就会一直挂着（发布事务"没有尽头"的第二种死法）。
+        let resp = super::agent()
+            .get(&url)
             .header("Authorization", &format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "SupportEase")
@@ -68,7 +71,8 @@ impl GitHub {
     /// POST 一个 API 路径（带 JSON body）。
     fn post(&self, path: &str, body: Value) -> Result<Value, AppError> {
         let url = format!("{}{}", api_base(), path);
-        let resp = ureq::post(&url)
+        let resp = super::agent()
+            .post(&url)
             .header("Authorization", &format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "SupportEase")

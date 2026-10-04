@@ -1735,6 +1735,11 @@ mod tests {
     ///
     /// 写命令**故意不在这张单子里**：它们要落盘、要和草稿的锁打配合，改异步是另一
     /// 件要单独评估的事（`wb_apply_draft` / `wb_save` / `wb_generate` …）。
+    ///
+    /// ★ **但"碰网络 / Keychain"的命令必须在这张单子里**（下面 [`IO`]）——2026-10-04
+    /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框）、推 git、
+    /// 建 PR 全发生在主线程上，窗口一动不动；作者原话「卡住了，我什么都没办法点」。
+    /// 那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
     #[test]
     fn read_commands_are_async_so_they_never_freeze_the_window() {
         /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
@@ -1767,6 +1772,20 @@ mod tests {
             "wb_version_orphans",
         ];
 
+        /// 这一批**碰网络或系统 Keychain**（发布事务那几条）—— 同样必须 `(async)`。
+        ///
+        /// 为什么它们比读命令更要紧：读命令只是"算得久"；这几条会**等系统弹框**
+        /// （Keychain 授权）和**等网络**（git 推送、平台 API）—— 等多久完全不可控，
+        /// 占着主线程就是无限期冻住整个窗口。
+        const IO: &[&str] = &[
+            "wb_publish",
+            "wb_publish_account",
+            "wb_set_publish_account",
+            "wb_set_publish_token",
+            "wb_clear_publish_account",
+            "wb_publish_status",
+        ];
+
         // 路径用 CARGO_MANIFEST_DIR 拼（不用 file!()：建了 workspace 之后它的基准会变）
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
@@ -1780,6 +1799,8 @@ mod tests {
             "bundles.rs",
             "machines.rs",
             "words.rs",
+            // 发布事务那几条命令住这里（IO 单子要扫到它们）
+            "publish_tx.rs",
         ] {
             sources.push_str(
                 &std::fs::read_to_string(app.join(name))
@@ -1806,6 +1827,25 @@ mod tests {
         assert!(
             missing.is_empty(),
             "这些读命令还跑在主线程上（算多久界面就冻多久）—— 加 `#[tauri::command(async)]`：{missing:?}"
+        );
+
+        // 同样的扫描，对「碰网络 / Keychain」的命令再来一遍 —— 它们的主线程代价更重
+        let mut missing_io: Vec<&str> = Vec::new();
+        for fn_name in IO {
+            let needle = format!("pub fn {fn_name}(");
+            let at = sources.find(&needle).unwrap_or_else(|| {
+                panic!("源码里找不到命令 {fn_name} —— 单子过时了（改了名或删了？）")
+            });
+            let head = &sources[..at];
+            let attr_at = head.rfind("#[tauri::command").expect("前面一定有属性");
+            if !sources[attr_at..at].contains("(async)") {
+                missing_io.push(fn_name);
+            }
+        }
+        assert!(
+            missing_io.is_empty(),
+            "这些命令碰网络 / Keychain，却还跑在主线程上（读 Keychain 会弹系统框、\
+             推送要等网络 —— 界面会整段冻住）：{missing_io:?}"
         );
     }
 }

@@ -154,79 +154,87 @@ impl PublishAudit {
 /// 与 `wb_publish` 共用同一个会话上下文（`with_ctx`），所以「闸里看到的」与
 /// 「发布时会写出去的」是同一份数据 —— 不存在"检查的是一个状态、发布的是另一个"。
 pub fn publish_audit() -> Result<PublishAudit, AppError> {
-    with_ctx(|ctx| {
-        let (c, d, _) = state(ctx)?;
-        let book = Book::new(&ctx.presets, &c, &d);
-        let dist = paths::dist_root_path();
-        // ★ 只读定位（`assets_root_path`），不是 `assets_root()` —— 后者会 `create_dir_all`，
-        // 一个自称「只读：不写盘」的闸不该顺手造出一个目录
-        let asset_root = paths::assets_root_path();
+    with_ctx(audit_with)
+}
 
-        let mut items: Vec<AuditItem> = Vec::with_capacity(15);
+/// 十五项的**锁无关内核**：给一份会话就算，自己不取锁。
+///
+/// ★ **发布事务必须调这一个**（[`super::publish_tx::run`]），不能调 [`publish_audit`]：
+/// 事务跑在 `with_ctx` 里，而 `with_ctx` 的锁**不可重入** —— 回头调那个"会自己取锁"的
+/// 入口就是自锁，表现是**主线程挂死**（不是报错；2026-10-04 真机上就是这么卡死的）。
+/// 与 `build::preview_with` / `generate_with` 同一条纪律，`publish_tx` 的源码扫描判据钉住它。
+pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = Book::new(&ctx.presets, &c, &d);
+    let dist = paths::dist_root_path();
+    // ★ 只读定位（`assets_root_path`），不是 `assets_root()` —— 后者会 `create_dir_all`，
+    // 一个自称「只读：不写盘」的闸不该顺手造出一个目录
+    let asset_root = paths::assets_root_path();
 
-        /* ① 源数据完整 —— 能走到这里就说明 `presets/` 整套读得出来（加载期校验过） */
-        items.push(sources_complete(&book));
+    let mut items: Vec<AuditItem> = Vec::with_capacity(15);
 
-        /* ② 引用都能落地 */
-        items.push(refs_resolve(&ctx.presets));
+    /* ① 源数据完整 —— 能走到这里就说明 `presets/` 整套读得出来（加载期校验过） */
+    items.push(sources_complete(&book));
 
-        /* ③ A 类资产的文件真在载荷根里 */
-        items.push(assets_exist(&ctx.presets, &asset_root));
+    /* ② 引用都能落地 */
+    items.push(refs_resolve(&ctx.presets));
 
-        /* ④ catalog.path 唯一且合法 */
-        items.push(paths_unique(&ctx.presets));
+    /* ③ A 类资产的文件真在载荷根里 */
+    items.push(assets_exist(&ctx.presets, &asset_root));
 
-        /* ⑤ B 类能渲染（走 preview 的锁无关内核 —— 只算不写） */
-        items.push(presets_renderable(ctx));
+    /* ④ catalog.path 唯一且合法 */
+    items.push(paths_unique(&ctx.presets));
 
-        /* ⑥ 渲染结果真在 dist/mkp/presets 下 */
-        items.push(presets_rendered(&book, &dist));
+    /* ⑤ B 类能渲染（走 preview 的锁无关内核 —— 只算不写） */
+    items.push(presets_renderable(ctx));
 
-        /* ⑦ catalog 登记的每一条都取得到 */
-        items.push(registered_paths_reachable(&ctx.presets, &dist));
+    /* ⑥ 渲染结果真在 dist/mkp/presets 下 */
+    items.push(presets_rendered(&book, &dist));
 
-        /* ⑧ SHA / size 对真字节算且一致 */
-        items.push(catalog_sha_size(&dist));
+    /* ⑦ catalog 登记的每一条都取得到 */
+    items.push(registered_paths_reachable(&ctx.presets, &dist));
 
-        /* ⑨ 没有幽灵条目（空 path / 非法 path） */
-        items.push(no_phantoms(&ctx.presets));
+    /* ⑧ SHA / size 对真字节算且一致 */
+    items.push(catalog_sha_size(&dist));
 
-        /* ⑩ dist 里没有残留 */
-        items.push(no_strays(&book, &dist));
+    /* ⑨ 没有幽灵条目（空 path / 非法 path） */
+    items.push(no_phantoms(&ctx.presets));
 
-        /* ⑪ 套餐引用闭包完整 */
-        items.push(bundles_closure(&ctx.presets));
+    /* ⑩ dist 里没有残留 */
+    items.push(no_strays(&book, &dist));
 
-        /* ⑫ 结构代次与最低客户端版本（第三刀：不再是 Skipped） */
-        let (structure, min_version) = structure_gate(&dist);
-        items.push(structure);
+    /* ⑪ 套餐引用闭包完整 */
+    items.push(bundles_closure(&ctx.presets));
 
-        /* ⑬ source.json 正确 */
-        items.push(source_correct(&dist));
+    /* ⑫ 结构代次与最低客户端版本（第三刀：不再是 Skipped） */
+    let (structure, min_version) = structure_gate(&dist);
+    items.push(structure);
 
-        /* ⑭ manifest 与交付集合一致 */
-        items.push(manifest_correct(&dist));
+    /* ⑬ source.json 正确 */
+    items.push(source_correct(&dist));
 
-        /* ⑮ Git 工作区状态 */
-        let git = git_clean();
-        let (added, changed, removed) = git_counts(&git);
-        /* ★ ⑮ **必须先入列再判定** —— 否则 `can_publish` 看不到它：
-        脏工作区（⑮ 红）时闸仍会亮「确认发布」，绕过「除交付产物外工作区必须干净」那条保护。
-        入列顺序与 `blockers()`（它也遍历全部 items）一致，两者才严格等价。 */
-        items.push(git);
+    /* ⑭ manifest 与交付集合一致 */
+    items.push(manifest_correct(&dist));
 
-        let can_publish = items
-            .iter()
-            .all(|i| !(i.severity == AuditSeverity::Blocker && i.status == AuditStatus::Fail));
+    /* ⑮ Git 工作区状态 */
+    let git = git_clean();
+    let (added, changed, removed) = git_counts(&git);
+    /* ★ ⑮ **必须先入列再判定** —— 否则 `can_publish` 看不到它：
+    脏工作区（⑮ 红）时闸仍会亮「确认发布」，绕过「除交付产物外工作区必须干净」那条保护。
+    入列顺序与 `blockers()`（它也遍历全部 items）一致，两者才严格等价。 */
+    items.push(git);
 
-        Ok(PublishAudit {
-            items,
-            files_added: added,
-            files_changed: changed,
-            files_removed: removed,
-            min_version,
-            can_publish,
-        })
+    let can_publish = items
+        .iter()
+        .all(|i| !(i.severity == AuditSeverity::Blocker && i.status == AuditStatus::Fail));
+
+    Ok(PublishAudit {
+        items,
+        files_added: added,
+        files_changed: changed,
+        files_removed: removed,
+        min_version,
+        can_publish,
     })
 }
 

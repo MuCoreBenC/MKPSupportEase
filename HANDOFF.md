@@ -1551,6 +1551,35 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
         agent-browser 实机验收：② 区显示「发布预设」+ 只读「软件版本」块 ✓（截图 `tmp-shots/publish-preset-vs-software-version.png`）。
       - **还没做**：「发布软件版本」整层（tag / Release / 上传安装包 / release.json 联动）—— **单独立刀**。
 
+    - **增量之二十五：发布事务真机挂死修复（自锁 + 主线程 + 网络无超时，2026-10-04 作者实点）**
+
+      **现场**：作者在工作台点「发布预设」→ 系统弹两次 Keychain 授权框 → 之后窗口整段挂死
+      （「卡住了，我什么都没办法点」）。`sample` 采样 + 日志定位：**主线程**卡在
+      `wb_publish → with_ctx → publish_tx::run → audit::publish_audit → with_ctx_mut`
+      —— `with_ctx` 的锁不可重入，事务里回头调"会自己取锁"的 `publish_audit()` = **自锁**。
+      仓库侧零改动（没提交 / 没推送 / 没写 dist），force-quit 即恢复。
+
+      **两处根因 + 一处帮凶**：
+      1. **自锁**（挂死的直接原因）：审计拆成**锁无关内核** `audit::audit_with(ctx)` + 入口薄壳
+         `publish_audit() = with_ctx(audit_with)`（与 `build::preview_with` 同形）；
+         `publish_tx::run` 改调 `audit_with(ctx)`。源码扫描判据
+         `the_transaction_chain_never_calls_a_command_shell` 的禁名单**补上 `publish_audit(`**
+         —— "会自己取锁的入口函数"与命令壳同罪。
+      2. **主线程冻结**（"点什么都没反应"的原因）：`wb_publish` 当时是同步命令 ⇒ 跑在**主线程**上，
+         读 Keychain / 起 git 子进程 / 发平台 HTTP 全挂在主线程。改 `#[tauri::command(async)]`；
+         同类三条 Keychain 命令（`wb_set_publish_account` / `wb_set_publish_token` /
+         `wb_clear_publish_account`）一并改异步。判据
+         `read_commands_are_async_so_they_never_freeze_the_window` 新增 **IO 单子**
+         （碰网络 / Keychain 的命令必须 async；扫描面加 `publish_tx.rs`）。
+      3. **网络没有超时**（"就算不挂死也没有尽头"）：平台 HTTP 原用裸 `ureq::get/post`
+         （默认无总超时）。`platform/mod.rs` 新增 `agent()`（`API_TIMEOUT = 30s` /
+         `API_CONNECT_TIMEOUT = 10s`），GitHub / Gitee 两处改走它 —— 与 `runtime/net.rs` 同一条纪律。
+
+      **规则源头**：`docs/PUBLISH-ARCHITECTURE.md` §7.1 新增第 4 条「锁与线程边界」。
+      **验证**：`cargo fmt` / 双 feature clippy `-D warnings` / 默认 **314** + workbench lib **565** /
+      `tsc -b` / lint / `build` / `check:bundle` / `check:zero-network` 全绿。
+      **真机复跑（作者再点一次发布）是这条修复的最终验收**。
+
     ### 切页立刻显示 + 生成页放开选择（2026-10-02，作者点名）
 
      **起因**：作者「点击生成与发布这个页面，它很慢才显示出来……**所有页面都应该优先显示出来**，
