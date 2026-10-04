@@ -155,6 +155,35 @@ impl Hosting for Gitee {
         // 合完回读：Gitee 的 `state` 会变成 `merged`（[`collapse_state`] 已认）
         self.get_review(id)
     }
+
+    fn find_open_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<Option<RemoteReview>, AppError> {
+        // 与 GitHub 同形的列表查询（`state` / `head` / `base`）—— 同一条"待核对"免责。
+        // ★ Gitee 的 `head` 参数一般是**不带 owner 前缀**的分支名；这里按公开 API 形状传
+        //   `owner:branch`（GitHub 的约定），核对时若不吃，改这一处即可。
+        let path = format!(
+            "/repos/{owner}/{repo}{}",
+            super::open_reviews_query(owner, head, base)
+        );
+        let list = self.get(&path)?;
+        let Some(first) = list.as_array().and_then(|a| a.first()) else {
+            return Ok(None);
+        };
+        let mut review = review_from_json(first)?;
+        if let Some(sha) = first
+            .get("head")
+            .and_then(|h| h.get("sha"))
+            .and_then(Value::as_str)
+        {
+            review.checks = self.checks_for_sha(owner, repo, sha)?;
+        }
+        Ok(Some(review))
+    }
 }
 
 impl Gitee {

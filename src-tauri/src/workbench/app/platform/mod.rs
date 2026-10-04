@@ -146,6 +146,28 @@ pub trait Hosting {
     /// ★ **CI 不是前置条件**（作者 2026-10-04 拍：不强制等 CI —— CI 状态由界面在
     /// 二次确认里说清，决定权在人）。平台自己有保护规则时会如实报错，不掩盖。
     fn merge_review(&self, id: &ReviewId, method: MergeMethod) -> Result<RemoteReview, AppError>;
+
+    /// 这一支（`head` → `base`）上**已经开着的**那份 PR / MR，没有 = `None`。
+    ///
+    /// ★ 用途：**发布可重跑**。平台不许同一个 head→base 开两份 PR —— 在合并之前再点一次
+    /// 「发布」，`create_review` 会落 422。那不是失败（产物已经推上去了），是"这一支已经
+    /// 有一份在等人合"：**回读那一份**继续，别把人堵在一条死路上（作者 2026-10-04）。
+    fn find_open_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<Option<RemoteReview>, AppError>;
+}
+
+/// 「这一支上开着的 PR / MR」的列表查询串。**纯函数**（两个平台参数名同形：`state` /
+/// `head` / `base`）—— 查询写错比报错更难查，判据钉它。
+///
+/// `head` 要**带 owner 前缀**（GitHub 的约定：`?head=owner:branch`）；分支名里的 `/`
+/// 在 query 里是合法字符，不用转义。
+pub fn open_reviews_query(owner: &str, head: &str, base: &str) -> String {
+    format!("/pulls?state=open&head={owner}:{head}&base={base}")
 }
 
 /// 合并方式。**只留 Squash 一档**（作者 2026-10-04 拍）。
@@ -327,6 +349,15 @@ mod tests {
         assert_eq!(
             merge_path("MuCoreBenC", "MKPSupportEase", 27),
             "/repos/MuCoreBenC/MKPSupportEase/pulls/27/merge"
+        );
+    }
+
+    /// 「这一支上开着的 PR」的查询串：head 带 owner 前缀、分支名里的 `/` 不转义。
+    #[test]
+    fn the_open_reviews_query_carries_the_owner_prefix() {
+        assert_eq!(
+            open_reviews_query("MuCoreBenC", "feat/param-def-controls-undo", "main"),
+            "/pulls?state=open&head=MuCoreBenC:feat/param-def-controls-undo&base=main"
         );
     }
 }

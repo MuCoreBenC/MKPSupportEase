@@ -347,11 +347,33 @@ pub fn run(
             out.files,
             gen.written.len(),
         );
-        let review = hosting.create_review(&spec)?;
+        // ★ 平台不许同一个 head→base 开两份 PR：在合并之前再点一次「发布」，`create_review`
+        //   会落 422（"这一支已经有一份"）。那不是失败 —— 产物已经推上去了，人只是又发了一次；
+        //   **回读那一份开着的 PR** 继续（发布要可重跑，别把人堵在死路上）。
+        //   找不到开着的才把原错误抛出来（那时它才是真错误）。
+        let mut reused_why: Option<String> = None;
+        let review = match hosting.create_review(&spec) {
+            Ok(r) => r,
+            Err(e) => {
+                match hosting.find_open_review(&t.owner, &t.repo, &branch, opts.base_or_main())? {
+                    Some(found) => {
+                        reused_why = Some(e.message.clone());
+                        found
+                    }
+                    None => return Err(e),
+                }
+            }
+        };
         report.stage = PublishStage::ReviewOpened;
-        report
-            .summary
-            .push_str(&format!("已建 PR !{}。", review.number));
+        match &reused_why {
+            None => report
+                .summary
+                .push_str(&format!("已建 PR !{}。", review.number)),
+            Some(why) => report.summary.push_str(&format!(
+                "PR !{} 这一支上已经开着 —— 回读那一份，没有重复建（平台原话：{why}）。",
+                review.number
+            )),
+        }
         report.review = Some(review);
     }
 

@@ -145,6 +145,34 @@ impl Hosting for GitHub {
         // 合完**回读**一份：调用方拿到的是"合并之后的真状态"，不是我们自己拼的
         self.get_review(id)
     }
+
+    fn find_open_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<Option<RemoteReview>, AppError> {
+        // `GET /repos/{o}/{r}/pulls?state=open&head={o}:{branch}&base={base}` → 数组
+        let path = format!(
+            "/repos/{owner}/{repo}{}",
+            super::open_reviews_query(owner, head, base)
+        );
+        let list = self.get(&path)?;
+        let Some(first) = list.as_array().and_then(|a| a.first()) else {
+            return Ok(None);
+        };
+        let mut review = review_from_json(first)?;
+        // 顺手把 CI 档位也带上（回执 / 历史要显示它）—— 与 get_review 同一取法
+        if let Some(sha) = first
+            .get("head")
+            .and_then(|h| h.get("sha"))
+            .and_then(Value::as_str)
+        {
+            review.checks = self.checks_for_sha(owner, repo, sha)?;
+        }
+        Ok(Some(review))
+    }
 }
 
 impl GitHub {
