@@ -14,6 +14,7 @@
  *   `bbsFiles.ts`   切片器 profile 的大小与修改时间**真值**（其余是演示推值）
  *   `localFiles.ts` 本机文件的固定演示集合（假后端没有文件系统）
  *   `menu.ts`       菜单表：每个文件对客户端公开到什么程度
+ *   `plates.ts`     打印板几何 + 机型引用（真数据 `presets/plates/*.toml` 的镜像）
  *   `types.ts`      `data/*.json` 的逐字形状（`Raw*`，不出这个目录）
  *
  * 两条铁律：
@@ -29,6 +30,7 @@ export { resolveVersionFiles } from './files'
 export { catalogRegistry, paramMeta, resolveParams } from './params'
 export { allPresetFiles } from './resources'
 export { menuEntries } from './menu'
+export { allPlates } from './plates'
 export {
   copyToSlicerIn,
   localFileIds,

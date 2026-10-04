@@ -33,13 +33,13 @@ type Json = Record<string, unknown>
 const WORDS: Json = {
   build: {
     built: { label: '已生成', explain: '磁盘里的生成物和当前配方一致，不用重新生成' },
-    stale: { label: '待重新生成', explain: '磁盘里的生成物跟当前配方不一致了 —— 生成之后客户端才会拿到新的' },
+    stale: { label: '待更新', explain: '磁盘里已经有上一版产物，配方改过了还没重新生成 —— 生成之后客户端才会拿到新的' },
     neverBuilt: { label: '未生成', explain: '还没生成过，客户端现在下载不到这一版' },
     noResources: { label: '配方文件缺失', explain: '这个版本没有配方文件 —— 这是异常，不是正常状态：版本一建出来就该带着配方文件。参数照样能看能改，但生成不了' },
   },
   artifact: {
     fresh: { label: '已生成', explain: '所有该有产物的版本都是最新的' },
-    stale: { label: '待重新生成', explain: '有版本的配方改过了，产物还没跟上' },
+    stale: { label: '待更新', explain: '有版本的配方改过了，产物还没跟上' },
     missing: { label: '未生成', explain: '一个产物都还没生成过' },
   },
   save: { saved: { label: '已保存', explain: null }, dirty: { label: '未保存', explain: null } },
@@ -47,6 +47,12 @@ const WORDS: Json = {
     assigned: { label: '已分配', explain: '在某个套餐里，客户端装那个套餐就会拿到' },
     optional: { label: '可选', explain: '没进任何套餐，客户端能手动下' },
     archiveOnly: { label: '仅归档', explain: '客户端完全不知道这个文件存在' },
+  },
+  identity: {
+    inBundle: { label: '进套餐', explain: '客户端首页按版本自动下载 —— 进套餐在套餐页管，资产库不直接设' },
+    optional: { label: '可选', explain: '客户端预设页看得到，用户手动下载' },
+    bundled: { label: '随包', explain: '构建期随程序包带进客户端，不下载不更新，页面上也不出现' },
+    archiveOnly: { label: '仅归档', explain: '仓库里留着，客户端完全不消费' },
   },
   bbsSource: {
     own: { label: '本版本单独一份', explain: '这个版本自己挑的曲线清单' },
@@ -100,7 +106,7 @@ const WORDS: Json = {
     selectBundle: '左边选一个套餐',
     selectAsset: '左边选一条文件，这里显示它被谁引用',
   },
-  relate: { goFixIt: '去改那一项', showAnyway: '仍然展开看' },
+  relate: { goFixIt: '去改那一项', showAnyway: '仍然展开看', foldBack: '收起来' },
   snapshot: {
     current: { label: '快照已跟上', explain: '停手之后已经写过一次崩溃快照，现在崩了也不丢' },
     pending: { label: '待落盘', explain: '刚改的还在内存里，停手 2 秒后会写一次快照' },
@@ -146,6 +152,8 @@ interface FixtureParam {
   choices: { label: string; value: string; deprecated: boolean }[]
   showWhen: { key: string; op: 'eq' | 'neq' | 'gt'; value: unknown } | null
   parentKey: string | null
+  /** 空 = 不限机型（真源里是逗号串，这里按拆好的数组存） */
+  machineFilter: string[]
   depth: number
   deprecated: boolean
 }
@@ -165,6 +173,7 @@ const p = (over: Partial<FixtureParam> & { key: string; label: string }): Fixtur
   choices: [],
   showWhen: null,
   parentKey: null,
+  machineFilter: [],
   depth: 0,
   deprecated: false,
   ...over,
@@ -294,26 +303,126 @@ const pending = new Map<string, unknown>()
 
 /* ---------- 套餐 / 资产 / 回退夹具（P4 三页的形状镜像；判定照后端文档现算） ---------- */
 
-/** 机型夹具带上一版一套的指向（MachinesPage 也要用） */
-const MACHINE_VIEWS = [
+/**
+ * 品牌夹具（2026-10-03：品牌升成一等条目 —— 机型与版本页可编辑显示名与品牌图）。
+ * 与真数据同形：机型的 `brand` 字段写着品牌的 **id**（`Bambu Lab` 这个字符串既是 id
+ * 也是真数据里那份 id），`logo` 是**资产 id**（不是文件名）。
+ */
+const BRANDS: { id: string; name: string; logo: string | null }[] = [
+  { id: 'Bambu Lab', name: '拓竹 (Bambu Lab)', logo: 'bambu-lab-logo' },
+]
+
+/** 机型清单（含品牌反查 —— 与真机同一条口径，前端不复算关系） */
+const machineListOf = () => ({
+  brands: BRANDS.map((b) => ({
+    ...b,
+    machines: MACHINE_VIEWS.filter((m) => m.brand.toLowerCase() === b.id.toLowerCase()).map((m) => m.id),
+  })),
+  machines: MACHINE_VIEWS,
+  root: 'C:\\dev\\MKPSupportEase\\presets',
+})
+
+/**
+ * 尺寸六组夹具（与真数据 A1 逐格同形 —— 探针要拿它跟界面上的读数对）。
+ *
+ * 六组**一个不少**：文件里 `[dimensions]` 是全有或全无，这里照同一口径造。
+ */
+const A1_DIMENSIONS = {
+  bedSize: { width: 260, depth: 255 },
+  movementRange: { minX: -40, maxX: 260, minY: 0, maxY: 255, maxZ: 999 },
+  edgeZone: 10,
+  glueArea: { glueMinX: -40, glueMaxX: 260, glueMinY: 0, glueMaxY: 255, wipeX: 252 },
+  calibration: {
+    lShapeBaseX: 68.21, lShapeBaseY: 126.373,
+    xLineX: 114.523, xLineY: 104.83, xLineYEnd: 114.83,
+    yLineX: 104.53, yLineXEnd: 114.53, yLineY: 114.83,
+    zStartX: 68.21, zStartY: 126.373,
+  },
+  flags: { gcodeMarker: ';===== machine: A1', hasSecondFan: false },
+}
+
+/** P1S 的尺寸（床身 256×256 —— 禁区画布的 viewBox 就是它） */
+const P1S_DIMENSIONS = {
+  bedSize: { width: 256, depth: 256 },
+  movementRange: { minX: 0, maxX: 255, minY: 0, maxY: 265, maxZ: 999 },
+  edgeZone: 10,
+  glueArea: { glueMinX: 0, glueMaxX: 255, glueMinY: 0, glueMaxY: 265, wipeX: 20 },
+  calibration: {
+    lShapeBaseX: 68.21, lShapeBaseY: 126.373,
+    xLineX: 114.523, xLineY: 104.83, xLineYEnd: 114.83,
+    yLineX: 104.53, yLineXEnd: 114.53, yLineY: 112.83,
+    zStartX: 68.21, zStartY: 126.373,
+  },
+  flags: { gcodeMarker: ';===== machine: P1', hasSecondFan: true },
+}
+
+/** P1S 的两块禁区（点序与真数据 `forbidden_zones/P1S.toml` 同形：6 点 + 4 点） */
+const P1S_ZONES: { points: [number, number][] }[] = [
   {
-    id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
-    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
-    hasDimensions: true, zoneCount: 0, file: 'A1.toml',
-    versions: [
-      { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, hasRecipe: true },
-      { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, hasRecipe: true },
+    points: [
+      [0, 0], [240, 0], [240, 14], [238, 14], [238, 5], [0, 5],
+    ],
+  },
+  {
+    points: [
+      [0, 0], [18, 0], [18, 28], [0, 28],
     ],
   },
 ]
 
-type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string }
+/** 机型夹具带上一版一套的指向（MachinesPage 也要用） */
+const MACHINE_VIEWS: {
+  id: string; display: string; name: string; brand: string;
+  defaultBundle: string | null; externalAliases: string[]; image: string | null;
+  icon: string | null; hasDimensions: boolean;
+  dimensions: typeof A1_DIMENSIONS | null;
+  zoneCount: number; zones: { points: [number, number][] }[]; file: string;
+  versions: { id: string; name: string; recommendedBundle: string | null; tag: string | null; description: string | null; image: string | null; hasRecipe: boolean }[];
+}[] = [
+  {
+    id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
+    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
+    hasDimensions: true, dimensions: A1_DIMENSIONS, zoneCount: 0, zones: [], file: 'A1.toml',
+    versions: [
+      // `image` = 这一版专属的外观图（资产 id）。`null` = 回落机型图（第三刀的默认）
+      { id: 'STANDARD', name: '标准版', recommendedBundle: 'A1_default', tag: '推荐', description: null, image: null, hasRecipe: true },
+      { id: 'FAST', name: '高速版', recommendedBundle: 'A1_FAST', tag: null, description: null, image: 'a1_mini-variant-image', hasRecipe: true },
+    ],
+  },
+  {
+    // 第二台（有禁区）—— 禁区编辑器与「移到品牌…」都要有第二条才量得出来
+    id: 'P1S', display: 'P1S', name: 'P1S', brand: 'Bambu Lab',
+    defaultBundle: 'P1S_default', externalAliases: ['P1'], image: 'p1s-image', icon: null,
+    hasDimensions: true, dimensions: P1S_DIMENSIONS, zoneCount: 2, zones: P1S_ZONES, file: 'P1S.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', recommendedBundle: 'P1S_default', tag: '推荐', description: null, image: null, hasRecipe: true },
+    ],
+  },
+  {
+    // 占位机型（没尺寸）—— 「尺寸卡显示说明而不是报错」那一档
+    id: 'A2L', display: 'A2L', name: 'A2L', brand: 'Bambu Lab',
+    defaultBundle: null, externalAliases: [], image: null, icon: null,
+    hasDimensions: false, dimensions: null, zoneCount: 0, zones: [], file: 'A2L.toml',
+    versions: [
+      { id: 'STANDARD', name: '标准版', recommendedBundle: null, tag: null, description: null, image: null, hasRecipe: false },
+    ],
+  },
+]
+
+type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string; delivery?: 'download' | 'bundled' }
 
 /** 资产域夹具。喷嘴 / 层高不存（doc §12.5 同一条），从路径与文件名现算。
- * **没有 image 类**（2026-10-01 起）：整机图已从资产台账剥离、搬进 `src/app/assets/printers/`，
- * 这个夹具跟着真台账走 —— 否则浏览器里跑工作台会看到一个后端已经不存在的一类。 */
+ *  **image 类回来了**（2026-10-03，撤销第三刀的剥离）：整机图在台账里，用
+ *  `delivery: 'bundled'` 表达「随包不下载」—— 台账可管可换图，客户端不下载。 */
 const ASSETS: FixtureRef[] = [
+  /* 品牌字标（2026-10-03 品牌图正式进台账）：**公共素材**，不写 machineId */
+  { id: 'bambu-lab-logo', kind: 'image', slicer: null, profile: null, name: 'Bambu Lab 字标', path: 'brands/bambu-lab-logo.svg', delivery: 'bundled' },
+  { id: 'a1-image', kind: 'image', slicer: null, profile: null, name: 'A1 外观图', path: 'printers/a1.webp', delivery: 'bundled' },
+  { id: 'a1_mini-image', kind: 'image', slicer: null, profile: null, name: 'A1 mini 外观图', path: 'printers/a1mini.webp', delivery: 'bundled' },
+  { id: 'p1s-image', kind: 'image', slicer: null, profile: null, name: 'P1S 外观图', path: 'printers/p1s.webp', delivery: 'bundled' },
   { id: 'a1-icon', kind: 'icon', slicer: null, profile: null, name: 'A1 图标', path: 'icons/a1.svg' },
+  { id: 'a1-standard', kind: 'mkPreset', slicer: null, profile: null, name: 'A1 标准版预设', path: '' },
+  { id: 'a1-fast', kind: 'mkPreset', slicer: null, profile: null, name: 'A1 高速版预设', path: '' },
   { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
   { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
   { id: 'a1-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json' },
@@ -323,10 +432,11 @@ const ASSETS: FixtureRef[] = [
   { id: 'a1-orca-02-010', kind: 'slicerProfile', slicer: 'orca', profile: 'process', name: 'A1：Orca 0.2 喷头 0.10 层高（可选）', path: 'orca/Process/0.2mm/OrcaProcess A1 0.2 0.10.json' },
 ]
 
-/** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST） */
+/** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST）。
+ *  `presets` = 套餐挂的 MKP 预设（**版本 uid 直引，文件可不存在** —— 作者 2026-10-03） */
 const BUNDLES: { id: string; display: string; machineId: string; assetRefs: string[]; updatedAt: string | null }[] = [
-  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-bbs-04-020'], updatedAt: '2026-07-12' },
-  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
+  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-standard', 'a1-bbs-04-020'], updatedAt: '2026-07-12' },
+  { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-fast', 'a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
   { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
 ]
 
@@ -346,16 +456,35 @@ function slicerAxes(path: string): { nozzle: string | null; layer: string | null
 const inBundleSet = () =>
   new Set(BUNDLES.flatMap((b) => b.assetRefs.map((r) => r.toLowerCase())))
 
-function assetListOf(kind: string | null, slicer: string | null, nozzle: string | null, layer: string | null, assign: string | null, query: string | null) {
+function assetListOf(kind: string | null, slicer: string | null, nozzle: string | null, layer: string | null, identity: string | null, query: string | null) {
   const bundled = inBundleSet()
   const rows = ASSETS.map((a) => {
     const axes = slicerAxes(a.path)
     const vis = pendingVis.get(a.id) ?? 'menu'
-    const asg = vis === 'archiveOnly' ? 'archiveOnly' : bundled.has(a.id.toLowerCase()) ? 'assigned' : 'optional'
+    const delivery = a.delivery ?? 'download'
+    // 四态身份，判定与真机同一优先级：归档 > 随包 > 进套餐 > 可选
+    const idt =
+      vis === 'archiveOnly' ? 'archiveOnly'
+      : delivery === 'bundled' ? 'bundled'
+      : bundled.has(a.id.toLowerCase()) ? 'inBundle'
+      : 'optional'
     return {
       id: a.id, kind: a.kind, machineId: a.id.startsWith('a1-') && a.kind !== 'model' ? 'A1' : a.id.startsWith('p1s-') ? 'P1S' : null,
+      versionId: a.kind === 'mkPreset' ? 'STANDARD' : null,
+      // 显示名一律真名：MKP 预设 = 版本名、切片器 = 文件名（与后端同一口径）
+      display:
+        a.kind === 'mkPreset'
+          ? (MACHINE_VIEWS.find((m) => m.id === 'A1')?.versions.find((v) => v.id === 'STANDARD')?.name ?? a.name)
+          : a.kind === 'slicerProfile'
+            ? (a.path.split('/').pop() ?? a.path).replace(/\.json$/i, '')
+            : a.name,
       name: a.name, path: a.path, url: `/assets/${a.path}`, slicer: a.slicer, profile: a.profile,
-      present: true, nozzle: axes.nozzle, layer: axes.layer, assign: asg,
+      // MKP 预存在资产库里恒有登记；「有没有生成」由生成页那套判据说（演示：一份已生成、
+      // 一份待生成）—— 作者 2026-10-03：「文件在不在都能选，徽章说生成到哪一步了」
+      present: a.kind === 'mkPreset' ? a.id === 'a1-standard' : true,
+      buildState: a.kind === 'mkPreset' ? (a.id === 'a1-standard' ? 'built' : 'neverBuilt') : null,
+      nozzle: axes.nozzle, layer: axes.layer, identity: idt,
+      delivery,
     }
   })
   const q = (query ?? '').trim().toLowerCase()
@@ -365,18 +494,60 @@ function assetListOf(kind: string | null, slicer: string | null, nozzle: string 
     (slicer === null || a.slicer === slicer) &&
     (nozzle === null || a.nozzle === nozzle) &&
     (layer === null || a.layer === layer) &&
-    (assign === null || a.assign === assign) &&
+    (identity === null || a.identity === identity) &&
     (q === '' || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)),
   )
   const numeric = (xs: string[]) => [...new Set(xs)].sort((x, y) => parseFloat(x) - parseFloat(y))
   return {
     assets: filtered,
-    root: 'C:\\dev\\public\\assets',
+    root: 'C:\\dev\\presets\\assets',
     nozzles: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.nozzle).map((a) => a.nozzle as string)),
     layers: numeric(all.filter((a) => a.kind === 'slicerProfile' && a.layer).map((a) => a.layer as string)),
     total: all.length,
-    optionalCount: all.filter((a) => a.assign === 'optional').length,
-    archiveCount: all.filter((a) => a.assign === 'archiveOnly').length,
+    optionalCount: all.filter((a) => a.identity === 'optional').length,
+    archiveCount: all.filter((a) => a.identity === 'archiveOnly').length,
+  }
+}
+
+/** 演示用的"源文件字节的 SHA-256"：真机上由后端读字节算 —— 这里只要形如 64 位 hex */
+function mockSha(id: string): string {
+  const hex = '0123456789abcdef'
+  let out = ''
+  for (let i = 0; i < 64; i += 1) out += hex[(id.charCodeAt(i % id.length) + i) % 16]
+  return out
+}
+
+/**
+ * `wb_asset_inspect` 的演示读数（第四刀）—— 与真机同形：
+ * 普通资产指向**源文件**（`presets/assets/<path>`）、mkPreset 指向**产物**
+ * （`presets/dist/mkp/presets/A1-standard.toml`，一份已生成、一份还没）。
+ * 文件不在的那一条给期望路径 + 空读数（照真机的口径）。
+ */
+function assetInspectOf(a: FixtureRef) {
+  const toWin = (p: string) => p.replace(/\//g, '\\')
+  if (a.kind === 'mkPreset') {
+    const versionId = a.id.endsWith('-fast') ? 'FAST' : 'STANDARD'
+    const fileName = `A1-${versionId.toLowerCase()}.toml`
+    // 演示：一份产物已生成、一份还没 —— 与列表里的 buildState 同一套演示事实
+    const exists = a.id === 'a1-standard'
+    const productPath = `presets/dist/mkp/presets/${fileName}`
+    return {
+      id: a.id, fileName, absPath: `C:\\dev\\${toWin(productPath)}`, exists,
+      bytes: exists ? 4312 : null, sha256: exists ? mockSha(a.id) : null,
+      width: null, height: null, format: 'toml', productPath,
+    }
+  }
+  const fileName = a.path.split('/').pop() ?? a.path
+  const format = fileName.includes('.') ? (fileName.split('.').pop() ?? '').toLowerCase() : null
+  const image = a.kind === 'image'
+  const icon = a.kind === 'icon'
+  return {
+    id: a.id, fileName, absPath: `C:\\dev\\presets\\assets\\${toWin(a.path)}`, exists: true,
+    bytes: image ? 95232 : icon ? 1824 : a.kind === 'model' ? 3355443 : 12048,
+    sha256: mockSha(a.id), format,
+    width: image ? 1024 : icon ? 24 : null,
+    height: image ? 768 : icon ? 24 : null,
+    productPath: null,
   }
 }
 
@@ -392,7 +563,10 @@ function bundleListOf(query: string | null) {
         return {
           id: r, kind: a?.kind ?? 'slicerProfile', resolvable: a !== undefined,
           isBbs: a?.kind === 'slicerProfile' && a.slicer === 'bbs',
-          name: a?.name ?? '', present: a !== undefined,
+          name: a?.name ?? '',
+          // MKP 预设的「在不在」按生成状态判（与真机同口径）；演示：一份已生成、一份待生成
+          present: a !== undefined && (a.kind !== 'mkPreset' || a.id === 'a1-standard'),
+          buildState: a?.kind === 'mkPreset' ? (a.id === 'a1-standard' ? 'built' : 'neverBuilt') : null,
           visibility: pendingVis.get(r) ?? 'menu',
         }
       }),
@@ -410,10 +584,11 @@ let mockBootstrap: string | null = null
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
   return {
+    // 与真机同一个形状：`<仓库>/presets`（状态条上只摆最后两段，见 App.shortRoot）
     roots: {
-      workbench: 'C:\\dev\\workbench',
-      presets: 'C:\\dev\\presets',
-      dist: 'C:\\dev\\presets\\dist',
+      workbench: 'C:\\dev\\MKPSupportEase\\workbench',
+      presets: 'C:\\dev\\MKPSupportEase\\presets',
+      dist: 'C:\\dev\\MKPSupportEase\\presets\\dist',
     },
     problem: null,
     detail: null,
@@ -442,6 +617,95 @@ const BASELINE = [
 const TRASH = [
   { file: '20260928-T-10-12-45__A1__OLDVER', deletedStamp: '20260928-T-10-12-45', machineId: 'A1', versionId: 'OLDVER' },
 ]
+
+/** dist 面的残留（`wb_dist_strays` 读它、「清理残留」清它）—— 桩里可变，好让发布闸跟着动 */
+let mockStrays: string[] = ['mkp/presets/old_file.toml']
+
+/** 发布闸一行（`audit::AuditItem` 的桩形状） */
+interface MockAuditItem {
+  id: string
+  name: string
+  status: string
+  severity: string
+  details: string
+  affectedFiles: string[]
+  fixHint: string
+}
+
+/** 演示用的结构代次与签名（真值由 Rust 的 `runtime::structure` 从类型算出来） */
+const MOCK_EPOCH = 1
+const MOCK_SIGNATURE = 'cb1080919d39b2bd'
+
+/** 十五项的编号与名字照 `docs/PUBLISH-ARCHITECTURE.md` §5.2（id 是契约） */
+const AUDIT_ROWS: [string, string][] = [
+  ['sources/complete', '源数据完整'],
+  ['refs/resolve', '引用都能落地'],
+  ['assets/exist', 'A 类资产的文件真在'],
+  ['assets/path-unique', 'catalog.path 唯一且不越界'],
+  ['presets/renderable', 'B 类预设能成功渲染'],
+  ['presets/rendered', '渲染产物真在交付目录里'],
+  ['catalog/matches-files', '登记的每一条都取得到'],
+  ['catalog/sha-size', 'SHA / 大小对真字节算且一致'],
+  ['catalog/no-phantoms', '没有幽灵条目'],
+  ['dist/no-strays', '交付目录里没有残留'],
+  ['bundles/closure', '套餐引用闭包完整'],
+  ['version/structure', '结构代次与最低客户端版本'],
+  ['source/correct', 'Bootstrap（source.json）正确'],
+  ['manifest/correct', 'manifest 与交付集合一致'],
+  ['git/clean', 'Git 工作区干净'],
+]
+
+/**
+ * 发布闸（第二刀）的桩。
+ *
+ * ★ **判定不在这一层**：真判据是 Rust 的 `audit::publish_audit`（界面与 `cargo test`
+ * 调的是同一个函数）。这一份只是让浏览器里那个框能验收 —— 所以结论按桩自己那份数据给，
+ * 至少 `dist/no-strays` 要跟着 [`mockStrays`] 走，别让两项桩互相打脸。
+ */
+function mockAudit(): Json {
+  const items: MockAuditItem[] = AUDIT_ROWS.map(([id, name]) => {
+    if (id === 'version/structure') {
+      // 第三刀之后这一项**真跑了**（不再是 Skipped）—— 桩照它的结论形态给一份
+      return {
+        id,
+        name,
+        status: 'pass',
+        severity: 'blocker',
+        details: `结构代次 ${MOCK_EPOCH} · 签名 ${MOCK_SIGNATURE} · 最低正式客户端版本 0.0.1（演示桩）`,
+        affectedFiles: [],
+        fixHint: '演示桩：这一项的真判据在 Rust（`runtime::structure` + 规则表）',
+      }
+    }
+    if (id === 'dist/no-strays' && mockStrays.length > 0) {
+      return {
+        id,
+        name,
+        status: 'fail',
+        severity: 'blocker',
+        details: `${mockStrays.length} 个残留文件`,
+        affectedFiles: [...mockStrays],
+        fixHint: '点「清理残留」（进 workbench/.trash/dist/<时间戳>/，可还原）',
+      }
+    }
+    return {
+      id,
+      name,
+      status: 'pass',
+      severity: 'blocker',
+      details: '演示桩：这一项按「全过」给',
+      affectedFiles: [],
+      fixHint: '演示桩没有真判据 —— 真机由 Rust 的 audit::publish_audit 说了算',
+    }
+  })
+  return {
+    items,
+    filesAdded: 12,
+    filesChanged: 3,
+    filesRemoved: 0,
+    minVersion: '0.0.1',
+    canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
+  }
+}
 
 const splitKey = (raw: string) => {
   const [level, owner, ...rest] = raw.split('|')
@@ -822,7 +1086,7 @@ function buildRegistry(): Json {
       defaultValue: pdef.defaultValue, defaultText: valueText(pdef, pdef.defaultValue),
       min: pdef.min, max: pdef.max, step: pdef.step, unit: pdef.unit,
       choices: pdef.choices, showWhen: pdef.showWhen, parentKey: pdef.parentKey,
-      machineFilter: [], deprecated: pdef.deprecated,
+      machineFilter: pdef.machineFilter ?? [], deprecated: pdef.deprecated,
     })),
   }
 }
@@ -835,6 +1099,9 @@ export function installMockBackend() {
     switch (cmd) {
       case 'wb_boot':
         return Promise.resolve(mockBoot())
+      /* 「软件版本」展示位：桩里报与真机同源的那个演示版本号 */
+      case 'wb_app_version':
+        return Promise.resolve('0.0.1')
       case 'wb_words':
         return Promise.resolve(WORDS)
       case 'wb_book':
@@ -864,14 +1131,6 @@ export function installMockBackend() {
         return Promise.resolve({
           issues: [
             {
-              id: 'compat.minimum_client',
-              severity: 'todo',
-              title: '最低客户端版本未声明',
-              detail:
-                '上游 manifest.json 的 minimumClient 是空串 —— 上游现在没有声明「客户端要多新才能用这份数据」。这不是我们该填的空，而是发布时要知道的事。',
-              at: { view: 'build', machineId: null, uid: null, key: null },
-            },
-            {
               id: 'bundle.orphan_files',
               severity: 'hint',
               title: '有 2 个文件没进任何套餐',
@@ -885,7 +1144,82 @@ export function installMockBackend() {
           emptyHint: '都过了 —— 没有阻断、没有待办、没有提示',
         })
       case 'wb_machines':
-        return Promise.resolve({ brands: [], machines: MACHINE_VIEWS, root: 'C:\\dev\\workbench' })
+        return Promise.resolve(machineListOf())
+      case 'wb_set_brand_field': {
+        const brandId = args?.brandId as string
+        const field = args?.field as 'name' | 'logo'
+        const value = (args?.value as string | null) ?? null
+        const b = BRANDS.find((x) => x.id.toLowerCase() === brandId.trim().toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `没有品牌 ${brandId}`, traceId: 'mock' })
+        if (field === 'name') {
+          if (!value || !value.trim()) {
+            return Promise.reject({ code: 'INVALID', message: '显示名 不能清空', traceId: 'mock' })
+          }
+          b.name = value.trim()
+        } else {
+          b.logo = value && value.trim() !== '' ? value.trim() : null
+        }
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_add_brand': {
+        const id = (args?.id as string).trim()
+        const name = (args?.name as string).trim()
+        if (id === '') return Promise.reject({ code: 'INVALID', message: '品牌 id 不能为空', traceId: 'mock' })
+        if (name === '') return Promise.reject({ code: 'INVALID', message: '显示名不能为空', traceId: 'mock' })
+        if (BRANDS.some((x) => x.id.toLowerCase() === id.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `已经有一个叫 ${id} 的品牌`, traceId: 'mock' })
+        }
+        BRANDS.push({ id, name, logo: null })
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_move_machine_to_brand': {
+        const machineId = args?.machineId as string
+        const brandId = (args?.brandId as string).trim()
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        // 目标品牌必须真的存在 —— 与真机同一条校验（打错一个字会留下悬空归属）
+        const b = BRANDS.find((x) => x.id.toLowerCase() === brandId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `没有品牌 ${brandId}`, traceId: 'mock' })
+        m.brand = b.id
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_set_machine_dimensions': {
+        const machineId = args?.machineId as string
+        const dims = args?.dimensions as typeof A1_DIMENSIONS
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        if (!(dims?.bedSize?.width > 0) || !(dims?.bedSize?.depth > 0)) {
+          return Promise.reject({ code: 'INVALID', message: '床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图', traceId: 'mock' })
+        }
+        m.dimensions = dims
+        m.hasDimensions = true
+        return Promise.resolve(machineListOf())
+      }
+      case 'wb_set_param_meta': {
+        /* 演示桩：同名的那条改掉就回。真机的校验（类型门 / 两级层级 / 枚举默认）
+           在 registry::set_param_meta —— 桩里不做第二套 */
+        const key = args?.key as string
+        const e = args?.edit as Partial<FixtureParam>
+        const target = PARAMS.find((x) => x.key === key)
+        if (!target) return Promise.reject({ code: 'NOT_FOUND', message: `字段定义里没有 ${key}`, traceId: 'mock' })
+        Object.assign(target, e)
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_set_machine_zones': {
+        const machineId = args?.machineId as string
+        const zones = (args?.zones as { points: [number, number][] }[]) ?? []
+        const m = MACHINE_VIEWS.find((x) => x.id === machineId)
+        if (!m) return Promise.reject({ code: 'NOT_FOUND', message: `没有机型 ${machineId}`, traceId: 'mock' })
+        for (const [i, z] of zones.entries()) {
+          if (z.points.length < 3) {
+            return Promise.reject({ code: 'INVALID', message: `第 ${i + 1} 块禁区只有 ${z.points.length} 个点 —— 少于 3 个围不出面`, traceId: 'mock' })
+          }
+        }
+        // 空数组 = 删掉禁区文件（真机口径：清空是删文件，不是留个空文件）
+        m.zones = zones
+        m.zoneCount = zones.length
+        return Promise.resolve(machineListOf())
+      }
       case 'wb_bundles':
         return Promise.resolve(bundleListOf((args?.query as string | null) ?? null))
       case 'wb_set_bundle_refs': {
@@ -900,6 +1234,85 @@ export function installMockBackend() {
         b.updatedAt = '今天（演示）'
         return Promise.resolve(bundleListOf(null))
       }
+      case 'wb_add_bundle': {
+        const id = (args?.id as string)?.trim() ?? ''
+        const machineId = args?.machineId as string
+        const display = args?.display as string
+        const ids = (args?.assetIds as string[]) ?? []
+        if (!id || /\s|[/]/.test(id)) return Promise.reject({ code: 'INVALID', message: '套餐 id 不能为空、不能含空白或 /', traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === id.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${id}`, traceId: 'mock' })
+        }
+        if (!ids.some((x) => ASSETS.find((a) => a.id === x)?.kind === 'slicerProfile')) {
+          return Promise.reject({ code: 'INVALID', message: '套餐的 assetRefs 里没有一条 BBS 预设', traceId: 'mock' })
+        }
+        BUNDLES.push({ id, display: display || '官方推荐', machineId, assetRefs: ids, updatedAt: '今天（演示）' })
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_rename_bundle': {
+        const bundleId = args?.bundleId as string
+        const newId = (args?.newId as string)?.trim() ?? ''
+        const display = args?.display as string | null
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        if (!newId || /\s|[/]/.test(newId)) return Promise.reject({ code: 'INVALID', message: '套餐 id 不能为空、不能含空白或 /', traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === newId.toLowerCase() && x !== b)) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${newId}`, traceId: 'mock' })
+        }
+        b.id = newId
+        if (display) b.display = display
+        b.updatedAt = '今天（演示）'
+        // 演示桩里的机型指向也跟着重指（真机由 Presets::rename_bundle 连带改机型文件）
+        for (const m of MACHINE_VIEWS) {
+          if (m.defaultBundle?.toLowerCase() === bundleId.toLowerCase()) m.defaultBundle = newId
+          for (const v of m.versions) {
+            if ((v.recommendedBundle ?? '').toLowerCase() === bundleId.toLowerCase()) v.recommendedBundle = newId
+          }
+        }
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_copy_bundle': {
+        const bundleId = args?.bundleId as string
+        const newId = (args?.newId as string)?.trim() ?? ''
+        const display = args?.display as string | null
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        if (BUNDLES.some((x) => x.id.toLowerCase() === newId.toLowerCase())) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 id 已经存在：${newId}`, traceId: 'mock' })
+        }
+        BUNDLES.push({ id: newId, display: display || b.display, machineId: b.machineId, assetRefs: [...b.assetRefs], updatedAt: '今天（演示）' })
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_assign_bundle_versions': {
+        const bundleId = args?.bundleId as string
+        const uids = (args?.uids as string[]) ?? []
+        const b = BUNDLES.find((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (!b) return Promise.reject({ code: 'NOT_FOUND', message: `查无此套餐：${bundleId}`, traceId: 'mock' })
+        for (const uid of uids) {
+          const [mid, vid] = uid.split('/')
+          const m = MACHINE_VIEWS.find((x) => x.id.toLowerCase() === mid?.toLowerCase())
+          const v = m?.versions.find((x) => x.id.toLowerCase() === vid?.toLowerCase())
+          if (!m || !v) {
+            return Promise.reject({ code: 'NOT_FOUND', message: `没有这个版本：${uid}`, traceId: 'mock' })
+          }
+          v.recommendedBundle = bundleId
+        }
+        return Promise.resolve(bundleListOf(null))
+      }
+      case 'wb_remove_bundle': {
+        const bundleId = args?.bundleId as string
+        const versions = MACHINE_VIEWS.flatMap((m) => m.versions.map((v) => ({ m, v })))
+        const holders = [
+          ...MACHINE_VIEWS.filter((m) => (m.defaultBundle ?? '').toLowerCase() === bundleId.toLowerCase()).map((m) => `机型 ${m.id} 的 defaultBundle`),
+          ...versions.filter(({ v }) => (v.recommendedBundle ?? '').toLowerCase() === bundleId.toLowerCase()).map(({ m, v }) => `版本 ${m.id}/${v.id}`),
+        ]
+        if (holders.length) {
+          return Promise.reject({ code: 'INVALID', message: `套餐 ${bundleId} 还被引用着，不能删`, detail: holders.join('、'), traceId: 'mock' })
+        }
+        const at = BUNDLES.findIndex((x) => x.id.toLowerCase() === bundleId.toLowerCase())
+        if (at >= 0) BUNDLES.splice(at, 1)
+        return Promise.resolve(bundleListOf(null))
+      }
       case 'wb_assets':
         return Promise.resolve(
           assetListOf(
@@ -907,10 +1320,21 @@ export function installMockBackend() {
             (args?.slicer as string | null) ?? null,
             (args?.nozzle as string | null) ?? null,
             (args?.layer as string | null) ?? null,
-            (args?.assign as string | null) ?? null,
+            (args?.identity as string | null) ?? null,
             (args?.query as string | null) ?? null,
           ),
         )
+      case 'wb_set_asset_delivery': {
+        const assetId = args?.assetId as string
+        const delivery = args?.delivery as 'download' | 'bundled'
+        const a = ASSETS.find((x) => x.id === assetId)
+        if (!a) return Promise.reject({ code: 'NOT_FOUND', message: `没有资产 ${assetId}`, traceId: 'mock' })
+        if (a.kind === 'mkPreset' && delivery === 'bundled') {
+          return Promise.reject({ code: 'INVALID', message: `资产 ${assetId} 是 MKP 预设登记，不能设成随包`, traceId: 'mock' })
+        }
+        a.delivery = delivery
+        return Promise.resolve(assetListOf(null, null, null, null, null, null))
+      }
       case 'wb_remove_asset': {
         const assetId = args?.assetId as string
         const used = BUNDLES.some((b) => b.assetRefs.includes(assetId)) || assetId === 'a1-icon'
@@ -920,6 +1344,55 @@ export function installMockBackend() {
         const at = ASSETS.findIndex((a) => a.id === assetId)
         if (at >= 0) ASSETS.splice(at, 1)
         return Promise.resolve(assetListOf(null, null, null, null, null, null))
+      }
+      case 'wb_generate_preview': {
+        /*
+         * 生成前预演（2026-10-02）。真机由 Rust 的 `build::preview_one` 逐份与磁盘比；
+         * 这里按 `builtRecords`（"这台之前生成过没有"）造一份同形的报告，好让确认框在
+         * 浏览器里能验收。**演示数据不冒充真渲染器**：正文头一行写着这是开发桩。
+         *
+         *   · 没生成过 → added（正文全绿）
+         *   · 生成过   → unchanged（只占清单一行）
+         */
+        const scope = args?.scope as string | { picked: string[] }
+        const rows = buildBook().buildRows as { uid: string; buildable: boolean; state: string }[]
+        const picked =
+          typeof scope === 'string'
+            ? rows.filter((r) => r.buildable && (scope === 'all' || r.state === 'stale')).map((r) => r.uid)
+            : (scope?.picked ?? [])
+        const files: unknown[] = []
+        const skipped: [string, string][] = []
+        let toWrite = 0
+        let unchangedN = 0
+        for (const uid of picked) {
+          const row = rows.find((r) => r.uid === uid)
+          if (!row || !row.buildable) {
+            skipped.push([uid, '这台机型还没配尺寸（占位），不参与交付'])
+            continue
+          }
+          const fileName = `${uid.replace('/', '-')}.toml`
+          if (builtRecords.has(uid)) {
+            unchangedN += 1
+            files.push({ uid, fileName, state: 'unchanged', lines: [], added: 0, removed: 0 })
+          } else {
+            toWrite += 1
+            const text = [
+              '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
+              `# machine: ${uid.split('/')[0]}`,
+              '',
+              '[demo]',
+            ]
+            files.push({
+              uid,
+              fileName,
+              state: 'added',
+              lines: text.map((t, i) => ({ kind: 'added', text: t, no: i + 1 })),
+              added: text.length,
+              removed: 0,
+            })
+          }
+        }
+        return Promise.resolve({ files, skipped, toWrite, unchanged: unchangedN, blocked: null })
       }
       case 'wb_generate': {
         const scope = args?.scope as string | { picked: string[] }
@@ -954,15 +1427,177 @@ export function installMockBackend() {
           },
         })
       }
+      case 'wb_publish_audit':
+        return Promise.resolve(mockAudit())
+      /*
+       * 发布事务（第三刀下半）：一次调用走完审计 → 生成 → 定稿 → 本地 git → 平台 PR。
+       * 桩走向**成功那一路**（演示"一条龙"是什么样）。真机由 Rust 的
+       * `publish_tx::run` 跑；平台方言在那个模块里被收敛成统一的 ReviewState / ChecksSummary。
+       */
       case 'wb_publish':
         return Promise.resolve({
-          stamp: '2026-09-30 12:30:00（演示）',
-          root: 'C:\\dev\\dist',
+          stage: 'reviewOpened',
+          auditPassed: 15,
+          auditFailed: 0,
+          generated: 9,
+          unchanged: 0,
+          committedPaths: ['presets/dist/', 'presets/structure-signatures.toml', 'presets/assets.toml'],
+          review: {
+            platform: 'github',
+            number: 128,
+            url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
+            state: 'open',
+            checks: 'pending',
+            title: '发布：交付产物 21 份',
+            head: 'publish/0.0.2',
+            base: 'main',
+          },
+          branch: 'publish/0.0.2',
+          commit: '08ec040',
           files: 21,
-          minimumClient: null,
-          todos: 1,
-          hints: 2,
+          summary: '已生成 9 份、定稿 21 份产物。已提交并推送到 `publish/0.0.2`。已建 PR !128。',
         })
+      /* 发布账户现状（演示）：GitHub 配好了、Gitee 还没配（尾号提示不是原值） */
+      case 'wb_publish_account':
+        return Promise.resolve({
+          platforms: [
+            {
+              platform: 'github',
+              repositoryUrl: 'git@github.com:MuCoreBenC/MKPSupportEase.git',
+              username: 'MuCoreBenC',
+              hasToken: true,
+              tokenHint: '…d4e5',
+            },
+            { platform: 'gitee', repositoryUrl: '', username: '', hasToken: false, tokenHint: null },
+          ],
+          remoteUrl: 'git@github.com:MuCoreBenC/MKPSupportEase.git',
+          remoteMatchesConfig: true,
+          branch: 'publish/0.0.2',
+        })
+      case 'wb_set_publish_account': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: String(args?.repositoryUrl ?? ''),
+          username: String(args?.username ?? ''),
+          hasToken: false,
+          tokenHint: null,
+        })
+      }
+      case 'wb_set_publish_token': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: '',
+          username: '',
+          hasToken: true,
+          tokenHint: '…ab12',
+        })
+      }
+      case 'wb_clear_publish_account': {
+        const platform = String(args?.platform ?? 'github')
+        return Promise.resolve({
+          platform,
+          repositoryUrl: '',
+          username: '',
+          hasToken: false,
+          tokenHint: null,
+        })
+      }
+      case 'wb_publish_status': {
+        // 演示脚本：#128 已经合了；别的编号回读一律"CI 已经跑完" —— 刷新看得出变化
+        const n = Number(args?.number ?? 128)
+        return Promise.resolve({
+          platform: 'github',
+          number: n,
+          url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${n}`,
+          state: n === 128 ? 'merged' : 'open',
+          checks: 'passed',
+          title: '发布：交付产物 21 份',
+          head: 'publish/0.0.2',
+          base: 'main',
+        })
+      }
+      /* 合并（演示）：一律 squash，回读后落到 merged —— 与真机同一条口径 */
+      case 'wb_merge_review':
+        return Promise.resolve({
+          platform: 'github',
+          number: Number(args?.number ?? 128),
+          url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${Number(args?.number ?? 128)}`,
+          state: 'merged',
+          checks: 'passed',
+          title: '发布：交付产物 21 份',
+          head: 'publish/0.0.2',
+          base: 'main',
+        })
+      /*
+       * 发布历史（演示）：三条 —— 已合并 / 等待合并 / 停在发布检查。
+       * 真机读 `<appDataDir>/publish-history.json`（`history::load`）。
+       */
+      case 'wb_publish_history':
+        return Promise.resolve({
+          historySchema: 1,
+          records: [
+            {
+              at: '2026-10-04T14:02:00+08:00',
+              stage: 'statusRead',
+              branch: 'publish/0.0.2',
+              commit: '08ec040',
+              review: {
+                platform: 'github',
+                number: 128,
+                url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/128',
+                state: 'merged',
+                checks: 'passed',
+                title: '发布：交付产物 21 份',
+                head: 'publish/0.0.2',
+                base: 'main',
+              },
+              files: 21,
+              generated: 0,
+              auditPassed: 15,
+              auditFailed: 0,
+              summary: '已生成 0 份、定稿 21 份产物。已提交并推送到 `publish/0.0.2`。已建 PR !128。',
+            },
+            {
+              at: '2026-10-04T11:20:00+08:00',
+              stage: 'reviewOpened',
+              branch: 'feat/demo',
+              commit: '1a2b3c4',
+              review: {
+                platform: 'github',
+                number: 127,
+                url: 'https://github.com/MuCoreBenC/MKPSupportEase/pull/127',
+                state: 'open',
+                checks: 'pending',
+                title: '发布：交付产物 18 份',
+                head: 'feat/demo',
+                base: 'main',
+              },
+              files: 18,
+              generated: 9,
+              auditPassed: 15,
+              auditFailed: 0,
+              summary: '已生成 9 份、定稿 18 份产物。已提交并推送到 `feat/demo`。已建 PR !127。',
+            },
+            {
+              at: '2026-10-03T18:44:00+08:00',
+              stage: 'blockedAudit',
+              branch: null,
+              commit: null,
+              review: null,
+              files: 0,
+              generated: 0,
+              auditPassed: 14,
+              auditFailed: 1,
+              summary: '发布闸没全绿 —— 一个字节都没写。先照「去修」把红项处理掉',
+            },
+          ],
+        })
+      /* 打开系统浏览器（演示）：桩里只记一笔，不真开 */
+      case 'wb_open_external':
+        console.info('[mock] openExternal', args?.url)
+        return Promise.resolve(undefined)
       case 'wb_preview_toml': {
         /*
          * 单独看一份产物的正文。**真产物由 Rust 的 `build::render()` 出**（段名取
@@ -1001,9 +1636,12 @@ export function installMockBackend() {
         return Promise.resolve(n)
       }
       case 'wb_dist_strays':
-        return Promise.resolve(['mkp/presets/old_file.toml'])
-      case 'wb_clean_dist_strays':
-        return Promise.resolve(1)
+        return Promise.resolve([...mockStrays])  // dist 面的残留（dist 相对）
+      case 'wb_clean_dist_strays': {
+        const n = mockStrays.length
+        mockStrays = []
+        return Promise.resolve(n)
+      }
       case 'wb_trash':
         return Promise.resolve(TRASH)
       case 'wb_asset_usage': {
@@ -1013,6 +1651,21 @@ export function installMockBackend() {
         ).map((m) => m.id)
         const bundles = BUNDLES.filter((b) => b.assetRefs.includes(assetId)).map((b) => b.id)
         return Promise.resolve({ id: assetId, machines, bundles })
+      }
+      case 'wb_asset_inspect': {
+        const assetId = args?.assetId as string
+        const a = ASSETS.find((x) => x.id === assetId)
+        if (!a) return Promise.reject({ code: 'NOT_FOUND', message: `没有资产 ${assetId}`, traceId: 'mock' })
+        return Promise.resolve(assetInspectOf(a))
+      }
+      case 'wb_reveal_asset': {
+        // 演示后端没有系统文件管理器 —— 如实说（真机上这一条会打开它并选中文件）。
+        // 探针断言的就是「演示里点它要说实话」，不是静默成功
+        return Promise.reject({
+          code: 'NOT_IMPLEMENTED',
+          message: '浏览器演示里没有系统文件管理器 —— 真机上会打开它并选中这个文件',
+          traceId: 'mock',
+        })
       }
       case 'wb_apply_draft': {
         const patches = (args?.patches as Json[]) ?? []

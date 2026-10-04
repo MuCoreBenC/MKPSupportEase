@@ -26,7 +26,8 @@ pub mod obs;
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
 pub mod presetdata;
-/// **新数据世界**：随包 catalog 的释放口 + 下载区/说明书的落点规则。
+/// **新数据世界**：随包 catalog 的释放口 + 说明书 / 交付文件的落点规则
+/// （落点 = `catalog.path`，见 [`runtime::paths`]）。
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
@@ -72,13 +73,13 @@ pub fn run() {
                 }
             }
 
-            /* 运行时 catalog：随包那份释放进内部根 + 建出空的下载区。
-            这是安装包 → 用户本地（层② → 层③）的唯一铺盘：客户端首屏的全部定义
-            （机型 / 资产 / 套餐 / 字段定义 / 布局）都从这一份出数。盘上已有且一致就
-            一个字节不动；不同（升级）就旧份归档、新份生效（runtime::release）。
+            /* 运行时 catalog：随包那份**只铺底**（层② → 层③ 的铺盘）。
+            交付面不预建任何目录 —— 落点由 `catalog.path` 定，下载那一刻按需建。
+            ★ 必须走 `ensure_released`（盘上没有才写）—— catalog 是 OTA 数据，用升级语义
+            铺盘会让每次启动覆盖掉 OTA 拿到的新目录，下载随即 SHA 不匹配（2026-10-04 修）。
             失败只告警不挡启动：界面会显示「读不到说明书」，那是能据以行动的状态。 */
             match fsx::paths::internal_root(&handle)
-                .and_then(|root| runtime::release::release_catalog(&root))
+                .and_then(|root| runtime::release::ensure_released(&root))
             {
                 Ok(r) => tracing::info!(report = %r.summary(), "运行时 catalog 已就位"),
                 Err(e) => tracing::warn!("运行时 catalog 没就位：{e}"),
@@ -168,6 +169,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
+        // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
+        ipc::catalog::get_app_version,
+        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -225,6 +229,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_archived_text,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
+        // 软件更新（release.json）—— 与上面那份清单一字不差
+        ipc::catalog::get_app_version,
+        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -239,21 +246,48 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
+        // 参数定义编辑（2026-10-03 作者：「弃用是谁决定的？我没办法改」）：
+        // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
+        // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿
+        app::wb_set_param_meta,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
         app::words::wb_words,
         // 「机型与版本」那一页：读写 presets/machines/*.toml。
         // **不走 wb_apply_draft** —— 清单与参数值不共用状态机（见 app/machines.rs 头注）
         app::machines::wb_machines,
+        // 品牌（2026-10-03 作者：「品牌也要像机型一样能编辑」）：显示名 + 品牌图，
+        // 即时落盘（同机型那一套）；品牌图是资产 id，清空回落内置字标
+        app::machines::wb_set_brand_field,
+        app::machines::wb_add_brand,
+        // 移动机型（2026-10-03 作者：「把某一个机型移到其他品牌下，就是那种正常的移动」）：
+        // 只改机型文件的 brand 一格（复用 wb_set_machine_field 那条路），
+        // 多一道「目标品牌真的存在」的校验 —— 打错一个字会在盘上留下悬空的归属
+        app::machines::wb_move_machine_to_brand,
+        // 尺寸六组（照旧面板移植）：整张 [dimensions] 一次写回，全零可选组由后端剔除
+        app::machines::wb_set_machine_dimensions,
+        // 禁区：空数组 = 删掉 forbidden_zones/<id>.toml（清空是删文件，不是留个空文件）
+        app::machines::wb_set_machine_zones,
         // 「资产库」：读 `presets/assets.toml`（b05 Task 8），P4 起带三轴派生与筛选；
         // 删除走数据层的反查守卫（有人引用整次拒绝）
         app::assets::wb_assets,
         app::assets::wb_asset_usage,
+        // 资产检查面板（第四刀）：选中一条才问 —— 重字段（SHA-256 / 尺寸）要读真实字节
+        app::assets::wb_asset_inspect,
+        // 「在访达中显示」：前端只传资产 id，路径由后端算（只读、只开窗口、不碰状态）
+        app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
+        app::assets::wb_set_asset_delivery,
         // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
-        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）
+        // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）；
+        // 2026-10-03 起新建 / 编辑（改 id 连带重指机型文件）/ 复制 / 删除（被指着整次拒绝）
         app::bundles::wb_bundles,
         app::bundles::wb_set_bundle_refs,
+        app::bundles::wb_add_bundle,
+        app::bundles::wb_rename_bundle,
+        app::bundles::wb_copy_bundle,
+        app::bundles::wb_assign_bundle_versions,
+        app::bundles::wb_remove_bundle,
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
@@ -284,8 +318,26 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
         app::build::wb_preview_toml,
+        // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
+        app::build::wb_generate_preview,
+        // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
+        app::wb_app_version,
         app::build::wb_generate,
         app::build::wb_revert_preview,
+        // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
+        app::build::wb_publish_audit,
+        // **发布事务**（第三刀下半）：唯一对外的发布动作 —— 审计 → 生成 → 定稿 → git → PR
         app::build::wb_publish,
+        // 发布账户 / 状态（第三刀下半）：仓库地址 + 用户名（配置）+ Token（Keychain，只进不出）+ 手动回读 PR/MR
+        app::publish_tx::wb_publish_account,
+        app::publish_tx::wb_set_publish_account,
+        app::publish_tx::wb_set_publish_token,
+        app::publish_tx::wb_clear_publish_account,
+        app::publish_tx::wb_publish_status,
+        // 合并（作者 2026-10-04 拍：squash、不强制等 CI）—— 用户显式点过才走
+        app::publish_tx::wb_merge_review,
+        // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
+        app::build::wb_publish_history,
+        app::build::wb_open_external,
     ])
 }

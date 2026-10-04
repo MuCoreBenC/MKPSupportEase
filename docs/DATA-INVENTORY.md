@@ -60,7 +60,7 @@
 | F2 | `presets/dist/` | 发布器产物暂存（实际已有 `mkp/presets/` 9 份；content JSON / manifest / catalog.json 是设计稿、尚未生成）。**布局与客户端落点同形**（2026-10-02 对齐）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
 | F2b | `crates/preset/assets/presets/`（9 份，入库） | **入库产物目录**：`BUILTIN_PRESETS` 编进二进制的同一批真字节 | ① 的②半成品真身 | **保留**；构建器与判据都认它 |
 | F3 | `public/assets/icons\|models`（+ `bbs/` 见 F4） | 图标 / 3mf 模型的**载荷**，随 vite 进包（工作台按 URL 直取） | ② 内置资源（源） | **收口**：第三圈第二刀已登记进 catalog（`kind=icon` / `kind=model`），客户端按需下载进 `mkp/icons/` `mkp/models/`，随包副本退役 |
-| F3b | ~~`public/assets/printers/`~~ → `src/app/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前的判定是"② 内置资源"，**2026-10-01 改判**：它是**界面展示素材**（不是产品数据资源） | **已收口 2026-10-01（第三刀）**：从资产台账（`presets/assets.toml` 的 4 条 `image`）剥离，搬进 `src/app/assets/`，由 vite 资源管线随程序本体走；机型文件的 `image` 引用一并清空。判据：`runtime::catalog`「台账里已无 image 类」 |
+| F3b | `presets/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前判成"② 内置资源"，2026-10-01 又改判成"界面素材搬进源码"，**两版都作废** | **已收口 2026-10-03**：作者指出「不会编程的用户怎么改图片呢」—— 第三刀把它硬编码进客户端源码是错的。文件回数据侧 `presets/assets/printers/`，台账 4 条 `image` 恢复登记，用 **`delivery = 'bundled'`** 表达「不进云端交付、随包不下载」，到客户端靠构建期复制（`scripts/copy-assets.mjs`）。判据：`runtime::catalog::dest_of_asset`「整机图在台账里、且不进 files[]」 |
 | F4 | `public/assets/bbs/Process/`（9 份 JSON） | BBS 切片配置成品 | ② 内置资源 | **已收口 2026-10-01（第一刀）**：登记进 catalog（`kind=bbs_config`），落点 `mkp/bbs/…`，随包副本退役 |
 | F5 | `public/bbs/`（PROVENANCE / registry / layout / defaults / icons / _sync.json） | BBS 页元数据（提取器产物，随本仓分发） | ② 内置资源 | **保留**；与 F4 同一批登记（这几份是 BBS 页的界面数据，不是下载资源） |
 | F6 | ~~`public/models/hero_pile*.webp`~~ → `src/app/assets/hero/` | 首页第五步 / 校准页测试模型那一屏的合影 | 界面展示素材（不是产品数据资源） | **已收口 2026-10-01（第三刀顺手搬）**：与 F3b 同一条规则、同一层（`src/app/assets/hero/`），改走 vite 资源管线；**不登记进资产台账**。搬完后 `public/` 里不再有界面素材 |
@@ -549,5 +549,12 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   3. **数据归属未变**：`run/preset-source.json` 仍住 Internal 根、仍"设置文件 → 内置默认
      → 没有就是没配"三段解析；`STORAGE.cloud` 那格**只归工作台**（客户端 C4 起不读，
      这次把工作台里"客户端读这一格"的失效指针一并校准）。
+
+- 2026-10-04：**导入入口收成拖拽独苗**（作者裁决：几乎不需要导入，不给它常驻的位子）：
+  预设页工具栏的「导入文件…」按钮退役 —— 第十二层（`FileImportProvider`）的拖拽那一半
+  照常生效（拖进窗口、重名改名格、结果条都在）；选择器能力 `pickFiles` 照旧住在 App 层，
+  只是暂时没有界面触发点（与 `clear_active_preset`「能力不删、界面退役」同一条规矩）。
+  同一轮：MKP 工具栏**恒两排**（第一排 类型 / 位置(右) / 搜索，第二排 pill + 计数台账），
+  MKP 档的「共 N 项 │ 仓库…」从页脚回到工具栏第二排（切片器档照旧住页脚）。
 
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

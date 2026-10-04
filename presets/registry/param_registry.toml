@@ -127,10 +127,16 @@ description = 'Z 轴抬升高度参数'
 order = 2.0
 
 [[tabs.sections]]
+id = 'calibration'
+label = '校准'
+description = '校准模式选择（不分机型）'
+order = 3.0
+
+[[tabs.sections]]
 id = 'machine_specific'
 label = '机型专属'
 description = '机型专属参数'
-order = 3.0
+order = 4.0
 
 [[tabs]]
 id = 'internal'
@@ -2273,12 +2279,12 @@ order = 2.0
 
 [[params]]
 key = 'wiping.wiper_x'
-label = '擦料塔X坐标'
-desc = '擦料塔在热床上的X坐标位置 (mm)'
+label = "擦料塔X坐标"
+desc = "擦料塔在热床上的X坐标位置 (mm)"
 tomlKey = 'wiper_x'
-unit = 'mm'
-valueType = 'float'
-uiComponent = 'number'
+unit = "mm"
+valueType = "float"
+uiComponent = "number"
 defaultValue = 20.0
 section = 'wiping'
 configKey = 'WiperX'
@@ -2292,7 +2298,7 @@ step = 1.0
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '擦嘴塔X坐标(mm)'
-parentKey = 'wiping.have_wiping_components'
+parentKey = "wiping.have_wiping_components"
 
 [params.machineMinVariants]
 'A1:FAST' = 10.0
@@ -2319,8 +2325,8 @@ sectionId = 'tower_position'
 order = 20.0
 
 [params.showWhen]
-key = 'wiping.have_wiping_components'
-op = 'eq'
+key = "wiping.have_wiping_components"
+op = "eq"
 value = 'tower'
 
 [[params]]
@@ -2428,8 +2434,8 @@ value = 'new'
 label = '新型'
 
 [params.layout]
-sectionId = 'machine_specific'
-order = 2.0
+sectionId = 'calibration'
+order = 1.0
 
 [[params]]
 key = 'wiping.z_calibration_mode'
@@ -2456,5 +2462,5 @@ value = 'new'
 label = '新型'
 
 [params.layout]
-sectionId = 'machine_specific'
-order = 3.0
+sectionId = 'calibration'
+order = 2.0

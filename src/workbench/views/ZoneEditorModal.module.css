@@ -1,0 +1,357 @@
+/*
+ * 禁区编辑器（2026-10-03，照旧面板 mkppanel 的 ZoneEditorModal）。
+ *
+ * 版式：左画布（55%）+ 右列表（45%），工具条在画布上方、状态在框脚。
+ * 画布默认是**干净的**：只有床身轮廓、网格与多边形边；悬停 / 选中只让线段变色，
+ * 点不被画出来 —— 只亮正在编辑 / 拖着的那一个，它头顶跟一块圆角坐标牌。
+ */
+
+.wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ---------- 左：画布 ---------- */
+
+.canvasPane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.tool {
+  padding: 3px 9px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.tool:hover:not(:disabled) {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.tool:disabled {
+  opacity: 0.45;
+}
+
+/* 把前后的按钮组拉开（撤销那一组离"添加/删除"远一点） */
+.toolGap {
+  flex: 1;
+}
+
+.zoom {
+  min-width: 42px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.canvasBox {
+  /* 画布是正方形（床身多半是方的），给它一个上限免得在小窗里顶破框 */
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.canvas {
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1 / 1;
+  /* 缩放走 transform：不改 viewBox，网格与顶点一起放大，坐标系不动 */
+  transform-origin: center;
+  transition: transform 0.1s ease;
+}
+
+.bed {
+  fill: var(--surface-solid);
+  stroke: var(--line-strong);
+  stroke-width: 0.8;
+}
+
+.grid {
+  stroke: var(--line);
+  stroke-width: 0.4;
+}
+
+.poly {
+  fill: var(--danger-soft, rgb(239 68 68 / 12%));
+  stroke: var(--danger);
+  stroke-width: 0.9;
+  cursor: pointer;
+}
+
+.polyOn {
+  fill: var(--danger-soft, rgb(239 68 68 / 20%));
+  stroke-width: 1.6;
+}
+
+/* 悬停只让线段变色，不出现点（作者那一刀）：没选中的块泛蓝邀请点一下，
+   选中的块再粗一点；压在面上的透明边热区也算在 g 里，贴着线悬停同样生效 */
+.zoneG:hover .poly {
+  stroke: var(--wb-primary);
+  stroke-width: 1.3;
+}
+
+.zoneG:hover .polyOn {
+  stroke: var(--danger);
+  stroke-width: 2;
+}
+
+.handle {
+  fill: var(--surface-solid);
+  stroke: var(--wb-primary);
+  stroke-width: 0.9;
+  cursor: grab;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+/* 亮着的那一个：实心蓝、大一号（正在编辑它的坐标 / 正拖着 / 刚加上的） */
+.handleOn {
+  fill: var(--wb-primary);
+  stroke: var(--surface-solid);
+  stroke-width: 0.7;
+}
+
+/* 坐标牌：亮着那个点头顶的圆角小矩形（作者嫌小 —— 放大到肉眼舒服的一档） */
+.tagBox {
+  fill: var(--surface-solid);
+  stroke: var(--wb-primary);
+  stroke-width: 0.5;
+  pointer-events: none;
+}
+
+.handleText {
+  font-size: 8px;
+  font-weight: 600;
+  fill: var(--wb-primary-deep);
+  pointer-events: none;
+}
+
+/* 选中块的"点边加顶点"热区：透明粗描边，只吃边上的点击（面上、手柄下） */
+.edgeHit {
+  fill: none;
+  stroke: rgb(0 0 0 / 0%);
+  pointer-events: stroke;
+  cursor: crosshair;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ---------- 右：列表 ---------- */
+
+.listPane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.listHead {
+  padding-bottom: 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.empty {
+  padding: 10px 2px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.item {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.itemOn {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-soft);
+}
+
+.itemHead {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+}
+
+.itemName {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.itemMeta {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.itemBad {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.itemActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mini {
+  padding: 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.mini:hover {
+  border-color: var(--line-strong);
+}
+
+.miniDanger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 坐标表：选中那块才展开 */
+.coords {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.coordRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.coordIdx {
+  width: 22px;
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* NumberField 的壳按内容自适应 —— 在这里撑满半行，框内输入框跟着拉长 */
+.coordNum {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.coordNum > span {
+  flex: 1;
+}
+
+.coordNum > span > input {
+  flex: 1;
+  width: auto !important;
+}
+
+.coordDel {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
+  color: var(--text-3);
+  border-radius: 3px;
+}
+
+.coordDel:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* 「添加点」：不用回画布也能加，虚线一整条占满行宽 */
+.addPoint {
+  margin-top: 2px;
+  padding: 5px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.addPoint:hover {
+  color: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+/* ---------- 框脚 ---------- */
+
+.status {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.warn {
+  margin: 12px 0 0;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}

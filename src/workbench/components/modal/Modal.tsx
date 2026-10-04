@@ -32,6 +32,7 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { modalShortcutGate, modalStack } from './shortcutGate'
 import s from './Modal.module.css'
 
 export interface ModalProps {
@@ -41,6 +42,11 @@ export interface ModalProps {
   subtitle?: string
   /** 底部一条。没有就不画那一条边 */
   footer?: ReactNode
+  /**
+   * 标题行右侧的空白位（关闭按钮左边）。确认框那种「想在头上放个小切换」的
+   * （如生成前确认的「完整 / 对比」）用它，不用各自改外壳。
+   */
+  headerExtra?: ReactNode
   /**
    * 框的宽度档。`sm` 看一眼就关的（详情）· `md` 要读的（确认 / 表单）· `lg` 向导。
    * 不给自由数值 —— 三档已经够，给了数值各处就会长出十种宽度。
@@ -60,6 +66,12 @@ export interface ModalProps {
   host?: HTMLElement | null
   /** 页眉那枚「关闭」的悬停说明 —— 关闭不总是「放弃」，有草稿语义的稿要写清 */
   closeTitle?: string
+  /**
+   * 开着的时候**外壳的撤销/重做/保存快捷键要不要照常工作**（2026-10-03）。
+   * 默认不 —— 框开着 Cmd+Z 却在改遮罩后面的草稿，就是「撤销穿透」；
+   * 只给自己的写都进外壳栈的框（G-code 模态框）传 true。
+   */
+  shellShortcuts?: boolean
   onClose: () => void
   children: ReactNode
 }
@@ -69,19 +81,36 @@ export default function Modal({
   title,
   subtitle,
   footer,
+  headerExtra,
   size = 'md',
   closeOnScrim = true,
   host = null,
   closeTitle,
+  shellShortcuts = false,
   onClose,
   children,
 }: ModalProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   /* 关掉之后焦点要还回去，不然键盘用户会掉到文档开头 */
   const returnTo = useRef<HTMLElement | null>(null)
+  /** 开框时领的栈序号 —— Esc 只归最上面那层（嵌套框见 modalStack） */
+  const stackToken = useRef<number | null>(null)
 
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+
+  /* 快捷键闸 + 栈序号：开一票、关一票 —— 外壳的 Cmd+Z / Cmd+S 在 blocking() 时装没听见 */
+  useEffect(() => {
+    if (!open) return
+    modalShortcutGate.enter(shellShortcuts)
+    const token = modalStack.push()
+    stackToken.current = token
+    return () => {
+      modalShortcutGate.exit(shellShortcuts)
+      modalStack.pop(token)
+      stackToken.current = null
+    }
+  }, [open, shellShortcuts])
 
   useEffect(() => {
     if (!open) {
@@ -100,7 +129,11 @@ export default function Modal({
   useEffect(() => {
     if (!open) return
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current()
+      if (e.key !== 'Escape') return
+      /* 嵌套框只关最上面那层 —— 底下的框连着人家正在改的东西 */
+      const token = stackToken.current
+      if (token !== null && !modalStack.isTop(token)) return
+      closeRef.current()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -158,6 +191,7 @@ export default function Modal({
             <strong className={s.title}>{title}</strong>
             {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
           </span>
+          {headerExtra !== undefined && <div className={s.headExtra}>{headerExtra}</div>}
           <button type="button" className={s.close} title={closeTitle} onClick={onClose}>
             关闭
           </button>

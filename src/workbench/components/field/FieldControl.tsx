@@ -76,7 +76,17 @@ export default function FieldControl({
 
     case 'choice': {
       const options = field.choices ?? []
-      const inline = !cell && options.length <= MAX_INLINE
+      /*
+       * 摆成哪副样子：row 场合调用方指定了（定义里的 `uiComponent`：分段 / 下拉）
+       * 就听它的；没指定（老稿不认识这个字段）按选项数自判。**cell 场合永远收进
+       * 下拉** —— 那是格子，摆不开，指定了也不摊。
+       * 「我选的是下拉却画成分段」就是从前漏传这个字段开始的（作者的实测）。
+       */
+      const inline = cell
+        ? false
+        : field.choiceLayout
+          ? field.choiceLayout === 'inline'
+          : options.length <= MAX_INLINE
       return inline ? (
         <SegmentedField
           variant="segmented"

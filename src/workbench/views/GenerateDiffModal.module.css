@@ -1,0 +1,374 @@
+/*
+ * 生成前确认模态框的样式。
+ *
+ * 两栏（清单 + 详情）在窄窗里退成一栏（清单在上、详情在下）—— 用容器查询按**框自己**
+ * 的宽度断，不问窗口档位（工作台里同一个件可能被摆在不同宽处）。
+ */
+
+.panes {
+  container-type: inline-size;
+  display: flex;
+  gap: 0;
+  /* 框内高度封顶，两栏各自滚 —— 免得一份几百行的 diff 把模态框顶穿。
+     这里必须是 flex 不能是 grid：grid 的 auto 行在 max-height 约束下仍按
+     内容高算（超出被 overflow 裁掉、栏内永远不出滚动条 —— 完整视图一展开
+     就滚不动），flex 会把栏压进容器高，栏自己出滚动条。 */
+  max-height: min(62vh, 560px);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  overflow: hidden;
+}
+
+/* ---------- 左：文件清单 ---------- */
+
+.list {
+  flex: 0 1 260px;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  overflow: auto;
+  /* 滚到头断在这，不许链到背后页面（与 Modal 遮罩的 contain 同一件事） */
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--w-line);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: rgb(16 24 32 / 4%);
+}
+
+.itemOn,
+.itemOn:hover {
+  background: var(--w-primary-soft);
+  box-shadow: inset 2px 0 0 var(--w-primary);
+}
+
+.itemName {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--w-text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.counts {
+  display: inline-flex;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.add {
+  color: #1a7f43;
+}
+
+.del {
+  color: #b4402f;
+}
+
+/* 三档状态的小字 */
+.state_added,
+.state_modified,
+.state_unchanged {
+  font-weight: 500;
+}
+
+.state_added {
+  color: #1a7f43;
+}
+
+.state_modified {
+  color: #b06a00;
+}
+
+.state_unchanged {
+  color: var(--w-text-3);
+}
+
+/* 「N 份无变化」的可折叠组头 */
+.groupToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--w-line);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-text-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.groupToggle:hover {
+  background: rgb(16 24 32 / 4%);
+}
+
+.caret {
+  flex: none;
+  color: var(--w-text-3);
+}
+
+/* ---------- 右：详情（行级 diff） ---------- */
+
+.detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.detailHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.detailName {
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12.5px;
+  color: var(--w-text-1);
+}
+
+.detailMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.diff {
+  padding: 6px 0;
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 一行：行号槽 + 内容槽。三档行只差底色与行号槽的字色 */
+.lineAdd,
+.lineDel,
+.lineCtx {
+  display: flex;
+  gap: 0;
+  min-width: 0;
+}
+
+.lineAdd {
+  background: rgb(32 178 90 / 10%);
+}
+
+.lineDel {
+  background: rgb(200 70 50 / 9%);
+}
+
+.lineCtx {
+  color: var(--w-text-2);
+}
+
+/* 行号槽定宽、右对齐、等宽数字 —— 一列对齐才读得出"第几行" */
+.lineNo {
+  flex: none;
+  width: 44px;
+  padding-right: 10px;
+  color: var(--w-text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.gutter {
+  flex: none;
+  width: 18px;
+  color: var(--w-text-3);
+  text-align: center;
+  user-select: none;
+}
+
+.lineAdd .gutter {
+  color: #1a7f43;
+}
+
+.lineDel .gutter {
+  color: #b4402f;
+}
+
+.lineTxt {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: 14px;
+  /* 不换行：TOML 一行一条，换行会把行号与内容错开（长了横向滚） */
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* ---------- 头部：「完整 / 对比」切换 ---------- */
+
+/* 两段小切换，住在模态框标题行右侧（Modal 的 headerExtra 工具位） */
+.viewToggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn, 6px);
+}
+
+.viewBtn {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--w-card);
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-text-2);
+  cursor: pointer;
+}
+
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--w-line);
+}
+
+.viewBtn:hover {
+  color: var(--w-text-1);
+}
+
+.viewBtnOn,
+.viewBtnOn:hover {
+  background: var(--w-primary-soft);
+  font-weight: 500;
+  color: var(--w-primary);
+}
+
+/* ---------- 空态 / 错误 ---------- */
+
+.empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12.5px;
+  color: var(--w-text-3);
+}
+
+.error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e3b0a4;
+  border-radius: var(--w-r-card);
+  background: #fdf2ef;
+  font-size: 12.5px;
+  color: #8a3b2a;
+}
+
+/* ---------- 底部 ---------- */
+
+/* 说明小字。按钮本体用 c14.module.css 的标准 .btn / .btnPrimary（全工作台一种长相），
+   撑开用它的 .grow —— 这里不再自养第二套按钮。 */
+.footNote {
+  font-size: 12px;
+  color: var(--w-text-3);
+}
+
+/* ---------- 窄框：两栏退成一栏 ---------- */
+
+@container (max-width: 560px) {
+  .panes {
+    flex-direction: column;
+    max-height: none;
+  }
+
+  .list {
+    flex: none;
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--w-line);
+  }
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.summary {
+  margin: 0;
+  font-size: 13px;
+  color: var(--w-text-1);
+}
+
+.resultGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resultHead {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--w-text-2);
+}
+
+.resultList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resultItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  color: var(--w-text-1);
+}
+
+.dotWritten,
+.dotUnchanged,
+.dotSkipped {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dotWritten {
+  background: #1a7f43;
+}
+
+.dotUnchanged {
+  background: #b9c0c7;
+}
+
+.dotSkipped {
+  background: #d08a2a;
+}

@@ -1,13 +1,16 @@
 # 资产域①层：**一份集中定义**（b05 Task 8）。
 #
-# 这里登记我们管的资产：图标 / 模型 / 切片器预设（BBS）三类。
-# **文件本体不在这里** —— 它们在资产根 `<repo>/public/assets/` 下，条目里的 `path`
+# 这里登记我们管的资产：整机图 / 图标 / 模型 / 切片器预设（BBS）四类。
+# **文件本体不在这里** —— 它们在资产根 `<repo>/presets/assets/` 下，条目里的 `path`
 # 就是相对那个根的一段。
 #
-# **整机图（`type = 'image'`）不在这里**（2026-10-01 剥离）：它是界面的展示素材，
-# 不是用户要下载 / 更新 / 管理的产品数据资源。判断依据是"它是不是产品数据资源"，
-# 而不是"文件是不是图片"。它现在与品牌 logo 同住 `src/app/assets/printers/`，
-# 由 vite 的资源管线随程序本体走（判据：`runtime::catalog` 里"台账已无 image 类"）。
+# 资产根 2026-10-03 从 `public/assets/` 搬到 `presets/assets/`（作者：「在 assets 吧，
+# 到时候 3mf 也要放」—— 所有产品数据资源住一起；`public/` 那个资产目录之后退役）。
+#
+# **整机图（`type = 'image'`）2026-10-03 回到台账**（2026-10-01 第三刀把它剥离、搬进
+# 客户端源码是错的：不会编程的用户改不了图）。它用 **`delivery = 'bundled'`** 表达
+# 「不进云端交付」—— 台账登记、工作台可管，构建期从数据目录带进客户端包，客户端
+# 不下载不更新（判据：`runtime::catalog` 的 `dest_of_asset` 按交付档位拦）。
 #
 # 为什么一份文件而不是一资产一文件：旧仓 `source/assets/*.toml` 是 18 份、一资产一文件，
 # 加一张图就要新建一个文件，而"这批资产都属于 A1"这句话在目录里看不出来（doc §8）。
@@ -16,16 +19,19 @@
 # **这里不写什么**：
 # - 不写 `fileName`：路径只有 `path` 一处（旧仓同时存 `fileName` 与 `relativePath`）
 # - 不写 `sha256` / `size`：那是**交付物**的属性，发布时按真实字节算（Task 13.6）
-# - **不给 MKP 预设建条目**：它的路径由命名规则算出（doc §12.5），登记一份就是冗余
+# - **MKP 预设不写 `path`**：它的文件是生成产物、落点由命名规则算出（doc §12.5）——
+#   2026-10-03 起它**在台账里**（作者：为什么资产库里面不放 mkp 预设），只是靠
+#   `machineId` + `versionId` 定位，不抄一份会过期的路径
 #
-# 一条的形状（`type` 取值：`icon` | `model` | `slicerProfile`）：
-#
+# 一条的形状（`type` 取值：`image` | `icon` | `model` | `slicerProfile`）：
+
 #   [[assets]]
-#   id = 'a1-icon'                    # 主键，**大小写不敏感**唯一
-#   type = 'icon'
+#   id = 'a1-image'                   # 主键，**大小写不敏感**唯一
+#   type = 'image'
 #   machineId = 'A1'                  # 归属机型；不属于任何机型时整行省略
-#   name = 'A1 图标'                  # 给人看的名字
-#   path = 'icons/a1.svg'             # 相对资产根，不许越界（拒绝对路径与 `..`）
+#   name = 'A1 外观图'                # 给人看的名字
+#   path = 'printers/a1.webp'         # 相对资产根，不许越界（拒绝对路径与 `..`）
+#   delivery = 'bundled'              # 可选：随包不下载（默认 download = 进交付集合）
 #
 # 切片器预设多两项（G-3：切片器是**开放的扩展维度**，今天只有 bbs）：
 #
@@ -45,6 +51,138 @@
 #   不属于某一台的：按源文件语义（`mkp-support-test-models`）
 # `machineId` 是**归属**（这份东西为谁做的），不是唯一的使用者 —— 图标 `p1s-icon`
 # 归 P1S，而 P2S / X1C 的 `icon` 字段也指向它（共享一件素材是允许的）。
+
+# ---------------- 整机图（image · delivery = 'bundled'） ----------------
+#
+# 2026-10-03 回到台账（作者裁定，撤销 2026-10-01 第三刀的剥离）。`bundled` =
+# **随包不下载**：不进交付集合 / 不进 catalog 的 files[]，构建期从
+# `presets/assets/printers/` 复制进客户端资源。台账照登记，工作台照可选可换。
+
+[[assets]]
+id = 'a1-image'
+type = 'image'
+machineId = 'A1'
+name = 'A1 外观图'
+path = 'printers/a1.webp'
+delivery = 'bundled'
+
+[[assets]]
+id = 'a1_mini-image'
+type = 'image'
+machineId = 'A1_MINI'
+name = 'A1 mini 外观图'
+path = 'printers/a1mini.webp'
+delivery = 'bundled'
+
+[[assets]]
+id = 'a1_mini-variant-image'
+type = 'image'
+machineId = 'A1_MINI'
+name = 'A1 mini 外观图（快拆版）'
+path = 'printers/a1mini-variant.webp'
+delivery = 'bundled'
+
+[[assets]]
+id = 'p1s-image'
+type = 'image'
+machineId = 'P1S'
+name = 'P1S 外观图'
+path = 'printers/p1s.webp'
+delivery = 'bundled'
+
+# ---------------- 公共素材（不属于任何机型） ----------------
+#
+# 2026-10-03（作者：「品牌 Logo 也应该正式进入资产体系」）：品牌图与机型图、版本图
+# 一样，是**台账里的一条资产**，业务数据只引用它的 id（`presets/brands.toml` 的
+# `logo = 'bambu-lab-logo'`）。
+#
+# **不写 `machineId`** = 公共素材（`Asset` 的字段说明早就预留了这条路）。
+# 它随包（客户端要显示、且不该从云端下载）⇒ `delivery = 'bundled'`。
+#
+# 颜色：原文件靠 `currentColor` 随外层 CSS 变色，而 `<img src>` 是独立文档、拿不到
+# 外层颜色 —— 随包资产只能一色。这一条固化**深色**那版（浅色底用）。将来真出现深色底，
+# 那是**另一条资产**（`bambu-lab-logo-light`），不是"换个 fill"。
+
+[[assets]]
+id = 'bambu-lab-logo'
+type = 'image'
+name = 'Bambu Lab 字标'
+path = 'brands/bambu-lab-logo.svg'
+delivery = 'bundled'
+
+# ---------------- MKP 预设（mkpPreset） ----------------
+#
+# 2026-10-03（作者：「为什么资产库里面不放 mkp 预设」）：**一切配发内容都在资产库里有
+# 登记**，套餐从这儿统一选。这一类的文件是**生成产物**（`presets/dist/mkp/presets/<产物名>`，
+# 命名规则算出），所以**不写 path** —— 归属写 `machineId` + `versionId`。
+#
+# **文件在不在都能登记、都能被套餐选中**（作者：「不只是没文件的时候可以选择，
+# 有文件也要可以选择」）—— 「有没有生成」是生成页那四档状态的事，不拦选用。
+# 它们**不进 catalog 的 files[]**（产物那 9 条已经在了）、**不进客户端菜单**
+# （客户端拿到的清单以 catalog files 为准）。
+
+[[assets]]
+id = 'a1-standard'
+type = 'mkPreset'
+machineId = 'A1'
+versionId = 'STANDARD'
+name = 'A1 标准版预设'
+
+[[assets]]
+id = 'a1-fast'
+type = 'mkPreset'
+machineId = 'A1'
+versionId = 'FAST'
+name = 'A1 高速版预设'
+
+[[assets]]
+id = 'a1-fastv3.3'
+type = 'mkPreset'
+machineId = 'A1'
+versionId = 'FASTV3.3'
+name = 'A1 快拆版 260628 预设'
+
+[[assets]]
+id = 'a1_mini-standard'
+type = 'mkPreset'
+machineId = 'A1_MINI'
+versionId = 'STANDARD'
+name = 'A1 mini 标准版预设'
+
+[[assets]]
+id = 'a1_mini-fast'
+type = 'mkPreset'
+machineId = 'A1_MINI'
+versionId = 'FAST'
+name = 'A1 mini 高速版预设'
+
+[[assets]]
+id = 'a1_mini-fastv3.3'
+type = 'mkPreset'
+machineId = 'A1_MINI'
+versionId = 'FASTV3.3'
+name = 'A1 mini 快拆版 260628 预设'
+
+[[assets]]
+id = 'p1s-lite'
+type = 'mkPreset'
+machineId = 'P1S'
+versionId = 'LITE'
+name = 'P1S lite 版预设'
+
+[[assets]]
+id = 'p2s-standard'
+type = 'mkPreset'
+machineId = 'P2S'
+versionId = 'STANDARD'
+name = 'P2S 标准版预设'
+
+[[assets]]
+id = 'x1c-lite'
+type = 'mkPreset'
+machineId = 'X1C'
+versionId = 'LITE'
+name = 'X1C lite 版预设'
 
 # ---------------- 图标 ----------------
 

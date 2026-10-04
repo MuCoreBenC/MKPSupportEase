@@ -51,15 +51,16 @@ pub const ASSETS_FILE: &str = "assets.toml";
 /// 一个是矢量标记，前端一处 <img>、一处当符号用），而 doc §8 那句"图片 / 图标、模型"
 /// 说的是**同一类文件形态**，不是同一个字段语义。
 ///
-/// **今天台账里没有 `image`**（2026-10-01 剥离）：整机图是界面的展示素材，走 `src/app/assets/`
-/// 随程序本体，不进 Catalog / Delivery。变体留着是因为它是**形态分类**，
-/// 而"进不进台账"是另一条判断——判据是 [`crate::runtime::catalog`] 里那句
-/// "台账里已无 image 类"，不是这里少一个枚举取值。
+/// **`image` 回到台账了**（2026-10-03 改判，撤销 2026-10-01 第三刀的剥离）：整机图
+/// 住在 `presets/assets/printers/`，台账里是 `type = 'image'` + `delivery = 'bundled'`
+/// 的条目 —— **工作台看得见、选得着、换得掉**（作者：不会编程的用户改不了图才是问题），
+/// 到客户端靠构建期复制随包，客户端不下载。判据在
+/// [`crate::runtime::catalog::dest_of_asset`]（**按交付档位拦**，不按类型拦）。
 ///
 /// **2026-10-02 复审结论：保留（去留已明确，别再问"要不要顺手删"）。** 三条依据：
-/// ① 它不是"纯未使用枚举" —— [`crate::runtime::catalog`] 的"不登记"分支、
-/// "台账里已无 image 类"判据、工作台机型页/资产页那两个**如实为空**的入口都在引用它；
-/// ② 也不是旧世界残留 —— 剥离是**改判**（图是界面素材，不是产品数据资源），用代码写着拒绝；
+/// ① 它不是"纯未使用枚举" —— 台账里四条 image 条目在用、[`crate::runtime::catalog`]
+/// 的 kind 映射表里也有一格（返回 None = 下载区没有「图片」这一段）；
+/// ② 也不是旧世界残留 —— 「进不进交付集合」是**档位**（`bundled`）的事，不是类型的事；
 /// ③ 要删就是一次 schema 清理（动公开契约 `Machine.image`、mock、工作台两页、判据），
 /// 属另案，不顺手做。
 ///
@@ -73,6 +74,16 @@ pub enum AssetKind {
     Model,
     /// 切片器预设。今天只有 BBS，`slicer` 字段留着别的切片器的位置
     SlicerProfile,
+    /// **MKP 预设**（作者 2026-10-03：「为什么资产库里面不放 mkp 预设」——
+    /// 一切配发内容都在资产库里有登记，套餐从这儿统一选）。
+    ///
+    /// 与前四类的**根本差别**：它的文件不是资产根下的静态文件，而是**生成产物**
+    /// （`presets/dist/mkp/presets/<产物名>`，命名规则算出）—— 所以这一类
+    /// **不写 `path`**（那是 doc §12.5「路径由命名规则算出」的实现），改写
+    /// `versionId`（`machineId` + `versionId` 定位那一版）。**文件在不在都不影响
+    /// 登记与选用**（作者：「不只是没文件的时候可以选择，有文件也要可以选择」）——
+    /// 「有没有生成」是另一条状态（生成页那四档），不由资产域管。
+    MkPreset,
 }
 
 impl AssetKind {
@@ -83,6 +94,7 @@ impl AssetKind {
             Self::Icon => "icon",
             Self::Model => "model",
             Self::SlicerProfile => "slicerProfile",
+            Self::MkPreset => "mkPreset",
         }
     }
 }
@@ -107,11 +119,45 @@ pub struct Asset {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_id: Option<String>,
     pub name: String,
+    /// 相对资产根的文件位置。**唯一一份路径**。
+    ///
+    /// `mkpPreset` 类**留空** —— 它的文件是生成产物（落点在 `presets/dist/mkp/presets/`），
+    /// 路径由命名规则算出，不在这里再登记一份（那是 doc §12.5 的原话；
+    /// 作者 2026-10-03 要求「进资产库」指的是**登记与选用**，不是把产物路径抄进台账）。
+    #[serde(default)]
     pub path: String,
+    /// **归属版本**（`mkpPreset` 类专有）：`machineId` + `versionId` 定位那一版。
+    /// 其余三类留空 —— 它们的归属是机型（`machineId`）或全局
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slicer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    /// **交付身份**（作者 2026-10-03 新增，默认 `download`）。
+    ///
+    /// - `download`（默认）：进交付集合，客户端**按需下载**（BBS / 图标 / 模型 / MKP 产物）；
+    /// - `bundled`：**随包不下载** —— 台账里登记、工作台里看得见选得着，构建期从
+    ///   数据目录复制进客户端资源，客户端不下载也不更新它（整机图：用户不换机器就不换图，
+    ///   但**换图的人有权在工作台里换** —— 2026-10-01 第三刀把它挪进客户端源码是错的，
+    ///   已作废）。
+    ///
+    /// 这是**静态声明**（写在 `assets.toml` 里），与运行时那个「在菜单 / 仅归档」
+    /// （`patch::Visibility`，工作台可改、存 store）正交：那份管**客户端菜单里看不看得到**，
+    /// 这一栏管**它到不到客户端手里**。
+    #[serde(default)]
+    pub delivery: Delivery,
+}
+
+/// [`Asset::delivery`] —— 这份资产**怎么到客户端手里**
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Delivery {
+    /// 进交付集合，客户端按需下载（默认）
+    #[default]
+    Download,
+    /// 随包不下载：构建期从数据目录带进客户端，客户端不下载、不更新
+    Bundled,
 }
 
 /// 文件形状。`[[assets]]` 数组表，与 `brands.toml` 那份"一份集中定义"同一写法。
@@ -189,7 +235,8 @@ impl Assets {
         let root = self.asset_root.as_ref().ok_or_else(|| {
             AppError::not_found("这一侧没有资产载荷根").with_detail(
                 "资产文件本体与定义分家：定义在 presets/assets.toml，载荷在 \
-                 public/assets/。没有载荷根时按「文件还没到」处理，不要猜路径"
+                 presets/assets/（2026-10-03 前是 public/assets/，资产链第一刀搬的）。\
+                 没有载荷根时按「文件还没到」处理，不要猜路径"
                     .to_owned(),
             )
         })?;
@@ -308,6 +355,69 @@ impl Assets {
         Ok(removed)
     }
 
+    /// 改一条资产的**交付档位**（`download` ↔ `bundled`）。
+    ///
+    /// 内存与文档面一起改（同 [`Self::remove`] 的纪律 —— 只改内存的话下一次
+    /// `write` 会把旧值写回去）。值没变就不动文档。
+    ///
+    /// **`mkPreset` 不许设成 bundled**：它的文件是生成产物、落点在交付根
+    /// `mkp/presets/`，没有「随包复制」这条路径（构建期复制脚本只搬有 `path` 的）
+    pub fn set_delivery(
+        &mut self,
+        id: &str,
+        delivery: crate::presetdata::assets::Delivery,
+    ) -> Result<(), AppError> {
+        let want = id.trim().to_lowercase();
+        let asset = self
+            .items
+            .iter_mut()
+            .find(|a| a.id.to_lowercase() == want)
+            .ok_or_else(|| AppError::not_found(format!("没有资产 {id}")))?;
+        if asset.kind == AssetKind::MkPreset
+            && delivery == crate::presetdata::assets::Delivery::Bundled
+        {
+            return Err(AppError::invalid_argument(format!(
+                "资产 {id} 是 MKP 预设登记，不能设成随包"
+            ))
+            .with_detail(
+                "MKP 预设的文件是生成产物（mkp/presets/…），没有随包复制这条路径；\
+                 它的「在不在」由生成页的生成状态说"
+                    .to_owned(),
+            ));
+        }
+        if asset.delivery == delivery {
+            return Ok(());
+        }
+        asset.delivery = delivery;
+
+        // 文档面：那一段表格里的 delivery 键（缺省 download 可以不写 —— 删掉键就是回到缺省）
+        let arr = self
+            .doc
+            .get_mut("assets")
+            .and_then(|i| i.as_array_of_tables_mut())
+            .ok_or_else(|| {
+                AppError::corrupted(format!("{} 的 assets 不是表数组", self.file.display()))
+            })?;
+        let table = arr
+            .iter_mut()
+            .find(|t| {
+                t.get("id")
+                    .and_then(|i| i.as_str())
+                    .is_some_and(|s| s.to_lowercase() == want)
+            })
+            .ok_or_else(|| {
+                AppError::corrupted(format!(
+                    "内存里有 {id}，文档里却找不到那一段 —— 别改，先查加载逻辑"
+                ))
+            })?;
+        if delivery == crate::presetdata::assets::Delivery::Download {
+            table.remove("delivery");
+        } else {
+            table["delivery"] = super::literal_str("bundled");
+        }
+        Ok(())
+    }
+
     /// 原子写回。**唯一的写盘点**（与 [`super::Catalog::write_machine`] 同一条出口）
     pub fn write(&self) -> Result<(), AppError> {
         crate::fsx::atomic::atomic_write(&self.file, self.to_toml().as_bytes())
@@ -359,10 +469,40 @@ impl Assets {
         // **第三道（比真实路径防符号链接）要有载荷根才查得了**，那一步在 [`Self::resolve`]。
         // 加载期不拿载荷根：客户端这一轮压根没有资产文件本体，而"路径不许 `../x`"
         // 这条判据与根在不在无关
-        check_relative(a.path.trim()).map_err(|e| {
-            AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", a.id, a.path))
-                .with_detail(e.to_string())
-        })?;
+        //
+        // **`mkpPreset` 例外**（作者 2026-10-03）：它的文件是生成产物、路径由命名规则
+        // 算出，台账里**不写 path** —— 写的就是第二份会过期的真相
+        if a.kind == AssetKind::MkPreset {
+            if !a.path.trim().is_empty() {
+                return Err(AppError::invalid_argument(format!(
+                    "资产 {} 是 MKP 预设，却写了 path",
+                    a.id
+                ))
+                .with_detail(
+                    "MKP 预设的文件是生成产物（落点由命名规则算出，doc §12.5）—— \
+                     台账里存一份路径就是第二份会过期的真相。归属写 machineId + versionId。"
+                        .to_owned(),
+                ));
+            }
+            if a.machine_id.as_deref().unwrap_or("").trim().is_empty()
+                || a.version_id.as_deref().unwrap_or("").trim().is_empty()
+            {
+                return Err(AppError::invalid_argument(format!(
+                    "资产 {} 是 MKP 预设，却没有 machineId + versionId",
+                    a.id
+                ))
+                .with_detail(
+                    "这一类靠「机型 + 版本」定位那一版的产物（两个字段都必填）—— \
+                     少了它就不知道这份登记说的是哪一版"
+                        .to_owned(),
+                ));
+            }
+        } else {
+            check_relative(a.path.trim()).map_err(|e| {
+                AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", a.id, a.path))
+                    .with_detail(e.to_string())
+            })?;
+        }
 
         match a.kind {
             AssetKind::SlicerProfile => {
@@ -376,6 +516,16 @@ impl Assets {
                          就不知道该给谁读"
                             .to_owned(),
                     ));
+                }
+            }
+            AssetKind::MkPreset => {
+                // 专有字段是 machineId + versionId（上面查过了），slicer/profile 一律不写
+                if a.slicer.is_some() || a.profile.is_some() {
+                    return Err(AppError::invalid_argument(format!(
+                        "资产 {} 是 MKP 预设，却写了 slicer / profile",
+                        a.id
+                    ))
+                    .with_detail("这两项只对 `type = 'slicerProfile'` 有意义".to_owned()));
                 }
             }
             _ => {
@@ -565,8 +715,10 @@ mod tests {
             machine_id: Some("P1S".to_owned()),
             name: "P1S 图标".to_owned(),
             path: "icons/p1s.svg".to_owned(),
+            version_id: None,
             slicer: None,
             profile: None,
+            delivery: Delivery::Download,
         })
         .expect("加一条");
         let after = a.to_toml();
@@ -584,8 +736,10 @@ mod tests {
             machine_id: None,
             name: "重名".to_owned(),
             path: "x.webp".to_owned(),
+            version_id: None,
             slicer: None,
             profile: None,
+            delivery: Delivery::Bundled,
         })
         .expect_err("同 id 再插一条必须被拦");
 
@@ -597,8 +751,10 @@ mod tests {
             machine_id: None,
             name: "越界".to_owned(),
             path: "../outside.webp".to_owned(),
+            version_id: None,
             slicer: None,
             profile: None,
+            delivery: Delivery::Download,
         })
         .expect_err("越界 path 必须被拦");
         assert_eq!(a.items().len(), 2, "被拦下的两条都不该进内存");

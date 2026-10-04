@@ -17,6 +17,8 @@ export interface RawBrand {
 }
 
 export interface RawVersion {
+  /** **这一版专属的外观图**（资产 id）。缺省 = 回落机型图 —— 演示数据里今天都没配 */
+  image?: string
   id: string
   name: string
   /** MKP 预设的文件名。**空字符串 = 没配**（A2L 就是空的） */
@@ -35,7 +37,13 @@ export interface RawModel {
   /** 机型级默认 bundle。版本级的 recommendedBundle 优先 */
   defaultBundle: string
   externalAliases: string[]
+  /**
+   * **资产 id**（不是文件名）：与真后端 `machines_dto` 同一口径 —— 界面拿它去
+   * `RuntimeCatalog.assets[]` 里查 `path`（2026-10-03 第二刀起）。空串 = 这台没有图
+   */
   image: string
+  /** 第二个图位（快拆版外观图）。缺省 = 没有 */
+  imageVariant?: string
   icon: string
   versions: RawVersion[]
 }
@@ -155,6 +163,8 @@ export interface RawParamLayout {
 export interface RawChoice {
   value: string
   label: string
+  /** 选项级弃用（实测 1 条：`wiping.outer_structure` 的 `sheath` = 护套） */
+  deprecated?: boolean
 }
 
 /**

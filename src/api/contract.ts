@@ -63,8 +63,14 @@ export interface RecipeParam {
   group: string
   unit?: string
   control: 'number' | 'switch' | 'choice' | 'text'
-  /** control === 'choice' 时的可选项 */
-  choices?: { value: string; label: string }[]
+  /**
+   * control === 'choice' 时的可选项。
+   *
+   * `deprecated`（选项级弃用，2026-10-02）：上游把某一档标成「正在退场」。**不是**字段级弃用
+   * —— 参数本身还是活的，只是这一个取值不许再被写成新值（老文件里存着的照旧读得到、能还原）。
+   * 客户端把它映射到共用的 `FieldOption.deprecated`（划线），不自己造第二个弃用信号。
+   */
+  choices?: { value: string; label: string; deprecated?: boolean }[]
   min?: number
   max?: number
   step?: number
@@ -73,6 +79,15 @@ export interface RecipeParam {
   origin: ParamOrigin
   /** 只有 origin === 'variant' 时有：基础配方里的那个值，用来显示「还原成」与对照 */
   baseValue?: string
+  /**
+   * 字段级弃用（2026-10-02）：该字段已退出正常编辑 / 产物生成，但**仍属于已知参数**，
+   * 所以参数页继续展示它的历史状态。
+   *
+   * 显示 ≠ 可编辑 ≠ 会进入新产物 —— 参数定义存在 / 参数页显示 / 用户编辑禁止 /
+   * 新 TOML 不生成。客户端靠 `ParamMeta.deprecated` 判（定义通道那边带），这一栏是
+   * 配方通道的镜像：`getMachineParams` 照旧**排除**弃用字段，所以这里正常恒为 undefined。
+   */
+  deprecated?: boolean
 }
 
 /** 一台机型的一个版本（标准版 / 快拆版 / lite 版…） */
@@ -89,6 +104,14 @@ export interface MachineVersion {
    * 不是出错 —— 界面该显示「未配置」。非空时保证 bundle 一定存在（后端启动时校验过）。
    */
   bundle: string
+  /**
+   * **这一版专属的外观图**（**资产 id**，不是文件名）：去 `RuntimeCatalog.assets` 里按 id 查
+   * `path`。**空字符串 = 回落机型图**（`Machine.image`）—— 不是"这一版没图"。
+   *
+   * 图位分层（作者 2026-10-03）：品牌图 → 机型图 → 版本图，版本缺则回落机型。
+   * 「标准版」与「快拆版」是同一台机器下两个独立的版本实体，各自有各自的图。
+   */
+  image: string
 }
 
 export interface BedSize {
@@ -159,6 +182,42 @@ export interface ForbiddenZone {
   points: ZonePoint[]
 }
 
+/**
+ * 可打印区在板轮廓坐标里的位置（mm）。**归 `Plate` 所有**。
+ *
+ * 机型 `MachineDimensions.bedSize` 是涂胶 / 运动口径（A1 记的是 260×255），
+ * 真可打印区是这里（256×256）。塔地图必须活在可打印区里。
+ */
+export interface PlateFrame {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * 一块打印板（2026-10-02）。**独立于机型的实体**：机型只引用 id（`plateIds`），
+ * 几何住在这里，随 catalog 的 `plates` 域下发（`RuntimeCatalog.plates`）。
+ *
+ * 坐标是板件自身的毫米：原点在板的**后缘左角**（y 向下指前缘）。`path` 含卡舌与把手，
+ * 孔洞子路径靠 evenodd 镂空；`bodyPath` 是不含卡舌 / 把手的板身。
+ */
+export interface Plate {
+  /** 稳定主键（`single-latch-256` / `dual-latch-180`）。机型的 `plateIds` 指向它 */
+  id: string
+  /** 给人看的名字（`单卡舌 256`） */
+  name: string
+  /** 板件外轮廓宽（viewBox 宽） */
+  w: number
+  /** 板件外轮廓深（viewBox 高） */
+  d: number
+  frame: PlateFrame
+  /** 板身路径（不含卡舌 / 把手） */
+  bodyPath: string
+  /** 完整外轮廓（含卡舌 / 把手） */
+  path: string
+}
+
 export interface Machine {
   /** 'A1' / 'A1_MINI' / 'P1S'…，规范形 `^[A-Z][A-Z0-9_]*$` */
   id: string
@@ -166,11 +225,28 @@ export interface Machine {
   display: string
   /** 品牌显示名，'拓竹 (Bambu Lab)' */
   brand: string
-  /** 机型图 / 图标的文件名，前端自己拼资源路径 */
+  /**
+   * **资产 id**（不是文件名，也不是路径）：整机图。去 `RuntimeCatalog.assets` 里按 id 查
+   * `path`，拼 `/assets/<path>` —— 客户端不再认识 `a1.webp` 这种具体文件（2026-10-03 第二刀）。
+   * 空串 = 这台机型没有图（界面回落品牌 logo）
+   */
   image: string
+  /**
+   * **第二个图位**：装了快拆件那张外观图（今天只有 A1 mini 有）。
+   * 客户端在**选到版本这一级**显示它；空串/查不到则回落 `image`。
+   * 这条关系 2026-10-03 之前只活在 `heroArt.ts` 的硬编码表里 —— 现在住机型文件
+   */
+  imageVariant: string
   icon: string
   /** 别名，用来认 G-code 里写的机型名（'A1MINI' / 'A1MC'…） */
   aliases: string[]
+  /**
+   * 这台机型能用的打印板 id（去 `RuntimeCatalog.plates` 里按 id 查板）。
+   * 空数组 = 没有板规格（塔地图那一层不出）。**机型只持引用，不持几何**
+   */
+  plateIds: string[]
+  /** 默认用哪一块板（塔地图按它选）；`null` = 没指定 */
+  defaultPlateId: string | null
   versions: MachineVersion[]
   /**
    * `null` = **这台机型还没配尺寸**（上游的 A2L）。
@@ -189,9 +265,10 @@ export interface FileRef {
   /** 界面上显示的文件名 */
   fileName: string
   /**
-   * 文件落点：MKP 预设相对**内部数据根**（'mkp/A1-fastv3.3.toml'，即下载区的登记落点）；
-   * 切片器配置相对**预设仓库根**（'presets/bbs/…'，前端按它拼内置资源 URL）。
-   * 前端只把它当标识/去重键用，不拿它拼本机路径。
+   * 文件落点 = **`catalog.path`**（唯一路径语义，2026-10-04）：
+   * MKP 预设是 `dist/mkp/presets/A1-fastv3.3.toml`、切片器配置是 `assets/bbs/…`，
+   * **同一串既是云端取哪、也是客户端放哪**。前端只把它当标识 / 去重键用，
+   * 不拿它拼本机路径、也不拿它拼 URL。
    */
   path: string
   /**
@@ -421,7 +498,7 @@ export interface UserPresetFile {
   stateDetail: string | null
   /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
   basedOn: BasedOn
-  /** 血统里记的来源（`mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
+  /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
   basedOnLabel: string | null
   /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */
   basedOnRelease: string | null
@@ -436,7 +513,7 @@ export interface UserPresetFile {
  * 它是"临时编辑"这条链的第一步（总纲 §1③）。**两条线**的第一步：
  *
  * ```text
- * 官方线   mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
+ * 官方线   dist/mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
  * 用户线   presets-mine/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
  * ```
  *
@@ -522,147 +599,6 @@ export interface MenuEntry {
 }
 
 /**
- * 客户端数据包的兼容性声明。**值初始留空。**
- *
- * `minClientVersion` 的具体数字要客户端先给一份兼容性清单，工作台**不许瞎填一个版本号** ——
- * 填了就等于对外承诺「这份数据在 x.y.z 以上都能用」，而没人验证过。
- * 所以它初始就是 `null`，空着时由 `checkRecipe()` 报一条**待办**（不是阻断），
- * 由 `getPublishIssues()` 报一条**阻断**（发布检查那一组，见下）。
- *
- * B04 补上了 `saveClientDataMeta` —— 有了写方法，那条永远填不上的待办才填得上。
- */
-export interface ClientDataMeta {
-  schemaVersion: number
-  /** 空 = 还没填。生成前会报一条待办，发布前是一条阻断 */
-  minClientVersion: string | null
-}
-
-/** 摊平后的一个机型 —— 客户端不做继承推导 */
-export interface ClientMachine {
-  id: string
-  display: string
-  brand: string
-  dimensions: MachineDimensions | null
-  versions: {
-    id: string
-    name: string
-    tag?: string
-    description?: string
-    /** 这个版本的袋子里装什么。已按套餐摊平成文件清单 */
-    files: FileRef[]
-    /**
-     * 这个版本的参数值 —— **已经三层算完的有效值**，键是参数注册表的稳定 key。
-     *
-     * 客户端**看不到机型基底这一层存在**：它拿到的就是「这个版本用什么值」，
-     * 没有 origin、没有 baseValue、没有「哪一层给的」。那些是后厨的账。
-     */
-    values: Record<string, string>
-    /** true = 暂不支持该机型或版本（配方本上有名字，资源一行没写） */
-    unsupported: boolean
-  }[]
-}
-
-/** 参数的**显示**元信息。不含继承规则、不含机型基底与版本覆盖 */
-export interface ClientFieldDef {
-  key: string
-  label: string
-  desc?: string
-  unit?: string
-  control: RecipeParam['control']
-  /**
-   * 控件形态的**原始**名字（A40 补）：`number` / `switch` / `segmented` / `select` / `gcode`。
-   *
-   * 为什么 `control` 之外还要这一栏：`control` 是**给画控件用的四档**
-   * （number / switch / choice / text），分段与下拉都并成 `choice`、而 G-code 落成 `text`。
-   * 客户端于是只能靠「只有 gcode 会落到 text」这个**巧合**反推 G-code —— 巧合不该是契约。
-   * 这一栏把注册表的原词带出来，客户端要细分（分段 vs 下拉、G-code 块）就有据可依。
-   */
-  uiComponent: string
-  /**
-   * 值**本身**的类型（C15 / A40 补）。
-   *
-   * 与 `control` 不是一回事：`control` 回答「画什么控件」（number / switch / segmented /
-   * select / gcode），这一栏回答「值是什么」（float / int / bool / string）。
-   * 开关是 bool、下拉是 string —— 客户端要按类型校验、要显示「这是什么」，
-   * 就不能拿控件去猜。
-   */
-  valueType: 'float' | 'int' | 'bool' | 'string'
-  /**
-   * 可见性条件（C15 / A40 补）：要 `key` 这个字段等于（或不等于 / 大于）`value` 才显示。
-   *
-   * 这一条原来只活在工作台里 —— 客户端拿到包却没有它，只能自己写死「哪些参数属于
-   * 哪个模式」（模式开关：擦料方式 = 擦料塔 / 圆盘擦拭，选哪支显示哪支）。
-   * 判据由客户端算（它依赖当前值），**数据由包里带** —— 客户端不再猜业务规则。
-   */
-  showWhen?: ParamMeta['showWhen']
-  choices?: { value: string; label: string }[]
-  min?: number
-  max?: number
-  step?: number
-  /** 分组的中文名 */
-  group: string
-  /** 所属分类的中文名（`擦料`）。`tabId` 没有的老包靠它兜底 */
-  tab: string
-  /**
-   * 所属分类的 **id**（T8 补，可选）：`offset` / `wiping` / `fan` / `glue` / `gcode` / `advanced`。
-   *
-   * 为什么 `tab` 之外还要这一栏：`tab` 是**中文名**，客户端拿它当 id 用就会踩 locale 的坑
-   * （A40 分类条的图标表按英文 id 查，包里全是中文名，六个图标全塌成兜底那一个）。
-   * id 稳定、名字可翻译 —— 老包没有这一栏时客户端退回 `tab` 照跑（只加字段，不改老语义）。
-   */
-  tabId?: string
-}
-
-/**
- * 一次发布的**另一个产物**：一份真正的预设文件（T7.1）。
- *
- * 作者把这件事说透了：「我们现在模拟的是『用户自己去下载一个 JSON 数据包』，但**真实客户端
- * 应该是自动同步/更新发布数据，用户真正下载、安装、使用的是 TOML 预设**」。
- *
- * 所以一次发布同时产生两样东西，**属于同一个 preset identity**：
- *
- *   `ClientDataPackage`  客户端说明书 —— 自动同步，用户看不见「下载 JSON」这个动作
- *   `ReleasePreset`      真正的 preset artifact —— 用户手动「获取预设」拿到它
- *
- * 不许出现「JSON 是 1.0.1、TOML 还是 1.0.0」这种原型层面的假链路。
- */
-export interface ReleasePreset {
-  machineId: string
-  versionId: string
-  /** 本机落盘的文件名（注册表里那一栏 `presetFile`，比如 `A1.toml`） */
-  fileName: string
-  /** TOML 正文 */
-  content: string
-}
-
-/** 一次发布 = 说明书 + 若干份预设文件 */
-export interface Release {
-  /** 包版本（工作台发布时填的那个三段数字） */
-  version: string | null
-  at: string | null
-  package: ClientDataPackage
-  presets: ReleasePreset[]
-}
-
-export interface ClientDataPackage {
-  meta: ClientDataMeta
-  machines: ClientMachine[]
-  fields: ClientFieldDef[]
-  /** 柜台上单卖的：菜单里 optional 的那些 */
-  optionalFiles: FileRef[]
-  /**
-   * 输入指纹，用来判「已过期」。
-   *
-   * 把配方本 + 菜单 + 套餐 + 字段定义 + 兼容声明排序后 JSON 化再取的**稳定结构化摘要**，
-   * **不是文件哈希**，也不作完整性校验 —— 它只回答「现在的输入和上次生成时是不是同一份」。
-   *
-   * 刻意**没有 `generatedAt`**：假后端里没有可信的时间源（`Date.now()` 在这一层没意义，
-   * 产物也不落盘）。「上次生成」由调用方自己记。
-   */
-  inputsHash: string
-}
-
-/**
  * 客户端要后端干的事。**这一份是产品仓的口径，不是试验场那份的照抄**：
  * 试验场把四个轨（客户端 / 工作台 / 原型 / 测试端）的方法并在一张表里（38 个），
  * 产品仓的用户端只用得到下面这些 —— 工作台那一套走自己的 `src/workbench/api.ts`（`wb_*`）。
@@ -692,6 +628,16 @@ export interface RuntimeCatalogFile {
   size: number
 }
 
+/** 品牌（`presets/brands.toml` 那一行）。`logo` 是**资产 id**，不是文件名 */
+export interface RuntimeCatalogBrand {
+  /** `'Bambu Lab'` —— 稳定 id */
+  id: string
+  /** `'拓竹 (Bambu Lab)'` —— 给人看的显示名（机型上的 `brand` 就是它） */
+  name: string
+  /** 品牌图的资产 id；空/查不到 = 回落内置字标 */
+  logo: string | null
+}
+
 export interface RuntimeCatalogMachine {
   id: string
   display: string
@@ -707,7 +653,7 @@ export interface RuntimeCatalogMachine {
  * （另存成另一份文件），永远不回写官方原件。
  */
 export interface ArchivedFile {
-  /** 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
+  /** 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
   path: string
   /** 文件名。与它对应的交付文件同名：换版本换的是字节，不是名字 */
   fileName: string
@@ -738,7 +684,7 @@ export interface DeliveryTrust {
    */
   verdict: 'old' | 'tampered'
   /**
-   * `old` 且归档区里有它字节时给（`archive/mkp/presets/A1-fast.toml`）—— 界面据此
+   * `old` 且归档区里有它字节时给（`archive/dist/mkp/presets/A1-fast.toml`）—— 界面据此
    * 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
    */
   archivedPath: string | null
@@ -748,6 +694,12 @@ export interface DeliveryTrust {
  * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
  * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
  * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
+ *
+ * 2026-10-02（① deprecated 链路）：参数页的**字段清单改从 definition 取**（作者裁决：
+ * 弃用字段「显示，但只读」）—— 所以这里补上渲染一行所需的显示格子（label / desc / unit /
+ * uiComponent / valueType / choices / min / max / step）。这些 JSON 里本来就有，
+ * 只是从前没声明。**这是 definition 通道**，与配方通道（`getMachineParams`，
+ * 排除弃用字段）各司其职。
  */
 export interface CatalogParamDef {
   key: string
@@ -755,8 +707,21 @@ export interface CatalogParamDef {
   section: string
   /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
   layout: { order: number; sectionId: string }
+  label: string
+  desc: string
+  unit?: string
+  /** `number` / `switch` / `segmented` / `select` / `gcode` —— 控件形态的原词 */
+  uiComponent: string
+  valueType: 'float' | 'int' | 'bool' | 'string'
+  /** 选项级弃用在 `Choice.deprecated` 上（那一档正在退场） */
+  choices?: { value: string; label: string; deprecated?: boolean }[]
+  min?: number
+  max?: number
+  step?: number
   deprecated?: boolean
+  /** 只对这些机型生效；空数组 = 不限机型 */
   machineFilter?: string[]
+  showWhen?: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }
 }
 
 /** 页签与分组的元数据（中文名、顺序的唯一权威；`layout_schema` 全文没有 label） */
@@ -793,13 +758,55 @@ export interface CatalogRegistry {
  * bundles / registry）。前端声明随消费面长出来：本轮先长 `registry`
  * （参数页的页签/分组树从它摊），其余几域消费时再声明。
  */
+/**
+ * 资产登记（`presets/assets.toml` 的 definition 面，随 catalog 下发）。
+ *
+ * **客户端只认识 id，不认识文件**：机型写 `image = 'a1-image'`，这里给
+ * `path = 'printers/a1.webp'`，界面拼 `/assets/<path>` 去取 ——
+ * 改图/换图都在数据侧发生，TS 一行不动（2026-10-03 第二刀）。
+ */
+export interface CatalogAsset {
+  /** 主键，**大小写不敏感**唯一 */
+  id: string
+  /** `'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'` */
+  type: string
+  /** 归属机型；不属于任何机型时不给这个字段 */
+  machineId?: string
+  /** 给人看的登记名 */
+  name: string
+  /** 相对资产根的路径。`mkPreset` 类留空（产物路径由命名规则算） */
+  path: string
+  /** 归属版本（`mkPreset` 类专有） */
+  versionId?: string
+  slicer?: string
+  profile?: string
+  /** `download` = 进交付集合按需下载；`bundled` = 随包不下载（构建期进客户端资源） */
+  delivery: 'download' | 'bundled'
+}
+
 export interface RuntimeCatalog {
   catalogSchema: number
   /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
   revision: string
   machines: RuntimeCatalogMachine[]
+  /**
+   * 品牌（含品牌图的**资产 id**）：机型与版本都没有图时回落到品牌图，再回落才是内置字标。
+   * 2026-10-03 起品牌图正式进资产体系（`presets/brands.toml` 的 `logo` 引用资产 id）。
+   *
+   * 可选：盘上那份 catalog.json 可能还是旧版（那时 `assets` 也没有）。
+   */
+  brands?: RuntimeCatalogBrand[]
   files: RuntimeCatalogFile[]
+  /**
+   * 资产登记：界面按 id 查 path（见 [`CatalogAsset`]）。
+   *
+   * **可选**：客户端读的是盘上那份 catalog.json，它可能还是旧版本释放的
+   * （那一版里没有这一栏）。缺了就是「图认不出文件在哪」⇒ 回落品牌 logo，不是错误。
+   */
+  assets?: CatalogAsset[]
   registry: CatalogRegistry
+  /** 打印板（2026-10-02）：机型持引用（`Machine.plateIds`），几何住这里，按 id 查 */
+  plates: Plate[]
 }
 
 /**
@@ -841,6 +848,35 @@ export interface RemoteUpdateCheck {
   upToDate: boolean
   localRevision: string
   remoteRevision: string
+  /**
+   * 本客户端**读得懂这一代远端目录吗**（能力优先、版本兜底，见 `runtime::structure::can_read`）。
+   *
+   * `false` = 远端有这一代数据，但当前客户端不具备读它的能力 —— 此时**不该采用**它
+   * （`applyRemoteUpdate` 会拒绝并抛 `NOT_SUPPORTED`）。用户要做的不是"再下一遍"，
+   * 而是**去升级客户端**。★ 它是"能不能读"，不是"有没有新版本"（后者是 `upToDate`）。
+   */
+  readable: boolean
+}
+
+/**
+ * **软件更新**状态（`release.json`）——与预设数据**完全两条链**。
+ *
+ * 它回答的是「有没有新版本的 SupportEase 这个软件」，与"预设数据能不能读"（`RemoteUpdateCheck`）
+ * 是**两个不同的系统**，两个入口（设置页 / 预设页提示），**不混成一句话**。
+ *
+ * 信息源 = 仓库根的 `release.json`（`presets/` 外），**不属于** catalog / manifest。
+ */
+export interface SoftwareUpdate {
+  /** 有没有比当前更新的正式版本 */
+  hasUpdate: boolean
+  /** 当前客户端版本（来自构建期，唯一真值） */
+  currentVersion: string
+  /** 最新正式版本（没有 release.json 时回落成 `currentVersion`） */
+  latestVersion: string
+  /** 更新说明；没有就是 `undefined` */
+  notes?: string
+  /** 去哪更新 / 看详情；没有就是 `undefined` */
+  url?: string
 }
 
 /**
@@ -1202,8 +1238,26 @@ export interface MkpApi {
   /**
    * 应用远端目录：旧目录归档、新目录生效。之后照常走「有更新」→ 下载，
    * 没有第三条更新路径。
+   *
+   * ★ 若远端这一代**读不懂**（`RemoteUpdateCheck.readable === false`），本命令
+   * **不落盘、不归档、不采用**，返回 `NOT_SUPPORTED` —— "下载前拦"的落点。
    */
   applyRemoteUpdate(): Promise<void>
+
+  /**
+   * 当前客户端版本号（来自构建期 `CARGO_PKG_VERSION`，唯一真值）。
+   *
+   * 设置页「软件更新」块要显示"当前版本 → 最新版本"，这是它拿"当前版本"的唯一口子。
+   */
+  getAppVersion(): Promise<string>
+
+  /**
+   * 检查**软件**更新（`release.json`）—— 与预设数据链**完全分开**。
+   *
+   * 只读、不在启动/首屏路径上（设置页打开时才调；铁律：云端不参与首屏）。
+   * 信息源不可达时**如实拒绝**（`IO` / `NOT_FOUND`），由调用方决定说还是略过。
+   */
+  checkSoftwareUpdate(): Promise<SoftwareUpdate>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */
@@ -1224,6 +1278,13 @@ export type ErrorCode =
   | 'IO'
   | 'NOT_IMPLEMENTED'
   | 'INTERNAL'
+  /**
+   * 客户端**读不懂**这一代数据：文件没坏、也不是下载失败，是能力不足。
+   *
+   * 与 `CORRUPTED` / `INTERNAL` 严格分开：那两个是"数据/程序出了问题"，这一档是
+   * "这份数据是新结构，当前客户端还不具备读它的能力" —— 用户要做的是**去升级客户端**。
+   */
+  | 'NOT_SUPPORTED'
 
 /**
  * 跨 IPC 边界的错误。

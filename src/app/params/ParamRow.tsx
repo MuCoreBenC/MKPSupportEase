@@ -22,6 +22,20 @@
  *
  * 不是藏起来。藏起来的后果是用户以为这个参数不存在，然后去别处找。
  * 名称下面写清是**哪个条件参数**控制的（「需先把 外围结构 设为 开启」），照旧版的做法。
+ *
+ * # 已弃用的行（2026-10-02，作者裁决）：第三档，不是 blocked
+ *
+ * `deprecated` 表示该字段已退出正常编辑 / 产物生成，但仍是已知参数 —— 参数页**照常显示**
+ * 它的历史状态（**显示 ≠ 可编辑 ≠ 会进入新产物**：行照列，控件只读，写值闸拒绝，
+ * `getMachineParams` 也不下发给新 TOML）。它**不并进 blocked**：blocked 说「换个条件就能用」，
+ * 对弃用的行说那句条件是假话 —— 它正在退场，跟条件满不满足无关。所以这一档自己长相：
+ *
+ *   · 行名划一条**红线** + 字压暗
+ *   · 控件左边一枚「已弃用」徽章（永远横着）
+ *   · 控件照旧摆着但改不动（disabled）—— 与 blocked 的置灰同一条路
+ *   · 展开的详情第一格是「状态」，让「它到底是什么」说在前头
+ *
+ * 判据只有一处：`def.deprecated`（定义通道带出来的原词），落到 `data-dep`。
  */
 
 import FieldControl from '../../components/field/FieldControl'
@@ -41,6 +55,12 @@ interface Props {
   dirty: boolean
   /** 被条件参数关掉：看得见、改不动 */
   blockedBy?: BlockedBy | null
+  /**
+   * 上面要不要那条分隔线。原来是 `.wrap + .wrap` 相邻选择器画的，但树把行隔进了
+   * 各自的分支容器里，相邻链到处断；改成由 ParamCard 摆行时显式给
+   * （排在前一个**行**后面才有线，分支容器的边界用留白）。
+   */
+  sep?: boolean
   expanded?: boolean
   onToggleExpand?: (key: string) => void
   onEdit: (key: string, next: string) => void
@@ -95,6 +115,7 @@ export default function ParamRow({
   factoryValue,
   dirty,
   blockedBy = null,
+  sep = false,
   expanded = false,
   onToggleExpand,
   onEdit,
@@ -102,6 +123,10 @@ export default function ParamRow({
   query = '',
 }: Props) {
   const blocked = blockedBy !== null
+  /* 已弃用：第三档，不并进 blocked —— 见文件头。判据只有这一处（定义通道带的原词） */
+  const dep = def.deprecated
+  /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
+  const locked = blocked || dep
   const savedText = valueText(def, savedValue)
   const factoryText = valueText(def, factoryValue)
 
@@ -115,6 +140,10 @@ export default function ParamRow({
        * 各自哈希,跨 module 只能走属性)。
        */
       data-open={expanded || undefined}
+      /* 分隔线 + 改不动的压淡；弃用划线走 data-dep（画法见 module.css） */
+      data-sep={sep || undefined}
+      data-off={blocked || undefined}
+      data-dep={dep || undefined}
     >
       <div className={s.row}>
         <button
@@ -127,7 +156,11 @@ export default function ParamRow({
             <span className={s.label}>
               <Highlight text={def.label} query={query} />
             </span>
-            {blocked && (
+            {/*
+             * 那句橙字只给「换个条件就能用」的行。弃用的行说它就是假话 —— 它正在退场，
+             * 跟条件满不满足无关，原因由徽章说。
+             */}
+            {blocked && !dep && (
               <span className={s.note}>
                 需先让「{blockedBy.label}」{blockedBy.need}
               </span>
@@ -139,7 +172,8 @@ export default function ParamRow({
         </button>
 
         <span className={s.right}>
-          {dirty && !blocked && (
+          {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值） */}
+          {dirty && !locked && (
             <button
               type="button"
               className={s.restore}
@@ -148,6 +182,11 @@ export default function ParamRow({
             >
               ↩ {savedText}
             </button>
+          )}
+          {dep && (
+            <span className={s.depBadge} title="该参数已弃用，不再写入新预设">
+              已弃用
+            </span>
           )}
           {def.field.control === 'number' ? (
             /*
@@ -164,7 +203,7 @@ export default function ParamRow({
                 field={def.field}
                 raw={value}
                 form="row"
-                disabled={blocked}
+                disabled={locked}
                 focusOnBoxClick
                 onChange={(next) => onEdit(def.key, next)}
               />
@@ -174,7 +213,7 @@ export default function ParamRow({
               field={def.field}
               raw={value}
               form="row"
-              disabled={blocked}
+              disabled={locked}
               onChange={(next) => onEdit(def.key, next)}
             />
           )}
@@ -189,6 +228,18 @@ export default function ParamRow({
          * 取值范围上，走的是同一段代码。
          */
         <dl className={s.detail}>
+          {/*
+            弃用的行，展开后第一格就说清「它到底是什么」：上游标了弃用 —— 显示但只读，
+            不再写入新预设。用户看到「为什么这个改不动」的答案在第一步。
+          */}
+          {dep && (
+            <>
+              <dt className={s.dt}>状态</dt>
+              <dd className={s.ddDep}>
+                已弃用 —— 该参数不再写入新预设，此处仅供查看（上游注册表已标记）
+              </dd>
+            </>
+          )}
           <dt className={s.dt}>说明</dt>
           <dd className={s.dd}>
             <Highlight
@@ -202,7 +253,7 @@ export default function ParamRow({
           </dd>
           {/*
             「值类型」—— 作者点名要的那一栏：「string，bool 之类的，都在抽屉里面，
-            显示的」。它来自**下载来的包里**（`ClientFieldDef.valueType`），不是客户端猜的：
+            显示的」。它来自**运行时 catalog 的字段定义**（`ParamDef.valueType`），不是客户端猜的：
             控件（开关 / 分段 / 步进器）说的是「画成什么」，类型说的是「值是什么」，
             两者不是一回事（开关是 bool，下拉是 string）。
           */}

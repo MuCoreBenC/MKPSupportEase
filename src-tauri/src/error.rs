@@ -29,6 +29,12 @@ pub enum ErrorCode {
     NotImplemented,
     /// 兜底：没归类的内部错误
     Internal,
+    /// 客户端**读不懂**这一代数据：文件没坏、也不是下载失败，是**能力不足**。
+    ///
+    /// 与 [`Corrupted`] / [`Internal`] 严格分开：那两个说的是"数据/程序出了问题"，
+    /// 这一档说的是"这份数据是新结构，当前客户端还不具备读它的能力"——
+    /// 用户要做的是**去升级客户端**，而不是"重下一份"或"重试"。
+    NotSupported,
 }
 
 /// 跨 IPC 边界的错误结构。
@@ -87,6 +93,14 @@ impl AppError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, message)
+    }
+
+    /// 读不懂这一代数据（能力不足）。
+    ///
+    /// ★ message 只写**用户能懂的话**：不许出现结构签名 / 最低客户端版本 / schema 这些词
+    /// （作者定的禁区）。技术细节放 [`AppError::with_detail`]。
+    pub fn not_supported(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::NotSupported, message)
     }
 
     /// 附技术细节
@@ -184,6 +198,7 @@ mod tests {
             (ErrorCode::Io, "IO"),
             (ErrorCode::NotImplemented, "NOT_IMPLEMENTED"),
             (ErrorCode::Internal, "INTERNAL"),
+            (ErrorCode::NotSupported, "NOT_SUPPORTED"),
         ];
         for (code, want) in cases {
             assert_eq!(serde_json::to_value(code).unwrap(), want);
@@ -195,5 +210,17 @@ mod tests {
         let e: AppError = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file").into();
         assert_eq!(e.code, ErrorCode::NotFound);
         assert!(e.detail.is_some(), "英文原文要进 detail");
+    }
+
+    /// 「不支持」是**独立的一档**：既不与"内容坏了"（CORRUPTED）同码，
+    /// 也不与"内部错误"（INTERNAL）同码 —— 用户要做的事完全不同（去升级 vs 重下 vs 重试）。
+    #[test]
+    fn not_supported_is_its_own_error_code() {
+        let e = AppError::not_supported("此预设需要更新版 SupportEase");
+        assert_eq!(e.code, ErrorCode::NotSupported);
+        assert_ne!(e.code, ErrorCode::Corrupted);
+        assert_ne!(e.code, ErrorCode::Internal);
+        assert_ne!(e.code, ErrorCode::NotImplemented);
+        assert_eq!(serde_json::to_value(e.code).unwrap(), "NOT_SUPPORTED");
     }
 }

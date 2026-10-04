@@ -61,3 +61,10 @@ tmp-port/
 # AI 工具的本机记忆/状态（codebuddy 等）。设计文档若被代码引用会放 .trae/documents/
 # ——那是文档，这个是工具自己的笔记，入库只会变成另一份会漂移的底账
 .codebuddy/
+
+# 随包资产的交付根：`tools/assets/sync.mjs` 从 `presets/assets.toml` 的
+# `delivery = 'bundled'` 条目对账产出（生成物，2026-10-03 第一刀）。
+# 它是"客户端随包资产交付结果"，**不入库**：删掉整个目录是安全的，下一次构建会重建。
+# 上一版那两个落点（`src/app/assets/printers/`、`public/assets/`）已退役 ——
+# 同一个东西有两个落点，就等于"盘上哪份是对的"有两个答案。
+client-assets/

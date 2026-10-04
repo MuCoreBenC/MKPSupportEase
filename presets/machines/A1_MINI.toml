@@ -2,9 +2,20 @@ id = 'A1_MINI'
 name = ''
 display = 'A1 mini'
 brand = 'Bambu Lab'
-defaultBundle = 'A1_MINI_default'
+defaultBundle = 'A1_MINI_STANDARD'
 externalAliases = ['A1MINI', 'A1M', 'A1MC', 'A1MQ', 'A1MF']
 icon = 'a1_mini-icon'
+# 整机图（bundled 档：工作台可换图，构建期随包，不进云端交付）
+image = 'a1_mini-image'
+
+# 第二张图（装了快拆件那台）：客户端在**选到版本这一级**显示它，缺则回落上面那张。
+# 2026-10-03 之前这条关系只活在客户端的 heroArt.ts 显式表里（数据侧看不见、
+# 工作台换不掉，而台账里那张图谁都不引用）—— 收进机型文件才是它该在的地方。
+imageVariant = 'a1_mini-variant-image'
+
+# A1 mini 用双卡舌 180 那块板 —— 塔地图按 defaultPlateId 选板
+plateIds = ['dual-latch-180']
+defaultPlateId = 'dual-latch-180'
 
 [dimensions]
 edgeZone = 10.0
@@ -46,20 +57,20 @@ minY = 0.0
 [[versions]]
 id = 'STANDARD'
 name = '标准版'
-recommendedBundle = 'A1_MINI_default'
+recommendedBundle = 'A1_MINI_STANDARD'
 tag = '推荐'
 description = '官方标准配置'
 
 [[versions]]
 id = 'FAST'
 name = '快拆版6月以前'
-recommendedBundle = 'A1_MINI_default'
+recommendedBundle = 'A1_MINI_FAST'
 tag = '热门'
 description = '支持快拆配件的改装配置'
 
 [[versions]]
 id = 'FASTV3.3'
 name = '快拆版260628'
-recommendedBundle = 'A1_MINI_default'
+recommendedBundle = 'A1_MINI_FASTV3.3'
 tag = '最新'
 description = '6月以后闲鱼购买的，以及6月28开源的快拆260628版本'

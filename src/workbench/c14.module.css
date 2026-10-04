@@ -479,8 +479,16 @@
   background: var(--wb-ok);
 }
 
+/*
+ * 文本块必须**能缩 + 会截**（2026-10-03，作者截图：「碰到一起了」）。
+ *
+ * 病根：`/Users/…/presets` 整条路径是一个不可断的"词"（CSS 不在 `/` 处断行），
+ * flex 项默认 `min-width: auto` 就不肯缩到它下面 —— 于是这一块被撑出导航栏、
+ * 压在内容区上。`min-width: 0` + `overflow: hidden` + 下面那条省略号，三件一起才治住。
+ */
 .upText {
   min-width: 0;
+  overflow: hidden;
 }
 
 .upLine {
@@ -489,7 +497,10 @@
 
 .upNote {
   display: block;
+  overflow: hidden;
   color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .upstreamOff {
@@ -908,9 +919,26 @@
   padding: 0 2px 0 8px;
 }
 
+/* 「包里有什么」在装说明书时的一排骨架条（2026-10-02）—— 与 chip 同一行高，不跳版 */
+.chipSkel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+}
+
 .chipMain {
   font-size: var(--fs-label);
   color: var(--text-2);
+}
+
+/*
+ * chip 里「它现在指着谁」那一截（2026-10-03）：与 uid 之间要留出间距 ——
+ * 贴在一起时 `X1C/LITEA1_MINI_STANDARD` 读起来是一串（作者截图点名：「碰到一起了」）
+ */
+.chipNow {
+  margin-left: 6px;
+  color: var(--text-3);
 }
 
 .chipMain:hover {
@@ -1309,7 +1337,7 @@
 
 .cellEd:focus-within input,
 .cellEd:focus-within select {
-  border-color: var(--accent);
+  border-color: var(--wb-primary);
 }
 
 /* 数字那层壳（`.edCell` 包着共用件的 `.box`）：框与底全撤，吃满格子 */
@@ -1404,7 +1432,14 @@
 
 .split {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  /*
+   * 左栏宽度**可拖**（作者 2026-10-03：像参数台那样能拖）—— 挂在变量上，
+   * 分隔条拖动时直接覆写它，state 只在松手时落一次（见 `SplitterC14`）。
+   * 变量没给（别的页面复用这个类时）落回 300px。
+   */
+  grid-template-columns: var(--split-w, 300px) minmax(0, 1fr);
+  /* 分隔条是绝对定位（`.splitSplit`），落点靠这个容器 */
+  position: relative;
   /*
    * 整页定高、左右**各自滚**（C14 第二十三轮，作者：「左侧的这个列表，不要受到
    * 右边的滚动的影响……就都跟那个参数台的一样，左侧的是自己的滚动」）：
@@ -1444,6 +1479,146 @@
   border-radius: var(--r-md);
 }
 
+/*
+ * 品牌树（2026-10-03，作者：「我想象中的就像那种树状的感觉一样…很明显的能看到
+ * 他们的父子关系。现在这种这么割裂」）。
+ *
+ * 三层：`.treeParent`（品牌行：折叠三角 + 名字）/ `.treeKids`（机型那一层，缩进）/
+ * `.treeKid`（机型行）。视觉沿用参数台左树：分组头小字加粗、行悬停变色、选中蓝底；
+ * 缩进用一条浅竖线暗示层级，不再垫任何背景色块（作者刚在别的弹窗里点名过"没必要加背景"）。
+ */
+.treeList {
+  gap: 0;
+  padding: 4px 6px 6px;
+}
+
+.treeGroup + .treeGroup {
+  margin-top: 2px;
+}
+
+.treeParent {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.treeParent:hover {
+  background: var(--surface-sunken);
+}
+
+.treeParentOn {
+  background: var(--wb-primary-soft);
+}
+
+/* 折叠三角：一个 18px 的小方块，收着指右、展着指下 */
+.treeTwist {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  color: var(--text-3);
+  border-radius: var(--r-sm);
+}
+
+.treeTwist:hover {
+  color: var(--text-1);
+}
+
+.treeTwist svg {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.12s ease;
+}
+
+.treeTwist svg[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+.treeParentName {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 6px 4px 0;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-2);
+  text-align: left;
+}
+
+.treeMeta {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+/* 机型那一层：左侧一条浅竖线 + 缩进，层级的唯一记号（不垫底色） */
+.treeKids {
+  margin-left: 9px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.treeKid {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.treeKid:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.treeKid:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.treeKidOn {
+  color: var(--wb-primary-deep);
+  font-weight: 500;
+  background: var(--wb-primary-soft);
+}
+
+/* 这家品牌下一台机器都没有（合法状态：刚建完品牌） */
+.treeEmpty {
+  padding: 4px 8px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/*
+ * 左列里的分段小标题（2026-10-03）：一个名单里有两类条目（品牌 / 机型）时，
+ * 用一条小标题分开；标题右边的按钮（新增品牌）自己靠右
+ */
+.listHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 8px 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.listHead .btn {
+  margin-left: auto;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -1456,6 +1631,30 @@
 
 .row:hover {
   background: var(--surface-sunken);
+}
+
+/*
+ * 两行版的行（2026-10-03）：名字一行、附注一行。
+ * 套餐行上有四个事实（显示名 / id / 装了几个文件 / 几个版本用它）——
+ * 挤一行时显示名会被省略成「官…」，于是拆两行，谁都不抢谁的位置。
+ */
+.rowStack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.rowTop,
+.rowBottom {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.rowStack .rowName {
+  flex: 1;
+  min-width: 0;
 }
 
 .rowOn {
@@ -1638,8 +1837,16 @@
 
 .addRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
   margin-top: 12px;
+}
+
+/* 行里那段说明文字要能自己占一行并折行 —— 否则它会把整行撑宽、被卡片右侧裁掉 */
+.addRow .cardNote {
+  flex: 1 1 16em;
+  min-width: 0;
 }
 
 .addRow .sel,
@@ -1710,6 +1917,28 @@
 .vrow .inp {
   flex: 1;
   min-width: 0;
+}
+
+/* 发布账户表单里每行左边那个短标签（仓库地址 / 用户名 / Token） */
+.vlabel {
+  flex: none;
+  width: 64px;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+}
+
+/* 已配置的 Token：显示一串掩码点（**假的填充**，不是空的）—— 点它才进编辑态。
+   借 `.inp` 的框样式，但它是按钮，不是输入框，所以补一下文字对齐与字距。 */
+.tokenMask {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-2);
+  letter-spacing: 2px;
+  background: transparent;
 }
 
 .vstatic {
@@ -2051,7 +2280,7 @@
 }
 
 .filter:focus {
-  border-color: var(--accent);
+  border-color: var(--wb-primary);
   outline: none;
 }
 
@@ -2357,6 +2586,12 @@
 /* 详情栏线：贴在详情栏左缘那条 border-left 上（栏内缘有 12px 内衬，盖不到内容） */
 .pSplitAside {
   right: calc(var(--p-aside-w, 360px) - 4.5px);
+}
+
+/* `.split` 两栏页（资产库 / 套餐 / 机型与版本）的左栏线：贴左栏右缘，
+   位置跟着 `--split-w` 走 —— 复用 `.pSplit` 的命中区与吸附手感 */
+.splitSplit {
+  left: calc(var(--split-w, 300px) - 4.5px);
 }
 
 /* 宽度读数牌：只在拖动中出现，跟着线走 */
@@ -3265,6 +3500,23 @@
   font-style: normal;
 }
 
+/* 「收起来」（2026-10-03）：被条件关着又被摊开的卡，卡头右侧的出口。
+   幽灵按钮 —— 卡头本来就是弱区，按钮抢过行就本末倒置了 */
+.pFoldBtn {
+  padding: 1px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pFoldBtn:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
 /*
  * 「模式开关整卡收起」（C15 A2）：整卡一行都改不动时，行全收起来，卡头下面只留
  * 后端那一句 + 「仍然展开看」。那一句原本住在每一行上（`.pRowBlock`），
@@ -3438,6 +3690,33 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-3);
+}
+
+/* 「基本信息」标题行：左标题、右「编辑定义」（2026-10-03）。同一行是因为
+   那颗按钮改的就是这一段里的格子 —— 入口长在它管的那片地上 */
+.pDSecTitleRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.pDSecTitleRow .pDSecTitle {
+  margin-bottom: 0;
+}
+
+.pDefEdit {
+  padding: 0;
+  font-size: var(--fs-label);
+  color: var(--wb-primary-deep);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pDefEdit:hover {
+  text-decoration: underline;
 }
 
 .pDVal {
@@ -3928,7 +4207,7 @@
 }
 
 .pGbig:focus-visible {
-  outline: 1px solid var(--accent-deep);
+  outline: 1px solid var(--wb-primary-deep);
   outline-offset: -1px;
 }
 
@@ -4302,6 +4581,24 @@
   color: var(--accent-deep);
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+/*
+ * 「选择版本」弹窗里那棵树（2026-10-03，作者：「我希望的是像参数台这样的显示 …
+ * 像树状显示一样」）：机型一行组头、版本缩进在下面，行里不再垫背景色。
+ * 行/勾/组头都是参数台左树那几颗类（`.pVrow` / `.pVmark` / `.pMg`），这里只管滚动。
+ */
+.pickTree {
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+/* 树行右侧「它现在指着谁」那一句：灰字、贴右，不要框（框留给左树里"正在改的那一版"） */
+.pickNow {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 /* 选择套餐弹窗里的候选清单 —— 装了几个文件是挑套餐时真正要看的东西 */

@@ -92,6 +92,10 @@ impl Source for LocalDirSource<'_> {
 /// - `Absent` 没下载过（合法状态，不是错误）；
 /// - `Current` 在，且 SHA 与目录一致；
 /// - `Stale` 在，但字节与目录不一样——目录更新带来新版本，或文件被手动动过。
+///
+/// **目录没给期望值时**（随包 bootstrap 目录，`sha256 = None`）盘上有的都按 `Current` 算：
+/// 这一侧的目录没资格为它的字节背书，说 `Stale` 就是凭空造一个"与目录不符"
+/// （用户会去查一个根本不存在的差异）。真正的判定等 OTA 目录生效后那次下载。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOnDisk {
     Absent,
@@ -100,18 +104,78 @@ pub enum FileOnDisk {
 }
 
 pub fn file_status(internal_root: &Path, file: &CatalogFile) -> FileOnDisk {
-    match std::fs::read(internal_root.join(&file.path)) {
-        Ok(bytes) if hex(&Sha256::digest(&bytes)) == file.sha256 => FileOnDisk::Current,
-        Ok(_) => FileOnDisk::Stale,
-        Err(_) => FileOnDisk::Absent,
+    match (
+        std::fs::read(internal_root.join(&file.path)),
+        file.expected_sha(),
+    ) {
+        (Ok(bytes), Some(want)) if hex(&Sha256::digest(&bytes)) == want => FileOnDisk::Current,
+        (Ok(_), Some(_)) => FileOnDisk::Stale,
+        (Ok(_), None) => FileOnDisk::Current,
+        (Err(_), _) => FileOnDisk::Absent,
     }
+}
+
+/// SHA 对不上时的那条错。**两种成因要给两种话**（2026-10-04）。
+///
+/// 本机目录的 revision 与远端不同 → 多半是目录过期（OTA 没跑 / 网络不通），该说
+/// "目录可能过期，检查更新"；相同却字节不符 → 才是源头坏件。判定用**远端目录的
+/// revision**；取不到远端（离线）就退回保守说法 —— 不拿本机目录当"远端"，那会把
+/// "没联网"误报成"文件坏了"。判定只在这一处做，界面只负责展示。
+fn sha_mismatch_error(internal_root: &Path, file: &CatalogFile, got: &str) -> AppError {
+    let stale = remote_revision(internal_root)
+        .zip(local_revision(internal_root))
+        .filter(|(remote, local)| remote != local);
+    AppError::sha_mismatch(sha_mismatch_message(file, got, stale))
+}
+
+/// 那句话本身 —— 与"怎么拿到两个 revision"分开，于是它能被单测逐字钉住
+/// （取 revision 要联网，这台机器上测不了；说话不该跟着一起测不了）。
+fn sha_mismatch_message(file: &CatalogFile, got: &str, stale: Option<(String, String)>) -> String {
+    let why = match stale {
+        Some((remote, local)) => format!(
+            "本地目录停在 revision {local}，云端已经是 {remote} —— \
+             先点「检查更新」刷新目录再下载（目录过期时拿旧 SHA 比对，必然对不上）"
+        ),
+        // 取不到远端（没配源 / 离线）时照保守说：**不拿本机目录当"远端"**，
+        // 那会把"没联网"误报成"文件坏了"
+        None => "文件在源头就被改过或传坏了".to_owned(),
+    };
+    format!(
+        "{} 的内容对不上（期望 SHA {}，拿到 {}）—— {why}",
+        file.file_name,
+        file.expected_sha().unwrap_or("<目录未登记>"),
+        got
+    )
+}
+
+/// 本机 registry 里那份 catalog 的 revision（读不到就 `None`）
+fn local_revision(internal_root: &Path) -> Option<String> {
+    let bytes = std::fs::read(super::paths::catalog_file(internal_root)).ok()?;
+    super::Catalog::parse(&bytes).ok().map(|c| c.revision)
+}
+
+/// 数据源那一侧 `catalog.json` 的 revision。**取不到一律 `None`**（没配源 / 离线）——
+/// 判定失败就退回保守说法，绝不让"没联网"看起来像"文件坏了"
+fn remote_revision(internal_root: &Path) -> Option<String> {
+    let resolved = super::source::resolve_source(internal_root).ok()?;
+    let bytes = super::net::get_catalog(&resolved.catalog_url).ok()?;
+    super::Catalog::parse(&bytes).ok().map(|c| c.revision)
 }
 
 /// 一份文件走完整条管道：取回 → SHA 校验 → 大小校验 → 防穿越 → 归档旧份 → 原子落盘。
 ///
-/// 落点是 catalog 说的算（`file.path`，相对内部根，`mkp/…`），不是调用方拼的——
-/// "下载到哪里"是目录的职责。返回落盘的绝对路径。重复下载相同内容是幂等的
-/// （字节一样就不折腾盘）；内容变了就是一次更新，旧份先归档。
+/// # 落点 = `file.path`（唯一路径语义，2026-10-04）
+///
+/// `file.path` 相对**内部根**，就是 [`CatalogFile::path`]。它同时是"云端取哪"
+/// （`baseUrl + path`）与"本地放哪"（`<appDataDir>/<path>`）—— **没有第二套映射**。
+/// 所以这里 `resolve_in(internal_root, &file.path)` 得到的就是最终落点，
+/// 函数自己**不拼任何目录名**。
+///
+/// 归档同理：`archive/<file.path>`（结构与交付面同形）。
+///
+/// 校验只在**目录给了期望值**时做：随包 bootstrap 目录不登记期望值
+/// （见 [`CatalogFile`]），那就照收 —— 拿一个空 SHA"比一比"看着像校验、其实什么都没验，
+/// 还会把好文件判成坏的。真正的校验等 OTA 目录生效后那次下载。
 pub fn deliver(
     internal_root: &Path,
     file: &CatalogFile,
@@ -120,20 +184,21 @@ pub fn deliver(
     let bytes = source.fetch(file)?;
 
     // 校验在落盘之前：期望值来自 catalog（发布时对真字节算的），字节不对就不碰盘
-    let got = hex(&Sha256::digest(&bytes));
-    if got != file.sha256 {
-        return Err(AppError::sha_mismatch(format!(
-            "{} 的内容对不上（期望 SHA {}，拿到 {}）—— 文件在源头就被改过或传坏了",
-            file.file_name, file.sha256, got
-        )));
+    if let Some(want) = file.expected_sha() {
+        let got = hex(&Sha256::digest(&bytes));
+        if got != want {
+            return Err(sha_mismatch_error(internal_root, file, &got));
+        }
     }
-    if bytes.len() as u64 != file.size {
-        return Err(AppError::corrupted(format!(
-            "{} 的大小对不上（目录记 {} 字节，拿到 {} 字节）",
-            file.file_name,
-            file.size,
-            bytes.len()
-        )));
+    if let Some(want) = file.expected_size() {
+        if bytes.len() as u64 != want {
+            return Err(AppError::corrupted(format!(
+                "{} 的大小对不上（目录记 {} 字节，拿到 {} 字节）",
+                file.file_name,
+                want,
+                bytes.len()
+            )));
+        }
     }
 
     // 防穿越：catalog 是我们自己写的，但路径判据不信任任何来源（总纲 §1③）
@@ -142,7 +207,11 @@ pub fn deliver(
     // 更新与归档：旧份与目录不一样才叫"换版本"，复制进 archive/（保留最早一份），
     // 然后原子换新。第一次下载没有旧份，直接落。
     let old = std::fs::read(&target).ok();
-    let is_update = matches!(&old, Some(b) if hex(&Sha256::digest(b)) != file.sha256);
+    let is_update = match file.expected_sha() {
+        Some(want) => matches!(&old, Some(b) if hex(&Sha256::digest(b)) != want),
+        // 没有期望值：旧份字节与"带来这份"是否一样由内容自己说了算
+        None => matches!(&old, Some(b) if b.as_slice() != bytes.as_slice()),
+    };
     if is_update {
         let archive_target = archive_dir(internal_root).join(&file.path);
         std::fs::create_dir_all(archive_target.parent().expect("归档路径必有父目录")).map_err(
@@ -173,7 +242,7 @@ pub fn deliver(
 /// 永远不回写官方原件。所以这里只有"官方旧版本"，没有"谁在什么时候改了什么"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedFile {
-    /// 相对内部根的路径（`archive/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
+    /// 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
     pub path: String,
     /// 文件名。与它对应的交付文件**同名**：换版本换的是字节，不是名字
     pub file_name: String,
@@ -252,7 +321,7 @@ pub enum FileTrust {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KnownVersion {
     pub sha256: String,
-    /// 归档区里躺着这份字节时给（`archive/mkp/presets/A1-fast.toml`）。
+    /// 归档区里躺着这份字节时给（`archive/dist/mkp/presets/A1-fast.toml`）。
     /// 只被旧目录登记过、归档里没有它字节的那种是 `None` —— 那样同样认得出，
     /// 只是没有"可以看正文"这一档
     pub archived_path: Option<String>,
@@ -294,9 +363,14 @@ pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<Kno
         .iter()
         .find(|f| f.path == file.path)
         .or_else(|| old.files.iter().find(|f| f.file_name == file.file_name));
-    if let Some(entry) = hit {
+    /*
+     * 旧目录那条要给得出指纹才算证据：随包 bootstrap 目录不登记它（`sha256 = None`），
+     * 一条没有指纹的登记认不出任何字节 —— 跳过，而不是拿 `None` 去比（那会把它当成
+     * "与任何字节都不同"的假证据，把盘上文件误判成 `Unknown`）。
+     */
+    if let Some(sha) = hit.and_then(|entry| entry.sha256.clone()) {
         out.push(KnownVersion {
-            sha256: entry.sha256.clone(),
+            sha256: sha,
             archived_path: None,
         });
     }
@@ -309,7 +383,16 @@ fn inspect(internal_root: &Path, file: &CatalogFile) -> (FileTrust, Option<Strin
         return (FileTrust::Absent, None);
     };
     let got = hex(&Sha256::digest(&bytes));
-    if got == file.sha256 {
+    let Some(want) = file.expected_sha() else {
+        /*
+         * 目录没登记期望值（随包 bootstrap 目录）：盘上有就算 `Current` ——
+         * 这一侧的目录没资格为它的字节背书，说 `Unknown` 会让每一份已下载文件
+         * 都进"报警表"（`trust_entries`），那是几百条假警报。
+         * 字节的权威判定归 OTA 目录生效后那次下载 / `file_status`。
+         */
+        return (FileTrust::Current, None);
+    };
+    if got == want {
         return (FileTrust::Current, None);
     }
     for known in other_known_versions(internal_root, file) {
@@ -362,11 +445,14 @@ pub fn official_text(internal_root: &Path, file: &CatalogFile) -> Result<String,
     let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
         AppError::not_found(format!("{} 还没下载到本机 —— 先下载，再改", file.file_name))
     })?;
-    if hex(&Sha256::digest(&bytes)) != file.sha256 {
-        return Err(AppError::sha_mismatch(format!(
-            "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的官方版，再改",
-            file.file_name
-        )));
+    // 只有目录登记了期望值才比对：随包 bootstrap 目录不登记它，读得出来的正文就是可用正文
+    if let Some(want) = file.expected_sha() {
+        if hex(&Sha256::digest(&bytes)) != want {
+            return Err(AppError::sha_mismatch(format!(
+                "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的官方版，再改",
+                file.file_name
+            )));
+        }
     }
     String::from_utf8(bytes)
         .map_err(|_| AppError::corrupted(format!("{} 不是 UTF-8 文本，改不了", file.file_name)))
@@ -488,8 +574,21 @@ mod tests {
             path: format!("mkp/{name}"),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
-            sha256: hex(&Sha256::digest(content)),
-            size: content.len() as u64,
+            sha256: Some(hex(&Sha256::digest(content))),
+            size: Some(content.len() as u64),
+        }
+    }
+
+    /// 随包 bootstrap 目录那种条目：有这一份、不登记期望值
+    fn entry_without_expectations(name: &str) -> CatalogFile {
+        CatalogFile {
+            kind: "mkp_preset".to_owned(),
+            file_name: name.to_owned(),
+            path: format!("mkp/{name}"),
+            machine_id: "A1".to_owned(),
+            version_id: "STANDARD".to_owned(),
+            sha256: None,
+            size: None,
         }
     }
 
@@ -501,13 +600,17 @@ mod tests {
         }
     }
 
-    fn catalog_with(files: Vec<CatalogFile>) -> Catalog {
+    fn catalog_with_rev(files: Vec<CatalogFile>, revision: &str) -> Catalog {
         Catalog {
             catalog_schema: super::super::catalog::CATALOG_SCHEMA,
-            revision: "test".to_owned(),
+            revision: revision.to_owned(),
             files,
             ..Catalog::default()
         }
+    }
+
+    fn catalog_with(files: Vec<CatalogFile>) -> Catalog {
+        catalog_with_rev(files, "test")
     }
 
     #[test]
@@ -530,6 +633,32 @@ mod tests {
         );
     }
 
+    /// ★ **目录没给期望值就不做字节校验**（2026-10-04，去 SHA 的另一半）。
+    ///
+    /// 随包 bootstrap 目录的条目 `sha256`/`size` 都是 `None`。这时下载**必须照收**：
+    /// 这一侧的目录没资格为字节背书，拿一个空 SHA 去"比一比"看着像校验、其实什么都没验，
+    /// 更糟的是会把好文件判成坏的。真正的校验等 OTA 目录生效后那次下载。
+    ///
+    /// 反向也钉住：**有期望值时仍然照校验**（上一条判据咬着）。
+    #[test]
+    fn delivers_without_checking_when_the_catalog_expects_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        let file = entry_without_expectations("A1-standard.toml");
+        let content = "随包目录不认识的字节".as_bytes();
+
+        let target = deliver(root.path(), &file, &MemorySource(content.to_vec()))
+            .expect("没有期望值就不该拒收");
+
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            content,
+            "收下的是源给的字节"
+        );
+        // 盘上有就算"当前"：这一侧的目录说不了它是旧是漂
+        assert_eq!(file_status(root.path(), &file), FileOnDisk::Current);
+    }
+
     #[test]
     fn rejects_sha_mismatch_without_touching_disk() {
         let root = tempfile::tempdir().unwrap();
@@ -547,6 +676,57 @@ mod tests {
             !root.path().join("mkp/A1-standard.toml").exists(),
             "校验不过就整个拒绝，坏文件不落盘"
         );
+        // 拿不到远端目录（这个夹具没配源、没联网）时**退回保守说法** ——
+        // 不许把"没联网"说成"目录过期"，更不许编一个 revision
+        assert!(
+            e.message.contains("文件在源头就被改过或传坏了"),
+            "取不到远端时照保守说：{}",
+            e.message
+        );
+        assert!(
+            !e.message.contains("检查更新"),
+            "没确认目录过期就不要提『检查更新』：{}",
+            e.message
+        );
+    }
+
+    /// ★ **目录过期与文件坏是两种话**（2026-10-04）。
+    ///
+    /// SHA 对不上有两种成因，用户能据以行动的动作完全不同：
+    /// 目录过期 → 去刷新目录；文件真坏 → 换一台机器 / 找发布方。
+    /// 以前两种共用"文件在源头就被改过或传坏了"，导致用户照着这句话查不出问题。
+    ///
+    /// 判据直接钉那句话本身（取 revision 要联网，测试里不碰网络）。
+    #[test]
+    fn stale_catalog_gets_a_different_message_than_a_bad_file() {
+        let file = entry("A1-standard.toml", "真内容".as_bytes());
+
+        // ① 两个 revision 不同 → 说"目录过期"，并给出行动建议
+        let stale = sha_mismatch_message(
+            &file,
+            "got-sha",
+            Some(("remote-rev".to_owned(), "local-rev".to_owned())),
+        );
+        assert!(
+            stale.contains("local-rev") && stale.contains("remote-rev"),
+            "两个 revision 都要摆出来：{stale}"
+        );
+        assert!(stale.contains("检查更新"), "要给行动建议：{stale}");
+        assert!(
+            !stale.contains("传坏了"),
+            "已定位到目录过期，就别说文件坏了：{stale}"
+        );
+
+        // ② 拿不到远端（None）→ 保守说法，且**不提**「检查更新」
+        let unknown = sha_mismatch_message(&file, "got-sha", None);
+        assert!(
+            unknown.contains("文件在源头就被改过或传坏了"),
+            "取不到远端时照保守说：{unknown}"
+        );
+        assert!(
+            !unknown.contains("检查更新"),
+            "没据实确认就不要提『检查更新』：{unknown}"
+        );
     }
 
     #[test]
@@ -554,7 +734,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(mkp_root(&root)).unwrap();
         let mut file = entry("A1-standard.toml", "内容".as_bytes());
-        file.size = 999; // 目录里记错了大小
+        file.size = Some(999); // 目录里记错了大小
 
         let e = deliver(
             root.path(),
@@ -954,8 +1134,8 @@ mod tests {
             .into_iter()
             .map(|mut file| {
                 let bytes = content_of(&file);
-                file.sha256 = hex(&Sha256::digest(&bytes));
-                file.size = bytes.len() as u64;
+                file.sha256 = Some(hex(&Sha256::digest(&bytes)));
+                file.size = Some(bytes.len() as u64);
                 file
             })
             .collect()
@@ -1073,7 +1253,12 @@ mod tests {
 
     // ---- 测试小工具 ----
 
+    /// 单测里造"交付面"目录：新语义下没有预建的下载区根，
+    /// 但不少用例要先 `create_dir_all` 才能让 `deliver` 有地方写 —— 给它一个与
+    /// `catalog.path` 第一段同名的地方（`assets/`、`dist/` 都行，这里取通用一点的名字）。
     fn mkp_root(dir: &tempfile::TempDir) -> PathBuf {
-        super::super::paths::mkp_dir(dir.path())
+        let p = dir.path().join("mkp");
+        let _ = std::fs::create_dir_all(&p);
+        p
     }
 }

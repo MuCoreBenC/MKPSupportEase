@@ -92,6 +92,8 @@ export default function GcodeModal({
       title={param.label}
       subtitle={`${layerLabel} · ${rows} 行${disabled ? ' · 这一层改不动' : ''}`}
       closeOnScrim={false}
+      /* 这里的每一笔写都进外壳的草稿栈 —— Cmd+Z 得照常够得着它们（页脚那句就是它） */
+      shellShortcuts
       onClose={onClose}
       closeTitle="改动留在草稿里（没有保存）—— 想丢弃这次改动，用下面的「取消」"
       footer={

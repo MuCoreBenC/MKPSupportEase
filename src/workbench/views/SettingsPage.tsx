@@ -28,10 +28,10 @@
  * （注意区分：这里读的是**配置**；Bootstrap 被客户端吃进二进制是**构建期**的事 ——
  * 改完要重新构建客户端，所以保存成功那句话会提"重启 dev / 重打正式包"。）
  */
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { Boot } from '../api'
+import type { Boot, PublishAccount } from '../api'
 import s from '../c14.module.css'
 
 export default function SettingsPage({ boot }: { boot: Boot }) {
@@ -41,6 +41,104 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
   const [saved, setSaved] = useState<string | null>(boot.bootstrapUrl)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  /*
+   * **发布账户**（第三刀下半）：GitHub / Gitee 对称，每平台三格 —— 仓库地址 / 用户名（配置）
+   * + Token（秘密，住系统 Keychain）。
+   *
+   * ★ 前端**拿不到 Token 原值** —— 只有 `hasToken` 与尾号提示（`PlatformAccountView`）。
+   * ★ 配置与秘密分离：仓库地址 / 用户名进 `publish-account.json`，Token 进 Keychain。
+   */
+  const [account, setAccount] = useState<PublishAccount | null>(null)
+  const [acctBusy, setAcctBusy] = useState(false)
+  /* 每平台的输入草稿：仓库地址 / 用户名 / Token（Token 存完即清空，不留界面） */
+  const [draft, setDraft] = useState<
+    Record<string, { repositoryUrl: string; username: string; token: string }>
+  >({})
+  /* 哪几个平台的 Token 正在编辑（已配置时默认显示掩码点，点进去才变输入框） */
+  const [editingToken, setEditingToken] = useState<Record<string, boolean>>({})
+  const [acctNote, setAcctNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const loadAccount = useCallback(async () => {
+    try {
+      const next = await wb.publishAccount()
+      setAccount(next)
+      // 用磁盘真值初始化草稿（Token 从不回填）；重新读取 = 退出 Token 编辑态
+      const d: Record<string, { repositoryUrl: string; username: string; token: string }> = {}
+      for (const p of next.platforms) {
+        d[p.platform] = { repositoryUrl: p.repositoryUrl, username: p.username, token: '' }
+      }
+      setDraft(d)
+      setEditingToken({})
+    } catch (e) {
+      setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadAccount()
+  }, [loadAccount])
+
+  const setDraftField = (
+    platform: string,
+    field: 'repositoryUrl' | 'username' | 'token',
+    v: string,
+  ) => {
+    setDraft((prev) => {
+      const cur = prev[platform] ?? { repositoryUrl: '', username: '', token: '' }
+      return { ...prev, [platform]: { ...cur, [field]: v } }
+    })
+  }
+
+  /** 保存一个平台：先写目标（仓库地址 + 用户名），Token 非空再写 Keychain。 */
+  const saveAccount = async (platform: string) => {
+    const d = draft[platform]
+    if (d === undefined) return
+    if (d.repositoryUrl.trim() === '' || d.username.trim() === '') {
+      setAcctNote({ text: '仓库地址与用户名都要填', bad: true })
+      return
+    }
+    setAcctBusy(true)
+    setAcctNote(null)
+    try {
+      await wb.setPublishAccount(platform, d.repositoryUrl.trim(), d.username.trim())
+      const token = d.token.trim()
+      if (token !== '') {
+        await wb.setPublishToken(platform, token)
+      }
+      // ★ Token 存完**立刻清空输入框** —— 不留在界面状态里
+      setDraft((prev) => ({
+        ...prev,
+        [platform]: { ...prev[platform], token: '' },
+      }))
+      setAcctNote({
+        text: `已保存 ${platform} 发布账户${token !== '' ? '（Token 存进系统钥匙串）' : ''}`,
+        bad: false,
+      })
+      await loadAccount()
+    } catch (e) {
+      setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setAcctBusy(false)
+    }
+  }
+
+  const clearAccount = async (platform: string) => {
+    setAcctBusy(true)
+    setAcctNote(null)
+    try {
+      await wb.clearPublishAccount(platform)
+      setAcctNote({ text: `已清除 ${platform} 发布账户（配置 + 凭据）`, bad: false })
+      await loadAccount()
+    } catch (e) {
+      setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setAcctBusy(false)
+    }
+  }
+
+  const PLATFORMS = ['github', 'gitee'] as const
+  const PLATFORM_LABEL: Record<string, string> = { github: 'GitHub', gitee: 'Gitee' }
 
   const save = async () => {
     if (busy) return
@@ -91,6 +189,154 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
 
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      {/* ——— 发布账户（第三刀下半）：GitHub / Gitee 对称，各三格 ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>发布账户</b>
+          <span className={s.cardNote}>
+            发布到哪个仓库、以谁的身份 —— SupportEase 自己管理凭据，不用本机的 gh / git 登录态
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              发布时会自动提交、推送并建 PR/MR。**平台与仓库由这里配置**（不靠猜远端）；
+              Token 存进**系统钥匙串**，**绝不写进配置文件**，前端也拿不到明文。
+            </p>
+            <p className={s.vhelp}>
+              当前仓库：
+              {account === null ? (
+                '读取中……'
+              ) : account.remoteUrl === null ? (
+                '读不到 git remote（这台机器上取不到 git / 不是仓库）'
+              ) : (
+                <>
+                  <span className={s.mono}>{account.remoteUrl}</span>
+                  {account.remoteMatchesConfig
+                    ? ' —— 与已配置的发布账户一致 ✓'
+                    : ' —— 与已配置的发布账户不一致，发布前请确认'}
+                  {account.branch !== null && ` · 分支 ${account.branch}`}
+                </>
+              )}
+            </p>
+          </div>
+
+          {PLATFORMS.map((p) => {
+            const view = account?.platforms.find((v) => v.platform === p)
+            const d = draft[p] ?? { repositoryUrl: '', username: '', token: '' }
+            return (
+              <div className={s.vfield} key={p}>
+                <div className={s.vhead}>
+                  <b>{PLATFORM_LABEL[p]}</b>
+                  <span className={s.vkey}>
+                    {view?.hasToken === true
+                      ? `Token 已配置（${view.tokenHint ?? '已存'}）`
+                      : 'Token 未配置'}
+                  </span>
+                </div>
+
+                <div className={s.vrow}>
+                  <label className={s.vlabel}>仓库地址</label>
+                  <input
+                    className={s.inp}
+                    type="text"
+                    value={d.repositoryUrl}
+                    onChange={(e) => setDraftField(p, 'repositoryUrl', e.target.value)}
+                    placeholder={`https://${p === 'github' ? 'github.com' : 'gitee.com'}/用户名/仓库.git`}
+                    aria-label={`${PLATFORM_LABEL[p]} 仓库地址`}
+                  />
+                </div>
+
+                <div className={s.vrow}>
+                  <label className={s.vlabel}>用户名</label>
+                  <input
+                    className={s.inp}
+                    type="text"
+                    value={d.username}
+                    onChange={(e) => setDraftField(p, 'username', e.target.value)}
+                    placeholder="推送 / 建 PR 用的账号名"
+                    aria-label={`${PLATFORM_LABEL[p]} 用户名`}
+                  />
+                </div>
+
+                <div className={s.vrow}>
+                  <label className={s.vlabel}>Token</label>
+                  {/*
+                    Token 框的两种形态（作者 2026-10-04）：
+                    · **已配置且不在编辑** → 显示一串假的掩码点（`••••••••`），**不是空的** ——
+                      让人一眼看到"这里有值、已经填好了"，而不是怀疑自己是不是没存上。
+                    · **点进去要改** → 变成空输入框接受新的 Token（存完又回到掩码态）。
+                    ★ 用 `type="text"`（不是 password）：password 会带浏览器自带的"小眼睛"，
+                      作者不要它。掩码是我们自己画的字符，不需要浏览器帮我们遮。
+                  */}
+                  {view?.hasToken === true && editingToken[p] !== true ? (
+                    <button
+                      type="button"
+                      className={`${s.inp} ${s.tokenMask}`}
+                      onClick={() => setEditingToken((prev) => ({ ...prev, [p]: true }))}
+                      aria-label={`${PLATFORM_LABEL[p]} Token 已配置，点击可修改`}
+                      title="已配置。点击可填入新的 Token（不改则保持原值）"
+                    >
+                      ••••••••••••
+                    </button>
+                  ) : (
+                    <input
+                      className={s.inp}
+                      type="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={d.token}
+                      onFocus={() => setEditingToken((prev) => ({ ...prev, [p]: true }))}
+                      onChange={(e) => setDraftField(p, 'token', e.target.value)}
+                      onBlur={() => {
+                        /* 已配置的 Token，如果点进来什么也没填就退出 —— 回到掩码态，
+                           不让人对着一格空输入框怀疑"是不是被我清掉了" */
+                        if (view?.hasToken === true && d.token === '') {
+                          setEditingToken((prev) => ({ ...prev, [p]: false }))
+                        }
+                      }}
+                      placeholder="粘贴 Personal Access Token"
+                      aria-label={`${PLATFORM_LABEL[p]} Token`}
+                    />
+                  )}
+                </div>
+
+                <div className={s.vrow}>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnPrimary}`}
+                    disabled={
+                      acctBusy || d.repositoryUrl.trim() === '' || d.username.trim() === ''
+                    }
+                    onClick={() => void saveAccount(p)}
+                  >
+                    保存
+                  </button>
+                  {(view?.hasToken === true ||
+                    (view?.repositoryUrl ?? '') !== '' ||
+                    (view?.username ?? '') !== '') && (
+                    <button
+                      type="button"
+                      className={s.btn}
+                      disabled={acctBusy}
+                      onClick={() => void clearAccount(p)}
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {acctNote && (
+            <p className={s.vhelp} style={acctNote.bad ? { color: 'var(--danger)' } : undefined}>
+              {acctNote.text}
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>官方源（Bootstrap）</b>

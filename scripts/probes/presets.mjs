@@ -1207,11 +1207,12 @@ console.log(`[第十一层 · 不覆盖] 表里叫这个名字的行：${collisi
 if (collisionCount !== 1) problems.push('撞名被拒之后表里不许悄悄多出东西')
 await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
 
-/* ---------- 5l. 第十二层：通用导入入口（选择器 / 拖拽 → 我的文件） ---------- */
+/* ---------- 5l. 第十二层：通用导入入口（拖拽 → 我的文件；「导入文件…」按钮退役） ---------- */
 /*
- * 守五件事：
- *   ① 工具栏「导入文件…」：选择器（假后端给一条演示路径）→ 结果条说"导入了 1 份" →
- *      新的一份**立刻**出现在「我的文件」里（列表以磁盘为准，不用切页刷新）；
+ * 作者 2026-10-04 裁决：几乎不需要导入，工具栏不给「导入文件…」常驻的位子 ——
+ * 界面上的入口只剩**拖拽**（把文件拖进窗口，任何页面都收）；选择器能力
+ * （`pickFiles`）照旧住在 App 层，只是没有界面触发点。守五件事：
+ *   ① 界面上**没有**「导入文件…」按钮（退役要锁住，不许哪天悄悄回来）；
  *   ② 拖进窗口（探针里造一个 File）：重名的那份进**改名那一格**，输入框预填原来那个名字；
  *      改成可用的名字 →「继续导入」→ 进来；原来那份一个字节不动；
  *   ③ 重名不覆盖、不自动改名：指到一个还会撞的名字 → 格子里出原因，表里不许悄悄多出东西；
@@ -1230,23 +1231,13 @@ const bannerText = async () => {
   return (raw ?? '').replace(/\s+/g, ' ').trim()
 }
 
-/* ① 选择器：点「导入文件…」→ 假后端给一条演示路径 → 直接导进来 */
-await page.getByRole('button', { name: '导入文件…' }).click()
-await page.waitForTimeout(500)
-const pickedBanner = await bannerText()
-console.log(`\n[第十二层 · 选择器] 结果条：${pickedBanner}`)
-if (!pickedBanner.includes('导入了 1 份')) {
-  problems.push('选择器导入之后结果条该说「导入了 1 份」')
-}
-const afterPick = await actions()
-const pickedRow = afterPick.find((r) => r.name.includes('从选择器导进来.toml'))
-console.log(
-  `[第十二层 · 选择器] 新行：${pickedRow === undefined ? '(没出现)' : `${pickedRow.name} → ${pickedRow.action}`}`,
-)
-if (pickedRow === undefined) {
-  problems.push('导入进来的那份该立刻出现在「我的文件」里（列表以磁盘为准）')
-} else if (!pickedRow.action.includes('应用')) {
-  problems.push('导入进来的那份该是一份正常用户文件（操作列该有「应用」）')
+/* ① 按钮退役：界面上不许再有「导入文件…」（拖拽是唯一入口） */
+const importBtnCount = await page.getByRole('button', { name: '导入文件…' }).count()
+console.log(`\n[第十二层 · 退役] 界面上的「导入文件…」按钮：${importBtnCount} 个`)
+if (importBtnCount !== 0) {
+  problems.push(
+    '「导入文件…」按钮已退役（作者 2026-10-04：几乎不需要导入，拖拽是唯一入口），界面上不该再有它',
+  )
 }
 
 /* ② 拖入一份与「我的 A1 涂胶-高速版.toml」同名的：进改名那一格 */
@@ -1524,6 +1515,23 @@ await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(200)
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
+
+/* 工具栏恒两排的 DOM 判据（作者 2026-10-04 定稿）：MKP 档的「共 N 项 │ 仓库…」
+   恒住工具栏第二排（pill 右边），页脚只留右键提示 —— 不随窗宽换住处 */
+const metaHome = await page.evaluate(() => {
+  const toolbar = document.querySelector('main div[class*="toolbar"]')
+  const foot = document.querySelector('main div[class*="foot"]')
+  return {
+    inToolbar: (toolbar?.innerText ?? '').includes('共 '),
+    inFoot: (foot?.innerText ?? '').includes('共 '),
+  }
+})
+console.log(
+  `[工具栏恒两排] MKP 档计数台账：工具栏=${metaHome.inToolbar} 页脚=${metaHome.inFoot}`,
+)
+if (!metaHome.inToolbar) problems.push('MKP 档的计数台账该恒住工具栏第二排（pill 右边）')
+if (metaHome.inFoot) problems.push('MKP 档的页脚不该再有计数台账（它住工具栏第二排；切片器档才住页脚）')
+
 const compact = await facts()
 await page.screenshot({ path: `${shotDir}/presets-compact.png` })
 console.log(`截图 ${shotDir}/presets-compact.png (900x640) 行 ${compact.dataRows} 计数 ${compact.counts}`)
@@ -1543,7 +1551,7 @@ console.log(
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
     '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
     '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
-    '导入入口（第十二层）：选择器能进、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
+    '导入入口（第十二层）：「导入文件…」按钮退役（拖拽是唯一入口）、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
     'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +
     '撤销应用退役（作者 2026-10-04：不做取消应用，总得有一套在生效；融合 pill 左拍说得出正在生效的那一套），' +

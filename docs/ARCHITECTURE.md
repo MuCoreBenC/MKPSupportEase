@@ -126,6 +126,12 @@ POSIX 原子）→ fsync 父目录。任何一步失败，目标文件都还是�
 但**只在 Rust 侧自己的命令体里调** —— 前端够不着插件命令面，所以不需要给它开 capability。
 将来若真要用 `plugin-fs`，按命令加，并把 scope 限到两个数据根。
 
+**插件两端版本必须对齐（major/minor）**：Rust crate（`tauri-plugin-dialog = "2.8"`）与
+npm 包（`@tauri-apps/plugin-dialog@2.8.1`）错档时，`tauri dev` 会直接报
+"version mismatched Tauri packages"（2026-10-02 踩过：crate 停在 2.7.3 / npm 在 2.8.1）——
+**升级时两端成对升**，crate 侧用 `cargo update -p <plugin> --precise <ver>` 落进锁文件。
+只在 Rust 侧调的插件（如 opener）没有 npm 对包，不受这条约束。
+
 ### 走 mock 还是走 Rust
 
 `src/api/index.ts` 的判据是**运行时探测** `'__TAURI_INTERNALS__' in window`，

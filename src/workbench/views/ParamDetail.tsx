@@ -94,6 +94,11 @@ interface Props {
   hideClose?: boolean
   /** 换一个参数来看 —— 抽屉里「属于 X 的子参数」点 X 就去那儿 */
   onPick?: (key: string) => void
+  /**
+   * 「编辑定义」（2026-10-03）：名称 / 单位 / 值类型 / 范围 / 前置条件 / 弃用
+   * 那些只读格子如今有一条改的路 —— 弹出定义编辑模态框（即时落盘）
+   */
+  onEditDef?: () => void
   /** 某一层那枚「打开编辑器」按钮 —— 每层各一枚，开的都是自己那层 */
   onOpenGcode?: (key: string, uid: string | null) => void
   /** 写某一层的值。`null` = 挂回继承（删键）。弃用闸在那条路上 */
@@ -113,6 +118,7 @@ export default function ParamDetail({
   onClose,
   hideClose = false,
   onPick,
+  onEditDef,
   onOpenGcode,
   onWriteLayer,
 }: Props) {
@@ -314,9 +320,22 @@ export default function ParamDetail({
           </p>
         </section>
 
-        {/* 基本信息：说明书该有的几行，没有键名 */}
+        {/* 基本信息：说明书该有的几行，没有键名。标题行右侧挂「编辑定义」——
+            那些格子从这里从只读变成可改（即时落盘，判据见 ParamDefModal） */}
         <section className={s.pDSection}>
-          <div className={s.pDSecTitle}>基本信息</div>
+          <div className={s.pDSecTitleRow}>
+            <span className={s.pDSecTitle}>基本信息</span>
+            {onEditDef && (
+              <button
+                type="button"
+                className={s.pDefEdit}
+                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 即时落盘，不进草稿"
+                onClick={onEditDef}
+              >
+                编辑定义
+              </button>
+            )}
+          </div>
           <div className={s.pKv}>
             {/*
               已弃用摆在「名称」**前面**：这一页最要紧的一条判断先说 ——

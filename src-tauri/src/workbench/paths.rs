@@ -26,8 +26,14 @@ const WORKBENCH_DIR: &str = "workbench";
 const PRESETS_DIR: &str = "presets";
 /// 交付产物的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/dist/*`：
 /// 源与产物各占一层，一眼分得清哪个是手写的。
-const DIST_SUBDIR: &str = "dist";
-/// 资产根的名字（`public/` 下）。见 [`assets_root`]
+pub(crate) const DIST_SUBDIR: &str = "dist";
+/// 交付根下的**产品资源区**：与客户端 `catalog.path` 里的那一段同名同形
+/// （B 类是 `dist/mkp/presets/…`，见 `app::dist` 模块头）。
+/// 住在 paths 是因为**读侧也要用**（生成状态兜底要 stat 磁盘上的产物），不能只让写侧认得。
+pub const MKP_DIR: &str = "mkp";
+/// MKP 产物在交付根里的子目录（**相对交付根**：`catalog.path` = `dist/` + 这一格）
+pub const MKP_PRESETS_DIR: &str = "mkp/presets";
+/// 资产根的名字（`presets/` 下）。见 [`assets_root`]
 const ASSET_DIR: &str = "assets";
 
 /// 开发源数据根下首次启动就建齐的子目录。**这份清单是唯一的** ——
@@ -58,11 +64,17 @@ pub fn workbench_root() -> Result<PathBuf, AppError> {
 
 /// 发布目录：`<repo>/presets/dist`。发布动作才会往里写，读状态时不需要它存在
 pub fn dist_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join(PRESETS_DIR).join(DIST_SUBDIR);
+    let root = dist_root_path();
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出发布目录：{}", root.display())).with_detail(e.to_string())
     })?;
     Ok(root)
+}
+
+/// 交付根的**只读**定位（不建目录）：读状态用 —— 只有生成 / 发布才需要它存在。
+/// 路径与 [`dist_root`] 同一处算出，不许第二处自拼。
+pub fn dist_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR).join(DIST_SUBDIR)
 }
 
 /// 把相对路径解析到开发源数据根内，越界一律 `PERMISSION_DENIED`
@@ -86,9 +98,11 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// **界面数据**，两类东西混在一层，`path` 就说不清"这条资产属于谁管"。约定是「我们管的资产全在
 /// `public/assets/` 里，别的 `public/` 文件不许被 `presets/assets.toml` 引用」。
 ///
-/// 2026-10-01 起，本来混在 `public/` 里的**界面素材**全部搬走了（整机图 → `src/app/assets/printers/`、
-/// hero 合影 → `src/app/assets/hero/`）：它们随程序本体、走 vite 资源管线，不归台账。
-/// 于是这个根下只剩台账真正管的三类：`bbs/` `icons/` `models/` —— 这一层从此不再有两种东西。
+/// 2026-10-03 从 `public/assets` 搬到 `presets/assets`（作者：「在 assets 吧，到时候 3mf
+/// 也要放」—— 产品数据资源住一起）：现在这个根下是台账管的全部分类
+/// `bbs/` `icons/` `models/` `printers/`。
+/// **`printers/`（整机图）是 `bundled` 档**：台账登记、工作台可管，但**不进云端交付**
+/// —— 到客户端靠构建期复制（`scripts/copy-assets.mjs`）。
 ///
 /// # 目录按需建
 ///
@@ -97,11 +111,20 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 /// "还没搬过资产"要落成一个真实存在的空目录（`public/assets/.gitkeep` 占着），
 /// 而不是一个查不出来的状态。
 pub fn assets_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join("public").join(ASSET_DIR);
+    let root = assets_root_path();
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出资产目录：{}", root.display())).with_detail(e.to_string())
     })?;
     Ok(root)
+}
+
+/// 资产根的**只读**定位（不建目录）—— 判据与闸用它。
+///
+/// 与 [`dist_root_path`] 同一条理由：**读一件事不该顺手造出一个目录**。
+/// 发布闸明写「只读：不写盘」，所以它必须走这一条而不是 [`assets_root`]。
+/// 路径与 [`assets_root`] 同一处算出，不许第二处自拼。
+pub fn assets_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR).join(ASSET_DIR)
 }
 
 /// 预设数据的根：`<repo>/presets`。**唯一的预设真相源** ——

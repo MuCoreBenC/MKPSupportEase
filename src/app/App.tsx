@@ -65,12 +65,20 @@ export default function App() {
     setTab('bbs')
   }, [])
 
+  /*
+   * 预设页那句「此预设需要更新版 SupportEase」的「去更新」出口：切到设置页。
+   *
+   * ★ 它与 `openBbs` 同类 —— **跨页跳转的出口由外壳给**，页面只负责把"我要去"交出去。
+   *   为什么不在预设页自己跳：页签状态住在外壳（`tab` 在这儿），页面不该伸手改它。
+   */
+  const openSettings = useCallback(() => setTab('settings'), [])
+
   const renderPage = () => {
     switch (tab) {
       case 'calib':
         return <PageCalib />
       case 'preset':
-        return <PagePresets density={density} onOpenBbs={openBbs} />
+        return <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
       case 'params':
         return <PageParams density={density} />
       case 'bbs':

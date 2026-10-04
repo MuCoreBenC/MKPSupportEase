@@ -1,0 +1,126 @@
+/*
+ * 机型尺寸编辑模态框（2026-10-03，照旧面板 mkppanel 的六组两列网格）。
+ *
+ * 只管这一张框里的排版：组头 + 两列字段网格。**共用类留在 `c14.module.css`**，
+ * 这里不复制按钮 / 卡片那几颗 —— 编辑器私有样式写自己的 module，别污染通用类。
+ */
+
+.group + .group {
+  margin-top: 14px;
+}
+
+.groupHead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+/* 两列网格：字段数不齐（5 个 / 10 个）时左对齐即可，不强行拉平 */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/* 原始键名：小一号、灰一点 —— 对着源文件能看上号，又不抢中文标签的视线 */
+.fieldKey {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.num {
+  flex: none;
+  width: 108px;
+  padding: 3px 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: right;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.num:focus {
+  border-color: var(--wb-primary);
+}
+
+.check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--wb-primary);
+}
+
+.copyFrom {
+  margin-left: auto;
+  padding: 2px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.warn {
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}
+
+.hint {
+  margin: 14px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}

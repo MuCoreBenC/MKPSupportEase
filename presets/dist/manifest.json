@@ -1,8 +1,8 @@
 {
   "manifestVersion": 3,
   "channel": "stable",
-  "updated": "2026-10-02T07:14:38Z",
-  "minimumClient": "",
+  "updated": "2026-10-04T14:47:48Z",
+  "minimumClient": "0.0.1",
   "version": "",
   "assets": [
     {
@@ -10,88 +10,88 @@
       "resourceType": "mkp_preset",
       "machineId": "A1",
       "fileName": "A1-standard.toml",
-      "relativePath": "mkp/presets/A1-standard.toml",
-      "sha256": "439c48134a39d58bb791c2347cfb4b45f6d13985b19660a573980989060d6835",
-      "size": 4299
+      "relativePath": "dist/mkp/presets/A1-standard.toml",
+      "sha256": "d3b5aeed32772053b6bf96b225d05cb2036aaa4697e5e01d2d37b6d6e32a331a",
+      "size": 4335
     },
     {
       "id": "A1-fast.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1",
       "fileName": "A1-fast.toml",
-      "relativePath": "mkp/presets/A1-fast.toml",
-      "sha256": "fad1a4c3952a868b7e5614051b2ab43b011cc0d032708959b0b0df6b487f93c0",
-      "size": 4297
+      "relativePath": "dist/mkp/presets/A1-fast.toml",
+      "sha256": "ff5b322ce4e4743a694a075362b32f47edfa58ff75d03757780dc950eed40a18",
+      "size": 4333
     },
     {
       "id": "A1-fastv3.3.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1",
       "fileName": "A1-fastv3.3.toml",
-      "relativePath": "mkp/presets/A1-fastv3.3.toml",
-      "sha256": "df29f0483ce0c4e17ba6f8ac472f845f68a20ca625d144d4772cf27d343fb2f7",
-      "size": 4300
+      "relativePath": "dist/mkp/presets/A1-fastv3.3.toml",
+      "sha256": "73b7a9b8fbc86b153bb70cfc554470deb1895f8651ecde3cdcacdf3dbc4474a2",
+      "size": 4336
     },
     {
       "id": "A1_MINI-standard.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-standard.toml",
-      "relativePath": "mkp/presets/A1_MINI-standard.toml",
-      "sha256": "447c55d221e713f65140d6dbeeadf401c964a72e441fd21af2b23f73d652b20c",
-      "size": 4306
+      "relativePath": "dist/mkp/presets/A1_MINI-standard.toml",
+      "sha256": "bdd13dc5959982ae85705baae9b57c3284375c65a23210d75b2f1e629bf17cf1",
+      "size": 4342
     },
     {
       "id": "A1_MINI-fast.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-fast.toml",
-      "relativePath": "mkp/presets/A1_MINI-fast.toml",
-      "sha256": "0eec6443bb097e7445cd5243a2305c828cb4146fc86401d07c84a1508e7e2bf9",
-      "size": 4300
+      "relativePath": "dist/mkp/presets/A1_MINI-fast.toml",
+      "sha256": "2914fae9304be75d8113ef832ba0633e8fa6781c1b4e12f370eac35a1e638eb8",
+      "size": 4336
     },
     {
       "id": "A1_MINI-fastv3.3.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-fastv3.3.toml",
-      "relativePath": "mkp/presets/A1_MINI-fastv3.3.toml",
-      "sha256": "5815a821e2da3f1125a6d4706ce4b1dfe5661b9550a111927a2fb14144a4ad54",
-      "size": 4304
+      "relativePath": "dist/mkp/presets/A1_MINI-fastv3.3.toml",
+      "sha256": "8cf47b7a098004b72db035f83f849625bb71a6f6166c4c5606fb7423741dd0d3",
+      "size": 4340
     },
     {
       "id": "P1S-lite.toml",
       "resourceType": "mkp_preset",
       "machineId": "P1S",
       "fileName": "P1S-lite.toml",
-      "relativePath": "mkp/presets/P1S-lite.toml",
-      "sha256": "95871dd12369446ece524858f9973962b663a33190e593138dad738a97bbf119",
-      "size": 4362
+      "relativePath": "dist/mkp/presets/P1S-lite.toml",
+      "sha256": "81f56489df37e3e837fcd75a6e5c17a03fde0f572e1d5e72e02279a18c7dc7db",
+      "size": 4398
     },
     {
       "id": "P2S-standard.toml",
       "resourceType": "mkp_preset",
       "machineId": "P2S",
       "fileName": "P2S-standard.toml",
-      "relativePath": "mkp/presets/P2S-standard.toml",
-      "sha256": "67983636c8f107be6e26af2e567809f517a743acbc0b74fdcb84252eecb807f1",
-      "size": 4366
+      "relativePath": "dist/mkp/presets/P2S-standard.toml",
+      "sha256": "38df311bafb4f65ad75e0e74b28cfb3418a208fe7f121964a95f13f85b379935",
+      "size": 4402
     },
     {
       "id": "X1C-lite.toml",
       "resourceType": "mkp_preset",
       "machineId": "X1C",
       "fileName": "X1C-lite.toml",
-      "relativePath": "mkp/presets/X1C-lite.toml",
-      "sha256": "484823e9c2f9a6cd2a3621beb46f23d1f6c83269dcab2f9896cb71611b7d1936",
-      "size": 4361
+      "relativePath": "dist/mkp/presets/X1C-lite.toml",
+      "sha256": "896e828baf2213fe719c2ed685dcef973aac500296e267bd1148290f850b8539",
+      "size": 4398
     },
     {
       "id": "a1-icon",
       "resourceType": "icon",
       "machineId": "A1",
       "fileName": "a1.svg",
-      "relativePath": "mkp/icons/a1.svg",
+      "relativePath": "assets/icons/a1.svg",
       "sha256": "68024611b1c1aaf2ef0f0b3f2476f0e53ec78adade8770d89d6c8a350e0d9d83",
       "size": 386
     },
@@ -100,7 +100,7 @@
       "resourceType": "icon",
       "machineId": "A1_MINI",
       "fileName": "a1_mini.svg",
-      "relativePath": "mkp/icons/a1_mini.svg",
+      "relativePath": "assets/icons/a1_mini.svg",
       "sha256": "8cfe37d585d7604d2493a67469e11b4b699784120ff00989ef3338e45caa1046",
       "size": 363
     },
@@ -109,7 +109,7 @@
       "resourceType": "icon",
       "machineId": "P1S",
       "fileName": "p1s.svg",
-      "relativePath": "mkp/icons/p1s.svg",
+      "relativePath": "assets/icons/p1s.svg",
       "sha256": "87604671835eeccb73ac11196253e360756e4196382d6b93b48bed1d046db2f7",
       "size": 324
     },
@@ -118,7 +118,7 @@
       "resourceType": "slicerProfile",
       "machineId": "A1",
       "fileName": "MKPProcess A1 0.4 0.20.json",
-      "relativePath": "mkp/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
       "sha256": "e4696732236194d4035635adce6abc01fe3efb01847249745f4a36c4f6d5977f",
       "size": 1332
     },
@@ -127,7 +127,7 @@
       "resourceType": "slicerProfile",
       "machineId": "A1_MINI",
       "fileName": "MKPProcess A1 mini 0.4 0.20.json",
-      "relativePath": "mkp/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
       "sha256": "1ae5318f97eeb95a3e804619d5102d1d851d06860e53a9a4899dad0db4d717ca",
       "size": 1301
     },
@@ -136,7 +136,7 @@
       "resourceType": "slicerProfile",
       "machineId": "P1S",
       "fileName": "MKPProcess P1S 0.4 0.24.json",
-      "relativePath": "mkp/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
       "sha256": "264addc551633c553828492580eef74fc51f2690a127919ed8da051634d8bc2d",
       "size": 1872
     },
@@ -145,7 +145,7 @@
       "resourceType": "slicerProfile",
       "machineId": "P2S",
       "fileName": "MKPProcess P2S 0.4 0.24.json",
-      "relativePath": "mkp/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
       "sha256": "124f8290aa007567af78d6058f95095e4787c02a30371acb56f489029168499e",
       "size": 1264
     },
@@ -154,7 +154,7 @@
       "resourceType": "slicerProfile",
       "machineId": "X1C",
       "fileName": "MKPProcess X1 0.4 0.24.json",
-      "relativePath": "mkp/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
       "sha256": "1fe7377c92d0f67bb8ed1cda16edb12c32a56e3cb4d864983eaccb6ced0a8fa4",
       "size": 1925
     }

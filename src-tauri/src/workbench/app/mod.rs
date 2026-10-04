@@ -33,17 +33,36 @@
 //! 与矩阵单元格**一模一样**。再建一套 DTO 等于给同一件事写两个形状，
 //! 迟早只改其中一个。所以字段详情走 `wb_matrix(cols=[那一列])`。
 
+/// **发布账户配置**（第三刀下半）：`repositoryUrl` + `username`，住
+/// `<appDataDir>/publish-account.json`（**不含 token**；token 住 Keychain）。
+/// 发布目标由它决定，`git remote` 只作校验
+pub mod account;
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
 pub mod assets;
+/// **发布闸**（第二刀）：发布前的唯一入口判定器。**它是 Rust 核心** ——
+/// 工作台界面 / 将来的 CLI / `cargo test` 判据调的都是 `publish_audit` 这一个函数，
+/// 界面不许自己再实现一套检查
+pub mod audit;
 pub mod build;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
+/// 发布账户凭据（第三刀下半）：每平台一份 Token，住**系统 Keychain**，前端拿不到原值
+pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod dist;
+/// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
+pub mod git;
+pub mod history;
 /// 「机型与版本」那一页。**它不走 `Ctx` / `Committed` / `Draft`** ——
 /// 那一套是参数值的，这一页管清单，两件事不共用状态机（见该文件头）
 pub mod machines;
+/// 代码托管平台出口（第三刀下半）：GitHub / Gitee 的 PR/MR + CI，**自持凭据**
+/// （被批准的第二个网络出口，见模块文档）
+pub mod platform;
+/// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
+/// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
+pub mod publish_tx;
 pub mod storage;
 pub mod words;
 
@@ -64,7 +83,9 @@ use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::load_presets;
-use crate::workbench::presets::registry::{ParamDef, ShowWhen, TabMeta, UiComponent, ValueType};
+use crate::workbench::presets::registry::{
+    ParamDef, ParamMetaEdit, ShowWhen, TabMeta, UiComponent, ValueType,
+};
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
 use crate::workbench::{paths, Roots};
@@ -387,7 +408,7 @@ fn store_dir_roles() -> Vec<StoreDirRole> {
 }
 
 /// 三个数据根。界面开场调它。**唯一的数据根是 `presets/`**
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_boot() -> Result<Boot, AppError> {
     traced("wb_boot", |_| boot_inner())
 }
@@ -397,6 +418,20 @@ pub fn wb_boot() -> Result<Boot, AppError> {
 pub fn wb_reload() -> Result<Boot, AppError> {
     drop_ctx();
     boot_inner()
+}
+
+/// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
+///
+/// 「生成与发布」页那块**只读的「软件版本」**展示位用它 —— 与客户端 `get_app_version`
+/// **同一个常量**（[`crate::runtime::structure::APP_VERSION`]），不是第二处真值。
+///
+/// ★ 它只报"当前装的是哪一版"，**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
+/// （见 `docs/RELEASE-TRANSACTIONS.md`），本轮不实现。
+#[tauri::command(async)]
+pub fn wb_app_version() -> Result<String, AppError> {
+    traced("wb_app_version", |_| {
+        Ok(crate::runtime::structure::APP_VERSION.to_owned())
+    })
 }
 
 /// 记下官方源（Bootstrap）地址 —— **工作台里唯一一处"发布到哪"**（写入库的
@@ -467,7 +502,7 @@ fn boot_inner() -> Result<Boot, AppError> {
 
 /* ---------- 读 ---------- */
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_book() -> Result<BookView, AppError> {
     traced("wb_book", |_| {
         with_ctx(|ctx| {
@@ -524,16 +559,46 @@ pub struct ChoiceView {
     pub deprecated: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_registry() -> Result<RegistryView, AppError> {
     traced("wb_registry", |_| {
-        with_ctx(|ctx| {
-            let reg = &ctx.presets.registry;
-            Ok(RegistryView {
-                updated: reg.updated().to_owned(),
-                tabs: reg.param_tabs(),
-                params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
-            })
+        with_ctx(|ctx| Ok(registry_view(&ctx.presets.registry)))
+    })
+}
+
+/// 注册表视图。`wb_registry` 与 `wb_set_param_meta` 共用一份拼法
+fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView {
+    RegistryView {
+        updated: reg.updated().to_owned(),
+        tabs: reg.param_tabs(),
+        params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
+    }
+}
+
+/// **改一条参数的定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
+/// 出厂默认 / 属于 / 前置条件 / 弃用）。
+///
+/// # 即时落盘；撤销走外壳那条栈的「定义」条目
+///
+/// 定义与值不是一种改动，但撤销只有状态栏那一个入口：值的条目带反向 patch，
+/// 定义的条目**自带改前/改后两份整包载荷** —— 撤销就是把改前那份再交回
+/// [`crate::presetdata::registry::ParamRegistry::set_param_meta`]，重做就是改后
+/// 那份。条目的 label 写明是「定义 · 某参数」，与值那条「机型 · 参数」在栈里
+/// 各说各的，不存在「撤销一步说不清」的问题。
+///
+/// # 写完整份重读
+///
+/// 定义一变，注册表指纹就变了（它进「待生成」的判定），而指纹缓存是
+/// **构造完不再变**的 —— 换掉整份 [`Presets`] 是唯一让指纹跟上改动的方式，
+/// 顺带保证内存与盘重新对表。返回重读后的注册表视图。
+#[tauri::command(async)]
+pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryView, AppError> {
+    traced("wb_set_param_meta", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.registry.set_param_meta(&key, edit)?;
+            ctx.presets.registry.write_back()?;
+            ctx.presets = ctx.presets.reload()?;
+            Ok(registry_view(&ctx.presets.registry))
         })
     })
 }
@@ -578,7 +643,7 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
 
 /// 一屏矩阵。列由前端勾选给出，**顺序由后端按配方本重排**；
 /// `baseMachineId`（对照模式的基准机型）驱动差异判据与行序 —— 见 [`derive::Matrix`]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_matrix(
     cols: Vec<ColRef>,
     tab: Option<String>,
@@ -601,7 +666,7 @@ pub fn wb_matrix(
 /// 配方台一屏（默认视角）：一个版本的分组列表。
 ///
 /// 矩阵是它的对比工具，不是默认 —— 一屏几十列的表格不好看也不好改
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_desk(
     machine_id: String,
     uid: Option<String>,
@@ -621,12 +686,12 @@ pub fn wb_desk(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_trash() -> Result<Vec<TrashEntry>, AppError> {
     traced("wb_trash", |_| with_ctx(|ctx| ctx.store.trash_entries()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_ui() -> Result<Value, AppError> {
     traced("wb_ui", |_| with_ctx(|ctx| storage::read_ui(&ctx.store)))
 }
@@ -640,7 +705,7 @@ pub fn wb_save_ui(ui: Value) -> Result<(), AppError> {
 
 /* ---------- 查（只读推演） ---------- */
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preview_bulk(
     key: String,
     value: Value,
@@ -670,7 +735,7 @@ pub struct DiffLine {
     pub kind: &'static str,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
     traced("wb_diff_draft", |_| {
         with_ctx(|ctx| {
@@ -1652,5 +1717,140 @@ mod tests {
                 assert!(cell.origin_explain.is_some(), "来源要带一句「改了会怎样」");
             }
         }
+    }
+
+    /* ---------- 读命令必须异步（2026-10-02 的性能修复，防回退） ---------- */
+
+    /// **只读命令一律 `#[tauri::command(async)]`。**
+    ///
+    /// # 为什么这条必须有机器拦着
+    ///
+    /// Tauri 官方文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
+    /// `#[tauri::command(async)]`**。而主线程就是 webview 渲染那个线程 ——
+    /// 同步命令算多久，**整个界面就冻结多久**：骨架屏画不出来、导航点不动，
+    /// 用户看到的就是"像被冻住了，过了好一会才有反应"（作者原话）。
+    ///
+    /// 这不是"再优化一点"的问题，是**别的线程算、主线程继续画**的问题：
+    /// 只要命令还在主线程上，算 14ms 还是 320ms 都是同一种病，只是轻重不同。
+    /// 所以新增一条读命令**忘了写 `(async)`** 就是把这个病又带回来 —— 用源码扫描拦住。
+    ///
+    /// 写命令**故意不在这张单子里**：它们要落盘、要和草稿的锁打配合，改异步是另一
+    /// 件要单独评估的事（`wb_apply_draft` / `wb_save` / `wb_generate` …）。
+    ///
+    /// ★ **但"碰网络 / Keychain"的命令必须在这张单子里**（下面 [`IO`]）——2026-10-04
+    /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框）、推 git、
+    /// 建 PR 全发生在主线程上，窗口一动不动；作者原话「卡住了，我什么都没办法点」。
+    /// 那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
+    #[test]
+    fn read_commands_are_async_so_they_never_freeze_the_window() {
+        /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
+        const READ: &[&str] = &[
+            "wb_boot",
+            "wb_words",
+            "wb_book",
+            "wb_registry",
+            "wb_matrix",
+            "wb_desk",
+            "wb_trash",
+            "wb_ui",
+            "wb_preview_bulk",
+            "wb_diff_draft",
+            "wb_preflight",
+            "wb_preview_toml",
+            "wb_generate_preview",
+            "wb_revert_preview",
+            "wb_dist_strays",
+            // 发布闸（第二刀）：只算不写 —— 与 `publish_audit` 是同一件事的两个壳
+            "wb_publish_audit",
+            "wb_baseline_diff",
+            "wb_assets",
+            "wb_asset_usage",
+            "wb_asset_inspect",
+            // 「在访达中显示」不写任何应用状态（只开系统文件管理器）—— 也归读这一档
+            "wb_reveal_asset",
+            "wb_bundles",
+            "wb_machines",
+            "wb_version_orphans",
+            // 发布收尾（回执屏）：只读一份回执日志；「查看 PR」只开系统浏览器，不写应用状态
+            "wb_publish_history",
+            "wb_open_external",
+        ];
+
+        /// 这一批**碰网络或系统 Keychain**（发布事务那几条）—— 同样必须 `(async)`。
+        ///
+        /// 为什么它们比读命令更要紧：读命令只是"算得久"；这几条会**等系统弹框**
+        /// （Keychain 授权）和**等网络**（git 推送、平台 API）—— 等多久完全不可控，
+        /// 占着主线程就是无限期冻住整个窗口。
+        const IO: &[&str] = &[
+            "wb_publish",
+            "wb_publish_account",
+            "wb_set_publish_account",
+            "wb_set_publish_token",
+            "wb_clear_publish_account",
+            "wb_publish_status",
+            "wb_merge_review",
+        ];
+
+        // 路径用 CARGO_MANIFEST_DIR 拼（不用 file!()：建了 workspace 之后它的基准会变）
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("workbench")
+            .join("app");
+        let mut sources = String::new();
+        for name in [
+            "mod.rs",
+            "build.rs",
+            "assets.rs",
+            "bundles.rs",
+            "machines.rs",
+            "words.rs",
+            // 发布事务那几条命令住这里（IO 单子要扫到它们）
+            "publish_tx.rs",
+        ] {
+            sources.push_str(
+                &std::fs::read_to_string(app.join(name))
+                    .unwrap_or_else(|e| panic!("读不到 {name}：{e}")),
+            );
+            sources.push('\n');
+        }
+
+        let mut missing: Vec<&str> = Vec::new();
+        for fn_name in READ {
+            // 找 `#[tauri::command...]` 紧跟着 `pub fn <fn_name>` 的那一处，看它带不带 (async)
+            let needle = format!("pub fn {fn_name}(");
+            let at = sources.find(&needle).unwrap_or_else(|| {
+                panic!("源码里找不到读命令 {fn_name} —— 单子过时了（改了名或删了？）")
+            });
+            // 往回退到最近的那个 #[tauri::command 属性
+            let head = &sources[..at];
+            let attr_at = head.rfind("#[tauri::command").expect("前面一定有属性");
+            let attr = &sources[attr_at..at];
+            if !attr.contains("(async)") {
+                missing.push(fn_name);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些读命令还跑在主线程上（算多久界面就冻多久）—— 加 `#[tauri::command(async)]`：{missing:?}"
+        );
+
+        // 同样的扫描，对「碰网络 / Keychain」的命令再来一遍 —— 它们的主线程代价更重
+        let mut missing_io: Vec<&str> = Vec::new();
+        for fn_name in IO {
+            let needle = format!("pub fn {fn_name}(");
+            let at = sources.find(&needle).unwrap_or_else(|| {
+                panic!("源码里找不到命令 {fn_name} —— 单子过时了（改了名或删了？）")
+            });
+            let head = &sources[..at];
+            let attr_at = head.rfind("#[tauri::command").expect("前面一定有属性");
+            if !sources[attr_at..at].contains("(async)") {
+                missing_io.push(fn_name);
+            }
+        }
+        assert!(
+            missing_io.is_empty(),
+            "这些命令碰网络 / Keychain，却还跑在主线程上（读 Keychain 会弹系统框、\
+             推送要等网络 —— 界面会整段冻住）：{missing_io:?}"
+        );
     }
 }

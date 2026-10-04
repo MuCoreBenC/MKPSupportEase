@@ -53,21 +53,16 @@
   box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
 }
 
-/* ---------- mini 排位（写在自家 module：PagePresets 的 .seg 够不着这里的哈希） ----------
- * 类型分段 1、位置分段 2 —— 两条分段留在第一排，机型（order 3，在 Picker 的 module）
- * 也在这排；搜索（PagePresets 的 order 7）落去状态条那排。段内衬收一档：
- * 否则「类型+位置+机型」在 400px 上差 11px，机型会被挤折行。
+/* ---------- mini：段内衬收一档，只排版不改外观 ----------
+ * 两条分段在 DOM 里本来就排最前（工具栏的头两个兄弟），mini 不需要 order：
+ * MKP 档第一排是「类型 + 位置 + 搜索」、切片器档是「类型 + 位置 + 漏斗」——
+ * 排位都由自然顺序与 PagePresets 的断行/order 管（搜索 order 6 落喷嘴那排）。
+ * （曾经这里有 `.seg{order:1}/.segPush{order:2}`：那是给旧 Picker 档配套的，
+ * Picker 退场后它们只剩副作用 —— 把分段挤到 pill / 台账后面去，已删。）
+ * 段内衬收一档：窄窗上「类型+位置」差一点摆不下。
  */
-[data-density='mini'] .seg {
-  order: 1;
-}
-
 [data-density='mini'] .seg .opt {
   padding: 0 9px;
-}
-
-[data-density='mini'] .segPush {
-  order: 2;
 }
 
 /*

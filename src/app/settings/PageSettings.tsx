@@ -1,5 +1,16 @@
 /*
- * 设置页 —— 最小版本：**只有「高级设置 → 预设数据源」这一节**（2026-10-02）。
+ * 设置页 —— 两块：**「软件更新」+「高级设置」**（2026-10-04 第三刀下半）。
+ *
+ * # 软件更新（第一块，普通用户唯一相关的）
+ *
+ * ★ **它是"有没有新版本 SupportEase"的唯一用户入口**（作者定死）。这一块与预设页的
+ * 「读不懂」提示是**两条链**：这里答"软件有没有新版"，那里答"这批预设数据我读不读得懂"。
+ * 两个事实**不许混成一句话**（禁区）。
+ *
+ * 信息源 = 仓库根的 `release.json`（`presets/` 之外，不是预设数据）：这是下半新开的一口，
+ * 与 catalog 无关。检查**只在打开这一页时**发生（铁律 2：云端不参与首屏）。
+ *
+ * # 高级设置（第二块）
  *
  * 为什么数据源住这里（作者裁决，「同步」页退役那一刀）：
  *  - 普通用户**完全不需要**知道"数据源"这个概念 —— 官方地址由工作台配置、
@@ -17,7 +28,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
-import type { PresetSource } from '../../api/contract'
+import type { PresetSource, SoftwareUpdate } from '../../api/contract'
 import s from './PageSettings.module.css'
 
 type Mode = 'builtin' | 'manual'
@@ -29,6 +40,16 @@ export default function PageSettings() {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /*
+   * 软件更新这一块的状态。三态各有各的话：
+   *   `loading`  还在问
+   *   `null`     问不到（没配源 / 离线 / 远端没部署）—— 如实说"这次没查到"，不编"已是最新"
+   *   `SoftwareUpdate`  查到了，按 `hasUpdate` 分两句
+   */
+  const [update, setUpdate] = useState<SoftwareUpdate | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(true)
+  /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
+  const [appVersion, setAppVersion] = useState('')
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -47,6 +68,34 @@ export default function PageSettings() {
   useEffect(() => {
     void read()
   }, [read])
+
+  /*
+   * 软件更新：**只在打开这一页时问一次**（铁律 2：更新检查不在启动 / 首屏路径）。
+   * 两件事各问各的：版本号（本地、一定拿得到）与远端发布信息（可能问不到）。
+   * 远端问不到 = `update` 留在 `null`，界面说"这次没查到" —— **不冒充"已是最新"**。
+   */
+  const checkUpdate = useCallback(async () => {
+    setUpdateBusy(true)
+    try {
+      const [version, got] = await Promise.all([
+        api.getAppVersion().catch(() => ''),
+        api.checkSoftwareUpdate(),
+      ])
+      setAppVersion(version || got.currentVersion)
+      setUpdate(got)
+    } catch {
+      /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 —— 如实留"没查到" */
+      setUpdate(null)
+      const v = await api.getAppVersion().catch(() => '')
+      setAppVersion(v)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void checkUpdate()
+  }, [checkUpdate])
 
   const pick = (next: Mode) => {
     setMode(next)
@@ -106,13 +155,62 @@ export default function PageSettings() {
     <div className={s.page} data-density="roomy">
       <header className={s.head}>
         <h1 className={s.title}>设置</h1>
-        <p className={s.sub}>
-          应用设置、诊断与版本。本版只有「高级设置」这一节 —— 普通使用不用来这里。
-        </p>
+        <p className={s.sub}>软件更新与应用设置。</p>
       </header>
+
+      <section className={s.section} aria-label="软件更新">
+        <h2 className={s.secTitle}>软件更新</h2>
+
+        <div className={s.updateRow}>
+          <div className={s.updateHeadline}>
+            {updateBusy ? (
+              <span className={s.updateIdle}>正在检查……</span>
+            ) : update?.hasUpdate === true ? (
+              <span className={s.updateFresh}>有新版本 SupportEase</span>
+            ) : update !== null ? (
+              <span className={s.updateIdle}>已是最新版本</span>
+            ) : (
+              <span className={s.updateIdle}>这次没能查到更新</span>
+            )}
+          </div>
+
+          {/* 版本对照：当前 → 最新。当前版本一定拿得到（来自构建期） */}
+          <p className={s.current}>
+            当前版本 {appVersion || '—'}
+            {update?.hasUpdate === true ? ` → 最新版本 ${update.latestVersion}` : ''}
+          </p>
+
+          {update?.hasUpdate === true && update.notes !== undefined && (
+            <p className={s.fieldNote}>{update.notes}</p>
+          )}
+
+          <div className={s.row}>
+            {update?.hasUpdate === true && update.url !== undefined && (
+              <a className={s.btn} href={update.url} target="_blank" rel="noreferrer">
+                查看更新
+              </a>
+            )}
+            <button
+              type="button"
+              className={s.btn}
+              onClick={() => void checkUpdate()}
+              disabled={updateBusy}
+            >
+              {updateBusy ? '正在检查……' : '重新检查'}
+            </button>
+          </div>
+
+          {update === null && !updateBusy && (
+            <p className={s.fieldNote}>
+              更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。
+            </p>
+          )}
+        </div>
+      </section>
 
       <section className={s.section} aria-label="高级设置">
         <h2 className={s.secTitle}>高级设置</h2>
+        <p className={s.fieldNote}>以下仅供开发排查，普通使用不需要改动。</p>
 
         <div className={s.field}>
           <div className={s.fieldTitle}>预设数据源</div>

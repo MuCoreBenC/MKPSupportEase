@@ -61,7 +61,10 @@ import {
   type ColRef,
   type Desk,
   type DeskGroup,
+  type MachineList,
   type Matrix,
+  type MetaApplied,
+  type ParamMetaEdit,
   type Patch,
   type Refresh,
   type RegistryView,
@@ -80,6 +83,7 @@ import BatchEdit from './BatchEdit'
 import type { BatchTarget } from './BatchEdit'
 import CellEditor from './CellEditor'
 import CompareMatrix from './CompareMatrix'
+import ParamDefModal from './ParamDefModal'
 import ParamDetail, { StatusTag } from './ParamDetail'
 import s from '../c14.module.css'
 
@@ -117,6 +121,8 @@ interface Props {
     patches: Patch[],
     refresh?: Refresh,
   ) => Promise<{ desk: Desk | null; matrix: Matrix | null }>
+  /** 「编辑定义」保存成功后交一条给外壳 —— 压进撤销栈（改前/改后整包） */
+  onMetaApplied: (m: MetaApplied) => void
   /** 外壳的保存 / 放弃 / 撤销 */
   onSave: () => void
   onDiscard: () => void
@@ -127,7 +133,7 @@ interface Props {
 
 export default memo(ParamsPage)
 
-function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, onDiscard, onUndo, onGoto }: Props) {
+function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onSave, onDiscard, onUndo, onGoto }: Props) {
   /* 定位只看挂载时的那一次 —— 之后就是普通的本页状态 */
   const init = initialFocus ?? null
   /*
@@ -153,8 +159,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   /**
    * 「仍然展开看」摊开的那几张卡（C15 A2）。**只装 session 里点开过的** ——
    * 收不收起来每次渲染按后端给的行态现判，所以条件一变回来，卡自己就正常了。
+   * 2026-10-03 作者：「展开了之后，还有按钮可以把它折回来」—— 摊开的卡上
+   * 长一颗「收起来」，点了就把这一张从这里请出去（收起判据照旧在后端字段里）。
    */
   const [openedCards, setOpenedCards] = useState<string[]>([])
+  /** 正在编辑定义的参数（2026-10-03。「编辑定义」模态框，null = 关着） */
+  const [defEditKey, setDefEditKey] = useState<string | null>(null)
+  /**
+   * 定义落盘的计数。定义一变，行的分组/文案/可改性都可能变 —— 挂进三处
+   * 派生数据的 effect 里当一次「手动 tick」（`tick` 是外壳的，只管值）
+   */
+  const [metaTick, setMetaTick] = useState(0)
   /** 对照模式右栏的两页签：false = 参数详情，true = 批量修改 */
   const [batchTab, setBatchTab] = useState(false)
   /** 多行 G-code 的模态框：存「哪一层」—— 按钮只在框右上角那枚（C14 第八轮） */
@@ -202,13 +217,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     [],
   )
 
-  /* 注册表（参数的元数据）。开场取一次 */
+  /*
+   * 注册表（参数的元数据）。开场取一次；此后外壳每写一笔（tick 拨一格）就
+   * 重取 —— 定义编辑的撤销/重做走外壳那条栈，回来时只有 tick 会动，注册表
+   * 得自己跟上（值的改动顺带重取一次很便宜，注册表就这么几十条）。
+   */
   useEffect(() => {
     void wb
       .registry()
       .then(setRegistry)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [])
+  }, [tick])
 
   const paramOf = useCallback(
     (key: string) => registry?.params.find((p) => p.key === key) ?? null,
@@ -255,7 +274,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .desk(machineId, target === BASE ? null : target, tabSel, q)
       .then(setDesk)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [mode, machineId, target, tabSel, q, tick])
+  }, [mode, machineId, target, tabSel, q, tick, metaTick])
 
   /*
    * 「去处理」带过来的定位（C14 第二十四轮 / C15 同款）：等这一屏配方台读完，
@@ -272,17 +291,23 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     locateAnchor(`t-param-${key}`, { row: true })
   }, [init, desk, mode])
 
-  /* 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮） */
+  /*
+   * 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮）。
+   * **tab 不递给后端**（2026-10-03）：矩阵一律取全量行，领域过滤挪到下面
+   * `shownMatrix` 与「仅显示差异」同一处做 —— 之前 tab 一递，页签计数只能
+   * 从过滤后的行里数，点了哪个领域其余页签就被数成 0 滤没了（作者：
+   * 「必须返回到全部才能看到其他」）。附带的好处：切领域不再过一遍后端。
+   */
   useEffect(() => {
     if (mode !== 'compare' || compareColRefs.length === 0) {
       setMatrix(null)
       return
     }
     void wb
-      .matrix(compareColRefs, tabSel, q, baseMachineId)
+      .matrix(compareColRefs, null, q, baseMachineId)
       .then(setMatrix)
       .catch((e: unknown) => setError(isAppError(e) ? e.message : String(e)))
-  }, [mode, compareColRefs, tabSel, q, baseMachineId, tick])
+  }, [mode, compareColRefs, q, baseMachineId, tick, metaTick])
 
   /* 对照模式右栏「参数详情」的数据：基准机型的全部层（选了参数才取） */
   useEffect(() => {
@@ -294,7 +319,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
       .desk(baseMachineId, target === BASE ? null : target, null, '')
       .then(setDrawerDesk)
       .catch(() => setDrawerDesk(null))
-  }, [mode, sel, baseMachineId, target, tick])
+  }, [mode, sel, baseMachineId, target, tick, metaTick])
 
   /** 机器的中文名（对照模式的层标签用） */
 
@@ -304,6 +329,20 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
     if (layerUid === null) return `${m?.display ?? mid} · ${words.level.machine.label}`
     const v = m?.versions.find((x) => x.uid === layerUid)
     return `${m?.display ?? mid} / ${v?.name ?? layerUid}`
+  }
+
+  /**
+   * 「编辑定义」的确认保存（2026-10-03 第二轮）：落盘、把改前/改后两份整包
+   * 交给外壳压撤销栈（状态栏那颗「撤销」管得到定义了）、关框。抛错原样抛回
+   * —— 模态框留着框，把话摆出来。
+   */
+  const commitDef = async (key: string, before0: ParamView, edit: ParamMetaEdit) => {
+    const next = await wb.setParamMeta(key, edit)
+    onMetaApplied({ label: `定义 · ${edit.label}`, key, before: metaOf(before0), after: edit })
+    setRegistry(next)
+    setDefEditKey(null)
+    setMetaTick((t) => t + 1)
+    toasts.push(`定义已写回 param_registry.toml · ${edit.label}`, { label: '撤销', run: onUndo })
   }
 
   /** 写值的统一入口：手势前拦弃用、按 valueType 归位，然后走外壳的 apply */
@@ -344,9 +383,13 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
     const level = layerUid !== null ? 'version' : 'machine'
     const owner = layerUid ?? ownerMachineId
+    /*
+     * 矩阵的刷新同样取全量（tab 过滤在前端）—— 写一笔回来要是带着旧 tab，
+     * 页签条立刻又塌回「全部 + 当前」两个了。
+     */
     const applyRefresh: Refresh =
       refreshKind === 'matrix'
-        ? { page: 'matrix', cols: compareColRefs, tab: tabSel, query: q }
+        ? { page: 'matrix', cols: compareColRefs, tab: null, query: q }
         : refresh
     const out = await onApply(`${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`, [
       { kind: 'setValue', level, owner, key: row.key, value },
@@ -474,6 +517,29 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
 
   /* 右栏按需出现：选了参数就有。没选参数时整栏收起，不摆一块空面板占位置 */
   const selParam = sel !== null ? (paramOf(sel) ?? null) : null
+  /** 「编辑定义」正在改的那条（null = 关着） */
+  const defParam = defEditKey !== null ? paramOf(defEditKey) : null
+  /*
+   * 「适用机型」选择器的候选（品牌 + 机型清单）。定义框开着才取一次 ——
+   * 挂了会重取的钩子就多一次 IPC；这里一次够用（品牌/机型清单不跟草稿走）。
+   */
+  const [machineList, setMachineList] = useState<MachineList | null>(null)
+  useEffect(() => {
+    if (defEditKey === null) {
+      setMachineList(null)
+      return
+    }
+    let dead = false
+    void wb
+      .machines()
+      .then((m) => {
+        if (!dead) setMachineList(m)
+      })
+      .catch(() => undefined)
+    return () => {
+      dead = true
+    }
+  }, [defEditKey])
   const selRow =
     sel !== null ? (mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)) : null
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
@@ -641,11 +707,31 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
   }
 
   /** 对照矩阵喂给视图的行（「仅显示差异」在这里滤） */
+  const searching = q.trim() !== ''
+  /*
+   * 领域（tab）过滤也在这里滤 —— 行身上带着后端给的 `tabId`，与「仅显示差异」
+   * 是同一处版面决定。搜索态不按领域收窄（后端的规矩就是搜索跨全部分类，
+   * doc §8.1），跟后端那份过滤对齐。
+   */
   const shownMatrix = matrix
-    ? diffOnly
-      ? { ...matrix, rows: matrix.rows.filter((r) => matrix.diffKeys.includes(r.key)) }
-      : matrix
+    ? {
+        ...matrix,
+        rows: matrix.rows
+          .filter((r) => searching || tabSel === null || r.tabId === tabSel)
+          .filter((r) => !diffOnly || matrix.diffKeys.includes(r.key)),
+      }
     : null
+  /*
+   * 页签条计数数的行：跟着「仅显示差异」走（与旧账一致），唯独**不吃当前
+   * 领域那一刀** —— 领域过滤只管正文。不然点了哪个领域，其余页签就从过滤
+   * 后的行里被数成 0，整条页签只剩「全部 + 当前」（作者：「必须返回到全部
+   * 才能看到其他」）。
+   */
+  const tabCountRows = matrix
+    ? diffOnly
+      ? matrix.rows.filter((r) => matrix.diffKeys.includes(r.key))
+      : matrix.rows
+    : []
 
   return (
     <div className={s.pPage}>
@@ -904,6 +990,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                          * 模式开关整卡收起（C15 A2）：整卡现在一行都改不动就收起行，
                          * 只留后端那句 + 「仍然展开看」。判据见文件头那一节 ——
                          * 一句话说：**判据全在后端给的字段里**（`offNote` / `blockedHint`）。
+                         * 摊开之后卡头长一颗「收起来」（2026-10-03）—— 出口与入口是一对。
                          */
                         const note = collapseNoteOf(g, desk.cur, q.trim() !== '')
                         if (note !== null && !openedCards.includes(g.sectionId)) {
@@ -935,6 +1022,12 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                                 mid: machineId ?? '',
                                 uid: target === BASE ? null : target,
                               })
+                            }
+                            onCollapse={
+                              note !== null
+                                ? () =>
+                                    setOpenedCards((prev) => prev.filter((id) => id !== g.sectionId))
+                                : undefined
                             }
                           />
                         )
@@ -997,7 +1090,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                   >
                     全部 <em>{shownMatrix.totalRows}</em>
                   </button>
-                  {tabCountsOf(shownMatrix, registry).map((t) => (
+                  {tabCountsOf(tabCountRows, registry).map((t) => (
                     <button
                       key={t.id}
                       type="button"
@@ -1120,6 +1213,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
                   onClose={() => setSel(null)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
+                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（即时落盘） */
+                  onEditDef={selParam ? () => setDefEditKey(sel) : undefined}
                   /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
                   onOpenGcode={(key, layerUid) => {
                     const mid =
@@ -1225,6 +1320,23 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onSave, o
           onClose={() => setGcodeOpen(null)}
         />
       )}
+
+      {/*
+        参数定义编辑（2026-10-03）：名称/单位/值类型/控件/范围/步进/出厂默认/
+        可选项（含逐条弃用）/适用机型/属于/前置条件/弃用。确认保存才落盘 ——
+        落盘成功把改前/改后整包交给外壳压撤销栈；回来的注册表直接顶掉旧的，
+        三处派生数据靠 `metaTick` 重取。
+      */}
+      {defEditKey !== null && defParam !== null && (
+        <ParamDefModal
+          paramKey={defEditKey}
+          param={defParam}
+          params={registry?.params ?? []}
+          machineList={machineList}
+          onClose={() => setDefEditKey(null)}
+          onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
+        />
+      )}
     </div>
   )
 }
@@ -1287,6 +1399,7 @@ function GroupCard({
   onPick,
   onWrite,
   onOpenGcode,
+  onCollapse,
 }: {
   group: DeskGroup
   cur: number
@@ -1307,12 +1420,27 @@ function GroupCard({
     beforeRaw?: string,
   ) => void
   onOpenGcode: (key: string) => void
+  /**
+   * 「收起来」（2026-10-03）：这张卡被条件关着、又被「仍然展开看」摊开时才有 ——
+   * 点了回到收起态。条件已经变回来了（`offNote` 没了）就不给：正常卡没有「收」可言
+   */
+  onCollapse?: () => void
 }) {
   return (
     <section className={s.pGroup}>
       <header className={s.pGroupHead}>
         <span>{group.label}</span>
         <em>{group.count}</em>
+        {onCollapse && (
+          <button
+            type="button"
+            className={s.pFoldBtn}
+            title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
+            onClick={onCollapse}
+          >
+            {words.relate.foldBack}
+          </button>
+        )}
       </header>
       {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
       {group.items
@@ -1438,6 +1566,30 @@ function ParamLine({
 /* ---------- 纯函数小工具 ---------- */
 
 /**
+ * 「这条参数现在的定义」→ 一份整包载荷。`commitDef` 在保存前拿它拍**改前**
+ * 快照 —— 外壳撤销栈上那条 meta 条目的改前半边就是它（改后半边是这次真正
+ * 交上去的载荷）。
+ */
+function metaOf(p: ParamView): ParamMetaEdit {
+  return {
+    label: p.label,
+    desc: p.desc,
+    unit: p.unit,
+    valueType: p.valueType,
+    uiComponent: p.uiComponent,
+    defaultValue: p.defaultValue,
+    min: p.min,
+    max: p.max,
+    step: p.step,
+    parentKey: p.parentKey,
+    showWhen: p.showWhen,
+    deprecated: p.deprecated,
+    choices: p.choices,
+    machineFilter: [...p.machineFilter],
+  }
+}
+
+/**
  * **整卡收起该怎么说**（C15 A2）。返回 `null` = 不收起来（照旧铺行）。
  *
  * 判据全是从后端收到的那几个字段读出来的，前端不重判可见性：
@@ -1495,14 +1647,17 @@ function cellAtCol(matrix: Matrix, col: Col, key: string) {
   return row && ci >= 0 ? (row.cells[ci] ?? null) : null
 }
 
-/** 对照矩阵的页签（后端矩阵不带 nav，计数从行本身数） */
+/**
+ * 对照矩阵的页签（后端矩阵不带 nav，计数从行本身数）。行源由调用处给 ——
+ * 必须是**没被当前领域滤过**的那份（见 `tabCountRows`），不然页签会塌。
+ */
 function tabCountsOf(
-  matrix: Matrix,
+  rows: Row[],
   registry: RegistryView | null,
 ): { id: string; label: string; count: number }[] {
   if (registry === null) return []
   const count = new Map<string, number>()
-  for (const r of matrix.rows) {
+  for (const r of rows) {
     if (r.tabId === null) continue
     count.set(r.tabId, (count.get(r.tabId) ?? 0) + 1)
   }

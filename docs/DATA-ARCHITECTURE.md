@@ -5,6 +5,8 @@
 > **它不管实现：**工程约束查 `ARCHITECTURE.md`（两层数据根 / IPC / 原子写 / 权限），产品行为查 `PRESET-PRODUCT-RULES.md`（三状态 / SHA / 归档 / 状态流转）。
 > 格式之争（TOML 还是 JSON）是第二层问题。**先把层定死，格式是这套架构自然产生的东西，不该反过来成为架构本身。**
 > **现状对账单：**`docs/DATA-INVENTORY.md`——现有代码与文件按本总纲逐件归位的结果。
+> **发布链的根规则：**`docs/PUBLISH-ARCHITECTURE.md`——唯一源 → 发布根 → 客户端消费
+> （路径语义 / 薄 dist / 发布闸 / minVersion / PR 全程）。本文管**归属**，那份管**发布**。
 
 ---
 
@@ -62,7 +64,7 @@
 | 程序本体 + 前端产物 | 二进制与 vite 产物 |
 | **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身。**它不带云端地址** —— 见 §1④ 的分工 |
 | 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放。**登记后不再随前端产物分发**：它是"产品开发出来的资源"，与 MKP 预设一样走 catalog → Source → Delivery → `mkp/<kind>/…`（第三圈已收口：三类全部接进同一条管道） |
-| 界面展示素材 | 品牌 logo、机型整机图、首页 / 校准页的测试模型合影——**随程序本体**（vite 资源管线，产物里带内容哈希），**不进 catalog**：它们不是产品数据资源，用户不下载也不更新。边界由 `runtime::catalog` 的判据守着（「资产台账里已无 image 类」） |
+| 界面展示素材 | 品牌 logo、首页 / 校准页的测试模型合影——**随程序本体**（vite 资源管线，产物里带内容哈希）。**机型整机图 2026-10-03 从这里搬回数据侧**：文件在 `presets/assets/printers/`、台账里是 `delivery = 'bundled'` 的条目（工作台可管可换图），到客户端仍**随程序本体**（构建期复制），但**不进 catalog 的 files[]**、客户端不下载。边界由 `runtime::catalog::dest_of_asset` 的判据守着（**按交付档位拦**，不按类型拦） |
 | 内置预设 | 随软件发布的成品内容（现 9 份，入库产物目录 `crates/preset/assets/presets`，判据锚定），在 catalog 里标"内置" |
 
 | 禁止 | 理由 |
@@ -102,6 +104,46 @@ Documents/SupportEase/
 ```
 
 给③新增任何子目录，**必须先改这份文档**，再写代码。
+
+#### catalog 的一生：**bootstrap → OTA → 当前**（2026-10-04 定，收口一个真事故）
+
+catalog 是 OTA 数据，**随包那份只是起点，不是最终资源**。三段各有唯一主人：
+
+```text
+① 随包 bootstrap catalog（层②，编译期 include_bytes! 进二进制）
+      只说"第一次启动时世界长什么样"——机型 / 版本 / 参数注册表 / 资产台账 /
+      交付文件条目。它是**起点**，不是判据。
+      │
+      │ 启动：只铺空位（ensure_released）—— 盘上没有才写，有就一个字节不动
+      ▼
+② 当前 catalog（层③，<appDataDir>/catalog.json）—— **运行时唯一有效的那一份**
+      首屏全部定义、下载校验的期望 SHA、Stale 判定，一律以它为准（铁律 4）。
+      │
+      │ 应用远端目录（apply_remote_update → release_bytes）：旧份归档，新份生效
+      ▲
+      │ OTA（check_remote_update 比 revision）
+      ┌───────────────────────────┐
+      │ ③ 远端 catalog（层④发布产物）│ —— presets/dist/catalog.json（与 source.json 同源）
+      └───────────────────────────┘
+```
+
+**三条硬规矩**：
+
+1. **启动绝不覆盖 ②**。启动只问"盘上有没有"（`release::ensure_released`），不比较、不升级。
+   用升级语义铺盘（曾经的 `release::release_catalog`）会让每次启动把用户 OTA 拿到的新目录
+   换回随包那份 —— 于是下载永远拿旧 SHA 比云端新文件、永远 `SHA_MISMATCH`
+   （2026-10-04 实测修掉，判据 `startup_never_overwrites_an_ota_catalog`）。
+2. **期望值只来自 ②，不来自 ①**。`deliver` 的 SHA / size 校验、`file_status` 的 Stale 判定、
+   `state::save_active` 的应用指纹、`mine::based_on` 的"官方换版了没"，读的都是 ②。
+   ① 只在 ② 缺席时被铺成 ②，**它自己从不直接参与校验**。
+3. **对不上时报"目录过期"，不报"文件坏了"**。目录停在旧 revision 时拿旧 SHA 比新文件必然不符，
+   该做的是刷新目录（`sha_mismatch_message`：两个 revision 都摆出来 + 指路「检查更新」）；
+   只有两个 revision 相同却字节不符，才是真的源头坏件。
+
+**构建链的双身份（欠账，见 §4）**：`crates/preset/assets/presets/*.toml` 是 ① 的**构建输入**
+（`gen-presets --write` → `gen-catalog` → `catalog.generated.json`），它**不是**"客户端内置的最终
+MKP TOML"（`mkp/` 初始为空是铁律 3）。工作台生成的是 ③ 的交付根 `presets/dist/mkp/presets/*.toml`，
+两批字节不同**本身不构成下载失败** —— 真正的失败只来自 ② 落后于 ③。
 
 #### 预设 TOML 的一生：**官方线 / 用户线，两条不许混**（2026-10-02 定）
 
@@ -311,10 +353,13 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
 | 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图不作为该类收口，而是改判归属、剥离台账**（第三刀，见下） |
-| 3b | ~~`public/assets/printers/` 的整机图：登记进 catalog 还是留在包外，一直悬着~~ | ~~归属未定~~ | **已收口 2026-10-01（第三圈第三刀）**：判定它不是产品数据资源而是**界面展示素材**（用户不下载、不更新、不管理它），于是**从资产台账剥离**：文件搬去 `src/app/assets/printers/`（vite 资源管线随程序本体走），`presets/assets.toml` 的 4 条 `image` 与机型文件的 `image` 引用清掉（19 → 15 条定义）。判据从"别忘了整机图"换向为**「资产台账里已无 image 类」**。遗留：schema 层的 `AssetKind::Image` 与机型 `image` 字段保留而值为空（要不要连 schema 一起收掉，另裁） |
+| 3b | ~~整机图：登记进 catalog 还是留在包外，一直悬着~~ | ~~归属未定~~ | **收口两次**：2026-10-01（第三圈第三刀）判它是界面素材、从台账剥离搬进客户端源码；**2026-10-03 作者改判作废**（「不会编程的用户怎么改图片呢」）。现状：文件在 `presets/assets/printers/`，`presets/assets.toml` 恢复 4 条 `image`（19 条），用 **`delivery = 'bundled'`** 表达「不进云端交付、随包不下载」，到客户端靠构建期复制（`scripts/copy-assets.mjs`）。判据从「台账里已无 image 类」换成**「整机图在台账里、且不进 catalog 的 files[]」**（`dest_of_asset` 按档位拦） |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | **半收口（2026-10-02 核对）**：catalog 已统一登记全部 9 份预设（`files[]`，`embedded_matches_rebuild` 判据盯着），但条目上**没有"内置"这一标记**、`BUILTIN_PRESETS` 作为编译期常量仍独立可达（判据 `builtin_presets_match_dir` 锚它）。要勾这一条 = 给 `CatalogFile` 加"内置"标记并让判据改锚 catalog；登记为**小口子**，不阻塞任何业务 |
 | 5 | ~~下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/`~~ | ~~命名欠账~~ | **已收口 2026-10-02**：产品规则正文按本文 `mkp/` 重写（`PRESET-PRODUCT-RULES.md` 的"反写"版，见该文件头），全仓不再有 `cloud/` 这个下载区叫法 |
 | 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |
+| 7 | **`catalog.path` 的基准错了**：现在指向 `mkp/<kind>/…`，发布时把 A 类资产**复制**一份进 `dist/` ⇒ 同一份字节有了第二份真相（0.2mm 那 4 份 BBS 登记了却没发，客户端点下载 404） | 铁律 1 的孪生问题 | **方案已定、待实施**（2026-10-04 裁决 C）：`catalog.path` 改指**真实资产源路径**、A 类**不复制**、发布根 = `presets/`。见 `PUBLISH-ARCHITECTURE.md` §0/§1 |
+| 8 | **没有统一的发布闸**：`audit_catalog` / `deliverable_set` / `dist_strays` / `version_orphans` 是散落命令，且 `audit_catalog` 只报待办**不阻断** | 第五圈（发布可信）缺失 | **待实施**：`PublishAudit` 结果模型 + 十五项逐项打勾模态框 + 全绿才允许建 PR。见 `PUBLISH-ARCHITECTURE.md` §5 |
+| 9 | **`minVersion` / 结构代次不存在**：只有 `catalogSchema: u32`（加字段不升号），没有"结构变了 → 最小客户端版本跟着变"的能力 | 第六圈（演进）缺失 | **待实施**：结构签名（只加可选字段时不变）+ 显式规则表 + 发布闸查不到签名就**禁止发布**。见 `PUBLISH-ARCHITECTURE.md` §5.3 |
 
 ## 5. 判据：怎么知道没人违反
 

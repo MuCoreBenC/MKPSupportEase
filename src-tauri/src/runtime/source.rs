@@ -66,6 +66,13 @@ pub const SOURCE_SCHEMA: u32 = 1;
 /// （见 `workbench::app::dist` 的 `NEW_CATALOG_FILE`）
 pub const CATALOG_FILE: &str = "catalog.json";
 
+/// **软件发布信息**（`release.json`）的固定名字。
+///
+/// ★ 它**不是预设数据**：住发布根（`presets/`）的**上一级**，不进制 catalog / manifest，
+/// 也不参与发布闸的内容校验（作者 2026-10-04 定死）。它是「有没有新版本的 SupportEase」
+/// 这条**软件发布链**的信息源，与"预设数据能不能读"是两件事。
+pub const RELEASE_FILE: &str = "release.json";
+
 /// Bootstrap（`source.json`）的 schema 代次。认不得就拒绝 —— 不猜新版长什么样。
 /// 注意它与上面的 [`SOURCE_SCHEMA`] 是两回事：那是**这台机器上设置文件**的代次，
 /// 这是**发布出去那一口文件**的协议代次
@@ -226,28 +233,17 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
 
 /// 解析 `source.json`（[`BootstrapFile`]）成两个地址。**纯函数**（字节已由调用方取回）——
 /// 联网那一小步在 [`resolve_entry`] 里，这里全部能单测。
+///
+/// ★ 它要 `url` 的唯一理由是：`baseUrl` 缺省时得从"这个文件在哪个 URL"回退出目录。
+/// **在本地校验本地文件时不该走这条路**（本地路径不是 http URL）—— 那种场景用
+/// [`validate_bootstrap_local`]。
 pub fn parse_bootstrap(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppError> {
+    /* 前一半（JSON 形状 + 代次 + catalog 相对路径合法性）与本地校验**同一处实现** ——
+    不许两处各写一遍（那正是「两边各算一遍、各自看着都对」的老病根） */
+    let catalog = validate_bootstrap_local(bytes)?;
     let file: BootstrapFile = serde_json::from_slice(bytes).map_err(|e| {
         AppError::corrupted("Bootstrap（source.json）解析不了").with_detail(format!("{url} / {e}"))
     })?;
-    if file.source_schema != BOOTSTRAP_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "Bootstrap 的格式代次认不了：文件是 {}，程序认 {}",
-            file.source_schema, BOOTSTRAP_SCHEMA
-        ))
-        .with_detail(url.to_owned()));
-    }
-    let catalog = file.catalog.trim();
-    if catalog.is_empty()
-        || catalog.starts_with("http://")
-        || catalog.starts_with("https://")
-        || catalog.contains("..")
-    {
-        return Err(AppError::corrupted(
-            "Bootstrap 里的 catalog 路径不合法（要相对路径、不许 ..）",
-        )
-        .with_detail(format!("{url} / catalog = {:?}", file.catalog)));
-    }
     let base_url = match file.base_url.as_deref() {
         /* 显式给的：与手动填的根走同一套收拾规矩（砍尾斜杠、只认 http(s)） */
         Some(raw) => normalize_base_url(raw)?,
@@ -255,9 +251,57 @@ pub fn parse_bootstrap(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppErr
         None => directory_of(url)?,
     };
     Ok(ResolvedSource {
-        catalog_url: join_url(&base_url, catalog),
+        catalog_url: join_url(&base_url, &catalog),
         base_url,
     })
+}
+
+/// **本地发布产物校验**：验一份 `source.json` 的**内容**是否合法 ——
+/// **不需要 URL、不解析 baseUrl、不拼地址**，因此本地文件（`presets/dist/source.json`）
+/// 也能验。
+///
+/// 验三件事（与 [`parse_bootstrap`] 共用同一段实现，只有"base_url 从哪来"这一步不同）：
+/// 1. 是合法 JSON 且能反序列化成 [`BootstrapFile`]；
+/// 2. `sourceSchema` 对得上 [`BOOTSTRAP_SCHEMA`]；
+/// 3. `catalog` 是合法的**相对**路径（非空、非 http(s) 绝对 URL、不含 `..`）。
+///
+/// 返回 trim 后的 catalog 相对路径（调用方拿它定位"它指向的那份目录文件在不在"）。
+///
+/// ★ 为什么单独有这个入口：发布闸 ⑬ `source/correct` 要验的是**本地交付根里那一份**，
+/// 早先误用了要求 http URL 的 [`parse_bootstrap`]，于是"文件明明合法、闸却判解析不出来"
+/// （`directory_of` 拒本地绝对路径）。本地校验就不该要求 URL。
+pub fn validate_bootstrap_local(bytes: &[u8]) -> Result<String, AppError> {
+    let file: BootstrapFile = serde_json::from_slice(bytes).map_err(|e| {
+        AppError::corrupted("Bootstrap（source.json）解析不了").with_detail(e.to_string())
+    })?;
+    if file.source_schema != BOOTSTRAP_SCHEMA {
+        return Err(AppError::corrupted(format!(
+            "Bootstrap 的格式代次认不了：文件是 {}，程序认 {}",
+            file.source_schema, BOOTSTRAP_SCHEMA
+        )));
+    }
+    let catalog = file.catalog.trim();
+    check_catalog_rel(catalog, &file.catalog)?;
+    Ok(catalog.to_owned())
+}
+
+/// `catalog` 必须是**合法的相对路径**：非空、不是 http(s) 绝对 URL、不含 `..`。
+///
+/// 抽成一处：[`parse_bootstrap`] 与 [`validate_bootstrap_local`] **共用**它 ——
+/// 这条口径只写一遍（`..` 会被 URL 层解释成向上爬，等于换了一份目录；绝对 URL 则
+/// 把"文件根"从 Bootstrap 身边挪走，与"相对 Bootstrap 所在目录"的约定冲突）。
+fn check_catalog_rel(trimmed: &str, raw: &str) -> Result<(), AppError> {
+    if trimmed.is_empty()
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.contains("..")
+    {
+        return Err(AppError::corrupted(
+            "Bootstrap 里的 catalog 路径不合法（要相对路径、不许 ..）",
+        )
+        .with_detail(format!("catalog = {raw:?}")));
+    }
+    Ok(())
 }
 
 /// `https://host/a/b/source.json` → `https://host/a/b`。
@@ -280,6 +324,36 @@ fn directory_of(url: &str) -> Result<String, AppError> {
         return Err(bad());
     }
     Ok(dir.to_owned())
+}
+
+/// 从**文件下载根**（`presets/dist` 或 `presets`）推出软件发布信息（`release.json`）的地址。
+///
+/// 语义（作者 2026-10-04 定死）：`release.json` 住发布根 `presets/` **之外** —— 它不是预设数据。
+/// 这里从 base 往上走**恰好一级**，再拼固定文件名：`…/presets/dist` → `…/presets/release.json`；
+/// 手动根 `…/presets` → `…/release.json`。**刻意不"多走几级去找"** —— 那会让部署位置一变
+/// 就悄悄指错。直接根与 Bootstrap 解析出来的 base 都走这一处，只有这一个答案。
+///
+/// 只认 http(s) 且要有可退回的目录段：host 根（`https://host`）如实拒，不编一个地址。
+pub fn release_url(base_url: &str) -> Result<String, AppError> {
+    let trimmed = base_url.trim_end_matches('/');
+    let bad = || {
+        AppError::invalid_argument(format!(
+            "数据源根不像一个可退回上一级的 http(s) 地址：{base_url}"
+        ))
+    };
+    let rest = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .ok_or_else(bad)?;
+    if rest.is_empty() || !rest.contains('/') {
+        return Err(bad());
+    }
+    let idx = trimmed.rfind('/').filter(|&i| i >= 8).ok_or_else(bad)?;
+    let parent = trimmed[..idx].trim_end_matches('/');
+    if parent.ends_with(':') {
+        return Err(bad());
+    }
+    Ok(format!("{parent}/{RELEASE_FILE}"))
 }
 
 /// 把人填进来的地址收拾干净：去首尾空白、砍掉末尾多余的斜杠。
@@ -485,6 +559,50 @@ mod tests {
         }
     }
 
+    /* ---------- 本地校验（发布闸 ⑬ 用；不要求 URL） ---------- */
+
+    /// ★★ **本地 `source.json`（无 baseUrl）必须校验得过** —— 这条直接钉住那个 bug：
+    /// 以前发布闸拿本地路径喂 `parse_bootstrap`，`directory_of` 拒"非 http" ⇒ 合法文件被判"解析不出来"。
+    #[test]
+    fn source_correct_accepts_a_local_bootstrap_without_a_url() {
+        // 与 `dist::bootstrap_json()` 产出同形：只有 sourceSchema + catalog，没有 baseUrl
+        let bytes = br#"{"sourceSchema":1,"catalog":"catalog.json"}"#;
+        let rel = validate_bootstrap_local(bytes).expect("本地合法档该验得过，不需要 URL");
+        assert_eq!(rel, "catalog.json");
+    }
+
+    /// 本地校验**不等于放水**：坏 JSON / 代次认不出 / catalog 绝对 URL 或含 `..` 一律如实拒。
+    #[test]
+    fn a_broken_bootstrap_is_still_refused_locally() {
+        for bad in [
+            b"not json".as_slice(),
+            br#"{"sourceSchema":99,"catalog":"catalog.json"}"#,
+            br#"{"sourceSchema":1,"catalog":""}"#,
+            br#"{"sourceSchema":1,"catalog":"../outside.json"}"#,
+            br#"{"sourceSchema":1,"catalog":"https://elsewhere.example.com/catalog.json"}"#,
+        ] {
+            assert!(
+                validate_bootstrap_local(bad).is_err(),
+                "{} 该被拒",
+                String::from_utf8_lossy(bad)
+            );
+        }
+    }
+
+    /// 本地校验与远端解析**共用同一段**：同一份字节，本地过 ⟺ 远端那半的前置也过。
+    /// （只有"base_url 从哪来"不同 —— 本地不要求 URL，远端才需要。）
+    #[test]
+    fn local_validation_matches_what_the_remote_parser_accepts_first() {
+        let bytes = br#"{"sourceSchema":1,"catalog":"catalog.json"}"#;
+        assert!(validate_bootstrap_local(bytes).is_ok());
+        // 同一份字节配一个远端 URL：远端解析器也过（前半段走的是同一处校验）
+        assert!(parse_bootstrap("https://host/a/source.json", bytes).is_ok());
+        // 坏档：两边**都**拒（口径一致）
+        let broken = br#"{"sourceSchema":1,"catalog":"../x.json"}"#;
+        assert!(validate_bootstrap_local(broken).is_err());
+        assert!(parse_bootstrap("https://host/a/source.json", broken).is_err());
+    }
+
     /// 目录回退的边界：host 后面的第一段才是目录；没有路径段 / 没有 host 都拒
     #[test]
     fn directory_fallback_edges() {
@@ -555,5 +673,24 @@ mod tests {
             join_url("https://cdn.example.com/mkp", "A1-standard.toml"),
             "https://cdn.example.com/mkp/A1-standard.toml"
         );
+    }
+
+    /* ---------- 软件发布信息（release.json）的地址 ---------- */
+
+    /// `release.json` 住发布根 `presets/` **之外**：从文件下载根往上**恰好一级**。
+    /// 直接根（`…/presets/dist`）与 Bootstrap 解析出来的 base 都走这一处。
+    #[test]
+    fn release_url_is_one_level_above_the_file_root() {
+        assert_eq!(
+            release_url("https://host/release/presets/dist").expect("该推得出"),
+            "https://host/release/presets/release.json"
+        );
+        // 手动根（只到 presets/）也是往上恰好一级
+        assert_eq!(
+            release_url("https://host/mkp-content").expect("该推得出"),
+            "https://host/release.json"
+        );
+        // host 后面只有一段（没有可退回的目录）：如实拒，不编一个地址
+        assert!(release_url("https://host").is_err());
     }
 }

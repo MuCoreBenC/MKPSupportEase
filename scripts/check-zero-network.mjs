@@ -26,8 +26,22 @@ const RUST_SRC = 'src-tauri/src'
 /** 前端源码目录 */
 const WEB_SRC = 'src'
 
-/** ① 唯一允许谈网络字节的那个文件。**只有它**，多一个都不行 */
-const NETWORK_FILE = 'src-tauri/src/runtime/net.rs'
+/**
+ * ① **允许谈网络字节的处所** —— 只有下面这两处，多一个都不行。
+ *
+ *   · `runtime/net.rs`           —— 客户端的数据下载（拿清单、拿文件）
+ *   · `workbench/app/platform/`  —— **发布平台出口**（GitHub / Gitee 的 PR/MR + CI）
+ *
+ * 第二处是第三刀下半（2026-10-04）**新开的、被批准的**网络面：发布必须由 SupportEase
+ * 自己发 HTTP（自持 Token），**不借用户的 `gh` / `git` 登录态**。这是产品决定 ——
+ * 用户的机器上不该需要先装好 GitHub CLI 才能发布。
+ *
+ * ★ 它的代价是**这条闸从"只住一处"放宽成"只住这两处"**，所以更要守死边界：
+ * 发布相关的 HTTP **只许加在 `platform/` 里**，别的地方（incl. 工作台其它模块）一律不许。
+ */
+const NETWORK_FILES = ['src-tauri/src/runtime/net.rs']
+/** 允许联网的**目录**（前缀匹配）。platform 每加一个平台文件都自动被这条收下 */
+const NETWORK_DIRS = ['src-tauri/src/workbench/app/platform/']
 
 /** Rust 侧的网络入口符号出现 anywhere 不在白名单文件里 → 红。右边是为什么 */
 const RUST_SYMBOLS = [
@@ -88,12 +102,17 @@ function norm(file) {
 
 /* ---------------- ① 范围闸 ---------------- */
 
+function allowedNetworkPlace(rel) {
+  if (NETWORK_FILES.some((f) => norm(f) === rel)) return true
+  return NETWORK_DIRS.some((d) => rel.startsWith(norm(d)))
+}
+
 function checkRustScope() {
   const files = walk(RUST_SRC, (f) => f.endsWith('.rs'))
   const hits = []
   for (const file of files) {
     const rel = norm(file)
-    if (rel === norm(NETWORK_FILE)) continue
+    if (allowedNetworkPlace(rel)) continue
     const text = readSafe(file)
     if (text === null) continue
     text.split('\n').forEach((line, i) => {
@@ -170,7 +189,9 @@ if (hits.length > 0) {
   for (const h of hits) console.error(`    ${h.where}\n      ${h.line}\n      → ${h.why}`)
   console.error('')
   console.error('  三道闸分别是：')
-  console.error(`    ① 网络字节只许住在 ${NETWORK_FILE}`)
+  console.error(
+    `    ① 网络字节只许住在 ${[...NETWORK_FILES, ...NETWORK_DIRS].join(' 与 ')}`,
+  )
   console.error('    ② 程序的 .setup() 段不许联网（首屏零网络）')
   console.error(`    ③ ${WEB_API_DIR} 不许自己发 HTTP（前端与后端之间只有 IPC）`)
   console.error('  改对了再跑一遍；**不要**把这些符号加进白名单来"让 CI 过"——那等于把闸门拆了。')
@@ -178,6 +199,6 @@ if (hits.length > 0) {
 }
 
 console.log('✓ 启动零网络：三道闸都干净 ——')
-console.log(`    ① 网络符号只出现在 ${NETWORK_FILE}`)
+console.log(`    ① 网络符号只出现在 ${[...NETWORK_FILES, ...NETWORK_DIRS].join(' 与 ')}`)
 console.log('    ② 程序的启动段没有联网动作')
 console.log(`    ③ ${WEB_API_DIR} 没有任何自己的 HTTP 调用（数据一律走 IPC）`)

@@ -1,0 +1,110 @@
+/*
+ * 发布历史面板的样式。
+ *
+ * 一行 = 左列时间 + 中列（阶段 / PR 状态 / commit / 产物份数 / 一句话结论）+ 右列操作。
+ *
+ * 列表自己滚（`max-height` + `overflow`）—— flex 列，不用 grid：
+ * grid 的 auto 行在 `max-height` 下仍按内容高算，超出的被裁掉、栏内不出滚动条
+ * （与 `PublishGateModal.module.css` / `GenerateDiffModal.module.css` 同一条坑）。
+ */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+}
+
+/* 时间那一列：定宽、等宽数字，扫一列对齐 */
+.when {
+  flex: none;
+  width: 8.5em;
+  padding-top: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.pr {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.merged {
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+}
+
+.open {
+  font-size: var(--fs-label);
+  color: var(--warn);
+}
+
+.checks {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.summary {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.acts {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  align-items: center;
+}
+
+.empty {
+  margin: 0;
+  color: var(--text-3);
+}
+
+.error {
+  margin: 0 0 10px;
+  color: var(--danger);
+}
+
+.footNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}

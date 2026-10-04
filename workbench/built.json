@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "records": {
+    "A1/FAST": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "1c274d6f189b4171d90d155151b8ad936eac6993eb2c581e3f2f6f4f1d01ee06"
+    },
+    "A1/FASTV3.3": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "39c4d15a1513e295e4adf33b814d8c10b99547341f0a082bedab0c4d9deb8534"
+    },
+    "A1/STANDARD": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "08d9e44ad14ba511b82cbd5dfb1dbe123e85a6515051a6a66f7cdbd38d60b6c2"
+    },
+    "A1_MINI/FAST": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "a4d7211aba3e083469125a8d1338fe3e758250e6c1090a0733f9f38afd1ece7e"
+    },
+    "A1_MINI/FASTV3.3": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "b5ca12573a7612b0a9d5e0245cd5a4b5b6145e80b95be8915e726acb2d93e9ec"
+    },
+    "A1_MINI/STANDARD": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "67403f60f61ff465d6315a01996f904f977a9971f28d33c432c26ee5b55c4b99"
+    },
+    "P1S/LITE": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "8e9cb7a0d93fdae3bcfefef493454a63364be6633147138510b675a2f7ebc950"
+    },
+    "P2S/STANDARD": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "eb7811db42c5555dedcc113f22a24ceff1dc99fec2447500b9b88c73e395bdcd"
+    },
+    "X1C/LITE": {
+      "stamp": "2026-10-03T15:38:41Z",
+      "fingerprint": "67f869f6158cf22717ebdaf2bfd493d000d9ba9e8d87c4350223629233ff85c1"
+    }
+  }
+}

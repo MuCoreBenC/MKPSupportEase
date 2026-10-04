@@ -49,18 +49,29 @@ const FORBIDDEN = [
   [/(^|\/)presets\/.+\.toml$/, '交付预设文件（编在二进制里，不该出现在前端产物）'],
 
   // 已接进 catalog 的资产：它们归 catalog 管（带 SHA / 大小，按需下载进 mkp/），
-  // 包里再带一份就是第二个真源。新增一类资产进管道，这里就多一行（与 vite.config.ts
-  // 的 DELIVERED_ASSET_DIRS 同一份清单，改一处就要改另一处）
+  // 包里再带一份就是第二个真源。新增一类资产进管道，这里就多一行。
+  //
+  // **这三条现在是第二道防线**（2026-10-03 第一刀）：第一道是"根本不存在那条路"——
+  // `public/assets/` 这个"原样直通进产物"的目录已经退役，客户端构建只把整机图
+  // （`delivery = 'bundled'`）经 vite 资源管线打进包，云端那几类没有任何入口。
+  // 留着是因为它守的是一条铁律（用户没下载的东西不许预置），代价只有三行。
   [/\/assets\/bbs\//, '已走下载管道的 BBS 资产（不该再随包分发）'],
   [/\/assets\/models\//, '已走下载管道的模型（不该再随包分发）'],
   [/\/assets\/icons\//, '已走下载管道的图标（不该再随包分发）'],
 
   // 注意：**界面自带素材不在这份清单的管辖里，也不需要靠目录名堵** ——
-  // 品牌 logo、机型整机图、首页 / 校准页那张 hero 合影，2026-10-01 起都住
-  // `src/app/assets/`（`bambuLogo.ts` / `printers/` / `hero/`），由 vite 资源管线打进
-  // `dist/assets/*.webp`（带内容哈希），与品牌 logo 同一档。
-  // `public/` 从此只剩两样：台账管的载荷根 `assets/{bbs,icons,models}`，与 BBS 页元数据 `bbs/`。
-  // 归属的判据在 Rust 侧（`runtime::catalog`：「资产台账里已无 image 类」），不在这里。
+  // 品牌 logo、首页 / 校准页那张 hero 合影住 `src/app/assets/`，由 vite 资源管线打进
+  // `dist/assets/*.webp`（带内容哈希）。
+  // 机型整机图 2026-10-03 第三版来法（第二刀）：文件在 `presets/assets/printers/`
+  // （台账登记、`delivery = 'bundled'`），构建期由 `tools/assets/sync.mjs` 对账同步进交付根
+  // `client-assets/`（生成物、不入库），再由 `tools/assets/plugin.mjs` 在 **build 收尾装配进
+  // `dist/assets/<path>`**（URL 同形、不带哈希）。客户端取图是**台账驱动**的：
+  // `catalog.assets[]` 的 id → `path` → `/assets/<path>`，**源码里没有 import、也不认识文件名**
+  // —— 所以这几张图在包里出现的位置就是数据里写的那个 path，**客户端不下载它**
+  // （不在 catalog files[]）。
+  // `public/` 从此只剩 BBS 页元数据 `bbs/`；`public/assets/`、`src/app/assets/printers/`
+  // 与 `@client-assets` 别名三个旧落点先后退役（一个东西两个落点 = 两个答案）。
+  // 归属的判据在 Rust 侧（`runtime::catalog::dest_of_asset`：按交付档位拦），不在这里。
 ]
 
 function walk(dir, prefix = '') {

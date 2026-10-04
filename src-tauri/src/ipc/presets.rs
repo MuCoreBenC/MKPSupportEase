@@ -129,11 +129,18 @@ fn file_name_of(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
-/// 切片器条目的类型。契约只有三种 `FileKind`，切片器这一档只有 bbs / orca 两个来源
-fn file_kind(a: &Asset) -> &'static str {
+/// 切片器条目的类型。契约只有三种 `FileKind`，切片器这一档只有 bbs / orca 两个来源。
+///
+/// **返回 `None` = 这一条不属于切片器档**（今天只有 MKP 预设的台账条目）——
+/// 以前这里是 `_ => "bbs_profile"` 兜底，于是 `path` 为空的 MKP 台账条目被贴成
+/// `bbs_profile` 混进了切片器表（2026-10-04 修的「presets/ 幽灵行」）。
+/// 判定改成显式匹配：认不出就说认不出，不猜。
+fn file_kind(a: &Asset) -> Option<&'static str> {
     match a.slicer.as_deref() {
-        Some("orca") => "orca_profile",
-        _ => "bbs_profile",
+        Some("orca") => Some("orca_profile"),
+        Some("bbs") | None => Some("bbs_profile"),
+        // MKP 预设与切片器不是一回事：它由 `catalog.files` 的 mkp_preset 条目承载
+        Some(_) => None,
     }
 }
 
@@ -175,6 +182,7 @@ fn control_of(c: UiComponent) -> &'static str {
         UiComponent::Segmented => "choice",
         UiComponent::Select => "choice",
         UiComponent::Gcode => "text",
+        UiComponent::Text => "text",
     }
 }
 
@@ -195,6 +203,8 @@ pub struct VersionDto {
     pub description: Option<String>,
     /// 空串 = 这个版本还没配套餐（与契约同一口径）
     pub bundle: String,
+    /// **这一版专属的外观图**（资产 id）。空串 = 回落机型图（不是"没图"）
+    pub image: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -216,9 +226,18 @@ pub struct MachineDto {
     pub id: String,
     pub display: String,
     pub brand: String,
+    /// **资产 id**（不是文件名）：机型图。前端去 catalog 的 `assets[]` 里查 `path`
     pub image: String,
+    /// 第二个图位（快拆版外观图）。`""` = 没有 —— 前端回落 [`Self::image`]
+    pub image_variant: String,
     pub icon: String,
     pub aliases: Vec<String>,
+    /// 这台机型能用的打印板 id（去 `getRuntimeCatalog().plates` 里按 id 查）。
+    /// 空 = 没有板规格（塔地图那一层不出）。**机型只持引用，不持几何**
+    pub plate_ids: Vec<String>,
+    /// 默认用哪一块板（塔地图按它选）；`null` = 没指定
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_plate_id: Option<String>,
     pub versions: Vec<VersionDto>,
     /// `null` = 这台机型还没配尺寸。不给空对象也不给 0
     pub dimensions: Option<Dimensions>,
@@ -238,8 +257,11 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
             // collect 时已经从 brands 换算成显示名（`拓竹 (Bambu Lab)`），直接用
             brand: m.brand.clone(),
             image: m.image.clone().unwrap_or_default(),
+            image_variant: m.image_variant.clone().unwrap_or_default(),
             icon: m.icon.clone().unwrap_or_default(),
             aliases: m.external_aliases.clone(),
+            plate_ids: m.plate_ids.clone(),
+            default_plate_id: m.default_plate_id.clone(),
             versions: m
                 .versions
                 .iter()
@@ -251,6 +273,8 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
                     bundle: non_empty(v.recommended_bundle.as_deref().unwrap_or_default())
                         .or_else(|| non_empty(m.default_bundle.as_deref().unwrap_or_default()))
                         .unwrap_or_default(),
+                    // 资产 id；空 = 回落机型图（客户端那条链自己回落）
+                    image: v.image.clone().unwrap_or_default(),
                 })
                 .collect(),
             dimensions: m.dimensions.clone(),
@@ -321,12 +345,14 @@ fn version_files_dto(
 
     // —— MKP 预设一支：catalog 登记的交付文件。条目缺席 = 交付集合里就没有这份
     match catalog.file_of(machine_id, version_id) {
+        // 期望值原样透给界面（随包 bootstrap 目录下是 `None` —— 那一侧不登记 SHA，
+        // 界面据此显示"还不知道大小/指纹"，不是显示 0 / 空串）
         Some(f) => files.push(FileRefDto {
             kind: "mkp_preset",
             file_name: f.file_name.clone(),
             path: f.path.clone(),
-            size: Some(f.size),
-            sha256: Some(f.sha256.clone()),
+            size: f.size,
+            sha256: f.sha256.clone(),
         }),
         None => missing.push(format!(
             "{machine_id} / {version_id} 在目录里没有登记交付文件"
@@ -353,18 +379,42 @@ fn version_files_dto(
             )),
             Some(bundle) => {
                 for r in &bundle.asset_refs {
-                    match catalog.asset(r) {
+                    let a = match catalog.asset(r) {
                         None => {
-                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id))
+                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id));
+                            continue;
                         }
-                        Some(a) => files.push(FileRefDto {
-                            kind: file_kind(a),
-                            file_name: file_name_of(&a.path),
-                            path: format!("presets/{}", a.path),
-                            size: None,
-                            sha256: None,
-                        }),
-                    }
+                        Some(a) => a,
+                    };
+                    /*
+                     * 套餐的 `assetRefs` 是**混合**的：它同时引用切片器配置与 MKP 预设。
+                     * 切片器表只装切片器文件 —— MKP 那一支由上面的 `catalog.file_of` 出
+                     * （带真 path / size / SHA）。认不出类型的（`file_kind` = `None`）
+                     * 与 path 为空的**都不进这张表**：进它就是一行主名空、落点写成
+                     * `presets/` 的幽灵（2026-10-04）。
+                     */
+                    let Some(kind) = file_kind(a) else {
+                        continue;
+                    };
+                    let Some(path) = non_empty(&a.path) else {
+                        continue;
+                    };
+                    /*
+                     * 落点取**与 `catalog.files[].path` 同一处算法**（发布根基准
+                     * `assets/…`，2026-10-04 唯一路径语义）—— 界面上不许再出现
+                     * `presets/…` 这第三套写法。拿不到落点（`bundled` 档 / 这类没有落点）
+                     * = 这一份不进交付，切片器表里也不该有它。
+                     */
+                    let Some(dest) = crate::runtime::catalog::dest_of_asset(a) else {
+                        continue;
+                    };
+                    files.push(FileRefDto {
+                        kind,
+                        file_name: file_name_of(&path),
+                        path: dest,
+                        size: None,
+                        sha256: None,
+                    });
                 }
             }
         },
@@ -434,14 +484,21 @@ fn preset_files_dto(catalog: &runtime::Catalog) -> Vec<PresetFileInfoDto> {
         .assets
         .iter()
         .filter(|a| a.kind == AssetKind::SlicerProfile)
-        .map(|a| {
+        .filter_map(|a| {
+            /*
+             * 落点取**与 `catalog.files[].path` 同一处算法**（发布根基准 `assets/…`）。
+             * 拿不到 = 这一份不进交付（`bundled` 档），云端表里也就没有它。
+             */
+            let path = crate::runtime::catalog::dest_of_asset(a)?;
             let in_bundles = bundles_of(catalog, &a.id);
             let (nozzle, layer_height) = slicer_axes(&a.path);
-            PresetFileInfoDto {
+            Some(PresetFileInfoDto {
                 id: a.id.clone(),
                 file_name: file_name_of(&a.path),
-                path: format!("presets/{}", a.path),
-                kind: file_kind(a),
+                path,
+                // 上面刚按 `SlicerProfile` 滤过，`file_kind` 不可能给 `None` —— 真给了
+                // 说明「切片器类型」与「切片器文件档」这两处口径分岔了，当场炸比静默贴错好
+                kind: file_kind(a).expect("SlicerProfile 条目必须能定出切片器 FileKind"),
                 category: a.profile.clone().unwrap_or_default(),
                 machine_ids: a.machine_id.clone().into_iter().collect(),
                 nozzle,
@@ -454,7 +511,7 @@ fn preset_files_dto(catalog: &runtime::Catalog) -> Vec<PresetFileInfoDto> {
                 in_bundles,
                 // 没有 MKP 资产条目（doc §12.5），所以这一栏恒空
                 used_by_versions: Vec::new(),
-            }
+            })
         })
         .collect()
 }
@@ -475,11 +532,19 @@ pub struct MenuEntryDto {
 }
 
 /// 菜单：哪些官方文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
-/// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的
+/// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的。
+///
+/// **`bundled` 交付档的资产不进这个菜单**（作者 2026-10-03）：那是「随包不下载」的那一档
+/// —— 客户端根本下载不到它（不在 catalog 的 `files[]` 里），菜单里列出来只会让
+/// 用户点一个拿不到的东西。它在**工作台的资产库**里照常可见可管。
 fn menu_dto(catalog: &runtime::Catalog) -> Vec<MenuEntryDto> {
     catalog
         .assets
         .iter()
+        .filter(|a| a.delivery != crate::presetdata::assets::Delivery::Bundled)
+        // MKP 预设在菜单里也不出现：它不是一份「下载区文件」—— 它的产物条目由生成侧
+        // 登记进 files[]，客户端按那 9 条走（作者 2026-10-03）
+        .filter(|a| a.kind != crate::presetdata::AssetKind::MkPreset)
         .map(|a| MenuEntryDto {
             file_id: a.id.clone(),
             visibility: if bundles_of(catalog, &a.id).is_empty() {
@@ -587,6 +652,13 @@ pub async fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppErro
 pub struct ChoiceDto {
     pub value: String,
     pub label: String,
+    /// **选项级弃用**（`Choice.deprecated`）：参数没废、某个选项废了。
+    ///
+    /// 真上游里就有这一档（`wiping.outer_structure` 的 `sheath` = 护套），不是为界面硬造的。
+    /// 界面上它**可点但不可存**（点开能看，写值闸拦下）—— 与字段级弃用"整行改不动"是两回事，
+    /// 所以两者不能合成一个布尔。
+    #[serde(skip_serializing_if = "is_false")]
+    pub deprecated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -623,6 +695,13 @@ pub struct RecipeParamDto {
     /// 只有 `origin === "variant"` 时有：基础配方里的那个值
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_value: Option<String>,
+    /// **字段级弃用**（`ParamDef.deprecated`）：这一整项在真上游里标了废弃。
+    ///
+    /// 与 [`ParamMetaDto::deprecated`] **同一个值、同一处出处**（`ParamDef.deprecated`）——
+    /// 两条通道都带是因为用的地方不同：参数页拿这份渲染"行名红线 + 已弃用徽章 + 控件改不动"。
+    /// 真上游里 7 条（`param_registry.toml`），不是为界面硬造的。
+    #[serde(skip_serializing_if = "is_false")]
+    pub deprecated: bool,
 }
 
 /// 一张配方（某个机型 + 某个版本）的全部参数值。
@@ -700,6 +779,7 @@ fn machine_params_dto(
                     .map(|c| ChoiceDto {
                         value: to_text(&c.value),
                         label: c.label.clone(),
+                        deprecated: c.deprecated,
                     })
                     .collect()
             }),
@@ -710,6 +790,8 @@ fn machine_params_dto(
             origin: if is_variant { "variant" } else { "base" },
             // 被版本盖过才带「还原成」的那个值：先看机型层有没有钉着，没有才是出厂默认
             base_value: is_variant.then(|| to_text(base.get(key).unwrap_or(&p.default_value))),
+            // 字段级弃用：与 [`ParamMetaDto::deprecated`] 同源同值（`ParamDef.deprecated`）
+            deprecated: p.deprecated,
         });
     }
     Ok(out)
@@ -775,9 +857,13 @@ mod tests {
 
     /// **DTO 构建吃的是 catalog（换源判据）。**
     ///
-    /// 九条命令的映射层全部从真 catalog 出数：机型、版本文件（MKP 带真 size/SHA）、
-    /// 参数元信息、配方值。任何一条从别的来源出数（TOML、硬编码），这条就失守 ——
-    /// 那正是「首屏唯一数据源 = catalog」（总纲判据 4）在 Rust 侧的钉子
+    /// 九条命令的映射层全部从真 catalog 出数：机型、版本文件、参数元信息、配方值。
+    /// 任何一条从别的来源出数（TOML、硬编码），这条就失守 ——
+    /// 那正是「首屏唯一数据源 = catalog」（总纲判据 4）在 Rust 侧的钉子。
+    ///
+    /// 注：这条用的是**随包 `catalog()`**，交付文件条目在它上面**不带期望值**
+    /// （`size`/`sha256` = `None`，见 `runtime::catalog::CatalogFile`）—— 那是发布侧的事。
+    /// 这里只咬"条目出得来、名字与落点对得上"。
     #[test]
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
@@ -793,7 +879,7 @@ mod tests {
         assert!(a1.forbidden_zones.is_empty(), "A1 没有禁区");
         assert_eq!(a1.versions.len(), 3);
 
-        // —— 版本文件：MKP 那支从 catalog 文件条目出，带真 size 与 SHA ——
+        // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
         let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
         assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
         let mkp = vf
@@ -802,14 +888,55 @@ mod tests {
             .find(|f| f.kind == "mkp_preset")
             .expect("MKP 引用必须在");
         assert_eq!(mkp.file_name, "A1-fastv3.3.toml");
-        assert_eq!(mkp.path, "mkp/presets/A1-fastv3.3.toml", "落点相对内部根");
-        assert!(mkp.size.unwrap_or(0) > 0, "大小是登记的真值");
-        assert_eq!(mkp.sha256.as_deref().map(str::len), Some(64));
-        // 切片器那支跟着套餐走：A1_default 至少一条 BBS
+        assert_eq!(
+            mkp.path, "dist/mkp/presets/A1-fastv3.3.toml",
+            "落点是发布根基准（B 类在 dist/ 下），也是客户端内部落点"
+        );
+        // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串
+        assert_eq!(mkp.size, None, "随包目录不登记 size");
+        assert_eq!(mkp.sha256, None, "随包目录不登记 SHA");
+        // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
             "切片器配置要跟着套餐出来"
         );
+        /*
+         * **切片器档里不许出现幽灵行**（2026-10-04）：
+         * 套餐的 `assetRefs` 是混合的 —— MKP 预设那条的 `path` 是空串。
+         * 以前它被 `_ => "bbs_profile"` 兜底贴成切片器文件，落点写成 `presets/`、
+         * 主名是空串，在界面上就是一行「presets/」。
+         * 判据：切片器那一支每一条都得有真文件名、落点都得是发布根基准的 `assets/…`
+         * （与 `catalog.files[].path` 同形 —— 2026-10-04 起界面上只有这一套写法）。
+         */
+        for f in vf.files.iter().filter(|f| f.kind != "mkp_preset") {
+            assert!(!f.file_name.is_empty(), "切片器条目主名不许为空：{f:?}");
+            assert_ne!(f.path, "assets/", "切片器条目的落点不许是空的 assets/");
+            assert!(
+                f.path.starts_with("assets/") && f.path.len() > "assets/".len(),
+                "切片器落点要在 assets/ 下指到真文件：{f:?}"
+            );
+        }
+        // 每台机型都与 A1 同形：切片器档一条幽灵都不许有
+        for m in machines.iter() {
+            for v in &m.versions {
+                let Some(vf) = version_files_dto(&catalog, &m.id, &v.id) else {
+                    continue;
+                };
+                assert!(
+                    vf.files
+                        .iter()
+                        .filter(|f| f.kind != "mkp_preset")
+                        .all(|f| !f.file_name.is_empty() && f.path != "assets/"),
+                    "{}/{} 的切片器档里有幽灵行：{:?}",
+                    m.id,
+                    v.id,
+                    vf.files
+                        .iter()
+                        .filter(|f| f.file_name.is_empty() || f.path == "assets/")
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
 
         // 不存在的机型/版本 → None（不是出错）
         assert!(version_files_dto(&catalog, "NOPE", "X").is_none());
@@ -830,7 +957,13 @@ mod tests {
             .find(|p| p.id == "a1-bbs-04-020")
             .expect("A1 的 BBS 条目在");
         assert_eq!(a1_bbs.delivery, "default", "被套餐装着的是 default");
-        assert!(a1_bbs.in_bundles.contains(&"A1_default".to_owned()));
+        assert!(
+            a1_bbs.in_bundles.contains(&"A1_STANDARD".to_owned())
+                && a1_bbs.in_bundles.contains(&"A1_FAST".to_owned())
+                && a1_bbs.in_bundles.contains(&"A1_FASTV3.3".to_owned()),
+            "A1 的三个版本共用这条 BBS，三份套餐都在 in_bundles 里：{:?}",
+            a1_bbs.in_bundles
+        );
         assert_eq!(a1_bbs.nozzle.as_deref(), Some("0.4"), "喷嘴从路径段读出");
 
         // —— 菜单：可见性跟着套餐走 ——
@@ -843,11 +976,15 @@ mod tests {
         };
         assert_eq!(vis("a1-bbs-04-020"), "bundled");
         assert_eq!(vis("a1-icon"), "optional", "图标不被套餐引用");
-        // 菜单里没有整机图那一类：2026-10-01 它已从资产台账剥离（界面的展示素材，
-        // 不归 Catalog）—— 菜单逐条来自 `catalog.assets`，台账没有的就不会出现
+        // 整机图在台账里（bundled 档，2026-10-03 回到台账）—— 但**不进客户端菜单**：
+        // 客户端下载不到它（不在 files[]），菜单里列出来只会让人点一个拿不到的东西
         assert!(
-            catalog.asset("a1-image").is_none(),
-            "整机图不在 catalog 里了"
+            catalog.asset("a1-image").is_some(),
+            "整机图在 catalog 的资产定义里（bundled 档）"
+        );
+        assert!(
+            !menu.iter().any(|m| m.file_id == "a1-image"),
+            "bundled 档不进客户端菜单"
         );
 
         // —— 参数元信息：全部 74 条，含废弃 ——
@@ -890,6 +1027,83 @@ mod tests {
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();
         assert!(err.message.contains("NOPE"));
+    }
+
+    /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。
+    ///
+    /// 真上游 `param_registry.toml` 里 8 处：7 字段级 + 1 选项级（`wiping.outer_structure`
+    /// 的 `sheath` = 护套）。作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为
+    /// 三件分开的事，于是这里的期望形状是：
+    ///
+    /// - **definition 通道**（`ParamMetaDto`）：带 7 条字段级弃用 —— 参数页靠它列字段、
+    ///   画红线徽章（「显示」）；
+    /// - **配方通道**（`RecipeParamDto`）：**一条字段级弃用都不下发** —— `visible_keys_of`
+    ///   的排除语义不许被偷改（不进入新产物）；配方里出现的每一条只能是被排除后剩下的活字段，
+    ///   它的 `deprecated` 必须恒为 false（否则就是「悄悄塞回来了」）；
+    /// - **选项级**弃用**只能**走配方通道（`ChoiceDto`，因为 `ParamMetaDto` 不带 `choices`）：
+    ///   护套那一档必须带着标记下来（「显示」），但它自己所在的那条 `wiping.outer_structure` 仍是活字段。
+    #[test]
+    fn deprecated_flags_travel_through_definition_channel_only() {
+        let catalog = catalog();
+
+        // —— 字段级：definition 通道带 7 条（真注册表口径）——
+        let meta = param_meta_dto(&catalog);
+        let meta_deprecated: Vec<&str> = meta
+            .iter()
+            .filter(|p| p.deprecated)
+            .map(|p| p.key.as_str())
+            .collect();
+        assert_eq!(
+            meta_deprecated.len(),
+            7,
+            "真注册表 7 条字段级弃用：{meta_deprecated:?}"
+        );
+
+        // —— 配方通道：一条字段级弃用都不许有（排除语义没被偷改）——
+        let params = machine_params_dto(&catalog, "A1", Some("FASTV3.3")).expect("A1 的配方");
+        let leaked: Vec<&str> = params
+            .iter()
+            .filter(|p| p.deprecated)
+            .map(|p| p.key.as_str())
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "配方通道不许下发字段级弃用（那是 definition 通道的活）：{leaked:?}"
+        );
+        // 配方里每一条都能在定义表里找到，且凡是定义侧标了弃用的，配方侧绝不出现
+        for p in &params {
+            if let Some(m) = meta.iter().find(|m| m.key == p.key) {
+                assert!(!m.deprecated, "{} 已被定义侧标弃用却出现在配方里", p.key);
+                assert!(!p.deprecated, "{} 配方侧也不许带弃用标记", p.key);
+            }
+        }
+        // 反向钉子：定义侧那 7 条，一条都不许出现在配方里
+        for key in &meta_deprecated {
+            assert!(
+                !params.iter().any(|p| p.key == *key),
+                "{key} 是弃用字段，不该进配方产物"
+            );
+        }
+
+        // —— 选项级：真数据 1 处（护套那一档），只能走配方通道 ——
+        let outer = params
+            .iter()
+            .find(|p| p.key == "wiping.outer_structure")
+            .expect("擦料外结构在配方里");
+        // 它自己是活字段（选项级弃用不是字段级弃用）
+        assert!(
+            !outer.deprecated,
+            "outer_structure 是活字段，弃用的是它的一个选项"
+        );
+        let choices = outer.choices.as_ref().expect("它是 choice 控件");
+        let dep: Vec<&str> = choices
+            .iter()
+            .filter(|c| c.deprecated)
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(dep, vec!["sheath"], "选项级弃用只有护套那一档");
+        // 其余选项一个都不许被误标（这是「选项级」而不是「参数级」的钉子）
+        assert!(choices.iter().filter(|c| c.deprecated).count() < choices.len());
     }
 
     /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。

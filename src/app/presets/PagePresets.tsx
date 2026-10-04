@@ -26,10 +26,9 @@
  * 后端 `clear_active_preset` 命令与数据层的 `clearApply` 照旧在（能力不删），
  * 只是从此没有界面入口；pill 左拍上的「已应用」就是唯一的事实。
  *
- * **计数与台账住页脚（G07-1 的 4 号）**：工具条右端的「共 N 项 │ 仓库…」搬到表格下面
- * 那条页脚，与右键提示同行 —— 工具条上只剩分段、搜索、导入与 pill。**compact / mini
- * 的 MKP 档例外**：那一档第二排只有 pill 一个件太空，作者点名「小窗模式把它移到这上
- * 面」—— 计数与台账回到 pill 右边那一排，页脚只留右键提示；切片器的筛选排本来就满
+ * **计数与台账的住处（2026-10-04 定稿）**：MKP 档恒住工具栏第二排（pill 右边，
+ * 台账顶到右线）—— 工具栏恒两排：第一排 类型分段 / 位置分段(右) / 搜索，第二排
+ * pill + 计数台账，不再随窗宽换摆法。页脚与右键提示同行；切片器的筛选排本来就满
  * （喷嘴 / 层高 chips），它的计数与台账任何档都住页脚。
  *
  * **页面里没有「预设」这两个字** —— 顶栏已经把「预设」高亮了，页面里再写一遍是重复。
@@ -108,8 +107,9 @@
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
- *   **导入文件…**（工具栏）    `FileImportProvider`（App 层）               真（第十二层：通用导入入口 ——
- *                            选择器 + 拖拽进窗口；重名开改名那一格。这一页只是第一个消费者）
+ *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
+ *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
+ *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
  *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
  *   **在 Finder 中显示**（我的文件） `api.revealInFolder()`                  真（第十三层：打开系统文件管理器**并选中**；
  *                            平台话术在 Windows 上是「在文件资源管理器中显示」。之后复制 / 压缩 / 发人随用户）
@@ -131,7 +131,7 @@ import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
-/* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 pickFiles 与 revision */
+/* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
 import { FieldLayer, FieldPopover } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
@@ -183,6 +183,14 @@ interface Props {
    * 切 tab 的状态住在那一层，这一页只负责把目标文件名交出去。
    */
   onOpenBbs?: (name: string) => void
+  /**
+   * 「此预设需要更新版 SupportEase」那句提示里「去更新」的出口：跳到设置页的软件更新块。
+   *
+   * ★ 跳转的出口由外壳给（页签状态住在那儿），这一页只说"我要去设置"。
+   *   注意这条链是**读不懂数据**（要升级客户端），与设置页那条"有没有新版本"是两条链 ——
+   *   这里只把用户送过去，不替设置页说话。
+   */
+  onOpenSettings?: () => void
 }
 
 /* 四档同一句（与参数页搜索框同一条规矩）：跨任何分界，框里的字都不换 */
@@ -213,11 +221,13 @@ interface Note {
   lines?: string[]
 }
 
-export default function PagePresets({ density, onOpenBbs }: Props) {
+export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Props) {
   /*
-   * 通用导入入口（第十二层）停在 App 层；预设页是它的**第一个消费者** ——
-   * 这里拿两样：`pickFiles`（工具栏那颗「导入文件…」）与 `revision`
+   * 通用导入入口（第十二层）停在 App 层；这一页拿 `revision`
    * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
+   * 导入的入口是**拖拽**（把文件拖进窗口，App 层接）—— 工具栏上的「导入文件…」
+   * 按钮已退役（作者 2026-10-04：几乎不需要导入）；选择器能力（pickFiles）
+   * 照旧住在 App 层，只是这里不再有触发它的界面。
    */
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
@@ -1027,8 +1037,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
 
   /*
    * 搜索框。两种类型共用这一个节点，只是排位不同：MKP 在 pill 左边、切片器在漏斗右边
-   * （G07-1 定稿的排位）。**固定 180px**，全档一样 —— 作者原话：「这个搜索有点长吧」，
-   * 不设 flex、不设 min-width，它就是 180，谁也别拉它；mini 档 CSS 收到 130。
+   * （G07-1 定稿的排位）。宽度**固定 180**（mini 收 130，见 CSS）——「弹性 180–320」
+   * 那一版被作者否掉（2026-10-04：「不要搞这么宽」，小的感觉不在宽度）。
+   * 真正的解在**高度**：36px，故意比 32px 的分段控件高 4px —— 分段是实心灰槽、
+   * 边界对比强，搜索是白底细边框，标称同高视觉上仍矮一截（作者：「高度上看着
+   * 比切换器小」）。
    */
   const searchNode = (
     <div className={s.search}>
@@ -1060,20 +1073,11 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
   )
 
   /*
-   * 「导入文件…」是**通用导入入口**（第十二层，住在 App 层）的第一个触发点：
-   * 这里只拿它的 `pickFiles`；拖拽那一半在任何页面都生效（把文件拖进窗口就行）。
-   * A44 稿上没有它（试验台没有导入这一层）—— 收编时保留，两种类型都排在搜索右边。
+   * 「导入文件…」按钮退役（作者 2026-10-04：几乎不需要导入，不给它常驻的位子）——
+   * 通用导入入口（第十二层，住在 App 层）的**拖拽那一半照常生效**：把文件拖进窗口
+   * 就行，重名照样进改名那一格。选择器那一半（`imp.pickFiles`）能力还在 App 层，
+   * 只是这一页不再有触发它的界面。
    */
-  const importNode = (
-    <button
-      type="button"
-      className={s.importBtn}
-      title="把外部文件导入「我的文件」（现在收 .toml 预设；也可以直接把文件拖进窗口）"
-      onClick={imp.pickFiles}
-    >
-      导入文件…
-    </button>
-  )
 
   /*
    * 「共 N 项」+ 仓库台账（G07-1 的 4 号：住页脚，与右键提示同行；
@@ -1110,19 +1114,21 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
     <div ref={rootRef} className={s.page} data-density={density}>
       <FieldLayer>
         {/*
-         * 工具栏区（G07-1 收编：融合 pill + 计数台账住页脚）——
+         * 工具栏区（G07-1 收编；2026-10-04 作者再裁决：**恒两排**）——
          *
-         *   MKP    宽档    类型分段 位置分段(右) 搜索 导入 pill(右)
-         *          compact 第一排：类型 位置 搜索 导入；第二排：pill + 计数台账
-         *   切片器  宽档    类型分段 位置分段(右) 漏斗 搜索 导入；第二排：chips
+         *   MKP     第一排：类型分段 位置分段(右) 搜索
+         *           第二排：pill + 计数台账（台账顶到右线）—— 全档一样，不再随窗宽并排
+         *   切片器  第一排：类型分段 位置分段(右) 漏斗 搜索；第二排：喷嘴 chips；第三排：层高 chips
          *
          * pill = PresetStatusPill：左拍「● 已应用 …」点击 = 定位（清筛选 + 闪行），
          * 右拍 = 机型筛选漏斗。切片器没有「已应用」，它的筛选是独立漏斗
          * （PresetMachineFilter，就是 pill 的右拍单拎出来），排在搜索左边。
-         * 计数与台账住页脚（.foot）；compact / mini 的 MKP 档搬回 pill 右边
-         * （作者：「小窗模式把它移到这上面」—— 那一排只有 pill 一个件太空）。
+         * 计数与台账：MKP 档**恒住 pill 右边**（作者 2026-10-04：以两排稿为准；
+         * 此前宽档住页脚、小窗回 pill 右边，一页两种摆法），页脚只留右键提示；
+         * 切片器的筛选排本来就满（喷嘴 / 层高 chips），它的计数与台账照旧住页脚。
          * **一个控件都不藏进「更多」**：藏起来等于让人猜。
-         * 换行靠 flex-wrap 自然折 + .tbBreak（切片器 chips 恒在第二排）。
+         * 换行不靠窗宽碰运气：.tbBreak（flex-basis 100% 的零高断行）把 pill / chips
+         * 钉在各自的排上，窄窗只是让第一排自己折。
          */}
         <div className={s.toolbar} data-kind={page.kind}>
           <PresetScopeBar
@@ -1135,7 +1141,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
           {page.kind === 'mkp' ? (
             <>
               {searchNode}
-              {importNode}
+              <span className={s.tbBreak} aria-hidden />
               <PresetStatusPill
                 applied={page.applied}
                 appliedFileName={page.appliedFileName}
@@ -1146,7 +1152,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 machineId={data.machineId}
                 onPick={pickMachine}
               />
-              {(density === 'compact' || density === 'mini') && metaNode}
+              {metaNode}
             </>
           ) : (
             <>
@@ -1156,14 +1162,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                 onPick={pickMachine}
               />
               {searchNode}
-              {importNode}
-            </>
-          )}
-
-          <span className={s.tbBreak} aria-hidden />
-
-          {page.kind !== 'mkp' && (
-            <>
+              <span className={s.tbBreak} aria-hidden />
               <div className={`${s.filterGroup} ${s.groupNozzle}`}>
                 <span className={s.filterLabel}>喷嘴</span>
                 <span className={s.chips}>
@@ -1307,6 +1306,33 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
                   >
                     {batchBusy ? '处理中…' : batch.label}
                   </button>
+                </div>
+              )}
+
+              {/*
+                「远端这一代读不懂」那一句（第三刀下半，作者定的产品规则 B）。
+                ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给我的这份我读不了"。
+                  **列表照常**（没有整表标红、没有逐行"不兼容"标签），只在这一格多一句提示。
+                文案照抄作者原话，按钮只有一个去处：设置页的软件更新块。
+              */}
+              {data.needsNewerClient && (
+                <div className={s.noteBad} role="status">
+                  <p className={s.noteMain}>
+                    <span>
+                      <strong>此预设需要更新版 SupportEase</strong>
+                      <br />
+                      当前客户端版本过旧，暂不支持此预设文件。
+                    </span>
+                    {onOpenSettings !== undefined && (
+                      <button
+                        type="button"
+                        className={s.noteAction}
+                        onClick={onOpenSettings}
+                      >
+                        去更新
+                      </button>
+                    )}
+                  </p>
                 </div>
               )}
 
@@ -1569,10 +1595,9 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
         </div>
 
         {/*
-         * 页脚（G07-1 的 4 号收编）：右键提示与「共 N 项 │ 仓库…」同一条 ——
-         * 工具条右端那组搬到这里，工具条上只剩分段、搜索与 pill。
-         * compact / mini 的 MKP 档例外：计数与台账回 pill 右边（见工具栏），
-         * 这一档的页脚只留右键提示；切片器的筛选排本来就满，它任何档都住页脚。
+         * 页脚（G07-1 的 4 号收编；2026-10-04 起 MKP 档的计数与台账恒住工具栏第二排，
+         * 见工具栏的说明）——页脚这一条：右键提示在左；**只有切片器**把
+         * 「共 N 项 │ 仓库…」放在这里（它的筛选排满，pill 也不在）。
          * 「暂不支持」时没有表可右键，提示不画（计数与台账照旧 —— 那是全局事实）。
          */}
         <div className={s.foot}>
@@ -1581,7 +1606,7 @@ export default function PagePresets({ density, onOpenBbs }: Props) {
               右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）
             </span>
           )}
-          {(density === 'ultra' || density === 'wide' || page.kind === 'slicer') && metaNode}
+          {page.kind === 'slicer' && metaNode}
         </div>
 
         <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />

@@ -1,0 +1,178 @@
+/*
+ * 擦料塔地图（A43 移植）的样式。
+ *
+ * 色板对齐参考程序（emerald 床面 / 琥珀「原位」），但都换成 A 轨 token 的同族色：
+ * 床面与网格用 --accent（绿）的低透明度，边缘留白用 --surface-sunken 同族的灰。
+ * 塔身与「原位」的颜色在组件里逐字保留（那是塔的既定长相，不在这层重设计）。
+ */
+
+.group {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+/* 画布列：231px 上限与参考程序一致，窄卡里可以缩 */
+.mapCol {
+  flex: 0 1 231px;
+  min-width: 0;
+}
+
+/*
+ * 热床画布。有板规格的机型（.mapPlate）只当定位壳 —— 轮廓、绿底、描边都由板 path 出；
+ * 没有板规格的机型（.map）保留圆角矩形 + 绿底。宽高比都由组件按尺寸写到 style 上。
+ * 6×6 网格画在机器坐标区那一层（.bedFrame），两种机型同一套。
+ */
+.map {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1.5px solid rgba(32, 178, 90, 0.5);
+  border-radius: var(--r-md);
+  background: rgba(32, 178, 90, 0.05);
+  box-shadow: inset 0 2px 6px rgba(20, 32, 45, 0.05);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.mapPlate {
+  position: relative;
+  width: 100%;
+  overflow: visible; /* 板描边比 viewBox 大半根，裁了会一粗一细 */
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+/*
+ * 真板轮廓：铺满画布。描边用 non-scaling 固定像素宽 —— 再缩放机型之间粗细一致；
+ * overflow 放开是让贴着 viewBox 边缘的卡舌尖 / 把手尖能画满整根描边（不裁半根）。
+ */
+.plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: rgba(32, 178, 90, 0.07);
+  stroke: rgba(32, 178, 90, 0.45);
+}
+
+.plate path {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.25px;
+}
+
+/* 板缘 → 可打印区之间的那圈余量。色调与边缘留白带一致（0.05）—— 两片要融成同一条
+ * 连续的灰。白缝的真正来路是留白带 viewBox 被 preserveAspectRatio 缩放让出的空档 */
+.ring {
+  fill: rgba(16, 24, 32, 0.05);
+  stroke: none;
+}
+
+/* 机器坐标区（frame）：叠在板上 frame 的真实位置。网格线从 1/6 处起铺 ——
+ * 贴边的线落在色调分界上会跟板线挤成粗带，只留内部 5×5 条 */
+.bedFrame {
+  position: absolute;
+  z-index: 1;
+  background:
+    linear-gradient(to right, rgba(32, 178, 90, 0.16) 1px, transparent 1px) calc(100% / 6) calc(100% / 6) /
+      calc(100% / 6) calc(100% / 6),
+    linear-gradient(to bottom, rgba(32, 178, 90, 0.16) 1px, transparent 1px) calc(100% / 6) calc(100% / 6) /
+      calc(100% / 6) calc(100% / 6);
+}
+
+.map:focus-visible,
+.mapPlate:focus-visible {
+  outline: none;
+  border-color: var(--accent-deep);
+  box-shadow:
+    inset 0 2px 6px rgba(20, 32, 45, 0.05),
+    0 0 0 2px var(--accent-soft);
+}
+
+/* 边缘留白那四条灰带 */
+.zones {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  fill: rgba(16, 24, 32, 0.05);
+  pointer-events: none;
+}
+
+.tower,
+.ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  transform-origin: center center;
+}
+
+.tower {
+  z-index: 1;
+}
+
+.ghost {
+  z-index: 0;
+  opacity: 0.7;
+}
+
+/* 塔身的 svg：撑满方块；viewBox 已经含外围扩展，不会画出方块外 */
+.core {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/*
+ * 右列：这一卡的全部参数行（含 X/Y 坐标）—— 行与地图并排，装在一个浅框里。
+ * 行本体是普通 ParamRow（自带行间分隔线 / ⓘ 展开 / 还原 chip），这里只管框。
+ */
+.sideCol {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.rows {
+  flex: 1 1 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-solid, #fff);
+  overflow: hidden;
+}
+
+/* 窄卡（单列 / mini）：画布挪到上面居中，参数行列到整行下面 */
+@container (max-width: 500px) {
+  .group {
+    flex-direction: column;
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .mapCol {
+    flex-basis: auto;
+    width: min(231px, 88%);
+    align-self: center;
+  }
+
+  .sideCol {
+    padding-top: 0;
+    align-self: stretch;
+  }
+}

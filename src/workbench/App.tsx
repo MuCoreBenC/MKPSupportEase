@@ -31,6 +31,8 @@ import type { CSSProperties, ReactNode } from 'react'
 
 
 import { FieldLayer } from './components/field'
+import PageSkeleton from './components/Skeleton'
+import { modalShortcutGate } from './components/modal'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -38,6 +40,8 @@ import {
   type BookView,
   type Boot,
   type IssueReport,
+  type MetaApplied,
+  type ParamMetaEdit,
   type Patch,
   type Refresh,
   type Words,
@@ -154,9 +158,29 @@ interface Focus {
   key?: string | null
 }
 
-interface UndoEntry {
-  label: string
-  patches: Patch[]
+/**
+ * 撤销栈上的一条。**两种改动共用一个入口**（状态栏那两颗按钮 + Cmd+Z），所以
+ * 条目自带「怎么倒回去」：
+ *
+ *   patches  值的改动 —— 反向 patch 交回 `wb.applyDraft`，后端算它自己的反向；
+ *   meta     参数定义的改动（即时落盘那一路）—— **自带改前/改后两份整包**，
+ *            撤销交改前、重做交改后，不用现算反向。label 写明「定义 · 某参数」，
+ *            与值那条在栈里各说各的。
+ */
+type UndoEntry =
+  | { kind: 'patches'; label: string; patches: Patch[] }
+  | { kind: 'meta'; label: string; key: string; before: ParamMetaEdit; after: ParamMetaEdit }
+
+/**
+ * 状态条上的数据根怎么显示（2026-10-03，作者：「左下角的也是，没必要显示这个吧，这么长」）。
+ *
+ * 完整绝对路径放在 `title` 里（悬停能看到全部），行上只留**最后两段** ——
+ * `…/projects/MKPSupportEase/presets` → `MKPSupportEase/presets`：够认出是哪份仓库，
+ * 又不会把窄档的导航栏撑宽（实测撑宽之后那一块会溢出到内容区上，压着页脚）。
+ */
+const shortRoot = (p: string): string => {
+  const parts = p.split(/[/\\]/).filter((s) => s !== '')
+  return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : p
 }
 
 export function WorkbenchApp() {
@@ -270,7 +294,7 @@ export function WorkbenchApp() {
         refreshReport()
         // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
-          const entry = { label, patches: out.inverse }
+          const entry: UndoEntry = { kind: 'patches', label, patches: out.inverse }
           if (where === 'undo') setUndoStack((st) => [...st, entry])
           else setRedoStack((st) => [...st, entry])
         }
@@ -285,19 +309,63 @@ export function WorkbenchApp() {
     [fail, refreshReport],
   )
 
+  /*
+   * meta 条目（参数定义）的执行：把条目里指定的那份整包交回去，成了就把这条
+   * 压进对面那摞（撤销压重做、重做压撤销）。定义是即时落盘 —— 一次调用就是
+   * 一次成败，失败就原地不动。
+   */
+  const runMeta = useCallback(
+    async (
+      entry: Extract<UndoEntry, { kind: 'meta' }>,
+      dir: 'before' | 'after',
+      toStack: 'undo' | 'redo',
+    ): Promise<boolean> => {
+      setBusy(true)
+      try {
+        await wb.setParamMeta(entry.key, entry[dir])
+        /* 注册表变了：参数台按 tick 重取（注册表 / 配方台 / 矩阵三处派生跟着走） */
+        setTick((n) => n + 1)
+        refreshReport()
+        if (toStack === 'undo') setUndoStack((st) => [...st, entry])
+        else setRedoStack((st) => [...st, entry])
+        return true
+      } catch (e) {
+        fail(e)
+        return false
+      } finally {
+        setBusy(false)
+      }
+    },
+    [fail, refreshReport],
+  )
+
+  /** 参数台「编辑定义」保存成功后交上来的一条：压进撤销栈（改前/改后都在手上） */
+  const pushMeta = useCallback((m: MetaApplied) => {
+    setUndoStack((st) => [...st, { kind: 'meta', ...m }])
+    setRedoStack([])
+  }, [])
+
   const undo = useCallback(async () => {
     const top = undoStack[undoStack.length - 1]
     if (!top) return
+    if (top.kind === 'meta') {
+      if (await runMeta(top, 'before', 'redo')) setUndoStack((st) => st.slice(0, -1))
+      return
+    }
     const out = await run(`撤销：${top.label}`, top.patches, 'redo')
     if (out) setUndoStack((st) => st.slice(0, -1))
-  }, [undoStack, run])
+  }, [undoStack, run, runMeta])
 
   const redo = useCallback(async () => {
     const top = redoStack[redoStack.length - 1]
     if (!top) return
+    if (top.kind === 'meta') {
+      if (await runMeta(top, 'after', 'undo')) setRedoStack((st) => st.slice(0, -1))
+      return
+    }
     const out = await run(`重做：${top.label}`, top.patches, 'undo')
     if (out) setRedoStack((st) => st.slice(0, -1))
-  }, [redoStack, run])
+  }, [redoStack, run, runMeta])
 
   const save = useCallback(async (): Promise<boolean> => {
     if (!book || book.dirtyCount === 0 || busy) return false
@@ -357,10 +425,13 @@ export function WorkbenchApp() {
     setPage(next)
   }, [])
 
-  /* 撤销 / 重做 / 保存的键盘入口装在外壳上 —— 撤销不是某几个页面的小功能 */
+  /* 撤销 / 重做 / 保存的键盘入口装在外壳上 —— 撤销不是某几个页面的小功能。
+     模态框开着（且没让路）就不穿透：框里的事框里自己管（G-code 框让路），
+     不然 Cmd+Z 改的是遮罩后面看不见的草稿（作者的实测） */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
+      if (modalShortcutGate.blocking()) return
       const k = e.key.toLowerCase()
       if (k === 'z' && !e.shiftKey) {
         e.preventDefault()
@@ -442,8 +513,35 @@ export function WorkbenchApp() {
 
   /* ---------- 页面渲染（挂载入口只有这一处） ---------- */
 
+  /*
+   * 整本 / 词表还没到 —— **别返回 null**。
+   *
+   * 之前这里 `return null`，于是点导航要等 `wb_book` + `wb_words` 回来才有画面，
+   * 作者的验收是「必须立马显示，就是那个反馈」。改成**按页给一具骨架**：
+   * 壳（页头 / 卡片框 / 行槽）立刻出来，数据一到整体换成真内容。
+   *
+   * 每页的形状给个大致对得上的（机型页两栏 / 生成页一叠卡）—— 骨架是占位，不是预览图。
+   */
+  const skeletonFor = (id: NavId): ReactNode => {
+    switch (id) {
+      case 'machines':
+        return <PageSkeleton layout="cols" cards={2} rows={7} label="机型与版本正在加载" />
+      case 'params':
+        return <PageSkeleton layout="cols" cards={2} rows={8} label="参数台正在加载" />
+      case 'bundles':
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="套餐正在加载" />
+      case 'build':
+        return <PageSkeleton layout="flow" cards={3} rows={5} label="生成与发布正在加载" />
+      case 'assets':
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="资产库正在加载" />
+      case 'settings':
+        return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
+    }
+  }
+
   const renderPage = (id: NavId): ReactNode => {
-    if (!book || !words) return null
+    /* 数据没到先给骨架（不再黑屏）—— 见 skeletonFor 的注 */
+    if (!book || !words) return skeletonFor(id)
     switch (id) {
       case 'machines':
         return (
@@ -471,6 +569,7 @@ export function WorkbenchApp() {
               const out = await run(label, patches, 'undo', refresh)
               return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
+            onMetaApplied={pushMeta}
             onSave={() => void save()}
             onDiscard={() => void discard()}
             onUndo={() => void undo()}
@@ -502,7 +601,8 @@ export function WorkbenchApp() {
           />
         )
       case 'build':
-        if (!boot) return null
+        /* `boot` 比整本晚到的那一瞬也给骨架（别在整本已到之后又黑一下） */
+        if (!boot) return skeletonFor('build')
         return (
           <BuildPage
             boot={boot}
@@ -519,7 +619,7 @@ export function WorkbenchApp() {
           />
         )
       case 'settings':
-        if (!boot) return null
+        if (!boot) return skeletonFor('settings')
         return <SettingsPage boot={boot} />
     }
   }
@@ -594,7 +694,8 @@ export function WorkbenchApp() {
         <span className={s.upDot} data-on={!!boot} aria-hidden />
         <span className={s.upText}>
           <span className={s.upLine}>{boot ? '预设源' : '读取中'}</span>
-          <span className={s.upNote}>{boot ? boot.roots.presets : '正在读…'}</span>
+          {/* 行上只留仓库名 + 目录名（见 `shortRoot`）；完整路径在整块的 title 上 */}
+          <span className={s.upNote}>{boot ? shortRoot(boot.roots.presets) : '正在读…'}</span>
         </span>
       </div>
 

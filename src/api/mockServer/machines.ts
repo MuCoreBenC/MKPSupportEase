@@ -1,5 +1,6 @@
 import type { ForbiddenZone, Machine, MachineDimensions, MachineVersion } from '../../api/contract'
 import catalogJson from './data/machine_catalog.json'
+import { plateRefsOf } from './plates'
 import type { RawCatalog, RawDimensions, RawModel, RawVersion } from './types'
 
 /**
@@ -28,6 +29,8 @@ function toVersion(model: RawModel, raw: RawVersion): MachineVersion {
     tag: raw.tag || undefined,
     description: raw.description || undefined,
     bundle: raw.recommendedBundle || model.defaultBundle || '',
+    // 版本专属外观图（资产 id）：空串 = 回落机型图（演示数据今天一条都没配）
+    image: raw.image || '',
   }
 }
 
@@ -57,9 +60,13 @@ function build(): Machine[] {
         // 上游六台机型的 name 全是空串，所以 display 才是唯一可用的显示名
         display: model.display || model.id,
         brand: brandName.get(brandId) ?? brandId,
+        // 资产 id（不是文件名）：界面按 id 去 `RuntimeCatalog.assets[]` 查 path
         image: model.image,
+        imageVariant: model.imageVariant ?? '',
         icon: model.icon,
         aliases: model.externalAliases,
+        // 板引用与真数据同源（演示常量，见 plates.ts）
+        ...plateRefsOf(model.id),
         versions: model.versions.map((v) => toVersion(model, v)),
         dimensions: toDimensions(catalog.dimensions[model.id]),
         forbiddenZones: toForbiddenZones(model.id),

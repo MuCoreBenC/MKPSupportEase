@@ -161,6 +161,51 @@ if (process.argv.includes('--pick')) {
   console.log(`  图片   ${imgs.length} 张：${imgs.map((i) => `${i.src}(${i.natural}px)`).join(' · ') || '（一张都没有）'}`)
   const broken = imgs.filter((i) => i.natural === 0)
   if (broken.length > 0) problems.push(`图片没加载成功（路径或文件不对）：${JSON.stringify(broken)}`)
+
+  /*
+   * 再走一遍**两个选择层级**，把图位分层钉住（2026-10-03 第三刀）：
+   *
+   *   选到机型（还没选版本）→ `printers/a1mini.webp`   ← 机型图
+   *   再选到版本            → `printers/a1mini.webp`   ← **版本没配图 ⇒ 回落机型图**
+   *
+   * 两条期待值相同是**故意的**：图位分层是「品牌图 / 机型图 / 版本图，版本缺则回落机型」，
+   * 而 A1 mini 的 `STANDARD` 今天**没有**版本图 —— 所以第三级理应与第二级同图。
+   * 哪天给那一版配了版本图，这条断言会红，那正是它该红的时候（改数据要改判据）。
+   *
+   * 这两个 URL 都是**台账 path**（`catalog.assets[]` 的 id → `path` → `/assets/<path>`），
+   * 不是构建期写死的模块路径 —— 在客户端又回去认识具体文件名时，这条断言会红。
+   *
+   * 量法同前：**停在选择那一页时 DOM 里没有 `<img>`**（那张卡还没挂），必须回主页才量得到。
+   */
+  const artAt = async (steps, expect) => {
+    if (!(await clickText('更换机型'))) {
+      problems.push('量分层大图时找不到「更换机型」')
+      return
+    }
+    for (const step of steps) await clickText(step)
+    if (!(await clickText('回主页'))) {
+      problems.push('量分层大图时找不到「回主页」')
+      return
+    }
+    await page.waitForTimeout(1600)
+    const srcs = await page.evaluate(() =>
+      [...document.querySelectorAll('img')].map((i) => i.getAttribute('src') ?? ''),
+    )
+    const hit = srcs.find((s) => s.includes('/assets/')) ?? null
+    console.log(`  分层大图 ${hit ?? '（一张都没有）'}（期待 ${expect}）`)
+    if (hit !== expect) {
+      problems.push(`分层大图不对：期待 ${expect}，实际 ${hit ?? '（一张都没有）'}`)
+    }
+  }
+  await artAt(['A1 mini'], '/assets/printers/a1mini.webp')
+  await artAt(['标准版'], '/assets/printers/a1mini.webp')
+  /*
+   * 第三级：**品牌图**（图位分层的最下一层）。A2L 没有机型图也没有版本图 ⇒ 回落品牌图，
+   * 而品牌图**也在台账里**（`brands.toml` 的 `logo` 引用资产 id `bambu-lab-logo`），
+   * 所以它同样是 `/assets/<台账 path>`，**不是**那个内置 data URI 字标。
+   * 内置字标只在"台账没配品牌图 / 认不出那张图"时兜底（老版本 catalog.json 那条路）。
+   */
+  await artAt(['A2L'], '/assets/brands/bambu-lab-logo.svg')
 }
 
 /* 校准页 */

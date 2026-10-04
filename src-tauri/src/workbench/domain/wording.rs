@@ -22,7 +22,7 @@
 //! | **暂不支持** | 这台机型/这个版本，我们还没打算做这件事 | 不要用在「上游没给数据」上 |
 //! | **暂无资源** | 配方在、参数都有值，但**没有可交付的产物**（A2L） | 不要写成「暂不支持」——参数是好的 |
 //! | **未配置** | 该有人填的位置还空着（有效配方为空、套餐没挑东西） | 不要用在「上游没声明」上 |
-//! | **未声明** | **上游**没给这项声明（`minimumClient` 是空串） | 不要写成「未配置」——不是我们该填的 |
+//! | **未声明** | **上游**没给这项声明（例：机型没写机型图 `image`） | 不要写成「未配置」——不是我们该填的 |
 //!
 //! A2L 是这四个词最容易混的地方：它的**参数不缺**（落到出厂默认，灰色「出厂」，有值可看），
 //! 缺的只有资源。所以参数那一面什么提示都不该有，资源那一面写「暂无资源」。
@@ -59,7 +59,9 @@ impl BuildState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Built => "已生成",
-            Self::Stale => "待生成",
+            // 「待更新」而不是「待生成」（作者 2026-10-03）：这一档的前提是
+            // **磁盘上有旧产物** —— 词必须把"有旧的"说出来，与「未生成」分得开
+            Self::Stale => "待更新",
             Self::NeverBuilt => "未生成",
             Self::NoResources => "暂无资源",
         }
@@ -97,7 +99,8 @@ impl ArtifactState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Fresh => "已生成",
-            Self::Stale => "待生成",
+            // 与 BuildState::Stale 同一条裁决：有旧产物的待重做，词里要见「旧」
+            Self::Stale => "待更新",
             Self::Missing => "未生成",
         }
     }
@@ -196,6 +199,57 @@ impl BbsAssign {
             Self::Assigned => "有版本用着它，改动会影响那些版本的交付",
             Self::Optional => "客户能看到，但还没有版本指定用它",
             Self::ArchiveOnly => "仓库里留着，客户看不到也下载不到",
+        }
+    }
+}
+
+/// **资产交付身份四态**（作者 2026-10-03 定的模型）：
+///
+/// 1. **进套餐** —— 客户端首页消费：用户点了版本，套餐里的文件跟着自动下载；
+/// 2. **可选** —— 不进套餐，客户端预设页看得到（按 kind 自动分到 MKP / 切片器档）、
+///    手动下载；模型类不在预设页、但在客户端同样是手动下载；
+/// 3. **随包** —— 两个页面都不出现，构建期打进客户端程序包（机型图这类自动消费的）；
+/// 4. **仅归档** —— 没用了但不舍得删，客户端完全不消费。
+///
+/// 判定优先级：归档 > 随包 > 进套餐 > 可选（同一条资产几个信号都在时，按这个序说话）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssetIdentity {
+    /// 进套餐：客户端首页按版本自动下载
+    InBundle,
+    /// 可选：客户端看得到，手动下载
+    Optional,
+    /// 随包：构建期打进客户端，两个页面都不出现
+    Bundled,
+    /// 仅归档：客户端不消费
+    ArchiveOnly,
+}
+
+impl AssetIdentity {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::InBundle => "inBundle",
+            Self::Optional => "optional",
+            Self::Bundled => "bundled",
+            Self::ArchiveOnly => "archiveOnly",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::InBundle => "进套餐",
+            Self::Optional => "可选",
+            Self::Bundled => "随包",
+            Self::ArchiveOnly => "仅归档",
+        }
+    }
+
+    pub fn explain(self) -> &'static str {
+        match self {
+            Self::InBundle => "客户端首页按版本自动下载 —— 进套餐在套餐页管，资产库不直接设",
+            Self::Optional => "客户端预设页看得到，用户手动下载",
+            Self::Bundled => "构建期随程序包带进客户端，不下载不更新，页面上也不出现",
+            Self::ArchiveOnly => "仓库里留着，客户端完全不消费",
         }
     }
 }
@@ -489,6 +543,10 @@ pub mod relate {
 
     /// 收起来的那几项点开看的入口
     pub const SHOW_ANYWAY: &str = "仍然展开看";
+
+    /// 摊开之后把它收回去的那颗（2026-10-03 作者：「展开了之后，还有按钮可以
+    /// 把它折回来」）—— 与 [`SHOW_ANYWAY`] 是一对：一个入口、一个出口
+    pub const FOLD_BACK: &str = "收起来";
 
     /// 对照矩阵差异格的悬停句（C14 第四轮）：差异由绿底承担，悬停才说基准是多少
     pub fn base_value_is(text: &str) -> String {

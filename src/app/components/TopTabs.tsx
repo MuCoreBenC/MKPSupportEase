@@ -2,7 +2,6 @@ import Icon from '../../components/Icon'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { winClose, winMinimize, winToggleMaximize } from '../window'
-import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
 import type { Platform } from '../../hooks/usePlatform'
 import s from './TopTabs.module.css'
@@ -10,12 +9,6 @@ import s from './TopTabs.module.css'
 interface Tab {
   id: string
   label: string
-  /**
-   * 迷你档要用的图标。不传就按 id 查下面那张 TAB_ICONS —— 老稿全都不传，走原路。
-   * 这个口子是给"同一个 id、这一稿想换个图标"用的（v022 的设置换成真齿轮就走这里），
-   * 改 TAB_ICONS 会把 #5…#21 的标题栏一起改掉。
-   */
-  icon?: IconName
 }
 
 interface TopTabsProps {
@@ -37,22 +30,12 @@ interface TopTabsProps {
    减掉标题栏自己的左内衬 16 与 gap 之后剩这么宽。60 / 72 都偏窄。 */
 const MAC_LIGHTS_INSET = 77
 
-/**
- * 迷你档用图标代替文字，好把标题栏中段的宽度还给「拖窗口」。
- * 查不到的 id 退回显示文字 —— 任何稿传进来的自定义页签都不会变成空方块。
+/*
+ * **mini 档不再收图标**（作者 2026-10-04：600 宽下七个文字页签放得下，「不用变成
+ * 图标」）—— 曾经 mini 档整条换成图标页签（TAB_ICONS 表 + `icon` 口子，给试验稿
+ * 换图标用），把中段宽度还给拖动区；文字版实测只差几十像素，图标版退役，
+ * 任何档都是文字页签。真不够宽时 `.tabs` 自己横向滑（样式里留着的兜底）。
  */
-const TAB_ICONS: Record<string, IconName> = {
-  machine: 'printer',
-  preset: 'presets',
-  calib: 'crosshair',
-  params: 'params',
-  /* 「BBS 预设」的图标（试验场 A40 的顶栏图标名）：3D 盒子（它与「报告」共用过同一个
-     文档图标，所以 A40 特意把它换成了盒子）。原来这里还有一条 `sync: 'download'` ——
-     随「同步」页退役撤掉（2026-10-02）；`download` 图标本身留着，别处还在用 */
-  bbs: 'box',
-  report: 'doc',
-  settings: 'settings',
-}
 
 export default function TopTabs({
   tabs,
@@ -64,33 +47,9 @@ export default function TopTabs({
   title,
 }: TopTabsProps) {
 
-  const isMini = density === 'mini'
   const isMac = platform === 'macos'
   const maximized = useWindowMaximized()
   const drag = useTitlebarDrag()
-
-  const iconStrip = (
-    <nav className={s.iconTabs} aria-label="主页签">
-      {tabs.map((t) => {
-        const on = t.id === active
-        const icon = t.icon ?? TAB_ICONS[t.id]
-        return (
-          <button
-            key={t.id}
-            type="button"
-            className={icon ? s.iconTab : s.tab}
-            data-on={on}
-            aria-current={on ? 'page' : undefined}
-            aria-label={icon ? t.label : undefined}
-            title={t.label}
-            onClick={() => onChange(t.id)}
-          >
-            {icon ? <Icon name={icon} size={17} /> : t.label}
-          </button>
-        )
-      })}
-    </nav>
-  )
 
   const wideStrip = (
     <nav className={s.tabs} aria-label="主页签">
@@ -113,13 +72,7 @@ export default function TopTabs({
   )
 
   /* 有 title 时页签条整个不渲染：报告态标题栏只剩品牌 + 页名 + 窗口键，中段全是拖动区 */
-  const tabStrip = title ? (
-    <span className={s.title}>{title}</span>
-  ) : isMini ? (
-    iconStrip
-  ) : (
-    wideStrip
-  )
+  const tabStrip = title ? <span className={s.title}>{title}</span> : wideStrip
 
   return (
     <header

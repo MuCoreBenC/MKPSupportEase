@@ -56,6 +56,28 @@
   gap: 6px;
 }
 
+/* ——— 软件更新（第一块） ——— */
+
+.updateRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.updateHeadline {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.updateFresh {
+  color: #2f6f3e;
+}
+
+.updateIdle {
+  color: var(--text-2);
+}
+
 .fieldTitle {
   font-size: var(--fs-body);
   font-weight: 600;
@@ -111,6 +133,10 @@
   color: var(--text-1);
   font-size: var(--fs-label);
   cursor: pointer;
+  /* `.btn` 也用在 <a> 上（「查看更新」），抹掉链接默认的蓝色与下划线 */
+  text-decoration: none;
+  display: inline-block;
+  line-height: 1.4;
 }
 
 .btn:disabled {

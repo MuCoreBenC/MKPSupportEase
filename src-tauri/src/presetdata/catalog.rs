@@ -53,12 +53,55 @@ pub struct MachineVersion {
     pub tag: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// **这一版专属的外观图**（资产 id）。**缺 = 回落机型图**（不是"没图"）。
+    ///
+    /// 2026-10-03（作者定层级：品牌图 / 机型图 / 版本图，版本缺则回落机型）：
+    /// 「标准版」与「快拆版」是同一台机器下的两个版本实体，各自可以有各自的图。
+    /// 这与 [`Machine::image_variant`] 是两件事 —— 那个是**硬件外观变体**（装了快拆件），
+    /// 不与版本混。
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 /// 一块禁区 —— 一串点围成的多边形
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Zone {
     pub points: Vec<(f64, f64)>,
+}
+
+/// 可打印区在板轮廓坐标里的位置（mm）。**归 [`Plate`] 所有** ——
+/// 机型 `[dimensions].bedSize` 是涂胶 / 运动口径（A1 记的是 260×255），
+/// 真可打印区是这里（256×256）。塔地图必须活在可打印区里。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlateFrame {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// 一块打印板。**独立于机型的实体**：机型只引用 id（[`Machine::plate_ids`]），
+/// 几何住在这里。数据源 = `presets/plates/*.toml`（一板一文件，与 `machines/*.toml` 同构）。
+///
+/// 坐标是板件自身的毫米：原点在板的**后缘左角**（y 向下指前缘）。`path` 含卡舌与把手，
+/// 孔洞子路径靠 evenodd 镂空；`body_path` 是不含卡舌 / 把手的板身。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plate {
+    /// 稳定主键（`single-latch-256` / `dual-latch-180`）。机型的 `plateIds` 指向它
+    pub id: String,
+    /// 给人看的名字（`单卡舌 256`）
+    pub name: String,
+    /// 板件外轮廓宽（viewBox 宽）
+    pub w: f64,
+    /// 板件外轮廓深（viewBox 高）
+    pub d: f64,
+    pub frame: PlateFrame,
+    /// 板身路径（不含卡舌 / 把手）
+    pub body_path: String,
+    /// 完整外轮廓（含卡舌 / 把手）
+    pub path: String,
 }
 
 /* ---------- 机型尺寸：`[dimensions]` 全族 ----------
@@ -144,6 +187,215 @@ pub struct Dimensions {
     pub flags: MachineFlags,
 }
 
+impl Dimensions {
+    /// **剔全零的可选组**（2026-10-03，作者照旧面板移植）。
+    ///
+    /// `bedSize` 与 `edgeZone` 恒留（前者是这台机器有没有床身的唯一凭据，后者是 0 也
+    /// 是个有意义的"不要留白"）；其余四组**全零就整组不写** —— 一屏 `0.0` 会让
+    /// 「没配」与「配成全零」分不清，而后者是一种写坏了的现场。
+    ///
+    /// 旧面板 `stripEmptyGroups` 是同一口径（那是前端做的；这里搬到后端，因为
+    /// **写盘口径只能有一份**，前端那颗只是为了少发几个字节），判据在
+    /// `removing_all_zero_optional_groups_keeps_only_bed_and_edge`。
+    pub fn trimmed(self) -> TrimmedDimensions {
+        let movement_zero = [
+            self.movement_range.min_x,
+            self.movement_range.max_x,
+            self.movement_range.min_y,
+            self.movement_range.max_y,
+            self.movement_range.max_z,
+        ]
+        .iter()
+        .all(|v| *v == 0.0);
+        let glue_zero = [
+            self.glue_area.glue_min_x,
+            self.glue_area.glue_max_x,
+            self.glue_area.glue_min_y,
+            self.glue_area.glue_max_y,
+            self.glue_area.wipe_x,
+        ]
+        .iter()
+        .all(|v| *v == 0.0);
+        let cal_zero = [
+            self.calibration.l_shape_base_x,
+            self.calibration.l_shape_base_y,
+            self.calibration.x_line_x,
+            self.calibration.x_line_y,
+            self.calibration.x_line_y_end,
+            self.calibration.y_line_x,
+            self.calibration.y_line_x_end,
+            self.calibration.y_line_y,
+            self.calibration.z_start_x,
+            self.calibration.z_start_y,
+        ]
+        .iter()
+        .all(|v| *v == 0.0);
+        let flags_zero = self.flags.gcode_marker.trim().is_empty() && !self.flags.has_second_fan;
+
+        TrimmedDimensions {
+            bed_size: self.bed_size,
+            edge_zone: self.edge_zone,
+            movement_range: (!movement_zero).then_some(self.movement_range),
+            glue_area: (!glue_zero).then_some(self.glue_area),
+            calibration: (!cal_zero).then_some(self.calibration),
+            flags: (!flags_zero).then_some(self.flags),
+        }
+    }
+
+    /// 六格都是**有限数**（拒 NaN / ±Inf）。
+    ///
+    /// 为什么在数据层拦：`f64` 从 IPC 过来时 JSON 允许 `NaN`（我们这边 `serde_json`
+    /// 默认就收），写进 TOML 会变成一个 `nan` 字面量 —— 之后**每一次读都失败**，
+    /// 而现场（谁写的）已经没了。
+    pub fn check_finite(&self) -> Result<(), AppError> {
+        let nums: [(&str, f64); 19] = [
+            ("bedSize.width", self.bed_size.width),
+            ("bedSize.depth", self.bed_size.depth),
+            ("edgeZone", self.edge_zone),
+            ("movementRange.minX", self.movement_range.min_x),
+            ("movementRange.maxX", self.movement_range.max_x),
+            ("movementRange.minY", self.movement_range.min_y),
+            ("movementRange.maxY", self.movement_range.max_y),
+            ("movementRange.maxZ", self.movement_range.max_z),
+            ("glueArea.glueMinX", self.glue_area.glue_min_x),
+            ("glueArea.glueMaxX", self.glue_area.glue_max_x),
+            ("glueArea.glueMinY", self.glue_area.glue_min_y),
+            ("glueArea.glueMaxY", self.glue_area.glue_max_y),
+            ("glueArea.wipeX", self.glue_area.wipe_x),
+            ("calibration.lShapeBaseX", self.calibration.l_shape_base_x),
+            ("calibration.lShapeBaseY", self.calibration.l_shape_base_y),
+            ("calibration.xLineX", self.calibration.x_line_x),
+            ("calibration.zStartX", self.calibration.z_start_x),
+            ("calibration.zStartY", self.calibration.z_start_y),
+            ("flags.hasSecondFan", 0.0),
+        ];
+        for (name, v) in nums {
+            if !v.is_finite() {
+                return Err(AppError::invalid_argument(format!(
+                    "{name} 不是有限数（NaN / 无穷大不能写进 TOML）"
+                )));
+            }
+        }
+        // 写成「是否为正」的白名单而不是 `!(x > 0.0)`：后者在 NaN 上语义绕
+        // （clippy 也拦），而这里要的正是"必须是个正数，NaN 不算"
+        let positive = |v: f64| v.is_finite() && v > 0.0;
+        if !positive(self.bed_size.width) || !positive(self.bed_size.depth) {
+            return Err(AppError::invalid_argument(
+                "床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// [`Dimensions::trimmed`] 的产物：可选组是 `Option`，`None` = **这一组是空的**。
+///
+/// # `None` 不等于"子表不写"（2026-10-03 实测撞出来的）
+///
+/// 本仓的 `load_dimensions` 是**全有或全无**：`[dimensions]` 在，六个子表就都得在，
+/// 缺一个是 `Corrupted`（写坏了的现场要报，不能当成"没配"）。所以"剔掉全零组"
+/// 在这里的正确读法是 —— **写一组 0**（`movementRange = { maxX = 0.0, … }`），
+/// 而不是把子表从文件里删掉：删掉之后这个文件下次读就报错了。
+///
+/// 旧面板的 `stripEmptyGroups` 是在 JSON 上做的，那边缺字段是合法的
+/// （读出来就是 undefined）。搬到 TOML 这边必须按这边的口径落地。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrimmedDimensions {
+    pub bed_size: BedSize,
+    pub edge_zone: f64,
+    /// `None` = 这一组全是 0（写一组零值，不删子表）
+    pub movement_range: Option<MovementRange>,
+    pub glue_area: Option<GlueArea>,
+    pub calibration: Option<CalibrationPoints>,
+    /// `None` = 没有 gcode 标记也没有第二风扇（`false` / 空串）
+    pub flags: Option<MachineFlags>,
+}
+
+impl TrimmedDimensions {
+    /// 六组按**固定顺序**写成一个 `[dimensions]` 表。
+    ///
+    /// 顺序写死（bedSize → movementRange → edgeZone → glueArea → calibration → flags）
+    /// 而不是照读进来的顺序：新建的机型没有旧顺序可依，两份文件也没有理由长得不一样。
+    ///
+    /// 六组**一个不少**（见上面那段）：可选组为 `None` 时写该组的零值。
+    pub fn to_table(&self) -> toml_edit::Table {
+        let mut t = toml_edit::Table::new();
+
+        let mut bed = toml_edit::Table::new();
+        bed["depth"] = toml_edit::value(self.bed_size.depth);
+        bed["width"] = toml_edit::value(self.bed_size.width);
+        t["bedSize"] = bed.into();
+
+        let m = self.movement_range.clone().unwrap_or(MovementRange {
+            min_x: 0.0,
+            max_x: 0.0,
+            min_y: 0.0,
+            max_y: 0.0,
+            max_z: 0.0,
+        });
+        let mut g = toml_edit::Table::new();
+        g["maxX"] = toml_edit::value(m.max_x);
+        g["maxY"] = toml_edit::value(m.max_y);
+        g["maxZ"] = toml_edit::value(m.max_z);
+        g["minX"] = toml_edit::value(m.min_x);
+        g["minY"] = toml_edit::value(m.min_y);
+        t["movementRange"] = g.into();
+
+        t["edgeZone"] = toml_edit::value(self.edge_zone);
+
+        let ga = self.glue_area.clone().unwrap_or(GlueArea {
+            glue_min_x: 0.0,
+            glue_max_x: 0.0,
+            glue_min_y: 0.0,
+            glue_max_y: 0.0,
+            wipe_x: 0.0,
+        });
+        let mut s = toml_edit::Table::new();
+        s["glueMaxX"] = toml_edit::value(ga.glue_max_x);
+        s["glueMaxY"] = toml_edit::value(ga.glue_max_y);
+        s["glueMinX"] = toml_edit::value(ga.glue_min_x);
+        s["glueMinY"] = toml_edit::value(ga.glue_min_y);
+        s["wipeX"] = toml_edit::value(ga.wipe_x);
+        t["glueArea"] = s.into();
+
+        let c = self.calibration.clone().unwrap_or(CalibrationPoints {
+            l_shape_base_x: 0.0,
+            l_shape_base_y: 0.0,
+            x_line_x: 0.0,
+            x_line_y: 0.0,
+            x_line_y_end: 0.0,
+            y_line_x: 0.0,
+            y_line_x_end: 0.0,
+            y_line_y: 0.0,
+            z_start_x: 0.0,
+            z_start_y: 0.0,
+        });
+        let mut s = toml_edit::Table::new();
+        s["lShapeBaseX"] = toml_edit::value(c.l_shape_base_x);
+        s["lShapeBaseY"] = toml_edit::value(c.l_shape_base_y);
+        s["xLineX"] = toml_edit::value(c.x_line_x);
+        s["xLineY"] = toml_edit::value(c.x_line_y);
+        s["xLineYEnd"] = toml_edit::value(c.x_line_y_end);
+        s["yLineX"] = toml_edit::value(c.y_line_x);
+        s["yLineXEnd"] = toml_edit::value(c.y_line_x_end);
+        s["yLineY"] = toml_edit::value(c.y_line_y);
+        s["zStartX"] = toml_edit::value(c.z_start_x);
+        s["zStartY"] = toml_edit::value(c.z_start_y);
+        t["calibration"] = s.into();
+
+        let f = self.flags.clone().unwrap_or(MachineFlags {
+            gcode_marker: String::new(),
+            has_second_fan: false,
+        });
+        let mut s = toml_edit::Table::new();
+        s["gcodeMarker"] = literal_str(f.gcode_marker.trim());
+        s["hasSecondFan"] = toml_edit::value(f.has_second_fan);
+        t["flags"] = s.into();
+
+        t
+    }
+}
+
 /// 版本身上可以改的那几格。
 ///
 /// **用枚举而不是字符串字段名**：字符串会把「改一个不存在的字段」推到运行时，
@@ -157,6 +409,8 @@ pub enum VersionField {
     RecommendedBundle,
     Tag,
     Description,
+    /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
+    Image,
 }
 
 impl VersionField {
@@ -164,6 +418,7 @@ impl VersionField {
         match self {
             Self::Name => "name",
             Self::RecommendedBundle => "recommendedBundle",
+            Self::Image => "image",
             Self::Tag => "tag",
             Self::Description => "description",
         }
@@ -183,6 +438,8 @@ pub enum MachineField {
     Brand,
     Name,
     Image,
+    /// 第二个图位（快拆版外观图）。见 [`Machine::image_variant`]
+    ImageVariant,
     Icon,
 }
 
@@ -193,12 +450,41 @@ impl MachineField {
             Self::Brand => "brand",
             Self::Name => "name",
             Self::Image => "image",
+            Self::ImageVariant => "imageVariant",
             Self::Icon => "icon",
         }
     }
 
     fn required(self) -> bool {
         matches!(self, Self::Display | Self::Brand)
+    }
+}
+
+/// 品牌身上可以改的那几格。`id` 不在这里（它是身份 —— 改了要连带动机型里的引用，
+/// 与机型 id 同一类事，那一刀不在这一片）。
+///
+/// 2026-10-03（作者：「品牌也要像机型一样能编辑 —— 品牌图、显示名，不管客户端
+/// 消不消费都提供」）：品牌从"一个只在机型下拉里出现的字符串"升成一等条目。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrandField {
+    /// 显示名（对着人读的那个：`拓竹 (Bambu Lab)`）
+    Name,
+    /// 品牌图 = **资产 id**（不是文件名）。清空 = 删键 —— 消费侧回落内置字标
+    Logo,
+}
+
+impl BrandField {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Logo => "logo",
+        }
+    }
+
+    /// 哪几格**不许清空**：显示名空了之后品牌卡上只剩一个 id
+    fn required(self) -> bool {
+        matches!(self, Self::Name)
     }
 }
 
@@ -213,7 +499,19 @@ pub struct Machine {
     /// 外部别名（`A1C` / `A1F` 这种）。**不许与任何机型 ID 相撞**
     pub external_aliases: Vec<String>,
     pub image: Option<String>,
+    /// **第二个图位**：同一台机器「装了快拆件」那张外观图（`a1_mini-variant-image`）。
+    /// 客户端在**选到版本这一级**时显示它，缺则回落 `image`。
+    ///
+    /// 2026-10-03 之前这条关系只活在客户端的 `heroArt.ts` 显式表里 —— 数据侧看不见、
+    /// 工作台换不掉，而台账里那张图谁都不引用。第二刀把它收进机型文件：
+    /// 「这台机器有两张图」是机型自己的事，不是界面的事。
+    pub image_variant: Option<String>,
     pub icon: Option<String>,
+    /// 这台机型能用的打印板（`presets/plates/*.toml` 的 id）。空 = 没有板规格
+    /// （塔地图那一层不出，画布退回圆角矩形）。**只持引用，不持几何** —— 几何归 [`Plate`]。
+    pub plate_ids: Vec<String>,
+    /// 默认用哪一块板（塔地图按它选）。`None` = 没指定（有 `plate_ids` 时取第一块兜底由消费侧决定）
+    pub default_plate_id: Option<String>,
     /// 机型文件里有没有 `[dimensions]`。**占位机型整台跳过**（工作台的交付可达性用它）
     pub has_dimensions: bool,
     /// `[dimensions]` 的逐格视图。`None` = 这台机型还没有那一节。
@@ -365,6 +663,8 @@ impl Machine {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
+            image: None,
         });
         Ok(())
     }
@@ -467,7 +767,49 @@ impl Machine {
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
             VersionField::Description => v.description = owned,
+            VersionField::Image => v.image = owned,
         }
+        Ok(())
+    }
+
+    /// **写整张 `[dimensions]`**（2026-10-03，作者照旧面板移植）。
+    ///
+    /// 这是"整节替换"而不是"改一格"：六个子表之间有内在关系（床身尺寸决定标定点走得到哪），
+    /// 逐格改会让中间态漂在文件上。前端那份草稿改完一次提交。
+    ///
+    /// 两件事一起做：
+    /// - **值面**：`self.dimensions` 换成新的、`has_dimensions` 跟着为真（两处必须同时改 ——
+    ///   它们读的是同一件事，见字段注释）；
+    /// - **文档面**：`[dimensions]` 整表替换成 [`TrimmedDimensions::to_table`] 那份。
+    ///   替换（不是 merge）是故意的：**剔全零组**意味着"这一组从有到没有"，
+    ///   merge 只会在旧表上叠键，全零组永远删不掉。
+    ///
+    /// 机型文件里 `[dimensions]` 之前的注释（`# 这台机器能用的打印板…`）在**上面一层**，
+    /// 整表替换动不到它；表内部的注释按"整节替换"的口径走（旧面板同口径）。
+    pub fn set_dimensions(&mut self, dims: Dimensions) -> Result<(), AppError> {
+        dims.check_finite()?;
+        // 文档面：整表替换（先算，`to_table` 借用 `dims`，之后才把它移进值面）
+        self.doc["dimensions"] = dims.clone().trimmed().to_table().into();
+        // 值面：`dimensions` 与 `has_dimensions` 一起
+        self.dimensions = Some(dims);
+        self.has_dimensions = true;
+        Ok(())
+    }
+
+    /// 改机型默认套餐。`None` = 删键（这台没有默认了）。
+    ///
+    /// **谁引用着旧 id 由调用方管**（`Presets::rename_bundle` 重指后调它）——
+    /// 这里只管本文件的值面与文档面一起改（与 [`Self::set_field`] 同一条纪律：
+    /// 只改值面的话，下一次 `to_toml` 会把旧值写回去）
+    pub fn set_default_bundle(&mut self, id: Option<&str>) -> Result<(), AppError> {
+        let val = id.map(str::trim).filter(|s| !s.is_empty());
+        match val {
+            Some(s) => self.doc["defaultBundle"] = literal_str(s),
+            None => {
+                self.doc.remove("defaultBundle");
+            }
+        }
+        self.default_bundle = val.map(str::to_owned);
         Ok(())
     }
 
@@ -496,6 +838,7 @@ impl Machine {
             MachineField::Brand => self.brand = owned.unwrap_or_default(),
             MachineField::Name => self.name = owned.unwrap_or_default(),
             MachineField::Image => self.image = owned,
+            MachineField::ImageVariant => self.image_variant = owned,
             MachineField::Icon => self.icon = owned,
         }
         Ok(())
@@ -506,9 +849,15 @@ impl Machine {
 #[derive(Debug)]
 pub struct Catalog {
     brands: Vec<Brand>,
+    /// `brands.toml` 的**文档面**：写品牌那几格时值面与它一起改
+    /// （只改值面的话，下次写回会把旧值写回去，而文件里那段解释 logo 的注释也会丢）。
+    /// 与机型各自持一份 `doc` 是同一条纪律
+    brands_doc: DocumentMut,
     machines: Vec<Machine>,
     /// 机型 ID → 禁区。只有三台机器有
     zones: BTreeMap<String, Vec<Zone>>,
+    /// 板 ID → 打印板几何。整目录可以不存在（还没有板规格也是合法状态）
+    plates: BTreeMap<String, Plate>,
     /// 数据根。**新建机型要在这里落文件** ——
     /// 从已有机型的路径反推是不行的：一台机型都没有的时候就推不出来了
     root: PathBuf,
@@ -516,7 +865,7 @@ pub struct Catalog {
 
 impl Catalog {
     pub fn load_from(root: &Path) -> Result<Self, AppError> {
-        let brands = load_brands(&root.join("brands.toml"))?;
+        let (brands, brands_doc) = load_brands(&root.join("brands.toml"))?;
         let machines = load_machines(&root.join("machines"))?;
         check_unique_ids(
             &machines
@@ -530,16 +879,141 @@ impl Catalog {
                 .collect::<Vec<_>>(),
         )?;
         let zones = load_zones(&root.join("forbidden_zones"))?;
+        let plates = load_plates(&root.join("plates"))?;
         Ok(Self {
             brands,
+            brands_doc,
             machines,
             zones,
+            plates,
             root: root.to_path_buf(),
         })
     }
 
     pub fn brands(&self) -> &[Brand] {
         &self.brands
+    }
+
+    /// 按 id 找品牌。**大小写不敏感**（与 `Assets::get` / `Bundles::get` 同一口径）——
+    /// 品牌 id 不是文件名，`Bambu Lab` 这种带空格大小写的写法是既成事实
+    pub fn brand(&self, id: &str) -> Option<&Brand> {
+        let want = id.trim();
+        self.brands.iter().find(|b| b.id.eq_ignore_ascii_case(want))
+    }
+
+    /// 要改它的时候用这个（`Result` 而不是 `Option`，理由同 [`Self::machine_mut`]）
+    pub fn brand_mut(&mut self, id: &str) -> Result<&mut Brand, AppError> {
+        let want = id.trim().to_owned();
+        self.brands
+            .iter_mut()
+            .find(|b| b.id.eq_ignore_ascii_case(&want))
+            .ok_or_else(|| AppError::not_found(format!("没有品牌 {id}")))
+    }
+
+    /// 改品牌的一格。`None` = 删键（同 [`Machine::set_field`]）。
+    ///
+    /// **值面与文档面一起改**：只改值面的话下一次 `write_brands()` 会把旧值写回去；
+    /// 而 `brands.toml` 里那段解释 `logo` 的注释必须原样留住。
+    pub fn set_brand_field(
+        &mut self,
+        id: &str,
+        field: BrandField,
+        value: Option<&str>,
+    ) -> Result<(), AppError> {
+        let val = value.map(str::trim).filter(|s| !s.is_empty());
+        if val.is_none() && field.required() {
+            return Err(AppError::invalid_argument(format!(
+                "{} 不能清空",
+                match field {
+                    BrandField::Name => "显示名",
+                    BrandField::Logo => "品牌图",
+                }
+            )));
+        }
+        // 文档面：按 id 找到那一段 `[[brands]]`（与值面同一条匹配规则）
+        let arr = self
+            .brands_doc
+            .get_mut("brands")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+        let t = arr
+            .iter_mut()
+            .find(|t| {
+                t.get("id")
+                    .and_then(|i| i.as_str())
+                    .is_some_and(|s| s.eq_ignore_ascii_case(id.trim()))
+            })
+            .ok_or_else(|| AppError::corrupted(format!("brands.toml 里找不到品牌 {id}")))?;
+        match val {
+            Some(s) => t[field.key()] = literal_str(s),
+            None => {
+                t.remove(field.key());
+            }
+        }
+        // 值面
+        let owned = val.map(str::to_owned);
+        let b = self.brand_mut(id)?;
+        match field {
+            BrandField::Name => b.name = owned.unwrap_or_default(),
+            BrandField::Logo => b.logo = owned,
+        }
+        Ok(())
+    }
+
+    /// 新建一个品牌 = 往 `brands.toml` 的 `[[brands]]` 里加一段。
+    ///
+    /// 与 [`Self::add_machine`] 的风险不同：这里**不新建文件**（品牌全住一个
+    /// `brands.toml`），所以是"改内存 + 显式写"，不会覆盖任何别的东西。
+    /// id 也不查字符集 —— 它不是文件名（真数据里叫 `Bambu Lab`，带空格与大小写），
+    /// 只查「非空 + 不撞已有品牌（大小写不敏感）」。
+    pub fn add_brand(&mut self, id: &str, name: &str) -> Result<(), AppError> {
+        let id = id.trim();
+        let name = name.trim();
+        if id.is_empty() {
+            return Err(AppError::invalid_argument("品牌 id 不能为空"));
+        }
+        if name.is_empty() {
+            return Err(AppError::invalid_argument("显示名不能为空"));
+        }
+        if self.brand(id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "已经有一个叫 {id} 的品牌"
+            )));
+        }
+        // 文档面：`brands` 段可能整段不存在（一份空文件 / 新仓库）
+        if self
+            .brands_doc
+            .get("brands")
+            .and_then(toml_edit::Item::as_array_of_tables)
+            .is_none()
+        {
+            self.brands_doc["brands"] = toml_edit::ArrayOfTables::new().into();
+        }
+        let arr = self
+            .brands_doc
+            .get_mut("brands")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+        let mut t = toml_edit::Table::new();
+        t["id"] = literal_str(id);
+        t["name"] = literal_str(name);
+        arr.push(t);
+        // 值面
+        self.brands.push(Brand {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            logo: None,
+        });
+        Ok(())
+    }
+
+    /// 把 `brands.toml` 写回（原子写）。**没改过就逐字节等于读进来那份** ——
+    /// 文档面只被动过被改的那几格
+    pub fn write_brands(&self) -> Result<(), AppError> {
+        atomic_write(
+            &self.root.join("brands.toml"),
+            self.brands_doc.to_string().as_bytes(),
+        )
     }
 
     pub fn machines(&self) -> &[Machine] {
@@ -562,6 +1036,60 @@ impl Catalog {
 
     pub fn zones(&self, machine_id: &str) -> Option<&[Zone]> {
         self.zones.get(machine_id).map(Vec::as_slice)
+    }
+
+    /// 全部打印板（按 id 排序）。
+    pub fn plates(&self) -> impl Iterator<Item = &Plate> {
+        self.plates.values()
+    }
+
+    /// 按 id 找板。**机型的 `plateIds` 引用就是在这里解析的**
+    pub fn plate(&self, id: &str) -> Option<&Plate> {
+        self.plates.get(id)
+    }
+
+    /// **写一台机型的禁区**（2026-10-03）。空 = **删掉 `forbidden_zones/<id>.toml`**。
+    ///
+    /// # 为什么"清空"是删文件而不是写一个空的 `[[zones]]` 数组
+    ///
+    /// 盘上没有这个文件 = 这台机器没有禁区（真数据里 5 台只有 3 台有文件）。
+    /// 空数组留着文件的话，`load_zones` 会把 `<id> → []` 塞进 map，
+    /// 「有没有禁区」从此有两种写法（缺键 / 空表），而下游只当第一种是"没有"。
+    /// 删掉是最省事的一种真相。
+    ///
+    /// 目录不存在时**先建目录**（第一次给某台机器画禁区就是这个场景）。
+    pub fn set_zones(&mut self, machine_id: &str, zones: Vec<Zone>) -> Result<(), AppError> {
+        self.machine(machine_id)
+            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?;
+        let at = self
+            .root
+            .join("forbidden_zones")
+            .join(format!("{machine_id}.toml"));
+        if zones.is_empty() {
+            match std::fs::remove_file(&at) {
+                Ok(()) => {}
+                // 本来就没有这个文件 = 已经达到了想要的状态（幂等）
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(
+                        AppError::io(format!("删不掉 {}", at.display())).with_detail(e.to_string())
+                    )
+                }
+            }
+            self.zones.remove(machine_id);
+            return Ok(());
+        }
+        // 旧文本读进来一起走（保住文件里原有的注释），读不到就当新建
+        let old = std::fs::read_to_string(&at).ok();
+        let doc = zones_doc(old.as_deref(), &zones);
+        if let Some(dir) = at.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| {
+                AppError::io(format!("建不出 {}", dir.display())).with_detail(e.to_string())
+            })?;
+        }
+        atomic_write(&at, doc.as_bytes())?;
+        self.zones.insert(machine_id.to_owned(), zones);
+        Ok(())
     }
 
     /// 全部 `机型:版本` 键。`param_registry.toml` 的 `machineVariants`
@@ -665,7 +1193,7 @@ impl Catalog {
         doc["display"] = literal_str(display);
         doc["brand"] = literal_str(brand);
         // 其余字段**一个都不写**：`name` / `defaultBundle` / `externalAliases` /
-        // `image` / `icon` / `[dimensions]` / `[[versions]]` 都留空。
+        // `image` / `imageVariant` / `icon` / `[dimensions]` / `[[versions]]` 都留空。
         // 写成空串或空数组会让界面显示成"填过但填了个空"，和"还没填"是两件事
         atomic_write(&file, doc.to_string().as_bytes())?;
 
@@ -677,7 +1205,11 @@ impl Catalog {
             default_bundle: None,
             external_aliases: Vec::new(),
             image: None,
+            image_variant: None,
             icon: None,
+            // 新建机型不带板 —— 板是后来按需挂的（与 has_dimensions: false 同一口径）
+            plate_ids: Vec::new(),
+            default_plate_id: None,
             has_dimensions: false,
             dimensions: None,
             versions: Vec::new(),
@@ -696,12 +1228,13 @@ fn parse(path: &Path) -> Result<DocumentMut, AppError> {
     super::parse_text(&text, path)
 }
 
-fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
+/// 读品牌 + **把文档面一起带回来**（值面与文档面两份，见 [`Catalog::brands_doc`]）
+fn load_brands(path: &Path) -> Result<(Vec<Brand>, DocumentMut), AppError> {
     let doc = parse(path)?;
     let Some(arr) = doc.get("brands").and_then(|i| i.as_array_of_tables()) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), doc));
     };
-    Ok(arr
+    let brands = arr
         .iter()
         .filter_map(|t| {
             Some(Brand {
@@ -718,7 +1251,8 @@ fn load_brands(path: &Path) -> Result<Vec<Brand>, AppError> {
                     .filter(|s| !s.is_empty()),
             })
         })
-        .collect())
+        .collect();
+    Ok((brands, doc))
 }
 
 /// 新版本 id 的公共校验（`add_version` 与 `copy_version` 同一条，免得两条路分岔）：
@@ -837,6 +1371,7 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
                             description: g("description"),
+                            image: g("image"),
                         })
                     })
                     .collect()
@@ -861,7 +1396,19 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                 })
                 .unwrap_or_default(),
             image: s("image"),
+            image_variant: s("imageVariant"),
             icon: s("icon"),
+            // 板引用（与 `externalAliases` 同法读字符串数组）。读不出就是空 = 没板
+            plate_ids: doc
+                .get("plateIds")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            default_plate_id: s("defaultPlateId"),
             has_dimensions: dimensions.is_some(),
             dimensions,
             versions,
@@ -978,6 +1525,42 @@ fn load_dimensions(doc: &DocumentMut, file: &Path) -> Result<Option<Dimensions>,
     }))
 }
 
+/// 把禁区写进 `forbidden_zones/<id>.toml` —— **走 toml_edit，不是拼字符串**。
+///
+/// # 为什么不是"新建文件随便拼"
+///
+/// 早先这里是拼字符串的（新建文件没有旧排版要保）。但作者定的一条纪律是
+/// **整份文件的注释要留住**：真数据那三份禁区文件将来会带人写的说明
+/// （"这块是 P1S 的后缘擦嘴区"这种），而拼字符串会把它们全部抹掉。
+/// 值面 + 文档面两份走是这一族写命令的统一口径（同 [`Catalog::set_brand_field`]），
+/// 禁区没有理由例外。
+///
+/// 形状与 [`load_zones`] 对齐：`[[zones]]` + 每块一串 `[[zones.points]]`（`x` / `y`）。
+/// **点序照调用方给的顺序**（多边形是有环序的，排序会把它翻面）；数字不取整
+/// （禁区坐标来自实测，抹掉小数等于改数据）。
+///
+/// 文件存在就**在旧文档上重写 zones 段**（别处一个字节不动）；不存在就从空文档起。
+fn zones_doc(existing: Option<&str>, zones: &[Zone]) -> String {
+    let mut doc: DocumentMut = existing
+        .and_then(|s| s.parse::<DocumentMut>().ok())
+        .unwrap_or_default();
+    let mut arr = toml_edit::ArrayOfTables::new();
+    for z in zones {
+        let mut t = toml_edit::Table::new();
+        let mut pts = toml_edit::ArrayOfTables::new();
+        for (x, y) in &z.points {
+            let mut p = toml_edit::Table::new();
+            p["x"] = toml_edit::value(*x);
+            p["y"] = toml_edit::value(*y);
+            pts.push(p);
+        }
+        t["points"] = pts.into();
+        arr.push(t);
+    }
+    doc["zones"] = arr.into();
+    doc.to_string()
+}
+
 fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
     let mut out = BTreeMap::new();
     // 禁区目录可以整个不存在 —— 一台有禁区的机器都没有是合法状态
@@ -1020,6 +1603,84 @@ fn load_zones(dir: &Path) -> Result<BTreeMap<String, Vec<Zone>>, AppError> {
             })
             .unwrap_or_default();
         out.insert(machine.to_owned(), zones);
+    }
+    Ok(out)
+}
+
+/// 读 `plates/` 目录里的打印板。**与 [`load_zones`] 同构**：目录可以整个不存在
+/// （还没有板规格是合法状态）。
+///
+/// 与 `load_zones` 的差别只有一处：**主键取自文件内的 `id` 字段**，不是文件名 ——
+/// 板是独立实体，id 是它的稳定身份，将来重命名文件不该改身份。
+fn load_plates(dir: &Path) -> Result<BTreeMap<String, Plate>, AppError> {
+    let mut out = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(out);
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    files.sort();
+
+    for file in files {
+        let doc = parse(&file)?;
+        let id = doc
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::corrupted(format!("{} 里没有 id", file.display()))
+                    .with_detail("板文件的第一行就该是 id = '...'".to_owned())
+            })?;
+        let num = |k: &str| -> Result<f64, AppError> {
+            doc.get(k)
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了数字 {k}", file.display())))
+        };
+        let s = |k: &str| {
+            doc.get(k)
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+                .filter(|v| !v.is_empty())
+        };
+        let frame = doc
+            .get("frame")
+            .and_then(|i| i.as_table())
+            .ok_or_else(|| AppError::corrupted(format!("{} 缺了 [frame]", file.display())))?;
+        let fnum = |k: &str| -> Result<f64, AppError> {
+            frame
+                .get(k)
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                .ok_or_else(|| {
+                    AppError::corrupted(format!("{} 的 [frame] 缺了数字 {k}", file.display()))
+                })
+        };
+        let plate = Plate {
+            id: id.clone(),
+            name: s("name").unwrap_or_else(|| id.clone()),
+            w: num("w")?,
+            d: num("d")?,
+            frame: PlateFrame {
+                x: fnum("x")?,
+                y: fnum("y")?,
+                w: fnum("w")?,
+                h: fnum("h")?,
+            },
+            body_path: s("bodyPath")
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 bodyPath", file.display())))?,
+            path: s("path")
+                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 path", file.display())))?,
+        };
+        if out.insert(id.clone(), plate).is_some() {
+            return Err(
+                AppError::corrupted(format!("板 id 重复：{id}")).with_detail(
+                    "两块板用了同一个 id —— plateIds 引用会指到哪一块就不确定了".to_owned(),
+                ),
+            );
+        }
     }
     Ok(out)
 }
@@ -1103,6 +1764,351 @@ mod tests {
         assert_eq!(before, after, "没改任何东西的一次写回改变了文件");
     }
 
+    /// **品牌的写回是"值面 + 文档面"两份一起走的**（2026-10-03，品牌可编辑）：
+    /// 没改 -> 逐字节一样；改了一格 -> 落盘、重读得到新值，而**注释一行不少**
+    /// （`brands.toml` 里那段解释 logo 的注释是最容易被这类写路径悄悄吃掉的）。
+    #[test]
+    fn editing_a_brand_keeps_the_file_comments() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        let file = tmp.path().join("brands.toml");
+
+        // 没改过的一次写回：逐字节一样
+        let before = std::fs::read_to_string(&file).unwrap();
+        c2.write_brands().expect("写回");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "没改任何东西的一次写回改变了 brands.toml"
+        );
+
+        // 改显示名与品牌图：落盘、重读得到，注释还在
+        let comments_before = before
+            .lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count();
+        assert!(comments_before > 0, "真 brands.toml 本来就带注释");
+        c2.set_brand_field("Bambu Lab", BrandField::Name, Some("拓竹科技"))
+            .expect("改显示名");
+        c2.set_brand_field("bambu lab", BrandField::Logo, Some("bambu-lab-logo"))
+            .expect("改品牌图（id 匹配大小写不敏感）");
+        c2.write_brands().expect("写回");
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            after
+                .lines()
+                .filter(|l| l.trim_start().starts_with('#'))
+                .count(),
+            comments_before,
+            "写回吃掉了注释：\n{after}"
+        );
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        let b = again.brand("Bambu Lab").expect("还在");
+        assert_eq!(b.name, "拓竹科技");
+        assert_eq!(b.logo.as_deref(), Some("bambu-lab-logo"));
+
+        // 清空品牌图 = 删键（不是写空串）；清空显示名当场拒
+        c2.set_brand_field("Bambu Lab", BrandField::Logo, None)
+            .expect("清空品牌图");
+        c2.write_brands().expect("写回");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("logo ="), "清空要删键：\n{text}");
+        assert!(Catalog::load_from(tmp.path())
+            .unwrap()
+            .brand("Bambu Lab")
+            .unwrap()
+            .logo
+            .is_none());
+        let err = c2
+            .set_brand_field("Bambu Lab", BrandField::Name, None)
+            .expect_err("显示名不许清空");
+        assert!(err.message.contains("不能清空"), "实测：{}", err.message);
+    }
+
+    /// 新建品牌：加一段 `[[brands]]`、落盘、重读得到；撞名的（**仅大小写不同也算**）
+    /// 与空 id / 空显示名一律当场拒
+    #[test]
+    fn adding_a_brand_appends_and_refuses_collisions() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        let count_before = c2.brands().len();
+
+        c2.add_brand("  Other Lab  ", "别家 (Other Lab)")
+            .expect("新建");
+        assert_eq!(c2.brands().len(), count_before + 1);
+        assert_eq!(c2.brand("other lab").unwrap().name, "别家 (Other Lab)");
+        c2.write_brands().expect("写回");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert!(again.brand("Other Lab").is_some(), "重读得到");
+        assert_eq!(
+            again
+                .brands()
+                .iter()
+                .filter(|b| b.id.eq_ignore_ascii_case("bambu lab"))
+                .count(),
+            1,
+            "原来那条没被碰"
+        );
+
+        let err = c2.add_brand("other LAB", "撞了").expect_err("撞名");
+        assert!(err.message.contains("已经有一个"), "实测：{}", err.message);
+        let err = c2.add_brand("", "空 id").expect_err("空 id");
+        assert!(err.message.contains("不能为空"), "实测：{}", err.message);
+        let err = c2.add_brand("X", "  ").expect_err("空显示名");
+        assert!(err.message.contains("不能为空"), "实测：{}", err.message);
+    }
+
+    /// **写尺寸：六组落盘、注释留住、全零可选组整组不写**（2026-10-03）。
+    ///
+    /// 三条一起断，因为它们是同一件事的三面：写进去了 / 没把文件搅坏 / 没留一屏 `0.0`。
+    #[test]
+    fn writing_dimensions_keeps_comments_and_drops_all_zero_groups() {
+        let Some((root, c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let a1 = c.machine("A1").expect("A1");
+        let base = a1.dimensions.clone().expect("A1 有尺寸");
+        let text_before = a1.to_toml();
+        // A1 的机型文件里 `[dimensions]` 上面那段注释（板件的说明）——
+        // 整表替换不能把它带走
+        assert!(
+            text_before.contains("# 这台机型能用的打印板") || text_before.contains("# 整机图"),
+            "夹具前提：文件里有注释"
+        );
+
+        let (tmp, mut c2) = copy_of(&root);
+        // ① 只改床身一格：其余五组原样留着（不是"全零组"），注释还在
+        let mut next = base.clone();
+        next.bed_size.width = 261.5;
+        c2.machine_mut("A1").unwrap().set_dimensions(next).unwrap();
+        c2.write_machine("A1").expect("写回");
+        let text_after = c2.machine("A1").unwrap().to_toml();
+        for keep in ["# 这台机型能用的打印板", "# 整机图"] {
+            assert!(text_after.contains(keep), "注释被带走了：{keep}");
+        }
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        let d = again
+            .machine("A1")
+            .and_then(|m| m.dimensions.clone())
+            .expect("重读有尺寸");
+        assert_eq!(d.bed_size.width, 261.5, "改的那一格落盘了");
+        assert_eq!(d.bed_size.depth, base.bed_size.depth, "没改的那一格没动");
+        assert_eq!(d.calibration, base.calibration, "标定点整组原样");
+        assert!(again.machine("A1").unwrap().has_dimensions);
+
+        // ② 把可选的四组全写成 0：整组不该出现在文件里（bedSize / edgeZone 恒留）
+        let mut zeroed = base.clone();
+        zeroed.movement_range = MovementRange {
+            min_x: 0.0,
+            max_x: 0.0,
+            min_y: 0.0,
+            max_y: 0.0,
+            max_z: 0.0,
+        };
+        zeroed.glue_area = GlueArea {
+            glue_min_x: 0.0,
+            glue_max_x: 0.0,
+            glue_min_y: 0.0,
+            glue_max_y: 0.0,
+            wipe_x: 0.0,
+        };
+        zeroed.calibration = CalibrationPoints {
+            l_shape_base_x: 0.0,
+            l_shape_base_y: 0.0,
+            x_line_x: 0.0,
+            x_line_y: 0.0,
+            x_line_y_end: 0.0,
+            y_line_x: 0.0,
+            y_line_x_end: 0.0,
+            y_line_y: 0.0,
+            z_start_x: 0.0,
+            z_start_y: 0.0,
+        };
+        zeroed.flags = MachineFlags {
+            gcode_marker: String::new(),
+            has_second_fan: false,
+        };
+        c2.machine_mut("A1")
+            .unwrap()
+            .set_dimensions(zeroed.clone())
+            .unwrap();
+        c2.write_machine("A1").expect("写回");
+        let text_zero = c2.machine("A1").unwrap().to_toml();
+        // ★ 这里有一条**本仓既有的硬口径**：`load_dimensions` 是「全有或全无」——
+        //   缺一个子表就是读坏（`Corrupted`），不是"没配"。所以"剔全零组"**不能**真的
+        //   把子表从文件里删掉（删了这份文件下次读就报错）；`TrimmedDimensions` 的
+        //   `Option` 只有 `flags` 用得上（`flags` 由零值重建一个空组）。
+        //   旧面板的 `stripEmptyGroups` 是在 JSON 上做的（那边缺字段合法），
+        //   搬过来必须按 TOML 这边的口径改 —— 这一条是实测撞出来的。
+        for kept in [
+            "bedSize",
+            "movementRange",
+            "edgeZone",
+            "glueArea",
+            "calibration",
+            "flags",
+        ] {
+            assert!(
+                text_zero.contains(kept),
+                "六组必须齐（全有或全无）：少了 {kept}"
+            );
+        }
+        // 重读读得回来：全零组读出来就是 0（不是"没配"）
+        let again2 = Catalog::load_from(tmp.path()).expect("重读：全零组也是完整的一份");
+        let d2 = again2.machine("A1").unwrap().dimensions.clone().unwrap();
+        assert_eq!(d2.edge_zone, base.edge_zone);
+        assert_eq!(d2.bed_size, base.bed_size);
+        assert_eq!(
+            d2.movement_range, zeroed.movement_range,
+            "全零的组读回来还是 0"
+        );
+        assert_eq!(d2.calibration, zeroed.calibration);
+    }
+
+    /// 尺寸的坏输入当场拒：床身宽高必须为正、数字必须有限。
+    /// **半张 [dimensions] 是写坏了的现场**，所以宁可拒写也不留下读不回来的文件。
+    #[test]
+    fn writing_dimensions_refuses_a_zero_bed_and_non_finite_numbers() {
+        let Some((root, c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let base = c.machine("A1").unwrap().dimensions.clone().unwrap();
+        let (tmp, mut c2) = copy_of(&root);
+
+        let mut flat = base.clone();
+        flat.bed_size.width = 0.0;
+        let err = c2
+            .machine_mut("A1")
+            .unwrap()
+            .set_dimensions(flat)
+            .expect_err("0 宽床身");
+        assert!(err.message.contains("大于 0"), "实测：{}", err.message);
+
+        let mut nan = base.clone();
+        nan.movement_range.max_z = f64::NAN;
+        let err = c2
+            .machine_mut("A1")
+            .unwrap()
+            .set_dimensions(nan)
+            .expect_err("NaN");
+        assert!(err.message.contains("有限数"), "实测：{}", err.message);
+
+        // 拒了之后盘上一个字节都没动
+        let text = std::fs::read_to_string(tmp.path().join("machines").join("A1.toml")).unwrap();
+        let original = c.machine("A1").unwrap().to_toml();
+        assert_eq!(text, original, "拒写不该碰文件");
+    }
+
+    /// **写禁区：点序原样落盘、块数可读回；清空 = 删文件**（2026-10-03）。
+    ///
+    /// "清空是删文件"这条是本仓新定的口径：留一个空的 `[[zones]]` 会让
+    /// 「有没有禁区」多出一种写法（缺键 / 空表），而下游只当缺键是"没有"。
+    #[test]
+    fn writing_zones_roundtrips_points_and_deleting_is_a_real_delete() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        // P1S 真数据里就有 2 块（6 点 + 4 点）
+        let original = c2.zones("P1S").expect("P1S 有禁区").to_vec();
+        assert_eq!(original.len(), 2, "夹具前提：P1S 两块");
+
+        // ① 原样写回：逐点相同（点序是有环序的，排序会把它翻面）
+        c2.set_zones("P1S", original.clone()).expect("写");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert_eq!(again.zones("P1S").unwrap(), original.as_slice(), "逐点相同");
+
+        // ② 换一批点（手画的形状）：顺序是调用方给的顺序
+        let custom = vec![Zone {
+            points: vec![(1.0, 2.0), (30.5, 2.0), (30.5, 9.25)],
+        }];
+        c2.set_zones("P1S", custom.clone()).expect("写");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert_eq!(again.zones("P1S").unwrap(), custom.as_slice());
+        let text =
+            std::fs::read_to_string(tmp.path().join("forbidden_zones").join("P1S.toml")).unwrap();
+        assert!(
+            text.starts_with("[[zones]]\n"),
+            "形状与 load_zones 对齐：{text}"
+        );
+
+        // ③ 清空 = 文件真的没了 + 内存里也没了
+        c2.set_zones("P1S", Vec::new()).expect("清空");
+        assert!(
+            !tmp.path().join("forbidden_zones").join("P1S.toml").exists(),
+            "清空必须把文件删掉"
+        );
+        assert!(c2.zones("P1S").is_none(), "内存里也去掉");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert!(again.zones("P1S").is_none(), "重读：缺键就是没有");
+
+        // ④ 本来就没有的不算错（幂等 —— 连点两次"清空"）
+        c2.set_zones("A1", Vec::new()).expect("本来就没有，也该过");
+
+        // ⑤ 给一台本来没有禁区的机器画一块（目录得自己建）
+        c2.set_zones(
+            "A1",
+            vec![Zone {
+                points: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+            }],
+        )
+        .expect("新画一块");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert_eq!(again.zones("A1").map(<[_]>::len), Some(1));
+
+        // ⑥ 不存在的机型如实拒
+        let err = c2.set_zones("NOPE", Vec::new()).expect_err("没这台机器");
+        assert!(err.message.contains("没有机型"), "实测：{}", err.message);
+    }
+
+    /// 移动机型 = 改 `brand` 一格（值面 + 文档面），**归属只有一份**。
+    #[test]
+    fn moving_a_machine_to_another_brand_rewrites_one_field() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        c2.add_brand("Other Lab", "别家").expect("建个新品牌");
+        let before = c2.machine("A1").unwrap().to_toml();
+
+        c2.machine_mut("A1")
+            .unwrap()
+            .set_field(MachineField::Brand, Some("Other Lab"))
+            .expect("改归属");
+        c2.write_machine("A1").expect("写回");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert_eq!(again.machine("A1").unwrap().brand, "Other Lab");
+
+        // 除了 brand 那一行，文件其余部分逐字不变（只改一格）
+        let after = again.machine("A1").unwrap().to_toml();
+        let stripped = |s: &str| {
+            s.lines()
+                .filter(|l| !l.starts_with("brand"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(stripped(&after), stripped(&before), "只动了 brand 那一行");
+
+        // 品牌侧是**反查**：没有第二份归属要同步
+        let under_new = again
+            .machines()
+            .iter()
+            .filter(|m| m.brand == "Other Lab")
+            .count();
+        assert_eq!(under_new, 1, "只有 A1 挪过去了");
+        assert!(again.brand("Bambu Lab").is_some());
+    }
+
     /// 把机型目录复制到临时目录，**在副本上改**，不碰真数据
     fn copy_of(root: &Path) -> (tempfile::TempDir, Catalog) {
         let tmp = tempfile::tempdir().expect("临时目录");
@@ -1113,6 +2119,17 @@ mod tests {
             std::fs::copy(&p, dst.join(p.file_name().unwrap())).unwrap();
         }
         std::fs::copy(root.join("brands.toml"), tmp.path().join("brands.toml")).unwrap();
+        // 禁区目录**也要拷**（2026-10-03 补）：它是"缺目录 = 一台都没有"的合法状态，
+        // 漏拷会让「读得回原来那两块」这类判据拿不到夹具，红在夹具上而不是产品上
+        let zones_src = root.join("forbidden_zones");
+        if zones_src.is_dir() {
+            let zones_dst = tmp.path().join("forbidden_zones");
+            std::fs::create_dir_all(&zones_dst).unwrap();
+            for f in std::fs::read_dir(&zones_src).unwrap() {
+                let p = f.unwrap().path();
+                std::fs::copy(&p, zones_dst.join(p.file_name().unwrap())).unwrap();
+            }
+        }
         let c = Catalog::load_from(tmp.path()).expect("副本也该读得通");
         (tmp, c)
     }

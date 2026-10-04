@@ -14,6 +14,11 @@
   justify-content: center;
   padding: var(--pad);
   background: rgba(16, 24, 32, 0.28);
+  /* 滚动穿透（2026-10-02）：滚到框内滚动容器的头、或鼠标落在遮罩空白处，
+     滚动链不许再传给背后页面 —— 遮罩自己当滚动链的最后一环。
+     代价是框贴到遮罩边时投影会被裁掉一点（阴影扩散 50px > --pad），值得。 */
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .box {
@@ -97,8 +102,19 @@
   min-height: 0;
   padding: 12px 14px;
   overflow-y: auto;
+  /* 滚到头就停在框里，不链给背后（与遮罩的 contain 同一件事，见 .scrim） */
+  overscroll-behavior: contain;
   font-size: var(--fs-label);
   color: var(--text-1);
+}
+
+/* 标题行右侧的工具位：吃掉标题与关闭按钮之间的空白，内容贴右排 */
+.headExtra {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .foot {

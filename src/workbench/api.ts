@@ -53,6 +53,8 @@ export type ArtifactState = 'fresh' | 'stale' | 'missing'
 export type SaveState = 'saved' | 'dirty'
 /** `wording::BbsAssign` */
 export type BbsAssign = 'assigned' | 'optional' | 'archiveOnly'
+/** `wording::AssetIdentity` —— 资产交付身份四态（作者 2026-10-03 定的模型） */
+export type AssetIdentity = 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 /** `wording::BbsSource` */
 export type BbsSource = 'own' | 'inheritedFromMachine'
 /** `patch::Visibility` */
@@ -61,8 +63,8 @@ export type Visibility = 'menu' | 'archiveOnly'
 export type CellKind = 'notApplicable' | 'gcode' | 'value'
 /** `registry::ValueType` */
 export type ValueType = 'float' | 'int' | 'bool' | 'string'
-/** `registry::UiComponent` */
-export type UiComponent = 'number' | 'switch' | 'segmented' | 'select' | 'gcode'
+/** `registry::UiComponent` —— `text` 是编辑器给的第六种（字符串清掉可选项后的自由文本） */
+export type UiComponent = 'number' | 'switch' | 'segmented' | 'select' | 'gcode' | 'text'
 /** `visibility::BlockScope` */
 export type BlockScope = 'field' | 'section'
 /** `preview::BulkKind` */
@@ -196,10 +198,13 @@ export interface ChoiceView {
   deprecated: boolean
 }
 
+/** `registry::ShowOp` —— 实测只有三种 */
+export type ShowOp = 'eq' | 'neq' | 'gt'
+
 /** `registry::ShowWhen` */
 export interface ShowWhen {
   key: string
-  op: 'eq' | 'neq' | 'gt'
+  op: ShowOp
   value: unknown
 }
 
@@ -234,6 +239,41 @@ export interface RegistryView {
   updated: string
   tabs: TabMeta[]
   params: ParamView[]
+}
+
+/**
+ * `registry::ParamMetaEdit` —— 一次「参数定义」编辑的整包载荷（2026-10-03）。
+ * 模态框一次保存改的可能不止一格，所以整包提交；`null` = **清空**那一格
+ * （文件里删键），不是「不动」。
+ */
+export interface ParamMetaEdit {
+  label: string
+  desc: string
+  unit: string | null
+  valueType: ValueType
+  uiComponent: UiComponent
+  defaultValue: unknown
+  min: number | null
+  max: number | null
+  step: number | null
+  parentKey: string | null
+  showWhen: ShowWhen | null
+  deprecated: boolean
+  /** 可选项整表 —— 字符串枚举在这里编辑；其他类型原样带回（预设档不丢） */
+  choices: ChoiceView[]
+  /** 适用机型。空 = 不限机型 */
+  machineFilter: string[]
+}
+
+/**
+ * 参数台「编辑定义」交到外壳的一条（2026-10-03）。外壳把它压进撤销栈：
+ * 撤销交 `before`、重做交 `after`，两份都是整包载荷，不用现算反向。
+ */
+export interface MetaApplied {
+  label: string
+  key: string
+  before: ParamMetaEdit
+  after: ParamMetaEdit
 }
 
 /* ---------- 矩阵 ---------- */
@@ -563,6 +603,42 @@ export interface GenerateReport {
   mark: Patch
 }
 
+/** `build::DiffState` —— 点生成会怎样 */
+export type DiffState = 'added' | 'modified' | 'unchanged'
+
+/** `build::DiffLineKind` */
+export type DiffLineKind = 'context' | 'added' | 'removed'
+
+/** `build::DiffLine`（**行级文本 diff**，与上面 `app::DiffLine` 那条字段级差异不是一回事） */
+export interface PreviewDiffLine {
+  kind: DiffLineKind
+  text: string
+  /** 1 起（`removed` 记旧版行号，其余记新版） */
+  no: number
+}
+
+/** `build::PreviewFile` —— 一份产物的预演 */
+export interface PreviewFile {
+  uid: string
+  fileName: string
+  state: DiffState
+  /** `unchanged` 时是空表 */
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+}
+
+/** `build::PreviewReport` —— **只算不写**，生成前确认那一步 */
+export interface PreviewReport {
+  files: PreviewFile[]
+  skipped: [string, string][]
+  /** 会写盘的份数（added + modified） */
+  toWrite: number
+  unchanged: number
+  /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
+  blocked: string | null
+}
+
 /** `build::RevertChange` */
 export interface RevertChange {
   key: string
@@ -587,10 +663,187 @@ export interface PublishReport {
   stamp: string
   root: string
   files: number
-  /** null = 上游未声明。**不编一个版本号出来** */
+  /**
+   * 这次发出去的目录登记的**最低正式客户端版本**（结构规则表里对当前结构签名那条）。
+   *
+   * `null` 只该出现在「这一代还没登记」时 —— 那种情况发布闸 ⑫ 会先拦住。
+   * **不编一个版本号出来**（要登记就得有人去规则表里签字）
+   */
   minimumClient: string | null
   todos: number
   hints: number
+}
+
+/* ---------- 发布闸（`app::audit`，第二刀） ---------- */
+
+/**
+ * `audit::AuditStatus` —— 一项的结论四态。
+ *
+ * ★ `skipped` **不许当 `pass` 画**：它说的是「这一项今天还没跑」。
+ * 把"没实现"画成绿勾，比画成红叉更危险（作者定的口径）
+ */
+export type AuditStatus = 'pass' | 'fail' | 'warn' | 'skipped'
+
+/** `audit::AuditSeverity` —— 分量。**只有 `blocker` 红了才拦发布** */
+export type AuditSeverity = 'blocker' | 'warning'
+
+/** `audit::AuditItem` —— 发布闸里的一行（一项检查） */
+export interface AuditItem {
+  /** 稳定 id（`docs/PUBLISH-ARCHITECTURE.md` §5.2）。界面按它 key 住，列表不会每次重排 */
+  id: string
+  name: string
+  status: AuditStatus
+  severity: AuditSeverity
+  /** 一句话说清「红了是什么、在哪」。通过时也写（那时的结论） */
+  details: string
+  affectedFiles: string[]
+  /** 界面上那颗「去修」的入口 */
+  fixHint: string
+}
+
+/**
+ * `audit::PublishAudit` —— 一次发布闸的全部结果。
+ *
+ * **这是"能不能往下走"的唯一答案来源**：`canPublish` 为假时，任何 commit / push / PR
+ * 都不许发生。界面不许自己再算一遍（那正是这把刀要治的老病根）
+ */
+export interface PublishAudit {
+  items: AuditItem[]
+  filesAdded: number
+  filesChanged: number
+  filesRemoved: number
+  /**
+   * 这一代结构要求的**最低正式客户端版本**（`presets/structure-signatures.toml` 里登记的）。
+   *
+   * `null` = ⑫ 没给出答案（签名没登记 / 规则表读不出来）—— 那种情况 ⑫ 已经是 Blocker，
+   * `canPublish` 已经是 false。**不编一个版本号出来**
+   */
+  minVersion: string | null
+  canPublish: boolean
+}
+
+/* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
+
+/**
+ * `publish_tx::PublishStage` —— 一次发布事务走到哪一步了。
+ *
+ * ★ 这是**工作台自己的发布状态模型**：GitHub 的 PR / Gitee 的 MR / 各自的 CI 方言
+ * 在后端就被收敛成这一档（见 `ReviewState` / `ChecksSummary`）。前端**不认识任何平台方言**。
+ */
+export type PublishStage =
+  | 'blockedAudit'
+  | 'generated'
+  | 'committed'
+  | 'pushed'
+  | 'reviewOpened'
+  | 'statusRead'
+
+/** `platform::ReviewState` —— PR/MR 的统一状态（方言已收敛） */
+export type ReviewState = 'open' | 'merged' | 'closed' | 'unknown'
+
+/** `platform::ChecksSummary` —— CI 汇总的统一档 */
+export type ChecksSummary = 'pending' | 'passed' | 'failed' | 'none' | 'unknown'
+
+/** `platform::RemoteReview` —— 一份 PR/MR 的平台无关快照 */
+export interface RemoteReview {
+  platform: string
+  number: number
+  url: string
+  state: ReviewState
+  checks: ChecksSummary
+  title: string
+  head: string
+  base: string
+}
+
+/** `publish_tx::PublishTxReport` —— 一轮发布事务的结果（阶段的快照） */
+export interface PublishTxReport {
+  stage: PublishStage
+  auditPassed: number
+  auditFailed: number
+  generated: number
+  unchanged: number
+  committedPaths: string[]
+  review: RemoteReview | null
+  branch: string | null
+  /** 这次发布提交的短 sha（没有提交 = null，如实说） */
+  commit: string | null
+  files: number
+  summary: string
+}
+
+/** `publish_tx::TxOptions` —— 发布事务的开关（一般用默认：一次点击走完全程） */
+export interface TxOptions {
+  /** 只审计 + 生成 + 定稿 + 报"会提交什么"，不 commit / push / 建 PR */
+  dryRun?: boolean
+  /** 提交推送之后要不要建 PR/MR（默认 true） */
+  openReview?: boolean
+  /** 目标分支（PR 的 base）；空 = main */
+  base?: string
+  /** 发到哪个平台（`github` / `gitee`）；不填 = 自动挑（见发布账户配置） */
+  platform?: string | null
+}
+
+/**
+ * `history::PublishRecord` —— 一条发布回执（`<appDataDir>/publish-history.json` 里的一条）。
+ *
+ * ★ 它是**写入那一刻的快照**：PR/MR 的状态之后会变。要看现在走到哪，拿编号去
+ * `publishStatus` **手动刷新**（作者定死：状态是"看一看"，不做轮询）。
+ */
+export interface PublishRecord {
+  at: string
+  /**
+   * 走到 / 停在哪一阶段。写入时是 `PublishStage` 的线上名；读的时候按字符串收 ——
+   * 将来版本写了新阶段，不该让整份历史读不出来（界面自己回落成"认不出"）
+   */
+  stage: string
+  branch: string | null
+  commit: string | null
+  review: RemoteReview | null
+  files: number
+  generated: number
+  auditPassed: number
+  auditFailed: number
+  summary: string
+}
+
+/** `history::PublishHistory` —— 回执日志（最新在前） */
+export interface PublishHistory {
+  historySchema: number
+  records: PublishRecord[]
+}
+
+/** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
+export interface CredentialStatus {
+  platform: string
+  configured: boolean
+  hint: string | null
+}
+
+/**
+ * `publish_tx::PlatformAccountView` —— 一个平台在设置页里的完整视图。
+ *
+ * `repositoryUrl` / `username` 来自 `<appDataDir>/publish-account.json`（配置）；
+ * `hasToken` / `tokenHint` 来自系统 Keychain（**只有真假 + 尾号，没有原值**）。
+ */
+export interface PlatformAccountView {
+  platform: string
+  repositoryUrl: string
+  username: string
+  hasToken: boolean
+  tokenHint: string | null
+}
+
+/** `publish_tx::PublishAccount` —— 设置页「发布账户」那块读的现状（GitHub / Gitee 对称） */
+export interface PublishAccount {
+  /** 每个平台一格 */
+  platforms: PlatformAccountView[]
+  /** 当前工作目录的远端 URL（给用户对照"是不是这个仓库"） */
+  remoteUrl: string | null
+  /** 当前远端是否与已配置的某个平台一致（发布前的一致性提示） */
+  remoteMatchesConfig: boolean
+  /** 当前分支 */
+  branch: string | null
 }
 
 /* ---------- 状态词 ---------- */
@@ -613,6 +866,8 @@ export interface Words {
   artifact: Record<ArtifactState, Word>
   save: Record<SaveState, Word>
   bbsAssign: Record<BbsAssign, Word>
+  /** 资产交付身份四态（进套餐 / 可选 / 随包 / 仅归档） */
+  identity: Record<AssetIdentity, Word>
   bbsSource: Record<BbsSource, Word>
   origin: Record<Origin, Word>
   level: Record<Level, Word>
@@ -655,7 +910,7 @@ export interface Words {
    * 带变量的整句在后端就拼好了（`Row.controlNote` / `Cell.blockedNote`）——
    * 前端不拿模板填空，模板一分两处迟早分岔
    */
-  relate: Record<'goFixIt' | 'showAnyway', string>
+  relate: Record<'goFixIt' | 'showAnyway' | 'foldBack', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
   /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
@@ -672,11 +927,15 @@ export interface Words {
 
 /* ---------- 机型与版本（`app::machines`） ---------- */
 
-/** `machines::BrandView` */
+/** `machines::BrandView` —— 品牌从"机型下拉里的一个字符串"升成一等条目（2026-10-03） */
 export interface BrandView {
   id: string
+  /** 显示名（`拓竹 (Bambu Lab)`）。空 = 没填过，界面回落显示 id */
   name: string
+  /** 品牌图 = **资产 id**（不是文件名）。`null` = 没配，消费侧回落内置字标 */
   logo: string | null
+  /** **这个品牌下的机型**（反查，后端算）。机型 `brand` 字段写着它的 id */
+  machines: string[]
 }
 
 /** `machines::VersionView` —— 版本卡上那几格 */
@@ -686,8 +945,85 @@ export interface VersionView {
   recommendedBundle: string | null
   tag: string | null
   description: string | null
+  /**
+   * 这一版专属的外观图（**资产 id**）。`null` = 回落机型图（`MachineView.image`）——
+   * 界面上要说明白那是回落，不是"没配"
+   */
+  image: string | null
   /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
   hasRecipe: boolean
+}
+
+/*
+ * 机型尺寸六组（`presetdata::Dimensions`）—— 字段名与外层契约 `src/api/contract.ts`
+ * 的 `MachineDimensions` 一一对应（后端注释里写死的那条口径），中间没有翻译层。
+ */
+
+/** 床身尺寸，mm */
+export interface BedSize {
+  width: number
+  depth: number
+}
+
+/** 喷头可达范围，mm */
+export interface MovementRange {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  maxZ: number
+}
+
+/** 可涂胶范围 + 擦料点的 X 坐标 */
+export interface GlueArea {
+  glueMinX: number
+  glueMaxX: number
+  glueMinY: number
+  glueMaxY: number
+  wipeX: number
+}
+
+/** 校准时笔尖要走的那几个点 */
+export interface CalibrationPoints {
+  lShapeBaseX: number
+  lShapeBaseY: number
+  xLineX: number
+  xLineY: number
+  xLineYEnd: number
+  yLineX: number
+  yLineXEnd: number
+  yLineY: number
+  zStartX: number
+  zStartY: number
+}
+
+/** 机型标记 */
+export interface MachineFlags {
+  /** G-code 里用来认机型的那行注释 */
+  gcodeMarker: string
+  hasSecondFan: boolean
+}
+
+/**
+ * 一台机型的尺寸（六组）。
+ *
+ * ★ **六组在文件里是全有或全无**（后端 `load_dimensions` 的口径）：`[dimensions]`
+ * 在，六个子表就都得在。所以这里六个字段都不是可选的 —— 界面上「没配尺寸」
+ * 是整张表缺席（`MachineView.dimensions === null`），不是某几组缺。
+ */
+export interface MachineDimensions {
+  bedSize: BedSize
+  movementRange: MovementRange
+  edgeZone: number
+  glueArea: GlueArea
+  calibration: CalibrationPoints
+  flags: MachineFlags
+}
+
+/** 一块禁区（画布上的一个多边形）。机器坐标 mm：原点在床身前左角、y 向上 */
+export interface ZonePolygon {
+  /** `[x, y]` 点对。**点序是有环序的** —— 不许排序 */
+  points: [number, number][]
 }
 
 /** `machines::MachineView` */
@@ -703,8 +1039,12 @@ export interface MachineView {
   icon: string | null
   /** 有没有 `[dimensions]` —— 界面上要能看出「这台还没配尺寸」 */
   hasDimensions: boolean
+  /** **`[dimensions]` 的逐格视图**（尺寸卡六组）。`null` = 这台没配尺寸 */
+  dimensions: MachineDimensions | null
   /** 禁区块数。0 = 这台没有禁区文件 */
   zoneCount: number
+  /** **禁区的原始点**（画布要用）。空数组与 `zoneCount === 0` 是同一件事 */
+  zones: ZonePolygon[]
   versions: VersionView[]
   /** 它自己那个 toml 文件名（`A1.toml`）。**给人看的**，让「我在改哪个文件」不用猜 */
   file: string
@@ -725,8 +1065,11 @@ export interface MachineList {
  *
  * 四个取值而不是三个：`image` 与 `icon` 是两种消费方式（一个是机型图、一个是矢量标记）。
  * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
+ *
+ * `image`（整机图）2026-10-03 回到台账（第三刀的剥离已作废）：它用
+ * `delivery = 'bundled'` 表达「不进云端交付、但工作台可管可换图」。
  */
-export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile'
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
 
 /** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
 export interface AssetView {
@@ -734,8 +1077,17 @@ export interface AssetView {
   kind: AssetKind
   /** 归属机型；不属于任何机型时是 null */
   machineId: string | null
+  /** 归属版本（只 `mkPreset` 类有）—— 界面拿它跳到那一版 */
+  versionId: string | null
+  /** **显示名（一律真名）**：MKP 预设 = 版本名、切片器 = 文件名，其余 = 登记名。
+   *  界面上显示这一格 */
+  display: string
+  /** 台账登记的名字（不是显示真源，详情卡里作对照） */
   name: string
-  /** 相对资产根（`public/assets/`）的一段 */
+  /**
+   * 相对**资产源根**（`presets/assets/`）的一段 —— 工作台读的是源，与交付档位无关。
+   * 它同时就是 `/assets/` 那条 URL 的后半截（`url` 由后端拼，前端只 encode）
+   */
   path: string
   /** `/assets/<path>`。**用之前过 `assetUrl()`** —— 路径里可能有空格 */
   url: string
@@ -748,8 +1100,15 @@ export interface AssetView {
   nozzle: string | null
   /** 三根轴之三：层高。后端从文件名尾部派生（`… 0.10.json` → `0.10`） */
   layer: string | null
-  /** 交付身份三态。可见性（含草稿态）压过「进没进套餐」，与 stock 行上同口径 */
-  assign: BbsAssign
+  /** **交付身份四态**（进套餐 / 可选 / 随包 / 仅归档；判定在后端一处：
+   *  归档 > 随包 > 进套餐 > 可选） */
+  identity: AssetIdentity
+  /** 交付档位（作者 2026-10-03）：`download` = 客户端按需下载（默认）、
+   *  `bundled` = **随包不下载**（整机图：工作台可管可换图，客户端不下载不更新） */
+  delivery: 'download' | 'bundled'
+  /** **生成状态**（只 `mkPreset` 类有，与生成页同一套判据）：没生成过 = 待生成；
+   *  生成过、参数改完还没重新生成 = **待更新**。其余四类恒 null */
+  buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
 }
 
 /** `assets::AssetList` */
@@ -779,10 +1138,42 @@ export interface AssetUsageView {
   bundles: string[]
 }
 
+/**
+ * `assets::AssetInspectView` —— **资产检查面板**（第四刀，选中一条才问）。
+ *
+ * 它不并进 [`AssetView`]（列表里那一条）：最贵的两格（`sha256` / `bytes`）要读真实
+ * 字节（模型 3.2 MB），而列表每次筛选 / 搜索词一变就重取 —— 把哈希算进列表就是
+ * "每敲一个字读几 MB"。所以与 `assetUsage` 同一形状：**选中才问**。
+ *
+ * 两条线各说各的落点：普通资产 = 源文件（`presets/assets/<path>`）；`mkPreset` =
+ * 生成产物（`fileName` 是产物名、`absPath` 是产物文件、`productPath` 相对仓库根）。
+ * **文件不存在时 `absPath` 同时就是"期望路径"** —— 界面按 `exists` 换标题。
+ */
+export interface AssetInspectView {
+  id: string
+  /** 真实文件名（盘上那个名字）。普通资产 = `path` 的文件名；`mkPreset` = 产物名 */
+  fileName: string
+  /** 盘上绝对路径（普通 = 源文件；`mkPreset` = 产物文件）。**文件不存在时它是期望路径** */
+  absPath: string
+  /** 文件在不在这条链的期望位置 */
+  exists: boolean
+  /** 文件大小（字节）；不存在时 null */
+  bytes: number | null
+  /** **源文件字节**的 SHA-256（小写 hex，与交付侧同一算法）；不存在时 null */
+  sha256: string | null
+  /** 图片像素尺寸 / viewBox（webp / png / svg 读得出时给）；非图片或读不出 = null */
+  width: number | null
+  height: number | null
+  /** 格式（小写扩展名：`webp` / `svg` / `3mf` / `json` / `toml`…） */
+  format: string | null
+  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/dist/mkp/presets/<产物名>` */
+  productPath: string | null
+}
+
 /** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
 export interface BundleRefView {
   id: string
-  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设不建资产条目，MKP 组恒空） */
+  /** 资产类型。前端按它把 refs 分成 MKP / 切片器两组（MKP 预设 2026-10-03 进了资产库） */
   kind: AssetKind
   /** 能不能解析到一条真实资产。加载期解析不到是 error，真数据上恒 true */
   resolvable: boolean
@@ -790,8 +1181,10 @@ export interface BundleRefView {
   isBbs: boolean
   /** 资产域登记的名字。解析不到时是空串 */
   name: string
-  /** 文件在不在 */
+  /** 文件在不在。**MKP 预设按生成状态判**（产物不在资产根里） */
   present: boolean
+  /** **生成状态**（只 `mkPreset` 类有，与生成页 / 资产库同一套判据），其余类恒 null */
+  buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
   /** 交付身份（在菜单 / 仅归档）。**含草稿态** —— 刚设还没保存的也看得见 */
   visibility: Visibility
 }
@@ -830,7 +1223,7 @@ export interface BundleList {
 export const assetUrl = (url: string) => encodeURI(url)
 
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
-export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description'
+export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description' | 'image'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
@@ -847,12 +1240,21 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
+  /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
+  appVersion: () => invoke<string>('wb_app_version'),
   /** 写官方源（Bootstrap）；返回**存的规范化值**（仓库地址 → 默认发布入口的 raw；blob 页转 raw） */
   setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
   words: () => invoke<Words>('wb_words'),
 
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
+  /**
+   * 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
+   * 出厂默认 / 属于 / 前置条件 / 弃用）。**即时落盘**（与机型尺寸那套一致），
+   * 不走参数草稿 —— 定义与值在撤销语义上不是一件事。返回重读后的注册表
+   */
+  setParamMeta: (key: string, edit: ParamMetaEdit) =>
+    invoke<RegistryView>('wb_set_param_meta', { key, edit }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
@@ -874,12 +1276,16 @@ export const wb = {
     slicer: string | null,
     nozzle: string | null,
     layer: string | null,
-    assign: string | null,
+    identity: string | null,
     query: string | null,
-  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, assign, query }),
+  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, identity, query }),
 
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
+
+  /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  setAssetDelivery: (assetId: string, delivery: 'download' | 'bundled') =>
+    invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
 
   /**
    * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、
@@ -889,16 +1295,51 @@ export const wb = {
 
   /**
    * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
-   * 悬空引用 / 「没有一条 BBS」在后端拦；`updatedAt` 由那次写盖上当天
+   * 悬空引用 / 「没有一条 BBS」在后端拦；MKP 预设也在 `assetIds` 里
+   * （2026-10-03 进资产库，`type = 'mkPreset'`，**文件在不在都能选**）；
+   * `updatedAt` 由那次写盖上当天
    */
   setBundleRefs: (bundleId: string, assetIds: string[]) =>
     invoke<BundleList>('wb_set_bundle_refs', { bundleId, assetIds }),
+
+  /** 新建一条套餐。**至少一条 BBS**（成套配发），id 不许与现有撞（大小写不敏感） */
+  addBundle: (id: string, machineId: string, display: string, assetIds: string[]) =>
+    invoke<BundleList>('wb_add_bundle', { id, machineId, display, assetIds }),
+
+  /** 编辑一条套餐：改 id 与/或显示名。**改 id 连带重指机型文件里的引用** */
+  renameBundle: (bundleId: string, newId: string, display: string | null) =>
+    invoke<BundleList>('wb_rename_bundle', { bundleId, newId, display }),
+
+  /** 复制一条套餐：内容照抄、id 必须是新的；复制出来的那份没人指着 */
+  copyBundle: (bundleId: string, newId: string, display: string | null) =>
+    invoke<BundleList>('wb_copy_bundle', { bundleId, newId, display }),
+
+  /** **把一批版本指到这份套餐**（多选 + 确认）。不限机型；已经指着它的跳过。
+   *  即时落盘，界面在确认前先摆影响预览 */
+  assignBundleVersions: (bundleId: string, uids: string[]) =>
+    invoke<BundleList>('wb_assign_bundle_versions', { bundleId, uids }),
+
+  /** 删一条套餐。被机型默认或版本指着时整次拒绝并点名（界面转拦截页） */
+  removeBundle: (bundleId: string) => invoke<BundleList>('wb_remove_bundle', { bundleId }),
 
   /**
    * 「谁在用它」。**删资产之前先问这一条** —— 删掉一张还被机型引用着的图，
    * 界面上只表现为「那台机型的图没了」。删除守卫在数据层（`Presets::remove_asset`）
    */
   assetUsage: (assetId: string) => invoke<AssetUsageView>('wb_asset_usage', { assetId }),
+
+  /**
+   * **资产检查面板**的数据（第四刀）：真实文件名 / 绝对路径 / SHA-256 / 尺寸 / 格式 /
+   * 大小 / 产物路径。只读；选中一条问一次（理由见 [`AssetInspectView`]）
+   */
+  assetInspect: (assetId: string) => invoke<AssetInspectView>('wb_asset_inspect', { assetId }),
+
+  /**
+   * 「在访达中显示」：打开系统文件管理器**并选中**这一条。
+   * **前端只传资产 id** —— 路径由后端自己算（不给前端传任意路径的机会）；
+   * 只读、只开窗口、不碰任何状态。文件不在时后端如实拒绝（附期望路径）
+   */
+  revealAsset: (assetId: string) => invoke<void>('wb_reveal_asset', { assetId }),
 
   /**
    * 加一台机型 = **新建一个 `presets/machines/{ID}.toml`**。
@@ -921,6 +1362,37 @@ export const wb = {
   /** 改机型自己的一格。`display` / `brand` 不许清空 */
   setMachineField: (machineId: string, field: MachineField, value: string | null) =>
     invoke<MachineList>('wb_set_machine_field', { machineId, field, value }),
+
+  /**
+   * 改品牌的一格（`name` / `logo`）。**即时落盘**（同机型那一套：没有草稿、没有撤销）。
+   * `logo = null` 是**清空**（删键，消费侧回落内置字标）；`name` 不许清空
+   */
+  setBrandField: (brandId: string, field: 'name' | 'logo', value: string | null) =>
+    invoke<MachineList>('wb_set_brand_field', { brandId, field, value }),
+
+  /** 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，撞名（含仅大小写不同）当场拒 */
+  addBrand: (id: string, name: string) => invoke<MachineList>('wb_add_brand', { id, name }),
+
+  /**
+   * **把一台机型挪到另一个品牌下**。只改机型文件的 `brand` 一格（品牌侧是反查）。
+   * 目标品牌不存在时如实拒 —— 打错一个字会在盘上留下一个悬空的归属
+   */
+  moveMachineToBrand: (machineId: string, brandId: string) =>
+    invoke<MachineList>('wb_move_machine_to_brand', { machineId, brandId }),
+
+  /**
+   * **写一台机型的整张 `[dimensions]`**（六组一起）。即时落盘。
+   * 校验在后端：床身宽深必须为正、数字必须有限；全零的可选组由后端写零值（不删子表）
+   */
+  setMachineDimensions: (machineId: string, dimensions: MachineDimensions) =>
+    invoke<MachineList>('wb_set_machine_dimensions', { machineId, dimensions }),
+
+  /**
+   * **写一台机型的禁区**。空数组 = 删掉 `forbidden_zones/<id>.toml`
+   * （清空是删文件，不是留一个空文件）。每块 ≥ 3 点、块数 ≤ 32 由后端把关
+   */
+  setMachineZones: (machineId: string, zones: ZonePolygon[]) =>
+    invoke<MachineList>('wb_set_machine_zones', { machineId, zones }),
 
   /**
    * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**
@@ -962,9 +1434,51 @@ export const wb = {
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   previewToml: (uid: string) => invoke<string>('wb_preview_toml', { uid }),
+  /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
+  generatePreview: (scope: BuildScope) =>
+    invoke<PreviewReport>('wb_generate_preview', { scope }),
   generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
-  publish: () => invoke<PublishReport>('wb_publish'),
+  /**
+   * **发布闸**（第二刀）：十五项逐项结果。
+   *
+   * ★ 与工作台点【发布】是**同一个 Rust 核心**（`audit::publish_audit`）——
+   * 界面只负责画，不负责判。`canPublish` 为假时**不许**往下走
+   */
+  publishAudit: () => invoke<PublishAudit>('wb_publish_audit'),
+  /**
+   * **发布事务**（第三刀下半）：唯一对外的发布动作。
+   *
+   * ★ 它内部串完 `审计 → 生成 → 定稿 → 本地 git → 平台 PR/MR` —— 前端**不再有**
+   * 独立的「生成」「创建 PR」按钮。返回的是**阶段快照**（走到哪、停在哪、为什么）。
+   * 不给 `opts` 就是默认全开（一次点击走完全程）。
+   */
+  publish: (opts?: TxOptions) => invoke<PublishTxReport>('wb_publish', { opts: opts ?? null }),
+  /** 发布账户现状（只读）：每个平台的仓库地址 / 用户名 / 有无 Token */
+  publishAccount: () => invoke<PublishAccount>('wb_publish_account'),
+  /** 存一个平台的**发布目标**（仓库地址 + 用户名，进 publish-account.json；**不含 Token**） */
+  setPublishAccount: (platform: string, repositoryUrl: string, username: string) =>
+    invoke<PlatformAccountView>('wb_set_publish_account', { platform, repositoryUrl, username }),
+  /** 存一个平台的 Token（**只进不出**：写 Keychain，返回里没有原值） */
+  setPublishToken: (platform: string, token: string) =>
+    invoke<PlatformAccountView>('wb_set_publish_token', { platform, token }),
+  /** 清一个平台的发布账户（配置 + 凭据一起清；幂等） */
+  clearPublishAccount: (platform: string) =>
+    invoke<PlatformAccountView>('wb_clear_publish_account', { platform }),
+  /** **手动回读**一份 PR/MR 的状态（快照 + 手动刷新；不做后台轮询） */
+  publishStatus: (number: number) => invoke<RemoteReview>('wb_publish_status', { number }),
+  /**
+   * **合并**一份 PR/MR（squash）—— 人在回执屏上**显式点过**才调。
+   *
+   * ★ 口径（作者 2026-10-04 拍）：一律 squash；**不强制等 CI** —— "CI 没跑完 / 已经红了"
+   * 的二次确认在界面做，这里不重复设闸。合完返回**回读后的真状态**（应落到 `merged`）。
+   */
+  mergeReview: (number: number, platform?: string | null) =>
+    invoke<RemoteReview>('wb_merge_review', { number, platform: platform ?? null }),
+  /** 发布历史（只读）：最近若干次「发布预设」事务的回执，**最新在前** */
+  publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
+  /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
+  openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

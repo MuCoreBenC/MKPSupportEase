@@ -84,7 +84,7 @@ const PUBLISH_CHANNEL: &str = "stable";
 ///
 /// 生成闸门（[`issues::inspect`]，`wb_generate` 里那道）**刻意不含**配方对齐：
 /// 生成读参数注册表，不读配方，对不上不影响工作台的产物（见 `issues.rs` 那边的说明）。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
@@ -93,9 +93,35 @@ pub fn wb_preflight() -> Result<Report, AppError> {
             let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
-            Ok(issues::preflight(&book, recipe_ref))
+            // 交付目录的「清单 ↔ 文件」自查在 app 层做（要摸盘），结果作为一条交给预检
+            let delivery =
+                super::dist::audit_catalog(&crate::workbench::paths::dist_root_path(), &book);
+            // 内嵌目录（编译进安装包的那份）跟仓库数据对不对得上也是盘上的事实 ——
+            // 同一条路交给预检：坏了自己成为报告里的一条，不让整个预检失败
+            let embedded = audit_embedded_catalog();
+            Ok(issues::preflight(&book, recipe_ref, delivery, embedded))
         })
     })
+}
+
+/// 内嵌目录自查：`catalog.generated.json`（编译进二进制、客户端首启释放的那份）
+/// 与当前仓库重新构建出来的那份是否**逐字节一致**。
+///
+/// 之前只有一条 Rust 单测（`runtime::tests::embedded_matches_rebuild`）盯着 ——
+/// 红在 `cargo test` 里，检查页上没人提。现在预检把这件事摆上桌面：
+/// 改了 presets/（或交付产物）没跑 `cargo run --bin gen-catalog`，装出来的
+/// 客户端首屏拿的还是旧数据 —— 这是发布前该知道的事。
+fn audit_embedded_catalog() -> Result<(), String> {
+    let repo = crate::workbench::paths::repo_root();
+    let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)
+        .map_err(|e| format!("重新构建内嵌目录失败：{}", e.message))?;
+    let json = catalog
+        .to_pretty_json()
+        .map_err(|e| format!("内嵌目录序列化失败：{}", e.message))?;
+    if json.as_bytes() == crate::runtime::EMBEDDED_CATALOG {
+        return Ok(());
+    }
+    Err("安装包里编译的那份，与按当前 presets/ 重新构建出来的不一致".to_owned())
 }
 
 /* ---------- 渲染 ---------- */
@@ -178,6 +204,16 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
                 Some((_, v)) => v.push(p),
                 None => groups.push((p.toml_key.as_str(), vec![p])),
             }
+        }
+
+        // 段内键序 = **tomlKey 字母序**（大小写不敏感）。作者 2026-10-03：
+        // 「明明都是 O 开头的 offset 都是一起的，生成的时候却改变了它的顺序」——
+        // 以前按界面顺序（layout.order）排，注册表条目一挪、产物键序就漂，
+        // diff 里满屏错位。字母序谁都能预期：offset_x/y/z 永远连在一起，
+        // 生成不再改变没改过的那些行的位置。
+        groups.sort_by_key(|g| g.0.to_lowercase());
+        for params in groups.iter_mut() {
+            params.1.sort_by_key(|p| p.json_key.to_lowercase());
         }
 
         for (toml_key, params) in groups {
@@ -372,117 +408,154 @@ pub struct GenerateReport {
     pub mark: Patch,
 }
 
-/// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门
+/// 这次要生成哪些（`todo`）与跳过了哪些（带原因）。
+///
+/// **`wb_generate` 与 `wb_generate_preview` 共用这一处** —— 预演必须与真生成算的是
+/// 同一批、同一套跳过理由，否则"确认过的"和"真写的"就会是两回事。
+fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, String)>) {
+    let rows = book.build_rows();
+    let wanted: Vec<&str> = match scope {
+        Scope::Stale => rows
+            .iter()
+            .filter(|r| r.buildable)
+            .map(|r| r.uid.as_str())
+            .collect(),
+        Scope::All => rows.iter().map(|r| r.uid.as_str()).collect(),
+        Scope::Picked(uids) => uids.iter().map(String::as_str).collect(),
+    };
+
+    let mut skipped: Vec<(String, String)> = Vec::new();
+    let mut todo: Vec<String> = Vec::new();
+    for uid in wanted {
+        // **没有床身尺寸的机型：跳过时说真因。**
+        //
+        // 这一台生成出来也用不了 —— 消费端读预设时会在内置尺寸表里查不到它，
+        // 然后拒掉整份配方（不是少一项检查）。b04 的 P0 审计查明了这件事。
+        // 原来它走的是「暂无资源」那条通用话术，而那句话让人去找资源，
+        // 方向是错的：要补的是尺寸。
+        let no_dims = book
+            .version(uid)
+            .and_then(|v| book.machines().iter().find(|m| m.id == v.machine_id))
+            .is_some_and(|m| !m.has_dimensions);
+        if no_dims {
+            skipped.push((uid.to_owned(), w::disabled::BUILD_NO_DIMENSIONS.to_owned()));
+            continue;
+        }
+        match rows.iter().find(|r| r.uid == uid) {
+            Some(r) if r.state == w::BuildState::NoResources => {
+                skipped.push((uid.to_owned(), w::disabled::BUILD_NO_RESOURCES.to_owned()))
+            }
+            Some(_) => todo.push(uid.to_owned()),
+            None => skipped.push((uid.to_owned(), "这一版不在树上".to_owned())),
+        }
+    }
+    (todo, skipped)
+}
+
+/// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门。
+///
+/// ★ 它是 [`generate_with`] 的薄壳（`with_ctx` + trace）。真正的写在那个收 `&Ctx`
+/// 的自由函数里 —— **发布事务要复用同一台生成器**，而它已经在 `with_ctx` 里了
+/// （锁不可重入），只能调自由函数。
 #[tauri::command]
 pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
+        with_ctx(|ctx| generate_with(ctx, &scope))
+    })
+}
 
-            let report = issues::inspect(&book);
-            if let Some(b) = report.first_block() {
-                return Err(AppError::invalid_argument(w::disabled::BUILD_BLOCKED)
-                    .with_detail(format!("{}：{}", b.title, b.detail)));
-            }
+/// 生成的**锁无关内核**：给定一份会话，按 scope 把产物写进 `dist/mkp/presets/` 并重算目录。
+///
+/// 与 [`preview_with`] 是同一条理由（见那里）：「生成前预演」与「真生成」、
+/// 「发布事务里的生成」必须是**同一批 todo、同一处渲染、同一处落点**。
+/// 命令壳只负责 `with_ctx` + trace。
+///
+/// ⚠ **它会写盘**（产物 + 快照 + catalog）。调用方负责先过闸（[`issues::inspect`]）。
+pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = Book::new(&ctx.presets, &c, &d);
 
-            let rows = book.build_rows();
-            let wanted: Vec<&str> = match &scope {
-                Scope::Stale => rows
-                    .iter()
-                    .filter(|r| r.buildable)
-                    .map(|r| r.uid.as_str())
-                    .collect(),
-                Scope::All => rows.iter().map(|r| r.uid.as_str()).collect(),
-                Scope::Picked(uids) => uids.iter().map(String::as_str).collect(),
-            };
+    let report = issues::inspect(&book);
+    if let Some(b) = report.first_block() {
+        return Err(AppError::invalid_argument(w::disabled::BUILD_BLOCKED)
+            .with_detail(format!("{}：{}", b.title, b.detail)));
+    }
 
-            let mut skipped: Vec<(String, String)> = Vec::new();
-            let mut todo: Vec<&str> = Vec::new();
-            for uid in wanted {
-                // **没有床身尺寸的机型：跳过时说真因。**
-                //
-                // 这一台生成出来也用不了 —— 消费端读预设时会在内置尺寸表里查不到它，
-                // 然后拒掉整份配方（不是少一项检查）。b04 的 P0 审计查明了这件事。
-                // 原来它走的是「暂无资源」那条通用话术，而那句话让人去找资源，
-                // 方向是错的：要补的是尺寸。
-                let no_dims = book
-                    .version(uid)
-                    .and_then(|v| book.machines().iter().find(|m| m.id == v.machine_id))
-                    .is_some_and(|m| !m.has_dimensions);
-                if no_dims {
-                    skipped.push((uid.to_owned(), w::disabled::BUILD_NO_DIMENSIONS.to_owned()));
-                    continue;
-                }
-                match rows.iter().find(|r| r.uid == uid) {
-                    Some(r) if r.state == w::BuildState::NoResources => {
-                        skipped.push((uid.to_owned(), w::disabled::BUILD_NO_RESOURCES.to_owned()))
-                    }
-                    Some(_) => todo.push(uid),
-                    None => skipped.push((uid.to_owned(), "这一版不在树上".to_owned())),
-                }
-            }
+    let (todo, skipped) = planned_todos(&book, scope);
 
-            // ① 全部算完。**任一项算不出来则整批不动**
-            let mut rendered: Vec<Rendered> = Vec::with_capacity(todo.len());
-            for uid in todo {
-                rendered.push(render(&book, uid)?);
-            }
+    // ① 全部算完。**任一项算不出来则整批不动**
+    let mut rendered: Vec<Rendered> = Vec::with_capacity(todo.len());
+    for uid in &todo {
+        rendered.push(render(&book, uid)?);
+    }
 
-            // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
-            // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
-            let dist = paths::dist_root()?
-                .join(super::dist::MKP_DIR)
-                .join("presets");
-            let mut written = Vec::new();
-            let mut unchanged = Vec::new();
-            let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
+    // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
+    // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
+    let dist = paths::dist_root()?
+        .join(super::dist::MKP_DIR)
+        .join("presets");
+    let mut written = Vec::new();
+    let mut unchanged = Vec::new();
+    let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
 
-            for r in &rendered {
-                let target = dist.join(&r.file_name);
-                let existing = std::fs::read_to_string(&target).ok();
-                if existing
-                    .as_deref()
-                    .is_some_and(|old| same_payload(old, &r.text))
-                {
-                    unchanged.push(r.uid.clone());
-                } else {
-                    crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
-                    written.push(r.uid.clone());
-                }
-                // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
-                let v = book.version(&r.uid).expect("刚才渲染过");
-                ctx.store.write_doc(
-                    &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
-                    &r.snapshot,
-                )?;
-                fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
-            }
+    for r in &rendered {
+        let target = dist.join(&r.file_name);
+        let existing = std::fs::read_to_string(&target).ok();
+        if existing
+            .as_deref()
+            .is_some_and(|old| same_payload(old, &r.text))
+        {
+            unchanged.push(r.uid.clone());
+        } else {
+            crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
+            written.push(r.uid.clone());
+        }
+        // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
+        let v = book.version(&r.uid).expect("刚才渲染过");
+        ctx.store.write_doc(
+            &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
+            &r.snapshot,
+        )?;
+        fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+    }
 
-            let stamp = clock::now_iso8601();
-            tracing::info!(
-                written = written.len(),
-                unchanged = unchanged.len(),
-                skipped = skipped.len(),
-                "生成完成"
-            );
-            Ok(GenerateReport {
-                mark: Patch::MarkBuilt {
-                    uids: fingerprints.keys().cloned().collect(),
-                    stamp: stamp.clone(),
-                    fingerprints,
-                },
-                stamp,
-                written,
-                unchanged,
-                skipped,
-            })
-        })
+    // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
+    // 跟上，dist 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
+    //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
+    // 重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 / 渠道）仍归
+    // 发布写 —— 生成不替发布定稿。
+    //
+    // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
+    // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
+    // ×7）。先补文件、再重算目录，两头对上。
+    let dist_root = paths::dist_root()?;
+    if let Ok(asset_root) = paths::assets_root() {
+        super::dist::write_content(&dist_root, &asset_root, &book)?;
+    }
+    super::dist::write_catalog_json(&dist_root, &book)?;
+
+    let stamp = clock::now_iso8601();
+    tracing::info!(
+        written = written.len(),
+        unchanged = unchanged.len(),
+        skipped = skipped.len(),
+        "生成完成"
+    );
+    Ok(GenerateReport {
+        mark: Patch::MarkBuilt {
+            uids: fingerprints.keys().cloned().collect(),
+            stamp: stamp.clone(),
+            fingerprints,
+        },
+        stamp,
+        written,
+        unchanged,
+        skipped,
     })
 }
 
 /// 单独看一份产物的文本（生成前确认、看差异都用它）
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
     traced("wb_preview_toml", |_| {
         with_ctx(|ctx| {
@@ -490,6 +563,278 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
             Ok(render(&Book::new(&ctx.presets, &c, &d), &uid)?.text)
         })
     })
+}
+
+/* ---------- 生成前预演（生成前确认那一步） ---------- */
+
+/// 一份文件的预演结论。
+///
+/// 三个状态就是「点生成会怎样」的全部可能：
+///   · `added`    —— 磁盘上还没有这一份（首次生成 / 被清理过）：正文全绿
+///   · `modified` —— 有这一份，但这次算出来的和它不一样：会**原子替换**
+///   · `unchanged`—— 逐字节相同，不会重写（与 [`same_payload`] 同一件事，只是这里比真文本）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffState {
+    Added,
+    Modified,
+    Unchanged,
+}
+
+/// 行级 diff 的一种行。
+///
+/// **判据比的是真文本，不是 [`same_payload`] 那个"跳过 release_time"的等价** ——
+/// 预演是给人看的，头里那一行时间戳确实会变，就该如实显示出来。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    /// `context` 没变 / `added` 这次新有 / `removed` 这次没有
+    pub kind: DiffLineKind,
+    pub text: String,
+    /// 第几行（1 起；`removed` 记它在**磁盘旧版**里的行号，其余记新版的）
+    pub no: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+/// 一份产物的预演：状态 + 行级差异 + 计数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewFile {
+    pub uid: String,
+    pub file_name: String,
+    pub state: DiffState,
+    /// 行级差异（含未变的上下文行）—— `unchanged` 时是空表（界面只显示"无变化"）
+    pub lines: Vec<DiffLine>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// 预演报告。跳过的项照实列出（与 `wb_generate` 同一套原因）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewReport {
+    pub files: Vec<PreviewFile>,
+    pub skipped: Vec<(String, String)>,
+    /// 会被写盘的份数（`added` + `modified`）
+    pub to_write: usize,
+    /// 不变的份数
+    pub unchanged: usize,
+    /// 有阻断时的唯一原因（与 `wb_generate` 同一道闸，前端照它压按钮）
+    pub blocked: Option<String>,
+}
+
+/// **生成前预演**：把这次要写的产物都算出来，与磁盘上现存的逐份比，给出行级 diff。
+///
+/// **一个字节都不写** —— 它就是 [`wb_generate`] 的彩排：同一批 `todo`（同一套跳过理由）、
+/// 同一处渲染、同一处落点（`<dist>/mkp/presets/`），只是把"写"换成"读出来比"。
+/// 界面上「点生成 → 先看这个 → 再点确认」的第二步靠它。
+///
+/// 阻断也照实报（`blocked` 非空 = 生成会被拒），不假装能生成。
+#[tauri::command(async)]
+pub fn wb_generate_preview(scope: Scope) -> Result<PreviewReport, AppError> {
+    traced("wb_generate_preview", |_| {
+        with_ctx(|ctx| preview_with(ctx, &scope))
+    })
+}
+
+/// 预演的**锁无关内核**：给定一份会话，把这次要写的产物都算出来。
+///
+/// ★ 这一层存在的唯一理由是**「一个入口」**：界面上的「生成前预演」与**发布闸**
+/// （[`super::audit`]）必须算同一件事。而发布闸本身已经在 `with_ctx` 里，`with_ctx`
+/// 的锁**不可重入** —— 闸里再调一次 `wb_generate_preview` 命令就是自己把自己锁死。
+/// 所以「同一台渲染器」落在这一层，**不落在命令壳上**；命令壳只负责 `with_ctx` + trace。
+///
+/// 只读：`dist_root_path` 不建目录，缺文件按「新增」算，不顺手造出一个 `mkp/presets/`。
+pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewReport, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = Book::new(&ctx.presets, &c, &d);
+
+    // 生成闸门与 `wb_generate` 是同一道：有阻断就如实说，不往下算
+    let report = issues::inspect(&book);
+    if let Some(b) = report.first_block() {
+        return Ok(PreviewReport {
+            files: Vec::new(),
+            skipped: Vec::new(),
+            to_write: 0,
+            unchanged: 0,
+            blocked: Some(format!("{}：{}", b.title, b.detail)),
+        });
+    }
+
+    let (todo, skipped) = planned_todos(&book, scope);
+    let dist = paths::dist_root_path()
+        .join(super::dist::MKP_DIR)
+        .join("presets");
+
+    let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
+    let mut to_write = 0usize;
+    let mut unchanged = 0usize;
+    for uid in &todo {
+        let r = render(&book, uid)?;
+        let existing = std::fs::read_to_string(dist.join(&r.file_name)).ok();
+        let pf = preview_one(&r, existing.as_deref());
+        match pf.state {
+            DiffState::Unchanged => unchanged += 1,
+            _ => to_write += 1,
+        }
+        files.push(pf);
+    }
+
+    Ok(PreviewReport {
+        files,
+        skipped,
+        to_write,
+        unchanged,
+        blocked: None,
+    })
+}
+
+/// 比一份：磁盘读得到且逐字节相同 → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
+fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
+    let (state, lines) = match existing {
+        None => (DiffState::Added, diff_added(&r.text)),
+        Some(old) if old == r.text => (DiffState::Unchanged, Vec::new()),
+        Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
+    };
+    let added = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Added)
+        .count();
+    let removed = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Removed)
+        .count();
+    PreviewFile {
+        uid: r.uid.clone(),
+        file_name: r.file_name.clone(),
+        state,
+        lines,
+        added,
+        removed,
+    }
+}
+
+/// 新增一份：每一行都是 `added`（界面全绿，不折叠）
+fn diff_added(text: &str) -> Vec<DiffLine> {
+    text.lines()
+        .enumerate()
+        .map(|(i, t)| DiffLine {
+            kind: DiffLineKind::Added,
+            text: t.to_owned(),
+            no: i + 1,
+        })
+        .collect()
+}
+
+/// 行级 diff：先剥掉两端的公共行，中间那段做最简 LCS，再拼回来。
+///
+/// **不引第三方 diff 库**（守"不引入新依赖"）。TOML 一行一条、行数在几十到几百，
+/// 这个 O(n·m) 的 LCS 在这里毫无压力。剥前缀/后缀是为了让"只改了一行"这种常见情形
+/// 退化成"一大段 context + 一两行变化"，避免整份文件都进 LCS。
+fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+
+    // 公共前缀
+    let mut head = 0;
+    while head < a.len() && head < b.len() && a[head] == b[head] {
+        head += 1;
+    }
+    // 公共后缀（不越过头）
+    let mut tail = 0;
+    while tail < a.len() - head
+        && tail < b.len() - head
+        && a[a.len() - 1 - tail] == b[b.len() - 1 - tail]
+    {
+        tail += 1;
+    }
+
+    let mid_a = &a[head..a.len() - tail];
+    let mid_b = &b[head..b.len() - tail];
+
+    let mut out: Vec<DiffLine> = Vec::with_capacity(a.len().max(b.len()) + mid_a.len());
+    for (i, t) in a[..head].iter().enumerate() {
+        out.push(DiffLine {
+            kind: DiffLineKind::Context,
+            text: (*t).to_owned(),
+            no: i + 1,
+        });
+    }
+    lcs_diff(mid_a, mid_b, head + 1, head + 1, &mut out);
+    for (i, t) in a[a.len() - tail..].iter().enumerate() {
+        out.push(DiffLine {
+            kind: DiffLineKind::Context,
+            text: (*t).to_owned(),
+            no: a.len() - tail + i + 1,
+        });
+    }
+    out
+}
+
+/// 中间那段的最简 LCS（标准 DP + 回溯），产出 `context` / `added` / `removed` 三种行。
+fn lcs_diff(a: &[&str], b: &[&str], a_base: usize, b_base: usize, out: &mut Vec<DiffLine>) {
+    let n = a.len();
+    let m = b.len();
+    // dp[i][j] = a[i..] 与 b[j..] 的最长公共子序列长度
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            out.push(DiffLine {
+                kind: DiffLineKind::Context,
+                text: a[i].to_owned(),
+                no: a_base + i,
+            });
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            out.push(DiffLine {
+                kind: DiffLineKind::Removed,
+                text: a[i].to_owned(),
+                no: a_base + i,
+            });
+            i += 1;
+        } else {
+            out.push(DiffLine {
+                kind: DiffLineKind::Added,
+                text: b[j].to_owned(),
+                no: b_base + j,
+            });
+            j += 1;
+        }
+    }
+    while i < n {
+        out.push(DiffLine {
+            kind: DiffLineKind::Removed,
+            text: a[i].to_owned(),
+            no: a_base + i,
+        });
+        i += 1;
+    }
+    while j < m {
+        out.push(DiffLine {
+            kind: DiffLineKind::Added,
+            text: b[j].to_owned(),
+            no: b_base + j,
+        });
+        j += 1;
+    }
 }
 
 /* ---------- 恢复配方 ---------- */
@@ -519,7 +864,7 @@ pub struct RevertChange {
 }
 
 /// 「恢复到上次成功生成时的配方」。**只算不写** —— 写走唯一那条入口
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_revert_preview(uid: String) -> Result<RevertPreview, AppError> {
     traced("wb_revert_preview", |_| {
         with_ctx(|ctx| {
@@ -591,55 +936,185 @@ pub struct PublishReport {
     pub stamp: String,
     pub root: String,
     pub files: usize,
-    /// 上游没声明最低客户端版本时是 `None`，界面写「未声明」。**不编一个版本号出来**
+    /// 这次发出去的目录登记的**最低正式客户端版本**（结构规则表里对当前结构签名那条）。
+    ///
+    /// 以前这一格是"上游 manifest 声明了吗"，上游删掉之后恒空；现在它有真来源，
+    /// 而且**不要求那个版本已经发布**（Dev 场景，见 `runtime::structure`）。
+    /// `None` 只该出现在"这一代还没登记"时 —— 那种情况发布闸会先拦住。
     pub minimum_client: Option<String>,
     /// 待办与提示**不挡发布**，但要在报告里列出来
     pub todos: usize,
     pub hints: usize,
 }
 
-/// 发布：把 `presets/dist/` 里的产物连同清单一起定稿。
+/// **发布闸**：发布前那十五项的逐项结果（第二刀）。
 ///
-/// **清单最后写**：先写资源、最后写指向它们的清单。反过来的话，中途失败会留下一份
-/// 指向不存在文件的清单，而客户端读到它只会 404 —— 那种失败在用户机器上才出现。
+/// 它**只读**：不写盘、不动 git、不发网络请求。界面拿它画那个逐项打勾的框，
+/// 往下走的那颗按钮只在 `can_publish` 为真时亮 —— **任何一项 Blocker 红了
+/// 就不许往下走**（作者定的硬规矩）。
 ///
-/// 闸门顺序（b05 Task 13）：**校验阻断**（`issues::inspect`，13.3）→
-/// **残留拦截**（`publish_into` 开头扫描，13.4：有残留一个字节都不写）→
-/// 内容与 manifest（13.6/13.7）。落盘细节全部在 [`super::dist::publish_into`]。
-#[tauri::command]
-pub fn wb_publish() -> Result<PublishReport, AppError> {
+/// 与 [`wb_publish`] 共用同一个会话上下文，所以"闸里看到的"就是"发布会写出去的"。
+///
+/// ★ **命令壳是薄的**：算的是 [`super::audit::publish_audit`]，界面与 `cargo test`
+/// 判据调的是同一个函数（「界面不许自己再实现一套检查」）。
+#[tauri::command(async)]
+pub fn wb_publish_audit() -> Result<super::audit::PublishAudit, AppError> {
+    traced("wb_publish_audit", |_| super::audit::publish_audit())
+}
+
+/// **发布事务**（第三刀下半）：把「审计 → 生成 → 定稿 → 本地 git → 平台 PR/MR」跑成一次手势。
+///
+/// ★ 这是**唯一对外的发布动作**：`wb_generate` / `wb_publish_audit` 都是它的**内部步骤**
+/// （前端不摆「生成」「创建 PR」按钮）。事务内核见 [`super::publish_tx::run`] ——
+/// **锁无关**（只收 `&Ctx`），因为 `with_ctx` 锁不可重入（回头调命令壳会自锁）。
+///
+/// 发布目标（平台 / 仓库 / 用户名 / Token）在**锁外**从发布账户配置解析（[`resolve_publish`]）；
+/// **没有配发布账户**时退化成"只生成 + 定稿 + 本地推送"，如实说"没建 PR" ——
+/// 那是"还没配账户"，不是失败。
+/// ★ `(async)` 不是性能优化，是正确性：这条命令要读 Keychain（系统弹密码框）、
+/// 起 git 子进程、发平台 HTTP —— 跑在主线程上就是"整个窗口一动不动"
+/// （2026-10-04 真机事故；与上面「读命令必须异步」同一条病，只是它更重）。
+#[tauri::command(async)]
+pub fn wb_publish(
+    app: tauri::AppHandle,
+    opts: Option<super::publish_tx::TxOptions>,
+) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
-            let report = issues::inspect(&book);
-            if let Some(b) = report.first_block() {
-                return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
-                    .with_detail(format!("{}：{}", b.title, b.detail)));
+        let opts = opts.unwrap_or_default();
+        // 发布目标 + 平台客户端在锁外构造（读配置 / Keychain / remote，都不碰会话）
+        let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
+        let report = with_ctx(|ctx| {
+            super::publish_tx::run(
+                ctx,
+                &opts,
+                target.as_ref(),
+                hosting.as_ref().map(|h| h.as_ref()),
+                None,
+            )
+        })?;
+
+        // 收尾：把这次回执落进**发布历史**（作者 2026-10-04）。
+        // - 壳层做：写历史要 `AppHandle` 拿 appDataDir，而事务内核不碰 AppHandle（锁纪律）；
+        // - **只记真发生过的**：被闸拦下（零写入）与 `dry_run`（演练）都不记 —— 回执不是"我点过"，
+        //   是"发生过什么"；
+        // - 历史写失败**不许**把一次成功的发布说成失败：如实在 summary 上补一句，照样返回。
+        let mut report = report;
+        if !opts.dry_run && report.stage != super::publish_tx::PublishStage::BlockedAudit {
+            match crate::fsx::paths::internal_root(&app) {
+                Ok(root) => {
+                    let record = super::history::PublishRecord::from_report(
+                        &report,
+                        crate::workbench::clock::now_iso8601(),
+                    );
+                    if let Err(e) = super::history::append(&root, record) {
+                        report
+                            .summary
+                            .push_str(&format!("（发布历史没记上：{}）", e.message));
+                    }
+                }
+                Err(e) => report
+                    .summary
+                    .push_str(&format!("（发布历史没记上：{}）", e.message)),
             }
+        }
+        Ok(report)
+    })
+}
 
-            let root = paths::dist_root()?;
-            let asset_root = paths::assets_root()?;
-            // 渠道是发布常量；最低客户端与版本原本跟着上游 manifest 的 compat 走，
-            // 上游整层删掉之后没有来源 —— **照实留空**，不编一个版本号出来
-            let meta = super::dist::PublishMeta {
-                stamp: clock::now_iso8601(),
-                channel: PUBLISH_CHANNEL.to_owned(),
-                minimum_client: String::new(),
-                version: String::new(),
-            };
-            let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
-            let stamp = meta.stamp;
+/// **发布历史**（只读、`async`）：最近若干次「发布预设」事务的回执，**最新在前**。
+///
+/// 界面开场读一次；每条"现在走到哪"由 [`super::publish_tx::wb_publish_status`] **手动刷新**
+/// （作者定死：状态是"看一看"，不是常驻任务 —— **不做轮询**）。
+#[tauri::command(async)]
+pub fn wb_publish_history(
+    app: tauri::AppHandle,
+) -> Result<super::history::PublishHistory, AppError> {
+    traced("wb_publish_history", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        super::history::load(&root)
+    })
+}
 
-            tracing::info!(files = out.files, at = %stamp, "发布完成");
-            Ok(PublishReport {
-                stamp,
-                root: root.display().to_string(),
-                files: out.files,
-                minimum_client: None,
-                todos: report.todos,
-                hints: report.hints,
-            })
+/// **在系统浏览器里打开一个 URL**（回执屏的「查看 PR」）。
+///
+/// ★ 只放行 `http(s)://`：这是个"把字符串变成系统动作"的口子，白名单要窄。
+/// 与 `wb_reveal_asset` 同一条取向：不写任何应用状态，只开系统程序。
+/// ★ `(async)`：命令一律不占主线程（读命令那条规矩的同一个理由）。
+#[tauri::command(async)]
+pub fn wb_open_external(app: tauri::AppHandle, url: String) -> Result<(), AppError> {
+    traced("wb_open_external", |_| {
+        let u = url.trim();
+        if !(u.starts_with("https://") || u.starts_with("http://")) {
+            return Err(AppError::invalid_argument(
+                "只允许打开 http(s) 链接 —— 别的形状不交给系统",
+            ));
+        }
+        tauri_plugin_opener::OpenerExt::opener(&app)
+            .open_url(u, None::<&str>)
+            .map_err(|e| AppError::io("打不开浏览器").with_detail(e.to_string()))
+    })
+}
+
+/// 解析发布目标 + 造平台客户端（都在锁外）。
+///
+/// - 配了发布账户 → 解析出 [`PublishTarget`] 并按平台造 `Hosting`（用配置里的 Token）；
+/// - **没配**（或配得不完整）→ 两者都是 `None` —— 事务退化成"生成 + 定稿 + 本地推送"，
+///   **不报错**（"还没配账户"是正常状态，不是失败）。
+fn resolve_publish(
+    app: &tauri::AppHandle,
+    platform: Option<&str>,
+) -> (
+    Option<super::publish_tx::PublishTarget>,
+    Option<Box<dyn super::platform::Hosting>>,
+) {
+    let Ok(root) = crate::fsx::paths::internal_root(app) else {
+        return (None, None);
+    };
+    let Ok(target) = super::publish_tx::resolve_target(&root, platform) else {
+        // 没配 / 配不完整：不报错，退化成纯本地推送
+        return (None, None);
+    };
+    let hosting: Box<dyn super::platform::Hosting> = match target.platform.as_str() {
+        "github" => Box::new(super::platform::github::GitHub::new(target.token.clone())),
+        "gitee" => Box::new(super::platform::gitee::Gitee::new(target.token.clone())),
+        _ => return (Some(target), None),
+    };
+    (Some(target), Some(hosting))
+}
+
+/// **旧发布壳**（第三刀上半及以前）：只把 `presets/dist/` 定稿，不生成、不动 git。
+///
+/// 已被 [`wb_publish`] 事务取代，**不再是前端入口**。留着它是因为它仍是"定稿"这一步的
+/// 可单测入口（发布事务内核走的是同一段 `publish_into`）。前端只用 `wb_publish`。
+#[allow(dead_code)]
+fn publish_deliverable_only() -> Result<PublishReport, AppError> {
+    with_ctx(|ctx| {
+        let (c, d, _) = state(ctx)?;
+        let book = Book::new(&ctx.presets, &c, &d);
+        let report = issues::inspect(&book);
+        if let Some(b) = report.first_block() {
+            return Err(AppError::invalid_argument("有阻断问题没解决，不能发布")
+                .with_detail(format!("{}：{}", b.title, b.detail)));
+        }
+
+        let root = paths::dist_root()?;
+        let asset_root = paths::assets_root()?;
+        let meta = super::dist::PublishMeta {
+            stamp: clock::now_iso8601(),
+            channel: PUBLISH_CHANNEL.to_owned(),
+            version: String::new(),
+        };
+        let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+        let stamp = meta.stamp;
+
+        tracing::info!(files = out.files, at = %stamp, "发布完成");
+        Ok(PublishReport {
+            stamp,
+            root: root.display().to_string(),
+            files: out.files,
+            minimum_client: out.minimum_client.clone(),
+            todos: report.todos,
+            hints: report.hints,
         })
     })
 }
@@ -648,13 +1123,13 @@ pub fn wb_publish() -> Result<PublishReport, AppError> {
 ///
 /// 「不在本次交付集合内」的文件，按字典序。发布被残留拦下时，界面先给这一条
 /// 让人看清是什么，再决定要不要清理。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
     traced("wb_dist_strays", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::deliverable_set(&book);
+            let expected = super::dist::dist_expected_set(&book);
             Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
         })
     })
@@ -668,7 +1143,7 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::deliverable_set(&book);
+            let expected = super::dist::dist_expected_set(&book);
             let root = paths::dist_root()?;
             let strays = super::dist::scan_strays(&root, &expected);
             if strays.is_empty() {
@@ -707,7 +1182,7 @@ pub struct BaselineDiffEntry {
 /// 为什么产物侧用 `BUILTIN_PRESETS` 而不是读盘：那张表有判据
 /// （`builtin_presets_match_dir`）保证与入库目录**一份不差**，编译进二进制
 /// 意味着"发布者看到的"与"用户二进制里带的"是同一份。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn wb_baseline_diff() -> Result<Vec<BaselineDiffEntry>, AppError> {
     traced("wb_baseline_diff", |_| {
         Ok(baseline_diff_against(&preset::generate::fixtures_dir()))
@@ -1121,6 +1596,38 @@ mod tests {
         }
     }
 
+    /// 段内键序 = **tomlKey 字母序**（大小写不敏感）—— 生成不许改变没改过的行的位置。
+    ///
+    /// 作者 2026-10-03：「明明都是 O 开头的 offset 都是一起的，生成的时候却改变了
+    /// 它的顺序」—— 以前按界面顺序排，注册表一挪条目产物键序就漂。
+    #[test]
+    fn sections_are_sorted_by_key_name_so_the_order_never_drifts() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        let r = render(&book, "A1/STANDARD").unwrap();
+
+        // 抠出 [toolhead] 段的键（小写化后必须已经有序）
+        let seg = r
+            .text
+            .split("[toolhead]\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .take_while(|l| !l.starts_with('[') && !l.is_empty())
+            .filter_map(|l| l.split('=').next())
+            .map(|k| k.trim().to_lowercase())
+            .collect::<Vec<_>>();
+        assert!(
+            seg.len() >= 2,
+            "fixture 的 toolhead 段该有几个键：{:?}",
+            seg
+        );
+        let mut sorted = seg.clone();
+        sorted.sort();
+        assert_eq!(seg, sorted, "段内键要按字母序：{:?}", seg);
+    }
+
     /// 同样的输入**产出同样的字节**（除了时间戳那一行）——
     /// uuid 用随机数的话这条就不成立，而「字节没变不重写」也就废了
     #[test]
@@ -1411,5 +1918,125 @@ mod tests {
             got, want,
             "产物名与消费端认的那一批不一致 —— 它会找不到文件，而两边都不报错"
         );
+    }
+
+    /* ---------- 生成前预演：行级 diff ---------- */
+
+    /// 逐行的 `(kind, 文本)`，方便断言时只写关心的部分。
+    fn kinds(lines: &[DiffLine]) -> Vec<(&'static str, &str)> {
+        lines
+            .iter()
+            .map(|l| {
+                let k = match l.kind {
+                    DiffLineKind::Context => "=",
+                    DiffLineKind::Added => "+",
+                    DiffLineKind::Removed => "-",
+                };
+                (k, l.text.as_str())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_new_file_shows_every_line_as_added() {
+        let out = diff_added("a\nb\nc");
+        assert_eq!(kinds(&out), vec![("+", "a"), ("+", "b"), ("+", "c")]);
+        // 行号从 1 起、连续
+        assert_eq!(out.iter().map(|l| l.no).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn an_identical_file_has_no_diff_lines() {
+        // 预演那层用的是逐字节比较（不是 same_payload），所以这里走的是"完全相同"
+        assert!(diff_lines("x\ny", "x\ny")
+            .iter()
+            .all(|l| l.kind == DiffLineKind::Context));
+    }
+
+    #[test]
+    fn a_changed_line_shows_one_removed_and_one_added() {
+        let out = diff_lines("a\nold\nc", "a\nnew\nc");
+        // 与 git diff 同一套顺序：删在前、增在后
+        assert_eq!(
+            kinds(&out),
+            vec![("=", "a"), ("-", "old"), ("+", "new"), ("=", "c")],
+            "变的那一行要一删一增，前后未变的行保持 context"
+        );
+    }
+
+    #[test]
+    fn an_inserted_line_shows_only_an_added() {
+        let out = diff_lines("a\nc", "a\nb\nc");
+        assert_eq!(kinds(&out), vec![("=", "a"), ("+", "b"), ("=", "c")]);
+    }
+
+    #[test]
+    fn a_deleted_line_shows_only_a_removed() {
+        let out = diff_lines("a\nb\nc", "a\nc");
+        assert_eq!(kinds(&out), vec![("=", "a"), ("-", "b"), ("=", "c")]);
+    }
+
+    #[test]
+    fn the_counts_match_the_line_kinds() {
+        // preview_one 的 added/removed 计数直接数行 —— 与界面上的「+N −N」是同一个数
+        let r = Rendered {
+            uid: "A1/standard".to_owned(),
+            file_name: "A1-standard.toml".to_owned(),
+            text: "a\nnew\nc\n".to_owned(),
+            fingerprint: String::new(),
+            snapshot: BTreeMap::new(),
+        };
+
+        let added = preview_one(&r, None);
+        assert_eq!(added.state, DiffState::Added);
+        assert_eq!((added.added, added.removed), (3, 0));
+
+        let same = preview_one(&r, Some("a\nnew\nc\n"));
+        assert_eq!(same.state, DiffState::Unchanged);
+        assert!(
+            same.lines.is_empty(),
+            "无变化不往回带行（界面只显示「无变化」）"
+        );
+        assert_eq!((same.added, same.removed), (0, 0));
+
+        let changed = preview_one(&r, Some("a\nold\nc\n"));
+        assert_eq!(changed.state, DiffState::Modified);
+        assert_eq!((changed.added, changed.removed), (1, 1));
+    }
+
+    /// **预演一个字节都不写** —— 它就是 `wb_generate` 的彩排。
+    ///
+    /// 这里用一个真实渲染器（`render`）产出的文本，落到临时目录：跑完预演后，
+    /// 磁盘上的字节与预演前**逐字节相同**（新增的那份不会被预演创建出来）。
+    #[test]
+    fn preview_never_touches_the_disk() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        let r = render(&book, "A1/STANDARD").unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(&r.file_name);
+
+        // 磁盘上还没有 → 预演判「新增」，但**不会把它写出来**
+        let added = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(added.state, DiffState::Added);
+        assert!(!target.exists(), "预演不许创建任何文件");
+
+        // 放一份**不同**的内容进去：预演判「修改」，且原字节一个不动
+        crate::fsx::atomic::atomic_write(&target, b"# old\n").unwrap();
+        let before = std::fs::read(&target).unwrap();
+        let modified = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(modified.state, DiffState::Modified);
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            before,
+            "预演不许改任何文件"
+        );
+
+        // 放成与渲染结果逐字节相同：预演判「不变」
+        crate::fsx::atomic::atomic_write(&target, r.text.as_bytes()).unwrap();
+        let unchanged = preview_one(&r, std::fs::read_to_string(&target).ok().as_deref());
+        assert_eq!(unchanged.state, DiffState::Unchanged);
     }
 }

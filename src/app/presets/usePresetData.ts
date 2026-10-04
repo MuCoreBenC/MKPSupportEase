@@ -67,6 +67,7 @@ import type {
   PresetDraft,
   UserFileIdentity,
 } from '../../api'
+import { isAppError } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { ReleasePresetSource } from './presetTree'
@@ -98,6 +99,19 @@ export interface PresetData {
   loading: boolean
   /** null = 没出错。非 null 时页面要把这句话显示出来，不要装成空表 */
   error: string | null
+
+  /**
+   * **远端这一代目录本客户端读不懂** —— 后端在 `applyRemoteUpdate` 时返回了 `NOT_SUPPORTED`。
+   *
+   * ★ 它与 `error` **不是一回事**，页面也不许把它当整页错误：
+   *   - `error` = 本机那份底账读坏了（该修的在这里）；
+   *   - 这一条 = **远端发布了新结构，当前客户端还不具备读它的能力** ——
+   *     本机什么都没坏、也没有任何东西失败，只是"你想给我的这份我读不了"。
+   *
+   * 用户要做的**唯一一件事**是去设置页更新客户端（不是"重试"、不是"再下一遍"）。
+   * 因此它**不改目录、不落页级错误**（作者定的产品规则 B：列表照常，只在预设页出现一句提示）。
+   */
+  needsNewerClient: boolean
 
   /**
    * 官方交付：目录（catalog）登记的交付预设全量 + 下载区（`mkp/`）现况。
@@ -297,31 +311,53 @@ const EMPTY_RELEASE: ReleaseState = {
  */
 let checkedBootstrapThisRun = false
 
+/** 后台检查一次的结果：换没换目录 + 远端这一代读不读得懂 */
+interface BootstrapResult {
+  /** 真的把本地目录换掉了（调用方据此重读那一路） */
+  changed: boolean
+  /** 远端有更新但**本客户端读不懂**（`NOT_SUPPORTED`）—— 列表照常，只多一句提示 */
+  needsNewerClient: boolean
+}
+
 /**
- * 进入「预设」后的**后台检查**一次远端目录（第十七刀）。
+ * 进入「预设」后的**后台检查**一次远端目录（第十七刀；第三刀下半补 readable / 读不懂那一路）。
  *
- * 判据（作者 2026-10-02）：
+ * 判据（作者 2026-10-02，2026-10-04 补）：
  *
  *   - **只检查目录指纹**（`checkRemoteUpdate`，比的是 revision），不碰任何预设文件；
  *   - 有变化才 `applyRemoteUpdate` —— 换的是**本地那一份 catalog**（旧目录自动归档），
  *     **绝不自动下载预设文件**（用户点了"下载"才下）；
+ *   - ★ 远端这一代**读不懂**时（`readable === false`，或 `applyRemoteUpdate` 抛回
+ *     `NOT_SUPPORTED`）：**不换目录、不报错**，只把 `needsNewerClient` 立起来 ——
+ *     预设页那句"此预设需要更新版 SupportEase"由它开（作者定的产品规则 B）；
  *   - 本次运行只做一次（`checkedBootstrapThisRun`）；
- *   - **失败静默**：没内置源 / 没联网 / 远端还没部署都是开发期的正常状态，
+ *   - 其余失败**静默**：没内置源 / 没联网 / 远端还没部署都是开发期的正常状态，
  *     不许因此让预设页报错或弹提示（启动零网络那条纪律的延伸：这里只是"路过时问一声"）。
- *
- * 返回是否**真的更新了**（调用方据此刷新目录；没变化返回 false）。
  */
-async function checkBootstrapOnce(): Promise<boolean> {
-  if (checkedBootstrapThisRun) return false
+async function checkBootstrapOnce(): Promise<BootstrapResult> {
+  const idle: BootstrapResult = { changed: false, needsNewerClient: false }
+  if (checkedBootstrapThisRun) return idle
   checkedBootstrapThisRun = true
   try {
     const check = await api.checkRemoteUpdate()
-    if (check.upToDate) return false
+    if (check.upToDate) return idle
+    /*
+     * 先看能力再落盘：`readable === false` 时**根本不去 apply**（落盘前拦，
+     * 后端那层也会再拦一道并回 NOT_SUPPORTED —— 两道闸说同一件事）。
+     */
+    if (!check.readable) return { changed: false, needsNewerClient: true }
     await api.applyRemoteUpdate()
-    return true
-  } catch {
-    /* 没配源 / 离线 / 远端没部署：都不该让预设页出问题 —— 静默略过 */
-    return false
+    return { changed: true, needsNewerClient: false }
+  } catch (e: unknown) {
+    /*
+     * `NOT_SUPPORTED` = 远端这一代读不懂（**不是失败**，是"我太旧了"）：
+     * 不当页级错误、不改目录，只立起那句提示。
+     */
+    if (isAppError(e) && e.code === 'NOT_SUPPORTED') {
+      return { changed: false, needsNewerClient: true }
+    }
+    /* 没配源 / 离线 / 远端没部署 / 坏档：都不该让预设页出问题 —— 静默略过 */
+    return idle
   }
 }
 
@@ -337,6 +373,8 @@ export function usePresetData(importRevision = 0): PresetData {
     fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 },
   })
   const [localIds, setLocalIds] = useState<string[]>([])
+  /* 远端这一代读不懂（NOT_SUPPORTED）：独立于 `error`，不挡列表、只开一句提示 */
+  const [needsNewerClient, setNeedsNewerClient] = useState(false)
   /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
   const [active, setActive] = useState<ActivePreset | null>(null)
@@ -496,8 +534,11 @@ export function usePresetData(importRevision = 0): PresetData {
            * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
            * 的分档要跟着以新目录为准）。它不返回脏数据：换的是盘上的 catalog，读的是同一套契约。
            */
-          const changed = await checkBootstrapOnce()
-          if (changed && alive) {
+          const boot = await checkBootstrapOnce()
+          if (!alive) return
+          /* 远端读不懂：立起那句提示（列表照常，不动 error、不动目录） */
+          setNeedsNewerClient(boot.needsNewerClient)
+          if (boot.changed) {
             const refreshed = await readRelease().catch(() => null)
             if (refreshed !== null && alive) setRelease(refreshed)
           }
@@ -637,6 +678,7 @@ export function usePresetData(importRevision = 0): PresetData {
   return {
     loading: error === null && !ready,
     error,
+    needsNewerClient,
     machines,
     machineId,
     versionId,

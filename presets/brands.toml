@@ -1,4 +1,7 @@
 [[brands]]
 id = 'Bambu Lab'
-logo = 'bambu-logo.png'
+# 品牌图 = **资产 id**（不是文件名）：去 `presets/assets.toml` 里按 id 查 path，
+# 客户端拼 `/assets/<path>` 取（2026-10-03：品牌图片正式进资产体系）。
+# 查不到就回落内置字标 —— 那是兜底，不是常态。
+logo = 'bambu-lab-logo'
 name = '拓竹 (Bambu Lab)'

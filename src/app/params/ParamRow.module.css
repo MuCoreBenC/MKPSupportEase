@@ -6,10 +6,11 @@
   flex-direction: column;
 }
 
-.wrap + .wrap,
-.wrap + .wrapOpen,
-.wrapOpen + .wrap,
-.wrapOpen + .wrapOpen {
+/*
+ * 分隔线走显式的 `data-sep`（由 ParamCard 摆行时给）—— 树把行隔进各自的分支容器里，
+ * `+` 相邻选择器到处断。排在前一个**行**后面才有线，分支容器的边界用留白。
+ */
+[data-sep] {
   border-top: 1px solid var(--line);
 }
 
@@ -74,6 +75,48 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * 已弃用的行（2026-10-02）：行名划一条红线 + 字压暗。
+ * 判据落在行容器 `[data-dep]`，这里只负责长相 —— 划线用 line-through 加红色，
+ * 与「灰色的线不明显」那句对齐（作者点名要红线）。
+ */
+[data-dep] .label {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: #b1716a;
+  text-decoration-thickness: 1.5px;
+}
+
+/*
+ * 改不动（条件关着）的行名压一档 —— 灰底分支里「这一行改不动」除了控件置灰和那句
+ * 橙字，行名本身也退半步，跟启用行拉开。弃用的行另有 data-dep（划线），两者可叠。
+ */
+[data-off] .label {
+  color: var(--text-3);
+}
+
+/* 弃用徽章：永远横着，控件左边那一枚 */
+.depBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  background: #f7e7e5;
+  color: #b1716a;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 展开详情里的「状态」那一格：与弃用徽章同色系，一眼串起来 */
+.ddDep {
+  margin: 0;
+  color: #b1716a;
+  line-height: 1.6;
 }
 
 /* 改不动的原因：写清是哪个条件参数控制的 */

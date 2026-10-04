@@ -30,7 +30,7 @@
   "wiping.glue_z_lift_height": 5.0,
   "wiping.glue_z_lift_height_first_layers": 6.0,
   "wiping.have_wiping_components": "tower",
-  "wiping.ironing_coverage_threshold": 0.0,
+  "wiping.ironing_coverage_threshold": 10.0,
   "wiping.ironing_e_sum_threshold": 7.9,
   "wiping.ironing_mode": "off",
   "wiping.ironing_suppress_expand": 0.0,

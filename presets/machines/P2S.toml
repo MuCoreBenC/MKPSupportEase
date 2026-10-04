@@ -6,6 +6,10 @@ defaultBundle = 'P2S_default'
 externalAliases = ['P2']
 icon = 'p1s-icon'
 
+# 与 A1 同一块板（单卡舌 256）—— 塔地图按 defaultPlateId 选板
+plateIds = ['single-latch-256']
+defaultPlateId = 'single-latch-256'
+
 [dimensions]
 edgeZone = 10.0
 

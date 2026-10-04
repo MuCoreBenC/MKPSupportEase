@@ -2,9 +2,16 @@ id = 'A1'
 name = ''
 display = 'A1'
 brand = 'Bambu Lab'
-defaultBundle = 'A1_default'
+defaultBundle = 'A1_STANDARD'
 externalAliases = ['A1C', 'A1F']
 icon = 'a1-icon'
+# 整机图（bundled 档：工作台可换图，构建期随包，不进云端交付）
+image = 'a1-image'
+
+# 这台机型能用的打印板（引用 `presets/plates/*.toml` 的 id），以及默认用哪一块。
+# 塔地图按 `defaultPlateId` 选板画底衬；板自带几何，机型只持引用。
+plateIds = ['single-latch-256']
+defaultPlateId = 'single-latch-256'
 
 [dimensions]
 edgeZone = 10.0
@@ -46,20 +53,20 @@ minY = 0.0
 [[versions]]
 id = 'STANDARD'
 name = '标准版'
-recommendedBundle = 'A1_default'
+recommendedBundle = 'A1_STANDARD'
 tag = '推荐'
 description = '官方标准配置，适合大多数用户'
 
 [[versions]]
 id = 'FAST'
 name = '快拆版6月以前'
-recommendedBundle = 'A1_default'
+recommendedBundle = 'A1_FAST'
 tag = '热门'
 description = '支持快拆配件的改装配置'
 
 [[versions]]
 id = 'FASTV3.3'
 name = '快拆版260628'
-recommendedBundle = 'A1_default'
+recommendedBundle = 'A1_FASTV3.3'
 tag = '最新'
 description = '6月以后闲鱼购买的，以及6月28开源的快拆260628版本'

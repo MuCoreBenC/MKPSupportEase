@@ -41,13 +41,10 @@ if (!host) {
   throw new Error('找不到 #workbench-root —— workbench.html 与本文件对不上了')
 }
 
-/* TEMP-DEBUG: 启动错误直接写到页面上（排查完删掉） */
-window.addEventListener('error', (e) => {
-  host.textContent = `BOOT ERROR: ${e.message}\n${String(e.error?.stack ?? '').slice(0, 2400)}`
-})
-window.addEventListener('unhandledrejection', (e) => {
-  host.textContent = `BOOT REJECTION: ${String(e.reason).slice(0, 600)}`
-})
+/* 全局 error / unhandledrejection 不再接管 #workbench-root：
+   ResizeObserver 的良性回路通知（loop completed with undelivered notifications）
+   也会以 error 事件的形式冒上来，一接管就把整棵树刷成一行白字。
+   真正的渲染错误由下面的 Boundary 兜，启动失败由 App 的 fail() 横幅兜。 */
 
 class Boundary extends React.Component<{ children: React.ReactNode }, never> {
   componentDidCatch(error: unknown, info: { componentStack?: string }) {

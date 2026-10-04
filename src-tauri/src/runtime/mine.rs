@@ -46,8 +46,9 @@
 //! save_back     写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
 //! ```
 //!
-//! 两条共用一句话：**官方原件（`mkp/` 与下载区）一概不碰**。区别只在"落点是谁"与
-//! "那三行血统从哪来"：另存是新的一份、血统从**来源**算；写回还是同一份、血统
+//! 两条共用一句话：**官方原件（按 `catalog.path` 落盘的那一份）一概不碰**。
+//! 区别只在"落点是谁"与"那三行血统从哪来"：另存是新的一份、血统从**来源**算；
+//! 写回还是同一份、血统
 //! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
 //! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
@@ -149,7 +150,8 @@ fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
 
 /// **这份用户文件是从哪一份官方派生的、那一版现在还在不在**。
 ///
-/// 血统里存的是 `based_on`（角色目录 + 文件名，形如 `mkp/presets/A1-standard.toml`）
+/// 血统里存的是 `based_on`（**`catalog.path`**，形如 `dist/mkp/presets/A1-standard.toml`；
+/// 2026-10-04 前是 `mkp/presets/…`，那种老形状**认不出就是 Unknown**，不回填）
 /// 与 `based_on_sha256`（那时候官方那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
 ///
 /// - 摘一样 ⇒ [`BasedOn::Current`]（官方没换版）
@@ -173,11 +175,15 @@ pub fn based_on(catalog: &Catalog, lineage: Option<&Lineage>) -> BasedOn {
     let Some(file) = known else {
         return BasedOn::Unknown;
     };
-    match lineage.based_on_sha256.as_deref() {
-        Some(sha) if sha == file.sha256 => BasedOn::Current,
-        Some(_) => BasedOn::Outdated,
-        /* 有来源没摘要：比不了 ⇒ 说不清新旧（缺的那项就是"不知道"） */
-        None => BasedOn::Unknown,
+    match (lineage.based_on_sha256.as_deref(), file.expected_sha()) {
+        (Some(sha), Some(want)) if sha == want => BasedOn::Current,
+        (Some(_), Some(_)) => BasedOn::Outdated,
+        /*
+         * 比不出来的两种都归 `Unknown`（"缺的那项就是不知道"）：
+         * 草稿没记来源摘要，或**目录没登记期望值**（随包 bootstrap 目录）——
+         * 后者不许当成"过期了"，那会凭空报一批假更新。
+         */
+        _ => BasedOn::Unknown,
     }
 }
 
@@ -355,12 +361,12 @@ pub struct Committed {
 /// **临时编辑的收尾：把草稿另存成用户自己的文件**（`presets-mine/<原名>（已修改）<后缀>`）。
 ///
 /// 这一刀全层的核心不变式就在这个函数里：它**只写用户根**——
-/// 官方原件（`mkp/`）与下载区**一概不碰**（只有云端换版本能替换官方原件）。
+/// 官方原件（按 `catalog.path` 落盘的那一份）**一概不碰**（只有云端换版本能替换它）。
 /// 再存一次就是**覆盖它自己**：用户改的是"我那份"，不该越存越多。
 ///
 /// 写下去的是**副本的形状**：`text` + 头注释块里三行血统（[`super::lineage::make_copy`]）——
-/// `based_on` = 来源那份在**交付根里的相对路径**（`mkp/presets/A1-standard.toml`，
-/// 与工作台建副本的"角色目录 + 文件名"同一形状）。于是这份文件拷到哪台电脑上都说得清
+/// `based_on` = 来源那份的 **`catalog.path`**（`dist/mkp/presets/A1-standard.toml`，
+/// 与工作台建副本的"哪一版"同一形状）。于是这份文件拷到哪台电脑上都说得清
 /// 自己从哪来、基于哪一版（第七层：「官方换版了、你这份还是基于旧版」就靠它判）。
 pub fn commit_draft(
     user_root: &Path,
@@ -699,11 +705,12 @@ mod tests {
         super::super::catalog::CatalogFile {
             kind: "mkp_preset".to_owned(),
             file_name: name.to_owned(),
-            path: format!("mkp/presets/{name}"),
+            // 落点 = 发布根基准（B 类在 `dist/` 下），与 `catalog.files[].path` 同形
+            path: format!("{}/{name}", super::super::catalog::PRESET_DEST_DIR),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
-            sha256: lineage::sha256_hex(content),
-            size: content.len() as u64,
+            sha256: Some(lineage::sha256_hex(content)),
+            size: Some(content.len() as u64),
         }
     }
 
@@ -846,7 +853,7 @@ mod tests {
     #[test]
     fn the_committed_copy_shows_up_in_mine_files() {
         let user = tempfile::tempdir().unwrap();
-        let label = "mkp/presets/A1-standard.toml";
+        let label = "dist/mkp/presets/A1-standard.toml";
         let done = commit_draft(
             user.path(),
             "我的 A1 涂胶.toml",
@@ -882,7 +889,7 @@ mod tests {
     #[test]
     fn saving_back_writes_the_same_file_and_keeps_the_lineage() {
         let user = tempfile::tempdir().unwrap();
-        let label = "mkp/presets/A1-standard.toml";
+        let label = "dist/mkp/presets/A1-standard.toml";
         let done = commit_draft(user.path(), "A1-standard.toml", label, "涂胶宽度 = 1.0").unwrap();
         let lineage = lineage_of_file(&user.path().join(&done.path)).expect("副本该有血统");
         let edited = "涂胶宽度 = 1.4";
@@ -914,7 +921,7 @@ mod tests {
         let done = commit_draft(
             user.path(),
             "A1-standard.toml",
-            "mkp/presets/A1-standard.toml",
+            "dist/mkp/presets/A1-standard.toml",
             "涂胶宽度 = 1.0",
         )
         .unwrap();
@@ -971,7 +978,7 @@ mod tests {
         let v1 = entry_bytes("A1-standard.toml", "官方第一版");
         let mut v2 = entry_bytes("A1-standard.toml", "官方第二版");
         let based_on_v1 = Lineage {
-            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
+            based_on: Some("dist/mkp/presets/A1-standard.toml".to_owned()),
             based_on_release_time: None,
             based_on_sha256: Some(lineage::sha256_hex("官方第一版")),
         };
@@ -1003,7 +1010,7 @@ mod tests {
         assert_eq!(based_on(&catalog, None), BasedOn::Unknown, "没有血统");
 
         let no_sha = Lineage {
-            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
+            based_on: Some("dist/mkp/presets/A1-standard.toml".to_owned()),
             based_on_release_time: None,
             based_on_sha256: None,
         };
@@ -1014,7 +1021,7 @@ mod tests {
         );
 
         let gone = Lineage {
-            based_on: Some("mkp/presets/A1-gone.toml".to_owned()),
+            based_on: Some("dist/mkp/presets/A1-gone.toml".to_owned()),
             based_on_release_time: None,
             based_on_sha256: Some(lineage::sha256_hex("官方")),
         };
@@ -1024,6 +1031,37 @@ mod tests {
             "来源不在目录里（换源或下线）"
         );
         assert!(source_of(&catalog, Some(&gone)).is_none());
+    }
+
+    /// ★ **老形状的 `based_on` 认不出就是认不出**（2026-10-04 作者裁决：**不引兼容层**）。
+    ///
+    /// 唯一路径语义把 B 类产物的 `catalog.path` 从 `mkp/presets/…` 换成了
+    /// `dist/mkp/presets/…`（发布根基准）。老用户文件里那三行血统记的仍是旧值 ——
+    /// **不为它写改写规则**（不按文件名回填、不做前缀映射）：认不出就落 `Unknown`
+    /// （"说不出新旧"），绝不能猜出一份官方然后声称它是最新版或过期版。
+    ///
+    /// 老文件一个字节都不动，照旧能读、能改、能应用 —— 掉的只是「基于哪一版」那句判断。
+    /// 这条判据钉的就是"不伪造"：下面这份血统的摘要**与新目录里那一份完全相同**，
+    /// 只因路径形状是旧的，答案也必须是 `Unknown`。
+    #[test]
+    fn an_old_shaped_based_on_is_unknown_and_never_guessed() {
+        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "官方")]);
+        let old = Lineage {
+            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
+            based_on_release_time: None,
+            // 摘要与目录里那一份**逐字节相同** —— 所以唯一能让答案变 Unknown 的
+            // 就是"路径形状对不上"，而不是"字节变了"
+            based_on_sha256: Some(lineage::sha256_hex("官方")),
+        };
+        assert_eq!(
+            based_on(&catalog, Some(&old)),
+            BasedOn::Unknown,
+            "老形状的 based_on 不许被猜成 Current / Outdated"
+        );
+        assert!(
+            source_of(&catalog, Some(&old)).is_none(),
+            "认不出就是认不出 —— 不回填一份官方给它"
+        );
     }
 
     /// 读血统只看文件头那一小段：一个几百 MB 的文件不许为了让界面读三行注释就整份读进来
@@ -1113,7 +1151,7 @@ mod tests {
         write(
             outside.path(),
             "别人的.toml",
-            "# based_on: mkp/presets/别人的.toml\n[toolhead]\noffset_x = 1.0\n",
+            "# based_on: dist/mkp/presets/别人的.toml\n[toolhead]\noffset_x = 1.0\n",
         );
         std::fs::create_dir_all(root.path().join("presets-mine")).unwrap();
         std::os::unix::fs::symlink(

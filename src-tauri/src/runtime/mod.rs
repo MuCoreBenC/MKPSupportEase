@@ -8,7 +8,9 @@
 //!     │  首启释放（release）
 //!     ▼
 //! <appDataDir>/catalog.json     说明书 —— 首屏唯一数据源（铁律 2：启动零网络）
-//! <appDataDir>/mkp/             下载区 —— 初始为空，用户下载了什么才有什么（铁律 3）
+//! <appDataDir>/<catalog.path>   交付文件 —— 落点由目录自己说（铁律 3：没下载就没有）
+//!                               A 类是 `assets/…`、B 类是 `dist/mkp/presets/…`；
+//!                               **没有固定的"下载区根"**，目录在落盘那一刻按需建
 //! ```
 //!
 //! 客户端首屏（`ipc::presets` 的九条读命令）从 catalog 的 definition 出数；
@@ -26,19 +28,30 @@ pub mod delivery;
 pub mod import;
 /// **血统三行**（用户那份是从哪份官方、哪一版拷出来改的）—— 写在文件头注释里
 pub mod lineage;
-/// **用户线**：用户自己的预设（`presets-mine/`）—— 与官方线（`mkp/` / `archive/`）分开
+/// **用户线**：用户自己的预设（`presets-mine/`）—— 与官方线（`<catalog.path>` /
+/// `archive/`）分开
 pub mod mine;
 pub mod net;
 pub mod paths;
 pub mod release;
+/// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
+/// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。
+pub mod release_info;
 pub mod source;
 pub mod state;
+/// **结构代次**：这批数据是什么结构、哪个客户端起读得懂（`docs/PUBLISH-ARCHITECTURE.md` §5.3）。
+/// 签名是机器真值（从类型探），「签名 → 最低客户端版本」是人必须显式登记的那半。
+pub mod structure;
 pub mod update;
 
 pub use catalog::Catalog;
 
 /// 读**释放进内部根的那份** catalog 的原始字节。盘上没有（setup 释放失败、或文件被删）
 /// 就就地补一次再读：那是兜底，不是正常路径。
+///
+/// 兜底走 [`release::ensure_released`] —— **只补空位，绝不覆盖**。它以前调
+/// `release_catalog`（= `release_bytes(EMBEDDED)`，升级语义），于是"随手读一下"
+/// 也可能把 OTA 成果换成随包那份（2026-10-04 与启动回退一并修掉）。
 ///
 /// 给"按字节缓存"的消费者用（`ipc::presets` 的九条读命令）：同一份字节只 parse 一次，
 /// 目录换新（升级 / 应用远端更新）后字节变，缓存自动失效——**不需要失效钩子**。
@@ -49,7 +62,7 @@ pub fn load_released_catalog_bytes(
     match std::fs::read(&path) {
         Ok(bytes) => Ok(bytes),
         Err(_) => {
-            release::release_catalog(root)?;
+            release::ensure_released(root)?;
             std::fs::read(&path).map_err(|e| {
                 crate::error::AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
             })

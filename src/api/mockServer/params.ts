@@ -1,4 +1,4 @@
-import type { CatalogRegistry, ParamMeta, RecipeParam } from '../../api/contract'
+import type { CatalogParamDef, CatalogRegistry, ParamMeta, RecipeParam } from '../../api/contract'
 import layoutJson from './data/layout_schema.json'
 import registryJson from './data/param_registry.json'
 import type { RawLayoutSchema, RawParam, RawParamRegistry } from './types'
@@ -184,10 +184,31 @@ export function catalogRegistry(): CatalogRegistry {
       key: p.key,
       section: p.section,
       layout: { order: p.layout.order, sectionId: p.layout.sectionId },
+      /* 定义侧的显示格子（2026-10-02，① deprecated 链路）：参数页的字段清单从这摊，
+         弃用字段也在这里 —— 「显示，但只读」。 */
+      label: p.label,
+      desc: p.desc,
+      unit: p.unit,
+      uiComponent: p.uiComponent,
+      valueType: VALUE_TYPES.has(p.valueType)
+        ? (p.valueType as CatalogParamDef['valueType'])
+        : 'string',
+      choices: (p.choices ?? []).map((c) => ({
+        value: toText(c.value),
+        label: c.label,
+        deprecated: c.deprecated === true ? true : undefined,
+      })),
+      min: p.min,
+      max: p.max,
+      step: p.step,
       deprecated: p.deprecated === true,
       machineFilter: p.machineFilter
         ? p.machineFilter.split(',').map((s) => s.trim()).filter((s) => s !== '')
         : [],
+      showWhen:
+        p.showWhen && (p.showWhen.op === 'eq' || p.showWhen.op === 'neq' || p.showWhen.op === 'gt')
+          ? { key: p.showWhen.key, op: p.showWhen.op, value: toText(p.showWhen.value) }
+          : undefined,
     })),
     tabs: registry.tabs.map((t) => ({
       id: t.id,

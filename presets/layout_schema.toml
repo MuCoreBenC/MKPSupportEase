@@ -344,6 +344,17 @@ id = 'item_5_2_2'
 paramKey = 'wiping.glue_inter_model_lift_height'
 
 [[tabs.sections]]
+id = 'calibration'
+
+[[tabs.sections.items]]
+id = 'item_5_3_3'
+paramKey = 'wiping.xy_calibration_mode'
+
+[[tabs.sections.items]]
+id = 'item_5_3_4'
+paramKey = 'wiping.z_calibration_mode'
+
+[[tabs.sections]]
 id = 'machine_specific'
 
 [[tabs.sections.items]]
@@ -357,14 +368,6 @@ paramKey = 'wiping.disable_3rd_layer_clog_detect'
 [[tabs.sections.items]]
 id = 'item_5_3_2'
 paramKey = 'wiping.disable_timelapse'
-
-[[tabs.sections.items]]
-id = 'item_5_3_3'
-paramKey = 'wiping.xy_calibration_mode'
-
-[[tabs.sections.items]]
-id = 'item_5_3_4'
-paramKey = 'wiping.z_calibration_mode'
 
 [[tabs]]
 id = 'internal'

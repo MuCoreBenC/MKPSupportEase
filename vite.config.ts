@@ -1,40 +1,22 @@
-import { rmSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { bbsFs } from './tools/dev-server/bbsFs.mjs'
+import { mkpAssets } from './tools/assets/plugin.mjs'
 
 /*
- * 已经接进 catalog、走「下载管道」的资产，**不再随客户端产物分发**。
+ * 随包资产的路由：**没有别名**（2026-10-03 第二刀撤掉了 `@client-assets`）。
  *
- * 以前 `public/` 里有什么就进什么包 —— 于是"开发仓库里有这份文件"变成了
- * "用户安装包里也带一份"。第三圈起它们归 catalog 管（带 SHA / 大小、按需下载进 `mkp/`），
- * 包里那份副本就成了第二个真源：**盘上哪份是对的，从此有两个答案。**
+ * 客户端不再 import 交付根 —— 它按台账（`catalog.assets[]` 的 id → `path`）拼
+ * `/assets/<path>` 去取，装配步骤把同一棵树铺进 `dist/assets/`（`tools/assets/plugin.mjs`）。
+ * 别名是"把生成物当模块引"的那条老路，随显式 import 表一起退场：
+ * 留着它只会让下一个人以为客户端还认识具体文件。
  *
- * 这里只摘**已经接进管道的那几类**（接一类加一行）。今天恰好是 `public/assets/` 下
- * 台账管的全部三类 —— 曾经剩下的那个例外（整机图 `printers/`）在 2026-10-01 被判定为
- * **界面素材**而不是产品数据资源，搬去了 `src/app/assets/printers/`（走 vite 资源管线，
- * import 回来带内容哈希），所以它不再经过这里。判据 1（`scripts/check-bundle.mjs`）
- * 盯着这件事：清单里有的却出现在产物里就红 —— 两处是**同一份清单**，加一类改两处。
+ * 这一条也顺带解掉了"生成目录不存在时 `tsc -b` 会不会红"那类问题：
+ * 客户端源码不再指向任何生成物。
  */
-const DELIVERED_ASSET_DIRS = ['bbs', 'models', 'icons']
-
-/** 从客户端构建产物里摘掉上面那几类资产的副本。**工作台构建不摘** —— 那是开发态工具 */
-function dropDeliveredAssets(enabled: boolean) {
-  return {
-    name: 'drop-delivered-assets',
-    apply: 'build' as const,
-    closeBundle() {
-      if (!enabled) return
-      for (const dir of DELIVERED_ASSET_DIRS) {
-        rmSync(resolve('dist/assets', dir), { recursive: true, force: true })
-      }
-    },
-  }
-}
 
 /*
- * 两个插件：react() 与 bbsFs()。
+ * 三个插件：react()、bbsFs() 与随包资产流水线 mkpAssets()。
  *
  * `bbsFs()` 是 BBS 预设页的数据源 —— `GET /api/bbs/presets` 实时读本机 BBS 目录
  * （本仓不打包那 285 个预设快照，见 C15-A40-PORT-PLAN §6-2）。它**只读**、只在 serve 期
@@ -83,7 +65,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), bbsFs(), dropDeliveredAssets(!withWorkbench)],
+    plugins: [react(), bbsFs(), mkpAssets({ workbench: withWorkbench })],
 
     build: {
       rollupOptions: { input },
