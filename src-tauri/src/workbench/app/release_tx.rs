@@ -328,22 +328,22 @@ pub fn run(
 
     /* ---------- ③ 推进版本号（给了新版本才动） ---------- */
 
-    if let Some(next) = opts.version.as_deref().map(str::trim) {
-        // ★ **续跑**：真值已经是目标版本（上一趟推进过了）就不重复推 ——
-        //   发版可能被切成两趟（先建 PR 看 CI、再合并），第二趟进来时版本号已经到位。
-        if next == truth {
-            report
-                .summary
-                .push_str(&format!("版本号已经是 {next}（上一趟推进过），跳过。"));
-        } else {
-            let changed = version::bump(repo_root, next)?;
-            report.committed_paths = changed;
-            report.stage = ReleaseStage::VersionBumped;
-            report.summary.push_str(&format!(
-                "版本号已推进到 {next}（改了 {} 处）。",
-                report.committed_paths.len()
-            ));
-        }
+    // ★ **续跑**：真值已经是目标版本（上一趟推进过了 / 这一趟就没给新版本号）就不重复推 ——
+    //   发版可能被切成两趟（先建 PR 看 CI、再合并），第二趟进来时版本号已经到位。
+    //   ★ 比的是**解析之后的目标**（空串早被折成真值），不是原始入参 ——
+    //   拿 `Some("")` 去 bump 会在校验那一步报"形状不对"，那是参数解析的锅，不是发版的锅。
+    if version == truth {
+        report.summary.push_str(&format!(
+            "版本号已经是 {version}（没给新版本号 / 上一趟推进过），跳过。"
+        ));
+    } else {
+        let changed = version::bump(repo_root, &version)?;
+        report.committed_paths = changed;
+        report.stage = ReleaseStage::VersionBumped;
+        report.summary.push_str(&format!(
+            "版本号已推进到 {version}（改了 {} 处）。",
+            report.committed_paths.len()
+        ));
     }
 
     /* ---------- ④ ① 提交 → 推送 ---------- */
