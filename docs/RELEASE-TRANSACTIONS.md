@@ -64,22 +64,64 @@
 ★ **第 9 步是"数据生效"，不是"软件发布"** —— 客户端本来就从预设仓库读数据，合并即生效，
 **不产生新的 SupportEase 安装包**。
 
-### 1.2 「发布软件版本」（另一套事务，**本轮不实现**）
+### 1.2 「发布软件版本」（另一套事务，**已实现** · 第四刀 2026-10-04）
 
 **做什么**：产出一个**新的、可下载的 SupportEase 安装包**，让用户能升级。
 
+**六条边界（作者 2026-10-04 一次裁完，写死在这里）**：
+
+| 项 | 裁定 |
+| --- | --- |
+| `release.json` 落点 | **`presets/release.json`**（客户端 `source::release_url` 从文件下载根往上恰好一级，正指向它） |
+| 版本真值 | **`src-tauri/Cargo.toml` 唯一**，其余全部派生（见下） |
+| 安装包 | 第一阶段**只做 macOS** |
+| 签名 | **暂不做**正式签名 / 公证（接受 Gatekeeper 首次打开警告，写进发布说明） |
+| Release 形态 | 正常 **GitHub Release + `vX.Y.Z` tag + macOS 安装包** |
+| 客户端 | 只负责**发现新版本 + 展示信息 + 打开下载页**，**不做应用内自动更新** |
+
+**★ 版本号是单向派生，不是"四处都写着"**：
+
+```text
+src-tauri/Cargo.toml  [package].version            ← 唯一真值（人只改这一处）
+    ├─ package.json / src-tauri/tauri.conf.json     （派生）
+    ├─ Cargo.lock                                  （派生）
+    └─ 构建期 env!("CARGO_PKG_VERSION") → APP_VERSION → 安装包版本 → tag → release.json
+```
+
+`workbench/app/version.rs` 是这条链的唯一实现（读真值 / 推派生 / 推进），
+判据 `the_app_version_has_one_source_of_truth` 钉住"五处同源"。
+
+**★ 与 `scripts/release.mjs` 的关系**：不废弃、不复制 —— **一个内核、两个入口**
+（`workbench/app/release_tx::run`）：
+
+```text
+       发布软件版本事务核心（release_tx::run）
+            │            └── CLI：src-tauri/src/bin/release.rs ← scripts/release.mjs（薄壳）
+            └── 工作台：wb_release_preflight / wb_release_software
+```
+
+脚本保留它的三条纪律与"校验 + 提问 + 等 CI"那一半，内核负责"版本号 → tag →
+构建 → Release → 上传 → 写 `release.json`"。
+
 | 步 | 动作 | 说明 |
 | --- | --- | --- |
-| 1 | 确认主线 | 要发的代码已在 `main`（即 1.1 那条链已合并） |
-| 2 | 确定版本号 | 改 `src-tauri/Cargo.toml` 等三处（版本号唯一真值仍是构建期常量） |
-| 3 | **tag** | `vX.Y.Z` 打在 `main` 上 |
-| 4 | 构建安装包 | CI（GitHub Actions 等）编出 `.app` / `.dmg` |
-| 5 | **Release** | 基于 tag 建 GitHub / Gitee Release |
-| 6 | 上传安装包 | 作为 Release asset（单 Release ≤ 1000 assets、单文件 < 2 GiB） |
-| 7 | 更新 `release.json` | 客户端"有没有新版本"的**唯一正式信息源**（见 §4） |
-| 8 | 客户端发现新版本 | 设置页「软件版本」块显示「有新版本 SupportEase」 |
+| 1 | 确认主线 | 工作区干净、不在 main 上、tag 没被占（`release_tx` 的预检，**零写入**） |
+| 2 | 确定版本号 | **改一处** `src-tauri/Cargo.toml`，三处派生自动跟随 |
+| 3 | **tag** | `vX.Y.Z` 打在 **main 的 tip** 上（squash 会重写提交） |
+| 4 | 构建安装包 | 本机 `npm run tauri -- build`（第一阶段 macOS / 不签名）；产物 `bundle/dmg` 下**唯一一份** |
+| 5 | **Release** | 基于 tag 建 GitHub Release（`Hosting::create_release`） |
+| 6 | 上传安装包 | 作为 Release asset（`Hosting::upload_asset`，流式 + 15 分钟上限） |
+| 7 | 更新 `release.json` | **上传成功之后**才写 `presets/release.json`，**另开一支分支走 PR** |
+| 8 | 客户端发现新版本 | 设置页「软件更新」显示「有新版本 SupportEase 0.0.2」+「查看更新」 |
 
-★ 这一层**与预设数据链完全分开**（`release.json` 不进 catalog / manifest，见 `PUBLISH-ARCHITECTURE.md` §7.2）。
+★ 第 7 步那个 PR **由人合并** —— 只有合并进 `main`，`raw.githubusercontent.com` 才吐得出
+新版本信息。**合并之前客户端看不到新版本**，这是刻意的（发布留给人，不自动生效）。
+
+★ 这一层**与预设数据链完全分开**：
+- `release.json` 不进 catalog / manifest，不在预设发布的 stage 白名单里
+  （两条链各有各的白名单：`STAGE_ALLOWLIST` 与 `RELEASE_STAGE_ALLOWLIST`）；
+- **发布预设永远不产生软件 Release**（改 TOML → 合并 → 客户端拿到，软件仍是 `0.0.1`）；
+- 两本历史也分开：`publish-history.json` 与 `release-history.json`。
 
 ---
 

@@ -22,13 +22,22 @@ use serde_json::Value;
 use crate::error::AppError;
 
 use super::{
-    collapse_checks, collapse_state, ChecksSummary, Hosting, MergeMethod, RemoteReview, ReviewId,
-    ReviewSpec,
+    collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
+    RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
 };
 
 /// GitHub API 基址（可用环境变量覆盖给企业版 / 测试假服务器）。
 fn api_base() -> String {
     std::env::var("MKPSE_GITHUB_API").unwrap_or_else(|_| "https://api.github.com".to_owned())
+}
+
+/// **上传**基址（GitHub 的二进制上传走另一个主机：`uploads.github.com`）。
+///
+/// 与 [`api_base`] 分开，环境变量也分开覆盖 —— 自建 / 假服务器时两个主机不一定同源，
+/// 合成一个会让人没法单独指另一个。
+fn uploads_base() -> String {
+    std::env::var("MKPSE_GITHUB_UPLOADS")
+        .unwrap_or_else(|_| "https://uploads.github.com".to_owned())
 }
 
 /// 一个绑定了 Token 的 GitHub 客户端。
@@ -173,6 +182,108 @@ impl Hosting for GitHub {
         }
         Ok(Some(review))
     }
+
+    fn create_release(&self, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
+        // `POST /repos/{o}/{r}/releases`。★ `draft` / `prerelease` 显式给 false：
+        // 我们要的是"发出去就能下载"，留草稿等于发了个看不见的版本。
+        let body = serde_json::json!({
+            "tag_name": spec.tag_name,
+            "name": spec.name,
+            "body": spec.body,
+            "draft": false,
+            "prerelease": false,
+        });
+        let v = self.post(
+            &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
+            body,
+        )?;
+        release_from_json(&v)
+    }
+
+    fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
+        // `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=<name>`
+        // —— 文件名在**查询串**里，body 是裸字节。与 JSON 出口不是一回事：
+        // 这里不 `send(json)`，也不 `read_json`（响应仍是 JSON，但要单独读）。
+        let size = std::fs::metadata(&up.path)
+            .map_err(|e| {
+                AppError::io("读不到要上传的安装包")
+                    .with_detail(format!("{}：{e}", up.path.display()))
+            })?
+            .len();
+        // ★ 流式：把文件句柄交给 ureq，不整个读进内存（dmg 几十 MB）
+        let file = std::fs::File::open(&up.path).map_err(|e| {
+            AppError::io("打不开要上传的安装包").with_detail(format!("{}：{e}", up.path.display()))
+        })?;
+        let name = url_encode(&up.name);
+        let url = format!(
+            "{}/repos/{}/{}/releases/{}/assets?name={name}",
+            uploads_base(),
+            up.owner,
+            up.repo,
+            up.release_id
+        );
+        let resp = super::upload_agent()
+            .post(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "SupportEase")
+            .header("Content-Type", &up.content_type)
+            // ★ 显式给长度：chunked 编码在 Release asset 这个端点上会被拒
+            .header("Content-Length", &size.to_string())
+            // ★ 直接把文件句柄交给 ureq（`AsSendBody for File`）—— 流式，不整个读进内存。
+            //   长度上面显式给了，所以不会退化成 chunked（那个端点不收 chunked）。
+            .send(file)
+            .map_err(transport)?;
+        let v = read_json(resp)?;
+        Ok(UploadedAsset {
+            name: v
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&up.name)
+                .to_owned(),
+            size,
+            url: v
+                .get("browser_download_url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+        })
+    }
+}
+
+/// URL 查询串里的最小转义（文件名里有空格 / 加号会直接把请求打歪）。
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Release JSON → [`RemoteRelease`]。
+fn release_from_json(v: &Value) -> Result<RemoteRelease, AppError> {
+    let id = v.get("id").and_then(Value::as_u64).ok_or_else(|| {
+        AppError::corrupted("GitHub Release 响应里没有 id").with_detail(v.to_string())
+    })?;
+    Ok(RemoteRelease {
+        platform: "github".to_owned(),
+        id,
+        tag_name: v
+            .get("tag_name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
+        url: v
+            .get("html_url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
+    })
 }
 
 impl GitHub {

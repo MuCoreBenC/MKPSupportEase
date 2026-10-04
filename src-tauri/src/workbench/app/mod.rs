@@ -63,7 +63,17 @@ pub mod platform;
 /// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
+/// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
+/// ★ **与发布预设那本账分开** —— 两条链不混
+pub mod release_history;
+/// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
+/// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
+/// 工作台与 CLI 两个入口共用它
+pub mod release_tx;
 pub mod storage;
+/// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
+/// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果
+pub mod version;
 pub mod words;
 
 use std::collections::BTreeMap;

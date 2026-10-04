@@ -201,6 +201,41 @@ mod tests {
         assert_eq!(up.latest_version, APP_VERSION);
     }
 
+    /// ★ **落点**（作者 2026-10-04 裁定 ①）：`release.json` 住 **`presets/release.json`** ——
+    /// 客户端 [`super::source::release_url`] 从文件下载根往上恰好一级，正好指到这里。
+    ///
+    /// 三条一起钉：① 发布根下**有**这一份 ② 仓库根**没有**第二份（两份就会有一份是假的）
+    /// ③ 推出来的 URL 停在这一份上。文件挪错位置的当天这条就红 —— 这正是它存在的理由。
+    #[test]
+    fn the_release_file_lives_next_to_the_publish_root() {
+        // `CARGO_MANIFEST_DIR` = <repo>/src-tauri（编译期填的仓库路径，与其余判据同一取法）
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri 上面就是仓库根")
+            .to_path_buf();
+
+        let at_root = root.join("release.json");
+        assert!(
+            !at_root.exists(),
+            "仓库根不该再有 release.json —— 它是 presets/release.json 了（{}）",
+            at_root.display()
+        );
+
+        let bytes = std::fs::read(root.join("presets/release.json"))
+            .expect("presets/release.json 该存在（客户端按这个地址取它）");
+        let info = parse(&bytes).expect("这一份该解析得动");
+        assert_eq!(info.release_schema, RELEASE_SCHEMA, "代次该是当前代次");
+        assert!(!info.version.trim().is_empty(), "该写着一个版本号");
+
+        // 地址推导与落点对得上：文件下载根（presets/dist）往上恰好一级
+        let url = crate::runtime::source::release_url("https://host/main/presets/dist")
+            .expect("该推得出地址");
+        assert!(
+            url.ends_with("/presets/release.json"),
+            "客户端会去 {url} —— 它该是 presets/release.json"
+        );
+    }
+
     #[test]
     fn empty_notes_and_url_become_none() {
         let info = parse(br#"{"version":"1.0.0","notes":"  ","url":""}"#).expect("该解析得动");

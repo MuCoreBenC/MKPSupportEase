@@ -1613,6 +1613,12 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       `build` / `check:bundle` / `check:zero-network` 全绿；探针实机走查 —— 回执 / 合并二次确认 /
       已合并 / 重开回执 / 历史三条 / 手动刷新 全过（仅剩预存红「生成之后产物名单没跟上」）。
 
+      **补（交接）**：第四刀「发布软件版本」的施工计划另起一份 **`PUBLISH-KNIFE4-HANDOFF.md`**
+      （本文件不重复它的内容）：八步现状与缺口、现成件清单（★ `scripts/release.mjs` 已管版本号四处 +
+      PR + 等 CI + 合并 + tag；设置页三态已完）、**六条待作者拍板**、五步施工顺序。
+      ★ 最硬的一条：**`release.json` 现在住仓库根，而客户端会去 `…/presets/release.json` 找**
+      （`source::release_url`：base 往上恰好一级）—— 开工前先定落点。
+
       **补（作者真机踩到）**：合并之前再点一次「发布」，`create_review` 落 **HTTP 422**
       （平台不许同一个 head→base 开两份 PR）—— 而 commit + push 其实已经成功。
       这是**发布可重跑**缺的一块：`Hosting::find_open_review`（`GET …/pulls?state=open&head=o:branch&base=…`）
@@ -1974,3 +1980,54 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   B 类 `<appDataDir>/dist/mkp/presets/…`）。换过布局时旧文件会成"残留"：
   发布页有清理（进 `workbench/.trash/dist/`），`wb_publish` 也会先拦残留再动字节。
   规则源头见 `docs/PUBLISH-ARCHITECTURE.md`。
+
+----
+
+## 增量之二十五 · 第四刀「发布软件版本」（2026-10-04，分支 `feat/software-release`）
+
+**六条边界作者一次裁完**：① `release.json` 住 **`presets/release.json`**（已 `git mv`；
+客户端 `source::release_url` 从文件下载根往上恰好一级，正指向 `…/main/presets/release.json`）
+② **`src-tauri/Cargo.toml` 是版本唯一真值** ③ 第一阶段**只做 macOS** ④ **不做签名 / 公证**
+⑤ 正常 **GitHub Release + `vX.Y.Z` tag + macOS 安装包** ⑥ 客户端只做**发现新版 + 打开下载页**，
+不做应用内自动更新。**预设发布与软件版本发布依然完全分开**（发预设不产生软件 Release）。
+
+### 版本真值：单向派生（`workbench/app/version.rs`，新）
+
+```text
+src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处）
+   ├─ package.json / src-tauri/tauri.conf.json（派生 → 安装包版本）
+   ├─ Cargo.lock                         （派生）
+   └─ env!("CARGO_PKG_VERSION") → APP_VERSION → tag → release.json
+```
+
+- `app_version` / `derived_mismatch` / `write_derived` / `bump`。**没有"从别处读回来当真值"的入口**。
+- ★ 派生改成**纯文件操作**（含 lock 那一行），**不再跑 `cargo update`**：判据能在临时目录验，
+  事务也不会因为环境里没有 cargo 就整条链走不下去。`refresh_lock` 保留给真仓库显式用。
+- ★ workspace 根 `Cargo.toml` 的 `[workspace.package] version = "0.2.0"` 是 `crates/preset` 的，
+  **不是** app 版本，别动。
+- 判据：`the_app_version_has_one_source_of_truth`（五处同源）、`one_bump_moves_the_truth_and_every_derived_file`、
+  `bump_only_moves_forward`、`the_truth_slot_is_the_package_table_not_any_version_line`
+
+### 事务内核：一个核心、两个入口（`workbench/app/release_tx.rs`，新）
+
+- 阶段快照（`ReleaseStage` 十四个档 → camelCase 与 `wire_name()` 逐字一致，判据钉）：
+  预检 → 版本号 → 提交 → 推送 → PR → 合并 → 切 main 打 tag → 构建 → Release → 上传 →
+  写 `release.json` → 它的 PR。**失败即停，不回滚远端**。
+- ★ **不收 `&Ctx`**（与 `publish_tx` 的**刻意**差别）：本事务不碰 `Presets`，从根上躲开不可重入锁。
+- ★ `release.json` 只在**上传成功之后**才写（先宣告后上传 = 用户点进空下载页）；
+  它走**第二支分支 + 第二个 PR**，**合并留给人** —— 合并之后 raw 才吐得出去，客户端才看得到新版本。
+- ★ 切 main + 打 tag 是"会动本机工作区"的动作：内核做之前会在回执里说，界面给独立警告条。
+- 判据：假 `Hosting` 在临时仓库真跑一遍到 `Tagged`（含 bare remote 真推送）；预检零写入；
+  主线发版被拦；演练停在 `Ready`；写出来的 `release.json` 客户端读得懂。
+- **入口二**：`src-tauri/src/bin/release.rs`（`required-features = ["workbench"]`，客户端编不到它）
+  + `scripts/release.mjs` 收敛成薄壳（保留三条纪律 / 提问 / 校验链 / 等 CI，其余交给内核）。
+
+### 平台与界面
+
+- `Hosting` 增 `create_release` / `upload_asset`（`UPLOAD_TIMEOUT = 15min`、流式 body、
+  `Content-Length` 显式给、`.dmg → application/x-apple-diskimage`）。**Gitee 这一支如实报"暂不支持"**
+  （trait 默认实现 + `platform_not_supported`，不许假装支持）。
+- `git.rs`：第二份 stage 白名单 `RELEASE_STAGE_ALLOWLIST`（与预设那份刻意分开）+ fetch /
+  ahead_behind / switch / pull_ff / tag / push_tag / tag_exists / is_clean / rev_parse_short。
+- 工作台：② 卡「软件版本」从只读块升级为**入口**（`ReleaseGateModal`：闸 → 回执 → 历史三段）；
+  历史独立成 `<appDataDir>/release-history.json`（**与 `publish-history.json` 两本账**）。
