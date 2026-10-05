@@ -2,7 +2,7 @@
   "releaseSchema": 1,
   "version": "0.0.6",
   "notes": "发布与更新链路切换到 Gitee（国内直连）；预设数据寻址升级，双官方源完善。",
-  "url": "",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.6",
   "asset": {
     "name": "SupportEase_0.0.6_aarch64.app.zip",
     "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.6/SupportEase_0.0.6_aarch64.app.zip",
