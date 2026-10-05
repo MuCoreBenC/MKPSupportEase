@@ -521,7 +521,14 @@ mod tests {
 
     #[test]
     fn sha256_is_checked_only_when_given() {
-        let real = sha256_file(Path::new("/dev/null")).unwrap();
+        // ★ 用临时目录里的空文件，**不用 `/dev/null`** ——
+        //   `/dev/null` 在 Windows 上不存在，这条判据在 rust-windows job 上真红过一次
+        //   （2026-10-05，作者贴的 CI 截图）。判据也守"跨平台"这一条。
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty.bin");
+        crate::fsx::atomic::atomic_write(&empty, b"").unwrap();
+        let real = sha256_file(&empty).unwrap();
+        assert_eq!(real.len(), 64, "SHA-256 是 32 字节 = 64 个十六进制字符");
         assert!(verify_sha256(&real, None).is_ok(), "没给校验和就不校验");
         assert!(verify_sha256(&real, Some(&real)).is_ok());
         assert!(verify_sha256(&real, Some("deadbeef")).is_err());
