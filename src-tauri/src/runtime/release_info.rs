@@ -19,17 +19,32 @@
 //!
 //! # 形状
 //!
-//! 只有三格，多说一个字都是两端要一起改的契约：
+//! 三格必备 + 一格可选，多说一个字都是两端要一起改的契约：
 //!
 //! ```json
-//! { "version": "0.0.2", "notes": "…", "url": "https://…" }
+//! {
+//!   "releaseSchema": 1,
+//!   "version": "0.0.4",
+//!   "notes": "…",
+//!   "url": "https://…/releases/tag/v0.0.4",
+//!   "asset": {                       // ← **可选**（2026-10-05 应用内下载这一刀）
+//!     "name": "SupportEase_0.0.4_aarch64.app.zip",
+//!     "url":   "https://…/releases/download/v0.0.4/SupportEase_0.0.4_aarch64.app.zip",
+//!     "size":  12345678,
+//!     "sha256": "…"                  // 有就校验，没有就只验大小
+//!   }
+//! }
 //! ```
+//!
+//! ★ **`asset` 是可选的，加它不升代次**（纪律：加字段不升号）。**没有它就退回
+//!   "打开下载页"** —— 那是 0.0.2 / 0.0.3 的行为，仍然成立、仍然能用。
+//!   换句话说：发布方**先具备**应用内下载能力，客户端**才**会用；反过来永远成立。
 //!
 //! 版本号**与 `Cargo.toml` 同源**（发布侧写它时取 `CARGO_PKG_VERSION`）——
 //! "软件版本"全局只有一处真值。将来换成 GitHub Releases，只换**消费层**取这份数据的方式
 //! （[`super::net`] 里换一个取法），不动预设发布架构（作者定死的演进路线）。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
@@ -53,6 +68,46 @@ pub struct ReleaseInfo {
     /// 协议代次。缺省按当前代次（老发布物没写这一格时不因此判坏）
     #[serde(default = "default_schema")]
     pub release_schema: u32,
+    /// **可下载的安装包**（`.app.zip`）。**没有这一格 = 只能打开下载页** ——
+    /// 老发布物天生如此，客户端会照旧退回那条路（不是错误状态）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<ReleaseAsset>,
+}
+
+/// 发布出去的**安装包**（应用内下载这一刀新增，可选格）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseAsset {
+    /// 文件名（形如 `SupportEase_0.0.4_aarch64.app.zip`）
+    pub name: String,
+    /// 下载地址
+    pub url: String,
+    /// 字节数。**给了就照它收**（下载完大小对不上 = 这一份坏了，不装）
+    #[serde(default)]
+    pub size: u64,
+    /// 校验和。**有就校验**（没有就只验大小 —— 那是弱一档，但不是没有）
+    #[serde(default)]
+    pub sha256: String,
+}
+
+impl ReleaseAsset {
+    /// 这一格**能不能拿来下载**（文件名与地址都得有，地址只认 http(s)）。
+    ///
+    /// 这是**纯判定**：发布方写错字段时客户端要能拒，而不是拿着空地址去下载。
+    pub fn is_downloadable(&self) -> bool {
+        !self.name.trim().is_empty()
+            && (self.url.starts_with("https://") || self.url.starts_with("http://"))
+    }
+
+    /// 要校验的 SHA-256（小写十六进制；空 = 不校验）
+    pub fn expect_sha256(&self) -> Option<String> {
+        let t = self.sha256.trim().to_ascii_lowercase();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
+    }
 }
 
 fn default_schema() -> u32 {
@@ -86,6 +141,8 @@ pub struct SoftwareUpdate {
     pub latest_version: String,
     pub notes: Option<String>,
     pub url: Option<String>,
+    /// **可下载的安装包**（`None` = 这一版只能打开下载页）
+    pub asset: Option<ReleaseAsset>,
 }
 
 /// 比较"当前构建版本"与"远端发布版本"。
@@ -112,6 +169,7 @@ pub fn to_update(info: &ReleaseInfo) -> SoftwareUpdate {
         latest_version: info.version.clone(),
         notes: non_empty(&info.notes),
         url: non_empty(&info.url),
+        asset: info.asset.clone().filter(|a| a.is_downloadable()),
     }
 }
 
@@ -124,6 +182,7 @@ pub fn none_available() -> SoftwareUpdate {
         latest_version: APP_VERSION.to_owned(),
         notes: None,
         url: None,
+        asset: None,
     }
 }
 
@@ -138,6 +197,37 @@ fn non_empty(s: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// ★ **老发布物没有 `asset` 格** —— 那不是坏档，客户端退回"打开下载页"
+    #[test]
+    fn a_release_without_an_asset_still_parses() {
+        let v = br#"{"releaseSchema":1,"version":"0.0.3","notes":"x","url":"https://h/t"}"#;
+        let info = parse(v).expect("老格式该读得懂");
+        assert_eq!(info.asset, None);
+        let u = to_update(&info);
+        assert_eq!(u.asset, None, "没有资产 ⇒ 界面只摆「查看更新」");
+    }
+
+    /// 有 `asset` 且地址合法 → 客户端拿它做应用内下载
+    #[test]
+    fn a_downloadable_asset_is_offered_to_the_client() {
+        let v = br#"{"releaseSchema":1,"version":"0.0.4","url":"https://h/t",
+            "asset":{"name":"S_0.0.4_aarch64.app.zip","url":"https://h/d/S.zip","size":123,
+                     "sha256":"ABCD"}}"#;
+        let u = to_update(&parse(v).unwrap());
+        let a = u.asset.expect("有资产就该给");
+        assert_eq!(a.name, "S_0.0.4_aarch64.app.zip");
+        assert_eq!(a.expect_sha256().as_deref(), Some("abcd"), "校验和按小写比");
+    }
+
+    /// ★ **地址不是 http(s) 的资产要被拒**（发布方写错了不能让客户端拿着去下载）
+    #[test]
+    fn an_unusable_asset_url_is_refused() {
+        let v = br#"{"releaseSchema":1,"version":"0.0.4","url":"https://h/t",
+            "asset":{"name":"x.zip","url":"file:///etc/passwd","size":1}}"#;
+        let u = to_update(&parse(v).unwrap());
+        assert_eq!(u.asset, None, "file: 这种形状不能拿去下载");
+    }
+
     use super::*;
 
     #[test]

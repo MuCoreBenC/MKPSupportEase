@@ -7,6 +7,9 @@ import type {
   PresetSource,
   SoftwareUpdate,
   UserPresetFile,
+  UpdateInfo,
+  UpdateResult,
+  UpdateState,
 } from './contract'
 import {
   allMachines,
@@ -999,16 +1002,116 @@ export const mockApi: MkpApi = {
 
   async checkSoftwareUpdate(): Promise<SoftwareUpdate> {
     /* 演示：比当前版本更新一档 —— 设置页因此显示「有新版本 SupportEase」。
-       想演示「已是最新版本」，把 hasUpdate 改成 false、latestVersion 设成 currentVersion */
+       **想触发"有新版本"那套界面不用真发一版**：装 mock（`?mock=1`）就是这个形状。
+       想演示「已是最新版本」，把 MOCK_NEW_VERSION 设成 MOCK_APP_VERSION */
     return {
-      hasUpdate: true,
+      hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
       currentVersion: MOCK_APP_VERSION,
-      latestVersion: '0.0.2',
+      latestVersion: MOCK_NEW_VERSION,
       notes: '演示：更新检查是独立的一条链（release.json），与预设数据无关。',
       url: 'https://example.com/supportease/releases',
+      /* 演示带安装包 ⇒ 界面会摆「在应用内下载」；删掉这一格就退回"打开下载页" */
+      asset: {
+        name: 'SupportEase_demo.app.zip',
+        url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
+        size: 7_260_510,
+        sha256: '',
+      },
+    }
+  },
+
+  /* ---------- 应用内更新（第五刀）：内存里的假下载 ----------
+     ★ 目的是**不用真发一版就能验界面**：标题栏的环、面板的暂停/继续/取消、
+       完成后的「重启并安装」都在浏览器里点得到。真机上这些走 `ipc/update.rs`。 */
+
+  async updateInfo(): Promise<UpdateInfo> {
+    return {
+      state: mockUpdate.state,
+      hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
+      currentVersion: MOCK_APP_VERSION,
+      latestVersion: MOCK_NEW_VERSION,
+      notes: '演示：应用内更新的进度、暂停与重启安装。',
+      url: 'https://example.com/supportease/releases',
+      asset: {
+        name: 'SupportEase_demo.app.zip',
+        url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
+        size: 7_260_510,
+        sha256: '',
+      },
+      lastResult: mockUpdate.lastResult,
+    }
+  },
+
+  async startUpdate() {
+    if (mockUpdate.state.state === 'downloading' || mockUpdate.state.state === 'paused') return
+    const total = 7_260_510
+    let received = 0
+    mockUpdate.timer = setInterval(() => {
+      if (mockUpdate.state.state === 'paused') return
+      received = Math.min(total, received + Math.round(total / 24))
+      if (received >= total) {
+        mockUpdate.stopTimer()
+        mockUpdate.state = { state: 'ready', path: '/tmp/SupportEase.app', size: total }
+        mockUpdate.lastResult = undefined
+        return
+      }
+      mockUpdate.state = { state: 'downloading', received, total }
+    }, 180)
+  },
+
+  async pauseUpdate() {
+    if (mockUpdate.state.state !== 'downloading') return
+    const { received, total } = mockUpdate.state
+    mockUpdate.state = { state: 'paused', received, total }
+  },
+
+  async resumeUpdate() {
+    if (mockUpdate.state.state !== 'paused') return
+    const { received, total } = mockUpdate.state
+    mockUpdate.state = { state: 'downloading', received, total }
+  },
+
+  async cancelUpdate() {
+    mockUpdate.stopTimer()
+    mockUpdate.state = { state: 'cancelled' }
+  },
+
+  async installUpdate() {
+    // 真机上这一步会**退出进程**；演示里只把账记上（下次问 updateInfo 能看到）
+    mockUpdate.lastResult = {
+      version: MOCK_NEW_VERSION,
+      ok: true,
+      reason: '',
+      at: new Date().toISOString(),
+    }
+    mockUpdate.state = { state: 'idle' }
+  },
+
+  async openUrl(url: string) {
+    // 演示里不真的开浏览器；真机走 opener 插件
+    mockUpdate.lastOpened = url
+  },
+}
+
+/** 演示用的更新会话（内存态，与其它 mock 同一套口径） */
+const mockUpdate = {
+  state: { state: 'idle' } as UpdateState,
+  lastResult: undefined as UpdateResult | undefined,
+  lastOpened: undefined as string | undefined,
+  timer: undefined as ReturnType<typeof setInterval> | undefined,
+  stopTimer() {
+    if (this.timer !== undefined) {
+      clearInterval(this.timer)
+      this.timer = undefined
     }
   },
 }
 
 /** mock 版的"当前版本"：与演示的"最新版本"配合出一个好看的对照 */
-const MOCK_APP_VERSION = '0.0.1'
+const MOCK_APP_VERSION: string = '0.0.1'
+
+/**
+ * 演示用的"最新版本"。★ **改成与 `MOCK_APP_VERSION` 相同就切到「已是最新版本」**
+ * —— 想验哪一态改这一处，不用真发一版。
+ */
+const MOCK_NEW_VERSION: string = '0.0.2'

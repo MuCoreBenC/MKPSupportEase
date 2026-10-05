@@ -1,0 +1,151 @@
+/*
+ * 标题栏那枚下载指示器 + 详情面板（2026-10-05 第五刀）。
+ *
+ * 设计口径：**克制动效**——环只画进度、不做花哨动画（下载中才有一个很轻的
+ * 旋转暗示"还在动"）；面板贴右上角、层级压在页签之下，不遮内容。
+ * 颜色沿用既有语义色（进行中=主色、成功=通过色、失败=危险色），**不新增色板**。
+ */
+
+.wrap {
+  position: relative;
+  flex: none;
+}
+
+.icon {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.icon:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+.icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.ring {
+  width: 18px;
+  height: 18px;
+  transform: rotate(-90deg);
+}
+
+.track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 3;
+}
+
+.bar {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease-out;
+}
+
+.label {
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 264px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised, var(--surface-solid));
+  box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.close {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--surface-hover);
+}
+
+.line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.bad {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btnPrimary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.btnWide {
+  width: 100%;
+}

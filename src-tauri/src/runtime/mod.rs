@@ -43,6 +43,9 @@ pub mod state;
 /// 签名是机器真值（从类型探），「签名 → 最低客户端版本」是人必须显式登记的那半。
 pub mod structure;
 pub mod update;
+/// **应用内更新**（2026-10-05 第五刀）：下载 / 进度 / 暂停取消 / 解压 / 替换重启。
+/// 与 `release_info` 分开：那份是"信息"，这份是"动作"
+pub mod updater;
 
 pub use catalog::Catalog;
 

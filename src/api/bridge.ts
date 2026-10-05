@@ -195,6 +195,14 @@ export const bridgeApi: MkpApi = {
   /* ——— 软件更新（release.json）—— 与预设数据两条链 ——— */
   getAppVersion: () => call('getAppVersion', 'get_app_version'),
   checkSoftwareUpdate: () => call('checkSoftwareUpdate', 'check_software_update'),
+  /* 应用内更新（第五刀）：命令名与前端一一对应，后端在 `ipc/update.rs` */
+  updateInfo: () => call('updateInfo', 'update_info'),
+  startUpdate: () => call('startUpdate', 'start_update'),
+  pauseUpdate: () => call('pauseUpdate', 'pause_update'),
+  resumeUpdate: () => call('resumeUpdate', 'resume_update'),
+  cancelUpdate: () => call('cancelUpdate', 'cancel_update'),
+  installUpdate: () => call('installUpdate', 'install_update'),
+  openUrl: (url) => call('openUrl', 'open_url', { url }),
 
   /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
   copyToSlicer: () => notWired('copyToSlicer'),

@@ -429,6 +429,24 @@ pub fn get_catalog(catalog_url: &str) -> Result<Vec<u8>, AppError> {
 /// 远端的**软件发布信息**（`release.json`）。与 [`get_catalog`] 同形、同一个取名口 ——
 /// 这一层只负责"取字节"，`release.json` 与 catalog 的**语义差别**（一个是软件版本、
 /// 一个是预设数据）不在这一层表达，那是 [`super::release_info`] 的事。
+/// **流式**取一个 URL —— 应用内更新下载安装包用（[`get_bytes`] 那种"整个取回内存"
+/// 的形状在几十 MB 的包上等于拿内存当磁盘）。
+///
+/// 超时给得比平时宽（[`UPLOAD_TIMEOUT`] 那一档的量级）：下载要传几十 MB，
+/// 30 秒的传输上限会**必然**掐断。连接超时仍是 10s（连不上就该立刻说连不上）。
+pub fn stream_get(url: &str) -> Result<ureq::http::Response<ureq::Body>, AppError> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60 * 60)))
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .build();
+    let agent: ureq::Agent = config.into();
+    agent
+        .get(url)
+        .header("User-Agent", "SupportEase")
+        .call()
+        .map_err(|e| transport_error(url, &e))
+}
+
 pub fn get_release(release_url: &str) -> Result<Vec<u8>, AppError> {
     get_bytes(release_url, &GetPlan::new(RELEASE_FILE), &noop_tick)
 }

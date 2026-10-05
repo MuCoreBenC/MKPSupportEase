@@ -52,6 +52,9 @@ pub const PRODUCT: &str = "SupportEase";
 /// ★ 两个候选都在：本仓库的 `CARGO_TARGET_DIR` 指到**仓库根**的 `target/`（真机实测
 /// 2026-10-04 构建落在 `target/release/bundle/dmg/`），而老机器 / 别的配置下会在
 /// `src-tauri/target/…`。**按顺序找，找到哪个里有就用哪个** —— 两个都没有才报错。
+/// `.app` 所在目录（与 [`DMG_DIRS`] 同一个"仓库根 target 优先"的前提）
+pub const MACOS_BUNDLE_DIR: &str = "target/release/bundle/macos";
+
 pub const DMG_DIRS: [&str; 2] = [
     "target/release/bundle/dmg",
     "src-tauri/target/release/bundle/dmg",
@@ -203,8 +206,11 @@ pub struct ReleaseTxReport {
     pub review: Option<RemoteReview>,
     /// 建好的 Release（网页地址进 `release.json` 的 `url`）
     pub release: Option<RemoteRelease>,
-    /// 上传上去的安装包
+    /// 上传上去的安装包（dmg，给愿意手动装的人）
     pub artifact: Option<ArtifactInfo>,
+    /// ★ **应用内更新用的 `.app.zip`**（第五刀）：客户端在程序里下载它、自动替换并重启。
+    /// **没有它客户端就退回"打开下载页"** —— 那条路仍然成立
+    pub zip: Option<crate::runtime::release_info::ReleaseAsset>,
     /// ② 所在分支（`release/vX.Y.Z`）
     pub info_branch: Option<String>,
     /// ② 的 PR / MR —— **它由人合并**，合并完客户端才看得到新版本
@@ -230,6 +236,7 @@ impl ReleaseTxReport {
             review: None,
             release: None,
             artifact: None,
+            zip: None,
             info_branch: None,
             info_review: None,
             committed_paths: Vec::new(),
@@ -313,6 +320,7 @@ pub fn run(
         review: None,
         release: None,
         artifact: None,
+        zip: None,
         info_branch: None,
         info_review: None,
         committed_paths: Vec::new(),
@@ -524,9 +532,54 @@ pub fn run(
         uploaded.name, uploaded.size
     ));
 
+    /* ---------- ⑧之二  应用内更新用的 `.app.zip`（第五刀） ---------- */
+    //
+    // dmg 是"给人手动装的"，zip 是"给程序自己下载并替换的" —— 两种用途，两个文件。
+    // ★ 这一步**失败不挡发版**：打不出 zip 就如实说"这一版只能打开下载页"，
+    //   release.json 里就没有 `asset`，客户端照旧退回那条路（比整个发版失败好）。
+    match build_app_zip(repo_root, &version) {
+        Ok(zip) => {
+            let zip_name = zip.name.clone();
+            match hosting.upload_asset(&super::platform::AssetUpload {
+                owner: t.owner.clone(),
+                repo: t.repo.clone(),
+                release_id: release.id,
+                name: zip.name.clone(),
+                content_type: super::platform::content_type_for(&zip.name).to_owned(),
+                path: zip.path.clone(),
+            }) {
+                Ok(put) => {
+                    let sha = sha256_file(&zip.path).unwrap_or_default();
+                    report.zip = Some(crate::runtime::release_info::ReleaseAsset {
+                        name: zip_name.clone(),
+                        url: format!("{}/download/{}/{}", release.url, tag, zip_name),
+                        size: put.size,
+                        sha256: sha,
+                    });
+                    report.summary.push_str(&format!(
+                        "已上传 {zip_name}（{} 字节，应用内更新用）。",
+                        put.size
+                    ));
+                }
+                Err(e) => report.summary.push_str(&format!(
+                    "应用内更新的 zip 传不上去（{e}）—— 这一版退回「打开下载页」。"
+                )),
+            }
+        }
+        Err(e) => report.summary.push_str(&format!(
+            "打不出应用内更新的 zip（{e}）—— 这一版退回「打开下载页」。"
+        )),
+    }
+
     /* ---------- ⑨ 写 `release.json` → 它自己的分支与 PR（**合并留给人**） ---------- */
 
-    let info_rel = write_release_info(repo_root, &version, &opts.notes, &release.url)?;
+    let info_rel = write_release_info(
+        repo_root,
+        &version,
+        &opts.notes,
+        &release.url,
+        report.zip.as_ref(),
+    )?;
     // ★ 分支名必须带合规前缀（`chore/`）—— 本机闸门⑥ 会拒没有前缀的分支名
     //   （`release/0.0.1` 这种在提交那一步会被钩子挡下来，白跑一趟）。
     let info_branch = format!("chore/release-{tag}");
@@ -664,6 +717,55 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     }
 }
 
+/// 打应用内更新用的 `.app.zip`（**系统 `ditto`，不引压缩依赖**）。
+///
+/// 源是 `bundle/macos/<PRODUCT>.app`，产物落在 dmg 旁边：`SupportEase_<版本>_<arch>.app.zip`。
+/// **找不到 `.app` 就如实报错**（不猜路径、不拿别的东西顶替）。
+fn build_app_zip(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppError> {
+    let macos_dir = repo_root.join(MACOS_BUNDLE_DIR);
+    let mut apps: Vec<PathBuf> = std::fs::read_dir(&macos_dir)
+        .map_err(|e| {
+            AppError::io("找不到 macOS 应用包目录")
+                .with_detail(format!("{}：{e}", macos_dir.display()))
+        })?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
+        .collect();
+    apps.sort();
+    let [app] = apps.as_slice() else {
+        return Err(AppError::io("macOS 应用包目录里没有 .app").with_detail(
+            apps.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("、"),
+        ));
+    };
+    let name = super::platform::asset_name(PRODUCT, version, arch_name(), "app.zip");
+    let zip_path = app.with_file_name(&name);
+    let out = std::process::Command::new("ditto")
+        // `--sequesterRsrc` 把扩展属性塞进 `__MACOSX`（下载解包后仍保留 Finder 扩展）
+        .args(["-c", "-k", "--sequesterRsrc", "--keepParent"])
+        .arg(app)
+        .arg(&zip_path)
+        .output()
+        .map_err(|e| AppError::io("起不了系统 ditto").with_detail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(AppError::io("打包 .app.zip 失败")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    let size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+    Ok(BuiltArtifact {
+        name,
+        size,
+        path: zip_path,
+    })
+}
+
+/// 文件的 SHA-256（小写十六进制；读不到就空字符串 —— 那就是"不校验"）
+fn sha256_file(path: &Path) -> Result<String, AppError> {
+    crate::runtime::updater::sha256_file(path)
+}
+
 fn version_of(repo_root: &Path) -> String {
     version::app_version(repo_root).unwrap_or_else(|_| "unknown".to_owned())
 }
@@ -686,13 +788,23 @@ fn write_release_info(
     version: &str,
     notes: &str,
     url: &str,
+    asset: Option<&crate::runtime::release_info::ReleaseAsset>,
 ) -> Result<String, AppError> {
-    let value = serde_json::json!({
+    let mut value = serde_json::json!({
         "releaseSchema": RELEASE_SCHEMA,
         "version": version,
         "notes": notes.trim(),
         "url": url,
     });
+    // ★ 有安装包就带上 `asset`（**可选格**：没有它客户端退回"打开下载页"，那条路仍然成立）
+    if let Some(a) = asset {
+        value["asset"] = serde_json::json!({
+            "name": a.name,
+            "url": a.url,
+            "size": a.size,
+            "sha256": a.sha256,
+        });
+    }
     let text = serde_json::to_string_pretty(&value)
         .map_err(|e| AppError::internal("发布信息序列化失败").with_detail(e.to_string()))?
         + "\n";
@@ -1067,8 +1179,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join("presets")).unwrap();
-        let rel = write_release_info(root, "0.0.2", "修了几个问题", "https://host/r/tag/v0.0.2")
-            .expect("该写得出来");
+        let rel = write_release_info(
+            root,
+            "0.0.2",
+            "修了几个问题",
+            "https://host/r/tag/v0.0.2",
+            None,
+        )
+        .expect("该写得出来");
         assert_eq!(rel, RELEASE_INFO_REL);
         let bytes = std::fs::read(root.join(&rel)).unwrap();
         let info = release_info::parse(&bytes).expect("客户端该读得懂");

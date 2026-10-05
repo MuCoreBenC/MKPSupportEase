@@ -877,6 +877,56 @@ export interface SoftwareUpdate {
   notes?: string
   /** 去哪更新 / 看详情；没有就是 `undefined` */
   url?: string
+  /**
+   * **可下载的安装包**（`.app.zip`，2026-10-05 第五刀）。
+   *
+   * ★ `undefined` = 这一版**没给安装包** ⇒ 客户端退回"打开下载页"
+   *   （那是 0.0.2 / 0.0.3 的行为，仍然成立）。**有它才摆"在应用内下载"按钮。**
+   */
+  asset?: ReleaseAsset
+}
+
+/** 发布出去的安装包（`release.json` 的可选 `asset` 格） */
+export interface ReleaseAsset {
+  name: string
+  url: string
+  /** 字节数；给了就照它收（对不上 = 这一份坏了，不装） */
+  size: number
+  /** 小写十六进制；空 = 不校验 */
+  sha256: string
+}
+
+/**
+ * 应用内更新的状态（`runtime::updater::UpdateState` 的线上形状）。
+ *
+ * **带 `state` 判别字段**（`tag` 序列化）—— 前端 `switch` 它，一处形状要认。
+ */
+export type UpdateState =
+  | { state: 'idle' }
+  | { state: 'downloading'; received: number; total: number }
+  | { state: 'paused'; received: number; total: number }
+  | { state: 'ready'; path: string; size: number }
+  | { state: 'failed'; reason: string }
+  | { state: 'cancelled' }
+
+/** 上一次安装的结果（退出后那个脚本写的账，下次启动读） */
+export interface UpdateResult {
+  version: string
+  ok: boolean
+  reason: string
+  at: string
+}
+
+/** 一次问全：状态 + 有无新版 + 资产 + 上次结果 */
+export interface UpdateInfo {
+  state: UpdateState
+  hasUpdate: boolean
+  currentVersion: string
+  latestVersion: string
+  notes?: string
+  url?: string
+  asset?: ReleaseAsset
+  lastResult?: UpdateResult
 }
 
 /**
@@ -1288,6 +1338,35 @@ export interface MkpApi {
    * 信息源不可达时**如实拒绝**（`IO` / `NOT_FOUND`），由调用方决定说还是略过。
    */
   checkSoftwareUpdate(): Promise<SoftwareUpdate>
+
+  /* ---------- 应用内更新（第五刀） ---------- */
+
+  /**
+   * 一次问全（状态 + 有无新版 + 资产 + 上次安装结果）。
+   *
+   * **不在首屏路径**：标题栏那枚图标在**用户开始下载之后**才订阅事件，
+   * 平时只在切到设置页时问一次。
+   */
+  updateInfo(): Promise<UpdateInfo>
+
+  /** 开始下载安装包（**秒回**；进度靠 `software-update-progress` 事件） */
+  startUpdate(): Promise<void>
+  pauseUpdate(): Promise<void>
+  resumeUpdate(): Promise<void>
+  cancelUpdate(): Promise<void>
+  /**
+   * 装上去并重启：**本进程会退出**（正在运行的 `.app` 换不掉）。
+   * 替换成没成，**下次启动**由 `updateInfo().lastResult` 说清。
+   */
+  installUpdate(): Promise<void>
+
+  /**
+   * 在系统默认程序里打开一个 **http(s)** 链接。
+   *
+   * ★ 前端**不要**用 `<a target="_blank">`：Tauri 的 webview 没开 opener 权限，
+   *   点了**什么都不发生**（0.0.2 的「查看更新」就是那样"点了没反应"的）。
+   */
+  openUrl(url: string): Promise<void>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

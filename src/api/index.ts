@@ -30,5 +30,23 @@ const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 export const api: MkpApi = inTauri ? bridgeApi : mockApi
 
+/**
+ * 订阅后端事件（**只订阅这一处**，别处别直接摸 `@tauri-apps/api/event`）。
+ *
+ * 浏览器（mock）里返回一个**空取消函数**：没有事件可听，但调用方的 cleanup 照样
+ * 成立 —— 界面代码不必知道自己跑在哪儿。
+ */
+export async function listen<T>(
+  event: string,
+  onEvent: (payload: T) => void,
+): Promise<() => void> {
+  if (!inTauri) return () => {}
+  const { listen: tauriListen } = await import('@tauri-apps/api/event')
+  const un = await tauriListen<T>(event, (e) => onEvent(e.payload))
+  return () => {
+    void un()
+  }
+}
+
 /** 给界面用：告诉用户"这一份数据是从哪来的"。调试用，不参与业务判断 */
 export const apiSource: 'rust' | 'mock' = inTauri ? 'rust' : 'mock'

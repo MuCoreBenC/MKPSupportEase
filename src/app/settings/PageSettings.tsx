@@ -104,6 +104,24 @@ export default function PageSettings() {
     void checkUpdate()
   }, [checkUpdate])
 
+  /** 在系统浏览器里打开 Release 页（**走命令**，不走 `<a>`） */
+  const openReleasePage = async (url: string) => {
+    try {
+      await api.openUrl(url)
+    } catch (e) {
+      setNote({ text: errorText(e), bad: true })
+    }
+  }
+
+  /** 开始在应用内下载（标题栏那枚环会接手；这一页只负责发起） */
+  const startDownload = async () => {
+    try {
+      await api.startUpdate()
+    } catch (e) {
+      setNote({ text: errorText(e), bad: true })
+    }
+  }
+
   const pick = (next: Mode) => {
     setMode(next)
     setNote(null)
@@ -181,10 +199,30 @@ export default function PageSettings() {
           )}
 
           <div className={s.row}>
+            {/*
+              ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
+              Tauri 的 webview 没开 opener 权限，`<a>` 点了**什么都不发生**
+              （0.0.2 用户实测："点了没反应，没弹出浏览器"）。修法是走命令（第五刀）。
+            */}
             {update?.hasUpdate === true && update.url !== undefined && (
-              <a className={s.btn} href={update.url} target="_blank" rel="noreferrer">
+              <button
+                type="button"
+                className={s.btn}
+                onClick={() => void openReleasePage(update.url as string)}
+              >
                 查看更新
-              </a>
+              </button>
+            )}
+            {/* 有安装包（release.json 给了 asset）才摆"在应用内下载"；没有就只留上面那颗 */}
+            {update?.hasUpdate === true && update.asset !== undefined && (
+              <button
+                type="button"
+                className={s.btn}
+                disabled={updateBusy}
+                onClick={() => void startDownload()}
+              >
+                在应用内下载
+              </button>
             )}
             <button
               type="button"
