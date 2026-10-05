@@ -279,6 +279,9 @@ button.usingNote:hover {
  * 两者加起来比这一行宽 **11px** —— 分类条只能横向滚（画面上就是右侧被啃掉一块）。
  * 分类条那边同时改了退化规则（见 CategoryPills.module.css 的注释），
  * 两边一起才把这一段救回来。占位文案在 132px 下仍然是「搜索…」，不截断。
+ *
+ * （2026-10-05 起这四档宽度改成**一条连续曲线**，见下方 `.searchSlot[data-row='bar']`
+ * —— 档位切换时搜索框"突然变宽 / 变窄"的跳感就是从这里来的。）
  */
 .searchSlot {
   display: flex;
@@ -286,21 +289,19 @@ button.usingNote:hover {
   flex: 0 0 auto;
 }
 
-[data-density='ultra'] .searchSlot[data-row='bar'] {
-  width: 260px;
+/*
+ * 槽宽**连续**随窗口长：小窗钉在 132（作者裁决不动）、1080 到 216、超宽顶 260
+ * —— 三个锚点都是旧档位定过的值，只是中间改成线性渐变，跨密度档不再跳一档。
+ * 1080 处两段公式同值（216），跨线无缝。
+ */
+.searchSlot[data-row='bar'] {
+  width: clamp(132px, 9.8px + 19.09vw, 216px);
 }
 
-[data-density='wide'] .searchSlot[data-row='bar'] {
-  width: 216px;
-}
-
-[data-density='compact'] .searchSlot[data-row='bar'] {
-  width: 132px;
-}
-
-/* mini：与 compact 同宽（132）—— 不再 `flex: 1` 吃光剩余空间 */
-[data-density='mini'] .searchSlot[data-row='bar'] {
-  width: 132px;
+@media (width >= 1080px) {
+  .searchSlot[data-row='bar'] {
+    width: clamp(216px, 124.6px + 8.46vw, 260px);
+  }
 }
 
 /*

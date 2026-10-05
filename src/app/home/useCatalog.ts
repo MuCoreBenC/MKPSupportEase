@@ -14,7 +14,12 @@
  * `assets[]` 说（`assetUrlOf`），客户端不再 import 具体文件。
  *
  * 都是静态读（每编辑一次就变的是参数值，不在这里），进页面拉一次就够。
- * 首页与校准页各持一份：tab 切换会重挂，一次进入一个来回，不做跨页缓存。
+ *
+ * 跨页缓存（2026-10-05）：原状是「tab 切换会重挂，一次进入一个来回」，代价是每次
+ * 切回都从空数组起跳、一切「先空后满」—— 校准页的 pill 与读数要等目录、底账、参数
+ * 几趟 IPC 都回来才长出真值，进场后当着用户的面再变一次（页签切换的「闪一下」）。
+ * 现在挂载先吃上一份结果渲染、照旧重拉（文件可能换过），回来后覆盖缓存与 state；
+ * 先旧后新在静态目录上没有一致性风险。
  */
 
 import { useEffect, useState } from 'react'
@@ -43,19 +48,22 @@ export function uidOfFile(file: PresetFileInfo): string | null {
   return ref === undefined ? null : `${ref.machine}/${ref.version}`
 }
 
+let catalogCache: Catalog = { machines: [], presets: [], assets: [], brands: [] }
+
 export function useCatalog(): Catalog {
-  const [machines, setMachines] = useState<Machine[]>([])
-  const [presets, setPresets] = useState<PresetFileInfo[]>([])
-  const [assets, setAssets] = useState<CatalogAsset[]>([])
-  const [brands, setBrands] = useState<RuntimeCatalogBrand[]>([])
+  const [cat, setCat] = useState<Catalog>(catalogCache)
 
   useEffect(() => {
     let alive = true
     Promise.all([api.getMachines(), api.getPresetFiles()]).then(
       ([list, files]) => {
         if (!alive) return
-        setMachines(list)
-        setPresets(files.filter((f) => f.kind === 'mkp_preset'))
+        catalogCache = {
+          ...catalogCache,
+          machines: list,
+          presets: files.filter((f) => f.kind === 'mkp_preset'),
+        }
+        setCat(catalogCache)
       },
       (err: unknown) => {
         /* 拉不到就空着：三级选择不显形（不摆假选项），控制台里有名字。
@@ -68,8 +76,8 @@ export function useCatalog(): Catalog {
     api.getRuntimeCatalog().then(
       (c) => {
         if (!alive) return
-        setAssets(c.assets ?? [])
-        setBrands(c.brands ?? [])
+        catalogCache = { ...catalogCache, assets: c.assets ?? [], brands: c.brands ?? [] }
+        setCat(catalogCache)
       },
       (err: unknown) => {
         console.error('[catalog] 资产登记拉取失败（大图回落品牌 logo）', err)
@@ -80,5 +88,5 @@ export function useCatalog(): Catalog {
     }
   }, [])
 
-  return { machines, presets, assets, brands }
+  return cat
 }

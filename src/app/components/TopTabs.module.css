@@ -54,6 +54,7 @@
 
 .tabs {
   flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -84,14 +85,25 @@
   font-weight: 600;
 }
 
-.tab[data-on='true']::after {
-  content: '';
+/*
+ * 滑动下划线（2026-10-05）：一条常驻指示条，替代原来 active 页签的 ::after ——
+ * 那样换页签是「那边消失、这边出现」，快速连点看着在眨；现在 transform 从旧位
+ * 滑到新位。位置 / 宽度由 TSX 量出来（内衬读页签自己的 padding，compact / mini /
+ * fluid 三档自动跟随），这里只管皮。transition 常开：换页签是那一下滑动，拉窗、
+ * 换密度是柔顺跟随；首次挂载带着终值出现，没有从 0 滑出来的动画。
+ * bottom: -1px 与旧 ::after 同几何，该被 .tabs 的 overflow 裁掉的部分照样裁，
+ * 落点和原来完全一致。
+ */
+.indicator {
   position: absolute;
-  left: 12px;
-  right: 12px;
   bottom: -1px;
+  left: 0;
   height: 2px;
   background: var(--accent);
+  pointer-events: none;
+  transition:
+    transform 170ms cubic-bezier(0.32, 0.72, 0.24, 1),
+    width 170ms cubic-bezier(0.32, 0.72, 0.24, 1);
 }
 
 .bar[data-density='compact'] .tab {
@@ -99,21 +111,11 @@
   font-size: 12px;
 }
 
-.bar[data-density='compact'] .tab[data-on='true']::after {
-  left: 9px;
-  right: 9px;
-}
-
 /* mini（600 最小窗）与 compact 同一套收紧 —— 文字页签在窄窗也放得下
    （mini 曾整条换成图标页签，2026-10-04 退役：文字版放得下，不再收图标） */
 .bar[data-density='mini'] .tab {
   padding: 0 9px;
   font-size: 12px;
-}
-
-.bar[data-density='mini'] .tab[data-on='true']::after {
-  left: 9px;
-  right: 9px;
 }
 
 /* 连续模式：页签内边距与字号随标题栏宽度平滑变化，抵消 compact 档位跳变 */
@@ -125,11 +127,6 @@
 .bar[data-fluid='true'] .tab {
   padding: 0 var(--tab-pad);
   font-size: var(--tab-size);
-}
-
-.bar[data-fluid='true'] .tab[data-on='true']::after {
-  left: var(--tab-pad);
-  right: var(--tab-pad);
 }
 
 @supports (width: 1cqw) {

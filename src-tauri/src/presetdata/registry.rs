@@ -335,19 +335,20 @@ pub struct ParamRegistry {
     file: PathBuf,
     layout_doc: DocumentMut,
     layout_file: PathBuf,
-    /// 全表指纹的**一次性缓存**（2026-10-02）。
+    /// 定义指纹的**一次性缓存**（2026-10-02；2026-10-05 起只算定义，见
+    /// [`schema_fingerprint`](Self::schema_fingerprint) 的注）。
     ///
     /// # 为什么要有它
     ///
-    /// [`fingerprint`](Self::fingerprint) 进有效配方的哈希（见 `Layers::fingerprint`），
-    /// 而 `Layers::fingerprint()` 在 `book_view` / `build_rows` 里按版本被调 O(版本数) 次
-    /// —— 真数据实测：一次 `registry.fingerprint()` = 8.5ms（序列化 74 条定义 + 整本布局
-    /// 再 SHA256），27 次就是 230ms，`wb_book` 于是卡住 320ms（作者："像被冻结住了"）。
+    /// 指纹进有效配方的哈希（见 `Layers::fingerprint`），而 `Layers::fingerprint()`
+    /// 在 `book_view` / `build_rows` 里按版本被调 O(版本数) 次
+    /// —— 真数据实测：一次 8.5ms（序列化 74 条定义 + 整本布局再 SHA256），
+    /// 27 次就是 230ms，`wb_book` 于是卡住 320ms（作者："像被冻结住了"）。
     ///
     /// 但**这张表构造完就不再变**（唯一改它的路径是 `load_from` 重建整个 `ParamRegistry`），
     /// 一份会话里对所有机型 / 所有版本都是**同一个值** —— 重算纯属浪费。
-    /// 缓存成 `OnceLock`：`fingerprint()` 仍是 `&self`，返回值一字不变，只是不再重算。
-    fingerprint_cache: std::sync::OnceLock<String>,
+    /// 缓存成 `OnceLock`：`schema_fingerprint()` 仍是 `&self`，返回值一字不变，只是不再重算。
+    schema_fingerprint_cache: std::sync::OnceLock<String>,
 }
 
 /// 手写而不是 `#[derive(Debug)]`：派生版会把 74 条参数定义连同布局整本打印出来，
@@ -399,7 +400,7 @@ impl ParamRegistry {
             file,
             layout_doc,
             layout_file,
-            fingerprint_cache: std::sync::OnceLock::new(),
+            schema_fingerprint_cache: std::sync::OnceLock::new(),
         };
         out.check_consistency()?;
         Ok(out)
@@ -718,17 +719,50 @@ impl ParamRegistry {
             .map_or(f64::MAX, |t| t.order)
     }
 
-    /// 全表指纹。进有效配方的 hash —— 否则改了字段定义，产物不会变成"待生成"
+    /// 定义指纹（schema fingerprint）：只哈希**字段定义**，不哈希**配方值**。
     ///
-    /// **算一次就缓存**（见 `fingerprint_cache` 字段的注）：这张表构造完不再变，
+    /// # 定义与数据的分界（2026-10-05 定死，改这里之前先读完）
+    ///
+    /// 一次真事故立的规矩：作者在参数台改了 `A1:FASTV3.3` 一个值 —— 值覆盖就落在
+    /// 这张表的 `[params.machineVariants]` 里 —— 旧版把**整张表**哈希进指纹，
+    /// 于是 9 份产物的 uuid 全变、全部「待更新」，而其他 8 份的正文一个字节都不该动。
+    ///
+    /// 给字段归类只认一句判据：
+    ///
+    /// > 改了它，是**所有引用这条定义的产物**都该重出生成（定义），
+    /// > 还是只有**握着这个值的那个版本**（数据）？
+    ///
+    /// - **定义**（进本指纹）：key / tomlKey / 类型 / 出厂默认 / 约束（min·max·choices）/
+    ///   适用机型 / 弃用 / 注释 / 布局，以及 `machineMinVariants` / `machineMaxVariants`
+    ///   —— 它们是**定义的机型特化**，不是配方值（见 [`ParamDef`] 那边的注）。
+    /// - **数据**（不进本指纹）：`machineVariants` 的值覆盖。每个版本的有效值本来就
+    ///   单独进 [`crate::presetdata::resolve::Layers::fingerprint`] 的 `recipe`，
+    ///   这里再算一遍，只会让改了别家值的那一版把全体版本都带成「待更新」。
+    ///
+    /// 结构性保证：把整条 [`ParamDef`] 序列化后剥掉 `machineVariants` —— 以后给
+    /// `ParamDef` **新加字段默认进定义指纹**（这是安全的默认）；想加"数据"只能走
+    /// `machineVariants`，而它恰好被剥掉。谁也别再随手往指纹里塞字段。
+    ///
+    /// **算一次就缓存**（见 `schema_fingerprint_cache` 字段的注）：这张表构造完不再变，
     /// 一份会话里对谁都是同一个值，而它在 `book_view` / `build_rows` 里被按版本反复取。
-    /// 返回值与不缓存时逐字节相同 —— 只是不再重算那 8.5ms 的序列化 + SHA256。
-    pub fn fingerprint(&self) -> String {
-        self.fingerprint_cache
+    pub fn schema_fingerprint(&self) -> String {
+        self.schema_fingerprint_cache
             .get_or_init(|| {
                 use sha2::{Digest, Sha256};
+                // 剥掉值覆盖：定义是全体版本共享的，值是每个版本自己的
+                let defs: Vec<Value> = self
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut v = serde_json::to_value(p).unwrap_or_default();
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.remove("machineVariants");
+                        }
+                        v
+                    })
+                    .collect();
                 let payload = serde_json::json!({
-                    "params": &self.params,
+                    "params": defs,
                     "tabs": &self.tabs,
                     "layout": &self.layout,
                 });
@@ -1689,17 +1723,47 @@ mod tests {
         assert!(r.tab_order("t1") < r.tab_order("ghost"));
     }
 
-    /// 指纹：改一个 step 就要变（否则改了字段定义产物不会过期）
+    /// 定义指纹：改一个**定义**字段就要变（否则改了字段定义产物不会过期）
     #[test]
-    fn fingerprint_reacts_to_any_field_change() {
+    fn schema_fingerprint_reacts_to_definition_changes() {
         let (p, l) = good();
         let (_d1, a) = load(p.clone(), l.clone());
-        let before = a.unwrap().fingerprint();
+        let before = a.unwrap().schema_fingerprint();
 
         let mut p2 = p;
         p2["params"][0]["step"] = serde_json::json!(0.05);
         let (_d2, b) = load(p2, l);
-        assert_ne!(before, b.unwrap().fingerprint());
+        assert_ne!(before, b.unwrap().schema_fingerprint());
+    }
+
+    /// 【回归 · 2026-10-05】值覆盖（`machineVariants`）是**数据**不是定义 ——
+    /// 改它不许动定义指纹。旧版把整张表哈希进指纹，作者改了 `A1:FASTV3.3`
+    /// 一个值，9 份产物的 uuid 全变、全部「待更新」。
+    /// 顺带钉住分界的另一半：范围覆盖（`machineMinVariants`）是**定义的机型特化**，
+    /// 改它就要变。
+    #[test]
+    fn schema_fingerprint_ignores_value_overrides_but_not_range_overrides() {
+        let (p, l) = good();
+        let (_d1, a) = load(p.clone(), l.clone());
+        let before = a.unwrap().schema_fingerprint();
+
+        let mut p2 = p.clone();
+        p2["params"][0]["machineVariants"] = serde_json::json!({ "A1:FASTV3.3": 70 });
+        let (_d2, b) = load(p2, l.clone());
+        assert_eq!(
+            before,
+            b.unwrap().schema_fingerprint(),
+            "别家的值泼进了定义指纹 —— 指纹粒度又错了"
+        );
+
+        let mut p3 = p;
+        p3["params"][0]["machineMinVariants"] = serde_json::json!({ "A1": 1 });
+        let (_d3, c) = load(p3, l);
+        assert_ne!(
+            before,
+            c.unwrap().schema_fingerprint(),
+            "范围覆盖是定义的机型特化，改了要变"
+        );
     }
 
     /// 指纹缓存（2026-10-02 的性能修复）：反复取**逐字节相同**，重载后仍跟着数据走。
@@ -1714,22 +1778,22 @@ mod tests {
         let (p, l) = good();
         let (_d1, a) = load(p.clone(), l.clone());
         let a = a.unwrap();
-        let first = a.fingerprint();
+        let first = a.schema_fingerprint();
 
         // 同一个实例反复取：稳定
         for _ in 0..1000 {
-            assert_eq!(a.fingerprint(), first);
+            assert_eq!(a.schema_fingerprint(), first);
         }
 
         // 另一份、同样数据：值相同（缓存不是"随机盐"）
         let (_d2, b) = load(p.clone(), l.clone());
-        assert_eq!(b.unwrap().fingerprint(), first);
+        assert_eq!(b.unwrap().schema_fingerprint(), first);
 
         // 重载后数据改了：新实例的指纹跟着变（缓存没有跨实例粘住旧值）
         let mut p2 = p;
         p2["params"][0]["step"] = serde_json::json!(0.05);
         let (_d3, c) = load(p2, l);
-        assert_ne!(c.unwrap().fingerprint(), first);
+        assert_ne!(c.unwrap().schema_fingerprint(), first);
     }
 
     /// 文件不在时是 NOT_FOUND 且写明是哪个文件 —— 不是静默空表

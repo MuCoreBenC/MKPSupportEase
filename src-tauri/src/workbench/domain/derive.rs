@@ -189,13 +189,21 @@ impl<'a> Book<'a> {
     /// 一个版本的三层视图。
     ///
     /// 机型层取它那台机型的裸键，版本层只取 `A1: FAST` 这一条 ——
-    /// 别的版本的键是别的版本的，不参与这一列的取值
+    /// 别的版本的键是别的版本的，不参与这一列的取值。
+    /// **走 `for_version`**：版本身份进指纹 —— 同机型两个版本值一模一样也是两份产物，
+    /// 过期判定各算各的，不许共用一个指纹
     pub fn version_layers(&self, uid: &str) -> Option<Layers<'_>> {
         let v = self.version(uid)?;
         let base = self.bases.get(&v.machine_id)?;
         let over = self.overs.get(uid)?;
         let id = self.machine(&v.machine_id)?.id.as_str();
-        Some(Layers::new(&self.presets.registry, id, base, over))
+        Some(Layers::for_version(
+            &self.presets.registry,
+            id,
+            v.version_id.as_str(),
+            base,
+            over,
+        ))
     }
 
     pub fn version(&self, uid: &str) -> Option<&VersionIdentity> {
@@ -359,6 +367,14 @@ impl<'a> Book<'a> {
 
     pub fn last_build(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.stamp.as_str())
+    }
+
+    /// 已生成记录里的配方指纹（没有记录 = `None`）。
+    ///
+    /// 生成侧拿它决定「这一行要不要补记」：产物字节没变、记录也对得上，
+    /// 台账就不许动 —— no-op 的生成不该把 `built.json` 顶新（2026-10-05）。
+    pub fn built_fingerprint(&self, uid: &str) -> Option<&str> {
+        self.built.get(uid).map(|r| r.fingerprint.as_str())
     }
 
     /// 磁盘的交付根里有没有这一版的产物文件（只 stat，不读内容、不算哈希）。

@@ -13,7 +13,7 @@
  * （PresetPickerDrawer，与参数页同颗）。壳最小窗 600×500（App.tsx），
  * 下缘在任何宽度一行（容器查询两档收紧）。其余（弹窗 / 状态机）沿用 v029 那套。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import CalibPlate from './CalibPlate'
 import { VIEW_BOX as Z_VIEW_BOX } from '../../calib/zoffset-calibration.generated'
 import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generated'
@@ -39,6 +39,13 @@ import s from './PageCalib.module.css'
 const PLATE_THEME = '浅色'
 
 const EMPTY: Selection = { brand: null, model: null, variant: null }
+
+/*
+ * 跨页缓存（2026-10-05）：选择不跨页存的话，每次切回校准页都要等「目录 → 底账」
+ * 两趟 IPC 才长出 pill 与读数，进场后当着用户的面再变一次。留一份上次的选择，
+ * 挂载先用它，底账回来后对表（对不上就换，见下面的反填 effect）。
+ */
+let selCache: Selection | null = null
 
 type Step = 'z' | 'xy' | 'models'
 
@@ -72,21 +79,44 @@ const TEST_MODEL_ID = 'test-models'
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
-export default function PageCalib() {
+interface PageCalibProps {
+  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账 */
+  active?: boolean
+}
+
+export default function PageCalib({ active }: PageCalibProps) {
   const [step, setStep] = useState<Step>('z')
-  const [sel, setSel] = useState<Selection>(EMPTY)
+  const [sel, setSel] = useState<Selection>(() => selCache ?? EMPTY)
+  /* 「先回『选择机型』……」只在没有基准**成为事实**之后才许出现 ——
+     挂载初期选择还在路上（目录/底账没回来），这时候那句提示是错的建议，
+     而且数据一到它又得消失，页脚就这么闪一下。 */
+  const [noSelection, setNoSelection] = useState(false)
 
   const catalog = useCatalog()
 
-  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填 */
-  const restored = useRef(false)
+  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填。
+     常驻挂载后 tab 不再重挂（2026-10-05），改成每次回到本页对一次：
+     对出的值与缓存一致时画面不动，在预设页换过应用才真正换基准。 */
   useEffect(() => {
-    if (restored.current || catalog.machines.length === 0) return
-    restored.current = true
+    if (!active || catalog.machines.length === 0) return
     void selectionFromActive(catalog.machines).then((next) => {
-      if (next !== null) setSel(next)
+      if (next !== null) {
+        setSel(next)
+      } else {
+        /* 底账里没有已应用：缓存的选择一并撤掉，别拿旧基准冒充 */
+        setSel((prev) => (prev.model === null ? prev : EMPTY))
+        setNoSelection(true)
+      }
     })
-  }, [catalog.machines])
+  }, [active, catalog.machines])
+
+  /* 选择一变就更新跨页缓存；真选上了就撤掉「没有基准」那句 */
+  useEffect(() => {
+    if (sel.model !== null && sel.variant !== null) {
+      selCache = sel
+      setNoSelection(false)
+    }
+  }, [sel])
 
   const presetOptions = useMemo(
     () =>
@@ -319,7 +349,7 @@ export default function PageCalib() {
               onRevert={revertAxis}
               onReset={resetAxis}
             />
-            {!saved && <p className={s.note}>{NEED_PRESET}</p>}
+            {!saved && noSelection && <p className={s.note}>{NEED_PRESET}</p>}
             {actions}
           </div>
         )}

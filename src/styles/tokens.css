@@ -65,45 +65,38 @@
   --titlebar-h-win: 38px;
   --statusbar-h: 32px;
 
-  /* 随密度切换的量 */
-  --gap: 20px;
-  --pad: 18px;
-  --fs-metric: 26px;
-  --fs-label: 12px;
-  --fs-body: 13px;
+  /*
+   * 随窗口宽度变化的量 —— **连续**，不随密度档跳。
+   *
+   * 以前这六个量按四档密度（ultra / wide / compact / mini）整档切换：拖窗跨过
+   * 1080 / 640 那一刻，全应用的字号、内边距同时跳一号（作者 2026-10-05：
+   * 「像是从大一号的字体变成了小一号」「文字被压缩一下」）。现在改成以窗口宽
+   * 为自变量的连续函数，两端收在原来四档的最小 / 最大值之间——任意宽度下的
+   * 落点都与旧档位值相差无几，但拖动时只渐变、不跳变。密度档（data-density）
+   * 继续存在，只管**结构性**的差别（表格列增减、搜索框换行这类），不再管"量"。
+   */
+  --gap: clamp(10px, 4.5px + 1.02vw, 24px);
+  --pad: clamp(11px, 7px + 0.78vw, 22px);
+  --fs-metric: clamp(19px, 15px + 0.78vw, 30px);
+  --fs-label: clamp(10px, 9.5px + 0.16vw, 12.5px);
+  --fs-body: clamp(12px, 11px + 0.16vw, 14px);
+  --icon: clamp(16px, 14.5px + 0.23vw, 19px);
+
+  /* 结构性的两样仍按档位给：导航宽（试验场在用）与卡片圆角 */
   --nav-w: 216px;
   --card-r: var(--r-lg);
-  --icon: 18px;
 }
 
 [data-density='ultra'] {
-  --gap: 24px;
-  --pad: 22px;
-  --fs-metric: 30px;
-  --fs-label: 12.5px;
-  --fs-body: 14px;
   --nav-w: 236px;
-  --icon: 19px;
 }
 
 [data-density='compact'] {
-  --gap: 14px;
-  --pad: 14px;
-  --fs-metric: 22px;
-  --fs-label: 11px;
-  --fs-body: 12.5px;
   --nav-w: 64px;
   --card-r: var(--r-md);
-  --icon: 17px;
 }
 
 [data-density='mini'] {
-  --gap: 10px;
-  --pad: 11px;
-  --fs-metric: 19px;
-  --fs-label: 10px;
-  --fs-body: 12px;
   --nav-w: 0px;
   --card-r: var(--r-md);
-  --icon: 16px;
 }

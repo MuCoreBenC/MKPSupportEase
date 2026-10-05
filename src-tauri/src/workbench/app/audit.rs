@@ -26,6 +26,14 @@
 //! ```
 //!
 //! ★ `Skipped` 是刻意的一档：把"没实现"伪装成"通过"，比红色更危险。
+//!
+//! # 两层检查（2026-10-05 起）
+//!
+//! 预检管**源状态**（git/clean、源数据、结构、可达性），交付账本的最终一致由
+//! [`finalize_consistency`] 在**发布事务定稿之后、commit 之前**断言。关键裁定：
+//! ⑭ `manifest/correct` 在预检里是**提示档**（Warning）—— manifest 是上一版发布
+//! 写下的账本，落后于 dist 是「生成过、还没发」的常规状态，拦了就是
+//! 「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环。
 
 use serde::Serialize;
 
@@ -213,12 +221,11 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     /* ⑬ source.json 正确 */
     items.push(source_correct(&dist));
 
-    /* ⑭ manifest 与交付集合一致 */
+    /* ⑭ manifest 与交付集合一致（预检 = 提示档；严格核对在事务 ③½ `finalize_consistency`） */
     items.push(manifest_correct(&dist));
 
-    /* ⑮ Git 工作区状态 */
-    let git = git_clean();
-    let (added, changed, removed) = git_counts(&git);
+    /* ⑮ Git 工作区状态（"新增/改动/删除"计数随行 —— 从原始 porcelain 状态解析） */
+    let (git, added, changed, removed) = git_clean();
     /* ★ ⑮ **必须先入列再判定** —— 否则 `can_publish` 看不到它：
     脏工作区（⑮ 红）时闸仍会亮「确认发布」，绕过「除交付产物外工作区必须干净」那条保护。
     入列顺序与 `blockers()`（它也遍历全部 items）一致，两者才严格等价。 */
@@ -236,6 +243,26 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         min_version,
         can_publish,
     })
+}
+
+/* ---------- 事务的最后一道安全检查（③½） ---------- */
+
+/// **发布事务的最终一致性核对**：`publish_into` 定稿之后、stage / commit / push 之前，
+/// 由 [`super::publish_tx::run`] 调用。核对"发出去的字节"与账本：manifest、catalog、
+/// 真实交付文件、残留。
+///
+/// ★ 它**不是第二套发布闸**，三个固定：
+///   · **时机固定** —— 只挂在定稿之后这一处，不是又一个可以随时跑的入口判定器；
+///   · **清单固定** —— 就这三项，**刻意不含 ⑮ git/clean**：定稿后的工作区理应带着
+///     `presets/dist/` 的改动，那正是这次要提交的东西，拿它拦自己又是死锁；
+///   · **语义固定** —— 红 = 内部错误或并发改动（定稿刚写下的账不该对不上），
+///     调用方 Err 短路，绝不产生半截发布提交。
+pub(super) fn finalize_consistency(book: &Book<'_>, dist: &std::path::Path) -> Vec<AuditItem> {
+    vec![
+        manifest_correct_strict(dist),
+        catalog_sha_size(dist),
+        no_strays(book, dist),
+    ]
 }
 
 /* ---------- 十五项 ---------- */
@@ -743,26 +770,39 @@ fn source_correct(dist: &std::path::Path) -> AuditItem {
     }
 }
 
-/// ⑭ manifest 与 catalog 交叉：manifest 里每一条都在 catalog 里、且 SHA 一致
-fn manifest_correct(dist: &std::path::Path) -> AuditItem {
-    let item = AuditItem::base(
-        "manifest/correct",
-        "manifest 与交付集合一致",
-        AuditSeverity::Blocker,
-        "重跑一次发布（manifest 在最后一步写）",
-    );
+/// manifest 与 catalog **两本账的比较内核**：预检 ⑭ 与事务定稿后的严格核对共用它 ——
+/// 「两账怎么算一致」只有这一处定义，两层不许各算各的。
+struct LedgerComparison {
+    /// manifest 里的条目总数（一致时"n 条两账一致"用它）
+    total: usize,
+    /// 不一致的条目（空 = 两账一致）
+    bad: Vec<String>,
+    /// 哪本账读不到 / 解析不出来。**这不是"不一致"** —— 是根本没比成
+    unreadable: Option<String>,
+}
+
+fn compare_ledgers(dist: &std::path::Path) -> LedgerComparison {
+    let mut out = LedgerComparison {
+        total: 0,
+        bad: Vec::new(),
+        unreadable: None,
+    };
     let Ok(bytes) = std::fs::read(dist.join(dist::MANIFEST_FILE)) else {
-        return item.fail("dist/manifest.json 还不存在".to_owned(), Vec::new());
+        out.unreadable = Some("dist/manifest.json 还不存在".to_owned());
+        return out;
     };
     let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return item.fail("dist/manifest.json 解析不出来".to_owned(), Vec::new());
+        out.unreadable = Some("dist/manifest.json 解析不出来".to_owned());
+        return out;
     };
     let Ok(catalog_bytes) = std::fs::read(dist.join(dist::NEW_CATALOG_FILE)) else {
-        return item.fail("dist/catalog.json 还不存在".to_owned(), Vec::new());
+        out.unreadable = Some("dist/catalog.json 还不存在".to_owned());
+        return out;
     };
     let Ok(catalog) = serde_json::from_slice::<crate::runtime::catalog::Catalog>(&catalog_bytes)
     else {
-        return item.fail("dist/catalog.json 解析不出来".to_owned(), Vec::new());
+        out.unreadable = Some("dist/catalog.json 解析不出来".to_owned());
+        return out;
     };
     let by_path: std::collections::HashMap<&str, &crate::runtime::catalog::CatalogFile> =
         catalog.files.iter().map(|f| (f.path.as_str(), f)).collect();
@@ -785,11 +825,63 @@ fn manifest_correct(dist: &std::path::Path) -> AuditItem {
             Some(_) => {}
         }
     }
-    if bad.is_empty() {
-        item.pass(format!("{n} 条两账一致"))
+    bad.sort();
+    out.total = n;
+    out.bad = bad;
+    out
+}
+
+/// ⑭ manifest 与交付集合一致 —— **预检是提示档，不是闸**。
+///
+/// manifest 是**上一版发布**写下的账本，只有发布事务定稿（`publish_into` 收尾）会
+/// 重写它。所以「生成过、还没发」的落后是**常规状态**：预检若因它把发布拦死，就是
+/// 「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环（2026-10-05
+/// 真机踩过：生成之后发布永远进不去，只能手工 restore 交付根绕过）。
+/// 严格的逐条核对由 [`finalize_consistency`] 在**事务定稿之后、commit 之前**跑 ——
+/// 那里才是这道检查管事的地方。
+fn manifest_correct(dist: &std::path::Path) -> AuditItem {
+    let item = AuditItem::base(
+        "manifest/correct",
+        "manifest 与交付集合一致",
+        AuditSeverity::Warning,
+        "无需手工处理 —— 点「确认发布」，发布事务定稿时会重写 manifest",
+    );
+    let cmp = compare_ledgers(dist);
+    if let Some(why) = cmp.unreadable {
+        // 缺失 = 首次发布；坏 = 定稿会整体重写。如实说，不猜、不拦。
+        return item.warn(format!("{why} —— 发布事务定稿时会写入 / 重写"), Vec::new());
+    }
+    if cmp.bad.is_empty() {
+        item.pass(format!("{} 条两账一致", cmp.total))
     } else {
-        bad.sort();
-        item.fail(format!("{} 处两账脱节", bad.len()), bad)
+        item.warn(
+            format!(
+                "落后 {} 处（上一版发布的账本）—— 定稿时重写对齐",
+                cmp.bad.len()
+            ),
+            cmp.bad,
+        )
+    }
+}
+
+/// manifest 两账的**严格版**（[`finalize_consistency`] 专用）：Fail + Blocker。
+/// 它只在发布事务定稿之后跑 —— 那时 manifest 是刚刚按真实字节写下的，再对不上
+/// 就是内部错误或并发改动，必须把发布拦在 commit 之前。
+fn manifest_correct_strict(dist: &std::path::Path) -> AuditItem {
+    let item = AuditItem::base(
+        "manifest/correct",
+        "manifest 与交付集合一致",
+        AuditSeverity::Blocker,
+        "定稿刚写下的账不该对不上 —— 重跑一次发布；反复红是 bug，去查并发改动",
+    );
+    let cmp = compare_ledgers(dist);
+    if let Some(why) = cmp.unreadable {
+        return item.fail(why, Vec::new());
+    }
+    if cmp.bad.is_empty() {
+        item.pass(format!("{} 条两账一致", cmp.total))
+    } else {
+        item.fail(format!("{} 处两账脱节", cmp.bad.len()), cmp.bad)
     }
 }
 
@@ -797,12 +889,17 @@ fn manifest_correct(dist: &std::path::Path) -> AuditItem {
 ///
 /// `presets/dist/` 必须排除 —— 它就是这次要提交的产物本身，拿它的未跟踪状态
 /// 去拦自己的发布是个死锁（与 `scripts/publish-presets.mjs` 同一条口径）。
-fn git_clean() -> AuditItem {
+///
+/// 返回值第二部分 = 「这次发布会让 `presets/` 怎么变」的计数（新增/改动/删除，
+/// 弹窗顶上那三个数），**从原始 porcelain 状态码解析** —— 不许再从结论行反推。
+/// 口径：`presets/` 前缀**含 `presets/dist/`**（交付物本身就是"发布会动它几份"
+/// 要数的对象）；新增 = `?`/`A`，删除 = `D`，其余非空格 = 改动（含 `R`/`C`）。
+fn git_clean() -> (AuditItem, usize, usize, usize) {
     git_clean_at(&paths::repo_root())
 }
 
 /// ⑮ 的本体：**在给定的工作目录上**判（发布时 = 真仓库；判据里 = 临时造的目录）。
-fn git_clean_at(repo: &std::path::Path) -> AuditItem {
+fn git_clean_at(repo: &std::path::Path) -> (AuditItem, usize, usize, usize) {
     let item = AuditItem::base(
         "git/clean",
         "Git 工作区干净",
@@ -820,30 +917,67 @@ fn git_clean_at(repo: &std::path::Path) -> AuditItem {
         //   如实说"本环境执行不了这条检查"，**发布阻断责任归有 Git 工作区的真实发布环境**
         //   （作者 2026-10-04 裁决；见 `docs/RELEASE-TRANSACTIONS.md` §6 那一句）。
         //   老写法这里是 skip ⇒ PR 上 rust job 恒红（2026-10-04 PR #27 实测）。
-        return item.pass(
-            "当前执行环境不是可用的 Git 工作区（`git` 不可用 / 不是仓库 / 游离 HEAD）\
-             —— 无法检查工作区变更，该检查不适用",
+        return (
+            item.pass(
+                "当前执行环境不是可用的 Git 工作区（`git` 不可用 / 不是仓库 / 游离 HEAD）\
+                 —— 无法检查工作区变更，该检查不适用",
+            ),
+            0,
+            0,
+            0,
         );
     };
-    let outside: Vec<String> = dirty
-        .split('\0')
-        .filter(|e| !e.is_empty())
-        .filter(|e| {
-            let path = e.get(3..).unwrap_or("").trim_matches('"');
-            !path.starts_with("presets/dist/")
-        })
-        .map(|e| e.get(3..).unwrap_or("").to_owned())
-        .collect();
+    /* porcelain v1 `-z`：条目 = `XY 路径`，NUL 分隔；**改名 / 复制**是
+       `XY new` 后跟一个独立的 `old` token —— 不吃掉它，`old` 会被当成一条
+       没有状态码的路径混进来（老实现正是在这里把路径当条目解析错位的）。 */
+    let mut added = 0usize;
+    let mut changed = 0usize;
+    let mut removed = 0usize;
+    let mut outside: Vec<String> = Vec::new();
+    let mut tokens = dirty.split('\0').filter(|t| !t.is_empty()).peekable();
+    while let Some(entry) = tokens.next() {
+        if entry.len() < 3 {
+            continue; // 连 `XY ` 都不够的是残片（改名的 old 段已被下面的 next() 吃掉）
+        }
+        let code = &entry[..2];
+        let path = entry.get(3..).unwrap_or("").trim_matches('"').to_owned();
+        if code.starts_with('R') || code.starts_with('C') {
+            tokens.next(); // 消费 origPath，不让它冒充独立条目
+        }
+        if path.starts_with("presets/") {
+            if code.contains('?') || code.contains('A') {
+                added += 1;
+            } else if code.contains('D') {
+                removed += 1;
+            } else {
+                changed += 1;
+            }
+        }
+        if !path.starts_with("presets/dist/") {
+            outside.push(path);
+        }
+    }
+    let counts = (added, changed, removed);
     if !outside.is_empty() {
-        return item.fail(
-            format!("`presets/dist/` 之外还有 {} 处改动", outside.len()),
-            outside,
+        return (
+            item.fail(
+                format!("`presets/dist/` 之外还有 {} 处改动", outside.len()),
+                outside,
+            ),
+            counts.0,
+            counts.1,
+            counts.2,
         );
     }
-    item.pass(format!(
-        "在 `{}` 上，除交付产物外没有别的改动",
-        branch.trim()
-    ))
+    (
+        item.pass(format!(
+            "在 `{}` 上，除交付产物外没有别的改动",
+            branch.trim()
+        )),
+        counts.0,
+        counts.1,
+        counts.2,
+    )
 }
 
 /* ---------- 小工具 ---------- */
@@ -858,29 +992,6 @@ fn git(repo: &std::path::Path, args: &[&str]) -> Option<String> {
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// 从 ⑮ 那一格的结论里数出「这次发布会让 presets/ 怎么变」。
-/// 只数 `presets/` 下面的（其余是无关改动，上面那条已经拦下了）
-fn git_counts(item: &AuditItem) -> (usize, usize, usize) {
-    let mut added = 0usize;
-    let mut changed = 0usize;
-    let mut removed = 0usize;
-    for f in &item.affected_files {
-        let path = f.trim_matches('"');
-        if !path.starts_with("presets/") {
-            continue;
-        }
-        let code = f.get(..2).unwrap_or("  ");
-        if code.contains('?') {
-            added += 1;
-        } else if code.contains('D') {
-            removed += 1;
-        } else if code.contains('M') {
-            changed += 1;
-        }
-    }
-    (added, changed, removed)
 }
 
 #[cfg(test)]
@@ -1097,7 +1208,12 @@ mod tests {
 
         // ① 不是 Git 仓库的目录（临时目录的常态）—— CI 的真实形状之一
         let dir = tempfile::tempdir().expect("临时目录");
-        let item = git_clean_at(dir.path());
+        let (item, added, changed, removed) = git_clean_at(dir.path());
+        assert_eq!(
+            (added, changed, removed),
+            (0, 0, 0),
+            "检查不适用时计数如实归零"
+        );
         assert_eq!(
             item.status,
             AuditStatus::Pass,
@@ -1137,12 +1253,372 @@ mod tests {
             ]
         ));
         assert!(run_git(dir.path(), &["checkout", "-q", "--detach"]));
-        let item = git_clean_at(dir.path());
+        let (item, ..) = git_clean_at(dir.path());
         assert_eq!(
             item.status,
             AuditStatus::Pass,
             "游离 HEAD ⇒ 该检查不适用（Pass）：{}",
             item.details
+        );
+    }
+
+    /* ---------- ⑭ / ③½ / ⑮ 计数 —— 两层检查的判据（2026-10-05） ---------- */
+
+    use crate::workbench::domain::patch::{Committed, CommittedVersion};
+    use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
+
+    /// 夹具 Committed（与 `dist.rs` tests 的 committed() 同一份清单）
+    fn committed() -> Committed {
+        let mut versions = std::collections::BTreeMap::new();
+        for (uid, machine, vid, name) in [
+            ("A1/STANDARD", "A1", "STANDARD", "标准版"),
+            ("A1/FAST", "A1", "FAST", "高速版"),
+            ("A2L/STANDARD", "A2L", "STANDARD", "标准版"),
+            ("P1S/LITE", "P1S", "LITE", "精简版"),
+        ] {
+            versions.insert(
+                uid.to_owned(),
+                CommittedVersion {
+                    machine_id: machine.to_owned(),
+                    version_id: vid.to_owned(),
+                    name: name.to_owned(),
+                    ..Default::default()
+                },
+            );
+        }
+        Committed {
+            versions,
+            catalog: fixture_catalog(),
+            ..Default::default()
+        }
+    }
+
+    /// 完整交付夹具：与 `dist.rs` 发布全链测试同一份形状（A 类原地件在发布根的
+    /// `assets/` 下，mkp 产物在 `dist/mkp/presets/` 下）。
+    struct Delivery {
+        publish_root: tempfile::TempDir,
+        asset_root: tempfile::TempDir,
+        presets: Fixture,
+        committed: Committed,
+        draft: crate::workbench::domain::patch::Draft,
+    }
+
+    impl Delivery {
+        fn book(&self) -> Book<'_> {
+            Book::new(&self.presets.presets, &self.committed, &self.draft)
+        }
+
+        /// dist 根（`<publish_root>/dist`）
+        fn dist(&self) -> std::path::PathBuf {
+            self.publish_root.path().join("dist")
+        }
+
+        /// 未定稿：dist 里只有 mkp 产物 —— 「生成过、还没发」的形状，三本账还没写
+        fn without_publish() -> Self {
+            let publish_root = tempfile::tempdir().unwrap();
+            let asset_root = tempfile::tempdir().unwrap();
+            let mut presets = Fixture::load();
+            for rel in [
+                "printers/a1.webp",
+                "icons/a1.svg",
+                "bbs/A1/process.json",
+                "icons/p1s.svg",
+            ] {
+                crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+            }
+            presets.presets.set_asset_root(asset_root.path());
+            let committed = committed();
+            let draft = crate::workbench::domain::patch::Draft::default();
+            let book = Book::new(&presets.presets, &committed, &draft);
+            let dist_dir = publish_root.path().join("dist");
+            std::fs::create_dir_all(dist_dir.join(dist::MKP_PRESETS_DIR)).unwrap();
+            // A 类原地件（与生产布局同形：发布根的 `assets/` 下，不在 `dist/` 里）
+            for a in dist::referenced_assets(&book) {
+                let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                    continue;
+                };
+                let dst = publish_root.path().join(&rel);
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
+                }
+                std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+            }
+            // mkp 产物（wb_generate 的等价物：文件在，内容任意）
+            for v in book.versions() {
+                if book.build_state(&v.uid) == crate::workbench::domain::BuildState::NoResources {
+                    continue;
+                }
+                crate::fsx::atomic::atomic_write(
+                    &dist_dir.join(dist::MKP_PRESETS_DIR).join(&v.mkp_file),
+                    format!("# preset {}", v.mkp_file).as_bytes(),
+                )
+                .unwrap();
+            }
+            Self {
+                publish_root,
+                asset_root,
+                presets,
+                committed,
+                draft,
+            }
+        }
+
+        /// 定稿态：跑过 `publish_into` —— manifest / catalog / source 三账一致
+        fn published() -> Self {
+            let fx = Self::without_publish();
+            let book = fx.book();
+            let meta = dist::PublishMeta {
+                stamp: "2026-10-05T00:00:00Z".to_owned(),
+                channel: "stable".to_owned(),
+                version: String::new(),
+            };
+            dist::publish_into(&fx.dist(), fx.asset_root.path(), &book, &meta).expect("定稿");
+            fx
+        }
+    }
+
+    /// 把 manifest 里第一条的 sha 改坏 —— 「生成重写了产物、manifest 还是上一版」
+    /// 的最小等价物
+    fn corrupt_first_manifest_sha(fx: &Delivery) {
+        let manifest_path = fx.dist().join(dist::MANIFEST_FILE);
+        let mut m: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        m["assets"][0]["sha256"] = serde_json::Value::String("0".repeat(64));
+        crate::fsx::atomic::atomic_write_json(&manifest_path, &m).unwrap();
+    }
+
+    /// ③½ 里红掉的项目 id（Blocker + Fail，与 `can_publish` 同一个判据）
+    fn finalize_red_items(book: &Book<'_>, dist_path: &std::path::Path) -> Vec<String> {
+        finalize_consistency(book, dist_path)
+            .iter()
+            .filter(|i| i.severity == AuditSeverity::Blocker && i.status == AuditStatus::Fail)
+            .map(|i| i.id.clone())
+            .collect()
+    }
+
+    /// **场景 A（预检侧）**：manifest 落后于交付物 —— 预检 ⑭ 是提示档（Warn），
+    /// **不许**把发布拦死（老实现这里是 Blocker，构成「只能靠发布修、发布又进不去」
+    /// 的死循环）。同一状态下严格版（③½ 用的那把尺）必须红 —— 两层各管各的。
+    #[test]
+    fn a_stale_manifest_warns_but_does_not_block_the_publish() {
+        let fx = Delivery::published();
+        corrupt_first_manifest_sha(&fx);
+
+        let pre = manifest_correct(&fx.dist());
+        assert_eq!(pre.severity, AuditSeverity::Warning, "预检 ⑭ 是提示档");
+        assert_eq!(pre.status, AuditStatus::Warn, "落后 = Warn，不是 Fail");
+        assert_eq!(pre.affected_files.len(), 1, "要列出来落后的是哪几条");
+        assert!(
+            !pre.fix_hint.contains("restore"),
+            "「去修」不许再让人手工 restore 交付根绕过：{}",
+            pre.fix_hint
+        );
+
+        let strict = manifest_correct_strict(&fx.dist());
+        assert_eq!(strict.severity, AuditSeverity::Blocker);
+        assert_eq!(strict.status, AuditStatus::Fail, "严格版在同一状态下必须红");
+    }
+
+    /// **场景 A（事务侧）**：落后状态直接跑 `publish_into`（run() 第③步调的就是它）
+    /// —— manifest 按真实字节重写，随后 ③½ 全绿。「重跑一次发布」从此真的是修法。
+    #[test]
+    fn publish_into_heals_a_stale_manifest() {
+        let fx = Delivery::published();
+        corrupt_first_manifest_sha(&fx);
+
+        let book = fx.book();
+        let meta = dist::PublishMeta {
+            stamp: "2026-10-05T01:00:00Z".to_owned(),
+            channel: "stable".to_owned(),
+            version: String::new(),
+        };
+        dist::publish_into(&fx.dist(), fx.asset_root.path(), &book, &meta).expect("定稿");
+
+        for i in finalize_consistency(&book, &fx.dist()) {
+            assert_eq!(i.status, AuditStatus::Pass, "③½ 必须全绿：{}", i.id);
+        }
+    }
+
+    /// **首次发布**：manifest 还不存在 —— 预检提示、不拦。老实现这里是 Blocker，
+    /// 和「落后」一样是死锁：第一发永远发不出去。
+    #[test]
+    fn a_missing_manifest_is_the_first_publish_not_a_deadlock() {
+        let fx = Delivery::without_publish();
+        let item = manifest_correct(&fx.dist());
+        assert_eq!(item.severity, AuditSeverity::Warning);
+        assert_eq!(
+            item.status,
+            AuditStatus::Warn,
+            "manifest 还不存在 = 首次发布，不拦"
+        );
+        assert!(
+            item.details.contains("不存在"),
+            "要说清是哪本账、什么问题：{}",
+            item.details
+        );
+    }
+
+    /// **场景 C（负向）**：定稿之后交付根被动过 —— ③½ 必须红，发布停在 commit 之前
+    /// （`run()` 里 Err 短路，不会产生半截发布提交）。
+    #[test]
+    fn finalize_consistency_catches_a_tampered_delivery() {
+        // ① 篡改一份交付文件的字节 → catalog 登记的 SHA 对不上真字节
+        let fx = Delivery::published();
+        let victim = fx
+            .dist()
+            .join(dist::MKP_PRESETS_DIR)
+            .join("A1-fast.toml");
+        crate::fsx::atomic::atomic_write(&victim, b"tampered").unwrap();
+        let red = finalize_red_items(&fx.book(), &fx.dist());
+        assert!(
+            red.iter().any(|id| id == "catalog/sha-size"),
+            "字节被改要被抓住：{red:?}"
+        );
+
+        // ② 篡改 manifest 里一条 sha → manifest 严格核对红
+        let fx = Delivery::published();
+        corrupt_first_manifest_sha(&fx);
+        let red = finalize_red_items(&fx.book(), &fx.dist());
+        assert!(
+            red.iter().any(|id| id == "manifest/correct"),
+            "账被改要被抓住：{red:?}"
+        );
+    }
+
+    /// 临时 Git 仓库（`git.rs` tests 同款纪律：任务分支上提交，绕开本机
+    /// 「禁止在 main 直接提交」的全局钩子）。
+    fn git_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .output()
+                    .expect("起 git")
+                    .status
+                    .success(),
+                "git {args:?} 失败"
+            );
+        };
+        ok(&["init", "-q"]);
+        ok(&["config", "user.email", "t@example.com"]);
+        ok(&["config", "user.name", "t"]);
+        ok(&["config", "commit.gpgsign", "false"]);
+        ok(&["checkout", "-q", "-b", "publish/demo"]);
+        dir
+    }
+
+    /// **场景 B**：`presets/dist/` 之外的源码未提交 —— ⑮ 依旧是 Blocker，
+    /// 发布照样拦。这次修复只把交付账本挪到事务里，**不放宽源状态**。
+    #[test]
+    fn uncommitted_source_outside_dist_still_blocks_the_publish() {
+        let dir = git_repo();
+        let write = |rel: &str, bytes: &[u8]| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&p, bytes).unwrap();
+        };
+        let git = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .output()
+                    .unwrap()
+                    .status
+                    .success(),
+                "git {args:?} 失败"
+            );
+        };
+        write("presets/dist/mkp/presets/A1-fast.toml", b"v1");
+        write("src/lib.rs", b"code");
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "baseline"]);
+
+        write("src/lib.rs", b"code v2");
+        let (item, added, changed, removed) = git_clean_at(dir.path());
+        assert_eq!(item.status, AuditStatus::Fail);
+        assert_eq!(
+            item.severity,
+            AuditSeverity::Blocker,
+            "⑮ 保持 Blocker：源状态必须可追溯"
+        );
+        assert!(
+            item.affected_files.iter().any(|p| p.contains("src/lib.rs")),
+            "红清单要指名是哪处：{:?}",
+            item.affected_files
+        );
+        assert_eq!(
+            (added, changed, removed),
+            (0, 0, 0),
+            "presets/ 没动，计数就是 0"
+        );
+    }
+
+    /// **场景 D**：弹窗那三个数 = **真实 Git 状态**。老实现恒 0/0/0：
+    /// 从结论行反推，而结论行剥掉了状态码、又按定义不含 `presets/dist/`，双重错位。
+    #[test]
+    fn git_counts_reflect_real_presets_changes() {
+        let dir = git_repo();
+        let write = |rel: &str, bytes: &[u8]| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&p, bytes).unwrap();
+        };
+        let git = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .output()
+                    .unwrap()
+                    .status
+                    .success(),
+                "git {args:?} 失败"
+            );
+        };
+        // 基线：两份交付物 + 一份源 + 一份将被改名的交付物
+        write("presets/dist/mkp/presets/A1-fast.toml", b"v1");
+        write("presets/dist/mkp/presets/gone.toml", b"bye");
+        write("presets/dist/mkp/presets/old-name.toml", b"old");
+        write("presets/registry/param_registry.toml", b"v1");
+        write("src/lib.rs", b"code");
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "baseline"]);
+
+        // 工作区：M 一份交付物、?? 新增一份源、D 删一份交付物、R 改名一份交付物、
+        // M 一份无关源（只进 ⑮ 的红清单，不进计数）
+        write("presets/dist/mkp/presets/A1-fast.toml", b"v2");
+        write("presets/registry/new.toml", b"new");
+        write("src/lib.rs", b"code v2");
+        std::fs::remove_file(dir.path().join("presets/dist/mkp/presets/gone.toml")).unwrap();
+        git(&[
+            "mv",
+            "presets/dist/mkp/presets/old-name.toml",
+            "presets/dist/mkp/presets/new-name.toml",
+        ]);
+
+        let (item, added, changed, removed) = git_clean_at(dir.path());
+        assert_eq!(
+            (added, changed, removed),
+            (1, 2, 1),
+            "?? 新增 1、M+R 改动 2、D 删除 1 —— 真实状态，不是恒 0"
+        );
+        assert_eq!(item.status, AuditStatus::Fail, "有无关源改动，⑮ 照样红");
+        assert!(
+            item.affected_files
+                .iter()
+                .all(|p| !p.starts_with("presets/dist/")),
+            "⑮ 的红清单仍排除 presets/dist/（交付产物不拦自己）：{:?}",
+            item.affected_files
+        );
+        assert!(
+            item.affected_files
+                .iter()
+                .all(|p| !p.contains("old-name.toml")),
+            "改名的 origPath 段不许冒充独立条目：{:?}",
+            item.affected_files
         );
     }
 }

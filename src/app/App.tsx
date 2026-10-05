@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 
 import { FieldLayer } from '../components/field'
 import { useDensity } from '../hooks/useDensity'
@@ -43,6 +43,21 @@ const PLATFORM = detectPlatform()
  * 变得看不见）；P2–P5 把预设 / 参数 / BBS 预设接成真页面，2026-10-02 设置接上最小版
  * （高级设置 → 预设数据源）；报告仍是空态。
  */
+/*
+ * 页签槽（2026-10-05）：页签从卸载重挂改成**常驻 + 切显示**（作者：「所有页面我都
+ * 希望保持我之前点击的状态」）。每页常驻挂一次，槽只切 data-hidden —— 滚动位置、
+ * 页内步骤（校准的 Z/XY/测试模型）、输入草稿、抽屉开合全部留住，切回也不重新拉数据。
+ * 走 visibility 不走 display：display:none 会把滚动位置一起毁掉。
+ * 需要「回到本页时对一次底账」的页面（首页 / 校准）另收 `active` 自己处理。
+ */
+function PageSlot({ hidden, children }: { hidden: boolean; children: ReactNode }) {
+  return (
+    <div className={s.pageSlot} data-hidden={hidden || undefined}>
+      {children}
+    </div>
+  )
+}
+
 export default function App() {
   const rootRef = useRef<HTMLDivElement>(null)
   const density = useDensity(rootRef)
@@ -73,25 +88,6 @@ export default function App() {
    */
   const openSettings = useCallback(() => setTab('settings'), [])
 
-  const renderPage = () => {
-    switch (tab) {
-      case 'calib':
-        return <PageCalib />
-      case 'preset':
-        return <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
-      case 'params':
-        return <PageParams density={density} />
-      case 'bbs':
-        return <PageBbs density={density} pending={pendingBbs} />
-      case 'report':
-        return <PagePlaceholder title="报告" hint="后处理执行报告与历史" />
-      case 'settings':
-        return <PageSettings />
-      default:
-        return <PageHome density={density} />
-    }
-  }
-
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
@@ -110,7 +106,29 @@ export default function App() {
           {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
           <ImportBanner />
 
-          <main className={s.body}>{renderPage()}</main>
+          <main className={s.body}>
+            <PageSlot hidden={tab !== 'machine'}>
+              <PageHome density={density} active={tab === 'machine'} />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'preset'}>
+              <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'calib'}>
+              <PageCalib active={tab === 'calib'} />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'params'}>
+              <PageParams density={density} />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'bbs'}>
+              <PageBbs density={density} pending={pendingBbs} />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'report'}>
+              <PagePlaceholder title="报告" hint="后处理执行报告与历史" />
+            </PageSlot>
+            <PageSlot hidden={tab !== 'settings'}>
+              <PageSettings />
+            </PageSlot>
+          </main>
         </FieldLayer>
       </FileImportProvider>
 

@@ -2,7 +2,8 @@
  * 「校准」tab 的皮 —— HUD 台面（G06-10 收编，10-03 作者定稿）。
  * 没有页首行：.hudTop（步骤条 + 预设 pill）/ .hudBoard（板子占满）/ .hudBottom
  * （可编辑读数 + 动作组）三段；Z 步视口锁板子比例、说明两行 cqw 跟板等比；
- * 下缘容器查询两档收紧（600×500 起一行）。覆盖 PlateZoom（手柄直角实白 ⇔ 居中）
+ * 下缘读数 / 按钮的字号框高连续跟容器宽走（旧的两档收紧已平滑化）。覆盖
+ * PlateZoom（手柄直角实白 ⇔ 居中）
  * 的两条沿用；挑自 G06-8～G06-10 四轮抽卡判词。
  */
 .root {
@@ -148,7 +149,10 @@
 
 /*
  * Z 步：视口锁板子自己的比例（136.219 × 34.019，取自产物 VIEW_BOX），
- * 说明两行才贴得住板下（同 G06-8）；盒子改内容高、整块在台面里居中。
+ * 说明两行才贴得住板下（同 G06-8）；盒子改内容高、整块在台面里**居中**
+ * （2026-10-05 定稿回到居中：顶对齐试了一轮，短横板吊在步骤条底下太靠上、
+ * tall 窗里下面整片空。「切页往下掉」的根因在进场二段填充与地板线，
+ * 已分别在数据层与页脚处理 —— 居中是无辜的，作者拍板改回）。
  */
 .hudBoard[data-step='z'] {
   justify-content: center;
@@ -238,82 +242,51 @@
   align-items: flex-end;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 6px clamp(14px, 2vw, 24px) 14px;
+  padding: 6px clamp(14px, 2vw, 24px) 6px;
+  /*
+   * 地板线（2026-10-05）：下缘以前没有上边线、带高 54.5，切进/切出校准时别的页
+   * 那条 y≈672 的地板线整条消失——「切到校准整页往下掉」的主体。补一条与参数页脚
+   * / BBS 状态条同款的上边线，底内衬 14→6，带高收到 47.5，线落在 672.5（参数 671
+   * / BBS 673，±2px）。读数行还是 HUD 台面的一段，只是台面在脚下收了条边。
+   */
+  border-top: 1px solid var(--line);
   /* 窄窗「读数一行按钮一行」地折行很难受（作者原话）—— 按实测宽度收紧两侧，保证一行 */
   container-type: inline-size;
 }
 
 /*
- * 两档收紧（容器 = .hudBottom 实测宽）：
- *   ≤880px  读数与按钮同步缩一号（值 14px / 框内衬 8 / 按钮 24px）
- *   ≤660px  再收一档：「原 x.xx」占位撤掉、间距更紧
- * 读数件是 G06-8 的 module，从这里只能按元素结构罩（dl > div > …），不动那边。
+ * 下缘的字号 / 内衬 / 框高**连续**跟容器宽走（cqw，容器 = .hudBottom 实测宽）。
+ *
+ * 原来按 ≤880 / ≤660 两档整档收紧（轴名 11→10、mm 12→10、按钮 24→22…），
+ * 拖窗跨线那一刻整个下缘"压一下"—— 轻，但也是跳变（作者 2026-10-05）。
+ * 现在连续取值，锚点落在旧档位的值上；`dd input` 那两条档位覆盖整个撤掉，
+ * 读数件自己的 `clamp(14px, 1.6vw, 17px)`（本来就是连续的）直接站出来。
+ *
+ * 顺带清一条死规则：`dt > span`（旧 660 档里 display:none 的那只）——
+ * 「原 x.xx」从 span 改成 button 后它就匹配不到任何东西了，撤掉。
  */
-@container (max-width: 880px) {
-  .hudBottom dl {
-    gap: 10px 20px;
-  }
-
-  .hudBottom dt label {
-    font-size: 10px;
-  }
-
-  .hudBottom dt > span {
-    font-size: 9.5px;
-  }
-
-  .hudBottom dd label {
-    padding: 2px 8px;
-    margin: 0 -8px;
-  }
-
-  .hudBottom dd input {
-    font-size: 14px;
-  }
-
-  .hudBottom dd label > span {
-    font-size: 10px;
-  }
-
-  .hudBottom .actions {
-    gap: 6px;
-  }
-
-  .hudBottom .actions button {
-    height: 24px;
-    padding: 0 10px;
-    font-size: 11.5px;
-  }
-
-  .hudBottom .actions .state {
-    font-size: 10.5px;
-    min-width: 2.8em;
-  }
+.hudBottom dl {
+  gap: clamp(8px, 2.1px + 0.9cqw, 14px) clamp(14px, 5.3px + 1.67cqw, 40px);
 }
 
-@container (max-width: 660px) {
-  .hudBottom dl {
-    gap: 8px 14px;
-  }
+.hudBottom dt label {
+  font-size: clamp(10px, 6.4px + 0.45cqw, 11px);
+}
 
-  .hudBottom dt > span {
-    display: none;
-  }
+.hudBottom dd label {
+  --field-x: clamp(6px, 3px + 0.5cqw, 10px);
+  padding: 2px var(--field-x);
+  margin: 0 calc(-1 * var(--field-x));
+}
 
-  .hudBottom dd label {
-    padding: 2px 6px;
-    margin: 0 -6px;
-  }
+.hudBottom .actions {
+  gap: clamp(6px, 3px + 0.35cqw, 8px);
+}
 
-  .hudBottom dd input {
-    font-size: 13px;
-  }
-
-  .hudBottom .actions button {
-    height: 22px;
-    padding: 0 8px;
-    font-size: 11px;
-  }
+.hudBottom .actions button {
+  height: clamp(22px, 15px + 0.8cqw, 26px);
+  padding: 0 clamp(8px, 2px + 0.7cqw, 11px);
+  font-size: clamp(11px, 9px + 0.25cqw, 12px);
 }
 
 .actions {

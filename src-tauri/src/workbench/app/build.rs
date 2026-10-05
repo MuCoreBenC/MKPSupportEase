@@ -12,15 +12,24 @@
 //!
 //! 但这里有个坑：产物头部有 `release_time`，它每次都不一样，于是"字节比较"永远不相等，
 //! 这条规则就永远不生效。所以比较时**跳过那一行**（[`same_payload`]）。
-//! 另一半是 `uuid`：它按有效配方的指纹算，不是随机数 —— 随机 uuid 会让同一份配方
-//! 每次产出不同的字节，同样把这条规则废掉。
+//! 生成路径的「跳过」与预演的「无变化」（[`preview_one`]）都认这一道判据 ——
+//! 两边各说各话，「将写入 N 份」就是假的。
+//!
+//! # 产物头没有 uuid（2026-10-05 删，别加回来）
+//!
+//! 头注释曾写过一行 `# uuid:`（旧系统防"用户复制与官方冲突"的遗产）。当日审计查证：
+//! 全仓没有任何代码读它，公开渠道也找不到读它的消费方 —— 官方/用户的分界由
+//! **角色目录与血统三行**承担，完整性与版本由 **SHA 与 release_time** 承担。
+//! 一行没有读者的字段就是假字段。有过期判定需求的是**工作台**，用的是
+//! **两层指纹**（定义 / 值分开算，见 `presetdata::resolve::Layers::fingerprint`）——
+//! 它只进 `built.json` 当「待更新」判据，**不进产物**。
+//! 历史基线那 9 份（`crates/preset` 一侧）头里还带着 uuid，那是历史事实，不是兼容壳。
 //!
 //! # TOML 的形状照上游的真产物
 //!
-//! 实测 `presets/mkp/A1.toml`：
+//! 实测 `presets/mkp/A1.toml`（上游头里有 uuid，我们**不写**那一行 —— 见上一节）：
 //!
 //! ```toml
-//! # uuid: f444aeaf-…
 //! # release_time: 2026-08-19 01:38:13
 //! # machine: A1
 //! # variant: standard
@@ -167,9 +176,8 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
         .collect();
 
     let mut out = String::new();
-    // uuid 按指纹算，**不是随机数** —— 随机的话同一份配方每次产出不同字节，
-    // 「字节没变不重写」这条规则就永远不生效
-    out.push_str(&format!("# uuid: {}\n", uuid_from(&fingerprint)));
+    // 头里只有 release_time。曾经的 `# uuid:`（指纹截断）已于 2026-10-05 删——
+    // 没有读者的死字段，见模块文档「产物头没有 uuid」一节；过期判定走两层指纹
     out.push_str(&format!("# release_time: {}\n", clock::now_release_time()));
     out.push_str(&format!("# machine: {}\n", machine.id));
     out.push_str(&format!("# variant: {}\n", v.version_id.to_lowercase()));
@@ -352,20 +360,6 @@ fn gcode_body(v: &Value) -> String {
         .to_owned()
 }
 
-/// 按指纹算一个稳定 uuid。格式照 uuid v4 的分段，但**内容是确定的**
-fn uuid_from(fingerprint: &str) -> String {
-    let h: Vec<char> = fingerprint.chars().take(32).collect();
-    let part = |a: usize, b: usize| h[a..b].iter().collect::<String>();
-    format!(
-        "{}-{}-{}-{}-{}",
-        part(0, 8),
-        part(8, 12),
-        part(12, 16),
-        part(16, 20),
-        part(20, 32)
-    )
-}
-
 /// 除了 `release_time` 那一行，两份文本一样吗。
 ///
 /// 这条判据存在的唯一理由：产物头里有时间戳，不跳过它「字节没变不重写」永远不生效，
@@ -378,6 +372,23 @@ fn same_payload(a: &str, b: &str) -> bool {
             .join("\n")
     };
     strip(a) == strip(b)
+}
+
+/// 这一行要不要进生成记录（`MarkBuilt`）。
+///
+/// 口径（2026-10-05 作者裁定：**没写文件就不许动台账**）：
+/// · 写出去了（`same_payload_on_disk = false`）→ 必记，stamp 与指纹都归本次；
+/// · 没写（字节没变）→ **不记** —— 老 stamp 说的「这份文件是何时写出来的」依然成立；
+///   只有台账缺失或指纹对不上（记录还是旧源状态的）才补记，
+///   否则「待更新」永远消不掉，生成按钮永远亮。
+/// 补记走的也是本函数 → no-op 的生成（9 份全无变化且台账对得上）一份都不记，
+/// `mark` 为 `None`，`built.json` 一个字节都不变。
+fn needs_built_record(
+    same_payload_on_disk: bool,
+    recorded: Option<&str>,
+    fingerprint: &str,
+) -> bool {
+    !same_payload_on_disk || recorded != Some(fingerprint)
 }
 
 /* ---------- 生成 ---------- */
@@ -404,8 +415,10 @@ pub struct GenerateReport {
     pub unchanged: Vec<String>,
     /// 跳过的（暂无资源）+ 原因
     pub skipped: Vec<(String, String)>,
-    /// 生成记录要走 `wb_apply_draft` 落进草稿，所以把 patch 交给前端
-    pub mark: Patch,
+    /// 生成记录要走 `wb_apply_draft` 落进草稿，所以把 patch 交给前端。
+    /// **`None` = 一行都没记**（全部无变化且台账已对上）—— 前端跳过 applyDraft，
+    /// 草稿一个字节都不动，`built.json` 连修改时间都不变。
+    pub mark: Option<Patch>,
 }
 
 /// 这次要生成哪些（`todo`）与跳过了哪些（带原因）。
@@ -501,22 +514,31 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     for r in &rendered {
         let target = dist.join(&r.file_name);
         let existing = std::fs::read_to_string(&target).ok();
-        if existing
+        let same = existing
             .as_deref()
-            .is_some_and(|old| same_payload(old, &r.text))
-        {
+            .is_some_and(|old| same_payload(old, &r.text));
+        if same {
             unchanged.push(r.uid.clone());
         } else {
             crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
             written.push(r.uid.clone());
         }
         // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
+        //（内容没变时 `atomic_write` 自己会跳过 —— 连修改时间都不动）
         let v = book.version(&r.uid).expect("刚才渲染过");
         ctx.store.write_doc(
             &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
             &r.snapshot,
         )?;
-        fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+        /* ★ 生成记录只记「真的变了」的（2026-10-05 作者裁定：没写文件就不许动台账）：
+           · 写出去的行 —— stamp 与指纹都归本次；
+           · 没写的行 —— 字节没变，老 stamp 说的「这份文件是何时写出来的」依然成立，
+             一个字节都不动；只有记录缺失 / 指纹对不上（记录是旧的）才补记。
+           不这么改的后果：no-op 的生成也把整本台账顶新 → built.json 必脏 →
+           git/clean 永远红（真机踩过：只是打开预演看了一眼，工作区就脏了）。 */
+        if needs_built_record(same, book.built_fingerprint(&r.uid), &r.fingerprint) {
+            fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+        }
     }
 
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
@@ -542,11 +564,13 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
         "生成完成"
     );
     Ok(GenerateReport {
-        mark: Patch::MarkBuilt {
+        // 一行都没记（全部无变化且台账已对上）→ 没有 patch：
+        // 前端跳过 applyDraft，草稿不动 —— 「没真的生成就不写任何东西」。
+        mark: (!fingerprints.is_empty()).then(|| Patch::MarkBuilt {
             uids: fingerprints.keys().cloned().collect(),
             stamp: stamp.clone(),
             fingerprints,
-        },
+        }),
         stamp,
         written,
         unchanged,
@@ -572,7 +596,10 @@ pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
 /// 三个状态就是「点生成会怎样」的全部可能：
 ///   · `added`    —— 磁盘上还没有这一份（首次生成 / 被清理过）：正文全绿
 ///   · `modified` —— 有这一份，但这次算出来的和它不一样：会**原子替换**
-///   · `unchanged`—— 逐字节相同，不会重写（与 [`same_payload`] 同一件事，只是这里比真文本）
+///   · `unchanged`—— **正文相同**（只有头部时间戳那行会不一样），不会重写。
+///     判据与 [`same_payload`] / [`wb_generate`] 的「跳过」**同一道** ——
+///     预演说「要写」而真生成跳过，是把「将写入 N 份」报成假的。
+///     作者 2026-10-05 被它吓过一回：只改一个值，确认框说 9 份全要写。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffState {
@@ -583,8 +610,8 @@ pub enum DiffState {
 
 /// 行级 diff 的一种行。
 ///
-/// **判据比的是真文本，不是 [`same_payload`] 那个"跳过 release_time"的等价** ——
-/// 预演是给人看的，头里那一行时间戳确实会变，就该如实显示出来。
+/// 状态判据跟写盘走（见 [`DiffState`]）；**行级差异仍比真文本** ——
+/// 真要重写的文件，头里时间戳那行确实会变，如实显示出来。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffLine {
@@ -696,11 +723,12 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     })
 }
 
-/// 比一份：磁盘读得到且逐字节相同 → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
+/// 比一份：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
+/// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
 fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
         None => (DiffState::Added, diff_added(&r.text)),
-        Some(old) if old == r.text => (DiffState::Unchanged, Vec::new()),
+        Some(old) if same_payload(old, &r.text) => (DiffState::Unchanged, Vec::new()),
         Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
     };
     let added = lines
@@ -971,8 +999,8 @@ pub fn wb_publish_audit() -> Result<super::audit::PublishAudit, AppError> {
 /// 发布目标（平台 / 仓库 / 用户名 / Token）在**锁外**从发布账户配置解析（[`resolve_publish`]）；
 /// **没有配发布账户**时退化成"只生成 + 定稿 + 本地推送"，如实说"没建 PR" ——
 /// 那是"还没配账户"，不是失败。
-/// ★ `(async)` 不是性能优化，是正确性：这条命令要读 Keychain（系统弹密码框）、
-/// 起 git 子进程、发平台 HTTP —— 跑在主线程上就是"整个窗口一动不动"
+/// ★ `(async)` 不是性能优化，是正确性：这条命令要起 git 子进程、发平台 HTTP ——
+/// 跑在主线程上就是"整个窗口一动不动"
 /// （2026-10-04 真机事故；与上面「读命令必须异步」同一条病，只是它更重）。
 #[tauri::command(async)]
 pub fn wb_publish(
@@ -981,7 +1009,7 @@ pub fn wb_publish(
 ) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
         let opts = opts.unwrap_or_default();
-        // 发布目标 + 平台客户端在锁外构造（读配置 / Keychain / remote，都不碰会话）
+        // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
         let report = with_ctx(|ctx| {
             super::publish_tx::run(
@@ -1373,7 +1401,7 @@ mod tests {
         let book = Book::new(&f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
-        assert!(r.text.starts_with("# uuid: "));
+        assert!(r.text.starts_with("# release_time: "));
         assert!(r.text.contains("# machine: A1"));
         assert!(r.text.contains("# variant: standard"));
         assert!(
@@ -1417,8 +1445,9 @@ mod tests {
     /// 不同就必须先定哪边对 —— 搬完 3 万行代码再发现值对不上，会留下一批
     /// "生成出来但和验证过的不一样"的产物，而那种错在产物上看不出来。
     ///
-    /// 比的是**正文**：`uuid` 与 `release_time` 两行按定义就该不同
-    /// （前者按内容指纹算、后者是当下时间），它们不参与比较。
+    /// 比的是**正文**：基线（历史产物）头里带着 `# uuid:` 与 `# release_time:`，
+    /// 现役产物头里只有后者 —— 剥离这两行才能把两边对齐到正文
+    /// （uuid 是 2026-10-05 删掉的死字段，见模块文档；基线不改，它是历史事实）。
     ///
     /// # 基线在仓内，配对认身份不认文件名（b05 Task 3.3）
     ///
@@ -1495,7 +1524,8 @@ mod tests {
             baselines.keys().collect::<Vec<_>>()
         );
 
-        /// 去掉那两行按定义会变的头部
+        /// 去掉按定义不对齐的头部行：release_time 是当下时间；
+        /// uuid 只存在于历史基线那侧（现役产物已不写它，见模块文档）
         fn body(s: &str) -> String {
             s.lines()
                 .filter(|l| !l.starts_with("# uuid:") && !l.starts_with("# release_time:"))
@@ -1629,7 +1659,8 @@ mod tests {
     }
 
     /// 同样的输入**产出同样的字节**（除了时间戳那一行）——
-    /// uuid 用随机数的话这条就不成立，而「字节没变不重写」也就废了
+    /// 头里若再有"每次都变"的东西（随机 uuid 之类），这条就不成立，
+    /// 而「字节没变不重写」也就废了
     #[test]
     fn rendering_is_deterministic_apart_from_the_timestamp() {
         let (_d, f, c) = setup();
@@ -1639,7 +1670,40 @@ mod tests {
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
         assert_eq!(a.fingerprint, b.fingerprint);
-        assert_eq!(uuid_from(&a.fingerprint).len(), 36);
+    }
+
+    /// ★ 生成记录的口径（2026-10-05）：**没写文件就不许动台账**。
+    /// no-op 的生成（产物字节没变、记录也对得上）一份都不记 → `mark` 为 `None`
+    /// → `built.json` 一个字节不变 → git/clean 不会因为"看了一眼"就红。
+    /// （真机踩过：只是打开预演，整本台账 stamp 被顶新，发布闸拦发布。）
+    #[test]
+    fn a_noop_generate_records_nothing() {
+        let fp = "abc";
+        // 产物字节没变 + 记录的指纹对得上 → 不记
+        assert!(!needs_built_record(true, Some(fp), fp));
+        // 写出去了 → 必记（stamp 归本次）
+        assert!(needs_built_record(false, Some(fp), fp));
+        // 没写，但记录是旧源状态的（指纹对不上）→ 补记，否则「待更新」消不掉
+        assert!(needs_built_record(true, Some("old"), fp));
+        // 没写，且台账里根本没有这条（记录丢了）→ 补记
+        assert!(needs_built_record(true, None, fp));
+    }
+
+    /// 产物头**不许**出现 `# uuid:` —— 2026-10-05 删掉的死字段（全仓无读者、
+    /// 公开渠道无消费方，见模块文档），谁把它加回来这条就红。
+    /// 历史基线那 9 份头里还带着它，那是历史事实，与本判据无关。
+    #[test]
+    fn the_product_header_carries_no_uuid() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        for uid in ["A1/STANDARD", "A1/FAST", "A2L/STANDARD", "P1S/LITE"] {
+            let r = render(&book, uid).unwrap();
+            assert!(
+                !r.text.contains("# uuid:"),
+                "{uid} 的产物头里出现了 uuid —— 一行没有读者的假字段又回来了"
+            );
+        }
     }
 
     /// 改一个值 → 产物真的变了（不然「待生成」是句空话）
@@ -1947,10 +2011,37 @@ mod tests {
 
     #[test]
     fn an_identical_file_has_no_diff_lines() {
-        // 预演那层用的是逐字节比较（不是 same_payload），所以这里走的是"完全相同"
+        // diff_lines 只服务「确实要重写」的文件；正文相同（含时间戳差异）的
+        // 在 preview_one 就被 same_payload 拦成「无变化」，根本走不到这里
         assert!(diff_lines("x\ny", "x\ny")
             .iter()
             .all(|l| l.kind == DiffLineKind::Context));
+    }
+
+    /// 预演的「无变化」与 [`wb_generate`] 的「跳过」是**同一道判据**
+    /// （[`same_payload`]）：只有头部时间戳那行不同的，不许报成「要写」——
+    /// 否则「将写入 N 份」虚报，作者又被自己吓一跳（2026-10-05 真实吐槽）。
+    /// 行级差异仍比真文本：真要重写的，时间戳那行如实显示。
+    #[test]
+    fn a_timestamp_only_difference_is_unchanged_not_modified() {
+        let r = Rendered {
+            uid: "A1/STANDARD".to_owned(),
+            file_name: "A1-standard.toml".to_owned(),
+            text: "# release_time: 1\nk = 1\n".to_owned(),
+            fingerprint: "fp".to_owned(),
+            snapshot: Default::default(),
+        };
+        // 正文一样、只有时间戳不同：不写盘，也不许报「要写」
+        let same_but_time = "# release_time: 2\nk = 1\n";
+        assert_eq!(
+            preview_one(&r, Some(same_but_time)).state,
+            DiffState::Unchanged
+        );
+        // 正文真变了：要写
+        let changed_body = "# release_time: 1\nk = 2\n";
+        assert_eq!(preview_one(&r, Some(changed_body)).state, DiffState::Modified);
+        // 磁盘上没有：新增
+        assert_eq!(preview_one(&r, None).state, DiffState::Added);
     }
 
     #[test]

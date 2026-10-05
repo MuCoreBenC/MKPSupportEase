@@ -599,8 +599,9 @@ export interface GenerateReport {
    *  不说的话「点了生成但文件时间没变」看起来像失败了 */
   unchanged: string[]
   skipped: [string, string][]
-  /** 生成记录要走 `applyDraft` 落进草稿 */
-  mark: Patch
+  /** 生成记录要走 `applyDraft` 落进草稿。**null = 一行都没记**（全部无变化且台账已对上）
+   *  —— 跳过 applyDraft，草稿一个字节都不动 */
+  mark: Patch | null
 }
 
 /** `build::DiffState` —— 点生成会怎样 */
@@ -936,7 +937,7 @@ export interface CredentialStatus {
  * `publish_tx::PlatformAccountView` —— 一个平台在设置页里的完整视图。
  *
  * `repositoryUrl` / `username` 来自 `<appDataDir>/publish-account.json`（配置）；
- * `hasToken` / `tokenHint` 来自系统 Keychain（**只有真假 + 尾号，没有原值**）。
+ * `hasToken` / `tokenHint` 来自本机凭据文件 credentials.json（**只有真假 + 尾号，没有原值**）。
  */
 export interface PlatformAccountView {
   platform: string
@@ -1571,7 +1572,7 @@ export const wb = {
   /** 存一个平台的**发布目标**（仓库地址 + 用户名，进 publish-account.json；**不含 Token**） */
   setPublishAccount: (platform: string, repositoryUrl: string, username: string) =>
     invoke<PlatformAccountView>('wb_set_publish_account', { platform, repositoryUrl, username }),
-  /** 存一个平台的 Token（**只进不出**：写 Keychain，返回里没有原值） */
+  /** 存一个平台的 Token（**只进不出**：写凭据文件，返回里没有原值） */
   setPublishToken: (platform: string, token: string) =>
     invoke<PlatformAccountView>('wb_set_publish_token', { platform, token }),
   /** 清一个平台的发布账户（配置 + 凭据一起清；幂等） */

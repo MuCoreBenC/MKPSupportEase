@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "bfd556b8bb7aba2d",
+  "revision": "241365be898f3dc6",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -3179,7 +3179,10 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1:FASTV3.3": 65.0,
+          "A1:STANDARD": 70.0
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -4842,8 +4845,8 @@
       "path": "dist/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "d3b5aeed32772053b6bf96b225d05cb2036aaa4697e5e01d2d37b6d6e32a331a",
-      "size": 4335
+      "sha256": "b7699eec1ea17cbb7a07bf8b33482cb153d6443bcd05933a6403e06e079bef0e",
+      "size": 4290
     },
     {
       "kind": "mkp_preset",
@@ -4851,8 +4854,8 @@
       "path": "dist/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "ff5b322ce4e4743a694a075362b32f47edfa58ff75d03757780dc950eed40a18",
-      "size": 4333
+      "sha256": "7bbe1b49b5d93c5226f8d798bcf27ff8fa61cf4629126b830b3464834ba6ee03",
+      "size": 4288
     },
     {
       "kind": "mkp_preset",
@@ -4860,8 +4863,8 @@
       "path": "dist/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "73b7a9b8fbc86b153bb70cfc554470deb1895f8651ecde3cdcacdf3dbc4474a2",
-      "size": 4336
+      "sha256": "05dfa6da3a1aef24ca024759db690a14ebdf69557d65dea3486c11ee580aec26",
+      "size": 4291
     },
     {
       "kind": "mkp_preset",
@@ -4869,8 +4872,8 @@
       "path": "dist/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "bdd13dc5959982ae85705baae9b57c3284375c65a23210d75b2f1e629bf17cf1",
-      "size": 4342
+      "sha256": "96ae05d63224dfd8a0470f41338f25b9760e07981e17f9eda0acb92e5ac0cc28",
+      "size": 4297
     },
     {
       "kind": "mkp_preset",
@@ -4878,8 +4881,8 @@
       "path": "dist/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "2914fae9304be75d8113ef832ba0633e8fa6781c1b4e12f370eac35a1e638eb8",
-      "size": 4336
+      "sha256": "9e3d034b89bb62c75b51e462163a5af7f3d6b99f073a445b76867cebbc56f448",
+      "size": 4291
     },
     {
       "kind": "mkp_preset",
@@ -4887,8 +4890,8 @@
       "path": "dist/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "8cf47b7a098004b72db035f83f849625bb71a6f6166c4c5606fb7423741dd0d3",
-      "size": 4340
+      "sha256": "676c9036cd15b9b023062c733b58a666e8d95ee6a426b89bbe8bdbde5ce171e7",
+      "size": 4295
     },
     {
       "kind": "mkp_preset",
@@ -4896,8 +4899,8 @@
       "path": "dist/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "81f56489df37e3e837fcd75a6e5c17a03fde0f572e1d5e72e02279a18c7dc7db",
-      "size": 4398
+      "sha256": "47671045796b7796ad4d48d37dee3a1f7a9b88343ca7b842f4ae23d85bee5ad9",
+      "size": 4353
     },
     {
       "kind": "mkp_preset",
@@ -4905,8 +4908,8 @@
       "path": "dist/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "38df311bafb4f65ad75e0e74b28cfb3418a208fe7f121964a95f13f85b379935",
-      "size": 4402
+      "sha256": "7e844e8e9bcee614a333512cae7e39030624fdc8a4d21bc45a56771f1b960748",
+      "size": 4357
     },
     {
       "kind": "mkp_preset",
@@ -4914,8 +4917,8 @@
       "path": "dist/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "896e828baf2213fe719c2ed685dcef973aac500296e267bd1148290f850b8539",
-      "size": 4398
+      "sha256": "564e522a7b4efc0d15573a48bd9696ad6140019057d8819bd40ef11ceb0f0480",
+      "size": 4353
     },
     {
       "kind": "icon",

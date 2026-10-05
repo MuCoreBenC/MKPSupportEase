@@ -2,7 +2,7 @@
 //!
 //! # 认证
 //!
-//! Token 从系统 Keychain 来（[`super::super::credentials`]），构造本结构时注入。
+//! Token 从本机凭据文件来（[`super::super::credentials`]），构造本结构时注入。
 //! Header 用 `Authorization: Bearer <token>`（GitHub 推荐）+ `Accept: application/vnd.github+json`。
 //!
 //! # 网络
