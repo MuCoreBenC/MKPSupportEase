@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.5"
+version = "0.0.6"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
