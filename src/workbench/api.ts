@@ -599,8 +599,9 @@ export interface GenerateReport {
    *  不说的话「点了生成但文件时间没变」看起来像失败了 */
   unchanged: string[]
   skipped: [string, string][]
-  /** 生成记录要走 `applyDraft` 落进草稿 */
-  mark: Patch
+  /** 生成记录要走 `applyDraft` 落进草稿。**null = 一行都没记**（全部无变化且台账已对上）
+   *  —— 跳过 applyDraft，草稿一个字节都不动 */
+  mark: Patch | null
 }
 
 /** `build::DiffState` —— 点生成会怎样 */

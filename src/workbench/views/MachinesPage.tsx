@@ -349,11 +349,15 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
       if (node === undefined) return
       try {
         const rep = await wb.generate({ picked: [node.uid] })
-        // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）
-        await onApply(
-          `生成记录：${rep.written.length + rep.unchanged.length} 份`,
-          [rep.mark],
-        )
+        // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）。
+        // ★ mark 为 null = 一行都没记（无变化且台账已对上）—— 跳过 applyDraft，
+        //   草稿不动、built.json 不变
+        if (rep.mark) {
+          await onApply(
+            `生成记录：${rep.written.length + rep.unchanged.length} 份`,
+            [rep.mark],
+          )
+        }
         const file = rowOf(node.uid)?.mkpFile
         toasts.push(
           `已生成 ${file ?? '预设'}：写出 ${rep.written.length} 份` +

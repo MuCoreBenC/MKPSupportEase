@@ -374,6 +374,23 @@ fn same_payload(a: &str, b: &str) -> bool {
     strip(a) == strip(b)
 }
 
+/// 这一行要不要进生成记录（`MarkBuilt`）。
+///
+/// 口径（2026-10-05 作者裁定：**没写文件就不许动台账**）：
+/// · 写出去了（`same_payload_on_disk = false`）→ 必记，stamp 与指纹都归本次；
+/// · 没写（字节没变）→ **不记** —— 老 stamp 说的「这份文件是何时写出来的」依然成立；
+///   只有台账缺失或指纹对不上（记录还是旧源状态的）才补记，
+///   否则「待更新」永远消不掉，生成按钮永远亮。
+/// 补记走的也是本函数 → no-op 的生成（9 份全无变化且台账对得上）一份都不记，
+/// `mark` 为 `None`，`built.json` 一个字节都不变。
+fn needs_built_record(
+    same_payload_on_disk: bool,
+    recorded: Option<&str>,
+    fingerprint: &str,
+) -> bool {
+    !same_payload_on_disk || recorded != Some(fingerprint)
+}
+
 /* ---------- 生成 ---------- */
 
 #[derive(Debug, Clone, Deserialize)]
@@ -398,8 +415,10 @@ pub struct GenerateReport {
     pub unchanged: Vec<String>,
     /// 跳过的（暂无资源）+ 原因
     pub skipped: Vec<(String, String)>,
-    /// 生成记录要走 `wb_apply_draft` 落进草稿，所以把 patch 交给前端
-    pub mark: Patch,
+    /// 生成记录要走 `wb_apply_draft` 落进草稿，所以把 patch 交给前端。
+    /// **`None` = 一行都没记**（全部无变化且台账已对上）—— 前端跳过 applyDraft，
+    /// 草稿一个字节都不动，`built.json` 连修改时间都不变。
+    pub mark: Option<Patch>,
 }
 
 /// 这次要生成哪些（`todo`）与跳过了哪些（带原因）。
@@ -495,22 +514,31 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     for r in &rendered {
         let target = dist.join(&r.file_name);
         let existing = std::fs::read_to_string(&target).ok();
-        if existing
+        let same = existing
             .as_deref()
-            .is_some_and(|old| same_payload(old, &r.text))
-        {
+            .is_some_and(|old| same_payload(old, &r.text));
+        if same {
             unchanged.push(r.uid.clone());
         } else {
             crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
             written.push(r.uid.clone());
         }
         // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
+        //（内容没变时 `atomic_write` 自己会跳过 —— 连修改时间都不动）
         let v = book.version(&r.uid).expect("刚才渲染过");
         ctx.store.write_doc(
             &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
             &r.snapshot,
         )?;
-        fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+        /* ★ 生成记录只记「真的变了」的（2026-10-05 作者裁定：没写文件就不许动台账）：
+           · 写出去的行 —— stamp 与指纹都归本次；
+           · 没写的行 —— 字节没变，老 stamp 说的「这份文件是何时写出来的」依然成立，
+             一个字节都不动；只有记录缺失 / 指纹对不上（记录是旧的）才补记。
+           不这么改的后果：no-op 的生成也把整本台账顶新 → built.json 必脏 →
+           git/clean 永远红（真机踩过：只是打开预演看了一眼，工作区就脏了）。 */
+        if needs_built_record(same, book.built_fingerprint(&r.uid), &r.fingerprint) {
+            fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
+        }
     }
 
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
@@ -536,11 +564,13 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
         "生成完成"
     );
     Ok(GenerateReport {
-        mark: Patch::MarkBuilt {
+        // 一行都没记（全部无变化且台账已对上）→ 没有 patch：
+        // 前端跳过 applyDraft，草稿不动 —— 「没真的生成就不写任何东西」。
+        mark: (!fingerprints.is_empty()).then(|| Patch::MarkBuilt {
             uids: fingerprints.keys().cloned().collect(),
             stamp: stamp.clone(),
             fingerprints,
-        },
+        }),
         stamp,
         written,
         unchanged,
@@ -1640,6 +1670,23 @@ mod tests {
         let b = render(&book, "A1/STANDARD").unwrap();
         assert!(same_payload(&a.text, &b.text));
         assert_eq!(a.fingerprint, b.fingerprint);
+    }
+
+    /// ★ 生成记录的口径（2026-10-05）：**没写文件就不许动台账**。
+    /// no-op 的生成（产物字节没变、记录也对得上）一份都不记 → `mark` 为 `None`
+    /// → `built.json` 一个字节不变 → git/clean 不会因为"看了一眼"就红。
+    /// （真机踩过：只是打开预演，整本台账 stamp 被顶新，发布闸拦发布。）
+    #[test]
+    fn a_noop_generate_records_nothing() {
+        let fp = "abc";
+        // 产物字节没变 + 记录的指纹对得上 → 不记
+        assert!(!needs_built_record(true, Some(fp), fp));
+        // 写出去了 → 必记（stamp 归本次）
+        assert!(needs_built_record(false, Some(fp), fp));
+        // 没写，但记录是旧源状态的（指纹对不上）→ 补记，否则「待更新」消不掉
+        assert!(needs_built_record(true, Some("old"), fp));
+        // 没写，且台账里根本没有这条（记录丢了）→ 补记
+        assert!(needs_built_record(true, None, fp));
     }
 
     /// 产物头**不许**出现 `# uuid:` —— 2026-10-05 删掉的死字段（全仓无读者、

@@ -20,8 +20,18 @@ use std::path::Path;
 use crate::error::AppError;
 
 /// 原子写。目标目录不存在会自动建。
+///
+/// ★ **内容没变就不落盘**（2026-10-05 作者裁定：只读不写，连修改时间都不许动）。
+/// git 不看 mtime，但人看 —— 「我只是打开了预演，文件时间怎么全变了」是实打实的困惑。
+/// 跳过是安全的：写盘的唯一目的是让目标等于这串字节，它已经相等了。
 #[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    if let Ok(old) = std::fs::read(path) {
+        if old == bytes {
+            return Ok(());
+        }
+    }
+
     let parent = path
         .parent()
         .ok_or_else(|| AppError::invalid_argument("写入路径没有父目录"))?;
@@ -91,6 +101,35 @@ mod tests {
             .filter(|n| n != "a.txt")
             .collect();
         assert!(leftovers.is_empty(), "临时文件残留：{leftovers:?}");
+    }
+
+    /// ★ 同字节重写必须**整个跳过**：内容不变，连修改时间都不许动
+    /// （2026-10-05 作者裁定：只读不写。真机踩过：no-op 的生成把交付根
+    /// 全部摸了一遍，用户看到「我只是看了一眼预演」）。
+    #[test]
+    fn identical_bytes_do_not_touch_the_file_at_all() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.txt");
+        atomic_write(&p, b"same").unwrap();
+        let before = std::fs::metadata(&p).unwrap().modified().unwrap();
+
+        // 留出时钟前进的余量：若跳过失效（真的重写了），mtime 必然不同
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        atomic_write(&p, b"same").unwrap();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().modified().unwrap(),
+            before,
+            "同字节重写不许动 mtime"
+        );
+
+        // 真写入：内容变、mtime 变
+        atomic_write(&p, b"changed").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"changed");
+        assert_ne!(
+            std::fs::metadata(&p).unwrap().modified().unwrap(),
+            before,
+            "真写入要更新 mtime"
+        );
     }
 
     #[test]

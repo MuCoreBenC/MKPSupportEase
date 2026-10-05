@@ -369,6 +369,14 @@ impl<'a> Book<'a> {
         self.built.get(uid).map(|r| r.stamp.as_str())
     }
 
+    /// 已生成记录里的配方指纹（没有记录 = `None`）。
+    ///
+    /// 生成侧拿它决定「这一行要不要补记」：产物字节没变、记录也对得上，
+    /// 台账就不许动 —— no-op 的生成不该把 `built.json` 顶新（2026-10-05）。
+    pub fn built_fingerprint(&self, uid: &str) -> Option<&str> {
+        self.built.get(uid).map(|r| r.fingerprint.as_str())
+    }
+
     /// 磁盘的交付根里有没有这一版的产物文件（只 stat，不读内容、不算哈希）。
     ///
     /// 路径与生成 / 发布写盘同源（`paths` 的 `DIST_SUBDIR` + `MKP_PRESETS_DIR`，

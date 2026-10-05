@@ -271,8 +271,12 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     setGenBusy(true)
     try {
       const rep = await wb.generate({ picked: genPicked })
-      // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）
-      await onApply(`生成记录：${rep.written.length + rep.unchanged.length} 份`, [rep.mark])
+      // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）。
+      // ★ mark 为 null = 一行都没记（全部无变化且台账已对上）—— 跳过 applyDraft：
+      //   草稿不动、built.json 不变，工作区不因为一次 no-op 的生成变脏
+      if (rep.mark) {
+        await onApply(`生成记录：${rep.written.length + rep.unchanged.length} 份`, [rep.mark])
+      }
       setGenDone(rep)
       setPicked({})
       onBookRefresh()
