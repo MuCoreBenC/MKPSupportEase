@@ -531,11 +531,11 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
             &r.snapshot,
         )?;
         /* ★ 生成记录只记「真的变了」的（2026-10-05 作者裁定：没写文件就不许动台账）：
-           · 写出去的行 —— stamp 与指纹都归本次；
-           · 没写的行 —— 字节没变，老 stamp 说的「这份文件是何时写出来的」依然成立，
-             一个字节都不动；只有记录缺失 / 指纹对不上（记录是旧的）才补记。
-           不这么改的后果：no-op 的生成也把整本台账顶新 → built.json 必脏 →
-           git/clean 永远红（真机踩过：只是打开预演看了一眼，工作区就脏了）。 */
+        · 写出去的行 —— stamp 与指纹都归本次；
+        · 没写的行 —— 字节没变，老 stamp 说的「这份文件是何时写出来的」依然成立，
+          一个字节都不动；只有记录缺失 / 指纹对不上（记录是旧的）才补记。
+        不这么改的后果：no-op 的生成也把整本台账顶新 → built.json 必脏 →
+        git/clean 永远红（真机踩过：只是打开预演看了一眼，工作区就脏了）。 */
         if needs_built_record(same, book.built_fingerprint(&r.uid), &r.fingerprint) {
             fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
         }
@@ -2039,7 +2039,10 @@ mod tests {
         );
         // 正文真变了：要写
         let changed_body = "# release_time: 1\nk = 2\n";
-        assert_eq!(preview_one(&r, Some(changed_body)).state, DiffState::Modified);
+        assert_eq!(
+            preview_one(&r, Some(changed_body)).state,
+            DiffState::Modified
+        );
         // 磁盘上没有：新增
         assert_eq!(preview_one(&r, None).state, DiffState::Added);
     }
