@@ -1,6 +1,6 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.2",
-  "notes": "应用图标换正式那张；网络自动用系统代理；用户文件改存程序自己的目录（不再碰「文稿」）",
-  "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.2"
+  "version": "0.0.3",
+  "notes": "两个官方源（GitHub / Gitee）可切换；手动指定地址两种形状都认；「已是最新」改绿色",
+  "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.3"
 }
