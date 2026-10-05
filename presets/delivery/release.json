@@ -1,12 +1,12 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.5",
-  "notes": "预设数据例行更新（17 份产物定稿）。",
-  "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.5",
+  "version": "0.0.6",
+  "notes": "发布与更新链路切换到 Gitee（国内直连）；预设数据寻址升级，双官方源完善。",
+  "url": "",
   "asset": {
-    "name": "SupportEase_0.0.5_aarch64.app.zip",
-    "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.5/SupportEase_0.0.5_aarch64.app.zip",
-    "size": 6996447,
-    "sha256": "fa1af6b2d843871efc071a8ce528f8b041dbd4903a55b9969192bb9ee2cf6b85"
+    "name": "SupportEase_0.0.6_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.6/SupportEase_0.0.6_aarch64.app.zip",
+    "size": 7024732,
+    "sha256": "2b6aa7add97713c225a60064884204de9ce2adac967b3359d29ae527b63da16f"
   }
 }
