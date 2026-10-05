@@ -1,5 +1,4 @@
-# uuid: 39c4d15a-1513-e295-e4ad-f33b814d8c10
-# release_time: 2026-10-03 15:35:16
+# release_time: 2026-10-05 08:59:40
 # machine: A1
 # variant: fastv3.3
 #胶笔配置
@@ -39,7 +38,7 @@ offset_x = 0.1 # 笔尖偏移
 offset_y = 24.4 # 笔尖偏移
 offset_z = 4 # 笔尖偏移
 prime_length = 100 # 预涂长度(mm) 范围:0~500
-speed_limit = 70 # 涂胶速度限制 (mm/s)
+speed_limit = 65 # 涂胶速度限制 (mm/s)
 
 [wiping]
 disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)

@@ -160,6 +160,10 @@ pub struct ValueOrigin<'a> {
 pub struct Layers<'a> {
     registry: &'a Registry,
     machine_id: &'a str,
+    /// 版本身份（`FAST`）。**进指纹** —— 同一台机型两个版本的有效值一模一样，
+    /// 也是两份产物（文件头的 variant 行就不一样），过期判定各算各的，不许共用。
+    /// 机型层的视图没有版本，这里是空串
+    version_id: &'a str,
     /// 机型层：`machineVariants` 的裸键（`A1`）
     base: &'a Overrides,
     /// 版本层：`machineVariants` 的版本键（`A1:FAST`）。只看机型那一列时是空表
@@ -167,15 +171,29 @@ pub struct Layers<'a> {
 }
 
 impl<'a> Layers<'a> {
+    /// 与版本无关的视图（机型层的参数台、可见性判定）。
+    /// **产物一律走 [`Self::for_version`]** —— 指纹里要有版本身份
     pub fn new(
         registry: &'a Registry,
         machine_id: &'a str,
         base: &'a Overrides,
         over: &'a Overrides,
     ) -> Self {
+        Self::for_version(registry, machine_id, "", base, over)
+    }
+
+    /// 一个**版本**的三层视图。版本身份进指纹（见 [`Self::fingerprint`]）
+    pub fn for_version(
+        registry: &'a Registry,
+        machine_id: &'a str,
+        version_id: &'a str,
+        base: &'a Overrides,
+        over: &'a Overrides,
+    ) -> Self {
         Self {
             registry,
             machine_id,
+            version_id,
             base,
             over,
         }
@@ -288,15 +306,31 @@ impl<'a> Layers<'a> {
         out
     }
 
-    /// 有效配方的指纹。产物过期判定（doc §5）用它，**不用文件时间**。
+    /// 有效配方的指纹。产物过期判定（doc §5）用它，**不用文件时间**；
+    /// 它只进 `built.json` 当「待更新」判据 —— **不进产物**（产物头只有 release_time，
+    /// 曾写过的 `# uuid:` 截断已于 2026-10-05 删，见 `app::build` 模块文档）。
     ///
-    /// 输入里含 `registry` 的指纹：改了字段定义（比如给某个参数换了 `tomlKey`）
-    /// 产出的 TOML 就不一样了，而三层的值一个都没动 —— 不带上它，产物会一直显示「已生成」
+    /// # 两层指纹（2026-10-05 定死）
+    ///
+    /// ```text
+    /// fingerprint = schema   全体版本共享的字段定义（Registry::schema_fingerprint）
+    ///             + machine  机型 id
+    ///             + version  版本 id（同机型两个版本值一模一样也是两份产物）
+    ///             + recipe   这一版自己的有效值
+    /// ```
+    ///
+    /// 于是语义各归各位：**定义**变 → 所有引用它的版本一起「待更新」；
+    /// **值**变 → 只有握着那个值的版本变。
+    ///
+    /// 以前这里哈希**整张注册表** —— 而值覆盖（`machineVariants`）就住在那张表里，
+    /// 作者改了 `A1:FASTV3.3` 一个值，9 份产物的 uuid 全变、全部「待更新」。
+    /// 今天这条就是为它改的，回归测试在 `fingerprint_ignores_other_versions_values`。
     pub fn fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
         let payload = serde_json::json!({
-            "registry": self.registry.fingerprint(),
+            "schema": self.registry.schema_fingerprint(),
             "machine": self.machine_id,
+            "version": self.version_id,
             "recipe": self.effective_recipe(),
         });
         let mut h = Sha256::new();
@@ -309,9 +343,8 @@ impl<'a> Layers<'a> {
 mod tests {
     use super::*;
 
-    /// 三个字段：一个普通的、一个出厂默认是**空串**的、一个只给 P1S 的
-    fn registry() -> (tempfile::TempDir, Registry) {
-        let d = tempfile::tempdir().unwrap();
+    /// `registry()` 的原料 —— 给要往定义里添一笔（值覆盖之类）的测试改
+    fn registry_json() -> (serde_json::Value, serde_json::Value) {
         let param = |key: &str, order: f64, default: serde_json::Value, filter: &str| {
             serde_json::json!({
                 "key": key, "configKey": "X", "tomlKey": key, "jsonKey": key,
@@ -341,6 +374,13 @@ mod tests {
                 { "id": "i3", "paramKey": "toolhead.gone" }
             ] }] }]
         });
+        (params, layout)
+    }
+
+    /// 三个字段：一个普通的、一个出厂默认是**空串**的、一个只给 P1S 的
+    fn registry() -> (tempfile::TempDir, Registry) {
+        let d = tempfile::tempdir().unwrap();
+        let (params, layout) = registry_json();
         let r = crate::presetdata::registry::load_from_json_fixture(d.path(), &params, &layout)
             .unwrap();
         (d, r)
@@ -592,6 +632,40 @@ mod tests {
             changed_defs, same_values,
             "改了 tomlKey 产出的 TOML 就不一样了，产物必须变成待生成"
         );
+    }
+
+    /// 【回归 · 2026-10-05】改**别的版本**的值，这一版的指纹不许动。
+    ///
+    /// 当天真出了这事：作者改了 `A1:FASTV3.3` 的一个值，值覆盖写进注册表的
+    /// `machineVariants`；旧版把整张注册表哈希进指纹 —— 9 份产物全部「待更新」、
+    /// 头里的 uuid 全变，而其他 8 份的正文一个字节都不该动。
+    /// （产物头已不再写 uuid，但「指纹不变 = 产物正文不变 = 不重写」这条等价依旧成立。）
+    #[test]
+    fn fingerprint_ignores_other_versions_values() {
+        let empty = Overrides::new();
+        let (_d1, reg) = registry();
+        let before = Layers::for_version(&reg, "A1", "STANDARD", &empty, &empty).fingerprint();
+
+        let (mut params, layout) = registry_json();
+        params["params"][0]["machineVariants"] = serde_json::json!({ "A1:FASTV3.3": 70 });
+        let d2 = tempfile::tempdir().unwrap();
+        let reg2 =
+            crate::presetdata::registry::load_from_json_fixture(d2.path(), &params, &layout)
+                .unwrap();
+
+        let after = Layers::for_version(&reg2, "A1", "STANDARD", &empty, &empty).fingerprint();
+        assert_eq!(before, after, "别家的值不许泼进这一版的指纹");
+    }
+
+    /// 同一台机型的两个版本，有效值一模一样也是**两份产物**
+    /// （文件头的 variant 行就不一样）—— 版本身份要进指纹，过期判定不许共用
+    #[test]
+    fn fingerprint_distinguishes_versions_even_with_identical_values() {
+        let (_d, reg) = registry();
+        let empty = Overrides::new();
+        let fast = Layers::for_version(&reg, "A1", "FAST", &empty, &empty).fingerprint();
+        let fast_v33 = Layers::for_version(&reg, "A1", "FASTV3.3", &empty, &empty).fingerprint();
+        assert_ne!(fast, fast_v33, "两个版本的指纹撞车了");
     }
 
     /// 只有一个参数、`tomlKey` 可指定的最小字段定义。给上面那条指纹判据用

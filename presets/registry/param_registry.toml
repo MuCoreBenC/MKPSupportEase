@@ -1883,6 +1883,10 @@ pinned = true
 sectionId = 'motion'
 order = 100.0
 
+[params.machineVariants]
+"A1:FASTV3.3" = 65.0
+"A1:STANDARD" = 70.0
+
 [[params]]
 key = 'wiping.support_extrusion_multiplier'
 label = '支撑挤出倍率'

@@ -372,8 +372,10 @@ mod tests {
             return;
         };
 
+        // 2026-10-05：作者在参数台给 A1 加了两条涂胶速度限制的版本覆盖
+        // （FASTV3.3 = 70、STANDARD = 65），A1 的版本层 9 → 11。A1_MINI 没动。
         let want: BTreeMap<&str, (usize, usize)> = [
-            ("A1", (1, 9)),
+            ("A1", (1, 11)),
             ("A1_MINI", (2, 6)),
             ("P1S", (5, 0)),
             ("P2S", (5, 0)),
@@ -397,7 +399,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(total, (18, 15), "合计与 doc §3.3 不一致");
+        assert_eq!(total, (18, 17), "合计与 doc §3.3 不一致");
 
         // A1 基底里那一项的身份也钉住：表里写的是 custom_mount_gcode
         let a1 = digest(
