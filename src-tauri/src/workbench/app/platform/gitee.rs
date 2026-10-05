@@ -206,7 +206,7 @@ impl Hosting for Gitee {
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
             body,
         ) {
-            Ok(v) => release_from_json(&v),
+            Ok(v) => Ok(with_page_url(&v, spec)),
             Err(e) => {
                 // ★ **幂等回读**（真机兜底）：Release 可能已经建过（上一趟死在传附件、
                 //   这次重跑）—— 按 tag 找回那一份接着走，别让"已存在"挡住发版；
@@ -215,7 +215,7 @@ impl Hosting for Gitee {
                     "/repos/{}/{}/releases/tags/{}",
                     spec.owner, spec.repo, spec.tag_name
                 )) {
-                    Ok(v) => release_from_json(&v),
+                    Ok(v) => Ok(with_page_url(&v, spec)),
                     Err(_) => Err(e),
                 }
             }
@@ -300,6 +300,21 @@ fn read_json_lenient(resp: ureq::http::Response<ureq::Body>) -> Result<Value, Ap
     }
     serde_json::from_slice(&body)
         .map_err(|e| AppError::corrupted("Gitee 响应不是合法 JSON").with_detail(e.to_string()))
+}
+
+/// 补**下载页地址**：Gitee 的 Release 响应（创建 / 按 tag 回读都一样）
+/// **页面字段可能整个不给**（2026-10-06 真机：`html_url` / `url` 全空）——
+/// 而页面地址是确定的：`https://gitee.com/{o}/{r}/releases/tag/{tag}`。
+/// 空着写进 release.json，客户端的「打开下载页」就没地方去了。
+fn with_page_url(v: &Value, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
+    let mut r = release_from_json(v)?;
+    if r.url.is_empty() {
+        r.url = format!(
+            "https://gitee.com/{}/{}/releases/tag/{}",
+            spec.owner, spec.repo, spec.tag_name
+        );
+    }
+    Ok(r)
 }
 
 /// Release JSON → [`RemoteRelease`]。Gitee 与 GitHub 同形给 `id` / `tag_name`，
