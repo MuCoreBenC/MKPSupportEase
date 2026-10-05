@@ -1111,6 +1111,26 @@ pub fn wb_release_preflight(
             },
         );
 
+        // ★ 开发构建发不得（2026-10-06 真机踩出来的）：发版要推进版本号，改的
+        //   4 个文件（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）
+        //   **全在 `tauri dev` 文件监视器的清单里** —— 版本号一落盘，dev 就重建并
+        //   重启应用，发版事务被杀在半路（分支推出去了、PR 没建、历史没记，
+        //   界面上就是一次"闪退"）。真发版用**安装版工作台**或 release CLI。
+        let dev_build = cfg!(debug_assertions);
+        push(
+            &mut items,
+            "run-env",
+            "发布环境",
+            !dev_build,
+            if dev_build {
+                "这是开发构建（npm run tauri dev）—— 真发版会在版本号落盘时被 dev 重启杀掉。\
+                 用安装版工作台或 release CLI 发版；这里只能演练"
+                    .to_owned()
+            } else {
+                "安装版（发布面）—— 可以真发".to_owned()
+            },
+        );
+
         // ★ 第一阶段只做 macOS：构建那一步在别的系统上做不出来，进闸里明说
         let mac = std::env::consts::OS == "macos";
         push(
@@ -1149,6 +1169,17 @@ pub async fn wb_release_software(
     app: tauri::AppHandle,
     opts: ReleaseOptions,
 ) -> Result<ReleaseTxReport, AppError> {
+    // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：dev 构建里真发版必死在半路
+    //   （bump 的 4 个文件一落盘，`tauri dev` 就重建重启，事务被杀 —— 2026-10-06）。
+    //   演练（dry_run）一个字节都不写，放行。
+    if cfg!(debug_assertions) && !opts.dry_run {
+        return Err(AppError::invalid_argument(
+            "开发构建里不能真发版 —— 版本号一落盘，dev 的文件监视器就重启应用，发版事务被杀在半路",
+        )
+        .with_detail(
+            "真发版用安装版工作台（npm run tauri build 出的安装包）或 release CLI；这里只能演练",
+        ));
+    }
     let root = crate::fsx::paths::internal_root(&app)?;
     let repo = crate::workbench::paths::repo_root();
     let target = super::publish_tx::resolve_target(&root, None).ok();

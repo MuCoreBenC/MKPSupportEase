@@ -142,6 +142,19 @@
   color: var(--warn);
 }
 
+/* 残留清理那颗按钮的落点（闸里就地可修，不用去主页翻卡片） */
+.fixAction {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.fixNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
 .footNote {
   font-size: var(--fs-label);
   color: var(--text-3);

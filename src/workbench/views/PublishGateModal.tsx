@@ -238,6 +238,26 @@ export default function PublishGateModal({
     if (initialReport === null) void run()
   }, [run, initialReport])
 
+  /** 残留清理中（闸里那颗「清理残留」按钮就挂这一态） */
+  const [cleanBusy, setCleanBusy] = useState(false)
+
+  /**
+   * 清理交付残留 —— **闸里就地给的那颗按钮**（去修提示让人点它，按钮就该在原地）。
+   * 走 `workbench/.trash/delivery/<时间戳>/` 回收（可还原），清完自动重新跑闸。
+   */
+  const cleanStrays = async () => {
+    setCleanBusy(true)
+    setError(null)
+    try {
+      await wb.cleanDistStrays()
+      await run()
+    } catch (e) {
+      setError(isAppError(e) ? e.message : String(e))
+    } finally {
+      setCleanBusy(false)
+    }
+  }
+
   const publish = async () => {
     setBusy(true)
     setError(null)
@@ -526,6 +546,23 @@ export default function PublishGateModal({
                     </span>
                   )}
                   {i.status !== 'pass' && <span className={s.fix}>去修：{i.fixHint}</span>}
+                  {i.id === 'delivery/no-strays' && i.status === 'fail' && (
+                    <div className={s.fixAction}>
+                      <button
+                        type="button"
+                        className={c.btn}
+                        disabled={cleanBusy}
+                        onClick={() => void cleanStrays()}
+                      >
+                        {cleanBusy ? '清理中…' : '清理残留'}
+                      </button>
+                      <span className={s.fixNote}>
+                        走{' '}
+                        <span className={c.mono}>workbench/.trash/delivery/&lt;时间戳&gt;/</span>{' '}
+                        回收，可还原；清完自动重新检查
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

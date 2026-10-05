@@ -557,6 +557,11 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
     set.insert(SOURCE_FILE.to_owned());
+    // ★ `release.json` 也住交付根（M6，2026-10-05 起）：它是**软件发布链**的信息源
+    //   （客户端按 Source Manifest 的 `release` 声明取它），与预设产物同目录、不同链。
+    //   不把它算进应有集合，发布闸的残留审计会永远拦着预设发布 —— 而且点「清理残留」
+    //   会把客户端检查软件更新要用的那份扔进回收站（真机踩过，2026-10-06）。
+    set.insert(crate::runtime::source::RELEASE_FILE.to_owned());
     for v in book.versions() {
         // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
         if book.build_state(&v.uid) == BuildState::NoResources {
@@ -1449,9 +1454,9 @@ mod tests {
         let expected = delivery_expected_set(&book);
         assert_eq!(
             expected.len(),
-            9,
-            "content 3 + manifest 1 + catalog.json 1 + source.json 1 + mkp 产物 3 = 9\
-             （A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
+            10,
+            "content 3 + manifest 1 + catalog.json 1 + source.json 1 + **release.json 1（M6 起\
+             住交付根）** + mkp 产物 3 = 10（A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
         );
         assert!(expected.contains("mkp/presets/A1-standard.toml"));
         assert!(
@@ -1670,11 +1675,17 @@ mod tests {
 
         let expected = delivery_expected_set(&book);
         // 反空转锚点（2026-10-04 改口径后）：content 3 + manifest 1 + catalog.json 1
-        // + source.json 1 + mkp 9（五台机型全部有套餐）= 15 —— **A 类资产不在 delivery 面**
+        // + source.json 1 + **release.json 1（M6 起软件发布信息也住交付根）** + mkp 9
+        // （五台机型全部有套餐）= 16 —— **A 类资产不在 delivery 面**
         assert_eq!(
             expected.len(),
-            15,
+            16,
             "delivery 面条数变了 —— 说清为什么（裁决 C/甲后 A 类资产原地交付，不再进 delivery）"
+        );
+        assert!(
+            expected.contains(crate::runtime::source::RELEASE_FILE),
+            "release.json 是交付根的合法住客（M6 软件发布链），不算残留 —— \
+             少了它发布闸永远拦着预设发布，「清理残留」还会把客户端更新要用的文件扔进回收站"
         );
         // **9 份 MKP 产物名单独立锚定**：命名函数逐版算出（wb_generate 将写的名单），
         // 与交付集合必须一致 —— 这是发布集合在真数据下的目标形状
