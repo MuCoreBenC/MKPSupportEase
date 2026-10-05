@@ -231,13 +231,20 @@ impl Git {
             args.extend(["-c", &header]);
         }
         args.extend(["push", "-u", &target, refspec]);
-        let out = Command::new("git")
-            .args(&args)
+        // ★ 推**发布仓库（Gitee 镜像）的 main**（⑥½"数据源主线跟随发布仓库"）是发布事务
+        //   **设计内的裸推** —— 本地推送闸②（pre-push hook，PR-only）分不清远端，见到
+        //   main 就拦。对发往 Gitee 发布仓库的主线推，由这里显式放行（hook 会留痕）；
+        //   GitHub 的 main 不受影响：推进仍只有 PR 一条路（服务端 ruleset 也在兜底）。
+        let allow_main = with_url_creds.is_some() && refspec == "refs/heads/main";
+        let mut cmd = Command::new("git");
+        cmd.args(&args)
             .current_dir(&self.repo)
             // 禁交互：没有 TTY 时 git 会尝试提示，这里直接关掉（防挂死）
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .output()
-            .map_err(|e| spawn_failed(&self.repo, e))?;
+            .env("GIT_TERMINAL_PROMPT", "0");
+        if allow_main {
+            cmd.env("ALLOW_PUSH_MAIN", "1");
+        }
+        let out = cmd.output().map_err(|e| spawn_failed(&self.repo, e))?;
         if !out.status.success() {
             // ★ detail 只用 stderr，且 **redact 掉 token** —— URL 内嵌凭据会随 git 报错
             //   原文出现（如 `unable to access 'https://user:token@…'`），不能原样带出去
