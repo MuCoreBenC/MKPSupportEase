@@ -20,18 +20,21 @@
  *  - 这里留下的是**开发 / 排查的后门**：临时把下载指向本地 `python3 -m http.server`
  *    或别的源。默认状态就是"没被碰过"（内置默认 / 没配），普通用户什么都不用动。
  *
- * 交互：**两个官方源摆成固定单选**（Gitee / GitHub，作者 2026-10-05 拍），
- * 自定义地址**收在最后那一档**里 —— 用户没有输错地址的机会，这是防错的第一道；
- * 第二道在后端：**保存前先探一次**，取不到就整次拒绝（错地址留在设置里比"没配"更难查）。
- *
- * 写动作全部走按钮（不做"一选就写"的隐式动作）：选自定义填地址再按「应用」；
- * 已经是默认那一档时，按钮不出现（没有可撤的东西就不摆一颗点了没事干的按钮）。
+ * 交互：**两个官方源摆成固定单选**（Gitee / GitHub），选上**立即生效**并回写
+ * （作者 2026-10-05 推翻旧的"选了不写、另摆按钮"那套 —— 「点了怎么没有立即帮我
+ * 切换成 Gitee」：单选本身就是明确的意图，再要一颗确认键反而让人怀疑没点上）。
+ * 切换失败回到**生效的那一档**，原因先讲人话。自定义地址收在最后那一档，仍是两步：
+ * 选上只展开输入框，按「应用」才写 —— 防错第一道是"用户没有输错地址的机会"，
+ * 第二道在后端：**保存前先探一次**，取不到就整次拒绝（错地址留在设置里比"没配"
+ * 更难查）；拒绝时同样先给一句看得懂的结论，技术细节收进折叠（普通用户看结论，
+ * 开发才有得排查）。
  */
 
 import { useCallback, useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
 import type { PresetSource, SoftwareUpdate } from '../../api/contract'
+import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
 /**
@@ -46,7 +49,7 @@ export default function PageSettings() {
   const [mode, setMode] = useState<Mode>('github')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const [note, setNote] = useState<{ text: string; bad?: boolean; detail?: string } | null>(null)
   /*
    * 软件更新这一块的状态。三态各有各的话：
    *   `loading`  还在问
@@ -122,9 +125,41 @@ export default function PageSettings() {
     }
   }
 
-  const pick = (next: Mode) => {
-    setMode(next)
+  /*
+   * 选官方源 = **立即生效**（作者 2026-10-05：选了没反应让人怀疑没点上）。
+   * 乐观把单选切过去，后端落盘成功就用回传值校准；失败**回到生效的那一档**，
+   * 结论讲成人话、技术细节进折叠。自定义仍只展开输入框，不在这里写。
+   */
+  const pick = async (next: Mode) => {
     setNote(null)
+    if (next === 'custom') {
+      setMode('custom')
+      return
+    }
+    if (busy) return
+    setBusy(true)
+    setMode(next)
+    try {
+      const got = await api.setPresetSource(next)
+      if (got === null) {
+        /* 演示后端没有内置源（真机必有）：选内置 = 回到"没配"，如实照做 */
+        setSource(null)
+        setMode(next)
+        return
+      }
+      setSource(got)
+      setMode(got.mode as Mode)
+      setNote({ text: `已切到：${got.label}` })
+    } catch (e) {
+      setMode((source?.mode as Mode | undefined) ?? 'github')
+      setNote({
+        text: `没换成，现在用的还是 ${source?.label ?? '默认源'}。`,
+        bad: true,
+        detail: errorText(e),
+      })
+    } finally {
+      setBusy(false)
+    }
   }
 
   /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
@@ -137,108 +172,95 @@ export default function PageSettings() {
           ? `你指定：${source.address === '' ? '（还没填地址）' : source.address}`
           : `${source.label}：${source.address}`
 
-  /* 「恢复默认」可不可点：只有"现在不是出厂默认那一档"时才有的撤 */
-  const canClear = source !== null && source.mode !== source.defaultMode
   const canSet = draft.trim() !== ''
 
+  /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
   const apply = async () => {
     if (busy) return
     setBusy(true)
     setNote(null)
     try {
-      if (mode === 'custom') {
-        // 自定义：**先探后落盘**（后端做），取不到会整次拒绝并说明为什么
-        const got = await api.setPresetSource('custom', draft.trim())
-        setSource(got)
-        setNote({ text: `已应用：${got.address}`, bad: false })
-        return
-      }
-      const got = await api.setPresetSource(mode)
+      const got = await api.setPresetSource('custom', draft.trim())
       setSource(got)
-      setNote({ text: `已切到：${got.label}（${got.address}）`, bad: false })
+      setNote({ text: '已应用：现在用的就是你指定的这个地址。' })
     } catch (e) {
-      setNote({ text: errorText(e), bad: true })
+      setNote({
+        text: `这个地址取不到预设数据，没有改，现在用的还是 ${source?.label ?? '默认源'}。请检查地址（或直接选上面的官方源）。`,
+        bad: true,
+        detail: errorText(e),
+      })
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className={s.page} data-density="roomy">
+    <div className={s.page}>
       <header className={s.head}>
         <h1 className={s.title}>设置</h1>
         <p className={s.sub}>软件更新与应用设置。</p>
       </header>
 
+      {/*
+       * 更新卡：**状态在左、动作在右**，顶对齐一行。不再摆「软件更新」小标题
+       * （作者 2026-10-05：绿色的状态大字本身就是这一块的标题，再写一遍没有信息量）。
+       * 窄窗放不下时按钮组折到下一行（margin-left:auto 让它单独占行时仍靠右）。
+       */}
       <section className={s.section} aria-label="软件更新">
-        <h2 className={s.secTitle}>软件更新</h2>
+        <div className={s.updateTop}>
+          <div className={s.updateRow}>
+            <div className={s.updateHeadline}>
+              {updateBusy ? (
+                <span className={s.updateIdle}>正在检查……</span>
+              ) : update?.hasUpdate === true ? (
+                <span className={s.updateFresh}>有新版本 SupportEase</span>
+              ) : update !== null ? (
+                /* ★ 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）——
+                   与「有新版本」同一个绿；「没查到」才是灰的（不是坏消息，是不知道）。 */
+                <span className={s.updateLatest}>已是最新版本</span>
+              ) : (
+                <span className={s.updateIdle}>这次没能查到更新</span>
+              )}
+            </div>
 
-        <div className={s.updateRow}>
-          <div className={s.updateHeadline}>
-            {updateBusy ? (
-              <span className={s.updateIdle}>正在检查……</span>
-            ) : update?.hasUpdate === true ? (
-              <span className={s.updateFresh}>有新版本 SupportEase</span>
-            ) : update !== null ? (
-              /* ★ 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）——
-                 与「有新版本」同一个绿；「没查到」才是灰的（不是坏消息，是不知道）。 */
-              <span className={s.updateLatest}>已是最新版本</span>
-            ) : (
-              <span className={s.updateIdle}>这次没能查到更新</span>
+            {/* 版本对照：当前 → 最新。当前版本一定拿得到（来自构建期） */}
+            <p className={s.current}>
+              当前版本 {appVersion || '—'}
+              {update?.hasUpdate === true ? ` → 最新版本 ${update.latestVersion}` : ''}
+            </p>
+
+            {update?.hasUpdate === true && update.notes !== undefined && (
+              <p className={s.fieldNote}>{update.notes}</p>
+            )}
+
+            {update === null && !updateBusy && (
+              <p className={s.fieldNote}>
+                更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。
+              </p>
             )}
           </div>
 
-          {/* 版本对照：当前 → 最新。当前版本一定拿得到（来自构建期） */}
-          <p className={s.current}>
-            当前版本 {appVersion || '—'}
-            {update?.hasUpdate === true ? ` → 最新版本 ${update.latestVersion}` : ''}
-          </p>
-
-          {update?.hasUpdate === true && update.notes !== undefined && (
-            <p className={s.fieldNote}>{update.notes}</p>
-          )}
-
-          <div className={s.row}>
+          <div className={s.secActions}>
             {/*
               ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
               Tauri 的 webview 没开 opener 权限，`<a>` 点了**什么都不发生**
               （0.0.2 用户实测："点了没反应，没弹出浏览器"）。修法是走命令（第五刀）。
             */}
             {update?.hasUpdate === true && update.url !== undefined && (
-              <button
-                type="button"
-                className={s.btn}
-                onClick={() => void openReleasePage(update.url as string)}
-              >
+              <Btn onClick={() => void openReleasePage(update.url as string)}>
                 查看更新
-              </button>
+              </Btn>
             )}
             {/* 有安装包（release.json 给了 asset）才摆"在应用内下载"；没有就只留上面那颗 */}
             {update?.hasUpdate === true && update.asset !== undefined && (
-              <button
-                type="button"
-                className={s.btn}
-                disabled={updateBusy}
-                onClick={() => void startDownload()}
-              >
+              <Btn variant="accent" disabled={updateBusy} onClick={() => void startDownload()}>
                 在应用内下载
-              </button>
+              </Btn>
             )}
-            <button
-              type="button"
-              className={s.btn}
-              onClick={() => void checkUpdate()}
-              disabled={updateBusy}
-            >
+            <Btn variant="primary" disabled={updateBusy} onClick={() => void checkUpdate()}>
               {updateBusy ? '正在检查……' : '重新检查'}
-            </button>
+            </Btn>
           </div>
-
-          {update === null && !updateBusy && (
-            <p className={s.fieldNote}>
-              更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。
-            </p>
-          )}
         </div>
       </section>
 
@@ -252,62 +274,34 @@ export default function PageSettings() {
             两个都是官方源，选一个就行（国内选 Gitee 更稳）。自定义地址只在开发 / 排查时用。
           </p>
 
-          {/* ★ 两个固定单选 = 防错第一道：用户没有输错地址的机会 */}
+          {/* ★ 两个固定单选 = 防错第一道：用户没有输错地址的机会。选上**立即生效**。
+              地址提示跟在**各自**那一档下面（原来两条 URL 挤在一处，看不出归属） */}
           {(source?.builtin ?? []).map((b) => (
-            <label key={b.id} className={s.radio}>
-              <input
-                type="radio"
-                name="preset-source"
-                checked={mode === b.id}
-                onChange={() => pick(b.id as Mode)}
-                disabled={busy}
-              />
-              <span>
-                {b.label}
-                {b.id === source?.defaultMode ? '（默认）' : ''}
-              </span>
-            </label>
-          ))}
-          {(source?.builtin ?? []).map((b) => (
-            <p key={`${b.id}-hint`} className={s.hint}>
-              {b.address}
-            </p>
-          ))}
-          {mode !== 'custom' && canClear && (
-            <div className={s.row}>
-              <button
-                type="button"
-                className={s.btn}
-                onClick={async () => {
-                  /* 撤掉选择 = 回到出厂默认那一档（写动作走按钮，不做"一选就写"） */
-                  if (busy || source === null) return
-                  setBusy(true)
-                  setNote(null)
-                  try {
-                    const got = await api.setPresetSource(source.defaultMode)
-                    setSource(got)
-                    setMode(got.mode as Mode)
-                    setNote({ text: `已回到默认：${got.label}`, bad: false })
-                  } catch (e) {
-                    setNote({ text: errorText(e), bad: true })
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
-                disabled={busy}
-              >
-                {busy ? '正在恢复……' : '恢复默认'}
-              </button>
+            <div key={b.id} className={s.sourceOpt}>
+              <label className={s.radio}>
+                <input
+                  type="radio"
+                  name="preset-source"
+                  checked={mode === b.id}
+                  onChange={() => void pick(b.id as Mode)}
+                  disabled={busy}
+                />
+                <span>
+                  {b.label}
+                  {b.id === source?.defaultMode ? '（默认）' : ''}
+                </span>
+              </label>
+              <p className={s.hint}>{b.address}</p>
             </div>
-          )}
+          ))}
 
-          {/* 收起的自定义：默认不展开（普通用户不需要看见输入框） */}
+          {/* 收起的自定义：默认不展开（普通用户不需要看见输入框）；选上只展开，按「应用」才写 */}
           <label className={s.radio}>
             <input
               type="radio"
               name="preset-source"
               checked={mode === 'custom'}
-              onChange={() => pick('custom')}
+              onChange={() => void pick('custom')}
               disabled={busy}
             />
             <span>自定义地址（开发 / 排查）</span>
@@ -321,14 +315,9 @@ export default function PageSettings() {
                 placeholder="https://…/presets/dist/ 或 …/source.json"
                 aria-label="数据源地址"
               />
-              <button
-                type="button"
-                className={s.btn}
-                onClick={() => void apply()}
-                disabled={busy || !canSet}
-              >
+              <Btn onClick={() => void apply()} disabled={busy || !canSet}>
                 {busy ? '正在检查……' : '应用'}
-              </button>
+              </Btn>
             </div>
           )}
           {mode === 'custom' && (
@@ -340,7 +329,17 @@ export default function PageSettings() {
 
         <p className={s.current}>当前：{currentText}</p>
         {note !== null && (
-          <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{note.text}</p>
+          <div className={s.noteBlock}>
+            <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{note.text}</p>
+            {note.detail !== undefined && (
+              /* 技术细节收进折叠：普通用户只看结论（作者 2026-10-05：
+                 「出了一堆东西我也看不懂，你要给用户看得懂的东西」） */
+              <details className={s.noteDetail}>
+                <summary>技术详情（开发排查用）</summary>
+                <p>{note.detail}</p>
+              </details>
+            )}
+          </div>
         )}
       </section>
     </div>

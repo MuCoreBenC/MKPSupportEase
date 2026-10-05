@@ -44,10 +44,10 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
 
   /*
    * **发布账户**（第三刀下半）：GitHub / Gitee 对称，每平台三格 —— 仓库地址 / 用户名（配置）
-   * + Token（秘密，住系统 Keychain）。
+   * + Token（秘密，住本机凭据文件 credentials.json，0600）。
    *
    * ★ 前端**拿不到 Token 原值** —— 只有 `hasToken` 与尾号提示（`PlatformAccountView`）。
-   * ★ 配置与秘密分离：仓库地址 / 用户名进 `publish-account.json`，Token 进 Keychain。
+   * ★ 配置与秘密分离：仓库地址 / 用户名进 `publish-account.json`，Token 进凭据文件。
    */
   const [account, setAccount] = useState<PublishAccount | null>(null)
   const [acctBusy, setAcctBusy] = useState(false)
@@ -90,7 +90,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     })
   }
 
-  /** 保存一个平台：先写目标（仓库地址 + 用户名），Token 非空再写 Keychain。 */
+  /** 保存一个平台：先写目标（仓库地址 + 用户名），Token 非空再写凭据文件。 */
   const saveAccount = async (platform: string) => {
     const d = draft[platform]
     if (d === undefined) return
@@ -112,7 +112,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
         [platform]: { ...prev[platform], token: '' },
       }))
       setAcctNote({
-        text: `已保存 ${platform} 发布账户${token !== '' ? '（Token 存进系统钥匙串）' : ''}`,
+        text: `已保存 ${platform} 发布账户${token !== '' ? '（Token 存进本机凭据文件）' : ''}`,
         bad: false,
       })
       await loadAccount()
@@ -201,7 +201,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
           <div className={s.vfield}>
             <p className={s.vhelp}>
               发布时会自动提交、推送并建 PR/MR。**平台与仓库由这里配置**（不靠猜远端）；
-              Token 存进**系统钥匙串**，**绝不写进配置文件**，前端也拿不到明文。
+              Token 存在**本机凭据文件**里（仅本人可读），**绝不写进配置文件**，前端也拿不到明文。
             </p>
             <p className={s.vhelp}>
               当前仓库：

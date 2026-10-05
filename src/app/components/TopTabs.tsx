@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'react'
+
 import Icon from '../../components/Icon'
 import UpdateIndicator from './UpdateIndicator'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
@@ -52,8 +54,48 @@ export default function TopTabs({
   const maximized = useWindowMaximized()
   const drag = useTitlebarDrag()
 
+  /*
+   * 滑动下划线（2026-10-05）：原来 active 页签的 ::after 直接出现/消失，快速换
+   * 页签时下划线在两处「眨」。现在是一条常驻指示条，换页签时从旧位滑到新位。
+   * 几何全部量 DOM：左右内衬直接读页签自己的 padding（compact / mini / fluid
+   * 三档差异就在那儿，量出来自动跟随），页签条任何尺寸变化（拉窗、换密度、
+   * 字体就绪、active 加粗引起的 1px 重排）都由 ResizeObserver 重测。
+   * `latest` 让 RO 与换页签两条路都调到最新一次渲染的测量函数，不用重订 RO。
+   */
+  const navRef = useRef<HTMLElement | null>(null)
+  const tabEls = useRef(new Map<string, HTMLButtonElement>())
+  const [ind, setInd] = useState<{ x: number; w: number } | null>(null)
+  const latest = useRef<() => void>(() => {})
+
+  const syncIndicator = () => {
+    const nav = navRef.current
+    const el = tabEls.current.get(active)
+    if (!nav || !el) return
+    const navLeft = nav.getBoundingClientRect().left
+    const rect = el.getBoundingClientRect()
+    const padX = parseFloat(getComputedStyle(el).paddingLeft) || 0
+    setInd({ x: rect.left - navLeft + padX, w: rect.width - padX * 2 })
+  }
+
+  useLayoutEffect(() => {
+    latest.current = syncIndicator
+  })
+
+  useLayoutEffect(() => {
+    latest.current()
+  }, [active])
+
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    if (!nav) return
+    const ro = new ResizeObserver(() => latest.current())
+    ro.observe(nav)
+    for (const el of tabEls.current.values()) ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const wideStrip = (
-    <nav className={s.tabs} aria-label="主页签">
+    <nav ref={navRef} className={s.tabs} aria-label="主页签">
       {tabs.map((t) => {
         const on = t.id === active
         return (
@@ -64,11 +106,22 @@ export default function TopTabs({
             data-on={on}
             aria-current={on ? 'page' : undefined}
             onClick={() => onChange(t.id)}
+            ref={(el) => {
+              if (el) tabEls.current.set(t.id, el)
+              else tabEls.current.delete(t.id)
+            }}
           >
             {t.label}
           </button>
         )
       })}
+      {ind && (
+        <span
+          aria-hidden="true"
+          className={s.indicator}
+          style={{ width: ind.w, transform: `translateX(${ind.x}px)` }}
+        />
+      )}
     </nav>
   )
 

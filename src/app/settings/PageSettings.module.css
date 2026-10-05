@@ -29,17 +29,37 @@
   color: var(--text-2);
 }
 
+/*
+ * 卡片**撑满页宽**（作者 2026-10-05：「右边没有撑满，大窗口下也是」）。
+ * 原来的 max-width: 760px 是早期最小版的遗留 —— 设置页就两块卡，压在左边
+ * 让大窗右侧整片空白。行文长度靠句子自己断（地址类都开了 overflow-wrap）。
+ */
 .section {
   width: 100%;
-  max-width: 760px;
   box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--surface);
-  padding: 14px 16px 16px;
+  padding: 14px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+/* 更新卡：状态在左、动作在右（顶对齐）；窄窗放不下时按钮组折到下一行、仍靠右 */
+.updateTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.secActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .secTitle {
@@ -65,7 +85,7 @@
 }
 
 .updateHeadline {
-  font-size: var(--fs-body);
+  font-size: calc(var(--fs-body) + 3px);
   font-weight: 600;
   color: var(--text-1);
 }
@@ -101,6 +121,13 @@
   color: var(--text-2);
 }
 
+/* 一个单选档 + 它自己的地址提示（原来两条地址挤在一处，看不出归属） */
+.sourceOpt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .radio {
   display: flex;
   align-items: center;
@@ -111,7 +138,7 @@
 }
 
 .hint {
-  margin: 0 0 4px 24px;
+  margin: 0 0 2px 24px;
   font-size: var(--fs-label);
   color: var(--text-3);
   overflow-wrap: anywhere;
@@ -135,26 +162,6 @@
   font-size: var(--fs-body);
 }
 
-.btn {
-  flex: none;
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--text-1);
-  font-size: var(--fs-label);
-  cursor: pointer;
-  /* `.btn` 也用在 <a> 上（「查看更新」），抹掉链接默认的蓝色与下划线 */
-  text-decoration: none;
-  display: inline-block;
-  line-height: 1.4;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .current {
   margin: 2px 0 0;
   font-size: var(--fs-body);
@@ -170,4 +177,25 @@
 
 .noteBad {
   color: #8a5a20;
+}
+
+/* 结论一句 + 可折叠的技术详情（普通用户只看结论，作者 2026-10-05） */
+.noteBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.noteDetail summary {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.noteDetail p {
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
 }

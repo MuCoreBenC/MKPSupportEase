@@ -57,12 +57,24 @@ const OFFSET_KEYS = {
 } as const
 const SPEED_KEY = 'toolhead.speed_limit'
 
-export function usePreset(sel: Selection): PresetState {
-  const [state, setState] = useState<PresetState>({ status: 'idle' })
+/*
+ * 跨页缓存（2026-10-05）：key = `机型/版本`。tab 切换会重挂，没有这份缓存时每次进
+ * 校准页读数都要从「—」等一趟 IPC 才长出数字 —— 页脚在进场后当着用户的面再变一次。
+ * 重挂先吃上一份 ready 结果渲染、照旧重拉（文件可能换过），回来后覆盖。
+ * 只缓存 ready：waiting/failed 是过程态，缓存它们会把「失败」钉在页面上。
+ */
+const presetCache = new Map<string, Preset>()
 
+export function usePreset(sel: Selection): PresetState {
   const machine = sel.model
   const version = sel.variant
   const complete = Boolean(sel.brand && machine && version)
+
+  const [state, setState] = useState<PresetState>(() => {
+    const hit =
+      machine !== null && version !== null ? presetCache.get(`${machine}/${version}`) : undefined
+    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'idle' }
+  })
 
   useEffect(() => {
     if (!complete || machine === null || version === null) {
@@ -72,7 +84,10 @@ export function usePreset(sel: Selection): PresetState {
 
     /* 选择在请求回来之前又改了：旧那一份的结果直接丢掉，不许它盖掉新的 */
     let alive = true
-    setState({ status: 'waiting', name: PENDING_NAME })
+    /* 缓存里有上一份就站在它上面刷新，不清成 waiting —— 重挂时读数不许闪「—」 */
+    if (!presetCache.has(`${machine}/${version}`)) {
+      setState({ status: 'waiting', name: PENDING_NAME })
+    }
 
     Promise.all([
       api.getVersionFiles(machine, version),
@@ -84,6 +99,7 @@ export function usePreset(sel: Selection): PresetState {
         /* 这个版本没有配 MKP 预设文件（如 A2L）：当没选，别拿半份数据糊弄 */
         const file = files?.files.find((f) => f.kind === 'mkp_preset')
         if (file === undefined) {
+          presetCache.delete(`${machine}/${version}`)
           setState({ status: 'idle' })
           return
         }
@@ -105,10 +121,14 @@ export function usePreset(sel: Selection): PresetState {
           return
         }
 
-        setState({
-          status: 'ready',
-          preset: { name: file.fileName, path: file.path, axes: { x, y, z }, speed },
-        })
+        const preset: Preset = {
+          name: file.fileName,
+          path: file.path,
+          axes: { x, y, z },
+          speed,
+        }
+        presetCache.set(`${machine}/${version}`, preset)
+        setState({ status: 'ready', preset })
       },
       (err: unknown) => {
         if (!alive) return

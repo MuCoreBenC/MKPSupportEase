@@ -30,10 +30,56 @@
 }
 
 .body {
+  position: relative;
   flex: 1;
   min-height: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * 页签槽（2026-10-05）：页签从「卸载重挂」改成「常驻 + 切显示」。active 槽在流内
+ * 占满 .body；其余各槽 absolute + visibility:hidden —— 布局还在，滚动位置、页内
+ * 步骤、输入草稿全部留住，也不参与命中与无障碍树（display:none 会把滚动位置
+ * 一起毁掉，所以走 visibility 这条）。
+ * 入场动画挂 :not([data-hidden])：data-hidden 撤掉那一刻选择器开始命中、动画起播
+ * —— 每次切页都重放那 130ms 淡入，不用额外按页签触发。
+ */
+.pageSlot {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pageSlot[data-hidden] {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pageSlot[data-hidden] * {
+  /*
+   * 把**所有后代**按住：页内不少浮层 / 步骤块自己写 `visibility: visible`
+   * （opacity 过渡的标配写法 —— MachinePicker、CardFrame 都这样），而 visibility
+   * 是继承属性，后代一声明就翻案 —— 首页右列的机型选择块就是这么从藏起来的
+   * 页面里透到别的页上的。这里没得商量：藏着的页面里不许有任何东西显形。
+   * 槽位重新显示时这条随选择器一起失效，组件自己的显隐切换照常工作。
+   */
+  visibility: hidden !important;
+}
+
+.pageSlot:not([data-hidden]) {
+  animation: page-in 130ms ease-out;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
 }
 

@@ -53,8 +53,12 @@ export interface Calibration {
 
 export function useCalibration(preset: PresetState): Calibration {
   /* null = 还没有值。初值不能拿 mkpFull.offsets 顶 —— 那是上一台机器的数，
-     一进来什么都没选就显示具体数字，看的人会以为已经替他读出来了 */
-  const [saved, setSaved] = useState<Axes | null>(null)
+     一进来什么都没选就显示具体数字，看的人会以为已经替他读出来了。
+     但**已就位**的预设（重挂时从跨页缓存里带来的那份 ready）就是当前真相，
+     初值直接吃它 —— 不然首帧先画一次「—」、等 effect 来填，进场闪一下。 */
+  const [saved, setSaved] = useState<Axes | null>(() =>
+    preset.status === 'ready' ? preset.preset.axes : null,
+  )
   const [zPick, setZPick] = useState<string | null>(null)
   const [xyPick, setXyPick] = useState<{ x: string | null; y: string | null }>({
     x: null,

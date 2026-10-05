@@ -99,9 +99,11 @@ function Rows({ items }: { items: [string, string][] }) {
 
 interface PageHomeProps {
   density: Density
+  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账 */
+  active?: boolean
 }
 
-export default function PageHome({ density }: PageHomeProps) {
+export default function PageHome({ density, active }: PageHomeProps) {
   const deckRef = useRef<DeckHandle>(null)
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
   const { fadeMs } = useDevDefaults()
@@ -120,19 +122,19 @@ export default function PageHome({ density }: PageHomeProps) {
   const catalog = useCatalog()
 
   /*
-   * T9/T10 联动（预设页 → 首页）：目录就绪后对准「正在使用的那一条」（唯一底账 mkp.a44.active）——
+   * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（唯一底账 mkp.a44.active）——
    * 预设页应用了哪一份，这里三级选择就反填成哪一台。active 的 machineId / versionId
-   * 与选择器是**同一套 id**（不再有映射表），只跑一次：tab 切换会重挂，之后的手选不受影响。
+   * 与选择器是**同一套 id**（不再有映射表）。
+   * 常驻挂载后 tab 不再重挂（2026-10-05），改成每次回到本页对一次：对出的值与
+   * 现状一致时画面不动，在预设页换过应用才真正换基准。
    */
-  const restored = useRef(false)
   useEffect(() => {
-    if (restored.current || catalog.machines.length === 0) return
-    restored.current = true
+    if (!active || catalog.machines.length === 0) return
     /* 底账走 IPC（run/active-preset.json），异步读；读不到当"没有"，不反填 */
     void selectionFromActive(catalog.machines).then((next) => {
       if (next !== null) setSel(next)
     })
-  }, [catalog.machines])
+  }, [active, catalog.machines])
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
