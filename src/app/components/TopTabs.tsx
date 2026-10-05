@@ -1,4 +1,5 @@
 import Icon from '../../components/Icon'
+import UpdateIndicator from './UpdateIndicator'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { winClose, winMinimize, winToggleMaximize } from '../window'
@@ -94,6 +95,13 @@ export default function TopTabs({
       <span className={s.logo}>MKP</span>
 
       {tabStrip}
+
+      {/*
+        下载指示器（2026-10-05 第五刀）：**在页签与窗口键之间**，任何页面都看得见。
+        它**自己取数据**（不靠 props 层层传）：`idle` 时**什么都不渲染**，
+        所以首屏不因为它多等一毫秒（铁律 2：云端不参与首屏）。
+      */}
+      <UpdateIndicator onInstalled={() => window.location.reload()} />
 
       {/* Windows 侧的窗口键：撑满标题栏全高、贴到右上角、彼此无缝。
           按钮是 <button>，useTitlebarDrag 里 closest('button') 会跳过它们，

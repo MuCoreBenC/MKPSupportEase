@@ -2118,3 +2118,38 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
 （`FetchBytes` + `probe_custom_shape_with` / `parse_source_json_with`），判据在纯内存里跑完整条判定，
 产品的门仍走 `net::get_bytes` 唯一出口。假 fetch 只看 URL 的**最后两段**
 （`…/source.json/catalog.json` 必须 404 —— 那正是真机上"填 source.json 地址"不通的那条路）。
+
+## 增量之二十八 · 第五刀「应用内更新」（交接见 `HANDOFF-5-APP-UPDATE.md`）
+
+作者 2026-10-05 拍板：「以后下载要像 Trae / WorkBuddy 那样」——标题栏常驻小图标 + 环形进度、
+点开详情面板（下载/暂停/取消）、下完「重启并安装」点了就重启。**一次提完，不再切碎。**
+
+- `release.json` 加**可选** `asset` 格（name/url/size/sha256）：**加字段不升代次**，
+  没有它客户端退回"打开下载页"（0.0.2 / 0.0.3 的行为仍然成立）。
+- 新增 `runtime::updater.rs`：流式下载（`net::stream_get`，**不引 zip 依赖**——
+  `ditto` 打包 / `unzip` 解压都是 macOS 自带）+ 进度 + 暂停/继续/取消 + 验大小/验 SHA + 解压。
+- 新增 `ipc/update.rs`：六个命令 + **`open_url`**（★ 修「查看更新点了没反应」：
+  webview 没 opener 权限，`<a target="_blank">` 必然打不开，一律过命令）。
+- **装上去并重启**：正在运行的 `.app` 换不掉 ⇒ spawn 后台脚本（`sleep 1`）→ `app.exit(0)`；
+  成没成本进程看不见 ⇒ 脚本写 `run/update-result.json`，**下次启动**读它说清。
+- 标题栏指示器 `UpdateIndicator.tsx`：环形进度 + 面板 + 「重启并安装」；
+  **idle 时什么都不渲染**（不占位），且**挂载后延迟 1.2s 才问**（首屏不等云端）。
+- **mock 夹具能触发整套界面**（作者 2026-10-05：不想为验界面真发一版）：
+  `src/api/mock.ts` 的 `MOCK_NEW_VERSION` 决定"有新版本 / 已是最新"，假下载可暂停/取消/装。
+- 工作台发版多两步：`ditto` 打 `.app.zip` → 上传 → 写进 `release.json` 的 `asset`。
+  **失败不挡发版**（如实说"这一版退回打开下载页"）。
+- 判据：默认 **338**、workbench lib **624**（新增 10 条，含"老发布物没有 asset 仍读得懂"、
+  "`file:` 地址被拒"、"解压只看退出码"、"账读得回来"）。
+- 写盘纪律**第二处逃生口**：`updater` 流式写用 `File::create`（atomic 是"整个进内存"），
+  代码里写了理由与退役条件。
+
+### 纪律追加（作者 2026-10-05，因为 PR 号涨太快）
+
+**一轮只提一次代码 PR**（手上攒的改动一起提）；**发版固定 +2**（版本号 + `release.json`）；
+端到端验收放在**发版之后**，不在发版前插验证轮次。
+
+### 纪律追加二（作者 2026-10-05，因为 PR #36 的 CI 我没盯）
+
+**开完 PR 要自己盯 CI，全绿了才通知作者合并。** 推上去就不管 = 把"红"这件事
+变成作者去发现 —— 2026-10-05 的一条判据（用了 `/dev/null`）在 rust-windows 上红了，
+是作者贴截图告诉我的。**判据也守跨平台**（CI 有 macos / ubuntu / windows 三个 job）。

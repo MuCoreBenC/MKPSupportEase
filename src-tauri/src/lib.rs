@@ -339,6 +339,14 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
         app::build::wb_publish_history,
         app::build::wb_open_external,
+        // ★ **应用内更新 + 打开外链**（第五刀）：`open_url` 修的是「查看更新点了没反应」
+        ipc::update::update_info,
+        ipc::update::start_update,
+        ipc::update::pause_update,
+        ipc::update::resume_update,
+        ipc::update::cancel_update,
+        ipc::update::install_update,
+        ipc::update::open_url,
         // ★ **发布软件版本**（第四刀）：闸 / 事务 / 历史各一条 —— 与 CLI 同一个内核
         app::release_tx::wb_release_preflight,
         app::release_tx::wb_release_software,

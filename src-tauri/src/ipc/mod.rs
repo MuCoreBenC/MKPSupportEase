@@ -18,6 +18,9 @@ pub mod catalog;
 pub mod import;
 pub mod mine;
 pub mod presets;
+/// **应用内更新 + 打开外链**（2026-10-05 第五刀）。`open_url` 是修「查看更新点了没反应」
+/// 那个 bug 的：webview 没 opener 权限，外链一律过命令
+pub mod update;
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
