@@ -192,16 +192,34 @@ impl Hosting for Gitee {
     /// ★ 与 GitHub 的差别**只在认证位置**（这里是 body 内的 `access_token`，那边是
     ///   Bearer header），走 [`Gitee::post`] 那同一条出口 —— 不另开一条 HTTP 路径。
     fn create_release(&self, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
+        // ★ `target_commitish` 是**必填**（2026-10-06 真机：缺了它 Gitee 回
+        //   `400 {"messages":["target_commitish is missing"]}`—— 文档把它标成可选，别信）。
+        //   tag 已由 ⑥½ 推上去，这个字段只在"tag 不存在"时才参与建 tag；给 `main`：
+        //   那正是发布事务打 tag 的那一支，兜底语义也对。
         let body = serde_json::json!({
             "tag_name": spec.tag_name,
+            "target_commitish": "main",
             "name": spec.name,
             "body": spec.body,
         });
-        let v = self.post(
+        match self.post(
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
             body,
-        )?;
-        release_from_json(&v)
+        ) {
+            Ok(v) => release_from_json(&v),
+            Err(e) => {
+                // ★ **幂等回读**（真机兜底）：Release 可能已经建过（上一趟死在传附件、
+                //   这次重跑）—— 按 tag 找回那一份接着走，别让"已存在"挡住发版；
+                //   找不回才把原错误交出去。
+                match self.get(&format!(
+                    "/repos/{}/{}/releases/tags/{}",
+                    spec.owner, spec.repo, spec.tag_name
+                )) {
+                    Ok(v) => release_from_json(&v),
+                    Err(_) => Err(e),
+                }
+            }
+        }
     }
 
     /// 上传安装包：`POST /repos/{o}/{r}/releases/{id}/attach_files`，**multipart 表单**。
