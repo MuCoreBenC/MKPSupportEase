@@ -1,12 +1,12 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.4",
-  "notes": "应用内更新：在程序里下载新版本、环形进度、暂停/取消、下完自动重启安装；修「查看更新」点了没反应",
-  "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.4",
+  "version": "0.0.5",
+  "notes": "预设数据例行更新（17 份产物定稿）。",
+  "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.5",
   "asset": {
-    "name": "SupportEase_0.0.4_aarch64.app.zip",
-    "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.4/SupportEase_0.0.4_aarch64.app.zip",
-    "size": 6996235,
-    "sha256": "4fa0f6925319692fafb23835aff638af02d152c94efb05ab34a2510d1ec59c4a"
+    "name": "SupportEase_0.0.5_aarch64.app.zip",
+    "url": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.5/SupportEase_0.0.5_aarch64.app.zip",
+    "size": 6996447,
+    "sha256": "fa1af6b2d843871efc071a8ce528f8b041dbd4903a55b9969192bb9ee2cf6b85"
   }
 }
