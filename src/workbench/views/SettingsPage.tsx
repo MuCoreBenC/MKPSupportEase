@@ -363,31 +363,41 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
               <span className={s.mono}> source.json </span>找回目录与文件。
               <b>填仓库地址就够</b>（仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
               我们会自动补成发布入口的 raw 直链（GitHub / Gitee 是同一座桥）。
+              GitHub 是<b>主源</b>；Gitee 是<b>镜像</b>（国内直连），空着 = 不提供这一档。
               也收：指向 <span className={s.mono}>source.json</span> 的 blob / raw 直链、
               自建源（<span className={s.mono}>http://…</span> 原样）。
               入库（<span className={s.mono}>workbench/bootstrap.json</span>）：换机器、CI 拿的都是同一份。
             </p>
-            <label className={s.vlabel}>GitHub（主源）</label>
             <div className={s.vrow}>
+              <label className={s.vlabel} htmlFor="bootstrap-gh">
+                GitHub
+              </label>
               <input
+                id="bootstrap-gh"
                 className={s.inp}
                 value={bootstrap}
                 onChange={(e) => setBootstrap(e.target.value)}
                 /* 中性示例（`<owner>/<repo>`），**不是"默认值"** ——
                    空着就是"还没配"，别让占位符看起来像已经填好了 */
-                placeholder="https://github.com/<owner>/<repo>"
+                placeholder="https://github.com/<owner>/<repo>（主源）"
                 aria-label="官方源（GitHub 主源）地址"
               />
             </div>
-            <label className={s.vlabel}>Gitee（镜像 —— 国内直连；空 = 不提供这一档）</label>
             <div className={s.vrow}>
+              <label className={s.vlabel} htmlFor="bootstrap-gitee">
+                Gitee
+              </label>
               <input
+                id="bootstrap-gitee"
                 className={s.inp}
                 value={giteeBootstrap}
                 onChange={(e) => setGiteeBootstrap(e.target.value)}
-                placeholder="https://gitee.com/<owner>/<repo>"
+                placeholder="https://gitee.com/<owner>/<repo>（镜像，空 = 不提供）"
                 aria-label="官方源（Gitee 镜像）地址"
               />
+            </div>
+            <div className={s.vrow}>
+              <span className={s.grow} />
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary}`}
