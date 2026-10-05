@@ -680,7 +680,7 @@ export function WorkbenchApp() {
         tabIndex={0}
         title={
           boot
-            ? `预设源 ${boot.roots.presets}\n配方本 ${boot.roots.workbench}\n交付 ${boot.roots.dist}\n点击查看设置`
+            ? `预设源 ${boot.roots.presets}\n配方本 ${boot.roots.workbench}\n交付 ${boot.roots.delivery}\n点击查看设置`
             : '正在读…'
         }
         onClick={() => setPage('settings')}

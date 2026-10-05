@@ -15,7 +15,7 @@
 //!    拼字符串会带进注入面，而这里的参数里有文件名。
 //! 2. ★ **只 stage 白名单路径**（[`STAGE_ALLOWLIST`]）。永不 `git add -A` ——
 //!    "这次发布"要提交的是**交付产物那一批**，把工作区里别的改动一起卷进去是事故。
-//!    这条口径与发布闸 ⑮ `git/clean`（排除 `presets/dist/` 之外不许有脏）互为反面：
+//!    这条口径与发布闸 ⑮ `git/clean`（排除 `presets/delivery/` 之外不许有脏）互为反面：
 //!    ⑮ 保证"除产物外没有别的改动"，本模块保证"只提交那一批"。
 //!
 //! # 取不到 git 怎么办
@@ -32,10 +32,10 @@ use crate::error::AppError;
 /// 允许被 stage 的路径白名单（**相对仓库根**，前缀匹配）。
 ///
 /// ★ 这就是"这次发布提交什么"的**唯一答案**。想提交新东西？加到这份清单里来，
-/// 别在这里写 `-A`。交付产物 `presets/dist/` 是主体；结构规则表与资产台账跟着
+/// 别在这里写 `-A`。交付产物 `presets/delivery/` 是主体；结构规则表与资产台账跟着
 /// 结构 / 资产变化走，一起提交。
 pub const STAGE_ALLOWLIST: [&str; 3] = [
-    "presets/dist/",
+    "presets/delivery/",
     "presets/structure-signatures.toml",
     "presets/assets.toml",
 ];
@@ -43,18 +43,19 @@ pub const STAGE_ALLOWLIST: [&str; 3] = [
 /// **「发布软件版本」那条链**的 stage 白名单（第四刀）。
 ///
 /// ★ 两份清单**刻意分开**（两条链不混）：这里是"版本号那一笔 + `release.json`"，
-/// 上面那份是预设交付产物。**发布预设绝不会提交 `presets/release.json`**，
+/// 上面那份是预设交付产物。**发布预设绝不会提交 `presets/delivery/release.json`**，
 /// 反过来也不会 —— 各自只认识自己那一批，混入另一条链的产物进不去索引。
 ///
 /// 清单里每一条都是**派生或发布物**：`src-tauri/Cargo.toml` 是版本真值那一格，
-/// 其余三个是它的派生结果（见 [`super::version`]），`presets/release.json` 是
-/// 上传成功后才写的发布信息。源码（`src/**` / `src-tauri/src/**`）一个都不在里头。
+/// 其余三个是它的派生结果（见 [`super::version`]），`presets/delivery/release.json` 是
+/// 上传成功后才写的发布信息（2026-10-05 起住交付根，总纲 §1②）。
+/// 源码（`src/**` / `src-tauri/src/**`）一个都不在里头。
 pub const RELEASE_STAGE_ALLOWLIST: [&str; 5] = [
     "src-tauri/Cargo.toml",
     "src-tauri/tauri.conf.json",
     "package.json",
     "Cargo.lock",
-    "presets/release.json",
+    "presets/delivery/release.json",
 ];
 
 /// 一条 git 命令的结果：成功 = stdout（已 trim 掉尾换行），失败 = 带 stderr 的 `AppError`。
@@ -425,7 +426,7 @@ impl Git {
     }
 }
 
-/// 路径在不在 stage 白名单里。**前缀匹配**（`presets/dist/` 收下它下头的一切）。
+/// 路径在不在 stage 白名单里。**前缀匹配**（`presets/delivery/` 收下它下头的一切）。
 pub fn is_allowed(path: &str) -> bool {
     is_allowed_in(path, &STAGE_ALLOWLIST)
 }
@@ -509,8 +510,8 @@ mod tests {
     #[test]
     fn stage_paths_are_an_explicit_allowlist() {
         for ok in [
-            "presets/dist/catalog.json",
-            "presets/dist/mkp/presets/A1-standard.toml",
+            "presets/delivery/catalog.json",
+            "presets/delivery/mkp/presets/A1-standard.toml",
             "presets/structure-signatures.toml",
             "presets/assets.toml",
         ] {
@@ -697,19 +698,20 @@ mod tests {
 
         // 造两类文件：白名单里的（交付产物）与白名单外的（源码）。
         // 走 `atomic_write`（clippy 对测试也生效，且与产品代码同一条写盘纪律）。
-        std::fs::create_dir_all(root.join("presets/dist")).unwrap();
-        crate::fsx::atomic::atomic_write(&root.join("presets/dist/catalog.json"), b"{}").unwrap();
+        std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
+        crate::fsx::atomic::atomic_write(&root.join("presets/delivery/catalog.json"), b"{}")
+            .unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
         crate::fsx::atomic::atomic_write(&root.join("src/lib.rs"), b"// not ours").unwrap();
 
         let git = Git::open(root);
         let staged = git
             .stage_allowed(&[
-                "presets/dist/catalog.json".to_owned(),
+                "presets/delivery/catalog.json".to_owned(),
                 "src/lib.rs".to_owned(), // 意图混进来 —— 必须被第二道闸挡掉
             ])
             .expect("stage");
-        assert_eq!(staged, vec!["presets/dist/catalog.json".to_owned()]);
+        assert_eq!(staged, vec!["presets/delivery/catalog.json".to_owned()]);
         assert!(git.has_staged().unwrap(), "该有一份 staged");
 
         // 索引里只有白名单那一份
@@ -719,7 +721,7 @@ mod tests {
             .output()
             .unwrap();
         let names = String::from_utf8_lossy(&out.stdout);
-        assert!(names.contains("presets/dist/catalog.json"));
+        assert!(names.contains("presets/delivery/catalog.json"));
         assert!(
             !names.contains("src/lib.rs"),
             "白名单外的文件被 stage 进去了：{names}"

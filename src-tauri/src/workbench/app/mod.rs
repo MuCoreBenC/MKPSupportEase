@@ -51,7 +51,7 @@ pub mod bundles;
 /// 0600），前端拿不到原值
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
-pub mod dist;
+pub mod delivery;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;
@@ -360,30 +360,45 @@ pub struct Boot {
     /// `None` = 还没配 —— 客户端构建时就不会注入默认源（`build.rs` 读同一份文件）。
     /// **它只对应"工作台配置"这一份**：改了要重新构建客户端才生效（编译期注入）
     pub bootstrap_url: Option<String>,
+    /// 第二官方源（Gitee 镜像，国内直连）。`None` = 没配 —— 客户端构建不注入那一档，
+    /// 客户端界面也不出现它。与 `bootstrap_url` **各读各的**
+    pub gitee_bootstrap_url: Option<String>,
 }
 
 /// `workbench/bootstrap.json` 的形状（`wb_set_bootstrap` 写、`boot_inner` 读、
-/// `src-tauri/build.rs` 也读同一个字段）。**一处定义**，三处引用
+/// `src-tauri/build.rs` 读同一份文件的两个键）。**一处定义**，三处引用。
+///
+/// ★ 双源（2026-10-05，作者拍"国内走 Gitee"）：`bootstrapUrl` = GitHub（主源），
+///   `giteeBootstrapUrl` = Gitee 镜像。**各是各的配置**：保存时两个格子一起显式写，
+///   不存在"只写主源、另一格靠保留"——单字段时代`wb_set_bootstrap`重写整份文件、
+///   把手填的 Gitee 键无声冲掉，正是这条要堵的坑。
 #[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapConfig {
     pub bootstrap_url: String,
+    /// `default`：读单键老档（双源之前写的）不炸；`skip_serializing_if`：
+    /// 清除后文件里不留 `null` 键 —— `build.rs` 的 pick 对缺键/空档都当"没配"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitee_bootstrap_url: Option<String>,
 }
 
-/// 读工作台配置里的官方源。**读不出 / 坏档 = `None` + 日志一条**：
+/// 读工作台配置里的**双官方源**。**读不出 / 坏档 = 全 `None` + 日志一条**：
 /// 它是可选配置，挡不住开场（修法：在工作台里再保存一次覆盖它，或手动删掉整个文件）。
 /// 与"坏档不静默"不冲突 —— 不静默的那一位是日志
-fn read_bootstrap_url() -> Option<String> {
-    let store = Store::open().ok()?;
+fn read_bootstrap_config() -> (Option<String>, Option<String>) {
+    let clean = |url: Option<String>| url.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
+    let Some(store) = Store::open().ok() else {
+        return (None, None);
+    };
     match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "官方源配置") {
-        Ok(Some(cfg)) => {
-            let url = cfg.bootstrap_url.trim().to_owned();
-            (!url.is_empty()).then_some(url)
-        }
-        Ok(None) => None,
+        Ok(Some(cfg)) => (
+            clean(Some(cfg.bootstrap_url)),
+            clean(cfg.gitee_bootstrap_url),
+        ),
+        Ok(None) => (None, None),
         Err(e) => {
             tracing::warn!(error = %e.message, "官方源配置读不出来，按「还没配」处理");
-            None
+            (None, None)
         }
     }
 }
@@ -445,27 +460,47 @@ pub fn wb_app_version() -> Result<String, AppError> {
     })
 }
 
-/// 记下官方源（Bootstrap）地址 —— **工作台里唯一一处"发布到哪"**（写入库的
-/// `workbench/bootstrap.json`）。
+/// 记下官方源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
+/// `workbench/bootstrap.json`）。GitHub 是主源；`gitee_url` 传 `None` / 空白 = 清除
+/// Gitee 镜像档（界面那格空着就是清除，如实写盘，不留 null 键）。
 ///
 /// **不进制 draft 体系**：它不是配方内容（没有撤销 / 差异 / 快照可言），是一次单值
-/// 配置写；界面上是「设置」页的一格，改完当场回显。
-/// 校验与规范化在 [`dist::normalize_bootstrap_url`]（**仓库地址 → 默认发布入口的 raw**；
-/// blob 页按人指的转；raw / 自建源原样 —— 见那个函数的输入契约表）。
+/// 配置写；界面上是「设置」页的两格，改完当场回显。
+/// 校验与规范化在 [`delivery::normalize_bootstrap_url`]（**仓库地址 → 默认发布入口的 raw**；
+/// blob 页按人指的转；raw / 自建源原样；Gitee 是同一座桥 —— 见那个函数的输入契约表）。
+/// **两个格子一笔写全**：调用方（设置页）把两格的现值都传进来 —— 这一笔就是配置的
+/// 全部真值，没有"只动一格、另一格靠后端帮忙保留"的暗规则。
 /// **对客户端生效要重新构建**（`build.rs` 构建期读同一份文件注入）——返回值只是回显。
 #[tauri::command]
-pub fn wb_set_bootstrap(url: String) -> Result<String, AppError> {
+pub fn wb_set_bootstrap(
+    url: String,
+    gitee_url: Option<String>,
+) -> Result<BootstrapConfig, AppError> {
     traced("wb_set_bootstrap", |_| {
-        let normalized = dist::normalize_bootstrap_url(&url)?;
         let store = Store::open()?;
-        store.write_doc(
-            Store::BOOTSTRAP_REL,
-            &BootstrapConfig {
-                bootstrap_url: normalized.clone(),
-            },
-        )?;
-        Ok(normalized)
+        write_bootstrap_config(&store, &url, gitee_url.as_deref())
     })
+}
+
+/// 写盘的那一半（从命令里拆出来给测试用：命令走 `Store::open()`，测试用 `Store::at`）。
+/// 规范化与"空 = 清除"的语义见 [`wb_set_bootstrap`]；返回写下去的形状（回显用）。
+fn write_bootstrap_config(
+    store: &Store,
+    url: &str,
+    gitee_url: Option<&str>,
+) -> Result<BootstrapConfig, AppError> {
+    let bootstrap_url = delivery::normalize_bootstrap_url(url)?;
+    let gitee_bootstrap_url = gitee_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(delivery::normalize_bootstrap_url)
+        .transpose()?;
+    let cfg = BootstrapConfig {
+        bootstrap_url,
+        gitee_bootstrap_url,
+    };
+    store.write_doc(Store::BOOTSTRAP_REL, &cfg)?;
+    Ok(cfg)
 }
 
 /// 开场那一段。先算出三个数据根，再开一次会话（`presets/` 定位不到才会是 problem）
@@ -477,37 +512,43 @@ fn boot_inner() -> Result<Boot, AppError> {
                 .ok_or_else(|| AppError::not_found("定位不到 <repo>/presets"))?
                 .display()
                 .to_string(),
-            dist: paths::dist_root()?.display().to_string(),
+            delivery: paths::delivery_root()?.display().to_string(),
         };
         // 建一次会话：能开就说明 presets/ 读得通（会话自己也读一次）
         with_ctx(|_| Ok(()))?;
+        let (bootstrap_url, gitee_bootstrap_url) = read_bootstrap_config();
         Ok(Boot {
             roots,
             problem: None,
             detail: None,
             store_dirs: store_dir_roles(),
-            bootstrap_url: read_bootstrap_url(),
+            bootstrap_url,
+            gitee_bootstrap_url,
         })
     })() {
         Ok(boot) => Ok(boot),
-        Err(e) => Ok(Boot {
-            roots: Roots {
-                workbench: paths::workbench_root()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-                presets: paths::presets_root()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-                dist: paths::dist_root()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-            },
-            problem: Some(e.message),
-            detail: e.detail,
-            store_dirs: store_dir_roles(),
+        Err(e) => {
             /* 官方源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
-            bootstrap_url: read_bootstrap_url(),
-        }),
+            let (bootstrap_url, gitee_bootstrap_url) = read_bootstrap_config();
+            Ok(Boot {
+                roots: Roots {
+                    workbench: paths::workbench_root()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    presets: paths::presets_root()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    delivery: paths::delivery_root()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                },
+                problem: Some(e.message),
+                detail: e.detail,
+                store_dirs: store_dir_roles(),
+                bootstrap_url,
+                gitee_bootstrap_url,
+            })
+        }
     }
 }
 
@@ -1862,6 +1903,74 @@ mod tests {
             missing_io.is_empty(),
             "这些命令碰网络 / 凭据盘，却还跑在主线程上（推送要等网络、发布链还有落盘与\
              子进程 —— 界面会整段冻住）：{missing_io:?}"
+        );
+    }
+
+    /* ---------- 官方源双源（2026-10-05：设置页两格，写盘不再无声冲掉 Gitee） ---------- */
+
+    /// 单键老档（双源之前的形状）照读 —— `gitee_bootstrap_url` 缺席 = `None`，不炸
+    #[test]
+    fn old_single_key_bootstrap_config_still_reads() {
+        let cfg: BootstrapConfig =
+            serde_json::from_str(r#"{"bootstrapUrl": "https://example.com/s.json"}"#)
+                .expect("单键老档该读得动");
+        assert_eq!(cfg.bootstrap_url, "https://example.com/s.json");
+        assert_eq!(cfg.gitee_bootstrap_url, None);
+    }
+
+    /// 双源一起写、一起读回；两边都是仓库地址 → 都被补成各自默认发布入口的 raw
+    #[test]
+    fn bootstrap_write_roundtrips_both_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+
+        let cfg = write_bootstrap_config(
+            &store,
+            "https://github.com/o/r",
+            Some("https://gitee.com/o/r"),
+        )
+        .expect("双源都合法");
+        assert_eq!(
+            cfg.bootstrap_url,
+            "https://raw.githubusercontent.com/o/r/main/presets/delivery/source.json"
+        );
+        assert_eq!(
+            cfg.gitee_bootstrap_url.as_deref(),
+            Some("https://gitee.com/o/r/raw/main/presets/delivery/source.json")
+        );
+
+        let back: BootstrapConfig = store
+            .read_doc(Store::BOOTSTRAP_REL, "官方源配置")
+            .expect("读回")
+            .expect("刚写的该在");
+        assert_eq!(back.bootstrap_url, cfg.bootstrap_url);
+        assert_eq!(back.gitee_bootstrap_url, cfg.gitee_bootstrap_url);
+    }
+
+    /// **清除语义**：`None` / 空白 = Gitee 档删掉（文件里不留 `null` 键），主源照写。
+    /// 界面上那格空着就是清除 —— 是显式的操作，不是"没传就帮你保住"的暗规则
+    #[test]
+    fn bootstrap_write_clears_gitee_when_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path());
+        store.bootstrap().unwrap();
+        write_bootstrap_config(
+            &store,
+            "https://github.com/o/r",
+            Some("https://gitee.com/o/r"),
+        )
+        .unwrap();
+
+        let cfg = write_bootstrap_config(&store, "https://github.com/o/r2", None).unwrap();
+        assert_eq!(cfg.gitee_bootstrap_url, None, "None = 清除");
+        let cfg = write_bootstrap_config(&store, "https://github.com/o/r2", Some("   ")).unwrap();
+        assert_eq!(cfg.gitee_bootstrap_url, None, "空白 = 清除");
+
+        let text = std::fs::read_to_string(dir.path().join("bootstrap.json")).unwrap();
+        assert!(
+            !text.contains("giteeBootstrapUrl"),
+            "清除后文件里不该留 null 键：{text}"
         );
     }
 }

@@ -197,7 +197,7 @@ pub fn preflight(
     match delivery {
         Ok(()) => {}
         Err(detail) => issues.push(Issue {
-            id: "dist.catalog_mismatch".to_owned(),
+            id: "delivery.catalog_mismatch".to_owned(),
             // **待办，不是阻断**（作者 2026-10-03 要求把这条升硬 —— 但不能是阻断）：
             // 阻断会压住生成与发布两颗按钮，而「重算清单」恰恰是修复动作 ——
             // 等于把修复的路堵死。待办显眼、进计数、不挡闸。
@@ -939,7 +939,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let todo = r
             .issues
             .iter()
-            .find(|i| i.id == "dist.catalog_mismatch")
+            .find(|i| i.id == "delivery.catalog_mismatch")
             .expect("清单对不上，这条该在");
         assert_eq!(
             todo.severity,
@@ -956,7 +956,7 @@ uuid = '33333333-3333-3333-3333-333333333333'
 
         // 自查过了就没有这条
         let r = preflight(&book, Err("配方读不回来（测试）"), Ok(()), Ok(()));
-        assert!(r.issues.iter().all(|i| i.id != "dist.catalog_mismatch"));
+        assert!(r.issues.iter().all(|i| i.id != "delivery.catalog_mismatch"));
     }
 
     /// 内嵌目录（安装包里编译死的那份 catalog）落后于仓库数据 = 一条待办。

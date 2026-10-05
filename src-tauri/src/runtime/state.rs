@@ -246,7 +246,7 @@ const DRAFT_FILE: &str = "run/draft-preset.json";
 /// ```
 ///
 /// **为什么不跟官方原件同目录**（示意里那个 `A1MF_260701.tmp.toml`）：交付文件的落点
-/// 由 `catalog.path` 定（A 类 `assets/…`、B 类 `dist/mkp/presets/…`），它的判据是
+/// 由 `catalog.path` 定（A 类 `assets/…`、B 类 `delivery/mkp/presets/…`），它的判据是
 /// "盘上每个文件都在目录里登记"（[`super::delivery::stale_files`] 就是靠这条
 /// 认陈旧文件的）—— 往里塞一个 `.tmp`，它立刻变成"目录里没有的陈旧文件"，
 /// 污染交付那一层的每一条判据。草稿是**运行状态**（"我正在改哪一份"），住 `run/`。

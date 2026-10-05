@@ -21,7 +21,7 @@
  *    impact 等，都是照真后端的行为**手工预填/按同一规则现算的测试数据**，
  *    判据的唯一出处仍在 src-tauri；
  *  - **桩里的值与真盘无关**：`wb_set_bootstrap` 只写内存、不做 GitHub → raw 规范化
- *    （那是真后端 `dist::normalize_bootstrap_url` 的活，有单元测试钉着）——
+ *    （那是真后端 `delivery::normalize_bootstrap_url` 的活，有单元测试钉着）——
  *    所以别拿浏览器里的行为当"配置生效了"的证据；
  *  - 写路径在这里是**内存里的假草稿**，落盘、快照、指纹这些一概没有。
  */
@@ -520,7 +520,7 @@ function mockSha(id: string): string {
 /**
  * `wb_asset_inspect` 的演示读数（第四刀）—— 与真机同形：
  * 普通资产指向**源文件**（`presets/assets/<path>`）、mkPreset 指向**产物**
- * （`presets/dist/mkp/presets/A1-standard.toml`，一份已生成、一份还没）。
+ * （`presets/delivery/mkp/presets/A1-standard.toml`，一份已生成、一份还没）。
  * 文件不在的那一条给期望路径 + 空读数（照真机的口径）。
  */
 function assetInspectOf(a: FixtureRef) {
@@ -530,7 +530,7 @@ function assetInspectOf(a: FixtureRef) {
     const fileName = `A1-${versionId.toLowerCase()}.toml`
     // 演示：一份产物已生成、一份还没 —— 与列表里的 buildState 同一套演示事实
     const exists = a.id === 'a1-standard'
-    const productPath = `presets/dist/mkp/presets/${fileName}`
+    const productPath = `presets/delivery/mkp/presets/${fileName}`
     return {
       id: a.id, fileName, absPath: `C:\\dev\\${toWin(productPath)}`, exists,
       bytes: exists ? 4312 : null, sha256: exists ? mockSha(a.id) : null,
@@ -580,6 +580,7 @@ function bundleListOf(query: string | null) {
 
 /** 官方源（Bootstrap）：`wb_set_bootstrap` 写它（浏览器里存内存）。真机写 workbench/bootstrap.json */
 let mockBootstrap: string | null = null
+let mockGiteeBootstrap: string | null = null
 
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
@@ -588,12 +589,13 @@ function mockBoot(): Json {
     roots: {
       workbench: 'C:\\dev\\MKPSupportEase\\workbench',
       presets: 'C:\\dev\\MKPSupportEase\\presets',
-      dist: 'C:\\dev\\MKPSupportEase\\presets\\dist',
+      delivery: 'C:\\dev\\MKPSupportEase\\presets\\delivery',
     },
     problem: null,
     detail: null,
     storeDirs: STORE_DIRS,
     bootstrapUrl: mockBootstrap,
+    giteeBootstrapUrl: mockGiteeBootstrap,
   }
 }
 
@@ -618,7 +620,7 @@ const TRASH = [
   { file: '20260928-T-10-12-45__A1__OLDVER', deletedStamp: '20260928-T-10-12-45', machineId: 'A1', versionId: 'OLDVER' },
 ]
 
-/** dist 面的残留（`wb_dist_strays` 读它、「清理残留」清它）—— 桩里可变，好让发布闸跟着动 */
+/** delivery 面的残留（`wb_dist_strays` 读它、「清理残留」清它）—— 桩里可变，好让发布闸跟着动 */
 let mockStrays: string[] = ['mkp/presets/old_file.toml']
 
 /** 发布闸一行（`audit::AuditItem` 的桩形状） */
@@ -647,7 +649,7 @@ const AUDIT_ROWS: [string, string][] = [
   ['catalog/matches-files', '登记的每一条都取得到'],
   ['catalog/sha-size', 'SHA / 大小对真字节算且一致'],
   ['catalog/no-phantoms', '没有幽灵条目'],
-  ['dist/no-strays', '交付目录里没有残留'],
+  ['delivery/no-strays', '交付目录里没有残留'],
   ['bundles/closure', '套餐引用闭包完整'],
   ['version/structure', '结构代次与最低客户端版本'],
   ['source/correct', 'Bootstrap（source.json）正确'],
@@ -660,7 +662,7 @@ const AUDIT_ROWS: [string, string][] = [
  *
  * ★ **判定不在这一层**：真判据是 Rust 的 `audit::publish_audit`（界面与 `cargo test`
  * 调的是同一个函数）。这一份只是让浏览器里那个框能验收 —— 所以结论按桩自己那份数据给，
- * 至少 `dist/no-strays` 要跟着 [`mockStrays`] 走，别让两项桩互相打脸。
+ * 至少 `delivery/no-strays` 要跟着 [`mockStrays`] 走，别让两项桩互相打脸。
  */
 function mockAudit(): Json {
   const items: MockAuditItem[] = AUDIT_ROWS.map(([id, name]) => {
@@ -676,7 +678,7 @@ function mockAudit(): Json {
         fixHint: '演示桩：这一项的真判据在 Rust（`runtime::structure` + 规则表）',
       }
     }
-    if (id === 'dist/no-strays' && mockStrays.length > 0) {
+    if (id === 'delivery/no-strays' && mockStrays.length > 0) {
       return {
         id,
         name,
@@ -684,7 +686,7 @@ function mockAudit(): Json {
         severity: 'blocker',
         details: `${mockStrays.length} 个残留文件`,
         affectedFiles: [...mockStrays],
-        fixHint: '点「清理残留」（进 workbench/.trash/dist/<时间戳>/，可还原）',
+        fixHint: '点「清理残留」（进 workbench/.trash/delivery/<时间戳>/，可还原）',
       }
     }
     return {
@@ -1441,7 +1443,7 @@ export function installMockBackend() {
           auditFailed: 0,
           generated: 9,
           unchanged: 0,
-          committedPaths: ['presets/dist/', 'presets/structure-signatures.toml', 'presets/assets.toml'],
+          committedPaths: ['presets/delivery/', 'presets/structure-signatures.toml', 'presets/assets.toml'],
           review: {
             platform: 'github',
             number: 128,
@@ -1728,10 +1730,13 @@ export function installMockBackend() {
         if (url === '') {
           return Promise.reject({ code: 'INVALID', message: 'Bootstrap 地址是空的', traceId: 'mock' })
         }
-        /* 演示桩不做 GitHub blob → raw 的规范化（那是真后端 `dist::normalize_bootstrap_url`
-           的活）—— 存原样；真机存下去的是转好的 raw 直链 */
+        const giteeRaw = args?.giteeUrl
+        const giteeUrl = giteeRaw === null || giteeRaw === undefined ? null : String(giteeRaw).trim()
+        /* 演示桩不做 GitHub/Gitee 仓库地址 → raw 的规范化（那是真后端
+           `delivery::normalize_bootstrap_url` 的活）—— 存原样；真机存下去的是转好的 raw 直链 */
         mockBootstrap = url
-        return Promise.resolve(url)
+        mockGiteeBootstrap = giteeUrl === '' ? null : giteeUrl
+        return Promise.resolve({ bootstrapUrl: mockBootstrap, giteeBootstrapUrl: mockGiteeBootstrap })
       }
       case 'wb_reload':
         return Promise.resolve(mockBoot())

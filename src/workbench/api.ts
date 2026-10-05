@@ -78,8 +78,8 @@ export interface Roots {
   workbench: string
   /** 预设真相源（仓库里的 `presets/`） */
   presets: string
-  /** 交付产物目录（仓库里的 `presets/dist/`） */
-  dist: string
+  /** 交付产物目录（仓库里的 `presets/delivery/`） */
+  delivery: string
 }
 
 /** `app::Boot`。**预设根定位不到时也是一个成功返回**，界面要显示问题与数据根 */
@@ -96,6 +96,11 @@ export interface Boot {
    * 改了要**重新构建客户端**才生效（编译期注入）；`wb_set_bootstrap` 写它
    */
   bootstrapUrl: string | null
+  /**
+   * 第二官方源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
+   * null = 没配 —— 客户端构建不注入这一档，客户端界面也不出现它。各读各的，互不兜底
+   */
+  giteeBootstrapUrl: string | null
 }
 
 /* ---------- 整本 ---------- */
@@ -1279,7 +1284,7 @@ export interface AssetInspectView {
   height: number | null
   /** 格式（小写扩展名：`webp` / `svg` / `3mf` / `json` / `toml`…） */
   format: string | null
-  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/dist/mkp/presets/<产物名>` */
+  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>` */
   productPath: string | null
 }
 
@@ -1355,8 +1360,16 @@ export const wb = {
   reload: () => invoke<Boot>('wb_reload'),
   /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
   appVersion: () => invoke<string>('wb_app_version'),
-  /** 写官方源（Bootstrap）；返回**存的规范化值**（仓库地址 → 默认发布入口的 raw；blob 页转 raw） */
-  setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
+  /**
+   * 写官方源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
+   * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。
+   * 两格一笔写全 —— 这一笔就是配置的全部真值
+   */
+  setBootstrap: (url: string, giteeUrl: string | null) =>
+    invoke<{ bootstrapUrl: string; giteeBootstrapUrl?: string | null }>('wb_set_bootstrap', {
+      url,
+      giteeUrl,
+    }),
   words: () => invoke<Words>('wb_words'),
 
   book: () => invoke<BookView>('wb_book'),
@@ -1649,7 +1662,7 @@ export const wb = {
    */
   distStrays: () => invoke<string[]>('wb_dist_strays'),
   /**
-   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/dist/` 回收（保留相对路径），
+   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/delivery/` 回收（保留相对路径），
    * **不直接删**。清理完重新发布即可
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),

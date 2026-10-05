@@ -37,7 +37,7 @@ pub fn catalog_file(root: &Path) -> PathBuf {
 /// 归档区：`<appDataDir>/archive`。
 ///
 /// **内部结构与交付面同形**：`archive/<catalog.path>`（例如
-/// `archive/dist/mkp/presets/A1-fast.toml`、`archive/assets/bbs/…/x.json`）。
+/// `archive/delivery/mkp/presets/A1-fast.toml`、`archive/assets/bbs/…/x.json`）。
 /// 同形是刻意的 —— 归档里这份是谁，去掉前缀就是答案。
 pub fn archive_dir(root: &Path) -> PathBuf {
     root.join(ARCHIVE_DIR)

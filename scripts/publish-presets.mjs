@@ -1,12 +1,16 @@
 /**
  * 官方预设数据发布 —— `npm run publish:presets`。
  *
+ * ★ **状态：清算中（`docs/RESOURCE-ADDRESSING-ROADMAP.md` M5）** —— 这是 wb_publish
+ * 之外的**第二个发布出口**，长期目标是退役或改调 `wb_publish` 内核；在那之前它
+ * 跟随新交付目录 `presets/delivery/`。新的一律走工作台的「发布」。
+ *
  * # 它是什么、不是什么（第十八刀）
  *
  * 这是**预设数据**的发布，**不是 SupportEase 软件版本的发布**。两者是两条独立的线：
  *
  *   `npm run release`         → 软件版本发布：改版本号 → PR → CI → squash → tag `vX.Y.Z`
- *   `npm run publish:presets` → 预设数据发布：把 `presets/dist/` 直接送进 main
+ *   `npm run publish:presets` → 预设数据发布：把 `presets/delivery/` 直接送进 main
  *
  * **刻意不共用 `release.mjs`**：共用的话，每更新一份预设 TOML 都会把软件版本体系
  * （版本号、tag、CI 全绿）一起卷进来 —— 那是把两件事绑成了一件事。
@@ -19,15 +23,15 @@
  *
  * # 为什么要一次性分支
  *
- * 我们定死"最终状态只在 main"：`presets/dist/` 是 main 上的**正式交付目录**，
- * 客户端从 `raw.githubusercontent.com/.../main/presets/dist/source.json` 读。
+ * 我们定死"最终状态只在 main"：`presets/delivery/` 是 main 上的**正式交付目录**，
+ * 客户端从 `raw.githubusercontent.com/.../main/presets/delivery/source.json` 读。
  * 所以**不需要**一个长期存在的 `preset-dist` 分支 —— 那种分支会多出一份要维护的状态
  * （跟 main 同步、被误删、别人要理解两套历史）。这里每次发布临时开一个分支，
  * PR 合并后由 GitHub 删掉（`--delete-branch` 或你手动），**自然消失**。
  *
  * # 发布前必须全过（否则一个字节都不 git add）
  *
- * `presets/dist/` 是 `wb_publish` 的产物，但脚本**不信任它"应该是对的"**：
+ * `presets/delivery/` 是 `wb_publish` 的产物，但脚本**不信任它"应该是对的"**：
  * 发布出去的字节就是用户下载的字节，所以逐条核对：
  *
  *   ① 产物存在且非空
@@ -97,7 +101,7 @@ function die(message, rollback = []) {
 }
 
 /** 交付根（相对仓库根）。.gitignore 不再忽略它 —— 它就是 main 上的正式交付目录 */
-const DIST_REL = 'presets/dist'
+const DIST_REL = 'presets/delivery'
 const DIST = join(ROOT, DIST_REL)
 /**
  * ★ **发布根**（相对仓库根）= `catalog.path` 的基准（2026-10-04 裁决 C/甲）。
@@ -105,9 +109,9 @@ const DIST = join(ROOT, DIST_REL)
  * `catalog.path`（与 manifest 的 `relativePath`）**同时是"云端取哪"与"客户端放哪"**：
  *
  *   A 类（BBS / 模型 / 图标）  `assets/…`          → 原地住在 `presets/assets/…`（不复制进 dist）
- *   B 类（MKP 渲染产物）       `dist/mkp/presets/…` → 住在 `presets/dist/mkp/presets/…`
+ *   B 类（MKP 渲染产物）       `dist/mkp/presets/…` → 住在 `presets/delivery/mkp/presets/…`
  *
- * 所以**校验交付文件时一律以发布根 `presets/` 为基准**，不是 `presets/dist/`。
+ * 所以**校验交付文件时一律以发布根 `presets/` 为基准**，不是 `presets/delivery/`。
  * 唯一例外是 `source.json` 的 `catalog` 字段：它的语义是"相对 source.json 所在目录"，
  * 那一处仍以 `DIST` 为基准。
  */
@@ -229,7 +233,7 @@ ok(`${CATALOG_FILE}：${files.length} 条 path 形状合法（非空、无 ..）
  * "catalog 登记了 mkp/models/xxx.3mf，但交付根里没有这份文件" —— 而那份模型本来就
  * 没进任何套餐。真踩到过：首次发布被这条误拦。
  *
- * ★ 2026-10-04 起基准是**发布根 `presets/`**（`PUBLISH`），不是交付根 `presets/dist/`：
+ * ★ 2026-10-04 起基准是**发布根 `presets/`**（`PUBLISH`），不是交付根 `presets/delivery/`：
  * manifest 的 `relativePath` 与 `catalog.path` 同值、同基准（A 类 `assets/…` 不在 dist 里）。
  */
 const manifestPaths = new Set(
@@ -324,7 +328,7 @@ if (branch !== 'main') {
   )
 }
 
-/* 「干净」＝**除 `presets/dist/` 之外**没有别的改动。
+/* 「干净」＝**除 `presets/delivery/` 之外**没有别的改动。
    必须把 dist 排除在外：首次发布时它本来就是未跟踪的（正被忽略惯了的目录第一次现身），
    拿它自身的未跟踪状态去拦自己的首次发布，就是个死锁。
 
@@ -345,12 +349,12 @@ const dirty = dirtyRaw
   .filter((path) => !(path === DIST_REL || path.startsWith(`${DIST_REL}/`)))
 if (dirty.length > 0) {
   die(
-    '工作区不干净（除 presets/dist/ 之外还有改动）。先提交或 stash。\n' +
+    '工作区不干净（除 presets/delivery/ 之外还有改动）。先提交或 stash。\n' +
       '    （**不要**顺手把在途的依赖版本文件带进来：那是另一件事）\n' +
       dirty.map((l) => `      ${l}`).join('\n'),
   )
 }
-ok('在 main 上，除 presets/dist/ 之外工作区干净')
+ok('在 main 上，除 presets/delivery/ 之外工作区干净')
 
 /* 说明：命令行给了就不问（`npm run publish:presets -- "一句话"`），与 release.mjs 同形 ——
    非交互也能跑，才可能进自动化 */
@@ -408,7 +412,7 @@ const prUrl = run('gh', [
     `- catalog revision：\`${catalog.revision}\``,
     `- 文件：${files.length} 条（SHA / 大小已逐一核对）`,
     '',
-    '合并后 main 上的 `presets/dist/` 即为客户端读取的官方交付目录。',
+    '合并后 main 上的 `presets/delivery/` 即为客户端读取的官方交付目录。',
   ].join('\n'),
 ])
 ok(`PR 已开：${prUrl}`)

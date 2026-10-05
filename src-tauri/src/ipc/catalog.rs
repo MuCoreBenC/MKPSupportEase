@@ -266,7 +266,7 @@ pub async fn download_runtime_file(
                 );
             };
             let resolved = runtime::source::resolve_source(&root)?;
-            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
+            let remote = runtime::net::RemoteSource::new(resolved.resolver.clone(), &forward);
             let outcome = runtime::delivery::deliver(&root, file, &remote);
 
             match &outcome {
@@ -347,7 +347,7 @@ pub async fn download_runtime_files(
                 );
             };
             let resolved = runtime::source::resolve_source(&root)?;
-            let remote = runtime::net::RemoteSource::new(resolved.base_url, &forward);
+            let remote = runtime::net::RemoteSource::new(resolved.resolver.clone(), &forward);
 
             let report = |outcome: &runtime::delivery::FileOutcome| {
                 // 期望大小是 `Option`（随包 bootstrap 目录不登记它）：拿不到就报
@@ -448,7 +448,7 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
 pub struct DeliveryTrustDto {
     pub file_name: String,
     pub verdict: String,
-    /// `old` 且归档区里有它字节时给（`archive/dist/mkp/presets/A1-fast.toml`）—— 界面据此
+    /// `old` 且归档区里有它字节时给（`archive/delivery/mkp/presets/A1-fast.toml`）—— 界面据此
     /// 把那一版旧正文读出来给人对。被旧目录登记、归档里没字节的那种是 `null`
     pub archived_path: Option<String>,
 }
@@ -478,7 +478,7 @@ pub async fn get_delivery_trust(app: AppHandle) -> Result<Vec<DeliveryTrustDto>,
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivedFileDto {
-    /// 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来
+    /// 相对内部根的路径（`archive/delivery/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来
     pub path: String,
     pub file_name: String,
     pub size: u64,
@@ -508,8 +508,8 @@ pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, 
         Ok(runtime::delivery::archived_files(&root)
             .into_iter()
             .map(|a| {
-                /* 认人靠"同位"：`archive/dist/mkp/presets/x.toml` ↔ 目录里的
-                `dist/mkp/presets/x.toml`（同形，新字节）。**不解析文件名**去猜机型
+                /* 认人靠"同位"：`archive/delivery/mkp/presets/x.toml` ↔ 目录里的
+                `delivery/mkp/presets/x.toml`（同形，新字节）。**不解析文件名**去猜机型
                 版本 —— 名字规则将来会变，而"归档这份与目录里哪一份同位"
                 是一个不需要额外知识的事实 */
                 let known = a
@@ -752,7 +752,7 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
             let resolved = runtime::source::resolve_source(&root)?;
-            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;
             let remote = runtime::Catalog::parse(&bytes)?;
             let local = runtime::load_released_catalog(&root)?;
             let r = runtime::update::check(&local, &remote);
@@ -780,7 +780,7 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
         traced("applyRemoteUpdate", |_| {
             let root = internal_root(&app)?;
             let resolved = runtime::source::resolve_source(&root)?;
-            let bytes = runtime::net::get_catalog(&resolved.catalog_url)?;
+            let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;
             let remote = runtime::Catalog::parse(&bytes)?;
 
             /* 先判定再落盘：读不懂就整次拒绝，盘上那份目录一个字节都不动。
@@ -830,10 +830,11 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
             let root = internal_root(&app)?;
             let resolved = runtime::source::resolve_source(&root)?;
 
-            /* release.json 住发布根（presets/）之外：从 base_url（文件下载根 = presets/dist）
+            /* release.json 住发布根（presets/）之外：从 base_url（文件下载根 = presets/delivery）
             上去两级就是仓库根发布位置。手写死三级最容易在换部署时错位，
             所以用 source 的目录回退规矩，从 base_url 推它自己的"上一级" */
-            let release_url = runtime::source::release_url(&resolved.base_url)?;
+            /* release.json 的地址由 Source Manifest 声明（不再从 base"上跳一级"去猜） */
+            let release_url = resolved.release_url()?;
             let bytes = runtime::net::get_release(&release_url)?;
             let info = runtime::release_info::parse(&bytes)?;
             Ok(SoftwareUpdateDto::from(runtime::release_info::to_update(

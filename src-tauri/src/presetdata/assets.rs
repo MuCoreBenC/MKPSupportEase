@@ -78,7 +78,7 @@ pub enum AssetKind {
     /// 一切配发内容都在资产库里有登记，套餐从这儿统一选）。
     ///
     /// 与前四类的**根本差别**：它的文件不是资产根下的静态文件，而是**生成产物**
-    /// （`presets/dist/mkp/presets/<产物名>`，命名规则算出）—— 所以这一类
+    /// （`presets/delivery/mkp/presets/<产物名>`，命名规则算出）—— 所以这一类
     /// **不写 `path`**（那是 doc §12.5「路径由命名规则算出」的实现），改写
     /// `versionId`（`machineId` + `versionId` 定位那一版）。**文件在不在都不影响
     /// 登记与选用**（作者：「不只是没文件的时候可以选择，有文件也要可以选择」）——
@@ -121,7 +121,7 @@ pub struct Asset {
     pub name: String,
     /// 相对资产根的文件位置。**唯一一份路径**。
     ///
-    /// `mkpPreset` 类**留空** —— 它的文件是生成产物（落点在 `presets/dist/mkp/presets/`），
+    /// `mkpPreset` 类**留空** —— 它的文件是生成产物（落点在 `presets/delivery/mkp/presets/`），
     /// 路径由命名规则算出，不在这里再登记一份（那是 doc §12.5 的原话；
     /// 作者 2026-10-03 要求「进资产库」指的是**登记与选用**，不是把产物路径抄进台账）。
     #[serde(default)]

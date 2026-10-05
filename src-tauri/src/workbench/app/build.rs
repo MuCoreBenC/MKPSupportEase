@@ -3,7 +3,7 @@
 //! # 生成是原子的
 //!
 //! **先把全部产物算完，任一项算不出来则整批不动**；全部成功才逐个原子替换。
-//! 半批生成的后果是最难查的一种：dist 里有一半新一半旧，而两边都是合法的 TOML，
+//! 半批生成的后果是最难查的一种：delivery 里有一半新一半旧，而两边都是合法的 TOML，
 //! 客户端下载下来也不会报错，只是行为对不上。
 //!
 //! # 字节没变不重写文件
@@ -103,8 +103,10 @@ pub fn wb_preflight() -> Result<Report, AppError> {
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
             // 交付目录的「清单 ↔ 文件」自查在 app 层做（要摸盘），结果作为一条交给预检
-            let delivery =
-                super::dist::audit_catalog(&crate::workbench::paths::dist_root_path(), &book);
+            let delivery = super::delivery::audit_catalog(
+                &crate::workbench::paths::delivery_root_path(),
+                &book,
+            );
             // 内嵌目录（编译进安装包的那份）跟仓库数据对不对得上也是盘上的事实 ——
             // 同一条路交给预检：坏了自己成为报告里的一条，不让整个预检失败
             let embedded = audit_embedded_catalog();
@@ -477,7 +479,7 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     })
 }
 
-/// 生成的**锁无关内核**：给定一份会话，按 scope 把产物写进 `dist/mkp/presets/` 并重算目录。
+/// 生成的**锁无关内核**：给定一份会话，按 scope 把产物写进 `delivery/mkp/presets/` 并重算目录。
 ///
 /// 与 [`preview_with`] 是同一条理由（见那里）：「生成前预演」与「真生成」、
 /// 「发布事务里的生成」必须是**同一批 todo、同一处渲染、同一处落点**。
@@ -504,15 +506,15 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
 
     // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
     // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
-    let dist = paths::dist_root()?
-        .join(super::dist::MKP_DIR)
+    let delivery_root = paths::delivery_root()?
+        .join(super::delivery::MKP_DIR)
         .join("presets");
     let mut written = Vec::new();
     let mut unchanged = Vec::new();
     let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
 
     for r in &rendered {
-        let target = dist.join(&r.file_name);
+        let target = delivery_root.join(&r.file_name);
         let existing = std::fs::read_to_string(&target).ok();
         let same = existing
             .as_deref()
@@ -542,7 +544,7 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     }
 
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
-    // 跟上，dist 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
+    // 跟上，delivery 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
     //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
     // 重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 / 渠道）仍归
     // 发布写 —— 生成不替发布定稿。
@@ -550,11 +552,11 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
     // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
     // ×7）。先补文件、再重算目录，两头对上。
-    let dist_root = paths::dist_root()?;
+    let dist_root = paths::delivery_root()?;
     if let Ok(asset_root) = paths::assets_root() {
-        super::dist::write_content(&dist_root, &asset_root, &book)?;
+        super::delivery::write_content(&dist_root, &asset_root, &book)?;
     }
-    super::dist::write_catalog_json(&dist_root, &book)?;
+    super::delivery::write_catalog_json(&dist_root, &book)?;
 
     let stamp = clock::now_iso8601();
     tracing::info!(
@@ -660,7 +662,7 @@ pub struct PreviewReport {
 /// **生成前预演**：把这次要写的产物都算出来，与磁盘上现存的逐份比，给出行级 diff。
 ///
 /// **一个字节都不写** —— 它就是 [`wb_generate`] 的彩排：同一批 `todo`（同一套跳过理由）、
-/// 同一处渲染、同一处落点（`<dist>/mkp/presets/`），只是把"写"换成"读出来比"。
+/// 同一处渲染、同一处落点（`<delivery>/mkp/presets/`），只是把"写"换成"读出来比"。
 /// 界面上「点生成 → 先看这个 → 再点确认」的第二步靠它。
 ///
 /// 阻断也照实报（`blocked` 非空 = 生成会被拒），不假装能生成。
@@ -696,8 +698,8 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     }
 
     let (todo, skipped) = planned_todos(&book, scope);
-    let dist = paths::dist_root_path()
-        .join(super::dist::MKP_DIR)
+    let delivery_root = paths::delivery_root_path()
+        .join(super::delivery::MKP_DIR)
         .join("presets");
 
     let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
@@ -705,7 +707,7 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     let mut unchanged = 0usize;
     for uid in &todo {
         let r = render(&book, uid)?;
-        let existing = std::fs::read_to_string(dist.join(&r.file_name)).ok();
+        let existing = std::fs::read_to_string(delivery_root.join(&r.file_name)).ok();
         let pf = preview_one(&r, existing.as_deref());
         match pf.state {
             DiffState::Unchanged => unchanged += 1,
@@ -1110,7 +1112,7 @@ fn resolve_publish(
     (Some(target), Some(hosting))
 }
 
-/// **旧发布壳**（第三刀上半及以前）：只把 `presets/dist/` 定稿，不生成、不动 git。
+/// **旧发布壳**（第三刀上半及以前）：只把 `presets/delivery/` 定稿，不生成、不动 git。
 ///
 /// 已被 [`wb_publish`] 事务取代，**不再是前端入口**。留着它是因为它仍是"定稿"这一步的
 /// 可单测入口（发布事务内核走的是同一段 `publish_into`）。前端只用 `wb_publish`。
@@ -1125,14 +1127,14 @@ fn publish_deliverable_only() -> Result<PublishReport, AppError> {
                 .with_detail(format!("{}：{}", b.title, b.detail)));
         }
 
-        let root = paths::dist_root()?;
+        let root = paths::delivery_root()?;
         let asset_root = paths::assets_root()?;
-        let meta = super::dist::PublishMeta {
+        let meta = super::delivery::PublishMeta {
             stamp: clock::now_iso8601(),
             channel: PUBLISH_CHANNEL.to_owned(),
             version: String::new(),
         };
-        let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+        let out = super::delivery::publish_into(&root, &asset_root, &book, &meta)?;
         let stamp = meta.stamp;
 
         tracing::info!(files = out.files, at = %stamp, "发布完成");
@@ -1157,13 +1159,16 @@ pub fn wb_dist_strays() -> Result<Vec<String>, AppError> {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::dist_expected_set(&book);
-            Ok(super::dist::scan_strays(&paths::dist_root()?, &expected))
+            let expected = super::delivery::delivery_expected_set(&book);
+            Ok(super::delivery::scan_strays(
+                &paths::delivery_root()?,
+                &expected,
+            ))
         })
     })
 }
 
-/// **清理残留**（b05 Task 13.5）：显式动作，走 `workbench/.trash/dist/<stamp>/`
+/// **清理残留**（b05 Task 13.5）：显式动作，走 `workbench/.trash/delivery/<stamp>/`
 /// 回收（保留相对路径，可还原），不直接删。清理完重新发布即可。
 #[tauri::command]
 pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
@@ -1171,9 +1176,9 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
-            let expected = super::dist::dist_expected_set(&book);
-            let root = paths::dist_root()?;
-            let strays = super::dist::scan_strays(&root, &expected);
+            let expected = super::delivery::delivery_expected_set(&book);
+            let root = paths::delivery_root()?;
+            let strays = super::delivery::scan_strays(&root, &expected);
             if strays.is_empty() {
                 return Ok(0);
             }
@@ -1181,7 +1186,7 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
             // 收集符号里的 `:` 会让 Windows 路径出问题，压成安全形状
             let stamp = stamp.replace([':', ' '], "-");
             let trash_root = paths::workbench_root()?.join(".trash");
-            let moved = super::dist::clean_strays(&root, &strays, &trash_root, &stamp)?;
+            let moved = super::delivery::clean_strays(&root, &strays, &trash_root, &stamp)?;
             tracing::info!(moved, at = %stamp, "交付残留已移入回收站");
             Ok(moved)
         })

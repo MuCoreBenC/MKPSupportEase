@@ -23,7 +23,7 @@
 //!
 //! ```text
 //! ① 版本号那一批（Cargo.toml + 三个派生）  → 分支 → PR → 合并 → 打 tag
-//! ② presets/release.json（上传成功之后）   → 新分支 → PR → **停在这里等人合并**
+//! ② presets/delivery/release.json（上传成功之后）   → 新分支 → PR → **停在这里等人合并**
 //! ```
 //!
 //! ② 之所以是另一笔、且**不再自动合并**：`release.json` 只有在**合并进 main**之后才
@@ -60,7 +60,61 @@ pub const DMG_DIRS: [&str; 2] = [
     "src-tauri/target/release/bundle/dmg",
 ];
 /// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
-pub const RELEASE_INFO_REL: &str = "presets/release.json";
+/// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
+///
+/// ★ 2026-10-05 寻址改造（总纲 §1②）：从 `presets/release.json` 入住交付根
+/// `presets/delivery/` —— 它本来就是客户端消费的交付元数据，与 catalog / manifest /
+/// source 同边界；客户端按 Source Manifest 的 `release` 声明取它（旧的"上跳一级"
+/// 推导已废除）。测试钉位见 `runtime::release_info`。
+pub const RELEASE_INFO_REL: &str = "presets/delivery/release.json";
+
+/// **断代线**（M6，总纲 §5-M6）：从这个版本起，`release.json` 里的 URL 一律来自
+/// **Gitee Release**（发布仓库），`github.com/.../releases` 只允许出现在断代前的
+/// 历史记录里（v≤0.0.5 是 GitHub 发的，照旧合法 —— 那是事实，不改写）。
+pub const FIRST_GITEE_RELEASE: &str = "0.0.6";
+
+/// 断代校验（写 `release.json` **之前**调，违规即事务短路 —— 坏 URL 不许落盘）。
+///
+/// ★ 与 `scripts/check-release-source.mjs`（CI）同一条规则的两个实现：
+/// 那边查**已入库**的历史档，这边拦**正在生成**的这一份。常量两边同值。
+fn validate_release_source(
+    version: &str,
+    release_url: &str,
+    asset: Option<&crate::runtime::release_info::ReleaseAsset>,
+) -> Result<(), AppError> {
+    // `compare(latest, current)` = latest 更新；"断代线比这一版还新" = 还在断代前
+    if crate::runtime::release_info::compare(FIRST_GITEE_RELEASE, version) {
+        return Ok(());
+    }
+    let mut bad: Vec<String> = Vec::new();
+    if release_url.contains("github.com") {
+        bad.push(format!("Release 页 {}", release_url));
+    }
+    if let Some(a) = asset {
+        if a.url.contains("github.com") {
+            bad.push(format!("安装包 {}", a.url));
+        }
+    }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::invalid_argument(format!(
+            "release.json 的下载地址必须是 Gitee（总纲 §5-M6：{FIRST_GITEE_RELEASE} 起断代）——              这些还指着 GitHub：{}",
+            bad.join("；")
+        )))
+    }
+}
+
+/// **软件版本的发布通道**（M6，2026-10-05 定成架构规则）：
+/// Release 与安装包附件住在 **Gitee**（发布仓库 = 设置里的 Gitee 账户），
+/// 与 `target`（PR / tag / 推送，跟仓库 remote 走）**刻意分开** ——
+/// 代码主线在 GitHub，发布面（Release + 附件 + 数据源镜像）在 Gitee。
+/// 客户端只读 `release.json → asset.url`，永远不知道发布平台细节。
+pub struct ReleaseChannel<'a> {
+    pub hosting: &'a dyn Hosting,
+    /// Gitee 的发布目标（owner/repo/凭据）
+    pub target: &'a PublishTarget,
+}
 
 /// 发布软件版本的**阶段**。顺序即流程，前端只认这一档枚举。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -265,6 +319,7 @@ pub fn run(
     opts: &ReleaseOptions,
     target: Option<&PublishTarget>,
     hosting: Option<&dyn Hosting>,
+    release: Option<&ReleaseChannel<'_>>,
 ) -> Result<ReleaseTxReport, AppError> {
     let git = Git::open(repo_root);
     let base = opts.base_or_main();
@@ -470,7 +525,7 @@ pub fn run(
             .push_str(&format!("已切到 {base} 并在 tip 上打 {tag}、推送。"));
 
         // ★★ **主线也推一份到发布仓库**（2026-10-05，作者定"后续走 Gitee"）：
-        //   客户端的**数据源**读的就是仓库里的 `presets/dist/` 与 `presets/release.json`
+        //   客户端的**数据源**读的就是仓库里的 `presets/delivery/`（release.json 也在里面，按 Manifest 声明取）
         //   （`raw/<branch>/…`）。只推 tag 的话，tag 在、main 上的数据源没过去 ——
         //   国内客户端连上 Gitee 之后看到的仍是上一版目录。
         //   这一步是**幂等**的：同一笔 main 推两次，第二次是 no-op。
@@ -490,6 +545,33 @@ pub fn run(
     }
     report.stage = ReleaseStage::Tagged;
 
+    /* ---------- ⑥½ 发布面同步（M6）：tag 与 main 推到 Gitee（幂等） ----------
+     *
+     * Release 挂在 tag 上，所以 **tag 必须在 Gitee 真实存在**；main 同步过去是
+     * "数据源主线跟随发布仓库"（作者 2026-10-05 定）—— 客户端的数据源读的就是
+     * 仓库里的 `presets/delivery/`。两步都幂等：同一笔重跑是 no-op / fast-forward。
+     * Gitee 主线与本地分叉时如实报错（那是镜像没同步，得先解决，不能悄悄覆盖）。
+     */
+    if let Some(ch) = release {
+        let g = ch.target;
+        git.push_ref_to_authenticated(
+            &g.repository_url,
+            &format!("refs/tags/{tag}"),
+            &g.username,
+            &g.token,
+        )?;
+        git.push_ref_to_authenticated(
+            &g.repository_url,
+            &format!("refs/heads/{base}"),
+            &g.username,
+            &g.token,
+        )?;
+        report.summary.push_str(&format!(
+            "已把 {tag} 与 {base} 推到发布仓库 {}（Release 的 tag 就位，数据源主线随之同步）。",
+            g.repository_url
+        ));
+    }
+
     /* ---------- ⑦ 构建 macOS 安装包（第一阶段只做 macOS、不签名） ---------- */
 
     if !opts.build {
@@ -505,11 +587,19 @@ pub fn run(
     report.stage = ReleaseStage::Built;
     report.summary.push_str(&format!("已构建 {}。", dmg.name));
 
-    /* ---------- ⑧ 建 Release + 上传安装包 ---------- */
+    /* ---------- ⑧ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
 
-    let release = hosting.create_release(&super::platform::ReleaseSpec {
-        owner: t.owner.clone(),
-        repo: t.repo.clone(),
+    // ★ **架构规则**（总纲 §5-M6）：软件版本的 Release 与附件**只发 Gitee**。
+    //   没有发布通道 = preflight 就该拦下（这里兜底，话说清楚）。
+    let Some(ch) = release else {
+        return Err(AppError::invalid_argument(
+            "软件版本的 Release 与安装包发布到 Gitee（总纲 §5-M6）——              先在设置里配好 Gitee 发布账户（仓库地址 / 用户名 / Token）",
+        ));
+    };
+    let g = ch.target;
+    let release = ch.hosting.create_release(&super::platform::ReleaseSpec {
+        owner: g.owner.clone(),
+        repo: g.repo.clone(),
         tag_name: tag.clone(),
         name: format!("{PRODUCT} {tag}"),
         body: release_body(&opts.notes),
@@ -518,9 +608,9 @@ pub fn run(
     report.stage = ReleaseStage::ReleaseCreated;
     report.summary.push_str("已建 Release。");
 
-    let uploaded = hosting.upload_asset(&super::platform::AssetUpload {
-        owner: t.owner.clone(),
-        repo: t.repo.clone(),
+    let uploaded = ch.hosting.upload_asset(&super::platform::AssetUpload {
+        owner: g.owner.clone(),
+        repo: g.repo.clone(),
         release_id: release.id,
         name: dmg.name.clone(),
         content_type: super::platform::content_type_for(&dmg.name).to_owned(),
@@ -540,9 +630,9 @@ pub fn run(
     match build_app_zip(repo_root, &version) {
         Ok(zip) => {
             let zip_name = zip.name.clone();
-            match hosting.upload_asset(&super::platform::AssetUpload {
-                owner: t.owner.clone(),
-                repo: t.repo.clone(),
+            match ch.hosting.upload_asset(&super::platform::AssetUpload {
+                owner: g.owner.clone(),
+                repo: g.repo.clone(),
                 release_id: release.id,
                 name: zip.name.clone(),
                 content_type: super::platform::content_type_for(&zip.name).to_owned(),
@@ -637,9 +727,9 @@ pub fn run(
     };
     report.info_review = Some(info_review);
     report.stage = ReleaseStage::InfoReviewOpened;
-    report
-        .summary
-        .push_str("已写 presets/release.json 并开了 PR —— **合并它之后客户端才看得到新版本**。");
+    report.summary.push_str(
+        "已写 presets/delivery/release.json 并开了 PR —— **合并它之后客户端才看得到新版本**。",
+    );
 
     Ok(report)
 }
@@ -790,7 +880,7 @@ fn arch_name() -> &'static str {
     }
 }
 
-/// 写 `presets/release.json`（**上传成功之后才写**）。
+/// 写 `presets/delivery/release.json`（**上传成功之后才写**）。
 ///
 /// ★ 顺序的意义：先说"有新版"再上传，用户点进去会撞上一个空的下载页。
 /// 这里是"安装包已经在 Release 上了"之后才宣告。
@@ -816,6 +906,8 @@ fn write_release_info(
             "sha256": a.sha256,
         });
     }
+    // ★ 断代校验在**写盘之前**：坏 URL 不许落盘（总纲 §5-M6）
+    validate_release_source(version, url, asset)?;
     let text = serde_json::to_string_pretty(&value)
         .map_err(|e| AppError::internal("发布信息序列化失败").with_detail(e.to_string()))?
         + "\n";
@@ -990,10 +1082,6 @@ pub fn wb_release_preflight(
         // 发布账户（没配 → 只做本地那一半，如实说）
         let account = super::publish_tx::resolve_target(&root, None).ok();
         let has_account = account.is_some();
-        let platform_ok = account
-            .as_ref()
-            .map(|t| t.platform == "github")
-            .unwrap_or(false);
         push(
             &mut items,
             "account",
@@ -1004,17 +1092,22 @@ pub fn wb_release_preflight(
                 None => "还没配发布账户 —— 只能做本地那一半（不会建 Release）".to_owned(),
             },
         );
+        // ★ M6（总纲 §5-M6）：软件版本的 Release 与附件**发布到 Gitee**（发布仓库），
+        //   与 PR/tag 的 target 刻意分开。Gitee 账户没配 = 发不了版，进闸里明说。
+        let gitee = super::publish_tx::resolve_target(&root, Some("gitee")).ok();
         push(
             &mut items,
-            "platform",
-            "平台支持软件 Release",
-            platform_ok,
-            if platform_ok {
-                "GitHub 已接（建 Release + 上传安装包）".to_owned()
-            } else if has_account {
-                "这个平台这一支还没接「发布软件版本」—— 换 GitHub，或先用 CLI 本地发".to_owned()
-            } else {
-                "没有发布账户 —— 这一项跟着上面走".to_owned()
+            "release-channel",
+            "软件发布通道（Gitee）",
+            gitee.is_some(),
+            match &gitee {
+                Some(t) => format!(
+                    "Gitee 发布仓库 · {}/{}（Release 与安装包住这里）",
+                    t.owner, t.repo
+                ),
+                None => {
+                    "Gitee 发布账户还没配 —— 0.0.6 起软件版本发布到 Gitee（总纲 §5-M6）".to_owned()
+                }
             },
         );
 
@@ -1059,6 +1152,9 @@ pub async fn wb_release_software(
     let root = crate::fsx::paths::internal_root(&app)?;
     let repo = crate::workbench::paths::repo_root();
     let target = super::publish_tx::resolve_target(&root, None).ok();
+    // M6（总纲 §5-M6）：发布通道 = Gitee 账户（与 target 刻意分开）。没配 → None，
+    // build=true 时 run() 会如实报错（preflight 已经先拦过一道）。
+    let release_target = super::publish_tx::resolve_target(&root, Some("gitee")).ok();
     let task = tauri::async_runtime::spawn_blocking(move || {
         crate::ipc::traced("wb_release_software", |_| {
             let (hosting, target) = match &target {
@@ -1072,11 +1168,28 @@ pub async fn wb_release_software(
                 ),
                 None => (None, None),
             };
+            let release_hosting = release_target
+                .as_ref()
+                .map(|t| {
+                    super::platform::hosting(&t.platform, t.token.clone()).ok_or_else(|| {
+                        AppError::invalid_argument(format!("不认识的平台：{}", t.platform))
+                    })
+                })
+                .transpose()?;
+            let release_channel =
+                release_target
+                    .as_ref()
+                    .zip(release_hosting.as_ref())
+                    .map(|(t, h)| ReleaseChannel {
+                        hosting: h.as_ref(),
+                        target: t,
+                    });
             let report = run(
                 &repo,
                 &opts,
                 target.as_ref(),
                 hosting.as_ref().map(|h| h.as_ref()),
+                release_channel.as_ref(),
             )?;
             // 记账：这一趟留在 `release-history.json`（**与发布预设那本账分开**）
             let _ = super::release_history::append(
@@ -1143,7 +1256,7 @@ mod tests {
         crate::fsx::atomic::atomic_write(&root.join("dirty.txt"), b"x").unwrap();
         assert!(!git.is_clean().unwrap());
 
-        let report = run(root, &ReleaseOptions::default(), None, None).expect("该返回报告");
+        let report = run(root, &ReleaseOptions::default(), None, None, None).expect("该返回报告");
         assert_eq!(report.stage, ReleaseStage::BlockedPreflight);
         assert!(
             report.blocked_reasons.iter().any(|r| r.contains("不干净")),
@@ -1159,7 +1272,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         init_repo(root, "main");
-        let report = run(root, &ReleaseOptions::default(), None, None).expect("该返回报告");
+        let report = run(root, &ReleaseOptions::default(), None, None, None).expect("该返回报告");
         assert_eq!(report.stage, ReleaseStage::BlockedPreflight);
         assert!(
             report.blocked_reasons.iter().any(|r| r.contains("主线")),
@@ -1178,7 +1291,7 @@ mod tests {
             dry_run: true,
             ..ReleaseOptions::default()
         };
-        let report = run(root, &opts, None, None).expect("该返回报告");
+        let report = run(root, &opts, None, None, None).expect("该返回报告");
         assert_eq!(report.stage, ReleaseStage::Ready);
         assert!(report.committed_paths.is_empty());
     }
@@ -1207,8 +1320,64 @@ mod tests {
         // 它**不进** catalog / 发布预设那一批 —— 两条链不混
         assert!(
             rel.starts_with("presets/"),
-            "release.json 住在发布根旁边，不是 dist 里：{rel}"
+            "release.json 在交付根 presets/delivery/ 里：{rel}"
         );
+    }
+
+    /* ---------- M6：断代校验（release.json 的 URL 来源） ---------- */
+
+    /// 0.0.6 起：URL 一律不许指 GitHub —— Release 页与安装包各拦一道。
+    #[test]
+    fn a_gitee_epoch_release_refuses_github_urls() {
+        let zip = crate::runtime::release_info::ReleaseAsset {
+            name: "SupportEase_0.0.6_aarch64.app.zip".to_owned(),
+            url: "https://github.com/o/r/releases/download/v0.0.6/x.zip".to_owned(),
+            size: 1,
+            sha256: "ab".to_owned(),
+        };
+        let e = validate_release_source(
+            "0.0.6",
+            "https://gitee.com/o/r/releases/tag/v0.0.6",
+            Some(&zip),
+        )
+        .expect_err("安装包指 GitHub 该拒");
+        assert!(e.message.contains("必须是 Gitee"), "{}", e.message);
+        assert!(
+            e.message.contains("安装包 https://github.com"),
+            "{}",
+            e.message
+        );
+
+        let e =
+            validate_release_source("0.0.6", "https://github.com/o/r/releases/tag/v0.0.6", None)
+                .expect_err("Release 页指 GitHub 也该拒");
+        assert!(
+            e.message.contains("Release 页 https://github.com"),
+            "{}",
+            e.message
+        );
+    }
+
+    /// Gitee 的 URL 照常过；断代线之前（≤0.0.5）的 GitHub 历史档照旧合法 ——
+    /// 那是事实记录，不改写（总纲 §1③：测试版断代，不是抹历史）。
+    #[test]
+    fn gitee_urls_pass_and_the_pre_epoch_history_stays_legal() {
+        let zip = crate::runtime::release_info::ReleaseAsset {
+            name: "SupportEase_0.0.6_aarch64.app.zip".to_owned(),
+            url: "https://gitee.com/o/r/releases/download/v0.0.6/x.zip".to_owned(),
+            size: 1,
+            sha256: "ab".to_owned(),
+        };
+        validate_release_source(
+            "0.0.6",
+            "https://gitee.com/o/r/releases/tag/v0.0.6",
+            Some(&zip),
+        )
+        .expect("全 Gitee 该过");
+
+        // 断代前：v0.0.5 的 GitHub 档是历史事实
+        validate_release_source("0.0.5", "https://github.com/o/r/releases/tag/v0.0.5", None)
+            .expect("断代前的历史档照旧合法");
     }
 
     /// ★ **假平台跑一遍**：本地那一半（预检 → 版本号 → 提交 → 推送 → PR → 合并 →
@@ -1265,7 +1434,7 @@ mod tests {
             build: false, // 构建要几分钟，这一条只验编排；构建与上传在真机上验
             ..ReleaseOptions::default()
         };
-        let report = run(root, &opts, Some(&target), Some(&fake)).expect("该跑通");
+        let report = run(root, &opts, Some(&target), Some(&fake), None).expect("该跑通");
 
         assert_eq!(report.stage, ReleaseStage::Tagged, "{:?}", report.summary);
         assert_eq!(report.version, "0.0.2");

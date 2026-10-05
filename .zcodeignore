@@ -1,19 +1,19 @@
 # 依赖与产物
 node_modules
 # Vite 的输出目录（**只指根上那一个**）。锚定 `/` 是必须的：裸 `dist` 会匹配任意
-# 层级的 dist 目录，于是把 `presets/delivery/`（正式交付目录，见下）也一起吞了 ——
-# 第十八刀撤掉 `presets/delivery/` 那条忽略却不起作用，就是被这一行拦的。
+# 层级的 dist 目录，于是把 `presets/dist/`（正式交付目录，见下）也一起吞了 ——
+# 第十八刀撤掉 `presets/dist/` 那条忽略却不起作用，就是被这一行拦的。
 /dist
 /dist-ssr
-# 预设交付产物 presets/delivery/ **入库**（2026-10-02 第十八刀改判）。
+# 预设交付产物 presets/dist/ **入库**（2026-10-02 第十八刀改判）。
 #
 # 旧裁决是"不入库"——那时把它当成一次性本地构建产物。现在产品契约变了：
 # 它是 **main 上的正式远端交付目录**，客户端 Bootstrap 读的就是
-# `raw.githubusercontent.com/.../main/presets/delivery/source.json`。
+# `raw.githubusercontent.com/.../main/presets/dist/source.json`。
 # 所以它必须进库。发布动作 = `npm run publish:presets`（校验 → 一次性分支 → PR → main）。
 #
 # 注意与 `presets/` 源数据的区别：源数据（*.toml / machines/ / registry/）是人维护的；
-# `presets/delivery/` 是机器生成的产物，**只由发布命令动它**，别手工改。
+# `presets/dist/` 是机器生成的产物，**只由发布命令动它**，别手工改。
 # 建了 workspace（b04 Task 13）之后，cargo 的产物目录在**仓库根**。
 # 老那一行留着：切换之前留下的 src-tauri/target 还在本机磁盘上，删不删由你
 target
@@ -68,3 +68,34 @@ tmp-port/
 # 上一版那两个落点（`src/app/assets/printers/`、`public/assets/`）已退役 ——
 # 同一个东西有两个落点，就等于"盘上哪份是对的"有两个答案。
 client-assets/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

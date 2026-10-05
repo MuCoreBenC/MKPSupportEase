@@ -60,6 +60,12 @@ jobs:
       - name: 启动零网络扫描
         run: npm run check:zero-network
 
+      # 资源寻址 M6 判据（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §5-M6）：
+      # 0.0.6 起 release.json 的下载地址一律来自 Gitee Release（发布仓库），
+      # 禁止 github.com/.../releases。v≤0.0.5 是断代前的历史记录，照旧合法。
+      - name: 软件发布源扫描（断代后禁 GitHub Releases）
+        run: npm run check:release-source
+
   rust:
     name: rust
     # macOS 而不是 ubuntu：Tauri 的 Rust 侧在 Linux 上要先装 libwebkit2gtk 等一串系统包，
@@ -111,6 +117,23 @@ jobs:
 
       - name: 测试（workbench）
         run: cargo test -p mkp-support-ease --features workbench
+
+      # 资源寻址立法（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §6.4）：
+      # ① 拼接越界 —— join_url 只许住在 runtime/resolver（模块可见性是墙，这条 grep
+      #    是绊线：谁把拼接函数挪出去/抄一份，这里红）；② 交付面禁止绝对 URL ——
+      #    source.json 是双镜像（GitHub/Gitee）共用的寻址规则声明，写死任何一家
+      #    的绝对地址等于把另一家镜像的用户指回去。真正的逐条对账由发布闸
+      #    ⑯（client/url-reconciliation，直调生产 Resolver）与 Golden Fixture 负责。
+      - name: 寻址立法扫描（拼接越界 + 交付面无绝对 URL）
+        run: |
+          if grep -rnE 'join_url\s*\(' src-tauri/src --include='*.rs' | grep -v 'runtime/resolver' | grep -vE '^[^:]+:[0-9]+:\s*(//|///)'; then
+            echo "::error::路径拼接跑出了 runtime/resolver —— 寻址唯一出口在 resolver 模块"
+            exit 1
+          fi
+          if grep -E 'https?://' presets/delivery/source.json; then
+            echo "::error::交付面（source.json）禁止绝对 URL —— 双镜像共用同一份寻址声明"
+            exit 1
+          fi
 
   # Windows 侧单独一个 job，**不并进 rust 的 matrix**：
   # matrix 会把 job 名变成 `rust (macos-latest)`，而 ruleset 里的必需检查叫 `rust` ——

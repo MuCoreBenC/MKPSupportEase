@@ -12,9 +12,9 @@
  * （`npm run tauri dev` 也吃它）。
  *
  * 输入口径（作者 2026-10-02 定死的产品契约）：**只填仓库地址就够** ——
- * GitHub 仓库地址 / `.git` 克隆地址都会被后端补成 `main/presets/dist/source.json`
+ * GitHub 仓库地址 / `.git` 克隆地址都会被后端补成 `main/presets/delivery/source.json`
  * 的 raw 直链；blob 页按人指的转；raw / 自建源原样。用户不必知道
- * `raw.githubusercontent.com` / `blob` / `presets/dist` / `source.json` 里的任何一个。
+ * `raw.githubusercontent.com` / `blob` / `presets/delivery` / `source.json` 里的任何一个。
  *
  * # 「重新读取」（2026-10-02）
  *
@@ -35,10 +35,12 @@ import type { Boot, PublishAccount } from '../api'
 import s from '../c14.module.css'
 
 export default function SettingsPage({ boot }: { boot: Boot }) {
-  /* 官方源那格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
-     下次 wb_boot 会带回同一份） */
+  /* 官方源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
+     下次 wb_boot 会带回同一份）。GitHub 是主源；Gitee 是镜像（空 = 没配/清除） */
   const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
   const [saved, setSaved] = useState<string | null>(boot.bootstrapUrl)
+  const [giteeBootstrap, setGiteeBootstrap] = useState(boot.giteeBootstrapUrl ?? '')
+  const [giteeSaved, setGiteeSaved] = useState<string | null>(boot.giteeBootstrapUrl)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
 
@@ -145,10 +147,16 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     setBusy(true)
     setNote(null)
     try {
-      const stored = await wb.setBootstrap(bootstrap.trim())
-      setSaved(stored)
-      setBootstrap(stored)
-      setNote({ text: `已保存：${stored}（重启 dev / 重打正式包后客户端才吃得到）`, bad: false })
+      /* 两格一笔写全：gitee 空着就是清除（null），不是"不动它" —— */
+      const stored = await wb.setBootstrap(
+        bootstrap.trim(),
+        giteeBootstrap.trim() === '' ? null : giteeBootstrap.trim(),
+      )
+      setSaved(stored.bootstrapUrl)
+      setBootstrap(stored.bootstrapUrl)
+      setGiteeSaved(stored.giteeBootstrapUrl ?? null)
+      setGiteeBootstrap(stored.giteeBootstrapUrl ?? '')
+      setNote({ text: '已保存（重启 dev / 重打正式包后客户端才吃得到）', bad: false })
     } catch (e) {
       setNote({
         text: isAppError(e) ? e.message : e instanceof Error ? e.message : String(e),
@@ -170,11 +178,17 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     setNote(null)
     try {
       const fresh = await wb.reload()
-      const onDisk = fresh.bootstrapUrl
-      setSaved(onDisk)
-      setBootstrap(onDisk ?? '')
+      setSaved(fresh.bootstrapUrl)
+      setBootstrap(fresh.bootstrapUrl ?? '')
+      setGiteeSaved(fresh.giteeBootstrapUrl)
+      setGiteeBootstrap(fresh.giteeBootstrapUrl ?? '')
       setNote({
-        text: onDisk === null ? '已从磁盘重读：还没配' : '已从磁盘重读',
+        text:
+          fresh.bootstrapUrl === null
+            ? '已从磁盘重读：还没配'
+            : fresh.giteeBootstrapUrl === null
+              ? '已从磁盘重读（Gitee 镜像没配）'
+              : '已从磁盘重读',
         bad: false,
       })
     } catch (e) {
@@ -345,14 +359,15 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
         <div className={s.cardBody}>
           <div className={s.vfield}>
             <p className={s.vhelp}>
-              发布出去的 <span className={s.mono}>presets/dist/</span> 推到哪里 —— 客户端拿它那口
+              发布出去的 <span className={s.mono}>presets/delivery/</span> 推到哪里 —— 客户端拿它那口
               <span className={s.mono}> source.json </span>找回目录与文件。
-              <b>填仓库地址就够</b>（GitHub 仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
-              我们会自动补成发布入口的 raw 直链。
-              也收：指向 <span className={s.mono}>source.json</span> 的 blob 链接（转 raw）、
+              <b>填仓库地址就够</b>（仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
+              我们会自动补成发布入口的 raw 直链（GitHub / Gitee 是同一座桥）。
+              也收：指向 <span className={s.mono}>source.json</span> 的 blob / raw 直链、
               自建源（<span className={s.mono}>http://…</span> 原样）。
               入库（<span className={s.mono}>workbench/bootstrap.json</span>）：换机器、CI 拿的都是同一份。
             </p>
+            <label className={s.vlabel}>GitHub（主源）</label>
             <div className={s.vrow}>
               <input
                 className={s.inp}
@@ -361,12 +376,27 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 /* 中性示例（`<owner>/<repo>`），**不是"默认值"** ——
                    空着就是"还没配"，别让占位符看起来像已经填好了 */
                 placeholder="https://github.com/<owner>/<repo>"
-                aria-label="官方源（Bootstrap）地址"
+                aria-label="官方源（GitHub 主源）地址"
+              />
+            </div>
+            <label className={s.vlabel}>Gitee（镜像 —— 国内直连；空 = 不提供这一档）</label>
+            <div className={s.vrow}>
+              <input
+                className={s.inp}
+                value={giteeBootstrap}
+                onChange={(e) => setGiteeBootstrap(e.target.value)}
+                placeholder="https://gitee.com/<owner>/<repo>"
+                aria-label="官方源（Gitee 镜像）地址"
               />
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary}`}
-                disabled={busy || bootstrap.trim() === '' || bootstrap.trim() === saved}
+                disabled={
+                  busy ||
+                  bootstrap.trim() === '' ||
+                  (bootstrap.trim() === (saved ?? '') &&
+                    giteeBootstrap.trim() === (giteeSaved ?? ''))
+                }
                 onClick={() => void save()}
               >
                 {busy ? '保存中……' : '保存'}
@@ -385,10 +415,20 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             <p className={s.vhelp}>
               当前（磁盘 <span className={s.mono}>workbench/bootstrap.json</span> 里的那份）：
               {saved === null ? (
-                '还没配 —— 客户端构建时不会注入默认源（下载会如实说「没配」）'
+                'GitHub 还没配 —— 客户端构建时不会注入默认源（下载会如实说「没配」）'
               ) : (
                 <span className={s.mono}>{saved}</span>
               )}
+              ；Gitee：
+              {giteeSaved === null ? (
+                '没配（客户端不出现 Gitee 档）'
+              ) : (
+                <span className={s.mono}>{giteeSaved}</span>
+              )}
+            </p>
+            <p className={s.vhelp}>
+              两个「Gitee」是两回事：这里的 Gitee 是<b>预设数据从哪读</b>（客户端里的镜像源档）；
+              上面「发布账户」的 Gitee 是<b>软件版本 Release 发到哪</b>（安装包附件）。
             </p>
             {note && (
               <p className={s.vhelp} style={note.bad ? { color: 'var(--danger)' } : undefined}>
@@ -436,10 +476,10 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             </div>
             <p className={s.vhelp}>
               「生成与发布」写出的那一批：人维护 <span className={s.mono}>presets/*.toml</span>，
-              机器生成 <span className={s.mono}>presets/dist/*</span>。
+              机器生成 <span className={s.mono}>presets/delivery/*</span>。
             </p>
             <div className={s.vrow}>
-              <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.dist}</span>
+              <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.delivery}</span>
             </div>
           </div>
         </div>

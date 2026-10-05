@@ -1,3 +1,7 @@
+> ⚠️ **历史快照（2026-10-05 加注）**：本文写于寻址改造之前，其中的 `presets/dist/`、
+> `baseUrl` 同目录推导、release.json 位置等表述是**当时的现状记录**，不再是现行规则。
+> 现行规则见 `docs/RESOURCE-ADDRESSING-ROADMAP.md` 与 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
+
 # 交接：数据架构重做 —— 第一圈完成，第二圈进行中
 
 > 更新时间：2026-10-01

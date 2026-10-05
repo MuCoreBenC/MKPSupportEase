@@ -53,7 +53,7 @@ pub struct UserPresetFileDto {
     /// **它不判"这份文件好不好"**：用户自己那份从来不是坏文件；
     /// `outdated` 只说"官方换版了，你这份是从旧版派生的"（第七层要说的那件事）。
     pub based_on: String,
-    /// 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。没有血统是 `null`
+    /// 血统里记的来源（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`
     pub based_on_label: Option<String>,
     /// 建副本那一刻来源文件头的版本号（给人看的，形如 `2026-08-19 01:38:13`）
     pub based_on_release: Option<String>,
@@ -354,7 +354,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             runtime::state::ActiveOrigin::Official => {
                 /*
                  * 血统要写进那份用户文件里：来源 = 目录里那一份的 **`catalog.path`**
-                 * （`dist/mkp/presets/A1-standard.toml`，与工作台建副本的"哪一版"同一形状）。
+                 * （`delivery/mkp/presets/A1-standard.toml`，与工作台建副本的"哪一版"同一形状）。
                  *
                  * 目录里已经没有它了（编辑期间换源 / 下线）就只写文件名本身 —— 血统还认得出
                  * "从哪一份"，只是少了"在哪"。**不为这个拦住保存**：用户改了半天的东西

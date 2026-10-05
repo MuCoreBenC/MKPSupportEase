@@ -1195,7 +1195,7 @@ export interface PresetLocalRow extends PresetRowBase {
    */
   basedOn?: BasedOn
   /**
-   * 血统里记的来源原文（`dist/mkp/presets/A1-standard.toml`）。没有血统是 `null`。
+   * 血统里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
    * 不回填、不猜（文件本身照旧能读能改能应用）。
    */
