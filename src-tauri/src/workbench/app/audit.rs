@@ -928,8 +928,8 @@ fn git_clean_at(repo: &std::path::Path) -> (AuditItem, usize, usize, usize) {
         );
     };
     /* porcelain v1 `-z`：条目 = `XY 路径`，NUL 分隔；**改名 / 复制**是
-       `XY new` 后跟一个独立的 `old` token —— 不吃掉它，`old` 会被当成一条
-       没有状态码的路径混进来（老实现正是在这里把路径当条目解析错位的）。 */
+    `XY new` 后跟一个独立的 `old` token —— 不吃掉它，`old` 会被当成一条
+    没有状态码的路径混进来（老实现正是在这里把路径当条目解析错位的）。 */
     let mut added = 0usize;
     let mut changed = 0usize;
     let mut removed = 0usize;
@@ -1464,10 +1464,7 @@ mod tests {
     fn finalize_consistency_catches_a_tampered_delivery() {
         // ① 篡改一份交付文件的字节 → catalog 登记的 SHA 对不上真字节
         let fx = Delivery::published();
-        let victim = fx
-            .dist()
-            .join(dist::MKP_PRESETS_DIR)
-            .join("A1-fast.toml");
+        let victim = fx.dist().join(dist::MKP_PRESETS_DIR).join("A1-fast.toml");
         crate::fsx::atomic::atomic_write(&victim, b"tampered").unwrap();
         let red = finalize_red_items(&fx.book(), &fx.dist());
         assert!(

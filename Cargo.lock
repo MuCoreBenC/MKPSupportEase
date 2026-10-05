@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "mkp-support-ease"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "mkpse-preset",
  "objc2",

@@ -577,6 +577,7 @@ z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
 
 [overrides."A1:fastv3.3"]
 "uuid" = '748dfd7f-c487-43a5-b8c7-920ebc019ad0'
+"toolhead.speed_limit" = 65
 "toolhead.custom_unmount_gcode" = '''
 M106 S[AUTO]
 G1 X256 F42000
