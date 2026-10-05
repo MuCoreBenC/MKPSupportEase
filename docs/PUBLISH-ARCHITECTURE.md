@@ -17,16 +17,18 @@
 | **②** | **`catalog.path` 相对发布根** | **发布根 = `presets/`**；路径不写 `presets/` 前缀 |
 | **③** | **保留薄 `dist/`** | 只放**渲染产物**（MKP TOML）+ **发布元数据**（catalog / source / manifest） |
 
-**唯一 URL 基准规则**（本文最硬的一条）：
+**唯一寻址规则**（2026-10-05 资源寻址改造定稿，`docs/RESOURCE-ADDRESSING-ROADMAP.md`）：
 
 ```text
-客户端下载 URL  =  baseUrl  +  catalog.path
+客户端下载 URL  =  SourceResolver（唯一寻址出口）算
 
-     baseUrl        = source.json 所在目录（缺省；发布侧不写 baseUrl 字段）
-     catalog.path   = 相对「发布根 presets/」的路径
+     Source Manifest（source.json v2）声明寻址规则：
+       catalog / manifest / release / content 相对 Manifest 自身目录（交付根）
+       filesRoot: ".."          ← catalog.files[].path 的锚 = 交付根的上一层 = 发布根 presets/
+     catalog.path               ← 资源清单，相对发布根（干净相对路径，禁止 ..）
 ```
 
-于是（**发布根 = `presets/`**）：
+于是：
 
 ```text
 presets/assets/bbs/Process/0.2mm/A1.json
@@ -34,15 +36,18 @@ presets/assets/bbs/Process/0.2mm/A1.json
         │  发布时补上「assets/」这一段 → catalog.path
         ▼
 catalog.path = "assets/bbs/Process/0.2mm/A1.json"
-        │  客户端：baseUrl + path
+        │  Resolver：filesRoot("..") + path
         ▼
 https://raw.githubusercontent.com/<o>/<r>/main/presets/assets/bbs/Process/0.2mm/A1.json
 ```
 
-> ★ 注意：`baseUrl` = `.../main/presets/dist/`（source.json 所在目录），
-> 而 A 类资产在 `.../main/presets/assets/` —— **两者是兄弟目录**，
-> 所以 `catalog.path` 从 `assets/...` 开头就能拼对。
-> 这不是巧合，见 §2.2 的「发布根与 baseUrl 的关系」。
+> ★ **职责切分说死**：Manifest = **寻址规则声明**（各类东西从哪个锚点找）；
+> Catalog = **资源清单**（有哪些 Entry、各自 `path`）。Catalog 不得自带第二套根/URL。
+> `filesRoot` 是**全局锚点规则，不是 Entry 路径的组成部分** —— 它只出现这一次。
+> 业务代码**永不拼路径**：全仓唯一被允许拼接的地方是 `runtime/resolver`
+> （发布闸 ⑯ `client/url-reconciliation` + Golden Fixture 守着这条跨端契约）。
+> **历史教训**：2026-10-04~05 的 `dist/dist` 事故就是"两个锚各说各话、没有对账"
+> —— 本段旧文曾把那套错误算术写成"最硬的一条规则"，谁再看到旧版不要信。
 
 ---
 
@@ -54,7 +59,7 @@ https://raw.githubusercontent.com/<o>/<r>/main/presets/assets/bbs/Process/0.2mm/
 | 源在哪 | `presets/assets/<kind>/…`（**真有一份文件**） | **源里没有完整实体** |
 | 从哪来 | 人写 / 外部导入，进仓库即成实体 | 工作台从 `machines/` + `versions/` + `templates/` **渲染** |
 | 发布时 | **不复制**，只登记路径 | **必须落盘**到 `dist/mkp/presets/` |
-| 落点 | `presets/assets/…`（原地） | `presets/dist/mkp/presets/…` |
+| 落点 | `presets/assets/…`（原地） | `presets/delivery/mkp/presets/…` |
 | `catalog.path` | `assets/<kind>/…` | `dist/mkp/presets/….toml` |
 | 台账 | `presets/assets.toml` 有它一条 | 台账那条**只登记身份**（哪个版本叫什么、归谁），文件条目由生成侧算 |
 
@@ -81,10 +86,10 @@ presets/
 **明确不许存在**（本次要清掉的）：
 
 ```text
-presets/dist/mkp/bbs/       ← A 类，不该有副本
-presets/dist/mkp/icons/
-presets/dist/mkp/models/
-presets/dist/mkp/printers/
+presets/delivery/mkp/bbs/       ← A 类，不该有副本
+presets/delivery/mkp/icons/
+presets/delivery/mkp/models/
+presets/delivery/mkp/printers/
 ```
 
 > 它们现在是历史遗留（发布时把所有 `download` 档资产都复制了一遍）。
@@ -96,14 +101,14 @@ presets/dist/mkp/printers/
 而是**发布根下的一个目录名**。两者同形是刻意的：客户端下载落点与发布落点同形，
 下载完直接落 `<appDataDir>/mkp/presets/A1-standard.toml`，路径形状一致、好对账。
 
-**A 类不再进 `mkp/`**，所以客户端下载后 A 类落点也要跟着改：
+**A 类不再进 `mkp/`**，客户端下载落点 = `<appDataDir>/<catalog.path>`（唯一路径语义）：
 
 ```text
 A 类下载落点：<appDataDir>/<catalog.path>   = <appDataDir>/assets/bbs/…
-B 类下载落点：<appDataDir>/<catalog.path>   = <appDataDir>/mkp/presets/…
+B 类下载落点：<appDataDir>/<catalog.path>   = <appDataDir>/delivery/mkp/presets/…
 ```
 
-**两者统一成一条规则**：`catalog.path` 就是**下载落点**（相对内部根），也是**URL 尾段**（相对 baseUrl）。
+**两者统一成一条规则**：`catalog.path` 就是**下载落点**（相对内部根），也是**URL 尾段**（经 Resolver 按 Manifest 声明锚定）。
 **一个字段同时是"取哪"和"放哪"** —— 这是本方案最大的简化，也是它必须守的唯一性所在。
 
 ### 1.3 `delivery` 档位的最终语义
@@ -135,7 +140,7 @@ B 类下载落点：<appDataDir>/<catalog.path>   = <appDataDir>/mkp/presets/…
 ③ catalog    CatalogFile.path = "assets/bbs/…"        ← 相对【发布根 presets/】
              （B 类 = "dist/mkp/presets/…"）
 
-④ 客户端     URL    = baseUrl + catalog.path
+④ 客户端     URL    = SourceResolver（Manifest 声明 + filesRoot 锚）算
              落盘   = <appDataDir>/catalog.path
 ```
 
@@ -145,30 +150,34 @@ B 类下载落点：<appDataDir>/<catalog.path>   = <appDataDir>/mkp/presets/…
 "资产根在仓库里叫什么"。发布时由**一处算法**补前缀 —— 这就是 `kind_dir` 的职责，
 **只在这一处**，客户端与工作台都不再自己拼。
 
-### 2.2 发布根与 baseUrl 的关系（★ 必须理解为一条规则）
+### 2.2 交付根与文件根的关系（★ 2026-10-05 定稿：锚点是声明，不是推导）
 
 ```text
-仓库：      <repo>/presets/{assets, dist}/
-source.json：<repo>/presets/dist/source.json     ← baseUrl 的锚点是它所在目录
-baseUrl    = <repo>/presets/dist/
+仓库：          <repo>/presets/{assets, delivery}/
+source.json：  <repo>/presets/delivery/source.json   ← Source Manifest v2（寻址规则声明）
+交付根：        <repo>/presets/delivery/              ← Manifest 相对引用的基准（= 自身目录）
+文件根：        <repo>/presets/                        ← filesRoot: ".." 声明 = 交付根上一层
+catalog.path： 相对文件根（发布根）的干净相对路径
 ```
 
-**所以 `catalog.path` 要以 `assets/` 开头、以 `dist/` 开头（B 类）** ——
-这条规则成立的前提是 **`baseUrl` 落在 `presets/dist/`**。
-
-> ⚠️ **风险点（已核实，需在实现时守住）**：`source.json` 的 `baseUrl` 现在是**缺省不写**的，
-> 客户端把"与 source.json 同目录"当缺省。所以只要 `source.json` 在 `presets/dist/` 里，
-> 一切自动成立。**将来若把 `source.json` 挪出 `dist/`，`catalog.path` 的语义就会静默错位** ——
-> 判据必须钉死这一条（见 §6 第 1 条）。
+> ⚠️ **历史教训（钉在这防重犯）**：2026-10-04 那版曾写"只要 `source.json` 在
+> `presets/dist/` 里，`baseUrl` 缺省（= 同目录）+ `catalog.path` 相对 `presets/`
+> 一切自动成立"—— **那句算术是错的**（`presets/dist/ + dist/… = presets/dist/dist/…`），
+> 并被写成了"最硬的一条规则"。结果是 2026-10-05 实测：catalog 里全部 24 条交付文件
+> 在客户端拼出 404。修正方式不是再解释算术，而是**结构上消灭"猜"**：
+> `source.json` 升级为 v2 寻址规则声明（`filesRoot` 显式声明锚点），客户端统一走
+> `runtime/resolver`（唯一拼接出口），发布闸 ⑯ 逐条对账。别再回退到"目录推导"那条路。
 
 ---
 
-## 3. 客户端改动的实际半径（比想象小，但有一处结构性障碍）
+## 3. 客户端改动的实际半径（★ 本章是 2026-10-04 改造时的施工推演，**历史价值**；
+落地结果以 §2.2 与 `RESOURCE-ADDRESSING-ROADMAP.md` 为准 —— 甲案已裁、已落地，
+落点规则是 `<appDataDir>/<catalog.path>`，不再是本节的 `mkp/<kind>/` 旧状）
 
 ### 3.1 已经对的部分（不用改）
 
-- `source.json` 的 `baseUrl` 缺省机制**本来就是为了这件事**（注释原话：
-  「发布产物推到哪里都对」）—— 所以**发布侧不需要改 source.json 的写法**。
+- ~~`source.json` 的 `baseUrl` 缺省机制~~（**已废，2026-10-05**：那句推导的算术不成立，
+  是 `dist/dist` 事故的病根；v2 起寻址规则全部显式声明，见 §2.2）。
 - 客户端拼 URL 的地方只有一处（`net.rs::RemoteSource::fetch` 用 `join_url(base_url, file.path)`）。
 - `catalog.path` 已经是"相对基准的一条相对路径"，只是基准从 `mkp/` 换成了发布根。
 
@@ -207,7 +216,7 @@ baseUrl    = <repo>/presets/dist/
 ```text
 Git 仓库
 ├── presets/assets/…      ← 源资产，同时就是云端发布资产（同一份，无复制）
-└── presets/dist/…        ← 生成的发布元数据 + B 类渲染产物
+└── presets/delivery/…        ← 生成的发布元数据 + B 类渲染产物
 ```
 
 **不存在**"源文件 → 再复制成云端文件"这一步。云端 = `main` 分支本身。
@@ -269,6 +278,29 @@ PR 合并进 main  →  GitHub raw 立即生效（raw.githubusercontent 读 main
 
 ---
 
+### 4.5 两本账的差集语义（catalog ⊇ manifest，**设计如此，不是漏生成**）
+
+★ 2026-10-05 钉死（作者要求把"为什么"写进规则，防止后人把差集当缺陷）：
+
+```text
+catalog.json（files[]）   = 「所有客户端可见资源」的登记面 —— 台账里每一种有落点的
+                            资产 + 全部 B 类产物，**无论当前有没有被引用**
+manifest.json（assets）   = 「本版本完整性 / 下载管理范围」= 引用可达的交付子集
+                            （被机型 / 套餐引用、且有落点的资产 + 全部 B 类产物）
+不变式                    = manifest ⊆ catalog；差集 = 登记了但当前无引用的资产
+```
+
+当前真数据（2026-10-05）：catalog 24 条（9 mkp_preset + 3 icon + 3 model + 9 bbs_config），
+manifest 17 条（9 mkp_preset + 3 icon + 5 slicerProfile）——差集 7 条 =
+**0.2mm 档 BBS 4 份 + 校准 / 测试模型 3 份**，全部是"台账登记了、但当前没有任何
+机型 / 套餐引用"的资产。它们：
+- 照常被发布闸 ⑦「登记的每一条都取得到」管着（真要取，取得到）；
+- 不进 manifest，所以不参与本版本的逐份 SHA 完整性账；
+- 哪天被套餐 / 机型引用了，自动进入可达集、自动进 manifest —— **不需要改任何代码**。
+
+钉子：判据 `the_manifest_covers_exactly_the_referenced_deliverable_set`（真数据），
+以及 `doc §7` 的历史引用统一改指本节（那个 §7 属于已退役的上游文档，引用悬空）。
+
 ## 5. 发布闸（`PublishAudit`）—— 你要的那个模态框
 
 ### 5.1 结果模型（先定数据结构，再加检查项）
@@ -298,7 +330,7 @@ struct PublishAudit {
 
 **设计要点**：加一条检查 = 加一个 `AuditItem`，**不改流程**。这是你要的"以后扩展不用重设计"。
 
-### 5.2 检查清单（十五项，与你列的一致）
+### 5.2 检查清单（十五项 + ⑯；⑯ 为 2026-10-05 寻址改造新增，见 §6 判据 10）
 
 | # | id | 检查什么 | 现状 |
 | --- | --- | --- | --- |
@@ -316,9 +348,10 @@ struct PublishAudit {
 | ⑫ | `version/structure` | 结构签名 + `minVersion`（见 §5.3） | ✅ 第三刀（`runtime::structure` 算签名 + `presets/structure-signatures.toml` 查表；**查不到 = Blocker Fail**） |
 | ⑬ | `source/correct` | `source.json` 正确（schema / catalog 相对路径合法） | ✅ 第二刀 |
 | ⑭ | `manifest/correct` | manifest 与交付集合一致 —— **预检 = 提示（Warning）**：manifest 是**上一版发布**写下的账本（只有发布事务定稿会重写它），「生成过、还没发」的落后是常规状态，拦了就是「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环（2026-10-05 真机踩过）。**严格的逐条核对移到发布事务定稿之后、commit 之前**（§7.1 的 3½ 步） | ✅ 第二刀 / 2026-10-05 改两层 |
-| ⑮ | `git/clean` | Git 工作区状态正确（无未提交的无关改动 / 在正确分支） | ✅ 第二刀（★ `presets/dist/` **排除在外**） |
+| ⑮ | `git/clean` | Git 工作区状态正确（无未提交的无关改动 / 在正确分支） | ✅ 第二刀（★ `presets/delivery/` **排除在外**） |
+| ⑯ | `client/url-reconciliation` | **客户端视角 URL 对账**：从 `workbench/bootstrap.json` 反推交付根，用生产 Resolver 把 catalog 全量条目 + catalog/release/manifest/content 逐条拼 URL，折回仓库相对路径与磁盘对账 —— 跨端锚点错位（`dist/dist` 事故）在发布前就红 | ✅ 2026-10-05 寻址改造（纯读不发网络；Golden Fixture 在 `runtime::resolver::tests`） |
 
-**⑮ 为什么把 `presets/dist/` 排除在外**：`dist/` 就是这次要提交的产物本身 ——
+**⑮ 为什么把 `presets/delivery/` 排除在外**：`dist/` 就是这次要提交的产物本身 ——
 拿它的未跟踪状态去拦自己的发布是个死锁（与 `scripts/publish-presets.mjs` 同一条口径）。
 **`dist/` 之外**有任何改动、或不在分支上，都拦发布。
 
@@ -367,7 +400,7 @@ A 类资产**不进 dist**，所以 ⑦ 的判定必须走**"发布根 + `catalo
 而 Dev 构建靠 `SUPPORTED_SIGNATURES` 放行，**不看版本号**，于是不会把自己锁死。
 正式 0.7.0 两段都不满足 → 拒绝使用新数据 + 「有新版 SupportEase」。
 
-> 本次（第一刀）**就是一次真实的结构变更**：落点从 `mkp/<kind>/` 改成发布根基准。
+> 本次（第一刀）**就是一次真实的结构变更**：落点从 `mkp/<kind>/` 改成发布根基准（第二代：`delivery/` 改名，2026-10-05，见 `RESOURCE-ADDRESSING-ROADMAP.md`）。
 > 字段名与类型一个都没动，所以是 `STRUCTURE_EPOCH = 1` 把它记下来的；
 > 规则表里那一条的 `minClient` 写 `0.0.1` —— 事实是**这个项目还没发布过任何正式客户端**
 > （三处版本号都是 0.0.1），所以"读得懂这一代的最老正式版"就是它。
@@ -389,8 +422,12 @@ A 类资产**不进 dist**，所以 ⑦ 的判定必须走**"发布根 + `catalo
 
 ```text
 仓库
-├── release.json     ← 软件发布信息 {version, notes, url}；**住 presets/ 之外**
-└── presets/         ← 预设数据（catalog.json / manifest.json / mkp/）
+└── presets/
+    └── delivery/     ← 交付边界：catalog.json / manifest.json / source.json
+        │               / content/ / mkp/presets/
+        └── release.json ← 软件发布信息 {version, notes, url}（2026-10-05 起住这里，
+                           由 Source Manifest 的 release 声明；仓库根与 presets/ 根
+                           **不许**再出现第二份 —— `runtime::release_info` 钉位测试守着）
 ```
 
 - 它是**软件发布信息，不是预设数据**：**不参与发布闸的预设数据内容校验，也不进
@@ -425,7 +462,7 @@ A 类资产**不进 dist**，所以 ⑦ 的判定必须走**"发布根 + `catalo
 app::audit::publish_audit()   ← ★ 唯一判定函数；`cargo test` 判据也直接调它
                       │
                       ▼
-              PublishAudit { items: [十五个 AuditItem], can_publish }
+              PublishAudit { items: [十六个 AuditItem], can_publish }
 ```
 
 - **界面不许自己再实现一套检查** —— 那正是"发布闸"之前散落各处的老病根（两边各算一遍、各自看着都对）。
@@ -436,7 +473,7 @@ app::audit::publish_audit()   ← ★ 唯一判定函数；`cargo test` 判据�
   闸里要复用任何"预演 / 渲染"能力，**必须调那个收 `&Ctx` 的自由函数**（如 `build::preview_with`），
   **绝不能调命令壳** —— 那是自锁（挂死，不是报错）。
 - `Skipped` 是**刻意留的一档**（界面画成虚线灰，不画成绿勾：把"没实现"伪装成"通过"
-  比红色更危险）。**第三刀之后十五项都用不上它了**（⑫ 是最后一项，已经真跑起来）——
+  比红色更危险）。**第三刀之后十五项都用不上它了**（⑫ 曾经是最后一项；2026-10-05 新增的 ⑯ 也真跑）——
   留着这一档是因为那条规矩还要用：将来加一项还没实现的检查时，它必须显式 `Skipped`。
   判据 `the_gate_lists_every_item_and_only_opens_when_no_blocker_fails` 里那条
   `skipped.is_empty()` 就是"哪天有新项没实现"的报警器。
@@ -452,15 +489,19 @@ app::audit::publish_audit()   ← ★ 唯一判定函数；`cargo test` 判据�
 
 | # | 判据 | 咬什么 |
 | --- | --- | --- |
-| 1 | **`catalog_path_is_relative_to_the_publish_root`** | `source.json` 必须落在 `presets/dist/`（`baseUrl` 锚点），且 `catalog.path` 以 `assets/` 或 `dist/` 开头 —— 挪了 source.json 就红 |
-| 2 | **`no_a_class_assets_in_dist`** | `presets/dist/` 下不许出现 `bbs/` `icons/` `models/` `printers/` —— 停止制造第二份真源 |
-| 3 | **`every_registered_path_is_reachable`**（新 ⑦） | catalog 每条 `path`，在「发布根 + path」处真能取到（A 类查 `presets/`，B 类查 `dist/`） |
+| 1 | **`catalog_path_is_relative_to_the_publish_root`** | `catalog.path` 以 `assets/` 或 `delivery/` 开头；锚点由 Source Manifest v2 的 `filesRoot` **声明**（不再由目录推导）—— 见闸⑯与 Golden Fixture |
+| 2 | **`no_a_class_assets_in_dist`** | `presets/delivery/` 下不许出现 `bbs/` `icons/` `models/` `printers/` —— 停止制造第二份真源 |
+| 3 | **`every_registered_path_is_reachable`**（新 ⑦） | catalog 每条 `path`，在「发布根 + path」处真能取到（A 类查 `presets/`，B 类查 `delivery/`） |
 | 4 | **`publish_audit_all_blockers_pass`** | `PublishAudit` 全绿才 `can_publish` |
 | 5 | **`bootstrap_request_bypasses_cdn_cache`** | `source.json` 请求带 cache-busting（CDN 缓存会让新发布延迟生效） |
 | 6 | `embedded_matches_rebuild`（既有） | 随包目录 == `gen-catalog` 重建 |
 | 7 | `startup_never_overwrites_an_ota_catalog`（既有） | 启动不覆盖 OTA 目录 |
 | 8 | 切片器档无幽灵行（既有） | `version_files_dto` 的类型分流 |
 | 9 | **`structure_signature_stable_for_optional_additions`** | 只加可选字段时签名不变（防止签名过度敏感、天天要跳 minVersion） |
+| 10 | **`client_url_reconciliation`（闸⑯，2026-10-05）** | 用生产 Resolver 从 `workbench/bootstrap.json` 反推交付根，catalog 全量条目 + catalog/release/manifest/content 逐条拼 URL 折回仓库对账 —— `dist/dist` 那类跨端锚点错位在发布前就红 |
+| 11 | **`golden_addresses_match_the_address_table`（Golden Fixture，2026-10-05）** | 全家族 × GitHub/Gitee × 本地落点的期望地址写成字面量；锚点/声明/布局任何改动，第一个看到的就是这张表的可读 diff |
+| 12 | **交付面无绝对 URL**（CI 负向断言） | source.json 是 GitHub/Gitee 双镜像共用的寻址规则声明，写死任何一家的绝对地址 = 把另一家镜像的用户指回去 |
+| 13 | **`the_manifest_covers_exactly_the_referenced_deliverable_set`**（2026-10-05） | manifest == 引用可达交付集（B 类全部 + 有落点可达资产），manifest ⊆ catalog；差集只许是"登记了但无引用"的资产（§4.5）—— 差集语义从注释升格为判据 |
 
 ---
 
@@ -469,7 +510,7 @@ app::audit::publish_audit()   ← ★ 唯一判定函数；`cargo test` 判据�
 | 刀 | 内容 | 验收 |
 | --- | --- | --- |
 | **第一刀：路径语义切换** ✅ | `dest_of_asset` 改为"发布根基准"；A 类不再复制进 dist；清掉 `dist/mkp/{bbs,icons,models,printers}`；客户端落点规则跟着改（§3.2 **裁甲**） | 判据 1/2/3 绿；客户端下载 0.2mm BBS 成功 |
-| **第二刀：发布闸** ✅ | `app::audit::publish_audit`（十五项，**唯一判定函数**）+ 命令壳 `wb_publish_audit` + `PublishGateModal`（十五项逐项打勾）。「创建 PR」**留到第三刀** —— 今天不摆点不动的假按钮 | 判据 4 绿；模态框截图（`tmp-shots/wb-publish-gate*.png`） |
+| **第二刀：发布闸** ✅ | `app::audit::publish_audit`（十五项 → 2026-10-05 起**十六项**，**唯一判定函数**）+ 命令壳 `wb_publish_audit` + `PublishGateModal`（逐项打勾）。「创建 PR」**留到第三刀** —— 今天不摆点不动的假按钮 | 判据 4 绿；模态框截图（`tmp-shots/wb-publish-gate*.png`） |
 | **第三刀（上半）：结构签名 + minVersion** ✅ | `runtime::structure`（签名从类型真值算 + `STRUCTURE_EPOCH` 记语义变化）+ `presets/structure-signatures.toml` 规则表 + ⑫ 真跑（查不到 = Blocker）+ 写进 `catalog.minClientVersion` / manifest | ⑫ 不再有 `Skipped`；`an_unregistered_structure_generation_blocks_the_publish` 绿 |
 | **第三刀（下半）· 不兼容链** ✅ 2026-10-04 | 客户端**先比再下**：`update::check` 出 `readable`（能力优先、版本兜底），`apply_remote_update` **在落盘前**拒读不懂的目录并返回新档 `NOT_SUPPORTED`；预设页只在"远端这一代读不懂"时出现「此预设需要更新版 SupportEase」+「去更新」（**列表照常、不整表标红**） | 判据 `an_unreadable_remote_catalog_is_refused_not_applied` / `the_update_check_reports_readability` / `not_supported_is_its_own_error_code` 绿 |
 | **第三刀（下半）· 软件更新链** ✅ 2026-10-04 | 新开**独立**信息源 `release.json`（住发布根 `presets/` **之外**、不进 catalog/manifest/发布闸）→ `runtime::release_info` → 设置页「软件更新」块（「有新版本 SupportEase」/「已是最新版本」）。与上面那条**两条链不合并** | 判据 `release_json_is_its_own_source_not_preset_data` / `software_version_compares_by_semver_and_ignores_dev_suffix` 绿 |
@@ -505,8 +546,8 @@ finalize_consistency（3½ 最终一致性核对：定稿刚写下的三本账�
 **两层检查的裁定**（2026-10-05）：预检 ⑭ `manifest/correct` 是**提示档**（Warning）——
 manifest 是上一版发布写下的账本，落后于 dist 只说明"生成过、还没发"；**交付账本的
 最终一致由事务自己在 3½ 步断言**（manifest 严格版 + catalog/sha-size + no-strays，
-刻意不含 ⑮ git/clean —— 定稿后的工作区理应带着 `presets/dist/` 的改动）。
-预检 ⑮ `git/clean` 的口径不变：源状态必须可追溯，`presets/dist/` 之外必须干净。
+刻意不含 ⑮ git/clean —— 定稿后的工作区理应带着 `presets/delivery/` 的改动）。
+预检 ⑮ `git/clean` 的口径不变：源状态必须可追溯，`presets/delivery/` 之外必须干净。
 
 **三条边界**（守住它，这刀才不是"给开发者包了一层 CLI"）：
 

@@ -312,7 +312,7 @@ export default function PageSettings() {
                 className={s.input}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="https://…/presets/dist/ 或 …/source.json"
+                placeholder="https://…/presets/delivery/ 或 …/source.json"
                 aria-label="数据源地址"
               />
               <Btn onClick={() => void apply()} disabled={busy || !canSet}>

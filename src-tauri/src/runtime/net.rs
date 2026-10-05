@@ -36,7 +36,8 @@ use crate::error::AppError;
 
 use super::catalog::CatalogFile;
 use super::delivery::Source;
-use super::source::{join_url, CATALOG_FILE, RELEASE_FILE};
+use super::resolver::{ResourceRef, SourceResolver};
+use super::source::{CATALOG_FILE, RELEASE_FILE};
 
 /// 一次请求的总时间上限（含连接与传完整个响应体）
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -453,24 +454,24 @@ pub fn get_release(release_url: &str) -> Result<Vec<u8>, AppError> {
 
 /* ------------------------------- 远端的 Source 实现 ------------------------------- */
 
-/// 网络源：把 catalog 登记的 (`path`) 与配置的地址拼成一个 URL，然后 GET。
+/// 网络源：**地址由 [`SourceResolver`] 说**（业务层不拼 URL —— 寻址唯一出口）。
 ///
-/// **它就是第一圈那句"真云端来了加一个实现，管道不动"的兑现**——管道仍然只见到
+/// 它就是第一圈那句"真云端来了加一个实现，管道不动"的兑现——管道仍然只见到
 /// 一个 [`Source`]`::fetch`，不认识 HTTP，也不需要认识。
 pub struct RemoteSource<'a> {
-    base_url: String,
+    resolver: SourceResolver,
     on_tick: &'a OnTick<'a>,
 }
 
 impl<'a> RemoteSource<'a> {
     /// `file_name` 之外的进度都吐给 `on_tick`；不关心进度就传 [`noop_tick`]
-    pub fn new(base_url: String, on_tick: &'a OnTick<'a>) -> Self {
-        Self { base_url, on_tick }
+    pub fn new(resolver: SourceResolver, on_tick: &'a OnTick<'a>) -> Self {
+        Self { resolver, on_tick }
     }
 
-    pub fn no_progress(base_url: String) -> Self {
+    pub fn no_progress(resolver: SourceResolver) -> Self {
         Self {
-            base_url,
+            resolver,
             on_tick: &noop_tick,
         }
     }
@@ -478,7 +479,10 @@ impl<'a> RemoteSource<'a> {
 
 impl Source for RemoteSource<'_> {
     fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
-        let url = join_url(&self.base_url, &file.path);
+        let url = self
+            .resolver
+            .resolve(ResourceRef::Entry(file))?
+            .remote_or("这份交付文件")?;
         let plan = GetPlan {
             file_name: &file.file_name,
             // 期望大小是 `Option`（随包 bootstrap 目录不登记它）：没有就不设水位
@@ -755,7 +759,7 @@ mod tests {
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let file = entry("A1-standard.toml", &content);
 
-        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let source = RemoteSource::no_progress(test_resolver(server.addr));
         let got = source.fetch(&file).expect("Source 该拿到字节");
 
         assert_eq!(got, content);
@@ -786,6 +790,16 @@ mod tests {
         tempfile::tempdir().expect("临时目录建不出来")
     }
 
+    /// 判据用的 Resolver：`filesRoot = "."`（测试服务器的根就是文件根）。
+    /// 地址全部由 resolver 说 —— 与产品同一条寻址路径。
+    fn test_resolver(addr: std::net::SocketAddr) -> crate::runtime::resolver::SourceResolver {
+        crate::runtime::resolver::SourceResolver::from_bootstrap(
+            format!("http://{addr}"),
+            br#"{"sourceSchema":2,"catalog":"catalog.json","filesRoot":"."}"#,
+        )
+        .expect("测试 Manifest 该解析得动")
+    }
+
     /// 这一轮唯一能证明「客户端真的能从远端把文件拿回来落到下载区」的那条。
     ///
     /// 路径与之前 Section 单测的最大差别是它经过 [`super::super::delivery::deliver`]：
@@ -797,7 +811,7 @@ mod tests {
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
 
-        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let source = RemoteSource::no_progress(test_resolver(server.addr));
         let target =
             super::super::delivery::deliver(root.path(), &file, &source).expect("该走得通");
 
@@ -836,7 +850,7 @@ mod tests {
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
 
-        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let source = RemoteSource::no_progress(test_resolver(server.addr));
         let target =
             super::super::delivery::deliver(root.path(), &file, &source).expect("该走得通");
 
@@ -870,7 +884,7 @@ mod tests {
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
 
-        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let source = RemoteSource::no_progress(test_resolver(server.addr));
         let target =
             super::super::delivery::deliver(root.path(), &file, &source).expect("该走得通");
 
@@ -892,7 +906,7 @@ mod tests {
         let server = TestServer::start(vec![Reply::Bytes(lying)]);
         let root = fresh_root();
 
-        let source = RemoteSource::no_progress(format!("http://{}", server.addr));
+        let source = RemoteSource::no_progress(test_resolver(server.addr));
         let e = super::super::delivery::deliver(root.path(), &file, &source).unwrap_err();
 
         assert_eq!(

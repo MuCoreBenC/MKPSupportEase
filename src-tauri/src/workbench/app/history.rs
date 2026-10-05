@@ -307,7 +307,7 @@ mod tests {
             audit_failed: 0,
             generated: 9,
             unchanged: 0,
-            committed_paths: vec!["presets/dist/catalog.json".to_owned()],
+            committed_paths: vec!["presets/delivery/catalog.json".to_owned()],
             review: Some(rec("x").review.unwrap()),
             branch: Some("feat/x".to_owned()),
             commit: Some("08ec040".to_owned()),

@@ -22,11 +22,19 @@
 //! `opaque(true)` 是关键：这层玻璃只给底色带上环境色与高光，不负责透出桌面 ——
 //! 我们的界面本身是不透明的浅色渐变，传 false 会让背后的窗口整片读进来。
 //!
+//! 裁角的**曲率**还得再补一刀：window-vibrancy 用 CALayer 圆角裁，而 CALayer 的
+//! cornerCurve 默认是普通圆弧（circular）—— 和系统窗口贴在一起看得出「圆是圆了，
+//! 但不是 mac 那种圆」。macOS 原生窗口用的是连续曲率（continuous，超椭圆），
+//! `smooth_corner_curves` 把裁角链上已有的圆角层换成 continuous，观感才与系统一致。
+//!
 //! 低于 macOS 26 的系统上 `apply_liquid_glass` 会返回 `UnsupportedPlatformVersion`
 //! （crate 自己比 `NSAppKitVersionNumber`），那时就只打一条日志、不退回毛玻璃 ——
 //! 毛玻璃会把界面变成半透明，那是比直角更大的观感改变。
 
 use tauri::{Runtime, WebviewWindow};
+
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSView;
 
 /// 主窗口圆角。Tahoe 带工具栏的窗口就是 26
 #[cfg(target_os = "macos")]
@@ -67,6 +75,39 @@ pub fn install_unified_toolbar<R: Runtime>(win: &WebviewWindow<R>) {
     window.setTitlebarSeparatorStyle(NSTitlebarSeparatorStyle::None);
 }
 
+/// 把 `view` 及其两级父视图上已有的圆角曲率换成连续曲率（mac 原生窗口那道平滑曲线）。
+///
+/// 从 webview 往上走两级正好是玻璃层的裁角链：父级 = 玻璃层挂内容的那层
+/// （window-vibrancy 给它设了 radius，是**看得见**的裁角），再往上 = 玻璃层自己。
+/// 只动 cornerRadius > 0 的层 —— 那是 window-vibrancy 明确裁过角的；没设 radius 的层
+/// 换曲率没有意义，也不该碰。
+#[cfg(target_os = "macos")]
+fn smooth_corner_curves(webview: &NSView) {
+    use objc2_quartz_core::kCACornerCurveContinuous;
+
+    fn flip(view: &NSView) {
+        if let Some(layer) = view.layer() {
+            if layer.cornerRadius() > 0.0 {
+                // SAFETY: extern static（Apple 的全局常量字符串），只读借用。
+                layer.setCornerCurve(unsafe { kCACornerCurveContinuous });
+            }
+        }
+    }
+
+    // SAFETY: superview 是 AppKit 的纯读方法；视图都在窗口存活期间有效，这里只借用。
+    if let Some(holder) = unsafe { webview.superview() } {
+        flip(&holder);
+        if let Some(glass) = unsafe { holder.superview() } {
+            flip(&glass);
+            eprintln!(
+                "[chrome] 裁角曲率：holder={:?} glass={:?}",
+                holder.layer().map(|l| l.cornerCurve().to_string()),
+                glass.layer().map(|l| l.cornerCurve().to_string()),
+            );
+        }
+    }
+}
+
 /// 把 webview 挂进玻璃层，让 AppKit 裁圆角。
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -90,8 +131,11 @@ pub fn apply_native_corners<R: Runtime>(win: &WebviewWindow<R>) {
             .opaque(true)
             .content_view(view);
 
-        if let Err(err) = apply_liquid_glass(&target, options) {
-            eprintln!("[chrome] 上原生玻璃失败（{err:?}）—— 圆角会是直角，其余不受影响");
+        match apply_liquid_glass(&target, options) {
+            Ok(()) => smooth_corner_curves(view),
+            Err(err) => {
+                eprintln!("[chrome] 上原生玻璃失败（{err:?}）—— 圆角会是直角，其余不受影响")
+            }
         }
     });
 

@@ -34,3 +34,19 @@ note = '''
 下一次结构变化时，这一条**不要改**：复制一份、换成新的签名，`minClient` 填那个**将要**
 发布的版本号。历史条目留着——它记录的是"老客户端那时候读到的是哪一代"。
 '''
+
+[[signature]]
+signature = '2242174c52e8a9b6'
+minClient = '0.0.6'
+note = '''
+第二代结构（2026-10-05，资源寻址改造，`docs/RESOURCE-ADDRESSING-ROADMAP.md`）。
+
+字段名与类型一个没动 —— 机器签名看不出这次变化，是 `STRUCTURE_EPOCH = 2` 记下的：
+交付目录 `presets/dist/` 改名 **`presets/delivery/`**（B 类 `catalog.path` 前缀随之从
+`dist/…` 变 `delivery/…`）；`release.json` 入住交付根；`source.json` 升级为
+**Source Manifest v2**（寻址规则声明，全相对引用 + `filesRoot`）。
+
+`minClient` 写 0.0.6 = 装有这代寻址的下一个正式客户端。老客户端（v0.0.4 / v0.0.5）
+的内置 bootstrap 地址指向旧 `presets/dist/source.json`，合并后 404 —— 按 §1③ 决策
+**有意搁浅**（作者机手动更新）。
+'''

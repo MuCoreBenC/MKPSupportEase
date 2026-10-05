@@ -24,14 +24,14 @@ use crate::fsx::paths::resolve_in;
 const WORKBENCH_DIR: &str = "workbench";
 /// 预设根目录名（仓库根下）。**唯一的预设真相源**
 const PRESETS_DIR: &str = "presets";
-/// 交付产物的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/dist/*`：
-/// 源与产物各占一层，一眼分得清哪个是手写的。
-pub(crate) const DIST_SUBDIR: &str = "dist";
+/// 交付目录的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/delivery/*`：
+/// 源与交付各占一层，一眼分得清哪个是手写的（`RESOURCE-ADDRESSING-ROADMAP.md` §2.1）。
+pub(crate) const DELIVERY_SUBDIR: &str = "delivery";
 /// 交付根下的**产品资源区**：与客户端 `catalog.path` 里的那一段同名同形
-/// （B 类是 `dist/mkp/presets/…`，见 `app::dist` 模块头）。
+/// （B 类是 `delivery/mkp/presets/…`，见 `app::delivery` 模块头）。
 /// 住在 paths 是因为**读侧也要用**（生成状态兜底要 stat 磁盘上的产物），不能只让写侧认得。
 pub const MKP_DIR: &str = "mkp";
-/// MKP 产物在交付根里的子目录（**相对交付根**：`catalog.path` = `dist/` + 这一格）
+/// MKP 产物在交付根里的子目录（**相对交付根**：`catalog.path` = `delivery/` + 这一格）
 pub const MKP_PRESETS_DIR: &str = "mkp/presets";
 /// 资产根的名字（`presets/` 下）。见 [`assets_root`]
 const ASSET_DIR: &str = "assets";
@@ -62,9 +62,10 @@ pub fn workbench_root() -> Result<PathBuf, AppError> {
     Ok(root)
 }
 
-/// 发布目录：`<repo>/presets/dist`。发布动作才会往里写，读状态时不需要它存在
-pub fn dist_root() -> Result<PathBuf, AppError> {
-    let root = dist_root_path();
+/// 交付目录：`<repo>/presets/delivery`。发布动作才会往里写，读状态时不需要它存在。
+/// **生成器的唯一出口**（`RESOURCE-ADDRESSING-ROADMAP.md` 铁律 ②）。
+pub fn delivery_root() -> Result<PathBuf, AppError> {
+    let root = delivery_root_path();
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io(format!("建不出发布目录：{}", root.display())).with_detail(e.to_string())
     })?;
@@ -72,9 +73,9 @@ pub fn dist_root() -> Result<PathBuf, AppError> {
 }
 
 /// 交付根的**只读**定位（不建目录）：读状态用 —— 只有生成 / 发布才需要它存在。
-/// 路径与 [`dist_root`] 同一处算出，不许第二处自拼。
-pub fn dist_root_path() -> PathBuf {
-    repo_root().join(PRESETS_DIR).join(DIST_SUBDIR)
+/// 路径与 [`delivery_root`] 同一处算出，不许第二处自拼。
+pub fn delivery_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR).join(DELIVERY_SUBDIR)
 }
 
 /// 把相对路径解析到开发源数据根内，越界一律 `PERMISSION_DENIED`
@@ -82,9 +83,9 @@ pub fn resolve(rel: &str) -> Result<PathBuf, AppError> {
     resolve_in(&workbench_root()?, rel)
 }
 
-/// 把相对路径解析到发布目录内
-pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
-    resolve_in(&dist_root()?, rel)
+/// 把相对路径解析到交付目录内
+pub fn resolve_delivery(rel: &str) -> Result<PathBuf, AppError> {
+    resolve_in(&delivery_root()?, rel)
 }
 
 /// 资产文件的根：`<repo>/public/assets/`（b05 Task 8 定的约定）。
@@ -106,7 +107,7 @@ pub fn resolve_dist(rel: &str) -> Result<PathBuf, AppError> {
 ///
 /// # 目录按需建
 ///
-/// 与 [`workbench_root`] / [`dist_root`] 同一口径。而且这里**必须**存在：防穿越
+/// 与 [`workbench_root`] / [`delivery_root`] 同一口径。而且这里**必须**存在：防穿越
 /// （[`resolve_in`]）的第三道要比真实路径，根不存在的话每条路径都会解析失败 ——
 /// "还没搬过资产"要落成一个真实存在的空目录（`public/assets/.gitkeep` 占着），
 /// 而不是一个查不出来的状态。
@@ -120,7 +121,7 @@ pub fn assets_root() -> Result<PathBuf, AppError> {
 
 /// 资产根的**只读**定位（不建目录）—— 判据与闸用它。
 ///
-/// 与 [`dist_root_path`] 同一条理由：**读一件事不该顺手造出一个目录**。
+/// 与 [`delivery_root_path`] 同一条理由：**读一件事不该顺手造出一个目录**。
 /// 发布闸明写「只读：不写盘」，所以它必须走这一条而不是 [`assets_root`]。
 /// 路径与 [`assets_root`] 同一处算出，不许第二处自拼。
 pub fn assets_root_path() -> PathBuf {
@@ -199,15 +200,15 @@ mod tests {
         }
     }
 
-    /// 发布目录落在**预设根里面**：`<repo>/presets/dist`。
-    /// 源与产物同一棵树，人维护的 `presets/*.toml` 与机器生成的 `presets/dist/*` 一眼分得开
+    /// 交付目录落在**预设根里面**：`<repo>/presets/delivery`。
+    /// 源与产物同一棵树，人维护的 `presets/*.toml` 与机器生成的 `presets/delivery/*` 一眼分得开
     #[test]
-    fn dist_lives_under_presets() {
-        let d = dist_root().unwrap();
+    fn delivery_lives_under_presets() {
+        let d = delivery_root().unwrap();
         assert_eq!(
             d.file_name().and_then(|s| s.to_str()),
-            Some("dist"),
-            "发布目录该是 presets/dist，实测 {}",
+            Some("delivery"),
+            "交付目录该是 presets/delivery，实测 {}",
             d.display()
         );
         assert_eq!(

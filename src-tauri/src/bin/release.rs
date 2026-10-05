@@ -36,7 +36,7 @@ use std::path::PathBuf;
 use mkp_support_ease_lib::error::AppError;
 use mkp_support_ease_lib::workbench::app::platform::{self, Hosting};
 use mkp_support_ease_lib::workbench::app::publish_tx::{resolve_target, PublishTarget};
-use mkp_support_ease_lib::workbench::app::release_tx::{run, ReleaseOptions};
+use mkp_support_ease_lib::workbench::app::release_tx::{run, ReleaseChannel, ReleaseOptions};
 
 fn main() {
     match run_cli() {
@@ -104,6 +104,13 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
     };
 
     let (target, hosting) = resolve_from_env();
+    // M6（总纲 §5-M6）：Release 与附件发布到 Gitee —— 通道从 Gitee 发布账户来
+    //（MKPSE_APP_DIR 复用工作台配置；MKPSE_RELEASE_* 显式给时 platform=gitee 即通道）。
+    let release_parts = release_channel_parts();
+    let release_channel = release_parts.as_ref().map(|(t, h)| ReleaseChannel {
+        hosting: h.as_ref(),
+        target: t,
+    });
     let repo_root = mkp_support_ease_lib::workbench::paths::repo_root();
     eprintln!("仓库根：{}", repo_root.display());
     run(
@@ -111,7 +118,39 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
         &opts,
         target.as_ref(),
         hosting.as_ref().map(|h| h.as_ref()),
+        release_channel.as_ref(),
     )
+}
+
+/// M6 的发布通道零件：Gitee 账户（工作台配置或 MKPSE_RELEASE_* 显式给）。
+/// 没配 = `None` —— build=true 时内核如实报错。
+fn release_channel_parts() -> Option<(PublishTarget, Box<dyn Hosting>)> {
+    if let Some(dir) = std::env::var_os("MKPSE_APP_DIR") {
+        let root = PathBuf::from(dir);
+        if let Ok(t) = resolve_target(&root, Some("gitee")) {
+            let hosting = platform::hosting(&t.platform, t.token.clone())?;
+            return Some((t, hosting));
+        }
+    }
+    if let (Some(owner), Some(repo), Some(token)) = (
+        std::env::var("MKPSE_RELEASE_OWNER").ok(),
+        std::env::var("MKPSE_RELEASE_REPO").ok(),
+        std::env::var("MKPSE_RELEASE_TOKEN").ok(),
+    ) {
+        let platform =
+            std::env::var("MKPSE_RELEASE_PLATFORM").unwrap_or_else(|_| "gitee".to_owned());
+        let t = PublishTarget {
+            platform: platform.clone(),
+            repository_url: format!("https://gitee.com/{owner}/{repo}"),
+            username: std::env::var("MKPSE_RELEASE_USER").unwrap_or_else(|_| owner.clone()),
+            token,
+            owner,
+            repo,
+        };
+        let hosting = platform::hosting(&t.platform, t.token.clone())?;
+        return Some((t, hosting));
+    }
+    None
 }
 
 /// 凑出发布目标与平台客户端。**没有就返回 `None`** —— 内核会退化成"只做本地那一半"。

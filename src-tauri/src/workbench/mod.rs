@@ -111,6 +111,6 @@ pub struct Roots {
     pub workbench: String,
     /// 预设真相源（仓库里的 `presets/`）—— 机型 / 参数 / 套餐 / 资产 / 交付产物都在它下面
     pub presets: String,
-    /// 交付产物目录（仓库里的 `presets/dist/`）
-    pub dist: String,
+    /// 交付目录（仓库里的 `presets/delivery/`）
+    pub delivery: String,
 }

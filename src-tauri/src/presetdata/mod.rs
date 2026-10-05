@@ -1473,7 +1473,10 @@ mod tests {
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
-                if p.file_name().is_some_and(|n| n == "dist") {
+                // 交付目录里的产物 TOML 不是源：跳过（旧名 dist 也一并认，防历史检出）
+                if p.file_name()
+                    .is_some_and(|n| n == "dist" || n == "delivery")
+                {
                     continue;
                 }
                 collect_toml(&p, out);

@@ -51,7 +51,7 @@ pub mod bundles;
 /// 0600），前端拿不到原值
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
-pub mod dist;
+pub mod delivery;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;
@@ -450,13 +450,13 @@ pub fn wb_app_version() -> Result<String, AppError> {
 ///
 /// **不进制 draft 体系**：它不是配方内容（没有撤销 / 差异 / 快照可言），是一次单值
 /// 配置写；界面上是「设置」页的一格，改完当场回显。
-/// 校验与规范化在 [`dist::normalize_bootstrap_url`]（**仓库地址 → 默认发布入口的 raw**；
+/// 校验与规范化在 [`delivery::normalize_bootstrap_url`]（**仓库地址 → 默认发布入口的 raw**；
 /// blob 页按人指的转；raw / 自建源原样 —— 见那个函数的输入契约表）。
 /// **对客户端生效要重新构建**（`build.rs` 构建期读同一份文件注入）——返回值只是回显。
 #[tauri::command]
 pub fn wb_set_bootstrap(url: String) -> Result<String, AppError> {
     traced("wb_set_bootstrap", |_| {
-        let normalized = dist::normalize_bootstrap_url(&url)?;
+        let normalized = delivery::normalize_bootstrap_url(&url)?;
         let store = Store::open()?;
         store.write_doc(
             Store::BOOTSTRAP_REL,
@@ -477,7 +477,7 @@ fn boot_inner() -> Result<Boot, AppError> {
                 .ok_or_else(|| AppError::not_found("定位不到 <repo>/presets"))?
                 .display()
                 .to_string(),
-            dist: paths::dist_root()?.display().to_string(),
+            delivery: paths::delivery_root()?.display().to_string(),
         };
         // 建一次会话：能开就说明 presets/ 读得通（会话自己也读一次）
         with_ctx(|_| Ok(()))?;
@@ -498,7 +498,7 @@ fn boot_inner() -> Result<Boot, AppError> {
                 presets: paths::presets_root()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
-                dist: paths::dist_root()
+                delivery: paths::delivery_root()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
             },

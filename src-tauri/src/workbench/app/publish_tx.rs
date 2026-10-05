@@ -12,7 +12,7 @@
 //! `with_ctx` 的锁**不可重入**：事务跑在锁里，若它回头调 `wb_generate` / `wb_publish`
 //! 这些命令壳，就是**自己把自己锁死**（挂死，不是报错）。
 //! 所以这一层的每一个函数**只收 `&Ctx`**，复用 [`super::build::generate_with`] /
-//! [`super::audit::publish_audit`] / [`super::dist::publish_into`] 这些自由函数。
+//! [`super::audit::publish_audit`] / [`super::delivery::publish_into`] 这些自由函数。
 //! 判据 `the_transaction_chain_never_calls_a_command_shell` 用源码扫描钉住这条。
 //!
 //! # 两条链在这里汇合，但不合并
@@ -191,8 +191,8 @@ impl TxOptions {
 ///
 /// 步骤：
 /// 1. [`super::audit::publish_audit`] —— 任一 Blocker 红 → **立即返回 [`PublishStage::BlockedAudit`]，零写入**
-/// 2. [`super::build::generate_with`] —— 把带 scope 的产物写进 `dist/mkp/presets/` + 重算目录
-/// 3. [`super::dist::publish_into`] —— 定稿 catalog / manifest / source
+/// 2. [`super::build::generate_with`] —— 把带 scope 的产物写进 `delivery/mkp/presets/` + 重算目录
+/// 3. [`super::delivery::publish_into`] —— 定稿 catalog / manifest / source
 ///    - **3½ 最终一致性核对**（[`super::audit::finalize_consistency`]）：定稿刚写下的
 ///      三本账与交付根真字节逐条对上、无残留。红 = 内部错误或并发改动 →
 ///      **Err 短路，绝不产生半截发布提交**
@@ -249,19 +249,19 @@ pub fn run(
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
     let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
-    let root = super::super::paths::dist_root()?;
+    let root = super::super::paths::delivery_root()?;
     let asset_root = super::super::paths::assets_root()?;
-    let meta = super::dist::PublishMeta {
+    let meta = super::delivery::PublishMeta {
         stamp: crate::workbench::clock::now_iso8601(),
         channel: "stable".to_owned(),
         version: String::new(),
     };
-    let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+    let out = super::delivery::publish_into(&root, &asset_root, &book, &meta)?;
 
     // ③½ **最终一致性核对**（发布事务的最后一道安全检查，不是第二套闸）：
     //    定稿刚按真实字节写下的 manifest / catalog 与交付根必须逐条对上、无残留。
     //    核对跑在 stage / commit 之前 —— 红了就 Err 短路，一个字节都不提交。
-    //    （清单刻意不含 ⑮ git/clean：定稿后的工作区理应带着 presets/dist 的改动，
+    //    （清单刻意不含 ⑮ git/clean：定稿后的工作区理应带着 presets/delivery 的改动，
     //    那正是这次要提交的东西。见 `audit::finalize_consistency` 的文档。）
     let final_items = super::audit::finalize_consistency(&book, &root);
     let broken: Vec<String> = final_items
@@ -314,7 +314,7 @@ pub fn run(
 
     // stage 的候选 = 交付产物根 + 台账（与生成 / 定稿写的同一批）。
     let candidates = vec![
-        "presets/dist/".to_owned(),
+        "presets/delivery/".to_owned(),
         "presets/structure-signatures.toml".to_owned(),
         "presets/assets.toml".to_owned(),
     ];

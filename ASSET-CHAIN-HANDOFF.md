@@ -1,3 +1,7 @@
+> ⚠️ **历史快照（2026-10-05 加注）**：本文写于寻址改造之前，其中的 `presets/dist/`、
+> `baseUrl` 同目录推导、release.json 位置等表述是**当时的现状记录**，不再是现行规则。
+> 现行规则见 `docs/RESOURCE-ADDRESSING-ROADMAP.md` 与 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
+
 # 交接文档 · 资产交付链与图位分层（2026-10-03）
 
 > **给新窗口/新会话的你**：这份文档是这一串工作的**完整交接**。读完这一篇 + 仓库根的

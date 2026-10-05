@@ -14,7 +14,7 @@
 
 ```text
 ① 开发仓库（我们看得见，用户永远不该知道它长什么样）
-   presets/*.toml 源 · presets/dist 产物暂存 · workbench/ 工作态 · 测试夹具
+   presets/*.toml 源 · presets/delivery 交付目录（入库） · workbench/ 工作态 · 测试夹具
         │  发布构建（唯一通道：把"厨房"做成"菜"）
         ▼
 ② 安装包（用户拿到的成品）
@@ -47,7 +47,7 @@
 | 路径 | 是什么 | 入库 |
 | --- | --- | --- |
 | `presets/*.toml` | 源定义：`brands` / `machines/`×5 / `forbidden_zones/`×3 / `assets` / `bundles` / `layout_schema` / `registry/` | 是 |
-| `presets/dist/` | 发布器产物暂存（源与产物同树是 `workbench/paths.rs` 的刻意决定）。**本机生成，gitignore，不入库**——判据输入用的是入库产物目录 | 否 |
+| `presets/delivery/` | 交付目录（源与交付同树是 `workbench/paths.rs` 的刻意决定）。**入库**（2026-10-02 第十八刀改判）——main 上的正式远端交付面 | 是 |
 | `crates/preset/assets/presets/` | **入库产物目录**：9 份交付预设的真字节，`BUILTIN_PRESETS` 编进二进制的就是它，判据测试锚着它 | 是 |
 | `crates/preset` + 判据测试 | `BUILTIN_PRESETS` 与命名函数，判据保证与 `dist` 一份不差 | 是 |
 | `crates/*/tests/fixtures/` | 判据资产（对照基线等，见 `ARCHITECTURE.md` §10.6） | 是 |
@@ -132,7 +132,7 @@ catalog 是 OTA 数据，**随包那份只是起点，不是最终资源**。三
       ▲
       │ OTA（check_remote_update 比 revision）
       ┌───────────────────────────┐
-      │ ③ 远端 catalog（层④发布产物）│ —— presets/dist/catalog.json（与 source.json 同源）
+      │ ③ 远端 catalog（层④发布产物）│ —— presets/delivery/catalog.json（与 source.json 同源）
       └───────────────────────────┘
 ```
 
@@ -151,7 +151,7 @@ catalog 是 OTA 数据，**随包那份只是起点，不是最终资源**。三
 
 **构建链的双身份（欠账，见 §4）**：`crates/preset/assets/presets/*.toml` 是 ① 的**构建输入**
 （`gen-presets --write` → `gen-catalog` → `catalog.generated.json`），它**不是**"客户端内置的最终
-MKP TOML"（`mkp/` 初始为空是铁律 3）。工作台生成的是 ③ 的交付根 `presets/dist/mkp/presets/*.toml`，
+MKP TOML"（落点 = `catalog.path`，铁律 3）。工作台生成的是 ③ 的交付根 `presets/delivery/mkp/presets/*.toml`，
 两批字节不同**本身不构成下载失败** —— 真正的失败只来自 ② 落后于 ③。
 
 #### 预设 TOML 的一生：**官方线 / 用户线，两条不许混**（2026-10-02 定）
@@ -329,7 +329,7 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- |
 | 1 | 开发源文件放哪里 | §1① 的表。任何一处都不放运行时数据 |
 | 2 | 发布时怎么变成运行时数据 | 唯一通道是**发布构建**：读①源 + 内置资源 → 产出 catalog（C15 的 ClientDataPackage 是它的雏形）。手工改运行时数据 = 违规 |
-| 3 | 安装包里允许有什么 | §1② 白名单。打包脚本**不许**直接抄 `presets/dist`，必须走构建产物 |
+| 3 | 安装包里允许有什么 | §1② 白名单。打包脚本**不许**直接抄 `presets/delivery`，必须走构建产物 |
 | 4 | 用户数据目录允许有什么 | §1③ 两根白名单 |
 | 5 | 云端负责什么 | manifest + 文件本体，就这两件 |
 | 6 | 启动读什么 | 只读 Internal 根：catalog + run 状态 + 日志初始化。**零网络，首屏立刻可渲染** |
@@ -346,7 +346,7 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- | --- |
 | 机型 / 版本 / 参数 / 布局定义 | `presets/*.toml`（人） | 算进 catalog | 无副本——改定义 = 改源重新发布 | — |
 | MKP 预设（出厂内容） | `crates/preset/assets/presets`（入库产物，判据锚定） | 内置 9 份，catalog 登记 | `mkp/` 原件只读；`presets-mine/` 副本可改 | manifest + 文件 |
-| BBS 切片配置 · 图标 · 3mf 模型 | `public/assets/{bbs,icons,models}`（成品） | catalog 登记（说明书随包），**文件本体不随包**：按需下载进 `mkp/<kind>/` | 不改原件 | manifest + 文件本体（地址 = 数据源 baseUrl + catalog 的 `path`） |
+| BBS 切片配置 · 图标 · 3mf 模型 | `public/assets/{bbs,icons,models}`（成品） | catalog 登记（说明书随包），**文件本体不随包**：按需下载（落点 = `<appDataDir>/<catalog.path>`，2026-10-05 寻址改造） | 不改原件 | manifest + 文件本体（地址 = 数据源 baseUrl + catalog 的 `path`） |
 | 界面展示素材（品牌 logo / 机型整机图 / 测试模型合影） | `src/app/assets/`（整机图与合影 2026-10-01 起搬来） | **随程序本体**（它就是界面的一部分） | 无副本 | — |
 | 偏移量 / 运行状态 | — | — | `run/`（程序替用户管） | — |
 | **数据源地址**（当前用哪个云端） | 用户填（界面里）或构建方注入默认值 | 可选的随包默认值（`MKPSE_PRESET_SOURCE`） | `run/preset-source.json`（程序写，用户可删=回到未配置） | 被寻址的一方，不拥有这份设置 |
@@ -361,13 +361,13 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | --- | --- | --- | --- |
 | 1 | ~~`client/defaults.rs` 把 13 份源 TOML `include_str!` 进二进制、首启铺进 `<appDataDir>/presets/`~~ | ~~铁律 1（开发文件成了运行时数据库）~~ | **已收口 2026-10-01**：catalog 替代。definition（机型/资产/套餐/字段定义/布局）由发布构建从同一批源算进 catalog，客户端只读它；`client/` 模块删除，铺盘只剩 catalog 一份 |
 | 2 | ~~`public/cloud/presets.json`——模拟云端的假清单——随 vite 进安装包~~ | 铁律 1/3（模拟数据进了成品） | **已收口 2026-10-01**：挪进 `src/workbench/fixtures/` 静态 import，只有工作台构建带它，客户端构建已无此字节（构建产物 grep 验证过） |
-| 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 `mkp/<kind>/…`，客户端按需下载、随包副本退役。**整机图不作为该类收口，而是改判归属、剥离台账**（第三刀，见下） |
+| 3 | ~~`public/assets/` 下的 BBS / 模型 / 图标裸进安装包~~ | ~~半违规：属②合法内容，但未经 catalog 登记，版本 / SHA 不可知~~ | **已收口 2026-10-01（第三圈前两刀）**：BBS（`kind=bbs_config`）、模型（`kind=model`）、图标（`kind=icon`）登记进 catalog，落点 = `catalog.path`（`<appDataDir>/<catalog.path>`），客户端按需下载、随包副本退役。**整机图不作为该类收口，而是改判归属、剥离台账**（第三刀，见下） |
 | 3b | ~~整机图：登记进 catalog 还是留在包外，一直悬着~~ | ~~归属未定~~ | **收口两次**：2026-10-01（第三圈第三刀）判它是界面素材、从台账剥离搬进客户端源码；**2026-10-03 作者改判作废**（「不会编程的用户怎么改图片呢」）。现状：文件在 `presets/assets/printers/`，`presets/assets.toml` 恢复 4 条 `image`（19 条），用 **`delivery = 'bundled'`** 表达「不进云端交付、随包不下载」，到客户端靠构建期复制（`scripts/copy-assets.mjs`）。判据从「台账里已无 image 类」换成**「整机图在台账里、且不进 catalog 的 files[]」**（`dest_of_asset` 按档位拦） |
 | 4 | `BUILTIN_PRESETS`（`crates/preset`）绕过 catalog 独立可达 | 形态合法（②内置内容，判据已锚 dist），但清单该由 catalog 统一给出 | **半收口（2026-10-02 核对）**：catalog 已统一登记全部 9 份预设（`files[]`，`embedded_matches_rebuild` 判据盯着），但条目上**没有"内置"这一标记**、`BUILTIN_PRESETS` 作为编译期常量仍独立可达（判据 `builtin_presets_match_dir` 锚它）。要勾这一条 = 给 `CatalogFile` 加"内置"标记并让判据改锚 catalog；登记为**小口子**，不阻塞任何业务 |
 | 5 | ~~下载区命名两套并存：产品规则交界写的 `cloud/` vs 客户端实现的 `mkp/`~~ | ~~命名欠账~~ | **已收口 2026-10-02**：产品规则正文按本文 `mkp/` 重写（`PRESET-PRODUCT-RULES.md` 的"反写"版，见该文件头），全仓不再有 `cloud/` 这个下载区叫法 |
-| 6 | `presets/dist` 混在预设根里 | **不违规**（源产物同树是刻意决定），但它是**本机暂存、不入库**——判据与构建的输入必须用入库产物目录 `crates/preset/assets/presets` | 已在本文声明；打包走构建产物，不抄目录 |
-| 7 | **`catalog.path` 的基准错了**：现在指向 `mkp/<kind>/…`，发布时把 A 类资产**复制**一份进 `dist/` ⇒ 同一份字节有了第二份真相（0.2mm 那 4 份 BBS 登记了却没发，客户端点下载 404） | 铁律 1 的孪生问题 | **方案已定、待实施**（2026-10-04 裁决 C）：`catalog.path` 改指**真实资产源路径**、A 类**不复制**、发布根 = `presets/`。见 `PUBLISH-ARCHITECTURE.md` §0/§1 |
-| 8 | **没有统一的发布闸**：`audit_catalog` / `deliverable_set` / `dist_strays` / `version_orphans` 是散落命令，且 `audit_catalog` 只报待办**不阻断** | 第五圈（发布可信）缺失 | **待实施**：`PublishAudit` 结果模型 + 十五项逐项打勾模态框 + 全绿才允许建 PR。见 `PUBLISH-ARCHITECTURE.md` §5 |
+| 6 | `presets/delivery` 混在预设根里 | **不违规**（源产物同树是刻意决定），且**已入库**（2026-10-02 第十八刀改判；见 `.gitignore`）——它是 main 上的正式远端交付目录 | ~~本机暂存~~ 已过时 |
+| 7 | ~~`catalog.path` 的基准错了~~ | —— | **已收口**（2026-10-04 裁决 C 落地 + 2026-10-05 寻址改造收尾）：`catalog.path` 指真实资产源路径、A 类不复制、锚点由 Source Manifest v2 的 `filesRoot` 声明。见 `RESOURCE-ADDRESSING-ROADMAP.md` |
+| 8 | ~~没有统一的发布闸~~ | —— | **已收口**：`PublishAudit`（十六项，含 2026-10-05 的 ⑯ 客户端视角 URL 对账）+ 全绿才许建 PR。见 `PUBLISH-ARCHITECTURE.md` §5 |
 | 9 | **`minVersion` / 结构代次不存在**：只有 `catalogSchema: u32`（加字段不升号），没有"结构变了 → 最小客户端版本跟着变"的能力 | 第六圈（演进）缺失 | **待实施**：结构签名（只加可选字段时不变）+ 显式规则表 + 发布闸查不到签名就**禁止发布**。见 `PUBLISH-ARCHITECTURE.md` §5.3 |
 
 ## 5. 判据：怎么知道没人违反

@@ -158,7 +158,7 @@ fn local_revision(internal_root: &Path) -> Option<String> {
 /// 判定失败就退回保守说法，绝不让"没联网"看起来像"文件坏了"
 fn remote_revision(internal_root: &Path) -> Option<String> {
     let resolved = super::source::resolve_source(internal_root).ok()?;
-    let bytes = super::net::get_catalog(&resolved.catalog_url).ok()?;
+    let bytes = super::net::get_catalog(&resolved.catalog_url().ok()?).ok()?;
     super::Catalog::parse(&bytes).ok().map(|c| c.revision)
 }
 
@@ -242,7 +242,7 @@ pub fn deliver(
 /// 永远不回写官方原件。所以这里只有"官方旧版本"，没有"谁在什么时候改了什么"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedFile {
-    /// 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
+    /// 相对内部根的路径（`archive/delivery/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
     pub path: String,
     /// 文件名。与它对应的交付文件**同名**：换版本换的是字节，不是名字
     pub file_name: String,
@@ -321,7 +321,7 @@ pub enum FileTrust {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KnownVersion {
     pub sha256: String,
-    /// 归档区里躺着这份字节时给（`archive/dist/mkp/presets/A1-fast.toml`）。
+    /// 归档区里躺着这份字节时给（`archive/delivery/mkp/presets/A1-fast.toml`）。
     /// 只被旧目录登记过、归档里没有它字节的那种是 `None` —— 那样同样认得出，
     /// 只是没有"可以看正文"这一档
     pub archived_path: Option<String>,

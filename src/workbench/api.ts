@@ -78,8 +78,8 @@ export interface Roots {
   workbench: string
   /** 预设真相源（仓库里的 `presets/`） */
   presets: string
-  /** 交付产物目录（仓库里的 `presets/dist/`） */
-  dist: string
+  /** 交付产物目录（仓库里的 `presets/delivery/`） */
+  delivery: string
 }
 
 /** `app::Boot`。**预设根定位不到时也是一个成功返回**，界面要显示问题与数据根 */
@@ -1279,7 +1279,7 @@ export interface AssetInspectView {
   height: number | null
   /** 格式（小写扩展名：`webp` / `svg` / `3mf` / `json` / `toml`…） */
   format: string | null
-  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/dist/mkp/presets/<产物名>` */
+  /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>` */
   productPath: string | null
 }
 
@@ -1649,7 +1649,7 @@ export const wb = {
    */
   distStrays: () => invoke<string[]>('wb_dist_strays'),
   /**
-   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/dist/` 回收（保留相对路径），
+   * 清理残留（b05 Task 13.5）：走 `workbench/.trash/delivery/` 回收（保留相对路径），
    * **不直接删**。清理完重新发布即可
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),

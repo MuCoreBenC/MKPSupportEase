@@ -214,7 +214,7 @@ note(
 )
 
 /* ③ MKP 预设：没有源文件，面板给的是**产物**（名字 + 相对仓库根的产物路径） */
-const mkShown = await selectAsset('a1-standard', 'presets/dist/mkp/presets/A1-standard.toml')
+const mkShown = await selectAsset('a1-standard', 'presets/delivery/mkp/presets/A1-standard.toml')
 const mkText = await cardText()
 note(
   mkShown && mkText.includes('A1-standard.toml'),

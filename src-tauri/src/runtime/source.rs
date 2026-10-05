@@ -4,7 +4,7 @@
 //!
 //! 第二圈把下载从"本地目录源"换成真远端源之后，**远端的地址是谁、写在哪**成了一个
 //! 必须有人管的持久状态。它不属于 [`super::delivery`]（那是管道，不管地址从哪来），
-//! 也不属于 [`super::net`]（那是取字节的动作）——这里只answer一件事：
+//! 也不属于 [`super::net`]（那是取字节的动作）——这里只回答一件事：
 //! **这一台机器上，云端在哪**。
 //!
 //! # 为什么是这个形状
@@ -13,13 +13,15 @@
 //! 不该为此重新发布一次说明书。于是分工变成:
 //!
 //! ```text
-//! catalog 说：有一个文件叫 A1-standard.toml，它在交付集合里的位置是 mkp/A1-standard.toml
-//! 这份设置说：当前的数据源是 https://…（官方 / Gitee / 自己的服务器）
-//! 下载地址 = 这份设置的 baseUrl + catalog 的 path
+//! source.json（Source Manifest）说：寻址规则 —— catalog / manifest / release / content
+//!                                    / filesRoot 各从哪个锚点找（全相对引用）
+//! catalog 说：有一个文件叫 A1-standard.toml，它在交付集合里的位置是 delivery/mkp/presets/…
+//! 这份设置说：当前的数据源是哪一份 source.json（官方 GitHub / 官方 Gitee / 自建）
+//! 下载地址 = SourceResolver（唯一寻址出口）算，业务层不拼
 //! ```
 //!
-//! 两半都是它们各自领域的唯一主人，`path` 不会因为换发布会变，`baseUrl` 不会因为
-//! 内容改版而重算。**换源不用重新设计目录。**
+//! 两半都是它们各自领域的唯一主人：Manifest 是**寻址规则声明**，Catalog 是**资源清单**
+//! —— Catalog 不得自带第二套根/URL（`docs/RESOURCE-ADDRESSING-ROADMAP.md` 铁律 ⑥）。
 //!
 //! # 存储规矩（沿用 [`super::state`] 那一套，不另发明）
 //!
@@ -32,15 +34,15 @@
 //! "当前用哪个远端"有两个来源，语义**故意不同**：
 //!
 //! ```text
-//! 手动覆盖（设置页 → 高级设置）  = 一个数据源根：根下就是 catalog.json 与各文件
+//! 手动覆盖（设置页 → 高级设置）  = 交付目录或 source.json 地址
 //!                                 （开发 / 排查通道：本地 http.server、自建镜像…）
 //! 内置（构建期注入）            = 一个 Bootstrap 地址：指向 source.json，
-//!                                 由它说"catalog 在哪、文件下载根在哪"
+//!                                 由它声明寻址规则
 //!                                 （正式通道：换部署位置只改 source.json，客户端不重发）
 //! ```
 //!
-//! 覆盖优先。两条路解析出来的是**同一个形状**（[`ResolvedSource`]：catalog 地址 +
-//! 文件下载根），下游（下载 / 检查更新 / 应用更新）只认它，不各自拼 URL。
+//! 覆盖优先。两条路解析出来的是**同一个形状**（[`ResolvedSource`]：一个
+//! [`SourceResolver`]），下游（下载 / 检查更新 / 应用更新）只从它拿地址，不各自拼 URL。
 //!
 //! # 没有地址时怎么办
 //!
@@ -57,6 +59,7 @@ use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
 
 use super::paths::SOURCE_FILE;
+use super::resolver::{ResourceRef, SourceResolver};
 
 /// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）。
 ///
@@ -66,25 +69,19 @@ use super::paths::SOURCE_FILE;
 /// 它的含义在新模型里**正好是 `custom`**（`customUrl`）。不猜、不迁移、不回填。
 pub const SOURCE_SCHEMA: u32 = 2;
 
-/// 目录（catalog）在远端根里的固定名字 —— **直接模式**的约定；
-/// Bootstrap 模式由 `source.json` 自己说，客户端不猜。发布侧引用同一常量
-/// （见 `workbench::app::dist` 的 `NEW_CATALOG_FILE`）
+/// 目录（catalog）在交付面上的固定文件名（`GetPlan` 的进度名也用它）。
+/// 具体位置由 Source Manifest 的 `catalog` 声明，客户端不猜。
 pub const CATALOG_FILE: &str = "catalog.json";
 
-/// **软件发布信息**（`release.json`）的固定名字。
+/// **软件发布信息**（`release.json`）的固定文件名（`GetPlan` 的进度名也用它）。
 ///
-/// ★ 它**不是预设数据**：住发布根（`presets/`）的**上一级**，不进制 catalog / manifest，
-/// 也不参与发布闸的内容校验（作者 2026-10-04 定死）。它是「有没有新版本的 SupportEase」
-/// 这条**软件发布链**的信息源，与"预设数据能不能读"是两件事。
+/// ★ 它**不是预设数据**：是「有没有新版本的 SupportEase」这条**软件发布链**的信息源，
+/// 与"预设数据能不能读"是两件事。具体位置由 Source Manifest 的 `release` 声明
+/// （2026-10-05 起住交付根 `presets/delivery/` 里，与其他交付元数据同边界）。
 pub const RELEASE_FILE: &str = "release.json";
 
-/// Bootstrap（`source.json`）的 schema 代次。认不得就拒绝 —— 不猜新版长什么样。
-/// 注意它与上面的 [`SOURCE_SCHEMA`] 是两回事：那是**这台机器上设置文件**的代次，
-/// 这是**发布出去那一口文件**的协议代次
-pub const BOOTSTRAP_SCHEMA: u32 = 1;
-
 /// 构建方可注入的默认地址（`MKPSE_PRESET_SOURCE`）—— **第十七刀起语义是 Bootstrap
-/// 地址**（指向 `source.json` 的文件地址），不再是"直接根"。**变量没设就再看工作台
+/// 地址**（指向 `source.json` 的文件地址）。**变量没设就再看工作台
 /// 配置**（那是 build.rs 的事，到这里时已经被合并成一个值）。
 const DEFAULT_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE");
 
@@ -98,22 +95,24 @@ const GITEE_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE_GITEE");
 /// 自定义源的**两种形状**（作者 2026-10-05 真机踩出来的）。
 ///
 /// ```text
-/// 根（root）      https://host/presets/dist/            根下就有 catalog.json 与各文件
-/// Bootstrap       https://host/presets/dist/source.json  由它说 catalog 与文件根在哪
+/// 交付目录        https://host/presets/delivery/          目录下就有 source.json
+/// Bootstrap       https://host/presets/delivery/source.json  寻址规则声明
 /// ```
 ///
-/// ★ **同一个"官方地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）
-///   —— 而手动指定这条路原本只认前者，于是"填官方地址反而不能用内置的"（0.0.2 真机）。
-///   所以：**保存时两种都探一次，认出来哪一个记在盘上**（[`CustomShape::Unset`] = 还没探过）。
+/// ★ **同一个"官方地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）。
+/// 自 Source Manifest v2 起**两种形状殊途同归**：最终都读 `{交付目录}/source.json`
+/// （寻址规则只住这一份文件，"直接读 catalog.json"的第三种读法已废 —— 没有 Manifest
+/// 就没有 `filesRoot`，客户端只能靠猜，那正是要消灭的）。形状的区别只剩
+/// "用户填的是目录还是文件"，记在盘上只为省一次探测。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CustomShape {
-    /// 还没探过（老档、或刚写下来还没联网）：**运行时自适应**（先根后 Bootstrap）
+    /// 还没探过（老档、或刚写下来还没联网）：**运行时自适应**
     #[default]
     Unset,
-    /// 数据源根
+    /// 用户填的是**交付目录**（客户端补上 `/source.json` 再读）
     Root,
-    /// `source.json` 地址
+    /// 用户填的就是 `source.json` 地址（原样读）
     Bootstrap,
 }
 
@@ -201,35 +200,35 @@ pub enum SourceEntry {
     /// 开发 / 排查通道（本地 http.server、自建镜像、另一个官方源…）。
     ///
     /// ★ `shape` 是探出来的那一种（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）：
-    /// **同一个地址两种读法**（根 / `source.json`）都能认，见 [`probe_custom_shape`]。
+    /// **同一个地址两种读法**（目录 / `source.json`）都能认，见 [`probe_custom_shape`]。
     Custom { url: String, shape: CustomShape },
     /// 构建期注入：**Bootstrap 地址** —— 指向 `source.json`，
-    /// 由它说"catalog 在哪、文件下载根在哪"。正式通道
+    /// 由它声明寻址规则。正式通道
     Bootstrap { url: String },
 }
 
-/// 解析出来的"远端在哪"：两个地址都定了。**所有联网动作的唯一出发点**
+/// 解析出来的"远端在哪"：一个装配好的 [`SourceResolver`]。**所有联网动作的唯一出发点**
 /// （下载 / 检查更新 / 应用更新都从它拿地址，不各自拼 URL）
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ResolvedSource {
-    /// catalog 的完整 URL（检查 / 应用更新取它）
-    pub catalog_url: String,
-    /// 文件下载根（`join_url(base, file.path)` 的那个 base）
-    pub base_url: String,
+    pub resolver: SourceResolver,
 }
 
-/// Bootstrap（`source.json`）说的两件事 —— **发布侧**（`workbench::app::dist`）写它，
-/// 客户端读它。形状小到只有这些：多说一个字都是两端要一起改的契约
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BootstrapFile {
-    source_schema: u32,
-    /// catalog 相对 Bootstrap 所在目录的路径（要相对、不许 `..`、不许绝对 URL）
-    catalog: String,
-    /// 文件下载根：省略 / `null` = 与 Bootstrap 同目录；给了必须是绝对 http(s)。
-    /// **发布侧不写它**（同一份 dist 推到哪里都对），换 CDN 时才有它的用场
-    #[serde(default)]
-    base_url: Option<String>,
+impl ResolvedSource {
+    /// catalog 的完整 URL（检查 / 应用更新取它）
+    pub fn catalog_url(&self) -> Result<String, AppError> {
+        self.resolver
+            .resolve(ResourceRef::Catalog)?
+            .remote_or("目录（catalog）")
+    }
+
+    /// 软件发布信息（release.json）的完整 URL —— **由 Manifest 声明**，
+    /// 不再从 base"上跳一级"去猜（那是 2026-10-05 寻址改造废除的第二套推导）。
+    pub fn release_url(&self) -> Result<String, AppError> {
+        self.resolver
+            .resolve(ResourceRef::Release)?
+            .remote_or("软件发布信息（release）")
+    }
 }
 
 /// 设置文件的落点：`<appDataDir>/run/preset-source.json`
@@ -280,7 +279,7 @@ fn read_v1(bytes: &[u8]) -> Result<Option<PresetSource>, AppError> {
         source_schema: SOURCE_SCHEMA,
         mode: SourceMode::Custom,
         custom_url: Some(normalize_base_url(base)?),
-        // ★ 老档**没探过形状** → `Unset` → 运行时自适应（先根后 Bootstrap）。
+        // ★ 老档**没探过形状** → `Unset` → 运行时自适应（先目录后 Bootstrap）。
         //   0.0.2 之前用户手填 `source.json` 地址的那些档，就是这样被救回来的。
         custom_shape: CustomShape::Unset,
     }))
@@ -336,34 +335,13 @@ pub fn save_source_with(
     Ok(source)
 }
 
-/// **探一个自定义地址是哪种形状**（真联网，两次机会：先根、再 `source.json`）。
-///
-/// ★ 顺序有讲究：**先试根** —— 根那一次不额外花请求（`{地址}/catalog.json` 本来
-///   就要取）；不成再当 Bootstrap 读一次 `source.json`。
-/// **两条都不通** → 如实报错，并把两条各自的失败原因都摆出来（只说"不行"等于让用户猜）。
-/// **Bootstrap 形状下，这个地址可能是哪一个文件**（纯函数，判据钉它）。
-///
-/// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
-///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
-///   （2026-10-05 真机：手动指定"官方地址"反而不通，就是这一处）。
-/// 所以：**原样先试**，不成再在根上补文件名。
-fn bootstrap_candidates(url: &str) -> Vec<String> {
-    let trimmed = url.trim().trim_end_matches('/');
-    let mut out = Vec::new();
-    if trimmed.ends_with(SOURCE_FILE_NAME) {
-        out.push(trimmed.to_owned());
-    }
-    let base = normalize_base_url(trimmed).unwrap_or_else(|_| trimmed.to_owned());
-    let appended = format!("{base}/{SOURCE_FILE_NAME}");
-    if !out.contains(&appended) {
-        out.push(appended);
-    }
-    out
-}
+/// `source.json` 的**文件**名（`RELEASE_FILE` 是 `release.json`，两者别混 —— 这个坑
+/// 名字上就分不开，所以给它一个自己的常量）。
+const SOURCE_FILE_NAME: &str = "source.json";
 
 /// **取字节的注入点**（判据用假的，产品的门只用真的）。
 ///
-/// ★ 为什么有这一层：形状判定（根还是 `source.json`）本质是"依次试几个 URL，看哪个
+/// ★ 为什么有这一层：形状判定（目录还是 `source.json`）本质是"依次试几个 URL，看哪个
 ///   能取到东西"。把它写成"直接调 `net::get_bytes`"的话，判据就得**开一个本地端口**
 ///   才能跑 —— 而客户端产品不许开端口（`check:zero-network` 那道闸会报红，2026-10-05
 ///   真被它抓过一次）。**注入取字节的动作，判据就能在纯内存里跑完整条判定。**
@@ -378,11 +356,28 @@ fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
     )
 }
 
-/// 探一个自定义地址是哪种形状（真联网：先根、再按 [`bootstrap_candidates`] 试 Bootstrap）。
+/// **这个地址可能是哪一个文件**（纯函数，判据钉它）。
 ///
-/// ★ 顺序有讲究：**先试根** —— 根那一次不额外花请求（`{地址}/catalog.json` 本来
-///   就要取）；不成再当 Bootstrap 读。
-/// **都不通** → 如实报错，并把每次尝试的原因都摆出来（只说"不行"等于让用户猜）。
+/// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
+///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
+///   （2026-10-05 真机：手动指定"官方地址"反而不通，就是这一处）。
+/// 所以：**原样先试**，不成再在目录上补文件名。返回值带上"命中它该记哪个形状"。
+fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let mut out: Vec<(String, CustomShape)> = Vec::new();
+    if trimmed.ends_with(SOURCE_FILE_NAME) {
+        out.push((trimmed.to_owned(), CustomShape::Bootstrap));
+    }
+    let base = normalize_base_url(trimmed).unwrap_or_else(|_| trimmed.to_owned());
+    let appended = format!("{base}/{SOURCE_FILE_NAME}");
+    if !out.iter().any(|(u, _)| *u == appended) {
+        out.push((appended, CustomShape::Root));
+    }
+    out
+}
+
+/// **探一个自定义地址是哪种形状**（真联网：原样、再补文件名，各一次机会）。
+/// **两条都不通** → 如实报错，并把两条各自的失败原因都摆出来（只说"不行"等于让用户猜）。
 pub fn probe_custom_shape(url: &str) -> Result<(CustomShape, ResolvedSource), AppError> {
     probe_custom_shape_with(url, &real_fetch)
 }
@@ -392,41 +387,27 @@ pub fn probe_custom_shape_with(
     url: &str,
     fetch: FetchBytes<'_>,
 ) -> Result<(CustomShape, ResolvedSource), AppError> {
-    let base = normalize_base_url(url)?;
-    // ① 先当"数据源根"
-    let as_root = ResolvedSource {
-        catalog_url: join_url(&base, CATALOG_FILE),
-        base_url: base.clone(),
-    };
-    if let Ok(resolved) = fetch_and_accept(fetch, &as_root) {
-        return Ok((CustomShape::Root, resolved));
-    }
-    // ② 再当 Bootstrap（原样 / 补文件名两种）
     let mut reasons = Vec::new();
-    for candidate in bootstrap_candidates(url) {
+    for (candidate, shape) in bootstrap_candidates(url) {
         match parse_source_json_with(fetch, &candidate).and_then(|r| fetch_and_accept(fetch, &r)) {
-            Ok(resolved) => return Ok((CustomShape::Bootstrap, resolved)),
+            Ok(resolved) => return Ok((shape, resolved)),
             Err(e) => reasons.push(format!("{candidate}（{e}）")),
         }
     }
     Err(AppError::invalid_argument(format!(
-        "这个地址下面取不到预设目录：当作数据源根试过（{base}/{CATALOG_FILE}），\
-         当作 {SOURCE_FILE_NAME} 试了 {} 次也不通 —— {}",
+        "这个地址下面读不到寻址规则声明（{SOURCE_FILE_NAME}）—— 试了 {} 次也不通：{}",
         reasons.len(),
         reasons.join("；")
     )))
 }
-
-/// `source.json` 的**文件**名（`RELEASE_FILE` 是 `release.json`，两者别混 —— 这个坑
-/// 名字上就分不开，所以给它一个自己的常量）。
-const SOURCE_FILE_NAME: &str = "source.json";
 
 /// 取一次 catalog 并确认它是**一份可用的目录**（解析过了才算）。
 fn fetch_and_accept(
     fetch: FetchBytes<'_>,
     resolved: &ResolvedSource,
 ) -> Result<ResolvedSource, AppError> {
-    let bytes = fetch(&resolved.catalog_url, CATALOG_FILE)?;
+    let catalog_url = resolved.catalog_url()?;
+    let bytes = fetch(&catalog_url, CATALOG_FILE)?;
     crate::runtime::Catalog::parse(&bytes)
         .map_err(|e| AppError::corrupted("取到的不是一份可用的预设目录").with_detail(e.message))?;
     Ok(resolved.clone())
@@ -436,7 +417,6 @@ fn fetch_and_accept(
 ///
 /// 「回到内置默认」只有这一条路 —— [`save_source`] 拒绝空地址（写空 = 制造第三种状态），
 /// 所以原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作。
-/// 删完生效什么（内置默认 / 没配）由 [`current_base_url`] 回答，不在这里替它说。
 pub fn clear_source(root: &Path) -> Result<(), AppError> {
     match std::fs::remove_file(source_file(root)) {
         Ok(()) => Ok(()),
@@ -479,6 +459,147 @@ pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
     }))
 }
 
+/// 把入口解析成"远端在哪"。
+///
+/// - 自定义（[`SourceEntry::Custom`]）：**按记下来的形状**读；形状还没探过（老档）
+///   就**自适应**：先当 `source.json` 文件地址，读不到再当交付目录补文件名
+///   —— 这正是 0.0.2 那个"填官方地址反而不通"的修法；
+/// - 内置（[`SourceEntry::Bootstrap`]）：**读 `source.json`**（一次很小的网络请求），
+///   按它声明的寻址规则算 —— 部署位置变了只改它，客户端不用重发。
+pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
+    match entry {
+        SourceEntry::Custom { url, shape } => match shape {
+            // 原样先试（用户复制来的地址通常已经带着 `source.json`）
+            CustomShape::Bootstrap => parse_source_json(&url),
+            // 填的是交付目录：补上文件名读
+            CustomShape::Root => {
+                let base = normalize_base_url(&url)?;
+                parse_source_json(&format!("{base}/{SOURCE_FILE_NAME}"))
+            }
+            // 自适应：两条都试，报错时把两次尝试的原因都摆出来（只说"不行"等于让用户猜）
+            CustomShape::Unset => {
+                let mut last = None;
+                for (candidate, _) in bootstrap_candidates(&url) {
+                    match parse_source_json(&candidate) {
+                        Ok(r) => return Ok(r),
+                        Err(e) => last = Some(e),
+                    }
+                }
+                Err(last.expect("候选表不为空（至少会补一个文件名）"))
+            }
+        },
+        SourceEntry::Bootstrap { url } => parse_source_json(&url),
+    }
+}
+
+/// 这台机器上的远端入口 → 装配好的 Resolver；**没配就报错、并且说清去哪儿配**。
+pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
+    let entry = current_entry(root)?.ok_or_else(|| {
+        AppError::not_implemented(
+            "这个构建没有内置官方源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
+        )
+    })?;
+    let resolved = resolve_entry(entry)?;
+    Ok(resolved.with_internal_root(root))
+}
+
+/// **探一次当前这个源**：解析入口 + 真去取一次 catalog。
+///
+/// ★ 它是"换源之前先看一眼"的实现（作者 2026-10-05：用户容易输错地址）：
+/// **取不到就整次拒绝**，而不是"先存上再说" —— 错地址留在设置里比"没配"更难查。
+/// 自定义源探的是 `{地址}/source.json` 声明的那份 catalog；内置源探的是它自己
+/// 在 `source.json` 里说的那个 catalog 地址。
+pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
+    let entry = current_entry(root)?.ok_or_else(|| {
+        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个官方源，或填一个地址")
+    })?;
+    let resolved = resolve_entry(entry)?;
+    let catalog_url = resolved.catalog_url()?;
+    let bytes = crate::runtime::net::get_bytes(
+        &catalog_url,
+        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
+        &crate::runtime::net::noop_tick,
+    )?;
+    // 解析一次：能取到但不是合法目录，那也是"这个地址不对"（用户看得懂的话）
+    crate::runtime::Catalog::parse(&bytes).map_err(|e| {
+        AppError::corrupted("这个地址下面不是一份可用的预设目录").with_detail(e.message)
+    })?;
+    Ok(resolved)
+}
+
+/// 取一个 Bootstrap（`source.json`）并解析成寻址规则。
+/// **内置与自定义的 Bootstrap 形状共用这一处**（少一处就少一处不一致）。
+fn parse_source_json(url: &str) -> Result<ResolvedSource, AppError> {
+    parse_source_json_with(&real_fetch, url)
+}
+
+fn parse_source_json_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSource, AppError> {
+    let bytes = fetch(url, SOURCE_FILE_NAME)?;
+    parse_manifest_at(url, &bytes)
+}
+
+/// 解析一份已取回的 Manifest 字节。**交付根 = Manifest 自身所在目录** ——
+/// 这是唯一无歧义的事实，Manifest 里的相对引用都以它为基准（客户端不猜别的锚）。
+pub fn parse_manifest_at(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppError> {
+    let resolver = SourceResolver::from_bootstrap(directory_of(url)?, bytes)?;
+    Ok(ResolvedSource { resolver })
+}
+
+/// Bootstrap 地址 → 它声明的交付根（= source.json 所在目录）。
+/// 发布闸⑯用它从 `workbench/bootstrap.json` 反推"客户端会认哪个交付根"。
+pub fn bootstrap_delivery_url(bootstrap_url: &str) -> Result<String, AppError> {
+    directory_of(bootstrap_url)
+}
+
+/// `https://host/a/b/source.json` → `https://host/a/b`（交付根锚点的唯一来源）。
+/// 只认 http(s)、scheme 后面要有 host；"https://host" 这种没有路径段的形状也拒
+/// （它不是一个"文件地址"，回退不出目录）
+fn directory_of(url: &str) -> Result<String, AppError> {
+    let bad =
+        || AppError::invalid_argument(format!("Bootstrap 地址不像一个 http(s) 文件地址：{url}"));
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .ok_or_else(bad)?;
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(bad());
+    }
+    /* scheme 双斜杠之后的第一个 '/' 才是目录的分界（8 = "https://" 的长度） */
+    let idx = url.rfind('/').filter(|&i| i >= 8).ok_or_else(bad)?;
+    let dir = url[..idx].trim_end_matches('/');
+    if dir.ends_with(':') {
+        return Err(bad());
+    }
+    Ok(dir.to_owned())
+}
+
+/// 把人填进来的地址收拾干净：去首尾空白、砍掉末尾多余的斜杠。
+///
+/// 只认 `http(s)`：这是**出站下载**用的地址。`file://`、UNC 路径这类Scheme
+/// 在下载栈里会被理解成别的东西——那既是"下载能读到本机任意文件"的门，
+/// 也绕过了「云端是远端」这个前提，趁它还没有第二个用途时关上。
+pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_argument("数据源地址是空的"));
+    }
+    let ok = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+    if !ok {
+        return Err(AppError::invalid_argument(format!(
+            "数据源地址只认 http:// 或 https://，填进来的是 {trimmed}"
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
+
+impl ResolvedSource {
+    /// 给 Resolver 本地落点根（客户端 = appDataDir）。
+    fn with_internal_root(mut self, root: &Path) -> Self {
+        self.resolver = self.resolver.with_internal_root(root.to_path_buf());
+        self
+    }
+}
+
 #[cfg(test)]
 mod two_source_tests {
     //! **双源 + 自适应形状**的判据（2026-10-05）。
@@ -499,7 +620,7 @@ mod two_source_tests {
         let d = dir();
         atomic_write(
             &source_file(d.path()),
-            br#"{"sourceSchema":1,"baseUrl":"https://example.com/presets/dist/"}"#,
+            br#"{"sourceSchema":1,"baseUrl":"https://example.com/presets/delivery/"}"#,
         )
         .unwrap();
 
@@ -507,7 +628,7 @@ mod two_source_tests {
         assert_eq!(s.mode, SourceMode::Custom);
         assert_eq!(
             s.custom_url.as_deref(),
-            Some("https://example.com/presets/dist")
+            Some("https://example.com/presets/delivery")
         );
         assert_eq!(
             s.custom_shape,
@@ -554,47 +675,51 @@ mod two_source_tests {
 
     /// ★ **同一个地址，两种读法都认**（这次真机 bug 的钉子）。
     ///
-    /// 服务端只有一个合法 catalog，摆在 `/catalog.json`；`/source.json` 也在（它指向
-    /// 那个 catalog）。于是：
-    /// - 填**根** → 探成 `Root`；
-    /// - 填 **`source.json` 地址** → 根那次 404 → 探成 `Bootstrap`。
+    /// 服务端把 `source.json`（v2 寻址规则声明）摆在交付目录里。于是：
+    /// - 填**目录** → 探成 `Root`（补文件名读）；
+    /// - 填 **`source.json` 地址** → 原样读，探成 `Bootstrap`。
     ///
     /// 两条都通 —— 用户填哪一种都能用，这正是"填官方地址反而不通"的修法。
     #[test]
     fn a_custom_url_is_read_as_a_root_or_as_a_source_json() {
-        // 假取字节：目录里有两个文件（`/catalog.json` 与 `/source.json`），别的 404。
+        // 假取字节：目录里有 source.json（v2），别的 404。
         // ★ 判据**不开端口**（客户端产品不许开端口，`check:zero-network` 守着那道闸）——
         //   形状判定做成"可注入的取字节"，就能在纯内存里跑完整条判定。
-        let fetch = fake_fetch(&["dist/catalog.json", "dist/source.json"]);
-        let root_url = "https://mirror.example/presets/dist";
+        let fetch = fake_fetch(&["delivery/source.json", "delivery/catalog.json"]);
+        let root_url = "https://mirror.example/presets/delivery";
 
-        let (root_shape, resolved) = probe_custom_shape_with(root_url, &fetch).expect("当根该通");
+        let (root_shape, resolved) = probe_custom_shape_with(root_url, &fetch).expect("当目录该通");
         assert_eq!(root_shape, CustomShape::Root);
         assert!(
-            resolved.catalog_url.ends_with("/catalog.json"),
-            "根形状：catalog 就在根下面，不多花请求"
+            resolved
+                .catalog_url()
+                .expect("该推得出")
+                .ends_with("/catalog.json"),
+            "交付目录形状：catalog 地址由 Manifest 声明"
         );
 
         // ★ 用户复制来的地址**本身带着 source.json**（0.0.2 真机就是这条路不通的）
-        let bootstrap_url = "https://mirror.example/presets/dist/source.json";
+        let bootstrap_url = "https://mirror.example/presets/delivery/source.json";
         let (shape, resolved) =
             probe_custom_shape_with(bootstrap_url, &fetch).expect("当 source.json 也该通");
         assert_eq!(shape, CustomShape::Bootstrap);
         assert_eq!(
-            resolved.catalog_url,
+            resolved.catalog_url().expect("该推得出"),
             format!("{root_url}/catalog.json"),
-            "Bootstrap 形状下两个地址都由 source.json 说"
+            "两个地址都由 Manifest 相对声明给出"
         );
     }
 
     /// 两条都不通 → 拒绝，且**两条的原因都摆出来**（只说"不行"等于让用户猜）
     #[test]
     fn an_unusable_address_is_refused_with_both_reasons() {
-        // 目录里什么都没有：根那条与 source.json 那条都要试、都要说清为什么
+        // 目录里什么都没有：原样与补文件名两条都要试、都要说清为什么
         let fetch = fake_fetch(&[]);
-        let e = probe_custom_shape_with("https://empty.example/presets/dist/", &fetch).unwrap_err();
+        // 地址本身带 source.json → 两条候选（原样 + 补名去重后同一条）都会试
+        let e =
+            probe_custom_shape_with("https://empty.example/presets/delivery/source.json", &fetch)
+                .unwrap_err();
         let text = format!("{}{}", e.message, e.detail.unwrap_or_default());
-        assert!(text.contains("catalog.json"), "说了根那条为什么：{text}");
         assert!(
             text.contains(SOURCE_FILE_NAME),
             "说了 source.json 那条为什么：{text}"
@@ -606,10 +731,9 @@ mod two_source_tests {
         files: &'static [&'static str],
     ) -> impl Fn(&str, &str) -> Result<Vec<u8>, AppError> + 'static {
         move |url: &str, what: &str| {
-            // ★ 只看**最后两段**（`dist/catalog.json` 这样的形状）：
-            //   前缀千变万化不该影响判定，但 `…/source.json/catalog.json` 的最后两段是
-            //   `source.json/catalog.json` —— 它必须 404，否则"当根试"会误判成功
-            //   （那正是真机上"填 source.json 地址"不通的那条路）。
+            // ★ 只看**最后两段**（`delivery/source.json` 这样的形状）：
+            //   前缀千变万化不该影响判定，但 `…/source.json/source.json` 的最后两段是
+            //   `source.json/source.json` —— 它必须 404，否则"补名试"会误判成功。
             let path = url
                 .split("://")
                 .nth(1)
@@ -622,7 +746,9 @@ mod two_source_tests {
             match hit {
                 true => Ok(match what {
                     CATALOG_FILE => br#"{"catalogSchema":1,"revision":"r1","files":[]}"#.to_vec(),
-                    SOURCE_FILE_NAME => br#"{"sourceSchema":1,"catalog":"catalog.json"}"#.to_vec(),
+                    SOURCE_FILE_NAME => {
+                        br#"{"sourceSchema":2,"catalog":"catalog.json","filesRoot":".."}"#.to_vec()
+                    }
                     other => panic!("判据不该问 {other}"),
                 }),
                 false => Err(AppError::io("404").with_detail(url.to_owned())),
@@ -631,319 +757,12 @@ mod two_source_tests {
     }
 }
 
-/// 把入口解析成"远端在哪"。
-///
-/// - 自定义（[`SourceEntry::Custom`]）：**按记下来的形状**读；形状还没探过（老档）
-///   就**自适应**：先当根，根下取不到 catalog 再当 `source.json` 读
-///   —— 这正是 0.0.2 那个"填官方地址反而不通"的修法；
-/// - 内置（[`SourceEntry::Bootstrap`]）：**读 `source.json`**（一次很小的网络请求），
-///   按它说的算 —— 部署位置变了只改它，客户端不用重发。
-pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
-    match entry {
-        SourceEntry::Custom { url, shape } => {
-            let base = normalize_base_url(&url)?;
-            match shape {
-                CustomShape::Root => Ok(ResolvedSource {
-                    catalog_url: join_url(&base, CATALOG_FILE),
-                    base_url: base,
-                }),
-                CustomShape::Bootstrap => {
-                    // ★ 原样先试（用户复制来的地址通常已经带着 `source.json`）
-                    let mut last = None;
-                    for candidate in bootstrap_candidates(&url) {
-                        match parse_source_json(&candidate) {
-                            Ok(r) => return Ok(r),
-                            Err(e) => last = Some(e),
-                        }
-                    }
-                    Err(last.expect("候选表不为空（至少会补一个文件名）"))
-                }
-                // ★ 自适应：两条都试，报错时把两次尝试的原因都摆出来
-                //   （只说"不行"等于让用户猜）
-                CustomShape::Unset => {
-                    let as_root = ResolvedSource {
-                        catalog_url: join_url(&base, CATALOG_FILE),
-                        base_url: base.clone(),
-                    };
-                    match crate::runtime::net::get_bytes(
-                        &as_root.catalog_url,
-                        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
-                        &crate::runtime::net::noop_tick,
-                    ) {
-                        Ok(_) => Ok(as_root),
-                        Err(root_err) => {
-                            let mut reasons = Vec::new();
-                            for candidate in bootstrap_candidates(&url) {
-                                if let Err(e) = parse_source_json(&candidate) {
-                                    reasons.push(format!("{candidate}（{e}）"));
-                                }
-                            }
-                            Err(AppError::invalid_argument(format!(
-                                "这个地址既不是数据源根（{base}/{CATALOG_FILE}：{root_err}），\
-                                 也不是一个可读的 {SOURCE_FILE_NAME} —— {}",
-                                reasons.join("；")
-                            )))
-                        }
-                    }
-                }
-            }
-        }
-        SourceEntry::Bootstrap { url } => parse_source_json(&url),
-    }
-}
-
-/// 取一个 Bootstrap（`source.json`）并解析成两个地址。
-/// **内置与自定义的 Bootstrap 形状共用这一处**（少一处就少一处不一致）。
-fn parse_source_json(url: &str) -> Result<ResolvedSource, AppError> {
-    parse_source_json_with(&real_fetch, url)
-}
-
-/// [`parse_source_json`] 的注入版。
-fn parse_source_json_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSource, AppError> {
-    let bytes = fetch(url, SOURCE_FILE_NAME)?;
-    parse_bootstrap(url, &bytes)
-}
-
-/// 这台机器上的远端入口 → 两个地址；**没配就报错、并且说清去哪儿配**。
-pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
-    let entry = current_entry(root)?.ok_or_else(|| {
-        AppError::not_implemented(
-            "这个构建没有内置官方源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
-        )
-    })?;
-    resolve_entry(entry)
-}
-
-/// **探一次当前这个源**：解析入口 + 真去取一次 catalog。
-///
-/// ★ 它是"换源之前先看一眼"的实现（作者 2026-10-05：用户容易输错地址）：
-/// **取不到就整次拒绝**，而不是"先存上再说" —— 错地址留在设置里比"没配"更难查。
-/// 自定义源探的是 `{地址}/catalog.json`（那一条是"直接根"语义）；内置源探的是它
-/// 自己在 `source.json` 里说的那个 catalog 地址。
-pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
-    let entry = current_entry(root)?.ok_or_else(|| {
-        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个官方源，或填一个地址")
-    })?;
-    let resolved = resolve_entry(entry)?;
-    let bytes = crate::runtime::net::get_bytes(
-        &resolved.catalog_url,
-        &crate::runtime::net::GetPlan::new(CATALOG_FILE),
-        &crate::runtime::net::noop_tick,
-    )?;
-    // 解析一次：能取到但不是合法目录，那也是"这个地址不对"（用户看得懂的话）
-    crate::runtime::Catalog::parse(&bytes).map_err(|e| {
-        AppError::corrupted("这个地址下面不是一份可用的预设目录").with_detail(e.message)
-    })?;
-    Ok(resolved)
-}
-
-/// 解析 `source.json`（[`BootstrapFile`]）成两个地址。**纯函数**（字节已由调用方取回）——
-/// 联网那一小步在 [`resolve_entry`] 里，这里全部能单测。
-///
-/// ★ 它要 `url` 的唯一理由是：`baseUrl` 缺省时得从"这个文件在哪个 URL"回退出目录。
-/// **在本地校验本地文件时不该走这条路**（本地路径不是 http URL）—— 那种场景用
-/// [`validate_bootstrap_local`]。
-pub fn parse_bootstrap(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppError> {
-    /* 前一半（JSON 形状 + 代次 + catalog 相对路径合法性）与本地校验**同一处实现** ——
-    不许两处各写一遍（那正是「两边各算一遍、各自看着都对」的老病根） */
-    let catalog = validate_bootstrap_local(bytes)?;
-    let file: BootstrapFile = serde_json::from_slice(bytes).map_err(|e| {
-        AppError::corrupted("Bootstrap（source.json）解析不了").with_detail(format!("{url} / {e}"))
-    })?;
-    let base_url = match file.base_url.as_deref() {
-        /* 显式给的：与手动填的根走同一套收拾规矩（砍尾斜杠、只认 http(s)） */
-        Some(raw) => normalize_base_url(raw)?,
-        /* 省略 = 与 Bootstrap 同目录 —— 发布产物推到哪里都对 */
-        None => directory_of(url)?,
-    };
-    Ok(ResolvedSource {
-        catalog_url: join_url(&base_url, &catalog),
-        base_url,
-    })
-}
-
-/// **本地发布产物校验**：验一份 `source.json` 的**内容**是否合法 ——
-/// **不需要 URL、不解析 baseUrl、不拼地址**，因此本地文件（`presets/dist/source.json`）
-/// 也能验。
-///
-/// 验三件事（与 [`parse_bootstrap`] 共用同一段实现，只有"base_url 从哪来"这一步不同）：
-/// 1. 是合法 JSON 且能反序列化成 [`BootstrapFile`]；
-/// 2. `sourceSchema` 对得上 [`BOOTSTRAP_SCHEMA`]；
-/// 3. `catalog` 是合法的**相对**路径（非空、非 http(s) 绝对 URL、不含 `..`）。
-///
-/// 返回 trim 后的 catalog 相对路径（调用方拿它定位"它指向的那份目录文件在不在"）。
-///
-/// ★ 为什么单独有这个入口：发布闸 ⑬ `source/correct` 要验的是**本地交付根里那一份**，
-/// 早先误用了要求 http URL 的 [`parse_bootstrap`]，于是"文件明明合法、闸却判解析不出来"
-/// （`directory_of` 拒本地绝对路径）。本地校验就不该要求 URL。
-pub fn validate_bootstrap_local(bytes: &[u8]) -> Result<String, AppError> {
-    let file: BootstrapFile = serde_json::from_slice(bytes).map_err(|e| {
-        AppError::corrupted("Bootstrap（source.json）解析不了").with_detail(e.to_string())
-    })?;
-    if file.source_schema != BOOTSTRAP_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "Bootstrap 的格式代次认不了：文件是 {}，程序认 {}",
-            file.source_schema, BOOTSTRAP_SCHEMA
-        )));
-    }
-    let catalog = file.catalog.trim();
-    check_catalog_rel(catalog, &file.catalog)?;
-    Ok(catalog.to_owned())
-}
-
-/// `catalog` 必须是**合法的相对路径**：非空、不是 http(s) 绝对 URL、不含 `..`。
-///
-/// 抽成一处：[`parse_bootstrap`] 与 [`validate_bootstrap_local`] **共用**它 ——
-/// 这条口径只写一遍（`..` 会被 URL 层解释成向上爬，等于换了一份目录；绝对 URL 则
-/// 把"文件根"从 Bootstrap 身边挪走，与"相对 Bootstrap 所在目录"的约定冲突）。
-fn check_catalog_rel(trimmed: &str, raw: &str) -> Result<(), AppError> {
-    if trimmed.is_empty()
-        || trimmed.starts_with("http://")
-        || trimmed.starts_with("https://")
-        || trimmed.contains("..")
-    {
-        return Err(AppError::corrupted(
-            "Bootstrap 里的 catalog 路径不合法（要相对路径、不许 ..）",
-        )
-        .with_detail(format!("catalog = {raw:?}")));
-    }
-    Ok(())
-}
-
-/// `https://host/a/b/source.json` → `https://host/a/b`。
-/// 只认 http(s)、scheme 后面要有 host；"https://host" 这种没有路径段的形状也拒
-/// （它不是一个"文件地址"，回退不出目录）
-fn directory_of(url: &str) -> Result<String, AppError> {
-    let bad =
-        || AppError::invalid_argument(format!("Bootstrap 地址不像一个 http(s) 文件地址：{url}"));
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or_else(bad)?;
-    if rest.is_empty() || rest.starts_with('/') {
-        return Err(bad());
-    }
-    /* scheme 双斜杠之后的第一个 '/' 才是目录的分界（8 = "https://" 的长度） */
-    let idx = url.rfind('/').filter(|&i| i >= 8).ok_or_else(bad)?;
-    let dir = url[..idx].trim_end_matches('/');
-    if dir.ends_with(':') {
-        return Err(bad());
-    }
-    Ok(dir.to_owned())
-}
-
-/// 从**文件下载根**（`presets/dist` 或 `presets`）推出软件发布信息（`release.json`）的地址。
-///
-/// 语义（作者 2026-10-04 定死）：`release.json` 住发布根 `presets/` **之外** —— 它不是预设数据。
-/// 这里从 base 往上走**恰好一级**，再拼固定文件名：`…/presets/dist` → `…/presets/release.json`；
-/// 手动根 `…/presets` → `…/release.json`。**刻意不"多走几级去找"** —— 那会让部署位置一变
-/// 就悄悄指错。直接根与 Bootstrap 解析出来的 base 都走这一处，只有这一个答案。
-///
-/// 只认 http(s) 且要有可退回的目录段：host 根（`https://host`）如实拒，不编一个地址。
-pub fn release_url(base_url: &str) -> Result<String, AppError> {
-    let trimmed = base_url.trim_end_matches('/');
-    let bad = || {
-        AppError::invalid_argument(format!(
-            "数据源根不像一个可退回上一级的 http(s) 地址：{base_url}"
-        ))
-    };
-    let rest = trimmed
-        .strip_prefix("https://")
-        .or_else(|| trimmed.strip_prefix("http://"))
-        .ok_or_else(bad)?;
-    if rest.is_empty() || !rest.contains('/') {
-        return Err(bad());
-    }
-    let idx = trimmed.rfind('/').filter(|&i| i >= 8).ok_or_else(bad)?;
-    let parent = trimmed[..idx].trim_end_matches('/');
-    if parent.ends_with(':') {
-        return Err(bad());
-    }
-    Ok(format!("{parent}/{RELEASE_FILE}"))
-}
-
-/// 把人填进来的地址收拾干净：去首尾空白、砍掉末尾多余的斜杠。
-///
-/// 只认 `http(s)`：这是**出站下载**用的地址。`file://`、UNC 路径这类Scheme
-/// 在下载栈里会被理解成别的东西——那既是"下载能读到本机任意文件"的门，
-/// 也绕过了「云端是远端」这个前提，趁它还没有第二个用途时关上。
-pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
-    let trimmed = raw.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Err(AppError::invalid_argument("数据源地址是空的"));
-    }
-    let ok = trimmed.starts_with("http://") || trimmed.starts_with("https://");
-    if !ok {
-        return Err(AppError::invalid_argument(format!(
-            "数据源地址只认 http:// 或 https://，填进来的是 {trimmed}"
-        )));
-    }
-    Ok(trimmed.to_owned())
-}
-
-/// 拼下载地址：`baseUrl` + catalog 记的相对位置（`path`）拼出最终 URL。
-///
-/// 两边各自可能带斜杠（人多敲一个、路径以 `/` 开头都常见），在这里抹一次，
-/// 免得下游出现 `a//b` 这种"看起来对但服务端不认"的地址。
-/// 路径段的百分号编码。**保留 `/`**（那是路径分隔符），其余按 RFC 3986 逐字节编码。
-///
-/// 为什么必须做这件事：资产的文件名里**实测有空格**（`MKPProcess A1 0.2 0.10.json`），
-/// 不编码的话拼出来的 URL 在网络层才炸（`invalid uri character`），而那个报错指向
-/// HTTP 客户端，往回查到"文件名带个空格"要大半天。编码放在拼地址这一处，
-/// 于是"怎么拼"和"怎么编"只有一个答案。
-pub fn encode_path(path: &str) -> String {
-    let mut out = String::with_capacity(path.len());
-    for byte in path.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(byte as char)
-            }
-            // 中文文件名也是逐字节编码（UTF-8 的百分号形式，服务端按同一套解）
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-/// 下载地址 = 数据源的 base + 目录记的相对位置。
-/// **位置在这里编码一次**（不许调用方各编各的，也不许编两次）
-pub fn join_url(base_url: &str, path: &str) -> String {
-    format!(
-        "{}/{}",
-        base_url.trim_end_matches('/'),
-        encode_path(path.trim_start_matches('/'))
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().expect("临时目录建不出来")
-    }
-
-    /// 拼出来的地址必须是一个**合法 URL**。文件名里的空格是实测存在的
-    /// （BBS 配置：`MKPProcess A1 0.2 0.10.json`），漏了编码就是网络层的怪错
-    #[test]
-    fn join_url_encodes_the_path_but_keeps_the_slashes() {
-        assert_eq!(
-            join_url(
-                "https://example.com/mkp",
-                "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"
-            ),
-            "https://example.com/mkp/bbs/Process/0.2mm/MKPProcess%20A1%200.2%200.10.json"
-        );
-        // 地址自身不动：它已经是一个 URL 了，再编一次会把 `:` `/` 也吃掉
-        assert_eq!(
-            join_url("https://example.com/", "catalog.json"),
-            "https://example.com/catalog.json"
-        );
-        // 中文文件名：逐字节编码，服务端按 UTF-8 解回来
-        assert_eq!(
-            encode_path("mkp/bbs/中文.json"),
-            "mkp/bbs/%E4%B8%AD%E6%96%87.json"
-        );
     }
 
     /// 存进去再读出来必须还是那份——这条看着弱，但它钉的是"写的那套格式就是读的那套"
@@ -957,7 +776,6 @@ mod tests {
         )
         .expect("写设置不该失败");
         let loaded = load_source(dir.path()).expect("读设置不该失败");
-
         assert_eq!(loaded, Some(saved));
         assert_eq!(
             loaded.expect("刚写完的").custom_url.as_deref(),
@@ -1022,100 +840,71 @@ mod tests {
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
     }
 
-    /* ---------- 第十七刀：Bootstrap（source.json）的解析 ---------- */
+    /* ---------- Source Manifest（source.json v2）的解析 ---------- */
 
-    /// 最完整的一份：显式 baseUrl + 相对 catalog —— 两个地址都按它说的算
+    /// 最基本的一份：交付根 = source.json 所在目录，catalog 地址由声明给出
     #[test]
-    fn bootstrap_gives_both_addresses() {
-        let r = parse_bootstrap(
-            "https://raw.githubusercontent.com/o/r/main/release/presets/source.json",
-            br#"{"sourceSchema": 1, "catalog": "catalog.json", "baseUrl": "https://cdn.example.com/mkp"}"#,
+    fn manifest_anchors_everything_at_its_own_directory() {
+        let r = parse_manifest_at(
+            "https://raw.githubusercontent.com/o/r/main/presets/delivery/source.json",
+            br#"{"sourceSchema":2,"catalog":"catalog.json","filesRoot":".."}"#,
         )
         .expect("好档该解析得动");
-        assert_eq!(r.base_url, "https://cdn.example.com/mkp");
-        assert_eq!(r.catalog_url, "https://cdn.example.com/mkp/catalog.json");
+        assert_eq!(
+            r.catalog_url().expect("该推得出"),
+            "https://raw.githubusercontent.com/o/r/main/presets/delivery/catalog.json"
+        );
+        // filesRoot ".." = 交付目录的上一层（发布根 presets/）
+        assert_eq!(
+            r.resolver.delivery_url(),
+            "https://raw.githubusercontent.com/o/r/main/presets/delivery"
+        );
     }
 
-    /// 省略 baseUrl = 与 Bootstrap 同目录 —— 发布产物推到哪里都对（工作台就不写它）
+    /// release 声明了就从声明来（不再"上跳一级"去猜）
     #[test]
-    fn bootstrap_defaults_the_base_to_its_own_directory() {
-        let r = parse_bootstrap(
-            "https://raw.githubusercontent.com/o/r/main/release/presets/source.json",
-            br#"{"sourceSchema": 1, "catalog": "catalog.json"}"#,
+    fn release_url_comes_from_the_manifest_declaration() {
+        let r = parse_manifest_at(
+            "https://host/a/presets/delivery/source.json",
+            br#"{"sourceSchema":2,"catalog":"catalog.json","release":"release.json","filesRoot":".."}"#,
         )
-        .expect("缺省 baseUrl 该走「同目录」");
+        .expect("好档该解析得动");
         assert_eq!(
-            r.base_url,
-            "https://raw.githubusercontent.com/o/r/main/release/presets"
-        );
-        assert_eq!(
-            r.catalog_url,
-            "https://raw.githubusercontent.com/o/r/main/release/presets/catalog.json"
+            r.release_url().expect("声明了就该给"),
+            "https://host/a/presets/delivery/release.json"
         );
     }
 
-    /// 代次认不得 / catalog 越过目录 / catalog 写成绝对 URL / baseUrl 不是 http(s) ——
-    /// 一律如实拒，不猜（catalog 的 `..` 会被 URL 层解释成向上爬，等于换了一份目录）
+    /// 代次认不得 / catalog 越过目录 / catalog 写成绝对 URL / 缺 filesRoot / 不是 JSON ——
+    /// 一律如实拒，不猜（校验本体住 resolver，这里钉"入口同样拒"）
     #[test]
-    fn bootstrap_bad_shapes_are_refused() {
+    fn manifest_bad_shapes_are_refused() {
         let url = "https://host/a/source.json";
         for bad in [
-            r#"{"sourceSchema": 99, "catalog": "catalog.json"}"#,
-            r#"{"sourceSchema": 1, "catalog": ""}"#,
-            r#"{"sourceSchema": 1, "catalog": "../outside.json"}"#,
-            r#"{"sourceSchema": 1, "catalog": "https://elsewhere.example.com/catalog.json"}"#,
-            r#"{"sourceSchema": 1, "catalog": "catalog.json", "baseUrl": "file:///tmp"}"#,
+            r#"{"sourceSchema": 99, "catalog": "catalog.json", "filesRoot": ".."}"#,
+            r#"{"sourceSchema": 2, "catalog": "", "filesRoot": ".."}"#,
+            r#"{"sourceSchema": 2, "catalog": "../outside.json", "filesRoot": ".."}"#,
+            r#"{"sourceSchema": 2, "catalog": "https://elsewhere.example.com/catalog.json", "filesRoot": ".."}"#,
+            r#"{"sourceSchema": 2, "catalog": "catalog.json"}"#,
             r#"不是 JSON"#,
         ] {
             assert!(
-                parse_bootstrap(url, bad.as_bytes()).is_err(),
+                parse_manifest_at(url, bad.as_bytes()).is_err(),
                 "{bad} 该被拒"
             );
         }
     }
 
-    /* ---------- 本地校验（发布闸 ⑬ 用；不要求 URL） ---------- */
-
-    /// ★★ **本地 `source.json`（无 baseUrl）必须校验得过** —— 这条直接钉住那个 bug：
-    /// 以前发布闸拿本地路径喂 `parse_bootstrap`，`directory_of` 拒"非 http" ⇒ 合法文件被判"解析不出来"。
+    /// 本地文件（工作台校验交付面里那一份）**不需要 URL 也能验内容**：
+    /// SourceManifest::parse 是纯解析 —— 这是发布闸 ⑬ 的用法。
     #[test]
-    fn source_correct_accepts_a_local_bootstrap_without_a_url() {
-        // 与 `dist::bootstrap_json()` 产出同形：只有 sourceSchema + catalog，没有 baseUrl
-        let bytes = br#"{"sourceSchema":1,"catalog":"catalog.json"}"#;
-        let rel = validate_bootstrap_local(bytes).expect("本地合法档该验得过，不需要 URL");
-        assert_eq!(rel, "catalog.json");
-    }
-
-    /// 本地校验**不等于放水**：坏 JSON / 代次认不出 / catalog 绝对 URL 或含 `..` 一律如实拒。
-    #[test]
-    fn a_broken_bootstrap_is_still_refused_locally() {
-        for bad in [
-            b"not json".as_slice(),
-            br#"{"sourceSchema":99,"catalog":"catalog.json"}"#,
-            br#"{"sourceSchema":1,"catalog":""}"#,
-            br#"{"sourceSchema":1,"catalog":"../outside.json"}"#,
-            br#"{"sourceSchema":1,"catalog":"https://elsewhere.example.com/catalog.json"}"#,
-        ] {
-            assert!(
-                validate_bootstrap_local(bad).is_err(),
-                "{} 该被拒",
-                String::from_utf8_lossy(bad)
-            );
-        }
-    }
-
-    /// 本地校验与远端解析**共用同一段**：同一份字节，本地过 ⟺ 远端那半的前置也过。
-    /// （只有"base_url 从哪来"不同 —— 本地不要求 URL，远端才需要。）
-    #[test]
-    fn local_validation_matches_what_the_remote_parser_accepts_first() {
-        let bytes = br#"{"sourceSchema":1,"catalog":"catalog.json"}"#;
-        assert!(validate_bootstrap_local(bytes).is_ok());
-        // 同一份字节配一个远端 URL：远端解析器也过（前半段走的是同一处校验）
-        assert!(parse_bootstrap("https://host/a/source.json", bytes).is_ok());
-        // 坏档：两边**都**拒（口径一致）
-        let broken = br#"{"sourceSchema":1,"catalog":"../x.json"}"#;
-        assert!(validate_bootstrap_local(broken).is_err());
-        assert!(parse_bootstrap("https://host/a/source.json", broken).is_err());
+    fn manifest_parses_without_any_url() {
+        let m = crate::runtime::resolver::SourceManifest::parse(
+            br#"{"sourceSchema":2,"catalog":"catalog.json","filesRoot":".."}"#,
+        )
+        .expect("本地合法档该验得过，不需要 URL");
+        assert_eq!(m.catalog, "catalog.json");
+        assert_eq!(m.files_root, "..");
     }
 
     /// 目录回退的边界：host 后面的第一段才是目录；没有路径段 / 没有 host 都拒
@@ -1137,18 +926,6 @@ mod tests {
         ] {
             assert!(directory_of(bad).is_err(), "{bad} 该被拒");
         }
-    }
-
-    /// 自定义源探成**根**之后那一路不联网、目录名按约定直接拼上
-    #[test]
-    fn a_custom_root_joins_the_conventional_catalog_name() {
-        let r = resolve_entry(SourceEntry::Custom {
-            url: "https://cdn.example.com/mkp".to_owned(),
-            shape: CustomShape::Root,
-        })
-        .expect("根形状不联网，不该失败");
-        assert_eq!(r.base_url, "https://cdn.example.com/mkp");
-        assert_eq!(r.catalog_url, "https://cdn.example.com/mkp/catalog.json");
     }
 
     /// 空地址不许写盘：它会制造"配了但等于没配"的第三种状态
@@ -1176,37 +953,5 @@ mod tests {
                 "拒绝 {raw}"
             );
         }
-    }
-
-    /// 拼 URL 两边多带斜杠都要抹平，否则服务端拿到的不是一个它认的路径
-    #[test]
-    fn joining_url_tolerates_sloppy_slashes() {
-        assert_eq!(
-            join_url("https://cdn.example.com/mkp/", "/A1-standard.toml"),
-            "https://cdn.example.com/mkp/A1-standard.toml"
-        );
-        assert_eq!(
-            join_url("https://cdn.example.com/mkp", "A1-standard.toml"),
-            "https://cdn.example.com/mkp/A1-standard.toml"
-        );
-    }
-
-    /* ---------- 软件发布信息（release.json）的地址 ---------- */
-
-    /// `release.json` 住发布根 `presets/` **之外**：从文件下载根往上**恰好一级**。
-    /// 直接根（`…/presets/dist`）与 Bootstrap 解析出来的 base 都走这一处。
-    #[test]
-    fn release_url_is_one_level_above_the_file_root() {
-        assert_eq!(
-            release_url("https://host/release/presets/dist").expect("该推得出"),
-            "https://host/release/presets/release.json"
-        );
-        // 手动根（只到 presets/）也是往上恰好一级
-        assert_eq!(
-            release_url("https://host/mkp-content").expect("该推得出"),
-            "https://host/release.json"
-        );
-        // host 后面只有一段（没有可退回的目录）：如实拒，不编一个地址
-        assert!(release_url("https://host").is_err());
     }
 }

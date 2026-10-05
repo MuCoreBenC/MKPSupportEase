@@ -134,8 +134,10 @@ mkpse-preset = { path = "../crates/preset", optional = true }
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar"] }
+# objc2-quartz-core：CALayer 的 cornerCurve —— 圆角曲率要从普通圆弧换成系统原生的连续曲率（见 chrome.rs）
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "objc2-quartz-core"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer"] }
 window-vibrancy = "0.8"
 
 [dev-dependencies]

@@ -166,7 +166,7 @@ pub struct AssetInspectView {
     /// 格式（小写扩展名：`webp` / `svg` / `3mf` / `json` / `toml`…）。
     /// 没有扩展名时 `None`
     pub format: Option<String>,
-    /// 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/dist/mkp/presets/<产物名>`。
+    /// 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>`。
     /// 绝对的那一份在 [`Self::abs_path`]
     pub product_path: Option<String>,
 }
@@ -540,11 +540,11 @@ fn target_of(
             )));
         };
         let name = super::build::preset_file_name(mid, vid);
-        let abs = paths::dist_root_path()
+        let abs = paths::delivery_root_path()
             .join(paths::MKP_PRESETS_DIR)
             .join(&name);
-        // 相对那一段给界面看 / 给人复制：`presets/dist/mkp/presets/<产物名>`
-        let rel = paths::dist_root_path()
+        // 相对那一段给界面看 / 给人复制：`presets/delivery/mkp/presets/<产物名>`
+        let rel = paths::delivery_root_path()
             .strip_prefix(paths::repo_root())
             .map(|p| {
                 p.join(paths::MKP_PRESETS_DIR)
@@ -1030,12 +1030,12 @@ mod tests {
         assert_eq!(v.file_name, "A1-standard.toml", "产物名 = 命名规则算出来的");
         assert_eq!(
             v.product_path.as_deref(),
-            Some("presets/dist/mkp/presets/A1-standard.toml"),
+            Some("presets/delivery/mkp/presets/A1-standard.toml"),
             "相对仓库根那一段是给人看的 / 复制的"
         );
         assert!(
             std::path::Path::new(&v.abs_path)
-                .ends_with("presets/dist/mkp/presets/A1-standard.toml"),
+                .ends_with("presets/delivery/mkp/presets/A1-standard.toml"),
             "绝对路径：{}",
             v.abs_path
         );

@@ -9,7 +9,7 @@
 //!     ▼
 //! <appDataDir>/catalog.json     说明书 —— 首屏唯一数据源（铁律 2：启动零网络）
 //! <appDataDir>/<catalog.path>   交付文件 —— 落点由目录自己说（铁律 3：没下载就没有）
-//!                               A 类是 `assets/…`、B 类是 `dist/mkp/presets/…`；
+//!                               A 类是 `assets/…`、B 类是 `delivery/mkp/presets/…`；
 //!                               **没有固定的"下载区根"**，目录在落盘那一刻按需建
 //! ```
 //!
@@ -37,6 +37,7 @@ pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
 /// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。
 pub mod release_info;
+pub mod resolver;
 pub mod source;
 pub mod state;
 /// **结构代次**：这批数据是什么结构、哪个客户端起读得懂（`docs/PUBLISH-ARCHITECTURE.md` §5.3）。

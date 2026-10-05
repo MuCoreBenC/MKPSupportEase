@@ -387,7 +387,7 @@ impl<'a> Book<'a> {
         };
         self.presets
             .root()
-            .join(crate::workbench::paths::DIST_SUBDIR)
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
             .join(crate::workbench::paths::MKP_PRESETS_DIR)
             .join(&v.mkp_file)
             .exists()
@@ -1867,7 +1867,7 @@ mod tests {
         let target = f
             .presets
             .root()
-            .join(crate::workbench::paths::DIST_SUBDIR)
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
             .join(crate::workbench::paths::MKP_PRESETS_DIR)
             .join(&mkp_file);
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();

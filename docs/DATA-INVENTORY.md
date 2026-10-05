@@ -28,7 +28,7 @@
 
 两个改变判断的发现：
 
-1. **"做菜"的环节已经存在大半。** 工作台 `wb_publish` 的交付层结构已在代码里定稿（`content/` 三件 JSON + `mkp/presets/` 产物 + `mkp/{bbs,models,icons}/…` 可达子集 + `manifest.json` + `catalog.json`，SHA/size 发布时算、残留文件拦截发布——见 `workbench/app/dist.rs` 头注释）；盘上目前实际生成过的只有 9 份预设产物（`presets/dist/mkp/presets/`，本机暂存不入库），入库真身在 `crates/preset/assets/presets/`。总纲欠账 #1 的解法**不是新写构建器**，是把这条已有的管道接给安装包。
+1. **"做菜"的环节已经存在大半。** 工作台 `wb_publish` 的交付层结构已在代码里定稿（`content/` 三件 JSON + `mkp/presets/` 产物 + `mkp/{bbs,models,icons}/…` 可达子集 + `manifest.json` + `catalog.json`，SHA/size 发布时算、残留文件拦截发布——见 `workbench/app/dist.rs` 头注释）；盘上目前实际生成过的只有 9 份预设产物（`presets/delivery/mkp/presets/`，本机暂存不入库），入库真身在 `crates/preset/assets/presets/`。总纲欠账 #1 的解法**不是新写构建器**，是把这条已有的管道接给安装包。
 2. **最大的一笔不在总纲 §4 里：客户端的用户数据住 localStorage**（`mkp.a40.package / presets / active`）。说明书、下载的预设、使用中状态都是③层运行时数据，现在住在 WebView 的 localStorage——换机器即丢、不可备份、绕过 `atomic_write` 纪律。违反铁律 4。
 
 ---
@@ -57,7 +57,7 @@
 | # | 现在在哪 | 是什么 | 按总纲 | 裁决 |
 | --- | --- | --- | --- | --- |
 | F1 | `presets/*.toml`（13 份源） | 机型 / 禁区 / 套餐 / 资产 / 布局 / 注册表的定义源 | ① 源 | **保留**。与总纲 §1① 的布局一字不差 |
-| F2 | `presets/dist/` | 发布器产物暂存（实际已有 `mkp/presets/` 9 份；content JSON / manifest / catalog.json 是设计稿、尚未生成）。**布局与客户端落点同形**（2026-10-02 对齐）。**本机生成、gitignore、不入库** | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
+| F2 | `presets/delivery/` | 发布器产物暂存（`mkp/presets/` 9 份 + content/ 三件 + catalog/manifest/source，全部已生成并入库）。**布局与客户端落点同形**（2026-10-05 寻址改造后再对齐）。**入库**（2026-10-02 第十八刀改判） | ① 的本机暂存，**不是判据输入** | **保留**（本机）；判据输入用 F2b |
 | F2b | `crates/preset/assets/presets/`（9 份，入库） | **入库产物目录**：`BUILTIN_PRESETS` 编进二进制的同一批真字节 | ① 的②半成品真身 | **保留**；构建器与判据都认它 |
 | F3 | `public/assets/icons\|models`（+ `bbs/` 见 F4） | 图标 / 3mf 模型的**载荷**，随 vite 进包（工作台按 URL 直取） | ② 内置资源（源） | **收口**：第三圈第二刀已登记进 catalog（`kind=icon` / `kind=model`），客户端按需下载进 `mkp/icons/` `mkp/models/`，随包副本退役 |
 | F3b | `presets/assets/printers/`（4 张 webp） | 机型整机图 | ③ 之前判成"② 内置资源"，2026-10-01 又改判成"界面素材搬进源码"，**两版都作废** | **已收口 2026-10-03**：作者指出「不会编程的用户怎么改图片呢」—— 第三刀把它硬编码进客户端源码是错的。文件回数据侧 `presets/assets/printers/`，台账 4 条 `image` 恢复登记，用 **`delivery = 'bundled'`** 表达「不进云端交付、随包不下载」，到客户端靠构建期复制（`scripts/copy-assets.mjs`）。判据：`runtime::catalog::dest_of_asset`「整机图在台账里、且不进 files[]」 |
@@ -154,7 +154,7 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   挂进 CI web job。干净过、种脏能抓，两种方向都实测过。
 
 - 2026-10-01：**R11 落地（第二圈）** —— 两端共用契约成形：工作台发布
-  `wb_publish` 现在额外产出 `presets/dist/catalog.json`（与客户端
+  `wb_publish` 现在额外产出 `presets/delivery/catalog.json`（与客户端
   `runtime::Catalog` 同 schema、同指纹算法，`build_from_presets_lenient`
   宽松构建）；客户端新增检查/应用更新（`check_remote_update` /
   `apply_remote_update`）：指纹比较 → 应用走既有 release 归档管道 →
@@ -201,7 +201,7 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      `runtime/state.rs` 那一套规则（一种状态一个文件 + `*Schema` 代次 +
      atomic_write + 坏档 CORRUPTED），默认地址由构建期 `MKPSE_PRESET_SOURCE`
      注入；**没注入就是没配**，下载与检查更新都如实拒绝，不猜 URL。
-  2. 下载地址 = `baseUrl` + catalog 记的相对位置（总纲 §1④ 那个分工），
+  2. 下载地址 = SourceResolver 按 Source Manifest 声明算（2026-10-05 寻址改造；业务层不拼），
      所以换 Gitee / 换自建 CDN 不用重发说明书。命令
      `get_preset_source` / `set_preset_source`。
   3. **网络只住一个文件**：新增 `runtime/net.rs` —— ureq（同步客户端 + rustls，
@@ -212,7 +212,7 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      进度走 Tauri `Channel`，只报真知道的事（`connecting` / `transferring` /
      `done` / `failed`）—— 没有"校验中 / 落盘中"，那两步在管道内部，报了就是编的。
      批量并发在 Rust 侧（`deliver_all`，固定 4 条道），**逐份给结局**，返回按请求顺序。
-  5. **脚手架退场**：原来探测仓库绝对路径的那段（探测 `presets/dist` 与
+  5. **脚手架退场**：原来探测仓库绝对路径的那段（探测 `presets/delivery` 与
      `crates/preset/assets/presets` 两个目录）全部删除，检查 / 应用更新改走同一个地址概念。
   6. **判据 2 落地**：`scripts/check-zero-network.mjs`，
      三道闸——网络符号只许住 `runtime/net.rs`、程序的 `.setup()` 段零联网、
@@ -292,8 +292,8 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
      （doc §7 原则 1 的可达性收窄，b05 Task 13 的裁决）——"登记得比发得多"是设计不是漏洞：
      客户端只会去取它下载集里那 8 条。所以收尾核对核对的是**本次发出的集合**，不是目录全部条目。
   5. 同批修正：`dist.rs` 头注释重写（交付根布局 + 落点唯一）、工作台文案与开发态夹具
-     （`BuildPage` 的 `mkp/presets/…`、`mockBackend` 的残留清单）。本机 `presets/dist/presets/mkp/`
-     那 9 份已挪到 `presets/dist/mkp/presets/`（本机产物，不入库）。
+     （`BuildPage` 的 `mkp/presets/…`、`mockBackend` 的残留清单）。本机 `presets/delivery/presets/mkp/`
+     那 9 份已挪到 `presets/delivery/mkp/presets/`（本机产物，不入库）。
   6. **登记两条不在本刀范围的欠账**（不是漏做）：① `src/workbench/clientPackage.ts` 造的
      `ClientDataPackage` 仍用另一套坐标（`presets/mkp/…` / `presets/<载荷 path>`）——
      它的客户端消费方已在 C4 退役（`STORAGE.clientPackage` 的编译期判据），所以这是

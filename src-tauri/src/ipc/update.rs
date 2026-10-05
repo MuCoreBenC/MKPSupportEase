@@ -55,7 +55,7 @@ pub(crate) fn software_update(
     root: &std::path::Path,
 ) -> crate::runtime::release_info::SoftwareUpdate {
     match crate::runtime::source::resolve_source(root)
-        .and_then(|resolved| crate::runtime::source::release_url(&resolved.base_url))
+        .and_then(|resolved| resolved.release_url())
         .and_then(|url| crate::runtime::net::get_release(&url))
         .and_then(|bytes| crate::runtime::release_info::parse(&bytes))
     {

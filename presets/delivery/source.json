@@ -1,0 +1,8 @@
+{
+  "sourceSchema": 2,
+  "catalog": "catalog.json",
+  "manifest": "manifest.json",
+  "release": "release.json",
+  "content": "content/",
+  "filesRoot": ".."
+}

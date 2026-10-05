@@ -19,7 +19,8 @@
     "release": "node scripts/release.mjs",
     "publish:presets": "node scripts/publish-presets.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
-    "check:zero-network": "node scripts/check-zero-network.mjs"
+    "check:zero-network": "node scripts/check-zero-network.mjs",
+    "check:release-source": "node scripts/check-release-source.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

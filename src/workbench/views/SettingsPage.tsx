@@ -12,9 +12,9 @@
  * （`npm run tauri dev` 也吃它）。
  *
  * 输入口径（作者 2026-10-02 定死的产品契约）：**只填仓库地址就够** ——
- * GitHub 仓库地址 / `.git` 克隆地址都会被后端补成 `main/presets/dist/source.json`
+ * GitHub 仓库地址 / `.git` 克隆地址都会被后端补成 `main/presets/delivery/source.json`
  * 的 raw 直链；blob 页按人指的转；raw / 自建源原样。用户不必知道
- * `raw.githubusercontent.com` / `blob` / `presets/dist` / `source.json` 里的任何一个。
+ * `raw.githubusercontent.com` / `blob` / `presets/delivery` / `source.json` 里的任何一个。
  *
  * # 「重新读取」（2026-10-02）
  *
@@ -345,7 +345,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
         <div className={s.cardBody}>
           <div className={s.vfield}>
             <p className={s.vhelp}>
-              发布出去的 <span className={s.mono}>presets/dist/</span> 推到哪里 —— 客户端拿它那口
+              发布出去的 <span className={s.mono}>presets/delivery/</span> 推到哪里 —— 客户端拿它那口
               <span className={s.mono}> source.json </span>找回目录与文件。
               <b>填仓库地址就够</b>（GitHub 仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
               我们会自动补成发布入口的 raw 直链。
@@ -436,10 +436,10 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             </div>
             <p className={s.vhelp}>
               「生成与发布」写出的那一批：人维护 <span className={s.mono}>presets/*.toml</span>，
-              机器生成 <span className={s.mono}>presets/dist/*</span>。
+              机器生成 <span className={s.mono}>presets/delivery/*</span>。
             </p>
             <div className={s.vrow}>
-              <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.dist}</span>
+              <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.delivery}</span>
             </div>
           </div>
         </div>

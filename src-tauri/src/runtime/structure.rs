@@ -75,7 +75,7 @@ use crate::runtime::catalog::Catalog;
 ///
 /// 加可选字段、加内容（机型 / 资产 / 参数）、改名字、改默认值 —— 这些签名自己会处理，
 /// 或者根本不构成"客户端读不动"。乱 +1 的代价是规则表里多一条没人看懂的登记。
-pub const STRUCTURE_EPOCH: u32 = 1;
+pub const STRUCTURE_EPOCH: u32 = 2;
 
 /// 本构建**能读**的结构签名清单（客户端那一半的"结构能力声明"）。
 ///
@@ -90,7 +90,7 @@ pub const STRUCTURE_EPOCH: u32 = 1;
 ///
 /// ★ 改了结构（签名变了）而忘了登记新签名 → `cargo test` 的
 /// `supported_signatures_cover_the_current_structure` 立刻红，且把该抄的值印出来。
-pub const SUPPORTED_SIGNATURES: &[&str] = &["cb1080919d39b2bd"];
+pub const SUPPORTED_SIGNATURES: &[&str] = &["cb1080919d39b2bd", "2242174c52e8a9b6"];
 
 /// 本构建的版本号（唯一来源 = `Cargo.toml`，不再由三处各写一份）。
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

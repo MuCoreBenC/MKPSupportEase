@@ -889,7 +889,7 @@ mod tests {
             .expect("MKP 引用必须在");
         assert_eq!(mkp.file_name, "A1-fastv3.3.toml");
         assert_eq!(
-            mkp.path, "dist/mkp/presets/A1-fastv3.3.toml",
+            mkp.path, "delivery/mkp/presets/A1-fastv3.3.toml",
             "落点是发布根基准（B 类在 dist/ 下），也是客户端内部落点"
         );
         // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串

@@ -152,25 +152,26 @@ pub struct CatalogMachine {
 ///
 /// **它不是运行时数据**：构建期从它读产物、算 SHA/大小。
 /// 2026-10-03 从 `public/assets` 搬来（产品数据资源住一起；`public/` 那个资产目录之后退役）。
-const REPO_ASSET_ROOT: &str = "presets/assets";
+pub const REPO_ASSET_ROOT: &str = "presets/assets";
 
-/// **发布根**（`catalog.path` 的基准）—— 相对仓库根。
+/// **发布根**（`catalog.path` 的基准，即 Manifest 的 `filesRoot: ".."` 落点）—— 相对仓库根。
 ///
-/// ★ 2026-10-04 定：**发布根 = `presets/`**。客户端 `baseUrl` 锚在 `source.json`
-/// 所在目录（`presets/dist/`），而 `catalog.path` 是相对发布根的 ——
-/// 两者拼起来正好是云端真实位置。
-pub(crate) const REPO_PUBLISH_ROOT: &str = "presets";
+/// ★ 2026-10-04 定：**发布根 = `presets/`**。交付根（`presets/delivery/`，source.json
+/// 所在目录）是它的子目录；`catalog.path` 相对发布根，客户端由 Manifest 的
+/// `filesRoot` 声明跳出去 —— 锚点差异是 Resolver 的实现细节
+/// （`docs/RESOURCE-ADDRESSING-ROADMAP.md` §2.4）。
+pub const REPO_PUBLISH_ROOT: &str = "presets";
 
 /// 资产在发布根下的第一段目录名：`assets/<台账 path>`。
 ///
-/// ★ **这一段不能省**：`baseUrl` = `.../presets/dist/`，A 类资产在 `.../presets/assets/` ——
+/// ★ **这一段不能省**：`baseUrl` = `.../presets/delivery/`，A 类资产在 `.../presets/assets/` ——
 /// 兄弟目录，必须靠这个前缀跳到正确位置。见 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
 const ASSET_PREFIX: &str = "assets";
 
-/// B 类渲染产物（MKP 预设 TOML）在发布根下的目录：`dist/mkp/presets/`。
+/// B 类渲染产物（MKP 预设 TOML）在发布根下的目录：`delivery/mkp/presets/`。
 ///
-/// 与 [`ASSET_PREFIX`] 对称：A 类原地不动，B 类落在 `dist/` 里（它源里没有实体）。
-pub const PRESET_DEST_DIR: &str = "dist/mkp/presets";
+/// 与 [`ASSET_PREFIX`] 对称：A 类原地不动，B 类落在 `delivery/` 里（它源里没有实体）。
+pub const PRESET_DEST_DIR: &str = "delivery/mkp/presets";
 
 /// 交付文件的**种类**（第三圈第一刀起不止一种）。
 ///
@@ -194,7 +195,7 @@ pub mod kind {
 /// - `Image`：图片**不进下载面**（整机图 / 品牌图都走 `bundled` 档随包，
 ///   客户端靠构建期装配拿它们，不按 URL 取）；
 /// - `MkPreset`：MKP 预设的产物文件**已经**作为 `files` 条目进来了（B 类，
-///   生成侧算的，落点 `dist/mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
+///   生成侧算的，落点 `delivery/mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
 ///   再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）。
 ///
 /// 注意判据是**类型**，不是交付档位：`bundled` 档照样走这一支，只是被
@@ -227,7 +228,7 @@ fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static st
 /// 所以只补这一段前缀，形状原样保留。
 ///
 /// ★ `assets/` 这一段不能省：客户端 `baseUrl` 锚在 `source.json` 所在目录
-/// （`presets/dist/`），而 A 类资产在 `presets/assets/` —— 兄弟目录，故必须带
+/// （`presets/delivery/`），而 A 类资产在 `presets/assets/` —— 兄弟目录，故必须带
 /// `assets/` 才拼得对。见 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
 fn asset_dest(asset_path: &str) -> String {
     format!("{ASSET_PREFIX}/{asset_path}")
@@ -317,7 +318,7 @@ impl Catalog {
     /// 从**层①**构建：`<repo>/presets`（源定义）+ `crates/preset/assets/presets`（交付产物真字节）。
     ///
     /// 产物字节取**入库**的那一份（`BUILTIN_PRESETS` 编进二进制的同一批文件）——
-    /// `presets/dist/` 是本机 gitignore 掉的暂存，进不了 CI，不能当判据输入。
+    /// `presets/delivery/` 是本机 gitignore 掉的暂存，进不了 CI，不能当判据输入。
     /// 每个机型版本都必须配齐产物，缺一份就失败 —— 宁可红着，不让目录里出现
     /// 「版本在、文件没有」这种静默的坑（那正是要收掉的旧账）。
     pub fn build_from_repo(repo_root: &Path) -> Result<Catalog, AppError> {
@@ -359,7 +360,7 @@ impl Catalog {
     /// 从**已加载的预设源 + 一个产物目录**构建（**发布侧**语义）。
     ///
     /// - 安装包侧已改走 [`Catalog::build_from_repo`]（随包 bootstrap 目录，不算 SHA）；
-    /// - 发布侧（工作台 `wb_publish`）：产物目录 = `dist/mkp/presets`（与客户端落点同形），
+    /// - 发布侧（工作台 `wb_publish`）：产物目录 = `delivery/mkp/presets`（与客户端落点同形），
     ///   **宽松**——没有产物的版本是合法状态（交付集合本来就不含它），跳过。
     ///
     /// 保留这个严格版是**给手工/未来的严格发布**用；当前工作台只调宽松版。
@@ -717,7 +718,7 @@ mod tests {
         );
         assert_eq!(catalog.revision.len(), 16, "指纹取 16 位");
 
-        // 预设：9 份，落点 `dist/mkp/presets/` 下（发布根基准，B 类）
+        // 预设：9 份，落点 `delivery/mkp/presets/` 下（发布根基准，B 类）
         let presets: Vec<&CatalogFile> = catalog
             .files
             .iter()
@@ -821,7 +822,7 @@ mod tests {
             .find(|f| f.machine_id == "A1" && f.version_id == "FASTV3.3")
             .expect("A1/FASTV3.3 该有交付产物");
         assert_eq!(a1_fast.file_name, "A1-fastv3.3.toml");
-        assert_eq!(a1_fast.path, "dist/mkp/presets/A1-fastv3.3.toml");
+        assert_eq!(a1_fast.path, "delivery/mkp/presets/A1-fastv3.3.toml");
         /*
          * ★ **随包 bootstrap 目录不登记交付文件期望值**（2026-10-04）。
          *
@@ -941,8 +942,8 @@ mod tests {
                 f.file_name
             );
             assert!(
-                f.path.starts_with("assets/") || f.path.starts_with("dist/"),
-                "落点必须是发布根基准（assets/ 或 dist/）：{}",
+                f.path.starts_with("assets/") || f.path.starts_with("delivery/"),
+                "落点必须是发布根基准（assets/ 或 delivery/）：{}",
                 f.path
             );
             assert!(!f.path.contains(".."), "落点不许有 `..`：{}", f.path);
@@ -986,7 +987,7 @@ mod tests {
             /*
              * ★ 「登记面 == 实体面」的核心判据：`catalog.path` 去掉 `assets/` 前缀就是
              * 载荷根里的相对位置 —— 它必须真的在。发布侧那一半由
-             * `workbench::app::dist::audit_catalog` 与 `publish_into` 的收尾核对守着。
+             * `workbench::app::delivery::audit_catalog` 与 `publish_into` 的收尾核对守着。
              */
             let on_disk = repo.join(REPO_ASSET_ROOT).join(&asset.path);
             assert!(
@@ -1091,7 +1092,7 @@ mod tests {
 
         // 访问面：file_of 是 MKP 引用的唯一出处（不再按命名规则重算）
         let f = catalog.file_of("A1", "FASTV3.3").expect("file_of 要找得到");
-        assert_eq!(f.path, "dist/mkp/presets/A1-fastv3.3.toml");
+        assert_eq!(f.path, "delivery/mkp/presets/A1-fastv3.3.toml");
         assert!(catalog.file_of("A1", "NOPE").is_none());
     }
 

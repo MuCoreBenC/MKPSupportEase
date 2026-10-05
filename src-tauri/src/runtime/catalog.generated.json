@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "8c075f53a18b874d",
+  "revision": "4c4592f74a9b33da",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -4842,63 +4842,63 @@
     {
       "kind": "mkp_preset",
       "fileName": "A1-standard.toml",
-      "path": "dist/mkp/presets/A1-standard.toml",
+      "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD"
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1-fast.toml",
-      "path": "dist/mkp/presets/A1-fast.toml",
+      "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST"
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1-fastv3.3.toml",
-      "path": "dist/mkp/presets/A1-fastv3.3.toml",
+      "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3"
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-standard.toml",
-      "path": "dist/mkp/presets/A1_MINI-standard.toml",
+      "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD"
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fast.toml",
-      "path": "dist/mkp/presets/A1_MINI-fast.toml",
+      "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST"
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fastv3.3.toml",
-      "path": "dist/mkp/presets/A1_MINI-fastv3.3.toml",
+      "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3"
     },
     {
       "kind": "mkp_preset",
       "fileName": "P1S-lite.toml",
-      "path": "dist/mkp/presets/P1S-lite.toml",
+      "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE"
     },
     {
       "kind": "mkp_preset",
       "fileName": "P2S-standard.toml",
-      "path": "dist/mkp/presets/P2S-standard.toml",
+      "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD"
     },
     {
       "kind": "mkp_preset",
       "fileName": "X1C-lite.toml",
-      "path": "dist/mkp/presets/X1C-lite.toml",
+      "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE"
     },
@@ -5008,6 +5008,6 @@
       "versionId": ""
     }
   ],
-  "structureSignature": "cb1080919d39b2bd",
-  "minClientVersion": "0.0.1"
+  "structureSignature": "2242174c52e8a9b6",
+  "minClientVersion": "0.0.6"
 }

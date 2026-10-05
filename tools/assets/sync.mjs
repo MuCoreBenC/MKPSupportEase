@@ -56,7 +56,7 @@
  * - **不管工作台预览那一份**：工作台 dev 由 vite middleware 直读 `presets/assets`
  *   （读取源，不落盘），build 时另有一趟装配（全部有 `path` 的条目）——两个集合不同
  *   是有意的：`client-assets/` 的语义只有一句「客户端随包资产交付结果」。
- * - **不写 `presets/dist/`**：那是云端交付根，由 `publish:presets` 那条链管。
+ * - **不写 `presets/delivery/`**：那是云端交付根，由 `publish:presets` 那条链管。
  */
 import { createHash } from 'node:crypto'
 import {

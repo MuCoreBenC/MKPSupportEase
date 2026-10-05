@@ -46,7 +46,7 @@
  * # 发布物摸得着（P6，2026-10-04 重新定口径）
  *
  * ② 卡给的是**真实发布物**：产物名单与文件名来自 `BuildRow.mkpFile`（Rust 交付集合里
- * 那几份 `dist/mkp/presets/*.toml` —— `catalog.path` 就是它，云端与客户端同形），
+ * 那几份 `delivery/mkp/presets/*.toml` —— `catalog.path` 就是它，云端与客户端同形），
  * TOML 正文走 `wb_preview_toml`（**真 Rust 渲染器**），不另拼一份「大概是这样」的。
  *
  * **旧的「说明书 JSON + 模拟云端」那一套 2026-10-04 退役**（`clientPackage.ts` /
@@ -197,7 +197,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
    */
   const pickable = (r: (typeof rows)[number]) => r.state !== 'noResources'
 
-  /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `dist/mkp/presets/` 同一批） */
+  /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `delivery/mkp/presets/` 同一批） */
   const artifacts = rows.flatMap((r) => (r.mkpFile === null ? [] : [{ uid: r.uid, fileName: r.mkpFile }]))
 
   /* 基线 / 残留 / 回收站：进页取一次，外壳每写一次（生成会改产物）重取 */
@@ -331,7 +331,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     }
   }
 
-  /** 清理交付残留。走 .trash/dist/<stamp>/ 回收，不直接删 */
+  /** 清理交付残留。走 .trash/delivery/<stamp>/ 回收，不直接删 */
   const cleanStrays = async () => {
     try {
       const n = await wb.cleanDistStrays()
@@ -586,13 +586,13 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
 
             {/*
               本次发布的**发布物**。作者要工作台看得见它：产物名单与文件名来自
-              `BuildRow.mkpFile`（Rust 交付集合里那几份 `dist/mkp/presets/*.toml`，
+              `BuildRow.mkpFile`（Rust 交付集合里那几份 `delivery/mkp/presets/*.toml`，
               `catalog.path` 就是它），正文走 `wb_preview_toml` —— 后端那台渲染器。
             */}
             <div className={s.group}>
               <div className={s.groupHead}>本次发布的发布物</div>
               <div className={s.chips}>
-                <span className={s.chip} title="已经生成出来的版本各一份：dist/mkp/presets/<机型>-<版本>.toml">
+                <span className={s.chip} title="已经生成出来的版本各一份：delivery/mkp/presets/<机型>-<版本>.toml">
                   {artifacts.length === 0
                     ? 'preset.toml — 未生成'
                     : `preset.toml × ${artifacts.length} 份`}
@@ -750,7 +750,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
                 disabled={!strays || strays.length === 0}
-                title="走 workbench/.trash/dist/ 回收（保留相对路径，可还原），不直接删"
+                title="走 workbench/.trash/delivery/ 回收（保留相对路径，可还原），不直接删"
                 onClick={() => void cleanStrays()}
               >
                 清理残留
