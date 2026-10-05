@@ -315,7 +315,7 @@ struct PublishAudit {
 | ⑪ | `bundles/closure` | bundle 引用闭包完整（每条 ref 可达） | ✅ 第二刀（`Warning` —— 不拦发布） |
 | ⑫ | `version/structure` | 结构签名 + `minVersion`（见 §5.3） | ✅ 第三刀（`runtime::structure` 算签名 + `presets/structure-signatures.toml` 查表；**查不到 = Blocker Fail**） |
 | ⑬ | `source/correct` | `source.json` 正确（schema / catalog 相对路径合法） | ✅ 第二刀 |
-| ⑭ | `manifest/correct` | manifest 与交付集合一致 | ✅ 第二刀 |
+| ⑭ | `manifest/correct` | manifest 与交付集合一致 —— **预检 = 提示（Warning）**：manifest 是**上一版发布**写下的账本（只有发布事务定稿会重写它），「生成过、还没发」的落后是常规状态，拦了就是「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环（2026-10-05 真机踩过）。**严格的逐条核对移到发布事务定稿之后、commit 之前**（§7.1 的 3½ 步） | ✅ 第二刀 / 2026-10-05 改两层 |
 | ⑮ | `git/clean` | Git 工作区状态正确（无未提交的无关改动 / 在正确分支） | ✅ 第二刀（★ `presets/dist/` **排除在外**） |
 
 **⑮ 为什么把 `presets/dist/` 排除在外**：`dist/` 就是这次要提交的产物本身 ——
@@ -491,6 +491,8 @@ PublishAudit        （任一 Blocker 红 → 停在审计，零写入）
    ↓
 publish_into        （定稿 catalog / manifest / source）
    ↓
+finalize_consistency（3½ 最终一致性核对：定稿刚写下的三本账对真字节、无残留；
+   ↓                  红 = 内部错误或并发改动 → Err 短路，**不 stage、不 commit**）
 本地 git            （子进程 git：白名单 stage → commit → push）
    ↓
 平台 API            （GitHub / Gitee：create PR/MR）
@@ -499,6 +501,12 @@ publish_into        （定稿 catalog / manifest / source）
    ↓
 用户去平台网页合并   （**合并留给平台**，工作台不做）
 ```
+
+**两层检查的裁定**（2026-10-05）：预检 ⑭ `manifest/correct` 是**提示档**（Warning）——
+manifest 是上一版发布写下的账本，落后于 dist 只说明"生成过、还没发"；**交付账本的
+最终一致由事务自己在 3½ 步断言**（manifest 严格版 + catalog/sha-size + no-strays，
+刻意不含 ⑮ git/clean —— 定稿后的工作区理应带着 `presets/dist/` 的改动）。
+预检 ⑮ `git/clean` 的口径不变：源状态必须可追溯，`presets/dist/` 之外必须干净。
 
 **三条边界**（守住它，这刀才不是"给开发者包了一层 CLI"）：
 
@@ -511,15 +519,20 @@ publish_into        （定稿 catalog / manifest / source）
    - 远程：`workbench/app/platform/{github,gitee}.rs`，**SupportEase 自持 Token**，
      **不借用户的 `gh` / `git` 登录态**（用户不该为了发布先装好 GitHub CLI）。
 
-3. **凭据住系统 Keychain，前端拿不到**：`workbench/app/credentials.rs`，每平台一份
-   （`supportease.github.token` / `supportease.gitee.token`），**绝不**写 config.toml /
-   localStorage / .env；前端只知道"**配没配**"+ 一个尾号提示（判据
-   `credentials_never_echo_the_token`）。
+3. **凭据住本机凭据文件，前端拿不到**（2026-10-05 从系统 Keychain 改判：无签名分发下
+   Keychain 的免弹窗授权不成立 —— 签名一变就当陌生 App，反复要登录密码；无签名软件
+   存秘密的业界惯例就是 0600 文件，npm / gh / AWS CLI 同款，完整理由见
+   `credentials.rs` 头部）：`workbench/app/credentials.rs`，每平台一份
+   （`supportease.github.token` / `supportease.gitee.token`），住
+   `<appDataDir>/credentials.json`（0600、`atomic_write`、**坏档当"没存"** 不炸设置页），
+   **绝不**写 localStorage / .env / 会被网盘同步的目录；前端只知道"**配没配**"+ 一个
+   尾号提示（判据 `credentials_never_echo_the_token`）。
 
 4. ★ **锁与线程边界**（2026-10-04 真机事故后补的硬规矩 —— 点一次发布，窗口直接挂死）：
-   - **`wb_publish` 必须 `#[tauri::command(async)]`**：它读 Keychain（系统弹密码框）、
-     起 git 子进程、发平台 HTTP，**跑在主线程上就是整个窗口一动不动**。凡"碰网络 /
-     Keychain"的命令同理 —— 它们在 `read_commands_are_async_so_they_never_freeze_the_window`
+   - **`wb_publish` 必须 `#[tauri::command(async)]`**：它起 git 子进程、发平台 HTTP，
+     **跑在主线程上就是整个窗口一动不动**（那次事故里它还在主线程读 Keychain 弹密码框；
+     凭据 2026-10-05 起改住本地文件，等网络这条不变）。凡"碰网络 / 凭据盘"的命令同理 ——
+     它们在 `read_commands_are_async_so_they_never_freeze_the_window`
      的 `IO` 单子上，忘了 `(async)` 就红。
    - **事务内核只许调锁无关自由函数**：`with_ctx` 的锁**不可重入** —— 事务里回头调
      `audit::publish_audit()`（它自己会 `with_ctx`）就是**自锁挂死**（不是报错）。
@@ -540,9 +553,8 @@ publish_into        （定稿 catalog / manifest / source）
    - **合并** = `Hosting::merge_review`（两个平台同形：`PUT /repos/{o}/{r}/pulls/{n}/merge`）：
      一律 **squash**、**不强制等 CI**（口径源头 = `RELEASE-TRANSACTIONS.md` §1.1 第 8 步）；
      **只在人显式点过之后调**，合完**回读**一份真状态。
-   - **Token 会话缓存** = `credentials::session()`（进程一份；`CachedStore` 包着 `KeychainStore`）：
-     一次程序运行**至多读一次**系统钥匙串（dev 下每读一次都可能弹授权框），`set` / `clear`
-     同步失效；**不改 Keychain 的存储方式与内容**。
+   - **Token 会话缓存** = `credentials::session()`（进程一份；`CachedStore` 包着 `FileStore`）：
+     一次程序运行**至多读一次**凭据文件，`set` / `clear` 同步失效；**不改文件的存储方式与内容**。
 
 **平台抽象与统一状态模型**（`workbench/app/platform/mod.rs`）：
 
@@ -574,12 +586,12 @@ Gitee 的接口细节**按公开 API 实现**；作者说后续会给旧版配�
 
 ```text
 <appDataDir>/publish-account.json      ← 配置：每平台 repositoryUrl + username（**无 token / 无 email**）
-系统 Keychain                          ← 秘密：supportease.github.token / supportease.gitee.token
+<appDataDir>/credentials.json（0600）  ← 秘密：supportease.github.token / supportease.gitee.token
 ```
 
 - 每平台一格，**GitHub / Gitee 完全对称**；设置页三格 = 仓库地址 + 用户名 + Token。
 - ★ **配置文件里绝不出现 token 字段**（判据 `publish_account_config_never_stores_a_token`）；
-  Token 住 Keychain，前端只拿得到 `hasToken` + 尾号（判据 `credentials_never_echo_the_token`）。
+  Token 住凭据文件，前端只拿得到 `hasToken` + 尾号（判据 `credentials_never_echo_the_token`）。
 - ★ 发布目标（平台 / owner / repo）**由这份配置决定**，`git remote` 降级为**校验**
   （当前工作目录是不是配置的那个仓库，见 `git::Git::remote_matches`），不是就如实拒绝。
 

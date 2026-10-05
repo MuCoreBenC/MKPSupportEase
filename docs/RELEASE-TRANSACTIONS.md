@@ -45,6 +45,7 @@
 | 1 | **发布闸** `PublishAudit`（十五项） | 逐项结果；`can_publish` 是唯一判据 | 任一 Blocker 红 → **零写入**，停下 |
 | 2 | **生成** | `dist/mkp/presets/*.toml`（B 类产物）+ 重算目录 | 任一项算不出来 → 整批不动 |
 | 3 | **finalize（定稿）** | `catalog.json` / `manifest.json` / `source.json` | 有残留 → 一个字节都不写 |
+| 3½ | **最终一致性核对**（`finalize_consistency`，2026-10-05 起） | 定稿刚写下的 manifest / catalog 对**真字节**逐条核对 + 无残留。**发布事务的最后一道安全检查，不是第二套闸** —— 刻意不含 ⑮ git/clean | 红 = 内部错误或并发改动 → Err 短路，**不 stage、不 commit** |
 | 4 | **commit** | 只 stage 白名单（交付产物 + 台账） | 白名单外的东西进不去索引 |
 | 5 | **push** | 分支上远端（自持 Token，不经用户 gh/git 登录态） | 认证失败 → 如实报，不重试到天荒地老 |
 | 6 | **创建 PR / MR** | GitHub PR / Gitee MR；**这一支已有开着的 PR 时回读那一份**（发布**可重跑**，见下） | 建失败且没有开着的 → 停在"已推送"，如实说 |

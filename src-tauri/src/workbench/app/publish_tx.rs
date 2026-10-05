@@ -33,7 +33,7 @@ use super::{state, Ctx};
 /// **发布目标** —— 一次发布"发到哪个仓库、以谁的身份"，**来自发布账户配置**
 /// （[`super::account`]），不是从 `git remote` 推断（作者 2026-10-04 定死）。
 ///
-/// 命令壳从 `<appDataDir>/publish-account.json` + Keychain 解析出它，再传给锁无关内核
+/// 命令壳从 `<appDataDir>/publish-account.json` + 凭据文件解析出它，再传给锁无关内核
 /// [`run`]。内核因此不碰 `AppHandle`（= 不破锁纪律）。
 #[derive(Debug, Clone)]
 pub struct PublishTarget {
@@ -43,7 +43,7 @@ pub struct PublishTarget {
     pub repository_url: String,
     /// 用户名（认证 + PR/MR 归属）
     pub username: String,
-    /// Keychain 里的 Token（**只在内存里过一手**，不落任何返回值/日志）
+    /// 凭据文件里的 Token（**只在内存里过一手**，不落任何返回值/日志）
     pub token: String,
     /// owner / repo（已从 [`repository_url`] 解析出来）
     pub owner: String,
@@ -193,6 +193,9 @@ impl TxOptions {
 /// 1. [`super::audit::publish_audit`] —— 任一 Blocker 红 → **立即返回 [`PublishStage::BlockedAudit`]，零写入**
 /// 2. [`super::build::generate_with`] —— 把带 scope 的产物写进 `dist/mkp/presets/` + 重算目录
 /// 3. [`super::dist::publish_into`] —— 定稿 catalog / manifest / source
+///    - **3½ 最终一致性核对**（[`super::audit::finalize_consistency`]）：定稿刚写下的
+///      三本账与交付根真字节逐条对上、无残留。红 = 内部错误或并发改动 →
+///      **Err 短路，绝不产生半截发布提交**
 /// 4. （非 dry_run）本地 git：白名单 stage → commit → push
 /// 5. （open_review 且给了平台）平台：create_review
 ///
@@ -254,6 +257,28 @@ pub fn run(
         version: String::new(),
     };
     let out = super::dist::publish_into(&root, &asset_root, &book, &meta)?;
+
+    // ③½ **最终一致性核对**（发布事务的最后一道安全检查，不是第二套闸）：
+    //    定稿刚按真实字节写下的 manifest / catalog 与交付根必须逐条对上、无残留。
+    //    核对跑在 stage / commit 之前 —— 红了就 Err 短路，一个字节都不提交。
+    //    （清单刻意不含 ⑮ git/clean：定稿后的工作区理应带着 presets/dist 的改动，
+    //    那正是这次要提交的东西。见 `audit::finalize_consistency` 的文档。）
+    let final_items = super::audit::finalize_consistency(&book, &root);
+    let broken: Vec<String> = final_items
+        .iter()
+        .filter(|i| {
+            i.severity == super::audit::AuditSeverity::Blocker
+                && i.status == super::audit::AuditStatus::Fail
+        })
+        .map(|i| format!("{}：{}", i.name, i.details))
+        .collect();
+    if !broken.is_empty() {
+        return Err(AppError::internal(format!(
+            "定稿后的最终一致性核对没过（{} 项红）—— 已停止，没有提交任何东西",
+            broken.len()
+        ))
+        .with_detail(broken.join("；")));
+    }
 
     let mut report = PublishTxReport {
         stage: PublishStage::Generated,
@@ -470,9 +495,9 @@ pub fn wb_publish_account(app: tauri::AppHandle) -> Result<PublishAccount, AppEr
 
 /// 存一个平台的**发布目标**（仓库地址 + 用户名，进 `publish-account.json`）。
 ///
-/// Token **不在这里** —— 它走 [`wb_set_publish_token`] 进 Keychain（配置与秘密分离）。
+/// Token **不在这里** —— 它走 [`wb_set_publish_token`] 进凭据文件（配置与秘密分离）。
 ///
-/// ★ `(async)`：它会读 Keychain（系统可能弹密码框）—— 绝不能占着主线程。
+/// ★ `(async)`：它要读盘（发布账户配置）—— 碰盘的命令不占主线程。
 #[tauri::command(async)]
 pub fn wb_set_publish_account(
     app: tauri::AppHandle,
@@ -504,9 +529,9 @@ pub fn wb_set_publish_account(
     })
 }
 
-/// 存一个发布 Token（**只进不出**：写 Keychain，返回的状态里没有原值）。
+/// 存一个发布 Token（**只进不出**：写凭据文件，返回的状态里没有原值）。
 ///
-/// ★ `(async)`：写 Keychain 同样可能弹系统框（更新他人建的条目要授权）—— 不占主线程。
+/// ★ `(async)`：碰盘的命令不占主线程（与 IO 单子的规矩一致）。
 #[tauri::command(async)]
 pub fn wb_set_publish_token(
     platform: String,
@@ -527,9 +552,9 @@ pub fn wb_set_publish_token(
     })
 }
 
-/// 清一个平台的**发布账户**（配置 + Keychain 凭据，都清；幂等）。
+/// 清一个平台的**发布账户**（配置 + 凭据文件里的 Token，都清；幂等）。
 ///
-/// ★ `(async)`：删 Keychain 条目可能弹系统框 —— 不占主线程。
+/// ★ `(async)`：碰盘的命令不占主线程。
 #[tauri::command(async)]
 pub fn wb_clear_publish_account(
     app: tauri::AppHandle,
@@ -612,7 +637,7 @@ pub fn wb_merge_review(
 
 /* ---------- 发布目标的解析（命令壳用；内核只收解析好的 PublishTarget） ---------- */
 
-/// 从发布账户配置 + Keychain 解析出**发布目标**。
+/// 从发布账户配置 + 凭据文件解析出**发布目标**。
 ///
 /// `platform` 指定用哪个平台；`None` = 自动挑（配置里唯一配好的那个；两个都配好时优先
 /// 取"当前 remote 一致"的那个，还不行就报错让用户显式说）。
