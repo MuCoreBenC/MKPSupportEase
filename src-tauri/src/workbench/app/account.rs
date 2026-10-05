@@ -3,8 +3,8 @@
 //! # 配置与秘密分离（作者 2026-10-04 定死）
 //!
 //! ```text
-//! publish-account.json   ← 发布账户配置：repositoryUrl + username（**没有 token**）
-//! 系统 Keychain          ← Token：supportease.<platform>.token（见 [`super::credentials`]）
+//! publish-account.json      ← 发布账户配置：repositoryUrl + username（**没有 token**）
+//! credentials.json（0600）  ← Token：supportease.<platform>.token（见 [`super::credentials`]）
 //! ```
 //!
 //! ★ **配置文件里绝不出现 token 字段** —— 判据 `publish_account_config_never_stores_a_token`

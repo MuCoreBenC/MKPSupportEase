@@ -27,7 +27,7 @@
 //!
 //! | 来源 | 怎么用 |
 //! |---|---|
-//! | `MKPSE_APP_DIR` 指向工作台的应用数据目录 | 复用发布账户配置 + Keychain 里的 Token（**与工作台完全一致**） |
+//! | `MKPSE_APP_DIR` 指向工作台的应用数据目录 | 复用发布账户配置 + 凭据文件里的 Token（**与工作台完全一致**） |
 //! | `MKPSE_RELEASE_{PLATFORM,OWNER,REPO,TOKEN}` | 无窗口环境下显式给（CI / 纯终端） |
 //! | 都没有 | 只做本地那一半（提交 / 推送 / 打 tag / 构建），如实说"没建 Release" |
 
@@ -116,7 +116,7 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
 
 /// 凑出发布目标与平台客户端。**没有就返回 `None`** —— 内核会退化成"只做本地那一半"。
 fn resolve_from_env() -> (Option<PublishTarget>, Option<Box<dyn Hosting>>) {
-    // ① 给了工作台的应用数据目录 → 复用它的发布账户配置（含 Keychain 里的 Token）
+    // ① 给了工作台的应用数据目录 → 复用它的发布账户配置（含凭据文件里的 Token）
     if let Some(dir) = std::env::var_os("MKPSE_APP_DIR") {
         let root = PathBuf::from(dir);
         if let Ok(t) = resolve_target(&root, None) {

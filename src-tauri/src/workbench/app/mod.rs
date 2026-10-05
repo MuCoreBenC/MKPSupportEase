@@ -34,8 +34,8 @@
 //! 迟早只改其中一个。所以字段详情走 `wb_matrix(cols=[那一列])`。
 
 /// **发布账户配置**（第三刀下半）：`repositoryUrl` + `username`，住
-/// `<appDataDir>/publish-account.json`（**不含 token**；token 住 Keychain）。
-/// 发布目标由它决定，`git remote` 只作校验
+/// `<appDataDir>/publish-account.json`（**不含 token**；token 住凭据文件
+/// `credentials.json`，见 [`credentials`]）。发布目标由它决定，`git remote` 只作校验
 pub mod account;
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
@@ -47,7 +47,8 @@ pub mod audit;
 pub mod build;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
-/// 发布账户凭据（第三刀下半）：每平台一份 Token，住**系统 Keychain**，前端拿不到原值
+/// 发布账户凭据（第三刀下半）：每平台一份 Token，住**本机凭据文件**（`credentials.json`，
+/// 0600），前端拿不到原值
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod dist;
@@ -1747,10 +1748,10 @@ mod tests {
     /// 写命令**故意不在这张单子里**：它们要落盘、要和草稿的锁打配合，改异步是另一
     /// 件要单独评估的事（`wb_apply_draft` / `wb_save` / `wb_generate` …）。
     ///
-    /// ★ **但"碰网络 / Keychain"的命令必须在这张单子里**（下面 [`IO`]）——2026-10-04
-    /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框）、推 git、
-    /// 建 PR 全发生在主线程上，窗口一动不动；作者原话「卡住了，我什么都没办法点」。
-    /// 那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
+    /// ★ **但"碰网络 / 凭据盘"的命令必须在这张单子里**（下面 [`IO`]）——2026-10-04
+    /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框，凭据后来
+    /// 改住凭据文件）、推 git、建 PR 全发生在主线程上，窗口一动不动；作者原话
+    /// 「卡住了，我什么都没办法点」。那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
     #[test]
     fn read_commands_are_async_so_they_never_freeze_the_window() {
         /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
@@ -1786,11 +1787,11 @@ mod tests {
             "wb_open_external",
         ];
 
-        /// 这一批**碰网络或系统 Keychain**（发布事务那几条）—— 同样必须 `(async)`。
+        /// 这一批**碰网络或凭据盘**（发布事务那几条）—— 同样必须 `(async)`。
         ///
-        /// 为什么它们比读命令更要紧：读命令只是"算得久"；这几条会**等系统弹框**
-        /// （Keychain 授权）和**等网络**（git 推送、平台 API）—— 等多久完全不可控，
-        /// 占着主线程就是无限期冻住整个窗口。
+        /// 为什么它们比读命令更要紧：读命令只是"算得久"；这几条要**等网络**
+        /// （git 推送、平台 API —— 等多久完全不可控），凭据文件虽是本地盘 IO，
+        /// 也归进同一批：**碰外界的命令不许占主线程**是一条规矩，不为每一处单独开例外。
         const IO: &[&str] = &[
             "wb_publish",
             "wb_publish_account",
@@ -1844,7 +1845,7 @@ mod tests {
             "这些读命令还跑在主线程上（算多久界面就冻多久）—— 加 `#[tauri::command(async)]`：{missing:?}"
         );
 
-        // 同样的扫描，对「碰网络 / Keychain」的命令再来一遍 —— 它们的主线程代价更重
+        // 同样的扫描，对「碰网络 / 凭据盘」的命令再来一遍 —— 它们的主线程代价更重
         let mut missing_io: Vec<&str> = Vec::new();
         for fn_name in IO {
             let needle = format!("pub fn {fn_name}(");
@@ -1859,8 +1860,8 @@ mod tests {
         }
         assert!(
             missing_io.is_empty(),
-            "这些命令碰网络 / Keychain，却还跑在主线程上（读 Keychain 会弹系统框、\
-             推送要等网络 —— 界面会整段冻住）：{missing_io:?}"
+            "这些命令碰网络 / 凭据盘，却还跑在主线程上（推送要等网络、发布链还有落盘与\
+             子进程 —— 界面会整段冻住）：{missing_io:?}"
         );
     }
 }

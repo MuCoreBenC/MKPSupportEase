@@ -1248,7 +1248,7 @@ mod tests {
             .unwrap();
 
         let fake = FakeHosting::default();
-        // 发布目标（真机上来自发布账户配置 + Keychain；这里用裸仓库的路径当 remote，
+        // 发布目标（真机上来自发布账户配置 + 凭据文件；这里用裸仓库的路径当 remote，
         // `remote_matches` 才过得去）。凭据是假的 —— 裸仓库走的是本地传输，不认证。
         let target = PublishTarget {
             platform: "fake".to_owned(),

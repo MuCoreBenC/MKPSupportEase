@@ -17,7 +17,7 @@
 //!
 //! # 认证
 //!
-//! Token 从系统 Keychain 来（[`super::super::credentials`]），构造时注入。
+//! Token 从本机凭据文件来（[`super::super::credentials`]），构造时注入。
 //! Gitee 用 `access_token` 查询参数（它不上 Bearer header）。
 
 use serde_json::Value;
