@@ -649,9 +649,8 @@ mod tests {
         let (mut params, layout) = registry_json();
         params["params"][0]["machineVariants"] = serde_json::json!({ "A1:FASTV3.3": 70 });
         let d2 = tempfile::tempdir().unwrap();
-        let reg2 =
-            crate::presetdata::registry::load_from_json_fixture(d2.path(), &params, &layout)
-                .unwrap();
+        let reg2 = crate::presetdata::registry::load_from_json_fixture(d2.path(), &params, &layout)
+            .unwrap();
 
         let after = Layers::for_version(&reg2, "A1", "STANDARD", &empty, &empty).fingerprint();
         assert_eq!(before, after, "别家的值不许泼进这一版的指纹");
