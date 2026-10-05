@@ -847,23 +847,39 @@ export const mockApi: MkpApi = {
   /*
    * 数据源（设置页那一格）：真机写 `run/preset-source.json`，浏览器里没有盘 ——
    * 这一档走**内存镜像**（与用户目录 / 使用中指针同一套口径：能走通的就真走，走不通的如实说）。
-   * 演示口径：这个假后端**没有内置默认源**（真机的内置是构建期注进来的），
+   * 演示口径：这个假后端**没有内置默认源**（真机的两个内置是构建期注进来的），
    * 所以「使用内置官方源」在这里 = 回到"没配"。
    */
   async getPresetSource() {
     return mockSource
   },
 
-  async setPresetSource(baseUrl) {
+  async setPresetSource(mode, customUrl) {
     /* 校验与真机 `runtime::source::normalize_base_url` 同一套（连消息也照抄）：
        只认 http(s)、砍尾斜杠、空地址拒绝 */
-    const url = baseUrl.trim().replace(/\/+$/, '')
-    if (url === '') throw new Error('数据源地址是空的')
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      throw new Error(`数据源地址只认 http:// 或 https://，填进来的是 ${url}`)
+    if (mode === 'custom') {
+      const url = (customUrl ?? '').trim().replace(/\/+$/, '')
+      if (url === '') throw new Error('数据源地址是空的')
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        throw new Error(`数据源地址只认 http:// 或 https://，填进来的是 ${url}`)
+      }
+      mockSource = {
+        mode: 'custom',
+        label: '自定义地址',
+        address: url,
+        fromUser: true,
+        builtin: [],
+        defaultMode: 'github',
+        builtinDefault: null,
+      }
+      return mockSource
     }
-    mockSource = { baseUrl: url, fromUser: true, builtin: null }
-    return mockSource
+    if (mode !== 'github' && mode !== 'gitee') {
+      throw new Error(`认不出的源：${mode}（只能是 github / gitee / custom）`)
+    }
+    // 演示后端没有内置源：选了内置 = 回到"没配"（与上面那段注释同一口径）
+    mockSource = null
+    return mockSource as unknown as PresetSource
   },
 
   async clearPresetSource() {

@@ -37,39 +37,77 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 
 /* ---------- 数据源的设置（重装 / 换 Gitee / 换自建 CDN 的入口） ---------- */
 
+/// 给界面的一个**内置源**选项（作者 2026-10-05 拍"两个官方源 + 收起的自定义"）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinSourceDto {
+    /// `github` / `gitee` —— **id 是契约**（盘上 / 界面 / 前端都认它）
+    pub id: String,
+    /// 给用户看的那一句
+    pub label: String,
+    /// 这个源的 Bootstrap 地址
+    pub address: String,
+}
+
 /// 给界面的当前数据源
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetSourceDto {
-    /// **当前生效**的入口地址（设置文件优先，其次内置默认）。
-    /// 第十七刀起两种来源的语义不同、界面要说清：手动 = 数据源根（根下就有
-    /// `catalog.json`）；内置 = **Bootstrap 地址**（指向 `source.json`，见 `runtime::source`）
-    pub base_url: String,
-    /// `true` = 用户在界面里填的（写进了设置文件）；`false` = 构建期注入的出厂默认值，还没被人动过。
-    /// 界面据此把"默认值"与"你选的"分开说——不然用户不知道当前的地址是自己改的还是出厂的
+    /// 用户选了哪一个：`github` / `gitee` / `custom`
+    pub mode: String,
+    /// 给用户看的模式名
+    pub label: String,
+    /// **当前生效的入口地址**（内置 = 构建期注入的那个；自定义 = 用户填的根）。
+    /// 空串 = 选了自定义但没填地址（界面据此把输入框摆出来并报错，**不悄悄用别的源**）
+    pub address: String,
+    /// `true` = 用户自己填的（`custom`）
     pub from_user: bool,
-    /// 构建期注入的默认地址（`MKPSE_PRESET_SOURCE`，工作台配置在构建时合并进它），
-    /// 没有就是 `null`。**单独给一份**：有用户覆盖时 `base_url` 是覆盖值，
-    /// 光看它分不出"撤掉覆盖之后会回到什么"—— 设置页「使用内置官方源」那一格要说的正是这句话
-    pub builtin: Option<String>,
+    /// **两个内置源**（没注入的那个不出现）。界面摆两个固定单选就靠它 ——
+    /// 用户没有输错地址的机会，这是防错的第一道
+    pub builtin: Vec<BuiltinSourceDto>,
+    /// 出厂默认是哪一个（`github`）：界面上「恢复默认」那一句要说得清它是什么
+    pub default_mode: String,
+    /// 出厂默认那个源的地址
+    pub builtin_default: Option<String>,
 }
 
-/// 生效值的装配：设置文件优先 → 内置默认 → 都没有就是 `null`。
-/// **只写这一处**（get 与 clear 共用）—— 各写一遍迟早有一份忘带新字段
+/// 生效值的装配：按盘上选中的模式 → 界面那一格。
+/// **只写这一处**（get / set / clear 共用）—— 各写一遍迟早有一份忘带新字段
 fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
-    let builtin = runtime::source::builtin_default();
-    match runtime::source::current_entry(root)? {
-        Some(runtime::source::SourceEntry::Direct { base_url }) => Ok(Some(PresetSourceDto {
-            base_url,
-            from_user: true,
-            builtin,
-        })),
-        Some(runtime::source::SourceEntry::Bootstrap { url }) => Ok(Some(PresetSourceDto {
-            base_url: url,
-            from_user: false,
-            builtin,
-        })),
-        None => Ok(None),
+    let entry = runtime::source::current_entry(root)?;
+    let mode = runtime::source::current_mode(root)?;
+    let builtin: Vec<BuiltinSourceDto> = runtime::source::builtin_sources()
+        .into_iter()
+        .map(|(m, address)| BuiltinSourceDto {
+            id: mode_wire(m),
+            label: m.label().to_owned(),
+            address,
+        })
+        .collect();
+    let (address, from_user) = match entry {
+        Some(runtime::source::SourceEntry::Custom { url, .. }) => (url, true),
+        Some(runtime::source::SourceEntry::Bootstrap { url }) => (url, false),
+        // 选了自定义却没地址：地址给空串（界面把输入框摆出来并报错），
+        // **不静默回落到内置源** —— 那会让界面显示"自定义"、实际连着别的地方。
+        None => (String::new(), true),
+    };
+    Ok(Some(PresetSourceDto {
+        mode: mode_wire(mode),
+        label: mode.label().to_owned(),
+        address,
+        from_user,
+        builtin,
+        default_mode: mode_wire(runtime::source::DEFAULT_MODE),
+        builtin_default: runtime::source::builtin_default(),
+    }))
+}
+
+/// Rust 枚举 → 线上字符串。**id 是契约**，所以只写这一处。
+fn mode_wire(mode: runtime::source::SourceMode) -> String {
+    match mode {
+        runtime::source::SourceMode::Gitee => "gitee".to_owned(),
+        runtime::source::SourceMode::Github => "github".to_owned(),
+        runtime::source::SourceMode::Custom => "custom".to_owned(),
     }
 }
 
@@ -83,24 +121,41 @@ pub async fn get_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>
     })
 }
 
-/// 换数据源：写完立刻生效（下一次下载就用新的），并显示写出来的那一份。
-/// 地址不合法在这一层就被拒：来自 `normalize_base_url`
+/// 换数据源：**先探一次，通了才落盘**（作者 2026-10-05：用户容易输错地址）。
 ///
-/// **空地址不是"清除"**（那是 [`clear_preset_source`] 的事）：这里拒空，
-/// 语义保持"填一个地址进来"这一件事（见 `runtime::source::save_source` 的注释）
+/// - 内置两个源：地址是程序自带的，**不联网不探**（否则每次切源都要等一次网络）；
+/// - 自定义：解析入口 + 取一次 catalog —— **取不到 / 解析不了就整次拒绝**，
+///   刚写的那份**撤掉**（不留半份状态；错地址留在设置里比"没配"更难查）。
 #[tauri::command]
 pub async fn set_preset_source(
     app: AppHandle,
-    base_url: String,
+    mode: String,
+    custom_url: Option<String>,
 ) -> Result<PresetSourceDto, AppError> {
+    let root = internal_root(&app)?;
+    let mode = runtime::source::SourceMode::parse(mode.trim()).ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "认不出的源：{mode}（只能是 github / gitee / custom）"
+        ))
+    })?;
+    if mode == runtime::source::SourceMode::Custom {
+        let raw = custom_url.unwrap_or_default();
+        let task = tauri::async_runtime::spawn_blocking(move || {
+            traced("setPresetSource", |_| {
+                // ★ 先探形状（根 / source.json 两种都认），**通了才落盘** ——
+                //   错地址留在设置里比"没配"更难查（0.0.2 的教训）。
+                let (shape, _resolved) = runtime::source::probe_custom_shape(&raw)?;
+                runtime::source::save_source_with(&root, mode, Some(&raw), shape)?;
+                source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
+            })
+        });
+        return task
+            .await
+            .map_err(|e| AppError::internal("换数据源没跑到终局").with_detail(e.to_string()))?;
+    }
     traced("setPresetSource", |_| {
-        let root = internal_root(&app)?;
-        let saved = runtime::source::save_source(&root, &base_url)?;
-        Ok(PresetSourceDto {
-            base_url: saved.base_url,
-            from_user: true,
-            builtin: runtime::source::builtin_default(),
-        })
+        runtime::source::save_source(&root, mode, None)?;
+        source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
     })
 }
 

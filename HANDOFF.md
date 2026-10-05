@@ -2070,3 +2070,51 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
   `mock.ts` / `localFiles.ts` / `presetTree.ts` 里那句 `Documents/SupportEase/…` 一并改口径。
 
 **这三件都是程序改动 ⇒ 走「发布软件版本」链发 0.0.2**（正好是第四刀第二段的验收对象）。
+
+## 增量之二十七 · 0.0.3 的前半：双源 + 自定义地址两种形状都认（分支 `feat/gitee-release`）
+
+作者 2026-10-05 拍：**两个官方源（Gitee 默认 / GitHub 备选）+ 收起的自定义**，
+并且**用户容易输错地址**这件事要一并解决。另一半（应用内下载 .app.zip + 标题栏环形进度 +
+自动替换重启）是下一刀。
+
+### 根因（真机）
+
+0.0.2 客户端里**手动指定"官方那个 source.json 地址"反而不通**，而内置默认同一个地址是通的：
+
+- 手动指定那条路原本**只认"数据源根"**（根下直接有 `catalog.json`）；
+- 而用户复制来的地址**本身就以 `source.json` 结尾** → 程序当根拼出
+  `…/source.json/catalog.json` → 404。
+- ⇒ 不是用户错，是我们把"一个地址有两种读法"当成了两种东西。
+
+### 改法
+
+- `runtime::source`：**从"一个地址"改成"选哪一个源"**（`SourceMode{Gitee,Github,Custom}`，
+  `SOURCE_SCHEMA` 升 **2**）。★ 读 1 代老档**不是兼容层**：那份 `baseUrl` 本来就是
+  "用户手填的地址"，含义正好等于新模型的 `custom`。
+- **两个内置源**构建期注入（`build.rs` 从 `workbench/bootstrap.json` 读
+  `bootstrapUrl` / `giteeBootstrapUrl` → `MKPSE_PRESET_SOURCE` / `…_GITEE`；
+  没注入的那个**不出现**在界面里）。
+- **自定义地址两种形状都认**（`CustomShape`）：`Root` / `Bootstrap` / `Unset`。
+  `bootstrap_candidates()`：**原样先试**（用户复制的地址通常已经带着 `source.json`），
+  不成再在根上补文件名 —— 之前"再拼一层"会拼出 `…/source.json/source.json`，永远不通。
+- **保存前先探一次**（`probe_custom_shape`），通了才落盘；不通则**每次尝试的原因都摆出来**。
+  内置两个源不联网不探（地址是程序自带的）。
+- 界面：两个固定单选 + 收起的自定义；「恢复默认」只在"当前不是默认档"时出现。
+
+### 判据（+7，默认 328）
+
+`the_v1_file_reads_as_a_custom_source` / `a_builtin_mode_refuses_an_address` /
+`a_custom_mode_without_an_address_has_no_entry`（不许静默回落到内置源）/
+`only_three_source_modes_are_recognized` /
+**`a_custom_url_is_read_as_a_root_or_as_a_source_json`**（本次真机 bug 的钉子：同一个
+服务，填根探成 `Root`、填 `source.json` 地址探成 `Bootstrap`，两条都通）/
+`an_unusable_address_is_refused_with_both_reasons`。
+判据里那个 `TinyServer` 是手写 `std::net` 的最小服务端（只按路径答两种内容）——
+它属于**判据脚手架**，不进产品架构。
+
+**★ 判据不许开端口（2026-10-05 CI 抓到的）**：形状判定第一版写成"起一个本地 `TcpListener`
+当假服务器"，`check:zero-network` 当场报红（`启动零网络扫描`：原始套接字 / TCP 监听 / TCP 连接）。
+那是对的 —— **客户端产品不开端口，判据也算客户端**。改成**注入取字节的动作**
+（`FetchBytes` + `probe_custom_shape_with` / `parse_source_json_with`），判据在纯内存里跑完整条判定，
+产品的门仍走 `net::get_bytes` 唯一出口。假 fetch 只看 URL 的**最后两段**
+（`…/source.json/catalog.json` 必须 404 —— 那正是真机上"填 source.json 地址"不通的那条路）。
