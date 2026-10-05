@@ -466,16 +466,13 @@ pub fn run(
                 notes_line(&opts.notes)
             ),
         };
-        let review = match hosting.create_review(&spec) {
-            Ok(r) => r,
-            // ★ **发布可重跑**（与预设那条链同一条口径）：平台不许同一个 head→base 开两份 PR，
-            //   422 不是失败 —— 产物已经推上去了，回读那一份继续。
-            Err(_) => hosting
-                .find_open_review(&t.owner, &t.repo, &branch, base)?
-                .ok_or_else(|| {
-                    AppError::io("建 PR 失败，也找不到这一支上开着的 PR")
-                        .with_detail("产物已经推上去了 —— 重跑一次这个事务就能接着走")
-                })?,
+        let review = match hosting.find_open_review(&t.owner, &t.repo, &branch, base)? {
+            // ★ **先找后建**（2026-10-06 真机踩的）：squash 合并之后同一个 head→base 还能
+            //   再开 PR —— 先建后找的写法在"人手动合并过上一趟的 PR / 事务重跑"时，
+            //   会开出第二份同样的 PR（v0.0.6 的 #46 就是这么来的，无害但难看）。
+            //   已开着的直接复用；真没有才建（建挂了如实报错）。
+            Some(r) => r,
+            None => hosting.create_review(&spec)?,
         };
         report.review = Some(review);
         report.stage = ReleaseStage::ReviewOpened;

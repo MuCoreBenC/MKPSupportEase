@@ -206,6 +206,11 @@ impl Git {
     /// 仓库去 —— GitHub 放 Release 与 tag，**Gitee 放数据源**（国内直连的那一份）。
     /// 本机不一定配了 `gitee` 这个 remote（也不该要求开发者配），而发布目标已经写在
     /// 发布账户配置里了（`repository_url`）—— **按那个 URL 推**，配置是唯一真值。
+    /// ★ 两家的 git-http **吃不同的认证形状**（2026-10-06 真机实测，同一份 token）：
+    ///   GitHub 认**先发式 Basic 头**（`http.extraHeader`）—— "Token 不进 URL"的纪律在它那边成立；
+    ///   **Gitee 无视那个头**（401 落到凭据提示，`GIT_TERMINAL_PROMPT=0` 下直接死），
+    ///   只认 **URL 内嵌凭据** —— 所以 Gitee 走 URL（命令行参数里短暂可见，本机单人场景），
+    ///   错误信息里 **redact**（见下）。
     pub fn push_ref_to_authenticated(
         &self,
         remote: &str,
@@ -213,29 +218,30 @@ impl Git {
         username: &str,
         token: &str,
     ) -> Result<(), AppError> {
-        let basic = base64_encode(format!("{username}:{token}").as_bytes());
-        let header = format!("http.extraHeader=Authorization: Basic {basic}");
-        let out = Command::new("git")
+        // Gitee → URL 内嵌凭据；其余（GitHub / 自建）→ 先发式 Basic 头
+        let with_url_creds = gitee_url_with(remote, username, token);
+        let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
+        let mut args: Vec<&str> = vec!["-c", "credential.helper="];
+        let header;
+        if with_url_creds.is_none() {
+            let basic = base64_encode(format!("{username}:{token}").as_bytes());
+            header = format!("http.extraHeader=Authorization: Basic {basic}");
             // `-c credential.helper=` 清掉全局 helper；`-c http.extraHeader=` 临时带认证。
             // 两个 `-c` 必须在子命令（push）**之前**。
-            .args([
-                "-c",
-                "credential.helper=",
-                "-c",
-                &header,
-                "push",
-                "-u",
-                remote,
-                refspec,
-            ])
+            args.extend(["-c", &header]);
+        }
+        args.extend(["push", "-u", &target, refspec]);
+        let out = Command::new("git")
+            .args(&args)
             .current_dir(&self.repo)
             // 禁交互：没有 TTY 时 git 会尝试提示，这里直接关掉（防挂死）
             .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .map_err(|e| spawn_failed(&self.repo, e))?;
         if !out.status.success() {
-            // ★ detail 只用 stderr —— **不带那条 header 参数**
-            let err = String::from_utf8_lossy(&out.stderr);
+            // ★ detail 只用 stderr，且 **redact 掉 token** —— URL 内嵌凭据会随 git 报错
+            //   原文出现（如 `unable to access 'https://user:token@…'`），不能原样带出去
+            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
             return Err(AppError::io("git push 失败了").with_detail(format!(
                 "{}（退出码 {:?}）",
                 err.trim(),
@@ -501,9 +507,37 @@ fn base64_encode(input: &[u8]) -> String {
     out
 }
 
+/// Gitee 的 **URL 内嵌凭据**形状：只对 gitee.com 的 http(s) URL 生效
+/// （remote 名（`origin`）/ 别的域 → `None`，调用方回落到 Basic 头）。
+///
+/// 为什么存在（2026-10-06 真机实测）：Gitee 的 git-http **无视先发式
+/// `Authorization: Basic` 头**，同一份 token 以 `https://user:token@…` 内嵌则通。
+fn gitee_url_with(remote: &str, username: &str, token: &str) -> Option<String> {
+    let rest = remote
+        .strip_prefix("https://gitee.com/")
+        .or_else(|| remote.strip_prefix("http://gitee.com/"))?;
+    Some(format!("https://{username}:{token}@gitee.com/{rest}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★ Gitee 的 git-http 不吃先发式 Basic 头（2026-10-06 真机实测）—— 只认 URL 内嵌凭据。
+    /// 这条钉**形状判定**：gitee.com 的 http(s) URL → 内嵌；remote 名 / 别的域 → `None` 回落。
+    #[test]
+    fn gitee_push_target_gets_url_credentials() {
+        assert_eq!(
+            gitee_url_with("https://gitee.com/o/r.git", "u", "t"),
+            Some("https://u:t@gitee.com/o/r.git".to_owned())
+        );
+        assert_eq!(
+            gitee_url_with("http://gitee.com/o/r", "u", "t"),
+            Some("https://u:t@gitee.com/o/r".to_owned())
+        );
+        assert_eq!(gitee_url_with("origin", "u", "t"), None);
+        assert_eq!(gitee_url_with("https://github.com/o/r", "u", "t"), None);
+    }
 
     /// ★ **`git add -A` 的替代是"白名单前缀匹配"** —— 这条钉住"什么进得去、什么进不去"。
     /// 交付产物、结构规则表、资产台账进得去；源码、配置、别的东西进不去。
