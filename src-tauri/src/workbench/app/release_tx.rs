@@ -550,9 +550,20 @@ pub fn run(
             }) {
                 Ok(put) => {
                     let sha = sha256_file(&zip.path).unwrap_or_default();
+                    // ★ 下载地址**用平台回给我们的那个**（`browser_download_url`），
+                    //   不自己拼 —— 2026-10-05 真机踩过：拼出来的
+                    //   `…/releases/tag/v0.0.4/download/v0.0.4/…` 多了一层 `/tag/{tag}`，
+                    //   GitHub 宽容地重定向了（能下），但**换到 Gitee 就未必**，
+                    //   而"平台告诉我们它的下载页在哪"是唯一跨平台可靠的说法。
+                    //   平台没给（某些 Gitee 版本）才回退到 Release 页。
+                    let url = if put.url.trim().is_empty() {
+                        release.url.clone()
+                    } else {
+                        put.url.clone()
+                    };
                     report.zip = Some(crate::runtime::release_info::ReleaseAsset {
                         name: zip_name.clone(),
-                        url: format!("{}/download/{}/{}", release.url, tag, zip_name),
+                        url,
                         size: put.size,
                         sha256: sha,
                     });
