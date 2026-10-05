@@ -106,7 +106,13 @@ export default function HistoryModal({ onClose }: Props) {
     }
   }
 
-  const records = history?.records ?? []
+  /** Rust 端 `Option::None` 序列化时**整个字段省掉**（`skip_serializing_if`）—— 到前端是
+   *  `undefined`，类型上写的却是 `null`。在这一处归一，下面的判空才成立：那条
+   *  "未配置发布账户"的回执就没有 review，`rev !== null` 拦不住 `undefined`，
+   *  一打开这里整个界面崩掉（2026-10-05 真实发生过）。 */
+  const records: PublishRecord[] = (history?.records ?? []).map((r) =>
+    r.review === undefined ? { ...r, review: null } : r,
+  )
 
   return (
     <ModalC14
