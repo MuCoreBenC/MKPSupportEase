@@ -96,6 +96,11 @@ export interface Boot {
    * 改了要**重新构建客户端**才生效（编译期注入）；`wb_set_bootstrap` 写它
    */
   bootstrapUrl: string | null
+  /**
+   * 第二官方源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
+   * null = 没配 —— 客户端构建不注入这一档，客户端界面也不出现它。各读各的，互不兜底
+   */
+  giteeBootstrapUrl: string | null
 }
 
 /* ---------- 整本 ---------- */
@@ -1355,8 +1360,16 @@ export const wb = {
   reload: () => invoke<Boot>('wb_reload'),
   /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
   appVersion: () => invoke<string>('wb_app_version'),
-  /** 写官方源（Bootstrap）；返回**存的规范化值**（仓库地址 → 默认发布入口的 raw；blob 页转 raw） */
-  setBootstrap: (url: string) => invoke<string>('wb_set_bootstrap', { url }),
+  /**
+   * 写官方源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
+   * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。
+   * 两格一笔写全 —— 这一笔就是配置的全部真值
+   */
+  setBootstrap: (url: string, giteeUrl: string | null) =>
+    invoke<{ bootstrapUrl: string; giteeBootstrapUrl?: string | null }>('wb_set_bootstrap', {
+      url,
+      giteeUrl,
+    }),
   words: () => invoke<Words>('wb_words'),
 
   book: () => invoke<BookView>('wb_book'),

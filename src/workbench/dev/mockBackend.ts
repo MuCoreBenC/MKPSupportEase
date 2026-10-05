@@ -580,6 +580,7 @@ function bundleListOf(query: string | null) {
 
 /** 官方源（Bootstrap）：`wb_set_bootstrap` 写它（浏览器里存内存）。真机写 workbench/bootstrap.json */
 let mockBootstrap: string | null = null
+let mockGiteeBootstrap: string | null = null
 
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
@@ -594,6 +595,7 @@ function mockBoot(): Json {
     detail: null,
     storeDirs: STORE_DIRS,
     bootstrapUrl: mockBootstrap,
+    giteeBootstrapUrl: mockGiteeBootstrap,
   }
 }
 
@@ -1728,10 +1730,13 @@ export function installMockBackend() {
         if (url === '') {
           return Promise.reject({ code: 'INVALID', message: 'Bootstrap 地址是空的', traceId: 'mock' })
         }
-        /* 演示桩不做 GitHub blob → raw 的规范化（那是真后端 `delivery::normalize_bootstrap_url`
-           的活）—— 存原样；真机存下去的是转好的 raw 直链 */
+        const giteeRaw = args?.giteeUrl
+        const giteeUrl = giteeRaw === null || giteeRaw === undefined ? null : String(giteeRaw).trim()
+        /* 演示桩不做 GitHub/Gitee 仓库地址 → raw 的规范化（那是真后端
+           `delivery::normalize_bootstrap_url` 的活）—— 存原样；真机存下去的是转好的 raw 直链 */
         mockBootstrap = url
-        return Promise.resolve(url)
+        mockGiteeBootstrap = giteeUrl === '' ? null : giteeUrl
+        return Promise.resolve({ bootstrapUrl: mockBootstrap, giteeBootstrapUrl: mockGiteeBootstrap })
       }
       case 'wb_reload':
         return Promise.resolve(mockBoot())

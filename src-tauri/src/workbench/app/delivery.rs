@@ -147,7 +147,12 @@ const DELIVERY_REL_PATH: &str = "presets/delivery";
 /// | GitHub `tree/…` 目录页 | ❌ 拒（无法表达"要哪个发布入口"） |
 /// | 空 / 非 http(s) | ❌ 拒 |
 ///
-/// **`.git` 不是产品语义**：它只是 GitHub 克隆地址的一种写法，规范化时去掉。
+/// **Gitee 是同一座桥**（2026-10-05 双官方源）：仓库地址 / `.git` / blob 页的契约与
+/// GitHub 完全对称，只有 raw 的落点不同 —— Gitee 的 raw 与网页**同域**
+/// （`gitee.com/<o>/<r>/raw/<ref>/<path>`），所以比 GitHub 多认一种"已经是 raw"的形状
+/// （GitHub 的 raw 住在别的域名上，天然落进"自建源原样"那一行）。
+///
+/// **`.git` 不是产品语义**：它只是克隆地址的一种写法，规范化时去掉。
 pub fn normalize_bootstrap_url(raw: &str) -> Result<String, AppError> {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -193,6 +198,55 @@ pub fn normalize_bootstrap_url(raw: &str) -> Result<String, AppError> {
         /* ③ 其余（`tree/…` 目录页、仓库下的别的路径）→ 拒：说不清"要哪个发布入口" */
         return Err(AppError::invalid_argument(
             "这是 GitHub 的目录页，不是一个文件 —— 请填**仓库地址**（我们会自动定位发布入口），或指向 source.json 的 blob 链接",
+        )
+        .with_detail(format!("收到：{trimmed}")));
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("https://gitee.com/")
+        .or_else(|| trimmed.strip_prefix("http://gitee.com/"))
+    {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() < 2 {
+            return Err(AppError::invalid_argument(
+                "这不是一个 Gitee 仓库地址 —— 要 <owner>/<repo> 两段",
+            )
+            .with_detail(format!("收到：{trimmed}")));
+        }
+        let owner = parts[0];
+        /* 仓库名可能带 `.git` 后缀（克隆地址的写法）—— 去掉，它不是产品语义 */
+        let repo = parts[1].strip_suffix(".git").unwrap_or(parts[1]);
+        if repo.is_empty() {
+            return Err(
+                AppError::invalid_argument("这不是一个 Gitee 仓库地址 —— 仓库名是空的")
+                    .with_detail(format!("收到：{trimmed}")),
+            );
+        }
+
+        /* ① 仓库地址（两段，且第二段就是那个仓库）：补默认 ref + 默认交付路径 */
+        if parts.len() == 2 {
+            return Ok(format!(
+                "https://gitee.com/{owner}/{repo}/raw/{DEFAULT_REF}/{DELIVERY_REL_PATH}/{SOURCE_FILE}"
+            ));
+        }
+
+        /* ② 已是 raw 直链：原样（Gitee 的 raw 与网页同域，得在分支里认出来，
+        不能落进下面的"自建源"—— 但结果一致，就是原样吐回去） */
+        if parts[2] == "raw" && parts.len() >= 5 {
+            return Ok(trimmed.to_owned());
+        }
+
+        /* ③ blob 页：人显式指了哪一份（含 ref 与路径），按他指的转 raw —— 与 GitHub 对称 */
+        if parts[2] == "blob" && parts.len() >= 5 {
+            return Ok(format!(
+                "https://gitee.com/{owner}/{repo}/raw/{}/{}",
+                parts[3],
+                parts[4..].join("/")
+            ));
+        }
+
+        /* ④ 其余（`tree/…` 目录页、仓库下的别的路径）→ 拒：说不清"要哪个发布入口" */
+        return Err(AppError::invalid_argument(
+            "这是 Gitee 的目录页，不是一个文件 —— 请填**仓库地址**（我们会自动定位发布入口），或指向 source.json 的 raw 直链",
         )
         .with_detail(format!("收到：{trimmed}")));
     }
@@ -1827,6 +1881,46 @@ mod tests {
         assert_eq!(
             normalize_bootstrap_url("http://127.0.0.1:8000/source.json").expect("自建源合法"),
             "http://127.0.0.1:8000/source.json"
+        );
+    }
+
+    /// **Gitee 是同一座桥**：仓库地址 / `.git` 补默认入口、blob 转 raw、
+    /// **raw 与网页同域所以"已经是 raw"要认出来原样吐回**、目录页拒。
+    /// 最后一例是入库配置里的真值（`workbench/bootstrap.json` 的 giteeBootstrapUrl）——
+    /// 保存时走一遍规范化必须原样通过，不能被改写。
+    #[test]
+    fn gitee_urls_follow_the_same_bridge() {
+        let want =
+            "https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/source.json";
+        for input in [
+            "https://gitee.com/MuCoreBenC/MKPSupportEase",
+            "https://gitee.com/MuCoreBenC/MKPSupportEase/",
+            "https://gitee.com/MuCoreBenC/MKPSupportEase.git",
+        ] {
+            assert_eq!(
+                normalize_bootstrap_url(input).unwrap_or_else(|e| panic!("{input} 该被接受：{e}")),
+                want,
+                "输入：{input}"
+            );
+        }
+        assert_eq!(
+            normalize_bootstrap_url(
+                "https://gitee.com/MuCoreBenC/MKPSupportEase/blob/dev/x/y/source.json"
+            )
+            .expect("blob 页该转成 raw"),
+            "https://gitee.com/MuCoreBenC/MKPSupportEase/raw/dev/x/y/source.json"
+        );
+        assert_eq!(
+            normalize_bootstrap_url(want).expect("已是 raw 直链，原样"),
+            want
+        );
+        let e = normalize_bootstrap_url("https://gitee.com/o/r/tree/main/presets").unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument, "目录页拒");
+        let e = normalize_bootstrap_url("https://gitee.com/o").unwrap_err();
+        assert_eq!(
+            e.code,
+            crate::error::ErrorCode::InvalidArgument,
+            "单段不是仓库地址"
         );
     }
 
