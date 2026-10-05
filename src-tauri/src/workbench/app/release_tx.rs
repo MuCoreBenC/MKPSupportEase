@@ -792,6 +792,20 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                 .with_detail(dir.display().to_string()))
         }
         [one] => {
+            // ★ 追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦"浏览器下载"的
+            //   第一次打开（"已损坏"）—— 让 dmg 自己带着解法（2026-10-06 真机踩的）。
+            //   说明文档能直接打开；终端快捷方式指向 Apple 签名的系统应用，也不会被拦。
+            //   ★ 刻意不放可执行脚本 —— 脚本和应用一样被隔离拦下，形同虚设。
+            let dmg_path = one.display().to_string();
+            let patched = std::process::Command::new("bash")
+                .args(["scripts/patch-dmg-extras.sh", &dmg_path])
+                .current_dir(repo_root)
+                .output()
+                .map_err(|e| AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string()))?;
+            if !patched.status.success() {
+                return Err(AppError::io("安装包追加说明失败")
+                    .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
+            }
             let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
             Ok(BuiltArtifact {
                 name: super::platform::asset_name(
