@@ -206,7 +206,7 @@ impl Hosting for Gitee {
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
             body,
         ) {
-            Ok(v) => Ok(with_page_url(&v, spec)),
+            Ok(v) => with_page_url(&v, spec),
             Err(e) => {
                 // ★ **幂等回读**（真机兜底）：Release 可能已经建过（上一趟死在传附件、
                 //   这次重跑）—— 按 tag 找回那一份接着走，别让"已存在"挡住发版；
@@ -215,7 +215,7 @@ impl Hosting for Gitee {
                     "/repos/{}/{}/releases/tags/{}",
                     spec.owner, spec.repo, spec.tag_name
                 )) {
-                    Ok(v) => Ok(with_page_url(&v, spec)),
+                    Ok(v) => with_page_url(&v, spec),
                     Err(_) => Err(e),
                 }
             }
