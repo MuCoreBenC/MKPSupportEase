@@ -13,7 +13,15 @@
 //! ★ 启动**绝不能**走 [`release_bytes`]：那会让每次启动都用随包那份覆盖掉
 //! 用户 OTA 拿到的新目录，下载随即 SHA 不匹配。详见 [`ensure_released`] 的注释。
 //!
-//! 归档只发生在 [`release_bytes`] 里：槽位保留**最早**一份，可回溯、不静默丢。
+//! 归档只发生在 [`release_bytes`] 里，分两层：
+//!
+//! - **版本链** `archive/catalogs/<revision>.json`：每一次换代都**追加**一份旧目录 ——
+//!   这是"这份文件我们认得出是哪一版"的全部记忆。曾经过的弯路：只留一个槽
+//!   （保留最早）时，连发两版中间那版的指纹就永久丢了 —— 用户上午下的货、下午换目录，
+//!   晚上盘上那几份全部被误判成「内容异常」（2026-10-06 实测 7 份假警报，那批字节
+//!   在发布历史里都是正规版本）；
+//! - **单槽** `archive/catalog.json`：保留最早一份（行为不变，老判据还在读它）。
+//!
 //! 换 catalog 之后文件层面的旧版本怎么办，是 [`super::delivery`] 的事
 //! （Stale → 重走管道 → 旧文件归档）。
 //!
@@ -34,6 +42,26 @@ use crate::fsx::atomic::atomic_write;
 
 use super::paths::{archive_dir, catalog_file};
 use super::EMBEDDED_CATALOG;
+
+/// 版本链目录：`archive/catalogs/`。每一次换代把**被换下的那份**追加进来，
+/// 文件名用那一份自己的 revision（[`super::catalog::Catalog::revision`]）。
+pub fn catalog_chain_dir(root: &Path) -> std::path::PathBuf {
+    archive_dir(root).join("catalogs")
+}
+
+/// revision → 链内文件名。revision 是发布侧生成的指纹（hex），但这一层不信任任何
+/// 来源的形状：只留文件名安全的那几个字符，其余换 `_`；清完是空的就用 `unknown`。
+fn chain_file_name(revision: &str) -> String {
+    let safe: String = revision
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    if safe.is_empty() {
+        "unknown".to_owned()
+    } else {
+        safe
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct ReleaseReport {
@@ -92,16 +120,40 @@ pub fn release_bytes(root: &Path, bytes: &[u8]) -> Result<ReleaseReport, AppErro
     match std::fs::read(&path) {
         // 最常见的路：同一个版本再开一次，一个字节都不动
         Ok(existing) if existing == bytes => Ok(ReleaseReport::default()),
-        // 盘上有、但与带来的不同：升级（或文件被手动动过）。旧份归档——归档槽保留最早一份，
-        // 槽位已有就不覆盖；然后换上新份
+        // 盘上有、但与带来的不同：升级（或文件被手动动过）。旧份归档——单槽保留最早一份
+        // （槽位已有就不覆盖）；**版本链追加**每一份被换下的旧目录（见模块头：单槽丢中间版）
         Ok(old) => {
-            let archive = archive_dir(root).join("catalog.json");
-            std::fs::create_dir_all(archive.parent().expect("归档路径必有父目录")).map_err(
-                |e| {
-                    AppError::io(format!("建不出归档目录：{}", archive.display()))
-                        .with_detail(e.to_string())
-                },
-            )?;
+            let archive_dir_path = archive_dir(root);
+            std::fs::create_dir_all(&archive_dir_path).map_err(|e| {
+                AppError::io(format!("建不出归档目录：{}", archive_dir_path.display()))
+                    .with_detail(e.to_string())
+            })?;
+            // 版本链：旧目录解析得出自己的 revision 就用它当文件名；解析不了也照收
+            // （名字退化为 unknown-N），**字节比名字重要** —— 信任判定读的是链里所有文件的指纹
+            let chain = catalog_chain_dir(root);
+            std::fs::create_dir_all(&chain).map_err(|e| {
+                AppError::io(format!("建不出版本链目录：{}", chain.display()))
+                    .with_detail(e.to_string())
+            })?;
+            let old_revision = super::Catalog::parse(&old)
+                .ok()
+                .map(|c| c.revision)
+                .unwrap_or_default();
+            let mut chain_name = chain_file_name(&old_revision);
+            if chain.join(&chain_name).exists() {
+                // 同名 revision 再换上来一次（同目录反复横跳）：补个序号，别把上一份盖掉
+                let mut n = 1;
+                loop {
+                    let candidate = format!("{chain_name}-{n}");
+                    if !chain.join(&candidate).exists() {
+                        chain_name = candidate;
+                        break;
+                    }
+                    n += 1;
+                }
+            }
+            atomic_write(&chain.join(&chain_name), &old)?;
+            let archive = archive_dir_path.join("catalog.json");
             let archived = if archive.exists() {
                 true
             } else {

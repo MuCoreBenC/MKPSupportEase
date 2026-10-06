@@ -88,12 +88,23 @@ pub async fn commit_import(
             .collect();
         Ok(runtime::import::commit(&user_root, &items)
             .into_iter()
-            .map(|outcome| ImportOutcomeDto {
-                source: outcome.source,
-                ok: outcome.ok,
-                path: outcome.path,
-                file_name: outcome.file_name,
-                message: outcome.message,
+            .map(|outcome| {
+                // 成的那一份记进出处账（「来源：导入」）—— 记不上不影响这次导入本身
+                if outcome.ok {
+                    let _ = runtime::provenance::record(
+                        &user_root,
+                        &outcome.path,
+                        None,
+                        runtime::provenance::ProvenanceKind::Import,
+                    );
+                }
+                ImportOutcomeDto {
+                    source: outcome.source,
+                    ok: outcome.ok,
+                    path: outcome.path,
+                    file_name: outcome.file_name,
+                    message: outcome.message,
+                }
             })
             .collect())
     })

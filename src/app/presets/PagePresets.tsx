@@ -167,6 +167,7 @@ import {
   sizeTextOf,
 } from './presetTree'
 import type {
+  LocateTarget,
   PresetKindAxis,
   PresetScopeAxis,
   PresetLocalRow,
@@ -319,22 +320,51 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const moreRef = useRef<HTMLButtonElement>(null)
 
   /*
+   * 「定位」的闪光本体：把目标行滚到视口中央，然后盖上 overlay 亮一下再退光。
+   * 两个入口共用（状态条的「定位已应用」与来源格的「复制自 X → 定位」）。
+   *
+   * 闪烁本体是 `s.locateFlash` 那块**盖在行上的普通 div**：现量现设位置，
+   * Web Animations API 淡出（1.8s、先停在 55%）后隐藏。**不许**给行本身挂 class
+   * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
+   * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
+   * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
+   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
+   */
+  const flashRow = (row: HTMLElement) => {
+    const root = rootRef.current
+    const overlay = flashRef.current
+    if (!root || !overlay) return
+    /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
+    row.scrollIntoView({ block: 'center' })
+    const rr = row.getBoundingClientRect()
+    const pr = root.getBoundingClientRect()
+    overlay.style.left = `${rr.left - pr.left}px`
+    overlay.style.width = `${rr.width}px`
+    overlay.style.top = `${rr.top - pr.top}px`
+    overlay.style.height = `${rr.height}px`
+    overlay.style.display = 'block'
+    overlay.getAnimations().forEach((a) => a.cancel())
+    overlay
+      .animate(
+        [
+          { opacity: 1 },
+          { opacity: 1, offset: 0.55 },
+          { opacity: 0 },
+        ],
+        { duration: 1800, easing: 'ease-out' },
+      )
+      .onfinish = () => {
+        overlay.style.display = 'none'
+      }
+  }
+
+  /*
    * 状态条上的「定位」。
    *
    * 全局只有一个「已应用」，机型筛选可能正好把它筛没了 —— 作者不愿意看到
    * 「筛完之后不知道哪套在生效」。点它清掉机型筛选（已应用一定在本地 MKP 表里），
    * 等重画完把那一行滚到视口中央。它替代了原来页脚那个「已应用 … →」按钮：
    * 客户端不知道「基底 / 出厂」这些工作台的概念，页脚那句话整个搬走了。
-   *
-   * 滚到之后**亮一下再慢慢退光**（作者：「就跟校准页那个的一样……差不多的
-   * 功能就复用，只是颜色不同」）。闪烁本体是 `s.locateFlash` 那块**盖在行上的普通
-   * div**：现量现设位置，Web Animations API 淡出（同款 1.8s、先停在 55%）后隐藏。
-   *
-   * 为什么不照抄校准页给行本身挂 class 跑 keyframes —— 这张表是折叠边框表，
-   * 在 tr/td 背景上跑动画，适配缩放下合成层缓存会留旧帧，行里就多出一条
-   * 若隐若现的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。
-   * div 的终态是 display:none，缓存与否无关紧要；表格内部从此没有动画。
-   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
    */
   const locateApplied = () => {
     menu.close()
@@ -342,32 +372,32 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     page.setScope('local')
     data.pickMachine('')
     window.setTimeout(() => {
-      const root = rootRef.current
-      const overlay = flashRef.current
-      const row = root?.querySelector('tr[data-live="true"]') as HTMLElement | null
-      if (!root || !overlay || !row) return
-      /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
-      row.scrollIntoView({ block: 'center' })
-      const rr = row.getBoundingClientRect()
-      const pr = root.getBoundingClientRect()
-      overlay.style.left = `${rr.left - pr.left}px`
-      overlay.style.width = `${rr.width}px`
-      overlay.style.top = `${rr.top - pr.top}px`
-      overlay.style.height = `${rr.height}px`
-      overlay.style.display = 'block'
-      overlay.getAnimations().forEach((a) => a.cancel())
-      overlay
-        .animate(
-          [
-            { opacity: 1 },
-            { opacity: 1, offset: 0.55 },
-            { opacity: 0 },
-          ],
-          { duration: 1800, easing: 'ease-out' },
-        )
-        .onfinish = () => {
-          overlay.style.display = 'none'
-        }
+      const row = rootRef.current?.querySelector('tr[data-live="true"]') as HTMLElement | null
+      if (row !== null) flashRow(row)
+    }, 60)
+  }
+
+  /*
+   * **来源定位**（「复制自 X」那一格点过来）：切到来源所在的表（local / cloud、
+   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、展开那一行、
+   * 滚过去亮一下 —— 用户要的是"看见我从哪复制来的"，缺一步都到不了那个效果。
+   *
+   * 行键按「全部机型」那一档算（mine 行的键里带机型筛选，见 `originCellOf`）；
+   * 类型轴只在目标说得出类型时才切（认不出类别的那份两张表里都有，不动当前档）。
+   * 60ms 与 `locateApplied` 同一个数：等 React 把换轴 + 清筛选的重画落完盘再找行。
+   */
+  const locateRow = (target: LocateTarget) => {
+    menu.close()
+    page.setScope(target.scope)
+    if (target.kind !== null) page.setKind(target.kind)
+    data.pickMachine('')
+    page.setQuery('')
+    setExpandedKey(target.rowKey)
+    window.setTimeout(() => {
+      const row = rootRef.current?.querySelector(
+        `tr[data-rowkey="${CSS.escape(target.rowKey)}"]`,
+      ) as HTMLElement | null
+      if (row !== null) flashRow(row)
     }, 60)
   }
 
@@ -419,13 +449,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const download = (row: PresetTableRow) => {
     if (row.releaseUid !== undefined) {
       /*
-       * 盘上那份不对劲的两档（旧版本 / 内容异常）走的是**同一条下载管道**（再下一遍，
-       * 旧份自动归档）—— 所以区别只在动词与结果那句话上，行为一模一样。
+       * 盘上那份不对劲的两档（旧版本 / 认不出）走的是**同一条下载管道**（再下一遍，
+       * 旧份自动归档）—— 动词统一叫「更新」（与按钮一致：云端有更新就该说更新，
+       * 「重新下载」那种吓唬人的说法不再出现在动作上）；认不出的实情在结果那句话里说。
        * 别在这里分支去找"另一个命令"：没有那个命令。
        */
-      const repairing = row.releaseState === 'tampered'
-      const updating = repairing || row.releaseState === 'old'
-      const verb = repairing ? '重新下载' : updating ? '更新' : '下载'
+      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
+      const verb = updating ? '更新' : '下载'
       setBusyKey(row.rowKey)
       setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
@@ -435,11 +465,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           () => {
             setBusyKey(null)
             setNote({
-              text: repairing
-                ? `已重新下载 ${row.fileName} —— 盘上那份不认得的，现在换成了目录登记的当前版本`
-                : updating
-                  ? `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
-                  : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
+              text: updating
+                ? row.releaseState === 'tampered'
+                  ? `已更新 ${row.fileName} —— 盘上那份认不出的，现在换成了目录登记的当前版本`
+                  : `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
+                : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
               bad: false,
             })
           },
@@ -908,7 +938,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const removeWhyNot = (row: PresetTableRow): string | undefined => {
     if (row.origin !== 'mine') {
       return row.origin === 'release'
-        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新 / 重新下载」修它'
+        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新」修它'
         : '官方文件不在这里删 —— 能删的只有你自己那份（用户根里的）'
     }
     return row.scope === 'local' && row.live
@@ -921,12 +951,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
     /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
     if (row.scope === 'cloud') {
-      const repairing = row.releaseState === 'tampered'
+      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
       return [
         {
           id: 'download',
-          /* 盘上那一份不对劲时这一项换词：同一条管道，动词不同（旧版本→更新，内容异常→重新下载） */
-          label: repairing ? '重新下载' : row.releaseState === 'old' ? '更新' : '下载',
+          /* 盘上那一份不对劲时这一项换词：同一条管道，云端有更新就说「更新」（与按钮一致） */
+          label: updating ? '更新' : '下载',
           onSelect: () => download(row),
         },
         {
@@ -1382,6 +1412,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onEdit={openEdit}
                 onLive={runLive}
                 onDownload={download}
+                /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
+                onLocate={locateRow}
+                sourceLabel={data.sourceLabel}
               />
             </>
           )}

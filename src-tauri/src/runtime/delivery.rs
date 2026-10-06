@@ -329,13 +329,18 @@ pub struct KnownVersion {
 
 /// 除了**目录登记的当前那一版**之外，这台机器还认得这一份文件的哪几版。
 ///
-/// 两个来源，都是"我们亲手发出去的字节"：
+/// 三个来源，都是"我们亲手发出去的字节"：
 ///
 /// 1. `archive/` 里那份旧文件 —— 换版本时被换下来的那一份；
 /// 2. 被归档的旧目录（`archive/catalog.json`）里登记的同一份文件 ——
-///    它记着更早那些版本的字节指纹，所以归档槽被后来的版本占了也还能认出更早那一版。
+///    它记着更早那些版本的字节指纹，所以归档槽被后来的版本占了也还能认出更早那一版；
+/// 3. **目录版本链**（`archive/catalogs/`，2026-10-06）—— 每一次换代归档的那份旧目录。
+///    曾经只有来源 1+2：单槽保留最早一份，官方连发两版中间那版的指纹就永久丢了，
+///    用户盘上正规的旧版本会被误判成「内容异常」（2026-10-06 实测 7 份假警报）。
+///    链是**追加**的（[`super::release::release_bytes`] 每次换代都进一份），
+///    所以"这台机器见过的每一版目录"都在这里。
 ///
-/// **没有第三个来源**：盘上的字节自己不算证据（那正是要判的东西）。
+/// **没有第四个来源**：盘上的字节自己不算证据（那正是要判的东西）。
 pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<KnownVersion> {
     let mut out = Vec::new();
 
@@ -347,32 +352,45 @@ pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<Kno
         });
     }
 
-    let Ok(old_bytes) = std::fs::read(
+    /* 归档目录（单槽 + 版本链）里登记的指纹。读不出来 / 是更未来的代次的那份 =>
+       当作"没有这一档证据"，不让整条判据失败 */
+    let mut catalog_paths = vec![
         internal_root
             .join(super::paths::ARCHIVE_DIR)
             .join(CATALOG_FILE),
-    ) else {
-        return out;
-    };
-    // 旧目录读不出来 / 是更未来的代次 → 当作"没有这一档证据"，不让整条判据失败
-    let Ok(old) = super::Catalog::parse(&old_bytes) else {
-        return out;
-    };
-    let hit = old
-        .files
-        .iter()
-        .find(|f| f.path == file.path)
-        .or_else(|| old.files.iter().find(|f| f.file_name == file.file_name));
-    /*
-     * 旧目录那条要给得出指纹才算证据：随包 bootstrap 目录不登记它（`sha256 = None`），
-     * 一条没有指纹的登记认不出任何字节 —— 跳过，而不是拿 `None` 去比（那会把它当成
-     * "与任何字节都不同"的假证据，把盘上文件误判成 `Unknown`）。
-     */
-    if let Some(sha) = hit.and_then(|entry| entry.sha256.clone()) {
-        out.push(KnownVersion {
-            sha256: sha,
-            archived_path: None,
-        });
+    ];
+    if let Ok(entries) = std::fs::read_dir(super::release::catalog_chain_dir(internal_root)) {
+        let mut chain: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        chain.sort();
+        catalog_paths.extend(chain);
+    }
+    for path in catalog_paths {
+        let Ok(old_bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(old) = super::Catalog::parse(&old_bytes) else {
+            continue;
+        };
+        let hit = old
+            .files
+            .iter()
+            .find(|f| f.path == file.path)
+            .or_else(|| old.files.iter().find(|f| f.file_name == file.file_name));
+        /*
+         * 旧目录那条要给得出指纹才算证据：随包 bootstrap 目录不登记它（`sha256 = None`），
+         * 一条没有指纹的登记认不出任何字节 —— 跳过，而不是拿 `None` 去比（那会把它当成
+         * "与任何字节都不同"的假证据，把盘上文件误判成 `Unknown`）。
+         */
+        if let Some(sha) = hit.and_then(|entry| entry.sha256.clone()) {
+            out.push(KnownVersion {
+                sha256: sha,
+                archived_path: None,
+            });
+        }
     }
     out
 }
@@ -1150,6 +1168,65 @@ mod tests {
             got[0].archived_path.is_none(),
             "归档区里没有它的字节 —— 认得出，但没有那一版可以打开看"
         );
+    }
+
+    /// **版本链修的那个 bug 的钉子**（2026-10-06，实测 7 份假「内容异常」）：
+    ///
+    /// 官方连发三代（v1 → v2 → v3），用户在 v2 那一代下载了文件，随后目录一路换到 v3。
+    /// 单槽归档（保留最早）会把 v2 那代目录永久丢掉 —— 单槽里只有 v1 代的目录、
+    /// 归档槽里只有 v1 的字节，盘上**正规的 v2** 谁都认不出，被误判成 `Unknown`
+    /// （「内容异常」）。版本链（`archive/catalogs/`）把每一代被换下的目录都留下来之后，
+    /// v2 必须被认成 `OldVersion`（「旧版本 · 有更新」），而不是异常。
+    #[test]
+    fn a_middle_generation_stays_recognized_through_the_catalog_chain() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = entry("A1-fastv3.3.toml", "第一版内容".as_bytes());
+        let v2 = entry("A1-fastv3.3.toml", "第二版内容".as_bytes());
+        let v3 = entry("A1-fastv3.3.toml", "第三版内容".as_bytes());
+        let gen1 = catalog_with_rev(vec![v1.clone()], "gen-1");
+        let gen2 = catalog_with_rev(vec![v2.clone()], "gen-2");
+        let gen3 = catalog_with_rev(vec![v3.clone()], "gen-3");
+
+        // 三代目录依次上盘：release_bytes 每次把被换下的那份归档（单槽 + 版本链）
+        let put_catalog = |bytes: &[u8]| {
+            crate::fsx::atomic::atomic_write(&root.path().join(CATALOG_FILE), bytes).unwrap();
+        };
+        put_catalog(gen1.to_pretty_json().unwrap().as_bytes());
+        crate::runtime::release::release_bytes(root.path(), gen2.to_pretty_json().unwrap().as_bytes())
+            .unwrap();
+        crate::runtime::release::release_bytes(root.path(), gen3.to_pretty_json().unwrap().as_bytes())
+            .unwrap();
+
+        // 用户盘上躺着的是 v2（在 gen-2 那一代下载的），云端已经是 v3
+        put_file(root.path(), "mkp/A1-fastv3.3.toml", "第二版内容");
+
+        assert_eq!(
+            trust_of(root.path(), &v3),
+            FileTrust::OldVersion,
+            "中间那代的指纹在版本链里 —— 正规旧版本必须认得出，不许误报内容异常"
+        );
+        // 单槽里只有第一代：这条证据只可能来自链
+        let got = trust_entries(root.path(), &gen3);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].trust, FileTrust::OldVersion);
+    }
+
+    /// 真正来路不明的字节（哪一代目录都没登记过它）依旧 `Unknown` ——
+    /// 版本链扩的是记忆，不是把异常洗成旧版本
+    #[test]
+    fn bytes_outside_every_generation_are_still_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = entry("A1-standard.toml", "第一版内容".as_bytes());
+        let current = entry("A1-standard.toml", "当前版本".as_bytes());
+        let gen1 = catalog_with_rev(vec![v1.clone()], "gen-1");
+        let gen2 = catalog_with_rev(vec![current.clone()], "gen-2");
+        crate::fsx::atomic::atomic_write(&root.path().join(CATALOG_FILE), gen1.to_pretty_json().unwrap().as_bytes())
+            .unwrap();
+        crate::runtime::release::release_bytes(root.path(), gen2.to_pretty_json().unwrap().as_bytes())
+            .unwrap();
+        put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
+
+        assert_eq!(trust_of(root.path(), &current), FileTrust::Unknown);
     }
 
     /// 「改这份」的入口：**SHA 对不上的字节不许当原文用**（修它的动作是重新下载）

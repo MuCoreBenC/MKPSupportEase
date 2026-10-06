@@ -33,6 +33,8 @@ pub mod lineage;
 pub mod mine;
 pub mod net;
 pub mod paths;
+/// **出处账**（复制 / 导入的来源）：用户文件"从哪复制来的"这件事盘上不存在，记在这一本
+pub mod provenance;
 pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
 /// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。

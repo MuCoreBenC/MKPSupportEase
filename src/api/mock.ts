@@ -94,6 +94,10 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
+    /* 演示里没走过复制/导入 —— 出处照实没有（真机上由出处账答） */
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
   {
     /* 没有血统（手工拷的 / 别的程序写出来的）—— 照实说不出新旧，这是合法状态 */
@@ -110,6 +114,9 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
   {
     /*
@@ -129,6 +136,9 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
 ]
 /** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
@@ -461,6 +471,10 @@ export const mockApi: MkpApi = {
       basedOnRelease: null,
       basedOnMachineId: 'A1',
       basedOnVersionId: 'STANDARD',
+      /* 官方另存出来的：出处走 based_on 血统（界面上显示"复制自官方 X"），账本不重复记 */
+      copiedFrom: null,
+      copiedFromName: null,
+      provenance: null,
     }
     if (replaced) {
       mockMine[mockMine.findIndex((f) => f.path === path)] = entry
@@ -526,7 +540,16 @@ export const mockApi: MkpApi = {
     }
     const text = mockMineText.get(path)
     if (text !== undefined) mockMineText.set(newPath, text)
-    mockMine.push({ ...hit, path: newPath, fileName: name, modifiedUnix: nowSec() })
+    mockMine.push({
+      ...hit,
+      path: newPath,
+      fileName: name,
+      modifiedUnix: nowSec(),
+      /* 与真机同形：复制出来的那份在出处账里记着从哪来（界面上「来源：复制自 X」） */
+      copiedFrom: path,
+      copiedFromName: hit.fileName,
+      provenance: 'copy' as const,
+    })
     return { path: newPath, fileName: name }
   },
 
@@ -620,6 +643,10 @@ export const mockApi: MkpApi = {
         basedOnRelease: null,
         basedOnMachineId: null,
         basedOnVersionId: null,
+        /* 与真机同形：导入进来的在出处账里记一档「导入」 */
+        copiedFrom: null,
+        copiedFromName: null,
+        provenance: 'import',
       })
       outcomes.push({ source: item.source, ok: true, path, fileName: name, message: '' })
     }

@@ -505,6 +505,19 @@ export interface UserPresetFile {
   /** 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜） */
   basedOnMachineId: string | null
   basedOnVersionId: string | null
+  /**
+   * **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
+   * 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编。
+   *
+   * 为什么在账本里而不是文件头：另存是**按字节**复制（血统原样带过去），往文件头里
+   * 加一行就得重写字节；导入的外部文件更不能动。账本只服务界面上「来源：复制自 X」
+   * 一格，丢了就退回「我的」，什么都不坏。
+   */
+  copiedFrom: string | null
+  /** 上面那条路径里的**文件名**（界面直接显示用）。没有同上 */
+  copiedFromName: string | null
+  /** 出处档：`copy`（复制自另一份用户文件）/ `import`（外部导入）。都没记 ⇒ `null` */
+  provenance: 'copy' | 'import' | null
 }
 
 /**

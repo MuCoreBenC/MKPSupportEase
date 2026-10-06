@@ -135,6 +135,12 @@ export interface PresetData {
   machineId: string
   versionId: string
   machine: Machine | undefined
+  /**
+   * **当前数据源**（`getPresetSource()` 的 mode：`gitee` / `github` / `custom`）——
+   * release 行「来源」列显示 GitHub / Gitee / 自定义源的依据。null = 没配源 / 读取失败
+   * （来源那一格照实退「官方」，不让整页因为这一格失败）。
+   */
+  sourceLabel: string | null
   /** 未过滤的整棵树（仅归档的文件建树时就剔掉了）。计数用它 */
   tree: PresetTree
   /**
@@ -393,6 +399,8 @@ export function usePresetData(importRevision = 0): PresetData {
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
   /* 归档区（官方旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
   const [archived, setArchived] = useState<ArchivedFile[]>([])
+  /* 当前数据源（release 行「来源」列的字）。读失败照实 null，不挡任何表 */
+  const [sourceLabel, setSourceLabel] = useState<string | null>(null)
 
   /**
    * 把官方交付这一路的现况读一遍。
@@ -548,6 +556,9 @@ export function usePresetData(importRevision = 0): PresetData {
         .then(async (next) => {
           if (!alive) return
           setRelease(next)
+          /* 数据源与 release 一路同读：它只服务「来源」那一格的字，失败照实 null */
+          const source = await api.getPresetSource().catch(() => null)
+          if (alive) setSourceLabel(source?.mode ?? null)
           /*
            * 后台检查一次（本次运行只一次，见 `checkBootstrapOnce`）。
            * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
@@ -702,6 +713,7 @@ export function usePresetData(importRevision = 0): PresetData {
     machineId,
     versionId,
     machine: machines.find((m) => m.id === machineId),
+    sourceLabel,
     tree,
     localIds,
     mine,
@@ -907,6 +919,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       staleReleases: data.release.stale,
       releaseVersion: data.release.version,
       releaseAt: data.release.publishedAt,
+      sourceLabel: data.sourceLabel,
     }),
     [
       data.active,
@@ -916,6 +929,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       data.release.presets,
       data.release.stale,
       data.release.version,
+      data.sourceLabel,
       data.mine,
       copiedSet,
       kind,

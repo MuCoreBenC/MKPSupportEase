@@ -60,6 +60,13 @@ pub struct UserPresetFileDto {
     /// 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜）
     pub based_on_machine_id: Option<String>,
     pub based_on_version_id: Option<String>,
+    /// **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
+    /// 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编
+    pub copied_from: Option<String>,
+    /// 上面那条路径里的**文件名**（界面直接显示用）。没有同上
+    pub copied_from_name: Option<String>,
+    /// 出处档：`copy`（复制自另一份用户文件）/ `import`（外部导入）。都没记 ⇒ `null`
+    pub provenance: Option<String>,
 }
 
 /// 用户自己有哪些文件（`presets-mine/` 里躺着什么）。
@@ -73,10 +80,15 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
         let root = crate::fsx::paths::user_root(&app)?;
         let internal = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&internal)?;
+        /* 出处账整本读一次（小 JSON），扫出来的每份按路径对号 */
+        let book = runtime::provenance::load(&root);
         Ok(runtime::mine::mine_files(&root)
             .into_iter()
             .map(|f| {
                 let source = runtime::mine::source_of(&catalog, f.lineage.as_ref());
+                /* 出处账：这一份是复制来的还是导入来的（没记过就是 null，照实退回「我的」） */
+                let provenance = book.iter().find(|e| e.to == f.path);
+                let copied_from = provenance.and_then(|e| e.from.clone());
                 UserPresetFileDto {
                     based_on: match runtime::mine::based_on(&catalog, f.lineage.as_ref()) {
                         runtime::mine::BasedOn::Current => "current",
@@ -91,6 +103,11 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                         .and_then(|l| l.based_on_release_time.clone()),
                     based_on_machine_id: source.map(|s| s.machine_id.clone()),
                     based_on_version_id: source.map(|s| s.version_id.clone()),
+                    copied_from_name: copied_from
+                        .as_deref()
+                        .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()),
+                    copied_from,
+                    provenance: provenance.map(|e| e.kind.clone()),
                     path: f.path,
                     file_name: f.file_name,
                     size: f.size,
@@ -442,6 +459,8 @@ pub async fn rename_user_preset(
                 ))
                 .with_detail(e.to_string())
             })?;
+        /* 出处账跟着走：副本改名了 to 跟走，来源改名了 from 跟走（「复制自 X」不失联） */
+        let _ = runtime::provenance::repath(&user_root, &path, &done.path);
 
         Ok(UserFileIdentityDto {
             path: done.path,
@@ -468,6 +487,13 @@ pub async fn copy_user_preset(
     traced("copyUserPreset", |_| {
         let user_root = crate::fsx::paths::user_root(&app)?;
         let done = runtime::mine::copy_as_new(&user_root, &path, &new_name)?;
+        /* 出处账：副本从哪来的 —— 界面上「来源：复制自 X」靠它。记不上不影响复制本身 */
+        let _ = runtime::provenance::record(
+            &user_root,
+            &done.path,
+            Some(&path),
+            runtime::provenance::ProvenanceKind::Copy,
+        );
         Ok(UserFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
