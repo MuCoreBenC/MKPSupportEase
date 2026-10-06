@@ -145,6 +145,7 @@ import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
+  ARCHIVE_TIME,
   ARCHIVE_WHY,
   EDIT_TEXT,
   MINE_COPY,
@@ -1449,26 +1450,41 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           >
             {viewer !== null && (
               <div className={s.arch}>
-                {viewer.kind === 'archive' && (
-                  <ul className={s.archList}>
-                    {viewer.rows.map((a) => (
-                      <li key={a.path} className={s.archItem}>
-                        <div className={s.archLine}>
-                          <span className={s.archName} title={a.path}>
-                            {a.fileName}
-                          </span>
-                          <span className={s.archMeta}>
-                            {sizeTextOf(a.size)} ·{' '}
-                            {a.modifiedUnix === null
-                              ? '时间未知'
-                              : longStatText(new Date(a.modifiedUnix * 1000).toISOString())}
-                          </span>
-                        </div>
-                        <p className={s.archWho} title={a.path}>
-                          {a.machineId === null || a.versionId === null
-                            ? ARCHIVE_DRAWER.unknown
-                            : `${a.machineId} · ${a.versionId}`}
-                        </p>
+                    {viewer.kind === 'archive' && (
+                      <ul className={s.archList}>
+                        {viewer.rows.map((a) => (
+                          <li key={a.path} className={s.archItem}>
+                            <div className={s.archLine}>
+                              <span className={s.archName} title={a.path}>
+                                {a.fileName}
+                              </span>
+                              <span className={s.archMeta}>{sizeTextOf(a.size)}</span>
+                            </div>
+                            {/*
+                             * 两个时间**各是各，永不互相顶替**（2026-10-06 事件时间模型）：
+                             * 云端发布 = 这一版发布时的时刻（跟着这一版字节走；早于版本记忆
+                             * 的照实「未知」，不拿"现在"顶）；替换时间 = 它被换下来那一刻
+                             * （替换事件）。以前只有一个 mtime 顶在唯一时间位上，用户看到的
+                             * 就是"我动它的时刻" —— 那正是「旧版本的时间居然是现在」的根子。
+                             */}
+                            <p className={s.archWhen}>
+                              {`${ARCHIVE_TIME.published} ${
+                                a.publishedAt === null
+                                  ? ARCHIVE_TIME.publishedUnknown
+                                  : (longStatText(a.publishedAt) ?? ARCHIVE_TIME.publishedUnknown)
+                              } · ${ARCHIVE_TIME.replaced} ${
+                                a.replacedUnix === null
+                                  ? ARCHIVE_TIME.replacedUnknown
+                                  : (longStatText(
+                                      new Date(a.replacedUnix * 1000).toISOString(),
+                                    ) ?? ARCHIVE_TIME.replacedUnknown)
+                              }`}
+                            </p>
+                            <p className={s.archWho} title={a.path}>
+                              {a.machineId === null || a.versionId === null
+                                ? ARCHIVE_DRAWER.unknown
+                                : `${a.machineId} · ${a.versionId}`}
+                            </p>
                         <button
                           type="button"
                           className={s.archBtn}

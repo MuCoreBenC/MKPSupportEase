@@ -507,6 +507,14 @@
   color: var(--text-3);
 }
 
+/* 两个时间一行（云端发布 · 替换时间）：标签是事件的名字，值查不到照实「未知」 */
+.archWhen {
+  grid-column: 1;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
 /* 认人那一行：认得出就是"机型 · 版本"，认不出**照实说认不出**（不猜） */
 .archWho {
   grid-column: 1;

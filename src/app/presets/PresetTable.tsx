@@ -222,22 +222,23 @@ export default function PresetTable({
    * 时间那一格的 title。**有值就给具体时间 + 一个词说清它是哪个时间**，
    * 不解释实现机制（`catalog.publishedAt` 这种内部名字不出现在界面上）：
    *
-   *   发布行     云端 = 「云端更新时间：…」；本地 = 「下载时间：…」
+   *   发布行     云端 = 「云端更新时间：…」；本地 = 「下载时间 / 替换时间：…」
+   *              —— 标签跟着**事件**走（`arrivalBy`），不是 UI 自己挑的
    *   我的文件   「修改于：…」—— 用户自己那份的最后一次保存，这一格叫修改时间才对
    *   真值（bbs） 「文件时间：…」—— 上游记录的内容更新时间
    *   演示推值   照实说它是演示值（唯一还得解释的那一档：它的值不是真的）
-   *   拿不到     各自有一句"为什么"（目录没盖戳 / 文件系统没给 / 本来就没有）
+   *   拿不到     各自有一句"为什么"（目录没盖戳 / 没有事件 / 本来就没有）
    */
   const statWhyOf = (row: PresetTableRow): string => {
     const when = longStatText(row.modifiedText)
     if (row.origin === 'release') {
-      return row.scope === 'cloud'
-        ? when === undefined
-          ? RELEASE_TIME_WHY.cloudMissing
-          : `云端更新时间：${when}`
-        : when === undefined
-          ? RELEASE_TIME_WHY.localMissing
-          : `下载时间：${when}`
+      if (row.scope === 'cloud') {
+        return when === undefined ? RELEASE_TIME_WHY.cloudMissing : `云端更新时间：${when}`
+      }
+      if (when === undefined) return RELEASE_TIME_WHY.localMissing
+      return row.arrivalBy === 'replaced'
+        ? `替换时间：${when}（上一次「更新」把它换上去的时刻）`
+        : `下载时间：${when}`
     }
     if (row.scope === 'local' && row.origin === 'mine') {
       return when === undefined ? NO_STAT_WHY : `修改于：${when}（你自己这份最后一次保存的时刻）`
@@ -699,16 +700,19 @@ export default function PresetTable({
                         </dd>
 
                         {/*
-                         * 时间：**名字跟着语义走** —— 交付行本地是「下载时间」（这份字节
-                         * 什么时候落到本机的）、云端是「云端更新」（这次发布的时刻）、
-                         * 我自己的文件才叫「修改时间」（最后一次保存）。同一个
-                         * `modifiedText` 不再一个「修改时间」包打天下。
+                         * 时间：**名字跟着事件走**（2026-10-06 事件时间模型）—— 本地交付行
+                         * 按 `arrivalBy` 给「下载时间」（DeliveryDownloaded）或「替换时间」
+                         * （DeliveryReplaced，上一次「更新」换上去的）、云端是「云端更新」
+                         * （这次发布的时刻）、我自己的文件才叫「修改时间」（最后一次保存）。
+                         * 同一个 `modifiedText` 不再一个「修改时间」包打天下。
                          */}
                         <dt className={s.factKey}>
                           {row.origin === 'release'
                             ? row.scope === 'cloud'
                               ? '云端更新'
-                              : '下载时间'
+                              : row.arrivalBy === 'replaced'
+                                ? '替换时间'
+                                : '下载时间'
                             : '修改时间'}
                         </dt>
                         <dd className={s.factVal} title={statWhyOf(row)}>
@@ -717,14 +721,33 @@ export default function PresetTable({
 
                         {row.origin === 'release' && (
                           <>
+                            {row.scope === 'local' &&
+                              row.ownPublishedAt != null &&
+                              row.ownPublishedAt !== row.publishedAt && (
+                              <>
+                                {/*
+                                 * **本机这份**属于哪一代、那一代什么时候发布的 —— 它跟着
+                                 * 这份字节走，云端以后怎么换代都不变（用户要的"记录它当时的"）。
+                                 * 只有认得出出身、且与云端最新版**不是同一代**时才显示
+                                 * （同一代时它与下面那格是同一个时间，不重复占位）。
+                                 */}
+                                <dt className={s.factKey}>本机这份发布于</dt>
+                                <dd
+                                  className={s.factVal}
+                                  title="这一版字节在云端发布时的时刻 —— 跟着这一版走，云端以后怎么换都不变"
+                                >
+                                  {longStatText(row.ownPublishedAt) ?? UNKNOWN}
+                                </dd>
+                              </>
+                            )}
                             {row.scope === 'local' && (
                               <>
                                 {/*
-                                 * 本地交付行的「云端更新」：与上面的「下载时间」是**两个时间**
-                                 * （这份字节什么时候落到本机的 / 云端什么时候换的版）——
-                                 * 用户要对照的正是这两个。
+                                 * 本地交付行的「云端最新版发布于」：与上面的到位时间是**两个版本
+                                 * 各自的时间**（你这份什么时候到的 / 云端现在这版什么时候发的）
+                                 * —— 名字里带「最新」，它就不再被读成"你这份的云端更新"。
                                  */}
-                                <dt className={s.factKey}>云端更新</dt>
+                                <dt className={s.factKey}>云端最新版发布于</dt>
                                 <dd
                                   className={s.factVal}
                                   title={
@@ -738,11 +761,11 @@ export default function PresetTable({
                               </>
                             )}
                             {/*
-                             * 「云端版本」：目录指纹是**版本的身份证**（新世界目录没有版本名，
+                             * 「云端最新版本」：目录指纹是**版本的身份证**（新世界目录没有版本名，
                              * 这是唯一权威标识）。它在这里有意义、在「来源」列里没有 ——
                              * 来源答的是"从哪来"，不是"哪一版"。
                              */}
-                            <dt className={s.factKey}>云端版本</dt>
+                            <dt className={s.factKey}>云端最新版本</dt>
                             <dd
                               className={s.factVal}
                               title="目录指纹（catalog revision）—— 新世界目录没有版本名，它就是这一版的身份证"

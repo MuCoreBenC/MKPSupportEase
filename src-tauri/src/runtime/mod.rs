@@ -33,6 +33,9 @@ pub mod lineage;
 pub mod mine;
 pub mod net;
 pub mod paths;
+/// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
+/// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
+pub mod preset_events;
 /// **出处账**（复制 / 导入的来源）：用户文件"从哪复制来的"这件事盘上不存在，记在这一本
 pub mod provenance;
 pub mod release;

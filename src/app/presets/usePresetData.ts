@@ -64,6 +64,7 @@ import type {
   DownloadOutcome,
   DownloadTick,
   Machine,
+  OnDiskFile,
   PresetDraft,
   UserFileIdentity,
 } from '../../api'
@@ -428,13 +429,11 @@ export function usePresetData(importRevision = 0): PresetData {
     const downloaded = new Set(mine.map((f) => f.fileName))
     const driftedSet = new Set(drifted.map((f) => f.fileName))
     /*
-     * 盘上那几份的**落盘时刻**（下载到本机的时刻 = 下载管道写盘那一刻的 mtime）。
-     * 已下载与有更新的是两批不相交的文件，合成一张表查；没有的时刻是 `null`
-     * —— 界面照实说「未知」，不编。
+     * 盘上那几份的**事件时间**（2026-10-06 预设事件时间模型）：下载 / 替换两个事件
+     * + 这份字节属于哪一代目录（`publishedAt`，版本出身反查）。已下载与有更新的是
+     * 两批不相交的文件，合成一张表查；没有的事件是 `null` —— 界面照实说「未知」，不编。
      */
-    const onDiskAt = new Map<string, number | null>(
-      [...mine, ...drifted].map((f) => [f.fileName, f.modifiedUnix]),
-    )
+    const onDisk = new Map<string, OnDiskFile>([...mine, ...drifted].map((f) => [f.fileName, f]))
     /* 判词按**文件名**查 —— 与下载 / 应用 / 读正文同一套口径（这套系统认的一直是 fileName） */
     const verdicts = new Map(trust.map((t) => [t.fileName, t.verdict]))
     /*
@@ -465,8 +464,10 @@ export function usePresetData(importRevision = 0): PresetData {
           kind,
           size: f.size,
           releaseVersion: null,
-          /* 盘上那份的落盘时刻（下载时刻）；云端语义的时间走目录的发布时刻（`publishedAt`），两回事 */
-          modifiedUnix: onDiskAt.get(f.fileName) ?? null,
+          /* 事件时间（见 `ReleasePresetSource` 三格的注释）；云端语义的时间走目录的发布时刻，两回事 */
+          downloadedUnix: onDisk.get(f.fileName)?.downloadedUnix ?? null,
+          replacedUnix: onDisk.get(f.fileName)?.replacedUnix ?? null,
+          deliveryPublishedAt: onDisk.get(f.fileName)?.publishedAt ?? null,
           state: stateOf(f.fileName),
         },
       ]

@@ -263,13 +263,26 @@ function literalFor(raw: string, valueType: string): string {
  * 三份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
  * 见 `downloadCatalogFile`。
  *
- * `modifiedUnix` 是固定演示值（真机上是文件 mtime = 下载管道落盘那一刻）：
- * 形状不编（`number | null`），数字编 —— 界面按它把「下载到本机的时刻」画出来。
+ * `downloadedUnix / replacedUnix / publishedAt` 是固定演示值（真机上来自事件账与
+ * 版本身份反查）：形状不编（`number | null` / `string | null`），数字编 ——
+ * 界面按它们把「下载时间 / 替换时间 / 本机这份发布于」画出来。
  */
-const MOCK_DOWNLOADED: OnDiskFile[] = [{ fileName: 'A1-standard.toml', modifiedUnix: 1780000000 }]
+const MOCK_DOWNLOADED: OnDiskFile[] = [
+  {
+    fileName: 'A1-standard.toml',
+    downloadedUnix: 1780000000,
+    replacedUnix: null,
+    publishedAt: '2026-10-06T05:46:00Z',
+  },
+]
 const MOCK_STALE: OnDiskFile[] = [
-  { fileName: 'A1-fast.toml', modifiedUnix: 1777000000 },
-  { fileName: 'A1mini-standard.toml', modifiedUnix: 1777000000 },
+  { fileName: 'A1-fast.toml', downloadedUnix: 1777000000, replacedUnix: null, publishedAt: null },
+  {
+    fileName: 'A1mini-standard.toml',
+    downloadedUnix: null,
+    replacedUnix: 1777000000,
+    publishedAt: null,
+  },
 ]
 
 export const mockApi: MkpApi = {
@@ -957,6 +970,7 @@ export const mockApi: MkpApi = {
    * 归档区：浏览器里没有盘，给一条**固定演示** —— 让"这一份有旧版本"那一格画得出来。
    * 真机上它是扫 `archive/` 得到的（换版本时被换下来的那一份）。
    * 认人那三格（机型 / 版本 / kind）跟着演示的那条走 —— 形状不编，数字编。
+   * 两个时间各是各：`publishedAt` 是这一版云端发布时刻、`replacedUnix` 是被换下的时刻。
    */
   async getArchivedFiles() {
     return [
@@ -964,7 +978,9 @@ export const mockApi: MkpApi = {
         path: 'archive/dist/mkp/presets/A1-fast.toml',
         fileName: 'A1-fast.toml',
         size: 2048,
-        modifiedUnix: 1780000000,
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000',
+        publishedAt: '2026-10-06T05:46:00Z',
+        replacedUnix: 1780000000,
         machineId: 'A1',
         versionId: 'FAST',
         kind: 'mkp_preset',

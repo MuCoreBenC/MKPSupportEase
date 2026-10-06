@@ -671,8 +671,20 @@ export interface ArchivedFile {
   /** 文件名。与它对应的交付文件同名：换版本换的是字节，不是名字 */
   fileName: string
   size: number
-  /** 被换下来的时刻（UTC **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
-  modifiedUnix: number | null
+  /** 这份旧字节的指纹 —— 替换事件与版本出身的对号键 */
+  sha256: string
+  /**
+   * 这一版**在云端发布**的时刻（RFC3339）。**跟着这一版走，不跟着操作走**：
+   * 查版本出身反查得到；链建立（2026-10-06）之前的版本查不到 = `null`
+   * —— 界面照实「未知（早于版本记忆）」，**不拿"现在"或换下时刻顶**。
+   */
+  publishedAt: string | null
+  /**
+   * 被**换下来**的时刻（UTC **epoch 秒**）= `DeliveryReplaced.at`（事件账）。
+   * 与 `publishedAt` 是两个时间、两件事：一个是"这一版什么时候发的"，
+   * 一个是"它是什么时候被换下来的" —— 永不互相顶替。
+   */
+  replacedUnix: number | null
   /** 认得出是谁的旧版本就有；**认不出是 `null`**（目录里已经没有这一份了）—— 不猜 */
   machineId: string | null
   versionId: string | null
@@ -706,13 +718,20 @@ export interface DeliveryTrust {
 /**
  * 盘上交付区里的一份（`getDownloadedFiles` / `getStaleFiles` 的行形状）。
  *
- * `modifiedUnix`（UTC **epoch 秒**）= 这份字节**落进本机的时刻**（文件 mtime ——
- * 下载管道写盘的那一刻）：本地表「时间」列的"下载到本机的时刻"，界面自己转
- * 本地时区。`null` = 文件系统没给，**不编**（与 `ArchivedFile.modifiedUnix` 同一条口径）。
+ * 时间**全部来自事件**（2026-10-06 预设事件时间模型），mtime 不再上界面：
+ *
+ * - `downloadedUnix` / `replacedUnix` —— 这份字节是「下载」进本机的还是「替换」上去的
+ *   （两个事件**至多一个有值**：同一份字节只有一种来路）。标签跟着事件走：
+ *   有 `downloadedUnix` 就叫「下载时间」，有 `replacedUnix` 就叫「替换时间」。
+ *   都没有 = 认不出出身的字节（这种字节不记账，不猜）—— 界面照实「未知」；
+ * - `publishedAt` —— 这份字节属于哪一代目录、那一代**在云端发布**的时刻
+ *   （RFC3339）。它跟着**这一版字节**走，云端以后怎么换代都不变；查不到 = `null`。
  */
 export interface OnDiskFile {
   fileName: string
-  modifiedUnix: number | null
+  downloadedUnix: number | null
+  replacedUnix: number | null
+  publishedAt: string | null
 }
 
 /**
@@ -1281,8 +1300,8 @@ export interface MkpApi {
   /**
    * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
    *
-   * 每份带 `modifiedUnix`（UTC epoch 秒）= 这份字节**落进本机的时刻** ——
-   * 预设页本地表「时间」列的"下载到本机的时刻"，界面自己转本地时区显示。
+   * 时间三格全部来自**事件**（见 [`OnDiskFile`]）：`downloadedUnix`（下载事件）、
+   * `replacedUnix`（替换事件）、`publishedAt`（这一版字节在云端发布的时刻）。
    */
   getDownloadedFiles(): Promise<OnDiskFile[]>
 
@@ -1290,7 +1309,7 @@ export interface MkpApi {
    * 有更新的文件：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
    * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
    *
-   * `modifiedUnix` 说的是**盘上那一份**的落盘时刻（它是什么时候到我机器上的）。
+   * 时间口径与 [`getDownloadedFiles`] 相同（事件账）。
    *
    * **它只说"不一致"，不说"因为什么"** —— 分成哪两种（旧版本 / 查不出它是哪一版）
    * 看 [`getDeliveryTrust`]。

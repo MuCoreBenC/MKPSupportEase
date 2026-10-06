@@ -252,7 +252,21 @@ export const RELEASE_DOWNLOAD_WHY =
  */
 export const RELEASE_TIME_WHY = {
   cloudMissing: '云端没有记这次发布的时间 —— 随包目录不带时间，旧版发布的目录也没有',
-  localMissing: '盘上那份的落盘时刻文件系统没给 —— 照实不显示，不编一个',
+  localMissing: '说不出这份字节是什么时候到的 —— 它认不出属于哪一版，这种字节不记时间，照实「未知」',
+} as const
+
+/**
+ * 旧版本抽屉里那两个时间的标签与「未知」的写法。**两个时间各是各，永不互相顶替**：
+ *
+ *   云端发布  这一版在云端发布时的时刻 —— 跟着这一版字节走，反查版本出身；
+ *             早于版本记忆的照实「未知（早于版本记忆）」，不拿"现在"顶
+ *   替换时间  它被换下来那一刻（替换事件）—— 你动它的时刻，如实说，但只当下要信息
+ */
+export const ARCHIVE_TIME = {
+  published: '云端发布',
+  replaced: '替换时间',
+  publishedUnknown: '未知（早于版本记忆）',
+  replacedUnknown: '未知',
 } as const
 
 export const RELEASE_SIZE_WHY = '按这一份 TOML 的字节数算的'
@@ -1293,12 +1307,25 @@ export interface PresetRowBase {
   releaseState?: ReleaseFileState
   /**
    * **这次发布的时刻**（catalog.publishedAt，ISO/UTC → 显示按本机时区）。
-   * release 行展开详情里「云端更新」一格的数据 —— **本地行也要有**：
-   * "我盘上这份什么时候下的"（`modifiedText`）与"云端什么时候换的版"是两个时间，
-   * 展开详情要同时给（云端表的 `modifiedText` 就是它，列上已经显示）。
+   * release 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
+   * "我盘上这份什么时候到的"（`modifiedText` + `arrivalBy`）与"云端最新版什么时候发的"
+   * 是两个版本各自的时间，展开详情要同时给（云端表的 `modifiedText` 就是它，列上已经显示）。
    * null = 目录没盖戳（随包 / 旧版发布），照实「未知」。
    */
   publishedAt?: string | null
+  /**
+   * 这份字节是怎么**到位**的（2026-10-06 事件时间模型）：`downloaded` = 下载进来
+   * （`DeliveryDownloaded`）、`replaced` = 替换上去（`DeliveryReplaced`）、null = 没有事件
+   * （认不出出身的字节）。详情面板「下载时间 / 替换时间」的标签跟着它走 ——
+   * **标签是事件的名字，不是 UI 自己挑的**。只有本地 release 行有它。
+   */
+  arrivalBy?: 'downloaded' | 'replaced' | null
+  /**
+   * **本机这份**属于哪一代目录、那一代在云端发布的时刻（RFC3339；版本出身反查）。
+   * 它跟着这一版字节走，云端以后怎么换代都不变 —— 与 `publishedAt`（云端**最新**版）
+   * 是两个版本各自的时间。认不出出身 = null（那一格整个不显示，不占「未知」位）。
+   */
+  ownPublishedAt?: string | null
 }
 
 
@@ -1459,10 +1486,10 @@ export interface PresetRowsInput {
  * 大小是**发布时对产物真字节算的真值**（catalog 登记的）。时间有两样、
  * 各归各的表（2026-10-06 起，此前"目录没有可信时间源"整列都是「未知」）：
  *
- *   `modifiedUnix`  **下载到本机的时刻**（盘上那份的 mtime）—— 本地表用
+ *   事件时间         **这份字节怎么到的**（下载 / 替换，事件账）—— 本地表用
  *   `releaseAt`     **这次发布的时刻**（catalog.publishedAt，发布侧盖的戳）—— 云端表用
  *
- * 都没有（随包目录没盖戳 / 盘上还没下）就照实「未知」，**不编**。
+ * 都没有（随包目录没盖戳 / 认不出出身的字节）就照实「未知」，**不编**。
  */
 /**
  * 交付行第二行那串小字：把人引到盘上的落点，**顺带把"盘上那份不对劲"这件事写在原地**。
@@ -1496,10 +1523,20 @@ export interface ReleasePresetSource {
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
   releaseVersion: string | null
   /**
-   * 盘上那一份的**落盘时刻**（UTC epoch 秒）= 下载到本机的时刻（本地表「时间」列）。
-   * 还没下到本机 / 文件系统没给就是 `null` —— 照实「未知」，不编。
+   * **事件时间**（2026-10-06 预设事件时间模型），三格各是各、互不顶替：
+   *
+   * - `downloadedUnix` —— 这份字节是「下载」进本机的（`DeliveryDownloaded.at`）；
+   * - `replacedUnix` —— 这份字节是「替换」上去的（`DeliveryReplaced.at`，
+   *   即上一次「更新」换上去的那一刻）。两个事件**至多一个有值**；
+   * - `deliveryPublishedAt` —— 这份字节属于哪一代目录、那一代**在云端发布**的时刻
+   *   （RFC3339）。**跟着这一版字节走**，云端以后怎么换代都不变。
+   *
+   * 都没有 / null = 认不出出身的字节或目录没盖戳 —— 照实「未知」，**不编**。
+   * mtime 从此只归文件系统，不再上界面。
    */
-  modifiedUnix: number | null
+  downloadedUnix: number | null
+  replacedUnix: number | null
+  deliveryPublishedAt: string | null
   /**
    * 盘上那一份现在是什么（见 [`ReleaseFileState`]）。
    *
@@ -1856,12 +1893,22 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         versions: [versionName(p.machineId, p.versionId)],
         sizeText: sizeTextOf(p.size),
         /*
-         * 下载到本机的时刻：盘上那份的 mtime（epoch 秒）→ ISO 交 `parseStatDate`
-         * 按本机时区显示 —— 与用户线那一份（`mine` 分支）同一条转换路。
-         * 没下到本机 / 文件系统没给就是 undefined（「未知」）。
+         * 到位时刻：这份字节是「下载」进来的还是「替换」上去的（两个事件至多一个有值，
+         * 见 `ReleasePresetSource`）—— 标签跟着事件走，UI 不自己挑。epoch 秒 → ISO
+         * 交 `parseStatDate` 按本机时区显示。没有事件（认不出出身的字节）就是
+         * undefined（「未知」）—— 不拿 mtime 顶（硬规则③）。
          */
         modifiedText:
-          p.modifiedUnix === null ? undefined : new Date(p.modifiedUnix * 1000).toISOString(),
+          (p.downloadedUnix ?? p.replacedUnix) === null
+            ? undefined
+            : new Date((p.downloadedUnix ?? p.replacedUnix)! * 1000).toISOString(),
+        arrivalBy:
+          p.downloadedUnix !== null
+            ? ('downloaded' as const)
+            : p.replacedUnix !== null
+              ? ('replaced' as const)
+              : null,
+        ownPublishedAt: p.deliveryPublishedAt,
         applied: live,
         pinned: pinned.has(`release:${p.fileName}`),
         scope: 'local',
