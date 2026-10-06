@@ -23,10 +23,11 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { api, errorText } from '../../api'
+import { api, errorText, isAppError } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { uidOfFile, useCatalog } from './useCatalog'
+import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
@@ -72,6 +73,15 @@ const CALIB_MODEL_INDEX = 4
 
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
+
+/**
+ * 后端说"盘上不是我以为的那一份" —— 只有这两种错值得补一次下载（§Task 5，见
+ * `docs/HOME-BUNDLE-DOWNLOAD.md`）：`NOT_FOUND`（盘上没有）与 `SHA_MISMATCH`（字节漂了）。
+ * 别的错（读不懂这一代数据、不是 MKP、权限…）补下载也没用，照原样抛给用户看。
+ */
+function isStaleGuess(e: unknown): boolean {
+  return isAppError(e) && (e.code === 'NOT_FOUND' || e.code === 'SHA_MISMATCH')
+}
 
 /**
  * 后处理脚本里那段可执行文件路径。契约里没有它（真值在桌面壳那一侧），
@@ -309,58 +319,136 @@ export default function PageHome({ density }: PageHomeProps) {
   const ready = Boolean(sel.brand && sel.model && sel.variant)
 
   /*
-   * 「应用」按钮（作者 2026-10-06：第二页要一颗**明确的**应用按钮，放在「下一步」旁边，
-   * 宽度固定不随文字变）。三态：
-   *   已应用        底账正指着这个 combo —— 完成态，点不了
-   *   应用          交付区里那份与目录逐字节一致
-   *   下载并应用    还没下载 / 字节漂了（旧版本 / 内容异常）—— 这是套餐：
-   *                下载（旧份自动归档、坏份换新）再应用
-   * 交付口径与预设页同一套账（下载清单 + 漂移清单）；失败说人话，不编成功。
+   * 「应用 / 下载并应用 / 更新并应用 / 已应用」那颗按钮（作者 2026-10-06：第二页要一颗
+   * **明确的**应用按钮，放在「下一步」旁边，宽度固定不随文字变）。
+   *
+   * ★ 它消费的是**整个套餐**（`useBundleFiles` = `getVersionFiles`：MKP + 配套 BBS），
+   *   **不是**"一个 TOML 能不能应用" —— 单文件布尔值表达不了这个页面的状态。
+   *   四态严格按顺序判、互斥（`docs/HOME-BUNDLE-DOWNLOAD.md` §2）：
+   *
+   *     底账正指着这个 combo        → 已应用（定格，点不了）
+   *     套餐里缺任一份              → 下载并应用   ← 缺 + 漂同时存在时也是这一态
+   *     无缺、但有漂的              → 更新并应用
+   *     全齐且全新                  → 应用（一个字节都不重下）
+   *
+   *   判不了（套餐没拿到 / 清单还没回来）= `unknown`：卡住，**不许**滑进「应用」。
+   *   盘的现状与预设页同一套账（下载清单 + 漂移清单）；失败说人话，不编成功。
    */
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const [deliveryTick, setDeliveryTick] = useState(0)
-  const [fileReady, setFileReady] = useState<boolean | null>(null)
-  const comboFileName =
-    ready && sel.model !== null && sel.variant !== null ? fileOf(sel.model, sel.variant) : null
+  /* 盘上那两份单子（下载区 / 漂移），按文件名查 */
+  const [onDisk, setOnDisk] = useState<{ downloaded: Set<string>; stale: Set<string> } | null>(null)
+
+  const comboKey =
+    ready && sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
   const comboApplied =
     activeEntry !== null &&
     sel.model !== null &&
     sel.variant !== null &&
     activeEntry.machineId === sel.model &&
     activeEntry.versionId === sel.variant
+
+  const bundle = useBundleFiles(sel.model, sel.variant)
+  /** 「应用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
+  const presetFile = bundle.presetFileName
+
   useEffect(() => {
-    if (comboFileName === null) {
-      setFileReady(null)
-      return
-    }
+    if (comboKey === null) return
     let alive = true
     void Promise.all([
       api.getDownloadedFiles().catch(() => []),
       api.getStaleFiles().catch(() => []),
     ]).then(([downloaded, stale]) => {
       if (!alive) return
-      setFileReady(
-        downloaded.some((f) => f.fileName === comboFileName) &&
-          !stale.some((f) => f.fileName === comboFileName),
-      )
+      setOnDisk({
+        downloaded: new Set(downloaded.map((f) => f.fileName)),
+        stale: new Set(stale.map((f) => f.fileName)),
+      })
     })
     return () => {
       alive = false
     }
-  }, [comboFileName, deliveryTick])
+  }, [comboKey, deliveryTick])
+
+  /*
+   * 套餐这一批文件在盘上是什么样 —— 三态与「待下清单」都从这一处算。
+   *
+   * ★ 「在盘上」= **已下载 ∪ 漂移**：两张单子都只收**盘上真有**的文件
+   *   （`runtime::delivery::entries_in_status` 遍历目录登记再读盘：字节对得上进「下载区」，
+   *   对不上进「漂移」），**漂 ≠ 缺** —— 漂的那份是"在盘上但字节旧/坏了"。
+   *   把漂当成缺，就会把「更新并应用」说成「下载并应用」（探针逮到过）。
+   * ★ 待下 = 缺 ∪ 漂，**按文件名去重**（作者 2026-10-06 的纪律①）：同一份既缺又漂
+   *   （理论上不会，但别指望）只会下一次；实现上不许把两张单子各拼一段再连接。
+   * ★ `unknown` 是"判不了"，不是"全齐"（纪律②）—— 不许拿它当 ready。
+   */
+  const bundleState = useMemo(() => {
+    const files = bundle.files
+    if (files === null || bundle.problems.length > 0 || onDisk === null) {
+      return { kind: 'unknown' as const, todo: [] as string[], missing: 0, drift: 0 }
+    }
+    const todo = new Set<string>()
+    let missing = 0
+    let drift = 0
+    for (const f of files) {
+      const onDiskNow = onDisk.downloaded.has(f.fileName) || onDisk.stale.has(f.fileName)
+      if (!onDiskNow) {
+        missing += 1
+        todo.add(f.fileName)
+        continue
+      }
+      if (onDisk.stale.has(f.fileName)) {
+        drift += 1
+        todo.add(f.fileName)
+      }
+    }
+    const kind = missing > 0 ? 'missing' : drift > 0 ? 'drift' : 'ready'
+    return { kind, todo: [...todo], missing, drift }
+  }, [bundle, onDisk])
+
+  const actionLabel = applying
+    ? '应用中…'
+    : comboApplied
+      ? '已应用'
+      : bundleState.kind === 'unknown'
+        ? bundle.problems.length > 0
+          ? '套餐未配置'
+          : '读取中…'
+        : bundleState.kind === 'missing'
+          ? '下载并应用'
+          : bundleState.kind === 'drift'
+            ? '更新并应用'
+            : '应用'
+  const actionDisabled = comboApplied || applying || bundleState.kind === 'unknown'
 
   const applyCurrent = useCallback(async () => {
-    if (comboFileName === null || applying) return
+    if (applying || bundleState.kind === 'unknown' || presetFile === null) return
     setApplying(true)
     setApplyError(null)
+    /* 预判：这一批里缺的与漂的（已去重）。空 = 全齐全新 —— 直接应用，一个字节都不重下 */
+    const todo = bundleState.todo
     try {
+      if (todo.length > 0) {
+        /* 逐份看结局：**任何一份没成就停下、不应用** —— 套餐缺一份就是没齐（不编成功） */
+        const outcomes = await api.downloadCatalogFiles(todo)
+        const failed = outcomes.filter((o) => !o.ok)
+        if (failed.length > 0) {
+          throw new Error(
+            `套餐没下全，先不应用：${failed.map((o) => `${o.fileName}（${o.message}）`).join('；')}`,
+          )
+        }
+      }
       try {
-        await api.applyActivePreset(comboFileName, 'official')
-      } catch {
-        /* 套餐的第二半：还没下载 / 字节漂了 —— 先下载换上目录那份，再应用 */
-        await api.downloadCatalogFile(comboFileName)
-        await api.applyActivePreset(comboFileName, 'official')
+        await api.applyActivePreset(presetFile, 'official')
+      } catch (e) {
+        /*
+         * 兜底只留给「预判过期」这一种：预判说齐了（清单为空），盘上其实不齐（刚被外部动过）
+         * —— 后端报 NOT_FOUND / SHA_MISMATCH 时才补一次下载再应用。不是重新套一个
+         * 吞异常的 catch：别的错（读不懂、不是 MKP…）照原样往上抛。
+         */
+        if (todo.length > 0 || !isStaleGuess(e)) throw e
+        await api.downloadCatalogFile(presetFile)
+        await api.applyActivePreset(presetFile, 'official')
       }
       appStateMutated()
     } catch (e) {
@@ -369,7 +457,7 @@ export default function PageHome({ density }: PageHomeProps) {
       setApplying(false)
       setDeliveryTick((t) => t + 1)
     }
-  }, [comboFileName, applying])
+  }, [applying, bundleState, presetFile])
 
   /** 已经拿到的那一份预设；还在等 / 失败时为 null —— 不回退到 mock 里的默认那份 */
   const presetInfo = preset.status === 'ready' ? preset.preset : null
@@ -529,16 +617,10 @@ export default function PageHome({ density }: PageHomeProps) {
               ...(ready
                 ? [
                     {
-                      label: applying
-                        ? '应用中…'
-                        : comboApplied
-                          ? '已应用'
-                          : fileReady === false
-                            ? '下载并应用'
-                            : '应用',
-                      primary: !comboApplied && !applying,
+                      label: actionLabel,
+                      primary: !actionDisabled,
                       fixed: true,
-                      disabled: comboApplied || applying,
+                      disabled: actionDisabled,
                       on: true,
                       onClick: () => {
                         void applyCurrent()
@@ -576,6 +658,11 @@ export default function PageHome({ density }: PageHomeProps) {
 
               {/* 应用失败要说话（不编成功）：errorText 带人话与 traceId */}
               {applyError !== null && <p className={p.applyError}>{applyError}</p>}
+
+              {/* 套餐本身取不全（后端没这个组合 / 配置没配齐）—— 照实说，不假装"套餐没文件" */}
+              {bundle.problems.length > 0 && (
+                <p className={p.applyError}>{bundle.problems.join('；')}</p>
+              )}
             </div>
           </CardFrame>
         ),
@@ -828,11 +915,11 @@ export default function PageHome({ density }: PageHomeProps) {
       saved,
       savedNote,
       sel,
-      applying,
+      actionDisabled,
+      actionLabel,
       applyCurrent,
       applyError,
-      comboApplied,
-      fileReady,
+      bundle,
       settle,
       typeAxis,
       variantName,

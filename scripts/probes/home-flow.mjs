@@ -25,6 +25,19 @@ if (wantShots) await mkdir(shotDir, { recursive: true })
 const BENIGN = [/\/favicon\.ico$/]
 const benign = (t) => BENIGN.some((re) => re.test(t))
 
+/*
+ * 控制台上**预期内**的那几条 —— 不是"把 error 都吞掉"：名字逐个点出来。
+ *
+ *   checkRemoteUpdate  浏览器预览里没有远端目录，mock 如实拒（桌面版才做这件事），
+ *                      **每次加载都会报**；探针基线里一直有它
+ *
+ * 另有一条 `applyActivePreset` 只在套餐那一段放行（见 `bundleProbe` 那行注释）：
+ * 那一段会**故意**点一次官方线的「应用」，浏览器里没有下载区就没有那份字节，
+ * mock 如实抛 —— 我们要验的正是"它走到了应用这一步、而且没去下载"。
+ */
+const EXPECTED = [/未实现的接口: checkRemoteUpdate/]
+let bundleProbe = false
+
 const browser = await chromium.launch({ channel: 'msedge' })
 const page = await browser.newPage({ viewport: { width: 1760, height: 900 } })
 
@@ -32,8 +45,11 @@ const problems = []
 page.on('console', (m) => {
   if (m.type() !== 'error') return
   const at = m.location?.()?.url ?? ''
+  const text = m.text()
   if (benign(at)) return
-  problems.push(`console.error: ${m.text()}${at ? ` @ ${at}` : ''}`)
+  if (EXPECTED.some((re) => re.test(text))) return
+  if (bundleProbe && /未实现的接口: applyActivePreset/.test(text)) return
+  problems.push(`console.error: ${text}${at ? ` @ ${at}` : ''}`)
 })
 page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`))
 page.on('response', (r) => {
@@ -206,6 +222,157 @@ if (process.argv.includes('--pick')) {
    * 内置字标只在"台账没配品牌图 / 认不出那张图"时兜底（老版本 catalog.json 那条路）。
    */
   await artAt(['A2L'], '/assets/brands/bambu-lab-logo.svg')
+
+  /*
+   * 套餐四态（2026-10-06，`docs/HOME-BUNDLE-DOWNLOAD.md`）。
+   *
+   * 首页那颗按钮消费的是**整个套餐**（MKP + 配套 BBS），四态 = 已应用 / 下载并应用 /
+   * 更新并应用 / 应用 —— 「缺」优先于「漂」，任一文件缺就是「下载并应用」。
+   * 浏览器里的编排（`mock.ts` 的 MOCK_DOWNLOADED，四态各占一档）：
+   *
+   *   A1 / 标准版        MKP 已下载 + 配套 BBS 已下载 → 应用
+   *   A1 / 快拆版6月以前  MKP 漂了   + 配套 BBS 已下载 → 更新并应用
+   *   A1 mini / 标准版   MKP 漂了、没下载过          → 下载并应用
+   *
+   * 「全齐且全新时零下载」怎么判：浏览器里下载一定失败（没有下载区），所以
+   *   - 「应用」那一态点下去**不该**出现我们自己那句「套餐没下全」—— 出现了就说明
+   *     它走了下载分支（该下的算错了）；
+   *   - 「更新并应用」「下载并应用」点下去**必须**出现那句 —— 那正是
+   *     「只下缺的 ∪ 漂的，下不齐就停下、不应用」。
+   */
+  /*
+   * 定位那颗按钮时踩到的坑（2026-10-06）：它是 `CardFrame` 的动作胶囊，而**别处也有同名的**
+   *   - 预设列表浮层里每个文件一颗「应用」（标题写着"把这一份设成正在使用的配置"）
+   *   - 参数页 / 校准页那些卡片的动作
+   * 而首页那台向导是 SlideDeck —— **所有卡都挂在 DOM 里**（只有当前那张在视口内），
+   * 于是 `getByRole(...).first()` 会点到浮层里那颗（Playwright 报"element is not visible"）。
+   * 所以这里一律**只认 Playwright 说可见、可点的那一颗**；量状态也一样。
+   */
+  /* 这一段的「应用」点击会触发一条预期内的 mock 拒绝（见文件头的 `EXPECTED` 说明） */
+  bundleProbe = true
+
+  const LABELS = ['应用', '已应用', '下载并应用', '更新并应用', '套餐未配置', '读取中…']
+
+  const readAction = async () => {
+    for (const label of LABELS) {
+      const all = page.getByRole('button', { name: label, exact: true })
+      const n = await all.count()
+      for (let i = 0; i < n; i += 1) {
+        const b = all.nth(i)
+        if (await b.isVisible()) return { label, button: b }
+      }
+    }
+    return null
+  }
+
+  /**
+   * 点一颗**可见**的按钮（同名的那几个里挑第一个能点的）。
+   *
+   * 先按全等找（「A1」不该点到「A1 mini」），找不到再放宽 —— 品牌那颗的
+   * 可访问名里带了别的东西，全等匹配不上（上一版就是这么空手而归的）。
+   */
+  const clickVisible = async (label, tries = 18) => {
+    /* 那一组是**分级揭示**的，还带换页动画：点完上一级要等它长出来，所以这里轮询着找 */
+    for (let t = 0; t < tries; t += 1) {
+      for (const exact of [true, false]) {
+        const all = page.getByRole('button', { name: label, exact })
+        const n = await all.count()
+        for (let i = 0; i < n; i += 1) {
+          const b = all.nth(i)
+          if ((await b.isVisible()) && (await b.isEnabled())) {
+            await b.click()
+            await page.waitForTimeout(1100)
+            return true
+          }
+        }
+      }
+      await page.waitForTimeout(200)
+    }
+    return false
+  }
+
+  /*
+   * 量某一档：**每次从新加载的页面走一遍**（刷新 → 现在开始 → 品牌/机型/版本）。
+   *
+   * 两条踩过的坑：
+   *   ① 不走「更换机型」那条路 —— 它挂在牌堆的另一张卡上，量完一次之后点不到；
+   *   ② **品牌必须点**：那三组是分级揭示的（先点品牌，机型那一组才出现；
+   *      点了机型，版本才出现）—— 刷新之后一台都没选，直接点「A1」是点不到的。
+   */
+  const bundleStateAt = async (steps) => {
+    await page.goto(url, { waitUntil: 'load' })
+    await page.waitForSelector('header', { timeout: 10000 })
+    if (!(await clickVisible('现在开始'))) {
+      problems.push('量套餐四态时点不到「现在开始」')
+      return null
+    }
+    for (const step of steps) {
+      if (!(await clickVisible(step))) {
+        problems.push(`量套餐四态时点不到「${step}」`)
+        return null
+      }
+    }
+    let got = null
+    for (let i = 0; i < 15; i += 1) {
+      got = await readAction()
+      if (got !== null && got.label !== '读取中…') break
+      await page.waitForTimeout(200)
+    }
+    return got
+  }
+
+  const want = async (steps, expect) => {
+    const got = await bundleStateAt(steps)
+    const seen = got === null ? '（找不到那颗按钮）' : got.label
+    console.log(`  套餐态 ${steps.join(' / ')}  ${seen}（期待 ${expect}）`)
+    if (got === null || got.label !== expect) {
+      problems.push(`套餐态不对：${steps.join(' / ')} 期待「${expect}」，实际「${seen}」`)
+    }
+    return got
+  }
+
+  /** 点那颗按钮，读回页面上那条错误（我们自己的「套餐没下全…」或 mock 的「…要用桌面版」） */
+  const clickAction = async (got) => {
+    await got.button.click()
+    await page.waitForTimeout(1000)
+    return page.evaluate(() => {
+      const el = [...document.querySelectorAll('main p')].find((p) =>
+        /套餐没下全|桌面版/.test(p.textContent ?? ''),
+      )
+      return el ? (el.textContent ?? '').trim() : ''
+    })
+  }
+
+  /* ① 全齐且全新 → 「应用」，且**一个字节都不该下** */
+  const readyState = await want(['拓竹 (Bambu Lab)', 'A1', '标准版'], '应用')
+  if (readyState !== null) {
+    const err = await clickAction(readyState)
+    console.log(`  ① 点「应用」之后   ${err || '（没有错误行）'}`)
+    if (err.includes('套餐没下全')) {
+      problems.push('「应用」那一态却走了下载分支：全齐且全新时不该下任何字节')
+    }
+  }
+
+  /* ② 有漂、无缺 → 「更新并应用」：只下漂的那份，下不齐就停（不许应用） */
+  const driftState = await want(['拓竹 (Bambu Lab)', 'A1', '快拆版6月以前'], '更新并应用')
+  if (driftState !== null) {
+    const err = await clickAction(driftState)
+    console.log(`  ② 点「更新并应用」之后   ${err || '（没有错误行）'}`)
+    if (!err.includes('套餐没下全')) {
+      problems.push('「更新并应用」下不齐时没有停下：没看到「套餐没下全」那句，可能已经应用了')
+    }
+  }
+
+  /* ③ 有缺 → 「下载并应用」（缺优先于漂，即使另一份是漂的） */
+  const missingState = await want(['拓竹 (Bambu Lab)', 'A1 mini', '标准版'], '下载并应用')
+  if (missingState !== null) {
+    const err = await clickAction(missingState)
+    console.log(`  ③ 点「下载并应用」之后   ${err || '（没有错误行）'}`)
+    if (!err.includes('套餐没下全')) {
+      problems.push('「下载并应用」下不齐时没有停下：没看到「套餐没下全」那句，可能已经应用了')
+    }
+  }
+  bundleProbe = false
 }
 
 /* 校准页 */

@@ -60,6 +60,13 @@ jobs:
       - name: 启动零网络扫描
         run: npm run check:zero-network
 
+      # 判据：Rust 侧要求的 Channel 参数，前端必须真的挂上一条（2026-10-06 首页
+      # 「下载并应用」死路）。Tauri 的 Channel 没有 Deserialize ⇒ 必填参数 ⇒
+      # 契约里的"onTick 可选"只能在 bridge 兑现；不兑现时命令体一行都不跑，
+      # 界面只拿到兜底的「出了点问题，请重试」。编译期抓不到、mock 那条路也不经过。
+      - name: Channel 参数扫描
+        run: npm run check:channel-args
+
       # 资源寻址 M6 判据（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §5-M6）：
       # 0.0.6 起 release.json 的下载地址一律来自 Gitee Release（发布仓库），
       # 禁止 github.com/.../releases。v≤0.0.5 是断代前的历史记录，照旧合法。

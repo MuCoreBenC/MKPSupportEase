@@ -79,15 +79,27 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
  *
  * **为什么不在调用方那边 new Channel**：一次调用一个 channel、参数名要与 Rust 侧的
  * `on_tick` 对上——这种细节在这层收一次，页面只见回调。
- * **不给回调就完全不挂** —— 与"点了等结果"那条路共用同一个 command，没有第二个版本。
+ *
+ * ★★ **不给回调也照样挂一条**（2026-10-06 修死路，别再改回去）：
+ * Rust 侧 `on_tick: Channel<DownloadTick>` 是**必填参数** —— Tauri 的 `Channel` 只有
+ * `CommandArg`、**没有 `Deserialize`**（它要 `Webview` 才能建），所以
+ * `Option<Channel<T>>` 根本编译不出来：契约里的"`onTick` 可选"只能**在这一层**兑现。
+ * 不挂的后果不是"少个回调"，而是 Tauri 在**参数反序列化**那一步就拒
+ * （`command download_runtime_file missing required key onTick`）——**命令体一行都不跑**
+ * （Rust 日志里连一条都没有），而界面只能拿到下面 `normalizeError` 兜底的
+ * 「出了点问题，请重试」。首页那颗「下载并应用」就是这么死的（有一档 `ShaMismatch`
+ * 的真实原因被它盖住了）。判据：`scripts/check-channel-args.mjs`。
+ *
+ * 挂着不给回调是安全的：JS 侧 `Channel` 的 `onmessage` 缺省就是空函数（收到即丢），
+ * Rust 侧 `send_tick` 对"没人听"也只记一行 debug —— 与"点了等结果"共用同一个 command，
+ * 没有第二个版本。
  */
 function withTick(
   args: Record<string, unknown>,
   onTick?: (tick: DownloadTick) => void,
 ): Record<string, unknown> {
-  if (onTick === undefined) return args
   const channel = new Channel<DownloadTick>()
-  channel.onmessage = onTick
+  if (onTick !== undefined) channel.onmessage = onTick
   return { ...args, onTick: channel }
 }
 

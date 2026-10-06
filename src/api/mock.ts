@@ -20,6 +20,7 @@ import {
   copyToSlicerIn,
   localFileIds,
   menuEntries,
+  mockCatalogFiles,
   paramMeta,
   resolveParams,
   resolveVersionFiles,
@@ -250,17 +251,31 @@ function literalFor(raw: string, valueType: string): string {
 }
 
 /*
- * 浏览器里的「下载区」：三份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
+ * 浏览器里的「下载区」：四份，**固定演示集合**（真机上是盘 `mkp/` + `assets/`，盘就是底账）。
  *
  * 为什么不是一份：预设页的交付行有四种状态（未下载 / 已下载 / 旧版本 / 内容异常），
  * 只给"未下载"一种的话，另外三种在浏览器里**根本画不出来** —— 而它们正是这一层
  * 最需要被看见的东西（"内容异常"尤其：那一档以前会被显示成"需更新"）。
  *
- * 三份各占一档，**同一档里的两份不存在**：交付构造上每个 (机型, 版本) 只有一份产物，
- * 再塞一份同版本的条目就是**编形状**了。「未下载」那一档在浏览器里由官方行的「下载」
+ * 前三份各占一档，**同一档里的两份不存在**：交付构造上每个 (机型, 版本) 只有一份 **MKP 产物**，
+ * 再塞一份同版本的 MKP 条目就是**编形状**了。「未下载」那一档在浏览器里由官方行的「下载」
  * 按钮覆盖（同一套动作列），真机上则由"目录里登记了、下载区还没有"的那些行覆盖。
  *
- * 三份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
+ * 第四份是**套餐的另一半**（`A1_STANDARD` 这个 bundle 配的切片器配置），2026-10-06 补：
+ * 首页那颗「下载并应用」消费的是**整个套餐**（MKP + 配套 BBS），少了这一条，
+ * 浏览器里就画不出「全齐且全新 → 应用」那一态（永远显示「缺」）。它不违反上面那条 ——
+ * 它是**另一种 kind**，不是同一 (机型, 版本) 的第二份 MKP。
+ *
+ * 哪一档都能看见（首页那颗按钮的四态就靠这几份编排）：
+ *   A1/STANDARD       MKP 已下载 + BBS 已下载          → 「应用」
+ *   A1/FAST           MKP 在盘上是旧的 + BBS 已下载     → 「更新并应用」
+ *   A1_MINI/STANDARD  MKP 在盘上是旧的 + 配套 BBS 不在盘上 → 「下载并应用」（缺优先于漂）
+ *   目录里没登记的机型（P1S…）                          → 「套餐未配置」
+ *
+ * ★ 两张单子是**互斥**的、都只收盘上真有的文件（漂移 = 盘上有但字节对不上），
+ *   所以判「在不在盘上」要 `已下载 ∪ 漂移`（见 `PageHome` 的 `bundleState`）。
+ *
+ * 这四份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
  * 见 `downloadCatalogFile`。
  *
  * `downloadedUnix / replacedUnix / publishedAt` 是固定演示值（真机上来自事件账与
@@ -270,6 +285,13 @@ function literalFor(raw: string, valueType: string): string {
 const MOCK_DOWNLOADED: OnDiskFile[] = [
   {
     fileName: 'A1-standard.toml',
+    downloadedUnix: 1780000000,
+    replacedUnix: null,
+    publishedAt: '2026-10-06T05:46:00Z',
+  },
+  {
+    /** 套餐的另一半：`A1_STANDARD` 的切片器配置（见上面那段说明） */
+    fileName: 'MKPProcess A1 0.4 0.20.json',
     downloadedUnix: 1780000000,
     replacedUnix: null,
     publishedAt: '2026-10-06T05:46:00Z',
@@ -828,64 +850,8 @@ export const mockApi: MkpApi = {
           versions: [{ id: 'STANDARD', name: '标准版' }],
         },
       ],
-      files: [
-        {
-          kind: 'mkp_preset',
-          fileName: 'A1-standard.toml',
-          path: 'dist/mkp/presets/A1-standard.toml',
-          machineId: 'A1',
-          versionId: 'STANDARD',
-          sha256: '0'.repeat(64),
-          size: 2048,
-        },
-        {
-          kind: 'mkp_preset',
-          fileName: 'A1-fast.toml',
-          path: 'dist/mkp/presets/A1-fast.toml',
-          machineId: 'A1',
-          versionId: 'FAST',
-          sha256: '1'.repeat(64),
-          size: 2048,
-        },
-        {
-          /* 「内容异常」那一档的演示：盘上有它、但与目录对不上，而且哪儿都查不出它是哪一版 */
-          kind: 'mkp_preset',
-          fileName: 'A1mini-standard.toml',
-          path: 'dist/mkp/presets/A1mini-standard.toml',
-          machineId: 'A1_MINI',
-          versionId: 'STANDARD',
-          sha256: '2'.repeat(64),
-          size: 2048,
-        },
-        {
-          /*
-           * 切片器那一类的交付文件（`bbs_config`）：预设页按 `kind` 把它分流进
-           * 「切片器配置 → 云端」——MKP 档**不列它**（真机 catalog 里它们占 9 条，
-           * 2026-10-02 作者截图里混进 MKP 表的就有它）。
-           */
-          kind: 'bbs_config',
-          fileName: 'MKPProcess A1 0.4 0.20.json',
-          path: 'assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
-          machineId: 'A1',
-          versionId: '',
-          sha256: '3'.repeat(64),
-          size: 1332,
-        },
-        {
-          /*
-           * 图标（`icon`）：**不归预设页** —— 它是资源，由自己的资源体系消费。
-           * 登记在 catalog 里只为钉住一条判据：「登记了」不等于「预设页要显示」
-           * （同截图的 `a1.svg`）。
-           */
-          kind: 'icon',
-          fileName: 'a1.svg',
-          path: 'assets/icons/a1.svg',
-          machineId: 'A1',
-          versionId: '',
-          sha256: '4'.repeat(64),
-          size: 2400,
-        },
-      ],
+      /* 目录登记的**唯一一份**演示数据：另一支消费者是「这个 combo 的套餐」（见该文件头） */
+      files: mockCatalogFiles(),
       /*
        * 资产登记（真机那份来自 `presets/assets.toml`）。**图片这一档用真 id + 真 path**：
        * 首页大图按 id 查 path 再拼 `/assets/<path>`（2026-10-03 第二刀），
