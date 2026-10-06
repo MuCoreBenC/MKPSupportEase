@@ -136,6 +136,9 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
+  /* 官方 → 我的文件：交付行直接另存（与「改这份」同一条可信字节闸；不碰任何状态） */
+  copyReleaseAsNew: (fileName, newName) =>
+    call('copyReleaseAsNew', 'copy_release_as_new', { fileName, newName }),
   /*
    * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
    * 这里管的是"选择器 + 两段式导入"：

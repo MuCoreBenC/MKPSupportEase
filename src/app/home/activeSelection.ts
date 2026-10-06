@@ -13,8 +13,10 @@
  * 就整体不反填，不硬凑。
  */
 
+import { useEffect, useState } from 'react'
+
 import { api } from '../../api'
-import type { Machine } from '../../api/contract'
+import type { ActivePreset, Machine } from '../../api/contract'
 import type { Selection } from './MachinePicker'
 
 /**
@@ -33,4 +35,45 @@ export async function selectionFromActive(machines: Machine[]): Promise<Selectio
   const version = machine.versions.find((v) => v.id === entry.versionId)
 
   return { brand: machine.brand, model: machine.id, variant: version?.id ?? null }
+}
+
+/**
+ * 读**底账本身**（不只反填选择）：本页是当前页签时读一次 `run/active-preset.json`。
+ *
+ * A3 修复的另一半：反填（上面那条）只回答"选中哪台机器"，显示层还要拿底账的
+ * **fileName** 说"正在使用的是哪一份" —— 否则应用了「我的文件」，首页 / 校准页
+ * 仍旧显示目录里那份官方底稿，两个界面两种答案。节奏与 `selectionFromActive`
+ * 同一条：回页签时对一次，不设全局 store（仓库没有那个机制，也不需要）。
+ */
+export function useActivePresetOnTab(tabActive: boolean | undefined): ActivePreset | null {
+  const [entry, setEntry] = useState<ActivePreset | null>(null)
+  useEffect(() => {
+    if (!tabActive) return
+    let alive = true
+    void api
+      .getActivePreset()
+      .then((a) => {
+        if (alive) setEntry(a)
+      })
+      .catch(() => {
+        if (alive) setEntry(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [tabActive])
+  return entry
+}
+
+/**
+ * 底账是否正指着这台机型的这个版本。是 → 显示层用底账的 fileName（与预设页同源）；
+ * 不是 → 维持"选中 combo 的目录文件"（预设页横幅仍是"正在使用"的唯一权威）。
+ */
+export function activeForSelection(
+  entry: ActivePreset | null,
+  model: string | null,
+  variant: string | null,
+): ActivePreset | null {
+  if (entry === null || model === null || variant === null) return null
+  return entry.machineId === model && entry.versionId === variant ? entry : null
 }

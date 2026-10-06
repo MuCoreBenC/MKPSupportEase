@@ -23,7 +23,11 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { selectionFromActive } from './activeSelection'
+import {
+  activeForSelection,
+  selectionFromActive,
+  useActivePresetOnTab,
+} from './activeSelection'
 import { uidOfFile, useCatalog } from './useCatalog'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
@@ -138,6 +142,14 @@ export default function PageHome({ density, active }: PageHomeProps) {
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
+
+  /*
+   * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），这里再拿底账本身
+   * —— 显示层用它判断"正在使用的这份是否就是当前选中 combo"。具体取值在下面的
+   * displayName / displayPath（要等 presetInfo / presetName 算完）。
+   */
+  const activeEntry = useActivePresetOnTab(active)
+  const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
 
   // ---------- 偏移：已保存的一份 + 板上点出来 / 手输出来的草稿 ----------
   /* 整块状态机搬进了 useCalibration —— 向导这几页与「校准」tab 用同一份实现。
@@ -305,6 +317,40 @@ export default function PageHome({ density, active }: PageHomeProps) {
       : preset.status === 'idle'
         ? null
         : preset.name
+
+  /*
+   * A3：正在使用的那份（底账）命中当前 combo 时，名字 / 路径**用底账的** ——
+   * 应用了「我的文件」，这里就说我的文件（与预设页横幅同源）；没命中维持目录那份。
+   * 覆盖只在目录那份就绪后发生：waiting / failed 的三态动画不动。
+   */
+  const presetReady = preset.status === 'ready'
+  const displayName = activeForSel !== null && presetReady ? activeForSel.fileName : presetName
+  const displayPath =
+    activeForSel !== null && presetReady
+      ? (activeForSel.path ?? presetInfo?.path ?? null)
+      : (presetInfo?.path ?? null)
+  const inUseNote =
+    activeForSel === null || !presetReady
+      ? undefined
+      : activeForSel.origin === 'mine'
+        ? '正在使用 · 我的文件'
+        : '正在使用'
+  /* picker sheet 那块卡：名字 / 路径换成底账那份，其余（三轴数值等）保持原样。
+     useMemo 包一层：sheets 那张 useMemo 拿它当依赖，引用得稳 */
+  const presetView = useMemo(
+    () =>
+      activeForSel !== null && presetReady
+        ? {
+            ...preset,
+            preset: {
+              ...preset.preset,
+              name: activeForSel.fileName,
+              path: activeForSel.path ?? preset.preset.path,
+            },
+          }
+        : preset,
+    [activeForSel, presetReady, preset],
+  )
   const entryLabel = modelName ? '选择版本' : '选择机型'
   const artAlt = [brandName, modelName].filter(Boolean).join(' ') || '未选择机型'
 
@@ -336,13 +382,14 @@ export default function PageHome({ density, active }: PageHomeProps) {
 
                 {ready && (
                   <>
-                    <p className={p.path} title={presetInfo?.path}>
-                      {presetName ?? '—'}
+                    <p className={p.path} title={displayPath ?? undefined}>
+                      {displayName ?? '—'}
                     </p>
-                    {/* 脚本里的 --Toml 跟着当前那份文件走（T10）；还没取到就先不摆这颗按钮 */}
-                    {presetInfo && (
+                    {/* 脚本里的 --Toml 跟着**正在使用的那一份**走（A3：底账命中时是
+                        用户那份的路径，不再是目录底稿）；还没取到就先不摆这颗按钮 */}
+                    {presetInfo && displayPath && (
                       <CopyAction
-                        text={`"${MKP_EXE}" --Toml "${presetInfo.path}" --Gcode`}
+                        text={`"${MKP_EXE}" --Toml "${displayPath}" --Gcode`}
                         label="复制后处理脚本"
                       />
                     )}
@@ -438,7 +485,7 @@ export default function PageHome({ density, active }: PageHomeProps) {
                   三轴只在"没有右侧露出卡"（density mini）时一起摆出来 */}
               {preset.status !== 'idle' && (
                 <div className={p.pickerPreset}>
-                  <PresetStack state={preset} axes={density === 'mini' ? saved : undefined} />
+                  <PresetStack state={presetView} inUse={inUseNote} axes={density === 'mini' ? saved : undefined} />
                 </div>
               )}
             </div>
@@ -668,10 +715,13 @@ export default function PageHome({ density, active }: PageHomeProps) {
       currentUid,
       density,
       dirty,
+      displayName,
+      displayPath,
       draft,
       drop,
       entryLabel,
       fadeMs,
+      inUseNote,
       layers,
       modelName,
       modelOptions,
@@ -683,6 +733,7 @@ export default function PageHome({ density, active }: PageHomeProps) {
       presetInfo,
       presetName,
       presetOptions,
+      presetView,
       ready,
       resetAxis,
       revertAxis,

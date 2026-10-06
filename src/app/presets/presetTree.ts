@@ -210,9 +210,18 @@ export const ACTION_TEXT: Record<PresetKindAxis, string> = {
   slicer: '复制',
 }
 
-/** 没有 asset id 的行为什么没有操作按钮。**不给一个点了会报错的按钮** */
+/**
+ * 交付目录里没有记录的官方行为什么没有操作按钮（A2 人话化：发生了什么 + 能干什么）。
+ *
+ * 两种真实状态共用这一句：用户自己放进 `mkp/` 的来路不明文件；以及演示数据里
+ * 旧资产库的行（新交付链里没有它的身份）。共同的事实是**目录里没有它** ——
+ * 所以不再断言"是你自己放的"（对登记在案的文件那是假话），也不再说
+ * asset id / 契约 / "点了必报错"那种开发者话。
+ */
 export const NO_ASSET_WHY =
-  '你自己放进预设目录的文件仓库里没有记录，没有 asset id —— 而契约的 applyPreset / copyToSlicer 只认 asset id。给一个点了必报错的按钮比不给糟'
+  '这份文件不在 SupportEase 的交付目录里（不是从软件里下载的那一份），' +
+  '所以不能直接应用，也不能直接另存。想用它：把它拖进窗口导入成「我的文件」，' +
+  '或从云端重新下载官方版本'
 
 /**
  * 交付身份的两种说法。**只有两种，没有第三种**（见契约 `PresetFileInfo.delivery`）：
@@ -604,6 +613,22 @@ export const MINE_COPY = {
   commit: '另存为',
 } as const
 
+/**
+ * **官方交付行的那口另存抽屉**（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+ * 官方 → 我的文件。可信字节（与「改这份」同一条闸）**按字节复制**，血统三行
+ * **新写指向**来源交付文件（官方原件没有血统头）；官方原件一个字节不动、
+ * 一个状态都不碰。名字由用户自己起 —— 不预填、不覆盖、不自动改名（与我的行同一套）。
+ */
+export const RELEASE_COPY = {
+  title: '另存为一份新的',
+  note:
+    '把官方这份**按字节**复制成你自己的一份（presets-mine/）—— 官方原件一个字节不动，' +
+    '身世（机型 / 版本 / 来源）跟着它走；新的那份从诞生起就是独立的一份' +
+    '（之后能自己编辑 / 改名 / 删除 / 应用）。' +
+    '名字由你来起：不能和官方那份一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
+  commit: '另存为',
+} as const
+
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
@@ -804,29 +829,27 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
 }
 
 /**
- * 右键菜单里那些**还没有后端**的动作。
+ * 右键菜单里那些**还没有后端**的动作（A2 人话化后的现状）：
  *
- * 分两种，界面上的说法也分两种：
+ *   契约里有签名   照调，让它抛 `NotImplementedError`（自带人话 hint），界面原样显示
+ *                 —— 官方仓库文件的「下载」（`downloadFiles`）是这一种
+ *   契约里没签名   不发请求，就地说「这个动作还没有对应的实现」（[`noContractText`]）
+ *                 —— 现在只剩「复制链接」一件（要加的话是 `getFileUrl`）
  *
- *   契约里有签名   照调，让它抛 `NotImplementedError`，显示「尚未实现：<方法名>」
- *                 —— 现在只有 `downloadFiles` 是这一种
- *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
- *
- * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * **用户文件那四件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
- * `deleteUserPreset`）、另存为一份新的（原来「复制」那个格子）是第十一层
- * （`copyUserPreset`）、在文件管理器里显示（原来「在文件夹中显示」）是第十三层
- * （`revealInFolder`）—— 都只对「我的文件」生效。这里剩下的一件是真的还没有，
- * 哪天要加，方法名照这个写。
+ * **用户文件那五件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
+ * `deleteUserPreset`）、另存为一份新的（我的 → 我的）是第十一层（`copyUserPreset`）、
+ * 官方 → 我的文件的另存是 `copyReleaseAsNew`、在文件管理器里显示是第十三层
+ * （`revealInFolder`）。原「MISSING_METHOD」待办表已并入这段注释 —— 只剩一件，
+ * 不值得一张表。
  */
-export const MISSING_METHOD = {
-  link: 'getFileUrl',
-}
 
-/** 「尚未实现」与「契约里还没有这个方法」两句话的统一写法，免得各处各写一套 */
-export const notImplementedText = (method: string): string => `尚未实现：${method}`
-
-export const noContractText = (method: string): string => `契约里还没有这个方法：${method}`
+/**
+ * 「界面上还没有对应实现的动作」那一句话（A2 人话化）：发生了什么 + 能干什么。
+ * 技术形式（方法名 / 契约名）不进提示条 —— 那是控制台与日志的事。
+ * 目前界面上唯一到不了契约的动作是「复制链接」（要加的话是 `getFileUrl`）。
+ */
+export const noContractText = (): string =>
+  '这个动作还没有对应的实现 —— 先用能用的那几步把事情办完'
 
 // ——————————————————————————————————————————————————————————————
 // 四档状态

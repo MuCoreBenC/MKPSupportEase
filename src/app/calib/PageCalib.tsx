@@ -22,7 +22,7 @@ import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
 import { api } from '../../api'
-import { selectionFromActive } from '../home/activeSelection'
+import { activeForSelection, selectionFromActive, useActivePresetOnTab } from '../home/activeSelection'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
 import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
@@ -166,6 +166,14 @@ export default function PageCalib({ active }: PageCalibProps) {
     ? fileOf(sel.model, sel.variant)
     : null
 
+  /*
+   * A3：底账正指着当前选中 combo 时，pill 说**底账那份**的名字 ——
+   * 应用了「我的文件」就显示我的文件（与预设页横幅、首页同源），不再显示目录底稿。
+   */
+  const activeEntry = useActivePresetOnTab(active)
+  const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
+  const pillFileName = activeForSel?.fileName ?? currentFileName
+
   const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
   const [pending, setPending] = useState<Step | null>(null)
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
@@ -277,11 +285,11 @@ export default function PageCalib({ active }: PageCalibProps) {
           {plate && (
             <button
               type="button"
-              className={currentFileName ? s.presetPill : `${s.presetPill} ${s.presetPillOff}`}
+              className={pillFileName ? s.presetPill : `${s.presetPill} ${s.presetPillOff}`}
               onClick={() => setPickerOpen(true)}
               title="点击选择预设"
             >
-              <span className={s.presetName}>{currentFileName ?? '选择预设'}</span>
+              <span className={s.presetName}>{pillFileName ?? '选择预设'}</span>
               <span className={s.presetSwitch}>切换</span>
             </button>
           )}

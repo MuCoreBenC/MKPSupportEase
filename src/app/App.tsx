@@ -117,7 +117,7 @@ export default function App() {
               <PageCalib active={tab === 'calib'} />
             </PageSlot>
             <PageSlot hidden={tab !== 'params'}>
-              <PageParams density={density} />
+              <PageParams density={density} active={tab === 'params'} />
             </PageSlot>
             <PageSlot hidden={tab !== 'bbs'}>
               <PageBbs density={density} pending={pendingBbs} />

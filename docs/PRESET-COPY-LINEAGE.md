@@ -1,9 +1,13 @@
 # 预设的复制与身世（另存放开 · 机型/版本继承）
 
 - 日期：2026-10-06
-- 性质：**设计稿（未实施）**。作者定方向，本文把它写成可实施的规格。
+- 性质：**设计稿**。作者定方向，本文把它写成可实施的规格。
 - 上一批：删除已全面放开（同分支提交，见 `PRESET-TIME-SEMANTICS.md` §6 与 `PRESET-EVENT-TIME-MODEL.md`）。
 - 所在分支：`feat/preset-provenance-version-chain`。等作者确认后动代码。
+- **实施状态（2026-10-06）**：§3.1（官方另存放开 + `copy_release_as_new` + 命名抽屉文案）
+  已随 UX 场景测试 A1 修复实施，判据见 `docs/UX-FIX-PLAN-2026-10-06.md` 与
+  `scripts/probes/presets.mjs` 第十一层、`runtime/mine.rs` 的 `copying_a_release_*` 四条单测；
+  **§3.2（机型 / 版本列继承）仍未实施**——下一批（身世可见性）。
 
 ---
 

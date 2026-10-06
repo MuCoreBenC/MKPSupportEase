@@ -107,6 +107,8 @@
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
+ *   **另存为一份新的**（官方交付行） `api.copyReleaseAsNew()`               真（UX 测试 A1 的正路：release + ok 的
+ *                            MKP 预设直接另存成你自己的一份 —— 可信字节 + 血统指向来源；不碰任何状态）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
@@ -126,7 +128,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { api, errorText, NotImplementedError } from '../../api'
+import { api, errorText } from '../../api'
 import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
@@ -149,11 +151,11 @@ import {
   ARCHIVE_WHY,
   EDIT_TEXT,
   MINE_COPY,
+  RELEASE_COPY,
   MINE_DRAWER,
   MINE_EDIT_TEXT,
   MINE_RENAME,
   DOWNLOAD_WHY,
-  MISSING_METHOD,
   mineCountOfAxis,
   treeCountOfAxis,
   NO_ASSET_WHY,
@@ -163,7 +165,6 @@ import {
   UNSUPPORTED_TEXT,
   isSuspectRelease,
   noContractText,
-  notImplementedText,
   releaseBatchText,
   sizeTextOf,
 } from './presetTree'
@@ -436,11 +437,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
    * 在文件管理器里显示在第十三层，都不在这里。
    *
-   * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
+   * 不发请求 —— 没有可发的方法。就地说清「还没有对应的实现」（A2 人话化：
+   * 发生了什么 + 能干什么；缺的是哪个方法记在 `MISSING_METHOD` 里，给开发对账用），
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
    */
-  const sayNoContract = (method: string, row: PresetTableRow) => {
-    setNote({ text: `${noContractText(method)}（${row.fileName}）`, bad: true })
+  const sayNoContract = (row: PresetTableRow) => {
+    setNote({ text: `${noContractText()}（${row.fileName}）`, bad: true })
   }
 
   /**
@@ -449,7 +451,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    *   目录登记的交付预设（`releaseUid` 在）  → `downloadRelease(fileName)`，**真的能下** ——
    *     走新世界下载管道落进下载区 `mkp/`，本地表跟着多出一行
    *   官方仓库的文件                        → 契约里有签名，所以**照调**。
-   *     假后端一定抛 `NotImplementedError`，界面接住并显示「尚未实现：downloadFiles」
+   *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
@@ -502,13 +504,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       },
       (e: unknown) => {
         setBusyKey(null)
-        setNote({
-          text:
-            e instanceof NotImplementedError
-              ? `${notImplementedText('downloadFiles')}（${row.fileName}）`
-              : `下载失败：${errorText(e)}`,
-          bad: true,
-        })
+        /* 错误话术统一走 errorText：NotImplementedError 自带人话 hint（A2），
+           不再按异常类型在前端拼"尚未实现：downloadFiles"那种术语 */
+        setNote({ text: `下载失败：${errorText(e)}`, bad: true })
       },
     )
   }
@@ -740,7 +738,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     const ask =
       naming.kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : data.copyAsNew(naming.row.path, name)
+        : naming.row.origin === 'release'
+          ? /* 官方交付行（UX 测试 A1 的正路）：可信字节直接复制成你自己的一份 */
+            data.copyReleaseAsNew(naming.row.fileName, name)
+          : data.copyAsNew(naming.row.path, name)
     ask.then(
       (done) => {
         setNaming(null)
@@ -748,7 +749,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           text:
             naming.kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+              : naming.row.origin === 'release'
+                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 官方原件一个字节没动，身世（机型 / 版本）跟着来源走了`
+                : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
@@ -887,7 +890,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
      * 没下载 / 字节漂了 / 是旧版本都应用不成，错误原样冒给提示条。
      */
     if (row.releaseUid === undefined) {
-      /* 到不了这里：MKP 档的本地表只有交付行有操作按钮。留着防形状变化时静默出错 */
+      /*
+       * 兜底（正常到不了）：A2 修缝后，没有交付身份的官方 MKP 行在表格那一层
+       * 就不给「应用」按钮了（`PresetTable` 的灰杠 + `NO_ASSET_WHY` 人话原因）。
+       * 这一格留着防行形状再变化时静默出错 —— 文案同样是人话（发生了什么 + 能干什么）。
+       */
       setNote({ text: `${row.fileName}：${NO_ASSET_WHY}`, bad: true })
       return
     }
@@ -940,12 +947,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 「另存为一份新的」为什么不能点（第十一层）：只有**我的文件**之间能复制 ——
-   * 官方那份的副本要经过「改这份」→ 保存（那条链才把副本落成你自己的一份）。
+   * 「另存为一份新的」为什么不能点（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+   *
+   * - **我的文件**：本来就开放（第十一层，我的 → 我的）；
+   * - **官方交付行**：`releaseState === 'ok'` 的 MKP 预设**放开** —— 可信字节直接复制，
+   *   不再绕「改这份」→ 保存（"改了再保存"与"不改直接复制"落的是同一种东西）；
+   * - 内容存疑的两档（旧版本 / 内容异常）仍由 `suspect` 那一句拦（这里到不了）；
+   * - 切片器交付行不放开：它们不是 TOML 预设，自有「复制到切片器目录」那条路；
+   * - 官方仓库文件（图标等）：不在此列。
    */
   const copyWhyNot = (row: PresetTableRow): string | undefined => {
     if (row.origin === 'mine') return undefined
-    return '官方那份的副本走「改这份」→ 保存（会另存成你自己的一份）；这一层只在「我的文件」之间复制'
+    if (row.origin === 'release') {
+      if (row.kind !== 'mkp_preset') {
+        return '这份是切片器工艺配置 —— 「复制」（复制到切片器目录）才是它的动作，另存成「我的文件」用不上'
+      }
+      return row.releaseState === 'ok'
+        ? undefined
+        : '这一份还没下载到本机 —— 先下载，下载好了才能另存成你自己的一份'
+    }
+    return '官方仓库文件不在这里另存 —— 能另存的是已下载到本机的 MKP 预设与「我的文件」'
   }
 
   /**
@@ -1004,7 +1025,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         {
           id: 'link',
           label: '复制链接',
-          onSelect: () => sayNoContract(MISSING_METHOD.link, row),
+          onSelect: () => sayNoContract(row),
         },
         { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
         bbsEntry(row),
@@ -1036,9 +1057,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'copy',
         label: '另存为一份新的',
         /*
-         * 第十一层：**我的文件 → 我的文件**（按字节复制、血统原样带过去）。
-         * 官方那两份的副本走「改这份」→ 保存；内容存疑的字节不许换个名字继续活着
-         * （第三圈第 6 层）—— 那一句优先。
+         * 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
+         * **官方交付行也开放了**（UX 测试 A1 的正路，作者 2026-10-06 定案）：
+         * release + ok 的 MKP 预设直接另存成你自己的一份（`copyReleaseAsNew`）。
+         * 内容存疑的那两档（旧版本 / 内容异常）仍不许 —— 字节我们不认，
+         * 不能让它换个名字继续活着（第三圈第 6 层）—— 那一句优先。
          */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => openCopyAs(row),
@@ -1683,7 +1706,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             {naming !== null && (
               <div className={s.edit}>
                 <p className={s.editNote}>
-                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
+                  {naming.kind === 'copy'
+                    ? naming.row.origin === 'release'
+                      ? RELEASE_COPY.note
+                      : MINE_COPY.note
+                    : MINE_RENAME.note}
                 </p>
                 {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>

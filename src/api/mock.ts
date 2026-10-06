@@ -340,7 +340,8 @@ export const mockApi: MkpApi = {
     const text = mockMineText.get(path)
     if (text === undefined) {
       throw new NotImplementedError(
-        'readUserPresetText：浏览器里只有这份会话另存出来的那份有正文',
+        'readUserPresetText',
+        '浏览器预览里读不到这一份的正文 —— 用桌面版就能看（每一份都读得到）',
       )
     }
     return text
@@ -369,7 +370,8 @@ export const mockApi: MkpApi = {
       const raw = mockMineText.get(rel)
       if (raw === undefined) {
         throw new NotImplementedError(
-          `beginPresetEdit：浏览器里只有那份演示正文能改（${rel} 没有正文）`,
+          'beginPresetEdit',
+          `浏览器预览里读不到 ${rel} 的正文 —— 用桌面版就能改（每一份都读得到）`,
         )
       }
       /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
@@ -451,7 +453,10 @@ export const mockApi: MkpApi = {
       const rel = mockDraft.path ?? ''
       const old = mockMineText.get(rel)
       if (old === undefined) {
-        throw new NotImplementedError(`commitPresetDraft：${rel} 已经没有正文可写回`)
+        throw new NotImplementedError(
+          'commitPresetDraft',
+          `浏览器预览里读不到 ${rel} 的正文，写不回去 —— 用桌面版就能存`,
+        )
       }
       const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
@@ -564,6 +569,64 @@ export const mockApi: MkpApi = {
       provenance: 'copy' as const,
     })
     return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 官方 → 我的文件（UX 测试 A1 的正路）：把一份**可信的**官方交付文件按字节复制成
+   * 你自己的一份。与真机同一套闸（`mine::copy_release_as_new`）：
+   * 目录里得有它、得是 MKP 预设、字节与目录一致才放行（演示口径：`MOCK_DOWNLOADED`
+   * 里那份 = 可信；旧版本 / 内容异常的两份照实拒）；血统三行**新写指向**来源交付文件
+   * （官方原件没有血统头，不是照抄）；不覆盖、不与来源同名；**一个状态都不碰**。
+   */
+  async copyReleaseAsNew(fileName, newName) {
+    /* 演示口径的可信集合与状态：与 getDownloadedFiles / getDeliveryTrust 同一条账 */
+    const releaseFiles = [
+      { fileName: 'A1-standard.toml', machineId: 'A1', versionId: 'STANDARD', trust: 'ok' },
+      { fileName: 'A1-fast.toml', machineId: 'A1', versionId: 'FAST', trust: 'old' },
+      { fileName: 'A1mini-standard.toml', machineId: 'A1_MINI', versionId: 'STANDARD', trust: 'tampered' },
+    ]
+    const hit = releaseFiles.find((f) => f.fileName === fileName)
+    if (hit === undefined) {
+      throw new Error(`${fileName} 还没下载到本机 —— 先下载，再另存成你自己的一份`)
+    }
+    if (hit.trust !== 'ok') {
+      throw new Error(
+        `${fileName} 盘上这一份与目录登记的字节不一致 —— 先「更新」换一份干净的官方版，再另存`,
+      )
+    }
+    const problem = mockNameProblem(fileName, newName)
+    if (problem !== null) throw new Error(problem)
+    const name = newName.trim()
+    if (name === fileName) {
+      throw new Error('新名字和官方那份一样 —— 另存要起个不同的名字（两份同名分不清谁是谁）')
+    }
+    const path = `presets-mine/${name}`
+    if (mockMine.some((f) => f.path === path)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    const label = `dist/mkp/presets/${fileName}`
+    const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${MOCK_OFFICIAL_TEXT}`
+    mockMineText.set(path, text)
+    mockMine.push({
+      path,
+      fileName: name,
+      size: text.length,
+      modifiedUnix: nowSec(),
+      kind: 'mkp_preset',
+      state: 'ok',
+      stateDetail: null,
+      /* 血统新写指向来源交付文件：假后端里它就是目录当前那一版 */
+      basedOn: 'current',
+      basedOnLabel: label,
+      basedOnRelease: null,
+      basedOnMachineId: hit.machineId,
+      basedOnVersionId: hit.versionId,
+      /* 官方另存出来的：出处走血统（「复制自官方 X」），账本不重复记 */
+      copiedFrom: null,
+      copiedFromName: null,
+      provenance: null,
+    })
+    return { path, fileName: name }
   },
 
   /*
@@ -724,9 +787,13 @@ export const mockApi: MkpApi = {
   /**
    * 假后端对这个方法是**故意抛**的（浏览器里没有真网络），产品仓照同一条口径：
    * 不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
+   * hint 说清"发生了什么 + 能干什么"（A2），技术形式只在控制台。
    */
   async downloadFiles() {
-    throw new NotImplementedError('downloadFiles')
+    throw new NotImplementedError(
+      'downloadFiles',
+      '浏览器预览里没有下载区 —— 下载要用桌面版（SupportEase 应用）',
+    )
   },
 
   /**
@@ -877,17 +944,26 @@ export const mockApi: MkpApi = {
 
   /** 浏览器里没有下载区也没有源：与 downloadFiles 同一条口径，不假装下载成功 */
   async downloadCatalogFile() {
-    throw new NotImplementedError('downloadCatalogFile')
+    throw new NotImplementedError(
+      'downloadCatalogFile',
+      '浏览器预览里没有下载区 —— 下载 / 更新要用桌面版（SupportEase 应用）',
+    )
   },
 
   /** 浏览器里没有下载区：没有那份文件可删 —— 与 downloadCatalogFile 同一条口径 */
   async deleteDeliveryFile() {
-    throw new NotImplementedError('deleteDeliveryFile：浏览器里没有下载区')
+    throw new NotImplementedError(
+      'deleteDeliveryFile',
+      '浏览器预览里没有下载区，删不了官方交付文件 —— 用桌面版再删',
+    )
   },
 
   /** 浏览器里没有归档区：与 readArchivedText 同一条口径 */
   async deleteArchivedFile() {
-    throw new NotImplementedError('deleteArchivedFile：浏览器里没有归档区')
+    throw new NotImplementedError(
+      'deleteArchivedFile',
+      '浏览器预览里没有归档区，删不了这份旧版本 —— 用桌面版再删',
+    )
   },
 
   async downloadCatalogFiles(fileNames) {
@@ -901,7 +977,10 @@ export const mockApi: MkpApi = {
 
   /** 浏览器里没有下载区，也就没有"已经下载的文件"可读：如实拒，不返回空串充数 */
   async readDownloadedText() {
-    throw new NotImplementedError('readDownloadedText：浏览器里没有下载区')
+    throw new NotImplementedError(
+      'readDownloadedText',
+      '浏览器预览里没有下载区，读不到这份的正文 —— 用桌面版就能看',
+    )
   },
 
   /*
@@ -995,7 +1074,10 @@ export const mockApi: MkpApi = {
 
   /** 读归档里的正文要真的盘（浏览器里没有）：与 downloadCatalogFile 同一条口径，不假装 */
   async readArchivedText() {
-    throw new NotImplementedError('readArchivedText：浏览器里没有归档区，先用真机跑一次更新')
+    throw new NotImplementedError(
+      'readArchivedText',
+      '浏览器预览里没有归档区，读不到这份旧版本的正文 —— 用桌面版（跑过一次更新）就能看',
+    )
   },
 
   /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原 */
@@ -1014,7 +1096,8 @@ export const mockApi: MkpApi = {
   async applyActivePreset(fileName, origin, path) {
     if (origin !== 'mine') {
       throw new NotImplementedError(
-        `applyActivePreset(${fileName})：浏览器里没有下载区，那份字节不在，先用真机下载一份`,
+        'applyActivePreset',
+        `浏览器预览里没有 ${fileName} 的字节，应用官方预设要用桌面版（先在桌面版里下载一份）`,
       )
     }
     const hit = mockMine.find((f) => f.path === path)
@@ -1044,11 +1127,17 @@ export const mockApi: MkpApi = {
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */
   async checkRemoteUpdate() {
-    throw new NotImplementedError('checkRemoteUpdate：浏览器里没有远端目录')
+    throw new NotImplementedError(
+      'checkRemoteUpdate',
+      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+    )
   },
 
   async applyRemoteUpdate() {
-    throw new NotImplementedError('applyRemoteUpdate：浏览器里没有远端目录')
+    throw new NotImplementedError(
+      'applyRemoteUpdate',
+      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+    )
   },
 
   /*

@@ -464,7 +464,7 @@ export interface Params {
   cancelPending: () => void
 }
 
-export function useParams(): Params {
+export function useParams(tabActive?: boolean): Params {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [combo, setCombo] = useState<ComboData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -700,7 +700,15 @@ export function useParams(): Params {
               (params): { tabs: ParamTab[]; params: RecipeParam[]; fileLabel: string | null } => ({
                 tabs: catalog.tabs,
                 params,
-                fileLabel: catalog.fileByCombo.get(`${machineId}:${versionId}`) ?? null,
+                /*
+                 * A3：标签跟着**编辑目标**走（同一张表，同 combo 我的文件优先）——
+                 * 编辑的是「我的文件」时，pill / 确认框 / 历史标题都说我的文件名，
+                 * 不再说目录里那份官方底稿（那是 fileByCombo 的答案，两件事）。
+                 */
+                fileLabel:
+                  catalog.editTargetByCombo.get(`${machineId}:${versionId}`)?.fileName ??
+                  catalog.fileByCombo.get(`${machineId}:${versionId}`) ??
+                  null,
               }),
             )
     Promise.resolve(data)
@@ -1254,6 +1262,32 @@ export function useParams(): Params {
       alive = false
     }
   }, [machineId, versionId])
+
+  /*
+   * A3：回页签时对一次底账（与首页 / 校准页 `selectionFromActive` 同一个节奏）——
+   * 参数页是**常驻挂载**的，"默认落在正在用的那一份"那只在天亮时读一次，
+   * 预设页换过应用这里就不知道了。现在每次回到本页对一次：底账的 combo
+   * 在目录里找得到才挪，找不到 / 没有底账 / 目录没就绪都不动当前选择。
+   * （形参叫 tabActive：hook 里 `active` 这个名字已经被底账 state 占了。）
+   */
+  useEffect(() => {
+    if (tabActive !== true || catalog === null) return
+    let alive = true
+    void api
+      .getActivePreset()
+      .then((a) => {
+        if (!alive || a === null) return
+        const machine = catalog.machines.find((m) => m.id === a.machineId)
+        const version = machine?.versions.find((v) => v.id === a.versionId)
+        if (machine !== undefined && version !== undefined) {
+          setPick({ machineId: machine.id, versionId: version.id })
+        }
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [tabActive, catalog])
 
   const activeUse = useMemo<ActiveUse | null>(() => {
     if (active === null) return null

@@ -45,6 +45,8 @@ import s from './PageParams.module.css'
 
 interface Props {
   density: Density
+  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账（A3） */
+  active?: boolean
 }
 
 interface ShownCard {
@@ -322,8 +324,8 @@ function useWidth(): [(el: HTMLElement | null) => void, number] {
   return [attach, width]
 }
 
-export default function PageParams({ density }: Props) {
-  const u = useParams()
+export default function PageParams({ density, active }: Props) {
+  const u = useParams(active)
 
   const [categoryId, setCategoryId] = useState('')
   const [query, setQuery] = useState('')
@@ -543,11 +545,14 @@ export default function PageParams({ density }: Props) {
   }
 
   /*
-   * 底栏那句状态文案。mini 档只留前半句 —— 实测「保存后会覆盖 A1.toml」这半截
-   * 占 153px，加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
-   * 半句话没丢：保存确认弹层里本来就在说（「以下 N 处改动将写入 A1.toml」），
-   * 而且这句挂了 title，悬停看全。
+   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是官方底稿，
+   * 保存 = 另存成你自己的一份（`presets-mine/…（已修改）.toml`，原件不动）——
+   * 原来那句"保存后会覆盖 A1.toml"与实际落盘相反，是测试报告里"用户不敢赌"的根源；
+   * 编辑的是我的文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
+   * 加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
+   * 完整的落点说明在保存确认弹层里，这里挂了 title，悬停看全。
    */
+  const savingToMine = u.editingPreset?.origin === 'mine'
   const stateText =
     u.dirtyCount === 0
       ? density === 'mini'
@@ -555,7 +560,9 @@ export default function PageParams({ density }: Props) {
         : '没有未保存的改动'
       : density === 'mini'
         ? `${u.dirtyCount} 处未保存`
-        : `${u.dirtyCount} 处未保存 · 保存后会覆盖 ${fileLabel}`
+        : savingToMine
+          ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
+          : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
 
   const closeHistory = () => setHistoryOpen(false)
 
@@ -1062,8 +1069,30 @@ export default function PageParams({ density }: Props) {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className={s.sheetTitle}>确认保存？</h3>
+              {/*
+                落点按**编辑目标**说（A1 统一口径，与 Rust 侧 `commit_preset_draft` 的两条
+                落点一一对应）：官方底稿 → 另存成你自己的一份（原件一个字不动）；
+                我的文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是官方原件，
+                实际却落 presets-mine/ —— 测试报告里"我不敢赌"的那句话就是它。
+              */}
               <p className={s.sheetText}>
-                以下 <b>{changedEntries.length}</b> 处改动将写入 <b>{fileLabel}</b>：
+                {u.editingPreset?.origin === 'mine' ? (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会写回你自己那一份{' '}
+                    <b>{fileLabel}</b>：
+                  </>
+                ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
+                    presets-mine/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
+                    （官方原件一个字不动）：
+                  </>
+                ) : (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
+                    （presets-mine/，官方原件一个字不动）：
+                  </>
+                )}
               </p>
               <ul className={s.changeList}>
                 {changedEntries.slice(0, MAX_CONFIRM_ITEMS).map((e) => (

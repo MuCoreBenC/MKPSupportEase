@@ -258,6 +258,12 @@ export interface PresetData {
    */
   copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
+   * **官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 测试 A1 的正路）。
+   * 可信字节 + 血统指向来源；回来**重读用户线**（新的一份要出现在表里）；
+   * **不碰任何状态** —— 使用中指针 / 草稿一概不动（与 copyAsNew 同一条边界）。
+   */
+  copyReleaseAsNew: (fileName: string, newName: string) => Promise<UserFileIdentity>
+  /**
    * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
    * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
    * 一并清掉；代价由页面的确认框讲清。
@@ -717,6 +723,13 @@ export function usePresetData(importRevision = 0): PresetData {
     return done
   }, [])
 
+  /* 官方 → 我的文件（UX 测试 A1 的正路）：同一条边界 —— 只重读用户线，不碰任何状态 */
+  const copyReleaseAsNew = useCallback(async (fileName: string, newName: string) => {
+    const done = await api.copyReleaseAsNew(fileName, newName)
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
+
   /* 在文件管理器里显示（第十三层）：纯外部动作 —— 不重读、不改任何状态 */
   const reveal = useCallback(async (path: string) => {
     await api.revealInFolder(path)
@@ -770,6 +783,7 @@ export function usePresetData(importRevision = 0): PresetData {
     removeRelease,
     removeArchived,
     copyAsNew,
+    copyReleaseAsNew,
     reveal,
   }
 }

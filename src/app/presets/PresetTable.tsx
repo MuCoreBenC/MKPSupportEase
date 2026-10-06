@@ -517,8 +517,19 @@ export default function PresetTable({
                         <span className={s.actNone} title={SLICER_RELEASE_WHY}>
                           {DASH_}
                         </span>
+                      ) : row.releaseUid === undefined && row.kind === 'mkp_preset' ? (
+                        /*
+                         * **官方 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
+                         * 应用只认目录登记的那一份。两种真实状态共用：用户自己放进
+                         * `mkp/` 的来路不明文件；以及旧资产库形状的行（演示数据里有）。
+                         * 原来这里放行到「应用」按钮、点了再被守卫拦下，报一串
+                         * asset id / 契约的术语 —— 现在按钮根本不给，原因用人话说。
+                         */
+                        <span className={s.actNone} title={NO_ASSET_WHY}>
+                          {DASH_}
+                        </span>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
-                        /* 官方副本没有 asset id 时也应用不了（契约那两个写只认 asset id） */
+                        /* 什么身份都没有的行：复制 / 应用都无从谈起（不给点了没反应的按钮） */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
                           {DASH_}
                         </span>

@@ -501,6 +501,30 @@ pub async fn copy_user_preset(
     })
 }
 
+/// **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+///
+/// 与 [`copy_user_preset`]（我的文件 → 我的文件）分开：来源是**官方交付行**，闸在
+/// [`runtime::mine::copy_release_as_new`] 那边 —— 目录里得有它、得是 MKP 预设、
+/// 字节必须与目录一致（与「改这份」同一条边界）。血统三行新写指向来源交付文件，
+/// **出处账不记**（血统已经答了"从哪来"，与 `commit_preset_draft` 官方线同一口径）；
+/// 使用中指针 / 草稿一概不碰。
+#[tauri::command]
+pub async fn copy_release_as_new(
+    app: AppHandle,
+    file_name: String,
+    new_name: String,
+) -> Result<UserFileIdentityDto, AppError> {
+    traced("copyReleaseAsNew", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let done = runtime::mine::copy_release_as_new(&root, &user_root, &file_name, &new_name)?;
+        Ok(UserFileIdentityDto {
+            path: done.path,
+            file_name: done.file_name,
+        })
+    })
+}
+
 /// **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
 ///
 /// 作者裁决（2026-10-06）：**不再拦"正在使用 / 有草稿"** —— 一切皆可删。删之前把

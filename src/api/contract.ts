@@ -1163,6 +1163,20 @@ export interface MkpApi {
    */
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
+  /**
+   * **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+   *
+   * 在此之前官方行的「另存为一份新的」是灰的，要绕「改这份」→ 保存才能复制 ——
+   * 可"改了再保存"与"不改直接复制"落的是同一种东西，绕一道编辑流程不合直觉。
+   *
+   * 来源是**官方交付行**，闸在 Rust 侧（`mine::copy_release_as_new`）：
+   * 目录里得有它、得是 MKP 预设、**字节必须与目录一致**（与「改这份」同一条边界 ——
+   * 旧版本 / 内容异常禁令不变）。血统三行**新写指向**来源交付文件（官方原件没有
+   * 血统头，不是照抄）；出处账不记（血统已经答了"从哪来"）。名字过同一套门槛、
+   * 不覆盖、不自动改名；**一个状态都不碰**（不改使用中指针、不建草稿、不进 archive）。
+   */
+  copyReleaseAsNew(fileName: string, newName: string): Promise<UserFileIdentity>
+
   /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
 
   /**

@@ -332,16 +332,17 @@ const statusFact = await page.evaluate(() => {
   return i < 0 ? '' : (dds[i]?.textContent ?? '').trim()
 })
 console.log(`[交付四态] 展开详情「状态」= ${statusFact || '(没有这一格)'}`)
-if (!statusFact.includes('旧版本')) problems.push(`展开详情的状态该说「旧版本」，实测「${statusFact}」`)
+/* 2026-10-06 时间/状态词修订（c41662e）：盘上那份是归档里的旧版时，状态说「有更新」 */
+if (!statusFact.includes('有更新')) problems.push(`展开详情的状态该说「有更新」（旧版那一份），实测「${statusFact}」`)
 await page.screenshot({ path: `${shotDir}/presets-release-states.png` })
 
-/* ---------- 5b. 归档：官方旧版本看得见、认得出、看得了 ---------- */
+/* ---------- 5b. 归档：官方旧版本看得见、认得出、看得了、删得掉 ---------- */
 /*
- * 守两件事：
+ * 守三件事：
  *   ① 归档的那一格画得出来、点得开，里面按**路径**列出旧版本（假后端给了一条演示）；
- *   ② 这一层**不提供归档管理** —— 抽屉里不许出现「删除 / 恢复 / 清空」这类动作
- *      （归档管理不在这一层，见 HANDOFF §3.5 的七步顺序）。
- * 读正文在浏览器里必然失败（没有盘），所以要断言它**如实说读不出来**，不是显示空正文。
+ *   ② **允许删**（作者裁决 2026-10-06 删除全面放开）：抽屉里有「删除」，但
+ *      仍然没有「恢复 / 清空」（用这份旧版本 / 批量清空不在这一层）；
+ *   ③ 读正文在浏览器里必然失败（没有盘），要断言它**如实说读不出来**，不是显示空正文。
  */
 const archiveCell = page.getByRole('button', { name: /^\d+ 份（点开看）$/ })
 const archiveCells = await archiveCell.count()
@@ -366,9 +367,12 @@ if (archiveCells === 0) {
   /* 列表里要认出它：文件名 + 这是哪台机型的哪一版（那条归档是不是你要找的，就靠这两个） */
   if (!drawer.text.includes('A1-fast.toml')) problems.push('抽屉里没列出那份旧版本')
   if (!/A1 · FAST/.test(drawer.text)) problems.push('抽屉里要认出它是哪台机型的哪一版')
-  for (const forbidden of ['删除', '恢复', '清空']) {
+  if (!drawer.buttons.some((b) => b.includes('删除'))) {
+    problems.push('归档允许删（2026-10-06 删除全面放开），抽屉里该有「删除」')
+  }
+  for (const forbidden of ['恢复', '清空']) {
     if (drawer.buttons.some((b) => b.includes(forbidden))) {
-      problems.push(`这一层不提供归档管理，抽屉里不该有「${forbidden}」`)
+      problems.push(`抽屉里不该有「${forbidden}」（归档管理不在这一层）`)
     }
   }
 
@@ -382,8 +386,8 @@ if (archiveCells === 0) {
     problems.push(`浏览器里没有盘，读正文该如实说读不出来，实测「${bodyText.slice(0, 120)}」`)
   }
   /* 正文头要带**归档里那条路径** —— 读它用的就是这条路径（界面上的"哪一份"由此无歧义） */
-  if (!bodyText.includes('archive/mkp/presets/A1-fast.toml')) {
-    problems.push('正文头要带那份旧版本在归档里的路径')
+  if (!bodyText.includes('archive/dist/mkp/presets/A1-fast.toml')) {
+    problems.push('正文头要带那份旧版本在归档里的路径（B 类在 dist/ 下）')
   }
   await page.screenshot({ path: `${shotDir}/presets-archive.png` })
   await page.keyboard.press('Escape')
@@ -477,17 +481,25 @@ const mineRow = page
   .first()
 await mineRow.click()
 await page.waitForTimeout(300)
-const mineKind = await page.evaluate(() => {
+/*
+ * 展开详情的格子集（2026-10-06 的详情格：版本 / 来源 / 基于 / 状态 / 大小 / 修改时间 / 正文）。
+ * 「类型」那一格已随详情重构退场 —— "认不出是哪一类"改由行上角标与任何类型档下都列
+ * （上面 5d-① 已量）来传达；这里守的是"来源格照常在、说得清它是我的"。
+ */
+const mineFacts = await page.evaluate(() => {
   const dl = document.querySelector('main tbody dl')
-  if (dl === null) return ''
+  if (dl === null) return {}
   const dts = [...dl.querySelectorAll('dt')]
   const dds = [...dl.querySelectorAll('dd')]
-  const i = dts.findIndex((d) => (d.textContent ?? '').trim() === '类型')
-  return i < 0 ? '' : (dds[i]?.textContent ?? '').trim()
+  const out = {}
+  dts.forEach((dt, i) => {
+    out[(dt.textContent ?? '').trim()] = (dds[i]?.textContent ?? '').trim()
+  })
+  return out
 })
-console.log(`[用户线] 那一份的类型：${mineKind || '(没有这一格)'}`)
-if (!mineKind.includes('认不出')) {
-  problems.push(`认不出类别的那一份，类型该写「认不出是哪一类」，实测「${mineKind}」`)
+console.log(`[用户线] 那一份的详情格：${JSON.stringify(mineFacts)}`)
+if (!(mineFacts['来源'] ?? '').includes('我的')) {
+  problems.push(`认不出类别的那一份，来源格该说「我的」，实测「${mineFacts['来源'] ?? '(没有)'}」`)
 }
 
 const bodyBtn = page.getByRole('button', { name: '看正文' })
@@ -629,7 +641,7 @@ console.log(`\n[认得出 · 全部机型] ${trustRows.map((r) => `${r.name} →
 
 const trustWant = [
   ['A1-fast.toml', '更新', '盘上那份**就是归档里那一版** → 旧版本，换成当前版'],
-  ['A1mini-standard.toml', '重新下载', '盘上那份哪儿都查不出是哪一版 → 内容异常，只能重下一份'],
+  ['A1mini-standard.toml', '更新', '盘上那份哪儿都查不出是哪一版 → 修坏档与换新版是同一条管道，按钮统一叫「更新」'],
 ]
 for (const [file, want, why] of trustWant) {
   const hit = trustRows.find((r) => r.name.includes(file))
@@ -664,8 +676,9 @@ await suspectRow('A1mini-standard.toml').click()
 await page.waitForTimeout(300)
 const tamperedFacts = await factOf()
 console.log(`[认不出] A1mini-standard.toml 展开详情：状态=${tamperedFacts['状态'] ?? '(没有)'}`)
-if (!(tamperedFacts['状态'] ?? '').includes('内容异常')) {
-  problems.push(`认不出的那一份，状态该说「内容异常」，实测「${tamperedFacts['状态']}」`)
+/* 2026-10-06 状态词修订：修坏档与换新版同一管道，状态说「有更新」（原「内容异常」那档并进来了） */
+if (!(tamperedFacts['状态'] ?? '').includes('有更新')) {
+  problems.push(`认不出的那一份，状态该说「有更新」，实测「${tamperedFacts['状态']}」`)
 }
 const editBtns = await page.getByRole('button', { name: '改这份' }).count()
 console.log(`[认不出] 展开详情里「改这份」按钮：${editBtns} 个（展开的这一份内容存疑，该是 0）`)
@@ -999,7 +1012,8 @@ if (afterDelete.some((r) => r.name.includes('坏了的涂胶'))) {
   problems.push('删完那一行该从表里消失（列表以磁盘为准）')
 }
 
-/* ③ 正在使用的那一份不给删（菜单项灰掉、带原因） */
+/* ③ 正在使用的那一份**也给删**（2026-10-06 删除全面放开）——
+      确认框的代价句要说清"使用中会一并撤下"（见 removeConfirmDetail 的 live 分支） */
 const liveTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1018,11 +1032,11 @@ const removeItem = await page.evaluate(() => {
     : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
 })
 console.log(
-  `[第十层 · 删除闸] 正在使用那份右键「删除」：${removeItem === null ? '没有这一项' : `灰=${removeItem.disabled} 原因「${removeItem.why}」`}`,
+  `[第十层 · 删除放开] 正在使用那份右键「删除」：${removeItem === null ? '没有这一项' : `灰=${removeItem.disabled}`}`,
 )
 if (removeItem === null) problems.push('右键菜单里没有「删除」这一项')
-else if (!removeItem.disabled || !removeItem.why.includes('正在使用')) {
-  problems.push('正在使用的那一份「删除」该灰掉并说清原因')
+else if (removeItem.disabled) {
+  problems.push('正在使用的那一份现在也该给删（删除全面放开），实测灰的')
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
@@ -1069,25 +1083,29 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
 
-/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制） ---------- */
+/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件 + 官方 → 我的文件） ---------- */
 /*
- * 守五件事：
- *   ① 只有「我的文件」这一项能点（官方那份灰掉带原因：副本走「改这份」→ 保存）；
- *   ② 名字由**用户自己起**：抽屉**不预填**；
+ * 守六件事：
+ *   ① **官方交付行也开放了**（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+ *      与目录一致的官方 MKP 行，「另存为一份新的」**能点** —— 走完命名抽屉，
+ *      「我的文件」多出一份、官方原件那一行不动、提示条说清落在哪；
+ *      （内容存疑的那两档仍不许复制 —— 那条边界在 5f 量）
+ *   ② 名字由**用户自己起**：抽屉**不预填**（官方与我的两条都一样）；
  *   ③ 复制出来的是**独立的新文件**：新的一行在、旧的一行不动；血统原样带过去
  *      （新那份行上照样「基于旧版官方」）；内容按字节复制（新那份正文里还是改过的字）；
  *   ④ **不碰任何状态**：原来那份照样「已应用」；新那份不会自称使用中；也没把草稿顺走
  *      （再点「改这份」不是「上次改到一半」）；
  *   ⑤ **不覆盖、不自动改名**：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西。
  *
- * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不覆盖 /
- * 不碰状态）+ `copying_touches_no_state_at_all` 那几条。
+ * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new` / `mine::copy_release_as_new`
+ * （字节复制 / 血统不重算 / 不覆盖 / 不碰状态）+ `copying_touches_no_state_at_all`、
+ * `copying_a_release_*` 那几条。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
 
-/* ① 官方那一份：这一项灰掉、带原因 */
+/* ① 官方那一份：与目录一致 → 这一顶能点，走完一整条另存 */
 const officialTr11 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1106,11 +1124,47 @@ const copyBoundary = await page.evaluate(() => {
     : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
 })
 console.log(
-  `\n[第十一层 · 边界] 官方那份右键「另存为一份新的」：${copyBoundary === null ? '没有这一项' : `灰=${copyBoundary.disabled} 原因「${copyBoundary.why}」`}`,
+  `\n[第十一层 · 官方另存] 官方那份右键「另存为一份新的」：${copyBoundary === null ? '没有这一项' : `灰=${copyBoundary.disabled}`}`,
 )
 if (copyBoundary === null) problems.push('右键菜单里没有「另存为一份新的」这一项')
-else if (!copyBoundary.disabled || !copyBoundary.why.includes('改这份')) {
-  problems.push('官方那份的「另存为一份新的」该灰掉并说清走「改这份」→ 保存')
+else if (copyBoundary.disabled) {
+  problems.push(
+    `与目录一致的官方交付行「另存为一份新的」该能点（A1 的正路），实测灰的：${copyBoundary.why}`,
+  )
+} else {
+  await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
+  await page.waitForTimeout(300)
+  const relCopyDlg = page.getByRole('dialog', { name: '另存为一份新的' })
+  const relCopyNote = (await relCopyDlg.textContent()) ?? ''
+  console.log(
+    `[第十一层 · 官方另存] 抽屉说明：${relCopyNote.replace(/\s+/g, ' ').trim().slice(0, 120)}`,
+  )
+  if (!relCopyNote.includes('官方原件一个字节不动')) {
+    problems.push('官方另存抽屉要说清「官方原件一个字节不动」（统一保存口径）')
+  }
+  const relPrefill = await relCopyDlg.getByLabel('新的文件名').inputValue()
+  if (relPrefill !== '') problems.push('官方另存的名字该由用户自己起（输入框不该预填）')
+  await relCopyDlg.getByLabel('新的文件名').fill('我的 A1 标准涂胶.toml')
+  await relCopyDlg.getByRole('button', { name: '另存为' }).click()
+  await page.waitForTimeout(600)
+  const relDone = await page.evaluate(() =>
+    (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  )
+  console.log(`[第十一层 · 官方另存] 保存之后提示条：${relDone}`)
+  if (!relDone.includes('已另存为')) {
+    problems.push(`官方另存成功后提示条该说「已另存为…」，实测「${relDone}」`)
+  }
+  if (!relDone.includes('presets-mine/')) {
+    problems.push('官方另存成功后要说清落在哪（presets-mine/…）')
+  }
+  const afterRelCopy = await actions()
+  const relCopied = afterRelCopy.find((r) => r.name.includes('我的 A1 标准涂胶.toml'))
+  const relOriginal = afterRelCopy.find((r) => r.name.includes('A1-standard.toml'))
+  console.log(
+    `[第十一层 · 官方另存] 新的一份：${relCopied === undefined ? '(没出现)' : relCopied.name}；官方原件：${relOriginal === undefined ? '(不见了！)' : '还在'}`,
+  )
+  if (relCopied === undefined) problems.push('官方另存之后「我的文件」里该多出新的一份')
+  if (relOriginal === undefined) problems.push('官方另存不许动官方原件（原来那行该还在）')
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
@@ -1348,10 +1402,13 @@ const revealItemOf = () =>
   })
 
 /* ① 官方那份：灰掉带原因 */
+/* 官方那一份：用「下载区」副标题锁定（光按文件名匹配会撞上"复制自 A1-standard.toml"
+   的出处副标题 —— 另存放开后我的文件里就有这样的行了） */
 const officialTr13 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1-standard.toml' })
+  .filter({ hasText: '下载区 mkp' })
   .first()
 await officialTr13.click({ button: 'right' })
 await page.waitForTimeout(250)
@@ -1460,7 +1517,8 @@ if (clearCount !== 0) {
   problems.push('「撤销应用」已退役（作者 2026-10-04：不做取消应用，总得有一套在生效）——界面上不该再有它')
 }
 const pillText = await page.evaluate(() => {
-  const el = document.querySelector('main [class*="pill"]')
+  /* 状态 pill 是**span** —— div 那一批是导航 / 筛选 / 计数的 pill，class 模糊匹配会撞上 */
+  const el = document.querySelector('main span[class*="pill"]')
   return el === null ? '' : (el.textContent ?? '').replace(/\s+/g, ' ').trim()
 })
 console.log(`[撤销应用退役] pill 左拍：${pillText}`)
@@ -1549,8 +1607,9 @@ console.log(
   '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
     '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
-    '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；正在使用的不给删）（第十层），' +
-    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
+    '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；删除全面放开 —— 使用中的删了把使用一并撤下）（第十层），' +
+    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿），' +
+    '官方交付行也能直接另存成你自己的一份（UX 测试 A1 的正路：可信字节、血统指向来源、不碰任何状态）（第十一层），' +
     '导入入口（第十二层）：「导入文件…」按钮退役（拖拽是唯一入口）、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
     'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +
