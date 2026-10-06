@@ -11,8 +11,11 @@
 //!
 //! `with_ctx` 的锁**不可重入**：事务跑在锁里，若它回头调 `wb_generate` / `wb_publish`
 //! 这些命令壳，就是**自己把自己锁死**（挂死，不是报错）。
-//! 所以这一层的每一个函数**只收 `&Ctx`**，复用 [`super::build::generate_with`] /
-//! [`super::audit::publish_audit`] / [`super::delivery::publish_into`] 这些自由函数。
+//! 所以这一层的每一个函数**只借一次会话、绝不回头调命令壳**，复用
+//! [`super::build::generate_with`] / [`super::audit::publish_audit`] /
+//! [`super::delivery::publish_into`] 这些自由函数。`run` 收 `&mut Ctx`：
+//! 生成事务要直接落台账并同步会话态（2026-10-06 状态机修正），可变借出
+//! 仍是**一次**借出，锁纪律不变。
 //! 判据 `the_transaction_chain_never_calls_a_command_shell` 用源码扫描钉住这条。
 //!
 //! # 两条链在这里汇合，但不合并
@@ -29,6 +32,7 @@ use crate::error::AppError;
 
 use super::platform::{Hosting, RemoteReview, ReviewSpec, ReviewState};
 use super::{state, Ctx};
+use crate::workbench::domain::wording as w;
 
 /// **发布目标** —— 一次发布"发到哪个仓库、以谁的身份"，**来自发布账户配置**
 /// （[`super::account`]），不是从 `git remote` 推断（作者 2026-10-04 定死）。
@@ -219,14 +223,31 @@ impl TxOptions {
 ///
 /// ★ 步骤 1 的 `publish_audit` 是**纯读**（不写盘）—— 它红了这里一个字节都不落。
 pub fn run(
-    ctx: &Ctx,
+    ctx: &mut Ctx,
     opts: &TxOptions,
     target: Option<&PublishTarget>,
     hosting: Option<&dyn Hosting>,
     repo_root: Option<PathBuf>,
 ) -> Result<PublishTxReport, AppError> {
+    // ⓪ **草稿里挂着未保存的编辑 = 不许发布**（2026-10-06 状态机修正）。
+    //    发布渲染的是会话态 —— 草稿不干净时，渲染结果里会混进没保存过的值，
+    //    而 registry（值的真源）还是旧的：发出去的产物与提交进 git 的数据分属两代。
+    //    生成记录不在此列 —— 它住在台账、由生成事务落盘，与草稿无关。
+    //    这一步在任何写盘之前，红 = 零副作用。
+    if !ctx.draft.is_clean() {
+        let d = &ctx.draft;
+        return Err(
+            AppError::invalid_argument(w::PUBLISH_BLOCKED_BY_UNSAVED_EDITS).with_detail(format!(
+                "未保存的修改：值 {} 处 · 菜单 {} 处 · 套餐 {} 处。先「保存」，再发布。",
+                d.values.len(),
+                d.visibility.len(),
+                d.bundles.len()
+            )),
+        );
+    }
+
     // ① 审计：唯一入口判定器（与工作台界面的闸、cargo test 判据同一个函数）。
-    //    ★ 调**锁无关内核** `audit_with`，不是 `publish_audit` —— 事务跑在 `with_ctx` 里，
+    //    ★ 调**锁无关内核** `audit_with`，不是 `publish_audit` —— 事务跑在 `with_ctx_mut` 里，
     //    那个入口会再取一次（不可重入的）锁 = 自锁挂死（2026-10-04 真机卡死的根因）。
     let audit = super::audit::audit_with(ctx)?;
     let passed = audit
@@ -265,14 +286,24 @@ pub fn run(
     // ★ 生成**之前**先留一份"目录里登记的指纹"（2026-10-06，回执的「本次变化」用它）：
     //    生成会把这份 catalog 覆盖掉，事后就问不出"发布前是什么"了。
     //    读的**是目录登记的值**（`sha256`），不是文件系统 mtime —— 回执里每个数都要能对上目录。
-    let root = super::super::paths::delivery_root()?;
+    //    ★ 根从**会话那份 presets 的根**派生（与生成 / 审计同一条 `*_at` 派生）——
+    //    会话的数据树在哪，交付与定稿就落在哪。
+    //    （先 clone 成 owned：后面 generate_with 要可变借出会话。）
+    let presets_root = ctx.presets.root().to_path_buf();
+    let root = super::super::paths::delivery_root_at(&presets_root);
+    std::fs::create_dir_all(&root).map_err(|e| {
+        AppError::io("建不出发布目录").with_detail(format!("{}：{e}", root.display()))
+    })?;
     let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
     let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
 
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
     let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
-    let asset_root = super::super::paths::assets_root()?;
+    let asset_root = super::super::paths::assets_root_at(&presets_root);
+    std::fs::create_dir_all(&asset_root).map_err(|e| {
+        AppError::io("建不出资产目录").with_detail(format!("{}：{e}", asset_root.display()))
+    })?;
     let meta = super::delivery::PublishMeta {
         stamp: crate::workbench::clock::now_iso8601(),
         channel: "stable".to_owned(),
@@ -354,9 +385,12 @@ pub fn run(
     let branch = git.branch()?;
     report.branch = Some(branch.clone());
 
-    // stage 的候选 = 交付产物根 + 台账（与生成 / 定稿写的同一批）。
+    // stage 的候选 = 交付产物根 + 台账 + 结构签名 + 资产定义（与生成 / 定稿写的同一批）。
+    // ★ 台账（built.json）必须进 commit：生成事务直接落盘的那份记录与交付产物同代，
+    //   缺了它，main 上就是「产物新、台账旧」，干净检出（CI）的已生成判据必红。
     let candidates = vec![
         "presets/delivery/".to_owned(),
+        "workbench/built.json".to_owned(),
         "presets/structure-signatures.toml".to_owned(),
         "presets/assets.toml".to_owned(),
     ];
@@ -1026,6 +1060,66 @@ pub fn collapse_review_state(raw: &str) -> ReviewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::domain::patch::apply;
+    use crate::workbench::domain::testkit::Fixture;
+    use crate::workbench::domain::Level;
+    use crate::workbench::store::Store;
+
+    /// 一份挂在**临时目录**上的会话（与真仓库零接触）。
+    /// 生成/审计/发布的落盘全部从 `ctx.presets.root()` 派生 —— 就落在这份临时数据里。
+    fn fixture_ctx() -> (tempfile::TempDir, Ctx) {
+        let f = Fixture::load();
+        let (dir, presets) = f.into_parts();
+        let store = Store::at(dir.path().join("workbench"));
+        store.bootstrap().unwrap();
+        let ctx = Ctx::with(presets, store).unwrap();
+        (dir, ctx)
+    }
+
+    /// **脏草稿闸（2026-10-06 状态机修正）**：草稿里有未保存的编辑时，发布必须被
+    /// 硬拒（Err，不是回执档）—— 否则渲染出来的产物会混进没确认过的值，
+    /// 与 registry（值的真源）分属两代。
+    #[test]
+    fn publish_refuses_unsaved_edits() {
+        let (_dir, mut ctx) = fixture_ctx();
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[crate::workbench::domain::patch::Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        assert!(!ctx.draft.is_clean());
+
+        let err =
+            run(&mut ctx, &TxOptions::default(), None, None, None).expect_err("脏草稿必须被拒");
+        assert!(
+            err.message.contains(w::PUBLISH_BLOCKED_BY_UNSAVED_EDITS),
+            "拒绝话术要直接说清「先保存再发布」：{}",
+            err.message
+        );
+    }
+
+    /// **干净草稿过得去闸**：不为脏而脏 —— 闸只拦「有未保存编辑」这一件事，
+    /// 干净草稿要能走到审计（这份最简夹具过不了全部审计项，返回 BlockedAudit
+    /// 就是"过了脏草稿闸"的证据 —— Err 与回执档是两种返回，混不了）。
+    #[test]
+    fn a_clean_draft_reaches_the_audit() {
+        let (_dir, mut ctx) = fixture_ctx();
+        assert!(ctx.draft.is_clean());
+        let out =
+            run(&mut ctx, &TxOptions::default(), None, None, None).expect("干净草稿不该在闸上被拒");
+        assert_eq!(
+            out.stage,
+            PublishStage::BlockedAudit,
+            "最简夹具过不了全部审计项 —— 但这证明流程走过了脏草稿闸"
+        );
+    }
 
     /// 阶段枚举的线上形状（降成 camelCase 字符串）—— 前端按它画状态条，
     /// 发布历史按它落盘。**`wire_name()` 必须与 serde 逐字一致**（两处写法不许漂）。

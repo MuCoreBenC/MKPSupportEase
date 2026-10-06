@@ -174,10 +174,12 @@ pub fn publish_audit() -> Result<PublishAudit, AppError> {
 pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     let (c, d, _) = state(ctx)?;
     let book = Book::new(&ctx.presets, &c, &d);
-    let delivery_root = paths::delivery_root_path();
-    // ★ 只读定位（`assets_root_path`），不是 `assets_root()` —— 后者会 `create_dir_all`，
-    // 一个自称「只读：不写盘」的闸不该顺手造出一个目录
-    let asset_root = paths::assets_root_path();
+    // ★ 根从**会话那份 presets 的根**派生（`*_at`，与生成 / 发布同一条派生）——
+    // 审计查的就是这个会话要发的那一棵交付树
+    let delivery_root = paths::delivery_root_at(ctx.presets.root());
+    // ★ 只读定位，不 `create_dir_all` —— 一个自称「只读：不写盘」的闸
+    // 不该顺手造出一个目录
+    let asset_root = paths::assets_root_at(ctx.presets.root());
 
     let mut items: Vec<AuditItem> = Vec::with_capacity(16);
 

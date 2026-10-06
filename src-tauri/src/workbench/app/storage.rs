@@ -174,6 +174,32 @@ fn check_version(v: u32, rel: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/* ---------- 生成台账 ---------- */
+
+/// 把本批生成记录并进台账（`built.json`）并落盘。**生成事务唯一的台账出口**。
+///
+/// ★ 2026-10-06 状态机修正：生成记录**不再走草稿** —— 交付产物写出去的同一批事务里，
+/// 台账就在这里落盘。生成成功 = 台账已经是这一代，界面的「已生成」与干净检出（CI）
+/// 读的是同一个真值，「产物新、台账旧」的分裂状态从机制上不存在。
+///
+/// `updates` 空 = no-op 的生成 —— **一个字节都不写**（2026-10-05 裁定：没写文件就
+/// 不许动台账，否则 git/clean 永远红）。
+pub(super) fn merge_built_records(
+    store: &Store,
+    committed_built: &BTreeMap<String, BuiltRecord>,
+    updates: BTreeMap<String, BuiltRecord>,
+) -> Result<(), AppError> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let mut b = BuiltFile {
+        v: V,
+        records: committed_built.clone(),
+    };
+    b.records.extend(updates);
+    store.write_doc(BUILT_REL, &b)
+}
+
 /* ---------- 草稿 ---------- */
 
 pub fn read_draft(store: &Store) -> Result<Draft, AppError> {
@@ -215,7 +241,11 @@ pub struct SaveOutcome {
 /// 把草稿写回仓库。
 ///
 /// 值走 [`Presets::apply_values`] 一次写进 `machineVariants`，
-/// 其余（菜单、套餐、生成记录）还是本品 `workbench/*.json`。
+/// 其余（菜单、套餐）还是本品 `workbench/*.json`。
+///
+/// ★ **生成记录不归保存管**（2026-10-06 状态机修正）：台账由生成事务在写交付产物的
+/// 同一批直接落盘（[`merge_built_records`]）—— 草稿里没有生成记录，保存也就没有
+/// 「替生成收尾」的职责。保存前后 `built.json` 一个字节都不变。
 ///
 /// `presets` 是 `&mut` 的 —— 写值要动内存中那份文档
 pub fn save(
@@ -227,7 +257,7 @@ pub fn save(
     let edits = plan_value_edits(presets, committed, draft);
     presets.apply_values(&edits)?;
 
-    // ② 菜单 / 套餐 / 生成记录
+    // ② 菜单 / 套餐
     if !draft.visibility.is_empty() || !draft.bundles.is_empty() {
         let mut d = DeliveryFile {
             v: V,
@@ -237,14 +267,6 @@ pub fn save(
         d.visibility.extend(draft.visibility.clone());
         d.bundles.extend(draft.bundles.clone());
         store.write_doc(DELIVERY_REL, &d)?;
-    }
-    if !draft.built.is_empty() {
-        let mut b = BuiltFile {
-            v: V,
-            records: committed.built.clone(),
-        };
-        b.records.extend(draft.built.clone());
-        store.write_doc(BUILT_REL, &b)?;
     }
 
     // ③ 草稿清空
@@ -623,20 +645,27 @@ mod tests {
             &mut draft,
             &c,
             &presets.registry,
-            &[
-                Patch::SetVisibility {
-                    file_id: "a1_mkp_standard".to_owned(),
-                    visibility: Visibility::ArchiveOnly,
-                },
-                Patch::MarkBuilt {
-                    uids: vec!["A1/STANDARD".to_owned()],
-                    stamp: "2026-01-01T00:00:00Z".to_owned(),
-                    fingerprints: BTreeMap::from([("A1/STANDARD".to_owned(), "fp-abc".to_owned())]),
-                },
-            ],
+            &[Patch::SetVisibility {
+                file_id: "a1_mkp_standard".to_owned(),
+                visibility: Visibility::ArchiveOnly,
+            }],
         )
         .unwrap();
         save(&s, &mut presets, &c, &draft).unwrap();
+
+        // 台账走**生成事务**的出口落盘（2026-10-06 状态机修正：与保存无关）
+        merge_built_records(
+            &s,
+            &c.built,
+            BTreeMap::from([(
+                "A1/STANDARD".to_owned(),
+                BuiltRecord {
+                    stamp: "2026-01-01T00:00:00Z".to_owned(),
+                    fingerprint: "fp-abc".to_owned(),
+                },
+            )]),
+        )
+        .unwrap();
 
         let again = load(&s, &presets).unwrap().committed;
         assert_eq!(
@@ -646,6 +675,30 @@ mod tests {
         );
         assert_eq!(again.built["A1/STANDARD"].fingerprint, "fp-abc");
         assert_eq!(again.built["A1/STANDARD"].stamp, "2026-01-01T00:00:00Z");
+    }
+
+    /// 台账的 no-op 出口**一个字节都不写** —— 空更新的 merge 调用前后，文件得原样
+    #[test]
+    fn an_empty_ledger_update_writes_nothing() {
+        let (d, s) = store();
+        // 先落一笔，拿到「已有台账」的基线字节
+        merge_built_records(
+            &s,
+            &BTreeMap::new(),
+            BTreeMap::from([(
+                "A1/STANDARD".to_owned(),
+                BuiltRecord {
+                    stamp: "s".to_owned(),
+                    fingerprint: "fp".to_owned(),
+                },
+            )]),
+        )
+        .unwrap();
+        let path = d.path().join("built.json");
+        let before = std::fs::read(&path).unwrap();
+        merge_built_records(&s, &BTreeMap::new(), BTreeMap::new()).unwrap();
+        let after = std::fs::read(&path).unwrap();
+        assert_eq!(before, after, "空更新不许碰台账（连修改时间都不该有意义）");
     }
 
     /// 干净草稿**不留空文件** —— 留着的话「有没有未保存改动」在文件系统上看不出来

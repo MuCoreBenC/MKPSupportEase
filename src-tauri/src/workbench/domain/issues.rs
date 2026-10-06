@@ -621,6 +621,7 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::domain::patch::BuiltRecord;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
@@ -1006,22 +1007,19 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let c = committed();
         let mut d = Draft::default();
 
-        // 先按当前配方「生成」一次（记下指纹）
+        // 先按当前配方「生成」一次（记进**台账**，2026-10-06 状态机修正）
+        let mut c = c;
         let fp = Book::new(&f.presets, &c, &d)
             .version_layers("A1/STANDARD")
             .unwrap()
             .fingerprint();
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::MarkBuilt {
-                uids: vec!["A1/STANDARD".to_owned()],
+        c.built.insert(
+            "A1/STANDARD".to_owned(),
+            BuiltRecord {
                 stamp: "2026-01-01T00:00:00Z".to_owned(),
-                fingerprints: [("A1/STANDARD".to_owned(), fp)].into_iter().collect(),
-            }],
-        )
-        .unwrap();
+                fingerprint: fp,
+            },
+        );
 
         // 产物跟得上配方 → 没有这条提示
         let r = inspect(&Book::new(&f.presets, &c, &d));

@@ -71,13 +71,13 @@ use crate::ipc::traced;
 use crate::workbench::clock;
 use crate::workbench::domain::derive::Book;
 use crate::workbench::domain::issues::{self, Report};
-use crate::workbench::domain::patch::Patch;
+use crate::workbench::domain::patch::{BuiltRecord, Patch};
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::Level;
 use crate::workbench::paths;
 use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
-use super::{state, with_ctx};
+use super::{state, with_ctx, with_ctx_mut};
 
 /// 发布渠道。原先是上游 manifest 的 `compat.channel`；上游整层删掉后，
 /// 工作台自己发的是正式渠道，定成常量
@@ -417,10 +417,8 @@ pub struct GenerateReport {
     pub unchanged: Vec<String>,
     /// 跳过的（暂无资源）+ 原因
     pub skipped: Vec<(String, String)>,
-    /// 生成记录要走 `wb_apply_draft` 落进草稿，所以把 patch 交给前端。
-    /// **`None` = 一行都没记**（全部无变化且台账已对上）—— 前端跳过 applyDraft，
-    /// 草稿一个字节都不动，`built.json` 连修改时间都不变。
-    pub mark: Option<Patch>,
+    // 没有生成记录字段：台账（built.json）在生成事务里直接落盘，报告不再携带
+    // 它、前端也不再回填草稿（2026-10-06 状态机修正）。
 }
 
 /// 这次要生成哪些（`todo`）与跳过了哪些（带原因）。
@@ -469,13 +467,14 @@ fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, S
 
 /// 生成。**有阻断时直接拒绝** —— 那是全程唯一的硬闸门。
 ///
-/// ★ 它是 [`generate_with`] 的薄壳（`with_ctx` + trace）。真正的写在那个收 `&Ctx`
-/// 的自由函数里 —— **发布事务要复用同一台生成器**，而它已经在 `with_ctx` 里了
-/// （锁不可重入），只能调自由函数。
+/// ★ 它是 [`generate_with`] 的薄壳（`with_ctx_mut` + trace）。真正的写在那个收
+/// `&mut Ctx` 的自由函数里 —— **发布事务要复用同一台生成器**，而它已经在
+/// `with_ctx_mut` 里了（锁不可重入），只能调自由函数。要可变借出，是因为生成
+/// 事务要把台账记进 `built.json` 并同步会话内的 committed（见 [`generate_with`]）。
 #[tauri::command]
 pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
-        with_ctx(|ctx| generate_with(ctx, &scope))
+        with_ctx_mut(|ctx| generate_with(ctx, &scope))
     })
 }
 
@@ -483,10 +482,14 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
 ///
 /// 与 [`preview_with`] 是同一条理由（见那里）：「生成前预演」与「真生成」、
 /// 「发布事务里的生成」必须是**同一批 todo、同一处渲染、同一处落点**。
-/// 命令壳只负责 `with_ctx` + trace。
+/// 命令壳只负责 `with_ctx_mut` + trace。
 ///
-/// ⚠ **它会写盘**（产物 + 快照 + catalog）。调用方负责先过闸（[`issues::inspect`]）。
-pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
+/// ⚠ **它会写盘**（产物 + 快照 + **台账** + catalog）。调用方负责先过闸
+/// （[`issues::inspect`]）。
+pub(super) fn generate_with(
+    ctx: &mut super::Ctx,
+    scope: &Scope,
+) -> Result<GenerateReport, AppError> {
     let (c, d, _) = state(ctx)?;
     let book = Book::new(&ctx.presets, &c, &d);
 
@@ -505,16 +508,18 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     }
 
     // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
-    // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）
-    let delivery_root = paths::delivery_root()?
-        .join(super::delivery::MKP_DIR)
-        .join("presets");
+    // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）。
+    // 根从**会话那份 presets 的根**派生（与 `product_on_disk` 同一条同源规矩），
+    // 不绕全局 repo_root —— 会话的数据树在哪，交付就落在哪。
+    let presets_root = ctx.presets.root();
+    let delivery_root = paths::delivery_root_at(presets_root).join(super::delivery::MKP_DIR);
+    let delivery_mkp = delivery_root.join("presets");
     let mut written = Vec::new();
     let mut unchanged = Vec::new();
     let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
 
     for r in &rendered {
-        let target = delivery_root.join(&r.file_name);
+        let target = delivery_mkp.join(&r.file_name);
         let existing = std::fs::read_to_string(&target).ok();
         let same = existing
             .as_deref()
@@ -543,6 +548,30 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
         }
     }
 
+    let stamp = clock::now_iso8601();
+
+    /* ★★ **台账与产物同一批事务落盘**（2026-10-06 状态机修正）。
+    生成记录曾经装进报告交前端回填草稿、等下一次「保存」才进 built.json ——
+    那允许「交付文件已是新字节、台账还是上一代」的中间态存在：本机（草稿叠加态）
+    显示已生成，干净检出（CI）判待生成，提交/发布把分裂状态写进 git。现在生成
+    记录在这里**直接落盘**（[`super::storage::merge_built_records`]）：生成完成
+    = 台账已是这一代，不再有「生成完还得记得保存」这个 UX，也不再需要它。
+    落盘之后同步会话内的 committed —— 界面的「已生成」读的就是这份内存态。 */
+    let updates: BTreeMap<String, BuiltRecord> = fingerprints
+        .iter()
+        .map(|(uid, fp)| {
+            (
+                uid.clone(),
+                BuiltRecord {
+                    stamp: stamp.clone(),
+                    fingerprint: fp.clone(),
+                },
+            )
+        })
+        .collect();
+    super::storage::merge_built_records(&ctx.store, &c.built, updates.clone())?;
+    ctx.committed.built.extend(updates);
+
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
     // 跟上，delivery 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
     //（「下载失败：响应比目录登记的大」真机踩了两回）。收尾把 catalog.json
@@ -552,13 +581,13 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     // 引用资产（图标 / BBS / 模型）也补进交付根：目录里登记了它们（按源字节
     // 算的 SHA），文件不在 = 客户端 404（作者真机看到的「目录登记了，文件不在」
     // ×7）。先补文件、再重算目录，两头对上。
-    let dist_root = paths::delivery_root()?;
-    if let Ok(asset_root) = paths::assets_root() {
-        super::delivery::write_content(&dist_root, &asset_root, &book)?;
-    }
-    super::delivery::write_catalog_json(&dist_root, &book, &clock::now_iso8601())?;
+    let dist_root = paths::delivery_root_at(presets_root);
+    let asset_root = paths::assets_root_at(presets_root);
+    std::fs::create_dir_all(&asset_root)
+        .map_err(|e| AppError::io("建不出资产目录").with_detail(e.to_string()))?;
+    super::delivery::write_content(&dist_root, &asset_root, &book)?;
+    super::delivery::write_catalog_json(&dist_root, &book, &stamp)?;
 
-    let stamp = clock::now_iso8601();
     tracing::info!(
         written = written.len(),
         unchanged = unchanged.len(),
@@ -566,13 +595,7 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
         "生成完成"
     );
     Ok(GenerateReport {
-        // 一行都没记（全部无变化且台账已对上）→ 没有 patch：
-        // 前端跳过 applyDraft，草稿不动 —— 「没真的生成就不写任何东西」。
-        mark: (!fingerprints.is_empty()).then(|| Patch::MarkBuilt {
-            uids: fingerprints.keys().cloned().collect(),
-            stamp: stamp.clone(),
-            fingerprints,
-        }),
+        // 台账已经在上面落盘 —— 报告里不再带生成记录（草稿与生成记录彻底无关）。
         stamp,
         written,
         unchanged,
@@ -1013,7 +1036,7 @@ pub fn wb_publish(
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
-        let report = with_ctx(|ctx| {
+        let report = with_ctx_mut(|ctx| {
             super::publish_tx::run(
                 ctx,
                 &opts,
@@ -1276,6 +1299,173 @@ mod tests {
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use crate::workbench::store::Store;
     use std::collections::BTreeSet;
+
+    /* ---------- 生成 × 台账（2026-10-06 状态机修正的判据） ---------- */
+
+    use super::super::Ctx;
+    use crate::runtime::catalog::Catalog as RuntimeCatalog;
+    use crate::workbench::domain::BuildState as TestBuildState;
+    use crate::workbench::presets::AssetKind as TestAssetKind;
+
+    /// 一份挂在临时目录上的会话 + 一份被引用的 BBS 资产文件（write_content 的健检要它）。
+    /// 生成 / 台账 / 快照 / catalog 的落盘全部从 `ctx.presets.root()` 派生 —— 与真仓库零接触。
+    fn fixture_ctx() -> (tempfile::TempDir, Ctx) {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let (dir, presets) = f.into_parts();
+        // 夹具引用的资产文件落齐（write_content 的健检要求真实存在）：
+        // 两台机型的图标 + A1 的机型图 + A1 的 BBS 曲线。
+        // 写盘走 atomic_write —— 写盘纪律对测试同样生效。
+        for rel in ["icons/a1.svg", "icons/p1s.svg", "printers/a1.webp"] {
+            let p = dir.path().join("presets/assets").join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&p, b"asset").unwrap();
+        }
+        let bbs = dir.path().join("presets/assets/bbs/A1");
+        std::fs::create_dir_all(&bbs).unwrap();
+        crate::fsx::atomic::atomic_write(&bbs.join("process.json"), br#"{"x":1}"#).unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        store.bootstrap().unwrap();
+        (dir, Ctx::with(presets, store).unwrap())
+    }
+
+    /// ★ **生成成功 = 台账已经落盘**：不调用 `wb_save`，`built.json` 里就有本批的
+    /// 新指纹，且与「现在会渲染出来的」同一代 —— 这就是「产物新、台账旧」那个
+    /// 分裂状态的墓碑（真机踩过：本机 Built、CI Stale）。
+    #[test]
+    fn generation_writes_the_ledger_in_the_same_transaction() {
+        let (dir, mut ctx) = fixture_ctx();
+
+        let report = generate_with(&mut ctx, &Scope::All).expect("生成成功");
+        assert!(!report.written.is_empty(), "首生成必须真写了东西");
+
+        // **绕开会话**直接读盘（干净检出的视角）：台账里有本批每一笔
+        let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
+        let empty = Draft::default();
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        for uid in &report.written {
+            let rec = loaded
+                .committed
+                .built
+                .get(uid)
+                .unwrap_or_else(|| panic!("台账里必须有 {uid} —— 生成与落账是同一批"));
+            let fp = book.version_layers(uid).unwrap().fingerprint();
+            assert_eq!(
+                rec.fingerprint, fp,
+                "{uid} 的台账指纹必须是这一代的渲染指纹"
+            );
+            // 干净 Book（无草稿）上就是已生成
+            assert_eq!(book.build_state(uid), TestBuildState::Built);
+        }
+        // 草稿从头到尾没被生成碰过
+        assert!(ctx.draft.is_clean(), "生成不写草稿 —— 它不是编辑");
+
+        // catalog 登记的 sha 与交付真字节同一代
+        let catalog = RuntimeCatalog::parse(
+            &std::fs::read(
+                dir.path()
+                    .join("presets/delivery")
+                    .join(crate::workbench::app::delivery::NEW_CATALOG_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        for f in &catalog.files {
+            if let Some(sha) = &f.sha256 {
+                let bytes = std::fs::read(dir.path().join("presets").join(&f.path)).unwrap();
+                assert_eq!(
+                    preset::lineage::sha256_hex(&String::from_utf8_lossy(&bytes)),
+                    *sha,
+                    "{} 的 catalog 登记与真字节必须一致",
+                    f.path
+                );
+            }
+        }
+    }
+
+    /// ★ **销毁草稿不能把已生成翻成待生成** —— 之前 CI 红的那条链
+    /// （生成 → 不保存 → 本机 Built → 草稿一没就 Stale）从这里开始不再成立：
+    /// 台账在磁盘上，草稿是死是活与生成状态无关。连「旧版快照里还带着
+    /// built 字段」那种历史文件也只被当草稿编辑态解析，翻不了账。
+    #[test]
+    fn destroying_the_draft_cannot_flip_built_back_to_stale() {
+        let (dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All).expect("生成成功");
+
+        // 造一份**带着旧 built 字段的草稿快照**（老版本工作台写出来的形状）
+        let legacy = serde_json::json!({
+            "values": {},
+            "visibility": {},
+            "bundles": {},
+            "built": { "A1/STANDARD": { "stamp": "old", "fingerprint": "deadbeef" } }
+        });
+        let draft_file = dir.path().join("workbench").join(Store::DRAFT_REL);
+        std::fs::create_dir_all(draft_file.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&draft_file, legacy.to_string().as_bytes()).unwrap();
+
+        // 干净检出视角：重新从盘上载入（草稿读回来 + 台账读回来）→ 仍然是已生成
+        let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
+        let draft = super::super::storage::read_draft(&ctx.store).unwrap();
+        let book = Book::new(&ctx.presets, &loaded.committed, &draft);
+        assert_eq!(
+            book.build_state("A1/STANDARD"),
+            TestBuildState::Built,
+            "草稿快照里的旧 built 记录不得覆盖台账"
+        );
+
+        // 把草稿整个删掉（等于从没保存过任何草稿）→ 还是已生成
+        std::fs::remove_file(&draft_file).unwrap();
+        let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
+        let empty = Draft::default();
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        assert_eq!(book.build_state("A1/STANDARD"), TestBuildState::Built);
+    }
+
+    /// no-op 的生成**连台账都不碰**：字节没变、指纹全对上时，built.json 原样
+    ///（2026-10-05 裁定在生成事务层依然成立 —— git/clean 不因为"看了一眼"变红）。
+    #[test]
+    fn a_noop_generation_leaves_the_ledger_byte_identical() {
+        let (dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All).expect("首次生成");
+
+        let ledger = dir.path().join("workbench").join("built.json");
+        let before = std::fs::read(&ledger).unwrap();
+
+        let report = generate_with(&mut ctx, &Scope::Stale).expect("二次生成");
+        assert!(report.written.is_empty(), "没有新东西要写");
+        // 一切都对得上 → 计划清单是空的（既没有要写的，也没有要跳过的）
+
+        let after = std::fs::read(&ledger).unwrap();
+        assert_eq!(before, after, "no-op 生成不许动台账（逐字节）");
+    }
+
+    /// 台账里的指纹就是渲染指纹 → 每一份有产物的版本都该是「已生成」；
+    /// A2L 那种「暂无资源」不参与（它是没有东西可生成，不是生成过没生成过）。
+    #[test]
+    fn every_renderable_version_reads_built_after_a_full_generation() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All).expect("全量生成");
+
+        let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
+        let empty = Draft::default();
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        for uid in ["A1/STANDARD", "A1/FAST", "P1S/LITE"] {
+            assert_eq!(
+                book.build_state(uid),
+                TestBuildState::Built,
+                "{uid} 在全量生成后必须是已生成"
+            );
+        }
+        // 资产台账上的 mkp 条目也全部「在」—— 另一条 CI 判据（资产清单完整）的形状
+        let list =
+            crate::workbench::app::assets::wb_assets(None, None, None, None, None, None).unwrap();
+        let missing: Vec<&str> = list
+            .assets
+            .iter()
+            .filter(|a| a.kind == TestAssetKind::MkPreset && !a.present)
+            .map(|a| a.id.as_str())
+            .collect();
+        assert!(missing.is_empty(), "mkp 资产不该有「不在」的：{missing:?}");
+    }
 
     /* ---------- 对照基线（b05 Task 14.9） ---------- */
 

@@ -549,9 +549,6 @@ export function WorkbenchApp() {
             book={book}
             words={words}
             onGoto={goto}
-            onApply={async (label, patches) => {
-              await run(label, patches, 'undo')
-            }}
             onSave={save}
             onBookRefresh={refreshBook}
           />
@@ -611,9 +608,6 @@ export function WorkbenchApp() {
             report={report}
             tick={tick}
             onGoto={goto}
-            onApply={async (label, patches) => {
-              await run(label, patches, 'undo')
-            }}
             onSave={save}
             onBookRefresh={refreshBook}
           />

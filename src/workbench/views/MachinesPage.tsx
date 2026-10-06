@@ -56,8 +56,6 @@ interface Props {
   book: BookView
   words: Words
   onGoto: (view: string, focus?: GotoFocus) => void
-  /** 草稿写入口（撤销栈归外壳）。本页只有「生成记录」这一种 patch 从这里过 */
-  onApply: (label: string, patches: import('../api').Patch[]) => Promise<void>
   /** 外壳的保存。生成按钮在草稿脏时给的「先落盘再生成」就是它 */
   onSave: () => Promise<boolean>
   /** 结构性写（建 / 删 / 复制）之后让外壳重取整本 —— 徽章的机型版本数跟着走 */
@@ -90,7 +88,7 @@ const STATE_TAG: Record<string, string> = {
   noResources: s.tagBuildNone,
 }
 
-export default function MachinesPage({ book, words, onGoto, onApply, onSave, onBookRefresh }: Props) {
+export default function MachinesPage({ book, words, onGoto, onSave, onBookRefresh }: Props) {
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const rail = useSplitRail('machines', bodyRef)
@@ -349,15 +347,8 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
       if (node === undefined) return
       try {
         const rep = await wb.generate({ picked: [node.uid] })
-        // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）。
-        // ★ mark 为 null = 一行都没记（无变化且台账已对上）—— 跳过 applyDraft，
-        //   草稿不动、built.json 不变
-        if (rep.mark) {
-          await onApply(
-            `生成记录：${rep.written.length + rep.unchanged.length} 份`,
-            [rep.mark],
-          )
-        }
+        // 生成记录由**后端生成事务直接落进台账**（built.json）—— 前端不再回填草稿，
+        // 生成完成 = 台账已是这一代（2026-10-06 状态机修正）。
         const file = rowOf(node.uid)?.mkpFile
         toasts.push(
           `已生成 ${file ?? '预设'}：写出 ${rep.written.length} 份` +
@@ -367,7 +358,7 @@ export default function MachinesPage({ book, words, onGoto, onApply, onSave, onB
         toasts.push(isAppError(e) ? e.message : String(e))
       }
     },
-    [nodeOf, onApply, rowOf],
+    [nodeOf, rowOf],
   )
 
   /** 先落盘再生成 —— 一个按钮两个动作，顺序规定死：先保存，成了才生成 */
