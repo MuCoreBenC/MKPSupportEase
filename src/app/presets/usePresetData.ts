@@ -259,9 +259,20 @@ export interface PresetData {
   copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
    * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
-   * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
+   * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
+   * 一并清掉；代价由页面的确认框讲清。
    */
   remove: (path: string) => Promise<void>
+  /**
+   * **删除本机那份官方交付文件**（2026-10-06 一切皆可删）：删了回「未下载」，
+   * 随时可从云端重下。回来**重读官方线**（那一行 + 归档清单一起刷新）。
+   */
+  removeRelease: (fileName: string) => Promise<void>
+  /**
+   * **删除归档区一份旧版本**（2026-10-06 允许删，代价讲清：删了找不回）。
+   * 回来重读官方线（归档清单以盘为准）。
+   */
+  removeArchived: (path: string) => Promise<void>
   /**
    * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
    * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
@@ -678,6 +689,27 @@ export function usePresetData(importRevision = 0): PresetData {
     setMine(await api.getUserPresetFiles())
   }, [])
 
+  /*
+   * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读官方线 ——
+   * 那一行回「未下载」，归档清单跟着刷新（`readRelease` 连归档一起读）。
+   */
+  const removeRelease = useCallback(
+    async (fileName: string) => {
+      await api.deleteDeliveryFile(fileName)
+      setRelease(await readRelease())
+    },
+    [readRelease],
+  )
+
+  /* 删除归档区一份旧版本（代价讲清在确认框）：同样重读官方线，清单以盘为准 */
+  const removeArchived = useCallback(
+    async (path: string) => {
+      await api.deleteArchivedFile(path)
+      setRelease(await readRelease())
+    },
+    [readRelease],
+  )
+
   /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
     const done = await api.copyUserPreset(path, newName)
@@ -735,6 +767,8 @@ export function usePresetData(importRevision = 0): PresetData {
     commitDraft,
     rename,
     remove,
+    removeRelease,
+    removeArchived,
     copyAsNew,
     reveal,
   }

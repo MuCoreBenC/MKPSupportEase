@@ -686,15 +686,10 @@ export const mockApi: MkpApi = {
   async deleteUserPreset(path) {
     const i = mockMine.findIndex((f) => f.path === path)
     if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
-    if (mockActive?.origin === 'mine' && mockActive.path === path) {
-      throw new Error(
-        `${path} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。先换成别的配置、或者撤销使用，再来删`,
-      )
-    }
+    /* 与真机同语义（2026-10-06 一切皆可删）：属于这一份的状态一并清掉，不再拦 */
+    if (mockActive?.origin === 'mine' && mockActive.path === path) mockActive = null
     if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
-      throw new Error(
-        `${path} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删`,
-      )
+      mockDraft = null
     }
     mockMine.splice(i, 1)
     mockMineText.delete(path)
@@ -883,6 +878,16 @@ export const mockApi: MkpApi = {
   /** 浏览器里没有下载区也没有源：与 downloadFiles 同一条口径，不假装下载成功 */
   async downloadCatalogFile() {
     throw new NotImplementedError('downloadCatalogFile')
+  },
+
+  /** 浏览器里没有下载区：没有那份文件可删 —— 与 downloadCatalogFile 同一条口径 */
+  async deleteDeliveryFile() {
+    throw new NotImplementedError('deleteDeliveryFile：浏览器里没有下载区')
+  },
+
+  /** 浏览器里没有归档区：与 readArchivedText 同一条口径 */
+  async deleteArchivedFile() {
+    throw new NotImplementedError('deleteArchivedFile：浏览器里没有归档区')
   },
 
   async downloadCatalogFiles(fileNames) {

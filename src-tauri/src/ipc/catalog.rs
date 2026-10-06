@@ -621,6 +621,46 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
         .map_err(|e| AppError::internal("读归档没跑到终局").with_detail(e.to_string()))?
 }
 
+/* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
+
+/// **删除本机那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+///
+/// 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
+/// 删之前把属于这一份的**状态**一并清掉：使用中指针（官方线认文件名）撤下、
+/// 没保存的草稿一并丢弃 —— 界面确认框讲清这一步。事件账与归档**不动**（历史事实）。
+#[tauri::command]
+pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("deleteDeliveryFile", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let active = runtime::state::load_active(&root)?;
+        let draft = runtime::state::load_draft(&root)?;
+        if active.as_ref().is_some_and(|a| {
+            a.origin == runtime::state::ActiveOrigin::Official && a.file_name == file_name
+        }) {
+            runtime::state::clear_active(&root)?;
+        }
+        if draft
+            .as_ref()
+            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::official(&file_name))
+        {
+            runtime::state::clear_draft(&root)?;
+        }
+        runtime::delivery::delete_downloaded(&root, &catalog, &file_name)
+    })
+}
+
+/// **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删，代价讲清 ——
+/// 云端只有最新版，这一版删了就找不回）。版本链与事件账**不动**
+/// （历史事实，不是这份文件的附属）。
+#[tauri::command]
+pub async fn delete_archived_file(app: AppHandle, path: String) -> Result<(), AppError> {
+    traced("deleteArchivedFile", |_| {
+        let root = internal_root(&app)?;
+        runtime::delivery::delete_archived(&root, &path)
+    })
+}
+
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */
 
 /// 给界面的使用中状态：指针 + 认得出的机型/版本 + 文件是否还是当时那份

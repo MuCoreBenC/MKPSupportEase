@@ -503,9 +503,60 @@ pub fn archived_files(internal_root: &Path) -> Vec<ArchivedFile> {
     out
 }
 
-/* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
+/* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
 
-/// 盘上这一份**官方文件**我们认得出是哪一版吗。
+/// 删除本机下载区里的一份官方交付文件。
+///
+/// 为什么可以删：删了它回到「未下载」，随时可以从云端重新下载 —— 字节有目录 SHA
+/// 锚定，**零数据损失**。此前的「不在这里删」是把"对不上目录时该修"错当成了"不许动"。
+///
+/// - 认 `file_name`（目录的键，与下载 / 应用同一套口径）；
+/// - **正在使用 / 有草稿不归这里管**：使用中指针与草稿由调用方（ipc）先撤下 ——
+///   文件层只管文件；
+/// - 幂等：本来就不在（已经删过 / 被外部动了）也算成功 —— 目标状态就是"不在"；
+/// - **事件账与归档不动**：`DeliveryDownloaded` / `DeliveryReplaced` 是历史事实，
+///   不是这份文件的附属；以后重新下载，新事件追加，读侧取最后一条。
+pub fn delete_downloaded(
+    internal_root: &Path,
+    catalog: &super::Catalog,
+    file_name: &str,
+) -> Result<(), AppError> {
+    let file = catalog
+        .files
+        .iter()
+        .find(|f| f.file_name == file_name)
+        .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+    let target = resolve_in(internal_root, &file.path)?;
+    remove_file_idempotent(&target, file_name)
+}
+
+/// 删除归档区里的一份旧版本（入参 = [`archived_files`] 给的那条相对路径）。
+///
+/// 允许删，但代价要讲清（界面确认框的事）：**云端只有最新版，这一版删了就找不回**。
+/// 版本链（`archive/catalogs/`）与事件账**不动** —— 它们是历史事实；只是删掉的
+/// 那份字节从此不在归档清单里。归档"保留最早一份、不覆盖"是**写侧**策略，与
+/// "允许用户删"不冲突。
+pub fn delete_archived(internal_root: &Path, path: &str) -> Result<(), AppError> {
+    let prefix = format!("{}/", super::paths::ARCHIVE_DIR);
+    if !path.starts_with(&prefix) {
+        return Err(AppError::invalid_argument(format!(
+            "只认归档区（{prefix}…）里的路径，别的不是旧版本"
+        )));
+    }
+    let target = resolve_in(internal_root, path)?;
+    remove_file_idempotent(&target, path)
+}
+
+/// 删一个文件；不存在 = 已是目标状态，照实成功（幂等）
+fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
+    match std::fs::remove_file(target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(AppError::io(format!("{what} 删不掉")).with_detail(e.to_string())),
+    }
+}
+
+/* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
 ///
 /// 四个答案，**只回答"本机这份是不是我们认可的官方内容"**——不掺"云端有没有更新"
 /// （那是 [`super::update::check`] 的问题，比的是目录指纹，与本机的字节无关）。
@@ -1375,6 +1426,53 @@ mod tests {
         assert_eq!(got.len(), 1, "只有旧份本身");
         assert_eq!(got[0].file_name, "A1-standard.toml");
         assert_eq!(got[0].sha256, sha_hex("旧份".as_bytes()));
+    }
+
+    /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
+
+    /// 删交付区那份：盘上没了 = 回到「未下载」；**事件账不动**（历史事实，
+    /// 以后重下追加新事件）；幂等 —— 再删一次也成功
+    #[test]
+    fn delete_downloaded_removes_only_the_disk_copy() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        let file = entry("A1-standard.toml", "内容".as_bytes());
+        deliver(root.path(), &file, &MemorySource("内容".as_bytes().to_vec())).unwrap();
+
+        delete_downloaded(root.path(), &catalog_with(vec![file.clone()]), "A1-standard.toml")
+            .unwrap();
+        assert!(downloaded_files(root.path(), &catalog_with(vec![file])).is_empty());
+        // 事件账还在：删的是文件，不是历史
+        assert_eq!(preset_events::load(root.path()).len(), 1);
+
+        // 幂等：再删一次（已经不在）照实成功
+        delete_downloaded(root.path(), &catalog_with(vec![entry("A1-standard.toml", b"x")]), "A1-standard.toml")
+            .unwrap();
+    }
+
+    /// 删归档那份：清单里没了；版本链与事件账不动；目录之外的路径不认（防穿越）
+    #[test]
+    fn delete_archived_removes_only_that_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        let v1 = entry("A1-standard.toml", "版本一".as_bytes());
+        let v2 = entry("A1-standard.toml", "版本二".as_bytes());
+        deliver(root.path(), &v1, &MemorySource("版本一".as_bytes().to_vec())).unwrap();
+        deliver(root.path(), &v2, &MemorySource("版本二".as_bytes().to_vec())).unwrap();
+        assert_eq!(archived_files(root.path()).len(), 1);
+
+        delete_archived(root.path(), "archive/mkp/A1-standard.toml").unwrap();
+        assert!(archived_files(root.path()).is_empty());
+        // 事件账与下载区都不动
+        assert!(!preset_events::load(root.path()).is_empty());
+        assert_eq!(
+            std::fs::read(root.path().join("mkp/A1-standard.toml")).unwrap(),
+            "版本二".as_bytes()
+        );
+
+        // 防穿越：只认归档区前缀
+        assert!(delete_archived(root.path(), "mkp/A1-standard.toml").is_err());
+        assert!(delete_archived(root.path(), "../外面.toml").is_err());
     }
 
     /// 归档槽**保留最早一份**（不覆盖）—— 所以连升两版之后，列出来仍然只有一份、

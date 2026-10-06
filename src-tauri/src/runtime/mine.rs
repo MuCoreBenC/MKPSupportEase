@@ -61,7 +61,6 @@ use crate::fsx::paths::MINE_DIR;
 use super::catalog::kind::PRESET;
 use super::catalog::Catalog;
 use super::lineage::{self, Lineage};
-use super::state::{ActiveOrigin, ActivePreset, PresetDraft};
 
 /// 读血统时最多看文件头这么多字节。
 ///
@@ -629,39 +628,16 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 /// （作者 2026-10-02 定死：`archive/` 是官方版本生命周期的一部分，用户自己删自己的文件
 /// 不搞第二套"用户历史"）。
 ///
-/// 两道硬闸都在入口（`active` / `draft` 由调用方从 `run/` 读出来传进来）：
-///
-/// - **正在使用的那一份不许删**：删了 `run/active-preset.json` 就指向一份不存在的文件
-///   （悬空的"使用中"）。先换用别的配置、或者撤销使用，再来删；
-/// - **还有没保存的草稿不许删**：删了那张草稿就成一张永远存不回去的纸（写回要文件在）。
-///   先「保存回我这份」或「放弃这次编辑」，再来删。
-pub fn delete_file(
-    user_root: &Path,
-    rel: &str,
-    active: Option<&ActivePreset>,
-    draft: Option<&PresetDraft>,
-) -> Result<(), AppError> {
+/// 作者裁决（2026-10-06）：**正在使用 / 有草稿不再拦** —— 那两样是**状态**，不是文件；
+/// 由调用方（ipc）在删之前把使用中指针撤下、草稿一并丢弃，确认框讲清这一步。
+/// 文件层只管文件：前缀 + 防穿越两道闸，删完列表以磁盘为准（界面回来重读用户线）。
+pub fn delete_file(user_root: &Path, rel: &str) -> Result<(), AppError> {
     check_mine_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
             "找不到 {rel} —— 它可能已经被移走或删掉了"
         )));
-    }
-    if let Some(state) = active {
-        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
-            return Err(AppError::invalid_argument(format!(
-                "{rel} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。\
-                 先换成别的配置、或者撤销使用，再来删"
-            )));
-        }
-    }
-    if let Some(state) = draft {
-        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
-            return Err(AppError::invalid_argument(format!(
-                "{rel} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删"
-            )));
-        }
     }
     std::fs::remove_file(&target)
         .map_err(|e| AppError::io(format!("{rel} 删不掉")).with_detail(e.to_string()))?;
@@ -1349,7 +1325,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
 
-        delete_file(root.path(), "presets-mine/A1.toml", None, None).unwrap();
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
         assert!(!root.path().join("presets-mine/A1.toml").exists());
         let left: Vec<String> = std::fs::read_dir(root.path().join("presets-mine"))
             .unwrap()
@@ -1358,72 +1334,33 @@ mod tests {
         assert!(left.is_empty(), "删掉就是删掉，不留档：{left:?}");
     }
 
-    /// **正在使用的那一份不许删**（删了「使用中」就悬空）；正在用的是**别人**，照常删
+    /// **正在使用也照删**（作者裁决 2026-10-06：一切皆可删）—— 文件层不碰状态：
+    /// 使用中指针的撤下是调用方（ipc）的事，这一层只保证文件本身删得掉
     #[test]
-    fn deleting_refuses_while_it_is_the_active_one() {
+    fn deleting_works_even_while_it_is_the_active_one() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
-        let active =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
-                .unwrap();
+        crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+            .unwrap();
 
-        let e = delete_file(root.path(), "presets-mine/A1.toml", Some(&active), None).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.message.contains("正在使用"), "{}", e.message);
-        assert!(
-            root.path().join("presets-mine/A1.toml").exists(),
-            "拒了就不许动它"
-        );
-
-        delete_file(root.path(), "presets-mine/B1.toml", Some(&active), None).unwrap();
-        assert!(!root.path().join("presets-mine/B1.toml").exists());
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
+        assert!(!root.path().join("presets-mine/A1.toml").exists());
     }
 
-    /// **还有没保存的草稿不许删**（删了草稿就永远存不回去）；草稿改的是**别人**，照常删
+    /// **有草稿也照删** —— 草稿的丢弃同样是调用方（ipc）的事，文件层只管文件
     #[test]
-    fn deleting_refuses_while_a_draft_is_open() {
+    fn deleting_works_even_while_a_draft_is_open() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
-        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
-        let draft =
-            crate::runtime::state::save_draft(root.path(), &subject, "sha", "正文").unwrap();
-
-        let e = delete_file(root.path(), "presets-mine/A1.toml", None, Some(&draft)).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.message.contains("草稿"), "{}", e.message);
-        assert!(root.path().join("presets-mine/A1.toml").exists());
-
-        delete_file(root.path(), "presets-mine/B1.toml", None, Some(&draft)).unwrap();
-        assert!(!root.path().join("presets-mine/B1.toml").exists());
-    }
-
-    /// 两道闸只认用户线：官方线的指针 / 草稿（哪怕路径字段撞上）挡不住删用户文件
-    #[test]
-    fn the_delete_gates_only_apply_to_the_mine_line() {
-        let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        let mut official =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
-                .unwrap();
-        official.origin = ActiveOrigin::Official;
-        let mut draft = crate::runtime::state::save_draft(
+        crate::runtime::state::save_draft(
             root.path(),
-            &crate::runtime::state::DraftSubject::official("A1.toml"),
+            &crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml"),
             "sha",
             "正文",
         )
         .unwrap();
-        draft.path = Some("presets-mine/A1.toml".to_owned());
 
-        delete_file(
-            root.path(),
-            "presets-mine/A1.toml",
-            Some(&official),
-            Some(&draft),
-        )
-        .unwrap();
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
         assert!(!root.path().join("presets-mine/A1.toml").exists());
     }
 
@@ -1432,8 +1369,8 @@ mod tests {
     fn deleting_stays_in_the_mine_dir() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "exports/别动我.txt", "x");
-        assert!(delete_file(root.path(), "exports/别动我.txt", None, None).is_err());
-        assert!(delete_file(root.path(), "../外面.txt", None, None).is_err());
+        assert!(delete_file(root.path(), "exports/别动我.txt").is_err());
+        assert!(delete_file(root.path(), "../外面.txt").is_err());
         assert!(root.path().join("exports/别动我.txt").exists());
     }
 

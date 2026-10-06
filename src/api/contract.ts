@@ -1328,8 +1328,8 @@ export interface MkpApi {
   /**
    * 归档区里有什么：官方文件换版本时**被换下来的那些旧版本**。
    *
-   * **只列** —— 不删、不恢复、也没有"用这份旧版本"（归档管理不在这一层）。
    * 目录里已经没有的那几份，`machineId / versionId / kind` 如实给 `null`。
+   * 删除见 [`deleteArchivedFile`]（作者裁决 2026-10-06：允许删）。
    */
   getArchivedFiles(): Promise<ArchivedFile[]>
 
@@ -1338,6 +1338,24 @@ export interface MkpApi {
    * **只认归档区**：入参是 [`getArchivedFiles`] 给的那个相对路径；不是 UTF-8 就如实报错。
    */
   readArchivedText(path: string): Promise<string>
+
+  /**
+   * **删除本机下载区里那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+   *
+   * 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
+   * 它正在被使用 / 还有没保存的草稿：后端把使用中指针一并撤下、草稿一并丢弃
+   * —— 确认框必须讲清这一步。幂等：本来就不在也照实成功。
+   */
+  deleteDeliveryFile(fileName: string): Promise<void>
+
+  /**
+   * **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删）。
+   *
+   * 入参是 [`getArchivedFiles`] 给的那个相对路径。**删了就找不回**
+   * （云端只有最新版）—— 确认框必须讲清这个代价。
+   * 版本链与事件账不动：那是历史事实，不是这份文件的附属。
+   */
+  deleteArchivedFile(path: string): Promise<void>
 
   /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。

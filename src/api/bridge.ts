@@ -170,9 +170,14 @@ export const bridgeApi: MkpApi = {
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
   /* 第 6 层：盘上这几份认得出是哪一版吗（旧版本 / 查不出它是哪一版）—— 只列有事的 */
   getDeliveryTrust: () => call('getDeliveryTrust', 'get_delivery_trust'),
-  /* 归档区（官方旧版本留档）：只列 + 读正文。删除 / 恢复**没有命令** —— 这一层不做 */
+  /* 归档区（官方旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
   getArchivedFiles: () => call('getArchivedFiles', 'get_archived_files'),
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
+  deleteArchivedFile: (path) =>
+    call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
+  /* 删除本机那份官方交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
+  deleteDeliveryFile: (fileName) =>
+    call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
   downloadCatalogFile: (fileName, onTick) =>
     call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
   downloadCatalogFiles: (fileNames, onTick) =>

@@ -503,9 +503,10 @@ pub async fn copy_user_preset(
 
 /// **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
 ///
-/// 两道硬闸（都在 [`runtime::mine::delete_file`]）：**正在使用的不许删**（删了「使用中」
-/// 就指向一份不存在的文件）、**还有没保存的草稿的不许删**（删了草稿就永远存不回去）。
-/// 两本状态账先读出来（坏档不静默）；删完列表以磁盘为准（界面回来重读用户线）。
+/// 作者裁决（2026-10-06）：**不再拦"正在使用 / 有草稿"** —— 一切皆可删。删之前把
+/// 属于这一份的状态一并清掉：使用中指针撤下（悬空的「使用中」比「没在用」糟）、
+/// 没保存的草稿一并丢弃（写回要文件在）。两本状态账先读出来（坏档不静默）；
+/// 删完列表以磁盘为准（界面回来重读用户线）。
 #[tauri::command]
 pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppError> {
     traced("deleteUserPreset", |_| {
@@ -513,7 +514,20 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
         let user_root = crate::fsx::paths::user_root(&app)?;
         let active = runtime::state::load_active(&root)?;
         let draft = runtime::state::load_draft(&root)?;
-        runtime::mine::delete_file(&user_root, &path, active.as_ref(), draft.as_ref())
+        /* 属于这一份的状态先撤（命中 = 用户线 + 同一条相对路径），再删文件 */
+        if active.as_ref().is_some_and(|a| {
+            a.origin == runtime::state::ActiveOrigin::Mine
+                && a.path.as_deref() == Some(path.as_str())
+        }) {
+            runtime::state::clear_active(&root)?;
+        }
+        if draft.as_ref().is_some_and(|d| {
+            d.origin == runtime::state::ActiveOrigin::Mine
+                && d.path.as_deref() == Some(path.as_str())
+        }) {
+            runtime::state::clear_draft(&root)?;
+        }
+        runtime::mine::delete_file(&user_root, &path)
     })
 }
 

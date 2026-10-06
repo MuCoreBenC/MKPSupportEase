@@ -274,6 +274,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     | { kind: 'mine'; fileName: string; path: string }
     | null
   >(null)
+  /*
+   * 归档删除的**两段式确认**（抽屉里没有菜单那套 confirm 机制）：
+   * 记"哪一份的删除按钮已经点过第一下"。点到别的份 / 关抽屉都退回。
+   */
+  const [confirmingArchive, setConfirmingArchive] = useState<string | null>(null)
   const [body, setBody] = useState<{
     path: string
     text: string | null
@@ -757,22 +762,44 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **删除我自己那一份**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
-   *
-   * 二次确认长在菜单里（`danger` + `confirm`，问句带着这一行的名字）；这里只管执行。
-   * 两道闸在后端：**正在使用的不许删、还有没保存的草稿的不许删** —— 原话进提示条。
-   * 菜单那一项对「正在使用」的行已经灰掉带原因，后端仍会再拦一次（两道都在）。
+   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（真删）；官方交付行走交付线
+   * （删了回「未下载」，随时可从云端重下）。二次确认长在菜单里（`danger` + `confirm`）；
+   * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
-    data.remove(row.path).then(
+    const done =
+      row.origin === 'release' ? data.removeRelease(row.fileName) : data.remove(row.path)
+    done.then(
       () =>
         setNote({
-          text: `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
+          text:
+            row.origin === 'release'
+              ? `已删除 ${row.fileName} —— 它回到「未下载」，随时可以从云端重新下载`
+              : `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
           bad: false,
         }),
-      (e: unknown) =>
-        setNote({ text: `没删成：${errorText(e)}`, bad: true }),
+      (e: unknown) => setNote({ text: `没删成：${errorText(e)}`, bad: true }),
+    )
+  }
+
+  /**
+   * **删除归档里的一份旧版本**（旧版本抽屉里那颗按钮）。
+   *
+   * 抽屉里没有菜单那套 confirm 机制，用**两段式**：第一下把按钮变成「确认删除」，
+   * 再点一下才真删（点到别处 / 换一份 / 关抽屉都退回）。代价在确认那一下的按钮上
+   * 说清 —— 云端只有最新版，删了就找不回。
+   */
+  const runRemoveArchived = (a: ArchivedFile) => {
+    setConfirmingArchive(null)
+    setNote({ text: `正在删除 ${a.fileName} 的这份旧版本…`, bad: false })
+    data.removeArchived(a.path).then(
+      () =>
+        setNote({
+          text: `已删除 ${a.fileName} 的这份旧版本 —— 删了就找不回（云端只有最新版）`,
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `没删成：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -933,18 +960,32 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
-   * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
+   * 「删除」对哪几行给。**一切皆可删**（作者裁决 2026-10-06，此前拦得太死）：
+   *
+   * - 官方交付行：删了回到「未下载」，随时可从云端重新下载（字节有目录 SHA 锚定，
+   *   零数据损失）—— 此前"对不上目录用「更新」修"说的是修法，不是禁删的理由；
+   * - 我的文件：本来就真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
+   *   （悬空的「使用中」比「没在用」糟），有草稿的连草稿一起丢，确认框讲清；
+   * - 官方仓库文件的本地副本仍不给删（它们走资源那一套命令，删了不是"重下"一条路）；
+   * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
+   *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
-  const removeWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin !== 'mine') {
-      return row.origin === 'release'
-        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新」修它'
-        : '官方文件不在这里删 —— 能删的只有你自己那份（用户根里的）'
-    }
-    return row.scope === 'local' && row.live
-      ? '正在使用的那一份不能直接删 —— 先换成别的配置（或撤销使用），再删它'
+  const removeWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'official'
+      ? '官方文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
+
+  /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
+  const removeConfirmDetail = (row: PresetTableRow): string => {
+    if (row.origin === 'release') {
+      return '它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，不会丢什么）。' +
+        '它正在被使用的话，使用中会一并撤下。'
+    }
+    const live = 'live' in row && row.live
+    return live
+      ? '这份正在使用中，删除会一并撤下使用；有没保存的草稿也一并丢弃。' +
+          '删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
+      : '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
   }
 
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
@@ -1023,12 +1064,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'remove',
         label: '删除',
         danger: true,
-        /* 第十层：只有「我的文件」能删；正在使用的那份连菜单都不给点（后端还会再拦一次） */
+        /* 一切皆可删（2026-10-06）：官方交付删了可重下；我的文件真删；
+           正在使用的那份删掉时后端会一并撤下使用 —— 代价在确认框里说清 */
         disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
-          detail:
-            '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。',
+          detail: removeConfirmDetail(row),
         },
         onSelect: () => runRemove(row),
       },
@@ -1446,6 +1487,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             onClose={() => {
               setViewer(null)
               setBody(null)
+              setConfirmingArchive(null)
             }}
           >
             {viewer !== null && (
@@ -1485,17 +1527,47 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                                 ? ARCHIVE_DRAWER.unknown
                                 : `${a.machineId} · ${a.versionId}`}
                             </p>
-                        <button
-                          type="button"
-                          className={s.archBtn}
-                          onClick={() => readBody(a.path, 'archive')}
-                        >
-                          {ARCHIVE_DRAWER.open}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                            {/*
+                             * 删除（2026-10-06 一切皆可删）：**两段式确认** —— 第一下变成
+                             * 「确认删除」，再点一下才真删。代价写在提示条上：云端只有最新版，
+                             * 这一版删了就找不回。版本链与事件账不受影响（历史事实）。
+                             */}
+                            <div className={s.archBtns}>
+                              <button
+                                type="button"
+                                className={s.archBtn}
+                                onClick={() => {
+                                  setConfirmingArchive(null)
+                                  readBody(a.path, 'archive')
+                                }}
+                              >
+                                {ARCHIVE_DRAWER.open}
+                              </button>
+                              <button
+                                type="button"
+                                className={
+                                  confirmingArchive === a.path
+                                    ? `${s.archBtn} ${s.archBtnDanger}`
+                                    : s.archBtn
+                                }
+                                title={
+                                  confirmingArchive === a.path
+                                    ? '再点一下确认删除 —— 这一版删了就找不回（云端只有最新版）'
+                                    : '删除这份旧版本（删了就找不回，云端只有最新版）'
+                                }
+                                onClick={() =>
+                                  confirmingArchive === a.path
+                                    ? runRemoveArchived(a)
+                                    : setConfirmingArchive(a.path)
+                                }
+                              >
+                                {confirmingArchive === a.path ? '确认删除' : '删除'}
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
                 {body !== null && (
                   <div className={s.archBody}>
