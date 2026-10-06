@@ -245,10 +245,17 @@ export const RELEASE_DOWNLOAD_WHY =
 /**
  * 发布行「时间 / 大小」两格的 title：这两样都是**真值**（发布时刻 / 下载时刻 /
  * TOML 字节数），不该沿用官方行那句「演示数据」——按行分流，说清是哪一层的意思。
+ *
+ * 时间**两种来源分归两张表**（2026-10-06）：云端表是**发布时刻**（发布侧盖进目录的戳）、
+ * 本地表是**下载时刻**（盘上那份的 mtime）；各自的"没有"也有自己的一句 ——
+ * 说清为什么拿不到，而不是让人以为界面没做完。显示一律**按本机时区**（`parseStatDate`）。
  */
 export const RELEASE_TIME_WHY = {
-  cloud: '这次发布的时刻',
-  local: '下载到本机的时刻',
+  cloud: '这次发布的时刻 —— 发布侧落盘时写进目录的（catalog.publishedAt），按你电脑的时区显示',
+  cloudMissing:
+    '这份目录没有记发布时刻 —— 随包目录不带时间，旧版发布的目录也没有；「检查更新」换到发布侧的目录之后会有',
+  local: '下载到本机的时刻 —— 这份字节落进下载区那一刻（文件 mtime），按你电脑的时区显示',
+  localMissing: '盘上那份的落盘时刻文件系统没给 —— 照实不显示，不编一个',
 } as const
 
 export const RELEASE_SIZE_WHY = '按这一份 TOML 的字节数算的'
@@ -1284,14 +1291,25 @@ export interface PresetRowsInput {
   staleReleases: ReleasePresetSource[]
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
+  /**
+   * **这次发布的时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表 release 行
+   * 「时间」列的来源，显示时前端转本机时区。null = 目录没带（随包 / 旧版发布），
+   * 那一列照实「未知」。
+   */
+  releaseAt: string | null
 }
 
 /**
  * 目录里登记的一份交付预设，摊平成行要用的形状。
  *
  * 数据来自新世界两端共用契约（`api.getRuntimeCatalog()` 的 `files` 域）——
- * 大小是**发布时对产物真字节算的真值**（catalog 登记的），时间刻意没有
- * （catalog 没有 `generatedAt`，没有可信时间源不编一个）。
+ * 大小是**发布时对产物真字节算的真值**（catalog 登记的）。时间有两样、
+ * 各归各的表（2026-10-06 起，此前"目录没有可信时间源"整列都是「未知」）：
+ *
+ *   `modifiedUnix`  **下载到本机的时刻**（盘上那份的 mtime）—— 本地表用
+ *   `releaseAt`     **这次发布的时刻**（catalog.publishedAt，发布侧盖的戳）—— 云端表用
+ *
+ * 都没有（随包目录没盖戳 / 盘上还没下）就照实「未知」，**不编**。
  */
 /**
  * 交付行第二行那串小字：把人引到盘上的落点，**顺带把"盘上那份不对劲"这件事写在原地**。
@@ -1324,6 +1342,11 @@ export interface ReleasePresetSource {
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
   releaseVersion: string | null
+  /**
+   * 盘上那一份的**落盘时刻**（UTC epoch 秒）= 下载到本机的时刻（本地表「时间」列）。
+   * 还没下到本机 / 文件系统没给就是 `null` —— 照实「未知」，不编。
+   */
+  modifiedUnix: number | null
   /**
    * 盘上那一份现在是什么（见 [`ReleaseFileState`]）。
    *
@@ -1673,6 +1696,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
         sizeText: sizeTextOf(p.size),
+        /*
+         * 下载到本机的时刻：盘上那份的 mtime（epoch 秒）→ ISO 交 `parseStatDate`
+         * 按本机时区显示 —— 与用户线那一份（`mine` 分支）同一条转换路。
+         * 没下到本机 / 文件系统没给就是 undefined（「未知」）。
+         */
+        modifiedText:
+          p.modifiedUnix === null ? undefined : new Date(p.modifiedUnix * 1000).toISOString(),
         applied: live,
         pinned: pinned.has(`release:${p.uid}`),
         scope: 'local',
@@ -1713,6 +1743,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     pinned,
     releasePresets,
     releaseVersion,
+    releaseAt,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
@@ -1781,6 +1812,12 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
         sizeText: sizeTextOf(p.size),
+        /*
+         * 云端表的时间 = **这次发布的时刻**（`releaseAt`，发布侧盖进目录的戳）——
+         * 同一次发布的每一行是同一个值；目录没带（随包 / 旧版发布）就是 undefined
+         * （「未知」+ `RELEASE_TIME_WHY.cloudMissing` 那句话）。
+         */
+        modifiedText: releaseAt ?? undefined,
         applied: live,
         pinned: pinned.has(`release:${p.fileName}`),
         scope: 'cloud',

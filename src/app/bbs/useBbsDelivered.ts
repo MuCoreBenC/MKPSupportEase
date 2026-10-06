@@ -50,7 +50,7 @@ export function useBbsDelivered(): BbsDelivered {
     let alive = true
     void (async () => {
       try {
-        const [catalog, names] = await Promise.all([
+        const [catalog, files] = await Promise.all([
           api.getRuntimeCatalog(),
           api.getDownloadedFiles(),
         ])
@@ -58,7 +58,7 @@ export function useBbsDelivered(): BbsDelivered {
         const all = catalog.files
           .filter((f) => f.kind === KIND_BBS)
           .map((f) => ({ fileName: f.fileName, machineId: f.machineId, size: f.size }));
-        const have = new Set(names)
+        const have = new Set(files.map((f) => f.fileName))
         setListed(all)
         setDownloaded(all.filter((f) => have.has(f.fileName)))
         setNote('')

@@ -918,7 +918,12 @@ pub fn publish_into(
 
     // 清单、目录与 Bootstrap 收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
     crate::fsx::atomic::atomic_write_json(&delivery_root.join(MANIFEST_FILE), &manifest)?;
-    write_catalog_json(delivery_root, book)?;
+    /*
+     * 发布时刻在这里盖：与 manifest 的 `updated` 是**同一个戳**（`meta.stamp`）——
+     * 一次发布事件只有一个时间，目录与清单不许各说一个。客户端把它显示在
+     * 云端表的「时间」列（`catalog.publishedAt` → 这次发布的时刻）。
+     */
+    write_catalog_json(delivery_root, book, &meta.stamp)?;
     /* Bootstrap：客户端"官方内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
     crate::fsx::atomic::atomic_write_json(&delivery_root.join(SOURCE_FILE), &bootstrap_json())?;
 
@@ -938,10 +943,18 @@ pub fn publish_into(
 /// 生成收尾把目录重算一遍，**记录永远与文件同一代**。manifest（版本 / 时间戳 /
 /// 渠道，发布台账）仍归发布写 —— 生成不替发布定稿。
 ///
+/// `published_at` 由**调用方给**（clock 不属于交付层，与 `PublishMeta` 同一条规矩）：
+/// 发布传 `meta.stamp`（与 manifest.updated 同一个戳）、生成传当下。写进
+/// `catalog.publishedAt`，客户端云端表的「时间」列显示的就是它。
+///
 /// 目录里的资产条目**按源字节算 SHA**（[`Catalog::build_from_presets_lenient`] 的
 /// 口径）—— 所以调用方要先把引用资产补进交付根（`write_content`），否则就是
 /// 「目录登记了，文件不在」。
-pub fn write_catalog_json(delivery_root: &Path, book: &Book<'_>) -> Result<usize, AppError> {
+pub fn write_catalog_json(
+    delivery_root: &Path,
+    book: &Book<'_>,
+    published_at: &str,
+) -> Result<usize, AppError> {
     let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
         &delivery_root.join(MKP_PRESETS_DIR),
@@ -952,6 +965,7 @@ pub fn write_catalog_json(delivery_root: &Path, book: &Book<'_>) -> Result<usize
         let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
         catalog.apply_min_client(&rules);
     }
+    catalog.published_at = Some(published_at.to_owned());
     let count = catalog.files.len();
     let text = catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
@@ -1383,7 +1397,7 @@ mod tests {
             )
             .unwrap();
         }
-        write_catalog_json(&delivery, &book).expect("目录重算");
+        write_catalog_json(&delivery, &book, "2026-10-06T00:00:00Z").expect("目录重算");
 
         // A 类「实体」在发布根里 —— 把载荷根的内容摆过去（它就是原地交付的那份）
         let assets_on_publish_root = publish_root.path().join("assets");
@@ -2077,6 +2091,13 @@ mod tests {
     /// **交付面 catalog 与重建一致**（`RESOURCE-ADDRESSING-ROADMAP.md` §6.2；
     /// CLI 出口 `gen-catalog` 的交付重算与工作台 `write_catalog_json` 同一条构建内核 ——
     /// 这条判据盯"入库的那份没有未经审阅的变化"，与 `embedded_matches_rebuild` 同思路）。
+    ///
+    /// ★ `publishedAt` **不参与这条比对**（2026-10-06）：它是**事件事实**（这一次发布的
+    /// 时刻，发布侧盖的），**不来自源** —— 重建永远算不出它，那不是"不一致"。所以判据把
+    /// 入库那份的戳**补回重建结果上**再逐字节比：除了这一格，一个字节都不许差。
+    ///
+    /// 与随包那份正好相反：`catalog.generated.json` **刻意不带戳**（它要逐字节可复现，
+    /// 见 `embedded_matches_rebuild`）。两种目录的差别就是"有没有发生过发布事件"。
     #[test]
     fn delivery_catalog_matches_rebuild() {
         let repo = crate::workbench::paths::repo_root();
@@ -2094,6 +2115,11 @@ mod tests {
 
         let committed = std::fs::read_to_string(repo.join("presets/delivery/catalog.json"))
             .expect("入库的交付面 catalog 在（2026-10-05 起入库）");
+        /* 戳从**入库那份**里取、补到重建结果上：它是发布事件的痕迹，不是源的一部分
+        （发布侧 `write_catalog_json` 盖的，与 manifest 的 `updated` 同一个戳） */
+        rebuilt.published_at = crate::runtime::catalog::Catalog::parse(committed.as_bytes())
+            .expect("入库的交付面 catalog 读得出来")
+            .published_at;
         assert_eq!(
             committed.trim(),
             rebuilt.to_pretty_json().expect("该序列化得出").trim(),

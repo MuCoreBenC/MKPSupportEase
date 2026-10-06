@@ -60,6 +60,13 @@ pub struct PublishRecord {
     pub audit_failed: usize,
     /// 一句话结论（与事务报告同一句）
     pub summary: String,
+    /// **合并之后把主线同步到第二个官方源**的结论（2026-10-06 加）。
+    ///
+    /// `None` = 这一条记下来的时候还没走到合并那一步（或还没做这一步）。
+    /// ★ 它不由"刷新"改写：刷新拿到的是**平台上的 PR 状态**，与"镜像跟没跟上"
+    /// 是两件事 —— 刷一次把这条抹掉就等于把"客户端为什么还看不到"的证据丢了。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<super::publish_tx::MirrorSync>,
 }
 
 impl PublishRecord {
@@ -76,6 +83,9 @@ impl PublishRecord {
             audit_passed: report.audit_passed,
             audit_failed: report.audit_failed,
             summary: report.summary.clone(),
+            /* 发布事务本身**不推镜像** —— 那一步发生在 PR/MR **合并之后**
+            （`wb_merge_review`），由 `update_review` 把结论补进这一格。 */
+            mirror: None,
         }
     }
 }
@@ -156,10 +166,15 @@ pub fn append(root: &Path, record: PublishRecord) -> Result<PublishHistory, AppE
 /// 什么时候用：**合并成功之后**。那是我们亲手造成的状态变化，记账不需要问网络
 /// （问网络的是 `wb_publish_status` 那条手动刷新）。别的操作不动历史 —— 快照就让它快照。
 ///
+/// `mirror` = 合并之后"把主线同步到第二个官方源"的结论（2026-10-06 加）。
+/// ★ **只填不清**：传 `None` 时保留记录里已有的那一条 —— 刷新拿到的是平台上的 PR 状态，
+/// 与"镜像跟没跟上"是两件事，刷一次把后者抹掉就等于把"客户端为什么还看不到"的证据丢了。
+///
 /// 返回改了几条（0 条 = 历史里没有这份 PR，正常）。
 pub fn update_review(
     root: &Path,
     review: &super::platform::RemoteReview,
+    mirror: Option<&super::publish_tx::MirrorSync>,
 ) -> Result<usize, AppError> {
     let mut history = load(root)?;
     let mut hit = 0usize;
@@ -170,6 +185,9 @@ pub fn update_review(
             .is_some_and(|old| old.platform == review.platform && old.number == review.number);
         if same {
             r.review = Some(review.clone());
+            if let Some(m) = mirror {
+                r.mirror = Some(m.clone());
+            }
             hit += 1;
         }
     }
@@ -206,6 +224,7 @@ mod tests {
             audit_failed: 0,
             summary: "已生成 0 份、定稿 17 份产物。已提交并推送到 `feat/x`。已建 PR !27。"
                 .to_owned(),
+            mirror: None,
         }
     }
 
@@ -277,7 +296,7 @@ mod tests {
         let mut merged = rec("x").review.unwrap();
         merged.state = ReviewState::Merged;
         assert_eq!(
-            update_review(d.path(), &merged).unwrap(),
+            update_review(d.path(), &merged, None).unwrap(),
             1,
             "只该命中 #27 那条"
         );
@@ -313,6 +332,10 @@ mod tests {
             commit: Some("08ec040".to_owned()),
             files: 17,
             summary: "一句话".to_owned(),
+            published_at: Some("2026-10-06T03:39:21Z".to_owned()),
+            revision: Some("ebc8e6d7a74e467c".to_owned()),
+            changes: None,
+            changed_files: Vec::new(),
         };
         let r = PublishRecord::from_report(&report, "2026-10-04T14:02:00+08:00".to_owned());
         assert_eq!(r.stage, "reviewOpened");

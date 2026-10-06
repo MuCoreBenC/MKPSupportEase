@@ -288,3 +288,132 @@
   align-items: center;
   margin-top: 4px;
 }
+
+/* ---------- 回执的三块：结果 / 过程 / 客户端（2026-10-06） ----------
+ *
+ * 为什么分块：原来是一条七步平铺的阶段链，读起来像程序日志 —— 它能回答"走到哪一步了"，
+ * 答不了用户真正在问的三件事：**我改了什么 / 它现在在哪 / 客户端什么时候能看到**。
+ * 块之间只用一条细分隔线，不加卡片、不加阴影（这一屏的主语是"事实"，不是装饰）。
+ */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--line);
+}
+
+.block:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.blockTitle {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+.blockLine {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* 一行里的分隔：比空格重、比竖线轻 */
+.sep {
+  margin: 0 8px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+/* 「查看文件变化」—— 长得像链接，其实是个按钮（不新开窗口） */
+.linkBtn {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-deep);
+  font-size: var(--fs-label);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linkBtn:hover {
+  color: var(--accent);
+}
+
+.filesBox {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px 0;
+}
+
+.fileRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--fs-label);
+}
+
+/* 路径可以很长：它让位，指纹不许被挤掉（逐位对照是这一块的全部意义） */
+.filePath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.fileSha {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+
+.arrow {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+
+/* 客户端块那句结论：一枚状态色 + 一句话 —— 四档各自有底色，不靠一个勾号 */
+.verdict {
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+}
+
+.verdict_ok {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.verdict_warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--text-1);
+}
+
+.verdict_stop {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--text-1);
+}
+
+.verdict_todo {
+  border-style: dashed;
+  color: var(--text-2);
+}

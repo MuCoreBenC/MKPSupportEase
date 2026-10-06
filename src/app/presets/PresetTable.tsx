@@ -208,15 +208,20 @@ export default function PresetTable({
   /**
    * 时间那一格的 title。三种来源，三句话：
    *
-   *   发布行     发布 / 下载时刻（按表分语义）
+   *   发布行     发布 / 下载时刻（按表分语义）；**拿不到时各自有一句"为什么"**
+   *              （云端 = 目录没带发布时刻；本地 = 文件系统没给 mtime）
    *   真值（bbs） `statFrom === 'file'` —— 真仓那份文件 + 上游 manifest 记的时间
    *   其余       演示推值 / 没有
    */
   const statWhyOf = (row: PresetTableRow): string =>
     row.origin === 'release'
       ? row.scope === 'cloud'
-        ? RELEASE_TIME_WHY.cloud
-        : RELEASE_TIME_WHY.local
+        ? row.modifiedText === undefined
+          ? RELEASE_TIME_WHY.cloudMissing
+          : RELEASE_TIME_WHY.cloud
+        : row.modifiedText === undefined
+          ? RELEASE_TIME_WHY.localMissing
+          : RELEASE_TIME_WHY.local
       : row.statFrom === 'file'
         ? FILE_TIME_WHY
         : row.modifiedText === undefined

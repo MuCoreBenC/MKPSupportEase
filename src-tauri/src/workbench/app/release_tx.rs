@@ -509,13 +509,17 @@ pub fn run(
         git.pull_ff("origin", base)?;
         git.tag(&tag, &format!("{tag} {}", opts.notes.trim()))?;
         match target {
-            Some(t) => git.push_ref_to_authenticated(
-                &t.repository_url,
-                &format!("refs/tags/{tag}"),
-                &t.username,
-                &t.token,
-            )?,
-            None => git.push_tag(&tag)?,
+            Some(t) => {
+                git.push_ref_to_authenticated(
+                    &t.repository_url,
+                    &format!("refs/tags/{tag}"),
+                    &t.username,
+                    &t.token,
+                )?;
+            }
+            None => {
+                git.push_tag(&tag)?;
+            }
         }
         report
             .summary
@@ -697,8 +701,12 @@ pub fn run(
     report.stage = ReleaseStage::InfoCommitted;
 
     match target {
-        Some(t) => git.push_authenticated(&info_branch, &t.username, &t.token)?,
-        None => git.push(&info_branch)?,
+        Some(t) => {
+            git.push_authenticated(&info_branch, &t.username, &t.token)?;
+        }
+        None => {
+            git.push(&info_branch)?;
+        }
     }
     report.stage = ReleaseStage::InfoPushed;
 

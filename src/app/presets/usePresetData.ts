@@ -269,8 +269,16 @@ export interface PresetData {
 export interface ReleaseState {
   /** 目录指纹（两端共用契约的 revision；旧世界的"包版本"没有对应物，指纹更诚实） */
   version: string | null
-  /** 刻意恒 null：目录没有时间字段，没有可信时间源不编一个 */
-  at: string | null
+  /**
+   * **发布时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表「时间」列的来源，
+   * 显示时由前端转本机时区。`null` = 这份目录没带（随包 bootstrap 目录、或旧版发布的
+   * 目录没有这一格）—— 照实说「未知」，**不编**。
+   *
+   * ★ 名字就叫 `publishedAt`（2026-10-06）：它前一版叫 `at`，恒 `null` 且没人读，
+   * 注释却写着"发布时刻" —— 那种"看起来接了线、其实没有"的字段就是「时间列永远是
+   * 未知」那次误导的根源。改名之后它与目录里那一格同名，读的人不会认错来源。
+   */
+  publishedAt: string | null
   /** 目录里登记的交付文件（**预设页认的那两类**：MKP + 切片器；源头已按 kind 分好类别） */
   presets: ReleasePresetSource[]
   /** 下载区（`mkp/`）里已有、**且与目录登记一致**的（`ReleaseFileState = ok`） */
@@ -293,7 +301,7 @@ export interface ReleaseState {
 
 const EMPTY_RELEASE: ReleaseState = {
   version: null,
-  at: null,
+  publishedAt: null,
   presets: [],
   localReleases: [],
   stale: [],
@@ -409,8 +417,16 @@ export function usePresetData(importRevision = 0): PresetData {
       api.getArchivedFiles(),
     ])
     setArchived(keep)
-    const downloaded = new Set(mine)
-    const driftedSet = new Set(drifted)
+    const downloaded = new Set(mine.map((f) => f.fileName))
+    const driftedSet = new Set(drifted.map((f) => f.fileName))
+    /*
+     * 盘上那几份的**落盘时刻**（下载到本机的时刻 = 下载管道写盘那一刻的 mtime）。
+     * 已下载与有更新的是两批不相交的文件，合成一张表查；没有的时刻是 `null`
+     * —— 界面照实说「未知」，不编。
+     */
+    const onDiskAt = new Map<string, number | null>(
+      [...mine, ...drifted].map((f) => [f.fileName, f.modifiedUnix]),
+    )
     /* 判词按**文件名**查 —— 与下载 / 应用 / 读正文同一套口径（这套系统认的一直是 fileName） */
     const verdicts = new Map(trust.map((t) => [t.fileName, t.verdict]))
     /*
@@ -441,6 +457,8 @@ export function usePresetData(importRevision = 0): PresetData {
           kind,
           size: f.size,
           releaseVersion: null,
+          /* 盘上那份的落盘时刻（下载时刻）；云端语义的时间走目录的发布时刻（`publishedAt`），两回事 */
+          modifiedUnix: onDiskAt.get(f.fileName) ?? null,
           state: stateOf(f.fileName),
         },
       ]
@@ -450,7 +468,8 @@ export function usePresetData(importRevision = 0): PresetData {
     const staleList = listed.filter((p) => p.state === 'old' || p.state === 'tampered')
     return {
       version: catalog.revision,
-      at: null,
+      /* 发布时刻跟着目录走：随包 / 旧版目录没有这一格 → null（界面照实说未知） */
+      publishedAt: catalog.publishedAt ?? null,
       presets: listed,
       localReleases: localList,
       stale: staleList,
@@ -887,10 +906,12 @@ export function usePresetPage(data: PresetData): PresetPage {
       localReleases: data.release.localReleases,
       staleReleases: data.release.stale,
       releaseVersion: data.release.version,
+      releaseAt: data.release.publishedAt,
     }),
     [
       data.active,
       data.machineId,
+      data.release.publishedAt,
       data.release.localReleases,
       data.release.presets,
       data.release.stale,

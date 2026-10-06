@@ -4,6 +4,7 @@ import type {
   ActivePreset,
   CalibModel,
   MkpApi,
+  OnDiskFile,
   PresetSource,
   SoftwareUpdate,
   UserPresetFile,
@@ -251,9 +252,15 @@ function literalFor(raw: string, valueType: string): string {
  *
  * 三份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
  * 见 `downloadCatalogFile`。
+ *
+ * `modifiedUnix` 是固定演示值（真机上是文件 mtime = 下载管道落盘那一刻）：
+ * 形状不编（`number | null`），数字编 —— 界面按它把「下载到本机的时刻」画出来。
  */
-const MOCK_DOWNLOADED = ['A1-standard.toml']
-const MOCK_STALE = ['A1-fast.toml', 'A1mini-standard.toml']
+const MOCK_DOWNLOADED: OnDiskFile[] = [{ fileName: 'A1-standard.toml', modifiedUnix: 1780000000 }]
+const MOCK_STALE: OnDiskFile[] = [
+  { fileName: 'A1-fast.toml', modifiedUnix: 1777000000 },
+  { fileName: 'A1mini-standard.toml', modifiedUnix: 1777000000 },
+]
 
 export const mockApi: MkpApi = {
   /*
@@ -697,6 +704,11 @@ export const mockApi: MkpApi = {
     return {
       catalogSchema: 1,
       revision: 'mock000000000000',
+      /*
+       * 发布时刻：真机上由发布侧写进目录（云端表的「时间」列显示它）。
+       * 演示给一个固定值 —— 形状不编，数字编。
+       */
+      publishedAt: '2026-10-05T08:00:00Z',
       machines: [
         {
           id: 'A1',

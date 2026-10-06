@@ -411,24 +411,48 @@ fn send_tick(
     }
 }
 
-/// 已经下载到下载区的文件名（盘就是底账：文件在且 SHA 对得上才算数）
+/// 下载区 / 交付区里的一份（盘当底账），给界面的形状。
+///
+/// `modifiedUnix` = 这份字节**落进本机的时刻**（UTC epoch 秒，文件 mtime）——
+/// 预设页本地表「时间」列的"下载到本机的时刻"。**界面自己转本地时区显示**
+/// （与归档区 `ArchivedFileDto.modified_unix` 同一条口径：默认构建不引时间库）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnDiskFileDto {
+    pub file_name: String,
+    pub modified_unix: Option<u64>,
+}
+
+/// 已经下载到下载区的文件（盘就是底账：文件在且 SHA 对得上才算数），带落盘时刻
 #[tauri::command]
-pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppError> {
     traced("getDownloadedFiles", |_| {
         let root = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        Ok(runtime::delivery::downloaded_files(&root, &catalog))
+        Ok(runtime::delivery::downloaded_entries(&root, &catalog)
+            .into_iter()
+            .map(|e| OnDiskFileDto {
+                file_name: e.file_name,
+                modified_unix: e.modified_unix,
+            })
+            .collect())
     })
 }
 
-/// 有更新的文件名（盘上在、字节与目录不一样）。"更新"就是对这些再跑一遍下载——
-/// 旧份自动归档，没有单独的更新代码路径
+/// 有更新的文件（盘上在、字节与目录不一样），带盘上那一份的落盘时刻。
+/// "更新"就是对这些再跑一遍下载——旧份自动归档，没有单独的更新代码路径
 #[tauri::command]
-pub async fn get_stale_files(app: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppError> {
     traced("getStaleFiles", |_| {
         let root = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        Ok(runtime::delivery::stale_files(&root, &catalog))
+        Ok(runtime::delivery::stale_entries(&root, &catalog)
+            .into_iter()
+            .map(|e| OnDiskFileDto {
+                file_name: e.file_name,
+                modified_unix: e.modified_unix,
+            })
+            .collect())
     })
 }
 

@@ -4,7 +4,7 @@
     "XOffset": 0.1,
     "YOffset": 24.4,
     "ZOffset": 4,
-    "MaxSpeed": 3900,
+    "MaxSpeed": 4200,
     "CustomMountGcode": [
       "G92 E0",
       "G1 E-5 F1800",
