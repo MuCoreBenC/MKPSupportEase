@@ -24,7 +24,7 @@ import {
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { activeForSelection, selectionFromActive } from './activeSelection'
-import { useActivePreset } from '../state/appState'
+import { activateCombo, useActivePreset } from '../state/appState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
@@ -272,6 +272,15 @@ export default function PageHome({ density }: PageHomeProps) {
     },
     [catalog.machines],
   )
+
+  /*
+   * 选择即切换（作者 2026-10-06 真机反馈）：三级选齐一台、或从抽屉换一份（都落到 sel），
+   * 就把它变成「正在使用」—— 四个页面同账，不再只有预设页的「应用」算切换。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
+  useEffect(() => {
+    activateCombo(sel.model, sel.variant, fileOf, activeEntry)
+  }, [sel.model, sel.variant, fileOf, activeEntry])
 
   /* 换预设会把本页草稿作废（草稿是相对上一份预设点出来的增量），所以先问一次。
      只给「取消 / 放弃改动并换」两条路：换了预设 saved 会被新预设的值覆盖，

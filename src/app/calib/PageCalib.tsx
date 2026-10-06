@@ -23,7 +23,7 @@ import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
 import { api } from '../../api'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
-import { useActivePreset, useActivePresetReady } from '../state/appState'
+import { activateCombo, useActivePreset, useActivePresetReady } from '../state/appState'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
 import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
@@ -153,6 +153,15 @@ export default function PageCalib() {
     },
     [catalog.presets],
   )
+
+  /*
+   * 选择即切换（作者 2026-10-06 真机反馈）：抽屉里点一份（落到 sel）就把它变成
+   * 「正在使用」—— 与首页 / 参数页同一份账，不再只有预设页的「应用」算切换。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
+  useEffect(() => {
+    activateCombo(sel.model, sel.variant, fileOf, activeEntry)
+  }, [sel.model, sel.variant, fileOf, activeEntry])
 
   const currentFileName = currentUid && sel.model !== null && sel.variant !== null
     ? fileOf(sel.model, sel.variant)

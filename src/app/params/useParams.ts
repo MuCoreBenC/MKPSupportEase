@@ -45,7 +45,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
-import { activePresetSnapshot, useActivePreset } from '../state/appState'
+import { activateCombo, activePresetSnapshot, useActivePreset } from '../state/appState'
 import type {
   ActiveOrigin,
   CatalogParamDef,
@@ -1267,6 +1267,21 @@ export function useParams(): Params {
       canJump: liveMachine !== undefined && liveVersion !== undefined,
     }
   }, [active, catalog, machineId, versionId])
+
+  /*
+   * 换 combo = 切换（作者 2026-10-06 真机反馈）：参数页的换组合（抽屉 / 「切换回」）
+   * 也是真的「用这一份」—— 底账跟着走，与首页 / 校准页同一份账。
+   * 守则见 activateCombo：底账已命中不动（挂载落地的那一次本来就在用这份，自然不动，
+   * 也不顶掉「我的文件」）、应用不了保持原账（页面三态如实显示）。
+   */
+  useEffect(() => {
+    activateCombo(
+      machineId === '' ? null : machineId,
+      versionId === '' ? null : versionId,
+      (m, v) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
+      active,
+    )
+  }, [machineId, versionId, active, catalog])
 
   /*
    * **编辑目标**：当前 combo 对应的那一份文件（参数页底座 ③）。

@@ -13,7 +13,12 @@
   align-items: stretch;
   gap: 0;
   min-width: 0;
-  max-width: 400px;
+  /*
+   * 上限 400 → 560（作者 2026-10-06 真机反馈：「矩形不完整，右边贴到箭头了」）——
+   * 文件名一长，400 的帽子把右拍挤得 caret 贴住右边框。放宽之后长名有更多呼吸位，
+   * 再长的由 .name 的省略号吸收；工具栏那一排可换行，计数格不会被挤走。
+   */
+  max-width: 560px;
   height: 28px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -191,8 +196,12 @@
   color: var(--text-3);
 }
 
-/* pill 里的那一颗：退化成右拍 —— 无边框、透明底、撑满 pill 高，hover 一层绿 */
+/* pill 里的那一颗：退化成右拍 —— 无边框、透明底、撑满 pill 高，hover 一层绿。
+   flex-shrink: 0（作者 2026-10-06「矩形右边贴到箭头」）：溢出一概由左拍的文件名
+   省略号吸收，右拍一寸不让 —— 漏斗 / 机型名 / 箭头与右边框之间的呼吸位是
+   「矩形完整」的一部分，不许被压缩吃掉。 */
 .pill .filterBtn {
+  flex-shrink: 0;
   height: auto;
   align-self: stretch;
   padding: 0 10px;
