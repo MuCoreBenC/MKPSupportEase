@@ -8,7 +8,7 @@
   "toolhead.offset.y": 24.4,
   "toolhead.offset.z": 4.0,
   "toolhead.prime_length": 100.0,
-  "toolhead.speed_limit": 65.0,
+  "toolhead.speed_limit": 70.0,
   "wiping.disable_3rd_layer_clog_detect": true,
   "wiping.disable_timelapse": true,
   "wiping.disk_stagger_angle": 5.0,

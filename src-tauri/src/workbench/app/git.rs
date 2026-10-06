@@ -58,6 +58,25 @@ pub const RELEASE_STAGE_ALLOWLIST: [&str; 5] = [
     "presets/delivery/release.json",
 ];
 
+/// 一次 ref 推送的结果（**从 git 自己的推送摘要里读出来**，不另加网络往返）。
+///
+/// ★ 为什么要把这件事读回来（2026-10-06，加"合并后同步镜像源"那一步时）：
+/// 把主线同步到第二个官方源是**幂等**动作，而「推上去了」与「那边本来就是这一版」
+/// 是**两件不同的事实** —— 回执里说"已经推过去"和说"那边早就有了"对用户的意义不一样
+/// （前者意味着镜像刚跟上，后者意味着这一步是空操作）。git 在推送成功时已经把这件事
+/// 打在 stderr 上了（`= [up to date]` 对 `abc1234..def5678`），直接读它比再问一次远端
+/// （`ls-remote`）便宜，也少一条会挂住的网络路径。
+///
+/// ★ 它**不改变**失败语义：失败仍然是 `Err(AppError)`（那才是"发布事务不能糊过去"的那一半）。
+#[derive(Debug, Clone)]
+pub struct PushOutcome {
+    /// 远端本来就是这一版（空操作，引用没动）
+    pub up_to_date: bool,
+    /// 人看的推送摘要（如 `abc1234..def5678  main -> main`、`* [new branch]`）；
+    /// **已 redact token、已剔掉带凭据的 URL**；读不出时是空串（调用方自己措辞）
+    pub detail: String,
+}
+
 /// 一条 git 命令的结果：成功 = stdout（已 trim 掉尾换行），失败 = 带 stderr 的 `AppError`。
 ///
 /// **与 ⑮ 里那个只返回 `Option<String>` 的 `git()` 不同**：那个是"探测"（没有 git 就当
@@ -181,7 +200,7 @@ impl Git {
         branch: &str,
         username: &str,
         token: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<PushOutcome, AppError> {
         let target = self.resolve_branch(branch)?;
         self.push_ref_authenticated(&target, username, token)
     }
@@ -196,7 +215,7 @@ impl Git {
         refspec: &str,
         username: &str,
         token: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<PushOutcome, AppError> {
         self.push_ref_to_authenticated("origin", refspec, username, token)
     }
 
@@ -217,7 +236,7 @@ impl Git {
         refspec: &str,
         username: &str,
         token: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<PushOutcome, AppError> {
         // Gitee → URL 内嵌凭据；其余（GitHub / 自建）→ 先发式 Basic 头
         let with_url_creds = gitee_url_with(remote, username, token);
         let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
@@ -235,7 +254,7 @@ impl Git {
         //   **设计内的裸推** —— 本地推送闸②（pre-push hook，PR-only）分不清远端，见到
         //   main 就拦。对发往 Gitee 发布仓库的主线推，由这里显式放行（hook 会留痕）；
         //   GitHub 的 main 不受影响：推进仍只有 PR 一条路（服务端 ruleset 也在兜底）。
-        let allow_main = with_url_creds.is_some() && refspec == "refs/heads/main";
+        let allow_main = with_url_creds.is_some() && refspec_targets_main(refspec);
         let mut cmd = Command::new("git");
         cmd.args(&args)
             .current_dir(&self.repo)
@@ -255,7 +274,19 @@ impl Git {
                 out.status.code()
             )));
         }
-        Ok(())
+        // 成功：把 git 自己那句推送摘要读回来（**不加网络往返**——它已经在 stderr 上了）。
+        // 只取含 ` -> ` 的那一行，带凭据的 `To https://user:***@…` 那行不带出去。
+        let stderr = String::from_utf8_lossy(&out.stderr).replace(token, "***");
+        let update = stderr
+            .lines()
+            .map(str::trim)
+            .find(|l| l.contains(" -> "))
+            .unwrap_or("")
+            .to_owned();
+        Ok(PushOutcome {
+            up_to_date: update.contains("[up to date]"),
+            detail: update,
+        })
     }
 
     /// 当前工作目录的 remote（`origin`）是不是**配置的那个仓库**（发布前的一致性校验）。
@@ -439,6 +470,19 @@ impl Git {
     }
 }
 
+/// 这条 refspec 的**目的地**是不是 `refs/heads/main` —— 放行裸推 main 的判据。
+///
+/// ★ 看**目的地**那一侧，不看源（2026-10-06 放宽）：同步镜像时推的是
+/// `refs/remotes/origin/main:refs/heads/main`，源是**远端跟踪引用** —— 把源写死成
+/// `refs/heads/main` 会让这种形状的推送被本地钩子拦下（或漏掉放行）。
+///
+/// ★ 为什么源必须是 `origin/<base>` 而不是本地 `<base>`：合并发生在**平台上**，
+/// 本地那个 main 往往是旧的（2026-10-06 实测：本机 main 停在 PR #46，比 `origin/main`
+/// 落后三个 PR）—— 拿它当源会把镜像**推回旧版**。
+fn refspec_targets_main(refspec: &str) -> bool {
+    refspec.rsplit_once(':').map_or(refspec, |(_, dst)| dst) == "refs/heads/main"
+}
+
 /// 路径在不在 stage 白名单里。**前缀匹配**（`presets/delivery/` 收下它下头的一切）。
 pub fn is_allowed(path: &str) -> bool {
     is_allowed_in(path, &STAGE_ALLOWLIST)
@@ -529,6 +573,32 @@ fn gitee_url_with(remote: &str, username: &str, token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **裸推 main 的放行判据看目的地、不看源**（2026-10-06）。
+    ///
+    /// 这条不是纸面功夫：同步镜像推的是 `refs/remotes/origin/main:refs/heads/main`，
+    /// 若判据只认字符串等于 `refs/heads/main`，这种推送就**拿不到放行**
+    /// （本地钩子 PR-only 那道闸会拦下），镜像永远同步不过去 —— 而那正是
+    /// "回执全绿、客户端没变化"那类事故的形状。
+    #[test]
+    fn the_main_push_allowance_looks_at_the_destination() {
+        assert!(refspec_targets_main("refs/heads/main"), "老形状照旧放行");
+        assert!(
+            refspec_targets_main("refs/remotes/origin/main:refs/heads/main"),
+            "同步镜像那种形状也要放行（源是远端跟踪引用）"
+        );
+        assert!(
+            refspec_targets_main("abc1234:refs/heads/main"),
+            "任意源，只要目的地是 main"
+        );
+        assert!(!refspec_targets_main("refs/heads/feature"), "推进分支不算");
+        assert!(
+            !refspec_targets_main("refs/heads/main:refs/heads/other"),
+            "往外推 main 的内容不算裸推 main"
+        );
+        assert!(!refspec_targets_main("refs/tags/v0.0.6"), "tag 不走这条");
+        assert!(!refspec_targets_main("refs/heads/mainish"), "前缀像不算");
+    }
 
     /// ★ Gitee 的 git-http 不吃先发式 Basic 头（2026-10-06 真机实测）—— 只认 URL 内嵌凭据。
     /// 这条钉**形状判定**：gitee.com 的 http(s) URL → 内嵌；remote 名 / 别的域 → `None` 回落。

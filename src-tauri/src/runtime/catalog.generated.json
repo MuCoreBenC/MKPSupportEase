@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "4c4592f74a9b33da",
+  "revision": "0bfc4ad3a9eac3b0",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -3179,10 +3179,7 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {
-          "A1:FASTV3.3": 65.0,
-          "A1:STANDARD": 70.0
-        },
+        "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,

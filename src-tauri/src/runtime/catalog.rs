@@ -25,8 +25,19 @@
 //! 对 brands + machines + assets + bundles + registry + files 的稳定序列化取的
 //! SHA256 前 16 位 ——「这份目录描述的输入和上次是不是同一份」。definition 在输入里：
 //! 改一个字段定义、挪一个布局项，revision 就变，检查更新看得见。它**不是**完整性校验
-//! （那是文件条目里每个 `sha256` 的事）。刻意没有 `generatedAt`：没有可信时间源之前
-//! 不编一个上去（与 ClientDataPackage 同一条裁决）。
+//! （那是文件条目里每个 `sha256` 的事）。
+//!
+//! # `publishedAt`（2026-10-06）：目录里唯一的可信时间
+//!
+//! 预设页云端表的「时间」要显示"这次发布的时刻"，来源只有发布侧的落盘那一刻 ——
+//! 所以 `publishedAt` 由**发布侧写**（工作台 `write_catalog_json`，与 manifest 的
+//! `updated` 同一个戳），随目录字节走到每台客户端。两条边界：
+//!
+//! - **随包 bootstrap 目录不带它**：`gen-catalog` 的产物必须逐字节可复现
+//!   （`embedded_matches_rebuild` 钉着），而且"随包"没有发布事件 —— 编一个就是撒谎；
+//!   那种目录在界面上照实说「未知」；
+//! - **不进 revision 输入**：同内容重发指纹不变，检查更新不该被一次重发惊动；
+//!   `#[serde(default)]` 也进不了结构签名（探针判的就是"删了还能不能解析"）。
 
 use std::path::Path;
 
@@ -46,6 +57,11 @@ pub struct Catalog {
     pub catalog_schema: u32,
     /// 目录指纹。源或交付产物变了它就变
     pub revision: String,
+    /// **发布时刻**（RFC3339 / UTC，秒级）。发布侧落盘时盖（工作台 `write_catalog_json`，
+    /// 与 manifest 的 `updated` 同一个戳）；随包 bootstrap 目录**刻意不带**（见模块头），
+    /// 界面对那种目录照实说「未知」
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
     /// 品牌清单（机型文件里写的是 id，给人看的名字在这里）
     #[serde(default)]
     pub brands: Vec<crate::presetdata::Brand>,
@@ -514,6 +530,8 @@ impl Catalog {
             Catalog {
                 catalog_schema: CATALOG_SCHEMA,
                 revision: String::new(),
+                // 发布时刻只归发布侧盖 —— 构建出来的目录（随包 / 预检）一律不带
+                published_at: None,
                 brands: presets.catalog.brands().to_vec(),
                 machines,
                 assets: presets.assets.items().to_vec(),

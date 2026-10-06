@@ -762,6 +762,44 @@ export interface RemoteReview {
   base: string
 }
 
+/** `publish_tx::ChangeSummary` —— 这次发布改了几份（按目录里登记的指纹算） */
+export interface ChangeSummary {
+  added: number
+  changed: number
+  removed: number
+  unchanged: number
+}
+
+/** `publish_tx::FileChange` —— 单份文件的指纹变化（`before` 空 = 新增；`after` 空 = 删除） */
+export interface FileChange {
+  path: string
+  before: string | null
+  after: string | null
+}
+
+/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个官方源」那一步的结论 */
+export type MirrorStatus = 'pushed' | 'upToDate' | 'skipped' | 'failed'
+
+/**
+ * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个官方源**的结果。
+ *
+ * ★ 它回答的是「**客户端读的那个源**跟上了没有」—— 与平台上的 PR 状态是两件事。
+ * 一次发布只开一条 PR（代码主线仍只走 GitHub），合完由这一步把数据面铺到另一个源上。
+ */
+export interface MirrorSync {
+  platform: string
+  repositoryUrl: string
+  branch: string
+  status: MirrorStatus
+  detail: string
+}
+
+/** `publish_tx::MergeOutcome` —— 「合并」这一步的完整结论（评审状态 + 镜像同步） */
+export interface MergeOutcome {
+  review: RemoteReview
+  mirror: MirrorSync | null
+}
+
 /** `publish_tx::PublishTxReport` —— 一轮发布事务的结果（阶段的快照） */
 export interface PublishTxReport {
   stage: PublishStage
@@ -776,6 +814,14 @@ export interface PublishTxReport {
   commit: string | null
   files: number
   summary: string
+  /** 本次发布时刻（= 写进目录 `publishedAt` 的那一个）。审计没过 = null */
+  publishedAt?: string | null
+  /** 本次发布的目录指纹（交付面 catalog 的 `revision`）。没走到生成 = null */
+  revision?: string | null
+  /** 这次改了几份（新增 / 修改 / 删除 / 未变化）。没走到生成 = null */
+  changes?: ChangeSummary | null
+  /** 逐份明细（只含新增 / 修改 / 删除那几份；未变化的不列） */
+  changedFiles?: FileChange[]
 }
 
 /** `publish_tx::TxOptions` —— 发布事务的开关（一般用默认：一次点击走完全程） */
@@ -811,6 +857,13 @@ export interface PublishRecord {
   auditPassed: number
   auditFailed: number
   summary: string
+  /**
+   * 合并之后「把主线同步到第二个官方源」的结论。
+   *
+   * `null` = 这一条写下来的时候还没走到合并那一步。★ 它**不由刷新改写** ——
+   * 刷新拿到的是平台上的 PR 状态，与"镜像跟没跟上"是两件事。
+   */
+  mirror?: MirrorSync | null
 }
 
 /** `history::PublishHistory` —— 回执日志（最新在前） */
@@ -1600,7 +1653,7 @@ export const wb = {
    * 的二次确认在界面做，这里不重复设闸。合完返回**回读后的真状态**（应落到 `merged`）。
    */
   mergeReview: (number: number, platform?: string | null) =>
-    invoke<RemoteReview>('wb_merge_review', { number, platform: platform ?? null }),
+    invoke<MergeOutcome>('wb_merge_review', { number, platform: platform ?? null }),
   /** 发布历史（只读）：最近若干次「发布预设」事务的回执，**最新在前** */
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */

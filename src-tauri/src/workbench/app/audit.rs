@@ -1606,6 +1606,31 @@ mod tests {
             .collect()
     }
 
+    /// **发布时刻进目录**（2026-10-06）：发布写的 catalog.json 带 `publishedAt`，
+    /// 而且与 manifest 的 `updated` 是**同一个戳** —— 一次发布事件只有一个时间，
+    /// 客户端云端表的「时间」列（`catalog.publishedAt`）显示的就是它。
+    /// 随包 bootstrap 目录刻意不带这一格（`gen-catalog` 产物逐字节可复现），那是另一条路的裁决。
+    #[test]
+    fn the_published_catalog_carries_the_publish_stamp() {
+        let fx = Delivery::published();
+        let catalog: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(fx.delivery_root().join(delivery::NEW_CATALOG_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            catalog["publishedAt"], "2026-10-05T00:00:00Z",
+            "publishedAt = 发布侧落的那个戳"
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(fx.delivery_root().join(delivery::MANIFEST_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["updated"], catalog["publishedAt"],
+            "目录与清单不许各说一个时间"
+        );
+    }
+
     /// **场景 A（预检侧）**：manifest 落后于交付物 —— 预检 ⑭ 是提示档（Warn），
     /// **不许**把发布拦死（老实现这里是 Blocker，构成「只能靠发布修、发布又进不去」
     /// 的死循环）。同一状态下严格版（③½ 用的那把尺）必须红 —— 两层各管各的。

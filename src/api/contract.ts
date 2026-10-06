@@ -691,6 +691,18 @@ export interface DeliveryTrust {
 }
 
 /**
+ * 盘上交付区里的一份（`getDownloadedFiles` / `getStaleFiles` 的行形状）。
+ *
+ * `modifiedUnix`（UTC **epoch 秒**）= 这份字节**落进本机的时刻**（文件 mtime ——
+ * 下载管道写盘的那一刻）：本地表「时间」列的"下载到本机的时刻"，界面自己转
+ * 本地时区。`null` = 文件系统没给，**不编**（与 `ArchivedFile.modifiedUnix` 同一条口径）。
+ */
+export interface OnDiskFile {
+  fileName: string
+  modifiedUnix: number | null
+}
+
+/**
  * catalog definition 里的**字段定义**（与 Rust `presetdata::ParamDef` 的 serde 形态对齐）。
  * 只声明消费面读的格子；JSON 里有更多字段（default_value / machine_variants …），
  * 见 `src-tauri/src/presetdata/registry.rs` —— 前端消费到哪一栏，声明就长到哪一栏。
@@ -788,6 +800,15 @@ export interface RuntimeCatalog {
   catalogSchema: number
   /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
   revision: string
+  /**
+   * **发布时刻**（RFC3339 / UTC）。发布侧落盘时写进目录（与 manifest 的 `updated`
+   * 同一个戳），客户端云端表的「时间」列显示它 —— 显示时按本机时区转。
+   *
+   * **可选**：随包 bootstrap 目录刻意不带这一格（`gen-catalog` 的产物要逐字节可复现，
+   * 而且"随包"没有发布事件）；旧版发布的目录也没有。缺了就是「没有可信的发布时刻」
+   * —— 界面照实说「未知」，**不编**。
+   */
+  publishedAt?: string
   machines: RuntimeCatalogMachine[]
   /**
    * 品牌（含品牌图的**资产 id**）：机型与版本都没有图时回落到品牌图，再回落才是内置字标。
@@ -1245,18 +1266,23 @@ export interface MkpApi {
   clearPresetSource(): Promise<PresetSource | null>
 
   /**
-   * 已经下载到下载区的文件名。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
+   * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
+   *
+   * 每份带 `modifiedUnix`（UTC epoch 秒）= 这份字节**落进本机的时刻** ——
+   * 预设页本地表「时间」列的"下载到本机的时刻"，界面自己转本地时区显示。
    */
-  getDownloadedFiles(): Promise<string[]>
+  getDownloadedFiles(): Promise<OnDiskFile[]>
 
   /**
-   * 有更新的文件名：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
+   * 有更新的文件：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
    * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
+   *
+   * `modifiedUnix` 说的是**盘上那一份**的落盘时刻（它是什么时候到我机器上的）。
    *
    * **它只说"不一致"，不说"因为什么"** —— 分成哪两种（旧版本 / 查不出它是哪一版）
    * 看 [`getDeliveryTrust`]。
    */
-  getStaleFiles(): Promise<string[]>
+  getStaleFiles(): Promise<OnDiskFile[]>
 
   /**
    * 盘上这几份交付预设**认得出是哪一版吗**（第三圈第 6 层）。**只列有事的**

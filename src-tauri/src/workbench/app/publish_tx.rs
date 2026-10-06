@@ -23,7 +23,7 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
@@ -135,6 +135,19 @@ pub struct PublishTxReport {
     pub files: usize,
     /// 这一步的一句话说明（给状态条）
     pub summary: String,
+    /// **本次发布时刻**（= 写进目录 `publishedAt` 的那一个，也与 manifest 的 `updated` 同戳）。
+    /// 审计没过（一个字节都没写）时是 `None` —— 如实说"这次没有发布时刻"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
+    /// **本次发布的目录指纹**（交付面 `catalog.json` 的 `revision`）。没走到生成 = `None`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// 本次变化的总数（新增 / 修改 / 删除 / 未变化）。没走到生成 = `None`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changes: Option<ChangeSummary>,
+    /// 逐份明细（只含新增 / 修改 / 删除那几份；未变化的不列）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_files: Vec<FileChange>,
 }
 
 /// 事务的开关：控制"走到哪一步停"。
@@ -239,17 +252,26 @@ pub fn run(
             commit: None,
             files: 0,
             summary: "发布闸没全绿 —— 一个字节都没写。先照「去修」把红项处理掉".to_owned(),
+            published_at: None,
+            revision: None,
+            changes: None,
+            changed_files: Vec::new(),
         });
     }
 
     // ② 生成 + ③ 定稿。生成用 `Scope::Stale`（只补该补的）—— 与界面「生成」同一个口子。
     //    生成会重算一份 catalog；定稿再把 manifest / source 落上，两头对上。
+    //
+    // ★ 生成**之前**先留一份"目录里登记的指纹"（2026-10-06，回执的「本次变化」用它）：
+    //    生成会把这份 catalog 覆盖掉，事后就问不出"发布前是什么"了。
+    //    读的**是目录登记的值**（`sha256`），不是文件系统 mtime —— 回执里每个数都要能对上目录。
+    let root = super::super::paths::delivery_root()?;
+    let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
     let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
 
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
     let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
-    let root = super::super::paths::delivery_root()?;
     let asset_root = super::super::paths::assets_root()?;
     let meta = super::delivery::PublishMeta {
         stamp: crate::workbench::clock::now_iso8601(),
@@ -257,6 +279,16 @@ pub fn run(
         version: String::new(),
     };
     let out = super::delivery::publish_into(&root, &asset_root, &book, &meta)?;
+
+    // 定稿之后的目录：取它的指纹（回执里显示「这一版是哪一版」）并与生成前逐份比。
+    let catalog_path = root.join(super::delivery::NEW_CATALOG_FILE);
+    let delivered = crate::runtime::catalog::Catalog::parse(&std::fs::read(&catalog_path)?)?;
+    let after: std::collections::BTreeMap<String, String> = delivered
+        .files
+        .iter()
+        .filter_map(|f| f.sha256.clone().map(|s| (f.path.clone(), s)))
+        .collect();
+    let (changes, changed_files) = diff_fingerprints(&before, &after);
 
     // ③½ **最终一致性核对**（发布事务的最后一道安全检查，不是第二套闸）：
     //    定稿刚按真实字节写下的 manifest / catalog 与交付根必须逐条对上、无残留。
@@ -280,6 +312,16 @@ pub fn run(
         .with_detail(broken.join("；")));
     }
 
+    // 状态条那一句里就把「改了什么」说清（"7 步全绿"答不了"我改了哪几份"）
+    let summary = format!(
+        "已生成 {} 份、定稿 {} 份产物。本次变化：新增 {} · 修改 {} · 删除 {} · 未变化 {}。",
+        gen.written.len(),
+        out.files,
+        changes.added,
+        changes.changed,
+        changes.removed,
+        changes.unchanged
+    );
     let mut report = PublishTxReport {
         stage: PublishStage::Generated,
         audit_passed: passed,
@@ -291,11 +333,11 @@ pub fn run(
         branch: None,
         commit: None,
         files: out.files,
-        summary: format!(
-            "已生成 {} 份、定稿 {} 份产物。",
-            gen.written.len(),
-            out.files
-        ),
+        summary,
+        published_at: Some(meta.stamp.clone()),
+        revision: Some(delivered.revision.clone()),
+        changes: Some(changes),
+        changed_files,
     };
 
     // dry_run：到这里就停（"只想看看会提交什么"）。
@@ -595,6 +637,241 @@ pub fn wb_publish_status(app: tauri::AppHandle, number: u64) -> Result<RemoteRev
     })
 }
 
+/// 一次发布"改了什么"：按**目录里登记的文件**逐份比指纹（不是文件系统 mtime）。
+///
+/// ★ 口径（2026-10-06）：只有真正在交付目录里登记了 `sha256` 的那种文件才算一份
+/// （`CatalogFile.sha256`）。登记不了期望值的（随包 bootstrap 那种）不参与计数 ——
+/// 数出来的每一个数都要能被 `catalog.json` 自己解释。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeSummary {
+    pub added: usize,
+    pub changed: usize,
+    pub removed: usize,
+    pub unchanged: usize,
+}
+
+/// 单份文件的指纹变化。`before` 为空 = 新增；`after` 为空 = 删除。
+///
+/// 只给**指纹**（`sha256` 前 8 位由前端截），不给内容 diff —— 预设是数据文件，
+/// 逐行 diff 要另做一套"TS 侧解析 TOML"的活，那是另一件事。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChange {
+    /// 相对交付根的落点（`mkp/presets/A1-fast.toml`）
+    pub path: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// 读一份目录里登记的 `路径 → sha256`（读不出 / 解析不了 = 空，**不编**）。
+fn catalog_fingerprints(path: &std::path::Path) -> std::collections::BTreeMap<String, String> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Default::default();
+    };
+    let Ok(catalog) = crate::runtime::catalog::Catalog::parse(&bytes) else {
+        return Default::default();
+    };
+    catalog
+        .files
+        .iter()
+        .filter_map(|f| f.sha256.clone().map(|s| (f.path.clone(), s)))
+        .collect()
+}
+
+/// 两份指纹表比出「新增 / 修改 / 删除 / 未变化」与逐份明细。
+fn diff_fingerprints(
+    before: &std::collections::BTreeMap<String, String>,
+    after: &std::collections::BTreeMap<String, String>,
+) -> (ChangeSummary, Vec<FileChange>) {
+    let mut summary = ChangeSummary::default();
+    let mut files = Vec::new();
+    for (path, new) in after {
+        match before.get(path) {
+            None => {
+                summary.added += 1;
+                files.push(FileChange {
+                    path: path.clone(),
+                    before: None,
+                    after: Some(new.clone()),
+                });
+            }
+            Some(old) if old == new => summary.unchanged += 1,
+            Some(old) => {
+                summary.changed += 1;
+                files.push(FileChange {
+                    path: path.clone(),
+                    before: Some(old.clone()),
+                    after: Some(new.clone()),
+                });
+            }
+        }
+    }
+    for (path, old) in before {
+        if !after.contains_key(path) {
+            summary.removed += 1;
+            files.push(FileChange {
+                path: path.clone(),
+                before: Some(old.clone()),
+                after: None,
+            });
+        }
+    }
+    (summary, files)
+}
+
+/// 镜像同步的结论。**不是布尔** —— 「推上去了」和「那边本来就是这一版」要对用户分开说。
+///
+/// `Deserialize` 是给**发布历史**读的（`PublishRecord` 要反序列化回来）；
+/// `PartialEq` 是给判据比的（同一份历史读回来该与原样相等）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MirrorStatus {
+    /// 推上去了（镜像的引用跟着动了）
+    Pushed,
+    /// 镜像上本来就是这一版（幂等空操作）
+    UpToDate,
+    /// 没做这一步，原因在 `detail` 里（没配那个源 / 这一笔是反向）
+    Skipped,
+    /// 试过、失败了。★ **不回滚"已合并"这个既成事实**，只如实报
+    Failed,
+}
+
+/// 合并之后「把主线同步到第二个官方源」这一步的结果。
+///
+/// 作者 2026-10-06 定：一次发布**只开一条 PR**（代码主线仍只走 GitHub 的 PR），
+/// PR 合并之后把主线数据同步一份到第二个官方源上 —— **幂等、不额外开 PR**。
+///
+/// ★ 为什么这是一件必须单独报出来的事：客户端的数据源读的就是**仓库里的
+/// `presets/delivery/`**。所以"合进 GitHub 的 main"与"客户端读的那个源上的 main
+/// 也有这一版"是**两件事** —— 2026-10-06 的那次事故正是前者成了、后者没成，
+/// 而回执七步全绿（详见 `docs/PUBLISH-ARCHITECTURE.md` 与当日台账）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorSync {
+    /// 目标平台 id（`"gitee"`）；没做这一步时是**本该去**的那个
+    pub platform: String,
+    /// 目标仓库地址（没配时是空串）
+    pub repository_url: String,
+    /// 推的是哪条分支
+    pub branch: String,
+    pub status: MirrorStatus,
+    /// 一句话：成功 = 推了什么；跳过 / 失败 = 为什么
+    pub detail: String,
+}
+
+/// 把主线同步到"另一个官方源"。**只做 GitHub → Gitee 这一个方向**。
+///
+/// 三条纪律：
+/// 1. **不给主流程判生死**：这一步失败不回滚"已合并"（那已经是事实），回执里如实报；
+/// 2. **只推主线、不开 PR**：镜像源是**数据面**，不是协作面；
+/// 3. **反向不做**：在 Gitee 上合完再裸推 GitHub 的 `main` 会被服务端 ruleset 拒
+///    （代码主线在 GitHub 上只有 PR 一条路）—— 所以那种情形如实标「跳过」，
+///    而不是去撞一次必然失败的推送。
+fn sync_mirror_after_merge(
+    root: &std::path::Path,
+    merged_on: &PublishTarget,
+    base: &str,
+) -> MirrorSync {
+    let platform = if merged_on.platform == "github" {
+        "gitee"
+    } else {
+        "github"
+    };
+    let mut out = MirrorSync {
+        platform: platform.to_owned(),
+        repository_url: String::new(),
+        branch: base.to_owned(),
+        status: MirrorStatus::Skipped,
+        detail: String::new(),
+    };
+
+    if merged_on.platform != "github" {
+        out.detail = format!(
+            "这一笔合在 {} 上 —— 代码主线在 GitHub 上只有 PR 一条路，这里不反向裸推。\
+             要让另一个源也跟上，把发布目标切到 GitHub 走一次发布。",
+            merged_on.platform
+        );
+        return out;
+    }
+
+    // 镜像目标从**同一份发布账户配置**里取（与发布目标是同一个真值来源）。
+    // 没配就不是"失败"，是"没这一步" —— 如实标跳过。
+    let mirror = match resolve_target(root, Some(platform)) {
+        Ok(t) => t,
+        Err(e) => {
+            out.detail = format!("没有可用的 {platform} 发布账户，这一步跳过（{e}）");
+            return out;
+        }
+    };
+    out.repository_url = mirror.repository_url.clone();
+    if super::git::normalize_repo_url_for_compare(&mirror.repository_url)
+        == super::git::normalize_repo_url_for_compare(&merged_on.repository_url)
+    {
+        out.detail = "镜像目标与发布目标是同一个仓库，这一步没有意义，跳过".to_owned();
+        return out;
+    }
+
+    let git = super::git::Git::at_repo_root();
+
+    /* ★ 同步的**源**是 `origin/<base>`，不是本地那个 `<base>`（2026-10-06 实测踩到的）：
+     *   合并发生在**平台上**，本地分支往往是旧的 —— 本机 `main` 停在 PR #46，而
+     *   `origin/main` 才是刚合出来的那一笔。拿本地 main 当源会把镜像**推回旧版**。
+     *   所以先 fetch 一次把它拉到最新；**拉不到就不推**（宁可不推，也不推一份旧的）。 */
+    if let Err(e) = git.fetch("origin") {
+        out.status = MirrorStatus::Failed;
+        out.detail = format!("拉取远端的 {base} 失败，读不到合并结果，没敢同步：{e}");
+        return out;
+    }
+    let source = format!("refs/remotes/origin/{base}");
+    if git.rev_parse_short(&source).is_err() {
+        out.status = MirrorStatus::Failed;
+        out.detail = format!("本机没有 {source}（读不到合并结果），没敢同步");
+        return out;
+    }
+
+    match git.push_ref_to_authenticated(
+        &mirror.repository_url,
+        &format!("{source}:refs/heads/{base}"),
+        &mirror.username,
+        &mirror.token,
+    ) {
+        Ok(p) if p.up_to_date => {
+            out.status = MirrorStatus::UpToDate;
+            out.detail = format!("{platform} 上已经是这一版（幂等空操作）");
+        }
+        Ok(p) => {
+            out.status = MirrorStatus::Pushed;
+            out.detail = match mirror_gap(&git, &source, &p.detail) {
+                /* 首次补齐要给个数：落后几个提交就是几个（那是"补了多少"，不是"改了什么"） */
+                Some(n) => format!("已把 {base} 推到 {platform}（补了 {n} 个提交）"),
+                None if p.detail.is_empty() => format!("已把 {base} 推到 {platform}"),
+                None => format!("已把 {base} 推到 {platform}：{}", p.detail),
+            };
+        }
+        Err(e) => {
+            out.status = MirrorStatus::Failed;
+            out.detail = format!("{platform} 同步失败 —— 已合并这件事不受影响：{e}");
+        }
+    }
+    out
+}
+
+/// 从 git 那句推送摘要里读"这一次把镜像补了多少个提交"（读不出 = `None`，**不编**）。
+///
+/// 摘要在快进时长这样：`abc1234..def5678  refs/remotes/origin/main -> main`
+/// —— 有了旧 sha 就能本地数差多少。旧 sha 在本机不认识（浅克隆等）就如实不数，
+/// 只报静默版的"已推过去"。
+fn mirror_gap(git: &super::git::Git, source_ref: &str, detail: &str) -> Option<usize> {
+    let old = detail.split_once("..")?.1.split_whitespace().next()?;
+    let old = old.trim_matches(|c: char| !c.is_ascii_hexdigit());
+    if old.len() < 7 {
+        return None;
+    }
+    let (ahead, _) = git.ahead_behind(source_ref, old).ok()?;
+    Some(ahead)
+}
+
 /// **合并**一份 PR/MR（squash）—— 用户在回执屏上**显式点过「合并」**才调。
 ///
 /// 口径（作者 2026-10-04 拍）：
@@ -608,31 +885,59 @@ pub fn wb_merge_review(
     app: tauri::AppHandle,
     number: u64,
     platform: Option<String>,
-) -> Result<RemoteReview, AppError> {
+) -> Result<MergeOutcome, AppError> {
     crate::ipc::traced("wb_merge_review", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
         let target = resolve_target(&root, platform.as_deref())?;
         let id = super::platform::ReviewId {
-            owner: target.owner,
-            repo: target.repo,
+            owner: target.owner.clone(),
+            repo: target.repo.clone(),
             number,
         };
         let method = super::platform::MergeMethod::Squash;
-        let merged = match target.platform.as_str() {
-            "github" => {
-                super::platform::github::GitHub::new(target.token).merge_review(&id, method)
-            }
-            "gitee" => super::platform::gitee::Gitee::new(target.token).merge_review(&id, method),
-            other => Err(AppError::invalid_argument(format!("不认识的平台：{other}"))),
-        }?;
+        let merged =
+            match target.platform.as_str() {
+                "github" => super::platform::github::GitHub::new(target.token.clone())
+                    .merge_review(&id, method),
+                "gitee" => super::platform::gitee::Gitee::new(target.token.clone())
+                    .merge_review(&id, method),
+                other => Err(AppError::invalid_argument(format!("不认识的平台：{other}"))),
+            }?;
+
+        /* ★ 合并成功之后**把主线同步到第二个官方源**（2026-10-06 加）。
+         *
+         * 为什么必须在这里：客户端的数据源读的是**仓库里的 `presets/delivery/`**，
+         * 而"合进 GitHub 的 main"与"客户端读的那个源上的 main 也有这一版"是两件事。
+         * 2026-10-06 那次事故正是前者成了、后者没成，而回执七步全绿 —— 用户看不出区别。
+         *
+         * ★ 只有**真合上了**才做：平台回读不是 `merged`（比如只关了 PR）时主线没动，
+         *   推镜像就是无意义甚至有害的动作。
+         */
+        let mirror = (merged.state == ReviewState::Merged)
+            .then(|| sync_mirror_after_merge(&root, &target, &merged.base));
 
         // 合并是**我们亲手造成的状态变化** —— 顺手把它记回发布历史（记账不必问网络）。
         // 记不上不影响结论：已经合了就是合了；下次「刷新」还能看到真状态。
-        if let Ok(root) = crate::fsx::paths::internal_root(&app) {
-            let _ = super::history::update_review(&root, &merged);
-        }
-        Ok(merged)
+        // 镜像那一条一起记进同一批记录（刷新不会把它抹掉，见 `history::update_review`）。
+        let _ = super::history::update_review(&root, &merged, mirror.as_ref());
+        Ok(MergeOutcome {
+            review: merged,
+            mirror,
+        })
     })
+}
+
+/// **合并**这一步的完整结论：评审的真状态 + **镜像同步**（2026-10-06 加）。
+///
+/// ★ 从"只返回 [`RemoteReview`]"改成这个形状，是为了让回执能说清"合完了，
+/// 但**客户端读的那个源**跟上了没有" —— 那件事与平台上的 PR 状态是两回事
+/// （见 [`MirrorSync`]）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeOutcome {
+    pub review: RemoteReview,
+    /// 只有**确实合并成功**之后才有这一步的结论；没合上 / 没配第二个源时如实带原因
+    pub mirror: Option<MirrorSync>,
 }
 
 /* ---------- 发布目标的解析（命令壳用；内核只收解析好的 PublishTarget） ---------- */
@@ -829,5 +1134,94 @@ mod tests {
                 hits.join("\n")
             );
         }
+    }
+
+    /// **镜像同步只走"合上 GitHub → 推 Gitee"一个方向**（2026-10-06）。
+    ///
+    /// 反向（在 Gitee 上合完再裸推 GitHub 的 `main`）**刻意不做**：代码主线在 GitHub 上
+    /// 只有 PR 一条路（服务端 ruleset 也在兜底），裸推必然被拒 —— 与其去撞一次必然失败的
+    /// 推送、把回执弄成红的，不如如实标"跳过 + 为什么"。这条判据钉住那个"不去撞"。
+    #[test]
+    fn the_mirror_step_never_pushes_back_to_github() {
+        let on_gitee = PublishTarget {
+            platform: "gitee".to_owned(),
+            repository_url: "https://gitee.com/o/r".to_owned(),
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        // root 随便给：这条路径**在碰 root 之前就该返回**（否则下面这几句断言就没意义了）
+        let out = sync_mirror_after_merge(std::path::Path::new("/nonexistent"), &on_gitee, "main");
+        assert_eq!(out.platform, "github", "本该去的是另一个方向");
+        assert_eq!(out.status, MirrorStatus::Skipped);
+        assert!(
+            out.detail.contains("只有 PR 一条路"),
+            "跳过要说明为什么，不是静默：{}",
+            out.detail
+        );
+        assert!(out.repository_url.is_empty(), "没做这一步就不该报目标地址");
+    }
+
+    /// **没配第二个源 = 跳过，不是失败**（2026-10-06）。
+    ///
+    /// 这条边界很重要：镜像那一步**不给主流程判生死**（合上了就是合上了），
+    /// 所以"没配 Gitee"绝不能长成 `Failed` —— 那会让一次正常发布在回执里看着像出了事。
+    #[test]
+    fn a_missing_mirror_account_is_skipped_not_failed() {
+        let d = tempfile::tempdir().unwrap();
+        let on_github = PublishTarget {
+            platform: "github".to_owned(),
+            repository_url: "https://github.com/o/r".to_owned(),
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        let out = sync_mirror_after_merge(d.path(), &on_github, "main");
+        assert_eq!(out.platform, "gitee");
+        assert_eq!(out.status, MirrorStatus::Skipped, "没配 ≠ 失败");
+        assert!(
+            out.detail.contains("跳过"),
+            "要说清是跳过、为什么：{}",
+            out.detail
+        );
+    }
+
+    /// **"本次变化"按目录登记的指纹算**（2026-10-06）—— 新增 / 修改 / 删除 / 未变化四档，
+    /// 明细里只列动过的那几份（未变化的不列，免得清单变成一整页）。
+    #[test]
+    fn the_change_summary_counts_fingerprints_not_mtime() {
+        let map = |pairs: &[(&str, &str)]| -> std::collections::BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+        let before = map(&[
+            ("a.toml", "1111"),
+            ("b.toml", "2222"),
+            ("gone.toml", "3333"),
+        ]);
+        let after = map(&[("a.toml", "1111"), ("b.toml", "2222"), ("new.toml", "4444")]);
+
+        let (sum, files) = diff_fingerprints(&before, &after);
+        assert_eq!(
+            (sum.added, sum.changed, sum.removed, sum.unchanged),
+            (1, 0, 1, 2),
+            "新增 1、删除 1、其余未变"
+        );
+        assert_eq!(files.len(), 2, "明细只列动过的那两份");
+        let new = files.iter().find(|f| f.path == "new.toml").unwrap();
+        assert!(new.before.is_none(), "新增那份的 before 该是空的");
+        assert_eq!(new.after.as_deref(), Some("4444"));
+        let gone = files.iter().find(|f| f.path == "gone.toml").unwrap();
+        assert_eq!(gone.before.as_deref(), Some("3333"));
+        assert!(gone.after.is_none(), "删掉那份的 after 该是空的");
+
+        // 指纹变了就是"修改"（不按 mtime、不按大小）
+        let touched = map(&[("a.toml", "9999")]);
+        let (sum2, _) = diff_fingerprints(&before, &touched);
+        assert_eq!((sum2.changed, sum2.unchanged), (1, 0));
     }
 }

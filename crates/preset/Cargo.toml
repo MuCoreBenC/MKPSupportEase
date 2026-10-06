@@ -42,7 +42,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-# build9 判据要读 Go 侧导出的 IR JSON 并做字段树归一比较。
+# registry_branch_diff 判据要把 build 输出序列化成 JSON 做字段树比较。
 serde_json.workspace = true
 # load_ir 的整链判据要把输入复制到临时目录再原地覆盖。
 tempfile.workspace = true

@@ -1884,8 +1884,11 @@ sectionId = 'motion'
 order = 100.0
 
 [params.machineVariants]
-"A1:FASTV3.3" = 65.0
-"A1:STANDARD" = 70.0
+# ★ 空表是刻意的（2026-10-06）：九条版本覆盖的值都等于本参数的 defaultValue（70.0），
+#   而"与基底同值"在归并那一步会被**上提进机型基底**、版本层不留覆盖 ——
+#   也就是说这九条登记**一个字节的作用都没有**，只会让"哪些版本真的覆盖了这一项"
+#   这件事失去信号（原来 A1:FASTV3.3 = 65 是**有意**的覆盖，被写成 70 之后就没了）。
+#   参数台的默认值就是 70，要改全局值请改上面的 defaultValue，别在这儿铺一层同值副本。
 
 [[params]]
 key = 'wiping.support_extrusion_multiplier'

@@ -556,7 +556,7 @@ pub(super) fn generate_with(ctx: &super::Ctx, scope: &Scope) -> Result<GenerateR
     if let Ok(asset_root) = paths::assets_root() {
         super::delivery::write_content(&dist_root, &asset_root, &book)?;
     }
-    super::delivery::write_catalog_json(&dist_root, &book)?;
+    super::delivery::write_catalog_json(&dist_root, &book, &clock::now_iso8601())?;
 
     let stamp = clock::now_iso8601();
     tracing::info!(

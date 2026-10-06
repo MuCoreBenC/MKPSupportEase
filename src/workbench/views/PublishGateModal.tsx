@@ -38,6 +38,9 @@ import { isAppError, wb } from '../api'
 import type {
   AuditItem,
   AuditStatus,
+  ChangeSummary,
+  FileChange,
+  MirrorSync,
   PublishAudit,
   PublishStage,
   PublishTxReport,
@@ -121,10 +124,32 @@ const REVIEW_TEXT: Record<RemoteReview['state'], string> = {
 }
 
 /**
+ * 镜像同步结论 → 一个词。
+ *
+ * ★ 四档**不能压成一个布尔**：「推上去了」与「那边本来就是这一版」是两件事，
+ * 「没做这一步」与「做失败了」更是两件事（前者是配置，后者是故障）。
+ */
+const MIRROR_TEXT: Record<MirrorSync['status'], string> = {
+  pushed: '已跟上',
+  upToDate: '本来就是这一版',
+  skipped: '没做这一步',
+  failed: '同步失败',
+}
+
+/** 指纹截短给眼睛看（完整值在 title 里） */
+function shortSha(sha: string | null): string {
+  return sha === null ? '—' : sha.slice(0, 8)
+}
+
+/**
  * 把一次事务报告摊成阶段链。**只读报告，不猜**：报告停在哪一步，
  * 后面那几步就是「还没到」；`commit` 为空且产物没变化 ⇒ 如实说"没有可提交的内容"。
  */
-function receiptSteps(report: PublishTxReport, review: RemoteReview | null): Step[] {
+function receiptSteps(
+  report: PublishTxReport,
+  review: RemoteReview | null,
+  mirror: MirrorSync | null,
+): Step[] {
   const rank = STAGE_RANK[report.stage] ?? 0
   const mk = (key: string, label: string, reached: boolean, note: string): Step => ({
     key,
@@ -184,8 +209,69 @@ function receiptSteps(report: PublishTxReport, review: RemoteReview | null): Ste
       note: review.state === 'merged' ? '已合并（squash）' : REVIEW_TEXT[review.state],
       state: review.state === 'merged' ? 'done' : 'todo',
     })
+    /* ★ 「把主线同步到第二个官方源」是**合并之后**的一步，只有真合上才可能发生
+     * （2026-10-06 加）。它答的是"**客户端读的那个源**跟上了没有" —— 与平台上的
+     * PR 状态是两件事，所以它是**独立一格**，不并进「合并」那一格里。 */
+    if (mirror !== null) {
+      steps.push({
+        key: 'mirror',
+        label: `同步到 ${mirror.platform}`,
+        note: `${MIRROR_TEXT[mirror.status]}${mirror.detail === '' ? '' : ` · ${mirror.detail}`}`,
+        state:
+          mirror.status === 'failed'
+            ? 'stop'
+            : mirror.status === 'pushed' || mirror.status === 'upToDate'
+              ? 'done'
+              : 'todo',
+      })
+    }
   }
   return steps
+}
+
+/**
+ * 回执「客户端」块的那一句结论 —— **"客户端现在为什么还看不到 / 什么时候能看到"**。
+ *
+ * ★ 它是这一刀存在的主要理由：2026-10-06 那次事故里，七步（检查→生成→提交→推送→PR→CI→合并）
+ * 全绿，而客户端什么也没变 —— 因为**客户端读的那个源**没跟上。所以这里必须把
+ * "合进代码主线"与"数据面铺到那个源上"分开说，并给出一句能当行动指引的话。
+ */
+function clientVerdict(
+  review: RemoteReview | null,
+  mirror: MirrorSync | null,
+): { tone: 'ok' | 'warn' | 'stop' | 'todo'; text: string } {
+  if (review === null) {
+    return { tone: 'todo', text: '还没建 PR/MR —— 这一版还没落到任何官方源上' }
+  }
+  const base = review.base || 'main'
+  if (review.state !== 'merged') {
+    return {
+      tone: 'todo',
+      text: `PR/MR 还没合并（${REVIEW_TEXT[review.state]}）—— 合上之后才谈得上"客户端能看到"`,
+    }
+  }
+  if (mirror === null) {
+    return {
+      tone: 'warn',
+      text: `已合进 ${base}；第二个官方源这一步没有结论（这次没有跑）—— 读那个源的客户端看不到这一版`,
+    }
+  }
+  if (mirror.status === 'failed') {
+    return {
+      tone: 'stop',
+      text: `已合进 ${base}，但 ${mirror.platform} 没跟上 —— 读 ${mirror.platform} 的客户端看不到这一版（${mirror.detail}）`,
+    }
+  }
+  if (mirror.status === 'skipped') {
+    return {
+      tone: 'warn',
+      text: `已合进 ${base}；${mirror.platform} 这一步没做 —— 读 ${mirror.platform} 的客户端看不到这一版（${mirror.detail}）`,
+    }
+  }
+  return {
+    tone: 'ok',
+    text: `已合进 ${base}，${mirror.platform} 的 ${mirror.branch} 也是这一版 —— 客户端下一次检查更新时会看到它（重启客户端触发检查）`,
+  }
 }
 
 interface Props {
@@ -194,14 +280,22 @@ interface Props {
   onPublish: () => Promise<PublishTxReport>
   /** 带一份"上一次的发布结果"打开 ⇒ 直接进回执视图（② 卡的「查看发布结果」） */
   initialReport?: PublishTxReport | null
+  /**
+   * 带上一次算出来的**镜像同步结论**（那个源跟上了没有）。
+   *
+   * ★ 它不在 `PublishTxReport` 里：发布事务本身不推镜像（那一步发生在**合并之后**），
+   * 所以它由外面那一格传进来 —— 不传就是"没有结论"，如实说，不猜。
+   */
+  initialMirror?: MirrorSync | null
   /** 合并成功后把新状态回传给外面（让 ② 卡那份 lastPublish 跟着更新） */
-  onMerged?: (review: RemoteReview) => void
+  onMerged?: (review: RemoteReview, mirror: MirrorSync | null) => void
 }
 
 export default function PublishGateModal({
   onClose,
   onPublish,
   initialReport = null,
+  initialMirror = null,
   onMerged,
 }: Props) {
   /** 闸的结果；null = 还没算回来 */
@@ -213,11 +307,20 @@ export default function PublishGateModal({
   const [report, setReport] = useState<PublishTxReport | null>(initialReport)
   /** 回执里的 PR/MR —— 「刷新」与「合并」都在这一份上更新（历史是快照，这里看当下） */
   const [review, setReview] = useState<RemoteReview | null>(initialReport?.review ?? null)
+  /**
+   * 「把主线同步到第二个官方源」那一步的结论。
+   *
+   * ★ 它**只由合并那次返回**（`wb_merge_review` → `MergeOutcome.mirror`）：刷新拿到的是
+   * 平台上的 PR 状态，推不出"镜像跟没跟上" —— 所以刷一次不会把它改掉，只会留着。
+   */
+  const [mirror, setMirror] = useState<MirrorSync | null>(initialMirror)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [mergeBusy, setMergeBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   /** 回执上的一句状态话（合并完成 / 回读结果） */
   const [notice, setNotice] = useState<string | null>(null)
+  /** 回执「结果」块里那份文件清单要不要摊开（默认收起 —— 一次发布可能几十份） */
+  const [showChanges, setShowChanges] = useState(false)
 
   /**
    * 跑一遍闸。**只读** —— 后端那条命令一个字节都不写，所以点几次都不会有副作用
@@ -307,15 +410,21 @@ export default function PublishGateModal({
     setMergeBusy(true)
     setError(null)
     try {
-      const merged = await wb.mergeReview(review.number)
+      /* ★ 合完后端会顺手把**主线同步到第二个官方源**（幂等、不额外开 PR），
+       *   结论一起返回 —— 那一格就是"客户端读的那个源跟上了没有"的答案。 */
+      const out = await wb.mergeReview(review.number)
+      const merged = out.review
       setReview(merged)
+      setMirror(out.mirror)
       setConfirming(false)
       setNotice(
-        merged.state === 'merged'
-          ? `已以 squash 合并 #${merged.number}`
-          : `合并请求已发出，平台回读仍是「${REVIEW_TEXT[merged.state]}」`,
+        merged.state !== 'merged'
+          ? `合并请求已发出，平台回读仍是「${REVIEW_TEXT[merged.state]}」`
+          : out.mirror === null
+            ? `已以 squash 合并 #${merged.number}`
+            : `已以 squash 合并 #${merged.number} · ${out.mirror.platform} ${MIRROR_TEXT[out.mirror.status]}`,
       )
-      onMerged?.(merged)
+      onMerged?.(merged, out.mirror)
     } catch (e) {
       setError(isAppError(e) ? e.message : String(e))
     } finally {
@@ -326,7 +435,10 @@ export default function PublishGateModal({
   /* ---------- 回执视图 ---------- */
 
   if (report !== null) {
-    const steps = receiptSteps(report, review)
+    const steps = receiptSteps(report, review, mirror)
+    const changes: ChangeSummary | null = report.changes ?? null
+    const changedFiles: FileChange[] = report.changedFiles ?? []
+    const verdict = clientVerdict(review, mirror)
     const canMerge = review !== null && review.state === 'open'
     const confirmText =
       review === null
@@ -399,23 +511,105 @@ export default function PublishGateModal({
           </p>
         )}
 
-        <div className={s.chain} role="list">
-          {steps.map((st) => (
-            <div key={st.key} className={s.step} data-state={st.state} role="listitem">
-              <span className={s.stepMark}>{STEP_MARK[st.state]}</span>
-              <b className={s.stepLabel}>{st.label}</b>
-              <span className={`${s.stepNote} ${st.key === 'commit' ? c.mono : ''}`}>
-                {st.note}
-              </span>
-            </div>
-          ))}
-        </div>
+        {/* ---------- 块一 · 结果：这次改了什么 ---------- */}
+        <section className={s.block}>
+          <h3 className={s.blockTitle}>结果</h3>
+          {changes === null ? (
+            <p className={s.blockLine}>
+              {report.stage === 'blockedAudit'
+                ? '停在发布检查 —— 一个字节都没写，所以没有"改了什么"'
+                : '这一轮没走到生成，拿不到变化清单'}
+            </p>
+          ) : (
+            <>
+              <p className={s.blockLine}>
+                新增 <b>{changes.added}</b> · 修改 <b>{changes.changed}</b> · 删除{' '}
+                <b>{changes.removed}</b> · 未变化 <b>{changes.unchanged}</b>
+                <span className={s.sep}>|</span>
+                发布时间{' '}
+                <span className={c.mono}>{report.publishedAt ?? '未知'}</span>
+                <span className={s.sep}>|</span>
+                目录指纹{' '}
+                <span className={c.mono} title={report.revision ?? ''}>
+                  {report.revision === null || report.revision === undefined
+                    ? '未知'
+                    : report.revision.slice(0, 8)}
+                </span>
+              </p>
+              {changedFiles.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    className={s.linkBtn}
+                    onClick={() => setShowChanges((v) => !v)}
+                  >
+                    {showChanges ? '收起文件变化' : `查看文件变化（${changedFiles.length} 份）`}
+                  </button>
+                  {showChanges && (
+                    <div className={s.filesBox}>
+                      {changedFiles.map((f) => (
+                        <div key={f.path} className={s.fileRow}>
+                          <code className={`${c.mono} ${s.filePath}`}>{f.path}</code>
+                          <span className={`${c.mono} ${s.fileSha}`} title={f.before ?? '（新增）'}>
+                            {shortSha(f.before)}
+                          </span>
+                          <span className={s.arrow}>→</span>
+                          <span className={`${c.mono} ${s.fileSha}`} title={f.after ?? '（删除）'}>
+                            {shortSha(f.after)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className={s.blockLine}>逐份没变 —— 这一版与上一版逐字节相同</p>
+              )}
+            </>
+          )}
+        </section>
 
-        {review !== null && review.url !== '' && (
-          <p className={s.prLine}>
-            <span className={c.mono}>{review.url}</span>
+        {/* ---------- 块二 · 过程：发布前 → 发布后 ---------- */}
+        <section className={s.block}>
+          <h3 className={s.blockTitle}>过程</h3>
+          <div className={s.chain} role="list">
+            {steps.map((st) => (
+              <div key={st.key} className={s.step} data-state={st.state} role="listitem">
+                <span className={s.stepMark}>{STEP_MARK[st.state]}</span>
+                <b className={s.stepLabel}>{st.label}</b>
+                <span className={`${s.stepNote} ${st.key === 'commit' ? c.mono : ''}`}>
+                  {st.note}
+                </span>
+              </div>
+            ))}
+          </div>
+          {review !== null && review.url !== '' && (
+            <p className={s.prLine}>
+              <span className={c.mono}>{review.url}</span>
+            </p>
+          )}
+        </section>
+
+        {/* ---------- 块三 · 客户端：现在为什么还看不到 ---------- */}
+        <section className={s.block}>
+          <h3 className={s.blockTitle}>客户端</h3>
+          <p className={`${s.verdict} ${s[`verdict_${verdict.tone}`]}`}>{verdict.text}</p>
+          <p className={s.blockLine}>
+            本次目录指纹{' '}
+            <span className={c.mono} title={report.revision ?? ''}>
+              {report.revision === null || report.revision === undefined
+                ? '未知'
+                : report.revision.slice(0, 8)}
+            </span>
+            {mirror !== null && (
+              <>
+                <span className={s.sep}>|</span>
+                {mirror.platform} 的 <span className={c.mono}>{mirror.branch}</span>{' '}
+                {MIRROR_TEXT[mirror.status]}
+              </>
+            )}
           </p>
-        )}
+        </section>
 
         {confirming && review !== null && (
           <div className={s.confirm}>

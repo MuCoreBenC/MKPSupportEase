@@ -539,26 +539,67 @@ pub fn deliver_all(
 /// 已经下载到本地的文件名（catalog 登记的里面，盘上是 Current 的）。
 /// 不查缓存、不记账本——每次都问盘，下载完立刻看得见。
 pub fn downloaded_files(internal_root: &Path, catalog: &super::Catalog) -> Vec<String> {
-    files_in_status(internal_root, catalog, FileOnDisk::Current)
+    entries_in_status(internal_root, catalog, FileOnDisk::Current)
+        .into_iter()
+        .map(|e| e.file_name)
+        .collect()
 }
 
 /// 有更新的文件名（盘上在，但字节与目录不一样）。
 /// "更新"动作就是对这些文件再跑一遍 [`deliver`]——旧份自动归档，没有单独的更新代码路径。
 pub fn stale_files(internal_root: &Path, catalog: &super::Catalog) -> Vec<String> {
-    files_in_status(internal_root, catalog, FileOnDisk::Stale)
+    entries_in_status(internal_root, catalog, FileOnDisk::Stale)
+        .into_iter()
+        .map(|e| e.file_name)
+        .collect()
 }
 
-fn files_in_status(
+/// 盘上的一份：文件名 + **这份字节落进下载区的时刻**。
+///
+/// `modified_unix`（UTC epoch 秒）= 文件的 mtime —— 下载管道写盘的那一刻，
+/// 界面拿它当「下载到本机的时刻」显示（按本机时区转）。`None` = 文件系统没给，
+/// **不编**（与 [`ArchivedFile::modified_unix`] 同一条口径）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnDiskEntry {
+    pub file_name: String,
+    pub modified_unix: Option<u64>,
+}
+
+/// [`downloaded_files`] 带时刻的那一版（界面预设页本地表的「时间」列）。
+pub fn downloaded_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<OnDiskEntry> {
+    entries_in_status(internal_root, catalog, FileOnDisk::Current)
+}
+
+/// [`stale_files`] 带时刻的那一版（盘上那份对不上目录的时刻也有显示价值 ——
+/// 它是"这份字节是什么时候到我机器上的"）。
+pub fn stale_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<OnDiskEntry> {
+    entries_in_status(internal_root, catalog, FileOnDisk::Stale)
+}
+
+fn entries_in_status(
     internal_root: &Path,
     catalog: &super::Catalog,
     want: FileOnDisk,
-) -> Vec<String> {
+) -> Vec<OnDiskEntry> {
     catalog
         .files
         .iter()
         .filter(|f| file_status(internal_root, f) == want)
-        .map(|f| f.file_name.clone())
+        .map(|f| OnDiskEntry {
+            file_name: f.file_name.clone(),
+            modified_unix: modified_unix_of(&internal_root.join(&f.path)),
+        })
         .collect()
+}
+
+/// 文件的 mtime → UTC epoch 秒。读不到 / 早于 1970 的都算"没给"——不编一个 0 出来
+fn modified_unix_of(path: &Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    meta.modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 #[cfg(test)]
@@ -630,6 +671,27 @@ mod tests {
         assert_eq!(
             downloaded_files(root.path(), &catalog),
             vec!["A1-standard.toml".to_owned()]
+        );
+    }
+
+    /// 「下载到本机的时刻」（2026-10-06）：`downloaded_entries` 给的 mtime =
+    /// 这份字节落进下载区那一刻 —— 本地表「时间」列的真值来源。**不存在时不编**
+    /// （`None`），与归档区 `ArchivedFile.modified_unix` 同一条口径。
+    #[test]
+    fn downloaded_entries_carry_the_disk_mtime() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(mkp_root(&root)).unwrap();
+        let content = "# A1 standard\nspeed_limit = 60\n".as_bytes();
+        let file = entry("A1-standard.toml", content);
+
+        deliver(root.path(), &file, &MemorySource(content.to_vec())).unwrap();
+
+        let got = downloaded_entries(root.path(), &catalog_with(vec![file]));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].file_name, "A1-standard.toml");
+        assert!(
+            got[0].modified_unix.is_some(),
+            "落盘时刻要给 —— 它就是界面上「下载到本机的时刻」"
         );
     }
 

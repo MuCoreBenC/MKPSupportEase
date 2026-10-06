@@ -64,6 +64,7 @@ import type {
   GenerateReport,
   Issue,
   IssueReport,
+  MirrorSync,
   PreviewReport,
   PublishTxReport,
   Words,
@@ -145,6 +146,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
    * 非 null ⇒ 直接进**发布回执**视图，不重跑十五项 —— 那是过去那一刻的快照。
    */
   const [gateReport, setGateReport] = useState<PublishTxReport | null>(null)
+  /** 上一次合并之后「把主线同步到第二个官方源」的结论（重新打开回执时还要用） */
+  const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
   /*
@@ -823,10 +826,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
           }}
           onPublish={publish}
           initialReport={gateReport}
-          onMerged={(r) =>
+          initialMirror={gateMirror}
+          onMerged={(r, m) => {
             /* 合并之后把②卡那份快照也更新掉 —— 免得「查看发布结果」还写着"等待合并" */
             setLastPublish((prev) => (prev === null ? prev : { ...prev, review: r }))
-          }
+            /* ★ 镜像同步的结论一并留着：重新打开回执时「客户端」那一块还要靠它说话
+               （它推不出来 —— 那是合并那一刻的事实） */
+            setGateMirror(m)
+          }}
         />
       )}
 
