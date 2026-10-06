@@ -1155,6 +1155,18 @@ export function useParams(): Params {
     [apply, log],
   )
 
+  /*
+   * 「在看的是不是已应用的那份」：AppState 的 activePreset 格（唯一底账 × 当前 combo）。
+   * 从唯一客户端订阅（`../state/appState.ts`）——应用 / 撤销 / 删除一发生，
+   * 这里的 active 同帧换账，不持有本地副本、不按 combo 变化重读
+   * （第一轮的本地 state + effect 补丁已拆，见 docs/APP-STATE.md）。
+   *
+   * 声明位置在 `switchTo` **之前** —— switchTo 的写回拿它当守卫，依赖数组在渲染期
+   * 求值，声明挪晚了就是 TDZ 白屏（2026-10-06 真机踩过：Cannot access 'active'
+   * before initialization）。
+   */
+  const active = useActivePreset()
+
   /** 换组合：草稿、栈、日志一起作废（面板上写的是「这次打开之后」）。已保存的那一层留着 */
   /*
    * 换 combo = 切换 —— **写回只住在这个显式动作处理器里**（抽屉选一份 / 确认切换，
@@ -1262,17 +1274,6 @@ export function useParams(): Params {
     (m: string, v: string) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
     [catalog],
   )
-
-  /*
-   * 「在看的是不是已应用的那份」：AppState 的 activePreset 格（唯一底账 × 当前 combo）。
-   * 从唯一客户端订阅（`../state/appState.ts`）——应用 / 撤销 / 删除一发生，
-   * 这里的 active 同帧换账，不持有本地副本、不按 combo 变化重读
-   * （第一轮的本地 state + effect 补丁已拆，见 docs/APP-STATE.md）。
-   *
-   * `canJump`：已应用那份在当前目录里找得到才有「切换回」动作 —— 找不到时切过去会落到
-   * 一个空壳 combo（字段在、值全空），那是假信息，所以宁可不给动作、只陈述。
-   */
-  const active = useActivePreset()
 
   /*
    * 「正在使用」与当前 combo 的关系（onIt / canJump）。
