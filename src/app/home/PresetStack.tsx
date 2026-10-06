@@ -19,6 +19,12 @@ const AXIS_ROWS = [
 interface PresetStackProps {
   state: PresetState
   /**
+   * 「正在使用」的说明行（A3）。底账正指着这一份时给：
+   * 官方 = 「正在使用」，我的文件 = 「正在使用 · 我的文件」；不命中 / 没应用 = undefined。
+   * 底账没说"正在使用"时这块**什么都不标** —— 卡片只回答"这份 combo 的预设文件是什么"。
+   */
+  inUse?: string
+  /**
    * 一并竖排 X / Y / Z。三种取值是三件不同的事：
    * `undefined` = 这一块不管三轴（露出卡里由 AxisBar 负责，它还要形变成横排）；
    * `null` = 摆出三行但还没有值；对象 = 有值。
@@ -32,7 +38,7 @@ interface PresetStackProps {
  * 只有非 ready 才有额外视觉。默认（ready）就是文件名和数值直接摆着 ——
  * 真实情况是连上就一瞬间下完，给正常路径加过场动画反而是假的。
  */
-export default function PresetStack({ state, axes }: PresetStackProps) {
+export default function PresetStack({ state, inUse, axes }: PresetStackProps) {
   const name =
     state.status === 'ready' ? state.preset.name : state.status === 'idle' ? null : state.name
   const path = state.status === 'ready' ? state.preset.path : undefined
@@ -58,6 +64,11 @@ export default function PresetStack({ state, axes }: PresetStackProps) {
       )}
 
       {state.status === 'waiting' && <p className={s.note}>连接云端…</p>}
+
+      {/* A3：与预设页横幅同源的那句「正在使用」—— 底账说在用这份，这里就跟着说 */}
+      {inUse !== undefined && state.status !== 'waiting' && (
+        <p className={s.note}>{inUse}</p>
+      )}
 
       {state.status === 'downloading' && (
         <span className={s.progress} role="img" aria-label="正在下载" />

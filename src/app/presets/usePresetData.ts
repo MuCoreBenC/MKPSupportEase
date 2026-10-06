@@ -16,7 +16,7 @@
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
  *   用户自己的文件      api.getUserPresetFiles()                  → **用户线**（扫 presets-mine/），空是合法状态
- *   当前使用的那一条    api.getActivePreset()（新世界底账 `run/active-preset.json`）→ **全局唯一**，null = 一套都还没应用
+ *   当前使用的那一条    AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
  *   与出厂不同 N 项     api.getMachineParams(machineId, versionId) 里 origin === 'variant' 的条数
@@ -56,6 +56,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
+import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -64,6 +65,7 @@ import type {
   DownloadOutcome,
   DownloadTick,
   Machine,
+  OnDiskFile,
   PresetDraft,
   UserFileIdentity,
 } from '../../api'
@@ -135,6 +137,12 @@ export interface PresetData {
   machineId: string
   versionId: string
   machine: Machine | undefined
+  /**
+   * **当前数据源**（`getPresetSource()` 的 mode：`gitee` / `github` / `custom`）——
+   * release 行「来源」列显示 GitHub / Gitee / 自定义源的依据。null = 没配源 / 读取失败
+   * （来源那一格照实退「官方」，不让整页因为这一格失败）。
+   */
+  sourceLabel: string | null
   /** 未过滤的整棵树（仅归档的文件建树时就剔掉了）。计数用它 */
   tree: PresetTree
   /**
@@ -251,10 +259,27 @@ export interface PresetData {
    */
   copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
+   * **官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 测试 A1 的正路）。
+   * 可信字节 + 血统指向来源；回来**重读用户线**（新的一份要出现在表里）；
+   * **不碰任何状态** —— 使用中指针 / 草稿一概不动（与 copyAsNew 同一条边界）。
+   */
+  copyReleaseAsNew: (fileName: string, newName: string) => Promise<UserFileIdentity>
+  /**
    * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
-   * 两道闸（正在使用的 / 还有没保存的草稿的）在后端 —— 失败照抛给页面说出来，不在这里吞。
+   * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
+   * 一并清掉；代价由页面的确认框讲清。
    */
   remove: (path: string) => Promise<void>
+  /**
+   * **删除本机那份官方交付文件**（2026-10-06 一切皆可删）：删了回「未下载」，
+   * 随时可从云端重下。回来**重读官方线**（那一行 + 归档清单一起刷新）。
+   */
+  removeRelease: (fileName: string) => Promise<void>
+  /**
+   * **删除归档区一份旧版本**（2026-10-06 允许删，代价讲清：删了找不回）。
+   * 回来重读官方线（归档清单以盘为准）。
+   */
+  removeArchived: (path: string) => Promise<void>
   /**
    * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
    * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
@@ -385,7 +410,8 @@ export function usePresetData(importRevision = 0): PresetData {
   const [needsNewerClient, setNeedsNewerClient] = useState(false)
   /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
-  const [active, setActive] = useState<ActivePreset | null>(null)
+  /* 使用中指针：AppState 唯一客户端订阅 —— 本页是写方之一，但快照同样只从客户端来 */
+  const active = useActivePreset()
   const [slicerCopied, setSlicerCopied] = useState<string[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -393,6 +419,8 @@ export function usePresetData(importRevision = 0): PresetData {
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
   /* 归档区（官方旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
   const [archived, setArchived] = useState<ArchivedFile[]>([])
+  /* 当前数据源（release 行「来源」列的字）。读失败照实 null，不挡任何表 */
+  const [sourceLabel, setSourceLabel] = useState<string | null>(null)
 
   /**
    * 把官方交付这一路的现况读一遍。
@@ -420,13 +448,11 @@ export function usePresetData(importRevision = 0): PresetData {
     const downloaded = new Set(mine.map((f) => f.fileName))
     const driftedSet = new Set(drifted.map((f) => f.fileName))
     /*
-     * 盘上那几份的**落盘时刻**（下载到本机的时刻 = 下载管道写盘那一刻的 mtime）。
-     * 已下载与有更新的是两批不相交的文件，合成一张表查；没有的时刻是 `null`
-     * —— 界面照实说「未知」，不编。
+     * 盘上那几份的**事件时间**（2026-10-06 预设事件时间模型）：下载 / 替换两个事件
+     * + 这份字节属于哪一代目录（`publishedAt`，版本出身反查）。已下载与有更新的是
+     * 两批不相交的文件，合成一张表查；没有的事件是 `null` —— 界面照实说「未知」，不编。
      */
-    const onDiskAt = new Map<string, number | null>(
-      [...mine, ...drifted].map((f) => [f.fileName, f.modifiedUnix]),
-    )
+    const onDisk = new Map<string, OnDiskFile>([...mine, ...drifted].map((f) => [f.fileName, f]))
     /* 判词按**文件名**查 —— 与下载 / 应用 / 读正文同一套口径（这套系统认的一直是 fileName） */
     const verdicts = new Map(trust.map((t) => [t.fileName, t.verdict]))
     /*
@@ -457,8 +483,10 @@ export function usePresetData(importRevision = 0): PresetData {
           kind,
           size: f.size,
           releaseVersion: null,
-          /* 盘上那份的落盘时刻（下载时刻）；云端语义的时间走目录的发布时刻（`publishedAt`），两回事 */
-          modifiedUnix: onDiskAt.get(f.fileName) ?? null,
+          /* 事件时间（见 `ReleasePresetSource` 三格的注释）；云端语义的时间走目录的发布时刻，两回事 */
+          downloadedUnix: onDisk.get(f.fileName)?.downloadedUnix ?? null,
+          replacedUnix: onDisk.get(f.fileName)?.replacedUnix ?? null,
+          deliveryPublishedAt: onDisk.get(f.fileName)?.publishedAt ?? null,
           state: stateOf(f.fileName),
         },
       ]
@@ -510,13 +538,12 @@ export function usePresetData(importRevision = 0): PresetData {
       )
 
       if (!alive) return
-      /* 唯一底账读一次 —— 下面默认落地那台机型也要用它，所以在这里拿 */
-      const entry = await api.getActivePreset().catch(() => null)
+      /* 唯一底账的快照（客户端的一次读取）—— 下面默认落地那台机型也要用它 */
+      const entry = await activePresetSnapshot()
       setMachines(list)
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
       setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
       setLocalIds(local)
-      setActive(entry)
       setSlicerCopied(copied)
 
       /*
@@ -548,6 +575,9 @@ export function usePresetData(importRevision = 0): PresetData {
         .then(async (next) => {
           if (!alive) return
           setRelease(next)
+          /* 数据源与 release 一路同读：它只服务「来源」那一格的字，失败照实 null */
+          const source = await api.getPresetSource().catch(() => null)
+          if (alive) setSourceLabel(source?.mode ?? null)
           /*
            * 后台检查一次（本次运行只一次，见 `checkBootstrapOnce`）。
            * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
@@ -591,8 +621,8 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 两个写。**先写底账，再重读底账**，中间不插一句前端自己的推断 ——
-   * 底账在 Rust 侧（`mkp/` + `run/active-preset.json`），这一个来回是一次 IPC；
+   * 写。**写命令成功后 AppState 客户端重读整份并广播**（`appStateMutated`）——
+   * 本页横幅与订阅了底账的另外三页同帧换账，中间不插一句前端自己的推断；
    * 界面上看到的必须是底账答的，不是前端猜的。
    *
    * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
@@ -600,14 +630,15 @@ export function usePresetData(importRevision = 0): PresetData {
    */
   const apply = useCallback(
     async (fileName: string, origin: ActiveOrigin = 'official', path?: string) => {
-      setActive(await api.applyActivePreset(fileName, origin, path))
+      await api.applyActivePreset(fileName, origin, path)
+      appStateMutated()
     },
     [],
   )
 
   const clearApply = useCallback(async () => {
     await api.clearActivePreset()
-    setActive(await api.getActivePreset())
+    appStateMutated()
   }, [])
 
   const copy = useCallback(async (assetId: string) => {
@@ -650,25 +681,57 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * 第十层：两条用户文件管理。同一条路子 —— 写底账 → **重读底账**：
-   * 改名之后使用中指针可能跟着改了名，所以顺手重读一遍（界面显示的永远是底账答的）；
-   * 删除不碰使用中指针（正在使用的不给删），只重读用户线。
+   * 第十层：用户文件管理。同一条路子 —— 写完 AppState 客户端重读广播：
+   * 改名之后使用中指针可能跟着改了名（`repoint_mine`），删的若是使用中那份，
+   * 后端会把指针一并撤下 —— 都靠重读对表（曾在这里漏过的两个"删除后横幅
+   * 还说正在使用"的滞留 bug，就是靠这一句消灭的）。
    */
   const rename = useCallback(async (path: string, newName: string) => {
     const done = await api.renameUserPreset(path, newName)
     setMine(await api.getUserPresetFiles())
-    setActive(await api.getActivePreset().catch(() => null))
+    appStateMutated()
     return done
   }, [])
 
   const remove = useCallback(async (path: string) => {
     await api.deleteUserPreset(path)
     setMine(await api.getUserPresetFiles())
+    appStateMutated()
   }, [])
+
+  /*
+   * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读官方线 ——
+   * 那一行回「未下载」，归档清单跟着刷新（`readRelease` 连归档一起读）。
+   * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
+   */
+  const removeRelease = useCallback(
+    async (fileName: string) => {
+      await api.deleteDeliveryFile(fileName)
+      setRelease(await readRelease())
+      appStateMutated()
+    },
+    [readRelease],
+  )
+
+  /* 删除归档区一份旧版本（代价讲清在确认框）：同样重读官方线，清单以盘为准 */
+  const removeArchived = useCallback(
+    async (path: string) => {
+      await api.deleteArchivedFile(path)
+      setRelease(await readRelease())
+    },
+    [readRelease],
+  )
 
   /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
     const done = await api.copyUserPreset(path, newName)
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
+
+  /* 官方 → 我的文件（UX 测试 A1 的正路）：同一条边界 —— 只重读用户线，不碰任何状态 */
+  const copyReleaseAsNew = useCallback(async (fileName: string, newName: string) => {
+    const done = await api.copyReleaseAsNew(fileName, newName)
     setMine(await api.getUserPresetFiles())
     return done
   }, [])
@@ -702,6 +765,7 @@ export function usePresetData(importRevision = 0): PresetData {
     machineId,
     versionId,
     machine: machines.find((m) => m.id === machineId),
+    sourceLabel,
     tree,
     localIds,
     mine,
@@ -722,7 +786,10 @@ export function usePresetData(importRevision = 0): PresetData {
     commitDraft,
     rename,
     remove,
+    removeRelease,
+    removeArchived,
     copyAsNew,
+    copyReleaseAsNew,
     reveal,
   }
 }
@@ -907,6 +974,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       staleReleases: data.release.stale,
       releaseVersion: data.release.version,
       releaseAt: data.release.publishedAt,
+      sourceLabel: data.sourceLabel,
     }),
     [
       data.active,
@@ -916,6 +984,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       data.release.presets,
       data.release.stale,
       data.release.version,
+      data.sourceLabel,
       data.mine,
       copiedSet,
       kind,

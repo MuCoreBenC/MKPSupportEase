@@ -20,6 +20,7 @@ import {
   copyToSlicerIn,
   localFileIds,
   menuEntries,
+  mockCatalogFiles,
   paramMeta,
   resolveParams,
   resolveVersionFiles,
@@ -94,6 +95,10 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
+    /* 演示里没走过复制/导入 —— 出处照实没有（真机上由出处账答） */
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
   {
     /* 没有血统（手工拷的 / 别的程序写出来的）—— 照实说不出新旧，这是合法状态 */
@@ -110,6 +115,9 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
   {
     /*
@@ -129,6 +137,9 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
   },
 ]
 /** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
@@ -240,26 +251,60 @@ function literalFor(raw: string, valueType: string): string {
 }
 
 /*
- * 浏览器里的「下载区」：三份，**固定演示集合**（真机上是盘 `mkp/`，盘就是底账）。
+ * 浏览器里的「下载区」：四份，**固定演示集合**（真机上是盘 `mkp/` + `assets/`，盘就是底账）。
  *
  * 为什么不是一份：预设页的交付行有四种状态（未下载 / 已下载 / 旧版本 / 内容异常），
  * 只给"未下载"一种的话，另外三种在浏览器里**根本画不出来** —— 而它们正是这一层
  * 最需要被看见的东西（"内容异常"尤其：那一档以前会被显示成"需更新"）。
  *
- * 三份各占一档，**同一档里的两份不存在**：交付构造上每个 (机型, 版本) 只有一份产物，
- * 再塞一份同版本的条目就是**编形状**了。「未下载」那一档在浏览器里由官方行的「下载」
+ * 前三份各占一档，**同一档里的两份不存在**：交付构造上每个 (机型, 版本) 只有一份 **MKP 产物**，
+ * 再塞一份同版本的 MKP 条目就是**编形状**了。「未下载」那一档在浏览器里由官方行的「下载」
  * 按钮覆盖（同一套动作列），真机上则由"目录里登记了、下载区还没有"的那些行覆盖。
  *
- * 三份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
+ * 第四份是**套餐的另一半**（`A1_STANDARD` 这个 bundle 配的切片器配置），2026-10-06 补：
+ * 首页那颗「下载并应用」消费的是**整个套餐**（MKP + 配套 BBS），少了这一条，
+ * 浏览器里就画不出「全齐且全新 → 应用」那一态（永远显示「缺」）。它不违反上面那条 ——
+ * 它是**另一种 kind**，不是同一 (机型, 版本) 的第二份 MKP。
+ *
+ * 哪一档都能看见（首页那颗按钮的四态就靠这几份编排）：
+ *   A1/STANDARD       MKP 已下载 + BBS 已下载          → 「应用」
+ *   A1/FAST           MKP 在盘上是旧的 + BBS 已下载     → 「更新并应用」
+ *   A1_MINI/STANDARD  MKP 在盘上是旧的 + 配套 BBS 不在盘上 → 「下载并应用」（缺优先于漂）
+ *   目录里没登记的机型（P1S…）                          → 「套餐未配置」
+ *
+ * ★ 两张单子是**互斥**的、都只收盘上真有的文件（漂移 = 盘上有但字节对不上），
+ *   所以判「在不在盘上」要 `已下载 ∪ 漂移`（见 `PageHome` 的 `bundleState`）。
+ *
+ * 这四份都**不是真的能下**：点「下载」/「更新」/「重新下载」仍如实抛"浏览器里没有下载区"，
  * 见 `downloadCatalogFile`。
  *
- * `modifiedUnix` 是固定演示值（真机上是文件 mtime = 下载管道落盘那一刻）：
- * 形状不编（`number | null`），数字编 —— 界面按它把「下载到本机的时刻」画出来。
+ * `downloadedUnix / replacedUnix / publishedAt` 是固定演示值（真机上来自事件账与
+ * 版本身份反查）：形状不编（`number | null` / `string | null`），数字编 ——
+ * 界面按它们把「下载时间 / 替换时间 / 本机这份发布于」画出来。
  */
-const MOCK_DOWNLOADED: OnDiskFile[] = [{ fileName: 'A1-standard.toml', modifiedUnix: 1780000000 }]
+const MOCK_DOWNLOADED: OnDiskFile[] = [
+  {
+    fileName: 'A1-standard.toml',
+    downloadedUnix: 1780000000,
+    replacedUnix: null,
+    publishedAt: '2026-10-06T05:46:00Z',
+  },
+  {
+    /** 套餐的另一半：`A1_STANDARD` 的切片器配置（见上面那段说明） */
+    fileName: 'MKPProcess A1 0.4 0.20.json',
+    downloadedUnix: 1780000000,
+    replacedUnix: null,
+    publishedAt: '2026-10-06T05:46:00Z',
+  },
+]
 const MOCK_STALE: OnDiskFile[] = [
-  { fileName: 'A1-fast.toml', modifiedUnix: 1777000000 },
-  { fileName: 'A1mini-standard.toml', modifiedUnix: 1777000000 },
+  { fileName: 'A1-fast.toml', downloadedUnix: 1777000000, replacedUnix: null, publishedAt: null },
+  {
+    fileName: 'A1mini-standard.toml',
+    downloadedUnix: null,
+    replacedUnix: 1777000000,
+    publishedAt: null,
+  },
 ]
 
 export const mockApi: MkpApi = {
@@ -317,7 +362,8 @@ export const mockApi: MkpApi = {
     const text = mockMineText.get(path)
     if (text === undefined) {
       throw new NotImplementedError(
-        'readUserPresetText：浏览器里只有这份会话另存出来的那份有正文',
+        'readUserPresetText',
+        '浏览器预览里读不到这一份的正文 —— 用桌面版就能看（每一份都读得到）',
       )
     }
     return text
@@ -346,7 +392,8 @@ export const mockApi: MkpApi = {
       const raw = mockMineText.get(rel)
       if (raw === undefined) {
         throw new NotImplementedError(
-          `beginPresetEdit：浏览器里只有那份演示正文能改（${rel} 没有正文）`,
+          'beginPresetEdit',
+          `浏览器预览里读不到 ${rel} 的正文 —— 用桌面版就能改（每一份都读得到）`,
         )
       }
       /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
@@ -428,7 +475,10 @@ export const mockApi: MkpApi = {
       const rel = mockDraft.path ?? ''
       const old = mockMineText.get(rel)
       if (old === undefined) {
-        throw new NotImplementedError(`commitPresetDraft：${rel} 已经没有正文可写回`)
+        throw new NotImplementedError(
+          'commitPresetDraft',
+          `浏览器预览里读不到 ${rel} 的正文，写不回去 —— 用桌面版就能存`,
+        )
       }
       const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
@@ -461,6 +511,10 @@ export const mockApi: MkpApi = {
       basedOnRelease: null,
       basedOnMachineId: 'A1',
       basedOnVersionId: 'STANDARD',
+      /* 官方另存出来的：出处走 based_on 血统（界面上显示"复制自官方 X"），账本不重复记 */
+      copiedFrom: null,
+      copiedFromName: null,
+      provenance: null,
     }
     if (replaced) {
       mockMine[mockMine.findIndex((f) => f.path === path)] = entry
@@ -526,8 +580,75 @@ export const mockApi: MkpApi = {
     }
     const text = mockMineText.get(path)
     if (text !== undefined) mockMineText.set(newPath, text)
-    mockMine.push({ ...hit, path: newPath, fileName: name, modifiedUnix: nowSec() })
+    mockMine.push({
+      ...hit,
+      path: newPath,
+      fileName: name,
+      modifiedUnix: nowSec(),
+      /* 与真机同形：复制出来的那份在出处账里记着从哪来（界面上「来源：复制自 X」） */
+      copiedFrom: path,
+      copiedFromName: hit.fileName,
+      provenance: 'copy' as const,
+    })
     return { path: newPath, fileName: name }
+  },
+
+  /*
+   * 官方 → 我的文件（UX 测试 A1 的正路）：把一份**可信的**官方交付文件按字节复制成
+   * 你自己的一份。与真机同一套闸（`mine::copy_release_as_new`）：
+   * 目录里得有它、得是 MKP 预设、字节与目录一致才放行（演示口径：`MOCK_DOWNLOADED`
+   * 里那份 = 可信；旧版本 / 内容异常的两份照实拒）；血统三行**新写指向**来源交付文件
+   * （官方原件没有血统头，不是照抄）；不覆盖、不与来源同名；**一个状态都不碰**。
+   */
+  async copyReleaseAsNew(fileName, newName) {
+    /* 演示口径的可信集合与状态：与 getDownloadedFiles / getDeliveryTrust 同一条账 */
+    const releaseFiles = [
+      { fileName: 'A1-standard.toml', machineId: 'A1', versionId: 'STANDARD', trust: 'ok' },
+      { fileName: 'A1-fast.toml', machineId: 'A1', versionId: 'FAST', trust: 'old' },
+      { fileName: 'A1mini-standard.toml', machineId: 'A1_MINI', versionId: 'STANDARD', trust: 'tampered' },
+    ]
+    const hit = releaseFiles.find((f) => f.fileName === fileName)
+    if (hit === undefined) {
+      throw new Error(`${fileName} 还没下载到本机 —— 先下载，再另存成你自己的一份`)
+    }
+    if (hit.trust !== 'ok') {
+      throw new Error(
+        `${fileName} 盘上这一份与目录登记的字节不一致 —— 先「更新」换一份干净的官方版，再另存`,
+      )
+    }
+    const problem = mockNameProblem(fileName, newName)
+    if (problem !== null) throw new Error(problem)
+    const name = newName.trim()
+    if (name === fileName) {
+      throw new Error('新名字和官方那份一样 —— 另存要起个不同的名字（两份同名分不清谁是谁）')
+    }
+    const path = `presets-mine/${name}`
+    if (mockMine.some((f) => f.path === path)) {
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+    }
+    const label = `dist/mkp/presets/${fileName}`
+    const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${MOCK_OFFICIAL_TEXT}`
+    mockMineText.set(path, text)
+    mockMine.push({
+      path,
+      fileName: name,
+      size: text.length,
+      modifiedUnix: nowSec(),
+      kind: 'mkp_preset',
+      state: 'ok',
+      stateDetail: null,
+      /* 血统新写指向来源交付文件：假后端里它就是目录当前那一版 */
+      basedOn: 'current',
+      basedOnLabel: label,
+      basedOnRelease: null,
+      basedOnMachineId: hit.machineId,
+      basedOnVersionId: hit.versionId,
+      /* 官方另存出来的：出处走血统（「复制自官方 X」），账本不重复记 */
+      copiedFrom: null,
+      copiedFromName: null,
+      provenance: null,
+    })
+    return { path, fileName: name }
   },
 
   /*
@@ -620,6 +741,10 @@ export const mockApi: MkpApi = {
         basedOnRelease: null,
         basedOnMachineId: null,
         basedOnVersionId: null,
+        /* 与真机同形：导入进来的在出处账里记一档「导入」 */
+        copiedFrom: null,
+        copiedFromName: null,
+        provenance: 'import',
       })
       outcomes.push({ source: item.source, ok: true, path, fileName: name, message: '' })
     }
@@ -646,15 +771,10 @@ export const mockApi: MkpApi = {
   async deleteUserPreset(path) {
     const i = mockMine.findIndex((f) => f.path === path)
     if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
-    if (mockActive?.origin === 'mine' && mockActive.path === path) {
-      throw new Error(
-        `${path} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。先换成别的配置、或者撤销使用，再来删`,
-      )
-    }
+    /* 与真机同语义（2026-10-06 一切皆可删）：属于这一份的状态一并清掉，不再拦 */
+    if (mockActive?.origin === 'mine' && mockActive.path === path) mockActive = null
     if (mockDraft !== null && mockDraft.origin === 'mine' && mockDraft.path === path) {
-      throw new Error(
-        `${path} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删`,
-      )
+      mockDraft = null
     }
     mockMine.splice(i, 1)
     mockMineText.delete(path)
@@ -689,9 +809,13 @@ export const mockApi: MkpApi = {
   /**
    * 假后端对这个方法是**故意抛**的（浏览器里没有真网络），产品仓照同一条口径：
    * 不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
+   * hint 说清"发生了什么 + 能干什么"（A2），技术形式只在控制台。
    */
   async downloadFiles() {
-    throw new NotImplementedError('downloadFiles')
+    throw new NotImplementedError(
+      'downloadFiles',
+      '浏览器预览里没有下载区 —— 下载要用桌面版（SupportEase 应用）',
+    )
   },
 
   /**
@@ -726,64 +850,8 @@ export const mockApi: MkpApi = {
           versions: [{ id: 'STANDARD', name: '标准版' }],
         },
       ],
-      files: [
-        {
-          kind: 'mkp_preset',
-          fileName: 'A1-standard.toml',
-          path: 'dist/mkp/presets/A1-standard.toml',
-          machineId: 'A1',
-          versionId: 'STANDARD',
-          sha256: '0'.repeat(64),
-          size: 2048,
-        },
-        {
-          kind: 'mkp_preset',
-          fileName: 'A1-fast.toml',
-          path: 'dist/mkp/presets/A1-fast.toml',
-          machineId: 'A1',
-          versionId: 'FAST',
-          sha256: '1'.repeat(64),
-          size: 2048,
-        },
-        {
-          /* 「内容异常」那一档的演示：盘上有它、但与目录对不上，而且哪儿都查不出它是哪一版 */
-          kind: 'mkp_preset',
-          fileName: 'A1mini-standard.toml',
-          path: 'dist/mkp/presets/A1mini-standard.toml',
-          machineId: 'A1_MINI',
-          versionId: 'STANDARD',
-          sha256: '2'.repeat(64),
-          size: 2048,
-        },
-        {
-          /*
-           * 切片器那一类的交付文件（`bbs_config`）：预设页按 `kind` 把它分流进
-           * 「切片器配置 → 云端」——MKP 档**不列它**（真机 catalog 里它们占 9 条，
-           * 2026-10-02 作者截图里混进 MKP 表的就有它）。
-           */
-          kind: 'bbs_config',
-          fileName: 'MKPProcess A1 0.4 0.20.json',
-          path: 'assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json',
-          machineId: 'A1',
-          versionId: '',
-          sha256: '3'.repeat(64),
-          size: 1332,
-        },
-        {
-          /*
-           * 图标（`icon`）：**不归预设页** —— 它是资源，由自己的资源体系消费。
-           * 登记在 catalog 里只为钉住一条判据：「登记了」不等于「预设页要显示」
-           * （同截图的 `a1.svg`）。
-           */
-          kind: 'icon',
-          fileName: 'a1.svg',
-          path: 'assets/icons/a1.svg',
-          machineId: 'A1',
-          versionId: '',
-          sha256: '4'.repeat(64),
-          size: 2400,
-        },
-      ],
+      /* 目录登记的**唯一一份**演示数据：另一支消费者是「这个 combo 的套餐」（见该文件头） */
+      files: mockCatalogFiles(),
       /*
        * 资产登记（真机那份来自 `presets/assets.toml`）。**图片这一档用真 id + 真 path**：
        * 首页大图按 id 查 path 再拼 `/assets/<path>`（2026-10-03 第二刀），
@@ -842,7 +910,26 @@ export const mockApi: MkpApi = {
 
   /** 浏览器里没有下载区也没有源：与 downloadFiles 同一条口径，不假装下载成功 */
   async downloadCatalogFile() {
-    throw new NotImplementedError('downloadCatalogFile')
+    throw new NotImplementedError(
+      'downloadCatalogFile',
+      '浏览器预览里没有下载区 —— 下载 / 更新要用桌面版（SupportEase 应用）',
+    )
+  },
+
+  /** 浏览器里没有下载区：没有那份文件可删 —— 与 downloadCatalogFile 同一条口径 */
+  async deleteDeliveryFile() {
+    throw new NotImplementedError(
+      'deleteDeliveryFile',
+      '浏览器预览里没有下载区，删不了官方交付文件 —— 用桌面版再删',
+    )
+  },
+
+  /** 浏览器里没有归档区：与 readArchivedText 同一条口径 */
+  async deleteArchivedFile() {
+    throw new NotImplementedError(
+      'deleteArchivedFile',
+      '浏览器预览里没有归档区，删不了这份旧版本 —— 用桌面版再删',
+    )
   },
 
   async downloadCatalogFiles(fileNames) {
@@ -856,7 +943,10 @@ export const mockApi: MkpApi = {
 
   /** 浏览器里没有下载区，也就没有"已经下载的文件"可读：如实拒，不返回空串充数 */
   async readDownloadedText() {
-    throw new NotImplementedError('readDownloadedText：浏览器里没有下载区')
+    throw new NotImplementedError(
+      'readDownloadedText',
+      '浏览器预览里没有下载区，读不到这份的正文 —— 用桌面版就能看',
+    )
   },
 
   /*
@@ -930,6 +1020,7 @@ export const mockApi: MkpApi = {
    * 归档区：浏览器里没有盘，给一条**固定演示** —— 让"这一份有旧版本"那一格画得出来。
    * 真机上它是扫 `archive/` 得到的（换版本时被换下来的那一份）。
    * 认人那三格（机型 / 版本 / kind）跟着演示的那条走 —— 形状不编，数字编。
+   * 两个时间各是各：`publishedAt` 是这一版云端发布时刻、`replacedUnix` 是被换下的时刻。
    */
   async getArchivedFiles() {
     return [
@@ -937,7 +1028,9 @@ export const mockApi: MkpApi = {
         path: 'archive/dist/mkp/presets/A1-fast.toml',
         fileName: 'A1-fast.toml',
         size: 2048,
-        modifiedUnix: 1780000000,
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000',
+        publishedAt: '2026-10-06T05:46:00Z',
+        replacedUnix: 1780000000,
         machineId: 'A1',
         versionId: 'FAST',
         kind: 'mkp_preset',
@@ -947,7 +1040,10 @@ export const mockApi: MkpApi = {
 
   /** 读归档里的正文要真的盘（浏览器里没有）：与 downloadCatalogFile 同一条口径，不假装 */
   async readArchivedText() {
-    throw new NotImplementedError('readArchivedText：浏览器里没有归档区，先用真机跑一次更新')
+    throw new NotImplementedError(
+      'readArchivedText',
+      '浏览器预览里没有归档区，读不到这份旧版本的正文 —— 用桌面版（跑过一次更新）就能看',
+    )
   },
 
   /* 使用中指针（新数据世界的第一个用户状态）：浏览器里记在内存，刷新即还原 */
@@ -966,7 +1062,8 @@ export const mockApi: MkpApi = {
   async applyActivePreset(fileName, origin, path) {
     if (origin !== 'mine') {
       throw new NotImplementedError(
-        `applyActivePreset(${fileName})：浏览器里没有下载区，那份字节不在，先用真机下载一份`,
+        'applyActivePreset',
+        `浏览器预览里没有 ${fileName} 的字节，应用官方预设要用桌面版（先在桌面版里下载一份）`,
       )
     }
     const hit = mockMine.find((f) => f.path === path)
@@ -996,11 +1093,17 @@ export const mockApi: MkpApi = {
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */
   async checkRemoteUpdate() {
-    throw new NotImplementedError('checkRemoteUpdate：浏览器里没有远端目录')
+    throw new NotImplementedError(
+      'checkRemoteUpdate',
+      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+    )
   },
 
   async applyRemoteUpdate() {
-    throw new NotImplementedError('applyRemoteUpdate：浏览器里没有远端目录')
+    throw new NotImplementedError(
+      'applyRemoteUpdate',
+      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+    )
   },
 
   /*

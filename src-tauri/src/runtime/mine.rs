@@ -61,7 +61,6 @@ use crate::fsx::paths::MINE_DIR;
 use super::catalog::kind::PRESET;
 use super::catalog::Catalog;
 use super::lineage::{self, Lineage};
-use super::state::{ActiveOrigin, ActivePreset, PresetDraft};
 
 /// 读血统时最多看文件头这么多字节。
 ///
@@ -625,43 +624,82 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     })
 }
 
+/// **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+///
+/// 在此之前官方行的「另存为一份新的」是灰的，tooltip 让人"走「改这份」→ 保存"——
+/// 可"改了再保存"与"不改直接复制"落的是**同一种东西**（同一条 `commit_draft` 链），
+/// 绕一道编辑流程才能复制，不合直觉。作者定案（2026-10-06）：另存放开。
+///
+/// 与 [`copy_as_new`]（我的文件 → 我的文件）同族，但来源是**官方交付行**，多两道闸：
+///
+/// - **目录里得有它，而且得是 MKP 预设** —— 切片器 profile / 图标那类不在此列
+///   （它们不是 TOML 预设，「另存」无从谈起；切片器自有「复制到切片器目录」那条路）；
+/// - **字节必须可信**（[`super::delivery::official_text`]，与「改这份」同一条闸）——
+///   旧版本 / 内容异常的禁令**不变**：我们不认的字节，不能换个名字继续活着。
+///
+/// 写下去的是**副本的形状**：官方原件的字节 + 头注释块里三行血统
+/// （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`）——
+/// 官方原件本身没有血统头（它是源头），所以这里是**新写指向**，不是照抄来源的 based_on。
+/// 出处账不记：血统已经答了"从哪来"（与 `commit_draft` 同一口径）。
+///
+/// **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive —— 新文件从诞生起就是
+/// 独立的一份。名字的门槛（不许空 / 不许带路径 / 后缀保持原样）、不覆盖、不自动改名、
+/// 不与来源同名，与 [`copy_as_new`] 同一套。
+pub fn copy_release_as_new(
+    internal_root: &Path,
+    user_root: &Path,
+    file_name: &str,
+    new_name: &str,
+) -> Result<FileIdentity, AppError> {
+    let catalog = super::load_released_catalog(internal_root)?;
+    let file = catalog
+        .files
+        .iter()
+        .find(|f| f.file_name == file_name)
+        .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+    if file.kind != super::catalog::kind::PRESET {
+        return Err(AppError::invalid_argument(format!(
+            "{file_name} 不是 MKP 预设 —— 只有 MKP 预设能另存成你自己的一份"
+        )));
+    }
+    /* 官方原件的字节过第六层的闸（SHA 与目录一致才放行）：可信才能复制 */
+    let raw = super::delivery::official_text(internal_root, file)?;
+    let new_name = check_new_name(file_name, new_name)?;
+    let rel = format!("{MINE_DIR}/{new_name}");
+    check_mine_prefix(&rel)?;
+    if new_name == file_name {
+        return Err(AppError::invalid_argument(
+            "新名字和官方那份一样 —— 另存要起个不同的名字（两份同名分不清谁是谁）",
+        ));
+    }
+    let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
+    if target.exists() {
+        return Err(AppError::invalid_argument(format!(
+            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        )));
+    }
+    let body = super::lineage::make_copy(&raw, &file.path);
+    crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
+    Ok(FileIdentity {
+        path: rel,
+        file_name: new_name,
+    })
+}
+
 /// **删除**一份用户文件（第十层）：**真删除** —— 没有垃圾桶，也没有归档
 /// （作者 2026-10-02 定死：`archive/` 是官方版本生命周期的一部分，用户自己删自己的文件
 /// 不搞第二套"用户历史"）。
 ///
-/// 两道硬闸都在入口（`active` / `draft` 由调用方从 `run/` 读出来传进来）：
-///
-/// - **正在使用的那一份不许删**：删了 `run/active-preset.json` 就指向一份不存在的文件
-///   （悬空的"使用中"）。先换用别的配置、或者撤销使用，再来删；
-/// - **还有没保存的草稿不许删**：删了那张草稿就成一张永远存不回去的纸（写回要文件在）。
-///   先「保存回我这份」或「放弃这次编辑」，再来删。
-pub fn delete_file(
-    user_root: &Path,
-    rel: &str,
-    active: Option<&ActivePreset>,
-    draft: Option<&PresetDraft>,
-) -> Result<(), AppError> {
+/// 作者裁决（2026-10-06）：**正在使用 / 有草稿不再拦** —— 那两样是**状态**，不是文件；
+/// 由调用方（ipc）在删之前把使用中指针撤下、草稿一并丢弃，确认框讲清这一步。
+/// 文件层只管文件：前缀 + 防穿越两道闸，删完列表以磁盘为准（界面回来重读用户线）。
+pub fn delete_file(user_root: &Path, rel: &str) -> Result<(), AppError> {
     check_mine_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
             "找不到 {rel} —— 它可能已经被移走或删掉了"
         )));
-    }
-    if let Some(state) = active {
-        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
-            return Err(AppError::invalid_argument(format!(
-                "{rel} 正在使用 —— 不能直接删（删了「使用中」会指向一份不存在的文件）。\
-                 先换成别的配置、或者撤销使用，再来删"
-            )));
-        }
-    }
-    if let Some(state) = draft {
-        if state.origin == ActiveOrigin::Mine && state.path.as_deref() == Some(rel) {
-            return Err(AppError::invalid_argument(format!(
-                "{rel} 还有没保存的改动（草稿在程序里）—— 先「保存回我这份」或「放弃这次编辑」，再来删"
-            )));
-        }
     }
     std::fs::remove_file(&target)
         .map_err(|e| AppError::io(format!("{rel} 删不掉")).with_detail(e.to_string()))?;
@@ -1349,7 +1387,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
 
-        delete_file(root.path(), "presets-mine/A1.toml", None, None).unwrap();
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
         assert!(!root.path().join("presets-mine/A1.toml").exists());
         let left: Vec<String> = std::fs::read_dir(root.path().join("presets-mine"))
             .unwrap()
@@ -1358,72 +1396,33 @@ mod tests {
         assert!(left.is_empty(), "删掉就是删掉，不留档：{left:?}");
     }
 
-    /// **正在使用的那一份不许删**（删了「使用中」就悬空）；正在用的是**别人**，照常删
+    /// **正在使用也照删**（作者裁决 2026-10-06：一切皆可删）—— 文件层不碰状态：
+    /// 使用中指针的撤下是调用方（ipc）的事，这一层只保证文件本身删得掉
     #[test]
-    fn deleting_refuses_while_it_is_the_active_one() {
+    fn deleting_works_even_while_it_is_the_active_one() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
-        let active =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
-                .unwrap();
+        crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+            .unwrap();
 
-        let e = delete_file(root.path(), "presets-mine/A1.toml", Some(&active), None).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.message.contains("正在使用"), "{}", e.message);
-        assert!(
-            root.path().join("presets-mine/A1.toml").exists(),
-            "拒了就不许动它"
-        );
-
-        delete_file(root.path(), "presets-mine/B1.toml", Some(&active), None).unwrap();
-        assert!(!root.path().join("presets-mine/B1.toml").exists());
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
+        assert!(!root.path().join("presets-mine/A1.toml").exists());
     }
 
-    /// **还有没保存的草稿不许删**（删了草稿就永远存不回去）；草稿改的是**别人**，照常删
+    /// **有草稿也照删** —— 草稿的丢弃同样是调用方（ipc）的事，文件层只管文件
     #[test]
-    fn deleting_refuses_while_a_draft_is_open() {
+    fn deleting_works_even_while_a_draft_is_open() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        write(root.path(), "presets-mine/B1.toml", VALID_TOML);
-        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
-        let draft =
-            crate::runtime::state::save_draft(root.path(), &subject, "sha", "正文").unwrap();
-
-        let e = delete_file(root.path(), "presets-mine/A1.toml", None, Some(&draft)).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.message.contains("草稿"), "{}", e.message);
-        assert!(root.path().join("presets-mine/A1.toml").exists());
-
-        delete_file(root.path(), "presets-mine/B1.toml", None, Some(&draft)).unwrap();
-        assert!(!root.path().join("presets-mine/B1.toml").exists());
-    }
-
-    /// 两道闸只认用户线：官方线的指针 / 草稿（哪怕路径字段撞上）挡不住删用户文件
-    #[test]
-    fn the_delete_gates_only_apply_to_the_mine_line() {
-        let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        let mut official =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
-                .unwrap();
-        official.origin = ActiveOrigin::Official;
-        let mut draft = crate::runtime::state::save_draft(
+        crate::runtime::app_state::set_draft(
             root.path(),
-            &crate::runtime::state::DraftSubject::official("A1.toml"),
+            &crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml"),
             "sha",
             "正文",
         )
         .unwrap();
-        draft.path = Some("presets-mine/A1.toml".to_owned());
 
-        delete_file(
-            root.path(),
-            "presets-mine/A1.toml",
-            Some(&official),
-            Some(&draft),
-        )
-        .unwrap();
+        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
         assert!(!root.path().join("presets-mine/A1.toml").exists());
     }
 
@@ -1432,8 +1431,8 @@ mod tests {
     fn deleting_stays_in_the_mine_dir() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "exports/别动我.txt", "x");
-        assert!(delete_file(root.path(), "exports/别动我.txt", None, None).is_err());
-        assert!(delete_file(root.path(), "../外面.txt", None, None).is_err());
+        assert!(delete_file(root.path(), "exports/别动我.txt").is_err());
+        assert!(delete_file(root.path(), "../外面.txt").is_err());
         assert!(root.path().join("exports/别动我.txt").exists());
     }
 
@@ -1532,14 +1531,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
         let active =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+            crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
                 .unwrap();
         let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
-        crate::runtime::state::save_draft(root.path(), &subject, "sha", "改到一半").unwrap();
+        crate::runtime::app_state::set_draft(root.path(), &subject, "sha", "改到一半").unwrap();
 
         copy_as_new(root.path(), "presets-mine/A1.toml", "A1-第二份.toml").unwrap();
 
-        let after_active = crate::runtime::state::load_active(root.path())
+        let after_active = crate::runtime::app_state::active_preset(root.path())
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1548,7 +1547,7 @@ mod tests {
             "使用中没动"
         );
         assert_eq!(after_active.file_name, active.file_name);
-        let after_draft = crate::runtime::state::load_draft(root.path())
+        let after_draft = crate::runtime::app_state::draft(root.path())
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1589,6 +1588,179 @@ mod tests {
         write(root.path(), "exports/别动我.txt", "x");
         assert!(copy_as_new(root.path(), "exports/别动我.txt", "副本.txt").is_err());
         assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
+    }
+
+    /* ---------- 官方 → 我的文件：copy_release_as_new（UX 测试 A1 的正路） ---------- */
+
+    /// 官方另存的夹具：内部根里放一份**与目录一致**的 MKP 交付文件
+    /// （catalog.json 登记它的 SHA，字节按同一条内容落在交付路径上）
+    fn release_fixture(root: &Path, name: &str, content: &str) {
+        let file = super::super::catalog::CatalogFile {
+            kind: "mkp_preset".to_owned(),
+            file_name: name.to_owned(),
+            path: format!("{}/{name}", super::super::catalog::PRESET_DEST_DIR),
+            machine_id: "A1".to_owned(),
+            version_id: "STANDARD".to_owned(),
+            sha256: Some(lineage::sha256_hex(content)),
+            size: Some(content.len() as u64),
+        };
+        crate::fsx::atomic::atomic_write(
+            &root.join(crate::runtime::paths::CATALOG_FILE),
+            catalog_with(vec![file])
+                .to_pretty_json()
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        write(root, &format!("delivery/mkp/presets/{name}"), content);
+    }
+
+    /// 正路：官方那份按字节复制成你自己的一份，血统**新写指向**来源交付文件
+    /// （官方原件没有血统头，不是照抄）；官方原件一个字节不动
+    #[test]
+    fn copying_a_release_writes_a_mine_copy_with_lineage() {
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
+
+        let done = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "我的涂胶.toml",
+        )
+        .unwrap();
+        assert_eq!(done.path, "presets-mine/我的涂胶.toml");
+
+        let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
+        assert!(
+            text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
+            "血统要指向来源交付文件：{text}"
+        );
+        assert!(
+            text.contains("# based_on_sha256:"),
+            "摘要那行也要在：{text}"
+        );
+        assert!(
+            text.contains("涂胶宽度 = 1.0"),
+            "官方原件的字节要原样在副本里：{text}"
+        );
+
+        assert_eq!(
+            std::fs::read(
+                internal
+                    .path()
+                    .join("delivery/mkp/presets/A1-standard.toml")
+            )
+            .unwrap(),
+            "涂胶宽度 = 1.0\n".as_bytes(),
+            "官方原件一个字节没动"
+        );
+    }
+
+    /// 与「改这份」同一条闸：盘上字节与目录不一致（被改过 / 旧版本）不许换个名字继续活着
+    #[test]
+    fn copying_a_release_refuses_untrusted_bytes() {
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        release_fixture(internal.path(), "A1-standard.toml", "官方当前版本\n");
+        write(
+            internal.path(),
+            "delivery/mkp/presets/A1-standard.toml",
+            "被人动过的字节\n",
+        );
+
+        let e = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "副本.toml",
+        )
+        .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::ShaMismatch);
+    }
+
+    /// 目录里没有它 / 不是 MKP 预设：都拒。切片器 profile 自有「复制到切片器目录」那条路
+    #[test]
+    fn copying_a_release_needs_a_catalogued_toml() {
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+
+        let missing =
+            copy_release_as_new(internal.path(), user.path(), "没有这份.toml", "副本.toml")
+                .unwrap_err();
+        assert_eq!(missing.code, crate::error::ErrorCode::NotFound);
+
+        let file = super::super::catalog::CatalogFile {
+            kind: "bbs_profile".to_owned(),
+            file_name: "MKPProcess.json".to_owned(),
+            path: "delivery/mkp/presets/MKPProcess.json".to_owned(),
+            machine_id: "A1".to_owned(),
+            version_id: "STANDARD".to_owned(),
+            sha256: None,
+            size: None,
+        };
+        crate::fsx::atomic::atomic_write(
+            &internal.path().join(crate::runtime::paths::CATALOG_FILE),
+            catalog_with(vec![file])
+                .to_pretty_json()
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        let e = copy_release_as_new(internal.path(), user.path(), "MKPProcess.json", "副本.json")
+            .unwrap_err();
+        assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
+    }
+
+    /// 撞名 / 与来源同名：拒（不覆盖、不自动改名）；**一个状态都不碰** ——
+    /// 使用中指针与草稿原地不动，新文件不自称使用中、也不冒出草稿
+    #[test]
+    fn copying_a_release_never_overwrites_and_touches_no_state() {
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
+        write(
+            user.path(),
+            "presets-mine/已有.toml",
+            "[wiping]\nspeed = 80\n",
+        );
+        let active = crate::runtime::app_state::set_active_mine(
+            user.path(),
+            "presets-mine/已有.toml",
+            "sha",
+        )
+        .unwrap();
+        let subject =
+            crate::runtime::state::DraftSubject::mine("已有.toml", "presets-mine/已有.toml");
+        crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
+
+        let e = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "已有.toml",
+        )
+        .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(e.message.contains("不覆盖"), "{}", e.message);
+        let e = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "A1-standard.toml",
+        )
+        .unwrap_err();
+        assert!(e.message.contains("不同的名字"), "{}", e.message);
+
+        let after = crate::runtime::app_state::active_preset(user.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.file_name, active.file_name, "使用中没动");
+        let draft = crate::runtime::app_state::draft(user.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(draft.text, "改到一半", "草稿没被碰");
     }
 
     /* ---------- 第十三层：在文件管理器里显示（只解析落点，窗口是系统的事） ---------- */

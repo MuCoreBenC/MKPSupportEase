@@ -27,6 +27,7 @@
 
 export { allMachines } from './machines'
 export { resolveVersionFiles } from './files'
+export { mockCatalogFiles } from './catalogFiles'
 export { catalogRegistry, paramMeta, resolveParams } from './params'
 export { allPresetFiles } from './resources'
 export { menuEntries } from './menu'

@@ -4,7 +4,7 @@
  * 原来这个文件是客户端同步层的三格底账（说明书 / 本机预设 / 使用中，全住 localStorage）——
  * 那套随 C4 收口整体退役：说明书的对应物是 catalog（`api.getRuntimeCatalog()`）、
  * 本机预设的对应物是下载区 `mkp/`（`api.getDownloadedFiles()`）、使用中的对应物是
- * `run/active-preset.json`（`api.getActivePreset()`）。存储全部回到程序管理的
+ * AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）。存储全部回到程序管理的
  * Internal 根（`atomic_write` 纪律），WebView 的 localStorage 不再承载任何底账。
  *
  * 留下来的只有**时间那一格的格式化**：表格 / 展开面板上"官方行 / 发布行 / 老的本机值"

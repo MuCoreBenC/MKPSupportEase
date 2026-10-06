@@ -23,8 +23,11 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { selectionFromActive } from './activeSelection'
+import { api, errorText, isAppError } from '../../api'
+import { activeForSelection, selectionFromActive } from './activeSelection'
+import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { uidOfFile, useCatalog } from './useCatalog'
+import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
@@ -72,6 +75,15 @@ const CALIB_MODEL_INDEX = 4
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
 /**
+ * 后端说"盘上不是我以为的那一份" —— 只有这两种错值得补一次下载（§Task 5，见
+ * `docs/HOME-BUNDLE-DOWNLOAD.md`）：`NOT_FOUND`（盘上没有）与 `SHA_MISMATCH`（字节漂了）。
+ * 别的错（读不懂这一代数据、不是 MKP、权限…）补下载也没用，照原样抛给用户看。
+ */
+function isStaleGuess(e: unknown): boolean {
+  return isAppError(e) && (e.code === 'NOT_FOUND' || e.code === 'SHA_MISMATCH')
+}
+
+/**
  * 后处理脚本里那段可执行文件路径。契约里没有它（真值在桌面壳那一侧），
  * 先沿用原来那串模板；`--Toml` 后面的路径跟着**当前那份文件**走（T10）。
  */
@@ -99,11 +111,9 @@ function Rows({ items }: { items: [string, string][] }) {
 
 interface PageHomeProps {
   density: Density
-  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账 */
-  active?: boolean
 }
 
-export default function PageHome({ density, active }: PageHomeProps) {
+export default function PageHome({ density }: PageHomeProps) {
   const deckRef = useRef<DeckHandle>(null)
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
   const { fadeMs } = useDevDefaults()
@@ -122,22 +132,28 @@ export default function PageHome({ density, active }: PageHomeProps) {
   const catalog = useCatalog()
 
   /*
-   * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（唯一底账 mkp.a44.active）——
+   * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（AppState 的 activePreset 格）——
    * 预设页应用了哪一份，这里三级选择就反填成哪一台。active 的 machineId / versionId
    * 与选择器是**同一套 id**（不再有映射表）。
-   * 常驻挂载后 tab 不再重挂（2026-10-05），改成每次回到本页对一次：对出的值与
-   * 现状一致时画面不动，在预设页换过应用才真正换基准。
+   * 底账从唯一客户端订阅（`useActivePreset`）：应用 / 撤销 / 删除一发生，
+   * 这里同帧换基准 —— 不需要回页签对账（第一轮的补丁已拆，见 docs/APP-STATE.md）。
    */
+  const activeEntry = useActivePreset()
   useEffect(() => {
-    if (!active || catalog.machines.length === 0) return
-    /* 底账走 IPC（run/active-preset.json），异步读；读不到当"没有"，不反填 */
-    void selectionFromActive(catalog.machines).then((next) => {
-      if (next !== null) setSel(next)
-    })
-  }, [active, catalog.machines])
+    if (catalog.machines.length === 0) return
+    const next = selectionFromActive(catalog.machines, activeEntry)
+    if (next !== null) setSel(next)
+  }, [activeEntry, catalog.machines])
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
+
+  /*
+   * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
+   * —— 显示层用它判断"正在使用的这份是否就是当前选中 combo"。具体取值在下面的
+   * displayName / displayPath（要等 presetInfo / presetName 算完）。
+   */
+  const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
 
   // ---------- 偏移：已保存的一份 + 板上点出来 / 手输出来的草稿 ----------
   /* 整块状态机搬进了 useCalibration —— 向导这几页与「校准」tab 用同一份实现。
@@ -255,8 +271,12 @@ export default function PageHome({ density, active }: PageHomeProps) {
     [catalog.presets],
   )
 
-  /* 校准页的预设下拉：一份预设文件唯一对应一处「机型 + 版本」，所以「选文件」= 反填三级选择 ——
-     于是回到第二页，品牌 / 机型 / 版本已经是这份文件对应的那一套，不用再手点一遍 */
+  /*
+   * 抽屉里点一份 = 明确要用这份（与「改预设先问一句」同一入口）：落到 sel 之外，
+   * 真写底账 —— 四个页面同账。首页三级的**浏览选择不算应用**（作者 2026-10-06：
+   * 「不是说点了它就是应用」，应用走下面那颗明确的按钮）。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
   const applyPreset = useCallback(
     (uid: string) => {
       const [machineId, versionId] = uid.split('/')
@@ -264,8 +284,9 @@ export default function PageHome({ density, active }: PageHomeProps) {
       const version = machine?.versions.find((v) => v.id === versionId)
       if (machine === undefined || version === undefined) return
       setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+      activateCombo(machine.id, version.id, fileOf, activeEntry)
     },
-    [catalog.machines],
+    [catalog.machines, fileOf, activeEntry],
   )
 
   /* 换预设会把本页草稿作废（草稿是相对上一份预设点出来的增量），所以先问一次。
@@ -296,6 +317,148 @@ export default function PageHome({ density, active }: PageHomeProps) {
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物
   const ready = Boolean(sel.brand && sel.model && sel.variant)
+
+  /*
+   * 「应用 / 下载并应用 / 更新并应用 / 已应用」那颗按钮（作者 2026-10-06：第二页要一颗
+   * **明确的**应用按钮，放在「下一步」旁边，宽度固定不随文字变）。
+   *
+   * ★ 它消费的是**整个套餐**（`useBundleFiles` = `getVersionFiles`：MKP + 配套 BBS），
+   *   **不是**"一个 TOML 能不能应用" —— 单文件布尔值表达不了这个页面的状态。
+   *   四态严格按顺序判、互斥（`docs/HOME-BUNDLE-DOWNLOAD.md` §2）：
+   *
+   *     底账正指着这个 combo        → 已应用（定格，点不了）
+   *     套餐里缺任一份              → 下载并应用   ← 缺 + 漂同时存在时也是这一态
+   *     无缺、但有漂的              → 更新并应用
+   *     全齐且全新                  → 应用（一个字节都不重下）
+   *
+   *   判不了（套餐没拿到 / 清单还没回来）= `unknown`：卡住，**不许**滑进「应用」。
+   *   盘的现状与预设页同一套账（下载清单 + 漂移清单）；失败说人话，不编成功。
+   */
+  const [applying, setApplying] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [deliveryTick, setDeliveryTick] = useState(0)
+  /* 盘上那两份单子（下载区 / 漂移），按文件名查 */
+  const [onDisk, setOnDisk] = useState<{ downloaded: Set<string>; stale: Set<string> } | null>(null)
+
+  const comboKey =
+    ready && sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
+  const comboApplied =
+    activeEntry !== null &&
+    sel.model !== null &&
+    sel.variant !== null &&
+    activeEntry.machineId === sel.model &&
+    activeEntry.versionId === sel.variant
+
+  const bundle = useBundleFiles(sel.model, sel.variant)
+  /** 「应用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
+  const presetFile = bundle.presetFileName
+
+  useEffect(() => {
+    if (comboKey === null) return
+    let alive = true
+    void Promise.all([
+      api.getDownloadedFiles().catch(() => []),
+      api.getStaleFiles().catch(() => []),
+    ]).then(([downloaded, stale]) => {
+      if (!alive) return
+      setOnDisk({
+        downloaded: new Set(downloaded.map((f) => f.fileName)),
+        stale: new Set(stale.map((f) => f.fileName)),
+      })
+    })
+    return () => {
+      alive = false
+    }
+  }, [comboKey, deliveryTick])
+
+  /*
+   * 套餐这一批文件在盘上是什么样 —— 三态与「待下清单」都从这一处算。
+   *
+   * ★ 「在盘上」= **已下载 ∪ 漂移**：两张单子都只收**盘上真有**的文件
+   *   （`runtime::delivery::entries_in_status` 遍历目录登记再读盘：字节对得上进「下载区」，
+   *   对不上进「漂移」），**漂 ≠ 缺** —— 漂的那份是"在盘上但字节旧/坏了"。
+   *   把漂当成缺，就会把「更新并应用」说成「下载并应用」（探针逮到过）。
+   * ★ 待下 = 缺 ∪ 漂，**按文件名去重**（作者 2026-10-06 的纪律①）：同一份既缺又漂
+   *   （理论上不会，但别指望）只会下一次；实现上不许把两张单子各拼一段再连接。
+   * ★ `unknown` 是"判不了"，不是"全齐"（纪律②）—— 不许拿它当 ready。
+   */
+  const bundleState = useMemo(() => {
+    const files = bundle.files
+    if (files === null || bundle.problems.length > 0 || onDisk === null) {
+      return { kind: 'unknown' as const, todo: [] as string[], missing: 0, drift: 0 }
+    }
+    const todo = new Set<string>()
+    let missing = 0
+    let drift = 0
+    for (const f of files) {
+      const onDiskNow = onDisk.downloaded.has(f.fileName) || onDisk.stale.has(f.fileName)
+      if (!onDiskNow) {
+        missing += 1
+        todo.add(f.fileName)
+        continue
+      }
+      if (onDisk.stale.has(f.fileName)) {
+        drift += 1
+        todo.add(f.fileName)
+      }
+    }
+    const kind = missing > 0 ? 'missing' : drift > 0 ? 'drift' : 'ready'
+    return { kind, todo: [...todo], missing, drift }
+  }, [bundle, onDisk])
+
+  const actionLabel = applying
+    ? '应用中…'
+    : comboApplied
+      ? '已应用'
+      : bundleState.kind === 'unknown'
+        ? bundle.problems.length > 0
+          ? '套餐未配置'
+          : '读取中…'
+        : bundleState.kind === 'missing'
+          ? '下载并应用'
+          : bundleState.kind === 'drift'
+            ? '更新并应用'
+            : '应用'
+  const actionDisabled = comboApplied || applying || bundleState.kind === 'unknown'
+
+  const applyCurrent = useCallback(async () => {
+    if (applying || bundleState.kind === 'unknown' || presetFile === null) return
+    setApplying(true)
+    setApplyError(null)
+    /* 预判：这一批里缺的与漂的（已去重）。空 = 全齐全新 —— 直接应用，一个字节都不重下 */
+    const todo = bundleState.todo
+    try {
+      if (todo.length > 0) {
+        /* 逐份看结局：**任何一份没成就停下、不应用** —— 套餐缺一份就是没齐（不编成功） */
+        const outcomes = await api.downloadCatalogFiles(todo)
+        const failed = outcomes.filter((o) => !o.ok)
+        if (failed.length > 0) {
+          throw new Error(
+            `套餐没下全，先不应用：${failed.map((o) => `${o.fileName}（${o.message}）`).join('；')}`,
+          )
+        }
+      }
+      try {
+        await api.applyActivePreset(presetFile, 'official')
+      } catch (e) {
+        /*
+         * 兜底只留给「预判过期」这一种：预判说齐了（清单为空），盘上其实不齐（刚被外部动过）
+         * —— 后端报 NOT_FOUND / SHA_MISMATCH 时才补一次下载再应用。不是重新套一个
+         * 吞异常的 catch：别的错（读不懂、不是 MKP…）照原样往上抛。
+         */
+        if (todo.length > 0 || !isStaleGuess(e)) throw e
+        await api.downloadCatalogFile(presetFile)
+        await api.applyActivePreset(presetFile, 'official')
+      }
+      appStateMutated()
+    } catch (e) {
+      setApplyError(errorText(e))
+    } finally {
+      setApplying(false)
+      setDeliveryTick((t) => t + 1)
+    }
+  }, [applying, bundleState, presetFile])
+
   /** 已经拿到的那一份预设；还在等 / 失败时为 null —— 不回退到 mock 里的默认那份 */
   const presetInfo = preset.status === 'ready' ? preset.preset : null
   /** 文件名在等待之外的几态都是已知的（知道要取哪一份），单独取出来 */
@@ -305,6 +468,40 @@ export default function PageHome({ density, active }: PageHomeProps) {
       : preset.status === 'idle'
         ? null
         : preset.name
+
+  /*
+   * A3：正在使用的那份（底账）命中当前 combo 时，名字 / 路径**用底账的** ——
+   * 应用了「我的文件」，这里就说我的文件（与预设页横幅同源）；没命中维持目录那份。
+   * 覆盖只在目录那份就绪后发生：waiting / failed 的三态动画不动。
+   */
+  const presetReady = preset.status === 'ready'
+  const displayName = activeForSel !== null && presetReady ? activeForSel.fileName : presetName
+  const displayPath =
+    activeForSel !== null && presetReady
+      ? (activeForSel.path ?? presetInfo?.path ?? null)
+      : (presetInfo?.path ?? null)
+  const inUseNote =
+    activeForSel === null || !presetReady
+      ? undefined
+      : activeForSel.origin === 'mine'
+        ? '正在使用 · 我的文件'
+        : '正在使用'
+  /* picker sheet 那块卡：名字 / 路径换成底账那份，其余（三轴数值等）保持原样。
+     useMemo 包一层：sheets 那张 useMemo 拿它当依赖，引用得稳 */
+  const presetView = useMemo(
+    () =>
+      activeForSel !== null && presetReady
+        ? {
+            ...preset,
+            preset: {
+              ...preset.preset,
+              name: activeForSel.fileName,
+              path: activeForSel.path ?? preset.preset.path,
+            },
+          }
+        : preset,
+    [activeForSel, presetReady, preset],
+  )
   const entryLabel = modelName ? '选择版本' : '选择机型'
   const artAlt = [brandName, modelName].filter(Boolean).join(' ') || '未选择机型'
 
@@ -336,13 +533,14 @@ export default function PageHome({ density, active }: PageHomeProps) {
 
                 {ready && (
                   <>
-                    <p className={p.path} title={presetInfo?.path}>
-                      {presetName ?? '—'}
+                    <p className={p.path} title={displayPath ?? undefined}>
+                      {displayName ?? '—'}
                     </p>
-                    {/* 脚本里的 --Toml 跟着当前那份文件走（T10）；还没取到就先不摆这颗按钮 */}
-                    {presetInfo && (
+                    {/* 脚本里的 --Toml 跟着**正在使用的那一份**走（A3：底账命中时是
+                        用户那份的路径，不再是目录底稿）；还没取到就先不摆这颗按钮 */}
+                    {presetInfo && displayPath && (
                       <CopyAction
-                        text={`"${MKP_EXE}" --Toml "${presetInfo.path}" --Gcode`}
+                        text={`"${MKP_EXE}" --Toml "${displayPath}" --Gcode`}
                         label="复制后处理脚本"
                       />
                     )}
@@ -414,6 +612,22 @@ export default function PageHome({ density, active }: PageHomeProps) {
             peekSafe
             navs={[{ label: '回主页', onClick: () => deckRef.current?.jumpTo(0) }]}
             actions={[
+              /* 「应用 / 下载并应用 / 已应用」：宽度固定（文字换态不变），在「下一步」旁边。
+                 浏览三级选择不算应用 —— 应用只发生在这颗按钮与各处抽屉的明确动作上 */
+              ...(ready
+                ? [
+                    {
+                      label: actionLabel,
+                      primary: !actionDisabled,
+                      fixed: true,
+                      disabled: actionDisabled,
+                      on: true,
+                      onClick: () => {
+                        void applyCurrent()
+                      },
+                    },
+                  ]
+                : []),
               {
                 label: '下一步',
                 arrow: true,
@@ -438,8 +652,16 @@ export default function PageHome({ density, active }: PageHomeProps) {
                   三轴只在"没有右侧露出卡"（density mini）时一起摆出来 */}
               {preset.status !== 'idle' && (
                 <div className={p.pickerPreset}>
-                  <PresetStack state={preset} axes={density === 'mini' ? saved : undefined} />
+                  <PresetStack state={presetView} inUse={inUseNote} axes={density === 'mini' ? saved : undefined} />
                 </div>
+              )}
+
+              {/* 应用失败要说话（不编成功）：errorText 带人话与 traceId */}
+              {applyError !== null && <p className={p.applyError}>{applyError}</p>}
+
+              {/* 套餐本身取不全（后端没这个组合 / 配置没配齐）—— 照实说，不假装"套餐没文件" */}
+              {bundle.problems.length > 0 && (
+                <p className={p.applyError}>{bundle.problems.join('；')}</p>
               )}
             </div>
           </CardFrame>
@@ -668,10 +890,13 @@ export default function PageHome({ density, active }: PageHomeProps) {
       currentUid,
       density,
       dirty,
+      displayName,
+      displayPath,
       draft,
       drop,
       entryLabel,
       fadeMs,
+      inUseNote,
       layers,
       modelName,
       modelOptions,
@@ -683,12 +908,18 @@ export default function PageHome({ density, active }: PageHomeProps) {
       presetInfo,
       presetName,
       presetOptions,
+      presetView,
       ready,
       resetAxis,
       revertAxis,
       saved,
       savedNote,
       sel,
+      actionDisabled,
+      actionLabel,
+      applyCurrent,
+      applyError,
+      bundle,
       settle,
       typeAxis,
       variantName,

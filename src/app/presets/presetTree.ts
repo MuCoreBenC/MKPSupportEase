@@ -210,9 +210,18 @@ export const ACTION_TEXT: Record<PresetKindAxis, string> = {
   slicer: '复制',
 }
 
-/** 没有 asset id 的行为什么没有操作按钮。**不给一个点了会报错的按钮** */
+/**
+ * 交付目录里没有记录的官方行为什么没有操作按钮（A2 人话化：发生了什么 + 能干什么）。
+ *
+ * 两种真实状态共用这一句：用户自己放进 `mkp/` 的来路不明文件；以及演示数据里
+ * 旧资产库的行（新交付链里没有它的身份）。共同的事实是**目录里没有它** ——
+ * 所以不再断言"是你自己放的"（对登记在案的文件那是假话），也不再说
+ * asset id / 契约 / "点了必报错"那种开发者话。
+ */
 export const NO_ASSET_WHY =
-  '你自己放进预设目录的文件仓库里没有记录，没有 asset id —— 而契约的 applyPreset / copyToSlicer 只认 asset id。给一个点了必报错的按钮比不给糟'
+  '这份文件不在 SupportEase 的交付目录里（不是从软件里下载的那一份），' +
+  '所以不能直接应用，也不能直接另存。想用它：把它拖进窗口导入成「我的文件」，' +
+  '或从云端重新下载官方版本'
 
 /**
  * 交付身份的两种说法。**只有两种，没有第三种**（见契约 `PresetFileInfo.delivery`）：
@@ -243,19 +252,30 @@ export const RELEASE_DOWNLOAD_WHY =
   '从目录登记的交付清单里下载这一份到下载区 mkp/ —— 下载 ≠ 使用，生效要到本地表里点「应用」'
 
 /**
- * 发布行「时间 / 大小」两格的 title：这两样都是**真值**（发布时刻 / 下载时刻 /
- * TOML 字节数），不该沿用官方行那句「演示数据」——按行分流，说清是哪一层的意思。
+ * 「时间」拿不到时的那两句（**有值的时候 tooltip 直接给具体时间**，不解释实现 ——
+ * `catalog.publishedAt` 这种内部名字不许出现在界面上；曾经过的弯路：tooltip 写成
+ * 「这次发布的时刻 —— 发布侧落盘时写进目录的……」，用户悬停半天拿到的是一段实现说明）。
  *
- * 时间**两种来源分归两张表**（2026-10-06）：云端表是**发布时刻**（发布侧盖进目录的戳）、
- * 本地表是**下载时刻**（盘上那份的 mtime）；各自的"没有"也有自己的一句 ——
- * 说清为什么拿不到，而不是让人以为界面没做完。显示一律**按本机时区**（`parseStatDate`）。
+ * 时间**两种来源分归两张表**（2026-10-06）：云端表是**云端更新时间**（发布侧盖进目录的戳）、
+ * 本地表是**下载时间**（盘上那份的 mtime）；显示一律**按本机时区**（`parseStatDate`）。
  */
 export const RELEASE_TIME_WHY = {
-  cloud: '这次发布的时刻 —— 发布侧落盘时写进目录的（catalog.publishedAt），按你电脑的时区显示',
-  cloudMissing:
-    '这份目录没有记发布时刻 —— 随包目录不带时间，旧版发布的目录也没有；「检查更新」换到发布侧的目录之后会有',
-  local: '下载到本机的时刻 —— 这份字节落进下载区那一刻（文件 mtime），按你电脑的时区显示',
-  localMissing: '盘上那份的落盘时刻文件系统没给 —— 照实不显示，不编一个',
+  cloudMissing: '云端没有记这次发布的时间 —— 随包目录不带时间，旧版发布的目录也没有',
+  localMissing: '说不出这份字节是什么时候到的 —— 它认不出属于哪一版，这种字节不记时间，照实「未知」',
+} as const
+
+/**
+ * 旧版本抽屉里那两个时间的标签与「未知」的写法。**两个时间各是各，永不互相顶替**：
+ *
+ *   云端发布  这一版在云端发布时的时刻 —— 跟着这一版字节走，反查版本出身；
+ *             早于版本记忆的照实「未知（早于版本记忆）」，不拿"现在"顶
+ *   替换时间  它被换下来那一刻（替换事件）—— 你动它的时刻，如实说，但只当下要信息
+ */
+export const ARCHIVE_TIME = {
+  published: '云端发布',
+  replaced: '替换时间',
+  publishedUnknown: '未知（早于版本记忆）',
+  replacedUnknown: '未知',
 } as const
 
 export const RELEASE_SIZE_WHY = '按这一份 TOML 的字节数算的'
@@ -280,21 +300,103 @@ export const ORIGIN_WHY: Record<PresetOrigin, string> = {
 }
 
 /**
- * 来源列的一格：release 行要带上**来源 chip**（「官方交付」；新世界目录没有版本号概念，chip 不缀版本），
- * 官方 / 我的照常走那两张静态表 —— 查表给不了动态的那截，所以收成一个小函数。
+ * 数据源（设置页那一个）→ 来源列上「官方交付」行显示的字。
+ *
+ * 用户问的是「这文件从哪来」—— 答案是 **Gitee / GitHub / 自定义源**，不是一串目录指纹
+ * （那串曾经过出现在来源 chip 上：`官方交付 · 08e55a3f…`，作者原话「我觉得这个没有意义」。
+ * 指纹唯一还有意义的位置是展开详情里的「云端版本」—— 那是版本的身份证，不是来源）。
+ * 没配源（离线 / 随包）就退回「官方」—— 照实说不出是哪一个源，不编。
  */
-export function originChip(row: {
-  origin: PresetOrigin
-  releaseVersion?: string | null
-}): { text: string; title: string } {
-  if (row.origin === 'release') {
-    /* title 里带上全文 —— 窄档表里它会被省略号截断，悬停要能看到完整来源 */
-    const text = row.releaseVersion
-      ? `${ORIGIN_TEXT.release} · ${row.releaseVersion}`
-      : ORIGIN_TEXT.release
-    return { text, title: `${text} —— ${ORIGIN_WHY.release}` }
+export function sourceTextOf(sourceLabel: string | null): string {
+  switch (sourceLabel) {
+    case 'gitee':
+      return 'Gitee'
+    case 'github':
+      return 'GitHub'
+    case 'custom':
+      return '自定义源'
+    default:
+      return ORIGIN_TEXT.official
   }
-  return { text: ORIGIN_TEXT[row.origin], title: ORIGIN_WHY[row.origin] }
+}
+
+/**
+ * 来源列 / 展开详情「来源」一格的统一出口。
+ *
+ * 三种来源三种说法：
+ *   官方      官方副本（仓库文件下到本机的那份）
+ *   release   官方交付：从**当前数据源**的目录下载的（`GitHub` / `Gitee` / `自定义源`）
+ *   mine      我的：再分三档 ——
+ *             `复制自 <文件名>`（出处账记的用户文件复制，**可点击定位**到那一份）
+ *             `复制自 <文件名>`（官方另存出来的，血统说的；定位到云端那一份官方）
+ *             `导入`（出处账记的导入档）
+ *             都没有 ⇒ 「我的」（手工放进目录的）
+ *
+ * `locate` 给了就是「这一格可以点」：点击后页面定位到来源那一行并高亮一下。
+ */
+export interface LocateTarget {
+  scope: PresetScopeAxis
+  /** null = 来源行与当前类型档相同（用户自己那份认不出类别的），定位时不动这一轴 */
+  kind: PresetKindAxis | null
+  /** 目标行键（按「全部机型」那一档算的 —— 定位时页面会把机型切回全部） */
+  rowKey: string
+  /** 目标文件名（定位失败时提示条用得上） */
+  fileName: string
+}
+
+export function originCellOf(
+  row: PresetTableRow,
+  sourceLabel: string | null,
+): { text: string; title: string; locate?: LocateTarget } {
+  /*
+   * **正向判别 `=== 'mine'`**，不是两个反向 `!==`：PresetCloudRow 的 origin 本身是
+   * 联合（'official' | 'release'），TS 的反向排除对"判别值是联合的成员"不彻底
+   * （成员删不掉，后面的字段访问照样报错）。正向判别一次到位 —— 剩下的必是 mine 行。
+   */
+  if (row.origin === 'mine') {
+    /* 出处账优先（用户文件 → 用户文件、导入），其次血统（官方另存出来的），再退「我的」 */
+    if (row.provenance === 'copy' && row.copiedFromName) {
+      return {
+        text: `复制自 ${row.copiedFromName}`,
+        title: `复制自 ${row.copiedFromName} —— 点击定位到那一份（你现在这份是它的副本，两边各改各的）`,
+        locate: {
+          scope: 'local',
+          kind: row.kind === null ? null : 'mkp',
+          /* 定位永远按「全部机型」那一档算行键（mine 行的键里带机型筛选） */
+          rowKey: `mine::${row.copiedFrom}`,
+          fileName: row.copiedFromName,
+        },
+      }
+    }
+    if (row.provenance === 'import') {
+      return {
+        text: '导入',
+        title: '导入：这个文件是你从外面导进来的（拖拽 / 文件选择器）—— 云端没有它，删了没有地方能找回来',
+      }
+    }
+    if (row.basedOnSource) {
+      const sourceName = row.basedOnSource.split('/').pop() ?? row.basedOnSource
+      return {
+        text: `复制自 ${sourceName}`,
+        title: `${basedOnCellText(row)} —— 点击定位到官方那一份（你这份是从它另存/修改出来的）`,
+        locate: {
+          scope: 'cloud',
+          kind: 'mkp',
+          rowKey: `release-cloud:${sourceName}`,
+          fileName: sourceName,
+        },
+      }
+    }
+    return { text: ORIGIN_TEXT.mine, title: ORIGIN_WHY.mine }
+  }
+  if (row.origin === 'release') {
+    const source = sourceTextOf(sourceLabel)
+    return {
+      text: source,
+      title: `官方交付：发布方写进目录、从 ${source} 的预设数据源下载（目录指纹 ${row.releaseVersion ?? '未知'}）`,
+    }
+  }
+  return { text: ORIGIN_TEXT.official, title: ORIGIN_WHY.official }
 }
 
 /** 云端表那一列：这个官方文件在不在本机。判据与本地表是同一个 `getLocalFiles()` */
@@ -343,7 +445,7 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
     '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「更新」换成当前版本',
   tampered:
     '内容异常：盘上这一份的字节既不是目录登记的当前版本，也不是我们发过的任何一版 —— ' +
-    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，只能重新下载一份干净的',
+    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，先「更新」换一份干净的',
 }
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
@@ -351,23 +453,74 @@ export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
   return state === 'old' || state === 'tampered'
 }
 
+/**
+ * **云端 vs 盘上**的三态 —— release 行「状态」与操作列的主词都从它出。
+ *
+ * 三个概念**不是** `ReleaseFileState`：那是"盘上那份认不认得出"（信任），
+ * 这一个是"云端有没有比盘上新的货"（更新）。**云端有更新时主词就是「有更新」** ——
+ * 不管盘上那份是认得出的旧版还是认不出的字节，用户要做的事是同一件：
+ * 点「更新」换成当前版（同一条下载管道）。
+ *
+ *   `missing`  未下载：目录里有、盘上没有
+ *   `latest`   已下载：盘上字节与目录一致
+ *   `update`   有更新：盘上有字节、但与目录登记的当前版不一致（旧版或认不出的都算）
+ */
+export type ReleaseUpdateState = 'missing' | 'latest' | 'update'
+
+export function updateStateOf(state: ReleaseFileState): ReleaseUpdateState {
+  switch (state) {
+    case 'missing':
+      return 'missing'
+    case 'ok':
+      return 'latest'
+    default:
+      return 'update'
+  }
+}
+
+export const UPDATE_STATE_TEXT: Record<ReleaseUpdateState, string> = {
+  missing: '未下载',
+  latest: '已下载',
+  update: '有更新',
+}
+
+/**
+ * 「有更新」底下那行**认不出**的注记（只有 `tampered` 那一档给）。
+ *
+ * 2026-10-06 查明的实情：客户端的版本记忆只留得住"每一代被换下的目录"（归档链），
+ * 在链建起来之前换过的版本谁都不记得 —— 所以"认不出"≠"被改过"，把「内容异常」顶在
+ * 状态主词上是**吓唬人**（实测 7 份全部是正规旧版）。主词改说「有更新」，
+ * 这句话作为第二行把实情讲全，动作给「更新」—— 对"旧版"和"真被动过"都是正解。
+ */
+export const RELEASE_UNTRUSTED_NOTE =
+  '本机这份认不出是官方哪一版 —— 官方连发几版时，更早的版本指纹在客户端留不全，' +
+  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「更新」换成当前版即可'
+
+/** release 行操作列那颗按钮：更新三态各一个字。**没有「重新下载」** —— 修坏档与换新版是同一条管道、同一个动作 */
+export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
+  missing: '下载',
+  latest: '已下载',
+  update: '更新',
+}
+
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
 export const RELEASE_SUSPECT_WHY =
-  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「重新下载」换一份干净的回来'
+  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「更新」换一份干净的回来'
 
 /** 「更新」那颗按钮的说明：它不是"删除重下"，旧份进归档，删除永远不是更新的一部分 */
 export const RELEASE_UPDATE_WHY =
   '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
 
 /**
- * 「重新下载」那颗按钮的说明（只给**内容异常**那一档）。
+ * 「更新」那颗按钮在**认不出**那一档的说明。
  *
  * 它不是第二套机制：与「下载 / 更新」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
- * 不同的只有说法 —— 这里要讲清"盘上那份我们不认"，因为用户多半不知道文件被谁动过。
+ * 按钮统一叫「更新」（云端有更新就说更新），这里要讲清的是"盘上那份我们不认"——
+ * 用户多半不知道文件被谁动过，也不知道更新会不会把他改的东西冲掉。
  */
 export const RELEASE_REPAIR_WHY =
-  '重新下载：盘上这一份我们不认得（不是目录登记的当前版本，也不是我们发过的任何一版）—— ' +
-  '再下一份干净的换上，落点与校验与「下载」是同一条管道'
+  '更新：盘上这一份我们认不出是官方哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
+  '再下一份干净的换上，落点与校验与「下载」是同一条管道；旧份进归档，不删'
 
 /**
  * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
@@ -460,6 +613,22 @@ export const MINE_COPY = {
   commit: '另存为',
 } as const
 
+/**
+ * **官方交付行的那口另存抽屉**（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+ * 官方 → 我的文件。可信字节（与「改这份」同一条闸）**按字节复制**，血统三行
+ * **新写指向**来源交付文件（官方原件没有血统头）；官方原件一个字节不动、
+ * 一个状态都不碰。名字由用户自己起 —— 不预填、不覆盖、不自动改名（与我的行同一套）。
+ */
+export const RELEASE_COPY = {
+  title: '另存为一份新的',
+  note:
+    '把官方这份**按字节**复制成你自己的一份（presets-mine/）—— 官方原件一个字节不动，' +
+    '身世（机型 / 版本 / 来源）跟着它走；新的那份从诞生起就是独立的一份' +
+    '（之后能自己编辑 / 改名 / 删除 / 应用）。' +
+    '名字由你来起：不能和官方那份一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
+  commit: '另存为',
+} as const
+
 /** 字节数写成人话（`4.2 KB`）。**一处** —— 表里的「大小」与归档抽屉里都用它 */
 export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
@@ -469,18 +638,20 @@ export function sizeTextOf(size: number): string {
  * 归档那一格（展开详情里的「旧版本」）。
  *
  * `archive/` 是**官方版本生命周期**的一部分：云端换版本时，旧的那一份被换下来放进归档
- * （保留最早一份，不覆盖、不删）。它**不是用户修改历史** —— 用户改出来的东西是另一条线
+ * （保留最早一份，不覆盖）。它**不是用户修改历史** —— 用户改出来的东西是另一条线
  * （另存成另一份文件），永远不回写官方原件。
  *
- * 这一层只做**看得见 / 认得出 / 看得了**：不提供删除、不提供恢复，也没有"用这份旧版本"
+ * 这一层做**看得见 / 认得出 / 看得了 / 删得掉**（2026-10-06 起允许删，代价讲清：
+ * 云端只有最新版，删了找不回）；仍然不提供"恢复"与"用这份旧版本"
  * （归档管理不在这一层，见 HANDOFF §3.5 的七步顺序）。
  */
 export const ARCHIVE_KEY = '旧版本'
 
 export const ARCHIVE_WHY =
-  '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖、不删）。' +
+  '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖）。' +
   '它属于官方文件的生命周期，不是你的修改历史 —— 你改出来的东西是另一份文件（另存），永远不回写官方原件。' +
-  '这一层只让你看得见、认得出、看得了：不提供删除、不提供恢复，也没有「用这份旧版本」。'
+  '这份留档可以删：但云端只有最新版，删了就找不回（版本链与事件账不受影响）。' +
+  '仍然没有「恢复」、也没有「用这份旧版本」。'
 
 /** 那一格上的字：几份 + 可以点开 */
 export function archiveOpenText(count: number): string {
@@ -658,29 +829,27 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
 }
 
 /**
- * 右键菜单里那些**还没有后端**的动作。
+ * 右键菜单里那些**还没有后端**的动作（A2 人话化后的现状）：
  *
- * 分两种，界面上的说法也分两种：
+ *   契约里有签名   照调，让它抛 `NotImplementedError`（自带人话 hint），界面原样显示
+ *                 —— 官方仓库文件的「下载」（`downloadFiles`）是这一种
+ *   契约里没签名   不发请求，就地说「这个动作还没有对应的实现」（[`noContractText`]）
+ *                 —— 现在只剩「复制链接」一件（要加的话是 `getFileUrl`）
  *
- *   契约里有签名   照调，让它抛 `NotImplementedError`，显示「尚未实现：<方法名>」
- *                 —— 现在只有 `downloadFiles` 是这一种
- *   契约里没签名   不发请求，就地说「契约里还没有这个方法：<要加的方法名>」
- *
- * 方法名是**给自己看的待办**，所以写的是将来要加在 `src/api/contract.ts` 里的那个名字。
- * **用户文件那四件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
- * `deleteUserPreset`）、另存为一份新的（原来「复制」那个格子）是第十一层
- * （`copyUserPreset`）、在文件管理器里显示（原来「在文件夹中显示」）是第十三层
- * （`revealInFolder`）—— 都只对「我的文件」生效。这里剩下的一件是真的还没有，
- * 哪天要加，方法名照这个写。
+ * **用户文件那五件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
+ * `deleteUserPreset`）、另存为一份新的（我的 → 我的）是第十一层（`copyUserPreset`）、
+ * 官方 → 我的文件的另存是 `copyReleaseAsNew`、在文件管理器里显示是第十三层
+ * （`revealInFolder`）。原「MISSING_METHOD」待办表已并入这段注释 —— 只剩一件，
+ * 不值得一张表。
  */
-export const MISSING_METHOD = {
-  link: 'getFileUrl',
-}
 
-/** 「尚未实现」与「契约里还没有这个方法」两句话的统一写法，免得各处各写一套 */
-export const notImplementedText = (method: string): string => `尚未实现：${method}`
-
-export const noContractText = (method: string): string => `契约里还没有这个方法：${method}`
+/**
+ * 「界面上还没有对应实现的动作」那一句话（A2 人话化）：发生了什么 + 能干什么。
+ * 技术形式（方法名 / 契约名）不进提示条 —— 那是控制台与日志的事。
+ * 目前界面上唯一到不了契约的动作是「复制链接」（要加的话是 `getFileUrl`）。
+ */
+export const noContractText = (): string =>
+  '这个动作还没有对应的实现 —— 先用能用的那几步把事情办完'
 
 // ——————————————————————————————————————————————————————————————
 // 四档状态
@@ -1009,7 +1178,7 @@ export function machinesInScope(tree: PresetTree, machineId: string): PresetMach
  * 一行文件现在是四档里的哪一档。
  *
  * `localIds` 是 `api.getLocalFiles()` 的结果（假后端给的是固定演示集合）。
- * `active` 是**唯一底账**（新世界 `run/active-preset.json`，读自 `api.getActivePreset()`）：
+ * `active` 是**唯一底账**（AppState 的 activePreset 格，`run/app-state.json`，经唯一客户端订阅）：
  * **全表最多一份**，换机型也不会变出第二个。判据**只认它**。
  *
  * 先判在不在本机，再判是不是正在使用的那一份 —— 「已应用」比「本地有」靠前，
@@ -1161,6 +1330,27 @@ export interface PresetRowBase {
    * 其余来源没有"从目录下载"这一回事。`undefined` = 这一行不是交付预设。
    */
   releaseState?: ReleaseFileState
+  /**
+   * **这次发布的时刻**（catalog.publishedAt，ISO/UTC → 显示按本机时区）。
+   * release 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
+   * "我盘上这份什么时候到的"（`modifiedText` + `arrivalBy`）与"云端最新版什么时候发的"
+   * 是两个版本各自的时间，展开详情要同时给（云端表的 `modifiedText` 就是它，列上已经显示）。
+   * null = 目录没盖戳（随包 / 旧版发布），照实「未知」。
+   */
+  publishedAt?: string | null
+  /**
+   * 这份字节是怎么**到位**的（2026-10-06 事件时间模型）：`downloaded` = 下载进来
+   * （`DeliveryDownloaded`）、`replaced` = 替换上去（`DeliveryReplaced`）、null = 没有事件
+   * （认不出出身的字节）。详情面板「下载时间 / 替换时间」的标签跟着它走 ——
+   * **标签是事件的名字，不是 UI 自己挑的**。只有本地 release 行有它。
+   */
+  arrivalBy?: 'downloaded' | 'replaced' | null
+  /**
+   * **本机这份**属于哪一代目录、那一代在云端发布的时刻（RFC3339；版本出身反查）。
+   * 它跟着这一版字节走，云端以后怎么换代都不变 —— 与 `publishedAt`（云端**最新**版）
+   * 是两个版本各自的时间。认不出出身 = null（那一格整个不显示，不占「未知」位）。
+   */
+  ownPublishedAt?: string | null
 }
 
 
@@ -1219,6 +1409,15 @@ export interface PresetLocalRow extends PresetRowBase {
   mineState?: MineState
   /** 读不出来时后端给的那句人话原因（角标与动作格的 title 用它） */
   mineStateDetail?: string | null
+  /**
+   * **出处账**：这一份是复制来的还是导入来的（`copy` / `import`）。没记过是 `null`。
+   * 与 `copiedFrom` / `copiedFromName` 一起构成「来源：复制自 X / 导入」那一格的数据。
+   */
+  provenance?: 'copy' | 'import' | null
+  /** 出处账记的来源路径（相对用户根）。没有是 `null` */
+  copiedFrom?: string | null
+  /** 出处账记的来源**文件名**（界面直接显示）。没有是 `null` */
+  copiedFromName?: string | null
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1297,6 +1496,12 @@ export interface PresetRowsInput {
    * 那一列照实「未知」。
    */
   releaseAt: string | null
+  /**
+   * **当前数据源**（设置页那一个的 mode：`gitee` / `github` / `custom`）——
+   * release 行「来源」列显示 GitHub / Gitee / 自定义源 的依据。null = 没配源
+   * （离线 / 随包），来源照旧退「官方」。
+   */
+  sourceLabel: string | null
 }
 
 /**
@@ -1306,10 +1511,10 @@ export interface PresetRowsInput {
  * 大小是**发布时对产物真字节算的真值**（catalog 登记的）。时间有两样、
  * 各归各的表（2026-10-06 起，此前"目录没有可信时间源"整列都是「未知」）：
  *
- *   `modifiedUnix`  **下载到本机的时刻**（盘上那份的 mtime）—— 本地表用
+ *   事件时间         **这份字节怎么到的**（下载 / 替换，事件账）—— 本地表用
  *   `releaseAt`     **这次发布的时刻**（catalog.publishedAt，发布侧盖的戳）—— 云端表用
  *
- * 都没有（随包目录没盖戳 / 盘上还没下）就照实「未知」，**不编**。
+ * 都没有（随包目录没盖戳 / 认不出出身的字节）就照实「未知」，**不编**。
  */
 /**
  * 交付行第二行那串小字：把人引到盘上的落点，**顺带把"盘上那份不对劲"这件事写在原地**。
@@ -1343,10 +1548,20 @@ export interface ReleasePresetSource {
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
   releaseVersion: string | null
   /**
-   * 盘上那一份的**落盘时刻**（UTC epoch 秒）= 下载到本机的时刻（本地表「时间」列）。
-   * 还没下到本机 / 文件系统没给就是 `null` —— 照实「未知」，不编。
+   * **事件时间**（2026-10-06 预设事件时间模型），三格各是各、互不顶替：
+   *
+   * - `downloadedUnix` —— 这份字节是「下载」进本机的（`DeliveryDownloaded.at`）；
+   * - `replacedUnix` —— 这份字节是「替换」上去的（`DeliveryReplaced.at`，
+   *   即上一次「更新」换上去的那一刻）。两个事件**至多一个有值**；
+   * - `deliveryPublishedAt` —— 这份字节属于哪一代目录、那一代**在云端发布**的时刻
+   *   （RFC3339）。**跟着这一版字节走**，云端以后怎么换代都不变。
+   *
+   * 都没有 / null = 认不出出身的字节或目录没盖戳 —— 照实「未知」，**不编**。
+   * mtime 从此只归文件系统，不再上界面。
    */
-  modifiedUnix: number | null
+  downloadedUnix: number | null
+  replacedUnix: number | null
+  deliveryPublishedAt: string | null
   /**
    * 盘上那一份现在是什么（见 [`ReleaseFileState`]）。
    *
@@ -1550,6 +1765,8 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     pinned,
     localReleases,
     staleReleases,
+    releaseVersion,
+    releaseAt,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
@@ -1655,6 +1872,10 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
          */
         mineState: f.state ?? undefined,
         mineStateDetail: f.stateDetail,
+        /* 出处账：复制自哪一份 / 是不是导入的（「来源」那一格的数据，见 `originCellOf`） */
+        provenance: f.provenance ?? null,
+        copiedFrom: f.copiedFrom,
+        copiedFromName: f.copiedFromName,
       }
     })
 
@@ -1697,20 +1918,32 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         versions: [versionName(p.machineId, p.versionId)],
         sizeText: sizeTextOf(p.size),
         /*
-         * 下载到本机的时刻：盘上那份的 mtime（epoch 秒）→ ISO 交 `parseStatDate`
-         * 按本机时区显示 —— 与用户线那一份（`mine` 分支）同一条转换路。
-         * 没下到本机 / 文件系统没给就是 undefined（「未知」）。
+         * 到位时刻：这份字节是「下载」进来的还是「替换」上去的（两个事件至多一个有值，
+         * 见 `ReleasePresetSource`）—— 标签跟着事件走，UI 不自己挑。epoch 秒 → ISO
+         * 交 `parseStatDate` 按本机时区显示。没有事件（认不出出身的字节）就是
+         * undefined（「未知」）—— 不拿 mtime 顶（硬规则③）。
          */
         modifiedText:
-          p.modifiedUnix === null ? undefined : new Date(p.modifiedUnix * 1000).toISOString(),
+          (p.downloadedUnix ?? p.replacedUnix) === null
+            ? undefined
+            : new Date((p.downloadedUnix ?? p.replacedUnix)! * 1000).toISOString(),
+        arrivalBy:
+          p.downloadedUnix !== null
+            ? ('downloaded' as const)
+            : p.replacedUnix !== null
+              ? ('replaced' as const)
+              : null,
+        ownPublishedAt: p.deliveryPublishedAt,
         applied: live,
-        pinned: pinned.has(`release:${p.uid}`),
+        pinned: pinned.has(`release:${p.fileName}`),
         scope: 'local',
         origin: 'release',
         untagged: false,
         releaseUid: p.uid,
-        releaseVersion: p.releaseVersion,
+        releaseVersion,
         releaseState: state,
+        /* 发布时刻：展开详情「云端更新」一格（本地行的下载时间在 `modifiedText` 上） */
+        publishedAt: releaseAt,
         live,
       }
     })
@@ -1828,6 +2061,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         /* `downloaded` 仍问"与目录一致的那一份在不在本机"（切片器那一档也用它） */
         downloaded: state === 'ok',
         releaseState: state,
+        publishedAt: releaseAt,
       }
     })
 

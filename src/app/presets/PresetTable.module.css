@@ -697,3 +697,32 @@
 [data-density='mini'] .hint {
   padding: 3px var(--pad);
 }
+
+/* ---------- 来源可点击 / 定位 / 注记 ---------- */
+
+/* 展开详情里那句**认不出**的注记（本机版本）：它是说明文字，不抢主词的视觉权重 */
+.factNote {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/*
+ * 「复制自 X」这种**可定位**的来源格：长得像 chip，但它是按钮 ——
+ * 悬停给下划线（有动作的东西要看得出来），底色仍是 chip 那套。
+ */
+.originLink {
+  cursor: pointer;
+  border: 0;
+  padding: 0 6px;
+  font: inherit;
+  font-size: var(--fs-label);
+}
+
+.originLink:hover,
+.originLink:focus-visible {
+  text-decoration: underline;
+}
+
+.originLink:focus-visible {
+  outline: none;
+}

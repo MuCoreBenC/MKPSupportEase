@@ -84,9 +84,6 @@ import {
   DASH_,
   DEMO_STAT_WHY,
   FILE_SIZE_WHY,
-  FILE_TIME_WHY,
-  KIND_NAME,
-  KIND_UNKNOWN,
   MINE_APPLY_WHY,
   MINE_BODY_WHY,
   MINE_DRAWER,
@@ -101,21 +98,25 @@ import {
   RELEASE_DOWNLOAD_WHY,
   RELEASE_REPAIR_WHY,
   RELEASE_SIZE_WHY,
-  RELEASE_STATE_TEXT,
   RELEASE_STATE_WHY,
   RELEASE_TIME_WHY,
+  RELEASE_UNTRUSTED_NOTE,
   RELEASE_UPDATE_WHY,
+  UPDATE_ACTION_TEXT,
+  UPDATE_STATE_TEXT,
   KIND_AXIS_TEXT,
   LIVE_TEXT,
   LIVE_WHY,
   NO_ASSET_WHY,
   NO_STAT_WHY,
   SLICER_RELEASE_WHY,
-  originChip,
+  originCellOf,
+  updateStateOf,
   UNKNOWN,
   versionsText,
 } from './presetTree'
 import type {
+  LocateTarget,
   PresetKindAxis,
   PresetLocalRow,
   PresetScopeAxis,
@@ -152,6 +153,16 @@ interface Props {
   /** 正在做动作的那一行（rowKey）。只禁那一颗按钮，不锁整张表 */
   busyKey: string | null
   /**
+   * 定位到来源那一行（「复制自 X」可点击那一格的落点）：切轴 + 展开 + 滚动 + 闪光
+   * 全在页面层（与状态条「定位」同一个 overlay 机制），表这边只把点击交出去。
+   */
+  onLocate: (target: LocateTarget) => void
+  /**
+   * 当前数据源（`gitee` / `github` / `custom`）—— release 行「来源」列显示
+   * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「官方」。
+   */
+  sourceLabel: string | null
+  /**
    * 这一份在归档区里有几个**旧版本**（按文件名对）。
    * `0` = 没有 → 展开详情里那一格**不显示**（没有 ≠ 未知，不必占一个"—"）
    */
@@ -184,6 +195,8 @@ export default function PresetTable({
   /** 展开详情的那一行(rowKey)。状态在页面层(右键菜单也要能展开它) */
   expandedKey,
   onToggleExpand,
+  onLocate,
+  sourceLabel,
   archiveCountOf,
   onOpenArchive,
   onOpenMine,
@@ -206,27 +219,35 @@ export default function PresetTable({
   }
 
   /**
-   * 时间那一格的 title。三种来源，三句话：
+   * 时间那一格的 title。**有值就给具体时间 + 一个词说清它是哪个时间**，
+   * 不解释实现机制（`catalog.publishedAt` 这种内部名字不出现在界面上）：
    *
-   *   发布行     发布 / 下载时刻（按表分语义）；**拿不到时各自有一句"为什么"**
-   *              （云端 = 目录没带发布时刻；本地 = 文件系统没给 mtime）
-   *   真值（bbs） `statFrom === 'file'` —— 真仓那份文件 + 上游 manifest 记的时间
-   *   其余       演示推值 / 没有
+   *   发布行     云端 = 「云端更新时间：…」；本地 = 「下载时间 / 替换时间：…」
+   *              —— 标签跟着**事件**走（`arrivalBy`），不是 UI 自己挑的
+   *   我的文件   「修改于：…」—— 用户自己那份的最后一次保存，这一格叫修改时间才对
+   *   真值（bbs） 「文件时间：…」—— 上游记录的内容更新时间
+   *   演示推值   照实说它是演示值（唯一还得解释的那一档：它的值不是真的）
+   *   拿不到     各自有一句"为什么"（目录没盖戳 / 没有事件 / 本来就没有）
    */
-  const statWhyOf = (row: PresetTableRow): string =>
-    row.origin === 'release'
-      ? row.scope === 'cloud'
-        ? row.modifiedText === undefined
-          ? RELEASE_TIME_WHY.cloudMissing
-          : RELEASE_TIME_WHY.cloud
-        : row.modifiedText === undefined
-          ? RELEASE_TIME_WHY.localMissing
-          : RELEASE_TIME_WHY.local
-      : row.statFrom === 'file'
-        ? FILE_TIME_WHY
-        : row.modifiedText === undefined
-          ? NO_STAT_WHY
-          : DEMO_STAT_WHY
+  const statWhyOf = (row: PresetTableRow): string => {
+    const when = longStatText(row.modifiedText)
+    if (row.origin === 'release') {
+      if (row.scope === 'cloud') {
+        return when === undefined ? RELEASE_TIME_WHY.cloudMissing : `云端更新时间：${when}`
+      }
+      if (when === undefined) return RELEASE_TIME_WHY.localMissing
+      return row.arrivalBy === 'replaced'
+        ? `替换时间：${when}（上一次「更新」把它换上去的时刻）`
+        : `下载时间：${when}`
+    }
+    if (row.scope === 'local' && row.origin === 'mine') {
+      return when === undefined ? NO_STAT_WHY : `修改于：${when}（你自己这份最后一次保存的时刻）`
+    }
+    if (row.statFrom === 'file') {
+      return when === undefined ? NO_STAT_WHY : `文件时间：${when}（上游记录的那份文件的更新时间）`
+    }
+    return row.modifiedText === undefined ? NO_STAT_WHY : DEMO_STAT_WHY
+  }
 
   /** 行上那一格：只写月-日 —— `shortStatText` 统一三种来源的写法 */
   const statCell = (row: PresetTableRow) => (
@@ -267,8 +288,13 @@ export default function PresetTable({
                 </>
               )}
 
+              {/*
+               * 「时间」这一格的表头随表分语义：云端表是**云端更新**（发布侧盖的戳），
+               * 本地表是**时间**（官方行是仓库记的更新时间、交付行是下载时间、我的是修改时间
+               * —— 一列三种真来源，格上的 tooltip 说清各自是哪一个，见 `statWhyOf`）。
+               */}
               <th className={s.thTime} scope="col">
-                时间
+                {scope === 'cloud' ? '云端更新' : '时间'}
               </th>
               <th className={s.thOrigin} scope="col">
                 来源
@@ -290,16 +316,16 @@ export default function PresetTable({
               const inUse = row.scope === 'local' ? row.live : row.applied
               const busy = row.rowKey === busyKey
               /*
-               * 盘上那份不对劲时，按钮的字**按档分**（见 `ReleaseFileState`）：
-               *   `old`      认得出是官方某一版旧版 → 「更新」（再跑一遍管道换成当前版）
-               *   `tampered` 这台机器上查不出它属于哪一版 → 「重新下载」—— 同一颗动作、
-               *              同一根管道，只是说法要说清"盘上那份我们不认"
-               * 两档都**不给「应用」**：`applyActivePreset` 的第一道闸就是 SHA，
-               * 点了必被拒（不给必报错的按钮）。
-               * 其余来源（切片器官方行）没有"从目录下载"这一回事，照旧走 `downloaded` 布尔
+               * release 行的**云端 vs 盘上**三态（未下载 / 已下载 / 有更新）——
+               * 状态主词与按钮都从它出（见 `updateStateOf`）。以前"盘上字节认不出"那一档
+               * 把「内容异常」顶在最前面、按钮叫「重新下载」：用户被吓着，而云端明明只是
+               * 有更新。现在主词说「有更新」，认不出的实情在展开详情里有一行注记说全。
                */
-              const needsRepair = row.releaseState === 'tampered'
-              const needsUpdate = row.releaseState === 'old' || needsRepair
+              const updateState =
+                row.releaseState !== undefined ? updateStateOf(row.releaseState) : undefined
+              const needsUpdate = updateState === 'update'
+              /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档） */
+              const untrusted = row.releaseState === 'tampered'
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
                * **用户线那一份问都不问**：归档是官方版本生命周期的事，
@@ -310,6 +336,13 @@ export default function PresetTable({
               const gotIt =
                 row.scope === 'cloud' &&
                 (row.releaseState === undefined ? row.downloaded : row.releaseState === 'ok')
+              /* 来源那一格（列 + 展开详情共用）：三种来源三种说法，可定位的带 `locate` */
+              const origin = originCellOf(row, sourceLabel)
+              /*
+               * 缩窄到手：`origin.locate` 的判空进不了 JSX 回调（TS 对属性访问的收窄
+               * 不跨函数边界），先落一个本地的量。
+               */
+              const locateTarget = origin.locate ?? null
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               return (
@@ -318,6 +351,8 @@ export default function PresetTable({
                   className={expanded ? `${s.row} ${s.rowOpen}` : s.row}
                   data-live={inUse}
                   data-active={row.rowKey === activeKey}
+                  /* 定位滚动/闪光用（「复制自 X」点过来要滚到这一行）——选择器认它 */
+                  data-rowkey={row.rowKey}
                   {...triggerProps(row)}
                   onClick={(e) => {
                     /* 点在按钮上不算「展开这一行」—— 按钮有自己的动作 */
@@ -391,9 +426,29 @@ export default function PresetTable({
                   {statCell(row)}
 
                   <td className={s.origin}>
-                    <span className={s.originChip} data-origin={row.origin} title={originChip(row).title}>
-                      {originChip(row).text}
-                    </span>
+                    {locateTarget !== null ? (
+                      /*
+                       * 「复制自 X」这类可定位的来源：**它是按钮**——点击定位到来源那一行
+                       * 并高亮一下（页面层切轴 + 展开 + 闪光）。stopPropagation：
+                       * 点来源不算"展开这一行"。
+                       */
+                      <button
+                        type="button"
+                        className={`${s.originChip} ${s.originLink}`}
+                        data-origin={row.origin}
+                        title={origin.title}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onLocate(locateTarget)
+                        }}
+                      >
+                        {origin.text}
+                      </button>
+                    ) : (
+                      <span className={s.originChip} data-origin={row.origin} title={origin.title}>
+                        {origin.text}
+                      </span>
+                    )}
                   </td>
 
                   {/*
@@ -402,27 +457,29 @@ export default function PresetTable({
                    */}
                   <td className={s.act}>
                     {row.scope === 'local' ? (
-                      row.live ? (
-                        <span className={s.actDone} title={LIVE_WHY[kind].on}>
-                          {LIVE_TEXT[kind].on}
-                        </span>
-                      ) : needsUpdate ? (
+                      needsUpdate ? (
                         /*
-                         * 盘上那一份与目录不符 → **不给「应用」**。应用会拿它去对 SHA，
-                         * 必被拒（`applyActivePreset` 的第一道闸）。给一个点了必报错的
-                         * 按钮比不给糟 —— 这里给的是修它的那个动作。
-                         * 字两档不同：旧版本说「更新」（换成当前版），内容异常说「重新下载」
-                         * （那份我们不认，重下一份干净的）—— 动作是同一个，说法不一样。
+                         * 盘上那一份与目录不符（旧版本 / 认不出）→ **不给「应用」**。应用会
+                         * 拿它去对 SHA，必被拒（`applyActivePreset` 的第一道闸）。按钮统一
+                         * 叫「更新」—— 换新版与修坏档是同一条管道、同一个动作；两档的差别
+                         * 在 tooltip 里说清（旧版本：换当前版；认不出：我们也不认盘上那份）。
+                         * **正在用的那一份也照给**：正在用的东西一样会有更新 —— 它已经在
+                         * 名称列转绿、展开详情里写「· 正在用」，这里再画一个灰字反而把
+                         * 修它的入口藏掉了（作者实测那份"正在用的旧版"就是这样没地方点）。
                          */
                         <button
                           type="button"
                           className={s.actBtn}
                           disabled={busy}
-                          title={needsRepair ? RELEASE_REPAIR_WHY : RELEASE_UPDATE_WHY}
+                          title={untrusted ? RELEASE_REPAIR_WHY : RELEASE_UPDATE_WHY}
                           onClick={() => onDownload(row)}
                         >
-                          {needsRepair ? '重新下载' : '更新'}
+                          {UPDATE_ACTION_TEXT.update}
                         </button>
+                      ) : row.live ? (
+                        <span className={s.actDone} title={LIVE_WHY[kind].on}>
+                          {LIVE_TEXT[kind].on}
+                        </span>
                       ) : row.origin === 'mine' ? (
                         /*
                          * **用户自己那份也能被应用**（第七层）：与官方那份同一个入口、
@@ -460,8 +517,19 @@ export default function PresetTable({
                         <span className={s.actNone} title={SLICER_RELEASE_WHY}>
                           {DASH_}
                         </span>
+                      ) : row.releaseUid === undefined && row.kind === 'mkp_preset' ? (
+                        /*
+                         * **官方 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
+                         * 应用只认目录登记的那一份。两种真实状态共用：用户自己放进
+                         * `mkp/` 的来路不明文件；以及旧资产库形状的行（演示数据里有）。
+                         * 原来这里放行到「应用」按钮、点了再被守卫拦下，报一串
+                         * asset id / 契约的术语 —— 现在按钮根本不给，原因用人话说。
+                         */
+                        <span className={s.actNone} title={NO_ASSET_WHY}>
+                          {DASH_}
+                        </span>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
-                        /* 官方副本没有 asset id 时也应用不了（契约那两个写只认 asset id） */
+                        /* 什么身份都没有的行：复制 / 应用都无从谈起（不给点了没反应的按钮） */
                         <span className={s.actNone} title={NO_ASSET_WHY}>
                           {DASH_}
                         </span>
@@ -485,19 +553,19 @@ export default function PresetTable({
                         type="button"
                         className={s.actBtn}
                         disabled={busy}
-                        /* 发布行是真下载（盘上那份不对时是"再下一遍"），官方行仍是「未实现」—— 文案按行分流 */
+                        /* 发布行是真下载；官方行仍是「未实现」—— 文案按行分流 */
                         title={
                           row.releaseUid !== undefined
-                            ? needsRepair
-                              ? RELEASE_REPAIR_WHY
-                              : needsUpdate
-                                ? RELEASE_UPDATE_WHY
-                                : RELEASE_DOWNLOAD_WHY
+                            ? needsUpdate
+                              ? untrusted
+                                ? RELEASE_REPAIR_WHY
+                                : RELEASE_UPDATE_WHY
+                              : RELEASE_DOWNLOAD_WHY
                             : DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
-                        {needsRepair ? '重新下载' : needsUpdate ? '更新' : '下载'}
+                        {needsUpdate ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing}
                       </button>
                     )}
                   </td>
@@ -514,11 +582,12 @@ export default function PresetTable({
                      */}
                     <td colSpan={mkp ? 6 : 7}>
                       <dl className={s.facts}>
-                        <dt className={s.factKey}>类型</dt>
-                        {/* 认不出是哪一类就照实说（用户自己的 `.json`：bbs 与 orca 分不出） */}
-                        <dd className={s.factVal}>
-                          {row.kind === null ? KIND_UNKNOWN : KIND_NAME[row.kind]}
-                        </dd>
+                        {/*
+                         * 展开详情**只回答用户真正要问的事**：什么版本 / 从哪来 / 什么时候
+                         * 下的 / 云端有没有更新 / 我改过没有 / 现在能做什么。
+                         * 曾经机械地摊内部字段：「类型」（分段控件已经选定了类型）与
+                         * 「置顶」（纯前端排序的偏好）在这里各占一行 —— 都是用户没问的。
+                         */}
 
                         {mkp && (
                           <>
@@ -538,8 +607,19 @@ export default function PresetTable({
                         )}
 
                         <dt className={s.factKey}>来源</dt>
-                        <dd className={s.factVal} title={originChip(row).title}>
-                          {originChip(row).text}
+                        <dd className={s.factVal}>
+                          {locateTarget !== null ? (
+                            <button
+                              type="button"
+                              className={s.factLink}
+                              title={origin.title}
+                              onClick={() => onLocate(locateTarget)}
+                            >
+                              {origin.text}
+                            </button>
+                          ) : (
+                            <span title={origin.title}>{origin.text}</span>
+                          )}
                         </dd>
 
                         {/*
@@ -576,21 +656,22 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 状态：交付预设那一档说的是**本机那一份的三态**（未下载 / 已下载 /
-                         * 需更新），其余来源说"生效没生效"。两件事不混一句
-                         * ——「已应用」不等于"本机这份是对的"，所以需更新时两个都写。
+                         * 状态：**release 行的主词按"云端 vs 盘上"三态说**（未下载 / 已下载 /
+                         * 有更新），"认不出是哪一版"不再顶在主词上 —— 那是信任维度的事，
+                         * 有它自己的一行注记（见下）。主词后面缀「正在用」；
+                         * 其余来源说"生效没生效"。
                          */}
                         <dt className={s.factKey}>状态</dt>
                         <dd
                           className={s.factVal}
                           title={
-                            row.releaseState === undefined
-                              ? undefined
-                              : RELEASE_STATE_WHY[row.releaseState]
+                            row.releaseState !== undefined
+                              ? RELEASE_STATE_WHY[row.releaseState]
+                              : undefined
                           }
                         >
                           {row.releaseState !== undefined
-                            ? RELEASE_STATE_TEXT[row.releaseState]
+                            ? UPDATE_STATE_TEXT[updateState ?? 'latest']
                             : row.scope === 'local'
                               ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
                               : row.downloaded
@@ -598,6 +679,20 @@ export default function PresetTable({
                                 : CLOUD_STATE_TEXT.pending}
                           {row.applied && ' · 正在用'}
                         </dd>
+
+                        {untrusted && (
+                          <>
+                            {/*
+                             * 「本机版本」：只认不出那一档才有的注记行。它不是把异常藏起来 ——
+                             * 恰恰是把"认不出"的实情（可能是旧版、可能被改过、更新即可换掉）
+                             * 从吓人的主词位置挪到讲道理的位置。
+                             */}
+                            <dt className={s.factKey}>本机版本</dt>
+                            <dd className={`${s.factVal} ${s.factNote}`} title={RELEASE_STATE_WHY.tampered}>
+                              {RELEASE_UNTRUSTED_NOTE}
+                            </dd>
+                          </>
+                        )}
 
                         <dt className={s.factKey}>大小</dt>
                         <dd
@@ -615,10 +710,81 @@ export default function PresetTable({
                           {row.sizeText ?? UNKNOWN}
                         </dd>
 
-                        <dt className={s.factKey}>修改时间</dt>
+                        {/*
+                         * 时间：**名字跟着事件走**（2026-10-06 事件时间模型）—— 本地交付行
+                         * 按 `arrivalBy` 给「下载时间」（DeliveryDownloaded）或「替换时间」
+                         * （DeliveryReplaced，上一次「更新」换上去的）、云端是「云端更新」
+                         * （这次发布的时刻）、我自己的文件才叫「修改时间」（最后一次保存）。
+                         * 同一个 `modifiedText` 不再一个「修改时间」包打天下。
+                         */}
+                        <dt className={s.factKey}>
+                          {row.origin === 'release'
+                            ? row.scope === 'cloud'
+                              ? '云端更新'
+                              : row.arrivalBy === 'replaced'
+                                ? '替换时间'
+                                : '下载时间'
+                            : '修改时间'}
+                        </dt>
                         <dd className={s.factVal} title={statWhyOf(row)}>
                           {longStatText(row.modifiedText) ?? UNKNOWN}
                         </dd>
+
+                        {row.origin === 'release' && (
+                          <>
+                            {row.scope === 'local' &&
+                              row.ownPublishedAt != null &&
+                              row.ownPublishedAt !== row.publishedAt && (
+                              <>
+                                {/*
+                                 * **本机这份**属于哪一代、那一代什么时候发布的 —— 它跟着
+                                 * 这份字节走，云端以后怎么换代都不变（用户要的"记录它当时的"）。
+                                 * 只有认得出出身、且与云端最新版**不是同一代**时才显示
+                                 * （同一代时它与下面那格是同一个时间，不重复占位）。
+                                 */}
+                                <dt className={s.factKey}>本机这份发布于</dt>
+                                <dd
+                                  className={s.factVal}
+                                  title="这一版字节在云端发布时的时刻 —— 跟着这一版走，云端以后怎么换都不变"
+                                >
+                                  {longStatText(row.ownPublishedAt) ?? UNKNOWN}
+                                </dd>
+                              </>
+                            )}
+                            {row.scope === 'local' && (
+                              <>
+                                {/*
+                                 * 本地交付行的「云端最新版发布于」：与上面的到位时间是**两个版本
+                                 * 各自的时间**（你这份什么时候到的 / 云端现在这版什么时候发的）
+                                 * —— 名字里带「最新」，它就不再被读成"你这份的云端更新"。
+                                 */}
+                                <dt className={s.factKey}>云端最新版发布于</dt>
+                                <dd
+                                  className={s.factVal}
+                                  title={
+                                    row.publishedAt
+                                      ? undefined
+                                      : RELEASE_TIME_WHY.cloudMissing
+                                  }
+                                >
+                                  {longStatText(row.publishedAt ?? undefined) ?? UNKNOWN}
+                                </dd>
+                              </>
+                            )}
+                            {/*
+                             * 「云端最新版本」：目录指纹是**版本的身份证**（新世界目录没有版本名，
+                             * 这是唯一权威标识）。它在这里有意义、在「来源」列里没有 ——
+                             * 来源答的是"从哪来"，不是"哪一版"。
+                             */}
+                            <dt className={s.factKey}>云端最新版本</dt>
+                            <dd
+                              className={s.factVal}
+                              title="目录指纹（catalog revision）—— 新世界目录没有版本名，它就是这一版的身份证"
+                            >
+                              {row.releaseVersion ?? UNKNOWN}
+                            </dd>
+                          </>
+                        )}
 
                         {/*
                          * 归档：官方旧版本留档。**没有旧版本就不显示这一格** ——
@@ -706,9 +872,6 @@ export default function PresetTable({
                             </dd>
                           </>
                         )}
-
-                        <dt className={s.factKey}>置顶</dt>
-                        <dd className={s.factVal}>{row.pinned ? '已置顶' : '未置顶'}</dd>
                       </dl>
                     </td>
                   </tr>

@@ -45,9 +45,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
+import { activateCombo, activePresetSnapshot, useActivePreset } from '../state/appState'
 import type {
   ActiveOrigin,
-  ActivePreset,
   CatalogParamDef,
   Machine,
   MachineVersion,
@@ -380,6 +380,12 @@ export interface Params {
    * `null` = 这个版本没配 MKP 文件（如 A2L），页面自己退成「机型 · 版本」。
    */
   fileLabel: string | null
+  /**
+   * **正在使用的那份**的文件名（AppState 底账答的）。`null` = 还没用任何一份。
+   * 顶部 pill 优先说它（底账命中当前 combo 时）—— pill 回答的是"正在用哪份"，
+   * 与「正在编辑哪份」（`fileLabel`，确认框 / 历史标题用）是两个问题。
+   */
+  activeFileName: string | null
   /** 任一组合的 MKP 文件名 —— 抽屉里每一项都显示自己的 */
   fileOf: (machineId: string, versionId: string) => string | null
   /**
@@ -651,12 +657,13 @@ export function useParams(): Params {
       })
 
       /*
-       * 默认落在**正在用的那一份**：使用中指针（`run/active-preset.json`）说应用了哪台哪个版本，
+       * 默认落在**正在用的那一份**：AppState 的 activePreset 格说应用了哪台哪个版本，
        * 就从目录里找它；找不到（没应用过 / 目录里没这台）才退回第一台 ——
        * 与预设页「默认落在已应用那台」同一个理由。
        * 原来写死"第一台"，应用了 P1S 再进这一页还是 A1（作者：「怎么一直是 a1」）。
+       * 快照走唯一客户端的一次读取（`activePresetSnapshot`），不在这里单独读底账。
        */
-      const live = await api.getActivePreset().catch(() => null)
+      const live = await activePresetSnapshot()
       if (!alive) return
       const liveMachine = list.find((m) => m.id === live?.machineId)
       const liveVersion = liveMachine?.versions.find((v) => v.id === live?.versionId)
@@ -700,7 +707,15 @@ export function useParams(): Params {
               (params): { tabs: ParamTab[]; params: RecipeParam[]; fileLabel: string | null } => ({
                 tabs: catalog.tabs,
                 params,
-                fileLabel: catalog.fileByCombo.get(`${machineId}:${versionId}`) ?? null,
+                /*
+                 * A3：标签跟着**编辑目标**走（同一张表，同 combo 我的文件优先）——
+                 * 编辑的是「我的文件」时，pill / 确认框 / 历史标题都说我的文件名，
+                 * 不再说目录里那份官方底稿（那是 fileByCombo 的答案，两件事）。
+                 */
+                fileLabel:
+                  catalog.editTargetByCombo.get(`${machineId}:${versionId}`)?.fileName ??
+                  catalog.fileByCombo.get(`${machineId}:${versionId}`) ??
+                  null,
               }),
             )
     Promise.resolve(data)
@@ -1140,16 +1155,47 @@ export function useParams(): Params {
     [apply, log],
   )
 
+  /*
+   * 「在看的是不是已应用的那份」：AppState 的 activePreset 格（唯一底账 × 当前 combo）。
+   * 从唯一客户端订阅（`../state/appState.ts`）——应用 / 撤销 / 删除一发生，
+   * 这里的 active 同帧换账，不持有本地副本、不按 combo 变化重读
+   * （第一轮的本地 state + effect 补丁已拆，见 docs/APP-STATE.md）。
+   *
+   * 声明位置在 `switchTo` **之前** —— switchTo 的写回拿它当守卫，依赖数组在渲染期
+   * 求值，声明挪晚了就是 TDZ 白屏（2026-10-06 真机踩过：Cannot access 'active'
+   * before initialization）。
+   */
+  const active = useActivePreset()
+
   /** 换组合：草稿、栈、日志一起作废（面板上写的是「这次打开之后」）。已保存的那一层留着 */
-  const switchTo = useCallback((next: { machineId: string; versionId: string }) => {
-    setPick(next)
-    setDraft({})
-    setPast([])
-    setFuture([])
-    setLog([])
-    setSeq(0)
-    setSavedNote(null)
-  }, [])
+  /*
+   * 换 combo = 切换 —— **写回只住在这个显式动作处理器里**（抽屉选一份 / 确认切换，
+   * 都是用户点出来的，一次动作一次写）。2026-10-06 教训（作者：「左右左右地闪」）：
+   * 这条写回曾经是个 **effect**（依赖底账快照、每次底账变都重跑）—— effect 写
+   * 自己所依赖的共享状态就是构造反馈环：别处一应用，这里把旧 combo 写回底账、
+   * follow 再把 combo 拉向新底账，两个 effect 互相拉扯，1 秒内打出十几次 apply，
+   * 底账在两份预设之间来回震荡。**纪律由此钉死：effect 一律只读；写底账只能发生在
+   * 显式动作的处理器里**（首页按钮 / 各处抽屉的选择回调同理）。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
+  const switchTo = useCallback(
+    (next: { machineId: string; versionId: string }) => {
+      setPick(next)
+      setDraft({})
+      setPast([])
+      setFuture([])
+      setLog([])
+      setSeq(0)
+      setSavedNote(null)
+      activateCombo(
+        next.machineId,
+        next.versionId,
+        (m, v) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
+        active,
+      )
+    },
+    [active, catalog],
+  )
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft])
 
@@ -1230,31 +1276,12 @@ export function useParams(): Params {
   )
 
   /*
-   * 「在看的是不是已应用的那份」：唯一底账 × 当前 combo。
-   * 底账走 IPC（`run/active-preset.json`），所以在依赖变化时读一次 state
-   * （开页 / 切组合）——与旧版"每次读一次 localStorage"同一个节奏，不是每次 render。
-   * 依赖带 machineId / versionId：切组合时 pick 先行、颜色立刻跟上，
-   * 不等字段重拉完（`combo` 那一层只管字段，不影响颜色）。
-   *
-   * `canJump`：已应用那份在当前目录里找得到才有「切换回」动作 —— 找不到时切过去会落到
-   * 一个空壳 combo（字段在、值全空），那是假信息，所以宁可不给动作、只陈述。
+   * 「正在使用」与当前 combo 的关系（onIt / canJump）。
+   * **不再被回页签弹回**（2026-10-06 架构决策）：第一轮的"回页签把 combo 拉回底账"
+   * 是同步补丁，它把「正在使用」与「正在编辑」绑死了。现在 active 只喂"正在使用"
+   * 的显示，用户自选的 combo（编辑目标）独立存在 —— 离开再回来，
+   * 接着编辑的就是自己选的那一份。
    */
-  const [active, setActive] = useState<ActivePreset | null>(null)
-  useEffect(() => {
-    let alive = true
-    void api
-      .getActivePreset()
-      .then((a) => {
-        if (alive) setActive(a)
-      })
-      .catch(() => {
-        if (alive) setActive(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [machineId, versionId])
-
   const activeUse = useMemo<ActiveUse | null>(() => {
     if (active === null) return null
     const liveMachine = catalog?.machines.find((m) => m.id === active.machineId)
@@ -1264,6 +1291,24 @@ export function useParams(): Params {
       machineId: active.machineId,
       versionId: active.versionId,
       canJump: liveMachine !== undefined && liveVersion !== undefined,
+    }
+  }, [active, catalog, machineId, versionId])
+
+  /*
+   * 「应用的状态」跟到参数页（作者 2026-10-06：点了应用，所有其他页就是应用的状态）——
+   * **只读的单向跟随**：底账的 combo 值真变了（别处显式应用成功）→ 这边把编辑目标
+   * 挪过去。effect 不写任何共享状态（写回只在 `switchTo` 那个显式处理器里，
+   * 见那里的教训注释）；底账值没变（只是快照换了新对象）时这里直接返回，
+   * 不会拽着用户在别处选的 combo 乱跳。挂载落地的那一次 pick 本来就是
+   * 底账那份，自然不动。
+   */
+  useEffect(() => {
+    if (active === null || catalog === null) return
+    if (active.machineId === machineId && active.versionId === versionId) return
+    const machine = catalog.machines.find((m) => m.id === active.machineId)
+    const version = machine?.versions.find((v) => v.id === active.versionId)
+    if (machine !== undefined && version !== undefined) {
+      setPick({ machineId: machine.id, versionId: version.id })
     }
   }, [active, catalog, machineId, versionId])
 
@@ -1324,6 +1369,7 @@ export function useParams(): Params {
     machine,
     version,
     fileLabel: combo?.fileLabel ?? null,
+    activeFileName: active?.fileName ?? null,
     fileOf,
     activeUse,
     tabs: combo?.tabs ?? [],

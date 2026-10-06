@@ -23,11 +23,15 @@
 //! 两半都是它们各自领域的唯一主人：Manifest 是**寻址规则声明**，Catalog 是**资源清单**
 //! —— Catalog 不得自带第二套根/URL（`docs/RESOURCE-ADDRESSING-ROADMAP.md` 铁律 ⑥）。
 //!
-//! # 存储规矩（沿用 [`super::state`] 那一套，不另发明）
+//! # 存储规矩（2026-10-06 起：AppState 的一格）
 //!
-//! 一种状态一个文件、住内部根 `run/` 下、带 `*Schema` 代次字段、写走 atomic_write、
-//! 坏档报 `CORRUPTED` 不静默。它也**不进 localStorage**——C4 之后 localStorage 只住
-//! 纯前端偏好，而这份地址最终要交给 Rust 侧去发起下载。
+//! 以前这份设置自己占一个文件（`run/preset-source.json`，沿用旧「一种状态一个文件」
+//! 那套）；2026-10-06 架构决策（`docs/APP-STATE.md`）把它并进 `run/app-state.json` 的
+//! `presetSource` 格 —— **落盘只走 [`super::app_state`]（整份读-改-写 + 原子替换）**，
+//! 这里只剩设置的**形状与校验**（[`make_source`]）、解析与寻址，以及迁移用的旧档
+//! 读取器 [`read_source_file`]（1 代老档的读法住那里）。坏档报 `CORRUPTED` 不静默；
+//! 它也**不进 localStorage** —— C4 之后 localStorage 只住纯前端偏好，
+//! 而这份地址最终要交给 Rust 侧去发起下载。
 //!
 //! # 两种入口（第十七刀起）
 //!
@@ -56,7 +60,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::fsx::atomic::atomic_write;
 
 use super::paths::SOURCE_FILE;
 use super::resolver::{ResourceRef, SourceResolver};
@@ -231,16 +234,17 @@ impl ResolvedSource {
     }
 }
 
-/// 设置文件的落点：`<appDataDir>/run/preset-source.json`
-pub fn source_file(root: &Path) -> PathBuf {
+/// 设置文件的落点：迁移前是 `<appDataDir>/run/preset-source.json`（旧档读取器用）。
+/// 现在这一格住 `run/app-state.json`（见 [`super::app_state`]）
+pub(super) fn source_file(root: &Path) -> PathBuf {
     root.join(SOURCE_FILE)
 }
 
-/// 读当前设置。文件不存在 → `Ok(None)`（**没配过是合法状态**）；
+/// **旧档读取器**（迁移的读半边）：文件不存在 → `Ok(None)`（**没配过是合法状态**）；
 /// 读得出来但解析不了 / 代次认不出 → `Err(CORRUPTED)`，不把它当"没配"。
 ///
 /// 静默吞配置等于骗人：用户明明选过 Gitee，界面却说"没配"，那是界面在编数据。
-pub fn load_source(root: &Path) -> Result<Option<PresetSource>, AppError> {
+pub(super) fn read_source_file(root: &Path) -> Result<Option<PresetSource>, AppError> {
     let bytes = match std::fs::read(source_file(root)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -285,22 +289,12 @@ fn read_v1(bytes: &[u8]) -> Result<Option<PresetSource>, AppError> {
     }))
 }
 
-/// 记下"当前用这个源"。整份替换（写新盖旧）。
+/// **按用户的选择构造一份设置**（纯函数，不落盘 —— 落盘走 [`super::app_state`]）。
 ///
 /// `mode = custom` 时地址**必须给且合法**（空地址在这里就拒：写进去等于制造一个
 /// "配了但配成空"的第三种状态，下游要为它单独想一套分支）。
 /// 内置两个模式**不许带地址**（带了说明调用方糊涂了 —— 内置地址是构建期注入的）。
-pub fn save_source(
-    root: &Path,
-    mode: SourceMode,
-    raw_custom_url: Option<&str>,
-) -> Result<PresetSource, AppError> {
-    save_source_with(root, mode, raw_custom_url, CustomShape::Unset)
-}
-
-/// [`save_source`] 的完整形状版：**形状已经探出来时**连它一起写（省掉一次网络）。
-pub fn save_source_with(
-    root: &Path,
+pub fn make_source(
     mode: SourceMode,
     raw_custom_url: Option<&str>,
     custom_shape: CustomShape,
@@ -319,7 +313,7 @@ pub fn save_source_with(
             None
         }
     };
-    let source = PresetSource {
+    Ok(PresetSource {
         source_schema: SOURCE_SCHEMA,
         mode,
         custom_url,
@@ -328,11 +322,7 @@ pub fn save_source_with(
         } else {
             CustomShape::Unset
         },
-    };
-    let json = serde_json::to_vec_pretty(&source)
-        .map_err(|e| AppError::internal("数据源设置序列化失败").with_detail(e.to_string()))?;
-    atomic_write(&source_file(root), &json)?;
-    Ok(source)
+    })
 }
 
 /// `source.json` 的**文件**名（`RELEASE_FILE` 是 `release.json`，两者别混 —— 这个坑
@@ -413,18 +403,6 @@ fn fetch_and_accept(
     Ok(resolved.clone())
 }
 
-/// 撤掉用户覆盖：删掉设置文件（幂等）。
-///
-/// 「回到内置默认」只有这一条路 —— [`save_source`] 拒绝空地址（写空 = 制造第三种状态），
-/// 所以原来的出口是"用户手删文件"；设置页把那件事变成一次显式动作。
-pub fn clear_source(root: &Path) -> Result<(), AppError> {
-    match std::fs::remove_file(source_file(root)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io("撤掉数据源覆盖失败").with_detail(e.to_string())),
-    }
-}
-
 /// 构建期注入的默认地址（没注就是 `None`）。界面用它区分"出厂默认值"与"用户改过的"，
 /// 免得读一次之后分不清当前地址是自己选的还是出厂的
 pub fn builtin_default() -> Option<String> {
@@ -433,7 +411,7 @@ pub fn builtin_default() -> Option<String> {
 
 /// **当前选的是哪一个**（没写过设置 = 出厂默认 [`DEFAULT_MODE`]）。
 pub fn current_mode(root: &Path) -> Result<SourceMode, AppError> {
-    Ok(load_source(root)?.map_or(DEFAULT_MODE, |s| s.mode))
+    Ok(super::app_state::preset_source(root)?.map_or(DEFAULT_MODE, |s| s.mode))
 }
 
 /// 当前生效的**入口**：按选中的模式解析（内置两个走构建期注入的 Bootstrap 地址，
@@ -441,7 +419,7 @@ pub fn current_mode(root: &Path) -> Result<SourceMode, AppError> {
 ///
 /// 返回 `None` 的那一路要被界面原样说出来——那是唯一诚实的答案。
 pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
-    let stored = load_source(root)?;
+    let stored = super::app_state::preset_source(root)?;
     let mode = stored.as_ref().map_or(DEFAULT_MODE, |s| s.mode);
     if mode == SourceMode::Custom {
         return Ok(match stored {
@@ -609,6 +587,7 @@ mod two_source_tests {
     //! 那不是用户错，是我们把"一个地址有两种读法"当成了两种东西。
 
     use super::*;
+    use crate::fsx::atomic::atomic_write;
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
@@ -624,7 +603,7 @@ mod two_source_tests {
         )
         .unwrap();
 
-        let s = load_source(d.path()).unwrap().expect("老档该读得出来");
+        let s = read_source_file(d.path()).unwrap().expect("老档该读得出来");
         assert_eq!(s.mode, SourceMode::Custom);
         assert_eq!(
             s.custom_url.as_deref(),
@@ -640,8 +619,12 @@ mod two_source_tests {
     /// 选内置源的时候不许带地址（带了说明调用方糊涂了）
     #[test]
     fn a_builtin_mode_refuses_an_address() {
-        let d = dir();
-        let e = save_source(d.path(), SourceMode::Github, Some("https://x.example/")).unwrap_err();
+        let e = make_source(
+            SourceMode::Github,
+            Some("https://x.example/"),
+            CustomShape::Unset,
+        )
+        .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
     }
 
@@ -650,8 +633,8 @@ mod two_source_tests {
     #[test]
     fn a_custom_mode_without_an_address_has_no_entry() {
         let d = dir();
-        save_source(d.path(), SourceMode::Custom, None).unwrap_err(); // 空地址直接拒
-                                                                      // 手工造一份"有 mode、没地址"的档（模拟手改坏的文件）
+        make_source(SourceMode::Custom, None, CustomShape::Unset).unwrap_err(); // 空地址直接拒
+                                                                                // 手工造一份"有 mode、没地址"的档（模拟手改坏的文件）
         atomic_write(
             &source_file(d.path()),
             br#"{"sourceSchema":2,"mode":"custom","customShape":"root"}"#,
@@ -760,6 +743,8 @@ mod two_source_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fsx::atomic::atomic_write;
+    use crate::runtime::app_state;
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().expect("临时目录建不出来")
@@ -769,60 +754,68 @@ mod tests {
     #[test]
     fn roundtrips_the_chosen_source() {
         let dir = root();
-        let saved = save_source(
-            dir.path(),
+        let source = make_source(
             SourceMode::Custom,
             Some("https://cdn.example.com/mkp/"),
+            CustomShape::Unset,
         )
         .expect("写设置不该失败");
-        let loaded = load_source(dir.path()).expect("读设置不该失败");
+        let saved = app_state::set_preset_source(dir.path(), source).expect("写设置不该失败");
+        let loaded = app_state::preset_source(dir.path()).expect("读设置不该失败");
         assert_eq!(loaded, Some(saved));
         assert_eq!(
             loaded.expect("刚写完的").custom_url.as_deref(),
             Some("https://cdn.example.com/mkp"),
-            "末尾多余的斜杠在写盘前就砍掉了"
+            "末尾多余的斜杠在落盘前就砍掉了"
         );
     }
 
-    /// 没配过 ≠ 坏了：文件不在就是 `None`，不报错（默认值的分支由 `current_entry` 管）
+    /// 没配过 ≠ 坏了：没有就是 `None`，不报错（默认值的分支由 `current_entry` 管）
     #[test]
     fn missing_file_is_not_corrupted() {
         let dir = root();
-        assert_eq!(load_source(dir.path()).expect("没配过不该报错"), None);
+        assert_eq!(
+            app_state::preset_source(dir.path()).expect("没配过不该报错"),
+            None
+        );
     }
 
-    /// 撤覆盖 = 删文件：撤完 load 就是 `None`（回不回内置默认由 `current_entry` 管）
+    /// 撤覆盖 = 这一格清空：撤完读就是 `None`（回不回内置默认由 `current_entry` 管）
     #[test]
     fn clearing_removes_the_override() {
         let dir = root();
-        save_source(
-            dir.path(),
+        let source = make_source(
             SourceMode::Custom,
             Some("https://cdn.example.com/mkp"),
+            CustomShape::Unset,
         )
         .expect("写设置");
-        assert!(load_source(dir.path()).expect("读设置").is_some());
+        app_state::set_preset_source(dir.path(), source).expect("写设置");
+        assert!(app_state::preset_source(dir.path())
+            .expect("读设置")
+            .is_some());
 
-        clear_source(dir.path()).expect("撤覆盖不该失败");
-        assert_eq!(load_source(dir.path()).expect("读设置"), None);
-        assert!(!source_file(dir.path()).exists());
+        app_state::clear_preset_source(dir.path()).expect("撤覆盖不该失败");
+        assert_eq!(app_state::preset_source(dir.path()).expect("读设置"), None);
     }
 
     /// 撤一个本来就没有的覆盖 = 幂等（与"撤销使用"同一条规矩：没有不是错）
     #[test]
     fn clearing_when_nothing_was_set_is_fine() {
         let dir = root();
-        clear_source(dir.path()).expect("没有覆盖时撤覆盖也不该失败");
-        assert_eq!(load_source(dir.path()).expect("读设置"), None);
+        app_state::clear_preset_source(dir.path()).expect("没有覆盖时撤覆盖也不该失败");
+        assert_eq!(app_state::preset_source(dir.path()).expect("读设置"), None);
     }
 
     /// 坏档不静默：字节坏了要说出来，不能当成"没配"让用户再选一次却依然读不出
+    /// （旧档读取器在 AppState 的迁移读半边上，同样守这条）
     #[test]
     fn unreadable_file_is_reported_not_swallowed() {
         let dir = root();
+        std::fs::create_dir_all(dir.path().join("run")).unwrap();
         atomic_write(&source_file(dir.path()), "这不是 JSON".as_bytes()).expect("写脏文件");
 
-        let e = load_source(dir.path()).unwrap_err();
+        let e = app_state::preset_source(dir.path()).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
     }
 
@@ -830,13 +823,14 @@ mod tests {
     #[test]
     fn future_schema_is_rejected() {
         let dir = root();
+        std::fs::create_dir_all(dir.path().join("run")).unwrap();
         atomic_write(
             &source_file(dir.path()),
             r#"{"sourceSchema": 99, "baseUrl": "https://x.example.com"}"#.as_bytes(),
         )
         .expect("写脏文件");
 
-        let e = load_source(dir.path()).unwrap_err();
+        let e = app_state::preset_source(dir.path()).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
     }
 
@@ -931,10 +925,8 @@ mod tests {
     /// 空地址不许写盘：它会制造"配了但等于没配"的第三种状态
     #[test]
     fn empty_base_url_is_refused_before_writing() {
-        let dir = root();
-        let e = save_source(dir.path(), SourceMode::Custom, Some("   ")).unwrap_err();
+        let e = make_source(SourceMode::Custom, Some("   "), CustomShape::Unset).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(!source_file(dir.path()).exists(), "拒绝时不留半个文件");
     }
 
     /// 只放出站 HTTP：**本地文件 Scheme 走同一个下载栈会造成"下载读到本机任意文件"**

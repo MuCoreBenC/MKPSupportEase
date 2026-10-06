@@ -2157,3 +2157,41 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
 **开完 PR 要自己盯 CI，全绿了才通知作者合并。** 推上去就不管 = 把"红"这件事
 变成作者去发现 —— 2026-10-05 的一条判据（用了 `/dev/null`）在 rust-windows 上红了，
 是作者贴截图告诉我的。**判据也守跨平台**（CI 有 macos / ubuntu / windows 三个 job）。
+
+## 增量之二十九 · 首页「下载并应用」按套餐消费（2026-10-06/07，分支 `feat/app-state`）
+
+作者 2026-10-06 拍板：①修死路 + ②首页真正消费套餐**一起做**；BBS **先只落盘**（不拷进切片器，
+用途二期再定）；「已应用」优先；本轮**不做** `deliver` 的二次省网络优化。
+
+- **死路修在 bridge，不在 Rust**：原计划的 `on_tick: Option<Channel<T>>` **编译不出来** ——
+  Tauri 的 `Channel<T>` 只实现了 `CommandArg`（要 `Webview` 才能建）、**没有 `Deserialize`**，
+  于是 `Option<Channel<T>>` 落不到任何 impl 上。改成 `src/api/bridge.ts::withTick`
+  **无条件挂一条 Channel**（回调可省、参数不可省）。新判据 `scripts/check-channel-args.mjs`
+  （接进 `npm run check:channel-args` + CI，**负向验证过**：把死路那行放回去会红）。
+- **首页接 `getVersionFiles()`** —— 「套餐 → 文件」这条链本来就存在（就是预设页在用的那一支），
+  所以**不在契约里另长 `bundles`、不在 TS 里重算路径**（那会是同一条事实的第二份手抄）。
+  四态：已应用 / 下载并应用（**缺优先于漂**）/ 更新并应用 / 应用；只下「缺 ∪ 漂」（按 fileName 去重）；
+  任何一份没成就**停下、不 apply**；失败原样透出（`errorText`），内层吞异常的 `catch {}` 拆掉。
+- ★ 施工时探针逮到：**「在盘上」= 已下载 ∪ 漂移，漂 ≠ 缺** —— 那两张单子都只收盘上真有的文件。
+- mock 两处收口：目录登记收成一处（新 `mockServer/catalogFiles.ts`；上游老命名 `A1.toml` 与消费端
+  `A1-standard.toml` 对不上会让首页套餐一律显示「缺」）＋ `MOCK_DOWNLOADED` 补一条套餐的另一半。
+- 判据：Rust 一个没动（`cargo test` 全绿、`--features workbench --lib` **687 passed**）；
+  客户端两条探针全绿（`home-flow --pick` 新增四态 + 「零下载」断言；`presets.mjs` 未受影响）。
+- **真机已验**（作者 2026-10-07 日志）：三次 `downloadRuntimeFiles` + 六次 `applyActivePreset` 全 ok，
+  全齐且全新那几档**零下载**；A1 mini 那次**只下了缺的 BBS**（已最新的 MKP 没重下）；
+  BBS 落在 `<appDataDir>/assets/bbs/Process/0.4mm/…`。
+- 施工计划与验收清单：`docs/HOME-BUNDLE-DOWNLOAD.md`。
+
+## 增量之三十 · Rust 工具链 / 纪律清理（2026-10-07，**已施工**）
+
+**作者裁定：单独一刀做，不混进增量之二十九。** 且"第一步不是改代码，是先确认 CI 工具链"。
+
+- **CI 实际用 rustc 1.99.0 / rustfmt 1.10.0**（两个 Rust job 都是 floating `stable`；从真实 run 日志读到）；
+  本机当时是 1.97.1 ⇒ 落后两版。装上 1.99.0 复核后**报的是同一批** ⇒ **不是工具链漂移**，
+  是 feat/app-state 新写的代码踩了 `clippy.toml` 既有的写盘纪律（那批提交没推过，CI 从没见过）。
+- 修法按**仓库既有形状**：9 处测试里的 `std::fs::write` → `fsx::atomic::atomic_write`
+  （`src-tauri` 里 atomic_write 有 117 处、`std::fs::write` 只在注释里），**没有加 `#[allow]`**；
+  1 处 doc 列表缩进；另 `cargo +1.99.0 fmt` 收 11 个文件（AppState 那批新行没跑过 fmt，1.97 / 1.99 都认）。
+- 全绿：`fmt --check`（两个版本）、双 feature `clippy --all-targets -D warnings` 都干净；
+  判据 **729**（默认）+ **687**（workbench lib）全过。本刀零 TS 改动。
+- 明细与遗留项（**要不要钉 `rust-toolchain.toml` —— 没做**）见 `docs/RUST-LINT-CLEANUP.md`。

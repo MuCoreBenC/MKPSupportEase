@@ -1,5 +1,6 @@
-import type { FileKind, FileRef, VersionFiles } from '../../api/contract'
+import type { FileKind, FileRef, RuntimeCatalogFile, VersionFiles } from '../../api/contract'
 import assetsJson from './data/assets.json'
+import { mockCatalogFiles } from './catalogFiles'
 import bundlesJson from './data/bundles.json'
 import type { RawAsset, RawAssetsFile, RawBundle } from './types'
 import { findRawVersion, findVersion } from './machines'
@@ -7,9 +8,10 @@ import { findRawVersion, findVersion } from './machines'
 /**
  * 「这个机型这个版本要哪些文件」—— 一跳答完。
  *
- * 上游是两条互不相交的链：
+ * 两条互不相交的链（★ 2026-10-06 收口：MKP 那一支改成查**目录登记**，
+ * 与真机 `ipc/presets.rs::version_files_dto` 一致）：
  *
- *   MKP 预设   version.presetFile ──▶ presets/mkp/<file>          （完全不经过 bundle）
+ *   MKP 预设   目录登记 catalog.files[]（按机型+版本查）  （完全不经过 bundle）
  *   切片器 profile  version.recommendedBundle ──▶ bundle.assetRefs ──▶ asset.relativePath
  *
  * `bundle.assetRefs` 的注释里写明「只含 bbs_profile/orca_profile，不含 mkp_preset」，
@@ -25,8 +27,17 @@ const assets = (assetsJson as RawAssetsFile).assets
 const bundleById = new Map(bundles.map((b) => [b.id, b]))
 const assetById = new Map(assets.map((a) => [a.id, a]))
 
-/** MKP 预设一律在这个目录下，上游是硬拼前缀，不查 asset 表 */
-const MKP_PREFIX = 'presets/mkp/'
+/**
+ * 目录里这个 (机型, 版本) 的那一份 MKP —— 与真机 `runtime::catalog::file_of` 同一口径。
+ *
+ * 按机型 + 版本查、**不看 kind**（真机也不看）：目录里只有 MKP 会带版本号，
+ * 切片器配置与图标那两种的 `versionId` 是空串，撞不上。
+ */
+function catalogFileOf(machineId: string, versionId: string): RuntimeCatalogFile | null {
+  return (
+    mockCatalogFiles().find((f) => f.machineId === machineId && f.versionId === versionId) ?? null
+  )
+}
 
 function assetKind(a: RawAsset): FileKind {
   if (a.resourceType === 'bbs_profile') return 'bbs_profile'
@@ -57,15 +68,19 @@ export function resolveVersionFiles(machineId: string, versionId: string): Versi
   const files: FileRef[] = []
   const missing: string[] = []
 
-  // —— MKP 预设一支 ——
-  if (raw.presetFile) {
-    files.push({
-      kind: 'mkp_preset',
-      fileName: raw.presetFile,
-      path: MKP_PREFIX + raw.presetFile,
-    })
+  /*
+   * —— MKP 预设一支 ——
+   *
+   * ★ 从**目录登记**里查，不是上游那个 `version.presetFile`：真机这一支就是
+   *   `catalog.file_of(...)`，而目录里的名字是 `{机型}-{版本小写}.toml`（消费端按这个
+   *   找文件，见 `workbench/app/build.rs`）；上游老命名（`A1.toml`）消费端不认识 ——
+   *   照老命名填，首页套餐会一律显示「缺」。
+   */
+  const registered = catalogFileOf(machineId, versionId)
+  if (registered !== null) {
+    files.push({ kind: 'mkp_preset', fileName: registered.fileName, path: registered.path })
   } else {
-    missing.push(`${machineId} / ${versionId} 没有配 MKP 预设文件`)
+    missing.push(`${machineId} / ${versionId} 没有配 MKP 预设文件（目录里查不到）`)
   }
 
   // —— 切片器 profile 一支 ——

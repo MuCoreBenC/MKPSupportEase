@@ -474,10 +474,10 @@ mod tests {
         write(user.path(), "presets-mine/A1.toml", VALID_TOML);
         write(ext.path(), "外部.toml", VALID_TOML);
         let active =
-            super::super::state::save_active_mine(user.path(), "presets-mine/A1.toml", "sha")
+            super::super::app_state::set_active_mine(user.path(), "presets-mine/A1.toml", "sha")
                 .unwrap();
         let subject = super::super::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
-        super::super::state::save_draft(user.path(), &subject, "sha", "改到一半").unwrap();
+        super::super::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
 
         let outcomes = commit(
             user.path(),
@@ -488,11 +488,11 @@ mod tests {
         );
         assert!(outcomes[0].ok, "{}", outcomes[0].message);
 
-        let after_active = super::super::state::load_active(user.path())
+        let after_active = super::super::app_state::active_preset(user.path())
             .unwrap()
             .unwrap();
         assert_eq!(after_active.path, active.path, "使用中没动");
-        let after_draft = super::super::state::load_draft(user.path())
+        let after_draft = super::super::app_state::draft(user.path())
             .unwrap()
             .unwrap();
         assert_eq!(

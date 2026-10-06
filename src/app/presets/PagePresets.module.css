@@ -507,6 +507,14 @@
   color: var(--text-3);
 }
 
+/* 两个时间一行（云端发布 · 替换时间）：标签是事件的名字，值查不到照实「未知」 */
+.archWhen {
+  grid-column: 1;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
 /* 认人那一行：认得出就是"机型 · 版本"，认不出**照实说认不出**（不猜） */
 .archWho {
   grid-column: 1;
@@ -515,9 +523,18 @@
   color: var(--text-2);
 }
 
-.archBtn {
+/* 两个按钮竖排（看正文 / 删除）：归档条目现在有三次行（名字 / 时间 / 认人），跨满 */
+.archBtns {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.archBtn {
   align-self: center;
   flex-shrink: 0;
   height: 24px;
@@ -535,6 +552,13 @@
 .archBtn:hover {
   border-color: var(--accent);
   color: var(--accent-deep);
+}
+
+/* 删除的**第二下**（确认那一下）：红 —— 不可逆动作才用这个颜色 */
+.archBtnDanger,
+.archBtnDanger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .archBtn:focus-visible {

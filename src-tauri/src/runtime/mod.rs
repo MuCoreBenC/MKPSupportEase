@@ -20,6 +20,9 @@
 //! 名字里没有版本号（作者裁决：新系统不背旧命名的包袱）——目录格式由
 //! [`catalog::CATALOG_SCHEMA`] 表达，进化靠加字段，不靠改名。
 
+/// **应用持久化状态（AppState）**——`run/app-state.json` 的唯一读写入口（2026-10-06
+/// 架构决策，`docs/APP-STATE.md`）：一个应用一个状态文件，整份读-改-写 + 原子替换
+pub mod app_state;
 pub mod catalog;
 pub mod delivery;
 /// **通用文件导入入口**（第十二层）：外部文件怎么安全地进入应用 —— 拖拽 / 文件选择器
@@ -33,6 +36,11 @@ pub mod lineage;
 pub mod mine;
 pub mod net;
 pub mod paths;
+/// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
+/// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
+pub mod preset_events;
+/// **出处账**（复制 / 导入的来源）：用户文件"从哪复制来的"这件事盘上不存在，记在这一本
+pub mod provenance;
 pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
 /// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。

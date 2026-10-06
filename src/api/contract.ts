@@ -505,6 +505,19 @@ export interface UserPresetFile {
   /** 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜） */
   basedOnMachineId: string | null
   basedOnVersionId: string | null
+  /**
+   * **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
+   * 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编。
+   *
+   * 为什么在账本里而不是文件头：另存是**按字节**复制（血统原样带过去），往文件头里
+   * 加一行就得重写字节；导入的外部文件更不能动。账本只服务界面上「来源：复制自 X」
+   * 一格，丢了就退回「我的」，什么都不坏。
+   */
+  copiedFrom: string | null
+  /** 上面那条路径里的**文件名**（界面直接显示用）。没有同上 */
+  copiedFromName: string | null
+  /** 出处档：`copy`（复制自另一份用户文件）/ `import`（外部导入）。都没记 ⇒ `null` */
+  provenance: 'copy' | 'import' | null
 }
 
 /**
@@ -658,8 +671,20 @@ export interface ArchivedFile {
   /** 文件名。与它对应的交付文件同名：换版本换的是字节，不是名字 */
   fileName: string
   size: number
-  /** 被换下来的时刻（UTC **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
-  modifiedUnix: number | null
+  /** 这份旧字节的指纹 —— 替换事件与版本出身的对号键 */
+  sha256: string
+  /**
+   * 这一版**在云端发布**的时刻（RFC3339）。**跟着这一版走，不跟着操作走**：
+   * 查版本出身反查得到；链建立（2026-10-06）之前的版本查不到 = `null`
+   * —— 界面照实「未知（早于版本记忆）」，**不拿"现在"或换下时刻顶**。
+   */
+  publishedAt: string | null
+  /**
+   * 被**换下来**的时刻（UTC **epoch 秒**）= `DeliveryReplaced.at`（事件账）。
+   * 与 `publishedAt` 是两个时间、两件事：一个是"这一版什么时候发的"，
+   * 一个是"它是什么时候被换下来的" —— 永不互相顶替。
+   */
+  replacedUnix: number | null
   /** 认得出是谁的旧版本就有；**认不出是 `null`**（目录里已经没有这一份了）—— 不猜 */
   machineId: string | null
   versionId: string | null
@@ -693,13 +718,20 @@ export interface DeliveryTrust {
 /**
  * 盘上交付区里的一份（`getDownloadedFiles` / `getStaleFiles` 的行形状）。
  *
- * `modifiedUnix`（UTC **epoch 秒**）= 这份字节**落进本机的时刻**（文件 mtime ——
- * 下载管道写盘的那一刻）：本地表「时间」列的"下载到本机的时刻"，界面自己转
- * 本地时区。`null` = 文件系统没给，**不编**（与 `ArchivedFile.modifiedUnix` 同一条口径）。
+ * 时间**全部来自事件**（2026-10-06 预设事件时间模型），mtime 不再上界面：
+ *
+ * - `downloadedUnix` / `replacedUnix` —— 这份字节是「下载」进本机的还是「替换」上去的
+ *   （两个事件**至多一个有值**：同一份字节只有一种来路）。标签跟着事件走：
+ *   有 `downloadedUnix` 就叫「下载时间」，有 `replacedUnix` 就叫「替换时间」。
+ *   都没有 = 认不出出身的字节（这种字节不记账，不猜）—— 界面照实「未知」；
+ * - `publishedAt` —— 这份字节属于哪一代目录、那一代**在云端发布**的时刻
+ *   （RFC3339）。它跟着**这一版字节**走，云端以后怎么换代都不变；查不到 = `null`。
  */
 export interface OnDiskFile {
   fileName: string
-  modifiedUnix: number | null
+  downloadedUnix: number | null
+  replacedUnix: number | null
+  publishedAt: string | null
 }
 
 /**
@@ -1131,6 +1163,20 @@ export interface MkpApi {
    */
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
+  /**
+   * **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+   *
+   * 在此之前官方行的「另存为一份新的」是灰的，要绕「改这份」→ 保存才能复制 ——
+   * 可"改了再保存"与"不改直接复制"落的是同一种东西，绕一道编辑流程不合直觉。
+   *
+   * 来源是**官方交付行**，闸在 Rust 侧（`mine::copy_release_as_new`）：
+   * 目录里得有它、得是 MKP 预设、**字节必须与目录一致**（与「改这份」同一条边界 ——
+   * 旧版本 / 内容异常禁令不变）。血统三行**新写指向**来源交付文件（官方原件没有
+   * 血统头，不是照抄）；出处账不记（血统已经答了"从哪来"）。名字过同一套门槛、
+   * 不覆盖、不自动改名；**一个状态都不碰**（不改使用中指针、不建草稿、不进 archive）。
+   */
+  copyReleaseAsNew(fileName: string, newName: string): Promise<UserFileIdentity>
+
   /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
 
   /**
@@ -1268,8 +1314,8 @@ export interface MkpApi {
   /**
    * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
    *
-   * 每份带 `modifiedUnix`（UTC epoch 秒）= 这份字节**落进本机的时刻** ——
-   * 预设页本地表「时间」列的"下载到本机的时刻"，界面自己转本地时区显示。
+   * 时间三格全部来自**事件**（见 [`OnDiskFile`]）：`downloadedUnix`（下载事件）、
+   * `replacedUnix`（替换事件）、`publishedAt`（这一版字节在云端发布的时刻）。
    */
   getDownloadedFiles(): Promise<OnDiskFile[]>
 
@@ -1277,7 +1323,7 @@ export interface MkpApi {
    * 有更新的文件：盘上在、但字节与目录不一致（目录更新带来新版本，或文件被动过）。
    * "更新"就是对这些再跑一遍 downloadCatalogFile——旧份自动归档。
    *
-   * `modifiedUnix` 说的是**盘上那一份**的落盘时刻（它是什么时候到我机器上的）。
+   * 时间口径与 [`getDownloadedFiles`] 相同（事件账）。
    *
    * **它只说"不一致"，不说"因为什么"** —— 分成哪两种（旧版本 / 查不出它是哪一版）
    * 看 [`getDeliveryTrust`]。
@@ -1296,8 +1342,8 @@ export interface MkpApi {
   /**
    * 归档区里有什么：官方文件换版本时**被换下来的那些旧版本**。
    *
-   * **只列** —— 不删、不恢复、也没有"用这份旧版本"（归档管理不在这一层）。
    * 目录里已经没有的那几份，`machineId / versionId / kind` 如实给 `null`。
+   * 删除见 [`deleteArchivedFile`]（作者裁决 2026-10-06：允许删）。
    */
   getArchivedFiles(): Promise<ArchivedFile[]>
 
@@ -1306,6 +1352,24 @@ export interface MkpApi {
    * **只认归档区**：入参是 [`getArchivedFiles`] 给的那个相对路径；不是 UTF-8 就如实报错。
    */
   readArchivedText(path: string): Promise<string>
+
+  /**
+   * **删除本机下载区里那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+   *
+   * 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
+   * 它正在被使用 / 还有没保存的草稿：后端把使用中指针一并撤下、草稿一并丢弃
+   * —— 确认框必须讲清这一步。幂等：本来就不在也照实成功。
+   */
+  deleteDeliveryFile(fileName: string): Promise<void>
+
+  /**
+   * **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删）。
+   *
+   * 入参是 [`getArchivedFiles`] 给的那个相对路径。**删了就找不回**
+   * （云端只有最新版）—— 确认框必须讲清这个代价。
+   * 版本链与事件账不动：那是历史事实，不是这份文件的附属。
+   */
+  deleteArchivedFile(path: string): Promise<void>
 
   /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。

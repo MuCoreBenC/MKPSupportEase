@@ -107,6 +107,8 @@
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
+ *   **另存为一份新的**（官方交付行） `api.copyReleaseAsNew()`               真（UX 测试 A1 的正路：release + ok 的
+ *                            MKP 预设直接另存成你自己的一份 —— 可信字节 + 血统指向来源；不碰任何状态）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
@@ -126,7 +128,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { api, errorText, NotImplementedError } from '../../api'
+import { api, errorText } from '../../api'
 import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
@@ -145,14 +147,15 @@ import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
+  ARCHIVE_TIME,
   ARCHIVE_WHY,
   EDIT_TEXT,
   MINE_COPY,
+  RELEASE_COPY,
   MINE_DRAWER,
   MINE_EDIT_TEXT,
   MINE_RENAME,
   DOWNLOAD_WHY,
-  MISSING_METHOD,
   mineCountOfAxis,
   treeCountOfAxis,
   NO_ASSET_WHY,
@@ -162,11 +165,11 @@ import {
   UNSUPPORTED_TEXT,
   isSuspectRelease,
   noContractText,
-  notImplementedText,
   releaseBatchText,
   sizeTextOf,
 } from './presetTree'
 import type {
+  LocateTarget,
   PresetKindAxis,
   PresetScopeAxis,
   PresetLocalRow,
@@ -272,6 +275,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     | { kind: 'mine'; fileName: string; path: string }
     | null
   >(null)
+  /*
+   * 归档删除的**两段式确认**（抽屉里没有菜单那套 confirm 机制）：
+   * 记"哪一份的删除按钮已经点过第一下"。点到别的份 / 关抽屉都退回。
+   */
+  const [confirmingArchive, setConfirmingArchive] = useState<string | null>(null)
   const [body, setBody] = useState<{
     path: string
     text: string | null
@@ -319,22 +327,51 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const moreRef = useRef<HTMLButtonElement>(null)
 
   /*
+   * 「定位」的闪光本体：把目标行滚到视口中央，然后盖上 overlay 亮一下再退光。
+   * 两个入口共用（状态条的「定位已应用」与来源格的「复制自 X → 定位」）。
+   *
+   * 闪烁本体是 `s.locateFlash` 那块**盖在行上的普通 div**：现量现设位置，
+   * Web Animations API 淡出（1.8s、先停在 55%）后隐藏。**不许**给行本身挂 class
+   * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
+   * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
+   * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
+   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
+   */
+  const flashRow = (row: HTMLElement) => {
+    const root = rootRef.current
+    const overlay = flashRef.current
+    if (!root || !overlay) return
+    /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
+    row.scrollIntoView({ block: 'center' })
+    const rr = row.getBoundingClientRect()
+    const pr = root.getBoundingClientRect()
+    overlay.style.left = `${rr.left - pr.left}px`
+    overlay.style.width = `${rr.width}px`
+    overlay.style.top = `${rr.top - pr.top}px`
+    overlay.style.height = `${rr.height}px`
+    overlay.style.display = 'block'
+    overlay.getAnimations().forEach((a) => a.cancel())
+    overlay
+      .animate(
+        [
+          { opacity: 1 },
+          { opacity: 1, offset: 0.55 },
+          { opacity: 0 },
+        ],
+        { duration: 1800, easing: 'ease-out' },
+      )
+      .onfinish = () => {
+        overlay.style.display = 'none'
+      }
+  }
+
+  /*
    * 状态条上的「定位」。
    *
    * 全局只有一个「已应用」，机型筛选可能正好把它筛没了 —— 作者不愿意看到
    * 「筛完之后不知道哪套在生效」。点它清掉机型筛选（已应用一定在本地 MKP 表里），
    * 等重画完把那一行滚到视口中央。它替代了原来页脚那个「已应用 … →」按钮：
    * 客户端不知道「基底 / 出厂」这些工作台的概念，页脚那句话整个搬走了。
-   *
-   * 滚到之后**亮一下再慢慢退光**（作者：「就跟校准页那个的一样……差不多的
-   * 功能就复用，只是颜色不同」）。闪烁本体是 `s.locateFlash` 那块**盖在行上的普通
-   * div**：现量现设位置，Web Animations API 淡出（同款 1.8s、先停在 55%）后隐藏。
-   *
-   * 为什么不照抄校准页给行本身挂 class 跑 keyframes —— 这张表是折叠边框表，
-   * 在 tr/td 背景上跑动画，适配缩放下合成层缓存会留旧帧，行里就多出一条
-   * 若隐若现的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。
-   * div 的终态是 display:none，缓存与否无关紧要；表格内部从此没有动画。
-   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
    */
   const locateApplied = () => {
     menu.close()
@@ -342,32 +379,32 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     page.setScope('local')
     data.pickMachine('')
     window.setTimeout(() => {
-      const root = rootRef.current
-      const overlay = flashRef.current
-      const row = root?.querySelector('tr[data-live="true"]') as HTMLElement | null
-      if (!root || !overlay || !row) return
-      /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
-      row.scrollIntoView({ block: 'center' })
-      const rr = row.getBoundingClientRect()
-      const pr = root.getBoundingClientRect()
-      overlay.style.left = `${rr.left - pr.left}px`
-      overlay.style.width = `${rr.width}px`
-      overlay.style.top = `${rr.top - pr.top}px`
-      overlay.style.height = `${rr.height}px`
-      overlay.style.display = 'block'
-      overlay.getAnimations().forEach((a) => a.cancel())
-      overlay
-        .animate(
-          [
-            { opacity: 1 },
-            { opacity: 1, offset: 0.55 },
-            { opacity: 0 },
-          ],
-          { duration: 1800, easing: 'ease-out' },
-        )
-        .onfinish = () => {
-          overlay.style.display = 'none'
-        }
+      const row = rootRef.current?.querySelector('tr[data-live="true"]') as HTMLElement | null
+      if (row !== null) flashRow(row)
+    }, 60)
+  }
+
+  /*
+   * **来源定位**（「复制自 X」那一格点过来）：切到来源所在的表（local / cloud、
+   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、展开那一行、
+   * 滚过去亮一下 —— 用户要的是"看见我从哪复制来的"，缺一步都到不了那个效果。
+   *
+   * 行键按「全部机型」那一档算（mine 行的键里带机型筛选，见 `originCellOf`）；
+   * 类型轴只在目标说得出类型时才切（认不出类别的那份两张表里都有，不动当前档）。
+   * 60ms 与 `locateApplied` 同一个数：等 React 把换轴 + 清筛选的重画落完盘再找行。
+   */
+  const locateRow = (target: LocateTarget) => {
+    menu.close()
+    page.setScope(target.scope)
+    if (target.kind !== null) page.setKind(target.kind)
+    data.pickMachine('')
+    page.setQuery('')
+    setExpandedKey(target.rowKey)
+    window.setTimeout(() => {
+      const row = rootRef.current?.querySelector(
+        `tr[data-rowkey="${CSS.escape(target.rowKey)}"]`,
+      ) as HTMLElement | null
+      if (row !== null) flashRow(row)
     }, 60)
   }
 
@@ -400,11 +437,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
    * 在文件管理器里显示在第十三层，都不在这里。
    *
-   * 不发请求 —— 没有可发的方法。就地说清「要加哪个方法」：往契约里加方法不在这一轮的范围里，
+   * 不发请求 —— 没有可发的方法。就地说清「还没有对应的实现」（A2 人话化：
+   * 发生了什么 + 能干什么；缺的是哪个方法记在 `MISSING_METHOD` 里，给开发对账用），
    * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
    */
-  const sayNoContract = (method: string, row: PresetTableRow) => {
-    setNote({ text: `${noContractText(method)}（${row.fileName}）`, bad: true })
+  const sayNoContract = (row: PresetTableRow) => {
+    setNote({ text: `${noContractText()}（${row.fileName}）`, bad: true })
   }
 
   /**
@@ -413,19 +451,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    *   目录登记的交付预设（`releaseUid` 在）  → `downloadRelease(fileName)`，**真的能下** ——
    *     走新世界下载管道落进下载区 `mkp/`，本地表跟着多出一行
    *   官方仓库的文件                        → 契约里有签名，所以**照调**。
-   *     假后端一定抛 `NotImplementedError`，界面接住并显示「尚未实现：downloadFiles」
+   *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
     if (row.releaseUid !== undefined) {
       /*
-       * 盘上那份不对劲的两档（旧版本 / 内容异常）走的是**同一条下载管道**（再下一遍，
-       * 旧份自动归档）—— 所以区别只在动词与结果那句话上，行为一模一样。
+       * 盘上那份不对劲的两档（旧版本 / 认不出）走的是**同一条下载管道**（再下一遍，
+       * 旧份自动归档）—— 动词统一叫「更新」（与按钮一致：云端有更新就该说更新，
+       * 「重新下载」那种吓唬人的说法不再出现在动作上）；认不出的实情在结果那句话里说。
        * 别在这里分支去找"另一个命令"：没有那个命令。
        */
-      const repairing = row.releaseState === 'tampered'
-      const updating = repairing || row.releaseState === 'old'
-      const verb = repairing ? '重新下载' : updating ? '更新' : '下载'
+      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
+      const verb = updating ? '更新' : '下载'
       setBusyKey(row.rowKey)
       setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
@@ -435,11 +473,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           () => {
             setBusyKey(null)
             setNote({
-              text: repairing
-                ? `已重新下载 ${row.fileName} —— 盘上那份不认得的，现在换成了目录登记的当前版本`
-                : updating
-                  ? `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
-                  : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
+              text: updating
+                ? row.releaseState === 'tampered'
+                  ? `已更新 ${row.fileName} —— 盘上那份认不出的，现在换成了目录登记的当前版本`
+                  : `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
+                : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
               bad: false,
             })
           },
@@ -466,13 +504,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       },
       (e: unknown) => {
         setBusyKey(null)
-        setNote({
-          text:
-            e instanceof NotImplementedError
-              ? `${notImplementedText('downloadFiles')}（${row.fileName}）`
-              : `下载失败：${errorText(e)}`,
-          bad: true,
-        })
+        /* 错误话术统一走 errorText：NotImplementedError 自带人话 hint（A2），
+           不再按异常类型在前端拼"尚未实现：downloadFiles"那种术语 */
+        setNote({ text: `下载失败：${errorText(e)}`, bad: true })
       },
     )
   }
@@ -704,7 +738,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     const ask =
       naming.kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : data.copyAsNew(naming.row.path, name)
+        : naming.row.origin === 'release'
+          ? /* 官方交付行（UX 测试 A1 的正路）：可信字节直接复制成你自己的一份 */
+            data.copyReleaseAsNew(naming.row.fileName, name)
+          : data.copyAsNew(naming.row.path, name)
     ask.then(
       (done) => {
         setNaming(null)
@@ -712,7 +749,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           text:
             naming.kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+              : naming.row.origin === 'release'
+                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 官方原件一个字节没动，身世（机型 / 版本）跟着来源走了`
+                : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
@@ -726,22 +765,44 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **删除我自己那一份**（第十层）：**真删除** —— 没有垃圾桶，也没有归档。
-   *
-   * 二次确认长在菜单里（`danger` + `confirm`，问句带着这一行的名字）；这里只管执行。
-   * 两道闸在后端：**正在使用的不许删、还有没保存的草稿的不许删** —— 原话进提示条。
-   * 菜单那一项对「正在使用」的行已经灰掉带原因，后端仍会再拦一次（两道都在）。
+   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（真删）；官方交付行走交付线
+   * （删了回「未下载」，随时可从云端重下）。二次确认长在菜单里（`danger` + `confirm`）；
+   * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
-    data.remove(row.path).then(
+    const done =
+      row.origin === 'release' ? data.removeRelease(row.fileName) : data.remove(row.path)
+    done.then(
       () =>
         setNote({
-          text: `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
+          text:
+            row.origin === 'release'
+              ? `已删除 ${row.fileName} —— 它回到「未下载」，随时可以从云端重新下载`
+              : `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
           bad: false,
         }),
-      (e: unknown) =>
-        setNote({ text: `没删成：${errorText(e)}`, bad: true }),
+      (e: unknown) => setNote({ text: `没删成：${errorText(e)}`, bad: true }),
+    )
+  }
+
+  /**
+   * **删除归档里的一份旧版本**（旧版本抽屉里那颗按钮）。
+   *
+   * 抽屉里没有菜单那套 confirm 机制，用**两段式**：第一下把按钮变成「确认删除」，
+   * 再点一下才真删（点到别处 / 换一份 / 关抽屉都退回）。代价在确认那一下的按钮上
+   * 说清 —— 云端只有最新版，删了就找不回。
+   */
+  const runRemoveArchived = (a: ArchivedFile) => {
+    setConfirmingArchive(null)
+    setNote({ text: `正在删除 ${a.fileName} 的这份旧版本…`, bad: false })
+    data.removeArchived(a.path).then(
+      () =>
+        setNote({
+          text: `已删除 ${a.fileName} 的这份旧版本 —— 删了就找不回（云端只有最新版）`,
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `没删成：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -829,7 +890,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
      * 没下载 / 字节漂了 / 是旧版本都应用不成，错误原样冒给提示条。
      */
     if (row.releaseUid === undefined) {
-      /* 到不了这里：MKP 档的本地表只有交付行有操作按钮。留着防形状变化时静默出错 */
+      /*
+       * 兜底（正常到不了）：A2 修缝后，没有交付身份的官方 MKP 行在表格那一层
+       * 就不给「应用」按钮了（`PresetTable` 的灰杠 + `NO_ASSET_WHY` 人话原因）。
+       * 这一格留着防行形状再变化时静默出错 —— 文案同样是人话（发生了什么 + 能干什么）。
+       */
       setNote({ text: `${row.fileName}：${NO_ASSET_WHY}`, bad: true })
       return
     }
@@ -882,12 +947,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 「另存为一份新的」为什么不能点（第十一层）：只有**我的文件**之间能复制 ——
-   * 官方那份的副本要经过「改这份」→ 保存（那条链才把副本落成你自己的一份）。
+   * 「另存为一份新的」为什么不能点（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+   *
+   * - **我的文件**：本来就开放（第十一层，我的 → 我的）；
+   * - **官方交付行**：`releaseState === 'ok'` 的 MKP 预设**放开** —— 可信字节直接复制，
+   *   不再绕「改这份」→ 保存（"改了再保存"与"不改直接复制"落的是同一种东西）；
+   * - 内容存疑的两档（旧版本 / 内容异常）仍由 `suspect` 那一句拦（这里到不了）；
+   * - 切片器交付行不放开：它们不是 TOML 预设，自有「复制到切片器目录」那条路；
+   * - 官方仓库文件（图标等）：不在此列。
    */
   const copyWhyNot = (row: PresetTableRow): string | undefined => {
     if (row.origin === 'mine') return undefined
-    return '官方那份的副本走「改这份」→ 保存（会另存成你自己的一份）；这一层只在「我的文件」之间复制'
+    if (row.origin === 'release') {
+      if (row.kind !== 'mkp_preset') {
+        return '这份是切片器工艺配置 —— 「复制」（复制到切片器目录）才是它的动作，另存成「我的文件」用不上'
+      }
+      return row.releaseState === 'ok'
+        ? undefined
+        : '这一份还没下载到本机 —— 先下载，下载好了才能另存成你自己的一份'
+    }
+    return '官方仓库文件不在这里另存 —— 能另存的是已下载到本机的 MKP 预设与「我的文件」'
   }
 
   /**
@@ -902,18 +981,32 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 「删除」为什么不能点。**正在使用的那一份也不给删**（删了「使用中」就指向一份不存在的
-   * 文件）—— 后端还会再拦一次（还有没保存的草稿的那份也拒，那个前端看不见）。
+   * 「删除」对哪几行给。**一切皆可删**（作者裁决 2026-10-06，此前拦得太死）：
+   *
+   * - 官方交付行：删了回到「未下载」，随时可从云端重新下载（字节有目录 SHA 锚定，
+   *   零数据损失）—— 此前"对不上目录用「更新」修"说的是修法，不是禁删的理由；
+   * - 我的文件：本来就真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
+   *   （悬空的「使用中」比「没在用」糟），有草稿的连草稿一起丢，确认框讲清；
+   * - 官方仓库文件的本地副本仍不给删（它们走资源那一套命令，删了不是"重下"一条路）；
+   * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
+   *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
-  const removeWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin !== 'mine') {
-      return row.origin === 'release'
-        ? '官方交付那份不在这里删 —— 盘上那份对不上目录时用「更新 / 重新下载」修它'
-        : '官方文件不在这里删 —— 能删的只有你自己那份（用户根里的）'
-    }
-    return row.scope === 'local' && row.live
-      ? '正在使用的那一份不能直接删 —— 先换成别的配置（或撤销使用），再删它'
+  const removeWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'official'
+      ? '官方文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
+
+  /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
+  const removeConfirmDetail = (row: PresetTableRow): string => {
+    if (row.origin === 'release') {
+      return '它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，不会丢什么）。' +
+        '它正在被使用的话，使用中会一并撤下。'
+    }
+    const live = 'live' in row && row.live
+    return live
+      ? '这份正在使用中，删除会一并撤下使用；有没保存的草稿也一并丢弃。' +
+          '删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
+      : '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
   }
 
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
@@ -921,18 +1014,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
     /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
     if (row.scope === 'cloud') {
-      const repairing = row.releaseState === 'tampered'
+      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
       return [
         {
           id: 'download',
-          /* 盘上那一份不对劲时这一项换词：同一条管道，动词不同（旧版本→更新，内容异常→重新下载） */
-          label: repairing ? '重新下载' : row.releaseState === 'old' ? '更新' : '下载',
+          /* 盘上那一份不对劲时这一项换词：同一条管道，云端有更新就说「更新」（与按钮一致） */
+          label: updating ? '更新' : '下载',
           onSelect: () => download(row),
         },
         {
           id: 'link',
           label: '复制链接',
-          onSelect: () => sayNoContract(MISSING_METHOD.link, row),
+          onSelect: () => sayNoContract(row),
         },
         { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
         bbsEntry(row),
@@ -964,9 +1057,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'copy',
         label: '另存为一份新的',
         /*
-         * 第十一层：**我的文件 → 我的文件**（按字节复制、血统原样带过去）。
-         * 官方那两份的副本走「改这份」→ 保存；内容存疑的字节不许换个名字继续活着
-         * （第三圈第 6 层）—— 那一句优先。
+         * 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
+         * **官方交付行也开放了**（UX 测试 A1 的正路，作者 2026-10-06 定案）：
+         * release + ok 的 MKP 预设直接另存成你自己的一份（`copyReleaseAsNew`）。
+         * 内容存疑的那两档（旧版本 / 内容异常）仍不许 —— 字节我们不认，
+         * 不能让它换个名字继续活着（第三圈第 6 层）—— 那一句优先。
          */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => openCopyAs(row),
@@ -992,12 +1087,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'remove',
         label: '删除',
         danger: true,
-        /* 第十层：只有「我的文件」能删；正在使用的那份连菜单都不给点（后端还会再拦一次） */
+        /* 一切皆可删（2026-10-06）：官方交付删了可重下；我的文件真删；
+           正在使用的那份删掉时后端会一并撤下使用 —— 代价在确认框里说清 */
         disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
-          detail:
-            '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。',
+          detail: removeConfirmDetail(row),
         },
         onSelect: () => runRemove(row),
       },
@@ -1382,6 +1477,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onEdit={openEdit}
                 onLive={runLive}
                 onDownload={download}
+                /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
+                onLocate={locateRow}
+                sourceLabel={data.sourceLabel}
               />
             </>
           )}
@@ -1412,41 +1510,87 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             onClose={() => {
               setViewer(null)
               setBody(null)
+              setConfirmingArchive(null)
             }}
           >
             {viewer !== null && (
               <div className={s.arch}>
-                {viewer.kind === 'archive' && (
-                  <ul className={s.archList}>
-                    {viewer.rows.map((a) => (
-                      <li key={a.path} className={s.archItem}>
-                        <div className={s.archLine}>
-                          <span className={s.archName} title={a.path}>
-                            {a.fileName}
-                          </span>
-                          <span className={s.archMeta}>
-                            {sizeTextOf(a.size)} ·{' '}
-                            {a.modifiedUnix === null
-                              ? '时间未知'
-                              : longStatText(new Date(a.modifiedUnix * 1000).toISOString())}
-                          </span>
-                        </div>
-                        <p className={s.archWho} title={a.path}>
-                          {a.machineId === null || a.versionId === null
-                            ? ARCHIVE_DRAWER.unknown
-                            : `${a.machineId} · ${a.versionId}`}
-                        </p>
-                        <button
-                          type="button"
-                          className={s.archBtn}
-                          onClick={() => readBody(a.path, 'archive')}
-                        >
-                          {ARCHIVE_DRAWER.open}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                    {viewer.kind === 'archive' && (
+                      <ul className={s.archList}>
+                        {viewer.rows.map((a) => (
+                          <li key={a.path} className={s.archItem}>
+                            <div className={s.archLine}>
+                              <span className={s.archName} title={a.path}>
+                                {a.fileName}
+                              </span>
+                              <span className={s.archMeta}>{sizeTextOf(a.size)}</span>
+                            </div>
+                            {/*
+                             * 两个时间**各是各，永不互相顶替**（2026-10-06 事件时间模型）：
+                             * 云端发布 = 这一版发布时的时刻（跟着这一版字节走；早于版本记忆
+                             * 的照实「未知」，不拿"现在"顶）；替换时间 = 它被换下来那一刻
+                             * （替换事件）。以前只有一个 mtime 顶在唯一时间位上，用户看到的
+                             * 就是"我动它的时刻" —— 那正是「旧版本的时间居然是现在」的根子。
+                             */}
+                            <p className={s.archWhen}>
+                              {`${ARCHIVE_TIME.published} ${
+                                a.publishedAt === null
+                                  ? ARCHIVE_TIME.publishedUnknown
+                                  : (longStatText(a.publishedAt) ?? ARCHIVE_TIME.publishedUnknown)
+                              } · ${ARCHIVE_TIME.replaced} ${
+                                a.replacedUnix === null
+                                  ? ARCHIVE_TIME.replacedUnknown
+                                  : (longStatText(
+                                      new Date(a.replacedUnix * 1000).toISOString(),
+                                    ) ?? ARCHIVE_TIME.replacedUnknown)
+                              }`}
+                            </p>
+                            <p className={s.archWho} title={a.path}>
+                              {a.machineId === null || a.versionId === null
+                                ? ARCHIVE_DRAWER.unknown
+                                : `${a.machineId} · ${a.versionId}`}
+                            </p>
+                            {/*
+                             * 删除（2026-10-06 一切皆可删）：**两段式确认** —— 第一下变成
+                             * 「确认删除」，再点一下才真删。代价写在提示条上：云端只有最新版，
+                             * 这一版删了就找不回。版本链与事件账不受影响（历史事实）。
+                             */}
+                            <div className={s.archBtns}>
+                              <button
+                                type="button"
+                                className={s.archBtn}
+                                onClick={() => {
+                                  setConfirmingArchive(null)
+                                  readBody(a.path, 'archive')
+                                }}
+                              >
+                                {ARCHIVE_DRAWER.open}
+                              </button>
+                              <button
+                                type="button"
+                                className={
+                                  confirmingArchive === a.path
+                                    ? `${s.archBtn} ${s.archBtnDanger}`
+                                    : s.archBtn
+                                }
+                                title={
+                                  confirmingArchive === a.path
+                                    ? '再点一下确认删除 —— 这一版删了就找不回（云端只有最新版）'
+                                    : '删除这份旧版本（删了就找不回，云端只有最新版）'
+                                }
+                                onClick={() =>
+                                  confirmingArchive === a.path
+                                    ? runRemoveArchived(a)
+                                    : setConfirmingArchive(a.path)
+                                }
+                              >
+                                {confirmingArchive === a.path ? '确认删除' : '删除'}
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
                 {body !== null && (
                   <div className={s.archBody}>
@@ -1562,7 +1706,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             {naming !== null && (
               <div className={s.edit}>
                 <p className={s.editNote}>
-                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
+                  {naming.kind === 'copy'
+                    ? naming.row.origin === 'release'
+                      ? RELEASE_COPY.note
+                      : MINE_COPY.note
+                    : MINE_RENAME.note}
                 </p>
                 {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>

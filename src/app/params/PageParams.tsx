@@ -522,6 +522,14 @@ export default function PageParams({ density }: Props) {
   /* 文件名从说明书里来：包里每个版本带着自己的文件清单（A1/STANDARD → A1.toml）；
      这个版本没配 MKP 文件（如 A2L）才退成「机型 · 版本」 */
   const fileLabel = u.fileLabel ?? `${u.machineId} · ${u.versionId}`
+  /*
+   * pill 说的是「**正在用哪份**」：底账命中当前 combo → 底账那份（作者 2026-10-06：
+   * 应用的是官方件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
+   * 没命中（正在编辑另一份）→ 退回编辑目标。确认框 / 历史标题仍用 fileLabel
+   * —— 它们回答的是「写回哪份 / 改的哪份」，与 pill 是两个问题。
+   */
+  const pillLabel =
+    u.activeUse?.onIt === true && u.activeFileName !== null ? u.activeFileName : fileLabel
 
   /*
    * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀，副标题行尾给一句
@@ -543,11 +551,14 @@ export default function PageParams({ density }: Props) {
   }
 
   /*
-   * 底栏那句状态文案。mini 档只留前半句 —— 实测「保存后会覆盖 A1.toml」这半截
-   * 占 153px，加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
-   * 半句话没丢：保存确认弹层里本来就在说（「以下 N 处改动将写入 A1.toml」），
-   * 而且这句挂了 title，悬停看全。
+   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是官方底稿，
+   * 保存 = 另存成你自己的一份（`presets-mine/…（已修改）.toml`，原件不动）——
+   * 原来那句"保存后会覆盖 A1.toml"与实际落盘相反，是测试报告里"用户不敢赌"的根源；
+   * 编辑的是我的文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
+   * 加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
+   * 完整的落点说明在保存确认弹层里，这里挂了 title，悬停看全。
    */
+  const savingToMine = u.editingPreset?.origin === 'mine'
   const stateText =
     u.dirtyCount === 0
       ? density === 'mini'
@@ -555,7 +566,9 @@ export default function PageParams({ density }: Props) {
         : '没有未保存的改动'
       : density === 'mini'
         ? `${u.dirtyCount} 处未保存`
-        : `${u.dirtyCount} 处未保存 · 保存后会覆盖 ${fileLabel}`
+        : savingToMine
+          ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
+          : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
 
   const closeHistory = () => setHistoryOpen(false)
 
@@ -778,12 +791,12 @@ export default function PageParams({ density }: Props) {
                   ref={pillRef}
                   title={
                     inactive
-                      ? `当前预设 ${fileLabel}（未应用）· 点击切换`
-                      : `当前预设 ${fileLabel} · 点击切换`
+                      ? `当前预设 ${pillLabel}（未应用）· 点击切换`
+                      : `当前预设 ${pillLabel} · 点击切换`
                   }
                   onClick={() => setPickerOpen((v) => !v)}
                 >
-                  <span className={s.presetName}>{fileLabel}</span>
+                  <span className={s.presetName}>{pillLabel}</span>
                   <span className={s.presetSwitch}>切换</span>
                 </button>
 
@@ -1062,8 +1075,30 @@ export default function PageParams({ density }: Props) {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className={s.sheetTitle}>确认保存？</h3>
+              {/*
+                落点按**编辑目标**说（A1 统一口径，与 Rust 侧 `commit_preset_draft` 的两条
+                落点一一对应）：官方底稿 → 另存成你自己的一份（原件一个字不动）；
+                我的文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是官方原件，
+                实际却落 presets-mine/ —— 测试报告里"我不敢赌"的那句话就是它。
+              */}
               <p className={s.sheetText}>
-                以下 <b>{changedEntries.length}</b> 处改动将写入 <b>{fileLabel}</b>：
+                {u.editingPreset?.origin === 'mine' ? (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会写回你自己那一份{' '}
+                    <b>{fileLabel}</b>：
+                  </>
+                ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
+                    presets-mine/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
+                    （官方原件一个字不动）：
+                  </>
+                ) : (
+                  <>
+                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
+                    （presets-mine/，官方原件一个字不动）：
+                  </>
+                )}
               </p>
               <ul className={s.changeList}>
                 {changedEntries.slice(0, MAX_CONFIRM_ITEMS).map((e) => (

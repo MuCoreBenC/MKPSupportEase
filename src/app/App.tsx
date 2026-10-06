@@ -48,7 +48,8 @@ const PLATFORM = detectPlatform()
  * 希望保持我之前点击的状态」）。每页常驻挂一次，槽只切 data-hidden —— 滚动位置、
  * 页内步骤（校准的 Z/XY/测试模型）、输入草稿、抽屉开合全部留住，切回也不重新拉数据。
  * 走 visibility 不走 display：display:none 会把滚动位置一起毁掉。
- * 需要「回到本页时对一次底账」的页面（首页 / 校准）另收 `active` 自己处理。
+ * （"回到本页对一次底账"那套 2026-10-06 随 AppState 退役 —— 页面订阅
+ * `src/app/state/appState.ts`，底账一变所有页同帧换账，不再需要 active prop。）
  */
 function PageSlot({ hidden, children }: { hidden: boolean; children: ReactNode }) {
   return (
@@ -108,13 +109,13 @@ export default function App() {
 
           <main className={s.body}>
             <PageSlot hidden={tab !== 'machine'}>
-              <PageHome density={density} active={tab === 'machine'} />
+              <PageHome density={density} />
             </PageSlot>
             <PageSlot hidden={tab !== 'preset'}>
               <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
             </PageSlot>
             <PageSlot hidden={tab !== 'calib'}>
-              <PageCalib active={tab === 'calib'} />
+              <PageCalib />
             </PageSlot>
             <PageSlot hidden={tab !== 'params'}>
               <PageParams density={density} />

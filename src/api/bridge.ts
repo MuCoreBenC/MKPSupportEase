@@ -79,15 +79,27 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
  *
  * **为什么不在调用方那边 new Channel**：一次调用一个 channel、参数名要与 Rust 侧的
  * `on_tick` 对上——这种细节在这层收一次，页面只见回调。
- * **不给回调就完全不挂** —— 与"点了等结果"那条路共用同一个 command，没有第二个版本。
+ *
+ * ★★ **不给回调也照样挂一条**（2026-10-06 修死路，别再改回去）：
+ * Rust 侧 `on_tick: Channel<DownloadTick>` 是**必填参数** —— Tauri 的 `Channel` 只有
+ * `CommandArg`、**没有 `Deserialize`**（它要 `Webview` 才能建），所以
+ * `Option<Channel<T>>` 根本编译不出来：契约里的"`onTick` 可选"只能**在这一层**兑现。
+ * 不挂的后果不是"少个回调"，而是 Tauri 在**参数反序列化**那一步就拒
+ * （`command download_runtime_file missing required key onTick`）——**命令体一行都不跑**
+ * （Rust 日志里连一条都没有），而界面只能拿到下面 `normalizeError` 兜底的
+ * 「出了点问题，请重试」。首页那颗「下载并应用」就是这么死的（有一档 `ShaMismatch`
+ * 的真实原因被它盖住了）。判据：`scripts/check-channel-args.mjs`。
+ *
+ * 挂着不给回调是安全的：JS 侧 `Channel` 的 `onmessage` 缺省就是空函数（收到即丢），
+ * Rust 侧 `send_tick` 对"没人听"也只记一行 debug —— 与"点了等结果"共用同一个 command，
+ * 没有第二个版本。
  */
 function withTick(
   args: Record<string, unknown>,
   onTick?: (tick: DownloadTick) => void,
 ): Record<string, unknown> {
-  if (onTick === undefined) return args
   const channel = new Channel<DownloadTick>()
-  channel.onmessage = onTick
+  if (onTick !== undefined) channel.onmessage = onTick
   return { ...args, onTick: channel }
 }
 
@@ -136,6 +148,9 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
+  /* 官方 → 我的文件：交付行直接另存（与「改这份」同一条可信字节闸；不碰任何状态） */
+  copyReleaseAsNew: (fileName, newName) =>
+    call('copyReleaseAsNew', 'copy_release_as_new', { fileName, newName }),
   /*
    * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
    * 这里管的是"选择器 + 两段式导入"：
@@ -170,9 +185,14 @@ export const bridgeApi: MkpApi = {
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
   /* 第 6 层：盘上这几份认得出是哪一版吗（旧版本 / 查不出它是哪一版）—— 只列有事的 */
   getDeliveryTrust: () => call('getDeliveryTrust', 'get_delivery_trust'),
-  /* 归档区（官方旧版本留档）：只列 + 读正文。删除 / 恢复**没有命令** —— 这一层不做 */
+  /* 归档区（官方旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
   getArchivedFiles: () => call('getArchivedFiles', 'get_archived_files'),
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
+  deleteArchivedFile: (path) =>
+    call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
+  /* 删除本机那份官方交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
+  deleteDeliveryFile: (fileName) =>
+    call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
   downloadCatalogFile: (fileName, onTick) =>
     call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
   downloadCatalogFiles: (fileNames, onTick) =>

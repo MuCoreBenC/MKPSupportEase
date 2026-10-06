@@ -149,6 +149,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
+        // 官方 → 我的文件：交付行直接另存（UX 场景测试 A1 的正路）
+        ipc::mine::copy_release_as_new,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
         ipc::import::stage_import,
         ipc::import::commit_import,
@@ -167,6 +169,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_delivery_trust,
         ipc::catalog::get_archived_files,
         ipc::catalog::read_archived_text,
+        // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
+        ipc::catalog::delete_delivery_file,
+        ipc::catalog::delete_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
@@ -209,6 +214,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
+        // 官方 → 我的文件：交付行直接另存（与上面那份清单一字不差）
+        ipc::mine::copy_release_as_new,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
         ipc::import::stage_import,
         ipc::import::commit_import,
@@ -227,6 +234,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_delivery_trust,
         ipc::catalog::get_archived_files,
         ipc::catalog::read_archived_text,
+        // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
+        ipc::catalog::delete_delivery_file,
+        ipc::catalog::delete_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与上面那份清单一字不差

@@ -20,6 +20,7 @@
     "publish:presets": "node scripts/publish-presets.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",
+    "check:channel-args": "node scripts/check-channel-args.mjs",
     "check:release-source": "node scripts/check-release-source.mjs"
   },
   "dependencies": {

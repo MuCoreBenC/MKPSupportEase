@@ -11,7 +11,7 @@
 //!
 //! **地址不在这一层写死，也不写在 catalog 里**：`presets/` 是内容源，换 Gitee、
 //! 换成自己的 CDN 是部署的事，不该为此重发一次说明书。地址来自
-//! [`runtime::source`]（`run/preset-source.json`，或构建期注入的默认值），
+//! [`runtime::source`]（AppState 的 presetSource 格，或构建期注入的默认值），
 //! 不知道就**诚实报没配**——不猜一个 URL、不假装下载成功。
 
 use std::path::Path;
@@ -145,16 +145,21 @@ pub async fn set_preset_source(
                 // ★ 先探形状（根 / source.json 两种都认），**通了才落盘** ——
                 //   错地址留在设置里比"没配"更难查（0.0.2 的教训）。
                 let (shape, _resolved) = runtime::source::probe_custom_shape(&raw)?;
-                runtime::source::save_source_with(&root, mode, Some(&raw), shape)?;
+                let source = runtime::source::make_source(mode, Some(&raw), shape)?;
+                runtime::app_state::set_preset_source(&root, source)?;
                 source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
             })
         });
-        return task
+        let dto = task
             .await
             .map_err(|e| AppError::internal("换数据源没跑到终局").with_detail(e.to_string()))?;
+        super::notify_app_state(&app);
+        return dto;
     }
     traced("setPresetSource", |_| {
-        runtime::source::save_source(&root, mode, None)?;
+        let source = runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
+        runtime::app_state::set_preset_source(&root, source)?;
+        super::notify_app_state(&app);
         source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
     })
 }
@@ -168,7 +173,8 @@ pub async fn set_preset_source(
 pub async fn clear_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
     traced("clearPresetSource", |_| {
         let root = internal_root(&app)?;
-        runtime::source::clear_source(&root)?;
+        runtime::app_state::clear_preset_source(&root)?;
+        super::notify_app_state(&app);
         source_dto(&root)
     })
 }
@@ -413,17 +419,22 @@ fn send_tick(
 
 /// 下载区 / 交付区里的一份（盘当底账），给界面的形状。
 ///
-/// `modifiedUnix` = 这份字节**落进本机的时刻**（UTC epoch 秒，文件 mtime）——
-/// 预设页本地表「时间」列的"下载到本机的时刻"。**界面自己转本地时区显示**
-/// （与归档区 `ArchivedFileDto.modified_unix` 同一条口径：默认构建不引时间库）。
+/// 时间**全部来自事件**（`preset_events` 账 + 版本身份反查），mtime 不再上界面：
+///
+/// - `downloaded_unix` / `replaced_unix` —— 这份字节是「下载」进来的还是「替换」上去的
+///   （两个事件至多一个在；都没有 = 认不出出身的字节，不记账不猜，界面照实「未知」）；
+/// - `published_at` —— 这份字节属于哪一代目录、那一代什么时候发布的（反查版本链；
+///   链建立之前的版本查不到 = `null`）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnDiskFileDto {
     pub file_name: String,
-    pub modified_unix: Option<u64>,
+    pub downloaded_unix: Option<u64>,
+    pub replaced_unix: Option<u64>,
+    pub published_at: Option<String>,
 }
 
-/// 已经下载到下载区的文件（盘就是底账：文件在且 SHA 对得上才算数），带落盘时刻
+/// 已经下载到下载区的文件（盘就是底账：文件在且 SHA 对得上才算数），带它的事件时间
 #[tauri::command]
 pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppError> {
     traced("getDownloadedFiles", |_| {
@@ -433,13 +444,15 @@ pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, 
             .into_iter()
             .map(|e| OnDiskFileDto {
                 file_name: e.file_name,
-                modified_unix: e.modified_unix,
+                downloaded_unix: e.downloaded_unix,
+                replaced_unix: e.replaced_unix,
+                published_at: e.published_at,
             })
             .collect())
     })
 }
 
-/// 有更新的文件（盘上在、字节与目录不一样），带盘上那一份的落盘时刻。
+/// 有更新的文件（盘上在、字节与目录不一样），带它的事件时间。
 /// "更新"就是对这些再跑一遍下载——旧份自动归档，没有单独的更新代码路径
 #[tauri::command]
 pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppError> {
@@ -450,7 +463,9 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppEr
             .into_iter()
             .map(|e| OnDiskFileDto {
                 file_name: e.file_name,
-                modified_unix: e.modified_unix,
+                downloaded_unix: e.downloaded_unix,
+                replaced_unix: e.replaced_unix,
+                published_at: e.published_at,
             })
             .collect())
     })
@@ -499,6 +514,14 @@ pub async fn get_delivery_trust(app: AppHandle) -> Result<Vec<DeliveryTrustDto>,
 }
 
 /// 归档区里的一份旧版本（给界面看的形状）。
+///
+/// 两个时间**各是各，永不互相顶替**（2026-10-06 预设事件时间模型）：
+///
+/// - `published_at` = 这一版**在云端发布**的时刻（`ReleasePublished`，反查版本出身）；
+/// - `replaced_unix` = 被换下来的时刻（`DeliveryReplaced.at`，事件账）。
+///
+/// 以前只有一个 mtime 顶在唯一的时间位上 —— 用户看到的就是"我动它的时刻"，
+/// 不是"这一版发布的时候"。现在两个都给，查不到的照实 `null`（不拿"现在"顶）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivedFileDto {
@@ -506,9 +529,14 @@ pub struct ArchivedFileDto {
     pub path: String,
     pub file_name: String,
     pub size: u64,
-    /// 这份旧版本被换下来的时刻（UTC epoch 秒）。**界面自己转人话** ——
-    /// 默认构建不引时间库（`time` 只挂在 workbench feature 下），别为一行时间戳把它拉进来
-    pub modified_unix: Option<u64>,
+    /// 这份旧字节的指纹 —— 事件账（`DeliveryReplaced.old_sha256`）与版本出身的对号键
+    pub sha256: String,
+    /// 这一版在云端发布过的时刻（RFC3339）。**链建立之前的版本查不到 = `null`**
+    /// —— 界面照实「未知（早于版本记忆）」
+    pub published_at: Option<String>,
+    /// 被换下来的时刻（UTC epoch 秒）= `DeliveryReplaced.at`。账前档案建账时已补记；
+    /// `null` = 账上没有（建账时读不动它），照实「未知」
+    pub replaced_unix: Option<u64>,
     /// 认得出是谁的旧版本就给；**认不出照实留空**（目录里已经没有这一份了：换源 / 下线）
     pub machine_id: Option<String>,
     pub version_id: Option<String>,
@@ -529,6 +557,8 @@ pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, 
         let root = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
         let prefix = format!("{}/", runtime::paths::ARCHIVE_DIR);
+        /* 事件账读一次（读不到/坏档 = 空表，替换时间照实「未知」） */
+        let events = runtime::delivery::load_events(&root, &catalog);
         Ok(runtime::delivery::archived_files(&root)
             .into_iter()
             .map(|a| {
@@ -536,18 +566,33 @@ pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, 
                 `delivery/mkp/presets/x.toml`（同形，新字节）。**不解析文件名**去猜机型
                 版本 —— 名字规则将来会变，而"归档这份与目录里哪一份同位"
                 是一个不需要额外知识的事实 */
-                let known = a
-                    .path
-                    .strip_prefix(&prefix)
-                    .and_then(|rel| catalog.files.iter().find(|f| f.path == rel));
+                let rel = a.path.strip_prefix(&prefix);
+                let known = rel.and_then(|rel| catalog.files.iter().find(|f| f.path == rel));
+                let machine_id = known.map(|f| f.machine_id.clone());
+                let version_id = known.map(|f| f.version_id.clone());
+                let kind = known.map(|f| f.kind.clone());
+                /* 两个时间各查各的，互不顶替：
+                 * - 替换时间 = 事件账里（同位路径 + 这份旧字节指纹）那条 `DeliveryReplaced.at`；
+                 * - 云端发布 = 版本身份反查（这一版登记在哪代目录、那代何时发布） */
+                let replaced_unix = rel.and_then(|rel| {
+                    runtime::preset_events::replaced_at_of(&events, rel, &a.sha256)
+                });
+                let published_at = if a.sha256.is_empty() {
+                    None
+                } else {
+                    runtime::delivery::generation_of_sha(&root, &a.sha256)
+                        .and_then(|g| g.published_at)
+                };
                 ArchivedFileDto {
                     path: a.path,
                     file_name: a.file_name,
                     size: a.size,
-                    modified_unix: a.modified_unix,
-                    machine_id: known.map(|f| f.machine_id.clone()),
-                    version_id: known.map(|f| f.version_id.clone()),
-                    kind: known.map(|f| f.kind.clone()),
+                    sha256: a.sha256,
+                    published_at,
+                    replaced_unix,
+                    machine_id,
+                    version_id,
+                    kind,
                 }
             })
             .collect())
@@ -581,6 +626,53 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
     });
     task.await
         .map_err(|e| AppError::internal("读归档没跑到终局").with_detail(e.to_string()))?
+}
+
+/* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
+
+/// **删除本机那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+///
+/// 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
+/// 删之前把属于这一份的**状态**一并清掉：使用中指针（官方线认文件名）撤下、
+/// 没保存的草稿一并丢弃 —— 界面确认框讲清这一步。事件账与归档**不动**（历史事实）。
+#[tauri::command]
+pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("deleteDeliveryFile", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let active = runtime::app_state::active_preset(&root)?;
+        let draft = runtime::app_state::draft(&root)?;
+        let mut state_cleared = false;
+        if active.as_ref().is_some_and(|a| {
+            a.origin == runtime::state::ActiveOrigin::Official && a.file_name == file_name
+        }) {
+            runtime::app_state::clear_active_preset(&root)?;
+            state_cleared = true;
+        }
+        if draft
+            .as_ref()
+            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::official(&file_name))
+        {
+            runtime::app_state::clear_draft(&root)?;
+            state_cleared = true;
+        }
+        runtime::delivery::delete_downloaded(&root, &catalog, &file_name)?;
+        if state_cleared {
+            super::notify_app_state(&app);
+        }
+        Ok(())
+    })
+}
+
+/// **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删，代价讲清 ——
+/// 云端只有最新版，这一版删了就找不回）。版本链与事件账**不动**
+/// （历史事实，不是这份文件的附属）。
+#[tauri::command]
+pub async fn delete_archived_file(app: AppHandle, path: String) -> Result<(), AppError> {
+    traced("deleteArchivedFile", |_| {
+        let root = internal_root(&app)?;
+        runtime::delivery::delete_archived(&root, &path)
+    })
 }
 
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */
@@ -658,7 +750,7 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
         let root = internal_root(&app)?;
         let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        match runtime::state::load_active(&root)? {
+        match runtime::app_state::active_preset(&root)? {
             None => Ok(None),
             Some(state) => Ok(Some(active_dto(&root, &user, &catalog, state))),
         }
@@ -687,7 +779,7 @@ pub async fn apply_active_preset(
     origin: Option<runtime::state::ActiveOrigin>,
     path: Option<String>,
 ) -> Result<ActivePresetDto, AppError> {
-    traced("applyActivePreset", |_| {
+    let dto = traced("applyActivePreset", |_| {
         use runtime::state::ActiveOrigin;
         let root = internal_root(&app)?;
         let user = crate::fsx::paths::user_root(&app)?;
@@ -716,7 +808,7 @@ pub async fn apply_active_preset(
                         )));
                     }
                 }
-                runtime::state::save_active(&root, file)?
+                runtime::app_state::set_active_official(&root, file)?
             }
             ActiveOrigin::Mine => {
                 let rel = path.ok_or_else(|| {
@@ -737,12 +829,15 @@ pub async fn apply_active_preset(
                  */
                 let text = runtime::mine::read_preset_text(&user, &rel)?;
                 let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
-                runtime::state::save_active_mine(&root, &rel, &digest)?
+                runtime::app_state::set_active_mine(&root, &rel, &digest)?
             }
         };
 
         Ok(active_dto(&root, &user, &catalog, state))
-    })
+    })?;
+    /* AppState 的写命令成功 → 广播（docs/APP-STATE.md §3.5），订阅者据此刷新 */
+    super::notify_app_state(&app);
+    Ok(dto)
 }
 
 /// 撤销使用。幂等：本来就没在用也不报错
@@ -750,7 +845,9 @@ pub async fn apply_active_preset(
 pub async fn clear_active_preset(app: AppHandle) -> Result<(), AppError> {
     traced("clearActivePreset", |_| {
         let root = internal_root(&app)?;
-        runtime::state::clear_active(&root)
+        runtime::app_state::clear_active_preset(&root)?;
+        super::notify_app_state(&app);
+        Ok(())
     })
 }
 

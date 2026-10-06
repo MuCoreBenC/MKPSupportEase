@@ -1,14 +1,23 @@
 /*
  * 首页与校准页共用的「文件体系」目录。
  *
- * 三个读，各管一级：
+ * 两个读，各管一级：
  *
  *   getMachines()        品牌 / 机型 / 版本 —— 三级选择的数据源（不再是手编表）
- *   getPresetFiles()     仓库里 9 份 MKP 预设文件（每份带 机型/版本 倒查）——「文件」这一级
- *   getRuntimeCatalog()  资产登记（`assets[]`）—— 机型图按 **id 查 path** 用它
+ *   getRuntimeCatalog()  MKP 预设清单 + 资产登记 + 品牌 —— 见下
  *
  * 作者定的方向：「首页也应该是消费那个文件，而不是用硬编码」——所以 A1 就是 A1
  * （`A1.toml`），P1S 的版本就是 `LITE`，不再靠一张手编表 + id 映射。
+ *
+ * # MKP 清单为什么吃 runtime catalog 的 `files[]`（2026-10-06 真机 bug 钉下的）
+ *
+ * `getPresetFiles()` 在真机上**只出切片器预设**（MKP 由 catalog 的 `files[]` 登记，
+ * 那条路的 `usedByVersions` 恒空）—— 首页的「文件」这一级吃它就整级为空：
+ * 抽屉里每项没有文件名小字、`fileOf` 恒 null，第二页的「应用」按钮点击在
+ * `comboFileName === null` 处**静默返回**（作者：「点了没用」）。mock 里
+ * getPresetFiles 恰好带 9 份 MKP 带倒查，浏览器里测不出来 —— 分歧以真机数据源
+ * 为准：MKP 的权威登记在 catalog 的 `files[]`（与预设页同源），每条自带
+ * `machineId` / `versionId`，倒查就是它自己。
  *
  * 整机图这条也一样（2026-10-03 第二刀）：机型写的是**资产 id**，文件在哪由 catalog 的
  * `assets[]` 说（`assetUrlOf`），客户端不再 import 具体文件。
@@ -29,7 +38,7 @@ import type { CatalogAsset, Machine, PresetFileInfo, RuntimeCatalogBrand } from 
 export interface Catalog {
   /** 机型目录（含品牌与版本），按目录顺序 */
   machines: Machine[]
-  /** 仓库里 `kind === 'mkp_preset'` 的文件；每份带 `usedByVersions`（机型/版本倒查） */
+  /** MKP 预设清单（catalog `files[]` 里 `kind === 'mkp_preset'` 的那些；倒查 = 它自己的 machineId/versionId） */
   presets: PresetFileInfo[]
   /**
    * 资产登记（`assets[]`）。机型图按 id 在这里查 `path`。
@@ -55,13 +64,28 @@ export function useCatalog(): Catalog {
 
   useEffect(() => {
     let alive = true
-    Promise.all([api.getMachines(), api.getPresetFiles()]).then(
-      ([list, files]) => {
+    void Promise.all([api.getMachines(), api.getRuntimeCatalog()]).then(
+      ([list, world]) => {
         if (!alive) return
         catalogCache = {
-          ...catalogCache,
           machines: list,
-          presets: files.filter((f) => f.kind === 'mkp_preset'),
+          presets: world.files
+            .filter((f) => f.kind === 'mkp_preset')
+            .map(
+              (f): PresetFileInfo => ({
+                id: f.fileName,
+                fileName: f.fileName,
+                path: f.path,
+                kind: 'mkp_preset',
+                category: '',
+                machineIds: [f.machineId],
+                usedByVersions: [{ machine: f.machineId, version: f.versionId }],
+                delivery: 'default',
+                inBundles: [],
+              }),
+            ),
+          assets: world.assets ?? [],
+          brands: world.brands ?? [],
         }
         setCat(catalogCache)
       },
@@ -69,18 +93,6 @@ export function useCatalog(): Catalog {
         /* 拉不到就空着：三级选择不显形（不摆假选项），控制台里有名字。
            这一层不吞也不编 —— 与预设页「三态显式」同一条规矩，但不给首页加骨架屏那一层。 */
         console.error('[catalog] 目录拉取失败', err)
-      },
-    )
-    /* 资产登记**单独拉、失败不拖累上一条**：它只影响大图（回落 logo），
-       而机型与版本必须照常显形。老版本的 catalog.json 里没有这一栏，按空处理 */
-    api.getRuntimeCatalog().then(
-      (c) => {
-        if (!alive) return
-        catalogCache = { ...catalogCache, assets: c.assets ?? [], brands: c.brands ?? [] }
-        setCat(catalogCache)
-      },
-      (err: unknown) => {
-        console.error('[catalog] 资产登记拉取失败（大图回落品牌 logo）', err)
       },
     )
     return () => {
