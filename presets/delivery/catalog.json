@@ -1,6 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "a5b0c77c3c37573d",
+  "revision": "08e55a3feeef37bc",
+  "publishedAt": "2026-10-06T05:46:36Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -4860,7 +4861,7 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "5721362dfd3dc8b3bd0e062885ff8176a62aec7a7ecf518e7191864e13edc74c",
+      "sha256": "3f98f82b42f7576ab0bd24a9efc348477476d5a1719b69fd7c41cc6595cb2d5b",
       "size": 4291
     },
     {
