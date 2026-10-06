@@ -1156,15 +1156,34 @@ export function useParams(): Params {
   )
 
   /** 换组合：草稿、栈、日志一起作废（面板上写的是「这次打开之后」）。已保存的那一层留着 */
-  const switchTo = useCallback((next: { machineId: string; versionId: string }) => {
-    setPick(next)
-    setDraft({})
-    setPast([])
-    setFuture([])
-    setLog([])
-    setSeq(0)
-    setSavedNote(null)
-  }, [])
+  /*
+   * 换 combo = 切换 —— **写回只住在这个显式动作处理器里**（抽屉选一份 / 确认切换，
+   * 都是用户点出来的，一次动作一次写）。2026-10-06 教训（作者：「左右左右地闪」）：
+   * 这条写回曾经是个 **effect**（依赖底账快照、每次底账变都重跑）—— effect 写
+   * 自己所依赖的共享状态就是构造反馈环：别处一应用，这里把旧 combo 写回底账、
+   * follow 再把 combo 拉向新底账，两个 effect 互相拉扯，1 秒内打出十几次 apply，
+   * 底账在两份预设之间来回震荡。**纪律由此钉死：effect 一律只读；写底账只能发生在
+   * 显式动作的处理器里**（首页按钮 / 各处抽屉的选择回调同理）。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
+  const switchTo = useCallback(
+    (next: { machineId: string; versionId: string }) => {
+      setPick(next)
+      setDraft({})
+      setPast([])
+      setFuture([])
+      setLog([])
+      setSeq(0)
+      setSavedNote(null)
+      activateCombo(
+        next.machineId,
+        next.versionId,
+        (m, v) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
+        active,
+      )
+    },
+    [active, catalog],
+  )
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft])
 
@@ -1275,25 +1294,12 @@ export function useParams(): Params {
   }, [active, catalog, machineId, versionId])
 
   /*
-   * 换 combo = 切换（作者 2026-10-06 真机反馈）：参数页的换组合（抽屉 / 「切换回」）
-   * 也是真的「用这一份」—— 底账跟着走，与首页 / 校准页同一份账。
-   * 守则见 activateCombo：底账已命中不动（挂载落地的那一次本来就在用这份，自然不动，
-   * 也不顶掉「我的文件」）、应用不了保持原账（页面三态如实显示）。
-   */
-  useEffect(() => {
-    activateCombo(
-      machineId === '' ? null : machineId,
-      versionId === '' ? null : versionId,
-      (m, v) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
-      active,
-    )
-  }, [machineId, versionId, active, catalog])
-
-  /*
-   * 「应用的状态」跟到参数页（作者 2026-10-06：点了应用，所有其他页就是应用的状态）：
-   * 应用发生在别处（首页的「下载并应用」按钮 / 预设页 / 各处抽屉）→ 这里跟着编辑那一份。
-   * 只单向跟事实：本页自选 combo 不被弹回的规矩不变，但底账**真变了**就换编辑目标 ——
-   * 与「切组合清草稿」同一语义。挂载落地的那一次 pick 本来就是底账那份，自然不动。
+   * 「应用的状态」跟到参数页（作者 2026-10-06：点了应用，所有其他页就是应用的状态）——
+   * **只读的单向跟随**：底账的 combo 值真变了（别处显式应用成功）→ 这边把编辑目标
+   * 挪过去。effect 不写任何共享状态（写回只在 `switchTo` 那个显式处理器里，
+   * 见那里的教训注释）；底账值没变（只是快照换了新对象）时这里直接返回，
+   * 不会拽着用户在别处选的 combo 乱跳。挂载落地的那一次 pick 本来就是
+   * 底账那份，自然不动。
    */
   useEffect(() => {
     if (active === null || catalog === null) return
