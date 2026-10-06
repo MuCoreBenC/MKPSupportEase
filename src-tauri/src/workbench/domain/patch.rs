@@ -25,16 +25,20 @@
 //! | BBS | 套餐那一层 | 版本已经有 `recommendedBundle`，再存一份 asset id 是两处真相 |
 //! | 新建 / 克隆 / 移动 / 删除版本 | 「机型与版本」页 | 清单就是 `presets/machines/*.toml`，那一页直接写它 |
 //!
-//! 剩下 [`Patch::SetValue`]、[`Patch::SetVisibility`]、[`Patch::SetBundle`]、
-//! [`Patch::MarkBuilt`] 四种。**撤销栈因此只服务值编辑** ——
+//! 剩下 [`Patch::SetValue`]、[`Patch::SetVisibility`]、[`Patch::SetBundle`] 三种。
+//! **撤销栈因此只服务值编辑** ——
 //! 低频的结构操作一律即时落盘、没有一个蓄了半天才生效的第二副本。
+//!
+//! 曾经还有第四种 [`Patch::MarkBuilt`]（生成记录回填草稿）。2026-10-06 状态机修正把它
+//! **整个删除**：生成记录是**台账**（`workbench/built.json`），由生成事务在写交付产物的
+//! 同一批直接落盘 —— 它不是编辑，不该住在草稿里。住在草稿里的后果是「产物已写盘、
+//! 台账在草稿」的三角状态：本机显示已生成，干净检出（CI）却判待生成（真机踩过，见
+//! `app::build` 的生成事务文档）。
 //!
 //! # 哪些手势不进撤销栈
 //!
-//! | 手势 | 可撤销 | 兜底 |
-//! |---|---|---|
-//! | 改值、套餐、可见性 | ✅ | —— |
-//! | [`Patch::MarkBuilt`] | ❌ | 它是生成的记录，不是编辑；撤销一条"生成过"没有意义 |
+//! 没有。三种 patch 全部可撤销 —— 撤销栈的取舍只剩「inverse 是不是空」
+//! （无变化的编辑不产反向）。
 //!
 //! # 非法 patch 拒绝整批
 //!
@@ -114,19 +118,6 @@ pub enum Patch {
         presets: Vec<String>,
         bbs: Vec<String>,
     },
-    MarkBuilt {
-        uids: Vec<String>,
-        stamp: String,
-        /// uid → 生成时的配方指纹
-        fingerprints: BTreeMap<String, String>,
-    },
-}
-
-impl Patch {
-    /// 这条 patch 能不能进撤销栈。见模块文档那张表
-    pub fn is_undoable(&self) -> bool {
-        !matches!(self, Patch::MarkBuilt { .. })
-    }
 }
 
 /// 整本草稿：**只存"改了什么"，不存整本**（doc §4.3）。
@@ -141,13 +132,14 @@ pub struct Draft {
     pub values: BTreeMap<String, Option<Value>>,
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
-    pub built: BTreeMap<String, BuiltRecord>,
+    // 没有 `built`：生成记录是台账（`workbench/built.json`），生成事务直接落盘，
+    // 不住在草稿里 —— 见模块文档「状态机修正」那一段。
 }
 
 impl Draft {
     /// 未保存的改动有几处
     pub fn dirty_count(&self) -> usize {
-        self.values.len() + self.visibility.len() + self.bundles.len() + self.built.len()
+        self.values.len() + self.visibility.len() + self.bundles.len()
     }
 
     pub fn is_clean(&self) -> bool {
@@ -188,10 +180,7 @@ impl Draft {
             }
         });
 
-        // 闭包没法对值类型泛化，所以这里用一个自由函数（见本文件末尾的 `retain_alive`）
-        let alive: BTreeSet<String> = committed.versions.keys().cloned().collect();
-        retain_alive(&mut self.built, &alive, &mut gone);
-
+        // （生成记录曾经也在这里清——它现在不住在草稿里了，见模块文档「状态机修正」。）
         gone.into_iter()
             .map(|uid| format!("草稿里有一条改动指向已经不存在的 {uid}，已丢弃"))
             .collect()
@@ -267,11 +256,9 @@ pub struct CatalogMachine {
 /// 应用的结果
 #[derive(Debug, Clone)]
 pub struct Applied {
-    /// 撤销这次操作要提交的 patches。空 = 这次操作不可撤销
+    /// 撤销这次操作要提交的 patches。空 = 这次没有可撤销的改动
+    /// （无变化的编辑不产反向，界面上也就不该有撤销按钮）
     pub inverse: Vec<Patch>,
-    /// 能不能进撤销栈。**为 false 时界面不该给出撤销按钮** ——
-    /// 给一个按下去没反应的按钮比没有按钮更糟
-    pub undoable: bool,
 }
 
 /// 值改动在草稿里的键。`"m:A1:toolhead.offset.x"` / `"v:A1/STANDARD:toolhead.offset.x"`
@@ -328,7 +315,6 @@ pub fn apply(
 
     validate(committed, registry, patches)?;
 
-    let undoable = patches.iter().all(Patch::is_undoable);
     let mut inverse: Vec<Patch> = Vec::new();
 
     for p in patches {
@@ -338,10 +324,7 @@ pub fn apply(
     // 反向要**倒着执行**才能回到原状：正向 A→B→C，反向是 C⁻¹→B⁻¹→A⁻¹
     inverse.reverse();
 
-    Ok(Applied {
-        inverse: if undoable { inverse } else { Vec::new() },
-        undoable,
-    })
+    Ok(Applied { inverse })
 }
 
 /// 把 `SetValue` 的数字归到注册表声明的那个类型上。
@@ -442,11 +425,6 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
             }
             Patch::SetVisibility { file_id, .. } => non_blank(file_id, "文件 id")?,
             Patch::SetBundle { bundle_id, .. } => non_blank(bundle_id, "套餐 id")?,
-            Patch::MarkBuilt { uids, .. } => {
-                for uid in uids {
-                    known_uid(uid)?;
-                }
-            }
         }
     }
     Ok(())
@@ -604,23 +582,6 @@ fn apply_one(
                 bbs: before.bbs,
             });
         }
-
-        Patch::MarkBuilt {
-            uids,
-            stamp,
-            fingerprints,
-        } => {
-            for uid in uids {
-                draft.built.insert(
-                    uid.clone(),
-                    BuiltRecord {
-                        stamp: stamp.clone(),
-                        fingerprint: fingerprints.get(uid).cloned().unwrap_or_default(),
-                    },
-                );
-            }
-            // 不产反向：撤销一条「生成过」没有意义（见模块文档那张表）
-        }
     }
 }
 
@@ -686,22 +647,6 @@ fn at_rest_effective(registry: &Registry, level: Level, owner: &str, key: &str) 
 
 /// 只留下 uid 还活着的条目，被丢掉的记进 `gone`。
 ///
-/// 写成自由函数而不是闭包：`Draft` 那几张表的值类型各不相同
-/// （`String` / `bool` / `Option<Vec<String>>` / `BuiltRecord`），闭包没法对值类型泛化
-fn retain_alive<V>(
-    map: &mut BTreeMap<String, V>,
-    alive: &BTreeSet<String>,
-    gone: &mut BTreeSet<String>,
-) {
-    map.retain(|uid, _| {
-        let ok = alive.contains(uid);
-        if !ok {
-            gone.insert(uid.clone());
-        }
-        ok
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,7 +767,6 @@ mod tests {
             )],
             "反向该是删键，不是「设回 1.1」"
         );
-        assert!(out.undoable);
     }
 
     /// 原来有自有值时，反向才是写回那个旧值
@@ -1228,30 +1172,6 @@ mod tests {
         );
     }
 
-    /// 生成记录不产反向 —— 撤销一条「生成过」没有意义
-    #[test]
-    fn mark_built_is_recorded_but_not_undoable() {
-        let (_d, reg) = registry();
-        let c = committed();
-        let mut draft = Draft::default();
-
-        let out = apply(
-            &mut draft,
-            &c,
-            &reg,
-            &[Patch::MarkBuilt {
-                uids: vec!["A1/STANDARD".to_owned()],
-                stamp: "2026-01-01T00:00:00Z".to_owned(),
-                fingerprints: [("A1/STANDARD".to_owned(), "abc".to_owned())]
-                    .into_iter()
-                    .collect(),
-            }],
-        )
-        .unwrap();
-        assert!(!out.undoable);
-        assert_eq!(draft.built["A1/STANDARD"].fingerprint, "abc");
-    }
-
     /// 非法 patch **拒绝整批**：前面几条也不许生效
     #[test]
     fn an_invalid_patch_rejects_the_whole_batch() {
@@ -1446,7 +1366,6 @@ mod tests {
             set(Level::Version, "A1/STANDARD", "toolhead.offset.z", None),
         ];
         let out = apply(&mut draft, &c, &reg, &forward).unwrap();
-        assert!(out.undoable);
         assert!(draft.dirty_count() > 0);
 
         apply(&mut draft, &c, &reg, &out.inverse).unwrap();

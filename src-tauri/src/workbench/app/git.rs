@@ -34,10 +34,14 @@ use crate::error::AppError;
 /// ★ 这就是"这次发布提交什么"的**唯一答案**。想提交新东西？加到这份清单里来，
 /// 别在这里写 `-A`。交付产物 `presets/delivery/` 是主体；结构规则表与资产台账跟着
 /// 结构 / 资产变化走，一起提交。
-pub const STAGE_ALLOWLIST: [&str; 3] = [
+pub const STAGE_ALLOWLIST: [&str; 4] = [
     "presets/delivery/",
     "presets/structure-signatures.toml",
     "presets/assets.toml",
+    // 生成台账（2026-10-06 状态机修正）：生成事务把记录直接写进 built.json，
+    // 它与交付产物同代 —— 发布提交不含它的话，main 上永远缺台账，
+    // 干净检出（CI）的「已生成」判据必红。
+    "workbench/built.json",
 ];
 
 /// **「发布软件版本」那条链**的 stage 白名单（第四刀）。
@@ -625,6 +629,8 @@ mod tests {
             "presets/delivery/mkp/presets/A1-standard.toml",
             "presets/structure-signatures.toml",
             "presets/assets.toml",
+            // 生成台账（2026-10-06 状态机修正）：与交付产物同代，必须进发布提交
+            "workbench/built.json",
         ] {
             assert!(is_allowed(ok), "{ok} 该在允许清单里");
         }
@@ -643,11 +649,15 @@ mod tests {
     }
 
     /// 白名单路径**是相对仓库根的前缀**，不是绝对路径（提交时 git 也按仓库根解释）。
+    /// 允许的两个前缀：交付产物（presets/）与生成台账（workbench/built.json）。
     #[test]
     fn the_allowlist_is_relative_to_the_repo_root() {
         for a in STAGE_ALLOWLIST {
             assert!(!a.starts_with('/'), "{a} 不该是绝对路径");
-            assert!(a.starts_with("presets/"), "{a} 该在 presets/ 下");
+            assert!(
+                a.starts_with("presets/") || a.starts_with("workbench/"),
+                "{a} 既不是交付面也不是工作台账，不该在白名单里"
+            );
         }
     }
 
@@ -807,11 +817,17 @@ mod tests {
         // `symbolic-ref --short HEAD` 拿得到非 main 分支名。
         ok(&["checkout", "-q", "-b", "publish/demo"]);
 
-        // 造两类文件：白名单里的（交付产物）与白名单外的（源码）。
+        // 造两类文件：白名单里的（交付产物 + 生成台账）与白名单外的（源码）。
         // 走 `atomic_write`（clippy 对测试也生效，且与产品代码同一条写盘纪律）。
         std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
         crate::fsx::atomic::atomic_write(&root.join("presets/delivery/catalog.json"), b"{}")
             .unwrap();
+        std::fs::create_dir_all(root.join("workbench")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.join("workbench/built.json"),
+            br#"{"v":1,"records":{}}"#,
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
         crate::fsx::atomic::atomic_write(&root.join("src/lib.rs"), b"// not ours").unwrap();
 
@@ -819,10 +835,17 @@ mod tests {
         let staged = git
             .stage_allowed(&[
                 "presets/delivery/catalog.json".to_owned(),
+                "workbench/built.json".to_owned(),
                 "src/lib.rs".to_owned(), // 意图混进来 —— 必须被第二道闸挡掉
             ])
             .expect("stage");
-        assert_eq!(staged, vec!["presets/delivery/catalog.json".to_owned()]);
+        assert_eq!(
+            staged,
+            vec![
+                "presets/delivery/catalog.json".to_owned(),
+                "workbench/built.json".to_owned(),
+            ]
+        );
         assert!(git.has_staged().unwrap(), "该有一份 staged");
 
         // 索引里只有白名单那一份
@@ -833,6 +856,10 @@ mod tests {
             .unwrap();
         let names = String::from_utf8_lossy(&out.stdout);
         assert!(names.contains("presets/delivery/catalog.json"));
+        assert!(
+            names.contains("workbench/built.json"),
+            "生成台账必须进发布提交（缺了它 main 就是产物新/台账旧）：{names}"
+        );
         assert!(
             !names.contains("src/lib.rs"),
             "白名单外的文件被 stage 进去了：{names}"

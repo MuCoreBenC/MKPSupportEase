@@ -872,9 +872,8 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
             &format!("{} 份产物 · {} 条曲线", edit.presets.len(), edit.bbs.len()),
         ));
     }
-    for (uid, rec) in &draft.built {
-        out.push(structural(uid, uid, "生成记录", "", &rec.stamp));
-    }
+    // 没有「生成记录」一条 —— 它是台账（`workbench/built.json`），生成事务直接落盘，
+    // 从来不进草稿（2026-10-06 状态机修正）。
 
     out
 }
@@ -912,10 +911,9 @@ fn split_any(raw: &str) -> Option<(Level, String, String)> {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyResult {
     pub view: BookView,
-    /// 撤销这次操作要提交的 patches，**倒序**
+    /// 撤销这次操作要提交的 patches，**倒序**。空 = 没有可撤销的改动
+    /// （无变化的编辑不产反向，界面上不给撤销按钮）
     pub inverse: Vec<Patch>,
-    /// 为 false 时界面**不给**撤销按钮（删除与生成记录不进撤销栈）
-    pub undoable: bool,
     pub notices: Vec<String>,
     /// 调用方要的那一页，**顺带带回来**。上一稿前端要在 apply 之后再问一次，
     /// 于是一次手势要走两趟 IPC、后端把整本书算两遍
@@ -1012,7 +1010,6 @@ pub fn wb_apply_draft(
             Ok(ApplyResult {
                 view,
                 inverse: out.inverse,
-                undoable: out.undoable,
                 notices,
                 desk,
                 matrix,
@@ -1384,7 +1381,10 @@ mod tests {
         )
         .unwrap();
         ctx.touch();
-        assert!(out.undoable);
+        assert!(
+            !out.inverse.is_empty(),
+            "值编辑必须产反向，否则撤销栈没东西可推"
+        );
 
         let (c2, d2, _) = state(&ctx).unwrap();
         assert_eq!(d2.dirty_count(), 1);

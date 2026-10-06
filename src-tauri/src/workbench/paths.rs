@@ -75,7 +75,7 @@ pub fn delivery_root() -> Result<PathBuf, AppError> {
 /// 交付根的**只读**定位（不建目录）：读状态用 —— 只有生成 / 发布才需要它存在。
 /// 路径与 [`delivery_root`] 同一处算出，不许第二处自拼。
 pub fn delivery_root_path() -> PathBuf {
-    repo_root().join(PRESETS_DIR).join(DELIVERY_SUBDIR)
+    delivery_root_at(&presets_root_path())
 }
 
 /// 把相对路径解析到开发源数据根内，越界一律 `PERMISSION_DENIED`
@@ -125,7 +125,7 @@ pub fn assets_root() -> Result<PathBuf, AppError> {
 /// 发布闸明写「只读：不写盘」，所以它必须走这一条而不是 [`assets_root`]。
 /// 路径与 [`assets_root`] 同一处算出，不许第二处自拼。
 pub fn assets_root_path() -> PathBuf {
-    repo_root().join(PRESETS_DIR).join(ASSET_DIR)
+    assets_root_at(&presets_root_path())
 }
 
 /// 预设数据的根：`<repo>/presets`。**唯一的预设真相源** ——
@@ -134,11 +134,31 @@ pub fn assets_root_path() -> PathBuf {
 /// 判据是**标志文件**而不是 `is_dir()`：一个同名空目录不该骗过定位，
 /// 否则真正的失败会推迟到第一次读机型文件才暴露。
 pub fn presets_root() -> Option<PathBuf> {
-    let p = repo_root().join(PRESETS_DIR);
+    let p = presets_root_path();
     p.join("registry")
         .join("param_registry.toml")
         .is_file()
         .then_some(p)
+}
+
+/// 预设根的**纯派生**（不探测）。定位探测归 [`presets_root`]；
+/// 生成 / 审计 / 发布这类**拿着会话里的 `presets.root()`** 找交付根的调用方，
+/// 必须走下面两个 `*_at` —— 派生只有这一处，`delivery_root_path` / `assets_root_path`
+/// 也只是它的真仓库特例。
+pub fn presets_root_path() -> PathBuf {
+    repo_root().join(PRESETS_DIR)
+}
+
+/// 交付目录相对**预设根**的落点。生成写盘、发布定稿、审计只读
+/// 三方都从这一处派生 —— 与 [`crate::workbench::domain::derive`] 的
+/// `product_on_disk` 同一条规矩：根用 `presets.root()`，不许第二处自拼。
+pub fn delivery_root_at(presets_root: &Path) -> PathBuf {
+    presets_root.join(DELIVERY_SUBDIR)
+}
+
+/// 资产根相对**预设根**的落点（见 [`delivery_root_at`] 的同源理由）。
+pub fn assets_root_at(presets_root: &Path) -> PathBuf {
+    presets_root.join(ASSET_DIR)
 }
 
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {

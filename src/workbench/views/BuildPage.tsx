@@ -88,8 +88,6 @@ interface Props {
   /** 外壳的「后端状态变过了」计数：生成 / 撤销之后重取基线与残留 */
   tick: number
   onGoto: (view: string, focus?: GotoFocus) => void
-  /** 草稿写入口（生成记录 MarkBuilt 从这里过 —— 不可撤销，不进栈） */
-  onApply: (label: string, patches: import('../api').Patch[]) => Promise<void>
   /** 先落盘再生成的那个「落盘」 */
   onSave: () => Promise<boolean>
   /** 生成之后让外壳重取整本（buildRows 的状态跟着走） */
@@ -130,7 +128,7 @@ function localStamp(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function BuildPage({ boot, book, words, report, tick, onGoto, onApply, onSave, onBookRefresh }: Props) {
+export default function BuildPage({ boot, book, words, report, tick, onGoto, onSave, onBookRefresh }: Props) {
   const rows = book.buildRows
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)
@@ -274,12 +272,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onA
     setGenBusy(true)
     try {
       const rep = await wb.generate({ picked: genPicked })
-      // 生成记录走唯一写入口落进草稿（不可撤销 —— 它是记录，不是编辑）。
-      // ★ mark 为 null = 一行都没记（全部无变化且台账已对上）—— 跳过 applyDraft：
-      //   草稿不动、built.json 不变，工作区不因为一次 no-op 的生成变脏
-      if (rep.mark) {
-        await onApply(`生成记录：${rep.written.length + rep.unchanged.length} 份`, [rep.mark])
-      }
+      // 生成记录由**后端生成事务直接落进台账**（built.json）—— 前端不再回填草稿，
+      // 生成完成 = 台账已是这一代（2026-10-06 状态机修正）。
       setGenDone(rep)
       setPicked({})
       onBookRefresh()

@@ -144,8 +144,10 @@ impl<'a> Book<'a> {
             }
         }
 
-        let mut built = committed.built.clone();
-        built.extend(draft.built.clone());
+        // 台账**只认已落盘的那一份**（2026-10-06 状态机修正）：生成事务直接把记录写进
+        // `workbench/built.json`，草稿里没有生成记录这一说了 —— 叠加草稿会让「本机的
+        // 已生成」与干净检出（CI）分叉，真机踩过（产物新、台账旧 → 本机 Built、CI Stale）。
+        let built = committed.built.clone();
         let mut bundles = committed.bundles.clone();
         bundles.extend(draft.bundles.clone());
 
@@ -1798,31 +1800,29 @@ mod tests {
     #[test]
     fn build_state_compares_fingerprints() {
         let f = Fixture::load();
-        let c = committed();
-        let mut d = Draft::default();
+        let mut c = committed();
+        let d = Draft::default();
 
-        // 先记一条「按当前配方生成过」
+        // 先记一条「按当前配方生成过」—— 记在**台账**（2026-10-06 状态机修正：
+        // 生成记录不住在草稿里，Book 的台账来源就是 committed.built）
         let fp = Book::new(&f.presets, &c, &d)
             .version_layers("A1/STANDARD")
             .unwrap()
             .fingerprint();
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::MarkBuilt {
-                uids: vec!["A1/STANDARD".to_owned()],
+        c.built.insert(
+            "A1/STANDARD".to_owned(),
+            BuiltRecord {
                 stamp: "2026-01-01T00:00:00Z".to_owned(),
-                fingerprints: [("A1/STANDARD".to_owned(), fp)].into_iter().collect(),
-            }],
-        )
-        .unwrap();
+                fingerprint: fp,
+            },
+        );
         assert_eq!(
             Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
             BuildState::Built
         );
 
         // 改一个值 → 指纹变 → 待生成
+        let mut d = Draft::default();
         apply(
             &mut d,
             &c,
@@ -2777,32 +2777,31 @@ mod tests {
     fn the_overall_artifact_state_ignores_versions_with_no_resources() {
         let f = Fixture::load();
         let c = committed();
-        let mut d = Draft::default();
+        let d = Draft::default();
 
         assert_eq!(
             Book::new(&f.presets, &c, &d).book_view().artifact,
             ArtifactState::Missing
         );
 
-        // 把三个有产物的版本都记成已生成
-        let b = Book::new(&f.presets, &c, &d);
+        // 把三个有产物的版本都记成已生成（记进**台账**，2026-10-06 状态机修正）
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
-        let fps: BTreeMap<String, String> = uids
-            .iter()
-            .map(|u| ((*u).to_owned(), b.version_layers(u).unwrap().fingerprint()))
-            .collect();
-        drop(b);
-        apply(
-            &mut d,
-            &c,
-            &f.presets.registry,
-            &[Patch::MarkBuilt {
-                uids: uids.iter().map(|u| (*u).to_owned()).collect(),
-                stamp: "2026-01-01T00:00:00Z".to_owned(),
-                fingerprints: fps,
-            }],
-        )
-        .unwrap();
+        let fps: Vec<String> = {
+            let b = Book::new(&f.presets, &c, &d);
+            uids.iter()
+                .map(|u| b.version_layers(u).unwrap().fingerprint())
+                .collect()
+        };
+        let mut c = c;
+        for (u, fp) in uids.iter().zip(fps) {
+            c.built.insert(
+                (*u).to_owned(),
+                BuiltRecord {
+                    stamp: "2026-01-01T00:00:00Z".to_owned(),
+                    fingerprint: fp,
+                },
+            );
+        }
 
         let view = Book::new(&f.presets, &c, &d).book_view();
         assert_eq!(

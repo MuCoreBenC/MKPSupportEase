@@ -509,28 +509,20 @@ export interface DiffLine {
  *
  * `kind` 是 serde 的内部标签，所以这里也用它做可辨识联合。
  *
- * b04 Task 12 之后**只剩这四种**：改名 / 归档 / 挑 BBS 与新建 / 克隆 / 移动 / 删除版本
- * 全部归「机型与版本」页即时落盘（REPORT §7），草稿里因此不再有结构手势 ——
- * **撤销栈只服务值编辑**
+ * b04 Task 12 之后结构手势就归了「机型与版本」页即时落盘（REPORT §7）；
+ * 2026-10-06 状态机修正又删掉了第四种 `markBuilt` —— 生成记录是**台账**
+ * （`workbench/built.json`），由生成事务直接落盘，从来不进草稿。
  */
 export type Patch =
   | { kind: 'setValue'; level: Level; owner: string; key: string; value: unknown | null }
   | { kind: 'setVisibility'; fileId: string; visibility: Visibility }
   | { kind: 'setBundle'; bundleId: string; presets: string[]; bbs: string[] }
-  | {
-      kind: 'markBuilt'
-      uids: string[]
-      stamp: string
-      fingerprints: Record<string, string>
-    }
 
 /** `app::ApplyResult` */
 export interface ApplyResult {
   view: BookView
-  /** 撤销这次操作要提交的 patches，**倒序**。为空时配合 `undoable=false` */
+  /** 撤销这次操作要提交的 patches，**倒序**。为空 = 没有可撤销的改动（不给撤销按钮） */
   inverse: Patch[]
-  /** 为 false 时界面**不给**撤销按钮 —— 生成记录不进撤销栈 */
-  undoable: boolean
   /** 顺带带回来的那一页。**省掉 apply 之后再问一次**（一次手势一次派生） */
   desk: Desk | null
   matrix: Matrix | null
@@ -604,9 +596,7 @@ export interface GenerateReport {
    *  不说的话「点了生成但文件时间没变」看起来像失败了 */
   unchanged: string[]
   skipped: [string, string][]
-  /** 生成记录要走 `applyDraft` 落进草稿。**null = 一行都没记**（全部无变化且台账已对上）
-   *  —— 跳过 applyDraft，草稿一个字节都不动 */
-  mark: Patch | null
+  // 没有生成记录字段：台账（built.json）由生成事务直接落盘，生成完成 = 台账已是这一代
 }
 
 /** `build::DiffState` —— 点生成会怎样 */
