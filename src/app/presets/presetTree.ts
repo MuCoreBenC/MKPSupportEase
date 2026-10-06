@@ -1276,6 +1276,18 @@ export interface PresetRowBase {
   /** 相对预设仓库根。表格第二行的小字与「在文件夹中显示」都用它 */
   path: string
   /**
+   * **表格第二行的小字（副标题）**（2026-10-07 作者定：副标题不要位置文案，
+   * 改显示**备注**）：备注覆盖账里有 ⇒ 用户的；否则那一版工作台写的 `remark`；
+     连版本备注都没有 ⇒ 回落 `path`（路径永远在 `title` 里，不丢）。
+   */
+  subtitle: string
+  /**
+   * 备注覆盖账的键（`null` = 这一行没有可改的备注 —— 官方仓库行）。
+   * 官方交付行 = `catalog.path`、用户线 = 相对用户根的路径；「改备注」「删了重新下载
+   * 就回到工作台那句」都认它。详情面板的备注编辑格只在它非 `null` 时出现。
+   */
+  remarkKey: string | null
+  /**
    * 哪一类。**`null` = 认不出**（用户自己的 `.json`：bbs 与 orca 都是 json，光看扩展名分不出）。
    *
    * 认不出的行**在任何类型档下都列**（藏起来等于说他没这份文件），
@@ -1418,6 +1430,13 @@ export interface PresetLocalRow extends PresetRowBase {
   copiedFrom?: string | null
   /** 出处账记的来源**文件名**（界面直接显示）。没有是 `null` */
   copiedFromName?: string | null
+  /**
+   * **这一份自己的归属**（只有 `mine` 行有它）：文件头 `# machine:` / `# variant:`
+   * 两行（认不出回落来源那份）。行上的 `machineId` 是**筛选档**（这一行挂在哪个
+   * 机型分栏下），归属是**文件自己的** —— 详情面板的「改归属」读这两个。
+   */
+  ownMachineId?: string | null
+  ownVersionId?: string | null
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1491,6 +1510,12 @@ export interface PresetRowsInput {
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
   /**
+   * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。
+   * 键 = 文件身份（官方交付行 `catalog.path` / 用户线相对用户根路径）；
+   * 有 ⇒ 副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
+   */
+  remarks: Record<string, string>
+  /**
    * **这次发布的时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表 release 行
    * 「时间」列的来源，显示时前端转本机时区。null = 目录没带（随包 / 旧版发布），
    * 那一列照实「未知」。
@@ -1543,6 +1568,8 @@ export interface ReleasePresetSource {
    * 和 `.svg` 全列了出来（2026-10-02 作者截图）。现在类别跟着数据走，两档按它分流。
    */
   kind: FileKind
+  /** **catalog 登记的落点**（`delivery/mkp/presets/A1-standard.toml`）—— 备注覆盖账的键 */
+  path: string
   /** 目录登记的字节数（真值） */
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
@@ -1737,6 +1764,25 @@ function versionNameLookup(
 }
 
 /**
+ * 版本 id → **备注**（副标题的第二优先级）。
+ *
+ * 与 `versionNameLookup` 同一棵树、同一个道理：只认当前这一档机型目录里有的，
+ * 查不到（没写 / 机型被筛掉了）返回 `undefined` —— 上层再往 `path` 回落，不编。
+ */
+function versionRemarkLookup(
+  machines: PresetMachineNode[],
+): (machineId: string, versionId: string) => string | undefined {
+  const byMachine = new Map<string, Map<string, string | undefined>>()
+  for (const m of machines) {
+    byMachine.set(
+      m.machine.id,
+      new Map(m.versions.map((v) => [v.version.id, v.version.remark ?? undefined])),
+    )
+  }
+  return (machineId, versionId) => byMachine.get(machineId)?.get(versionId)
+}
+
+/**
  * 本地表：**本机磁盘上真有的文件**。
  *
  * 两种来源拼在一起，用 `origin` 分开：
@@ -1767,9 +1813,18 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     staleReleases,
     releaseVersion,
     releaseAt,
+    remarks,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
+  const versionRemark = versionRemarkLookup(machines)
+  /*
+   * 副标题：**账上有覆盖（包括空串）就用用户的**（2026-10-07 作者改口：
+   * 「可以空着，不要回退」—— 用户写空副标题就空）；没有覆盖才走
+   * 「工作台写的 → 路径文本」回落。「恢复默认」= 删掉覆盖。
+   */
+  const remarkOr = (key: string | null, fallback: string): string =>
+    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
 
   const official = machineFiles(machines)
     .filter((e) => matchesKind(kind, e.file.kind))
@@ -1786,6 +1841,9 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
+        /* 官方仓库行没有备注覆盖（ remarkKey null）—— 副标题照旧路径文本 */
+        subtitle: f.path,
+        remarkKey: null,
         kind: f.kind,
         machineId: e.machineId,
         machineText: names.get(e.machineId) ?? e.machineId,
@@ -1836,6 +1894,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
               f.basedOnMachineId,
               f.basedOnVersionId,
             )}`
+      /*
+       * **自己的归属**（2026-10-07 作者要的：复制出来的那份也要显示机型 / 版本，
+       * 而且能改）：文件头 `# machine:` / `# variant:` 两行（后端已归一化，
+       * 头里没有 / 认不出回落血统那份）。副标题的版本备注也按它查。
+       */
+      const ownMachine = f.machineId ?? f.basedOnMachineId
+      const ownVersion = f.versionId ?? f.basedOnVersionId
       return {
         /* rowKey 带上当前那一档机型：换机型时这一行要当成新的一行重画（焦点与菜单都跟着行走） */
         rowKey: `mine:${machineId}:${f.path}`,
@@ -1843,13 +1908,21 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey: f.path,
         fileName: f.fileName,
         path: f.path,
+        /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 路径（presets-mine/…） */
+        subtitle: remarkOr(
+          f.path,
+          ownMachine !== null && ownVersion !== null
+            ? (versionRemark(ownMachine, ownVersion) ?? f.path)
+            : f.path,
+        ),
+        remarkKey: f.path,
         /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
         kind: f.kind,
         machineId,
-        /* 机型这一层没有来源 —— 写「—」，不替他猜 */
-        machineText: DASH_,
-        /* 用户自己的文件不属于任何版本。表格那一列写「—」，不替他猜一个 */
-        versions: [],
+        /* **归属**说它属于哪台 —— 不再是「—」；归属都没有（导入的裸文件）才写「—」 */
+        machineText: ownMachine === null ? DASH_ : (names.get(ownMachine) ?? ownMachine),
+        /* 归属那一版的显示名。都没有就不写，不替他猜一个 */
+        versions: ownMachine !== null && ownVersion !== null ? [versionName(ownMachine, ownVersion)] : [],
         /* **真值**：盘上那份的大小与改动时刻（用户线也盘当底账）—— 与切片器那一档同一档来源 */
         sizeText: sizeTextOf(f.size),
         modifiedText:
@@ -1859,12 +1932,16 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinned: pinned.has(f.path),
         scope: 'local',
         origin: 'mine',
-        untagged: true,
+        /* 归属都没有（导入的裸文件）才挂「未标机型」—— 有归属的那份现在自己说得出 */
+        untagged: ownMachine === null,
         live,
         /* 血统：它当初基于官方哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
+        /* 详情面板「改归属」读它（机型 / 版本两个下拉的数据源是行上这份归属） */
+        ownMachineId: ownMachine,
+        ownVersionId: ownVersion,
         /*
          * 第九层：文件级状态。**读不出来的照样列出来**（藏起来等于说他没这份文件），
          * 只是不给「应用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
@@ -1910,8 +1987,17 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         /* 仓库里没有它，没有 assetId —— 「应用」认 fileName（页面里分流） */
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
-        /* 第二行小字：把人引到盘上的落点；盘上那份不对劲时把那件事写在这里 */
+        /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
+           副标题 = 备注覆盖账里的 → 那一版工作台写的 → 落点文本；
+           盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
         path: releasePathText(p),
+        subtitle:
+          /* 盘上那份不对劲（旧版本 / 内容异常）时那件事**必须**写在副标题原地 ——
+             状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 落点」回落 */
+          p.state === 'ok'
+            ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? releasePathText(p))
+            : releasePathText(p),
+        remarkKey: p.path,
         kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
@@ -1977,9 +2063,14 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     releasePresets,
     releaseVersion,
     releaseAt,
+    remarks,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
+  const versionRemark = versionRemarkLookup(machines)
+  /* 与本地表同一条回落 —— 同一份覆盖账，两张表不各说一套（空覆盖也是覆盖，不回退） */
+  const remarkOr = (key: string | null, fallback: string): string =>
+    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
 
   /*
    * 凡文件名在**云端最新发布**里打包过的，官方行不再列出 —— 发布行接管它
@@ -2001,6 +2092,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
+        subtitle: f.path,
+        remarkKey: null,
         kind: f.kind,
         machineId: e.machineId,
         machineText: names.get(e.machineId) ?? e.machineId,
@@ -2040,6 +2133,12 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         path: `官方交付 / ${p.machineId} / ${p.versionId}`,
+        /* 副标题同样走备注（与本地表同一份覆盖账；盘上不对劲的状态只在本地表说） */
+        subtitle: remarkOr(
+          p.path,
+          versionRemark(p.machineId, p.versionId) ?? `官方交付 / ${p.machineId} / ${p.versionId}`,
+        ),
+        remarkKey: p.path,
         kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,

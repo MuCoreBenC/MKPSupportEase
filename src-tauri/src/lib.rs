@@ -136,6 +136,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
         ipc::mine::get_user_preset_files,
         ipc::mine::read_user_preset_text,
+        // 备注覆盖账 + 改归属（客户端副标题 / 复制出来的那份标机型版本）
+        ipc::mine::get_preset_remarks,
+        ipc::mine::set_preset_remark,
+        ipc::mine::set_user_preset_machine_version,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
         ipc::mine::begin_preset_edit,
         ipc::mine::patch_preset_draft,

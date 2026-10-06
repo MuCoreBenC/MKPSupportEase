@@ -657,6 +657,12 @@ pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(
             state_cleared = true;
         }
         runtime::delivery::delete_downloaded(&root, &catalog, &file_name)?;
+        /* 备注覆盖跟着删（「删了重新下载就回到工作台的备注」；删账失败不拦删除） */
+        if let Some(user_root) = crate::fsx::paths::user_root(&app).ok().as_deref() {
+            if let Some(f) = catalog.files.iter().find(|f| f.file_name == file_name) {
+                let _ = runtime::remarks::remove(user_root, &f.path);
+            }
+        }
         if state_cleared {
             super::notify_app_state(&app);
         }
