@@ -1107,6 +1107,11 @@ export interface VersionView {
   tag: string | null
   description: string | null
   /**
+   * **备注**（2026-10-07）：客户端预设列表的**副标题**显示的就是这一句。
+   * `null` = 没写（客户端回落路径文本）。可空 —— 客户端「副标题不要位置文案」的正文。
+   */
+  remark: string | null
+  /**
    * 这一版专属的外观图（**资产 id**）。`null` = 回落机型图（`MachineView.image`）——
    * 界面上要说明白那是回落，不是"没配"
    */
@@ -1384,7 +1389,13 @@ export interface BundleList {
 export const assetUrl = (url: string) => encodeURI(url)
 
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
-export type VersionField = 'name' | 'recommendedBundle' | 'tag' | 'description' | 'image'
+export type VersionField =
+  | 'name'
+  | 'recommendedBundle'
+  | 'tag'
+  | 'description'
+  | 'remark'
+  | 'image'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'

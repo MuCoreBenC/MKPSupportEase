@@ -60,6 +60,14 @@ pub struct UserPresetFileDto {
     /// 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜）
     pub based_on_machine_id: Option<String>,
     pub based_on_version_id: Option<String>,
+    /// **这一份自己的归属**（文件头 `# machine:` / `# variant:` 两行，对着目录
+    /// 大小写无关地归一化到版本 id）；头里没有 / 认不出就回落到来源那份
+    /// （`based_on_machine_id` / `based_on_version_id`）。列表的机型 / 版本两列读它。
+    ///
+    /// 「改归属」（[`set_user_preset_machine_version`]）改的就是文件头那两行 ——
+    /// 归属是文件自己的属性，随文件走。
+    pub machine_id: Option<String>,
+    pub version_id: Option<String>,
     /// **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
     /// 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编
     pub copied_from: Option<String>,
@@ -89,6 +97,22 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                 /* 出处账：这一份是复制来的还是导入来的（没记过就是 null，照实退回「我的」） */
                 let provenance = book.iter().find(|e| e.to == f.path);
                 let copied_from = provenance.and_then(|e| e.from.clone());
+                /*
+                 * **自己的归属**：头注释里 `# machine:` / `# variant:` 两行。
+                 * variant 在 B 类产物里写的是版本 id 的小写（`fast`），所以对着目录登记
+                 * **大小写无关**地找同一台机型下的版本，取目录里的规范写法（`FAST`）——
+                 * 界面拿它查显示名才查得到。头里没有 / 认不出就回落到来源那份的归属
+                 * （血统通常与头一致，所以大多数时候就是同一个答案；不猜、也不编）。
+                 */
+                let own = f.machine.as_deref().and_then(|mid| {
+                    let vid = f.variant.as_deref()?;
+                    let canonical = catalog
+                        .files
+                        .iter()
+                        .find(|c| c.machine_id == mid && c.version_id.eq_ignore_ascii_case(vid))
+                        .map(|c| c.version_id.clone())?;
+                    Some((mid.to_owned(), canonical))
+                });
                 UserPresetFileDto {
                     based_on: match runtime::mine::based_on(&catalog, f.lineage.as_ref()) {
                         runtime::mine::BasedOn::Current => "current",
@@ -103,6 +127,17 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                         .and_then(|l| l.based_on_release_time.clone()),
                     based_on_machine_id: source.map(|s| s.machine_id.clone()),
                     based_on_version_id: source.map(|s| s.version_id.clone()),
+                    /*
+                     * **自己的归属**：头注释里 `# machine:` / `# variant:` 两行
+                     * （上面归一化过的那份）。认不出回落来源那份的归属 —— 不猜、也不编。
+                     */
+                    machine_id: own
+                        .clone()
+                        .map(|o| o.0)
+                        .or_else(|| source.map(|s| s.machine_id.clone())),
+                    version_id: own
+                        .map(|o| o.1)
+                        .or_else(|| source.map(|s| s.version_id.clone())),
                     copied_from_name: copied_from
                         .as_deref()
                         .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()),
@@ -551,6 +586,8 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
             state_cleared = true;
         }
         runtime::mine::delete_file(&user_root, &path)?;
+        /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句；删账失败不拦删除） */
+        let _ = runtime::remarks::remove(&user_root, &path);
         if state_cleared {
             super::notify_app_state(&app);
         }
@@ -574,6 +611,70 @@ pub async fn reveal_in_folder(app: AppHandle, path: String) -> Result<(), AppErr
         app.opener()
             .reveal_item_in_dir(&target)
             .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
+    })
+}
+
+/* ---------- 备注覆盖账（客户端副标题）+ 改归属（2026-10-07） ---------- */
+
+/// **用户改过的备注**整本给界面（键 = 文件身份，见 [`runtime::remarks`] 模块头）。
+///
+/// 界面拿它叠加在 catalog 版本备注上：账上有 ⇒ 用用户的；没有 ⇒ 用工作台那句。
+#[tauri::command]
+pub async fn get_preset_remarks(
+    app: AppHandle,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    traced("getPresetRemarks", |_| {
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        Ok(runtime::remarks::load(&user_root))
+    })
+}
+
+/// **改一份预设的备注**（客户端副标题）。`remark` 为 `null` / 空 = 清掉覆盖，
+/// 回到工作台写的那句。只动这一本账 —— 文件字节与目录全程不碰。
+#[tauri::command]
+pub async fn set_preset_remark(
+    app: AppHandle,
+    key: String,
+    remark: Option<String>,
+) -> Result<(), AppError> {
+    traced("setPresetRemark", |_| {
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        runtime::remarks::set(&user_root, &key, remark.as_deref())
+    })
+}
+
+/// **改一份用户预设的归属**（机型 / 版本）：把文件头的 `# machine:` / `# variant:`
+/// 两行换成新值（正文一个字节不动）。复制出来的那份从此在列表的机型 / 版本两列
+/// 显示你选的这台。
+///
+/// 机型**必须目录里真有**（机型是目录登记的实体，认不出的机型在界面上什么都
+/// 查不到）；**版本随便写**（2026-10-07 作者：「版本也不一定是选择，加一个自定义」
+/// —— 版本只是头注释里的一行字，界面遇到不认识的就照原文显示，不拦、不猜）。
+#[tauri::command]
+pub async fn set_user_preset_machine_version(
+    app: AppHandle,
+    path: String,
+    machine_id: String,
+    version_id: String,
+) -> Result<(), AppError> {
+    traced("setUserPresetMachineVersion", |_| {
+        let machine_id = machine_id.trim();
+        let version_id = version_id.trim();
+        if machine_id.is_empty() || version_id.is_empty() {
+            return Err(AppError::invalid_argument(
+                "机型与版本都要填 —— 归属写的是文件头的那两行，留空就认不出",
+            ));
+        }
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let known = catalog.machines.iter().any(|m| m.id == machine_id);
+        if !known {
+            return Err(AppError::invalid_argument(format!(
+                "{machine_id} 不是目录里登记的机型 —— 归属的机型要选一台真的机器"
+            )));
+        }
+        runtime::mine::set_machine_variant(&user_root, &path, machine_id, version_id)
     })
 }
 

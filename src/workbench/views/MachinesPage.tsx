@@ -308,7 +308,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   /** 改版本的一格。同上 */
   const saveVersion = async (
     versionId: string,
-    field: 'name' | 'tag' | 'description' | 'recommendedBundle' | 'image',
+    field: 'name' | 'tag' | 'description' | 'remark' | 'recommendedBundle' | 'image',
     value: string | null,
   ) => {
     if (!m) return
@@ -1343,6 +1343,31 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                       }}
                     />
+                  </span>
+
+                  {/* **备注**（2026-10-07）：客户端预设列表的**副标题**显示的就是这一句。
+                      可空 —— 客户端那边空了回落路径文本；用户在客户端改过的那份记在
+                      客户端自己的覆盖账里，这里的改动不会盖掉它 */}
+                  <span className={s.kvKey}>备注</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.remark ?? ''}
+                      key={`vremark-${picked.id}-${picked.remark ?? ''}`}
+                      aria-label="备注"
+                      placeholder="可空 —— 显示在客户端预设列表的副标题"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.remark ?? ''))
+                          void saveVersion(picked.id, 'remark', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                    <span className={s.cardNote}>
+                      客户端副标题用这一句；用户改过的以用户的为准（更新不覆盖）
+                    </span>
                   </span>
 
                   {/* 这一版专属的外观图。**留空 = 回落机型图**（作者定的默认）——

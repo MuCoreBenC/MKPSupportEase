@@ -2,16 +2,23 @@
  * 预设表（**列随类型变** + 常驻操作列）。本地表与云端表共用这一个件。
  *
  * ```
- * MKP 配置（8 列，没有喷嘴层高）
- * 名称                 机型      版本      时间    大小     来源   状态      操作
- * A1.toml              A1       标准版    09-14   4.2 KB   官方   ● 已应用  已应用
- * presets/mkp/A1.toml
- * A1MF_260628.toml     A1       快拆版…   09-14   3.7 KB   官方   未应用    [应用]
+ * MKP 配置（5 列，没有喷嘴层高；「来源」列 2026-10-07 撤了 —— 来源在展开详情里说）
+ * 名称                 机型      版本      时间    操作
+ * A1.toml              A1       标准版    09-14   已应用
+ * 副标题（备注）
+ * A1MF_260628.toml     A1       快拆版…   09-14   [应用]
  *
- * 切片器配置（9 列，没有版本）
- * 名称                 机型      喷嘴  层高  时间    大小     来源   状态      操作
- * MKPProcess A1 0.4…   A1       0.4   0.20  09-14   8.1 KB   官方   ● 已复制  已复制
+ * 切片器配置（6 列，没有版本）
+ * 名称                 机型      喷嘴  层高  时间    操作
+ * MKPProcess A1 0.4…   A1       0.4   0.20  09-14   ● 已复制
  * ```
+ *
+ * # 副标题是备注，不是路径（2026-10-07 作者定）
+ *
+ * 名称下面那行小字原来写「下载区 mkp · A1/FAST」这种盘上位置 —— 作者：「副标题不要
+ * 这些，改用工作台的备注」。现在它按三段回落：**备注覆盖账里用户改过的 → 那一版
+ * 工作台写的 `remark` → 路径文本**（路径永远在 `title` 里，不丢）。备注可以在展开
+ * 详情里改（记进覆盖账：「更新不覆盖，删了重新下载才回到工作台那句」）。
  *
  * # MKP 和切片器是两种东西，列不一样
  *
@@ -19,8 +26,8 @@
  * 作者原话：「MKP 没有喷嘴，没有层高就不要显示，不要占个位置在那里。那个版本的话呢，
  * 切片器没有版本的话就不要显示版本」。所以切分段控件时**表头列数真的跟着换**：
  *
- *   MKP 配置    名称 / 机型 / 版本 / 时间 / 大小 / 来源 / 状态 / 操作
- *   切片器配置  名称 / 机型 / 喷嘴 / 层高 / 时间 / 大小 / 来源 / 状态 / 操作
+ *   MKP 配置    名称 / 机型 / 版本 / 时间 / 操作（「来源」列 2026-10-07 撤了，详情里有）
+ *   切片器配置  名称 / 机型 / 喷嘴 / 层高 / 时间 / 操作
  *
  * 不留空位、不画「—」占格。「类型」那一列也删了：分段控件已经把类型选定了，
  * 表里每一行都是同一种类型，再画一列写同一个词是重复。
@@ -67,8 +74,9 @@
  */
 
 
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import type { ContextMenuApi } from '../../components/menu'
+import type { Machine } from '../../api'
 import { longStatText, shortStatText } from '../store/package'
 import {
   ACTION_TEXT,
@@ -180,6 +188,24 @@ interface Props {
   onLive: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
   onDownload: (row: PresetTableRow) => void
+  /**
+   * **机型目录**（`data.machines`）：详情面板「归属」编辑格的两个下拉的数据源
+   * （机型 → 它的版本）。
+   */
+  machines: Machine[]
+  /**
+   * **备注覆盖账**（副标题的键 → 用户改过的备注）：详情面板「备注」格的当前值与
+   * 「有没有覆盖」都从它读。空对象 = 一个都没改过。
+   */
+  remarks: Record<string, string>
+  /** 改备注（写覆盖账；写什么存什么，空也存；`null` = 恢复默认）。失败由页面说出来 */
+  onSetRemark: (key: string, remark: string | null) => Promise<void>
+  /** 改用户预设的归属（机型 / 版本，文件头那两行）。失败由页面说出来 */
+  onSetAttribution: (
+    row: PresetTableRow,
+    machineId: string,
+    versionId: string,
+  ) => Promise<void>
 }
 
 export default function PresetTable({
@@ -203,6 +229,10 @@ export default function PresetTable({
   onEdit,
   onLive,
   onDownload,
+  machines,
+  remarks,
+  onSetRemark,
+  onSetAttribution,
 }: Props) {
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
@@ -296,9 +326,11 @@ export default function PresetTable({
               <th className={s.thTime} scope="col">
                 {scope === 'cloud' ? '云端更新' : '时间'}
               </th>
-              <th className={s.thOrigin} scope="col">
-                来源
-              </th>
+
+              {/*
+               * 「来源」列撤了（2026-10-07 作者：「来源不用显示在右侧」）——
+               * 它还在展开详情的「来源」格里（那里还能点「复制自 X」定位）。
+               */}
               <th className={s.thAct} scope="col">
                 操作
               </th>
@@ -401,9 +433,10 @@ export default function PresetTable({
                         </span>
                       )}
                     </span>
-                    {/* 第二行等宽小字：给人核对磁盘位置的，不是标题 */}
+                    {/* 第二行等宽小字：**备注**（覆盖账 → 工作台写的 → 路径回落）。
+                        磁盘位置在 title 里，不丢 */}
                     <span className={s.path} title={row.path}>
-                      {row.path}
+                      {row.subtitle}
                     </span>
                   </td>
 
@@ -424,32 +457,6 @@ export default function PresetTable({
                   )}
 
                   {statCell(row)}
-
-                  <td className={s.origin}>
-                    {locateTarget !== null ? (
-                      /*
-                       * 「复制自 X」这类可定位的来源：**它是按钮**——点击定位到来源那一行
-                       * 并高亮一下（页面层切轴 + 展开 + 闪光）。stopPropagation：
-                       * 点来源不算"展开这一行"。
-                       */
-                      <button
-                        type="button"
-                        className={`${s.originChip} ${s.originLink}`}
-                        data-origin={row.origin}
-                        title={origin.title}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onLocate(locateTarget)
-                        }}
-                      >
-                        {origin.text}
-                      </button>
-                    ) : (
-                      <span className={s.originChip} data-origin={row.origin} title={origin.title}>
-                        {origin.text}
-                      </span>
-                    )}
-                  </td>
 
                   {/*
                    * 操作列常驻。三种画法，**已经生效 / 已经下载的那一种是灰字不是按钮**：
@@ -574,13 +581,11 @@ export default function PresetTable({
                 {expanded && (
                   <tr className={s.expandRow}>
                     {/*
-                     * colSpan 必须**跟着上面的表头列数走**：MKP 6 列、切片器 7 列。
-                     * 「删状态/大小列」那轮砍了两列后这里的 8 没跟着改 —— 比表头多出的
-                     * 那一跨会撑出一个匿名的第 8 列，吃掉表格右侧的全部余量，且没有任何
-                     * 底色：表头和主行右边就多出一条白（作者：「切片器配置怎么点击展开
-                     * 变成这样」）。改列数时这里要一起改。
+                     * colSpan 必须**跟着上面的表头列数走**：MKP 5 列、切片器 6 列
+                     * （「来源」列撤了之后又各少一列）。比表头多出的那一跨会撑出一个
+                     * 匿名列，吃掉表格右侧的全部余量 —— 改列数时这里要一起改。
                      */}
-                    <td colSpan={mkp ? 6 : 7}>
+                    <td colSpan={mkp ? 5 : 6}>
                       <dl className={s.facts}>
                         {/*
                          * 展开详情**只回答用户真正要问的事**：什么版本 / 从哪来 / 什么时候
@@ -604,6 +609,24 @@ export default function PresetTable({
                             <dt className={s.factKey}>层高</dt>
                             <dd className={s.factVal}>{row.layerHeight ?? DASH_}</dd>
                           </>
+                        )}
+
+                        {/*
+                         * **备注**（副标题的正文）：这一行有 remarkKey（官方交付行 / 用户线）
+                         * 才有这一格 —— 在这里改的是**覆盖账**：改过的以后更新不覆盖，
+                         * 「清除」回到工作台写的那句（删了文件重新下载是另一条同效的路）。
+                         */}
+                        {row.remarkKey !== null && (
+                          <RemarkField
+                            /* key 带上显示值：保存/恢复之后行上的 subtitle 变了，
+                               输入框要以新值为初始重开一个（useState 只认首帧） */
+                            key={`${row.rowKey}:${row.subtitle}`}
+                            rowKey={row.rowKey}
+                            busy={row.rowKey === busyKey}
+                            current={row.subtitle}
+                            hasOverride={remarks[row.remarkKey] !== undefined}
+                            onSave={(remark) => onSetRemark(row.remarkKey ?? '', remark)}
+                          />
                         )}
 
                         <dt className={s.factKey}>来源</dt>
@@ -653,6 +676,26 @@ export default function PresetTable({
                               {MINE_UNREADABLE_TEXT}
                             </dd>
                           </>
+                        )}
+
+                        {/*
+                         * **改归属**（2026-10-07 作者要的：复制出来的那份可以改机型 / 版本）：
+                         * 写的是文件头 `# machine:` / `# variant:` 两行（正文一个字节不动），
+                         * 机型 / 版本必须是目录里真有的（后端校验）。能应用的 MKP 预设才给 ——
+                         * 读不出来的、认不出类别的改了也用不上。
+                         */}
+                        {row.origin === 'mine' &&
+                          row.kind === 'mkp_preset' &&
+                          row.mineState !== 'unreadable' && (
+                          <AttributionField
+                            key={`${row.rowKey}:${row.ownMachineId ?? ''}:${row.ownVersionId ?? ''}`}
+                            rowKey={row.rowKey}
+                            busy={row.rowKey === busyKey}
+                            machines={machines}
+                            machineId={row.ownMachineId ?? null}
+                            versionId={row.ownVersionId ?? null}
+                            onSave={(m, v) => onSetAttribution(row, m, v)}
+                          />
                         )}
 
                         {/*
@@ -886,5 +929,164 @@ export default function PresetTable({
         {rows.length === 0 && <p className={s.empty}>{emptyText()}</p>}
       </div>
     </div>
+  )
+}
+
+/* ——————————————————————————————————————————————————————————————
+ * 展开详情里的两个小编辑格（备注 / 归属）。状态都在自己的小盒子里 ——
+ * 表这边不替它们留全局状态；保存交回页面层（错误由页面说出来）。
+ * —————————————————————————————————————————————————————————————— */
+
+/**
+ * **备注**（副标题覆盖账）的编辑格。
+ *
+ * `current` 是账上有覆盖时的那句（没有覆盖时是回落链的显示值），输入框初始就是它。
+ * **用户写什么就是什么 —— 包括空串**（2026-10-07 作者改口：「可以空着，不要回退」：
+ * 存空副标题就空着，不偷偷退回工作台那句）；「恢复默认」才是把覆盖拿掉、
+ * 退回落入「工作台写的 → 路径」。恢复默认只在**真有覆盖**时出现。
+ */
+function RemarkField(props: {
+  rowKey: string
+  busy: boolean
+  /** 当前显示值（有覆盖 = 用户的；没有 = 回落链的那句） */
+  current: string
+  hasOverride: boolean
+  onSave: (remark: string | null) => Promise<void>
+}) {
+  const [text, setText] = useState(props.current)
+  const [saving, setSaving] = useState(false)
+  /* 动过输入框才算有要存的 —— 初始值就是现在显示的那一句；存空也是存（空也是覆盖） */
+  const dirty = text !== props.current
+  const save = async (remark: string | null) => {
+    setSaving(true)
+    try {
+      await props.onSave(remark)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <>
+      <dt className={s.factKey}>备注</dt>
+      <dd className={s.factVal}>
+        <span className={s.remarkRow}>
+          <input
+            className={s.remarkInput}
+            type="text"
+            value={text}
+            placeholder="空着 = 副标题留空"
+            title="这一句就是列表里名称下面的副标题。写什么显示什么（空就空着，不回退）；官方更新不会覆盖它。「恢复默认」才回到工作台写的那句"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !saving && !props.busy && dirty) void save(text.trim())
+            }}
+          />
+          <button
+            type="button"
+            className={s.factLink}
+            disabled={saving || props.busy || !dirty}
+            title={dirty ? '保存备注（空 = 副标题留空）' : '没有要保存的改动'}
+            onClick={() => void save(text.trim())}
+          >
+            保存
+          </button>
+          {props.hasOverride && (
+            <button
+              type="button"
+              className={s.factLink}
+              disabled={saving || props.busy}
+              title="去掉你改过的这一句，回到默认（工作台写的那句；没写就显示路径）"
+              onClick={() => void save(null)}
+            >
+              恢复默认
+            </button>
+          )}
+        </span>
+      </dd>
+    </>
+  )
+}
+
+/**
+ * **归属**（机型 / 版本）的编辑格：机型下拉 + **版本可自定义**（2026-10-07 作者：
+ * 「版本也不一定是选择，加一个自定义」—— 输入框带目录里那几版做候选，
+ * 也可以自己填一个；写进文件头的 variant 行，界面遇到不认识的照原文显示）。
+ * 没有归属（`null`）时初始为空，保存按钮不给点，直到两边都填了。
+ */
+function AttributionField(props: {
+  rowKey: string
+  busy: boolean
+  machines: Machine[]
+  machineId: string | null
+  versionId: string | null
+  onSave: (machineId: string, versionId: string) => Promise<void>
+}) {
+  const [machineId, setMachineId] = useState(props.machineId ?? '')
+  const [versionId, setVersionId] = useState(props.versionId ?? '')
+  const [saving, setSaving] = useState(false)
+  const versions = props.machines.find((m) => m.id === machineId)?.versions ?? []
+  const dirty = machineId !== (props.machineId ?? '') || versionId !== (props.versionId ?? '')
+  const ready = machineId !== '' && versionId.trim() !== ''
+  return (
+    <>
+      <dt className={s.factKey}>归属</dt>
+      <dd className={s.factVal}>
+        <span className={s.remarkRow}>
+          <select
+            className={s.remarkInput}
+            value={machineId}
+            title="这一份属于哪台机型（写进文件头的 machine 行）"
+            onChange={(e) => {
+              setMachineId(e.target.value)
+              setVersionId('')
+            }}
+          >
+            <option value="">请选择机型</option>
+            {props.machines.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display}
+              </option>
+            ))}
+          </select>
+          <input
+            className={s.remarkInput}
+            list={`attribution-versions-${props.rowKey}`}
+            value={versionId}
+            placeholder="选择一版或自己填"
+            title="这一份属于哪一版（写进文件头的 variant 行）。可以从列表里选，也可以自己填一个 —— 显示时照原文"
+            onChange={(e) => setVersionId(e.target.value)}
+          />
+          <datalist id={`attribution-versions-${props.rowKey}`}>
+            {versions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </datalist>
+          <button
+            type="button"
+            className={s.factLink}
+            disabled={saving || props.busy || !ready || !dirty}
+            title={
+              !ready
+                ? '机型与版本都填上才能保存'
+                : dirty
+                  ? '把文件头的 machine / variant 两行换成这个（正文一个字节不动）'
+                  : '没有要保存的改动'
+            }
+            onClick={() => void (async () => {
+              setSaving(true)
+              try {
+                await props.onSave(machineId, versionId.trim())
+              } finally {
+                setSaving(false)
+              }
+            })()}
+          >
+            保存
+          </button>
+        </span>
+      </dd>
+    </>
   )
 }

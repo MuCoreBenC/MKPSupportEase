@@ -132,6 +132,16 @@ export const bridgeApi: MkpApi = {
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
   /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-mine） */
   getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
+  /* 备注覆盖账（副标题）+ 改归属（文件头 # machine/# variant 两行） */
+  getPresetRemarks: () => call('getPresetRemarks', 'get_preset_remarks'),
+  setPresetRemark: (key, remark) =>
+    call('setPresetRemark', 'set_preset_remark', { key, remark }),
+  setUserPresetMachineVersion: (path, machineId, versionId) =>
+    call('setUserPresetMachineVersion', 'set_user_preset_machine_version', {
+      path,
+      machineId,
+      versionId,
+    }),
   readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
   /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */
   beginPresetEdit: (fileName, origin, path) =>

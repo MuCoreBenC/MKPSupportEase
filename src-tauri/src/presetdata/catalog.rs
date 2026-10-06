@@ -53,6 +53,16 @@ pub struct MachineVersion {
     pub tag: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// **备注**（客户端副标题用它）。可空；清空 = 删键。
+    ///
+    /// 2026-10-07 作者定：客户端预设列表的副标题不要路径、改显示这一句 ——
+    /// 「默认下载的用工作台写的，用户改了之后更新不覆盖（除非删了重新下载）」。
+    /// 它是版本的属性，所以住机型文件、随发布链走。
+    ///
+    /// ★ `skip_serializing_if`：没写就不出键 —— catalog / 机型文件的形状与加这一格之前
+    /// 逐字节相同（`embedded_matches_rebuild` 不用重出）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
     /// **这一版专属的外观图**（资产 id）。**缺 = 回落机型图**（不是"没图"）。
     ///
     /// 2026-10-03（作者定层级：品牌图 / 机型图 / 版本图，版本缺则回落机型）：
@@ -409,6 +419,8 @@ pub enum VersionField {
     RecommendedBundle,
     Tag,
     Description,
+    /// **备注**（客户端副标题）。可空
+    Remark,
     /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
     Image,
 }
@@ -421,6 +433,7 @@ impl VersionField {
             Self::Image => "image",
             Self::Tag => "tag",
             Self::Description => "description",
+            Self::Remark => "remark",
         }
     }
 
@@ -663,6 +676,8 @@ impl Machine {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            // 新建版本不写备注 —— 客户端副标题空了回落路径文本
+            remark: None,
             // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
             image: None,
         });
@@ -767,6 +782,7 @@ impl Machine {
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
             VersionField::Description => v.description = owned,
+            VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
         }
         Ok(())
@@ -1371,6 +1387,7 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
                             description: g("description"),
+                            remark: g("remark"),
                             image: g("image"),
                         })
                     })

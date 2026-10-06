@@ -158,6 +158,22 @@ export interface PresetData {
    */
   mine: UserPresetFile[]
   /**
+   * **备注覆盖账**（`api.getPresetRemarks()`，键 = 文件身份）：用户改过的副标题。
+   * 两张表的副标题都按「账上有的 → 那一版工作台写的 → 路径」回落。
+   */
+  remarks: Record<string, string>
+  /**
+   * **改一份预设的备注**（副标题覆盖账）。**写什么就是什么 —— 包括空串**
+   * （空 = 副标题留空，不回退）；`null` = 恢复默认（退回「工作台写的 → 路径」）。
+   * 「更新不覆盖」靠账在，不在文件里。
+   */
+  setRemark: (key: string, remark: string | null) => Promise<void>
+  /**
+   * **改一份用户预设的归属**（机型 / 版本）：文件头那两行换成新值，
+   * 回来重读用户线。机型必须目录里登记的；**版本可自定义**（后端校验机型）。
+   */
+  setMineMachineVersion: (path: string, machineId: string, versionId: string) => Promise<void>
+  /**
    * 正在使用的**唯一那一条**：从底账（`run/active-preset.json`）读出来的，
    * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
    *
@@ -421,6 +437,11 @@ export function usePresetData(importRevision = 0): PresetData {
   const [archived, setArchived] = useState<ArchivedFile[]>([])
   /* 当前数据源（release 行「来源」列的字）。读失败照实 null，不挡任何表 */
   const [sourceLabel, setSourceLabel] = useState<string | null>(null)
+  /*
+   * **备注覆盖账**（副标题）：用户改过的备注（键 = 文件身份）。只读一次 +
+   * 写后重读整本 —— 与 release / mine 同一条「界面读底账」的规矩。
+   */
+  const [remarks, setRemarks] = useState<Record<string, string>>({})
 
   /**
    * 把官方交付这一路的现况读一遍。
@@ -481,6 +502,8 @@ export function usePresetData(importRevision = 0): PresetData {
           versionId: f.versionId,
           fileName: f.fileName,
           kind,
+          /* 目录登记的落点：备注覆盖账的键（「改了备注，更新不覆盖」认的就是它） */
+          path: f.path,
           size: f.size,
           releaseVersion: null,
           /* 事件时间（见 `ReleasePresetSource` 三格的注释）；云端语义的时间走目录的发布时刻，两回事 */
@@ -510,15 +533,17 @@ export function usePresetData(importRevision = 0): PresetData {
 
     const load = async () => {
       /* 用户线那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
-      const [repo, list, menu, local, mine, copied] = await Promise.all([
+      const [repo, list, menu, local, mine, copied, marks] = await Promise.all([
         api.getPresetFiles(),
         api.getMachines(),
         api.getMenu(),
         api.getLocalFiles(),
         api.getUserPresetFiles(),
         api.getSlicerCopied(),
+        api.getPresetRemarks(),
       ])
       setMine(mine)
+      setRemarks(marks)
 
       /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
       const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
@@ -742,6 +767,29 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
+   * **改一份预设的备注**（2026-10-07 副标题覆盖账）：写完重读整本账 ——
+   * 副标题是账答的，不是前端改自己那份拷贝。写什么就是什么（空也存）；
+   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 路径」）。
+   */
+  const setRemark = useCallback(async (key: string, remark: string | null) => {
+    await api.setPresetRemark(key, remark)
+    setRemarks(await api.getPresetRemarks())
+  }, [])
+
+  /*
+   * **改一份用户预设的归属**（机型 / 版本）：写完重读用户线 ——
+   * 归属是文件头里那两行，重读之后列表的机型 / 版本两列以文件为准。
+   * 机型必须目录里登记的；版本可自定义（不认识的照原文显示）。
+   */
+  const setMineMachineVersion = useCallback(
+    async (path: string, machineId: string, versionId: string) => {
+      await api.setUserPresetMachineVersion(path, machineId, versionId)
+      setMine(await api.getUserPresetFiles())
+    },
+    [],
+  )
+
+  /*
    * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
    */
@@ -791,6 +839,10 @@ export function usePresetData(importRevision = 0): PresetData {
     copyAsNew,
     copyReleaseAsNew,
     reveal,
+    /** 备注覆盖账（副标题）与它的写入口；归属的写入口见 `setMineMachineVersion` */
+    remarks,
+    setRemark,
+    setMineMachineVersion,
   }
 }
 
@@ -975,6 +1027,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       releaseVersion: data.release.version,
       releaseAt: data.release.publishedAt,
       sourceLabel: data.sourceLabel,
+      remarks: data.remarks,
     }),
     [
       data.active,
@@ -985,6 +1038,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       data.release.stale,
       data.release.version,
       data.sourceLabel,
+      data.remarks,
       data.mine,
       copiedSet,
       kind,

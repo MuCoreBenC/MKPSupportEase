@@ -92,9 +92,11 @@
   width: 88px;
 }
 
-/* 版本：一个名字，或者几个名字用 `·` 连起来（不够宽就截断，title 里是全的） */
+/* 版本：一个名字，或者几个名字用 `·` 连起来（不够宽就截断，title 里是全的）。
+   2026-10-07 作者：「版本的宽一点」—— 104 装不下「快拆版260628」，加到 136
+   （宽度从撤掉的「来源」列的富余里拿） */
 .thVersion {
-  width: 104px;
+  width: 136px;
 }
 
 .thNum {
@@ -106,14 +108,9 @@
 }
 
 /*
- * 来源：三枚 chip 里最长的是 release 的「工作台发布 · 1.0.0」——
- * 实测内容约 106px（渲染 99.8px），原来的 72px 装不下，chip 又没兜底，
- * 溢出 41px 压到操作列上（作者：「字和字都叠在一起」）。
- * 加宽到放得下它（宽度从名称列的富余里拿，列一个不删）；窄档按 chip 自己的省略号兜底。
+ * 来源列撤了（2026-10-07 作者：「来源不用显示在右侧」）—— `.thOrigin` 与
+ * 表格里的来源格一起退役；来源的完整说法（含「复制自 X → 定位」）在展开详情里。
  */
-.thOrigin {
-  width: 140px;
-}
 
 /* 操作：一颗文字按钮（应用 / 复制 / 下载）或者三个字的灰字。
    按钮在列内**水平居中**（作者：「下面的按钮没有水平居中」），
@@ -138,8 +135,7 @@
 .head th.thMachine,
 .head th.thVersion,
 .head th.thNum,
-.head th.thTime,
-.head th.thOrigin {
+.head th.thTime {
   text-align: center;
 }
 
@@ -339,47 +335,7 @@
   white-space: nowrap;
 }
 
-/* ---------- 来源 ---------- */
-
-.origin {
-  text-align: center;
-  white-space: nowrap;
-}
-
-/*
- * tag 几何 —— 18px 高 / 0 6px 内衬 / 2px 圆角，不再做胶囊。
- *
- * 从 inline-flex 改成 inline-block + line-height —— 窄档（compact / mini）的
- * 来源列放不下「工作台发布 · 1.0.0」时按**省略号截断**，不再溢出压到操作列上
- * （text-overflow 对 inline-flex 不生效）。`title` 里仍是全文。
- */
-.originChip {
-  display: inline-block;
-  max-width: 100%;
-  height: 18px;
-  line-height: 18px;
-  padding: 0 6px;
-  border-radius: 2px;
-  background: var(--surface-sunken);
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-}
-
-/* 「我的」用蓝（--axis-y 那支），和官方分得开；两者都不是警示色 */
-.originChip[data-origin='mine'] {
-  background: rgb(59 130 246 / 10%);
-  color: #2563eb;
-}
-
-/* 「工作台发布」用绿 —— 它跟「已应用」状态条同一支色：同一条链上来的东西 */
-.originChip[data-origin='release'] {
-  background: rgb(22 163 74 / 10%);
-  color: #16a34a;
-}
+/* ---------- 来源（列已撤，样式只留展开详情用的注记） ---------- */
 
 /* ---------- 状态 ---------- */
 
@@ -622,10 +578,6 @@
   width: 58px;
 }
 
-[data-density='compact'] .thOrigin {
-  width: 58px;
-}
-
 [data-density='compact'] .thAct {
   /* 右线收窄（16px）后给「复制」按钮留够宽 */
   width: 70px;
@@ -653,12 +605,6 @@
   width: 40px;
 }
 
-
-[data-density='mini'] .thOrigin {
-  width: 38px;
-}
-
-
 [data-density='mini'] .thAct {
   width: 40px;
 }
@@ -677,8 +623,7 @@
   padding: 0 5px;
 }
 
-/* 两枚角标在 mini 收掉左右余量，否则一枚「已应用」就把 56px 的格子撑破（高度不变，只收左右） */
-[data-density='mini'] .originChip,
+/* 角标在 mini 收掉左右余量，否则一枚「已应用」就把 56px 的格子撑破（高度不变，只收左右） */
 [data-density='mini'] .badge {
   padding: 0 4px;
 }
@@ -706,23 +651,39 @@
   line-height: 1.6;
 }
 
+/* ---------- 详情面板里的两个小编辑格（备注 / 归属） ---------- */
+
+/* 一行摆下：输入框（或两个下拉）+ 动作按钮，别把详情撑成三行 */
+.remarkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 /*
- * 「复制自 X」这种**可定位**的来源格：长得像 chip，但它是按钮 ——
- * 悬停给下划线（有动作的东西要看得出来），底色仍是 chip 那套。
+ * 输入框与下拉同几何：24px 高（与操作按钮同档），细边框。
+ * 宽度吃满剩余 —— 备注是给人读的一句话，越宽越好读。
  */
-.originLink {
-  cursor: pointer;
-  border: 0;
+.remarkInput {
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 24px;
   padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
   font: inherit;
   font-size: var(--fs-label);
+  color: var(--text-1);
 }
 
-.originLink:hover,
-.originLink:focus-visible {
-  text-decoration: underline;
-}
-
-.originLink:focus-visible {
+.remarkInput:focus {
   outline: none;
+  border-color: var(--accent);
+}
+
+.remarkInput:disabled {
+  color: var(--text-3);
 }

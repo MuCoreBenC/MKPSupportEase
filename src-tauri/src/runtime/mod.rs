@@ -45,6 +45,9 @@ pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
 /// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。
 pub mod release_info;
+/// **备注覆盖账**（客户端副标题）：用户改过的备注记在这一本 —— 「更新不覆盖、
+/// 删了重下才回到工作台那句」靠它兑现
+pub mod remarks;
 pub mod resolver;
 pub mod source;
 pub mod state;
