@@ -20,11 +20,11 @@
 //! 名字里没有版本号（作者裁决：新系统不背旧命名的包袱）——目录格式由
 //! [`catalog::CATALOG_SCHEMA`] 表达，进化靠加字段，不靠改名。
 
-pub mod catalog;
-pub mod delivery;
 /// **应用持久化状态（AppState）**——`run/app-state.json` 的唯一读写入口（2026-10-06
 /// 架构决策，`docs/APP-STATE.md`）：一个应用一个状态文件，整份读-改-写 + 原子替换
 pub mod app_state;
+pub mod catalog;
+pub mod delivery;
 /// **通用文件导入入口**（第十二层）：外部文件怎么安全地进入应用 —— 拖拽 / 文件选择器
 /// 共用这一层，Preset 只是第一个消费者。与官方线 / 用户线都分开：
 /// 它只管"进来"，不碰"使用"（不校验内容、不碰状态）。

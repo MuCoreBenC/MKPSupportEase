@@ -141,7 +141,13 @@ mod tests {
     #[test]
     fn record_then_lookup_roundtrip() {
         let d = tempfile::tempdir().unwrap();
-        record(d.path(), "presets-mine/B.toml", Some("presets-mine/A.toml"), ProvenanceKind::Copy).unwrap();
+        record(
+            d.path(),
+            "presets-mine/B.toml",
+            Some("presets-mine/A.toml"),
+            ProvenanceKind::Copy,
+        )
+        .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].to, "presets-mine/B.toml");
@@ -153,8 +159,20 @@ mod tests {
     #[test]
     fn re_recording_replaces_the_entry_for_the_same_copy() {
         let d = tempfile::tempdir().unwrap();
-        record(d.path(), "presets-mine/B.toml", Some("presets-mine/A.toml"), ProvenanceKind::Copy).unwrap();
-        record(d.path(), "presets-mine/B.toml", Some("presets-mine/C.toml"), ProvenanceKind::Copy).unwrap();
+        record(
+            d.path(),
+            "presets-mine/B.toml",
+            Some("presets-mine/A.toml"),
+            ProvenanceKind::Copy,
+        )
+        .unwrap();
+        record(
+            d.path(),
+            "presets-mine/B.toml",
+            Some("presets-mine/C.toml"),
+            ProvenanceKind::Copy,
+        )
+        .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].from.as_deref(), Some("presets-mine/C.toml"));
@@ -164,7 +182,13 @@ mod tests {
     #[test]
     fn repath_follows_both_sides_of_a_copy() {
         let d = tempfile::tempdir().unwrap();
-        record(d.path(), "presets-mine/B.toml", Some("presets-mine/A.toml"), ProvenanceKind::Copy).unwrap();
+        record(
+            d.path(),
+            "presets-mine/B.toml",
+            Some("presets-mine/A.toml"),
+            ProvenanceKind::Copy,
+        )
+        .unwrap();
 
         repath(d.path(), "presets-mine/B.toml", "presets-mine/B2.toml").unwrap();
         assert_eq!(load(d.path())[0].to, "presets-mine/B2.toml");
@@ -179,7 +203,7 @@ mod tests {
     #[test]
     fn a_broken_ledger_reads_as_empty() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::write(d.path().join("provenance.json"), b"{not json").unwrap();
+        atomic_write(&d.path().join("provenance.json"), b"{not json").unwrap();
         assert!(load(d.path()).is_empty());
     }
 
@@ -187,7 +211,13 @@ mod tests {
     #[test]
     fn imports_have_no_from() {
         let d = tempfile::tempdir().unwrap();
-        record(d.path(), "presets-mine/外来的.toml", None, ProvenanceKind::Import).unwrap();
+        record(
+            d.path(),
+            "presets-mine/外来的.toml",
+            None,
+            ProvenanceKind::Import,
+        )
+        .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].kind, "import");

@@ -126,13 +126,7 @@ pub fn init(internal_root: &Path, events: Vec<PresetEvent>) {
     if is_initialized(internal_root) {
         return;
     }
-    let _ = save(
-        internal_root,
-        &Ledger {
-            schema: 1,
-            events,
-        },
-    );
+    let _ = save(internal_root, &Ledger { schema: 1, events });
 }
 
 /// 追加一条。只追加，不盖旧的（同一份文件换几版就有几条，历史不合并 ——
@@ -163,7 +157,10 @@ pub fn arrival_of(events: &[PresetEvent], file: &str, sha256: &str) -> Option<Ar
     for event in events {
         match event {
             PresetEvent::DeliveryDownloaded {
-                file: f, sha256: s, at, ..
+                file: f,
+                sha256: s,
+                at,
+                ..
             } if f == file && s == sha256 => hit = Some(Arrival::Downloaded(*at)),
             PresetEvent::DeliveryReplaced {
                 file: f,
@@ -197,8 +194,9 @@ pub fn replaced_at_of(events: &[PresetEvent], file: &str, old_sha256: &str) -> O
 }
 
 fn save(internal_root: &Path, ledger: &Ledger) -> Result<(), crate::error::AppError> {
-    let body = serde_json::to_vec_pretty(ledger)
-        .map_err(|e| crate::error::AppError::internal("事件账序列化不了").with_detail(e.to_string()))?;
+    let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
+        crate::error::AppError::internal("事件账序列化不了").with_detail(e.to_string())
+    })?;
     atomic_write(&ledger_path(internal_root), &body)
 }
 
@@ -232,7 +230,10 @@ mod tests {
         );
         let all = load(d.path());
         assert_eq!(all.len(), 2);
-        assert!(matches!(&all[1], PresetEvent::DeliveryReplaced { at: 200, .. }));
+        assert!(matches!(
+            &all[1],
+            PresetEvent::DeliveryReplaced { at: 200, .. }
+        ));
     }
 
     /// 硬规则③的读侧：没有事件就是没有（`None`），读侧不许拿别的东西顶
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn a_broken_ledger_reads_as_empty() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::write(d.path().join("preset_events.json"), b"{not json").unwrap();
+        atomic_write(&d.path().join("preset_events.json"), b"{not json").unwrap();
         assert!(load(d.path()).is_empty());
     }
 }

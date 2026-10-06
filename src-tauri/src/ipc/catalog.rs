@@ -157,8 +157,7 @@ pub async fn set_preset_source(
         return dto;
     }
     traced("setPresetSource", |_| {
-        let source =
-            runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
+        let source = runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
         runtime::app_state::set_preset_source(&root, source)?;
         super::notify_app_state(&app);
         source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
@@ -575,8 +574,9 @@ pub async fn get_archived_files(app: AppHandle) -> Result<Vec<ArchivedFileDto>, 
                 /* 两个时间各查各的，互不顶替：
                  * - 替换时间 = 事件账里（同位路径 + 这份旧字节指纹）那条 `DeliveryReplaced.at`；
                  * - 云端发布 = 版本身份反查（这一版登记在哪代目录、那代何时发布） */
-                let replaced_unix = rel
-                    .and_then(|rel| runtime::preset_events::replaced_at_of(&events, rel, &a.sha256));
+                let replaced_unix = rel.and_then(|rel| {
+                    runtime::preset_events::replaced_at_of(&events, rel, &a.sha256)
+                });
                 let published_at = if a.sha256.is_empty() {
                     None
                 } else {

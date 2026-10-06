@@ -2182,8 +2182,16 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
   BBS 落在 `<appDataDir>/assets/bbs/Process/0.4mm/…`。
 - 施工计划与验收清单：`docs/HOME-BUNDLE-DOWNLOAD.md`。
 
-## 增量之三十 · Rust 工具链 / 纪律清理（**未开工**，预存红）
+## 增量之三十 · Rust 工具链 / 纪律清理（2026-10-07，**已施工**）
 
-`cargo fmt --check` 3 处（`ipc/catalog.rs`×2、`ipc/mine.rs`×1）+ 双 feature clippy 各 10 条
-`std::fs::write`（`disallowed_methods`）+ 1 条 doc 缩进。清单与开工前置条件见
-`docs/RUST-LINT-CLEANUP.md`。**作者 2026-10-07 裁定：单独一刀做，不混进增量之二十九。**
+**作者裁定：单独一刀做，不混进增量之二十九。** 且"第一步不是改代码，是先确认 CI 工具链"。
+
+- **CI 实际用 rustc 1.99.0 / rustfmt 1.10.0**（两个 Rust job 都是 floating `stable`；从真实 run 日志读到）；
+  本机当时是 1.97.1 ⇒ 落后两版。装上 1.99.0 复核后**报的是同一批** ⇒ **不是工具链漂移**，
+  是 feat/app-state 新写的代码踩了 `clippy.toml` 既有的写盘纪律（那批提交没推过，CI 从没见过）。
+- 修法按**仓库既有形状**：9 处测试里的 `std::fs::write` → `fsx::atomic::atomic_write`
+  （`src-tauri` 里 atomic_write 有 117 处、`std::fs::write` 只在注释里），**没有加 `#[allow]`**；
+  1 处 doc 列表缩进；另 `cargo +1.99.0 fmt` 收 11 个文件（AppState 那批新行没跑过 fmt，1.97 / 1.99 都认）。
+- 全绿：`fmt --check`（两个版本）、双 feature `clippy --all-targets -D warnings` 都干净；
+  判据 **729**（默认）+ **687**（workbench lib）全过。本刀零 TS 改动。
+- 明细与遗留项（**要不要钉 `rust-toolchain.toml` —— 没做**）见 `docs/RUST-LINT-CLEANUP.md`。

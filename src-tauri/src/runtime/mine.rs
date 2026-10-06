@@ -1606,7 +1606,10 @@ mod tests {
         };
         crate::fsx::atomic::atomic_write(
             &root.join(crate::runtime::paths::CATALOG_FILE),
-            catalog_with(vec![file]).to_pretty_json().unwrap().as_bytes(),
+            catalog_with(vec![file])
+                .to_pretty_json()
+                .unwrap()
+                .as_bytes(),
         )
         .unwrap();
         write(root, &format!("delivery/mkp/presets/{name}"), content);
@@ -1634,11 +1637,22 @@ mod tests {
             text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
             "血统要指向来源交付文件：{text}"
         );
-        assert!(text.contains("# based_on_sha256:"), "摘要那行也要在：{text}");
-        assert!(text.contains("涂胶宽度 = 1.0"), "官方原件的字节要原样在副本里：{text}");
+        assert!(
+            text.contains("# based_on_sha256:"),
+            "摘要那行也要在：{text}"
+        );
+        assert!(
+            text.contains("涂胶宽度 = 1.0"),
+            "官方原件的字节要原样在副本里：{text}"
+        );
 
         assert_eq!(
-            std::fs::read(internal.path().join("delivery/mkp/presets/A1-standard.toml")).unwrap(),
+            std::fs::read(
+                internal
+                    .path()
+                    .join("delivery/mkp/presets/A1-standard.toml")
+            )
+            .unwrap(),
             "涂胶宽度 = 1.0\n".as_bytes(),
             "官方原件一个字节没动"
         );
@@ -1688,16 +1702,14 @@ mod tests {
         };
         crate::fsx::atomic::atomic_write(
             &internal.path().join(crate::runtime::paths::CATALOG_FILE),
-            catalog_with(vec![file]).to_pretty_json().unwrap().as_bytes(),
+            catalog_with(vec![file])
+                .to_pretty_json()
+                .unwrap()
+                .as_bytes(),
         )
         .unwrap();
-        let e = copy_release_as_new(
-            internal.path(),
-            user.path(),
-            "MKPProcess.json",
-            "副本.json",
-        )
-        .unwrap_err();
+        let e = copy_release_as_new(internal.path(), user.path(), "MKPProcess.json", "副本.json")
+            .unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
     }
 
@@ -1708,7 +1720,11 @@ mod tests {
         let internal = tempfile::tempdir().unwrap();
         let user = tempfile::tempdir().unwrap();
         release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
-        write(user.path(), "presets-mine/已有.toml", "[wiping]\nspeed = 80\n");
+        write(
+            user.path(),
+            "presets-mine/已有.toml",
+            "[wiping]\nspeed = 80\n",
+        );
         let active = crate::runtime::app_state::set_active_mine(
             user.path(),
             "presets-mine/已有.toml",
@@ -1719,20 +1735,31 @@ mod tests {
             crate::runtime::state::DraftSubject::mine("已有.toml", "presets-mine/已有.toml");
         crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
 
-        let e = copy_release_as_new(internal.path(), user.path(), "A1-standard.toml", "已有.toml")
-            .unwrap_err();
+        let e = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "已有.toml",
+        )
+        .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(e.message.contains("不覆盖"), "{}", e.message);
-        let e =
-            copy_release_as_new(internal.path(), user.path(), "A1-standard.toml", "A1-standard.toml")
-                .unwrap_err();
+        let e = copy_release_as_new(
+            internal.path(),
+            user.path(),
+            "A1-standard.toml",
+            "A1-standard.toml",
+        )
+        .unwrap_err();
         assert!(e.message.contains("不同的名字"), "{}", e.message);
 
         let after = crate::runtime::app_state::active_preset(user.path())
             .unwrap()
             .unwrap();
         assert_eq!(after.file_name, active.file_name, "使用中没动");
-        let draft = crate::runtime::app_state::draft(user.path()).unwrap().unwrap();
+        let draft = crate::runtime::app_state::draft(user.path())
+            .unwrap()
+            .unwrap();
         assert_eq!(draft.text, "改到一半", "草稿没被碰");
     }
 

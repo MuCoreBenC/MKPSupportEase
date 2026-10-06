@@ -260,8 +260,7 @@ pub fn deliver(
                 internal_root,
                 PresetEvent::DeliveryReplaced {
                     file: file.path.clone(),
-                    old_revision: generation_of_sha(internal_root, &old_sha)
-                        .map(|g| g.revision),
+                    old_revision: generation_of_sha(internal_root, &old_sha).map(|g| g.revision),
                     old_sha256: old_sha,
                     new_sha256: Some(new_sha),
                     new_revision: local_revision(internal_root),
@@ -291,7 +290,7 @@ pub struct Generation {
 /// 以**最早**登记它的那一代为它的发布（版本的出生，不是它最近一次被提起）。
 pub fn generation_index(internal_root: &Path) -> std::collections::HashMap<String, Generation> {
     /* 收集所有能当证据的目录字节，带上各自的 mtime（读不到的排最后，仍参与 ——
-       排序只是为了让"最早登记"赢，不是可信度判定） */
+    排序只是为了让"最早登记"赢，不是可信度判定） */
     let mut candidates: Vec<(u64, Vec<u8>)> = Vec::new();
     let push = |path: std::path::PathBuf, out: &mut Vec<(u64, Vec<u8>)>| {
         if let Ok(bytes) = std::fs::read(&path) {
@@ -300,13 +299,20 @@ pub fn generation_index(internal_root: &Path) -> std::collections::HashMap<Strin
         }
     };
     if let Ok(entries) = std::fs::read_dir(super::release::catalog_chain_dir(internal_root)) {
-        let mut chain: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+        let mut chain: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
         chain.sort();
         for p in chain {
             push(p, &mut candidates);
         }
     }
-    push(archive_dir(internal_root).join(CATALOG_FILE), &mut candidates);
+    push(
+        archive_dir(internal_root).join(CATALOG_FILE),
+        &mut candidates,
+    );
     push(super::paths::catalog_file(internal_root), &mut candidates);
     candidates.sort_by_key(|(at, _)| *at);
 
@@ -318,12 +324,10 @@ pub fn generation_index(internal_root: &Path) -> std::collections::HashMap<Strin
         for f in &catalog.files {
             /* sha 是 None 的条目（随包 bootstrap 不登记）认不出任何字节 —— 跳过 */
             if let Some(sha) = &f.sha256 {
-                index
-                    .entry(sha.clone())
-                    .or_insert_with(|| Generation {
-                        revision: catalog.revision.clone(),
-                        published_at: catalog.published_at.clone(),
-                    });
+                index.entry(sha.clone()).or_insert_with(|| Generation {
+                    revision: catalog.revision.clone(),
+                    published_at: catalog.published_at.clone(),
+                });
             }
         }
     }
@@ -371,7 +375,10 @@ fn bootstrap_events(internal_root: &Path, catalog: &super::Catalog) {
         let Some(at) = a.modified_unix else {
             continue;
         };
-        let Some(file) = a.path.strip_prefix(&format!("{}/", super::paths::ARCHIVE_DIR)) else {
+        let Some(file) = a
+            .path
+            .strip_prefix(&format!("{}/", super::paths::ARCHIVE_DIR))
+        else {
             continue;
         };
         let file = file.to_owned();
@@ -609,12 +616,10 @@ pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<Kno
     }
 
     /* 归档目录（单槽 + 版本链）里登记的指纹。读不出来 / 是更未来的代次的那份 =>
-       当作"没有这一档证据"，不让整条判据失败 */
-    let mut catalog_paths = vec![
-        internal_root
-            .join(super::paths::ARCHIVE_DIR)
-            .join(CATALOG_FILE),
-    ];
+    当作"没有这一档证据"，不让整条判据失败 */
+    let mut catalog_paths = vec![internal_root
+        .join(super::paths::ARCHIVE_DIR)
+        .join(CATALOG_FILE)];
     if let Ok(entries) = std::fs::read_dir(super::release::catalog_chain_dir(internal_root)) {
         let mut chain: Vec<_> = entries
             .flatten()
@@ -881,9 +886,7 @@ fn entries_in_status(
                     Some(preset_events::Arrival::Replaced(at)) => Some(at),
                     _ => None,
                 },
-                published_at: generations
-                    .get(&sha)
-                    .and_then(|g| g.published_at.clone()),
+                published_at: generations.get(&sha).and_then(|g| g.published_at.clone()),
             })
         })
         .collect()
@@ -1003,10 +1006,25 @@ mod tests {
         let v1 = entry("A1-standard.toml", "版本一".as_bytes());
         let v2 = entry("A1-standard.toml", "版本二".as_bytes());
 
-        deliver(root.path(), &v1, &MemorySource("版本一".as_bytes().to_vec())).unwrap();
+        deliver(
+            root.path(),
+            &v1,
+            &MemorySource("版本一".as_bytes().to_vec()),
+        )
+        .unwrap();
         // 同字节重放：什么都没发生，不记事件
-        deliver(root.path(), &v1, &MemorySource("版本一".as_bytes().to_vec())).unwrap();
-        deliver(root.path(), &v2, &MemorySource("版本二".as_bytes().to_vec())).unwrap();
+        deliver(
+            root.path(),
+            &v1,
+            &MemorySource("版本一".as_bytes().to_vec()),
+        )
+        .unwrap();
+        deliver(
+            root.path(),
+            &v2,
+            &MemorySource("版本二".as_bytes().to_vec()),
+        )
+        .unwrap();
 
         let events = preset_events::load(root.path());
         assert_eq!(events.len(), 2, "下载一条 + 替换一条");
@@ -1049,6 +1067,7 @@ mod tests {
     ///   写它的那一刻就是换版那一刻）—— **同一份盘上字节只有一种来路**：被替换
     ///   事件解释过的不再记「下载」（硬规则①）；
     /// - 认不出出身的字节不记（硬规则③，不许 mtime 冒充业务时间）。
+    ///
     /// 建过账之后只追加，绝不回写。
     #[test]
     fn bootstrap_seeds_the_ledger_from_disk() {
@@ -1057,11 +1076,17 @@ mod tests {
         let plain = entry("A1-standard.toml", "纯下载的存量".as_bytes());
         let replaced = entry("A1-fast.toml", "替换上去的新份".as_bytes());
         // 直接把文件放盘上（不走 deliver）：模拟"账建起来之前"的存量
-        std::fs::write(root.path().join(&plain.path), "纯下载的存量".as_bytes()).unwrap();
-        std::fs::write(root.path().join(&replaced.path), "替换上去的新份".as_bytes()).unwrap();
+        /* 写盘走全仓唯一那个出口（`clippy.toml` 禁 `std::fs::write`）—— 测试也一样 */
+        crate::fsx::atomic::atomic_write(&root.path().join(&plain.path), "纯下载的存量".as_bytes())
+            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join(&replaced.path),
+            "替换上去的新份".as_bytes(),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.path().join("archive/mkp")).unwrap();
-        std::fs::write(
-            root.path().join("archive/mkp/A1-fast.toml"),
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("archive/mkp/A1-fast.toml"),
             "被换下的旧份".as_bytes(),
         )
         .unwrap();
@@ -1078,7 +1103,10 @@ mod tests {
         let catalog = catalog_with(vec![plain, replaced]);
         let got = downloaded_entries(root.path(), &catalog); // 第一次读：触发建账
         assert_eq!(got.len(), 2);
-        let plain_row = got.iter().find(|e| e.file_name == "A1-standard.toml").unwrap();
+        let plain_row = got
+            .iter()
+            .find(|e| e.file_name == "A1-standard.toml")
+            .unwrap();
         assert!(
             plain_row.downloaded_unix.is_some() && plain_row.replaced_unix.is_none(),
             "纯下载的存量记「下载」"
@@ -1118,7 +1146,11 @@ mod tests {
         std::fs::create_dir_all(mkp_root(&root)).unwrap();
         let file = entry("A1-standard.toml", "目录登记的版本".as_bytes());
         // 盘上躺着的是来路不明的字节
-        std::fs::write(root.path().join(&file.path), "被人动过的字节".as_bytes()).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join(&file.path),
+            "被人动过的字节".as_bytes(),
+        )
+        .unwrap();
         crate::fsx::atomic::atomic_write(
             &crate::runtime::paths::catalog_file(root.path()),
             catalog_with(vec![file.clone()])
@@ -1394,7 +1426,10 @@ mod tests {
             "版本一".len() as u64,
             "大小是**旧份**的字节数，不是新的"
         );
-        assert!(got[0].modified_unix.is_some(), "写这份文件的时刻要带上（bootstrap 的原料）");
+        assert!(
+            got[0].modified_unix.is_some(),
+            "写这份文件的时刻要带上（bootstrap 的原料）"
+        );
         assert_eq!(
             got[0].sha256,
             sha_hex("版本一".as_bytes()),
@@ -1413,11 +1448,12 @@ mod tests {
     fn archived_files_skip_the_catalog_memory() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("archive/catalogs")).unwrap();
-        std::fs::write(root.path().join("archive/catalog.json"), b"{}").unwrap();
-        std::fs::write(root.path().join("archive/catalogs/gen-2.json"), b"{}").unwrap();
+        crate::fsx::atomic::atomic_write(&root.path().join("archive/catalog.json"), b"{}").unwrap();
+        crate::fsx::atomic::atomic_write(&root.path().join("archive/catalogs/gen-2.json"), b"{}")
+            .unwrap();
         std::fs::create_dir_all(root.path().join("archive/mkp")).unwrap();
-        std::fs::write(
-            root.path().join("archive/mkp/A1-standard.toml"),
+        crate::fsx::atomic::atomic_write(
+            &root.path().join("archive/mkp/A1-standard.toml"),
             "旧份".as_bytes(),
         )
         .unwrap();
@@ -1437,17 +1473,30 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(mkp_root(&root)).unwrap();
         let file = entry("A1-standard.toml", "内容".as_bytes());
-        deliver(root.path(), &file, &MemorySource("内容".as_bytes().to_vec())).unwrap();
+        deliver(
+            root.path(),
+            &file,
+            &MemorySource("内容".as_bytes().to_vec()),
+        )
+        .unwrap();
 
-        delete_downloaded(root.path(), &catalog_with(vec![file.clone()]), "A1-standard.toml")
-            .unwrap();
+        delete_downloaded(
+            root.path(),
+            &catalog_with(vec![file.clone()]),
+            "A1-standard.toml",
+        )
+        .unwrap();
         assert!(downloaded_files(root.path(), &catalog_with(vec![file])).is_empty());
         // 事件账还在：删的是文件，不是历史
         assert_eq!(preset_events::load(root.path()).len(), 1);
 
         // 幂等：再删一次（已经不在）照实成功
-        delete_downloaded(root.path(), &catalog_with(vec![entry("A1-standard.toml", b"x")]), "A1-standard.toml")
-            .unwrap();
+        delete_downloaded(
+            root.path(),
+            &catalog_with(vec![entry("A1-standard.toml", b"x")]),
+            "A1-standard.toml",
+        )
+        .unwrap();
     }
 
     /// 删归档那份：清单里没了；版本链与事件账不动；目录之外的路径不认（防穿越）
@@ -1457,8 +1506,18 @@ mod tests {
         std::fs::create_dir_all(mkp_root(&root)).unwrap();
         let v1 = entry("A1-standard.toml", "版本一".as_bytes());
         let v2 = entry("A1-standard.toml", "版本二".as_bytes());
-        deliver(root.path(), &v1, &MemorySource("版本一".as_bytes().to_vec())).unwrap();
-        deliver(root.path(), &v2, &MemorySource("版本二".as_bytes().to_vec())).unwrap();
+        deliver(
+            root.path(),
+            &v1,
+            &MemorySource("版本一".as_bytes().to_vec()),
+        )
+        .unwrap();
+        deliver(
+            root.path(),
+            &v2,
+            &MemorySource("版本二".as_bytes().to_vec()),
+        )
+        .unwrap();
         assert_eq!(archived_files(root.path()).len(), 1);
 
         delete_archived(root.path(), "archive/mkp/A1-standard.toml").unwrap();
@@ -1688,10 +1747,16 @@ mod tests {
             crate::fsx::atomic::atomic_write(&root.path().join(CATALOG_FILE), bytes).unwrap();
         };
         put_catalog(gen1.to_pretty_json().unwrap().as_bytes());
-        crate::runtime::release::release_bytes(root.path(), gen2.to_pretty_json().unwrap().as_bytes())
-            .unwrap();
-        crate::runtime::release::release_bytes(root.path(), gen3.to_pretty_json().unwrap().as_bytes())
-            .unwrap();
+        crate::runtime::release::release_bytes(
+            root.path(),
+            gen2.to_pretty_json().unwrap().as_bytes(),
+        )
+        .unwrap();
+        crate::runtime::release::release_bytes(
+            root.path(),
+            gen3.to_pretty_json().unwrap().as_bytes(),
+        )
+        .unwrap();
 
         // 用户盘上躺着的是 v2（在 gen-2 那一代下载的），云端已经是 v3
         put_file(root.path(), "mkp/A1-fastv3.3.toml", "第二版内容");
@@ -1716,10 +1781,16 @@ mod tests {
         let current = entry("A1-standard.toml", "当前版本".as_bytes());
         let gen1 = catalog_with_rev(vec![v1.clone()], "gen-1");
         let gen2 = catalog_with_rev(vec![current.clone()], "gen-2");
-        crate::fsx::atomic::atomic_write(&root.path().join(CATALOG_FILE), gen1.to_pretty_json().unwrap().as_bytes())
-            .unwrap();
-        crate::runtime::release::release_bytes(root.path(), gen2.to_pretty_json().unwrap().as_bytes())
-            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.path().join(CATALOG_FILE),
+            gen1.to_pretty_json().unwrap().as_bytes(),
+        )
+        .unwrap();
+        crate::runtime::release::release_bytes(
+            root.path(),
+            gen2.to_pretty_json().unwrap().as_bytes(),
+        )
+        .unwrap();
         put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
 
         assert_eq!(trust_of(root.path(), &current), FileTrust::Unknown);

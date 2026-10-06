@@ -331,8 +331,8 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{paths, source, state};
+    use super::*;
     use crate::error::ErrorCode;
     use crate::fsx::atomic::atomic_write;
 
@@ -369,10 +369,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("run")).unwrap();
         atomic_write(&state_file(d.path()), "{ 不是 JSON }".as_bytes()).unwrap();
-        assert_eq!(
-            load(d.path()).unwrap_err().code,
-            ErrorCode::Corrupted
-        );
+        assert_eq!(load(d.path()).unwrap_err().code, ErrorCode::Corrupted);
     }
 
     /// 代次认不出同样是坏档
@@ -512,9 +509,13 @@ mod tests {
         )
         .unwrap();
 
-        let (active, draft_followed) =
-            repoint_mine(d.path(), "presets-mine/A1.toml", "presets-mine/A2.toml", "A2.toml")
-                .unwrap();
+        let (active, draft_followed) = repoint_mine(
+            d.path(),
+            "presets-mine/A1.toml",
+            "presets-mine/A2.toml",
+            "A2.toml",
+        )
+        .unwrap();
         assert!(active && draft_followed, "两格都该跟走");
 
         let active = active_preset(d.path()).unwrap().unwrap();
@@ -555,7 +556,8 @@ mod tests {
         atomic_write(
             &d.path().join(state::ACTIVE_FILE),
             r#"{ "activeSchema": 1, "origin": "mine", "fileName": "我的 A1.toml",
-                  "sha256": "abc", "path": "presets-mine/我的 A1.toml" }"#.as_bytes(),
+                  "sha256": "abc", "path": "presets-mine/我的 A1.toml" }"#
+                .as_bytes(),
         )
         .unwrap();
         atomic_write(
@@ -603,17 +605,15 @@ mod tests {
         atomic_write(
             &d.path().join(state::DRAFT_FILE),
             r#"{ "draftSchema": 1, "sourceFileName": "A1-fast.toml", "sourceSha256": "s",
-                  "text": "旧草稿", "updatedUnix": 1 }"#.as_bytes(),
+                  "text": "旧草稿", "updatedUnix": 1 }"#
+                .as_bytes(),
         )
         .unwrap();
 
         // 首次写：动的是 presetSource 这一格，但 active / draft 也一起并进来
-        let source = source::make_source(
-            source::SourceMode::Github,
-            None,
-            source::CustomShape::Unset,
-        )
-        .unwrap();
+        let source =
+            source::make_source(source::SourceMode::Github, None, source::CustomShape::Unset)
+                .unwrap();
         set_preset_source(d.path(), source).unwrap();
 
         assert!(state_file(d.path()).exists());
@@ -655,10 +655,7 @@ mod tests {
         let e = set_active_official(d.path(), &unregistered).unwrap_err();
         assert_eq!(e.code, ErrorCode::NotFound);
         assert!(!state_file(d.path()).exists(), "失败不落新档");
-        assert!(
-            d.path().join(state::ACTIVE_FILE).exists(),
-            "失败也不删旧档"
-        );
+        assert!(d.path().join(state::ACTIVE_FILE).exists(), "失败也不删旧档");
         assert_eq!(
             active_preset(d.path()).unwrap().unwrap().file_name,
             "A1-standard.toml",
@@ -671,7 +668,11 @@ mod tests {
     fn corrupted_legacy_file_is_loud() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("run")).unwrap();
-        atomic_write(&d.path().join(state::ACTIVE_FILE), "{ 不是 JSON }".as_bytes()).unwrap();
+        atomic_write(
+            &d.path().join(state::ACTIVE_FILE),
+            "{ 不是 JSON }".as_bytes(),
+        )
+        .unwrap();
         assert_eq!(load(d.path()).unwrap_err().code, ErrorCode::Corrupted);
     }
 }

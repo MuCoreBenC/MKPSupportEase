@@ -619,8 +619,12 @@ mod two_source_tests {
     /// 选内置源的时候不许带地址（带了说明调用方糊涂了）
     #[test]
     fn a_builtin_mode_refuses_an_address() {
-        let e = make_source(SourceMode::Github, Some("https://x.example/"), CustomShape::Unset)
-            .unwrap_err();
+        let e = make_source(
+            SourceMode::Github,
+            Some("https://x.example/"),
+            CustomShape::Unset,
+        )
+        .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
     }
 
@@ -770,7 +774,10 @@ mod tests {
     #[test]
     fn missing_file_is_not_corrupted() {
         let dir = root();
-        assert_eq!(app_state::preset_source(dir.path()).expect("没配过不该报错"), None);
+        assert_eq!(
+            app_state::preset_source(dir.path()).expect("没配过不该报错"),
+            None
+        );
     }
 
     /// 撤覆盖 = 这一格清空：撤完读就是 `None`（回不回内置默认由 `current_entry` 管）
@@ -784,7 +791,9 @@ mod tests {
         )
         .expect("写设置");
         app_state::set_preset_source(dir.path(), source).expect("写设置");
-        assert!(app_state::preset_source(dir.path()).expect("读设置").is_some());
+        assert!(app_state::preset_source(dir.path())
+            .expect("读设置")
+            .is_some());
 
         app_state::clear_preset_source(dir.path()).expect("撤覆盖不该失败");
         assert_eq!(app_state::preset_source(dir.path()).expect("读设置"), None);

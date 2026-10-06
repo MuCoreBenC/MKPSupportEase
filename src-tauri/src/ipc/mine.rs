@@ -444,7 +444,7 @@ pub async fn rename_user_preset(
         let done = runtime::mine::rename_file(&user_root, &path, &new_name)?;
 
         /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格；
-           万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
+        万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
         runtime::app_state::repoint_mine(&root, &path, &done.path, &done.file_name).map_err(
             |e| {
                 AppError::internal(format!(

@@ -54,7 +54,13 @@ pub fn catalog_chain_dir(root: &Path) -> std::path::PathBuf {
 fn chain_file_name(revision: &str) -> String {
     let safe: String = revision
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if safe.is_empty() {
         "unknown".to_owned()

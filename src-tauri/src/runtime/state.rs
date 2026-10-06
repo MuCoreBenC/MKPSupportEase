@@ -261,8 +261,8 @@ use super::catalog::hex;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::catalog::CatalogFile;
     use crate::fsx::atomic::atomic_write;
+    use crate::runtime::catalog::CatalogFile;
 
     fn entry(name: &str, content: &[u8]) -> CatalogFile {
         CatalogFile {
