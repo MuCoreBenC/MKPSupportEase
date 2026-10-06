@@ -11,7 +11,7 @@
 //!
 //! **地址不在这一层写死，也不写在 catalog 里**：`presets/` 是内容源，换 Gitee、
 //! 换成自己的 CDN 是部署的事，不该为此重发一次说明书。地址来自
-//! [`runtime::source`]（`run/preset-source.json`，或构建期注入的默认值），
+//! [`runtime::source`]（AppState 的 presetSource 格，或构建期注入的默认值），
 //! 不知道就**诚实报没配**——不猜一个 URL、不假装下载成功。
 
 use std::path::Path;
@@ -145,16 +145,22 @@ pub async fn set_preset_source(
                 // ★ 先探形状（根 / source.json 两种都认），**通了才落盘** ——
                 //   错地址留在设置里比"没配"更难查（0.0.2 的教训）。
                 let (shape, _resolved) = runtime::source::probe_custom_shape(&raw)?;
-                runtime::source::save_source_with(&root, mode, Some(&raw), shape)?;
+                let source = runtime::source::make_source(mode, Some(&raw), shape)?;
+                runtime::app_state::set_preset_source(&root, source)?;
                 source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
             })
         });
-        return task
+        let dto = task
             .await
             .map_err(|e| AppError::internal("换数据源没跑到终局").with_detail(e.to_string()))?;
+        super::notify_app_state(&app);
+        return dto;
     }
     traced("setPresetSource", |_| {
-        runtime::source::save_source(&root, mode, None)?;
+        let source =
+            runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
+        runtime::app_state::set_preset_source(&root, source)?;
+        super::notify_app_state(&app);
         source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
     })
 }
@@ -168,7 +174,8 @@ pub async fn set_preset_source(
 pub async fn clear_preset_source(app: AppHandle) -> Result<Option<PresetSourceDto>, AppError> {
     traced("clearPresetSource", |_| {
         let root = internal_root(&app)?;
-        runtime::source::clear_source(&root)?;
+        runtime::app_state::clear_preset_source(&root)?;
+        super::notify_app_state(&app);
         source_dto(&root)
     })
 }
@@ -633,20 +640,27 @@ pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(
     traced("deleteDeliveryFile", |_| {
         let root = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        let active = runtime::state::load_active(&root)?;
-        let draft = runtime::state::load_draft(&root)?;
+        let active = runtime::app_state::active_preset(&root)?;
+        let draft = runtime::app_state::draft(&root)?;
+        let mut state_cleared = false;
         if active.as_ref().is_some_and(|a| {
             a.origin == runtime::state::ActiveOrigin::Official && a.file_name == file_name
         }) {
-            runtime::state::clear_active(&root)?;
+            runtime::app_state::clear_active_preset(&root)?;
+            state_cleared = true;
         }
         if draft
             .as_ref()
             .is_some_and(|d| d.subject() == runtime::state::DraftSubject::official(&file_name))
         {
-            runtime::state::clear_draft(&root)?;
+            runtime::app_state::clear_draft(&root)?;
+            state_cleared = true;
         }
-        runtime::delivery::delete_downloaded(&root, &catalog, &file_name)
+        runtime::delivery::delete_downloaded(&root, &catalog, &file_name)?;
+        if state_cleared {
+            super::notify_app_state(&app);
+        }
+        Ok(())
     })
 }
 
@@ -736,7 +750,7 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
         let root = internal_root(&app)?;
         let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        match runtime::state::load_active(&root)? {
+        match runtime::app_state::active_preset(&root)? {
             None => Ok(None),
             Some(state) => Ok(Some(active_dto(&root, &user, &catalog, state))),
         }
@@ -765,7 +779,7 @@ pub async fn apply_active_preset(
     origin: Option<runtime::state::ActiveOrigin>,
     path: Option<String>,
 ) -> Result<ActivePresetDto, AppError> {
-    traced("applyActivePreset", |_| {
+    let dto = traced("applyActivePreset", |_| {
         use runtime::state::ActiveOrigin;
         let root = internal_root(&app)?;
         let user = crate::fsx::paths::user_root(&app)?;
@@ -794,7 +808,7 @@ pub async fn apply_active_preset(
                         )));
                     }
                 }
-                runtime::state::save_active(&root, file)?
+                runtime::app_state::set_active_official(&root, file)?
             }
             ActiveOrigin::Mine => {
                 let rel = path.ok_or_else(|| {
@@ -815,12 +829,15 @@ pub async fn apply_active_preset(
                  */
                 let text = runtime::mine::read_preset_text(&user, &rel)?;
                 let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
-                runtime::state::save_active_mine(&root, &rel, &digest)?
+                runtime::app_state::set_active_mine(&root, &rel, &digest)?
             }
         };
 
         Ok(active_dto(&root, &user, &catalog, state))
-    })
+    })?;
+    /* AppState 的写命令成功 → 广播（docs/APP-STATE.md §3.5），订阅者据此刷新 */
+    super::notify_app_state(&app);
+    Ok(dto)
 }
 
 /// 撤销使用。幂等：本来就没在用也不报错
@@ -828,7 +845,9 @@ pub async fn apply_active_preset(
 pub async fn clear_active_preset(app: AppHandle) -> Result<(), AppError> {
     traced("clearActivePreset", |_| {
         let root = internal_root(&app)?;
-        runtime::state::clear_active(&root)
+        runtime::app_state::clear_active_preset(&root)?;
+        super::notify_app_state(&app);
+        Ok(())
     })
 }
 

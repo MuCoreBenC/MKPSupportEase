@@ -5,7 +5,7 @@
 //! 官方原件不可变、用户修改另存、用户那份**永远不回写官方原件**。
 //!
 //! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分两条路：
-//! `begin_preset_edit` 改的是**临时文件**（`run/draft-preset.json`），`commit_preset_draft`
+//! `begin_preset_edit` 改的是**临时文件账**（AppState 的 draft 格，`run/app-state.json`），`commit_preset_draft`
 //! 才落到用户根 —— 官方那份 → **另存**成 `（已修改）`；我那份 → **写回自己**（第八层）。
 //! 第十层再加两条**管理**命令：`rename_user_preset`（只改名字，字节一个不动；正指着它的
 //! 使用中指针与该份的草稿跟着改）与 `delete_user_preset`（**真删除** —— 没有垃圾桶、
@@ -163,7 +163,7 @@ pub struct UserFileIdentityDto {
     pub file_name: String,
 }
 
-/// **开始改一份预设**：把正文复制进临时文件（`run/draft-preset.json`），**原件一动不动**。
+/// **开始改一份预设**：把正文复制进临时文件账（AppState 的 draft 格），**原件一动不动**。
 ///
 /// 这是"临时编辑"那条链的第一步（总纲 §1③「预设 TOML 的一生」）：
 /// 用户改的永远是临时文件，点保存才落到用户根 ——
@@ -201,7 +201,7 @@ pub async fn begin_preset_edit(
         let user_root = crate::fsx::paths::user_root(&app)?;
         let subject = draft_subject(&file_name, origin.as_deref(), path.as_deref())?;
 
-        if let Some(draft) = runtime::state::load_draft(&root)? {
+        if let Some(draft) = runtime::app_state::draft(&root)? {
             if draft.subject().matches(&subject) {
                 return Ok(draft_dto(draft, true));
             }
@@ -252,7 +252,8 @@ pub async fn begin_preset_edit(
             }
         };
 
-        let draft = runtime::state::save_draft(&root, &subject, &source_sha256, &text)?;
+        let draft = runtime::app_state::set_draft(&root, &subject, &source_sha256, &text)?;
+        super::notify_app_state(&app);
         Ok(draft_dto(draft, false))
     })
 }
@@ -296,9 +297,10 @@ fn draft_dto(draft: runtime::state::PresetDraft, reused: bool) -> PresetDraftDto
 pub async fn put_preset_draft(app: AppHandle, text: String) -> Result<(), AppError> {
     traced("putPresetDraft", |_| {
         let root = internal_root(&app)?;
-        let draft = runtime::state::load_draft(&root)?
+        let draft = runtime::app_state::draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份"))?;
-        runtime::state::save_draft(&root, &draft.subject(), &draft.source_sha256, &text)?;
+        runtime::app_state::set_draft(&root, &draft.subject(), &draft.source_sha256, &text)?;
+        super::notify_app_state(&app);
         Ok(())
     })
 }
@@ -307,7 +309,7 @@ pub async fn put_preset_draft(app: AppHandle, text: String) -> Result<(), AppErr
 ///
 /// 与 [`put_preset_draft`] 的分工：那条是"把界面上那一整份正文写进去"（编辑器逐字改的场景），
 /// 这条是"我只改这一个字段"（参数页用控件改值的场景）—— 后者**不碰**注释、键序、
-/// 别人的行，只把那一处换掉。两条都只动 `run/draft-preset.json` 的正文，
+/// 别人的行，只把那一处换掉。两条都只动 AppState 里 draft 格的正文，
 /// 官方原件与下载区全程不碰。
 ///
 /// 定位与取值形态归 [`crate::presetdata::patch`]：它拿**字段定义**把 `param_key`
@@ -322,7 +324,7 @@ pub async fn patch_preset_draft(
 ) -> Result<(), AppError> {
     traced("patchPresetDraft", |_| {
         let root = internal_root(&app)?;
-        let draft = runtime::state::load_draft(&root)?
+        let draft = runtime::app_state::draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，改不了参数"))?;
         let catalog = runtime::load_released_catalog(&root)?;
 
@@ -332,7 +334,8 @@ pub async fn patch_preset_draft(
             &crate::presetdata::patch::FieldEdit::new(param_key, value),
         )?;
         /* 只换正文 —— 来源与打开那一刻的指纹保持不动（与 put 同一条规矩） */
-        runtime::state::save_draft(&root, &draft.subject(), &draft.source_sha256, &patched)?;
+        runtime::app_state::set_draft(&root, &draft.subject(), &draft.source_sha256, &patched)?;
+        super::notify_app_state(&app);
         Ok(())
     })
 }
@@ -345,7 +348,9 @@ pub async fn patch_preset_draft(
 pub async fn discard_preset_draft(app: AppHandle) -> Result<(), AppError> {
     traced("discardPresetDraft", |_| {
         let root = internal_root(&app)?;
-        runtime::state::clear_draft(&root)
+        runtime::app_state::clear_draft(&root)?;
+        super::notify_app_state(&app);
+        Ok(())
     })
 }
 
@@ -364,7 +369,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
     traced("commitPresetDraft", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
-        let draft = runtime::state::load_draft(&root)?
+        let draft = runtime::app_state::draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，没得存"))?;
 
         let done = match draft.origin {
@@ -402,7 +407,8 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             }
         };
         /* 存完就该丢掉草稿：它会盖住下一次「改这份」的"接着上次改" */
-        runtime::state::clear_draft(&root)?;
+        runtime::app_state::clear_draft(&root)?;
+        super::notify_app_state(&app);
 
         Ok(CommittedDraftDto {
             path: done.path,
@@ -432,33 +438,23 @@ pub async fn rename_user_preset(
     traced("renameUserPreset", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
-        let active = runtime::state::load_active(&root)?;
-        let draft = runtime::state::load_draft(&root)?;
+        /* 两本状态账先整份读出来：坏档就什么都不做（宁可原地不动，也不留悬空指针） */
+        runtime::app_state::load(&root)?;
 
         let done = runtime::mine::rename_file(&user_root, &path, &new_name)?;
 
-        runtime::state::repoint_active_mine(
-            &root,
-            active.as_ref(),
-            &path,
-            &done.path,
-            &done.file_name,
-        )
-        .map_err(|e| {
-            AppError::internal(format!(
-                "底账没跟上（使用中指针）—— 文件其实已经改名为 {}；重新「应用」一次那一份就能对齐",
-                done.file_name
-            ))
-            .with_detail(e.to_string())
-        })?;
-        runtime::state::repoint_draft_mine(&root, draft.as_ref(), &path, &done.path, &done.file_name)
-            .map_err(|e| {
+        /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格；
+           万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
+        runtime::app_state::repoint_mine(&root, &path, &done.path, &done.file_name).map_err(
+            |e| {
                 AppError::internal(format!(
-                    "底账没跟上（没保存的那份草稿）—— 文件其实已经改名为 {}；再点一次「改这份」会从新名字上重来",
+                    "状态账没跟上（使用中指针 / 草稿）—— 文件其实已经改名为 {}；重新「应用」一次那一份、再点一次「改这份」就能对齐",
                     done.file_name
                 ))
                 .with_detail(e.to_string())
-            })?;
+            },
+        )?;
+        super::notify_app_state(&app);
         /* 出处账跟着走：副本改名了 to 跟走，来源改名了 from 跟走（「复制自 X」不失联） */
         let _ = runtime::provenance::repath(&user_root, &path, &done.path);
 
@@ -536,22 +532,29 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
     traced("deleteUserPreset", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
-        let active = runtime::state::load_active(&root)?;
-        let draft = runtime::state::load_draft(&root)?;
+        let active = runtime::app_state::active_preset(&root)?;
+        let draft = runtime::app_state::draft(&root)?;
         /* 属于这一份的状态先撤（命中 = 用户线 + 同一条相对路径），再删文件 */
+        let mut state_cleared = false;
         if active.as_ref().is_some_and(|a| {
             a.origin == runtime::state::ActiveOrigin::Mine
                 && a.path.as_deref() == Some(path.as_str())
         }) {
-            runtime::state::clear_active(&root)?;
+            runtime::app_state::clear_active_preset(&root)?;
+            state_cleared = true;
         }
         if draft.as_ref().is_some_and(|d| {
             d.origin == runtime::state::ActiveOrigin::Mine
                 && d.path.as_deref() == Some(path.as_str())
         }) {
-            runtime::state::clear_draft(&root)?;
+            runtime::app_state::clear_draft(&root)?;
+            state_cleared = true;
         }
-        runtime::mine::delete_file(&user_root, &path)
+        runtime::mine::delete_file(&user_root, &path)?;
+        if state_cleared {
+            super::notify_app_state(&app);
+        }
+        Ok(())
     })
 }
 

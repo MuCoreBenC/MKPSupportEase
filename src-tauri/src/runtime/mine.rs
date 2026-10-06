@@ -1402,7 +1402,7 @@ mod tests {
     fn deleting_works_even_while_it_is_the_active_one() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+        crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
             .unwrap();
 
         delete_file(root.path(), "presets-mine/A1.toml").unwrap();
@@ -1414,7 +1414,7 @@ mod tests {
     fn deleting_works_even_while_a_draft_is_open() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        crate::runtime::state::save_draft(
+        crate::runtime::app_state::set_draft(
             root.path(),
             &crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml"),
             "sha",
@@ -1531,14 +1531,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-mine/A1.toml", VALID_TOML);
         let active =
-            crate::runtime::state::save_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+            crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
                 .unwrap();
         let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
-        crate::runtime::state::save_draft(root.path(), &subject, "sha", "改到一半").unwrap();
+        crate::runtime::app_state::set_draft(root.path(), &subject, "sha", "改到一半").unwrap();
 
         copy_as_new(root.path(), "presets-mine/A1.toml", "A1-第二份.toml").unwrap();
 
-        let after_active = crate::runtime::state::load_active(root.path())
+        let after_active = crate::runtime::app_state::active_preset(root.path())
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1547,7 +1547,7 @@ mod tests {
             "使用中没动"
         );
         assert_eq!(after_active.file_name, active.file_name);
-        let after_draft = crate::runtime::state::load_draft(root.path())
+        let after_draft = crate::runtime::app_state::draft(root.path())
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1709,7 +1709,7 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
         write(user.path(), "presets-mine/已有.toml", "[wiping]\nspeed = 80\n");
-        let active = crate::runtime::state::save_active_mine(
+        let active = crate::runtime::app_state::set_active_mine(
             user.path(),
             "presets-mine/已有.toml",
             "sha",
@@ -1717,7 +1717,7 @@ mod tests {
         .unwrap();
         let subject =
             crate::runtime::state::DraftSubject::mine("已有.toml", "presets-mine/已有.toml");
-        crate::runtime::state::save_draft(user.path(), &subject, "sha", "改到一半").unwrap();
+        crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
 
         let e = copy_release_as_new(internal.path(), user.path(), "A1-standard.toml", "已有.toml")
             .unwrap_err();
@@ -1728,11 +1728,11 @@ mod tests {
                 .unwrap_err();
         assert!(e.message.contains("不同的名字"), "{}", e.message);
 
-        let after = crate::runtime::state::load_active(user.path())
+        let after = crate::runtime::app_state::active_preset(user.path())
             .unwrap()
             .unwrap();
         assert_eq!(after.file_name, active.file_name, "使用中没动");
-        let draft = crate::runtime::state::load_draft(user.path()).unwrap().unwrap();
+        let draft = crate::runtime::app_state::draft(user.path()).unwrap().unwrap();
         assert_eq!(draft.text, "改到一半", "草稿没被碰");
     }
 

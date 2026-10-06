@@ -30,6 +30,17 @@ use crate::fsx::atomic::atomic_write_json;
 use crate::fsx::paths::{resolve, Root};
 use crate::obs::tracing::new_trace_id;
 
+/// **AppState 变更事件**（`docs/APP-STATE.md` §7）：任何写命令成功改了
+/// `run/app-state.json` 之后广播。前端唯一的 AppState 客户端接住它重读整份状态、
+/// 再通知订阅的页面 —— 这是"改了就推"的唯一通道，页面自己不持有状态副本。
+pub const APP_STATE_EVENT: &str = "app-state-changed";
+
+/// 广播一次 AppState 变更（尽力而为：界面不在也不影响写本身的成功）
+pub fn notify_app_state(app: &AppHandle) {
+    use tauri::Emitter as _;
+    let _ = app.emit(APP_STATE_EVENT, ());
+}
+
 /// 三轴偏移，单位 mm
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Axes {

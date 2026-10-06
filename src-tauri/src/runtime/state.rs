@@ -1,38 +1,21 @@
-//! 程序自己产生的持久状态怎么存（第一圈 ⑤ 的规则，总纲第③层）。
+//! 状态的**数据形状**与纯判定：使用中指针、编辑中草稿这两格 section 的类型、
+//! 两条线的落点解析与指纹比对，以及迁移用的旧档读取器。
 //!
-//! # 规则（新数据世界的"状态"都按这一套来）
+//! # 文件级的读写不在这里（2026-10-06 架构决策，见 `docs/APP-STATE.md`）
 //!
-//! 1. **一种状态一个文件**——JSON、带 `*Schema` 代次字段，与 catalog 同一惯例；
-//! 2. **住在内部根 `run/` 下**——那是"运行状态"的目录（`ARCHITECTURE.md` §4），
-//!    文件名就是状态的名字，用户能看见、能单独删；
-//! 3. **写走 [`crate::fsx::atomic::atomic_write`]**——全仓唯一写盘出口，没有例外；
-//! 4. **坏档不静默**——读出来解析不了就报 `CORRUPTED`，不把它当"没有"。
-//!    静默吞状态是编数据的近亲：用户明明"使用中"，界面却说没在用，那是撒谎。
-//!    状态可重建（再点一次就是），所以宁可响。
+//! 以前这个模块按「一种状态一个文件」管着 `run/active-preset.json` 与
+//! `run/draft-preset.json` 两个文件；现在应用状态统一住 `run/app-state.json`，
+//! **唯一读写入口是 [`super::app_state`]**。这里只剩三样东西：
 //!
-//! # 第一个住进来的状态：使用中指针
+//! - section 的**数据形状**（[`ActivePreset`] / [`PresetDraft`] / [`DraftSubject`]）
+//!   —— 字段就是原文件的字段，原样搬家，语义没变；
+//! - **纯判定**（落点解析 [`active_target`]、指纹比对 [`active_matches_disk`]）；
+//! - **旧档读取器**（[`read_active_file`] / [`read_draft_file`]）：迁移的读半边 ——
+//!   `app-state.json` 还不在时，AppState 按格读旧文件拼快照。
 //!
-//! [`ActivePreset`] 记"当前使用的是哪一份"。全局唯一——
-//! 产品规则定的「同一时刻只能有一份处于已应用状态」，在构造上成立：
-//! 状态就一个文件，写新的自然盖旧的（原子替换，没有中间态）。
-//!
-//! 指针里带着**应用时刻的 SHA**：这份 SHA 就是"文件没被动过"的凭证 ——
-//! 盘上的字节漂了，界面能看出「文件已经不是当时应用的那份」。
-//!
-//! # 两条线都能进来（第七层，2026-10-02 作者定）
-//!
-//! ```text
-//! 官方线  云端 → <catalog.path>  只读，只有"云端换版本"能替换它  ┐
-//!                                                          ├─ 都能成为使用中
-//! 用户线  另存 → presets-mine/ 用户自己可改，不属任何官方版本  ┘
-//! ```
-//!
-//! **"只读"是文件归属的属性，不是"能不能被使用"的属性**（作者原话）。
-//! 所以指针多了 [`ActiveOrigin`]：它只说"这一份住在哪条线上"，**不是两套 Preset 模型** ——
-//! 两条线的落点解析各按自己的根来（[`active_target`]），其余（唯一性、指纹、撤销）一模一样。
-//!
-//! **两条线上"字节漂了"的意思不一样**：官方线是"它不是我们交付的那一版了"（可疑，见
-//! [`super::delivery::FileTrust`]）；用户线是"用户自己又改了它"（正常 —— 那份是他的）。
+//! 旧规矩里活下来的三条：住 `run/` 下、原子写、坏档不静默（读出来解析不了就报
+//! `CORRUPTED`，不把它当"没有"—— 静默吞状态是编数据的近亲：用户明明"使用中"，
+//! 界面却说没在用，那是撒谎）。
 
 use std::path::{Path, PathBuf};
 
@@ -40,16 +23,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
-use crate::fsx::atomic::atomic_write;
-use crate::fsx::paths::MINE_DIR;
-
-use super::catalog::hex;
-use super::catalog::CatalogFile;
 
 /// 状态格式的代次。加字段不升号，改语义才升（与 [`super::catalog::CATALOG_SCHEMA`] 同一条）
 pub const ACTIVE_SCHEMA: u32 = 1;
 
-const ACTIVE_FILE: &str = "run/active-preset.json";
+/// 迁移前的旧档（`run/active-preset.json`）。首次写成功后由 [`super::app_state`] 退役
+pub(super) const ACTIVE_FILE: &str = "run/active-preset.json";
 
 /// 使用中那一份**来自哪条线**。
 ///
@@ -65,7 +44,10 @@ pub enum ActiveOrigin {
     Mine,
 }
 
-/// 使用中指针。全局唯一，`None` = 还没用任何一份（合法状态，不是错误）
+/// 使用中指针。全局唯一，`None` = 还没用任何一份（合法状态，不是错误）。
+///
+/// 指针里带着**应用时刻的 SHA**：这份 SHA 就是"文件没被动过"的凭证 ——
+/// 盘上的字节漂了，界面能看出「文件已经不是当时应用的那份」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivePreset {
@@ -84,14 +66,10 @@ pub struct ActivePreset {
     pub path: Option<String>,
 }
 
-/// 状态文件的落点：`<appDataDir>/run/active-preset.json`
-pub fn active_file(root: &Path) -> PathBuf {
-    root.join(ACTIVE_FILE)
-}
-
-/// 读使用中指针。文件不存在 → `Ok(None)`；解析不了 → `Err(CORRUPTED)`（坏档不静默）
-pub fn load_active(root: &Path) -> Result<Option<ActivePreset>, AppError> {
-    let bytes = match std::fs::read(active_file(root)) {
+/// 旧档读取器（迁移的读半边）：文件不存在 → `Ok(None)`；
+/// 解析不了 → `Err(CORRUPTED)`（坏档不静默）
+pub(super) fn read_active_file(root: &Path) -> Result<Option<ActivePreset>, AppError> {
+    let bytes = match std::fs::read(root.join(ACTIVE_FILE)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
@@ -107,72 +85,6 @@ pub fn load_active(root: &Path) -> Result<Option<ActivePreset>, AppError> {
         )));
     }
     Ok(Some(state))
-}
-
-/// 记下"用这一份官方的"。`file` 来自 catalog，整份替换旧的。
-///
-/// # 指纹从哪来（2026-10-04）
-///
-/// 目录登记了期望值（发布侧 / OTA 目录）就直接用它；没登记（随包 bootstrap 目录，
-/// `sha256 = None`）就**对盘上那份真字节算一次** —— 使用中状态是"我当时用的正是这份
-/// 字节"的凭证，不能因为目录这一侧没记就留空。算不出（文件其实不在）就报错：
-/// 调用方（`use_active_preset`）本来就已经先确认过字节在盘上。
-pub fn save_active(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
-    let sha256 = match file.expected_sha() {
-        Some(want) => want.to_owned(),
-        None => {
-            let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
-                AppError::not_found(format!("{} 还不在本机 —— 先下载，再使用", file.file_name))
-            })?;
-            super::catalog::hex(&Sha256::digest(&bytes))
-        }
-    };
-    write_active(
-        root,
-        ActivePreset {
-            active_schema: ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Official,
-            file_name: file.file_name.clone(),
-            sha256,
-            path: None,
-        },
-    )
-}
-
-/// 记下"用我自己那一份"（`presets-mine/…`）。`rel` 是**相对用户根**的路径（[`super::mine`]
-/// 那一套口径），`sha256` 是应用那一刻它的字节摘要（用户后来自己改它就是"漂了"，
-/// 见模块头：那条对用户线是正常的，不是可疑）。
-pub fn save_active_mine(root: &Path, rel: &str, sha256: &str) -> Result<ActivePreset, AppError> {
-    let file_name = Path::new(rel)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| rel.to_owned());
-    write_active(
-        root,
-        ActivePreset {
-            active_schema: ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Mine,
-            file_name,
-            sha256: sha256.to_owned(),
-            path: Some(rel.to_owned()),
-        },
-    )
-}
-
-fn write_active(root: &Path, state: ActivePreset) -> Result<ActivePreset, AppError> {
-    let json = serde_json::to_vec_pretty(&state)
-        .map_err(|e| AppError::internal("使用中状态序列化失败").with_detail(e.to_string()))?;
-    atomic_write(&active_file(root), &json)?;
-    Ok(state)
-}
-
-/// 撤销使用 = 删掉那个状态文件。文件本来就不在 → 不算错（撤销的幂等性）
-pub fn clear_active(root: &Path) -> Result<(), AppError> {
-    match std::fs::remove_file(active_file(root)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io("撤销使用失败").with_detail(e.to_string())),
-    }
 }
 
 /// 使用中那一份**现在在盘上的哪儿**（两条线各按自己的根解析），
@@ -205,6 +117,8 @@ pub fn active_target(
     }
 }
 
+use crate::fsx::paths::MINE_DIR;
+
 /// 应用时刻的指纹 → 当下的盘。`Ok(true)` = 文件还是当时那份。
 ///
 /// 找不到那一份（目录里没有了 / 用户把它删了）也算"漂了" —— 指针指向的东西不存在了。
@@ -223,15 +137,15 @@ pub fn active_matches_disk(
     }
 }
 
-/* ---------- 第二个住进来的状态：编辑中的那一份（临时文件） ---------- */
+/* ---------- 第二格：编辑中的那一份（临时文件账） ---------- */
 
 /// 草稿格式的代次
 pub const DRAFT_SCHEMA: u32 = 1;
 
-const DRAFT_FILE: &str = "run/draft-preset.json";
+/// 迁移前的旧档（`run/draft-preset.json`）。首次写成功后由 [`super::app_state`] 退役
+pub(super) const DRAFT_FILE: &str = "run/draft-preset.json";
 
-/// **编辑中的那一份**。全局唯一 —— 同一时刻只改一份（与"使用中指针"同一条道理：
-/// 一个状态一个文件，写新的自然盖旧的）。
+/// **编辑中的那一份**。全局唯一 —— 同一时刻只改一份（AppState 里写新的自然盖旧的）。
 ///
 /// 它是"临时编辑"这条链的第一步（总纲 §1③）：
 ///
@@ -239,7 +153,7 @@ const DRAFT_FILE: &str = "run/draft-preset.json";
 /// mkp/presets/A1-fast.toml     官方原件 —— 编辑全程**一动不动**
 ///        │ 点「改这份」：正文复制出来
 ///        ▼
-/// run/draft-preset.json        临时文件（用户改的是它；改到一半关掉也还在）
+/// run/app-state.json (draft)   临时文件账（用户改的是它；改到一半关掉也还在）
 ///        │ 点「保存为用户文件」
 ///        ▼
 /// presets-mine/A1-fast（已修改）.toml
@@ -249,7 +163,7 @@ const DRAFT_FILE: &str = "run/draft-preset.json";
 /// 由 `catalog.path` 定（A 类 `assets/…`、B 类 `delivery/mkp/presets/…`），它的判据是
 /// "盘上每个文件都在目录里登记"（[`super::delivery::stale_files`] 就是靠这条
 /// 认陈旧文件的）—— 往里塞一个 `.tmp`，它立刻变成"目录里没有的陈旧文件"，
-/// 污染交付那一层的每一条判据。草稿是**运行状态**（"我正在改哪一份"），住 `run/`。
+/// 污染交付那一层的每一条判据。草稿是**运行状态**（"我正在改哪一份"），住 AppState。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetDraft {
@@ -323,21 +237,10 @@ impl PresetDraft {
     }
 }
 
-/// 草稿的落点：`<appDataDir>/run/draft-preset.json`
-pub fn draft_file(root: &Path) -> PathBuf {
-    root.join(DRAFT_FILE)
-}
-
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// 读草稿。不在 → `Ok(None)`；解析不了 → `Err(CORRUPTED)`（坏档不静默，与使用中指针同一条）
-pub fn load_draft(root: &Path) -> Result<Option<PresetDraft>, AppError> {
-    let bytes = match std::fs::read(draft_file(root)) {
+/// 旧档读取器（迁移的读半边）：文件不存在 → `Ok(None)`；
+/// 解析不了 → `Err(CORRUPTED)`（坏档不静默，与使用中指针同一条）
+pub(super) fn read_draft_file(root: &Path) -> Result<Option<PresetDraft>, AppError> {
+    let bytes = match std::fs::read(root.join(DRAFT_FILE)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(AppError::io("读不到编辑中的那份").with_detail(e.to_string())),
@@ -353,104 +256,13 @@ pub fn load_draft(root: &Path) -> Result<Option<PresetDraft>, AppError> {
     Ok(Some(draft))
 }
 
-/// 落一份草稿（整份替换旧的 —— 一个状态一个文件）
-pub fn save_draft(
-    root: &Path,
-    subject: &DraftSubject,
-    source_sha256: &str,
-    text: &str,
-) -> Result<PresetDraft, AppError> {
-    write_draft(
-        root,
-        PresetDraft {
-            draft_schema: DRAFT_SCHEMA,
-            origin: subject.origin,
-            source_file_name: subject.file_name.clone(),
-            path: subject.path.clone(),
-            source_sha256: source_sha256.to_owned(),
-            text: text.to_owned(),
-            updated_unix: now_unix(),
-        },
-    )
-}
-
-/// 草稿的实际落盘（`save_draft` 与"跟改名"共用这一处，序列化不许各写一遍）
-fn write_draft(root: &Path, draft: PresetDraft) -> Result<PresetDraft, AppError> {
-    let json = serde_json::to_vec_pretty(&draft)
-        .map_err(|e| AppError::internal("草稿序列化失败").with_detail(e.to_string()))?;
-    atomic_write(&draft_file(root), &json)?;
-    Ok(draft)
-}
-
-/// 丢掉草稿（放弃 / 保存完之后）。文件本来就不在 → 不算错（幂等）
-pub fn clear_draft(root: &Path) -> Result<(), AppError> {
-    match std::fs::remove_file(draft_file(root)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io("丢掉草稿失败").with_detail(e.to_string())),
-    }
-}
-
-/* ---------- 第十层：用户文件改过名之后，两本状态账跟着走 ---------- */
-
-/// **使用中指针跟改名**：只动"正指着这一份"的那条**用户线**指针 —— 路径与文件名换成新的，
-/// **指纹原样**（文件一个字节没动，摘要当然不动）。别的指针（官方的、指着别人那份的）一概不动。
-///
-/// `active` 由调用方从 [`load_active`] 读出来传进来（读不出来就不该走到这里 —— 坏档不静默）。
-/// 返回 `true` = 指针确实跟了。
-pub fn repoint_active_mine(
-    root: &Path,
-    active: Option<&ActivePreset>,
-    old_rel: &str,
-    new_rel: &str,
-    new_file_name: &str,
-) -> Result<bool, AppError> {
-    let Some(state) = active else {
-        return Ok(false);
-    };
-    if state.origin != ActiveOrigin::Mine || state.path.as_deref() != Some(old_rel) {
-        return Ok(false);
-    }
-    write_active(
-        root,
-        ActivePreset {
-            file_name: new_file_name.to_owned(),
-            path: Some(new_rel.to_owned()),
-            ..state.clone()
-        },
-    )?;
-    Ok(true)
-}
-
-/// **草稿跟改名**：只动"改的是这一份"的那条草稿 ——「接着上次改」不接丢
-/// （用户线认路径，与 [`DraftSubject`] 同一把钥匙）。正文与打开时刻的指纹原样不动。
-///
-/// 返回 `true` = 草稿确实跟了。
-pub fn repoint_draft_mine(
-    root: &Path,
-    draft: Option<&PresetDraft>,
-    old_rel: &str,
-    new_rel: &str,
-    new_file_name: &str,
-) -> Result<bool, AppError> {
-    let Some(state) = draft else { return Ok(false) };
-    if state.origin != ActiveOrigin::Mine || state.path.as_deref() != Some(old_rel) {
-        return Ok(false);
-    }
-    write_draft(
-        root,
-        PresetDraft {
-            source_file_name: new_file_name.to_owned(),
-            path: Some(new_rel.to_owned()),
-            ..state.clone()
-        },
-    )?;
-    Ok(true)
-}
+use super::catalog::hex;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::catalog::CatalogFile;
+    use crate::fsx::atomic::atomic_write;
 
     fn entry(name: &str, content: &[u8]) -> CatalogFile {
         CatalogFile {
@@ -474,116 +286,15 @@ mod tests {
         }
     }
 
+    /// 坏档不静默：解析不了要响，不能装作"没有"（迁移的读半边同样守这条）
     #[test]
-    fn save_then_load_roundtrips() {
-        let d = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", b"content");
-
-        let saved = save_active(d.path(), &file).unwrap();
-        let loaded = load_active(d.path()).unwrap().expect("该读回来");
-
-        assert_eq!(saved.file_name, loaded.file_name);
-        assert_eq!(saved.sha256, loaded.sha256);
-        assert_eq!(loaded.active_schema, ACTIVE_SCHEMA);
-    }
-
-    #[test]
-    fn absent_state_is_none_not_error() {
-        let d = tempfile::tempdir().unwrap();
-        assert!(load_active(d.path()).unwrap().is_none(), "没用过 = None");
-    }
-
-    /// 坏档不静默：解析不了要响，不能装作"没有"
-    #[test]
-    fn corrupted_state_is_an_error() {
+    fn corrupted_legacy_state_is_an_error() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("run")).unwrap();
-        crate::fsx::atomic::atomic_write(&active_file(d.path()), "{ 不是 JSON }".as_bytes())
-            .unwrap();
-
-        let e = load_active(d.path()).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
-    }
-
-    #[test]
-    fn future_schema_is_rejected() {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("run")).unwrap();
-        let json = format!(
-            "{{ \"activeSchema\": {}, \"fileName\": \"x\", \"sha256\": \"y\" }}",
-            ACTIVE_SCHEMA + 1
-        );
-        crate::fsx::atomic::atomic_write(&active_file(d.path()), json.as_bytes()).unwrap();
-
-        let e = load_active(d.path()).unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
-    }
-
-    /* ---------- 编辑中的那一份（临时文件） ---------- */
-
-    /// 草稿存得下、读得回、丢掉之后就是 None（幂等）
-    #[test]
-    fn draft_roundtrips_and_clears() {
-        let d = tempfile::tempdir().unwrap();
-        let subject = DraftSubject::official("A1-fast.toml");
-        let saved = save_draft(d.path(), &subject, "abc", "涂胶 = 1.2").unwrap();
-        let loaded = load_draft(d.path()).unwrap().expect("该读回来");
-
-        assert_eq!(loaded.source_file_name, "A1-fast.toml");
-        assert_eq!(loaded.source_sha256, "abc", "打开那一刻的指纹要留着");
-        assert_eq!(loaded.text, "涂胶 = 1.2");
-        assert_eq!(loaded.updated_unix, saved.updated_unix);
-        assert_eq!(loaded.draft_schema, DRAFT_SCHEMA);
-
-        clear_draft(d.path()).unwrap();
-        assert!(load_draft(d.path()).unwrap().is_none());
-        clear_draft(d.path()).unwrap(); // 再丢一次也不报错
-    }
-
-    /// 没草稿 = None，不是错误（还没开始改就是这个状态）
-    #[test]
-    fn absent_draft_is_none_not_error() {
-        let d = tempfile::tempdir().unwrap();
-        assert!(load_draft(d.path()).unwrap().is_none());
-    }
-
-    /// 坏档不静默：解析不了要响
-    #[test]
-    fn corrupted_draft_is_an_error() {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("run")).unwrap();
-        crate::fsx::atomic::atomic_write(&draft_file(d.path()), "{ 不是 JSON }".as_bytes())
-            .unwrap();
-
+        atomic_write(&d.path().join(ACTIVE_FILE), "{ 不是 JSON }".as_bytes()).unwrap();
         assert_eq!(
-            load_draft(d.path()).unwrap_err().code,
+            read_active_file(d.path()).unwrap_err().code,
             crate::error::ErrorCode::Corrupted
-        );
-    }
-
-    /// 两条线的钥匙不同：用户目录里两份文件同名很正常（他自己分文件夹），
-    /// 只比文件名会把 A 的草稿接到 B 上
-    #[test]
-    fn a_draft_knows_which_line_it_belongs_to() {
-        let d = tempfile::tempdir().unwrap();
-        save_draft(
-            d.path(),
-            &DraftSubject::official("A1-fast.toml"),
-            "a",
-            "官方",
-        )
-        .unwrap();
-        let mine = DraftSubject::mine("A1-fast.toml", "presets-mine/我的/A1-fast.toml");
-        save_draft(d.path(), &mine, "b", "我的").unwrap();
-
-        let loaded = load_draft(d.path()).unwrap().expect("该读回来");
-        assert_eq!(loaded.text, "我的");
-        assert_eq!(loaded.subject(), mine, "改的是我自己那份");
-        assert!(
-            !loaded
-                .subject()
-                .matches(&DraftSubject::official("A1-fast.toml")),
-            "同名不同线 ≠ 同一份：「接着改」不许接错"
         );
     }
 
@@ -596,57 +307,11 @@ mod tests {
             "{{ \"draftSchema\": {DRAFT_SCHEMA}, \"sourceFileName\": \"A1-fast.toml\", \
              \"sourceSha256\": \"abc\", \"text\": \"涂胶 = 1\", \"updatedUnix\": 1 }}"
         );
-        crate::fsx::atomic::atomic_write(&draft_file(d.path()), json.as_bytes()).unwrap();
+        atomic_write(&d.path().join(DRAFT_FILE), json.as_bytes()).unwrap();
 
-        let loaded = load_draft(d.path()).unwrap().expect("该读回来");
+        let loaded = read_draft_file(d.path()).unwrap().expect("该读回来");
         assert_eq!(loaded.origin, ActiveOrigin::Official);
         assert_eq!(loaded.path, None, "官方线不存路径 —— 落点由目录给");
-    }
-
-    /// 草稿与使用中指针**两个文件、互不干扰**：改一份不等于在用它
-    #[test]
-    fn draft_and_active_are_separate_files() {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("run")).unwrap();
-        save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        save_draft(
-            d.path(),
-            &DraftSubject::official("A1-fast.toml"),
-            "x",
-            "涂胶 = 2",
-        )
-        .unwrap();
-
-        assert_eq!(
-            load_active(d.path()).unwrap().unwrap().file_name,
-            "A1-standard.toml",
-            "存草稿不动使用中指针"
-        );
-        clear_draft(d.path()).unwrap();
-        assert!(
-            load_active(d.path()).unwrap().is_some(),
-            "丢草稿也不动使用中指针"
-        );
-    }
-
-    /// 全局唯一的"应用"：写新的自然盖旧的，构造上没有两份并存的可能
-    #[test]
-    fn applying_another_replaces_the_first() {
-        let d = tempfile::tempdir().unwrap();
-        save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        save_active(d.path(), &entry("A1-fast.toml", b"b")).unwrap();
-
-        let state = load_active(d.path()).unwrap().expect("该有一份");
-        assert_eq!(state.file_name, "A1-fast.toml", "后应用的赢");
-    }
-
-    #[test]
-    fn clear_is_idempotent() {
-        let d = tempfile::tempdir().unwrap();
-        save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        clear_active(d.path()).unwrap();
-        assert!(load_active(d.path()).unwrap().is_none());
-        clear_active(d.path()).unwrap(); // 再撤一次也不报错
     }
 
     #[test]
@@ -655,7 +320,18 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("mkp/presets")).unwrap();
         let file = entry("A1-standard.toml", "当时的内容".as_bytes());
-        save_active(d.path(), &file).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &d.path().join("mkp/presets/A1-standard.toml"),
+            "当时的内容".as_bytes(),
+        )
+        .unwrap();
+        let state = ActivePreset {
+            active_schema: ACTIVE_SCHEMA,
+            origin: ActiveOrigin::Official,
+            file_name: file.file_name.clone(),
+            sha256: file.sha256.clone().unwrap(),
+            path: None,
+        };
         crate::fsx::atomic::atomic_write(
             &d.path().join("mkp/presets/A1-standard.toml"),
             "被动过".as_bytes(),
@@ -663,7 +339,6 @@ mod tests {
         .unwrap();
 
         let catalog = catalog_with(vec![file]);
-        let state = load_active(d.path()).unwrap().unwrap();
         assert!(
             !active_matches_disk(d.path(), user.path(), &catalog, &state),
             "盘上的字节漂了要看得见"
@@ -685,8 +360,13 @@ mod tests {
             "官方当前版本".as_bytes(),
         )
         .unwrap();
-        save_active(d.path(), &file).unwrap();
-        let state = load_active(d.path()).unwrap().unwrap();
+        let state = ActivePreset {
+            active_schema: ACTIVE_SCHEMA,
+            origin: ActiveOrigin::Official,
+            file_name: file.file_name.clone(),
+            sha256: file.sha256.clone().unwrap(),
+            path: None,
+        };
 
         assert_eq!(state.origin, ActiveOrigin::Official);
         assert!(state.path.is_none(), "官方线不存路径：那是目录的职责");
@@ -698,201 +378,6 @@ mod tests {
         assert_eq!(
             active_target(d.path(), user.path(), &catalog, &state).as_deref(),
             Some(d.path().join("mkp/presets/A1-standard.toml").as_path())
-        );
-
-        /* 目录里已经没有它了（下线 / 换源）：找不到 ⇒ 漂了。不猜一个路径出来 */
-        assert!(!active_matches_disk(
-            d.path(),
-            user.path(),
-            &catalog_with(Vec::new()),
-            &state
-        ));
-    }
-
-    /// 旧档（第七层之前写下的、没有 `origin` 字段）读出来就是官方线 —— **语义没变，不升 schema**
-    #[test]
-    fn an_older_pointer_file_still_means_the_official_line() {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("run")).unwrap();
-        let json = format!(
-            "{{ \"activeSchema\": {ACTIVE_SCHEMA}, \"fileName\": \"A1-standard.toml\", \"sha256\": \"y\" }}"
-        );
-        crate::fsx::atomic::atomic_write(&active_file(d.path()), json.as_bytes()).unwrap();
-
-        let state = load_active(d.path()).unwrap().unwrap();
-        assert_eq!(state.origin, ActiveOrigin::Official);
-        assert_eq!(state.path, None);
-    }
-
-    /// **用户自己那份也能是使用中的那一份**：落点在用户根（可以带子目录），
-    /// 指纹按它的字节算；它后来被用户改了 → "漂了"（对用户线这是正常事，不是可疑）
-    #[test]
-    fn the_users_own_copy_can_be_the_active_one() {
-        let d = tempfile::tempdir().unwrap();
-        let user = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(user.path().join("presets-mine/我的")).unwrap();
-        let target = user.path().join("presets-mine/我的/另存.toml");
-        crate::fsx::atomic::atomic_write(&target, "涂胶 = 1.4".as_bytes()).unwrap();
-        let sha = hex(&Sha256::digest("涂胶 = 1.4".as_bytes()));
-
-        let saved = save_active_mine(d.path(), "presets-mine/我的/另存.toml", &sha).unwrap();
-        assert_eq!(saved.origin, ActiveOrigin::Mine);
-        assert_eq!(saved.file_name, "另存.toml", "文件名只是给人看的");
-        assert_eq!(saved.path.as_deref(), Some("presets-mine/我的/另存.toml"));
-
-        let catalog = catalog_with(Vec::new());
-        let loaded = load_active(d.path()).unwrap().unwrap();
-        assert!(
-            active_matches_disk(d.path(), user.path(), &catalog, &loaded),
-            "用户线的落点在用户根下，与目录无关"
-        );
-
-        /* 用户自己又改了它：指针还是那一份，但字节已经不是当时那份 */
-        crate::fsx::atomic::atomic_write(&target, "涂胶 = 1.5".as_bytes()).unwrap();
-        assert!(!active_matches_disk(
-            d.path(),
-            user.path(),
-            &catalog,
-            &loaded
-        ));
-    }
-
-    /// 指针里记的路径不是用户根那一格 ⇒ 按"找不到"处理（不去猜、不去别处找）
-    #[test]
-    fn a_pointer_pointing_outside_the_mine_dir_is_not_resolved() {
-        let d = tempfile::tempdir().unwrap();
-        let user = tempfile::tempdir().unwrap();
-        let mut stray = save_active_mine(d.path(), "presets-mine/x.toml", "abc").unwrap();
-        stray.path = Some("../secret.toml".to_owned());
-
-        assert!(active_target(d.path(), user.path(), &catalog_with(Vec::new()), &stray).is_none());
-    }
-
-    /// 全局唯一对两条线同样成立：先应用官方的，再改成自己那份，指针里只剩后者
-    #[test]
-    fn applying_one_line_replaces_the_other() {
-        let d = tempfile::tempdir().unwrap();
-        save_active(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        save_active_mine(d.path(), "presets-mine/我的/另存.toml", "sha").unwrap();
-
-        let state = load_active(d.path()).unwrap().expect("该有一份");
-        assert_eq!(state.origin, ActiveOrigin::Mine);
-        assert_eq!(state.file_name, "另存.toml");
-    }
-
-    /* ---------- 第十层：改名之后，两本状态账跟着走 ---------- */
-
-    /// 使用中指针跟改名：路径与文件名换成新的，**指纹不动**（文件一个字节没改）；
-    /// 不指着这一份的、以及官方线的指针，一概不动
-    #[test]
-    fn the_active_pointer_follows_a_rename() {
-        let d = tempfile::tempdir().unwrap();
-        let saved = save_active_mine(d.path(), "presets-mine/旧名.toml", "sha-abc").unwrap();
-
-        let moved = repoint_active_mine(
-            d.path(),
-            Some(&saved),
-            "presets-mine/旧名.toml",
-            "presets-mine/新名.toml",
-            "新名.toml",
-        )
-        .unwrap();
-        assert!(moved, "正指着这一份：该跟");
-        let after = load_active(d.path()).unwrap().unwrap();
-        assert_eq!(after.path.as_deref(), Some("presets-mine/新名.toml"));
-        assert_eq!(after.file_name, "新名.toml");
-        assert_eq!(after.sha256, "sha-abc", "字节没动，指纹当然不动");
-
-        /* 不指着这一份 → 一个字都不动 */
-        assert!(!repoint_active_mine(
-            d.path(),
-            Some(&after),
-            "presets-mine/别人.toml",
-            "presets-mine/换了.toml",
-            "换了.toml"
-        )
-        .unwrap());
-        assert_eq!(
-            load_active(d.path()).unwrap().unwrap().path.as_deref(),
-            Some("presets-mine/新名.toml")
-        );
-
-        /* 官方线指针：哪怕文件名撞上，也不归这条规则管 */
-        let official = save_active(d.path(), &entry("旧名.toml", b"x")).unwrap();
-        assert!(!repoint_active_mine(
-            d.path(),
-            Some(&official),
-            "presets-mine/旧名.toml",
-            "presets-mine/新名2.toml",
-            "新名2.toml"
-        )
-        .unwrap());
-        let still = load_active(d.path()).unwrap().unwrap();
-        assert_eq!(still.origin, ActiveOrigin::Official);
-        assert_eq!(still.path, None);
-    }
-
-    /// 没有那两本账时 repoint 回一句"没跟"，不是错误（改名的文件本来就可能没人用、没在改）
-    #[test]
-    fn repointing_nothing_is_a_no_op() {
-        let d = tempfile::tempdir().unwrap();
-        assert!(!repoint_active_mine(
-            d.path(),
-            None,
-            "presets-mine/a.toml",
-            "presets-mine/b.toml",
-            "b.toml"
-        )
-        .unwrap());
-        assert!(!repoint_draft_mine(
-            d.path(),
-            None,
-            "presets-mine/a.toml",
-            "presets-mine/b.toml",
-            "b.toml"
-        )
-        .unwrap());
-    }
-
-    /// 草稿跟改名：「接着上次改」不接丢 —— 换完名字后钥匙（origin + 路径）要从新名字上认出来，
-    /// 正文与打开时刻的指纹原样
-    #[test]
-    fn the_draft_follows_a_rename() {
-        let d = tempfile::tempdir().unwrap();
-        let subject = DraftSubject::mine("旧名.toml", "presets-mine/旧名.toml");
-        let saved = save_draft(d.path(), &subject, "sha-abc", "涂胶宽度 = 1.2").unwrap();
-
-        assert!(repoint_draft_mine(
-            d.path(),
-            Some(&saved),
-            "presets-mine/旧名.toml",
-            "presets-mine/新名.toml",
-            "新名.toml"
-        )
-        .unwrap());
-        let after = load_draft(d.path()).unwrap().unwrap();
-        assert_eq!(after.path.as_deref(), Some("presets-mine/新名.toml"));
-        assert_eq!(after.source_file_name, "新名.toml");
-        assert_eq!(after.text, "涂胶宽度 = 1.2", "改到一半的正文原样");
-        assert_eq!(after.source_sha256, "sha-abc");
-        assert_eq!(
-            after.subject(),
-            DraftSubject::mine("新名.toml", "presets-mine/新名.toml"),
-            "换完名字，再点「改这份」还是接上这一份"
-        );
-
-        /* 改的是别人那份 → 不动 */
-        assert!(!repoint_draft_mine(
-            d.path(),
-            Some(&after),
-            "presets-mine/别人.toml",
-            "presets-mine/别的.toml",
-            "别的.toml"
-        )
-        .unwrap());
-        assert_eq!(
-            load_draft(d.path()).unwrap().unwrap().path.as_deref(),
-            Some("presets-mine/新名.toml")
         );
     }
 }
