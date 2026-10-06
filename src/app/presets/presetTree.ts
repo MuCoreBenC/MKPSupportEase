@@ -1178,7 +1178,7 @@ export function machinesInScope(tree: PresetTree, machineId: string): PresetMach
  * 一行文件现在是四档里的哪一档。
  *
  * `localIds` 是 `api.getLocalFiles()` 的结果（假后端给的是固定演示集合）。
- * `active` 是**唯一底账**（新世界 `run/active-preset.json`，读自 `api.getActivePreset()`）：
+ * `active` 是**唯一底账**（AppState 的 activePreset 格，`run/app-state.json`，经唯一客户端订阅）：
  * **全表最多一份**，换机型也不会变出第二个。判据**只认它**。
  *
  * 先判在不在本机，再判是不是正在使用的那一份 —— 「已应用」比「本地有」靠前，

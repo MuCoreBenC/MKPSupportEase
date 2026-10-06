@@ -23,11 +23,8 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import {
-  activeForSelection,
-  selectionFromActive,
-  useActivePresetOnTab,
-} from './activeSelection'
+import { activeForSelection, selectionFromActive } from './activeSelection'
+import { useActivePreset } from '../state/appState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
@@ -103,11 +100,9 @@ function Rows({ items }: { items: [string, string][] }) {
 
 interface PageHomeProps {
   density: Density
-  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账 */
-  active?: boolean
 }
 
-export default function PageHome({ density, active }: PageHomeProps) {
+export default function PageHome({ density }: PageHomeProps) {
   const deckRef = useRef<DeckHandle>(null)
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
   const { fadeMs } = useDevDefaults()
@@ -126,29 +121,27 @@ export default function PageHome({ density, active }: PageHomeProps) {
   const catalog = useCatalog()
 
   /*
-   * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（唯一底账 mkp.a44.active）——
+   * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（AppState 的 activePreset 格）——
    * 预设页应用了哪一份，这里三级选择就反填成哪一台。active 的 machineId / versionId
    * 与选择器是**同一套 id**（不再有映射表）。
-   * 常驻挂载后 tab 不再重挂（2026-10-05），改成每次回到本页对一次：对出的值与
-   * 现状一致时画面不动，在预设页换过应用才真正换基准。
+   * 底账从唯一客户端订阅（`useActivePreset`）：应用 / 撤销 / 删除一发生，
+   * 这里同帧换基准 —— 不需要回页签对账（第一轮的补丁已拆，见 docs/APP-STATE.md）。
    */
+  const activeEntry = useActivePreset()
   useEffect(() => {
-    if (!active || catalog.machines.length === 0) return
-    /* 底账走 IPC（run/active-preset.json），异步读；读不到当"没有"，不反填 */
-    void selectionFromActive(catalog.machines).then((next) => {
-      if (next !== null) setSel(next)
-    })
-  }, [active, catalog.machines])
+    if (catalog.machines.length === 0) return
+    const next = selectionFromActive(catalog.machines, activeEntry)
+    if (next !== null) setSel(next)
+  }, [activeEntry, catalog.machines])
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
 
   /*
-   * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），这里再拿底账本身
+   * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
    * —— 显示层用它判断"正在使用的这份是否就是当前选中 combo"。具体取值在下面的
    * displayName / displayPath（要等 presetInfo / presetName 算完）。
    */
-  const activeEntry = useActivePresetOnTab(active)
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
 
   // ---------- 偏移：已保存的一份 + 板上点出来 / 手输出来的草稿 ----------

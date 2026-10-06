@@ -45,8 +45,6 @@ import s from './PageParams.module.css'
 
 interface Props {
   density: Density
-  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账（A3） */
-  active?: boolean
 }
 
 interface ShownCard {
@@ -324,8 +322,8 @@ function useWidth(): [(el: HTMLElement | null) => void, number] {
   return [attach, width]
 }
 
-export default function PageParams({ density, active }: Props) {
-  const u = useParams(active)
+export default function PageParams({ density }: Props) {
+  const u = useParams()
 
   const [categoryId, setCategoryId] = useState('')
   const [query, setQuery] = useState('')

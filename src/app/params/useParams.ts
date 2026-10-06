@@ -45,9 +45,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
+import { activePresetSnapshot, useActivePreset } from '../state/appState'
 import type {
   ActiveOrigin,
-  ActivePreset,
   CatalogParamDef,
   Machine,
   MachineVersion,
@@ -464,7 +464,7 @@ export interface Params {
   cancelPending: () => void
 }
 
-export function useParams(tabActive?: boolean): Params {
+export function useParams(): Params {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [combo, setCombo] = useState<ComboData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -651,12 +651,13 @@ export function useParams(tabActive?: boolean): Params {
       })
 
       /*
-       * 默认落在**正在用的那一份**：使用中指针（`run/active-preset.json`）说应用了哪台哪个版本，
+       * 默认落在**正在用的那一份**：AppState 的 activePreset 格说应用了哪台哪个版本，
        * 就从目录里找它；找不到（没应用过 / 目录里没这台）才退回第一台 ——
        * 与预设页「默认落在已应用那台」同一个理由。
        * 原来写死"第一台"，应用了 P1S 再进这一页还是 A1（作者：「怎么一直是 a1」）。
+       * 快照走唯一客户端的一次读取（`activePresetSnapshot`），不在这里单独读底账。
        */
-      const live = await api.getActivePreset().catch(() => null)
+      const live = await activePresetSnapshot()
       if (!alive) return
       const liveMachine = list.find((m) => m.id === live?.machineId)
       const liveVersion = liveMachine?.versions.find((v) => v.id === live?.versionId)
@@ -1238,57 +1239,23 @@ export function useParams(tabActive?: boolean): Params {
   )
 
   /*
-   * 「在看的是不是已应用的那份」：唯一底账 × 当前 combo。
-   * 底账走 IPC（`run/active-preset.json`），所以在依赖变化时读一次 state
-   * （开页 / 切组合）——与旧版"每次读一次 localStorage"同一个节奏，不是每次 render。
-   * 依赖带 machineId / versionId：切组合时 pick 先行、颜色立刻跟上，
-   * 不等字段重拉完（`combo` 那一层只管字段，不影响颜色）。
+   * 「在看的是不是已应用的那份」：AppState 的 activePreset 格（唯一底账 × 当前 combo）。
+   * 从唯一客户端订阅（`../state/appState.ts`）——应用 / 撤销 / 删除一发生，
+   * 这里的 active 同帧换账，不持有本地副本、不按 combo 变化重读
+   * （第一轮的本地 state + effect 补丁已拆，见 docs/APP-STATE.md）。
    *
    * `canJump`：已应用那份在当前目录里找得到才有「切换回」动作 —— 找不到时切过去会落到
    * 一个空壳 combo（字段在、值全空），那是假信息，所以宁可不给动作、只陈述。
    */
-  const [active, setActive] = useState<ActivePreset | null>(null)
-  useEffect(() => {
-    let alive = true
-    void api
-      .getActivePreset()
-      .then((a) => {
-        if (alive) setActive(a)
-      })
-      .catch(() => {
-        if (alive) setActive(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [machineId, versionId])
+  const active = useActivePreset()
 
   /*
-   * A3：回页签时对一次底账（与首页 / 校准页 `selectionFromActive` 同一个节奏）——
-   * 参数页是**常驻挂载**的，"默认落在正在用的那一份"那只在天亮时读一次，
-   * 预设页换过应用这里就不知道了。现在每次回到本页对一次：底账的 combo
-   * 在目录里找得到才挪，找不到 / 没有底账 / 目录没就绪都不动当前选择。
-   * （形参叫 tabActive：hook 里 `active` 这个名字已经被底账 state 占了。）
+   * 「正在使用」与当前 combo 的关系（onIt / canJump）。
+   * **不再被回页签弹回**（2026-10-06 架构决策）：第一轮的"回页签把 combo 拉回底账"
+   * 是同步补丁，它把「正在使用」与「正在编辑」绑死了。现在 active 只喂"正在使用"
+   * 的显示，用户自选的 combo（编辑目标）独立存在 —— 离开再回来，
+   * 接着编辑的就是自己选的那一份。
    */
-  useEffect(() => {
-    if (tabActive !== true || catalog === null) return
-    let alive = true
-    void api
-      .getActivePreset()
-      .then((a) => {
-        if (!alive || a === null) return
-        const machine = catalog.machines.find((m) => m.id === a.machineId)
-        const version = machine?.versions.find((v) => v.id === a.versionId)
-        if (machine !== undefined && version !== undefined) {
-          setPick({ machineId: machine.id, versionId: version.id })
-        }
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [tabActive, catalog])
-
   const activeUse = useMemo<ActiveUse | null>(() => {
     if (active === null) return null
     const liveMachine = catalog?.machines.find((m) => m.id === active.machineId)

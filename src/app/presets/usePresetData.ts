@@ -16,7 +16,7 @@
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
  *   用户自己的文件      api.getUserPresetFiles()                  → **用户线**（扫 presets-mine/），空是合法状态
- *   当前使用的那一条    api.getActivePreset()（新世界底账 `run/active-preset.json`）→ **全局唯一**，null = 一套都还没应用
+ *   当前使用的那一条    AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
  *   与出厂不同 N 项     api.getMachineParams(machineId, versionId) 里 origin === 'variant' 的条数
@@ -56,6 +56,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
+import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -409,7 +410,8 @@ export function usePresetData(importRevision = 0): PresetData {
   const [needsNewerClient, setNeedsNewerClient] = useState(false)
   /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
-  const [active, setActive] = useState<ActivePreset | null>(null)
+  /* 使用中指针：AppState 唯一客户端订阅 —— 本页是写方之一，但快照同样只从客户端来 */
+  const active = useActivePreset()
   const [slicerCopied, setSlicerCopied] = useState<string[]>([])
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -536,13 +538,12 @@ export function usePresetData(importRevision = 0): PresetData {
       )
 
       if (!alive) return
-      /* 唯一底账读一次 —— 下面默认落地那台机型也要用它，所以在这里拿 */
-      const entry = await api.getActivePreset().catch(() => null)
+      /* 唯一底账的快照（客户端的一次读取）—— 下面默认落地那台机型也要用它 */
+      const entry = await activePresetSnapshot()
       setMachines(list)
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
       setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
       setLocalIds(local)
-      setActive(entry)
       setSlicerCopied(copied)
 
       /*
@@ -620,8 +621,8 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 两个写。**先写底账，再重读底账**，中间不插一句前端自己的推断 ——
-   * 底账在 Rust 侧（`mkp/` + `run/active-preset.json`），这一个来回是一次 IPC；
+   * 写。**写命令成功后 AppState 客户端重读整份并广播**（`appStateMutated`）——
+   * 本页横幅与订阅了底账的另外三页同帧换账，中间不插一句前端自己的推断；
    * 界面上看到的必须是底账答的，不是前端猜的。
    *
    * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
@@ -629,14 +630,15 @@ export function usePresetData(importRevision = 0): PresetData {
    */
   const apply = useCallback(
     async (fileName: string, origin: ActiveOrigin = 'official', path?: string) => {
-      setActive(await api.applyActivePreset(fileName, origin, path))
+      await api.applyActivePreset(fileName, origin, path)
+      appStateMutated()
     },
     [],
   )
 
   const clearApply = useCallback(async () => {
     await api.clearActivePreset()
-    setActive(await api.getActivePreset())
+    appStateMutated()
   }, [])
 
   const copy = useCallback(async (assetId: string) => {
@@ -679,30 +681,34 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * 第十层：两条用户文件管理。同一条路子 —— 写底账 → **重读底账**：
-   * 改名之后使用中指针可能跟着改了名，所以顺手重读一遍（界面显示的永远是底账答的）；
-   * 删除不碰使用中指针（正在使用的不给删），只重读用户线。
+   * 第十层：用户文件管理。同一条路子 —— 写完 AppState 客户端重读广播：
+   * 改名之后使用中指针可能跟着改了名（`repoint_mine`），删的若是使用中那份，
+   * 后端会把指针一并撤下 —— 都靠重读对表（曾在这里漏过的两个"删除后横幅
+   * 还说正在使用"的滞留 bug，就是靠这一句消灭的）。
    */
   const rename = useCallback(async (path: string, newName: string) => {
     const done = await api.renameUserPreset(path, newName)
     setMine(await api.getUserPresetFiles())
-    setActive(await api.getActivePreset().catch(() => null))
+    appStateMutated()
     return done
   }, [])
 
   const remove = useCallback(async (path: string) => {
     await api.deleteUserPreset(path)
     setMine(await api.getUserPresetFiles())
+    appStateMutated()
   }, [])
 
   /*
    * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读官方线 ——
    * 那一行回「未下载」，归档清单跟着刷新（`readRelease` 连归档一起读）。
+   * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
    */
   const removeRelease = useCallback(
     async (fileName: string) => {
       await api.deleteDeliveryFile(fileName)
       setRelease(await readRelease())
+      appStateMutated()
     },
     [readRelease],
   )

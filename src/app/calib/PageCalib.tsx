@@ -22,7 +22,8 @@ import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
 import { api } from '../../api'
-import { activeForSelection, selectionFromActive, useActivePresetOnTab } from '../home/activeSelection'
+import { activeForSelection, selectionFromActive } from '../home/activeSelection'
+import { useActivePreset, useActivePresetReady } from '../state/appState'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
 import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
@@ -39,13 +40,6 @@ import s from './PageCalib.module.css'
 const PLATE_THEME = '浅色'
 
 const EMPTY: Selection = { brand: null, model: null, variant: null }
-
-/*
- * 跨页缓存（2026-10-05）：选择不跨页存的话，每次切回校准页都要等「目录 → 底账」
- * 两趟 IPC 才长出 pill 与读数，进场后当着用户的面再变一次。留一份上次的选择，
- * 挂载先用它，底账回来后对表（对不上就换，见下面的反填 effect）。
- */
-let selCache: Selection | null = null
 
 type Step = 'z' | 'xy' | 'models'
 
@@ -79,14 +73,9 @@ const TEST_MODEL_ID = 'test-models'
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
-interface PageCalibProps {
-  /** 本页是否是当前页签。常驻挂载后页签不再重挂，靠它在每次回到本页时对一次底账 */
-  active?: boolean
-}
-
-export default function PageCalib({ active }: PageCalibProps) {
+export default function PageCalib() {
   const [step, setStep] = useState<Step>('z')
-  const [sel, setSel] = useState<Selection>(() => selCache ?? EMPTY)
+  const [sel, setSel] = useState<Selection>(EMPTY)
   /* 「先回『选择机型』……」只在没有基准**成为事实**之后才许出现 ——
      挂载初期选择还在路上（目录/底账没回来），这时候那句提示是错的建议，
      而且数据一到它又得消失，页脚就这么闪一下。 */
@@ -94,26 +83,29 @@ export default function PageCalib({ active }: PageCalibProps) {
 
   const catalog = useCatalog()
 
-  /* 目录就绪后对准「正在使用的那一条」（唯一底账）—— 与首页同一套反填。
-     常驻挂载后 tab 不再重挂（2026-10-05），改成每次回到本页对一次：
-     对出的值与缓存一致时画面不动，在预设页换过应用才真正换基准。 */
+  /*
+   * 对准「正在使用的那一条」（AppState 的 activePreset 格）—— 与首页同一套反填。
+   * 底账从唯一客户端订阅：应用 / 撤销 / 删除一发生这里同帧换基准，
+   * 不需要回页签对账（第一轮的 selCache + 回页签补丁已拆，见 docs/APP-STATE.md）。
+   * 首读没落地前不动选择 —— 那时的 null 是"还没读到"，不是"没有已应用"。
+   */
+  const activeEntry = useActivePreset()
+  const activeReady = useActivePresetReady()
   useEffect(() => {
-    if (!active || catalog.machines.length === 0) return
-    void selectionFromActive(catalog.machines).then((next) => {
-      if (next !== null) {
-        setSel(next)
-      } else {
-        /* 底账里没有已应用：缓存的选择一并撤掉，别拿旧基准冒充 */
-        setSel((prev) => (prev.model === null ? prev : EMPTY))
-        setNoSelection(true)
-      }
-    })
-  }, [active, catalog.machines])
+    if (!activeReady || catalog.machines.length === 0) return
+    const next = selectionFromActive(catalog.machines, activeEntry)
+    if (next !== null) {
+      setSel(next)
+    } else {
+      /* 底账里没有已应用：残留的选择一并撤掉，别拿旧基准冒充 */
+      setSel((prev) => (prev.model === null ? prev : EMPTY))
+      setNoSelection(true)
+    }
+  }, [activeReady, activeEntry, catalog.machines])
 
-  /* 选择一变就更新跨页缓存；真选上了就撤掉「没有基准」那句 */
+  /* 真选上了就撤掉「没有基准」那句 */
   useEffect(() => {
     if (sel.model !== null && sel.variant !== null) {
-      selCache = sel
       setNoSelection(false)
     }
   }, [sel])
@@ -169,8 +161,8 @@ export default function PageCalib({ active }: PageCalibProps) {
   /*
    * A3：底账正指着当前选中 combo 时，pill 说**底账那份**的名字 ——
    * 应用了「我的文件」就显示我的文件（与预设页横幅、首页同源），不再显示目录底稿。
+   * （activeEntry 来自上面的 AppState 订阅。）
    */
-  const activeEntry = useActivePresetOnTab(active)
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
   const pillFileName = activeForSel?.fileName ?? currentFileName
 
