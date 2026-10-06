@@ -522,6 +522,14 @@ export default function PageParams({ density }: Props) {
   /* 文件名从说明书里来：包里每个版本带着自己的文件清单（A1/STANDARD → A1.toml）；
      这个版本没配 MKP 文件（如 A2L）才退成「机型 · 版本」 */
   const fileLabel = u.fileLabel ?? `${u.machineId} · ${u.versionId}`
+  /*
+   * pill 说的是「**正在用哪份**」：底账命中当前 combo → 底账那份（作者 2026-10-06：
+   * 应用的是官方件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
+   * 没命中（正在编辑另一份）→ 退回编辑目标。确认框 / 历史标题仍用 fileLabel
+   * —— 它们回答的是「写回哪份 / 改的哪份」，与 pill 是两个问题。
+   */
+  const pillLabel =
+    u.activeUse?.onIt === true && u.activeFileName !== null ? u.activeFileName : fileLabel
 
   /*
    * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀，副标题行尾给一句
@@ -783,12 +791,12 @@ export default function PageParams({ density }: Props) {
                   ref={pillRef}
                   title={
                     inactive
-                      ? `当前预设 ${fileLabel}（未应用）· 点击切换`
-                      : `当前预设 ${fileLabel} · 点击切换`
+                      ? `当前预设 ${pillLabel}（未应用）· 点击切换`
+                      : `当前预设 ${pillLabel} · 点击切换`
                   }
                   onClick={() => setPickerOpen((v) => !v)}
                 >
-                  <span className={s.presetName}>{fileLabel}</span>
+                  <span className={s.presetName}>{pillLabel}</span>
                   <span className={s.presetSwitch}>切换</span>
                 </button>
 

@@ -23,8 +23,9 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
+import { api, errorText } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
-import { activateCombo, useActivePreset } from '../state/appState'
+import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
@@ -260,8 +261,12 @@ export default function PageHome({ density }: PageHomeProps) {
     [catalog.presets],
   )
 
-  /* 校准页的预设下拉：一份预设文件唯一对应一处「机型 + 版本」，所以「选文件」= 反填三级选择 ——
-     于是回到第二页，品牌 / 机型 / 版本已经是这份文件对应的那一套，不用再手点一遍 */
+  /*
+   * 抽屉里点一份 = 明确要用这份（与「改预设先问一句」同一入口）：落到 sel 之外，
+   * 真写底账 —— 四个页面同账。首页三级的**浏览选择不算应用**（作者 2026-10-06：
+   * 「不是说点了它就是应用」，应用走下面那颗明确的按钮）。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
   const applyPreset = useCallback(
     (uid: string) => {
       const [machineId, versionId] = uid.split('/')
@@ -269,18 +274,10 @@ export default function PageHome({ density }: PageHomeProps) {
       const version = machine?.versions.find((v) => v.id === versionId)
       if (machine === undefined || version === undefined) return
       setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+      activateCombo(machine.id, version.id, fileOf, activeEntry)
     },
-    [catalog.machines],
+    [catalog.machines, fileOf, activeEntry],
   )
-
-  /*
-   * 选择即切换（作者 2026-10-06 真机反馈）：三级选齐一台、或从抽屉换一份（都落到 sel），
-   * 就把它变成「正在使用」—— 四个页面同账，不再只有预设页的「应用」算切换。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
-   */
-  useEffect(() => {
-    activateCombo(sel.model, sel.variant, fileOf, activeEntry)
-  }, [sel.model, sel.variant, fileOf, activeEntry])
 
   /* 换预设会把本页草稿作废（草稿是相对上一份预设点出来的增量），所以先问一次。
      只给「取消 / 放弃改动并换」两条路：换了预设 saved 会被新预设的值覆盖，
@@ -310,6 +307,70 @@ export default function PageHome({ density }: PageHomeProps) {
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物
   const ready = Boolean(sel.brand && sel.model && sel.variant)
+
+  /*
+   * 「应用」按钮（作者 2026-10-06：第二页要一颗**明确的**应用按钮，放在「下一步」旁边，
+   * 宽度固定不随文字变）。三态：
+   *   已应用        底账正指着这个 combo —— 完成态，点不了
+   *   应用          交付区里那份与目录逐字节一致
+   *   下载并应用    还没下载 / 字节漂了（旧版本 / 内容异常）—— 这是套餐：
+   *                下载（旧份自动归档、坏份换新）再应用
+   * 交付口径与预设页同一套账（下载清单 + 漂移清单）；失败说人话，不编成功。
+   */
+  const [applying, setApplying] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [deliveryTick, setDeliveryTick] = useState(0)
+  const [fileReady, setFileReady] = useState<boolean | null>(null)
+  const comboFileName =
+    ready && sel.model !== null && sel.variant !== null ? fileOf(sel.model, sel.variant) : null
+  const comboApplied =
+    activeEntry !== null &&
+    sel.model !== null &&
+    sel.variant !== null &&
+    activeEntry.machineId === sel.model &&
+    activeEntry.versionId === sel.variant
+  useEffect(() => {
+    if (comboFileName === null) {
+      setFileReady(null)
+      return
+    }
+    let alive = true
+    void Promise.all([
+      api.getDownloadedFiles().catch(() => []),
+      api.getStaleFiles().catch(() => []),
+    ]).then(([downloaded, stale]) => {
+      if (!alive) return
+      setFileReady(
+        downloaded.some((f) => f.fileName === comboFileName) &&
+          !stale.some((f) => f.fileName === comboFileName),
+      )
+    })
+    return () => {
+      alive = false
+    }
+  }, [comboFileName, deliveryTick])
+
+  const applyCurrent = useCallback(async () => {
+    if (comboFileName === null || applying) return
+    setApplying(true)
+    setApplyError(null)
+    try {
+      try {
+        await api.applyActivePreset(comboFileName, 'official')
+      } catch {
+        /* 套餐的第二半：还没下载 / 字节漂了 —— 先下载换上目录那份，再应用 */
+        await api.downloadCatalogFile(comboFileName)
+        await api.applyActivePreset(comboFileName, 'official')
+      }
+      appStateMutated()
+    } catch (e) {
+      setApplyError(errorText(e))
+    } finally {
+      setApplying(false)
+      setDeliveryTick((t) => t + 1)
+    }
+  }, [comboFileName, applying])
+
   /** 已经拿到的那一份预设；还在等 / 失败时为 null —— 不回退到 mock 里的默认那份 */
   const presetInfo = preset.status === 'ready' ? preset.preset : null
   /** 文件名在等待之外的几态都是已知的（知道要取哪一份），单独取出来 */
@@ -463,6 +524,28 @@ export default function PageHome({ density }: PageHomeProps) {
             peekSafe
             navs={[{ label: '回主页', onClick: () => deckRef.current?.jumpTo(0) }]}
             actions={[
+              /* 「应用 / 下载并应用 / 已应用」：宽度固定（文字换态不变），在「下一步」旁边。
+                 浏览三级选择不算应用 —— 应用只发生在这颗按钮与各处抽屉的明确动作上 */
+              ...(ready
+                ? [
+                    {
+                      label: applying
+                        ? '应用中…'
+                        : comboApplied
+                          ? '已应用'
+                          : fileReady === false
+                            ? '下载并应用'
+                            : '应用',
+                      primary: !comboApplied && !applying,
+                      fixed: true,
+                      disabled: comboApplied || applying,
+                      on: true,
+                      onClick: () => {
+                        void applyCurrent()
+                      },
+                    },
+                  ]
+                : []),
               {
                 label: '下一步',
                 arrow: true,
@@ -490,6 +573,9 @@ export default function PageHome({ density }: PageHomeProps) {
                   <PresetStack state={presetView} inUse={inUseNote} axes={density === 'mini' ? saved : undefined} />
                 </div>
               )}
+
+              {/* 应用失败要说话（不编成功）：errorText 带人话与 traceId */}
+              {applyError !== null && <p className={p.applyError}>{applyError}</p>}
             </div>
           </CardFrame>
         ),
@@ -742,6 +828,11 @@ export default function PageHome({ density }: PageHomeProps) {
       saved,
       savedNote,
       sel,
+      applying,
+      applyCurrent,
+      applyError,
+      comboApplied,
+      fileReady,
       settle,
       typeAxis,
       variantName,

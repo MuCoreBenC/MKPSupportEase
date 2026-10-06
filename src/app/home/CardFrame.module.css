@@ -280,6 +280,22 @@
   font-weight: 600;
 }
 
+/* 固定宽度的一颗（首页「应用 / 下载并应用 / 已应用」，作者 2026-10-06：
+   按钮宽度固定下来，不要随着文字换态变化） */
+.pill[data-fixed='true'] {
+  justify-content: center;
+  min-width: 112px;
+}
+
+/* 失效态：看得见、点不了，也不吃 hover（「已应用」是完成态，不是灰掉的错误） */
+.pill[data-disabled='true'],
+.pill[data-disabled='true']:hover {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 60%);
+  color: var(--text-3);
+  cursor: default;
+}
+
 @supports (width: 1cqw) {
   .frame {
     --chrome-x: clamp(20px, 5cqw, 96px);

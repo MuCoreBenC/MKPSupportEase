@@ -154,15 +154,6 @@ export default function PageCalib() {
     [catalog.presets],
   )
 
-  /*
-   * 选择即切换（作者 2026-10-06 真机反馈）：抽屉里点一份（落到 sel）就把它变成
-   * 「正在使用」—— 与首页 / 参数页同一份账，不再只有预设页的「应用」算切换。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
-   */
-  useEffect(() => {
-    activateCombo(sel.model, sel.variant, fileOf, activeEntry)
-  }, [sel.model, sel.variant, fileOf, activeEntry])
-
   const currentFileName = currentUid && sel.model !== null && sel.variant !== null
     ? fileOf(sel.model, sel.variant)
     : null
@@ -203,6 +194,11 @@ export default function PageCalib() {
     [dirty, step],
   )
 
+  /*
+   * 抽屉里点一份 = 明确要用这份：落到 sel 之外真写底账（与首页 / 参数页抽屉同一语义；
+   * 首页三级浏览不算应用，那边走的是明确的「应用」按钮）。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   */
   const applyPreset = useCallback(
     (uid: string) => {
       const [machineId, versionId] = uid.split('/')
@@ -210,8 +206,9 @@ export default function PageCalib() {
       const version = machine?.versions.find((v) => v.id === versionId)
       if (machine === undefined || version === undefined) return
       setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+      activateCombo(machine.id, version.id, fileOf, activeEntry)
     },
-    [catalog.machines],
+    [catalog.machines, fileOf, activeEntry],
   )
 
   const pickPreset = useCallback(

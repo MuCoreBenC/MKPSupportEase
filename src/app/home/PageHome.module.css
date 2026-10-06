@@ -816,6 +816,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 「应用」按钮的失败说明（作者：不编成功）：errorText 的人话 + traceId，与项目红同值 */
+.applyError {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #d13438;
+  font-variant-numeric: tabular-nums;
+}
+
 /*
  * Z 步板下的两行文案（10-03 作者：「首页也缺那个文案」—— 与「校准」tab 同一句原话，
  * 字挂在 calibAxesA44 里共用）。居中贴板下；不参与板宽公式的话列会溢出，

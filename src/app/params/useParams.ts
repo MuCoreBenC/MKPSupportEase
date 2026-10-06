@@ -380,6 +380,12 @@ export interface Params {
    * `null` = 这个版本没配 MKP 文件（如 A2L），页面自己退成「机型 · 版本」。
    */
   fileLabel: string | null
+  /**
+   * **正在使用的那份**的文件名（AppState 底账答的）。`null` = 还没用任何一份。
+   * 顶部 pill 优先说它（底账命中当前 combo 时）—— pill 回答的是"正在用哪份"，
+   * 与「正在编辑哪份」（`fileLabel`，确认框 / 历史标题用）是两个问题。
+   */
+  activeFileName: string | null
   /** 任一组合的 MKP 文件名 —— 抽屉里每一项都显示自己的 */
   fileOf: (machineId: string, versionId: string) => string | null
   /**
@@ -1284,6 +1290,22 @@ export function useParams(): Params {
   }, [machineId, versionId, active, catalog])
 
   /*
+   * 「应用的状态」跟到参数页（作者 2026-10-06：点了应用，所有其他页就是应用的状态）：
+   * 应用发生在别处（首页的「下载并应用」按钮 / 预设页 / 各处抽屉）→ 这里跟着编辑那一份。
+   * 只单向跟事实：本页自选 combo 不被弹回的规矩不变，但底账**真变了**就换编辑目标 ——
+   * 与「切组合清草稿」同一语义。挂载落地的那一次 pick 本来就是底账那份，自然不动。
+   */
+  useEffect(() => {
+    if (active === null || catalog === null) return
+    if (active.machineId === machineId && active.versionId === versionId) return
+    const machine = catalog.machines.find((m) => m.id === active.machineId)
+    const version = machine?.versions.find((v) => v.id === active.versionId)
+    if (machine !== undefined && version !== undefined) {
+      setPick({ machineId: machine.id, versionId: version.id })
+    }
+  }, [active, catalog, machineId, versionId])
+
+  /*
    * **编辑目标**：当前 combo 对应的那一份文件（参数页底座 ③）。
    *
    * 默认由"正在应用的那一份"决定（`catalog.editTargetByCombo` 里那张表按 combo 查）；
@@ -1340,6 +1362,7 @@ export function useParams(): Params {
     machine,
     version,
     fileLabel: combo?.fileLabel ?? null,
+    activeFileName: active?.fileName ?? null,
     fileOf,
     activeUse,
     tabs: combo?.tabs ?? [],
