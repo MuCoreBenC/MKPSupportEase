@@ -1242,6 +1242,14 @@ pub struct ReleasePreflight {
     pub has_account: bool,
 }
 
+/// dev 构建里**文件监视器是否已关**：工作台 dev 由 `scripts/tauri-workbench.mjs`
+/// 用 `tauri dev --no-watch` 起，它顺手设 `MKP_WORKBENCH_NO_WATCH=1`（暗号）。
+/// 监视器关着，版本号落盘（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）
+/// 就不会触发重建重启 —— 发版事务不会被杀，dev 进程也能真发。
+fn dev_watcher_off() -> bool {
+    std::env::var("MKP_WORKBENCH_NO_WATCH").as_deref() == Ok("1")
+}
+
 /// **跑一遍闸**（只读）：工作区 / 分支 / 版本派生 / 发布账户 / tag 有没有被占 / 平台支不支持。
 ///
 /// ★ `(async)` 且**一个字节都不写** —— 点几次都不会有副作用（界面上「重新检查」就靠这条）。
@@ -1391,23 +1399,27 @@ pub fn wb_release_preflight(
             },
         );
 
-        // ★ 开发构建发不得（2026-10-06 真机踩出来的）：发版要推进版本号，改的
+        // ★ dev 构建发版要慎重（2026-10-06 真机踩出来的）：发版要推进版本号，改的
         //   4 个文件（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）
-        //   **全在 `tauri dev` 文件监视器的清单里** —— 版本号一落盘，dev 就重建并
-        //   重启应用，发版事务被杀在半路（分支推出去了、PR 没建、历史没记，
-        //   界面上就是一次"闪退"）。真发版用**安装版工作台**或 release CLI。
+        //   原本全在 `tauri dev` 文件监视器的清单里 —— 版本号一落盘，dev 就重建并
+        //   重启应用，发版事务被杀在半路。**死因是那个监视器，不是"dev"这个身份**：
+        //   工作台 dev 已改成 `--no-watch` 起（监视器关死），可以真发；
+        //   客户端 `npm run tauri dev`（监视器开着）仍拦，只许演练。
         let dev_build = cfg!(debug_assertions);
+        let watcher_off = dev_watcher_off();
         push(
             &mut items,
             "run-env",
             "发布环境",
-            !dev_build,
-            if dev_build {
-                "这是开发构建（npm run tauri dev）—— 真发版会在版本号落盘时被 dev 重启杀掉。\
-                 用安装版工作台或 release CLI 发版；这里只能演练"
-                    .to_owned()
-            } else {
+            !dev_build || watcher_off,
+            if !dev_build {
                 "安装版（发布面）—— 可以真发".to_owned()
+            } else if watcher_off {
+                "工作台 dev（--no-watch，文件监视器已关）—— 版本号落盘不会重启应用，可以真发".to_owned()
+            } else {
+                "这是开发构建（npm run tauri dev，文件监视器开着）—— 真发版会在版本号落盘时被 dev 重启杀掉。\
+                 用 npm run tauri:workbench:dev 起工作台（已关监视器）或安装版工作台发版；这里只能演练"
+                    .to_owned()
             },
         );
 
@@ -1454,15 +1466,16 @@ pub async fn wb_release_software(
     app: tauri::AppHandle,
     opts: ReleaseOptions,
 ) -> Result<ReleaseTxReport, AppError> {
-    // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：dev 构建里真发版必死在半路
+    // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：dev 构建里真发版原本必死在半路
     //   （bump 的 4 个文件一落盘，`tauri dev` 就重建重启，事务被杀 —— 2026-10-06）。
+    //   工作台 dev 已改 `--no-watch` 起（监视器关死）→ 放行；客户端 dev 仍拦。
     //   演练（dry_run）一个字节都不写，放行。
-    if cfg!(debug_assertions) && !opts.dry_run {
+    if cfg!(debug_assertions) && !opts.dry_run && !dev_watcher_off() {
         return Err(AppError::invalid_argument(
             "开发构建里不能真发版 —— 版本号一落盘，dev 的文件监视器就重启应用，发版事务被杀在半路",
         )
         .with_detail(
-            "真发版用安装版工作台（npm run tauri build 出的安装包）或 release CLI；这里只能演练",
+            "用 npm run tauri:workbench:dev 起工作台（--no-watch，监视器已关）或安装版工作台 / release CLI 发版；这里只能演练",
         ));
     }
     let root = crate::fsx::paths::internal_root(&app)?;
