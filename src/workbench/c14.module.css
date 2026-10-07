@@ -1812,6 +1812,16 @@
   resize: none;
 }
 
+/*
+ * 「看整份文本」那种弹窗（`xl`）里的正文框：比默认那口高得多 —— 一份 TOML / 一份
+ * 交付 JSON 几百行，框小的时候人得在一个巴掌大的窗口里一行行挪
+ * （作者 2026-10-07：「这些查看的模态框能大尽量都大一点」）。
+ */
+.pkgJsonFull {
+  min-height: 62vh;
+  max-height: 68vh;
+}
+
 .fileRow {
   display: flex;
   gap: 8px;

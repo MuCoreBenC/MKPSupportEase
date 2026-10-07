@@ -44,6 +44,12 @@
   width: 640px;
 }
 
+/* `xl`：看整份文本（一份产物 TOML / 一份交付 JSON）。`.box` 另有 `max-width: 100%`，
+   窄窗口里照样让位给容器 */
+.box[data-size='xl'] {
+  width: 1080px;
+}
+
 
 .head {
   display: flex;

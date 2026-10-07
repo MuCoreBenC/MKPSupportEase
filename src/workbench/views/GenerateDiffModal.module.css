@@ -13,7 +13,7 @@
      这里必须是 flex 不能是 grid：grid 的 auto 行在 max-height 约束下仍按
      内容高算（超出被 overflow 裁掉、栏内永远不出滚动条 —— 完整视图一展开
      就滚不动），flex 会把栏压进容器高，栏自己出滚动条。 */
-  max-height: min(62vh, 560px);
+  max-height: min(74vh, 760px);
   border: 1px solid var(--w-line);
   border-radius: var(--w-r-card);
   overflow: hidden;

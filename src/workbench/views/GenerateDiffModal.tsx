@@ -202,7 +202,7 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   return (
     <ModalC14
       open
-      size="lg"
+      size="xl"
       title="生成前确认"
       subtitle={subtitle}
       closeOnScrim={false}

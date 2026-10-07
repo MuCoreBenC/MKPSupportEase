@@ -43,11 +43,19 @@
  *  - **恢复配方（wb_revert_preview）不在这页**：按版本走机型页的版本卡 ——
  *    恢复的是「某一版」的配方，不是整包的动作。
  *
- * # 发布物摸得着（P6，2026-10-04 重新定口径）
+ * # 交付文件摸得着（P6 起，2026-10-07 重定口径）
  *
- * ② 卡给的是**真实发布物**：产物名单与文件名来自 `BuildRow.mkpFile`（Rust 交付集合里
- * 那几份 `delivery/mkp/presets/*.toml` —— `catalog.path` 就是它，云端与客户端同形），
- * TOML 正文走 `wb_preview_toml`（**真 Rust 渲染器**），不另拼一份「大概是这样」的。
+ * ② 卡给的是**真实交付物**，名单与存在与否都来自后端那**同一份交付集合**
+ * （`delivery_expected_set` —— 发布闸判残留用的就是它，界面不另拼一份"大概有这些"）：
+ *
+ *  - 产物 `mkp/presets/*.toml` 只留一枚概览 chip（`preset.toml × N 份`）——
+ *    **逐份正文在「生成前确认」里看**（点「生成」先过那一屏）。作者 2026-10-07：
+ *    「这上面这一个我觉得没必要了呀，因为我在生成的地方就可以查看了」，
+ *    所以这一块不再长出一排「查看 TOML」。
+ *  - 其余**不带版本概念**的附属文件（`content/*.json`、`catalog.json`、
+ *    `manifest.json`、`source.json`、`release.json`）一份一行，标出谁写的
+ *    （生成时重算 / 发布时定稿 / 软件发布链）与在不在盘上，点「查看」读**盘上原文**
+ *    （`wb_delivery_file` 直读，不是重新渲染一份）。
  *
  * **旧的「说明书 JSON + 模拟云端」那一套 2026-10-04 退役**（`clientPackage.ts` /
  * `cloud.ts` / `compat.ts` / `fixtures/cloud-presets.json`）：它是一份假的云端数据结构，
@@ -158,10 +166,6 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const [baseline, setBaseline] = useState<BaselineDiffEntry[] | null>(null)
   const [strays, setStrays] = useState<string[] | null>(null)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof wb.trash>> | null>(null)
-  /** 打开着的那一份产物 TOML（正文从 `wb_preview_toml` 现取） */
-  const [tomlOpen, setTomlOpen] = useState<{ uid: string; fileName: string; text: string } | null>(null)
-  /** 正在取哪一份产物的正文（同一时刻只会有一次） */
-  const [tomlBusy, setTomlBusy] = useState<string | null>(null)
   /*
    * **交付文件清单**（2026-10-07）：除了 `mkp/presets/*.toml`，交付目录里还有一串
    * 附属文件（`content/*.json`、`catalog.json`、`manifest.json`、`source.json`）。
@@ -360,24 +364,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   }
 
   /**
-   * 看一份产物的正文。**正文来自后端**（`wb_preview_toml` 就是生成时那台渲染器）——
-   * 前端不拼一份「大概是这样」的 TOML 出来：那样看到的和发布的就不是同一份东西。
-   */
-  const openToml = async (uid: string, fileName: string) => {
-    setTomlBusy(uid)
-    try {
-      setTomlOpen({ uid, fileName, text: await wb.previewToml(uid) })
-    } catch (e) {
-      toasts.push(isAppError(e) ? e.message : String(e))
-    } finally {
-      setTomlBusy(null)
-    }
-  }
-
-  /**
    * 看一份交付文件的正文。**直读盘上原文**（`wb_delivery_file`）——
-   * 与「查看 TOML」不同：那个是渲染器现算"将来会写出什么"，这个是"交付目录里现在
-   * 就长这样"（发布出去的就是它）。
+   * 交付目录里现在就长这样，发布出去的就是它。
    */
   const openDelivery = async (rel: string) => {
     setDeliveryBusy(rel)
@@ -624,14 +612,22 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
             </div>
 
             {/*
-              本次发布的**发布物**。作者要工作台看得见它：产物名单与文件名来自
-              `BuildRow.mkpFile`（Rust 交付集合里那几份 `delivery/mkp/presets/*.toml`，
-              `catalog.path` 就是它），正文走 `wb_preview_toml` —— 后端那台渲染器。
+              **本次交付文件**（作者 2026-10-07 重定口径）：
+
+              · **产物 toml 不在这里逐份列**了 —— 逐份正文在「生成前确认」那一屏里看得到
+                （点「生成」先过那一屏），这一块不再长出一排「查看 TOML」；作者原话：
+                「这一个我觉得没必要了呀，因为我在生成的地方就可以查看了」。
+              · 这里列的是**不带版本概念**的附属文件（目录 JSON / manifest / source），
+                名单来自后端那**同一份交付集合**（发布闸判残留用的就是它）——
+                界面不另拼一份"大概有这些"。点「查看」读**盘上原文**。
             */}
             <div className={s.group}>
-              <div className={s.groupHead}>本次发布的发布物</div>
+              <div className={s.groupHead}>本次交付文件</div>
               <div className={s.chips}>
-                <span className={s.chip} title="已经生成出来的版本各一份：delivery/mkp/presets/<机型>-<版本>.toml">
+                <span
+                  className={s.chip}
+                  title="已经生成出来的版本各一份（delivery/mkp/presets/<机型>-<版本>.toml）—— 逐份正文在「生成前确认」里看"
+                >
                   {artifacts.length === 0
                     ? 'preset.toml — 未生成'
                     : `preset.toml × ${artifacts.length} 份`}
@@ -642,48 +638,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                     : '本会话还没发布过'}
                 </span>
               </div>
-              {artifacts.length > 0 && (
-                <div className={s.vstack}>
-                  {artifacts.slice(0, 3).map((a) => (
-                    <div key={a.uid} className={s.vfield}>
-                      <div className={s.vhead}>
-                        <b className={s.mono}>{a.fileName}</b>
-                        <span className={s.vkey}>{a.uid}</span>
-                        <span className={s.grow} />
-                        <button
-                          type="button"
-                          className={`${s.btn} ${s.btnSm}`}
-                          disabled={tomlBusy === a.uid}
-                          title="看这一份预设文件长什么样（正文由后端渲染器现出，只读）"
-                          onClick={() => void openToml(a.uid, a.fileName)}
-                        >
-                          {tomlBusy === a.uid ? '正在取……' : '查看 TOML'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {artifacts.length > 3 && (
-                    <p className={s.note}>
-                      只列出前 3 份 —— 全名单在交付集合里（`catalog.path` 那一批）。
-                    </p>
-                  )}
-                </div>
-              )}
               <p className={s.note}>
-                产物名单与 TOML 正文**都从后端来**（<span className={s.mono}>wb_preview_toml</span>
-                就是生成时那台渲染器）—— 界面不另拼一份「大概是这样」的 TOML。
-              </p>
-            </div>
-
-            {/*
-              **其他交付文件**（作者 2026-10-07）：除了 toml 产物，交付目录里还有一串
-              不带版本概念的附属文件。名单来自后端那**同一份交付集合**（发布闸判残留
-              用的就是它）—— 界面不另拼一份"大概有这些"。点「查看」读**盘上原文**。
-            */}
-            <div className={s.group}>
-              <div className={s.groupHead}>其他交付文件</div>
-              <p className={s.note} style={{ marginTop: 0 }}>
-                它们跟着<strong>生成 / 发布</strong>一起落进交付目录，不带「版本」概念：
+                下面这些**不带「版本」概念**，跟着生成 / 发布一起落进交付目录：
                 <span className={s.mono}>content/*.json</span> 与{' '}
                 <span className={s.mono}>catalog.json</span> 在<strong>生成时重算</strong>，
                 <span className={s.mono}>manifest.json</span> /{' '}
@@ -946,11 +902,11 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         />
       )}
 
-      {/* 其他交付文件：目录 JSON / manifest / source —— 正文是**盘上原文** */}
+      {/* 交付文件：目录 JSON / manifest / source —— 正文是**盘上原文**（框给到最大那档） */}
       {deliveryOpen !== null && (
         <ModalC14
           open
-          size="lg"
+          size="xl"
           title={`交付文件 ${deliveryOpen.rel}`}
           subtitle="交付目录里的盘上原文（只读）—— 客户端或云端取的就是这一份"
           onClose={() => setDeliveryOpen(null)}
@@ -958,43 +914,15 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           <div className={s.vstack}>
             <p className={s.note}>
               正文是<span className={s.mono}>wb_delivery_file</span>直读的**盘上原文**
-              —— 与「查看 TOML」不同：那份是渲染器现算"将来会写出什么"，这一份是
-              "交付目录里现在就长这样"。盘上没有它时按钮是灰的。
+              —— 交付目录里现在就长这样，发布出去的就是它（盘上没有它时按钮是灰的）。
             </p>
             <textarea
-              className={s.pkgJson}
+              className={`${s.pkgJson} ${s.pkgJsonFull}`}
               readOnly
               spellCheck={false}
-              rows={18}
+              rows={30}
               aria-label="交付文件正文"
               value={deliveryOpen.text}
-            />
-          </div>
-        </ModalC14>
-      )}
-
-      {/* 另一半发布物：用户真正下载的那一份 —— 正文来自后端的渲染器 */}
-      {tomlOpen !== null && (
-        <ModalC14
-          open
-          size="lg"
-          title={`预设文件 ${tomlOpen.fileName}`}
-          subtitle={`${tomlOpen.uid} —— 客户端在「预设」页按份下载的就是这一份`}
-          onClose={() => setTomlOpen(null)}
-        >
-          <div className={s.vstack}>
-            <p className={s.note}>
-              正文由后端的生成器现出（wb_preview_toml 就是生成产物那台渲染器）——
-              不是前端拼一份「大概长这样」。客户端那边的口径（2026-10-02）：说明书随安装包
-              走，这一份在「预设」页的云端表按份下载。
-            </p>
-            <textarea
-              className={s.pkgJson}
-              readOnly
-              spellCheck={false}
-              rows={18}
-              aria-label="预设文件 TOML"
-              value={tomlOpen.text}
             />
           </div>
         </ModalC14>
