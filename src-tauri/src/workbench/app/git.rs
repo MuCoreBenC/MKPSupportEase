@@ -293,6 +293,117 @@ impl Git {
         })
     }
 
+    /// **带认证**问一次远端：这个 tag 在不在、剥了皮指向哪一笔提交。
+    ///
+    /// ★ 推 tag 之前先问一句（「发布软件版本」⑥½ 用它做幂等：发布仓库上已有同名 tag
+    ///   时不该硬推，git 自己会拒，pre-push 闸③ 还会把它报成"非快进"）。
+    ///   与 [`Self::push_ref_to_authenticated`] 同一套凭据纪律：Gitee 走 URL 内嵌、
+    ///   其余走先发式 Basic 头，Token 不进错误 detail。
+    /// ★ **剥皮要在本地做**：`ls-remote` 的 `^{}` 那行是服务端给的，Gitee 不给
+    ///   （真机 2026-10-07：只回 tag 对象一行）—— 所以分三步：
+    ///   1. `ls-remote` 问存在（不在 → `None`）；
+    ///   2. 远端对象与本地 tag 对象**同一个** → 同一个 tag，本地直接剥皮（省一趟网络）；
+    ///   3. 对象不同就把远端那**一个** ref fetch 到 `FETCH_HEAD` —— 不落 `refs/`，
+    ///      与 `--tags` 会撞本地同名 tag 的 clobber 是两回事 —— 再本地剥皮。
+    ///   远端没有这个 tag → `None`。
+    pub fn remote_tag_commit(
+        &self,
+        remote: &str,
+        tag: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Option<String>, AppError> {
+        let Some(remote_sha) =
+            self.ls_remote_ref(remote, &format!("refs/tags/{tag}"), username, token)?
+        else {
+            return Ok(None);
+        };
+        let local_ref = format!("refs/tags/{tag}");
+        if let Ok(local_obj) = self.rev_parse(&local_ref) {
+            if remote_sha == local_obj {
+                return Ok(Some(self.rev_parse(&format!("{local_ref}^{{commit}}"))?));
+            }
+        }
+        // 对象不同（或本地读不到）：把远端那一个 ref 取下来，本地剥皮。
+        // 只写 `FETCH_HEAD`，不落任何 refs/ —— 本地的同名 tag 动都不动。
+        let with_url_creds = gitee_url_with(remote, username, token);
+        let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
+        let refspec = format!("refs/tags/{tag}");
+        let mut args: Vec<&str> = vec!["-c", "credential.helper="];
+        let header;
+        if with_url_creds.is_none() {
+            let basic = base64_encode(format!("{username}:{token}").as_bytes());
+            header = format!("http.extraHeader=Authorization: Basic {basic}");
+            args.extend(["-c", &header]);
+        }
+        args.extend(["fetch", "--no-tags", &target, &refspec]);
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
+            return Err(AppError::io("git fetch 失败了").with_detail(format!(
+                "{}（退出码 {:?}）",
+                err.trim(),
+                out.status.code()
+            )));
+        }
+        Ok(Some(self.rev_parse("FETCH_HEAD^{commit}")?))
+    }
+
+    /// **带认证**问一次远端：某个 ref 在不在，在的话对象 sha 是多少（`git ls-remote`）。
+    ///
+    /// 只读、不落任何本地引用。远端没有这个 ref → `None`。
+    fn ls_remote_ref(
+        &self,
+        remote: &str,
+        refname: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Option<String>, AppError> {
+        let with_url_creds = gitee_url_with(remote, username, token);
+        let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
+        let ref_pattern = refname.to_owned();
+        let mut args: Vec<&str> = vec!["-c", "credential.helper="];
+        let header;
+        if with_url_creds.is_none() {
+            let basic = base64_encode(format!("{username}:{token}").as_bytes());
+            header = format!("http.extraHeader=Authorization: Basic {basic}");
+            args.extend(["-c", &header]);
+        }
+        args.extend(["ls-remote", &target, &ref_pattern]);
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
+            return Err(AppError::io("git ls-remote 失败了").with_detail(format!(
+                "{}（退出码 {:?}）",
+                err.trim(),
+                out.status.code()
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        // 严格认整行（`refs/tags/v0.0.6` 不能吃进 `refs/tags/v0.0.6^{}`
+        // 也别匹配到 `refs/tags/v0.0.6x`）—— 拿到的是 ref 指向的对象 sha
+        // （annotated tag 就是 tag 对象本身，剥皮交给调用方）。
+        for line in stdout.lines() {
+            let Some((sha, name)) = line.split_once('\t') else {
+                continue;
+            };
+            if name.trim() == refname {
+                return Ok(Some(sha.trim().to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
     /// 当前工作目录的 remote（`origin`）是不是**配置的那个仓库**（发布前的一致性校验）。
     ///
     /// 规范化后比较：https / ssh 两种形状等价、`…/o/r.git` 与 `…/o/r` 等价、
@@ -417,6 +528,12 @@ impl Git {
     /// "这一版发出去过"与"上一次事务的续跑"。
     pub fn rev_parse_short(&self, what: &str) -> Result<String, AppError> {
         Ok(self.run(&["rev-parse", "--short", what])?.trim().to_owned())
+    }
+
+    /// 解析一个引用的**完整** sha（`git rev-parse <what>`）—— 与远端报回来的 sha 对比用
+    /// （远端给的是全长，短 sha 对不上）。
+    pub fn rev_parse(&self, what: &str) -> Result<String, AppError> {
+        Ok(self.run(&["rev-parse", what])?.trim().to_owned())
     }
 
     /// 工作区干不干净（`git status --porcelain` 为空）。

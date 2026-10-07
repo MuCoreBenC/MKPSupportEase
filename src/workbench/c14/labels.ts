@@ -42,3 +42,26 @@ export const deliveryStageText = {
   publish: '发布时定稿',
   software: '软件发布链',
 } as const
+
+/**
+ * **发布软件版本**的阶段线上名 → 人话（与后端 `ReleaseStage::wire_name()` 逐字对应）。
+ *
+ * 两处读同一份：发布回执（`ReleaseGateModal`）与页面上的发布历史（`BuildPage`）——
+ * 人话只有一处，分头写的话同一格 `stage` 在这边说「回执」、那边说别的。
+ */
+export const releaseStageText: Record<string, string> = {
+  blockedPreflight: '停在预检',
+  ready: '预检通过',
+  versionBumped: '版本号已推进',
+  committed: '已提交',
+  pushed: '已推送',
+  reviewOpened: 'PR 已建',
+  merged: '已合并',
+  tagged: 'tag 已打',
+  built: '安装包已构建',
+  releaseCreated: 'Release 已建',
+  assetUploaded: '安装包已上传',
+  infoCommitted: 'release.json 已提交',
+  infoPushed: 'release.json 已推送',
+  infoReviewOpened: 'release.json 的 PR 已建',
+}

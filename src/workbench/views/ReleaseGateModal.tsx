@@ -6,13 +6,15 @@
  * 那边看的是"预设交出去会不会缺东西"。判定**整份来自 Rust**（`wb_release_preflight`
  * 与内核同一个函数）—— 这一屏没有第二套检查。
  *
- * # 三段视图
+ * # 两段视图
  *
  * ```text
  * 闸   逐项结果（红的染整行）→ 全绿才亮「确认发布」
  * 回执 阶段链：版本号 → 提交 → PR → 合并 → tag → 构建 → Release → release.json 的 PR
- * 历史 release-history.json（**与发布预设那本账分开**），最新在前
  * ```
+ *
+ * 发布历史**不在框里**（2026-10-07 作者要的：历史放在外面，不塞模态框）——
+ * 它摆在页面「软件版本」卡上（[`BuildPage`]），这里发完关框就能看见。
  *
  * # 两条必须说清的话（不藏在说明文字里）
  *
@@ -25,33 +27,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { isAppError, wb } from '../api'
 import type {
   PreflightItem,
-  ReleaseHistory,
   ReleasePreflight,
-  ReleaseRecord,
   ReleaseTxReport,
 } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
+import { releaseStageText as STAGE_TEXT } from '../c14/labels'
 import c from '../c14.module.css'
 import s from './ReleaseGateModal.module.css'
-
-/** 阶段的线上名 → 人话（与后端 `ReleaseStage::wire_name()` 逐字对应） */
-const STAGE_TEXT: Record<string, string> = {
-  blockedPreflight: '停在预检',
-  ready: '预检通过',
-  versionBumped: '版本号已推进',
-  committed: '已提交',
-  pushed: '已推送',
-  reviewOpened: 'PR 已建',
-  merged: '已合并',
-  tagged: 'tag 已打',
-  built: '安装包已构建',
-  releaseCreated: 'Release 已建',
-  assetUploaded: '安装包已上传',
-  infoCommitted: 'release.json 已提交',
-  infoPushed: 'release.json 已推送',
-  infoReviewOpened: 'release.json 的 PR 已建',
-}
 
 /** 回执的阶段链：按"走到了哪"的顺序排，走到的是 done、没走到的是 todo */
 const STAGE_ORDER: string[] = [
@@ -105,14 +88,6 @@ function receiptSteps(report: ReleaseTxReport): { key: string; label: string; no
   }))
 }
 
-/** 本地时区的时间戳（后端写的是 UTC ISO 串，给人看要转本机时区） */
-function localStamp(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
 interface Props {
   onClose: () => void
   /** 当前安装的版本（② 卡已经取过，这里只用来显示"当前 → 目标"） */
@@ -120,7 +95,7 @@ interface Props {
 }
 
 export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
-  const [tab, setTab] = useState<'gate' | 'receipt' | 'history'>('gate')
+  const [tab, setTab] = useState<'gate' | 'receipt'>('gate')
   /** 闸的结果；null = 还没算回来 */
   const [pre, setPre] = useState<ReleasePreflight | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -142,7 +117,6 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   const [version, setVersion] = useState('')
   /** 一句话说明：进 Release 正文与 `release.json` 的 notes */
   const [notes, setNotes] = useState('')
-  const [history, setHistory] = useState<ReleaseHistory | null>(null)
 
   /** 记一条错误：`message` 是标题，`detail` 是"为什么" */
   const fail = (e: unknown) => {
@@ -178,17 +152,6 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
     // ★ 只在**打开时**跑一次：`version` 一变就重跑会把人正在输入的东西冲掉
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  const openTab = async (next: typeof tab) => {
-    setTab(next)
-    if (next === 'history' && history === null) {
-      try {
-        setHistory(await wb.releaseHistory())
-      } catch (e) {
-        fail(e)
-      }
-    }
-  }
 
   /** 真发：一次手势走完内核那八步（**以分钟计**：要构建并上传安装包） */
   const release = async () => {
@@ -272,51 +235,6 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
       </div>
     )
 
-  /* ---------- 历史 ---------- */
-
-  if (tab === 'history') {
-    return (
-      <ModalC14
-        open
-        size="lg"
-        title="软件版本发布历史"
-        subtitle={history === null ? '正在读……' : `${history.records.length} 条 · 最新在前`}
-        closeOnScrim={false}
-        onClose={onClose}
-        footer={
-          <>
-            <span className={s.footNote}>★ 这是「发布软件版本」那本账 —— 发布预设的回执在另一本里</span>
-            <span className={c.grow} />
-            <button type="button" className={c.btn} onClick={() => void openTab('gate')}>
-              回闸
-            </button>
-            <button type="button" className={c.btn} onClick={onClose}>
-              关闭
-            </button>
-          </>
-        }
-      >
-        {errorBox}
-        {history !== null && history.records.length === 0 ? (
-          <p className={s.empty}>还没有发过软件版本。</p>
-        ) : (
-          <div className={s.hist}>
-            {(history?.records ?? []).map((r: ReleaseRecord, i) => (
-              <div key={`${r.tag}-${i}`} className={s.histRow}>
-                <div className={s.histHead}>
-                  <span className={s.histTag}>{r.tag}</span>
-                  <span className={s.histAt}>{localStamp(r.at)}</span>
-                  <span className={s.histAt}>{STAGE_TEXT[r.stage] ?? r.stage}</span>
-                </div>
-                <span className={s.histNote}>{r.summary}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </ModalC14>
-    )
-  }
-
   /* ---------- 回执 ---------- */
 
   if (tab === 'receipt' && report !== null) {
@@ -324,32 +242,30 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
     return (
       <ModalC14
         open
-        size="lg"
+        size="xl"
         title="发布回执 · 软件版本"
         subtitle={`${STAGE_TEXT[report.stage] ?? report.stage} · ${report.tag}`}
         closeOnScrim={false}
         onClose={onClose}
         footer={
-          <>
+          <div className={s.footCol}>
             <span className={s.footNote}>{report.summary}</span>
-            <span className={c.grow} />
-            <button type="button" className={c.btn} onClick={() => void openTab('history')}>
-              历史
-            </button>
-            <button type="button" className={c.btn} onClick={onClose}>
-              关闭
-            </button>
-            {report.infoReview !== null && report.infoReview.url !== '' && (
-              <button
-                type="button"
-                className={`${c.btn} ${c.btnPrimary}`}
-                title="★ 合并它之后客户端才看得到新版本"
-                onClick={() => void openUrl(report.infoReview?.url ?? '')}
-              >
-                去合并 release.json 的 PR
+            <div className={s.footBtns}>
+              <button type="button" className={c.btn} onClick={onClose}>
+                关闭
               </button>
-            )}
-          </>
+              {report.infoReview !== null && report.infoReview.url !== '' && (
+                <button
+                  type="button"
+                  className={`${c.btn} ${c.btnPrimary}`}
+                  title="★ 合并它之后客户端才看得到新版本"
+                  onClick={() => void openUrl(report.infoReview?.url ?? '')}
+                >
+                  去合并 release.json 的 PR
+                </button>
+              )}
+            </div>
+          </div>
         }
       >
         <div className={s.chain} role="list">
@@ -394,13 +310,18 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   return (
     <ModalC14
       open
-      size="lg"
+      size="xl"
       title="发布软件版本"
       subtitle={subtitle}
       closeOnScrim={false}
       onClose={onClose}
       footer={
-        <>
+        /*
+         * 底部**两行**（2026-10-07）：提示独占一行、按钮另起一行 —— 之前五个按钮和
+         * 一句长提示挤同一行，按钮把提示挤成竖排的字，footer 被顶得老高（作者：
+         * "按钮太多了，才导致文字变得这么长这么高"）。宽的那档（xl）也是给它的。
+         */
+        <div className={s.footCol}>
           <span className={s.footNote}>
             {pre === null
               ? '闸还没跑完 —— 跑完才谈得上发不发'
@@ -408,35 +329,33 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
                 ? '全绿才发：这一趟会切 main、打 tag、构建并上传安装包'
                 : '有项没过：修完点「重新检查」'}
           </span>
-          <span className={c.grow} />
-          <button
-            type="button"
-            className={c.btn}
-            disabled={busy}
-            title="把这—版要怎么发（版本号 / 更新说明 / 发版纪律 / 产物名）生成一段任务书并复制 —— 贴给 AI，由它照仓库自己的发版路径做"
-            onClick={() => void copyPrompt()}
-          >
-            复制发布提示词
-          </button>
-          <button type="button" className={c.btn} onClick={onClose} disabled={busy}>
-            取消
-          </button>
-          <button type="button" className={c.btn} onClick={() => void run()} disabled={busy}>
-            重新检查
-          </button>
-          <button type="button" className={c.btn} onClick={() => void openTab('history')} disabled={busy}>
-            历史
-          </button>
-          <button
-            type="button"
-            className={`${c.btn} ${c.btnPrimary}`}
-            disabled={!pre?.canRelease || busy}
-            title={pre?.canRelease ? undefined : '闸没全绿 —— 这颗按钮不亮'}
-            onClick={() => void release()}
-          >
-            {busy ? '发布中…（要构建并上传安装包，几分钟）' : '确认发布'}
-          </button>
-        </>
+          <div className={s.footBtns}>
+            <button
+              type="button"
+              className={c.btn}
+              disabled={busy}
+              title="把这—版要怎么发（版本号 / 更新说明 / 发版纪律 / 产物名）生成一段任务书并复制 —— 贴给 AI，由它照仓库自己的发版路径做"
+              onClick={() => void copyPrompt()}
+            >
+              复制发布提示词
+            </button>
+            <button type="button" className={c.btn} onClick={onClose} disabled={busy}>
+              取消
+            </button>
+            <button type="button" className={c.btn} onClick={() => void run()} disabled={busy}>
+              重新检查
+            </button>
+            <button
+              type="button"
+              className={`${c.btn} ${c.btnPrimary}`}
+              disabled={!pre?.canRelease || busy}
+              title={pre?.canRelease ? undefined : '闸没全绿 —— 这颗按钮不亮'}
+              onClick={() => void release()}
+            >
+              {busy ? '发布中…（要构建并上传安装包，几分钟）' : '确认发布'}
+            </button>
+          </div>
+        </div>
       }
     >
       {/*

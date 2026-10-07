@@ -647,19 +647,44 @@ pub fn run(
      *
      * Release 挂在 tag 上，所以 **tag 必须在 Gitee 真实存在**；main 同步过去是
      * "数据源主线跟随发布仓库"（作者 2026-10-05 定）—— 客户端的数据源读的就是
-     * 仓库里的 `presets/delivery/`。两步都幂等：同一笔重跑是 no-op / fast-forward。
+     * 仓库里的 `presets/delivery/`。两步都幂等：tag 先 `ls-remote` 问一句（已有且
+     * 同一笔提交就跳过，指到别的提交就报分叉）；main 同一笔重跑是 no-op / fast-forward。
      * 主线的**源是 `origin/{base}`**（上面刚 fetch 过）：本地 {base} 旧不旧都不影响这一推 ——
      * 拿本地分支当源正是 2026-10-07 那次"git push 失败了"的成因（非快进，闸③ 拦）。
      * 远端有本地没有的提交时如实报错（那是镜像分叉，得先解决，不能悄悄覆盖）。
      */
     if let Some(ch) = release {
         let g = ch.target;
-        git.push_ref_to_authenticated(
-            &g.repository_url,
-            &format!("refs/tags/{tag}"),
-            &g.username,
-            &g.token,
-        )?;
+        // ★ 发布仓库上**已有这个 tag** 时不要硬推：同名不同对象的 tag，git 自己会拒
+        //   （already exists），pre-push 闸③ 也会把"远端 tag 对象不是本地的祖先"报成
+        //   非快进（2026-10-07 真机：本地与发布仓库的 v0.0.6 是两回打的 annotated tag，
+        //   对象不同、**指向同一笔提交** —— tag 不是提交，闸的祖先判定在它身上只会误报，
+        //   界面上就剩一句"git push 失败了"）。剥了皮指向同一笔提交 = 早就同步过去了，
+        //   跳过（幂等）；指向别的提交 = tag 真分叉 —— 已发布的 tag 不许重打/移动，
+        //   停下来让人裁决，不悄悄覆盖。
+        let local_commit = git.rev_parse(&format!("refs/tags/{tag}^{{commit}}"))?;
+        match git.remote_tag_commit(&g.repository_url, &tag, &g.username, &g.token)? {
+            Some(remote_commit) if remote_commit == local_commit => {
+                report
+                    .summary
+                    .push_str(&format!("{tag} 发布仓库里已有（同一笔提交），不重推。"));
+            }
+            Some(remote_commit) => {
+                return Err(AppError::invalid_argument(format!(
+                    "{tag} 在发布仓库上指向 {remote_commit}，本地这个指向 {local_commit} —— \
+                     tag 分叉了，不许自动覆盖（已发布的 tag 不许重打/移动）；\
+                     先弄清哪一笔才是真发布，再重跑这一趟"
+                )));
+            }
+            None => {
+                git.push_ref_to_authenticated(
+                    &g.repository_url,
+                    &format!("refs/tags/{tag}"),
+                    &g.username,
+                    &g.token,
+                )?;
+            }
+        }
         git.push_ref_to_authenticated(
             &g.repository_url,
             &format!("{remote_base}:refs/heads/{base}"),
@@ -667,7 +692,7 @@ pub fn run(
             &g.token,
         )?;
         report.summary.push_str(&format!(
-            "已把 {tag} 与 {base} 推到发布仓库 {}（Release 的 tag 就位，数据源主线随之同步）。",
+            "已把 {base} 推到发布仓库 {}（数据源与 release.json 随之过去）。",
             g.repository_url
         ));
     }
@@ -1374,6 +1399,22 @@ struct PromptFacts<'a> {
     account: Option<&'a PublishTarget>,
     channel: Option<&'a PublishTarget>,
     plan: Option<InstallerPlan>,
+    /// 这一趟是**首发**还是**补包**（问过发布仓库的结论，与闸共用 [`release_slot`]）——
+    /// 任务书按错的趟别写，AI 就会照着八步去重开 PR / 动版本号。
+    mode: PromptMode,
+}
+
+/// 提示词要写的**趟别**。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptMode {
+    /// `{tag}` 还没发过：完整八步
+    Fresh,
+    /// `{tag}` 已发过、本平台缺包：只补安装包（不重打 tag / 不开新 PR / 不动版本号）
+    Append,
+    /// 本平台那一份已经在 Release 上了：没什么可发
+    Taken,
+    /// 问不出来（发布通道没配 / 网络不通）：照实说，让 AI 以预检结论为准
+    Unsure,
 }
 
 /// 把"这一版要怎么发"写成一段**能直接交给 AI 的任务书**。
@@ -1404,6 +1445,63 @@ fn release_prompt_text(f: &PromptFacts) -> String {
     } else {
         f.notes.trim()
     };
+    // 趟别决定任务书的形状：补包趟把八步换成"构建 + 上传"那几步 —— 照首发写，
+    // AI 就会去重开 PR、动版本号（2026-10-07 补 Windows 包那次真踩了）
+    let mode_line = match f.mode {
+        PromptMode::Fresh => String::new(),
+        PromptMode::Append => format!(
+            "- 这一趟是**补包**：`{tag}` 已经发过（tag 与 Release 都在发布仓库），\
+             缺的只是本平台的安装包 —— 版本号、tag、PR 都不动\n",
+            tag = f.tag
+        ),
+        PromptMode::Taken => format!(
+            "- ⚠ `{tag}` 本平台的安装包**已经在发布仓库上了** —— 这一趟没什么可发；\
+             要发新版就换一个版本号\n",
+            tag = f.tag
+        ),
+        PromptMode::Unsure => {
+            "- ⚠ 发布仓库这一版本平台发没发过**问不到**（发布通道没配 / 网络不通）\
+             —— 跑命令时预检会给结论，照它走\n"
+                .to_owned()
+        }
+    };
+    let steps = match f.mode {
+        PromptMode::Append => format!(
+            r#"## 这条命令会按顺序做（**补包趟** —— 照它核对进度）
+1. 预检：会认出这是补包（`{tag}` 已在发布仓库，本平台的安装包还没传）
+2. 把 `{tag}` 与 `{base}` 对齐到发布仓库（幂等 —— 早同步过的就是 no-op）
+3. 构建本平台安装包：`{asset}`
+4. 把安装包传到发布仓库**已有的** Release「{product} {tag}」上
+5. {release_info}：上一趟已经写过 / 开过 PR 的话不重开 —— 开了的话**仍要人合并**
+
+★ 补包不重打 tag、不开新 PR、不动版本号 —— 版本号四处保持 {version} 原样。
+"#,
+            tag = f.tag,
+            base = f.base,
+            asset = asset,
+            product = PRODUCT,
+            release_info = RELEASE_INFO_REL,
+            version = f.version,
+        ),
+        _ => format!(
+            r#"## 这条命令会按顺序做（照它核对进度）
+1. 预检：分支 / 工作区干净 / 四处版本号一致 / 这一版这一平台还没发过 / 本机能打这个包
+2. 版本号四处一起推进到 {version} → 提交 `chore: {tag}` → 推当前分支
+3. 开 PR「发版 {tag}」（base={base}）→ 等 CI → squash 合并
+4. 切回 {base}，在 {base} 的 **tip** 上打 annotated tag `{tag}` 并推送
+5. 把 tag 与 {base} 推到发布仓库（客户端的数据源读的就是那边的 presets/delivery/）
+6. 构建本平台安装包：`{asset}`
+7. 在发布仓库建 Release「{product} {tag}」，上传安装包
+8. 写 {release_info}，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
+"#,
+            version = f.version,
+            tag = f.tag,
+            base = f.base,
+            asset = asset,
+            product = PRODUCT,
+            release_info = RELEASE_INFO_REL,
+        ),
+    };
     // 推荐命令：把「发布账户与凭据从哪来」一并写进同一行（CLI 靠 MKPSE_APP_DIR 复用工作台的配置）
     let cmd = if cfg!(target_os = "windows") {
         format!(
@@ -1428,7 +1526,7 @@ fn release_prompt_text(f: &PromptFacts) -> String {
 - 仓库根：{repo}
 - 当前分支：{branch}（发版 PR 的目标分支是 {base}）
 - 目标版本：{version}　tag：{tag}
-- 更新说明（会成为 Release 正文与 release.json 的 notes）：{notes}
+{mode_line}- 更新说明（会成为 Release 正文与 release.json 的 notes）：{notes}
 - 发布账户：{account}
 - 发布通道（Release 与安装包**只发这里**）：{channel}
 - 安装包产物名：{asset}
@@ -1445,16 +1543,7 @@ fn release_prompt_text(f: &PromptFacts) -> String {
 ★ 不要自己手写 git 命令去凑发版流程：版本号是"**一处真值 + 三处派生**"，必须一起改 ——
   src-tauri/Cargo.toml（真值）/ package.json / src-tauri/tauri.conf.json / Cargo.lock。
 
-## 这条命令会按顺序做（照它核对进度）
-1. 预检：分支 / 工作区干净 / 四处版本号一致 / 这一版这一平台还没发过 / 本机能打这个包
-2. 版本号四处一起推进到 {version} → 提交 `chore: {tag}` → 推当前分支
-3. 开 PR「发版 {tag}」（base={base}）→ 等 CI → squash 合并
-4. 切回 {base}，在 {base} 的 **tip** 上打 annotated tag `{tag}` 并推送
-5. 把 tag 与 {base} 推到发布仓库（客户端的数据源读的就是那边的 presets/delivery/）
-6. 构建本平台安装包：`{asset}`
-7. 在发布仓库建 Release「{product} {tag}」，上传安装包
-8. 写 {release_info}，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
-
+{steps}
 ## 纪律（不许破）
 - {base} 只能由 PR 推进：不要在 {base} 上直接提交 / 推送
 - tag 必须打在 {base} 的 tip 上、必须是 annotated（`git tag -a`）；已发布的 tag 不许重打 / 移动
@@ -1478,9 +1567,10 @@ release.json 的 PR 链接 / **还差什么**（例如"等你合并 release.json
         repo = f.repo.display(),
         branch = f.branch,
         base = f.base,
+        mode_line = mode_line,
+        steps = steps,
         notes = notes,
         asset = asset,
-        product = PRODUCT,
         release_info = RELEASE_INFO_REL,
         history_file = f.history_file,
     )
@@ -1488,8 +1578,10 @@ release.json 的 PR 链接 / **还差什么**（例如"等你合并 release.json
 
 /// **发射提示词**（"傻瓜化"出口）：把"这一版要怎么发"整成一段能直接贴给 AI 的任务书。
 ///
-/// ★ 只读：不动仓库、不联网（除了读本机的发布账户配置）—— 点几次都没副作用。
-#[tauri::command]
+/// ★ 只读：不动仓库、不写任何东西 —— 但要**问一句发布仓库**（这一版本平台发过没有，
+///   与闸/事务共用 [`release_slot`]）：任务书按首发写、实际是补包的话，AI 照着八步走
+///   就会去重开 PR / 动版本号。所以这条命令是 `(async)` —— 网络慢时不挂界面。
+#[tauri::command(async)]
 pub fn wb_release_prompt(
     app: tauri::AppHandle,
     version: Option<String>,
@@ -1510,6 +1602,20 @@ pub fn wb_release_prompt(
         let app_dir = root.display().to_string();
         let history_file = root.join("release-history.json").display().to_string();
         let opts = ReleaseOptions::default();
+        // 趟别：问一句发布仓库（与闸同一判据）。问不到就照实写"问不到"，不猜。
+        let hosting = channel
+            .as_ref()
+            .and_then(|t| super::platform::hosting(&t.platform, t.token.clone()));
+        let rel_channel = channel
+            .as_ref()
+            .zip(hosting.as_deref())
+            .map(|(target, hosting)| ReleaseChannel { hosting, target });
+        let mode = match release_slot(&git, &tag, rel_channel.as_ref()) {
+            Ok(ReleaseSlot::Fresh) => PromptMode::Fresh,
+            Ok(ReleaseSlot::Append) => PromptMode::Append,
+            Ok(ReleaseSlot::Taken) => PromptMode::Taken,
+            Err(_) => PromptMode::Unsure,
+        };
         Ok(release_prompt_text(&PromptFacts {
             repo: &repo,
             app_dir: &app_dir,
@@ -1522,6 +1628,7 @@ pub fn wb_release_prompt(
             account: account.as_ref(),
             channel: channel.as_ref(),
             plan: installer_plan(),
+            mode,
         }))
     })
 }
@@ -1861,6 +1968,7 @@ mod tests {
             account: Some(&account),
             channel: Some(&channel),
             plan: installer_plan(),
+            mode: PromptMode::Fresh,
         });
 
         for must in [
@@ -1889,6 +1997,41 @@ mod tests {
                     p.ext
                 )),
                 "提示词里少了安装包名：\n{text}"
+            );
+        }
+    }
+
+    /// **补包趟的任务书按补包写**（2026-10-07）：这一版已经发过、只缺本平台的包时，
+    /// 任务书还按首发八步写，接话的 AI 就会去重开 PR / 动版本号 —— 都是被闸拦下来
+    /// 才知道走错了路。补包任务书要说清"只构建 + 上传"，并把完整八步从里面拿掉。
+    #[test]
+    fn the_append_prompt_talks_like_an_append_run() {
+        let repo = PathBuf::from("/tmp/repo");
+        let text = release_prompt_text(&PromptFacts {
+            repo: &repo,
+            app_dir: "/tmp/app",
+            history_file: "/tmp/app/release-history.json",
+            branch: "feat/demo",
+            version: "0.0.6",
+            tag: "v0.0.6",
+            notes: "",
+            base: "main",
+            account: None,
+            channel: None,
+            plan: installer_plan(),
+            mode: PromptMode::Append,
+        });
+
+        for must in ["补包", "已有的** Release", "不重打 tag", "仍要人合并"] {
+            assert!(text.contains(must), "补包任务书里少了「{must}」：\n{text}");
+        }
+        for must_not in [
+            "版本号四处一起推进", // 首发②的那一步 —— 补包不动版本号
+            "开 PR「发版",        // 首发③ —— 补包不开新 PR
+        ] {
+            assert!(
+                !text.contains(must_not),
+                "补包任务书里不该有「{must_not}」：\n{text}"
             );
         }
     }
