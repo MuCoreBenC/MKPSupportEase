@@ -759,17 +759,26 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
         let old = std::fs::read_to_string(delivery.join(rel)).ok();
         aux.push(preview_text(rel, rel, &text, old.as_deref()));
     }
-    let catalog_text = super::delivery::built_catalog(&delivery, &book, &stamp)?.to_pretty_json()?;
+    let catalog_text =
+        super::delivery::built_catalog(&delivery, &book, &stamp)?.to_pretty_json()?;
     let catalog_rel = super::delivery::NEW_CATALOG_FILE;
     let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
-    aux.push(preview_text(catalog_rel, catalog_rel, &catalog_text, old.as_deref()));
+    aux.push(preview_text(
+        catalog_rel,
+        catalog_rel,
+        &catalog_text,
+        old.as_deref(),
+    ));
 
     // 生成**不动**的那几份也照实列出来（作者 2026-10-07：「那我那个生成的里面怎么没有」）——
     // manifest / source 由发布定稿、release.json 属软件发布链，界面把它们标成"本次生成不动"。
     for (rel, stage) in [
         (super::delivery::MANIFEST_FILE, DeliveryStage::Publish),
         (super::delivery::SOURCE_FILE, DeliveryStage::Publish),
-        (crate::runtime::source::RELEASE_FILE, DeliveryStage::Software),
+        (
+            crate::runtime::source::RELEASE_FILE,
+            DeliveryStage::Software,
+        ),
     ] {
         let old = std::fs::read_to_string(delivery.join(rel)).ok();
         aux.push(preview_frozen(rel, stage, old.as_deref()));

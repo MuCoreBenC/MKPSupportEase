@@ -47,18 +47,59 @@ use super::version;
 pub const TAG_PREFIX: &str = "v";
 /// 安装包的产品名（asset 命名与 Release 标题用它）。
 pub const PRODUCT: &str = "SupportEase";
-/// 安装包产物目录（相对仓库根）：`tauri build` 把 dmg 放在这里。
+/// `tauri build` 的**产物根**（相对仓库根）的两个候选。
 ///
 /// ★ 两个候选都在：本仓库的 `CARGO_TARGET_DIR` 指到**仓库根**的 `target/`（真机实测
 /// 2026-10-04 构建落在 `target/release/bundle/dmg/`），而老机器 / 别的配置下会在
 /// `src-tauri/target/…`。**按顺序找，找到哪个里有就用哪个** —— 两个都没有才报错。
-/// `.app` 所在目录（与 [`DMG_DIRS`] 同一个"仓库根 target 优先"的前提）
+pub const BUNDLE_ROOT_CANDIDATES: [&str; 2] =
+    ["target/release/bundle", "src-tauri/target/release/bundle"];
+
+/// `.app` 所在的那一层（macOS 打应用内更新的 zip 用；与 [`BUNDLE_ROOT_CANDIDATES`] 同一个
+/// "仓库根 target 优先"的前提）
 pub const MACOS_BUNDLE_DIR: &str = "target/release/bundle/macos";
 
-pub const DMG_DIRS: [&str; 2] = [
-    "target/release/bundle/dmg",
-    "src-tauri/target/release/bundle/dmg",
-];
+/// **宿主平台打出来的那一份安装包**（第四刀只做 macOS；2026-10-07 起两端各在自己的机器上打）。
+///
+/// 为什么不在一台机器上打两个平台的包：macOS 的 dmg 要 `hdiutil`、Windows 的 NSIS 要
+/// `makensis` —— 交叉打包不是"多传一个参数"的事。**各自平台打各自的包**是这一阶段的决定，
+/// 也是这个类型存在的理由：谁也别假装自己能打别人的。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstallerPlan {
+    /// `bundle/` 下的子目录（`dmg` / `nsis`）
+    pub dir: &'static str,
+    /// 认的产物后缀，同时也是 asset 命名的后缀（`dmg` / `exe`）
+    pub ext: &'static str,
+    /// 给人看的一句话
+    pub label: &'static str,
+}
+
+/// 本机能打什么。**别的一律 `None`** —— 不假装能构建，也不悄悄换一种产物顶上。
+pub fn installer_plan() -> Option<InstallerPlan> {
+    if cfg!(target_os = "macos") {
+        Some(InstallerPlan {
+            dir: "dmg",
+            ext: "dmg",
+            label: "dmg",
+        })
+    } else if cfg!(target_os = "windows") {
+        Some(InstallerPlan {
+            dir: "nsis",
+            ext: "exe",
+            label: "NSIS 安装包",
+        })
+    } else {
+        None
+    }
+}
+
+/// `bundle/<子目录>` 在盘上的实际位置：两个候选按顺序找，**找到哪个里有就用哪个**。
+fn bundle_dir(repo_root: &Path, sub: &str) -> Option<PathBuf> {
+    BUNDLE_ROOT_CANDIDATES
+        .iter()
+        .map(|root| repo_root.join(root).join(sub))
+        .find(|dir| dir.is_dir())
+}
 /// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
 /// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
 ///
@@ -573,20 +614,20 @@ pub fn run(
         ));
     }
 
-    /* ---------- ⑦ 构建 macOS 安装包（第一阶段只做 macOS、不签名） ---------- */
+    /* ---------- ⑦ 构建本平台的安装包（macOS → dmg / Windows → NSIS；都不签名） ---------- */
 
     if !opts.build {
         report.summary.push_str("（本次不构建安装包）");
         return Ok(report);
     }
-    let dmg = build_installer(repo_root)?;
+    let built = build_installer(repo_root)?;
     report.artifact = Some(ArtifactInfo {
-        name: dmg.name.clone(),
-        size: dmg.size,
-        path: dmg.path.display().to_string(),
+        name: built.name.clone(),
+        size: built.size,
+        path: built.path.display().to_string(),
     });
     report.stage = ReleaseStage::Built;
-    report.summary.push_str(&format!("已构建 {}。", dmg.name));
+    report.summary.push_str(&format!("已构建 {}。", built.name));
 
     /* ---------- ⑧ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
 
@@ -613,9 +654,9 @@ pub fn run(
         owner: g.owner.clone(),
         repo: g.repo.clone(),
         release_id: release.id,
-        name: dmg.name.clone(),
-        content_type: super::platform::content_type_for(&dmg.name).to_owned(),
-        path: dmg.path.clone(),
+        name: built.name.clone(),
+        content_type: super::platform::content_type_for(&built.name).to_owned(),
+        path: built.path.clone(),
     })?;
     report.stage = ReleaseStage::AssetUploaded;
     report.summary.push_str(&format!(
@@ -623,54 +664,66 @@ pub fn run(
         uploaded.name, uploaded.size
     ));
 
-    /* ---------- ⑧之二  应用内更新用的 `.app.zip`（第五刀） ---------- */
+    /* ---------- ⑧之二  应用内更新用的 `.app.zip`（第五刀；**只有 macOS 有这条路**） ---------- */
     //
     // dmg 是"给人手动装的"，zip 是"给程序自己下载并替换的" —— 两种用途，两个文件。
     // ★ 这一步**失败不挡发版**：打不出 zip 就如实说"这一版只能打开下载页"，
     //   release.json 里就没有 `asset`，客户端照旧退回那条路（比整个发版失败好）。
-    match build_app_zip(repo_root, &version) {
-        Ok(zip) => {
-            let zip_name = zip.name.clone();
-            match ch.hosting.upload_asset(&super::platform::AssetUpload {
-                owner: g.owner.clone(),
-                repo: g.repo.clone(),
-                release_id: release.id,
-                name: zip.name.clone(),
-                content_type: super::platform::content_type_for(&zip.name).to_owned(),
-                path: zip.path.clone(),
-            }) {
-                Ok(put) => {
-                    let sha = sha256_file(&zip.path).unwrap_or_default();
-                    // ★ 下载地址**用平台回给我们的那个**（`browser_download_url`），
-                    //   不自己拼 —— 2026-10-05 真机踩过：拼出来的
-                    //   `…/releases/tag/v0.0.4/download/v0.0.4/…` 多了一层 `/tag/{tag}`，
-                    //   GitHub 宽容地重定向了（能下），但**换到 Gitee 就未必**，
-                    //   而"平台告诉我们它的下载页在哪"是唯一跨平台可靠的说法。
-                    //   平台没给（某些 Gitee 版本）才回退到 Release 页。
-                    let url = if put.url.trim().is_empty() {
-                        release.url.clone()
-                    } else {
-                        put.url.clone()
-                    };
-                    report.zip = Some(crate::runtime::release_info::ReleaseAsset {
-                        name: zip_name.clone(),
-                        url,
-                        size: put.size,
-                        sha256: sha,
-                    });
-                    report.summary.push_str(&format!(
-                        "已上传 {zip_name}（{} 字节，应用内更新用）。",
-                        put.size
-                    ));
+    //
+    // ★ 2026-10-07：客户端那条应用内更新（`runtime::updater`）替换的是
+    //   `/Applications/SupportEase.app`，靠系统 `ditto` / `unzip` —— **它只认 macOS**。
+    //   Windows 版没有对应的替换路径（NSIS 静默安装那套客户端还没接），所以这里**不做**、
+    //   `release.json` 里也就没有 `asset`：客户端的 Windows 版走"打开下载页"，
+    //   而 Release 页上那份 `.exe` 就在那儿。**不假装打一个 zip 出来顶上。**
+    if cfg!(target_os = "macos") {
+        match build_app_zip(repo_root, &version) {
+            Ok(zip) => {
+                let zip_name = zip.name.clone();
+                match ch.hosting.upload_asset(&super::platform::AssetUpload {
+                    owner: g.owner.clone(),
+                    repo: g.repo.clone(),
+                    release_id: release.id,
+                    name: zip.name.clone(),
+                    content_type: super::platform::content_type_for(&zip.name).to_owned(),
+                    path: zip.path.clone(),
+                }) {
+                    Ok(put) => {
+                        let sha = sha256_file(&zip.path).unwrap_or_default();
+                        // ★ 下载地址**用平台回给我们的那个**（`browser_download_url`），
+                        //   不自己拼 —— 2026-10-05 真机踩过：拼出来的
+                        //   `…/releases/tag/v0.0.4/download/v0.0.4/…` 多了一层 `/tag/{tag}`，
+                        //   GitHub 宽容地重定向了（能下），但**换到 Gitee 就未必**，
+                        //   而"平台告诉我们它的下载页在哪"是唯一跨平台可靠的说法。
+                        //   平台没给（某些 Gitee 版本）才回退到 Release 页。
+                        let url = if put.url.trim().is_empty() {
+                            release.url.clone()
+                        } else {
+                            put.url.clone()
+                        };
+                        report.zip = Some(crate::runtime::release_info::ReleaseAsset {
+                            name: zip_name.clone(),
+                            url,
+                            size: put.size,
+                            sha256: sha,
+                        });
+                        report.summary.push_str(&format!(
+                            "已上传 {zip_name}（{} 字节，应用内更新用）。",
+                            put.size
+                        ));
+                    }
+                    Err(e) => report.summary.push_str(&format!(
+                        "应用内更新的 zip 传不上去（{e}）—— 这一版退回「打开下载页」。"
+                    )),
                 }
-                Err(e) => report.summary.push_str(&format!(
-                    "应用内更新的 zip 传不上去（{e}）—— 这一版退回「打开下载页」。"
-                )),
             }
+            Err(e) => report.summary.push_str(&format!(
+                "打不出应用内更新的 zip（{e}）—— 这一版退回「打开下载页」。"
+            )),
         }
-        Err(e) => report.summary.push_str(&format!(
-            "打不出应用内更新的 zip（{e}）—— 这一版退回「打开下载页」。"
-        )),
+    } else {
+        report
+            .summary
+            .push_str("应用内更新（.app.zip）只对 macOS 包做 —— 这一版客户端走「打开下载页」。");
     }
 
     /* ---------- ⑨ 写 `release.json` → 它自己的分支与 PR（**合并留给人**） ---------- */
@@ -754,65 +807,70 @@ struct BuiltArtifact {
     path: PathBuf,
 }
 
-/// **构建 macOS 安装包**（`npm run tauri -- build`）。
+/// **构建本平台的安装包**（`npm run tauri -- build`）。
 ///
 /// 走 npm script 而不是直接 `npx tauri`：那确保用的是本项目 `node_modules` 里那一版 CLI，
 /// 而不是 PATH 上碰巧存在的另一个。
 ///
-/// ★ 产物**只认 `bundle/dmg` 下的唯一一份 dmg**：找到 0 份如实报（不猜别的目录），
+/// ★ 产物**只认 `bundle/<本平台目录>` 下的唯一一份**：找到 0 份如实报（不猜别的目录），
 /// 找到多份也如实报（让人自己决定哪一份）—— "挑一个"这种事不该由程序偷偷做。
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
-    let out = std::process::Command::new("npm")
-        .args(["run", "tauri", "--", "build"])
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| AppError::io("起不了 npm").with_detail(e.to_string()))?;
+    let plan = installer_plan().ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
+            std::env::consts::OS
+        ))
+    })?;
+
+    let out = npm_build(repo_root)?;
     if !out.status.success() {
         return Err(AppError::io("构建安装包失败")
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
 
-    // 两个候选目录：**找到哪个里有就用哪个**（顺序见 `DMG_DIRS` 的说明）
-    let dir = DMG_DIRS
-        .iter()
-        .map(|d| repo_root.join(d))
-        .find(|d| d.is_dir())
-        .ok_or_else(|| {
-            AppError::io("找不到安装包目录（构建没产出 dmg？）").with_detail(
-                DMG_DIRS
-                    .iter()
-                    .map(|d| repo_root.join(d).display().to_string())
-                    .collect::<Vec<_>>()
-                    .join("、"),
-            )
-        })?;
+    let dir = bundle_dir(repo_root, plan.dir).ok_or_else(|| {
+        AppError::io(format!("找不到安装包目录（构建没产出 {}？）", plan.ext)).with_detail(
+            BUNDLE_ROOT_CANDIDATES
+                .iter()
+                .map(|root| repo_root.join(root).join(plan.dir).display().to_string())
+                .collect::<Vec<_>>()
+                .join("、"),
+        )
+    })?;
     let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| {
             AppError::io("读不了安装包目录").with_detail(format!("{}：{e}", dir.display()))
         })?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("dmg"))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some(plan.ext))
         .collect();
     found.sort();
     match found.as_slice() {
-        [] => {
-            Err(AppError::io("构建完了但 bundle/dmg 下没有 dmg")
-                .with_detail(dir.display().to_string()))
-        }
+        [] => Err(AppError::io(format!(
+            "构建完了但 bundle/{} 下没有 {}",
+            plan.dir, plan.ext
+        ))
+        .with_detail(dir.display().to_string())),
         [one] => {
-            // ★ 追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦"浏览器下载"的
-            //   第一次打开（"已损坏"）—— 让 dmg 自己带着解法（2026-10-06 真机踩的）。
+            // ★ 只有 macOS 的 dmg 要追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦
+            //   "浏览器下载"的第一次打开（"已损坏"）—— 让 dmg 自己带着解法（2026-10-06 真机踩的）。
             //   说明文档能直接打开；终端快捷方式指向 Apple 签名的系统应用，也不会被拦。
             //   ★ 刻意不放可执行脚本 —— 脚本和应用一样被隔离拦下，形同虚设。
-            let dmg_path = one.display().to_string();
-            let patched = std::process::Command::new("bash")
-                .args(["scripts/patch-dmg-extras.sh", &dmg_path])
-                .current_dir(repo_root)
-                .output()
-                .map_err(|e| AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string()))?;
-            if !patched.status.success() {
-                return Err(AppError::io("安装包追加说明失败")
-                    .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
+            //   ★ Windows 那边是另一回事（SmartScreen 警告，解法在 Release 说明里），
+            //     这一步帮不上忙，也不假装帮 —— 不往 .exe 里塞东西。
+            if cfg!(target_os = "macos") {
+                let dmg_path = one.display().to_string();
+                let patched = std::process::Command::new("bash")
+                    .args(["scripts/patch-dmg-extras.sh", &dmg_path])
+                    .current_dir(repo_root)
+                    .output()
+                    .map_err(|e| {
+                        AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string())
+                    })?;
+                if !patched.status.success() {
+                    return Err(AppError::io("安装包追加说明失败")
+                        .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
+                }
             }
             let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
             Ok(BuiltArtifact {
@@ -820,21 +878,42 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                     PRODUCT,
                     &version_of(repo_root),
                     arch_name(),
-                    "dmg",
+                    plan.ext,
                 ),
                 size,
                 path: one.clone(),
             })
         }
-        many => Err(
-            AppError::io("bundle/dmg 下不止一份 dmg —— 自己确认要发哪一份").with_detail(
-                many.iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join("、"),
-            ),
-        ),
+        many => Err(AppError::io(format!(
+            "bundle/{} 下不止一份 {} —— 自己确认要发哪一份",
+            plan.dir, plan.ext
+        ))
+        .with_detail(
+            many.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("、"),
+        )),
     }
+}
+
+/// `npm run tauri -- build`。
+///
+/// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而 `Command::new("npm")`
+/// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
+/// 这不是优化，是"在 Windows 上这条命令根本跑不起来"。
+fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("cmd");
+        c.arg("/C").arg("npm");
+        c
+    } else {
+        std::process::Command::new("npm")
+    };
+    cmd.args(["run", "tauri", "--", "build"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| AppError::io("起不了 npm").with_detail(e.to_string()))
 }
 
 /// 打应用内更新用的 `.app.zip`（**系统 `ditto`，不引压缩依赖**）。
@@ -940,12 +1019,18 @@ fn write_release_info(
 
 fn release_body(notes: &str) -> String {
     let n = notes.trim();
-    if n.is_empty() {
-        format!(
-            "{PRODUCT} 的正式版本。\n\n（未签名：首次打开需要右键 → 打开绕过 Gatekeeper 警告。）"
-        )
+    // 未签名那句**按平台说**（2026-10-07）：两边的拦截不是同一件事，给同一句等于给错解法
+    let unsigned = if cfg!(target_os = "macos") {
+        "（未签名：首次打开需要右键 → 打开绕过 Gatekeeper 警告。）"
+    } else if cfg!(target_os = "windows") {
+        "（未签名：首次运行会被 SmartScreen 拦一下 ——「更多信息」→「仍要运行」。）"
     } else {
-        format!("{n}\n\n（未签名：首次打开需要右键 → 打开绕过 Gatekeeper 警告。）")
+        "（未签名的构建。）"
+    };
+    if n.is_empty() {
+        format!("{PRODUCT} 的正式版本。\n\n{unsigned}")
+    } else {
+        format!("{n}\n\n{unsigned}")
     }
 }
 
@@ -1150,20 +1235,25 @@ pub fn wb_release_preflight(
             },
         );
 
-        // ★ 第一阶段只做 macOS：构建那一步在别的系统上做不出来，进闸里明说
-        let mac = std::env::consts::OS == "macos";
+        // ★ 构建那一步**按宿主平台分流**（macOS → dmg / Windows → NSIS，2026-10-07）：
+        //   两个平台各自的打包链都在本机，别的一概做不出来 —— 进闸里明说。
+        let plan = installer_plan();
         push(
             &mut items,
             "platform-build",
             "构建环境",
-            mac,
-            if mac {
-                format!("本机是 macOS —— 会构建 dmg（{}）", arch_name())
-            } else {
-                format!(
-                    "本机是 {} —— 第一阶段只做 macOS 安装包",
+            plan.is_some(),
+            match plan {
+                Some(p) => format!(
+                    "本机是 {} —— 会构建 {}（{}）",
+                    std::env::consts::OS,
+                    p.label,
+                    arch_name()
+                ),
+                None => format!(
+                    "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
                     std::env::consts::OS
-                )
+                ),
             },
         );
 

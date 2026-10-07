@@ -920,7 +920,7 @@ export interface ReleaseOptions {
   dryRun?: boolean
   /** 建了 PR 之后接着合并（人在界面上点过「确认发布」才有） */
   merge?: boolean
-  /** 构建 macOS 安装包（默认开） */
+  /** 构建**本平台**的安装包（macOS → dmg / Windows → NSIS；默认开） */
   build?: boolean
   openReview?: boolean
 }

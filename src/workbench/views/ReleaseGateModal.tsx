@@ -367,7 +367,8 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
       <div className={s.warn}>
         <div className={s.warnTitle}>这一趟会动本机的工作区</div>
         切到 main → 在 main 的 tip 上打 tag（squash 会重写提交，tag 必须打在 main 上）→
-        构建 macOS 安装包 → 建 Release 并上传 → 写 release.json 并开第二个 PR。
+        构建安装包（macOS → dmg / Windows → NSIS）→ 建 Release 并上传 → 写 release.json
+        并开第二个 PR。
         <br />
         ★ release.json 那个 PR 要**你自己合并** —— 合并之后客户端才看得到新版本。
       </div>

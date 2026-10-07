@@ -174,13 +174,22 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      # **这一档刻意不启用 `workbench`。** 它的存在理由是 `#[cfg(not(target_os = "macos"))]`
-      # 那几段在 macOS 上一行都不会被编译；而 `src/workbench/**` 里
-      # `cfg(not(target_os` / `cfg(target_os` / `cfg(windows` / `cfg(unix)` **零命中** ——
-      # 工作台没有平台相关的编译分支，在 Windows 上再跑一遍得不到新信息，只是多花一份 runner。
-      # 哪天工作台里出现了平台分支，这里要跟着加上（那时这条注释就是提醒）。
-      - name: clippy
+      # ★ **2026-10-07 起这一档也跑 `workbench`**：它原来刻意不跑，理由是
+      #   `src/workbench/**` 里没有平台编译分支（在 Windows 上再跑一遍得不到新信息，
+      #   只多花一份 runner）。**那条理由到期了** —— 软件发布那一刀按宿主分流：
+      #   `release_tx.rs` 的 `installer_plan()`（macOS → dmg / Windows → NSIS）、
+      #   `npm_build()`（`npm` 在 Windows 上必须过一层 `cmd /C`，否则"程序找不到"）、
+      #   应用内更新的 `.app.zip` 只有 macOS 有。这几段在 macOS 上一行都不会被编译，
+      #   **只有这里能替它们把关**。当初那句"哪天工作台里出现了平台分支，这里要跟着加上"
+      #   就是这条改动的由来。
+      - name: clippy（默认 feature）
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: 测试
+      - name: clippy（workbench）
+        run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
+
+      - name: 测试（默认 feature）
         run: cargo test
+
+      - name: 测试（workbench）
+        run: cargo test -p mkp-support-ease --features workbench
