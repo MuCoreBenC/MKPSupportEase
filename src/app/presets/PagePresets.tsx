@@ -833,7 +833,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /*
-   * **改备注**（2026-10-07 副标题覆盖账）：写完说一句。失败照实说 ——
+   * **改备注**（2026-10-07 副标题覆盖账；只有本地表的行有这个入口 ——
+   * 云端行只读工作台那句）：写完说一句。失败照实说 ——
    * 覆盖账是用户根下的一本小 JSON，写失败多半是盘的事，别吞。
    */
   const runSetRemark = (key: string, remark: string | null) =>
@@ -842,7 +843,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         setNote({
           text:
             remark === null
-              ? '已恢复默认备注 —— 回到工作台写的那句（没写就显示路径）'
+              ? '已恢复默认备注 —— 回到工作台写的那句（没写就空着）'
               : remark === ''
                 ? '备注已保存 —— 副标题留空（写什么就是什么，不回退）'
                 : '备注已保存 —— 以后更新不会覆盖它',

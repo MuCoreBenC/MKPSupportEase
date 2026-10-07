@@ -1276,15 +1276,20 @@ export interface PresetRowBase {
   /** 相对预设仓库根。表格第二行的小字与「在文件夹中显示」都用它 */
   path: string
   /**
-   * **表格第二行的小字（副标题）**（2026-10-07 作者定：副标题不要位置文案，
-   * 改显示**备注**）：备注覆盖账里有 ⇒ 用户的；否则那一版工作台写的 `remark`；
-     连版本备注都没有 ⇒ 回落 `path`（路径永远在 `title` 里，不丢）。
+   * **表格第二行的小字（副标题）= 备注**（2026-10-07 作者定：副标题不要位置文案）。
+   *
+   * 两张表两类来源、**互不干扰**（2026-10-07 三轮定案）：
+   *   本地表  覆盖账（用户改过的）→ 那一版工作台写的 `remark` → **空着**
+   *   云端表  **只**读那一版工作台写的 `remark` → **空着**（不读覆盖账、没有编辑格）
+   * 都没有备注就空着（位置文案不上副标题；`path` 永远在 `title` 里，不丢）。
+   * 唯一例外：本地交付行盘上不对劲（old / tampered）时状态注记压过备注（见 `localRows`）。
    */
   subtitle: string
   /**
-   * 备注覆盖账的键（`null` = 这一行没有可改的备注 —— 官方仓库行）。
-   * 官方交付行 = `catalog.path`、用户线 = 相对用户根的路径；「改备注」「删了重新下载
-   * 就回到工作台那句」都认它。详情面板的备注编辑格只在它非 `null` 时出现。
+   * 备注覆盖账的键（`null` = 这一行没有可改的备注）。**只有本地表的行有它**：
+   * 本地交付行 = `catalog.path`、用户线 = 相对用户根的路径；官方仓库行没有备注来源，
+   * 云端表的行一律不给 —— 云端只读工作台那句（2026-10-07 作者定）。
+   * 详情面板的备注编辑格只在它非 `null` 时出现。
    */
   remarkKey: string | null
   /**
@@ -1510,9 +1515,10 @@ export interface PresetRowsInput {
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
   /**
-   * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。
+   * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。**只有本地表读它** ——
+   * 云端表只读工作台写的那句（2026-10-07 作者定：本地的改动不许影响云端显示）。
    * 键 = 文件身份（官方交付行 `catalog.path` / 用户线相对用户根路径）；
-   * 有 ⇒ 副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
+   * 有 ⇒ 本地副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
    */
   remarks: Record<string, string>
   /**
@@ -1821,7 +1827,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
   /*
    * 副标题：**账上有覆盖（包括空串）就用用户的**（2026-10-07 作者改口：
    * 「可以空着，不要回退」—— 用户写空副标题就空）；没有覆盖才走
-   * 「工作台写的 → 路径文本」回落。「恢复默认」= 删掉覆盖。
+   * 「工作台写的 → 空着」回落。「恢复默认」= 删掉覆盖。
    */
   const remarkOr = (key: string | null, fallback: string): string =>
     key !== null && remarks[key] !== undefined ? remarks[key] : fallback
@@ -1841,8 +1847,8 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
-        /* 官方仓库行没有备注覆盖（ remarkKey null）—— 副标题照旧路径文本 */
-        subtitle: f.path,
+        /* 官方仓库行没有备注的来源也没有覆盖（remarkKey null）—— 副标题空着（路径在 title 里） */
+        subtitle: '',
         remarkKey: null,
         kind: f.kind,
         machineId: e.machineId,
@@ -1908,12 +1914,12 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey: f.path,
         fileName: f.fileName,
         path: f.path,
-        /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 路径（presets-mine/…） */
+        /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 空着（路径在 title 里，不丢） */
         subtitle: remarkOr(
           f.path,
           ownMachine !== null && ownVersion !== null
-            ? (versionRemark(ownMachine, ownVersion) ?? f.path)
-            : f.path,
+            ? (versionRemark(ownMachine, ownVersion) ?? '')
+            : '',
         ),
         remarkKey: f.path,
         /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
@@ -1988,14 +1994,14 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
-           副标题 = 备注覆盖账里的 → 那一版工作台写的 → 落点文本；
+           副标题 = 备注覆盖账里的 → 那一版工作台写的 → 空着；
            盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
         path: releasePathText(p),
         subtitle:
           /* 盘上那份不对劲（旧版本 / 内容异常）时那件事**必须**写在副标题原地 ——
-             状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 落点」回落 */
+             状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 空着」回落 */
           p.state === 'ok'
-            ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? releasePathText(p))
+            ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? '')
             : releasePathText(p),
         remarkKey: p.path,
         kind: p.kind,
@@ -2063,14 +2069,10 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     releasePresets,
     releaseVersion,
     releaseAt,
-    remarks,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
   const versionRemark = versionRemarkLookup(machines)
-  /* 与本地表同一条回落 —— 同一份覆盖账，两张表不各说一套（空覆盖也是覆盖，不回退） */
-  const remarkOr = (key: string | null, fallback: string): string =>
-    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
 
   /*
    * 凡文件名在**云端最新发布**里打包过的，官方行不再列出 —— 发布行接管它
@@ -2092,7 +2094,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
-        subtitle: f.path,
+        /* 官方仓库行没有备注的来源（工作台只给交付预设写 remark）—— 副标题空着（路径在 title 里） */
+        subtitle: '',
         remarkKey: null,
         kind: f.kind,
         machineId: e.machineId,
@@ -2133,12 +2136,14 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         path: `官方交付 / ${p.machineId} / ${p.versionId}`,
-        /* 副标题同样走备注（与本地表同一份覆盖账；盘上不对劲的状态只在本地表说） */
-        subtitle: remarkOr(
-          p.path,
-          versionRemark(p.machineId, p.versionId) ?? `官方交付 / ${p.machineId} / ${p.versionId}`,
-        ),
-        remarkKey: p.path,
+        /*
+         * 副标题 = **只读工作台写的那句**（这一版发布时带进目录的 `remark`）。
+         * 云端表不读本地覆盖账（2026-10-07 作者三轮：本地的改动不许影响云端显示）——
+         * 要写自己的备注，下载后在本地表里改。工作台没写就**空着**
+         * （不回落「官方交付 / …」那种位置文案；落点仍在 `title` 里）。
+         */
+        subtitle: versionRemark(p.machineId, p.versionId) ?? '',
+        remarkKey: null,
         kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,

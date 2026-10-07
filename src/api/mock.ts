@@ -154,7 +154,8 @@ const mockMineText = new Map<string, string>()
 
 /**
  * **备注覆盖账**（假后端版）：键 = 文件身份，值 = 用户改过的备注。
- * 与真机同语义：清掉（null / 空）= 删键，回到工作台那句。
+ * 与真机同语义（`runtime::remarks`）：`null` = 删键（恢复默认，回到工作台那句 /
+ * 空着）；**空串也是覆盖**（存进去，副标题就空着）—— 只有删除才删键。
  */
 const mockRemarks = new Map<string, string>()
 

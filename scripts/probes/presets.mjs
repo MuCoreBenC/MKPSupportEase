@@ -1402,13 +1402,14 @@ const revealItemOf = () =>
   })
 
 /* ① 官方那份：灰掉带原因 */
-/* 官方那一份：用「下载区」副标题锁定（光按文件名匹配会撞上"复制自 A1-standard.toml"
-   的出处副标题 —— 另存放开后我的文件里就有这样的行了） */
+/* 官方那一份：用副标题 span 的 `title`（盘上落点「下载区 mkp · …」）锁定 ——
+   副标题本体没备注时是**空的**（2026-10-07 三轮：没备注就空着、不再回落位置文案），
+   title 才是稳定的那一份；光按文件名匹配会撞上别的行。 */
 const officialTr13 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1-standard.toml' })
-  .filter({ hasText: '下载区 mkp' })
+  .filter({ has: page.locator('[title*="下载区 mkp"]') })
   .first()
 await officialTr13.click({ button: 'right' })
 await page.waitForTimeout(250)

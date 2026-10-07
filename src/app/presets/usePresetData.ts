@@ -159,12 +159,13 @@ export interface PresetData {
   mine: UserPresetFile[]
   /**
    * **备注覆盖账**（`api.getPresetRemarks()`，键 = 文件身份）：用户改过的副标题。
-   * 两张表的副标题都按「账上有的 → 那一版工作台写的 → 路径」回落。
+   * **只有本地表读它**（云端表只读工作台那句 —— 本地改动不许影响云端显示）：
+   * 本地副标题 = 账上有的 → 那一版工作台写的 → 空着。
    */
   remarks: Record<string, string>
   /**
-   * **改一份预设的备注**（副标题覆盖账）。**写什么就是什么 —— 包括空串**
-   * （空 = 副标题留空，不回退）；`null` = 恢复默认（退回「工作台写的 → 路径」）。
+   * **改一份预设的备注**（本地副标题覆盖账）。**写什么就是什么 —— 包括空串**
+   * （空 = 副标题留空，不回退）；`null` = 恢复默认（退回「工作台写的 → 空着」）。
    * 「更新不覆盖」靠账在，不在文件里。
    */
   setRemark: (key: string, remark: string | null) => Promise<void>
@@ -767,9 +768,9 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * **改一份预设的备注**（2026-10-07 副标题覆盖账）：写完重读整本账 ——
+   * **改一份预设的备注**（2026-10-07 副标题覆盖账；只有本地表读它）：写完重读整本账 ——
    * 副标题是账答的，不是前端改自己那份拷贝。写什么就是什么（空也存）；
-   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 路径」）。
+   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 空着」）。
    */
   const setRemark = useCallback(async (key: string, remark: string | null) => {
     await api.setPresetRemark(key, remark)
