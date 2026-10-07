@@ -342,10 +342,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_publish_audit,
         // **发布事务**（第三刀下半）：唯一对外的发布动作 —— 审计 → 生成 → 定稿 → git → PR
         app::build::wb_publish,
-        // 发布账户 / 状态（第三刀下半）：仓库地址 + 用户名（配置）+ Token（凭据文件，只进不出）+ 手动回读 PR/MR
+        // 发布账户 / 状态（第三刀下半）：仓库地址 + 用户名（配置）+ Token（凭据文件；写入只进不出、
+        // 明文只在设置页点「眼睛」时显式取）+ 手动回读 PR/MR
         app::publish_tx::wb_publish_account,
         app::publish_tx::wb_set_publish_account,
         app::publish_tx::wb_set_publish_token,
+        app::publish_tx::wb_get_publish_token,
         app::publish_tx::wb_clear_publish_account,
         app::publish_tx::wb_publish_status,
         // 合并（作者 2026-10-04 拍：squash、不强制等 CI）—— 用户显式点过才走

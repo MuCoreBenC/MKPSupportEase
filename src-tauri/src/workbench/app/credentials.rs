@@ -14,10 +14,15 @@
 //! 3. **每平台一份** key（`supportease.github.token` / `supportease.gitee.token`）——
 //!    一个 key 存多平台会导致切平台时反复覆盖。
 //!
-//! # 前端看不到 Token
+//! # 前端拿不到 Token —— 除非人**显式点那颗「眼睛」**
 //!
-//! 前端只知道"**有 / 没有**凭据"（[`CredentialStatus`]），**拿不到原值**。
-//! 判据 `credentials_never_echo_the_token` 钉住这条 —— 状态结构里没有 token 字段。
+//! 状态面（[`CredentialStatus`] / `publish_tx::PlatformAccountView`）只有"**有 / 没有**"
+//! 加一个尾号提示，**没有原值**；判据 `credentials_never_echo_the_token` 钉住这条。
+//!
+//! ★ 2026-10-07 作者加了一条**显式**出口：设置页那颗「眼睛」调
+//! `publish_tx::wb_get_publish_token` 取明文（换机器 / 重配时要看得见、要能复制）。
+//! 它与状态面分家 —— 状态结构里照旧一个 token 字段都没有；这条出口**只在人点眼睛
+//! 那一刻**才走（不是开场自动读，也不进发布链）。
 //!
 //! # 可测性：trait + 内存替身，**且真后端自己也可测**
 //!

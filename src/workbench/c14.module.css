@@ -1941,6 +1941,40 @@
   background: transparent;
 }
 
+/*
+ * 已配置 Token 右侧那颗「眼睛」（作者 2026-10-07）：点它显示 / 收起明文。
+ * 只占一个方框，与 28px 的输入框同高 —— 不抢输入框的行宽。
+ */
+.tokenEye {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.tokenEye:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.tokenEye:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tokenEye svg {
+  width: 15px;
+  height: 15px;
+}
+
 .vstatic {
   font-size: var(--fs-body);
   font-weight: 600;

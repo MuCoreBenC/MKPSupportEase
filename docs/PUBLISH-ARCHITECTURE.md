@@ -568,6 +568,9 @@ manifest 是上一版发布写下的账本，落后于 dist 只说明"生成过�
    `<appDataDir>/credentials.json`（0600、`atomic_write`、**坏档当"没存"** 不炸设置页），
    **绝不**写 localStorage / .env / 会被网盘同步的目录；前端只知道"**配没配**"+ 一个
    尾号提示（判据 `credentials_never_echo_the_token`）。
+   ★ 2026-10-07 作者补了一条**显式**出口：设置页那颗「眼睛」调 `wb_get_publish_token`
+   取明文（换机器 / 重配时要看得见、要能复制）。状态面**形状一个字段没变** —— 这条出口
+   只在人点眼睛那一刻才走，不是开场自动读、也不进发布链。
 
 4. ★ **锁与线程边界**（2026-10-04 真机事故后补的硬规矩 —— 点一次发布，窗口直接挂死）：
    - **`wb_publish` 必须 `#[tauri::command(async)]`**：它起 git 子进程、发平台 HTTP，
