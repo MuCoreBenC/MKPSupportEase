@@ -628,6 +628,28 @@ pub fn wb_set_publish_token(
     })
 }
 
+/// **显式取出**一个平台的 Token 明文 —— 设置页那颗「眼睛」的唯一用途（作者 2026-10-07）。
+///
+/// # 口径变更：从「前端拿不到原值」到「人点眼睛就能看、能复制」
+///
+/// 原来前端只有 `hasToken` + 尾号提示。作者要求"看着它、复制它"（换机器 / 重配时要用），
+/// 于是开这一条**显式**出口。三条边界，别让它长歪：
+///
+/// - 只有人点眼睛那一刻才调 —— **不是开场自动读**，也不进发布链；
+/// - [`PlatformAccountView`] 的形状**一个字段没变** —— 状态结构里依旧没有 token 字段，
+///   判据 `credentials_never_echo_the_token` 照旧成立（状态面与这条出口分家）；
+/// - 没配 / 读不出来 = `None`，**不报错** —— 与 `credentials::FileStore`
+///   "坏档当没存"同一条口径。
+///
+/// ★ `(async)`：读凭据文件 = 碰盘（在 `read_commands_are_async_…` 的 IO 单子里）。
+#[tauri::command(async)]
+pub fn wb_get_publish_token(platform: String) -> Result<Option<String>, AppError> {
+    crate::ipc::traced("wb_get_publish_token", |_| {
+        super::credentials::ensure_known(&platform)?;
+        super::credentials::session().token(&platform)
+    })
+}
+
 /// 清一个平台的**发布账户**（配置 + 凭据文件里的 Token，都清；幂等）。
 ///
 /// ★ `(async)`：碰盘的命令不占主线程。

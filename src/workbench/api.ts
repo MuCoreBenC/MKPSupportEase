@@ -1642,6 +1642,15 @@ export const wb = {
   /** 存一个平台的 Token（**只进不出**：写凭据文件，返回里没有原值） */
   setPublishToken: (platform: string, token: string) =>
     invoke<PlatformAccountView>('wb_set_publish_token', { platform, token }),
+  /**
+   * **显式取出**一个平台的 Token 明文 —— 设置页那颗「眼睛」的唯一用途（作者 2026-10-07）。
+   *
+   * ★ 与 `publishAccount()` 那条状态面**分家**：`PlatformAccountView` 里从来没有 token 字段
+   * （判据 `credentials_never_echo_the_token`），这里是另一条**只有人点眼睛才走**的出口。
+   * 没配 / 读不出来 = `null`（不抛错）。
+   */
+  getPublishToken: (platform: string) =>
+    invoke<string | null>('wb_get_publish_token', { platform }),
   /** 清一个平台的发布账户（配置 + 凭据一起清；幂等） */
   clearPublishAccount: (platform: string) =>
     invoke<PlatformAccountView>('wb_clear_publish_account', { platform }),

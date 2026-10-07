@@ -1838,6 +1838,8 @@ mod tests {
             "wb_publish_account",
             "wb_set_publish_account",
             "wb_set_publish_token",
+            // 设置页「眼睛」取明文：读凭据文件，同样是碰盘的那一档
+            "wb_get_publish_token",
             "wb_clear_publish_account",
             "wb_publish_status",
             "wb_merge_review",

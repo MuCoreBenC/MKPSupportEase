@@ -1496,6 +1496,13 @@ export function installMockBackend() {
           tokenHint: '…ab12',
         })
       }
+      /* 设置页「眼睛」取明文（2026-10-07）：GitHub 有、Gitee 没配 —— 与上面的现状一致 */
+      case 'wb_get_publish_token':
+        return Promise.resolve(
+          String(args?.platform ?? 'github') === 'gitee'
+            ? null
+            : 'ghp_demo_personal_access_token_1234',
+        )
       case 'wb_clear_publish_account': {
         const platform = String(args?.platform ?? 'github')
         return Promise.resolve({
