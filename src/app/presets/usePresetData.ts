@@ -456,15 +456,20 @@ export function usePresetData(importRevision = 0): PresetData {
    * 界面上看到的必须是底账答的，不是前端猜的。
    */
   const readRelease = useCallback(async (): Promise<ReleaseState> => {
-    /* 五个读：目录清单、盘上对得上的、盘上对不上的、**那些对不上的认得出是哪一版吗**、
-       归档区里躺着的旧版本。中间三个合起来才是四档（见 `ReleaseFileState`）；
-       归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读 */
-    const [catalog, mine, drifted, trust, keep] = await Promise.all([
+    /*
+     * 六个读：目录清单、盘上对得上的、盘上对不上的、**那些对不上的认得出是哪一版吗**、
+     * 归档区里躺着的旧版本；外加 `getPresetFiles` —— 目录（catalog）里**没有**喷嘴 /
+     * 层高，那两格只有它算得出来（按 `fileName` 对同一份文件，见
+     * `ReleasePresetSource.nozzle`）。中间三个合起来才是四档（见 `ReleaseFileState`）；
+     * 归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读。
+     */
+    const [catalog, mine, drifted, trust, keep, repo] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
       api.getDeliveryTrust(),
       api.getArchivedFiles(),
+      api.getPresetFiles(),
     ])
     setArchived(keep)
     const downloaded = new Set(mine.map((f) => f.fileName))
@@ -493,6 +498,9 @@ export function usePresetData(importRevision = 0): PresetData {
      * —— 它们由自己的资源体系消费。2026-10-02 作者截图里 `a1.svg` 和
      * `MKPProcess ….json` 混在「MKP 配置」表里，就是这一层没看 `kind` 造成的。
      */
+    /* 喷嘴 / 层高的搬运表：`getPresetFiles` 的 `fileName` 与 catalog 的 `fileName`
+       是同一把钥匙（都是文件的本名）；目录里没有这两格，这里只搬、不重算 */
+    const axesByName = new Map(repo.map((r) => [r.fileName, r]))
     const listed: ReleasePresetSource[] = catalog.files.flatMap((f) => {
       const kind = catalogKindToFileKind(f.kind)
       if (kind === null) return []
@@ -506,6 +514,9 @@ export function usePresetData(importRevision = 0): PresetData {
           /* 目录登记的落点：备注覆盖账的键（「改了备注，更新不覆盖」认的就是它） */
           path: f.path,
           size: f.size,
+          /* 喷嘴 / 层高（切片器 profile 才有）：从 `getPresetFiles` 的同一份文件上搬 */
+          nozzle: axesByName.get(f.fileName)?.nozzle,
+          layerHeight: axesByName.get(f.fileName)?.layerHeight,
           releaseVersion: null,
           /* 事件时间（见 `ReleasePresetSource` 三格的注释）；云端语义的时间走目录的发布时刻，两回事 */
           downloadedUnix: onDisk.get(f.fileName)?.downloadedUnix ?? null,

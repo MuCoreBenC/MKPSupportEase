@@ -1576,6 +1576,16 @@ export interface ReleasePresetSource {
   kind: FileKind
   /** **catalog 登记的落点**（`delivery/mkp/presets/A1-standard.toml`）—— 备注覆盖账的键 */
   path: string
+  /**
+   * 喷嘴 / 层高 —— **切片器 profile 才有**（MKP 的 `.toml` 没有这回事，字段不给）。
+   *
+   * 目录（catalog）里**没有**这两格，它们由 `getPresetFiles()` 对**同一份文件**
+   * （按 `fileName` 对上）算好给出来 —— 算法只有后端一处（`ipc/presets.rs::slicer_axes`），
+   * 前端只搬，**不在 TS 里从路径重算**（2026-10-07：release 行从前不带这两格，
+   * 切片器档的喷嘴 / 层高整列都是「—」）。
+   */
+  nozzle?: string
+  layerHeight?: string
   /** 目录登记的字节数（真值） */
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
@@ -2008,6 +2018,9 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
+        /* 喷嘴 / 层高：切片器 profile 才有（按 fileName 从 `getPresetFiles` 对过来的） */
+        nozzle: p.nozzle,
+        layerHeight: p.layerHeight,
         sizeText: sizeTextOf(p.size),
         /*
          * 到位时刻：这份字节是「下载」进来的还是「替换」上去的（两个事件至多一个有值，
@@ -2148,6 +2161,9 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
+        /* 喷嘴 / 层高：切片器 profile 才有（按 fileName 从 `getPresetFiles` 对过来的） */
+        nozzle: p.nozzle,
+        layerHeight: p.layerHeight,
         sizeText: sizeTextOf(p.size),
         /*
          * 云端表的时间 = **这次发布的时刻**（`releaseAt`，发布侧盖进目录的戳）——

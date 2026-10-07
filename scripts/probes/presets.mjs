@@ -203,6 +203,35 @@ console.log(
 if (slicerCloudRows2.some((r) => r.name.includes('.svg'))) {
   problems.push('切片器档云端混进了图标（.svg 不归预设页）')
 }
+
+/*
+ * 喷嘴 / 层高：catalog 里**没有**这两格 —— 前端按 `fileName` 从 `getPresetFiles`
+ * （后端 `slicer_axes` 算好的）对过来（2026-10-07 修：release 行从前不带这两格，
+ * 切片器档的喷嘴 / 层高整列都是「—」，作者真机截图）。对不上就是整列「—」。
+ */
+const slicerAxes = await page.evaluate(() => {
+  const trs = [...document.querySelectorAll('main tbody tr')].filter(
+    (tr) => tr.querySelector('td:not([colspan])') !== null,
+  )
+  return trs.map((tr) => {
+    const tds = [...tr.querySelectorAll('td')]
+    return {
+      name: (tds[0]?.innerText ?? '').split('\n')[0].trim(),
+      nozzle: (tds[2]?.innerText ?? '').trim(),
+      layer: (tds[3]?.innerText ?? '').trim(),
+    }
+  })
+})
+console.log(
+  `[分类边界 · 切片器喷嘴层高] ${slicerAxes.map((r) => `${r.name}(${r.nozzle}/${r.layer})`).join(' || ')}`,
+)
+if (!slicerAxes.some((r) => r.nozzle !== '' && r.nozzle !== '—')) {
+  problems.push('切片器档的喷嘴整列都是「—」——按 fileName 对 getPresetFiles 那一步断了')
+}
+if (!slicerAxes.some((r) => r.layer !== '' && r.layer !== '—')) {
+  problems.push('切片器档的层高整列都是「—」——按 fileName 对 getPresetFiles 那一步断了')
+}
+
 const bbsReleaseRow = slicerCloudRows2.find((r) => r.name.includes('MKPProcess A1 0.4 0.20.json'))
 console.log(`[分类边界] catalog 登记的切片器交付行：${bbsReleaseRow?.action ?? '(没这一行)'}`)
 if (bbsReleaseRow === undefined) {
