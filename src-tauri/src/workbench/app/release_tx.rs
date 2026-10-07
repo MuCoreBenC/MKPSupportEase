@@ -33,6 +33,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::error::AppError;
 use crate::fsx;
@@ -1240,14 +1241,97 @@ pub struct ReleasePreflight {
     pub branch: String,
     /// 有没有配发布账户（没配就只做本地那一半）
     pub has_account: bool,
+    /// run-env 拦下时给出的 dev 监视器 PID —— 前端据此画「杀掉 dev 监视进程」按钮；
+    /// null = 没有要杀的（闸放行或错误另有说法）
+    pub dev_watcher_pid: Option<u32>,
 }
 
-/// dev 构建里**文件监视器是否已关**：工作台 dev 由 `scripts/tauri-workbench.mjs`
-/// 用 `tauri dev --no-watch` 起，它顺手设 `MKP_WORKBENCH_NO_WATCH=1`（暗号）。
-/// 监视器关着，版本号落盘（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）
-/// 就不会触发重建重启 —— 发版事务不会被杀，dev 进程也能真发。
-fn dev_watcher_off() -> bool {
-    std::env::var("MKP_WORKBENCH_NO_WATCH").as_deref() == Ok("1")
+/// 本进程自己的 dev 监视器（祖先进程链上那个 `tauri dev` CLI）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevWatcher {
+    /// CLI 进程的 PID（前端「杀掉 dev 监视进程」按钮拿它调 [`wb_release_kill_dev_watcher`]）
+    pub pid: u32,
+    /// 命令行（截短给人看，确认杀的是谁）
+    pub cmdline: String,
+    /// 命令行带 `--no-watch` = 监视器关死（工作台脚本起的）：活着但不碍事，放行
+    pub no_watch: bool,
+}
+
+/// 进程命令行是不是"tauri dev CLI"那副模样（小写比过：路径里的大写不管）。
+fn looks_like_tauri_dev_cmd(cmd: &str) -> bool {
+    cmd.contains("tauri") && (cmd.contains(" dev ") || cmd.ends_with(" dev"))
+}
+
+/// 命令行拼串（sysinfo 给的是 OsString 列表）。
+fn process_cmdline(proc: &sysinfo::Process) -> String {
+    proc.cmd()
+        .iter()
+        .map(|s| s.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 沿**祖先进程链**找出本进程自己的 `tauri dev` 监视器。
+///
+/// dev 会话的进程树是 `应用 ← cargo run ← node(tauri.js dev …) ← 包装层（cmd/npm）`，
+/// 从应用往外交祖，**第一个**长得像 `tauri dev` 的就是 CLI 本尊（更外面的 npm/cmd
+/// 包装层杀不死监视器）。找不到 = 不是 dev 起的（或 CLI 已死）→ None。
+fn own_dev_watcher() -> Option<DevWatcher> {
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    let mut pid = Pid::from_u32(std::process::id());
+    for _ in 0..16 {
+        let proc = sys.process(pid)?;
+        let cmd = process_cmdline(proc);
+        if looks_like_tauri_dev_cmd(&cmd.to_lowercase()) {
+            return Some(DevWatcher {
+                pid: pid.as_u32(),
+                cmdline: {
+                    let mut c = cmd.chars().take(120).collect::<String>();
+                    if cmd.chars().count() > 120 {
+                        c.push('…');
+                    }
+                    c
+                },
+                no_watch: cmd.to_lowercase().contains("--no-watch"),
+            });
+        }
+        pid = proc.parent()?;
+    }
+    None
+}
+
+/// run-env 闸的判定：本进程自己的监视器**活着且没关**（版本号一落盘它就重建重启，
+/// 发版事务必被杀在半路 —— 2026-10-06 真机踩出来的）。
+fn watcher_on() -> Option<DevWatcher> {
+    if !cfg!(debug_assertions) {
+        return None; // 安装版没有 dev 监视器这回事
+    }
+    own_dev_watcher().filter(|w| !w.no_watch)
+}
+
+/// **杀掉 dev 监视进程**（run-env 拦下时给人的一键解法）。
+///
+/// ★ 先**重新读一遍该 PID 的命令行**验明正身才动手 —— 防 PID 复用误伤无辜进程。
+/// 只杀 CLI 本尊（sysinfo 的 kill 只动这一个进程）：应用与 vite 都是它的子进程，
+/// Windows 上父死子活，所以窗口照常用、HMR 照常跑，死的只有"文件监视 + 自动重建"。
+#[tauri::command]
+pub fn wb_release_kill_dev_watcher(pid: u32) -> Result<bool, AppError> {
+    crate::ipc::traced("wb_release_kill_dev_watcher", |_| {
+        let mut sys = System::new();
+        sys.refresh_processes(ProcessesToUpdate::All, true);
+        let proc = sys
+            .process(Pid::from_u32(pid))
+            .ok_or_else(|| AppError::invalid_argument(format!("进程 {pid} 已经不在了")))?;
+        let cmd = process_cmdline(proc).to_lowercase();
+        if !looks_like_tauri_dev_cmd(&cmd) {
+            return Err(AppError::invalid_argument(format!(
+                "PID {pid} 的命令行不像 tauri dev（可能是 PID 已被复用）—— 拒绝杀，请手动确认"
+            )));
+        }
+        Ok(proc.kill())
+    })
 }
 
 /// **跑一遍闸**（只读）：工作区 / 分支 / 版本派生 / 发布账户 / tag 有没有被占 / 平台支不支持。
@@ -1403,23 +1487,26 @@ pub fn wb_release_preflight(
         //   4 个文件（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）
         //   原本全在 `tauri dev` 文件监视器的清单里 —— 版本号一落盘，dev 就重建并
         //   重启应用，发版事务被杀在半路。**死因是那个监视器，不是"dev"这个身份**：
-        //   工作台 dev 已改成 `--no-watch` 起（监视器关死），可以真发；
-        //   客户端 `npm run tauri dev`（监视器开着）仍拦，只许演练。
-        let dev_build = cfg!(debug_assertions);
-        let watcher_off = dev_watcher_off();
+        //   监视器活着 → 拦（并给 PID，前端出「杀掉 dev 监视进程」按钮）；
+        //   监视器不在或带 --no-watch → 放行。判定**实时查进程**，不认出身。
+        let watcher = watcher_on();
         push(
             &mut items,
             "run-env",
             "发布环境",
-            !dev_build || watcher_off,
-            if !dev_build {
-                "安装版（发布面）—— 可以真发".to_owned()
-            } else if watcher_off {
-                "工作台 dev（--no-watch，文件监视器已关）—— 版本号落盘不会重启应用，可以真发".to_owned()
-            } else {
-                "这是开发构建（npm run tauri dev，文件监视器开着）—— 真发版会在版本号落盘时被 dev 重启杀掉。\
-                 用 npm run tauri:workbench:dev 起工作台（已关监视器）或安装版工作台发版；这里只能演练"
-                    .to_owned()
+            watcher.is_none(),
+            match &watcher {
+                Some(w) => format!(
+                    "发现本进程自己的 dev 监视器（PID {}：{}）—— 版本号一落盘它就重建重启，\
+                     发版事务被杀在半路。点「杀掉 dev 监视进程」再「重新检查」（窗口照常用），\
+                     或重启一次 dev 会话",
+                    w.pid, w.cmdline
+                ),
+                None if cfg!(debug_assertions) => {
+                    "dev 构建，但文件监视器不在 / 已关（--no-watch）—— 版本号落盘不会重启应用，可以真发"
+                        .to_owned()
+                }
+                None => "安装版（发布面）—— 可以真发".to_owned(),
             },
         );
 
@@ -1453,6 +1540,8 @@ pub fn wb_release_preflight(
             tag,
             branch,
             has_account,
+            // 只在 run-env 真拦下时给 PID —— 前端那颗「杀掉 dev 监视进程」只认它
+            dev_watcher_pid: watcher.map(|w| w.pid),
         })
     })
 }
@@ -1466,17 +1555,19 @@ pub async fn wb_release_software(
     app: tauri::AppHandle,
     opts: ReleaseOptions,
 ) -> Result<ReleaseTxReport, AppError> {
-    // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：dev 构建里真发版原本必死在半路
-    //   （bump 的 4 个文件一落盘，`tauri dev` 就重建重启，事务被杀 —— 2026-10-06）。
-    //   工作台 dev 已改 `--no-watch` 起（监视器关死）→ 放行；客户端 dev 仍拦。
+    // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：真发版前**再探一次**监视器
+    //   （人可能在预检之后又起/又杀了 dev —— 以落键那一刻的进程表为准）。
     //   演练（dry_run）一个字节都不写，放行。
-    if cfg!(debug_assertions) && !opts.dry_run && !dev_watcher_off() {
-        return Err(AppError::invalid_argument(
-            "开发构建里不能真发版 —— 版本号一落盘，dev 的文件监视器就重启应用，发版事务被杀在半路",
-        )
-        .with_detail(
-            "用 npm run tauri:workbench:dev 起工作台（--no-watch，监视器已关）或安装版工作台 / release CLI 发版；这里只能演练",
-        ));
+    if !opts.dry_run {
+        if let Some(w) = watcher_on() {
+            return Err(AppError::invalid_argument(
+                "本进程的 dev 监视器还活着 —— 版本号一落盘，它就重建重启应用，发版事务被杀在半路",
+            )
+            .with_detail(format!(
+                "先在闸里点「杀掉 dev 监视进程」（PID {}）或重启一次 dev 会话（npm run tauri:workbench:dev，脚本已带 --no-watch），再发",
+                w.pid
+            )));
+        }
     }
     let root = crate::fsx::paths::internal_root(&app)?;
     let repo = crate::workbench::paths::repo_root();

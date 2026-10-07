@@ -194,6 +194,24 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
     }
   }
 
+  /**
+   * run-env 拦下时的一键解法：杀掉本进程自己的 dev 监视器（后端先验明正身再动手，
+   * 只杀 CLI 本尊 —— 窗口与 vite 都活着）→ 自动重跑闸。PID 以最近一次预检为准。
+   */
+  const killWatcher = async () => {
+    if (pre?.devWatcherPid == null) return
+    setBusy(true)
+    setError(null)
+    try {
+      await wb.killDevWatcher(pre.devWatcherPid)
+      await run()
+    } catch (e) {
+      setError(isAppError(e) ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /* ---------- 历史 ---------- */
 
   if (tab === 'history') {
@@ -416,6 +434,17 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
                 <span className={s.id}>{it.id}</span>
               </span>
               <span className={s.details}>{it.detail}</span>
+              {it.id === 'run-env' && it.status === 'fail' && pre?.devWatcherPid != null && (
+                <button
+                  type="button"
+                  className={`${c.btn} ${c.btnDanger}`}
+                  disabled={busy}
+                  title="只杀 tauri dev 的 CLI 监视进程 —— 本窗口与前端 HMR 都不受影响"
+                  onClick={() => void killWatcher()}
+                >
+                  杀掉 dev 监视进程（PID {pre.devWatcherPid}）
+                </button>
+              )}
             </span>
           </div>
         ))}

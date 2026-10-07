@@ -942,6 +942,8 @@ export interface ReleasePreflight {
   tag: string
   branch: string
   hasAccount: boolean
+  /** run-env 拦下时给出的 dev 监视器 PID（「杀掉 dev 监视进程」按钮只认它）；null = 没有 */
+  devWatcherPid: number | null
 }
 
 /** `release_tx::ReleaseTxReport` —— 一轮「发布软件版本」的结果（阶段快照） */
@@ -1712,6 +1714,12 @@ export const wb = {
     invoke<ReleaseTxReport>('wb_release_software', { opts }),
   /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
   releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
+  /**
+   * **杀掉 dev 监视进程**（run-env 拦下时的一键解法）—— 后端先验明正身（命令行
+   * 得像 tauri dev）再动手；只杀 CLI 本尊，应用窗口与 vite 都活着。
+   * 返回 true = 杀了；false = 进程已经不在（等价于杀过，重跑闸即可）。
+   */
+  killDevWatcher: (pid: number) => invoke<boolean>('wb_release_kill_dev_watcher', { pid }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

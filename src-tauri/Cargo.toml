@@ -43,7 +43,7 @@ serde_json.workspace = true
 # 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
 [features]
 default = []
-workbench = ["dep:time", "dep:mkpse-preset"]
+workbench = ["dep:time", "dep:mkpse-preset", "dep:sysinfo"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -84,6 +84,12 @@ uuid = { version = "1", features = ["v7"] }
 # 只有 workbench feature 用得到的：发布时间戳（`clock`）。
 # optional = true 的意思是"默认构建里本 crate 用不上它"。
 time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+
+# 只有 workbench feature 用得到的：run-env 闸的**进程探测**——沿祖先链找本进程
+# 自己的 `tauri dev` 监视器（读命令行看 --no-watch）、按 PID 杀它。给用户的
+# 二进制（默认 feature）编不到 workbench 子树，也就不需要它。
+# default-features = false：只要"列进程 + 读命令行 + 杀"，disks/组件/network 那些一律不要。
+sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
 
 # 指纹（`presetdata::resolve::Layers::fingerprint`）与预设体摘要都要它。
 # 它本来就在依赖图里（tauri-codegen 在编译期用它），所以这里的成本是零。
