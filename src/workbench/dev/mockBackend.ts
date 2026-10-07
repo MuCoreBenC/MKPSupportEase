@@ -1405,7 +1405,59 @@ export function installMockBackend() {
             })
           }
         }
-        return Promise.resolve({ files, skipped, toWrite, unchanged: unchangedN, blocked: null })
+        /*
+         * 附属文件（目录与清单）—— 真机由 Rust 的 `content_json_texts` /
+         * `built_catalog` 算出正文再与盘上那份比；桩里照形状造一份：
+         * 改了备注 → 机型目录要变；目录的 `publishedAt` 每次生成都会换 →
+         * `catalog.json` 也总是「修改」（真机同款，不是桩编的）。
+         */
+        const ctx = (text: string[]) =>
+          text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 }))
+        const aux = [
+          {
+            uid: 'content/machine_catalog.json',
+            fileName: 'content/machine_catalog.json',
+            state: 'modified',
+            added: 2,
+            removed: 1,
+            lines: [
+              { kind: 'context', text: '{', no: 1 },
+              { kind: 'removed', text: '    "name": "标准版",', no: 2 },
+              { kind: 'added', text: '    "name": "标准版",', no: 2 },
+              { kind: 'added', text: '    "remark": "演示：改过的备注",', no: 3 },
+              { kind: 'context', text: '}', no: 4 },
+            ],
+          },
+          {
+            uid: 'content/bundles.json',
+            fileName: 'content/bundles.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            lines: ctx(['{', '  "bundles": []', '}']),
+          },
+          {
+            uid: 'content/assets_index.json',
+            fileName: 'content/assets_index.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            lines: ctx(['{', '  "assets": []', '}']),
+          },
+          {
+            uid: 'catalog.json',
+            fileName: 'catalog.json',
+            state: 'modified',
+            added: 1,
+            removed: 1,
+            lines: [
+              { kind: 'removed', text: '    "publishedAt": "2026-10-06T05:46:36Z",', no: 2 },
+              { kind: 'added', text: '    "publishedAt": "2026-10-07T06:37:12Z",', no: 2 },
+              { kind: 'context', text: '    "files": []', no: 3 },
+            ],
+          },
+        ]
+        return Promise.resolve({ files, aux, skipped, toWrite, unchanged: unchangedN, blocked: null })
       }
       case 'wb_generate': {
         const scope = args?.scope as string | { picked: string[] }

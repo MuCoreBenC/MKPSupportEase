@@ -626,10 +626,17 @@ export interface PreviewFile {
 
 /** `build::PreviewReport` —— **只算不写**，生成前确认那一步 */
 export interface PreviewReport {
+  /** **产物**（`mkp/presets/*.toml`）—— 一份一个版本 */
   files: PreviewFile[]
+  /**
+   * **附属文件**（content 那三份 + `catalog.json`）：生成不只写 toml，它同时重算目录与清单。
+   * `uid` / `fileName` 都是交付根相对的路径。单独一格 —— 发布闸数渲染产物时读的是 `files`
+   */
+  aux: PreviewFile[]
   skipped: [string, string][]
-  /** 会写盘的份数（added + modified） */
+  /** 会写盘的**产物**份数（added + modified） */
   toWrite: number
+  /** 不变的**产物**份数 */
   unchanged: number
   /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
   blocked: string | null

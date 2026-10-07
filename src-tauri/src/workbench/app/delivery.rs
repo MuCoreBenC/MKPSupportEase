@@ -471,6 +471,24 @@ pub struct DistContent {
     pub assets_checked: usize,
 }
 
+/// `content/` 三份目录 JSON 的**正文**（纯函数，不落盘）。
+///
+/// ★ **写盘与预演共用这一处构造**：生成前确认要如实说"这几份会不会变"
+/// （作者 2026-10-07：「我希望它还能显示一个会变化的 Json」）——
+/// 预演自己再拼一份 JSON 的话，"预演说会变、真生成又不写"这种谎就躲不掉了。
+pub fn content_json_texts(book: &Book<'_>) -> Result<Vec<(&'static str, String)>, AppError> {
+    let referenced = referenced_assets(book);
+    let values: [(&'static str, serde_json::Value); 3] = [
+        (CONTENT_FILES[0], machine_catalog_json(book)),
+        (CONTENT_FILES[1], bundles_json(book)),
+        (CONTENT_FILES[2], assets_index_json(&referenced)),
+    ];
+    values
+        .into_iter()
+        .map(|(rel, v)| Ok((rel, serde_json::to_string_pretty(&v)?)))
+        .collect()
+}
+
 /// 写三份目录 JSON，并把引用可达的资产从资产根复制进交付根（`mkp/<kind 目录>/…`）。
 ///
 /// **资产根是参数**（依赖注入）：生产上是 `public/assets/`，测试给临时目录 ——
@@ -485,15 +503,11 @@ pub fn write_content(
     asset_root: &Path,
     book: &Book<'_>,
 ) -> Result<DistContent, AppError> {
-    let catalog = machine_catalog_json(book);
-    let bundles = bundles_json(book);
     let referenced = referenced_assets(book);
-    let index = assets_index_json(&referenced);
 
-    let content = delivery_root.join(CONTENT_DIR);
-    crate::fsx::atomic::atomic_write_json(&content.join("machine_catalog.json"), &catalog)?;
-    crate::fsx::atomic::atomic_write_json(&content.join("bundles.json"), &bundles)?;
-    crate::fsx::atomic::atomic_write_json(&content.join("assets_index.json"), &index)?;
+    for (rel, text) in content_json_texts(book)? {
+        crate::fsx::atomic::atomic_write(&delivery_root.join(rel), text.as_bytes())?;
+    }
 
     /*
      * ★ A 类资产**不复制**（2026-10-04 作者裁决 C/甲）。
@@ -1019,6 +1033,23 @@ pub fn write_catalog_json(
     book: &Book<'_>,
     published_at: &str,
 ) -> Result<usize, AppError> {
+    let catalog = built_catalog(delivery_root, book, published_at)?;
+    let count = catalog.files.len();
+    let text = catalog.to_pretty_json()?;
+    crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
+    Ok(count)
+}
+
+/// **这一代要写出的目录**（纯函数，不落盘）。
+///
+/// ★ 写盘（[`write_catalog_json`]）与预演（生成前确认）共用这一处构造 ——
+/// 预演拿它的 [`to_pretty_json`](crate::runtime::catalog::Catalog::to_pretty_json)
+/// 跟盘上那份比，比的就是真生成会写出的字节。
+pub fn built_catalog(
+    delivery_root: &Path,
+    book: &Book<'_>,
+    published_at: &str,
+) -> Result<crate::runtime::catalog::Catalog, AppError> {
     let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
         &delivery_root.join(MKP_PRESETS_DIR),
@@ -1030,10 +1061,7 @@ pub fn write_catalog_json(
         catalog.apply_min_client(&rules);
     }
     catalog.published_at = Some(published_at.to_owned());
-    let count = catalog.files.len();
-    let text = catalog.to_pretty_json()?;
-    crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
-    Ok(count)
+    Ok(catalog)
 }
 
 /// **交付面的自查**（预检的「清单 ↔ 文件」一档）：三件事一起对 ——

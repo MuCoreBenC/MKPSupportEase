@@ -21,6 +21,14 @@
  *   │ 无变化的折叠 │ │ │
  *   └──────────┘ └──────────────────────┘
  *
+ * # 清单分两组：预设产物 / 目录与清单（作者 2026-10-07）
+ *
+ * 生成不只写 toml —— 它同时重算目录与清单（`content` 那三份 + `catalog.json`）。
+ * 作者原话：「我希望到时候它还能显示一个会变化的 Json……也可以显示出来，也是在这个
+ * 生成的这个模态框里面显示出来」「可以再多分一栏出来」。于是清单里多出一组
+ * **目录与清单**（后端的 `PreviewReport.aux`），点开与产物同一种看法（完整 / 对比）。
+ * 两组分开列：附属文件不带「版本」概念，混在产物里读不出谁是谁。
+ *
  * # 「完整 / 对比」切换（作者 2026-10-02，默认完整）
  *
  * 作者原话：「diff 的效果我不喜欢……加一个切换吧，就看完整的不看对比的」。于是标题行
@@ -95,10 +103,13 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   const [sel, setSel] = useState<string | null>(null)
   /** 无变化那一组展开没有 */
   const [showUnchanged, setShowUnchanged] = useState(false)
+  /** 附属文件里"无变化"那一组展开没有（与产物那组各管各的） */
+  const [showAuxUnchanged, setShowAuxUnchanged] = useState(false)
   /** 详情视图：作者 2026-10-02 —— 默认看完整的，想看差异再切「对比」 */
   const [view, setView] = useState<DetailView>('full')
 
   const files = useMemo(() => report?.files ?? [], [report])
+  const aux = useMemo(() => report?.aux ?? [], [report])
 
   /*
    * 清单顺序：有变化的在前（作者「变的先显示」），无变化的折成最后一组。
@@ -106,11 +117,47 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
    */
   const changed = files.filter((f) => rankOf(f.state) === 0)
   const unchanged = files.filter((f) => rankOf(f.state) === 1)
+  /* 附属文件（目录与清单）另一组：它们不带「版本」概念，混在产物里读不出来 */
+  const auxChanged = aux.filter((f) => rankOf(f.state) === 0)
+  const auxUnchanged = aux.filter((f) => rankOf(f.state) === 1)
 
-  /** 默认选中：第一份有变化的；没有就第一份无变化的 */
-  const current = files.find((f) => f.fileName === sel) ?? changed[0] ?? unchanged[0] ?? null
+  /** 默认选中：第一份有变化的（产物优先，再轮到附属文件）；没有就第一份无变化的 */
+  const current =
+    [...files, ...aux].find((f) => f.fileName === sel) ??
+    changed[0] ??
+    auxChanged[0] ??
+    unchanged[0] ??
+    auxUnchanged[0] ??
+    null
 
-  const total = files.length
+  /** 会写盘 / 不会写盘的总份数（产物 + 附属文件）—— 说「将写入 N 份」就得是全部的 N */
+  const willWrite = (report?.toWrite ?? 0) + auxChanged.length
+  const stays = (report?.unchanged ?? 0) + auxUnchanged.length
+
+  const total = files.length + aux.length
+
+  /** 清单里的一行。产物与附属文件同一种长相 —— 两处各写一份迟早会长成两种 */
+  const item = (f: PreviewFile) => (
+    <button
+      key={f.fileName}
+      type="button"
+      className={f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}
+      aria-current={f.fileName === current?.fileName}
+      title={f.fileName}
+      onClick={() => setSel(f.fileName)}
+    >
+      <span className={s.itemName}>{f.fileName}</span>
+      <span className={s.itemMeta}>
+        <span className={s[`state_${f.state}`]}>{STATE_TEXT[f.state]}</span>
+        {f.state !== 'unchanged' && (
+          <span className={s.counts}>
+            <span className={s.add}>+{f.added}</span>
+            {f.removed > 0 && <span className={s.del}>−{f.removed}</span>}
+          </span>
+        )}
+      </span>
+    </button>
+  )
 
   /* ---------- 结果页（已经生成完） ---------- */
   if (done !== null) {
@@ -197,7 +244,7 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
         ? '有阻断，不能生成'
         : total === 0
           ? '没有可生成的项'
-          : `将写入 ${report.toWrite} 份 · ${unchanged.length} 份无变化`
+          : `将写入 ${willWrite} 份 · ${stays} 份无变化`
 
   return (
     <ModalC14
@@ -230,9 +277,9 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
       footer={
         <>
           <span className={s.footNote}>
-            {changed.length > 0 ? (
+            {willWrite > 0 ? (
               <>
-                有变化的 <b>{changed.length}</b> 份会覆盖磁盘上同名文件
+                有变化的 <b>{willWrite}</b> 份会覆盖磁盘上同名文件
               </>
             ) : (
               <>没有哪一份会变 —— 点了也不会重写任何文件</>
@@ -266,29 +313,10 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
 
       {report !== null && blocked === null && (
         <div className={s.panes}>
-          {/* 左：文件清单 */}
+          {/* 左：文件清单（产物一组 / 目录与清单一组） */}
           <nav className={s.list} aria-label="要生成的文件">
-            {changed.map((f) => (
-              <button
-                key={f.fileName}
-                type="button"
-                className={f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}
-                aria-current={f.fileName === current?.fileName}
-                onClick={() => setSel(f.fileName)}
-              >
-                <span className={s.itemName}>{f.fileName}</span>
-                <span className={s.itemMeta}>
-                  <span className={s[`state_${f.state}`]}>{STATE_TEXT[f.state]}</span>
-                  {f.state !== 'unchanged' && (
-                    <span className={s.counts}>
-                      <span className={s.add}>+{f.added}</span>
-                      {f.removed > 0 && <span className={s.del}>−{f.removed}</span>}
-                    </span>
-                  )}
-                </span>
-              </button>
-            ))}
-
+            {files.length > 0 && <div className={s.listGroup}>预设产物</div>}
+            {changed.map(item)}
             {unchanged.length > 0 && (
               <>
                 <button
@@ -302,21 +330,26 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   </span>
                   {unchanged.length} 份无变化
                 </button>
-                {showUnchanged &&
-                  unchanged.map((f) => (
-                    <button
-                      key={f.fileName}
-                      type="button"
-                      className={f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}
-                      aria-current={f.fileName === current?.fileName}
-                      onClick={() => setSel(f.fileName)}
-                    >
-                      <span className={s.itemName}>{f.fileName}</span>
-                      <span className={s.itemMeta}>
-                        <span className={s.state_unchanged}>无变化</span>
-                      </span>
-                    </button>
-                  ))}
+                {showUnchanged && unchanged.map(item)}
+              </>
+            )}
+
+            {aux.length > 0 && <div className={s.listGroup}>目录与清单</div>}
+            {auxChanged.map(item)}
+            {auxUnchanged.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className={s.groupToggle}
+                  aria-expanded={showAuxUnchanged}
+                  onClick={() => setShowAuxUnchanged((v) => !v)}
+                >
+                  <span className={s.caret} aria-hidden>
+                    ▸
+                  </span>
+                  {auxUnchanged.length} 份无变化
+                </button>
+                {showAuxUnchanged && auxUnchanged.map(item)}
               </>
             )}
 

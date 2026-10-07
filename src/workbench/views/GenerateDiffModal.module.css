@@ -104,6 +104,20 @@
   color: var(--w-text-3);
 }
 
+/*
+ * 清单里的一组（「预设产物」/「目录与清单」）。
+ * 2026-10-07 加：生成不只写 toml —— 目录与清单那几份也在这一栏里列出来
+ * （作者：「我希望它还能显示一个会变化的 Json」），两组分开才读得出谁是谁。
+ */
+.listGroup {
+  padding: 7px 12px 6px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--w-text-3);
+}
+
 /* 「N 份无变化」的可折叠组头 */
 .groupToggle {
   display: flex;
@@ -225,9 +239,15 @@
   flex: 1 1 auto;
   min-width: 0;
   padding-right: 14px;
-  /* 不换行：TOML 一行一条，换行会把行号与内容错开（长了横向滚） */
-  white-space: pre;
-  overflow-wrap: normal;
+  /*
+   * **长行折行，不横向滚**（作者 2026-10-07 改口）。
+   *
+   * 原来是 `white-space: pre`：长行让整个详情栏长出横向滚动条 —— 而那条滚动条
+   * 会**把详情头与行号槽一起拖走**（横滚的是整栏不是那一行），人看到的是
+   * "文件名不见了、第几行也不见了"。折行没有这个问题：行号槽与内容起点始终对齐。
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- 头部：「完整 / 对比」切换 ---------- */

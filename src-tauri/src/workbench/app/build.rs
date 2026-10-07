@@ -674,11 +674,18 @@ pub struct PreviewFile {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewReport {
+    /// **产物**（`mkp/presets/*.toml`）—— 一份一个版本
     pub files: Vec<PreviewFile>,
+    /// **附属文件**（`content/*.json` + `catalog.json`，`uid` / `fileName` 都是交付根相对的路径）。
+    ///
+    /// ★ 2026-10-07 加：生成不只写 toml —— 它同时重算目录与清单。作者原话
+    /// 「我希望到时候它还能显示一个会变化的 Json」。单独一格而不是并进 `files`：
+    /// 发布闸的 ⑤「能不能渲染」数的是 `files`（渲染产物），口径不能混。
+    pub aux: Vec<PreviewFile>,
     pub skipped: Vec<(String, String)>,
-    /// 会被写盘的份数（`added` + `modified`）
+    /// 会被写盘的**产物**份数（`added` + `modified`）
     pub to_write: usize,
-    /// 不变的份数
+    /// 不变的**产物**份数
     pub unchanged: usize,
     /// 有阻断时的唯一原因（与 `wb_generate` 同一道闸，前端照它压按钮）
     pub blocked: Option<String>,
@@ -715,6 +722,7 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     if let Some(b) = report.first_block() {
         return Ok(PreviewReport {
             files: Vec::new(),
+            aux: Vec::new(),
             skipped: Vec::new(),
             to_write: 0,
             unchanged: 0,
@@ -723,16 +731,15 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     }
 
     let (todo, skipped) = planned_todos(&book, scope);
-    let delivery_root = paths::delivery_root_path()
-        .join(super::delivery::MKP_DIR)
-        .join("presets");
+    let delivery = paths::delivery_root_path();
+    let presets_dir = delivery.join(super::delivery::MKP_DIR).join("presets");
 
     let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
     let mut to_write = 0usize;
     let mut unchanged = 0usize;
     for uid in &todo {
         let r = render(&book, uid)?;
-        let existing = std::fs::read_to_string(delivery_root.join(&r.file_name)).ok();
+        let existing = std::fs::read_to_string(presets_dir.join(&r.file_name)).ok();
         let pf = preview_one(&r, existing.as_deref());
         match pf.state {
             DiffState::Unchanged => unchanged += 1,
@@ -741,8 +748,29 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
         files.push(pf);
     }
 
+    // ★ **附属文件也预演**（作者 2026-10-07：「我希望到时候它还能显示一个会变化的 Json」）。
+    //
+    // 生成不只写 toml —— 它同时重算目录与清单（content 那三份 + `catalog.json`）。
+    // 那几份也在确认框里列出来，比法与产物同一处（`preview_text`）。
+    //
+    // 正文由 `delivery` 那两台**纯函数**给出（与真生成同一处构造）；
+    // 时间戳就用当下这一个（真生成也在这一刻取，预演不另编一个）。
+    // ⚠ `catalog.json` 头里有 `publishedAt`：它每次生成都会换，所以它**每次都会显示"修改"**
+    // —— 那是实话（`atomic_write` 比的是整份字节，时间戳变了就重写），不是误报。
+    let stamp = clock::now_iso8601();
+    let mut aux: Vec<PreviewFile> = Vec::new();
+    for (rel, text) in super::delivery::content_json_texts(&book)? {
+        let old = std::fs::read_to_string(delivery.join(rel)).ok();
+        aux.push(preview_text(rel, rel, &text, old.as_deref()));
+    }
+    let catalog_text = super::delivery::built_catalog(&delivery, &book, &stamp)?.to_pretty_json()?;
+    let catalog_rel = super::delivery::NEW_CATALOG_FILE;
+    let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
+    aux.push(preview_text(catalog_rel, catalog_rel, &catalog_text, old.as_deref()));
+
     Ok(PreviewReport {
         files,
+        aux,
         skipped,
         to_write,
         unchanged,
@@ -750,17 +778,25 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     })
 }
 
-/// 比一份：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
+/// 比一份产物：见 [`PreviewFile`] 的三档状态。
+fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
+    preview_text(&r.uid, &r.file_name, &r.text, existing)
+}
+
+/// 比一份文本：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
 /// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`。
 ///
 /// **无变化也把正文带回去**（作者 2026-10-07）：确认框的「完整」视图要看整份原文 ——
 /// 「就算它一模一样不会重写，我也希望看一个完整的」。所以这里给 [`full_lines`]
 /// （全 `context`、`added` / `removed` 都是 0），「不会重写」那句只在**对比**视图说。
-fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
+///
+/// 产物（`preview_one`）与**附属文件**（目录 JSON）都走这一处 —— 两边各写一套比法，
+/// 迟早有一边把"会写"报成"不会写"。
+fn preview_text(uid: &str, file_name: &str, text: &str, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
-        None => (DiffState::Added, diff_added(&r.text)),
-        Some(old) if same_payload(old, &r.text) => (DiffState::Unchanged, full_lines(&r.text)),
-        Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
+        None => (DiffState::Added, diff_added(text)),
+        Some(old) if same_payload(old, text) => (DiffState::Unchanged, full_lines(text)),
+        Some(old) => (DiffState::Modified, diff_lines(old, text)),
     };
     let added = lines
         .iter()
@@ -771,8 +807,8 @@ fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
         .filter(|l| l.kind == DiffLineKind::Removed)
         .count();
     PreviewFile {
-        uid: r.uid.clone(),
-        file_name: r.file_name.clone(),
+        uid: uid.to_owned(),
+        file_name: file_name.to_owned(),
         state,
         lines,
         added,
