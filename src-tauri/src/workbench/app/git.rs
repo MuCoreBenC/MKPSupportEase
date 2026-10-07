@@ -311,12 +311,24 @@ impl Git {
      * 以及"主线到底齐不齐"的判定。全部走同一个 `run`（显式参数数组），不另开一条路。
      */
 
-    /// 拉远端的最新引用（`git fetch <remote> --tags --prune`）。
+    /// 拉远端的最新引用：**分支那一 fetch 决定成败，tag 单独尽力取**。
     ///
     /// ★ **判定"主线齐不齐"之前必须先 fetch**：不 fetch 的 `origin/main` 是上次拉到的样子，
     /// 拿它当"远端现状"会得出一个过期的、偏乐观的结论。
+    ///
+    /// ★ 2026-10-07 真机踩到（发布回执里那条红）：原来是一条
+    /// `fetch <remote> --tags --prune` —— 只要本地有哪个 tag 与远端**同名不同提交**，
+    /// git 就拒更新它并以**退出码 1 结束整次 fetch**，于是 `origin/main` 明明拉到了、
+    /// 调用方却读到"拉取远端失败"，镜像同步整个不敢做（`would clobber existing tag`）。
+    /// 拆成两步之后，"要不要同步"这个判断**只跟分支有关**：
+    /// 1. 分支：`fetch --prune`，失败照旧如实报（这一步的失败才是真失败）；
+    /// 2. tag：单独一次、**尽力而为**，并且用 `--force` 让远端那份说了算 ——
+    ///    同名 tag 冲突时，远端是权威（本地那份要么旧、要么是别人机器上打的）。
     pub fn fetch(&self, remote: &str) -> Result<(), AppError> {
-        self.run(&["fetch", remote, "--tags", "--prune"])?;
+        self.run(&["fetch", remote, "--prune"])?;
+        // `+`（强制）不能省：`git fetch --tags` 遇到同名 tag **不会**更新它
+        //（不是快进与否的问题，是"已存在的 tag 一律不动"）；要让它归位只有显式 refspec
+        let _ = self.try_run(&["fetch", remote, "+refs/tags/*:refs/tags/*"]);
         Ok(())
     }
 
@@ -372,6 +384,16 @@ impl Git {
     pub fn tag(&self, name: &str, message: &str) -> Result<(), AppError> {
         self.run(&["tag", "-a", name, "-m", message])?;
         Ok(())
+    }
+
+    /// 本地有没有这条分支（`git rev-parse -q --verify refs/heads/<name>`）。
+    ///
+    /// ★ 用途（2026-10-07）：发布信息那条分支（`chore/release-vX.Y.Z`）**上一趟已经建过**
+    /// 时不该再 `switch -c`（会以"已存在"失败）—— 补平台 / 重跑都得先问一句。
+    pub fn branch_exists(&self, name: &str) -> Result<bool, AppError> {
+        Ok(self
+            .try_run(&["rev-parse", "-q", "--verify", &format!("refs/heads/{name}")])?
+            .is_some())
     }
 
     /// 这个 tag 存不存在（`git rev-parse -q --verify refs/tags/<name>`）。
@@ -764,6 +786,76 @@ mod tests {
         assert!(!g
             .remote_matches("https://gitee.com/MuCoreBenC/MKPSupportEase.git")
             .unwrap());
+    }
+
+    /// 判据（2026-10-07 真机踩到的那条红）：**本地 tag 与远端同名、而本地那份不在远端那份
+    /// 的历史里**时，`fetch` 照样成功 —— 分支拉到最新，tag 归远端那份。
+    ///
+    /// 老写法是一条 `fetch --tags`：tag 更新被拒（`would clobber existing tag`）会让**整次**
+    /// fetch 以退出码 1 结束，调用方把它读成"读不到 origin/main"，镜像同步整个不敢做。
+    #[test]
+    fn a_conflicting_tag_does_not_fail_the_fetch() {
+        let remote = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let run_in = |at: &std::path::Path, args: &[&str]| -> String {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(at)
+                .output()
+                .expect("起 git");
+            assert!(
+                out.status.success(),
+                "git {args:?} 失败：{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+
+        run_in(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
+        run_in(root, &["init", "-q", "-b", "main"]);
+        run_in(root, &["config", "user.email", "t@example.com"]);
+        run_in(root, &["config", "user.name", "t"]);
+        crate::fsx::atomic::atomic_write(&root.join("a.txt"), b"a\n").unwrap();
+        run_in(root, &["add", "a.txt"]);
+        run_in(root, &["commit", "-q", "-m", "A"]);
+        let sha_a = run_in(root, &["rev-parse", "HEAD"]);
+        run_in(
+            root,
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
+        run_in(root, &["push", "-q", "-u", "origin", "main"]);
+        run_in(root, &["tag", "-a", "v0.0.1", "-m", "v0.0.1"]);
+        run_in(root, &["push", "-q", "origin", "refs/tags/v0.0.1"]);
+        let tag_at_remote = run_in(remote.path(), &["rev-parse", "refs/tags/v0.0.1"]);
+
+        // 再走一笔，把**本地**那份 tag 移到新的提交上 —— 远端还在 A，于是同名不同提交
+        crate::fsx::atomic::atomic_write(&root.join("b.txt"), b"b\n").unwrap();
+        run_in(root, &["add", "b.txt"]);
+        run_in(root, &["commit", "-q", "-m", "B"]);
+        run_in(root, &["tag", "-f", "-a", "v0.0.1", "-m", "本地那份"]);
+        assert_ne!(
+            run_in(root, &["rev-parse", "refs/tags/v0.0.1"]),
+            tag_at_remote,
+            "前提：本地那份已经不是远端那一份了（sha_a={sha_a}）"
+        );
+
+        let g = Git::open(root);
+        g.fetch("origin").expect("tag 撞车不该把整次 fetch 带崩");
+
+        // 远端那份说了算（本地那份被强制 refspec 归位）
+        assert_eq!(
+            run_in(root, &["rev-parse", "refs/tags/v0.0.1"]),
+            tag_at_remote
+        );
+        // 分支照旧拉到最新（这一步才是调用方真正要的东西）
+        assert!(
+            g.try_run(&["rev-parse", "--verify", "refs/remotes/origin/main"])
+                .unwrap()
+                .is_some(),
+            "fetch 之后该有 origin/main"
+        );
     }
 
     /// 测试用：把 base64 解回原文（只覆盖 ASCII + 补齐，够验这几个向量）。
