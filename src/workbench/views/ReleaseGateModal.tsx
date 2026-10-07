@@ -31,6 +31,7 @@ import type {
   ReleaseTxReport,
 } from '../api'
 import ModalC14 from '../c14/ModalC14'
+import { toasts } from '../c14/toast'
 import c from '../c14.module.css'
 import s from './ReleaseGateModal.module.css'
 
@@ -123,6 +124,14 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   /** 闸的结果；null = 还没算回来 */
   const [pre, setPre] = useState<ReleasePreflight | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * 错误的**详情**（Rust 的 `detail`：git 的 stderr、平台回的那句话）。
+   *
+   * ★ 只说标题等于没说 —— 2026-10-07 真机就卡在这儿：界面上只剩一句
+   * "git push 失败了"，而真正的原因（本地 main 陈旧 → 非快进 → 本地闸③）躺在
+   * detail 里，得去翻日志才看得见。两行都要摆出来。
+   */
+  const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   /** 回执：非 null = 这一屏在收尾视图里 */
   const [report, setReport] = useState<ReleaseTxReport | null>(null)
@@ -135,16 +144,32 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   const [notes, setNotes] = useState('')
   const [history, setHistory] = useState<ReleaseHistory | null>(null)
 
+  /** 记一条错误：`message` 是标题，`detail` 是"为什么" */
+  const fail = (e: unknown) => {
+    if (isAppError(e)) {
+      setError(e.message)
+      setErrorDetail(e.detail ?? null)
+    } else {
+      setError(String(e))
+      setErrorDetail(null)
+    }
+  }
+
+  const clearError = () => {
+    setError(null)
+    setErrorDetail(null)
+  }
+
   /** 跑一遍闸。**只读** —— 后端那条命令一个字节都不写，"重新检查"点几次都没副作用 */
   const run = useCallback(async () => {
-    setError(null)
+    clearError()
     try {
       const p = await wb.releasePreflight(version.trim() === '' ? null : version.trim())
       setPre(p)
       if (version.trim() === '') setVersion(p.currentVersion)
     } catch (e) {
       setPre(null)
-      setError(isAppError(e) ? e.message : String(e))
+      fail(e)
     }
   }, [version])
 
@@ -160,7 +185,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
       try {
         setHistory(await wb.releaseHistory())
       } catch (e) {
-        setError(isAppError(e) ? e.message : String(e))
+        fail(e)
       }
     }
   }
@@ -168,7 +193,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   /** 真发：一次手势走完内核那八步（**以分钟计**：要构建并上传安装包） */
   const release = async () => {
     setBusy(true)
-    setError(null)
+    clearError()
     try {
       const rep = await wb.releaseSoftware({
         version: version.trim() === '' ? null : version.trim(),
@@ -179,7 +204,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
       setTab('receipt')
     } catch (e) {
       // 发挂了就把闸留在原地 —— 回执是给"走到了"用的，别拿它兜错误
-      setError(isAppError(e) ? e.message : String(e))
+      fail(e)
     } finally {
       setBusy(false)
     }
@@ -190,7 +215,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
     try {
       await wb.openExternal(url)
     } catch (e) {
-      setError(isAppError(e) ? e.message : String(e))
+      fail(e)
     }
   }
 
@@ -201,16 +226,51 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   const killWatcher = async () => {
     if (pre?.devWatcherPid == null) return
     setBusy(true)
-    setError(null)
+    clearError()
     try {
       await wb.killDevWatcher(pre.devWatcherPid)
       await run()
     } catch (e) {
-      setError(isAppError(e) ? e.message : String(e))
+      fail(e)
     } finally {
       setBusy(false)
     }
   }
+
+  /**
+   * **复制发布提示词**（2026-10-07 作者要的"傻瓜化"出口）：把"这一版要怎么发"整成一段
+   * 任务书贴给 AI —— 版本号、更新说明、发版纪律、产物名、`release.json` 落点全在里面，
+   * 它照着仓库自己的发版路径做，人不必在这颗按钮上冒险。
+   *
+   * 文本由 Rust 生成（事实只有一处），这里只负责取回来 + 放进剪贴板。
+   */
+  const copyPrompt = async () => {
+    setBusy(true)
+    clearError()
+    try {
+      const text = await wb.releasePrompt(
+        version.trim() === '' ? null : version.trim(),
+        notes.trim(),
+      )
+      await navigator.clipboard.writeText(text)
+      toasts.push('发布提示词已复制 —— 贴给 AI 即可（任务书里带着版本号、更新说明与发版纪律）')
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 错误块：标题 + 详情 —— 三段视图共用（详情就是"为什么"，不许只给标题） */
+  const errorBox =
+    error === null ? null : (
+      <div role="alert">
+        <p className={s.error}>{error}</p>
+        {errorDetail !== null && errorDetail.trim() !== '' && (
+          <pre className={s.errorDetail}>{errorDetail.trim()}</pre>
+        )}
+      </div>
+    )
 
   /* ---------- 历史 ---------- */
 
@@ -236,11 +296,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
           </>
         }
       >
-        {error !== null && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {errorBox}
         {history !== null && history.records.length === 0 ? (
           <p className={s.empty}>还没有发过软件版本。</p>
         ) : (
@@ -316,11 +372,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
             release.json 的 PR：<span className={c.mono}>{report.infoReview.url}</span>
           </p>
         )}
-        {error !== null && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {errorBox}
       </ModalC14>
     )
   }
@@ -357,6 +409,15 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
                 : '有项没过：修完点「重新检查」'}
           </span>
           <span className={c.grow} />
+          <button
+            type="button"
+            className={c.btn}
+            disabled={busy}
+            title="把这—版要怎么发（版本号 / 更新说明 / 发版纪律 / 产物名）生成一段任务书并复制 —— 贴给 AI，由它照仓库自己的发版路径做"
+            onClick={() => void copyPrompt()}
+          >
+            复制发布提示词
+          </button>
           <button type="button" className={c.btn} onClick={onClose} disabled={busy}>
             取消
           </button>
@@ -437,7 +498,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
               {it.id === 'run-env' && it.status === 'fail' && pre?.devWatcherPid != null && (
                 <button
                   type="button"
-                  className={`${c.btn} ${c.btnDanger}`}
+                  className={`${c.btn} ${c.btnDanger} ${s.rowAction}`}
                   disabled={busy}
                   title="只杀 tauri dev 的 CLI 监视进程 —— 本窗口与前端 HMR 都不受影响"
                   onClick={() => void killWatcher()}

@@ -1720,6 +1720,13 @@ export const wb = {
    * 返回 true = 杀了；false = 进程已经不在（等价于杀过，重跑闸即可）。
    */
   killDevWatcher: (pid: number) => invoke<boolean>('wb_release_kill_dev_watcher', { pid }),
+  /**
+   * **发布提示词**（只读）：把"这一版要怎么发"整成一段能直接贴给 AI 的任务书 ——
+   * 版本号、更新说明、发版纪律、产物名、`release.json` 落点全在里面，
+   * 由 AI 照仓库自己的发版路径去发。文本生成在 Rust（事实只有一处）。
+   */
+  releasePrompt: (version?: string | null, notes?: string) =>
+    invoke<string>('wb_release_prompt', { version: version ?? null, notes: notes ?? null }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

@@ -573,10 +573,24 @@ pub fn run(
 
     /* ---------- ⑥ 回 main、打 tag（★ tag 必须打在 main 的 tip 上） ---------- */
 
+    // ★ **主线的源头一律取 `origin/{base}`，不是本地 `{base}`**（2026-10-07 真机踩的）：
+    //   合并发生在**平台上**，本地那个 {base} 常常停在旧提交（这台机器上就落后一个 PR）。
+    //   补平台那趟（Append）根本不走下面 ⑥ 的切分支 + pull —— 拿本地 {base} 往发布仓库推
+    //   就是**非快进**，被 pre-push 闸③ 拦下，界面上只剩一句"git push 失败了"，
+    //   原因得翻日志才看得见（见 `git.rs::push_ref_to_authenticated` 的错误形状）。
+    //   与镜像同步（`publish_tx::mirror_sync`）同一条规矩：先 fetch，拿远端跟踪引用当源；
+    //   读不到就不推 —— **宁可不推，也不推一份旧的**。
+    git.fetch("origin")?;
+    let remote_base = format!("refs/remotes/origin/{base}");
+    if git.rev_parse_short(&remote_base).is_err() {
+        return Err(AppError::invalid_argument(format!(
+            "本机读不到 {remote_base} —— 读不到主线就不敢往发布仓库推（也许远端还没有 {base}）"
+        )));
+    }
+
     if !git.tag_exists(&tag)? {
         // ★ 这一动会**切换开发者本机的当前分支** —— 界面与 CLI 都要在闸里明说（作者定死的
         // "破坏性命令要讲明白"）。squash 重写过提交，分支上打的 tag 指向不在 main 历史里的提交。
-        git.fetch("origin")?;
         git.switch(base)?;
         git.pull_ff("origin", base)?;
         git.tag(&tag, &format!("{tag} {}", opts.notes.trim()))?;
@@ -597,21 +611,32 @@ pub fn run(
             .summary
             .push_str(&format!("已切到 {base} 并在 tip 上打 {tag}、推送。"));
 
-        // ★★ **主线也推一份到发布仓库**（2026-10-05，作者定"后续走 Gitee"）：
+        // ★★ **主线也推一份到目标仓库**（2026-10-05，作者定"后续走 Gitee"）：
         //   客户端的**数据源**读的就是仓库里的 `presets/delivery/`（release.json 也在里面，按 Manifest 声明取）
         //   （`raw/<branch>/…`）。只推 tag 的话，tag 在、main 上的数据源没过去 ——
         //   国内客户端连上 Gitee 之后看到的仍是上一版目录。
         //   这一步是**幂等**的：同一笔 main 推两次，第二次是 no-op。
+        //
+        // ★ 但**目标仓库就是本机 origin 时跳过**（2026-10-07）：合并本来就发生在 origin 上，
+        //   `origin/{base}` 已经是刚合出来的那一笔 —— 对着自己推一次 no-op，会被本地
+        //   pre-push 闸②（PR-only，见 main 就拦）挡下，白报一次"git push 失败了"。
+        //   只有目标**不是** origin（真镜像）时这一推才有内容。
         if let Some(t) = target {
-            git.push_ref_to_authenticated(
-                &t.repository_url,
-                &format!("refs/heads/{base}"),
-                &t.username,
-                &t.token,
-            )?;
-            report.summary.push_str(&format!(
-                "已把 {base} 推到发布仓库（数据源与 release.json 随之过去）。"
-            ));
+            if git.remote_matches(&t.repository_url)? {
+                report.summary.push_str(&format!(
+                    "{base} 由平台上的 PR 合并推进，目标仓库就是本机 origin —— 主线不必再推一次。"
+                ));
+            } else {
+                git.push_ref_to_authenticated(
+                    &t.repository_url,
+                    &format!("{remote_base}:refs/heads/{base}"),
+                    &t.username,
+                    &t.token,
+                )?;
+                report.summary.push_str(&format!(
+                    "已把 {base} 推到发布仓库（数据源与 release.json 随之过去）。"
+                ));
+            }
         }
     } else {
         report.summary.push_str("tag 已存在，沿用。");
@@ -623,7 +648,9 @@ pub fn run(
      * Release 挂在 tag 上，所以 **tag 必须在 Gitee 真实存在**；main 同步过去是
      * "数据源主线跟随发布仓库"（作者 2026-10-05 定）—— 客户端的数据源读的就是
      * 仓库里的 `presets/delivery/`。两步都幂等：同一笔重跑是 no-op / fast-forward。
-     * Gitee 主线与本地分叉时如实报错（那是镜像没同步，得先解决，不能悄悄覆盖）。
+     * 主线的**源是 `origin/{base}`**（上面刚 fetch 过）：本地 {base} 旧不旧都不影响这一推 ——
+     * 拿本地分支当源正是 2026-10-07 那次"git push 失败了"的成因（非快进，闸③ 拦）。
+     * 远端有本地没有的提交时如实报错（那是镜像分叉，得先解决，不能悄悄覆盖）。
      */
     if let Some(ch) = release {
         let g = ch.target;
@@ -635,7 +662,7 @@ pub fn run(
         )?;
         git.push_ref_to_authenticated(
             &g.repository_url,
-            &format!("refs/heads/{base}"),
+            &format!("{remote_base}:refs/heads/{base}"),
             &g.username,
             &g.token,
         )?;
@@ -1334,6 +1361,171 @@ pub fn wb_release_kill_dev_watcher(pid: u32) -> Result<bool, AppError> {
     })
 }
 
+/// 提示词的**事实来源**（生成在 Rust —— 界面不重写一份，事实只有一处）。
+struct PromptFacts<'a> {
+    repo: &'a Path,
+    app_dir: &'a str,
+    history_file: &'a str,
+    branch: &'a str,
+    version: &'a str,
+    tag: &'a str,
+    notes: &'a str,
+    base: &'a str,
+    account: Option<&'a PublishTarget>,
+    channel: Option<&'a PublishTarget>,
+    plan: Option<InstallerPlan>,
+}
+
+/// 把"这一版要怎么发"写成一段**能直接交给 AI 的任务书**。
+///
+/// ★ 为什么放在 Rust：分支 / 版本 / tag / 账户 / 通道 / 产物名 / 平台都是这里的事实，
+///   前端不许凭自己的状态再拼一份（拼错了就是"AI 照着一份错的任务书去发版"）。
+fn release_prompt_text(f: &PromptFacts) -> String {
+    let asset = match f.plan {
+        Some(p) => super::platform::asset_name(PRODUCT, f.version, arch_name(), p.ext),
+        None => format!("（本机是 {}，打不出安装包）", std::env::consts::OS),
+    };
+    let label = f.plan.map(|p| p.label).unwrap_or("打不出安装包");
+    let account = f
+        .account
+        .map(|t| format!("{} · {}/{}", t.platform, t.owner, t.repo))
+        .unwrap_or_else(|| {
+            "**还没配** —— 先在「设置 → 发布账户」里配好，否则这趟只能在本地走到推送".to_owned()
+        });
+    let channel = f
+        .channel
+        .map(|t| format!("{} · {}/{}", t.platform, t.owner, t.repo))
+        .unwrap_or_else(|| {
+            "**还没配** —— 软件版本的 Release 与安装包只发 Gitee，先在「设置」里配 Gitee 发布账户"
+                .to_owned()
+        });
+    let notes = if f.notes.trim().is_empty() {
+        "（**还没填** —— 先用一句话说清这一版改了什么，再发）"
+    } else {
+        f.notes.trim()
+    };
+    // 推荐命令：把「发布账户与凭据从哪来」一并写进同一行（CLI 靠 MKPSE_APP_DIR 复用工作台的配置）
+    let cmd = if cfg!(target_os = "windows") {
+        format!(
+            "$env:MKPSE_APP_DIR=\"{}\"; npm run release -- {} \"{}\"",
+            f.app_dir,
+            f.version,
+            notes
+        )
+    } else {
+        format!(
+            "MKPSE_APP_DIR=\"{}\" npm run release -- {} \"{}\"",
+            f.app_dir, f.version, notes
+        )
+    };
+
+    format!(
+        r#"# 任务：发布 SupportEase {tag}
+
+在这个仓库里把 **{tag}** 发出去（本机平台：{os} —— 只会构建 {label}）。
+
+## 事实（照这个核对，别自己猜）
+- 仓库根：{repo}
+- 当前分支：{branch}（发版 PR 的目标分支是 {base}）
+- 目标版本：{version}　tag：{tag}
+- 更新说明（会成为 Release 正文与 release.json 的 notes）：{notes}
+- 发布账户：{account}
+- 发布通道（Release 与安装包**只发这里**）：{channel}
+- 安装包产物名：{asset}
+- release.json 落点：{release_info}（客户端"有没有新版本"的唯一正式信息源，按 Source Manifest 声明取）
+
+## 怎么发（跑仓库自己的发版命令，别手写流程）
+```text
+{cmd}
+```
+等价的底层命令：`cargo run --bin release --features workbench -- {version} "{notes}" --merge`
+
+★ 前置条件：`gh` 已登录、工作区干净（`git status` 没有别的改动）、当前不在 {base} 上、
+  **没有 `tauri dev` / 工作台 dev 在跑**（版本号一落盘 dev 会重建重启，把这一趟搅乱）。
+★ 不要自己手写 git 命令去凑发版流程：版本号是"**一处真值 + 三处派生**"，必须一起改 ——
+  src-tauri/Cargo.toml（真值）/ package.json / src-tauri/tauri.conf.json / Cargo.lock。
+
+## 这条命令会按顺序做（照它核对进度）
+1. 预检：分支 / 工作区干净 / 四处版本号一致 / 这一版这一平台还没发过 / 本机能打这个包
+2. 版本号四处一起推进到 {version} → 提交 `chore: {tag}` → 推当前分支
+3. 开 PR「发版 {tag}」（base={base}）→ 等 CI → squash 合并
+4. 切回 {base}，在 {base} 的 **tip** 上打 annotated tag `{tag}` 并推送
+5. 把 tag 与 {base} 推到发布仓库（客户端的数据源读的就是那边的 presets/delivery/）
+6. 构建本平台安装包：`{asset}`
+7. 在发布仓库建 Release「{product} {tag}」，上传安装包
+8. 写 {release_info}，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
+
+## 纪律（不许破）
+- {base} 只能由 PR 推进：不要在 {base} 上直接提交 / 推送
+- tag 必须打在 {base} 的 tip 上、必须是 annotated（`git tag -a`）；已发布的 tag 不许重打 / 移动
+- 同一个版本同一个平台不重发（要补另一个平台的包，就换一台对应平台的机器跑）
+- **第 8 步那个 PR 必须由人合并** —— 你不要自己合并，做完把它留给用户（合并之后客户端才看得到新版本）
+- 不许用 pre-push 钩子的逃生开关：ALLOW_PUSH_MAIN / ALLOW_FORCE_PUSH / ALLOW_TAG_MISMATCH / ALLOW_DELETE_REMOTE
+
+## 做完回报（缺哪项就说缺哪项）
+版本 / 分支 / 提交 sha / PR 链接 / tag / 是否已合并 / 安装包名与大小 / Release 链接 /
+release.json 的 PR 链接 / **还差什么**（例如"等你合并 release.json 的 PR"）。
+★ 任何一步失败：把命令的**原始 stdout / stderr 整段**贴回来，不要只说一句"失败了"。
+
+## 发完之后
+这一趟会记进工作台的发布历史（「生成与发布 → 历史」，文件是 {history_file}）——
+前提是命令带上了上面那个 MKPSE_APP_DIR。
+"#,
+        tag = f.tag,
+        version = f.version,
+        os = std::env::consts::OS,
+        label = label,
+        repo = f.repo.display(),
+        branch = f.branch,
+        base = f.base,
+        notes = notes,
+        asset = asset,
+        product = PRODUCT,
+        release_info = RELEASE_INFO_REL,
+        history_file = f.history_file,
+    )
+}
+
+/// **发射提示词**（"傻瓜化"出口）：把"这一版要怎么发"整成一段能直接贴给 AI 的任务书。
+///
+/// ★ 只读：不动仓库、不联网（除了读本机的发布账户配置）—— 点几次都没副作用。
+#[tauri::command]
+pub fn wb_release_prompt(
+    app: tauri::AppHandle,
+    version: Option<String>,
+    notes: Option<String>,
+) -> Result<String, AppError> {
+    crate::ipc::traced("wb_release_prompt", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        let repo = crate::workbench::paths::repo_root();
+        let git = Git::open(&repo);
+        let current = version::app_version(&repo)?;
+        let want = version
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| current.clone());
+        let tag = tag_of(&want);
+        let account = super::publish_tx::resolve_target(&root, None).ok();
+        let channel = super::publish_tx::resolve_target(&root, Some("gitee")).ok();
+        let app_dir = root.display().to_string();
+        let history_file = root.join("release-history.json").display().to_string();
+        let opts = ReleaseOptions::default();
+        Ok(release_prompt_text(&PromptFacts {
+            repo: &repo,
+            app_dir: &app_dir,
+            history_file: &history_file,
+            branch: &git.branch().unwrap_or_default(),
+            version: &want,
+            tag: &tag,
+            notes: notes.as_deref().unwrap_or_default(),
+            base: opts.base_or_main(),
+            account: account.as_ref(),
+            channel: channel.as_ref(),
+            plan: installer_plan(),
+        }))
+    })
+}
+
 /// **跑一遍闸**（只读）：工作区 / 分支 / 版本派生 / 发布账户 / tag 有没有被占 / 平台支不支持。
 ///
 /// ★ `(async)` 且**一个字节都不写** —— 点几次都不会有副作用（界面上「重新检查」就靠这条）。
@@ -1640,6 +1832,66 @@ pub fn wb_release_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **发布提示词把事实写全**（2026-10-07）：这份文本是要贴给 AI 当任务书的 ——
+    /// 少了 tag / 版本 / 产物名 / release.json 落点 / "那个 PR 要人合并"里的任何一条，
+    /// 接过话的那个执行者就只能猜，而猜错的代价是一次真发版。
+    #[test]
+    fn the_release_prompt_carries_the_facts_and_the_discipline() {
+        let repo = PathBuf::from("/tmp/repo");
+        let mk = |platform: &str| PublishTarget {
+            platform: platform.to_owned(),
+            repository_url: format!("https://{platform}.com/o/r"),
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        let account = mk("github");
+        let channel = mk("gitee");
+        let text = release_prompt_text(&PromptFacts {
+            repo: &repo,
+            app_dir: "/tmp/app",
+            history_file: "/tmp/app/release-history.json",
+            branch: "feat/demo",
+            version: "1.2.3",
+            tag: "v1.2.3",
+            notes: "修了 X",
+            base: "main",
+            account: Some(&account),
+            channel: Some(&channel),
+            plan: installer_plan(),
+        });
+
+        for must in [
+            "v1.2.3",                 // tag
+            "1.2.3",                  // 版本号
+            "feat/demo",              // 当前分支
+            "修了 X",                  // 更新说明
+            "npm run release -- 1.2.3", // 推荐命令
+            "github · o/r",           // 发布账户
+            "gitee · o/r",            // 发布通道
+            RELEASE_INFO_REL,         // release.json 落点
+            "chore/release-v1.2.3",   // 第二个 PR 的分支名
+            "必须由人合并",             // 那条不能代劳的纪律
+            "ALLOW_PUSH_MAIN",        // 逃生开关不许用
+            "MKPSE_APP_DIR",          // 让 CLI 复用工作台的发布账户与账本
+        ] {
+            assert!(text.contains(must), "提示词里少了「{must}」：\n{text}");
+        }
+        // 找得到本平台的产物名（本机是 macOS / Windows 时）
+        if let Some(p) = installer_plan() {
+            assert!(
+                text.contains(&super::super::platform::asset_name(
+                    PRODUCT,
+                    "1.2.3",
+                    arch_name(),
+                    p.ext
+                )),
+                "提示词里少了安装包名：\n{text}"
+            );
+        }
+    }
 
     /// 阶段名与 serde 的 camelCase **逐字一致** —— 前端按这个字符串画图，
     /// 两边漂移的表现是界面上某个阶段永远不亮，而编译照样过。

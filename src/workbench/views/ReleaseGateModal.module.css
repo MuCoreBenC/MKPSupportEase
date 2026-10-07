@@ -156,6 +156,34 @@
   color: var(--danger);
 }
 
+/*
+ * 错误的**详情**（Rust 的 `detail`：git 的 stderr、平台返回的那句话）。
+ *
+ * ★ 只有标题那一行等于没说：2026-10-07 真机踩的就是这个 —— 界面上只剩一句
+ * "git push 失败了"，而真正的原因（本地 main 陈旧 → 非快进 → 闸③）躺在 detail 里。
+ * 等宽 + 保留换行（git 的报错是多行的），自己滚，不把模态框顶穿。
+ */
+.errorDetail {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: calc(var(--fs-label) - 1px);
+  white-space: pre-wrap;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* 闸里某一格自带的动作按钮（run-env 那颗「杀掉 dev 监视进程」）：贴着说明往下摆一行 */
+.rowAction {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .pending {
   margin: 0;
   color: var(--text-3);

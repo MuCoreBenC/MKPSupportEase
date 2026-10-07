@@ -380,5 +380,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::release_tx::wb_release_history,
         // run-env 拦下时的一键解法：杀掉本进程自己的 dev 监视器（先验明正身再动手）
         app::release_tx::wb_release_kill_dev_watcher,
+        // 「复制发布提示词」：把这一版要怎么发整成一段能直接贴给 AI 的任务书（只读）
+        app::release_tx::wb_release_prompt,
     ])
 }

@@ -36,7 +36,11 @@ use std::path::PathBuf;
 use mkp_support_ease_lib::error::AppError;
 use mkp_support_ease_lib::workbench::app::platform::{self, Hosting};
 use mkp_support_ease_lib::workbench::app::publish_tx::{resolve_target, PublishTarget};
-use mkp_support_ease_lib::workbench::app::release_tx::{run, ReleaseChannel, ReleaseOptions};
+use mkp_support_ease_lib::workbench::app::release_history::{self, ReleaseRecord};
+use mkp_support_ease_lib::workbench::app::release_tx::{
+    run, ReleaseChannel, ReleaseOptions, ReleaseTxReport,
+};
+use mkp_support_ease_lib::workbench::clock;
 
 fn main() {
     match run_cli() {
@@ -113,13 +117,44 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
     });
     let repo_root = mkp_support_ease_lib::workbench::paths::repo_root();
     eprintln!("仓库根：{}", repo_root.display());
-    run(
+    let report = run(
         &repo_root,
         &opts,
         target.as_ref(),
         hosting.as_ref().map(|h| h.as_ref()),
         release_channel.as_ref(),
-    )
+    )?;
+    record_history(&opts, &report);
+    Ok(report)
+}
+
+/// 把这一趟记进**发布历史**（`<appDataDir>/release-history.json`，与工作台同一个文件）。
+///
+/// ★ 2026-10-07 补的一笔：以前只有工作台那颗「确认发布」会记账，CLI 这条路（也就是
+///   "把提示词贴给 AI 让它代跑"那条路）发完在工作台历史里**查无此次** —— 人看不见
+///   AI 到底发了什么。落点靠 `MKPSE_APP_DIR` 认门（发布账户也从它来，本来就是同一个目录）；
+///   没给（CI 那种无窗口环境）就跳过。
+/// ★ **尽力而为**：账本不是发布的一部分，记不上只提示一句，不把发版判成失败。
+/// ★ 演练（`--dry-run`）不记账：那趟一个字节都没动。
+fn record_history(opts: &ReleaseOptions, report: &ReleaseTxReport) {
+    if opts.dry_run {
+        return;
+    }
+    let Some(dir) = std::env::var_os("MKPSE_APP_DIR") else {
+        return;
+    };
+    let root = PathBuf::from(dir);
+    let file = root.join("release-history.json");
+    match release_history::append(
+        &root,
+        ReleaseRecord::from_report(report, clock::now_iso8601()),
+    ) {
+        Ok(_) => eprintln!("已记入发布历史：{}", file.display()),
+        Err(e) => eprintln!(
+            "（发布历史没记上：{} —— 不影响这一趟发布）",
+            e.message
+        ),
+    }
 }
 
 /// M6 的发布通道零件：Gitee 账户（工作台配置或 MKPSE_RELEASE_* 显式给）。
