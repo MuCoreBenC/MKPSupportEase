@@ -54,7 +54,7 @@
  * 外壳按 tab 切换页面（切走就卸载），两页之间没有共享状态，跨页联动也没做。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -541,6 +541,25 @@ export function usePresetData(importRevision = 0): PresetData {
     }
   }, [])
 
+  /*
+   * **「读一遍 + 写快照」的唯一出口，带代次守卫（后发者优先）**。
+   *
+   * 快照有三个读源：首屏那条链、换目录后的重读、投递面代次触发的重读 —— 它们可能
+   * **并发**（下载完的广播正好撞上首屏那条还在路上）。没有守卫时，**先发起、后返回**
+   * 的旧读会把快照写回去（新数据闪一下又变回旧的）。
+   *
+   * 守卫只用一句话表达：**只有"最后发起的那次读"允许写快照**（`seq` 对上才写）。
+   * 它盖住所有并发组合，不需要每条读源各写一套 cancel 逻辑。
+   * 读失败照抛（调用方决定怎么说）——失败不写快照，保持上一份。
+   */
+  const readSeqRef = useRef(0)
+  const readReleaseInto = useCallback(async (): Promise<void> => {
+    const seq = ++readSeqRef.current
+    const next = await readRelease()
+    if (seq !== readSeqRef.current) return
+    setRelease(next)
+  }, [readRelease])
+
   useEffect(() => {
     let alive = true
 
@@ -609,10 +628,9 @@ export function usePresetData(importRevision = 0): PresetData {
        * 顺序不能反 —— 用户一进预设页看到的必须是本地那份（离线也看得到），
        * 后台检查只是"路过时问一声远端有没有新版"，不问到就把页面挂住。
        */
-      void readRelease()
-        .then(async (next) => {
+      void readReleaseInto()
+        .then(async () => {
           if (!alive) return
-          setRelease(next)
           /* 数据源与 release 一路同读：它只服务「来源」那一格的字，失败照实 null */
           const source = await api.getPresetSource().catch(() => null)
           if (alive) setSourceLabel(source?.mode ?? null)
@@ -626,8 +644,8 @@ export function usePresetData(importRevision = 0): PresetData {
           /* 远端读不懂：立起那句提示（列表照常，不动 error、不动目录） */
           setNeedsNewerClient(boot.needsNewerClient)
           if (boot.changed) {
-            const refreshed = await readRelease().catch(() => null)
-            if (refreshed !== null && alive) setRelease(refreshed)
+            /* 目录换过了，重读一遍（同一条出口，代次守卫管着先后） */
+            await readReleaseInto().catch(() => {})
           }
         })
         .catch(() => {
@@ -644,7 +662,7 @@ export function usePresetData(importRevision = 0): PresetData {
     return () => {
       alive = false
     }
-  }, [readRelease, importRevision])
+  }, [readReleaseInto, importRevision])
 
   /*
    * **跨页再同步**（2026-10-07 真机两刀挣来的）：
@@ -662,12 +680,12 @@ export function usePresetData(importRevision = 0): PresetData {
   const deliveryRevision = useDeliveryRevision()
   useEffect(() => {
     if (!ready) return
-    void readRelease()
-      .then((next) => setRelease(next))
-      .catch(() => {
-        /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
-      })
-  }, [deliveryRevision, ready, readRelease])
+    /* 走那条带守卫的出口（`readReleaseInto`）：这次重读与首屏 / 换目录后的重读
+       并发时，晚发起的那次才算数 —— 旧读晚回来不许覆盖新快照 */
+    void readReleaseInto().catch(() => {
+      /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
+    })
+  }, [deliveryRevision, ready, readReleaseInto])
 
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
