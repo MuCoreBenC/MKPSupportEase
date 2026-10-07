@@ -645,6 +645,33 @@ export function usePresetData(importRevision = 0): PresetData {
     }
   }, [readRelease, importRevision])
 
+  /*
+   * **跨页再同步**（2026-10-07 真机：首页「下载并应用」下了 X1 套餐，
+   * 切回预设页的本地表却没有那两行 —— 数据是**首次进入时读的那一份**）：
+   *
+   * 外壳的页签是**常驻 + 切显示**（`App.tsx`，2026-10-05 起），本页**不再重挂载**，
+   * 只在挂载时读一次 —— 别的页面写进投递面的东西这里永远看不见。
+   * 「使用中指针」（AppState）是**每一条"下载并应用"都会写的格子**（首页那颗按钮
+   * 必写它），它的**实质变化**就是一声"投递面可能变了"：收到就重读那一路。
+   * 本页自己的下载 / 删除已经自带重读（`downloadRelease` 等），这条只补跨页那一半。
+   *
+   * `activeKey` 用字符串折叠（不用对象引用）：底账重读一次就给一个新对象，
+   * 拿引用当依赖会让"同名重放"也重读一遍。首屏那条链自己会读，这里从 ready 之后
+   * 才开始听（首帧会多读一次，接受）。
+   */
+  const activeKey =
+    active === null
+      ? ''
+      : `${active.origin}:${active.machineId}:${active.versionId}:${active.fileName}`
+  useEffect(() => {
+    if (!ready) return
+    void readRelease()
+      .then((next) => setRelease(next))
+      .catch(() => {
+        /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
+      })
+  }, [activeKey, ready, readRelease])
+
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
   }, [])

@@ -3,7 +3,8 @@
 > 分支：`feat/build-delivery-files`。作者真机反馈两件事：
 > ① 切片器档（预设页 → 切片器配置 → 云端）9 份 BBS 的**喷嘴 / 层高整列都是「—」**；
 > ② 首页套餐下载的 BBS，在预设页「本地」看不到。
-> ① 是 bug（已修）；② 核实下来**不是** bug（结论与证据见 §2）。
+> **两件都是 bug，都已修**：① 见 §1；② 的根因是**页签常驻的跨页陈旧数据**，见 §2
+> （第一版结论曾写"不是 bug"，被真机实验推翻，当场更正）。
 
 ## 1. 喷嘴 / 层高整列「—」——根因与修法
 
@@ -45,33 +46,58 @@ localRows / cloudRows 的 release 行   搬进行上 → 表格两列有值
 - 后端侧算法本身的判据既有：`cargo test` 的 `slicer_axes_reads_nozzle_and_layer`
   与 `a1_bbs.nozzle == Some("0.4")`（`ipc/presets.rs`）。
 
-## 2. 「本地看不到」的核实（不是 bug）
+## 2. 「本地看不到」——**是 bug**：页签常驻的跨页陈旧数据（已修）
 
-作者现象：首页套餐（A1 mini / 快拆版260628）下载后，预设页切片器档「本地」为空。
-逐层核实（都在作者本机真实数据上跑）：
+作者现象：首页套餐（A1 mini / 快拆版260628，之后还有 X1C / lite）下载并应用之后，
+预设页切片器档「本地」看不到刚下的那些行。
+
+### 2.1 逐层核实（都在作者本机真实数据上跑）
 
 | 层 | 核实方式 | 结果 |
 |---|---|---|
-| 盘上 | `%APPDATA%\SupportEase\assets\bbs\…` | 两份在：`MKPProcess A1 0.2 0.10.json`、`MKPProcess A1 mini 0.4 0.20.json`；size / sha256 与目录登记逐字节一致 |
-| 事件账 | `preset_events.json` | 两份都有 `DeliveryDownloaded`（23:20:43 / 23:21:21） |
-| 后端判定 | 临时探针（`cargo test`，用真实数据根跑 `downloaded_entries`）| 返回 5 份 = 3 MKP + **这 2 份 BBS** ⇒ 是「已下载」 |
+| 盘上 | `%APPDATA%\SupportEase\assets\bbs\…` | 3 份都在（A1 0.2 / A1 mini 0.4 / **X1 0.4**）；size / sha256 与目录登记逐字节一致 |
+| 事件账 | `preset_events.json` | 每份都有 `DeliveryDownloaded`（23:20:43 / 23:21:21 / 23:35:09） |
+| 后端判定 | 临时探针（`cargo test`，真实数据根跑 `downloaded_entries`）| 返回 7 份 = 4 MKP + **3 份 BBS**（含 X1 那份）⇒ 全是「已下载」 |
+| 前端代码 | 从 vite dev server（5321）抓**运行时**模块比对 | 是最新代码（`nozzle: p.nozzle`、`subtitle: ""` 都在）|
 | 前端链 | 浏览器探针（mock）切到切片器 / 本地 | 本地表 4 行（含 release 行）⇒ release 行进本地表这条路通 |
+| **界面实测** | 直接在作者窗口上截图 + 点击（只读操作）| 切片器本地表**停在 2 行**（A1 0.2 / A1 mini 0.4）——X1 那行不在；**切走再切回也不刷新** |
 
-**时间线证据**（截图自带的字）：切片器云端表那行「未下载 **9** 份」只可能出现在
-**23:20:43 首页套餐下载之前** —— 之后至少 A1 mini 0.4mm 已在盘上，应显示「未下载 8 份」。
-（同批截图里 MKP 档是「未下载 8 份」= 9 份减已下载的 `A1_MINI-fast.toml`，与此一致。）
+### 2.2 根因
 
-⇒ 那两张截图拍的是**下载之前**的状态：那时切片器本地为空**是应然**（一份都没下）。
-修好 §1 之后在客户端里**切一下 tab 或重开窗口**再进预设页，切片器 / 本地应出现
-已下载的那两份；若仍为空，再按"真机复现"往下查（前端状态刷新那条链）。
+**外壳的页签 2026-10-05 起是「常驻 + 切显示」**（`src/app/App.tsx`：所有页面都常驻
+在 DOM 里，切 tab 只换 `visibility`，**不重挂载**）—— 预设页因此**只在首次进入时读一次
+数据**；而下载发生在**首页**（写盘 + 写使用中指针），预设页手里那份快照永远是旧的。
+「切走再切回」不重挂载 ⇒ 也不重读（界面实验复现：数据停在 2 行）。
+
+> 第一版核实停在"后端与前端逻辑都没问题"，据此写成"不是 bug、应是下载前的应然状态"；
+> **在窗口上直接实验后被推翻**。教训一句话：**跨页数据流的问题，两边各自都"对"，
+> 错在两页之间没人负责** —— 常驻页与跨页写是一对，改的时候要成对看。
+
+### 2.3 修法
+
+预设页订阅**使用中指针的实质变化**（`activeKey` = origin/machineId/versionId/fileName）→
+重读 delivery 那一路。它是**每一条"下载并应用"都会写的格子**（首页那颗按钮必写它），
+所以跨页那一半补上了；本页自己的下载 / 删除早已自带重读，不重复。
+首帧（ready 之后）会多读一次，接受。
+
+### 2.4 顺带说清的两件事（不是 bug，是期望落差）
+
+- **套餐里的切片器配置每机型只有一份**（`A1_MINI_*` 与 `X1C_default` 的 assetRefs
+  各引 `*-bbs-04-020` / `*-bbs-04-024` 一份）；**0.2mm 那几份是可选**（不在任何
+  bundle 里），要手动到切片器档云端表点「下载」。
+- 作者看到的**喷嘴 / 层高整列「—」**由 §1 修掉（release 行按 fileName 对 `getPresetFiles`）。
 
 ## 3. 落点清单
 
 | 层 | 文件 | 内容 |
 |---|---|---|
 | 前端数据形状 | `src/app/presets/presetTree.ts` | `ReleasePresetSource.nozzle/layerHeight`；`localRows` / `cloudRows` 的 release 行照搬 |
-| 前端读 | `src/app/presets/usePresetData.ts` | `readRelease` 多读 `getPresetFiles()`，按 `fileName` 建对表 |
+| 前端读 | `src/app/presets/usePresetData.ts` | ① `readRelease` 多读 `getPresetFiles()`，按 `fileName` 建对表；② **跨页再同步**：`activeKey` 实质变化 → 重读 delivery |
 | 探针 | `scripts/probes/presets.mjs` | 切片器档喷嘴 / 层高不许整列「—」 |
+
+**没动但记一笔**：首页那张「下载并应用」按钮的"已下载 / 漂移"判据是**同一个坑的
+另一面**（页签常驻 + 跨页写）—— 预设页下载后回首页，按钮状态可能还是旧的。
+它有自己的数据流（`useBundleFiles` 等），这一刀不碰，真机再看到再处理。
 
 ## 4. 验证
 
@@ -82,3 +108,7 @@ localRows / cloudRows 的 release 行   搬进行上 → 表格两列有值
 [分类边界 · 切片器喷嘴层高] MKPProcess A1 0.2 0.10.json(0.2/0.10)
   || MKPProcess A1 0.4 0.20.json(0.4/0.20) || OrcaProcess A1 0.2 0.10.json(—/—)
 ```
+
+**真机核实用过的三件工具**（都用完即删，不留在仓库里）：临时 `cargo test` 探针
+（真实数据根跑 `downloaded_entries`）；从 vite dev server 抓运行时模块与源码比对；
+在作者窗口上截图 + 只读点击（DPI 感知的客户区坐标 + `mouse_event`）。
