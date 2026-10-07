@@ -42,7 +42,7 @@ import { mkpAssets } from './tools/assets/plugin.mjs'
  * - host —— 只在 Tauri 需要时绑网卡（`TAURI_DEV_HOST` 由 tauri dev 在真机调试时注入），
  *   平时不绑，避免把 dev server 暴露给同网段。这与试验场的 `host: true` 是刻意的差别。
  *
- * ---- 第二个入口：后厨工作台（B03）----
+ * ---- 第二个入口：工作台（B03）----
  *
  * `workbench.html` **只在工作台构建里进 input**。默认 `npm run build` 的产物里不存在这一页，
  * 所以给用户的包里找不到它 —— 这不是"藏起来"，是没编进去，与 Rust 侧的

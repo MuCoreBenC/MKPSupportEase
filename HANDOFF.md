@@ -924,7 +924,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       - **链路侧**：客户端构建也装配 `delivery = 'bundled'` 进 `dist/assets/<path>`（URL 同形、
         **不带哈希** ⇒ 同一条资产在包里只有一份）；**dev 两边读的东西有意不同**：
         客户端读**交付根** `client-assets/`（与打包后一致），工作台读**源** `presets/assets/`
-        （后厨要看得见任何登记资产）。
+        （工作台要看得见任何登记资产）。
       - **桩数据跟上**：`machine_catalog.json` 的 `image` 从文件名改成资产 id（P2S / X1C 那个
         根本不存在的 `p2s.webp` / `x1c.webp` 清空 —— 那是移植时留下的错路）；
         `mock.ts` 的 `getRuntimeCatalog()` 补 `assets[]`（**真 id + 真 path**，于是浏览器演示里的

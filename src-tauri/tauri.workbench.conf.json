@@ -1,8 +1,13 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "SupportEase Workbench",
+  "identifier": "com.mkpsupport.ease.workbench",
   "build": {
     "devUrl": "http://localhost:5322",
     "beforeDevCommand": "npm run dev:workbench",
     "beforeBuildCommand": "npm run build:workbench"
+  },
+  "app": {
+    "windows": []
   }
 }
