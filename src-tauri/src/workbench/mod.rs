@@ -83,8 +83,25 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
             .inner_size(1360.0, 900.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)
+            /*
+             * ★ **先藏着，等前端首帧就绪再露面**（作者 2026-10-07）：
+             * dev 下前端首次加载要把整棵模块树编译一遍（以分钟计），窗口若当场就露，
+             * 人看到的是"一块白板先出现、然后干等"—— 作者原话"不要先出现白屏然后再等"。
+             * 露面那一半在前端入口（`src/workbench/main.tsx` 首帧后调 `window.show()`）；
+             * 这里同时挂**兜底**（见下）：前端因任何原因没来敲（编译错误 / JS 崩），
+             * 藏着的窗口不会有任何报错出口 —— 到点无条件 show，宁可白板也不能永不出现。
+             */
+            .visible(false)
             .build()
             .map_err(|e| AppError::internal("建不出工作台窗口").with_detail(e.to_string()))?;
+
+    {
+        let win = win.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let _ = win.show();
+        });
+    }
 
     /* 草稿在内存里，磁盘上只有崩溃快照。落盘三个时机里的两个挂在窗口事件上：
     失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。

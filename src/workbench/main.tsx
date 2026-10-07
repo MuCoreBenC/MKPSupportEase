@@ -10,6 +10,7 @@
  */
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import './tokens.css'
 import './workbench.css'
@@ -68,3 +69,26 @@ ReactDOM.createRoot(host).render(
     </Boundary>
   </React.StrictMode>,
 )
+
+/*
+ * ★ **窗口这时还是藏着的**（Rust 侧 `.visible(false)`，见 `workbench::open_window`）——
+ * 等两帧过去（React 把首帧画上），再让它露面：作者 2026-10-07 定的是"画面跟窗口
+ * 一起出现"，不要"先给一块白板、再等一分钟"。
+ *
+ * 两帧的原因：React 18 的 render 是调度着提交的，跳过第一帧再 show 最稳 ——
+ * 差一帧人看不出来。Rust 侧还挂着 60 秒兜底：这段代码因任何原因没走到，
+ * 窗口照样会出现（宁可白板，不能永不露面）。
+ *
+ * 浏览器里（探针跑 vite preview 时）没有 Tauri，跳过。
+ */
+if ('__TAURI_INTERNALS__' in window) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      getCurrentWindow()
+        .show()
+        .catch(() => {
+          /* show 失败没有补救余地（Rust 侧兜底定时器还在），不打断入口 */
+        })
+    })
+  })
+}
