@@ -89,6 +89,14 @@ const PEEK_MAX = 0.2
 const peekFor = (w: number) =>
   Math.min(PEEK_MAX, Math.max(0, (PEEK_MAX * (w - PEEK_FROM)) / (PEEK_FULL - PEEK_FROM)))
 
+/*
+ * 启动重栅格化的触发点（2026-10-07，见组件里那条 effect 的长注释）。
+ * 要晚于入场动画与 WebView2 启动期的合成比例落定（page-in 130ms + 余量），
+ * 又要早于用户看清首屏。500ms 两头都留了余量；真机上若仍见首启发糊，
+ * 先加大这个值（比如 1000）再怀疑别的。
+ */
+const RERASTERIZE_AT_MS = 500
+
 const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
   { sheets, density, canLeave },
   ref,
@@ -139,6 +147,8 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
   const cardRef = useRef<HTMLDivElement>(null)
   const exitRef = useRef<HTMLDivElement>(null)
   const deckRef = useRef<HTMLDivElement>(null)
+  /** 平面层本体：启动重栅格化要直接摘/挂它的 will-change（见下面那条 effect） */
+  const planeRef = useRef<HTMLDivElement>(null)
   /** go() 里要读最新的 p，但它是 useCallback 的依赖之外的东西，用 ref 取当前值 */
   const peekRef = useRef(0)
   peekRef.current = peek
@@ -155,6 +165,42 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
+  }, [])
+
+  /*
+   * 启动重栅格化（2026-10-07，触发点见上面的 RERASTERIZE_AT_MS）。
+   *
+   * 现象（作者真机指认）：首启那一下首页文字发糊，切一次页签回来就锐了。
+   * 机制：.plane 的 will-change 层把**第一份栅格化位图**一直攥在手里 —— 而首帧
+   * 那一次栅格化可能落在 WebView2 启动期（合成比例/首帧时序）还没落定的时候；
+   * 页签切换会把层连 visibility 一起销毁重建，重建才肯重栅格化，所以"切回来就锐"。
+   * 真机实测（WebView2 CDP，DSF 1.25）：切页签前后栅格逐像素不变（同一上下文重建），
+   * 而**把提升摘两帧再挂回**（本条做的事）会强制一份新位图 —— 零位移
+   * （三探针 best=(0,0)、自配准 SAD=0）、纯变锐（step 行锐度 121.9 → 141.3、
+   * 边缘判定像素 193 → 245）、AA 模式不变（仍灰度，通道差 5.8 不动）——
+   * 等价于用户手动那一下，但没有任何位移可看。
+   *
+   * 时机取 RERASTERIZE_AT_MS（晚于 page-in 130ms 与启动落定、早于用户看清首屏）；
+   * 真机若仍见首启发糊，先加大这个值（比如 1000）再怀疑别的。
+   * 只在启动做一次；卸载时把 will-change 还回去，不留 inline 残留。
+   */
+  useEffect(() => {
+    const el = planeRef.current
+    if (!el) return
+    let raf = 0
+    const t = window.setTimeout(() => {
+      el.style.willChange = 'auto'
+      raf = requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          el.style.willChange = ''
+        }),
+      )
+    }, RERASTERIZE_AT_MS)
+    return () => {
+      window.clearTimeout(t)
+      cancelAnimationFrame(raf)
+      el.style.willChange = ''
+    }
   }, [])
 
   // 换页后页条自动亮一下，给"我在第几页"的反馈
@@ -373,6 +419,7 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
       */}
       <div
         key={`plane-${sheets[index].id}`}
+        ref={planeRef}
         className={s.plane}
         data-layer="plane"
         data-peek={peekAt(index) ? 'true' : undefined}

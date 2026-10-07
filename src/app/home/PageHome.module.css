@@ -770,12 +770,16 @@
   padding: clamp(10px, 1.2vh, 12px);
 
   /*
-   * 与下面那条板子 SVG 同一个道理，但针对的是**这一块自己**：卡片层里 .step 有 step-in 的
-   * opacity 淡入，opacity < 1 期间它是一个独立绘制层，动画一结束又退回普通绘制 ——
-   * 框里的标题、说明文字、提示行就在这次切换里被重新取整（肉眼指认："先回「选择机型」…"
-   * 那一行挪了）。常驻一个合成层，从头到尾走同一条路。translateZ(0) 不产生任何位移。
+   * 2026-10-07 作者裁决的收尾：这里的 translateZ(0) 常驻合成层退役（与 SlideDeck 的
+   * .plane、CardFrame 的 [data-layer='plane'] .frame 同一批）。它让 .step 整块停在
+   * 位图化路径里 —— legend / tip / note 那几行 11.5px 的小字被禁了 ClearType
+   * （DSF 1.25 实测合成层内 maxSpread 14、彩边 0%；直接绘制 165+、彩边 30-47%），
+   * 读起来就是「发虚」。
+   *
+   * 代价是原注释记录过的那笔账反着付：step-in 的 opacity 淡入结束、独立绘制层退掉
+   * 的那一帧，文字亚像素取整会换一条路 —— ±1px、单帧。frame-settle 末段的 blur 收尾
+   * （CardFrame.module.css）仍负责遮这一刻，与 .plane 的处理同一口径。
    */
-  transform: translateZ(0);
 }
 
 
@@ -1310,6 +1314,17 @@
 }
 
 /* ---------- 文字（眉标题在 CardFrame 里，这里只剩内容里的标题与正文） ---------- */
+/*
+ * 2026-10-07 实测记录：机型名的大字号**有意**越过了 Chromium 的 ClearType 上限。
+ * Windows 引擎对超过 ~48 物理像素的字形一律改用灰度抗锯齿（真机扫描：36px@DSF1.25
+ * =45 物理px 彩边 30-47%，40px=50 物理px 彩边归零；DSF 1.0 / 1.5 同规律，阈值跟着
+ * 物理像素走 —— 100% 缩放下 44px 仍是 ClearType，125% / 150% 就换成灰度）。
+ * 所以这条 clamp 在高缩放屏上大标题必然"发虚"，是引擎行为，Chrome / Edge /
+ * VS Code 同样如此，**不是**合成层回归（合成层毛病的量法见 SlideDeck .plane 那条：
+ * maxSpread ≤ 颜色自身通道差且彩边 0% 才叫灰度）。macOS 走 Core Text 无此阈值，
+ * 两边观感不同属正常。
+ * 若哪天嫌大标题太虚，唯一的杠杆是字重（300 → 400 让笔画实起来），字号动不得。
+ */
 .name {
   margin: 0;
   font-size: clamp(26px, 3.6vw, 48px);
