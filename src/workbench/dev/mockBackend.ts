@@ -1373,17 +1373,28 @@ export function installMockBackend() {
             continue
           }
           const fileName = `${uid.replace('/', '-')}.toml`
+          const text = [
+            '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
+            `# machine: ${uid.split('/')[0]}`,
+            '',
+            '[demo]',
+          ]
           if (builtRecords.has(uid)) {
             unchangedN += 1
-            files.push({ uid, fileName, state: 'unchanged', lines: [], added: 0, removed: 0 })
+            /*
+             * 无变化也带回整份正文（真机 `preview_one` 同款，作者 2026-10-07）：
+             * 「完整」视图要看原文，「对比」视图才说"不会重写"
+             */
+            files.push({
+              uid,
+              fileName,
+              state: 'unchanged',
+              lines: text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 })),
+              added: 0,
+              removed: 0,
+            })
           } else {
             toWrite += 1
-            const text = [
-              '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
-              `# machine: ${uid.split('/')[0]}`,
-              '',
-              '[demo]',
-            ]
             files.push({
               uid,
               fileName,
@@ -1650,6 +1661,46 @@ export function installMockBackend() {
         const n = mockStrays.length
         mockStrays = []
         return Promise.resolve(n)
+      }
+      /*
+       * 交付文件清单 / 读一份（2026-10-07）。真机名单 = Rust 的 `delivery_expected_set`
+       * （与发布闸判残留同一份）；桩里照它的形状造一份，好让「发布预设」卡在浏览器里
+       * 能验收。产物按 `builtRecords` 判在不在，附属文件按下表。
+       */
+      case 'wb_delivery_files': {
+        const rows = buildBook().buildRows as { mkpFile: string | null }[]
+        const presets = rows
+          .filter((r) => r.mkpFile !== null)
+          .map((r) => ({ rel: `mkp/presets/${r.mkpFile}`, exist: true, size: 2048, stage: 'generate' }))
+        const others = [
+          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate' },
+          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate' },
+          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate' },
+          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate' },
+          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish' },
+          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish' },
+        ]
+        return Promise.resolve([...presets, ...others])
+      }
+      case 'wb_delivery_file': {
+        const rel = String(args?.rel ?? '')
+        const demos: Record<string, string> = {
+          'content/machine_catalog.json': '{\n  "brands": [],\n  "machines": []\n}\n',
+          'content/bundles.json': '{\n  "bundles": []\n}\n',
+          'content/assets_index.json': '{\n  "assets": []\n}\n',
+          'catalog.json': '{\n  "catalogSchema": 1,\n  "files": []\n}\n',
+          'manifest.json': '{\n  "manifestSchema": 3,\n  "assets": []\n}\n',
+          'source.json': '{\n  "sourceSchema": 1,\n  "catalog": "catalog.json"\n}\n',
+        }
+        const text = demos[rel]
+        if (text === undefined) {
+          return Promise.reject({
+            code: 'NOT_FOUND',
+            message: `盘上还没有这一份：${rel}`,
+            traceId: 'mock',
+          })
+        }
+        return Promise.resolve(text)
       }
       case 'wb_trash':
         return Promise.resolve(TRASH)

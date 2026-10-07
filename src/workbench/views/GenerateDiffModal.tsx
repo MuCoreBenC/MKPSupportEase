@@ -38,9 +38,12 @@
  * 三档状态（后端 `DiffState`）：
  *   · 新增    磁盘上还没有这一份 —— 正文**全绿**，不折叠（没变化可言）
  *   · 修改    有，但这次算出来的不一样 —— 行级 diff，一删一增（删在前、增在后，与 git 同序）
- *   · 无变化  正文相同（只有头部时间戳那行会不同），不会重写 —— 只在清单里占一行，
- *             详情写「没有变化」。判据与真生成的「跳过」同一道（`same_payload`）：
- *             预演说「要写」而真生成跳过，「将写入 N 份」就是假的
+ *   · 无变化  正文相同（只有头部时间戳那行会不同），不会重写。判据与真生成的
+ *             「跳过」同一道（`same_payload`）：预演说「要写」而真生成跳过，
+ *             「将写入 N 份」就是假的。
+ *             **详情照给全文**（作者 2026-10-07：「就算它一模一样不会重写，我也希望
+ *             看一个完整的，然后对比的时候才写这个文案」）—— 选中它：「完整」视图
+ *             摊开整份素底正文，「对比」视图才写「这一份和磁盘上的一模一样，不会重写」
  *
  * # 确认之后：框不关，换成结果页
  *
@@ -339,7 +342,7 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   </span>
                 </header>
 
-                {current.state === 'unchanged' ? (
+                {current.state === 'unchanged' && view === 'diff' ? (
                   <p className={s.empty}>这一份和磁盘上的一模一样，不会重写。</p>
                 ) : (
                   <DiffLines lines={current.lines} mode={current.state} view={view} />

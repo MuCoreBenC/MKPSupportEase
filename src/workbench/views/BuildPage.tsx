@@ -61,6 +61,8 @@ import type {
   BaselineDiffEntry,
   BookView,
   Boot,
+  DeliveryFile,
+  DeliveryStage,
   GenerateReport,
   Issue,
   IssueReport,
@@ -161,6 +163,16 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   /** 正在取哪一份产物的正文（同一时刻只会有一次） */
   const [tomlBusy, setTomlBusy] = useState<string | null>(null)
   /*
+   * **交付文件清单**（2026-10-07）：除了 `mkp/presets/*.toml`，交付目录里还有一串
+   * 附属文件（`content/*.json`、`catalog.json`、`manifest.json`、`source.json`）。
+   * 名单来自后端（与残留审计同一份交付集合），这一页只负责摆出来、点开看原文。
+   */
+  const [deliveries, setDeliveries] = useState<DeliveryFile[] | null>(null)
+  /** 打开着的那一份交付文件（**盘上原文**，从 `wb_delivery_file` 直读） */
+  const [deliveryOpen, setDeliveryOpen] = useState<{ rel: string; text: string } | null>(null)
+  /** 正在取哪一份交付文件（同一时刻只会有一次） */
+  const [deliveryBusy, setDeliveryBusy] = useState<string | null>(null)
+  /*
    * 当前安装的 SupportEase 版本号（只读展示）——「软件版本」块用它。
    * `null` = 还没取到 / 取不到（显示"未知"，**不阻塞页面**）。
    */
@@ -222,6 +234,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       .then(setAppVersion)
       .catch(() => setAppVersion(null))
   }, [])
+
+  /* 交付文件清单：进页取一次；生成 / 发布之后（tick）重取 —— 那时盘上的存在与否会变 */
+  useEffect(() => {
+    void wb
+      .deliveryFiles()
+      .then(setDeliveries)
+      .catch(() => setDeliveries([]))
+  }, [tick])
 
   /*
    * 「去处理」的定位（C14 第二十四轮）：滚动到目标模块 + 闪烁两秒。
@@ -353,6 +373,28 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       setTomlBusy(null)
     }
   }
+
+  /**
+   * 看一份交付文件的正文。**直读盘上原文**（`wb_delivery_file`）——
+   * 与「查看 TOML」不同：那个是渲染器现算"将来会写出什么"，这个是"交付目录里现在
+   * 就长这样"（发布出去的就是它）。
+   */
+  const openDelivery = async (rel: string) => {
+    setDeliveryBusy(rel)
+    try {
+      setDeliveryOpen({ rel, text: await wb.deliveryFile(rel) })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    } finally {
+      setDeliveryBusy(null)
+    }
+  }
+
+  /*
+   * 「其他交付文件」= 交付集合里**不带版本概念**的那些（`mkp/presets/*.toml` 之外的）。
+   * 产物那几份在上面的「发布物」组里按版本列，这里列目录 JSON / manifest / source。
+   */
+  const otherDeliveries = (deliveries ?? []).filter((d) => !d.rel.startsWith('mkp/presets/'))
 
   const baselineDirty = baseline?.filter((b) => b.status !== 'same').length ?? 0
 
@@ -632,6 +674,65 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                 就是生成时那台渲染器）—— 界面不另拼一份「大概是这样」的 TOML。
               </p>
             </div>
+
+            {/*
+              **其他交付文件**（作者 2026-10-07）：除了 toml 产物，交付目录里还有一串
+              不带版本概念的附属文件。名单来自后端那**同一份交付集合**（发布闸判残留
+              用的就是它）—— 界面不另拼一份"大概有这些"。点「查看」读**盘上原文**。
+            */}
+            <div className={s.group}>
+              <div className={s.groupHead}>其他交付文件</div>
+              <p className={s.note} style={{ marginTop: 0 }}>
+                它们跟着<strong>生成 / 发布</strong>一起落进交付目录，不带「版本」概念：
+                <span className={s.mono}>content/*.json</span> 与{' '}
+                <span className={s.mono}>catalog.json</span> 在<strong>生成时重算</strong>，
+                <span className={s.mono}>manifest.json</span> /{' '}
+                <span className={s.mono}>source.json</span> 由<strong>发布时定稿</strong>。
+                所以改了备注这类不碰参数的数据，<span className={s.mono}>
+                  mkp/presets/*.toml
+                </span>{' '}
+                一个字节都不动（生成时显示「无变化」），但{' '}
+                <span className={s.mono}>catalog.json</span> 会跟着重算 ——
+                客户端预设列表的副标题就是从它来的。
+              </p>
+              {deliveries === null ? (
+                <div className={s.emptyHint}>正在读……</div>
+              ) : (
+                <div className={s.vstack}>
+                  {otherDeliveries.map((d) => (
+                    <div key={d.rel} className={s.vfield}>
+                      <div className={s.vhead}>
+                        <b className={s.mono}>{d.rel}</b>
+                        <span className={s.vkey}>{STAGE_TEXT[d.stage]}</span>
+                        <span className={s.grow} />
+                        <span className={s.rowMeta}>
+                          {d.stage === 'generate'
+                            ? d.exist
+                              ? `已生成 · ${fmtSize(d.size)}`
+                              : '还没生成'
+                            : d.exist
+                              ? `已发布 · ${fmtSize(d.size)}`
+                              : '还没发布'}
+                        </span>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          disabled={!d.exist || deliveryBusy === d.rel}
+                          title={
+                            d.exist
+                              ? '看交付目录里这一份的盘上原文（只读）'
+                              : '盘上还没有这一份 —— 先生成 / 发布再看'
+                          }
+                          onClick={() => void openDelivery(d.rel)}
+                        >
+                          {deliveryBusy === d.rel ? '正在取……' : '查看'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -845,6 +946,33 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         />
       )}
 
+      {/* 其他交付文件：目录 JSON / manifest / source —— 正文是**盘上原文** */}
+      {deliveryOpen !== null && (
+        <ModalC14
+          open
+          size="lg"
+          title={`交付文件 ${deliveryOpen.rel}`}
+          subtitle="交付目录里的盘上原文（只读）—— 客户端或云端取的就是这一份"
+          onClose={() => setDeliveryOpen(null)}
+        >
+          <div className={s.vstack}>
+            <p className={s.note}>
+              正文是<span className={s.mono}>wb_delivery_file</span>直读的**盘上原文**
+              —— 与「查看 TOML」不同：那份是渲染器现算"将来会写出什么"，这一份是
+              "交付目录里现在就长这样"。盘上没有它时按钮是灰的。
+            </p>
+            <textarea
+              className={s.pkgJson}
+              readOnly
+              spellCheck={false}
+              rows={18}
+              aria-label="交付文件正文"
+              value={deliveryOpen.text}
+            />
+          </div>
+        </ModalC14>
+      )}
+
       {/* 另一半发布物：用户真正下载的那一份 —— 正文来自后端的渲染器 */}
       {tomlOpen !== null && (
         <ModalC14
@@ -881,4 +1009,18 @@ const STATE_TAG: Record<string, string> = {
   stale: s.tagBuildStale,
   neverBuilt: s.tagBuildNever,
   noResources: s.tagBuildNone,
+}
+
+/** 交付文件「谁写的」那一句（`delivery::DeliveryStage` 的中文） */
+const STAGE_TEXT: Record<DeliveryStage, string> = {
+  generate: '生成时重算',
+  publish: '发布时定稿',
+  software: '软件发布链',
+}
+
+/** 字节数给人看（交付文件那一行） */
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }

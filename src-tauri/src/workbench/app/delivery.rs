@@ -572,6 +572,70 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     set
 }
 
+/// 一份交付文件**是谁写的**（决定界面上那句"已生成 / 还没发布"）。
+///
+/// 生成与发布是两道事务，写出的文件不是同一批 —— 界面上要分开说，人才知道
+/// 「改了备注 / 套餐之后，哪些文件会跟着变」（作者 2026-10-07 的疑问）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryStage {
+    /// 生成时算出并写盘（`mkp/presets/*.toml`、`content/*.json`、`catalog.json`）
+    Generate,
+    /// **发布时定稿**才写（`manifest.json`、`source.json`）—— 生成不替发布定稿
+    Publish,
+    /// 软件发布链的东西（`release.json`）—— 与预设发布同目录、不同链
+    Software,
+}
+
+/// 「发布预设」卡里的一份交付文件。
+///
+/// 名单就是 [`delivery_expected_set`]（= 发布闸判残留用的**同一份集合**）——
+/// 界面不另拼一份"大概有这些"，免得又一处两说。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryFile {
+    /// 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…）
+    pub rel: String,
+    /// 盘上有这一份没有
+    pub exist: bool,
+    /// 字节数（不存在 = 0）
+    pub size: u64,
+    /// 谁写的（见 [`DeliveryStage`]）
+    pub stage: DeliveryStage,
+}
+
+/// 交付文件的分类：只认那几个**固定名**，其余都算生成写的（含 `mkp/presets/*.toml`）。
+fn stage_of(rel: &str) -> DeliveryStage {
+    if rel == MANIFEST_FILE || rel == SOURCE_FILE {
+        DeliveryStage::Publish
+    } else if rel == crate::runtime::source::RELEASE_FILE {
+        DeliveryStage::Software
+    } else {
+        DeliveryStage::Generate
+    }
+}
+
+/// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
+///
+/// 供「发布预设」卡展出 —— 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，
+/// 我不知道这些其他的……还有什么文件需要生成的，我也想看到」。
+pub fn delivery_files(delivery_root: &Path, book: &Book<'_>) -> Vec<DeliveryFile> {
+    delivery_expected_set(book)
+        .into_iter()
+        .map(|rel| {
+            let path = delivery_root.join(&rel);
+            let exist = path.is_file();
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            DeliveryFile {
+                stage: stage_of(&rel),
+                rel,
+                exist,
+                size,
+            }
+        })
+        .collect()
+}
+
 /// 递归收集 `dir` 下的全部文件，返回**以 `/` 分隔**的相对路径。
 /// 目录不存在（还没发布过）= 空集合
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {

@@ -314,6 +314,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
+        // 交付文件清单（2026-10-07）：「发布预设」卡看这次都会写出哪些文件 + 看某一份的原文
+        app::build::wb_delivery_files,
+        app::build::wb_delivery_file,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
         app::machines::wb_copy_version,
         app::wb_copy_recipe,

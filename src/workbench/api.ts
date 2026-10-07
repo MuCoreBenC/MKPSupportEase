@@ -618,7 +618,7 @@ export interface PreviewFile {
   uid: string
   fileName: string
   state: DiffState
-  /** `unchanged` 时是空表 */
+  /** `unchanged` 时是整份正文（全 `context`）—— 「完整」视图要看原文，「对比」视图才说"不会重写" */
   lines: PreviewDiffLine[]
   added: number
   removed: number
@@ -1400,6 +1400,21 @@ export type VersionField =
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 
+/** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
+export type DeliveryStage = 'generate' | 'publish' | 'software'
+
+/** `delivery::DeliveryFile` —— 交付集合里的一份（「发布预设」卡展出用） */
+export interface DeliveryFile {
+  /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
+  rel: string
+  /** 盘上有这一份没有 */
+  exist: boolean
+  /** 字节数（不存在 = 0） */
+  size: number
+  /** 谁写的：生成时重算 / 发布时定稿 / 软件发布链 */
+  stage: DeliveryStage
+}
+
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
 export interface BaselineDiffEntry {
   fileName: string
@@ -1729,4 +1744,16 @@ export const wb = {
    * **不直接删**。清理完重新发布即可
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
+  /**
+   * **交付文件清单**（2026-10-07，只读）：本次交付集合里都有哪些文件、盘上有没有、
+   * 谁写的（生成时重算 / 发布时定稿 / 软件发布链）。
+   *
+   * 名单就是发布闸判残留用的那份集合 —— 界面不另拼一份"大概有这些"
+   */
+  deliveryFiles: () => invoke<DeliveryFile[]>('wb_delivery_files'),
+  /**
+   * 看一份交付文件的**盘上原文**（只读）。只认交付集合里的路径；
+   * 盘上还没有（还没生成 / 还没发布）时如实报错
+   */
+  deliveryFile: (rel: string) => invoke<string>('wb_delivery_file', { rel }),
 }

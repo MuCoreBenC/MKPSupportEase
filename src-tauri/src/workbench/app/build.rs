@@ -662,7 +662,9 @@ pub struct PreviewFile {
     pub uid: String,
     pub file_name: String,
     pub state: DiffState,
-    /// 行级差异（含未变的上下文行）—— `unchanged` 时是空表（界面只显示"无变化"）
+    /// 行级差异（含未变的上下文行）。`unchanged` 时是**整份正文**（全 `context`）——
+    /// 确认框的「完整」视图要能看原文（作者 2026-10-07：「就算它一模一样不会重写，
+    /// 我也希望看一个完整的」）
     pub lines: Vec<DiffLine>,
     pub added: usize,
     pub removed: usize,
@@ -749,11 +751,15 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
 }
 
 /// 比一份：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
-/// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
+/// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`。
+///
+/// **无变化也把正文带回去**（作者 2026-10-07）：确认框的「完整」视图要看整份原文 ——
+/// 「就算它一模一样不会重写，我也希望看一个完整的」。所以这里给 [`full_lines`]
+/// （全 `context`、`added` / `removed` 都是 0），「不会重写」那句只在**对比**视图说。
 fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
         None => (DiffState::Added, diff_added(&r.text)),
-        Some(old) if same_payload(old, &r.text) => (DiffState::Unchanged, Vec::new()),
+        Some(old) if same_payload(old, &r.text) => (DiffState::Unchanged, full_lines(&r.text)),
         Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
     };
     let added = lines
@@ -780,6 +786,21 @@ fn diff_added(text: &str) -> Vec<DiffLine> {
         .enumerate()
         .map(|(i, t)| DiffLine {
             kind: DiffLineKind::Added,
+            text: t.to_owned(),
+            no: i + 1,
+        })
+        .collect()
+}
+
+/// 整份正文，逐行都是 `context`（无变化的文件在「完整」视图里要能看全文）。
+///
+/// 与 [`diff_added`] 的差别只在 kind：那个是"这次新有的"（界面全绿），
+/// 这个每一行都是"磁盘上本来就这样"（素底）。
+fn full_lines(text: &str) -> Vec<DiffLine> {
+    text.lines()
+        .enumerate()
+        .map(|(i, t)| DiffLine {
+            kind: DiffLineKind::Context,
             text: t.to_owned(),
             no: i + 1,
         })
@@ -1212,6 +1233,51 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
             let moved = super::delivery::clean_strays(&root, &strays, &trash_root, &stamp)?;
             tracing::info!(moved, at = %stamp, "交付残留已移入回收站");
             Ok(moved)
+        })
+    })
+}
+
+/* ---------- 交付文件清单（「发布预设」卡看这次都会写出什么） ---------- */
+
+/// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
+///
+/// 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，我不知道这些其他的……
+/// 还有什么文件需要生成的，我也想看到」。名单就是交付集合（与残留审计同一份），
+/// 分类见 [`super::delivery::DeliveryStage`]。
+#[tauri::command(async)]
+pub fn wb_delivery_files() -> Result<Vec<super::delivery::DeliveryFile>, AppError> {
+    traced("wb_delivery_files", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
+            // 只读定位，不顺手建交付目录（和 `wb_dist_strays` 的读侧一样）
+            Ok(super::delivery::delivery_files(
+                &paths::delivery_root_path(),
+                &book,
+            ))
+        })
+    })
+}
+
+/// 看一份交付文件的**盘上原文**（只读）。
+///
+/// 只认交付集合里的路径 —— 界面传什么都读不了集合外的文件。
+/// 盘上还没有那一份（还没生成 / 还没发布）时如实报错，不假装有内容。
+#[tauri::command(async)]
+pub fn wb_delivery_file(rel: String) -> Result<String, AppError> {
+    traced("wb_delivery_file", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
+            if !super::delivery::delivery_expected_set(&book).contains(&rel) {
+                return Err(AppError::invalid_argument(format!("不熟这一份：{rel}"))
+                    .with_detail("只给看本次交付集合里的文件".to_owned()));
+            }
+            let path = paths::delivery_root_path().join(&rel);
+            std::fs::read_to_string(&path).map_err(|e| {
+                AppError::not_found(format!("盘上还没有这一份：{rel}"))
+                    .with_detail(format!("{e} —— 生成 / 发布过之后才有"))
+            })
         })
     })
 }
@@ -2282,11 +2348,14 @@ mod tests {
 
         let same = preview_one(&r, Some("a\nnew\nc\n"));
         assert_eq!(same.state, DiffState::Unchanged);
+        // 无变化也带回**整份正文**（全 context）—— 确认框的「完整」视图要看原文；
+        // 「不会重写」那句由界面在**对比**视图说（作者 2026-10-07）
         assert!(
-            same.lines.is_empty(),
-            "无变化不往回带行（界面只显示「无变化」）"
+            same.lines.iter().all(|l| l.kind == DiffLineKind::Context),
+            "无变化带回的是整份正文，不是差异"
         );
-        assert_eq!((same.added, same.removed), (0, 0));
+        assert_eq!(same.lines.len(), 3, "正文几行就几行");
+        assert_eq!((same.added, same.removed), (0, 0), "没变化就不算增减");
 
         let changed = preview_one(&r, Some("a\nold\nc\n"));
         assert_eq!(changed.state, DiffState::Modified);
