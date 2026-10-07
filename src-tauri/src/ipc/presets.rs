@@ -201,6 +201,9 @@ pub struct VersionDto {
     pub tag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// **备注**（客户端预设列表副标题用）。缺 = 没写（界面回落路径）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
     /// 空串 = 这个版本还没配套餐（与契约同一口径）
     pub bundle: String,
     /// **这一版专属的外观图**（资产 id）。空串 = 回落机型图（不是"没图"）
@@ -270,6 +273,7 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
                     name: v.name.clone(),
                     tag: v.tag.as_deref().and_then(non_empty),
                     description: v.description.as_deref().and_then(non_empty),
+                    remark: v.remark.as_deref().and_then(non_empty),
                     bundle: non_empty(v.recommended_bundle.as_deref().unwrap_or_default())
                         .or_else(|| non_empty(m.default_bundle.as_deref().unwrap_or_default()))
                         .unwrap_or_default(),

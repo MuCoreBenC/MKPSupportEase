@@ -310,6 +310,85 @@ fn match_header_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     Some(rest)
 }
 
+/// `# machine: A1`（与 `# release_time` 同一条解析路）。没有就是没有 —— 不猜。
+pub fn parse_machine_from_content(content: &str) -> Option<String> {
+    parse_header_value(content, "machine")
+}
+
+/// `# variant: standard`。**大小写不归它管**：B 类产物写的是版本 id 的小写
+/// （`fast`），解析原样返回，归一化交给调用方（对着目录大小写无关地比对）。
+pub fn parse_variant_from_content(content: &str) -> Option<String> {
+    parse_header_value(content, "variant")
+}
+
+/// 把文件头的 `# machine:` / `# variant:` 两行**换成新值**（用户线「改归属」用）。
+///
+/// 规则与血统那两条写路同族：**只动这两行注释，正文其余字节一个不碰** ——
+/// 已有的行在原位替换；缺哪行就在头注释块里补上（两个都缺时一起插在头注释块末尾）。
+/// 行尾跟着文件自己（CRLF 的文件改完还是 CRLF）。
+pub fn rewrite_machine_variant(text: &str, machine: &str, variant: &str) -> String {
+    let nl = newline_of(text);
+    let has_machine = parse_machine_from_content(text).is_some();
+    let has_variant = parse_variant_from_content(text).is_some();
+    /* 两行都在文件里 ⇒ 不需要插入位置；否则插在头注释块末尾 */
+    let insert_at = if has_machine && has_variant {
+        None
+    } else {
+        Some(header_block_end(text))
+    };
+
+    let mut out = String::with_capacity(text.len() + machine.len() + variant.len() + 32);
+    let mut machine_written = false;
+    let mut variant_written = false;
+    let mut offset = 0usize;
+    for (line, term) in lines_with_terminators(text) {
+        /* 该插的那一格：插在头注释块末尾（一次插两行，写过的键不再重复写） */
+        if Some(offset) == insert_at && !machine_written {
+            out.push_str(&format!("# machine: {machine}{nl}"));
+            machine_written = true;
+        }
+        if Some(offset) == insert_at && !variant_written {
+            out.push_str(&format!("# variant: {variant}{nl}"));
+            variant_written = true;
+        }
+        let t = line.trim();
+        if match_header_key(t, "machine").is_some() {
+            out.push_str(&format!("# machine: {machine}{nl}"));
+            machine_written = true;
+            /* 文件里有 machine 行而没有 variant 行 ⇒ variant 紧跟着补上（同族挨着） */
+            if !has_variant && !variant_written {
+                out.push_str(&format!("# variant: {variant}{nl}"));
+                variant_written = true;
+            }
+            offset += line.len() + term.len();
+            continue;
+        }
+        if match_header_key(t, "variant").is_some() {
+            if !machine_written && !has_machine {
+                /* 文件里有 variant 行而没有 machine 行 ⇒ machine 补在它前面 */
+                out.push_str(&format!("# machine: {machine}{nl}"));
+                machine_written = true;
+            }
+            out.push_str(&format!("# variant: {variant}{nl}"));
+            variant_written = true;
+            offset += line.len() + term.len();
+            continue;
+        }
+        out.push_str(line);
+        out.push_str(term);
+        offset += line.len() + term.len();
+    }
+    /* 两行都缺、且文件一条头注释都没有（insert_at == 0）时循环里已插过；
+    到这里还没写（理论到不了：insert_at 之内必有一格命中）就在末尾兜底补上 */
+    if !machine_written {
+        out.push_str(&format!("# machine: {machine}{nl}"));
+    }
+    if !variant_written {
+        out.push_str(&format!("# variant: {variant}{nl}"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,4 +562,69 @@ offset_z = 4 # 笔尖偏移
             "插回去的三行也要是 CRLF"
         );
     }
+
+    /* ---------- 改归属（# machine / # variant 两行） ---------- */
+
+    /// 两行都在：**原位换值**，正文与血统三行一个字节不动
+    #[test]
+    fn rewriting_machine_variant_replaces_in_place() {
+        let copy = make_copy(SRC, "mkp/presets/A1-standard.toml");
+        let out = rewrite_machine_variant(&copy, "A1_MINI", "FAST");
+
+        let mut machine = out.lines().filter(|l| l.starts_with("# machine:"));
+        let mut variant = out.lines().filter(|l| l.starts_with("# variant:"));
+        assert_eq!(machine.next(), Some("# machine: A1_MINI"));
+        assert_eq!(machine.next(), None, "machine 行只有一条");
+        assert_eq!(variant.next(), Some("# variant: FAST"));
+        assert_eq!(variant.next(), None, "variant 行只有一条");
+
+        /* 剪掉 machine / variant 两行之后 = 来源 + 血统三行（正文没被动过） */
+        let stripped: String = out
+            .lines()
+            .filter(|l| !l.starts_with("# machine:") && !l.starts_with("# variant:"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let copy_stripped: String = copy
+            .lines()
+            .filter(|l| !l.starts_with("# machine:") && !l.starts_with("# variant:"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(stripped, copy_stripped, "除那两行外逐字节相同");
+        assert_eq!(
+            parse_lineage_from_content(&out),
+            parse_lineage_from_content(&copy),
+            "血统三行原样"
+        );
+    }
+
+    /// 缺哪行补哪行；两行全缺时一起插进头注释块
+    #[test]
+    fn rewriting_adds_the_missing_lines() {
+        /* 只有 variant：machine 补在它前面 */
+        let only_variant = "# release_time: t\n# variant: standard\n[toolhead]\nx = 1\n";
+        let out = rewrite_machine_variant(only_variant, "A1", "FAST");
+        let head: Vec<&str> = out.lines().take(3).collect();
+        assert_eq!(head[0], "# release_time: t");
+        assert_eq!(head[1], "# machine: A1");
+        assert_eq!(head[2], "# variant: FAST");
+
+        /* 两行全缺：插在头注释块末尾（紧贴 [toolhead]，不进正文） */
+        let out = rewrite_machine_variant(SRC_WITHOUT_MV, "A1", "FAST");
+        assert!(out.contains("# machine: A1"));
+        assert!(out.contains("# variant: FAST"));
+        assert!(out.find("# machine:").unwrap() < out.find("[toolhead]").unwrap());
+
+        /* CRLF 跟着文件自己 */
+        let crlf = rewrite_machine_variant(&SRC.replace('\n', "\r\n"), "A1", "FAST");
+        assert!(crlf.contains("# machine: A1\r\n"));
+        assert!(crlf.contains("# variant: FAST\r\n"));
+    }
+
+    /// 一份**没有** machine / variant 两行的官方形文件（测试夹具）
+    const SRC_WITHOUT_MV: &str = "\
+# release_time: 2026-08-19 01:38:13
+
+[toolhead]
+offset_x = -1
+";
 }

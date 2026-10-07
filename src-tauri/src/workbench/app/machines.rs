@@ -47,6 +47,8 @@ pub struct VersionView {
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
     pub description: Option<String>,
+    /// **备注**（客户端副标题）。可空
+    pub remark: Option<String>,
     /// **这一版专属的外观图**（资产 id）。`None` = 回落机型图（`Machine::image`）——
     /// 界面上要说明白那是回落，不是"没配"
     pub image: Option<String>,
@@ -496,6 +498,7 @@ fn list_of(p: &Presets) -> MachineList {
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
                             description: v.description.clone(),
+                            remark: v.remark.clone(),
                             image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),
                         }

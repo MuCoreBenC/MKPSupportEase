@@ -1,4 +1,4 @@
-//! 后厨工作台的 Rust 侧。
+//! 工作台的 Rust 侧。
 //!
 //! **整个模块只在 `workbench` feature 下存在。** `lib.rs` 里的 `mod workbench;` 挂着
 //! `#[cfg(feature = "workbench")]`，所以默认构建连编译都不会碰这些文件 —— 给用户的
@@ -79,7 +79,7 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
 
     let win =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
-            .title("SupportEase 后厨工作台")
+            .title("SupportEase 工作台")
             .inner_size(1360.0, 900.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)

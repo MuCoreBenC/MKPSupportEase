@@ -832,6 +832,42 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     })
   }
 
+  /*
+   * **改备注**（2026-10-07 副标题覆盖账）：写完说一句。失败照实说 ——
+   * 覆盖账是用户根下的一本小 JSON，写失败多半是盘的事，别吞。
+   */
+  const runSetRemark = (key: string, remark: string | null) =>
+    data.setRemark(key, remark).then(
+      () =>
+        setNote({
+          text:
+            remark === null
+              ? '已恢复默认备注 —— 回到工作台写的那句（没写就显示路径）'
+              : remark === ''
+                ? '备注已保存 —— 副标题留空（写什么就是什么，不回退）'
+                : '备注已保存 —— 以后更新不会覆盖它',
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `备注没存成：${errorText(e)}`, bad: true }),
+    )
+
+  /*
+   * **改归属**（复制出来的那份标机型 / 版本）：写的是文件头那两行，
+   * 回来用户线已重读 —— 列表的机型 / 版本两列以文件为准。
+   */
+  const runSetAttribution = (row: PresetTableRow, machineId: string, versionId: string) => {
+    const m = data.machines.find((x) => x.id === machineId)
+    const v = m?.versions.find((x) => x.id === versionId)
+    return data.setMineMachineVersion(row.path, machineId, versionId).then(
+      () =>
+        setNote({
+          text: `已把 ${row.fileName} 归到 ${m?.display ?? machineId} · ${v?.name ?? versionId}`,
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `归属没存成：${errorText(e)}`, bad: true }),
+    )
+  }
+
   /**
    * 操作列上那两个**真的能用**的动作。
    *
@@ -1480,6 +1516,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
                 sourceLabel={data.sourceLabel}
+                /* 备注（副标题覆盖账）与归属（复制出来的那份标机型 / 版本） */
+                machines={data.machines}
+                remarks={data.remarks}
+                onSetRemark={runSetRemark}
+                onSetAttribution={runSetAttribution}
               />
             </>
           )}

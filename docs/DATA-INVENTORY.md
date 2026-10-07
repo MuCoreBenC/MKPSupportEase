@@ -84,7 +84,7 @@
 | R5 | `ipc/presets.rs`（9 条读命令 + 缓存） | 首屏与预设页的全部数据源。零网络；SHA/size 栏留空"等发布打 manifest"；`forget_cached_presets` 给未来写命令留了钩子 | 首屏读本地 = 铁律 2 的正面样本 | **已收口 2026-10-01（R5）**：九条命令的 DTO 一个没动，数据源换成释放的 catalog（按**字节**缓存，目录换新自动失效）；MKP 引用带真 size/SHA；三层取值改走与 ParamRegistry 共用的 `resolve::visible_keys_of / effective_of`。判据 `dto_builders_read_the_catalog_and_nothing_else` 钉死"唯一数据源" |
 | R6 | `ipc/mod.rs`（4 条基础命令） | 预设值 / 偏移量 / 校准模型 / 开模型 | ③ run 状态 + ② 内置模型 | **保留** |
 | R7 | `presetdata/`（catalog/assets/bundles/registry/resolve） | TOML 树解析 + 三层取值 | ①↔③ 的解析层 | **保留**给工作台；客户端侧已随 R5 换源退役（2026-10-01）——但它的**类型**成了两端共用契约的 definition（serde 序列化进 catalog），三层取值（`resolve`）提取成 `visible_keys_of / effective_of` 继续两边共用 |
-| R8 | `workbench/`（paths/app/domain/store…） | 后厨：源编辑、生成、发布、manifest v3、残留拦截 | ① 的工具 | **保留**。`wb_publish` 就是总纲"发布构建"的现成本体 |
+| R8 | `workbench/`（paths/app/domain/store…） | 工作台：源编辑、生成、发布、manifest v3、残留拦截 | ① 的工具 | **保留**。`wb_publish` 就是总纲"发布构建"的现成本体 |
 | R9 | `crates/preset`（BUILTIN_PRESETS + `preset_file_name`） | 命名唯一实现 + 9 份内置预设编译进二进制，判据锚入库产物目录 | ② 内置内容 | **保留**形态；**收口**清单归 catalog（总纲欠账 #4） |
 | R10 | `client/defaults.rs` 之外的 `chrome/obs/error/lib` | 窗口 / 日志 / 错误 | 基础设施 | **保留**（不属数据架构，列此备查） |
 | R11 | `workbench/app/dist.rs` 头注释里的 **manifest v3 定义** | 交付文件全集的哈希清单， bundles 字段已删 | ④ manifest 的格式 | **收口**：把这份定义**提升**为两端共用契约（不是工作台私有物）。真云端来之前，它是④的最终形状 |
@@ -102,7 +102,7 @@
 | C6 | `app/home/useCatalog.ts` | 首页消费真目录，不硬编码 | 首屏读本地 | **保留** |
 | C7 | `workbench/cloud.ts` | 模拟云端：静态快照 + localStorage 上传 | ① 演示管道 | **收口→退役**：真下载落地后整块删；`public/cloud/presets.json`（F7）随它走。`clientPackage.ts` 头注释自己写着"归宿是 Rust"——装配逻辑迁 R8 发布链路 |
 | C8 | `app/bbs/*` + `tools/dev-server/bbsFs.mjs` | BBS 页读**本机 Bambu Studio 目录**（serve 期端点，build 产物里不存在） | ① 开发/预览能力 | **保留**。注意两点已自洽：无鉴权端点的安全边界写在文件头；产品包里没有这个端点，页面是空态不是报错 |
-| C9 | `workbench/c14/* views/*` | 后厨界面 | ① 工具 UI | **保留**（不属数据架构，列此备查） |
+| C9 | `workbench/c14/* views/*` | 工作台界面 | ① 工具 UI | **保留**（不属数据架构，列此备查） |
 
 ### 3.3 构建与工具
 

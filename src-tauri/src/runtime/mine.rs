@@ -84,6 +84,13 @@ pub struct MineFile {
     /// 它从哪一份官方、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
     /// （手工拷的、或别的程序写出来的）—— **不是错误**
     pub lineage: Option<Lineage>,
+    /// 文件头的 `# machine:` 行（原样，不归一化）。没有就是 `None`
+    ///
+    /// 副本按字节拷自官方产物，头里本来就带着这两行 —— **它自己就说得出它属于哪台机型
+    /// 哪一版**（作者定：文件本身的信息随文件走）。「改归属」改的就是这两行。
+    pub machine: Option<String>,
+    /// 文件头的 `# variant:` 行（B 类产物写的是版本 id 的小写）。没有就是 `None`
+    pub variant: Option<String>,
     /// 第九层的**文件级**状态（见 [`MineState`]）。`None` = 不是预设候选
     /// （[`kind_of`] 认不出是哪一类），它没有"能不能当预设用"这一档
     pub state: Option<MineState>,
@@ -135,8 +142,13 @@ impl MineState {
 /// 读不出来（不是文本、没权限、文件太大被截断而三行不在前面）⇒ `None`：
 /// 这一层不为此报错 —— 血统是**附加信息**，缺了不影响这份文件被认成用户的预设。
 pub fn lineage_of_file(path: &Path) -> Option<Lineage> {
+    head_text(path).and_then(|t| lineage::parse_lineage_from_content(&t))
+}
+
+/// 读一份文件的头注释原文（最多 [`LINEAGE_READ_LIMIT`] 字节，UTF-8 读不进就 `None`）。
+pub fn head_text(path: &Path) -> Option<String> {
     let bytes = read_head(path, LINEAGE_READ_LIMIT)?;
-    lineage::parse_lineage_from_content(&String::from_utf8_lossy(&bytes))
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// 只读前 `limit` 字节（不把整个文件读进内存）
@@ -291,28 +303,40 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
              * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（血统也一样不读）。
              * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
              */
-            let (lineage, state, state_detail) =
-                match crate::fsx::paths::resolve_in(user_root, &rel) {
-                    Err(_) => (
-                        None,
-                        (kind == Some(PRESET)).then_some(MineState::Unreadable),
-                        (kind == Some(PRESET)).then(|| {
-                            "它指向 presets-mine/ 外面 —— 程序不读用户根外面的东西".to_owned()
-                        }),
-                    ),
-                    Ok(real) => {
-                        let (state, detail) = if kind == Some(PRESET) {
-                            preset_file_state(&real)
-                        } else {
-                            (None, None)
-                        };
-                        (lineage_of_file(&real), state, detail)
-                    }
-                };
+            let (head, state, state_detail) = match crate::fsx::paths::resolve_in(user_root, &rel) {
+                Err(_) => (
+                    None,
+                    (kind == Some(PRESET)).then_some(MineState::Unreadable),
+                    (kind == Some(PRESET)).then(|| {
+                        "它指向 presets-mine/ 外面 —— 程序不读用户根外面的东西".to_owned()
+                    }),
+                ),
+                Ok(real) => {
+                    let (state, detail) = if kind == Some(PRESET) {
+                        preset_file_state(&real)
+                    } else {
+                        (None, None)
+                    };
+                    (head_text(&real), state, detail)
+                }
+            };
+            /* 血统（三行）与归属（machine / variant 两行）读的是**同一段头注释** ——
+            一次读出，不许为省一次文件头 IO 把两处事实抄成两份 */
+            let lineage = head
+                .as_deref()
+                .and_then(lineage::parse_lineage_from_content);
+            let machine = head
+                .as_deref()
+                .and_then(lineage::parse_machine_from_content);
+            let variant = head
+                .as_deref()
+                .and_then(lineage::parse_variant_from_content);
             out.push(MineFile {
                 path: rel,
                 kind,
                 lineage,
+                machine,
+                variant,
                 state,
                 state_detail,
                 file_name,
@@ -424,6 +448,30 @@ pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, A
         /* 写的就是原来那一份所在的位置：当然是覆盖 */
         replaced: true,
     })
+}
+
+/// **改一份用户预设的归属**（2026-10-07 作者要的）：把文件头的 `# machine:` /
+/// `# variant:` 两行换成新值 —— 复制出来的那份从此自己说得出它属于哪台机型哪一版。
+///
+/// 与血统同一族文本手术：**只动那两行注释，正文一个字节不动**（[`super::lineage::
+/// rewrite_machine_variant`]），写盘走 [`crate::fsx::atomic::atomic_write`]。
+/// 归属是**文件自己的属性** —— 它随文件走，不记在程序账上。
+pub fn set_machine_variant(
+    user_root: &Path,
+    rel: &str,
+    machine_id: &str,
+    version_id: &str,
+) -> Result<(), AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        )));
+    }
+    let text = read_text(user_root, rel)?;
+    let body = super::lineage::rewrite_machine_variant(&text, machine_id, version_id);
+    crate::fsx::atomic::atomic_write(&target, body.as_bytes())
 }
 
 /// 读用户自己那份的正文（**只认 `presets-mine/`**，见 [`check_mine_prefix`]）。

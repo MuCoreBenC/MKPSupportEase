@@ -100,6 +100,15 @@ export interface MachineVersion {
   tag?: string
   description?: string
   /**
+   * **备注**（2026-10-07）：客户端预设列表的**副标题**用它 —— 不再显示
+   * 「下载区 mkp · 路径」那种位置文案。可空（工作台可以不写）。
+   *
+   * 「默认下载的用工作台写的；用户改了之后，以后更新不覆盖，除非他删了重新下载」——
+   * 用户改过的那份记在客户端的**备注覆盖账**里（`MkpApi.getPresetRemarks`），
+   * 副标题 = 覆盖账里的 ?? 这里的 ?? 路径文本。
+   */
+  remark?: string | null
+  /**
    * 这个版本用哪一套 bundle。**空字符串 = 这个版本还没配**（上游的 A2L 就是这样），
    * 不是出错 —— 界面该显示「未配置」。非空时保证 bundle 一定存在（后端启动时校验过）。
    */
@@ -505,6 +514,16 @@ export interface UserPresetFile {
   /** 来源那份**现在**对应哪台机型 / 哪个版本（认不出留 `null`，界面不猜） */
   basedOnMachineId: string | null
   basedOnVersionId: string | null
+  /**
+   * **这一份自己的归属**：文件头 `# machine:` / `# variant:` 两行（对着目录
+   * 大小写无关归一化到版本 id）。头里没有 / 认不出 ⇒ 回落到来源那份
+   * （`basedOnMachineId` / `basedOnVersionId`）。列表的机型 / 版本两列读它。
+   *
+   * 「改归属」（`setUserPresetMachineVersion`）改的就是文件头那两行 ——
+   * 归属是**文件自己的属性**，随文件走。
+   */
+  machineId: string | null
+  versionId: string | null
   /**
    * **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
    * 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编。
@@ -1084,6 +1103,34 @@ export interface MkpApi {
    * （[`BasedOn`]）—— 那是"官方换版了、你这份还是基于旧版"这件事的判据。
    */
   getUserPresetFiles(): Promise<UserPresetFile[]>
+
+  /**
+   * **用户改过的备注**整本（副标题覆盖账）。键 = 文件身份（官方交付行是
+   * `catalog.path`，用户线是相对用户根的路径）；有 ⇒ 预设列表副标题用它，
+   * 没有 ⇒ 用那一版工作台写的 `remark`。「更新不覆盖；删了重新下载才回到
+   * 工作台那句」——删除文件时后端把键一起清掉。
+   */
+  getPresetRemarks(): Promise<Record<string, string>>
+
+  /**
+   * **改一份预设的备注**（副标题覆盖账）。**用户写什么就是什么 —— 包括空串**
+   * （2026-10-07 作者改口：「可以空着，不要回退」；空 = 副标题就空着）。
+   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 路径」）。
+   * 只动这一本账 —— 文件字节与目录全程不碰。
+   */
+  setPresetRemark(key: string, remark: string | null): Promise<void>
+
+  /**
+   * **改一份用户预设的归属**（机型 / 版本）：把文件头的 `# machine:` / `# variant:`
+   * 两行换成新值（正文一个字节不动）。机型必须是目录里登记的；**版本可自定义**
+   * （2026-10-07 作者：「版本也不一定是选择，加一个自定义」—— 界面遇到不认识的
+   * 版本就照原文显示）。
+   */
+  setUserPresetMachineVersion(
+    path: string,
+    machineId: string,
+    versionId: string,
+  ): Promise<void>
 
   /**
    * 读用户自己那份的正文。**只认 `presets-mine/`**（入参是 [`getUserPresetFiles`] 给的路径），

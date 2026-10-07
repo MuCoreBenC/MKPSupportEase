@@ -48,7 +48,8 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
    * **发布账户**（第三刀下半）：GitHub / Gitee 对称，每平台三格 —— 仓库地址 / 用户名（配置）
    * + Token（秘密，住本机凭据文件 credentials.json，0600）。
    *
-   * ★ 前端**拿不到 Token 原值** —— 只有 `hasToken` 与尾号提示（`PlatformAccountView`）。
+   * ★ 状态面**不含 Token 原值** —— 只有 `hasToken` 与尾号提示（`PlatformAccountView`）；
+   * 要看 / 要复制明文，点那一格右侧的**眼睛**（显式调 `getPublishToken`，作者 2026-10-07 加）。
    * ★ 配置与秘密分离：仓库地址 / 用户名进 `publish-account.json`，Token 进凭据文件。
    */
   const [account, setAccount] = useState<PublishAccount | null>(null)
@@ -59,6 +60,9 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
   >({})
   /* 哪几个平台的 Token 正在编辑（已配置时默认显示掩码点，点进去才变输入框） */
   const [editingToken, setEditingToken] = useState<Record<string, boolean>>({})
+  /* 哪几个平台**眼睛睁着**（platform → 明文；键在 = 显示中）。保存 / 清除 / 重读一律收回 */
+  const [revealed, setRevealed] = useState<Record<string, string>>({})
+  const [revealBusy, setRevealBusy] = useState<string | null>(null)
   const [acctNote, setAcctNote] = useState<{ text: string; bad: boolean } | null>(null)
 
   const loadAccount = useCallback(async () => {
@@ -72,6 +76,8 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
       }
       setDraft(d)
       setEditingToken({})
+      // ★ 重读 = 收回明文：眼睛睁着的那几格一律回到掩码（明文不留在界面上）
+      setRevealed({})
     } catch (e) {
       setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     }
@@ -141,6 +147,51 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
 
   const PLATFORMS = ['github', 'gitee'] as const
   const PLATFORM_LABEL: Record<string, string> = { github: 'GitHub', gitee: 'Gitee' }
+
+  /**
+   * 眼睛：显示 / 收起一个平台的 Token 明文（作者 2026-10-07 —— 不要密码，点眼睛直接看、能复制）。
+   *
+   * ★ 明文只活在**这一刻的界面状态**里：眼睛收起、保存、清除、从磁盘重读都会收回。
+   */
+  const toggleReveal = async (platform: string) => {
+    if (revealed[platform] !== undefined) {
+      setRevealed((prev) => {
+        const next = { ...prev }
+        delete next[platform]
+        return next
+      })
+      return
+    }
+    setRevealBusy(platform)
+    setAcctNote(null)
+    try {
+      const token = await wb.getPublishToken(platform)
+      if (token === null || token === '') {
+        setAcctNote({
+          text: `${PLATFORM_LABEL[platform]} 这会儿取不到 Token（可能已被清掉）`,
+          bad: true,
+        })
+      } else {
+        setRevealed((prev) => ({ ...prev, [platform]: token }))
+      }
+    } catch (e) {
+      setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setRevealBusy(null)
+    }
+  }
+
+  /** 把「眼睛睁着」那一格的明文送进剪贴板（复制失败就说清楚，不静默）。 */
+  const copyToken = async (platform: string) => {
+    const token = revealed[platform]
+    if (token === undefined) return
+    try {
+      await navigator.clipboard.writeText(token)
+      setAcctNote({ text: `已复制 ${PLATFORM_LABEL[platform]} Token`, bad: false })
+    } catch {
+      setAcctNote({ text: '剪贴板用不了 —— 请手动选中明文再复制', bad: true })
+    }
+  }
 
   const save = async () => {
     if (busy) return
@@ -215,7 +266,8 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
           <div className={s.vfield}>
             <p className={s.vhelp}>
               发布时会自动提交、推送并建 PR/MR。**平台与仓库由这里配置**（不靠猜远端）；
-              Token 存在**本机凭据文件**里（仅本人可读），**绝不写进配置文件**，前端也拿不到明文。
+              Token 存在**本机凭据文件**里（仅本人可读），**绝不写进配置文件**；
+              要看 / 要复制明文，点那一格右侧的**眼睛**（作者 2026-10-07）。
             </p>
             <p className={s.vhelp}>
               当前仓库：
@@ -276,23 +328,38 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 <div className={s.vrow}>
                   <label className={s.vlabel}>Token</label>
                   {/*
-                    Token 框的两种形态（作者 2026-10-04）：
+                    Token 框的三种形态（作者 2026-10-04 立、2026-10-07 改）：
                     · **已配置且不在编辑** → 显示一串假的掩码点（`••••••••`），**不是空的** ——
                       让人一眼看到"这里有值、已经填好了"，而不是怀疑自己是不是没存上。
-                    · **点进去要改** → 变成空输入框接受新的 Token（存完又回到掩码态）。
+                    · **点进去要改** → 输入框接受新的 Token；已配置的用掩码点当**占位**，
+                      进来不再显得是空的（存完又回到掩码态）。
+                    · **眼睛**（右侧那颗）→ 显示 / 收起**明文**，明文旁边多一颗【复制】
+                      （作者 2026-10-07：不要密码，点眼睛直接看）。
                     ★ 用 `type="text"`（不是 password）：password 会带浏览器自带的"小眼睛"，
                       作者不要它。掩码是我们自己画的字符，不需要浏览器帮我们遮。
                   */}
                   {view?.hasToken === true && editingToken[p] !== true ? (
-                    <button
-                      type="button"
-                      className={`${s.inp} ${s.tokenMask}`}
-                      onClick={() => setEditingToken((prev) => ({ ...prev, [p]: true }))}
-                      aria-label={`${PLATFORM_LABEL[p]} Token 已配置，点击可修改`}
-                      title="已配置。点击可填入新的 Token（不改则保持原值）"
-                    >
-                      ••••••••••••
-                    </button>
+                    revealed[p] !== undefined ? (
+                      /* 眼睛睁着：明文（只读、点一下整段选中）—— 右边跟一颗【复制】 */
+                      <input
+                        className={`${s.inp} ${s.mono}`}
+                        type="text"
+                        readOnly
+                        value={revealed[p]}
+                        onFocus={(e) => e.currentTarget.select()}
+                        aria-label={`${PLATFORM_LABEL[p]} Token 明文`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className={`${s.inp} ${s.tokenMask}`}
+                        onClick={() => setEditingToken((prev) => ({ ...prev, [p]: true }))}
+                        aria-label={`${PLATFORM_LABEL[p]} Token 已配置，点击可修改`}
+                        title="已配置。点击可填入新的 Token（不改则保持原值）"
+                      >
+                        ••••••••••••
+                      </button>
+                    )
                   ) : (
                     <input
                       className={s.inp}
@@ -309,9 +376,50 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                           setEditingToken((prev) => ({ ...prev, [p]: false }))
                         }
                       }}
-                      placeholder="粘贴 Personal Access Token"
+                      /* 已配置时用掩码点当占位：点进来**不显得空**（作者 2026-10-07） */
+                      placeholder={
+                        view?.hasToken === true ? '••••••••••••' : '粘贴 Personal Access Token'
+                      }
                       aria-label={`${PLATFORM_LABEL[p]} Token`}
                     />
+                  )}
+                  {/* 眼睛（作者 2026-10-07）：显示 / 收起明文；明文可整段选中，也可一键复制。
+                      编辑态不摆它 —— 那时候在填新的，没有"看旧的"这回事。 */}
+                  {view?.hasToken === true && editingToken[p] !== true && (
+                    <>
+                      <button
+                        type="button"
+                        className={s.tokenEye}
+                        disabled={revealBusy === p}
+                        onClick={() => void toggleReveal(p)}
+                        aria-label={`${PLATFORM_LABEL[p]} Token 明文查看`}
+                        title={revealed[p] !== undefined ? '收起明文' : '显示明文（可复制）'}
+                      >
+                        <svg viewBox="0 0 20 20" aria-hidden>
+                          <path
+                            d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          />
+                          {revealed[p] !== undefined ? (
+                            <path
+                              d="M3.5 3.5 16.5 16.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            />
+                          ) : (
+                            <circle cx="10" cy="10" r="2.2" fill="currentColor" />
+                          )}
+                        </svg>
+                      </button>
+                      {revealed[p] !== undefined && (
+                        <button type="button" className={s.btn} onClick={() => void copyToken(p)}>
+                          复制
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
 

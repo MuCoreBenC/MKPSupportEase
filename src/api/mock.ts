@@ -95,6 +95,9 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
+    /* 归属（文件头 # machine/# variant 两行）：这份演示正文里也种了这两行 */
+    machineId: 'A1',
+    versionId: 'FAST',
     /* 演示里没走过复制/导入 —— 出处照实没有（真机上由出处账答） */
     copiedFrom: null,
     copiedFromName: null,
@@ -115,6 +118,8 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    machineId: null,
+    versionId: null,
     copiedFrom: null,
     copiedFromName: null,
     provenance: null,
@@ -137,6 +142,8 @@ const mockMine: UserPresetFile[] = [
     basedOnRelease: null,
     basedOnMachineId: null,
     basedOnVersionId: null,
+    machineId: null,
+    versionId: null,
     copiedFrom: null,
     copiedFromName: null,
     provenance: null,
@@ -144,6 +151,51 @@ const mockMine: UserPresetFile[] = [
 ]
 /** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
 const mockMineText = new Map<string, string>()
+
+/**
+ * **备注覆盖账**（假后端版）：键 = 文件身份，值 = 用户改过的备注。
+ * 与真机同语义：清掉（null / 空）= 删键，回到工作台那句。
+ */
+const mockRemarks = new Map<string, string>()
+
+/**
+ * 改文件头的 `# machine:` / `# variant:` 两行（假后端版，与 Rust
+ * `lineage::rewrite_machine_variant` 同一套规矩：原位换值，缺哪行补哪行，
+ * 正文一个字节不动）。
+ */
+function rewriteMockMachineVariant(text: string, machineId: string, versionId: string): string {
+  const isMachine = (l: string) => /^#\s*machine:/.test(l)
+  const isVariant = (l: string) => /^#\s*variant:/.test(l)
+  const hasMachine = text.split('\n').some(isMachine)
+  const hasVariant = text.split('\n').some(isVariant)
+  const out: string[] = []
+  let machineDone = false
+  let variantDone = false
+  for (const line of text.split('\n')) {
+    if (isMachine(line)) {
+      out.push(`# machine: ${machineId}`)
+      machineDone = true
+      if (!hasVariant) {
+        out.push(`# variant: ${versionId}`)
+        variantDone = true
+      }
+      continue
+    }
+    if (isVariant(line)) {
+      if (!hasMachine && !machineDone) {
+        out.push(`# machine: ${machineId}`)
+        machineDone = true
+      }
+      out.push(`# variant: ${versionId}`)
+      variantDone = true
+      continue
+    }
+    out.push(line)
+  }
+  if (!machineDone) out.push(`# machine: ${machineId}`)
+  if (!variantDone) out.push(`# variant: ${versionId}`)
+  return out.join('\n')
+}
 
 /**
  * 用户文件新名字的门槛（与 Rust 侧 `mine::check_new_name` 同一套）：
@@ -213,6 +265,8 @@ mockMineText.set(
   'presets-mine/我的 A1 涂胶.toml',
   [
     '# 我自己的这一份（假后端演示正文）',
+    '# machine: A1',
+    '# variant: fast',
     '# based_on: dist/mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-05-29 04:26:12',
     `# based_on_sha256: ${'0'.repeat(64)}`,
@@ -355,6 +409,42 @@ export const mockApi: MkpApi = {
   /* 用户线：两份**固定演示**（一份 `.toml` 认得出、一份 `.json` 认不出）+ 这份会话另存出来的 */
   async getUserPresetFiles() {
     return mockMine.map((f) => ({ ...f }))
+  },
+
+  /* 备注覆盖账（副标题）：整本给 / 改一条。空串也是覆盖（不回退）；null = 恢复默认 */
+  async getPresetRemarks() {
+    return Object.fromEntries(mockRemarks)
+  },
+
+  async setPresetRemark(key, remark) {
+    const k = key.trim()
+    if (k === '') throw new Error('备注要说是哪一份（缺文件身份）')
+    if (remark === null) mockRemarks.delete(k)
+    else mockRemarks.set(k, remark.trim())
+  },
+
+  /*
+   * 改归属：改文件头的 `# machine:` / `# variant:` 两行（与真机同一个闸：
+   * 机型必须目录里真有、**版本可自定义**；正文一个字节不动）。
+   */
+  async setUserPresetMachineVersion(path, machineId, versionId) {
+    const mid = machineId.trim()
+    const vid = versionId.trim()
+    if (mid === '' || vid === '') {
+      throw new Error('机型与版本都要填 —— 归属写的是文件头的那两行，留空就认不出')
+    }
+    const hit = mockMine.find((f) => f.path === path)
+    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const known = allMachines().some((m) => m.id === mid)
+    if (!known) {
+      throw new Error(`${mid} 不是目录里登记的机型 —— 归属的机型要选一台真的机器`)
+    }
+    const text = mockMineText.get(path)
+    if (text !== undefined) {
+      mockMineText.set(path, rewriteMockMachineVariant(text, mid, vid))
+    }
+    hit.machineId = mid
+    hit.versionId = vid
   },
 
   /** 只有这份会话另存出来的那份有正文可读（真机上每一份都能读） */
@@ -511,6 +601,9 @@ export const mockApi: MkpApi = {
       basedOnRelease: null,
       basedOnMachineId: 'A1',
       basedOnVersionId: 'STANDARD',
+      /* 归属与来源那份一致（正文头里也是这两行） */
+      machineId: 'A1',
+      versionId: 'STANDARD',
       /* 官方另存出来的：出处走 based_on 血统（界面上显示"复制自官方 X"），账本不重复记 */
       copiedFrom: null,
       copiedFromName: null,
@@ -643,6 +736,9 @@ export const mockApi: MkpApi = {
       basedOnRelease: null,
       basedOnMachineId: hit.machineId,
       basedOnVersionId: hit.versionId,
+      /* 归属与来源那份一致（正文按字节复制，头里那两行原样带过来） */
+      machineId: hit.machineId,
+      versionId: hit.versionId,
       /* 官方另存出来的：出处走血统（「复制自官方 X」），账本不重复记 */
       copiedFrom: null,
       copiedFromName: null,
@@ -741,6 +837,9 @@ export const mockApi: MkpApi = {
         basedOnRelease: null,
         basedOnMachineId: null,
         basedOnVersionId: null,
+        /* 导入的裸文件没有归属（文件头里没有那两行）—— 照实 null */
+        machineId: null,
+        versionId: null,
         /* 与真机同形：导入进来的在出处账里记一档「导入」 */
         copiedFrom: null,
         copiedFromName: null,
@@ -778,6 +877,8 @@ export const mockApi: MkpApi = {
     }
     mockMine.splice(i, 1)
     mockMineText.delete(path)
+    /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句） */
+    mockRemarks.delete(path)
   },
 
   async getSlicerCopied() {

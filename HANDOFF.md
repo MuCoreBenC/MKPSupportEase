@@ -924,7 +924,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
       - **链路侧**：客户端构建也装配 `delivery = 'bundled'` 进 `dist/assets/<path>`（URL 同形、
         **不带哈希** ⇒ 同一条资产在包里只有一份）；**dev 两边读的东西有意不同**：
         客户端读**交付根** `client-assets/`（与打包后一致），工作台读**源** `presets/assets/`
-        （后厨要看得见任何登记资产）。
+        （工作台要看得见任何登记资产）。
       - **桩数据跟上**：`machine_catalog.json` 的 `image` 从文件名改成资产 id（P2S / X1C 那个
         根本不存在的 `p2s.webp` / `x1c.webp` 清空 —— 那是移植时留下的错路）；
         `mock.ts` 的 `getRuntimeCatalog()` 补 `assets[]`（**真 id + 真 path**，于是浏览器演示里的
@@ -2195,3 +2195,26 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
 - 全绿：`fmt --check`（两个版本）、双 feature `clippy --all-targets -D warnings` 都干净；
   判据 **729**（默认）+ **687**（workbench lib）全过。本刀零 TS 改动。
 - 明细与遗留项（**要不要钉 `rust-toolchain.toml` —— 没做**）见 `docs/RUST-LINT-CLEANUP.md`。
+
+## 增量之三十一 · 设置页 Token 明文可见 / 可复制（2026-10-07，分支 `feat/app-state`）
+
+作者 2026-10-07 反馈（截图 = 设置页「发布账户」）：**点一下掩码就变成空的输入框** ⇒
+"不知道它到底还有没有"；要"看着它、复制它"。两问定案（施工前问过）：
+
+- 查看门槛 = **不要密码** —— 本地凭据文件本就仅本人可读，门槛只是象征性的，点眼睛直接出明文；
+- 改 Token 的入口**保持点掩码进去**，但进去后输入框用掩码点当**占位**（不再显得空）。
+
+- **后端**：新命令 `wb_get_publish_token(platform) -> Option<String>`（`publish_tx.rs`，
+  `#[tauri::command(async)]`，进 `read_commands_are_async_…` 的 **IO 单子**；`lib.rs` 登记）。
+  ★ **口径变更写进文档**：原来"前端拿不到原值"是硬承诺，现在改成"状态面照旧不含原值 +
+  另开一条**显式**出口"。`PlatformAccountView` **形状一个字段没变** ⇒ 判据
+  `credentials_never_echo_the_token` 照旧成立；出口只在人点眼睛那一刻走（不是开场自动读、
+  不进发布链）。三处口径同步：`credentials.rs` 头注释、`docs/PUBLISH-ARCHITECTURE.md` §7.1 第 3 条、`api.ts`。
+- **前端**（`SettingsPage.tsx`）：Token 行三种形态 —— 掩码（可点进编辑）/ **明文**（只读、
+  点一下整段选中）/ 编辑（已配置时 placeholder = 掩码点）；右侧**眼睛**（显示 ↔ 收起）
+  + 明文旁一颗**【复制】**。明文只活在界面状态里：收起 / 保存 / 清除 / 重新读取一律收回
+  （`loadAccount` 里 `setRevealed({})`）。新样式 `.tokenEye`（`c14.module.css`）；桩同步
+  （`mockBackend.ts` 的 `wb_get_publish_token`：GitHub 有、Gitee `null`）。
+- 验证：`cargo fmt --check` / 双 feature `clippy --all-targets -D warnings` / `cargo test` +
+  `--features workbench --lib` / `npx tsc -b` / `npm run lint`（只剩既有 2 条 react-refresh warning）/
+  `npm run build` + 三道闸。
