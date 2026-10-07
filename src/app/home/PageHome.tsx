@@ -26,6 +26,7 @@ import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText, isAppError } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
+import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
@@ -336,7 +337,13 @@ export default function PageHome({ density }: PageHomeProps) {
    */
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
-  const [deliveryTick, setDeliveryTick] = useState(0)
+  /*
+   * 投递面代次（`deliveryState`）：**任何页面**把交付文件写下 / 移出本机之后 +1，
+   * 这里重拉那两份单子 —— 页签常驻，本页不重挂载，不订阅就永远拿着首读那一份
+   * （2026-10-07 真机：预设页下了 BBS，回首页按钮还停在旧状态）。
+   * 本页自己的下载走 `applyCurrent` 里的 `deliveryMutated()`（同一条路，不再另设 tick）。
+   */
+  const deliveryRevision = useDeliveryRevision()
   /* 盘上那两份单子（下载区 / 漂移），按文件名查 */
   const [onDisk, setOnDisk] = useState<{ downloaded: Set<string>; stale: Set<string> } | null>(null)
 
@@ -353,6 +360,7 @@ export default function PageHome({ density }: PageHomeProps) {
   /** 「应用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
   const presetFile = bundle.presetFileName
 
+  /* 盘上那两份单子：combo 换台时读一次；**投递面代次一变就重读**（谁写的都算） */
   useEffect(() => {
     if (comboKey === null) return
     let alive = true
@@ -369,7 +377,7 @@ export default function PageHome({ density }: PageHomeProps) {
     return () => {
       alive = false
     }
-  }, [comboKey, deliveryTick])
+  }, [comboKey, deliveryRevision])
 
   /*
    * 套餐这一批文件在盘上是什么样 —— 三态与「待下清单」都从这一处算。
@@ -455,7 +463,9 @@ export default function PageHome({ density }: PageHomeProps) {
       setApplyError(errorText(e))
     } finally {
       setApplying(false)
-      setDeliveryTick((t) => t + 1)
+      /* 投递面广播：本页重读那两份单子（订阅在上面），**别的页**（预设页本地表 /
+         BBS 交付面）也收得到 —— 成了一半也是变了，所以放在 finally 里 */
+      deliveryMutated()
     }
   }, [applying, bundleState, presetFile])
 

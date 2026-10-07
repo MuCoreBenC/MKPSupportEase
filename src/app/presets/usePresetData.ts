@@ -57,6 +57,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
+import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -646,23 +647,19 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [readRelease, importRevision])
 
   /*
-   * **跨页再同步**（2026-10-07 真机：首页「下载并应用」下了 X1 套餐，
-   * 切回预设页的本地表却没有那两行 —— 数据是**首次进入时读的那一份**）：
+   * **跨页再同步**（2026-10-07 真机两刀挣来的）：
    *
    * 外壳的页签是**常驻 + 切显示**（`App.tsx`，2026-10-05 起），本页**不再重挂载**，
-   * 只在挂载时读一次 —— 别的页面写进投递面的东西这里永远看不见。
-   * 「使用中指针」（AppState）是**每一条"下载并应用"都会写的格子**（首页那颗按钮
-   * 必写它），它的**实质变化**就是一声"投递面可能变了"：收到就重读那一路。
-   * 本页自己的下载 / 删除已经自带重读（`downloadRelease` 等），这条只补跨页那一半。
+   * 只在挂载时读一次 —— 别的页面写进投递面的东西这里永远看不见
+   * （首页「下载并应用」下了 X1 套餐，切回本页本地表却没有那两行）。
    *
-   * `activeKey` 用字符串折叠（不用对象引用）：底账重读一次就给一个新对象，
-   * 拿引用当依赖会让"同名重放"也重读一遍。首屏那条链自己会读，这里从 ready 之后
-   * 才开始听（首帧会多读一次，接受）。
+   * 订阅的是**投递面代次**（`deliveryState`）：凡写投递面处，写完就广播，谁写的都算。
+   * （第一版拿「使用中指针」当信号 —— 它只覆盖"下载并应用"这一类，覆盖不了
+   * "只下载不应用"，所以这一刀换成直说。）
+   * 本页自己的四个写出口（下载 / 批量 / 删本机 / 删归档）也只广播、不另行显式重读 ——
+   * 单一触发路径。首屏那条链自己会读，这里从 ready 之后才开始听（首帧多读一次，接受）。
    */
-  const activeKey =
-    active === null
-      ? ''
-      : `${active.origin}:${active.machineId}:${active.versionId}:${active.fileName}`
+  const deliveryRevision = useDeliveryRevision()
   useEffect(() => {
     if (!ready) return
     void readRelease()
@@ -670,7 +667,7 @@ export function usePresetData(importRevision = 0): PresetData {
       .catch(() => {
         /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
       })
-  }, [activeKey, ready, readRelease])
+  }, [deliveryRevision, ready, readRelease])
 
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
@@ -713,13 +710,21 @@ export function usePresetData(importRevision = 0): PresetData {
   /*
    * 官方交付那一路的「下载」：走新世界下载管道，落进下载区 `mkp/`。
    * 不 catch：失败传给页面说出来，与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个。）
+   *
+   * 写完**只广播**（`deliveryMutated()`）：本页与别的页都从订阅里重读那一路 ——
+   * 这里是"写下 / 移出投递面"的四个出口之一，不再各自显式重读一次（单一触发路径）。
    */
   const downloadRelease = useCallback(
     async (fileName: string, onTick?: (tick: DownloadTick) => void) => {
-      await api.downloadCatalogFile(fileName, onTick)
-      setRelease(await readRelease())
+      try {
+        await api.downloadCatalogFile(fileName, onTick)
+      } finally {
+        /* 成没成都广播：`deliver` 是"先归档旧份、再换新"，失败也可能动过盘 ——
+           宁可多读一次，不赌"失败 = 没变"（与首页 `applyCurrent` 同一条） */
+        deliveryMutated()
+      }
     },
-    [readRelease],
+    [],
   )
 
   /*
@@ -768,23 +773,19 @@ export function usePresetData(importRevision = 0): PresetData {
    * 那一行回「未下载」，归档清单跟着刷新（`readRelease` 连归档一起读）。
    * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
    */
-  const removeRelease = useCallback(
-    async (fileName: string) => {
-      await api.deleteDeliveryFile(fileName)
-      setRelease(await readRelease())
-      appStateMutated()
-    },
-    [readRelease],
-  )
+  const removeRelease = useCallback(async (fileName: string) => {
+    await api.deleteDeliveryFile(fileName)
+    /* 投递面广播（本页跟着重读，清单以盘为准）；删的是使用中那份时后端已撤指针，
+       那条走 AppState 的广播（下面这句） */
+    deliveryMutated()
+    appStateMutated()
+  }, [])
 
-  /* 删除归档区一份旧版本（代价讲清在确认框）：同样重读官方线，清单以盘为准 */
-  const removeArchived = useCallback(
-    async (path: string) => {
-      await api.deleteArchivedFile(path)
-      setRelease(await readRelease())
-    },
-    [readRelease],
-  )
+  /* 删除归档区一份旧版本（代价讲清在确认框）：投递面广播，清单以盘为准 */
+  const removeArchived = useCallback(async (path: string) => {
+    await api.deleteArchivedFile(path)
+    deliveryMutated()
+  }, [])
 
   /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
@@ -829,16 +830,16 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 批量：一次把多份交给后端，回来后**不管成没成先重读底账**（成功的那些已经落盘了），
+   * 批量：一次把多份交给后端，回来后**不管成没成先广播**（成功的那些已经落盘了），
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
    */
   const downloadReleaseBatch = useCallback(
     async (fileNames: string[], onTick?: (tick: DownloadTick) => void) => {
       const outcomes = await api.downloadCatalogFiles(fileNames, onTick)
-      setRelease(await readRelease())
+      deliveryMutated()
       return outcomes
     },
-    [readRelease],
+    [],
   )
 
   const machineId = at?.machineId ?? ''
