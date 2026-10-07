@@ -370,6 +370,9 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
         构建安装包（macOS → dmg / Windows → NSIS）→ 建 Release 并上传 → 写 release.json
         并开第二个 PR。
         <br />
+        ★ 这一版**已经发过**时只补**本平台**的包：不重打 tag、不开 PR、不动版本号 ——
+        同一个版本可以同时挂 macOS 与 Windows 的安装包（同一个平台不重发）。
+        <br />
         ★ release.json 那个 PR 要**你自己合并** —— 合并之后客户端才看得到新版本。
       </div>
 

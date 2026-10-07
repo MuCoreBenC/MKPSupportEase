@@ -279,6 +279,28 @@ pub trait Hosting {
         let _ = up;
         Err(platform_not_supported(self.kind()))
     }
+
+    /// 这个 tag 的 Release 上**已经挂了哪些附件**（文件名）。**没有那个 Release = 空表**
+    /// （不是错误 —— 还没发过就是这个答案）。
+    ///
+    /// ★ 用途（2026-10-07）：**同一版本可以发多个平台** —— macOS 发过之后，Windows 还能
+    /// 往同一个 Release 补一个包。闸与事务据此回答"**本平台**是不是已经发过了"，
+    /// 而不是笼统地"tag 被占就不许发"。
+    fn release_assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<String>, AppError> {
+        let _ = (owner, repo, tag);
+        Err(platform_not_supported(self.kind()))
+    }
+}
+
+/// 这批附件名里**有没有本平台那一份**（按后缀认：macOS 认 `.dmg`、Windows 认 `.exe`）。
+///
+/// 判据收在这里而不是各写一遍：闸与事务都拿它回答"这一版这一平台发过没有"，
+/// 两处要是各写各的，"闸说能发、事务说发过了"就会同时出现。**纯函数**（判据钉它）。
+pub fn platform_asset_uploaded(names: &[String], ext: &str) -> bool {
+    let suffix = format!(".{}", ext.to_ascii_lowercase());
+    names
+        .iter()
+        .any(|n| n.to_ascii_lowercase().ends_with(&suffix))
 }
 
 /// **平台 id → 平台客户端**。**两张入口（工作台 / CLI）共用这一张映射表** ——
@@ -419,6 +441,29 @@ pub fn collapse_checks(raw: &str) -> ChecksSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 「本平台发过没有」只看**本平台那个后缀**（2026-10-07）：同一版本可以发多个平台，
+    /// 判据错了就是"闸说能补、事务说发过了"（或反过来，白跑一趟构建）。
+    #[test]
+    fn the_platform_asset_check_only_looks_at_its_own_extension() {
+        let names = vec![
+            "SupportEase_0.0.6_aarch64.dmg".to_owned(),
+            "SupportEase_0.0.6_aarch64.app.zip".to_owned(),
+        ];
+        assert!(platform_asset_uploaded(&names, "dmg"), "macOS 那一份在");
+        assert!(
+            !platform_asset_uploaded(&names, "exe"),
+            "Windows 那一份不在"
+        );
+        // 大小写不敏感（平台回给我们的名字不一定是什么形状）
+        assert!(platform_asset_uploaded(&names, "DMG"));
+        // `.app.zip` 不该被当成 `.dmg`（一个真会踩的坑：`ends_with("dmg")` 少了那个点）
+        assert!(!platform_asset_uploaded(
+            &["SupportEase_0.0.6_aarch64.app.zip".to_owned()],
+            "dmg"
+        ));
+        assert!(!platform_asset_uploaded(&[], "dmg"), "空表 = 还没发过");
+    }
 
     /// **remote URL → 平台**（纯函数）。含 https / ssh / 自建 / 空 的边界。
     #[test]

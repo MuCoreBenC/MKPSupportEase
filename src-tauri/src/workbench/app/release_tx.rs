@@ -389,13 +389,27 @@ pub fn run(
     if !git.is_clean()? {
         blocked.push("工作区不干净 —— 发版会改版本号并提交，混在一起说不清".to_owned());
     }
-    // 版本号撞车：tag 已存在且**指的又是另一笔提交** = 这一版发出去过，换版本号。
-    // 指向当前 HEAD（续跑上一次的事务）不算撞车，下面的步骤会跳过重复动作。
-    if git.tag_exists(&tag)? && !tag_points_at_head(&git, &tag) {
+    // ★ 版本撞车**按平台判**（2026-10-07）：tag 打了不等于这一版发不了 ——
+    //   同一版本可以补别的平台的包（见 [`ReleaseSlot`]）。
+    //   不构建（`--no-build`）的那几趟没有"平台"可言，照老规矩：tag 不是 HEAD 就当它被占。
+    let mut slot = ReleaseSlot::Fresh;
+    if opts.build {
+        match release_slot(&git, &tag, release) {
+            Ok(ReleaseSlot::Taken) => blocked.push(format!(
+                "tag `{tag}` 上已经有{}了 —— 这一版这一平台发过了，换一个版本号\
+                 （同一版本可以补别的平台，同一个平台不重发）",
+                installer_plan().map(|p| p.label).unwrap_or("安装包")
+            )),
+            Ok(s) => slot = s,
+            // 问不到（没发布通道 / 网络）就不往下走：不猜"还没发过"
+            Err(e) => blocked.push(e.message),
+        }
+    } else if git.tag_exists(&tag)? && !tag_points_at_head(&git, &tag) {
         blocked.push(format!(
             "tag `{tag}` 已经存在。换一个版本号，或先确认那一版发到哪了"
         ));
     }
+    let append = slot == ReleaseSlot::Append;
     // 版本派生不一致 = 有人手改了别处。给了新版本号的话 `bump` 会把它推平，
     // 所以只在"沿用当前真值"时它才是问题。
     if opts.version.is_none() {
@@ -430,72 +444,88 @@ pub fn run(
         return Ok(report);
     }
 
-    /* ---------- ③ 推进版本号（给了新版本才动） ---------- */
+    /* ---------- ③④ 版本号 / 提交 / 推送（**补平台那趟全都跳过**） ---------- */
 
-    // ★ **续跑**：真值已经是目标版本（上一趟推进过了 / 这一趟就没给新版本号）就不重复推 ——
-    //   发版可能被切成两趟（先建 PR 看 CI、再合并），第二趟进来时版本号已经到位。
-    //   ★ 比的是**解析之后的目标**（空串早被折成真值），不是原始入参 ——
-    //   拿 `Some("")` 去 bump 会在校验那一步报"形状不对"，那是参数解析的锅，不是发版的锅。
-    if version == truth {
+    // ★ **补平台**（同一版本发第二个平台，2026-10-07 作者要的）：版本号、提交、PR、tag
+    //   上一趟都做完了 —— 这一趟只做 ⑦ 构建 → ⑧ 上传 → ⑨ 发布信息。
+    //   重做一遍的后果不是"多跑几步"：bump 会拿人填的目标（= 当前真值）把版本号改回去、
+    //   ④ 会把分支再推一遍、⑤ 会再开一份一模一样的 PR。
+    if append {
         report.summary.push_str(&format!(
-            "版本号已经是 {version}（没给新版本号 / 上一趟推进过），跳过。"
+            "{tag} 已经发过 —— 这一趟只往它上面补本平台（{}）的安装包：\
+             不动版本号、不提交、不开 PR、不重打 tag。",
+            installer_plan().map(|p| p.label).unwrap_or("安装包")
         ));
     } else {
-        let changed = version::bump(repo_root, &version)?;
-        report.committed_paths = changed;
-        report.stage = ReleaseStage::VersionBumped;
-        report.summary.push_str(&format!(
-            "版本号已推进到 {version}（改了 {} 处）。",
-            report.committed_paths.len()
-        ));
-    }
+        /* ③ 推进版本号（给了新版本才动） */
 
-    /* ---------- ④ ① 提交 → 推送 ---------- */
-
-    let candidates: Vec<String> = RELEASE_STAGE_CANDIDATES
-        .iter()
-        .map(|s| (*s).to_owned())
-        .collect();
-    let staged = git.stage_allowed_in(&candidates, &RELEASE_STAGE_ALLOWLIST)?;
-    if git.has_staged()? {
-        git.commit(&format!("chore: {tag}"))?;
-        report.commit = git.head_short().ok();
-        report.committed_paths = staged;
-        report.stage = ReleaseStage::Committed;
-        report.summary.push_str(&format!(
-            "已提交{}。",
-            commit_suffix(report.commit.as_deref())
-        ));
-    } else {
-        report
-            .summary
-            .push_str("版本号那一批没有新变化（可能上次已经提交过），跳过提交。");
-    }
-
-    // 推送：**从发布账户配置取凭据**（SupportEase 自持），不借用户 gh/git 登录态。
-    match target {
-        Some(t) => {
-            if !git.remote_matches(&t.repository_url)? {
-                return Err(AppError::invalid_argument(
-                    "当前仓库的远端地址和「发布账户」里配置的不一致，先确认一下发布目标",
-                )
-                .with_detail(format!("配置：{}", t.repository_url)));
-            }
-            git.push_authenticated(&branch, &t.username, &t.token)?;
+        // ★ **续跑**：真值已经是目标版本（上一趟推进过了 / 这一趟就没给新版本号）就不重复推 ——
+        //   发版可能被切成两趟（先建 PR 看 CI、再合并），第二趟进来时版本号已经到位。
+        //   ★ 比的是**解析之后的目标**（空串早被折成真值），不是原始入参 ——
+        //   拿 `Some("")` 去 bump 会在校验那一步报"形状不对"，那是参数解析的锅，不是发版的锅。
+        if version == truth {
+            report.summary.push_str(&format!(
+                "版本号已经是 {version}（没给新版本号 / 上一趟推进过），跳过。"
+            ));
+        } else {
+            let changed = version::bump(repo_root, &version)?;
+            report.committed_paths = changed;
+            report.stage = ReleaseStage::VersionBumped;
+            report.summary.push_str(&format!(
+                "版本号已推进到 {version}（改了 {} 处）。",
+                report.committed_paths.len()
+            ));
         }
-        None => git.push(&branch)?,
+
+        /* ---------- ④ ① 提交 → 推送 ---------- */
+
+        let candidates: Vec<String> = RELEASE_STAGE_CANDIDATES
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let staged = git.stage_allowed_in(&candidates, &RELEASE_STAGE_ALLOWLIST)?;
+        if git.has_staged()? {
+            git.commit(&format!("chore: {tag}"))?;
+            report.commit = git.head_short().ok();
+            report.committed_paths = staged;
+            report.stage = ReleaseStage::Committed;
+            report.summary.push_str(&format!(
+                "已提交{}。",
+                commit_suffix(report.commit.as_deref())
+            ));
+        } else {
+            report
+                .summary
+                .push_str("版本号那一批没有新变化（可能上次已经提交过），跳过提交。");
+        }
+
+        // 推送：**从发布账户配置取凭据**（SupportEase 自持），不借用户 gh/git 登录态。
+        match target {
+            Some(t) => {
+                if !git.remote_matches(&t.repository_url)? {
+                    return Err(AppError::invalid_argument(
+                        "当前仓库的远端地址和「发布账户」里配置的不一致，先确认一下发布目标",
+                    )
+                    .with_detail(format!("配置：{}", t.repository_url)));
+                }
+                git.push_authenticated(&branch, &t.username, &t.token)?;
+            }
+            None => git.push(&branch)?,
+        }
+        report.stage = ReleaseStage::Pushed;
+        report.summary.push_str(&format!("已推送到 `{branch}`。"));
     }
-    report.stage = ReleaseStage::Pushed;
-    report.summary.push_str(&format!("已推送到 `{branch}`。"));
 
     /* ---------- ⑤ ① 建 PR →（可选）合并 ---------- */
 
+    // ★ 平台没配 = CLI 只做本地那一半（脚本自己用 gh 开 PR 的历史路径不受影响）
     let (Some(hosting), Some(t)) = (hosting, target) else {
-        // 没有平台 = CLI 只做本地那一半（脚本自己用 gh 开 PR 的历史路径不受影响）
         report.summary.push_str("没有配置发布平台，到推送为止。");
         return Ok(report);
     };
-    if opts.open_review {
+    // ★ **补平台那趟不开 PR**：这一版的分支早合进 main 了（tag 就在 main 的 tip 上），
+    //   再开一份一模一样的 PR 只会让人以为又要发一次。
+    if !append && opts.open_review {
         let spec = ReviewSpec {
             owner: t.owner.clone(),
             repo: t.repo.clone(),
@@ -728,18 +758,57 @@ pub fn run(
 
     /* ---------- ⑨ 写 `release.json` → 它自己的分支与 PR（**合并留给人**） ---------- */
 
+    // ★ 先算一遍"它该长什么样"（**纯函数**，不落盘）：与盘上那份一字不差就**不动分支、
+    //   不开 PR**（2026-10-07）。补平台那一趟正是这种情况 —— asset 保留的是上一份，
+    //   内容一个字节都不变；照老写法会切到一条不相干的分支上、再开一份空的 PR。
+    let previous = previous_release_info(repo_root);
+    // ★ 补平台那一趟**不改软件发布信息**：`notes` / `url` 沿用盘上那一份 —— 人这一趟填的
+    //   说明只进 Release 正文那一步，而那一步对**已经存在**的 Release 本来就不改
+    //   （`create_release` 是回读，不是改）。于是 release.json 一个字节都不动：
+    //   既不会多开一份 PR，也不会把上一趟发布的那句话悄悄换掉。
+    let (info_notes, info_url) = match previous
+        .as_ref()
+        .filter(|p| append && p.version.trim() == version.trim())
+    {
+        Some(p) => (p.notes.clone(), p.url.clone()),
+        None => (opts.notes.clone(), release.url.clone()),
+    };
+    let want_info = release_info_text(
+        &version,
+        &info_notes,
+        &info_url,
+        report.zip.as_ref(),
+        previous.as_ref(),
+    )?;
+    if std::fs::read_to_string(repo_root.join(RELEASE_INFO_REL))
+        .ok()
+        .as_deref()
+        == Some(want_info.as_str())
+    {
+        report
+            .summary
+            .push_str("release.json 与盘上那份一字不差（这一趟不改软件发布信息），没有要提交的。");
+        return Ok(report);
+    }
+
     let info_rel = write_release_info(
         repo_root,
         &version,
-        &opts.notes,
-        &release.url,
+        &info_notes,
+        &info_url,
         report.zip.as_ref(),
     )?;
     // ★ 分支名必须带合规前缀（`chore/`）—— 本机闸门⑥ 会拒没有前缀的分支名
     //   （`release/0.0.1` 这种在提交那一步会被钩子挡下来，白跑一趟）。
     let info_branch = format!("chore/release-{tag}");
-    // 新分支从**当前**提交起（此刻人在 main 上、main 已含 ① 的合并结果）
-    git.switch_new(&info_branch)?;
+    // ★ 那条分支**已经存在就切过去**，不再新建（2026-10-07）：重跑 / 补平台时它还在
+    //   （上一趟建的），`switch -c` 会以"已存在"失败 —— 那不是发版失败。
+    if git.branch_exists(&info_branch)? {
+        git.switch(&info_branch)?;
+    } else {
+        // 新分支从**当前**提交起（此刻人在 main 上、main 已含 ① 的合并结果）
+        git.switch_new(&info_branch)?;
+    }
     let staged = git.stage_allowed_in(std::slice::from_ref(&info_rel), &RELEASE_STAGE_ALLOWLIST)?;
     if !git.has_staged()? {
         report.info_branch = Some(info_branch);
@@ -978,6 +1047,52 @@ fn arch_name() -> &'static str {
     }
 }
 
+/// 上一份 `release.json`（读不到 / 读不懂 = `None` —— 那不是错误：第一次发就是没有）。
+fn previous_release_info(repo_root: &Path) -> Option<release_info::ReleaseInfo> {
+    let bytes = std::fs::read(repo_root.join(RELEASE_INFO_REL)).ok()?;
+    release_info::parse(&bytes).ok()
+}
+
+/// `release.json` 该长什么样（**纯函数**）：写盘与"要不要写"共用它。
+///
+/// ★ `asset` 为 `None` 而**盘上那份是同一个版本**时，把它那一格原样留住（`previous`）——
+///   2026-10-07 补平台那一刀：Windows 没有应用内更新的包（那条链只认 macOS 的 `.app`），
+///   要是不留住，补一个 Windows 包就会把 macOS 的 `.app.zip` 抹掉，客户端的应用内更新
+///   退回"打开下载页"。**那是真丢东西**，不是风格问题。
+fn release_info_text(
+    version: &str,
+    notes: &str,
+    url: &str,
+    asset: Option<&crate::runtime::release_info::ReleaseAsset>,
+    previous: Option<&release_info::ReleaseInfo>,
+) -> Result<String, AppError> {
+    let kept = asset.or_else(|| {
+        previous
+            .filter(|p| p.version.trim() == version.trim())
+            .and_then(|p| p.asset.as_ref())
+    });
+    let mut value = serde_json::json!({
+        "releaseSchema": RELEASE_SCHEMA,
+        "version": version,
+        "notes": notes.trim(),
+        "url": url,
+    });
+    // ★ 有安装包就带上 `asset`（**可选格**：没有它客户端退回"打开下载页"，那条路仍然成立）
+    if let Some(a) = kept {
+        value["asset"] = serde_json::json!({
+            "name": a.name,
+            "url": a.url,
+            "size": a.size,
+            "sha256": a.sha256,
+        });
+    }
+    // ★ 断代校验在**写盘之前**：坏 URL 不许落盘（总纲 §5-M6）
+    validate_release_source(version, url, kept)?;
+    Ok(serde_json::to_string_pretty(&value)
+        .map_err(|e| AppError::internal("发布信息序列化失败").with_detail(e.to_string()))?
+        + "\n")
+}
+
 /// 写 `presets/delivery/release.json`（**上传成功之后才写**）。
 ///
 /// ★ 顺序的意义：先说"有新版"再上传，用户点进去会撞上一个空的下载页。
@@ -989,26 +1104,8 @@ fn write_release_info(
     url: &str,
     asset: Option<&crate::runtime::release_info::ReleaseAsset>,
 ) -> Result<String, AppError> {
-    let mut value = serde_json::json!({
-        "releaseSchema": RELEASE_SCHEMA,
-        "version": version,
-        "notes": notes.trim(),
-        "url": url,
-    });
-    // ★ 有安装包就带上 `asset`（**可选格**：没有它客户端退回"打开下载页"，那条路仍然成立）
-    if let Some(a) = asset {
-        value["asset"] = serde_json::json!({
-            "name": a.name,
-            "url": a.url,
-            "size": a.size,
-            "sha256": a.sha256,
-        });
-    }
-    // ★ 断代校验在**写盘之前**：坏 URL 不许落盘（总纲 §5-M6）
-    validate_release_source(version, url, asset)?;
-    let text = serde_json::to_string_pretty(&value)
-        .map_err(|e| AppError::internal("发布信息序列化失败").with_detail(e.to_string()))?
-        + "\n";
+    let previous = previous_release_info(repo_root);
+    let text = release_info_text(version, notes, url, asset, previous.as_ref())?;
     let path = repo_root.join(RELEASE_INFO_REL);
     fsx::atomic::atomic_write(&path, text.as_bytes())?;
     // 写完立刻自己解析一遍：**写进去的东西必须是客户端读得懂的东西**（代次 / 版本形状）
@@ -1056,6 +1153,57 @@ fn tag_points_at_head(git: &Git, tag: &str) -> bool {
         .rev_parse_short(&format!("{tag}^{{commit}}"))
         .unwrap_or_default();
     !head.is_empty() && head == tagged
+}
+
+/* ---------- 版本 × 平台：这一版本平台发过没有 ---------- */
+
+/// **这一版（tag）× 本平台**的状态。闸与事务共用这一套判断（各写一份迟早不一致：
+/// 闸说能发、事务说发过了）。
+///
+/// ★ 2026-10-07 改口径（作者）：「应该给我选择 Windows 还是 macOS 的吧。发布过的才不让发，
+///   没发布过的就可以发呀」—— 软件版本**一个版本可以有多个平台的包**：macOS 发过之后，
+///   Windows 还能往同一个 Release 补一份。于是"tag 被占"不再等于"不许发"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReleaseSlot {
+    /// tag 还没打过：走完整流程（版本号 → PR → tag → 构建 → 上传）
+    Fresh,
+    /// tag 打了、**本平台**还没有：只补本平台的包（不重打 tag、不开 PR、不动版本号）
+    Append,
+    /// **本平台**那一份已经在 Release 上了：换一个版本号（同一个平台不重发）
+    Taken,
+}
+
+/// 去发布仓库问一句：这一版**本平台**发过没有。**只读**。
+///
+/// 读不到（没账户 / 网络）**不猜**：如实报错 —— "猜成还没发过"的代价是让人对着一个
+/// 传不上去的附件，把整趟发版（含几分钟的构建）跑完才发现。
+fn release_slot(
+    git: &Git,
+    tag: &str,
+    release: Option<&ReleaseChannel<'_>>,
+) -> Result<ReleaseSlot, AppError> {
+    if !git.tag_exists(tag)? {
+        return Ok(ReleaseSlot::Fresh);
+    }
+    let plan = installer_plan().ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
+            std::env::consts::OS
+        ))
+    })?;
+    let Some(ch) = release else {
+        return Err(AppError::invalid_argument(format!(
+            "`{tag}` 已经打过 —— 要判断这一版本平台发过没有，得先配好发布通道（Gitee）"
+        )));
+    };
+    let names = ch
+        .hosting
+        .release_assets(&ch.target.owner, &ch.target.repo, tag)?;
+    if super::platform::platform_asset_uploaded(&names, plan.ext) {
+        Ok(ReleaseSlot::Taken)
+    } else {
+        Ok(ReleaseSlot::Append)
+    }
 }
 
 /* ---------- 工作台入口（命令壳） ----------
@@ -1166,22 +1314,50 @@ pub fn wb_release_preflight(
             },
         );
 
-        // tag 撞车：tag 已存在且指的是另一笔提交 = 这一版发出去过
-        let tagged = git.tag_exists(&tag)?;
-        let same = tagged && tag_points_at_head(&git, &tag);
-        push(
-            &mut items,
-            "tag",
-            "tag 没被占",
-            !tagged || same,
-            if !tagged {
-                format!("`{tag}` 还没打过")
-            } else if same {
-                format!("`{tag}` 已经打在这一笔上（续跑上一趟）")
-            } else {
-                format!("`{tag}` 已经存在 —— 换一个版本号")
-            },
-        );
+        // ★ **版本 × 平台**（2026-10-07 改口径）：**同一版本可以发多个平台** ——
+        //   macOS 发过之后，Windows 还能往同一个 Release 补一份。所以判的是
+        //   "**本平台**这一份发过没有"，不是笼统的"tag 被占"。
+        //   ★ 判据与事务共用 [`release_slot`] —— 两处各写一份就成了"闸说能发、
+        //     事务说发过了"或者反过来。
+        let gitee = super::publish_tx::resolve_target(&root, Some("gitee")).ok();
+        let gitee_hosting = gitee
+            .as_ref()
+            .and_then(|t| super::platform::hosting(&t.platform, t.token.clone()));
+        let channel = gitee
+            .as_ref()
+            .zip(gitee_hosting.as_deref())
+            .map(|(target, hosting)| ReleaseChannel { hosting, target });
+        let label = installer_plan().map(|p| p.label).unwrap_or("安装包");
+        match release_slot(&git, &tag, channel.as_ref()) {
+            Ok(ReleaseSlot::Fresh) => push(
+                &mut items,
+                "tag",
+                "版本 · 平台",
+                true,
+                format!("`{tag}` 还没打过 —— 走完整流程（版本号 → PR → tag → 构建 → 上传）"),
+            ),
+            Ok(ReleaseSlot::Append) => push(
+                &mut items,
+                "tag",
+                "版本 · 平台",
+                true,
+                format!(
+                    "`{tag}` 已经发过 —— 这一趟只往它上面补一个{label}\
+                     （不重打 tag、不开 PR、不动版本号）"
+                ),
+            ),
+            Ok(ReleaseSlot::Taken) => push(
+                &mut items,
+                "tag",
+                "版本 · 平台",
+                false,
+                format!(
+                    "`{tag}` 的{label}已经在发布仓库里了 —— 这一版这一平台发过了，换一个版本号"
+                ),
+            ),
+            // 读不到（没配发布通道 / 网络）**不猜**：不假设"还没发过"
+            Err(e) => push(&mut items, "tag", "版本 · 平台", false, e.message),
+        }
 
         // 发布账户（没配 → 只做本地那一半，如实说）
         let account = super::publish_tx::resolve_target(&root, None).ok();
@@ -1198,7 +1374,7 @@ pub fn wb_release_preflight(
         );
         // ★ M6（总纲 §5-M6）：软件版本的 Release 与附件**发布到 Gitee**（发布仓库），
         //   与 PR/tag 的 target 刻意分开。Gitee 账户没配 = 发不了版，进闸里明说。
-        let gitee = super::publish_tx::resolve_target(&root, Some("gitee")).ok();
+        //   （`gitee` 在上一格「版本 · 平台」里已经取过 —— 那一格要问它本平台发过没有。）
         push(
             &mut items,
             "release-channel",
@@ -1603,6 +1779,8 @@ mod tests {
     #[derive(Default)]
     struct FakeHosting {
         releases: std::cell::RefCell<Vec<super::super::platform::ReleaseSpec>>,
+        /// 发布仓库上这一版的附件名（判据按它造「补平台 / 发过了」两种局面）
+        assets: std::cell::RefCell<Vec<String>>,
     }
 
     impl super::super::platform::Hosting for FakeHosting {
@@ -1685,6 +1863,117 @@ mod tests {
                 url: "https://fake/download".to_owned(),
             })
         }
+        fn release_assets(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _tag: &str,
+        ) -> Result<Vec<String>, AppError> {
+            Ok(self.assets.borrow().clone())
+        }
+    }
+
+    /* ---------- 版本 × 平台：同一版本可以发多个平台（2026-10-07） ---------- */
+
+    /// 三档判定：没打过 = `Fresh`；打了而**本平台**的包不在 = `Append`；
+    /// 本平台那一份在 = `Taken`。**闸与事务共用这一处** —— 它错了就是
+    /// "闸说能发、事务说发过了"（或反过来）。
+    #[test]
+    fn the_release_slot_is_decided_per_platform() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = init_repo(root, "feat/demo");
+        let fake = FakeHosting::default();
+        let target = PublishTarget {
+            platform: "fake".to_owned(),
+            repository_url: "https://fake/o/r".to_owned(),
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        let channel = ReleaseChannel {
+            hosting: &fake,
+            target: &target,
+        };
+        let ext = installer_plan().expect("判据跑在能打包的平台上").ext;
+
+        // 还没打过 ⇒ 首发（走完整流程）
+        assert_eq!(
+            release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
+            ReleaseSlot::Fresh
+        );
+
+        // 打过了、发布仓库上还没有本平台的包 ⇒ **补平台**
+        git.tag("v0.0.2", "v0.0.2").unwrap();
+        assert_eq!(
+            release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
+            ReleaseSlot::Append
+        );
+
+        // 别的平台的包**不算**本平台发过 —— 这正是"补第二个平台"的判据
+        let other = if ext == "dmg" { "exe" } else { "dmg" };
+        *fake.assets.borrow_mut() = vec![format!("SupportEase_0.0.2_x86_64.{other}")];
+        assert_eq!(
+            release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
+            ReleaseSlot::Append,
+            "只有别的平台的包时，本平台还没发过"
+        );
+
+        // 本平台那一份在 ⇒ 这一版这一平台发过了，换版本号
+        *fake.assets.borrow_mut() = vec![format!("SupportEase_0.0.2_x86_64.{ext}")];
+        assert_eq!(
+            release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
+            ReleaseSlot::Taken
+        );
+
+        // 没有发布通道 = **问不到**：如实报错，不猜"还没发过"
+        let err = release_slot(&git, "v0.0.2", None).unwrap_err();
+        assert!(err.message.contains("发布通道"), "{}", err.message);
+    }
+
+    /// 补平台**不许把别的平台的安装包抹掉**（2026-10-07 的真机场景：Windows 那一趟
+    /// 没有 `.app.zip`，而 `release.json` 里那一格正是 macOS 的应用内更新的入口）。
+    #[test]
+    fn appending_a_platform_keeps_the_existing_asset() {
+        let mac = release_info::ReleaseAsset {
+            name: "SupportEase_0.0.6_aarch64.app.zip".to_owned(),
+            url: "https://gitee.com/o/r/releases/download/v0.0.6/x.app.zip".to_owned(),
+            size: 7,
+            sha256: "ab".to_owned(),
+        };
+        let prev = release_info::ReleaseInfo {
+            version: "0.0.6".to_owned(),
+            notes: "第一版".to_owned(),
+            url: "https://gitee.com/o/r/releases/tag/v0.0.6".to_owned(),
+            release_schema: RELEASE_SCHEMA,
+            asset: Some(mac.clone()),
+        };
+        let url = "https://gitee.com/o/r/releases/tag/v0.0.6";
+
+        // 这一趟没有新的 zip（Windows）⇒ 留住上一份那一格
+        let text = release_info_text("0.0.6", "补一个 Windows 包", url, None, Some(&prev)).unwrap();
+        let parsed = release_info::parse(text.as_bytes()).unwrap();
+        assert_eq!(parsed.asset, Some(mac), "补平台把 macOS 那一格抹掉了");
+        assert_eq!(parsed.version, "0.0.6");
+
+        // **别的版本**那份不搬过来（0.0.7 是另一版，它的 asset 该由它自己那一趟写）
+        let next = "https://gitee.com/o/r/releases/tag/v0.0.7";
+        let text = release_info_text("0.0.7", "", next, None, Some(&prev)).unwrap();
+        assert_eq!(release_info::parse(text.as_bytes()).unwrap().asset, None);
+
+        // 这一趟有新的 zip（macOS 补包）⇒ 用新的
+        let new = release_info::ReleaseAsset {
+            name: "SupportEase_0.0.6_x64.app.zip".to_owned(),
+            url: "https://gitee.com/o/r/releases/download/v0.0.6/y.app.zip".to_owned(),
+            size: 8,
+            sha256: "cd".to_owned(),
+        };
+        let text = release_info_text("0.0.6", "", url, Some(&new), Some(&prev)).unwrap();
+        assert_eq!(
+            release_info::parse(text.as_bytes()).unwrap().asset,
+            Some(new)
+        );
     }
 
     /// 造一个最小仓库：git init + 一条提交 + 版本号真值那四个文件。

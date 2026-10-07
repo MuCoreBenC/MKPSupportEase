@@ -266,6 +266,31 @@ impl Hosting for Gitee {
             url: download,
         })
     }
+
+    /// 这个 tag 的 Release 上挂了哪些附件：`GET /repos/{o}/{r}/releases/tags/{tag}`。
+    ///
+    /// ★ **没有那个 Release = 404 = 空表**（一个答案，不是故障）—— 同一版本要发第二个平台
+    ///   时，闸与事务靠这一句回答"本平台是不是已经发过了"。
+    fn release_assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<String>, AppError> {
+        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => Ok(release_asset_names(&v)),
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// 一个 Release 响应里的附件名（`assets[].name`）。缺字段 = 空表，不编。
+fn release_asset_names(v: &Value) -> Vec<String> {
+    v.get("assets")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|a| a.get("name").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl Gitee {
@@ -386,12 +411,16 @@ fn review_from_json(v: &Value) -> Result<RemoteReview, AppError> {
 fn transport(e: ureq::Error) -> AppError {
     match e {
         ureq::Error::StatusCode(code) => {
-            let kind = if (400..500).contains(&code) {
-                "请求被拒"
+            if code == 404 {
+                // ★ 404 单独成一档（2026-10-07）：它常常**是一个答案**而不是故障 ——
+                //   "这个 tag 上没有 Release"就是 404。按 IO 报的话调用方分不出来
+                //  （[`Hosting::release_assets`]），只能去嗅字符串。
+                AppError::not_found("Gitee 上没有这一份（HTTP 404）")
+            } else if (400..500).contains(&code) {
+                AppError::io(format!("Gitee 请求被拒（HTTP {code}）"))
             } else {
-                "服务端错误"
-            };
-            AppError::io(format!("Gitee {kind}（HTTP {code}）"))
+                AppError::io(format!("Gitee 服务端错误（HTTP {code}）"))
+            }
         }
         other => AppError::io("连不上 Gitee").with_detail(other.to_string()),
     }
