@@ -32,7 +32,7 @@ pub mod presetdata;
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
 
-// 后厨工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
+// 工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
 // 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
 // 见 .comate/specs/b03-backstage-workbench/doc.md §4
 //
@@ -86,7 +86,10 @@ pub fn run() {
             }
 
             /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
-            两件事都只在 macOS 上有意义，失败都只打日志 —— 外观问题不该挡启动 */
+            两件事都只在 macOS 上有意义，失败都只打日志 —— 外观问题不该挡启动。
+            ★ 只给客户端窗口做：工作台构建里**没有** main 窗口（见下一段），
+            工作台那个用的是原生标题栏，不需要这套装饰 */
+            #[cfg(not(feature = "workbench"))]
             if let Some(win) = app.get_webview_window("main") {
                 chrome::install_unified_toolbar(&win);
                 chrome::apply_native_corners(&win);
@@ -94,11 +97,13 @@ pub fn run() {
                 eprintln!("[setup] 找不到 main 窗口，跳过窗口外观");
             }
 
-            /* 后厨工作台的第二个窗口。**刻意在运行时建，而不是写进 tauri.conf.json**：
-            配置里的 windows 数组是整体覆盖的，把工作台窗口写进一份"给工作台用的配置"
-            就得把 main 窗口也抄一遍 —— 两份声明迟早漂移。写在这里，窗口的存在与
-            feature 严格同生共死，不需要任何一份配置去声明它。
-            开不出来只警告不中止：工作台开不出来是开发者的事，不该让客户端窗口也起不来 */
+            /* 工作台窗口。**刻意在运行时建，而不是写进配置**：工作台那份配置把
+            `app.windows` 声明成**空数组** —— 于是这个构建里根本不开客户端窗口，
+            `npm run tauri:workbench:dev` 起来就只有工作台这一页（客户端本体走
+            `npm run tauri dev`，两件事从此是两条独立的路）。
+            若改成在配置里声明窗口，windows 数组是整体覆盖的，就得把客户端那份也抄一遍，
+            两份声明迟早漂移；写在这里，窗口的存在与 feature 严格同生共死。
+            开不出来只警告不中止：工作台开不出来是开发者的事，不该让进程也起不来 */
             #[cfg(feature = "workbench")]
             if let Err(e) = workbench::open_window(&handle) {
                 tracing::warn!("工作台窗口开不出来：{e}");
@@ -249,7 +254,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
-        // 后厨工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
+        // 工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
         // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。
         // 旧那 30 多个命令已全部作废：每个按钮各自写盘的话，撤销、脏计数、

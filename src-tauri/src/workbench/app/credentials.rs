@@ -96,9 +96,14 @@ pub const CREDENTIALS_FILE: &str = "credentials.json";
 /// 凭据文件格式的代次。加字段不升号、改语义才升（与 publish-account 同一条）。
 pub const CREDENTIALS_SCHEMA: u32 = 1;
 
-/// 应用标识 —— 与 `src-tauri/tauri.conf.json` 的 `identifier` 是同一份，判据
+/// 应用标识 —— 与 `src-tauri/tauri.workbench.conf.json` 的 `identifier` 是同一份，判据
 /// `the_credentials_path_is_pinned_to_the_tauri_identifier` 钉住两处不漂移。
-const APP_ID: &str = "com.mkpsupport.ease";
+///
+/// ★ 是**工作台那一份**（`.workbench` 后缀），不是客户端的：工作台与客户端是两个
+/// identifier（`tauri.workbench.conf.json` 覆盖主配置那一份），于是各有各的
+/// `appDataDir`、各有各的 WebView2 数据目录 —— 两边才能同时开。凭据跟着工作台走：
+/// 它只被工作台（GUI 与 `release` CLI）用到。
+const APP_ID: &str = "com.mkpsupport.ease.workbench";
 
 /// 凭据文件的形状（`credentials.json` 的根）。**只放秘密** —— 配置在
 /// `publish-account.json`（判据 `publish_account_config_never_stores_a_token` 反向钉住）。
@@ -614,14 +619,20 @@ mod tests {
         );
     }
 
-    /// ★ 凭据目录的 identifier 与 Tauri 配置钉在同一处：改了 `tauri.conf.json` 的
-    /// identifier 而不改 [`APP_ID`]，GUI（AppHandle 解析的 appDataDir）与文件落点
-    /// 就会各找各的 —— 源码比对当场红。
+    /// ★ 凭据目录的 identifier 与**工作台那份** Tauri 配置钉在同一处：改了
+    /// `tauri.workbench.conf.json` 的 identifier 而不改 [`APP_ID`]，GUI（AppHandle
+    /// 解析的 appDataDir）与文件落点就会各找各的 —— 源码比对当场红。
+    ///
+    /// 读的是工作台配置而不是主配置：本文件整份活在 `workbench` feature 里，
+    /// 它认的 identifier 就是工作台那一份。
     #[test]
     fn the_credentials_path_is_pinned_to_the_tauri_identifier() {
-        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
-            .expect("读得到 tauri.conf.json");
-        let v: serde_json::Value = serde_json::from_str(&conf).expect("tauri.conf.json 是 JSON");
+        let conf = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tauri.workbench.conf.json"
+        ))
+        .expect("读得到 tauri.workbench.conf.json");
+        let v: serde_json::Value = serde_json::from_str(&conf).expect("工作台配置是 JSON");
         let identifier = v["identifier"].as_str().expect("identifier 是字符串");
 
         let src = std::fs::read_to_string(concat!(
@@ -631,7 +642,7 @@ mod tests {
         .expect("读得到本文件");
         assert!(
             src.contains(identifier),
-            "凭据落点的 APP_ID（{identifier}）没跟着 tauri.conf.json 走 —— 两处必须一致"
+            "凭据落点的 APP_ID（{identifier}）没跟着 tauri.workbench.conf.json 走 —— 两处必须一致"
         );
     }
 
