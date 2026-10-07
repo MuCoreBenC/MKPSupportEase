@@ -1,7 +1,7 @@
 {
   "manifestVersion": 3,
   "channel": "stable",
-  "updated": "2026-10-06T03:39:21Z",
+  "updated": "2026-10-07T07:04:53Z",
   "minimumClient": "0.0.6",
   "version": "",
   "assets": [
@@ -29,7 +29,7 @@
       "machineId": "A1",
       "fileName": "A1-fastv3.3.toml",
       "relativePath": "delivery/mkp/presets/A1-fastv3.3.toml",
-      "sha256": "5721362dfd3dc8b3bd0e062885ff8176a62aec7a7ecf518e7191864e13edc74c",
+      "sha256": "3f98f82b42f7576ab0bd24a9efc348477476d5a1719b69fd7c41cc6595cb2d5b",
       "size": 4291
     },
     {
