@@ -48,17 +48,57 @@ use super::version;
 pub const TAG_PREFIX: &str = "v";
 /// 安装包的产品名（asset 命名与 Release 标题用它）。
 pub const PRODUCT: &str = "SupportEase";
-/// `tauri build` 的**产物根**（相对仓库根）的两个候选。
+/// `tauri build` 的**产物根**（相对仓库根）的两个标准候选。
 ///
 /// ★ 两个候选都在：本仓库的 `CARGO_TARGET_DIR` 指到**仓库根**的 `target/`（真机实测
 /// 2026-10-04 构建落在 `target/release/bundle/dmg/`），而老机器 / 别的配置下会在
 /// `src-tauri/target/…`。**按顺序找，找到哪个里有就用哪个** —— 两个都没有才报错。
+///
+/// ★ 但"这一次构建用哪个目录"以 `CARGO_TARGET_DIR`（若设了）为第一优先 ——
+/// 找产物与找它的是同一套候选，见 [`bundle_roots`]。
 pub const BUNDLE_ROOT_CANDIDATES: [&str; 2] =
     ["target/release/bundle", "src-tauri/target/release/bundle"];
 
-/// `.app` 所在的那一层（macOS 打应用内更新的 zip 用；与 [`BUNDLE_ROOT_CANDIDATES`] 同一个
-/// "仓库根 target 优先"的前提）
-pub const MACOS_BUNDLE_DIR: &str = "target/release/bundle/macos";
+/// `bundle/` 的根在盘上可能在哪 —— 按"**这一次构建**落在哪个目录"排序。
+///
+/// 1. `CARGO_TARGET_DIR`（设了才算；相对路径按仓库根解析，与 cargo 的规矩一致）——
+///    **它是本次构建真正生效的那个**：工作台 dev 带着 `target-workbench` 在跑
+///    （`scripts/tauri-workbench.mjs` 给 dev 会话设的），[`npm_build`] 的子进程原样
+///    继承同一个值，产物就落在 `<CARGO_TARGET_DIR>/release/bundle/`。2026-10-07 真机
+///    踩的"构建成功却说没产出"：包在 `target-workbench/release/bundle/nsis/` 里躺着，
+///    而这里当时只找下面两个候选；
+/// 2. 两个标准候选（没设 env、或从打包的工作台里发版时，落在这些）。
+fn bundle_roots(repo_root: &Path) -> Vec<PathBuf> {
+    bundle_roots_from(repo_root, std::env::var_os("CARGO_TARGET_DIR"))
+}
+
+/// [`bundle_roots`] 的纯函数形状（env 值当参数传）：并行测试共享进程环境，
+/// 摆弄 `CARGO_TARGET_DIR` 会互相干扰 —— 判据要能直接喂值。
+fn bundle_roots_from(repo_root: &Path, cargo_target_dir: Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = cargo_target_dir {
+        if !dir.is_empty() {
+            let target = PathBuf::from(dir);
+            let abs = if target.is_absolute() {
+                target
+            } else {
+                repo_root.join(target)
+            };
+            roots.push(abs.join("release").join("bundle"));
+        }
+    }
+    roots.extend(BUNDLE_ROOT_CANDIDATES.iter().map(|rel| repo_root.join(rel)));
+    roots
+}
+
+/// 候选目录（含构建时真正生效的那个）拼成一行 —— 错误详情里给"去哪些地方看"。
+fn bundle_candidates_text(repo_root: &Path, sub: &str) -> String {
+    bundle_roots(repo_root)
+        .iter()
+        .map(|root| root.join(sub).display().to_string())
+        .collect::<Vec<_>>()
+        .join("、")
+}
 
 /// **宿主平台打出来的那一份安装包**（第四刀只做 macOS；2026-10-07 起两端各在自己的机器上打）。
 ///
@@ -94,11 +134,11 @@ pub fn installer_plan() -> Option<InstallerPlan> {
     }
 }
 
-/// `bundle/<子目录>` 在盘上的实际位置：两个候选按顺序找，**找到哪个里有就用哪个**。
+/// `bundle/<子目录>` 在盘上的实际位置：[`bundle_roots`] 按顺序找，**找到哪个里有就用哪个**。
 fn bundle_dir(repo_root: &Path, sub: &str) -> Option<PathBuf> {
-    BUNDLE_ROOT_CANDIDATES
-        .iter()
-        .map(|root| repo_root.join(root).join(sub))
+    bundle_roots(repo_root)
+        .into_iter()
+        .map(|root| root.join(sub))
         .find(|dir| dir.is_dir())
 }
 /// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
@@ -951,13 +991,8 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     }
 
     let dir = bundle_dir(repo_root, plan.dir).ok_or_else(|| {
-        AppError::io(format!("找不到安装包目录（构建没产出 {}？）", plan.ext)).with_detail(
-            BUNDLE_ROOT_CANDIDATES
-                .iter()
-                .map(|root| repo_root.join(root).join(plan.dir).display().to_string())
-                .collect::<Vec<_>>()
-                .join("、"),
-        )
+        AppError::io(format!("找不到安装包目录（构建没产出 {}？）", plan.ext))
+            .with_detail(bundle_candidates_text(repo_root, plan.dir))
     })?;
     let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| {
@@ -1043,10 +1078,13 @@ fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
 /// 源是 `bundle/macos/<PRODUCT>.app`，产物落在 dmg 旁边：`SupportEase_<版本>_<arch>.app.zip`。
 /// **找不到 `.app` 就如实报错**（不猜路径、不拿别的东西顶替）。
 fn build_app_zip(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppError> {
-    let macos_dir = repo_root.join(MACOS_BUNDLE_DIR);
+    let macos_dir = bundle_dir(repo_root, "macos").ok_or_else(|| {
+        AppError::io("找不到 macOS 应用包目录")
+            .with_detail(bundle_candidates_text(repo_root, "macos"))
+    })?;
     let mut apps: Vec<PathBuf> = std::fs::read_dir(&macos_dir)
         .map_err(|e| {
-            AppError::io("找不到 macOS 应用包目录")
+            AppError::io("读不了 macOS 应用包目录")
                 .with_detail(format!("{}：{e}", macos_dir.display()))
         })?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -1936,9 +1974,65 @@ pub fn wb_release_history(
     })
 }
 
+/// **打开安装包目录**（发布对话框的「打开安装包目录」按钮，2026-10-07 作者要的）：
+/// 不管这一趟发没发出去，都让人能去文件管理器里看一眼产物在哪个目录
+/// （"我先去打开看一下它放在哪些位置"）。
+///
+/// 纪律与 `wb_reveal_asset` / `wb_open_external` 同一条：**只读、只开系统文件管理器、
+/// 一个应用状态都不碰**。找不到目录就如实拒绝（附候选路径 —— 判据与事务共用
+/// [`bundle_dir`]，两处不会漂移），不去猜、也不打开一个空的层。
+#[tauri::command(async)]
+pub fn wb_release_open_bundle(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::ipc::traced("wb_release_open_bundle", |_| {
+        let repo = crate::workbench::paths::repo_root();
+        let plan = installer_plan().ok_or_else(|| {
+            AppError::invalid_argument(format!(
+                "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
+                std::env::consts::OS
+            ))
+        })?;
+        let dir = bundle_dir(&repo, plan.dir).ok_or_else(|| {
+            AppError::not_found(format!(
+                "{}目录还没建出来（这次构建还没产出 {}）",
+                plan.label, plan.ext
+            ))
+            .with_detail(bundle_candidates_text(&repo, plan.dir))
+        })?;
+        tauri_plugin_opener::OpenerExt::opener(&app)
+            .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★ **候选的第一优先是 `CARGO_TARGET_DIR`**（2026-10-07 真机踩出来的）：dev 下
+    /// 工作台进程带着 `target-workbench` 在跑（`scripts/tauri-workbench.mjs` 设的），
+    /// `npm run tauri -- build` 的子进程原样继承同一个值 —— 包落在
+    /// `target-workbench/release/bundle/nsis/`，而旧候选只有两个标准根，
+    /// "构建成功"被报成"找不到安装包目录（构建没产出 exe？）"。
+    #[test]
+    fn bundle_roots_put_cargo_target_dir_first() {
+        let repo = PathBuf::from("/tmp/repo");
+
+        // 绝对路径：原样排第一 —— 后头跟着两个标准候选
+        let abs_target = std::env::temp_dir().join("mkpse-custom-target");
+        let roots = bundle_roots_from(&repo, Some(abs_target.clone().into_os_string()));
+        assert_eq!(roots[0], abs_target.join("release").join("bundle"));
+        assert_eq!(roots.len(), BUNDLE_ROOT_CANDIDATES.len() + 1);
+
+        // 相对路径：按仓库根解析（工作台进程的 cwd 就是仓库根，与 cargo 的规矩一致）
+        let roots = bundle_roots_from(&repo, Some("target-workbench".into()));
+        assert_eq!(roots[0], repo.join("target-workbench/release/bundle"));
+
+        // 没设 / 空串：两个标准候选原样，顺序不变
+        let plain = bundle_roots_from(&repo, None);
+        assert_eq!(plain, bundle_roots_from(&repo, Some("".into())));
+        assert_eq!(plain[0], repo.join(BUNDLE_ROOT_CANDIDATES[0]));
+        assert_eq!(plain[1], repo.join(BUNDLE_ROOT_CANDIDATES[1]));
+    }
 
     /// **发布提示词把事实写全**（2026-10-07）：这份文本是要贴给 AI 当任务书的 ——
     /// 少了 tag / 版本 / 产物名 / release.json 落点 / "那个 PR 要人合并"里的任何一条，

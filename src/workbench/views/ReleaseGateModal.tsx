@@ -183,6 +183,19 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
   }
 
   /**
+   * **打开安装包目录**（2026-10-07 作者要的"默认就显示"那颗）：不管这一趟发没发出去，
+   * 都能去文件管理器里看一眼产物放在哪。只读、只开系统程序；目录还没建出来时后端
+   * 如实拒绝 —— 错误详情里给候选路径（去哪些地方看）。
+   */
+  const openBundle = async () => {
+    try {
+      await wb.releaseOpenBundle()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  /**
    * run-env 拦下时的一键解法：杀掉本进程自己的 dev 监视器（后端先验明正身再动手，
    * 只杀 CLI 本尊 —— 窗口与 vite 都活着）→ 自动重跑闸。PID 以最近一次预检为准。
    */
@@ -251,6 +264,14 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
           <div className={s.footCol}>
             <span className={s.footNote}>{report.summary}</span>
             <div className={s.footBtns}>
+              <button
+                type="button"
+                className={c.btn}
+                title="在系统文件管理器里打开本平台的安装包目录 —— 产物住 cargo 的 target 里；还没构建出来时错误里会列候选路径"
+                onClick={() => void openBundle()}
+              >
+                打开安装包目录
+              </button>
               <button type="button" className={c.btn} onClick={onClose}>
                 关闭
               </button>
@@ -330,6 +351,15 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
                 : '有项没过：修完点「重新检查」'}
           </span>
           <div className={s.footBtns}>
+            <button
+              type="button"
+              className={c.btn}
+              disabled={busy}
+              title="在系统文件管理器里打开本平台的安装包目录 —— 产物住 cargo 的 target 里；还没构建出来时错误里会列候选路径"
+              onClick={() => void openBundle()}
+            >
+              打开安装包目录
+            </button>
             <button
               type="button"
               className={c.btn}

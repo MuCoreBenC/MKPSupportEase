@@ -305,6 +305,7 @@ impl Git {
     ///   2. 远端对象与本地 tag 对象**同一个** → 同一个 tag，本地直接剥皮（省一趟网络）；
     ///   3. 对象不同就把远端那**一个** ref fetch 到 `FETCH_HEAD` —— 不落 `refs/`，
     ///      与 `--tags` 会撞本地同名 tag 的 clobber 是两回事 —— 再本地剥皮。
+    ///
     ///   远端没有这个 tag → `None`。
     pub fn remote_tag_commit(
         &self,

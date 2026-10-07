@@ -1727,6 +1727,13 @@ export const wb = {
    */
   releasePrompt: (version?: string | null, notes?: string) =>
     invoke<string>('wb_release_prompt', { version: version ?? null, notes: notes ?? null }),
+  /**
+   * **打开安装包目录**（发布对话框的「打开安装包目录」按钮）：在系统文件管理器里
+   * 打开本平台的安装包目录 —— 不管这一趟发没发出去都能点，先去看一眼产物在哪。
+   *
+   * ★ 只读、只开系统程序；目录还没建出来时后端**如实拒绝**（错误详情里附候选路径）。
+   */
+  releaseOpenBundle: () => invoke<void>('wb_release_open_bundle'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

@@ -382,5 +382,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::release_tx::wb_release_kill_dev_watcher,
         // 「复制发布提示词」：把这一版要怎么发整成一段能直接贴给 AI 的任务书（只读）
         app::release_tx::wb_release_prompt,
+        // 「打开安装包目录」：不管发没发出去，都让人能去文件管理器里看产物在哪个目录（只读）
+        app::release_tx::wb_release_open_bundle,
     ])
 }
