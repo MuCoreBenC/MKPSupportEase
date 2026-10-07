@@ -544,15 +544,16 @@ fn target_of(
             .join(paths::MKP_PRESETS_DIR)
             .join(&name);
         // 相对那一段给界面看 / 给人复制：`presets/delivery/mkp/presets/<产物名>`
+        //
+        // ★ **一律用 `/` 拼**：这一段是"仓库相对路径"，不是本机路径。
+        // 直接 `PathBuf::join` + `display()` 的话，Windows 上会写出
+        // `presets\delivery\mkp/presets\A1-standard.toml`（分隔符跟着平台走），
+        // 界面上给人复制的那一段就成了另一回事 —— 而 Windows 恰好是唯一
+        // 会暴露它的平台（CI 的 windows job 跑默认 feature，这几条测试不进编译）。
         let rel = paths::delivery_root_path()
             .strip_prefix(paths::repo_root())
-            .map(|p| {
-                p.join(paths::MKP_PRESETS_DIR)
-                    .join(&name)
-                    .display()
-                    .to_string()
-            })
-            .unwrap_or_else(|_| abs.display().to_string());
+            .map(|p| slash_path(&p.join(paths::MKP_PRESETS_DIR).join(&name)))
+            .unwrap_or_else(|_| slash_path(&abs));
         Ok((name, abs, Some(rel)))
     } else {
         let abs = presets.assets.resolve(asset)?;
@@ -565,6 +566,17 @@ fn target_of(
             .to_owned();
         Ok((name, abs, None))
     }
+}
+
+/// 把一条路径写成**仓库相对路径的样子**：分隔符一律 `/`，与平台无关。
+///
+/// 只用在"给人看 / 给人复制"的那一段（检查面板的 `productPath`）。
+/// 真要去读盘的那一条是 [`target_of`] 里的 `abs`，它照旧是本机 `PathBuf`。
+fn slash_path(p: &std::path::Path) -> String {
+    p.components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// 一条资产的**检查面板**读数（见 [`AssetInspectView`]）。命令与测试共用。

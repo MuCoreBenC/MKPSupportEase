@@ -41,6 +41,10 @@ pub mod runtime;
 #[cfg(feature = "workbench")]
 pub mod workbench;
 
+/* `Manager` 只被客户端窗口那一段（`get_webview_window`）用到 —— 工作台构建里没有
+main 窗口，那段整个不编译，导入留着就是一条 unused import（CI 的 clippy 带
+`-D warnings`，警告即失败），所以它跟着同一道闸门走 */
+#[cfg(not(feature = "workbench"))]
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
