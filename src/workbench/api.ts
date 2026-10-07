@@ -622,6 +622,11 @@ export interface PreviewFile {
   lines: PreviewDiffLine[]
   added: number
   removed: number
+  /**
+   * 谁写的：`generate` = 这次生成会重算；`publish` / `software` = **本次生成不动**
+   * （manifest / source 归发布、release.json 归软件发布链）—— 界面据此说"不碰它"
+   */
+  stage: DeliveryStage
 }
 
 /** `build::PreviewReport` —— **只算不写**，生成前确认那一步 */
@@ -1635,7 +1640,6 @@ export const wb = {
   discard: () => invoke<BookView>('wb_discard'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
-  previewToml: (uid: string) => invoke<string>('wb_preview_toml', { uid }),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
   generatePreview: (scope: BuildScope) =>
     invoke<PreviewReport>('wb_generate_preview', { scope }),

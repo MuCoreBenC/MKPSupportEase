@@ -1793,15 +1793,22 @@
 }
 
 /*
- * 客户端数据包的只读正文块（C15）—— 「查看 JSON」/「查看 TOML」那一块。
- * 等宽、可滚、不高过一屏；**不给语法高亮**：这不是编辑器，是「让我看一眼」。
+ * 只读的代码/正文块（C15 的「查看 JSON / TOML」那一块）。等宽、可滚、不高过一屏。
  * 滚动条自己那条规矩仍然只有全局那一处（组件级不许写 ::-webkit-scrollbar）。
+ *
+ * ★ 2026-10-07 **加上语法高亮**：作者原话「不要都是黑色的字，变一下颜色，像 VSCode
+ * 里面的插件一样，这样能看清楚一点」—— 原先那句"这不是编辑器、不给高亮"的口径作废。
+ * 上色在 `c14/syntax.ts` 切 token、`CodeText` 拼行，这里只管字色。
+ * 用 `<pre>` 而不是 `<textarea>`：**textarea 里放不了 span**，字只能一种颜色。
  */
-.pkgJson {
+.codeText {
   width: 100%;
   min-height: 240px;
   max-height: 52vh;
+  margin: 0;
   padding: 10px;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: var(--bg-2, #f7f8f7);
   color: var(--text-1);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1809,17 +1816,55 @@
   line-height: 1.45;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  resize: none;
+}
+
+/* 一行：长行折行，别让正文块横着滚 */
+.codeLine {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /*
- * 「看整份文本」那种弹窗（`xl`）里的正文框：比默认那口高得多 —— 一份 TOML / 一份
+ * 「看整份文本」那种弹窗（`xl`）里的正文块：比默认那口高得多 —— 一份 TOML / 一份
  * 交付 JSON 几百行，框小的时候人得在一个巴掌大的窗口里一行行挪
  * （作者 2026-10-07：「这些查看的模态框能大尽量都大一点」）。
  */
-.pkgJsonFull {
+.codeTextTall {
   min-height: 62vh;
   max-height: 68vh;
+}
+
+/*
+ * 语法高亮的字色（VSCode Light+ 的取向，浅底可读）。
+ * **只在这一处定义** ——「生成前确认」的行级 diff 也 import 这一份（`c.tok_*`）。
+ */
+.tok_key {
+  color: #0451a5;
+}
+
+.tok_string {
+  color: #a31515;
+}
+
+.tok_number {
+  color: #098658;
+}
+
+.tok_keyword {
+  color: #00f;
+}
+
+.tok_comment {
+  color: #008000;
+}
+
+.tok_section {
+  color: #795e26;
+  font-weight: 500;
+}
+
+.tok_punct {
+  color: #6a737d;
 }
 
 .fileRow {

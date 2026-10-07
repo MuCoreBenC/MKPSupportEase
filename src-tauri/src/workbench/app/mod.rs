@@ -1808,7 +1808,6 @@ mod tests {
             "wb_preview_bulk",
             "wb_diff_draft",
             "wb_preflight",
-            "wb_preview_toml",
             "wb_generate_preview",
             "wb_revert_preview",
             "wb_dist_strays",

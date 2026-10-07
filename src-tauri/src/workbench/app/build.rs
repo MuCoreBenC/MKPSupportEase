@@ -77,6 +77,7 @@ use crate::workbench::domain::Level;
 use crate::workbench::paths;
 use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
+use super::delivery::DeliveryStage;
 use super::{state, with_ctx, with_ctx_mut};
 
 /// 发布渠道。原先是上游 manifest 的 `compat.channel`；上游整层删掉后，
@@ -603,17 +604,6 @@ pub(super) fn generate_with(
     })
 }
 
-/// 单独看一份产物的文本（生成前确认、看差异都用它）
-#[tauri::command(async)]
-pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
-    traced("wb_preview_toml", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.presets, &c, &d), &uid)?.text)
-        })
-    })
-}
-
 /* ---------- 生成前预演（生成前确认那一步） ---------- */
 
 /// 一份文件的预演结论。
@@ -668,6 +658,12 @@ pub struct PreviewFile {
     pub lines: Vec<DiffLine>,
     pub added: usize,
     pub removed: usize,
+    /// **谁写的**（生成时重算 / 发布时定稿 / 软件发布链）。
+    ///
+    /// 附属文件那几份不都由生成写：`manifest.json` / `source.json` 归发布、
+    /// `release.json` 归软件发布链 —— 它们也列在确认框里（作者 2026-10-07 问
+    /// 「怎么没有这」），界面照这个字段说"本次生成不动"、也不把它们算进「将写入 N 份」
+    pub stage: DeliveryStage,
 }
 
 /// 预演报告。跳过的项照实列出（与 `wb_generate` 同一套原因）。
@@ -768,6 +764,17 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
     aux.push(preview_text(catalog_rel, catalog_rel, &catalog_text, old.as_deref()));
 
+    // 生成**不动**的那几份也照实列出来（作者 2026-10-07：「那我那个生成的里面怎么没有」）——
+    // manifest / source 由发布定稿、release.json 属软件发布链，界面把它们标成"本次生成不动"。
+    for (rel, stage) in [
+        (super::delivery::MANIFEST_FILE, DeliveryStage::Publish),
+        (super::delivery::SOURCE_FILE, DeliveryStage::Publish),
+        (crate::runtime::source::RELEASE_FILE, DeliveryStage::Software),
+    ] {
+        let old = std::fs::read_to_string(delivery.join(rel)).ok();
+        aux.push(preview_frozen(rel, stage, old.as_deref()));
+    }
+
     Ok(PreviewReport {
         files,
         aux,
@@ -813,6 +820,24 @@ fn preview_text(uid: &str, file_name: &str, text: &str, existing: Option<&str>) 
         lines,
         added,
         removed,
+        stage: DeliveryStage::Generate,
+    }
+}
+
+/// 附属文件里**本次生成不动**的那几份（`manifest.json` / `source.json` 归发布定稿、
+/// `release.json` 归软件发布链）。
+///
+/// 它们也列在确认框里（作者 2026-10-07：「那我那个生成的里面怎么没有」）——
+/// 但状态**永远是「无变化」**：生成一个字节都不碰它们；详情给盘上原文，看得见就行。
+fn preview_frozen(rel: &str, stage: DeliveryStage, existing: Option<&str>) -> PreviewFile {
+    PreviewFile {
+        uid: rel.to_owned(),
+        file_name: rel.to_owned(),
+        state: DiffState::Unchanged,
+        lines: existing.map(full_lines).unwrap_or_default(),
+        added: 0,
+        removed: 0,
+        stage,
     }
 }
 

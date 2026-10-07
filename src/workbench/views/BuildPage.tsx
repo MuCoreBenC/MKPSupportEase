@@ -70,7 +70,6 @@ import type {
   BookView,
   Boot,
   DeliveryFile,
-  DeliveryStage,
   GenerateReport,
   Issue,
   IssueReport,
@@ -83,6 +82,8 @@ import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
+import CodeText from '../c14/CodeText'
+import { deliveryStageText as STAGE_TEXT } from '../c14/labels'
 import GenerateDiffModal from './GenerateDiffModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
@@ -916,13 +917,10 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               正文是<span className={s.mono}>wb_delivery_file</span>直读的**盘上原文**
               —— 交付目录里现在就长这样，发布出去的就是它（盘上没有它时按钮是灰的）。
             </p>
-            <textarea
-              className={`${s.pkgJson} ${s.pkgJsonFull}`}
-              readOnly
-              spellCheck={false}
-              rows={30}
-              aria-label="交付文件正文"
-              value={deliveryOpen.text}
+            <CodeText
+              fileName={deliveryOpen.rel}
+              text={deliveryOpen.text}
+              className={`${s.codeText} ${s.codeTextTall}`}
             />
           </div>
         </ModalC14>
@@ -937,13 +935,6 @@ const STATE_TAG: Record<string, string> = {
   stale: s.tagBuildStale,
   neverBuilt: s.tagBuildNever,
   noResources: s.tagBuildNone,
-}
-
-/** 交付文件「谁写的」那一句（`delivery::DeliveryStage` 的中文） */
-const STAGE_TEXT: Record<DeliveryStage, string> = {
-  generate: '生成时重算',
-  publish: '发布时定稿',
-  software: '软件发布链',
 }
 
 /** 字节数给人看（交付文件那一行） */

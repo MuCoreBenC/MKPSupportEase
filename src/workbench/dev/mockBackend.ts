@@ -1410,6 +1410,9 @@ export function installMockBackend() {
          * `built_catalog` 算出正文再与盘上那份比；桩里照形状造一份：
          * 改了备注 → 机型目录要变；目录的 `publishedAt` 每次生成都会换 →
          * `catalog.json` 也总是「修改」（真机同款，不是桩编的）。
+         *
+         * 后面三份 `stage` 不是 `generate`：生成**不动**它们，只列出来看得见
+         * （真机同款，见 `build::preview_frozen`）。
          */
         const ctx = (text: string[]) =>
           text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 }))
@@ -1420,6 +1423,7 @@ export function installMockBackend() {
             state: 'modified',
             added: 2,
             removed: 1,
+            stage: 'generate',
             lines: [
               { kind: 'context', text: '{', no: 1 },
               { kind: 'removed', text: '    "name": "标准版",', no: 2 },
@@ -1434,6 +1438,7 @@ export function installMockBackend() {
             state: 'unchanged',
             added: 0,
             removed: 0,
+            stage: 'generate',
             lines: ctx(['{', '  "bundles": []', '}']),
           },
           {
@@ -1442,6 +1447,7 @@ export function installMockBackend() {
             state: 'unchanged',
             added: 0,
             removed: 0,
+            stage: 'generate',
             lines: ctx(['{', '  "assets": []', '}']),
           },
           {
@@ -1450,11 +1456,39 @@ export function installMockBackend() {
             state: 'modified',
             added: 1,
             removed: 1,
+            stage: 'generate',
             lines: [
               { kind: 'removed', text: '    "publishedAt": "2026-10-06T05:46:36Z",', no: 2 },
               { kind: 'added', text: '    "publishedAt": "2026-10-07T06:37:12Z",', no: 2 },
               { kind: 'context', text: '    "files": []', no: 3 },
             ],
+          },
+          {
+            uid: 'manifest.json',
+            fileName: 'manifest.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'publish',
+            lines: ctx(['{', '  "manifestSchema": 3,', '  "assets": []', '}']),
+          },
+          {
+            uid: 'source.json',
+            fileName: 'source.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'publish',
+            lines: ctx(['{', '  "sourceSchema": 1,', '  "catalog": "catalog.json"', '}']),
+          },
+          {
+            uid: 'release.json',
+            fileName: 'release.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'software',
+            lines: ctx(['{', '  "releaseSchema": 1,', '  "version": "0.0.6"', '}']),
           },
         ]
         return Promise.resolve({ files, aux, skipped, toWrite, unchanged: unchangedN, blocked: null })
@@ -1670,33 +1704,6 @@ export function installMockBackend() {
       case 'wb_open_external':
         console.info('[mock] openExternal', args?.url)
         return Promise.resolve(undefined)
-      case 'wb_preview_toml': {
-        /*
-         * 单独看一份产物的正文。**真产物由 Rust 的 `build::render()` 出**（段名取
-         * `param.section`、共享 tomlKey 的参数合成内联表、注释按 `tomlComment`…）。
-         * 这里只把「哪一版、哪些值」按 TOML 的样子摊平，好让「查看 TOML」这个入口
-         * 在浏览器里能验收；正文头一行就写着这是开发桩，不冒充真渲染器。
-         */
-        const uid = String(args?.uid ?? '')
-        const [mid, vid] = uid.split('/')
-        const m = MACHINES.find((x) => x.id === mid)
-        if (!m || !m.versions.some((v) => v.uid === uid)) {
-          return Promise.reject({ code: 'NOT_FOUND', message: `查无此版本：${uid}`, traceId: 'mock' })
-        }
-        const out = [
-          '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
-          `# machine: ${mid}`,
-          `# variant: ${(vid ?? '').toLowerCase()}`,
-          '',
-          '[demo]',
-        ]
-        for (const pdef of PARAMS) {
-          const hit = effective(mid, uid, pdef.key)
-          if (!hit) continue
-          out.push(`${pdef.key.split('.').pop()} = ${JSON.stringify(String(hit.value))}`)
-        }
-        return Promise.resolve(`${out.join('\n')}\n`)
-      }
       case 'wb_baseline_diff':
         return Promise.resolve(BASELINE)
       case 'wb_sync_baseline': {

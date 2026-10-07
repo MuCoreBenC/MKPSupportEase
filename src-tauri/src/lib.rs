@@ -343,7 +343,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
-        app::build::wb_preview_toml,
         // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
