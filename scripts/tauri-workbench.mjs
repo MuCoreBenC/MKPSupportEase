@@ -17,7 +17,7 @@
  *    每切一次都要重编一批 crate。分开后两边各留各的指纹，来回切不再重编。
  *
  * 光分产物目录还不够：`tauri.workbench.conf.json` 里另写了 `identifier`
- * （`com.mkpsupport.ease.workbench`）与 `productName`。identifier 决定 `appDataDir`
+ * （`SupportEase-Workbench`）与 `productName`。identifier 决定 `appDataDir`
  * 与 Windows 上 WebView2 的用户数据目录（tauri 在 windows/linux 上把 webview 的
  * data_directory 指向 `app_local_data_dir()`）—— 不改它，两个窗口会抢同一个
  * WebView2 数据目录。

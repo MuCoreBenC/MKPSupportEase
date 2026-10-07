@@ -618,18 +618,30 @@ export interface PreviewFile {
   uid: string
   fileName: string
   state: DiffState
-  /** `unchanged` 时是空表 */
+  /** `unchanged` 时是整份正文（全 `context`）—— 「完整」视图要看原文，「对比」视图才说"不会重写" */
   lines: PreviewDiffLine[]
   added: number
   removed: number
+  /**
+   * 谁写的：`generate` = 这次生成会重算；`publish` / `software` = **本次生成不动**
+   * （manifest / source 归发布、release.json 归软件发布链）—— 界面据此说"不碰它"
+   */
+  stage: DeliveryStage
 }
 
 /** `build::PreviewReport` —— **只算不写**，生成前确认那一步 */
 export interface PreviewReport {
+  /** **产物**（`mkp/presets/*.toml`）—— 一份一个版本 */
   files: PreviewFile[]
+  /**
+   * **附属文件**（content 那三份 + `catalog.json`）：生成不只写 toml，它同时重算目录与清单。
+   * `uid` / `fileName` 都是交付根相对的路径。单独一格 —— 发布闸数渲染产物时读的是 `files`
+   */
+  aux: PreviewFile[]
   skipped: [string, string][]
-  /** 会写盘的份数（added + modified） */
+  /** 会写盘的**产物**份数（added + modified） */
   toWrite: number
+  /** 不变的**产物**份数 */
   unchanged: number
   /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
   blocked: string | null
@@ -908,7 +920,7 @@ export interface ReleaseOptions {
   dryRun?: boolean
   /** 建了 PR 之后接着合并（人在界面上点过「确认发布」才有） */
   merge?: boolean
-  /** 构建 macOS 安装包（默认开） */
+  /** 构建**本平台**的安装包（macOS → dmg / Windows → NSIS；默认开） */
   build?: boolean
   openReview?: boolean
 }
@@ -1400,6 +1412,21 @@ export type VersionField =
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
 export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 
+/** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
+export type DeliveryStage = 'generate' | 'publish' | 'software'
+
+/** `delivery::DeliveryFile` —— 交付集合里的一份（「发布预设」卡展出用） */
+export interface DeliveryFile {
+  /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
+  rel: string
+  /** 盘上有这一份没有 */
+  exist: boolean
+  /** 字节数（不存在 = 0） */
+  size: number
+  /** 谁写的：生成时重算 / 发布时定稿 / 软件发布链 */
+  stage: DeliveryStage
+}
+
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
 export interface BaselineDiffEntry {
   fileName: string
@@ -1613,7 +1640,6 @@ export const wb = {
   discard: () => invoke<BookView>('wb_discard'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
-  previewToml: (uid: string) => invoke<string>('wb_preview_toml', { uid }),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
   generatePreview: (scope: BuildScope) =>
     invoke<PreviewReport>('wb_generate_preview', { scope }),
@@ -1729,4 +1755,16 @@ export const wb = {
    * **不直接删**。清理完重新发布即可
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
+  /**
+   * **交付文件清单**（2026-10-07，只读）：本次交付集合里都有哪些文件、盘上有没有、
+   * 谁写的（生成时重算 / 发布时定稿 / 软件发布链）。
+   *
+   * 名单就是发布闸判残留用的那份集合 —— 界面不另拼一份"大概有这些"
+   */
+  deliveryFiles: () => invoke<DeliveryFile[]>('wb_delivery_files'),
+  /**
+   * 看一份交付文件的**盘上原文**（只读）。只认交付集合里的路径；
+   * 盘上还没有（还没生成 / 还没发布）时如实报错
+   */
+  deliveryFile: (rel: string) => invoke<string>('wb_delivery_file', { rel }),
 }

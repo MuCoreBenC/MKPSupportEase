@@ -30,3 +30,15 @@ export const placeholderText = {
   noDimensions: '这台机型还没配尺寸（占位），不参与交付',
   noBundle: '这个版本还没有套餐',
 } as const
+
+/**
+ * 一份交付文件**是谁写的**（`delivery::DeliveryStage` 的中文，2026-10-07 加）。
+ *
+ * 两处读同一份：②卡的「本次交付文件」与「生成前确认」的清单 —— 分头写的话，
+ * 同一份 `manifest.json` 在这边说「发布时定稿」、那边说别的，人就没法对着看了。
+ */
+export const deliveryStageText = {
+  generate: '生成时重算',
+  publish: '发布时定稿',
+  software: '软件发布链',
+} as const

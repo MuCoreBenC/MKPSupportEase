@@ -80,6 +80,13 @@
 | Release 形态 | 正常 **GitHub Release + `vX.Y.Z` tag + macOS 安装包** |
 | 客户端 | 只负责**发现新版本 + 展示信息 + 打开下载页**，**不做应用内自动更新** |
 
+> ★ **2026-10-07 更新（安装包那一行）**：不再"只做 macOS" —— `release_tx` 按**宿主平台**
+> 分流（macOS → dmg / Windows → NSIS `.exe`），两端各自在自己的机器上打，`installer_plan()`
+> 是唯一判据。理由：dmg 要 `hdiutil`、NSIS 要 `makensis`，交叉打不是"多传一个参数"的事。
+> 应用内更新的 `.app.zip` **仍只有 macOS 有**（客户端那条替换链替换的是 `.app`），
+> Windows 上传完 `.exe` 后在 `release.json` 里不带 `asset`，客户端走"打开下载页"。
+> 表里"GitHub Release"那一行也已由 M6 之后的几刀改成 **Gitee 发布通道**（总纲 §5-M6）。
+
 **★ 版本号是单向派生，不是"四处都写着"**：
 
 ```text

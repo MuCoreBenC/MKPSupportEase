@@ -1373,17 +1373,28 @@ export function installMockBackend() {
             continue
           }
           const fileName = `${uid.replace('/', '-')}.toml`
+          const text = [
+            '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
+            `# machine: ${uid.split('/')[0]}`,
+            '',
+            '[demo]',
+          ]
           if (builtRecords.has(uid)) {
             unchangedN += 1
-            files.push({ uid, fileName, state: 'unchanged', lines: [], added: 0, removed: 0 })
+            /*
+             * 无变化也带回整份正文（真机 `preview_one` 同款，作者 2026-10-07）：
+             * 「完整」视图要看原文，「对比」视图才说"不会重写"
+             */
+            files.push({
+              uid,
+              fileName,
+              state: 'unchanged',
+              lines: text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 })),
+              added: 0,
+              removed: 0,
+            })
           } else {
             toWrite += 1
-            const text = [
-              '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
-              `# machine: ${uid.split('/')[0]}`,
-              '',
-              '[demo]',
-            ]
             files.push({
               uid,
               fileName,
@@ -1394,7 +1405,93 @@ export function installMockBackend() {
             })
           }
         }
-        return Promise.resolve({ files, skipped, toWrite, unchanged: unchangedN, blocked: null })
+        /*
+         * 附属文件（目录与清单）—— 真机由 Rust 的 `content_json_texts` /
+         * `built_catalog` 算出正文再与盘上那份比；桩里照形状造一份：
+         * 改了备注 → 机型目录要变；目录的 `publishedAt` 每次生成都会换 →
+         * `catalog.json` 也总是「修改」（真机同款，不是桩编的）。
+         *
+         * 后面三份 `stage` 不是 `generate`：生成**不动**它们，只列出来看得见
+         * （真机同款，见 `build::preview_frozen`）。
+         */
+        const ctx = (text: string[]) =>
+          text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 }))
+        const aux = [
+          {
+            uid: 'content/machine_catalog.json',
+            fileName: 'content/machine_catalog.json',
+            state: 'modified',
+            added: 2,
+            removed: 1,
+            stage: 'generate',
+            lines: [
+              { kind: 'context', text: '{', no: 1 },
+              { kind: 'removed', text: '    "name": "标准版",', no: 2 },
+              { kind: 'added', text: '    "name": "标准版",', no: 2 },
+              { kind: 'added', text: '    "remark": "演示：改过的备注",', no: 3 },
+              { kind: 'context', text: '}', no: 4 },
+            ],
+          },
+          {
+            uid: 'content/bundles.json',
+            fileName: 'content/bundles.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'generate',
+            lines: ctx(['{', '  "bundles": []', '}']),
+          },
+          {
+            uid: 'content/assets_index.json',
+            fileName: 'content/assets_index.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'generate',
+            lines: ctx(['{', '  "assets": []', '}']),
+          },
+          {
+            uid: 'catalog.json',
+            fileName: 'catalog.json',
+            state: 'modified',
+            added: 1,
+            removed: 1,
+            stage: 'generate',
+            lines: [
+              { kind: 'removed', text: '    "publishedAt": "2026-10-06T05:46:36Z",', no: 2 },
+              { kind: 'added', text: '    "publishedAt": "2026-10-07T06:37:12Z",', no: 2 },
+              { kind: 'context', text: '    "files": []', no: 3 },
+            ],
+          },
+          {
+            uid: 'manifest.json',
+            fileName: 'manifest.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'publish',
+            lines: ctx(['{', '  "manifestSchema": 3,', '  "assets": []', '}']),
+          },
+          {
+            uid: 'source.json',
+            fileName: 'source.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'publish',
+            lines: ctx(['{', '  "sourceSchema": 1,', '  "catalog": "catalog.json"', '}']),
+          },
+          {
+            uid: 'release.json',
+            fileName: 'release.json',
+            state: 'unchanged',
+            added: 0,
+            removed: 0,
+            stage: 'software',
+            lines: ctx(['{', '  "releaseSchema": 1,', '  "version": "0.0.6"', '}']),
+          },
+        ]
+        return Promise.resolve({ files, aux, skipped, toWrite, unchanged: unchangedN, blocked: null })
       }
       case 'wb_generate': {
         const scope = args?.scope as string | { picked: string[] }
@@ -1607,33 +1704,6 @@ export function installMockBackend() {
       case 'wb_open_external':
         console.info('[mock] openExternal', args?.url)
         return Promise.resolve(undefined)
-      case 'wb_preview_toml': {
-        /*
-         * 单独看一份产物的正文。**真产物由 Rust 的 `build::render()` 出**（段名取
-         * `param.section`、共享 tomlKey 的参数合成内联表、注释按 `tomlComment`…）。
-         * 这里只把「哪一版、哪些值」按 TOML 的样子摊平，好让「查看 TOML」这个入口
-         * 在浏览器里能验收；正文头一行就写着这是开发桩，不冒充真渲染器。
-         */
-        const uid = String(args?.uid ?? '')
-        const [mid, vid] = uid.split('/')
-        const m = MACHINES.find((x) => x.id === mid)
-        if (!m || !m.versions.some((v) => v.uid === uid)) {
-          return Promise.reject({ code: 'NOT_FOUND', message: `查无此版本：${uid}`, traceId: 'mock' })
-        }
-        const out = [
-          '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
-          `# machine: ${mid}`,
-          `# variant: ${(vid ?? '').toLowerCase()}`,
-          '',
-          '[demo]',
-        ]
-        for (const pdef of PARAMS) {
-          const hit = effective(mid, uid, pdef.key)
-          if (!hit) continue
-          out.push(`${pdef.key.split('.').pop()} = ${JSON.stringify(String(hit.value))}`)
-        }
-        return Promise.resolve(`${out.join('\n')}\n`)
-      }
       case 'wb_baseline_diff':
         return Promise.resolve(BASELINE)
       case 'wb_sync_baseline': {
@@ -1650,6 +1720,46 @@ export function installMockBackend() {
         const n = mockStrays.length
         mockStrays = []
         return Promise.resolve(n)
+      }
+      /*
+       * 交付文件清单 / 读一份（2026-10-07）。真机名单 = Rust 的 `delivery_expected_set`
+       * （与发布闸判残留同一份）；桩里照它的形状造一份，好让「发布预设」卡在浏览器里
+       * 能验收。产物按 `builtRecords` 判在不在，附属文件按下表。
+       */
+      case 'wb_delivery_files': {
+        const rows = buildBook().buildRows as { mkpFile: string | null }[]
+        const presets = rows
+          .filter((r) => r.mkpFile !== null)
+          .map((r) => ({ rel: `mkp/presets/${r.mkpFile}`, exist: true, size: 2048, stage: 'generate' }))
+        const others = [
+          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate' },
+          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate' },
+          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate' },
+          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate' },
+          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish' },
+          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish' },
+        ]
+        return Promise.resolve([...presets, ...others])
+      }
+      case 'wb_delivery_file': {
+        const rel = String(args?.rel ?? '')
+        const demos: Record<string, string> = {
+          'content/machine_catalog.json': '{\n  "brands": [],\n  "machines": []\n}\n',
+          'content/bundles.json': '{\n  "bundles": []\n}\n',
+          'content/assets_index.json': '{\n  "assets": []\n}\n',
+          'catalog.json': '{\n  "catalogSchema": 1,\n  "files": []\n}\n',
+          'manifest.json': '{\n  "manifestSchema": 3,\n  "assets": []\n}\n',
+          'source.json': '{\n  "sourceSchema": 1,\n  "catalog": "catalog.json"\n}\n',
+        }
+        const text = demos[rel]
+        if (text === undefined) {
+          return Promise.reject({
+            code: 'NOT_FOUND',
+            message: `盘上还没有这一份：${rel}`,
+            traceId: 'mock',
+          })
+        }
+        return Promise.resolve(text)
       }
       case 'wb_trash':
         return Promise.resolve(TRASH)

@@ -1,5 +1,5 @@
 /*
- * 工作台 C15 增量探针：**生成与发布页**（发布物 / 查看 TOML / 生成前确认 / 产物名单）
+ * 工作台 C15 增量探针：**生成与发布页**（交付文件 / 查看交付文件 / 生成前确认 / 产物名单）
  * （2026-10-04：「说明书 JSON / 版本轴 / 云端那一格」随 `ClientDataPackage` 退役一并去掉）
  * 与**参数台的两处版面增量**（模式开关整卡收起 · 抽屉说清类型）。
  *
@@ -124,7 +124,7 @@ console.log('-'.repeat(96))
 
 /* ============================ 一、生成与发布 ============================ */
 
-console.log('\n【一】生成与发布（发布物 / 查看 TOML / 生成前确认 / 产物名单）')
+console.log('\n【一】生成与发布（交付文件 / 查看交付文件 / 生成前确认 / 产物名单）')
 /* 用 title 认导航项：带徽标的那几项可访问名字会多出一个数字（「生成与发布 1」） */
 await page.locator('button[title="生成与发布"]').first().click()
 await until(() => hasText('② 发布预设'))
@@ -175,26 +175,29 @@ if (!dlgSeen || !hasList) problems.push('生成前没有弹 diff 确认框')
 const beforeConfirm = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '（没找到）'
 say(beforeConfirm === 'preset.toml × 1 份', `确认之前不写盘，产物名单还是开局那份：${beforeConfirm}`)
 if (beforeConfirm !== 'preset.toml × 1 份') problems.push('还没确认就把盘写了（预演应是只读）')
-/* —— 头部「完整 / 对比」切换（2026-10-02）：默认看完整正文，想看差异再切「对比」 —— */
+/* —— 清单里也该有附属文件（2026-10-07）：生成不只写 toml，目录与清单也列出来 —— */
+const auxRow = await page.locator('[role="dialog"] nav button', { hasText: 'catalog.json' }).count()
+say(auxRow > 0, `清单里列着附属文件（catalog.json ×${auxRow}）—— 生成同时重算目录与清单`)
+if (auxRow === 0) problems.push('清单里没有附属文件（catalog.json）')
+/* —— 头部「完整 / 对比」切换（2026-10-07：**默认对比**，想看整份原文再切「完整」） —— */
 const viewGroup = page.locator('[role="dialog"] [aria-label="详情显示方式"]')
 const hasToggle = (await viewGroup.count()) > 0
 const pressedOn = hasToggle ? await viewGroup.locator('[aria-pressed="true"]').first().textContent() : ''
-say(hasToggle && pressedOn === '完整', `详情默认「完整」视图（标题行右侧切换）：${pressedOn || '（没有切换）'}`)
-if (!hasToggle || pressedOn !== '完整') problems.push('详情切换缺失或默认不是「完整」')
-await viewGroup.getByRole('button', { name: '对比', exact: true }).click()
+say(hasToggle && pressedOn === '对比', `详情默认「对比」视图（标题行右侧切换）：${pressedOn || '（没有切换）'}`)
+if (!hasToggle || pressedOn !== '对比') problems.push('详情切换缺失或默认不是「对比」')
 const diffSeen = await until(
   async () =>
     (await page.locator('[role="dialog"] [class*="lineAdd"], [role="dialog"] [class*="lineDel"]').count()) > 0,
   3000,
 )
-say(diffSeen, '切到「对比」看到行级 diff（整份摊开、不省略）')
+say(diffSeen, '默认「对比」就摆着行级 diff（整份摊开、不省略）')
 if (!diffSeen) problems.push('对比视图没有行级 diff')
 await viewGroup.getByRole('button', { name: '完整', exact: true }).click()
 const fullBack = await until(
   async () => (await page.locator('[role="dialog"] [class*="lineCtx"]').count()) > 0,
   3000,
 )
-say(fullBack, '切回「完整」恢复新文件全文（无红绿底）')
+say(fullBack, '切到「完整」看到新文件全文（无红绿底）')
 if (!fullBack) problems.push('完整视图没有全文')
 if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-generate-diff.png` })
 /* 点确认 → 框切成结果页 → 点「完成」关掉 */
@@ -210,13 +213,13 @@ const artLine = /preset\.toml × \d+ 份/.exec(text(await mainText()))?.[0] ?? '
 say(gotArtifacts, `确认生成之后：${artLine}`)
 if (!gotArtifacts) problems.push('生成之后产物名单没跟上')
 
-await page.getByRole('button', { name: '查看 TOML', exact: true }).first().click()
-await page.waitForSelector('[role="dialog"] textarea', { timeout: 5000 })
-const toml = await page.evaluate(() => document.querySelector('[role="dialog"] textarea')?.value ?? '')
-const tomlOk = toml.includes('# machine:') && toml.includes('[demo]')
-say(tomlOk, `查看 TOML：${toml.length} 字符（正文来自后端那条 wb_preview_toml）`, toml.split('\n')[0])
-if (!tomlOk) problems.push('查看 TOML 没拿到正文')
-if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-toml.png` })
+await page.getByRole('button', { name: '查看', exact: true }).first().click()
+await page.waitForSelector('[role="dialog"] pre', { timeout: 5000 })
+const json = await page.evaluate(() => document.querySelector('[role="dialog"] pre')?.textContent ?? '')
+const jsonOk = json.length > 0 && json.includes('{')
+say(jsonOk, `查看交付文件：${json.length} 字符（正文由 wb_delivery_file 直读盘上原文）`, json.split('\n')[0])
+if (!jsonOk) problems.push('查看交付文件没拿到正文')
+if (wantShots) await page.screenshot({ path: `${shotDir}/wb-build-delivery-file.png` })
 await page.getByRole('button', { name: '关闭', exact: true }).first().click()
 await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 })
 

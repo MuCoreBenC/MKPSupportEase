@@ -21,12 +21,20 @@
  *   │ 无变化的折叠 │ │ │
  *   └──────────┘ └──────────────────────┘
  *
- * # 「完整 / 对比」切换（作者 2026-10-02，默认完整）
+ * # 清单分两组：预设产物 / 目录与清单（作者 2026-10-07）
+ *
+ * 生成不只写 toml —— 它同时重算目录与清单（`content` 那三份 + `catalog.json`）。
+ * 作者原话：「我希望到时候它还能显示一个会变化的 Json……也可以显示出来，也是在这个
+ * 生成的这个模态框里面显示出来」「可以再多分一栏出来」。于是清单里多出一组
+ * **目录与清单**（后端的 `PreviewReport.aux`），点开与产物同一种看法（完整 / 对比）。
+ * 两组分开列：附属文件不带「版本」概念，混在产物里读不出谁是谁。
+ *
+ * # 「完整 / 对比」切换（作者 2026-10-02 加；**默认改成「对比」2026-10-07**）
  *
  * 作者原话：「diff 的效果我不喜欢……加一个切换吧，就看完整的不看对比的」。于是标题行
  * 右侧多一个两段切换（`Modal` 的 `headerExtra`）：
- *   · 完整（默认）—— 选中那份的**新文件全文**，逐行带新文件行号，没有红绿底；
- *   · 对比 —— 上面的行级 diff。
+ *   · **对比（默认）** —— 上面的行级 diff。2026-10-07 作者改口：「默认显示对比里面的好吧」；
+ *   · 完整 —— 选中那份的**新文件全文**，逐行带新文件行号，没有红绿底。
  * 行号口径也顺手修了：后端 `removed` 行记的是**旧文件行号**、其余记**新文件行号**，
  * 以前混排在同一列里（39、40 然后跳 41、42），人看不懂 —— 现在 `removed` 行行号
  * 槽留空（「−」符已经说明了它是删掉的），列里只剩一套「新文件第几行」的语义。
@@ -38,9 +46,12 @@
  * 三档状态（后端 `DiffState`）：
  *   · 新增    磁盘上还没有这一份 —— 正文**全绿**，不折叠（没变化可言）
  *   · 修改    有，但这次算出来的不一样 —— 行级 diff，一删一增（删在前、增在后，与 git 同序）
- *   · 无变化  正文相同（只有头部时间戳那行会不同），不会重写 —— 只在清单里占一行，
- *             详情写「没有变化」。判据与真生成的「跳过」同一道（`same_payload`）：
- *             预演说「要写」而真生成跳过，「将写入 N 份」就是假的
+ *   · 无变化  正文相同（只有头部时间戳那行会不同），不会重写。判据与真生成的
+ *             「跳过」同一道（`same_payload`）：预演说「要写」而真生成跳过，
+ *             「将写入 N 份」就是假的。
+ *             **详情照给全文**（作者 2026-10-07：「就算它一模一样不会重写，我也希望
+ *             看一个完整的，然后对比的时候才写这个文案」）—— 选中它：「完整」视图
+ *             摊开整份素底正文，「对比」视图才写「这一份和磁盘上的一模一样，不会重写」
  *
  * # 确认之后：框不关，换成结果页
  *
@@ -56,6 +67,9 @@
 
 import { useMemo, useState } from 'react'
 import ModalC14 from '../c14/ModalC14'
+import { CodeLine } from '../c14/CodeText'
+import { highlightLines, langOf } from '../c14/syntax'
+import { deliveryStageText as STAGE_TEXT } from '../c14/labels'
 import type { GenerateReport, PreviewDiffLine, PreviewFile, PreviewReport } from '../api'
 import c from '../c14.module.css'
 import s from './GenerateDiffModal.module.css'
@@ -79,6 +93,8 @@ const STATE_TEXT: Record<PreviewFile['state'], string> = {
   unchanged: '无变化',
 }
 
+
+
 /** 一份文件在清单里的排序权重：有变化（修改 / 新增）在前，无变化在最后 */
 function rankOf(state: PreviewFile['state']): number {
   return state === 'unchanged' ? 1 : 0
@@ -92,10 +108,13 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   const [sel, setSel] = useState<string | null>(null)
   /** 无变化那一组展开没有 */
   const [showUnchanged, setShowUnchanged] = useState(false)
-  /** 详情视图：作者 2026-10-02 —— 默认看完整的，想看差异再切「对比」 */
-  const [view, setView] = useState<DetailView>('full')
+  /** 附属文件里"无变化"那一组展开没有（与产物那组各管各的） */
+  const [showAuxUnchanged, setShowAuxUnchanged] = useState(false)
+  /** 详情视图：作者 2026-10-07 —— **默认看对比**，想看整份原文再切「完整」 */
+  const [view, setView] = useState<DetailView>('diff')
 
   const files = useMemo(() => report?.files ?? [], [report])
+  const aux = useMemo(() => report?.aux ?? [], [report])
 
   /*
    * 清单顺序：有变化的在前（作者「变的先显示」），无变化的折成最后一组。
@@ -103,11 +122,66 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
    */
   const changed = files.filter((f) => rankOf(f.state) === 0)
   const unchanged = files.filter((f) => rankOf(f.state) === 1)
+  /*
+   * 附属文件（目录与清单）再分两截：
+   *   · `generate` —— 生成会一并重算的那几份，照常给「要不要写」的结论；
+   *   · 其余（发布定稿 / 软件发布链）—— **本次生成不动**，只照实列出来看得见。
+   */
+  const auxGen = aux.filter((f) => f.stage === 'generate')
+  const auxFrozen = aux.filter((f) => f.stage !== 'generate')
+  const auxChanged = auxGen.filter((f) => rankOf(f.state) === 0)
+  const auxUnchanged = auxGen.filter((f) => rankOf(f.state) === 1)
 
-  /** 默认选中：第一份有变化的；没有就第一份无变化的 */
-  const current = files.find((f) => f.fileName === sel) ?? changed[0] ?? unchanged[0] ?? null
+  /** 默认选中：第一份有变化的（产物优先，再轮到附属文件）；没有就第一份无变化的 */
+  const current =
+    [...files, ...aux].find((f) => f.fileName === sel) ??
+    changed[0] ??
+    auxChanged[0] ??
+    unchanged[0] ??
+    auxUnchanged[0] ??
+    null
 
-  const total = files.length
+  /**
+   * 会写盘 / 不会写盘的总份数（产物 + **生成会写的**附属文件）。
+   * 「本次生成不动」的那几份不算 —— 把它们算进"将写入 N 份"就是虚报。
+   */
+  const willWrite = (report?.toWrite ?? 0) + auxChanged.length
+  const stays = (report?.unchanged ?? 0) + auxUnchanged.length
+
+  const total = files.length + aux.length
+
+  /** 清单里的一行。产物与附属文件同一种长相 —— 两处各写一份迟早会长成两种 */
+  const item = (f: PreviewFile) => {
+    const frozen = f.stage !== 'generate'
+    return (
+      <button
+        key={f.fileName}
+        type="button"
+        className={`${f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}${frozen ? ` ${s.itemFrozen}` : ''}`}
+        aria-current={f.fileName === current?.fileName}
+        title={f.fileName}
+        onClick={() => setSel(f.fileName)}
+      >
+        <span className={s.itemName}>{f.fileName}</span>
+        <span className={s.itemMeta}>
+          {frozen ? (
+            /* 生成不动它 —— 说「无变化」会让人以为"生成算过它"，那是假的 */
+            <span className={s.stateFrozen}>{STAGE_TEXT[f.stage]}</span>
+          ) : (
+            <>
+              <span className={s[`state_${f.state}`]}>{STATE_TEXT[f.state]}</span>
+              {f.state !== 'unchanged' && (
+                <span className={s.counts}>
+                  <span className={s.add}>+{f.added}</span>
+                  {f.removed > 0 && <span className={s.del}>−{f.removed}</span>}
+                </span>
+              )}
+            </>
+          )}
+        </span>
+      </button>
+    )
+  }
 
   /* ---------- 结果页（已经生成完） ---------- */
   if (done !== null) {
@@ -194,12 +268,12 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
         ? '有阻断，不能生成'
         : total === 0
           ? '没有可生成的项'
-          : `将写入 ${report.toWrite} 份 · ${unchanged.length} 份无变化`
+          : `将写入 ${willWrite} 份 · ${stays} 份无变化`
 
   return (
     <ModalC14
       open
-      size="lg"
+      size="xl"
       title="生成前确认"
       subtitle={subtitle}
       closeOnScrim={false}
@@ -227,9 +301,9 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
       footer={
         <>
           <span className={s.footNote}>
-            {changed.length > 0 ? (
+            {willWrite > 0 ? (
               <>
-                有变化的 <b>{changed.length}</b> 份会覆盖磁盘上同名文件
+                有变化的 <b>{willWrite}</b> 份会覆盖磁盘上同名文件
               </>
             ) : (
               <>没有哪一份会变 —— 点了也不会重写任何文件</>
@@ -263,29 +337,10 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
 
       {report !== null && blocked === null && (
         <div className={s.panes}>
-          {/* 左：文件清单 */}
+          {/* 左：文件清单（产物一组 / 目录与清单一组） */}
           <nav className={s.list} aria-label="要生成的文件">
-            {changed.map((f) => (
-              <button
-                key={f.fileName}
-                type="button"
-                className={f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}
-                aria-current={f.fileName === current?.fileName}
-                onClick={() => setSel(f.fileName)}
-              >
-                <span className={s.itemName}>{f.fileName}</span>
-                <span className={s.itemMeta}>
-                  <span className={s[`state_${f.state}`]}>{STATE_TEXT[f.state]}</span>
-                  {f.state !== 'unchanged' && (
-                    <span className={s.counts}>
-                      <span className={s.add}>+{f.added}</span>
-                      {f.removed > 0 && <span className={s.del}>−{f.removed}</span>}
-                    </span>
-                  )}
-                </span>
-              </button>
-            ))}
-
+            {files.length > 0 && <div className={s.listGroup}>预设产物</div>}
+            {changed.map(item)}
             {unchanged.length > 0 && (
               <>
                 <button
@@ -299,23 +354,38 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   </span>
                   {unchanged.length} 份无变化
                 </button>
-                {showUnchanged &&
-                  unchanged.map((f) => (
-                    <button
-                      key={f.fileName}
-                      type="button"
-                      className={f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}
-                      aria-current={f.fileName === current?.fileName}
-                      onClick={() => setSel(f.fileName)}
-                    >
-                      <span className={s.itemName}>{f.fileName}</span>
-                      <span className={s.itemMeta}>
-                        <span className={s.state_unchanged}>无变化</span>
-                      </span>
-                    </button>
-                  ))}
+                {showUnchanged && unchanged.map(item)}
               </>
             )}
+
+            {auxGen.length > 0 && <div className={s.listGroup}>目录与清单</div>}
+            {auxChanged.map(item)}
+            {auxUnchanged.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className={s.groupToggle}
+                  aria-expanded={showAuxUnchanged}
+                  onClick={() => setShowAuxUnchanged((v) => !v)}
+                >
+                  <span className={s.caret} aria-hidden>
+                    ▸
+                  </span>
+                  {auxUnchanged.length} 份无变化
+                </button>
+                {showAuxUnchanged && auxUnchanged.map(item)}
+              </>
+            )}
+
+            {/*
+              生成**不动**的那几份（manifest / source 归发布、release.json 归软件发布链）。
+              作者 2026-10-07 问「那我那个生成的里面怎么没有」—— ②卡列全了七份，这里也列全，
+              只是标明这次不碰它们。
+            */}
+            {auxFrozen.length > 0 && (
+              <div className={s.listGroup}>发布时定稿（本次生成不动）</div>
+            )}
+            {auxFrozen.map(item)}
 
             {total === 0 && <p className={s.empty}>没有可生成的项</p>}
           </nav>
@@ -329,20 +399,37 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                 <header className={s.detailHead}>
                   <span className={s.detailName}>{current.fileName}</span>
                   <span className={s.detailMeta}>
-                    <span className={s[`state_${current.state}`]}>{STATE_TEXT[current.state]}</span>
-                    {current.state !== 'unchanged' && (
-                      <span className={s.counts}>
-                        <span className={s.add}>+{current.added}</span>
-                        {current.removed > 0 && <span className={s.del}>−{current.removed}</span>}
-                      </span>
+                    {current.stage !== 'generate' ? (
+                      <span className={s.stateFrozen}>{STAGE_TEXT[current.stage]}</span>
+                    ) : (
+                      <>
+                        <span className={s[`state_${current.state}`]}>{STATE_TEXT[current.state]}</span>
+                        {current.state !== 'unchanged' && (
+                          <span className={s.counts}>
+                            <span className={s.add}>+{current.added}</span>
+                            {current.removed > 0 && <span className={s.del}>−{current.removed}</span>}
+                          </span>
+                        )}
+                      </>
                     )}
                   </span>
                 </header>
 
-                {current.state === 'unchanged' ? (
+                {/* 「对比」视图对着两份"没有 diff 可比"的东西各说一句自己的话；
+                    「完整」视图一律摊开原文（含盘上现状） */}
+                {view === 'diff' && current.stage !== 'generate' ? (
+                  <p className={s.empty}>
+                    这一份由{STAGE_TEXT[current.stage]}负责 —— 本次生成不会动它。
+                  </p>
+                ) : view === 'diff' && current.state === 'unchanged' ? (
                   <p className={s.empty}>这一份和磁盘上的一模一样，不会重写。</p>
                 ) : (
-                  <DiffLines lines={current.lines} mode={current.state} view={view} />
+                  <DiffLines
+                    lines={current.lines}
+                    mode={current.state}
+                    view={view}
+                    fileName={current.fileName}
+                  />
                 )}
               </>
             )}
@@ -361,15 +448,21 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
  * 行号口径：`removed` 行在后端记的是**旧文件**行号，其余记**新文件**行号 ——
  * 所以 `removed` 行的行号槽留空（「−」符已经说明它是删掉的），保证一列里
  * 只有一套「新文件第几行」的语义，不再出现 39、40 跳 41、42 的看不懂。
+ *
+ * **语法上色**（2026-10-07）：`fileName` 只为认文法（`.json` / `.toml`）——
+ * 作者原话「不要都是黑色的字，变一下颜色，像 VSCode 里面的插件一样」。
+ * 上色类名与只看盘上原文那个块共用一份（`c14.module.css` 的 `tok_*`）。
  */
 function DiffLines({
   lines,
   mode,
   view,
+  fileName,
 }: {
   lines: PreviewDiffLine[]
   mode: PreviewFile['state']
   view: DetailView
+  fileName: string
 }) {
   /*
    * 完整视图的行 = 丢弃 `removed`（旧文件才有的行），剩下的 context / added
@@ -385,14 +478,31 @@ function DiffLines({
     [lines],
   )
 
+  /*
+   * 两套视图的 token 各自算：`full` 丢了 removed 行，行数与后端给的那一份对不上 ——
+   * 共用一个 token 列表就会串行（一行的颜色贴到另一行上）。
+   * 认不出文法（`null`）⇒ 原样渲染，一个字都不动。
+   */
+  const lang = langOf(fileName)
+  const fullTokens = useMemo(
+    () => (lang === null ? null : highlightLines(fullRows.map((l) => l.text), lang)),
+    [lang, fullRows],
+  )
+  const diffTokens = useMemo(
+    () => (lang === null ? null : highlightLines(lines.map((l) => l.text), lang)),
+    [lang, lines],
+  )
+
   if (view === 'full') {
     return (
       <div className={s.diff}>
-        {fullRows.map((l) => (
+        {fullRows.map((l, i) => (
           <div key={l.no} className={s.lineCtx}>
             <span className={s.gutter} aria-hidden />
             <span className={s.lineNo}>{l.no}</span>
-            <code className={s.lineTxt}>{l.text === '' ? '\u00a0' : l.text}</code>
+            <code className={s.lineTxt}>
+              <CodeLine line={l.text} tokens={fullTokens?.[i]} />
+            </code>
           </div>
         ))}
       </div>
@@ -409,7 +519,9 @@ function DiffLines({
             {l.kind === 'added' ? '+' : l.kind === 'removed' ? '−' : ''}
           </span>
           <span className={s.lineNo}>{l.kind === 'removed' ? '' : l.no}</span>
-          <code className={s.lineTxt}>{l.text === '' ? '\u00a0' : l.text}</code>
+          <code className={s.lineTxt}>
+            <CodeLine line={l.text} tokens={diffTokens?.[i]} />
+          </code>
         </div>
       ))}
     </div>

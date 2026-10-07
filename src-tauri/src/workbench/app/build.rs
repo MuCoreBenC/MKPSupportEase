@@ -77,6 +77,7 @@ use crate::workbench::domain::Level;
 use crate::workbench::paths;
 use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 
+use super::delivery::DeliveryStage;
 use super::{state, with_ctx, with_ctx_mut};
 
 /// 发布渠道。原先是上游 manifest 的 `compat.channel`；上游整层删掉后，
@@ -603,17 +604,6 @@ pub(super) fn generate_with(
     })
 }
 
-/// 单独看一份产物的文本（生成前确认、看差异都用它）
-#[tauri::command(async)]
-pub fn wb_preview_toml(uid: String) -> Result<String, AppError> {
-    traced("wb_preview_toml", |_| {
-        with_ctx(|ctx| {
-            let (c, d, _) = state(ctx)?;
-            Ok(render(&Book::new(&ctx.presets, &c, &d), &uid)?.text)
-        })
-    })
-}
-
 /* ---------- 生成前预演（生成前确认那一步） ---------- */
 
 /// 一份文件的预演结论。
@@ -662,21 +652,36 @@ pub struct PreviewFile {
     pub uid: String,
     pub file_name: String,
     pub state: DiffState,
-    /// 行级差异（含未变的上下文行）—— `unchanged` 时是空表（界面只显示"无变化"）
+    /// 行级差异（含未变的上下文行）。`unchanged` 时是**整份正文**（全 `context`）——
+    /// 确认框的「完整」视图要能看原文（作者 2026-10-07：「就算它一模一样不会重写，
+    /// 我也希望看一个完整的」）
     pub lines: Vec<DiffLine>,
     pub added: usize,
     pub removed: usize,
+    /// **谁写的**（生成时重算 / 发布时定稿 / 软件发布链）。
+    ///
+    /// 附属文件那几份不都由生成写：`manifest.json` / `source.json` 归发布、
+    /// `release.json` 归软件发布链 —— 它们也列在确认框里（作者 2026-10-07 问
+    /// 「怎么没有这」），界面照这个字段说"本次生成不动"、也不把它们算进「将写入 N 份」
+    pub stage: DeliveryStage,
 }
 
 /// 预演报告。跳过的项照实列出（与 `wb_generate` 同一套原因）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewReport {
+    /// **产物**（`mkp/presets/*.toml`）—— 一份一个版本
     pub files: Vec<PreviewFile>,
+    /// **附属文件**（`content/*.json` + `catalog.json`，`uid` / `fileName` 都是交付根相对的路径）。
+    ///
+    /// ★ 2026-10-07 加：生成不只写 toml —— 它同时重算目录与清单。作者原话
+    /// 「我希望到时候它还能显示一个会变化的 Json」。单独一格而不是并进 `files`：
+    /// 发布闸的 ⑤「能不能渲染」数的是 `files`（渲染产物），口径不能混。
+    pub aux: Vec<PreviewFile>,
     pub skipped: Vec<(String, String)>,
-    /// 会被写盘的份数（`added` + `modified`）
+    /// 会被写盘的**产物**份数（`added` + `modified`）
     pub to_write: usize,
-    /// 不变的份数
+    /// 不变的**产物**份数
     pub unchanged: usize,
     /// 有阻断时的唯一原因（与 `wb_generate` 同一道闸，前端照它压按钮）
     pub blocked: Option<String>,
@@ -713,6 +718,7 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     if let Some(b) = report.first_block() {
         return Ok(PreviewReport {
             files: Vec::new(),
+            aux: Vec::new(),
             skipped: Vec::new(),
             to_write: 0,
             unchanged: 0,
@@ -721,16 +727,15 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     }
 
     let (todo, skipped) = planned_todos(&book, scope);
-    let delivery_root = paths::delivery_root_path()
-        .join(super::delivery::MKP_DIR)
-        .join("presets");
+    let delivery = paths::delivery_root_path();
+    let presets_dir = delivery.join(super::delivery::MKP_DIR).join("presets");
 
     let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
     let mut to_write = 0usize;
     let mut unchanged = 0usize;
     for uid in &todo {
         let r = render(&book, uid)?;
-        let existing = std::fs::read_to_string(delivery_root.join(&r.file_name)).ok();
+        let existing = std::fs::read_to_string(presets_dir.join(&r.file_name)).ok();
         let pf = preview_one(&r, existing.as_deref());
         match pf.state {
             DiffState::Unchanged => unchanged += 1,
@@ -739,8 +744,49 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
         files.push(pf);
     }
 
+    // ★ **附属文件也预演**（作者 2026-10-07：「我希望到时候它还能显示一个会变化的 Json」）。
+    //
+    // 生成不只写 toml —— 它同时重算目录与清单（content 那三份 + `catalog.json`）。
+    // 那几份也在确认框里列出来，比法与产物同一处（`preview_text`）。
+    //
+    // 正文由 `delivery` 那两台**纯函数**给出（与真生成同一处构造）；
+    // 时间戳就用当下这一个（真生成也在这一刻取，预演不另编一个）。
+    // ⚠ `catalog.json` 头里有 `publishedAt`：它每次生成都会换，所以它**每次都会显示"修改"**
+    // —— 那是实话（`atomic_write` 比的是整份字节，时间戳变了就重写），不是误报。
+    let stamp = clock::now_iso8601();
+    let mut aux: Vec<PreviewFile> = Vec::new();
+    for (rel, text) in super::delivery::content_json_texts(&book)? {
+        let old = std::fs::read_to_string(delivery.join(rel)).ok();
+        aux.push(preview_text(rel, rel, &text, old.as_deref()));
+    }
+    let catalog_text =
+        super::delivery::built_catalog(&delivery, &book, &stamp)?.to_pretty_json()?;
+    let catalog_rel = super::delivery::NEW_CATALOG_FILE;
+    let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
+    aux.push(preview_text(
+        catalog_rel,
+        catalog_rel,
+        &catalog_text,
+        old.as_deref(),
+    ));
+
+    // 生成**不动**的那几份也照实列出来（作者 2026-10-07：「那我那个生成的里面怎么没有」）——
+    // manifest / source 由发布定稿、release.json 属软件发布链，界面把它们标成"本次生成不动"。
+    for (rel, stage) in [
+        (super::delivery::MANIFEST_FILE, DeliveryStage::Publish),
+        (super::delivery::SOURCE_FILE, DeliveryStage::Publish),
+        (
+            crate::runtime::source::RELEASE_FILE,
+            DeliveryStage::Software,
+        ),
+    ] {
+        let old = std::fs::read_to_string(delivery.join(rel)).ok();
+        aux.push(preview_frozen(rel, stage, old.as_deref()));
+    }
+
     Ok(PreviewReport {
         files,
+        aux,
         skipped,
         to_write,
         unchanged,
@@ -748,13 +794,25 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     })
 }
 
-/// 比一份：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
-/// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`
+/// 比一份产物：见 [`PreviewFile`] 的三档状态。
 fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
+    preview_text(&r.uid, &r.file_name, &r.text, existing)
+}
+
+/// 比一份文本：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
+/// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`。
+///
+/// **无变化也把正文带回去**（作者 2026-10-07）：确认框的「完整」视图要看整份原文 ——
+/// 「就算它一模一样不会重写，我也希望看一个完整的」。所以这里给 [`full_lines`]
+/// （全 `context`、`added` / `removed` 都是 0），「不会重写」那句只在**对比**视图说。
+///
+/// 产物（`preview_one`）与**附属文件**（目录 JSON）都走这一处 —— 两边各写一套比法，
+/// 迟早有一边把"会写"报成"不会写"。
+fn preview_text(uid: &str, file_name: &str, text: &str, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
-        None => (DiffState::Added, diff_added(&r.text)),
-        Some(old) if same_payload(old, &r.text) => (DiffState::Unchanged, Vec::new()),
-        Some(old) => (DiffState::Modified, diff_lines(old, &r.text)),
+        None => (DiffState::Added, diff_added(text)),
+        Some(old) if same_payload(old, text) => (DiffState::Unchanged, full_lines(text)),
+        Some(old) => (DiffState::Modified, diff_lines(old, text)),
     };
     let added = lines
         .iter()
@@ -765,12 +823,30 @@ fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
         .filter(|l| l.kind == DiffLineKind::Removed)
         .count();
     PreviewFile {
-        uid: r.uid.clone(),
-        file_name: r.file_name.clone(),
+        uid: uid.to_owned(),
+        file_name: file_name.to_owned(),
         state,
         lines,
         added,
         removed,
+        stage: DeliveryStage::Generate,
+    }
+}
+
+/// 附属文件里**本次生成不动**的那几份（`manifest.json` / `source.json` 归发布定稿、
+/// `release.json` 归软件发布链）。
+///
+/// 它们也列在确认框里（作者 2026-10-07：「那我那个生成的里面怎么没有」）——
+/// 但状态**永远是「无变化」**：生成一个字节都不碰它们；详情给盘上原文，看得见就行。
+fn preview_frozen(rel: &str, stage: DeliveryStage, existing: Option<&str>) -> PreviewFile {
+    PreviewFile {
+        uid: rel.to_owned(),
+        file_name: rel.to_owned(),
+        state: DiffState::Unchanged,
+        lines: existing.map(full_lines).unwrap_or_default(),
+        added: 0,
+        removed: 0,
+        stage,
     }
 }
 
@@ -780,6 +856,21 @@ fn diff_added(text: &str) -> Vec<DiffLine> {
         .enumerate()
         .map(|(i, t)| DiffLine {
             kind: DiffLineKind::Added,
+            text: t.to_owned(),
+            no: i + 1,
+        })
+        .collect()
+}
+
+/// 整份正文，逐行都是 `context`（无变化的文件在「完整」视图里要能看全文）。
+///
+/// 与 [`diff_added`] 的差别只在 kind：那个是"这次新有的"（界面全绿），
+/// 这个每一行都是"磁盘上本来就这样"（素底）。
+fn full_lines(text: &str) -> Vec<DiffLine> {
+    text.lines()
+        .enumerate()
+        .map(|(i, t)| DiffLine {
+            kind: DiffLineKind::Context,
             text: t.to_owned(),
             no: i + 1,
         })
@@ -1212,6 +1303,51 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
             let moved = super::delivery::clean_strays(&root, &strays, &trash_root, &stamp)?;
             tracing::info!(moved, at = %stamp, "交付残留已移入回收站");
             Ok(moved)
+        })
+    })
+}
+
+/* ---------- 交付文件清单（「发布预设」卡看这次都会写出什么） ---------- */
+
+/// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
+///
+/// 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，我不知道这些其他的……
+/// 还有什么文件需要生成的，我也想看到」。名单就是交付集合（与残留审计同一份），
+/// 分类见 [`super::delivery::DeliveryStage`]。
+#[tauri::command(async)]
+pub fn wb_delivery_files() -> Result<Vec<super::delivery::DeliveryFile>, AppError> {
+    traced("wb_delivery_files", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
+            // 只读定位，不顺手建交付目录（和 `wb_dist_strays` 的读侧一样）
+            Ok(super::delivery::delivery_files(
+                &paths::delivery_root_path(),
+                &book,
+            ))
+        })
+    })
+}
+
+/// 看一份交付文件的**盘上原文**（只读）。
+///
+/// 只认交付集合里的路径 —— 界面传什么都读不了集合外的文件。
+/// 盘上还没有那一份（还没生成 / 还没发布）时如实报错，不假装有内容。
+#[tauri::command(async)]
+pub fn wb_delivery_file(rel: String) -> Result<String, AppError> {
+    traced("wb_delivery_file", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            let book = Book::new(&ctx.presets, &c, &d);
+            if !super::delivery::delivery_expected_set(&book).contains(&rel) {
+                return Err(AppError::invalid_argument(format!("不熟这一份：{rel}"))
+                    .with_detail("只给看本次交付集合里的文件".to_owned()));
+            }
+            let path = paths::delivery_root_path().join(&rel);
+            std::fs::read_to_string(&path).map_err(|e| {
+                AppError::not_found(format!("盘上还没有这一份：{rel}"))
+                    .with_detail(format!("{e} —— 生成 / 发布过之后才有"))
+            })
         })
     })
 }
@@ -2282,11 +2418,14 @@ mod tests {
 
         let same = preview_one(&r, Some("a\nnew\nc\n"));
         assert_eq!(same.state, DiffState::Unchanged);
+        // 无变化也带回**整份正文**（全 context）—— 确认框的「完整」视图要看原文；
+        // 「不会重写」那句由界面在**对比**视图说（作者 2026-10-07）
         assert!(
-            same.lines.is_empty(),
-            "无变化不往回带行（界面只显示「无变化」）"
+            same.lines.iter().all(|l| l.kind == DiffLineKind::Context),
+            "无变化带回的是整份正文，不是差异"
         );
-        assert_eq!((same.added, same.removed), (0, 0));
+        assert_eq!(same.lines.len(), 3, "正文几行就几行");
+        assert_eq!((same.added, same.removed), (0, 0), "没变化就不算增减");
 
         let changed = preview_one(&r, Some("a\nold\nc\n"));
         assert_eq!(changed.state, DiffState::Modified);

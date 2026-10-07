@@ -203,7 +203,8 @@ pub struct UploadedAsset {
 
 /// 安装包文件名 → `Content-Type`。**纯函数**（判据钉它）。
 ///
-/// 只认第一阶段会产出的那两种（`.dmg` / `.app` 打成的 zip）；认不出 → 通用二进制类型，
+/// 只认会产出的那几种：macOS 的 `.dmg` 与 `.app` 打成的 `.zip`、Windows 的 NSIS `.exe`
+/// 与 `.msi`（2026-10-07 两端各自打包起）；认不出 → 通用二进制类型，
 /// **不猜**（猜错的代价是用户下下来打不开，而报错至少还能看见）。
 pub fn content_type_for(file_name: &str) -> &'static str {
     let lower = file_name.to_ascii_lowercase();
@@ -211,6 +212,8 @@ pub fn content_type_for(file_name: &str) -> &'static str {
         "application/x-apple-diskimage"
     } else if lower.ends_with(".zip") {
         "application/zip"
+    } else if lower.ends_with(".exe") {
+        "application/vnd.microsoft.portable-executable"
     } else if lower.ends_with(".msi") {
         "application/x-msi"
     } else {

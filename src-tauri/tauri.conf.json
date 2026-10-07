@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SupportEase",
   "version": "0.0.6",
-  "identifier": "com.mkpsupport.ease",
+  "identifier": "SupportEase",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5321",

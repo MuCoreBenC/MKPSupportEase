@@ -314,6 +314,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
+        // 交付文件清单（2026-10-07）：「发布预设」卡看这次都会写出哪些文件 + 看某一份的原文
+        app::build::wb_delivery_files,
+        app::build::wb_delivery_file,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
         app::machines::wb_copy_version,
         app::wb_copy_recipe,
@@ -340,7 +343,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
-        app::build::wb_preview_toml,
         // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本

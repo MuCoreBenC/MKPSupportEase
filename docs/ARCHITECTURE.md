@@ -30,7 +30,7 @@ MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 
 | 层 | 值 | 谁看得见 |
 | --- | --- | --- |
 | 产品名 / 窗口标题 | `SupportEase` | 用户 |
-| bundle identifier | `com.mkpsupport.ease` | 系统（决定数据目录位置，**改它等于换一个新应用**） |
+| bundle identifier | `SupportEase`（工作台 `SupportEase-Workbench`） | 系统（决定数据目录位置，**改它等于换一个新应用**） |
 | 仓库名 | `MKPSupportEase` | 开发 |
 | npm 包名 / crate 名 | `mkp-support-ease` | 工具链（必须小写） |
 

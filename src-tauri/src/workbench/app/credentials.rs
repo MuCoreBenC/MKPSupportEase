@@ -99,11 +99,16 @@ pub const CREDENTIALS_SCHEMA: u32 = 1;
 /// 应用标识 —— 与 `src-tauri/tauri.workbench.conf.json` 的 `identifier` 是同一份，判据
 /// `the_credentials_path_is_pinned_to_the_tauri_identifier` 钉住两处不漂移。
 ///
-/// ★ 是**工作台那一份**（`.workbench` 后缀），不是客户端的：工作台与客户端是两个
-/// identifier（`tauri.workbench.conf.json` 覆盖主配置那一份），于是各有各的
-/// `appDataDir`、各有各的 WebView2 数据目录 —— 两边才能同时开。凭据跟着工作台走：
+/// ★ 是**工作台那一份**，不是客户端的：工作台与客户端是两个 identifier
+/// （`tauri.workbench.conf.json` 覆盖主配置那一份），于是各有各的 `appDataDir`、
+/// 各有各的 WebView2 数据目录 —— 两边才能同时开。凭据跟着工作台走：
 /// 它只被工作台（GUI 与 `release` CLI）用到。
-const APP_ID: &str = "com.mkpsupport.ease.workbench";
+///
+/// ★★ 为什么不是 `com.*` 那套反域名：identifier 在 Windows 上直接就是
+/// `AppData\Roaming` 下的**文件夹名**，`com.` 前缀是 macOS / Java 的反域名传统
+/// （bundle id 用它），Windows 的桌面软件一律叫产品名（`Code` / `BambuStudio` /
+/// `obsidian`）。这台机器上是给人翻文件夹的，所以两边都用产品名说话。
+const APP_ID: &str = "SupportEase-Workbench";
 
 /// 凭据文件的形状（`credentials.json` 的根）。**只放秘密** —— 配置在
 /// `publish-account.json`（判据 `publish_account_config_never_stores_a_token` 反向钉住）。

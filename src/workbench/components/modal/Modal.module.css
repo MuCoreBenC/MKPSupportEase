@@ -44,6 +44,18 @@
   width: 640px;
 }
 
+/* `xl`：看整份文本（一份产物 TOML / 一份交付 JSON）。`.box` 另有 `max-width: 100%`，
+   窄窗口里照样让位给容器 */
+.box[data-size='xl'] {
+  width: 1080px;
+}
+
+/* `xl` 那种"看整份文本"的框尽量吃满宿主：遮罩留边收窄到 8px
+   （作者 2026-10-07：「这些查看的模态框能大尽量都大一点」「它可以宽一点呀」） */
+.scrim:has(> .box[data-size='xl']) {
+  padding: 8px;
+}
+
 
 .head {
   display: flex;

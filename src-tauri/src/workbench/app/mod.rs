@@ -1808,10 +1808,12 @@ mod tests {
             "wb_preview_bulk",
             "wb_diff_draft",
             "wb_preflight",
-            "wb_preview_toml",
             "wb_generate_preview",
             "wb_revert_preview",
             "wb_dist_strays",
+            // 交付文件清单（2026-10-07）：只读一份名单 + 读一份盘上原文，都不写盘
+            "wb_delivery_files",
+            "wb_delivery_file",
             // 发布闸（第二刀）：只算不写 —— 与 `publish_audit` 是同一件事的两个壳
             "wb_publish_audit",
             "wb_baseline_diff",
