@@ -23,7 +23,7 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { api, errorText, isAppError } from '../../api'
+import { api, errorText } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -75,15 +75,6 @@ const CALIB_MODEL_INDEX = 4
 
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
-
-/**
- * 后端说"盘上不是我以为的那一份" —— 只有这两种错值得补一次下载（§Task 5，见
- * `docs/HOME-BUNDLE-DOWNLOAD.md`）：`NOT_FOUND`（盘上没有）与 `SHA_MISMATCH`（字节漂了）。
- * 别的错（读不懂这一代数据、不是 MKP、权限…）补下载也没用，照原样抛给用户看。
- */
-function isStaleGuess(e: unknown): boolean {
-  return isAppError(e) && (e.code === 'NOT_FOUND' || e.code === 'SHA_MISMATCH')
-}
 
 /**
  * 后处理脚本里那段可执行文件路径。契约里没有它（真值在桌面壳那一侧），
@@ -449,26 +440,18 @@ export default function PageHome({ density }: PageHomeProps) {
         }
       }
       /*
-       * 应用的是**「我那一份」**（2026-10-08 作者改判：下载即得工作副本，用户操作的
-       * 一直是它；官方基线不进用户世界）。`ensureUserCopy` 幂等 —— 下载的收尾已经
-       * 建过就原样返回，"全齐全新"那一档（没走下载）就靠它补上。
+       * 用的是**官方那一份本尊**（2026-10-08 资源库改判）：官方是模板，用户要用的就是它 ——
+       * 「使用」在本机没有字节（或盘上那份与目录对不上）时**按需取回**，再写成当前使用
+       * （`use_official_preset` 内部走的就是那条下载管道）。
+       *
+       * 原来那条"先补一份工作副本、再应用副本"的路已经退场：副本只能由「另存为我的预设」
+       * 显式产生 —— 所以"用一下官方，本地就凭空多出一份"这回事不会再发生。
+       *
+       * 也**不必**再给"预判过期"留兜底：字节在不在这一层由后端自己解决，
+       * 不存在"预判说齐了、其实没齐"那种错 —— 上面那次批量下载只负责套餐里**别的**文件
+       * （切片器配置那一类）。
        */
-      const applyCopy = async () => {
-        const copy = await api.ensureUserCopy(presetFile)
-        await api.applyActivePreset(copy.fileName, 'mine', copy.path)
-      }
-      try {
-        await applyCopy()
-      } catch (e) {
-        /*
-         * 兜底只留给「预判过期」这一种：预判说齐了（清单为空），盘上其实不齐（刚被外部动过）
-         * —— 后端报 NOT_FOUND / SHA_MISMATCH 时才补一次下载再应用。不是重新套一个
-         * 吞异常的 catch：别的错（读不懂、不是 MKP…）照原样往上抛。
-         */
-        if (todo.length > 0 || !isStaleGuess(e)) throw e
-        await api.downloadCatalogFile(presetFile)
-        await applyCopy()
-      }
+      await api.useOfficialPreset(presetFile)
       appStateMutated()
     } catch (e) {
       setApplyError(errorText(e))
@@ -1054,7 +1037,7 @@ export default function PageHome({ density }: PageHomeProps) {
               : ''}
             {canSave
               ? '。离开前要保存吗？'
-              : '。这份预设还没有「你的一份」—— 先下载才能存，现在只能放弃。'}
+              : '。这份还没有「你的一份」—— 先在预设页另存为我的预设才能存，现在只能放弃。'}
           </p>
         </Modal>
       )}

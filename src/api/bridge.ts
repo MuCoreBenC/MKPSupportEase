@@ -121,7 +121,7 @@ async function notWired(method: MkpApiMethod): Promise<never> {
 }
 
 export const bridgeApi: MkpApi = {
-  /* 校准值写进「我的那一份」工作副本（2026-10-08：不再是独立的 offsets.json） */
+  /* 校准值写进「我的预设」（2026-10-08：随用户那份走，不再是独立的 offsets.json） */
   savePresetCalibration: (path, axes) =>
     call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
@@ -160,8 +160,9 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
-  /* 下载即得工作副本：补齐「我的那一份」（幂等、永不覆盖）+ 按机型/版本找它（校准页） */
-  ensureUserCopy: (fileName) => call('ensureUserCopy', 'ensure_user_copy', { fileName }),
+  /* 另存为我的预设：官方那一份 → 我的一份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+  copyOfficialAsMine: (fileName, newName) =>
+    call('copyOfficialAsMine', 'copy_official_as_mine', { fileName, newName }),
   getUserCopyFor: (machineId, versionId) =>
     call('getUserCopyFor', 'get_user_copy_for', { machineId, versionId }),
   /*
@@ -218,12 +219,11 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
-  /* ——— baseline + 对比台（2026-10-08）———
-     官方版本列表（已下载 / 新版本，**不是过时判定**）、「恢复默认」的基准值、
-     以及对比台读/写用户预设的参数。baseline 是隐藏内部存储，前端拿不到它的路径。 */
+  /* ——— 官方版本账 + 对比台（2026-10-08）———
+     官方版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
+     baseline 是隐藏内部存储，前端拿不到它的路径。 */
   getOfficialVersions: (fileName) =>
     call('getOfficialVersions', 'get_official_versions', { fileName: fileName ?? null }),
-  getPresetDefaults: (path) => call('getPresetDefaults', 'get_preset_defaults', { path }),
   readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
   savePresetParams: (path, edits) =>
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
@@ -231,6 +231,8 @@ export const bridgeApi: MkpApi = {
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
+  /* 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用 */
+  useOfficialPreset: (fileName) => call('useOfficialPreset', 'use_official_preset', { fileName }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),

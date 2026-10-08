@@ -7,10 +7,10 @@
  *                   没有 → `api.getMachineParams` 的官方默认
  *                   （`toolhead.offset.x / y / z` + `toolhead.speed_limit`）
  *
- * **「我那一份」从下载那一刻就有**（2026-10-08 作者改判：下载即得工作副本）——
- * 于是校准的读与写都在那一份 TOML 上；官方基线只留作与云端比对、不进用户世界。
+ * **校准写在「我的预设」上**（2026-10-08 资源库改判）：官方那一份是模板、只读 ——
+ * 要校准它就得先在资源库里「另存为我的预设」，之后读与写都落在那一份 TOML 上。
  * 「没有我的一份」不是错误：校准页照旧显示官方默认值，只是**保存会被拦**
- * （先下载才有得存）。
+ * （先存一份自己的才有得存）。
  *
  * 为什么走文件体系（作者的原话：「首页也应该是消费那个文件，而不是用硬编码」）：
  * 上一版走 `api.getPreset(variantId)`，那是一张手编表、三份全是 A1 mini 的 ——
@@ -99,7 +99,7 @@ export function usePreset(sel: Selection): PresetState {
     Promise.all([
       api.getVersionFiles(machine, version),
       api.getMachineParams(machine, version),
-      /* 「我那一份」在不在（在就用它的校准值 —— 2026-10-08：校准随工作副本走） */
+      /* 「我那一份」在不在（在就用它的校准值 —— 2026-10-08：校准写在「我的预设」上） */
       api.getUserCopyFor(machine, version),
     ]).then(
       ([files, params, copy]) => {
@@ -119,7 +119,7 @@ export function usePreset(sel: Selection): PresetState {
           const n = Number(row.value)
           return Number.isFinite(n) ? n : null
         }
-        /* 官方默认那一套：工作副本里读不出来的那几格回落到它 */
+        /* 官方默认那一套：你那份里读不出来的那几格回落到它 */
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
         const z = valueOf(OFFSET_KEYS.z)
@@ -142,7 +142,7 @@ export function usePreset(sel: Selection): PresetState {
           path: copy?.path ?? file.path,
           axes,
           speed,
-          /* 保存校准写它；null = 还没有我的一份（先下载才有得存） */
+          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存） */
           mine: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
         presetCache.set(`${machine}/${version}`, preset)

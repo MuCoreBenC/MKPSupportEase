@@ -69,6 +69,7 @@ import type {
   OfficialVersion,
   OnDiskFile,
   PresetDraft,
+  UseOfficialResult,
   UserFileIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
@@ -78,6 +79,7 @@ import type { ReleasePresetSource } from './presetTree'
 import {
   applySlicerFilters,
   archivedIds,
+  assetRows,
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
@@ -218,6 +220,23 @@ export interface PresetData {
    * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    */
   apply: (fileName: string, origin?: ActiveOrigin, path?: string) => Promise<void>
+  /**
+   * **使用一份官方预设**（2026-10-08 资源库改判）—— 官方那一行唯一的动作。
+   *
+   * 本机没有（或盘上那份与目录对不上）时后端**先按需取回**，再写成当前使用；
+   * 本机已是当前版就直接使用（一次网络都不发）。所以界面上不再有"下载 / 已下载"
+   * 这一档：用户只管「使用」，回来重读底账（与 `apply` 同一条规矩）。
+   *
+   * 返回值说这次**有没有真的取回来一份**（提示条据此说「已取回并使用」/「已使用」）。
+   */
+  useOfficial: (fileName: string) => Promise<UseOfficialResult>
+  /**
+   * **另存为我的预设**：官方那一份 → 用户自己的一份（名字由用户起；撞名后端拒）。
+   *
+   * 官方行的「要改」只有这一条路 —— 下载 / 使用都**不再自动产生副本**。
+   * 回来**两条线一起重读**：官方字节可能刚被取回来（投递面变了），用户线也多了一份。
+   */
+  saveAsMine: (fileName: string, newName: string) => Promise<UserFileIdentity>
   /**
    * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
    *
@@ -699,9 +718,9 @@ export function usePresetData(importRevision = 0): PresetData {
       /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
     })
     /*
-     * **用户线也要重读**：下载即得工作副本（2026-10-08）—— 下载完成那一刻
-     * `presets-mine/` 里会多出一份，本地表要跟着出现那一行
-     * （只重读官方线的话，用户在预设页点完「下载」会看不到属于他的那一份）。
+     * **用户线也要重读**：投递面变了 = 官方那一份的字节可能刚被取回来（「使用」按需取回、
+     * 「另存为我的预设」也会先取一份），而 `presets-mine/` own 目录里也可能刚多出一份
+     * —— 资源库要跟着出现那一行（只重读官方线的话，用户会看不到自己刚存的那一份）。
      */
     void api
       .getUserPresetFiles()
@@ -801,6 +820,29 @@ export function usePresetData(importRevision = 0): PresetData {
     },
     [],
   )
+
+  /*
+   * 资源库那一条路（2026-10-08 改判）：
+   *
+   *   官方行的「使用」  `useOfficialPreset` —— 没在本机就先取回来，再写成当前使用
+   *   官方行的「要改」  `copyOfficialAsMine` —— 官方 → 我的，名字由用户起
+   *
+   * 两条都**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
+   * 成功各广播一次账变，别的页与这一页都从订阅里重读那一路。
+   */
+  const useOfficial = useCallback(async (fileName: string): Promise<UseOfficialResult> => {
+    const done = await api.useOfficialPreset(fileName)
+    appStateMutated()
+    return done
+  }, [])
+
+  const saveAsMine = useCallback(async (fileName: string, newName: string) => {
+    const done = await api.copyOfficialAsMine(fileName, newName)
+    /* 官方字节可能刚被取回来（投递面变了），用户线也多了一份 —— 两条都广播 */
+    deliveryMutated()
+    setMine(await api.getUserPresetFiles())
+    return done
+  }, [])
 
   /*
    * 临时编辑那条链：起手（复制官方正文进临时文件）、边改边存、放弃、另存成用户文件。
@@ -930,6 +972,8 @@ export function usePresetData(importRevision = 0): PresetData {
     pick,
     pickMachine,
     apply,
+    useOfficial,
+    saveAsMine,
     clearApply,
     copy,
     release,
@@ -1012,13 +1056,30 @@ export interface PresetPage {
   /** 左边那条分段控件：文件类型 */
   kind: PresetKindAxis
   setKind: (next: PresetKindAxis) => void
-  /** 右边那条分段控件：位置。它切的是两张**互不相干**的表，不是同一批数据的筛选 */
+  /**
+   * 右边那条分段控件：位置。**切片器档才有它** —— 那两张表互不相干、各答各的问题：
+   *
+   *   本地  本机磁盘上有什么（官方副本 + 我的文件）
+   *   云端  菜单上有哪些官方文件，行尾标「已下载 / 未下载」
+   *
+   * ★ **MKP 档不画它**（2026-10-08 资源库改判）：那里只有一张表（[`assetRows`]），
+   * 来源（官方 / 我的预设）只是行上的一枚小字，`scope` 恒为 `'local'`。
+   */
   scope: PresetScopeAxis
   setScope: (next: PresetScopeAxis) => void
 
-  /** 本地表 —— 本机磁盘上有什么（官方副本 + 我的文件） */
+  /**
+   * 「本地」这一张表。
+   *
+   * **MKP 档 = 资源库列表**（[`assetRows`]：官方那几行 + 我的预设那几行，
+   * 来源只是行上的一枚小字，没有"下过没有"这一档）；
+   * 切片器档 = 本机磁盘上有什么（官方副本 + 我的文件）。
+   */
   local: PresetTableData<PresetLocalRow>
-  /** 云端表 —— 菜单上有什么官方文件 */
+  /**
+   * 云端表 —— 菜单上有什么官方文件。**只有切片器档用它**：
+   * MKP 档这一格与 `local` 是同一张（同一份引用），页面也不会读它。
+   */
   cloud: PresetTableData<PresetCloudRow>
 
   /**
@@ -1089,7 +1150,13 @@ export function usePresetPage(data: PresetData): PresetPage {
    */
   const [query, setQuery] = useSessionState('presets.query', '')
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
-  const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
+  const [scopeRaw, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
+  /*
+   * **MKP 档只有一张表**（2026-10-08 资源库改判）：位置那一轴在那一档整个退场 ——
+   * `scope` 恒为「本地」，页面也不画那条分段控件。切片器档照旧两轴。
+   */
+  const mkp = kind === 'mkp'
+  const scope: PresetScopeAxis = mkp ? 'local' : scopeRaw
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
   const [nozzle, setNozzle] = useSessionState('presets.nozzle', '')
   const [layer, setLayer] = useSessionState('presets.layer', '')
@@ -1159,8 +1226,16 @@ export function usePresetPage(data: PresetData): PresetPage {
     ],
   )
 
-  const localBase = useMemo(() => localRows(input), [input])
-  const cloudBase = useMemo(() => cloudRows(input), [input])
+  /*
+   * **MKP 档那一张表**：`assetRows`（资源库）—— 它顶掉「本地 / 云端」两张，
+   * 所以那一档的 `cloudBase` 恒为**空表**（页面也不会读 `page.cloud`：批量那一行、
+   * 云端表的列，全都不在 MKP 档出现）。切片器档照旧：两张表各算各的。
+   */
+  const localBase = useMemo(() => (mkp ? assetRows(input) : localRows(input)), [input, mkp])
+  const cloudBase: PresetTableData<PresetCloudRow> = useMemo(
+    () => (mkp ? { rows: [], total: 0 } : cloudRows(input)),
+    [input, mkp],
+  )
 
   /*
    * 批量那一批。取**云端表筛前**的行，两个理由：

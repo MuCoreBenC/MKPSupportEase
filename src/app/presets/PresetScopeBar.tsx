@@ -5,14 +5,17 @@
  * ┌ MKP 配置 │ 切片器配置 ┐   ┌ 本地 │ 云端 ┐
  * ```
  *
- * # 两个轴各管什么
+ * # 两个轴各管什么（2026-10-08 资源库改判：位置那一轴只剩切片器档）
  *
  *   左（类型）  `PresetFileInfo.kind` —— MKP 的涂胶预设 toml，还是切片器的工艺 profile。
  *               **它还决定表头有几列**（MKP 没有喷嘴层高，切片器没有版本）
- *   右（位置）  **两张互不相干的表**，不是同一批数据的筛选：本地的就是本地的，云端的就是
- *               云端的。一个官方文件下载之后两张表里都有，那是对的 —— 两张表各回答一个问题
+ *   右（位置）  **只有切片器档渲染它**：那是两张互不相干的表，不是同一批数据的筛选 ——
+ *               本地的就是本地的、云端的就是云端的，各自回答一个问题。
+ *               MKP 档只有一张表（资源库）：来源（官方 / 我的预设）只是行上的一枚小字，
+ *               所以那一档整个不画它。
  *
- * 上一版把位置这个轴压成了行内的一个状态角标，被否了。它是分类，不是状态。
+ * 上一版把位置这个轴压成了行内的一个状态角标，被否了。它是分类，不是状态
+ * （在资源库那张表上，它降级成"来源"，仍然不是状态 —— 见 `ASSET_SOURCE_TEXT`）。
  *
  * # 去掉多余的那一层外包
  *
@@ -74,21 +77,30 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
         ))}
       </span>
 
-      <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
-        {SCOPES.map((sc) => (
-          <label key={sc} className={s.opt} data-on={sc === scope} title={SCOPE_AXIS_WHY[sc]}>
-            <input
-              type="radio"
-              className={s.radio}
-              name="preset-scope"
-              value={sc}
-              checked={sc === scope}
-              onChange={() => onScope(sc)}
-            />
-            {SCOPE_AXIS_TEXT[sc]}
-          </label>
-        ))}
-      </span>
+      {/*
+       * **位置那一轴只有切片器档有**（2026-10-08 资源库改判）。
+       *
+       * MKP 档只有一张表（资源库）：官方与我的预设并排，来源只是行上的一枚小字 ——
+       * 「本地 / 云端」这两个维度在那一档整个退场（两张表变成一张，轴就没有主语了）。
+       * 切片器档照旧：它那两张表（本机真有的 / 云端菜单上的）是两件不同的事。
+       */}
+      {kind === 'slicer' && (
+        <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
+          {SCOPES.map((sc) => (
+            <label key={sc} className={s.opt} data-on={sc === scope} title={SCOPE_AXIS_WHY[sc]}>
+              <input
+                type="radio"
+                className={s.radio}
+                name="preset-scope"
+                value={sc}
+                checked={sc === scope}
+                onChange={() => onScope(sc)}
+              />
+              {SCOPE_AXIS_TEXT[sc]}
+            </label>
+          ))}
+        </span>
+      )}
     </>
   )
 }

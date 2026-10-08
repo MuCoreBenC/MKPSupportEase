@@ -295,16 +295,6 @@ pub async fn download_runtime_file(
             }
 
             let target = outcome?;
-            /*
-             * **下载即得工作副本**（2026-10-08 作者改判）：MKP 预设的基线落盘之后，
-             * 「我的那一份」也补上（幂等：已经有就一个字节都不动）。
-             * 单个下载是用户点名的那一份 —— 副本建不出来就报错说清，不假装下完了。
-             */
-            if file.kind == runtime::catalog::kind::PRESET {
-                let user_root = crate::fsx::paths::user_root(&app)?;
-                let text = runtime::delivery::official_text(&root, file)?;
-                runtime::mine::ensure_working_copy(&user_root, file, &text)?;
-            }
             Ok(target
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -391,30 +381,7 @@ pub async fn download_runtime_files(
                 );
             };
 
-            let mut outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
-            /*
-             * **下载即得工作副本**（2026-10-08 作者改判）：成功落盘的 MKP 预设，
-             * 「我的那一份」也补上（幂等）。副本没建出来要**如实说** —— 这一次下载的
-             * 意义就是"拿到你的一份"，基线落了而副本没落不算成，逐份结局照实翻脸。
-             */
-            for outcome in outcomes.iter_mut().filter(|o| o.ok) {
-                let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) else {
-                    continue;
-                };
-                if file.kind != runtime::catalog::kind::PRESET {
-                    continue;
-                }
-                let materialize = || -> Result<(), AppError> {
-                    let user_root = crate::fsx::paths::user_root(&app)?;
-                    let text = runtime::delivery::official_text(&root, file)?;
-                    runtime::mine::ensure_working_copy(&user_root, file, &text)?;
-                    Ok(())
-                };
-                if let Err(e) = materialize() {
-                    outcome.ok = false;
-                    outcome.message = format!("文件已下载，但没能生成你的一份：{}", e.message);
-                }
-            }
+            let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
             Ok(outcomes
                 .into_iter()
                 .map(|o| DownloadOutcomeDto {
@@ -427,6 +394,83 @@ pub async fn download_runtime_files(
     });
     task.await
         .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
+}
+
+/// 「使用官方预设」的结果：这次有没有真的取回来一份 + 使用中的那一条
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UseOfficialDto {
+    /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，直接使用）
+    pub fetched: bool,
+    pub active: ActivePresetDto,
+}
+
+/// 「使用这一份官方预设」—— 资源库那一条路（2026-10-08 作者改判）。
+///
+/// 用户不需要知道这一份有没有在本机：**没有（或盘上那份与目录对不上）就先按需取回，
+/// 再写成当前使用**；本机已经是当前版就直接使用（一次网络都不发）。于是
+/// 「下载 / 已下载 / 未下载」这些词从用户心智里整个退场，只剩一个动作：使用。
+///
+/// 取回走的是**同一条下载管道**（SHA 校验 / 旧份归档 / 原子落盘，没有第二条路）；
+/// 「使用」写的是**唯一底账**（`run/active-preset.json` 的 official 线，全局唯一）。
+#[tauri::command]
+pub async fn use_official_preset(
+    app: AppHandle,
+    file_name: String,
+) -> Result<UseOfficialDto, AppError> {
+    /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
+    let app_handle = app.clone();
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("useOfficialPreset", |_| {
+            let root = internal_root(&app_handle)?;
+            let user = crate::fsx::paths::user_root(&app_handle)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == file_name)
+                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+            let fetched = ensure_official_bytes(&root, file)?;
+            let state = runtime::app_state::set_active_official(&root, file)?;
+            Ok(UseOfficialDto {
+                fetched,
+                active: active_dto(&root, &user, &catalog, state),
+            })
+        })
+    });
+    let dto = task
+        .await
+        .map_err(|e| AppError::internal("使用预设没跑到终局").with_detail(e.to_string()))??;
+    /* AppState 的写命令成功 → 广播（docs/APP-STATE.md §3.5），订阅者据此刷新 */
+    super::notify_app_state(&app);
+    Ok(dto)
+}
+
+/// 让这份官方预设的字节**在本机可用**：盘上那份与目录登记一致就直接用（不发一次网络）；
+/// 没有 / 对不上就走同一条下载管道取回来（旧份自动归档，没有第二条路）。
+///
+/// 回来的是"这次是否真的取了一份"（`false` = 本机已有当前版）—— 界面据此说
+/// 「已取回并使用」还是「已使用」。随包 bootstrap 目录不登记期望值：盘上有就照收
+/// （与交付面的口径一致，见 `runtime::delivery::status_of`）。
+pub(super) fn ensure_official_bytes(
+    root: &Path,
+    file: &runtime::catalog::CatalogFile,
+) -> Result<bool, AppError> {
+    if let Ok(bytes) = std::fs::read(root.join(&file.path)) {
+        let current = match file.expected_sha() {
+            Some(want) => runtime::catalog::hex(&sha2::Sha256::digest(&bytes)) == want,
+            None => true,
+        };
+        if current {
+            return Ok(false);
+        }
+    }
+    let resolved = runtime::source::resolve_source(root)?;
+    /* 这条路不问进度（用户点的是"使用"）——水位没人听，打个空拍就行 */
+    let forward = |_tick: &runtime::net::Tick| {};
+    let remote = runtime::net::RemoteSource::new(resolved.resolver.clone(), &forward);
+    runtime::delivery::deliver(root, file, &remote)?;
+    Ok(true)
 }
 
 /// 水位发货。**Channel 关了（调用方已经不再听）不是错误** —— 记一行 debug 就够，

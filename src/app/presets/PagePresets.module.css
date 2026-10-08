@@ -107,6 +107,14 @@
   border-color: var(--accent);
 }
 
+/*
+ * MKP 档的搜索框（2026-10-08 资源库改判）：那一档没有「本地 / 云端」分段控件了，
+ * 搜索自己顶到右线 —— 与切片器那一排（漏斗 + 搜索靠右）同一眼观感。
+ */
+.searchPush {
+  margin-left: auto;
+}
+
 .input {
   flex: 1;
   min-width: 0;

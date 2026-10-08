@@ -4,10 +4,11 @@
 //! 这一条是**另一条线**（总纲 §1③「预设 TOML 的一生」），两条不许混：
 //! 官方原件不可变、用户修改另存、用户那份**永远不回写官方原件**。
 //!
-//! 写命令都在这一层（**都只写用户根**，官方基线与下载区一概不碰），分几路：
+//! 写命令都在这一层（**都只写用户根**，官方模板与下载区一概不碰），分几路：
 //!
-//! - **下载的收尾**把工作副本补上（`ensure_user_copy`，2026-10-08 改判：下载即得工作副本；
-//!   幂等，已有不动）；
+//! - **另存为我的预设**（`copy_official_as_mine`，2026-10-08 资源库改判）：官方那一份
+//!   → `presets-mine/<你起的名字>`（撞名就拒、血统三行）；下载 / 使用官方
+//!   **都不再自动产生副本**；
 //! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
 //!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
 //! - 校准值也写进同一份工作副本（`save_preset_calibration`：按注册表定位改
@@ -551,29 +552,23 @@ pub async fn copy_user_preset(
     })
 }
 
-/// 工作副本落定的结果（[`ensure_user_copy`]）
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserCopyDto {
-    pub file_name: String,
-    /// 相对用户根的落点（`presets-mine/<官方原名>`）
-    pub path: String,
-    /// 这次是不是新生成了一份；`false` = 本来就有（一个字节都没动）
-    pub created: bool,
-}
-
-/// **确保「我的那一份」在**（2026-10-08 作者改判：下载即得工作副本）。
+/// **另存为我的预设**：官方那一份 → 用户自己的一份（2026-10-08 资源库改判）。
 ///
-/// 下载命令的收尾就是它（下完基线顺手把工作副本补上）；这里同时是一条**幂等**的
-/// 显式入口 —— 首页「应用」前、以及"基线早在盘上、只差副本"的场合都靠它。
+/// 资源库模型里"官方是模板、我的才是实际工作文件"落在这一步：下载 / 使用官方都
+/// **不再自动产生副本**，用户要改就必须显式另存，名字由他自己起。
 ///
-/// 已经有就原样返回（`created: false`）：用户改过、删过都算数，这里**永不覆盖**。
-/// 官方基线没下载 / 字节与目录对不上 ⇒ 报错说清「先下载」（闸在
-/// [`runtime::delivery::official_text`]：与「改这份」同一条边界 —— 我们不认的字节，
-/// 不会换个身份变成用户的一份）。
+/// 本机还没有这一份（或盘上那份与目录对不上）就先按需取回（同一条下载管道），
+/// 再复制 —— 界面上只有一颗「另存为我的预设」，用户不需要先关心"下过没有"。
+/// 字节的可信由 [`runtime::delivery::official_text`] 的 SHA 闸保证（与「改这份」
+/// 同一条边界：我们不认的字节，不会换个身份变成用户的一份）；落盘见
+/// [`runtime::mine::save_official_as_new`]（撞名就拒、不覆盖、血统三行）。
 #[tauri::command]
-pub async fn ensure_user_copy(app: AppHandle, file_name: String) -> Result<UserCopyDto, AppError> {
-    traced("ensureUserCopy", |_| {
+pub async fn copy_official_as_mine(
+    app: AppHandle,
+    file_name: String,
+    new_name: String,
+) -> Result<UserFileIdentityDto, AppError> {
+    traced("copyOfficialAsMine", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
@@ -582,12 +577,13 @@ pub async fn ensure_user_copy(app: AppHandle, file_name: String) -> Result<UserC
             .iter()
             .find(|f| f.file_name == file_name)
             .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+        /* 没有 / 对不上就先取回来 —— 取回失败了照实报（下一步拿不到可信字节） */
+        super::catalog::ensure_official_bytes(&root, file)?;
         let text = runtime::delivery::official_text(&root, file)?;
-        let copy = runtime::mine::ensure_working_copy(&user_root, file, &text)?;
-        Ok(UserCopyDto {
-            file_name: copy.file_name,
-            path: copy.path,
-            created: copy.created,
+        let done = runtime::mine::save_official_as_new(&user_root, file, &text, &new_name)?;
+        Ok(UserFileIdentityDto {
+            path: done.path,
+            file_name: done.file_name,
         })
     })
 }

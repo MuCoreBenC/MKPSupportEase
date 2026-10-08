@@ -123,3 +123,17 @@ Rust 判据：`runtime::mine` 的 `the_first_download_leaves_a_working_copy_and_
   「不做自动合并 / 不做数据迁移」这两条**不变**。
 - **基线没有用户可见的删除入口**：它是程序管理的内部内容（随检查更新自动换代）；
   要清理就删 `<appDataDir>/delivery/…` 里那份，程序会把它当"未下载"。
+
+---
+
+## ⚠️ 【2026-10-08 三次改判 · 追加】本文的模型已被取代
+
+作者裁决（见 [`PRESET-ASSET-LIBRARY.md`](PRESET-ASSET-LIBRARY.md)）：
+
+- **官方是模板，我的才是实际工作文件**：下载 / 使用都**不再自动产生副本** ——
+  `ensure_working_copy` 一系（`working_copy_of` / `working_copy_name` / `release_date_of` /
+  `available_mine_path` / `numbered`）与命令 `ensure_user_copy` **整条退役**；
+- 我的预设只能由「另存为我的预设」（`copy_official_as_mine` → `mine::save_official_as_new`）
+  或用户自己放进来；官方那一行本机没有字节时点「使用」**按需取回**（`use_official_preset`）；
+- 校准照旧写「我的预设」那一份（没有就先另存一份自己的）；
+- **不做数据迁移**这条**不变**：旧盘上那些按发布日命名的"我的副本"原样留着，程序不读、不搬。

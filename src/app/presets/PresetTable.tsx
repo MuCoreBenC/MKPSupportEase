@@ -90,6 +90,11 @@ import {
   ARCHIVE_KEY,
   ARCHIVE_WHY,
   archiveOpenText,
+  ASSET_STATE_TEXT,
+  ASSET_TEMPLATE_UPDATED_TEXT,
+  ASSET_TEMPLATE_UPDATED_WHY,
+  ASSET_USE_TEXT,
+  ASSET_USE_WHY,
   BASED_ON_KEY,
   BASED_ON_WHY,
   basedOnCellText,
@@ -190,6 +195,11 @@ interface Props {
   onEdit: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
+  /**
+   * **资源库那一行唯一的按钮：使用**（2026-10-08 资源库改判）。官方与我的同一个入口 ——
+   * 官方那一份本机没有字节时后端先按需取回，所以这里没有「下载 / 已下载」这一档。
+   */
+  onUse: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
   onDownload: (row: PresetTableRow) => void
   /**
@@ -233,6 +243,7 @@ export default function PresetTable({
   onOpenMine,
   onEdit,
   onLive,
+  onUse,
   onDownload,
   machines,
   remarks,
@@ -246,6 +257,10 @@ export default function PresetTable({
   const emptyText = (): string => {
     if (failure !== null) return `加载失败：${failure}`
     if (total === 0) {
+      /* MKP 那一档是一张**资源库**：里面两种来源，空表就要把两句话都说出来 */
+      if (mkp) {
+        return `资源库里还没有这一档的预设 —— 官方仓库里没有登记的，你自己放进预设目录的会出现在这里`
+      }
       return scope === 'local'
         ? `本机还没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 官方文件下载之后会出现在这里，你自己放进预设目录的也会`
         : `云端没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 菜单上没有，就下不到`
@@ -329,9 +344,16 @@ export default function PresetTable({
                * 本地表是**时间**（官方行是仓库记的更新时间、交付行是下载时间、我的是修改时间
                * —— 一列三种真来源，格上的 tooltip 说清各自是哪一个，见 `statWhyOf`）。
                */}
-              <th className={s.thTime} scope="col">
-                {scope === 'cloud' ? '云端更新' : '时间'}
-              </th>
+              {/*
+               * ★ **MKP 资源库那一档整个没有这一列**（2026-10-08）：行上只有
+               * 来源 + 机型 + 版本 + 操作；两个时间（来源那一版发布的、我这份改的）
+               * 都挪进展开详情 —— 用户在这一页问的是"我有哪些预设、在用哪个"。
+               */}
+              {mkp ? null : (
+                <th className={s.thTime} scope="col">
+                  {scope === 'cloud' ? '云端更新' : '时间'}
+                </th>
+              )}
 
               {/*
                * 「来源」列撤了（2026-10-07 作者：「来源不用显示在右侧」）——
@@ -375,8 +397,13 @@ export default function PresetTable({
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
                * **用户线那一份问都不问**：归档是官方版本生命周期的事，
                * 用户自己的文件不进归档，也不该因为同名就借到官方的旧版本。
+               * **MKP 资源库那一档整个不显示它**（2026-10-08：官方只有当前这一版）
+               * —— 归档抽屉只留切片器档。
                */
-              const archiveCount = row.origin === 'mine' ? 0 : archiveCountOf(row.fileName)
+              const archiveCount =
+                row.origin === 'mine' || (mkp && row.scope === 'local')
+                  ? 0
+                  : archiveCountOf(row.fileName)
               /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
@@ -428,6 +455,16 @@ export default function PresetTable({
                           title={`这一机下过这个预设的 ${row.olderVersions} 代旧版 —— 它们在你自己的文件里（本地表，名字带日期），展开这一行还能看到归档里那几份`}
                         >
                           旧版 ×{row.olderVersions}
+                        </span>
+                      )}
+                      {/*
+                        资源库：**我这份的来源官方换版了**（2026-10-08）。这不是"过时"、
+                        也不是"你该更新" —— 那份照常能用能改，这枚极淡的小字只说
+                        "官方那边有新的了，要的话从官方那一行另存一份"。
+                      */}
+                      {row.scope === 'local' && row.templateUpdated === true && (
+                        <span className={s.templateUpdated} title={ASSET_TEMPLATE_UPDATED_WHY}>
+                          {ASSET_TEMPLATE_UPDATED_TEXT}
                         </span>
                       )}
                       {row.scope === 'local' && row.untagged && (
@@ -493,14 +530,45 @@ export default function PresetTable({
                     </>
                   )}
 
-                  {statCell(row)}
+                  {mkp ? null : statCell(row)}
 
                   {/*
                    * 操作列常驻。三种画法，**已经生效 / 已经下载的那一种是灰字不是按钮**：
                    * 已经在用的东西没有可点的动作，给个按钮只会让人点一下看看会发生什么。
                    */}
                   <td className={s.act}>
-                    {row.scope === 'local' ? (
+                    {row.scope === 'local' && mkp ? (
+                      /*
+                       * **资源库那一行唯一的动作：使用**（2026-10-08 资源库改判）。
+                       * 官方与我的同一套外观、同一个词：两档都走 `onUse` —— 官方那份
+                       * 本机没有字节时后端先按需取回，所以这里没有「下载 / 已下载」这一档。
+                       * 两处不给按钮（不给必报错的按钮）：认不出是 MKP 预设的（`.json`），
+                       * 以及第九层读不出来的（这两档只可能出在我的那一半）。
+                       */
+                      row.live ? (
+                        <span className={s.actLive} title={ASSET_USE_WHY.on}>
+                          ✓ {ASSET_USE_TEXT.on}
+                        </span>
+                      ) : row.origin === 'mine' && row.kind !== 'mkp_preset' ? (
+                        <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
+                          {DASH_}
+                        </span>
+                      ) : row.origin === 'mine' && row.mineState === 'unreadable' ? (
+                        <span className={s.actNone} title={mineUnreadableWhy(row.mineStateDetail)}>
+                          {DASH_}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className={s.actBtn}
+                          disabled={busy}
+                          title={ASSET_USE_WHY.off}
+                          onClick={() => onUse(row)}
+                        >
+                          {ASSET_USE_TEXT.off}
+                        </button>
+                      )
+                    ) : row.scope === 'local' ? (
                       needsUpdate ? (
                         /*
                          * 盘上那一份与目录不符（旧版本 / 认不出）→ **不给「应用」**。应用会
@@ -618,11 +686,12 @@ export default function PresetTable({
                 {expanded && (
                   <tr className={s.expandRow}>
                     {/*
-                     * colSpan 必须**跟着上面的表头列数走**：MKP 5 列、切片器 6 列
-                     * （「来源」列撤了之后又各少一列）。比表头多出的那一跨会撑出一个
-                     * 匿名列，吃掉表格右侧的全部余量 —— 改列数时这里要一起改。
+                     * colSpan 必须**跟着上面的表头列数走**：MKP 4 列（名称 / 机型 / 版本 / 操作
+                     * —— 2026-10-08 资源库改判之后「时间」那一列退场）、切片器 6 列。
+                     * 比表头多出的那一跨会撑出一个匿名列，吃掉表格右侧的全部余量 ——
+                     * 改列数时这里要一起改。
                      */}
-                    <td colSpan={mkp ? 5 : 6}>
+                    <td colSpan={mkp ? 4 : 6}>
                       <dl className={s.facts}>
                         {/*
                          * 展开详情**只回答用户真正要问的事**：什么版本 / 从哪来 / 什么时候
@@ -747,16 +816,20 @@ export default function PresetTable({
                           title={
                             row.releaseState !== undefined
                               ? RELEASE_STATE_WHY[row.releaseState]
-                              : undefined
+                              : mkp && row.scope === 'local'
+                                ? ASSET_USE_WHY[row.live ? 'on' : 'off']
+                                : undefined
                           }
                         >
                           {row.releaseState !== undefined
                             ? UPDATE_STATE_TEXT[updateState ?? 'latest']
-                            : row.scope === 'local'
-                              ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
-                              : row.downloaded
-                                ? CLOUD_STATE_TEXT.downloaded
-                                : CLOUD_STATE_TEXT.pending}
+                            : mkp && row.scope === 'local'
+                              ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
+                              : row.scope === 'local'
+                                ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
+                                : row.downloaded
+                                  ? CLOUD_STATE_TEXT.downloaded
+                                  : CLOUD_STATE_TEXT.pending}
                           {row.applied && ' · 正在用'}
                         </dd>
 
@@ -891,13 +964,14 @@ export default function PresetTable({
                         {/*
                          * 用户线那一份：**看正文** + **改这份**（第八层）。
                          * 两条都是它自己的入口：改的是临时文件，保存时**写回它自己**
-                         * （不另存一份新的、也不碰官方基线）。
+                         * （不另存一份新的、也不碰官方那一份）。
                          * 认不出是哪一类的那份（`.json`）不给「改」—— 这一层只改 TOML 预设；
                          * **第九层读不出来的**也不给（改的入口同样过文件级检查）。
                          * 看正文照旧给：用户要能看着它去修（读它不算"用"）。
                          *
-                         * 2026-10-08 起「改这份」只有这一条入口：本地表 MKP 档只列工作副本，
-                         * 官方交付行（旧的那条入口）不再出现在这张表里。
+                         * 2026-10-08 资源库改判起「改这份」只有这一条入口：编辑的对象是
+                         * 「我的预设」（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
+                         * 要改它先在资源库里「另存为我的预设」。
                          */}
                         {row.origin === 'mine' && (
                           <>

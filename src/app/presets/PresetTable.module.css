@@ -295,6 +295,25 @@
 }
 
 /*
+ * 「官方模板已更新」那一枚（2026-10-08，资源库专用）：我这份的来源官方换了新版。
+ *
+ * **中性、虚线、极淡** —— 它不是"过时"、也不是"你该更新"（那套说法整个退场了），
+ * 只说一句"官方那边有新的了"。实线边或警示色都会把它读成一条待办。
+ */
+.templateUpdated {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
  * 「文件无法读取」那一枚（第九层：我那份读不出来 —— 编码 / TOML 语法 / 指向用户根之外）。
  *
  * 与上一枚的中性色分开：这一枚说的是**这份现在用不了**。琥珀（--warn）不是 --danger：
@@ -487,6 +506,24 @@
 .actDone {
   font-size: var(--fs-label);
   color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * **当前使用**那一格（资源库，2026-10-08）：绿色字 + 一层极淡的绿底。
+ *
+ * 它是"生效了"、不是"下载了"—— 表里唯一一条绿线（行左那道竖线）与它说的是同一件事。
+ * 这里若沿用 `.actDone` 的灰字，用户会把它读成"点不动、也没事了"的死格，
+ * 而它偏偏是这一页唯一的正状态。
+ */
+.actLive {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
   white-space: nowrap;
 }
 

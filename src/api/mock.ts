@@ -8,7 +8,6 @@ import type {
   OfficialVersion,
   OnDiskFile,
   ParamEdit,
-  PresetDefaults,
   PresetParamValues,
   PresetSource,
   SoftwareUpdate,
@@ -433,33 +432,6 @@ type RawParamDef = { key: string; section: string; tomlKey: string; valueType: s
 
 const rawParamDefs = (): RawParamDef[] => catalogRegistry().params as unknown as RawParamDef[]
 
-/**
- * 演示基准：真机上它是**隐藏 baseline** 里那份官方原文（按血统的 `based_on_sha256` 取）。
- * 假后端没有那个存储，用两张按摘要首字符认的小表顶上 —— 目的只是让「恢复默认值」
- * 在浏览器里也能看出"退回到的是当初那一版官方，不是出厂值"。
- */
-const MOCK_BASELINES: Record<string, string> = {
-  /* `'0'.repeat(64)` 那份血统指的就是它（2026-05-29 那一版） */
-  '0': [
-    '# 假后端的演示基准 · 2026-05-29 那一版官方',
-    '[toolhead]',
-    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
-    'offset_y = 18.6 # 笔尖偏移',
-    '',
-  ].join('\n'),
-  /* `'1'.repeat(64)` 那份血统指的是 2026-10-15 那一版 */
-  '1': [
-    '# 假后端的演示基准 · 2026-10-15 那一版官方',
-    '[toolhead]',
-    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
-    'offset_y = 26.3 # 笔尖偏移',
-    '',
-  ].join('\n'),
-}
-
-const baselineTextOf = (sha: string): string =>
-  MOCK_BASELINES[sha.slice(0, 1)] ?? MOCK_BASELINES['0']!
-
 /** 去掉行尾注释（引号里的 `#` 不算；演示数据够用） */
 function stripMockComment(raw: string): string {
   let quote: string | null = null
@@ -644,7 +616,7 @@ export const mockApi: MkpApi = {
   async savePresetCalibration(path, axes) {
     const text = mockMineText.get(path)
     if (text === undefined) {
-      throw new Error(`${path} 读不出来 —— 先下载这份预设，再保存校准`)
+      throw new Error(`${path} 读不出来 —— 先把这份另存为我的预设，再保存校准`)
     }
     mockMineText.set(path, patchMockOffsets(text, axes))
     const at = mockMine.findIndex((f) => f.path === path)
@@ -964,25 +936,23 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 下载即得工作副本（2026-10-08 作者改判）：官方预设落盘那一刻，「我的那一份」也在。
-   * 与真机同一套闸（`mine::ensure_working_copy` + `delivery::official_text`）：
-   * 官方基线没下载 / 字节与目录对不上 ⇒ 报错说清「先下载」（演示口径：`MOCK_DOWNLOADED`
-   * 里那份 = 可信；旧版本 / 内容异常的两份照实拒）；已经有我的一份 ⇒ 原样返回
-   * （`created: false` —— 用户改过、删过都算数，**永不覆盖**）；血统三行新写指向交付文件。
+   * **另存为我的预设**（2026-10-08 资源库改判）：官方那一份 → 我的一份。
+   *
+   * 与真机同一套规矩：官方那一行不区分"下过没有"（本机没有就先取回，演示里用官方原文
+   * 直接复制）；名字过与改名 / 复制同一道门槛（`mockNameProblem`），**撞名就拒**；
+   * 写下去的是官方原文 + 三行血统（指向交付文件）；**一个状态都不碰**。
    */
-  async ensureUserCopy(fileName) {
+  async copyOfficialAsMine(fileName, newName) {
     const hit = mockReleaseFile(fileName)
     if (hit === undefined) {
-      throw new Error(`${fileName} 还没下载到本机 —— 先下载，再到你的一份`)
+      throw new Error(`目录里没有 ${fileName} 这一份`)
     }
-    if (hit.trust !== 'ok') {
-      throw new Error(
-        `${fileName} 盘上这一份与目录登记的字节不一致 —— 先「更新」换一份干净的官方版`,
-      )
-    }
-    const path = `presets-mine/${fileName}`
+    const name = newName.trim()
+    const problem = mockNameProblem(fileName, name)
+    if (problem !== null) throw new Error(problem)
+    const path = `presets-mine/${name}`
     if (mockMine.some((f) => f.path === path)) {
-      return { fileName, path, created: false }
+      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
     }
     const label = `dist/mkp/presets/${fileName}`
     const text = [
@@ -996,7 +966,7 @@ export const mockApi: MkpApi = {
     mockMineText.set(path, text)
     mockMine.push({
       path,
-      fileName,
+      fileName: name,
       size: text.length,
       modifiedUnix: nowSec(),
       kind: 'mkp_preset',
@@ -1011,12 +981,12 @@ export const mockApi: MkpApi = {
       /* 归属与来源那份一致（官方原文头里那两行原样带过来） */
       machineId: hit.machineId,
       versionId: hit.versionId,
-      /* 下载出来的：出处走血统（「复制自官方 X」），账本不重复记 */
-      copiedFrom: null,
-      copiedFromName: null,
-      provenance: null,
+      /* 从官方那一份另存出来的：出处账记着从哪来（界面上「来源」那一格） */
+      copiedFrom: label,
+      copiedFromName: fileName,
+      provenance: 'copy' as const,
     })
-    return { fileName, path, created: true }
+    return { path, fileName: name }
   },
 
   /*
@@ -1398,18 +1368,6 @@ export const mockApi: MkpApi = {
     return MOCK_OFFICIAL_VERSIONS.filter((v) => !want || v.fileName === want).map((v) => ({ ...v }))
   },
 
-  async getPresetDefaults(path: string): Promise<PresetDefaults> {
-    const text = mockMineText.get(path)
-    if (text === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
-    const line = text.split('\n').find((l) => l.trimStart().startsWith('# based_on_sha256'))
-    const sha = line === undefined ? null : (line.split(':')[1]?.trim() ?? null)
-    if (sha === null || sha === '') {
-      /* 没有血统（导入的 / 手工拷的）—— 没有基准，界面回退出厂值 */
-      return { basedOnSha256: null, values: null }
-    }
-    return { basedOnSha256: sha, values: readMockParams(baselineTextOf(sha)) }
-  },
-
   async readPresetParams(path: string): Promise<PresetParamValues> {
     const text = mockMineText.get(path)
     const fileName = path.split('/').pop() ?? path
@@ -1531,6 +1489,34 @@ export const mockApi: MkpApi = {
 
   async clearActivePreset() {
     mockActive = null
+  },
+
+  /*
+   * 资源库那一条路（2026-10-08 改判）：官方预设的「使用」= 按需取回 + 写成当前使用。
+   * 浏览器里**没有下载区**，所以照实分两档：
+   *   演示集合里已有（`MOCK_DOWNLOADED`）→ 当成"本机已有当前版"，直接记指针；
+   *   没有                              → 取不回来，如实抛（与 `downloadCatalogFile` 同一口径）。
+   */
+  async useOfficialPreset(fileName) {
+    const hit = mockReleaseFile(fileName)
+    if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
+    if (!MOCK_DOWNLOADED.some((f) => f.fileName === fileName)) {
+      throw new NotImplementedError(
+        'useOfficialPreset',
+        `浏览器预览里没有 ${fileName} 的字节，也没法从数据源取回来 —— 用桌面版点「使用」`,
+      )
+    }
+    mockActive = {
+      origin: 'official',
+      fileName,
+      path: null,
+      /* 指纹是使用那一刻的字节摘要；浏览器里没有真字节，用文件名占位（形状不编） */
+      sha256: `mock:${fileName}`,
+      machineId: hit.machineId,
+      versionId: hit.versionId,
+      intact: true,
+    }
+    return { fetched: false, active: mockActive }
   },
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */

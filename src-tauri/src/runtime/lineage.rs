@@ -280,7 +280,7 @@ fn parse_release_time_from_content(content: &str) -> Option<String> {
 /// **这一版官方是什么时候发的**（文件头 `# release_time` 的原样值，如
 /// `2026-08-19 01:38:13`）。
 ///
-/// 它是下载收尾给"我的那份"起名时用的日期真值（[`super::mine::ensure_working_copy`]）——
+/// 它是"这是哪个官方版本"的日期真值（血统三行里的 `based_on_release_time` 也用它）——
 /// **不许**拿下载时刻 / 文件 mtime / 目录代时间冒充它：那些回答的是"我什么时候拿到它"，
 /// 不是"这是哪个官方版本"。没有这一行就返回 `None`（不知道就不编一个）。
 pub fn parse_release_time(content: &str) -> Option<String> {

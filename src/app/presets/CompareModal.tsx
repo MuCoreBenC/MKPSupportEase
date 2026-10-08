@@ -311,7 +311,11 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
       footer={footer}
     >
       <div className={s.pick}>
-        {files.length === 0 && <span className={s.note}>还没有「我的预设」可以对比 —— 先下载一份。</span>}
+        {files.length === 0 && (
+          <span className={s.note}>
+            还没有「我的预设」可以对比 —— 先在资源库里另存一份自己的（官方那一份是模板，不进这张台子）。
+          </span>
+        )}
         {files.map((f) => {
           const on = picked.includes(f.path)
           const full = !on && picked.length >= MAX_PICKED

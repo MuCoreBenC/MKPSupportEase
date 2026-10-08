@@ -2,18 +2,17 @@
 //!
 //! ```text
 //! 内部（程序管，住内部根）                       用户线（用户自己要看要拷，住用户根）
-//!   <catalog.path>  当前官方版本（唯一 URL 锚）   presets-mine/ 我的预设（可编辑 / 可删）
+//!   <catalog.path>  官方模板的本机落点             presets-mine/ 我的预设（可编辑 / 可删）
 //!   archive/        换下来的官方旧版本
-//!   baseline/<sha>  隐藏基准快照（只服务"恢复默认"）
+//!   baseline/<sha>  隐藏基准快照（切片器档的版本账在用）
 //! ```
 //!
-//! 两界**不许混**（总纲 §1③「预设 TOML 的一生」；2026-10-08 作者两次改判）：
+//! 两界**不许混**（总纲 §1③「预设 TOML 的一生」；2026-10-08 资源库改判）：
 //!
-//! - 隐藏 baseline**不可变**（[`super::baseline`]）：每一版官方按内容摘要留一份，
-//!   用户不可见、不被编辑、不参与任何"新版本 / 过时"判断 —— 它只回答一件事：
-//!   "这份我的预设当初那一版官方默认值是什么"（参数页「恢复默认」的取值依据）；
-//! - 用户的工作副本**下载那一刻就有**（[`ensure_working_copy`]），名字带**官方发布日**；
-//!   官方再来新版**不动旧的任何一份**，而是再产生一份新的（V1 / V2 并存，用户自己挑）；
+//! - **官方是模板**：它落在内部区（`<catalog.path>`），列表里只是一行「官方」——
+//!   「使用」直接用它，**不产生副本**；官方永远只有当前这一版，没有第二份、没有旧版账；
+//! - **我的预设**是用户自己的文件，只有两条路产生：「另存为我的预设」
+//!   （[`save_official_as_new`]，官方 → 我的）与用户自己放进这一格；**下载不再自动产生副本**；
 //! - 用户什么都没改 = 什么都没发生（浏览 / 使用 / 关开不产生文件）。
 //!
 //! # 用户根在哪（**不碰 `~/Documents`**）
@@ -47,7 +46,7 @@
 //! 对应三件**不同**的事，不许合并成一个"存一下"：
 //!
 //! ```text
-//! ensure_working_copy  下载的收尾：基线落下 → 我的那份也在（<原名>-<发布日>.toml，幂等）
+//! save_official_as_new 另存：官方模板 → presets-mine/<你起的名字>（带血统三行，撞名就拒）
 //! commit_draft         另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
 //! save_back            写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
 //! ```
@@ -736,156 +735,47 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     })
 }
 
-/// 工作副本落定的结果（[`ensure_working_copy`]）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkingCopy {
-    /// 相对**用户根**的落点（`presets-mine/<官方原名>`）
-    pub path: String,
-    pub file_name: String,
-    /// 这次是不是新生成了一份；`false` = 本来就有（一个字节都没动）
-    pub created: bool,
-}
-
-/// **下载即得工作副本**（2026-10-08 作者改判；同日二次改判：按官方发布日命名）。
+/// **把官方那一份另存成我自己的一份**（官方 → 我的；2026-10-08 资源库改判）。
 ///
-/// 每个官方预设从**下载那一刻起**就有一份属于用户的、可编辑的工作副本。官方再来新版时
-/// **不动旧的任何一份**，而是再产生一份新的 —— 于是 V1 / V2 两份我的预设并存，
-/// 用户自己决定用哪一份、怎么改（程序不替他合并，也不替他判断谁过时）。
+/// 资源库模型里「我的预设」只能由这条路产生 —— 「另存为我的预设」。下载 / 使用官方
+/// 都不再自动产生副本：官方是模板，用户实际要用、要改的是他自己那一份。
 ///
-/// - **名字**：`<官方原名的 stem>-<官方发布日>.<后缀>`（`A1-fast.toml` + `2026-10-15`
-///   → `A1-fast-2026-10-15.toml`）。日期取自官方正文文件头的 `# release_time`
-///   （[`lineage::parse_release_time`]）—— 那是"这是哪个官方版本"的真值；
-///   官方没写这一行就退回原名（**不编日期**）。同日重名往后补 `-01` / `-02`。
-/// - **幂等**：用户线里已经有一份基于这一版（血统 `based_on_sha256` 相同）的，
-///   一个字节都不碰 —— **他改过名、改过值都算数**，那不是"缺一份"，是"那一份就是它"。
-/// - **不覆盖**：已经在盘上的任何一份用户文件都不会被这次调用改写。
+/// - **名字**：由用户起（`new_name`），只过"是不是一个像样的名字"那道门槛
+///   （[`check_new_name`]：不许空 / 不许带路径 / 后缀保持原样）；**撞名就拒** ——
+///   不覆盖、也不自动改名（名字由用户自己换）；
+/// - 写下去的是**副本的形状**：官方原文 + 头注释块里三行血统
+///   （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`，
+///   `based_on_sha256` 就是这一版官方的唯一身份）；
+/// - **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive。
 ///
-/// 写下去的是**副本的形状**：官方原文 + 头注释块里三行血统
-/// （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`，
-/// `based_on_sha256` 就是这一版官方的唯一身份）。`file` 必须是一份 MKP 预设，
-/// `official_text` 的字节可信由调用方（[`super::delivery::official_text`] 的 SHA 闸）
-/// 保证；出处账不记：血统已经答了"从哪来"（与 `commit_draft` 同一口径）。
-/// **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive。
-pub fn ensure_working_copy(
+/// `file` 必须是一份 MKP 预设，`official_text` 的字节可信由调用方
+/// （[`super::delivery::official_text`] 的 SHA 闸）保证。
+pub fn save_official_as_new(
     user_root: &Path,
     file: &CatalogFile,
     official_text: &str,
-) -> Result<WorkingCopy, AppError> {
+    new_name: &str,
+) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
         return Err(AppError::invalid_argument(format!(
-            "{} 不是 MKP 预设 —— 只有 MKP 预设会有工作副本",
+            "{} 不是 MKP 预设 —— 只有 MKP 预设能另存成你的一份",
             file.file_name
         )));
     }
-    let sha = lineage::sha256_hex(official_text);
-    /* 幂等：用户线里已经有「基于这一版」的那一份，就不再产生第二份 */
-    if let Some(had) = working_copy_of(user_root, &sha) {
-        return Ok(had);
+    let name = check_new_name(&file.file_name, new_name)?;
+    let rel = format!("{MINE_DIR}/{name}");
+    let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
+    if target.exists() {
+        return Err(AppError::invalid_argument(format!(
+            "已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"
+        )));
     }
-    let want = working_copy_name(&file.file_name, official_text);
-    let (path, file_name) = available_mine_path(user_root, &want)?;
-    let target = crate::fsx::paths::resolve_in(user_root, &path)?;
     let body = super::lineage::make_copy(official_text, &file.path);
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
-    Ok(WorkingCopy {
-        path,
-        file_name,
-        created: true,
+    Ok(FileIdentity {
+        path: rel,
+        file_name: name,
     })
-}
-
-/// 用户线里已经有一份基于**这一版官方**（按全文摘要认）的工作副本了吗。
-///
-/// 认的是**血统**而不是文件名：用户随时可能把那份改名（第十层），改名之后名字对不上、
-/// 内容还是那一份 —— 按名字找会凭空多复制一份出来。
-fn working_copy_of(user_root: &Path, sha: &str) -> Option<WorkingCopy> {
-    mine_files(user_root).into_iter().find_map(|f| {
-        let hit = f
-            .lineage
-            .as_ref()
-            .and_then(|l| l.based_on_sha256.as_deref())
-            .is_some_and(|s| s.eq_ignore_ascii_case(sha));
-        /* `then_some` 而不是 `then(|| …)`：这一格是**终点**（`f` 后面不再用），
-           命中与否都不影响谁被移动 —— 闭包在这里只是把惰性白写了一遍 */
-        hit.then_some(WorkingCopy {
-            path: f.path,
-            file_name: f.file_name,
-            created: false,
-        })
-    })
-}
-
-/// 下载收尾那份副本叫什么：`<原名 stem>-<官方发布日>.<后缀>`。
-///
-/// 官方正文没有 `# release_time` 时**退回原名**（不知道日期就不编一个）——
-/// 那种情况下"同一份下两次"由 [`working_copy_of`] 的幂等兜住。
-pub fn working_copy_name(source_file_name: &str, official_text: &str) -> String {
-    let Some(date) = release_date_of(official_text) else {
-        return source_file_name.to_owned();
-    };
-    let path = Path::new(source_file_name);
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| source_file_name.to_owned());
-    match path.extension() {
-        Some(ext) => format!("{stem}-{date}.{}", ext.to_string_lossy()),
-        None => format!("{stem}-{date}"),
-    }
-}
-
-/// 文件头 `# release_time` 里的**日期段**（`2026-10-08 01:38:13` → `2026-10-08`）。
-///
-/// 只认 `YYYY-MM-DD` 这一种形状：它会进用户看得见的文件名，形状不对就整个不用
-/// （不把半截时间戳塞进名字里）。
-fn release_date_of(official_text: &str) -> Option<String> {
-    let raw = lineage::parse_release_time(official_text)?;
-    let date = raw.split_whitespace().next()?;
-    let b = date.as_bytes();
-    let shaped = b.len() == 10
-        && b[4] == b'-'
-        && b[7] == b'-'
-        && b.iter()
-            .enumerate()
-            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
-    shaped.then(|| date.to_owned())
-}
-
-/// 找一个还没被占用的落点：想要的名字已有东西就往后补 `-01` / `-02`…（最多到 `-99`）。
-///
-/// 名字过[同一套门槛](check_new_name)（不许空 / 不许带路径 / 后缀保持原样）。
-/// **只有下载收尾这条路会自动编号** —— 用户手输的改名 / 另存仍然"撞名就拒"
-/// （第十层 / 第十一层），那条边界不动。
-fn available_mine_path(user_root: &Path, want: &str) -> Result<(String, String), AppError> {
-    let name = check_new_name(want, want)?;
-    for attempt in 0..100u32 {
-        let candidate = if attempt == 0 {
-            name.clone()
-        } else {
-            numbered(&name, attempt)
-        };
-        let rel = format!("{MINE_DIR}/{candidate}");
-        let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
-        if !target.exists() {
-            return Ok((rel, candidate));
-        }
-    }
-    Err(AppError::invalid_argument(format!(
-        "{name} 这一版已经重名到 -99 了 —— 去「我的文件」里清理一下再下"
-    )))
-}
-
-/// `A1-fast-2026-10-15.toml` + 1 → `A1-fast-2026-10-15-01.toml`（后缀留在最后）
-fn numbered(file_name: &str, n: u32) -> String {
-    let path = Path::new(file_name);
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| file_name.to_owned());
-    match path.extension() {
-        Some(ext) => format!("{stem}-{n:02}.{}", ext.to_string_lossy()),
-        None => format!("{stem}-{n:02}"),
-    }
 }
 
 /// **删除**一份用户文件（第十层）：**真删除** —— 没有垃圾桶，也没有归档
@@ -1792,141 +1682,110 @@ mod tests {
         assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
     }
 
-    /* ---------- 下载即得工作副本：ensure_working_copy（2026-10-08 作者改判） ---------- */
+    /* ---------- 另存为我的预设：save_official_as_new（2026-10-08 资源库改判） ---------- */
 
-    /// 正路：第一次"下载"之后，用户目录里就有一份工作副本 —— 官方原文 + 血统三行
-    /// （`based_on` 指向来源交付文件）；再调一次**一个字节不动**，`created: false`
+    /// 正路：官方那一份另存成我的一份 —— 官方原文 + 血统三行（`based_on` 指向来源
+    /// 交付文件）；落点用**用户起的名字**（不自动加日期、也不自动编号）
     #[test]
-    fn the_first_download_leaves_a_working_copy_and_never_overwrites_it() {
+    fn saving_official_as_new_writes_a_copy_with_lineage() {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let first = ensure_working_copy(user.path(), &file, "涂胶宽度 = 1.0\n").unwrap();
-        assert_eq!(
-            first.path, "presets-mine/A1-standard.toml",
-            "没有 release_time 就退回原名（不编日期）"
-        );
-        assert!(first.created, "第一次要真生成一份");
+        let done =
+            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "我的 A1 标准版.toml")
+                .unwrap();
+        assert_eq!(done.path, "presets-mine/我的 A1 标准版.toml");
 
-        let text =
-            String::from_utf8(std::fs::read(user.path().join(&first.path)).unwrap()).unwrap();
+        let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
         assert!(
             text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
             "血统要指向来源交付文件：{text}"
         );
-        assert!(
-            text.contains("# based_on_sha256:"),
-            "摘要那行也要在：{text}"
-        );
+        assert!(text.contains("# based_on_sha256:"), "摘要那行也要在：{text}");
         assert!(
             text.contains("涂胶宽度 = 1.0"),
             "官方原文要原样在副本里：{text}"
         );
-
-        /* 用户改过它（编辑走 save_back，血统三行照旧）—— 重新下载这一版，这份照样不动 */
-        let edited = text.replace("涂胶宽度 = 1.0", "涂胶宽度 = 2.0");
-        write(user.path(), &first.path, &edited);
-        let again = ensure_working_copy(user.path(), &file, "涂胶宽度 = 1.0\n").unwrap();
-        assert_eq!(again.path, first.path);
-        assert!(!again.created, "已经有我的一份了，这次不该新建");
-        let after =
-            String::from_utf8(std::fs::read(user.path().join(&first.path)).unwrap()).unwrap();
-        assert_eq!(after, edited, "用户的改动一个字节都不能被覆盖");
     }
 
-    /// 名字带**官方发布日** —— 真值取自 `# release_time`，不是下载时刻 / mtime
+    /// 撞名就拒：不覆盖、也不自动改名（名字由用户自己换）
     #[test]
-    fn the_working_copy_is_named_after_the_official_release_date() {
+    fn saving_official_as_new_refuses_an_existing_name() {
         let user = tempfile::tempdir().unwrap();
-        let v2 = "# machine: A1\n# variant: standard\n# release_time: 2026-10-15 09:12:33\n\
-                  涂胶宽度 = 1.2\n";
-        let file = entry_bytes("A1-standard.toml", v2);
+        write(user.path(), "presets-mine/已经在了.toml", "别动我\n");
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let made = ensure_working_copy(user.path(), &file, v2).unwrap();
-        assert_eq!(made.path, "presets-mine/A1-standard-2026-10-15.toml");
-        assert!(made.created);
-    }
-
-    /// **官方再来新版：旧的照样在，再产生新的一份** —— "不覆盖、不自动合并"的落点
-    #[test]
-    fn a_new_official_version_adds_a_second_copy_and_leaves_the_first_alone() {
-        let user = tempfile::tempdir().unwrap();
-        let v1 = "# machine: A1\n# release_time: 2026-10-08 08:00:00\n涂胶宽度 = 1.0\n";
-        let v2 = "# machine: A1\n# release_time: 2026-10-15 09:00:00\n涂胶宽度 = 1.4\n";
-
-        let a = ensure_working_copy(user.path(), &entry_bytes("A1-standard.toml", v1), v1).unwrap();
-        assert_eq!(a.path, "presets-mine/A1-standard-2026-10-08.toml");
-        /* 用户把 V1 那份改成自己的一版 */
-        let a_text = String::from_utf8(std::fs::read(user.path().join(&a.path)).unwrap()).unwrap();
-        let mine_a = a_text.replace("涂胶宽度 = 1.0", "涂胶宽度 = 0.9");
-        write(user.path(), &a.path, &mine_a);
-
-        let b = ensure_working_copy(user.path(), &entry_bytes("A1-standard.toml", v2), v2).unwrap();
+        let e = save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "已经在了.toml")
+            .unwrap_err();
+        assert!(e.message.contains("换个名字"), "{}", e.message);
         assert_eq!(
-            b.path, "presets-mine/A1-standard-2026-10-15.toml",
-            "新版是**另一份**"
-        );
-        assert!(b.created);
-        assert_eq!(
-            String::from_utf8(std::fs::read(user.path().join(&a.path)).unwrap()).unwrap(),
-            mine_a,
-            "V1 那份一个字节都不许动"
+            String::from_utf8(
+                std::fs::read(user.path().join("presets-mine/已经在了.toml")).unwrap()
+            )
+            .unwrap(),
+            "别动我\n",
+            "已经在盘上的那一份一个字节都不能动"
         );
     }
 
-    /// 撞名（同一天两版）往后补 `-01`，绝不覆盖已存在的那一份；同一版再来一次仍是幂等
+    /// 名字过的是与改名 / 另存同一道门槛：不许空、后缀保持原样、不许带路径
     #[test]
-    fn a_name_collision_gets_a_number_and_never_overwrites() {
+    fn saving_official_as_new_checks_the_new_name() {
         let user = tempfile::tempdir().unwrap();
-        let v = "# machine: A1\n# release_time: 2026-10-15 09:00:00\n涂胶宽度 = 1.0\n";
-        let other = "# machine: A1\n# release_time: 2026-10-15 18:00:00\n涂胶宽度 = 1.9\n";
-
-        let first =
-            ensure_working_copy(user.path(), &entry_bytes("A1-standard.toml", v), v).unwrap();
-        assert_eq!(first.path, "presets-mine/A1-standard-2026-10-15.toml");
-        let second = ensure_working_copy(
-            user.path(),
-            &entry_bytes("A1-standard.toml", other),
-            other,
-        )
-        .unwrap();
-        assert_eq!(second.path, "presets-mine/A1-standard-2026-10-15-01.toml");
-        assert!(second.created);
-        let third = ensure_working_copy(
-            user.path(),
-            &entry_bytes("A1-standard.toml", other),
-            other,
-        )
-        .unwrap();
-        assert_eq!(third.path, second.path, "同一版再来一次是幂等，不是 -02");
-        assert!(!third.created);
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
+        assert!(save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ").is_err());
+        assert!(
+            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt").is_err(),
+            "后缀不许换"
+        );
+        assert!(
+            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml").is_err(),
+            "不许带路径"
+        );
     }
 
-    /// 用户把那份**改了名**，幂等照样认得出（认血统、不认文件名）
+    /// 只有 MKP 预设能另存成我的一份：切片器 profile（json）那类拒
     #[test]
-    fn idempotency_survives_a_user_rename() {
-        let user = tempfile::tempdir().unwrap();
-        let v = "# machine: A1\n# release_time: 2026-10-15 09:00:00\n涂胶宽度 = 1.0\n";
-        let first =
-            ensure_working_copy(user.path(), &entry_bytes("A1-standard.toml", v), v).unwrap();
-        let target = crate::fsx::paths::resolve_in(user.path(), &first.path).unwrap();
-        std::fs::rename(&target, target.with_file_name("我的调好的 A1.toml")).unwrap();
-
-        let again = ensure_working_copy(user.path(), &entry_bytes("A1-standard.toml", v), v).unwrap();
-        assert_eq!(again.path, "presets-mine/我的调好的 A1.toml");
-        assert!(!again.created, "改名不改\"从哪来\" —— 不该再多一份");
-    }
-
-    /// 只有 MKP 预设会有工作副本：切片器 profile（json）那类拒
-    #[test]
-    fn ensure_working_copy_refuses_non_presets() {
+    fn saving_official_as_new_refuses_non_presets() {
         let user = tempfile::tempdir().unwrap();
         let file = super::super::catalog::CatalogFile {
             kind: "bbs_profile".to_owned(),
             ..entry_bytes("MKPProcess.json", "{}")
         };
-        let e = ensure_working_copy(user.path(), &file, "{}").unwrap_err();
+        let e = save_official_as_new(user.path(), &file, "{}", "我的.json").unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
+    }
+
+    /// **一个状态都不碰**：使用中指针还是指着原来那份、草稿也还在原来那份上
+    #[test]
+    fn saving_official_as_new_touches_no_state_at_all() {
+        let user = tempfile::tempdir().unwrap();
+        write(user.path(), "presets-mine/A1.toml", VALID_TOML);
+        crate::runtime::app_state::set_active_mine(user.path(), "presets-mine/A1.toml", "sha")
+            .unwrap();
+        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
+
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
+        save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "新的一份.toml").unwrap();
+
+        let after_active = crate::runtime::app_state::active_preset(user.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_active.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "使用中没动"
+        );
+        let after_draft = crate::runtime::app_state::draft(user.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_draft.path.as_deref(),
+            Some("presets-mine/A1.toml"),
+            "草稿没被动过"
+        );
+        assert_eq!(after_draft.text, "改到一半");
     }
 
     /* ---------- 校准值：从工作副本正文里读（2026-10-08） ---------- */

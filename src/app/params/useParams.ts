@@ -445,14 +445,11 @@ export interface Params {
   saveResult: string | null
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
-  /** 底栏的「恢复默认值」：全部退回默认值（有官方基准用它，没有就出厂值），算一次动作、可整体撤销 */
-  restoreDefaults: () => void
   /**
-   * 「恢复默认值」退回到**哪一份**（2026-10-08）：`baseline` = 这份我的预设当初那一版官方的
-   * 默认值（藏在系统内部，用户看不见）；`factory` = 没有基准，退回目录里的出厂值。
-   * 确认框据此把那句话说准 —— 两档的后果一样安全（都是一次可撤销的改动）。
+   * 底栏的「恢复默认值」：全部退回**出厂值**（目录里那份 `baseValue`），
+   * 算一次动作、可整体撤销（2026-10-08 资源库改判：不再问任何历史快照）。
    */
-  defaultSource: 'baseline' | 'factory'
+  restoreDefaults: () => void
   save: () => void
   /** 保存成功后的那一行绿字；null = 不显示 */
   savedNote: string | null
@@ -527,39 +524,15 @@ export function useParams(): Params {
    */
   const [gateNote, setGateNote] = useState<string | null>(null)
   /**
-   * **「恢复默认值」的基准**（2026-10-08 作者改判）。
+   * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
    *
-   * 以前退回的是目录里的**出厂值**；现在改成：**这份我的预设当初那一版官方的默认值** ——
-   * 藏在系统内部的 baseline 里（按血统的 `based_on_sha256` 寻址，用户看不见它）。
+   * 那一版是"退回这份预设当初那版官方的默认值"（藏在内部 baseline 里）。
+   * 现在整个功能不要了：**有问题就让用户删掉、重新取一份** —— 参数表上的「恢复默认值」
+   * 退回**出厂值**（目录里那份 `baseValue`），不再去问任何历史快照。
    *
-   * `null` = 没有可用的基准（导入的 / 从用户预设复制出来的 / 编辑目标不是我的预设）——
-   * 那时**回退出厂值**（基准缺失是正常状态，不是错误）。
+   * 于是这一条读（`getPresetDefaults`）与状态一起下线：少一次请求、少一个"我该退到哪一版"
+   * 的隐性概念。
    */
-  const [baselineDefaults, setBaselineDefaults] = useState<Record<string, string> | null>(null)
-
-  /*
-   * 编辑目标一变就去取它的官方基准。只读，且**读不到就是 `null`**（不报错、不挡页面）——
-   * 它只影响「恢复默认值」退回哪一份，取不到时退回出厂值，别的一概不变。
-   */
-  const editingPath = editingPreset?.origin === 'mine' ? editingPreset.path : null
-  useEffect(() => {
-    if (editingPath === null) {
-      setBaselineDefaults(null)
-      return
-    }
-    let alive = true
-    void api.getPresetDefaults(editingPath).then(
-      (d) => {
-        if (alive) setBaselineDefaults(d.values)
-      },
-      () => {
-        if (alive) setBaselineDefaults(null)
-      },
-    )
-    return () => {
-      alive = false
-    }
-  }, [editingPath])
 
   /**
    * **保存**：把草稿提交成"我的预设"（官方线另存 / 用户线写回）。
@@ -1108,21 +1081,20 @@ export function useParams(): Params {
   /**
    * 整份恢复默认值：一次动作，撤销一下就全回来。
    *
-   * **基准有两档**（2026-10-08）：有官方基准就用它（这份我的预设当初那一版官方的默认值），
-   * 没有就退回目录里的出厂值。基准里**缺哪一项**就那一项回退出厂值 —— 参数表可能比
-   * 当初那一版官方多出几项，不能因为基线上没有就把它们留成空。
+   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版官方的
+   * 默认值"整个退场了 —— 有问题就让用户删掉、重新取一份，参数页不再养一份历史快照，
+   * 也就没有"基准里缺哪一项"那一串回落。
    */
   const restoreDefaults = useCallback(() => {
     if (combo === null) return
-    const base = baselineDefaults
     apply(
-      base === null ? '恢复默认值' : '恢复官方默认值',
+      '恢复默认值',
       combo.defs.map((d) => ({
         key: d.key,
-        value: base?.[d.key] ?? combo.factoryByKey.get(d.key) ?? '',
+        value: combo.factoryByKey.get(d.key) ?? '',
       })),
     )
-  }, [apply, baselineDefaults, combo])
+  }, [apply, combo])
 
   /* 撤销 / 重做在**回调体里**读栈算完再 set —— StrictMode 会把 updater 跑两次 */
   const undo = useCallback(() => {
@@ -1447,7 +1419,6 @@ export function useParams(): Params {
     saveResult,
     revertToSaved,
     restoreDefaults,
-    defaultSource: baselineDefaults === null ? 'factory' : 'baseline',
     save,
     savedNote,
     gateNote,

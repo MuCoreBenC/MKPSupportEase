@@ -169,14 +169,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
-        // 下载即得工作副本 + 校准写回（2026-10-08）：补齐我的那份 / 找它 / 把校准值写进它
-        ipc::mine::ensure_user_copy,
+        // 另存为我的预设 + 校准写回（2026-10-08 资源库改判）：官方 → 我的 / 找它 / 把校准值写进它
+        ipc::mine::copy_official_as_mine,
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
-        // 对比台 + baseline（2026-10-08）：只在**用户自己的预设**之间对比；
-        // baseline 是隐藏内部存储（云端版本列表 + 恢复默认的基准值）
+        // 对比台 + 官方版本账（2026-10-08）：只在**用户自己的预设**之间对比
         ipc::preset_baseline::get_official_versions,
-        ipc::preset_baseline::get_preset_defaults,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
@@ -191,6 +189,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_downloaded_text,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
+        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
+        ipc::catalog::use_official_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -241,13 +241,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
-        // 下载即得工作副本 + 校准写回（与上面那份清单一字不差）
-        ipc::mine::ensure_user_copy,
+        // 另存为我的预设 + 校准写回（与上面那份清单一字不差）
+        ipc::mine::copy_official_as_mine,
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
-        // 对比台 + baseline（与上面那份清单一字不差）
+        // 对比台 + 官方版本账（与上面那份清单一字不差）
         ipc::preset_baseline::get_official_versions,
-        ipc::preset_baseline::get_preset_defaults,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
@@ -262,6 +261,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_downloaded_text,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
+        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
+        ipc::catalog::use_official_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）

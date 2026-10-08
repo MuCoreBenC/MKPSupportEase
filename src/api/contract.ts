@@ -24,9 +24,9 @@ export interface Preset {
   axes: Axes
   speed: number
   /**
-   * **「我那一份」工作副本的落点** —— 校准保存写它（2026-10-08 作者改判：
-   * 偏移随工作副本走）。`null` = 这个机型 / 版本还没有用户的一份：校准页照旧显示
-   * 官方默认值，**保存被拦**（先下载才有得存 —— 官方基线永远不可变）。
+   * **「我那一份」的落点** —— 校准保存写它（2026-10-08 资源库改判：偏移随「我的预设」走）。
+   * `null` = 这个机型 / 版本还没有你的一份：校准页照旧显示官方默认值，**保存被拦**
+   * （先另存一份自己的才有得存 —— 官方那一份是模板，永远不可变）。
    */
   mine: { path: string; fileName: string } | null
 }
@@ -592,24 +592,11 @@ export interface UserFileIdentity {
 }
 
 /**
- * 工作副本落定的结果（[`ensureUserCopy`]）。
- *
- * 「下载即得工作副本」（2026-10-08 作者改判）：官方预设落盘那一刻，`presets-mine/`
- * 里就有一份属于用户的、可编辑的副本 —— 用户此后只操作这一份，官方那份退居内部基线。
- */
-export interface UserCopyInfo {
-  fileName: string
-  /** 落点（相对**用户根**，`presets-mine/<官方原名>`） */
-  path: string
-  /** 这次是不是新生成了一份；`false` = 本来就有（一个字节都没动） */
-  created: boolean
-}
-
-/**
  * 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）。
  *
- * **整个对象缺席**（`null`）= 这个机型 / 版本还没有用户的一份 —— 校准页照旧显示
- * 官方默认值，**保存被拦**（先下载才有得存：校准的对象是工作副本，基线永远不可变）。
+ * **整个对象缺席**（`null`）= 这个机型 / 版本还没有你的一份 —— 校准页照旧显示
+ * 官方默认值，**保存被拦**（先另存一份自己的才有得存：校准的对象是「我的预设」，
+ * 官方那一份是模板、永远不可变）。
  */
 export interface UserCopyCalibration {
   fileName: string
@@ -958,6 +945,17 @@ export interface ActivePreset {
 }
 
 /**
+ * 「使用官方预设」的结果（[`useOfficialPreset`]，2026-10-08 资源库改判）。
+ *
+ * `fetched` 说这次**有没有真的取回来一份** —— 本机已经是当前版时是 `false`
+ * （一次网络都不发）。界面据此说「已取回并使用」还是「已使用」。
+ */
+export interface UseOfficialResult {
+  fetched: boolean
+  active: ActivePreset
+}
+
+/**
  * 远端目录检查结果（两端共用契约：比较的是 revision 指纹，不逐项 diff）。
  * 开发期远端 = 工作台发布的 dist/catalog.json；真云端来了只换来源，这个形状不动。
  */
@@ -1154,21 +1152,14 @@ export interface PresetParamValues {
   problem: string | null
 }
 
-/** 「恢复默认」的基准值（参数页「恢复默认值」的取值来源） */
-export interface PresetDefaults {
-  /** 这份预设血统里的来源摘要（没血统 / 没摘要 ⇒ `null`） */
-  basedOnSha256: string | null
-  /** 基准参数值；`null` = 没有可用的基准，前端**回退出厂值** */
-  values: Record<string, string> | null
-}
-
 export interface MkpApi {
   /**
-   * **把校准好的三轴偏移写进「我的那一份」工作副本**（2026-10-08 作者改判）。
+   * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
    *
    * `path` 来自 [`getUserCopyFor`]（或用户线列表）—— 必须是 `presets-mine/…` 里
    * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
-   * （注释、键序、血统三行一个字节不动）。官方基线不可变：没有工作副本就先下载。
+   * （注释、键序、血统三行一个字节不动）。
+   * 官方那一份是模板、永远不可变：还没有你的一份就先「另存为我的预设」。
    */
   savePresetCalibration(path: string, axes: Axes): Promise<void>
 
@@ -1313,16 +1304,17 @@ export interface MkpApi {
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
   /**
-   * **确保「我的那一份」在**（2026-10-08 作者改判：下载即得工作副本）。
+   * **另存为我的预设**：官方那一份 → 用户自己的一份（2026-10-08 资源库改判）。
    *
-   * 下载命令的收尾就是它（下完基线顺手把工作副本补上）；这里同时是一条**幂等**的
-   * 显式入口 —— 首页「应用」前、以及"基线早在盘上、只差副本"的场合都靠它。
+   * 资源库模型里"官方是模板、我的才是实际工作文件"落在这一步：下载 / 使用官方
+   * **都不再自动产生副本**，用户要改就必须显式另存，名字由他自己起。
    *
-   * 已经有就原样返回（`created: false`）：用户改过、删过都算数，这里**永不覆盖**
-   * （官方换版本只换基线，不碰工作副本 —— 作者裁决 ⑤）。
-   * 官方基线没下载 / 字节与目录对不上 ⇒ 报错说清「先下载」（与「改这份」同一条闸）。
+   * 本机还没有这一份（或盘上那份与目录对不上）就先按需取回（同一条下载管道），
+   * 再复制 —— 界面上只有一颗「另存为我的预设」，用户不需要先关心"下过没有"。
+   * 新名字过与改名 / 另存同一套门槛；**撞名就拒**（不覆盖、也不自动改名）；
+   * 写下去的是官方原文 + 三行血统；**一个状态都不碰**。
    */
-  ensureUserCopy(fileName: string): Promise<UserCopyInfo>
+  copyOfficialAsMine(fileName: string, newName: string): Promise<UserFileIdentity>
 
   /**
    * **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
@@ -1554,6 +1546,18 @@ export interface MkpApi {
     ): Promise<ActivePreset>
 
   /**
+   * **使用一份官方预设**（2026-10-08 资源库改判）—— 官方那一行唯一的动作。
+   *
+   * 用户不需要知道它有没有在本机：**没有（或盘上那份与目录对不上）就先按需取回，
+   * 再写成当前使用**；本机已是当前版就直接使用（一次网络都不发）。于是
+   * 「下载 / 已下载 / 未下载」从用户心智里退场，只剩「使用」。
+   *
+   * 取回走同一条下载管道（SHA 校验 / 旧份归档 / 原子落盘）；
+   * 「使用」写唯一底账（official 线，全局唯一）。
+   */
+  useOfficialPreset(fileName: string): Promise<UseOfficialResult>
+
+  /**
    * 撤销使用。幂等：本来就没在用也不报错。
    */
   clearActivePreset(): Promise<void>
@@ -1628,13 +1632,6 @@ export interface MkpApi {
    * `fileName` 给了就只返回那一个预设的版本。
    */
   getOfficialVersions(fileName?: string | null): Promise<OfficialVersion[]>
-
-  /**
-   * **「恢复默认」的基准值**：拿这份用户预设血统里的 `based_on_sha256` 去 hidden
-   * baseline 取当初那一版官方的参数值。没有基准（导入的 / 从用户预设复制出来的）
-   * ⇒ `values: null`，参数页**回退到出厂值**。只读，一个字节都不写。
-   */
-  getPresetDefaults(path: string): Promise<PresetDefaults>
 
   /**
    * **读一份用户预设的参数**（对比台里的一列）。**只认 `presets-mine/`**。

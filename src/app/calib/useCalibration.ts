@@ -1,9 +1,9 @@
 /*
  * 三轴偏移的状态机：已保存的一份 + 草稿。
  *
- * 保存走 `api.savePresetCalibration` —— 写进**「我那一份」工作副本**的 TOML
- * （2026-10-08 作者改判：偏移随工作副本走，`index/offsets.json` 那个孤岛退役）。
- * 没有工作副本（还没下载这份预设）时保存被拦（按钮灰着 + 这里第二道）。
+ * 保存走 `api.savePresetCalibration` —— 写进**「我的预设」**那一份的 TOML
+ * （2026-10-08 资源库改判：偏移随「我的预设」走，`index/offsets.json` 那个孤岛退役）。
+ * 没有你的一份（还没在资源库里「另存为我的预设」）时保存被拦（按钮灰着 + 这里第二道）。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -41,8 +41,9 @@ export interface Calibration {
   /** 有基准才点得动板子 */
   canPick: boolean
   /**
-   * 有「我那一份」工作副本才存得动（2026-10-08：校准值写进它，不落别处）。
-   * `false` = 这个机型 / 版本还没下载 —— 保存按钮灰着，先下载。
+   * 有「我那一份」才存得动（2026-10-08 资源库改判：校准值写进它，不落别处）。
+   * `false` = 这个机型 / 版本还没有你的一份 —— 保存按钮灰着，
+   * 先去资源库把这份**另存为我的预设**。
    */
   canSave: boolean
   /** Z 板上高亮的格子 */
@@ -179,7 +180,7 @@ export function useCalibration(preset: PresetState): Calibration {
   /* 没有基准值就没有"加多少"可言：点板子不产生草稿，免得出现「— → +0.20」这种半截读数 */
   const canPick = saved !== null
 
-  /* 有「我那一份」工作副本才存得动（见接口注释） */
+  /* 有「我那一份」才存得动（见接口注释）—— 官方那份是模板，校准不落它 */
   const canSave = preset.status === 'ready' && preset.preset.mine !== null
 
   const pickZ = useCallback(
@@ -234,10 +235,10 @@ export function useCalibration(preset: PresetState): Calibration {
   )
 
   /**
-   * 保存：把**全部草稿轴**写进已保存那一份，不分页，同时写回**我那一份工作副本**。
+   * 保存：把**全部草稿轴**写进已保存那一份，不分页，同时写回**「我的预设」**那一份。
    *
-   * 没有工作副本（还没下载这份预设）时不写：保存按钮本来就灰着，这里是第二道
-   * —— 官方基线不可变，校准值不落别处。
+   * 没有你的一份（还没在资源库里另存过）时不写：保存按钮本来就灰着，这里是第二道
+   * —— 官方那一份不可变，校准值不落别处。
    * 落盘的结果不等、不 catch：没接后端时 api 会抛 NotImplementedError 并在控制台点名，
    * 要的就是"哪个口子没接"看得见（见 src/api/index.ts）。
    */

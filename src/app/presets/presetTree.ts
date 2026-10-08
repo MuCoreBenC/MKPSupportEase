@@ -5,11 +5,21 @@
  * 页面、卡片、行、首页都读它：「待下载」在一处写成「待下载」、另一处写成「云端」，
  * 界面就开始撒谎。
  *
- * # 三个轴，版本**不在其中**（这一轮改的就是这一条）
+ * # 轴与两张表（2026-10-08 资源库改判）
  *
  *   机型          → 页面顶部一个下拉（`PresetPicker`），含「全部机型」一档
  *   MKP / 切片器  → 一条分段控件（`PresetScopeBar` 左半），文件类型
- *   本地 / 云端   → 一条分段控件（`PresetScopeBar` 右半），**两张互不相干的表**
+ *
+ * **MKP 档只有一张表**（[`assetRows`]）：里面每一行都是一个预设，来源（官方 / 我的预设）
+ * 只是行上的一枚小字，不是第二个轴 ——「云端 / 本地」这两个维度在 MKP 档退场，
+ * 「下载 / 已下载」也从用户心智里退场（官方那一行的动作只有「使用」，按需取回在后端做）。
+ *
+ * **切片器档照旧两张表**，由 `localRows()` / `cloudRows()` 各自算，不合流：
+ *
+ *   本地表  你这台机器上有哪些文件。两种来源：官方下载下来的副本（`getLocalFiles()`）
+ *           与用户自己放进预设目录的（`getUserPresetFiles()` —— 用户线，**云端没有它们**）
+ *   云端表  菜单上有哪些官方文件（已分配 + 可选）。行尾标「已下载 / 未下载」
+ *           （切片器那一档本期不动：四态 / 归档 / 官方版本账都还在）
  *
  * **版本从筛选器降成了表里的一列。** 原因：筛选器的宽度随选项个数线性增长 ——
  * 6 个版本就摆不下，实测那一行还只画出了 3 个，剩下的直接看不见。而版本是
@@ -17,16 +27,6 @@
  * 一个文件一行，用到它的版本名收在 `versions: string[]` 里由表格画成一列（多个用 `·` 连，
  * **不写 `+N`** —— 作者原话「显示什么版本加 2 什么意思？」，那是省宽度省出来的黑话）。
  * 这一列不可点、不排序、不分组 —— 做成可点的就等于把筛选器换个位置放回来。
- *
- * 曾经把「本地 / 云端」做成了同一个文件的行状态（一个角标 + 顶部一句汇总），那被否了。
- * 正确的模型是**两张表各回答一个问题**，谁也不管谁：
- *
- *   本地表  你这台机器上有哪些文件。两种来源：官方下载下来的副本（`getLocalFiles()`）
- *           与用户自己放进预设目录的（`getUserPresetFiles()` —— 用户线，**云端没有它们**）
- *   云端表  菜单上有哪些官方文件（已分配 + 可选）。行尾标「已下载 / 未下载」
- *
- * 所以一个官方文件下载之后**两张表里都有**，那是对的；用户自己的文件只在本地表里，
- * 云端表永远看不到它。两张表由 `localRows()` / `cloudRows()` 各自算，不合流。
  *
  * **树本身留着** —— 首页（`pages/PageHome`，这一轮不动）按 品牌→机型→版本→文件
  * 四步走，它要的就是这棵树；两张表也是从树上按机型汇总出来的。
@@ -87,6 +87,7 @@ import type {
   UserPresetFile,
   VersionFiles,
 } from '../../api'
+import { shortStatText } from '../store/package'
 
 /**
  * 用户自己的一份文件（用户线，`presets-mine/`）。
@@ -542,8 +543,9 @@ export const RELEASE_REPAIR_WHY =
 /**
  * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
  *
- * 2026-10-08 起编辑的对象只有**用户的工作副本**（本地表 MKP 档只列它；官方基线
- * 不进用户世界）。改的是临时文件，保存 = **写回它自己**（同一个文件，不会多出一份）：
+ * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（`presets-mine/` 里那份；
+ * 官方那一份是模板、只读 —— 要改它先在资源库里「另存为我的预设」）。
+ * 改的是临时文件，保存 = **写回它自己**（同一个文件，不会多出一份）：
  *
  * ```text
  * presets-mine/A1-standard.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己
@@ -1419,6 +1421,13 @@ export interface PresetLocalRow extends PresetRowBase {
    */
   ownMachineId?: string | null
   ownVersionId?: string | null
+  /**
+   * **它当初基于的那一版官方，现在已经不是目录里那一版了**（`basedOn === 'outdated'`）。
+   *
+   * 资源库列表在我的那一行上挂一句极淡的「官方模板已更新」——**不是版本列表、
+   * 也不是"你该更新"**：那份照常能用能改，程序不替他合并、也不替他换（2026-10-08 改判）。
+   */
+  templateUpdated?: boolean
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1792,40 +1801,25 @@ function versionRemarkLookup(
 }
 
 /**
- * 本地表：**本机磁盘上真有的文件**。
+ * **「我的预设」那一半的行**（`presets-mine/` 扫出来的那些）—— 本地表与资源库列表
+ * 共用的**唯一一条映射**（两个列表的这一半不许各写一份）。
  *
- * ★ **MKP 档只有用户的工作副本**（2026-10-08 作者改判：下载即得工作副本、官方退居
- * 内部基线）：本地表不列官方交付行、也不列仓库行 —— 用户世界里只有一份预设
- * （`presets-mine/` 里他那一份），所以"下载一个预设、列表里两个"构造上不会发生。
- * 切片器档不受影响（它们没有"工作副本"这条线）：
+ * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
+ * 也没有 SHA 可比。所以它们只活在用户侧的表里，云端表永远看不到。
  *
- *   切片器 · 官方副本  `getLocalFiles()` 说已经下到本机的那些
- *   切片器 · 我的文件  `getUserPresetFiles()` 扫出来的（认不出类别的 `.json` 在
- *                      任何类型档下都列）—— 云端没有它，没有交付身份、也没有 SHA 可比
+ * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
+ *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
+ *   - **机型**这一档**真的筛**：归属（文件头 `# machine:` / `# variant:` 那两行，2026-10-07
+ *     起就有，还能「改归属」）说得出属于哪台机的，就只在那台机下出现；
+ *     **归属认不出的**（导入的裸文件）才在任何机型档下列，机上那格写「—」、
+ *     名称列挂「未标机型」。这与官方那半边的 `untagged` 是同一条口径。
  *
- * 官方那一半按**机型**汇总（一个文件一行，用到它的版本收进 `versions`）；
- * 我的那一半是**用户线**（`presets-mine/` 扫出来的）。
- *
- * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
- * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
+ * ★ 机型筛这一段的历史：注释原来写的是「这一层根本没有来源 → 任何机型档下都列」，
+ * 那句话在「改归属」落地那天就过期了，而**没人跟着改筛**，于是筛 A1 mini 时 A1 / XC
+ * 的文件照旧满屏（作者 2026-10-08 实测）。现在按归属筛（见最后那个 `.filter`）。
  */
-export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
-  const {
-    machines,
-    machineId,
-    mine: mineFiles,
-    localIds,
-    slicerCopiedIds,
-    active,
-    kind,
-    query,
-    pinned,
-    localReleases,
-    staleReleases,
-    releaseVersion,
-    releaseAt,
-    remarks,
-  } = input
+function mineHalf(input: PresetRowsInput): PresetLocalRow[] {
+  const { machines, machineId, mine: mineFiles, kind, active, pinned, remarks } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
   const versionRemark = versionRemarkLookup(machines)
@@ -1836,77 +1830,12 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
    */
   const remarkOr = (key: string | null, fallback: string): string =>
     key !== null && remarks[key] !== undefined ? remarks[key] : fallback
-
-  /*
-   * MKP 档：**只有用户的工作副本**（2026-10-08 作者改判）。官方基线是内部的东西，
-   * 不在用户世界里出现 —— 它连"行"都没有；仓库行（云端表）才是"下载 / 更新"的入口。
-   * 切片器档照旧（它们没有"工作副本"这条线）。
-   */
-  const mineOnly = kind === 'mkp'
-
-  const official = (mineOnly ? [] : machineFiles(machines))
-    .filter((e) => matchesKind(kind, e.file.kind))
-    /* 四档里的 missing 不属于本地表 —— 判据只有 statusOf 这一条 */
-    .map((e) => ({ e, status: statusOf(e.file, localIds, active) }))
-    .filter(({ status }) => status !== 'missing')
-    .map(({ e, status }): PresetLocalRow => {
-      const f = e.file
-      const pinKey = f.id ?? f.path
-      const applied = status === 'applied'
-      return {
-        rowKey: `${e.machineId}:${f.path}`,
-        assetId: f.id,
-        pinKey,
-        fileName: f.fileName,
-        path: f.path,
-        /* 官方仓库行没有备注的来源也没有覆盖（remarkKey null）—— 副标题空着（路径在 title 里） */
-        subtitle: '',
-        remarkKey: null,
-        kind: f.kind,
-        machineId: e.machineId,
-        machineText: names.get(e.machineId) ?? e.machineId,
-        versions: e.versions,
-        versionIds: e.versionIds,
-        nozzle: f.nozzle,
-        layerHeight: f.layerHeight,
-        sizeText: f.sizeText,
-        modifiedText: f.modifiedText,
-        statFrom: f.statFrom,
-        applied,
-        pinned: pinned.has(pinKey),
-        scope: 'local',
-        origin: 'official',
-        delivery: f.delivery,
-        untagged: false,
-        /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
-        live: kind === 'mkp' ? applied : f.id !== undefined && slicerCopiedIds.has(f.id),
-      }
-    })
-
-  /*
-   * **用户线**：用户自己放进 `presets-mine/` 的那些（`<appDataDir>/user/`）。
-   *
-   * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
-   * 也没有 SHA 可比。所以它们只活在这一张本地表里，云端表永远看不到。
-   *
-   * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
-   *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
-   *   - **机型**这一档**真的筛**：归属（文件头 `# machine:` / `# variant:` 那两行，2026-10-07
-   *     起就有，还能「改归属」）说得出属于哪台机的，就只在那台机下出现；
-   *     **归属认不出的**（导入的裸文件）才在任何机型档下列，机上那格写「—」、
-   *     名称列挂「未标机型」。这与官方那半边的 `untagged` 是同一条口径。
-   *
-   * ★ 这一段注释原来写的是「机型这一层根本没有来源（今天没有地方让用户标它）→ 任何机型档下都列」
-   * —— 那句话在「改归属」落地那天就过期了，而**没人跟着改筛**，于是筛 A1 mini 时 A1 / X1C
-   * 的文件照旧满屏（作者 2026-10-08 实测：「我这个筛选有问题呀，我选 mini，他也把其他的都筛出来了」）。
-   * 现在按归属筛（见下面那个 `.filter`）。
-   */
-  const mine = mineFiles
+  return mineFiles
     .filter((f) => f.kind === null || matchesKind(kind, f.kind))
     .map((f): PresetLocalRow => {
       /*
-       * 用户自己那份**也能被应用**（第七层）：只有认得出是 MKP 预设（`.toml`）的才行 ——
-       * `.json` 那几份（bbs / orca 分不出）不是预设，应用它们无从谈起。
+       * 用户自己那份**也能被使用**（第七层）：只有认得出是 MKP 预设（`.toml`）的才行 ——
+       * `.json` 那几份（bbs / orca 分不出）不是预设，使用它们无从谈起。
        * 「生效」认的是**唯一底账**里的那一条：`origin` 是用户线、而且路径就是这一条。
        */
       const canApply = f.kind === 'mkp_preset'
@@ -1964,12 +1893,14 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
+        /* 资源库那一行的小字：**它当初基于的官方那一版已经换新版了**（不是坏文件） */
+        templateUpdated: f.basedOn === 'outdated',
         /* 详情面板「改归属」读它（机型 / 版本两个下拉的数据源是行上这份归属） */
         ownMachineId: ownMachine,
         ownVersionId: ownVersion,
         /*
          * 第九层：文件级状态。**读不出来的照样列出来**（藏起来等于说他没这份文件），
-         * 只是不给「应用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
+         * 只是不给「使用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
          * 认不出是哪一类的没有这一档（`null` → `undefined`）。
          */
         mineState: f.state ?? undefined,
@@ -1989,13 +1920,103 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
       (row) =>
         row.ownMachineId === null || machineId === '' || row.ownMachineId === machineId,
     )
+}
+
+/**
+ * **本地表**（切片器档；MKP 档由 [`assetRows`] 接管 —— 见那条的说明）：
+ * 本机磁盘上真有的文件。
+ *
+ *   切片器 · 官方副本  `getLocalFiles()` 说已经下到本机的那些
+ *   切片器 · 我的文件  `getUserPresetFiles()` 扫出来的（认不出类别的 `.json` 在
+ *                      任何类型档下都列）—— 云端没有它，没有交付身份、也没有 SHA 可比
+ *
+ * 官方那一半按**机型**汇总（一个文件一行，用到它的版本收进 `versions`）；
+ * 我的那一半是**用户线**（与资源库列表共用 [`mineHalf`]，两张表的这一半永远一致）。
+ *
+ * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
+ * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
+ */
+export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
+  const {
+    machines,
+    machineId,
+    localIds,
+    slicerCopiedIds,
+    active,
+    kind,
+    query,
+    pinned,
+    localReleases,
+    staleReleases,
+    releaseVersion,
+    releaseAt,
+    remarks,
+  } = input
+  const names = machineNames(machines)
+  const versionName = versionNameLookup(machines)
+  const versionRemark = versionRemarkLookup(machines)
+  /*
+   * 副标题：**账上有覆盖（包括空串）就用用户的**（2026-10-07 作者改口：
+   * 「可以空着，不要回退」—— 用户写空副标题就空）；没有覆盖才走
+   * 「工作台写的 → 空着」回落。「恢复默认」= 删掉覆盖。
+   */
+  const remarkOr = (key: string | null, fallback: string): string =>
+    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
+
+  /*
+   * **MKP 档不走这一张表**（`mineOnly`）：它由资源库那一张（[`assetRows`]）接管 ——
+   * 官方那几行与我的那几行并排、来源只是行上的一枚小字（2026-10-08 资源库改判）。
+   * 切片器档照旧（本机真有的那些 + 云端菜单上的那些，两张表各答各的）。
+   */
+  const mineOnly = kind === 'mkp'
+
+  const official = (mineOnly ? [] : machineFiles(machines))
+    .filter((e) => matchesKind(kind, e.file.kind))
+    /* 四档里的 missing 不属于本地表 —— 判据只有 statusOf 这一条 */
+    .map((e) => ({ e, status: statusOf(e.file, localIds, active) }))
+    .filter(({ status }) => status !== 'missing')
+    .map(({ e, status }): PresetLocalRow => {
+      const f = e.file
+      const pinKey = f.id ?? f.path
+      const applied = status === 'applied'
+      return {
+        rowKey: `${e.machineId}:${f.path}`,
+        assetId: f.id,
+        pinKey,
+        fileName: f.fileName,
+        path: f.path,
+        /* 官方仓库行没有备注的来源也没有覆盖（remarkKey null）—— 副标题空着（路径在 title 里） */
+        subtitle: '',
+        remarkKey: null,
+        kind: f.kind,
+        machineId: e.machineId,
+        machineText: names.get(e.machineId) ?? e.machineId,
+        versions: e.versions,
+        versionIds: e.versionIds,
+        nozzle: f.nozzle,
+        layerHeight: f.layerHeight,
+        sizeText: f.sizeText,
+        modifiedText: f.modifiedText,
+        statFrom: f.statFrom,
+        applied,
+        pinned: pinned.has(pinKey),
+        scope: 'local',
+        origin: 'official',
+        delivery: f.delivery,
+        untagged: false,
+        /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
+        live: kind === 'mkp' ? applied : f.id !== undefined && slicerCopiedIds.has(f.id),
+      }
+    })
+
+  const mine = mineHalf(input)
 
   /*
    * 目录里登记的交付预设（**切片器档**）：下载之后它们就躺在下载区，
    * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**收盘上真有的那些**：
    * 与目录一致的、以及不一致的（旧版本 / 内容异常）。四档全在盘上，
    * 藏起后三种就等于对用户说"你机器上没有它"，而修复它的入口也就没了。
-   * MKP 档**不列**（官方基线不进用户世界，见上面 `mineOnly`）；
+   * MKP 档**不列**（那一档由 `assetRows` 接管，见上面 `mineOnly`）；
    * 「生效」认唯一底账（`run/app-state.json` 的 activePreset）里那一条（合流，不分两套）。
    */
   const onDisk = mineOnly ? [] : [...localReleases, ...staleReleases]
@@ -2073,6 +2094,152 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     })
 
   const all = [...official, ...mine, ...release]
+  return {
+    rows: sortRows(all.filter((r) => fileMatchesQuery(r, query))),
+    total: all.length,
+  }
+}
+
+/** 资源库那一行的小字：来源只有两种说法（官方 / 我的预设）—— 位置、下没下过都不在这里说 */
+export const ASSET_SOURCE_TEXT = {
+  official: '官方',
+  mine: '我的预设',
+} as const
+
+/**
+ * **资源库那一行唯一的动作**，以及它生效时的样子（2026-10-08 资源库改判）。
+ *
+ * 官方与我的**同一颗按钮、同一个词**：用户不需要知道那一份住在哪、也不需要先"下载" ——
+ * 官方那一份本机没有字节时，后端会先按需取回来再使用（`useOfficialPreset`）。
+ */
+export const ASSET_USE_TEXT = {
+  on: '当前使用',
+  off: '使用',
+} as const
+
+/**
+ * **这一行生效了没有**（展开详情「状态」那一格）。
+ *
+ * 与 [`ASSET_USE_TEXT`] 分开是有意的：那个是**按钮上的字**（点了会发生什么），
+ * 这个是**状态的字**（现在是什么样）—— `off` 那半句要是也写「使用」，
+ * 展开详情里就会读到「状态：使用」这种把动作当状态的句子。
+ */
+export const ASSET_STATE_TEXT = {
+  on: '当前使用',
+  off: '未使用',
+} as const
+
+export const ASSET_USE_WHY = {
+  on: '当前使用：唯一底账（run/active-preset.json）说正在使用的就是它。**全局唯一** —— 全表最多一条',
+  off:
+    '使用：把它设为当前生效的那一份。官方预设本机还没有（或字节对不上）时，' +
+    '后端会先从数据源取回来再使用 —— 不需要先"下载"，也没有"下过没有"这一档',
+} as const
+
+/**
+ * 我的那一行上那枚极淡的提示：**它当初基于的那一版官方已经换了新版**（按血统比出来的）。
+ *
+ * **它不是"你该更新"**（2026-10-08：那套"过时"的说法整个退场）—— 这份照常能用能改，
+ * 程序不替它合并、也不替它换。官方那一行永远只有一个当前版，要拿新的就从它另存一份。
+ */
+export const ASSET_TEMPLATE_UPDATED_TEXT = '官方模板已更新'
+
+export const ASSET_TEMPLATE_UPDATED_WHY =
+  '你这份当初基于的那一版官方，现在已经不是目录里那一版了（按文件头血统比出来的）。' +
+  '这不是"你该更新"：它照常能用、能改，程序不替你合并。' +
+  '要拿官方新版，从资源库里官方那一行「另存为我的预设」存一份新的。'
+
+/**
+ * **官方 → 我的**那一口抽屉（起名字用一个，与改名 / 另存为一份新的同一个外壳）。
+ *
+ * 资源库模型里"官方是模板、我的才是实际工作文件"就落在这颗按钮上：下载 / 使用官方
+ * 都不再自动产生副本，要改就必须显式存一份自己的（名字由他起，撞名后端拒）。
+ */
+export const ASSET_SAVE_AS = {
+  title: '另存为我的预设',
+  commit: '另存',
+  note:
+    '把官方这一份存成你自己的一份（`presets-mine/` 里一份新的）：官方原文 + 三行血统。' +
+    '存完它就是你的了 —— 能改、能改名、能删除、能使用；官方那一份原件照旧在资源库里。' +
+    '名字由你起（撞名会被拒，不覆盖、也不自动改名）。',
+} as const
+
+/** 官方行的小字：来源 + **目录这次发布的时刻**（目录没盖戳就只说来源，不编一个时间） */
+function officialNote(publishedAt: string | null | undefined): string {
+  const day = shortStatText(publishedAt ?? undefined)
+  return day === undefined ? ASSET_SOURCE_TEXT.official : `${ASSET_SOURCE_TEXT.official} · ${day}`
+}
+
+/** 我的行的小字：来源 + **它从哪来**（血统 → 出处账 → 都没有就只说来源） */
+function mineNote(row: PresetLocalRow): string {
+  if (row.basedOnSource !== null && row.basedOnSource !== undefined) {
+    const name = row.basedOnSource.split('/').pop() ?? row.basedOnSource
+    return `${ASSET_SOURCE_TEXT.mine} · 源自官方 ${name}`
+  }
+  if (row.provenance === 'import') return `${ASSET_SOURCE_TEXT.mine} · 导入`
+  if (row.copiedFromName !== null && row.copiedFromName !== undefined) {
+    return `${ASSET_SOURCE_TEXT.mine} · 复制自 ${row.copiedFromName}`
+  }
+  return ASSET_SOURCE_TEXT.mine
+}
+
+/**
+ * **资源库列表**（2026-10-08 作者改判）—— MKP 档唯一的那一张表。
+ *
+ * 位置上不再分「本地 / 云端」两张：**里面每一行都是一个预设**，来源只是它身上的一枚小字。
+ *
+ *   官方  目录（catalog）里登记的那一份 —— **只有当前这一版**：没有旧版账、没有版本列表、
+ *         也没有「已下载 / 未下载」这一档。它在本机有没有字节**不在这张表上回答**：
+ *         点「使用」时后端按需取回（`useOfficialPreset`），用户不需要先"下载"。
+ *   我的  `presets-mine/` 里用户自己的文件（与本地表共用 [`mineHalf`] 那条映射）。
+ *
+ * 行上唯一的状态是**当前使用**（全局唯一底账）。官方行要改必须显式「另存为我的预设」
+ * （`copyOfficialAsMine`）—— 下载 / 使用都不再自动产生副本。
+ *
+ * 切片器档照旧走 [`localRows`] / [`cloudRows`] 那两张表（本期不动）。
+ */
+export function assetRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
+  const { machines, machineId, active, kind, query, pinned, releasePresets, releaseAt } = input
+  const names = machineNames(machines)
+  const versionName = versionNameLookup(machines)
+
+  /* 官方那一半：一个目录条目一行（官方只有当前这一版，行数 = 目录里 MKP 预设的个数） */
+  const official = releasePresets
+    .filter((p) => matchesKind(kind, p.kind))
+    .filter((p) => machineId === '' || p.machineId === machineId)
+    .map((p): PresetLocalRow => {
+      const live =
+        active !== null && active.origin === 'official' && active.fileName === p.fileName
+      return {
+        rowKey: `release:${p.fileName}`,
+        pinKey: `release:${p.fileName}`,
+        fileName: p.fileName,
+        /* 落点文案只在 title / 展开详情里（副标题那一行留给来源） */
+        path: `官方预设 / ${p.machineId} / ${p.versionId}`,
+        subtitle: officialNote(releaseAt),
+        remarkKey: null,
+        kind: p.kind,
+        machineId: p.machineId,
+        machineText: names.get(p.machineId) ?? p.machineId,
+        versions: [versionName(p.machineId, p.versionId)],
+        sizeText: sizeTextOf(p.size),
+        statFrom: 'demo',
+        applied: live,
+        pinned: pinned.has(`release:${p.fileName}`),
+        scope: 'local',
+        origin: 'release',
+        untagged: false,
+        releaseUid: p.uid,
+        /* 发布时间（展开详情「云端更新」那一格）；列表上不占一列 */
+        publishedAt: releaseAt,
+        live,
+      }
+    })
+
+  /* 我的那一半：与本地表同一条映射；只把副标题换成来源那一行（备注挪进展开详情） */
+  const mine = mineHalf(input).map((r) => ({ ...r, subtitle: mineNote(r) }))
+
+  const all = [...official, ...mine]
   return {
     rows: sortRows(all.filter((r) => fileMatchesQuery(r, query))),
     total: all.length,

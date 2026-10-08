@@ -1,4 +1,9 @@
-//! baseline 的两条命令：**云端版本列表**与**「恢复默认」的基准值**。
+//! baseline 的命令面：**官方版本账**（`get_official_versions`）。
+//!
+//! ★ 2026-10-08 资源库改判：原先的第二条命令（`get_preset_defaults`，「恢复默认值」
+//! 的基准值）**退役** —— 那套"按血统找当初那版官方默认值"的能力随「恢复默认值」
+//! 功能一起退场（用户要的就是"有问题删掉重来一份"）。baseline 本身仍由下载管道写入，
+//! 留给下一轮和切片器档一起收口。
 //!
 //! # 一、云端版本列表（`get_official_versions`）
 //!
@@ -13,24 +18,17 @@
 //! 日期：已下载的那一版有**真值**（baseline 文件头的 `# release_time`）；
 //! 没下载的只有目录代时间（`catalog.publishedAt`），界面按"目录发布时间"如实标注。
 //!
-//! # 二、「恢复默认」的基准值（`get_preset_defaults`）
+//! # 二、「恢复默认」的基准值 —— **已退役**（2026-10-08 资源库改判）
 //!
-//! 参数页的「恢复默认值」原本退回**出厂值**（目录里的 `baseValue`）。这一版改成：
-//! **以这份我的预设当初那版官方的默认值为准** —— 拿血统里的 `based_on_sha256` 去
-//! [`runtime::baseline`] 取那一份，按注册表抽出参数值交给前端。
-//!
-//! 没有基准（导入的 / 从用户预设复制出来的 / 血统缺摘要）⇒ `values: null`，
-//! 前端**回退到出厂值** —— 基准缺失是正常状态，不是错误。
-
-use std::collections::BTreeMap;
+//! 参数页的「恢复默认值」不再以"当初那版官方的默认值"为基准 —— 这个功能整个退场
+//! （用户要的是"有问题删掉重来一份"）。命令、类型与它的读取都随之下线。
 
 use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::error::AppError;
-use crate::fsx::paths::{internal_root, user_root};
+use crate::fsx::paths::internal_root;
 use crate::ipc::traced;
-use crate::presetdata::params as param_alg;
 use crate::runtime;
 
 /// 官方预设的一个版本（云端表按预设归组之后，组内的每一行）。
@@ -87,48 +85,3 @@ pub async fn get_official_versions(
     })
 }
 
-/// 「恢复默认」的基准值。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PresetDefaultsDto {
-    /// 这份预设血统里的来源摘要（没血统 / 没摘要 ⇒ `null`）
-    pub based_on_sha256: Option<String>,
-    /// 基准参数值；`null` = 没有可用的基准，前端**回退出厂值**
-    pub values: Option<BTreeMap<String, String>>,
-}
-
-/// 取一份用户预设的**官方基准默认值**（参数页「恢复默认值」的取值来源）。
-///
-/// 只读：读用户那份的**文件头**拿血统（不读整份 —— 用户可能扔进一个大文件），
-/// 再按摘要取 baseline。**一个字节都不写**。
-#[tauri::command]
-pub async fn get_preset_defaults(
-    app: AppHandle,
-    path: String,
-) -> Result<PresetDefaultsDto, AppError> {
-    let root = internal_root(&app)?;
-    let user = user_root(&app)?;
-    let catalog = runtime::load_released_catalog(&root)?;
-    traced("getPresetDefaults", |_| {
-        let target = crate::fsx::paths::resolve_in(&user, path.trim_start_matches('/'))?;
-        let sha = runtime::mine::lineage_of_file(&target).and_then(|l| l.based_on_sha256);
-        let Some(sha) = sha else {
-            /* 没有血统（导入的 / 手工拷的）—— 没有基准，前端回退出厂值 */
-            return Ok(PresetDefaultsDto {
-                based_on_sha256: None,
-                values: None,
-            });
-        };
-        let values = match runtime::baseline::read_baseline(&root, &sha)? {
-            Some(text) => Some(param_alg::read_param_values(
-                &text,
-                &catalog.registry.params,
-            )?),
-            None => None,
-        };
-        Ok(PresetDefaultsDto {
-            based_on_sha256: Some(sha),
-            values,
-        })
-    })
-}

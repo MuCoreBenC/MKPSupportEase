@@ -148,10 +148,15 @@ import {
   ARCHIVE_DRAWER,
   ARCHIVE_TIME,
   ARCHIVE_WHY,
+  ASSET_SAVE_AS,
+  ASSET_USE_TEXT,
+  ASSET_USE_WHY,
   EDIT_TEXT,
   MINE_COPY,
   MINE_DRAWER,
+  MINE_NOT_PRESET_WHY,
   MINE_RENAME,
+  mineUnreadableWhy,
   DOWNLOAD_WHY,
   mineCountOfAxis,
   treeCountOfAxis,
@@ -209,6 +214,17 @@ const PLACEHOLDER: Record<Density, string> = {
  */
 const REVEAL_LABEL =
   detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
+
+/*
+ * 起名字抽屉的三套话：改名（我的 → 我的）/ 另存为一份新的（我的 → 我的）/
+ * 另存为我的预设（官方 → 我的，2026-10-08）。**外壳同一个**，说法各一套 ——
+ * 三件事都只传一个名字，别的全在后端。
+ */
+const NAMING_TEXT = {
+  rename: MINE_RENAME,
+  copy: MINE_COPY,
+  saveAsMine: ASSET_SAVE_AS,
+} as const
 
 /**
  * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
@@ -328,7 +344,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
    */
   const [naming, setNaming] = useState<{
-    kind: 'rename' | 'copy'
+    /**
+     * 三件"起个名字就完事"的事共用这一口抽屉：
+     *   `rename`      我的 → 我的（只改名字）
+     *   `copy`        我的 → 我的（按字节再存一份）
+     *   `saveAsMine`  官方 → 我的（2026-10-08 资源库改判：要改官方那份就得先存一份自己的）
+     */
+    kind: 'rename' | 'copy' | 'saveAsMine'
     row: PresetTableRow
     name: string
     busy: boolean
@@ -622,10 +644,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   /**
    * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 2026-10-08 起**编辑的对象只有用户的工作副本**（本地表 MKP 档只列它）——
-   * 官方基线不进用户世界，也没有"改官方那份"这条入口。前置条件全在后端拦
-   * （认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的话后端会返回它
-   * （`reused`），于是"改到一半关掉再回来"接着改。
+   * 2026-10-08 资源库改判起，**编辑的对象只有「我的预设」**（`presets-mine/` 里那份）——
+   * 官方那一份是模板、只读，要改它先在资源库里「另存为我的预设」（所以这里固定走 mine 线）。
+   * 前置条件全在后端拦（认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的
+   * 话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
@@ -729,6 +751,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     setNaming({ kind: 'copy', row, name: '', busy: false, error: null })
   }
 
+  /**
+   * **另存为我的预设**（官方 → 我的，2026-10-08 资源库改判）。
+   *
+   * 这是官方那一行**唯一**的"要改"入口：下载 / 使用都不再自动产生副本。
+   * 名字**不预填**（与「另存为一份新的」同一条规矩：用户明确指定，撞名就拒）。
+   * 本机还没有那一份字节时后端会先按需取回来再存 —— 用户不必先关心"下过没有"。
+   */
+  const openSaveAsMine = (row: PresetTableRow) => {
+    menu.close()
+    setViewer(null)
+    setEditing(null)
+    setNaming({ kind: 'saveAsMine', row, name: '', busy: false, error: null })
+  }
+
   /** 起名字抽屉那一颗按钮（改名 / 另存为共用这一条提交路） */
   const submitNaming = () => {
     if (naming === null || naming.busy) return
@@ -738,18 +774,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       return
     }
     setNaming({ ...naming, busy: true, error: null })
+    const kind = naming.kind
     const ask =
-      naming.kind === 'rename'
+      kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : data.copyAsNew(naming.row.path, name)
+        : kind === 'copy'
+          ? data.copyAsNew(naming.row.path, name)
+          : data.saveAsMine(naming.row.fileName, name)
     ask.then(
       (done) => {
         setNaming(null)
         setNote({
           text:
-            naming.kind === 'rename'
+            kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+              : kind === 'copy'
+                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`
+                : `已存成你的一份：${done.fileName} —— 官方那一份原件照旧在资源库里，这份现在归你（能改、能改名的就是你手里这一份）`,
           bad: false,
         })
       },
@@ -945,6 +986,48 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
+   * **资源库那一行唯一的动作：使用**（2026-10-08 资源库改判）—— 官方与我的同一个词。
+   *
+   *   官方那一份  没在本机（或盘上那份与目录对不上）时后端**先按需取回**，再写成当前使用；
+   *               本机已是当前版就直接使用（一次网络都不发）—— 所以这里不需要"下载"这一档
+   *   我的那一份  走原来那条用户线（认路径、不查 SHA），与「应用」同一个写口
+   *
+   * 提示条按**这次有没有真的取回来**说两种话：用户看得见"它去拿了"，而不是凭空生效。
+   */
+  const runUse = (row: PresetLocalRow) => {
+    setBusyKey(row.rowKey)
+    if (row.origin === 'mine') {
+      data.apply(row.fileName, 'mine', row.path).then(
+        () => {
+          setBusyKey(null)
+          setNote({ text: `已使用 ${row.fileName}`, bad: false })
+        },
+        (e: unknown) => {
+          setBusyKey(null)
+          setNote({ text: `使用失败：${errorText(e)}`, bad: true })
+        },
+      )
+      return
+    }
+    data.useOfficial(row.fileName).then(
+      (done) => {
+        setBusyKey(null)
+        /* 这一趟可能**真的去取了**（`fetched`）—— 提示条如实说，用户看得见它去了哪 */
+        setNote({
+          text: done.fetched
+            ? `已取回并使用 ${row.fileName} —— 本机原来没有它（或盘上那份对不上），这一趟把它取回来了`
+            : `已使用 ${row.fileName}`,
+          bad: false,
+        })
+      },
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `使用失败：${errorText(e)}`, bad: true })
+      },
+    )
+  }
+
+  /**
    * 「在 BBS 预设查看器中打开」的判据。
    *
    * 只看两件事：**是 BBS 工艺 profile**（`kind === 'bbs_profile'`）、**文件名是 .json**。
@@ -1061,6 +1144,95 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
+     * **资源库那一行**（MKP 档，2026-10-08 资源库改判）：官方与我的都是"一个预设"，
+     * 菜单第一项永远是「使用」—— 它与操作列那颗按钮是**同一个动作**，不是两套。
+     *
+     *   官方行  别人的东西（只读）：能做的只有「使用」与「另存为我的预设」
+     *           ——「要改就先存一份自己的」，下载 / 使用都不再自动产生副本
+     *   我的行  你自己的文件：改 / 另存 / 改名 / 显示 / 删除，原来那一套照旧
+     */
+    if (row.scope === 'local' && page.kind === 'mkp') {
+      /*
+       * 「使用」为什么不能点：与操作列**同一套判据**（认不出是 MKP 预设的 `.json`、
+       * 第九层读不出来的）—— 菜单里给一个点了必报错的项，与按钮同罪。
+       * 已经在用的那一份也不给"再点一次"的空动作（它已经在用了）。
+       */
+      const useWhyNot =
+        row.origin !== 'mine'
+          ? undefined
+          : row.kind !== 'mkp_preset'
+            ? MINE_NOT_PRESET_WHY
+            : row.mineState === 'unreadable'
+              ? mineUnreadableWhy(row.mineStateDetail)
+              : undefined
+      const useEntry: ContextMenuEntry = {
+        id: 'use',
+        label: ASSET_USE_TEXT[row.live ? 'on' : 'off'],
+        disabled: row.live ? ASSET_USE_WHY.on : useWhyNot,
+        onSelect: () => runUse(row),
+      }
+      const detailEntry: ContextMenuEntry = {
+        id: 'detail',
+        label: '查看详情',
+        onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)),
+      }
+      if (row.origin === 'release') {
+        return [
+          useEntry,
+          {
+            id: 'saveAsMine',
+            label: ASSET_SAVE_AS.title,
+            /* 官方那一份要改，只能先存成自己的 —— 这是它唯一的"写入"入口 */
+            onSelect: () => openSaveAsMine(row),
+          },
+          { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+          detailEntry,
+          bbsEntry(row),
+        ]
+      }
+      const suspectMine = isSuspectRelease(row.releaseState)
+      return [
+        useEntry,
+        ...(row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+          ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
+          : []),
+        {
+          id: 'copy',
+          label: '另存为一份新的',
+          disabled: suspectMine ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
+          onSelect: () => openCopyAs(row),
+        },
+        {
+          id: 'rename',
+          label: '重命名',
+          disabled: renameWhyNot(row),
+          onSelect: () => openRename(row),
+        },
+        {
+          id: 'reveal',
+          label: REVEAL_LABEL,
+          disabled: revealWhyNot(row),
+          onSelect: () => runReveal(row),
+        },
+        { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+        detailEntry,
+        bbsEntry(row),
+        { separator: true },
+        {
+          id: 'remove',
+          label: '删除',
+          danger: true,
+          disabled: removeWhyNot(row),
+          confirm: {
+            question: `删除 ${row.fileName}？`,
+            detail: removeConfirmDetail(row),
+          },
+          onSelect: () => runRemove(row),
+        },
+      ]
+    }
+
+    /*
      * 临时编辑的入口：**只有用户的工作副本**（本地表 MKP 档只列它；
      * 认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
@@ -1160,7 +1332,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 比切换器小」）。
    */
   const searchNode = (
-    <div className={s.search}>
+    /* MKP 档没有位置那一轴了（2026-10-08），搜索自己顶到右线 —— 与切片器那一排同一眼观感 */
+    <div className={page.kind === 'mkp' ? `${s.search} ${s.searchPush}` : s.search}>
+
       <input
         className={s.input}
         value={page.query}
@@ -1210,11 +1384,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * （官方副本的总数，老契约 getLocalFiles 的读数）。
    */
   const mineCount = mineCountOfAxis(data.mine, page.kind)
+  /*
+   * 资源库那一档台账里的「官方」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
+   * 与切片器那档的「仓库」是同一个口径（台账说全集，表格说这一档机型）。
+   */
+  const assetOfficialCount = data.release.presets.filter(
+    (p) => p.kind === 'mkp_preset',
+  ).length
   const metaNode = (
     <span className={s.meta}>
       <span
         className={s.counts}
-        title={`当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`}
+        title={
+          page.kind === 'mkp'
+            ? `资源库这一张表在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`
+            : `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`
+        }
       >
         共 {table.rows.length} 项
       </span>
@@ -1222,16 +1407,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         className={s.ledger}
         title={
           page.kind === 'mkp'
-            ? `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；云端没有它们）。官方基线不进用户世界（2026-10-08）。${DOWNLOAD_WHY}`
+            ? `资源库：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己的文件里属于这一档的几个，扫 presets-mine）。` +
+              `官方那一份**只有一个当前版**，也没有"下过没有"这一档 —— 点「使用」时它按需取回并落成当前使用。`
             : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`
         }
       >
-        仓库 {treeCountOfAxis(data.tree, page.kind)} ·{' '}
         {page.kind === 'mkp' ? (
-          <>我的 {mineCount}</>
+          <>
+            官方 {assetOfficialCount} · 我的 {mineCount}
+          </>
         ) : (
           <>
-            本机 {data.localIds.length} + 我的 {mineCount}
+            仓库 {treeCountOfAxis(data.tree, page.kind)} ·{' '}
+            <>
+              本机 {data.localIds.length} + 我的 {mineCount}
+            </>
           </>
         )}
       </span>
@@ -1517,6 +1707,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onOpenMine={openMine}
                 onEdit={openEdit}
                 onLive={runLive}
+                /* 资源库那一行唯一的按钮（2026-10-08）：官方与我的同一个入口 */
+                onUse={runUse}
                 onDownload={download}
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
@@ -1679,7 +1871,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
            * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
            *
-           * 2026-10-08 起编辑的对象只有**用户的工作副本**（本地表 MKP 档只列它），
+           * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（官方那一份是模板），
            * 所以这里只有一套说法：保存 = 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
@@ -1735,7 +1927,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
            */}
           <Drawer
             open={naming !== null}
-            title={naming?.kind === 'copy' ? MINE_COPY.title : MINE_RENAME.title}
+            title={naming === null ? MINE_RENAME.title : NAMING_TEXT[naming.kind].title}
             subtitle={naming?.row.path}
             footer={
               <>
@@ -1748,7 +1940,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                   disabled={naming?.busy === true}
                   onClick={submitNaming}
                 >
-                  {naming?.kind === 'copy' ? MINE_COPY.commit : MINE_RENAME.commit}
+                  {naming === null ? MINE_RENAME.commit : NAMING_TEXT[naming.kind].commit}
                 </button>
               </>
             }
@@ -1756,9 +1948,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           >
             {naming !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>
-                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
-                </p>
+                <p className={s.editNote}>{NAMING_TEXT[naming.kind].note}</p>
                 {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
                 )}
@@ -1780,7 +1970,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 />
                 {naming.error !== null && (
                   <p className={s.editErr}>
-                    {naming.kind === 'copy' ? '没另存成：' : '没改成：'}
+                    {naming.kind === 'rename' ? '没改成：' : '没另存成：'}
                     {naming.error}
                   </p>
                 )}
@@ -1798,7 +1988,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         <div className={s.foot}>
           {!page.unsupported && (
             <span className={s.footHint}>
-              右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）
+              {/* 菜单里有什么，按档说 —— 资源库那一档没有"重命名 / 删除"这种只属于我的文件的话 */}
+              {page.kind === 'mkp'
+                ? '右键任意一行还有使用 / 另存为我的预设 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                : '右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'}
             </span>
           )}
           {page.kind === 'slicer' && metaNode}
