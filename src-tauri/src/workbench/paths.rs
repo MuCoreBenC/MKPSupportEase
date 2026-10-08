@@ -16,6 +16,7 @@
 //! 因为"反正是开发者自己用"就允许 `../../` 写到仓库外面去。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::AppError;
 use crate::fsx::paths::resolve_in;
@@ -24,6 +25,8 @@ use crate::fsx::paths::resolve_in;
 const WORKBENCH_DIR: &str = "workbench";
 /// 预设根目录名（仓库根下）。**唯一的预设真相源**
 const PRESETS_DIR: &str = "presets";
+/// 沙箱目录名（`workbench/` 底下，点号打头，与 `.draft` / `.trash` / `.snapshots` 同一族）
+pub const SANDBOX_DIR: &str = ".sandbox";
 /// 交付目录的子目录名（`presets/` 下）。人维护 `presets/*.toml`，机器生成 `presets/delivery/*`：
 /// 源与交付各占一层，一眼分得清哪个是手写的（`RESOURCE-ADDRESSING-ROADMAP.md` §2.1）。
 pub(crate) const DELIVERY_SUBDIR: &str = "delivery";
@@ -55,9 +58,55 @@ pub fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// 测试模式（沙箱）开着吗。
+///
+/// **进程内一份**：开机时从 `<appDataDir>/sandbox.json` 读进来装一次
+/// （`app::sandbox::install_at_startup`），之后由那颗开关改（`wb_sandbox_set`）。
+/// 做成模块级状态、而不是"每个取根的函数多收一个参数"，是因为**每一处取根的地方
+/// 都该自动跟着走** —— 见 [`data_root`]：整套数据根只有那一个开关。
+static SANDBOX: AtomicBool = AtomicBool::new(false);
+
+/// 测试模式开着吗。
+pub fn sandbox_on() -> bool {
+    SANDBOX.load(Ordering::Relaxed)
+}
+
+/// 切测试模式。**只切模式，不动文件** —— 沙箱那棵树的建 / 清 / 拷由
+/// `app::sandbox` 那几条命令负责（它们才需要 AppHandle 去写模式档）。
+pub fn set_sandbox(on: bool) {
+    SANDBOX.store(on, Ordering::Relaxed);
+}
+
+/// 沙箱根：`<repo>/workbench/.sandbox`。**测试模式下整套数据都住这儿**
+/// —— `presets/` 的整棵副本 + 沙箱自己的 `workbench/`。
+///
+/// 放在 `workbench/` 里、点号打头，与 `.draft` / `.trash` / `.snapshots` 同一族：
+/// 它是**本机状态**（不入库，`.gitignore` 一行挡住），删掉整个目录是安全的。
+pub fn sandbox_root() -> PathBuf {
+    repo_root().join(WORKBENCH_DIR).join(SANDBOX_DIR)
+}
+
+/// **会话数据根** —— 现在这一整套数据住在哪：正式 = `<repo>`；测试 = 沙箱根。
+///
+/// ★ 它是"整套切根"的**唯一**一处开关：`presets/`（源数据 + 交付产物 + 资产载荷）
+/// 与 `workbench/`（草稿 / 台账 / 回收站）全部由它派生。生成与审计早就是从会话根
+/// 派生的（`delivery_root_at(ctx.presets.root())`），所以换根对它们天然成立。
+fn data_root() -> PathBuf {
+    data_root_at(&repo_root(), sandbox_on())
+}
+
+/// 会话数据根的**纯派生版**（测试用：不碰那个模块级开关）。
+fn data_root_at(repo: &Path, sandbox: bool) -> PathBuf {
+    if sandbox {
+        repo.join(WORKBENCH_DIR).join(SANDBOX_DIR)
+    } else {
+        repo.to_path_buf()
+    }
+}
+
 /// 开发源数据根。**只建目录，不写任何配方** —— 见 doc §7
 pub fn workbench_root() -> Result<PathBuf, AppError> {
-    let root = repo_root().join(WORKBENCH_DIR);
+    let root = data_root().join(WORKBENCH_DIR);
     ensure_dirs(&root, &WORKBENCH_DIRS)?;
     Ok(root)
 }
@@ -146,7 +195,20 @@ pub fn presets_root() -> Option<PathBuf> {
 /// 必须走下面两个 `*_at` —— 派生只有这一处，`delivery_root_path` / `assets_root_path`
 /// 也只是它的真仓库特例。
 pub fn presets_root_path() -> PathBuf {
+    data_root().join(PRESETS_DIR)
+}
+
+/// **正式**那份预设根（仓库里的 `presets/`），与测试模式无关。
+///
+/// 给沙箱那两条命令用：拷的来源永远是这一份 —— 无论当前模式是什么，
+/// 都不靠"先切旗帜再读根"的时序去保证（那种写法迟早被人改坏）。
+pub fn real_presets_root_path() -> PathBuf {
     repo_root().join(PRESETS_DIR)
+}
+
+/// **正式**那份配方本（仓库里的 `workbench/`），与测试模式无关。
+pub fn real_workbench_root() -> PathBuf {
+    repo_root().join(WORKBENCH_DIR)
 }
 
 /// 交付目录相对**预设根**的落点。生成写盘、发布定稿、审计只读
@@ -218,6 +280,37 @@ mod tests {
                 p.display()
             );
         }
+    }
+
+    /// **测试模式把整套数据根挪到沙箱那棵树里**，正式根一个字节都不沾它
+    #[test]
+    fn the_sandbox_moves_the_whole_data_root() {
+        let repo = Path::new("/tmp/repo");
+        assert_eq!(data_root_at(repo, false), repo, "正式：数据根就是仓库根");
+        assert_eq!(
+            data_root_at(repo, true),
+            repo.join("workbench").join(SANDBOX_DIR),
+            "测试：整棵挪到 workbench/{SANDBOX_DIR} 底下"
+        );
+        /* 预设根由数据根派生 —— 换了它，`presets/` 跟着走 */
+        assert_eq!(
+            data_root_at(repo, true).join("presets"),
+            repo.join("workbench").join(SANDBOX_DIR).join("presets")
+        );
+    }
+
+    /// 默认（正式）时那几个根与以前**一字不差**：沙箱是"加"上去的一条路，
+    /// 不是把原来那条改掉
+    #[test]
+    fn the_real_roots_are_untouched_while_the_sandbox_is_off() {
+        assert!(!sandbox_on(), "测试进程里默认不该是测试模式");
+        assert_eq!(presets_root_path(), repo_root().join("presets"));
+        assert_eq!(real_presets_root_path(), repo_root().join("presets"));
+        assert_eq!(real_workbench_root(), repo_root().join("workbench"));
+        assert_eq!(
+            sandbox_root(),
+            repo_root().join("workbench").join(SANDBOX_DIR)
+        );
     }
 
     /// 交付目录落在**预设根里面**：`<repo>/presets/delivery`。

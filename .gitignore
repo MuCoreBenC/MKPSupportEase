@@ -40,6 +40,11 @@ src-tauri/gen/schemas
 # 其余 workbench/ 下的东西全部入库 —— 那是开发源数据，就该跟着 git 走。
 workbench/.draft/
 
+# 测试模式（沙箱）那一整棵树（2026-10-08）：`presets/` 的副本 + 沙箱自己的台账。
+# 它是**本机状态** —— 整个目录删掉是安全的（点「从正式拷一份」就回来了），
+# 入库只会把"哪一份才是真的"搅浑。
+workbench/.sandbox/
+
 # 系统
 .DS_Store
 Thumbs.db

@@ -108,6 +108,14 @@ pub fn run() {
             若改成在配置里声明窗口，windows 数组是整体覆盖的，就得把客户端那份也抄一遍，
             两份声明迟早漂移；写在这里，窗口的存在与 feature 严格同生共死。
             开不出来只警告不中止：工作台开不出来是开发者的事，不该让进程也起不来 */
+            /* ★ **测试模式要在开窗口之前装好**：模式档记着"这台机器现在是不是测试环境"，
+            它决定整套数据根指哪儿（`workbench::paths` 那一个开关）。装晚了的话，
+            第一屏读的是正式、之后的命令读沙箱 —— 那种"我到底在看哪一个"的错位
+            正是作者点名不要的（「我不能迷迷糊糊的，不知道我在测试版还是正式版」）。
+            读不出来只告警并退回正式：正式那边的东西永远是真的 */
+            #[cfg(feature = "workbench")]
+            workbench::app::sandbox::install_at_startup(&handle);
+
             #[cfg(feature = "workbench")]
             if let Err(e) = workbench::open_window(&handle) {
                 tracing::warn!("工作台窗口开不出来：{e}");
@@ -407,5 +415,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 端口被占着时的那一下：起之前就探（谁占着、PID 多少），界面摆出来问一句
         // 「要不要把它停了」—— 停的那一条单独给，先验明正身再动手
         app::dev_source::wb_dev_source_clear_conflict,
+        // **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵，
+        // 正式目录一个字节都不碰。四条：现状 / 开关 / 清空并重拷 / 清空
+        app::sandbox::wb_sandbox_status,
+        app::sandbox::wb_sandbox_set,
+        app::sandbox::wb_sandbox_refill,
+        app::sandbox::wb_sandbox_wipe,
     ])
 }

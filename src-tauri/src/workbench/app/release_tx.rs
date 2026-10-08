@@ -1680,6 +1680,9 @@ pub fn wb_release_preflight(
     version: Option<String>,
 ) -> Result<ReleasePreflight, AppError> {
     crate::ipc::traced("wb_release_preflight", |_| {
+        /* 测试模式里这道闸的读数会混两个世界（版本号来自真仓库、产物在沙箱）——
+           与其给一份看不出问题的结论，不如直说这条路关着 */
+        super::sandbox::require_real_mode("发布软件版本")?;
         let root = crate::fsx::paths::internal_root(&app)?;
         let repo = crate::workbench::paths::repo_root();
         let git = Git::open(&repo);
@@ -1892,6 +1895,8 @@ pub async fn wb_release_software(
     app: tauri::AppHandle,
     opts: ReleaseOptions,
 ) -> Result<ReleaseTxReport, AppError> {
+    /* ★ 测试模式（沙箱）里不许发版：沙箱只在本机，推出去的是另一回事 */
+    super::sandbox::require_real_mode("发布软件版本")?;
     // ★ 与闸里 run-env 那一格同一条规矩的**硬闸**：真发版前**再探一次**监视器
     //   （人可能在预检之后又起/又杀了 dev —— 以落键那一刻的进程表为准）。
     //   演练（dry_run）一个字节都不写，放行。
