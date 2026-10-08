@@ -143,6 +143,13 @@ pub struct PublishAudit {
     pub min_version: Option<String>,
     /// 全部 Blocker 都 Pass 才是 true —— **这是能不能往下走的唯一答案**
     pub can_publish: bool,
+    /// **当前模式让不让发布**：测试模式（沙箱）里这条路关着，这里是那句原因；
+    /// 正式模式是 `None`。
+    ///
+    /// ★ 它与 `can_publish` 答的是两件事：`can_publish` = "这一版东西能不能发出去"
+    /// （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
+    /// 界面不许把那颗按钮画亮 —— 点下去只会被后端如实拒掉。
+    pub publish_closed: Option<String>,
 }
 
 impl PublishAudit {
@@ -250,6 +257,21 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         files_removed: removed,
         min_version,
         can_publish,
+        publish_closed: closed_reason(),
+    })
+}
+
+/// 当前模式**让不让发布**：测试模式（沙箱）里这条路整个关着
+/// （`wb_publish` 起手就是 [`super::sandbox::require_real_mode`]）。
+///
+/// ★ 为什么闸要把这句话**自己说出来**：闸全绿时那颗「确认发布」是亮的，而测试模式下
+/// 点下去只会换来一句"这条路是关着的" —— **一颗点了会被拒的按钮比没有按钮更坏**，
+/// 人会以为是自己点错了地方。判据取自**同一个函数**，不在这里重写一遍模式判断。
+fn closed_reason() -> Option<String> {
+    let e = super::sandbox::require_real_mode("发布").err()?;
+    Some(match e.detail {
+        Some(d) => format!("{} —— {d}", e.message),
+        None => e.message,
     })
 }
 

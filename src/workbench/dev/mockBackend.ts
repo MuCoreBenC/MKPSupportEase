@@ -706,6 +706,8 @@ function mockAudit(): Json {
     filesRemoved: 0,
     minVersion: '0.0.1',
     canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
+    /* 桩里没有"测试模式"这回事（沙箱切不动，见 `wb_sandbox_*`），所以发布这门是开的 */
+    publishClosed: null,
   }
 }
 

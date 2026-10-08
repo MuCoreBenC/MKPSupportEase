@@ -728,6 +728,16 @@ export interface PublishAudit {
    */
   minVersion: string | null
   canPublish: boolean
+  /**
+   * **当前模式让不让发布**：测试模式（沙箱）里这条路整个关着，这里是那句原因；
+   * 正式模式是 `null`。
+   *
+   * ★ 它与 `canPublish` 答的是两件事：`canPublish` = "这一版东西能不能发出去"
+   * （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
+   * 那颗「确认发布」不许画亮 —— 点下去只会被后端如实拒掉，而**一颗点了会被拒的
+   * 按钮比没有按钮更坏**（人会以为是自己点错了）。
+   */
+  publishClosed: string | null
 }
 
 /* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
