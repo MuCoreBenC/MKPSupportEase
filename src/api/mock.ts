@@ -2,6 +2,7 @@ import { NotImplementedError } from './errors'
 import type {
   ActiveOrigin,
   ActivePreset,
+  Axes,
   CalibModel,
   MkpApi,
   OnDiskFile,
@@ -286,6 +287,55 @@ mockMineText.set(
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 /**
+ * 演示口径的官方交付集合与它们的可信档（与 `getDownloadedFiles` / `getDeliveryTrust` /
+ * `getStaleFiles` 同一套演示账）。下载即得工作副本那条链要按它判"这份能不能到你手里"。
+ */
+const MOCK_RELEASE_FILES = [
+  { fileName: 'A1-standard.toml', machineId: 'A1', versionId: 'STANDARD', trust: 'ok' },
+  { fileName: 'A1-fast.toml', machineId: 'A1', versionId: 'FAST', trust: 'old' },
+  {
+    fileName: 'A1mini-standard.toml',
+    machineId: 'A1_MINI',
+    versionId: 'STANDARD',
+    trust: 'tampered',
+  },
+] as const
+
+const mockReleaseFile = (fileName: string) =>
+  MOCK_RELEASE_FILES.find((f) => f.fileName === fileName)
+
+/**
+ * 改演示正文里的三轴偏移（真机上是 `presetdata::patch` 按注册表定位：只换那个值，
+ * 注释、键序、血统三行一个字节不动）。行尾注释保留。
+ */
+const patchMockOffsets = (text: string, axes: Axes): string =>
+  text
+    .split('\n')
+    .map((line) => {
+      const hit = /^(\s*offset_([xyz])\s*=\s*)(-?[\d.]+)(.*)$/.exec(line)
+      if (hit === null) return line
+      const value = hit[2] === 'x' ? axes.x : hit[2] === 'y' ? axes.y : axes.z
+      return `${hit[1]}${value}${hit[4]}`
+    })
+    .join('\n')
+
+/** 从演示正文里读一个数字（真机上是 `mine::calibration_of` 按注册表读） */
+const readMockNumber = (text: string, key: string): number | null => {
+  const hit = new RegExp(`^\\s*${key}\\s*=\\s*(-?[\\d.]+)`, 'm').exec(text)
+  if (hit === null) return null
+  const n = Number(hit[1])
+  return Number.isFinite(n) ? n : null
+}
+
+/** 从演示正文里读三轴偏移；缺一个轴就是 `null`（与真机同一口径，不拿半个基准充数） */
+const readMockAxes = (text: string): Axes | null => {
+  const x = readMockNumber(text, 'offset_x')
+  const y = readMockNumber(text, 'offset_y')
+  const z = readMockNumber(text, 'offset_z')
+  return x === null || y === null || z === null ? null : { x, y, z }
+}
+
+/**
  * 把一个控件值写成 TOML 字面量（假后端版）。
  *
  * 与真后端 `presetdata::patch::to_toml_value` **同一条规则**：形态由 `valueType` 定，
@@ -364,15 +414,19 @@ const MOCK_STALE: OnDiskFile[] = [
 
 export const mockApi: MkpApi = {
   /*
-   * 只记一条日志，不假装持久化。
-   *
-   * 想过在内存里留一份"已保存的偏移"让界面读回来，但那一份没有归属 ——
-   * 契约里 saveOffsets 不带 variantId（写的是当前机器的配置，不是某份预设文件），
-   * 于是在 A 预设上保存、切到 B 会看见 A 的数。宁可这一轮不假装持久化：
-   * 界面自己有 saved 状态，看得见"存下去了"，真正的落盘等 Rust 侧。
+   * 校准值写进「我的那一份」（2026-10-08 作者改判：不再是独立的 offsets.json）。
+   * 落点带 path（`presets-mine/…`），所以在浏览器里可以真的改那份演示正文 ——
+   * 校准页保存后重进，`getUserCopyFor` 读到的就是刚写的值（同一份内存文本）。
+   * 真机上是 `mine::save_preset_calibration`（按注册表定位、注释一个字节不动）。
    */
-  async saveOffsets(axes) {
-    console.info('[mock] saveOffsets', axes)
+  async savePresetCalibration(path, axes) {
+    const text = mockMineText.get(path)
+    if (text === undefined) {
+      throw new Error(`${path} 读不出来 —— 先下载这份预设，再保存校准`)
+    }
+    mockMineText.set(path, patchMockOffsets(text, axes))
+    const at = mockMine.findIndex((f) => f.path === path)
+    if (at >= 0) mockMine[at] = { ...mockMine[at], modifiedUnix: nowSec() }
   },
 
   async getCalibModels() {
@@ -688,44 +742,39 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 官方 → 我的文件（UX 测试 A1 的正路）：把一份**可信的**官方交付文件按字节复制成
-   * 你自己的一份。与真机同一套闸（`mine::copy_release_as_new`）：
-   * 目录里得有它、得是 MKP 预设、字节与目录一致才放行（演示口径：`MOCK_DOWNLOADED`
-   * 里那份 = 可信；旧版本 / 内容异常的两份照实拒）；血统三行**新写指向**来源交付文件
-   * （官方原件没有血统头，不是照抄）；不覆盖、不与来源同名；**一个状态都不碰**。
+   * 下载即得工作副本（2026-10-08 作者改判）：官方预设落盘那一刻，「我的那一份」也在。
+   * 与真机同一套闸（`mine::ensure_working_copy` + `delivery::official_text`）：
+   * 官方基线没下载 / 字节与目录对不上 ⇒ 报错说清「先下载」（演示口径：`MOCK_DOWNLOADED`
+   * 里那份 = 可信；旧版本 / 内容异常的两份照实拒）；已经有我的一份 ⇒ 原样返回
+   * （`created: false` —— 用户改过、删过都算数，**永不覆盖**）；血统三行新写指向交付文件。
    */
-  async copyReleaseAsNew(fileName, newName) {
-    /* 演示口径的可信集合与状态：与 getDownloadedFiles / getDeliveryTrust 同一条账 */
-    const releaseFiles = [
-      { fileName: 'A1-standard.toml', machineId: 'A1', versionId: 'STANDARD', trust: 'ok' },
-      { fileName: 'A1-fast.toml', machineId: 'A1', versionId: 'FAST', trust: 'old' },
-      { fileName: 'A1mini-standard.toml', machineId: 'A1_MINI', versionId: 'STANDARD', trust: 'tampered' },
-    ]
-    const hit = releaseFiles.find((f) => f.fileName === fileName)
+  async ensureUserCopy(fileName) {
+    const hit = mockReleaseFile(fileName)
     if (hit === undefined) {
-      throw new Error(`${fileName} 还没下载到本机 —— 先下载，再另存成你自己的一份`)
+      throw new Error(`${fileName} 还没下载到本机 —— 先下载，再到你的一份`)
     }
     if (hit.trust !== 'ok') {
       throw new Error(
-        `${fileName} 盘上这一份与目录登记的字节不一致 —— 先「更新」换一份干净的官方版，再另存`,
+        `${fileName} 盘上这一份与目录登记的字节不一致 —— 先「更新」换一份干净的官方版`,
       )
     }
-    const problem = mockNameProblem(fileName, newName)
-    if (problem !== null) throw new Error(problem)
-    const name = newName.trim()
-    if (name === fileName) {
-      throw new Error('新名字和官方那份一样 —— 另存要起个不同的名字（两份同名分不清谁是谁）')
-    }
-    const path = `presets-mine/${name}`
+    const path = `presets-mine/${fileName}`
     if (mockMine.some((f) => f.path === path)) {
-      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+      return { fileName, path, created: false }
     }
     const label = `dist/mkp/presets/${fileName}`
-    const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${MOCK_OFFICIAL_TEXT}`
+    const text = [
+      `# machine: ${hit.machineId}`,
+      `# variant: ${hit.versionId.toLowerCase()}`,
+      `# based_on: ${label}`,
+      `# based_on_release_time: 2026-10-06 03:34:17`,
+      `# based_on_sha256: ${'0'.repeat(64)}`,
+      MOCK_OFFICIAL_TEXT,
+    ].join('\n')
     mockMineText.set(path, text)
     mockMine.push({
       path,
-      fileName: name,
+      fileName,
       size: text.length,
       modifiedUnix: nowSec(),
       kind: 'mkp_preset',
@@ -734,18 +783,44 @@ export const mockApi: MkpApi = {
       /* 血统新写指向来源交付文件：假后端里它就是目录当前那一版 */
       basedOn: 'current',
       basedOnLabel: label,
-      basedOnRelease: null,
+      basedOnRelease: '2026-10-06 03:34:17',
       basedOnMachineId: hit.machineId,
       basedOnVersionId: hit.versionId,
-      /* 归属与来源那份一致（正文按字节复制，头里那两行原样带过来） */
+      /* 归属与来源那份一致（官方原文头里那两行原样带过来） */
       machineId: hit.machineId,
       versionId: hit.versionId,
-      /* 官方另存出来的：出处走血统（「复制自官方 X」），账本不重复记 */
+      /* 下载出来的：出处走血统（「复制自官方 X」），账本不重复记 */
       copiedFrom: null,
       copiedFromName: null,
       provenance: null,
     })
-    return { path, fileName: name }
+    return { fileName, path, created: true }
+  },
+
+  /*
+   * 这台机型 / 这个版本，「我那一份」在哪（校准页：初值从它读、保存写它）。
+   * 与真机同一套匹配（归属优先、回落血统）—— 演示数据里 `我的 A1 涂胶.toml` 就是
+   * 血统指向 `A1-fast` 的那一份，所以选 A1/快拆版能读到它。
+   */
+  async getUserCopyFor(machineId, versionId) {
+    const hit = mockMine.find(
+      (f) =>
+        f.kind === 'mkp_preset' &&
+        f.state === 'ok' &&
+        (f.machineId ?? f.basedOnMachineId) === machineId &&
+        (f.versionId ?? f.basedOnVersionId) === versionId,
+    )
+    if (hit === undefined) return null
+    const text = mockMineText.get(hit.path)
+    if (text === undefined) {
+      return { fileName: hit.fileName, path: hit.path, axes: null, speed: null }
+    }
+    return {
+      fileName: hit.fileName,
+      path: hit.path,
+      axes: readMockAxes(text),
+      speed: readMockNumber(text, 'speed_limit'),
+    }
   },
 
   /*

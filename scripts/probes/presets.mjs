@@ -300,13 +300,17 @@ await page.waitForTimeout(200)
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
 
+/*
+ * 2026-10-08 作者改判之后，本地表 MKP 档**只有用户的工作副本**（`presets-mine/`）：
+ * 官方交付行（下载区那份）不进用户世界 —— "下载一个预设、列表里两个"构造上不会发生。
+ * 交付文件的四态改在**云端表**量（下面那一段），这里只守边界。
+ */
 const localActions = await actions()
 console.log(`\n[交付四态 · 本地表] ${localActions.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
-const localFast = localActions.find((r) => r.name.includes('A1-fast.toml'))
-if (localFast === undefined) {
-  problems.push('本地表里没有盘上不对劲的那一份（盘上确实有它，藏起来就等于说本机没有）')
-} else if (!localFast.action.includes('更新')) {
-  problems.push(`旧版本那一份，本地表的动作该是「更新」，实测「${localFast.action}」`)
+for (const file of ['A1-standard.toml', 'A1-fast.toml', 'A1mini-standard.toml']) {
+  if (localActions.some((r) => r.name === file)) {
+    problems.push(`本地表里不该出现官方交付行（用户只有他那一份）：${file}`)
+  }
 }
 
 await rad('preset-scope', 'cloud').click({ force: true })
@@ -566,99 +570,49 @@ if (bodyBtnCount === 0) {
   await page.waitForTimeout(250)
 }
 
-/* ---------- 5e. 临时编辑：改 → 另存成用户那一份 ---------- */
+/* ---------- 5e. 用户世界只有他那一份（2026-10-08 作者改判：下载即得工作副本） ---------- */
 /*
  * 守三件事：
- *   ① 只有"与目录一致"的交付行有「改这份」（没下载就没正文可改；需更新的那份内容存疑）；
- *   ② 编辑器里是**临时文件里那份**正文，不是就地改官方；
- *   ③ 保存之后本地表多出 `（已修改）` 那一份 —— 而**原来那一份还在**（官方原件没被改掉）。
+ *   ① 官方交付文件（A1-standard 等）在本地表里**一行都没有** —— 官方基线退居内部
+ *      （只留作与云端比对），页面上不给它任何可操作的入口；
+ *   ② 用户那一份照旧在本地表里（编辑 / 应用 / 改名 / 删除全走它）；
+ *   ③ 云端表照旧是"下载 / 更新"的入口（那一份不在本地表出现 ≠ 看不见它）。
  *
- * 真机那条更硬的判据在 Rust 侧（`runtime::mine`）：另存只写用户根、
- * 官方原件字节不变、下载区里不会多出文件（临时文件不住 `mkp/`）。
+ * 真机那条更硬的判据在 Rust 侧：下载的收尾把工作副本补上（`mine::ensure_working_copy`，
+ * 幂等、永不覆盖），编辑保存写回它自己（`save_back`）。
  */
-const stdRow = page
-  .locator('main tbody tr')
-  .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: 'A1-standard.toml' })
-  .first()
-await stdRow.click()
+await rad('preset-kind', 'mkp').click({ force: true })
+await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
 
-const editBtn = page.getByRole('button', { name: '改这份' })
-const editBtnCount = await editBtn.count()
-console.log(`\n[编辑] 「改这份」按钮 ${editBtnCount} 个`)
-if (editBtnCount === 0) {
-  problems.push('与目录一致的交付行展开后没有「改这份」')
-} else {
-  await editBtn.first().click()
-  await page.waitForTimeout(500)
-  const editor = await page.evaluate(() => {
-    const dlg = document.querySelector('[role="dialog"]')
-    const area = dlg?.querySelector('textarea')
-    return {
-      open: area !== null && area !== undefined,
-      text: area?.value ?? '',
-      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map((b) =>
-        (b.innerText || b.getAttribute('aria-label') || '').trim(),
-      ),
-    }
-  })
-  console.log(
-    `[编辑] 抽屉${editor.open ? '开着' : '没开'}，正文 ${editor.text.length} 字节：${editor.text.replace(/\n/g, ' / ').slice(0, 70)}`,
-  )
-  if (!editor.open) problems.push('点「改这份」没有打开编辑器（抽屉里该有一个 textarea）')
-  if (editor.text.length === 0) problems.push('编辑器里没有正文（该是临时文件里那份）')
-  if (!editor.buttons.includes('保存为用户文件')) problems.push('编辑器里没有「保存为用户文件」')
-  if (!editor.buttons.includes('放弃这次编辑')) problems.push('编辑器里没有「放弃这次编辑」')
-
-  /* 改一行：边改边存（debounce 700ms），抽屉里不该出现"草稿没存上" */
-  await page.locator('[role="dialog"] textarea').fill('# 改过的正文\n涂胶宽度 = 1.4\n')
-  await page.waitForTimeout(1300)
-  const draftErr = await page.evaluate(
-    () => document.querySelector('[role="dialog"]')?.innerText ?? '',
-  )
-  if (draftErr.includes('草稿没存上')) problems.push('草稿没存上（浏览器里草稿也在内存里，不该失败）')
-
-  await page.getByRole('button', { name: '保存为用户文件' }).click()
-  await page.waitForTimeout(700)
-  const savedNote = await page.evaluate(() =>
-    (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
-  )
-  console.log(`[编辑] 保存之后提示条：${savedNote}`)
-  if (!savedNote.includes('已保存')) {
-    problems.push(`保存之后提示条该说「已保存…」，实测「${savedNote}」`)
+const worldRows = await actions()
+console.log(`\n[用户世界 · 本地表] ${worldRows.map((r) => r.name).join(' || ')}`)
+for (const file of ['A1-standard.toml', 'A1-fast.toml', 'A1mini-standard.toml']) {
+  if (worldRows.some((r) => r.name === file)) {
+    problems.push(`官方交付行不该出现在本地表：${file}`)
   }
-  if (!savedNote.includes('presets-mine/')) {
-    problems.push('保存之后要说清落在哪（presets-mine/…）')
-  }
-
-  const afterSave = await actions()
-  console.log(`[编辑] 保存后本地表：${afterSave.map((r) => r.name).join(' || ')}`)
-  if (!afterSave.some((r) => r.name.includes('A1-standard（已修改）.toml'))) {
-    problems.push('保存之后本地表里该多出「（已修改）」那一份')
-  }
-  if (!afterSave.some((r) => r.name.includes('A1-standard.toml'))) {
-    problems.push('保存不该动官方原件：本地表里原来那一份还得在')
-  }
-  await page.screenshot({ path: `${shotDir}/presets-edit.png` })
 }
+if (!worldRows.some((r) => r.name.includes('我的 A1 涂胶.toml'))) {
+  problems.push('本地表里该有我自己的那一份（用户线的正常内容）')
+}
+await page.screenshot({ path: `${shotDir}/presets-world.png` })
 
 /* ---------- 5f. 认得出 / 认不出（第三圈第 6 层：官方文件的 SHA 报警） ---------- */
 /*
  * 守三件事：
  *   ① 盘上与目录不符的两档**分得开**：`旧版本`（认得出是官方某一版旧版）与
  *      `内容异常`（这台机器上查不出它属于哪一版）—— 假后端各给一份演示；
- *   ② 内容存疑的那两份**没有「应用」也没有「改这份」**：修复动作只有重新下载
- *      （不给点了必报错的按钮：`applyActivePreset` 的第一道闸就是 SHA）；
- *   ③ 那两份的「复制」在右键菜单里是**灰的、而且带原因**（不许复制那条边界）。
+ *   ② 内容存疑的那两份**在云端表只给「更新」**（修复动作只有重新下载）——
+ *      它们不进本地表（官方基线不进用户世界，2026-10-08），所以"不给应用 / 不给改"
+ *      这条边界现在是**构造上**成立的；
+ *   ③ 云端表右键菜单里**没有**「另存为一份新的」（那是本地表"我的文件"的项）。
  *
- * 真机上更硬的判据在 Rust 侧（`runtime::delivery`）：旧版 / 查不出是哪一版的判定，
- * 以及「改这份」在入口就把漂了的字节拒掉（`official_text`）。
+ * 真机上更硬的判据在 Rust 侧（`runtime::delivery`）：旧版 / 查不出是哪一版的判定。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
-await rad('preset-scope', 'local').click({ force: true })
+await rad('preset-scope', 'cloud').click({ force: true })
 await page.waitForTimeout(250)
-/* 那两份演示分属两台机型：切到「全部机型」才同屏看得到（本机的东西不该被机型筛选藏起来）。
+/* 那两份演示分属两台机型：切到「全部机型」才同屏看得到。
    机型筛选现在是融合 pill 的右拍（漏斗），菜单是 FieldPopover 里的普通按钮 —— 不再是 select 的 option */
 await page.locator('button[aria-haspopup="true"]').first().click()
 await page.waitForTimeout(200)
@@ -666,7 +620,7 @@ await page.getByRole('button', { name: /全部机型/ }).click()
 await page.waitForTimeout(400)
 
 const trustRows = await actions()
-console.log(`\n[认得出 · 全部机型] ${trustRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
+console.log(`\n[认得出 · 云端表 · 全部机型] ${trustRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
 
 const trustWant = [
   ['A1-fast.toml', '更新', '盘上那份**就是归档里那一版** → 旧版本，换成当前版'],
@@ -675,7 +629,7 @@ const trustWant = [
 for (const [file, want, why] of trustWant) {
   const hit = trustRows.find((r) => r.name.includes(file))
   console.log(`  ${file} → ${hit?.action ?? '(没这一行)'}（期望含「${want}」）—— ${why}`)
-  if (hit === undefined) problems.push(`本地表里没有 ${file}`)
+  if (hit === undefined) problems.push(`云端表里没有 ${file}`)
   else if (!hit.action.includes(want)) problems.push(`${file} 的动作该含「${want}」，实测「${hit.action}」`)
   else if (hit.action.includes('应用')) problems.push(`${file} 内容存疑，不该给「应用」（实测「${hit.action}」）`)
 }
@@ -713,21 +667,33 @@ const editBtns = await page.getByRole('button', { name: '改这份' }).count()
 console.log(`[认不出] 展开详情里「改这份」按钮：${editBtns} 个（展开的这一份内容存疑，该是 0）`)
 if (editBtns > 0) problems.push('内容存疑的那一份不该有「改这份」（改的来源必须是官方当前版）')
 
-/* 右键：不许复制那条边界要说得出原因（灰一项不说为什么等于坏了） */
+/* 本地表里没有它 —— 官方基线不进用户世界（"不许改 / 不许应用"构造上成立） */
+await rad('preset-scope', 'local').click({ force: true })
+await page.waitForTimeout(300)
+const localTrust = await actions()
+if (localTrust.some((r) => r.name.includes('A1mini-standard.toml'))) {
+  problems.push('内容存疑的官方交付行不该出现在本地表（官方基线不进用户世界）')
+}
+await rad('preset-scope', 'cloud').click({ force: true })
+await page.waitForTimeout(300)
+
+/* 右键：云端表里**没有**「另存为一份新的」（那是本地表"我的文件"的项） */
 await suspectRow('A1mini-standard.toml').click({ button: 'right' })
 await page.waitForTimeout(250)
-const copyItem = await page.evaluate(() => {
+const cloudMenu = await page.evaluate(() => {
   const ul = document.querySelector('[role="menu"]')
-  if (ul === null) return null
-  const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
-    (b) => (b.textContent ?? '').trim() === '另存为一份新的',
-  )
-  return btn === undefined ? null : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
+  return ul === null ? null : [...ul.querySelectorAll('[role="menuitem"]')].map((b) => (b.textContent ?? '').trim())
 })
-console.log(`[认不出] 右键「另存为一份新的」：${copyItem === null ? '没有这一项' : `灰=${copyItem.disabled} 原因「${copyItem.why}」`}`)
-if (copyItem === null) problems.push('右键菜单里没有「另存为一份新的」这一项')
-else if (!copyItem.disabled) problems.push('内容存疑的那一份不许复制，菜单里该是灰的')
-else if (!copyItem.why.includes('不许')) problems.push(`灰掉的「另存为一份新的」要带原因（不许复制），实测「${copyItem.why}」`)
+console.log(`[认不出] 云端表右键菜单：${cloudMenu?.join(' | ') ?? '(没有菜单)'}`)
+if (cloudMenu === null) problems.push('云端表右键没有菜单')
+else {
+  if (cloudMenu.some((m) => m === '另存为一份新的')) {
+    problems.push('云端表不该有「另存为一份新的」（那是本地表"我的文件"的项）')
+  }
+  if (!cloudMenu.some((m) => m === '更新' || m === '下载')) {
+    problems.push('云端表菜单里该有「下载 / 更新」')
+  }
+}
 await page.screenshot({ path: `${shotDir}/presets-trust.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
@@ -842,8 +808,8 @@ const mineEditor = await page.evaluate(() => {
 })
 console.log(`[改我这份] 抽屉：${mineEditor.whole.slice(0, 80)}`)
 if (!mineEditor.open) problems.push('点我那份的「改这份」没有打开编辑器')
-if (!mineEditor.whole.includes('改我自己这份')) {
-  problems.push(`编辑我自己那份时标题该说「改我自己这份」，实测「${mineEditor.whole.slice(0, 40)}」`)
+if (!mineEditor.whole.includes('改这一份')) {
+  problems.push(`编辑器的标题该说「改这一份」，实测「${mineEditor.whole.slice(0, 40)}」`)
 }
 if (!mineEditor.whole.includes('保存回我这份')) {
   problems.push('编辑我自己那份时，保存按钮该说「保存回我这份」（不是「保存为用户文件」）')
@@ -1104,7 +1070,7 @@ await liveRenamedTr.click()
 await page.waitForTimeout(300)
 await page.getByRole('button', { name: '改这份' }).click()
 await page.waitForTimeout(400)
-const reusedText = await page.getByRole('dialog', { name: '改我自己这份' }).textContent()
+const reusedText = await page.getByRole('dialog', { name: '改这一份' }).textContent()
 const reused = (reusedText ?? '').includes('上次改到一半')
 console.log(`[第十层 · 改名 · 草稿] 再点「改这份」：${reused ? '接着上次改（草稿跟着走了）' : '没接上'}`)
 if (!reused) problems.push('改名之后草稿该跟着走（再点「改这份」要说「上次改到一半的那一份」）')
@@ -1112,93 +1078,26 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
 
-/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件 + 官方 → 我的文件） ---------- */
+/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件） ---------- */
 /*
- * 守六件事：
- *   ① **官方交付行也开放了**（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
- *      与目录一致的官方 MKP 行，「另存为一份新的」**能点** —— 走完命名抽屉，
- *      「我的文件」多出一份、官方原件那一行不动、提示条说清落在哪；
- *      （内容存疑的那两档仍不许复制 —— 那条边界在 5f 量）
- *   ② 名字由**用户自己起**：抽屉**不预填**（官方与我的两条都一样）；
- *   ③ 复制出来的是**独立的新文件**：新的一行在、旧的一行不动；血统原样带过去
+ * 守四件事：
+ *   ① 名字由**用户自己起**：抽屉**不预填**；
+ *   ② 复制出来的是**独立的新文件**：新的一行在、旧的一行不动；血统原样带过去
  *      （新那份行上照样「基于旧版官方」）；内容按字节复制（新那份正文里还是改过的字）；
- *   ④ **不碰任何状态**：原来那份照样「已应用」；新那份不会自称使用中；也没把草稿顺走
+ *   ③ **不碰任何状态**：原来那份照样「已应用」；新那份不会自称使用中；也没把草稿顺走
  *      （再点「改这份」不是「上次改到一半」）；
- *   ⑤ **不覆盖、不自动改名**：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西。
+ *   ④ **不覆盖、不自动改名**：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西。
  *
- * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new` / `mine::copy_release_as_new`
- * （字节复制 / 血统不重算 / 不覆盖 / 不碰状态）+ `copying_touches_no_state_at_all`、
- * `copying_a_release_*` 那几条。
+ * （官方 → 我的那条另存 2026-10-08 退役：下载即得工作副本，官方行不再有另存入口。）
+ *
+ * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不覆盖 /
+ * 不碰状态）+ `copying_touches_no_state_at_all` 那条。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await rad('preset-scope', 'local').click({ force: true })
 await page.waitForTimeout(300)
 
-/* ① 官方那一份：与目录一致 → 这一顶能点，走完一整条另存 */
-const officialTr11 = page
-  .locator('main tbody tr')
-  .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: 'A1-standard.toml' })
-  .first()
-await officialTr11.click({ button: 'right' })
-await page.waitForTimeout(250)
-const copyBoundary = await page.evaluate(() => {
-  const ul = document.querySelector('[role="menu"]')
-  if (ul === null) return null
-  const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
-    (b) => (b.textContent ?? '').trim() === '另存为一份新的',
-  )
-  return btn === undefined
-    ? null
-    : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
-})
-console.log(
-  `\n[第十一层 · 官方另存] 官方那份右键「另存为一份新的」：${copyBoundary === null ? '没有这一项' : `灰=${copyBoundary.disabled}`}`,
-)
-if (copyBoundary === null) problems.push('右键菜单里没有「另存为一份新的」这一项')
-else if (copyBoundary.disabled) {
-  problems.push(
-    `与目录一致的官方交付行「另存为一份新的」该能点（A1 的正路），实测灰的：${copyBoundary.why}`,
-  )
-} else {
-  await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
-  await page.waitForTimeout(300)
-  const relCopyDlg = page.getByRole('dialog', { name: '另存为一份新的' })
-  const relCopyNote = (await relCopyDlg.textContent()) ?? ''
-  console.log(
-    `[第十一层 · 官方另存] 抽屉说明：${relCopyNote.replace(/\s+/g, ' ').trim().slice(0, 120)}`,
-  )
-  if (!relCopyNote.includes('官方原件一个字节不动')) {
-    problems.push('官方另存抽屉要说清「官方原件一个字节不动」（统一保存口径）')
-  }
-  const relPrefill = await relCopyDlg.getByLabel('新的文件名').inputValue()
-  if (relPrefill !== '') problems.push('官方另存的名字该由用户自己起（输入框不该预填）')
-  await relCopyDlg.getByLabel('新的文件名').fill('我的 A1 标准涂胶.toml')
-  await relCopyDlg.getByRole('button', { name: '另存为' }).click()
-  await page.waitForTimeout(600)
-  const relDone = await page.evaluate(() =>
-    (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
-  )
-  console.log(`[第十一层 · 官方另存] 保存之后提示条：${relDone}`)
-  if (!relDone.includes('已另存为')) {
-    problems.push(`官方另存成功后提示条该说「已另存为…」，实测「${relDone}」`)
-  }
-  if (!relDone.includes('presets-mine/')) {
-    problems.push('官方另存成功后要说清落在哪（presets-mine/…）')
-  }
-  const afterRelCopy = await actions()
-  const relCopied = afterRelCopy.find((r) => r.name.includes('我的 A1 标准涂胶.toml'))
-  const relOriginal = afterRelCopy.find((r) => r.name.includes('A1-standard.toml'))
-  console.log(
-    `[第十一层 · 官方另存] 新的一份：${relCopied === undefined ? '(没出现)' : relCopied.name}；官方原件：${relOriginal === undefined ? '(不见了！)' : '还在'}`,
-  )
-  if (relCopied === undefined) problems.push('官方另存之后「我的文件」里该多出新的一份')
-  if (relOriginal === undefined) problems.push('官方另存不许动官方原件（原来那行该还在）')
-}
-await page.keyboard.press('Escape')
-await page.waitForTimeout(200)
-
-/* ② 我自己那份：名字不预填；③ 复制出一份新的独立文件 */
+/* ① 我自己那份：名字不预填；② 复制出一份新的独立文件 */
 const liveTr11 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1241,7 +1140,7 @@ if (original === undefined) {
   problems.push(`另存不该断原文件的「已应用」，实测操作列「${original.action}」`)
 }
 
-/* ④ 新那份的正文 = 原来那份的字节（5h 改过的字还在）；且不是"接着上次改"（草稿没被顺走） */
+/* ③ 新那份的正文 = 原来那份的字节（5h 改过的字还在）；且不是"接着上次改"（草稿没被顺走） */
 const copiedTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1269,7 +1168,7 @@ if (copiedReused) problems.push('另存不该把原来那份的草稿顺走（�
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
-/* ⑤ 不覆盖、不自动改名：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西 */
+/* ④ 不覆盖、不自动改名：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西 */
 await copiedTr.click({ button: 'right' })
 await page.waitForTimeout(250)
 await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
@@ -1401,7 +1300,8 @@ await page.screenshot({ path: `${shotDir}/presets-import.png` })
 /* ---------- 5m. 第十三层：文件外部管理（在 Finder 中显示） ---------- */
 /*
  * 守三件事：
- *   ① 只有「我的文件」这一项能点（官方那份灰掉带原因：它住程序自己管的下载区）；
+ *   ① 这个动作只给「我的文件」（官方基线不进用户世界，2026-10-08 —— 没有它的行，
+ *      也就没有可显示的落点）；
  *   ② 点它走的是**真的那条动作** —— 浏览器里没有文件管理器、假后端的"文件"也只是内存里
  *      一条，所以假后端如实说这一步在真机上的样子（不假装打开了）；
  *   ③ 它不碰任何状态：点完原来那份照样「已应用」。
@@ -1430,28 +1330,11 @@ const revealItemOf = () =>
         }
   })
 
-/* ① 官方那份：灰掉带原因 */
-/* 官方那一份：用副标题 span 的 `title`（盘上落点「下载区 mkp · …」）锁定 ——
-   副标题本体没备注时是**空的**（2026-10-07 三轮：没备注就空着、不再回落位置文案），
-   title 才是稳定的那一份；光按文件名匹配会撞上别的行。 */
-const officialTr13 = page
-  .locator('main tbody tr')
-  .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: 'A1-standard.toml' })
-  .filter({ has: page.locator('[title*="下载区 mkp"]') })
-  .first()
-await officialTr13.click({ button: 'right' })
-await page.waitForTimeout(250)
-const officialReveal = await revealItemOf()
-console.log(
-  `\n[第十三层 · 边界] 官方那份右键「${officialReveal?.label ?? '?'}」：${officialReveal === null ? '没有这一项' : `灰=${officialReveal.disabled} 原因「${officialReveal.why}」`}`,
-)
-if (officialReveal === null) problems.push('右键菜单里没有「…中显示」这一项')
-else if (!officialReveal.disabled || officialReveal.why === '') {
-  problems.push('官方那份的「…中显示」该灰掉并说清原因')
+/* ① 官方基线不在本地表里（它的「…中显示」无从谈起 —— 那就是"不进用户世界"的一部分） */
+const officialTr13 = await actions()
+if (officialTr13.some((r) => r.name === 'A1-standard.toml')) {
+  problems.push('官方交付行不该出现在本地表（第十三层：只有「我的文件」有落点可显示）')
 }
-await page.keyboard.press('Escape')
-await page.waitForTimeout(200)
 
 /* ② 我的那份：能点；点了如实说"浏览器里没有文件管理器" */
 const mineTr13 = page
@@ -1634,12 +1517,12 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）画得对且动作对、' +
+  '\n预设页：两轴可点、四张表可读、点行展开、右键菜单出得来、交付预设的四态（已下载 / 旧版本 / 内容异常 / 未下载）在云端表画得对且动作对、' +
+    '用户世界只有他那一份（本地表不列官方交付行；官方基线只作与云端比对，2026-10-08），' +
     '我那份能被应用并说得出「基于旧版官方」，改我那份能保存回它自己（不产生第二份、血统还在），' +
     '读不出来的那一份画得出「文件无法读取」且不给应用 / 改这份（第九层），' +
     '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；删除全面放开 —— 使用中的删了把使用一并撤下）（第十层），' +
-    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿），' +
-    '官方交付行也能直接另存成你自己的一份（UX 测试 A1 的正路：可信字节、血统指向来源、不碰任何状态）（第十一层），' +
+    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
     '导入入口（第十二层）：「导入文件…」按钮退役（拖拽是唯一入口）、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「已应用」，' +
     '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那份灰掉带原因、失败如实说、不碰「已应用」），' +
     'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +

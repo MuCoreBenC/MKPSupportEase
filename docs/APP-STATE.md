@@ -99,7 +99,7 @@ AppState 放的是「**应用现在是什么状态**」，不是「应用所有�
 
 | 落点 | 定案 | 为什么 |
 | --- | --- | --- |
-| `index/offsets.json`（校准偏移） | **不进**（原"待定"改判） | 作者 2026-10-08：偏移该**保存进 toml** —— 校准保存与"编辑预设"同一个动作（默认另存为用户线一份，官方那份留作**基线**对比云端有没有新版）。这条产品线落地时该落点**直接退役**；本刀不动它 |
+| `index/offsets.json`（校准偏移） | **不进，且该落点已退役**（2026-10-08 落地） | 作者改判：偏移**保存进用户工作副本的 TOML**（`toolhead.offset.x/y/z`）—— 下载即得工作副本，校准保存 = 写回它自己；`save_offsets` 命令与 `index/` 预建目录一并退役。见 [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md) |
 | `user/preset-remarks.json`（备注覆盖账） | **不进** | 用户数据的**伴生账**（与 `provenance.json` 同族：随文件数增长、删文件清键、住用户根）。读写已唯一（`get_preset_remarks` / `set_preset_remark`），没有散落 |
 | 前端 7 格 localStorage | **不进** | **窗口级 UI 偏好**（置顶 / 参数搜索历史 / 抽屉宽 ×2 / BBS 显示档 ×3）：单页面消费、不需要跨进程广播。§5 的"用户偏好"指**应用级**偏好，不含"这个窗口长什么样" |
 | `useSessionState`（会话态） | **不进** | 不跨重启、无事件、无原子写 —— 恰是 AppState 的反面；它只回答"切 tab 不丢选择" |
@@ -183,7 +183,8 @@ TS 侧：唯一客户端（快照 + `subscribe` + `useSyncExternalStore` 钩子�
 - **旧三档的读半边保留**（`legacy_snapshot` 的迁移兼容）：盘上还可能有没迁过的老档，
   写口虽已退役，读半边要等迁移窗口过去才删 —— 不在本轮，清单里记了退役条件。
 - **后续刀**（清单里各自记着证据与代价）：
-  1. **校准保存 = 另存为用户线预设**（官方那份退居"基线"）—— 落成时 `index/offsets.json`
-     与 `save_offsets` 一起退役，动作本身经 AppState 改 `activePreset`；
+  1. ~~**校准保存 = 另存为用户线预设**（官方那份退居"基线"）~~ —— **已落地（2026-10-08）**：
+     不是"校准时另存"，而是**下载即得工作副本**；`index/offsets.json` 与 `save_offsets`
+     已退役，校准值写进工作副本 TOML。见 [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md)；
   2. `run/update-result.json` 的**两条写路径**（Rust 原子写 + 安装脚本 `printf`）合并成一条；
   3. 工作台那一族（`SupportEase-Workbench`）若也要收口，另起一份清单。

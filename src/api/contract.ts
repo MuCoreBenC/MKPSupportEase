@@ -23,6 +23,12 @@ export interface Preset {
   path: string
   axes: Axes
   speed: number
+  /**
+   * **「我那一份」工作副本的落点** —— 校准保存写它（2026-10-08 作者改判：
+   * 偏移随工作副本走）。`null` = 这个机型 / 版本还没有用户的一份：校准页照旧显示
+   * 官方默认值，**保存被拦**（先下载才有得存 —— 官方基线永远不可变）。
+   */
+  mine: { path: string; fileName: string } | null
 }
 
 /** 校准板模型（Z 板 / XY 板 / 支撑测试件） */
@@ -585,6 +591,36 @@ export interface UserFileIdentity {
   fileName: string
 }
 
+/**
+ * 工作副本落定的结果（[`ensureUserCopy`]）。
+ *
+ * 「下载即得工作副本」（2026-10-08 作者改判）：官方预设落盘那一刻，`presets-mine/`
+ * 里就有一份属于用户的、可编辑的副本 —— 用户此后只操作这一份，官方那份退居内部基线。
+ */
+export interface UserCopyInfo {
+  fileName: string
+  /** 落点（相对**用户根**，`presets-mine/<官方原名>`） */
+  path: string
+  /** 这次是不是新生成了一份；`false` = 本来就有（一个字节都没动） */
+  created: boolean
+}
+
+/**
+ * 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）。
+ *
+ * **整个对象缺席**（`null`）= 这个机型 / 版本还没有用户的一份 —— 校准页照旧显示
+ * 官方默认值，**保存被拦**（先下载才有得存：校准的对象是工作副本，基线永远不可变）。
+ */
+export interface UserCopyCalibration {
+  fileName: string
+  /** 落点（相对**用户根**，`presets-mine/…`）—— 保存校准时把它交回来 */
+  path: string
+  /** 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数） */
+  axes: Axes | null
+  /** 涂胶速度限速；读不出来是 `null` */
+  speed: number | null
+}
+
 /** 落点检查的一档（第十二层）：`ready` 能收 / `collision` 重名 / `rejected` 收不了（带原因） */
 export type ImportStage = 'ready' | 'collision' | 'rejected'
 
@@ -1068,8 +1104,14 @@ export interface PresetSource {
 }
 
 export interface MkpApi {
-  /** 把校准好的三轴偏移写回配置。三轴一起写，不按页分 */
-  saveOffsets(axes: Axes): Promise<void>
+  /**
+   * **把校准好的三轴偏移写进「我的那一份」工作副本**（2026-10-08 作者改判）。
+   *
+   * `path` 来自 [`getUserCopyFor`]（或用户线列表）—— 必须是 `presets-mine/…` 里
+   * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
+   * （注释、键序、血统三行一个字节不动）。官方基线不可变：没有工作副本就先下载。
+   */
+  savePresetCalibration(path: string, axes: Axes): Promise<void>
 
   /** 校准板清单 */
   getCalibModels(): Promise<CalibModel[]>
@@ -1202,10 +1244,9 @@ export interface MkpApi {
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
    *
-   * 与第八层"官方 → 我的文件"那条另存分开：这一层是**我的文件 → 我的文件** ——
-   * 原文件一个字节不动；内容与那三行 `based_on*` 血统**原样带过去**（来源已经是用户文件，
-   * 不重算血统 —— 重算会把"从哪一版官方派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
-   * （**不覆盖、也不自动改名** —— 名字由用户自己换）。
+   * **我的文件 → 我的文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
+   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版官方派生"说错）。
+   * 新名字过同一套门槛、落点已有东西就拒绝（**不覆盖、也不自动改名** —— 名字由用户自己换）。
    *
    * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
    * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
@@ -1213,18 +1254,27 @@ export interface MkpApi {
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
   /**
-   * **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+   * **确保「我的那一份」在**（2026-10-08 作者改判：下载即得工作副本）。
    *
-   * 在此之前官方行的「另存为一份新的」是灰的，要绕「改这份」→ 保存才能复制 ——
-   * 可"改了再保存"与"不改直接复制"落的是同一种东西，绕一道编辑流程不合直觉。
+   * 下载命令的收尾就是它（下完基线顺手把工作副本补上）；这里同时是一条**幂等**的
+   * 显式入口 —— 首页「应用」前、以及"基线早在盘上、只差副本"的场合都靠它。
    *
-   * 来源是**官方交付行**，闸在 Rust 侧（`mine::copy_release_as_new`）：
-   * 目录里得有它、得是 MKP 预设、**字节必须与目录一致**（与「改这份」同一条边界 ——
-   * 旧版本 / 内容异常禁令不变）。血统三行**新写指向**来源交付文件（官方原件没有
-   * 血统头，不是照抄）；出处账不记（血统已经答了"从哪来"）。名字过同一套门槛、
-   * 不覆盖、不自动改名；**一个状态都不碰**（不改使用中指针、不建草稿、不进 archive）。
+   * 已经有就原样返回（`created: false`）：用户改过、删过都算数，这里**永不覆盖**
+   * （官方换版本只换基线，不碰工作副本 —— 作者裁决 ⑤）。
+   * 官方基线没下载 / 字节与目录对不上 ⇒ 报错说清「先下载」（与「改这份」同一条闸）。
    */
-  copyReleaseAsNew(fileName: string, newName: string): Promise<UserFileIdentity>
+  ensureUserCopy(fileName: string): Promise<UserCopyInfo>
+
+  /**
+   * **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
+   *
+   * 找法（有先后）：底账正用着的那一份（origin=mine 且归属匹配）> 用户目录里
+   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落血统
+   * （与用户线列表同一套口径）。
+   *
+   * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示官方默认值，保存被拦。
+   */
+  getUserCopyFor(machineId: string, versionId: string): Promise<UserCopyCalibration | null>
 
   /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
 

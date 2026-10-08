@@ -557,4 +557,20 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   同一轮：MKP 工具栏**恒两排**（第一排 类型 / 位置(右) / 搜索，第二排 pill + 计数台账），
   MKP 档的「共 N 项 │ 仓库…」从页脚回到工具栏第二排（切片器档照旧住页脚）。
 
+- 2026-10-08：**下载即得工作副本**（作者改判：用户世界里只有一份预设）：
+  1. **官方那份退居内部基线**（`<catalog.path>` = `delivery/mkp/presets/…`）：用户不可见、
+     不被编辑，只用于与云端比对（工作副本血统 sha256 ↔ 目录期望 sha256）；
+     MKP 档本地表只列 `presets-mine/`，官方交付行/仓库行不再进本地表（云端表照旧）。
+  2. **下载的收尾就复制**：`runtime::mine::ensure_working_copy`（幂等，已有不动）；
+     新命令 `ensure_user_copy`（首页应用前补齐）；官方 → 我的那条另存
+     （`copy_release_as_new`）退役。
+  3. **校准值写进工作副本 TOML**：`save_preset_calibration`（按注册表定位 `toolhead.offset.x/y/z`）；
+     初值读 `get_user_copy_for`；`save_offsets` / `index/offsets.json` / `index/` 预建目录 /
+     `fsx::paths` 的 `Root`·`resolve` 抽象一并退役。
+  4. **规格**：[`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md)；
+     根规则 [`DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) §1③/§2/§3 与本文件同轮更新；
+     产品规则 `PRESET-PRODUCT-RULES.md` 头部改判块 + §1/2/5/7/8/11/12/13 就地改。
+  5. **判据**：Rust 单测 4 条（工作副本生成/不覆盖/非预设拒/校准读值）；
+     探针 `presets.mjs` 5/5e/5f/5k/5m 五节按新世界改写、全绿。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

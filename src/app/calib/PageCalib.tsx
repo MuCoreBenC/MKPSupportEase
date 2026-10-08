@@ -25,7 +25,7 @@ import { api } from '../../api'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
 import { activateCombo, useActivePreset, useActivePresetReady } from '../state/appState'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
-import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
+import { AXIS_ROWS, NEED_COPY, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
 import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
@@ -130,6 +130,7 @@ export default function PageCalib() {
     dirtyAxes,
     savedNote,
     canPick,
+    canSave,
     zSelected,
     xySelected,
     pickZ,
@@ -237,7 +238,12 @@ export default function PageCalib() {
       <Btn variant="ghost" disabled={!dirty} onClick={clearAll}>
         放弃改动
       </Btn>
-      <Btn variant="primary" disabled={!dirty} onClick={commitAll}>
+      <Btn
+        variant="primary"
+        disabled={!dirty || !canSave}
+        title={canSave ? undefined : NEED_COPY}
+        onClick={commitAll}
+      >
         保存
       </Btn>
     </div>

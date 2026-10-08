@@ -13,7 +13,7 @@
 //! 用户根住在 `<appDataDir>/user`：它**仍然是独立的一层**（路径语义、防穿越都不变），
 //! 只是**落点**从系统目录换成程序目录。用户想拿自己的预设，去「在 Finder 中显示」。
 //!
-//! **防穿越**：所有相对路径都必须经过 [`resolve`]。拒绝绝对路径、拒绝 `..`、拼完还要再确认
+//! **防穿越**：所有相对路径都必须经过 [`resolve_in`]。拒绝绝对路径、拒绝 `..`、拼完还要再确认
 //! 结果仍在根内（符号链接能绕过前两条，所以第三条是必须的）。
 
 use std::path::{Component, Path, PathBuf};
@@ -22,19 +22,12 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
-/// 两个数据根。`Root` 而不是直接传 `&Path`：调用点写的是"内部"还是"用户"，
-/// 而不是一个能被随手替换成任意目录的路径。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Root {
-    /// `appDataDir` —— 程序管理，用户不该手动进去改
-    Internal,
-    /// 给用户看的那一份（预设副本 / 导出 / 报告）。**也住 `appDataDir`** ——
-    /// 见模块头：它不该去碰 `~/Documents`（TCC 弹窗 + iCloud 驱逐）
-    User,
-}
-
 /// 内部根下首次启动就建齐的子目录
-const INTERNAL_DIRS: [&str; 5] = ["cloud", "archive", "index", "logs", "run"];
+///
+/// `index/` 2026-10-08 退役：它唯一住过的东西是 `offsets.json`（校准偏移的孤岛，
+/// 只写不读）—— 校准值改随**用户工作副本**走之后这个目录没有消费者了。
+/// 盘上遗留的空目录不清理（用户自己删）。
+const INTERNAL_DIRS: [&str; 4] = ["cloud", "archive", "logs", "run"];
 /// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::mine`）要认它，
 /// 字面量只许有这一处
 pub const MINE_DIR: &str = "presets-mine";
@@ -64,18 +57,6 @@ pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let root = internal_root(app)?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS)?;
     Ok(root)
-}
-
-pub fn root_path(app: &AppHandle, root: Root) -> Result<PathBuf, AppError> {
-    match root {
-        Root::Internal => internal_root(app),
-        Root::User => user_root(app),
-    }
-}
-
-/// 把相对路径解析成根内的绝对路径。越界一律 `PERMISSION_DENIED`
-pub fn resolve(app: &AppHandle, root: Root, rel: &str) -> Result<PathBuf, AppError> {
-    resolve_in(&root_path(app, root)?, rel)
 }
 
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
@@ -182,9 +163,9 @@ mod tests {
     #[test]
     fn accepts_plain_relative_path() {
         let d = root();
-        let p = resolve_in(d.path(), "index/offsets.json").unwrap();
+        let p = resolve_in(d.path(), "run/app-state.json").unwrap();
         assert!(p.starts_with(d.path()));
-        assert!(p.ends_with("index/offsets.json"));
+        assert!(p.ends_with("run/app-state.json"));
     }
 
     #[test]

@@ -99,16 +99,14 @@
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
  *                            见 `ReleaseFileState`）
- *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
- *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
- *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
+ *   **修改 / 保存**（我的文件） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/app-state.json`：
+ *                            `putPresetDraft` 边改边存；保存 = **写回我那一份自己**（不产生第二份）。
+ *                            **原文件与下载区全程没被碰过** —— 判据逐字节盯着）
  *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
- *   **另存为一份新的**（官方交付行） `api.copyReleaseAsNew()`               真（UX 测试 A1 的正路：release + ok 的
- *                            MKP 预设直接另存成你自己的一份 —— 可信字节 + 血统指向来源；不碰任何状态）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
@@ -151,9 +149,7 @@ import {
   ARCHIVE_WHY,
   EDIT_TEXT,
   MINE_COPY,
-  RELEASE_COPY,
   MINE_DRAWER,
-  MINE_EDIT_TEXT,
   MINE_RENAME,
   DOWNLOAD_WHY,
   mineCountOfAxis,
@@ -609,14 +605,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   /**
    * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 两条线**同一个入口**（与「应用」同一形状）：官方线交文件名、用户线还要交路径
-   * （用户目录里可以自己分文件夹）。前置条件全在后端拦 —— 这里不重复判断。
-   * 同一份的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
+   * 2026-10-08 起**编辑的对象只有用户的工作副本**（本地表 MKP 档只列它）——
+   * 官方基线不进用户世界，也没有"改官方那份"这条入口。前置条件全在后端拦
+   * （认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的话后端会返回它
+   * （`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
     setViewer(null)
-    data.beginEdit(row.fileName, row.origin === 'mine' ? 'mine' : 'official', row.path).then(
+    data.beginEdit(row.fileName, 'mine', row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
         setEditing({
@@ -661,35 +658,24 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     return () => window.clearTimeout(timer)
   }, [data, editing])
 
-  /** 放弃这次编辑：丢草稿（官方原件与下载区全程没被碰过，所以它天生安全） */
+  /** 放弃这次编辑：丢草稿（原文件与下载区全程没被碰过，所以它天生安全） */
   const discardEdit = () => {
     data.discardDraft().then(
       () => {
         setEditing(null)
-        setNote({ text: '已放弃这次编辑 —— 官方原件从头到尾没有被改过', bad: false })
+        setNote({ text: '已放弃这次编辑 —— 你的那份从头到尾没有被改过', bad: false })
       },
       (e: unknown) =>
         setNote({ text: `放弃不了：${errorText(e)}`, bad: true }),
     )
   }
 
-  /**
-   * 保存：官方线**另存**进 `presets-mine/`（本地表跟着多出那一份）；
-   * 用户线**写回它自己**（第八层：同一个文件，不会多出一份）。
-   */
+  /** 保存：**写回它自己**（第八层：同一个文件，不会多出一份） */
   const commitEdit = () => {
-    const mine = editing?.origin === 'mine'
     data.commitDraft().then(
       (done) => {
         setEditing(null)
-        setNote({
-          text: mine
-            ? MINE_EDIT_TEXT.savedBack(done.fileName, done.path)
-            : done.replaced
-              ? EDIT_TEXT.savedAgain(done.fileName)
-              : EDIT_TEXT.saved(done.fileName, done.path),
-          bad: false,
-        })
+        setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
       },
       (e: unknown) =>
         setNote({
@@ -738,10 +724,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     const ask =
       naming.kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : naming.row.origin === 'release'
-          ? /* 官方交付行（UX 测试 A1 的正路）：可信字节直接复制成你自己的一份 */
-            data.copyReleaseAsNew(naming.row.fileName, name)
-          : data.copyAsNew(naming.row.path, name)
+        : data.copyAsNew(naming.row.path, name)
     ask.then(
       (done) => {
         setNaming(null)
@@ -749,9 +732,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           text:
             naming.kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : naming.row.origin === 'release'
-                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 官方原件一个字节没动，身世（机型 / 版本）跟着来源走了`
-                : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
@@ -765,9 +746,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（真删）；官方交付行走交付线
-   * （删了回「未下载」，随时可从云端重下）。二次确认长在菜单里（`danger` + `confirm`）；
-   * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
+   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（**真删除**）；
+   * 切片器交付行走交付线（删了回「未下载」，随时可从云端重下）。
+   * 二次确认长在菜单里（`danger` + `confirm`）；正在使用 / 有草稿不再拦 ——
+   * 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
@@ -974,63 +956,47 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
   /**
    * 「重命名」为什么不能点（第十层）。只有**我的文件**能改 ——
-   * 官方线那两份各有各的原因，都要说出来（灰一个项不说为什么，用户只会以为坏了）。
+   * 灰一个项不说为什么，用户只会以为坏了。
    */
-  const renameWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    return row.origin === 'release'
-      ? '官方交付那份不能改名 —— 下载 / 应用 / 读正文都认目录登记的文件名；要改内容用「改这份」另存出你自己的一份'
-      : '官方文件不能改名，复制一份再改'
-  }
+  const renameWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '只有「我的文件」能改名（只动名字、字节一个不动）—— 官方那份不归你改名'
 
   /**
-   * 「另存为一份新的」为什么不能点（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+   * 「另存为一份新的」为什么不能点（第十一层）：
    *
-   * - **我的文件**：本来就开放（第十一层，我的 → 我的）；
-   * - **官方交付行**：`releaseState === 'ok'` 的 MKP 预设**放开** —— 可信字节直接复制，
-   *   不再绕「改这份」→ 保存（"改了再保存"与"不改直接复制"落的是同一种东西）；
-   * - 内容存疑的两档（旧版本 / 内容异常）仍由 `suspect` 那一句拦（这里到不了）；
-   * - 切片器交付行不放开：它们不是 TOML 预设，自有「复制到切片器目录」那条路；
-   * - 官方仓库文件（图标等）：不在此列。
+   * - **我的文件**：本来就开放（我的 → 我的，按字节复制、血统原样带过去）；
+   * - 其余（切片器交付行 / 官方仓库文件）：不是"我的文件"，另行处置 ——
+   *   切片器自有「复制到切片器目录」那条路。
    */
-  const copyWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    if (row.origin === 'release') {
-      if (row.kind !== 'mkp_preset') {
-        return '这份是切片器工艺配置 —— 「复制」（复制到切片器目录）才是它的动作，另存成「我的文件」用不上'
-      }
-      return row.releaseState === 'ok'
-        ? undefined
-        : '这一份还没下载到本机 —— 先下载，下载好了才能另存成你自己的一份'
-    }
-    return '官方仓库文件不在这里另存 —— 能另存的是已下载到本机的 MKP 预设与「我的文件」'
-  }
+  const copyWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '只有「我的文件」能另存为一份新的 —— 官方那份不归你复制'
 
   /**
    * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
-   * 官方那两份住在程序自己管的下载区（本地表），或者根本还没下载（仓库表）。
+   * 官方那份住在程序自己管的区域，或者根本还没下载（仓库表）。
    */
-  const revealWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    return row.scope === 'local'
-      ? '官方那份住程序自己管的下载区 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
-      : '官方原件还没下载到本机 —— 没有能显示的地方'
-  }
+  const revealWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '住在程序自己管理的区域 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
 
   /**
    * 「删除」对哪几行给。**一切皆可删**（作者裁决 2026-10-06，此前拦得太死）：
    *
-   * - 官方交付行：删了回到「未下载」，随时可从云端重新下载（字节有目录 SHA 锚定，
-   *   零数据损失）—— 此前"对不上目录用「更新」修"说的是修法，不是禁删的理由；
-   * - 我的文件：本来就真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
+   * - 我的文件：真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
    *   （悬空的「使用中」比「没在用」糟），有草稿的连草稿一起丢，确认框讲清；
-   * - 官方仓库文件的本地副本仍不给删（它们走资源那一套命令，删了不是"重下"一条路）；
+   * - 切片器交付行：删了回到「未下载」，随时可从云端重新下载；
+   * - 官方仓库文件（切片器仓库行）的本地副本不给删（它们走资源那一套命令）；
    * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   const removeWhyNot = (row: PresetTableRow): string | undefined =>
     row.origin === 'official'
-      ? '官方文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
+      ? '官方仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
@@ -1070,14 +1036,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
-     * 临时编辑的入口（两条线）：
-     * 交付行只有"与目录一致"的那一份有（它才有正文可改，且内容不存疑）；
-     * 我自己那份：认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
+     * 临时编辑的入口：**只有用户的工作副本**（本地表 MKP 档只列它；
+     * 认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
     const canEdit =
-      (row.origin === 'release' && row.kind === 'mkp_preset' && row.releaseState === 'ok') ||
-      (row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable')
+      row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
@@ -1093,13 +1057,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       {
         id: 'copy',
         label: '另存为一份新的',
-        /*
-         * 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
-         * **官方交付行也开放了**（UX 测试 A1 的正路，作者 2026-10-06 定案）：
-         * release + ok 的 MKP 预设直接另存成你自己的一份（`copyReleaseAsNew`）。
-         * 内容存疑的那两档（旧版本 / 内容异常）仍不许 —— 字节我们不认，
-         * 不能让它换个名字继续活着（第三圈第 6 层）—— 那一句优先。
-         */
+        /* 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
+           其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => openCopyAs(row),
       },
@@ -1124,8 +1083,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'remove',
         label: '删除',
         danger: true,
-        /* 一切皆可删（2026-10-06）：官方交付删了可重下；我的文件真删；
-           正在使用的那份删掉时后端会一并撤下使用 —— 代价在确认框里说清 */
+        /* 我的文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
+           —— 代价在确认框里说清 */
         disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
@@ -1221,9 +1180,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
    * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
    * 图标 / 模型不归这一页，哪个数里都不含它们。
-   * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
-   * 真机上还没接），id 集合分不出类型，先如实写全量。
+   * **MKP 档没有「本机」这一格**（2026-10-08）：官方基线不进用户世界，用户只有他那一份 ——
+   * 台账就是「仓库（云端有几个）· 我的（你有几个）」。切片器档照旧带「本机」
+   * （官方副本的总数，老契约 getLocalFiles 的读数）。
    */
+  const mineCount = mineCountOfAxis(data.mine, page.kind)
   const metaNode = (
     <span className={s.meta}>
       <span
@@ -1234,10 +1195,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       </span>
       <span
         className={s.ledger}
-        title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
+        title={
+          page.kind === 'mkp'
+            ? `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；云端没有它们）。官方基线不进用户世界（2026-10-08）。${DOWNLOAD_WHY}`
+            : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`
+        }
       >
-        仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
-        {mineCountOfAxis(data.mine, page.kind)}
+        仓库 {treeCountOfAxis(data.tree, page.kind)} ·{' '}
+        {page.kind === 'mkp' ? (
+          <>我的 {mineCount}</>
+        ) : (
+          <>
+            本机 {data.localIds.length} + 我的 {mineCount}
+          </>
+        )}
       </span>
     </span>
   )
@@ -1661,30 +1632,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
           {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
-           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存」。
+           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
            *
-           * 两条线共用这一个抽屉，只有两句话不同（保存成什么、保存到哪）：
-           * 官方线「保存为用户文件」= 另存一份新的；用户线「保存回我这份」= 写回它自己。
+           * 2026-10-08 起编辑的对象只有**用户的工作副本**（本地表 MKP 档只列它），
+           * 所以这里只有一套说法：保存 = 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
            * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
            */}
           <Drawer
             open={editing !== null}
-            title={editing?.origin === 'mine' ? MINE_EDIT_TEXT.title : EDIT_TEXT.title}
-            subtitle={
-              editing === null
-                ? undefined
-                : /* 用户线说落点（他自己可能分了文件夹）：官方线只说文件名 */
-                  (editing.path ?? editing.sourceFileName)
-            }
+            title={EDIT_TEXT.title}
+            subtitle={editing === null ? undefined : (editing.path ?? editing.sourceFileName)}
             footer={
               <>
                 <button type="button" className={s.editGhost} onClick={discardEdit}>
                   {EDIT_TEXT.discard}
                 </button>
                 <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                  {editing?.origin === 'mine' ? MINE_EDIT_TEXT.commit : EDIT_TEXT.commit}
+                  {EDIT_TEXT.commit}
                 </button>
               </>
             }
@@ -1692,9 +1658,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           >
             {editing !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>
-                  {editing.origin === 'mine' ? MINE_EDIT_TEXT.note : EDIT_TEXT.note}
-                </p>
+                <p className={s.editNote}>{EDIT_TEXT.note}</p>
                 {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
                 <textarea
                   className={s.editArea}
@@ -1748,11 +1712,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             {naming !== null && (
               <div className={s.edit}>
                 <p className={s.editNote}>
-                  {naming.kind === 'copy'
-                    ? naming.row.origin === 'release'
-                      ? RELEASE_COPY.note
-                      : MINE_COPY.note
-                    : MINE_RENAME.note}
+                  {naming.kind === 'copy' ? MINE_COPY.note : MINE_RENAME.note}
                 </p>
                 {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>

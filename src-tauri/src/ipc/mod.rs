@@ -3,8 +3,7 @@
 //! 每个命令都走 [`traced`] 包一层：生成 trace id → 开 span → 调业务 → 给错误盖上同一个 id。
 //! 于是界面上显示的 traceId 与日志里的 span 是同一个值，按 id 能把一次调用的全过程捞出来。
 //!
-//! **这一份只剩三条锚在"应用本身"上的命令**（校准三件套）：校准板清单是静态结构数据；
-//! 三轴偏移真的落盘（[`save_offsets`]，`fsx::atomic` 的第一个真实调用点）；
+//! **这一份只剩两条锚在"应用本身"上的命令**：校准板清单是静态结构数据（[`get_calib_models`]）；
 //! 打开测试模型只记日志（"尚未实现下载与打开"，见 [`open_model`]）。
 //! 业务数据（预设 / 参数 / 下载区 / 使用中…）全在 [`presets`] / [`mine`] / [`catalog`]
 //! 那几个模块里，读的是 catalog 与数据根 —— 与 `src/api/contract.ts` 一一对应。
@@ -12,6 +11,10 @@
 //! **2026-10-02 清扫**：首圈的 `get_preset`（一张 v023 时代的硬编码表，`preset_of`）删除 ——
 //! 首页与校准页早已改走文件体系（`getVersionFiles` + `getMachineParams`），
 //! 它只剩测试与注册清单在引用，是"平行真相"的残留。
+//!
+//! **2026-10-08 校准改判**：`save_offsets`（三轴落 `index/offsets.json`，只写不读的孤岛）
+//! 退役 —— 校准值随**用户工作副本**走（`ipc::mine::save_preset_calibration` 写进那份
+//! TOML 的 `offset_x/y/z`），落点与读写口都在用户线那一族里。
 
 pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
@@ -26,8 +29,6 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::error::AppError;
-use crate::fsx::atomic::atomic_write_json;
-use crate::fsx::paths::{resolve, Root};
 use crate::obs::tracing::new_trace_id;
 
 /// **AppState 变更事件**（`docs/APP-STATE.md` §7）：任何写命令成功改了
@@ -106,18 +107,7 @@ fn calib_models() -> Vec<CalibModel> {
     .collect()
 }
 
-/* ---------- 三个命令 ---------- */
-
-/// 把三轴偏移写回配置。**原子写的第一个真实调用点**
-#[tauri::command]
-pub fn save_offsets(app: AppHandle, axes: Axes) -> Result<(), AppError> {
-    traced("save_offsets", |_| {
-        let path = resolve(&app, Root::Internal, "index/offsets.json")?;
-        atomic_write_json(&path, &axes)?;
-        tracing::info!(path = %path.display(), "偏移已落盘");
-        Ok(())
-    })
-}
+/* ---------- 两条命令 ---------- */
 
 #[tauri::command]
 pub fn get_calib_models() -> Result<Vec<CalibModel>, AppError> {

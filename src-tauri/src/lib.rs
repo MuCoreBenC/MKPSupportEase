@@ -131,7 +131,6 @@ Tauri 的 API 形状决定的，不是这里想省事；把它放在相邻的两
 #[cfg(not(feature = "workbench"))]
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
-        ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
         // 预设页（A41）的真后端。读客户端自己的数据根（`appDataDir/presets`）
@@ -162,8 +161,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
-        // 官方 → 我的文件：交付行直接另存（UX 场景测试 A1 的正路）
-        ipc::mine::copy_release_as_new,
+        // 下载即得工作副本 + 校准写回（2026-10-08）：补齐我的那份 / 找它 / 把校准值写进它
+        ipc::mine::ensure_user_copy,
+        ipc::mine::get_user_copy_for,
+        ipc::mine::save_preset_calibration,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
         ipc::import::stage_import,
         ipc::import::commit_import,
@@ -200,7 +201,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
 fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     use workbench::app;
     b.invoke_handler(tauri::generate_handler![
-        ipc::save_offsets,
         ipc::get_calib_models,
         ipc::open_model,
         // 客户端命令：**两份清单一字不差**（漏一份就是「原生机能用、工作台构建不能用」）
@@ -227,8 +227,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
-        // 官方 → 我的文件：交付行直接另存（与上面那份清单一字不差）
-        ipc::mine::copy_release_as_new,
+        // 下载即得工作副本 + 校准写回（与上面那份清单一字不差）
+        ipc::mine::ensure_user_copy,
+        ipc::mine::get_user_copy_for,
+        ipc::mine::save_preset_calibration,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
         ipc::import::stage_import,
         ipc::import::commit_import,

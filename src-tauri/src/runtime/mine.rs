@@ -2,14 +2,16 @@
 //!
 //! ```text
 //! 官方线（程序管，住内部根）              用户线（用户自己要看要拷，住用户根）
-//!   mkp/ 下载的官方原件                  presets-mine/ 用户自己的那一份
+//!   <catalog.path> 官方基线（下载的原件） presets-mine/ 用户的工作副本
 //!   archive/ 换下来的官方旧版本
 //! ```
 //!
-//! 两条线**不许混**（总纲 §1③「预设 TOML 的一生」）：
+//! 两条线**不许混**（总纲 §1③「预设 TOML 的一生」；2026-10-08 作者改判）：
 //!
-//! - 官方原件**不可变**：只有云端换版本能替换它；
-//! - 用户自己那份**从官方另存出来**，从此与云端脱钩，**永远不回写官方原件**；
+//! - 官方基线**不可变**：只有云端换版本能替换它；它是"当初拿到的那一版官方内容"，
+//!   只用于和云端比对有没有新版 —— **对用户不可见、也不被用户编辑**；
+//! - 用户的工作副本**下载那一刻就有**（[`ensure_working_copy`]）：用户编辑 / 校准
+//!   都直接改它，**永远不回写基线**；官方换版本只换基线，**不碰工作副本**；
 //! - 用户什么都没改 = 什么都没发生（浏览 / 使用 / 关开不产生文件）。
 //!
 //! # 用户根在哪（**不碰 `~/Documents`**）
@@ -37,19 +39,20 @@
 //! 所以这一层**不许**复制一份 schema 来判结构 / 参数。语义那一档留给"应用 / 编辑"这类
 //! 真正要解析的入口上的真正 Preset 能力（HANDOFF §3.5 第 9 层）。
 //!
-//! # 读在上面，写只有两条（都是"写我自己的文件"）
+//! # 读在上面，写只有三条（都是"写我自己的文件"）
 //!
-//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有两个函数**，
-//! 对应两条**不同**的事，不许合并成一个"存一下"：
+//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有三个函数**，
+//! 对应三件**不同**的事，不许合并成一个"存一下"：
 //!
 //! ```text
-//! commit_draft  另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
-//! save_back     写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
+//! ensure_working_copy  下载的收尾：基线落下 → 我的那份也在（幂等，已有不动，2026-10-08）
+//! commit_draft         另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
+//! save_back            写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
 //! ```
 //!
-//! 两条共用一句话：**官方原件（按 `catalog.path` 落盘的那一份）一概不碰**。
-//! 区别只在"落点是谁"与"那三行血统从哪来"：另存是新的一份、血统从**来源**算；
-//! 写回还是同一份、血统
+//! 三条共用一句话：**官方基线（按 `catalog.path` 落盘的那一份）一概不碰**。
+//! 区别只在"落点是谁"与"那三行血统从哪来"：下载收尾与另存都是新的一份、血统从
+//! **来源**算；写回还是同一份、血统
 //! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
 //! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
@@ -59,7 +62,7 @@ use crate::error::AppError;
 use crate::fsx::paths::MINE_DIR;
 
 use super::catalog::kind::PRESET;
-use super::catalog::Catalog;
+use super::catalog::{Catalog, CatalogFile};
 use super::lineage::{self, Lineage};
 
 /// 读血统时最多看文件头这么多字节。
@@ -506,6 +509,65 @@ pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError>
     Ok(text)
 }
 
+/// 把新的正文**原子写回同一份**用户文件（读-改-写的收尾）。
+///
+/// 与 [`save_back`] 的分工：那个走编辑器那条链（正文由用户改、血统照抄回去）；
+/// 这个是"正文已经处理好了、只管落盘"的裸写 —— **校准写回**（[`calibration_of`]
+/// 是它的读侧）用它，血统三行原样留在 `text` 里。门槛与读侧同一条（前缀 + 防穿越），
+/// 文件被移走 / 删掉了照实拒绝，不去别处新建一份。
+pub fn write_text(user_root: &Path, rel: &str, text: &str) -> Result<(), AppError> {
+    check_mine_prefix(rel)?;
+    let target = crate::fsx::paths::resolve_in(user_root, rel)?;
+    if !target.is_file() {
+        return Err(AppError::not_found(format!(
+            "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+        )));
+    }
+    crate::fsx::atomic::atomic_write(&target, text.as_bytes())
+}
+
+/// 一份预设正文里那四个校准值（三轴偏移 + 涂胶限速）。
+///
+/// **缺谁就是 `None`** —— 不拿 0 充数（0 是一个合法的偏移值，与"读不出来"是两件事）。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Calibration {
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub z: Option<f64>,
+    pub speed: Option<f64>,
+}
+
+impl Calibration {
+    /// 三轴齐全才算一份能用的偏移基准（缺一个就是"说不清"，与校准页同一条口径）。
+    pub fn axes(&self) -> Option<(f64, f64, f64)> {
+        Some((self.x?, self.y?, self.z?))
+    }
+}
+
+/// 从一份预设 TOML 的正文里读校准值（校准页初值 / 官方换版判定都用它）。
+///
+/// 定位一律从**参数注册表**派生（`param_key` → `(section, toml_key)`，与
+/// [`crate::presetdata::patch`] 同一张表、同一条纪律）—— 这一层不硬编码 `offset_x`
+/// 这类裸键。TOML 解析不出 / 键不在 / 值不是数 ⇒ 对应的 `None`：照实说不知道，不猜。
+/// 整数写法（`offset_z = 4`）照收：预设里三轴本来就允许整数与小数混着写。
+pub fn calibration_of(catalog: &Catalog, text: &str) -> Calibration {
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return Calibration::default();
+    };
+    let number = |param_key: &str| -> Option<f64> {
+        let def = catalog.params().iter().find(|p| p.key == param_key)?;
+        let item = doc.get(&def.section)?.as_table_like()?.get(&def.toml_key)?;
+        item.as_float()
+            .or_else(|| item.as_integer().map(|i| i as f64))
+    };
+    Calibration {
+        x: number("toolhead.offset.x"),
+        y: number("toolhead.offset.y"),
+        z: number("toolhead.offset.z"),
+        speed: number("toolhead.speed_limit"),
+    }
+}
+
 /// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
@@ -672,65 +734,62 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     })
 }
 
-/// **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+/// 工作副本落定的结果（[`ensure_working_copy`]）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkingCopy {
+    /// 相对**用户根**的落点（`presets-mine/<官方原名>`）
+    pub path: String,
+    pub file_name: String,
+    /// 这次是不是新生成了一份；`false` = 本来就有（一个字节都没动）
+    pub created: bool,
+}
+
+/// **下载即得工作副本**（2026-10-08 作者改判）：基线落下之后，确保「我的那一份」也在。
 ///
-/// 在此之前官方行的「另存为一份新的」是灰的，tooltip 让人"走「改这份」→ 保存"——
-/// 可"改了再保存"与"不改直接复制"落的是**同一种东西**（同一条 `commit_draft` 链），
-/// 绕一道编辑流程才能复制，不合直觉。作者定案（2026-10-06）：另存放开。
+/// 每个官方预设从**下载那一刻起**就有一份属于用户的、可编辑的工作副本 ——
+/// 用户从此只操作这一份（编辑 / 校准都直接改它），**不再有"另存为"这一步**。
 ///
-/// 与 [`copy_as_new`]（我的文件 → 我的文件）同族，但来源是**官方交付行**，多两道闸：
+/// 与它取代的 `copy_release_as_new`（用户点"另存"）的区别只有两处：
 ///
-/// - **目录里得有它，而且得是 MKP 预设** —— 切片器 profile / 图标那类不在此列
-///   （它们不是 TOML 预设，「另存」无从谈起；切片器自有「复制到切片器目录」那条路）；
-/// - **字节必须可信**（[`super::delivery::official_text`]，与「改这份」同一条闸）——
-///   旧版本 / 内容异常的禁令**不变**：我们不认的字节，不能换个名字继续活着。
+/// - **固定原名**（官方文件名）：不用起名字 —— 血统三行已经说清"从哪来"，
+///   名字由用户以后在「我的文件」里自己改（改名是独立的一件事）；
+/// - **幂等、永不覆盖**：`presets-mine/` 里同名那份就是用户自己的（他改过、删过都算数），
+///   下载新版本时这里也只管"补齐"，**一个字节都不碰它**（作者裁决 ⑤：
+///   官方更新只换基线，不碰工作副本）。
 ///
-/// 写下去的是**副本的形状**：官方原件的字节 + 头注释块里三行血统
-/// （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`）——
-/// 官方原件本身没有血统头（它是源头），所以这里是**新写指向**，不是照抄来源的 based_on。
-/// 出处账不记：血统已经答了"从哪来"（与 `commit_draft` 同一口径）。
-///
-/// **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive —— 新文件从诞生起就是
-/// 独立的一份。名字的门槛（不许空 / 不许带路径 / 后缀保持原样）、不覆盖、不自动改名、
-/// 不与来源同名，与 [`copy_as_new`] 同一套。
-pub fn copy_release_as_new(
-    internal_root: &Path,
+/// 写下去的是**副本的形状**：官方原文 + 头注释块里三行血统
+/// （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`）。
+/// `file` 必须是一份 MKP 预设，`official_text` 的字节可信由调用方
+/// （[`super::delivery::official_text`] 的 SHA 闸）保证；出处账不记：血统已经答了
+/// "从哪来"（与 `commit_draft` 同一口径）。**一个状态都不碰**：不改使用中指针、
+/// 不建草稿、不进 archive。
+pub fn ensure_working_copy(
     user_root: &Path,
-    file_name: &str,
-    new_name: &str,
-) -> Result<FileIdentity, AppError> {
-    let catalog = super::load_released_catalog(internal_root)?;
-    let file = catalog
-        .files
-        .iter()
-        .find(|f| f.file_name == file_name)
-        .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
-    if file.kind != super::catalog::kind::PRESET {
+    file: &CatalogFile,
+    official_text: &str,
+) -> Result<WorkingCopy, AppError> {
+    if file.kind != PRESET {
         return Err(AppError::invalid_argument(format!(
-            "{file_name} 不是 MKP 预设 —— 只有 MKP 预设能另存成你自己的一份"
+            "{} 不是 MKP 预设 —— 只有 MKP 预设会有工作副本",
+            file.file_name
         )));
     }
-    /* 官方原件的字节过第六层的闸（SHA 与目录一致才放行）：可信才能复制 */
-    let raw = super::delivery::official_text(internal_root, file)?;
-    let new_name = check_new_name(file_name, new_name)?;
-    let rel = format!("{MINE_DIR}/{new_name}");
-    check_mine_prefix(&rel)?;
-    if new_name == file_name {
-        return Err(AppError::invalid_argument(
-            "新名字和官方那份一样 —— 另存要起个不同的名字（两份同名分不清谁是谁）",
-        ));
-    }
+    let rel = format!("{MINE_DIR}/{}", file.file_name);
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
-        return Err(AppError::invalid_argument(format!(
-            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
-        )));
+        /* 已经有我的一份了 —— 那是用户的地盘，一个字节都不动（这不是"更新"，是"补齐"） */
+        return Ok(WorkingCopy {
+            path: rel,
+            file_name: file.file_name.clone(),
+            created: false,
+        });
     }
-    let body = super::lineage::make_copy(&raw, &file.path);
+    let body = super::lineage::make_copy(official_text, &file.path);
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
-    Ok(FileIdentity {
+    Ok(WorkingCopy {
         path: rel,
-        file_name: new_name,
+        file_name: file.file_name.clone(),
+        created: true,
     })
 }
 
@@ -1638,49 +1697,22 @@ mod tests {
         assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
     }
 
-    /* ---------- 官方 → 我的文件：copy_release_as_new（UX 测试 A1 的正路） ---------- */
+    /* ---------- 下载即得工作副本：ensure_working_copy（2026-10-08 作者改判） ---------- */
 
-    /// 官方另存的夹具：内部根里放一份**与目录一致**的 MKP 交付文件
-    /// （catalog.json 登记它的 SHA，字节按同一条内容落在交付路径上）
-    fn release_fixture(root: &Path, name: &str, content: &str) {
-        let file = super::super::catalog::CatalogFile {
-            kind: "mkp_preset".to_owned(),
-            file_name: name.to_owned(),
-            path: format!("{}/{name}", super::super::catalog::PRESET_DEST_DIR),
-            machine_id: "A1".to_owned(),
-            version_id: "STANDARD".to_owned(),
-            sha256: Some(lineage::sha256_hex(content)),
-            size: Some(content.len() as u64),
-        };
-        crate::fsx::atomic::atomic_write(
-            &root.join(crate::runtime::paths::CATALOG_FILE),
-            catalog_with(vec![file])
-                .to_pretty_json()
-                .unwrap()
-                .as_bytes(),
-        )
-        .unwrap();
-        write(root, &format!("delivery/mkp/presets/{name}"), content);
-    }
-
-    /// 正路：官方那份按字节复制成你自己的一份，血统**新写指向**来源交付文件
-    /// （官方原件没有血统头，不是照抄）；官方原件一个字节不动
+    /// 正路：第一次"下载"之后，用户目录里就有一份工作副本 —— 官方原文 + 血统三行
+    /// （`based_on` 指向来源交付文件；官方基线本身没有血统头，这里是新写指向）；
+    /// 再调一次（官方换版本 / 重新下载）**一个字节不动**，`created: false`
     #[test]
-    fn copying_a_release_writes_a_mine_copy_with_lineage() {
-        let internal = tempfile::tempdir().unwrap();
+    fn the_first_download_leaves_a_working_copy_and_never_overwrites_it() {
         let user = tempfile::tempdir().unwrap();
-        release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let done = copy_release_as_new(
-            internal.path(),
-            user.path(),
-            "A1-standard.toml",
-            "我的涂胶.toml",
-        )
-        .unwrap();
-        assert_eq!(done.path, "presets-mine/我的涂胶.toml");
+        let first = ensure_working_copy(user.path(), &file, "涂胶宽度 = 1.0\n").unwrap();
+        assert_eq!(first.path, "presets-mine/A1-standard.toml");
+        assert!(first.created, "第一次要真生成一份");
 
-        let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
+        let text =
+            String::from_utf8(std::fs::read(user.path().join(&first.path)).unwrap()).unwrap();
         assert!(
             text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
             "血统要指向来源交付文件：{text}"
@@ -1691,124 +1723,61 @@ mod tests {
         );
         assert!(
             text.contains("涂胶宽度 = 1.0"),
-            "官方原件的字节要原样在副本里：{text}"
+            "官方原文要原样在副本里：{text}"
         );
 
-        assert_eq!(
-            std::fs::read(
-                internal
-                    .path()
-                    .join("delivery/mkp/presets/A1-standard.toml")
-            )
-            .unwrap(),
-            "涂胶宽度 = 1.0\n".as_bytes(),
-            "官方原件一个字节没动"
-        );
+        /* 用户改过它 —— 官方换版本、重新下载，这一份照样不动（作者裁决 ⑤） */
+        write(user.path(), &first.path, "涂胶宽度 = 2.0\n");
+        let again = ensure_working_copy(user.path(), &file, "涂胶宽度 = 1.0\n").unwrap();
+        assert_eq!(again.path, first.path);
+        assert!(!again.created, "已经有我的一份了，这次不该新建");
+        let after =
+            String::from_utf8(std::fs::read(user.path().join(&first.path)).unwrap()).unwrap();
+        assert_eq!(after, "涂胶宽度 = 2.0\n", "用户的改动一个字节都不能被覆盖");
     }
 
-    /// 与「改这份」同一条闸：盘上字节与目录不一致（被改过 / 旧版本）不许换个名字继续活着
+    /// 只有 MKP 预设会有工作副本：切片器 profile（json）那类拒
     #[test]
-    fn copying_a_release_refuses_untrusted_bytes() {
-        let internal = tempfile::tempdir().unwrap();
+    fn ensure_working_copy_refuses_non_presets() {
         let user = tempfile::tempdir().unwrap();
-        release_fixture(internal.path(), "A1-standard.toml", "官方当前版本\n");
-        write(
-            internal.path(),
-            "delivery/mkp/presets/A1-standard.toml",
-            "被人动过的字节\n",
-        );
-
-        let e = copy_release_as_new(
-            internal.path(),
-            user.path(),
-            "A1-standard.toml",
-            "副本.toml",
-        )
-        .unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::ShaMismatch);
-    }
-
-    /// 目录里没有它 / 不是 MKP 预设：都拒。切片器 profile 自有「复制到切片器目录」那条路
-    #[test]
-    fn copying_a_release_needs_a_catalogued_toml() {
-        let internal = tempfile::tempdir().unwrap();
-        let user = tempfile::tempdir().unwrap();
-
-        let missing =
-            copy_release_as_new(internal.path(), user.path(), "没有这份.toml", "副本.toml")
-                .unwrap_err();
-        assert_eq!(missing.code, crate::error::ErrorCode::NotFound);
-
         let file = super::super::catalog::CatalogFile {
             kind: "bbs_profile".to_owned(),
-            file_name: "MKPProcess.json".to_owned(),
-            path: "delivery/mkp/presets/MKPProcess.json".to_owned(),
-            machine_id: "A1".to_owned(),
-            version_id: "STANDARD".to_owned(),
-            sha256: None,
-            size: None,
+            ..entry_bytes("MKPProcess.json", "{}")
         };
-        crate::fsx::atomic::atomic_write(
-            &internal.path().join(crate::runtime::paths::CATALOG_FILE),
-            catalog_with(vec![file])
-                .to_pretty_json()
-                .unwrap()
-                .as_bytes(),
-        )
-        .unwrap();
-        let e = copy_release_as_new(internal.path(), user.path(), "MKPProcess.json", "副本.json")
-            .unwrap_err();
+        let e = ensure_working_copy(user.path(), &file, "{}").unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
     }
 
-    /// 撞名 / 与来源同名：拒（不覆盖、不自动改名）；**一个状态都不碰** ——
-    /// 使用中指针与草稿原地不动，新文件不自称使用中、也不冒出草稿
+    /* ---------- 校准值：从工作副本正文里读（2026-10-08） ---------- */
+
+    /// 真目录：校准读值要真的注册表（`toolhead.offset.x` → `offset_x` 这张映射在目录里）
+    fn real_catalog() -> Catalog {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo = manifest.parent().expect("src-tauri 上面就是仓库根");
+        super::super::catalog::Catalog::build_from_repo(repo).expect("目录构建不出来")
+    }
+
+    /// 三个偏移 + 限速都从**注册表派生的位置**读出来；整数写法（`offset_z = 4`）照收
     #[test]
-    fn copying_a_release_never_overwrites_and_touches_no_state() {
-        let internal = tempfile::tempdir().unwrap();
-        let user = tempfile::tempdir().unwrap();
-        release_fixture(internal.path(), "A1-standard.toml", "涂胶宽度 = 1.0\n");
-        write(
-            user.path(),
-            "presets-mine/已有.toml",
-            "[wiping]\nspeed = 80\n",
-        );
-        let active = crate::runtime::app_state::set_active_mine(
-            user.path(),
-            "presets-mine/已有.toml",
-            "sha",
-        )
-        .unwrap();
-        let subject =
-            crate::runtime::state::DraftSubject::mine("已有.toml", "presets-mine/已有.toml");
-        crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
+    fn calibration_reads_axes_and_speed_from_the_registry() {
+        let catalog = real_catalog();
+        let text = "[toolhead]\noffset_x = -0.7\noffset_y = 26.3\noffset_z = 4\nspeed_limit = 70\n";
+        let c = calibration_of(&catalog, text);
+        assert_eq!(c.axes(), Some((-0.7, 26.3, 4.0)));
+        assert_eq!(c.speed, Some(70.0));
+    }
 
-        let e = copy_release_as_new(
-            internal.path(),
-            user.path(),
-            "A1-standard.toml",
-            "已有.toml",
-        )
-        .unwrap_err();
-        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(e.message.contains("不覆盖"), "{}", e.message);
-        let e = copy_release_as_new(
-            internal.path(),
-            user.path(),
-            "A1-standard.toml",
-            "A1-standard.toml",
-        )
-        .unwrap_err();
-        assert!(e.message.contains("不同的名字"), "{}", e.message);
+    /// 读不出来就是 `None` —— 不拿 0 充数（缺一个轴 = 整份 axes 不成立）
+    #[test]
+    fn calibration_is_none_when_values_are_not_there() {
+        let catalog = real_catalog();
+        let c = calibration_of(&catalog, "[toolhead]\noffset_x = 1\n");
+        assert_eq!(c.axes(), None);
+        assert_eq!(c.x, Some(1.0));
+        assert_eq!(c.speed, None);
 
-        let after = crate::runtime::app_state::active_preset(user.path())
-            .unwrap()
-            .unwrap();
-        assert_eq!(after.file_name, active.file_name, "使用中没动");
-        let draft = crate::runtime::app_state::draft(user.path())
-            .unwrap()
-            .unwrap();
-        assert_eq!(draft.text, "改到一半", "草稿没被碰");
+        let broken = calibration_of(&catalog, "[toolhead]\noffset_x = (1");
+        assert_eq!(broken, Calibration::default(), "语法不对 ⇒ 全部未知");
     }
 
     /* ---------- 第十三层：在文件管理器里显示（只解析落点，窗口是系统的事） ---------- */

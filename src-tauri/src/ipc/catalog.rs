@@ -295,6 +295,16 @@ pub async fn download_runtime_file(
             }
 
             let target = outcome?;
+            /*
+             * **下载即得工作副本**（2026-10-08 作者改判）：MKP 预设的基线落盘之后，
+             * 「我的那一份」也补上（幂等：已经有就一个字节都不动）。
+             * 单个下载是用户点名的那一份 —— 副本建不出来就报错说清，不假装下完了。
+             */
+            if file.kind == runtime::catalog::kind::PRESET {
+                let user_root = crate::fsx::paths::user_root(&app)?;
+                let text = runtime::delivery::official_text(&root, file)?;
+                runtime::mine::ensure_working_copy(&user_root, file, &text)?;
+            }
             Ok(target
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -381,7 +391,30 @@ pub async fn download_runtime_files(
                 );
             };
 
-            let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
+            let mut outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
+            /*
+             * **下载即得工作副本**（2026-10-08 作者改判）：成功落盘的 MKP 预设，
+             * 「我的那一份」也补上（幂等）。副本没建出来要**如实说** —— 这一次下载的
+             * 意义就是"拿到你的一份"，基线落了而副本没落不算成，逐份结局照实翻脸。
+             */
+            for outcome in outcomes.iter_mut().filter(|o| o.ok) {
+                let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) else {
+                    continue;
+                };
+                if file.kind != runtime::catalog::kind::PRESET {
+                    continue;
+                }
+                let materialize = || -> Result<(), AppError> {
+                    let user_root = crate::fsx::paths::user_root(&app)?;
+                    let text = runtime::delivery::official_text(&root, file)?;
+                    runtime::mine::ensure_working_copy(&user_root, file, &text)?;
+                    Ok(())
+                };
+                if let Err(e) = materialize() {
+                    outcome.ok = false;
+                    outcome.message = format!("文件已下载，但没能生成你的一份：{}", e.message);
+                }
+            }
             Ok(outcomes
                 .into_iter()
                 .map(|o| DownloadOutcomeDto {

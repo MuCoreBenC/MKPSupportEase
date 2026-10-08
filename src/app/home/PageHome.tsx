@@ -46,6 +46,7 @@ import { pickArt } from './heroArt'
 import { useArtLayers } from './useArtLayers'
 import {
   AXIS_ROWS,
+  NEED_COPY,
   NEED_PRESET,
   Z_LEGEND,
   Z_TIP,
@@ -167,6 +168,7 @@ export default function PageHome({ density }: PageHomeProps) {
     dirtyAxes,
     savedNote,
     canPick,
+    canSave,
     view: axisView,
     zSelected,
     xySelected,
@@ -446,8 +448,17 @@ export default function PageHome({ density }: PageHomeProps) {
           )
         }
       }
+      /*
+       * 应用的是**「我那一份」**（2026-10-08 作者改判：下载即得工作副本，用户操作的
+       * 一直是它；官方基线不进用户世界）。`ensureUserCopy` 幂等 —— 下载的收尾已经
+       * 建过就原样返回，"全齐全新"那一档（没走下载）就靠它补上。
+       */
+      const applyCopy = async () => {
+        const copy = await api.ensureUserCopy(presetFile)
+        await api.applyActivePreset(copy.fileName, 'mine', copy.path)
+      }
       try {
-        await api.applyActivePreset(presetFile, 'official')
+        await applyCopy()
       } catch (e) {
         /*
          * 兜底只留给「预判过期」这一种：预判说齐了（清单为空），盘上其实不齐（刚被外部动过）
@@ -456,7 +467,7 @@ export default function PageHome({ density }: PageHomeProps) {
          */
         if (todo.length > 0 || !isStaleGuess(e)) throw e
         await api.downloadCatalogFile(presetFile)
-        await api.applyActivePreset(presetFile, 'official')
+        await applyCopy()
       }
       appStateMutated()
     } catch (e) {
@@ -707,7 +718,15 @@ export default function PageHome({ density }: PageHomeProps) {
             navs={[{ label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) }]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
-              { label: '保存', on: dirty, primary: true, onClick: commitAll },
+              {
+                label: '保存',
+                on: dirty,
+                primary: true,
+                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                disabled: !canSave,
+                title: canSave ? undefined : NEED_COPY,
+                onClick: commitAll,
+              },
               {
                 label: '下一步',
                 arrow: true,
@@ -759,6 +778,8 @@ export default function PageHome({ density }: PageHomeProps) {
                 {/* 没取到预设时点板子不产生读数，这一行是唯一的解释，必须留。
                     其余说明去掉了：点了哪一格、改成多少，上面三轴读数里的「旧 → 新」已经说完 */}
                 {!saved && <p className={p.note}>{NEED_PRESET}</p>}
+                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
+                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -798,7 +819,15 @@ export default function PageHome({ density }: PageHomeProps) {
             ]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
-              { label: '保存', on: dirty, primary: true, onClick: commitAll },
+              {
+                label: '保存',
+                on: dirty,
+                primary: true,
+                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                disabled: !canSave,
+                title: canSave ? undefined : NEED_COPY,
+                onClick: commitAll,
+              },
               {
                 label: '下一步',
                 arrow: true,
@@ -841,6 +870,8 @@ export default function PageHome({ density }: PageHomeProps) {
                   />
                 </PlateZoom>
                 {!saved && <p className={p.note}>{NEED_PRESET}</p>}
+                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
+                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -895,6 +926,7 @@ export default function PageHome({ density }: PageHomeProps) {
       axisView,
       brandOptions,
       canPick,
+      canSave,
       clearAll,
       commitAll,
       currentUid,
@@ -997,15 +1029,17 @@ export default function PageHome({ density }: PageHomeProps) {
               >
                 放弃改动并离开
               </Btn>
-              <Btn
-                variant="primary"
-                onClick={() => {
-                  commitAll()
-                  leaveTo(pending.to)
-                }}
-              >
-                保存并离开
-              </Btn>
+              {canSave && (
+                <Btn
+                  variant="primary"
+                  onClick={() => {
+                    commitAll()
+                    leaveTo(pending.to)
+                  }}
+                >
+                  保存并离开
+                </Btn>
+              )}
             </>
           }
         >
@@ -1018,7 +1052,9 @@ export default function PageHome({ density }: PageHomeProps) {
                   .map(([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`)
                   .join('，')
               : ''}
-            。离开前要保存吗？
+            {canSave
+              ? '。离开前要保存吗？'
+              : '。这份预设还没有「你的一份」—— 先下载才能存，现在只能放弃。'}
           </p>
         </Modal>
       )}

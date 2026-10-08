@@ -96,18 +96,16 @@ import {
   CLOUD_STATE_WHY,
   DASH_,
   DEMO_STAT_WHY,
+  EDIT_TEXT,
+  EDIT_WHY,
   FILE_SIZE_WHY,
   MINE_APPLY_WHY,
   MINE_BODY_WHY,
   MINE_DRAWER,
-  MINE_EDIT_TEXT,
-  MINE_EDIT_WHY,
   MINE_NOT_PRESET_WHY,
   MINE_UNREADABLE_TEXT,
   mineUnreadableWhy,
   DOWNLOAD_WHY,
-  EDIT_TEXT,
-  EDIT_WHY,
   RELEASE_DOWNLOAD_WHY,
   RELEASE_REPAIR_WHY,
   RELEASE_SIZE_WHY,
@@ -859,36 +857,15 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 临时编辑的入口：**只有"与目录一致"的 MKP 交付行**给 ——
-                         * 没下载（missing）就没有正文可改；需更新（stale）那一份的内容本身存疑，
-                         * 先更新再改（这与"不给点了必报错的按钮"是同一条口径）；
-                         * 切片器那一类也不是预设正文，改无从谈起。
-                         */}
-                        {row.origin === 'release' &&
-                          row.kind === 'mkp_preset' &&
-                          row.releaseState === 'ok' && (
-                          <>
-                            <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
-                            <dd className={s.factVal}>
-                              <button
-                                type="button"
-                                className={s.factLink}
-                                title={EDIT_WHY}
-                                onClick={() => onEdit(row)}
-                              >
-                                {EDIT_TEXT.open}
-                              </button>
-                            </dd>
-                          </>
-                        )}
-
-                        {/*
                          * 用户线那一份：**看正文** + **改这份**（第八层）。
                          * 两条都是它自己的入口：改的是临时文件，保存时**写回它自己**
-                         * （不另存一份新的、也不碰官方原件）。
+                         * （不另存一份新的、也不碰官方基线）。
                          * 认不出是哪一类的那份（`.json`）不给「改」—— 这一层只改 TOML 预设；
                          * **第九层读不出来的**也不给（改的入口同样过文件级检查）。
                          * 看正文照旧给：用户要能看着它去修（读它不算"用"）。
+                         *
+                         * 2026-10-08 起「改这份」只有这一条入口：本地表 MKP 档只列工作副本，
+                         * 官方交付行（旧的那条入口）不再出现在这张表里。
                          */}
                         {row.origin === 'mine' && (
                           <>
@@ -909,15 +886,15 @@ export default function PresetTable({
                           row.kind === 'mkp_preset' &&
                           row.mineState !== 'unreadable' && (
                           <>
-                            <dt className={s.factKey}>{MINE_EDIT_TEXT.cell}</dt>
+                            <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
                             <dd className={s.factVal}>
                               <button
                                 type="button"
                                 className={s.factLink}
-                                title={MINE_EDIT_WHY}
+                                title={EDIT_WHY}
                                 onClick={() => onEdit(row)}
                               >
-                                {MINE_EDIT_TEXT.open}
+                                {EDIT_TEXT.open}
                               </button>
                             </dd>
                           </>
