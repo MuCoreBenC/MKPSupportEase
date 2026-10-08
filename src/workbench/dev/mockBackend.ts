@@ -1853,17 +1853,19 @@ export function installMockBackend() {
           pid: null,
           url: 'http://127.0.0.1:8787',
           repoRoot: 'C:\\dev\\MKPSupportEase',
-          command: 'npm run dev:test-update',
+          command: 'npm run preset-source:dev',
           note: null,
           /* 桩里没有端口可探（没有那个仓库、也没有 npm）—— 冲突那一块在浏览器里恒为空 */
           conflicts: [],
+          fixtureRoot: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v1',
+          fixturesReady: true,
         })
       case 'wb_dev_source_start':
       case 'wb_dev_source_stop':
       case 'wb_dev_source_clear_conflict':
         return Promise.reject({
           code: 'NOT_IMPLEMENTED',
-          message: '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run dev:test-update',
+          message: '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run preset-source:dev',
           traceId: 'mock',
         })
       case 'wb_set_bootstrap': {

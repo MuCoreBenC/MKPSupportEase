@@ -1,51 +1,51 @@
-//! 「本地测试源（开发）」—— 工作台里那颗**一键起本地假云端**的按钮。
+//! 「本地测试源（开发）」—— 工作台里那颗**起本地假云端**的按钮。
 //!
 //! # 它解决的那件事
 //!
 //! 客户端要验「官方发了新版本 → 检查更新 → 下载 → 对比 → 恢复默认」这一整条链，
-//! 今天得先去终端敲 `npm run dev:test-update`。可工作台自己就是**从仓库里跑起来**的，
+//! 得先去终端敲 `npm run preset-source:dev`。可工作台自己就是**从仓库里跑起来**的，
 //! 人在工作台里干活时不该再切到终端 —— 这一颗按钮就是那条命令。
 //!
 //! ```text
-//! 按钮 ──► npm run dev:test-update （cwd = 仓库根）
-//!            ├─ 夹具不在就先派生（make-fixtures）
-//!            ├─ 起 scripts/preset-test-server/ 在 127.0.0.1:8787
-//!            └─ 以 MKPSE_PRESET_SOURCE_URL=<那地址> 起客户端 tauri dev
+//! 按钮 ──► npm run preset-source:dev （cwd = 仓库根）
+//!            └─ 起 scripts/preset-test-server/ 在 127.0.0.1:8787
 //! ```
 //!
-//! # 为什么从工作台起是安全的
+//! # ★ 它**只起服务**，不碰客户端（作者 2026-10-08 裁决）
 //!
-//! 两份 dev 会话本来就是**分开的两条路**（`tauri-workbench.mjs` 头注那段）：
-//! vite 端口 5321 / 5322，cargo 产物目录 `target/` / `target-workbench/`。
-//! 所以"工作台在跑、再起客户端 dev"不会撞端口、也不会撞 Windows 那个
-//! "不许覆盖正在运行的可执行文件"。
+//! 先前那一版按钮跑的是 `npm run dev:test-update`（连客户端 `tauri dev` 一起起、
+//! 用 `MKPSE_PRESET_SOURCE_URL` 把源指过去）。作者的判断很直接：**没必要** ——
+//! 「这不就是单开一个服务吗？我自己输入这个地址就可以」。
+//!
+//! 于是这一版只起服务：地址摆在界面上，人去客户端的
+//! 「设置 → 高级设置 → 预设数据源 → 自定义地址」填一次（**保存即生效，不用重启**，
+//! 见 `runtime/source.rs`）。那一颗按钮因此不会去动你正在用的客户端 dev，
+//! 也不会去争它那个 vite 端口 —— 那份"一起起"的便利留在命令行里：
+//! `npm run dev:test-update`（它才注入 `MKPSE_PRESET_SOURCE_URL`）。
 //!
 //! # 边界
 //!
-//! - **不感知测试源是什么**：这一层只起命令、报状态。它不读夹具、不写任何配置、
+//! - **不感知测试源是什么**：这一层只起命令、报状态。它不读夹具内容、不写任何配置、
 //!   更不去改客户端的「预设数据源」那一格（那是运行时那份设置，住客户端自己的
 //!   `appDataDir/run/app-state.json`，两个应用连 appDataDir 都不一样）。
-//!   源地址是 `MKPSE_PRESET_SOURCE_URL` 注入进去的 —— 只在 debug 构建里认。
 //! - **只在工作台构建里存在**（`src/workbench/` 整个子树挂在 `--features workbench`
-//!   那道闸后面），给用户的二进制里既没有这颗按钮，也没有这三条命令。
-//! - 输出**继承给终端**：服务与客户端 dev 的日志打在起工作台的那个终端里。
+//!   那道闸后面），给用户的二进制里既没有这颗按钮，也没有这几条命令。
+//! - 输出**继承给终端**：服务的日志打在起工作台的那个终端里。
 //!   这个按钮只是"替你敲了那条命令"，不另造一套日志窗口充当真相。
-//! - **端口被占着时，先把占用者摆出来、问一句**（2026-10-08 通跑踩出来的那条）：
-//!   客户端 dev 已经在跑时，点「启动」会起一份新的 `tauri dev`，它的 vite 撞在
-//!   5321 上 → `beforeDevCommand` 非零退出 → **整条链死掉**，界面上只留一句
-//!   「退出码 1」。而真正的答案是"5321 被占着，占它的是谁" —— 所以这里**提前探端口**
-//!   （`conflicts_of`），把占用者连同 PID 摆到界面上，让作者一句话人话决定
-//!   "要不要把它停了"（`wb_dev_source_clear_conflict`）。
+//! - **端口被占着时，先把占用者摆出来、问一句**（2026-10-08 踩出来的那条）：
+//!   8787 上已经有东西（上一轮留下的服务、或你手动起的 `preset-source:dev`）时，
+//!   这一份起不来。所以**起之前先探端口**（`conflicts_of`），把占用者连同 PID 摆到
+//!   界面上，问一句"要不要把它停掉"（`wb_dev_source_clear_conflict`）。
 //!
 //!   ★ 判据是**端口**，不是命令行：进程的命令行 / 工作目录在某些环境里读不到
 //!   （本机实测 `sysinfo` 对所有进程都返回空），拿它做判据会变成"按钮点了没反应"；
 //!   而端口是硬事实 —— 谁在听，`netstat` / `lsof` 说得出来，`taskkill` 停得掉。
 //!   （旧项目 `mkppanel/presets_server.go` 的 `ListOccupiedPorts` / `StopPortProcess`
-//!   就是这一套，这里按同一个形状补上。）
+//!   就是这一套，这里按同一个形状。）
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -57,7 +57,14 @@ use crate::error::AppError;
 
 /// 起它的那条 npm script。**名字是契约**：`package.json` 里没有这一条，
 /// 这颗按钮点的就是一个空壳（下面有测试钉着）。
-const NPM_SCRIPT: &str = "dev:test-update";
+const NPM_SCRIPT: &str = "preset-source:dev";
+
+/// 夹具根（`server.mjs` 的默认 `--root`）：**它端出去的就是这一份**。
+/// 路径只在 `scripts/preset-test-server/` 那一处约定，这里照同一个相对位置认。
+const FIXTURE_REL: &str = "scripts/preset-test-server/fixtures/v1";
+
+/// 夹具齐了的标志文件（`make-fixtures.mjs` 派生的第一件东西；`dev.mjs` 也拿它判"在不在"）。
+const FIXTURE_MARKER: &str = "catalog.json";
 
 /// 测试源的默认端口 —— 与 `scripts/preset-test-server/server.mjs` 同一个值。
 /// 它读 `PRESET_TEST_PORT`（见 [`port_from`]），这里只是那个变量的默认档。
@@ -87,9 +94,14 @@ pub struct DevSourceStatus {
     pub command: String,
     /// 不在跑的时候为什么：退出码那句 / "本来就没在跑"。在跑时 `null`
     pub note: Option<String>,
-    /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 / 客户端 dev 的 vite
-    /// 端口被别人占着的话，点「启动」必死在那上面。空 = 两个端口都干净
+    /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 被别人占着的话，
+    /// 点「启动」必死在那上面。空 = 端口干净
     pub conflicts: Vec<PortConflict>,
+    /// 服务端出去的是哪一份夹具（`server.mjs` 的默认 `--root`）
+    pub fixture_root: String,
+    /// 那份夹具派生过了吗。**不在也要如实说**：服务起得来、但底下什么都没有，
+    /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远，这里先讲明白
+    pub fixtures_ready: bool,
 }
 
 /// 谁占着那个关键端口。**摆给人看的**（`text` 是那句人话）+
@@ -145,12 +157,12 @@ fn origin() -> String {
     format!("http://127.0.0.1:{}", port())
 }
 
-/// 起 `npm run dev:test-update`（cwd = 仓库根）。
+/// 起 `npm run preset-source:dev`（cwd = 仓库根）——**只有服务**，不碰客户端。
 ///
 /// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而
 /// `Command::new("npm")` 走 `CreateProcess`，它**不替你补 `.cmd` 后缀** ——
 /// 直接起会报"程序找不到"。与 `release_tx::npm_build` 同一条理由。
-fn spawn_dev_update(repo: &Path) -> Result<Child, AppError> {
+fn spawn_server(repo: &Path) -> Result<Child, AppError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("npm");
@@ -242,24 +254,6 @@ fn port_of_addr(addr: &str) -> Option<u16> {
     addr.rsplit_once(':')?.1.parse().ok()
 }
 
-/// `http://localhost:5321` / `http://localhost:5321/` → `5321`
-fn port_of_url(url: &str) -> Option<u16> {
-    let rest = url.split_once("//").map_or(url, |(_, r)| r);
-    let host_port = rest.split(['/', '?', '#']).next()?;
-    host_port.rsplit_once(':')?.1.parse().ok()
-}
-
-/// 客户端 dev 的 vite 端口：读 `<repo>/src-tauri/tauri.conf.json` 的 `build.devUrl`。
-///
-/// **不写死第二份**：那个端口与 `vite.config.ts` 的 `server.port` 是一对
-/// （`tauri dev` 的 devUrl 必须落在 vite 起的那个端口上，见那边头注）。
-fn client_dev_port(repo: &Path) -> Option<u16> {
-    let path = repo.join("src-tauri").join("tauri.conf.json");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    port_of_url(value.get("build")?.get("devUrl")?.as_str()?)
-}
-
 /// 谁在听这个端口。**平台各一套**，与旧项目 `mkppanel/presets_server.go` 的
 /// `findListenPid` 同一个思路：Windows 用 `netstat -ano`，类 Unix 用 `lsof`。
 fn listen_pid(port: u16) -> Option<u32> {
@@ -325,40 +319,39 @@ fn describe_conflict(c: &PortConflict) -> String {
     }
 }
 
-/// 起之前那两个端口干净吗。**这就是"别让人去终端里猜"的那一眼**：
-/// 客户端 dev 已经在跑的话，这一份新起的必然撞在它的 vite 端口上，而那一份
-/// 没法被重新指源（源是它启动时的环境变量）—— 所以要问的是"要不要把它停掉"。
-fn conflicts_of(repo: &Path) -> Vec<PortConflict> {
+/// 服务要用的那个端口上有没有别人。**这就是"别让人去终端里猜"的那一眼**：
+/// 上一轮留下的服务还在、或者你手动起了一份 `preset-source:dev`，这一份就起不来。
+/// 摆出来的是"谁占着"，问的是"要不要把它停掉"。
+fn conflicts_of() -> Vec<PortConflict> {
     let mut out: Vec<PortConflict> = Vec::new();
-    let mut check = |port: u16, role: &str| {
-        if !port_taken(port) {
-            return;
-        }
-        let who = listen_owner(port);
-        let (pid, process) = match who {
-            Some((pid, name)) => (Some(pid), Some(name)),
-            None => (None, None),
-        };
-        let mut c = PortConflict {
-            port,
-            role: role.to_owned(),
-            pid,
-            process,
-            text: String::new(),
-        };
-        c.text = describe_conflict(&c);
-        out.push(c);
-    };
-    let src_port = port();
-    check(src_port, "测试源自己的端口");
-    /* 客户端 dev 的 vite 端口。读不出来（仓库怪）时**跳过这一条** —— 少一次提示，
-       也好过因为一格配置读不动就把「启动」锁死（那时还有"退出码 1 + 终端日志"那条兜底） */
-    match client_dev_port(repo) {
-        Some(p) if p != src_port => check(p, "客户端 dev 的 vite 端口"),
-        Some(_) => {}
-        None => tracing::warn!("读不到 tauri.conf.json 的 devUrl —— 这一轮的端口冲突探测少一条"),
+    let p = port();
+    if !port_taken(p) {
+        return out;
     }
+    let (pid, process) = match listen_owner(p) {
+        Some((pid, name)) => (Some(pid), Some(name)),
+        None => (None, None),
+    };
+    let mut c = PortConflict {
+        port: p,
+        role: "本地测试源要用的端口".to_owned(),
+        pid,
+        process,
+        text: String::new(),
+    };
+    c.text = describe_conflict(&c);
+    out.push(c);
     out
+}
+
+/// 服务端出去的那一份夹具在哪。
+fn fixture_root_of(repo: &Path) -> PathBuf {
+    repo.join(FIXTURE_REL)
+}
+
+/// 夹具派生过了吗（不在的话服务起得来、但底下什么都没有）。
+fn fixtures_ready(repo: &Path) -> bool {
+    fixture_root_of(repo).join(FIXTURE_MARKER).is_file()
 }
 
 /// 起不来时那句总结（错误消息用）。
@@ -416,7 +409,9 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         command: format!("npm run {NPM_SCRIPT}"),
         note,
         /* 不在跑的时候才探端口：跑着的时候 8787 本来就是我们自己占着 */
-        conflicts: conflicts_of(repo),
+        conflicts: conflicts_of(),
+        fixture_root: fixture_root_of(repo).display().to_string(),
+        fixtures_ready: fixtures_ready(repo),
     }
 }
 
@@ -452,7 +447,7 @@ fn refresh_exit(cur: &mut DevSource) {
 
 /* ---------- 命令 ---------- */
 
-/// 起本地测试源（= `npm run dev:test-update`）。
+/// 起本地测试源（= `npm run preset-source:dev`，**只起服务**）。
 ///
 /// **幂等**：已经在跑就把现状报回去，不再起第二个 —— 第二份会撞在 8787 上，
 /// 然后那个进程静悄悄地死掉，而人以为自己点了两下、起了两个。
@@ -472,15 +467,15 @@ pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
                 return Ok(status_of(cur, &repo));
             }
         }
-        /* ★ 端口那一眼：起之前把那两个端口的占用者摆出来，而不是让它起一半死掉 */
-        let conflicts = conflicts_of(&repo);
+        /* ★ 端口那一眼：起之前把那个端口的占用者摆出来，而不是让它起一半死掉 */
+        let conflicts = conflicts_of();
         if !conflicts.is_empty() {
             return Err(AppError::invalid_argument(conflict_sentence(&conflicts)).with_detail(
                 "界面会把这几条摆出来，并给一颗「停掉它」（`wb_dev_source_clear_conflict`）"
                     .to_owned(),
             ));
         }
-        let child = spawn_dev_update(&repo)?;
+        let child = spawn_server(&repo)?;
         let pid = child.id();
         tracing::info!(pid, repo = %repo.display(), "本地测试源起来了（npm run {NPM_SCRIPT}）");
         let cur = DevSource {
@@ -494,7 +489,10 @@ pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
     })
 }
 
-/// 停掉它**连同它起的客户端 dev**（整棵进程树），把 8787 让出来。
+/// 停掉它（整棵进程树），把 8787 让出来。
+///
+/// ★ 收的是**整棵**：`npm` 底下那层进程若不一起收，服务就会变成孤儿占着端口。
+/// 这里只起服务、不碰客户端，所以收掉的也只是这一条。
 ///
 /// 没在跑时**幂等成功** —— 界面上的按钮不该因为"其实已经没了"而报错。
 #[tauri::command]
@@ -509,11 +507,29 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         /* 包装层自己收一次尸：Windows 上 PID 复用很快，不 wait 就分不清
            "我杀掉的那个"和"刚好新起来的另一个" */
         let _ = cur.child.kill();
+        /* ★ **不报退出码**：这一下是**我们**按的信号，那个码只是终止的结果，
+           摆到人眼前会被读成"出错了"（2026-10-08 烟测里读出来的原话：
+           「已停（它退出了（退出码 1）—— 刚才终端里那几条日志是原因）」）。
+           该说的是"端口让出来没有"——那才是人关心的那一件事 */
         let note = match cur.child.wait() {
-            Ok(st) => format!("已停（{}）", exit_text(st)),
+            Ok(_) => {
+                let p = port();
+                let t0 = Instant::now();
+                while t0.elapsed() < Duration::from_secs(3) {
+                    if !port_taken(p) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(120));
+                }
+                if port_taken(p) {
+                    format!("已停，但 {p} 还被占着 —— 可能还有别的进程在听")
+                } else {
+                    format!("已停（{p} 让出来了）")
+                }
+            }
             Err(e) => format!("已停（不过收尸时出了点岔子：{e}）"),
         };
-        tracing::info!(pid = cur.pid, "本地测试源已停（连同它起的客户端 dev）");
+        tracing::info!(pid = cur.pid, "本地测试源已停（端口让出来了）");
         Ok(base_status(&repo, Some(note)))
     })
 }
@@ -759,23 +775,21 @@ mod tests {
         assert_eq!(port_of_addr("*:*"), None);
     }
 
-    /// `devUrl` → 端口（`tauri.conf.json` 里那一格）
+    /// 夹具根按约定位置认；"齐没齐"只看那一个标志文件（与 `dev.mjs` 同一口径）
     #[test]
-    fn the_port_is_read_out_of_the_dev_url() {
-        assert_eq!(port_of_url("http://localhost:5321"), Some(5321));
-        assert_eq!(port_of_url("http://localhost:5321/"), Some(5321));
-        assert_eq!(port_of_url("https://127.0.0.1:8443/x?y#z"), Some(8443));
-        assert_eq!(port_of_url("http://localhost"), None);
-        assert_eq!(port_of_url(""), None);
-    }
+    fn fixture_readiness_only_looks_for_the_marker() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(
+            fixture_root_of(d.path()).ends_with(FIXTURE_REL),
+            "夹具根不按约定拼：{}",
+            fixture_root_of(d.path()).display()
+        );
+        assert!(!fixtures_ready(d.path()), "空仓库不该说夹具就绪");
 
-    /// 客户端 dev 的端口是**从 `tauri.conf.json` 读出来的**，不是第三份写死的数。
-    /// 这条红了 = 那个 `devUrl` 变了 —— 顺手看一眼 `vite.config.ts` 的 `server.port`
-    /// 跟没跟上（`tauri dev` 的 devUrl 必须落在 vite 起的那个端口上，错开就是白屏）。
-    #[test]
-    fn the_client_dev_port_comes_from_the_tauri_config() {
-        let p = client_dev_port(&crate::workbench::paths::repo_root());
-        assert_eq!(p, Some(5321), "读到的客户端 dev 端口是 {p:?}");
+        let root = fixture_root_of(d.path());
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(FIXTURE_MARKER), "{}").unwrap();
+        assert!(fixtures_ready(d.path()), "写了标志文件还不说就绪");
     }
 
     /// 三档说法：认得名 / 只有 PID / 认不出 —— **认不出时不许编一个名字出来**
@@ -808,11 +822,12 @@ mod tests {
         assert!(s.contains("PID 1"));
     }
 
-    /// 报给界面的那条命令与真起的那条是同一个（界面不自己拼一遍，也就不该漂）
+    /// 报给界面的那条命令与真起的那条是同一个（界面不自己拼一遍，也就不该漂）——
+    /// **而且是"只起服务"的那一条**（作者 2026-10-08 裁决：别去动客户端）
     #[test]
     fn the_reported_command_is_the_one_we_spawn() {
         let st = base_status(Path::new("/tmp/repo"), None);
-        assert_eq!(st.command, "npm run dev:test-update");
+        assert_eq!(st.command, "npm run preset-source:dev");
         assert!(st.url.starts_with("http://127.0.0.1:"));
         assert!(!st.running && st.pid.is_none());
     }

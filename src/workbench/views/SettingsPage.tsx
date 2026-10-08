@@ -30,19 +30,21 @@
  *
  * # 「本地测试源（开发）」（2026-10-08）
  *
- * 上面那一格是**发布到哪**（构建期注入）。这一格是**运行时把源换成什么** ——
- * 一颗按钮替你敲 `npm run dev:test-update`：起本地假云端在 `127.0.0.1:8787`，
- * 再以 `MKPSE_PRESET_SOURCE_URL` 把客户端 dev 一起起起来，于是不用为了验"官方
- * 发了新版本"真去发一版。
+ * 上面那一格是**发布到哪**（构建期注入）。这一格是**起一份本地假云端** ——
+ * 一颗按钮替你敲 `npm run preset-source:dev`，把 `scripts/preset-test-server`
+ * 起在 `127.0.0.1:8787` 上，于是不用为了验"官方发了新版本"真去发一版。
  *
- * ★ 它**不碰客户端那一格「预设数据源」**：那是客户端自己的运行时设置
- * （住客户端的 `appDataDir/run/app-state.json`，两个应用的 appDataDir 都不一样），
- * 归客户端设置页管 —— 这里换的是**环境变量**那条路，只在 debug 构建里认。
+ * ★ **它只起服务，不碰客户端**（作者 2026-10-08 裁决）。先前那一版连客户端
+ * `tauri dev` 一起起（`npm run dev:test-update` + `MKPSE_PRESET_SOURCE_URL`）——
+ * 作者的判断很直接：「这不就是单开一个服务吗？我自己输入这个地址就可以」。
+ * 于是地址由人填一次：客户端的「设置 → 高级设置 → 预设数据源 → 自定义地址」，
+ * **保存即生效**（见 `runtime/source.rs`）。那一格是客户端自己的运行时设置，
+ * 归客户端设置页管，这里不碰。
  *
- * ★ **端口被占着时先把占用者摆出来**（2026-10-08 通跑踩出来的那条）：客户端 dev
- * 已经在跑、占着它的 vite 端口时，新起的这份必撞死在那上面，而界面上原来只留一句
- * "退出码 1"。现在起之前就探那两个端口，把"谁占着、PID 多少"列出来，并给一颗
- * 「停掉它」—— 问一句，而不是让人去终端里猜。
+ * ★ **端口被占着时先把占用者摆出来**（2026-10-08 踩出来的那条）：8787 上已经有东西
+ * （上一轮留下的服务、你手动起的 `preset-source:dev`），这一份就起不来。
+ * 现在起之前先探那个端口，把"谁占着、PID 多少"列出来，并给一颗「停掉它」——
+ * 问一句，而不是让人对着一句"退出码 1"去终端里猜。
  */
 import { useCallback, useEffect, useState } from 'react'
 
@@ -253,7 +255,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
       setDevNote(
         next.running
           ? {
-              text: '已启动 —— 客户端 dev 也一起起了，日志打在起工作台的那个终端里。',
+              text: `已启动 —— 把 ${next.url} 填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」（保存即生效）。`,
               bad: false,
             }
           : { text: next.note ?? '已停，服务端口也让出来了。', bad: false },
@@ -668,22 +670,23 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
         </div>
       </div>
 
-      {/* ——— 本地测试源（开发）：一颗按钮 = npm run dev:test-update ——— */}
+      {/* ——— 本地测试源（开发）：一颗按钮 = npm run preset-source:dev（只起服务） ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>本地测试源（开发）</b>
           <span className={s.cardNote}>
-            起本地假云端 + 带 MKPSE_PRESET_SOURCE_URL 起客户端 dev —— 不用为了验"官方发了新版本"真去发一版
+            起本地假云端（只起服务，不碰你的客户端）—— 地址填进客户端设置页，保存即生效
           </span>
         </div>
         <div className={s.cardBody}>
           <div className={s.vfield}>
             <p className={s.vhelp}>
               点「启动」就是替你在这个仓库里敲
-              <span className={s.mono}>{devSrc?.command ?? 'npm run dev:test-update'}</span>
-              ：夹具不在先派生 → 起 <span className={s.mono}>scripts/preset-test-server</span>
-              在下面这个地址上 → 再把客户端 <span className={s.mono}>tauri dev</span>
-              一起起起来，官方源就指向它。
+              <span className={s.mono}>{devSrc?.command ?? 'npm run preset-source:dev'}</span>
+              ：把 <span className={s.mono}>scripts/preset-test-server</span>
+              起在下面这个地址上，端出去的是<b>已发布形状</b>的交付根
+              （<span className={s.mono}>source.json</span> +{' '}
+              <span className={s.mono}>catalog.json</span> + 交付文件）。
             </p>
             <p className={s.vhelp}>
               客户端<b>不感知这是测试源</b> —— 它仍走 catalog / manifest / 寻址 / SHA 校验 /
@@ -708,6 +711,21 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 {devSrc?.url ?? 'http://127.0.0.1:8787'}
               </span>
             </div>
+
+            <div className={s.vrow}>
+              <label className={s.vlabel}>端的是</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {devSrc?.fixtureRoot ?? '…/scripts/preset-test-server/fixtures/v1'}
+              </span>
+            </div>
+
+            {devSrc !== null && !devSrc.fixturesReady && (
+              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                夹具还没派生 —— 服务起得来，但底下什么都没有（客户端只会说「取不到预设数据」）。
+                先跑一次 <span className={s.mono}>npm run preset-source:make</span>（它从真交付根
+                派生 v1 / v2 两代）。
+              </p>
+            )}
 
             {devConflicts.length > 0 && (
               <div className={s.vfield}>
@@ -735,9 +753,9 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                   </div>
                 ))}
                 <p className={s.vhelp}>
-                  它多半就是你已经在跑的客户端 dev —— 那一份<b>没法被重新指源</b>
-                  （源是它启动时的环境变量），所以起新的必撞在同一个 vite 端口上。
-                  要么停掉它再点「启动」，要么只起服务、把上面那个地址填进客户端设置页。
+                  多半是上一轮留下的服务，或者你手动起的
+                  <span className={s.mono}>preset-source:dev</span>
+                  —— 同一端口上只能有一个。停掉它，再点「启动」。
                 </p>
               </div>
             )}
@@ -751,9 +769,9 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 }
                 title={
                   devSrc?.running === true
-                    ? '连同它起的客户端 dev 一起停（整棵进程树），并把服务端口让出来'
+                    ? '停掉这个服务，把端口让出来（只收它自己那一棵，不碰你的客户端 dev）'
                     : devConflicts.length > 0
-                      ? '先把上面那几条端口占用处理掉'
+                      ? '先把上面那条端口占用处理掉'
                       : undefined
                 }
                 onClick={() => void toggleDevSrc()}
@@ -778,10 +796,17 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             )}
 
             <p className={s.vhelp}>
-              只想起服务、不起客户端 dev：用{' '}
-              <span className={s.mono}>npm run preset-source:dev</span>
-              ，再把上面这个地址填进<b>客户端</b>的「设置 → 高级设置 → 预设数据源 → 自定义地址」
-              （保存即生效）。两边各管各的 —— 这一格换的是环境变量那条路，客户端那一格归客户端设置页管。
+              ★ 它<b>只起服务</b>，不碰你的客户端 —— 地址自己填一次：
+              <b>客户端</b>的「设置 → 高级设置 → 预设数据源 → 自定义地址」，把上面那一串贴进去
+              （保存即生效，不用重启客户端）。
+            </p>
+
+            <p className={s.vhelp}>
+              想连客户端的 <span className={s.mono}>tauri dev</span> 一起起（它会自动把源指过来，
+              不用手填地址）：那在命令行里 ——{' '}
+              <span className={s.mono}>npm run dev:test-update</span>
+              。那条路靠 <span className={s.mono}>MKPSE_PRESET_SOURCE_URL</span> 注入，
+              所以它必须把客户端 dev 一起管起来；这里这颗按钮不干那件事。
             </p>
 
             <p className={s.vhelp}>

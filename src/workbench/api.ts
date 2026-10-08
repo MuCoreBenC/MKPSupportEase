@@ -1057,8 +1057,12 @@ export interface DevSourceStatus {
   command: string
   /** 不在跑时的原因（退出码那句 / "本来就没在跑"）；在跑时 null */
   note: string | null
-  /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 两个端口都干净 */
+  /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
   conflicts: PortConflict[]
+  /** 服务端出去的是哪一份夹具（`server.mjs` 的默认 `--root`） */
+  fixtureRoot: string
+  /** 那份夹具派生过了吗：不在的话服务起得来、但底下什么都没有 */
+  fixturesReady: boolean
 }
 
 /* ---------- 状态词 ---------- */
@@ -1776,13 +1780,16 @@ export const wb = {
   releaseOpenBundle: () => invoke<void>('wb_release_open_bundle'),
 
   /**
-   * **本地测试源（开发）** —— 起 / 停 / 查那颗按钮背后的 `npm run dev:test-update`：
-   * 夹具不在先派生 → 起 `scripts/preset-test-server` 在 `127.0.0.1:8787` →
-   * 以 `MKPSE_PRESET_SOURCE_URL` 把客户端 dev 一起起起来（那个变量只在 debug 构建里认）。
+   * **本地测试源（开发）** —— 起 / 停 / 查那颗按钮背后的 `npm run preset-source:dev`。
    *
-   * ★ `start` **幂等**（已在跑就报现状，不再起第二个 —— 第二份会撞在 8787 上悄悄死掉）；
-   * `stop` 收掉**整棵进程树**（只杀包装层会留下服务与客户端 dev 的孤儿）。
-   * 三条都**不写任何配置**：源地址是环境变量注入的，客户端那格始终归客户端设置页管。
+   * ★ 它**只起服务**（`127.0.0.1:8787`），**不碰客户端**（作者 2026-10-08 裁决：
+   * 「这不就是单开一个服务吗？我自己输入这个地址就可以」）—— 地址由人去客户端
+   * 「设置 → 高级设置 → 预设数据源 → 自定义地址」填一次（保存即生效）。
+   * 想连客户端 dev 一起起：那在命令行里，`npm run dev:test-update`。
+   *
+   * ★ `start` **幂等**（已在跑就报现状）；被占着时**如实拒绝**并点名那个端口
+   * （`conflicts` 摆着是谁）；`stop` 收掉**整棵进程树**，把端口让出来。
+   * 三条都**不写任何配置**。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
   devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
