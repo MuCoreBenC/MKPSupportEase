@@ -591,7 +591,6 @@ export function WorkbenchApp() {
             }}
             onMetaApplied={pushMeta}
             onSave={() => void save()}
-            onDiscard={() => void discard()}
             onUndo={() => void undo()}
             onGoto={goto}
           />

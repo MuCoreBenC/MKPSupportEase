@@ -15,6 +15,7 @@
  * 所以这一份现在守两头：
  *
  *   工作台端   ① 勾「待生成」→ 生成 → ② 卡的产物名单报出**真产物份数**
+ *              ①b 参数台上「保存 / 放弃」各只剩一处（页头那对；工具行那对已删）
  *              ② 设置页「官方源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
  *              ②b 设置页「本地测试源（开发）」在、报得出地址；三份源（夹具 v1 / v2 /
  *                 当前交付）都在且是真单选、「当前交付」的地址带 /delivery；
@@ -196,6 +197,26 @@ for (const size of SIZES) {
     `生成前 ${before} 份 → 生成后 ${builtCount} 份`,
   )
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-build.png` })
+
+  /* ---------- ①b 参数台：「放弃 / 保存」只剩页头那一对（2026-10-08 作者裁决） ---------- */
+  /*
+   * 作者原话：「这个工作台的保存有两个多余的。你把下面这个去掉，只留上面那个」——
+   * 参数台的工具行里原来又画了一对，与页头右上角那对**一模一样**（同一屏两组同名按钮，
+   * 人分不出"哪一个保存的是哪一半"）。这里守的就是**只剩一处**。
+   */
+  await wbPage.locator('button[title="参数台"]').first().click()
+  const paramsReady = await until(
+    async () => (await wbText(wbPage)).includes('参数台'),
+    8000,
+  )
+  const saveBtns = await wbPage.getByRole('button', { name: '保存', exact: true }).count()
+  const dropBtns = await wbPage.getByRole('button', { name: '放弃', exact: true }).count()
+  check(
+    tag,
+    '①b 参数台上「保存 / 放弃」各只剩一处（页头那对；工具行那对没了）',
+    paramsReady && saveBtns === 1 && dropBtns === 1,
+    `保存 ${saveBtns} 个 · 放弃 ${dropBtns} 个`,
+  )
 
   /* ---------- ② 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
   /*
