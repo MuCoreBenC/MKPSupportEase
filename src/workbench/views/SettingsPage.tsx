@@ -461,8 +461,20 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
               开着的时候：你改的每一个 <span className={s.mono}>.toml</span> /{' '}
               <span className={s.mono}>.json</span>、点「生成」写出来的交付产物，
               连带资产库里的 3MF 与模型，<b>全都落在沙箱里</b>；正式那份{' '}
-              <span className={s.mono}>presets/</span> 一动不动。草稿也分两套（互不影响），
-              <b>发布与发版在测试模式里是关着的</b>。
+              <span className={s.mono}>presets/</span> 一动不动。草稿也分两套（互不影响）。
+            </p>
+            <p className={s.vhelp}>
+              ★ <b>发布与发版在测试模式里是关着的</b>（后端直接拒绝）—— 注意关着的是
+              <b>「发布」这个动作本身</b>，不是"发布但换个目的地"。正式模式下的发布就是
+              "本地 git 提交 + 推平台开 PR/MR"，那件事到不到云端不由这里选。
+            </p>
+            <p className={s.vhelp}>
+              ★ <b>但要看新版不必发布</b>：客户端判"有没有新版"只比交付根里{' '}
+              <span className={s.mono}>catalog.json</span> 的{' '}
+              <span className={s.mono}>revision</span>，而<b>「生成」就已经把它重算了</b>
+              （发布才定稿的那两份不在客户端那条链上）。所以沙箱这条路是：
+              <b>改参数 → 保存 → 生成 → 客户端进「预设」页 → 点「下载」</b> ——
+              一句「发布」都不用点。详见下面「本地测试源（开发）」那张卡。
             </p>
 
             <div className={s.vhead}>
@@ -951,6 +963,23 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             <p className={s.vhelp}>
               端的目录今天是这样，<b>测试模式开着时「当前交付」会自动变成沙箱那一份</b>
               （连"它齐没齐"一起变）—— 界面不自己推，每读一次都是新那棵树的读数。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ <b>选「当前交付」时不用先去发布</b>：客户端判"有没有新版"只比交付根里{' '}
+              <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>
+              （下载时校的 SHA 也从它来），而<b>「生成」就已经把它重算了</b>。发布才定稿的
+              那两份（<span className={s.mono}>manifest.json</span> /{' '}
+              <span className={s.mono}>release.json</span>）不在客户端那条链上 ——
+              测试模式里它们会一直停在上一版，发布闸因此报一条「待留意」，<b>那是正常的</b>，
+              不用为它去点发布。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ 客户端那边的节奏：进「预设」页时它<b>自己查一次</b>远端目录（比 revision，
+              本次运行只查一次），查到就把本地那份目录换掉 —— 但<b>绝不自动下载预设文件</b>，
+              云端表里那几行要点「下载」才落进「我的预设」。所以"生成完看不到更新"通常只有两种原因：
+              地址填的不是上面这一串，或者这次运行已经查过了（重进页面 / 重启客户端再查一次）。
             </p>
 
             {devConflicts.length > 0 && (
