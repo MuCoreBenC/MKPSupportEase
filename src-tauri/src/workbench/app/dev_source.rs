@@ -50,7 +50,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::error::AppError;
@@ -59,12 +59,29 @@ use crate::error::AppError;
 /// 这颗按钮点的就是一个空壳（下面有测试钉着）。
 const NPM_SCRIPT: &str = "preset-source:dev";
 
-/// 夹具根（`server.mjs` 的默认 `--root`）：**它端出去的就是这一份**。
-/// 路径只在 `scripts/preset-test-server/` 那一处约定，这里照同一个相对位置认。
-const FIXTURE_REL: &str = "scripts/preset-test-server/fixtures/v1";
+/// 夹具根（v1 / v2）：**服务端出去的就是这一份**。两代只差两处（发布日 + 一个参数值），
+/// 够演示"官方发新版了 → 检查更新看得见"。路径只在 `scripts/preset-test-server/`
+/// 那一处约定，这里照同一个相对位置认。
+const FIXTURE_REL_V1: &str = "scripts/preset-test-server/fixtures/v1";
+const FIXTURE_REL_V2: &str = "scripts/preset-test-server/fixtures/v2";
 
 /// 夹具齐了的标志文件（`make-fixtures.mjs` 派生的第一件东西；`dev.mjs` 也拿它判"在不在"）。
 const FIXTURE_MARKER: &str = "catalog.json";
+
+/// 「当前交付」那一份齐了的标志：交付根的说明书（发布动作写出来的第一件东西）。
+const DELIVERY_MARKER: &str = "source.json";
+
+/// 交付根相对预设根的那一层目录名（与 `paths::DELIVERY_SUBDIR` 同一个值；
+/// 那一处是 `pub(crate)`，这一层只管拼地址，仍照同一处约定认）。
+const DELIVERY_SUBDIR: &str = "delivery";
+
+/// 把「端哪个目录」交给 `server.mjs` 的那个环境变量。
+///
+/// ★ **为什么走环境变量、而不是给命令加 `--root` 参数**：这一层起的永远是
+/// `npm run preset-source:dev` 这一条（`package.json` 里那行是契约，有测试钉着），
+/// 命令行本身不带参数；环境变量能被它继承下去，于是"换源"不必给这条命令另开一条
+/// argv 路径。`server.mjs` 那边 `--root` 参数**仍然优先**，这个变量只是它的第二档。
+const ROOT_ENV: &str = "PRESET_TEST_ROOT";
 
 /// 测试源的默认端口 —— 与 `scripts/preset-test-server/server.mjs` 同一个值。
 /// 它读 `PRESET_TEST_PORT`（见 [`port_from`]），这里只是那个变量的默认档。
@@ -74,6 +91,116 @@ const DEFAULT_PORT: u16 = 8787;
 /// 万一取到一张成环的表，没有上限的循环会把工作台卡死。
 const MAX_ANCESTOR_HOPS: usize = 32;
 
+/* ---------- 端什么（三选一） ---------- */
+
+/// 测试源端哪一份。
+///
+/// 前两项是**夹具**（`make-fixtures.mjs` 从真交付根派生的两代，够演"官方发新版了"）。
+/// 第三项是 2026-10-08 作者要的那一环：**当前交付** —— 端你（在沙箱里）生成出来的
+/// 那一份，于是「改参数 → 生成 → 客户端检查更新 → 看到我的新版」这条闭环在本地
+/// 整条走得通，而且**永远不碰正式**。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SourceKind {
+    /// 夹具 v1：模拟「官方源，还没有新版本」
+    #[serde(rename = "v1")]
+    V1,
+    /// 夹具 v2：模拟「官方发了新版」（revision 变了 → 「检查更新」看得见）
+    #[serde(rename = "v2")]
+    V2,
+    /// **当前交付**：测试模式开着 = 沙箱那份，正式 = 仓库那份
+    #[serde(rename = "delivery")]
+    Delivery,
+}
+
+/// 一份源**端出去时**的样子：服务根在哪、客户端该填哪个地址。
+///
+/// ★ 地址**不只端口那一截**：夹具自己就是一个交付根（`filesRoot: "."`），填到根上；
+/// 而真交付根的 `source.json` 写的是 `filesRoot: ".."` —— 交付文件（`mkp/presets/*.toml`）
+/// 住在**预设根**底下、不在 `delivery/` 里。所以那一份要端的目录是**预设根**，
+/// 客户端填 `<地址>/delivery`：`..` 一解就落回预设根，客户端那条真链（catalog /
+/// manifest / 寻址规则 / SHA 校验）一个环节都不变。
+struct Served {
+    /// 交给 `server.mjs` 的那个目录（`PRESET_TEST_ROOT`）
+    root: PathBuf,
+    /// 客户端「自定义地址」里该填的那一串
+    url: String,
+}
+
+impl SourceKind {
+    /// 服务根与地址的**纯派生**（不碰磁盘，所以测试钉得住）。
+    fn derive(self, repo: &Path, presets_root: &Path) -> Served {
+        match self {
+            SourceKind::V1 => Served {
+                root: repo.join(FIXTURE_REL_V1),
+                url: origin(),
+            },
+            SourceKind::V2 => Served {
+                root: repo.join(FIXTURE_REL_V2),
+                url: origin(),
+            },
+            SourceKind::Delivery => Served {
+                root: presets_root.to_path_buf(),
+                url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
+            },
+        }
+    }
+
+    /// 「这一份齐了吗」的那个标志文件。不齐**不许起**：服务起得来、底下什么都没有的话，
+    /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远。
+    fn marker(self, served: &Served) -> PathBuf {
+        match self {
+            SourceKind::V1 | SourceKind::V2 => served.root.join(FIXTURE_MARKER),
+            SourceKind::Delivery => served
+                .root
+                .join(DELIVERY_SUBDIR)
+                .join(DELIVERY_MARKER),
+        }
+    }
+
+    /// 不齐时那句人话：**缺什么 + 怎么补**（界面直接摆，不重写措辞）。
+    fn missing(self, marker: &Path) -> AppError {
+        match self {
+            SourceKind::V1 | SourceKind::V2 => AppError::invalid_argument(format!(
+                "这份夹具还没派生：{} 不在",
+                marker.display()
+            ))
+            .with_detail(
+                "跑一次 `npm run preset-source:make`（从真交付根派生两代夹具），再点「启动」"
+                    .to_owned(),
+            ),
+            SourceKind::Delivery => AppError::invalid_argument(format!(
+                "还没有交付产物：{} 不在",
+                marker.display()
+            ))
+            .with_detail(
+                "在「生成与发布」里点一次生成 —— 注意**当前模式**：测试模式开着时生成物落在沙箱里，\
+                 端的就是沙箱那一份（这正是这一项要验的）"
+                    .to_owned(),
+            ),
+        }
+    }
+}
+
+/// 界面上那三行单选，一行一份。**名字与说法由后端给**（界面不自己拼一套措辞），
+/// 连同"这一份在哪、填什么地址、齐没齐"一起摊开 —— 选之前就该看得见。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceOption {
+    pub kind: SourceKind,
+    /// 行上的名字（如 `夹具 v1`）
+    pub label: String,
+    /// 这一份是干什么用的（一句话）
+    pub note: String,
+    /// 服务根（端的是这个目录 —— 给排查用）
+    pub root: String,
+    /// 客户端「自定义地址」里要填的那一串（**每一份不一样**）
+    pub url: String,
+    /// 齐了吗（不齐时点「启动」会被如实拒绝）
+    pub ready: bool,
+    /// 不齐的话缺什么、怎么补
+    pub missing: Option<String>,
+}
+
 /* ---------- DTO ---------- */
 
 /// 本地测试源现在什么样。**`running` 每次现问子进程**（`try_wait`），
@@ -81,13 +208,17 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevSourceStatus {
-    /// 那条 `npm run dev:test-update` 还活着吗
+    /// 那条 `npm run preset-source:dev` 还活着吗
     pub running: bool,
     /// 包装层（Windows 上是 `cmd`）的 PID。不在跑时 `null`
     pub pid: Option<u32>,
-    /// 服务地址 —— `MKPSE_PRESET_SOURCE_URL` 注入进客户端的**就是它**。
-    /// 想只手起服务、然后在客户端设置页手填地址的人，填这一串
+    /// 客户端该填的地址 —— **在跑时是那一份的地址**（夹具是根，交付带 `/delivery`）；
+    /// 没起过时给默认地址当兜底。想只手起服务、再去客户端设置页手填的人，填这一串
     pub url: String,
+    /// 在跑（没在跑时：上次起）的是哪一份。**从没起过 = `null`**
+    pub source: Option<SourceKind>,
+    /// 它端的目录（不在跑且没起过时为空串）
+    pub source_root: String,
     /// 它在哪个仓库根下跑（命令的 cwd）
     pub repo_root: String,
     /// 实际跑的那条命令（给人对账用，界面不自己拼一遍）
@@ -97,11 +228,8 @@ pub struct DevSourceStatus {
     /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 被别人占着的话，
     /// 点「启动」必死在那上面。空 = 端口干净
     pub conflicts: Vec<PortConflict>,
-    /// 服务端出去的是哪一份夹具（`server.mjs` 的默认 `--root`）
-    pub fixture_root: String,
-    /// 那份夹具派生过了吗。**不在也要如实说**：服务起得来、但底下什么都没有，
-    /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远，这里先讲明白
-    pub fixtures_ready: bool,
+    /// 三行单选：每一份的名字 / 在哪儿 / 填什么地址 / 齐没齐
+    pub sources: Vec<SourceOption>,
 }
 
 /// 谁占着那个关键端口。**摆给人看的**（`text` 是那句人话）+
@@ -125,6 +253,12 @@ pub struct PortConflict {
 struct DevSource {
     child: Child,
     pid: u32,
+    /// 它是按哪一份起的（换源 = 先收掉它、再以新的那一份起）
+    source: SourceKind,
+    /// 它端的目录（`PRESET_TEST_ROOT` 交下去的那个）
+    root: PathBuf,
+    /// 客户端该填的地址（随源不同：夹具在根上，交付带 `/delivery`）
+    url: String,
     /// `try_wait` 看到它退出之后填上（退出码那句）。填上 = 不在跑了
     exited: Option<String>,
 }
@@ -162,7 +296,10 @@ fn origin() -> String {
 /// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而
 /// `Command::new("npm")` 走 `CreateProcess`，它**不替你补 `.cmd` 后缀** ——
 /// 直接起会报"程序找不到"。与 `release_tx::npm_build` 同一条理由。
-fn spawn_server(repo: &Path) -> Result<Child, AppError> {
+///
+/// ★ 端哪一份由 [`ROOT_ENV`] 交下去（`server.mjs` 读它，`--root` 参数仍然优先）：
+/// 命令本身不带参数，于是"换源"不必给这条命令另开一条 argv 路径。
+fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("npm");
@@ -172,6 +309,7 @@ fn spawn_server(repo: &Path) -> Result<Child, AppError> {
     };
     cmd.args(["run", NPM_SCRIPT])
         .current_dir(repo)
+        .env(ROOT_ENV, &served.root)
         /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -344,14 +482,54 @@ fn conflicts_of() -> Vec<PortConflict> {
     out
 }
 
-/// 服务端出去的那一份夹具在哪。
-fn fixture_root_of(repo: &Path) -> PathBuf {
-    repo.join(FIXTURE_REL)
+/// 「不齐」那句话说全（缺什么 + 怎么补）——给界面直接摆，不重写措辞。
+impl SourceKind {
+    fn missing_sentence(self, marker: &Path) -> String {
+        let e = self.missing(marker);
+        match e.detail {
+            Some(d) => format!("{} —— {d}", e.message),
+            None => e.message,
+        }
+    }
 }
 
-/// 夹具派生过了吗（不在的话服务起得来、但底下什么都没有）。
-fn fixtures_ready(repo: &Path) -> bool {
-    fixture_root_of(repo).join(FIXTURE_MARKER).is_file()
+/// 三行单选的内容：每一份**现在**在哪儿、客户端填什么地址、齐没齐。
+///
+/// ★ 每一份都现算：`delivery` 那一份随**模式**走（测试模式开着就是沙箱的预设根）——
+/// 模式一切，这一行的根与"齐没齐"立刻就是新那棵树的读数，界面不必自己推一遍。
+fn sources_of(repo: &Path) -> Vec<SourceOption> {
+    let presets = crate::workbench::paths::presets_root_path();
+    [SourceKind::V1, SourceKind::V2, SourceKind::Delivery]
+        .into_iter()
+        .map(|kind| {
+            let served = kind.derive(repo, &presets);
+            let marker = kind.marker(&served);
+            let ready = marker.is_file();
+            let (label, note) = match kind {
+                SourceKind::V1 => (
+                    "夹具 v1",
+                    "模拟「官方源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」",
+                ),
+                SourceKind::V2 => (
+                    "夹具 v2",
+                    "模拟「官方发了新版」—— 同一份预设的下一版（revision 变了）",
+                ),
+                SourceKind::Delivery => (
+                    "当前交付",
+                    "端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」",
+                ),
+            };
+            SourceOption {
+                kind,
+                label: label.to_owned(),
+                note: note.to_owned(),
+                root: served.root.display().to_string(),
+                url: served.url,
+                ready,
+                missing: (!ready).then(|| kind.missing_sentence(&marker)),
+            }
+        })
+        .collect()
 }
 
 /// 起不来时那句总结（错误消息用）。
@@ -405,13 +583,14 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         running: false,
         pid: None,
         url: origin(),
+        source: None,
+        source_root: String::new(),
         repo_root: repo.display().to_string(),
         command: format!("npm run {NPM_SCRIPT}"),
         note,
         /* 不在跑的时候才探端口：跑着的时候 8787 本来就是我们自己占着 */
         conflicts: conflicts_of(),
-        fixture_root: fixture_root_of(repo).display().to_string(),
-        fixtures_ready: fixtures_ready(repo),
+        sources: sources_of(repo),
     }
 }
 
@@ -419,6 +598,11 @@ fn status_of(cur: &DevSource, repo: &Path) -> DevSourceStatus {
     let mut st = base_status(repo, cur.exited.clone());
     st.pid = Some(cur.pid);
     st.running = cur.exited.is_none();
+    /* 端的哪一份 / 端的哪个目录 / 客户端填哪一串：**在跑没在跑都报**——
+       界面据此把那一行选中摆在"上次起的是它"上，地址也跟着换成它的那一串 */
+    st.source = Some(cur.source);
+    st.source_root = cur.root.display().to_string();
+    st.url = cur.url.clone();
     if st.running {
         st.conflicts.clear();
     } else if let Some(first) = st.conflicts.first() {
@@ -447,26 +631,67 @@ fn refresh_exit(cur: &mut DevSource) {
 
 /* ---------- 命令 ---------- */
 
-/// 起本地测试源（= `npm run preset-source:dev`，**只起服务**）。
+/// 等它真的走（最多 `timeout`）。**有界**：等不到就往下走 —— 端口那一眼会如实
+/// 报出"还占着"，而不是把界面卡在这儿。
+fn wait_gone(child: &mut Child, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// 起本地测试源（= `npm run preset-source:dev`，**只起服务**），端 `source` 那一份。
 ///
-/// **幂等**：已经在跑就把现状报回去，不再起第二个 —— 第二份会撞在 8787 上，
+/// **同一份幂等**：已经在跑的就是它，那就不动，把现状报回去 —— 第二份会撞在 8787 上，
 /// 然后那个进程静悄悄地死掉，而人以为自己点了两下、起了两个。
 ///
-/// **起之前先探端口**（[`conflicts_of`]）：被占着就**如实拒绝**，把那句人话
-/// （谁占着、PID 多少）交出去，界面据此摆出「停掉它」那颗按钮 —— 而不是硬起、
-/// 让它撞死在那里、只留一句"退出码 1"。
+/// **换了源 = 换源重启**：把那棵进程树整棵收掉，等端口让出来，再以新的那一份起。
+/// 一件事一次点击，不用"先停再起"两步（中间那一步人容易忘，然后就撞端口了）。
+///
+/// **先验齐没齐，再动进程**：选了一份还没派生的夹具 / 还没生成的交付时**如实拒绝** ——
+/// 而且是在**杀掉手上那一份之前**就拒绝，选错了不该把正在跑的服务带下水。
+///
+/// **起之前先探端口**（[`conflicts_of`]）：被占着就如实拒绝，把那句人话（谁占着、
+/// PID 多少）交出去，界面据此摆出「停掉它」那颗按钮 —— 而不是硬起、让它撞死在那里、
+/// 只留一句"退出码 1"。
 #[tauri::command]
-pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
+pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppError> {
     crate::ipc::traced("wb_dev_source_start", |_| {
         let repo = crate::workbench::paths::repo_root();
+        let presets = crate::workbench::paths::presets_root_path();
+        let served = source.derive(&repo, &presets);
+        let marker = source.marker(&served);
+        if !marker.is_file() {
+            return Err(source.missing(&marker));
+        }
+
         let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(cur) = guard.as_mut() {
-            refresh_exit(cur);
-            /* 还活着 = 幂等返回；已经退了 = 换掉它，重新起一份 */
-            if cur.running_now() {
-                return Ok(status_of(cur, &repo));
+
+        /* 手上那一份还在跑的：同一份 → 幂等；换了源 → 先整棵收掉 */
+        let stale = match guard.as_mut() {
+            Some(cur) => {
+                refresh_exit(cur);
+                if cur.running_now() {
+                    if cur.source == source {
+                        return Ok(status_of(cur, &repo));
+                    }
+                    Some(cur.pid)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        if let Some(pid) = stale {
+            kill_process_tree(pid);
+            if let Some(mut cur) = guard.take() {
+                wait_gone(&mut cur.child, Duration::from_secs(5));
             }
         }
+
         /* ★ 端口那一眼：起之前把那个端口的占用者摆出来，而不是让它起一半死掉 */
         let conflicts = conflicts_of();
         if !conflicts.is_empty() {
@@ -475,12 +700,20 @@ pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
                     .to_owned(),
             ));
         }
-        let child = spawn_server(&repo)?;
+        let child = spawn_server(&repo, &served)?;
         let pid = child.id();
-        tracing::info!(pid, repo = %repo.display(), "本地测试源起来了（npm run {NPM_SCRIPT}）");
+        tracing::info!(
+            pid,
+            source = ?source,
+            root = %served.root.display(),
+            "本地测试源起来了（npm run {NPM_SCRIPT}）"
+        );
         let cur = DevSource {
             child,
             pid,
+            source,
+            root: served.root,
+            url: served.url,
             exited: None,
         };
         let st = status_of(&cur, &repo);
@@ -775,21 +1008,110 @@ mod tests {
         assert_eq!(port_of_addr("*:*"), None);
     }
 
-    /// 夹具根按约定位置认；"齐没齐"只看那一个标志文件（与 `dev.mjs` 同一口径）
+    /// **三份源各自端哪儿、客户端填什么地址** —— 一行一行钉住。
+    ///
+    /// 最要紧的是 `delivery` 那一条：它端的目录是**预设根**、填的地址带 `/delivery`。
+    /// 真交付根的 `source.json` 写着 `filesRoot: ".."`（交付文件 `mkp/presets/*.toml`
+    /// 住在预设根底下，不在 `delivery/` 里），所以只端 `delivery/` 那一层的话，
+    /// 客户端按 `..` 解出来的文件全在服务根外面 —— 一个一个都是 403。
+    /// 这条链就是在这一处悄悄断的，值得专门钉一条。
     #[test]
-    fn fixture_readiness_only_looks_for_the_marker() {
-        let d = tempfile::tempdir().unwrap();
-        assert!(
-            fixture_root_of(d.path()).ends_with(FIXTURE_REL),
-            "夹具根不按约定拼：{}",
-            fixture_root_of(d.path()).display()
-        );
-        assert!(!fixtures_ready(d.path()), "空仓库不该说夹具就绪");
+    fn each_source_serves_the_root_that_makes_files_addressable() {
+        let repo = Path::new("/tmp/repo");
+        let presets = Path::new("/tmp/repo/presets");
 
-        let root = fixture_root_of(d.path());
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join(FIXTURE_MARKER), "{}").unwrap();
-        assert!(fixtures_ready(d.path()), "写了标志文件还不说就绪");
+        let v1 = SourceKind::V1.derive(repo, presets);
+        assert!(
+            v1.root.ends_with("fixtures/v1"),
+            "v1 端的是夹具根：{}",
+            v1.root.display()
+        );
+        assert_eq!(v1.url, origin(), "夹具自己就是一个交付根，地址填到根上");
+
+        let v2 = SourceKind::V2.derive(repo, presets);
+        assert!(
+            v2.root.ends_with("fixtures/v2"),
+            "v2 端的是夹具根：{}",
+            v2.root.display()
+        );
+        assert_eq!(v2.url, v1.url, "两代夹具同一个地址（换的是内容，不是端口）");
+        assert_ne!(v1.root, v2.root, "两代必须是两个不同的目录");
+
+        let d = SourceKind::Delivery.derive(repo, presets);
+        assert_eq!(
+            d.root, presets,
+            "交付那一份端的是**预设根**（filesRoot: \"..\" 得解得到那儿）"
+        );
+        assert_eq!(
+            d.url,
+            format!("{}/delivery", origin()),
+            "客户端要填 <地址>/delivery，不是裸地址"
+        );
+    }
+
+    /// **「当前交付」跟着调用方给的预设根走** —— 工作台传的是
+    /// `paths::presets_root_path()`（**模式感知**），于是测试模式开着时端出去的就是
+    /// 沙箱里生成的那份交付，正式那份从头到尾不参与。这正是闭环那一环的要害。
+    #[test]
+    fn the_delivery_source_serves_the_presets_root_it_is_given() {
+        let repo = Path::new("/tmp/repo");
+        let real = repo.join("presets");
+        let sandbox = repo.join("workbench").join(".sandbox").join("presets");
+        let a = SourceKind::Delivery.derive(repo, &real);
+        let b = SourceKind::Delivery.derive(repo, &sandbox);
+        assert_eq!(a.root, real);
+        assert_eq!(b.root, sandbox);
+        assert_ne!(a.root, b.root, "两份预设根必须端出两个不同的目录");
+        /* 缺的那份标志文件也各说各的（界面据此告诉人"去哪儿生成"） */
+        assert!(SourceKind::Delivery.marker(&a).ends_with("delivery/source.json"));
+        assert_ne!(
+            SourceKind::Delivery.marker(&a),
+            SourceKind::Delivery.marker(&b)
+        );
+    }
+
+    /// 不齐的两句人话**各指各的补法**：夹具去 `preset-source:make`，交付去点「生成」——
+    /// 指错方向（让还没生成过的人去跑 make）比不提示还坏
+    #[test]
+    fn a_source_that_is_not_ready_says_how_to_make_it_ready() {
+        let repo = Path::new("/tmp/repo");
+        let presets = Path::new("/tmp/repo/presets");
+
+        let served = SourceKind::V1.derive(repo, presets);
+        let fixture = SourceKind::V1.missing_sentence(&served.root.join(FIXTURE_MARKER));
+        assert!(fixture.contains("preset-source:make"), "实测：{fixture}");
+
+        let served = SourceKind::Delivery.derive(repo, presets);
+        let delivery = SourceKind::Delivery
+            .missing_sentence(&served.root.join("delivery").join(DELIVERY_MARKER));
+        assert!(delivery.contains("生成"), "实测：{delivery}");
+        assert!(
+            !delivery.contains("preset-source:make"),
+            "别把交付那一条指去跑夹具：{delivery}"
+        );
+    }
+
+    /// 界面上那三行：**名字与说法由后端给**，三份都在、都带根与地址、齐没齐都说得出
+    /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）
+    #[test]
+    fn the_three_rows_are_told_by_the_backend() {
+        let rows = sources_of(Path::new("/tmp/repo"));
+        assert_eq!(rows.len(), 3, "三行单选：v1 / v2 / 当前交付");
+        assert_eq!(rows[0].kind, SourceKind::V1);
+        assert_eq!(rows[1].kind, SourceKind::V2);
+        assert_eq!(rows[2].kind, SourceKind::Delivery);
+        for r in &rows {
+            assert!(!r.label.is_empty() && !r.note.is_empty(), "{:?}", r.kind);
+            assert!(r.url.starts_with("http://127.0.0.1:"), "{:?}", r.kind);
+            assert!(!r.root.is_empty(), "{:?}", r.kind);
+            /* 齐 / 不齐两种情形都要说得出话：不齐时补齐那句，齐时就没有那句 */
+            assert_eq!(r.missing.is_none(), r.ready, "{:?}", r.kind);
+        }
+        assert!(
+            rows[2].note.contains("沙箱"),
+            "「当前交付」那一行要说清它跟着模式走：{}",
+            rows[2].note
+        );
     }
 
     /// 三档说法：认得名 / 只有 PID / 认不出 —— **认不出时不许编一个名字出来**
@@ -830,5 +1152,30 @@ mod tests {
         assert_eq!(st.command, "npm run preset-source:dev");
         assert!(st.url.starts_with("http://127.0.0.1:"));
         assert!(!st.running && st.pid.is_none());
+        /* 从没起过：不谎报"端的是哪一份"（免得界面把某一行当成"正在端"） */
+        assert!(st.source.is_none() && st.source_root.is_empty());
+        assert_eq!(st.sources.len(), 3);
+    }
+
+    /// **端哪一份靠 `PRESET_TEST_ROOT` 交下去**，而它得是 `server.mjs` 真读的那个名字 ——
+    /// 改名 / 拼错会表现成"服务起得来、但端的是默认那份"（夹具 v1），
+    /// 那是一种看不出错的错：界面上写着"当前交付"，客户端拿到的还是 v1。
+    #[test]
+    fn the_root_env_var_is_the_one_the_server_reads() {
+        let server = crate::workbench::paths::repo_root()
+            .join("scripts")
+            .join("preset-test-server")
+            .join("server.mjs");
+        let text = std::fs::read_to_string(&server)
+            .unwrap_or_else(|e| panic!("读不了 {}：{e}", server.display()));
+        assert!(
+            text.contains(ROOT_ENV),
+            "server.mjs 不认 {ROOT_ENV} —— 换源那一下会静悄悄地端回默认那份"
+        );
+        /* 而且它必须比默认值优先：`--root` 参数仍然最先认 */
+        assert!(
+            text.contains("--root") && text.contains(ROOT_ENV),
+            "server.mjs 那边 `--root` 与 {ROOT_ENV} 得都在"
+        );
     }
 }

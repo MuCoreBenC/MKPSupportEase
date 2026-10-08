@@ -19,6 +19,13 @@
  * node server.mjs --root fixtures/v2 --port 8787
  * ```
  *
+ * # 端哪一份：`--root` → `PRESET_TEST_ROOT` → 夹具 v1
+ *
+ * 第二档那个环境变量是给**工作台那颗按钮**用的（2026-10-08）：它起的永远是
+ * `npm run preset-source:dev` 这同一条命令（`package.json` 里那行是契约），
+ * 换源换的是环境变量 —— 于是"换源"不必给这条命令另开一条 argv 路径。
+ * 参数仍然优先（手敲命令时照旧 `--root` 说了算）。
+ *
  * 起好之后可以把它填进「设置 → 高级设置 → 预设数据源 → 自定义地址」，
  * 或者用 `npm run dev:test-update` 让 dev 脚本自动注入。
  *
@@ -42,7 +49,8 @@ const argOf = (name, fallback) => {
 
 const PORT = Number(argOf('--port', process.env.PRESET_TEST_PORT ?? 8787))
 const HOST = argOf('--host', '127.0.0.1')
-const ROOT = resolve(argOf('--root', join(HERE, 'fixtures', 'v1')))
+/* 端哪一份：`--root` 参数 → `PRESET_TEST_ROOT`（工作台换源走这一条）→ 夹具 v1 */
+const ROOT = resolve(argOf('--root', process.env.PRESET_TEST_ROOT ?? join(HERE, 'fixtures', 'v1')))
 
 const TYPES = {
   '.json': 'application/json; charset=utf-8',

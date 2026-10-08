@@ -1875,20 +1875,53 @@ export function installMockBackend() {
           running: false,
           pid: null,
           url: 'http://127.0.0.1:8787',
+          /* 从没起过：不谎报"端的是哪一份"（界面据此把默认那一行选上） */
+          source: null,
+          sourceRoot: '',
           repoRoot: 'C:\\dev\\MKPSupportEase',
           command: 'npm run preset-source:dev',
           note: null,
           /* 桩里没有端口可探（没有那个仓库、也没有 npm）—— 冲突那一块在浏览器里恒为空 */
           conflicts: [],
-          fixtureRoot: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v1',
-          fixturesReady: true,
+          /* 三行单选：桩里**照后端那套说法**摆出来（名字 / 说法 / 根 / 地址 / 齐没齐）——
+             名字与措辞由后端给，这边只当它是个数据源，不许自己另编一套 */
+          sources: [
+            {
+              kind: 'v1',
+              label: '夹具 v1',
+              note: '模拟「官方源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」',
+              root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v1',
+              url: 'http://127.0.0.1:8787',
+              ready: true,
+              missing: null,
+            },
+            {
+              kind: 'v2',
+              label: '夹具 v2',
+              note: '模拟「官方发了新版」—— 同一份预设的下一版（revision 变了）',
+              root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v2',
+              url: 'http://127.0.0.1:8787',
+              ready: true,
+              missing: null,
+            },
+            {
+              kind: 'delivery',
+              label: '当前交付',
+              note: '端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」',
+              root: 'C:\\dev\\MKPSupportEase\\presets',
+              url: 'http://127.0.0.1:8787/delivery',
+              ready: true,
+              missing: null,
+            },
+          ],
         })
       case 'wb_dev_source_start':
       case 'wb_dev_source_stop':
       case 'wb_dev_source_clear_conflict':
         return Promise.reject({
           code: 'NOT_IMPLEMENTED',
-          message: '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run preset-source:dev',
+          message:
+            '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run preset-source:dev，把选中的那一份交给它',
           traceId: 'mock',
         })
       case 'wb_set_bootstrap': {

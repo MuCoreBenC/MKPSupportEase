@@ -1039,13 +1039,6 @@ export interface PortConflict {
 }
 
 /**
- * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
- *
- * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
- * 那个进程可能是人在终端里 Ctrl+C 掉的。`url` 就是 `MKPSE_PRESET_SOURCE_URL`
- * 注进客户端的那个地址 —— 界面照后端说的报，不自己拼一遍。
- */
-/**
  * `sandbox::SandboxStatus` —— **测试模式（沙箱）**现在什么样。
  *
  * 作者 2026-10-08：「我希望它是完全另起炉灶那种……测试的归测试的，而且我测试的随时
@@ -1068,12 +1061,29 @@ export interface SandboxStatus {
   note: string | null
 }
 
+/**
+ * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
+ *
+ * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
+ * 那个进程可能是人在终端里 Ctrl+C 掉的。
+ *
+ * ★ **端哪一份（`source`）与地址（`url`）也由后端给**：地址随源不同（夹具填到根上、
+ * 「当前交付」要带 `/delivery` —— 真交付那份的 `source.json` 写着 `filesRoot: ".."`），
+ * 界面照报，不自己拼一遍路径。
+ */
 export interface DevSourceStatus {
   running: boolean
   /** 包装层（Windows 上是 cmd）的 PID；不在跑时 null */
   pid: number | null
-  /** 服务地址 —— 想只手起服务、再在客户端设置页手填地址的人，填这一串 */
+  /**
+   * 客户端「自定义地址」里该填的那一串。**在跑时是那一份的地址**（夹具填到根上、
+   * 当前交付带 `/delivery`），没起过时是默认地址当兜底 —— 界面照后端说的报。
+   */
   url: string
+  /** 在跑（没在跑时：上次起）的是哪一份；**从没起过 = null** */
+  source: DevSourceKind | null
+  /** 它端的是哪个目录（不在跑且没起过时是空串）—— 给排查用 */
+  sourceRoot: string
   /** 它在哪个仓库根下跑（命令的 cwd） */
   repoRoot: string
   /** 实际跑的那条命令（给人对账用） */
@@ -1082,10 +1092,28 @@ export interface DevSourceStatus {
   note: string | null
   /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
   conflicts: PortConflict[]
-  /** 服务端出去的是哪一份夹具（`server.mjs` 的默认 `--root`） */
-  fixtureRoot: string
-  /** 那份夹具派生过了吗：不在的话服务起得来、但底下什么都没有 */
-  fixturesReady: boolean
+  /** 三行单选：每一份的名字 / 在哪儿 / 填什么地址 / 齐没齐 */
+  sources: SourceOption[]
+}
+
+/** `dev_source::SourceKind` —— 测试源端哪一份 */
+export type DevSourceKind = 'v1' | 'v2' | 'delivery'
+
+/** `dev_source::SourceOption` —— 界面那三行单选，一行一份 */
+export interface SourceOption {
+  kind: DevSourceKind
+  /** 行上的名字（如「夹具 v1」） */
+  label: string
+  /** 这一份是干什么用的（那句话由**后端**给，界面不重写一遍） */
+  note: string
+  /** 服务根（端的是这个目录） */
+  root: string
+  /** 客户端要填的那一串（**每一份不一样**） */
+  url: string
+  /** 齐了吗。不齐时点「启动」会被如实拒绝 */
+  ready: boolean
+  /** 不齐的话：缺什么 + 怎么补 */
+  missing: string | null
 }
 
 /* ---------- 状态词 ---------- */
@@ -1810,12 +1838,19 @@ export const wb = {
    * 「设置 → 高级设置 → 预设数据源 → 自定义地址」填一次（保存即生效）。
    * 想连客户端 dev 一起起：那在命令行里，`npm run dev:test-update`。
    *
-   * ★ `start` **幂等**（已在跑就报现状）；被占着时**如实拒绝**并点名那个端口
-   * （`conflicts` 摆着是谁）；`stop` 收掉**整棵进程树**，把端口让出来。
-   * 三条都**不写任何配置**。
+   * ★ `start` **同一份幂等**（已经在端它就不动）、**换了源则换源重启**（先整棵收掉
+   * 再以新的起 —— 一次点击一件事）；那一份还没派生 / 还没生成时**如实拒绝**，
+   * 而且是在**杀掉手上那一份之前**就拒绝（选错了不该把正在跑的服务带下水）；
+   * 被占着时**如实拒绝**并点名那个端口（`conflicts` 摆着是谁）；
+   * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
+   *
+   * ★ 端哪一份：`v1` / `v2` 是两代夹具，`delivery` 是**当前交付** ——
+   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到我的
+   * 新版」这条闭环在本地整条走得通，而且正式那份从头到尾不参与。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
-  devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
+  devSourceStart: (source: DevSourceKind) =>
+    invoke<DevSourceStatus>('wb_dev_source_start', { source }),
   devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
   /**
    * **停掉占着某个端口的那个进程**（那张卡上的「停掉它」）。

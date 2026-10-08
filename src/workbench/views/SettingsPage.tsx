@@ -51,6 +51,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { isAppError, wb } from '../api'
 import type {
   Boot,
+  DevSourceKind,
   DevSourceStatus,
   PortConflict,
   PublishAccount,
@@ -241,17 +242,25 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
   const [devBusy, setDevBusy] = useState(false)
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /** 起哪一份（**草稿**：点一下只是选，交出去是点「启动」/「换源并重启」那一下） */
+  const [devDraft, setDevDraft] = useState<DevSourceKind>('v1')
 
-  const readDevSrc = useCallback(async () => {
+  /**
+   * 现读一次状态。`sync` 只在**第一次**读的时候为真：把"上次端的是哪一份"选中一次。
+   * 之后每次刷新都再同步的话，人刚点好的那一行会被轮询按回去 —— 那正是"点了没反应"。
+   */
+  const readDevSrc = useCallback(async (sync: boolean) => {
     try {
-      setDevSrc(await wb.devSourceStatus())
+      const st = await wb.devSourceStatus()
+      setDevSrc(st)
+      if (sync && st.source !== null) setDevDraft(st.source)
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     }
   }, [])
 
   useEffect(() => {
-    void readDevSrc()
+    void readDevSrc(true)
   }, [readDevSrc])
 
   const devWatch = devSrc?.running === true || (devSrc?.conflicts.length ?? 0) > 0
@@ -263,32 +272,49 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
     return () => clearInterval(timer)
   }, [devWatch])
 
-  /** 一颗按钮翻面：没在跑就起，跑着就（连它起的客户端 dev 一起）停 */
-  const toggleDevSrc = async () => {
-    if (devBusy || devSrc === null) return
-    const stopping = devSrc.running
+  /** 「启动」= 以草稿那一份起。同一份幂等；换了源就是**换源重启**（后端先整棵收掉再起） */
+  const startDevSrc = async () => {
+    if (devBusy) return
     setDevBusy(true)
     setDevNote(null)
     try {
-      const next = stopping ? await wb.devSourceStop() : await wb.devSourceStart()
+      const next = await wb.devSourceStart(devDraft)
       setDevSrc(next)
-      setDevNote(
-        next.running
-          ? {
-              text: `已启动 —— 把 ${next.url} 填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」（保存即生效）。`,
-              bad: false,
-            }
-          : { text: next.note ?? '已停，服务端口也让出来了。', bad: false },
-      )
+      setDevNote({
+        text: `已启动（端的是 ${devLabel(next.source)}）—— 把 ${next.url} 填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」（保存即生效）。`,
+        bad: false,
+      })
     } catch (e) {
-      /* 起不来时后端会把"是谁占着"写进消息里（界面下面还摆着那几条），
+      /* 起不来时后端会把理由写进消息里（没派生 / 没生成 / 是谁占着那个端口），
          但状态也可能是旧的 —— 失败之后立刻重取一次，别让界面停在过期的读数上 */
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
-      await readDevSrc()
+      await readDevSrc(false)
     } finally {
       setDevBusy(false)
     }
   }
+
+  const stopDevSrc = async () => {
+    if (devBusy) return
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = await wb.devSourceStop()
+      setDevSrc(next)
+      setDevNote({ text: next.note ?? '已停，服务端口也让出来了。', bad: false })
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  /**
+   * 那一份的行名 —— **后端给的说法**（`sources[].label`），界面不自己拼一套。
+   * 还没读到状态时退回枚举值本身（`v1`），总比空着强。
+   */
+  const devLabel = (k: DevSourceKind | null): string =>
+    devSrc?.sources.find((o) => o.kind === k)?.label ?? (k ?? '—')
 
   /**
    * 停掉占着某个端口的那个进程（那颗「停掉它」）。
@@ -313,7 +339,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
       })
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
-      await readDevSrc()
+      await readDevSrc(false)
     } finally {
       setDevBusy(false)
     }
@@ -873,20 +899,59 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
               </span>
             </div>
 
-            <div className={s.vrow}>
-              <label className={s.vlabel}>端的是</label>
-              <span className={`${s.vstatic} ${s.mono}`}>
-                {devSrc?.fixtureRoot ?? '…/scripts/preset-test-server/fixtures/v1'}
+            {/* ——— 端哪一份：三行单选（名字 / 说法 / 在哪儿 / 齐没齐都由后端给） ——— */}
+            <div className={s.vhead}>
+              <b>端哪一份</b>
+              <span className={s.vkey}>
+                {devSrc?.running === true
+                  ? '服务在跑着 —— 换到别的会重启它'
+                  : '选一份，再点「启动」'}
               </span>
             </div>
 
-            {devSrc !== null && !devSrc.fixturesReady && (
-              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
-                夹具还没派生 —— 服务起得来，但底下什么都没有（客户端只会说「取不到预设数据」）。
-                先跑一次 <span className={s.mono}>npm run preset-source:make</span>（它从真交付根
-                派生 v1 / v2 两代）。
-              </p>
-            )}
+            {(devSrc?.sources ?? []).map((o) => (
+              <label
+                key={o.kind}
+                className={s.vrow}
+                style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+              >
+                <input
+                  type="radio"
+                  name="dev-source-kind"
+                  value={o.kind}
+                  checked={devDraft === o.kind}
+                  onChange={() => setDevDraft(o.kind)}
+                />
+                <span className={s.grow}>
+                  <b>{o.label}</b>
+                  {devSrc?.running === true && devSrc.source === o.kind && '（正在端这一份）'}
+                  <span className={s.vhelp} style={{ display: 'block' }}>
+                    {o.note}
+                  </span>
+                  <span className={`${s.vhelp} ${s.mono}`} style={{ display: 'block' }}>
+                    {o.root}
+                  </span>
+                  {!o.ready && o.missing !== null && (
+                    <span className={s.vhelp} style={{ display: 'block', color: 'var(--danger)' }}>
+                      {o.missing}
+                    </span>
+                  )}
+                </span>
+                <span className={s.mono}>{o.url}</span>
+              </label>
+            ))}
+
+            <p className={s.vhelp}>
+              「当前交付」那一份端的是<b>预设根</b>、地址要带{' '}
+              <span className={s.mono}>/delivery</span>：真交付那份的{' '}
+              <span className={s.mono}>source.json</span> 写着{' '}
+              <span className={s.mono}>filesRoot: &quot;..&quot;</span>（交付文件住在预设根底下），
+              所以地址那一串由后端按这个规矩给 —— 照抄。
+            </p>
+            <p className={s.vhelp}>
+              端的目录今天是这样，<b>测试模式开着时「当前交付」会自动变成沙箱那一份</b>
+              （连"它齐没齐"一起变）—— 界面不自己推，每读一次都是新那棵树的读数。
+            </p>
 
             {devConflicts.length > 0 && (
               <div className={s.vfield}>
@@ -922,29 +987,51 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             )}
 
             <div className={s.vrow}>
-              <button
-                type="button"
-                className={`${s.btn} ${devSrc?.running === true ? '' : s.btnPrimary}`}
-                disabled={
-                  devBusy || devSrc === null || (!devSrc.running && devConflicts.length > 0)
-                }
-                title={
-                  devSrc?.running === true
-                    ? '停掉这个服务，把端口让出来（只收它自己那一棵，不碰你的客户端 dev）'
-                    : devConflicts.length > 0
+              {devSrc?.running === true ? (
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={devBusy}
+                  title="停掉这个服务，把端口让出来（只收它自己那一棵，不碰你的客户端 dev）"
+                  onClick={() => void stopDevSrc()}
+                >
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnPrimary}`}
+                  disabled={devBusy || devSrc === null || devConflicts.length > 0}
+                  title={
+                    devConflicts.length > 0
                       ? '先把上面那条端口占用处理掉'
-                      : undefined
-                }
-                onClick={() => void toggleDevSrc()}
-              >
-                {devSrc?.running === true ? '停止' : '启动'}
-              </button>
+                      : `以「${devLabel(devDraft)}」这一份起`
+                  }
+                  onClick={() => void startDevSrc()}
+                >
+                  启动
+                </button>
+              )}
+              {/* 跑着的时候选了别的：换源要重启一次服务（后端先整棵收掉再起） */}
+              {devSrc?.running === true && devSrc.source !== devDraft && (
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={devBusy || devConflicts.length > 0}
+                  title={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
+                    devDraft,
+                  )}」：先把它那棵进程树收掉再起，一次点击一件事`}
+                  onClick={() => void startDevSrc()}
+                >
+                  换源并重启
+                </button>
+              )}
               <button
                 type="button"
                 className={s.btn}
                 disabled={devBusy}
                 title="现问一次后端 —— 状态是现问子进程得来的，不靠界面自己记"
-                onClick={() => void readDevSrc()}
+                onClick={() => void readDevSrc(false)}
               >
                 刷新状态
               </button>
@@ -992,6 +1079,15 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             </div>
             <p className={s.vhelp}>
               工作台读写的唯一预设根。改它要改的是仓库结构，不是这里的某一格。
+              {sandbox?.enabled === true && (
+                <>
+                  {' '}
+                  <b style={{ color: 'var(--accent-deep)' }}>
+                    现在摆的是沙箱里那一份（测试模式开着）
+                  </b>
+                  —— 它随模式走，正式那份不在这条路上。
+                </>
+              )}
             </p>
             <div className={s.vrow}>
               <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.presets}</span>
