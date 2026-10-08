@@ -805,7 +805,9 @@ fn working_copy_of(user_root: &Path, sha: &str) -> Option<WorkingCopy> {
             .as_ref()
             .and_then(|l| l.based_on_sha256.as_deref())
             .is_some_and(|s| s.eq_ignore_ascii_case(sha));
-        hit.then(|| WorkingCopy {
+        /* `then_some` 而不是 `then(|| …)`：这一格是**终点**（`f` 后面不再用），
+           命中与否都不影响谁被移动 —— 闭包在这里只是把惰性白写了一遍 */
+        hit.then_some(WorkingCopy {
             path: f.path,
             file_name: f.file_name,
             created: false,

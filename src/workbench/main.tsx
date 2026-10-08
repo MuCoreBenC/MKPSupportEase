@@ -80,15 +80,25 @@ ReactDOM.createRoot(host).render(
  * 窗口照样会出现（宁可白板，不能永不露面）。
  *
  * 浏览器里（探针跑 vite preview 时）没有 Tauri，跳过。
+ *
+ * ★ **但"这个键在不在"判不准**（2026-10-08 探针里现的原形）：`?mock=1` 那个桩
+ * 也往 `__TAURI_INTERNALS__` 上挂了一个 `invoke`（见 `dev/mockBackend.ts`），
+ * 于是守卫放行、`getCurrentWindow()` 在浏览器里**同步抛** `TypeError`
+ * （桩上没有 `metadata`）—— 那一下抛在 rAF 回调里，谁也接不住，探针里就是一条
+ * pageerror。这里只要"没有真的窗口就别显示"：接住它，桩那边本来也没什么可显示的。
  */
 if ('__TAURI_INTERNALS__' in window) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      getCurrentWindow()
-        .show()
-        .catch(() => {
-          /* show 失败没有补救余地（Rust 侧兜底定时器还在），不打断入口 */
-        })
+      try {
+        getCurrentWindow()
+          .show()
+          .catch(() => {
+            /* show 失败没有补救余地（Rust 侧兜底定时器还在），不打断入口 */
+          })
+      } catch {
+        /* 桩（`?mock=1`）不是真的 Tauri：没有窗口可显示，这不是错误 */
+      }
     })
   })
 }
