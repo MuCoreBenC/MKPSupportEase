@@ -38,11 +38,16 @@
  * ★ 它**不碰客户端那一格「预设数据源」**：那是客户端自己的运行时设置
  * （住客户端的 `appDataDir/run/app-state.json`，两个应用的 appDataDir 都不一样），
  * 归客户端设置页管 —— 这里换的是**环境变量**那条路，只在 debug 构建里认。
+ *
+ * ★ **端口被占着时先把占用者摆出来**（2026-10-08 通跑踩出来的那条）：客户端 dev
+ * 已经在跑、占着它的 vite 端口时，新起的这份必撞死在那上面，而界面上原来只留一句
+ * "退出码 1"。现在起之前就探那两个端口，把"谁占着、PID 多少"列出来，并给一颗
+ * 「停掉它」—— 问一句，而不是让人去终端里猜。
  */
 import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { Boot, DevSourceStatus, PublishAccount } from '../api'
+import type { Boot, DevSourceStatus, PortConflict, PublishAccount } from '../api'
 import s from '../c14.module.css'
 
 export default function SettingsPage({ boot }: { boot: Boot }) {
@@ -205,11 +210,11 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
   }
 
   /*
-   * 「本地测试源（开发）」的状态与那两颗按钮。
+   * 「本地测试源（开发）」的状态与那几颗按钮。
    *
-   * ★ **只在跑着的时候**每 2 秒问一次 —— 工作台的页面挂过就一直挂着
-   * （`App.tsx` 的 `.pageSlot`：切走只是藏起来，不卸载），无条件轮询等于
-   * 离开这一页之后还在空转 IPC。不跑的时候它自己退了只是少一次刷新。
+   * ★ **跑着、或者有端口被占着的时候**每 2 秒问一次 —— 工作台的页面挂过就一直挂着
+   * （`App.tsx` 的 `.pageSlot`：切走只是藏起来，不卸载），无条件轮询等于离开这一页
+   * 之后还在空转 IPC。冲突那一路要轮询，是因为作者可能刚在别的终端把那个 dev 停了。
    */
   const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
   const [devBusy, setDevBusy] = useState(false)
@@ -227,13 +232,14 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     void readDevSrc()
   }, [readDevSrc])
 
+  const devWatch = devSrc?.running === true || (devSrc?.conflicts.length ?? 0) > 0
   useEffect(() => {
-    if (devSrc?.running !== true) return
+    if (!devWatch) return
     const timer = setInterval(() => {
       wb.devSourceStatus().then(setDevSrc).catch(() => undefined)
     }, 2000)
     return () => clearInterval(timer)
-  }, [devSrc?.running])
+  }, [devWatch])
 
   /** 一颗按钮翻面：没在跑就起，跑着就（连它起的客户端 dev 一起）停 */
   const toggleDevSrc = async () => {
@@ -253,7 +259,39 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
           : { text: next.note ?? '已停，服务端口也让出来了。', bad: false },
       )
     } catch (e) {
+      /* 起不来时后端会把"是谁占着"写进消息里（界面下面还摆着那几条），
+         但状态也可能是旧的 —— 失败之后立刻重取一次，别让界面停在过期的读数上 */
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      await readDevSrc()
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  /**
+   * 停掉占着某个端口的那个进程（那颗「停掉它」）。
+   *
+   * 把**当时看到的 pid** 一起交回后端 —— 它会重新问一次"这个端口现在是谁的"，
+   * 对不上就拒绝动手（PID 会被复用）。
+   */
+  const clearConflict = async (c: PortConflict) => {
+    if (devBusy) return
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = await wb.devSourceClearConflict(c.port, c.pid)
+      setDevSrc(next)
+      const left = next.conflicts.length
+      setDevNote({
+        text:
+          left === 0
+            ? `${next.note ?? '占用者已停'} —— 现在可以点「启动」了。`
+            : `${next.note ?? '停是停了'}，但还有 ${left} 条占用没处理。`,
+        bad: left > 0,
+      })
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      await readDevSrc()
     } finally {
       setDevBusy(false)
     }
@@ -264,6 +302,7 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     devNote?.text ??
     (devSrc !== null && !devSrc.running ? (devSrc.note ?? null) : null)
   const devBad = devNote?.bad === true
+  const devConflicts = devSrc?.conflicts ?? []
 
   const save = async () => {
     if (busy) return
@@ -670,15 +709,52 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
               </span>
             </div>
 
+            {devConflicts.length > 0 && (
+              <div className={s.vfield}>
+                <div className={s.vhead}>
+                  <b>端口被占着</b>
+                  <span className={s.vkey}>先处理掉，再点「启动」</span>
+                </div>
+                {devConflicts.map((c) => (
+                  <div className={s.vrow} key={c.port}>
+                    <span>{c.text}</span>
+                    <span className={s.grow} />
+                    <button
+                      type="button"
+                      className={s.btn}
+                      disabled={devBusy || c.pid === null}
+                      title={
+                        c.pid === null
+                          ? '认不出占着它的进程 —— 请在那个终端里自己停掉它'
+                          : '把它停掉（后端会先确认这个端口还是它的，再动手）'
+                      }
+                      onClick={() => void clearConflict(c)}
+                    >
+                      停掉它
+                    </button>
+                  </div>
+                ))}
+                <p className={s.vhelp}>
+                  它多半就是你已经在跑的客户端 dev —— 那一份<b>没法被重新指源</b>
+                  （源是它启动时的环境变量），所以起新的必撞在同一个 vite 端口上。
+                  要么停掉它再点「启动」，要么只起服务、把上面那个地址填进客户端设置页。
+                </p>
+              </div>
+            )}
+
             <div className={s.vrow}>
               <button
                 type="button"
                 className={`${s.btn} ${devSrc?.running === true ? '' : s.btnPrimary}`}
-                disabled={devBusy || devSrc === null}
+                disabled={
+                  devBusy || devSrc === null || (!devSrc.running && devConflicts.length > 0)
+                }
                 title={
                   devSrc?.running === true
                     ? '连同它起的客户端 dev 一起停（整棵进程树），并把服务端口让出来'
-                    : undefined
+                    : devConflicts.length > 0
+                      ? '先把上面那几条端口占用处理掉'
+                      : undefined
                 }
                 onClick={() => void toggleDevSrc()}
               >
@@ -709,10 +785,9 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             </p>
 
             <p className={s.vhelp}>
-              ★ <b>客户端 dev 已经在跑时，先把它停掉再点</b>：那一份没法被重新指源
-              （源是它启动时的环境变量），而新起的这份会撞在同一个 vite 端口上 ——
-              终端里会说 <span className={s.mono}>Port 5321 is in use</span>，
-              这里的状态随后会如实说它退出了。
+              ★ <b>端口被占着的话，上面会先把它摆出来</b>（谁占着、PID 多少），
+              点那颗「停掉它」就行 —— 后端会先确认那个端口还是它的才动手（PID 会被复用）。
+              不在跑的时候这里每 2 秒问一次，所以你在别的终端把它停了，界面也会跟上。
             </p>
           </div>
         </div>

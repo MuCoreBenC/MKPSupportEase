@@ -1022,6 +1022,23 @@ export interface PublishAccount {
 }
 
 /**
+ * `dev_source::PortConflict` —— **谁占着关键端口**（起之前该处理掉的那个）。
+ *
+ * 客户端 dev 已经在跑时，新起的这一份必撞在它的 vite 端口上（`Port 5321 is in use`），
+ * 而那一份没法被重新指源 —— 所以起之前先把占用者摆出来，问一句要不要停。
+ */
+export interface PortConflict {
+  port: number
+  /** 这个端口是干什么的（后端给的，界面不自己拼） */
+  role: string
+  /** 占着它的进程；认不出身份时 null（那时不许编一个名字出来） */
+  pid: number | null
+  process: string | null
+  /** 那句话人话 —— **事实只有一处**：后端写好，界面直接摆出来 */
+  text: string
+}
+
+/**
  * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
  *
  * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
@@ -1040,6 +1057,8 @@ export interface DevSourceStatus {
   command: string
   /** 不在跑时的原因（退出码那句 / "本来就没在跑"）；在跑时 null */
   note: string | null
+  /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 两个端口都干净 */
+  conflicts: PortConflict[]
 }
 
 /* ---------- 状态词 ---------- */
@@ -1768,6 +1787,14 @@ export const wb = {
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
   devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
   devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
+  /**
+   * **停掉占着某个端口的那个进程**（那张卡上的「停掉它」）。
+   *
+   * ★ 把当时看到的 `pid` 一起交回去 —— 后端**重新问一次"这个端口现在是谁的"**，
+   * 对不上就拒绝动手（PID 会被复用）。端口上没人了时幂等成功。
+   */
+  devSourceClearConflict: (port: number, pid: number | null) =>
+    invoke<DevSourceStatus>('wb_dev_source_clear_conflict', { port, pid }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

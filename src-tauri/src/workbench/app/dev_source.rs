@@ -30,18 +30,25 @@
 //!   那道闸后面），给用户的二进制里既没有这颗按钮，也没有这三条命令。
 //! - 输出**继承给终端**：服务与客户端 dev 的日志打在起工作台的那个终端里。
 //!   这个按钮只是"替你敲了那条命令"，不另造一套日志窗口充当真相。
-//! - **不拦"客户端 dev 已经在跑"**（那是最常见的一种点不动的原因）：那一份没法被
-//!   重新指源（源是它启动时的环境变量），而新起的这一份会撞在同一个 vite 端口
-//!   （5321，`strictPort`）与同一个可执行文件上。★ 但这件事**不在这里猜** ——
-//!   进程的命令行 / 工作目录在某些环境里读不到（本机实测：`sysinfo` 对所有进程都
-//!   返回空），猜错就成了"按钮点了没反应"，比不拦更坏。所以照常起，原因由那条命令
-//!   自己打在终端里（`Port 5321 is in use`），界面把"它退出了（退出码 N）——
-//!   日志在终端"如实说出来。
+//! - **端口被占着时，先把占用者摆出来、问一句**（2026-10-08 通跑踩出来的那条）：
+//!   客户端 dev 已经在跑时，点「启动」会起一份新的 `tauri dev`，它的 vite 撞在
+//!   5321 上 → `beforeDevCommand` 非零退出 → **整条链死掉**，界面上只留一句
+//!   「退出码 1」。而真正的答案是"5321 被占着，占它的是谁" —— 所以这里**提前探端口**
+//!   （`conflicts_of`），把占用者连同 PID 摆到界面上，让作者一句话人话决定
+//!   "要不要把它停了"（`wb_dev_source_clear_conflict`）。
+//!
+//!   ★ 判据是**端口**，不是命令行：进程的命令行 / 工作目录在某些环境里读不到
+//!   （本机实测 `sysinfo` 对所有进程都返回空），拿它做判据会变成"按钮点了没反应"；
+//!   而端口是硬事实 —— 谁在听，`netstat` / `lsof` 说得出来，`taskkill` 停得掉。
+//!   （旧项目 `mkppanel/presets_server.go` 的 `ListOccupiedPorts` / `StopPortProcess`
+//!   就是这一套，这里按同一个形状补上。）
 
 use std::collections::HashMap;
+use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -80,6 +87,24 @@ pub struct DevSourceStatus {
     pub command: String,
     /// 不在跑的时候为什么：退出码那句 / "本来就没在跑"。在跑时 `null`
     pub note: Option<String>,
+    /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 / 客户端 dev 的 vite
+    /// 端口被别人占着的话，点「启动」必死在那上面。空 = 两个端口都干净
+    pub conflicts: Vec<PortConflict>,
+}
+
+/// 谁占着那个关键端口。**摆给人看的**（`text` 是那句人话）+
+/// **给按钮用的**（`port` / `pid` 原样交回去，后端再验一次明正身才动手）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortConflict {
+    pub port: u16,
+    /// 这个端口是干什么的（界面不自己拼这一句）
+    pub role: String,
+    /// 占着它的进程（`netstat` / `lsof` 拿不到身份时为 `null`）
+    pub pid: Option<u32>,
+    pub process: Option<String>,
+    /// 那句话人话（**事实只有一处**：界面直接摆出来，不重写一遍措辞）
+    pub text: String,
 }
 
 /* ---------- 进程状态 ---------- */
@@ -202,6 +227,175 @@ fn kill_process_tree(root: u32) {
     }
 }
 
+/* ---------- 端口：谁占着，怎么让它让开 ---------- */
+
+/// 端口有没有人在听。**两个回环地址都试**：对面可能只绑了 v4，也可能只绑了 v6
+/// （vite 绑的是 `localhost`，在有些机器上只落在 `::1`）。
+fn port_taken(port: u16) -> bool {
+    let v4 = SocketAddr::from(([127, 0, 0, 1], port));
+    let v6 = SocketAddr::from(([0u16, 0, 0, 0, 0, 0, 0, 1], port));
+    [v4, v6].iter().any(|a| TcpListener::bind(a).is_err())
+}
+
+/// `127.0.0.1:5321` / `[::1]:5321` / `0.0.0.0:5321` → `5321`
+fn port_of_addr(addr: &str) -> Option<u16> {
+    addr.rsplit_once(':')?.1.parse().ok()
+}
+
+/// `http://localhost:5321` / `http://localhost:5321/` → `5321`
+fn port_of_url(url: &str) -> Option<u16> {
+    let rest = url.split_once("//").map_or(url, |(_, r)| r);
+    let host_port = rest.split(['/', '?', '#']).next()?;
+    host_port.rsplit_once(':')?.1.parse().ok()
+}
+
+/// 客户端 dev 的 vite 端口：读 `<repo>/src-tauri/tauri.conf.json` 的 `build.devUrl`。
+///
+/// **不写死第二份**：那个端口与 `vite.config.ts` 的 `server.port` 是一对
+/// （`tauri dev` 的 devUrl 必须落在 vite 起的那个端口上，见那边头注）。
+fn client_dev_port(repo: &Path) -> Option<u16> {
+    let path = repo.join("src-tauri").join("tauri.conf.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    port_of_url(value.get("build")?.get("devUrl")?.as_str()?)
+}
+
+/// 谁在听这个端口。**平台各一套**，与旧项目 `mkppanel/presets_server.go` 的
+/// `findListenPid` 同一个思路：Windows 用 `netstat -ano`，类 Unix 用 `lsof`。
+fn listen_pid(port: u16) -> Option<u32> {
+    if cfg!(windows) {
+        let out = Command::new("netstat").arg("-ano").output().ok()?;
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            /* TCP    127.0.0.1:5321    0.0.0.0:0    LISTENING    1234 */
+            let f: Vec<&str> = line.split_whitespace().collect();
+            if f.len() < 5
+                || !f[0].eq_ignore_ascii_case("tcp")
+                || !f[3].eq_ignore_ascii_case("listening")
+                || port_of_addr(f[1]) != Some(port)
+            {
+                continue;
+            }
+            if let Ok(pid) = f[4].parse() {
+                return Some(pid);
+            }
+        }
+        return None;
+    }
+    let out = Command::new("lsof")
+        .args([
+            "-nP".to_owned(),
+            format!("-iTCP:{port}"),
+            "-sTCP:LISTEN".to_owned(),
+        ])
+        .output()
+        .ok()?;
+    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+        /* node 1234 user 21u IPv4 … TCP *:5321 (LISTEN) */
+        if let Some(pid) = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+/// PID → 进程名（`sysinfo` 只刷这一个，别为一行字去扫全表）。
+fn process_name(pid: u32) -> Option<String> {
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), false);
+    sys.process(Pid::from_u32(pid))
+        .map(|p| p.name().to_string_lossy().into_owned())
+}
+
+/// 那个端口现在是谁的：PID + 名字。认不出（工具不在 / 输出格式变了）就 `None` ——
+/// 界面照实说"认不出是谁"，不编。
+fn listen_owner(port: u16) -> Option<(u32, String)> {
+    let pid = listen_pid(port)?;
+    Some((
+        pid,
+        process_name(pid).unwrap_or_else(|| "认不出名字".to_owned()),
+    ))
+}
+
+/// 那句人话。**事实只有一处**：界面直接摆 `text`，不重写一遍措辞。
+fn describe_conflict(c: &PortConflict) -> String {
+    match (c.pid, c.process.as_deref()) {
+        (Some(pid), Some(name)) => format!("{}（{}）被 {}（PID {}）占着", c.port, c.role, name, pid),
+        (Some(pid), None) => format!("{}（{}）被 PID {} 占着", c.port, c.role, pid),
+        _ => format!("{}（{}）被占着（认不出是谁）", c.port, c.role),
+    }
+}
+
+/// 起之前那两个端口干净吗。**这就是"别让人去终端里猜"的那一眼**：
+/// 客户端 dev 已经在跑的话，这一份新起的必然撞在它的 vite 端口上，而那一份
+/// 没法被重新指源（源是它启动时的环境变量）—— 所以要问的是"要不要把它停掉"。
+fn conflicts_of(repo: &Path) -> Vec<PortConflict> {
+    let mut out: Vec<PortConflict> = Vec::new();
+    let mut check = |port: u16, role: &str| {
+        if !port_taken(port) {
+            return;
+        }
+        let who = listen_owner(port);
+        let (pid, process) = match who {
+            Some((pid, name)) => (Some(pid), Some(name)),
+            None => (None, None),
+        };
+        let mut c = PortConflict {
+            port,
+            role: role.to_owned(),
+            pid,
+            process,
+            text: String::new(),
+        };
+        c.text = describe_conflict(&c);
+        out.push(c);
+    };
+    let src_port = port();
+    check(src_port, "测试源自己的端口");
+    /* 客户端 dev 的 vite 端口。读不出来（仓库怪）时**跳过这一条** —— 少一次提示，
+       也好过因为一格配置读不动就把「启动」锁死（那时还有"退出码 1 + 终端日志"那条兜底） */
+    match client_dev_port(repo) {
+        Some(p) if p != src_port => check(p, "客户端 dev 的 vite 端口"),
+        Some(_) => {}
+        None => tracing::warn!("读不到 tauri.conf.json 的 devUrl —— 这一轮的端口冲突探测少一条"),
+    }
+    out
+}
+
+/// 起不来时那句总结（错误消息用）。
+fn conflict_sentence(conflicts: &[PortConflict]) -> String {
+    let parts: Vec<&str> = conflicts.iter().map(|c| c.text.as_str()).collect();
+    format!("起不来 —— {}", parts.join("；"))
+}
+
+/// 停掉一个进程：**先走 `sysinfo`**（`release_tx` 已在用同一套），
+/// **拿不到再退回系统命令**（`taskkill /F` / `kill -9`）—— 权限不对时前者会悄悄失败。
+fn kill_pid(pid: u32) -> Result<(), AppError> {
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), false);
+    if let Some(p) = sys.process(Pid::from_u32(pid)) {
+        if p.kill() {
+            return Ok(());
+        }
+    }
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("taskkill");
+        c.args(["/F".to_owned(), "/PID".to_owned(), pid.to_string()]);
+        c
+    } else {
+        let mut c = Command::new("kill");
+        c.args(["-9".to_owned(), pid.to_string()]);
+        c
+    };
+    let out = cmd
+        .output()
+        .map_err(|e| AppError::io("停不了那个进程").with_detail(e.to_string()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(AppError::permission_denied(format!("停不了 PID {pid} 那个进程"))
+        .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+}
+
 /* ---------- 状态视图 ---------- */
 
 /// 退出码那句人话。`code() == None` = 被信号带走的（Unix）
@@ -221,6 +415,8 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         repo_root: repo.display().to_string(),
         command: format!("npm run {NPM_SCRIPT}"),
         note,
+        /* 不在跑的时候才探端口：跑着的时候 8787 本来就是我们自己占着 */
+        conflicts: conflicts_of(repo),
     }
 }
 
@@ -228,6 +424,17 @@ fn status_of(cur: &DevSource, repo: &Path) -> DevSourceStatus {
     let mut st = base_status(repo, cur.exited.clone());
     st.pid = Some(cur.pid);
     st.running = cur.exited.is_none();
+    if st.running {
+        st.conflicts.clear();
+    } else if let Some(first) = st.conflicts.first() {
+        /* 它自己退了 → 把"多半为什么"也指出来。通跑踩出来的正是这一条：退出码 1
+           背后是 5321 被占着，而那句话原来在界面上根本看不见（只有终端里有） */
+        let why = format!("多半是 {} 被占着顶下来的", first.port);
+        st.note = Some(match st.note.take() {
+            Some(n) => format!("{n} —— {why}"),
+            None => why,
+        });
+    }
     st
 }
 
@@ -250,12 +457,9 @@ fn refresh_exit(cur: &mut DevSource) {
 /// **幂等**：已经在跑就把现状报回去，不再起第二个 —— 第二份会撞在 8787 上，
 /// 然后那个进程静悄悄地死掉，而人以为自己点了两下、起了两个。
 ///
-/// ★ **不拦"已经有一个客户端 dev 在跑"**：那一份没法被重新指源（源是它启动时的
-/// 环境变量），而这一份会撞在同一个 vite 端口与同一个可执行文件上。但那件事
-/// **不在这里猜** —— 进程的命令行 / 工作目录在某些环境里读不到（本机实测：sysinfo
-/// 对所有进程都返回空），猜错就变成"按钮点了没反应"，比不拦更坏。
-/// 让它照常起，理由由那条命令自己打在终端里（`Port 5321 is in use`），界面上的
-/// `note` 会把"它退出了（退出码 N）—— 日志在终端"如实说出来。
+/// **起之前先探端口**（[`conflicts_of`]）：被占着就**如实拒绝**，把那句人话
+/// （谁占着、PID 多少）交出去，界面据此摆出「停掉它」那颗按钮 —— 而不是硬起、
+/// 让它撞死在那里、只留一句"退出码 1"。
 #[tauri::command]
 pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
     crate::ipc::traced("wb_dev_source_start", |_| {
@@ -267,6 +471,14 @@ pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
             if cur.running_now() {
                 return Ok(status_of(cur, &repo));
             }
+        }
+        /* ★ 端口那一眼：起之前把那两个端口的占用者摆出来，而不是让它起一半死掉 */
+        let conflicts = conflicts_of(&repo);
+        if !conflicts.is_empty() {
+            return Err(AppError::invalid_argument(conflict_sentence(&conflicts)).with_detail(
+                "界面会把这几条摆出来，并给一颗「停掉它」（`wb_dev_source_clear_conflict`）"
+                    .to_owned(),
+            ));
         }
         let child = spawn_dev_update(&repo)?;
         let pid = child.id();
@@ -302,6 +514,71 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
             Err(e) => format!("已停（不过收尸时出了点岔子：{e}）"),
         };
         tracing::info!(pid = cur.pid, "本地测试源已停（连同它起的客户端 dev）");
+        Ok(base_status(&repo, Some(note)))
+    })
+}
+
+/// **停掉占着某个端口的那个进程**（界面上那颗「停掉它」）。
+///
+/// ★ **先验明正身再动手**：前端把它当时看到的 `pid` 交回来，这里重新问一次
+/// "这个端口现在是谁的" —— 对不上就拒绝（PID 会被复用，照
+/// `release_tx::wb_release_kill_dev_watcher` 那条纪律：宁可让人自己动手，也不误伤）。
+///
+/// **幂等**：端口上没人了就直接说"不用停"，不报错（界面那颗按钮不该因为
+/// "其实已经没了"而炸）。
+#[tauri::command]
+pub fn wb_dev_source_clear_conflict(
+    port: u16,
+    pid: Option<u32>,
+) -> Result<DevSourceStatus, AppError> {
+    crate::ipc::traced("wb_dev_source_clear_conflict", |_| {
+        let repo = crate::workbench::paths::repo_root();
+        {
+            let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cur) = guard.as_mut() {
+                refresh_exit(cur);
+                if cur.running_now() {
+                    return Err(AppError::invalid_argument(
+                        "本地测试源正在跑 —— 先点「停止」，再处理端口上的占用者",
+                    ));
+                }
+            }
+        }
+
+        if !port_taken(port) {
+            return Ok(base_status(
+                &repo,
+                Some(format!("{port} 上已经没人了 —— 不用停")),
+            ));
+        }
+        let Some((now_pid, name)) = listen_owner(port) else {
+            return Err(AppError::permission_denied(format!(
+                "认不出占着 {port} 的是哪个进程（没拿到 PID）—— 请在那个终端里自己把它停掉"
+            )));
+        };
+        if let Some(said) = pid {
+            if said != now_pid {
+                return Err(AppError::invalid_argument(format!(
+                    "{port} 现在的占用者换人了：你看到的是 PID {said}，现在是 {name}（PID {now_pid}）—— 拒绝动手，请刷新再看一眼"
+                )));
+            }
+        }
+
+        kill_pid(now_pid)?;
+        /* 等端口真的让出来（**有界**）：进程收到了终止信号，但端口未必立刻释放 */
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(3) {
+            if !port_taken(port) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+        let note = if port_taken(port) {
+            format!("{name}（PID {now_pid}）已经收到终止，但 {port} 还被占着 —— 可能还有别的进程在听")
+        } else {
+            format!("已停掉占着 {port} 的 {name}（PID {now_pid}）")
+        };
+        tracing::info!(port, pid = now_pid, name = %name, "端口占用者已停");
         Ok(base_status(&repo, Some(note)))
     })
 }
@@ -469,6 +746,66 @@ mod tests {
             }
         }
         panic!("收完还活着（包装层 {root_pid} / 儿子 {child_pid}）—— 只杀到包装层");
+    }
+
+    /// 端口从地址里剥出来：`netstat` 给的形式有两种（v4 / v6）
+    #[test]
+    fn the_port_is_read_out_of_the_address() {
+        assert_eq!(port_of_addr("127.0.0.1:5321"), Some(5321));
+        assert_eq!(port_of_addr("0.0.0.0:8787"), Some(8787));
+        assert_eq!(port_of_addr("[::1]:5321"), Some(5321));
+        assert_eq!(port_of_addr("[::]:8787"), Some(8787));
+        assert_eq!(port_of_addr("127.0.0.1"), None);
+        assert_eq!(port_of_addr("*:*"), None);
+    }
+
+    /// `devUrl` → 端口（`tauri.conf.json` 里那一格）
+    #[test]
+    fn the_port_is_read_out_of_the_dev_url() {
+        assert_eq!(port_of_url("http://localhost:5321"), Some(5321));
+        assert_eq!(port_of_url("http://localhost:5321/"), Some(5321));
+        assert_eq!(port_of_url("https://127.0.0.1:8443/x?y#z"), Some(8443));
+        assert_eq!(port_of_url("http://localhost"), None);
+        assert_eq!(port_of_url(""), None);
+    }
+
+    /// 客户端 dev 的端口是**从 `tauri.conf.json` 读出来的**，不是第三份写死的数。
+    /// 这条红了 = 那个 `devUrl` 变了 —— 顺手看一眼 `vite.config.ts` 的 `server.port`
+    /// 跟没跟上（`tauri dev` 的 devUrl 必须落在 vite 起的那个端口上，错开就是白屏）。
+    #[test]
+    fn the_client_dev_port_comes_from_the_tauri_config() {
+        let p = client_dev_port(&crate::workbench::paths::repo_root());
+        assert_eq!(p, Some(5321), "读到的客户端 dev 端口是 {p:?}");
+    }
+
+    /// 三档说法：认得名 / 只有 PID / 认不出 —— **认不出时不许编一个名字出来**
+    #[test]
+    fn a_conflict_says_who_holds_the_port_or_admits_it_cannot_tell() {
+        let mk = |pid: Option<u32>, process: Option<&str>| {
+            let mut c = PortConflict {
+                port: 5321,
+                role: "客户端 dev 的 vite 端口".to_owned(),
+                pid,
+                process: process.map(str::to_owned),
+                text: String::new(),
+            };
+            c.text = describe_conflict(&c);
+            c
+        };
+        assert_eq!(
+            mk(Some(1234), Some("node.exe")).text,
+            "5321（客户端 dev 的 vite 端口）被 node.exe（PID 1234）占着"
+        );
+        assert_eq!(
+            mk(Some(1234), None).text,
+            "5321（客户端 dev 的 vite 端口）被 PID 1234 占着"
+        );
+        assert!(mk(None, None).text.contains("认不出是谁"));
+
+        /* 起不来那句总结：几条并成一句、以"起不来"开头 */
+        let s = conflict_sentence(&[mk(Some(1), Some("node.exe"))]);
+        assert!(s.starts_with("起不来"), "实测「{s}」");
+        assert!(s.contains("PID 1"));
     }
 
     /// 报给界面的那条命令与真起的那条是同一个（界面不自己拼一遍，也就不该漂）
