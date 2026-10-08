@@ -1891,8 +1891,15 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
    *
    * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
    *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
-   *   - **机型**这一层根本没有来源（今天没有地方让用户标它）→ 任何机型档下都列，
-   *     机上那格写「—」、名称列上挂「未标机型」—— 这与官方那半边的 `untagged` 是同一条口径。
+   *   - **机型**这一档**真的筛**：归属（文件头 `# machine:` / `# variant:` 那两行，2026-10-07
+   *     起就有，还能「改归属」）说得出属于哪台机的，就只在那台机下出现；
+   *     **归属认不出的**（导入的裸文件）才在任何机型档下列，机上那格写「—」、
+   *     名称列挂「未标机型」。这与官方那半边的 `untagged` 是同一条口径。
+   *
+   * ★ 这一段注释原来写的是「机型这一层根本没有来源（今天没有地方让用户标它）→ 任何机型档下都列」
+   * —— 那句话在「改归属」落地那天就过期了，而**没人跟着改筛**，于是筛 A1 mini 时 A1 / X1C
+   * 的文件照旧满屏（作者 2026-10-08 实测：「我这个筛选有问题呀，我选 mini，他也把其他的都筛出来了」）。
+   * 现在按归属筛（见下面那个 `.filter`）。
    */
   const mine = mineFiles
     .filter((f) => f.kind === null || matchesKind(kind, f.kind))
@@ -1973,6 +1980,15 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         copiedFromName: f.copiedFromName,
       }
     })
+    /*
+     * 机型这一档**真的筛**（2026-10-08 修）：归属说得出属于哪台机的，就只在那一档下出现；
+     * 归属认不出的（`ownMachineId === null`，导入的裸文件）在任何机型档下列 ——
+     * 藏起来等于说他没这份文件。`machineId === ''` 是「全部机型」那一档。
+     */
+    .filter(
+      (row) =>
+        row.ownMachineId === null || machineId === '' || row.ownMachineId === machineId,
+    )
 
   /*
    * 目录里登记的交付预设（**切片器档**）：下载之后它们就躺在下载区，

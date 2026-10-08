@@ -1033,17 +1033,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     if (row === null) return []
 
     /*
-     * 云端表：**仓库里的东西删不掉**（客户端管不到云端）——但**本机那一份可以删**。
+     * 云端表：**只有下载** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
      *
-     * ★ 2026-10-08 补上这一项。作者的实测是：「我在本地删除，我在云端看到的还是显示已下载」
-     * —— 因为他删的是**自己那份副本**（`presets-mine/`），而那一行说的「已下载」指的是
-     * **下载区里那一份**（另一个地方的东西，`deleteDeliveryFile` 早就有，只是一直没挂出来）。
-     * 两件事都说得通，缺的是"把 `已下载` 撤销掉"的那颗按钮：现在它在这儿 ——
-     * 删掉本机这份，那一行回到「未下载」，随时能再下一份（云端不受影响）。
+     * ★ 作者 2026-10-08 把它定死了：「云端的不管它删除下载……这云端就是云端的，
+     * 就是一个列表啊，你就把它想象成一份那个下载的列表啊，就像你去浏览器下东西一样，
+     * 别人只是让你下载，你都不能修改人家的东西好不好」。
+     * （同一天上午这里短暂挂过一颗「删除本机这份」—— 那是把"我这一侧"的事混进了
+     * 云端表，作者当天就否了。要删自己那份副本，去**本地表**；要删下载区那份官方副本，
+     * 那是本地表里切片器那一档的事。**云端表一味只读**。）
      */
     if (row.scope === 'cloud') {
-      /* 只有**交付行且真下过**才给这一项：官方仓库行本机那份不归这一页管 */
-      const hasLocalCopy = row.origin === 'release' && row.downloaded
       return [
         {
           id: 'download',
@@ -1051,21 +1050,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           label: UPDATE_ACTION_TEXT.missing,
           onSelect: () => download(row),
         },
-        ...(hasLocalCopy
-          ? ([
-              { separator: true },
-              {
-                id: 'removeLocal',
-                label: '删除本机这份',
-                danger: true,
-                confirm: {
-                  question: `删掉本机那份 ${row.fileName}？`,
-                  detail: removeConfirmDetail(row),
-                },
-                onSelect: () => runRemove(row),
-              },
-            ] satisfies ContextMenuEntry[])
-          : []),
         {
           id: 'link',
           label: '复制链接',
