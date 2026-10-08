@@ -82,6 +82,8 @@
 import { Fragment, useState } from 'react'
 import type { ContextMenuApi } from '../../components/menu'
 import type { Machine } from '../../api'
+/* 机型识别色：一色一机型（`A1` 与 `A1 mini` 光靠读字分不开 —— 见那个模块的头） */
+import { machineToneKeyOf, machineToneOf } from '../ui/machineTone'
 import { longStatText, shortStatText } from '../store/package'
 import {
   ACTION_TEXT,
@@ -354,6 +356,13 @@ export default function PresetTable({
             {rows.map((row) => {
               const version = versionsText(row.versions)
               /*
+               * 机型识别色（2026-10-08）：`A1` 与 `A1 mini` 只差四个字母，作者在真机上
+               * 把 A1 那行看成了 A1 mini、点了下载才发现。一色一机型，见 `ui/machineTone.ts`。
+               * 「我的文件」按**文件自己标的归属**上色（`machineToneKeyOf` 收的规矩）。
+               */
+              const machineToneKey = machineToneKeyOf(row)
+              const machineTone = machineToneOf(machineToneKey)
+              /*
                * 行左边那道绿竖线只标**「正在生效的那一份」**：本地表是 live（MKP 已应用 /
                * 切片器已复制），云端表是 applied（仓库里那一份就是你在用的那一份）。
                * 云端的「已下载」不画线 —— 下载不等于生效，九行里有八行带绿线那道线就没意思了。
@@ -452,8 +461,19 @@ export default function PresetTable({
                     </span>
                   </td>
 
+                  {/*
+                    机型这一格是**带识别色的小标签**，不是一串灰字（2026-10-08）：
+                    光靠读字分不开 `A1` 与 `A1 mini`，颜色能先于文字被认出来。
+                    `data-machine` 留着给探针按机型取值（不是装饰）。
+                  */}
                   <td className={s.machine} title={row.machineText}>
-                    {row.machineText}
+                    <span
+                      className={s.machineChip}
+                      data-machine={machineToneKey}
+                      style={{ color: machineTone.ink, background: machineTone.bg }}
+                    >
+                      {row.machineText}
+                    </span>
                   </td>
 
                   {mkp ? (
