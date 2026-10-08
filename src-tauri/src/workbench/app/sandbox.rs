@@ -398,6 +398,9 @@ pub fn wb_sandbox_set(app: AppHandle, enabled: bool) -> Result<SandboxStatus, Ap
 
         paths::set_sandbox(enabled);
         write_mode(&app, enabled)?;
+        /* 标题栏也要跟着走：它是唯一"切到别的窗口还看得见"的那一处
+           （任务栏 / Alt+Tab / 截图里都在）—— 界面里那一圈换装看不见的时候还有它 */
+        crate::workbench::refresh_window_title(&app);
         /* 根换了：把旧会话丢掉，下一条命令按新根重建 */
         super::reset_session();
         tracing::warn!(

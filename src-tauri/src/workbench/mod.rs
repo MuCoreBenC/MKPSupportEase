@@ -67,6 +67,29 @@ pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
 /// 工作台窗口的标签。与客户端的 `main` 分开，`get_webview_window` 拿的是各自那一个
 const WINDOW_LABEL: &str = "workbench";
 
+/// 窗口标题。**测试模式那一份带前缀** —— 标题栏是唯一一处"切到别的窗口也还看得见"
+/// 的地方（任务栏、Alt+Tab、截图里都在），作者要的"时时刻刻知道我在哪一边"就靠它兜底。
+fn window_title() -> String {
+    if paths::sandbox_on() {
+        format!("{SANDBOX_TITLE_PREFIX}SupportEase 工作台")
+    } else {
+        "SupportEase 工作台".to_owned()
+    }
+}
+
+/// 测试模式下标题的前缀（一眼分得开）
+const SANDBOX_TITLE_PREFIX: &str = "【测试模式】";
+
+/// 把窗口标题按**现在**的模式写一遍。
+///
+/// 开窗时用 [`window_title`]，切换模式时由那几条命令调这里 —— 标题不是启动一次的
+/// 快照，它得跟着模式走，否则人会对着一个说"正式"的标题栏看沙箱。
+pub fn refresh_window_title(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
+        let _ = win.set_title(&window_title());
+    }
+}
+
 /// 开工作台窗口。已经开着就聚焦，不重复开第二个。
 ///
 /// 刻意**不带** transparent / titleBarStyle=Overlay 这些客户端的窗口花活：
@@ -79,7 +102,7 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
 
     let win =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
-            .title("SupportEase 工作台")
+            .title(window_title())
             .inner_size(1360.0, 900.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)

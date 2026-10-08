@@ -49,10 +49,30 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { Boot, DevSourceStatus, PortConflict, PublishAccount } from '../api'
+import type {
+  Boot,
+  DevSourceStatus,
+  PortConflict,
+  PublishAccount,
+  SandboxStatus,
+} from '../api'
 import s from '../c14.module.css'
 
-export default function SettingsPage({ boot }: { boot: Boot }) {
+/** 字节数给人看（一位小数够） */
+const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`
+
+interface Props {
+  boot: Boot
+  /**
+   * 测试模式现状。★ **由外壳取、外壳也照它换装**（横幅 / 整窗配色 / 状态栏那一枚）——
+   * 这一页不自己再取一份：两处各取各的，迟早出现"横幅说在测试、这一格说在正式"。
+   */
+  sandbox: SandboxStatus | null
+  /** 切模式 / 重拷 / 清空之后交给外壳：它换装并把整本按新根重取一遍 */
+  onSandbox: (next: SandboxStatus) => void
+}
+
+export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   /* 官方源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
      下次 wb_boot 会带回同一份）。GitHub 是主源；Gitee 是镜像（空 = 没配/清除） */
   const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
@@ -306,6 +326,40 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
   const devBad = devNote?.bad === true
   const devConflicts = devSrc?.conflicts ?? []
 
+  /*
+   * 测试模式（沙箱）：开关 + 清空 / 从正式重拷。
+   *
+   * ★ 三件事都**由后端做**（拷、清、切根都在 Rust 那边），这里只负责"问一句、把结果
+   * 交给外壳" —— 外壳拿到新的那一份之后换装（横幅 / 整窗配色 / 状态栏那一枚），
+   * 并把整本按新根重取一遍（根换了，界面上的机型 / 参数 / 交付产物全是旧根的）。
+   */
+  const [sandBusy, setSandBusy] = useState(false)
+  const [sandNote, setSandNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const sandboxAct = async (what: 'set' | 'refill' | 'wipe', enabled?: boolean) => {
+    if (sandBusy) return
+    setSandBusy(true)
+    setSandNote(null)
+    try {
+      const next =
+        what === 'set'
+          ? await wb.sandboxSet(enabled === true)
+          : what === 'refill'
+            ? await wb.sandboxRefill()
+            : await wb.sandboxWipe()
+      setSandNote({
+        text: next.note ?? (next.enabled ? '已经在测试模式里了' : '已经切回正式了'),
+        bad: false,
+      })
+      onSandbox(next)
+    } catch (e) {
+      /* 有未保存的改动时后端会拒绝（草稿是两套）—— 那句原话就是该看的 */
+      setSandNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setSandBusy(false)
+    }
+  }
+
   const save = async () => {
     if (busy) return
     setBusy(true)
@@ -367,6 +421,113 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
 
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      {/* ——— 测试模式（沙箱）：整套数据根切到另一棵树 ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>测试模式（沙箱）</b>
+          <span className={s.cardNote}>
+            整套数据根切到仓库里另一棵树 —— 正式那份一个字节都不动
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              开着的时候：你改的每一个 <span className={s.mono}>.toml</span> /{' '}
+              <span className={s.mono}>.json</span>、点「生成」写出来的交付产物，
+              连带资产库里的 3MF 与模型，<b>全都落在沙箱里</b>；正式那份{' '}
+              <span className={s.mono}>presets/</span> 一动不动。草稿也分两套（互不影响），
+              <b>发布与发版在测试模式里是关着的</b>。
+            </p>
+
+            <div className={s.vhead}>
+              <b>现在</b>
+              <span className={s.vkey}>
+                {sandbox === null
+                  ? '读取中……'
+                  : sandbox.enabled
+                    ? '测试模式（沙箱）'
+                    : '正式'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <label className={s.vlabel}>沙箱根</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {sandbox?.sandboxRoot ?? '读取中……'}
+              </span>
+            </div>
+            <div className={s.vrow}>
+              <label className={s.vlabel}>里面有什么</label>
+              <span className={s.vstatic}>
+                {sandbox === null
+                  ? '读取中……'
+                  : sandbox.ready
+                    ? `${sandbox.files} 个文件 · ${mb(sandbox.bytes)}`
+                    : '空的（还没从正式拷）'}
+              </span>
+            </div>
+            <div className={s.vrow}>
+              <label className={s.vlabel}>从哪儿拷</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {sandbox?.realPresetsRoot ?? '读取中……'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <button
+                type="button"
+                className={`${s.btn} ${sandbox?.enabled === true ? '' : s.btnPrimary}`}
+                disabled={sandBusy || sandbox === null}
+                title={
+                  sandbox?.enabled === true
+                    ? '切回正式 —— 沙箱原样留着，下次回来还在'
+                    : '开之前会先把正式那份整个拷进沙箱（presets/ 整棵，含 3MF 与模型）'
+                }
+                onClick={() => void sandboxAct('set', sandbox?.enabled !== true)}
+              >
+                {sandbox?.enabled === true
+                  ? '关掉测试模式（切回正式）'
+                  : '打开测试模式（从正式拷一份）'}
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={sandBusy || sandbox === null}
+                title="清空沙箱，再从正式那份重新拷一份 —— 测试随时可以重来"
+                onClick={() => void sandboxAct('refill')}
+              >
+                从正式重拷一份
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={sandBusy || sandbox === null}
+                title="只清空沙箱（正式那边一根汗毛都不碰）"
+                onClick={() => void sandboxAct('wipe')}
+              >
+                清空沙箱
+              </button>
+            </div>
+
+            {sandNote !== null && (
+              <p
+                className={s.vhelp}
+                style={sandNote.bad ? { color: 'var(--danger)' } : undefined}
+              >
+                {sandNote.text}
+              </p>
+            )}
+
+            <p className={s.vhelp}>
+              ★ 沙箱就在 <span className={s.mono}>workbench/.sandbox/</span> 里（与草稿{' '}
+              <span className={s.mono}>.draft</span> 同一族，不入库）—— 整个目录删掉是安全的，
+              点「从正式重拷一份」就回来了。切模式时若还有未保存的改动，会先让你保存或放弃
+              （草稿是两套，不能悄悄吞掉）。
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ——— 发布账户（第三刀下半）：GitHub / Gitee 对称，各三格 ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>

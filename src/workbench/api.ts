@@ -1045,6 +1045,29 @@ export interface PortConflict {
  * 那个进程可能是人在终端里 Ctrl+C 掉的。`url` 就是 `MKPSE_PRESET_SOURCE_URL`
  * 注进客户端的那个地址 —— 界面照后端说的报，不自己拼一遍。
  */
+/**
+ * `sandbox::SandboxStatus` —— **测试模式（沙箱）**现在什么样。
+ *
+ * 作者 2026-10-08：「我希望它是完全另起炉灶那种……测试的归测试的，而且我测试的随时
+ * 可以把这些清空，从正式的复制一份过去，再进行测试」「我不能迷迷糊糊的，不知道我在
+ * 测试版还是正式版」。所以这一格数字要一直摆在界面上（横幅 + 设置页那张卡）。
+ */
+export interface SandboxStatus {
+  /** 测试模式开着吗（= 整套数据根现在指着沙箱） */
+  enabled: boolean
+  /** 沙箱根：`<repo>/workbench/.sandbox` */
+  sandboxRoot: string
+  /** 沙箱里那份 `presets/` 建起来了吗（没建 = 刚打开、还没拷） */
+  ready: boolean
+  /** 沙箱这一棵里有几个文件 / 几字节（"真拷了东西"的读数） */
+  files: number
+  bytes: number
+  /** 正式那一份的预设根（界面上摆出"从哪儿拷的"） */
+  realPresetsRoot: string
+  /** 上一次动作的结果（"已从正式拷了一份：54 个文件 4.4 MB"） */
+  note: string | null
+}
+
 export interface DevSourceStatus {
   running: boolean
   /** 包装层（Windows 上是 cmd）的 PID；不在跑时 null */
@@ -1802,6 +1825,20 @@ export const wb = {
    */
   devSourceClearConflict: (port: number, pid: number | null) =>
     invoke<DevSourceStatus>('wb_dev_source_clear_conflict', { port, pid }),
+
+  /**
+   * **测试模式（沙箱）** —— 整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
+   * 正式目录一个字节都不碰（作者：「完全另起炉灶」「测试的归测试的」）。
+   *
+   * - `sandboxSet(true)`：沙箱不齐就先**从正式拷一份**（`presets/` 整棵，含 3MF /
+   *   模型 / 图片），然后把根切过去；**有未保存的改动时如实拒绝**（草稿是两套）；
+   * - `sandboxRefill()`：清空沙箱再从正式重新拷一份；
+   * - `sandboxWipe()`：只清空（留在当前模式）。
+   */
+  sandboxStatus: () => invoke<SandboxStatus>('wb_sandbox_status'),
+  sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
+  sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
+  sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

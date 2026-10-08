@@ -44,6 +44,7 @@ import {
   type ParamMetaEdit,
   type Patch,
   type Refresh,
+  type SandboxStatus,
   type Words,
 } from './api'
 import { toasts } from './c14/toast'
@@ -189,6 +190,12 @@ export function WorkbenchApp() {
   const toastList = useSyncExternalStore(toasts.subscribe, toasts.get)
 
   const [boot, setBoot] = useState<Boot | null>(null)
+  /**
+   * **测试模式（沙箱）**现在开着没有。外壳持有它、也照它换装（`data-sandbox` 整窗配色 +
+   * 正文顶上那条横幅 + 状态栏那一枚）—— 作者 2026-10-08：「我不能迷迷糊糊的，不知道
+   * 我在测试版还是正式版」。设置页那几张卡读的也是这一份，不各取各的。
+   */
+  const [sandbox, setSandbox] = useState<SandboxStatus | null>(null)
   const [words, setWords] = useState<Words | null>(null)
   const [book, setBook] = useState<BookView | null>(null)
   const [report, setReport] = useState<IssueReport | null>(null)
@@ -241,9 +248,10 @@ export function WorkbenchApp() {
       try {
         const b = await wb.boot()
         setBoot(b)
-        const [w, bk] = await Promise.all([wb.words(), wb.book()])
+        const [w, bk, sb] = await Promise.all([wb.words(), wb.book(), wb.sandboxStatus()])
         setWords(w)
         setBook(bk)
+        setSandbox(sb)
         // 参数台默认谁都不选（C14 第十七轮）：空态留白 + 文案，
         // 「还没选」这个状态必须存在 —— 选中由左树那一下点击或 goto 产生
         setReport(await wb.preflight())
@@ -278,6 +286,21 @@ export function WorkbenchApp() {
       refreshBook()
     },
     [refreshBook],
+  )
+
+  /**
+   * 测试模式换过（开关 / 重拷一份 / 清空）之后：**换装 + 按新根把整本重取一遍**。
+   *
+   * 后端切模式时已经把会话丢了（旧根那份 `Presets` / `Store` / 草稿全作废），所以
+   * 这里必须重开一次会话读新根 —— 不重取的话，界面还摆着正式那一套机型与参数，
+   * 而写盘已经落在沙箱里了：那正是"我到底在哪一边"的最坏一种错位。
+   */
+  const applySandbox = useCallback(
+    (next: SandboxStatus) => {
+      setSandbox(next)
+      wb.reload().then(reloadBoot).catch(fail)
+    },
+    [reloadBoot, fail],
   )
 
   /**
@@ -614,7 +637,7 @@ export function WorkbenchApp() {
         )
       case 'settings':
         if (!boot) return skeletonFor('settings')
-        return <SettingsPage boot={boot} />
+        return <SettingsPage boot={boot} sandbox={sandbox} onSandbox={applySandbox} />
     }
   }
   const nowNode = renderPage(page)
@@ -719,6 +742,8 @@ export function WorkbenchApp() {
       data-no-chrome="yes"
       data-page={page}
       data-density={density}
+      /* 测试模式整窗换一层色（`c14tokens.css` 只改那几个变量，C14 的内衬全跟着走） */
+      data-sandbox={sandbox?.enabled === true ? 'on' : 'off'}
       style={{ '--nav-w': `${navW}px` } as CSSProperties}
     >
       {fatal && (
@@ -777,6 +802,48 @@ export function WorkbenchApp() {
               {nav}
 
               <div className={s.main}>
+                {/*
+                  测试模式那条横幅：**常驻**，压在正文最上面。
+                  它是三道明示里最显眼的一道（另外两道：整窗转琥珀、窗口标题的
+                  【测试模式】前缀——后者在切走窗口、任务栏、截图里也看得见）。
+                  `data-tone="warn"` 是现成的语义：这不是错误，是"要留意"。
+                */}
+                {sandbox?.enabled === true && (
+                  <div
+                    className="wb-banner"
+                    data-tone="warn"
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                      alignItems: 'baseline',
+                    }}
+                  >
+                    <b>测试模式（沙箱）</b>
+                    <span>
+                      读写都在 <span className="wb-mono">{shortRoot(sandbox.sandboxRoot)}</span>{' '}
+                      里（
+                      {sandbox.ready
+                        ? `${sandbox.files} 个文件 · ${(sandbox.bytes / 1024 / 1024).toFixed(1)} MB`
+                        : '空的'}
+                      ）—— <b>正式那份一个字节都不动</b>，发布与发版也是关着的。
+                    </span>
+                    {!sandbox.ready && (
+                      <span style={{ color: 'var(--danger)' }}>
+                        ☆ 沙箱是空的 —— 去设置页点「从正式重拷一份」再动手
+                      </span>
+                    )}
+                    <span className={s.grow} />
+                    <button
+                      type="button"
+                      className="wb-link"
+                      onClick={() => setPage('settings')}
+                    >
+                      去设置页
+                    </button>
+                  </div>
+                )}
+
                 <div className={s.head}>
                   <div className={s.headT}>
                     <h1>{navLabel}</h1>
@@ -870,6 +937,19 @@ export function WorkbenchApp() {
 
             {/* 状态栏：三段读数 + 动作组（C14 版式；读数全部来自后端） */}
             <div className={s.sb}>
+              {/* 第三道明示（最小的一道，但它在状态栏上——做别的动作时眼角一直有它） */}
+              {sandbox?.enabled === true && (
+                <>
+                  <span
+                    className={s.sbSeg}
+                    style={{ color: 'var(--accent-deep)', fontWeight: 600 }}
+                    title={`测试模式（沙箱）：${sandbox.sandboxRoot}`}
+                  >
+                    【测试模式】
+                  </span>
+                  <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
+                </>
+              )}
               <span className={s.sbSeg}>
                 <span className={`${s.dot} ${dirty ? s.dotDirty : ''}`} />
                 {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}

@@ -18,6 +18,8 @@
  *              ② 设置页「官方源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
  *              ②b 设置页「本地测试源（开发）」在、报得出地址；点「启动」如实拒绝
  *                 （浏览器里起不了进程 —— 那是真机上 `npm run dev:test-update` 的活）
+ *              ②c 设置页「测试模式（沙箱）」在且如实说在正式；点「打开测试模式」如实拒绝
+ *                 （桩里没有那个仓库，拷不出沙箱 —— 不许假装切了根）；没开时不许换装
  *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源，也不假装联动）
  *
  * 客户端那半条链（下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
@@ -269,6 +271,37 @@ for (const size of SIZES) {
   )
   check(tag, '②b 浏览器里点「启动」如实拒绝（不静默成功）', refused, '')
 
+  /* ---------- ②c 同一页的「测试模式（沙箱）」 ---------- */
+  /*
+   * 守两件事：卡片在、并且**如实说现在在正式**（整窗那圈琥珀换装与那条横幅都读它 ——
+   * `data-sandbox` 只有真开时才 'on'）；以及浏览器里点「打开测试模式」要**如实拒绝**：
+   * 桩里没有那个仓库、拷不出沙箱，假装切了根是最坏的一种谎 ——
+   * 人会以为自己在沙箱里，而其实一个字都没动。
+   */
+  const sandOn = await until(
+    async () => (await wbText(wbPage)).includes('测试模式（沙箱）'),
+    3000,
+  )
+  const sandText = flat(await wbText(wbPage))
+  check(
+    tag,
+    '②c 设置页有「测试模式（沙箱）」，且如实说现在在正式',
+    sandOn && sandText.includes('正式'),
+    sandText.slice(0, 80),
+  )
+  await wbPage.getByRole('button', { name: /打开测试模式/ }).first().click()
+  const sandRefused = await until(
+    async () => (await wbText(wbPage)).includes('测试模式切不了'),
+    3000,
+  )
+  check(tag, '②c 浏览器里点「打开测试模式」如实拒绝（不假装切了根）', sandRefused, '')
+  check(
+    tag,
+    '②c 没真开测试模式时，外壳不带 data-sandbox=on（不许乱换装）',
+    (await wbPage.locator('[data-sandbox="on"]').count()) === 0,
+    '',
+  )
+
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-settings.png` })
 
   /* ---------- ③ 客户端：那一端的边界（浏览器里不再读工作台那一格） ---------- */
@@ -317,6 +350,6 @@ if (problems.length > 0) {
 console.log(
   '工作台发布这一端走通：生成 → ② 卡报出真产物份数；客户端那一端如实（数据源那一格说真话）；'
   + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「官方源」收得下 / 「重新读取」能从磁盘看真相 / '
-  + '「本地测试源」在且点「启动」如实拒绝'
+  + '「本地测试源」在且点「启动」如实拒绝 / 「测试模式（沙箱）」在且点开时如实拒绝（不假装切了根）'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )
