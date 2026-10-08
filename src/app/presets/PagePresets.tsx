@@ -160,6 +160,8 @@ import {
   STATUS_TEXT,
   STATUS_WHY,
   UNSUPPORTED_TEXT,
+  /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
+  UPDATE_ACTION_TEXT,
   isSuspectRelease,
   noContractText,
   releaseBatchText,
@@ -1030,16 +1032,40 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
-    /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
+    /*
+     * 云端表：**仓库里的东西删不掉**（客户端管不到云端）——但**本机那一份可以删**。
+     *
+     * ★ 2026-10-08 补上这一项。作者的实测是：「我在本地删除，我在云端看到的还是显示已下载」
+     * —— 因为他删的是**自己那份副本**（`presets-mine/`），而那一行说的「已下载」指的是
+     * **下载区里那一份**（另一个地方的东西，`deleteDeliveryFile` 早就有，只是一直没挂出来）。
+     * 两件事都说得通，缺的是"把 `已下载` 撤销掉"的那颗按钮：现在它在这儿 ——
+     * 删掉本机这份，那一行回到「未下载」，随时能再下一份（云端不受影响）。
+     */
     if (row.scope === 'cloud') {
-      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
+      /* 只有**交付行且真下过**才给这一项：官方仓库行本机那份不归这一页管 */
+      const hasLocalCopy = row.origin === 'release' && row.downloaded
       return [
         {
           id: 'download',
-          /* 盘上那一份不对劲时这一项换词：同一条管道，云端有更新就说「更新」（与按钮一致） */
-          label: updating ? '更新' : '下载',
+          /* 一个动作一个词（作者 2026-10-08：「那颗按钮就叫下载吧」）；"为什么"是状态列那格的事 */
+          label: UPDATE_ACTION_TEXT.missing,
           onSelect: () => download(row),
         },
+        ...(hasLocalCopy
+          ? ([
+              { separator: true },
+              {
+                id: 'removeLocal',
+                label: '删除本机这份',
+                danger: true,
+                confirm: {
+                  question: `删掉本机那份 ${row.fileName}？`,
+                  detail: removeConfirmDetail(row),
+                },
+                onSelect: () => runRemove(row),
+              },
+            ] satisfies ContextMenuEntry[])
+          : []),
         {
           id: 'link',
           label: '复制链接',

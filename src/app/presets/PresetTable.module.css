@@ -273,6 +273,28 @@
 }
 
 /*
+ * 「旧版 ×N」那一枚（2026-10-08，云端表专用）。
+ *
+ * 名字列上为什么要有它：云端表回到「一个目录条目一行」之后（逐版各开一行会长出
+ * 三行同名 —— 见 `presetTree.cloudRows` 那段），"这一机下过几代旧的"就没地方说了。
+ * 中性灰、实线细边：它既不是错误也不是待办，只是**来历**（旧版以用户自己的名字
+ * 躺在本地表里，展开这一行能看到归档里那几份）。
+ */
+.olderVersions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
  * 「文件无法读取」那一枚（第九层：我那份读不出来 —— 编码 / TOML 语法 / 指向用户根之外）。
  *
  * 与上一枚的中性色分开：这一枚说的是**这份现在用不了**。琥珀（--warn）不是 --danger：

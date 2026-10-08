@@ -411,23 +411,14 @@ export const CLOUD_STATE_WHY = {
   pending: '未下载：仓库里有，你机器上还没有',
 }
 
-/**
- * 官方版本行上「新版本」那枚胶囊（2026-10-08）。
- *
- * ★ 它说的是**"这个官方版本我还没下载"**，不是"你现在用的那份过时了" ——
- * 系统不会自动更新用户的任何一份预设，也不会在任何一行上说"该更新了"。
+/*
+ * ★ `VERSION_NEW_TEXT` / `VERSION_NEW_WHY` / `VERSION_TIME_WHY` 三条词随
+ * 「逐版各占一行」一起退役了（2026-10-08 当天下午）：它们只服务**版本行**
+ * （那枚「新版本」胶囊、以及"这一版自己的发布日 vs 目录代时间"的分别）。
+ * 云端表回到「一个目录条目一行」之后，一行的状态只有那四档
+ * （`UPDATE_STATE_TEXT` + `RELEASE_STATE_WHY`），时间只有目录盖的戳 ——
+ * 这三条词就没有一行会用到了。留着它们就是留一条没人走的路。
  */
-export const VERSION_NEW_TEXT = '新版本'
-
-export const VERSION_NEW_WHY =
-  '新版本：官方登记了这一版，你这台机器还没下过它 —— 点「下载」拿到它。' +
-  '下载会生成**一份新的「我的预设」**（名字带这一版的官方发布日），旧的那份一个字节都不动'
-
-/** 版本行「时间」列的说明（真值来自哪、没下载时写的是什么） */
-export const VERSION_TIME_WHY = {
-  downloaded: '这一版的官方发布日期（取自它自己文件头的 release_time）',
-  pending: '还没下载，拿不到这一版自己的发布日 —— 这里写的是**目录代时间**（这一代目录什么时候发布的）',
-}
 
 /**
  * **盘上那一份是什么**（catalog 登记的交付预设才有的那一档）。
@@ -461,10 +452,10 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
   ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「应用」',
   old:
     '旧版本：盘上这一份的字节与归档里那一版**逐字节相同** —— 它是我们发过的某一版旧版（云端已经换了新的）。' +
-    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「更新」换成当前版本',
+    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「下载」换一份当前版本回来',
   tampered:
     '内容异常：盘上这一份的字节既不是目录登记的当前版本，也不是我们发过的任何一版 —— ' +
-    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，先「更新」换一份干净的',
+    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，先「下载」换一份干净的',
 }
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
@@ -478,7 +469,7 @@ export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
  * 三个概念**不是** `ReleaseFileState`：那是"盘上那份认不认得出"（信任），
  * 这一个是"云端有没有比盘上新的货"（更新）。**云端有更新时主词就是「有更新」** ——
  * 不管盘上那份是认得出的旧版还是认不出的字节，用户要做的事是同一件：
- * 点「更新」换成当前版（同一条下载管道）。
+ * 点「下载」换一份当前版回来（同一条下载管道）。
  *
  *   `missing`  未下载：目录里有、盘上没有
  *   `latest`   已下载：盘上字节与目录一致
@@ -509,37 +500,44 @@ export const UPDATE_STATE_TEXT: Record<ReleaseUpdateState, string> = {
  * 2026-10-06 查明的实情：客户端的版本记忆只留得住"每一代被换下的目录"（归档链），
  * 在链建起来之前换过的版本谁都不记得 —— 所以"认不出"≠"被改过"，把「内容异常」顶在
  * 状态主词上是**吓唬人**（实测 7 份全部是正规旧版）。主词改说「有更新」，
- * 这句话作为第二行把实情讲全，动作给「更新」—— 对"旧版"和"真被动过"都是正解。
+ * 这句话作为第二行把实情讲全，动作给「下载」—— 对"旧版"和"真被动过"都是正解。
  */
 export const RELEASE_UNTRUSTED_NOTE =
   '本机这份认不出是官方哪一版 —— 官方连发几版时，更早的版本指纹在客户端留不全，' +
-  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「更新」换成当前版即可'
+  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「下载」换一份当前版即可'
 
-/** release 行操作列那颗按钮：更新三态各一个字。**没有「重新下载」** —— 修坏档与换新版是同一条管道、同一个动作 */
+/**
+ * release 行操作列那颗按钮：三态各一个字。
+ *
+ * ★ **「有更新」那一档的按钮也叫「下载」**（2026-10-08 作者：「那颗按钮就叫下载吧」）。
+ * 动作本来就只有一个 —— 从云端取一份落下来；`安装 / 更新 / 重新下载` 都是**同一个管道**
+ * （见 `runtime/delivery.rs`：旧份自动归档，没有第二条路）。**状态词才是"为什么"**
+ * （状态列那句「有更新」照旧说），按钮只该说"点它会发生什么"。
+ */
 export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
   missing: '下载',
   latest: '已下载',
-  update: '更新',
+  update: '下载',
 }
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
 export const RELEASE_SUSPECT_WHY =
-  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「更新」换一份干净的回来'
+  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「下载」换一份干净的回来'
 
-/** 「更新」那颗按钮的说明：它不是"删除重下"，旧份进归档，删除永远不是更新的一部分 */
+/** 「下载」那颗按钮在**盘上那份已经旧了**那一档的说明：它不是"删除重下"，旧份进归档，删除永远不是这件事的一部分 */
 export const RELEASE_UPDATE_WHY =
-  '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
+  '下载：对盘上这一份再跑一遍下载管道（状态那格的「有更新」说的就是为什么）—— 旧份先归档（archive/）再换新，删除永远不是它的一部分'
 
 /**
- * 「更新」那颗按钮在**认不出**那一档的说明。
+ * 「下载」那颗按钮在**认不出**那一档的说明。
  *
- * 它不是第二套机制：与「下载 / 更新」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
- * 按钮统一叫「更新」（云端有更新就说更新），这里要讲清的是"盘上那份我们不认"——
- * 用户多半不知道文件被谁动过，也不知道更新会不会把他改的东西冲掉。
+ * 它不是第二套机制：与别处的「下载」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
+ * 按钮统一叫「下载」（状态词才是"为什么"，那是状态列的事），这里要讲清的是"盘上那份我们不认"——
+ * 用户多半不知道文件被谁动过，也不知道换一份会不会把他改的东西冲掉。
  */
 export const RELEASE_REPAIR_WHY =
-  '更新：盘上这一份我们认不出是官方哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
-  '再下一份干净的换上，落点与校验与「下载」是同一条管道；旧份进归档，不删'
+  '下载：盘上这一份我们认不出是官方哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
+  '再下一份干净的换上，落点与校验与普通的「下载」是同一条管道；旧份进归档，不删'
 
 /**
  * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
@@ -1327,13 +1325,6 @@ export interface PresetRowBase {
    */
   releaseState?: ReleaseFileState
   /**
-   * **这是"官方登记了、我还没下载"的那一版**（2026-10-08 多版本行）。
-   *
-   * 语义只有一句：「云端有一个我还没下载的官方版本」。**它不是"过时"** ——
-   * 系统不会自动更新用户的任何一份预设，也不在任何一行上说"你该更新了"。
-   */
-  newVersion?: boolean
-  /**
    * **这次发布的时刻**（catalog.publishedAt，ISO/UTC → 显示按本机时区）。
    * release 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
    * "我盘上这份什么时候到的"（`modifiedText` + `arrivalBy`）与"云端最新版什么时候发的"
@@ -1440,6 +1431,14 @@ export interface PresetCloudRow extends PresetRowBase {
   delivery: PresetFileInfo['delivery']
   /** 在不在本机。官方文件看 `getLocalFiles()`，release 行看下载区（`mkp/`，盘就是底账）—— 两套底账，行上不说谎 */
   downloaded: boolean
+  /**
+   * **下过的旧版有几代**（版本账里 `downloaded && !current` 的条数）。
+   *
+   * 2026-10-08：云端表回到「一个目录条目一行」之后，那几代旧版的**唯一**痕迹就是它 ——
+   * 旧版本身以用户自己的名字躺在本地表里（`presets-mine/`，名字带日期），
+   * 展开这一行还能在「旧版本」那一格看到具体是谁。`0` / `undefined` = 没有。
+   */
+  olderVersions?: number
 }
 
 export type PresetTableRow = PresetLocalRow | PresetCloudRow
@@ -2074,21 +2073,12 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
  * `applied` 是第三件事，判据只有一条 asset id 相等 —— 所以一个还没下的文件也可能是
  * 「正在配着的那一份」，那时页脚会说「配着 X（还没下）」。
  */
-/**
- * 版本行「时间」列写什么（2026-10-08）。
- *
- * - **已下载的那一版**：它自己文件头的 `release_time` 的**日期段**（真值，`2026-10-15`）；
- * - **还没下载的**：拿不到那一版自己的发布日，写**目录代时间**（`publishedAt`）——
- *   界面上如实标明是"目录发布时间"，不冒充预设发布日（见 [`VERSION_TIME_WHY`]）。
- * - 两样都没有 ⇒ `undefined`（那一格照实写「未知」，不编）。
+/*
+ * ★ `versionDateText` 随「逐版各占一行」一起退役了（2026-10-08 当天下午）：
+ * 它算的是**版本行**那一格时间（已下载的取文件头 `release_time`，没下的取目录代时间）。
+ * 云端表回到「一个目录条目一行」之后，那一格时间是目录这次发布的时刻（`releaseAt`）——
+ * 见 `cloudRows` 里 `modifiedText` 的说明。留着它就是留一条没人走的路。
  */
-function versionDateText(v: OfficialVersion): string | undefined {
-  const rt = v.releaseTime?.trim()
-  if (rt !== undefined && rt !== '') return rt.slice(0, 10)
-  const pa = v.publishedAt?.trim()
-  if (pa !== undefined && pa !== '') return pa
-  return undefined
-}
 
 export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRow> {
   const {
@@ -2165,18 +2155,25 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
       /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
       const state = p.state
       /*
-       * **官方版本行**（2026-10-08）：同一个预设的每一版各占一行 ——
-       * 「已下载 / 新版本」由隐藏 baseline 按摘要答，**不是"过时判定"**。
-       * 版本账读不到（假后端没这一路 / 随包目录）就退回"一个预设一行"的老画法。
+       * **一个目录条目一行**（2026-10-08 作者改判）。
+       *
+       * 上午那一版是"同一个预设的每一代官方版本各占一行"（版本账 `officialVersions`
+       * 按 `downloaded || current` 滤，`versions.map` 铺开）。作者在真机上看到的后果是：
+       * `A1_MINI-fast.toml` **三行同名** —— 名称 / 机型 / 版本三列逐字一样，只有时间列
+       * 不同（还有两行都是 08 号），他原话「我觉得每一个版本就只应该显示一个」
+       * 「他为什么不沿用本地的名字呢……真正值得下载的才显示云端的名字」。
+       *
+       * 于是回到一行：这一行答的还是那三件事（云上有没有我这份 / 我该不该下 /
+       * 我这份对不对），状态与动作全部由 `p.releaseState` 出（四档在源上算好）。
+       *
+       * **下过的旧版去哪了**：它们本来就是**用户的东西**，以用户自己的名字躺在本地表里
+       * （`A1_MINI-fast-2026-10-06.toml` 这种，`presets-mine/`），展开这一行还能看到
+       * 归档里那几份旧版（`.facts` 的「旧版本 N」）—— 云端表不必再替它们各占一行。
+       * 列表上只留一个数（`olderVersions`），把"下过几代旧的"这件事说出来。
        */
-      /*
-       * 只列**下过的**与**当前那一版**：历史版本没下过时给不出「下载」——
-       * 下载命令认的是当前目录那一条的字节，历史版本没法按摘要重下。
-       * 列一行点了没反应的按钮，比不列它更糟。
-       */
-      const versions = officialVersions.filter(
-        (v) => v.fileName === p.fileName && (v.downloaded || v.current),
-      )
+      const olderVersions = officialVersions.filter(
+        (v) => v.fileName === p.fileName && v.downloaded && !v.current,
+      ).length
       const row = {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
         rowKey: `release-cloud:${p.fileName}`,
@@ -2216,19 +2213,9 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         downloaded: state === 'ok',
         releaseState: state,
         publishedAt: releaseAt,
+        olderVersions,
       } satisfies PresetCloudRow
-      if (versions.length === 0) return [row]
-      return versions.map((v) => ({
-        ...row,
-        /* 行键带上这一版的摘要前 8 位：同一个预设的多版各占一行，展开 / 焦点都跟着版本走 */
-        rowKey: `release-cloud:${p.fileName}@${v.sha256.slice(0, 8)}`,
-        modifiedText: versionDateText(v),
-        downloaded: v.downloaded,
-        /* 版本行只有两态：下过 = `ok`（灰字「已下载」），没下过 = `missing`（可点的「下载」） */
-        releaseState: v.downloaded ? 'ok' : 'missing',
-        newVersion: !v.downloaded,
-        publishedAt: v.publishedAt ?? releaseAt,
-      }))
+      return [row]
     })
 
   const all = [...official, ...release]

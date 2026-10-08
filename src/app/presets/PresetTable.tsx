@@ -95,9 +95,6 @@ import {
   basedOnCellText,
   CLOUD_STATE_TEXT,
   CLOUD_STATE_WHY,
-  VERSION_NEW_TEXT,
-  VERSION_NEW_WHY,
-  VERSION_TIME_WHY,
   DASH_,
   DEMO_STAT_WHY,
   EDIT_TEXT,
@@ -271,13 +268,7 @@ export default function PresetTable({
     const when = longStatText(row.modifiedText)
     if (row.origin === 'release') {
       if (row.scope === 'cloud') {
-        /*
-         * **版本行**（2026-10-08）：已下载的那一行写的是这一版自己的官方发布日（真值），
-         * 还没下载的写的是目录代时间 —— 两个时间语义不同，title 里如实分开说，
-         * 不让"目录什么时候发的"冒充"这个预设什么时候发的"。
-         */
-        if (row.newVersion === true) return VERSION_TIME_WHY.pending
-        if (row.newVersion === false) return VERSION_TIME_WHY.downloaded
+        /* 云端表的时间 = **这一次发布的时刻**（目录盖的戳）；目录没带就说未知，不编 */
         return when === undefined ? RELEASE_TIME_WHY.cloudMissing : `云端更新时间：${when}`
       }
       if (when === undefined) return RELEASE_TIME_WHY.localMissing
@@ -425,6 +416,20 @@ export default function PresetTable({
                       <span className={s.nameText} title={row.fileName}>
                         {row.fileName}
                       </span>
+                      {/*
+                        云端表：**下过几代旧版**（2026-10-08）。
+                        这一行现在只代表"云上这一个条目"（一个目录条目一行 —— 见
+                        `presetTree.cloudRows` 那段：逐版各开一行时会长出三行同名）。
+                        旧版本身以用户自己的名字在本地表里，这里只把那个数说出来。
+                      */}
+                      {row.scope === 'cloud' && (row.olderVersions ?? 0) > 0 && (
+                        <span
+                          className={s.olderVersions}
+                          title={`这一机下过这个预设的 ${row.olderVersions} 代旧版 —— 它们在你自己的文件里（本地表，名字带日期），展开这一行还能看到归档里那几份`}
+                        >
+                          旧版 ×{row.olderVersions}
+                        </span>
+                      )}
                       {row.scope === 'local' && row.untagged && (
                         <span
                           className={s.untagged}
@@ -594,15 +599,13 @@ export default function PresetTable({
                         disabled={busy}
                         /* 发布行是真下载；官方行仍是「未实现」—— 文案按行分流 */
                         title={
-                          row.newVersion === true
-                            ? VERSION_NEW_WHY
-                            : row.releaseUid !== undefined
-                              ? needsUpdate
-                                ? untrusted
-                                  ? RELEASE_REPAIR_WHY
-                                  : RELEASE_UPDATE_WHY
-                                : RELEASE_DOWNLOAD_WHY
-                              : DOWNLOAD_WHY
+                          row.releaseUid !== undefined
+                            ? needsUpdate
+                              ? untrusted
+                                ? RELEASE_REPAIR_WHY
+                                : RELEASE_UPDATE_WHY
+                              : RELEASE_DOWNLOAD_WHY
+                            : DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
@@ -747,11 +750,9 @@ export default function PresetTable({
                               : undefined
                           }
                         >
-                          {row.newVersion === true
-                            ? VERSION_NEW_TEXT
-                            : row.releaseState !== undefined
-                              ? UPDATE_STATE_TEXT[updateState ?? 'latest']
-                              : row.scope === 'local'
+                          {row.releaseState !== undefined
+                            ? UPDATE_STATE_TEXT[updateState ?? 'latest']
+                            : row.scope === 'local'
                               ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
                               : row.downloaded
                                 ? CLOUD_STATE_TEXT.downloaded
