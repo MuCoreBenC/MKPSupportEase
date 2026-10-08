@@ -397,5 +397,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::release_tx::wb_release_prompt,
         // 「打开安装包目录」：不管发没发出去，都让人能去文件管理器里看产物在哪个目录（只读）
         app::release_tx::wb_release_open_bundle,
+        // 「本地测试源（开发）」：起 / 停 / 查那颗按钮背后的 `npm run dev:test-update`。
+        // ★ 三条**只为工作台存在**：它起的是客户端 dev，但源地址由环境变量注入
+        // （`MKPSE_PRESET_SOURCE_URL`，只在 debug 构建里认），这一层不写任何配置 ——
+        // 客户端自己的「预设数据源」那一格始终归客户端设置页管
+        app::dev_source::wb_dev_source_start,
+        app::dev_source::wb_dev_source_stop,
+        app::dev_source::wb_dev_source_status,
     ])
 }

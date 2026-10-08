@@ -181,6 +181,17 @@ Z 轴偏移  4.00 mm   [4.0 ]                   [4.0 ]
 | `npm run preset-source:dev` | 起服务（默认 `127.0.0.1:8787`，默认 `fixtures/v1`） |
 | `npm run dev:test-update` | 夹具就绪 → 起服务 → 等就绪 → 以 `MKPSE_PRESET_SOURCE_URL` 起 `tauri dev` |
 
+也可以从工作台起这一条：**「设置 → 本地测试源（开发）」**那颗按钮跑的就是
+`npm run dev:test-update`（`workbench/app/dev_source.rs`，起 / 停 / 查三条命令；
+停会把整棵进程树一起收掉，否则 8787 那个服务会变成孤儿）。它**不碰客户端那一格
+「预设数据源」** —— 换的是环境变量那条路，两边各管各的；两份 dev 会话本来就分了
+vite 端口（5321 / 5322）与 cargo 产物目录，所以可以同时开着。
+
+★ **客户端 dev 已经在跑时，先停掉再点**：那一份没法被重新指源（源是它启动时的
+环境变量），而新起的这份会撞在同一个 vite 端口（5321，`strictPort`）上。
+这条**不拦也不猜**：进程的命令行 / 工作目录在某些环境里读不到（本机实测 `sysinfo`
+对所有进程都返回空），猜错就成了"按钮点了没反应"；照常起、让原因打在终端里更诚实。
+
 `MKPSE_PRESET_SOURCE_URL` 的覆盖点在 `runtime/source.rs::current_entry` 最前面，
 **`#[cfg(debug_assertions)]`**：release 里这段代码整个不存在，
 `check-release-source.mjs` 与"启动零网络"两条判据都不受影响。

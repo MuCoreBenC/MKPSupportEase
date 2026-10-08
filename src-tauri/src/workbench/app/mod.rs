@@ -52,6 +52,10 @@ pub mod bundles;
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod delivery;
+/// 「本地测试源（开发）」：一颗按钮＝把 `npm run dev:test-update` 替你敲了
+/// （起本地假云端 + 以 `MKPSE_PRESET_SOURCE_URL` 起客户端 dev）。
+/// **它不碰任何配置** —— 源地址是环境变量注入的，只在 debug 构建里认
+pub mod dev_source;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;

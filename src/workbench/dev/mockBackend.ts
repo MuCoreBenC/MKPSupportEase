@@ -1842,6 +1842,27 @@ export function installMockBackend() {
         return Promise.resolve({})
       case 'wb_save_ui':
         return Promise.resolve(null)
+      /*
+       * 「本地测试源（开发）」：演示后端**不真起进程**（浏览器里没有那个仓库、也没有 npm）。
+       * 状态如实报"没在跑"；起 / 停如实拒绝，理由写在消息里 —— 照 `wb_reveal_asset`
+       * 那条口径：演示里点它要说实话，不是静默成功。
+       */
+      case 'wb_dev_source_status':
+        return Promise.resolve({
+          running: false,
+          pid: null,
+          url: 'http://127.0.0.1:8787',
+          repoRoot: 'C:\\dev\\MKPSupportEase',
+          command: 'npm run dev:test-update',
+          note: null,
+        })
+      case 'wb_dev_source_start':
+      case 'wb_dev_source_stop':
+        return Promise.reject({
+          code: 'NOT_IMPLEMENTED',
+          message: '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run dev:test-update',
+          traceId: 'mock',
+        })
       case 'wb_set_bootstrap': {
         const url = String(args?.url ?? '').trim()
         if (url === '') {

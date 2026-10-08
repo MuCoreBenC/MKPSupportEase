@@ -27,11 +27,22 @@
  * **它同时是"配置生效了没有"的判据**：点一下看到的就是**磁盘真值**。
  * （注意区分：这里读的是**配置**；Bootstrap 被客户端吃进二进制是**构建期**的事 ——
  * 改完要重新构建客户端，所以保存成功那句话会提"重启 dev / 重打正式包"。）
+ *
+ * # 「本地测试源（开发）」（2026-10-08）
+ *
+ * 上面那一格是**发布到哪**（构建期注入）。这一格是**运行时把源换成什么** ——
+ * 一颗按钮替你敲 `npm run dev:test-update`：起本地假云端在 `127.0.0.1:8787`，
+ * 再以 `MKPSE_PRESET_SOURCE_URL` 把客户端 dev 一起起起来，于是不用为了验"官方
+ * 发了新版本"真去发一版。
+ *
+ * ★ 它**不碰客户端那一格「预设数据源」**：那是客户端自己的运行时设置
+ * （住客户端的 `appDataDir/run/app-state.json`，两个应用的 appDataDir 都不一样），
+ * 归客户端设置页管 —— 这里换的是**环境变量**那条路，只在 debug 构建里认。
  */
 import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { Boot, PublishAccount } from '../api'
+import type { Boot, DevSourceStatus, PublishAccount } from '../api'
 import s from '../c14.module.css'
 
 export default function SettingsPage({ boot }: { boot: Boot }) {
@@ -192,6 +203,67 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
       setAcctNote({ text: '剪贴板用不了 —— 请手动选中明文再复制', bad: true })
     }
   }
+
+  /*
+   * 「本地测试源（开发）」的状态与那两颗按钮。
+   *
+   * ★ **只在跑着的时候**每 2 秒问一次 —— 工作台的页面挂过就一直挂着
+   * （`App.tsx` 的 `.pageSlot`：切走只是藏起来，不卸载），无条件轮询等于
+   * 离开这一页之后还在空转 IPC。不跑的时候它自己退了只是少一次刷新。
+   */
+  const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
+  const [devBusy, setDevBusy] = useState(false)
+  const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const readDevSrc = useCallback(async () => {
+    try {
+      setDevSrc(await wb.devSourceStatus())
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }, [])
+
+  useEffect(() => {
+    void readDevSrc()
+  }, [readDevSrc])
+
+  useEffect(() => {
+    if (devSrc?.running !== true) return
+    const timer = setInterval(() => {
+      wb.devSourceStatus().then(setDevSrc).catch(() => undefined)
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [devSrc?.running])
+
+  /** 一颗按钮翻面：没在跑就起，跑着就（连它起的客户端 dev 一起）停 */
+  const toggleDevSrc = async () => {
+    if (devBusy || devSrc === null) return
+    const stopping = devSrc.running
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = stopping ? await wb.devSourceStop() : await wb.devSourceStart()
+      setDevSrc(next)
+      setDevNote(
+        next.running
+          ? {
+              text: '已启动 —— 客户端 dev 也一起起了，日志打在起工作台的那个终端里。',
+              bad: false,
+            }
+          : { text: next.note ?? '已停，服务端口也让出来了。', bad: false },
+      )
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  /* 那一行结论：有动作反馈用动作的，否则用后端报的"为什么不在跑" */
+  const devLine =
+    devNote?.text ??
+    (devSrc !== null && !devSrc.running ? (devSrc.note ?? null) : null)
+  const devBad = devNote?.bad === true
 
   const save = async () => {
     if (busy) return
@@ -553,6 +625,95 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
                 {note.text}
               </p>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* ——— 本地测试源（开发）：一颗按钮 = npm run dev:test-update ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>本地测试源（开发）</b>
+          <span className={s.cardNote}>
+            起本地假云端 + 带 MKPSE_PRESET_SOURCE_URL 起客户端 dev —— 不用为了验"官方发了新版本"真去发一版
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              点「启动」就是替你在这个仓库里敲
+              <span className={s.mono}>{devSrc?.command ?? 'npm run dev:test-update'}</span>
+              ：夹具不在先派生 → 起 <span className={s.mono}>scripts/preset-test-server</span>
+              在下面这个地址上 → 再把客户端 <span className={s.mono}>tauri dev</span>
+              一起起起来，官方源就指向它。
+            </p>
+            <p className={s.vhelp}>
+              客户端<b>不感知这是测试源</b> —— 它仍走 catalog / manifest / 寻址 / SHA 校验 /
+              下载那一条真链，换的只是"去哪儿取"；生产构建里这段代码整个不存在。日志打在
+              <b>起工作台的那个终端</b>里 —— 这个按钮只是替你敲了那条命令，不另造一套日志窗口。
+            </p>
+
+            <div className={s.vhead}>
+              <b>状态</b>
+              <span className={s.vkey}>
+                {devSrc === null
+                  ? '读取中……'
+                  : devSrc.running
+                    ? `运行中（PID ${devSrc.pid ?? '—'}）`
+                    : '没在跑'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <label className={s.vlabel}>服务地址</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {devSrc?.url ?? 'http://127.0.0.1:8787'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <button
+                type="button"
+                className={`${s.btn} ${devSrc?.running === true ? '' : s.btnPrimary}`}
+                disabled={devBusy || devSrc === null}
+                title={
+                  devSrc?.running === true
+                    ? '连同它起的客户端 dev 一起停（整棵进程树），并把服务端口让出来'
+                    : undefined
+                }
+                onClick={() => void toggleDevSrc()}
+              >
+                {devSrc?.running === true ? '停止' : '启动'}
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devBusy}
+                title="现问一次后端 —— 状态是现问子进程得来的，不靠界面自己记"
+                onClick={() => void readDevSrc()}
+              >
+                刷新状态
+              </button>
+            </div>
+
+            {devLine !== null && (
+              <p className={s.vhelp} style={devBad ? { color: 'var(--danger)' } : undefined}>
+                {devLine}
+              </p>
+            )}
+
+            <p className={s.vhelp}>
+              只想起服务、不起客户端 dev：用{' '}
+              <span className={s.mono}>npm run preset-source:dev</span>
+              ，再把上面这个地址填进<b>客户端</b>的「设置 → 高级设置 → 预设数据源 → 自定义地址」
+              （保存即生效）。两边各管各的 —— 这一格换的是环境变量那条路，客户端那一格归客户端设置页管。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ <b>客户端 dev 已经在跑时，先把它停掉再点</b>：那一份没法被重新指源
+              （源是它启动时的环境变量），而新起的这份会撞在同一个 vite 端口上 ——
+              终端里会说 <span className={s.mono}>Port 5321 is in use</span>，
+              这里的状态随后会如实说它退出了。
+            </p>
           </div>
         </div>
       </div>

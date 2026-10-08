@@ -1021,6 +1021,27 @@ export interface PublishAccount {
   branch: string | null
 }
 
+/**
+ * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
+ *
+ * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
+ * 那个进程可能是人在终端里 Ctrl+C 掉的。`url` 就是 `MKPSE_PRESET_SOURCE_URL`
+ * 注进客户端的那个地址 —— 界面照后端说的报，不自己拼一遍。
+ */
+export interface DevSourceStatus {
+  running: boolean
+  /** 包装层（Windows 上是 cmd）的 PID；不在跑时 null */
+  pid: number | null
+  /** 服务地址 —— 想只手起服务、再在客户端设置页手填地址的人，填这一串 */
+  url: string
+  /** 它在哪个仓库根下跑（命令的 cwd） */
+  repoRoot: string
+  /** 实际跑的那条命令（给人对账用） */
+  command: string
+  /** 不在跑时的原因（退出码那句 / "本来就没在跑"）；在跑时 null */
+  note: string | null
+}
+
 /* ---------- 状态词 ---------- */
 
 /** `words::Word`。`explain` 写「改了会怎样」，不是「这个状态怎么算的」 */
@@ -1734,6 +1755,19 @@ export const wb = {
    * ★ 只读、只开系统程序；目录还没建出来时后端**如实拒绝**（错误详情里附候选路径）。
    */
   releaseOpenBundle: () => invoke<void>('wb_release_open_bundle'),
+
+  /**
+   * **本地测试源（开发）** —— 起 / 停 / 查那颗按钮背后的 `npm run dev:test-update`：
+   * 夹具不在先派生 → 起 `scripts/preset-test-server` 在 `127.0.0.1:8787` →
+   * 以 `MKPSE_PRESET_SOURCE_URL` 把客户端 dev 一起起起来（那个变量只在 debug 构建里认）。
+   *
+   * ★ `start` **幂等**（已在跑就报现状，不再起第二个 —— 第二份会撞在 8787 上悄悄死掉）；
+   * `stop` 收掉**整棵进程树**（只杀包装层会留下服务与客户端 dev 的孤儿）。
+   * 三条都**不写任何配置**：源地址是环境变量注入的，客户端那格始终归客户端设置页管。
+   */
+  devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
+  devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
+  devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
