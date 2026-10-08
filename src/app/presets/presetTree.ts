@@ -82,6 +82,7 @@ import type {
   MachineVersion,
   MenuEntry,
   MineState,
+  OfficialVersion,
   PresetFileInfo,
   UserPresetFile,
   VersionFiles,
@@ -408,6 +409,24 @@ export const CLOUD_STATE_TEXT = {
 export const CLOUD_STATE_WHY = {
   downloaded: '已下载：getLocalFiles() 说本机已经有这个文件了（假后端给的是固定演示集合）—— 它同时出现在本地表里，那是对的',
   pending: '未下载：仓库里有，你机器上还没有',
+}
+
+/**
+ * 官方版本行上「新版本」那枚胶囊（2026-10-08）。
+ *
+ * ★ 它说的是**"这个官方版本我还没下载"**，不是"你现在用的那份过时了" ——
+ * 系统不会自动更新用户的任何一份预设，也不会在任何一行上说"该更新了"。
+ */
+export const VERSION_NEW_TEXT = '新版本'
+
+export const VERSION_NEW_WHY =
+  '新版本：官方登记了这一版，你这台机器还没下过它 —— 点「下载」拿到它。' +
+  '下载会生成**一份新的「我的预设」**（名字带这一版的官方发布日），旧的那份一个字节都不动'
+
+/** 版本行「时间」列的说明（真值来自哪、没下载时写的是什么） */
+export const VERSION_TIME_WHY = {
+  downloaded: '这一版的官方发布日期（取自它自己文件头的 release_time）',
+  pending: '还没下载，拿不到这一版自己的发布日 —— 这里写的是**目录代时间**（这一代目录什么时候发布的）',
 }
 
 /**
@@ -1308,6 +1327,13 @@ export interface PresetRowBase {
    */
   releaseState?: ReleaseFileState
   /**
+   * **这是"官方登记了、我还没下载"的那一版**（2026-10-08 多版本行）。
+   *
+   * 语义只有一句：「云端有一个我还没下载的官方版本」。**它不是"过时"** ——
+   * 系统不会自动更新用户的任何一份预设，也不在任何一行上说"你该更新了"。
+   */
+  newVersion?: boolean
+  /**
    * **这次发布的时刻**（catalog.publishedAt，ISO/UTC → 显示按本机时区）。
    * release 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
    * "我盘上这份什么时候到的"（`modifiedText` + `arrivalBy`）与"云端最新版什么时候发的"
@@ -1463,6 +1489,14 @@ export interface PresetRowsInput {
    * （图标 / 模型不进这个数组）；空数组 = 目录里没有登记预设页的文件。
    */
   releasePresets: ReleasePresetSource[]
+  /**
+   * **官方版本账**（`api.getOfficialVersions()`，2026-10-08）：官方登记过哪几版、
+   * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**。
+   *
+   * 空数组 = 版本账读不到（假后端没这一路 / 随包目录）—— 退回"一个预设一行"的老画法，
+   * 行为不退化。
+   */
+  officialVersions: OfficialVersion[]
   /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
   /**
@@ -2040,6 +2074,22 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
  * `applied` 是第三件事，判据只有一条 asset id 相等 —— 所以一个还没下的文件也可能是
  * 「正在配着的那一份」，那时页脚会说「配着 X（还没下）」。
  */
+/**
+ * 版本行「时间」列写什么（2026-10-08）。
+ *
+ * - **已下载的那一版**：它自己文件头的 `release_time` 的**日期段**（真值，`2026-10-15`）；
+ * - **还没下载的**：拿不到那一版自己的发布日，写**目录代时间**（`publishedAt`）——
+ *   界面上如实标明是"目录发布时间"，不冒充预设发布日（见 [`VERSION_TIME_WHY`]）。
+ * - 两样都没有 ⇒ `undefined`（那一格照实写「未知」，不编）。
+ */
+function versionDateText(v: OfficialVersion): string | undefined {
+  const rt = v.releaseTime?.trim()
+  if (rt !== undefined && rt !== '') return rt.slice(0, 10)
+  const pa = v.publishedAt?.trim()
+  if (pa !== undefined && pa !== '') return pa
+  return undefined
+}
+
 export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRow> {
   const {
     machines,
@@ -2050,6 +2100,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     query,
     pinned,
     releasePresets,
+    officialVersions,
     releaseVersion,
     releaseAt,
   } = input
@@ -2109,11 +2160,24 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
   const release = releasePresets
     .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
-    .map((p): PresetCloudRow => {
+    .flatMap((p): PresetCloudRow[] => {
       const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
       /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
       const state = p.state
-      return {
+      /*
+       * **官方版本行**（2026-10-08）：同一个预设的每一版各占一行 ——
+       * 「已下载 / 新版本」由隐藏 baseline 按摘要答，**不是"过时判定"**。
+       * 版本账读不到（假后端没这一路 / 随包目录）就退回"一个预设一行"的老画法。
+       */
+      /*
+       * 只列**下过的**与**当前那一版**：历史版本没下过时给不出「下载」——
+       * 下载命令认的是当前目录那一条的字节，历史版本没法按摘要重下。
+       * 列一行点了没反应的按钮，比不列它更糟。
+       */
+      const versions = officialVersions.filter(
+        (v) => v.fileName === p.fileName && (v.downloaded || v.current),
+      )
+      const row = {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
         rowKey: `release-cloud:${p.fileName}`,
         pinKey: `release:${p.fileName}`,
@@ -2152,7 +2216,19 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         downloaded: state === 'ok',
         releaseState: state,
         publishedAt: releaseAt,
-      }
+      } satisfies PresetCloudRow
+      if (versions.length === 0) return [row]
+      return versions.map((v) => ({
+        ...row,
+        /* 行键带上这一版的摘要前 8 位：同一个预设的多版各占一行，展开 / 焦点都跟着版本走 */
+        rowKey: `release-cloud:${p.fileName}@${v.sha256.slice(0, 8)}`,
+        modifiedText: versionDateText(v),
+        downloaded: v.downloaded,
+        /* 版本行只有两态：下过 = `ok`（灰字「已下载」），没下过 = `missing`（可点的「下载」） */
+        releaseState: v.downloaded ? 'ok' : 'missing',
+        newVersion: !v.downloaded,
+        publishedAt: v.publishedAt ?? releaseAt,
+      }))
     })
 
   const all = [...official, ...release]

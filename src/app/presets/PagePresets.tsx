@@ -125,7 +125,7 @@
  * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
 import { longStatText } from '../store/package'
@@ -140,6 +140,7 @@ import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
+import CompareModal from './CompareModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
 import PresetTable from './PresetTable'
@@ -231,6 +232,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
+  /*
+   * **对比台的候选**：读得出来的「我的预设」（MKP 预设）。
+   * 读不出来的那份不给 —— 比一份读不懂的文件只会得到一行"读不出来"；
+   * 别的类型（`.json`）也不给：这一台子比的是参数。`useMemo` 是必需的（对比台按它重置选择）。
+   */
+  const compareFiles = useMemo(
+    () => data.mine.filter((f) => f.kind === 'mkp_preset' && f.state !== 'unreadable'),
+    [data.mine],
+  )
   const rootRef = useRef<HTMLDivElement>(null)
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
   const flashRef = useRef<HTMLDivElement>(null)
@@ -243,6 +253,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
+  /*
+   * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"官方版本"或"更新"上，
+   * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-mine/`）。
+   */
+  const [compareOpen, setCompareOpen] = useState(false)
   /*
    * 正在做动作的那一行（rowKey）。只用来把那一颗按钮禁掉 —— 假后端是同进程的内存写，
    * 这一下快到看不见；真后端上「应用」要写盘，连点两次就会发两个写。
@@ -1255,6 +1270,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 machineId={data.machineId}
                 onPick={pickMachine}
               />
+              <button
+                type="button"
+                className={s.chip}
+                title="对比台：选 2~3 份「我的预设」，同一项并排看、可以直接改。只在你自己那几份之间比 —— 官方那份（隐藏基线）不进这张台子"
+                onClick={() => setCompareOpen(true)}
+              >
+                参数对比
+              </button>
               {metaNode}
             </>
           ) : (
@@ -1629,6 +1652,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
               </div>
             )}
           </Drawer>
+
+          {/*
+           * **参数对比台**（2026-10-08）：一个独立常驻工具，只在**用户自己的本地预设**
+           * 之间比。挂在 `.main` 里（与抽屉同一条规矩）：遮罩只盖内容区。
+           * **官方那份（隐藏 baseline）不进这张台子** —— 它是系统内部的东西，不是给用户比的。
+           */}
+          <CompareModal
+            open={compareOpen}
+            files={compareFiles}
+            onClose={() => setCompareOpen(false)}
+            onSaved={(text) => setNote({ text, bad: false })}
+          />
 
           {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——

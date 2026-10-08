@@ -803,6 +803,14 @@ export interface OnDiskFile {
  */
 export interface CatalogParamDef {
   key: string
+  /**
+   * 这个参数在 MKP 预设 TOML 里的**字段名**（`offset_x` / `speed_limit`…）。
+   *
+   * 真目录里本来就有它（`presetdata::ParamDef` 的 `toml_key`，serde 成 camelCase）——
+   * 客户端的**写值**不读它（按注册表定位是 Rust 那边的事），
+   * 只有**假后端的对比台**要靠它把演示正文对回参数键（真机上这一步在 Rust 里）。
+   */
+  tomlKey?: string
   /** 数据域分区（= key 前缀）。**不是界面分组** —— 分组看 layout.sectionId */
   section: string
   /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
@@ -1101,6 +1109,57 @@ export interface PresetSource {
   defaultMode: string
   /** 出厂默认那个源的地址 */
   builtinDefault: string | null
+}
+
+/* ---------- baseline + 对比台（2026-10-08） ---------- */
+
+/**
+ * 官方预设的一个版本（云端表按预设归组之后，组内的每一行）。
+ *
+ * ★ **这不是"过时判定"**：它说的是"云端登记过这一版、我这一版下过没有"，
+ * 不是"你那份该更新了"。用户自己那份是完整、可继续使用的一份，系统不替他更新。
+ */
+export interface OfficialVersion {
+  /** 归属的官方预设文件名（`A1-fast.toml`）—— 界面按它归组 */
+  fileName: string
+  /** 内容摘要（版本的唯一身份）。**界面不显示** —— 用户没必要看见哈希 */
+  sha256: string
+  /** 官方**发布日期真值**（该版正文文件头的 `# release_time`）。`null` = 还没下载，拿不到 */
+  releaseTime: string | null
+  /** 目录代时间（`catalog.publishedAt`）—— 兜底，界面上标明是"目录发布时间" */
+  publishedAt: string | null
+  /** 这一版本机下过没有（= 隐藏 baseline 里有它） */
+  downloaded: boolean
+  /**
+   * 这一版是**当前目录登记的那一版** —— 只有它的「下载」真能拿到（历史版本没法按摘要重下）。
+   * 界面据此决定给不给「下载」：历史版本没下过也给不出一个真能成的动作。
+   */
+  current: boolean
+}
+
+/** 一次参数改动：参数 key + 目标值的字符串形式（形态由注册表决定，前端**不拼 TOML**） */
+export interface ParamEdit {
+  paramKey: string
+  value: string
+}
+
+/** 一份用户预设的参数值（对比台里的一列） */
+export interface PresetParamValues {
+  /** 相对用户根的路径（`presets-mine/A1-fast-2026-10-15.toml`） */
+  path: string
+  fileName: string
+  /** 参数 key → 控件看得懂的值（`-1.5` / `true` / `standard` / 多行 G-code） */
+  values: Record<string, string>
+  /** 这一份读不出来时的一句人话（此时 `values` 是空表） */
+  problem: string | null
+}
+
+/** 「恢复默认」的基准值（参数页「恢复默认值」的取值来源） */
+export interface PresetDefaults {
+  /** 这份预设血统里的来源摘要（没血统 / 没摘要 ⇒ `null`） */
+  basedOnSha256: string | null
+  /** 基准参数值；`null` = 没有可用的基准，前端**回退出厂值** */
+  values: Record<string, string> | null
 }
 
 export interface MkpApi {
@@ -1556,6 +1615,43 @@ export interface MkpApi {
    *   点了**什么都不发生**（0.0.2 的「查看更新」就是那样"点了没反应"的）。
    */
   openUrl(url: string): Promise<void>
+
+  /* ---------- baseline + 对比台（2026-10-08） ---------- */
+
+  /**
+   * **官方版本列表**：这个官方预设官方登记过哪几版、哪几版这一机已经下过。
+   *
+   * 两条判据：官方登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
+   * 下过没有 = 隐藏 baseline 里有没有那一版的摘要。
+   *
+   * ★ **它不是"过时判定"**：不读用户预设的字节、不看血统，也**不会**说"你那份该更新了"。
+   * `fileName` 给了就只返回那一个预设的版本。
+   */
+  getOfficialVersions(fileName?: string | null): Promise<OfficialVersion[]>
+
+  /**
+   * **「恢复默认」的基准值**：拿这份用户预设血统里的 `based_on_sha256` 去 hidden
+   * baseline 取当初那一版官方的参数值。没有基准（导入的 / 从用户预设复制出来的）
+   * ⇒ `values: null`，参数页**回退到出厂值**。只读，一个字节都不写。
+   */
+  getPresetDefaults(path: string): Promise<PresetDefaults>
+
+  /**
+   * **读一份用户预设的参数**（对比台里的一列）。**只认 `presets-mine/`**。
+   *
+   * 读不出来**不抛错**：返回空表 + `problem` 一句人话 —— 那一列如实说"这份读不出来"，
+   * 而不是把整个对话框打掉。
+   */
+  readPresetParams(path: string): Promise<PresetParamValues>
+
+  /**
+   * **把改过的几项写回它自己那一份**（同一路径，**不产生第二份**）。
+   *
+   * 结构保真：逐项只换那个值（注释 / 键序 / inline table / 多行字面量 / 行尾一个字节不动），
+   * 任何一项失败**整批不落**；空改动 / 算出来与原文一样**不写盘**。
+   * baseline 与官方当前版永远不被写。
+   */
+  savePresetParams(path: string, edits: ParamEdit[]): Promise<void>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

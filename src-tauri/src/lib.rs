@@ -165,6 +165,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::ensure_user_copy,
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
+        // 对比台 + baseline（2026-10-08）：只在**用户自己的预设**之间对比；
+        // baseline 是隐藏内部存储（云端版本列表 + 恢复默认的基准值）
+        ipc::preset_baseline::get_official_versions,
+        ipc::preset_baseline::get_preset_defaults,
+        ipc::preset_params::read_preset_params,
+        ipc::preset_params::save_preset_params,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
         ipc::import::stage_import,
         ipc::import::commit_import,
@@ -231,6 +237,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::ensure_user_copy,
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
+        // 对比台 + baseline（与上面那份清单一字不差）
+        ipc::preset_baseline::get_official_versions,
+        ipc::preset_baseline::get_preset_defaults,
+        ipc::preset_params::read_preset_params,
+        ipc::preset_params::save_preset_params,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
         ipc::import::stage_import,
         ipc::import::commit_import,

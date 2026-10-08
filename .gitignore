@@ -72,3 +72,6 @@ tmp-port/
 # 上一版那两个落点（`src/app/assets/printers/`、`public/assets/`）已退役 ——
 # 同一个东西有两个落点，就等于"盘上哪份是对的"有两个答案。
 client-assets/
+
+# playwright-cli（浏览器验证工具）的会话快照与截图：人工排查用，不入库
+.playwright-cli/

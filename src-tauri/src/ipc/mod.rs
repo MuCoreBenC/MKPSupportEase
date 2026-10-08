@@ -20,6 +20,12 @@ pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
 pub mod mine;
+/// **baseline 的两条命令**（2026-10-08）：云端版本列表（已下载 / 新版本，**不是过时判定**）
+/// 与「恢复默认」的基准值。baseline 是隐藏内部存储，用户看不见它。
+pub mod preset_baseline;
+/// **对比台的两条命令**（2026-10-08）：读一份用户预设的参数 / 把改过的几项写回它自己。
+/// **只在用户自己的预设之间对比** —— 官方基线不进对比台。
+pub mod preset_params;
 pub mod presets;
 /// **应用内更新 + 打开外链**（2026-10-05 第五刀）。`open_url` 是修「查看更新点了没反应」
 /// 那个 bug 的：webview 没 opener 权限，外链一律过命令

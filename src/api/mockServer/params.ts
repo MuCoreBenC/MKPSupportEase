@@ -182,6 +182,8 @@ export function catalogRegistry(): CatalogRegistry {
   return {
     params: registry.params.map((p) => ({
       key: p.key,
+      /* 真目录也带这一格（`ParamDef.toml_key`）—— 假后端的对比台靠它对回参数键 */
+      tomlKey: p.tomlKey,
       section: p.section,
       layout: { order: p.layout.order, sectionId: p.layout.sectionId },
       /* 定义侧的显示格子（2026-10-02，① deprecated 链路）：参数页的字段清单从这摊，

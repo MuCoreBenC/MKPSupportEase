@@ -1044,8 +1044,15 @@ export default function PageParams({ density }: Props) {
             >
               <h3 className={s.sheetTitle}>恢复默认值</h3>
               <p className={s.sheetText}>
-                会把全部参数改回出厂设置。它算<b>一次</b>改动，
-                <b>按「撤销」可以整个退回来</b>；要落地还得按「保存修改」。
+                {/*
+                 * 基准有两档（2026-10-08）：这份我的预设当初那一版官方的默认值（隐藏在
+                 * 系统内部，用户看不见它），或者没有基准时的出厂设置。两档后果一样安全
+                 * —— 都是一次可整体撤销的改动，都要按「保存修改」才落地。
+                 */}
+                {u.defaultSource === 'baseline'
+                  ? '会把全部参数改回这份预设对应的官方默认值。'
+                  : '会把全部参数改回出厂设置（这份没有可用的官方基准）。'}
+                它算<b>一次</b>改动，<b>按「撤销」可以整个退回来</b>；要落地还得按「保存修改」。
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskRestore(false)}>

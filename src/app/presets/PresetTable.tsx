@@ -89,11 +89,13 @@ import {
   ARCHIVE_WHY,
   archiveOpenText,
   BASED_ON_KEY,
-  BASED_ON_TEXT,
   BASED_ON_WHY,
   basedOnCellText,
   CLOUD_STATE_TEXT,
   CLOUD_STATE_WHY,
+  VERSION_NEW_TEXT,
+  VERSION_NEW_WHY,
+  VERSION_TIME_WHY,
   DASH_,
   DEMO_STAT_WHY,
   EDIT_TEXT,
@@ -267,6 +269,13 @@ export default function PresetTable({
     const when = longStatText(row.modifiedText)
     if (row.origin === 'release') {
       if (row.scope === 'cloud') {
+        /*
+         * **版本行**（2026-10-08）：已下载的那一行写的是这一版自己的官方发布日（真值），
+         * 还没下载的写的是目录代时间 —— 两个时间语义不同，title 里如实分开说，
+         * 不让"目录什么时候发的"冒充"这个预设什么时候发的"。
+         */
+        if (row.newVersion === true) return VERSION_TIME_WHY.pending
+        if (row.newVersion === false) return VERSION_TIME_WHY.downloaded
         return when === undefined ? RELEASE_TIME_WHY.cloudMissing : `云端更新时间：${when}`
       }
       if (when === undefined) return RELEASE_TIME_WHY.localMissing
@@ -416,14 +425,12 @@ export default function PresetTable({
                         </span>
                       )}
                       {/*
-                       * 我那份是**从旧版官方**改出来的（官方已经换新版）—— 一眼看得见。
-                       * 它不是"坏文件"：照常能用能改，展开详情里那一格说得更全。
+                       * ★ **"基于旧版官方"那枚徽章退役了**（2026-10-08 作者裁决）：
+                       * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；
+                       * 系统既不自动更新它，也不在列表上暗示"你落后了"。
+                       * 血统照旧写在文件头（展开详情「基于」那一格还答"从哪一版派生"），
+                       * 只是不再据此给状态色。
                        */}
-                      {row.scope === 'local' && row.basedOn === 'outdated' && (
-                        <span className={s.basedOld} title={BASED_ON_WHY.outdated}>
-                          {BASED_ON_TEXT.outdated}
-                        </span>
-                      )}
                       {/*
                        * 第九层：读不出来的那一份（编码 / TOML 语法 / 指向用户根之外）——
                        * 一眼看得见；为什么读不出来在 title 里。**照常列出来**，不藏。
@@ -567,13 +574,15 @@ export default function PresetTable({
                         disabled={busy}
                         /* 发布行是真下载；官方行仍是「未实现」—— 文案按行分流 */
                         title={
-                          row.releaseUid !== undefined
-                            ? needsUpdate
-                              ? untrusted
-                                ? RELEASE_REPAIR_WHY
-                                : RELEASE_UPDATE_WHY
-                              : RELEASE_DOWNLOAD_WHY
-                            : DOWNLOAD_WHY
+                          row.newVersion === true
+                            ? VERSION_NEW_WHY
+                            : row.releaseUid !== undefined
+                              ? needsUpdate
+                                ? untrusted
+                                  ? RELEASE_REPAIR_WHY
+                                  : RELEASE_UPDATE_WHY
+                                : RELEASE_DOWNLOAD_WHY
+                              : DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
@@ -718,9 +727,11 @@ export default function PresetTable({
                               : undefined
                           }
                         >
-                          {row.releaseState !== undefined
-                            ? UPDATE_STATE_TEXT[updateState ?? 'latest']
-                            : row.scope === 'local'
+                          {row.newVersion === true
+                            ? VERSION_NEW_TEXT
+                            : row.releaseState !== undefined
+                              ? UPDATE_STATE_TEXT[updateState ?? 'latest']
+                              : row.scope === 'local'
                               ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
                               : row.downloaded
                                 ? CLOUD_STATE_TEXT.downloaded

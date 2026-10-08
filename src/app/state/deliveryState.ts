@@ -58,3 +58,38 @@ export function useDeliveryRevision(): number {
     () => revision,
   )
 }
+
+/* ---------- 数据源代次（2026-10-08） ---------- */
+
+let sourceRevision = 0
+const sourceListeners = new Set<() => void>()
+
+/**
+ * **数据源换过了**（设置页保存成功那一刻调）。
+ *
+ * # 为什么单开一条代次，不并进 `deliveryMutated`
+ *
+ * 换源与"投递面变了"是两件事：前者换的是**去哪儿取数**，后者换的是**盘上有什么**。
+ * 换源之后要做的动作也更重一层 —— 不只是重读，还要**允许后台再检查一次目录**
+ * （`checkBootstrapOnce` 的"本次运行只一次"要被复位），否则用户改完地址看到的是
+ * 旧源的数据，而验收标准是**保存即生效、不许要求重启**。
+ *
+ * 与 `deliveryMutated` 同一条边界：只广播一个代次，不存任何数据。
+ */
+export function sourceMutated(): void {
+  sourceRevision += 1
+  for (const listener of sourceListeners) listener()
+}
+
+/** 数据源代次。放进 effect 依赖里：变了就按新地址重来一遍 */
+export function useSourceRevision(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      sourceListeners.add(listener)
+      return () => {
+        sourceListeners.delete(listener)
+      }
+    },
+    () => sourceRevision,
+  )
+}

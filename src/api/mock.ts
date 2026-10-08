@@ -5,7 +5,11 @@ import type {
   Axes,
   CalibModel,
   MkpApi,
+  OfficialVersion,
   OnDiskFile,
+  ParamEdit,
+  PresetDefaults,
+  PresetParamValues,
   PresetSource,
   SoftwareUpdate,
   UserPresetFile,
@@ -82,7 +86,11 @@ let mockSource: PresetSource | null = null
  */
 const mockMine: UserPresetFile[] = [
   {
-    /* 带血统、而且**基于旧版官方**（官方已经换到新版）：界面上要有「基于旧版官方」那一枚 */
+    /*
+     * 带血统（基于旧版官方）。**2026-10-08 起界面上不再有「基于旧版官方」那一枚** ——
+     * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；血统只在展开详情里
+     * 答"从哪一版派生"。
+     */
     path: 'presets-mine/我的 A1 涂胶.toml',
     fileName: '我的 A1 涂胶.toml',
     size: 2048,
@@ -100,6 +108,30 @@ const mockMine: UserPresetFile[] = [
     machineId: 'A1',
     versionId: 'FAST',
     /* 演示里没走过复制/导入 —— 出处照实没有（真机上由出处账答） */
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
+  },
+  {
+    /*
+     * **第二份可读的「我的预设」**：对比台要能被看见就必须有两份能比的 ——
+     * 只有一份时那个模态框只会说「至少选两份才能对比」。
+     * 它对应的就是"官方发了 2026-10-15 那一版之后，下载生成的新的一份"。
+     */
+    path: 'presets-mine/我的 A1 涂胶-2026-10-15.toml',
+    fileName: '我的 A1 涂胶-2026-10-15.toml',
+    size: 2048,
+    modifiedUnix: 1780900000,
+    kind: 'mkp_preset',
+    state: 'ok',
+    stateDetail: null,
+    basedOn: 'current',
+    basedOnLabel: 'mkp/presets/A1-fast.toml',
+    basedOnRelease: '2026-10-15 09:00:00',
+    basedOnMachineId: 'A1',
+    basedOnVersionId: 'FAST',
+    machineId: 'A1',
+    versionId: 'FAST',
     copiedFrom: null,
     copiedFromName: null,
     provenance: null,
@@ -272,8 +304,26 @@ mockMineText.set(
     '# based_on: dist/mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-05-29 04:26:12',
     `# based_on_sha256: ${'0'.repeat(64)}`,
-    '"涂胶宽度" = 1.1',
-    '"起始延时" = 0.4',
+    /* 键用**注册表里的真名字**（`[toolhead]` + `offset_y`）：对比台按注册表认参数，
+       编一套假键的话那一列会全是"—"，等于把要验的东西绕开了 */
+    '[toolhead]',
+    'offset_y = 20.0 # 笔尖偏移',
+    'speed_limit = 60 # 涂胶速度限制 (mm/s)',
+    '',
+  ].join('\n'),
+)
+mockMineText.set(
+  'presets-mine/我的 A1 涂胶-2026-10-15.toml',
+  [
+    '# 我自己的这一份 · 基于 2026-10-15 那一版官方（假后端演示正文）',
+    '# machine: A1',
+    '# variant: fast',
+    '# based_on: mkp/presets/A1-fast.toml',
+    '# based_on_release_time: 2026-10-15 09:00:00',
+    `# based_on_sha256: ${'1'.repeat(64)}`,
+    '[toolhead]',
+    'offset_y = 26.8 # 笔尖偏移',
+    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
     '',
   ].join('\n'),
 )
@@ -333,6 +383,178 @@ const readMockAxes = (text: string): Axes | null => {
   const y = readMockNumber(text, 'offset_y')
   const z = readMockNumber(text, 'offset_z')
   return x === null || y === null || z === null ? null : { x, y, z }
+}
+
+/* ---------- baseline + 对比台（2026-10-08）----------
+ *
+ * 真机上 baseline 是**隐藏的内部存储**（按内容摘要寻址）、官方版本来自目录 + 版本链，
+ * 假后端两样都没有 —— 用一份**固定的演示版本账**顶上，形状与真后端一致：
+ * 每个演示预设给两版（旧的一版算「已下载」、新的一版算「新版本」）。
+ *
+ * 它**不是"过时判定"**：这里不读用户预设的字节、也不给任何一行挂"该更新了"。
+ */
+const MOCK_OFFICIAL_VERSIONS: OfficialVersion[] = [
+  {
+    fileName: 'A1-standard.toml',
+    sha256: 'a1'.padEnd(64, '0'),
+    releaseTime: '2026-09-30 05:46:00',
+    publishedAt: '2026-10-06T05:46:00Z',
+    downloaded: true,
+    current: false,
+  },
+  {
+    fileName: 'A1-standard.toml',
+    sha256: 'a2'.padEnd(64, '0'),
+    releaseTime: null,
+    publishedAt: '2026-10-15T05:46:00Z',
+    downloaded: false,
+    current: true,
+  },
+  {
+    fileName: 'A1-fast.toml',
+    sha256: 'f1'.padEnd(64, '0'),
+    releaseTime: '2026-05-29 04:26:12',
+    publishedAt: null,
+    downloaded: true,
+    current: false,
+  },
+  {
+    fileName: 'A1-fast.toml',
+    sha256: 'f2'.padEnd(64, '0'),
+    releaseTime: null,
+    publishedAt: '2026-10-15T05:46:00Z',
+    downloaded: false,
+    current: true,
+  },
+]
+
+/** 注册表里那三格（`CatalogParamDef` 的 TS 声明只长到消费面，假后端这里要 tomlKey） */
+type RawParamDef = { key: string; section: string; tomlKey: string; valueType: string }
+
+const rawParamDefs = (): RawParamDef[] => catalogRegistry().params as unknown as RawParamDef[]
+
+/**
+ * 演示基准：真机上它是**隐藏 baseline** 里那份官方原文（按血统的 `based_on_sha256` 取）。
+ * 假后端没有那个存储，用两张按摘要首字符认的小表顶上 —— 目的只是让「恢复默认值」
+ * 在浏览器里也能看出"退回到的是当初那一版官方，不是出厂值"。
+ */
+const MOCK_BASELINES: Record<string, string> = {
+  /* `'0'.repeat(64)` 那份血统指的就是它（2026-05-29 那一版） */
+  '0': [
+    '# 假后端的演示基准 · 2026-05-29 那一版官方',
+    '[toolhead]',
+    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
+    'offset_y = 18.6 # 笔尖偏移',
+    '',
+  ].join('\n'),
+  /* `'1'.repeat(64)` 那份血统指的是 2026-10-15 那一版 */
+  '1': [
+    '# 假后端的演示基准 · 2026-10-15 那一版官方',
+    '[toolhead]',
+    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
+    'offset_y = 26.3 # 笔尖偏移',
+    '',
+  ].join('\n'),
+}
+
+const baselineTextOf = (sha: string): string =>
+  MOCK_BASELINES[sha.slice(0, 1)] ?? MOCK_BASELINES['0']!
+
+/** 去掉行尾注释（引号里的 `#` 不算；演示数据够用） */
+function stripMockComment(raw: string): string {
+  let quote: string | null = null
+  for (let i = 0; i < raw.length; i += 1) {
+    const c = raw[i]!
+    if (quote !== null) {
+      if (c === quote) quote = null
+      continue
+    }
+    if (c === '"' || c === "'") {
+      quote = c
+      continue
+    }
+    if (c === '#') return raw.slice(0, i)
+  }
+  return raw
+}
+
+/** 引号去掉（`"tower"` / `'tower'` → `tower`）；裸值原样 */
+function unquoteMock(raw: string): string {
+  const t = raw.trim()
+  if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
+    return t.slice(1, -1)
+  }
+  return t
+}
+
+/**
+ * 极简 TOML 读取（**只为假后端**）：`[section]` + `key = value` →
+ * `section\0key` 映射到**控件看得懂的值**（与真机 `presetdata::params` 同一口径）。
+ */
+function parseMockToml(text: string): Map<string, string> {
+  const out = new Map<string, string>()
+  const lines = text.split('\n')
+  let section = ''
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const sec = /^\[([^\]]+)\]$/.exec(trimmed)
+    if (sec !== null) {
+      section = sec[1]!
+      continue
+    }
+    const kv = /^([\w"'-]+)\s*=\s*(.*)$/.exec(trimmed)
+    if (kv === null) continue
+    const key = unquoteMock(kv[1]!)
+    const raw = kv[2]!.trim()
+    if (raw.startsWith('"""')) {
+      const body: string[] = [raw.slice(3)]
+      while (!body[body.length - 1]!.includes('"""') && i + 1 < lines.length) {
+        i += 1
+        body.push(lines[i]!)
+      }
+      const joined = body.join('\n')
+      const end = joined.indexOf('"""')
+      out.set(`${section}\u0000${key}`, end < 0 ? joined : joined.slice(0, end))
+      continue
+    }
+    out.set(`${section}\u0000${key}`, unquoteMock(stripMockComment(raw)))
+  }
+  return out
+}
+
+/** 按注册表把一份演示正文里的参数抽出来（真机：`presetdata::params::read_param_values`） */
+function readMockParams(text: string): Record<string, string> {
+  const sections = parseMockToml(text)
+  const out: Record<string, string> = {}
+  for (const d of rawParamDefs()) {
+    const hit = sections.get(`${d.section}\u0000${d.tomlKey}`)
+    if (hit !== undefined) out[d.key] = hit
+  }
+  return out
+}
+
+/** 只换那一行里的值（真机：`presetdata::patch` 保真写回）；行尾注释留着 */
+function patchMockParam(text: string, def: RawParamDef, value: string): string {
+  const literal = literalFor(value, def.valueType)
+  const lines = text.split('\n')
+  let section = ''
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim()
+    const sec = /^\[([^\]]+)\]$/.exec(trimmed)
+    if (sec !== null) {
+      section = sec[1]!
+      continue
+    }
+    if (section !== def.section) continue
+    const hit = /^(\s*)([\w"'-]+)(\s*=\s*)(.*)$/.exec(lines[i]!)
+    if (hit === null || unquoteMock(hit[2]!) !== def.tomlKey) continue
+    /* 行尾注释留着（`# 速度上限(mm/s)` 这类）—— 只换值 */
+    const comment = hit[4]!.slice(stripMockComment(hit[4]!).length).trimEnd()
+    lines[i] = `${hit[1]}${hit[2]}${hit[3]}${literal}${comment === '' ? '' : ` ${comment}`}`
+    return lines.join('\n')
+  }
+  throw new Error(`演示正文里没有 [${def.section}].${def.tomlKey} —— 这一项改不动`)
 }
 
 /**
@@ -1167,6 +1389,49 @@ export const mockApi: MkpApi = {
   async clearPresetSource() {
     mockSource = null
     return null
+  },
+
+  /* —— baseline + 对比台（2026-10-08）：固定演示版本账 + 从演示正文里读写参数 ——
+     真机上第一条读目录 + 版本链、第二条读隐藏 baseline、后两条读写用户那份文件本身。 */
+  async getOfficialVersions(fileName?: string | null) {
+    const want = fileName?.trim()
+    return MOCK_OFFICIAL_VERSIONS.filter((v) => !want || v.fileName === want).map((v) => ({ ...v }))
+  },
+
+  async getPresetDefaults(path: string): Promise<PresetDefaults> {
+    const text = mockMineText.get(path)
+    if (text === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    const line = text.split('\n').find((l) => l.trimStart().startsWith('# based_on_sha256'))
+    const sha = line === undefined ? null : (line.split(':')[1]?.trim() ?? null)
+    if (sha === null || sha === '') {
+      /* 没有血统（导入的 / 手工拷的）—— 没有基准，界面回退出厂值 */
+      return { basedOnSha256: null, values: null }
+    }
+    return { basedOnSha256: sha, values: readMockParams(baselineTextOf(sha)) }
+  },
+
+  async readPresetParams(path: string): Promise<PresetParamValues> {
+    const text = mockMineText.get(path)
+    const fileName = path.split('/').pop() ?? path
+    if (text === undefined) {
+      return { path, fileName, values: {}, problem: `找不到 ${path}` }
+    }
+    return { path, fileName, values: readMockParams(text), problem: null }
+  },
+
+  async savePresetParams(path: string, edits: ParamEdit[]) {
+    const text = mockMineText.get(path)
+    if (text === undefined) throw new Error(`找不到 ${path} —— 没有动别的地方`)
+    let next = text
+    for (const e of edits) {
+      const def = rawParamDefs().find((d) => d.key === e.paramKey)
+      if (def === undefined) throw new Error(`不认识这个参数：${e.paramKey}`)
+      next = patchMockParam(next, def, e.value)
+    }
+    if (next === text) return
+    mockMineText.set(path, next)
+    const at = mockMine.findIndex((f) => f.path === path)
+    if (at >= 0) mockMine[at] = { ...mockMine[at]!, size: next.length, modifiedUnix: nowSec() }
   },
 
   /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：

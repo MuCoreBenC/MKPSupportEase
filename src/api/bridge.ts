@@ -218,6 +218,15 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
+  /* ——— baseline + 对比台（2026-10-08）———
+     官方版本列表（已下载 / 新版本，**不是过时判定**）、「恢复默认」的基准值、
+     以及对比台读/写用户预设的参数。baseline 是隐藏内部存储，前端拿不到它的路径。 */
+  getOfficialVersions: (fileName) =>
+    call('getOfficialVersions', 'get_official_versions', { fileName: fileName ?? null }),
+  getPresetDefaults: (path) => call('getPresetDefaults', 'get_preset_defaults', { path }),
+  readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
+  savePresetParams: (path, edits) =>
+    call<void>('savePresetParams', 'save_preset_params', { path, edits }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>

@@ -42,6 +42,8 @@ pub mod bundles;
 pub mod catalog;
 /// 按**参数 key** 改一份 MKP 预设 TOML 里的一个值（保真写回）。参数页底座 ②
 pub mod patch;
+/// 参数值的**只读抽取**与批量结构保真写回（对比台与「恢复默认」共用）。**纯计算**，不碰盘
+pub mod params;
 pub mod registry;
 /// 三层取值（出厂 → 机型基底 → 版本覆盖）与来源层。**纯计算**，不碰盘。
 ///

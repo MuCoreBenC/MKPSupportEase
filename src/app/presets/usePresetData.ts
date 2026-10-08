@@ -57,7 +57,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
-import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
+import { deliveryMutated, useDeliveryRevision, useSourceRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -66,6 +66,7 @@ import type {
   DownloadOutcome,
   DownloadTick,
   Machine,
+  OfficialVersion,
   OnDiskFile,
   PresetDraft,
   UserFileIdentity,
@@ -132,6 +133,15 @@ export interface PresetData {
    * 归档是官方版本生命周期的一部分（见 `ArchivedFile` 的注释）。
    */
   archived: ArchivedFile[]
+
+  /**
+   * **官方版本账**（`api.getOfficialVersions()`，2026-10-08）：官方登记过哪几版、
+   * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**
+   * （「已下载 / 新版本」）。
+   *
+   * ★ 它**不是"过时判定"**：不读用户预设的字节、不看血统，也不在任何一行上说"该更新了"。
+   */
+  officialVersions: OfficialVersion[]
 
   machines: Machine[]
   /** 当前机型。**空串 = 「全部机型」那一档**（预设页才用得到，首页永远是一台具体的） */
@@ -431,6 +441,12 @@ export function usePresetData(importRevision = 0): PresetData {
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
   /* 归档区（官方旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
   const [archived, setArchived] = useState<ArchivedFile[]>([])
+  /*
+   * **官方版本账**（2026-10-08）：官方登记过哪几版、哪几版这一机已下过。
+   * 与 release 一路读（它俩本来就同源：都是"云端登记了什么"），空数组 = 读不到 = 退回
+   * "一个预设一行"的老画法。
+   */
+  const [officialVersions, setOfficialVersions] = useState<OfficialVersion[]>([])
   /* 当前数据源（release 行「来源」列的字）。读失败照实 null，不挡任何表 */
   const [sourceLabel, setSourceLabel] = useState<string | null>(null)
   /*
@@ -458,15 +474,18 @@ export function usePresetData(importRevision = 0): PresetData {
      * `ReleasePresetSource.nozzle`）。中间三个合起来才是四档（见 `ReleaseFileState`）；
      * 归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读。
      */
-    const [catalog, mine, drifted, trust, keep, repo] = await Promise.all([
+    const [catalog, mine, drifted, trust, keep, repo, versions] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
       api.getDeliveryTrust(),
       api.getArchivedFiles(),
       api.getPresetFiles(),
+      /* 官方版本账（2026-10-08）：云端表 MKP 档按它把每个预设摊成多行版本 */
+      api.getOfficialVersions(),
     ])
     setArchived(keep)
+    setOfficialVersions(versions)
     const downloaded = new Set(mine.map((f) => f.fileName))
     const driftedSet = new Set(drifted.map((f) => f.fileName))
     /*
@@ -692,6 +711,39 @@ export function usePresetData(importRevision = 0): PresetData {
       })
   }, [deliveryRevision, ready, readReleaseInto])
 
+  /*
+   * **换了数据源 —— 立刻按新地址重来一遍**（2026-10-08 作者要求）。
+   *
+   * 验收标准原话：「改完地址 → 保存 → 立即刷新数据源状态 → 下一次读取 / 检查就使用新地址」，
+   * **不允许要求重启**。后端那侧本来就是每次现读（`resolve_source` 无进程内缓存），
+   * 所以这里要补的只有两件前端的事：
+   *
+   *   ① 把「本次运行只检查一次」那道刹**复位**，允许后台**再检查一次**目录
+   *      （不然用户改完地址，页面还停在旧源的目录与经济状态上）；
+   *   ② 重读来源标签与交付那一路，并把新目录带来的变化照常应用 + 重读。
+   *
+   * 只在**真的换过**之后跑（代次 0 = 还没有人换过）。
+   */
+  const sourceRevision = useSourceRevision()
+  useEffect(() => {
+    if (sourceRevision === 0) return
+    let alive = true
+    checkedBootstrapThisRun = false
+    void (async () => {
+      const source = await api.getPresetSource().catch(() => null)
+      if (!alive) return
+      setSourceLabel(source?.mode ?? null)
+      const boot = await checkBootstrapOnce().catch(() => null)
+      if (!alive || boot === null) return
+      setNeedsNewerClient(boot.needsNewerClient)
+      /* 无论换没换目录都重读一遍：新源的自述与它登记的文件可能全都不同 */
+      await readReleaseInto().catch(() => {})
+    })()
+    return () => {
+      alive = false
+    }
+  }, [sourceRevision, readReleaseInto])
+
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
   }, [])
@@ -882,6 +934,7 @@ export function usePresetData(importRevision = 0): PresetData {
     copy,
     release,
     archived,
+    officialVersions,
     downloadRelease,
     downloadReleaseBatch,
     beginEdit,
@@ -1077,6 +1130,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       query,
       pinned,
       releasePresets: data.release.presets,
+      officialVersions: data.officialVersions,
       localReleases: data.release.localReleases,
       staleReleases: data.release.stale,
       releaseVersion: data.release.version,
@@ -1087,6 +1141,7 @@ export function usePresetPage(data: PresetData): PresetPage {
     [
       data.active,
       data.machineId,
+      data.officialVersions,
       data.release.publishedAt,
       data.release.localReleases,
       data.release.presets,

@@ -34,6 +34,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
 import type { PresetSource, SoftwareUpdate } from '../../api/contract'
+/* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
+import { deliveryMutated, sourceMutated } from '../state/deliveryState'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -145,11 +147,13 @@ export default function PageSettings() {
         /* 演示后端没有内置源（真机必有）：选内置 = 回到"没配"，如实照做 */
         setSource(null)
         setMode(next)
+        sourceChanged()
         return
       }
       setSource(got)
       setMode(got.mode as Mode)
       setNote({ text: `已切到：${got.label}` })
+      sourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
@@ -174,6 +178,18 @@ export default function PageSettings() {
 
   const canSet = draft.trim() !== ''
 
+  /**
+   * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
+   *
+   * 做两件事：`sourceMutated()` 让预设页**按新地址重来一遍**（包括允许后台再检查一次
+   * 目录 —— 那道"本次运行只检查一次"的刹由收方复位）；`deliveryMutated()` 让所有读
+   * 投递面的页面按新目录重读。两个都只是代次，不携带数据。
+   */
+  const sourceChanged = () => {
+    sourceMutated()
+    deliveryMutated()
+  }
+
   /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
   const apply = async () => {
     if (busy) return
@@ -183,6 +199,7 @@ export default function PageSettings() {
       const got = await api.setPresetSource('custom', draft.trim())
       setSource(got)
       setNote({ text: '已应用：现在用的就是你指定的这个地址。' })
+      sourceChanged()
     } catch (e) {
       setNote({
         text: `这个地址取不到预设数据，没有改，现在用的还是 ${source?.label ?? '默认源'}。请检查地址（或直接选上面的官方源）。`,
