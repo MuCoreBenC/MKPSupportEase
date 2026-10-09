@@ -140,6 +140,10 @@ export function usePreset(sel: Selection): PresetState {
         const preset: Preset = {
           name: copy?.fileName ?? file.fileName,
           path: copy?.path ?? file.path,
+          /* 绝对路径跟上面那两格**必须是同一份**：有「我那一份」时就是它那份
+             （后端刚读出正文，所以一定在盘上）；没有时才轮到官方交付那份 ——
+             那份还没「取回」时后端不给绝对路径，界面就不摆复制按钮（见 `Preset.absPath`） */
+          absPath: copy !== null ? copy.absPath : (file.absPath ?? null),
           axes,
           speed,
           /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存） */

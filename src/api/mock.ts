@@ -772,6 +772,39 @@ export const mockApi: MkpApi = {
     console.info('[mock] openModel', modelId)
   },
 
+  /*
+   * 「复制后处理脚本」里那段可执行物路径 —— 浏览器里没有本机可执行物，如实答 `null`
+   * （真机那份是壳的 `current_exe()`：就是本程序自己）。不编一串假路径出来：
+   * 编出来的命令贴进切片器只会让人以为"复制成功了"，其实指不到东西。
+   * 界面拿到 `null` 就不摆那颗按钮 —— 与"这份预设不在本机"同一个处置。
+   */
+  async getPostProcessExe() {
+    return null
+  },
+
+  /*
+   * 钩子那一趟：浏览器里不可能有 —— 那一趟是**切片器带参数把本程序拉起来**的那一次
+   * （`--Toml/--Gcode`），浏览器根本没有这个进程。所以快照如实答 `null`
+   * （界面那屏模态框就不出现），另两条点不到、真被调也只报"没有在跑"。
+   */
+  async getPostProcessRun() {
+    return null
+  },
+
+  async cancelPostProcess() {
+    throw new NotImplementedError(
+      'cancelPostProcess',
+      '浏览器预览里没有在跑的后处理 —— 那一趟由切片器带参数拉起来（用桌面版试）',
+    )
+  },
+
+  async answerPostProcessMismatch() {
+    throw new NotImplementedError(
+      'answerPostProcessMismatch',
+      '浏览器预览里没有在跑的后处理 —— 那一趟由切片器带参数拉起来（用桌面版试）',
+    )
+  },
+
   /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
    *
    * 数据来自 `src/api/mockServer/`：那份假后端把 `data/*.json` 的六份上游快照
@@ -1097,13 +1130,18 @@ export const mockApi: MkpApi = {
         (f.versionId ?? f.basedOnVersionId) === versionId,
     )
     if (hit === undefined) return null
+    /* 浏览器里没有盘 ⇒ 没有绝对路径（真机那份是 `<appDataDir>/user/presets-mine/…`）。
+       首页「复制后处理脚本」按它决定摆不摆按钮 —— 那一侧不摆，与真机上"这份还没取回"
+       同一个答案：不许编一个本机路径出来。 */
+    const absPath = null
     const text = mockMineText.get(hit.path)
     if (text === undefined) {
-      return { fileName: hit.fileName, path: hit.path, axes: null, speed: null }
+      return { fileName: hit.fileName, path: hit.path, absPath, axes: null, speed: null }
     }
     return {
       fileName: hit.fileName,
       path: hit.path,
+      absPath,
       axes: readMockAxes(text),
       speed: readMockNumber(text, 'speed_limit'),
     }

@@ -9,9 +9,18 @@
 //! 启动顺序有讲究：**先建数据根，再装日志**（日志要写进 `internal_root/logs`），
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
+/// **参数分流**：切片器（BambuStudio）带 `--Toml/--Gcode` 调我们时走钩子，否则开界面
+/// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
+pub mod args;
 pub mod chrome;
 pub mod error;
 pub mod fsx;
+/// **后处理钩子**：切片器导出 G-code 时调的那一次 —— 预设 → IR → 12 步管线（原地覆盖）。
+/// 内核就在本仓库（`crates/postprocess`），这里只把它接上参数、退出码与 stderr 结论。
+pub mod hook;
+/// **钩子那趟的界面那一半**：进度模态框的数据（事件 + 快照）、那颗「停止」、
+/// 机型不匹配那一问的等待，以及"跑完带退出码退"。
+pub mod hook_ui;
 pub mod ipc;
 /// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
 pub mod legacy;
@@ -51,6 +60,24 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    run_inner(None)
+}
+
+/// **钩子模式的入口**：同一扇窗，但起来就把切片器那一趟挂上（见 [`hook_ui`]）。
+///
+/// 分流发生在 `main.rs`（**建窗口之前**那一层判超参数）：带 `--Toml/--Gcode` 的进程走这里，
+/// 它跑完会**带退出码退** —— 切片器等的就是这个退出码。
+pub fn run_hook(job: crate::args::HookJob) {
+    run_inner(Some(job))
+}
+
+/// 两条入口共用的那一份装配。`hook_job = None` 就是普通界面（从桌面图标起来的）。
+fn run_inner(hook_job: Option<crate::args::HookJob>) {
+    let run = hook_job.map(|job| std::sync::Arc::new(hook_ui::HookRun::new(job)));
+    let for_setup = run.clone();
+    /* 事件循环结束之后那一段（用户把窗关了）也要拿它 —— 见函数末尾 */
+    let after_loop = run.clone();
+
     with_commands(tauri::Builder::default())
         /* 系统文件选择器（第十二层：通用导入入口的"选择文件"那一半）。
         权限只开 `dialog:allow-open`（默认 capability），别的一律不给 */
@@ -58,7 +85,9 @@ pub fn run() {
         /* 在文件管理器里显示（第十三层）。**只在 Rust 侧调**（我们自己的命令体里），
         所以不需要给它开任何 capability —— 前端够不着它的命令面 */
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        /* 钩子那一趟的状态。普通模式里是 `None` —— 界面据此知道"现在没有在跑后处理" */
+        .manage(hook_ui::HookSlot(run))
+        .setup(move |app| {
             let handle = app.handle().clone();
 
             /* 数据根：建不出来也继续，日志目录随之退到 stderr。
@@ -123,10 +152,27 @@ pub fn run() {
                 tracing::warn!("工作台窗口开不出来：{e}");
             }
 
+            /* 钩子那一趟：窗口起好之后挂到后台线程上跑（进度推给前面那扇窗，
+            跑完带退出码退）。**主线程留给窗口** —— 模态框要画得出来、那颗「停止」要点得动 */
+            if let Some(run) = for_setup {
+                hook_ui::spawn(&handle, run);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("Tauri 启动失败");
+
+    /* 走到这里 = 事件循环结束了（钩子模式下就是**用户把窗关了**）。
+    那一趟可能还在跑：按"取消"了结它，再等它把退出码交出来 ——
+    **绝不能就这么返回 0**：切片器会把 0 读成"处理成功"，然后去打印一份没处理过的 G-code。 */
+    if let Some(run) = after_loop {
+        run.stop();
+        let code = run
+            .wait_finished(std::time::Duration::from_secs(20))
+            .unwrap_or(crate::hook::EXIT_FAILED);
+        std::process::exit(i32::from(code));
+    }
 }
 
 /* ---------- 命令清单 ----------
@@ -143,6 +189,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
+        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
+        ipc::get_post_process_exe,
+        // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
+        ipc::postprocess::get_post_process_run,
+        ipc::postprocess::cancel_post_process,
+        ipc::postprocess::answer_post_process_mismatch,
         // 预设页（A41）的真后端。读客户端自己的数据根（`appDataDir/presets`）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,
@@ -238,6 +290,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
+        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
+        ipc::get_post_process_exe,
+        // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
+        ipc::postprocess::get_post_process_run,
+        ipc::postprocess::cancel_post_process,
+        ipc::postprocess::answer_post_process_mismatch,
         // 客户端命令：**两份清单一字不差**（漏一份就是「原生机能用、工作台构建不能用」）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,

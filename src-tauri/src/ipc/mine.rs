@@ -558,6 +558,12 @@ pub struct UserCopyCalibrationDto {
     pub file_name: String,
     /// 相对用户根的落点（`presets-mine/…`）—— 保存校准时把它交回来
     pub path: String,
+    /// 同一份在本机上的**绝对路径** —— 首页「复制后处理脚本」拼 `--Toml` 用它。
+    ///
+    /// 为什么不能拿 `path` 顶：切片器起钩子时的工作目录不是我们的数据根，相对落点
+    /// 在那里找不到文件（2026-10-09 实测：Bambu 弹 "Error code: 2"，正是 mkp-ssr 的
+    /// `EXIT_BAD_INPUT`「预设文件不存在：presets-mine/…」）。
+    pub abs_path: String,
     /// 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数）
     pub axes: Option<crate::ipc::Axes>,
     /// 涂胶速度限速；读不出来是 `null`
@@ -611,6 +617,8 @@ pub async fn get_user_copy_for(
         Ok(Some(UserCopyCalibrationDto {
             file_name: f.file_name.clone(),
             path: f.path.clone(),
+            /* 正文刚读出来了 ⇒ 这份一定在盘上，绝对路径不是猜的 */
+            abs_path: user_root.join(&f.path).display().to_string(),
             axes: calib.axes().map(|(x, y, z)| crate::ipc::Axes { x, y, z }),
             speed: calib.speed,
         }))

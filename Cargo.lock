@@ -2201,6 +2201,8 @@ dependencies = [
 name = "mkp-support-ease"
 version = "0.0.6"
 dependencies = [
+ "ctrlc",
+ "mkpse-postprocess",
  "mkpse-preset",
  "objc2",
  "objc2-app-kit",

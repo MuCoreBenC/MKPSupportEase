@@ -19,8 +19,22 @@ export interface Axes {
 export interface Preset {
   /** 文件名，界面上直接显示 */
   name: string
-  /** 本机绝对路径，鼠标悬停时看 */
+  /**
+   * **落点**（用户线是相对用户根的 `presets-mine/…`，官方线是相对内部根的
+   * `delivery/mkp/presets/…`）—— 读正文、保存校准都把它交回后端，所以它**不是**
+   * 本机绝对路径：后端只收相对落点（绝对路径一律被那道防穿越的闸拒掉）。
+   * 界面上只当悬停提示与去重键用。
+   */
   path: string
+  /**
+   * 同一份在**本机上的绝对路径**；`null` = 这一份不在盘上（官方那份还没「取回」）。
+   *
+   * 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
+   * 不是我们的仓库根，相对落点在那里找不到文件 —— 2026-10-09 实测，贴进去导出时
+   * Bambu 弹的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」）。拿不到就**不摆
+   * 那颗按钮**：一条贴进去必报错的命令比没有按钮更糟。
+   */
+  absPath: string | null
   axes: Axes
   speed: number
   /**
@@ -356,6 +370,13 @@ export interface FileRef {
    */
   path: string
   /**
+   * MKP 预设那一支：这一份在**本机上的绝对路径**（`内部根 + path`）。
+   * `undefined` = 盘上还没有它（还没「取回」）—— 界面据此不摆「复制后处理脚本」：
+   * 切片器起钩子时的工作目录不是我们的内部根，相对落点贴进去必报 "Error code: 2"。
+   * 切片器配置那一支不给（后台处理的 `--Toml` 不指它）。
+   */
+  absPath?: string
+  /**
    * `mkp_preset` 那一支带**真值**（运行时 catalog 的文件条目对交付产物真字节算的，
    * 下载校验拿它当期望值）；切片器那两支仍是 undefined —— 资产本体的登记与
    * 下载要等交付管道接管（总纲欠账 #3），没有就显示「未知」。
@@ -670,6 +691,12 @@ export interface UserCopyCalibration {
   fileName: string
   /** 落点（相对**用户根**，`presets-mine/…`）—— 保存校准时把它交回来 */
   path: string
+  /**
+   * 同一份在**本机上的绝对路径**（首页「复制后处理脚本」里 `--Toml` 用它）。
+   * 真后端上它恒有值（正文都读出来了，这份就在盘上）；浏览器预览里是 `null`
+   * —— 那一侧没有盘，也就不该编一个绝对路径出来。
+   */
+  absPath: string | null
   /** 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数） */
   axes: Axes | null
   /** 涂胶速度限速；读不出来是 `null` */
@@ -1290,6 +1317,56 @@ export interface ParamDecision {
   kind: ParamDecisionKind
 }
 
+/* ——— 后处理钩子那一趟（切片器导出 G-code 时起的那个进程）———
+ *
+ * 三个形状与 Rust 侧 `hook_ui` 里的 `ProgressPayload` / `QuestionPayload` /
+ * `FinishedPayload` / `RunSnapshot` 一一对应（两边没有编译器，靠这里的注释对齐）。
+ */
+
+/** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
+export interface PostProcessProgress {
+  /** 阶段 id（内核的稳定标识：`input` / `pass1`…） */
+  step: string
+  /** 步内比例 `0..1`；`null` = 这一步此刻给不出比例 */
+  fractionInStep: number | null
+  message: string
+}
+
+/** 要用户回答的一个问题 */
+export interface PostProcessQuestion {
+  /** 问题种类：`machine-mismatch` = 机型不匹配（给「继续 / 停下」两颗按钮） */
+  kind: string
+  text: string
+}
+
+/** 那一趟的结论 */
+export interface PostProcessFinished {
+  ok: boolean
+  /** 用户按了停止（或 Ctrl-C）—— 不是"失败"，说法不一样 */
+  cancelled: boolean
+  /** 一句话结论（与切片器那行 stderr 同一句） */
+  message: string
+  /** 给切片器的退出码（0 成功 / 1 失败或取消 / 2 输入·预设错） */
+  exitCode: number
+  elapsedMs: number
+  /** 产物落点（成功时就是输入那一份 —— 原地覆盖） */
+  output: string | null
+  warnings: string[]
+}
+
+/**
+ * 钩子那一趟的**全量快照**：窗口起来时读一次，之后跟着事件走。
+ *
+ * 只靠事件是不够的：窗口起来时那一趟可能已经跑到一半、甚至已经跑完（早期的失败尤其快）。
+ */
+export interface PostProcessRun {
+  presetName: string
+  gcodeName: string
+  question: PostProcessQuestion | null
+  progress: PostProcessProgress | null
+  finished: PostProcessFinished | null
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -1309,6 +1386,39 @@ export interface MkpApi {
    * 前端不碰文件系统，也不关心它是下载还是命中缓存 —— 那是壳的事。
    */
   openModel(modelId: string): Promise<void>
+
+  /**
+   * 「复制后处理脚本」里那段可执行文件路径 —— **本应用自己的可执行物**（壳的 `current_exe()`：
+   * 开发态是 `target/debug/…`，装好了就是安装位置）。
+   *
+   * 后处理由**本程序自己**跑（一个可执行物两种角色：带 `--Toml/--Gcode` 是切片器的
+   * 后处理钩子，不带参数就是界面），所以这段路径只有壳知道，前端不许写死一串 ——
+   * 早先首页硬编码的是**另一个仓库**的 exe，那个 exe 读不了我们的预设
+   * （`offset_x` 会被它判成"这份预设比本程序新"），复制出去的命令必然跑不通。
+   *
+   * `null` = 这一侧没有本机可执行物（浏览器预览的假后端）。界面据此**不摆**那颗按钮
+   * —— 与"这份预设不在本机"同一个处置：一条指不到东西的命令比没有按钮糟。
+   */
+  getPostProcessExe(): Promise<string | null>
+
+  /* ——— 后处理钩子那一趟：看它 / 停它 / 答它那一问（切在 `app/postprocess/`）——— */
+
+  /**
+   * 钩子那一趟的全量快照。`null` = **现在没有在跑后处理**（普通模式，从桌面图标起来的）
+   * —— 不是错误：界面据此不摆那一屏模态框。
+   */
+  getPostProcessRun(): Promise<PostProcessRun | null>
+
+  /**
+   * 界面那颗「停止」：请求取消。
+   *
+   * 取消落在内核的**步骤边界**上（写盘前还有最后一道），所以按下去之后原文件不会被写坏；
+   * 顺带把"等你回答机型那一问"的等待也放开（按停止 = 不跑）。
+   */
+  cancelPostProcess(): Promise<void>
+
+  /** 回答「机型不匹配还跑不跑」：`keep = true` 继续，`false` 停下 */
+  answerPostProcessMismatch(keep: boolean): Promise<void>
 
   /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 

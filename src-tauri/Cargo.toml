@@ -39,11 +39,12 @@ serde_json.workspace = true
 # 与 vite 那边的 `--mode workbench` 是**两道独立的闸**：一道管页面在不在产物里，
 # 一道管命令在不在二进制里。任一道漏了，另一道还挡得住。
 #
-# 它同时是**依赖开关**：`dep:mkpse-preset` 挂在这一档（见下方依赖注释），
-# 所以关掉它连内核 crate 都不进依赖图 —— 那条边界由 CI 的两种 feature 组合各跑一遍守着。
+# 它曾经同时是**依赖开关**（`dep:mkpse-preset` 挂在它下面）。2026-10-09 起不再如此：
+# 后处理钩子要「预设 → IR」的映射与管线本体，而钩子属于**给用户的那个二进制**
+# （一个 exe 两种角色，见 `src/args.rs` / `src/hook.rs`），那两个 crate 因此成了必需依赖。
 [features]
 default = []
-workbench = ["dep:time", "dep:mkpse-preset", "dep:sysinfo"]
+workbench = ["dep:time", "dep:sysinfo"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -124,18 +125,28 @@ ureq = { version = "3", default-features = false, features = ["rustls", "multipa
 # 版本从 M4b 起住在 workspace 根（`crates/preset` 也用它）。
 toml_edit.workspace = true
 
-# 预设解析 crate。工作台只为**借一个函数**：产物命名规则（`preset::preset_file_name`，
-# 权威实现见 `crates/preset/src/generate.rs`，规范见 `docs/ARCHITECTURE.md` §10）。
+# 预设解析 crate（**必需依赖**，2026-10-09 起）：
 #
-# 为什么值得破一次"src-tauri 不碰内核 crate"的解耦：命名规则以前有两份独立实现
-# （这里一份、`crates/preset` 一份），形状相同但**中间没有编译器** —— 漂移的表现不是报错，
-# 是消费端找不到文件。转调之后规则只有一处，改一次两边同步。
+# 1. 工作台借它的产物命名规则（`preset::preset_file_name`，权威实现见
+#    `crates/preset/src/generate.rs`，规范见 `docs/ARCHITECTURE.md` §10）；
+# 2. **后处理钩子借它的「预设 TOML → IR」映射**（`preset::load_ir`）—— 切片器那一条路
+#    （`src/hook.rs`）手里是用户预设，而管线吃的是 IR，这个换算全仓只有它一处实现。
 #
-# 代价照实说：它 `include_str!` 带了 56 KB 参数注册表与 9 份内置预设，
-# 且它自己还依赖 `mkpse-postprocess`。所以它 **optional + 只挂在 workbench feature 下** ——
-# 默认（发布）构建的依赖图里没有这个 crate，给用户的二进制里也就没有那批数据。
-# 隔离靠的不是"少编一个包"，是**默认构建里 `use preset` 编不过**（与 sha2 / toml_edit 同一套路）。
-mkpse-preset = { path = "../crates/preset", optional = true }
+# 原来它是 optional、只挂在 workbench feature 下（理由：给用户的二进制里不带那批内置数据）。
+# 2026-10-09 这条边界移动了：**本程序同时是切片器的后处理钩子**，钩子属于给用户的二进制，
+# 所以内核必须进默认构建。代价照实说：那 56 KB 参数注册表与 9 份内置预设现在也在客户端
+# 二进制里；换来的是"一个 exe 两种角色"—— 不再需要第二个格式对不上的 exe（那个 exe
+# 读不了我们的预设：`offset_x` 会被它判成"这份预设比本程序新"）。
+mkpse-preset = { path = "../crates/preset" }
+
+# 后处理内核本体（`crates/postprocess`）：钩子直接用它的 12 步管线与取消线。
+# 它虽然已经是 `mkpse-preset` 的依赖，但 Rust 要求"用了谁就直写谁"——
+# 不在这里写一行，`src/hook.rs` 里的 `use postprocess::…` 编不过。
+mkpse-postprocess = { path = "../crates/postprocess" }
+
+# Ctrl-C → **协作取消**（只在钩子模式装，见 src/hook.rs）：内核在步骤边界停下，
+# `.part` 丢掉、原文件不动。装不上处理器不阻断那一趟（最坏退回默认硬杀）。
+ctrlc.workspace = true
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]

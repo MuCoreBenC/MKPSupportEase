@@ -313,6 +313,15 @@ pub struct FileRefDto {
     pub kind: &'static str,
     pub file_name: String,
     pub path: String,
+    /// 这一份**在本机上的绝对路径**；`None` = 盘上没有它（还没下载 / 这一侧根本没有盘）。
+    ///
+    /// 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
+    /// 不是我们的内部根，`path`（相对落点）在那里找不到文件 —— 2026-10-09 实测，
+    /// Bambu 弹的是 "Error code: 2"，正是 mkp-ssr 的 `EXIT_BAD_INPUT`「预设文件不存在」。
+    /// 所以**只有这份真在盘上时**才给值，界面据此决定摆不摆那颗按钮（宁可不摆，
+    /// 也不给一条贴进去就报错的命令）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abs_path: Option<String>,
     /// MKP 那支带真值（catalog 文件条目对交付产物真字节算的）；切片器资产本轮不给
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
@@ -334,8 +343,12 @@ pub struct VersionFilesDto {
 /// MKP 那一支**从 catalog 的文件条目出**（路径、大小、SHA 都是登记值）——
 /// 不再按命名规则重算：首屏唯一数据源 = catalog（总纲判据 4）。
 /// 切片器那一支与旧世界同构：版本 → 套餐 → 资产。
+///
+/// `internal_root` 只用来答一件事：这一份**在不在本机**（[`FileRefDto::abs_path`]）。
+/// 落点本身仍然是 catalog 登记的那个 `path`，这里不重算、也不写盘。
 fn version_files_dto(
     catalog: &runtime::Catalog,
+    internal_root: &Path,
     machine_id: &str,
     version_id: &str,
 ) -> Option<VersionFilesDto> {
@@ -351,13 +364,17 @@ fn version_files_dto(
     match catalog.file_of(machine_id, version_id) {
         // 期望值原样透给界面（随包 bootstrap 目录下是 `None` —— 那一侧不登记 SHA，
         // 界面据此显示"还不知道大小/指纹"，不是显示 0 / 空串）
-        Some(f) => files.push(FileRefDto {
-            kind: "mkp_preset",
-            file_name: f.file_name.clone(),
-            path: f.path.clone(),
-            size: f.size,
-            sha256: f.sha256.clone(),
-        }),
+        Some(f) => {
+            let at = internal_root.join(&f.path);
+            files.push(FileRefDto {
+                kind: "mkp_preset",
+                file_name: f.file_name.clone(),
+                path: f.path.clone(),
+                abs_path: at.is_file().then(|| at.display().to_string()),
+                size: f.size,
+                sha256: f.sha256.clone(),
+            })
+        }
         None => missing.push(format!(
             "{machine_id} / {version_id} 在目录里没有登记交付文件"
         )),
@@ -416,6 +433,9 @@ fn version_files_dto(
                         kind,
                         file_name: file_name_of(&path),
                         path: dest,
+                        /* 切片器配置不是「我们的预设文件」：后台处理的 `--Toml` 不指它，
+                           这里也就不编一个绝对路径 */
+                        abs_path: None,
                         size: None,
                         sha256: None,
                     });
@@ -439,7 +459,8 @@ pub async fn get_version_files(
 ) -> Result<Option<VersionFilesDto>, AppError> {
     traced("getVersionFiles", |_| {
         let catalog = load_presets(&app)?;
-        Ok(version_files_dto(&catalog, &machine_id, &version_id))
+        let root = internal_root(&app)?;
+        Ok(version_files_dto(&catalog, &root, &machine_id, &version_id))
     })
 }
 
@@ -972,6 +993,9 @@ mod tests {
     #[test]
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
+        /* 一个空内部根：交付文件一份都不在盘上 —— `abs_path` 的起点就是这一档 */
+        let empty = tempfile::tempdir().expect("临时内部根");
+        let root = empty.path();
 
         // —— 机型清单：5 台，A1 带别名与尺寸，品牌是显示名 ——
         let machines = machines_dto(&catalog);
@@ -985,7 +1009,7 @@ mod tests {
         assert_eq!(a1.versions.len(), 3);
 
         // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
-        let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
+        let vf = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
         assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
         let mkp = vf
             .files
@@ -1000,6 +1024,23 @@ mod tests {
         // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串
         assert_eq!(mkp.size, None, "随包目录不登记 size");
         assert_eq!(mkp.sha256, None, "随包目录不登记 SHA");
+        /*
+         * **绝对路径的唯一消费者是「复制后处理脚本」里那段 `--Toml`**（2026-10-09）。
+         * 盘上还没有这一份 ⇒ 不给值 —— 界面据此**不摆那颗按钮**：贴一条指不到文件的
+         * 命令进切片器，用户看到的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」），
+         * 那正是这条判据要防的那次事故。
+         */
+        assert_eq!(mkp.abs_path, None, "盘上没有这一份，不许给绝对路径");
+        // 真落到盘上之后：绝对路径 = 内部根 + 目录登记的落点
+        let at = root.join(&mkp.path);
+        crate::fsx::atomic::atomic_write(&at, b"# machine: A1\n").expect("放过一份交付文件");
+        let on_disk = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("同一份");
+        let mkp = on_disk
+            .files
+            .iter()
+            .find(|f| f.kind == "mkp_preset")
+            .expect("MKP 引用必须在");
+        assert_eq!(mkp.abs_path.as_deref(), Some(at.to_string_lossy().as_ref()));
         // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
@@ -1024,9 +1065,19 @@ mod tests {
         // 每台机型都与 A1 同形：切片器档一条幽灵都不许有
         for m in machines.iter() {
             for v in &m.versions {
-                let Some(vf) = version_files_dto(&catalog, &m.id, &v.id) else {
+                let Some(vf) = version_files_dto(&catalog, root, &m.id, &v.id) else {
                     continue;
                 };
+                /* 切片器那支与绝对路径无关：它一份都不该带 `abs_path` */
+                assert!(
+                    vf.files
+                        .iter()
+                        .filter(|f| f.kind != "mkp_preset")
+                        .all(|f| f.abs_path.is_none()),
+                    "{}/{} 的切片器档不该给绝对路径",
+                    m.id,
+                    v.id
+                );
                 assert!(
                     vf.files
                         .iter()
@@ -1044,8 +1095,8 @@ mod tests {
         }
 
         // 不存在的机型/版本 → None（不是出错）
-        assert!(version_files_dto(&catalog, "NOPE", "X").is_none());
-        assert!(version_files_dto(&catalog, "A1", "NOPE").is_none());
+        assert!(version_files_dto(&catalog, root, "NOPE", "X").is_none());
+        assert!(version_files_dto(&catalog, root, "A1", "NOPE").is_none());
 
         // —— 云端表：只出切片器预设，15 条资产里图标/模型不进来 ——
         let presets = preset_files_dto(&catalog);

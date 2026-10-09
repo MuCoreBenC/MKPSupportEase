@@ -3,10 +3,12 @@
 //! 每个命令都走 [`traced`] 包一层：生成 trace id → 开 span → 调业务 → 给错误盖上同一个 id。
 //! 于是界面上显示的 traceId 与日志里的 span 是同一个值，按 id 能把一次调用的全过程捞出来。
 //!
-//! **这一份只剩两条锚在"应用本身"上的命令**：校准板清单（[`get_calib_models`]）与
-//! 打开模型文件（[`open_model`]）。两件都读**真实磁盘**：模型是 catalog 登记的三个
-//! 交付文件（`assets/models/*.3mf`），本机有没有以盘为准；打开走系统默认程序
-//! （`.3mf` 关联的切片器）。旧实现里"只记日志"的空壳与恒 `ready` 的假状态都已删掉。
+//! **这一份只剩三条锚在"应用本身"上的命令**：校准板清单（[`get_calib_models`]）、
+//! 打开模型文件（[`open_model`]）与首页「复制后处理脚本」要的那段可执行物路径
+//! （[`get_post_process_exe`] —— **就是本程序自己**）。三件都读**真实的事实**：
+//! 模型是 catalog 登记的三个交付文件（`assets/models/*.3mf`），本机有没有以盘为准；
+//! 打开走系统默认程序（`.3mf` 关联的切片器）；自己的路径由 `current_exe()` 给。
+//! 旧实现里"只记日志"的空壳与恒 `ready` 的假状态都已删掉。
 //! 业务数据（预设 / 参数 / 下载区 / 使用中…）全在 [`presets`] / [`mine`] / [`catalog`]
 //! 那几个模块里，读的是 catalog 与数据根 —— 与 `src/api/contract.ts` 一一对应。
 //!
@@ -25,6 +27,9 @@ pub mod mine;
 /// **逐参数「官方更新」的两条命令**（2026-10-09）：读三方账（我 / 官方旧值 / 官方新值）
 /// 与落采用·保持的决定。官方那一版默认值住在隐藏 baseline 里，用户看不见它。
 pub mod param_sync;
+/// **钩子模式那三条命令**（2026-10-09）：看那一趟 / 停那一趟 / 答那一问 ——
+/// 那一趟本身住 [`crate::hook_ui`]（切片器导出 G-code 时起的那一次）。
+pub mod postprocess;
 /// **baseline 的两条命令**（2026-10-08）：云端版本列表（已下载 / 新版本，**不是过时判定**）
 /// 与「恢复默认」的基准值。baseline 是隐藏内部存储，用户看不见它。
 pub mod preset_baseline;
@@ -173,7 +178,7 @@ fn size_text(bytes: u64) -> String {
     }
 }
 
-/* ---------- 两条命令 ---------- */
+/* ---------- 三条命令（锚在应用本身上的） ---------- */
 
 #[tauri::command]
 pub fn get_calib_models(app: AppHandle) -> Result<Vec<CalibModel>, AppError> {
@@ -222,6 +227,31 @@ pub fn open_model(app: AppHandle, model_id: String) -> Result<(), AppError> {
             .map_err(|e| AppError::io("系统打不开这个模型文件").with_detail(e.to_string()))?;
         tracing::info!(model_id = id, path = %path.display(), "模型已交给系统打开");
         Ok(())
+    })
+}
+
+/// 「复制后处理脚本」里那段可执行文件路径 —— **就是本可执行物自己**。
+///
+/// # 为什么是这个 exe，不是别人的
+///
+/// 后处理不是别人的事：内核就在本仓库（`crates/postprocess`），这条命令将来由**本程序自己**
+/// 跑 —— 一个可执行物两种角色：**带 `--Toml/--Gcode` 时是切片器的后处理钩子，不带参数就是
+/// 界面**（旧世代 `mkp-ssr` 也是这个形状，它那个 exe 同时是界面与钩子）。
+///
+/// 所以这段路径没有第二种真值：开发态是 `target/debug/…`、装好了就是安装位置，只有
+/// `current_exe()` 知道。前端**不许再写死一串**：2026-10-09 之前首页写死的是**另一个仓库**
+/// 的 exe（`G:\project\mkp-ssr\…`），而那个 exe 读不了本仓库的预设 ——
+/// 它拿到 `offset_x` 会判「这份预设比本程序新（多了 `offset_x`），请升级程序」，
+/// 照着复制出来的命令贴进切片器必然报 `Error code: 2`（实测）。
+///
+/// 拿不到自己是谁（`current_exe` 失败，极罕见）⇒ **报错，不编一个路径**：
+/// 界面据此不摆那颗按钮 —— 一条指不到东西的命令比没有按钮糟。
+#[tauri::command]
+pub fn get_post_process_exe() -> Result<String, AppError> {
+    traced("getPostProcessExe", |_| {
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .map_err(|e| AppError::io("取不到本程序自己的路径").with_detail(e.to_string()))
     })
 }
 

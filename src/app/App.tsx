@@ -15,6 +15,9 @@ import PageSettings from './settings/PageSettings'
 /* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
    拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
 import { FileImportProvider, ImportBanner } from './import/FileImport'
+/* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
+   普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够 */
+import PostProcessModal from './postprocess/PostProcessModal'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -128,6 +131,7 @@ export default function App() {
               <PageSettings />
             </PageSlot>
           </main>
+          <PostProcessModal />
         </FieldLayer>
       </FileImportProvider>
 
