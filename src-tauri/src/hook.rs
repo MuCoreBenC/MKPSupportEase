@@ -164,7 +164,16 @@ pub fn run(
         Ok(ir) => ir,
         Err(e) => {
             let message = format!("预设不可用 [{}]：{e}", e.code());
-            archive_failure(&archived, job, "", &message, false, started_at, started);
+            archive_failure(
+                &archived,
+                job,
+                "",
+                &message,
+                false,
+                raw.len() as u64,
+                started_at,
+                started,
+            );
             return Err(HookError::BadInput(message));
         }
     };
@@ -192,6 +201,7 @@ pub fn run(
                         &preset_machine,
                         &message,
                         true,
+                        raw.len() as u64,
                         started_at,
                         started,
                     );
@@ -209,6 +219,7 @@ pub fn run(
                     &preset_machine,
                     &message,
                     false,
+                    raw.len() as u64,
                     started_at,
                     started,
                 );
@@ -236,6 +247,7 @@ pub fn run(
                 &preset_machine,
                 &e.to_string(),
                 e.cancelled(),
+                raw.len() as u64,
                 started_at,
                 started,
             );
@@ -250,6 +262,7 @@ pub fn run(
             job,
             &preset_machine,
             &done,
+            raw.len() as u64, // 输入大小 = 原文字节数（盘上那份此刻已经是输出了）
             raw.lines().count() as u64,
             started_at,
             started,
@@ -293,6 +306,7 @@ fn archive_success(
     job: &HookJob,
     machine: &str,
     done: &postprocess::pipeline::ProcessResult,
+    input_size_bytes: u64,
     input_lines: u64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
@@ -335,7 +349,12 @@ fn archive_success(
             .map(|t| PipelineStep::from_timing(t, PipelineStatus::Complete))
             .collect(),
         detail: Detail {
-            input_file: input_fact(&job.gcode, Some(input_lines), &done.input_sha256),
+            input_file: input_fact(
+                &job.gcode,
+                input_size_bytes,
+                Some(input_lines),
+                &done.input_sha256,
+            ),
             output_file,
             stats: serde_json::to_value(&done.stats.pass1).ok(),
             print_time: done
@@ -360,6 +379,7 @@ fn archive_failure(
     machine: &str,
     error: &str,
     cancelled: bool,
+    input_size_bytes: u64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
 ) {
@@ -379,7 +399,7 @@ fn archive_failure(
         cancelled,
         pipeline: Vec::new(),
         detail: Detail {
-            input_file: input_fact(&job.gcode, None, ""),
+            input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,
             stats: None,
             print_time: None,
@@ -390,14 +410,16 @@ fn archive_failure(
     }
 }
 
-/// 输入侧的文件事实（sha 由内核给；大小从盘上取，读不到就落 0 —— 记录本身比完美重要）。
-fn input_fact(gcode: &std::path::Path, lines: Option<u64>, sha256: &str) -> FileFact {
-    crate::archive::file_fact(gcode, lines, sha256.to_string()).unwrap_or_else(|_| FileFact {
-        path: gcode.display().to_string(),
-        size_bytes: 0,
-        lines,
-        sha256: sha256.to_string(),
-    })
+/// 输入侧的文件事实：**大小由调用方给**（原文字节数），不从盘上读 ——
+/// 原地覆盖之后 `job.gcode` 里已经是输出了，从盘上量出来的是输出大小
+/// （踩过一次的坑，判据见 `archive::input_file_fact` 那一条回归测试）。
+fn input_fact(
+    gcode: &std::path::Path,
+    size_bytes: u64,
+    lines: Option<u64>,
+    sha256: &str,
+) -> FileFact {
+    crate::archive::input_file_fact(gcode, size_bytes, lines, sha256.to_string())
 }
 
 /// 两边机型对不上吗。

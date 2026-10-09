@@ -256,6 +256,9 @@ pub fn sha256_of(path: &Path) -> Result<String, AppError> {
 }
 
 /// 组装一份文件事实（大小从盘上取，行数与 sha 由调用方给 —— 它们已经在手上）。
+///
+/// ★ **只适用于"盘上那份就是要写的那份"**（即输出文件）。输入文件**不能**用它 ——
+/// 见 [`input_file_fact`]。
 pub fn file_fact(path: &Path, lines: Option<u64>, sha256: String) -> Result<FileFact, AppError> {
     let size_bytes = std::fs::metadata(path)
         .map_err(|e| {
@@ -270,10 +273,52 @@ pub fn file_fact(path: &Path, lines: Option<u64>, sha256: String) -> Result<File
     })
 }
 
+/// 组装**输入侧**的文件事实：大小**必须由调用方给**（原文字节数），不从盘上读。
+///
+/// 为什么不能 [`file_fact`] 那样从盘上取：本程序是**原地覆盖**，`_meta.json` 在写盘
+/// **之后**才组装 —— 那一刻 `job.gcode` 里已经是**输出**了，从盘上量出来的会是
+/// 输出的大小（实测踩过：输入被记成 26,877,295 = 输出大小，而真实输入是 23.76 MB）。
+pub fn input_file_fact(
+    path: &Path,
+    size_bytes: u64,
+    lines: Option<u64>,
+    sha256: String,
+) -> FileFact {
+    FileFact {
+        path: path.display().to_string(),
+        size_bytes,
+        lines,
+        sha256,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    /// 输入侧的大小必须来自调用方（原文），**不是**盘上的现文件。
+    /// 回归：曾经因为原地覆盖，把输入大小记成了输出大小。
+    #[test]
+    fn input_file_size_comes_from_the_caller_not_the_disk() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("in.gcode");
+        std::fs::write(&input, "G1 X1\n").unwrap();
+
+        // 模拟"原地覆盖"：同一个路径上的内容被换成了更长的一份
+        std::fs::write(&input, "G1 X1\nG1 X2\nG1 X3\n").unwrap();
+        let fact = input_file_fact(&input, 6, Some(1), "sha".into());
+
+        assert_eq!(fact.size_bytes, 6, "大小必须是调用方给的原文字节数");
+        assert_eq!(fact.lines, Some(1));
+        assert_eq!(fact.path, input.display().to_string());
+        // 对照：从盘上取会拿到"覆盖后"的 18 字节 —— 这正是 bug 的形态
+        assert_eq!(
+            file_fact(&input, None, String::new()).unwrap().size_bytes,
+            18,
+            "file_fact 读的是盘上的现文件（输出侧才该这么做）"
+        );
+    }
 
     /// 命名规则：**前导点必须去掉**（Bambu Studio 的缓存文件名以 `.` 开头，
     /// 带点在 macOS 上不可见），目录用日期、前缀带时刻。
