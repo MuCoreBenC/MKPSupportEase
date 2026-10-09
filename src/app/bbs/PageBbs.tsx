@@ -98,9 +98,11 @@ export default function PageBbs({ density, pending }: Props) {
   /** 宽度、拖动状态、热区那一套 props */
   const sizing = useBbsDrawer()
 
-  /* 展示模式：只能看、点不动。**默认开着** —— 这一页的正事是「看 BBS 里是什么值」，
-     能改是附带的（而且改了也不写回去）。 */
-  const [showcase, setShowcase] = useState(true)
+  /*
+   * **整页只读**（2026-10-09 用户裁断）：这一页是「看 BBS 里是什么值」的查看器。
+   * 原来那个「可改动」档砍掉了 —— 改了不落盘、看不到落点，是个假模式（审计 A-52 / X-14）。
+   */
+  const readOnly = true
   const [dropping, setDropping] = useState(false)
   const [localNote, setLocalNote] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -308,16 +310,6 @@ export default function PageBbs({ density, pending }: Props) {
           {viewMode === 'bbs' ? '跟 BBS 一样' : '全部参数'}
         </button>
 
-        <button type="button" className={s.btn} onClick={() => setShowcase(!showcase)}>
-          {showcase ? '展示模式' : '可改动'}
-        </button>
-
-        {!showcase && preset.editedKeys.size > 0 && (
-          <button type="button" className={s.btn} onClick={preset.revertAll}>
-            全部还原（{preset.editedKeys.size}）
-          </button>
-        )}
-
         <button type="button" className={s.btn} onClick={() => fileRef.current?.click()}>
           导入 JSON
         </button>
@@ -481,7 +473,7 @@ export default function PageBbs({ density, pending }: Props) {
                 modifiedKeys={modifiedSet}
                 variantIdx={preset.variant.index}
                 icons={data.icons}
-                readOnly={showcase}
+                readOnly={readOnly}
                 query={q}
                 onChange={preset.setValue}
                 onReset={preset.resetKey}

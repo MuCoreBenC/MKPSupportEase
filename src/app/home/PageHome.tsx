@@ -24,6 +24,7 @@ import {
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText } from '../../api'
+import type { CalibModel } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -67,6 +68,9 @@ const EMPTY: Selection = { brand: null, model: null, variant: null }
 
 /** 板子的配色跟应用的模式对齐；等应用做了深色模式，这里换成跟随主题的那个值 */
 const PLATE_THEME = '浅色'
+
+/** 第五步要打开的那份测试模型（后端 `getCalibModels` 认的 id） */
+const TEST_MODEL_ID = 'test-models'
 
 /** 两张校准卡在 sheets 里的位置：按页拦截换页要认它们 */
 const CALIB_Z_INDEX = 2
@@ -112,7 +116,11 @@ export default function PageHome({ density }: PageHomeProps) {
   const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
 
-  const [openModel, setOpenModel] = useState<string | null>(null)
+  const [openModel, setOpenModel] = useState<{ id: string; name: string } | null>(null)
+  /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
+  const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
+  const [modelErr, setModelErr] = useState<string | null>(null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
   /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
@@ -184,6 +192,62 @@ export default function PageHome({ density }: PageHomeProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [openModel, pending, presetAsk])
+
+  /* 「打开测试模型」弹窗：盘上有没有缓存查一次（下载区 + 旧缓存），失败照实说 */
+  useEffect(() => {
+    if (openModel === null) {
+      setModelInfo(null)
+      setModelErr(null)
+      setModelBusy(false)
+      return
+    }
+    let alive = true
+    api.getCalibModels().then(
+      (list) => {
+        if (alive) setModelInfo(list.find((m) => m.id === openModel.id) ?? null)
+      },
+      (e: unknown) => {
+        if (alive) setModelErr(errorText(e))
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [openModel])
+
+  /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
+  const openCachedModel = () => {
+    if (openModel === null) return
+    setModelBusy(true)
+    api.openModel(openModel.id).then(
+      () => {
+        setModelBusy(false)
+        setOpenModel(null)
+      },
+      (e: unknown) => {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      },
+    )
+  }
+
+  /** 取回（走交付下载管道）再打开。两步都可能失败，失败就在弹窗里照实说，不吞 */
+  const fetchAndOpenModel = () => {
+    if (openModel === null || modelInfo === null) return
+    setModelBusy(true)
+    setModelErr(null)
+    void (async () => {
+      try {
+        await api.downloadCatalogFile(modelInfo.fileName)
+        await api.openModel(openModel.id)
+        setModelBusy(false)
+        setOpenModel(null)
+      } catch (e) {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      }
+    })()
+  }
 
   /** 有未保存的改动就把换页拦下（不分页 —— 三轴在哪一页都能改），等弹窗里给答案 */
   const canLeave = useCallback(
@@ -690,7 +754,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: '打开模型',
               accent: true,
-              onClick: () => setOpenModel('Z 偏移校准板'),
+              onClick: () => setOpenModel({ id: 'z', name: 'Z 偏移校准板' }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
@@ -786,7 +850,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: '打开模型',
               accent: true,
-              onClick: () => setOpenModel('XY 偏移校准板'),
+              onClick: () => setOpenModel({ id: 'xy', name: 'XY 偏移校准板' }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
@@ -884,7 +948,7 @@ export default function PageHome({ density }: PageHomeProps) {
               {
                 label: '打开测试模型',
                 primary: true,
-                onClick: () => setOpenModel('测试模型'),
+                onClick: () => setOpenModel({ id: TEST_MODEL_ID, name: '测试模型' }),
               },
               { label: '回主页', onClick: () => deckRef.current?.jumpTo(0) },
             ]}
@@ -987,19 +1051,29 @@ export default function PageHome({ density }: PageHomeProps) {
 
       {openModel && (
         <Modal
-          title="打开测试模型"
+          title="打开模型"
           onClose={() => setOpenModel(null)}
           foot={
             <>
-              <Btn disabled>从本地缓存打开</Btn>
-              <Btn variant="primary" onClick={() => setOpenModel(null)}>
+              <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
+                从本地缓存打开
+              </Btn>
+              <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
                 从云端获取
               </Btn>
             </>
           }
         >
           <p className={p.note}>
-            {openModel} · 本地无缓存文件，即将从云端下载打开。点击后请耐心等待 3mf 打开。
+            {modelErr !== null
+              ? modelErr
+              : modelBusy
+                ? `${openModel.name} · 正在处理，请稍候…`
+                : modelInfo === null
+                  ? `${openModel.name} · 正在看本机有没有缓存…`
+                  : modelInfo.ready
+                    ? `${openModel.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                    : `${openModel.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
         </Modal>
       )}

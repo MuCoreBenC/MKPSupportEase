@@ -1,7 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
-import { NotImplementedError } from './errors'
 import {
   isAppError,
   type AppError,
@@ -20,10 +19,9 @@ import {
  * 2026-10-02 清扫时删除：首圈的硬编码表，页面早已改走文件体系）。
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
- * 还剩两个写盘 / 下载的（`copyToSlicer` / `downloadFiles`）后端还没有：
- * 按仓里的纪律（HANDOFF 14.1：后端没有的命令**不渲染入口**），
- * 它们在真机上抛 `NotImplementedError`，页面因此显示「本版未接入」那一块，
- * 而不是白屏、也不是假装成功。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
+ * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制官方链接）
+ * 也接上了真 command；`downloadFiles`（官方仓库文件的「下载」残支）按用户裁断
+ * **连入口一起撤了**，契约里不再留它。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
  * 是多一层没必要的间接：`invoke` 本身就是那座桥。
@@ -101,23 +99,6 @@ function withTick(
   const channel = new Channel<DownloadTick>()
   if (onTick !== undefined) channel.onmessage = onTick
   return { ...args, onTick: channel }
-}
-
-/**
- * 一个**还没接**的接口。
- *
- * 不做成"返回空数组"：空数组与"后端说没有"在界面上长得一样，
- * 而这两件事要分开（见 `errors.ts` 那段）。抛出来，页面上是一块写明方法名的空态。
- *
- * **必须是 async**：契约上这些方法返回 `Promise`，调用方把「失败」接在
- * `.then(ok, err)` / `.catch` 上 —— 直接同步 throw 会绕过那条 reject 通道，
- * 在 `Promise.all([api.getMachines(), ...])` 这种**数组字面量**处就炸穿出去
- * （异常发生在 `Promise.all` 被调用之前），于是调用方的兜底永远收不到它。
- * 落在 `useEffect` 里就是 React 渲染期异常，没有 error boundary 时整棵树卸载 ——
- * 白屏，而不是这块「未接入」空态。async 之后异常才走 reject，兜底才接得住。
- */
-async function notWired(method: MkpApiMethod): Promise<never> {
-  throw new NotImplementedError(method)
 }
 
 export const bridgeApi: MkpApi = {
@@ -258,7 +239,7 @@ export const bridgeApi: MkpApi = {
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
 
-  /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
-  copyToSlicer: () => notWired('copyToSlicer'),
-  downloadFiles: () => notWired('downloadFiles'),
+  /* ——— 切片器目录（复制进去才生效）+ 复制官方链接（2026-10-09 接通）——— */
+  copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
+  getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 }

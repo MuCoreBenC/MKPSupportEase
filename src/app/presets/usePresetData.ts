@@ -788,8 +788,12 @@ export function usePresetData(importRevision = 0): PresetData {
     appStateMutated()
   }, [])
 
-  const copy = useCallback(async (assetId: string) => {
-    await api.copyToSlicer(assetId)
+  /*
+   * 切片器的「生效」= 复制进切片器自己的用户配置目录。**键是文件名**
+   * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径），真机落盘、假后端改内存。
+   */
+  const copy = useCallback(async (fileName: string) => {
+    await api.copyToSlicer(fileName)
     setSlicerCopied(await api.getSlicerCopied())
   }, [])
 

@@ -115,7 +115,7 @@ import {
   MINE_NOT_PRESET_WHY,
   MINE_UNREADABLE_TEXT,
   mineUnreadableWhy,
-  DOWNLOAD_WHY,
+  REPO_FILE_WHY,
   RELEASE_DOWNLOAD_WHY,
   RELEASE_REPAIR_WHY,
   RELEASE_SIZE_WHY,
@@ -130,7 +130,6 @@ import {
   LIVE_WHY,
   NO_ASSET_WHY,
   NO_STAT_WHY,
-  SLICER_RELEASE_WHY,
   originCellOf,
   updateStateOf,
   UNKNOWN,
@@ -694,15 +693,20 @@ export default function PresetTable({
                         )
                       ) : row.releaseUid !== undefined && row.kind !== 'mkp_preset' ? (
                         /*
-                         * 切片器那一类的交付行（catalog 登记、能下载）在本地表里**没有可点的动作**：
-                         * 不能「应用」（使用中指针只认 MKP 预设）；「复制」那条路只认资产库的
-                         * asset id —— 原来这里画的是「复制」，点了**静静没反应**
-                         * （`runLive` 里 assetId 是 undefined 就 return）。给一个点了没反应的
-                         * 按钮，与"点了必报错"同罪：不给。
+                         * 切片器那一类的交付行（catalog 登记、字节在盘上）：动作是**「复制」** ——
+                         * 复制进切片器自己的用户配置目录它才生效（MKP 的「启用」是另一回事）。
+                         * 2026-10-09 起这条路认**文件名**（与下载 / 应用 / 读正文同一个取用口径），
+                         * 交付行接得上了 —— 原来它只认资产库 asset id，交付行只能画个灰杠。
                          */
-                        <span className={s.actNone} title={SLICER_RELEASE_WHY}>
-                          {DASH_}
-                        </span>
+                        <button
+                          type="button"
+                          className={s.actBtn}
+                          disabled={busy}
+                          title={LIVE_WHY[kind].off}
+                          onClick={() => onLive(row)}
+                        >
+                          {ACTION_TEXT[kind]}
+                        </button>
                       ) : row.releaseUid === undefined && row.kind === 'mkp_preset' ? (
                         /*
                          * **官方 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
@@ -734,25 +738,30 @@ export default function PresetTable({
                       <span className={s.actDone} title={CLOUD_STATE_WHY.downloaded}>
                         {CLOUD_STATE_TEXT.downloaded}
                       </span>
-                    ) : (
+                    ) : row.releaseUid !== undefined ? (
                       <button
                         type="button"
                         className={s.actBtn}
                         disabled={busy}
-                        /* 发布行是真下载；官方行仍是「未实现」—— 文案按行分流 */
                         title={
-                          row.releaseUid !== undefined
-                            ? needsUpdate
-                              ? untrusted
-                                ? RELEASE_REPAIR_WHY
-                                : RELEASE_UPDATE_WHY
-                              : RELEASE_DOWNLOAD_WHY
-                            : DOWNLOAD_WHY
+                          needsUpdate
+                            ? untrusted
+                              ? RELEASE_REPAIR_WHY
+                              : RELEASE_UPDATE_WHY
+                            : RELEASE_DOWNLOAD_WHY
                         }
                         onClick={() => onDownload(row)}
                       >
                         {needsUpdate ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing}
                       </button>
+                    ) : (
+                      /*
+                       * **官方仓库文件不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
+                       * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载。
+                       */
+                      <span className={s.actNone} title={REPO_FILE_WHY}>
+                        {DASH_}
+                      </span>
                     )}
                   </td>
                 </tr>

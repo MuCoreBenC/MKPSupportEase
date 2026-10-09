@@ -132,7 +132,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import type { ActiveOrigin, ArchivedFile, DownloadOutcome, FileRef } from '../../api'
+import type { ActiveOrigin, ArchivedFile, DownloadOutcome } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
@@ -167,7 +167,6 @@ import {
   MINE_NOT_PRESET_WHY,
   MINE_RENAME,
   mineUnreadableWhy,
-  DOWNLOAD_WHY,
   mineCountOfAxis,
   treeCountOfAxis,
   NO_ASSET_WHY,
@@ -178,7 +177,6 @@ import {
   /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
   UPDATE_ACTION_TEXT,
   isSuspectRelease,
-  noContractText,
   releaseBatchText,
   sizeTextOf,
 } from './presetTree'
@@ -483,16 +481,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那一件事（复制链接）——
-   * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
-   * 在文件管理器里显示在第十三层，都不在这里。
-   *
-   * 不发请求 —— 没有可发的方法。就地说清「还没有对应的实现」（A2 人话化：
-   * 发生了什么 + 能干什么；缺的是哪个方法记在 `MISSING_METHOD` 里，给开发对账用），
-   * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
+   * **复制链接**（2026-10-09 接通）：官方下载链接由后端按**当前数据源**算 ——
+   * 与下载管道同一个寻址出口，复制到的链接就是下载时取的那个地址。
+   * 拿到就进剪贴板；没配数据源 / 算不出来照实说，不编一个假 URL。
    */
-  const sayNoContract = (row: PresetTableRow) => {
-    setNote({ text: `${noContractText()}（${row.fileName}）`, bad: true })
+  const copyLink = (row: PresetTableRow) => {
+    api.getFileUrl(row.fileName).then(
+      (url) => {
+        void navigator.clipboard.writeText(url).then(
+          () => setNote({ text: `已复制 ${row.fileName} 的下载链接`, bad: false }),
+          (e: unknown) => setNote({ text: `链接拿到了，但进剪贴板没成功：${errorText(e)}`, bad: true }),
+        )
+      },
+      (e: unknown) => setNote({ text: `取不到下载链接：${errorText(e)}`, bad: true }),
+    )
   }
 
   /**
@@ -563,27 +565,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         )
       return
     }
-    if (row.kind === null) {
-      /* 认不出类别的东西（用户自己那份 `.json`）不进官方下载那条路：它本来也不在仓库里 */
-      setNote({ text: `${row.fileName}：认不出它是哪一类，走不了「下载」这条路`, bad: true })
-      return
-    }
-    const ref: FileRef = { kind: row.kind, fileName: row.fileName, path: row.path }
-    setBusyKey(row.rowKey)
-    setNote({ text: `正在请壳下载 ${row.fileName}…`, bad: false })
-    api.downloadFiles([ref]).then(
-      () => {
-        /* 真后端接上以后走这一支。这一轮到不了这里 —— 假后端一定抛 */
-        setBusyKey(null)
-        setNote({ text: `已交给外壳下载 ${row.fileName}`, bad: false })
-      },
-      (e: unknown) => {
-        setBusyKey(null)
-        /* 错误话术统一走 errorText：NotImplementedError 自带人话 hint（A2），
-           不再按异常类型在前端拼"尚未实现：downloadFiles"那种术语 */
-        setNote({ text: `下载失败：${errorText(e)}`, bad: true })
-      },
-    )
+    /*
+     * 到这里只剩「官方仓库文件」那一类（没有 MKP 的 `localState`、也没有交付身份）。
+     * 它的「下载」残支 2026-10-09 按用户裁断**连入口一起撤了**（`downloadFiles`
+     * 从契约里删掉）—— 界面上这类行不再给下载按钮，走到这里说明按钮闸漏了。
+     */
+    setNote({ text: `${row.fileName}：这一份不走「下载」—— 只有登记过的交付文件能取`, bad: true })
   }
 
   /**
@@ -972,16 +959,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 真后端还会多两种（切片器路径没配、目标已存在）。不吞、不假装成功。
    */
   const runLive = (row: PresetLocalRow) => {
-    /* 切片器：照旧走契约那一个写（假后端内存，刷新还原），成功要发提示条 */
+    /*
+     * 切片器：复制进切片器自己的用户配置目录（真机落盘）。**键是文件名** ——
+     * 下载 / 应用 / 读正文同一个取用口径。成功要发提示条（行上的「已复制」只说状态、
+     * 不说去了哪）；失败照抛出来说（不是切片器配置 / 本机没那份字节 / 目标已有同名）。
+     */
     if (page.kind !== 'mkp') {
-      const slicerId = row.assetId
-      if (slicerId === undefined) return /* 到不了这里：切片器行必有 asset id */
       setBusyKey(row.rowKey)
-      data.copy(slicerId).then(
+      data.copy(row.fileName).then(
         () => {
           setBusyKey(null)
           setNote({
-            text: `已复制 ${row.fileName} 到切片器目录（假后端只改内存，刷新会还原）`,
+            text: `已复制 ${row.fileName} 到切片器目录 —— 切片器里现在能选到它了`,
             bad: false,
           })
         },
@@ -1226,7 +1215,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         {
           id: 'link',
           label: '复制链接',
-          onSelect: () => sayNoContract(row),
+          onSelect: () => copyLink(row),
         },
         { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
         bbsEntry(row),
@@ -1498,7 +1487,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           page.kind === 'mkp'
             ? `MKP 台账：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己那份工作副本，扫 presets-mine）。` +
               `官方的取用在云端表那一行（下载 / 更新 = 取回 + 落一份你的），使用在本地表那一行 —— 两件事不在同一张表上。`
-            : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`
+            : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）`
         }
       >
         {page.kind === 'mkp' ? (

@@ -263,11 +263,12 @@ export const DELIVERY_WHY: Record<PresetFileInfo['delivery'], string> = {
   optional: '可选：仓库里有、没进默认集，需要手动下载。不是错误，也不是孤儿',
 }
 
-/** 下载点了会抛 —— 这是设计，见 `PresetFileRow` 的文件头 */
-export const DOWNLOAD_NOT_READY = '尚未实现'
-
-export const DOWNLOAD_WHY =
-  '下载要写盘，契约里 downloadFiles 在假后端上直接抛 NotImplementedError —— 这里不假装下载成功'
+/**
+ * **官方仓库文件为什么不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
+ * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载（`downloadCatalogFile`）。
+ */
+export const REPO_FILE_WHY =
+  '这一份不在交付下载那条路里 —— 能「下载」的是目录登记过的交付文件'
 
 /**
  * 发布行的「下载」：这一条**是真的能下的**（`downloadCatalogFile` 落进下载区 `mkp/`）——
@@ -884,28 +885,6 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
   default: '套餐内',
   optional: '可单下',
 }
-
-/**
- * 右键菜单里那些**还没有后端**的动作（A2 人话化后的现状）：
- *
- *   契约里有签名   照调，让它抛 `NotImplementedError`（自带人话 hint），界面原样显示
- *                 —— 官方仓库文件的「下载」（`downloadFiles`）是这一种
- *   契约里没签名   不发请求，就地说「这个动作还没有对应的实现」（[`noContractText`]）
- *                 —— 现在只剩「复制链接」一件（要加的话是 `getFileUrl`）
- *
- * **用户文件那几件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
- * `deleteUserPreset`）、另存为一份新的（我的 → 我的）是第十一层（`copyUserPreset`）、
- * 在文件管理器里显示是第十三层（`revealInFolder`）。原「MISSING_METHOD」待办表已并入
- * 这段注释 —— 只剩一件，不值得一张表。
- */
-
-/**
- * 「界面上还没有对应实现的动作」那一句话（A2 人话化）：发生了什么 + 能干什么。
- * 技术形式（方法名 / 契约名）不进提示条 —— 那是控制台与日志的事。
- * 目前界面上唯一到不了契约的动作是「复制链接」（要加的话是 `getFileUrl`）。
- */
-export const noContractText = (): string =>
-  '这个动作还没有对应的实现 —— 先用能用的那几步把事情办完'
 
 // ——————————————————————————————————————————————————————————————
 // 四档状态
@@ -1558,7 +1537,8 @@ export interface PresetRowsInput {
   /** `api.getLocalFiles()` 的结果（同样是固定演示集合） */
   localIds: Set<string>
   /**
-   * `api.getSlicerCopied()` 的结果：**已经复制到切片器 profile 目录**的 asset id。
+   * `api.getSlicerCopied()` 的结果：**已经复制到切片器 profile 目录**的**文件名**
+   * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径）。
    *
    * 和 `localIds` 是两件事 —— 在本机不等于切片器看得见它。切片器行的「生效」只看这一个。
    */
@@ -1803,18 +1783,6 @@ export function treeCountOfAxis(tree: PresetTree, axis: PresetKindAxis): number 
 export function mineCountOfAxis(mine: UserPresetFile[], axis: PresetKindAxis): number {
   return mine.filter((f) => f.kind === null || matchesKind(axis, f.kind)).length
 }
-
-/**
- * 切片器那一类的**交付行**（catalog 登记、能下载）在本地表里为什么没有操作按钮。
- *
- * 它不能被「应用」（使用中指针只认 MKP 预设）；「复制到切片器目录」那条路只认
- * 资产库里的 asset id（切片器那一侧的写还没接，见 `docs/PROJECT-AUDIT.md` ③）——
- * 原来这里画的是「复制」，点了**静静没反应**。给一个点了没反应的按钮，与
- * "点了必报错"同罪：不给。
- */
-export const SLICER_RELEASE_WHY =
-  '切片器配置不参与「应用」——它的生效要把它复制进切片器自己的目录，那条写动作还没接（见 PROJECT-AUDIT ③）。' +
-  '这一份已经在本地了，没有可点的动作；要重新下一份干净的，到云端表那一行点「下载 / 更新」'
 
 /**
  * 置顶的排最前，其余按文件名。
@@ -2086,7 +2054,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         delivery: f.delivery,
         untagged: false,
         /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
-        live: kind === 'mkp' ? applied : f.id !== undefined && slicerCopiedIds.has(f.id),
+        live: kind === 'mkp' ? applied : slicerCopiedIds.has(f.fileName),
       }
     })
 
@@ -2107,9 +2075,14 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetLocalRow => {
       const state = p.state
-      /* 交付行只有 MKP 那一类能被「应用」（使用中指针认的一直是 MKP 交付文件）——
-         切片器那一类的交付行没有"生效"这回事，`live` 恒 false */
-      const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
+      /*
+       * MKP 交付行的「生效」= 被启用（使用中指针认的一直是 MKP 交付文件）；
+       * 切片器那一类的「生效」= 已复制进切片器目录（2026-10-09 接通）—— 两回事，别合流。
+       */
+      const live =
+        p.kind === 'mkp_preset'
+          ? active !== null && active.fileName === p.fileName
+          : slicerCopiedIds.has(p.fileName)
       return {
         /*
          * 行键与置顶键都用 **fileName**，不用 `uid`（`机型/版本`）。

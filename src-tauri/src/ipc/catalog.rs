@@ -305,6 +305,33 @@ pub async fn download_runtime_file(
         .map_err(|e| AppError::internal("下载任务没能跑到终局").with_detail(e.to_string()))?
 }
 
+/// 一份目录文件的**官方下载链接**（用户「复制链接」复制的就是它）。
+///
+/// 寻址走唯一出口 [`runtime::resolver::SourceResolver`]（`ResourceRef::Entry`）——
+/// 与下载管道算的是**同一个地址**，"复制到的链接"与"下载时取的地址"不可能分叉。
+/// 没配数据源 / Manifest 没声明文件根时**照实报错**，不拼一个猜出来的 URL 给用户。
+#[tauri::command]
+pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("getFileUrl", |_| {
+            let root = internal_root(&app)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == file_name)
+                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            resolved
+                .resolver
+                .resolve(runtime::resolver::ResourceRef::Entry(file))
+                .and_then(|addr| addr.remote_or("这份文件"))
+        })
+    });
+    task.await
+        .map_err(|e| AppError::internal("取链接的任务没能跑到终局").with_detail(e.to_string()))?
+}
+
 /// 多份下载里某一份的结局。**来自 [`runtime::delivery::FileOutcome`]**，
 /// 消息原样给界面——评语不由单页造句
 #[derive(Debug, Clone, Serialize)]

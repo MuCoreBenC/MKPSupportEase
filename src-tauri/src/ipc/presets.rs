@@ -16,7 +16,7 @@
 //! | `get_param_meta` | 字段定义（**全部**，含废弃） |
 //! | `get_machine_params` | `machineVariants` 的三层取值 |
 //! | `get_local_files` | 本轮恒为空集合（见下） |
-//! | `get_slicer_copied` | 本轮恒为空集合 |
+//! | `get_slicer_copied` | 切片器用户配置目录里**真有**的那几份（盘就是底账） |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
 //! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-mine/`，
@@ -801,7 +801,7 @@ fn machine_params_dto(
     Ok(out)
 }
 
-/* ---------- 本机状态（本轮恒空） ---------- */
+/* ---------- 本机状态 ---------- */
 
 /// 本机已经有的官方文件（asset id）。
 ///
@@ -813,10 +813,111 @@ pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| Ok(Vec::new()))
 }
 
-/// 已经复制进切片器目录的那些。**本轮恒空** —— 写盘那一侧还没有
+/* ---------- 切片器目录（复制进去才生效） ---------- */
+
+/// Bambu Studio 的**用户工艺配置目录**（`…/user/<账号>/process`）。
+///
+/// 与 `tools/dev-server/bbsFs.mjs` 同一套口径：正式版优先（`BambuStudio`，没有才退
+/// `BambuStudioBeta`）；`user/` 下按账号分目录（数字 uid，也有 BBL / default 这种），
+/// 只认里面**真有 `process/` 子目录的**。命中就给第一个 —— 一台机器一般只有一个账号目录。
+///
+/// 平台差异照实写破：Windows 在 `%APPDATA%`、macOS 在 `~/Library/Application Support`；
+/// 其余平台**不猜目录名**，返回 `None` —— 界面照实说"没找到切片器的配置目录"，
+/// 而不是找错地方复制一份没人用的文件。
+fn slicer_process_dir() -> Option<std::path::PathBuf> {
+    let base: std::path::PathBuf = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)?
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+        home.join("Library").join("Application Support")
+    } else {
+        return None;
+    };
+    for app_dir in ["BambuStudio", "BambuStudioBeta"] {
+        let user_base = base.join(app_dir).join("user");
+        let Ok(entries) = std::fs::read_dir(&user_base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let process = entry.path().join("process");
+            if process.is_dir() {
+                return Some(process);
+            }
+        }
+    }
+    None
+}
+
+/// 已经复制进切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+///
+/// 盘就是底账：切片器目录里真有这份文件才算"已复制"。**找不到切片器目录 = 空集**
+/// （一份都没复制过），与"读失败"是两回事 —— 这里没有会失败的读。
 #[tauri::command]
-pub fn get_slicer_copied(_app: AppHandle) -> Result<Vec<String>, AppError> {
-    traced("getSlicerCopied", |_| Ok(Vec::new()))
+pub fn get_slicer_copied(app: AppHandle) -> Result<Vec<String>, AppError> {
+    traced("getSlicerCopied", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(dir) = slicer_process_dir() else {
+            return Ok(Vec::new());
+        };
+        Ok(catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == "bbs_config")
+            .filter(|f| dir.join(&f.file_name).is_file())
+            .map(|f| f.file_name.clone())
+            .collect())
+    })
+}
+
+/// 把一份切片器配置复制进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
+/// （MKP 预设的生效是「启用」，两回事）。
+///
+/// 三种真实的失败照实抛，不吞：
+/// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型复制过去没有意义）；
+/// - 本机还没有这份文件的字节（先「下载」）；
+/// - 目标位置已经有同名文件（**不覆盖** —— 那份可能被用户在切片器里改过，静默盖掉
+///   等于删用户数据。要换新，先在切片器里删掉旧的）。
+#[tauri::command]
+pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("copyToSlicer", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(format!("目录里没有这份文件：{file_name}")));
+        };
+        if file.kind == "mkp_preset" {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+            )));
+        }
+        if file.kind != "bbs_config" {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 不是切片器配置，复制进切片器目录没有意义"
+            )));
+        }
+        let internal = internal_root(&app)?;
+        let source = crate::fsx::paths::resolve_in(&internal, &file.path)?;
+        if !source.is_file() {
+            return Err(AppError::not_found(format!(
+                "本机还没有 {file_name} —— 先「下载」再复制"
+            )));
+        }
+        let dir = slicer_process_dir().ok_or_else(|| {
+            AppError::not_found(
+                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
+            )
+        })?;
+        let target = dir.join(&file.file_name);
+        if target.exists() {
+            return Err(AppError::io(format!(
+                "切片器目录里已经有 {file_name} 了 —— 要换新先在切片器里删掉旧的那份"
+            ))
+            .with_detail(target.display().to_string()));
+        }
+        std::fs::copy(&source, &target)
+            .map_err(|e| AppError::io("复制进切片器目录失败").with_detail(e.to_string()))?;
+        tracing::info!(file = %file_name, target = %target.display(), "已复制进切片器目录");
+        Ok(())
+    })
 }
 
 #[cfg(test)]

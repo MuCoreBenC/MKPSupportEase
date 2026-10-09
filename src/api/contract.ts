@@ -36,8 +36,11 @@ export interface CalibModel {
   id: string
   name: string
   desc: string
-  /** 已经是给人看的字符串（'284 KB'），不是字节数 —— 单位换算不该由界面再做一遍 */
-  size: string
+  /** 交付文件名（catalog 登记的那个）—— 「取回」走下载管道、「打开」找盘上那份，都认它 */
+  fileName: string
+  /** 本机那份的真实大小（'3.1 MB'）。`null` = 本机还没有这份文件 —— 不编假大小 */
+  size: string | null
+  /** 本机有没有这份文件（下载区或旧缓存里找得到），以磁盘为唯一权威 */
   ready: boolean
 }
 
@@ -1430,11 +1433,20 @@ export interface MkpApi {
    */
   deleteUserPreset(path: string): Promise<void>
 
-  /** 已经复制到切片器目录的那些（切片器文件的「生效」与 MKP 不是一回事） */
+  /**
+   * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+   * 盘就是底账：切片器的用户配置目录里真有这份文件才算「已复制」。
+   */
   getSlicerCopied(): Promise<string[]>
 
-  /** 把一份切片器配置复制到切片器目录。写方法：真机上会落盘 */
-  copyToSlicer(assetId: string): Promise<void>
+  /**
+   * 把一份切片器配置复制进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
+   * （MKP 预设的生效是「启用」，两回事）。
+   *
+   * 真机上会落盘。三种真实的失败照实抛：不是切片器配置 / 本机还没有那份字节
+   * （先「下载」）/ 目标已有同名文件（不覆盖 —— 那份可能被用户在切片器里改过）。
+   */
+  copyToSlicer(fileName: string): Promise<void>
 
   /** 预设仓库的清单（含交付身份 / 大小 / 修改时间） */
   getPresetFiles(): Promise<PresetFileInfo[]>
@@ -1452,10 +1464,12 @@ export interface MkpApi {
   getMachineParams(machineId: string, versionId: string | null): Promise<RecipeParam[]>
 
   /**
-   * 下载选中的文件（官方那一批）。
-   * 试验场的假后端对这个方法是**故意抛**的（那里没有真网络），真机上是 Rust 的活。
+   * 一份目录文件的**官方下载链接**（「复制链接」复制的就是它）。
+   *
+   * 寻址与下载管道同一个出口算 —— 复制到的链接就是下载时取的那个地址。
+   * 没配数据源时照实报错，不拼一个猜的 URL。
    */
-  downloadFiles(refs: FileRef[]): Promise<void>
+  getFileUrl(fileName: string): Promise<string>
 
   /**
    * 新数据世界的目录（第一圈骨架）。读运行时释放进数据根的那份 catalog.json，

@@ -97,12 +97,15 @@ export function localFileIds(): string[] {
  *   MKP     生效 = 设为当前配置       状态 已应用 / 未应用
  *   切片器   生效 = 复制到切片器目录    状态 已复制 / 未复制
  *
- * 演示集合挑 `a1_bbs_mkpprocess_a1_04_020`（它同时也在「本机已有」里）——
+ * 演示集合挑「MKPProcess A1 0.4 0.20.json」（它同时也在「本机已有」里）——
  * 这样默认那一屏能同时看到「已复制」和「未复制」两种行。
+ *
+ * **键是文件名**（2026-10-09 起）：与真机 `copy_to_slicer` / `get_slicer_copied`
+ * 同一个取用口径（下载 / 应用 / 读正文也都认它），不再用资产库的 asset id。
  */
-const DEMO_SLICER_COPIED = new Set<string>(['a1_bbs_mkpprocess_a1_04_020'])
+const DEMO_SLICER_COPIED = new Set<string>(['MKPProcess A1 0.4 0.20.json'])
 
-/** 已复制到切片器目录的 asset id。返回副本，调用方改不到这份状态 */
+/** 已复制到切片器目录的**文件名**。返回副本，调用方改不到这份状态 */
 export function slicerCopied(): string[] {
   return [...DEMO_SLICER_COPIED]
 }
@@ -110,15 +113,15 @@ export function slicerCopied(): string[] {
 /**
  * 复制某个切片器 profile 到切片器目录。**只改内存，刷新还原。**
  *
- * 真后端在这里会有两种真实的失败：切片器路径没配、目标已存在。那时该抛，界面照抛。
- * 假后端没有磁盘，所以只校验「它得是切片器文件」——
- * 传错类型静默成功的话，界面上会出现「已应用一个 json」这种说不通的状态。
+ * 真后端在这里有三种真实的失败：不是切片器配置、本机没有那份字节、目标已存在。
+ * 假后端没有磁盘，所以只校验前两条里的"类型对不上"——
+ * 传错类型静默成功的话，界面上会出现「已复制一个 MKP 预设」这种说不通的状态。
  */
-export function copyToSlicerIn(assetId: string): void {
-  const hit = allPresetFiles().find((f) => f.id === assetId)
-  if (hit === undefined) throw new Error(`仓库里没有这个文件：${assetId}`)
+export function copyToSlicerIn(fileName: string): void {
+  const hit = allPresetFiles().find((f) => f.fileName === fileName)
+  if (hit === undefined) throw new Error(`仓库里没有这个文件：${fileName}`)
   if (hit.kind === 'mkp_preset') {
-    throw new Error(`${hit.fileName} 是 MKP 预设，不用复制到切片器 —— 它走「应用」`)
+    throw new Error(`${hit.fileName} 是 MKP 预设，不用复制到切片器 —— 它走「启用」`)
   }
-  DEMO_SLICER_COPIED.add(assetId)
+  DEMO_SLICER_COPIED.add(fileName)
 }

@@ -69,9 +69,30 @@ import {
  * `getPresetFiles()` / `getMachines()`，所以那份常量已经退场（见 `presetIndex` 上面那段）。
  */
 const calibModels: CalibModel[] = [
-  { id: 'z', name: 'Z 轴校准', desc: '校准喷嘴高度与第一层，先打这个', size: '284 KB', ready: true },
-  { id: 'xy', name: 'XY 校准', desc: '校准平面内的偏移，Z 轴之后打', size: '377 KB', ready: true },
-  { id: 'sup', name: '支撑测试', desc: '校准完打这个看支撑效果', size: '3.2 MB', ready: true },
+  {
+    id: 'z',
+    name: 'Z 轴校准',
+    desc: '校准喷嘴高度与第一层，先打这个',
+    fileName: 'ZOffset_Calibration.3mf',
+    size: '284 KB',
+    ready: true,
+  },
+  {
+    id: 'xy',
+    name: 'XY 校准',
+    desc: '校准平面内的偏移，Z 轴之后打',
+    fileName: 'Precise_Calibration.3mf',
+    size: '377 KB',
+    ready: true,
+  },
+  {
+    id: 'test-models',
+    name: '支撑测试',
+    desc: '校准完打这个看支撑效果',
+    fileName: 'MKP_support_test_models.3mf',
+    size: '3.2 MB',
+    ready: true,
+  },
 ]
 
 /** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
@@ -1228,9 +1249,9 @@ export const mockApi: MkpApi = {
     return slicerCopied()
   },
 
-  async copyToSlicer(assetId) {
+  async copyToSlicer(fileName) {
     /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多 */
-    copyToSlicerIn(assetId)
+    copyToSlicerIn(fileName)
   },
 
   async getPresetFiles() {
@@ -1251,14 +1272,13 @@ export const mockApi: MkpApi = {
   },
 
   /**
-   * 假后端对这个方法是**故意抛**的（浏览器里没有真网络），产品仓照同一条口径：
-   * 不假装下载成功 —— 「下载点了没反应」比「点了说成功但盘上什么都没有」好查。
-   * hint 说清"发生了什么 + 能干什么"（A2），技术形式只在控制台。
+   * 「复制链接」要的是官方 URL，而官方地址在**真机的数据源设置**里 ——
+   * 浏览器预览里没有它。**照实拒**，不编一个假 URL 让用户复制出去（那比报错糟得多）。
    */
-  async downloadFiles() {
+  async getFileUrl() {
     throw new NotImplementedError(
-      'downloadFiles',
-      '浏览器预览里没有下载区 —— 下载要用桌面版（SupportEase 应用）',
+      'getFileUrl',
+      '浏览器预览里没有官方源地址 —— 复制链接请用桌面版（SupportEase 应用）',
     )
   },
 

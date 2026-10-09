@@ -13,6 +13,8 @@ pub mod chrome;
 pub mod error;
 pub mod fsx;
 pub mod ipc;
+/// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
+pub mod legacy;
 pub mod obs;
 /// 预设数据的**纯读写与解析核心**：机型目录 / 资产 / 套餐 / 字段定义 / 界面布局，
 /// 加上三层取值。[`presetdata::Presets::load_from`] 只要一个根。
@@ -183,12 +185,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::import::stage_import,
         ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
+        // 切片器的「生效」= 复制进切片器自己的用户配置目录（2026-10-09 接通）
+        ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,
         ipc::catalog::download_runtime_file,
         ipc::catalog::download_runtime_files,
         ipc::catalog::read_downloaded_text,
+        // 「复制链接」：与下载管道同一个寻址出口算出来的官方 URL
+        ipc::catalog::get_file_url,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
@@ -257,12 +263,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::import::stage_import,
         ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
+        // 切片器的「生效」= 复制进切片器自己的用户配置目录（与上面那份清单一字不差）
+        ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,
         ipc::catalog::download_runtime_file,
         ipc::catalog::download_runtime_files,
         ipc::catalog::read_downloaded_text,
+        // 「复制链接」（与上面那份清单一字不差）
+        ipc::catalog::get_file_url,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
