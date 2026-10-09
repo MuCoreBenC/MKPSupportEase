@@ -34,6 +34,7 @@ import type { DrawerMode, HistoryView } from './HistoryDrawer'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import ParamCard from './ParamCard'
 import type { TowerSlot } from './ParamCard'
+import ParamSyncModal from './ParamSyncModal'
 import PresetPickerDrawer from './PresetPickerDrawer'
 import SearchField from './SearchField'
 import Icon from '../shell/icons'
@@ -45,6 +46,17 @@ import s from './PageParams.module.css'
 
 interface Props {
   density: Density
+  /**
+   * **嵌在模态框里**（右键某一份预设打开的那一档）。
+   *
+   * 只改版面，不改组件：去掉页面自己的大标题与预设切换 pill（外面那个框的标题就是
+   * 这一份的名字），分类条那一排照旧。卡片、G-code、擦料塔画布、历史抽屉一个不动。
+   */
+  embedded?: boolean
+  /** 钉住编辑目标（嵌模态框时由调用方点名：改的就是这一份） */
+  target?: { path: string; fileName: string; machineId: string; versionId: string }
+  /** 一进来就把「选择要跟随的更新」那一屏打开 */
+  openSyncOnStart?: boolean
 }
 
 interface ShownCard {
@@ -322,8 +334,13 @@ function useWidth(): [(el: HTMLElement | null) => void, number] {
   return [attach, width]
 }
 
-export default function PageParams({ density }: Props) {
-  const u = useParams()
+export default function PageParams({
+  density,
+  embedded = false,
+  target,
+  openSyncOnStart = false,
+}: Props) {
+  const u = useParams(target === undefined ? undefined : { target })
 
   const [categoryId, setCategoryId] = useState('')
   const [query, setQuery] = useState('')
@@ -334,6 +351,11 @@ export default function PageParams({ density }: Props) {
   const [askRestore, setAskRestore] = useState(false)
   const [askSave, setAskSave] = useState(false)
   const [attachBody, bodyWidth] = useWidth()
+  /**
+   * 「选择要跟随的更新」那一屏的开合。`openSyncOnStart` 是右键菜单那条直路
+   * （用户点「选择要跟随的官方更新」＝他已经知道有更新等着处理）。
+   */
+  const [syncOpen, setSyncOpen] = useState(openSyncOnStart)
   /** 预设抽屉的开合 + pill 的 ref（关抽屉后焦点要还回去） */
   const [pickerOpen, setPickerOpen] = useState(false)
   const pillRef = useRef<HTMLButtonElement>(null)
@@ -598,6 +620,14 @@ export default function PageParams({ density }: Props) {
         onToggleExpand={(key) => setExpandedDetailKey((prev) => (prev === key ? null : key))}
         onEdit={u.edit}
         onRevertToSaved={u.revertToSaved}
+        /*
+         * 官方更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
+         * 认不出是哪一版官方）时不传 —— 行上一律不画，与以前长得一模一样。
+         */
+        syncOf={u.sync === null ? undefined : u.syncOf}
+        onAdoptSync={(key) => u.decideSync([key], 'adopt')}
+        onHoldSync={(key) => u.decideSync([key], 'hold')}
+        syncBusy={u.syncBusy}
         renderBlock={(def) => (
           <GcodeBlock
             def={def}
@@ -774,7 +804,8 @@ export default function PageParams({ density }: Props) {
           <div className={s.left}>
             <header className={s.head}>
               <div className={s.headTop}>
-                <h2 className={s.pageTitle}>修改参数</h2>
+                {/* 嵌在模态框里时不画页面大标题 —— 外面那个框的标题就是这一份的名字 */}
+                {!embedded && <h2 className={s.pageTitle}>修改参数</h2>}
 
                 {/*
                  * 预设选择器：一个文件名 pill + 「切换」小字，点开抽屉。
@@ -784,21 +815,26 @@ export default function PageParams({ density }: Props) {
                  *
                  * 换 combo 仍走 `u.requestCombo` —— 未保存改动的确认弹层在那一层，
                  * 抽屉自己不判断脏数据。
+                 *
+                 * **嵌模态框时它整个不画**：那时编辑对象已经定死（用户右键的就是那一份），
+                 * 摆一个点了没反应的 pill 只会让人以为能换。
                  */}
-                <button
-                  type="button"
-                  className={inactive ? `${s.presetPill} ${s.presetPillOff}` : s.presetPill}
-                  ref={pillRef}
-                  title={
-                    inactive
-                      ? `当前预设 ${pillLabel}（未应用）· 点击切换`
-                      : `当前预设 ${pillLabel} · 点击切换`
-                  }
-                  onClick={() => setPickerOpen((v) => !v)}
-                >
-                  <span className={s.presetName}>{pillLabel}</span>
-                  <span className={s.presetSwitch}>切换</span>
-                </button>
+                {!embedded && (
+                  <button
+                    type="button"
+                    className={inactive ? `${s.presetPill} ${s.presetPillOff}` : s.presetPill}
+                    ref={pillRef}
+                    title={
+                      inactive
+                        ? `当前预设 ${pillLabel}（未应用）· 点击切换`
+                        : `当前预设 ${pillLabel} · 点击切换`
+                    }
+                    onClick={() => setPickerOpen((v) => !v)}
+                  >
+                    <span className={s.presetName}>{pillLabel}</span>
+                    <span className={s.presetSwitch}>切换</span>
+                  </button>
+                )}
 
                 {/*
                  * 窄窗时搜索框搬到这一行（见 searchInHead）—— 挤在文件名
@@ -877,6 +913,39 @@ export default function PageParams({ density }: Props) {
               {/* mini 档的「修改历史」搬到这里（见 historyInBar）：搜索在上面，它在下面 */}
               {historyInBar && historyButton}
             </div>
+
+            {/*
+              官方更新（2026-10-09）：官方改过的项**不直接顶掉我的值**，
+              它们先在这里等着 —— 一屏一条，动作只有一个去处（那一个弹层）。
+              行上也能逐项处理（见 ParamRow 的两个按钮），这条路是"一次看完"的那条。
+            */}
+            {u.pendingCount > 0 && (
+              <div className={s.syncBar} role="status">
+                <span className={s.syncBarText}>
+                  官方更新待选择 <b>{u.pendingCount}</b> 项
+                  {u.sync?.currentReleaseTime !== null && u.sync?.currentReleaseTime !== undefined
+                    ? `（官方 ${u.sync.currentReleaseTime}）`
+                    : ''}
+                  <span className={s.syncBarHint}>
+                    —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
+                  </span>
+                </span>
+                <button type="button" className={s.syncBarBtn} onClick={() => setSyncOpen(true)}>
+                  选择要跟随的更新
+                </button>
+              </div>
+            )}
+            {/*
+              「官方换版了，但新版正文还没取回来」：一条陈**述**，不是错误 ——
+              拿不到官方那一版的字节就逐项比不出来（不编一个差异出来）。
+            */}
+            {u.pendingCount === 0 && u.syncNeedsFetch && (
+              <p className={s.warn}>
+                官方发了新版，但这一版的正文还没取回来 —— 取回之后这里会列出它改了哪几项
+                {u.sync?.basedOnReleaseTime != null ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）` : ''}
+              </p>
+            )}
+            {u.syncError !== null && <p className={s.warn}>官方更新这一条读不出来：{u.syncError}</p>}
 
             {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
             {/*
@@ -1132,8 +1201,21 @@ export default function PageParams({ density }: Props) {
           </div>
         )}
         {/*
-          预设抽屉。挂在 FieldLayer 里、`.main` 之后 —— absolute 的定位父级是 `.main`，
-          放在最后只为了 z-index 顺序（它要盖在卡片与底部操作条之上）。
+          「选择要跟随的更新」那一屏。挂在**这一页里**（`.page` 是定位祖先）——
+          遮罩只盖参数区（在模态框里就是只盖那个框），与这一页别的弹层同一条规矩。
+        */}
+        <ParamSyncModal
+          open={syncOpen}
+          sync={u.sync}
+          busy={u.syncBusy}
+          defOf={u.defOf}
+          onDecide={u.decideSync}
+          onClose={() => setSyncOpen(false)}
+        />
+
+        {/*
+         预设抽屉。挂在 FieldLayer 里、`.main` 之后 —— absolute 的定位父级是 `.main`，
+         放在最后只为了 z-index 顺序（它要盖在卡片与底部操作条之上）。
         */}
         <PresetPickerDrawer
           open={pickerOpen}

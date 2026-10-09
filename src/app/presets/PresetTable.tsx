@@ -91,8 +91,7 @@ import {
   ARCHIVE_WHY,
   archiveOpenText,
   ASSET_STATE_TEXT,
-  ASSET_TEMPLATE_UPDATED_TEXT,
-  ASSET_TEMPLATE_UPDATED_WHY,
+
   ASSET_USE_TEXT,
   ASSET_USE_WHY,
   BASED_ON_KEY,
@@ -458,15 +457,11 @@ export default function PresetTable({
                         </span>
                       )}
                       {/*
-                        资源库：**我这份的来源官方换版了**（2026-10-08）。这不是"过时"、
-                        也不是"你该更新" —— 那份照常能用能改，这枚极淡的小字只说
-                        "官方那边有新的了，要的话从官方那一行另存一份"。
+                        「官方模板已更新」那枚小字**退役了**（2026-10-09）：官方改过的项
+                        现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持我的」，
+                        或者「选择要跟随的官方更新」一屏看全），不再在列表上留一句
+                        "官方那边有新的了"让人自己去猜是哪几项。
                       */}
-                      {row.scope === 'local' && row.templateUpdated === true && (
-                        <span className={s.templateUpdated} title={ASSET_TEMPLATE_UPDATED_WHY}>
-                          {ASSET_TEMPLATE_UPDATED_TEXT}
-                        </span>
-                      )}
                       {row.scope === 'local' && row.untagged && (
                         <span
                           className={s.untagged}

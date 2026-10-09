@@ -231,13 +231,6 @@ export interface PresetData {
    */
   useOfficial: (fileName: string) => Promise<UseOfficialResult>
   /**
-   * **另存为我的预设**：官方那一份 → 用户自己的一份（名字由用户起；撞名后端拒）。
-   *
-   * 官方行的「要改」只有这一条路 —— 下载 / 使用都**不再自动产生副本**。
-   * 回来**两条线一起重读**：官方字节可能刚被取回来（投递面变了），用户线也多了一份。
-   */
-  saveAsMine: (fileName: string, newName: string) => Promise<UserFileIdentity>
-  /**
    * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
    *
    * 与 `apply` 同一条规矩（写底账 → 重读底账）；幂等：本来就没在应用也不报错
@@ -822,25 +815,17 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 资源库那一条路（2026-10-08 改判）：
+   * 资源库那一条路（2026-10-09 改判）：官方行的「使用」= 按需取回 + 落成我的一份 + 使用它。
    *
-   *   官方行的「使用」  `useOfficialPreset` —— 没在本机就先取回来，再写成当前使用
-   *   官方行的「要改」  `copyOfficialAsMine` —— 官方 → 我的，名字由用户起
-   *
-   * 两条都**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
-   * 成功各广播一次账变，别的页与这一页都从订阅里重读那一路。
+   * 它**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
+   * 成功之后**两条线一起重读**：官方字节可能刚被取回来（投递面变了），
+   * 用户线可能也多了一份（`created`）—— 两个广播都要发。
    */
   const useOfficial = useCallback(async (fileName: string): Promise<UseOfficialResult> => {
     const done = await api.useOfficialPreset(fileName)
-    appStateMutated()
-    return done
-  }, [])
-
-  const saveAsMine = useCallback(async (fileName: string, newName: string) => {
-    const done = await api.copyOfficialAsMine(fileName, newName)
-    /* 官方字节可能刚被取回来（投递面变了），用户线也多了一份 —— 两条都广播 */
     deliveryMutated()
     setMine(await api.getUserPresetFiles())
+    appStateMutated()
     return done
   }, [])
 
@@ -973,7 +958,6 @@ export function usePresetData(importRevision = 0): PresetData {
     pickMachine,
     apply,
     useOfficial,
-    saveAsMine,
     clearApply,
     copy,
     release,

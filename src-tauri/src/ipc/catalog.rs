@@ -396,23 +396,37 @@ pub async fn download_runtime_files(
         .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
 }
 
-/// 「使用官方预设」的结果：这次有没有真的取回来一份 + 使用中的那一条
+/// 「使用官方预设」的结果：这次取回没有 / 落成我的一份没有 + 使用中的那一条
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UseOfficialDto {
-    /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，直接使用）
+    /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，一次网络都没发）
     pub fetched: bool,
+    /// 这次是不是**新落了一份我自己的**（`false` = 我那份本来就在，直接用那一份）
+    pub created: bool,
     pub active: ActivePresetDto,
 }
 
-/// 「使用这一份官方预设」—— 资源库那一条路（2026-10-08 作者改判）。
+/// 「使用这一份官方预设」—— 资源库那一条路（2026-10-08 起，2026-10-09 再改判）。
 ///
-/// 用户不需要知道这一份有没有在本机：**没有（或盘上那份与目录对不上）就先按需取回，
-/// 再写成当前使用**；本机已经是当前版就直接使用（一次网络都不发）。于是
-/// 「下载 / 已下载 / 未下载」这些词从用户心智里整个退场，只剩一个动作：使用。
+/// # 用户世界里只有一份
+///
+/// 用户不需要知道这一份有没有在本机，也不需要知道"官方原件"这个中间物：
+///
+/// ```text
+///   没有（或盘上那份与目录对不上）  先按需取回（同一条下载管道，一次网络）
+///             ↓
+///   presets-mine/<原名>.toml  还没有就落一份（= 官方原文 + 血统那三行）
+///             ↓
+///   使用中指针指向**我那一份**
+/// ```
+///
+/// 于是"下载下来是两份"这件事**在用户这一侧不存在**：他看到的、能改的从始至终是
+/// `presets-mine/` 里那一份。官方原件留在下载区（`<catalog.path>`），它是内部数据 ——
+/// 隐藏 baseline 的来源、也是"官方当前版"的唯一可信字节。
 ///
 /// 取回走的是**同一条下载管道**（SHA 校验 / 旧份归档 / 原子落盘，没有第二条路）；
-/// 「使用」写的是**唯一底账**（`run/active-preset.json` 的 official 线，全局唯一）。
+/// 「我那份」已经在了就**一个字节都不动**（用户改过的东西不许被官方原件顶掉）。
 #[tauri::command]
 pub async fn use_official_preset(
     app: AppHandle,
@@ -431,9 +445,22 @@ pub async fn use_official_preset(
                 .find(|f| f.file_name == file_name)
                 .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
             let fetched = ensure_official_bytes(&root, file)?;
-            let state = runtime::app_state::set_active_official(&root, file)?;
+
+            /* 官方原件是**内部**数据：它只用来落"我那一份"，绝不进用户世界 */
+            let rel = format!("{}/{}", crate::fsx::paths::MINE_DIR, file.file_name);
+            let target = crate::fsx::paths::resolve_in(&user, &rel)?;
+            let created = !target.is_file();
+            if created {
+                let text = runtime::delivery::official_text(&root, file)?;
+                runtime::mine::save_official_as_new(&user, file, &text, &file.file_name)?;
+            }
+            let bytes = std::fs::read(&target)
+                .map_err(|e| AppError::io(format!("读不到 {rel}")).with_detail(e.to_string()))?;
+            let sha = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
+            let state = runtime::app_state::set_active_mine(&root, &rel, &sha)?;
             Ok(UseOfficialDto {
                 fetched,
+                created,
                 active: active_dto(&root, &user, &catalog, state),
             })
         })

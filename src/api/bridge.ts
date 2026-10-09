@@ -161,8 +161,7 @@ export const bridgeApi: MkpApi = {
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
   /* 另存为我的预设：官方那一份 → 我的一份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
-  copyOfficialAsMine: (fileName, newName) =>
-    call('copyOfficialAsMine', 'copy_official_as_mine', { fileName, newName }),
+
   getUserCopyFor: (machineId, versionId) =>
     call('getUserCopyFor', 'get_user_copy_for', { machineId, versionId }),
   /*
@@ -227,6 +226,16 @@ export const bridgeApi: MkpApi = {
   readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
   savePresetParams: (path, edits) =>
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
+  /* ——— 逐参数「官方更新」（2026-10-09）———
+     读三方账（我 / 官方旧值 / 官方新值）+ 落采用·保持的决定。
+     `fetchMissing` 只在打开某一份预设时给 true（允许为取官方新版发一次网络）。 */
+  getPresetParamSync: (path, fetchMissing) =>
+    call('getPresetParamSync', 'get_preset_param_sync', {
+      path,
+      fetchMissing: fetchMissing ?? false,
+    }),
+  applyPresetParamDecisions: (path, decisions) =>
+    call('applyPresetParamDecisions', 'apply_preset_param_decisions', { path, decisions }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>

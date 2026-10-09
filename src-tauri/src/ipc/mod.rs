@@ -20,6 +20,9 @@ pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
 pub mod mine;
+/// **逐参数「官方更新」的两条命令**（2026-10-09）：读三方账（我 / 官方旧值 / 官方新值）
+/// 与落采用·保持的决定。官方那一版默认值住在隐藏 baseline 里，用户看不见它。
+pub mod param_sync;
 /// **baseline 的两条命令**（2026-10-08）：云端版本列表（已下载 / 新版本，**不是过时判定**）
 /// 与「恢复默认」的基准值。baseline 是隐藏内部存储，用户看不见它。
 pub mod preset_baseline;

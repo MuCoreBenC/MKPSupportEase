@@ -39,6 +39,12 @@
   width: 640px;
 }
 
+/* 整块工作区：宽到能摆下两列参数卡，高到能自己管滚动（见下面的 .bodyFill） */
+.box[data-size='xl'] {
+  width: min(1180px, 100%);
+  height: min(88vh, 100%);
+}
+
 
 .head {
   display: flex;
@@ -99,6 +105,18 @@
   overflow-y: auto;
   font-size: var(--fs-label);
   color: var(--text-1);
+}
+
+/*
+ * 「框身不滚」那一档（`bodyFill`）：内衬与滚动都交回给里面那个整体
+ * （参数编辑器有自己的可滚区与钉住的底栏）。这一层只负责**把它撑满**。
+ */
+.bodyFill {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .foot {

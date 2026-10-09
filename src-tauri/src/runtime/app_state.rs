@@ -38,6 +38,7 @@
 //! 预设正文仍在交付区 / `presets-mine/`。事件账、出处账、下载文件、图片模型
 //! 都不进这里（它们是业务数据 / 历史记录，各有各的落点）。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -50,6 +51,33 @@ use crate::fsx::atomic::atomic_write_json;
 use super::catalog::{hex, CatalogFile};
 use super::source::PresetSource;
 use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft};
+
+/// 一次「官方更新」的处理决定（逐参数）。
+///
+/// 用户世界里只有一份自己的预设；官方那一版默认值住在**隐藏 baseline** 里
+/// （[`super::baseline`]，按摘要寻址）。于是"这一项我处理过了"这件事盘上不存在，
+/// 只能记在这里 —— 它回答的是**程序当前怎么管理这一份**（不是"这个预设文件是什么"），
+/// 所以照 [`super::lineage`] 定的那条界，它属于 `run/`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParamDecisionKind {
+    /// 采用了官方的新值（文件里那一项已经写成官方新值）
+    Adopt,
+    /// 明确保持我的值（文件里那一项一个字没动）
+    Hold,
+}
+
+/// 一个参数上"我做过的那次决定"。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamDecision {
+    /// 做决定那一刻的官方版本（正文全文 sha256）。
+    ///
+    /// 它同时是**这一项"处理到哪一版了"的水位**：下次官方再改，官方当前版的摘要与它不同，
+    /// 这一项就会重新进入待处理 —— 官方连着发几版也不需要在本地存历史。
+    pub sha256: String,
+    pub kind: ParamDecisionKind,
+}
 
 /// 应用状态格式的代次。加 section / 加字段不升号，改语义才升（与 catalog 同一条）。
 pub const APP_STATE_SCHEMA: u32 = 1;
@@ -71,6 +99,12 @@ pub struct AppStateFile {
     /// 数据源设置：当前用哪个远端
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset_source: Option<PresetSource>,
+    /// **逐参数「官方更新」处理账**：`presets-mine/…` 相对路径 → `参数 key → 决定`。
+    ///
+    /// 空的格不写进文件（`skip_serializing_if`）—— 没处理过官方更新的应用，状态文件与以前一样。
+    /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_mine`]）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub param_decisions: BTreeMap<String, BTreeMap<String, ParamDecision>>,
 }
 
 impl Default for AppStateFile {
@@ -80,6 +114,7 @@ impl Default for AppStateFile {
             active_preset: None,
             draft: None,
             preset_source: None,
+            param_decisions: BTreeMap::new(),
         }
     }
 }
@@ -140,6 +175,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         active_preset: super::state::read_active_file(root)?,
         draft: super::state::read_draft_file(root)?,
         preset_source: super::source::read_source_file(root)?,
+        /* 逐参数决定账是 2026-10-09 才有的格：旧档里本来就没有它 */
+        param_decisions: BTreeMap::new(),
     })
 }
 
@@ -295,7 +332,54 @@ pub fn repoint_mine(
                 draft_followed = true;
             }
         }
+        /*
+         * 逐参数决定账按**路径**认这一份（与草稿同一条钥匙）：改名之后它得跟到新路径上，
+         * 否则"这项官方更新我已经处理过了"会凭空消失，官方下一次发布又把它们全翻出来。
+         */
+        if let Some(book) = state.param_decisions.remove(old_rel) {
+            state.param_decisions.insert(new_rel.to_owned(), book);
+        }
         Ok((active_followed, draft_followed))
+    })
+}
+
+/* ---------- paramDecisions：逐参数「官方更新」处理账 ---------- */
+
+/// 这一份用户预设上，**我做过的那些决定**（参数 key → 决定）。没有处理过就是空表。
+pub fn param_decisions(root: &Path, rel: &str) -> Result<BTreeMap<String, ParamDecision>, AppError> {
+    Ok(load(root)?
+        .param_decisions
+        .get(rel)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 记下/覆盖若干项决定（同一份文件上的**合并写**，别的项一个不动）。
+///
+/// 幂等：同样的决定记两次结果一样。一次写里整份状态原子替换 ——
+/// 「采用」这种一次改几十项的动作也只有一个中间的态。
+pub fn record_param_decisions(
+    root: &Path,
+    rel: &str,
+    entries: &[(String, ParamDecision)],
+) -> Result<(), AppError> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    with_state(root, |state| {
+        let book = state.param_decisions.entry(rel.to_owned()).or_default();
+        for (key, decision) in entries {
+            book.insert(key.clone(), decision.clone());
+        }
+        Ok(())
+    })
+}
+
+/// 忘掉这一份的整本决定账（文件被删掉时用）。没有账也不报错（幂等）。
+pub fn forget_param_decisions(root: &Path, rel: &str) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.param_decisions.remove(rel);
+        Ok(())
     })
 }
 
@@ -525,6 +609,91 @@ mod tests {
         let draft = draft(d.path()).unwrap().unwrap();
         assert_eq!(draft.source_file_name, "A2.toml");
         assert_eq!(draft.text, "改到一半", "正文原样");
+    }
+
+    /* ---------- paramDecisions ---------- */
+
+    fn adopt(sha: &str) -> ParamDecision {
+        ParamDecision {
+            sha256: sha.to_owned(),
+            kind: ParamDecisionKind::Adopt,
+        }
+    }
+
+    /// 记下 → 读回 → 合并写（同一份的别的项一个不动）；没记过的份是空表
+    #[test]
+    fn param_decisions_roundtrip_and_merge() {
+        let d = tempfile::tempdir().unwrap();
+        let rel = "presets-mine/A1-fast.toml";
+        assert!(param_decisions(d.path(), rel).unwrap().is_empty(), "没处理过 = 空表");
+
+        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+        record_param_decisions(
+            d.path(),
+            rel,
+            &[(
+                "wiping.glue_pass_count".to_owned(),
+                ParamDecision {
+                    sha256: "aa".to_owned(),
+                    kind: ParamDecisionKind::Hold,
+                },
+            )],
+        )
+        .unwrap();
+
+        let book = param_decisions(d.path(), rel).unwrap();
+        assert_eq!(book.len(), 2, "两次记的都在");
+        assert_eq!(book["toolhead.offset.x"], adopt("aa"));
+        assert_eq!(book["wiping.glue_pass_count"].kind, ParamDecisionKind::Hold);
+
+        /* 同一项再记一次 = 覆盖，不是多一条 */
+        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("bb"))]).unwrap();
+        let book = param_decisions(d.path(), rel).unwrap();
+        assert_eq!(book.len(), 2);
+        assert_eq!(book["toolhead.offset.x"].sha256, "bb");
+    }
+
+    /// 决定账**不干扰**别的格：存决定不动使用中指针与草稿
+    #[test]
+    fn param_decisions_do_not_touch_other_sections() {
+        let d = tempfile::tempdir().unwrap();
+        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        record_param_decisions(
+            d.path(),
+            "presets-mine/A1.toml",
+            &[("toolhead.offset.x".to_owned(), adopt("aa"))],
+        )
+        .unwrap();
+        assert_eq!(
+            active_preset(d.path()).unwrap().unwrap().file_name,
+            "A1-standard.toml"
+        );
+        assert!(draft(d.path()).unwrap().is_none());
+    }
+
+    /// 删掉那一份文件 → 决定账跟着忘（幂等）
+    #[test]
+    fn forgetting_a_book_is_idempotent() {
+        let d = tempfile::tempdir().unwrap();
+        let rel = "presets-mine/A1.toml";
+        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+        forget_param_decisions(d.path(), rel).unwrap();
+        assert!(param_decisions(d.path(), rel).unwrap().is_empty());
+        forget_param_decisions(d.path(), rel).unwrap(); // 再忘一次也不报错
+    }
+
+    /// 改名之后决定账**跟到新路径**：不跟的话官方下一次发布会把处理过的项全翻出来
+    #[test]
+    fn renaming_moves_the_book_to_the_new_path() {
+        let d = tempfile::tempdir().unwrap();
+        let old = "presets-mine/A1.toml";
+        let new = "presets-mine/A2.toml";
+        record_param_decisions(d.path(), old, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+
+        repoint_mine(d.path(), old, new, "A2.toml").unwrap();
+
+        assert!(param_decisions(d.path(), old).unwrap().is_empty(), "旧路径上不该还留着");
+        assert_eq!(param_decisions(d.path(), new).unwrap()["toolhead.offset.x"], adopt("aa"));
     }
 
     /* ---------- presetSource ---------- */

@@ -1421,13 +1421,6 @@ export interface PresetLocalRow extends PresetRowBase {
    */
   ownMachineId?: string | null
   ownVersionId?: string | null
-  /**
-   * **它当初基于的那一版官方，现在已经不是目录里那一版了**（`basedOn === 'outdated'`）。
-   *
-   * 资源库列表在我的那一行上挂一句极淡的「官方模板已更新」——**不是版本列表、
-   * 也不是"你该更新"**：那份照常能用能改，程序不替他合并、也不替他换（2026-10-08 改判）。
-   */
-  templateUpdated?: boolean
 }
 
 export interface PresetCloudRow extends PresetRowBase {
@@ -1893,8 +1886,7 @@ function mineHalf(input: PresetRowsInput): PresetLocalRow[] {
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
-        /* 资源库那一行的小字：**它当初基于的官方那一版已经换新版了**（不是坏文件） */
-        templateUpdated: f.basedOn === 'outdated',
+
         /* 详情面板「改归属」读它（机型 / 版本两个下拉的数据源是行上这份归属） */
         ownMachineId: ownMachine,
         ownVersionId: ownVersion,
@@ -2132,36 +2124,9 @@ export const ASSET_STATE_TEXT = {
 export const ASSET_USE_WHY = {
   on: '当前使用：唯一底账（run/active-preset.json）说正在使用的就是它。**全局唯一** —— 全表最多一条',
   off:
-    '使用：把它设为当前生效的那一份。官方预设本机还没有（或字节对不上）时，' +
-    '后端会先从数据源取回来再使用 —— 不需要先"下载"，也没有"下过没有"这一档',
-} as const
-
-/**
- * 我的那一行上那枚极淡的提示：**它当初基于的那一版官方已经换了新版**（按血统比出来的）。
- *
- * **它不是"你该更新"**（2026-10-08：那套"过时"的说法整个退场）—— 这份照常能用能改，
- * 程序不替它合并、也不替它换。官方那一行永远只有一个当前版，要拿新的就从它另存一份。
- */
-export const ASSET_TEMPLATE_UPDATED_TEXT = '官方模板已更新'
-
-export const ASSET_TEMPLATE_UPDATED_WHY =
-  '你这份当初基于的那一版官方，现在已经不是目录里那一版了（按文件头血统比出来的）。' +
-  '这不是"你该更新"：它照常能用、能改，程序不替你合并。' +
-  '要拿官方新版，从资源库里官方那一行「另存为我的预设」存一份新的。'
-
-/**
- * **官方 → 我的**那一口抽屉（起名字用一个，与改名 / 另存为一份新的同一个外壳）。
- *
- * 资源库模型里"官方是模板、我的才是实际工作文件"就落在这颗按钮上：下载 / 使用官方
- * 都不再自动产生副本，要改就必须显式存一份自己的（名字由他起，撞名后端拒）。
- */
-export const ASSET_SAVE_AS = {
-  title: '另存为我的预设',
-  commit: '另存',
-  note:
-    '把官方这一份存成你自己的一份（`presets-mine/` 里一份新的）：官方原文 + 三行血统。' +
-    '存完它就是你的了 —— 能改、能改名、能删除、能使用；官方那一份原件照旧在资源库里。' +
-    '名字由你起（撞名会被拒，不覆盖、也不自动改名）。',
+    '使用：把它设为当前生效的那一份。官方原件本机还没有（或字节对不上）时，' +
+    '后端先从数据源取回来，再落成你的一份（`presets-mine/` 里同名那一份，已经有了就一个字节不动），' +
+    '然后使用它 —— 不需要先"下载"，也没有"下过没有"这一档',
 } as const
 
 /** 官方行的小字：来源 + **目录这次发布的时刻**（目录没盖戳就只说来源，不编一个时间） */
@@ -2193,8 +2158,9 @@ function mineNote(row: PresetLocalRow): string {
  *         点「使用」时后端按需取回（`useOfficialPreset`），用户不需要先"下载"。
  *   我的  `presets-mine/` 里用户自己的文件（与本地表共用 [`mineHalf`] 那条映射）。
  *
- * 行上唯一的状态是**当前使用**（全局唯一底账）。官方行要改必须显式「另存为我的预设」
- * （`copyOfficialAsMine`）—— 下载 / 使用都不再自动产生副本。
+ * 行上唯一的状态是**当前使用**（全局唯一底账）。官方行只有一个动作：**使用** ——
+ * 它 = 按需取回 + 落成我的一份（还没有的话）+ 使用那一份。于是"官方原件"从头到尾
+ * 不进用户世界，**用户只面对一份自己的预设**（2026-10-09 改判）。
  *
  * 切片器档照旧走 [`localRows`] / [`cloudRows`] 那两张表（本期不动）。
  */

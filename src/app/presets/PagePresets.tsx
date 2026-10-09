@@ -140,6 +140,8 @@ import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
+/* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
+import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
@@ -148,7 +150,6 @@ import {
   ARCHIVE_DRAWER,
   ARCHIVE_TIME,
   ARCHIVE_WHY,
-  ASSET_SAVE_AS,
   ASSET_USE_TEXT,
   ASSET_USE_WHY,
   EDIT_TEXT,
@@ -216,14 +217,12 @@ const REVEAL_LABEL =
   detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
 
 /*
- * 起名字抽屉的三套话：改名（我的 → 我的）/ 另存为一份新的（我的 → 我的）/
- * 另存为我的预设（官方 → 我的，2026-10-08）。**外壳同一个**，说法各一套 ——
- * 三件事都只传一个名字，别的全在后端。
+ * 起名字抽屉的两套话：改名（我的 → 我的）/ 另存为一份新的（我的 → 我的）。
+ * **外壳同一个**，说法各一套 —— 两件事都只传一个名字，别的全在后端。
  */
 const NAMING_TEXT = {
   rename: MINE_RENAME,
   copy: MINE_COPY,
-  saveAsMine: ASSET_SAVE_AS,
 } as const
 
 /**
@@ -276,6 +275,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-mine/`）。
    */
   const [compareOpen, setCompareOpen] = useState(false)
+  /*
+   * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
+   * 那一屏打开（用户点的是那条直路：他已经知道有官方更新等着处理）。
+   */
+  const [paramModal, setParamModal] = useState<{
+    target: { path: string; fileName: string; machineId: string; versionId: string }
+    syncFirst: boolean
+  } | null>(null)
   /*
    * 正在做动作的那一行（rowKey）。只用来把那一颗按钮禁掉 —— 假后端是同进程的内存写，
    * 这一下快到看不见；真后端上「应用」要写盘，连点两次就会发两个写。
@@ -345,12 +352,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
   const [naming, setNaming] = useState<{
     /**
-     * 三件"起个名字就完事"的事共用这一口抽屉：
-     *   `rename`      我的 → 我的（只改名字）
-     *   `copy`        我的 → 我的（按字节再存一份）
-     *   `saveAsMine`  官方 → 我的（2026-10-08 资源库改判：要改官方那份就得先存一份自己的）
+     * 两件"起个名字就完事"的事共用这一口抽屉：
+     *   `rename`  我的 → 我的（只改名字）
+     *   `copy`    我的 → 我的（按字节再存一份）
      */
-    kind: 'rename' | 'copy' | 'saveAsMine'
+    kind: 'rename' | 'copy'
     row: PresetTableRow
     name: string
     busy: boolean
@@ -751,20 +757,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     setNaming({ kind: 'copy', row, name: '', busy: false, error: null })
   }
 
-  /**
-   * **另存为我的预设**（官方 → 我的，2026-10-08 资源库改判）。
-   *
-   * 这是官方那一行**唯一**的"要改"入口：下载 / 使用都不再自动产生副本。
-   * 名字**不预填**（与「另存为一份新的」同一条规矩：用户明确指定，撞名就拒）。
-   * 本机还没有那一份字节时后端会先按需取回来再存 —— 用户不必先关心"下过没有"。
-   */
-  const openSaveAsMine = (row: PresetTableRow) => {
-    menu.close()
-    setViewer(null)
-    setEditing(null)
-    setNaming({ kind: 'saveAsMine', row, name: '', busy: false, error: null })
-  }
-
   /** 起名字抽屉那一颗按钮（改名 / 另存为共用这一条提交路） */
   const submitNaming = () => {
     if (naming === null || naming.busy) return
@@ -778,9 +770,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     const ask =
       kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : kind === 'copy'
-          ? data.copyAsNew(naming.row.path, name)
-          : data.saveAsMine(naming.row.fileName, name)
+        : data.copyAsNew(naming.row.path, name)
     ask.then(
       (done) => {
         setNaming(null)
@@ -788,9 +778,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           text:
             kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : kind === 'copy'
-                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`
-                : `已存成你的一份：${done.fileName} —— 官方那一份原件照旧在资源库里，这份现在归你（能改、能改名的就是你手里这一份）`,
+              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
@@ -1012,11 +1000,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     data.useOfficial(row.fileName).then(
       (done) => {
         setBusyKey(null)
-        /* 这一趟可能**真的去取了**（`fetched`）—— 提示条如实说，用户看得见它去了哪 */
+        /*
+         * 提示条按**这一趟真做了什么**说（两件独立的事：官方字节取回来没有 / 我那份是新落的还是原来那份）。
+         * 用户看得见它去了哪、也看得见他改的那一份是哪来的。
+         */
         setNote({
-          text: done.fetched
-            ? `已取回并使用 ${row.fileName} —— 本机原来没有它（或盘上那份对不上），这一趟把它取回来了`
-            : `已使用 ${row.fileName}`,
+          text: done.created
+            ? done.fetched
+              ? `已取回官方 ${row.fileName}，并落成你的一份 —— 现在用的是你自己那一份（改的就是它）`
+              : `已落成你的一份 ${row.fileName} —— 现在用的是你自己那一份（官方那一版本机本来就有）`
+            : done.fetched
+              ? `已取回官方的 ${row.fileName}，并使用你原来那一份 —— 你那份一个字节没动`
+              : `已使用 ${row.fileName} —— 用的是你自己那一份`,
           bad: false,
         })
       },
@@ -1112,6 +1107,53 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       : '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
   }
 
+  /**
+   * **「打开参数」为什么不给点**（2026-10-09）。
+   *
+   * 参数表画哪些项、怎么分组，全由**这一份自己的归属**（文件头 `# machine:` /
+   * `# variant:` 那两行）决定 —— 标不出机型 / 版本时就没有字段表可画。
+   * 读不出来的那份同理（先修好它）。灰一个项不说为什么，用户只会以为坏了。
+   */
+  const paramsWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin !== 'mine') {
+      return '只有「我的」那一份能这样打开参数 —— 官方那一份是模板，先用「使用」取一份自己的'
+    }
+    if (row.kind !== 'mkp_preset') return MINE_NOT_PRESET_WHY
+    if (row.mineState === 'unreadable') return mineUnreadableWhy(row.mineStateDetail)
+    if (row.scope !== 'local') return '这一行不在本机'
+    if (row.ownMachineId === null || row.ownMachineId === undefined) {
+      return '这一份没标机型 —— 先在详情里「改归属」，参数表才知道该画哪些项'
+    }
+    if (row.ownVersionId === null || row.ownVersionId === undefined) {
+      return '这一份没标版本 —— 先在详情里「改归属」'
+    }
+    return undefined
+  }
+
+  /**
+   * 打开某一份预设的参数（模态框）。里面就是**参数页本身** —— 一件组件不改、一个样式不换，
+   * 只是钉死编辑对象：用户点的是哪一份，改的就是哪一份。
+   *
+   * 与「改这份」（改正文那个纯文本编辑器）是两件事，两份都在菜单上：
+   * 那个改的是 TOML 正文，这个改的是参数表。
+   */
+  const openParams = (row: PresetTableRow, syncFirst: boolean) => {
+    menu.close()
+    if (paramsWhyNot(row) !== undefined) return
+    if (row.scope !== 'local') return
+    const machineId = row.ownMachineId
+    const versionId = row.ownVersionId
+    if (machineId === null || machineId === undefined) return
+    if (versionId === null || versionId === undefined) return
+    setViewer(null)
+    setEditing(null)
+    setNaming(null)
+    setParamModal({
+      target: { path: row.path, fileName: row.fileName, machineId, versionId },
+      syncFirst,
+    })
+  }
+
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
@@ -1177,14 +1219,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)),
       }
       if (row.origin === 'release') {
+        /*
+         * 官方那一行**只有「使用」**（2026-10-09 改判）：使用 = 按需取回 + 落成我的一份
+         * + 使用它。用户世界里只有一份，没有一个要他自己走的"另存"步骤。
+         */
         return [
           useEntry,
-          {
-            id: 'saveAsMine',
-            label: ASSET_SAVE_AS.title,
-            /* 官方那一份要改，只能先存成自己的 —— 这是它唯一的"写入"入口 */
-            onSelect: () => openSaveAsMine(row),
-          },
           { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
           detailEntry,
           bbsEntry(row),
@@ -1193,6 +1233,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       const suspectMine = isSuspectRelease(row.releaseState)
       return [
         useEntry,
+        /* 参数表那一屏（2026-10-09）：改的是参数本身，官方更新也在这里处理 */
+        {
+          id: 'params',
+          label: '打开参数',
+          disabled: paramsWhyNot(row),
+          onSelect: () => openParams(row, false),
+        },
+        {
+          id: 'paramsSync',
+          label: '选择要跟随的官方更新',
+          disabled: paramsWhyNot(row),
+          onSelect: () => openParams(row, true),
+        },
         ...(row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
           ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
           : []),
@@ -1868,6 +1921,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           />
 
           {/*
+           * **那一份预设的参数**（2026-10-09）。里面就是参数页本身；
+           * 挂在 `.main` 里与上面那几个同一层 —— 遮罩只盖内容区。
+           */}
+          <PresetParamsModal
+            open={paramModal !== null}
+            density={density}
+            target={
+              paramModal?.target ?? { path: '', fileName: '', machineId: '', versionId: '' }
+            }
+            openSyncOnStart={paramModal?.syncFirst ?? false}
+            onClose={() => setParamModal(null)}
+          />
+
+          {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
            * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
            *
@@ -1990,7 +2057,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             <span className={s.footHint}>
               {/* 菜单里有什么，按档说 —— 资源库那一档没有"重命名 / 删除"这种只属于我的文件的话 */}
               {page.kind === 'mkp'
-                ? '右键任意一行还有使用 / 另存为我的预设 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                ? '右键任意一行还有使用 / 打开参数 / 官方更新 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
                 : '右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'}
             </span>
           )}

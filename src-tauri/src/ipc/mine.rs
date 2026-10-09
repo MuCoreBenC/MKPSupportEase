@@ -4,11 +4,10 @@
 //! 这一条是**另一条线**（总纲 §1③「预设 TOML 的一生」），两条不许混：
 //! 官方原件不可变、用户修改另存、用户那份**永远不回写官方原件**。
 //!
-//! 写命令都在这一层（**都只写用户根**，官方模板与下载区一概不碰），分几路：
+//! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分几路：
 //!
-//! - **另存为我的预设**（`copy_official_as_mine`，2026-10-08 资源库改判）：官方那一份
-//!   → `presets-mine/<你起的名字>`（撞名就拒、血统三行）；下载 / 使用官方
-//!   **都不再自动产生副本**；
+//! - **使用官方预设**（`catalog::use_official_preset`，2026-10-09 改判）：按需取回官方原件，
+//!   再把它落成 `presets-mine/<原名>`（还没有的话）+ 使用那一份 —— **用户只面对一份**；
 //! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
 //!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
 //! - 校准值也写进同一份工作副本（`save_preset_calibration`：按注册表定位改
@@ -552,42 +551,6 @@ pub async fn copy_user_preset(
     })
 }
 
-/// **另存为我的预设**：官方那一份 → 用户自己的一份（2026-10-08 资源库改判）。
-///
-/// 资源库模型里"官方是模板、我的才是实际工作文件"落在这一步：下载 / 使用官方都
-/// **不再自动产生副本**，用户要改就必须显式另存，名字由他自己起。
-///
-/// 本机还没有这一份（或盘上那份与目录对不上）就先按需取回（同一条下载管道），
-/// 再复制 —— 界面上只有一颗「另存为我的预设」，用户不需要先关心"下过没有"。
-/// 字节的可信由 [`runtime::delivery::official_text`] 的 SHA 闸保证（与「改这份」
-/// 同一条边界：我们不认的字节，不会换个身份变成用户的一份）；落盘见
-/// [`runtime::mine::save_official_as_new`]（撞名就拒、不覆盖、血统三行）。
-#[tauri::command]
-pub async fn copy_official_as_mine(
-    app: AppHandle,
-    file_name: String,
-    new_name: String,
-) -> Result<UserFileIdentityDto, AppError> {
-    traced("copyOfficialAsMine", |_| {
-        let root = internal_root(&app)?;
-        let user_root = crate::fsx::paths::user_root(&app)?;
-        let catalog = runtime::load_released_catalog(&root)?;
-        let file = catalog
-            .files
-            .iter()
-            .find(|f| f.file_name == file_name)
-            .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
-        /* 没有 / 对不上就先取回来 —— 取回失败了照实报（下一步拿不到可信字节） */
-        super::catalog::ensure_official_bytes(&root, file)?;
-        let text = runtime::delivery::official_text(&root, file)?;
-        let done = runtime::mine::save_official_as_new(&user_root, file, &text, &new_name)?;
-        Ok(UserFileIdentityDto {
-            path: done.path,
-            file_name: done.file_name,
-        })
-    })
-}
-
 /// 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -721,6 +684,11 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
         runtime::mine::delete_file(&user_root, &path)?;
         /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句；删账失败不拦删除） */
         let _ = runtime::remarks::remove(&user_root, &path);
+        /*
+         * 逐参数「官方更新」决定账跟着删：那份文件都不在了，"我处理过哪几项"再留着
+         * 只会是一条悬空的账（而且下一次同名文件出现时会莫名其妙继承它）。
+         */
+        let _ = runtime::app_state::forget_param_decisions(&root, &path);
         if state_cleared {
             super::notify_app_state(&app);
         }

@@ -39,6 +39,9 @@ pub mod lineage;
 /// `archive/`）分开
 pub mod mine;
 pub mod net;
+/// **逐参数「官方更新」的比对**（2026-10-09）：我这份 / 官方旧值 / 官方新值三方账。
+/// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
+pub mod param_sync;
 pub mod paths;
 /// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
 /// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统

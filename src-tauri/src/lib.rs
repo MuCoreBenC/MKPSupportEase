@@ -169,14 +169,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
         ipc::mine::copy_user_preset,
-        // 另存为我的预设 + 校准写回（2026-10-08 资源库改判）：官方 → 我的 / 找它 / 把校准值写进它
-        ipc::mine::copy_official_as_mine,
+        // 找「我那一份」+ 把校准值写进它（2026-10-08 资源库改判）
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
         // 对比台 + 官方版本账（2026-10-08）：只在**用户自己的预设**之间对比
         ipc::preset_baseline::get_official_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
+        // 逐参数「官方更新」（2026-10-09）：读三方账 / 落采用·保持的决定
+        ipc::param_sync::get_preset_param_sync,
+        ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
         ipc::import::stage_import,
         ipc::import::commit_import,
@@ -241,14 +243,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
         ipc::mine::copy_user_preset,
-        // 另存为我的预设 + 校准写回（与上面那份清单一字不差）
-        ipc::mine::copy_official_as_mine,
+        // 找「我那一份」+ 把校准值写进它（与上面那份清单一字不差）
         ipc::mine::get_user_copy_for,
         ipc::mine::save_preset_calibration,
         // 对比台 + 官方版本账（与上面那份清单一字不差）
         ipc::preset_baseline::get_official_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
+        // 逐参数「官方更新」（与上面那份清单一字不差）
+        ipc::param_sync::get_preset_param_sync,
+        ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
         ipc::import::stage_import,
         ipc::import::commit_import,

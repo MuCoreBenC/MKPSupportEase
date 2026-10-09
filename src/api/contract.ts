@@ -945,13 +945,18 @@ export interface ActivePreset {
 }
 
 /**
- * 「使用官方预设」的结果（[`useOfficialPreset`]，2026-10-08 资源库改判）。
+ * 「使用官方预设」的结果（[`useOfficialPreset`]，2026-10-09 资源库改判）。
  *
- * `fetched` 说这次**有没有真的取回来一份** —— 本机已经是当前版时是 `false`
- * （一次网络都不发）。界面据此说「已取回并使用」还是「已使用」。
+ * `fetched` 说这次**有没有真的取回来一份**官方原件（本机已经是当前版时是 `false`，
+ * 一次网络都不发）；`created` 说这次**有没有新落一份我自己的**
+ * （没有的话用的是已经在的那一份，那份一个字节都没动）。
+ *
+ * 两个都是"这次到底做了什么"的实情 —— 界面据此说清「取回来了没有」与
+ * 「你之前那份还在不在」。
  */
 export interface UseOfficialResult {
   fetched: boolean
+  created: boolean
   active: ActivePreset
 }
 
@@ -1152,6 +1157,68 @@ export interface PresetParamValues {
   problem: string | null
 }
 
+/* ---------- 逐参数「官方更新」（2026-10-09） ---------- */
+
+/**
+ * 一个参数上"我做过的那次决定"。
+ *
+ * `adopt` = 采用官方新值（文件里那一项已经写成官方新值）；
+ * `hold` = 明确保持我的值（文件里那一项一个字没动）。
+ * 两者都把这一项的水位推到当时的官方版 —— 于是同一版不会再挂着，官方再改才会重新进待处理。
+ */
+export type ParamDecisionKind = 'adopt' | 'hold'
+
+/** 一个参数上的四方账。`null` = 这一格没有值（**不是空串**：文件里没有这一项就是没有） */
+export interface ParamSyncEntry {
+  /** 参数 key（注册表的键，与 `RecipeParam.key` 同一套） */
+  key: string
+  /** 我这份文件里现在写着的值 */
+  mine: string | null
+  /** 官方**旧值**：我上次处理到的那一版官方里这一项是什么 */
+  baselineOld: string | null
+  /** 官方**当前最新值**。官方当前版字节不在本机 ⇒ `null`（界面照实说"还没取回来"） */
+  officialNew: string | null
+  /** 官方改过这一项、而我还没处理 */
+  pending: boolean
+  /** 我已经对**当前官方版**处理过这一项 */
+  decided: ParamDecisionKind | null
+}
+
+/**
+ * 一份用户预设的「官方更新」总账。
+ *
+ * 三方 = **我这份文件 / 官方旧值（我上次处理到的那一版） / 官方当前最新版**。
+ * 用户看不见"旧值是哪一版"这种话 —— 界面上只说"官方旧值 → 官方新值"。
+ */
+export interface PresetParamSync {
+  /** 相对用户根的路径（`presets-mine/A1-fast.toml`） */
+  path: string
+  fileName: string
+  /** 这份预设自己的归属（文件头两行归一化后的）。认不出是 `null` */
+  machineId: string | null
+  versionId: string | null
+  /** 官方那一份的文件名（`A1-fast.toml`）。认不出是 `null` —— 那就比不出官方更新 */
+  officialFileName: string | null
+  /** 我这份当初基于的那一版官方的发布时间（给人看的） */
+  basedOnReleaseTime: string | null
+  /** 官方当前版的发布时间（给人看的）。拿不到是 `null` */
+  currentReleaseTime: string | null
+  /** 官方当前版的字节**在本机可用**（可用就能逐项比） */
+  officialReady: boolean
+  /** 官方换版了：当前版与我这份当初那一版不是同一份 */
+  versionAdvanced: boolean
+  /** 待处理条数（= `entries` 里 `pending` 的条数） */
+  pendingCount: number
+  /** 逐参数的四方账，顺序与参数定义一致 */
+  entries: ParamSyncEntry[]
+}
+
+/** 一条要落下去的决定 */
+export interface ParamDecision {
+  paramKey: string
+  kind: ParamDecisionKind
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -1302,19 +1369,6 @@ export interface MkpApi {
    * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
    */
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
-
-  /**
-   * **另存为我的预设**：官方那一份 → 用户自己的一份（2026-10-08 资源库改判）。
-   *
-   * 资源库模型里"官方是模板、我的才是实际工作文件"落在这一步：下载 / 使用官方
-   * **都不再自动产生副本**，用户要改就必须显式另存，名字由他自己起。
-   *
-   * 本机还没有这一份（或盘上那份与目录对不上）就先按需取回（同一条下载管道），
-   * 再复制 —— 界面上只有一颗「另存为我的预设」，用户不需要先关心"下过没有"。
-   * 新名字过与改名 / 另存同一套门槛；**撞名就拒**（不覆盖、也不自动改名）；
-   * 写下去的是官方原文 + 三行血统；**一个状态都不碰**。
-   */
-  copyOfficialAsMine(fileName: string, newName: string): Promise<UserFileIdentity>
 
   /**
    * **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
@@ -1546,14 +1600,20 @@ export interface MkpApi {
     ): Promise<ActivePreset>
 
   /**
-   * **使用一份官方预设**（2026-10-08 资源库改判）—— 官方那一行唯一的动作。
+   * **使用一份官方预设**（2026-10-09 资源库改判）—— 官方那一行唯一的动作。
    *
-   * 用户不需要知道它有没有在本机：**没有（或盘上那份与目录对不上）就先按需取回，
-   * 再写成当前使用**；本机已是当前版就直接使用（一次网络都不发）。于是
-   * 「下载 / 已下载 / 未下载」从用户心智里退场，只剩「使用」。
+   * 用户世界里**只有一份**（他从来不面对"官方原件 + 我的副本"两份）：
    *
-   * 取回走同一条下载管道（SHA 校验 / 旧份归档 / 原子落盘）；
-   * 「使用」写唯一底账（official 线，全局唯一）。
+   * ```text
+   *   官方原件不在本机（或盘上那份与目录对不上） → 按需取回（同一条下载管道，一次网络）
+   *              ↓
+   *   presets-mine/<原名>.toml  还没有就落一份（官方原文 + 血统三行）
+   *              ↓
+   *   使用中指针指向**我那一份**
+   * ```
+   *
+   * 我那份已经在了就一个字节都不动（用户改过的东西不许被官方原件顶掉）。
+   * 于是「下载 / 已下载 / 未下载」从用户心智里退场，只剩「使用」。
    */
   useOfficialPreset(fileName: string): Promise<UseOfficialResult>
 
@@ -1649,6 +1709,33 @@ export interface MkpApi {
    * baseline 与官方当前版永远不被写。
    */
   savePresetParams(path: string, edits: ParamEdit[]): Promise<void>
+
+  /* ---------- 逐参数「官方更新」（2026-10-09） ---------- */
+
+  /**
+   * **这一份预设的官方更新账**：逐项给出「我 / 官方旧值 / 官方新值」与待处理标记。
+   *
+   * 官方那一版默认值住在**隐藏 baseline** 里（用户看不见）；"我上次处理到哪一版"
+   * 记在逐参数决定账里 —— 所以官方连着发几版也能一次算清（比对的是
+   * 「我处理到的那一版 → 当前版」，不需要云端提供中间版本）。
+   *
+   * `fetchMissing` = 允许为了拿到**官方当前版**的正文发一次网络请求。
+   * 打开某一份预设时可以给 `true`；列表那种一屏几十行的读一律 `false`（启动零网络）。
+   * 拿不到官方当前版正文时**不报错**：`officialReady: false`，逐项新值给 `null`。
+   */
+  getPresetParamSync(path: string, fetchMissing?: boolean): Promise<PresetParamSync>
+
+  /**
+   * **落一批决定**（采用 / 保持），回来的是落完之后的那一份总账。
+   *
+   * 采用会**结构保真地**改文件里那几项（注释 / 键序 / 行尾一个字节不动），
+   * 保持一个字节不动；两者都把这一项的水位推到官方当前版。
+   * 官方当前版正文不在本机时，采用会如实报错（不许"记了水位、值却没写"）。
+   */
+  applyPresetParamDecisions(
+    path: string,
+    decisions: ParamDecision[],
+  ): Promise<PresetParamSync>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

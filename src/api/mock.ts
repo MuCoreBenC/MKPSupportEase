@@ -7,7 +7,11 @@ import type {
   MkpApi,
   OfficialVersion,
   OnDiskFile,
+  ParamDecision,
+  ParamDecisionKind,
   ParamEdit,
+  ParamSyncEntry,
+  PresetParamSync,
   PresetParamValues,
   PresetSource,
   SoftwareUpdate,
@@ -332,6 +336,122 @@ mockMineText.set(
   'presets-mine/坏了的涂胶.toml',
   ['# 坏了的演示（假后端演示正文）', '[toolhead]', 'offset_x = (1', ''].join('\n'),
 )
+
+/* ---------- 逐参数「官方更新」（2026-10-09）----------
+ *
+ * 真机上这件事由三份东西凑出来：
+ *
+ *   我那份文件      `presets-mine/…`（盘上，用户唯一可见的那一份）
+ *   官方旧值        隐藏 baseline（`<appDataDir>/baseline/<sha>.toml`，按内容摘要寻址）
+ *   官方当前版      目录里那一版的字节（`<appDataDir>/<catalog.path>`）
+ *
+ * 假后端没有文件系统，用**同一形状的内存夹具**顶上（不是另编一套形状）：
+ *
+ *   基准区   `mockParamBaseline`：sha → 那一版官方正文
+ *   当前版   `mockParamCurrent`：文件名 → 官方当前版（sha + 正文）
+ *   决定账   `mockParamDecisions`：路径 → 参数 key → { sha, kind }（真机 run/app-state.json）
+ *
+ * 「官方当前版」那段正文比基准那版**真改了两个值**（`speed_limit` 70→65、
+ * `offset_y` 18.6→19.0）—— 于是演示那份 `我的 A1 涂胶.toml` 真有两条待处理。
+ */
+
+/** 与演示正文里那两行 `# based_on_sha256` 对上（`我的 A1 涂胶.toml` / `…-2026-10-15.toml`） */
+const SHA_BASED_OLD = '0'.repeat(64)
+const SHA_BASED_NEW = '1'.repeat(64)
+
+/** 官方**当前版**的演示正文（与 `MOCK_OFFICIAL_TEXT` 差两项） */
+const MOCK_OFFICIAL_NEXT = [
+  '# 假后端的演示正文 —— 官方当前版（比基准那版改了两个值）',
+  '# release_time: 2026-10-15 09:00:00',
+  '[toolhead]',
+  'speed_limit = 65 # 速度上限(mm/s)',
+  'offset_x = -1 # 笔尖偏移',
+  'offset_y = 19.0 # 笔尖偏移',
+  'offset_z = 4 # 笔尖偏移',
+  '',
+  '[wiping]',
+  'mode = "tower"',
+  '',
+].join('\n')
+
+const mockParamBaseline = new Map<string, string>([
+  [SHA_BASED_OLD, MOCK_OFFICIAL_TEXT],
+  [SHA_BASED_NEW, MOCK_OFFICIAL_NEXT],
+])
+
+const mockParamCurrent = new Map<string, { sha256: string; text: string }>([
+  /* sha 与 `MOCK_OFFICIAL_VERSIONS` 里 A1-fast 的「当前版」那一条是同一个值 */
+  ['A1-fast.toml', { sha256: 'f2'.padEnd(64, '0'), text: MOCK_OFFICIAL_NEXT }],
+])
+
+const mockParamDecisions = new Map<
+  string,
+  Map<string, { sha256: string; kind: ParamDecisionKind }>
+>()
+
+/** 文件头 `# <key>: <值>`（与真机 `runtime::lineage` 同一条解析规矩：键后必须是冒号） */
+function mockHeaderOf(text: string, key: string): string | null {
+  const re = new RegExp(`^#\\s*${key}\\s*:\\s*(.+)$`)
+  for (const line of text.split('\n')) {
+    const hit = re.exec(line.trim())
+    if (hit !== null) {
+      const value = hit[1]!.trim()
+      if (value !== '') return value
+    }
+  }
+  return null
+}
+
+/** 一份用户预设现在的官方更新账（真机：`ipc::param_sync::sync_of`） */
+function mockSyncOf(path: string): PresetParamSync {
+  const text = mockMineText.get(path)
+  if (text === undefined) throw new Error(`找不到 ${path}`)
+  const fileName = path.split('/').pop() ?? path
+  const basedOn = mockHeaderOf(text, 'based_on')
+  const officialFileName = basedOn === null ? null : (basedOn.split('/').pop() ?? null)
+  const current = officialFileName === null ? undefined : mockParamCurrent.get(officialFileName)
+  const basedSha = mockHeaderOf(text, 'based_on_sha256')
+  const mine = readMockParams(text)
+  const currentValues = current === undefined ? undefined : readMockParams(current.text)
+  const book = mockParamDecisions.get(path)
+
+  const entries: ParamSyncEntry[] = []
+  let pendingCount = 0
+  for (const d of rawParamDefs()) {
+    const decision = book?.get(d.key)
+    const refSha = decision?.sha256 ?? basedSha
+    const refText = refSha === null || refSha === undefined ? undefined : mockParamBaseline.get(refSha)
+    const old = refText === undefined ? undefined : readMockParams(refText)[d.key]
+    const neu = currentValues?.[d.key]
+    const pending = old !== undefined && neu !== undefined && old !== neu
+    if (pending) pendingCount += 1
+    entries.push({
+      key: d.key,
+      mine: mine[d.key] ?? null,
+      baselineOld: old ?? null,
+      officialNew: neu ?? null,
+      pending,
+      decided:
+        decision !== undefined && current !== undefined && decision.sha256 === current.sha256
+          ? decision.kind
+          : null,
+    })
+  }
+
+  return {
+    path,
+    fileName,
+    machineId: mockHeaderOf(text, 'machine'),
+    versionId: mockHeaderOf(text, 'variant'),
+    officialFileName,
+    basedOnReleaseTime: mockHeaderOf(text, 'based_on_release_time'),
+    currentReleaseTime: current === undefined ? null : mockHeaderOf(current.text, 'release_time'),
+    officialReady: current !== undefined,
+    versionAdvanced: basedSha !== null && current !== undefined && basedSha !== current.sha256,
+    pendingCount,
+    entries,
+  }
+}
 
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -898,6 +1018,13 @@ export const mockApi: MkpApi = {
         mockMineText.delete(path)
         mockMineText.set(newPath, text)
       }
+      /* 逐参数「官方更新」决定账按**路径**认这一份 —— 改名之后它得跟到新路径上
+         （不跟的话，官方下一次发布会把处理过的项全翻出来） */
+      const book = mockParamDecisions.get(path)
+      if (book !== undefined) {
+        mockParamDecisions.delete(path)
+        mockParamDecisions.set(newPath, book)
+      }
     }
     return { path: newPath, fileName: name }
   },
@@ -933,60 +1060,6 @@ export const mockApi: MkpApi = {
       provenance: 'copy' as const,
     })
     return { path: newPath, fileName: name }
-  },
-
-  /*
-   * **另存为我的预设**（2026-10-08 资源库改判）：官方那一份 → 我的一份。
-   *
-   * 与真机同一套规矩：官方那一行不区分"下过没有"（本机没有就先取回，演示里用官方原文
-   * 直接复制）；名字过与改名 / 复制同一道门槛（`mockNameProblem`），**撞名就拒**；
-   * 写下去的是官方原文 + 三行血统（指向交付文件）；**一个状态都不碰**。
-   */
-  async copyOfficialAsMine(fileName, newName) {
-    const hit = mockReleaseFile(fileName)
-    if (hit === undefined) {
-      throw new Error(`目录里没有 ${fileName} 这一份`)
-    }
-    const name = newName.trim()
-    const problem = mockNameProblem(fileName, name)
-    if (problem !== null) throw new Error(problem)
-    const path = `presets-mine/${name}`
-    if (mockMine.some((f) => f.path === path)) {
-      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
-    }
-    const label = `dist/mkp/presets/${fileName}`
-    const text = [
-      `# machine: ${hit.machineId}`,
-      `# variant: ${hit.versionId.toLowerCase()}`,
-      `# based_on: ${label}`,
-      `# based_on_release_time: 2026-10-06 03:34:17`,
-      `# based_on_sha256: ${'0'.repeat(64)}`,
-      MOCK_OFFICIAL_TEXT,
-    ].join('\n')
-    mockMineText.set(path, text)
-    mockMine.push({
-      path,
-      fileName: name,
-      size: text.length,
-      modifiedUnix: nowSec(),
-      kind: 'mkp_preset',
-      state: 'ok',
-      stateDetail: null,
-      /* 血统新写指向来源交付文件：假后端里它就是目录当前那一版 */
-      basedOn: 'current',
-      basedOnLabel: label,
-      basedOnRelease: '2026-10-06 03:34:17',
-      basedOnMachineId: hit.machineId,
-      basedOnVersionId: hit.versionId,
-      /* 归属与来源那份一致（官方原文头里那两行原样带过来） */
-      machineId: hit.machineId,
-      versionId: hit.versionId,
-      /* 从官方那一份另存出来的：出处账记着从哪来（界面上「来源」那一格） */
-      copiedFrom: label,
-      copiedFromName: fileName,
-      provenance: 'copy' as const,
-    })
-    return { path, fileName: name }
   },
 
   /*
@@ -1147,6 +1220,8 @@ export const mockApi: MkpApi = {
     mockMineText.delete(path)
     /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句） */
     mockRemarks.delete(path)
+    /* 逐参数「官方更新」决定账跟着删：文件都不在了，留着一本账只会是悬空的 */
+    mockParamDecisions.delete(path)
   },
 
   async getSlicerCopied() {
@@ -1392,6 +1467,47 @@ export const mockApi: MkpApi = {
     if (at >= 0) mockMine[at] = { ...mockMine[at]!, size: next.length, modifiedUnix: nowSec() }
   },
 
+  /* —— 逐参数「官方更新」（2026-10-09）：内存夹具里的三方账 + 采用·保持 ——
+     真机上第一条读我那份文件 + 隐藏 baseline + 目录里那一版；第二条结构保真地写那几项。
+     `fetchMissing` 在假后端里没有对应的动作（没有网络），形状照留。 */
+  async getPresetParamSync(path: string, fetchMissing?: boolean) {
+    /* 假后端没有网络可发：`fetchMissing` 在这里没有对应的动作，形状照留（真机上有） */
+    void fetchMissing
+    return mockSyncOf(path)
+  },
+
+  async applyPresetParamDecisions(path: string, decisions: ParamDecision[]) {
+    const text = mockMineText.get(path)
+    if (text === undefined) throw new Error(`找不到 ${path}`)
+    const before = mockSyncOf(path)
+    const current =
+      before.officialFileName === null ? undefined : mockParamCurrent.get(before.officialFileName)
+    if (current === undefined) {
+      throw new Error('官方当前版的正文还不在本机 —— 先把官方新版取回来，再处理这一项')
+    }
+    let next = text
+    const book = mockParamDecisions.get(path) ?? new Map()
+    for (const d of decisions) {
+      if (d.kind === 'adopt') {
+        const def = rawParamDefs().find((x) => x.key === d.paramKey)
+        if (def === undefined) throw new Error(`不认识这个参数：${d.paramKey}`)
+        const value = before.entries.find((e) => e.key === d.paramKey)?.officialNew
+        if (value === null || value === undefined) {
+          throw new Error(`官方当前版里没有 ${d.paramKey} 的新值 —— 采用不了`)
+        }
+        next = patchMockParam(next, def, value)
+      }
+      book.set(d.paramKey, { sha256: current.sha256, kind: d.kind })
+    }
+    if (next !== text) {
+      mockMineText.set(path, next)
+      const at = mockMine.findIndex((f) => f.path === path)
+      if (at >= 0) mockMine[at] = { ...mockMine[at]!, size: next.length, modifiedUnix: nowSec() }
+    }
+    mockParamDecisions.set(path, book)
+    return mockSyncOf(path)
+  },
+
   /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：
      两份对得上目录、一份对不上。三个读合起来才够预设页画三态，这是其中两个 */
   async getDownloadedFiles() {
@@ -1492,10 +1608,14 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 资源库那一条路（2026-10-08 改判）：官方预设的「使用」= 按需取回 + 写成当前使用。
+   * 资源库那一条路（2026-10-09 改判）：官方预设的「使用」= 按需取回 + 落成我的一份 + 使用它。
+   *
    * 浏览器里**没有下载区**，所以照实分两档：
-   *   演示集合里已有（`MOCK_DOWNLOADED`）→ 当成"本机已有当前版"，直接记指针；
+   *   演示集合里已有（`MOCK_DOWNLOADED`）→ 当成"本机已有当前版"，
+   *                                        然后落 `presets-mine/<原名>`（没有的话）；
    *   没有                              → 取不回来，如实抛（与 `downloadCatalogFile` 同一口径）。
+   *
+   * 与真机同一个形状：用户只面对 `presets-mine/` 里那一份，官方原件留在内部。
    */
   async useOfficialPreset(fileName) {
     const hit = mockReleaseFile(fileName)
@@ -1506,17 +1626,52 @@ export const mockApi: MkpApi = {
         `浏览器预览里没有 ${fileName} 的字节，也没法从数据源取回来 —— 用桌面版点「使用」`,
       )
     }
+    const path = `presets-mine/${fileName}`
+    const existing = mockMine.find((f) => f.path === path)
+    const created = existing === undefined
+    if (created) {
+      const label = `dist/mkp/presets/${fileName}`
+      const text = [
+        `# machine: ${hit.machineId}`,
+        `# variant: ${hit.versionId.toLowerCase()}`,
+        `# based_on: ${label}`,
+        `# based_on_release_time: 2026-10-06 03:34:17`,
+        `# based_on_sha256: ${'0'.repeat(64)}`,
+        MOCK_OFFICIAL_TEXT,
+      ].join('\n')
+      mockMineText.set(path, text)
+      mockMine.push({
+        path,
+        fileName,
+        size: text.length,
+        modifiedUnix: nowSec(),
+        kind: 'mkp_preset',
+        state: 'ok',
+        stateDetail: null,
+        basedOn: 'current',
+        basedOnLabel: label,
+        basedOnRelease: '2026-10-06 03:34:17',
+        basedOnMachineId: hit.machineId,
+        basedOnVersionId: hit.versionId,
+        machineId: hit.machineId,
+        versionId: hit.versionId,
+        /* 它是从官方原件落下来的：出处账记着从哪来（界面上「来源」那一格） */
+        copiedFrom: label,
+        copiedFromName: fileName,
+        provenance: 'copy' as const,
+      })
+    }
     mockActive = {
-      origin: 'official',
+      origin: 'mine',
       fileName,
-      path: null,
-      /* 指纹是使用那一刻的字节摘要；浏览器里没有真字节，用文件名占位（形状不编） */
-      sha256: `mock:${fileName}`,
+      path,
+      /* 指纹是使用那一刻的字节摘要；浏览器里没有真字节，用路径占位（形状不编） */
+      sha256: `mock:${path}`,
       machineId: hit.machineId,
       versionId: hit.versionId,
       intact: true,
     }
-    return { fetched: false, active: mockActive }
+    return { fetched: false, created, active: mockActive }
   },
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */
