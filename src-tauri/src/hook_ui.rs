@@ -268,6 +268,9 @@ impl HookView {
 
 #[cfg(test)]
 mod tests {
+    // 判据要造真实文件（归档记录 + 输出体）—— 生产代码的写盘走 `fsx::atomic`。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     /// 钩子把打印时间交出来之后：**这一侧**把它补上（`computing` → `ready`），
@@ -283,13 +286,21 @@ mod tests {
         let history = d.path().join(crate::fsx::paths::GCODE_HISTORY_DIR);
         let input = d.path().join("in.gcode");
         std::fs::write(&input, "G1 X1\n").unwrap();
-        let paths =
-            crate::archive::begin(&history, &input, "G1 X1\n", datetime!(2026-10-10 2:00:00 +8))
-                .unwrap();
+        let paths = crate::archive::begin(
+            &history,
+            &input,
+            "G1 X1\n",
+            datetime!(2026-10-10 2:00:00 +8),
+        )
+        .unwrap();
         let record_id = paths
             .meta
             .file_name()
-            .and_then(|n| n.to_string_lossy().strip_suffix("_meta.json").map(str::to_string))
+            .and_then(|n| {
+                n.to_string_lossy()
+                    .strip_suffix("_meta.json")
+                    .map(str::to_string)
+            })
             .unwrap();
         let meta = serde_json::json!({
             "startedAt": "2026-10-10 02:00:00",
@@ -308,7 +319,8 @@ mod tests {
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(
-            back["printTimeStatus"], crate::archive::PRINT_TIME_READY,
+            back["printTimeStatus"],
+            crate::archive::PRINT_TIME_READY,
             "补算之后必须是 ready"
         );
         assert!(
@@ -342,9 +354,13 @@ mod tests {
         let history = d.path().join(crate::fsx::paths::GCODE_HISTORY_DIR);
         let input = d.path().join("in.gcode");
         std::fs::write(&input, "G1 X1\n").unwrap();
-        let paths =
-            crate::archive::begin(&history, &input, "G1 X1\n", datetime!(2026-10-10 2:00:00 +8))
-                .unwrap();
+        let paths = crate::archive::begin(
+            &history,
+            &input,
+            "G1 X1\n",
+            datetime!(2026-10-10 2:00:00 +8),
+        )
+        .unwrap();
         let record_id = paths
             .meta
             .file_name()
@@ -365,7 +381,8 @@ mod tests {
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(
-            back["printTimeStatus"], crate::archive::PRINT_TIME_FAILED,
+            back["printTimeStatus"],
+            crate::archive::PRINT_TIME_FAILED,
             "读不到输出就该标失败"
         );
     }

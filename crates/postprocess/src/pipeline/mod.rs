@@ -601,7 +601,8 @@ fn run(
             startup_overhead_seconds: 240.0,
         };
         let (write_result, estimated) = std::thread::scope(|s| {
-            let estimating = s.spawn(|| crate::postproc::printtime::estimate(&out_text, &print_opts));
+            let estimating =
+                s.spawn(|| crate::postproc::printtime::estimate(&out_text, &print_opts));
             let writing = write_text_atomic(&final_output_path, &out_text);
             (writing, estimating.join().expect("printtime 不 panic"))
         });

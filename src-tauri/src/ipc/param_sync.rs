@@ -162,7 +162,9 @@ fn sync_at(
     let text = runtime::mine::read_text(user, path)?;
     let lineage = runtime::lineage::parse_lineage_from_content(&text);
     /* 读得出来就顺带把"这份当初基于哪一版"的日期给人看（读不出来就是不写，不编） */
-    let based_on_release_time = lineage.as_ref().and_then(|l| l.based_on_release_time.clone());
+    let based_on_release_time = lineage
+        .as_ref()
+        .and_then(|l| l.based_on_release_time.clone());
     let based_on_sha256 = lineage
         .as_ref()
         .and_then(|l| l.based_on_sha256.as_deref())
@@ -554,10 +556,9 @@ offset_x = -1
     #[test]
     fn a_sync_report_finds_the_changed_param() {
         let defs = defs();
-        let official = std::fs::read_to_string(
-            repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"),
-        )
-        .expect("读官方交付件");
+        let official =
+            std::fs::read_to_string(repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"))
+                .expect("读官方交付件");
 
         let mut new_values = param_alg::read_param_values(&official, &defs).unwrap();
         let key = "toolhead.offset.x";
@@ -642,19 +643,17 @@ offset_x = -1
                 .unwrap();
 
             /* 我这份当初基于的那一版：官方当前版把这一项改成别的（同一个保真写口） */
-            let based_text = param_alg::apply_param_edits(
-                &current_text,
-                &defs,
-                &[FieldEdit::new(KEY, "-2")],
-            )
-            .unwrap();
+            let based_text =
+                param_alg::apply_param_edits(&current_text, &defs, &[FieldEdit::new(KEY, "-2")])
+                    .unwrap();
             let based_sha = runtime::lineage::sha256_hex(&based_text);
             runtime::baseline::ensure_baseline(&root, &based_sha, based_text.as_bytes()).unwrap();
 
             /* 我那份 = 基于那一版 + 我自己把它改成 -5（场景 B：改过的值不许被顶掉） */
-            let copy = runtime::lineage::make_copy(&based_text, "delivery/mkp/presets/A1-fast.toml");
-            let mine = param_alg::apply_param_edits(&copy, &defs, &[FieldEdit::new(KEY, "-5")])
-                .unwrap();
+            let copy =
+                runtime::lineage::make_copy(&based_text, "delivery/mkp/presets/A1-fast.toml");
+            let mine =
+                param_alg::apply_param_edits(&copy, &defs, &[FieldEdit::new(KEY, "-5")]).unwrap();
             crate::fsx::atomic::atomic_write(&user.join(MINE), mine.as_bytes()).unwrap();
 
             Self {
@@ -699,9 +698,12 @@ offset_x = -1
         /// 官方再发一版：把 `KEY` 改成 `next`，并把目录里的摘要推进过去
         fn publish(&self, next: &str) {
             let defs = defs();
-            let text =
-                param_alg::apply_param_edits(&self.current_text, &defs, &[FieldEdit::new(KEY, next)])
-                    .unwrap();
+            let text = param_alg::apply_param_edits(
+                &self.current_text,
+                &defs,
+                &[FieldEdit::new(KEY, next)],
+            )
+            .unwrap();
             let sha = runtime::lineage::sha256_hex(&text);
             runtime::baseline::ensure_baseline(&self.root, &sha, text.as_bytes()).unwrap();
             let mut catalog = catalog_with_shas();
@@ -729,12 +731,19 @@ offset_x = -1
         assert_eq!(report.official_file_name.as_deref(), Some("A1-fast.toml"));
         assert_eq!(report.machine_id.as_deref(), Some("A1"));
         assert_eq!(report.version_id.as_deref(), Some("FAST"));
-        assert!(report.based_on_release_time.is_some(), "血统里那行日期该读得到");
+        assert!(
+            report.based_on_release_time.is_some(),
+            "血统里那行日期该读得到"
+        );
 
         let e = w.at(KEY);
         assert!(e.pending);
         assert_eq!(e.mine.as_deref(), Some("-5"), "我的值不许被顶掉");
-        assert_eq!(e.baseline_old.as_deref(), Some("-2"), "官方旧值 = 我处理到的那一版");
+        assert_eq!(
+            e.baseline_old.as_deref(),
+            Some("-2"),
+            "官方旧值 = 我处理到的那一版"
+        );
         assert_eq!(e.official_new.as_deref(), Some("-0.7"));
         assert_eq!(e.decided, None, "还没处理过");
     }
@@ -747,7 +756,7 @@ offset_x = -1
         assert_eq!(after.pending_count, 0, "处理过就不该再挂着");
 
         let e = after.entries.iter().find(|e| e.key == KEY).unwrap();
-        assert_eq!(e.decided.as_deref(), Some("adopt"));
+        assert_eq!(e.decided, Some("adopt"));
         assert_eq!(e.mine.as_deref(), Some("-0.7"), "文件里那一项该是官方新值");
 
         /* 文件真的被改了，而且**只改了那一行**（保真：注释 / 别的行一个字不动） */
@@ -769,7 +778,7 @@ offset_x = -1
 
         assert_eq!(after.pending_count, 0);
         assert_eq!(
-            after.entries.iter().find(|e| e.key == KEY).unwrap().decided.as_deref(),
+            after.entries.iter().find(|e| e.key == KEY).unwrap().decided,
             Some("hold")
         );
         assert_eq!(w.mine_text(), before, "保持 = 一个字节都不动");
@@ -833,7 +842,11 @@ offset_x = -1
         /* 只处理掉第一项 */
         let after = w.decide(KEY, "adopt");
         assert_eq!(after.pending_count, 1, "第二项还等着");
-        let second = after.entries.iter().find(|e| e.key == "toolhead.offset.y").unwrap();
+        let second = after
+            .entries
+            .iter()
+            .find(|e| e.key == "toolhead.offset.y")
+            .unwrap();
         assert!(second.pending);
         assert_eq!(second.decided, None, "它没被处理过");
         assert_eq!(
@@ -859,7 +872,9 @@ offset_x = -1
     #[test]
     fn a_preset_that_maps_to_no_official_file_is_not_an_error() {
         let w = World::new();
-        let text = w.based_text.replace("# machine: A1", "# machine: 不存在的机型");
+        let text = w
+            .based_text
+            .replace("# machine: A1", "# machine: 不存在的机型");
         crate::fsx::atomic::atomic_write(&w.user.join(MINE), text.as_bytes()).unwrap();
 
         let report = w.sync();
@@ -889,7 +904,12 @@ offset_x = -1
         )
         .unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
-        assert!(runtime::app_state::param_decisions(&w.root, MINE).unwrap().is_empty(), "一项水位都不许留下");
+        assert!(
+            runtime::app_state::param_decisions(&w.root, MINE)
+                .unwrap()
+                .is_empty(),
+            "一项水位都不许留下"
+        );
     }
 
     /// 认不出的处理方式 / 不存在的参数：都拒绝（不让界面写出第三种决定来）

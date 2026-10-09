@@ -346,7 +346,10 @@ pub fn repoint_mine(
 /* ---------- paramDecisions：逐参数「官方更新」处理账 ---------- */
 
 /// 这一份用户预设上，**我做过的那些决定**（参数 key → 决定）。没有处理过就是空表。
-pub fn param_decisions(root: &Path, rel: &str) -> Result<BTreeMap<String, ParamDecision>, AppError> {
+pub fn param_decisions(
+    root: &Path,
+    rel: &str,
+) -> Result<BTreeMap<String, ParamDecision>, AppError> {
     Ok(load(root)?
         .param_decisions
         .get(rel)
@@ -625,9 +628,17 @@ mod tests {
     fn param_decisions_roundtrip_and_merge() {
         let d = tempfile::tempdir().unwrap();
         let rel = "presets-mine/A1-fast.toml";
-        assert!(param_decisions(d.path(), rel).unwrap().is_empty(), "没处理过 = 空表");
+        assert!(
+            param_decisions(d.path(), rel).unwrap().is_empty(),
+            "没处理过 = 空表"
+        );
 
-        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+        record_param_decisions(
+            d.path(),
+            rel,
+            &[("toolhead.offset.x".to_owned(), adopt("aa"))],
+        )
+        .unwrap();
         record_param_decisions(
             d.path(),
             rel,
@@ -647,7 +658,12 @@ mod tests {
         assert_eq!(book["wiping.glue_pass_count"].kind, ParamDecisionKind::Hold);
 
         /* 同一项再记一次 = 覆盖，不是多一条 */
-        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("bb"))]).unwrap();
+        record_param_decisions(
+            d.path(),
+            rel,
+            &[("toolhead.offset.x".to_owned(), adopt("bb"))],
+        )
+        .unwrap();
         let book = param_decisions(d.path(), rel).unwrap();
         assert_eq!(book.len(), 2);
         assert_eq!(book["toolhead.offset.x"].sha256, "bb");
@@ -676,7 +692,12 @@ mod tests {
     fn forgetting_a_book_is_idempotent() {
         let d = tempfile::tempdir().unwrap();
         let rel = "presets-mine/A1.toml";
-        record_param_decisions(d.path(), rel, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+        record_param_decisions(
+            d.path(),
+            rel,
+            &[("toolhead.offset.x".to_owned(), adopt("aa"))],
+        )
+        .unwrap();
         forget_param_decisions(d.path(), rel).unwrap();
         assert!(param_decisions(d.path(), rel).unwrap().is_empty());
         forget_param_decisions(d.path(), rel).unwrap(); // 再忘一次也不报错
@@ -688,12 +709,23 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let old = "presets-mine/A1.toml";
         let new = "presets-mine/A2.toml";
-        record_param_decisions(d.path(), old, &[("toolhead.offset.x".to_owned(), adopt("aa"))]).unwrap();
+        record_param_decisions(
+            d.path(),
+            old,
+            &[("toolhead.offset.x".to_owned(), adopt("aa"))],
+        )
+        .unwrap();
 
         repoint_mine(d.path(), old, new, "A2.toml").unwrap();
 
-        assert!(param_decisions(d.path(), old).unwrap().is_empty(), "旧路径上不该还留着");
-        assert_eq!(param_decisions(d.path(), new).unwrap()["toolhead.offset.x"], adopt("aa"));
+        assert!(
+            param_decisions(d.path(), old).unwrap().is_empty(),
+            "旧路径上不该还留着"
+        );
+        assert_eq!(
+            param_decisions(d.path(), new).unwrap()["toolhead.offset.x"],
+            adopt("aa")
+        );
     }
 
     /* ---------- presetSource ---------- */

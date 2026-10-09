@@ -58,7 +58,10 @@ pub async fn get_official_versions(
 ) -> Result<Vec<OfficialVersionDto>, AppError> {
     let root = internal_root(&app)?;
     traced("getOfficialVersions", |_| {
-        let wanted = file_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let wanted = file_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let mut out = Vec::new();
         for v in runtime::versions::official_versions(&root) {
             if wanted.is_some_and(|w| w != v.file_name) {
@@ -84,4 +87,3 @@ pub async fn get_official_versions(
         Ok(out)
     })
 }
-

@@ -109,8 +109,9 @@ fn read_mode(app: &AppHandle) -> Result<bool, AppError> {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => {
-            return Err(AppError::io("读不了测试模式档")
-                .with_detail(format!("{}：{e}", path.display())))
+            return Err(
+                AppError::io("读不了测试模式档").with_detail(format!("{}：{e}", path.display()))
+            )
         }
     };
     let doc: SandboxMode = serde_json::from_slice(&bytes).map_err(|e| {
@@ -144,7 +145,9 @@ pub fn install_at_startup(app: &AppHandle) {
         Ok(on) => {
             paths::set_sandbox(on);
             if on {
-                tracing::warn!("工作台在**测试模式（沙箱）**下启动 —— 读写都在沙箱里，正式目录不动");
+                tracing::warn!(
+                    "工作台在**测试模式（沙箱）**下启动 —— 读写都在沙箱里，正式目录不动"
+                );
             }
         }
         Err(e) => {
@@ -180,8 +183,9 @@ fn copy_tree(from: &Path, to: &Path, skip: &[&str]) -> Result<CopyReport, AppErr
 }
 
 fn copy_into(from: &Path, to: &Path, skip: &[&str], acc: &mut CopyReport) -> Result<(), AppError> {
-    std::fs::create_dir_all(to)
-        .map_err(|e| AppError::io(format!("建不出目录：{}", to.display())).with_detail(e.to_string()))?;
+    std::fs::create_dir_all(to).map_err(|e| {
+        AppError::io(format!("建不出目录：{}", to.display())).with_detail(e.to_string())
+    })?;
     let entries = std::fs::read_dir(from).map_err(|e| {
         AppError::io(format!("读不了目录：{}", from.display())).with_detail(e.to_string())
     })?;
@@ -195,8 +199,9 @@ fn copy_into(from: &Path, to: &Path, skip: &[&str], acc: &mut CopyReport) -> Res
         let src = entry.path();
         let dst = to.join(&*name);
         /* 符号链接一律不跟（沙箱要的是**字节的副本**；跟出去会把正式那份也牵连进来） */
-        let meta = std::fs::symlink_metadata(&src)
-            .map_err(|e| AppError::io(format!("读不了：{}", src.display())).with_detail(e.to_string()))?;
+        let meta = std::fs::symlink_metadata(&src).map_err(|e| {
+            AppError::io(format!("读不了：{}", src.display())).with_detail(e.to_string())
+        })?;
         if meta.file_type().is_symlink() {
             tracing::warn!(path = %src.display(), "沙箱拷贝跳过符号链接");
             continue;
@@ -231,10 +236,18 @@ fn sandbox_ready() -> bool {
 ///
 /// 调用方保证"目标是空的或被清过"：这里**不删目标**，只往里写
 /// （删是 [`wipe_root`] 的事，两件事分开，谁都不会意外删掉别人的东西）。
-fn refill_from(real_presets: &Path, real_workbench: &Path, dest: &Path) -> Result<CopyReport, AppError> {
+fn refill_from(
+    real_presets: &Path,
+    real_workbench: &Path,
+    dest: &Path,
+) -> Result<CopyReport, AppError> {
     if !real_presets.join(PRESETS_MARKER).is_file() {
-        return Err(AppError::not_found("正式那边没有 presets/ —— 没东西可拷")
-            .with_detail(format!("期望 {}", real_presets.join(PRESETS_MARKER).display())));
+        return Err(
+            AppError::not_found("正式那边没有 presets/ —— 没东西可拷").with_detail(format!(
+                "期望 {}",
+                real_presets.join(PRESETS_MARKER).display()
+            )),
+        );
     }
     let mut total = copy_tree(real_presets, &dest.join(PRESETS), &[])?;
 
@@ -245,8 +258,9 @@ fn refill_from(real_presets: &Path, real_workbench: &Path, dest: &Path) -> Resul
     let entries = std::fs::read_dir(real_workbench)
         .map_err(|e| AppError::io("读不了正式的 workbench/").with_detail(e.to_string()))?;
     let dst = dest.join(WORKBENCH);
-    std::fs::create_dir_all(&dst)
-        .map_err(|e| AppError::io(format!("建不出目录：{}", dst.display())).with_detail(e.to_string()))?;
+    std::fs::create_dir_all(&dst).map_err(|e| {
+        AppError::io(format!("建不出目录：{}", dst.display())).with_detail(e.to_string())
+    })?;
     for entry in entries {
         let entry = entry.map_err(|e| AppError::io("目录项读不出来").with_detail(e.to_string()))?;
         let src = entry.path();
@@ -399,7 +413,7 @@ pub fn wb_sandbox_set(app: AppHandle, enabled: bool) -> Result<SandboxStatus, Ap
         paths::set_sandbox(enabled);
         write_mode(&app, enabled)?;
         /* 标题栏也要跟着走：它是唯一"切到别的窗口还看得见"的那一处
-           （任务栏 / Alt+Tab / 截图里都在）—— 界面里那一圈换装看不见的时候还有它 */
+        （任务栏 / Alt+Tab / 截图里都在）—— 界面里那一圈换装看不见的时候还有它 */
         crate::workbench::refresh_window_title(&app);
         /* 根换了：把旧会话丢掉，下一条命令按新根重建 */
         super::reset_session();
@@ -435,12 +449,17 @@ pub fn wb_sandbox_wipe() -> Result<SandboxStatus, AppError> {
     crate::ipc::traced("wb_sandbox_wipe", |_| {
         wipe()?;
         super::reset_session();
-        Ok(status(Some("沙箱已清空 —— 想继续测就点「从正式拷一份」".to_owned())))
+        Ok(status(Some(
+            "沙箱已清空 —— 想继续测就点「从正式拷一份」".to_owned(),
+        )))
     })
 }
 
 #[cfg(test)]
 mod tests {
+    // 判据要造真实沙箱目录 —— 生产代码的写盘走 `fsx::atomic` 那一个洞。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     fn tree(root: &Path, files: &[&str]) {
@@ -461,7 +480,10 @@ mod tests {
         let r = copy_tree(&from, &to, &[]).unwrap();
         assert_eq!(r.files, 3);
         assert!(r.bytes > 0);
-        assert_eq!(std::fs::read_to_string(to.join("sub/deep/c.3mf")).unwrap(), "sub/deep/c.3mf");
+        assert_eq!(
+            std::fs::read_to_string(to.join("sub/deep/c.3mf")).unwrap(),
+            "sub/deep/c.3mf"
+        );
     }
 
     /// 拷配方本时要**甩掉那三个点号目录**（本机会话状态不带过去）——
@@ -540,7 +562,10 @@ mod tests {
         ] {
             assert!(dest.join(rel).is_file(), "沙箱里少了 {rel}");
         }
-        assert!(!dest.join("workbench/.draft").exists(), "会话状态不该带过去");
+        assert!(
+            !dest.join("workbench/.draft").exists(),
+            "会话状态不该带过去"
+        );
         assert!(
             real_presets.join("machines/A1.toml").is_file()
                 && real_wb.join(".draft/book.json").is_file(),

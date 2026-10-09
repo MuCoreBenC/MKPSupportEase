@@ -103,7 +103,9 @@ fn parse_gcode(args: &[OsString], idx: usize) -> Option<PathBuf> {
         }
     }
     // 形态 3：兜底取最后一个 —— 只看"像不像路径"，不挑位置
-    args.last().filter(|l| looks_like_path(l)).map(PathBuf::from)
+    args.last()
+        .filter(|l| looks_like_path(l))
+        .map(PathBuf::from)
 }
 
 /// 解析 argv（**含** argv[0]，与 `std::env::args_os()` 一致）。
@@ -124,12 +126,14 @@ pub fn parse<I: IntoIterator<Item = OsString>>(argv: I) -> Result<Mode, ArgError
             continue;
         }
         if args[i] == "--Gcode" {
-            gcode = Some(parse_gcode(&args, i).ok_or_else(|| ArgError::GcodeUnparsable {
-                argv: args
-                    .iter()
-                    .map(|a| a.to_string_lossy().to_string())
-                    .collect::<Vec<_>>()
-                    .join(" "),
+            gcode = Some(parse_gcode(&args, i).ok_or_else(|| {
+                ArgError::GcodeUnparsable {
+                    argv: args
+                        .iter()
+                        .map(|a| a.to_string_lossy().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                }
             })?);
             i += 2;
             continue;
@@ -171,8 +175,12 @@ mod tests {
         assert_eq!(
             got,
             Mode::Hook(HookJob {
-                toml: PathBuf::from("C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml"),
-                gcode: PathBuf::from("C:\\Users\\x\\AppData\\Local\\Temp\\bamboo_model\\45600.0.gcode"),
+                toml: PathBuf::from(
+                    "C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml"
+                ),
+                gcode: PathBuf::from(
+                    "C:\\Users\\x\\AppData\\Local\\Temp\\bamboo_model\\45600.0.gcode"
+                ),
             })
         );
     }
@@ -235,8 +243,13 @@ mod tests {
     #[test]
     fn lowercase_flags_are_not_recognized() {
         assert_eq!(
-            parse(argv(&["--toml", "C:\\p\\A1.toml", "--gcode", "C:\\tmp\\a.gcode"]))
-                .expect("不该报错"),
+            parse(argv(&[
+                "--toml",
+                "C:\\p\\A1.toml",
+                "--gcode",
+                "C:\\tmp\\a.gcode"
+            ]))
+            .expect("不该报错"),
             Mode::Gui
         );
     }

@@ -78,9 +78,7 @@ pub struct SyncInput<'a> {
 ///
 /// 待处理条数就地从结果里数（同一份数据算两遍必漂）—— 调用方不需要自己过滤。
 pub fn diff(input: &SyncInput<'_>) -> (Vec<ParamSyncEntry>, usize) {
-    let current = input
-        .current_sha256
-        .and_then(|sha| input.by_sha.get(sha));
+    let current = input.current_sha256.and_then(|sha| input.by_sha.get(sha));
 
     let mut entries = Vec::with_capacity(input.defs.len());
     let mut pending = 0usize;
@@ -93,7 +91,9 @@ pub fn diff(input: &SyncInput<'_>) -> (Vec<ParamSyncEntry>, usize) {
          * 不报错（宁可少报一项，也不许瞎猜一个值）。
          */
         let decision = input.decisions.get(key);
-        let ref_sha = decision.map(|d| d.sha256.as_str()).or(input.based_on_sha256);
+        let ref_sha = decision
+            .map(|d| d.sha256.as_str())
+            .or(input.based_on_sha256);
         let old = ref_sha
             .and_then(|sha| input.by_sha.get(sha))
             .and_then(|m| m.get(key));
@@ -347,7 +347,11 @@ mod tests {
         );
 
         assert_eq!(pending, 0, "只有一边有这一项时比不出「改了」：{out:?}");
-        assert_eq!(out[0].official_new.as_deref(), Some("1"), "值没变就不算更新");
+        assert_eq!(
+            out[0].official_new.as_deref(),
+            Some("1"),
+            "值没变就不算更新"
+        );
         assert_eq!(out[1].official_new, None, "官方新版里没有它");
         assert_eq!(out[2].official_old, None, "官方旧版里没有它");
     }
@@ -369,7 +373,11 @@ mod tests {
 
         assert_eq!(pending, 0);
         assert_eq!(out[0].official_old, None);
-        assert_eq!(out[0].official_new.as_deref(), Some("-1.5"), "官方值照旧看得见");
+        assert_eq!(
+            out[0].official_new.as_deref(),
+            Some("-1.5"),
+            "官方值照旧看得见"
+        );
     }
 
     /// 官方当前版的字节还没到本机（`by_sha` 里没有它）⇒ 一项都算不出来，如实给 None

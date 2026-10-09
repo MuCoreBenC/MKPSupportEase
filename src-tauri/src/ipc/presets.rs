@@ -434,7 +434,7 @@ fn version_files_dto(
                         file_name: file_name_of(&path),
                         path: dest,
                         /* 切片器配置不是「我们的预设文件」：后台处理的 `--Toml` 不指它，
-                           这里也就不编一个绝对路径 */
+                        这里也就不编一个绝对路径 */
                         abs_path: None,
                         size: None,
                         sha256: None,
@@ -903,7 +903,9 @@ pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError>
     traced("copyToSlicer", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
-            return Err(AppError::not_found(format!("目录里没有这份文件：{file_name}")));
+            return Err(AppError::not_found(format!(
+                "目录里没有这份文件：{file_name}"
+            )));
         };
         if file.kind == "mkp_preset" {
             return Err(AppError::invalid_argument(format!(

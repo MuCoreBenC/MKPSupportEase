@@ -124,18 +124,21 @@ mod tests {
                 "sha256":"{sha}","size":{size}}}]}}"#,
             size = text.len()
         );
-        crate::fsx::atomic::atomic_write(
-            &super::super::paths::catalog_file(root),
-            json.as_bytes(),
-        )
-        .unwrap();
+        crate::fsx::atomic::atomic_write(&super::super::paths::catalog_file(root), json.as_bytes())
+            .unwrap();
     }
 
     /// 换了一代目录之后，旧的与新的**都在**清单里（版本链记着）—— 这是"多版本并存"的地基
     #[test]
     fn both_generations_show_up_after_a_catalog_change() {
         let d = tempfile::tempdir().unwrap();
-        write_catalog(d.path(), "rev1", "2026-10-08T00:00:00Z", "A1-fast.toml", "v1");
+        write_catalog(
+            d.path(),
+            "rev1",
+            "2026-10-08T00:00:00Z",
+            "A1-fast.toml",
+            "v1",
+        );
         // 换代：旧目录进链，新目录生效
         let new_sha = super::super::catalog::hex(&sha2::Sha256::digest(b"v2"));
         let json = format!(
@@ -167,14 +170,23 @@ mod tests {
         assert_eq!(got[1].published_at.as_deref(), Some("2026-10-15T00:00:00Z"));
         assert_ne!(got[0].sha256, got[1].sha256);
         assert!(!got[0].current, "旧的那一版不是当前版");
-        assert!(got[1].current, "当前目录登记的那一版才是「点下载真能拿到」的那一版");
+        assert!(
+            got[1].current,
+            "当前目录登记的那一版才是「点下载真能拿到」的那一版"
+        );
     }
 
     /// 没换版：同一份摘要出现两代也只算一版（不虚报版本）
     #[test]
     fn an_unchanged_file_is_one_version_not_two() {
         let d = tempfile::tempdir().unwrap();
-        write_catalog(d.path(), "rev1", "2026-10-08T00:00:00Z", "A1-fast.toml", "v1");
+        write_catalog(
+            d.path(),
+            "rev1",
+            "2026-10-08T00:00:00Z",
+            "A1-fast.toml",
+            "v1",
+        );
         let old = std::fs::read(super::super::paths::catalog_file(d.path())).unwrap();
         // 新一代目录里这一份没变，但 revision / publishedAt 变了
         std::fs::create_dir_all(super::super::release::catalog_chain_dir(d.path())).unwrap();

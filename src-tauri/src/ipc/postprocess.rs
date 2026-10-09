@@ -35,9 +35,6 @@ pub fn cancel_post_process(slot: State<'_, HookSlot>) -> Result<(), AppError> {
 
 /// 回答"机型不匹配还跑不跑"：`keep = true` 继续，`false` 停下。
 #[tauri::command]
-pub fn answer_post_process_mismatch(
-    slot: State<'_, HookSlot>,
-    keep: bool,
-) -> Result<(), AppError> {
+pub fn answer_post_process_mismatch(slot: State<'_, HookSlot>, keep: bool) -> Result<(), AppError> {
     traced("answerPostProcessMismatch", |_| slot.0.answer(keep))
 }

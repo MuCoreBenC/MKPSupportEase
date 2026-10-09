@@ -805,10 +805,7 @@ impl ParamBuf {
                 return Some(it.1);
             }
         }
-        self.overflow
-            .iter()
-            .find(|it| it.0 == key)
-            .map(|it| it.1)
+        self.overflow.iter().find(|it| it.0 == key).map(|it| it.1)
     }
 
     fn contains(&self, key: u8) -> bool {

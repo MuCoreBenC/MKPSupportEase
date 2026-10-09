@@ -706,9 +706,8 @@ pub fn second_pass(
         Some(l)
     };
 
-    let peek_lines = |q: &VecDeque<String>, n: usize| -> Vec<String> {
-        q.iter().take(n).cloned().collect()
-    };
+    let peek_lines =
+        |q: &VecDeque<String>, n: usize| -> Vec<String> { q.iter().take(n).cloned().collect() };
 
     while let Some(line) = read_next(&mut remaining, &mut pos) {
         // 协作取消（Task 17.2）：循环顶部（pass2.go:624-640 同位——所有含
@@ -851,8 +850,11 @@ pub fn second_pass(
                             5,
                         );
                         let e_str = crate::gcode::format_e_value(new_e_value);
-                        adjusted =
-                            Some(format!("{}{};Adjust as support", &trimmed[..e_idx + 1], e_str));
+                        adjusted = Some(format!(
+                            "{}{};Adjust as support",
+                            &trimmed[..e_idx + 1],
+                            e_str
+                        ));
                         support_extrusion_count += 1;
                     }
                 }

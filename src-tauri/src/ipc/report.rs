@@ -111,7 +111,11 @@ fn collect(dir: &std::path::Path) -> Vec<ReportSummary> {
     }
     // 时间倒序（新的在前）。`startedAt` 是 `YYYY-MM-DD HH:MM:SS`，字典序即时间序；
     // 读不出来的那些按 id（自带时刻）垫底对齐，顺序仍然稳定
-    out.sort_by(|a, b| b.started_at.cmp(&a.started_at).then_with(|| b.id.cmp(&a.id)));
+    out.sort_by(|a, b| {
+        b.started_at
+            .cmp(&a.started_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
     out
 }
 
@@ -199,13 +203,13 @@ pub fn get_report_list(app: AppHandle) -> Result<Vec<ReportSummary>, AppError> {
 pub fn get_report_detail(app: AppHandle, id: String) -> Result<ReportDetail, AppError> {
     traced("getReportDetail", |_| {
         let dir = history_root(&app)?;
-        let (path, day) = find_meta(&dir, &id).ok_or_else(|| {
-            AppError::not_found(format!("没有这条执行记录：{id}"))
-        })?;
+        let (path, day) = find_meta(&dir, &id)
+            .ok_or_else(|| AppError::not_found(format!("没有这条执行记录：{id}")))?;
         let text = std::fs::read_to_string(&path)
             .map_err(|e| AppError::io("这份记录读不出来").with_detail(e.to_string()))?;
-        let meta: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| AppError::corrupted("这份记录不是合法的 JSON").with_detail(e.to_string()))?;
+        let meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            AppError::corrupted("这份记录不是合法的 JSON").with_detail(e.to_string())
+        })?;
         let summary = summarize(&path, &id, &day);
         Ok(detail_of(summary, &meta))
     })
@@ -268,6 +272,9 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
 
 #[cfg(test)]
 mod tests {
+    // 判据要造真实归档文件 —— 生产代码的写盘走 `fsx::atomic` 那一个洞。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     /// 一条真形状的 `_meta.json` → 摘要按真字段取值（不是演示数据）
@@ -314,7 +321,11 @@ mod tests {
         let rows = collect(dir.path());
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].ok);
-        assert!(rows[0].error.as_deref().unwrap().contains("E_GCODE_BOUNDARY_001"));
+        assert!(rows[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("E_GCODE_BOUNDARY_001"));
     }
 
     /// 记录文件坏了：**照进列表**，写明读不出来 —— 不许悄悄消失
@@ -328,7 +339,11 @@ mod tests {
         let rows = collect(dir.path());
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].ok);
-        assert!(rows[0].error.as_deref().unwrap().contains("不是合法的 JSON"));
+        assert!(rows[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("不是合法的 JSON"));
     }
 
     /// 没有树 = 一条都没有（空列表，不是错误）

@@ -80,11 +80,7 @@ pub fn baseline_exists(internal_root: &Path, sha256: &str) -> bool {
 ///
 /// 返回 `true` = 这次真的写了一份新的。落不上不该让下载失败 ——
 /// 调用方按"附加信息"处理（与事件账、出处账同一条口径）。
-pub fn ensure_baseline(
-    internal_root: &Path,
-    sha256: &str,
-    bytes: &[u8],
-) -> Result<bool, AppError> {
+pub fn ensure_baseline(internal_root: &Path, sha256: &str, bytes: &[u8]) -> Result<bool, AppError> {
     let s = check_sha(sha256)?;
     let target = baseline_path(internal_root, s);
     if target.is_file() {
@@ -92,8 +88,7 @@ pub fn ensure_baseline(
     }
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::io(format!("建不出基准目录：{}", parent.display()))
-                .with_detail(e.to_string())
+            AppError::io(format!("建不出基准目录：{}", parent.display())).with_detail(e.to_string())
         })?;
     }
     crate::fsx::atomic::atomic_write(&target, bytes)?;
@@ -172,7 +167,8 @@ mod tests {
         assert!(ensure_baseline(d.path(), &sha, text.as_bytes()).unwrap());
         // 有人在盘上动过它（模拟）：再 ensure 不许写回去
         let path = baseline_path(d.path(), &sha);
-        crate::fsx::atomic::atomic_write(&path, b"# \xe8\xa2\xab\xe6\x94\xb9\xe8\xbf\x87\n").unwrap();
+        crate::fsx::atomic::atomic_write(&path, b"# \xe8\xa2\xab\xe6\x94\xb9\xe8\xbf\x87\n")
+            .unwrap();
         assert!(
             !ensure_baseline(d.path(), &sha, text.as_bytes()).unwrap(),
             "已经有就不该再写"
@@ -190,9 +186,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let text = "# machine: A1\n[toolhead]\noffset_x = -1 # 笔尖\n";
         let sha = sha_of(text);
-        assert_eq!(read_baseline(d.path(), &sha).unwrap(), None, "还没有就是 None");
+        assert_eq!(
+            read_baseline(d.path(), &sha).unwrap(),
+            None,
+            "还没有就是 None"
+        );
         ensure_baseline(d.path(), &sha, text.as_bytes()).unwrap();
-        assert_eq!(read_baseline(d.path(), &sha).unwrap().as_deref(), Some(text));
+        assert_eq!(
+            read_baseline(d.path(), &sha).unwrap().as_deref(),
+            Some(text)
+        );
     }
 
     /// 字节与名字对不上 = 当它没有（宁可回退出厂值，也不拿可疑字节当默认）
@@ -202,8 +205,11 @@ mod tests {
         let text = "# machine: A1\n";
         let sha = sha_of(text);
         ensure_baseline(d.path(), &sha, text.as_bytes()).unwrap();
-        crate::fsx::atomic::atomic_write(&baseline_path(d.path(), &sha), b"# \xe5\x88\xab\xe7\x9a\x84\n")
-            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &baseline_path(d.path(), &sha),
+            b"# \xe5\x88\xab\xe7\x9a\x84\n",
+        )
+        .unwrap();
         assert_eq!(read_baseline(d.path(), &sha).unwrap(), None);
     }
 
@@ -212,7 +218,10 @@ mod tests {
     fn a_non_sha_is_refused_before_it_touches_the_disk() {
         let d = tempfile::tempdir().unwrap();
         for bad in ["", "../../x", "abc", &"z".repeat(64)] {
-            assert!(ensure_baseline(d.path(), bad, b"x").is_err(), "{bad} 该被拒");
+            assert!(
+                ensure_baseline(d.path(), bad, b"x").is_err(),
+                "{bad} 该被拒"
+            );
             assert!(!baseline_exists(d.path(), bad));
         }
     }

@@ -74,7 +74,10 @@ fn bundle_roots(repo_root: &Path) -> Vec<PathBuf> {
 
 /// [`bundle_roots`] 的纯函数形状（env 值当参数传）：并行测试共享进程环境，
 /// 摆弄 `CARGO_TARGET_DIR` 会互相干扰 —— 判据要能直接喂值。
-fn bundle_roots_from(repo_root: &Path, cargo_target_dir: Option<std::ffi::OsString>) -> Vec<PathBuf> {
+fn bundle_roots_from(
+    repo_root: &Path,
+    cargo_target_dir: Option<std::ffi::OsString>,
+) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(dir) = cargo_target_dir {
         if !dir.is_empty() {
@@ -1544,9 +1547,7 @@ fn release_prompt_text(f: &PromptFacts) -> String {
     let cmd = if cfg!(target_os = "windows") {
         format!(
             "$env:MKPSE_APP_DIR=\"{}\"; npm run release -- {} \"{}\"",
-            f.app_dir,
-            f.version,
-            notes
+            f.app_dir, f.version, notes
         )
     } else {
         format!(
@@ -1681,7 +1682,7 @@ pub fn wb_release_preflight(
 ) -> Result<ReleasePreflight, AppError> {
     crate::ipc::traced("wb_release_preflight", |_| {
         /* 测试模式里这道闸的读数会混两个世界（版本号来自真仓库、产物在沙箱）——
-           与其给一份看不出问题的结论，不如直说这条路关着 */
+        与其给一份看不出问题的结论，不如直说这条路关着 */
         super::sandbox::require_real_mode("发布软件版本")?;
         let root = crate::fsx::paths::internal_root(&app)?;
         let repo = crate::workbench::paths::repo_root();
@@ -2071,18 +2072,18 @@ mod tests {
         });
 
         for must in [
-            "v1.2.3",                 // tag
-            "1.2.3",                  // 版本号
-            "feat/demo",              // 当前分支
-            "修了 X",                  // 更新说明
+            "v1.2.3",                   // tag
+            "1.2.3",                    // 版本号
+            "feat/demo",                // 当前分支
+            "修了 X",                   // 更新说明
             "npm run release -- 1.2.3", // 推荐命令
-            "github · o/r",           // 发布账户
-            "gitee · o/r",            // 发布通道
-            RELEASE_INFO_REL,         // release.json 落点
-            "chore/release-v1.2.3",   // 第二个 PR 的分支名
+            "github · o/r",             // 发布账户
+            "gitee · o/r",              // 发布通道
+            RELEASE_INFO_REL,           // release.json 落点
+            "chore/release-v1.2.3",     // 第二个 PR 的分支名
             "必须由人合并",             // 那条不能代劳的纪律
-            "ALLOW_PUSH_MAIN",        // 逃生开关不许用
-            "MKPSE_APP_DIR",          // 让 CLI 复用工作台的发布账户与账本
+            "ALLOW_PUSH_MAIN",          // 逃生开关不许用
+            "MKPSE_APP_DIR",            // 让 CLI 复用工作台的发布账户与账本
         ] {
             assert!(text.contains(must), "提示词里少了「{must}」：\n{text}");
         }

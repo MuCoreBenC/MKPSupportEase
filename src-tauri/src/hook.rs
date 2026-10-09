@@ -379,17 +379,17 @@ fn archive_success(
             warnings.push(format!("输出归档失败：{e}"));
         }
         match crate::archive::sha256_of(&done.output_path) {
-        Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
-            Ok(fact) => Some(fact),
+            Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
+                Ok(fact) => Some(fact),
+                Err(e) => {
+                    warnings.push(format!("输出文件事实读不出来：{e}"));
+                    None
+                }
+            },
             Err(e) => {
-                warnings.push(format!("输出文件事实读不出来：{e}"));
+                warnings.push(format!("输出文件摘要算不出来：{e}"));
                 None
             }
-        },
-        Err(e) => {
-            warnings.push(format!("输出文件摘要算不出来：{e}"));
-            None
-        }
         }
     };
 
@@ -592,7 +592,9 @@ fn split_code(text: &str) -> (String, Option<String>) {
     let code = text[start..end].to_owned();
     /* 正文取码**之后**那截（码前面是外层包装：`处理失败 [外层码]：配置无效: ` 之类）——
     它们对用户没有信息量，留着只会把真正的原因往后推。 */
-    let mut tail = text[end..].trim_start_matches([']', ':', '：', ' ', '，', '。']).trim();
+    let mut tail = text[end..]
+        .trim_start_matches([']', ':', '：', ' ', '，', '。'])
+        .trim();
     if tail.is_empty() {
         /* 码后面什么都没有（整句就是个码）：那就整句当人话，别给一屏空白 */
         tail = text;
@@ -618,10 +620,7 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
     /* 端点文件在内部根下（钩子这侧没有 AppHandle，靠标识符自己算）。
     算不出来 / 连不上 / 起不来 ⇒ 一条"没有界面"的线：照旧干活 */
     let client = match crate::fsx::paths::internal_root_headless() {
-        Some(root) => {
-            let client = crate::hook_ipc::Client::connect_or_spawn(&root, &cancel);
-            client
-        }
+        Some(root) => crate::hook_ipc::Client::connect_or_spawn(&root, &cancel),
         None => crate::hook_ipc::Client::headless(&cancel),
     };
     client.send(&crate::hook_ipc::FromHook::Hello {
@@ -838,7 +837,11 @@ fn finished_payload(
         Ok(out) => crate::hook_ipc::FinishedPayload {
             ok: true,
             cancelled: false,
-            message: format!("处理完成：{}（{} ms）", out.output.display(), out.elapsed_ms),
+            message: format!(
+                "处理完成：{}（{} ms）",
+                out.output.display(),
+                out.elapsed_ms
+            ),
             code: None,
             stage,
             exit_code: EXIT_OK,
@@ -876,7 +879,11 @@ fn finished_payload(
 pub fn report(done: Result<Outcome, HookError>) -> u8 {
     match done {
         Ok(out) => {
-            eprintln!("处理完成：{} （{} ms）", out.output.display(), out.elapsed_ms);
+            eprintln!(
+                "处理完成：{} （{} ms）",
+                out.output.display(),
+                out.elapsed_ms
+            );
             // 警告各占一行：那是**用户要看的东西**，不是日志
             for w in &out.warnings {
                 eprintln!("警告：{w}");
@@ -893,6 +900,9 @@ pub fn report(done: Result<Outcome, HookError>) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    // 判据要造真实文件（预设、G-code、归档）—— 生产代码的写盘走 `fsx::atomic`。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use crate::args::HookJob;
 
@@ -933,7 +943,10 @@ mod tests {
         std::fs::write(&gcode, "G28\n").expect("写输入");
         let err = run_headless(&d.path().join("nope.toml"), &gcode).expect_err("预设不在必须报错");
         assert_eq!(err.exit_code(), EXIT_BAD_INPUT);
-        assert!(err.to_string().contains("预设文件不存在"), "要说人话：{err}");
+        assert!(
+            err.to_string().contains("预设文件不存在"),
+            "要说人话：{err}"
+        );
         assert_eq!(
             std::fs::read_to_string(&gcode).expect("读回输入"),
             "G28\n",
@@ -962,7 +975,10 @@ mod tests {
         std::fs::write(&gcode, "G28\n").expect("写输入");
         let err = run_headless(&toml, &gcode).expect_err("坏预设必须报错");
         assert_eq!(err.exit_code(), EXIT_BAD_INPUT);
-        assert!(err.to_string().contains("预设不可用 [E_"), "带上稳定错误码：{err}");
+        assert!(
+            err.to_string().contains("预设不可用 [E_"),
+            "带上稳定错误码：{err}"
+        );
     }
 
     /// **机型不匹配**：预设是 A1、G-code 自报 A1 mini ⇒ 没界面时**不猜**，
@@ -977,7 +993,10 @@ mod tests {
         let err = run_headless(&toml, &gcode).expect_err("机型不匹配必须拦下");
         assert_eq!(err.exit_code(), EXIT_BAD_INPUT);
         let why = err.to_string();
-        assert!(why.contains("A1_MINI") && why.contains("A1"), "两边都要点名：{why}");
+        assert!(
+            why.contains("A1_MINI") && why.contains("A1"),
+            "两边都要点名：{why}"
+        );
         assert_eq!(
             std::fs::read_to_string(&gcode).expect("读回输入"),
             "; printer_model = Bambu Lab A1 mini\nG28\n",
@@ -999,7 +1018,10 @@ mod tests {
         impl Asker for Yes {
             fn confirm(&mut self, q: &str) -> bool {
                 /* 问句要把**两边**都说清（用的是规范机型名，与预设头里那个同一个写法） */
-                assert!(q.contains("A1_MINI") && q.contains("A1"), "两边都要点名：{q}");
+                assert!(
+                    q.contains("A1_MINI") && q.contains("A1"),
+                    "两边都要点名：{q}"
+                );
                 true
             }
         }

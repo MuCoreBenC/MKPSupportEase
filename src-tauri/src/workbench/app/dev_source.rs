@@ -44,7 +44,6 @@
 //!   就是这一套，这里按同一个形状。）
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -150,10 +149,7 @@ impl SourceKind {
     fn marker(self, served: &Served) -> PathBuf {
         match self {
             SourceKind::V1 | SourceKind::V2 => served.root.join(FIXTURE_MARKER),
-            SourceKind::Delivery => served
-                .root
-                .join(DELIVERY_SUBDIR)
-                .join(DELIVERY_MARKER),
+            SourceKind::Delivery => served.root.join(DELIVERY_SUBDIR).join(DELIVERY_MARKER),
         }
     }
 
@@ -314,7 +310,7 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         /* stdin 给 null：父子都在读 stdin 的话，敲键归谁就成了碰运气
-           （`tauri dev` 自己也读 stdin 做热重载） */
+        （`tauri dev` 自己也读 stdin 做热重载） */
         .stdin(Stdio::null());
     cmd.spawn()
         .map_err(|e| AppError::io("起不了 npm").with_detail(e.to_string()))
@@ -379,12 +375,12 @@ fn kill_process_tree(root: u32) {
 
 /* ---------- 端口：谁占着，怎么让它让开 ---------- */
 
-/// 端口有没有人在听。**两个回环地址都试**：对面可能只绑了 v4，也可能只绑了 v6
-/// （vite 绑的是 `localhost`，在有些机器上只落在 `::1`）。
+/// 端口有没有人在听（两个回环地址都试，见 [`crate::runtime::net::loopback::is_port_taken`]）。
+///
+/// 探测本身住在 `runtime::net::loopback` —— 判据 ① 要求网络字节只许住那一处。
+/// 这里保留名字与调用面：语义、调用点一个都没动。
 fn port_taken(port: u16) -> bool {
-    let v4 = SocketAddr::from(([127, 0, 0, 1], port));
-    let v6 = SocketAddr::from(([0u16, 0, 0, 0, 0, 0, 0, 1], port));
-    [v4, v6].iter().any(|a| TcpListener::bind(a).is_err())
+    crate::runtime::net::loopback::is_port_taken(port)
 }
 
 /// `127.0.0.1:5321` / `[::1]:5321` / `0.0.0.0:5321` → `5321`
@@ -451,7 +447,9 @@ fn listen_owner(port: u16) -> Option<(u32, String)> {
 /// 那句人话。**事实只有一处**：界面直接摆 `text`，不重写一遍措辞。
 fn describe_conflict(c: &PortConflict) -> String {
     match (c.pid, c.process.as_deref()) {
-        (Some(pid), Some(name)) => format!("{}（{}）被 {}（PID {}）占着", c.port, c.role, name, pid),
+        (Some(pid), Some(name)) => {
+            format!("{}（{}）被 {}（PID {}）占着", c.port, c.role, name, pid)
+        }
         (Some(pid), None) => format!("{}（{}）被 PID {} 占着", c.port, c.role, pid),
         _ => format!("{}（{}）被占着（认不出是谁）", c.port, c.role),
     }
@@ -563,8 +561,10 @@ fn kill_pid(pid: u32) -> Result<(), AppError> {
     if out.status.success() {
         return Ok(());
     }
-    Err(AppError::permission_denied(format!("停不了 PID {pid} 那个进程"))
-        .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+    Err(
+        AppError::permission_denied(format!("停不了 PID {pid} 那个进程"))
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()),
+    )
 }
 
 /* ---------- 状态视图 ---------- */
@@ -599,7 +599,7 @@ fn status_of(cur: &DevSource, repo: &Path) -> DevSourceStatus {
     st.pid = Some(cur.pid);
     st.running = cur.exited.is_none();
     /* 端的哪一份 / 端的哪个目录 / 客户端填哪一串：**在跑没在跑都报**——
-       界面据此把那一行选中摆在"上次起的是它"上，地址也跟着换成它的那一串 */
+    界面据此把那一行选中摆在"上次起的是它"上，地址也跟着换成它的那一串 */
     st.source = Some(cur.source);
     st.source_root = cur.root.display().to_string();
     st.url = cur.url.clone();
@@ -607,7 +607,7 @@ fn status_of(cur: &DevSource, repo: &Path) -> DevSourceStatus {
         st.conflicts.clear();
     } else if let Some(first) = st.conflicts.first() {
         /* 它自己退了 → 把"多半为什么"也指出来。通跑踩出来的正是这一条：退出码 1
-           背后是 5321 被占着，而那句话原来在界面上根本看不见（只有终端里有） */
+        背后是 5321 被占着，而那句话原来在界面上根本看不见（只有终端里有） */
         let why = format!("多半是 {} 被占着顶下来的", first.port);
         st.note = Some(match st.note.take() {
             Some(n) => format!("{n} —— {why}"),
@@ -695,10 +695,12 @@ pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppErr
         /* ★ 端口那一眼：起之前把那个端口的占用者摆出来，而不是让它起一半死掉 */
         let conflicts = conflicts_of();
         if !conflicts.is_empty() {
-            return Err(AppError::invalid_argument(conflict_sentence(&conflicts)).with_detail(
-                "界面会把这几条摆出来，并给一颗「停掉它」（`wb_dev_source_clear_conflict`）"
-                    .to_owned(),
-            ));
+            return Err(
+                AppError::invalid_argument(conflict_sentence(&conflicts)).with_detail(
+                    "界面会把这几条摆出来，并给一颗「停掉它」（`wb_dev_source_clear_conflict`）"
+                        .to_owned(),
+                ),
+            );
         }
         let child = spawn_server(&repo, &served)?;
         let pid = child.id();
@@ -738,12 +740,12 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         };
         kill_process_tree(cur.pid);
         /* 包装层自己收一次尸：Windows 上 PID 复用很快，不 wait 就分不清
-           "我杀掉的那个"和"刚好新起来的另一个" */
+        "我杀掉的那个"和"刚好新起来的另一个" */
         let _ = cur.child.kill();
         /* ★ **不报退出码**：这一下是**我们**按的信号，那个码只是终止的结果，
-           摆到人眼前会被读成"出错了"（2026-10-08 烟测里读出来的原话：
-           「已停（它退出了（退出码 1）—— 刚才终端里那几条日志是原因）」）。
-           该说的是"端口让出来没有"——那才是人关心的那一件事 */
+        摆到人眼前会被读成"出错了"（2026-10-08 烟测里读出来的原话：
+        「已停（它退出了（退出码 1）—— 刚才终端里那几条日志是原因）」）。
+        该说的是"端口让出来没有"——那才是人关心的那一件事 */
         let note = match cur.child.wait() {
             Ok(_) => {
                 let p = port();
@@ -823,7 +825,9 @@ pub fn wb_dev_source_clear_conflict(
             std::thread::sleep(Duration::from_millis(150));
         }
         let note = if port_taken(port) {
-            format!("{name}（PID {now_pid}）已经收到终止，但 {port} 还被占着 —— 可能还有别的进程在听")
+            format!(
+                "{name}（PID {now_pid}）已经收到终止，但 {port} 还被占着 —— 可能还有别的进程在听"
+            )
         } else {
             format!("已停掉占着 {port} 的 {name}（PID {now_pid}）")
         };
@@ -921,8 +925,8 @@ mod tests {
         let pkg = crate::workbench::paths::repo_root().join("package.json");
         let text = std::fs::read_to_string(&pkg)
             .unwrap_or_else(|e| panic!("读不了 {}：{e}", pkg.display()));
-        let value: serde_json::Value =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{} 不是 JSON：{e}", pkg.display()));
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("{} 不是 JSON：{e}", pkg.display()));
         assert!(
             value["scripts"][NPM_SCRIPT].is_string(),
             "package.json 的 scripts 里没有 {NPM_SCRIPT}"
@@ -1063,7 +1067,9 @@ mod tests {
         assert_eq!(b.root, sandbox);
         assert_ne!(a.root, b.root, "两份预设根必须端出两个不同的目录");
         /* 缺的那份标志文件也各说各的（界面据此告诉人"去哪儿生成"） */
-        assert!(SourceKind::Delivery.marker(&a).ends_with("delivery/source.json"));
+        assert!(SourceKind::Delivery
+            .marker(&a)
+            .ends_with("delivery/source.json"));
         assert_ne!(
             SourceKind::Delivery.marker(&a),
             SourceKind::Delivery.marker(&b)

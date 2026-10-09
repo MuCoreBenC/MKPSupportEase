@@ -143,7 +143,10 @@ const MODEL_DEFS: [(&str, &str, &str, &str); 3] = [
 /// 见 [`crate::legacy`]）。两处都没有 → `None`（"还没取回"，不是错误）。
 ///
 /// catalog 里没有这个文件的登记时**不猜落点**：下载区那一半直接没有，只剩旧缓存可查。
-fn locate_model_file(app: &AppHandle, file_name: &str) -> Result<Option<std::path::PathBuf>, AppError> {
+fn locate_model_file(
+    app: &AppHandle,
+    file_name: &str,
+) -> Result<Option<std::path::PathBuf>, AppError> {
     let internal = crate::fsx::paths::internal_root(app)?;
     let in_delivery = crate::runtime::load_released_catalog(&internal)
         .ok()
@@ -214,7 +217,9 @@ pub fn open_model(app: AppHandle, model_id: String) -> Result<(), AppError> {
     traced("openModel", |_| {
         let id = model_id.trim();
         let Some((_, _, _, file_name)) = MODEL_DEFS.iter().find(|(mid, ..)| *mid == id) else {
-            return Err(AppError::invalid_argument(format!("没这个模型：{model_id}")));
+            return Err(AppError::invalid_argument(format!(
+                "没这个模型：{model_id}"
+            )));
         };
         let Some(path) = locate_model_file(&app, file_name)? else {
             return Err(AppError::not_found(format!(

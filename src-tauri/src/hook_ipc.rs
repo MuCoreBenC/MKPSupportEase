@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! 钩子进程（跑完就退，切片器继续）              界面进程（常驻：留着、下次复用）
-//!   connect(127.0.0.1:<port>) ────────────►  TcpListener::bind（bind 即单实例）
+//!   connect(127.0.0.1:<port>) ────────────►  LoopbackListener::bind（bind 即单实例）
 //!   写 {"kind":"hello",…}\n
 //!   写 {"kind":"progress",…}\n
 //!   写 {"kind":"finished",…}\n
@@ -42,7 +42,9 @@
 //! "等你回答"那个等待），把 `answer` 转给等在 [`Client::ask`] 上的那个人。
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+// loopback 通道住在 `runtime::net::loopback`（判据 ①：网络字节只许住那一处）——
+// 这里只拿两个包装类型，不直接碰 `std::net`。
+use crate::runtime::net::loopback::{LoopbackListener, LoopbackStream};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -112,14 +114,20 @@ pub struct FinishedPayload {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FromHook {
     /// 开场：告诉界面这一趟在处理哪两份文件（界面拿它写标题）
-    Hello { preset_name: String, gcode_name: String },
+    Hello {
+        preset_name: String,
+        gcode_name: String,
+    },
     Progress(ProgressPayload),
     Question(QuestionPayload),
     /// 打印时间估算**交给你了**：钩子写完盘就退，界面按 id 补全那条记录。
     ///
     /// 为什么钩子不能自己留后台任务：它必须**立刻退出**（切片器在等退出码）。
     /// 界面本来就常驻，是唯一合适的承接方。
-    DeferPrintTime { record_id: String, output: String },
+    DeferPrintTime {
+        record_id: String,
+        output: String,
+    },
     /// 结论。之后钩子就退了（界面把它留在屏上，等下一次）
     Finished(Box<FinishedPayload>),
 }
@@ -141,7 +149,7 @@ pub enum ToHook {
 /// 里面全是内部可变：进度出口（`&self`）与问句（`&self`）会**同时**被拿去用
 /// （管线的 `sink` 与 `Asker` 是两个参数），所以不能要求 `&mut self`。
 pub struct Client {
-    conn: Mutex<Option<TcpStream>>,
+    conn: Mutex<Option<LoopbackStream>>,
     /// 答复从读线程转过来（只有 [`Client::ask`] 一个人消费）
     answers: Mutex<Option<Receiver<bool>>>,
     /// 取消线（读线程收到 `cancel` 直接置位 —— 这样它能**打断**等答复那个等待）
@@ -182,7 +190,7 @@ impl Client {
         }
     }
 
-    fn with_conn(conn: TcpStream, cancel: &CancelToken) -> Self {
+    fn with_conn(conn: LoopbackStream, cancel: &CancelToken) -> Self {
         let cancel = cancel.clone();
         let answers = conn.try_clone().ok().map(|read_side| {
             let (tx, rx) = mpsc::channel::<bool>();
@@ -255,7 +263,7 @@ impl Client {
 }
 
 /// 钩子侧唯一的读循环：`cancel` 直接置取消线，`answer` 转给等答复的人。
-fn read_loop(read_side: TcpStream, answers: Sender<bool>, cancel: CancelToken) {
+fn read_loop(read_side: LoopbackStream, answers: Sender<bool>, cancel: CancelToken) {
     let mut lines = BufReader::new(read_side);
     let mut line = String::new();
     loop {
@@ -286,10 +294,9 @@ fn read_loop(read_side: TcpStream, answers: Sender<bool>, cancel: CancelToken) {
 }
 
 /// 读端点文件 → 连上去（**只探一下**，探不到就是 `None`）。
-pub fn connect(internal_root: &Path) -> Option<TcpStream> {
+pub fn connect(internal_root: &Path) -> Option<LoopbackStream> {
     let port = read_port(internal_root)?;
-    let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
-    TcpStream::connect_timeout(&addr.into(), CONNECT_PROBE).ok()
+    LoopbackStream::connect_local(port, CONNECT_PROBE).ok()
 }
 
 fn read_port(internal_root: &Path) -> Option<u16> {
@@ -316,9 +323,9 @@ fn spawn_display() {
 
 /// 界面那一侧的监听器（**bind 成功就是唯一那扇窗**）。
 pub struct Listener {
-    listener: TcpListener,
+    listener: LoopbackListener,
     /// 当前那条连接的写端（界面回写"取消 / 答复"用它）
-    current: Arc<Mutex<Option<TcpStream>>>,
+    current: Arc<Mutex<Option<LoopbackStream>>>,
 }
 
 /// 界面能不能当"那扇窗"：已经有人在做显示时给 `None`。
@@ -329,8 +336,8 @@ pub fn bind_for_display(internal_root: &Path) -> Option<Listener> {
     if connect(internal_root).is_some() {
         return None;
     }
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).ok()?;
-    let port = listener.local_addr().ok()?.port();
+    let listener = LoopbackListener::bind_any_local().ok()?;
+    let port = listener.port().ok()?;
     write_port(internal_root, port);
     Some(Listener {
         listener,
@@ -389,7 +396,7 @@ impl Listener {
 
 /// 回写那一头（界面 → 钩子）。
 pub struct Handle {
-    current: Arc<Mutex<Option<TcpStream>>>,
+    current: Arc<Mutex<Option<LoopbackStream>>>,
 }
 
 impl Handle {
@@ -420,7 +427,9 @@ fn write_port(internal_root: &Path, port: u16) {
     if let Some(dir) = at.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&at, format!("{port}\n"));
+    // 走唯一的写盘出口（`fsx::atomic`）：端点文件也是本程序的数据，
+    // 崩溃中途留半个端口号会让下一次钩子连到一个不存在的端口。
+    let _ = crate::fsx::atomic::atomic_write(&at, format!("{port}\n").as_bytes());
 }
 
 #[cfg(test)]
@@ -484,7 +493,10 @@ mod tests {
         /* 回写：界面 → 钩子（取消）。读线程直接把它接到取消线上 */
         assert!(handle.connected(), "钩子还连着");
         handle.send(ToHook::Cancel);
-        assert!(wait_until(|| cancel.is_cancelled()), "取消该传到钩子的取消线上");
+        assert!(
+            wait_until(|| cancel.is_cancelled()),
+            "取消该传到钩子的取消线上"
+        );
     }
 
     /// 已经有界面在做显示时，第二个界面**不抢**（`None`）；没人听时能重新当显示（自愈）。

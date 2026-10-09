@@ -150,10 +150,7 @@ fn record_history(opts: &ReleaseOptions, report: &ReleaseTxReport) {
         ReleaseRecord::from_report(report, clock::now_iso8601()),
     ) {
         Ok(_) => eprintln!("已记入发布历史：{}", file.display()),
-        Err(e) => eprintln!(
-            "（发布历史没记上：{} —— 不影响这一趟发布）",
-            e.message
-        ),
+        Err(e) => eprintln!("（发布历史没记上：{} —— 不影响这一趟发布）", e.message),
     }
 }
 

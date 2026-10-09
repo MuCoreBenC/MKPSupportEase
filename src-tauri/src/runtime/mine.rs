@@ -1694,9 +1694,13 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let done =
-            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "我的 A1 标准版.toml")
-                .unwrap();
+        let done = save_official_as_new(
+            user.path(),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "我的 A1 标准版.toml",
+        )
+        .unwrap();
         assert_eq!(done.path, "presets-mine/我的 A1 标准版.toml");
 
         let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
@@ -1704,7 +1708,10 @@ mod tests {
             text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
             "血统要指向来源交付文件：{text}"
         );
-        assert!(text.contains("# based_on_sha256:"), "摘要那行也要在：{text}");
+        assert!(
+            text.contains("# based_on_sha256:"),
+            "摘要那行也要在：{text}"
+        );
         assert!(
             text.contains("涂胶宽度 = 1.0"),
             "官方原文要原样在副本里：{text}"

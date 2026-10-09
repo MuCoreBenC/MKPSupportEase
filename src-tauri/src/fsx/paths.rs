@@ -80,7 +80,9 @@ pub fn internal_root_headless() -> Option<PathBuf> {
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"))
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
+            })
     };
     let root = base.join(APP_IDENTIFIER);
     ensure_dirs(&root, &INTERNAL_DIRS).ok()?;
@@ -240,7 +242,8 @@ mod tests {
     #[test]
     fn the_identifier_matches_tauri_conf() {
         let conf = include_str!("../../tauri.conf.json");
-        let parsed: serde_json::Value = serde_json::from_str(conf).expect("tauri.conf.json 该是 JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(conf).expect("tauri.conf.json 该是 JSON");
         let declared = parsed["identifier"]
             .as_str()
             .expect("tauri.conf.json 里该有 identifier");

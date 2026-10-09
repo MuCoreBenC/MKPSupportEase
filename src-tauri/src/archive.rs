@@ -335,16 +335,17 @@ pub fn complete_meta(
 ) -> Result<(), AppError> {
     let text = std::fs::read_to_string(meta_path)
         .map_err(|e| AppError::io("这条记录读不出来（补全前）").with_detail(e.to_string()))?;
-    let mut meta: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| AppError::corrupted("这条记录不是合法的 JSON（补全前）").with_detail(e.to_string()))?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        AppError::corrupted("这条记录不是合法的 JSON（补全前）").with_detail(e.to_string())
+    })?;
     {
         let Some(obj) = meta.as_object_mut() else {
             return Err(AppError::corrupted("这条记录不是 JSON 对象"));
         };
         let detail = obj.entry("detail").or_insert_with(|| serde_json::json!({}));
         if let Some(of) = output_file {
-            detail["outputFile"] =
-                serde_json::to_value(of).map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
+            detail["outputFile"] = serde_json::to_value(of)
+                .map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
         }
         if let Some(pt) = print_time {
             detail["printTime"] = pt;
@@ -375,6 +376,10 @@ pub fn mark_print_time_failed(meta_path: &Path) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
+    // 判据要造真实文件（原件、输出体、`_meta.json`）—— 生产代码的写盘一律走
+    // `fsx::atomic` 那一个洞，这里的 `std::fs::write` 只活在测试里。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use time::macros::datetime;
 
@@ -384,7 +389,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let input = d.path().join("in.gcode");
         std::fs::write(&input, "G1 X1\n").unwrap();
-        let paths = begin(d.path(), &input, "G1 X1\n", datetime!(2026-10-10 1:00:00 +8)).unwrap();
+        let paths = begin(
+            d.path(),
+            &input,
+            "G1 X1\n",
+            datetime!(2026-10-10 1:00:00 +8),
+        )
+        .unwrap();
 
         let meta = serde_json::json!({
             "startedAt": "2026-10-10 01:00:00",
@@ -416,7 +427,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let input = d.path().join("in.gcode");
         std::fs::write(&input, "G1 X1\n").unwrap();
-        let paths = begin(d.path(), &input, "G1 X1\n", datetime!(2026-10-10 1:00:00 +8)).unwrap();
+        let paths = begin(
+            d.path(),
+            &input,
+            "G1 X1\n",
+            datetime!(2026-10-10 1:00:00 +8),
+        )
+        .unwrap();
         std::fs::write(
             &paths.meta,
             r#"{"elapsedMs":1,"printTimeStatus":"computing"}"#,
@@ -480,7 +497,9 @@ mod tests {
         )
         .expect("归档原件");
 
-        assert!(paths.original.ends_with("63288.1_20261009_220851_original.gcode"));
+        assert!(paths
+            .original
+            .ends_with("63288.1_20261009_220851_original.gcode"));
         assert!(paths.output.ends_with("63288.1_20261009_220851.gcode"));
         assert!(paths.meta.ends_with("63288.1_20261009_220851_meta.json"));
         assert_eq!(
@@ -603,6 +622,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(back["elapsedMs"], 1);
         assert_eq!(back["error"], "E_GCODE_BOUNDARY_001: 越界");
-        assert!(back["detail"].get("outputFile").is_none(), "失败记录没有输出件");
+        assert!(
+            back["detail"].get("outputFile").is_none(),
+            "失败记录没有输出件"
+        );
     }
 }

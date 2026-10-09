@@ -1125,7 +1125,7 @@ pub fn wb_publish(
 ) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
         /* ★ **测试模式（沙箱）里不许发布**：沙箱那套只在本机、也不在 git 索引里 ——
-           让它走到"提交 / 推送 / 开 PR"这一步，只会把一个说不清的世界推给别人 */
+        让它走到"提交 / 推送 / 开 PR"这一步，只会把一个说不清的世界推给别人 */
         super::sandbox::require_real_mode("不许发布")?;
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）

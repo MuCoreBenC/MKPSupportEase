@@ -68,9 +68,6 @@ pub mod platform;
 /// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
-/// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
-/// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
-pub mod sandbox;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与发布预设那本分开** —— 两条链不混
 pub mod release_history;
@@ -78,6 +75,9 @@ pub mod release_history;
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
 pub mod release_tx;
+/// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
+/// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
+pub mod sandbox;
 pub mod storage;
 /// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
 /// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果

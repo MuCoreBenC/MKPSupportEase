@@ -130,10 +130,17 @@ mode = \"tower\"
     #[test]
     fn values_come_out_in_control_shape() {
         let got = read_param_values(DOC, reg().params()).expect("抽值");
-        assert_eq!(got.get("toolhead.speed_limit").map(String::as_str), Some("70"));
-        assert_eq!(got.get("toolhead.offset.x").map(String::as_str), Some("-1.5"));
         assert_eq!(
-            got.get("toolhead.first_pen_revitalization_flag").map(String::as_str),
+            got.get("toolhead.speed_limit").map(String::as_str),
+            Some("70")
+        );
+        assert_eq!(
+            got.get("toolhead.offset.x").map(String::as_str),
+            Some("-1.5")
+        );
+        assert_eq!(
+            got.get("toolhead.first_pen_revitalization_flag")
+                .map(String::as_str),
             Some("false")
         );
         assert!(
@@ -169,7 +176,10 @@ mode = \"tower\"
         /* `speed_limit` 在注册表里是浮点 ⇒ 渲染成 `80.0`；要紧的是**值换了、注释留着** */
         assert!(out.contains("speed_limit = 80"), "值要换\n{out}");
         assert!(out.contains("# 速度上限(mm/s)"), "注释要留着\n{out}");
-        assert!(out.contains("# release_time: 2026-10-15 09:00:00"), "头注释不动\n{out}");
+        assert!(
+            out.contains("# release_time: 2026-10-15 09:00:00"),
+            "头注释不动\n{out}"
+        );
         /* 只有那两行变了 */
         let changed: Vec<(&str, &str)> = DOC
             .lines()

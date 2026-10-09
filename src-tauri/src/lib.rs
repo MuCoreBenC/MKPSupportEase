@@ -556,7 +556,9 @@ mod command_list_parity {
         let end_mark = "\n    ])";
         while let Some(pos) = rest.find(&mark) {
             let after = &rest[pos + mark.len()..];
-            let end = after.find(end_mark).expect("generate_handler! 块要以 ]\\n 收尾");
+            let end = after
+                .find(end_mark)
+                .expect("generate_handler! 块要以 ]\\n 收尾");
             lists.push(commands_in(&after[..end]));
             rest = &after[end..];
         }
@@ -603,7 +605,10 @@ mod command_list_parity {
                 "ipc::update::install_update",
                 "ipc::update::open_url",
             ] {
-                assert!(list.contains(cmd), "{cmd} 不在一份清单里 —— 界面点下去会 NOT_IMPLEMENTED");
+                assert!(
+                    list.contains(cmd),
+                    "{cmd} 不在一份清单里 —— 界面点下去会 NOT_IMPLEMENTED"
+                );
             }
         }
     }
