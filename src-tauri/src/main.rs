@@ -5,19 +5,16 @@ use std::process::ExitCode;
 
 /// 一个可执行物，两种角色：
 ///
-/// - **带 `--Toml/--Gcode`** ⇒ 切片器的**后处理钩子**：跑完就退，退出码给切片器看
-///   （首页「复制后处理脚本」复制的那一行指的就是本程序，见 `ipc::get_post_process_exe`）；
+/// - **带 `--Toml/--Gcode`** ⇒ 切片器的**后处理钩子**：干活、把进度写进通道、**跑完就退**
+///   （退出码给切片器看；窗口住在另一个常驻进程里，见 `hook_ipc`）；
 /// - 什么都不带（或不认识的参数）⇒ 界面。
 ///
-/// **分流必须在建窗口之前**：钩子那一趟不许开窗、不许初始化 Tauri —— 切片器在等这个进程
-/// 退出，开一扇窗口等用户关，就是让它卡在 95%（2026-10-09 实测：那时候本程序还没有钩子角色）。
+/// **分流必须在这里（建窗口之前）**：钩子那一趟不许开窗、不许初始化 Tauri —— 切片器在等这个
+/// 进程退出，开一扇窗口等用户关，就是让它卡在 95%（2026-10-09 实测过两次）。
 fn main() -> ExitCode {
     match mkp_support_ease_lib::args::parse(std::env::args_os()) {
         Ok(mkp_support_ease_lib::args::Mode::Hook(job)) => {
-            /* 钩子那一趟：**开同一扇窗**把它跑完（进度模态框 + 一颗「停止」，见 `hook_ui`），
-            跑完由那一趟带退出码退 —— 切片器在等这个退出码 */
-            mkp_support_ease_lib::run_hook(job);
-            ExitCode::SUCCESS
+            mkp_support_ease_lib::hook::run_with_channel(&job)
         }
         Ok(mkp_support_ease_lib::args::Mode::Gui) => {
             mkp_support_ease_lib::run();

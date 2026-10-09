@@ -9,12 +9,16 @@
 //! [`crate::ipc::get_post_process_exe`] 给出）—— 成熟版 `mkpsupporte` 与旧世代 `mkp-ssr`
 //! 都是这个形状。
 //!
-//! # 这一层管什么
+//! # 这一层管什么（**钩子进程里没有窗口**）
 //!
 //! 参数以外的**全部行为**都在这里：前置检查 → 预设 → IR → 机型不匹配那一问 → 12 步管线
-//! （原地覆盖，`.part` + rename 原子替换）→ 结论 + 退出码。界面那一半（窗口 / 事件 /
-//! 问答的等待）住 [`crate::hook_ui`]：本模块只认两个抽象 —— [`ProgressSink`]（进度往哪推）
-//! 与 [`Asker`]（问题问谁）。没有界面时用 [`NoProgress`] + [`MismatchPolicy::Refuse`]。
+//! （原地覆盖，`.part` + rename 原子替换）→ 结论 + 退出码。窗口住在**界面那个常驻进程**里，
+//! 这一侧只往通道里写事件（[`crate::hook_ipc`]）：跑完**立刻退**（切片器一秒都不多等），
+//! 结果留在界面那扇窗上等下一次切片。
+//!
+//! 本模块只认两个抽象 —— [`ProgressSink`]（进度往哪推）与 [`Asker`]（问题问谁）：
+//! 有界面时是 [`ChannelSink`] / [`ChannelAsker`]，没有界面时是 [`NoProgress`] /
+//! [`MismatchPolicy::Refuse`]（**不替用户决定**）。
 //!
 //! # 还没做的（按成熟版的形状接着做，别当成"以后再说"）
 //!
@@ -33,7 +37,8 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use postprocess::diag::{CancelToken, PostprocError};
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressSink};
@@ -300,9 +305,11 @@ fn split_code(text: &str) -> (String, Option<String>) {
     (tail.to_owned(), Some(code))
 }
 
-/// 没有界面的那条路：跑一次，把结论写到 stderr 并给出退出码 ——
-/// **这两样就是切片器看得见的全部**（进度没人看、机型不匹配不猜）。
-pub fn run_and_report(job: &HookJob) -> ExitCode {
+/// **钩子进程的入口**：接上通道 → 干活 → 把结论写进通道 → 立刻退。
+///
+/// 退出码与那一行 stderr 是切片器看得见的全部；进度与结论是**给界面那扇窗看的**，
+/// 写不出去也不影响成败（产物优先于界面，见 [`crate::hook_ipc`]）。
+pub fn run_with_channel(job: &HookJob) -> ExitCode {
     let cancel = CancelToken::new();
     /* Ctrl-C → 协作取消（不是硬杀）：内核在步骤边界停下，`.part` 丢掉、原文件不动。
     装不上处理器**不阻断**这一趟 —— 用户按 Ctrl-C 时最坏退回默认硬杀。 */
@@ -313,9 +320,250 @@ pub fn run_and_report(job: &HookJob) -> ExitCode {
         eprintln!("Ctrl-C 处理器装配失败（{e}），继续但不支持协作取消");
     }
 
+    /* 端点文件在内部根下（钩子这侧没有 AppHandle，靠标识符自己算）。
+    算不出来 / 连不上 / 起不来 ⇒ 一条"没有界面"的线：照旧干活 */
+    let client = match crate::fsx::paths::internal_root_headless() {
+        Some(root) => {
+            let client = crate::hook_ipc::Client::connect_or_spawn(&root, &cancel);
+            client
+        }
+        None => crate::hook_ipc::Client::headless(&cancel),
+    };
+    client.send(&crate::hook_ipc::FromHook::Hello {
+        preset_name: file_name_of(&job.toml),
+        gcode_name: file_name_of(&job.gcode),
+    });
+
+    /* 看门狗：偶尔抬头看一次"还在动吗"，到点就**请求取消**并把理由写进结论 */
+    let watch = Watch::new();
+    spawn_watchdog(watch.clone(), cancel.clone());
+
+    let started = Instant::now();
+    let mut sink = ChannelSink {
+        client: &client,
+        watch: watch.clone(),
+        last_step: None,
+    };
+    let mut asker = ChannelAsker { client: &client };
+    let mismatch = if client.connected() {
+        MismatchPolicy::Ask(&mut asker)
+    } else {
+        MismatchPolicy::Refuse
+    };
+
+    let done = run(job, &mut sink, &cancel, mismatch);
+    let payload = finished_payload(
+        &done,
+        started.elapsed().as_millis(),
+        sink.last_step(),
+        watch.reason(),
+    );
+    client.send(&crate::hook_ipc::FromHook::Finished(Box::new(payload)));
+
+    /* stderr 那一行（切片器会把 stderr 给用户看）与退出码走同一条路 —— 两处口径不许各写一份 */
+    ExitCode::from(report(done))
+}
+
+/// 没有通道的那条路（判据 / 极端情况）：跑一次，结论只写 stderr。
+pub fn run_and_report(job: &HookJob) -> ExitCode {
+    let cancel = CancelToken::new();
     let mut sink = NoProgress;
     let done = run(job, &mut sink, &cancel, MismatchPolicy::Refuse);
     ExitCode::from(report(done))
+}
+
+fn file_name_of(p: &std::path::Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| p.display().to_string())
+}
+
+/// 通道那一侧的进度出口：每条进度推给界面，同时给看门狗"报个平安"。
+struct ChannelSink<'a> {
+    client: &'a crate::hook_ipc::Client,
+    watch: Arc<Watch>,
+    last_step: Option<String>,
+}
+
+impl ChannelSink<'_> {
+    fn last_step(&self) -> Option<String> {
+        self.last_step.clone()
+    }
+}
+
+impl ProgressSink for ChannelSink<'_> {
+    fn emit(&mut self, event: postprocess::pipeline::ProgressEvent) {
+        let payload = crate::hook_ipc::ProgressPayload {
+            step: event.step.id().to_owned(),
+            fraction_in_step: event.fraction_in_step,
+            message: event.message,
+        };
+        self.last_step = Some(payload.step.clone());
+        self.watch.touch();
+        self.client
+            .send(&crate::hook_ipc::FromHook::Progress(payload));
+    }
+}
+
+/// 通道那一侧的问句：推给界面，等它答（见 [`crate::hook_ipc::Client::ask`]）。
+struct ChannelAsker<'a> {
+    client: &'a crate::hook_ipc::Client,
+}
+
+impl Asker for ChannelAsker<'_> {
+    fn confirm(&mut self, question: &str) -> bool {
+        self.client.ask(question)
+    }
+}
+
+/// 看门狗：整趟最多跑多久；多久没有任何进展就当卡住（照成熟版：30 分钟 / 10 分钟）。
+const WATCHDOG_TOTAL: Duration = Duration::from_secs(30 * 60);
+const WATCHDOG_IDLE: Duration = Duration::from_secs(10 * 60);
+/// 看门狗多久看一次（它只是"偶尔抬头看一眼" —— 真正的取消仍走内核那条协作线）。
+const WATCHDOG_TICK: Duration = Duration::from_secs(5);
+
+/// 看门狗的判据。**纯函数**：真跑一次 30 分钟才能验的东西不算判据。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchdogVerdict {
+    /// 正常（还在动，也没超时）
+    Fine,
+    /// 太久没有任何进展
+    Idle,
+    /// 整趟超时
+    Overrun,
+}
+
+/// 现在该不该收手。先判**整趟超时**：走完 30 分钟这件事比"最后 10 分钟没动"更硬。
+pub fn watchdog_verdict(
+    now: Instant,
+    started: Instant,
+    last_progress: Instant,
+    idle_limit: Duration,
+    total_limit: Duration,
+) -> WatchdogVerdict {
+    if now.duration_since(started) >= total_limit {
+        return WatchdogVerdict::Overrun;
+    }
+    if now.duration_since(last_progress) >= idle_limit {
+        return WatchdogVerdict::Idle;
+    }
+    WatchdogVerdict::Fine
+}
+
+/// 这一趟"还在动吗"的那点状态（进度出口报平安，看门狗读它）。
+pub struct Watch {
+    last: Mutex<Instant>,
+    reason: Mutex<Option<String>>,
+}
+
+impl Watch {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            last: Mutex::new(Instant::now()),
+            reason: Mutex::new(None),
+        })
+    }
+
+    fn touch(&self) {
+        *self.last.lock().expect("锁没坏") = Instant::now();
+    }
+
+    fn last(&self) -> Instant {
+        *self.last.lock().expect("锁没坏")
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason.lock().expect("锁没坏").clone()
+    }
+
+    fn stop_with(&self, why: String) {
+        let mut g = self.reason.lock().expect("锁没坏");
+        if g.is_none() {
+            *g = Some(why);
+        }
+    }
+}
+
+/// 看门狗那一圈：到点就**请求取消**并留下理由（界面据此说清是哪一种停）。
+fn spawn_watchdog(watch: Arc<Watch>, cancel: CancelToken) {
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(WATCHDOG_TICK);
+            if cancel.is_cancelled() {
+                return; // 已经有人叫停了（用户按的 / Ctrl-C），不用再看
+            }
+            match watchdog_verdict(
+                Instant::now(),
+                started,
+                watch.last(),
+                WATCHDOG_IDLE,
+                WATCHDOG_TOTAL,
+            ) {
+                WatchdogVerdict::Fine => {}
+                WatchdogVerdict::Idle => {
+                    watch.stop_with(format!(
+                        "超时停止：{} 分钟没有任何进展（多半是卡住了）—— 原文件没有被改动",
+                        WATCHDOG_IDLE.as_secs() / 60
+                    ));
+                    cancel.cancel();
+                    return;
+                }
+                WatchdogVerdict::Overrun => {
+                    watch.stop_with(format!(
+                        "超时停止：这一趟超过 {} 分钟 —— 原文件没有被改动",
+                        WATCHDOG_TOTAL.as_secs() / 60
+                    ));
+                    cancel.cancel();
+                    return;
+                }
+            }
+        }
+    });
+}
+
+/// 结论 → 通道里那条 [`crate::hook_ipc::FinishedPayload`]。
+fn finished_payload(
+    done: &Result<Outcome, HookError>,
+    elapsed_ms: u128,
+    stage: Option<String>,
+    stop_reason: Option<String>,
+) -> crate::hook_ipc::FinishedPayload {
+    match done {
+        Ok(out) => crate::hook_ipc::FinishedPayload {
+            ok: true,
+            cancelled: false,
+            message: format!("处理完成：{}（{} ms）", out.output.display(), out.elapsed_ms),
+            code: None,
+            stage,
+            exit_code: EXIT_OK,
+            elapsed_ms: out.elapsed_ms as u64,
+            output: Some(out.output.display().to_string()),
+            warnings: out.warnings.clone(),
+        },
+        Err(err) => {
+            /* 原因与码分家：界面把原因摆正中、码摆小字（见 [`describe`]）。
+            取消那一档优先用**停止的理由**（用户按的？看门狗收的？）——
+            只说"已停止"会把"为什么停"藏起来 */
+            let (message, code) = describe(err);
+            let message = if err.cancelled() {
+                stop_reason.unwrap_or(message)
+            } else {
+                message
+            };
+            crate::hook_ipc::FinishedPayload {
+                ok: false,
+                cancelled: err.cancelled(),
+                message,
+                code,
+                stage,
+                exit_code: err.exit_code(),
+                elapsed_ms: elapsed_ms as u64,
+                output: None,
+                warnings: Vec::new(),
+            }
+        }
+    }
 }
 
 /// 结论 → stderr 那一行 + 退出码。**有界面与没界面两条路共用这一处**：
@@ -626,6 +874,54 @@ mod tests {
         assert!(
             took < Duration::from_secs(1),
             "取消用了 {took:?} —— 太慢（内核该在一个检查间隔内收手）"
+        );
+    }
+
+    /// 看门狗判据：正常 / 没进展 / 整趟超时三档，且**整趟超时优先**
+    /// （真跑 30 分钟才能验的东西不算判据，所以这里比的是时间点）
+    #[test]
+    fn the_watchdog_speaks_up_only_when_it_should() {
+        let idle = Duration::from_secs(600);
+        let total = Duration::from_secs(1800);
+        let started = Instant::now();
+
+        assert_eq!(
+            watchdog_verdict(started, started, started, idle, total),
+            WatchdogVerdict::Fine,
+            "刚起步：什么都不说"
+        );
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(300),
+                started,
+                started + Duration::from_secs(300),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Fine,
+            "5 分钟前还有进度：正常"
+        );
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(700),
+                started,
+                started + Duration::from_secs(100),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Idle,
+            "最后 10 分钟一动不动：卡住"
+        );
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(1801),
+                started,
+                started + Duration::from_secs(1800),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Overrun,
+            "超过整趟上限：哪怕刚刚还有进度也收手"
         );
     }
 

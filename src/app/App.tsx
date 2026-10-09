@@ -93,6 +93,12 @@ export default function App() {
    */
   const openSettings = useCallback(() => setTab('settings'), [])
 
+  /*
+   * 后处理那一屏的「看报告」出口（跨页跳转的出口由外壳给，与 `openBbs` / `openSettings` 同类）。
+   * 失败也照样进报告页 —— 那一条执行记录里写着原因与错误码（见 `app/postprocess/`）。
+   */
+  const openReport = useCallback(() => setTab('report'), [])
+
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
@@ -131,7 +137,7 @@ export default function App() {
               <PageSettings />
             </PageSlot>
           </main>
-          <PostProcessModal />
+          <PostProcessModal onOpenReport={openReport} />
         </FieldLayer>
       </FileImportProvider>
 

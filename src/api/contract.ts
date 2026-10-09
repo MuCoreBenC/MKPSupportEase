@@ -1360,6 +1360,17 @@ export interface PostProcessFinished {
 }
 
 /**
+ * 新一趟的开场（事件 `postprocess-started`）。
+ *
+ * 界面据此把上一趟的结论与"我关过了"一起清掉 —— 窗口是常驻的、结论会留到下一次顶掉它
+ * （旧世代同一条），所以"新的一趟开始了"必须有个明确的开场信号。
+ */
+export interface PostProcessStarted {
+  presetName: string
+  gcodeName: string
+}
+
+/**
  * 钩子那一趟的**全量快照**：窗口起来时读一次，之后跟着事件走。
  *
  * 只靠事件是不够的：窗口起来时那一趟可能已经跑到一半、甚至已经跑完（早期的失败尤其快）。
