@@ -31,8 +31,18 @@ const INTERNAL_DIRS: [&str; 4] = ["cloud", "archive", "logs", "run"];
 /// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::mine`）要认它，
 /// 字面量只许有这一处
 pub const MINE_DIR: &str = "presets-mine";
+
+/// 后处理执行归档的那棵树：`<用户根>/gcode_history`。
+///
+/// 目录形状照成熟版（`mkpsupporte` 的 `gcode_history`）：
+/// `<日期>/<名>_<时刻>{_original.gcode, .gcode, _meta.json}` 三件套。
+/// 落点住在**本应用自己的用户根**（`appDataDir/user`）—— 不碰 `~/Documents`
+/// （理由见模块头）。`pub`：归档（`crate::archive`）与报告页读口
+/// （`crate::ipc::report`）都要认它，字面量只许有这一处。
+pub const GCODE_HISTORY_DIR: &str = "gcode_history";
+
 /// 用户根下首次启动就建齐的子目录
-const USER_DIRS: [&str; 3] = ["exports", "reports", MINE_DIR];
+const USER_DIRS: [&str; 4] = ["exports", "reports", MINE_DIR, GCODE_HISTORY_DIR];
 
 /// 用户根在**应用数据目录**下的那一个子目录（`<appDataDir>/user`）。
 ///
@@ -100,6 +110,17 @@ pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let root = internal_root(app)?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS)?;
     Ok(root)
+}
+
+/// 用户根（**钩子进程**那条路：没有 `AppHandle`，只有平台规则 + 环境变量覆盖）。
+///
+/// 与 [`user_root`] 同一个落点、同一套子目录；算不出来 / 建不出来 ⇒ `None` ——
+/// 与 [`internal_root_headless`] 同一个理由：归档不该让后处理跑不起来
+/// （调用方把 `None` 降级成一条警告，见 `crate::archive` 的接入点）。
+pub fn user_root_headless() -> Option<PathBuf> {
+    let root = internal_root_headless()?.join(USER_ROOT_DIR);
+    ensure_dirs(&root, &USER_DIRS).ok()?;
+    Some(root)
 }
 
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {

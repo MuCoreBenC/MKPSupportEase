@@ -271,7 +271,9 @@ pub fn first_pass(
         // 协作取消（Task 17.2）：100ms 时间基节流，未取消时是一次时间比较
         cancel_checker.check(cancel, std::time::Instant::now())?;
         let line = &content[i];
-        let trimmed = line.trim().to_string();
+        // 借用而不是 `to_string()`：一份 90 万行的输入，每行一次堆分配只为 trim ——
+        // 而绝大多数行本来就没有前导/尾随空白。`trimmed` 只读，不参与任何改写。
+        let trimmed = line.trim();
         let class = classify_line(line);
 
         if i % 500 == 0 {
@@ -291,7 +293,7 @@ pub fn first_pass(
             && !trimmed.contains('E')
             && last_xy_command_fe_flag
         {
-            last_xy_command = trimmed.clone();
+            last_xy_command = trimmed.to_string();
         }
 
         if (trimmed.contains("G1 X") || trimmed.contains("G1 Y"))
@@ -302,13 +304,13 @@ pub fn first_pass(
             if let Some(e_idx) = trimmed.find(" E") {
                 last_xy_command = trimmed[..e_idx].trim().to_string();
             } else {
-                last_xy_command = trimmed.clone();
+                last_xy_command = trimmed.to_string();
             }
         }
 
-        if match_slicer_comment(&trimmed, "Z_HEIGHT: ") {
+        if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
             last_layer_height = current_layer_height;
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 current_layer_height = n;
                 z_height_values.push(current_layer_height);
@@ -332,14 +334,14 @@ pub fn first_pass(
         }
 
         if stats.total_layer_number == 0 && trimmed.contains("; total layer number:") {
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 stats.total_layer_number = n as i64;
             }
         }
 
         if stats.max_z_height == 0.0 && trimmed.contains("; max_z_height:") {
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 stats.max_z_height = n;
             }
@@ -350,66 +352,66 @@ pub fn first_pass(
                 || trimmed.contains("; OrcaSlicer ")
                 || trimmed.contains("; PrusaSlicer "))
         {
-            stats.slicer_version = trimmed.strip_prefix("; ").unwrap_or(&trimmed).to_string();
+            stats.slicer_version = trimmed.strip_prefix("; ").unwrap_or(trimmed).to_string();
         }
 
         if param_count < 9 {
             if trimmed.contains("; travel_speed =") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.travel_speed = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; nozzle_diameter = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.nozzle_diameter = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; initial_layer_print_height =") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.first_layer_height = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; layer_height = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.typical_layer_height = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; initial_layer_speed =") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.first_layer_speed = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; retraction_length = ") && ir_data.machine.retract_length == 0.0 {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.retract_length = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; filament_retraction_length = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.retract_length = n;
                 }
             }
             if trimmed.contains("; nozzle_temperature = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.toolhead.nozzle_switch_temperature = n;
                 }
                 param_count += 1;
             }
-            let ft = filament_type_from_line(&trimmed);
+            let ft = filament_type_from_line(trimmed);
             if !ft.is_empty() {
                 ir_data.filament.filament_type = ft;
                 param_count += 1;
@@ -425,20 +427,20 @@ pub fn first_pass(
                 param_count += 1;
             }
             if trimmed.contains("; outer_wall_speed =") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.wall_print_speed = n;
                 }
                 param_count += 1;
             }
             if trimmed.contains("; support_interface_speed = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     ir_data.machine.support_interface_speed = n;
                 }
             }
             if trimmed.contains("; enable_support_ironing = ") {
-                let nums = num_strip(&trimmed);
+                let nums = num_strip(trimmed);
                 if let Some(&n) = nums.first() {
                     if n == 1.0 {
                         has_ironing_feature = true;
@@ -453,14 +455,14 @@ pub fn first_pass(
         // 风扇状态跟踪（Phase 2：保存 / 恢复）：记录输入 G-code 的 M106 运行态，
         // 绝不写 Wiping.FanSpeed（配置值）。
         if trimmed.contains("M106 S") && !trimmed.contains("P1") && !trimmed.contains('[') {
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if nums.len() >= 2 {
                 ir_data.state.current_fan_speed = nums[1];
                 ir_data.state.current_fan_speed_set = true;
             }
         }
         if trimmed.contains("M106 P1 S") {
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if nums.len() >= 3 {
                 ir_data.state.current_fan_speed = nums[2];
                 ir_data.state.current_fan_speed_set = true;
@@ -468,17 +470,17 @@ pub fn first_pass(
         }
 
         if class == LineClass::Feature
-            && (has_slicer_comment_prefix(&trimmed, "FEATURE: Outer wall")
-                || has_slicer_comment_prefix(&trimmed, "FEATURE: Inner wall")
-                || has_slicer_comment_prefix(&trimmed, "FEATURE: Internal infill")
-                || has_slicer_comment_prefix(&trimmed, "FEATURE: Bridge")
-                || has_slicer_comment_prefix(&trimmed, "FEATURE: Top surface"))
+            && (has_slicer_comment_prefix(trimmed, "FEATURE: Outer wall")
+                || has_slicer_comment_prefix(trimmed, "FEATURE: Inner wall")
+                || has_slicer_comment_prefix(trimmed, "FEATURE: Internal infill")
+                || has_slicer_comment_prefix(trimmed, "FEATURE: Bridge")
+                || has_slicer_comment_prefix(trimmed, "FEATURE: Top surface"))
         {
             layer_feature_map.insert(ZKey(current_layer_height), true);
         }
 
         if class == LineClass::Feature
-            && has_slicer_comment_prefix(&trimmed, "FEATURE: Support interface")
+            && has_slicer_comment_prefix(trimmed, "FEATURE: Support interface")
         {
             copy_flag = true;
             start_idx = i;
@@ -512,8 +514,8 @@ pub fn first_pass(
         }
 
         if class == LineClass::Feature
-            && has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support interface")
+            && has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support interface")
             && copy_flag_moisture
         {
             copy_flag_moisture = false;
@@ -524,7 +526,7 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !scan::is_support_related_feature(&trimmed) {
+            if !scan::is_support_related_feature(trimmed) {
                 end_idx_moisture =
                     trim_end_idx_before_wipe(content, start_idx_moisture, end_idx_moisture);
             }
@@ -548,8 +550,8 @@ pub fn first_pass(
             }
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support interface")
+        if has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support interface")
             && copy_flag_fallback
         {
             copy_flag_fallback = false;
@@ -560,7 +562,7 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !scan::is_support_related_feature(&trimmed) {
+            if !scan::is_support_related_feature(trimmed) {
                 end_idx_fallback =
                     trim_end_idx_before_wipe(content, start_idx_fallback, end_idx_fallback);
             }
@@ -588,7 +590,7 @@ pub fn first_pass(
             }
         }
 
-        if copy_flag && match_slicer_comment(&trimmed, "CHANGE_LAYER") {
+        if copy_flag && match_slicer_comment(trimmed, "CHANGE_LAYER") {
             in_support_ironing_section = false;
             if ironing_removal_flag {
                 ironing_removal_flag = false;
@@ -631,10 +633,10 @@ pub fn first_pass(
             copy_flag = false;
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support interface")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing")
+        if has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support interface")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
             && copy_flag
             && (!has_ironing_feature
                 || (!ir_data.ironing.use_path && ir_data.ironing.mode == "off"))
@@ -653,7 +655,7 @@ pub fn first_pass(
                         break;
                     }
                 }
-                if !scan::is_support_related_feature(&trimmed) {
+                if !scan::is_support_related_feature(trimmed) {
                     end_idx = trim_end_idx_before_wipe(content, start_idx, end_idx);
                 }
                 if end_idx > start_idx {
@@ -687,7 +689,7 @@ pub fn first_pass(
             }
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing")
+        if has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
             && ir_data.ironing.mode == "off"
             && (has_ironing_feature || ir_data.ironing.use_path)
         {
@@ -775,7 +777,7 @@ pub fn first_pass(
             }
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing") {
+        if has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing") {
             has_ironing_feature = true;
             has_ironing_data = true;
             in_support_ironing_section = true;
@@ -853,7 +855,7 @@ pub fn first_pass(
             }
         }
 
-        if copy_flag_ironing && match_slicer_comment(&trimmed, "CHANGE_LAYER") {
+        if copy_flag_ironing && match_slicer_comment(trimmed, "CHANGE_LAYER") {
             let end_idx = i;
             if end_idx > start_idx_ironing {
                 if !iface_ironing.is_empty() {
@@ -877,10 +879,10 @@ pub fn first_pass(
             start_idx_ironing = i;
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support interface")
+        if has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support interface")
             && copy_flag
             && has_ironing_feature
             && (ir_data.ironing.use_path || ir_data.ironing.mode != "off")
@@ -899,7 +901,7 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !scan::is_support_related_feature(&trimmed) {
+            if !scan::is_support_related_feature(trimmed) {
                 end_idx = trim_end_idx_before_wipe(content, start_idx, end_idx);
             }
             if end_idx > start_idx {
@@ -930,9 +932,9 @@ pub fn first_pass(
         }
 
         if copy_flag_ironing
-            && has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing")
+            && has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
         {
             let mut end_idx = i;
             for j in start_idx_ironing..end_idx {
@@ -941,7 +943,7 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !scan::is_support_related_feature(&trimmed) {
+            if !scan::is_support_related_feature(trimmed) {
                 end_idx = trim_end_idx_before_wipe(content, start_idx_ironing, end_idx);
             }
             if end_idx > start_idx_ironing {
@@ -1218,9 +1220,9 @@ pub fn first_pass(
             last_xy_command_fe_flag = true;
         }
 
-        if has_slicer_comment_prefix(&trimmed, "FEATURE:")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing")
+        if has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
             && ironing_removal_flag
         {
             in_support_ironing_section = false;

@@ -1,22 +1,21 @@
 //! 旧世代（`mkp-ssr`）数据根 —— `<系统文稿目录>/MKPSupportSSR`。
 //!
-//! # 为什么这一个模块要去读另一棵树
+//! # 为什么这一个模块还留着
 //!
-//! 后处理这件事今天**不在 SupportEase 里跑**：用户把「复制后处理脚本」得到的
-//! `mkp-ssr.exe --Toml … --Gcode` 贴进切片器（Bambu Studio）的后处理栏，
-//! 由切片器导出时调用。那个钩子跑完把**执行报告**（`gcode_history/<日期>/*_meta.json`）
-//! 与**校准模型缓存**（`models/*.3mf`）都写在它自己的数据根里
-//! （`mkp-ssr` 的 `settings.rs`：默认 `~/Documents/MKPSupportSSR`，`MKP_SSR_DATA` 覆盖）。
+//! 2026-10-09 起**后处理在本程序里跑**（切片器带 `--Toml/--Gcode` 调的就是我们自己的
+//! 钩子）：执行记录与三件套备份落在自己的用户根（见 [`crate::archive`]），
+//! 报告页已经**不再读这棵树**。
 //!
-//! 报告页要回答"后处理跑得怎么样"，**唯一真实的账就在那一棵树里** ——
-//! 界面上不许拿假数据凑，所以只能去读真账。模型同理：用户机器上已经缓存的
-//! 三个 3mf 就在它的 `models/` 下，「从本地缓存打开」该认它。
+//! 本模块只剩**一处**消费者：**校准模型缓存**（`models/*.3mf`，`ipc/mod.rs` 的回落
+//! 分支）—— 用户机器上 mkp-ssr 时代缓存下来的那三个 3mf 还有用，这里找不到再退回
+//! 内置资产。哪天那个回落也退役，本模块整个删掉即可（旧目录用户自己删；
+//! 本模块**不搬旧数据、不写迁移逻辑**）。
 //!
 //! # 纪律
 //!
 //! - **只读**。这棵树的主人是 mkp-ssr，本模块一个字节都不写（连日志也不写进去）。
 //! - 找不到是**正常状态**（用户还没装 / 还没跑过后处理），返回 `None`，不报错 ——
-//!   界面据此显示"还没有执行记录"，与"读不出来"是两回事。
+//!   界面据此走内置资产那条回落。
 //! - `MKP_SSR_DATA` 与 mkp-ssr 认的是**同一个环境变量**：用户把数据根挪了，
 //!   两边看到的是同一棵树。
 //!
@@ -24,7 +23,7 @@
 //!
 //! `fsx::paths` 管的是 **SupportEase 自己的**两层数据根（那里的判据是"不许碰
 //! `~/Documents`"——那是给自家数据定的规矩）。本模块读的是**别人的数据根**，
-//! 是产品行为的一部分（报告页的数据源），不是把自家数据搬回 Documents。
+//! 只为那一处缓存回落服务。
 
 use std::path::PathBuf;
 
@@ -62,11 +61,6 @@ pub fn models_dir(root: &std::path::Path) -> PathBuf {
     root.join("models")
 }
 
-/// 后处理执行账（`<根>/gcode_history`）—— 钩子跑完落的 `_meta.json` 都在这下面的日期目录里。
-pub fn gcode_history_dir(root: &std::path::Path) -> PathBuf {
-    root.join("gcode_history")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,6 +79,5 @@ mod tests {
     fn sub_dirs_sit_under_the_root() {
         let root = data_root_in(std::path::Path::new("/tmp/d"));
         assert!(models_dir(&root).ends_with("MKPSupportSSR/models"));
-        assert!(gcode_history_dir(&root).ends_with("MKPSupportSSR/gcode_history"));
     }
 }

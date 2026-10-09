@@ -44,7 +44,7 @@ serde_json.workspace = true
 # （一个 exe 两种角色，见 `src/args.rs` / `src/hook.rs`），那两个 crate 因此成了必需依赖。
 [features]
 default = []
-workbench = ["dep:time", "dep:sysinfo"]
+workbench = ["dep:sysinfo"]
 
 [dependencies]
 tauri = { version = "2.9.1", features = ["macos-private-api"] }
@@ -82,9 +82,14 @@ tracing-appender = "0.2"
 # trace id 用 v7：带时间前缀，按 id 排序就是按时间排序，翻日志时有用
 uuid = { version = "1", features = ["v7"] }
 
-# 只有 workbench feature 用得到的：发布时间戳（`clock`）。
-# optional = true 的意思是"默认构建里本 crate 用不上它"。
-time = { version = "0.3", features = ["formatting", "macros"], optional = true }
+# 时间戳（工作台的发布时间戳 + 后处理归档的记录时间）。
+#
+# **不再是 optional**（2026-10-09）：后处理钩子——默认构建那条路——要写执行记录，
+# 记录里的 `startedAt`/`finishedAt` 与目录名 `YYYY-MM-DD` / `YYYYMMDD_HHMMSS`
+# 都是用户翻存档时直接看到的本地时间。
+# `local-offset` 是 `now_local()` 的门；解析不到时区会回落 UTC（见 `crate::archive`），
+# 归档不因为时区解析失败而停。
+time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 
 # 只有 workbench feature 用得到的：run-env 闸的**进程探测**——沿祖先链找本进程
 # 自己的 `tauri dev` 监视器（读命令行看 --no-watch）、按 PID 杀它。给用户的

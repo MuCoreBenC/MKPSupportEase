@@ -35,7 +35,7 @@
 pub mod hooks;
 pub mod progress;
 
-pub use progress::{NoProgress, ProgressEvent, ProgressSink, STEPS, Step};
+pub use progress::{NoProgress, ProgressEvent, ProgressSink, STEPS, Step, StepTiming};
 
 use std::path::{Path, PathBuf};
 
@@ -123,6 +123,9 @@ pub struct ProcessResult {
     pub warnings: Vec<String>,
     /// 实际执行到的步骤，供顺序断言与展示。
     pub executed_steps: Vec<Step>,
+    /// 逐步骤耗时（与 `executed_steps` 同序、同集合）。报告页「管线计时」区与 CLI
+    /// 的逐阶段打印都读它 —— 在此之前只有整跑总耗时。
+    pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
     pub detail_facts: DetailFacts,
 }
@@ -342,10 +345,11 @@ fn run(
     }
 
     let mut executed: Vec<Step> = Vec::new();
+    let mut timer = StepTimer::new(sink);
 
     // ---- step 1: input —— 唯一一次读输入文件 + sha256 ----
     checkpoint(cancel)?;
-    emit(sink, Step::Input, "正在读取文件...");
+    timer.begin(Step::Input, "正在读取文件...");
     executed.push(Step::Input);
     let raw = std::fs::read_to_string(&gcode_path).map_err(|e| PostprocError::Io {
         op: "read_gcode",
@@ -364,50 +368,60 @@ fn run(
     executed.push(Step::Config);
     let mut ir = match ir_source {
         IrSource::Config { path, overrides } => {
-            emit(sink, Step::Config, "正在加载配置...");
+            timer.begin(Step::Config, "正在加载配置...");
             config_ir(&path, &overrides)?
         }
         // 文案与 Config 分支**刻意不同**：这一步在这条路径上确实没有读任何文件，
         // 写成一样的「正在加载配置...」等于让进度条撒谎。
         IrSource::Prebuilt(ir) => {
-            emit(sink, Step::Config, "配置已就绪（IR 由调用方给出）");
+            timer.begin(Step::Config, "配置已就绪（IR 由调用方给出）");
             *ir
         }
     };
 
     // ---- step 3: machine-detect —— 维度填充 + 禁区 ----
     checkpoint(cancel)?;
-    emit(sink, Step::MachineDetect, "识别机型...");
+    timer.begin(Step::MachineDetect, "识别机型...");
     executed.push(Step::MachineDetect);
     let machine_type = ir.machine.machine_type.clone();
     fill_machine_facts(&mut ir, Some(&raw));
 
-    // ---- step 4: parse —— 校准模式检测 ----
+    // ---- step 4: parse —— 校准模式检测（与 step 5 的只读扫描并行）----
     checkpoint(cancel)?;
-    emit(sink, Step::Parse, "解析 G-code...");
+    timer.begin(Step::Parse, "解析 G-code...");
     executed.push(Step::Parse);
-    let calib_mode = crate::postproc::calibration::detect_mode(&content);
-    ir.safety.is_calibration_mode = crate::postproc::calibration::is_any(calib_mode);
-    // **无条件**取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
-    // 这个事实）。零新计算，只是提早取。
-    let calibration_mode = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
 
-    // ---- step 5: support —— DecideWiping → ApplyWipingDecision ----
-    checkpoint(cancel)?;
-    emit(sink, Step::Support, "支撑面检测...");
-    executed.push(Step::Support);
+    // ---- step 4 ∥ step 5 的只读半段 —— 两个全文件扫描并行 ----
+    // `detect_mode`（parse 步）与 `decide_wiping`（support 步的只读半段）都是全文件
+    // 扫描、互不写状态，串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
+    // 并行的墙钟时间记在 parse 步上 —— support 步只剩 ApplyWipingDecision 那一笔，
+    // 两步相加仍等于真实总耗时。
+    //
     // preferred 的来源：来源仓库取 `preset.config.wiping.have_wiping_components`，
     // 而 `ir::build.rs:74` 是 `ir.wiping.preferred_mode = cfg.…have_wiping_components`
     // 的**纯恒等拷贝**（无归一化，Task 8 实测确认）⇒ 从 IR 取同一个值，
     // 而不是把 TOML 结构重新拉进来。钉住这条恒等的判据在
     // `tests/pipeline_wiping_source.rs`。
     let preferred = ir.wiping.preferred_mode.clone();
-    let decision = crate::postproc::support::decide_wiping(&preferred, &content);
+    let (calib_mode, decision) = std::thread::scope(|s| {
+        let scan = s.spawn(|| crate::postproc::calibration::detect_mode(&content));
+        let decision = crate::postproc::support::decide_wiping(&preferred, &content);
+        (scan.join().expect("detect_mode 不 panic"), decision)
+    });
+    ir.safety.is_calibration_mode = crate::postproc::calibration::is_any(calib_mode);
+    // **无条件**取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
+    // 这个事实）。零新计算，只是提早取。
+    let calibration_mode = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
+
+    // ---- step 5: support —— ApplyWipingDecision ----
+    checkpoint(cancel)?;
+    timer.begin(Step::Support, "支撑面检测...");
+    executed.push(Step::Support);
     let wiping_applied = crate::postproc::support::apply_wiping_decision(&mut ir, &decision);
 
     // ---- step 6: collision ----
     checkpoint(cancel)?;
-    emit(sink, Step::Collision, "碰撞检测...");
+    timer.begin(Step::Collision, "碰撞检测...");
     executed.push(Step::Collision);
     if crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
@@ -421,7 +435,7 @@ fn run(
     // ---- step 7: calib-check —— 仅动态校准：BBox + 质心 + dry-run ----
     checkpoint(cancel)?;
     if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
-        emit(sink, Step::CalibCheck, "校准模型检测...");
+        timer.begin(Step::CalibCheck, "校准模型检测...");
         executed.push(Step::CalibCheck);
         let bbox = crate::postproc::disk::compute_bbox(&content)?;
         let centroid = centroid_of(&content);
@@ -439,11 +453,11 @@ fn run(
 
     // ---- step 8: pass1 ----
     checkpoint(cancel)?;
-    emit(sink, Step::Pass1, "第一遍扫描：收集信息...");
+    timer.begin(Step::Pass1, "第一遍扫描：收集信息...");
     executed.push(Step::Pass1);
     let toml_machine = machine_type.clone();
     let mut p1_fwd = |pct: f64, msg: String| {
-        sink.emit(ProgressEvent {
+        timer.emit(ProgressEvent {
             step: Step::Pass1,
             fraction_in_step: Some((pct / 100.0).clamp(0.0, 1.0) as f32),
             message: msg,
@@ -462,10 +476,10 @@ fn run(
 
     // ---- step 9: pass2（消耗式吃 Pass1Output）----
     checkpoint(cancel)?;
-    emit(sink, Step::Pass2, "第二遍扫描：应用修改...");
+    timer.begin(Step::Pass2, "第二遍扫描：应用修改...");
     executed.push(Step::Pass2);
     let mut p2_fwd = |pct: f64, msg: String| {
-        sink.emit(ProgressEvent {
+        timer.emit(ProgressEvent {
             step: Step::Pass2,
             fraction_in_step: Some((pct / 100.0).clamp(0.0, 1.0) as f32),
             message: msg,
@@ -488,7 +502,7 @@ fn run(
     // ---- step 10: calibration —— 校准插入（内存行序列）----
     checkpoint(cancel)?;
     if crate::postproc::calibration::is_any(calib_mode) {
-        emit(sink, Step::Calibration, "校准 G-code 插入...");
+        timer.begin(Step::Calibration, "校准 G-code 插入...");
         executed.push(Step::Calibration);
         let (bbox, centroid) = if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
             (
@@ -512,7 +526,7 @@ fn run(
     // ---- step 11: write —— 三个 hooks + .part + rename ----
     // 最后一道取消检查点：此后开始落盘，写就写完。
     checkpoint(cancel)?;
-    emit(sink, Step::Write, "正在写入文件...");
+    timer.begin(Step::Write, "正在写入文件...");
     executed.push(Step::Write);
     out_lines = hooks::apply_begin_stage_retract(
         out_lines,
@@ -531,23 +545,32 @@ fn run(
         Some(p) if p != &gcode_path => p.clone(),
         _ => gcode_path.clone(),
     };
-    write_atomic(&final_output_path, &out_lines)?;
-
-    // ---- step 12: printtime —— 不是 transform，只填字段 ----
-    // 执行过的步骤必须发事件：来源这一步以前只 push 不 emit ⇒ 最后一帧永远停在
-    // 「写入文件」，完成后看起来像卡死。
-    emit(sink, Step::PrintTime, "打印时间估算...");
-    executed.push(Step::PrintTime);
+    // **一次 join，两处共用**（写盘 + printtime）：旧实现写盘 join 一次、
+    // printtime 又 `out_lines.join("\n")` 一次 —— 26MB 的拼接做了两遍。
+    // 先 join 再放掉行序列，峰值内存也低一档。
     let mut out_text = out_lines.join("\n");
     out_text.push('\n');
-    let print_time = crate::postproc::printtime::estimate(
-        &out_text,
-        &crate::postproc::printtime::Options {
-            compute_delta: true,
-            startup_overhead_seconds: 240.0,
-        },
-    );
+    drop(out_lines);
 
+    // ---- step 12: printtime —— 不是 transform，只填字段；**与写盘并行** ----
+    // 两者都只读同一份成品文本：写盘是 IO/内存、估算吃 CPU，重叠省下 min(两者)。
+    // 事件仍按编排顺序发（执行过的步骤必须发事件：来源这一步以前只 push 不 emit
+    // ⇒ 最后一帧永远停在「写入文件」，完成后看起来像卡死）。写盘失败照旧返回错误
+    // —— 代价只是这次估算白算了一遍（没有落盘副作用）。
+    timer.begin(Step::PrintTime, "打印时间估算...");
+    executed.push(Step::PrintTime);
+    let print_opts = crate::postproc::printtime::Options {
+        compute_delta: true,
+        startup_overhead_seconds: 240.0,
+    };
+    let (write_result, print_time) = std::thread::scope(|s| {
+        let estimating = s.spawn(|| crate::postproc::printtime::estimate(&out_text, &print_opts));
+        let writing = write_text_atomic(&final_output_path, &out_text);
+        (writing, estimating.join().expect("printtime 不 panic"))
+    });
+    write_result?;
+
+    let step_timings = timer.finish();
     Ok(ProcessResult {
         output_path: final_output_path,
         stats: Stats {
@@ -557,6 +580,7 @@ fn run(
         print_time: Some(print_time),
         warnings: ir.warnings.clone(),
         executed_steps: executed,
+        step_timings,
         input_sha256,
         detail_facts: DetailFacts {
             ir,
@@ -578,15 +602,78 @@ fn centroid_of(content: &[String]) -> crate::postproc::disk::CentroidResult {
     }
 }
 
-fn emit(sink: &mut dyn ProgressSink, step: Step, message: &str) {
-    sink.emit(ProgressEvent {
-        step,
-        fraction_in_step: None,
-        message: message.to_string(),
-    });
+/// 逐步计时的收集器：包住调用方给的 sink，记录每步入点时刻与该步最后一条消息。
+///
+/// 为什么不手写「一对 `Instant::now()` + 一个 push」：12 步里有 3 步是条件执行的
+/// （calib-check / calibration / calibration 的分支），手写的结算点早晚会在某个
+/// 分支上漏一笔；包一层之后，结算点只有两处 —— 下一次 [`Self::begin`] 与出口的
+/// [`Self::finish`]。
+///
+/// 事件语义**一个字不改**：`begin` 发的事件与旧 `emit` 逐字段相同，步内进度事件
+/// 原样转发（只是顺手记下消息），`ProgressEvent` 依旧不带全局百分比。
+struct StepTimer<'a> {
+    sink: &'a mut dyn ProgressSink,
+    timings: Vec<StepTiming>,
+    /// 当前步：`(步骤, 入点时刻, 该步最后一条消息)`。
+    current: Option<(Step, std::time::Instant, String)>,
+}
+
+impl<'a> StepTimer<'a> {
+    fn new(sink: &'a mut dyn ProgressSink) -> Self {
+        Self {
+            sink,
+            // 步骤数上界 = STEPS.len()，账本一次分配到位
+            timings: Vec::with_capacity(STEPS.len()),
+            current: None,
+        }
+    }
+
+    /// 进入一步：结算上一步 → 发入口事件 → 开始计时。
+    fn begin(&mut self, step: Step, message: &str) {
+        self.settle();
+        self.sink.emit(ProgressEvent {
+            step,
+            fraction_in_step: None,
+            message: message.to_string(),
+        });
+        self.current = Some((step, std::time::Instant::now(), message.to_string()));
+    }
+
+    /// 结算当前步。幂等：`current` 取走之后再调不会重复记账。
+    fn settle(&mut self) {
+        if let Some((step, started, message)) = self.current.take() {
+            self.timings.push(StepTiming {
+                step,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                message,
+            });
+        }
+    }
+
+    /// 收尾：结算最后一步，交出账本。
+    fn finish(mut self) -> Vec<StepTiming> {
+        self.settle();
+        self.timings
+    }
+}
+
+impl ProgressSink for StepTimer<'_> {
+    fn emit(&mut self, event: ProgressEvent) {
+        if let Some((step, _, message)) = self.current.as_mut()
+            && *step == event.step
+        {
+            // 覆盖而不是拼接：口径 = 「该步最后一条消息」（旧世代 meta 同款）
+            message.clear();
+            message.push_str(&event.message);
+        }
+        self.sink.emit(event);
+    }
 }
 
 /// `<out>.part` → rename 原子替换；rename 失败回退复制。
+///
+/// 接**成品文本**而不是行序列：`join` 由调用方做一次（write 与 printtime 共用
+/// 同一份），这里不再自己拼 —— 旧签名每调一次就多一次 26MB 的拷贝。
 ///
 /// **写盘豁免**（`clippy::disallowed_methods`）：禁列禁 `fs::write` 的理由是
 /// "会截断目标文件、崩溃时留半个文件"。这里写的是 **`.part` 临时文件**，
@@ -595,15 +682,13 @@ fn emit(sink: &mut dyn ProgressSink, step: Step, message: &str) {
 ///
 /// **退役条件**：Task 19 统一写盘入口落地、且内核能用上那个入口时，改成转调它。
 #[allow(clippy::disallowed_methods)]
-fn write_atomic(path: &Path, lines: &[String]) -> Result<(), PostprocError> {
+fn write_text_atomic(path: &Path, text: &str) -> Result<(), PostprocError> {
     let part_path = {
         let mut p = path.as_os_str().to_os_string();
         p.push(".part");
         PathBuf::from(p)
     };
-    let mut text = lines.join("\n");
-    text.push('\n');
-    std::fs::write(&part_path, &text).map_err(|e| PostprocError::Io {
+    std::fs::write(&part_path, text).map_err(|e| PostprocError::Io {
         op: "write_part",
         source: e,
     })?;

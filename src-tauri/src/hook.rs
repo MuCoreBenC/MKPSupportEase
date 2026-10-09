@@ -20,12 +20,15 @@
 //! 有界面时是 [`ChannelSink`] / [`ChannelAsker`]，没有界面时是 [`NoProgress`] /
 //! [`MismatchPolicy::Refuse`]（**不替用户决定**）。
 //!
+//! # 执行记录与备份（2026-10-09 起）
+//!
+//! 每跑一次落三件套：`<用户根>/gcode_history/<日期>/<名>_{_original.gcode, .gcode, _meta.json}`
+//! （形状与成熟版一致，落点住本应用自己的数据根 —— 见 [`crate::archive`]）。
+//! **原件在处理前先备份**：原地覆盖之后原文件就变样了，这一笔是它唯一的副本；
+//! 失败与取消也留记录（`error` / `cancelled`），报告页扫 `*_meta.json`。
+//!
 //! # 还没做的（按成熟版的形状接着做，别当成"以后再说"）
 //!
-//! - **执行记录**（`_meta.json`）与**备份**：成熟版每跑一次落
-//!   `<数据根>/gcode_history/<日期>/<名>_{_original.gcode, .gcode, _meta.json}`，
-//!   报告页扫 `*_meta.json`。我们这边报告页读的还是旧世代那棵树 —— 落点要跟报告页一起定；
-//!   在这一条到位之前，**成功之后原件就没了**（失败与取消都不动原件，靠内核的 `.part`）。
 //! - **看门狗**：成熟版有 30 分钟上限、心跳丢失、10 分钟无进展就取消、卡死快照。
 //!   我们这一版只有"用户在界面上按停止"与 Ctrl-C。
 //!
@@ -43,6 +46,7 @@ use std::time::{Duration, Instant};
 use postprocess::diag::{CancelToken, PostprocError};
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressSink};
 
+use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
 use crate::args::HookJob;
 
 /// 成功。
@@ -146,9 +150,24 @@ pub fn run(
         HookError::BadInput(format!("读不到输入 G-code：{}（{e}）", job.gcode.display()))
     })?;
 
+    // 记账起点（本地时刻）：归档记录里的 `startedAt`。读文件之后、干活之前 ——
+    // 口径是「这一趟从哪一刻开始」，不是进程启动时刻。
+    let started_at = crate::archive::now_local();
+
+    // 归档第一笔：**原件先备份**。原地覆盖模式下原文件会被处理后的内容盖掉，
+    // 这一笔是它唯一的副本。失败只降级成警告：产物优先（见 `crate::archive` 模块头）。
+    let mut archive_warnings: Vec<String> = Vec::new();
+    let archived = archive_begin(&job.gcode, &raw, &mut archive_warnings);
+
     // 预设 → IR：唯一入口（`crates/preset`）。预设里的参数错、机型不认识都在这一步报出来
-    let ir = preset::load_ir(&job.toml, Some(&raw))
-        .map_err(|e| HookError::BadInput(format!("预设不可用 [{}]：{e}", e.code())))?;
+    let ir = match preset::load_ir(&job.toml, Some(&raw)) {
+        Ok(ir) => ir,
+        Err(e) => {
+            let message = format!("预设不可用 [{}]：{e}", e.code());
+            archive_failure(&archived, job, "", &message, false, started_at, started);
+            return Err(HookError::BadInput(message));
+        }
+    };
 
     // 机型核对：预设说一台、切片器那份自报另一台 —— 维度与边界全按预设算，
     // 闷头跑出来的是垃圾（旧世代那次实测：A1 的图 + A1 mini 的预设，
@@ -163,23 +182,43 @@ pub fn run(
         match mismatch {
             MismatchPolicy::Ask(asker) => {
                 if !asker.confirm(&question) {
-                    return Err(HookError::Cancelled(format!(
+                    let message = format!(
                         "已停下（机型不匹配：G-code 是 {gcode_machine}，预设是 {preset_machine}）—— \
                          原文件没有被改动"
-                    )));
+                    );
+                    archive_failure(
+                        &archived,
+                        job,
+                        &preset_machine,
+                        &message,
+                        true,
+                        started_at,
+                        started,
+                    );
+                    return Err(HookError::Cancelled(message));
                 }
             }
             MismatchPolicy::Refuse => {
-                return Err(HookError::BadInput(format!(
+                let message = format!(
                     "机型不匹配：G-code 是 {gcode_machine}，预设是 {preset_machine} —— \
                      换一份对应机型的预设再跑"
-                )));
+                );
+                archive_failure(
+                    &archived,
+                    job,
+                    &preset_machine,
+                    &message,
+                    false,
+                    started_at,
+                    started,
+                );
+                return Err(HookError::BadInput(message));
             }
         }
     }
 
     // 12 步管线。`output_path: None` = 原地覆盖（`.part` + rename，见内核 pipeline 文档）
-    let done = pipeline::process_with_ir(
+    let done = match pipeline::process_with_ir(
         IrProcessRequest {
             gcode_path: job.gcode.clone(),
             ir,
@@ -187,13 +226,177 @@ pub fn run(
         },
         sink,
         cancel,
-    )
-    .map_err(report_error)?;
+    ) {
+        Ok(done) => done,
+        Err(err) => {
+            let e = report_error(err);
+            archive_failure(
+                &archived,
+                job,
+                &preset_machine,
+                &e.to_string(),
+                e.cancelled(),
+                started_at,
+                started,
+            );
+            return Err(e);
+        }
+    };
 
+    // 归档第二笔：复制输出 + 写成功记录（失败只降级成警告）
+    if let Some(paths) = &archived {
+        archive_success(
+            paths,
+            job,
+            &preset_machine,
+            &done,
+            raw.lines().count() as u64,
+            started_at,
+            started,
+            &mut archive_warnings,
+        );
+    }
+
+    let mut warnings = done.warnings;
+    warnings.extend(archive_warnings);
     Ok(Outcome {
         output: done.output_path,
         elapsed_ms: started.elapsed().as_millis(),
-        warnings: done.warnings,
+        warnings,
+    })
+}
+
+/// 归档第一笔：原件备份。返回 `None` = 这次没有归档（没有数据根 / 写失败），
+/// 原因作为警告记进 `warnings` —— **调用点照常往下跑**（产物优先，见 `crate::archive`）。
+fn archive_begin(
+    gcode: &std::path::Path,
+    raw: &str,
+    warnings: &mut Vec<String>,
+) -> Option<ArchivePaths> {
+    let Some(root) = crate::archive::history_root() else {
+        warnings.push("归档不可用：找不到应用数据目录（这一次不落执行记录）".to_string());
+        return None;
+    };
+    match crate::archive::begin(&root, gcode, raw, crate::archive::now_local()) {
+        Ok(paths) => Some(paths),
+        Err(e) => {
+            warnings.push(format!("原件备份失败（这一次不落执行记录）：{e}"));
+            None
+        }
+    }
+}
+
+/// 归档第二笔（成功）：复制输出 + 写成功记录。每一步失败都只降级成警告。
+#[allow(clippy::too_many_arguments)]
+fn archive_success(
+    paths: &ArchivePaths,
+    job: &HookJob,
+    machine: &str,
+    done: &postprocess::pipeline::ProcessResult,
+    input_lines: u64,
+    started_at: time::OffsetDateTime,
+    started: std::time::Instant,
+    warnings: &mut Vec<String>,
+) {
+    if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
+        warnings.push(format!("输出归档失败：{e}"));
+    }
+
+    let output_file = match crate::archive::sha256_of(&done.output_path) {
+        Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
+            Ok(fact) => Some(fact),
+            Err(e) => {
+                warnings.push(format!("输出文件事实读不出来：{e}"));
+                None
+            }
+        },
+        Err(e) => {
+            warnings.push(format!("输出文件摘要算不出来：{e}"));
+            None
+        }
+    };
+
+    let meta = Meta {
+        schema_version: Meta::SCHEMA_VERSION,
+        started_at: crate::archive::display_stamp(started_at),
+        finished_at: crate::archive::display_stamp(crate::archive::now_local()),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        preset_name: file_name_of(&job.toml),
+        machine_type: machine.to_string(),
+        preset_path: job.toml.display().to_string(),
+        gcode_path: job.gcode.display().to_string(),
+        invocation: crate::archive::invocation(),
+        warnings: done.warnings.clone(),
+        error: None,
+        cancelled: false,
+        pipeline: done
+            .step_timings
+            .iter()
+            .map(|t| PipelineStep::from_timing(t, PipelineStatus::Complete))
+            .collect(),
+        detail: Detail {
+            input_file: input_fact(&job.gcode, Some(input_lines), &done.input_sha256),
+            output_file,
+            stats: serde_json::to_value(&done.stats.pass1).ok(),
+            print_time: done
+                .print_time
+                .as_ref()
+                .and_then(|pt| serde_json::to_value(pt).ok()),
+        },
+    };
+    if let Err(e) = crate::archive::write_meta(paths, &meta) {
+        warnings.push(format!("执行记录写入失败：{e}"));
+    }
+}
+
+/// 归档第三笔（失败 / 取消）：写 error 记录（没有输出件）。
+///
+/// 这里的失败只进日志（`tracing::warn`）—— 调用点马上就要把 `Err` 返回给切片器，
+/// 没有一条能把警告带给用户的通道；但归档失败必须留下痕迹（排查用）。
+#[allow(clippy::too_many_arguments)]
+fn archive_failure(
+    archived: &Option<ArchivePaths>,
+    job: &HookJob,
+    machine: &str,
+    error: &str,
+    cancelled: bool,
+    started_at: time::OffsetDateTime,
+    started: std::time::Instant,
+) {
+    let Some(paths) = archived else { return };
+    let meta = Meta {
+        schema_version: Meta::SCHEMA_VERSION,
+        started_at: crate::archive::display_stamp(started_at),
+        finished_at: crate::archive::display_stamp(crate::archive::now_local()),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        preset_name: file_name_of(&job.toml),
+        machine_type: machine.to_string(),
+        preset_path: job.toml.display().to_string(),
+        gcode_path: job.gcode.display().to_string(),
+        invocation: crate::archive::invocation(),
+        warnings: Vec::new(),
+        error: Some(error.to_string()),
+        cancelled,
+        pipeline: Vec::new(),
+        detail: Detail {
+            input_file: input_fact(&job.gcode, None, ""),
+            output_file: None,
+            stats: None,
+            print_time: None,
+        },
+    };
+    if let Err(e) = crate::archive::write_meta(paths, &meta) {
+        tracing::warn!(error = %e, "执行记录写入失败（失败/取消那一条）");
+    }
+}
+
+/// 输入侧的文件事实（sha 由内核给；大小从盘上取，读不到就落 0 —— 记录本身比完美重要）。
+fn input_fact(gcode: &std::path::Path, lines: Option<u64>, sha256: &str) -> FileFact {
+    crate::archive::file_fact(gcode, lines, sha256.to_string()).unwrap_or_else(|_| FileFact {
+        path: gcode.display().to_string(),
+        size_bytes: 0,
+        lines,
+        sha256: sha256.to_string(),
     })
 }
 

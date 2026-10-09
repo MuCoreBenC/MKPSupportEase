@@ -6,7 +6,8 @@
  * 的模块头：显示名与全局百分比**只允许存在于 UI 一处**）。
  *
  * 权重是**体感**不是测量：两次 pass 是绝对大头（一条 G-code 逐行过两遍），
- * 其余是解析与收尾。内核不报耗时分布，这里也不假装知道它。
+ * 其余是解析与收尾。进度事件（`ProgressEvent`）这条通道不带耗时 —— 逐阶段耗时是
+ * 另一条账（`ProcessResult.step_timings` → 执行记录的 `pipeline[]`），报告页才显示它。
  */
 
 export interface StepView {

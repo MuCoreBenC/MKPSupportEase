@@ -89,6 +89,20 @@ pub trait ProgressSink {
     fn emit(&mut self, event: ProgressEvent);
 }
 
+/// 一步的实际耗时（**正式产物**：CLI 的逐阶段打印与执行记录 `pipeline[]` 都吃它）。
+///
+/// 与 [`ProgressEvent`] 的关系：事件回答「现在在做什么」（流），这里回答「这一步花了多久」
+/// （账，一步一笔）。`message` = 该步**最后一条**进度消息（该步没发过进度就是入口消息），
+/// 与旧世代 `_meta.json` 里 `pipeline[].message` 同口径 —— 报告页直接显示它。
+///
+/// `step` 复用稳定 id（[`Step::id`]）：中文显示名仍只许住 UI 一处。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepTiming {
+    pub step: Step,
+    pub elapsed_ms: u64,
+    pub message: String,
+}
+
 /// 任何 `FnMut(ProgressEvent)` 都是 sink（测试与 CLI 转发用）。
 impl<F: FnMut(ProgressEvent)> ProgressSink for F {
     fn emit(&mut self, event: ProgressEvent) {

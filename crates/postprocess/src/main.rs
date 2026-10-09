@@ -170,10 +170,21 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
         None => eprintln!("[progress] {:?} {}", event.step, event.message),
     };
 
+    let started = std::time::Instant::now();
     match pipeline::process(request, &mut sink, &cancel) {
         Ok(result) => {
             // 结果路径 → stdout，**独占一行**（脚本消费面）
             println!("{}", result.output_path.display());
+            // 逐阶段耗时 → stderr（性能基线靠这张表；报告页的 `pipeline[]` 吃的是同一份账）
+            eprintln!("总耗时：{} ms", started.elapsed().as_millis());
+            for t in &result.step_timings {
+                eprintln!(
+                    "  {:<14} {:>8} ms  {}",
+                    t.step.id(),
+                    t.elapsed_ms,
+                    t.message
+                );
+            }
             if let Some(pt) = &result.print_time {
                 eprintln!(
                     "预计打印时间：{:.1}s（tool {:.1}s / prep {:.1}s / startup {:.1}s / segments {}）",

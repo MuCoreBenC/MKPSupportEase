@@ -2,30 +2,31 @@
 //!
 //! # 账在哪
 //!
-//! 后处理今天由 `mkp-ssr.exe` 跑（用户把首页「复制后处理脚本」得到的命令贴进切片器
-//! 的后处理栏）。那个钩子每跑一次，就把执行报告落在自己的数据根里：
+//! 后处理由本程序自己跑（切片器导出时带 `--Toml/--Gcode` 调的那一次，见
+//! [`crate::hook`]）。每跑一次落三件套（形状与成熟版一致，写的那一侧是
+//! [`crate::archive`]）：
 //!
 //! ```text
-//! <旧世代数据根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>_meta.json   ← 执行报告（本模块读的）
-//! <旧世代数据根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>_original.gcode
-//! <旧世代数据根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>_final.gcode
+//! <用户根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>_meta.json   ← 执行报告（本模块读的）
+//! <用户根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>_original.gcode
+//! <用户根>/gcode_history/<YYYY-MM-DD>/<名>_<时刻>.gcode
 //! ```
 //!
-//! 数据根的定位见 [`crate::legacy`]。**本模块只读** —— 账的主人是那个钩子，
-//! SupportEase 一个字节都不写它。
+//! **本模块只读** —— 账的主人是钩子那条路。2026-10-09 起不再读旧世代（`mkp-ssr`）
+//! 那棵树：换标识就是全新应用，旧目录用户自己删（旧世代的记录因此不再出现在这一页）。
 //!
 //! # 失败与空长得不一样
 //!
-//! - **没有记录**（数据根不存在 / `gcode_history` 是空的）→ 空列表，界面说"还没有执行记录"；
+//! - **没有记录**（`gcode_history` 还是空的）→ 空列表，界面说"还没有执行记录"；
 //! - **读不出来**（某份 `_meta.json` 坏了）→ 这一条**照进列表**，`ok = false` +
 //!   `error` 里写清"这份记录读不出来"——藏起它就等于替钩子瞒了一次事故；
 //! - **跑失败的记录**（钩子写的 `error`）→ 同样进列表，`ok = false`。
 //!
 //! # 字段口径
 //!
-//! `_meta.json` 是 mkp-ssr 的 `history.rs` 写的 schema v2：起止时间、耗时、预设 / 机型、
-//! `invocation`（exe + argv）、输入输出指纹、`warnings`、`error`、`detail`
-//! （文件事实 / 头部刮取 / 统计 / 打印时间 / 全量 IR）与 `pipeline`（12 步计时）。
+//! `_meta.json` 是 [`crate::archive::Meta`] 写的 schema v2（键名与旧世代同口径）：
+//! 起止时间、耗时、预设 / 机型、`invocation`（exe + argv）、输入输出指纹、`warnings`、
+//! `error`、`detail`（文件事实 / 统计 / 打印时间）与 `pipeline`（逐阶段计时）。
 //! 本模块按**界面要显示的**截取 —— 没显示的字段不搬，将来要展示再加，不预造大 DTO。
 
 use serde::Serialize;
@@ -175,25 +176,26 @@ fn broken_summary(id: &str, day: &str, why: String) -> ReportSummary {
     }
 }
 
+/// 归档树的根（`<用户根>/gcode_history`）—— 与钩子写的那棵树是同一处：
+/// 两边都从 [`crate::fsx::paths`] 认同一个子目录名，字面量只住那里一处。
+///
+/// `user_root` 会把缺失的子目录建齐（首启动就建），所以"还没有记录"是
+/// **空列表**而不是错误 —— 三态里的第一种（见模块头）。
+fn history_root(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
+    Ok(crate::fsx::paths::user_root(app)?.join(crate::fsx::paths::GCODE_HISTORY_DIR))
+}
+
 /// 全部执行记录（新在前）。
 #[tauri::command]
 pub fn get_report_list(app: AppHandle) -> Result<Vec<ReportSummary>, AppError> {
-    traced("getReportList", |_| {
-        let root = crate::legacy::data_root(&app).ok_or_else(|| {
-            AppError::not_found("这台机器上还没有后处理的数据（没跑过 MKP 后处理）")
-        })?;
-        Ok(collect(&crate::legacy::gcode_history_dir(&root)))
-    })
+    traced("getReportList", |_| Ok(collect(&history_root(&app)?)))
 }
 
 /// 一条记录的详情。`id` 是 [`ReportSummary::id`] 那个值。
 #[tauri::command]
 pub fn get_report_detail(app: AppHandle, id: String) -> Result<ReportDetail, AppError> {
     traced("getReportDetail", |_| {
-        let root = crate::legacy::data_root(&app).ok_or_else(|| {
-            AppError::not_found("这台机器上还没有后处理的数据（没跑过 MKP 后处理）")
-        })?;
-        let dir = crate::legacy::gcode_history_dir(&root);
+        let dir = history_root(&app)?;
         let (path, day) = find_meta(&dir, &id).ok_or_else(|| {
             AppError::not_found(format!("没有这条执行记录：{id}"))
         })?;
