@@ -59,6 +59,9 @@ export default function PageSettings() {
    *   `SoftwareUpdate`  查到了，按 `hasUpdate` 分两句
    */
   const [update, setUpdate] = useState<SoftwareUpdate | null>(null)
+  /* 查更新**失败的原因**（断网 / 没配源 / 远端没发 release.json）——
+     与「没有新版」严格分开（A-53：失败不许长得像"已是最新"，也不许吞掉原因） */
+  const [updateErr, setUpdateErr] = useState<string | null>(null)
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
@@ -88,6 +91,7 @@ export default function PageSettings() {
    */
   const checkUpdate = useCallback(async () => {
     setUpdateBusy(true)
+    setUpdateErr(null)
     try {
       const [version, got] = await Promise.all([
         api.getAppVersion().catch(() => ''),
@@ -95,9 +99,11 @@ export default function PageSettings() {
       ])
       setAppVersion(version || got.currentVersion)
       setUpdate(got)
-    } catch {
-      /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 —— 如实留"没查到" */
+    } catch (e) {
+      /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 ——
+         如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
       setUpdate(null)
+      setUpdateErr(errorText(e))
       const v = await api.getAppVersion().catch(() => '')
       setAppVersion(v)
     } finally {
@@ -252,7 +258,9 @@ export default function PageSettings() {
 
             {update === null && !updateBusy && (
               <p className={s.fieldNote}>
-                更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。
+                {updateErr !== null
+                  ? `这次检查失败了：${updateErr}`
+                  : '更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。'}
               </p>
             )}
           </div>

@@ -219,6 +219,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
+        // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
+        // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
+        // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
+        ipc::update::update_info,
+        ipc::update::start_update,
+        ipc::update::pause_update,
+        ipc::update::resume_update,
+        ipc::update::cancel_update,
+        ipc::update::install_update,
+        ipc::update::open_url,
     ])
 }
 
@@ -239,6 +249,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
         ipc::mine::get_user_preset_files,
         ipc::mine::read_user_preset_text,
+        // 备注覆盖账 + 改归属（与上面那份清单一字不差 —— 2026-10-09 对齐：这三条
+        // 原来只在客户端那份里，工作台构建里发它们会落到 NOT_IMPLEMENTED）
+        ipc::mine::get_preset_remarks,
+        ipc::mine::set_preset_remark,
+        ipc::mine::set_user_preset_machine_version,
         // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
         ipc::mine::begin_preset_edit,
         ipc::mine::patch_preset_draft,
@@ -443,4 +458,99 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::sandbox::wb_sandbox_refill,
         app::sandbox::wb_sandbox_wipe,
     ])
+}
+
+#[cfg(test)]
+mod command_list_parity {
+    //! **两份命令清单的一致性判据**（X-01 / X-08 的钉子）。
+    //!
+    //! Tauri 只许调一次 `invoke_handler`，「客户端命令 + 可选的工作台命令」没法拼接，
+    //! 只能给出两份完整清单 —— **手写的两份一定会漂**，而且已经漂过：
+    //!
+    //! - `ipc::update::*` 七条只在工作台那份里 ⇒ 正式客户端的「检查更新 / 下载安装」
+    //!   全落到 `NOT_IMPLEMENTED`（审计 X-01，2026-10-09 修）；
+    //! - `ipc::mine::set_user_preset_machine_version` 等三条只在客户端那份里
+    //!   （审计 X-08 的同一个病）。
+    //!
+    //! 所以这里扫**本文件源码**（与 `fsx::paths` 那条"用户根不碰 Documents"同一路数）：
+    //! 把两个 `generate_handler![…]` 块里的命令路径抽出来逐个比 ——
+    //! 客户端有的工作台必须有；工作台多出来的只许是 `workbench::app` 那一支。
+
+    use std::collections::BTreeSet;
+
+    /// 一个 `generate_handler![…]` 块里的命令路径（`a::b::c` 形状的那些 token）。
+    fn commands_in(block: &str) -> BTreeSet<String> {
+        block
+            .lines()
+            .map(|l| l.split("//").next().unwrap_or(""))
+            .flat_map(|l| l.split(','))
+            .map(|t| t.trim().to_string())
+            .filter(|t| t.contains("::") && !t.contains(' ') && !t.contains('('))
+            .collect()
+    }
+
+    fn the_two_lists() -> Vec<BTreeSet<String>> {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+            .expect("读得到 lib.rs");
+        let mut lists = Vec::new();
+        let mut rest = src.as_str();
+        /* 锚 = **调用现场**那一句，现场拼出来：本模块自己的注释与常量里都写着
+        片段字面量，整句拼接只在两处真实调用点出现 —— 免得把自己扫成第三份清单。
+        收口认 `\n    ])`（两份清单的收尾行）而不是第一个 `]` —— 块里注释带 `]`
+        会把清单从中间截断（实测就是这么把 update 七条截丢的） */
+        let mark = ["invoke_handler(tauri::", "generate_handler!["].concat();
+        let end_mark = "\n    ])";
+        while let Some(pos) = rest.find(&mark) {
+            let after = &rest[pos + mark.len()..];
+            let end = after.find(end_mark).expect("generate_handler! 块要以 ]\\n 收尾");
+            lists.push(commands_in(&after[..end]));
+            rest = &after[end..];
+        }
+        lists
+    }
+
+    #[test]
+    fn the_two_command_lists_never_drift() {
+        let lists = the_two_lists();
+        assert_eq!(lists.len(), 2, "应该正好两份清单（客户端 / 工作台）");
+        let client = &lists[0];
+        let workbench = &lists[1];
+
+        /* 工作台那份多出来的只许是 workbench 自己的（`workbench::app` / `app::` 一支），
+        客户端命令一个都不许少 —— 少了就是「原机能用、工作台构建不能用」（或反过来） */
+        let wb_only: BTreeSet<String> = workbench
+            .difference(client)
+            .filter(|c| !c.starts_with("workbench::") && !c.starts_with("app::"))
+            .cloned()
+            .collect();
+        assert!(
+            wb_only.is_empty(),
+            "工作台清单里混进了客户端没有的非工作台命令：{wb_only:?}"
+        );
+
+        let missing: BTreeSet<String> = client.difference(workbench).cloned().collect();
+        assert!(
+            missing.is_empty(),
+            "这些命令只在客户端清单里，工作台构建发它会落 NOT_IMPLEMENTED：{missing:?}"
+        );
+    }
+
+    /// 更新那七条**必须在两份清单里都有**（这次修复的靶子，单独钉一遍）
+    #[test]
+    fn the_update_commands_are_registered_everywhere() {
+        let lists = the_two_lists();
+        for list in &lists {
+            for cmd in [
+                "ipc::update::update_info",
+                "ipc::update::start_update",
+                "ipc::update::pause_update",
+                "ipc::update::resume_update",
+                "ipc::update::cancel_update",
+                "ipc::update::install_update",
+                "ipc::update::open_url",
+            ] {
+                assert!(list.contains(cmd), "{cmd} 不在一份清单里 —— 界面点下去会 NOT_IMPLEMENTED");
+            }
+        }
+    }
 }
