@@ -10,7 +10,6 @@ import { tabs } from './constants/tabs'
 import PageBbs from './bbs/PageBbs'
 import PageCalib from './calib/PageCalib'
 import PageHome from './home/PageHome'
-import PageParams from './params/PageParams'
 import PagePresets from './presets/PagePresets'
 import PageSettings from './settings/PageSettings'
 /* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
@@ -33,7 +32,9 @@ const PLATFORM = detectPlatform()
  *
  * P1 起是 8 个（加了「同步」「BBS 预设」）；2026-10-02 作者裁决「同步」**整页退役** ——
  * 普通用户不需要"同步"这个概念（catalog 随包走、更新是内部机制），数据源配置降级成
- * 设置页里的开发后门（见 `settings/PageSettings.tsx`）。现在 7 个。
+ * 设置页里的开发后门（见 `settings/PageSettings.tsx`）。2026-10-09「参数」也整页退场
+ * （参数从预设那一行右键「打开参数」进去，是同一份 `PageParams`，见 `constants/tabs.ts`）。
+ * 现在 6 个。
  *
  * 外壳套上 `FieldLayer` —— 预设页 / 参数页的下拉、浮层、右键菜单全挂在它上面
  * （`src/components/field/` 那一套）。它不产生包裹元素，只在最后多一个绝对定位的层，
@@ -116,9 +117,6 @@ export default function App() {
             </PageSlot>
             <PageSlot hidden={tab !== 'calib'}>
               <PageCalib />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'params'}>
-              <PageParams density={density} />
             </PageSlot>
             <PageSlot hidden={tab !== 'bbs'}>
               <PageBbs density={density} pending={pendingBbs} />

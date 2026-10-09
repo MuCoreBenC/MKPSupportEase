@@ -559,6 +559,11 @@ export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
  * 判据只认**来源关系**（文件头血统里记的 `based_on`），不认文件名 ——
  * 导入的同名文件不会被误认成"本地已有"。
  *
+ * **「有新版」什么时候翻成「本地已有」**（2026-10-09 补）：官方当前版的字节
+ * **取回来了**（`state === 'ok'`）就算这一行做完了 —— 因为 `更新` 只做"取回来"，
+ * 我那份一个字节不动，血统永远停在旧那一版；光凭血统这一行会永远挂着「更新」。
+ * 逐参数的取舍在「打开参数」里，是另一条链（[`localStateOf`] 的注释说全）。
+ *
  * 切片器档照旧用 `releaseState`（那边的「本机」是真事实：profile 得躺在
  * 切片器自己的目录里才算数）。
  */
@@ -573,7 +578,9 @@ export const CLOUD_LOCAL_TEXT: Record<CloudLocalState, string> = {
 
 export const CLOUD_LOCAL_WHY: Record<CloudLocalState, string> = {
   none: '官方有这一份，你机器上还没有它 —— 点「下载」把它取到本机（会落一份你自己那份，能改能用）',
-  has: '你机器上已经有一份基于它的工作副本，而且跟官方当前这一版对得上 —— 要改、要用，去「本地」那张表那一行',
+  has:
+    '你机器上已经有一份基于它的工作副本 —— 这一行没有要你做的事了：要改、要用，去「本地」那张表那一行；' +
+    '官方换过版的话，改了哪几项去「打开参数」里逐项看（采用新值 / 保持我的）',
   stale:
     '你机器上那份工作副本当初基于的**不是**官方现在这一版（官方换过版了）。' +
     '点「更新」把官方新版取回来，**你那份一个字节都不会被改**；' +
@@ -2264,12 +2271,27 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
       claims.set(source, f.basedOn)
     }
   }
-  /** 云端那一行「我这边怎么样」。切片器档没有这一档（它照旧按 `releaseState` 说） */
-  const localStateOf = (fileName: string): CloudLocalState | undefined => {
+  /**
+   * 云端那一行「我这边怎么样」。切片器档没有这一档（它照旧按 `releaseState` 说）。
+   *
+   * `state` 是这一行的下载区四态（[`ReleaseFileState`]）—— 这里**只当一个内部信号用**：
+   * `ok` = 官方当前版的字节已经在本机。**不把这四态摆到界面上**（用户看到的仍是三态）。
+   *
+   * 为什么要有它（2026-10-09 作者实测）：`更新` 做的是"把官方当前版取回来"，
+   * **我那份一个字节不动** —— 文件头血统里的 `based_on_sha256` 永远是旧那一版。
+   * 光凭血统，点完更新这一行会一直挂着「有新版」，可它已经没有任何要用户做的事了
+   * （逐参数的取舍在「打开参数」里，那是另一条链）。所以：官方当前版取回来了 ⇒ 翻成「本地已有」。
+   */
+  const localStateOf = (
+    fileName: string,
+    state: ReleaseFileState,
+  ): CloudLocalState | undefined => {
     if (kind !== 'mkp') return undefined
     const claim = claims.get(fileName)
     if (claim === undefined) return 'none'
-    return claim === 'current' ? 'has' : 'stale'
+    if (claim === 'current') return 'has'
+    /* 我那份基于旧版官方：官方当前版已经取回来 ⇒ 这一行没别的要做了 */
+    return state === 'ok' ? 'has' : 'stale'
   }
 
   /*
@@ -2392,7 +2414,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         publishedAt: releaseAt,
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `releaseState`） */
-        localState: localStateOf(p.fileName),
+        localState: localStateOf(p.fileName, state),
       } satisfies PresetCloudRow
       return [row]
     })
