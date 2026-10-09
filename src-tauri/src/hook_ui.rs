@@ -94,39 +94,54 @@ struct Shared {
 /// - 那条记录已经不在（被清掉了）⇒ 什么都不做；
 /// - 界面进程退出 ⇒ 线程随进程一起没，记录停在 `computing` —— 界面下次打开报告页
 ///   会看到"正在估算"，**不假装有值**。
-pub(crate) fn estimate_print_time_for(user_root: &std::path::Path, record_id: &str, output: &str) {
+pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, output: &str) {
     let history = user_root.join(crate::fsx::paths::GCODE_HISTORY_DIR);
-    let Some(meta) = crate::archive::find_meta(&history, record_id) else {
+    let Some(meta_path) = crate::archive::find_meta(&history, record_id) else {
         tracing::warn!(record = %record_id, "找不到那条执行记录，放弃补全");
         return;
     };
 
-    let text = match std::fs::read_to_string(output) {
-        Ok(t) => t,
+    // ① 输出副本：与 `_meta.json` 同目录、名字就是 `<record_id>.gcode`
+    let output_copy = meta_path.with_file_name(format!("{record_id}.gcode"));
+    if let Err(e) = std::fs::copy(output, &output_copy) {
+        tracing::warn!(error = %e, "输出归档复制失败，标失败");
+        let _ = crate::archive::mark_print_time_failed(&meta_path);
+        return;
+    }
+
+    // ② 输出文件的事实（大小 + sha）
+    let output_file = match crate::archive::sha256_of(&output_copy) {
+        Ok(sha) => crate::archive::file_fact(&output_copy, None, sha).ok(),
         Err(e) => {
-            tracing::warn!(error = %e, "读不到输出文件，打印时间标失败");
-            let _ = crate::archive::mark_print_time_failed(&meta);
+            tracing::warn!(error = %e, "输出摘要算不出来，标失败");
+            let _ = crate::archive::mark_print_time_failed(&meta_path);
             return;
         }
     };
 
-    // 与管线内那一遍**同一个口径**（compute_delta / startup 都是同一组值），
-    // 所以补出来的数字跟自己算的一模一样。
+    // ③ 打印时间（与管线内同一口径，补出来的数字跟自己算的一模一样）
+    let text = match std::fs::read_to_string(output) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "读不到输出文件，打印时间标失败");
+            let _ = crate::archive::mark_print_time_failed(&meta_path);
+            return;
+        }
+    };
     let opts = postprocess::postproc::printtime::Options {
         compute_delta: true,
         startup_overhead_seconds: 240.0,
     };
     let estimated = postprocess::postproc::printtime::estimate(&text, &opts);
-    match serde_json::to_value(&estimated) {
-        Ok(v) => {
-            let _ = crate::archive::complete_print_time(&meta, &v);
-            tracing::info!(record = %record_id, "打印时间补全完成");
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "打印时间序列化失败，标失败");
-            let _ = crate::archive::mark_print_time_failed(&meta);
-        }
+    let print_time = serde_json::to_value(&estimated).ok();
+
+    // ④ 一次读-改-写补全（原子）
+    if let Err(e) = crate::archive::complete_meta(&meta_path, output_file, print_time) {
+        tracing::warn!(error = %e, "补全记录失败");
+        let _ = crate::archive::mark_print_time_failed(&meta_path);
+        return;
     }
+    tracing::info!(record = %record_id, "输出归档与打印时间补全完成");
 }
 
 impl HookView {
@@ -183,7 +198,7 @@ impl HookView {
                 let root = crate::fsx::paths::user_root(app).ok();
                 std::thread::spawn(move || {
                     if let Some(root) = root {
-                        estimate_print_time_for(&root, &record_id, &output);
+                        complete_archive(&root, &record_id, &output);
                     }
                 });
             }
@@ -288,7 +303,7 @@ mod tests {
         let output = d.path().join("out.gcode");
         std::fs::write(&output, "G1 X10 Y10 F3000\nG1 X20 Y10 E0.5\n").unwrap();
 
-        estimate_print_time_for(d.path(), &record_id, &output.to_string_lossy());
+        complete_archive(d.path(), &record_id, &output.to_string_lossy());
 
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
@@ -300,6 +315,18 @@ mod tests {
             back["detail"]["printTime"]["segments"].is_number(),
             "printTime 要有内容：{:?}",
             back["detail"]["printTime"]
+        );
+        // 输出副本的事实也要补上（复制 + sha + 大小）
+        assert!(
+            back["detail"]["outputFile"]["sizeBytes"].is_number(),
+            "outputFile 要有内容：{:?}",
+            back["detail"]["outputFile"]
+        );
+        let expected_copy = paths.meta.with_file_name(format!("{record_id}.gcode"));
+        assert_eq!(
+            back["detail"]["outputFile"]["path"],
+            expected_copy.display().to_string(),
+            "输出副本的落点要与记录同目录、同名"
         );
         // 其余字段不动
         assert_eq!(back["elapsedMs"], 1234);
@@ -333,7 +360,7 @@ mod tests {
         .unwrap();
 
         let missing = d.path().join("nope.gcode");
-        estimate_print_time_for(d.path(), &record_id, &missing.to_string_lossy());
+        complete_archive(d.path(), &record_id, &missing.to_string_lossy());
 
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();

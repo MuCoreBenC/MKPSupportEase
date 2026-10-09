@@ -321,26 +321,34 @@ pub fn find_meta(history_root: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
-/// 补全一条记录里的打印时间：**读-改-写，原子落盘**（走唯一的写盘出口）。
+/// 补全一条记录：**读-改-写，原子落盘**（走唯一的写盘出口）。
 ///
-/// 只动 `detail.printTime` 与顶层 `printTimeStatus` 两个键 —— 其余字段原样保留
-/// （先读后写，不重建整份记录）。
-pub fn complete_print_time(
+/// 补全的两样东西都是"报告用途"、且都要读/复制一份 26MB 级的输出 ——
+/// 钩子把它们交给常驻进程，自己写完记录就退。
+///
+/// 只动 `detail.outputFile` / `detail.printTime` 与顶层 `printTimeStatus`
+/// 这三个键 —— 其余字段原样保留（先读后写，不重建整份记录）。
+pub fn complete_meta(
     meta_path: &Path,
-    print_time: &serde_json::Value,
+    output_file: Option<FileFact>,
+    print_time: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
-    let text = std::fs::read_to_string(meta_path).map_err(|e| {
-        AppError::io("这条记录读不出来（补全打印时间前）").with_detail(e.to_string())
-    })?;
-    let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        AppError::corrupted("这条记录不是合法的 JSON（补全打印时间前）").with_detail(e.to_string())
-    })?;
+    let text = std::fs::read_to_string(meta_path)
+        .map_err(|e| AppError::io("这条记录读不出来（补全前）").with_detail(e.to_string()))?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| AppError::corrupted("这条记录不是合法的 JSON（补全前）").with_detail(e.to_string()))?;
     {
         let Some(obj) = meta.as_object_mut() else {
             return Err(AppError::corrupted("这条记录不是 JSON 对象"));
         };
         let detail = obj.entry("detail").or_insert_with(|| serde_json::json!({}));
-        detail["printTime"] = print_time.clone();
+        if let Some(of) = output_file {
+            detail["outputFile"] =
+                serde_json::to_value(of).map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
+        }
+        if let Some(pt) = print_time {
+            detail["printTime"] = pt;
+        }
         obj.insert(
             "printTimeStatus".to_string(),
             serde_json::json!(PRINT_TIME_READY),
@@ -390,7 +398,7 @@ mod tests {
         std::fs::write(&paths.meta, serde_json::to_string(&meta).unwrap()).unwrap();
 
         let pt = serde_json::json!({"totalSeconds": 17046.8, "segments": 708937});
-        complete_print_time(&paths.meta, &pt).expect("补全打印时间");
+        complete_meta(&paths.meta, None, Some(pt)).expect("补全打印时间");
 
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();

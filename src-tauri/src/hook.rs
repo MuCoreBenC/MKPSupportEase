@@ -370,11 +370,15 @@ fn archive_success(
     started: std::time::Instant,
     warnings: &mut Vec<String>,
 ) {
-    if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
-        warnings.push(format!("输出归档失败：{e}"));
-    }
-
-    let output_file = match crate::archive::sha256_of(&done.output_path) {
+    // 延后模式下：输出的复制与 sha 都交给界面进程 —— 这条路上只写记录，不碰那 26MB。
+    let deferred = done.print_time.is_none();
+    let output_file = if deferred {
+        None
+    } else {
+        if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
+            warnings.push(format!("输出归档失败：{e}"));
+        }
+        match crate::archive::sha256_of(&done.output_path) {
         Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
             Ok(fact) => Some(fact),
             Err(e) => {
@@ -385,6 +389,7 @@ fn archive_success(
         Err(e) => {
             warnings.push(format!("输出文件摘要算不出来：{e}"));
             None
+        }
         }
     };
 
