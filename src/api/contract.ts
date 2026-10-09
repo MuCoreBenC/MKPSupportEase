@@ -1344,8 +1344,13 @@ export interface PostProcessFinished {
   ok: boolean
   /** 用户按了停止（或 Ctrl-C）—— 不是"失败"，说法不一样 */
   cancelled: boolean
-  /** 一句话结论（与切片器那行 stderr 同一句） */
+  /** **原因**（人话）。稳定错误码已经从这句里剥走了，单独给 `code` ——
+   * 整句码塞给用户，他读不到到底哪儿不对 */
   message: string
+  /** 稳定错误码（`E_*_NNN`，报问题时带上它）。取消与没有码的几句是 `null` */
+  code: string | null
+  /** 停在哪一阶段（内核的阶段 id，界面转中文名）；还没出过进度时是 `null` */
+  stage: string | null
   /** 给切片器的退出码（0 成功 / 1 失败或取消 / 2 输入·预设错） */
   exitCode: number
   elapsedMs: number

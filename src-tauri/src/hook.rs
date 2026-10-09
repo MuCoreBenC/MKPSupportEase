@@ -210,15 +210,94 @@ pub fn is_machine_mismatch(preset_machine: &str, gcode_machine: &str) -> bool {
     !p.is_empty() && !g.is_empty() && p != g
 }
 
-/// 内核错误 → 钩子错误。**码原样带上**（`E_*_NNN` 是稳定标识，用户报问题时要用它去查）。
+/// 内核错误 → 钩子错误。整句原样留下（界面那一屏再拆成「原因 + 码」，见 [`describe`]）。
 fn report_error(e: PostprocError) -> HookError {
     match e {
-        PostprocError::Cancelled { .. } => HookError::Cancelled(format!(
-            "已取消 [{}]：原文件没有被改动",
-            e.code()
-        )),
+        PostprocError::Cancelled { .. } => {
+            HookError::Cancelled(format!("已取消 [{}]：原文件没有被改动", e.code()))
+        }
         other => HookError::Failed(format!("处理失败 [{}]：{other}", other.code())),
     }
+}
+
+/// 界面那一屏要的三件：**原因**（人话）、**稳定错误码**、是不是用户取消。
+///
+/// # 为什么要拆
+///
+/// 内核那句话里经常**嵌两层码**，实测形态：
+///
+/// ```text
+/// 处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: 模型超出打印边界，当前X：185.9mm…
+///            ^^^^^^^^^^^^^^^^ 外层（变体名）  ^^^^^^^^^^^^^^^^^^^^ 里层（真正的原因）
+/// ```
+///
+/// 直接整句摆给用户，他看到的是一串码，读不到"到底哪儿不对"（2026-10-09 作者原话：
+/// 「停只显示了个什么错误码而已，根本就没显示正确的错误原因」）。
+/// 所以：**里层码**（更具体那个）留下给排查用，**正文**只留码后面那截人话。
+/// 外层那句"配置无效"一并丢掉 —— 它常常是**变体名在说假话**（边界检查复用的就是
+/// `InvalidConfig` 这个变体，见内核 `diag/error.rs` 的登记）。
+pub fn describe(err: &HookError) -> (String, Option<String>) {
+    match err {
+        /* 取消不是"错误"：不摆码，也不摆那串 `E_SYS_CANCELLED_001` —— 用户自己按的，
+        他要看的是"现在是什么状态" */
+        HookError::Cancelled(_) => (
+            "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）".to_owned(),
+            None,
+        ),
+        HookError::BadInput(text) | HookError::Failed(text) => {
+            let (body, code) = split_code(text);
+            (body, code)
+        }
+    }
+}
+
+/// 从内核那句话里剥出**最具体**的稳定错误码（`E_*_NNN`），并返回码后面的人话。
+///
+/// 取值规则（简单到能一眼验）：扫全文，取**最后一个**像码的 token —— 越靠里越具体；
+/// 找不到就整句当人话（前置检查那几句本来就没有码）。
+fn split_code(text: &str) -> (String, Option<String>) {
+    /// 看着像不像一个错误码：`E_` 开头，后面全是大写字母 / 数字 / 下划线，且至少两段。
+    fn code_len_at(bytes: &[u8], at: usize) -> Option<usize> {
+        if bytes[at] != b'E' || bytes.get(at + 1) != Some(&b'_') {
+            return None;
+        }
+        let mut j = at + 2;
+        while j < bytes.len() {
+            let c = bytes[j];
+            if c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_' {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let token = &bytes[at..j];
+        (token.len() > 4 && token.iter().filter(|c| **c == b'_').count() >= 2).then_some(j - at)
+    }
+
+    let bytes = text.as_bytes();
+    let mut found: Option<(usize, usize)> = None; // (码的起点, 码的终点)
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(len) = code_len_at(bytes, i) {
+            found = Some((i, i + len));
+            i += len;
+            continue;
+        }
+        i += 1;
+    }
+
+    let Some((start, end)) = found else {
+        return (text.to_owned(), None);
+    };
+    let code = text[start..end].to_owned();
+    /* 正文取码**之后**那截（码前面是外层包装：`处理失败 [外层码]：配置无效: ` 之类）——
+    它们对用户没有信息量，留着只会把真正的原因往后推。 */
+    let mut tail = text[end..].trim_start_matches([']', ':', '：', ' ', '，', '。']).trim();
+    if tail.is_empty() {
+        /* 码后面什么都没有（整句就是个码）：那就整句当人话，别给一屏空白 */
+        tail = text;
+    }
+    (tail.to_owned(), Some(code))
 }
 
 /// 没有界面的那条路：跑一次，把结论写到 stderr 并给出退出码 ——
@@ -448,6 +527,106 @@ mod tests {
             .filter(|n| n != "ref.gcode" && n != "A1_MINI-fast.toml")
             .collect();
         assert!(leftovers.is_empty(), "中间文件残留：{leftovers:?}");
+    }
+
+    /// 界面那句话的拆法：**里层码**与**原因**分家。
+    ///
+    /// 这条钉的是 2026-10-09 作者点名的那个 bug：「停只显示了个什么错误码而已，
+    /// 根本就没显示正确的错误原因」。
+    #[test]
+    fn the_display_sentence_splits_the_code_from_the_reason() {
+        // 内核那句的实测形态（两层码：外层是变体名，里层才是真因）
+        let err = HookError::Failed(
+            "处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: \
+             模型超出打印边界，当前X：185.9mm，允许范围：≤180.0mm"
+                .to_owned(),
+        );
+        let (why, code) = describe(&err);
+        assert_eq!(
+            code.as_deref(),
+            Some("E_GCODE_BOUNDARY_001"),
+            "要留**里层**那个更具体的码"
+        );
+        assert_eq!(why, "模型超出打印边界，当前X：185.9mm，允许范围：≤180.0mm");
+        assert!(!why.contains("E_"), "人话里不许再夹码：{why}");
+
+        // 像码的那一截**不在开头**也要认得出来（预设不可用那句前面还有自己的前缀）
+        let err = HookError::BadInput(
+            "预设不可用 [E_CFG_PARSE_001]：TOML 解析失败 : 这份预设比本程序新".to_owned(),
+        );
+        let (why, code) = describe(&err);
+        assert_eq!(code.as_deref(), Some("E_CFG_PARSE_001"));
+        assert!(why.starts_with("TOML 解析失败"), "{why}");
+
+        // 没有码的那几句：原样给人话
+        let err = HookError::BadInput("预设文件不存在：C:\\x\\A1.toml".to_owned());
+        let (why, code) = describe(&err);
+        assert!(code.is_none());
+        assert!(why.contains("预设文件不存在"), "{why}");
+
+        // 取消：**不给码**，只给状态（用户自己按的停止不是"错误"）
+        let err = HookError::Cancelled("已取消 [E_SYS_CANCELLED_001]：原文件没有被改动".to_owned());
+        let (why, code) = describe(&err);
+        assert!(code.is_none(), "用户按的停止不该摆错误码");
+        assert!(why.contains("原文件没有被改动"), "{why}");
+    }
+
+    /// **「点了停止就该立刻停」**：跑到一半置位取消，管线必须马上收手。
+    ///
+    /// 内核每个步骤边界查一次、长 pass 内每 100ms 查一次（`DEFAULT_CANCEL_CHECK_INTERVAL`），
+    /// 所以判据给 **1 秒**是留线程调度的余量 —— 不是放宽（作者原话：
+    /// 「他应该立刻，马上，一秒钟都不耽误的就停止」）。
+    #[test]
+    fn a_mid_run_cancel_stops_within_a_tick() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let d = tempfile::tempdir().expect("临时目录");
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let toml = d.path().join("A1_MINI-fast.toml");
+        std::fs::copy(
+            manifest.join("../crates/preset/assets/presets/A1_MINI-fast.toml"),
+            &toml,
+        )
+        .expect("拷一份预设");
+        let gcode = d.path().join("ref.gcode");
+        std::fs::copy(
+            manifest.join("../crates/postprocess/tests/golden/42274.2.gcode"),
+            &gcode,
+        )
+        .expect("拷一份整链参考 G-code");
+
+        let cancel = CancelToken::new();
+        let trigger = cancel.clone();
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag2 = flag.clone();
+        let stopper = std::thread::spawn(move || {
+            // 等管线真的跑起来（第一条进度）再取消 —— 否则测的是"起点就取消"
+            while !flag2.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            trigger.cancel();
+        });
+
+        let mut sink = move |_e: postprocess::pipeline::ProgressEvent| {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst)
+        };
+        let started = Instant::now();
+        let done = run(
+            &job(&toml, &gcode),
+            &mut sink,
+            &cancel,
+            MismatchPolicy::Refuse,
+        );
+        let took = started.elapsed();
+        stopper.join().expect("停手那个线程不该炸");
+
+        let err = done.expect_err("取消必须报错");
+        assert!(err.cancelled(), "要落在取消那一档：{err}");
+        assert!(
+            took < Duration::from_secs(1),
+            "取消用了 {took:?} —— 太慢（内核该在一个检查间隔内收手）"
+        );
     }
 
     /// 机型判据本身：认不出（UNKNOWN / 空）**不算**不匹配；大小写差异也不算

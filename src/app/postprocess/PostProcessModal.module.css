@@ -88,6 +88,19 @@
   color: var(--warn);
 }
 
+/* 错误码：小字、等宽、可选中（用户要把它复制去查/报问题） */
+.code {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  user-select: text;
+}
+
+.code code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--text-2);
+}
+
 .hint {
   margin: 0;
   font-size: var(--fs-label);

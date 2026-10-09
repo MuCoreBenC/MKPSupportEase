@@ -105,13 +105,23 @@ export default function PostProcessModal() {
                 {finished.ok ? '✓ 处理完成' : finished.cancelled ? '已停止' : '✗ 处理失败'}
               </p>
               <p className={s.msg}>{finished.message}</p>
+              {/* 失败时把**停在哪一步**说出来：只说"失败了"等于让人从头猜 */}
+              {!finished.ok && !finished.cancelled && finished.stage !== null && (
+                <p className={s.hint}>停在：{stepName(finished.stage)}</p>
+              )}
+              {finished.code !== null && (
+                <p className={s.code}>
+                  错误码 <code>{finished.code}</code> —— 报问题时带上它
+                </p>
+              )}
               {finished.warnings.map((w) => (
                 <p className={s.warn} key={w}>
                   警告：{w}
                 </p>
               ))}
               <p className={s.hint}>
-                这一屏很快会自己关掉，让切片器继续（退出码 {finished.exitCode}）。
+                这一屏会自己关掉，让切片器继续（退出码 {finished.exitCode}）；想立刻放它走，
+                直接把这扇窗关掉就行。
               </p>
             </>
           )}

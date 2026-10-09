@@ -51,9 +51,51 @@ pub const FINISHED_EVENT: &str = "postprocess-finished";
 /// 等用户答复的上限。到点 = **不跑**（见模块头第 2 条）。
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// 看门狗：整趟最多跑多久；多久没有任何进展就当卡住（照成熟版：30 分钟 / 10 分钟）。
+const WATCHDOG_TOTAL: Duration = Duration::from_secs(30 * 60);
+const WATCHDOG_IDLE: Duration = Duration::from_secs(10 * 60);
+/// 看门狗多久看一次（它只是"偶尔抬头看一眼" —— 真正的取消仍走内核那条协作线）。
+const WATCHDOG_TICK: Duration = Duration::from_secs(5);
+
+/// 看门狗的判据。**纯函数**：真跑一次 30 分钟才能验的东西不算判据。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchdogVerdict {
+    /// 正常（还在动，也没超时）
+    Fine,
+    /// 太久没有任何进展
+    Idle,
+    /// 整趟超时
+    Overrun,
+}
+
+/// 现在该不该收手。
+///
+/// 先判**整趟超时**：走完了 30 分钟这件事比"最后 10 分钟没动"更硬。
+pub fn watchdog_verdict(
+    now: Instant,
+    started: Instant,
+    last_progress: Instant,
+    idle_limit: Duration,
+    total_limit: Duration,
+) -> WatchdogVerdict {
+    if now.duration_since(started) >= total_limit {
+        return WatchdogVerdict::Overrun;
+    }
+    if now.duration_since(last_progress) >= idle_limit {
+        return WatchdogVerdict::Idle;
+    }
+    WatchdogVerdict::Fine
+}
+
 /// 跑完之后窗口留多久再看一眼结果 —— 然后自动退，切片器才走得下去。
-/// 成功短（切片器在等）、失败与取消长（那句话要读）。
+///
+/// - 成功：几秒就够（切片器在等，用户不需要读什么）；
+/// - **取消：一闪而过** —— 按钮是他自己按的，多留一秒都是"点了停止它还在那儿"（作者原话：
+///   「他应该立刻，马上，一秒钟都不耽误的就停止」）；
+/// - 失败：留久一点读原因。想立刻放切片器走，直接把这扇窗关掉即可
+///   （关窗会带着这一趟的退出码退，见 [`crate::run_inner`] 末尾那段）。
 const HOLD_OK: Duration = Duration::from_secs(4);
+const HOLD_CANCELLED: Duration = Duration::from_millis(900);
 const HOLD_BAD: Duration = Duration::from_secs(20);
 
 /// 一条进度（推给界面，也存进快照）。
@@ -83,8 +125,13 @@ pub struct FinishedPayload {
     pub ok: bool,
     /// 用户按了停止（或 Ctrl-C）—— 不是"失败"，界面说法不一样
     pub cancelled: bool,
-    /// 一句话结论（与 stderr 那一行同一句）
+    /// **原因**（人话）。码已经从这里剥掉了 —— 整句码塞给用户，他读不到到底哪儿不对
+    /// （见 [`crate::hook::describe`]）
     pub message: String,
+    /// 稳定错误码（`E_*_NNN`，报问题时带上它）。取消与没有码的几句是 `None`
+    pub code: Option<String>,
+    /// 停在哪一阶段（内核的阶段 id，界面转中文名）；还没出过进度时是 `None`
+    pub stage: Option<String>,
     /// 给切片器的退出码
     pub exit_code: u8,
     pub elapsed_ms: u128,
@@ -119,13 +166,29 @@ pub struct HookRun {
     done: Condvar,
 }
 
-#[derive(Default)]
 struct Shared {
     question: Option<QuestionPayload>,
     /// 用户的答复（`None` = 还没答）
     answer: Option<bool>,
     progress: Option<ProgressPayload>,
     finished: Option<FinishedPayload>,
+    /// 最近一条进度是什么时候（看门狗靠它判"卡住了"）
+    last_progress_at: Instant,
+    /// 停止的理由（用户按的 / 看门狗收的）—— 界面要说清是哪一种
+    stop_reason: Option<String>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Self {
+            question: None,
+            answer: None,
+            progress: None,
+            finished: None,
+            last_progress_at: Instant::now(),
+            stop_reason: None,
+        }
+    }
 }
 
 impl HookRun {
@@ -148,17 +211,35 @@ impl HookRun {
         self.cancel.clone()
     }
 
-    /// 界面那颗"停止"：请求取消。
+    /// 界面那颗「停止」：请求取消。
     ///
     /// **顺带把等在那一问上的线程放开**（答"不跑"）—— 成熟版同一条：取消要能打断
     /// "等你决定"那个等待，否则用户按了停，进程还杵在那儿等答复。
     pub fn stop(&self) {
+        self.stop_with("已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）");
+    }
+
+    /// 带理由地停（看门狗用它，界面那颗「停止」用上面那句）。
+    pub fn stop_with(&self, why: &str) {
         self.cancel.cancel();
         let mut g = self.shared.lock().expect("锁没坏");
         if g.answer.is_none() {
             g.answer = Some(false);
         }
+        if g.stop_reason.is_none() {
+            g.stop_reason = Some(why.to_owned());
+        }
         self.answered.notify_all();
+    }
+
+    /// 停止的理由（没有就是 `None`）。
+    fn stop_reason(&self) -> Option<String> {
+        self.shared.lock().expect("锁没坏").stop_reason.clone()
+    }
+
+    /// 最近一条进度是什么时候（看门狗判"卡住了没有"）。
+    fn last_progress_at(&self) -> Instant {
+        self.shared.lock().expect("锁没坏").last_progress_at
     }
 
     /// 用户对那一问的答复（`keep = true` 继续跑）。
@@ -212,6 +293,7 @@ impl HookRun {
     fn record_progress(&self, payload: ProgressPayload) {
         let mut g = self.shared.lock().expect("锁没坏");
         g.progress = Some(payload);
+        g.last_progress_at = Instant::now();
     }
 
     fn record_finished(&self, payload: FinishedPayload) {
@@ -220,6 +302,16 @@ impl HookRun {
         /* 结论已出：那一问不可能还有人在等，清掉免得快照里挂着一条过期的问句 */
         g.question = None;
         self.done.notify_all();
+    }
+
+    /// 最近一条进度所在的阶段 —— 失败时界面用它说"停在哪一步"。
+    pub fn last_step(&self) -> Option<String> {
+        self.shared
+            .lock()
+            .expect("锁没坏")
+            .progress
+            .as_ref()
+            .map(|p| p.step.clone())
     }
 
     /// 等这一趟落地（`Some(退出码)`）；超时给 `None`。
@@ -293,43 +385,194 @@ pub fn spawn(app: &AppHandle, run: Arc<HookRun>) {
             run: run.clone(),
         };
 
+        /* 看门狗：偶尔抬头看一眼"还在动吗"。它只**请求取消**（内核那条协作线负责真的停），
+        理由留给界面说清是哪一种停（用户按的 / 超时收的） */
+        let watched = run.clone();
+        std::thread::spawn(move || watch(watched));
+
         let done = hook::run(
             run.job(),
             &mut sink,
             &run.cancel_token(),
             MismatchPolicy::Ask(&mut asker),
         );
-        let payload = finished_payload(&done, started.elapsed().as_millis());
+        let payload = finished_payload(
+            &done,
+            started.elapsed().as_millis(),
+            run.last_step(),
+            run.stop_reason(),
+        );
+        let hold = if payload.ok {
+            HOLD_OK
+        } else if payload.cancelled {
+            HOLD_CANCELLED
+        } else {
+            HOLD_BAD
+        };
         run.record_finished(payload.clone());
         let _ = app.emit(FINISHED_EVENT, payload);
 
         /* stderr 那一行（切片器会把 stderr 给用户看）与退出码走同一条路 —— 两处口径不许各写一份 */
         let code = hook::report(done);
 
-        std::thread::sleep(if code == hook::EXIT_OK { HOLD_OK } else { HOLD_BAD });
+        std::thread::sleep(hold);
         app.exit(i32::from(code));
     });
 }
 
-fn finished_payload(done: &Result<hook::Outcome, hook::HookError>, elapsed_ms: u128) -> FinishedPayload {
+fn finished_payload(
+    done: &Result<hook::Outcome, hook::HookError>,
+    elapsed_ms: u128,
+    stage: Option<String>,
+    stop_reason: Option<String>,
+) -> FinishedPayload {
     match done {
         Ok(out) => FinishedPayload {
             ok: true,
             cancelled: false,
             message: format!("处理完成：{}（{} ms）", out.output.display(), out.elapsed_ms),
+            code: None,
+            stage,
             exit_code: hook::EXIT_OK,
             elapsed_ms: out.elapsed_ms,
             output: Some(out.output.display().to_string()),
             warnings: out.warnings.clone(),
         },
-        Err(err) => FinishedPayload {
-            ok: false,
-            cancelled: err.cancelled(),
-            message: err.to_string(),
-            exit_code: err.exit_code(),
-            elapsed_ms,
-            output: None,
-            warnings: Vec::new(),
-        },
+        Err(err) => {
+            /* 原因与码分家：界面把原因摆正中、码摆小字（见 `hook::describe`）。
+            取消那一档优先用**停止的理由**（用户按的？看门狗收的？）——
+            只说"已停止"会把"为什么停"藏起来 */
+            let (message, code) = hook::describe(err);
+            let message = if err.cancelled() {
+                stop_reason.unwrap_or(message)
+            } else {
+                message
+            };
+            FinishedPayload {
+                ok: false,
+                cancelled: err.cancelled(),
+                message,
+                code,
+                stage,
+                exit_code: err.exit_code(),
+                elapsed_ms,
+                output: None,
+                warnings: Vec::new(),
+            }
+        }
+    }
+}
+
+/// 看门狗那一圈：偶尔抬头看一次"还在动吗 / 是不是太久了"，到点就**请求取消**并留下理由。
+///
+/// 为什么要有它：切片器在等**这个进程**退出，而"卡住"会长这样 —— 进程活着、界面在画、
+/// 切片器永远停在 95%（2026-10-09 同一天踩过两次：钩子开窗不退、等答复没人答）。
+/// 成熟版同一条：30 分钟上限 + 10 分钟无进展。
+fn watch(run: Arc<HookRun>) {
+    let started = Instant::now();
+    loop {
+        /* 睡到下一次抬头（这一趟跑完会立刻醒 —— `wait_finished` 在结论落地时被唤醒） */
+        if run.wait_finished(WATCHDOG_TICK).is_some() {
+            return;
+        }
+        match watchdog_verdict(
+            Instant::now(),
+            started,
+            run.last_progress_at(),
+            WATCHDOG_IDLE,
+            WATCHDOG_TOTAL,
+        ) {
+            WatchdogVerdict::Fine => {}
+            WatchdogVerdict::Idle => {
+                run.stop_with(&format!(
+                    "超时停止：{} 分钟没有任何进展（多半是卡住了）—— 原文件没有被改动",
+                    WATCHDOG_IDLE.as_secs() / 60
+                ));
+                return;
+            }
+            WatchdogVerdict::Overrun => {
+                run.stop_with(&format!(
+                    "超时停止：这一趟超过 {} 分钟 —— 原文件没有被改动",
+                    WATCHDOG_TOTAL.as_secs() / 60
+                ));
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 看门狗判据：正常 / 没进展 / 整趟超时三档，且**整趟超时优先**
+    /// （真跑 30 分钟才能验的东西不算判据，所以这里比的是时间点）
+    #[test]
+    fn the_watchdog_speaks_up_only_when_it_should() {
+        let idle = Duration::from_secs(600);
+        let total = Duration::from_secs(1800);
+        let started = Instant::now();
+
+        // 刚起步：什么都不说
+        assert_eq!(
+            watchdog_verdict(started, started, started, idle, total),
+            WatchdogVerdict::Fine
+        );
+
+        // 5 分钟前有过进度：还正常
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(300),
+                started,
+                started + Duration::from_secs(300),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Fine
+        );
+
+        // 最后 10 分钟一动不动：卡住
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(700),
+                started,
+                started + Duration::from_secs(100),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Idle
+        );
+
+        // 超过整趟上限：哪怕刚刚还有进度也收手（这一条比"没进展"更硬）
+        assert_eq!(
+            watchdog_verdict(
+                started + Duration::from_secs(1801),
+                started,
+                started + Duration::from_secs(1800),
+                idle,
+                total
+            ),
+            WatchdogVerdict::Overrun
+        );
+    }
+
+    /// 快照里的那几格：进度 / 问句 / 结论 / 停的理由都读得出来
+    #[test]
+    fn the_snapshot_carries_what_the_window_needs() {
+        let run = HookRun::new(HookJob {
+            toml: std::path::PathBuf::from("C:\\p\\A1_MINI-fast.toml"),
+            gcode: std::path::PathBuf::from("C:\\tmp\\45600.0.gcode"),
+        });
+        assert_eq!(run.snapshot().preset_name, "A1_MINI-fast.toml");
+        assert_eq!(run.snapshot().gcode_name, "45600.0.gcode");
+        assert!(run.snapshot().question.is_none() && run.snapshot().finished.is_none());
+
+        run.record_progress(ProgressPayload {
+            step: "pass1".to_owned(),
+            fraction_in_step: Some(0.5),
+            message: "第一遍处理中".to_owned(),
+        });
+        assert_eq!(run.last_step().as_deref(), Some("pass1"));
+        assert_eq!(run.snapshot().progress.unwrap().fraction_in_step, Some(0.5));
     }
 }
