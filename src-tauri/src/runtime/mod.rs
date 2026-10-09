@@ -23,6 +23,10 @@
 /// **应用持久化状态（AppState）**——`run/app-state.json` 的唯一读写入口（2026-10-06
 /// 架构决策，`docs/APP-STATE.md`）：一个应用一个状态文件，整份读-改-写 + 原子替换
 pub mod app_state;
+/// **隐藏 baseline 存储**（2026-10-08 作者改判）：每一版下载过的官方预设在这里留一份
+/// 不可见的基准快照，按 `sha256` 寻址。用户不可见、不进对比台，只服务"恢复默认"与
+/// 血统里的 `based_on_sha256`。见 [`baseline`] 的模块头。
+pub mod baseline;
 pub mod catalog;
 pub mod delivery;
 /// **通用文件导入入口**（第十二层）：外部文件怎么安全地进入应用 —— 拖拽 / 文件选择器
@@ -35,6 +39,9 @@ pub mod lineage;
 /// `archive/`）分开
 pub mod mine;
 pub mod net;
+/// **逐参数「官方更新」的比对**（2026-10-09）：我这份 / 官方旧值 / 官方新值三方账。
+/// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
+pub mod param_sync;
 pub mod paths;
 /// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
 /// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
@@ -58,6 +65,9 @@ pub mod update;
 /// **应用内更新**（2026-10-05 第五刀）：下载 / 进度 / 暂停取消 / 解压 / 替换重启。
 /// 与 `release_info` 分开：那份是"信息"，这份是"动作"
 pub mod updater;
+/// **官方版本清单**（2026-10-08）：这台机器"见过"的官方预设版本 = 历次目录里登记过的
+/// 那几版（当前目录 + 版本链），按内容摘要去重。见 [`versions`] 的模块头。
+pub mod versions;
 
 pub use catalog::Catalog;
 

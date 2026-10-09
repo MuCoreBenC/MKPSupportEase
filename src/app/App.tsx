@@ -3,19 +3,21 @@ import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { FieldLayer } from '../components/field'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
-import PagePlaceholder from './components/PagePlaceholder'
+import PageReport from './report/PageReport'
 import ResizeEdges from './components/ResizeEdges'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
 import PageBbs from './bbs/PageBbs'
 import PageCalib from './calib/PageCalib'
 import PageHome from './home/PageHome'
-import PageParams from './params/PageParams'
 import PagePresets from './presets/PagePresets'
 import PageSettings from './settings/PageSettings'
 /* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
    拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
 import { FileImportProvider, ImportBanner } from './import/FileImport'
+/* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
+   普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够 */
+import PostProcessModal from './postprocess/PostProcessModal'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -33,7 +35,9 @@ const PLATFORM = detectPlatform()
  *
  * P1 起是 8 个（加了「同步」「BBS 预设」）；2026-10-02 作者裁决「同步」**整页退役** ——
  * 普通用户不需要"同步"这个概念（catalog 随包走、更新是内部机制），数据源配置降级成
- * 设置页里的开发后门（见 `settings/PageSettings.tsx`）。现在 7 个。
+ * 设置页里的开发后门（见 `settings/PageSettings.tsx`）。2026-10-09「参数」也整页退场
+ * （参数从预设那一行右键「打开参数」进去，是同一份 `PageParams`，见 `constants/tabs.ts`）。
+ * 现在 6 个。
  *
  * 外壳套上 `FieldLayer` —— 预设页 / 参数页的下拉、浮层、右键菜单全挂在它上面
  * （`src/components/field/` 那一套）。它不产生包裹元素，只在最后多一个绝对定位的层，
@@ -89,6 +93,12 @@ export default function App() {
    */
   const openSettings = useCallback(() => setTab('settings'), [])
 
+  /*
+   * 后处理那一屏的「看报告」出口（跨页跳转的出口由外壳给，与 `openBbs` / `openSettings` 同类）。
+   * 失败也照样进报告页 —— 那一条执行记录里写着原因与错误码（见 `app/postprocess/`）。
+   */
+  const openReport = useCallback(() => setTab('report'), [])
+
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
@@ -117,19 +127,17 @@ export default function App() {
             <PageSlot hidden={tab !== 'calib'}>
               <PageCalib />
             </PageSlot>
-            <PageSlot hidden={tab !== 'params'}>
-              <PageParams density={density} />
-            </PageSlot>
             <PageSlot hidden={tab !== 'bbs'}>
               <PageBbs density={density} pending={pendingBbs} />
             </PageSlot>
             <PageSlot hidden={tab !== 'report'}>
-              <PagePlaceholder title="报告" hint="后处理执行报告与历史" />
+              <PageReport />
             </PageSlot>
             <PageSlot hidden={tab !== 'settings'}>
               <PageSettings />
             </PageSlot>
           </main>
+          <PostProcessModal onOpenReport={openReport} />
         </FieldLayer>
       </FileImportProvider>
 

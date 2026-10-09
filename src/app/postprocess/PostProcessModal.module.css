@@ -1,0 +1,108 @@
+/*
+ * 那一屏自己的东西（问句 / 结论 / 进度那几行）。
+ * 外壳（遮罩 + 白框 + 页头页脚）用的是 `../ui/ui.module.css` 那一套 ——
+ * 与首页、校准页那些确认框是同一个外壳，这里只加这一屏独有的排版。
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.files {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.pct {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.msg {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+/* 机型不匹配那一问：底色按「要你看一眼」那一档给，正文用默认色（它是主角） */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  border: 1px solid var(--line-strong);
+}
+
+.askText {
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.askBtns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ok {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--accent-deep);
+}
+
+.cancelled {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.bad {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--danger);
+}
+
+.warn {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--warn);
+}
+
+/* 错误码：小字、等宽、可选中（用户要把它复制去查/报问题） */
+.code {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  user-select: text;
+}
+
+.code code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--text-2);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}

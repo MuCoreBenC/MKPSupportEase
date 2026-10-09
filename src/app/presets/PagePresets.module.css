@@ -355,6 +355,30 @@
   flex-direction: column;
 }
 
+/*
+ * **参数模态框的宿主层**（2026-10-09）：挂在 `.page` 那一层，不挂 `.main`。
+ *
+ * 这一层只负责**定位与层高** —— 遮罩本体是 Modal 的 `.scrim`（absolute inset: 0），
+ * 它跟着这一层走。`.page` 是定位祖先，所以这一层铺满的是"顶栏页签以下整块"
+ * （从工具条一直到底部页脚），正是参数编辑器要占的那一块。
+ *
+ * z-index 70 压过抽屉（60）与右键菜单（20）：参数模态框是整块内容区的唯一前台，
+ * 同屏不该有别的浮层压在它上面。
+ *
+ * 关着时 Modal 不画任何东西，这一层只剩空壳 —— **不许吃点击**（pointer-events: none），
+ * 里面的浮层自己重新打开命中（`> *` 那一句）。
+ */
+.paramsLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.paramsLayer > * {
+  pointer-events: auto;
+}
+
 /* 「暂不支持」那一块自己占内容区，可滚（missing[] 条数不定） */
 .noneHold {
   flex: 1;

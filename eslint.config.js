@@ -10,9 +10,19 @@ export default tseslint.config(
      （压缩过的二进制字节），eslint 会在那上面报 Parsing error。本地一跑 build 就红，
      CI 上因为 target 不入库反而看不见，是个只在本机出现的假故障。
 
-     建了 workspace（b04 Task 13）之后产物目录搬到了仓库根，所以两个都要列：
-     根上的 `target` 是新的，`src-tauri/target` 是切换之前留下的。 */
-  { ignores: ['dist', 'node_modules', 'target', 'src-tauri/target', 'src-tauri/gen'] },
+     建了 workspace（b04 Task 13）之后产物目录搬到了仓库根，所以几个都要列：
+     根上的 `target` 是新的，`src-tauri/target` 是切换之前留下的，
+     `target-workbench` 是后厨工作台那一份（CARGO_TARGET_DIR，与客户端 target 分开）。 */
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'target',
+      'target-workbench',
+      'src-tauri/target',
+      'src-tauri/gen',
+    ],
+  },
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

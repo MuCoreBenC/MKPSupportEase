@@ -4,9 +4,15 @@
 //! 这一条是**另一条线**（总纲 §1③「预设 TOML 的一生」），两条不许混：
 //! 官方原件不可变、用户修改另存、用户那份**永远不回写官方原件**。
 //!
-//! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分两条路：
-//! `begin_preset_edit` 改的是**临时文件账**（AppState 的 draft 格，`run/app-state.json`），`commit_preset_draft`
-//! 才落到用户根 —— 官方那份 → **另存**成 `（已修改）`；我那份 → **写回自己**（第八层）。
+//! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分几路：
+//!
+//! - **取回官方预设**（`catalog::fetch_official_preset`，2026-10-09 改判）：按需取回官方原件，
+//!   再把它落成 `presets-mine/<原名>`（还没有的话）—— **用户只面对一份**；
+//! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
+//!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
+//! - 校准值也写进同一份工作副本（`save_preset_calibration`：按注册表定位改
+//!   `toolhead.offset.x/y/z`，注释 / 键序 / 血统一个字节不动）。
+//!
 //! 第十层再加两条**管理**命令：`rename_user_preset`（只改名字，字节一个不动；正指着它的
 //! 使用中指针与该份的草稿跟着改）与 `delete_user_preset`（**真删除** —— 没有垃圾桶、
 //! 没有归档；正在使用 / 还有草稿的不给删，两道闸在 [`runtime::mine::delete_file`]）。
@@ -97,22 +103,8 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                 /* 出处账：这一份是复制来的还是导入来的（没记过就是 null，照实退回「我的」） */
                 let provenance = book.iter().find(|e| e.to == f.path);
                 let copied_from = provenance.and_then(|e| e.from.clone());
-                /*
-                 * **自己的归属**：头注释里 `# machine:` / `# variant:` 两行。
-                 * variant 在 B 类产物里写的是版本 id 的小写（`fast`），所以对着目录登记
-                 * **大小写无关**地找同一台机型下的版本，取目录里的规范写法（`FAST`）——
-                 * 界面拿它查显示名才查得到。头里没有 / 认不出就回落到来源那份的归属
-                 * （血统通常与头一致，所以大多数时候就是同一个答案；不猜、也不编）。
-                 */
-                let own = f.machine.as_deref().and_then(|mid| {
-                    let vid = f.variant.as_deref()?;
-                    let canonical = catalog
-                        .files
-                        .iter()
-                        .find(|c| c.machine_id == mid && c.version_id.eq_ignore_ascii_case(vid))
-                        .map(|c| c.version_id.clone())?;
-                    Some((mid.to_owned(), canonical))
-                });
+                /* 自己的归属（头两行优先、回落血统，见 [`owner_of`]） */
+                let (owner_machine, owner_version) = owner_of(&catalog, &f);
                 UserPresetFileDto {
                     based_on: match runtime::mine::based_on(&catalog, f.lineage.as_ref()) {
                         runtime::mine::BasedOn::Current => "current",
@@ -129,15 +121,11 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
                     based_on_version_id: source.map(|s| s.version_id.clone()),
                     /*
                      * **自己的归属**：头注释里 `# machine:` / `# variant:` 两行
-                     * （上面归一化过的那份）。认不出回落来源那份的归属 —— 不猜、也不编。
+                     * （[`owner_of`] 归一化过的那份）。认不出回落来源那份的归属 ——
+                     * 不猜、也不编。
                      */
-                    machine_id: own
-                        .clone()
-                        .map(|o| o.0)
-                        .or_else(|| source.map(|s| s.machine_id.clone())),
-                    version_id: own
-                        .map(|o| o.1)
-                        .or_else(|| source.map(|s| s.version_id.clone())),
+                    machine_id: owner_machine,
+                    version_id: owner_version,
                     copied_from_name: copied_from
                         .as_deref()
                         .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()),
@@ -154,6 +142,37 @@ pub async fn get_user_preset_files(app: AppHandle) -> Result<Vec<UserPresetFileD
             })
             .collect())
     })
+}
+
+/// 一份用户文件的**归属**：哪台机型 / 哪个版本（归一化到目录里的规范写法）。
+///
+/// 文件头 `# machine:` / `# variant:` 两行优先 —— variant 在 B 类产物里写的是版本
+/// id 的小写（`fast`），所以对着目录登记**大小写无关**地找同一台机型下的版本，
+/// 取目录里的规范写法（`FAST`），界面拿它查显示名才查得到；头里没有 / 认不出就
+/// 回落到**血统指向的那份官方**的归属（不猜、也不编）。
+///
+/// 用户线列表的机型 / 版本两列与校准页"找哪一份"读的都是它 —— 只有这一处口径。
+fn owner_of(
+    catalog: &runtime::Catalog,
+    f: &runtime::mine::MineFile,
+) -> (Option<String>, Option<String>) {
+    let own = f.machine.as_deref().and_then(|mid| {
+        let vid = f.variant.as_deref()?;
+        let canonical = catalog
+            .files
+            .iter()
+            .find(|c| c.machine_id == mid && c.version_id.eq_ignore_ascii_case(vid))
+            .map(|c| c.version_id.clone())?;
+        Some((mid.to_owned(), canonical))
+    });
+    if let Some((machine, version)) = own {
+        return (Some(machine), Some(version));
+    }
+    let source = runtime::mine::source_of(catalog, f.lineage.as_ref());
+    (
+        source.map(|s| s.machine_id.clone()),
+        source.map(|s| s.version_id.clone()),
+    )
 }
 
 /// 编辑中的那一份（临时文件）给界面的形状。
@@ -532,27 +551,112 @@ pub async fn copy_user_preset(
     })
 }
 
-/// **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+/// 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserCopyCalibrationDto {
+    pub file_name: String,
+    /// 相对用户根的落点（`presets-mine/…`）—— 保存校准时把它交回来
+    pub path: String,
+    /// 同一份在本机上的**绝对路径** —— 首页「复制后处理脚本」拼 `--Toml` 用它。
+    ///
+    /// 为什么不能拿 `path` 顶：切片器起钩子时的工作目录不是我们的数据根，相对落点
+    /// 在那里找不到文件（2026-10-09 实测：Bambu 弹 "Error code: 2"，正是 mkp-ssr 的
+    /// `EXIT_BAD_INPUT`「预设文件不存在：presets-mine/…」）。
+    pub abs_path: String,
+    /// 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数）
+    pub axes: Option<crate::ipc::Axes>,
+    /// 涂胶速度限速；读不出来是 `null`
+    pub speed: Option<f64>,
+}
+
+/// **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
 ///
-/// 与 [`copy_user_preset`]（我的文件 → 我的文件）分开：来源是**官方交付行**，闸在
-/// [`runtime::mine::copy_release_as_new`] 那边 —— 目录里得有它、得是 MKP 预设、
-/// 字节必须与目录一致（与「改这份」同一条边界）。血统三行新写指向来源交付文件，
-/// **出处账不记**（血统已经答了"从哪来"，与 `commit_preset_draft` 官方线同一口径）；
-/// 使用中指针 / 草稿一概不碰。
+/// 找法（有先后）：**底账正用着的那一份**（origin=mine 且归属匹配）> 用户目录里
+/// 第一份匹配的。匹配按**归属**（`# machine:` / `# variant:` 归一化后回落血统，
+/// 与用户线列表同一套口径，见 [`owner_of`]）。
+///
+/// 一份都没有 / 都读不出来 ⇒ `None`：校准页照旧显示官方默认值，**保存会被拦**
+/// （"先下载才有得存"—— 校准的对象是用户的工作副本，官方基线永远不可变）。
 #[tauri::command]
-pub async fn copy_release_as_new(
+pub async fn get_user_copy_for(
     app: AppHandle,
-    file_name: String,
-    new_name: String,
-) -> Result<UserFileIdentityDto, AppError> {
-    traced("copyReleaseAsNew", |_| {
+    machine_id: String,
+    version_id: String,
+) -> Result<Option<UserCopyCalibrationDto>, AppError> {
+    traced("getUserCopyFor", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
-        let done = runtime::mine::copy_release_as_new(&root, &user_root, &file_name, &new_name)?;
-        Ok(UserFileIdentityDto {
-            path: done.path,
-            file_name: done.file_name,
-        })
+        let catalog = runtime::load_released_catalog(&root)?;
+        let files = runtime::mine::mine_files(&user_root);
+        /* 候选 = 归属对得上 + 是能读的 TOML（读不出来的那份即便匹配也不能当基准） */
+        let matched: Vec<&runtime::mine::MineFile> = files
+            .iter()
+            .filter(|f| f.kind == Some(runtime::catalog::kind::PRESET))
+            .filter(|f| f.state == Some(runtime::mine::MineState::Ok))
+            .filter(|f| {
+                let owner = owner_of(&catalog, f);
+                owner.0.as_deref() == Some(machine_id.as_str())
+                    && owner.1.as_deref() == Some(version_id.as_str())
+            })
+            .collect();
+
+        let active = runtime::app_state::active_preset(&root)?;
+        let pick = active
+            .as_ref()
+            .filter(|a| a.origin == runtime::state::ActiveOrigin::Mine)
+            .and_then(|a| a.path.as_deref())
+            .and_then(|p| matched.iter().find(|f| f.path == p).copied())
+            .or_else(|| matched.first().copied());
+        let Some(f) = pick else {
+            return Ok(None);
+        };
+
+        let text = runtime::mine::read_text(&user_root, &f.path)?;
+        let calib = runtime::mine::calibration_of(&catalog, &text);
+        Ok(Some(UserCopyCalibrationDto {
+            file_name: f.file_name.clone(),
+            path: f.path.clone(),
+            /* 正文刚读出来了 ⇒ 这份一定在盘上，绝对路径不是猜的 */
+            abs_path: user_root.join(&f.path).display().to_string(),
+            axes: calib.axes().map(|(x, y, z)| crate::ipc::Axes { x, y, z }),
+            speed: calib.speed,
+        }))
+    })
+}
+
+/// **把校准值写进「我的那一份」**（2026-10-08 作者改判：偏移随工作副本走，
+/// `index/offsets.json` 那个只写不读的孤岛退役）。
+///
+/// 三个值都从**注册表派生**的位置改（`toolhead.offset.x/y/z` → 对应 TOML 键），
+/// [`crate::presetdata::patch`] 只换那个值 —— 注释、键序、血统三行全程一个字节不动；
+/// 写完就是那份工作副本的新内容（原子替换）。
+///
+/// 只认「我的文件」那一格（[`runtime::mine::read_text`] / [`runtime::mine::write_text`]
+/// 的前缀 + 防穿越两道闸）：官方基线不可变 —— 没有副本就先下载，校准不落别处。
+#[tauri::command]
+pub async fn save_preset_calibration(
+    app: AppHandle,
+    path: String,
+    axes: crate::ipc::Axes,
+) -> Result<(), AppError> {
+    traced("savePresetCalibration", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let mut text = runtime::mine::read_text(&user_root, &path)?;
+        for (key, value) in [
+            ("toolhead.offset.x", axes.x),
+            ("toolhead.offset.y", axes.y),
+            ("toolhead.offset.z", axes.z),
+        ] {
+            text = crate::presetdata::patch::patch_preset_toml(
+                &text,
+                &catalog.registry.params,
+                &crate::presetdata::patch::FieldEdit::new(key, value.to_string()),
+            )?;
+        }
+        runtime::mine::write_text(&user_root, &path, &text)
     })
 }
 
@@ -588,6 +692,11 @@ pub async fn delete_user_preset(app: AppHandle, path: String) -> Result<(), AppE
         runtime::mine::delete_file(&user_root, &path)?;
         /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句；删账失败不拦删除） */
         let _ = runtime::remarks::remove(&user_root, &path);
+        /*
+         * 逐参数「官方更新」决定账跟着删：那份文件都不在了，"我处理过哪几项"再留着
+         * 只会是一条悬空的账（而且下一次同名文件出现时会莫名其妙继承它）。
+         */
+        let _ = runtime::app_state::forget_param_decisions(&root, &path);
         if state_cleared {
             super::notify_app_state(&app);
         }

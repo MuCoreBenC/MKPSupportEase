@@ -84,7 +84,7 @@ export default function BbsRow({
           className={s.reset}
           disabled={readOnly}
           title={`恢复默认值 ${base === undefined ? '（基准缺）' : String(base)}`
-            + (readOnly ? ' · 展示模式下不可点，切到「可改动」' : '')}
+            + (readOnly ? ' · 这一页是只读查看器，改了也不落盘 —— 不可点' : '')}
           aria-label={`恢复 ${label} 的默认值`}
           onClick={() => onReset(paramKey)}
         >

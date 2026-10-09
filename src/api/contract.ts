@@ -19,10 +19,30 @@ export interface Axes {
 export interface Preset {
   /** 文件名，界面上直接显示 */
   name: string
-  /** 本机绝对路径，鼠标悬停时看 */
+  /**
+   * **落点**（用户线是相对用户根的 `presets-mine/…`，官方线是相对内部根的
+   * `delivery/mkp/presets/…`）—— 读正文、保存校准都把它交回后端，所以它**不是**
+   * 本机绝对路径：后端只收相对落点（绝对路径一律被那道防穿越的闸拒掉）。
+   * 界面上只当悬停提示与去重键用。
+   */
   path: string
+  /**
+   * 同一份在**本机上的绝对路径**；`null` = 这一份不在盘上（官方那份还没「取回」）。
+   *
+   * 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
+   * 不是我们的仓库根，相对落点在那里找不到文件 —— 2026-10-09 实测，贴进去导出时
+   * Bambu 弹的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」）。拿不到就**不摆
+   * 那颗按钮**：一条贴进去必报错的命令比没有按钮更糟。
+   */
+  absPath: string | null
   axes: Axes
   speed: number
+  /**
+   * **「我那一份」的落点** —— 校准保存写它（2026-10-08 资源库改判：偏移随「我的预设」走）。
+   * `null` = 这个机型 / 版本还没有你的一份：校准页照旧显示官方默认值，**保存被拦**
+   * （先另存一份自己的才有得存 —— 官方那一份是模板，永远不可变）。
+   */
+  mine: { path: string; fileName: string } | null
 }
 
 /** 校准板模型（Z 板 / XY 板 / 支撑测试件） */
@@ -30,9 +50,84 @@ export interface CalibModel {
   id: string
   name: string
   desc: string
-  /** 已经是给人看的字符串（'284 KB'），不是字节数 —— 单位换算不该由界面再做一遍 */
-  size: string
+  /** 交付文件名（catalog 登记的那个）—— 「取回」走下载管道、「打开」找盘上那份，都认它 */
+  fileName: string
+  /** 本机那份的真实大小（'3.1 MB'）。`null` = 本机还没有这份文件 —— 不编假大小 */
+  size: string | null
+  /** 本机有没有这份文件（下载区或旧缓存里找得到），以磁盘为唯一权威 */
   ready: boolean
+}
+
+/* ---------- 后处理执行报告（报告页） ---------- */
+
+/** 输入 / 输出文件的事实（大小、行数、SHA） */
+export interface ReportFileFact {
+  path?: string
+  sizeBytes?: number
+  sha256?: string
+  lines?: number
+}
+
+/** 打印时间估算（`detail.printTime`） */
+export interface ReportPrintTime {
+  totalSeconds?: number
+  toolMovementSeconds?: number
+  prepOverheadSeconds?: number
+  startupOverheadSeconds?: number
+  segments?: number
+  byType?: Record<string, { seconds?: number; count?: number; percent?: number }>
+}
+
+/** 管线一步的计时（`pipeline[]`） */
+export interface ReportPipelineStep {
+  id?: string
+  elapsedMs?: number
+  message?: string
+  status?: string
+}
+
+/** 一次执行的摘要（报告页列表行）。字段与 `_meta.json`（schema v2）一一对应 */
+export interface ReportSummary {
+  /** 记录 id = `_meta.json` 文件名去掉后缀，全树唯一 */
+  id: string
+  /** 哪一天的账（日期目录名） */
+  day: string
+  startedAt: string | null
+  finishedAt: string | null
+  elapsedMs: number | null
+  presetName: string | null
+  machineType: string | null
+  /** 输入 G-code 的文件名 */
+  gcodeName: string | null
+  /** `false` 有两种：跑失败（有 error）与记录本身坏了 —— 都进列表，不许藏 */
+  ok: boolean
+  error: string | null
+  warningCount: number
+}
+
+/** 一条执行记录的详情（展开那一屏） */
+export interface ReportDetail {
+  summary: ReportSummary
+  inputFile: ReportFileFact | null
+  outputFile: ReportFileFact | null
+  /** 刮出来的切片器头部事实（机型 / 工艺预设名、熨平开关、3mf 名） */
+  header: Record<string, unknown> | null
+  /** 16 项统计（塔高 / 涂胶层 / 层数……）—— 键与 `_meta.json` 的 `detail.stats` 同名 */
+  stats: Record<string, unknown> | null
+  printTime: ReportPrintTime | null
+  /**
+   * 打印时间估算的状态：`computing` / `ready` / `failed`。
+   *
+   * 打印时间是**延后**算的（钩子写完盘就退，交给常驻进程），所以刚生成的记录
+   * 可能还没有 `printTime` —— 这时看这个状态显示"正在估算…"，**不许拿 0 凑数**。
+   */
+  printTimeStatus: string | null
+  pipeline: ReportPipelineStep[]
+  warnings: string[]
+  /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
+  invocation: { exe?: string; args?: string[] } | null
+  presetPath: string | null
+  gcodePath: string | null
 }
 
 
@@ -101,11 +196,12 @@ export interface MachineVersion {
   description?: string
   /**
    * **备注**（2026-10-07）：客户端预设列表的**副标题**用它 —— 不再显示
-   * 「下载区 mkp · 路径」那种位置文案。可空（工作台可以不写）。
+   * 「下载区 mkp · 路径」那种位置文案。可空（工作台可以不写；没写副标题就空着）。
    *
-   * 「默认下载的用工作台写的；用户改了之后，以后更新不覆盖，除非他删了重新下载」——
-   * 用户改过的那份记在客户端的**备注覆盖账**里（`MkpApi.getPresetRemarks`），
-   * 副标题 = 覆盖账里的 ?? 这里的 ?? 路径文本。
+   * 两条消费链**互不干扰**（2026-10-07 三轮定案）：
+   *   云端表  直接显示这一句（客户端只读，不叠加任何本地改动）；
+   *   本地表  用户在**备注覆盖账**（`MkpApi.getPresetRemarks`）里改过的优先
+   *           （「更新不覆盖，除非他删了重新下载」），没有覆盖才用它。
    */
   remark?: string | null
   /**
@@ -280,6 +376,13 @@ export interface FileRef {
    * 不拿它拼本机路径、也不拿它拼 URL。
    */
   path: string
+  /**
+   * MKP 预设那一支：这一份在**本机上的绝对路径**（`内部根 + path`）。
+   * `undefined` = 盘上还没有它（还没「取回」）—— 界面据此不摆「复制后处理脚本」：
+   * 切片器起钩子时的工作目录不是我们的内部根，相对落点贴进去必报 "Error code: 2"。
+   * 切片器配置那一支不给（后台处理的 `--Toml` 不指它）。
+   */
+  absPath?: string
   /**
    * `mkp_preset` 那一支带**真值**（运行时 catalog 的文件条目对交付产物真字节算的，
    * 下载校验拿它当期望值）；切片器那两支仍是 undefined —— 资产本体的登记与
@@ -584,6 +687,29 @@ export interface UserFileIdentity {
   fileName: string
 }
 
+/**
+ * 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）。
+ *
+ * **整个对象缺席**（`null`）= 这个机型 / 版本还没有你的一份 —— 校准页照旧显示
+ * 官方默认值，**保存被拦**（先另存一份自己的才有得存：校准的对象是「我的预设」，
+ * 官方那一份是模板、永远不可变）。
+ */
+export interface UserCopyCalibration {
+  fileName: string
+  /** 落点（相对**用户根**，`presets-mine/…`）—— 保存校准时把它交回来 */
+  path: string
+  /**
+   * 同一份在**本机上的绝对路径**（首页「复制后处理脚本」里 `--Toml` 用它）。
+   * 真后端上它恒有值（正文都读出来了，这份就在盘上）；浏览器预览里是 `null`
+   * —— 那一侧没有盘，也就不该编一个绝对路径出来。
+   */
+  absPath: string | null
+  /** 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数） */
+  axes: Axes | null
+  /** 涂胶速度限速；读不出来是 `null` */
+  speed: number | null
+}
+
 /** 落点检查的一档（第十二层）：`ready` 能收 / `collision` 重名 / `rejected` 收不了（带原因） */
 export type ImportStage = 'ready' | 'collision' | 'rejected'
 
@@ -766,6 +892,14 @@ export interface OnDiskFile {
  */
 export interface CatalogParamDef {
   key: string
+  /**
+   * 这个参数在 MKP 预设 TOML 里的**字段名**（`offset_x` / `speed_limit`…）。
+   *
+   * 真目录里本来就有它（`presetdata::ParamDef` 的 `toml_key`，serde 成 camelCase）——
+   * 客户端的**写值**不读它（按注册表定位是 Rust 那边的事），
+   * 只有**假后端的对比台**要靠它把演示正文对回参数键（真机上这一步在 Rust 里）。
+   */
+  tomlKey?: string
   /** 数据域分区（= key 前缀）。**不是界面分组** —— 分组看 layout.sectionId */
   section: string
   /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
@@ -910,6 +1044,25 @@ export interface ActivePreset {
   machineId: string
   versionId: string
   intact: boolean
+}
+
+/**
+ * 「取回官方预设」的结果（[`fetchOfficialPreset`]，2026-10-09 改判）。
+ *
+ * `fetched` 说这次**有没有真的取回来一份**官方原件（本机已经是当前版时是 `false`，
+ * 一次网络都不发）；`created` 说这次**有没有新落一份我自己的工作副本**
+ * （没有的话用的是已经在的那一份，那份一个字节都没动）。
+ *
+ * 两个都是"这次到底做了什么"的实情 —— 界面据此说清「取回来了没有」与
+ * 「你之前那份还在不在」。`path` / `fileName` 是我那一份的落点：调用方要接着
+ * 「使用」它（[`applyPreset`]）时就用这两个，不用自己拼路径。
+ */
+export interface FetchOfficialResult {
+  fetched: boolean
+  created: boolean
+  fileName: string
+  /** 我那一份的落点（相对用户根：`presets-mine/…`） */
+  path: string
 }
 
 /**
@@ -1066,9 +1219,187 @@ export interface PresetSource {
   builtinDefault: string | null
 }
 
+/* ---------- baseline + 对比台（2026-10-08） ---------- */
+
+/**
+ * 官方预设的一个版本（云端表按预设归组之后，组内的每一行）。
+ *
+ * ★ **这不是"过时判定"**：它说的是"云端登记过这一版、我这一版下过没有"，
+ * 不是"你那份该更新了"。用户自己那份是完整、可继续使用的一份，系统不替他更新。
+ */
+export interface OfficialVersion {
+  /** 归属的官方预设文件名（`A1-fast.toml`）—— 界面按它归组 */
+  fileName: string
+  /** 内容摘要（版本的唯一身份）。**界面不显示** —— 用户没必要看见哈希 */
+  sha256: string
+  /** 官方**发布日期真值**（该版正文文件头的 `# release_time`）。`null` = 还没下载，拿不到 */
+  releaseTime: string | null
+  /** 目录代时间（`catalog.publishedAt`）—— 兜底，界面上标明是"目录发布时间" */
+  publishedAt: string | null
+  /** 这一版本机下过没有（= 隐藏 baseline 里有它） */
+  downloaded: boolean
+  /**
+   * 这一版是**当前目录登记的那一版** —— 只有它的「下载」真能拿到（历史版本没法按摘要重下）。
+   * 界面据此决定给不给「下载」：历史版本没下过也给不出一个真能成的动作。
+   */
+  current: boolean
+}
+
+/** 一次参数改动：参数 key + 目标值的字符串形式（形态由注册表决定，前端**不拼 TOML**） */
+export interface ParamEdit {
+  paramKey: string
+  value: string
+}
+
+/** 一份用户预设的参数值（对比台里的一列） */
+export interface PresetParamValues {
+  /** 相对用户根的路径（`presets-mine/A1-fast-2026-10-15.toml`） */
+  path: string
+  fileName: string
+  /** 参数 key → 控件看得懂的值（`-1.5` / `true` / `standard` / 多行 G-code） */
+  values: Record<string, string>
+  /** 这一份读不出来时的一句人话（此时 `values` 是空表） */
+  problem: string | null
+}
+
+/* ---------- 逐参数「官方更新」（2026-10-09） ---------- */
+
+/**
+ * 一个参数上"我做过的那次决定"。
+ *
+ * `adopt` = 采用官方新值（文件里那一项已经写成官方新值）；
+ * `hold` = 明确保持我的值（文件里那一项一个字没动）。
+ * 两者都把这一项的水位推到当时的官方版 —— 于是同一版不会再挂着，官方再改才会重新进待处理。
+ */
+export type ParamDecisionKind = 'adopt' | 'hold'
+
+/** 一个参数上的四方账。`null` = 这一格没有值（**不是空串**：文件里没有这一项就是没有） */
+export interface ParamSyncEntry {
+  /** 参数 key（注册表的键，与 `RecipeParam.key` 同一套） */
+  key: string
+  /** 我这份文件里现在写着的值 */
+  mine: string | null
+  /** 官方**旧值**：我上次处理到的那一版官方里这一项是什么 */
+  baselineOld: string | null
+  /** 官方**当前最新值**。官方当前版字节不在本机 ⇒ `null`（界面照实说"还没取回来"） */
+  officialNew: string | null
+  /** 官方改过这一项、而我还没处理 */
+  pending: boolean
+  /** 我已经对**当前官方版**处理过这一项 */
+  decided: ParamDecisionKind | null
+}
+
+/**
+ * 一份用户预设的「官方更新」总账。
+ *
+ * 三方 = **我这份文件 / 官方旧值（我上次处理到的那一版） / 官方当前最新版**。
+ * 用户看不见"旧值是哪一版"这种话 —— 界面上只说"官方旧值 → 官方新值"。
+ */
+export interface PresetParamSync {
+  /** 相对用户根的路径（`presets-mine/A1-fast.toml`） */
+  path: string
+  fileName: string
+  /** 这份预设自己的归属（文件头两行归一化后的）。认不出是 `null` */
+  machineId: string | null
+  versionId: string | null
+  /** 官方那一份的文件名（`A1-fast.toml`）。认不出是 `null` —— 那就比不出官方更新 */
+  officialFileName: string | null
+  /** 我这份当初基于的那一版官方的发布时间（给人看的） */
+  basedOnReleaseTime: string | null
+  /** 官方当前版的发布时间（给人看的）。拿不到是 `null` */
+  currentReleaseTime: string | null
+  /** 官方当前版的字节**在本机可用**（可用就能逐项比） */
+  officialReady: boolean
+  /** 官方换版了：当前版与我这份当初那一版不是同一份 */
+  versionAdvanced: boolean
+  /** 待处理条数（= `entries` 里 `pending` 的条数） */
+  pendingCount: number
+  /** 逐参数的四方账，顺序与参数定义一致 */
+  entries: ParamSyncEntry[]
+}
+
+/** 一条要落下去的决定 */
+export interface ParamDecision {
+  paramKey: string
+  kind: ParamDecisionKind
+}
+
+/* ——— 后处理钩子那一趟（切片器导出 G-code 时起的那个进程）———
+ *
+ * 三个形状与 Rust 侧 `hook_ui` 里的 `ProgressPayload` / `QuestionPayload` /
+ * `FinishedPayload` / `RunSnapshot` 一一对应（两边没有编译器，靠这里的注释对齐）。
+ */
+
+/** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
+export interface PostProcessProgress {
+  /** 阶段 id（内核的稳定标识：`input` / `pass1`…） */
+  step: string
+  /** 步内比例 `0..1`；`null` = 这一步此刻给不出比例 */
+  fractionInStep: number | null
+  message: string
+}
+
+/** 要用户回答的一个问题 */
+export interface PostProcessQuestion {
+  /** 问题种类：`machine-mismatch` = 机型不匹配（给「继续 / 停下」两颗按钮） */
+  kind: string
+  text: string
+}
+
+/** 那一趟的结论 */
+export interface PostProcessFinished {
+  ok: boolean
+  /** 用户按了停止（或 Ctrl-C）—— 不是"失败"，说法不一样 */
+  cancelled: boolean
+  /** **原因**（人话）。稳定错误码已经从这句里剥走了，单独给 `code` ——
+   * 整句码塞给用户，他读不到到底哪儿不对 */
+  message: string
+  /** 稳定错误码（`E_*_NNN`，报问题时带上它）。取消与没有码的几句是 `null` */
+  code: string | null
+  /** 停在哪一阶段（内核的阶段 id，界面转中文名）；还没出过进度时是 `null` */
+  stage: string | null
+  /** 给切片器的退出码（0 成功 / 1 失败或取消 / 2 输入·预设错） */
+  exitCode: number
+  elapsedMs: number
+  /** 产物落点（成功时就是输入那一份 —— 原地覆盖） */
+  output: string | null
+  warnings: string[]
+}
+
+/**
+ * 新一趟的开场（事件 `postprocess-started`）。
+ *
+ * 界面据此把上一趟的结论与"我关过了"一起清掉 —— 窗口是常驻的、结论会留到下一次顶掉它
+ * （旧世代同一条），所以"新的一趟开始了"必须有个明确的开场信号。
+ */
+export interface PostProcessStarted {
+  presetName: string
+  gcodeName: string
+}
+
+/**
+ * 钩子那一趟的**全量快照**：窗口起来时读一次，之后跟着事件走。
+ *
+ * 只靠事件是不够的：窗口起来时那一趟可能已经跑到一半、甚至已经跑完（早期的失败尤其快）。
+ */
+export interface PostProcessRun {
+  presetName: string
+  gcodeName: string
+  question: PostProcessQuestion | null
+  progress: PostProcessProgress | null
+  finished: PostProcessFinished | null
+}
+
 export interface MkpApi {
-  /** 把校准好的三轴偏移写回配置。三轴一起写，不按页分 */
-  saveOffsets(axes: Axes): Promise<void>
+  /**
+   * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
+   *
+   * `path` 来自 [`getUserCopyFor`]（或用户线列表）—— 必须是 `presets-mine/…` 里
+   * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
+   * （注释、键序、血统三行一个字节不动）。
+   * 官方那一份是模板、永远不可变：还没有你的一份就先「另存为我的预设」。
+   */
+  savePresetCalibration(path: string, axes: Axes): Promise<void>
 
   /** 校准板清单 */
   getCalibModels(): Promise<CalibModel[]>
@@ -1078,6 +1409,39 @@ export interface MkpApi {
    * 前端不碰文件系统，也不关心它是下载还是命中缓存 —— 那是壳的事。
    */
   openModel(modelId: string): Promise<void>
+
+  /**
+   * 「复制后处理脚本」里那段可执行文件路径 —— **本应用自己的可执行物**（壳的 `current_exe()`：
+   * 开发态是 `target/debug/…`，装好了就是安装位置）。
+   *
+   * 后处理由**本程序自己**跑（一个可执行物两种角色：带 `--Toml/--Gcode` 是切片器的
+   * 后处理钩子，不带参数就是界面），所以这段路径只有壳知道，前端不许写死一串 ——
+   * 早先首页硬编码的是**另一个仓库**的 exe，那个 exe 读不了我们的预设
+   * （`offset_x` 会被它判成"这份预设比本程序新"），复制出去的命令必然跑不通。
+   *
+   * `null` = 这一侧没有本机可执行物（浏览器预览的假后端）。界面据此**不摆**那颗按钮
+   * —— 与"这份预设不在本机"同一个处置：一条指不到东西的命令比没有按钮糟。
+   */
+  getPostProcessExe(): Promise<string | null>
+
+  /* ——— 后处理钩子那一趟：看它 / 停它 / 答它那一问（切在 `app/postprocess/`）——— */
+
+  /**
+   * 钩子那一趟的全量快照。`null` = **现在没有在跑后处理**（普通模式，从桌面图标起来的）
+   * —— 不是错误：界面据此不摆那一屏模态框。
+   */
+  getPostProcessRun(): Promise<PostProcessRun | null>
+
+  /**
+   * 界面那颗「停止」：请求取消。
+   *
+   * 取消落在内核的**步骤边界**上（写盘前还有最后一道），所以按下去之后原文件不会被写坏；
+   * 顺带把"等你回答机型那一问"的等待也放开（按停止 = 不跑）。
+   */
+  cancelPostProcess(): Promise<void>
+
+  /** 回答「机型不匹配还跑不跑」：`keep = true` 继续，`false` 停下 */
+  answerPostProcessMismatch(keep: boolean): Promise<void>
 
   /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 
@@ -1105,17 +1469,18 @@ export interface MkpApi {
   getUserPresetFiles(): Promise<UserPresetFile[]>
 
   /**
-   * **用户改过的备注**整本（副标题覆盖账）。键 = 文件身份（官方交付行是
-   * `catalog.path`，用户线是相对用户根的路径）；有 ⇒ 预设列表副标题用它，
-   * 没有 ⇒ 用那一版工作台写的 `remark`。「更新不覆盖；删了重新下载才回到
-   * 工作台那句」——删除文件时后端把键一起清掉。
+   * **用户改过的备注**整本（副标题覆盖账）。**只有本地表的副标题读它** ——
+   * 云端表只读工作台写的那句（本地改动不许影响云端显示，2026-10-07 作者定）。
+   * 键 = 文件身份（官方交付行是 `catalog.path`，用户线是相对用户根的路径）；
+   * 有 ⇒ 本地副标题用它，没有 ⇒ 用那一版工作台写的 `remark`（都没写就空着）。
+   * 「更新不覆盖；删了重新下载才回到工作台那句」——删除文件时后端把键一起清掉。
    */
   getPresetRemarks(): Promise<Record<string, string>>
 
   /**
-   * **改一份预设的备注**（副标题覆盖账）。**用户写什么就是什么 —— 包括空串**
+   * **改一份预设的备注**（本地副标题覆盖账）。**用户写什么就是什么 —— 包括空串**
    * （2026-10-07 作者改口：「可以空着，不要回退」；空 = 副标题就空着）。
-   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 路径」）。
+   * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 空着」）。
    * 只动这一本账 —— 文件字节与目录全程不碰。
    */
   setPresetRemark(key: string, remark: string | null): Promise<void>
@@ -1200,10 +1565,9 @@ export interface MkpApi {
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
    *
-   * 与第八层"官方 → 我的文件"那条另存分开：这一层是**我的文件 → 我的文件** ——
-   * 原文件一个字节不动；内容与那三行 `based_on*` 血统**原样带过去**（来源已经是用户文件，
-   * 不重算血统 —— 重算会把"从哪一版官方派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
-   * （**不覆盖、也不自动改名** —— 名字由用户自己换）。
+   * **我的文件 → 我的文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
+   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版官方派生"说错）。
+   * 新名字过同一套门槛、落点已有东西就拒绝（**不覆盖、也不自动改名** —— 名字由用户自己换）。
    *
    * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
    * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
@@ -1211,18 +1575,15 @@ export interface MkpApi {
   copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
 
   /**
-   * **把官方交付那份直接另存成你自己的一份**（官方 → 我的文件；UX 场景测试 A1 的正路）。
+   * **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
    *
-   * 在此之前官方行的「另存为一份新的」是灰的，要绕「改这份」→ 保存才能复制 ——
-   * 可"改了再保存"与"不改直接复制"落的是同一种东西，绕一道编辑流程不合直觉。
+   * 找法（有先后）：底账正用着的那一份（origin=mine 且归属匹配）> 用户目录里
+   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落血统
+   * （与用户线列表同一套口径）。
    *
-   * 来源是**官方交付行**，闸在 Rust 侧（`mine::copy_release_as_new`）：
-   * 目录里得有它、得是 MKP 预设、**字节必须与目录一致**（与「改这份」同一条边界 ——
-   * 旧版本 / 内容异常禁令不变）。血统三行**新写指向**来源交付文件（官方原件没有
-   * 血统头，不是照抄）；出处账不记（血统已经答了"从哪来"）。名字过同一套门槛、
-   * 不覆盖、不自动改名；**一个状态都不碰**（不改使用中指针、不建草稿、不进 archive）。
+   * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示官方默认值，保存被拦。
    */
-  copyReleaseAsNew(fileName: string, newName: string): Promise<UserFileIdentity>
+  getUserCopyFor(machineId: string, versionId: string): Promise<UserCopyCalibration | null>
 
   /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
 
@@ -1270,11 +1631,20 @@ export interface MkpApi {
    */
   deleteUserPreset(path: string): Promise<void>
 
-  /** 已经复制到切片器目录的那些（切片器文件的「生效」与 MKP 不是一回事） */
+  /**
+   * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+   * 盘就是底账：切片器的用户配置目录里真有这份文件才算「已复制」。
+   */
   getSlicerCopied(): Promise<string[]>
 
-  /** 把一份切片器配置复制到切片器目录。写方法：真机上会落盘 */
-  copyToSlicer(assetId: string): Promise<void>
+  /**
+   * 把一份切片器配置复制进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
+   * （MKP 预设的生效是「启用」，两回事）。
+   *
+   * 真机上会落盘。三种真实的失败照实抛：不是切片器配置 / 本机还没有那份字节
+   * （先「下载」）/ 目标已有同名文件（不覆盖 —— 那份可能被用户在切片器里改过）。
+   */
+  copyToSlicer(fileName: string): Promise<void>
 
   /** 预设仓库的清单（含交付身份 / 大小 / 修改时间） */
   getPresetFiles(): Promise<PresetFileInfo[]>
@@ -1292,10 +1662,22 @@ export interface MkpApi {
   getMachineParams(machineId: string, versionId: string | null): Promise<RecipeParam[]>
 
   /**
-   * 下载选中的文件（官方那一批）。
-   * 试验场的假后端对这个方法是**故意抛**的（那里没有真网络），真机上是 Rust 的活。
+   * 一份目录文件的**官方下载链接**（「复制链接」复制的就是它）。
+   *
+   * 寻址与下载管道同一个出口算 —— 复制到的链接就是下载时取的那个地址。
+   * 没配数据源时照实报错，不拼一个猜的 URL。
    */
-  downloadFiles(refs: FileRef[]): Promise<void>
+  getFileUrl(fileName: string): Promise<string>
+
+  /**
+   * **后处理执行报告与历史**（报告页）：`mkp-ssr` 钩子每跑一次落一份 `_meta.json`，
+   * 这里把它们读成摘要列表（新在前）。空列表 = 还没有执行记录（不是错误）；
+   * 读不出来的那几条**照进列表**（`ok=false` + 原因），不许消失。
+   */
+  getReportList(): Promise<ReportSummary[]>
+
+  /** 一条执行记录的详情（展开那一屏）。`id` 是 [`ReportSummary::id`] */
+  getReportDetail(id: string): Promise<ReportDetail>
 
   /**
    * 新数据世界的目录（第一圈骨架）。读运行时释放进数据根的那份 catalog.json，
@@ -1443,6 +1825,22 @@ export interface MkpApi {
     ): Promise<ActivePreset>
 
   /**
+   * **把官方这一份预设取到本机** —— 云端表那两个动作（「下载」/「更新」）共用的那一条。
+   *
+   * 它做的两件事，都幂等：
+   *
+   * ```text
+   *   ① 官方当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+   *   ② 我的工作副本       presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统三行）
+   *                       已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
+   * ```
+   *
+   * **不碰「当前使用」**：下载 / 更新是"把官方的取到我机器上"，使用是"把哪一份设为生效"——
+   * 后者由本地表那颗按钮走 {@link applyPreset}。官方原件留在下载区，是内部数据。
+   */
+  fetchOfficialPreset(fileName: string): Promise<FetchOfficialResult>
+
+  /**
    * 撤销使用。幂等：本来就没在用也不报错。
    */
   clearActivePreset(): Promise<void>
@@ -1504,6 +1902,63 @@ export interface MkpApi {
    *   点了**什么都不发生**（0.0.2 的「查看更新」就是那样"点了没反应"的）。
    */
   openUrl(url: string): Promise<void>
+
+  /* ---------- baseline + 对比台（2026-10-08） ---------- */
+
+  /**
+   * **官方版本列表**：这个官方预设官方登记过哪几版、哪几版这一机已经下过。
+   *
+   * 两条判据：官方登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
+   * 下过没有 = 隐藏 baseline 里有没有那一版的摘要。
+   *
+   * ★ **它不是"过时判定"**：不读用户预设的字节、不看血统，也**不会**说"你那份该更新了"。
+   * `fileName` 给了就只返回那一个预设的版本。
+   */
+  getOfficialVersions(fileName?: string | null): Promise<OfficialVersion[]>
+
+  /**
+   * **读一份用户预设的参数**（对比台里的一列）。**只认 `presets-mine/`**。
+   *
+   * 读不出来**不抛错**：返回空表 + `problem` 一句人话 —— 那一列如实说"这份读不出来"，
+   * 而不是把整个对话框打掉。
+   */
+  readPresetParams(path: string): Promise<PresetParamValues>
+
+  /**
+   * **把改过的几项写回它自己那一份**（同一路径，**不产生第二份**）。
+   *
+   * 结构保真：逐项只换那个值（注释 / 键序 / inline table / 多行字面量 / 行尾一个字节不动），
+   * 任何一项失败**整批不落**；空改动 / 算出来与原文一样**不写盘**。
+   * baseline 与官方当前版永远不被写。
+   */
+  savePresetParams(path: string, edits: ParamEdit[]): Promise<void>
+
+  /* ---------- 逐参数「官方更新」（2026-10-09） ---------- */
+
+  /**
+   * **这一份预设的官方更新账**：逐项给出「我 / 官方旧值 / 官方新值」与待处理标记。
+   *
+   * 官方那一版默认值住在**隐藏 baseline** 里（用户看不见）；"我上次处理到哪一版"
+   * 记在逐参数决定账里 —— 所以官方连着发几版也能一次算清（比对的是
+   * 「我处理到的那一版 → 当前版」，不需要云端提供中间版本）。
+   *
+   * `fetchMissing` = 允许为了拿到**官方当前版**的正文发一次网络请求。
+   * 打开某一份预设时可以给 `true`；列表那种一屏几十行的读一律 `false`（启动零网络）。
+   * 拿不到官方当前版正文时**不报错**：`officialReady: false`，逐项新值给 `null`。
+   */
+  getPresetParamSync(path: string, fetchMissing?: boolean): Promise<PresetParamSync>
+
+  /**
+   * **落一批决定**（采用 / 保持），回来的是落完之后的那一份总账。
+   *
+   * 采用会**结构保真地**改文件里那几项（注释 / 键序 / 行尾一个字节不动），
+   * 保持一个字节不动；两者都把这一项的水位推到官方当前版。
+   * 官方当前版正文不在本机时，采用会如实报错（不许"记了水位、值却没写"）。
+   */
+  applyPresetParamDecisions(
+    path: string,
+    decisions: ParamDecision[],
+  ): Promise<PresetParamSync>
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

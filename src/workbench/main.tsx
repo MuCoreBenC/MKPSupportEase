@@ -10,6 +10,7 @@
  */
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import './tokens.css'
 import './workbench.css'
@@ -68,3 +69,36 @@ ReactDOM.createRoot(host).render(
     </Boundary>
   </React.StrictMode>,
 )
+
+/*
+ * ★ **窗口这时还是藏着的**（Rust 侧 `.visible(false)`，见 `workbench::open_window`）——
+ * 等两帧过去（React 把首帧画上），再让它露面：作者 2026-10-07 定的是"画面跟窗口
+ * 一起出现"，不要"先给一块白板、再等一分钟"。
+ *
+ * 两帧的原因：React 18 的 render 是调度着提交的，跳过第一帧再 show 最稳 ——
+ * 差一帧人看不出来。Rust 侧还挂着 60 秒兜底：这段代码因任何原因没走到，
+ * 窗口照样会出现（宁可白板，不能永不露面）。
+ *
+ * 浏览器里（探针跑 vite preview 时）没有 Tauri，跳过。
+ *
+ * ★ **但"这个键在不在"判不准**（2026-10-08 探针里现的原形）：`?mock=1` 那个桩
+ * 也往 `__TAURI_INTERNALS__` 上挂了一个 `invoke`（见 `dev/mockBackend.ts`），
+ * 于是守卫放行、`getCurrentWindow()` 在浏览器里**同步抛** `TypeError`
+ * （桩上没有 `metadata`）—— 那一下抛在 rAF 回调里，谁也接不住，探针里就是一条
+ * pageerror。这里只要"没有真的窗口就别显示"：接住它，桩那边本来也没什么可显示的。
+ */
+if ('__TAURI_INTERNALS__' in window) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        getCurrentWindow()
+          .show()
+          .catch(() => {
+            /* show 失败没有补救余地（Rust 侧兜底定时器还在），不打断入口 */
+          })
+      } catch {
+        /* 桩（`?mock=1`）不是真的 Tauri：没有窗口可显示，这不是错误 */
+      }
+    })
+  })
+}

@@ -7,7 +7,7 @@
 //!
 //! 运行（CPU 口径，抗机器负载竞争）：
 //! ```sh
-//! cargo test -p mkp-postproc --test perf_probe --no-run
+//! cargo test -p mkpse-postprocess --test perf_probe --no-run
 //! B=$(ls -t target/debug/deps/perf_probe-* | grep -v '\.d$' | head -1)
 //! /usr/bin/time -p $B --ignored --nocapture --test-threads=1
 //! ```

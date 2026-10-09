@@ -156,6 +156,34 @@
   color: var(--danger);
 }
 
+/*
+ * 错误的**详情**（Rust 的 `detail`：git 的 stderr、平台返回的那句话）。
+ *
+ * ★ 只有标题那一行等于没说：2026-10-07 真机踩的就是这个 —— 界面上只剩一句
+ * "git push 失败了"，而真正的原因（本地 main 陈旧 → 非快进 → 闸③）躺在 detail 里。
+ * 等宽 + 保留换行（git 的报错是多行的），自己滚，不把模态框顶穿。
+ */
+.errorDetail {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: calc(var(--fs-label) - 1px);
+  white-space: pre-wrap;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* 闸里某一格自带的动作按钮（run-env 那颗「杀掉 dev 监视进程」）：贴着说明往下摆一行 */
+.rowAction {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .pending {
   margin: 0;
   color: var(--text-3);
@@ -341,73 +369,23 @@
   color: var(--text-3);
 }
 
-/* 三段视图的切换（闸 / 回执 / 历史）：一行小按钮，不引新的组件体系 */
-.tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.tab {
-  padding: 3px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  color: var(--text-2);
-  font-size: var(--fs-label);
-  cursor: pointer;
-}
-
-.tab[aria-current='true'] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-}
-
-/* 历史：一列回执，最新在前（与发布预设那本账分开读） */
-.hist {
+/*
+ * footer 的两行布局（2026-10-07）：**提示独占一行、按钮另起一行**。
+ * 之前靠 `.foot`（shared）的单行 flex + `grow` 把按钮推到右边，五个按钮一多，
+ * 提示被挤成竖排的字、footer 被顶得老高。这里改成纵向两行：提示一行不通挤，
+ * 按钮行靠右、放不下时**换行**（不缩成一列窄字）。
+ */
+.footCol {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: min(56vh, 520px);
-  overflow: auto;
-  overscroll-behavior: contain;
+  width: 100%;
 }
 
-.histRow {
+.footBtns {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-}
-
-.histHead {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.histTag {
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.histAt {
-  font-size: var(--fs-label);
-  color: var(--text-3);
-}
-
-.histNote {
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  overflow-wrap: anywhere;
-}
-
-.empty {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }

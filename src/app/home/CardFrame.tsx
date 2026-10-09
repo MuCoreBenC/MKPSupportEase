@@ -20,6 +20,8 @@ export interface Capsule {
   on?: boolean
   /** 失效态（首页的「已应用 / 应用中」）：看得见、点不了，也不吃 hover */
   disabled?: boolean
+  /** 灰着 / 需要说明时悬停能看到的一句话（例如「先下载这份预设」） */
+  title?: string
   /** 固定宽度（作者 2026-10-06：按钮宽度不随文字换态变化） */
   fixed?: boolean
 }
@@ -63,7 +65,7 @@ interface CardFrameProps {
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
-function Pill({ label, onClick, primary, arrow, back, on = true, disabled, fixed }: Capsule) {
+function Pill({ label, onClick, primary, arrow, back, on = true, disabled, title, fixed }: Capsule) {
   return (
     <button
       type="button"
@@ -74,6 +76,7 @@ function Pill({ label, onClick, primary, arrow, back, on = true, disabled, fixed
       data-fixed={fixed ? 'true' : undefined}
       tabIndex={on && !disabled ? 0 : -1}
       disabled={disabled}
+      title={title}
       onMouseDown={noFocus}
       onClick={onClick}
     >

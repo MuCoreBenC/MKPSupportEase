@@ -1,0 +1,70 @@
+{
+  "workspace": {
+    "cargoWorkspaceMembers": ["crates/postprocess", "crates/preset", "src-tauri"],
+    "cargoVersion": "0.2.0 (workspace.package) / src-tauri 自带 0.0.6",
+    "tauriIdentifier": "SupportEase",
+    "frontendStack": "React 18 + TypeScript + Vite 5 + CSS Modules；无状态库，`useSyncExternalStore` 自建 store",
+    "buildScripts": {
+      "dev": "vite",
+      "build": "tsc -b && vite build",
+      "lint": "eslint . && stylelint src/**/*.css",
+      "checks": ["check:bundle", "check:zero-network", "check:channel-args", "check:release-source"]
+    },
+    "evidence": ["Cargo.toml", "package.json", "src-tauri/tauri.conf.json"]
+  },
+  "roots": {
+    "internalRoot": "<appDataDir>（fsx/paths.rs::internal_root::43；自动建 cloud/archive/logs/run）",
+    "userRoot": "<appDataDir>/user（fsx/paths.rs::user_root::56；自动建 exports/reports/presets-mine）",
+    "counterExample": "用户根**不再**落 ~/Documents（fsx/paths.rs::the_user_root_never_touches_documents::212 为源码扫描判据）",
+    "evidence": ["src-tauri/src/fsx/paths.rs::internal_root::43", "src-tauri/src/fsx/paths.rs::user_root::56"]
+  },
+  "modules": [
+    { "id": "M-window", "path": "src-tauri/src/main.rs", "kind": "app", "role": "Tauri 进程入口", "pathClass": "formal", "evidence": ["src-tauri/src/main.rs"] },
+    { "id": "M-lib", "path": "src-tauri/src/lib.rs", "kind": "app", "role": "启动装配 + 两份 generate_handler 命令清单（按 feature 分客户端/工作台）", "pathClass": "formal", "evidence": ["src-tauri/src/lib.rs::run::51", "src-tauri/src/lib.rs::with_commands::140", "src-tauri/src/lib.rs::with_commands::217"] },
+    { "id": "M-chrome", "path": "src-tauri/src/chrome.rs", "kind": "app", "role": "macOS 原生圆角与红绿灯位（仅客户端窗口）", "pathClass": "formal", "evidence": ["src-tauri/src/chrome.rs"] },
+    { "id": "M-obs", "path": "src-tauri/src/obs/*", "kind": "lib", "role": "tracing 日志初始化（logs/）", "pathClass": "formal", "evidence": ["src-tauri/src/obs/tracing.rs"] },
+    { "id": "M-fsx", "path": "src-tauri/src/fsx/*", "kind": "lib", "role": "唯一写盘出口 atomic_write + 路径根与防穿越 resolve_in", "pathClass": "formal", "evidence": ["src-tauri/src/fsx/atomic.rs::atomic_write::28", "src-tauri/src/fsx/paths.rs::resolve_in::78"] },
+    { "id": "M-ipc", "path": "src-tauri/src/ipc/*", "kind": "app", "role": "命令层（catalog/presets/mine/preset_baseline/preset_params/param_sync/import/update/mod）", "pathClass": "formal", "evidence": ["src-tauri/src/ipc/mod.rs", "src-tauri/src/ipc/catalog.rs", "src-tauri/src/ipc/mine.rs"] },
+    { "id": "M-runtime", "path": "src-tauri/src/runtime/*", "kind": "lib", "role": "客户端领域内核：catalog/release/delivery/mine/lineage/baseline/param_sync/app_state/provenance/remarks/preset_events/versions/source/resolver/structure/net/update/updater", "pathClass": "formal", "evidence": ["src-tauri/src/runtime/mod.rs", "src-tauri/src/runtime/delivery.rs", "src-tauri/src/runtime/mine.rs"] },
+    { "id": "M-presetdata", "path": "src-tauri/src/presetdata/*", "kind": "lib", "role": "presets/*.toml 的解析/注册表/取值/结构保真改写（客户端与工作台共用）", "pathClass": "formal", "evidence": ["src-tauri/src/presetdata/mod.rs", "src-tauri/src/presetdata/patch.rs"] },
+    { "id": "M-workbench-rs", "path": "src-tauri/src/workbench/*", "kind": "app", "role": "发布端（工作台）后端：生成/审计/发布事务/版本发布/沙箱/本地测试源", "pathClass": "formal", "note": "整棵子树在 feature=\"workbench\" 门内，客户端二进制里搜不到", "evidence": ["src-tauri/src/lib.rs::41", "src-tauri/src/workbench/app/publish_tx.rs::run::225", "src-tauri/src/workbench/app/release_tx.rs"] },
+    { "id": "M-bin-gencatalog", "path": "src-tauri/src/bin/gen-catalog.rs", "kind": "tool", "role": "生成随包 catalog（catalog.generated.json）+ 重算 presets/delivery/catalog.json", "pathClass": "devtool", "evidence": ["src-tauri/src/bin/gen-catalog.rs::39"] },
+    { "id": "M-bin-release", "path": "src-tauri/src/bin/release.rs", "kind": "tool", "role": "软件版本发布内核 CLI（与工作台同一事务内核）", "pathClass": "devtool", "evidence": ["src-tauri/src/bin/release.rs", "scripts/release.mjs"] },
+    { "id": "M-preset-crate", "path": "crates/preset/*", "kind": "engine", "role": "预设读写/生成/注册表/血统（include_str! 内置 9 份预设 + 参数注册表）", "pathClass": "formal", "evidence": ["crates/preset/src/generate.rs", "crates/preset/src/lineage.rs", "crates/preset/src/registry.rs"] },
+    { "id": "M-postprocess-crate", "path": "crates/postprocess/*", "kind": "engine", "role": "G-code 后处理内核（pass1/pass2/tower），CLI + 判据测试", "pathClass": "formal", "note": "当前客户端界面未暴露入口；由 CLI 与测试消费", "evidence": ["crates/postprocess/src/lib.rs", "crates/postprocess/tests/end_to_end.rs"] },
+    { "id": "M-app", "path": "src/app/*", "kind": "app", "role": "客户端产品前端（外壳 + 各页）", "pathClass": "formal", "evidence": ["src/app/App.tsx::62", "src/app/constants/tabs.ts"] },
+    { "id": "M-app-shell", "path": "src/app/App.tsx, src/app/components/TopTabs.tsx, src/app/components/UpdateIndicator.tsx", "kind": "app", "role": "外壳：页签槽（常驻+切显示）、标题栏、更新环、窗口按钮", "pathClass": "formal", "evidence": ["src/app/App.tsx::54", "src/app/components/TopTabs.tsx::108", "src/app/components/UpdateIndicator.tsx::136"] },
+    { "id": "M-app-import", "path": "src/app/import/*", "kind": "app", "role": "通用文件导入（拖拽 + 重名抽屉 + 结果条）", "pathClass": "formal", "evidence": ["src/app/import/FileImport.tsx::269", "src/app/import/useFileImport.ts"] },
+    { "id": "M-app-home", "path": "src/app/home/*", "kind": "app", "role": "首页五步向导（机型/版本 → 预设 → Z → XY → 测试模型）", "pathClass": "formal", "evidence": ["src/app/home/PageHome.tsx::109"] },
+    { "id": "M-app-presets", "path": "src/app/presets/*", "kind": "app", "role": "预设页：本地/云端 × MKP/切片器 两表；纯函数 presetTree + 数据层 usePresetData", "pathClass": "formal", "evidence": ["src/app/presets/PagePresets.tsx::250", "src/app/presets/presetTree.ts", "src/app/presets/usePresetData.ts::435"] },
+    { "id": "M-app-params", "path": "src/app/params/*", "kind": "app", "role": "参数编辑器（现仅经右键「打开参数」以模态框进入），含官方更新决策与对比台入口", "pathClass": "formal", "evidence": ["src/app/params/PageParams.tsx::337", "src/app/params/PresetParamsModal.tsx::39", "src/app/params/useParams.ts"] },
+    { "id": "M-app-calib", "path": "src/app/calib/*", "kind": "app", "role": "校准台（Z/XY/测试模型三视图，写回「我的预设」）", "pathClass": "formal", "evidence": ["src/app/calib/PageCalib.tsx::76", "src/app/calib/useCalibration.ts::245"] },
+    { "id": "M-app-bbs", "path": "src/app/bbs/*", "kind": "app", "role": "BBS 预设只读查看器（数据来自 public/bbs 与 dev 端点，非 src/api）", "pathClass": "formal", "note": "含仅本页生效的「可改动」模式，是否落盘未证实", "evidence": ["src/app/bbs/PageBbs.tsx::58", "src/app/bbs/useBbsData.ts"] },
+    { "id": "M-app-settings", "path": "src/app/settings/*", "kind": "app", "role": "设置页：软件更新 + 预设数据源（开发后门）", "pathClass": "formal", "evidence": ["src/app/settings/PageSettings.tsx::48"] },
+    { "id": "M-app-report", "path": "src/app/components/PagePlaceholder.tsx", "kind": "app", "role": "报告页——占位，无数据无动作", "pathClass": "formal", "note": "App.tsx::126 挂载", "evidence": ["src/app/App.tsx::126"] },
+    { "id": "M-app-state", "path": "src/app/state/*", "kind": "app", "role": "appState（唯一底账订阅口，useSyncExternalStore）与 deliveryState（投递面代次）", "pathClass": "formal", "evidence": ["src/app/state/appState.ts::42", "src/app/state/deliveryState.ts"] },
+    { "id": "M-api", "path": "src/api/*", "kind": "app", "role": "契约层：contract.ts 唯一定义 + bridge.ts（Rust 映射）+ mock.ts（浏览器回退）+ storageKeys.ts", "pathClass": "formal", "evidence": ["src/api/contract.ts::1225", "src/api/bridge.ts", "src/api/mock.ts"] },
+    { "id": "M-mockserver", "path": "src/api/mockServer/*", "kind": "app", "role": "浏览器假后端数据（机型/参数/菜单/本机文件/官方版本/打印板等）", "pathClass": "dev", "note": "仅 npm run dev（非 Tauri）时被 mock.ts 消费；进 dist 与否由 check-bundle 管", "evidence": ["src/api/mockServer/index.ts", "scripts/check-bundle.mjs::27"] },
+    { "id": "M-workbench-fe", "path": "src/workbench/*", "kind": "app", "role": "工作台前端（发布端 UI，走 workbench.html / vite --mode workbench）", "pathClass": "formal", "note": "与客户端是两条独立入口", "evidence": ["workbench.html", "vite.config.ts", "src/workbench/pages"] },
+    { "id": "M-scripts-publish", "path": "scripts/publish-presets.mjs", "kind": "script", "role": "预设数据发布：5 条校验后开一次性分支 → PR", "pathClass": "devtool", "evidence": ["scripts/publish-presets.mjs::279"] },
+    { "id": "M-scripts-release", "path": "scripts/release.mjs", "kind": "script", "role": "软件版本发布外壳（调 bin/release + 等 CI + 合并/tag/Release）", "pathClass": "devtool", "evidence": ["scripts/release.mjs::85"] },
+    { "id": "M-scripts-check", "path": "scripts/check-*.mjs", "kind": "script", "role": "四条静态判据：bundle 不含开发数据 / 启动零网络 / Channel 参数必挂 / release 源断代", "pathClass": "devtool", "evidence": ["scripts/check-bundle.mjs", "scripts/check-zero-network.mjs::129", "scripts/check-channel-args.mjs", "scripts/check-release-source.mjs"] },
+    { "id": "M-scripts-probes", "path": "scripts/probes/*", "kind": "script", "role": "11 个 playwright 实机走查探针（含 presets/home-flow/tabs/workbench-build）", "pathClass": "devtool", "evidence": ["scripts/probes/presets.mjs", "scripts/probes/home-flow.mjs"] },
+    { "id": "M-scripts-testsource", "path": "scripts/preset-test-server/*", "kind": "script", "role": "本地假云端（fixtures v1/v2 + node:http 服务），配合 MKPSE_PRESET_SOURCE_URL（仅 debug 认）", "pathClass": "dev", "evidence": ["scripts/preset-test-server/server.mjs::32", "src-tauri/src/runtime/source.rs::debug_source_override::430"] },
+    { "id": "M-hooks", "path": "scripts/hooks/*, scripts/setup-hooks.mjs", "kind": "script", "role": "git 钩子（pre-commit/pre-push 等）", "pathClass": "devtool", "evidence": ["scripts/setup-hooks.mjs", "scripts/hooks/pre-push"] },
+    { "id": "M-data-presets", "path": "presets/*", "kind": "data", "role": "源数据：9 份内置预设 toml + brands/machines/assets/bundles/plates + registry + delivery 产物", "pathClass": "formal", "evidence": ["presets/", "presets/delivery/catalog.json"] },
+    { "id": "M-data-cataloggen", "path": "src-tauri/src/runtime/catalog.generated.json", "kind": "data", "role": "随包 bootstrap 目录（编进二进制，无 publishedAt）", "pathClass": "formal", "evidence": ["src-tauri/src/runtime/catalog.generated.json"] },
+    { "id": "M-data-public", "path": "public/*, client-assets/*", "kind": "data", "role": "前端静态资源与随包同步产物", "pathClass": "formal", "evidence": ["public/", "client-assets/"] },
+    { "id": "M-data-workbench-bootstrap", "path": "workbench/bootstrap.json", "kind": "data", "role": "构建期注入的两个官方源 Bootstrap 地址（GitHub / Gitee）", "pathClass": "formal", "evidence": ["src-tauri/build.rs::bootstrap_urls_from_workbench::54"] },
+    { "id": "M-tests-rs", "path": "src-tauri/src/**/*.rs 内联 #[test] + crates/*/tests/*", "kind": "test", "role": "Rust 判据测试；内核测试充足，IPC 命令层仅 3 个模块有测试", "pathClass": "formal", "evidence": ["crates/preset/tests", "crates/postprocess/tests", "src-tauri/src/ipc/param_sync.rs"] },
+    { "id": "M-tests-fe", "path": "（无 *.test.ts*）", "kind": "test", "role": "前端无单测；替代物是 scripts/probes 与 check-*.mjs", "pathClass": "formal", "evidence": ["package.json"] },
+    { "id": "M-legacy-dirs", "path": "target/, target-workbench/, dist/, dist-presets/, tmp-port/, tmp-shots/, local-reference/", "kind": "artifact", "role": "构建产物 / 临时目录 / 本地参考", "pathClass": "devtool", "note": "dist-presets 为空；均由 .gitignore 管", "evidence": [".gitignore"] },
+    { "id": "M-docs", "path": "docs/*.md（31 份）+ 根目录 HANDOFF/PUBLISH-*/*PORT-PLAN*.md", "kind": "doc", "role": "历史决策与规格文档；本审计只作为辅助理解，已与实现交叉核对", "pathClass": "formal", "note": "多份文档描述的是被后续改判推翻的旧模型（如资源库合并表、ensure_working_copy），不得当作现状", "evidence": ["docs/PRESET-ASSET-LIBRARY.md", "docs/PROJECT-AUDIT.md", "HANDOFF.md"] }
+  ],
+  "notCoveredInModuleMap": [
+    "crates/postprocess 的 pass 内部分支（本次只到模块级：它是 CLI/引擎，未暴露到客户端界面）",
+    "crates/preset 的生成规则细节（只到模块级）",
+    "src/workbench 前端各页的逐动作（本次只到工作台后端与发布链路）",
+    "src-tauri/src/workbench/app/* 各命令的逐字段（只到发布事务与平台出口级别）"
+  ]
+}

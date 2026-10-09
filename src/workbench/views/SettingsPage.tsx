@@ -27,14 +27,53 @@
  * **它同时是"配置生效了没有"的判据**：点一下看到的就是**磁盘真值**。
  * （注意区分：这里读的是**配置**；Bootstrap 被客户端吃进二进制是**构建期**的事 ——
  * 改完要重新构建客户端，所以保存成功那句话会提"重启 dev / 重打正式包"。）
+ *
+ * # 「本地测试源（开发）」（2026-10-08）
+ *
+ * 上面那一格是**发布到哪**（构建期注入）。这一格是**起一份本地假云端** ——
+ * 一颗按钮替你敲 `npm run preset-source:dev`，把 `scripts/preset-test-server`
+ * 起在 `127.0.0.1:8787` 上，于是不用为了验"官方发了新版本"真去发一版。
+ *
+ * ★ **它只起服务，不碰客户端**（作者 2026-10-08 裁决）。先前那一版连客户端
+ * `tauri dev` 一起起（`npm run dev:test-update` + `MKPSE_PRESET_SOURCE_URL`）——
+ * 作者的判断很直接：「这不就是单开一个服务吗？我自己输入这个地址就可以」。
+ * 于是地址由人填一次：客户端的「设置 → 高级设置 → 预设数据源 → 自定义地址」，
+ * **保存即生效**（见 `runtime/source.rs`）。那一格是客户端自己的运行时设置，
+ * 归客户端设置页管，这里不碰。
+ *
+ * ★ **端口被占着时先把占用者摆出来**（2026-10-08 踩出来的那条）：8787 上已经有东西
+ * （上一轮留下的服务、你手动起的 `preset-source:dev`），这一份就起不来。
+ * 现在起之前先探那个端口，把"谁占着、PID 多少"列出来，并给一颗「停掉它」——
+ * 问一句，而不是让人对着一句"退出码 1"去终端里猜。
  */
 import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { Boot, PublishAccount } from '../api'
+import type {
+  Boot,
+  DevSourceKind,
+  DevSourceStatus,
+  PortConflict,
+  PublishAccount,
+  SandboxStatus,
+} from '../api'
 import s from '../c14.module.css'
 
-export default function SettingsPage({ boot }: { boot: Boot }) {
+/** 字节数给人看（一位小数够） */
+const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`
+
+interface Props {
+  boot: Boot
+  /**
+   * 测试模式现状。★ **由外壳取、外壳也照它换装**（横幅 / 整窗配色 / 状态栏那一枚）——
+   * 这一页不自己再取一份：两处各取各的，迟早出现"横幅说在测试、这一格说在正式"。
+   */
+  sandbox: SandboxStatus | null
+  /** 切模式 / 重拷 / 清空之后交给外壳：它换装并把整本按新根重取一遍 */
+  onSandbox: (next: SandboxStatus) => void
+}
+
+export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   /* 官方源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
      下次 wb_boot 会带回同一份）。GitHub 是主源；Gitee 是镜像（空 = 没配/清除） */
   const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
@@ -193,6 +232,160 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
     }
   }
 
+  /*
+   * 「本地测试源（开发）」的状态与那几颗按钮。
+   *
+   * ★ **跑着、或者有端口被占着的时候**每 2 秒问一次 —— 工作台的页面挂过就一直挂着
+   * （`App.tsx` 的 `.pageSlot`：切走只是藏起来，不卸载），无条件轮询等于离开这一页
+   * 之后还在空转 IPC。冲突那一路要轮询，是因为作者可能刚在别的终端把那个 dev 停了。
+   */
+  const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
+  const [devBusy, setDevBusy] = useState(false)
+  const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /** 起哪一份（**草稿**：点一下只是选，交出去是点「启动」/「换源并重启」那一下） */
+  const [devDraft, setDevDraft] = useState<DevSourceKind>('v1')
+
+  /**
+   * 现读一次状态。`sync` 只在**第一次**读的时候为真：把"上次端的是哪一份"选中一次。
+   * 之后每次刷新都再同步的话，人刚点好的那一行会被轮询按回去 —— 那正是"点了没反应"。
+   */
+  const readDevSrc = useCallback(async (sync: boolean) => {
+    try {
+      const st = await wb.devSourceStatus()
+      setDevSrc(st)
+      if (sync && st.source !== null) setDevDraft(st.source)
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }, [])
+
+  useEffect(() => {
+    void readDevSrc(true)
+  }, [readDevSrc])
+
+  const devWatch = devSrc?.running === true || (devSrc?.conflicts.length ?? 0) > 0
+  useEffect(() => {
+    if (!devWatch) return
+    const timer = setInterval(() => {
+      wb.devSourceStatus().then(setDevSrc).catch(() => undefined)
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [devWatch])
+
+  /** 「启动」= 以草稿那一份起。同一份幂等；换了源就是**换源重启**（后端先整棵收掉再起） */
+  const startDevSrc = async () => {
+    if (devBusy) return
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = await wb.devSourceStart(devDraft)
+      setDevSrc(next)
+      setDevNote({
+        text: `已启动（端的是 ${devLabel(next.source)}）—— 把 ${next.url} 填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」（保存即生效）。`,
+        bad: false,
+      })
+    } catch (e) {
+      /* 起不来时后端会把理由写进消息里（没派生 / 没生成 / 是谁占着那个端口），
+         但状态也可能是旧的 —— 失败之后立刻重取一次，别让界面停在过期的读数上 */
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      await readDevSrc(false)
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  const stopDevSrc = async () => {
+    if (devBusy) return
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = await wb.devSourceStop()
+      setDevSrc(next)
+      setDevNote({ text: next.note ?? '已停，服务端口也让出来了。', bad: false })
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  /**
+   * 那一份的行名 —— **后端给的说法**（`sources[].label`），界面不自己拼一套。
+   * 还没读到状态时退回枚举值本身（`v1`），总比空着强。
+   */
+  const devLabel = (k: DevSourceKind | null): string =>
+    devSrc?.sources.find((o) => o.kind === k)?.label ?? (k ?? '—')
+
+  /**
+   * 停掉占着某个端口的那个进程（那颗「停掉它」）。
+   *
+   * 把**当时看到的 pid** 一起交回后端 —— 它会重新问一次"这个端口现在是谁的"，
+   * 对不上就拒绝动手（PID 会被复用）。
+   */
+  const clearConflict = async (c: PortConflict) => {
+    if (devBusy) return
+    setDevBusy(true)
+    setDevNote(null)
+    try {
+      const next = await wb.devSourceClearConflict(c.port, c.pid)
+      setDevSrc(next)
+      const left = next.conflicts.length
+      setDevNote({
+        text:
+          left === 0
+            ? `${next.note ?? '占用者已停'} —— 现在可以点「启动」了。`
+            : `${next.note ?? '停是停了'}，但还有 ${left} 条占用没处理。`,
+        bad: left > 0,
+      })
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      await readDevSrc(false)
+    } finally {
+      setDevBusy(false)
+    }
+  }
+
+  /* 那一行结论：有动作反馈用动作的，否则用后端报的"为什么不在跑" */
+  const devLine =
+    devNote?.text ??
+    (devSrc !== null && !devSrc.running ? (devSrc.note ?? null) : null)
+  const devBad = devNote?.bad === true
+  const devConflicts = devSrc?.conflicts ?? []
+
+  /*
+   * 测试模式（沙箱）：开关 + 清空 / 从正式重拷。
+   *
+   * ★ 三件事都**由后端做**（拷、清、切根都在 Rust 那边），这里只负责"问一句、把结果
+   * 交给外壳" —— 外壳拿到新的那一份之后换装（横幅 / 整窗配色 / 状态栏那一枚），
+   * 并把整本按新根重取一遍（根换了，界面上的机型 / 参数 / 交付产物全是旧根的）。
+   */
+  const [sandBusy, setSandBusy] = useState(false)
+  const [sandNote, setSandNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  const sandboxAct = async (what: 'set' | 'refill' | 'wipe', enabled?: boolean) => {
+    if (sandBusy) return
+    setSandBusy(true)
+    setSandNote(null)
+    try {
+      const next =
+        what === 'set'
+          ? await wb.sandboxSet(enabled === true)
+          : what === 'refill'
+            ? await wb.sandboxRefill()
+            : await wb.sandboxWipe()
+      setSandNote({
+        text: next.note ?? (next.enabled ? '已经在测试模式里了' : '已经切回正式了'),
+        bad: false,
+      })
+      onSandbox(next)
+    } catch (e) {
+      /* 有未保存的改动时后端会拒绝（草稿是两套）—— 那句原话就是该看的 */
+      setSandNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setSandBusy(false)
+    }
+  }
+
   const save = async () => {
     if (busy) return
     setBusy(true)
@@ -254,6 +447,125 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
 
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      {/* ——— 测试模式（沙箱）：整套数据根切到另一棵树 ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>测试模式（沙箱）</b>
+          <span className={s.cardNote}>
+            整套数据根切到仓库里另一棵树 —— 正式那份一个字节都不动
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              开着的时候：你改的每一个 <span className={s.mono}>.toml</span> /{' '}
+              <span className={s.mono}>.json</span>、点「生成」写出来的交付产物，
+              连带资产库里的 3MF 与模型，<b>全都落在沙箱里</b>；正式那份{' '}
+              <span className={s.mono}>presets/</span> 一动不动。草稿也分两套（互不影响）。
+            </p>
+            <p className={s.vhelp}>
+              ★ <b>发布与发版在测试模式里是关着的</b>（后端直接拒绝）—— 注意关着的是
+              <b>「发布」这个动作本身</b>，不是"发布但换个目的地"。正式模式下的发布就是
+              "本地 git 提交 + 推平台开 PR/MR"，那件事到不到云端不由这里选。
+            </p>
+            <p className={s.vhelp}>
+              ★ <b>但要看新版不必发布</b>：客户端判"有没有新版"只比交付根里{' '}
+              <span className={s.mono}>catalog.json</span> 的{' '}
+              <span className={s.mono}>revision</span>，而<b>「生成」就已经把它重算了</b>
+              （发布才定稿的那两份不在客户端那条链上）。所以沙箱这条路是：
+              <b>改参数 → 保存 → 生成 → 客户端进「预设」页 → 点「下载」</b> ——
+              一句「发布」都不用点。详见下面「本地测试源（开发）」那张卡。
+            </p>
+
+            <div className={s.vhead}>
+              <b>现在</b>
+              <span className={s.vkey}>
+                {sandbox === null
+                  ? '读取中……'
+                  : sandbox.enabled
+                    ? '测试模式（沙箱）'
+                    : '正式'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <label className={s.vlabel}>沙箱根</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {sandbox?.sandboxRoot ?? '读取中……'}
+              </span>
+            </div>
+            <div className={s.vrow}>
+              <label className={s.vlabel}>里面有什么</label>
+              <span className={s.vstatic}>
+                {sandbox === null
+                  ? '读取中……'
+                  : sandbox.ready
+                    ? `${sandbox.files} 个文件 · ${mb(sandbox.bytes)}`
+                    : '空的（还没从正式拷）'}
+              </span>
+            </div>
+            <div className={s.vrow}>
+              <label className={s.vlabel}>从哪儿拷</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {sandbox?.realPresetsRoot ?? '读取中……'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <button
+                type="button"
+                className={`${s.btn} ${sandbox?.enabled === true ? '' : s.btnPrimary}`}
+                disabled={sandBusy || sandbox === null}
+                title={
+                  sandbox?.enabled === true
+                    ? '切回正式 —— 沙箱原样留着，下次回来还在'
+                    : '开之前会先把正式那份整个拷进沙箱（presets/ 整棵，含 3MF 与模型）'
+                }
+                onClick={() => void sandboxAct('set', sandbox?.enabled !== true)}
+              >
+                {sandbox?.enabled === true
+                  ? '关掉测试模式（切回正式）'
+                  : '打开测试模式（从正式拷一份）'}
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={sandBusy || sandbox === null}
+                title="清空沙箱，再从正式那份重新拷一份 —— 测试随时可以重来"
+                onClick={() => void sandboxAct('refill')}
+              >
+                从正式重拷一份
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={sandBusy || sandbox === null}
+                title="只清空沙箱（正式那边一根汗毛都不碰）"
+                onClick={() => void sandboxAct('wipe')}
+              >
+                清空沙箱
+              </button>
+            </div>
+
+            {sandNote !== null && (
+              <p
+                className={s.vhelp}
+                style={sandNote.bad ? { color: 'var(--danger)' } : undefined}
+              >
+                {sandNote.text}
+              </p>
+            )}
+
+            <p className={s.vhelp}>
+              ★ 沙箱就在 <span className={s.mono}>workbench/.sandbox/</span> 里（与草稿{' '}
+              <span className={s.mono}>.draft</span> 同一族，不入库）—— 整个目录删掉是安全的，
+              点「从正式重拷一份」就回来了。切模式时若还有未保存的改动，会先让你保存或放弃
+              （草稿是两套，不能悄悄吞掉）。
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ——— 发布账户（第三刀下半）：GitHub / Gitee 对称，各三格 ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>
@@ -557,6 +869,232 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
         </div>
       </div>
 
+      {/* ——— 本地测试源（开发）：一颗按钮 = npm run preset-source:dev（只起服务） ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>本地测试源（开发）</b>
+          <span className={s.cardNote}>
+            起本地假云端（只起服务，不碰你的客户端）—— 地址填进客户端设置页，保存即生效
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              点「启动」就是替你在这个仓库里敲
+              <span className={s.mono}>{devSrc?.command ?? 'npm run preset-source:dev'}</span>
+              ：把 <span className={s.mono}>scripts/preset-test-server</span>
+              起在下面这个地址上，端出去的是<b>已发布形状</b>的交付根
+              （<span className={s.mono}>source.json</span> +{' '}
+              <span className={s.mono}>catalog.json</span> + 交付文件）。
+            </p>
+            <p className={s.vhelp}>
+              客户端<b>不感知这是测试源</b> —— 它仍走 catalog / manifest / 寻址 / SHA 校验 /
+              下载那一条真链，换的只是"去哪儿取"；生产构建里这段代码整个不存在。日志打在
+              <b>起工作台的那个终端</b>里 —— 这个按钮只是替你敲了那条命令，不另造一套日志窗口。
+            </p>
+
+            <div className={s.vhead}>
+              <b>状态</b>
+              <span className={s.vkey}>
+                {devSrc === null
+                  ? '读取中……'
+                  : devSrc.running
+                    ? `运行中（PID ${devSrc.pid ?? '—'}）`
+                    : '没在跑'}
+              </span>
+            </div>
+
+            <div className={s.vrow}>
+              <label className={s.vlabel}>服务地址</label>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {devSrc?.url ?? 'http://127.0.0.1:8787'}
+              </span>
+            </div>
+
+            {/* ——— 端哪一份：三行单选（名字 / 说法 / 在哪儿 / 齐没齐都由后端给） ——— */}
+            <div className={s.vhead}>
+              <b>端哪一份</b>
+              <span className={s.vkey}>
+                {devSrc?.running === true
+                  ? '服务在跑着 —— 换到别的会重启它'
+                  : '选一份，再点「启动」'}
+              </span>
+            </div>
+
+            {(devSrc?.sources ?? []).map((o) => (
+              <label
+                key={o.kind}
+                className={s.vrow}
+                style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+              >
+                <input
+                  type="radio"
+                  name="dev-source-kind"
+                  value={o.kind}
+                  checked={devDraft === o.kind}
+                  onChange={() => setDevDraft(o.kind)}
+                />
+                <span className={s.grow}>
+                  <b>{o.label}</b>
+                  {devSrc?.running === true && devSrc.source === o.kind && '（正在端这一份）'}
+                  <span className={s.vhelp} style={{ display: 'block' }}>
+                    {o.note}
+                  </span>
+                  <span className={`${s.vhelp} ${s.mono}`} style={{ display: 'block' }}>
+                    {o.root}
+                  </span>
+                  {!o.ready && o.missing !== null && (
+                    <span className={s.vhelp} style={{ display: 'block', color: 'var(--danger)' }}>
+                      {o.missing}
+                    </span>
+                  )}
+                </span>
+                <span className={s.mono}>{o.url}</span>
+              </label>
+            ))}
+
+            <p className={s.vhelp}>
+              「当前交付」那一份端的是<b>预设根</b>、地址要带{' '}
+              <span className={s.mono}>/delivery</span>：真交付那份的{' '}
+              <span className={s.mono}>source.json</span> 写着{' '}
+              <span className={s.mono}>filesRoot: &quot;..&quot;</span>（交付文件住在预设根底下），
+              所以地址那一串由后端按这个规矩给 —— 照抄。
+            </p>
+            <p className={s.vhelp}>
+              端的目录今天是这样，<b>测试模式开着时「当前交付」会自动变成沙箱那一份</b>
+              （连"它齐没齐"一起变）—— 界面不自己推，每读一次都是新那棵树的读数。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ <b>选「当前交付」时不用先去发布</b>：客户端判"有没有新版"只比交付根里{' '}
+              <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>
+              （下载时校的 SHA 也从它来），而<b>「生成」就已经把它重算了</b>。发布才定稿的
+              那两份（<span className={s.mono}>manifest.json</span> /{' '}
+              <span className={s.mono}>release.json</span>）不在客户端那条链上 ——
+              测试模式里它们会一直停在上一版，发布闸因此报一条「待留意」，<b>那是正常的</b>，
+              不用为它去点发布。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ 客户端那边的节奏：进「预设」页时它<b>自己查一次</b>远端目录（比 revision，
+              本次运行只查一次），查到就把本地那份目录换掉 —— 但<b>绝不自动下载预设文件</b>，
+              云端表里那几行要点「下载」才落进「我的预设」。所以"生成完看不到更新"通常只有两种原因：
+              地址填的不是上面这一串，或者这次运行已经查过了（重进页面 / 重启客户端再查一次）。
+            </p>
+
+            {devConflicts.length > 0 && (
+              <div className={s.vfield}>
+                <div className={s.vhead}>
+                  <b>端口被占着</b>
+                  <span className={s.vkey}>先处理掉，再点「启动」</span>
+                </div>
+                {devConflicts.map((c) => (
+                  <div className={s.vrow} key={c.port}>
+                    <span>{c.text}</span>
+                    <span className={s.grow} />
+                    <button
+                      type="button"
+                      className={s.btn}
+                      disabled={devBusy || c.pid === null}
+                      title={
+                        c.pid === null
+                          ? '认不出占着它的进程 —— 请在那个终端里自己停掉它'
+                          : '把它停掉（后端会先确认这个端口还是它的，再动手）'
+                      }
+                      onClick={() => void clearConflict(c)}
+                    >
+                      停掉它
+                    </button>
+                  </div>
+                ))}
+                <p className={s.vhelp}>
+                  多半是上一轮留下的服务，或者你手动起的
+                  <span className={s.mono}>preset-source:dev</span>
+                  —— 同一端口上只能有一个。停掉它，再点「启动」。
+                </p>
+              </div>
+            )}
+
+            <div className={s.vrow}>
+              {devSrc?.running === true ? (
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={devBusy}
+                  title="停掉这个服务，把端口让出来（只收它自己那一棵，不碰你的客户端 dev）"
+                  onClick={() => void stopDevSrc()}
+                >
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnPrimary}`}
+                  disabled={devBusy || devSrc === null || devConflicts.length > 0}
+                  title={
+                    devConflicts.length > 0
+                      ? '先把上面那条端口占用处理掉'
+                      : `以「${devLabel(devDraft)}」这一份起`
+                  }
+                  onClick={() => void startDevSrc()}
+                >
+                  启动
+                </button>
+              )}
+              {/* 跑着的时候选了别的：换源要重启一次服务（后端先整棵收掉再起） */}
+              {devSrc?.running === true && devSrc.source !== devDraft && (
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={devBusy || devConflicts.length > 0}
+                  title={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
+                    devDraft,
+                  )}」：先把它那棵进程树收掉再起，一次点击一件事`}
+                  onClick={() => void startDevSrc()}
+                >
+                  换源并重启
+                </button>
+              )}
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devBusy}
+                title="现问一次后端 —— 状态是现问子进程得来的，不靠界面自己记"
+                onClick={() => void readDevSrc(false)}
+              >
+                刷新状态
+              </button>
+            </div>
+
+            {devLine !== null && (
+              <p className={s.vhelp} style={devBad ? { color: 'var(--danger)' } : undefined}>
+                {devLine}
+              </p>
+            )}
+
+            <p className={s.vhelp}>
+              ★ 它<b>只起服务</b>，不碰你的客户端 —— 地址自己填一次：
+              <b>客户端</b>的「设置 → 高级设置 → 预设数据源 → 自定义地址」，把上面那一串贴进去
+              （保存即生效，不用重启客户端）。
+            </p>
+
+            <p className={s.vhelp}>
+              想连客户端的 <span className={s.mono}>tauri dev</span> 一起起（它会自动把源指过来，
+              不用手填地址）：那在命令行里 ——{' '}
+              <span className={s.mono}>npm run dev:test-update</span>
+              。那条路靠 <span className={s.mono}>MKPSE_PRESET_SOURCE_URL</span> 注入，
+              所以它必须把客户端 dev 一起管起来；这里这颗按钮不干那件事。
+            </p>
+
+            <p className={s.vhelp}>
+              ★ <b>端口被占着的话，上面会先把它摆出来</b>（谁占着、PID 多少），
+              点那颗「停掉它」就行 —— 后端会先确认那个端口还是它的才动手（PID 会被复用）。
+              不在跑的时候这里每 2 秒问一次，所以你在别的终端把它停了，界面也会跟上。
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>数据根</b>
@@ -570,6 +1108,15 @@ export default function SettingsPage({ boot }: { boot: Boot }) {
             </div>
             <p className={s.vhelp}>
               工作台读写的唯一预设根。改它要改的是仓库结构，不是这里的某一格。
+              {sandbox?.enabled === true && (
+                <>
+                  {' '}
+                  <b style={{ color: 'var(--accent-deep)' }}>
+                    现在摆的是沙箱里那一份（测试模式开着）
+                  </b>
+                  —— 它随模式走，正式那份不在这条路上。
+                </>
+              )}
             </p>
             <div className={s.vrow}>
               <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.presets}</span>

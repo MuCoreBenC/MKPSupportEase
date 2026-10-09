@@ -21,11 +21,12 @@ import PlateZoom from './PlateZoom'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { Btn } from '../ui/Controls'
 import { Modal } from '../ui/Modal'
-import { api } from '../../api'
+import { api, errorText } from '../../api'
+import type { CalibModel } from '../../api'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
 import { activateCombo, useActivePreset, useActivePresetReady } from '../state/appState'
 import { uidOfFile, useCatalog } from '../home/useCatalog'
-import { AXIS_ROWS, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
+import { AXIS_ROWS, NEED_COPY, NEED_PRESET, Z_LEGEND, Z_TIP, xyHitLabel, zHitLabel } from './calibAxes'
 import { useCalibration } from './useCalibration'
 import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
@@ -130,6 +131,7 @@ export default function PageCalib() {
     dirtyAxes,
     savedNote,
     canPick,
+    canSave,
     zSelected,
     xySelected,
     pickZ,
@@ -169,6 +171,69 @@ export default function PageCalib() {
   const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
   const [pending, setPending] = useState<Step | null>(null)
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
+
+  /*
+   * 「打开模型」那一个模态框的**真实状态**（2026-10-09）：本机有没有缓存由**盘**说了算
+   * （`getCalibModels` 查下载区与旧缓存），不再是写死的「本地无缓存，即将从云端下载」。
+   */
+  const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
+  const [modelErr, setModelErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (opening === null) {
+      setModelInfo(null)
+      setModelErr(null)
+      setModelBusy(false)
+      return
+    }
+    let alive = true
+    api.getCalibModels().then(
+      (list) => {
+        if (alive) setModelInfo(list.find((m) => m.id === opening.id) ?? null)
+      },
+      (e: unknown) => {
+        if (alive) setModelErr(errorText(e))
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [opening])
+
+  /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
+  const openCachedModel = () => {
+    if (opening === null) return
+    setModelBusy(true)
+    api.openModel(opening.id).then(
+      () => {
+        setModelBusy(false)
+        setOpening(null)
+      },
+      (e: unknown) => {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      },
+    )
+  }
+
+  /** 取回（走交付下载管道）再打开。两步都可能失败，失败就在弹窗里照实说，不吞 */
+  const fetchAndOpenModel = () => {
+    if (opening === null || modelInfo === null) return
+    setModelBusy(true)
+    setModelErr(null)
+    void (async () => {
+      try {
+        await api.downloadCatalogFile(modelInfo.fileName)
+        await api.openModel(opening.id)
+        setModelBusy(false)
+        setOpening(null)
+      } catch (e) {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      }
+    })()
+  }
 
   useEffect(() => {
     if (opening === null && pending === null && presetAsk === null) return
@@ -237,7 +302,12 @@ export default function PageCalib() {
       <Btn variant="ghost" disabled={!dirty} onClick={clearAll}>
         放弃改动
       </Btn>
-      <Btn variant="primary" disabled={!dirty} onClick={commitAll}>
+      <Btn
+        variant="primary"
+        disabled={!dirty || !canSave}
+        title={canSave ? undefined : NEED_COPY}
+        onClick={commitAll}
+      >
         保存
       </Btn>
     </div>
@@ -387,21 +457,25 @@ export default function PageCalib() {
           onClose={() => setOpening(null)}
           foot={
             <>
-              <Btn disabled>从本地缓存打开</Btn>
-              <Btn
-                variant="primary"
-                onClick={() => {
-                  void api.openModel(opening.id)
-                  setOpening(null)
-                }}
-              >
+              <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
+                从本地缓存打开
+              </Btn>
+              <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
                 从云端获取
               </Btn>
             </>
           }
         >
           <p className={s.note}>
-            {opening.name} · 本地无缓存文件，即将从云端下载打开。点击后请耐心等待 3mf 打开。
+            {modelErr !== null
+              ? modelErr
+              : modelBusy
+                ? `${opening.name} · 正在处理，请稍候…`
+                : modelInfo === null
+                  ? `${opening.name} · 正在看本机有没有缓存…`
+                  : modelInfo.ready
+                    ? `${opening.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                    : `${opening.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
         </Modal>
       )}

@@ -5,11 +5,32 @@
  * 页面、卡片、行、首页都读它：「待下载」在一处写成「待下载」、另一处写成「云端」，
  * 界面就开始撒谎。
  *
- * # 三个轴，版本**不在其中**（这一轮改的就是这一条）
+ * # 轴与两张表（2026-10-09：位置那一轴回来了）
  *
  *   机型          → 页面顶部一个下拉（`PresetPicker`），含「全部机型」一档
  *   MKP / 切片器  → 一条分段控件（`PresetScopeBar` 左半），文件类型
- *   本地 / 云端   → 一条分段控件（`PresetScopeBar` 右半），**两张互不相干的表**
+ *   本地 / 云端   → 同一条分段控件（右半），**两种类型都有**
+ *
+ * 两张表各答一个用户真会问的问题，由 `localRows()` / `cloudRows()` 各自算，**不合流**：
+ *
+ * ```text
+ *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上
+ *   云端表  官方现在提供什么 —— 我这边有没有、要不要拿
+ * ```
+ *
+ * **MKP 档的两张表各是什么**（2026-10-09 改判，此前短暂合成过一张"资源库"表）：
+ *
+ *   本地  只有 `presets-mine/` 里那几行（用户的工作副本）：能改、能使用、删了就没了。
+ *         官方原件（下载区那份字节）与基准快照都是**内部数据**，不在这张表里出现
+ *   云端  目录里登记的每一份预设一行。行上按 [`CloudLocalState`] 说"我这边怎么样"
+ *         （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」—— 都是把官方的取到本机，
+ *         **不动「当前使用」**（使用只发生在本地表那几行上）
+ *
+ * **切片器档照旧**，它那两张表说的是另一件事：
+ *
+ *   本地表  本机有哪些文件。两种来源：官方下载下来的副本（`getLocalFiles()`）
+ *           与用户自己放进预设目录的（`getUserPresetFiles()` —— 用户线，**云端没有它们**）
+ *   云端表  菜单上有哪些官方文件（已分配 + 可选）。行尾标「已下载 / 未下载」，四态照旧
  *
  * **版本从筛选器降成了表里的一列。** 原因：筛选器的宽度随选项个数线性增长 ——
  * 6 个版本就摆不下，实测那一行还只画出了 3 个，剩下的直接看不见。而版本是
@@ -17,16 +38,6 @@
  * 一个文件一行，用到它的版本名收在 `versions: string[]` 里由表格画成一列（多个用 `·` 连，
  * **不写 `+N`** —— 作者原话「显示什么版本加 2 什么意思？」，那是省宽度省出来的黑话）。
  * 这一列不可点、不排序、不分组 —— 做成可点的就等于把筛选器换个位置放回来。
- *
- * 曾经把「本地 / 云端」做成了同一个文件的行状态（一个角标 + 顶部一句汇总），那被否了。
- * 正确的模型是**两张表各回答一个问题**，谁也不管谁：
- *
- *   本地表  你这台机器上有哪些文件。两种来源：官方下载下来的副本（`getLocalFiles()`）
- *           与用户自己放进预设目录的（`getUserPresetFiles()` —— 用户线，**云端没有它们**）
- *   云端表  菜单上有哪些官方文件（已分配 + 可选）。行尾标「已下载 / 未下载」
- *
- * 所以一个官方文件下载之后**两张表里都有**，那是对的；用户自己的文件只在本地表里，
- * 云端表永远看不到它。两张表由 `localRows()` / `cloudRows()` 各自算，不合流。
  *
  * **树本身留着** —— 首页（`pages/PageHome`，这一轮不动）按 品牌→机型→版本→文件
  * 四步走，它要的就是这棵树；两张表也是从树上按机型汇总出来的。
@@ -82,6 +93,7 @@ import type {
   MachineVersion,
   MenuEntry,
   MineState,
+  OfficialVersion,
   PresetFileInfo,
   UserPresetFile,
   VersionFiles,
@@ -174,9 +186,22 @@ export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, string> = {
   cloud: '云端',
 }
 
-export const SCOPE_AXIS_WHY: Record<PresetScopeAxis, string> = {
-  local: '本地：你这台机器上真有的文件 —— 官方下载下来的副本，加上你自己放进预设目录的（云端没有它们）',
-  cloud: '云端：菜单上的官方文件（已分配 + 可选）。仅归档的一个都不出现 —— 不在菜单上 = 客户端看不到也下不了',
+/**
+ * 位置那一轴的说明。**两种类型各说各的**（2026-10-09）——
+ * 同一对词在 MKP 与切片器两档里是两件事：
+ *
+ *   MKP     本地 = 你自己那份工作副本（官方原件是内部数据，不在这里出现）
+ *   切片器   本地 = 本机真有的文件（官方副本 + 你自己的）
+ */
+export const SCOPE_AXIS_WHY: Record<PresetKindAxis, Record<PresetScopeAxis, string>> = {
+  mkp: {
+    local: '本地：你自己那一份（`presets-mine/`）—— 改的是它、用的是它，没有网也看得见改得动',
+    cloud: '云端：官方当前提供的预设。这里只说"我这边有没有、要不要拿"，动作是下载 / 更新',
+  },
+  slicer: {
+    local: '本地：你这台机器上真有的文件 —— 官方下载下来的副本，加上你自己放进预设目录的（云端没有它们）',
+    cloud: '云端：菜单上的官方文件（已分配 + 可选）。仅归档的一个都不出现 —— 不在菜单上 = 客户端看不到也下不了',
+  },
 }
 
 /**
@@ -238,11 +263,12 @@ export const DELIVERY_WHY: Record<PresetFileInfo['delivery'], string> = {
   optional: '可选：仓库里有、没进默认集，需要手动下载。不是错误，也不是孤儿',
 }
 
-/** 下载点了会抛 —— 这是设计，见 `PresetFileRow` 的文件头 */
-export const DOWNLOAD_NOT_READY = '尚未实现'
-
-export const DOWNLOAD_WHY =
-  '下载要写盘，契约里 downloadFiles 在假后端上直接抛 NotImplementedError —— 这里不假装下载成功'
+/**
+ * **官方仓库文件为什么不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
+ * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载（`downloadCatalogFile`）。
+ */
+export const REPO_FILE_WHY =
+  '这一份不在交付下载那条路里 —— 能「下载」的是目录登记过的交付文件'
 
 /**
  * 发布行的「下载」：这一条**是真的能下的**（`downloadCatalogFile` 落进下载区 `mkp/`）——
@@ -410,6 +436,15 @@ export const CLOUD_STATE_WHY = {
   pending: '未下载：仓库里有，你机器上还没有',
 }
 
+/*
+ * ★ `VERSION_NEW_TEXT` / `VERSION_NEW_WHY` / `VERSION_TIME_WHY` 三条词随
+ * 「逐版各占一行」一起退役了（2026-10-08 当天下午）：它们只服务**版本行**
+ * （那枚「新版本」胶囊、以及"这一版自己的发布日 vs 目录代时间"的分别）。
+ * 云端表回到「一个目录条目一行」之后，一行的状态只有那四档
+ * （`UPDATE_STATE_TEXT` + `RELEASE_STATE_WHY`），时间只有目录盖的戳 ——
+ * 这三条词就没有一行会用到了。留着它们就是留一条没人走的路。
+ */
+
 /**
  * **盘上那一份是什么**（catalog 登记的交付预设才有的那一档）。
  *
@@ -442,10 +477,10 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
   ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「应用」',
   old:
     '旧版本：盘上这一份的字节与归档里那一版**逐字节相同** —— 它是我们发过的某一版旧版（云端已经换了新的）。' +
-    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「更新」换成当前版本',
+    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「下载」换一份当前版本回来',
   tampered:
     '内容异常：盘上这一份的字节既不是目录登记的当前版本，也不是我们发过的任何一版 —— ' +
-    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，先「更新」换一份干净的',
+    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许应用、不许改、不许复制，先「下载」换一份干净的',
 }
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
@@ -459,7 +494,7 @@ export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
  * 三个概念**不是** `ReleaseFileState`：那是"盘上那份认不认得出"（信任），
  * 这一个是"云端有没有比盘上新的货"（更新）。**云端有更新时主词就是「有更新」** ——
  * 不管盘上那份是认得出的旧版还是认不出的字节，用户要做的事是同一件：
- * 点「更新」换成当前版（同一条下载管道）。
+ * 点「下载」换一份当前版回来（同一条下载管道）。
  *
  *   `missing`  未下载：目录里有、盘上没有
  *   `latest`   已下载：盘上字节与目录一致
@@ -490,94 +525,133 @@ export const UPDATE_STATE_TEXT: Record<ReleaseUpdateState, string> = {
  * 2026-10-06 查明的实情：客户端的版本记忆只留得住"每一代被换下的目录"（归档链），
  * 在链建起来之前换过的版本谁都不记得 —— 所以"认不出"≠"被改过"，把「内容异常」顶在
  * 状态主词上是**吓唬人**（实测 7 份全部是正规旧版）。主词改说「有更新」，
- * 这句话作为第二行把实情讲全，动作给「更新」—— 对"旧版"和"真被动过"都是正解。
+ * 这句话作为第二行把实情讲全，动作给「下载」—— 对"旧版"和"真被动过"都是正解。
  */
 export const RELEASE_UNTRUSTED_NOTE =
   '本机这份认不出是官方哪一版 —— 官方连发几版时，更早的版本指纹在客户端留不全，' +
-  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「更新」换成当前版即可'
+  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「下载」换一份当前版即可'
 
-/** release 行操作列那颗按钮：更新三态各一个字。**没有「重新下载」** —— 修坏档与换新版是同一条管道、同一个动作 */
+/**
+ * release 行操作列那颗按钮：三态各一个字。
+ *
+ * ★ **「有更新」那一档的按钮也叫「下载」**（2026-10-08 作者：「那颗按钮就叫下载吧」）。
+ * 动作本来就只有一个 —— 从云端取一份落下来；`安装 / 更新 / 重新下载` 都是**同一个管道**
+ * （见 `runtime/delivery.rs`：旧份自动归档，没有第二条路）。**状态词才是"为什么"**
+ * （状态列那句「有更新」照旧说），按钮只该说"点它会发生什么"。
+ */
 export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
   missing: '下载',
   latest: '已下载',
-  update: '更新',
+  update: '下载',
+}
+
+/**
+ * 云端那一行「我这边怎么样」—— **MKP 档的判据**（2026-10-09）。
+ *
+ * # 它为什么不看下载区
+ *
+ * MKP 档里，官方原件（下载区那份字节）是**内部数据**：它是隐藏基准的来源，
+ * 用户既看不到也改不了它。所以"盘上那份对不对"那四态（未下载 / 已下载 /
+ * 旧版本 / 内容异常）在这一档**没有主语** —— 用户真正关心的是：
+ *
+ *   我有没有一份**基于它**的工作副本（`presets-mine/` 里那个能改能用的）
+ *   官方有没有换过版（换了 = 我那份的默认值来源旧了，有「有新版」）
+ *
+ * 判据只认**来源关系**（文件头血统里记的 `based_on`），不认文件名 ——
+ * 导入的同名文件不会被误认成"本地已有"。
+ *
+ * **「有新版」什么时候翻成「本地已有」**（2026-10-09 补）：官方当前版的字节
+ * **取回来了**（`state === 'ok'`）就算这一行做完了 —— 因为 `更新` 只做"取回来"，
+ * 我那份一个字节不动，血统永远停在旧那一版；光凭血统这一行会永远挂着「更新」。
+ * 逐参数的取舍在「打开参数」里，是另一条链（[`localStateOf`] 的注释说全）。
+ *
+ * 切片器档照旧用 `releaseState`（那边的「本机」是真事实：profile 得躺在
+ * 切片器自己的目录里才算数）。
+ */
+export type CloudLocalState = 'none' | 'has' | 'stale'
+
+/** 状态那一列的词（MKP 云端行） */
+export const CLOUD_LOCAL_TEXT: Record<CloudLocalState, string> = {
+  none: '未获取',
+  has: '本地已有',
+  stale: '有新版',
+}
+
+export const CLOUD_LOCAL_WHY: Record<CloudLocalState, string> = {
+  none: '官方有这一份，你机器上还没有它 —— 点「下载」把它取到本机（会落一份你自己那份，能改能用）',
+  has:
+    '你机器上已经有一份基于它的工作副本 —— 这一行没有要你做的事了：要改、要用，去「本地」那张表那一行；' +
+    '官方换过版的话，改了哪几项去「打开参数」里逐项看（采用新值 / 保持我的）',
+  stale:
+    '你机器上那份工作副本当初基于的**不是**官方现在这一版（官方换过版了）。' +
+    '点「更新」把官方新版取回来，**你那份一个字节都不会被改**；' +
+    '官方到底改了哪几项，去「打开参数」里逐项看（采用新值 / 保持我的）',
+}
+
+/**
+ * 云端行操作列那颗按钮的字。`null` = 这一档不给按钮 ——
+ * 「本地已有」那一行点了没有意义（要改要用都在本地那张表上），
+ * 摆一颗看起来能点、点了什么也不发生的按钮比不摆糟。
+ */
+export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, string | null> = {
+  none: '下载',
+  has: null,
+  stale: '更新',
 }
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
 export const RELEASE_SUSPECT_WHY =
-  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「更新」换一份干净的回来'
+  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许应用、不许改、不许复制。先「下载」换一份干净的回来'
 
-/** 「更新」那颗按钮的说明：它不是"删除重下"，旧份进归档，删除永远不是更新的一部分 */
+/** 「下载」那颗按钮在**盘上那份已经旧了**那一档的说明：它不是"删除重下"，旧份进归档，删除永远不是这件事的一部分 */
 export const RELEASE_UPDATE_WHY =
-  '更新：对盘上这一份再跑一遍下载管道 —— 旧份先归档（archive/）再换新，删除永远不是更新的一部分'
+  '下载：对盘上这一份再跑一遍下载管道（状态那格的「有更新」说的就是为什么）—— 旧份先归档（archive/）再换新，删除永远不是它的一部分'
 
 /**
- * 「更新」那颗按钮在**认不出**那一档的说明。
+ * 「下载」那颗按钮在**认不出**那一档的说明。
  *
- * 它不是第二套机制：与「下载 / 更新」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
- * 按钮统一叫「更新」（云端有更新就说更新），这里要讲清的是"盘上那份我们不认"——
- * 用户多半不知道文件被谁动过，也不知道更新会不会把他改的东西冲掉。
+ * 它不是第二套机制：与别处的「下载」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
+ * 按钮统一叫「下载」（状态词才是"为什么"，那是状态列的事），这里要讲清的是"盘上那份我们不认"——
+ * 用户多半不知道文件被谁动过，也不知道换一份会不会把他改的东西冲掉。
  */
 export const RELEASE_REPAIR_WHY =
-  '更新：盘上这一份我们认不出是官方哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
-  '再下一份干净的换上，落点与校验与「下载」是同一条管道；旧份进归档，不删'
+  '下载：盘上这一份我们认不出是官方哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
+  '再下一份干净的换上，落点与校验与普通的「下载」是同一条管道；旧份进归档，不删'
 
 /**
  * **临时编辑**那条链的话（展开详情里的「修改」→ 编辑器抽屉）。
  *
- * 这一层只做"改 → 另存成用户那一份"这条链本身：官方原件全程不动（只有云端换版本能替换它），
- * 用户改的是临时文件，保存 = 另存成 `presets-mine/<原名>（已修改）<后缀>`。
- * **不做**：改完之后"生效 / 应用"（那是"用户那份也能不能用"那条产品规则的活）、
- * 与官方更新的并存处理（第 7 步）。
+ * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（`presets-mine/` 里那份；
+ * 官方那一份是模板、只读 —— 要改它先在资源库里「另存为我的预设」）。
+ * 改的是临时文件，保存 = **写回它自己**（同一个文件，不会多出一份）：
+ *
+ * ```text
+ * presets-mine/A1-standard.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己
+ * ```
+ *
+ * 于是不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
+ * 它基于哪一版官方写在文件里（那三行），保存时**原样保留** —— 改的是参数，不是出处。
+ * **不做**：改完之后"生效 / 应用"（那是"用户那份也能不能用"那条产品规则的活）。
  */
 export const EDIT_TEXT = {
   cell: '修改',
   open: '改这份',
   title: '改这一份',
   note:
-    '改的是**临时文件**：官方原件一动不动（只有云端换版本能替换它），改到一半关掉也还在。' +
-    '点「保存为用户文件」才另存成你自己那一份 —— 那份从此与云端脱钩：' +
-    '官方怎么更新都不动它，改它也永远不回写官方原件。',
-  reused: '上次改到一半的那一份，接着改',
-  discard: '放弃这次编辑',
-  commit: '保存为用户文件',
-  /** 草稿自动落盘失败时那一行（安静地写在抽屉里，不用提示条） */
-  draftFailed: '草稿没存上：',
-  /** 存到哪去了那句（`replaced` 时另说） */
-  saved: (name: string, path: string) => `已保存成你自己那一份：${name}（${path}）`,
-  savedAgain: (name: string) => `已保存：${name} —— 盖掉了上一次那份（你改的一直是同一份）`,
-} as const
-
-/** 「改这份」那颗按钮的说明（官方线） */
-export const EDIT_WHY =
-  '修改：把这一份的正文复制进临时文件再改 —— 官方原件不会被改动（只有云端换版本能替换它）'
-
-/**
- * **用户线**那份的「改这份」（第八层）：同一个编辑器抽屉、**同一条临时文件链**，
- * 只有两句话不一样 —— 保存的不是"另存成一份新的"，而是**写回你自己那一份**：
- *
- * ```text
- * 我的 A1-standard（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己
- * ```
- *
- * 于是不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
- * 它基于哪一版官方写在文件里（那三行），保存时**原样保留** —— 改的是参数，不是出处。
- */
-export const MINE_EDIT_TEXT = {
-  cell: '修改',
-  open: '改这份',
-  title: '改我自己这份',
-  note:
     '改的是**临时文件**：保存时才写回你自己那一份（**同一个文件**，不会多出一份）。' +
     '它基于哪一版官方写在文件里 —— 保存时原样保留，你改的是参数、不是出处。',
+  reused: '上次改到一半的那一份，接着改',
+  discard: '放弃这次编辑',
   commit: '保存回我这份',
+  /** 草稿自动落盘失败时那一行（安静地写在抽屉里，不用提示条） */
+  draftFailed: '草稿没存上：',
   /** 写回之后那句（`path` 说清写回哪去了） */
   savedBack: (name: string, path: string) => `已保存回我自己那一份：${name}（${path}）`,
 } as const
 
-/** 用户线「改这份」那颗按钮的说明 */
-export const MINE_EDIT_WHY =
-  '修改：把我自己这份的正文复制进临时文件再改 —— 保存时写回同一个文件（不会多出一份）'
+/** 「改这份」那颗按钮的说明 */
+export const EDIT_WHY =
+  '修改：把这份的正文复制进临时文件再改 —— 保存时写回同一个文件（不会多出一份）'
 
 /**
  * **第十层**：重命名那一口抽屉的话（删除的二次确认在菜单里，话术在菜单项上）。
@@ -598,8 +672,8 @@ export const MINE_RENAME = {
 /**
  * **第十一层**：另存为一份新的那一口抽屉的话。
  *
- * 我的文件 → 我的文件（与第八层"官方 → 我的文件"那条另存分开）：**按字节复制**、
- * 那三行 `# based_on` 血统**原样带过去**（不重算 —— 来源已经是用户文件）；原文件一个字节不动。
+ * 我的文件 → 我的文件（第十一层的边界）：**按字节复制**、那三行 `# based_on` 血统
+ * **原样带过去**（不重算 —— 来源已经是用户文件）；原文件一个字节不动。
  * 名字由用户自己起 —— **不预填、不自动改名**（作者：目标存在就拒绝，让他自己换名字）；
  * **一个状态都不碰**：不改「已应用」、草稿也留在原来那份上。
  */
@@ -610,22 +684,6 @@ export const MINE_COPY = {
     '新的那份从诞生起就是独立的一份（之后能自己编辑 / 改名 / 删除 / 应用）。' +
     '那三行 `# based_on` 血统原样带过去（来源已经是用户文件，不重算）。' +
     '名字由你来起：不能和原来一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
-  commit: '另存为',
-} as const
-
-/**
- * **官方交付行的那口另存抽屉**（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
- * 官方 → 我的文件。可信字节（与「改这份」同一条闸）**按字节复制**，血统三行
- * **新写指向**来源交付文件（官方原件没有血统头）；官方原件一个字节不动、
- * 一个状态都不碰。名字由用户自己起 —— 不预填、不覆盖、不自动改名（与我的行同一套）。
- */
-export const RELEASE_COPY = {
-  title: '另存为一份新的',
-  note:
-    '把官方这份**按字节**复制成你自己的一份（presets-mine/）—— 官方原件一个字节不动，' +
-    '身世（机型 / 版本 / 来源）跟着它走；新的那份从诞生起就是独立的一份' +
-    '（之后能自己编辑 / 改名 / 删除 / 应用）。' +
-    '名字由你来起：不能和官方那份一样、后缀保持原样；已经有同名文件了会被拒（不覆盖，也不会自动改名）。',
   commit: '另存为',
 } as const
 
@@ -827,29 +885,6 @@ export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
   default: '套餐内',
   optional: '可单下',
 }
-
-/**
- * 右键菜单里那些**还没有后端**的动作（A2 人话化后的现状）：
- *
- *   契约里有签名   照调，让它抛 `NotImplementedError`（自带人话 hint），界面原样显示
- *                 —— 官方仓库文件的「下载」（`downloadFiles`）是这一种
- *   契约里没签名   不发请求，就地说「这个动作还没有对应的实现」（[`noContractText`]）
- *                 —— 现在只剩「复制链接」一件（要加的话是 `getFileUrl`）
- *
- * **用户文件那五件都不在这一档了**：重命名 / 删除是第十层（`renameUserPreset` /
- * `deleteUserPreset`）、另存为一份新的（我的 → 我的）是第十一层（`copyUserPreset`）、
- * 官方 → 我的文件的另存是 `copyReleaseAsNew`、在文件管理器里显示是第十三层
- * （`revealInFolder`）。原「MISSING_METHOD」待办表已并入这段注释 —— 只剩一件，
- * 不值得一张表。
- */
-
-/**
- * 「界面上还没有对应实现的动作」那一句话（A2 人话化）：发生了什么 + 能干什么。
- * 技术形式（方法名 / 契约名）不进提示条 —— 那是控制台与日志的事。
- * 目前界面上唯一到不了契约的动作是「复制链接」（要加的话是 `getFileUrl`）。
- */
-export const noContractText = (): string =>
-  '这个动作还没有对应的实现 —— 先用能用的那几步把事情办完'
 
 // ——————————————————————————————————————————————————————————————
 // 四档状态
@@ -1276,15 +1311,20 @@ export interface PresetRowBase {
   /** 相对预设仓库根。表格第二行的小字与「在文件夹中显示」都用它 */
   path: string
   /**
-   * **表格第二行的小字（副标题）**（2026-10-07 作者定：副标题不要位置文案，
-   * 改显示**备注**）：备注覆盖账里有 ⇒ 用户的；否则那一版工作台写的 `remark`；
-     连版本备注都没有 ⇒ 回落 `path`（路径永远在 `title` 里，不丢）。
+   * **表格第二行的小字（副标题）= 备注**（2026-10-07 作者定：副标题不要位置文案）。
+   *
+   * 两张表两类来源、**互不干扰**（2026-10-07 三轮定案）：
+   *   本地表  覆盖账（用户改过的）→ 那一版工作台写的 `remark` → **空着**
+   *   云端表  **只**读那一版工作台写的 `remark` → **空着**（不读覆盖账、没有编辑格）
+   * 都没有备注就空着（位置文案不上副标题；`path` 永远在 `title` 里，不丢）。
+   * 唯一例外：本地交付行盘上不对劲（old / tampered）时状态注记压过备注（见 `localRows`）。
    */
   subtitle: string
   /**
-   * 备注覆盖账的键（`null` = 这一行没有可改的备注 —— 官方仓库行）。
-   * 官方交付行 = `catalog.path`、用户线 = 相对用户根的路径；「改备注」「删了重新下载
-   * 就回到工作台那句」都认它。详情面板的备注编辑格只在它非 `null` 时出现。
+   * 备注覆盖账的键（`null` = 这一行没有可改的备注）。**只有本地表的行有它**：
+   * 本地交付行 = `catalog.path`、用户线 = 相对用户根的路径；官方仓库行没有备注来源，
+   * 云端表的行一律不给 —— 云端只读工作台那句（2026-10-07 作者定）。
+   * 详情面板的备注编辑格只在它非 `null` 时出现。
    */
   remarkKey: string | null
   /**
@@ -1449,6 +1489,22 @@ export interface PresetCloudRow extends PresetRowBase {
   delivery: PresetFileInfo['delivery']
   /** 在不在本机。官方文件看 `getLocalFiles()`，release 行看下载区（`mkp/`，盘就是底账）—— 两套底账，行上不说谎 */
   downloaded: boolean
+  /**
+   * **下过的旧版有几代**（版本账里 `downloaded && !current` 的条数）。
+   *
+   * 2026-10-08：云端表回到「一个目录条目一行」之后，那几代旧版的**唯一**痕迹就是它 ——
+   * 旧版本身以用户自己的名字躺在本地表里（`presets-mine/`，名字带日期），
+   * 展开这一行还能在「旧版本」那一格看到具体是谁。`0` / `undefined` = 没有。
+   *
+   * **MKP 档不给它**（2026-10-09）：那一档的"下过没有"按 [`CloudLocalState`] 说
+   * （我有没有一份基于它的工作副本），下载区里的旧份是内部数据，不进用户世界。
+   */
+  olderVersions?: number
+  /**
+   * 「我这边怎么样」—— **只有 MKP 档有它**（见 [`CloudLocalState`]）。
+   * 切片器档不出这个字段：那一档照旧按 `releaseState` 四态说话。
+   */
+  localState?: CloudLocalState
 }
 
 export type PresetTableRow = PresetLocalRow | PresetCloudRow
@@ -1481,7 +1537,8 @@ export interface PresetRowsInput {
   /** `api.getLocalFiles()` 的结果（同样是固定演示集合） */
   localIds: Set<string>
   /**
-   * `api.getSlicerCopied()` 的结果：**已经复制到切片器 profile 目录**的 asset id。
+   * `api.getSlicerCopied()` 的结果：**已经复制到切片器 profile 目录**的**文件名**
+   * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径）。
    *
    * 和 `localIds` 是两件事 —— 在本机不等于切片器看得见它。切片器行的「生效」只看这一个。
    */
@@ -1498,6 +1555,14 @@ export interface PresetRowsInput {
    * （图标 / 模型不进这个数组）；空数组 = 目录里没有登记预设页的文件。
    */
   releasePresets: ReleasePresetSource[]
+  /**
+   * **官方版本账**（`api.getOfficialVersions()`，2026-10-08）：官方登记过哪几版、
+   * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**。
+   *
+   * 空数组 = 版本账读不到（假后端没这一路 / 随包目录）—— 退回"一个预设一行"的老画法，
+   * 行为不退化。
+   */
+  officialVersions: OfficialVersion[]
   /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`ReleaseFileState = ok`） */
   localReleases: ReleasePresetSource[]
   /**
@@ -1510,9 +1575,10 @@ export interface PresetRowsInput {
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   releaseVersion: string | null
   /**
-   * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。
+   * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。**只有本地表读它** ——
+   * 云端表只读工作台写的那句（2026-10-07 作者定：本地的改动不许影响云端显示）。
    * 键 = 文件身份（官方交付行 `catalog.path` / 用户线相对用户根路径）；
-   * 有 ⇒ 副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
+   * 有 ⇒ 本地副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
    */
   remarks: Record<string, string>
   /**
@@ -1570,6 +1636,16 @@ export interface ReleasePresetSource {
   kind: FileKind
   /** **catalog 登记的落点**（`delivery/mkp/presets/A1-standard.toml`）—— 备注覆盖账的键 */
   path: string
+  /**
+   * 喷嘴 / 层高 —— **切片器 profile 才有**（MKP 的 `.toml` 没有这回事，字段不给）。
+   *
+   * 目录（catalog）里**没有**这两格，它们由 `getPresetFiles()` 对**同一份文件**
+   * （按 `fileName` 对上）算好给出来 —— 算法只有后端一处（`ipc/presets.rs::slicer_axes`），
+   * 前端只搬，**不在 TS 里从路径重算**（2026-10-07：release 行从前不带这两格，
+   * 切片器档的喷嘴 / 层高整列都是「—」）。
+   */
+  nozzle?: string
+  layerHeight?: string
   /** 目录登记的字节数（真值） */
   size: number
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「官方交付」） */
@@ -1709,18 +1785,6 @@ export function mineCountOfAxis(mine: UserPresetFile[], axis: PresetKindAxis): n
 }
 
 /**
- * 切片器那一类的**交付行**（catalog 登记、能下载）在本地表里为什么没有操作按钮。
- *
- * 它不能被「应用」（使用中指针只认 MKP 预设）；「复制到切片器目录」那条路只认
- * 资产库里的 asset id（切片器那一侧的写还没接，见 `docs/PROJECT-AUDIT.md` ③）——
- * 原来这里画的是「复制」，点了**静静没反应**。给一个点了没反应的按钮，与
- * "点了必报错"同罪：不给。
- */
-export const SLICER_RELEASE_WHY =
-  '切片器配置不参与「应用」——它的生效要把它复制进切片器自己的目录，那条写动作还没接（见 PROJECT-AUDIT ③）。' +
-  '这一份已经在本地了，没有可点的动作；要重新下一份干净的，到云端表那一行点「下载 / 更新」'
-
-/**
  * 置顶的排最前，其余按文件名。
  *
  * 置顶是**纯前端的排序**（落 localStorage，见 `usePresetData` 的 PINNED_KEY），
@@ -1783,105 +1847,41 @@ function versionRemarkLookup(
 }
 
 /**
- * 本地表：**本机磁盘上真有的文件**。
+ * **「我的预设」那一半的行**（`presets-mine/` 扫出来的那些）—— 本地表与资源库列表
+ * 共用的**唯一一条映射**（两个列表的这一半不许各写一份）。
  *
- * 两种来源拼在一起，用 `origin` 分开：
+ * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
+ * 也没有 SHA 可比。所以它们只活在用户侧的表里，云端表永远看不到。
  *
- *   官方副本  当前这些机型的文件里，`getLocalFiles()` 说已经下到本机的那些
- *   我的文件  `getUserPresetFiles()` 扫出来的（**用户线**：`presets-mine/`）—— 云端没有它，
- *             所以没有交付身份、不属于任何版本、也没有 SHA 可比
+ * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
+ *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
+ *   - **机型**这一档**真的筛**：归属（文件头 `# machine:` / `# variant:` 那两行，2026-10-07
+ *     起就有，还能「改归属」）说得出属于哪台机的，就只在那台机下出现；
+ *     **归属认不出的**（导入的裸文件）才在任何机型档下列，机上那格写「—」、
+ *     名称列挂「未标机型」。这与官方那半边的 `untagged` 是同一条口径。
  *
- * 官方那一半按**机型**汇总（一个文件一行，用到它的版本收进 `versions`）；
- * 我的那一半是**用户线**（`presets-mine/` 扫出来的）：机型这一层没有来源，
- * 所以任何机型档下都列（机上写「—」，名称列挂「未标机型」，见 `untagged`）。
- *
- * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
- * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
+ * ★ 机型筛这一段的历史：注释原来写的是「这一层根本没有来源 → 任何机型档下都列」，
+ * 那句话在「改归属」落地那天就过期了，而**没人跟着改筛**，于是筛 A1 mini 时 A1 / XC
+ * 的文件照旧满屏（作者 2026-10-08 实测）。现在按归属筛（见最后那个 `.filter`）。
  */
-export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
-  const {
-    machines,
-    machineId,
-    mine: mineFiles,
-    localIds,
-    slicerCopiedIds,
-    active,
-    kind,
-    query,
-    pinned,
-    localReleases,
-    staleReleases,
-    releaseVersion,
-    releaseAt,
-    remarks,
-  } = input
+function mineHalf(input: PresetRowsInput): PresetLocalRow[] {
+  const { machines, machineId, mine: mineFiles, kind, active, pinned, remarks } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
   const versionRemark = versionRemarkLookup(machines)
   /*
    * 副标题：**账上有覆盖（包括空串）就用用户的**（2026-10-07 作者改口：
    * 「可以空着，不要回退」—— 用户写空副标题就空）；没有覆盖才走
-   * 「工作台写的 → 路径文本」回落。「恢复默认」= 删掉覆盖。
+   * 「工作台写的 → 空着」回落。「恢复默认」= 删掉覆盖。
    */
   const remarkOr = (key: string | null, fallback: string): string =>
     key !== null && remarks[key] !== undefined ? remarks[key] : fallback
-
-  const official = machineFiles(machines)
-    .filter((e) => matchesKind(kind, e.file.kind))
-    /* 四档里的 missing 不属于本地表 —— 判据只有 statusOf 这一条 */
-    .map((e) => ({ e, status: statusOf(e.file, localIds, active) }))
-    .filter(({ status }) => status !== 'missing')
-    .map(({ e, status }): PresetLocalRow => {
-      const f = e.file
-      const pinKey = f.id ?? f.path
-      const applied = status === 'applied'
-      return {
-        rowKey: `${e.machineId}:${f.path}`,
-        assetId: f.id,
-        pinKey,
-        fileName: f.fileName,
-        path: f.path,
-        /* 官方仓库行没有备注覆盖（ remarkKey null）—— 副标题照旧路径文本 */
-        subtitle: f.path,
-        remarkKey: null,
-        kind: f.kind,
-        machineId: e.machineId,
-        machineText: names.get(e.machineId) ?? e.machineId,
-        versions: e.versions,
-        versionIds: e.versionIds,
-        nozzle: f.nozzle,
-        layerHeight: f.layerHeight,
-        sizeText: f.sizeText,
-        modifiedText: f.modifiedText,
-        statFrom: f.statFrom,
-        applied,
-        pinned: pinned.has(pinKey),
-        scope: 'local',
-        origin: 'official',
-        delivery: f.delivery,
-        untagged: false,
-        /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
-        live: kind === 'mkp' ? applied : f.id !== undefined && slicerCopiedIds.has(f.id),
-      }
-    })
-
-  /*
-   * **用户线**：用户自己放进 `presets-mine/` 的那些（`<appDataDir>/user/`）。
-   *
-   * 与官方行最本质的区别（总纲 §1③）：**云端没有它们** —— 没有交付身份、不属于任何版本、
-   * 也没有 SHA 可比。所以它们只活在这一张本地表里，云端表永远看不到。
-   *
-   * 两条"不知道就别筛掉"的口径（藏起来等于对用户说他没这份文件）：
-   *   - **认不出类别的**（`.json` 分不出 bbs 还是 orca）在任何类型档下都列；
-   *   - **机型**这一层根本没有来源（今天没有地方让用户标它）→ 任何机型档下都列，
-   *     机上那格写「—」、名称列上挂「未标机型」—— 这与官方那半边的 `untagged` 是同一条口径。
-   */
-  const mine = mineFiles
+  return mineFiles
     .filter((f) => f.kind === null || matchesKind(kind, f.kind))
     .map((f): PresetLocalRow => {
       /*
-       * 用户自己那份**也能被应用**（第七层）：只有认得出是 MKP 预设（`.toml`）的才行 ——
-       * `.json` 那几份（bbs / orca 分不出）不是预设，应用它们无从谈起。
+       * 用户自己那份**也能被使用**（第七层）：只有认得出是 MKP 预设（`.toml`）的才行 ——
+       * `.json` 那几份（bbs / orca 分不出）不是预设，使用它们无从谈起。
        * 「生效」认的是**唯一底账**里的那一条：`origin` 是用户线、而且路径就是这一条。
        */
       const canApply = f.kind === 'mkp_preset'
@@ -1908,12 +1908,12 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey: f.path,
         fileName: f.fileName,
         path: f.path,
-        /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 路径（presets-mine/…） */
+        /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 空着（路径在 title 里，不丢） */
         subtitle: remarkOr(
           f.path,
           ownMachine !== null && ownVersion !== null
-            ? (versionRemark(ownMachine, ownVersion) ?? f.path)
-            : f.path,
+            ? (versionRemark(ownMachine, ownVersion) ?? '')
+            : '',
         ),
         remarkKey: f.path,
         /* 认不出是哪一类就照实留 `null`：展开详情里写"认不出"，不替他认成 MKP */
@@ -1939,12 +1939,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         basedOn: f.basedOn,
         basedOnSource: f.basedOnLabel,
         basedOnOfficial: source,
+
         /* 详情面板「改归属」读它（机型 / 版本两个下拉的数据源是行上这份归属） */
         ownMachineId: ownMachine,
         ownVersionId: ownVersion,
         /*
          * 第九层：文件级状态。**读不出来的照样列出来**（藏起来等于说他没这份文件），
-         * 只是不给「应用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
+         * 只是不给「使用 / 改这份」—— 与 `.json` 那份"不给必报错的按钮"同一条口径。
          * 认不出是哪一类的没有这一档（`null` → `undefined`）。
          */
         mineState: f.state ?? undefined,
@@ -1955,24 +1956,133 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         copiedFromName: f.copiedFromName,
       }
     })
+    /*
+     * 机型这一档**真的筛**（2026-10-08 修）：归属说得出属于哪台机的，就只在那一档下出现；
+     * 归属认不出的（`ownMachineId === null`，导入的裸文件）在任何机型档下列 ——
+     * 藏起来等于说他没这份文件。`machineId === ''` 是「全部机型」那一档。
+     */
+    .filter(
+      (row) =>
+        row.ownMachineId === null || machineId === '' || row.ownMachineId === machineId,
+    )
+}
+
+/**
+ * **本地表**（两种类型都算）：本机磁盘上真有的东西。
+ *
+ *   MKP     只列 `presets-mine/` 里那几行（你自己那份工作副本，见下面 `mineOnly`）——
+ *           官方原件是内部数据，不进这张表
+ *   切片器   官方副本（`getLocalFiles()` 说已经下到本机的那些）+ 我的文件
+ *           （`getUserPresetFiles()` 扫出来的；认不出类别的 `.json` 在任何类型档下都列）
+ *
+ * 官方那一半按**机型**汇总（一个文件一行，用到它的版本收进 `versions`）；
+ * 我的那一半是**用户线**（两张表共用 [`mineHalf`]，这一半永远一致）。
+ *
+ * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
+ * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
+ */
+export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
+  const {
+    machines,
+    machineId,
+    localIds,
+    slicerCopiedIds,
+    active,
+    kind,
+    query,
+    pinned,
+    localReleases,
+    staleReleases,
+    releaseVersion,
+    releaseAt,
+    remarks,
+  } = input
+  const names = machineNames(machines)
+  const versionName = versionNameLookup(machines)
+  const versionRemark = versionRemarkLookup(machines)
+  /*
+   * 副标题：**账上有覆盖（包括空串）就用用户的**（2026-10-07 作者改口：
+   * 「可以空着，不要回退」—— 用户写空副标题就空）；没有覆盖才走
+   * 「工作台写的 → 空着」回落。「恢复默认」= 删掉覆盖。
+   */
+  const remarkOr = (key: string | null, fallback: string): string =>
+    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
 
   /*
-   * 目录里登记的交付预设：下载之后它们就躺在下载区（`mkp/`，盘就是底账），
+   * **MKP 档的本地表只列"我的工作副本"**（`mineOnly`，2026-10-09 定死）。
+   *
+   * 官方那一半（下载区里的官方副本）不进这张表：那是内部数据 —— 它是隐藏基准的来源，
+   * 用户既看不到也改不了它。把"官方原件在本机"当成"本机有这一份预设"摆给用户看，
+   * 正是上一版让人误以为"本地有两份"的根子。
+   *
+   * 切片器档照旧（本机真有的那些 + 云端菜单上的那些，两张表各答各的）。
+   */
+  const mineOnly = kind === 'mkp'
+
+  const official = (mineOnly ? [] : machineFiles(machines))
+    .filter((e) => matchesKind(kind, e.file.kind))
+    /* 四档里的 missing 不属于本地表 —— 判据只有 statusOf 这一条 */
+    .map((e) => ({ e, status: statusOf(e.file, localIds, active) }))
+    .filter(({ status }) => status !== 'missing')
+    .map(({ e, status }): PresetLocalRow => {
+      const f = e.file
+      const pinKey = f.id ?? f.path
+      const applied = status === 'applied'
+      return {
+        rowKey: `${e.machineId}:${f.path}`,
+        assetId: f.id,
+        pinKey,
+        fileName: f.fileName,
+        path: f.path,
+        /* 官方仓库行没有备注的来源也没有覆盖（remarkKey null）—— 副标题空着（路径在 title 里） */
+        subtitle: '',
+        remarkKey: null,
+        kind: f.kind,
+        machineId: e.machineId,
+        machineText: names.get(e.machineId) ?? e.machineId,
+        versions: e.versions,
+        versionIds: e.versionIds,
+        nozzle: f.nozzle,
+        layerHeight: f.layerHeight,
+        sizeText: f.sizeText,
+        modifiedText: f.modifiedText,
+        statFrom: f.statFrom,
+        applied,
+        pinned: pinned.has(pinKey),
+        scope: 'local',
+        origin: 'official',
+        delivery: f.delivery,
+        untagged: false,
+        /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
+        live: kind === 'mkp' ? applied : slicerCopiedIds.has(f.fileName),
+      }
+    })
+
+  const mine = mineHalf(input)
+
+  /*
+   * 目录里登记的交付预设（**切片器档**）：下载之后它们就躺在下载区，
    * 本地说的就是「本机磁盘上真有的文件」—— 所以这一半**收盘上真有的那些**：
    * 与目录一致的、以及不一致的（旧版本 / 内容异常）。四档全在盘上，
    * 藏起后三种就等于对用户说"你机器上没有它"，而修复它的入口也就没了。
-   * 「生效」认唯一底账（新世界 `run/active-preset.json`）里那一条（与官方行合流，不分两套）。
+   * MKP 档**不列**（那一档只列 `presets-mine/` 那几行，见上面 `mineOnly`）；
+   * 「生效」认唯一底账（`run/app-state.json` 的 activePreset）里那一条（合流，不分两套）。
    */
-  const onDisk = [...localReleases, ...staleReleases]
+  const onDisk = mineOnly ? [] : [...localReleases, ...staleReleases]
 
   const release = onDisk
     .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetLocalRow => {
       const state = p.state
-      /* 交付行只有 MKP 那一类能被「应用」（使用中指针认的一直是 MKP 交付文件）——
-         切片器那一类的交付行没有"生效"这回事，`live` 恒 false */
-      const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
+      /*
+       * MKP 交付行的「生效」= 被启用（使用中指针认的一直是 MKP 交付文件）；
+       * 切片器那一类的「生效」= 已复制进切片器目录（2026-10-09 接通）—— 两回事，别合流。
+       */
+      const live =
+        p.kind === 'mkp_preset'
+          ? active !== null && active.fileName === p.fileName
+          : slicerCopiedIds.has(p.fileName)
       return {
         /*
          * 行键与置顶键都用 **fileName**，不用 `uid`（`机型/版本`）。
@@ -1988,20 +2098,23 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
-           副标题 = 备注覆盖账里的 → 那一版工作台写的 → 落点文本；
+           副标题 = 备注覆盖账里的 → 那一版工作台写的 → 空着；
            盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
         path: releasePathText(p),
         subtitle:
           /* 盘上那份不对劲（旧版本 / 内容异常）时那件事**必须**写在副标题原地 ——
-             状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 落点」回落 */
+             状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 空着」回落 */
           p.state === 'ok'
-            ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? releasePathText(p))
+            ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? '')
             : releasePathText(p),
         remarkKey: p.path,
         kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
+        /* 喷嘴 / 层高：切片器 profile 才有（按 fileName 从 `getPresetFiles` 对过来的） */
+        nozzle: p.nozzle,
+        layerHeight: p.layerHeight,
         sizeText: sizeTextOf(p.size),
         /*
          * 到位时刻：这份字节是「下载」进来的还是「替换」上去的（两个事件至多一个有值，
@@ -2042,6 +2155,35 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
 }
 
 /**
+ * **本地表 / 云端表共用的那一颗按钮**：把这一份设为当前生效（`applyActivePreset`）。
+ *
+ * 两条线（官方线与用户线）**同一个词**：用户看到的那一份就是"这一份预设"，
+ * 不必先分清它住哪条线。官方原件不进用户世界，所以今天能走到这里的基本都是
+ * `presets-mine/` 里那几行 —— 词照旧只有这一个。
+ */
+export const ASSET_USE_TEXT = {
+  on: '当前使用',
+  off: '使用',
+} as const
+
+/**
+ * **这一行生效了没有**（展开详情「状态」那一格）。
+ *
+ * 与 [`ASSET_USE_TEXT`] 分开是有意的：那个是**按钮上的字**（点了会发生什么），
+ * 这个是**状态的字**（现在是什么样）—— `off` 那半句要是也写「使用」，
+ * 展开详情里就会读到「状态：使用」这种把动作当状态的句子。
+ */
+export const ASSET_STATE_TEXT = {
+  on: '当前使用',
+  off: '未使用',
+} as const
+
+export const ASSET_USE_WHY = {
+  on: '当前使用：唯一底账（run/active-preset.json）说正在使用的就是它。**全局唯一** —— 全表最多一条',
+  off: '使用：把它设为当前生效的那一份。改的、用的都是你自己目录里这一份（`presets-mine/`）',
+} as const
+
+/**
  * 云端表：**菜单上的官方文件**（已分配 + 可选）。
  *
  * 取的是树上这些机型的文件 —— 仅归档的文件建树时就整个剔掉了（`archivedIds`），
@@ -2051,6 +2193,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
  * `applied` 是第三件事，判据只有一条 asset id 相等 —— 所以一个还没下的文件也可能是
  * 「正在配着的那一份」，那时页脚会说「配着 X（还没下）」。
  */
+/*
+ * ★ `versionDateText` 随「逐版各占一行」一起退役了（2026-10-08 当天下午）：
+ * 它算的是**版本行**那一格时间（已下载的取文件头 `release_time`，没下的取目录代时间）。
+ * 云端表回到「一个目录条目一行」之后，那一格时间是目录这次发布的时刻（`releaseAt`）——
+ * 见 `cloudRows` 里 `modifiedText` 的说明。留着它就是留一条没人走的路。
+ */
+
 export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRow> {
   const {
     machines,
@@ -2061,16 +2210,62 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     query,
     pinned,
     releasePresets,
+    officialVersions,
     releaseVersion,
     releaseAt,
-    remarks,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
   const versionRemark = versionRemarkLookup(machines)
-  /* 与本地表同一条回落 —— 同一份覆盖账，两张表不各说一套（空覆盖也是覆盖，不回退） */
-  const remarkOr = (key: string | null, fallback: string): string =>
-    key !== null && remarks[key] !== undefined ? remarks[key] : fallback
+
+  /*
+   * **"我这边有没有一份基于它的工作副本"**（MKP 档，2026-10-09）。
+   *
+   * 认亲只认**来源关系**：我那份文件头血统里的 `based_on` 末段就是官方那个文件名
+   * （`delivery/mkp/presets/A1-fast.toml` → `A1-fast.toml`）。**不按文件名认** ——
+   * 用户导入一份同名文件不会被当成"本地已有"（自己拉进来的东西没有来源关系，
+   * 它在本列表里就是"未获取"，而他那份照常在本地表里列着）。
+   *
+   * 一个官方条目可能被我好几份认领（「另存为一份新的」造出来的副本血统照抄）。
+   * 这一行只回答"有没有、新不新"，所以取其中**最好的那一个**：
+   * 只要有一份跟得上当前版就算「本地已有」。
+   *
+   * `unknown`（认得出来源名字、但比对不了摘要）**当"不敢说它跟得上"** ——
+   * 报「有新版」比报「本地已有」安全：点一下"更新"是幂等的（我那份一个字节不动），
+   * 而默默说"跟得上"却让用户错过官方改动，是这一轮要根治的那类毛病。
+   */
+  const claims = new Map<string, BasedOn>()
+  if (kind === 'mkp') {
+    for (const f of input.mine) {
+      if (f.kind !== 'mkp_preset') continue
+      const source = f.basedOnLabel?.split('/').pop() ?? ''
+      if (source === '') continue
+      if (claims.get(source) === 'current') continue
+      claims.set(source, f.basedOn)
+    }
+  }
+  /**
+   * 云端那一行「我这边怎么样」。切片器档没有这一档（它照旧按 `releaseState` 说）。
+   *
+   * `state` 是这一行的下载区四态（[`ReleaseFileState`]）—— 这里**只当一个内部信号用**：
+   * `ok` = 官方当前版的字节已经在本机。**不把这四态摆到界面上**（用户看到的仍是三态）。
+   *
+   * 为什么要有它（2026-10-09 作者实测）：`更新` 做的是"把官方当前版取回来"，
+   * **我那份一个字节不动** —— 文件头血统里的 `based_on_sha256` 永远是旧那一版。
+   * 光凭血统，点完更新这一行会一直挂着「有新版」，可它已经没有任何要用户做的事了
+   * （逐参数的取舍在「打开参数」里，那是另一条链）。所以：官方当前版取回来了 ⇒ 翻成「本地已有」。
+   */
+  const localStateOf = (
+    fileName: string,
+    state: ReleaseFileState,
+  ): CloudLocalState | undefined => {
+    if (kind !== 'mkp') return undefined
+    const claim = claims.get(fileName)
+    if (claim === undefined) return 'none'
+    if (claim === 'current') return 'has'
+    /* 我那份基于旧版官方：官方当前版已经取回来 ⇒ 这一行没别的要做了 */
+    return state === 'ok' ? 'has' : 'stale'
+  }
 
   /*
    * 凡文件名在**云端最新发布**里打包过的，官方行不再列出 —— 发布行接管它
@@ -2092,7 +2287,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
-        subtitle: f.path,
+        /* 官方仓库行没有备注的来源（工作台只给交付预设写 remark）—— 副标题空着（路径在 title 里） */
+        subtitle: '',
         remarkKey: null,
         kind: f.kind,
         machineId: e.machineId,
@@ -2123,26 +2319,54 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
   const release = releasePresets
     .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
-    .map((p): PresetCloudRow => {
+    .flatMap((p): PresetCloudRow[] => {
       const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
       /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
       const state = p.state
-      return {
+      /*
+       * **一个目录条目一行**（2026-10-08 作者改判）。
+       *
+       * 上午那一版是"同一个预设的每一代官方版本各占一行"（版本账 `officialVersions`
+       * 按 `downloaded || current` 滤，`versions.map` 铺开）。作者在真机上看到的后果是：
+       * `A1_MINI-fast.toml` **三行同名** —— 名称 / 机型 / 版本三列逐字一样，只有时间列
+       * 不同（还有两行都是 08 号），他原话「我觉得每一个版本就只应该显示一个」
+       * 「他为什么不沿用本地的名字呢……真正值得下载的才显示云端的名字」。
+       *
+       * 于是回到一行：这一行答的还是那三件事（云上有没有我这份 / 我该不该下 /
+       * 我这份对不对），状态与动作全部由 `p.releaseState` 出（四档在源上算好）。
+       *
+       * **下过的旧版去哪了**：它们本来就是**用户的东西**，以用户自己的名字躺在本地表里
+       * （`A1_MINI-fast-2026-10-06.toml` 这种，`presets-mine/`），展开这一行还能看到
+       * 归档里那几份旧版（`.facts` 的「旧版本 N」）—— 云端表不必再替它们各占一行。
+       * 列表上只留一个数（`olderVersions`），把"下过几代旧的"这件事说出来。
+       */
+      const olderVersions =
+        kind === 'mkp'
+          ? undefined
+          : officialVersions.filter(
+              (v) => v.fileName === p.fileName && v.downloaded && !v.current,
+            ).length
+      const row = {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
         rowKey: `release-cloud:${p.fileName}`,
         pinKey: `release:${p.fileName}`,
         fileName: p.fileName,
         path: `官方交付 / ${p.machineId} / ${p.versionId}`,
-        /* 副标题同样走备注（与本地表同一份覆盖账；盘上不对劲的状态只在本地表说） */
-        subtitle: remarkOr(
-          p.path,
-          versionRemark(p.machineId, p.versionId) ?? `官方交付 / ${p.machineId} / ${p.versionId}`,
-        ),
-        remarkKey: p.path,
+        /*
+         * 副标题 = **只读工作台写的那句**（这一版发布时带进目录的 `remark`）。
+         * 云端表不读本地覆盖账（2026-10-07 作者三轮：本地的改动不许影响云端显示）——
+         * 要写自己的备注，下载后在本地表里改。工作台没写就**空着**
+         * （不回落「官方交付 / …」那种位置文案；落点仍在 `title` 里）。
+         */
+        subtitle: versionRemark(p.machineId, p.versionId) ?? '',
+        remarkKey: null,
         kind: p.kind,
         machineId: p.machineId,
         machineText: names.get(p.machineId) ?? p.machineId,
         versions: [versionName(p.machineId, p.versionId)],
+        /* 喷嘴 / 层高：切片器 profile 才有（按 fileName 从 `getPresetFiles` 对过来的） */
+        nozzle: p.nozzle,
+        layerHeight: p.layerHeight,
         sizeText: sizeTextOf(p.size),
         /*
          * 云端表的时间 = **这次发布的时刻**（`releaseAt`，发布侧盖进目录的戳）——
@@ -2161,7 +2385,11 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         downloaded: state === 'ok',
         releaseState: state,
         publishedAt: releaseAt,
-      }
+        olderVersions,
+        /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `releaseState`） */
+        localState: localStateOf(p.fileName, state),
+      } satisfies PresetCloudRow
+      return [row]
     })
 
   const all = [...official, ...release]

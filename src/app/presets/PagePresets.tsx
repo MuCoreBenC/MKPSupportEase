@@ -49,19 +49,21 @@
  * 搜索框里原来还有一枚「命中 N 条」，和「共 N 项」是同一个数，删掉了：同一个数字写两遍，
  * 哪天算法改了就会有一处忘记跟。
  *
- * 它右边那格台账：**「仓库」与「我的」两个数跟着当前类型档走**（MKP 档数 MKP 的、
- * 切片器档数切片器的；图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字
- * 混进某一档的语境里只会让人对不上（作者 2026-10-02 点名「仓库 9」）。
- * 「本机」仍是官方副本的总数（老契约 `getLocalFiles` 的读数，id 集合分不出类型）。
+ * 它右边那格台账：**两个数跟着当前类型档走**（MKP 档数 MKP 的、切片器档数切片器的；
+ * 图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字混进某一档的语境里
+ * 只会让人对不上（作者 2026-10-02 点名「仓库 9」）。MKP 档是「官方 · 我的」，
+ * 切片器档是「仓库 · 本机 · 我的」。
  *
- * # 本地 / 云端是**两张互不相干的表**
+ * # 本地 / 云端是**两张互不相干的表**（两种类型都有这一对，2026-10-09 恢复）
  *
- *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ **用户线**
- *           （`getUserPresetFiles()` 扫 `presets-mine/` —— **云端没有它们**）
- *   云端表  菜单上有什么官方文件（已分配 + 可选）。仅归档的一处都不出现
+ *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
+ *           MKP：只有你自己那份工作副本（`presets-mine/`）；切片器：官方副本 + 用户线
+ *   云端表  官方现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
+ *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
+ *           切片器：菜单上的官方文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
  *
- * 一个官方文件下载之后两张表里都有，那是对的：云端表说「仓库里有这个东西」，
- * 本地表说「你机器上有这个东西」。两张表各回答一个问题，不合流。
+ * 两张表各回答一个问题，不合流。MKP 档里一个官方条目同时出现在两张表上不是重复：
+ * 云端那一行说"官方有这个、我要不要拿"，本地那一行说"我手上这份能不能用"。
  *
  * # 两种类型的「生效」是两件不同的事
  *
@@ -92,23 +94,24 @@
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
  *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
+ *   **下载 / 更新**（MKP 云端行） `api.fetchOfficialPreset()`                真（取回官方当前版 + 落一份你的工作副本；
+ *                            两个词是同一条路，差别只在本地有没有 / 换没换版。**不改当前使用**）
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
- *   **批量**（云端表那一行）   `api.downloadCatalogFiles()`（多份）            真（同一套机制；**逐份结局**，
- *                            没成的各占提示条一行。范围 = 机型 + 类型，不受搜索词影响；已下载的不进来）
+ *   **批量**（云端表那一行）   MKP 逐份 `fetchOfficialPreset` / 切片器 `api.downloadCatalogFiles`（多份）
+ *                            真（**逐份结局**，没成的各占提示条一行。范围 = 机型 + 类型，
+ *                            不受搜索词影响；未获取 / 有新版才进来）
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
  *                            见 `ReleaseFileState`）
- *   **修改 / 保存**（交付行） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/draft-preset.json`：
- *                            `putPresetDraft` 边改边存；保存 = 另存进 `presets-mine/<原名>（已修改）<后缀>`。
- *                            **官方原件与下载区全程没被碰过** —— 判据逐字节盯着）
+ *   **修改 / 保存**（我的文件） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/app-state.json`：
+ *                            `putPresetDraft` 边改边存；保存 = **写回我那一份自己**（不产生第二份）。
+ *                            **原文件与下载区全程没被碰过** —— 判据逐字节盯着）
  *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
  *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
- *   **另存为一份新的**（官方交付行） `api.copyReleaseAsNew()`               真（UX 测试 A1 的正路：release + ok 的
- *                            MKP 预设直接另存成你自己的一份 —— 可信字节 + 血统指向来源；不碰任何状态）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
@@ -127,9 +130,9 @@
  * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
+import type { ActiveOrigin, ArchivedFile, DownloadOutcome } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
@@ -142,6 +145,9 @@ import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { outcomeText, tickText } from '../shared/download'
+/* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
+import PresetParamsModal from '../params/PresetParamsModal'
+import CompareModal from './CompareModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
 import PresetTable from './PresetTable'
@@ -149,13 +155,18 @@ import {
   ARCHIVE_DRAWER,
   ARCHIVE_TIME,
   ARCHIVE_WHY,
+  ASSET_USE_TEXT,
+  ASSET_USE_WHY,
+  /* MKP 云端行三态的按钮词与说明（与操作列那颗按钮同一条出处，2026-10-09） */
+  CLOUD_LOCAL_ACTION,
+  CLOUD_LOCAL_TEXT,
+  CLOUD_LOCAL_WHY,
   EDIT_TEXT,
   MINE_COPY,
-  RELEASE_COPY,
   MINE_DRAWER,
-  MINE_EDIT_TEXT,
+  MINE_NOT_PRESET_WHY,
   MINE_RENAME,
-  DOWNLOAD_WHY,
+  mineUnreadableWhy,
   mineCountOfAxis,
   treeCountOfAxis,
   NO_ASSET_WHY,
@@ -163,8 +174,9 @@ import {
   STATUS_TEXT,
   STATUS_WHY,
   UNSUPPORTED_TEXT,
+  /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
+  UPDATE_ACTION_TEXT,
   isSuspectRelease,
-  noContractText,
   releaseBatchText,
   sizeTextOf,
 } from './presetTree'
@@ -211,6 +223,15 @@ const PLACEHOLDER: Record<Density, string> = {
 const REVEAL_LABEL =
   detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
 
+/*
+ * 起名字抽屉的两套话：改名（我的 → 我的）/ 另存为一份新的（我的 → 我的）。
+ * **外壳同一个**，说法各一套 —— 两件事都只传一个名字，别的全在后端。
+ */
+const NAMING_TEXT = {
+  rename: MINE_RENAME,
+  copy: MINE_COPY,
+} as const
+
 /**
  * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
  *
@@ -235,6 +256,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
+  /*
+   * **对比台的候选**：读得出来的「我的预设」（MKP 预设）。
+   * 读不出来的那份不给 —— 比一份读不懂的文件只会得到一行"读不出来"；
+   * 别的类型（`.json`）也不给：这一台子比的是参数。`useMemo` 是必需的（对比台按它重置选择）。
+   */
+  const compareFiles = useMemo(
+    () => data.mine.filter((f) => f.kind === 'mkp_preset' && f.state !== 'unreadable'),
+    [data.mine],
+  )
   const rootRef = useRef<HTMLDivElement>(null)
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
   const flashRef = useRef<HTMLDivElement>(null)
@@ -247,6 +277,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
+  /*
+   * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"官方版本"或"更新"上，
+   * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-mine/`）。
+   */
+  const [compareOpen, setCompareOpen] = useState(false)
+  /*
+   * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
+   * 那一屏打开（用户点的是那条直路：他已经知道有官方更新等着处理）。
+   */
+  const [paramModal, setParamModal] = useState<{
+    target: { path: string; fileName: string; machineId: string; versionId: string }
+    syncFirst: boolean
+  } | null>(null)
   /*
    * 正在做动作的那一行（rowKey）。只用来把那一颗按钮禁掉 —— 假后端是同进程的内存写，
    * 这一下快到看不见；真后端上「应用」要写盘，连点两次就会发两个写。
@@ -315,6 +358,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
    */
   const [naming, setNaming] = useState<{
+    /**
+     * 两件"起个名字就完事"的事共用这一口抽屉：
+     *   `rename`  我的 → 我的（只改名字）
+     *   `copy`    我的 → 我的（按字节再存一份）
+     */
     kind: 'rename' | 'copy'
     row: PresetTableRow
     name: string
@@ -433,28 +481,57 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   // ——————————————————————————————————————————————————————————
 
   /**
-   * 契约里**连签名都没有**的那一件事（复制链接）——
-   * 用户文件那四件都已经接上了：重命名与删除在第十层、另存为一份新的在第十一层、
-   * 在文件管理器里显示在第十三层，都不在这里。
-   *
-   * 不发请求 —— 没有可发的方法。就地说清「还没有对应的实现」（A2 人话化：
-   * 发生了什么 + 能干什么；缺的是哪个方法记在 `MISSING_METHOD` 里，给开发对账用），
-   * 而假装成功（弹个「已删除」然后什么都没发生）比说不出话糟得多。
+   * **复制链接**（2026-10-09 接通）：官方下载链接由后端按**当前数据源**算 ——
+   * 与下载管道同一个寻址出口，复制到的链接就是下载时取的那个地址。
+   * 拿到就进剪贴板；没配数据源 / 算不出来照实说，不编一个假 URL。
    */
-  const sayNoContract = (row: PresetTableRow) => {
-    setNote({ text: `${noContractText()}（${row.fileName}）`, bad: true })
+  const copyLink = (row: PresetTableRow) => {
+    api.getFileUrl(row.fileName).then(
+      (url) => {
+        void navigator.clipboard.writeText(url).then(
+          () => setNote({ text: `已复制 ${row.fileName} 的下载链接`, bad: false }),
+          (e: unknown) => setNote({ text: `链接拿到了，但进剪贴板没成功：${errorText(e)}`, bad: true }),
+        )
+      },
+      (e: unknown) => setNote({ text: `取不到下载链接：${errorText(e)}`, bad: true }),
+    )
   }
 
   /**
-   * 下载。两条路：
+   * 云端表那颗按钮。**三条路，都是"把官方的取到我机器上"**（2026-10-09）：
    *
-   *   目录登记的交付预设（`releaseUid` 在）  → `downloadRelease(fileName)`，**真的能下** ——
-   *     走新世界下载管道落进下载区 `mkp/`，本地表跟着多出一行
-   *   官方仓库的文件                        → 契约里有签名，所以**照调**。
+   *   MKP 云端行（`localState` 在）  → `fetchOfficial(fileName)`：
+   *       取回官方当前版字节（同一条下载管道，旧份进 archive）**+ 落一份我的工作副本**
+   *       （还没有的话）。**不动「当前使用」** —— 使用在本地表那一行上。
+   *       两颗按钮（下载 / 更新）走的是**同一条路**：差别只是本地有没有、换没换版。
+   *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`
+   *   官方仓库的文件                 → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
+    if (row.scope === 'cloud' && row.localState !== undefined) {
+      const verb = row.localState === 'stale' ? '更新' : '下载'
+      setBusyKey(row.rowKey)
+      setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
+      data.fetchOfficial(row.fileName).then(
+        (done) => {
+          setBusyKey(null)
+          setNote({
+            text: done.created
+              ? `已${verb} ${row.fileName} —— 官方这一版取到本机了，并且落成你的一份（本地表里现在有它）`
+              : `已${verb} ${row.fileName} —— 你那份本来就在，**一个字节没动**；官方新版已经取回来，改了哪几项去「打开参数」里看`,
+            bad: false,
+          })
+        },
+        (e: unknown) => {
+          setBusyKey(null)
+          /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
+          setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
+        },
+      )
+      return
+    }
     if (row.releaseUid !== undefined) {
       /*
        * 盘上那份不对劲的两档（旧版本 / 认不出）走的是**同一条下载管道**（再下一遍，
@@ -488,37 +565,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         )
       return
     }
-    if (row.kind === null) {
-      /* 认不出类别的东西（用户自己那份 `.json`）不进官方下载那条路：它本来也不在仓库里 */
-      setNote({ text: `${row.fileName}：认不出它是哪一类，走不了「下载」这条路`, bad: true })
-      return
-    }
-    const ref: FileRef = { kind: row.kind, fileName: row.fileName, path: row.path }
-    setBusyKey(row.rowKey)
-    setNote({ text: `正在请壳下载 ${row.fileName}…`, bad: false })
-    api.downloadFiles([ref]).then(
-      () => {
-        /* 真后端接上以后走这一支。这一轮到不了这里 —— 假后端一定抛 */
-        setBusyKey(null)
-        setNote({ text: `已交给外壳下载 ${row.fileName}`, bad: false })
-      },
-      (e: unknown) => {
-        setBusyKey(null)
-        /* 错误话术统一走 errorText：NotImplementedError 自带人话 hint（A2），
-           不再按异常类型在前端拼"尚未实现：downloadFiles"那种术语 */
-        setNote({ text: `下载失败：${errorText(e)}`, bad: true })
-      },
-    )
+    /*
+     * 到这里只剩「官方仓库文件」那一类（没有 MKP 的 `localState`、也没有交付身份）。
+     * 它的「下载」残支 2026-10-09 按用户裁断**连入口一起撤了**（`downloadFiles`
+     * 从契约里删掉）—— 界面上这类行不再给下载按钮，走到这里说明按钮闸漏了。
+     */
+    setNote({ text: `${row.fileName}：这一份不走「下载」—— 只有登记过的交付文件能取`, bad: true })
   }
 
   /**
-   * 批量：把「未下载 + 需更新」的那些**一次交给后端** —— 多份单文件操作的组合，
-   * 不是第二套机制（走同一个 `downloadCatalogFiles`，Rust 侧逐份跑同一个 `deliver`）。
+   * 批量：把「未获取 / 有新版」的那些**一次交给后端** —— 多份单文件操作的组合，
+   * 不是第二套机制。判据与单行那颗按钮同一条，只是把多份合成一次。
+   *
+   * **两种类型走两条现成的管道**：
+   *
+   *   MKP     逐份 `fetchOfficial` —— 取回官方 + 落一份我的工作副本（与「下载 / 更新」同一条）
+   *   切片器   一次交给 `downloadReleaseBatch`（Rust 侧逐份跑同一个 `deliver`，落下载区 `mkp/`）
    *
    * 结局**逐份**收：全成 / 有名有姓地列出没成的。**命令级失败是另一档**（比如没配数据源）：
    * 那时一份都没发出去，不能说成"全都失败了" —— 两句话不一样，用户要做的也不一样。
    */
-  const runBatch = () => {
+  const runBatch = async () => {
     const { fileNames } = page.pending
     if (fileNames.length === 0 || batchBusy) return
     const { label } = releaseBatchText(
@@ -528,32 +595,55 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     )
     setBatchBusy(true)
     setNote({ text: `正在${label}…`, bad: false })
-    data
-      .downloadReleaseBatch(fileNames, (t) =>
-        setNote({ text: tickText(t), bad: t.stage === 'failed' }),
+    /* 逐份结局收成一个口子：主句说总数、明细一行一份（两条管道共用同一句话） */
+    const report = (outcomes: DownloadOutcome[], doneText: string) => {
+      const bad = outcomes.filter((o) => !o.ok)
+      const done = outcomes.length - bad.length
+      setNote(
+        bad.length === 0
+          ? { text: `${label}完成：${done} 份${doneText}`, bad: false }
+          : {
+              text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
+              bad: true,
+              lines: bad.map(outcomeText),
+            },
       )
-      .then(
-        (outcomes) => {
-          const bad = outcomes.filter((o) => !o.ok)
-          const done = outcomes.length - bad.length
-          setNote(
-            bad.length === 0
-              ? { text: `${label}完成：${done} 份都落进下载区了`, bad: false }
-              : {
-                  text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
-                  bad: true,
-                  lines: bad.map(outcomeText),
-                },
-          )
-        },
-        (e: unknown) => {
-          setNote({
-            text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
-            bad: true,
-          })
-        },
-      )
-      .finally(() => setBatchBusy(false))
+    }
+    try {
+      if (page.kind === 'mkp') {
+        /*
+         * MKP 云端那一批：逐份「取回 + 落工作副本」—— 与单行那颗「下载 / 更新」同一条路
+         * （不是下载区那一条：这一档的用户世界里只有 `presets-mine/` 里那一份）。
+         * 一份失败不拖累别人：单独 catch 成一条 `ok: false`，照实列出来。
+         */
+        const outcomes: DownloadOutcome[] = []
+        for (const fileName of fileNames) {
+          try {
+            const done = await data.fetchOfficial(fileName)
+            outcomes.push({
+              fileName,
+              ok: true,
+              message: done.created ? '已落成你的一份' : '你那份本来就在，一个字节没动',
+            })
+          } catch (e: unknown) {
+            outcomes.push({ fileName, ok: false, message: errorText(e) })
+          }
+        }
+        report(outcomes, '都取到本机了（落成你的一份）')
+      } else {
+        const outcomes = await data.downloadReleaseBatch(fileNames, (t) =>
+          setNote({ text: tickText(t), bad: t.stage === 'failed' }),
+        )
+        report(outcomes, '都落进下载区了')
+      }
+    } catch (e: unknown) {
+      setNote({
+        text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
+        bad: true,
+      })
+    } finally {
+      setBatchBusy(false)
+    }
   }
 
   /**
@@ -609,14 +699,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   /**
    * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 两条线**同一个入口**（与「应用」同一形状）：官方线交文件名、用户线还要交路径
-   * （用户目录里可以自己分文件夹）。前置条件全在后端拦 —— 这里不重复判断。
-   * 同一份的草稿还在的话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
+   * **编辑的对象只有「我的预设」**（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
+   * 要改它先在云端「下载」一份自己的（所以这里固定走 mine 线）。
+   * 前置条件全在后端拦（认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的
+   * 话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
     setViewer(null)
-    data.beginEdit(row.fileName, row.origin === 'mine' ? 'mine' : 'official', row.path).then(
+    data.beginEdit(row.fileName, 'mine', row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
         setEditing({
@@ -661,35 +752,24 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     return () => window.clearTimeout(timer)
   }, [data, editing])
 
-  /** 放弃这次编辑：丢草稿（官方原件与下载区全程没被碰过，所以它天生安全） */
+  /** 放弃这次编辑：丢草稿（原文件与下载区全程没被碰过，所以它天生安全） */
   const discardEdit = () => {
     data.discardDraft().then(
       () => {
         setEditing(null)
-        setNote({ text: '已放弃这次编辑 —— 官方原件从头到尾没有被改过', bad: false })
+        setNote({ text: '已放弃这次编辑 —— 你的那份从头到尾没有被改过', bad: false })
       },
       (e: unknown) =>
         setNote({ text: `放弃不了：${errorText(e)}`, bad: true }),
     )
   }
 
-  /**
-   * 保存：官方线**另存**进 `presets-mine/`（本地表跟着多出那一份）；
-   * 用户线**写回它自己**（第八层：同一个文件，不会多出一份）。
-   */
+  /** 保存：**写回它自己**（第八层：同一个文件，不会多出一份） */
   const commitEdit = () => {
-    const mine = editing?.origin === 'mine'
     data.commitDraft().then(
       (done) => {
         setEditing(null)
-        setNote({
-          text: mine
-            ? MINE_EDIT_TEXT.savedBack(done.fileName, done.path)
-            : done.replaced
-              ? EDIT_TEXT.savedAgain(done.fileName)
-              : EDIT_TEXT.saved(done.fileName, done.path),
-          bad: false,
-        })
+        setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
       },
       (e: unknown) =>
         setNote({
@@ -735,23 +815,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       return
     }
     setNaming({ ...naming, busy: true, error: null })
+    const kind = naming.kind
     const ask =
-      naming.kind === 'rename'
+      kind === 'rename'
         ? data.rename(naming.row.path, name)
-        : naming.row.origin === 'release'
-          ? /* 官方交付行（UX 测试 A1 的正路）：可信字节直接复制成你自己的一份 */
-            data.copyReleaseAsNew(naming.row.fileName, name)
-          : data.copyAsNew(naming.row.path, name)
+        : data.copyAsNew(naming.row.path, name)
     ask.then(
       (done) => {
         setNaming(null)
         setNote({
           text:
-            naming.kind === 'rename'
+            kind === 'rename'
               ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : naming.row.origin === 'release'
-                ? `已另存为一份新的：${done.fileName}（${done.path}）—— 官方原件一个字节没动，身世（机型 / 版本）跟着来源走了`
-                : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
           bad: false,
         })
       },
@@ -765,9 +841,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（真删）；官方交付行走交付线
-   * （删了回「未下载」，随时可从云端重下）。二次确认长在菜单里（`danger` + `confirm`）；
-   * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
+   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（**真删除**）；
+   * 切片器交付行走交付线（删了回「未下载」，随时可从云端重下）。
+   * 二次确认长在菜单里（`danger` + `confirm`）；正在使用 / 有草稿不再拦 ——
+   * 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
@@ -833,7 +910,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /*
-   * **改备注**（2026-10-07 副标题覆盖账）：写完说一句。失败照实说 ——
+   * **改备注**（2026-10-07 副标题覆盖账；只有本地表的行有这个入口 ——
+   * 云端行只读工作台那句）：写完说一句。失败照实说 ——
    * 覆盖账是用户根下的一本小 JSON，写失败多半是盘的事，别吞。
    */
   const runSetRemark = (key: string, remark: string | null) =>
@@ -842,7 +920,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         setNote({
           text:
             remark === null
-              ? '已恢复默认备注 —— 回到工作台写的那句（没写就显示路径）'
+              ? '已恢复默认备注 —— 回到工作台写的那句（没写就空着）'
               : remark === ''
                 ? '备注已保存 —— 副标题留空（写什么就是什么，不回退）'
                 : '备注已保存 —— 以后更新不会覆盖它',
@@ -881,16 +959,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 真后端还会多两种（切片器路径没配、目标已存在）。不吞、不假装成功。
    */
   const runLive = (row: PresetLocalRow) => {
-    /* 切片器：照旧走契约那一个写（假后端内存，刷新还原），成功要发提示条 */
+    /*
+     * 切片器：复制进切片器自己的用户配置目录（真机落盘）。**键是文件名** ——
+     * 下载 / 应用 / 读正文同一个取用口径。成功要发提示条（行上的「已复制」只说状态、
+     * 不说去了哪）；失败照抛出来说（不是切片器配置 / 本机没那份字节 / 目标已有同名）。
+     */
     if (page.kind !== 'mkp') {
-      const slicerId = row.assetId
-      if (slicerId === undefined) return /* 到不了这里：切片器行必有 asset id */
       setBusyKey(row.rowKey)
-      data.copy(slicerId).then(
+      data.copy(row.fileName).then(
         () => {
           setBusyKey(null)
           setNote({
-            text: `已复制 ${row.fileName} 到切片器目录（假后端只改内存，刷新会还原）`,
+            text: `已复制 ${row.fileName} 到切片器目录 —— 切片器里现在能选到它了`,
             bad: false,
           })
         },
@@ -945,6 +1025,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
+   * **本地表那一行的动作：使用**（2026-10-09）—— 把这一份设为当前生效。
+   *
+   * MKP 本地表里只有 `presets-mine/` 那几行（你自己那份工作副本），所以这一条就是
+   * 用户线那个写口（认路径、不查 SHA），与「应用」同一个底账。
+   * **不用发网络**：字节在你盘上（要拿官方新版是云端表「更新」那件事）。
+   * 上一版那条"官方行也能点使用、后端按需取回"的路已经退场 —— 官方原件不进这张表了。
+   */
+  const runUse = (row: PresetLocalRow) => {
+    setBusyKey(row.rowKey)
+    data.apply(row.fileName, 'mine', row.path).then(
+      () => {
+        setBusyKey(null)
+        setNote({ text: `已使用 ${row.fileName}`, bad: false })
+      },
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `使用失败：${errorText(e)}`, bad: true })
+      },
+    )
+  }
+
+  /**
    * 「在 BBS 预设查看器中打开」的判据。
    *
    * 只看两件事：**是 BBS 工艺 profile**（`kind === 'bbs_profile'`）、**文件名是 .json**。
@@ -973,63 +1075,47 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
   /**
    * 「重命名」为什么不能点（第十层）。只有**我的文件**能改 ——
-   * 官方线那两份各有各的原因，都要说出来（灰一个项不说为什么，用户只会以为坏了）。
+   * 灰一个项不说为什么，用户只会以为坏了。
    */
-  const renameWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    return row.origin === 'release'
-      ? '官方交付那份不能改名 —— 下载 / 应用 / 读正文都认目录登记的文件名；要改内容用「改这份」另存出你自己的一份'
-      : '官方文件不能改名，复制一份再改'
-  }
+  const renameWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '只有「我的文件」能改名（只动名字、字节一个不动）—— 官方那份不归你改名'
 
   /**
-   * 「另存为一份新的」为什么不能点（UX 场景测试 A1 的正路，作者 2026-10-06 定案）：
+   * 「另存为一份新的」为什么不能点（第十一层）：
    *
-   * - **我的文件**：本来就开放（第十一层，我的 → 我的）；
-   * - **官方交付行**：`releaseState === 'ok'` 的 MKP 预设**放开** —— 可信字节直接复制，
-   *   不再绕「改这份」→ 保存（"改了再保存"与"不改直接复制"落的是同一种东西）；
-   * - 内容存疑的两档（旧版本 / 内容异常）仍由 `suspect` 那一句拦（这里到不了）；
-   * - 切片器交付行不放开：它们不是 TOML 预设，自有「复制到切片器目录」那条路；
-   * - 官方仓库文件（图标等）：不在此列。
+   * - **我的文件**：本来就开放（我的 → 我的，按字节复制、血统原样带过去）；
+   * - 其余（切片器交付行 / 官方仓库文件）：不是"我的文件"，另行处置 ——
+   *   切片器自有「复制到切片器目录」那条路。
    */
-  const copyWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    if (row.origin === 'release') {
-      if (row.kind !== 'mkp_preset') {
-        return '这份是切片器工艺配置 —— 「复制」（复制到切片器目录）才是它的动作，另存成「我的文件」用不上'
-      }
-      return row.releaseState === 'ok'
-        ? undefined
-        : '这一份还没下载到本机 —— 先下载，下载好了才能另存成你自己的一份'
-    }
-    return '官方仓库文件不在这里另存 —— 能另存的是已下载到本机的 MKP 预设与「我的文件」'
-  }
+  const copyWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '只有「我的文件」能另存为一份新的 —— 官方那份不归你复制'
 
   /**
    * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
-   * 官方那两份住在程序自己管的下载区（本地表），或者根本还没下载（仓库表）。
+   * 官方那份住在程序自己管的区域，或者根本还没下载（仓库表）。
    */
-  const revealWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin === 'mine') return undefined
-    return row.scope === 'local'
-      ? '官方那份住程序自己管的下载区 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
-      : '官方原件还没下载到本机 —— 没有能显示的地方'
-  }
+  const revealWhyNot = (row: PresetTableRow): string | undefined =>
+    row.origin === 'mine'
+      ? undefined
+      : '住在程序自己管理的区域 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
 
   /**
    * 「删除」对哪几行给。**一切皆可删**（作者裁决 2026-10-06，此前拦得太死）：
    *
-   * - 官方交付行：删了回到「未下载」，随时可从云端重新下载（字节有目录 SHA 锚定，
-   *   零数据损失）—— 此前"对不上目录用「更新」修"说的是修法，不是禁删的理由；
-   * - 我的文件：本来就真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
+   * - 我的文件：真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
    *   （悬空的「使用中」比「没在用」糟），有草稿的连草稿一起丢，确认框讲清；
-   * - 官方仓库文件的本地副本仍不给删（它们走资源那一套命令，删了不是"重下"一条路）；
+   * - 切片器交付行：删了回到「未下载」，随时可从云端重新下载；
+   * - 官方仓库文件（切片器仓库行）的本地副本不给删（它们走资源那一套命令）；
    * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   const removeWhyNot = (row: PresetTableRow): string | undefined =>
     row.origin === 'official'
-      ? '官方文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
+      ? '官方仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
@@ -1045,23 +1131,91 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       : '这是你自己的文件，删了就没了 —— 程序没有垃圾桶、也没有归档（删掉就是真删掉）。'
   }
 
+  /**
+   * **「打开参数」为什么不给点**（2026-10-09）。
+   *
+   * 参数表画哪些项、怎么分组，全由**这一份自己的归属**（文件头 `# machine:` /
+   * `# variant:` 那两行）决定 —— 标不出机型 / 版本时就没有字段表可画。
+   * 读不出来的那份同理（先修好它）。灰一个项不说为什么，用户只会以为坏了。
+   */
+  const paramsWhyNot = (row: PresetTableRow): string | undefined => {
+    if (row.origin !== 'mine') {
+      return '只有「我的」那一份能这样打开参数 —— 官方那一份是模板，先用「使用」取一份自己的'
+    }
+    if (row.kind !== 'mkp_preset') return MINE_NOT_PRESET_WHY
+    if (row.mineState === 'unreadable') return mineUnreadableWhy(row.mineStateDetail)
+    if (row.scope !== 'local') return '这一行不在本机'
+    if (row.ownMachineId === null || row.ownMachineId === undefined) {
+      return '这一份没标机型 —— 先在详情里「改归属」，参数表才知道该画哪些项'
+    }
+    if (row.ownVersionId === null || row.ownVersionId === undefined) {
+      return '这一份没标版本 —— 先在详情里「改归属」'
+    }
+    return undefined
+  }
+
+  /**
+   * 打开某一份预设的参数（模态框）。里面就是**参数页本身** —— 一件组件不改、一个样式不换，
+   * 只是钉死编辑对象：用户点的是哪一份，改的就是哪一份。
+   *
+   * 与「改这份」（改正文那个纯文本编辑器）是两件事，两份都在菜单上：
+   * 那个改的是 TOML 正文，这个改的是参数表。
+   */
+  const openParams = (row: PresetTableRow, syncFirst: boolean) => {
+    menu.close()
+    if (paramsWhyNot(row) !== undefined) return
+    if (row.scope !== 'local') return
+    const machineId = row.ownMachineId
+    const versionId = row.ownVersionId
+    if (machineId === null || machineId === undefined) return
+    if (versionId === null || versionId === undefined) return
+    setViewer(null)
+    setEditing(null)
+    setNaming(null)
+    setParamModal({
+      target: { path: row.path, fileName: row.fileName, machineId, versionId },
+      syncFirst,
+    })
+  }
+
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
-    /* 云端表：**没有删除** —— 客户端不能删仓库里的东西 */
+    /*
+     * 云端表：**只有"把官方的取到我机器上"** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
+     *
+     * ★ 作者 2026-10-08 把它定死了：「云端的不管它删除下载……这云端就是云端的，
+     * 就是一个列表啊，你就把它想象成一份那个下载的列表啊，就像你去浏览器下东西一样，
+     * 别人只是让你下载，你都不能修改人家的东西好不好」。
+     * （同一天上午这里短暂挂过一颗「删除本机这份」—— 那是把"我这一侧"的事混进了
+     * 云端表，作者当天就否了。要删自己那份副本，去**本地表**；要删下载区那份官方副本，
+     * 那是本地表里切片器那一档的事。**云端表一味只读**。）
+     *
+     * 2026-10-09 起 MKP 档那一项按**三态**给词（下载 / 更新 / 本地已有不给动作），
+     * 判据与操作列那颗按钮同一条（`localState` / `CLOUD_LOCAL_ACTION`）——
+     * "为什么"在状态列与这一项的 title 里说。
+     */
     if (row.scope === 'cloud') {
-      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
+      const localState = row.localState
+      const label =
+        localState !== undefined
+          ? (CLOUD_LOCAL_ACTION[localState] ?? CLOUD_LOCAL_TEXT[localState])
+          : UPDATE_ACTION_TEXT.missing
+      const whyNot =
+        localState !== undefined && CLOUD_LOCAL_ACTION[localState] === null
+          ? CLOUD_LOCAL_WHY[localState]
+          : undefined
       return [
         {
           id: 'download',
-          /* 盘上那一份不对劲时这一项换词：同一条管道，云端有更新就说「更新」（与按钮一致） */
-          label: updating ? '更新' : '下载',
+          label,
+          disabled: whyNot,
           onSelect: () => download(row),
         },
         {
           id: 'link',
           label: '复制链接',
-          onSelect: () => sayNoContract(row),
+          onSelect: () => copyLink(row),
         },
         { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
         bbsEntry(row),
@@ -1069,14 +1223,100 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
-     * 临时编辑的入口（两条线）：
-     * 交付行只有"与目录一致"的那一份有（它才有正文可改，且内容不存疑）；
-     * 我自己那份：认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
+     * **MKP 本地表那一行**（2026-10-09）：这一档只有你自己那份工作副本，菜单照旧围绕它 ——
+     *
+     *   使用                             把它设为当前生效（与操作列那颗按钮是同一个动作）
+     *   打开参数 / 选择要跟随的官方更新   参数表那一屏（官方更新也在这里处理）
+     *   改这份 / 另存 / 改名 / 显示 / 删除  原「我的文件」那一套
+     *
+     * （官方那一行**不在这张表里** —— 官方原件是内部数据，它的取用在云端表「下载 / 更新」。）
+     */
+    if (row.scope === 'local' && page.kind === 'mkp') {
+      /*
+       * 「使用」为什么不能点：与操作列**同一套判据**（认不出是 MKP 预设的 `.json`、
+       * 第九层读不出来的）—— 菜单里给一个点了必报错的项，与按钮同罪。
+       * 已经在用的那一份也不给"再点一次"的空动作（它已经在用了）。
+       */
+      const useWhyNot =
+        row.origin !== 'mine'
+          ? undefined
+          : row.kind !== 'mkp_preset'
+            ? MINE_NOT_PRESET_WHY
+            : row.mineState === 'unreadable'
+              ? mineUnreadableWhy(row.mineStateDetail)
+              : undefined
+      const useEntry: ContextMenuEntry = {
+        id: 'use',
+        label: ASSET_USE_TEXT[row.live ? 'on' : 'off'],
+        disabled: row.live ? ASSET_USE_WHY.on : useWhyNot,
+        onSelect: () => runUse(row),
+      }
+      const detailEntry: ContextMenuEntry = {
+        id: 'detail',
+        label: '查看详情',
+        onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)),
+      }
+      return [
+        useEntry,
+        /* 参数表那一屏（2026-10-09）：改的是参数本身，官方更新也在这里处理 */
+        {
+          id: 'params',
+          label: '打开参数',
+          disabled: paramsWhyNot(row),
+          onSelect: () => openParams(row, false),
+        },
+        {
+          id: 'paramsSync',
+          label: '选择要跟随的官方更新',
+          disabled: paramsWhyNot(row),
+          onSelect: () => openParams(row, true),
+        },
+        ...(row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+          ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
+          : []),
+        {
+          id: 'copy',
+          label: '另存为一份新的',
+          disabled: copyWhyNot(row),
+          onSelect: () => openCopyAs(row),
+        },
+        {
+          id: 'rename',
+          label: '重命名',
+          disabled: renameWhyNot(row),
+          onSelect: () => openRename(row),
+        },
+        {
+          id: 'reveal',
+          label: REVEAL_LABEL,
+          disabled: revealWhyNot(row),
+          onSelect: () => runReveal(row),
+        },
+        { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+        detailEntry,
+        bbsEntry(row),
+        { separator: true },
+        {
+          id: 'remove',
+          label: '删除',
+          danger: true,
+          disabled: removeWhyNot(row),
+          confirm: {
+            question: `删除 ${row.fileName}？`,
+            detail: removeConfirmDetail(row),
+          },
+          onSelect: () => runRemove(row),
+        },
+      ]
+    }
+
+    /*
+     * 临时编辑的入口：**只有用户的工作副本**（本地表 MKP 档只列它；
+     * 认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
     const canEdit =
-      (row.origin === 'release' && row.kind === 'mkp_preset' && row.releaseState === 'ok') ||
-      (row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable')
+      row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
@@ -1092,13 +1332,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       {
         id: 'copy',
         label: '另存为一份新的',
-        /*
-         * 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
-         * **官方交付行也开放了**（UX 测试 A1 的正路，作者 2026-10-06 定案）：
-         * release + ok 的 MKP 预设直接另存成你自己的一份（`copyReleaseAsNew`）。
-         * 内容存疑的那两档（旧版本 / 内容异常）仍不许 —— 字节我们不认，
-         * 不能让它换个名字继续活着（第三圈第 6 层）—— 那一句优先。
-         */
+        /* 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
+           其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => openCopyAs(row),
       },
@@ -1123,8 +1358,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         id: 'remove',
         label: '删除',
         danger: true,
-        /* 一切皆可删（2026-10-06）：官方交付删了可重下；我的文件真删；
-           正在使用的那份删掉时后端会一并撤下使用 —— 代价在确认框里说清 */
+        /* 我的文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
+           —— 代价在确认框里说清 */
         disabled: removeWhyNot(row),
         confirm: {
           question: `删除 ${row.fileName}？`,
@@ -1175,7 +1410,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 比切换器小」）。
    */
   const searchNode = (
+    /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
     <div className={s.search}>
+
       <input
         className={s.input}
         value={page.query}
@@ -1211,18 +1448,31 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
 
   /*
-   * 「共 N 项」+ 仓库台账（G07-1 的 4 号：住页脚，与右键提示同行；
-   * compact / mini 的 MKP 档由工具栏渲染这一份，页脚那份不画 —— 见 .foot 的说明）。
+   * 「共 N 项」+ 台账（MKP 档恒住工具栏第二排；切片器档住页脚，与右键提示同行）。
    * **包成一个不拆分的整体** —— 窄窗折行时两样一起走，台账的竖线永远不会落单
    * （作者圈过那半截孤线）。
    *
-   * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
-   * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
-   * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
+   * 「共 N 项」= **当前这张表**（本地 / 云端）筛后的行数 —— 眼前只有一张表，
+   * 报另一张表的数只会让人去对一个看不见的东西。
+   *
+   * 台账是可数的全局事实，**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
+   * 全 catalog 数字不应该混在当前类型的业务语境里」）：
+   *
+   *   MKP     「官方（目录里登记的 MKP 预设，全机型）· 我的（你有几份工作副本）」
+   *           —— 官方的取用（下载 / 更新）在云端表、使用在本地表，这一格说的是
+   *           "一共多少"，与当前看哪张表无关
+   *   切片器   「仓库（这一档全机型的官方文件）· 本机（官方副本总数）· 我的」
+   *
    * 图标 / 模型不归这一页，哪个数里都不含它们。
-   * 「本机」仍是官方副本的总数：它是老契约 getLocalFiles 的读数（演示集合，
-   * 真机上还没接），id 集合分不出类型，先如实写全量。
    */
+  const mineCount = mineCountOfAxis(data.mine, page.kind)
+  /*
+   * MKP 台账里的「官方」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
+   * 与切片器那档的「仓库」是同一个口径（台账说全集，表格说这一档机型）。
+   */
+  const assetOfficialCount = data.release.presets.filter(
+    (p) => p.kind === 'mkp_preset',
+  ).length
   const metaNode = (
     <span className={s.meta}>
       <span
@@ -1233,10 +1483,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       </span>
       <span
         className={s.ledger}
-        title={`仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`}
+        title={
+          page.kind === 'mkp'
+            ? `MKP 台账：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己那份工作副本，扫 presets-mine）。` +
+              `官方的取用在云端表那一行（下载 / 更新 = 取回 + 落一份你的），使用在本地表那一行 —— 两件事不在同一张表上。`
+            : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）`
+        }
       >
-        仓库 {treeCountOfAxis(data.tree, page.kind)} · 本机 {data.localIds.length} + 我的{' '}
-        {mineCountOfAxis(data.mine, page.kind)}
+        {page.kind === 'mkp' ? (
+          <>
+            官方 {assetOfficialCount} · 我的 {mineCount}
+          </>
+        ) : (
+          <>
+            仓库 {treeCountOfAxis(data.tree, page.kind)} ·{' '}
+            <>
+              本机 {data.localIds.length} + 我的 {mineCount}
+            </>
+          </>
+        )}
       </span>
     </span>
   )
@@ -1283,6 +1548,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 machineId={data.machineId}
                 onPick={pickMachine}
               />
+              <button
+                type="button"
+                className={s.chip}
+                title="对比台：选 2~3 份「我的预设」，同一项并排看、可以直接改。只在你自己那几份之间比 —— 官方那份（隐藏基线）不进这张台子"
+                onClick={() => setCompareOpen(true)}
+              >
+                参数对比
+              </button>
               {metaNode}
             </>
           ) : (
@@ -1418,8 +1691,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             <>
               {/*
                * 批量那一行：只在**云端表**、且这一批非空时出现。
-               * 为什么在云端表：那里说的是"目录里有什么、你缺什么"，批量正是补这里；
-               * 本地表说的是"我机器上有什么"（需更新那几份已经各带一颗「更新」）。
+               * 为什么在云端表：那里说的是"官方有什么、我缺什么"，批量正是补这里 ——
+               * MKP 档逐份「取回 + 落工作副本」、切片器档逐份落下载区 `mkp/`。
+               * 本地表说的是"我机器上有什么"，那是另一件事。
                * 为什么敢占一行高度：它的数**与眼前这张表同口径**（当前机型 + 这一档类型），
                * 而且带着动作 —— 不是那种"别处还有个数字"的噪音（那种以前删过）。
                */}
@@ -1433,7 +1707,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                     className={s.batchBtn}
                     disabled={batchBusy}
                     title={batch.why}
-                    onClick={runBatch}
+                    onClick={() => void runBatch()}
                   >
                     {batchBusy ? '处理中…' : batch.label}
                   </button>
@@ -1512,6 +1786,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onOpenMine={openMine}
                 onEdit={openEdit}
                 onLive={runLive}
+                /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份工作副本 */
+                onUse={runUse}
                 onDownload={download}
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
@@ -1659,31 +1935,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           </Drawer>
 
           {/*
+           * **参数对比台**（2026-10-08）：一个独立常驻工具，只在**用户自己的本地预设**
+           * 之间比。挂在 `.main` 里（与抽屉同一条规矩）：遮罩只盖内容区。
+           * **官方那份（隐藏 baseline）不进这张台子** —— 它是系统内部的东西，不是给用户比的。
+           */}
+          <CompareModal
+            open={compareOpen}
+            files={compareFiles}
+            onClose={() => setCompareOpen(false)}
+            onSaved={(text) => setNote({ text, bad: false })}
+          />
+
+          {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
-           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存」。
+           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
            *
-           * 两条线共用这一个抽屉，只有两句话不同（保存成什么、保存到哪）：
-           * 官方线「保存为用户文件」= 另存一份新的；用户线「保存回我这份」= 写回它自己。
+           * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（官方那一份是模板），
+           * 所以这里只有一套说法：保存 = 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
            * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
            */}
           <Drawer
             open={editing !== null}
-            title={editing?.origin === 'mine' ? MINE_EDIT_TEXT.title : EDIT_TEXT.title}
-            subtitle={
-              editing === null
-                ? undefined
-                : /* 用户线说落点（他自己可能分了文件夹）：官方线只说文件名 */
-                  (editing.path ?? editing.sourceFileName)
-            }
+            title={EDIT_TEXT.title}
+            subtitle={editing === null ? undefined : (editing.path ?? editing.sourceFileName)}
             footer={
               <>
                 <button type="button" className={s.editGhost} onClick={discardEdit}>
                   {EDIT_TEXT.discard}
                 </button>
                 <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                  {editing?.origin === 'mine' ? MINE_EDIT_TEXT.commit : EDIT_TEXT.commit}
+                  {EDIT_TEXT.commit}
                 </button>
               </>
             }
@@ -1691,9 +1974,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           >
             {editing !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>
-                  {editing.origin === 'mine' ? MINE_EDIT_TEXT.note : EDIT_TEXT.note}
-                </p>
+                <p className={s.editNote}>{EDIT_TEXT.note}</p>
                 {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
                 <textarea
                   className={s.editArea}
@@ -1725,7 +2006,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
            */}
           <Drawer
             open={naming !== null}
-            title={naming?.kind === 'copy' ? MINE_COPY.title : MINE_RENAME.title}
+            title={naming === null ? MINE_RENAME.title : NAMING_TEXT[naming.kind].title}
             subtitle={naming?.row.path}
             footer={
               <>
@@ -1738,7 +2019,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                   disabled={naming?.busy === true}
                   onClick={submitNaming}
                 >
-                  {naming?.kind === 'copy' ? MINE_COPY.commit : MINE_RENAME.commit}
+                  {naming === null ? MINE_RENAME.commit : NAMING_TEXT[naming.kind].commit}
                 </button>
               </>
             }
@@ -1746,13 +2027,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           >
             {naming !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>
-                  {naming.kind === 'copy'
-                    ? naming.row.origin === 'release'
-                      ? RELEASE_COPY.note
-                      : MINE_COPY.note
-                    : MINE_RENAME.note}
-                </p>
+                <p className={s.editNote}>{NAMING_TEXT[naming.kind].note}</p>
                 {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
                   <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
                 )}
@@ -1774,7 +2049,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 />
                 {naming.error !== null && (
                   <p className={s.editErr}>
-                    {naming.kind === 'copy' ? '没另存成：' : '没改成：'}
+                    {naming.kind === 'rename' ? '没改成：' : '没另存成：'}
                     {naming.error}
                   </p>
                 )}
@@ -1792,13 +2067,39 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         <div className={s.foot}>
           {!page.unsupported && (
             <span className={s.footHint}>
-              右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）
+              {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于我的文件的话 */}
+              {page.kind === 'mkp'
+                ? page.scope === 'cloud'
+                  ? '右键任意一行还有下载 / 更新 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                  : '右键任意一行还有使用 / 打开参数 / 官方更新 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                : '右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'}
             </span>
           )}
           {page.kind === 'slicer' && metaNode}
         </div>
 
         <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />
+
+        {/*
+         * **那一份预设的参数**（2026-10-09）。里面就是参数页本身。
+         *
+         * ★ 挂在**这一页的 `.page` 那一层**（不是 `.main` 里）：`.page` 是定位祖先，
+         *   Modal 的遮罩是 `absolute inset: 0` —— 于是它正好铺满"顶栏页签以下整块"
+         *   （从工具条一直到底部页脚）。里面那套参数编辑器有自己的头 / 可滚的中间 /
+         *   钉住的底栏，一个字节不改（见 `PresetParamsModal`）。
+         *   宿主层只负责定位与层高（`s.paramsLayer`），遮罩本体仍是 Modal 的 `.scrim`。
+         */}
+        <div className={s.paramsLayer}>
+          <PresetParamsModal
+            open={paramModal !== null}
+            density={density}
+            target={
+              paramModal?.target ?? { path: '', fileName: '', machineId: '', versionId: '' }
+            }
+            openSyncOnStart={paramModal?.syncFirst ?? false}
+            onClose={() => setParamModal(null)}
+          />
+        </div>
       </FieldLayer>
 
       {/* 「定位」的闪烁层：盖在被定位那一行上的普通 div，位置尺寸由 locateApplied

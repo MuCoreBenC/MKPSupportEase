@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SupportEase 预设</title>
+<style>
+  :root{
+    --bg:#f5f6f7;
+    --panel:#ffffff;
+    --border:#e5e7e9;
+    --border-strong:#d5d8db;
+    --text:#1b1d1f;
+    --muted:#6c7175;
+    --faint:#9aa0a5;
+    --green:#1f7a4d;
+    --green-bg:#eef7f1;
+    --green-border:#d2e9dc;
+    --amber:#8a6212;
+    --amber-bg:#fdf7ea;
+    --amber-border:#eee0c2;
+    --radius:6px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit;font-size:13px;cursor:pointer;}
+
+  /* ---------- top bar ---------- */
+  .topbar{background:var(--panel);border-bottom:1px solid var(--border);}
+  .topbar-inner{
+    max-width:1080px;margin:0 auto;padding:14px 24px;
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+  }
+  .brand-title{font-size:15px;font-weight:600;letter-spacing:.01em;}
+  .brand-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+
+  .page{max-width:1080px;margin:0 auto;padding:22px 24px 64px;}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    background:#fff;border:1px solid var(--border-strong);color:var(--text);
+    border-radius:var(--radius);padding:6px 12px;line-height:1.4;
+  }
+  .btn:hover{background:#fafbfb;border-color:#c4c8cb;}
+  .btn-primary{background:#1b1d1f;border-color:#1b1d1f;color:#fff;}
+  .btn-primary:hover{background:#33373a;border-color:#33373a;}
+  .btn-link{
+    background:none;border:none;padding:0;color:var(--green);
+    font-size:12px;text-decoration:underline;text-underline-offset:2px;
+  }
+  .btn-link:hover{color:#155c39;}
+  .btn-link.is-amber{color:var(--amber);}
+  .btn-link.is-amber:hover{color:#6b4c0e;}
+
+  /* ---------- banner ---------- */
+  .banner{
+    display:flex;align-items:flex-start;gap:10px;
+    background:var(--green-bg);border:1px solid var(--green-border);
+    border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;
+    color:#2b4a38;font-size:13px;
+  }
+  .banner.is-amber{background:var(--amber-bg);border-color:var(--amber-border);color:#5f470f;}
+  .banner-text{flex:1;min-width:0;}
+  .banner-actions{display:flex;align-items:center;gap:14px;flex:none;}
+  .banner .banner-close{
+    background:none;border:none;color:#5d7a68;font-size:14px;
+    line-height:1;padding:2px 4px;flex:none;
+  }
+  .banner.is-amber .banner-close{color:#8a7340;}
+
+  /* ---------- summary ---------- */
+  .summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:22px;}
+  .summary-box{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:13px 16px;
+  }
+  .summary-box.is-amber{border-color:var(--amber-border);}
+  .summary-label{font-size:12px;color:var(--muted);}
+  .summary-name{font-size:14px;font-weight:600;margin:3px 0 6px;}
+  .summary-line{font-size:12.5px;color:var(--muted);}
+  .summary-line .strong{color:var(--text);font-weight:500;}
+  .summary-line.is-amber{color:var(--amber);}
+
+  /* ---------- sections ---------- */
+  .section{margin-bottom:26px;}
+  .section-title{
+    font-size:12px;font-weight:600;color:var(--muted);
+    letter-spacing:.04em;margin:0 0 10px;
+  }
+
+  /* ---------- preset card ---------- */
+  .preset-card{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:15px 18px;display:flex;align-items:center;gap:16px;
+  }
+  .preset-card.is-amber{border-color:var(--amber-border);}
+  .preset-main{flex:1;min-width:0;}
+  .preset-name{font-size:15px;font-weight:600;}
+  .preset-meta{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .preset-meta.is-amber{color:var(--amber);}
+  .preset-actions{display:flex;align-items:center;gap:12px;flex:none;}
+
+  /* ---------- chips ---------- */
+  .chip{
+    display:inline-block;font-size:12px;line-height:18px;padding:0 8px;
+    border-radius:4px;border:1px solid transparent;white-space:nowrap;
+  }
+  .chip-follow{background:#f4f5f6;border-color:#e6e8ea;color:var(--muted);}
+  .chip-modified{background:var(--green-bg);border-color:var(--green-border);color:var(--green);font-weight:500;}
+  .chip-frozen{background:#f4f5f6;border-color:#e0e2e4;color:#5b6064;font-weight:500;}
+  .chip-updated{background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber);font-weight:500;}
+  .chip-inuse{background:var(--green-bg);border-color:var(--green-border);color:var(--green);border-radius:999px;}
+  .chip-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+
+  /* ---------- dev panel ---------- */
+  .dev{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px 18px;
+  }
+  .dev-version{font-size:12.5px;color:var(--muted);margin-bottom:12px;}
+  .dev-version .strong{color:var(--text);font-weight:600;}
+  .dev-btns{display:flex;flex-wrap:wrap;gap:8px;}
+
+  /* ---------- edit view ---------- */
+  .edit-head{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+    margin-bottom:16px;
+  }
+  .edit-title{font-size:16px;font-weight:600;}
+  .edit-meta{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .edit-meta .is-amber{color:var(--amber);}
+  .edit-head-actions{display:flex;align-items:center;gap:10px;flex:none;}
+
+  .edit-body{display:grid;grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:start;}
+
+  .edit-nav{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:8px;position:sticky;top:16px;
+  }
+  .nav-item{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;
+    background:none;border:none;border-radius:4px;padding:6px 9px;text-align:left;
+    color:var(--text);font-size:13px;
+  }
+  .nav-item:hover{background:#f5f6f7;}
+  .nav-item.active{background:#eef0f1;font-weight:600;}
+  .nav-item .count{font-size:11.5px;color:var(--faint);font-weight:400;}
+  .nav-item.active .count{color:var(--muted);}
+  .nav-item.has-alert{color:var(--amber);}
+  .nav-item.has-alert .count{color:var(--amber);font-weight:600;}
+  .nav-sep{height:1px;background:var(--border);margin:8px 4px;}
+
+  .param-list{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;
+  }
+  .param-list-head{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:11px 16px;border-bottom:1px solid var(--border);
+    font-size:12px;color:var(--muted);
+  }
+  .field{
+    display:grid;grid-template-columns:190px 130px minmax(0,1fr);
+    gap:16px;align-items:center;padding:12px 16px;
+    border-bottom:1px solid var(--border);
+  }
+  .field:last-child{border-bottom:none;}
+  .field-label{font-size:13px;color:var(--text);}
+  .field-label .unit{font-size:11.5px;color:var(--faint);margin-left:5px;}
+
+  .field-input input{
+    width:100%;border:1px solid var(--border-strong);border-radius:5px;
+    padding:6px 9px;font-size:13px;font-variant-numeric:tabular-nums;
+    background:#fff;color:var(--text);font-family:inherit;
+  }
+  .field-input input:focus{outline:none;border-color:#9aa0a5;box-shadow:0 0 0 2px rgba(27,29,31,.06);}
+  .field.is-modified .field-input input{border-color:var(--green-border);background:#fbfefc;}
+  .field.is-modified .field-input input:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(31,122,77,.10);}
+  .field.is-updated{background:#fffdf7;}
+  .field.is-updated .field-input input{border-color:var(--amber-border);}
+  .field.is-updated .field-input input:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(138,98,18,.10);}
+
+  .field-side{display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:0;}
+  .official-line{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  .official-line .val{font-variant-numeric:tabular-nums;color:#565b60;}
+  .official-line .mine{color:var(--green);font-weight:500;font-variant-numeric:tabular-nums;}
+  .official-line .arrow{color:var(--amber);font-weight:500;font-variant-numeric:tabular-nums;}
+
+  .empty-note{padding:26px 16px;text-align:center;color:var(--faint);font-size:13px;}
+
+  /* ---------- modal ---------- */
+  .modal-backdrop{
+    position:fixed;inset:0;background:rgba(27,29,31,.34);
+    display:flex;align-items:center;justify-content:center;padding:24px;z-index:50;
+  }
+  .modal{
+    background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;
+    width:100%;max-width:660px;max-height:82vh;display:flex;flex-direction:column;
+    box-shadow:0 12px 32px rgba(0,0,0,.12);
+  }
+  .modal-head{padding:16px 20px 12px;border-bottom:1px solid var(--border);}
+  .modal-title{font-size:15px;font-weight:600;}
+  .modal-sub{font-size:12.5px;color:var(--muted);margin-top:4px;}
+  .modal-sub .strong{color:var(--text);font-weight:500;}
+  .modal-body{overflow:auto;padding:4px 0;}
+  .modal-row{
+    display:grid;grid-template-columns:26px minmax(0,1fr) 190px;
+    gap:12px;align-items:center;padding:11px 20px;
+    border-bottom:1px solid var(--border);
+  }
+  .modal-row:last-child{border-bottom:none;}
+  .modal-row.is-checked{background:#fbfdfb;}
+  .modal-check input{width:15px;height:15px;cursor:pointer;accent-color:#1f7a4d;}
+  .modal-name{font-size:13px;}
+  .modal-name .unit{font-size:11.5px;color:var(--faint);margin-left:5px;}
+  .modal-vals{font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .modal-vals .mine{color:var(--green);font-weight:500;}
+  .modal-vals .val{color:#565b60;}
+  .modal-vals .arrow{color:var(--amber);font-weight:500;}
+  .modal-after{font-size:12px;color:var(--muted);text-align:right;}
+  .modal-after .after-val{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+  .modal-selectbar{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 20px;border-bottom:1px solid var(--border);background:#fafbfb;
+  }
+  .modal-selectbar .modal-check input{width:15px;height:15px;cursor:pointer;accent-color:#1f7a4d;}
+  .modal-selectbar .sel-label{font-size:13px;cursor:pointer;-webkit-user-select:none;user-select:none;}
+  .modal-selectbar .sel-hint{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .modal-foot{
+    padding:12px 20px;border-top:1px solid var(--border);
+    display:flex;justify-content:flex-end;gap:10px;
+  }
+
+  @media (max-width:860px){
+    .summary{grid-template-columns:1fr;}
+    .edit-body{grid-template-columns:1fr;}
+    .edit-nav{position:static;}
+    .field{grid-template-columns:1fr;gap:6px;}
+    .field-side{align-items:flex-start;}
+    .official-line{justify-content:flex-start;}
+    .modal-row{grid-template-columns:26px minmax(0,1fr);}
+    .modal-after{grid-column:2;text-align:left;}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div>
+      <div class="brand-title">SupportEase 预设</div>
+      <div class="brand-sub">官方负责默认值 · 用不用新版由你决定</div>
+    </div>
+    <button class="btn" data-action="reset">重置 Demo</button>
+  </div>
+</header>
+
+<main class="page">
+  <div id="banner-slot"></div>
+  <section id="summary-slot" class="summary"></section>
+
+  <div id="view-list">
+    <section class="section">
+      <h2 class="section-title">我的预设</h2>
+      <div id="preset-slot"></div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">开发者模拟</h2>
+      <div id="dev-slot-list" class="dev-slot"></div>
+    </section>
+  </div>
+
+  <div id="view-edit" hidden>
+    <div id="edit-head-slot"></div>
+    <div class="edit-body">
+      <aside id="edit-nav-slot"></aside>
+      <div id="edit-main-slot"></div>
+    </div>
+    <section class="section" style="margin-top:26px;">
+      <h2 class="section-title">开发者模拟</h2>
+      <div id="dev-slot-edit" class="dev-slot"></div>
+    </section>
+  </div>
+</main>
+
+<div id="modal-slot"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STORAGE_KEY = 'supportease-preset-v5';
+
+  /* =========================================================
+     参数定义（每一行就是「官方默认值」的定义处）
+     ========================================================= */
+  var CORE_DEFS = [
+    { key:'nozzleTemp',       label:'喷嘴温度',   unit:'℃',    cat:'温度', step:1,    dec:0, base:230 },
+    { key:'bedTemp',          label:'热床温度',   unit:'℃',    cat:'温度', step:1,    dec:0, base:60  },
+
+    { key:'speed',            label:'打印速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:320 },
+    { key:'firstLayerSpeed',  label:'首层速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:120 },
+    { key:'bridgeSpeed',      label:'桥接速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:40  },
+    { key:'wallSpeed',        label:'壁速度',     unit:'mm/s', cat:'速度', step:5,    dec:0, base:180 },
+    { key:'infillSpeed',      label:'填充速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:200 },
+    { key:'supportSpeed',     label:'支撑速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:60  },
+
+    { key:'retraction',       label:'回抽距离',   unit:'mm',   cat:'回抽', step:0.01, dec:2, base:0.75 },
+    { key:'retractionSpeed',  label:'回抽速度',   unit:'mm/s', cat:'回抽', step:1,    dec:0, base:35  },
+
+    { key:'lineWidth',        label:'线宽',       unit:'mm',   cat:'挤出', step:0.01, dec:2, base:0.42 },
+    { key:'extrusionRatio',   label:'挤出比例',   unit:'%',    cat:'挤出', step:1,    dec:0, base:98  },
+    { key:'firstLayerHeight', label:'首层高度',   unit:'mm',   cat:'挤出', step:0.01, dec:2, base:0.25 },
+
+    { key:'fan',              label:'风扇',       unit:'%',    cat:'冷却', step:1,    dec:0, base:85  },
+    { key:'acceleration',     label:'加速度',     unit:'mm/s²',cat:'运动', step:100,  dec:0, base:8000 }
+  ];
+
+  /* 「+ 模拟更多参数」展开时追加的参数，用于证明参数数量不影响模型 */
+  var EXTRA_DEFS = [
+    { key:'firstLayerLineWidth',    label:'首层线宽',     unit:'mm',   cat:'挤出', step:0.01, dec:2, base:0.45 },
+    { key:'outerWallLineWidth',     label:'外壁线宽',     unit:'mm',   cat:'挤出', step:0.01, dec:2, base:0.42 },
+    { key:'innerWallLineWidth',     label:'内壁线宽',     unit:'mm',   cat:'挤出', step:0.01, dec:2, base:0.45 },
+    { key:'topLayers',              label:'顶部层数',     unit:'层',   cat:'挤出', step:1,    dec:0, base:5   },
+    { key:'bottomLayers',           label:'底层层数',     unit:'层',   cat:'挤出', step:1,    dec:0, base:4   },
+    { key:'infillDensity',          label:'填充密度',     unit:'%',    cat:'挤出', step:1,    dec:0, base:15  },
+    { key:'infillOverlap',          label:'填充重叠',     unit:'%',    cat:'挤出', step:1,    dec:0, base:15  },
+    { key:'supportAngle',           label:'支撑角度',     unit:'°',    cat:'挤出', step:1,    dec:0, base:55  },
+    { key:'supportDensity',         label:'支撑密度',     unit:'%',    cat:'挤出', step:1,    dec:0, base:12  },
+    { key:'bridgeFlow',             label:'桥接流量',     unit:'%',    cat:'挤出', step:1,    dec:0, base:95  },
+
+    { key:'topSpeed',               label:'顶面速度',     unit:'mm/s', cat:'速度', step:5,    dec:0, base:150 },
+    { key:'bottomSpeed',            label:'底面速度',     unit:'mm/s', cat:'速度', step:5,    dec:0, base:120 },
+    { key:'outerWallSpeed',         label:'外壁速度',     unit:'mm/s', cat:'速度', step:5,    dec:0, base:150 },
+    { key:'innerWallSpeed',         label:'内壁速度',     unit:'mm/s', cat:'速度', step:5,    dec:0, base:220 },
+    { key:'travelSpeed',            label:'空驶速度',     unit:'mm/s', cat:'速度', step:10,   dec:0, base:500 },
+    { key:'supportInterfaceSpeed',  label:'支撑界面速度', unit:'mm/s', cat:'速度', step:5,    dec:0, base:80  },
+    { key:'towerSpeed',             label:'打印塔速度',   unit:'mm/s', cat:'速度', step:5,    dec:0, base:90  },
+
+    { key:'wipeDistance',           label:'擦拭距离',     unit:'mm',   cat:'回抽', step:0.5,  dec:1, base:2.0 },
+    { key:'wipeSpeed',              label:'擦拭速度',     unit:'mm/s', cat:'回抽', step:1,    dec:0, base:30  },
+    { key:'retractBeforeWipe',      label:'擦拭前回抽',   unit:'mm',   cat:'回抽', step:0.05, dec:2, base:0.20},
+    { key:'minRetractTravel',       label:'最小回抽行程', unit:'mm',   cat:'回抽', step:0.5,  dec:1, base:1.5 },
+    { key:'zHop',                   label:'Z 抬升',       unit:'mm',   cat:'回抽', step:0.1,  dec:1, base:0.4 },
+
+    { key:'coolingMinLayerTime',    label:'最小层时间',   unit:'s',    cat:'冷却', step:1,    dec:0, base:8   },
+    { key:'fanOffLayers',           label:'风扇关闭层数', unit:'层',   cat:'冷却', step:1,    dec:0, base:1   },
+    { key:'fanFullLayer',           label:'风扇全速层',   unit:'层',   cat:'冷却', step:1,    dec:0, base:4   },
+    { key:'bridgeFan',              label:'桥接风扇',     unit:'%',    cat:'冷却', step:1,    dec:0, base:100 },
+
+    { key:'jerk',                   label:'拐角速度',     unit:'mm/s', cat:'运动', step:1,    dec:0, base:9   },
+    { key:'pressureAdvance',        label:'压力提前',     unit:'',     cat:'运动', step:0.005,dec:3, base:0.040},
+    { key:'pressureAdvanceSmooth',  label:'压力平滑',     unit:'',     cat:'运动', step:0.005,dec:3, base:0.050},
+    { key:'initialLayerAccel',      label:'首层加速度',   unit:'mm/s²',cat:'运动', step:100,  dec:0, base:500 },
+    { key:'outerWallAccel',         label:'外壁加速度',   unit:'mm/s²',cat:'运动', step:100,  dec:0, base:3000},
+    { key:'travelAccel',            label:'空驶加速度',   unit:'mm/s²',cat:'运动', step:500,  dec:0, base:10000}
+  ];
+
+  /* 官方后续发布的版本（开发者模拟用，页面上不暴露历史） */
+  var RELEASES = [
+    {
+      version:'2026-10-20',
+      patch:{
+        nozzleTemp:235, bedTemp:62, speed:340, firstLayerSpeed:130,
+        retraction:0.80, retractionSpeed:38, fan:90, bridgeSpeed:45,
+        wallSpeed:190, infillSpeed:210
+      }
+    },
+    {
+      version:'2026-10-25',
+      patch:{
+        nozzleTemp:240, speed:350, retraction:0.70,
+        wallSpeed:196, supportSpeed:65, lineWidth:0.44
+      }
+    }
+  ];
+
+  /* =========================================================
+     状态
+     =========================================================
+     official.values = 官方最新值
+     overrides       = 我的修改（我手动改过的参数）
+     hold            = 保持旧值（我看过官方更新、明确选择不用新值，冻结在当时的官方值）
+     updates         = 官方动过、我还没处理的参数：{ old: 官方旧值 }
+     最终值 = overrides → hold → updates.old → official.values
+     ========================================================= */
+  var state = {
+    official:{ name:'A1 Fast', version:'2026-10-08', values:{} },
+    overrides:{},
+    hold:{},
+    updates:{},
+    moreParams:false,
+    inUse:true,
+    releaseIndex:-1,
+    view:'list',
+    filter:'all'
+  };
+
+  var banner = null;                 // { text, count }
+  var modal = { open:false, checked:{} };
+
+  /* =========================================================
+     工具
+     ========================================================= */
+  function has(obj, key){ return Object.prototype.hasOwnProperty.call(obj, key); }
+
+  function defs(){
+    return state.moreParams ? CORE_DEFS.concat(EXTRA_DEFS) : CORE_DEFS;
+  }
+  function defByKey(key){
+    var all = defs();
+    for (var i=0;i<all.length;i++){ if (all[i].key===key) return all[i]; }
+    return null;
+  }
+  function roundTo(v, dec){
+    var p = Math.pow(10, dec);
+    return Math.round(v*p)/p;
+  }
+  function fmt(key, v){
+    var d = defByKey(key);
+    if (!d) return String(v);
+    return d.dec === 0 ? String(Math.round(v)) : Number(v).toFixed(d.dec);
+  }
+  function withUnit(key, v){
+    var d = defByKey(key);
+    if (!d) return String(v);
+    return fmt(key, v) + (d.unit ? ' ' + d.unit : '');
+  }
+
+  function isModified(key){ return has(state.overrides, key); }
+  function isFrozen(key){ return has(state.hold, key); }
+  function hasUpdate(key){ return has(state.updates, key); }
+
+  function getEffective(key){
+    if (isModified(key)) return state.overrides[key];
+    if (isFrozen(key))   return state.hold[key];
+    if (hasUpdate(key))  return state.updates[key].old;
+    return state.official.values[key];
+  }
+
+  /* 用户手动编辑 */
+  function setValue(key, value){
+    var d = defByKey(key);
+    var v = roundTo(Number(value), d ? d.dec : 2);
+    if (isNaN(v)) return;
+    if (v === getEffective(key)) return;
+
+    if (v === state.official.values[key]) {
+      // 手动改成了官方最新值 => 直接跟随官方
+      delete state.overrides[key];
+      delete state.hold[key];
+      delete state.updates[key];
+    } else {
+      state.overrides[key] = v;
+      delete state.hold[key];
+      // 保留 updates：即使我自己改过，也仍然要知道官方动过这个参数
+    }
+  }
+  /* 恢复官方值：回到官方最新值 */
+  function restoreKey(key){
+    delete state.overrides[key];
+    delete state.hold[key];
+    delete state.updates[key];
+  }
+  /* 单行用新值：用于「未修改 + 官方已更新」的行 */
+  function adoptKey(key){
+    delete state.overrides[key];
+    delete state.hold[key];
+    delete state.updates[key];
+  }
+
+  function countOf(map){
+    var n = 0, list = defs();
+    for (var i=0;i<list.length;i++){ if (has(map, list[i].key)) n++; }
+    return n;
+  }
+  function updateCount(){ return countOf(state.updates); }
+  function overrideCount(){ return countOf(state.overrides); }
+  function frozenCount(){ return countOf(state.hold); }
+  function totalCount(){ return defs().length; }
+
+  /* =========================================================
+     持久化
+     ========================================================= */
+  function save(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        official: state.official,
+        overrides: state.overrides,
+        hold: state.hold,
+        updates: state.updates,
+        moreParams: state.moreParams,
+        inUse: state.inUse,
+        releaseIndex: state.releaseIndex
+      }));
+    }catch(e){}
+  }
+  function load(){
+    var raw = null;
+    try{ raw = localStorage.getItem(STORAGE_KEY); }catch(e){}
+    if (!raw) return false;
+    var data;
+    try{ data = JSON.parse(raw); }catch(e){ return false; }
+    if (!data || !data.official || !data.official.values) return false;
+    state.official = data.official;
+    state.overrides = data.overrides || {};
+    state.hold = data.hold || {};
+    state.updates = data.updates || {};
+    state.moreParams = !!data.moreParams;
+    state.inUse = data.inUse !== false;
+    state.releaseIndex = typeof data.releaseIndex === 'number' ? data.releaseIndex : -1;
+    ensureExtras();
+    return true;
+  }
+  function buildDefaultOfficial(){
+    var v = {};
+    CORE_DEFS.forEach(function(d){ v[d.key] = d.base; });
+    state.official = { name:'A1 Fast', version:'2026-10-08', values:v };
+  }
+  function ensureExtras(){
+    if (!state.moreParams) return;
+    EXTRA_DEFS.forEach(function(d){
+      if (!(d.key in state.official.values)) state.official.values[d.key] = d.base;
+    });
+  }
+
+  /* =========================================================
+     官方发布新版
+     ========================================================= */
+  function addDays(iso, n){
+    var p = iso.split('-');
+    var dt = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    var m = String(dt.getUTCMonth()+1); if (m.length<2) m = '0'+m;
+    var dd = String(dt.getUTCDate());   if (dd.length<2) dd = '0'+dd;
+    return dt.getUTCFullYear() + '-' + m + '-' + dd;
+  }
+
+  function publishRelease(){
+    var prevOfficial = {};
+    defs().forEach(function(d){ prevOfficial[d.key] = state.official.values[d.key]; });
+
+    state.releaseIndex++;
+    var rel = RELEASES[state.releaseIndex];
+
+    if (rel) {
+      state.official.version = rel.version;
+      Object.keys(rel.patch).forEach(function(k){ state.official.values[k] = rel.patch[k]; });
+    } else {
+      state.official.version = addDays(state.official.version, 7);
+      var v = state.official.values;
+      v.speed = roundTo((v.speed || 320) + 20, 0);
+      v.nozzleTemp = roundTo((v.nozzleTemp || 230) + 5, 0);
+      v.acceleration = roundTo((v.acceleration || 8000) + 1000, 0);
+      v.wallSpeed = roundTo((v.wallSpeed || 180) + 6, 0);
+      if (v.fan != null) v.fan = Math.min(100, roundTo(v.fan + 3, 0));
+    }
+
+    // 官方动过的参数一律登记待处理：包括我已经改过的（那种情况只为展示三方值）
+    defs().forEach(function(d){
+      var k = d.key;
+      if (state.official.values[k] === prevOfficial[k]) return;
+      if (has(state.updates, k)) return;                 // 已有未处理条目，保留最早的官方旧值
+      state.updates[k] = { old: prevOfficial[k] };
+    });
+
+    var p = updateCount();
+    banner = { text: bannerText(p), count: p };
+    save();
+    render();
+  }
+
+  function bannerText(p){
+    if (p > 0) {
+      return '官方发布了新版 ' + state.official.version + ' · 有 ' + p +
+        ' 项更新和你有关，你现在的预设没有变';
+    }
+    return '官方发布了新版 ' + state.official.version + ' · 这次没有和你有关的改动';
+  }
+
+  /* =========================================================
+     处理官方更新
+     ========================================================= */
+  function openReview(){
+    modal.open = true;
+    modal.checked = {};
+    defs().forEach(function(d){
+      if (!hasUpdate(d.key)) return;
+      // 默认：我没改过的勾上（本来就该跟官方），我改过的默认不勾（保持我的值）
+      modal.checked[d.key] = !isModified(d.key) && !isFrozen(d.key);
+    });
+    render();
+    window.scrollTo(0,0);
+  }
+  function closeReview(){
+    modal.open = false;
+    render();
+  }
+  function confirmReview(){
+    var applied = 0, kept = 0;
+    defs().forEach(function(d){
+      var k = d.key;
+      if (!hasUpdate(k)) return;
+      if (modal.checked[k]) {
+        delete state.overrides[k];
+        delete state.hold[k];
+        delete state.updates[k];
+        applied++;
+      } else {
+        if (!isModified(k) && !isFrozen(k)) {
+          state.hold[k] = state.updates[k].old;   // 冻结在官方旧值
+        }
+        delete state.updates[k];
+        kept++;
+      }
+    });
+    modal.open = false;
+    banner = { text: '已用上 ' + applied + ' 项官方更新，' + kept + ' 项保持原值', count: 0 };
+    save();
+    render();
+  }
+
+  function modifyAll(){
+    defs().forEach(function(d){
+      var cur = getEffective(d.key);
+      var v = roundTo(cur * 1.03, d.dec);
+      if (v === state.official.values[d.key]) v = roundTo(v + Math.pow(10, -d.dec), d.dec);
+      state.overrides[d.key] = v;
+    });
+    state.hold = {};
+    state.updates = {};
+    banner = null;
+    save();
+    render();
+  }
+  function restoreAll(){
+    state.overrides = {};
+    state.hold = {};
+    state.updates = {};
+    banner = null;
+    save();
+    render();
+  }
+  function toggleMore(){
+    state.moreParams = !state.moreParams;
+    ensureExtras();
+    if (state.filter !== 'all' && state.filter !== 'modified' && state.filter !== 'updated'){
+      state.filter = 'all';
+    }
+    banner = null;
+    save();
+    render();
+  }
+
+  /* =========================================================
+     渲染
+     ========================================================= */
+  function renderBanner(){
+    var slot = document.getElementById('banner-slot');
+    if (!banner){ slot.innerHTML = ''; return; }
+    var amber = banner.count > 0;
+    var actions = '';
+    if (amber) {
+      actions = '<span class="banner-actions">' +
+        '<button class="btn-link is-amber" data-action="review">看看这 ' + banner.count + ' 项</button>' +
+      '</span>';
+    }
+    slot.innerHTML =
+      '<div class="banner' + (amber ? ' is-amber' : '') + '">' +
+        '<span class="banner-text">' + banner.text + '</span>' + actions +
+        '<button class="banner-close" data-action="dismiss-banner" aria-label="关闭">✕</button>' +
+      '</div>';
+  }
+
+  function renderSummary(){
+    var slot = document.getElementById('summary-slot');
+    var n = overrideCount(), p = updateCount();
+    slot.innerHTML =
+      '<div class="summary-box">' +
+        '<div class="summary-label">官方预设</div>' +
+        '<div class="summary-name">官方 A1 Fast</div>' +
+        '<div class="summary-line">最新版 <span class="strong">' + state.official.version + '</span></div>' +
+      '</div>' +
+      '<div class="summary-box' + (p > 0 ? ' is-amber' : '') + '">' +
+        '<div class="summary-label">我的预设</div>' +
+        '<div class="summary-name">我的 A1 Fast</div>' +
+        '<div class="summary-line">' +
+          (state.inUse ? '<span class="strong">当前使用 ✓</span> · ' : '') +
+          '自定义 <span class="strong">' + n + '</span> 项' +
+        '</div>' +
+        (p > 0 ? '<div class="summary-line is-amber">官方更新待选择 ' + p + ' 项</div>' : '') +
+      '</div>';
+  }
+
+  function renderPresetList(){
+    var slot = document.getElementById('preset-slot');
+    var n = overrideCount(), p = updateCount();
+    slot.innerHTML =
+      '<div class="preset-card' + (p > 0 ? ' is-amber' : '') + '">' +
+        '<div class="preset-main">' +
+          '<div class="preset-name">我的 A1 Fast</div>' +
+          '<div class="preset-meta">MKP · A1 · Fast</div>' +
+          '<div class="preset-meta">基于官方 A1 Fast · 官方最新版：' + state.official.version +
+            ' · 自定义 ' + n + ' 项</div>' +
+          (p > 0 ? '<div class="preset-meta is-amber">官方更新待选择 ' + p + ' 项</div>' : '') +
+        '</div>' +
+        '<div class="preset-actions">' +
+          (state.inUse ? '<span class="chip chip-inuse">当前使用 ✓</span>' : '') +
+          (p > 0 ? '<button class="btn" data-action="review">选择要跟随的更新</button>' : '') +
+          '<button class="btn" data-action="edit">编辑</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function devPanelHTML(){
+    return '' +
+      '<div class="dev-version">官方当前版本：<span class="strong">' + state.official.version + '</span>' +
+        '　·　共 <span class="strong">' + totalCount() + '</span> 个参数</div>' +
+      '<div class="dev-btns">' +
+        '<button class="btn btn-primary" data-action="publish">发布官方新版</button>' +
+        '<button class="btn" data-action="modify-all">模拟：我修改了全部参数</button>' +
+        '<button class="btn" data-action="restore-all">恢复全部官方设置</button>' +
+        '<button class="btn" data-action="toggle-more">' +
+          (state.moreParams ? '收起额外参数' : '+ 模拟更多参数') + '</button>' +
+      '</div>';
+  }
+  function renderDev(){
+    var slots = document.querySelectorAll('.dev-slot');
+    for (var i=0;i<slots.length;i++) slots[i].innerHTML = devPanelHTML();
+  }
+
+  function renderEditHead(){
+    var slot = document.getElementById('edit-head-slot');
+    var n = overrideCount(), p = updateCount(), f = frozenCount();
+    slot.innerHTML =
+      '<div class="edit-head">' +
+        '<div>' +
+          '<div class="edit-title">我的 A1 Fast</div>' +
+          '<div class="edit-meta">官方最新版：' + state.official.version +
+            '　·　我的修改：' + n + ' 项' +
+            (f > 0 ? '　·　保持旧值：' + f + ' 项' : '') +
+            '　·　共 ' + totalCount() + ' 个参数' +
+            (p > 0 ? '　·　<span class="is-amber">官方更新待选择：' + p + ' 项</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="edit-head-actions">' +
+          (p > 0 ? '<button class="btn" data-action="review">选择要跟随的更新</button>' : '') +
+          '<button class="btn btn-primary" data-action="done">完成</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function catList(){
+    var seen = {}, out = [];
+    defs().forEach(function(d){ if (!seen[d.cat]){ seen[d.cat] = true; out.push(d.cat); } });
+    return out;
+  }
+
+  function renderEditNav(){
+    var slot = document.getElementById('edit-nav-slot');
+    var all = defs();
+    var p = updateCount();
+    var html = '<div class="edit-nav">';
+    html += navItem('all', '全部参数', all.length, false);
+    html += navItem('modified', '我的修改', overrideCount(), false);
+    html += navItem('updated', '官方已更新', p, p > 0);
+    html += '<div class="nav-sep"></div>';
+    catList().forEach(function(cat){
+      var n = all.filter(function(d){ return d.cat === cat; }).length;
+      html += navItem('cat:' + cat, cat, n, false);
+    });
+    html += '</div>';
+    slot.innerHTML = html;
+  }
+  function navItem(value, label, count, alert){
+    return '<button class="nav-item' + (state.filter === value ? ' active' : '') +
+      (alert ? ' has-alert' : '') + '" data-action="nav" data-nav="' + value + '">' +
+      '<span>' + label + '</span><span class="count">' + count + '</span></button>';
+  }
+
+  function chipsFor(key){
+    var out = [];
+    if (isModified(key)) out.push('<span class="chip chip-modified">我的修改</span>');
+    else if (isFrozen(key)) out.push('<span class="chip chip-frozen">保持旧值</span>');
+    if (hasUpdate(key)) out.push('<span class="chip chip-updated">官方已更新</span>');
+    if (!out.length) out.push('<span class="chip chip-follow">跟随官方</span>');
+    return '<span class="chip-row">' + out.join('') + '</span>';
+  }
+
+  function lineFor(key){
+    var cur = withUnit(key, getEffective(key));
+    var old = hasUpdate(key) ? withUnit(key, state.updates[key].old) : '';
+    var neu = withUnit(key, state.official.values[key]);
+
+    if (hasUpdate(key)) {
+      if (isModified(key) || isFrozen(key)) {
+        // 三方：我的值 · 官方旧值 → 官方新值
+        return '<div class="official-line">' +
+          '<span>我 <span class="mine">' + cur + '</span>　官方 <span class="val">' + old +
+          '</span><span class="arrow"> → ' + neu + '</span></span>' +
+          '<button class="btn-link" data-action="restore" data-key="' + key + '">恢复官方值</button></div>';
+      }
+      return '<div class="official-line">' +
+        '<span>官方 <span class="val">' + old + '</span><span class="arrow"> → ' + neu + '</span></span>' +
+        '<button class="btn-link is-amber" data-action="adopt" data-key="' + key + '">用新值</button></div>';
+    }
+    if (isModified(key)) {
+      return '<div class="official-line"><span>官方当前值：<span class="val">' + neu + '</span></span>' +
+        '<button class="btn-link" data-action="restore" data-key="' + key + '">恢复官方值</button></div>';
+    }
+    if (isFrozen(key)) {
+      return '<div class="official-line"><span>官方最新值：<span class="val">' + neu + '</span></span>' +
+        '<button class="btn-link" data-action="restore" data-key="' + key + '">恢复官方值</button></div>';
+    }
+    return '';
+  }
+
+  function fieldHTML(d){
+    var cls = isModified(d.key) ? ' is-modified' : (isFrozen(d.key) ? ' is-frozen' : '');
+    if (hasUpdate(d.key)) cls += ' is-updated';
+    return '' +
+      '<div class="field' + cls + '" data-key="' + d.key + '">' +
+        '<div class="field-label">' + d.label +
+          (d.unit ? '<span class="unit">' + d.unit + '</span>' : '') + '</div>' +
+        '<div class="field-input">' +
+          '<input type="number" step="' + d.step + '" value="' + fmt(d.key, getEffective(d.key)) + '" ' +
+          'aria-label="' + d.label + '"></div>' +
+        '<div class="field-side">' + chipsFor(d.key) + lineFor(d.key) + '</div>' +
+      '</div>';
+  }
+
+  function visibleDefs(){
+    var all = defs();
+    if (state.filter === 'all') return all;
+    if (state.filter === 'modified') return all.filter(function(d){ return isModified(d.key); });
+    if (state.filter === 'updated')  return all.filter(function(d){ return hasUpdate(d.key); });
+    if (state.filter.indexOf('cat:') === 0) {
+      var cat = state.filter.slice(4);
+      return all.filter(function(d){ return d.cat === cat; });
+    }
+    return all;
+  }
+
+  function emptyNote(){
+    if (state.filter === 'modified') return '当前没有自定义参数，所有参数都跟随官方。';
+    if (state.filter === 'updated')  return '这次官方没有动过任何参数。';
+    return '没有参数。';
+  }
+
+  function renderEditMain(){
+    var slot = document.getElementById('edit-main-slot');
+    var list = visibleDefs();
+    var head = '<div class="param-list-head"><span>参数</span><span>' +
+      list.length + ' 项</span></div>';
+    if (!list.length) {
+      slot.innerHTML = '<div class="param-list">' + head +
+        '<div class="empty-note">' + emptyNote() + '</div></div>';
+      return;
+    }
+    slot.innerHTML = '<div class="param-list">' + head +
+      list.map(fieldHTML).join('') + '</div>';
+  }
+
+  function renderEdit(){
+    renderEditHead();
+    renderEditNav();
+    renderEditMain();
+  }
+
+  function modalAfterText(key, checked){
+    return checked ? withUnit(key, state.official.values[key]) : withUnit(key, getEffective(key));
+  }
+
+  function renderModal(){
+    var slot = document.getElementById('modal-slot');
+    if (!modal.open){ slot.innerHTML = ''; return; }
+
+    var list = defs().filter(function(d){ return hasUpdate(d.key); });
+    var rows = list.map(function(d){
+      var k = d.key;
+      var checked = !!modal.checked[k];
+      var old = withUnit(k, state.updates[k].old);
+      var neu = withUnit(k, state.official.values[k]);
+      var mine = withUnit(k, getEffective(k));
+      var vals = (isModified(k) || isFrozen(k))
+        ? '我 <span class="mine">' + mine + '</span> · 官方 <span class="val">' + old +
+          '</span><span class="arrow"> → ' + neu + '</span>'
+        : '官方 <span class="val">' + old + '</span><span class="arrow"> → ' + neu + '</span>';
+
+      return '<div class="modal-row' + (checked ? ' is-checked' : '') + '" data-key="' + k + '">' +
+        '<label class="modal-check"><input type="checkbox"' + (checked ? ' checked' : '') +
+          ' aria-label="' + d.label + '"></label>' +
+        '<div>' +
+          '<div class="modal-name">' + d.label +
+            (d.unit ? '<span class="unit">' + d.unit + '</span>' : '') + '</div>' +
+          '<div class="modal-vals">' + vals + '</div>' +
+        '</div>' +
+        '<div class="modal-after">确认后：<span class="after-val">' +
+          modalAfterText(k, checked) + '</span></div>' +
+      '</div>';
+    }).join('');
+
+    slot.innerHTML =
+      '<div class="modal-backdrop">' +
+        '<div class="modal">' +
+          '<div class="modal-head">' +
+            '<div class="modal-title">选择要跟随的更新</div>' +
+            '<div class="modal-sub">官方最新版 <span class="strong">' + state.official.version +
+              '</span> · 有 <span class="strong">' + list.length +
+              '</span> 项官方改过了。勾选 = 用官方的新值，不勾 = 保持你现在用的值。</div>' +
+          '</div>' +
+          '<div class="modal-selectbar">' +
+            '<label class="modal-check"><input type="checkbox" id="modal-select-all" aria-label="全选"></label>' +
+            '<label class="sel-label" for="modal-select-all">全选</label>' +
+            '<span class="sel-hint"></span>' +
+          '</div>' +
+          '<div class="modal-body">' + rows + '</div>' +
+          '<div class="modal-foot">' +
+            '<button class="btn" data-action="modal-cancel">取消</button>' +
+            '<button class="btn btn-primary" data-action="modal-confirm">应用勾选项</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    syncSelectAll();
+  }
+
+  /* 全选框三态：全勾=对号，全不勾=空，部分勾=横杠 */
+  function syncSelectAll(){
+    var box = document.getElementById('modal-select-all');
+    if (!box) return;
+    var list = defs().filter(function(d){ return hasUpdate(d.key); });
+    var n = list.filter(function(d){ return modal.checked[d.key]; }).length;
+    box.checked = (n > 0 && n === list.length);
+    box.indeterminate = (n > 0 && n < list.length);
+    var hint = document.querySelector('.modal-selectbar .sel-hint');
+    if (hint) hint.textContent = '已选 ' + n + ' / ' + list.length + ' 项';
+  }
+
+  function renderViews(){
+    document.getElementById('view-list').hidden = (state.view !== 'list');
+    document.getElementById('view-edit').hidden = (state.view !== 'edit');
+  }
+
+  function render(){
+    renderViews();
+    renderBanner();
+    renderSummary();
+    renderPresetList();
+    renderEdit();
+    renderDev();
+    renderModal();
+  }
+
+  /* 输入时不重建参数列表，避免丢失焦点 */
+  function refreshLight(){
+    renderBanner();
+    renderSummary();
+    renderPresetList();
+    renderEditHead();
+    renderEditNav();
+    renderDev();
+  }
+
+  function refreshRow(key){
+    var row = document.querySelector('.field[data-key="' + key + '"]');
+    if (!row) return;
+    var cls = isModified(key) ? ' is-modified' : (isFrozen(key) ? ' is-frozen' : '');
+    if (hasUpdate(key)) cls += ' is-updated';
+    row.className = 'field' + cls;
+    row.querySelector('.field-side').innerHTML = chipsFor(key) + lineFor(key);
+
+    var input = row.querySelector('input');
+    if (document.activeElement !== input) input.value = fmt(key, getEffective(key));
+  }
+
+  /* =========================================================
+     事件
+     ========================================================= */
+  document.addEventListener('click', function(e){
+    if (modal.open && e.target.classList && e.target.classList.contains('modal-backdrop')) {
+      closeReview();
+      return;
+    }
+    var el = e.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.getAttribute('data-action');
+
+    if (action === 'reset') {
+      if (!window.confirm('重置 Demo？官方版本、官方参数、你的修改、保持旧值与还没处理的官方更新都会被清空。')) return;
+      resetAll();
+      return;
+    }
+    if (action === 'edit'){ state.view = 'edit'; state.filter = 'all'; banner = null; render(); window.scrollTo(0,0); return; }
+    if (action === 'done'){ state.view = 'list'; render(); window.scrollTo(0,0); return; }
+    if (action === 'view-updated'){ state.view = 'edit'; state.filter = 'updated'; render(); window.scrollTo(0,0); return; }
+    if (action === 'publish'){ publishRelease(); return; }
+    if (action === 'modify-all'){ modifyAll(); return; }
+    if (action === 'restore-all'){ restoreAll(); return; }
+    if (action === 'toggle-more'){ toggleMore(); return; }
+    if (action === 'review'){ openReview(); return; }
+    if (action === 'modal-cancel'){ closeReview(); return; }
+    if (action === 'modal-confirm'){ confirmReview(); return; }
+    if (action === 'adopt'){ adoptKey(el.getAttribute('data-key')); save(); render(); return; }
+    if (action === 'restore'){ restoreKey(el.getAttribute('data-key')); save(); render(); return; }
+    if (action === 'nav'){
+      state.filter = el.getAttribute('data-nav');
+      renderEditNav();
+      renderEditMain();
+      return;
+    }
+    if (action === 'dismiss-banner'){ banner = null; renderBanner(); return; }
+  });
+
+  document.addEventListener('input', function(e){
+    var input = e.target;
+    if (!input || input.tagName !== 'INPUT' || input.type !== 'number') return;
+    var row = input.closest('.field');
+    if (!row) return;
+    var key = row.getAttribute('data-key');
+    if (input.value === '') return;
+    setValue(key, input.value);
+    save();
+    refreshRow(key);
+    refreshLight();
+  });
+
+  document.addEventListener('change', function(e){
+    var input = e.target;
+
+    // 模态框：全选 / 全不选（部分选中时点击 => 全选）
+    if (input && input.id === 'modal-select-all' && modal.open) {
+      var all = defs().filter(function(d){ return hasUpdate(d.key); });
+      var on = all.filter(function(d){ return modal.checked[d.key]; }).length;
+      var target = !(on > 0 && on === all.length);
+      all.forEach(function(d){ modal.checked[d.key] = target; });
+      var rows = document.querySelectorAll('.modal-row');
+      for (var i=0;i<rows.length;i++){
+        var r = rows[i];
+        var cb = r.querySelector('input');
+        if (cb) cb.checked = target;
+        r.classList.toggle('is-checked', target);
+        var av = r.querySelector('.after-val');
+        if (av) av.textContent = modalAfterText(r.getAttribute('data-key'), target);
+      }
+      syncSelectAll();
+      return;
+    }
+
+    // 模态框里的单行勾选
+    if (input && input.type === 'checkbox' && modal.open) {
+      var mrow = input.closest('.modal-row');
+      if (!mrow) return;
+      var mkey = mrow.getAttribute('data-key');
+      modal.checked[mkey] = input.checked;
+      mrow.classList.toggle('is-checked', input.checked);
+      var after = mrow.querySelector('.after-val');
+      if (after) after.textContent = modalAfterText(mkey, input.checked);
+      syncSelectAll();
+      return;
+    }
+
+    if (!input || input.tagName !== 'INPUT' || input.type !== 'number') return;
+    var row = input.closest('.field');
+    if (!row) return;
+    var key = row.getAttribute('data-key');
+    input.value = fmt(key, getEffective(key));
+  });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && modal.open) closeReview();
+  });
+
+  function resetAll(){
+    try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+    state.overrides = {};
+    state.hold = {};
+    state.updates = {};
+    state.moreParams = false;
+    state.inUse = true;
+    state.releaseIndex = -1;
+    state.view = 'list';
+    state.filter = 'all';
+    banner = null;
+    modal.open = false;
+    buildDefaultOfficial();
+    save();
+    render();
+    window.scrollTo(0,0);
+  }
+
+  /* =========================================================
+     启动
+     ========================================================= */
+  if (!load()) {
+    buildDefaultOfficial();
+    ensureExtras();
+  }
+  render();
+})();
+</script>
+</body>
+</html>

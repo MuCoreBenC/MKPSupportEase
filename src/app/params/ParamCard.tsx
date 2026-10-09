@@ -37,6 +37,7 @@
  */
 
 import type { ReactNode } from 'react'
+import type { ParamSyncEntry } from '../../api'
 import Highlight from './highlight'
 import { valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
@@ -64,6 +65,14 @@ interface Props {
   onToggleExpand?: (key: string) => void
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
+  /**
+   * **官方更新账**（逐项）。不给就是"这一段没有官方更新这回事"（官方线 / 认不出是哪一版官方）——
+   * 行上一律不画，页面的长相与以前完全一样。
+   */
+  syncOf?: (key: string) => ParamSyncEntry | undefined
+  onAdoptSync?: (key: string) => void
+  onHoldSync?: (key: string) => void
+  syncBusy?: boolean
   /** G-code 这种整块的控件由调用方画 */
   renderBlock?: (def: ParamDef) => ReactNode
   /**
@@ -184,6 +193,10 @@ export default function ParamCard({
   onToggleExpand,
   onEdit,
   onRevertToSaved,
+  syncOf,
+  onAdoptSync,
+  onHoldSync,
+  syncBusy = false,
   renderBlock,
   tower,
   query = '',
@@ -255,6 +268,10 @@ export default function ParamCard({
             savedValue={savedValueOf(node.def.key)}
             factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}
+            sync={syncOf?.(node.def.key)}
+            onAdoptSync={onAdoptSync}
+            onHoldSync={onHoldSync}
+            syncBusy={syncBusy}
             blockedBy={blockedByOf(node.def.key)}
             sep={i > 0}
             expanded={expandedKey === node.def.key}

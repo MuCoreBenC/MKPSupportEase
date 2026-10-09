@@ -67,6 +67,29 @@ pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
 /// 工作台窗口的标签。与客户端的 `main` 分开，`get_webview_window` 拿的是各自那一个
 const WINDOW_LABEL: &str = "workbench";
 
+/// 窗口标题。**测试模式那一份带前缀** —— 标题栏是唯一一处"切到别的窗口也还看得见"
+/// 的地方（任务栏、Alt+Tab、截图里都在），作者要的"时时刻刻知道我在哪一边"就靠它兜底。
+fn window_title() -> String {
+    if paths::sandbox_on() {
+        format!("{SANDBOX_TITLE_PREFIX}SupportEase 工作台")
+    } else {
+        "SupportEase 工作台".to_owned()
+    }
+}
+
+/// 测试模式下标题的前缀（一眼分得开）
+const SANDBOX_TITLE_PREFIX: &str = "【测试模式】";
+
+/// 把窗口标题按**现在**的模式写一遍。
+///
+/// 开窗时用 [`window_title`]，切换模式时由那几条命令调这里 —— 标题不是启动一次的
+/// 快照，它得跟着模式走，否则人会对着一个说"正式"的标题栏看沙箱。
+pub fn refresh_window_title(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
+        let _ = win.set_title(&window_title());
+    }
+}
+
 /// 开工作台窗口。已经开着就聚焦，不重复开第二个。
 ///
 /// 刻意**不带** transparent / titleBarStyle=Overlay 这些客户端的窗口花活：
@@ -79,12 +102,29 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
 
     let win =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
-            .title("SupportEase 工作台")
+            .title(window_title())
             .inner_size(1360.0, 900.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)
+            /*
+             * ★ **先藏着，等前端首帧就绪再露面**（作者 2026-10-07）：
+             * dev 下前端首次加载要把整棵模块树编译一遍（以分钟计），窗口若当场就露，
+             * 人看到的是"一块白板先出现、然后干等"—— 作者原话"不要先出现白屏然后再等"。
+             * 露面那一半在前端入口（`src/workbench/main.tsx` 首帧后调 `window.show()`）；
+             * 这里同时挂**兜底**（见下）：前端因任何原因没来敲（编译错误 / JS 崩），
+             * 藏着的窗口不会有任何报错出口 —— 到点无条件 show，宁可白板也不能永不出现。
+             */
+            .visible(false)
             .build()
             .map_err(|e| AppError::internal("建不出工作台窗口").with_detail(e.to_string()))?;
+
+    {
+        let win = win.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let _ = win.show();
+        });
+    }
 
     /* 草稿在内存里，磁盘上只有崩溃快照。落盘三个时机里的两个挂在窗口事件上：
     失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。

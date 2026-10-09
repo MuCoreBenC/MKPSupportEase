@@ -23,9 +23,11 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { api, errorText, isAppError } from '../../api'
+import { api, errorText } from '../../api'
+import type { CalibModel } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
+import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
@@ -45,6 +47,7 @@ import { pickArt } from './heroArt'
 import { useArtLayers } from './useArtLayers'
 import {
   AXIS_ROWS,
+  NEED_COPY,
   NEED_PRESET,
   Z_LEGEND,
   Z_TIP,
@@ -66,6 +69,9 @@ const EMPTY: Selection = { brand: null, model: null, variant: null }
 /** 板子的配色跟应用的模式对齐；等应用做了深色模式，这里换成跟随主题的那个值 */
 const PLATE_THEME = '浅色'
 
+/** 第五步要打开的那份测试模型（后端 `getCalibModels` 认的 id） */
+const TEST_MODEL_ID = 'test-models'
+
 /** 两张校准卡在 sheets 里的位置：按页拦截换页要认它们 */
 const CALIB_Z_INDEX = 2
 const CALIB_XY_INDEX = 3
@@ -73,21 +79,6 @@ const CALIB_MODEL_INDEX = 4
 
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
-
-/**
- * 后端说"盘上不是我以为的那一份" —— 只有这两种错值得补一次下载（§Task 5，见
- * `docs/HOME-BUNDLE-DOWNLOAD.md`）：`NOT_FOUND`（盘上没有）与 `SHA_MISMATCH`（字节漂了）。
- * 别的错（读不懂这一代数据、不是 MKP、权限…）补下载也没用，照原样抛给用户看。
- */
-function isStaleGuess(e: unknown): boolean {
-  return isAppError(e) && (e.code === 'NOT_FOUND' || e.code === 'SHA_MISMATCH')
-}
-
-/**
- * 后处理脚本里那段可执行文件路径。契约里没有它（真值在桌面壳那一侧），
- * 先沿用原来那串模板；`--Toml` 后面的路径跟着**当前那份文件**走（T10）。
- */
-const MKP_EXE = 'G:\\project\\mkp-ssr\\target\\debug\\mkp-ssr.exe'
 
 /** 版本角标：契约给的是中文 tag，组件只收三档色调 —— 没配过的 tag 不给 tone（走 muted） */
 const TAG_TONE: Record<string, Option['badgeTone']> = {
@@ -119,7 +110,11 @@ export default function PageHome({ density }: PageHomeProps) {
   const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
 
-  const [openModel, setOpenModel] = useState<string | null>(null)
+  const [openModel, setOpenModel] = useState<{ id: string; name: string } | null>(null)
+  /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
+  const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
+  const [modelErr, setModelErr] = useState<string | null>(null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
   /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
@@ -149,6 +144,30 @@ export default function PageHome({ density }: PageHomeProps) {
   const preset = usePreset(sel)
 
   /*
+   * 「复制后处理脚本」里那段可执行文件路径 —— **由壳给出：就是本应用自己**
+   * （壳那侧是 `current_exe()`）。这里不再写死路径：早先写死的是一串开发机路径，
+   * 而且指向**另一个仓库**的 exe，那个 exe 读不了我们的预设（它把 `offset_x` 判成
+   * "这份预设比本程序新"），复制出去的命令贴进切片器必然报 `Error code: 2`。
+   * 拿不到（浏览器预览那侧没有本机可执行物 / 极罕见的读取失败）→ 保持 `null`，
+   * 那颗按钮就不摆（见下面 `copyScript`）。
+   */
+  const [mkpExe, setMkpExe] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    void api
+      .getPostProcessExe()
+      .then((path) => {
+        if (alive) setMkpExe(path)
+      })
+      .catch((err: unknown) => {
+        console.error('[postprocess] 取不到本程序自己的路径', err)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  /*
    * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
    * —— 显示层用它判断"正在使用的这份是否就是当前选中 combo"。具体取值在下面的
    * displayName / displayPath（要等 presetInfo / presetName 算完）。
@@ -166,6 +185,7 @@ export default function PageHome({ density }: PageHomeProps) {
     dirtyAxes,
     savedNote,
     canPick,
+    canSave,
     view: axisView,
     zSelected,
     xySelected,
@@ -190,6 +210,62 @@ export default function PageHome({ density }: PageHomeProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [openModel, pending, presetAsk])
+
+  /* 「打开测试模型」弹窗：盘上有没有缓存查一次（下载区 + 旧缓存），失败照实说 */
+  useEffect(() => {
+    if (openModel === null) {
+      setModelInfo(null)
+      setModelErr(null)
+      setModelBusy(false)
+      return
+    }
+    let alive = true
+    api.getCalibModels().then(
+      (list) => {
+        if (alive) setModelInfo(list.find((m) => m.id === openModel.id) ?? null)
+      },
+      (e: unknown) => {
+        if (alive) setModelErr(errorText(e))
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [openModel])
+
+  /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
+  const openCachedModel = () => {
+    if (openModel === null) return
+    setModelBusy(true)
+    api.openModel(openModel.id).then(
+      () => {
+        setModelBusy(false)
+        setOpenModel(null)
+      },
+      (e: unknown) => {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      },
+    )
+  }
+
+  /** 取回（走交付下载管道）再打开。两步都可能失败，失败就在弹窗里照实说，不吞 */
+  const fetchAndOpenModel = () => {
+    if (openModel === null || modelInfo === null) return
+    setModelBusy(true)
+    setModelErr(null)
+    void (async () => {
+      try {
+        await api.downloadCatalogFile(modelInfo.fileName)
+        await api.openModel(openModel.id)
+        setModelBusy(false)
+        setOpenModel(null)
+      } catch (e) {
+        setModelBusy(false)
+        setModelErr(errorText(e))
+      }
+    })()
+  }
 
   /** 有未保存的改动就把换页拦下（不分页 —— 三轴在哪一页都能改），等弹窗里给答案 */
   const canLeave = useCallback(
@@ -336,7 +412,13 @@ export default function PageHome({ density }: PageHomeProps) {
    */
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
-  const [deliveryTick, setDeliveryTick] = useState(0)
+  /*
+   * 投递面代次（`deliveryState`）：**任何页面**把交付文件写下 / 移出本机之后 +1，
+   * 这里重拉那两份单子 —— 页签常驻，本页不重挂载，不订阅就永远拿着首读那一份
+   * （2026-10-07 真机：预设页下了 BBS，回首页按钮还停在旧状态）。
+   * 本页自己的下载走 `applyCurrent` 里的 `deliveryMutated()`（同一条路，不再另设 tick）。
+   */
+  const deliveryRevision = useDeliveryRevision()
   /* 盘上那两份单子（下载区 / 漂移），按文件名查 */
   const [onDisk, setOnDisk] = useState<{ downloaded: Set<string>; stale: Set<string> } | null>(null)
 
@@ -353,6 +435,7 @@ export default function PageHome({ density }: PageHomeProps) {
   /** 「应用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
   const presetFile = bundle.presetFileName
 
+  /* 盘上那两份单子：combo 换台时读一次；**投递面代次一变就重读**（谁写的都算） */
   useEffect(() => {
     if (comboKey === null) return
     let alive = true
@@ -369,7 +452,7 @@ export default function PageHome({ density }: PageHomeProps) {
     return () => {
       alive = false
     }
-  }, [comboKey, deliveryTick])
+  }, [comboKey, deliveryRevision])
 
   /*
    * 套餐这一批文件在盘上是什么样 —— 三态与「待下清单」都从这一处算。
@@ -438,24 +521,34 @@ export default function PageHome({ density }: PageHomeProps) {
           )
         }
       }
-      try {
-        await api.applyActivePreset(presetFile, 'official')
-      } catch (e) {
-        /*
-         * 兜底只留给「预判过期」这一种：预判说齐了（清单为空），盘上其实不齐（刚被外部动过）
-         * —— 后端报 NOT_FOUND / SHA_MISMATCH 时才补一次下载再应用。不是重新套一个
-         * 吞异常的 catch：别的错（读不懂、不是 MKP…）照原样往上抛。
-         */
-        if (todo.length > 0 || !isStaleGuess(e)) throw e
-        await api.downloadCatalogFile(presetFile)
-        await api.applyActivePreset(presetFile, 'official')
-      }
+      /*
+       * **两步，各是各的**（2026-10-09 改判）：
+       *
+       *   ① `fetchOfficialPreset` 把官方这一版取到本机（本机已有当前版就一个字节不下载），
+       *      并落一份**我的工作副本**（`presets-mine/<原名>.toml`，已经有了就一个字节不动）；
+       *   ② `applyActivePreset` 把**我那一份**设成当前使用。
+       *
+       * 为什么不合成一步：「取到本机」与「把哪一份设为生效」是两件事 —— 云端表那两颗
+       * （下载 / 更新）只做前一件，使用只发生在本地表那几行上。首页这一颗按钮的语义是
+       * 「让这一台机器用上这一版」，所以两步都走，顺序也是这个顺序。
+       *
+       * 于是"点一下使用就凭空多出一份"那回事仍然不会发生：副本要么本来就在（原样不动），
+       * 要么这一趟就该有（本机一份都没有）。
+       *
+       * 也**不必**再给"预判过期"留兜底：字节在不在这一层由后端自己解决，
+       * 不存在"预判说齐了、其实没齐"那种错 —— 上面那次批量下载只负责套餐里**别的**文件
+       * （切片器配置那一类）。
+       */
+      const fetched = await api.fetchOfficialPreset(presetFile)
+      await api.applyActivePreset(fetched.fileName, 'mine', fetched.path)
       appStateMutated()
     } catch (e) {
       setApplyError(errorText(e))
     } finally {
       setApplying(false)
-      setDeliveryTick((t) => t + 1)
+      /* 投递面广播：本页重读那两份单子（订阅在上面），**别的页**（预设页本地表 /
+         BBS 交付面）也收得到 —— 成了一半也是变了，所以放在 finally 里 */
+      deliveryMutated()
     }
   }, [applying, bundleState, presetFile])
 
@@ -480,6 +573,23 @@ export default function PageHome({ density }: PageHomeProps) {
     activeForSel !== null && presetReady
       ? (activeForSel.path ?? presetInfo?.path ?? null)
       : (presetInfo?.path ?? null)
+  /*
+   * 「复制后处理脚本」里那段 `--Toml` 要的是**绝对路径**（2026-10-09 实测：切片器起
+   * 钩子时的工作目录不是我们的仓库根，贴相对落点进去，导出时竹子弹 "Error code: 2"
+   * —— mkp-ssr 的「预设文件不存在」）。底账那一支不用另算：`usePreset` 取「我那一份」
+   * 时**优先底账正用着的那份**，所以底账命中时 `presetInfo.absPath` 指的就是它，
+   * 与 `displayPath` 说同一份文件。拿不到（官方那份还没取回 / 浏览器预览）就不摆按钮。
+   */
+  const displayAbsPath = presetInfo?.absPath ?? null
+  /*
+   * 那一整行命令 —— **两个事实各归各的那一侧**：可执行物路径由壳给（本应用自己），
+   * 预设路径是我们这侧的绝对落点。**缺一个就不拼、不摆**：相对路径或指不到东西的
+   * 路径贴进切片器是同一种事故（`Error code: 2`），一条这样的命令比没有按钮糟。
+   */
+  const copyScript =
+    mkpExe !== null && displayAbsPath !== null
+      ? `"${mkpExe}" --Toml "${displayAbsPath}" --Gcode`
+      : null
   const inUseNote =
     activeForSel === null || !presetReady
       ? undefined
@@ -536,13 +646,11 @@ export default function PageHome({ density }: PageHomeProps) {
                     <p className={p.path} title={displayPath ?? undefined}>
                       {displayName ?? '—'}
                     </p>
-                    {/* 脚本里的 --Toml 跟着**正在使用的那一份**走（A3：底账命中时是
-                        用户那份的路径，不再是目录底稿）；还没取到就先不摆这颗按钮 */}
-                    {presetInfo && displayPath && (
-                      <CopyAction
-                        text={`"${MKP_EXE}" --Toml "${displayPath}" --Gcode`}
-                        label="复制后处理脚本"
-                      />
+                    {/* 这一行**照着两处真事实拼**：可执行物 = 本应用自己（壳那一侧的
+                        `current_exe()`），预设 = 正在使用那份的绝对路径（A3：底账命中时
+                        是用户那份的文件）；两个缺一不摆 —— 见 `copyScript` */}
+                    {copyScript !== null && (
+                      <CopyAction text={copyScript} label="复制后处理脚本" />
                     )}
                   </>
                 )}
@@ -679,7 +787,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: '打开模型',
               accent: true,
-              onClick: () => setOpenModel('Z 偏移校准板'),
+              onClick: () => setOpenModel({ id: 'z', name: 'Z 偏移校准板' }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
@@ -697,7 +805,15 @@ export default function PageHome({ density }: PageHomeProps) {
             navs={[{ label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) }]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
-              { label: '保存', on: dirty, primary: true, onClick: commitAll },
+              {
+                label: '保存',
+                on: dirty,
+                primary: true,
+                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                disabled: !canSave,
+                title: canSave ? undefined : NEED_COPY,
+                onClick: commitAll,
+              },
               {
                 label: '下一步',
                 arrow: true,
@@ -749,6 +865,8 @@ export default function PageHome({ density }: PageHomeProps) {
                 {/* 没取到预设时点板子不产生读数，这一行是唯一的解释，必须留。
                     其余说明去掉了：点了哪一格、改成多少，上面三轴读数里的「旧 → 新」已经说完 */}
                 {!saved && <p className={p.note}>{NEED_PRESET}</p>}
+                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
+                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -765,7 +883,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: '打开模型',
               accent: true,
-              onClick: () => setOpenModel('XY 偏移校准板'),
+              onClick: () => setOpenModel({ id: 'xy', name: 'XY 偏移校准板' }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
@@ -788,7 +906,15 @@ export default function PageHome({ density }: PageHomeProps) {
             ]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
-              { label: '保存', on: dirty, primary: true, onClick: commitAll },
+              {
+                label: '保存',
+                on: dirty,
+                primary: true,
+                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                disabled: !canSave,
+                title: canSave ? undefined : NEED_COPY,
+                onClick: commitAll,
+              },
               {
                 label: '下一步',
                 arrow: true,
@@ -831,6 +957,8 @@ export default function PageHome({ density }: PageHomeProps) {
                   />
                 </PlateZoom>
                 {!saved && <p className={p.note}>{NEED_PRESET}</p>}
+                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
+                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -853,7 +981,7 @@ export default function PageHome({ density }: PageHomeProps) {
               {
                 label: '打开测试模型',
                 primary: true,
-                onClick: () => setOpenModel('测试模型'),
+                onClick: () => setOpenModel({ id: TEST_MODEL_ID, name: '测试模型' }),
               },
               { label: '回主页', onClick: () => deckRef.current?.jumpTo(0) },
             ]}
@@ -885,8 +1013,10 @@ export default function PageHome({ density }: PageHomeProps) {
       axisView,
       brandOptions,
       canPick,
+      canSave,
       clearAll,
       commitAll,
+      copyScript,
       currentUid,
       density,
       dirty,
@@ -955,19 +1085,29 @@ export default function PageHome({ density }: PageHomeProps) {
 
       {openModel && (
         <Modal
-          title="打开测试模型"
+          title="打开模型"
           onClose={() => setOpenModel(null)}
           foot={
             <>
-              <Btn disabled>从本地缓存打开</Btn>
-              <Btn variant="primary" onClick={() => setOpenModel(null)}>
+              <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
+                从本地缓存打开
+              </Btn>
+              <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
                 从云端获取
               </Btn>
             </>
           }
         >
           <p className={p.note}>
-            {openModel} · 本地无缓存文件，即将从云端下载打开。点击后请耐心等待 3mf 打开。
+            {modelErr !== null
+              ? modelErr
+              : modelBusy
+                ? `${openModel.name} · 正在处理，请稍候…`
+                : modelInfo === null
+                  ? `${openModel.name} · 正在看本机有没有缓存…`
+                  : modelInfo.ready
+                    ? `${openModel.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                    : `${openModel.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
         </Modal>
       )}
@@ -987,15 +1127,17 @@ export default function PageHome({ density }: PageHomeProps) {
               >
                 放弃改动并离开
               </Btn>
-              <Btn
-                variant="primary"
-                onClick={() => {
-                  commitAll()
-                  leaveTo(pending.to)
-                }}
-              >
-                保存并离开
-              </Btn>
+              {canSave && (
+                <Btn
+                  variant="primary"
+                  onClick={() => {
+                    commitAll()
+                    leaveTo(pending.to)
+                  }}
+                >
+                  保存并离开
+                </Btn>
+              )}
             </>
           }
         >
@@ -1008,7 +1150,9 @@ export default function PageHome({ density }: PageHomeProps) {
                   .map(([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`)
                   .join('，')
               : ''}
-            。离开前要保存吗？
+            {canSave
+              ? '。离开前要保存吗？'
+              : '。这份还没有「你的一份」—— 先在预设页另存为我的预设才能存，现在只能放弃。'}
           </p>
         </Modal>
       )}

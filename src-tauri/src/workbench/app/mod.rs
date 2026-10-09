@@ -52,6 +52,10 @@ pub mod bundles;
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
 pub mod delivery;
+/// 「本地测试源（开发）」：一颗按钮＝把 `npm run dev:test-update` 替你敲了
+/// （起本地假云端 + 以 `MKPSE_PRESET_SOURCE_URL` 起客户端 dev）。
+/// **它不碰任何配置** —— 源地址是环境变量注入的，只在 debug 构建里认
+pub mod dev_source;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;
@@ -65,12 +69,15 @@ pub mod platform;
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
-/// ★ **与发布预设那本账分开** —— 两条链不混
+/// ★ **与发布预设那本分开** —— 两条链不混
 pub mod release_history;
 /// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
 pub mod release_tx;
+/// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
+/// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
+pub mod sandbox;
 pub mod storage;
 /// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
 /// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果
@@ -296,6 +303,31 @@ pub(super) fn spawn_flusher() {
             tracing::warn!(error = %e, "空闲落盘的线程起不来，快照只在失焦/关窗时写");
         }
     });
+}
+
+/// 现在这一摞草稿有几处未保存的改动。**没有会话时 `None`** ——
+/// 不为了问一句话去新开一个会话（那会顺便建目录、把整个预设根读一遍）。
+///
+/// 给测试模式那颗开关用：切模式会把会话整个换掉，而草稿是两套、
+/// 未保存的改动不会跟着过去 —— 所以有改动就先拦下来（见 `sandbox` 模块头）。
+pub(super) fn dirty_count_now() -> Option<usize> {
+    let guard = session().lock().ok()?;
+    guard.as_ref().map(|ctx| ctx.draft.dirty_count())
+}
+
+/// 把会话丢掉（下一条命令按**现在**的根重建）。
+///
+/// 给"整套数据根换了"那条路用（测试模式开关、沙箱重拷/清空）：留着旧会话，
+/// 界面显示的是旧根的数据、写盘写的是新根 —— 那是最坏的一种组合。
+/// **丢之前先把草稿落一次盘**（落到旧根），别让"没保存的编辑"随会话一起没。
+pub(super) fn reset_session() {
+    let Ok(mut guard) = session().lock() else {
+        return;
+    };
+    if let Some(ctx) = guard.as_mut() {
+        ctx.flush();
+    }
+    *guard = None;
 }
 
 /// 空闲落盘。**没停手就不写** —— 连着改 10 个值只在停手之后写一次

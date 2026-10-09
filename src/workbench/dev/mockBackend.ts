@@ -706,6 +706,8 @@ function mockAudit(): Json {
     filesRemoved: 0,
     minVersion: '0.0.1',
     canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
+    /* 桩里没有"测试模式"这回事（沙箱切不动，见 `wb_sandbox_*`），所以发布这门是开的 */
+    publishClosed: null,
   }
 }
 
@@ -1842,6 +1844,88 @@ export function installMockBackend() {
         return Promise.resolve({})
       case 'wb_save_ui':
         return Promise.resolve(null)
+      /*
+       * 「本地测试源（开发）」：演示后端**不真起进程**（浏览器里没有那个仓库、也没有 npm）。
+       * 状态如实报"没在跑"；起 / 停如实拒绝，理由写在消息里 —— 照 `wb_reveal_asset`
+       * 那条口径：演示里点它要说实话，不是静默成功。
+       */
+      /*
+       * **测试模式（沙箱）**：桩里没有那个仓库 —— 沙箱那棵树（拷 `presets/`）建不出来，
+       * 于是"开关"这件事在浏览器里必须**如实拒绝**，不能假装切了根（那会让人以为
+       * 自己正站在沙箱里，而其实一个字都没动）。状态那一格报"没开"。
+       */
+      case 'wb_sandbox_status':
+        return Promise.resolve({
+          enabled: false,
+          sandboxRoot: 'C:\\dev\\MKPSupportEase\\workbench\\.sandbox',
+          ready: false,
+          files: 0,
+          bytes: 0,
+          realPresetsRoot: 'C:\\dev\\MKPSupportEase\\presets',
+          note: null,
+        })
+      case 'wb_sandbox_set':
+      case 'wb_sandbox_refill':
+      case 'wb_sandbox_wipe':
+        return Promise.reject({
+          code: 'NOT_IMPLEMENTED',
+          message: '浏览器演示里没有那个仓库 —— 沙箱（拷一份 presets/）建不出来，测试模式切不了',
+          traceId: 'mock',
+        })
+      case 'wb_dev_source_status':
+        return Promise.resolve({
+          running: false,
+          pid: null,
+          url: 'http://127.0.0.1:8787',
+          /* 从没起过：不谎报"端的是哪一份"（界面据此把默认那一行选上） */
+          source: null,
+          sourceRoot: '',
+          repoRoot: 'C:\\dev\\MKPSupportEase',
+          command: 'npm run preset-source:dev',
+          note: null,
+          /* 桩里没有端口可探（没有那个仓库、也没有 npm）—— 冲突那一块在浏览器里恒为空 */
+          conflicts: [],
+          /* 三行单选：桩里**照后端那套说法**摆出来（名字 / 说法 / 根 / 地址 / 齐没齐）——
+             名字与措辞由后端给，这边只当它是个数据源，不许自己另编一套 */
+          sources: [
+            {
+              kind: 'v1',
+              label: '夹具 v1',
+              note: '模拟「官方源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」',
+              root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v1',
+              url: 'http://127.0.0.1:8787',
+              ready: true,
+              missing: null,
+            },
+            {
+              kind: 'v2',
+              label: '夹具 v2',
+              note: '模拟「官方发了新版」—— 同一份预设的下一版（revision 变了）',
+              root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v2',
+              url: 'http://127.0.0.1:8787',
+              ready: true,
+              missing: null,
+            },
+            {
+              kind: 'delivery',
+              label: '当前交付',
+              note: '端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」',
+              root: 'C:\\dev\\MKPSupportEase\\presets',
+              url: 'http://127.0.0.1:8787/delivery',
+              ready: true,
+              missing: null,
+            },
+          ],
+        })
+      case 'wb_dev_source_start':
+      case 'wb_dev_source_stop':
+      case 'wb_dev_source_clear_conflict':
+        return Promise.reject({
+          code: 'NOT_IMPLEMENTED',
+          message:
+            '浏览器演示里起不了本地测试源 —— 真机上这颗会跑 npm run preset-source:dev，把选中的那一份交给它',
+          traceId: 'mock',
+        })
       case 'wb_set_bootstrap': {
         const url = String(args?.url ?? '').trim()
         if (url === '') {

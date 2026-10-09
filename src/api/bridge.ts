@@ -1,7 +1,6 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
-import { NotImplementedError } from './errors'
 import {
   isAppError,
   type AppError,
@@ -20,10 +19,9 @@ import {
  * 2026-10-02 清扫时删除：首圈的硬编码表，页面早已改走文件体系）。
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
- * 还剩两个写盘 / 下载的（`copyToSlicer` / `downloadFiles`）后端还没有：
- * 按仓里的纪律（HANDOFF 14.1：后端没有的命令**不渲染入口**），
- * 它们在真机上抛 `NotImplementedError`，页面因此显示「本版未接入」那一块，
- * 而不是白屏、也不是假装成功。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
+ * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制官方链接）
+ * 也接上了真 command；`downloadFiles`（官方仓库文件的「下载」残支）按用户裁断
+ * **连入口一起撤了**，契约里不再留它。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
  * 是多一层没必要的间接：`invoke` 本身就是那座桥。
@@ -103,27 +101,19 @@ function withTick(
   return { ...args, onTick: channel }
 }
 
-/**
- * 一个**还没接**的接口。
- *
- * 不做成"返回空数组"：空数组与"后端说没有"在界面上长得一样，
- * 而这两件事要分开（见 `errors.ts` 那段）。抛出来，页面上是一块写明方法名的空态。
- *
- * **必须是 async**：契约上这些方法返回 `Promise`，调用方把「失败」接在
- * `.then(ok, err)` / `.catch` 上 —— 直接同步 throw 会绕过那条 reject 通道，
- * 在 `Promise.all([api.getMachines(), ...])` 这种**数组字面量**处就炸穿出去
- * （异常发生在 `Promise.all` 被调用之前），于是调用方的兜底永远收不到它。
- * 落在 `useEffect` 里就是 React 渲染期异常，没有 error boundary 时整棵树卸载 ——
- * 白屏，而不是这块「未接入」空态。async 之后异常才走 reject，兜底才接得住。
- */
-async function notWired(method: MkpApiMethod): Promise<never> {
-  throw new NotImplementedError(method)
-}
-
 export const bridgeApi: MkpApi = {
-  saveOffsets: (axes) => call('saveOffsets', 'save_offsets', { axes }),
+  /* 校准值写进「我的预设」（2026-10-08：随用户那份走，不再是独立的 offsets.json） */
+  savePresetCalibration: (path, axes) =>
+    call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
+  /* 「复制后处理脚本」里那段可执行物路径：壳的 current_exe()（就是本程序自己） */
+  getPostProcessExe: () => call('getPostProcessExe', 'get_post_process_exe'),
+  /* 钩子那一趟：切片器导出时本程序被带参数拉起来的那一次（快照 / 停 / 答一问） */
+  getPostProcessRun: () => call('getPostProcessRun', 'get_post_process_run'),
+  cancelPostProcess: () => call('cancelPostProcess', 'cancel_post_process'),
+  answerPostProcessMismatch: (keep) =>
+    call('answerPostProcessMismatch', 'answer_post_process_mismatch', { keep }),
 
   /* ——— 预设页（A41）的读接口：走真 command —— */
   getMachines: () => call('getMachines', 'get_machines'),
@@ -158,9 +148,10 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
   copyUserPreset: (path, newName) =>
     call('copyUserPreset', 'copy_user_preset', { path, newName }),
-  /* 官方 → 我的文件：交付行直接另存（与「改这份」同一条可信字节闸；不碰任何状态） */
-  copyReleaseAsNew: (fileName, newName) =>
-    call('copyReleaseAsNew', 'copy_release_as_new', { fileName, newName }),
+  /* 另存为我的预设：官方那一份 → 我的一份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+
+  getUserCopyFor: (machineId, versionId) =>
+    call('getUserCopyFor', 'get_user_copy_for', { machineId, versionId }),
   /*
    * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
    * 这里管的是"选择器 + 两段式导入"：
@@ -215,10 +206,31 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
+  /* ——— 官方版本账 + 对比台（2026-10-08）———
+     官方版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
+     baseline 是隐藏内部存储，前端拿不到它的路径。 */
+  getOfficialVersions: (fileName) =>
+    call('getOfficialVersions', 'get_official_versions', { fileName: fileName ?? null }),
+  readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
+  savePresetParams: (path, edits) =>
+    call<void>('savePresetParams', 'save_preset_params', { path, edits }),
+  /* ——— 逐参数「官方更新」（2026-10-09）———
+     读三方账（我 / 官方旧值 / 官方新值）+ 落采用·保持的决定。
+     `fetchMissing` 只在打开某一份预设时给 true（允许为取官方新版发一次网络）。 */
+  getPresetParamSync: (path, fetchMissing) =>
+    call('getPresetParamSync', 'get_preset_param_sync', {
+      path,
+      fetchMissing: fetchMissing ?? false,
+    }),
+  applyPresetParamDecisions: (path, decisions) =>
+    call('applyPresetParamDecisions', 'apply_preset_param_decisions', { path, decisions }),
   getActivePreset: () => call('getActivePreset', 'get_active_preset'),
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
+  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
+  fetchOfficialPreset: (fileName) =>
+    call('fetchOfficialPreset', 'fetch_official_preset', { fileName }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
@@ -234,7 +246,11 @@ export const bridgeApi: MkpApi = {
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
 
-  /* ——— 还要等后端的那几个（写盘 / 应用 / 下载）——— */
-  copyToSlicer: () => notWired('copyToSlicer'),
-  downloadFiles: () => notWired('downloadFiles'),
+  /* ——— 切片器目录（复制进去才生效）+ 复制官方链接（2026-10-09 接通）——— */
+  copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
+  getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
+
+  /* ——— 报告页：后处理执行报告与历史（gcode_history 的真账，只读）——— */
+  getReportList: () => call('getReportList', 'get_report_list'),
+  getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
 }

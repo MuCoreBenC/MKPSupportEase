@@ -128,11 +128,14 @@ export function Btn({
   children,
   variant = 'default',
   disabled,
+  title,
   onClick,
 }: {
   children: ReactNode
   variant?: 'default' | 'accent' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
+  /** 灰着 / 需要说明时悬停能看到的一句话 —— 灰一个按钮不说为什么，用户只会以为坏了 */
+  title?: string
   onClick?: () => void
 }) {
   const cls = [
@@ -145,7 +148,7 @@ export function Btn({
     .filter(Boolean)
     .join(' ')
   return (
-    <button type="button" className={cls} disabled={disabled} onClick={onClick}>
+    <button type="button" className={cls} disabled={disabled} title={title} onClick={onClick}>
       {children}
     </button>
   )

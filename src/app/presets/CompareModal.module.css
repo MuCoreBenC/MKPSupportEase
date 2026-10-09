@@ -1,0 +1,220 @@
+/*
+ * 参数对比台（2026-10-08）。
+ *
+ * 与预设页、参数页同源：扁平克制、浅灰白面板、1px 细线、圆角，颜色与间距全部取
+ * `src/styles/tokens.css` 的变量 —— 一行硬编码色都不写（下面那几个色号也只是回退值，
+ * 变量在就是变量说了算）。
+ *
+ * 视觉重量放在**差异本身**上：有差异的行整行淡底 + 左侧强调条，没有差异的行安静下来。
+ */
+
+.pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+
+.pickItem {
+  font: inherit;
+  font-size: var(--fs-label);
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.pickItem:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.pickItem:disabled {
+  cursor: not-allowed;
+  color: var(--text-3);
+}
+
+.pickOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.problem {
+  margin: 0 0 8px;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.note {
+  margin: 6px 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.grid {
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.headKey,
+.headCol {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: var(--fs-label);
+  font-weight: 600;
+}
+
+.headCol {
+  min-width: 180px;
+}
+
+.headName {
+  display: block;
+  color: var(--text-1);
+}
+
+.headSub {
+  display: block;
+  margin-top: 2px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.groupRow td {
+  padding: 6px 10px;
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  border-top: 1px solid var(--line);
+}
+
+.row td {
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.rowDiff td {
+  background: var(--accent-soft);
+}
+
+.keyCell {
+  width: 30%;
+}
+
+.keyLabel {
+  display: block;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.unit {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.keyPath {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.absent {
+  color: var(--text-3);
+}
+
+.gcode {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.more {
+  color: var(--text-3);
+}
+
+.adopt {
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: var(--accent-deep);
+  cursor: pointer;
+}
+
+.adopt:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.footNote {
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.ghost,
+.primary {
+  font: inherit;
+  font-size: var(--fs-label);
+  padding: 5px 14px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.ghost {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-1);
+}
+
+.primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:disabled,
+.ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

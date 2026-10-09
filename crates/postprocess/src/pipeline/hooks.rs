@@ -26,9 +26,9 @@ pub fn apply_skip_vibration_calibration(lines: Vec<String>, skip: bool) -> Vec<S
                 return true;
             }
             match code_part.split_whitespace().next() {
+                // 大小写不敏感比较（原实现每行一次 `to_uppercase` 堆分配）
                 Some(cmd) => {
-                    let cmd = cmd.to_uppercase();
-                    !(cmd.starts_with("M970") || cmd == "M974")
+                    !(starts_with_ascii_ci(cmd, "m970") || cmd.eq_ignore_ascii_case("M974"))
                 }
                 None => true,
             }
@@ -41,6 +41,12 @@ fn code_before_comment(trimmed: &str) -> &str {
         Some(idx) => trimmed[..idx].trim(),
         None => trimmed,
     }
+}
+
+/// ASCII 大小写不敏感的前缀判断（`prefix` 必须小写）。
+fn starts_with_ascii_ci(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 /// P1/X1 共用收笔 G-code（begin_stage_retract_custom.go:8，从 p1mkp 样本提取）。
@@ -201,10 +207,13 @@ pub fn apply_begin_stage_retract(
         .iter()
         .position(|l| l.contains("; FEATURE: Custom"))
         .unwrap_or(0);
+    // **移动**而不是 `extend_from_slice`：后者对 `String` 是深拷贝整份行序列
+    // （一份百万行级的输出就是一百万次分配）。
     let mut result = Vec::with_capacity(lines.len() + block.len());
-    result.extend_from_slice(&lines[..insert_idx]);
+    let mut tail = lines.into_iter();
+    result.extend(tail.by_ref().take(insert_idx));
     result.extend(block);
-    result.extend_from_slice(&lines[insert_idx..]);
+    result.extend(tail);
     result
 }
 

@@ -43,7 +43,7 @@
  * 「共 0 条」，那是假信息。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activateCombo, activePresetSnapshot, useActivePreset } from '../state/appState'
 import type {
@@ -51,14 +51,33 @@ import type {
   CatalogParamDef,
   Machine,
   MachineVersion,
+  ParamDecisionKind,
   ParamMeta,
   ParamSection,
+  ParamSyncEntry,
   ParamTab,
   Plate,
+  PresetParamSync,
   RecipeParam,
   RuntimeCatalog,
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
+
+/**
+ * 参数编辑器的两种打开方式。
+ *
+ * - **不带 `target`**：整页参数台 —— 按「机型 · 版本」挑编辑目标（catalog 里那张
+ *   `editTargetByCombo` 表说这个组合编辑谁），用户能在预设抽屉里换。
+ * - **带 `target`**：右键某一份预设打开的那一个 —— **钉死这一份**
+ *   （`presets-mine/…` 里的那一个路径），机型 / 版本只用来决定字段表与分组，
+ *   用户换不了目标。两次打开同一份预设得到的是同一件事，与「当前应用」无关。
+ *
+ * 两者**共用同一个 hook 与同一套组件**：外壳不同、编辑的对象来源不同，别的全一样。
+ */
+export interface UseParamsOptions {
+  /** 钉住编辑目标（右键某一份预设进来时给） */
+  target?: { path: string; fileName: string; machineId: string; versionId: string }
+}
 
 /** 一条字段定义。**刻意不带当前值** —— 值走 `valueOf()`，免得行数据里那份过期 */
 export interface ParamDef {
@@ -445,7 +464,10 @@ export interface Params {
   saveResult: string | null
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
-  /** 底栏的「恢复默认值」：全部退回出厂值，算一次动作，撤销一下就全回来 */
+  /**
+   * 底栏的「恢复默认值」：全部退回**出厂值**（目录里那份 `baseValue`），
+   * 算一次动作、可整体撤销（2026-10-08 资源库改判：不再问任何历史快照）。
+   */
   restoreDefaults: () => void
   save: () => void
   /** 保存成功后的那一行绿字；null = 不显示 */
@@ -468,9 +490,55 @@ export interface Params {
   pendingCombo: { machineId: string; versionId: string } | null
   confirmPending: () => void
   cancelPending: () => void
+
+  /**
+   * **钉住模式**：这一次编辑的对象就是某一份具体的预设（右键进来的那一个）。
+   * 整页参数台是 `false` —— 那时编辑目标跟着 combo 走。
+   */
+  pinned: boolean
+
+  /* ---------- 官方更新（2026-10-09） ---------- */
+
+  /**
+   * 这一份的**官方更新账**（我 / 官方旧值 / 官方新值）。
+   *
+   * `null` = 现在还比不了（编辑目标不是「我的预设」、官方那一版认不出、或读坏了）——
+   * 界面照实说，不编一个"零项待处理"出来。
+   */
+  sync: PresetParamSync | null
+  /** 读 / 落这次官方更新账时的问题（一句人话）。正常是 `null` */
+  syncError: string | null
+  /** 官方当前版的字节还没到本机 —— 只能看到"有新版本"，看不到逐项差异 */
+  syncNeedsFetch: boolean
+  /** 正在落决定（采用 / 保持）—— 那一行的两颗按钮据此禁用 */
+  syncBusy: boolean
+  /** 某一项上的官方更新账（没有这一项就是 `undefined`） */
+  syncOf: (key: string) => ParamSyncEntry | undefined
+  /** 待处理条数（`sync === null` 时是 0） */
+  pendingCount: number
+  /**
+   * **落一批决定**：`adopt` = 采用官方新值（写进我那份文件），
+   * `hold` = 保持我的值（文件一个字不动）。两者都把水位推到官方当前版。
+   */
+  decideSync: (keys: string[], kind: ParamDecisionKind) => void
 }
 
-export function useParams(): Params {
+export function useParams(opts: UseParamsOptions = {}): Params {
+  /*
+   * 钉住的那一份（右键预设进来）。摊成几个原始值再用 —— 对象每次渲染都是新的，
+   * 拿它当 effect 依赖会让所有效果每帧重跑一遍。
+   */
+  const pinnedPath = opts.target?.path ?? null
+  const pinnedFileName = opts.target?.fileName ?? null
+  const pinnedMachine = opts.target?.machineId ?? null
+  const pinnedVersion = opts.target?.versionId ?? null
+  const pinned = pinnedPath !== null && pinnedFileName !== null
+  /*
+   * 挂载那一刻的钉住状态：catalog 那条装载效果只跑一次，它要按**当时**是不是钉住模式
+   * 决定"要不要落到正在用的那一份" —— 拿 state 当依赖会让它重跑一遍（那是另一件事）。
+   */
+  const pinnedAtMount = useRef(pinned).current
+
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [combo, setCombo] = useState<ComboData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -520,6 +588,34 @@ export function useParams(): Params {
    * 与 `savedNote`（保存成功的绿字）分开：这是**拒绝**，语气与位置都不同。
    */
   const [gateNote, setGateNote] = useState<string | null>(null)
+
+  /*
+   * **我那份文件里真实写着的参数值**（`presets-mine/…` 的字节，`readPresetParams` 读的）。
+   *
+   * 为什么需要这一层：`getMachineParams` 给的是**目录里的配方**（机型·版本的有效值），
+   * 而"我的值"是**我那份文件里写着什么** —— 两者在用户改过之后就分岔了。
+   * 编辑对象是「我的预设」时，已保存那一层以文件为准；官方线 / 认不出那份才退回配方。
+   * 文件里没有这一项就**不进表**（下一层回落），所以"这份没写它"与"它等于 0"分得开。
+   */
+  const [fileValues, setFileValues] = useState<Map<string, string>>(() => new Map())
+  /** 重读那一层的计数器（采用官方新值之后文件变了，要再读一次） */
+  const [fileReload, setFileReload] = useState(0)
+
+  /* ---------- 官方更新（三方账） ---------- */
+  const [sync, setSync] = useState<PresetParamSync | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncBusy, setSyncBusy] = useState(false)
+
+  /**
+   * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
+   *
+   * 那一版是"退回这份预设当初那版官方的默认值"（藏在内部 baseline 里）。
+   * 现在整个功能不要了：**有问题就让用户删掉、重新取一份** —— 参数表上的「恢复默认值」
+   * 退回**出厂值**（目录里那份 `baseValue`），不再去问任何历史快照。
+   *
+   * 于是这一条读（`getPresetDefaults`）与状态一起下线：少一次请求、少一个"我该退到哪一版"
+   * 的隐性概念。
+   */
 
   /**
    * **保存**：把草稿提交成"我的预设"（官方线另存 / 用户线写回）。
@@ -663,6 +759,8 @@ export function useParams(): Params {
        * 原来写死"第一台"，应用了 P1S 再进这一页还是 A1（作者：「怎么一直是 a1」）。
        * 快照走唯一客户端的一次读取（`activePresetSnapshot`），不在这里单独读底账。
        */
+      /* 钉住模式：目标由调用方点名，别让"正在用的那一份"把它顶掉 */
+      if (pinnedAtMount) return
       const live = await activePresetSnapshot()
       if (!alive) return
       const liveMachine = list.find((m) => m.id === live?.machineId)
@@ -678,7 +776,7 @@ export function useParams(): Params {
     return () => {
       alive = false
     }
-  }, [])
+  }, [pinnedAtMount])
 
   /*
    * 换组合就**重拉**布局、参数、文件清单 —— 不吃缓存。
@@ -871,10 +969,41 @@ export function useParams(): Params {
   const defOf = useCallback((key: string) => combo?.defByKey.get(key), [combo])
   const placeOf = useCallback((key: string) => combo?.placeByKey.get(key), [combo])
 
+  /**
+   * **这一轮编辑的是哪一份**（参数页底座 ③）。
+   *
+   * 默认由"当前组合对应哪一份"决定（`catalog.editTargetByCombo`：同一组合用户线优先）；
+   * 钉住模式（右键某一行的参数模态框）由调用方点名，**不看**那张表 ——
+   * 用户点的是哪一份就编哪一份，与「当前应用」、与 combo 都不再有关系。
+   */
+  const editingTarget = useMemo(() => {
+    if (pinnedPath !== null && pinnedFileName !== null) {
+      return { fileName: pinnedFileName, origin: 'mine' as ActiveOrigin, path: pinnedPath }
+    }
+    if (catalog === null || machineId === '' || versionId === '') return null
+    return catalog.editTargetByCombo.get(`${machineId}:${versionId}`) ?? null
+  }, [catalog, machineId, pinnedFileName, pinnedPath, versionId])
+
+  /** 这一轮编辑的对象是**我的那一份**（有路径）—— 官方线 / 认不出则不是 */
+  const editingMine = editingTarget !== null && editingTarget.origin === 'mine'
+  const minePath = editingMine ? (editingTarget?.path ?? null) : null
+
+  /**
+   * 已保存那一层的取值顺序：
+   *   ① 这一屏保存过的（`saved`，按「机型:版本:字段」记）
+   *   ② **我那份文件里真实写着的**（编辑对象是「我的预设」时才有这一档）
+   *   ③ 目录里的配方值（`getMachineParams`）—— 官方线 / 文件里没写这一项时的底
+   *
+   * ② 不能省：用户改过之后，配方给的就不再是"我的值"了 —— 少了它，
+   * 参数行会把官方默认显示成"我已保存的"，而「我的修改」那个徽章也就没了依据。
+   */
   const savedValueOf = useCallback(
     (key: string) =>
-      saved.get(cellKey(machineId, versionId, key)) ?? combo?.baseByKey.get(key) ?? '',
-    [combo, machineId, saved, versionId],
+      saved.get(cellKey(machineId, versionId, key)) ??
+      (editingMine ? fileValues.get(key) : undefined) ??
+      combo?.baseByKey.get(key) ??
+      '',
+    [combo, editingMine, fileValues, machineId, saved, versionId],
   )
 
   const valueOf = useCallback(
@@ -1065,12 +1194,21 @@ export function useParams(): Params {
     [apply, defOf, savedValueOf],
   )
 
-  /** 整份恢复出厂值：一次动作，撤销一下就全回来 */
+  /**
+   * 整份恢复默认值：一次动作，撤销一下就全回来。
+   *
+   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版官方的
+   * 默认值"整个退场了 —— 有问题就让用户删掉、重新取一份，参数页不再养一份历史快照，
+   * 也就没有"基准里缺哪一项"那一串回落。
+   */
   const restoreDefaults = useCallback(() => {
     if (combo === null) return
     apply(
       '恢复默认值',
-      combo.defs.map((d) => ({ key: d.key, value: combo.factoryByKey.get(d.key) ?? '' })),
+      combo.defs.map((d) => ({
+        key: d.key,
+        value: combo.factoryByKey.get(d.key) ?? '',
+      })),
     )
   }, [apply, combo])
 
@@ -1201,6 +1339,8 @@ export function useParams(): Params {
 
   const requestCombo = useCallback(
     (nextMachine: string, nextVersion: string) => {
+      /* 钉住模式（右键某一份预设）：编辑的是那一份，换目标这件事整个不存在 */
+      if (pinned) return
       if (nextMachine === machineId && nextVersion === versionId) return
       /* 有未保存改动就先问一句 —— 切过去草稿就没了，不能静默丢 */
       if (dirtyKeys.length > 0) {
@@ -1209,7 +1349,7 @@ export function useParams(): Params {
       }
       switchTo({ machineId: nextMachine, versionId: nextVersion })
     },
-    [dirtyKeys.length, machineId, switchTo, versionId],
+    [dirtyKeys.length, machineId, pinned, switchTo, versionId],
   )
 
   const confirmPending = useCallback(() => {
@@ -1303,6 +1443,8 @@ export function useParams(): Params {
    * 底账那份，自然不动。
    */
   useEffect(() => {
+    /* 钉住模式（右键某一份预设进来）：目标由调用方点名，底账怎么变都不该拽着这一屏乱跳 */
+    if (pinned) return
     if (active === null || catalog === null) return
     if (active.machineId === machineId && active.versionId === versionId) return
     const machine = catalog.machines.find((m) => m.id === active.machineId)
@@ -1310,7 +1452,17 @@ export function useParams(): Params {
     if (machine !== undefined && version !== undefined) {
       setPick({ machineId: machine.id, versionId: version.id })
     }
-  }, [active, catalog, machineId, versionId])
+  }, [active, catalog, machineId, pinned, versionId])
+
+  /*
+   * 钉住模式：机型 / 版本只用来决定**字段表与分组**（这张卡画哪些参数、怎么分组），
+   * 编辑目标另算（见 `editingTarget`）。放在这里而不是初值里：catalog 是异步到的，
+   * 初值那一次可能还没有这台机型。
+   */
+  useEffect(() => {
+    if (pinnedMachine === null || pinnedVersion === null) return
+    setPick({ machineId: pinnedMachine, versionId: pinnedVersion })
+  }, [pinnedMachine, pinnedVersion])
 
   /*
    * **编辑目标**：当前 combo 对应的那一份文件（参数页底座 ③）。
@@ -1319,11 +1471,6 @@ export function useParams(): Params {
    * 用户切机型/版本 = 换目标，**不动 active-preset** —— 编辑与应用解耦。
    * combo 对应不到任何文件（如 A2L 没配 MKP）就是 `null`：页面照实说"这份没法改"。
    */
-  const editingTarget = useMemo(() => {
-    if (catalog === null || machineId === '' || versionId === '') return null
-    return catalog.editTargetByCombo.get(`${machineId}:${versionId}`) ?? null
-  }, [catalog, machineId, versionId])
-
   /*
    * combo 一换就**重开草稿**（`beginPresetEdit`）：把那份文件的正文读进草稿链，
    * 于是"改到一半关掉再回来"接着改（后端按"同一份"认草稿，`reused`）。
@@ -1359,6 +1506,105 @@ export function useParams(): Params {
       alive = false
     }
   }, [editingTarget])
+
+  /*
+   * **我那份文件里真实写着的参数值**（只在编辑对象是「我的预设」时读）。
+   *
+   * 读不出来**不报错**：那是"这一屏退回配方值显示"（下一层兜底），不是整页失败 ——
+   * 用户看的是参数，不该为一次读盘失败丢掉整张表。
+   * 采用官方新值之后这里要重读一次（值已经落进文件了，见 `decideSync`）。
+   */
+  useEffect(() => {
+    if (minePath === null) {
+      setFileValues(new Map())
+      return
+    }
+    let alive = true
+    void api.readPresetParams(minePath).then(
+      (v) => {
+        if (alive) setFileValues(new Map(Object.entries(v.values)))
+      },
+      () => {
+        if (alive) setFileValues(new Map())
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [minePath, fileReload])
+
+  /*
+   * **官方更新账**（三方：我 / 官方旧值 / 官方新值）。
+   *
+   * `fetchMissing: true` —— 打开这一份（或这一页）时允许为拿到官方当前版的字节发一次
+   * 请求；取不回来不算失败（后端照实给 `officialReady: false`），界面说清"有新版本、
+   * 还没取回来"，逐项差异等取回来再看。
+   */
+  useEffect(() => {
+    if (minePath === null) {
+      setSync(null)
+      setSyncError(null)
+      return
+    }
+    let alive = true
+    setSyncError(null)
+    void api.getPresetParamSync(minePath, true).then(
+      (v) => {
+        if (alive) setSync(v)
+      },
+      (e: unknown) => {
+        if (alive) {
+          setSync(null)
+          setSyncError(errorText(e))
+        }
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [minePath])
+
+  /**
+   * 落一批决定（采用 / 保持）。
+   *
+   * 采用会把文件里那几项结构保真地改掉 —— 于是**草稿那一层也要跟着改**
+   * （`patchDraft`），否则用户在这之后点「保存修改」会把刚采用的官方新值覆盖回旧值。
+   */
+  const decideSync = useCallback(
+    (keys: string[], kind: ParamDecisionKind) => {
+      if (minePath === null || keys.length === 0) return
+      setSyncBusy(true)
+      setSyncError(null)
+      void api.applyPresetParamDecisions(
+        minePath,
+        keys.map((paramKey) => ({ paramKey, kind })),
+      ).then(
+        (v) => {
+          setSyncBusy(false)
+          setSync(v)
+          if (kind === 'adopt') {
+            for (const key of keys) {
+              const next = v.entries.find((e) => e.key === key)?.mine
+              if (next !== null && next !== undefined) patchDraft(key, next)
+            }
+          }
+          setFileReload((n) => n + 1)
+        },
+        (e: unknown) => {
+          setSyncBusy(false)
+          setSyncError(errorText(e))
+        },
+      )
+    },
+    [minePath, patchDraft],
+  )
+
+  /** 逐项的账，按 key 索引（行上直接取；没有这一项就是 `undefined`） */
+  const syncByKey = useMemo(
+    () => new Map((sync?.entries ?? []).map((e) => [e.key, e] as const)),
+    [sync],
+  )
+  const syncOf = useCallback((key: string) => syncByKey.get(key), [syncByKey])
 
   return {
     loading: error === null && (catalog === null || combo === null),
@@ -1412,5 +1658,14 @@ export function useParams(): Params {
     pendingCombo,
     confirmPending,
     cancelPending,
+    pinned,
+    sync,
+    syncError,
+    syncNeedsFetch:
+      sync !== null && sync.versionAdvanced && sync.officialFileName !== null && !sync.officialReady,
+    syncBusy,
+    syncOf,
+    pendingCount: sync?.pendingCount ?? 0,
+    decideSync,
   }
 }

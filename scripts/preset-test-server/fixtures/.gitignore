@@ -1,0 +1,3 @@
+# 派生产物：`npm run preset-source:make` 生成，不进版本库（会与真目录漂移）
+*
+!.gitignore

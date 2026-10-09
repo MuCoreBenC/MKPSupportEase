@@ -1,9 +1,16 @@
 /*
- * 取预设：选齐「机型 + 版本」后，从**文件体系**里组装那一份。
+ * 取预设：选齐「机型 + 版本」后，组装那一份。
  *
- *   文件名 / 路径   `api.getVersionFiles(machine, version)` 里 `kind === 'mkp_preset'` 的那份
- *   三轴 / 速度     `api.getMachineParams(machine, version)` 的
- *                   `toolhead.offset.x / y / z` + `toolhead.speed_limit`
+ *   文件名 / 落点   有「我那一份」→ 它（`presets-mine/…`，校准保存写它）；
+ *                   没有 → 官方那份（`api.getVersionFiles` 里 `kind === 'mkp_preset'` 的条目）
+ *   三轴 / 速度     有「我那一份」→ 读它的（`api.getUserCopyFor`，用户自己校准出来的值）；
+ *                   没有 → `api.getMachineParams` 的官方默认
+ *                   （`toolhead.offset.x / y / z` + `toolhead.speed_limit`）
+ *
+ * **校准写在「我的预设」上**（2026-10-08 资源库改判）：官方那一份是模板、只读 ——
+ * 要校准它就得先在资源库里「另存为我的预设」，之后读与写都落在那一份 TOML 上。
+ * 「没有我的一份」不是错误：校准页照旧显示官方默认值，只是**保存会被拦**
+ * （先存一份自己的才有得存）。
  *
  * 为什么走文件体系（作者的原话：「首页也应该是消费那个文件，而不是用硬编码」）：
  * 上一版走 `api.getPreset(variantId)`，那是一张手编表、三份全是 A1 mini 的 ——
@@ -17,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { isAppError } from '../../api/contract'
-import type { AppError, Preset } from '../../api/contract'
+import type { AppError, Axes, Preset } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
 
 export type { Preset }
@@ -92,8 +99,10 @@ export function usePreset(sel: Selection): PresetState {
     Promise.all([
       api.getVersionFiles(machine, version),
       api.getMachineParams(machine, version),
+      /* 「我那一份」在不在（在就用它的校准值 —— 2026-10-08：校准写在「我的预设」上） */
+      api.getUserCopyFor(machine, version),
     ]).then(
-      ([files, params]) => {
+      ([files, params, copy]) => {
         if (!alive) return
 
         /* 这个版本没有配 MKP 预设文件（如 A2L）：当没选，别拿半份数据糊弄 */
@@ -110,22 +119,35 @@ export function usePreset(sel: Selection): PresetState {
           const n = Number(row.value)
           return Number.isFinite(n) ? n : null
         }
+        /* 官方默认那一套：你那份里读不出来的那几格回落到它 */
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
         const z = valueOf(OFFSET_KEYS.z)
-        const speed = valueOf(SPEED_KEY)
+        const official: Axes | null =
+          x !== null && y !== null && z !== null ? { x, y, z } : null
+        const officialSpeed = valueOf(SPEED_KEY)
+
+        /* 我那一份优先：它的三轴是**用户自己校准出来的**（官方那套只是出厂默认） */
+        const axes = copy?.axes ?? official
+        const speed = copy?.speed ?? officialSpeed
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
-        if (x === null || y === null || z === null || speed === null) {
+        if (axes === null || speed === null) {
           setState({ status: 'failed', name: PENDING_NAME })
           return
         }
 
         const preset: Preset = {
-          name: file.fileName,
-          path: file.path,
-          axes: { x, y, z },
+          name: copy?.fileName ?? file.fileName,
+          path: copy?.path ?? file.path,
+          /* 绝对路径跟上面那两格**必须是同一份**：有「我那一份」时就是它那份
+             （后端刚读出正文，所以一定在盘上）；没有时才轮到官方交付那份 ——
+             那份还没「取回」时后端不给绝对路径，界面就不摆复制按钮（见 `Preset.absPath`） */
+          absPath: copy !== null ? copy.absPath : (file.absPath ?? null),
+          axes,
           speed,
+          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存） */
+          mine: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
         presetCache.set(`${machine}/${version}`, preset)
         setState({ status: 'ready', preset })

@@ -1,6 +1,11 @@
 > ⚠️ **历史快照（2026-10-05 加注）**：本文写于寻址改造之前，其中的 `presets/dist/`、
 > `baseUrl` 同目录推导、release.json 位置等表述是**当时的现状记录**，不再是现行规则。
 > 现行规则见 `docs/RESOURCE-ADDRESSING-ROADMAP.md` 与 `docs/PUBLISH-ARCHITECTURE.md` §2.2。
+>
+> ⚠️ **2026-10-08 再加注**：预设线改判为**下载即得工作副本**（官方那份退居内部基线、
+> 用户世界里只有一份；校准值写进工作副本 TOML，`index/offsets.json` 退役）。
+> 下文凡提"官方原件 / 用户另存 / 两条写路"的段落，按
+> [`docs/PRESET-WORKING-COPY-2026-10-08.md`](docs/PRESET-WORKING-COPY-2026-10-08.md) 读。
 
 # 交接：数据架构重做 —— 第一圈完成，第二圈进行中
 

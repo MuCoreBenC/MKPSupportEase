@@ -305,6 +305,33 @@ pub async fn download_runtime_file(
         .map_err(|e| AppError::internal("下载任务没能跑到终局").with_detail(e.to_string()))?
 }
 
+/// 一份目录文件的**官方下载链接**（用户「复制链接」复制的就是它）。
+///
+/// 寻址走唯一出口 [`runtime::resolver::SourceResolver`]（`ResourceRef::Entry`）——
+/// 与下载管道算的是**同一个地址**，"复制到的链接"与"下载时取的地址"不可能分叉。
+/// 没配数据源 / Manifest 没声明文件根时**照实报错**，不拼一个猜出来的 URL 给用户。
+#[tauri::command]
+pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("getFileUrl", |_| {
+            let root = internal_root(&app)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == file_name)
+                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+            let resolved = runtime::source::resolve_source(&root)?;
+            resolved
+                .resolver
+                .resolve(runtime::resolver::ResourceRef::Entry(file))
+                .and_then(|addr| addr.remote_or("这份文件"))
+        })
+    });
+    task.await
+        .map_err(|e| AppError::internal("取链接的任务没能跑到终局").with_detail(e.to_string()))?
+}
+
 /// 多份下载里某一份的结局。**来自 [`runtime::delivery::FileOutcome`]**，
 /// 消息原样给界面——评语不由单页造句
 #[derive(Debug, Clone, Serialize)]
@@ -394,6 +421,113 @@ pub async fn download_runtime_files(
     });
     task.await
         .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
+}
+
+/// 「取回官方预设」的结果：这次取回没有 / 落成我的一份没有 / 我那份在哪
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchOfficialDto {
+    /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，一次网络都没发）
+    pub fetched: bool,
+    /// 这次是不是**新落了一份我自己的**（`false` = 我那份本来就在，一个字节都没动）
+    pub created: bool,
+    /// 我那一份的文件名（= 官方那个文件名，两份同名是设计：它就是这一份预设）
+    pub file_name: String,
+    /// 我那一份的落点（相对用户根：`presets-mine/…`）—— 调用方要拿它去「使用」
+    pub path: String,
+}
+
+/// **把官方这一份预设取到本机** —— 资源库云端表那两个动作（「下载」/「更新」）共用的那一条。
+///
+/// # 它做的两件事（都幂等）
+///
+/// ```text
+///   ① 官方当前版的字节  没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+///   ② 我的工作副本      presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统那三行）
+///                      已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
+/// ```
+///
+/// # 它**不**做的事
+///
+/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把官方的取到我机器上"，
+/// 使用是"把哪一份设为生效" —— 两件事分在两个表上：云端表只有下载 / 更新，
+/// 本地表那几行才有「使用」。偷偷替用户换掉正在用的那份，是这一轮要根治的毛病之一。
+///
+/// # 用户世界里的"一份"
+///
+/// 官方原件留在下载区（`<catalog.path>`），它是**内部数据** —— 隐藏 baseline 的来源、
+/// 也是"官方当前版"的唯一可信字节。用户看到的、能改的从始至终是 `presets-mine/` 里那一份。
+#[tauri::command]
+pub async fn fetch_official_preset(
+    app: AppHandle,
+    file_name: String,
+) -> Result<FetchOfficialDto, AppError> {
+    /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
+    let app_handle = app.clone();
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("fetchOfficialPreset", |_| {
+            let root = internal_root(&app_handle)?;
+            let user = crate::fsx::paths::user_root(&app_handle)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == file_name)
+                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+            let fetched = ensure_official_bytes(&root, file)?;
+
+            /* 官方原件是**内部**数据：它只用来落"我那一份"，绝不进用户世界 */
+            let rel = format!("{}/{}", crate::fsx::paths::MINE_DIR, file.file_name);
+            let target = crate::fsx::paths::resolve_in(&user, &rel)?;
+            let created = !target.is_file();
+            if created {
+                let text = runtime::delivery::official_text(&root, file)?;
+                runtime::mine::save_official_as_new(&user, file, &text, &file.file_name)?;
+            }
+            Ok(FetchOfficialDto {
+                fetched,
+                created,
+                file_name: file.file_name.clone(),
+                path: rel,
+            })
+        })
+    });
+    let dto = task
+        .await
+        .map_err(|e| AppError::internal("取回预设没跑到终局").with_detail(e.to_string()))??;
+    /*
+     * **一条广播都不发**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）——
+     * 变的只有盘上的字节。前端的「投递面」那一格由调用方在成功后自行广播
+     * （`deliveryState.ts::deliveryMutated()`，见 `usePresetData.fetchOfficial`）。
+     */
+    Ok(dto)
+}
+
+/// 让这份官方预设的字节**在本机可用**：盘上那份与目录登记一致就直接用（不发一次网络）；
+/// 没有 / 对不上就走同一条下载管道取回来（旧份自动归档，没有第二条路）。
+///
+/// 回来的是"这次是否真的取了一份"（`false` = 本机已有当前版）—— 界面据此说
+/// 「已取回并使用」还是「已使用」。随包 bootstrap 目录不登记期望值：盘上有就照收
+/// （与交付面的口径一致，见 `runtime::delivery::status_of`）。
+pub(super) fn ensure_official_bytes(
+    root: &Path,
+    file: &runtime::catalog::CatalogFile,
+) -> Result<bool, AppError> {
+    if let Ok(bytes) = std::fs::read(root.join(&file.path)) {
+        let current = match file.expected_sha() {
+            Some(want) => runtime::catalog::hex(&sha2::Sha256::digest(&bytes)) == want,
+            None => true,
+        };
+        if current {
+            return Ok(false);
+        }
+    }
+    let resolved = runtime::source::resolve_source(root)?;
+    /* 这条路不问进度（用户点的是"使用"）——水位没人听，打个空拍就行 */
+    let forward = |_tick: &runtime::net::Tick| {};
+    let remote = runtime::net::RemoteSource::new(resolved.resolver.clone(), &forward);
+    runtime::delivery::deliver(root, file, &remote)?;
+    Ok(true)
 }
 
 /// 水位发货。**Channel 关了（调用方已经不再听）不是错误** —— 记一行 debug 就够，

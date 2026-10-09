@@ -649,14 +649,23 @@ export default function PublishGateModal({
   const blockers = audit?.items.filter((i) => i.severity === 'blocker' && i.status === 'fail').length ?? 0
   const warnings = audit?.items.filter((i) => i.status === 'warn').length ?? 0
 
+  /*
+   * 当前模式让不让发布（测试模式里关着）。**它与闸全绿是两件事** —— 闸算的是"这一版
+   * 东西能不能发出去"，这一格算的是"现在这个模式允不允许发"。两个都过才叫能发，
+   * 所以那句话与那颗按钮都得看它（`canPublish` 单独一个不够）。
+   */
+  const closed = audit?.publishClosed ?? null
+
   const subtitle =
     audit === null
       ? error === null
         ? '正在跑十五项检查……'
         : '没跑起来'
-      : audit.canPublish
-        ? `十五项全过${warnings > 0 ? ` · ${warnings} 项待留意` : ''}`
-        : `${blockers} 项拦住发布`
+      : closed !== null
+        ? '测试模式里发布是关着的'
+        : audit.canPublish
+          ? `十五项全过${warnings > 0 ? ` · ${warnings} 项待留意` : ''}`
+          : `${blockers} 项拦住发布`
 
   return (
     <ModalC14
@@ -671,9 +680,11 @@ export default function PublishGateModal({
           <span className={s.footNote}>
             {audit === null
               ? '闸还没跑完 —— 跑完才谈得上发不发'
-              : audit.canPublish
-                ? '任何一项 Blocker 红了就不许往下走 —— 现在是全绿'
-                : '有 Blocker 未通过：修完点「重新检查」'}
+              : closed !== null
+                ? '关掉测试模式（设置 → 测试模式（沙箱））才能发布 —— 沙箱那一套只在本机，不进 git'
+                : audit.canPublish
+                  ? '任何一项 Blocker 红了就不许往下走 —— 现在是全绿'
+                  : '有 Blocker 未通过：修完点「重新检查」'}
           </span>
           <span className={c.grow} />
           <button type="button" className={c.btn} onClick={onClose} disabled={busy}>
@@ -685,8 +696,14 @@ export default function PublishGateModal({
           <button
             type="button"
             className={`${c.btn} ${c.btnPrimary}`}
-            disabled={!audit?.canPublish || busy}
-            title={audit?.canPublish ? undefined : '闸没全绿 —— 这颗按钮不亮'}
+            disabled={!audit?.canPublish || busy || closed !== null}
+            title={
+              closed !== null
+                ? closed
+                : audit?.canPublish
+                  ? undefined
+                  : '闸没全绿 —— 这颗按钮不亮'
+            }
             onClick={() => void publish()}
           >
             {busy ? '发布中…' : '确认发布'}
@@ -697,6 +714,24 @@ export default function PublishGateModal({
       {error !== null && (
         <p className={s.error} role="alert">
           {error}
+        </p>
+      )}
+
+      {/*
+        测试模式里发布关着 —— **这句必须在闸的正文里**，不能只藏在一颗灰按钮的 title 上。
+        闸全绿的时候人只看到"全绿"，会以为下一步就是发布；而那条路后端是拒的
+        （`wb_publish` 起手 `require_real_mode`）。所以先说清楚：这一版东西闸是过的，
+        只是"现在这个模式"不让发。
+      */}
+      {closed !== null && (
+        <p className={s.error} role="alert" style={{ color: 'var(--warn)' }}>
+          {closed}
+          <br />
+          这一版东西<b>是通过检查的</b>（上面那十六项就是结论）—— 关着的是"发布"这个动作本身。
+          测试模式下产物只写在沙箱里；要发到云端，先关掉测试模式（设置 → 测试模式（沙箱））。
+          <br />
+          顺带：客户端那边**不需要发布**也能看到你生成的新版（它比的是交付根里
+          <span className="wb-mono">catalog.json</span> 的 revision），见「本地测试源」那张卡。
         </p>
       )}
 

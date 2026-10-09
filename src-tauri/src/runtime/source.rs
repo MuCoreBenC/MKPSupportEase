@@ -418,7 +418,36 @@ pub fn current_mode(root: &Path) -> Result<SourceMode, AppError> {
 /// 自定义走盘上那份地址 + **记下来的形状**），内置地址一个都没注入 → 没配。
 ///
 /// 返回 `None` 的那一路要被界面原样说出来——那是唯一诚实的答案。
+/// **开发期的源覆盖**（2026-10-08）：`MKPSE_PRESET_SOURCE_URL` 设了就强制用它。
+///
+/// 它只服务一件事：**本地官方源测试服务**（`scripts/preset-test-server`）——
+/// 开发时把官方源临时指向 `http://127.0.0.1:8787`，客户端逻辑**一套不变**、
+/// 也不感知这是测试源（仍走 catalog / manifest / SHA 校验 / 下载管道）。
+///
+/// ★ **只在 debug 构建里编**：release 里这段代码整个不存在，`check-release-source.mjs`
+/// 与「启动零网络」那两条判据都不受影响；地址按 [`CustomShape::Root`] 解析
+/// （= 在它下面读 `source.json`），所以给的是**服务根**，不是 `source.json` 的完整地址。
+#[cfg(debug_assertions)]
+fn debug_source_override() -> Option<SourceEntry> {
+    let url = std::env::var("MKPSE_PRESET_SOURCE_URL").ok()?;
+    let url = url.trim().to_owned();
+    if url.is_empty() {
+        return None;
+    }
+    tracing::warn!(url = %url, "开发期源覆盖已启用（MKPSE_PRESET_SOURCE_URL）—— 只该在本地测试时看见");
+    Some(SourceEntry::Custom {
+        url,
+        shape: CustomShape::Root,
+    })
+}
+
 pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
+    /* ★ 开发期覆盖排在最前（debug 构建才有；release 里这一段整个不存在） */
+    #[cfg(debug_assertions)]
+    if let Some(entry) = debug_source_override() {
+        return Ok(Some(entry));
+    }
+
     let stored = super::app_state::preset_source(root)?;
     let mode = stored.as_ref().map_or(DEFAULT_MODE, |s| s.mode);
     if mode == SourceMode::Custom {

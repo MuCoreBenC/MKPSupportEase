@@ -123,9 +123,8 @@ interface Props {
   ) => Promise<{ desk: Desk | null; matrix: Matrix | null }>
   /** 「编辑定义」保存成功后交一条给外壳 —— 压进撤销栈（改前/改后整包） */
   onMetaApplied: (m: MetaApplied) => void
-  /** 外壳的保存 / 放弃 / 撤销 */
+  /** 外壳的保存 / 撤销（「放弃」也归外壳那对按钮 —— 这一页不再画自己的一对） */
   onSave: () => void
-  onDiscard: () => void
   onUndo: () => void
   /** 「回到版本页」—— 正在编辑某版时跳回机型与版本页 */
   onGoto: (view: string, focus?: GotoFocus) => void
@@ -133,7 +132,7 @@ interface Props {
 
 export default memo(ParamsPage)
 
-function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onSave, onDiscard, onUndo, onGoto }: Props) {
+function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onSave, onUndo, onGoto }: Props) {
   /* 定位只看挂载时的那一次 —— 之后就是普通的本页状态 */
   const init = initialFocus ?? null
   /*
@@ -938,22 +937,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                     {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
                   </span>
                   <span className={s.grow} />
-                  {/* 撤销 / 重做 / 未保存改动是全稿的动作，长在外壳状态栏上；
-                      这里只留「放弃 / 保存」—— 只有这两件是「这一页在改的东西」 */}
-                  <span className={s.pOpsBtns}>
-                    <button type="button" className={`${s.btn} ${s.btnSm}`} disabled={!dirty} onClick={onDiscard}>
-                      放弃
-                    </button>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                      disabled={!dirty}
-                      title={dirty ? undefined : words.disabled.nothingToSave}
-                      onClick={onSave}
-                    >
-                      保存
-                    </button>
-                  </span>
+                  {/*
+                    ★ **这里不再画「放弃 / 保存」**（2026-10-08 作者实测）：
+                    外壳页头右上角同一位置已经有一对（`未保存 · 放弃 · 保存`），
+                    这一页再画一对就是**同一屏两组一模一样的按钮**，作者原话
+                    「这个工作台的保存有两个多余的。你把下面这个去掉，只留上面那个」。
+                    留着页头那一对：它跟着草稿走（`book.dirtyCount`），而草稿是**全稿**的 ——
+                    保存本来就跨页（改了参数去别的页面点保存也该算数），
+                    把按钮钉在某一页上反而在暗示"只保存这一页"。
+                  */}
                 </div>
 
                 {/* 顶上 tab = 一级参数领域。分组不再是控件 —— 它在下面做卡头 */}
@@ -1064,20 +1056,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                     {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
                   </span>
                   <span className={s.grow} />
-                  <span className={s.pOpsBtns}>
-                    <button type="button" className={`${s.btn} ${s.btnSm}`} disabled={!dirty} onClick={onDiscard}>
-                      放弃
-                    </button>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                      disabled={!dirty}
-                      title={dirty ? undefined : words.disabled.nothingToSave}
-                      onClick={onSave}
-                    >
-                      保存
-                    </button>
-                  </span>
+                  {/* 同「单版本」那一支：这一页不再画「放弃 / 保存」—— 外壳页头已经有
+                      一对，同一屏两组一模一样的按钮（见上面那段注） */}
                 </div>
 
                 <div className={s.pTabRow} role="tablist" aria-label="参数领域">

@@ -241,6 +241,20 @@ pub fn deliver(
      * 记不上不影响这次下载本身（附加信息，与 provenance 同一条口径）；
      * 同字节重放（旧份在、字节一致）：什么都没发生 —— 不记事件。 */
     let new_sha = sha_hex(&bytes);
+
+    /* ★ **隐藏 baseline**（2026-10-08 作者改判）：每一版官方预设都留一份不可见的
+     * 基准快照（[`super::baseline`]）。按内容摘要寻址 ⇒ 幂等、每版一份、不覆盖；
+     * 它是参数页「恢复默认」的取值依据，也是用户那份血统里 `based_on_sha256`
+     * 指向的东西。**与归档（`archive/`）是两件事**：归档服务交付四态判定，
+     * 这一份服务恢复默认 —— 两条线各管各的。
+     * 落不上**不影响这次下载**（附加信息，与事件账、出处账同一条口径）：
+     * 缺了只表现为"恢复默认"回退到出厂值。 */
+    if file.kind == super::catalog::kind::PRESET {
+        if let Err(e) = super::baseline::ensure_baseline(internal_root, &new_sha, &bytes) {
+            tracing::warn!("baseline 没落上（{}）：{}", new_sha, e.message);
+        }
+    }
+
     match old.as_deref() {
         // 第一次落盘：这是「下载」
         None => preset_events::append(

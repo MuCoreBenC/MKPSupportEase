@@ -200,6 +200,27 @@ impl Hosting for GitHub {
         release_from_json(&v)
     }
 
+    /// 这个 tag 的 Release 上挂了哪些附件（`assets[].name`）。
+    ///
+    /// ★ 与 Gitee 同一语义：**没有那个 Release = 一个答案**（空表），不是故障 ——
+    ///   同一版本要发第二个平台时靠它回答"本平台发过没有"。
+    fn release_assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<String>, AppError> {
+        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => Ok(v
+                .get("assets")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|a| a.get("name").and_then(Value::as_str))
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()),
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+
     fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
         // `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=<name>`
         // —— 文件名在**查询串**里，body 是裸字节。与 JSON 出口不是一回事：
@@ -370,12 +391,15 @@ fn review_from_json(v: &Value) -> Result<RemoteReview, AppError> {
 fn transport(e: ureq::Error) -> AppError {
     match e {
         ureq::Error::StatusCode(code) => {
-            let kind = if (400..500).contains(&code) {
-                "请求被拒"
+            if code == 404 {
+                // ★ 404 单独成一档（2026-10-07）：它常常**是一个答案** —— "这个 tag 上没有
+                //   Release"就是 404。按 IO 报的话 [`Hosting::release_assets`] 分不出来。
+                AppError::not_found("GitHub 上没有这一份（HTTP 404）")
+            } else if (400..500).contains(&code) {
+                AppError::io(format!("GitHub 请求被拒（HTTP {code}）"))
             } else {
-                "服务端错误"
-            };
-            AppError::io(format!("GitHub {kind}（HTTP {code}）"))
+                AppError::io(format!("GitHub 服务端错误（HTTP {code}）"))
+            }
         }
         other => AppError::io("连不上 GitHub").with_detail(other.to_string()),
     }

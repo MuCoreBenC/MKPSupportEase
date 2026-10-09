@@ -62,7 +62,7 @@
  * 客户端根本不读，而且它的路径（`presets/mkp/…`）与真实发布契约（`catalog.path`）
  * 已经冲突 —— 留着只会让人误以为那种路径还合法。**没有迁移成兼容结构。**
  */
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
@@ -76,6 +76,7 @@ import type {
   MirrorSync,
   PreviewReport,
   PublishTxReport,
+  ReleaseHistory,
   Words,
 } from '../api'
 import { toasts } from '../c14/toast'
@@ -83,7 +84,7 @@ import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 import ModalC14 from '../c14/ModalC14'
 import CodeText from '../c14/CodeText'
-import { deliveryStageText as STAGE_TEXT } from '../c14/labels'
+import { deliveryStageText as STAGE_TEXT, releaseStageText as RELEASE_STAGE_TEXT } from '../c14/labels'
 import GenerateDiffModal from './GenerateDiffModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
@@ -164,6 +165,22 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    * 「发布预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
    */
   const [releaseGateOpen, setReleaseGateOpen] = useState(false)
+  /*
+   * 软件版本的发布历史（2026-10-07 从发布框里挪到这 —— 作者：历史放在外面，不塞模态框）。
+   * 本地回执日志（`release-history.json`），最新在前；与上面「发布预设」那本账
+   * （`publish-history.json`）是**两本账**。进页取一次 + 关掉发布框取一次，不轮询。
+   */
+  const [releaseHistory, setReleaseHistory] = useState<ReleaseHistory | null>(null)
+  const [releaseHistoryErr, setReleaseHistoryErr] = useState(false)
+  const reloadReleaseHistory = useCallback(() => {
+    setReleaseHistoryErr(false)
+    wb.releaseHistory()
+      .then(setReleaseHistory)
+      .catch(() => setReleaseHistoryErr(true))
+  }, [])
+  useEffect(() => {
+    reloadReleaseHistory()
+  }, [reloadReleaseHistory])
   const [baseline, setBaseline] = useState<BaselineDiffEntry[] | null>(null)
   const [strays, setStrays] = useState<string[] | null>(null)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof wb.trash>> | null>(null)
@@ -725,6 +742,51 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               （Rust / React / 数据读取能力 / 客户端功能）才需要发布一个软件版本。
               发完还要**合并 release.json 那个 PR** —— 客户端才看得到新版本。
             </p>
+
+            {/*
+              发布历史（2026-10-07 从发布框里挪到这）：本地回执日志，最新在前。
+              ★ 这是「发布软件版本」那本账 —— 上面「发布预设」的回执在另一本里
+                （②卡顶上那枚「本次发布落下…」chip），两本账不混。
+            */}
+            <div className={s.bar}>
+              <span className={s.cardNote}>
+                发布历史 ·{' '}
+                {releaseHistoryErr
+                  ? '读不到'
+                  : releaseHistory === null
+                    ? '正在读……'
+                    : `${releaseHistory.records.length} 条 · 最新在前`}
+              </span>
+              <span className={s.grow} />
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => reloadReleaseHistory()}
+              >
+                刷新
+              </button>
+            </div>
+            {releaseHistoryErr ? (
+              <div className={s.emptyHint}>读不到发布历史（后端刚才报错了）—— 点「刷新」再试</div>
+            ) : releaseHistory === null ? (
+              <div className={s.emptyHint}>正在读……</div>
+            ) : releaseHistory.records.length === 0 ? (
+              <div className={s.emptyHint}>还没有发过软件版本。</div>
+            ) : (
+              <div className={s.vstack}>
+                {releaseHistory.records.map((r, i) => (
+                  <div key={`${r.tag}-${i}`} className={s.vfield}>
+                    <div className={s.vhead}>
+                      <b className={s.mono}>{r.tag}</b>
+                      <span className={s.vkey}>{RELEASE_STAGE_TEXT[r.stage] ?? r.stage}</span>
+                      <span className={s.grow} />
+                      <span className={s.rowMeta}>{localStamp(r.at)}</span>
+                    </div>
+                    <span className={s.vhelp}>{r.summary}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -893,12 +955,17 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} />}
 
       {/*
-        发布软件版本的闸 → 回执 → 历史（第四刀）。
-        ★ 与上面那个 `PublishGateModal` 是**两道闸**：这道发安装包，那道发预设。
+        发布软件版本的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
+        「发布预设」的闸（`gateOpen`）是**两道闸**，各有各的账。
+        ★ 关框时重取发布历史：发完的那一趟已经记进 `release-history.json`，
+          页面这块要跟上（历史摆在这张卡上，不再塞在框里）。
       */}
       {releaseGateOpen && (
         <ReleaseGateModal
-          onClose={() => setReleaseGateOpen(false)}
+          onClose={() => {
+            setReleaseGateOpen(false)
+            reloadReleaseHistory()
+          }}
           currentVersion={appVersion}
         />
       )}

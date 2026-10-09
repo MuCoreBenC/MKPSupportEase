@@ -78,9 +78,9 @@ pub fn detect_limits_from_gcode(content: &str) -> (Limits, bool) {
     for raw in content.lines() {
         let stripped = raw.trim();
         if !post_processed && !in_config && stripped.starts_with(';') {
-            let low = stripped[1..].trim().to_lowercase();
+            let body = stripped[1..].trim();
             for m in ["tower_layer_gcode", "glueing", "trapezoidal sheath"] {
-                if low.contains(m) {
+                if contains_ascii_ci(body, m) {
                     post_processed = true;
                     break;
                 }
@@ -381,7 +381,13 @@ pub struct Block {
     pub safe_feedrate: f64,
     pub max_entry_speed: f64,
     pub kind: &'static str,
-    pub type_tag: String,
+    /// 该段所属 `type:` 行对应的**类名**（`None` = 没命中 type 表 ⇒ 按 `kind` 分类）。
+    ///
+    /// 为什么不是 type 原串：一份 G-code 有几十万运动段而 `type:` 行只有几千条，
+    /// 「type → 类名」在 parse 时算掉（[`classify_type`]），逐段求和里就没有
+    /// trim + lowercase + 匹配 + 每段一次字符串分配。**判定面一个字没变**：
+    /// classify 原本就是「先按 type 查表、不中再按 kind 分类」，这里只是把前半段提前。
+    pub type_class: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -402,7 +408,8 @@ struct Parser {
     pos: [f64; 4],
     absolute: bool,
     e_absolute: bool,
-    cur_type: String,
+    /// 当前 `type:` 行对应的类名（`None` = 没命中 type 表）。见 [`Block::type_class`]。
+    cur_type_class: Option<&'static str>,
     cur_feedrate: f64,
     cur_accel: f64,
     cur_travel_accel: f64,
@@ -423,7 +430,7 @@ impl Parser {
             pos: [0.0; 4],
             absolute: true,
             e_absolute: true,
-            cur_type: String::new(),
+            cur_type_class: None,
             cur_feedrate: 0.0,
             blocks: Vec::new(),
             overhead: Overhead::default(),
@@ -578,7 +585,7 @@ impl Parser {
             safe_feedrate,
             max_entry_speed: vmax_junction,
             kind,
-            type_tag: self.cur_type.clone(),
+            type_class: self.cur_type_class,
         });
         self.prev_dir = Some(PrevDirState {
             cruise,
@@ -732,7 +739,7 @@ impl Parser {
             safe_feedrate,
             max_entry_speed: vmax_junction,
             kind,
-            type_tag: self.cur_type.clone(),
+            type_class: self.cur_type_class,
         });
         self.prev_dir = Some(PrevDirState {
             cruise,
@@ -742,12 +749,78 @@ impl Parser {
     }
 }
 
+/// 参数表定长容量（X/Y/Z/E/F/I/J/R/S/P/T = 11 个字母，留 1 个余量）。
+const PARAM_BUF_CAP: usize = 12;
+
+/// 运动行参数表：栈上定长 + 线性查找（**后写覆盖先写**，与 `HashMap::insert` 同义）。
+///
+/// 为什么不是 `HashMap<u8, f64>`：一份 G-code 有几十万运动行，每行建一个 HashMap
+/// 就是每行一次堆分配 + 哈希；而一行最多出现 11 个不同字母，线性扫十来项的代价
+/// 远低于一次分配。溢出（真实 G-code 到不了的超过 [`PARAM_BUF_CAP`] 个不同字母）
+/// 落进 `overflow` —— 这是「绝不悄悄丢参数」的兜底，不是预期路径。
+struct ParamBuf {
+    items: [(u8, f64); PARAM_BUF_CAP],
+    len: usize,
+    overflow: Vec<(u8, f64)>,
+}
+
+impl ParamBuf {
+    fn new() -> Self {
+        Self {
+            items: [(0, 0.0); PARAM_BUF_CAP],
+            len: 0,
+            overflow: Vec::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.len = 0;
+        self.overflow.clear();
+    }
+
+    fn insert(&mut self, key: u8, value: f64) {
+        for it in &mut self.items[..self.len] {
+            if it.0 == key {
+                it.1 = value;
+                return;
+            }
+        }
+        for it in &mut self.overflow {
+            if it.0 == key {
+                it.1 = value;
+                return;
+            }
+        }
+        if self.len < PARAM_BUF_CAP {
+            self.items[self.len] = (key, value);
+            self.len += 1;
+        } else {
+            self.overflow.push((key, value));
+        }
+    }
+
+    fn get(&self, key: u8) -> Option<f64> {
+        for it in &self.items[..self.len] {
+            if it.0 == key {
+                return Some(it.1);
+            }
+        }
+        self.overflow.iter().find(|it| it.0 == key).map(|it| it.1)
+    }
+
+    fn contains(&self, key: u8) -> bool {
+        self.get(key).is_some()
+    }
+}
+
 /// 参数扫描 `([A-Za-z])(-?(?:\d+\.?\d*|\.\d+))`（手写字符扫描，无 regex 依赖）。
 /// 接受面必须含无整数部分形态（"-.02" / ".4"）——G-code 的回抽/复位行大量使用，
 /// 拒绝它们会让纯 E 移动行整体丢块（实测 segments 16265 vs Go 16668）。
-fn scan_params(line: &str) -> Vec<(u8, f64)> {
+///
+/// 写进调用方的 [`ParamBuf`]（零分配）。`G`/`M` 不进参数表 —— 与旧实现调用点的
+/// `if c == b'G' || c == b'M' { continue; }` 同义，只是把过滤前移到这里。
+fn scan_params_into(line: &str, out: &mut ParamBuf) {
     let b = line.as_bytes();
-    let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
         if b[i].is_ascii_alphabetic() {
@@ -786,14 +859,46 @@ fn scan_params(line: &str) -> Vec<(u8, f64)> {
             if num_end > num_start
                 && let Ok(v) = line[num_start..num_end].parse::<f64>()
             {
-                out.push((b[i].to_ascii_uppercase(), v));
+                let key = b[i].to_ascii_uppercase();
+                if key != b'G' && key != b'M' {
+                    out.insert(key, v);
+                }
                 i = num_end;
                 continue;
             }
         }
         i += 1;
     }
-    out
+}
+
+/// ASCII 大小写不敏感的前缀剥离；命中时返回**原串**的尾巴切片（不改大小写）。
+fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = s.get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix) {
+        Some(&s[prefix.len()..])
+    } else {
+        None
+    }
+}
+
+/// ASCII 大小写不敏感的子串查找（`needle` 必须小写）；返回命中的字节下标。
+///
+/// 替代「`to_lowercase()` 后 `contains`/`find`」：一份 G-code 里注释行占近一半，
+/// 后者每行一次堆分配。调用点的针都是固定短串，朴素窗口比较够用。
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+    if n.is_empty() {
+        return Some(0);
+    }
+    if h.len() < n.len() {
+        return None;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
+}
+
+/// [`find_ascii_ci`] 的布尔形态。
+fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
+    find_ascii_ci(haystack, needle).is_some()
 }
 
 /// ParseGcode（内容版）。
@@ -803,22 +908,23 @@ fn scan_params(line: &str) -> Vec<(u8, f64)> {
 pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Block>, Overhead) {
     let mut p = Parser::new(*limits, disable_arc);
     let mut in_config_block = false;
+    let mut params = ParamBuf::new();
 
     for raw in content.lines() {
         let stripped = raw.trim();
 
         if let Some(after_semi) = stripped.strip_prefix(';') {
-            let low = after_semi.trim().to_lowercase();
-            if low.contains("config_block_start") {
+            let body = after_semi.trim();
+            if contains_ascii_ci(body, "config_block_start") {
                 in_config_block = true;
                 continue;
             }
-            if low.contains("config_block_end") {
+            if contains_ascii_ci(body, "config_block_end") {
                 in_config_block = false;
                 continue;
             }
-            if let Some(rest) = low.strip_prefix("type:") {
-                p.cur_type = rest.trim().to_string();
+            if let Some(rest) = strip_prefix_ascii_ci(body, "type:") {
+                p.cur_type_class = classify_type(rest.trim());
             }
             continue;
         }
@@ -876,13 +982,9 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
             continue;
         }
 
-        let mut params: std::collections::HashMap<u8, f64> = std::collections::HashMap::new();
-        for (c, v) in scan_params(line) {
-            if c == b'G' || c == b'M' {
-                continue;
-            }
-            params.insert(c, v);
-        }
+        // 参数表复用同一块栈缓冲：每行零分配
+        params.clear();
+        scan_params_into(line, &mut params);
 
         match (m, gnum) {
             (b'G', "90") => {
@@ -905,20 +1007,20 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
         }
 
         if m == b'M' && gnum == "204" {
-            if let Some(&s) = params.get(&b'S') {
+            if let Some(s) = params.get(b'S') {
                 p.cur_accel = s.abs();
                 p.cur_travel_accel = s.abs();
-                if let Some(&t) = params.get(&b'T') {
+                if let Some(t) = params.get(b'T') {
                     p.cur_retract_accel = t.abs();
                 }
             } else {
-                if let Some(&v) = params.get(&b'P') {
+                if let Some(v) = params.get(b'P') {
                     p.cur_accel = v.abs();
                 }
-                if let Some(&v) = params.get(&b'R') {
+                if let Some(v) = params.get(b'R') {
                     p.cur_retract_accel = v.abs();
                 }
-                if let Some(&v) = params.get(&b'T') {
+                if let Some(v) = params.get(b'T') {
                     p.cur_travel_accel = v.abs();
                 }
             }
@@ -935,15 +1037,15 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
         let ny = axis_coord(&params, b'Y', &p.pos, p.absolute);
         let nz = axis_coord(&params, b'Z', &p.pos, p.absolute);
         let mut ne = p.pos[3];
-        let has_e = params.contains_key(&b'E');
-        if let Some(&v) = params.get(&b'E') {
+        let has_e = params.contains(b'E');
+        if let Some(v) = params.get(b'E') {
             if p.e_absolute {
                 ne = v;
             } else {
                 ne = p.pos[3] + v;
             }
         }
-        if let Some(&v) = params.get(&b'F') {
+        if let Some(v) = params.get(b'F') {
             p.cur_feedrate = v;
         }
 
@@ -955,12 +1057,12 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
             let ccw = !cw;
             let (mut cx, mut cy, mut r): (f64, f64, f64) = (0.0, 0.0, 0.0);
             let mut has_ij = false;
-            if let (Some(&vi), Some(&vj)) = (params.get(&b'I'), params.get(&b'J')) {
+            if let (Some(vi), Some(vj)) = (params.get(b'I'), params.get(b'J')) {
                 has_ij = true;
                 cx = p.pos[0] + vi;
                 cy = p.pos[1] + vj;
                 r = vi.hypot(vj);
-            } else if let Some(&vr) = params.get(&b'R') {
+            } else if let Some(vr) = params.get(b'R') {
                 r = vr.abs();
                 let (mx, my) = ((p.pos[0] + nx) / 2.0, (p.pos[1] + ny) / 2.0);
                 let (ddx, ddy) = (nx - p.pos[0], ny - p.pos[1]);
@@ -989,9 +1091,9 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
                     p.pos[1],
                     nx,
                     ny,
-                    params.get(&b'I').copied().unwrap_or(0.0),
-                    params.get(&b'J').copied().unwrap_or(0.0),
-                    params.get(&b'R').copied().unwrap_or(0.0),
+                    params.get(b'I').unwrap_or(0.0),
+                    params.get(b'J').unwrap_or(0.0),
+                    params.get(b'R').unwrap_or(0.0),
                     has_ij,
                     cw,
                 );
@@ -1014,21 +1116,16 @@ pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Bl
 }
 
 /// 绝对/相对坐标解析。
-fn axis_coord(
-    params: &std::collections::HashMap<u8, f64>,
-    axis: u8,
-    pos: &[f64; 4],
-    absolute: bool,
-) -> f64 {
+fn axis_coord(params: &ParamBuf, axis: u8, pos: &[f64; 4], absolute: bool) -> f64 {
     let idx = match axis {
         b'X' => 0,
         b'Y' => 1,
         b'Z' => 2,
         _ => 3,
     };
-    match params.get(&axis) {
+    match params.get(axis) {
         None => pos[idx],
-        Some(&v) => {
+        Some(v) => {
             if absolute {
                 v
             } else {
@@ -1136,38 +1233,66 @@ fn recalculate_trapezoids(blocks: &mut [Block]) {
 
 // ---- 分类（classify.go） ----
 
-fn classify(kind: &str, type_tag: &str) -> String {
-    let t = type_tag.trim().to_lowercase();
-    let c = match t.as_str() {
-        "wall-outer" | "externalperimeter" | "outer wall" => "外墙",
-        "wall-inner" | "perimeter" | "inner wall" => "内墙",
-        "skin" | "solidinfill" | "topsolidinfill" | "bottomsolidinfill" | "top surface" => {
-            "顶/底面"
-        }
-        "fill" | "internalinfill" | "infill" => "填充",
-        "support" | "support-interface" | "supportinterface" => "支撑",
-        "skirt" | "brim" => "裙边/包边",
-        "gapfill" | "gap fill" => "缝隙填充",
-        "wipe" | "wipe tower" | "priming" | "prime tower" => {
-            // Go 表里 priming → "清洗/ priming"，wipe/wipe tower/prime tower → 擦拭塔
-            if t == "priming" {
-                "清洗/ priming"
-            } else {
-                "擦拭塔"
-            }
-        }
-        _ => "",
+/// `type:` 值 → 类名（Go 表逐条；`None` = 没命中）。
+///
+/// 在 parse 阶段对**每一行 `type:`** 调用一次（几千次），而不是在逐段求和里
+/// 对每个 block 调用（几十万次）。判定面与原 `classify` 的前半段一字不差。
+fn classify_type(type_tag: &str) -> Option<&'static str> {
+    // Go 表逐条（大小写不敏感：原实现是 `to_lowercase` 后全等 match，对 ASCII 值等价）
+    let t = type_tag.trim();
+    let c = if t.eq_ignore_ascii_case("wall-outer")
+        || t.eq_ignore_ascii_case("externalperimeter")
+        || t.eq_ignore_ascii_case("outer wall")
+    {
+        "外墙"
+    } else if t.eq_ignore_ascii_case("wall-inner")
+        || t.eq_ignore_ascii_case("perimeter")
+        || t.eq_ignore_ascii_case("inner wall")
+    {
+        "内墙"
+    } else if t.eq_ignore_ascii_case("skin")
+        || t.eq_ignore_ascii_case("solidinfill")
+        || t.eq_ignore_ascii_case("topsolidinfill")
+        || t.eq_ignore_ascii_case("bottomsolidinfill")
+        || t.eq_ignore_ascii_case("top surface")
+    {
+        "顶/底面"
+    } else if t.eq_ignore_ascii_case("fill")
+        || t.eq_ignore_ascii_case("internalinfill")
+        || t.eq_ignore_ascii_case("infill")
+    {
+        "填充"
+    } else if t.eq_ignore_ascii_case("support")
+        || t.eq_ignore_ascii_case("support-interface")
+        || t.eq_ignore_ascii_case("supportinterface")
+    {
+        "支撑"
+    } else if t.eq_ignore_ascii_case("skirt") || t.eq_ignore_ascii_case("brim") {
+        "裙边/包边"
+    } else if t.eq_ignore_ascii_case("gapfill") || t.eq_ignore_ascii_case("gap fill") {
+        "缝隙填充"
+    } else if t.eq_ignore_ascii_case("priming") {
+        // Go 表里 priming → "清洗/ priming"
+        "清洗/ priming"
+    } else if t.eq_ignore_ascii_case("wipe")
+        || t.eq_ignore_ascii_case("wipe tower")
+        || t.eq_ignore_ascii_case("prime tower")
+    {
+        "擦拭塔"
+    } else {
+        return None;
     };
-    if !c.is_empty() {
-        return c.to_string();
-    }
+    Some(c)
+}
+
+/// type 表没命中时按运动类别分类（原 `classify` 的后半段，逐条同 Go 表）。
+fn classify_kind(kind: &str) -> &'static str {
     match kind {
         "retract" => "回抽/换料",
         "travel" => "空驶移动",
         "extrude" => "其他挤出",
         _ => "其他",
     }
-    .to_string()
 }
 
 // ---- 头部元数据（meta.go，内容版） ----
@@ -1188,7 +1313,7 @@ fn parse_header_meta(content: &str) -> (f64, Option<f64>) {
 
     for raw in content.lines() {
         let s = raw.trim();
-        if s.to_lowercase().starts_with("; config_block_end") {
+        if strip_prefix_ascii_ci(s, "; config_block_end").is_some() {
             break;
         }
         if !s.starts_with(';') {
@@ -1264,7 +1389,7 @@ pub struct Options {
 
 /// `Serialize` 的理由同 [`CategoryStat`]。
 ///
-/// `by_type` 的键是 [`classify`] 给的**中文类别名**（「外墙」「非运动等待(G4/M400)」…），
+/// `by_type` 的键是 [`classify_type`] / [`classify_kind`] 给的**中文类别名**（「外墙」「非运动等待(G4/M400)」…），
 /// 落进 JSON 就是对象键，原样、不转义 —— 这不违反「中文步骤名只许在 UI 一处」那条：
 /// 那条管的是 12 步的**步骤名**（`pipeline/progress.rs:6`），而这些类别名是
 /// 打印时间估算自己的分类结果，本来就只在这一处产生。
@@ -1278,7 +1403,9 @@ pub struct Result {
     pub bambu_anchor_seconds: Option<f64>,
     pub post_process_delta_seconds: Option<f64>,
     pub segments: i64,
-    pub by_type: BTreeMap<String, CategoryStat>,
+    /// 键是 [`classify_type`] / [`classify_kind`] 给的中文类别名（两者都返回 `&'static str`，
+    /// 集合有限 —— 用字面量做键，逐段求和里不再为每一段分配一个 String）。
+    pub by_type: BTreeMap<&'static str, CategoryStat>,
 }
 
 /// `Estimate`（内容版）：options.startup_overhead_seconds 即 CLI 的 240。
@@ -1291,11 +1418,12 @@ pub fn estimate(content: &str, opts: &Options) -> Result {
     recalculate_trapezoids(&mut blocks);
 
     let mut total = 0.0;
-    let mut by_type: BTreeMap<String, CategoryStat> = BTreeMap::new();
+    let mut by_type: BTreeMap<&'static str, CategoryStat> = BTreeMap::new();
     for b in &blocks {
         let t = trapezoid_time(b.entry, b.cruise, b.exit, b.distance, b.accel);
         total += t;
-        let cat = classify(b.kind, &b.type_tag);
+        // 命中 type 表就用 parse 阶段算好的类名，不中才按 kind 分类（逐段零分配）
+        let cat = b.type_class.unwrap_or_else(|| classify_kind(b.kind));
         let d = by_type.entry(cat).or_default();
         d.seconds += t;
         d.count += 1;
@@ -1304,9 +1432,7 @@ pub fn estimate(content: &str, opts: &Options) -> Result {
     let non_motion = overhead.g4_dwell + overhead.m400_wait;
     total += non_motion;
     if non_motion > 0.0 {
-        let d = by_type
-            .entry("非运动等待(G4/M400)".to_string())
-            .or_default();
+        let d = by_type.entry("非运动等待(G4/M400)").or_default();
         d.seconds = non_motion;
         d.count = (overhead.g4_dwell > 0.0) as i64 + (overhead.m400_wait > 0.0) as i64;
     }
@@ -1348,7 +1474,7 @@ mod serialize_tests {
     fn the_archive_gets_all_eight_keys_in_camel_case() {
         let mut by_type = BTreeMap::new();
         by_type.insert(
-            "外墙".to_string(),
+            "外墙",
             CategoryStat {
                 seconds: 12.5,
                 count: 3,

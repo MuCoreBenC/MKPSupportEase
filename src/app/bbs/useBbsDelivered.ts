@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
+import { useDeliveryRevision } from '../state/deliveryState'
 import type { BbsPresetDoc } from './bbsTypes'
 
 /** catalog 里 BBS 配置那一类的 kind（与 Rust 侧 `runtime::catalog::kind::BBS_CONFIG` 同一个词） */
@@ -45,6 +46,12 @@ export function useBbsDelivered(): BbsDelivered {
   const [listed, setListed] = useState<BbsDeliveredItem[]>([])
   const [downloaded, setDownloaded] = useState<BbsDeliveredItem[]>([])
   const [note, setNote] = useState('')
+  /*
+   * 「盘上有哪几份」是**投递面**的事：任何页面下载 / 删除之后代次 +1，这里跟着重读。
+   * 页签常驻（`App.tsx` 2026-10-05 起不重挂载）—— 不订阅就永远拿着首读那一份
+   * （2026-10-07 与首页 / 预设页同一条病，同一味药）。
+   */
+  const deliveryRevision = useDeliveryRevision()
 
   useEffect(() => {
     let alive = true
@@ -70,7 +77,7 @@ export function useBbsDelivered(): BbsDelivered {
     return () => {
       alive = false
     }
-  }, [])
+  }, [deliveryRevision])
 
   const read = useCallback(async (fileName: string) => {
     const text = await api.readDownloadedText(fileName)

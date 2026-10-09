@@ -34,6 +34,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
 import type { PresetSource, SoftwareUpdate } from '../../api/contract'
+/* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
+import { deliveryMutated, sourceMutated } from '../state/deliveryState'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -57,6 +59,9 @@ export default function PageSettings() {
    *   `SoftwareUpdate`  查到了，按 `hasUpdate` 分两句
    */
   const [update, setUpdate] = useState<SoftwareUpdate | null>(null)
+  /* 查更新**失败的原因**（断网 / 没配源 / 远端没发 release.json）——
+     与「没有新版」严格分开（A-53：失败不许长得像"已是最新"，也不许吞掉原因） */
+  const [updateErr, setUpdateErr] = useState<string | null>(null)
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
@@ -86,6 +91,7 @@ export default function PageSettings() {
    */
   const checkUpdate = useCallback(async () => {
     setUpdateBusy(true)
+    setUpdateErr(null)
     try {
       const [version, got] = await Promise.all([
         api.getAppVersion().catch(() => ''),
@@ -93,9 +99,11 @@ export default function PageSettings() {
       ])
       setAppVersion(version || got.currentVersion)
       setUpdate(got)
-    } catch {
-      /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 —— 如实留"没查到" */
+    } catch (e) {
+      /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 ——
+         如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
       setUpdate(null)
+      setUpdateErr(errorText(e))
       const v = await api.getAppVersion().catch(() => '')
       setAppVersion(v)
     } finally {
@@ -145,11 +153,13 @@ export default function PageSettings() {
         /* 演示后端没有内置源（真机必有）：选内置 = 回到"没配"，如实照做 */
         setSource(null)
         setMode(next)
+        sourceChanged()
         return
       }
       setSource(got)
       setMode(got.mode as Mode)
       setNote({ text: `已切到：${got.label}` })
+      sourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
@@ -174,6 +184,18 @@ export default function PageSettings() {
 
   const canSet = draft.trim() !== ''
 
+  /**
+   * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
+   *
+   * 做两件事：`sourceMutated()` 让预设页**按新地址重来一遍**（包括允许后台再检查一次
+   * 目录 —— 那道"本次运行只检查一次"的刹由收方复位）；`deliveryMutated()` 让所有读
+   * 投递面的页面按新目录重读。两个都只是代次，不携带数据。
+   */
+  const sourceChanged = () => {
+    sourceMutated()
+    deliveryMutated()
+  }
+
   /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
   const apply = async () => {
     if (busy) return
@@ -183,6 +205,7 @@ export default function PageSettings() {
       const got = await api.setPresetSource('custom', draft.trim())
       setSource(got)
       setNote({ text: '已应用：现在用的就是你指定的这个地址。' })
+      sourceChanged()
     } catch (e) {
       setNote({
         text: `这个地址取不到预设数据，没有改，现在用的还是 ${source?.label ?? '默认源'}。请检查地址（或直接选上面的官方源）。`,
@@ -235,7 +258,9 @@ export default function PageSettings() {
 
             {update === null && !updateBusy && (
               <p className={s.fieldNote}>
-                更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。
+                {updateErr !== null
+                  ? `这次检查失败了：${updateErr}`
+                  : '更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充“已是最新”。'}
               </p>
             )}
           </div>

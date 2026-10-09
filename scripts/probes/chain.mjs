@@ -15,7 +15,13 @@
  * 所以这一份现在守两头：
  *
  *   工作台端   ① 勾「待生成」→ 生成 → ② 卡的产物名单报出**真产物份数**
+ *              ①b 参数台上「保存 / 放弃」各只剩一处（页头那对；工具行那对已删）
  *              ② 设置页「官方源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
+ *              ②b 设置页「本地测试源（开发）」在、报得出地址；三份源（夹具 v1 / v2 /
+ *                 当前交付）都在且是真单选、「当前交付」的地址带 /delivery；
+ *                 点「启动」如实拒绝（浏览器里起不了进程 —— 那是真机上起 npm 的活）
+ *              ②c 设置页「测试模式（沙箱）」在且如实说在正式；点「打开测试模式」如实拒绝
+ *                 （桩里没有那个仓库，拷不出沙箱 —— 不许假装切了根）；没开时不许换装
  *   客户端端   ③ 设置页的数据源那一格如实说「还没配置」（浏览器里没有源，也不假装联动）
  *
  * 客户端那半条链（下载 → 应用）**在浏览器里不再覆盖**，覆盖搬到了：
@@ -70,8 +76,14 @@ const check = (tag, what, ok, detail = '') => {
   if (!ok) problems.push(`${tag} ${what}${detail ? ` —— ${detail}` : ''}`)
 }
 
-/* 已知且无害：index.html 没写 favicon，浏览器自己会去要一次 */
-const BENIGN = [/\/favicon\.ico$/]
+/*
+ * 已知且无害：
+ *   ① index.html 没写 favicon，浏览器自己会去要一次；
+ *   ② 客户端的设置页一打开就问一次远端目录（「软件更新」那一块）—— 浏览器里没有
+ *      远端源，假后端必抛。这条**是设计成要发生的**（页面自己吞掉、如实说"没查到"），
+ *      `presets.mjs` / `home-flow.mjs` 里也都把它列成预期内。
+ */
+const BENIGN = [/\/favicon\.ico$/, /未实现的接口: checkRemoteUpdate/]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
 const flat = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
@@ -95,8 +107,11 @@ function wire(tag, page) {
   page.on('console', (m) => {
     if (m.type() !== 'error') return
     const at = m.location?.()?.url ?? ''
-    if (benign(at)) return
-    problems.push(`${tag} console.error: ${m.text()}${at ? ` @ ${at}` : ''}`)
+    const text = m.text()
+    /* URL 与**文本**两处都要比：favicon 那条在 URL 上，假后端的"未实现"在文本上
+       （`preset-compare.mjs` 一直是这么比的，这里补上） */
+    if (benign(at) || benign(text)) return
+    problems.push(`${tag} console.error: ${text}${at ? ` @ ${at}` : ''}`)
   })
   page.on('pageerror', (e) => problems.push(`${tag} pageerror: ${e.message}`))
   page.on('response', (r) => {
@@ -183,6 +198,26 @@ for (const size of SIZES) {
   )
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-build.png` })
 
+  /* ---------- ①b 参数台：「放弃 / 保存」只剩页头那一对（2026-10-08 作者裁决） ---------- */
+  /*
+   * 作者原话：「这个工作台的保存有两个多余的。你把下面这个去掉，只留上面那个」——
+   * 参数台的工具行里原来又画了一对，与页头右上角那对**一模一样**（同一屏两组同名按钮，
+   * 人分不出"哪一个保存的是哪一半"）。这里守的就是**只剩一处**。
+   */
+  await wbPage.locator('button[title="参数台"]').first().click()
+  const paramsReady = await until(
+    async () => (await wbText(wbPage)).includes('参数台'),
+    8000,
+  )
+  const saveBtns = await wbPage.getByRole('button', { name: '保存', exact: true }).count()
+  const dropBtns = await wbPage.getByRole('button', { name: '放弃', exact: true }).count()
+  check(
+    tag,
+    '①b 参数台上「保存 / 放弃」各只剩一处（页头那对；工具行那对没了）',
+    paramsReady && saveBtns === 1 && dropBtns === 1,
+    `保存 ${saveBtns} 个 · 放弃 ${dropBtns} 个`,
+  )
+
   /* ---------- ② 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
   /*
    * 守第十七/十八刀定的**输入契约**：用户只表达"我有一个仓库"，其余是系统的事。
@@ -190,6 +225,13 @@ for (const size of SIZES) {
    *   ② 仓库地址**能被接受并保存**（浏览器桩不做 GitHub → raw 规范化 —— 那是真后端
    *      `dist::normalize_bootstrap_url` 的活，它有 3 组单元测试钉着；这里只验 UI 收得下）；
    *   ③ 空地址**存不进去**（按钮压住 / 如实拒）。
+   *
+   * **2026-10-08 修**：这一节漂过一轮 —— 输入框的 aria-label 早已从
+   * 「官方源（Bootstrap）地址」改成**两个**（GitHub 主源 / Gitee 镜像），保存那两句
+   * 也不再带冒号；而"保存"以前靠 `~ button` 找**同一个 vrow 里的后续兄弟**，可那颗
+   * 按钮其实在**下一个** vrow 里 —— 于是这条 locator 恒空、探针在这一行就断了。
+   * 现在按"**点那颗活着的「保存」**"定位：夹具里草稿是干净的，外壳那颗（草稿保存）
+   * 一定是禁用的，所以"哪一颗是活的"本身就是判据。
    */
   await wbPage.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await wbText(wbPage)).includes('官方源（Bootstrap）'), 8000)
@@ -200,12 +242,10 @@ for (const size of SIZES) {
     setReady && wbSetText.includes('填仓库地址就够'),
     wbSetText.slice(0, 80),
   )
-  const urlInput = wbPage.getByLabel('官方源（Bootstrap）地址')
+  const urlInput = wbPage.getByLabel('官方源（GitHub 主源）地址')
   await urlInput.fill('https://github.com/MuCoreBenC/MKPSupportEase.git')
-  /* 「保存」有两个：外壳那颗（草稿保存，此刻禁用）+ 这一格自己那颗。
-     用输入框的**后续兄弟**定位，别用 .first() —— 那会点到外壳那颗上。 */
-  await wbPage.locator('input[aria-label="官方源（Bootstrap）地址"] ~ button').first().click()
-  const saved = await until(async () => (await wbText(wbPage)).includes('已保存：'), 5000)
+  await wbPage.locator('button:enabled', { hasText: /^保存$/ }).first().click()
+  const saved = await until(async () => (await wbText(wbPage)).includes('已保存'), 5000)
   check(
     tag,
     '② 仓库 .git 克隆地址能被接受并保存（UI 收得下；规范化是真后端的活）',
@@ -228,6 +268,89 @@ for (const size of SIZES) {
     reread && afterReread !== 'https://example.com/not-saved',
     `重读后输入框=${afterReread || '(空)'}`,
   )
+
+  /* ---------- ②b 同一页的「本地测试源（开发）」（2026-10-08 加的卡） ---------- */
+  /*
+   * 守两件事：**卡片在、地址报得出**；以及**浏览器里点「启动」要如实拒绝** ——
+   * 演示后端不真起进程（起不了 npm），照 `wb_reveal_asset` 那条口径：宁可说
+   * "这里不行"，也不许静默成功。
+   */
+  const devSrcOn = await until(
+    async () => (await wbText(wbPage)).includes('本地测试源（开发）'),
+    3000,
+  )
+  const devSrcText = flat(await wbText(wbPage))
+  check(
+    tag,
+    '②b 设置页有「本地测试源（开发）」，且报出 127.0.0.1:8787（没在跑）',
+    devSrcOn && devSrcText.includes('127.0.0.1:8787') && devSrcText.includes('没在跑'),
+    devSrcText.slice(0, 80),
+  )
+  await wbPage.getByRole('button', { name: '启动', exact: true }).first().click()
+  const refused = await until(
+    async () => (await wbText(wbPage)).includes('浏览器演示里起不了本地测试源'),
+    3000,
+  )
+  check(tag, '②b 浏览器里点「启动」如实拒绝（不静默成功）', refused, '')
+
+  /*
+   * ②b 之二：**三行单选都在，且「当前交付」那一行的地址带 `/delivery`**。
+   *
+   * 地址那一串不是装饰：真交付根的 `source.json` 写着 `filesRoot: ".."`（交付文件住在
+   * 预设根底下），所以客户端要填 `<地址>/delivery` —— 少写这一截，取 catalog 就 404。
+   * 这一串由后端按那个规矩给，这里钉住它**真出现在界面上**（顺带钉住三份都在）。
+   */
+  const srcText = flat(await wbText(wbPage))
+  check(
+    tag,
+    '②b 测试源三份都在（夹具 v1 / v2 / 当前交付）',
+    srcText.includes('夹具 v1') && srcText.includes('夹具 v2') && srcText.includes('当前交付'),
+    srcText.slice(0, 60),
+  )
+  check(
+    tag,
+    '②b 「当前交付」的地址带 /delivery（filesRoot: ".." 那条规矩）',
+    srcText.includes('127.0.0.1:8787/delivery'),
+    '',
+  )
+  check(
+    tag,
+    '②b 三行都是真单选（radio），不是三行字',
+    (await wbPage.locator('input[name="dev-source-kind"]').count()) === 3,
+    '',
+  )
+
+  /* ---------- ②c 同一页的「测试模式（沙箱）」 ---------- */
+  /*
+   * 守两件事：卡片在、并且**如实说现在在正式**（整窗那圈琥珀换装与那条横幅都读它 ——
+   * `data-sandbox` 只有真开时才 'on'）；以及浏览器里点「打开测试模式」要**如实拒绝**：
+   * 桩里没有那个仓库、拷不出沙箱，假装切了根是最坏的一种谎 ——
+   * 人会以为自己在沙箱里，而其实一个字都没动。
+   */
+  const sandOn = await until(
+    async () => (await wbText(wbPage)).includes('测试模式（沙箱）'),
+    3000,
+  )
+  const sandText = flat(await wbText(wbPage))
+  check(
+    tag,
+    '②c 设置页有「测试模式（沙箱）」，且如实说现在在正式',
+    sandOn && sandText.includes('正式'),
+    sandText.slice(0, 80),
+  )
+  await wbPage.getByRole('button', { name: /打开测试模式/ }).first().click()
+  const sandRefused = await until(
+    async () => (await wbText(wbPage)).includes('测试模式切不了'),
+    3000,
+  )
+  check(tag, '②c 浏览器里点「打开测试模式」如实拒绝（不假装切了根）', sandRefused, '')
+  check(
+    tag,
+    '②c 没真开测试模式时，外壳不带 data-sandbox=on（不许乱换装）',
+    (await wbPage.locator('[data-sandbox="on"]').count()) === 0,
+    '',
+  )
+
   await wbPage.screenshot({ path: `${shotDir}/chain-${tag}-workbench-settings.png` })
 
   /* ---------- ③ 客户端：那一端的边界（浏览器里不再读工作台那一格） ---------- */
@@ -275,6 +398,7 @@ if (problems.length > 0) {
 }
 console.log(
   '工作台发布这一端走通：生成 → ② 卡报出真产物份数；客户端那一端如实（数据源那一格说真话）；'
-  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「官方源」收得下 / 「重新读取」能从磁盘看真相'
+  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「官方源」收得下 / 「重新读取」能从磁盘看真相 / '
+  + '「本地测试源」在且点「启动」如实拒绝 / 「测试模式（沙箱）」在且点开时如实拒绝（不假装切了根）'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )

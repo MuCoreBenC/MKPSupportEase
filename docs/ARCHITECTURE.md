@@ -112,9 +112,9 @@ POSIX 原子）→ fsync 父目录。任何一步失败，目标文件都还是�
 
 | 域 | Rust 文件 | 覆盖 |
 | --- | --- | --- |
-| 校准三件 | `ipc/mod.rs` | `save_offsets`（原子写第一个真实调用点）/ `get_calib_models`（静态清单）/ `open_model`（只记日志，未实现下载与打开） |
+| 校准两件 | `ipc/mod.rs` | `get_calib_models`（静态清单）/ `open_model`（只记日志，未实现下载与打开）。（`save_offsets` 2026-10-08 退役 —— 校准值随用户工作副本走，见下面「用户线」那一格） |
 | 预设读 | `ipc/presets.rs` | 机型 / 版本 / 文件 / 菜单 / 参数元信息与取值（DTO 构建只吃 catalog） |
-| 用户线 | `ipc/mine.rs` | 列 / 读正文 / 编辑四条（草稿）/ 另存 / 写回 / 改名 / 删除 / 导入 / **在文件管理器里显示** |
+| 用户线 | `ipc/mine.rs` | 列 / 读正文 / 编辑四条（草稿）/ 写回 / 改名 / 删除 / 导入 / **在文件管理器里显示**；**另存为我的预设**（`copy_official_as_mine` → `mine::save_official_as_new`）与**校准写回**（`save_preset_calibration`）也在这条线上 |
 | 目录与下载 | `ipc/catalog.rs` | 运行时 catalog / 下载区与归档读 / 使用中指针 / 应用 / 数据源地址 / 检查与更新远端 |
 
 命名两套、映射只在 `bridge.ts` 一处：TS 侧 camelCase，Rust 侧 snake_case。

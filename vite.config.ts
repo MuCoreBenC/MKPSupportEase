@@ -76,6 +76,21 @@ export default defineConfig(({ mode }) => {
       port: withWorkbench ? 5322 : 5321,
       strictPort: true,
       open: false,
+
+      /*
+       * ★ **启动即预热整棵源码树**（2026-10-07 加的，作者真机报"窗口白屏将近一分钟"）：
+       * dev 是按需编译 —— 请求到哪个模块才 transform 哪个。工作台入口静态 import
+       * 全部页面（约 300 个模块），每次重启 dev（vite 换进程、内存缓存清零）首屏都要
+       * 逐个编译：真机实测单模块 ~0.19 秒 × 300 ≈ 60 秒，正好是白屏时长。
+       *
+       * 这里让 vite 在启动时就把模块图编好。妙处在 tauri dev 的流程：
+       * **先起 vite → 再 cargo 编译几十秒 → 才开窗口** —— 预热正好藏在编译那段里
+       * （listen 之后后台跑，不推迟 devUrl ready，tauri 不会多等），窗口打开时模块已就绪。
+       * 就算没跑完就进人了，也只是回到"按需编译"的老样子 —— 没有新风险。
+       */
+      warmup: {
+        clientFiles: ['./src/**/*.{ts,tsx,css}'],
+      },
     },
 
     // Tauri 自己的输出已经够吵，Vite 不要再清屏把它的报错冲掉

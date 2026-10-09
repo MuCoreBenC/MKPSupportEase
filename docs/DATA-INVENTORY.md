@@ -557,4 +557,36 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   同一轮：MKP 工具栏**恒两排**（第一排 类型 / 位置(右) / 搜索，第二排 pill + 计数台账），
   MKP 档的「共 N 项 │ 仓库…」从页脚回到工具栏第二排（切片器档照旧住页脚）。
 
+- 2026-10-08：**下载即得工作副本**（作者改判：用户世界里只有一份预设）：
+  1. **官方那份退居内部基线**（`<catalog.path>` = `delivery/mkp/presets/…`）：用户不可见、
+     不被编辑，只用于与云端比对（工作副本血统 sha256 ↔ 目录期望 sha256）；
+     MKP 档本地表只列 `presets-mine/`，官方交付行/仓库行不再进本地表（云端表照旧）。
+  2. **下载的收尾就复制**：`runtime::mine::ensure_working_copy`（幂等，已有不动）；
+     新命令 `ensure_user_copy`（首页应用前补齐）；官方 → 我的那条另存
+     （`copy_release_as_new`）退役。
+  3. **校准值写进工作副本 TOML**：`save_preset_calibration`（按注册表定位 `toolhead.offset.x/y/z`）；
+     初值读 `get_user_copy_for`；`save_offsets` / `index/offsets.json` / `index/` 预建目录 /
+     `fsx::paths` 的 `Root`·`resolve` 抽象一并退役。
+  4. **规格**：[`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md)；
+     根规则 [`DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) §1③/§2/§3 与本文件同轮更新；
+     产品规则 `PRESET-PRODUCT-RULES.md` 头部改判块 + §1/2/5/7/8/11/12/13 就地改。
+  5. **判据**：Rust 单测 4 条（工作副本生成/不覆盖/非预设拒/校准读值）；
+     探针 `presets.mjs` 5/5e/5f/5k/5m 五节按新世界改写、全绿。
+
+- 2026-10-08（同日三次改判）：**预设资产库**（官方是模板，我的才是实际工作文件）：
+  1. **MKP 档只有一张表**（资源库）：官方那几行（目录登记的当前版）与我的那几行
+     （`presets-mine/`）并排，`来源` 只是副标题上的一枚小字；位置那一轴只剩切片器档；
+  2. **「使用」是唯一的核心动作**：新命令 `use_official_preset`（本机没有字节**按需取回**
+     再写使用中）；「已下载 / 未下载 / 有更新」整套退场；
+  3. **「另存为我的预设」**：新命令 `copy_official_as_mine` → `mine::save_official_as_new`
+     （官方原文 + 三行血统、撞名拒）；**下载 / 使用都不再自动产生副本** ——
+     `mine::ensure_working_copy` 一系 + `ensure_user_copy` **整条退役**；
+  4. **「恢复默认值」退役**：`get_preset_defaults` 下线，参数表退回出厂值；
+     `baseline` 在 MKP 侧的用途随之退役（写盘那一支仍在，下一期随切片器收口）；
+  5. **规格**：[`PRESET-ASSET-LIBRARY.md`](PRESET-ASSET-LIBRARY.md)；
+     产品规则 `PRESET-PRODUCT-RULES.md` 第三次改判块 + §1/7/11/15/19 就地改；
+  6. **判据**：Rust 单测 5 条（另存为正路 / 撞名拒 / 名字门槛 / 非预设拒 / 不碰状态）；
+     探针 `presets.mjs` 全绿（资源库那一张表 + 两套菜单 + 归档/批量退场）。
+     **不写数据迁移**：旧目录原样留在盘上。
+
 每收口一条：勾掉本表一行 + 更新总纲 §4 对应欠账。**新增任何数据相关代码前，先过总纲 §6 准入问句。**

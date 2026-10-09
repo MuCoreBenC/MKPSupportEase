@@ -1,0 +1,64 @@
+{
+  "source": {
+    "builtinAddresses": "编译期注入：src-tauri/build.rs::main::28 读 ../workbench/bootstrap.json 的 bootstrapUrl / giteeBootstrapUrl，经 cargo:rustc-env 写 MKPSE_PRESET_SOURCE / MKPSE_PRESET_SOURCE_GITEE",
+    "priority": "环境变量显式覆盖 > workbench/bootstrap.json > 都没有则**不编造 URL**（联网命令诚实报「还没配置」）",
+    "runtimeStorage": "run/app-state.json#presetSource（整体读-改-写 + 原子替换）；旧 run/preset-source.json 已退役（读侧兜底，写成功后删）",
+    "discovery": "入口 → resolve_entry → parse_source_json（取 source.json 字节）→ SourceManifest::parse → SourceResolver；自定义地址支持「目录 / source.json」两形状自适应（probe_custom_shape）",
+    "deliveryRoot": "= source.json 自身所在目录；filesRoot 只认 . / ..",
+    "devOverride": "MKPSE_PRESET_SOURCE_URL 只在 #[cfg(debug_assertions)] 认（强制指向本地测试源，按 Root 解析）",
+    "evidence": ["src-tauri/build.rs::28", "src-tauri/build.rs::54", "src-tauri/src/runtime/source.rs::476", "src-tauri/src/runtime/source.rs::430", "src-tauri/src/runtime/resolver.rs::1"],
+    "level": "confirmed"
+  },
+  "catalog": {
+    "revision": "对 brands+machines+assets+bundles+registry+plates+files 稳定序列化取 SHA256 前 16 位；**不含** revision 自身、publishedAt、structureSignature",
+    "publishedAt": "发布侧盖（工作台 write_catalog_json，与 manifest.updated 同一个戳 = clock::now_iso8601）；**随包 bootstrap 目录刻意不带**",
+    "digest": "sha256/size 由发布侧对 dist/ 真字节算（FileHashes::FromArtifacts）；随包侧 FileHashes::None（只验存在、不登记）",
+    "embeddedVsRemote": "随包：无 publishedAt / 无 sha256 / size、逐字节可复现；远端：有期望值（下载校验权威）",
+    "ensureReleased": "盘上有就一个字节不动（OTA 数据不许被启动覆盖）；启动入口唯一，release.rs 有源码扫描判据钉死",
+    "generation": "cargo run --bin gen-catalog → src-tauri/src/runtime/catalog.generated.json（编入二进制）+ 重算 presets/delivery/catalog.json；embedded_matches_rebuild 钉「仓库那份＝可重建那份」",
+    "capability": "can_read：**先能力后版本** —— 签名命中 SUPPORTED_SIGNATURES 或 APP_VERSION >= minClientVersion 即放行",
+    "evidence": ["src-tauri/src/runtime/catalog.rs::651", "src-tauri/src/bin/gen-catalog.rs::39", "src-tauri/src/runtime/release.rs::102", "src-tauri/src/runtime/structure.rs::456"],
+    "level": "confirmed"
+  },
+  "downloadChain": [
+    { "step": "进入预设页 → 后台检查一次", "detail": "checkBootstrapOnce：本次运行只做一次，失败静默；有变化才 applyRemoteUpdate", "evidence": ["src/app/presets/usePresetData.ts::403"], "level": "confirmed" },
+    { "step": "URL 拼接", "detail": "SourceResolver::resolve(Entry)：filesRoot + catalog.path，逐段百分号编码；走 HTTPS 原生 ureq（非 git）", "evidence": ["src-tauri/src/runtime/resolver.rs::266", "src-tauri/src/runtime/net.rs::480"], "level": "confirmed" },
+    { "step": "校验", "detail": "仅在目录给了期望值时：先算 SHA 不符即拒、再比 size；随包侧无期望值则照收。SHA 不符时按「本地/远端 revision 是否不同」分两种成因说法", "evidence": ["src-tauri/src/runtime/delivery.rs::184", "src-tauri/src/runtime/delivery.rs::129"], "level": "confirmed" },
+    { "step": "重试", "detail": "趟数 = 1 + 2 次，退避 300ms*2^n；**仅运输类**（IO/超时/连接/主机解析）重试，404/500/超大不重试", "evidence": ["src-tauri/src/runtime/net.rs::129", "src-tauri/src/runtime/net.rs::387"], "level": "confirmed" },
+    { "step": "超大拦截", "detail": "目录登记的 size 当硬上限，超了提前收摊", "evidence": ["src-tauri/src/runtime/net.rs::221"], "level": "confirmed" },
+    { "step": "落地", "detail": "旧份归档 → 原子写新份 → baseline（kind==PRESET）→ 事件账", "evidence": ["src-tauri/src/runtime/delivery.rs::220"], "level": "confirmed" },
+    { "step": "进度", "detail": "Channel DownloadTick：connecting / transferring / done / failed（没有「校验中/落盘中」）", "evidence": ["src-tauri/src/ipc/catalog.rs::191"], "level": "confirmed" },
+    { "step": "批量", "detail": "Rust 侧并发；先对清单（缺一份整次拒绝）；结果按请求顺序、水位按完成顺序", "evidence": ["src-tauri/src/ipc/catalog.rs::323"], "level": "confirmed" },
+    { "step": "目录换代", "detail": "checkRemoteUpdate 只比 revision（带 readable）；applyRemoteUpdate 读不懂则**在写之前**回 NOT_SUPPORTED（盘零改动），否则旧目录进 archive/catalog.json + archive/catalogs/<rev>.json", "evidence": ["src-tauri/src/ipc/catalog.rs::984", "src-tauri/src/ipc/catalog.rs::1012"], "level": "confirmed" }
+  ],
+  "publishChain": [
+    { "step": "产物生成（随包）", "detail": "gen-catalog → catalog.generated.json + presets/delivery/catalog.json", "evidence": ["src-tauri/src/bin/gen-catalog.rs::32"], "level": "confirmed" },
+    { "step": "产物生成（交付）", "detail": "wb_generate / publish_into 写 delivery/mkp/presets/ + 重算 catalog；定稿写 manifest.json / catalog.json / source.json", "evidence": ["src-tauri/src/workbench/app/delivery.rs::770"], "level": "confirmed" },
+    { "step": "预设数据发布", "detail": "scripts/publish-presets.mjs：校验 5 条（source/catalog/manifest 存在 + SHA/size 对真字节 + 交叉核对）→ 开一次性分支 → PR；不碰 main 直推闸", "evidence": ["scripts/publish-presets.mjs::279"], "level": "confirmed" },
+    { "step": "软件版本发布", "detail": "scripts/release.mjs → bin/release（release_tx::run）→ 等 CI → 第二趟合并/tag/构建/Release/release.json", "evidence": ["scripts/release.mjs::85"], "level": "confirmed" },
+    { "step": "发布到哪", "detail": "软件 Release 与附件**只发 Gitee**（M6 断代 0.0.6）；release_tx 写前 validate_release_source 拦 GitHub 地址", "evidence": ["src-tauri/src/workbench/app/release_tx.rs::158", "scripts/check-release-source.mjs::17"], "level": "confirmed" },
+    { "step": "两条链的区别", "detail": "release.json = 软件本体（住 presets/delivery/release.json，Manifest 的 release 声明）；catalog.json = 预设数据；version 同源 CARGO_PKG_VERSION；release.json 不进 catalog、不参与发布闸、不进结构签名", "evidence": ["src-tauri/src/runtime/release_info.rs::10"], "level": "confirmed" },
+    { "step": "发布事务", "detail": "publish_tx::run：草稿干净检查 → 审计（Blocker 即零写返回）→ 生成 → 定稿 → 最终一致性核对（红即 Err 短路、不提交）→ git 白名单 stage/commit/push → 平台 PR；没有显式回滚，靠写前判定 + 原子写 + 定稿后核对短路", "evidence": ["src-tauri/src/workbench/app/publish_tx.rs::225"], "level": "confirmed" },
+    { "step": "平台网络出口", "detail": "只许 runtime/net.rs 与 workbench/app/platform/（check-zero-network 的第一道闸）", "evidence": ["scripts/check-zero-network.mjs::44"], "level": "confirmed" }
+  ],
+  "rules": [
+    { "id": "R-01", "rule": "应用启动时不主动联网", "verdict": "符合", "evidence": ["src-tauri/src/lib.rs::59", "scripts/check-zero-network.mjs::129"], "level": "confirmed" },
+    { "id": "R-02", "rule": "官方源在工作台配置、构建时注入客户端", "verdict": "符合", "evidence": ["src-tauri/build.rs::28", "src-tauri/src/lib.rs::295"], "level": "confirmed" },
+    { "id": "R-03", "rule": "进入预设页时允许后台检查官方目录", "verdict": "符合（本次运行只一次，失败静默）", "evidence": ["src/app/presets/usePresetData.ts::403"], "level": "confirmed" },
+    { "id": "R-04", "rule": "目录检查 ≠ 批量下载文件", "verdict": "符合（applyRemoteUpdate 只换目录）", "evidence": ["src-tauri/src/ipc/catalog.rs::1012"], "level": "confirmed" },
+    { "id": "R-05", "rule": "只有用户明确选某个预设时才下载", "verdict": "部分符合（官方预设确实如此；但随包 assets 档 delivery='bundled' 随安装包进包、不经下载）", "evidence": ["src-tauri/src/runtime/catalog.rs::262"], "level": "partial" },
+    { "id": "R-06", "rule": "本地磁盘是已交付内容实际状态的权威来源", "verdict": "符合（运行时内：file_status 以盘上字节算）", "evidence": ["src-tauri/src/runtime/delivery.rs::107"], "level": "confirmed" },
+    { "id": "R-07", "rule": "check-zero-network 被 CI 调用", "verdict": "符合（.github/workflows/ci.yml web job）", "evidence": [".github/workflows/ci.yml::60"], "level": "confirmed" },
+    { "id": "R-08", "rule": "check-zero-network 能抓到间接联网", "verdict": "**抓不到**（只抓直接符号，脚本自述）", "evidence": ["scripts/check-zero-network.mjs::15"], "level": "unverified" },
+    { "id": "R-09", "rule": "Gitee 平台适配字段名与真机一致", "verdict": "未核对", "evidence": ["docs/RESOURCE-ADDRESSING-ROADMAP.md::298"], "level": "unverified" },
+    { "id": "R-10", "rule": "CI 三个 job（web / rust / rust-windows）实际绿灯", "verdict": "本次未跑", "evidence": [".github/workflows/ci.yml"], "level": "unverified" }
+  ],
+  "devTestSurface": [
+    { "id": "DT-01", "item": "scripts/preset-test-server/*（fixtures v1/v2 + node:http 服务）", "entersProduct": false, "detail": "本地假云端脚手架；node 脚本，不进二进制", "evidence": ["scripts/preset-test-server/server.mjs::32"], "level": "confirmed" },
+    { "id": "DT-02", "item": "MKPSE_PRESET_SOURCE_URL 覆盖", "entersProduct": false, "detail": "仅 #[cfg(debug_assertions)] 认", "evidence": ["src-tauri/src/runtime/source.rs::430"], "level": "confirmed" },
+    { "id": "DT-03", "item": "workbench dev_source / sandbox", "entersProduct": false, "detail": "整棵 src/workbench 在 feature 门内", "evidence": ["src-tauri/src/lib.rs::41"], "level": "confirmed" },
+    { "id": "DT-04", "item": "scripts/check-bundle.mjs", "entersProduct": false, "detail": "CI 判据：客户端 dist/ 不许含开发源 TOML / 模拟数据 / 工作台内容", "evidence": ["scripts/check-bundle.mjs::27"], "level": "confirmed" },
+    { "id": "DT-05", "item": "scripts/probes/*（11 个 playwright 探针）", "entersProduct": false, "detail": "实机走查脚本，不进产物；是前端「测试」的实际替代物", "evidence": ["scripts/probes/presets.mjs"], "level": "confirmed" },
+    { "id": "DT-06", "item": "src/api/mockServer/*", "entersProduct": "取决构建", "detail": "npm run dev（非 Tauri）时的假后端；check-bundle 管它进不进 dist", "evidence": ["scripts/check-bundle.mjs::27"], "level": "partial" }
+  ]
+}

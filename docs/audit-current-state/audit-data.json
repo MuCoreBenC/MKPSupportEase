@@ -1,0 +1,49 @@
+{
+  "schema": "supportease-audit/1",
+  "meta": {
+    "title": "SupportEase 全仓库现状审计（2026-10-09）",
+    "repo": "MKPSupportEase",
+    "branch": "feat/preset-param-official-update",
+    "head": "d3e7f4ba56b37a2119ff81eb21f86a67bbe59654",
+    "headShort": "d3e7f4b",
+    "headDate": "2026-10-09 15:08:10 +0800",
+    "headSubject": "fix(presets): 官方新版取回后云端行不再一直挂「更新」；顶栏「参数」页签退场（参数从预设行右键进）",
+    "auditDate": "2026-10-09",
+    "workingTreeClean": true,
+    "readOnly": true,
+    "sourceOfTruth": "本目录下的结构化 JSON 是唯一机器可读事实来源；index.html 与 README/*.md 都由同一份数据撰写或验证。",
+    "method": [
+      "先钉仓库基线（分支 / HEAD / 工作区是否干净 / 目录与文档清单），再逐层追踪：UI 入口 → 事件处理函数 → 前端数据层 → Tauri IPC 命令 → Rust 实现 → 文件系统 / 网络 → DTO → UI。",
+      "不按函数名推断行为：同名命令、桥接映射、一次动作触发多条命令、异步与后台任务、文件写删改、内存与磁盘同步、错误与部分成功、同一事实的多处保存、开发/测试代码是否进正式产品、只有类型声明没有实现的东西，都逐条打开文件核对。",
+      "行号取自本次审计时的工作区；行号会随修改漂移，所以每条证据同时给符号名。",
+      "静态代码能证的才写「已证实」；只在 mock 或只在一侧确认的写「部分证实」；需要运行/CI 才能定的写「待验证」；发现互相矛盾写「已发现冲突」。"
+    ],
+    "evidenceLevels": {
+      "confirmed": "已证实：已追踪到实际实现，有代码位置或测试证据。",
+      "partial": "部分证实：找到部分实现，完整调用链或运行结果尚未确认。",
+      "unverified": "待验证：当前静态代码无法确定，需要运行测试或观察真实运行行为。",
+      "conflict": "已发现冲突：代码、测试、文档或不同调用方之间存在不一致。"
+    },
+    "verdicts": {
+      "keep": "保留：用户任务或数据正确性必需。",
+      "merge": "合并：功能有价值，但不该以多个独立实体 / 状态源 / UI 概念存在。",
+      "drop": "砍掉：没有足够业务价值，或属于不应保留的历史负担。",
+      "internalize": "降级为内部：仍有价值，但不该成为普通用户需要理解或操作的概念。",
+      "redo": "重做：业务需求必须保留，但现有实现方式不适合新系统。",
+      "todo": "待验证：现有证据不足以决定。"
+    },
+    "cliNote": "本审计为只读审计：没有修改任何产品源码、没有改数据文件、没有提交行为变更。新增仅限 docs/audit-current-state/ 下的审计成果。"
+  },
+  "parts": [
+    "data/module-map.json",
+    "data/product.json",
+    "data/domain.json",
+    "data/contract.json",
+    "data/persistence.json",
+    "data/cloud.json",
+    "data/rewrite.json",
+    "data/coverage.json"
+  ],
+  "countsNote": "各集合的条数由 build.mjs 在构建时从本目录数据实时统计并写进 index.html 与构建日志，不在本文件里硬编码，避免与数据漂移。",
+  "repositoryPathNote": "所有源码引用使用仓库相对路径，形如 src/app/presets/PagePresets.tsx::download::510（路径::符号::行号）。仓库当前没有可确定的公开浏览地址，因此不生成任何伪链接。"
+}

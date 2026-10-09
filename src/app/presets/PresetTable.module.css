@@ -190,7 +190,11 @@
 /*
  * vertical-align 从 top 改 middle（作者：「右侧那些，垂直居中」）——
  * 行是两行高（名字 + 路径），右侧的按钮 / 灰字 / 徽章原来全顶在行头。
- * 名称列两行本来就把行高占满，middle 对它没有可见变化。
+ *
+ * ★ 这一条也管**名称列**（2026-10-07 作者：「没备注的时候文件名该是居中的，
+ * 有备注的时候再往上移动腾位置」）：没有备注时格里只有文件名 ⇒ 它自己居中；
+ * 有备注时名字 + 备注两行整块居中 ⇒ 名字上移、备注在下面。**不给空副标题留高度**
+ * （见 `.path`）—— 留了高度就等于把没备注的行的名字顶到偏上。
  */
 .row td {
   padding: 8px 10px;
@@ -269,6 +273,60 @@
 }
 
 /*
+ * 「旧版 ×N」那一枚（2026-10-08，云端表专用）。
+ *
+ * 名字列上为什么要有它：云端表回到「一个目录条目一行」之后（逐版各开一行会长出
+ * 三行同名 —— 见 `presetTree.cloudRows` 那段），"这一机下过几代旧的"就没地方说了。
+ * 中性灰、实线细边：它既不是错误也不是待办，只是**来历**（旧版以用户自己的名字
+ * 躺在本地表里，展开这一行能看到归档里那几份）。
+ */
+/*
+ * 「我这边怎么样」那一枚（2026-10-09，MKP 云端行专用）：未获取 / 本地已有 / 有新版。
+ *
+ * 三档同一种形状、三种颜色 —— 它是**状态**（现在什么样），不是待办：
+ *
+ *   未获取    极淡灰（只是说"还没有"，不是错误）
+ *   本地已有  中性绿（跟得上官方当前版）
+ *   有新版    琥珀（官方那边动了 —— 这是这一页唯一真值得他动一下的一档）
+ */
+.localState {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.localState[data-state='has'] {
+  border-color: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.localState[data-state='stale'] {
+  border-color: var(--warn-soft);
+  color: var(--warn);
+}
+
+.olderVersions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
  * 「文件无法读取」那一枚（第九层：我那份读不出来 —— 编码 / TOML 语法 / 指向用户根之外）。
  *
  * 与上一枚的中性色分开：这一枚说的是**这份现在用不了**。琥珀（--warn）不是 --danger：
@@ -288,6 +346,12 @@
   white-space: nowrap;
 }
 
+/*
+ * 副标题（备注）。**空着就不占位**（2026-10-07 作者：「没备注的时候文件名该是居中的，
+ * 有备注的时候再往上移动腾位置」）—— 排版交给 `.row td` 的 `vertical-align: middle`：
+ * 没有备注时格子里只有文件名，它自己居中；有备注时两行整块居中，文件名自然上移。
+ * 不给空副标题留高度：那会把"没备注"的行名顶到偏上，与右侧那几列对不齐。
+ */
 .path {
   display: block;
   margin-top: 2px;
@@ -314,6 +378,31 @@
   color: var(--text-2);
   text-align: center;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 机型那一格里的小标签（2026-10-08）。
+ *
+ * 为什么值得给它一个色：`A1` 与 `A1 mini` 只差四个字母，名称列 `A1-fast.toml` 与
+ * `A1_MINI-fast.toml` 也只差一段 —— 作者在真机上把 A1 那行看成了 A1 mini，
+ * 点了下载才发现。**颜色先于文字被认出来**（色值来自 `src/app/ui/machineTone.ts`，
+ * 一色一机型；认不出的机型给中性灰，不借别人的色）。
+ *
+ * 这里只管几何：色由 inline style 给（`color` + 浅底），描边跟着 `currentcolor` 走 ——
+ * 于是"改颜色"只用改那一张表，不用回来改样式。
+ */
+.machineChip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 6px;
+  overflow: hidden;
+  border: 1px solid currentcolor;
+  border-radius: 4px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -430,6 +519,24 @@
 .actDone {
   font-size: var(--fs-label);
   color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * **当前使用**那一格（资源库，2026-10-08）：绿色字 + 一层极淡的绿底。
+ *
+ * 它是"生效了"、不是"下载了"—— 表里唯一一条绿线（行左那道竖线）与它说的是同一件事。
+ * 这里若沿用 `.actDone` 的灰字，用户会把它读成"点不动、也没事了"的死格，
+ * 而它偏偏是这一页唯一的正状态。
+ */
+.actLive {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
   white-space: nowrap;
 }
 

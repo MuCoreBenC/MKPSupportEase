@@ -1,0 +1,154 @@
+/*
+ * 「选择要跟随的更新」那一屏的样式。
+ *
+ * 与原型（`docs/supportease-preset-v3.html` 的模态框）同一套版面：三列一行 ——
+ * 勾选框 / 参数名与三方值 / 确认后那一格。用项目自己的令牌上色，不照抄原型的调色板。
+ */
+
+.empty {
+  margin: 0;
+  padding: 18px 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 全选那一条：钉在列表上方（列表自己滚） */
+.selectbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.checkLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.checkLabel input,
+.check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.selHint {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 150px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+/* 勾上的行给一层极淡的底：一排勾里，"哪几行会被采用"一眼看得出来 */
+.rowOn {
+  background: var(--bg-1);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+}
+
+.what {
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.unit {
+  margin-left: 5px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.vals {
+  margin-top: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「我」那个值：与行上「我的修改」同一套绿，一眼知道这是他自己的 */
+.mine {
+  color: #2f7d59;
+  font-weight: 500;
+}
+
+.after {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: right;
+}
+
+.afterVal {
+  color: var(--text-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 底栏两颗：与全稿一致的「次动作 / 主动作」 */
+.ghost {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.ghost:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.primary {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--text-1);
+  border-radius: var(--r-sm);
+  background: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: #fff;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  border-color: var(--line-strong);
+  background: var(--bg-2);
+  color: var(--text-3);
+  cursor: default;
+}

@@ -291,6 +291,17 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// 透传行专用：行**已经**是 owned（`read_next` 交出来的原行）——
+    /// sink 直接接管，recent 只留一份副本。语义与 [`Self::write_line`] 逐字相同，
+    /// 少一次「先 `to_string` 进 sink、再 `to_string` 进 recent」里的第一份分配。
+    fn write_line_owned(&mut self, line: String) {
+        self.recent_lines.push_back(line.clone());
+        if self.recent_lines.len() > MAX_RECENT_LINES {
+            self.recent_lines.pop_front();
+        }
+        self.sink.push_owned(line);
+    }
+
     fn write_lines(&mut self, lines: &[String]) {
         for l in lines {
             self.write_line(l);
@@ -674,42 +685,40 @@ pub fn second_pass(
     ctx.curr_max_tower_height = ctx.ir_data.machine.first_layer_height;
     ctx.suggested_lh = TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter;
 
-    // 读游标 + 预读缓冲（Go 的 scanner + peekBuffer）
+    // 读队列（Go 的 scanner + peekBuffer 合并成一条队列）：
+    // `read_next` = 队头弹出（**移动**，不再每行 `clone`）；`peek_lines` = 看队头 n 行。
+    // 旧实现把「读游标 + 预读缓冲」拆成两段，于是每行都要 `pass1_lines[pos].clone()`
+    // 才能交给主循环 —— 一份 90 万行的中间产物就是 90 万次堆分配。peek 只克隆
+    // 被看的那几行（调用点每层两次、合计约 20 万行），与旧口径一致（peek 的行之后
+    // 仍会被 `read_next` 按原序返回）。
     let total = pass1_lines.len();
+    let mut remaining: VecDeque<String> = pass1_lines.into();
+    // 已读行数（进度百分比用）。
     let mut pos: usize = 0;
-    let mut peek_buffer: VecDeque<String> = VecDeque::new();
 
     let mut last_progress: i64 = -1;
     let mut support_extrusion_count = 0i64;
     let mut line_num: i64 = 0;
 
-    let read_next = |pos: &mut usize, peek_buffer: &mut VecDeque<String>| -> Option<String> {
-        if let Some(l) = peek_buffer.pop_front() {
-            return Some(l);
-        }
-        if *pos < pass1_lines.len() {
-            let l = pass1_lines[*pos].clone();
-            *pos += 1;
-            Some(l)
-        } else {
-            None
-        }
+    let read_next = |q: &mut VecDeque<String>, read: &mut usize| -> Option<String> {
+        let l = q.pop_front()?;
+        *read += 1;
+        Some(l)
     };
 
-    let peek_lines = |pos: &mut usize, peek_buffer: &mut VecDeque<String>, n: usize| {
-        while peek_buffer.len() < n && *pos < pass1_lines.len() {
-            peek_buffer.push_back(pass1_lines[*pos].clone());
-            *pos += 1;
-        }
-        peek_buffer.iter().take(n).cloned().collect::<Vec<_>>()
-    };
+    let peek_lines =
+        |q: &VecDeque<String>, n: usize| -> Vec<String> { q.iter().take(n).cloned().collect() };
 
-    while let Some(line) = read_next(&mut pos, &mut peek_buffer) {
+    while let Some(line) = read_next(&mut remaining, &mut pos) {
         // 协作取消（Task 17.2）：循环顶部（pass2.go:624-640 同位——所有含
         // continue 的分支都会经过这里），100ms 时间基节流
         cancel_checker.check(cancel, std::time::Instant::now())?;
-        let mut line = line;
-        let trimmed = line.trim().to_string();
+        // 改写位：`;Adjust as support` 那一支**不再就地改 `line`**（那会锁死下面
+        // `trimmed` 的借用），改成记一份改写结果，出行时二选一。
+        let mut adjusted: Option<String> = None;
+        // 借用而不是 `to_string()`：一行一次堆分配只为 trim，而绝大多数行没有空白；
+        // 且它是只读的（改行走 `adjusted`），所以 `line` 最后可以整份移动进 sink。
+        let trimmed = line.trim();
         line_num += 1;
 
         if line_num % 500 == 0 {
@@ -729,10 +738,13 @@ pub fn second_pass(
             // swap#1 的 BEGIN/END 一起消失、事件只剩 paint→swap（违反 EV_SHAPE）。
             // 代价是这一次 swap 成为空区间（观看端 SWAP_HAS_MOTION warn）——
             // 取笔动作确实发生在首笔活化里，不在这个块里。
-            if crate::postproc::marks::is_mark_line(&trimmed) {
-                ctx.write_line(&line);
+            // 两个判定先算成值（同序），`line` 才能整份移动进 sink。
+            let is_mark = crate::postproc::marks::is_mark_line(trimmed);
+            let mounted = trimmed.contains(";Toolhead Mounted");
+            if is_mark {
+                ctx.write_line_owned(line);
             }
-            if trimmed.contains(";Toolhead Mounted") {
+            if mounted {
                 ctx.skipping_mount_sequence = false;
                 ctx.skip_glue_block_mount = false;
             }
@@ -794,8 +806,8 @@ pub fn second_pass(
             }
         }
 
-        if match_slicer_comment(&trimmed, "LAYER_HEIGHT:") {
-            let nums = num_strip(&trimmed);
+        if match_slicer_comment(trimmed, "LAYER_HEIGHT:") {
+            let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 ctx.local_thickness = n;
             }
@@ -806,11 +818,11 @@ pub fn second_pass(
         }
 
         if ctx.current_layer_height > 0.3 {
-            if has_slicer_comment_prefix(&trimmed, "FEATURE: Support body") {
+            if has_slicer_comment_prefix(trimmed, "FEATURE: Support body") {
                 ctx.adjust_support_flag = true;
             }
-            if has_slicer_comment_prefix(&trimmed, "FEATURE: ")
-                && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support body")
+            if has_slicer_comment_prefix(trimmed, "FEATURE: ")
+                && !has_slicer_comment_prefix(trimmed, "FEATURE: Support body")
             {
                 ctx.adjust_support_flag = false;
             }
@@ -838,31 +850,35 @@ pub fn second_pass(
                             5,
                         );
                         let e_str = crate::gcode::format_e_value(new_e_value);
-                        line = format!("{}{};Adjust as support", &trimmed[..e_idx + 1], e_str);
+                        adjusted = Some(format!(
+                            "{}{};Adjust as support",
+                            &trimmed[..e_idx + 1],
+                            e_str
+                        ));
                         support_extrusion_count += 1;
                     }
                 }
             }
         }
 
-        if crate::gcode::is_support_related_feature(&trimmed)
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Support")
+        if crate::gcode::is_support_related_feature(trimmed)
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Support")
         {
             ctx.append_support_flag = true;
         }
-        if (has_slicer_comment_prefix(&trimmed, "FEATURE: ")
-            && !has_slicer_comment_prefix(&trimmed, "FEATURE: Support"))
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Support ironing")
+        if (has_slicer_comment_prefix(trimmed, "FEATURE: ")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support"))
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
         {
             ctx.append_support_flag = false;
         }
         if ctx.append_support_flag && trimmed.starts_with("G1 X") {
-            ctx.supports.push(trimmed.clone());
+            ctx.supports.push(trimmed.to_string());
         }
 
-        if match_slicer_comment(&trimmed, "Z_HEIGHT: ") {
+        if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
             ctx.last_layer_height = ctx.current_layer_height;
-            let nums = num_strip(&trimmed);
+            let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 ctx.current_layer_height = n;
             }
@@ -878,7 +894,7 @@ pub fn second_pass(
                 ctx.first_layer_flag = false;
             }
 
-            let peek = peek_lines(&mut pos, &mut peek_buffer, 20);
+            let peek = peek_lines(&remaining, 20);
             for pk in &peek {
                 if pk.contains(";Rising Nozzle a little") {
                     ctx.next_tj = true;
@@ -890,7 +906,7 @@ pub fn second_pass(
 
             // 距下一涂胶层的层数（fast 模式层高预判）
             let mut next_glue_layer_distance: i64 = 9999;
-            let peek_far = peek_lines(&mut pos, &mut peek_buffer, 200);
+            let peek_far = peek_lines(&remaining, 200);
             let mut z_height_count: i64 = 0;
             for pk in &peek_far {
                 if pk.contains(";Rising Nozzle a little") {
@@ -958,7 +974,7 @@ pub fn second_pass(
 
         let was_first_layer_tower_flag = ctx.first_layer_tower_flag;
 
-        if match_slicer_comment(&trimmed, "CHANGE_LAYER")
+        if match_slicer_comment(trimmed, "CHANGE_LAYER")
             && ctx.first_layer_tower_flag
             && ctx.ir_data.tower.use_towers
             && has_glue_event
@@ -1035,7 +1051,7 @@ pub fn second_pass(
         // 第二个 CHANGE_LAYER：首层模型打完 → 首笔活化（校准模式禁用）
         if !was_first_layer_tower_flag
             && ctx.first_layer_model_finished_flag
-            && match_slicer_comment(&trimmed, "CHANGE_LAYER")
+            && match_slicer_comment(trimmed, "CHANGE_LAYER")
             && ctx.ir_data.tower.use_towers
             && ctx.ir_data.toolhead.first_pen_revitalization_flag
             && has_glue_event
@@ -1389,20 +1405,20 @@ pub fn second_pass(
         }
 
         // 碰撞特征收集（所有可能形成实体表面的 FEATURE）
-        let is_collision_feature = has_slicer_comment_prefix(&trimmed, "FEATURE: Outer wall")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Inner wall")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Top surface")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Internal infill")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Bridge")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Support")
-            || has_slicer_comment_prefix(&trimmed, "FEATURE: Ironing");
+        let is_collision_feature = has_slicer_comment_prefix(trimmed, "FEATURE: Outer wall")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Inner wall")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Top surface")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Internal infill")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Bridge")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Support")
+            || has_slicer_comment_prefix(trimmed, "FEATURE: Ironing");
         if is_collision_feature {
             ctx.add_collision_line_flag = true;
         }
         if ctx.add_collision_line_flag && trimmed.starts_with("G1 X") && trimmed.contains('E') {
-            ctx.collision_walls.push(trimmed.clone());
+            ctx.collision_walls.push(trimmed.to_string());
         }
-        if has_slicer_comment_prefix(&trimmed, "FEATURE:") && !is_collision_feature {
+        if has_slicer_comment_prefix(trimmed, "FEATURE:") && !is_collision_feature {
             ctx.add_collision_line_flag = false;
         }
 
@@ -1419,7 +1435,7 @@ pub fn second_pass(
             ctx.allow_print_flag = false;
         }
 
-        if has_slicer_comment_prefix(&trimmed, "SKIPTYPE: head_wrap_detect") {
+        if has_slicer_comment_prefix(trimmed, "SKIPTYPE: head_wrap_detect") {
             let should_remove = ctx.ir_data.safety.disable_3rd_layer_clog_detect
                 || (ctx.toml_machine != "A1" && ctx.toml_machine != "A1_MINI");
             if should_remove {
@@ -1428,7 +1444,7 @@ pub fn second_pass(
             }
         }
 
-        if has_slicer_comment_prefix(&trimmed, "SKIPTYPE: timelapse")
+        if has_slicer_comment_prefix(trimmed, "SKIPTYPE: timelapse")
             && ctx.ir_data.safety.disable_timelapse
         {
             ctx.allow_print_flag = false;
@@ -1488,27 +1504,44 @@ pub fn second_pass(
             }
         }
 
+        // —— 出行的唯一消费点 ——
+        // 后续要用的标记判定先算成值（bool / Option<f64>，零分配；逐条与旧实现同序），
+        // `trimmed` 对 `line` 的借用到此结束 —— 原行（或被 Adjust 改写的那份）可以
+        // **移动**进 sink，不再每行一次 `to_string`。
+        let h_reset_status = trimmed.contains(";===== reset machine status");
+        let h_lower_pentip = trimmed.contains(crate::gcode::MARKER_LOWER_PENTIP);
+        let h_shield_nozzle = trimmed.contains(crate::gcode::MARKER_SHIELD_NOZZLE);
+        let h_lift_z = trimmed.contains(crate::gcode::MARKER_LIFT_Z);
+        let lift_z_first = if h_lift_z {
+            num_strip(trimmed).first().copied()
+        } else {
+            None
+        };
+        let h_prepare_next_tower = trimmed.contains(crate::gcode::MARKER_PREPARE_NEXT_TOWER);
+        let h_adjust_cooling = trimmed.contains(crate::gcode::MARKER_ADJUST_COOLING);
+        let out_line = adjusted.unwrap_or(line);
+
         if ctx.allow_print_flag {
             // Go 的 m630Inserted 是每轮循环内新建的局部量，检查处恒为 false —— 逐字保持
             if ctx.ir_data.safety.disable_front_cover_alarm
                 && ctx.toml_machine == "P1S"
-                && trimmed.contains(";===== reset machine status")
+                && h_reset_status
             {
-                ctx.write_line(&line);
+                ctx.write_line_owned(out_line);
                 ctx.write_line("M630 S0 P0");
                 continue;
             }
-            ctx.write_line(&line);
+            ctx.write_line_owned(out_line);
         }
 
-        if trimmed.contains(crate::gcode::MARKER_LOWER_PENTIP) {
+        if h_lower_pentip {
             ctx.write_line(&format!(
                 "G1 Z{}",
                 format_z(ctx.curr_max_tower_height + ctx.ir_data.toolhead.z_offset)
             ));
         }
 
-        if trimmed.contains(crate::gcode::MARKER_SHIELD_NOZZLE) {
+        if h_shield_nozzle {
             let (x_off, y_off) = (ctx.tower_x_off(), ctx.tower_y_off());
             ctx.write_line_offset(
                 &format!(
@@ -1606,21 +1639,18 @@ pub fn second_pass(
             )?;
         }
 
-        if trimmed.contains(crate::gcode::MARKER_LIFT_Z) {
-            let nums = num_strip(&trimmed);
-            if let Some(&lift_z) = nums.first() {
-                let comp = math_round(ctx.curr_max_tower_height + TOWER_HEIGHT_COMP_OFFSET, 3);
-                if comp > lift_z {
-                    ctx.write_line(&format!("G1 Z{};Compensation", format_z(comp)));
-                }
+        if let Some(lift_z) = lift_z_first {
+            let comp = math_round(ctx.curr_max_tower_height + TOWER_HEIGHT_COMP_OFFSET, 3);
+            if comp > lift_z {
+                ctx.write_line(&format!("G1 Z{};Compensation", format_z(comp)));
             }
         }
 
-        if trimmed.contains(crate::gcode::MARKER_PREPARE_NEXT_TOWER) {
+        if h_prepare_next_tower {
             ctx.handle_prepare_next_tower()?;
         }
 
-        if trimmed.contains(crate::gcode::MARKER_ADJUST_COOLING) {
+        if h_adjust_cooling {
             ctx.write_line(&format!(
                 "G1 Z{}",
                 format_z(math_round(

@@ -728,6 +728,16 @@ export interface PublishAudit {
    */
   minVersion: string | null
   canPublish: boolean
+  /**
+   * **当前模式让不让发布**：测试模式（沙箱）里这条路整个关着，这里是那句原因；
+   * 正式模式是 `null`。
+   *
+   * ★ 它与 `canPublish` 答的是两件事：`canPublish` = "这一版东西能不能发出去"
+   * （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
+   * 那颗「确认发布」不许画亮 —— 点下去只会被后端如实拒掉，而**一颗点了会被拒的
+   * 按钮比没有按钮更坏**（人会以为是自己点错了）。
+   */
+  publishClosed: string | null
 }
 
 /* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
@@ -942,6 +952,8 @@ export interface ReleasePreflight {
   tag: string
   branch: string
   hasAccount: boolean
+  /** run-env 拦下时给出的 dev 监视器 PID（「杀掉 dev 监视进程」按钮只认它）；null = 没有 */
+  devWatcherPid: number | null
 }
 
 /** `release_tx::ReleaseTxReport` —— 一轮「发布软件版本」的结果（阶段快照） */
@@ -1017,6 +1029,101 @@ export interface PublishAccount {
   remoteMatchesConfig: boolean
   /** 当前分支 */
   branch: string | null
+}
+
+/**
+ * `dev_source::PortConflict` —— **谁占着关键端口**（起之前该处理掉的那个）。
+ *
+ * 客户端 dev 已经在跑时，新起的这一份必撞在它的 vite 端口上（`Port 5321 is in use`），
+ * 而那一份没法被重新指源 —— 所以起之前先把占用者摆出来，问一句要不要停。
+ */
+export interface PortConflict {
+  port: number
+  /** 这个端口是干什么的（后端给的，界面不自己拼） */
+  role: string
+  /** 占着它的进程；认不出身份时 null（那时不许编一个名字出来） */
+  pid: number | null
+  process: string | null
+  /** 那句话人话 —— **事实只有一处**：后端写好，界面直接摆出来 */
+  text: string
+}
+
+/**
+ * `sandbox::SandboxStatus` —— **测试模式（沙箱）**现在什么样。
+ *
+ * 作者 2026-10-08：「我希望它是完全另起炉灶那种……测试的归测试的，而且我测试的随时
+ * 可以把这些清空，从正式的复制一份过去，再进行测试」「我不能迷迷糊糊的，不知道我在
+ * 测试版还是正式版」。所以这一格数字要一直摆在界面上（横幅 + 设置页那张卡）。
+ */
+export interface SandboxStatus {
+  /** 测试模式开着吗（= 整套数据根现在指着沙箱） */
+  enabled: boolean
+  /** 沙箱根：`<repo>/workbench/.sandbox` */
+  sandboxRoot: string
+  /** 沙箱里那份 `presets/` 建起来了吗（没建 = 刚打开、还没拷） */
+  ready: boolean
+  /** 沙箱这一棵里有几个文件 / 几字节（"真拷了东西"的读数） */
+  files: number
+  bytes: number
+  /** 正式那一份的预设根（界面上摆出"从哪儿拷的"） */
+  realPresetsRoot: string
+  /** 上一次动作的结果（"已从正式拷了一份：54 个文件 4.4 MB"） */
+  note: string | null
+}
+
+/**
+ * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
+ *
+ * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
+ * 那个进程可能是人在终端里 Ctrl+C 掉的。
+ *
+ * ★ **端哪一份（`source`）与地址（`url`）也由后端给**：地址随源不同（夹具填到根上、
+ * 「当前交付」要带 `/delivery` —— 真交付那份的 `source.json` 写着 `filesRoot: ".."`），
+ * 界面照报，不自己拼一遍路径。
+ */
+export interface DevSourceStatus {
+  running: boolean
+  /** 包装层（Windows 上是 cmd）的 PID；不在跑时 null */
+  pid: number | null
+  /**
+   * 客户端「自定义地址」里该填的那一串。**在跑时是那一份的地址**（夹具填到根上、
+   * 当前交付带 `/delivery`），没起过时是默认地址当兜底 —— 界面照后端说的报。
+   */
+  url: string
+  /** 在跑（没在跑时：上次起）的是哪一份；**从没起过 = null** */
+  source: DevSourceKind | null
+  /** 它端的是哪个目录（不在跑且没起过时是空串）—— 给排查用 */
+  sourceRoot: string
+  /** 它在哪个仓库根下跑（命令的 cwd） */
+  repoRoot: string
+  /** 实际跑的那条命令（给人对账用） */
+  command: string
+  /** 不在跑时的原因（退出码那句 / "本来就没在跑"）；在跑时 null */
+  note: string | null
+  /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
+  conflicts: PortConflict[]
+  /** 三行单选：每一份的名字 / 在哪儿 / 填什么地址 / 齐没齐 */
+  sources: SourceOption[]
+}
+
+/** `dev_source::SourceKind` —— 测试源端哪一份 */
+export type DevSourceKind = 'v1' | 'v2' | 'delivery'
+
+/** `dev_source::SourceOption` —— 界面那三行单选，一行一份 */
+export interface SourceOption {
+  kind: DevSourceKind
+  /** 行上的名字（如「夹具 v1」） */
+  label: string
+  /** 这一份是干什么用的（那句话由**后端**给，界面不重写一遍） */
+  note: string
+  /** 服务根（端的是这个目录） */
+  root: string
+  /** 客户端要填的那一串（**每一份不一样**） */
+  url: string
+  /** 齐了吗。不齐时点「启动」会被如实拒绝 */
+  ready: boolean
+  /** 不齐的话：缺什么 + 怎么补 */
+  missing: string | null
 }
 
 /* ---------- 状态词 ---------- */
@@ -1712,6 +1819,71 @@ export const wb = {
     invoke<ReleaseTxReport>('wb_release_software', { opts }),
   /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
   releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
+  /**
+   * **杀掉 dev 监视进程**（run-env 拦下时的一键解法）—— 后端先验明正身（命令行
+   * 得像 tauri dev）再动手；只杀 CLI 本尊，应用窗口与 vite 都活着。
+   * 返回 true = 杀了；false = 进程已经不在（等价于杀过，重跑闸即可）。
+   */
+  killDevWatcher: (pid: number) => invoke<boolean>('wb_release_kill_dev_watcher', { pid }),
+  /**
+   * **发布提示词**（只读）：把"这一版要怎么发"整成一段能直接贴给 AI 的任务书 ——
+   * 版本号、更新说明、发版纪律、产物名、`release.json` 落点全在里面，
+   * 由 AI 照仓库自己的发版路径去发。文本生成在 Rust（事实只有一处）。
+   */
+  releasePrompt: (version?: string | null, notes?: string) =>
+    invoke<string>('wb_release_prompt', { version: version ?? null, notes: notes ?? null }),
+  /**
+   * **打开安装包目录**（发布对话框的「打开安装包目录」按钮）：在系统文件管理器里
+   * 打开本平台的安装包目录 —— 不管这一趟发没发出去都能点，先去看一眼产物在哪。
+   *
+   * ★ 只读、只开系统程序；目录还没建出来时后端**如实拒绝**（错误详情里附候选路径）。
+   */
+  releaseOpenBundle: () => invoke<void>('wb_release_open_bundle'),
+
+  /**
+   * **本地测试源（开发）** —— 起 / 停 / 查那颗按钮背后的 `npm run preset-source:dev`。
+   *
+   * ★ 它**只起服务**（`127.0.0.1:8787`），**不碰客户端**（作者 2026-10-08 裁决：
+   * 「这不就是单开一个服务吗？我自己输入这个地址就可以」）—— 地址由人去客户端
+   * 「设置 → 高级设置 → 预设数据源 → 自定义地址」填一次（保存即生效）。
+   * 想连客户端 dev 一起起：那在命令行里，`npm run dev:test-update`。
+   *
+   * ★ `start` **同一份幂等**（已经在端它就不动）、**换了源则换源重启**（先整棵收掉
+   * 再以新的起 —— 一次点击一件事）；那一份还没派生 / 还没生成时**如实拒绝**，
+   * 而且是在**杀掉手上那一份之前**就拒绝（选错了不该把正在跑的服务带下水）；
+   * 被占着时**如实拒绝**并点名那个端口（`conflicts` 摆着是谁）；
+   * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
+   *
+   * ★ 端哪一份：`v1` / `v2` 是两代夹具，`delivery` 是**当前交付** ——
+   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到我的
+   * 新版」这条闭环在本地整条走得通，而且正式那份从头到尾不参与。
+   */
+  devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
+  devSourceStart: (source: DevSourceKind) =>
+    invoke<DevSourceStatus>('wb_dev_source_start', { source }),
+  devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
+  /**
+   * **停掉占着某个端口的那个进程**（那张卡上的「停掉它」）。
+   *
+   * ★ 把当时看到的 `pid` 一起交回去 —— 后端**重新问一次"这个端口现在是谁的"**，
+   * 对不上就拒绝动手（PID 会被复用）。端口上没人了时幂等成功。
+   */
+  devSourceClearConflict: (port: number, pid: number | null) =>
+    invoke<DevSourceStatus>('wb_dev_source_clear_conflict', { port, pid }),
+
+  /**
+   * **测试模式（沙箱）** —— 整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
+   * 正式目录一个字节都不碰（作者：「完全另起炉灶」「测试的归测试的」）。
+   *
+   * - `sandboxSet(true)`：沙箱不齐就先**从正式拷一份**（`presets/` 整棵，含 3MF /
+   *   模型 / 图片），然后把根切过去；**有未保存的改动时如实拒绝**（草稿是两套）；
+   * - `sandboxRefill()`：清空沙箱再从正式重新拷一份；
+   * - `sandboxWipe()`：只清空（留在当前模式）。
+   */
+  sandboxStatus: () => invoke<SandboxStatus>('wb_sandbox_status'),
+  sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
+  sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
+  sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

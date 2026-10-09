@@ -1,0 +1,104 @@
+{
+  "atomicWrite": {
+    "symbol": "src-tauri/src/fsx/atomic.rs::atomic_write::28",
+    "how": "同目录 NamedTempFile → write_all → sync_all → persist（同分区 rename）→ 父目录 sync_all；内容完全相同则整份跳过（连 mtime 不动）",
+    "platform": "Unix 原子；Windows 走 MoveFileEx（tempfile 语义），同目录保证同卷、不退化 copy",
+    "guarantee": "全仓唯一写**内容**的统一出口；`a_failed_write_touches_nothing` 钉住「写失败不碰目标」",
+    "notCovered": "删除 / 改名 / 建目录按设计直调 std::fs（atomic_write 表达不了这些语义）",
+    "evidence": ["src-tauri/src/fsx/atomic.rs::28", "src-tauri/src/fsx/atomic.rs::110"],
+    "level": "confirmed"
+  },
+  "writes": [
+    { "id": "W-01", "file": "src-tauri/src/runtime/app_state.rs::with_state::194", "target": "run/app-state.json", "how": "原子写 JSON", "trigger": "应用/撤用/存草稿/改名跟随/数据源/参数决定", "failure": "写失败则不写不删旧文件", "level": "confirmed" },
+    { "id": "W-02", "file": "src-tauri/src/runtime/app_state.rs::with_state::196", "target": "run/active-preset.json / run/draft-preset.json / run/preset-source.json", "how": "**直接 remove_file**", "trigger": "首次写成功后一次性迁移退役旧档", "failure": "删失败仅 warn", "level": "confirmed" },
+    { "id": "W-03", "file": "src-tauri/src/runtime/mine.rs::commit_draft::411", "target": "user/presets-mine/<原名>（已修改）.ext", "how": "原子写", "trigger": "commitPresetDraft（官方线另存）", "failure": "返回错误，原件不动", "level": "confirmed" },
+    { "id": "W-04", "file": "src-tauri/src/runtime/mine.rs::save_back::444", "target": "presets-mine/<rel>（原路径）", "how": "原子写", "trigger": "commitPresetDraft（用户线写回）", "failure": "文件不在 → NotFound，不去别处新建", "level": "confirmed" },
+    { "id": "W-05", "file": "src-tauri/src/runtime/mine.rs::set_machine_variant::478", "target": "presets-mine/<rel>", "how": "原子写", "trigger": "setUserPresetMachineVersion", "failure": "NotFound", "level": "confirmed" },
+    { "id": "W-06", "file": "src-tauri/src/runtime/mine.rs::write_text::527", "target": "presets-mine/<rel>", "how": "原子写", "trigger": "savePresetCalibration / savePresetParams / applyPresetParamDecisions", "failure": "NotFound", "level": "confirmed" },
+    { "id": "W-07", "file": "src-tauri/src/runtime/mine.rs::rename_file::681", "target": "同目录新名", "how": "**std::fs::rename**", "trigger": "renameUserPreset", "failure": "目标已存在 → 拒绝（不覆盖）", "level": "confirmed" },
+    { "id": "W-08", "file": "src-tauri/src/runtime/mine.rs::copy_as_new::731", "target": "presets-mine/<新名>", "how": "原子写（先 fs::read 源）", "trigger": "copyUserPreset", "failure": "撞名 → InvalidArgument", "level": "confirmed" },
+    { "id": "W-09", "file": "src-tauri/src/runtime/mine.rs::save_official_as_new::777", "target": "presets-mine/<原名>", "how": "原子写", "trigger": "fetchOfficialPreset", "failure": "撞名 → 拒绝", "level": "confirmed" },
+    { "id": "W-10", "file": "src-tauri/src/runtime/mine.rs::delete_file::799", "target": "presets-mine/<rel>", "how": "**std::fs::remove_file**", "trigger": "deleteUserPreset", "failure": "真删，无垃圾桶", "level": "confirmed" },
+    { "id": "W-11", "file": "src-tauri/src/runtime/delivery.rs::deliver::229", "target": "archive/<catalog.path>", "how": "原子写（旧份归档）", "trigger": "下载 / 更新", "failure": "槽位已存在则跳过（保留最早）", "level": "confirmed" },
+    { "id": "W-12", "file": "src-tauri/src/runtime/delivery.rs::deliver::236", "target": "<appDataDir>/<catalog.path>", "how": "原子写（新份落点）", "trigger": "downloadCatalogFile(s) / fetchOfficialPreset", "failure": "SHA/大小不过 → 整个拒绝、不碰盘", "level": "confirmed" },
+    { "id": "W-13", "file": "src-tauri/src/runtime/delivery.rs::remove_file_idempotent::573", "target": "<catalog.path> / archive/<path>", "how": "**std::fs::remove_file**", "trigger": "deleteDeliveryFile / deleteArchivedFile", "failure": "不存在＝成功（幂等）", "level": "confirmed" },
+    { "id": "W-14", "file": "src-tauri/src/runtime/baseline.rs::ensure_baseline::99", "target": "baseline/<sha256>.toml", "how": "原子写", "trigger": "deliver 收尾 / param_sync 读侧", "failure": "落不上仅告警", "level": "confirmed" },
+    { "id": "W-15", "file": "src-tauri/src/runtime/release.rs::ensure_released::109", "target": "catalog.json", "how": "原子写", "trigger": "**启动**（lib.rs::setup::86）", "failure": "盘上已有 → 一个字节不动", "level": "confirmed" },
+    { "id": "W-16", "file": "src-tauri/src/runtime/release.rs::release_bytes::161/166/169", "target": "archive/catalogs/<rev>.json / archive/catalog.json / catalog.json", "how": "原子写 ×3", "trigger": "applyRemoteUpdate", "failure": "先解析后写；解析不过不碰盘", "level": "confirmed" },
+    { "id": "W-17", "file": "src-tauri/src/runtime/preset_events.rs::save::200", "target": "preset_events.json", "how": "原子写", "trigger": "deliver / bootstrap init", "failure": "追加失败仅告警", "level": "confirmed" },
+    { "id": "W-18", "file": "src-tauri/src/runtime/provenance.rs::save::134", "target": "user/provenance.json", "how": "原子写", "trigger": "copyUserPreset / commitImport / renameUserPreset", "failure": "记不上不影响主流程", "level": "confirmed" },
+    { "id": "W-19", "file": "src-tauri/src/runtime/remarks.rs::save::94", "target": "user/preset-remarks.json", "how": "原子写", "trigger": "setPresetRemark / 删除连带", "failure": "同族", "level": "confirmed" },
+    { "id": "W-20", "file": "src-tauri/src/runtime/import.rs::commit_one::237", "target": "presets-mine/<name>", "how": "原子写", "trigger": "commitImport", "failure": "撞名/源丢 → 逐份 fail", "level": "confirmed" },
+    { "id": "W-21", "file": "src-tauri/src/fsx/paths.rs::ensure_dirs::64", "target": "cloud/ archive/ logs/ run/ 与 user/{exports,reports,presets-mine}", "how": "create_dir_all", "trigger": "每次 internal_root / user_root", "failure": "建不出 → AppError::io", "level": "confirmed" },
+    { "id": "W-22", "file": "src-tauri/src/runtime/updater.rs::download_into::416 / write_result::263", "target": "update/<asset>.part → 改名；run/update-result.json", "how": "**流式 File::create + rename**（刻意不走 atomic，几十 MB；有退役条件标注）", "trigger": "软件自更新", "failure": ".part 失败即删；无启动清理", "level": "confirmed" },
+    { "id": "W-23", "file": "src-tauri/src/workbench/*（store.rs::103 / sandbox.rs / app/delivery.rs::705）", "target": "工作台文档与沙箱", "how": "原子写 / copy / remove", "trigger": "工作台命令", "failure": "—", "note": "feature=workbench 门内，客户端二进制不含", "level": "confirmed" }
+  ],
+  "writeDisciplineGaps": [
+    { "id": "WD-01", "gap": "crates/preset/tests/write_discipline_scan.rs 只扫 crates/preset/src 与 crates/postprocess/src，**完全不扫 src-tauri**", "evidence": ["crates/preset/tests/write_discipline_scan.rs::162", "crates/preset/tests/write_discipline_scan.rs::31"], "level": "confirmed" },
+    { "id": "WD-02", "gap": "clippy.toml 只管 fs::write / File::create / OpenOptions（且刻意不禁 File::create_new），**不管 remove_file / rename / copy / remove_dir_all**", "evidence": ["clippy.toml::39"], "level": "confirmed" },
+    { "id": "WD-03", "gap": "结果：src-tauri 里的删除/改名/复制没有任何源码扫描兜底（靠人工与 code review）", "level": "confirmed" }
+  ],
+  "carriers": [
+    { "id": "PS-01", "path": "<内部>/catalog.json", "format": "JSON Catalog", "writer": "ensure_released / release_bytes", "reader": "全部读命令", "clearer": "手删", "authority": "权威", "rebuildable": "是（可重下）", "level": "confirmed" },
+    { "id": "PS-02", "path": "<内部>/archive/catalogs/<rev>.json", "format": "JSON", "writer": "release_bytes", "reader": "official_versions / generation_index / trust", "clearer": "无", "authority": "历史记忆", "rebuildable": "**否**（中间版指纹唯一来源）", "level": "confirmed" },
+    { "id": "PS-03", "path": "<内部>/archive/catalog.json", "format": "JSON", "writer": "release_bytes（单槽保最早）", "reader": "other_known_versions", "clearer": "无", "authority": "历史", "rebuildable": "否", "level": "confirmed" },
+    { "id": "PS-04", "path": "<内部>/<catalog.path>", "format": "真字节", "writer": "deliver", "reader": "读命令", "clearer": "delete_downloaded", "authority": "**权威（盘即底账）**", "rebuildable": "是（SHA 锚定）", "level": "confirmed" },
+    { "id": "PS-05", "path": "<内部>/archive/<catalog.path>", "format": "真字节", "writer": "deliver（is_update）", "reader": "archived_files", "clearer": "delete_archived", "authority": "历史", "rebuildable": "否（云端只有最新版）", "level": "confirmed" },
+    { "id": "PS-06", "path": "<内部>/baseline/<sha256>.toml", "format": "TOML", "writer": "ensure_baseline", "reader": "param_sync / preset_baseline", "clearer": "无 GC", "authority": "**权威（官方旧值）**", "rebuildable": "可（按内容重下）", "level": "confirmed" },
+    { "id": "PS-07", "path": "run/app-state.json#activePreset", "format": "JSON", "writer": "set_active_official / set_active_mine", "reader": "appState.ts", "clearer": "clear_* / 删文件连带", "authority": "**权威（指针）**", "rebuildable": "否（用户选择）", "level": "confirmed" },
+    { "id": "PS-08", "path": "run/app-state.json#draft", "format": "JSON（含正文全文）", "writer": "set_draft", "reader": "draft()", "clearer": "clear_draft / 删文件", "authority": "权威（临时账）", "rebuildable": "否（未保存改动）", "level": "confirmed" },
+    { "id": "PS-09", "path": "run/app-state.json#presetSource", "format": "JSON", "writer": "set_preset_source", "reader": "current_mode / entry", "clearer": "clear_preset_source", "authority": "权威", "rebuildable": "否", "level": "confirmed" },
+    { "id": "PS-10", "path": "run/app-state.json#paramDecisions", "format": "JSON map", "writer": "record_param_decisions", "reader": "param_decisions", "clearer": "forget_param_decisions / 改名跟随", "authority": "**权威（水位）**", "rebuildable": "否", "level": "confirmed" },
+    { "id": "PS-11", "path": "<内部>/preset_events.json", "format": "JSON {schema,events[]}", "writer": "append / init(bootstrap)", "reader": "load_events", "clearer": "无（只追加）", "authority": "**权威（业务时间唯一来源）**", "rebuildable": "**否**（bootstrap 从 mtime 补，有损）", "level": "confirmed" },
+    { "id": "PS-12", "path": "user/provenance.json", "format": "JSON {entries[]}", "writer": "record / repath", "reader": "load", "clearer": "改名跟随（悬空保留）", "authority": "权威（唯一记「从哪复制/导入」）", "rebuildable": "否", "level": "confirmed" },
+    { "id": "PS-13", "path": "user/preset-remarks.json", "format": "JSON {remarks:map}", "writer": "set / remove", "reader": "load", "clearer": "remove / 删文件连带", "authority": "权威（覆盖层）", "rebuildable": "否（可退回工作台值）", "level": "confirmed" },
+    { "id": "PS-14", "path": "user/presets-mine/**.toml", "format": "TOML + 文件头", "writer": "上一节各写点", "reader": "mine_files 与各读", "clearer": "delete_file", "authority": "**权威（盘即底账）**", "rebuildable": "否（用户自己的文件）", "level": "confirmed" },
+    { "id": "PS-15", "path": "user/exports、user/reports", "format": "—", "writer": "仅建目录", "reader": "—", "clearer": "—", "authority": "占位（现无写者）", "rebuildable": "—", "level": "confirmed" },
+    { "id": "PS-16", "path": "run/update-result.json", "format": "JSON UpdateResult", "writer": "更新脚本 / write_result", "reader": "下次启动", "clearer": "—", "authority": "权威", "rebuildable": "否", "level": "confirmed" },
+    { "id": "PS-17", "path": "<内部>/logs/", "format": "tracing", "writer": "obs::tracing", "reader": "人", "clearer": "无", "authority": "缓存", "rebuildable": "是", "level": "confirmed" },
+    { "id": "PS-18", "path": "run/{active-preset,draft-preset,preset-source}.json（退役）", "format": "JSON", "writer": "（迁移时删）", "reader": "（读侧兜底）", "clearer": "首次写成功后删", "authority": "已退役", "rebuildable": "—", "level": "confirmed" }
+  ],
+  "localStorage": [
+    { "key": "mkp.A40.presets.pinned", "meaning": "预设置顶集合（pinKey 数组）", "writer": "usePresetData.ts::1021", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.params.searchHistory", "meaning": "参数页最近搜索词", "writer": "PageParams.tsx::183", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.params.historyDrawerW", "meaning": "历史抽屉宽度", "writer": "PageParams.tsx::409", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.bbs.view", "meaning": "BBS 看全部/同 BBS", "writer": "PageBbs.tsx::65", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.bbs.light", "meaning": "BBS 皮肤深浅", "writer": "PageBbs.tsx::66", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.bbs.drawerMode", "meaning": "抽屉并排/浮层", "writer": "PageBbs.tsx::95", "isAuthority": false, "level": "confirmed" },
+    { "key": "mkp.A40.bbs.drawerW", "meaning": "BBS 抽屉宽度", "writer": "useBbsDrawer.ts::22", "isAuthority": false, "level": "confirmed" }
+  ],
+  "sessionState": {
+    "mechanism": "src/app/shared/useSessionState.ts 是模块作用域的内存 Map，**不落 localStorage**、刷新即丢",
+    "usedFor": ["presets.query / presets.nozzle / presets.layer", "bbs.target / bbs.query / bbs.drawer / bbs.paramQuery"],
+    "stores": "「这次会话我看到哪」（展开/范围/搜索词），不存草稿或未保存改动",
+    "evidence": ["src/app/shared/useSessionState.ts::32"],
+    "level": "confirmed"
+  },
+  "startupInit": {
+    "does": ["建数据根与日志目录（失败不阻断）", "ensure_released（catalog 只补空位）", "macOS 窗口外观（仅客户端）", "工作台窗口（仅 feature）"],
+    "doesNot": ["核对草稿引用的文件是否还在", "app-state 与盘对账", "清理临时文件", "事件账重建校验"],
+    "evidence": ["src-tauri/src/lib.rs::59", "src-tauri/src/runtime/release.rs::102"],
+    "level": "confirmed"
+  },
+  "consistency": [
+    { "id": "CO-01", "item": "同一业务状态被多处维护", "exists": true, "detail": "「本机已下载官方文件」有真值（downloaded_entries，盘）与桩（get_local_files 恒空）两套；预设页用后者，release 行用前者。", "evidence": ["src-tauri/src/ipc/presets.rs::812", "src-tauri/src/runtime/delivery.rs::834"], "level": "conflict" },
+    { "id": "CO-02", "item": "写文件成功但状态/账未跟上", "exists": true, "detail": "rename：文件已改名、state/provenance 未跟 → 后端**明确告知**「文件其实已经改名」；commit_draft：清草稿失败则残留（与「已保存」语义不符）。", "evidence": ["src-tauri/src/ipc/mine.rs::502", "src-tauri/src/ipc/mine.rs::464"], "level": "partial" },
+    { "id": "CO-03", "item": "状态成功但写盘失败", "exists": false, "detail": "with_state 先写盘成功才返回；广播是 let _ =（失败只是不自动刷新）。未发现「状态成功、写盘失败」。", "level": "confirmed" },
+    { "id": "CO-04", "item": "重复执行产生重复数据", "exists": false, "detail": "下载同字节 no-op；应用整份替换；另存/写回覆盖自己；复制/导入/改名撞名一律拒绝；出处/备注同键替换；参数决定同项覆盖。未发现重复数据路径。", "evidence": ["src-tauri/src/runtime/delivery.rs::184", "src-tauri/src/runtime/provenance.rs::85"], "level": "confirmed" },
+    { "id": "CO-05", "item": "中途关闭留下什么", "exists": true, "detail": "草稿（设计如此）；硬崩溃可能在目标目录留一个随机名临时文件（atomic_write 用 NamedTempFile，正常 drop 会删）；自更新崩溃留 .part 与暂存目录且无启动清理。", "level": "partial" },
+    { "id": "CO-06", "item": "启动修复逻辑", "exists": "minimal", "detail": "只有 ensure_released 铺目录；不一致靠各读命令按需发现（active_matches_disk / stale_files / FileTrust）。", "level": "confirmed" },
+    { "id": "CO-07", "item": "可从磁盘重建 vs 依赖不可重建历史", "exists": true, "detail": "可重建：catalog、交付件、baseline、logs。不可重建：事件账、版本链、provenance、remarks、paramDecisions、activePreset、draft。", "level": "confirmed" },
+    { "id": "CO-08", "item": "多步操作的半完成风险点", "exists": true, "detail": "见 halfDoneRisks。", "level": "partial" }
+  ],
+  "halfDoneRisks": [
+    { "flow": "applyActivePreset", "steps": "校验 → 单次原子写", "risk": "低" },
+    { "flow": "commitPresetDraft", "steps": "写文件 → 清草稿（两次写）", "risk": "文件已存、草稿未清 → 残留草稿" },
+    { "flow": "renameUserPreset", "steps": "rename → 改 state → 改 provenance", "risk": "悬空指针/出处（已告知）" },
+    { "flow": "deleteUserPreset", "steps": "撤指针 → 清草稿 → 删文件 → 删备注 → 忘决策账", "risk": "删文件后 remark/决策账未清 → 悬空账" },
+    { "flow": "deleteDeliveryFile", "steps": "撤指针 → 清草稿 → 删文件 → 删备注", "risk": "同族；删文件失败时指针已撤" },
+    { "flow": "fetchOfficialPreset", "steps": "取回官方字节 → 落工作副本", "risk": "官方字节已到、工作副本未落 → 重试即补（幂等）" },
+    { "flow": "applyRemoteUpdate", "steps": "结构判定 → 三次原子写（链/单槽/catalog）", "risk": "链已加而 catalog 未换 → 下次重跑补；不可读则写之前整次拒绝" },
+    { "flow": "applyPresetParamDecisions", "steps": "写文件（adopt）→ 记水位", "risk": "文件已改、水位未推 → 下次仍显示待处理（反向已防：值写失败不记水位）" },
+    { "flow": "deliver 单份", "steps": "fetch → 校验 → 归档旧份 → 写新份 → baseline → 事件", "risk": "归档已写、新份未写 → 目标仍旧、归档多一份（重跑幂等，槽位不覆盖）" }
+  ]
+}

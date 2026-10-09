@@ -16,7 +16,7 @@
 //! | `get_param_meta` | 字段定义（**全部**，含废弃） |
 //! | `get_machine_params` | `machineVariants` 的三层取值 |
 //! | `get_local_files` | 本轮恒为空集合（见下） |
-//! | `get_slicer_copied` | 本轮恒为空集合 |
+//! | `get_slicer_copied` | 切片器用户配置目录里**真有**的那几份（盘就是底账） |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
 //! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-mine/`，
@@ -313,6 +313,15 @@ pub struct FileRefDto {
     pub kind: &'static str,
     pub file_name: String,
     pub path: String,
+    /// 这一份**在本机上的绝对路径**；`None` = 盘上没有它（还没下载 / 这一侧根本没有盘）。
+    ///
+    /// 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
+    /// 不是我们的内部根，`path`（相对落点）在那里找不到文件 —— 2026-10-09 实测，
+    /// Bambu 弹的是 "Error code: 2"，正是 mkp-ssr 的 `EXIT_BAD_INPUT`「预设文件不存在」。
+    /// 所以**只有这份真在盘上时**才给值，界面据此决定摆不摆那颗按钮（宁可不摆，
+    /// 也不给一条贴进去就报错的命令）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abs_path: Option<String>,
     /// MKP 那支带真值（catalog 文件条目对交付产物真字节算的）；切片器资产本轮不给
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
@@ -334,8 +343,12 @@ pub struct VersionFilesDto {
 /// MKP 那一支**从 catalog 的文件条目出**（路径、大小、SHA 都是登记值）——
 /// 不再按命名规则重算：首屏唯一数据源 = catalog（总纲判据 4）。
 /// 切片器那一支与旧世界同构：版本 → 套餐 → 资产。
+///
+/// `internal_root` 只用来答一件事：这一份**在不在本机**（[`FileRefDto::abs_path`]）。
+/// 落点本身仍然是 catalog 登记的那个 `path`，这里不重算、也不写盘。
 fn version_files_dto(
     catalog: &runtime::Catalog,
+    internal_root: &Path,
     machine_id: &str,
     version_id: &str,
 ) -> Option<VersionFilesDto> {
@@ -351,13 +364,17 @@ fn version_files_dto(
     match catalog.file_of(machine_id, version_id) {
         // 期望值原样透给界面（随包 bootstrap 目录下是 `None` —— 那一侧不登记 SHA，
         // 界面据此显示"还不知道大小/指纹"，不是显示 0 / 空串）
-        Some(f) => files.push(FileRefDto {
-            kind: "mkp_preset",
-            file_name: f.file_name.clone(),
-            path: f.path.clone(),
-            size: f.size,
-            sha256: f.sha256.clone(),
-        }),
+        Some(f) => {
+            let at = internal_root.join(&f.path);
+            files.push(FileRefDto {
+                kind: "mkp_preset",
+                file_name: f.file_name.clone(),
+                path: f.path.clone(),
+                abs_path: at.is_file().then(|| at.display().to_string()),
+                size: f.size,
+                sha256: f.sha256.clone(),
+            })
+        }
         None => missing.push(format!(
             "{machine_id} / {version_id} 在目录里没有登记交付文件"
         )),
@@ -416,6 +433,9 @@ fn version_files_dto(
                         kind,
                         file_name: file_name_of(&path),
                         path: dest,
+                        /* 切片器配置不是「我们的预设文件」：后台处理的 `--Toml` 不指它，
+                        这里也就不编一个绝对路径 */
+                        abs_path: None,
                         size: None,
                         sha256: None,
                     });
@@ -439,7 +459,8 @@ pub async fn get_version_files(
 ) -> Result<Option<VersionFilesDto>, AppError> {
     traced("getVersionFiles", |_| {
         let catalog = load_presets(&app)?;
-        Ok(version_files_dto(&catalog, &machine_id, &version_id))
+        let root = internal_root(&app)?;
+        Ok(version_files_dto(&catalog, &root, &machine_id, &version_id))
     })
 }
 
@@ -801,7 +822,7 @@ fn machine_params_dto(
     Ok(out)
 }
 
-/* ---------- 本机状态（本轮恒空） ---------- */
+/* ---------- 本机状态 ---------- */
 
 /// 本机已经有的官方文件（asset id）。
 ///
@@ -813,10 +834,113 @@ pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| Ok(Vec::new()))
 }
 
-/// 已经复制进切片器目录的那些。**本轮恒空** —— 写盘那一侧还没有
+/* ---------- 切片器目录（复制进去才生效） ---------- */
+
+/// Bambu Studio 的**用户工艺配置目录**（`…/user/<账号>/process`）。
+///
+/// 与 `tools/dev-server/bbsFs.mjs` 同一套口径：正式版优先（`BambuStudio`，没有才退
+/// `BambuStudioBeta`）；`user/` 下按账号分目录（数字 uid，也有 BBL / default 这种），
+/// 只认里面**真有 `process/` 子目录的**。命中就给第一个 —— 一台机器一般只有一个账号目录。
+///
+/// 平台差异照实写破：Windows 在 `%APPDATA%`、macOS 在 `~/Library/Application Support`；
+/// 其余平台**不猜目录名**，返回 `None` —— 界面照实说"没找到切片器的配置目录"，
+/// 而不是找错地方复制一份没人用的文件。
+fn slicer_process_dir() -> Option<std::path::PathBuf> {
+    let base: std::path::PathBuf = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)?
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+        home.join("Library").join("Application Support")
+    } else {
+        return None;
+    };
+    for app_dir in ["BambuStudio", "BambuStudioBeta"] {
+        let user_base = base.join(app_dir).join("user");
+        let Ok(entries) = std::fs::read_dir(&user_base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let process = entry.path().join("process");
+            if process.is_dir() {
+                return Some(process);
+            }
+        }
+    }
+    None
+}
+
+/// 已经复制进切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+///
+/// 盘就是底账：切片器目录里真有这份文件才算"已复制"。**找不到切片器目录 = 空集**
+/// （一份都没复制过），与"读失败"是两回事 —— 这里没有会失败的读。
 #[tauri::command]
-pub fn get_slicer_copied(_app: AppHandle) -> Result<Vec<String>, AppError> {
-    traced("getSlicerCopied", |_| Ok(Vec::new()))
+pub fn get_slicer_copied(app: AppHandle) -> Result<Vec<String>, AppError> {
+    traced("getSlicerCopied", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(dir) = slicer_process_dir() else {
+            return Ok(Vec::new());
+        };
+        Ok(catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == "bbs_config")
+            .filter(|f| dir.join(&f.file_name).is_file())
+            .map(|f| f.file_name.clone())
+            .collect())
+    })
+}
+
+/// 把一份切片器配置复制进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
+/// （MKP 预设的生效是「启用」，两回事）。
+///
+/// 三种真实的失败照实抛，不吞：
+/// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型复制过去没有意义）；
+/// - 本机还没有这份文件的字节（先「下载」）；
+/// - 目标位置已经有同名文件（**不覆盖** —— 那份可能被用户在切片器里改过，静默盖掉
+///   等于删用户数据。要换新，先在切片器里删掉旧的）。
+#[tauri::command]
+pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("copyToSlicer", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(format!(
+                "目录里没有这份文件：{file_name}"
+            )));
+        };
+        if file.kind == "mkp_preset" {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+            )));
+        }
+        if file.kind != "bbs_config" {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 不是切片器配置，复制进切片器目录没有意义"
+            )));
+        }
+        let internal = internal_root(&app)?;
+        let source = crate::fsx::paths::resolve_in(&internal, &file.path)?;
+        if !source.is_file() {
+            return Err(AppError::not_found(format!(
+                "本机还没有 {file_name} —— 先「下载」再复制"
+            )));
+        }
+        let dir = slicer_process_dir().ok_or_else(|| {
+            AppError::not_found(
+                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
+            )
+        })?;
+        let target = dir.join(&file.file_name);
+        if target.exists() {
+            return Err(AppError::io(format!(
+                "切片器目录里已经有 {file_name} 了 —— 要换新先在切片器里删掉旧的那份"
+            ))
+            .with_detail(target.display().to_string()));
+        }
+        std::fs::copy(&source, &target)
+            .map_err(|e| AppError::io("复制进切片器目录失败").with_detail(e.to_string()))?;
+        tracing::info!(file = %file_name, target = %target.display(), "已复制进切片器目录");
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -871,6 +995,9 @@ mod tests {
     #[test]
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
+        /* 一个空内部根：交付文件一份都不在盘上 —— `abs_path` 的起点就是这一档 */
+        let empty = tempfile::tempdir().expect("临时内部根");
+        let root = empty.path();
 
         // —— 机型清单：5 台，A1 带别名与尺寸，品牌是显示名 ——
         let machines = machines_dto(&catalog);
@@ -884,7 +1011,7 @@ mod tests {
         assert_eq!(a1.versions.len(), 3);
 
         // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
-        let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
+        let vf = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
         assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
         let mkp = vf
             .files
@@ -899,6 +1026,23 @@ mod tests {
         // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串
         assert_eq!(mkp.size, None, "随包目录不登记 size");
         assert_eq!(mkp.sha256, None, "随包目录不登记 SHA");
+        /*
+         * **绝对路径的唯一消费者是「复制后处理脚本」里那段 `--Toml`**（2026-10-09）。
+         * 盘上还没有这一份 ⇒ 不给值 —— 界面据此**不摆那颗按钮**：贴一条指不到文件的
+         * 命令进切片器，用户看到的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」），
+         * 那正是这条判据要防的那次事故。
+         */
+        assert_eq!(mkp.abs_path, None, "盘上没有这一份，不许给绝对路径");
+        // 真落到盘上之后：绝对路径 = 内部根 + 目录登记的落点
+        let at = root.join(&mkp.path);
+        crate::fsx::atomic::atomic_write(&at, b"# machine: A1\n").expect("放过一份交付文件");
+        let on_disk = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("同一份");
+        let mkp = on_disk
+            .files
+            .iter()
+            .find(|f| f.kind == "mkp_preset")
+            .expect("MKP 引用必须在");
+        assert_eq!(mkp.abs_path.as_deref(), Some(at.to_string_lossy().as_ref()));
         // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
@@ -923,9 +1067,19 @@ mod tests {
         // 每台机型都与 A1 同形：切片器档一条幽灵都不许有
         for m in machines.iter() {
             for v in &m.versions {
-                let Some(vf) = version_files_dto(&catalog, &m.id, &v.id) else {
+                let Some(vf) = version_files_dto(&catalog, root, &m.id, &v.id) else {
                     continue;
                 };
+                /* 切片器那支与绝对路径无关：它一份都不该带 `abs_path` */
+                assert!(
+                    vf.files
+                        .iter()
+                        .filter(|f| f.kind != "mkp_preset")
+                        .all(|f| f.abs_path.is_none()),
+                    "{}/{} 的切片器档不该给绝对路径",
+                    m.id,
+                    v.id
+                );
                 assert!(
                     vf.files
                         .iter()
@@ -943,8 +1097,8 @@ mod tests {
         }
 
         // 不存在的机型/版本 → None（不是出错）
-        assert!(version_files_dto(&catalog, "NOPE", "X").is_none());
-        assert!(version_files_dto(&catalog, "A1", "NOPE").is_none());
+        assert!(version_files_dto(&catalog, root, "NOPE", "X").is_none());
+        assert!(version_files_dto(&catalog, root, "A1", "NOPE").is_none());
 
         // —— 云端表：只出切片器预设，15 条资产里图标/模型不进来 ——
         let presets = preset_files_dto(&catalog);

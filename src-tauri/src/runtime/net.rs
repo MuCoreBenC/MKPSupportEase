@@ -34,6 +34,127 @@ use std::time::Duration;
 
 use crate::error::AppError;
 
+/// **本地 IPC 的 loopback 通道**（钩子进程 ↔ 常驻界面进程）。
+///
+/// # 它为什么住在这里
+///
+/// `scripts/check-zero-network.mjs` 的 ①闸要求"网络字节只许住 `runtime/net.rs` 与
+/// `workbench/app/platform/`"。钩子 IPC 走的是 **loopback TCP**（两个进程都在本机），
+/// 按那条判据的字面它属于"网络字节" —— 于是它只能住这里。搬进来不是为了让扫描器闭嘴
+/// （给文件加白名单才是），而是让"谁在谈网络"这个问题继续**只有一个答案**：
+/// 这个文件与 `platform/` 就是那两处。
+///
+/// # 它不是对外网络
+///
+/// - 只 bind `127.0.0.1`（[`Ipv4Addr::LOCALHOST`]），**从不绑 `0.0.0.0`**；
+/// - 端口是内核给的随机端口（`bind :0`），经内部根下的端点文件在两者之间交换；
+/// - 连接带超时：钩子"只探一下"，探不到就自己起一个界面进程。
+///
+/// 这三条是它敢住在"网络面"里、而又不违反"客户端产品不许开端口"那条精神的原因：
+/// **它没有对外开任何门**，只是同一台机器上两个进程之间的一条私线。
+pub mod loopback {
+    use std::io;
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+    use std::time::Duration;
+
+    /// 某个**本机端口**上有没有人在听（工作台的 dev 文件源起服务前用它探路）。
+    ///
+    /// 这是 [`LoopbackListener::bind_any_local`] 的**探测形态**：bind 一下、立刻释放。
+    /// 两个回环地址都试 —— 对面可能只绑了 v4，也可能只绑 v6（vite 绑 `localhost`
+    /// 在有些机器上只落在 `::1`）。
+    ///
+    /// 它**不长期占任何端口**（探测即释放），所以不违反"客户端产品不许开端口"。
+    pub fn is_port_taken(port: u16) -> bool {
+        let v4 = SocketAddr::from(([127, 0, 0, 1], port));
+        let v6 = SocketAddr::from(([0u16, 0, 0, 0, 0, 0, 0, 1], port));
+        [v4, v6].iter().any(|a| TcpListener::bind(a).is_err())
+    }
+
+    /// 监听端（界面那一侧；`bind` 成功就是"唯一那扇窗"，单实例不用锁文件）。
+    pub struct LoopbackListener(TcpListener);
+
+    /// 连接端（两侧各持一个；[`LoopbackStream::try_clone`] 给读写分家）。
+    pub struct LoopbackStream(TcpStream);
+
+    impl LoopbackListener {
+        /// 在本机 loopback 上绑一个**随机端口**。
+        pub fn bind_any_local() -> io::Result<Self> {
+            TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map(Self)
+        }
+
+        /// 内核给的那个端口（写进端点文件，钩子照它连）。
+        pub fn port(&self) -> io::Result<u16> {
+            self.0.local_addr().map(|a| a.port())
+        }
+
+        /// 收下一条连接。
+        pub fn accept(&self) -> io::Result<LoopbackStream> {
+            self.0.accept().map(|(stream, _)| LoopbackStream(stream))
+        }
+
+        /// 收连接的迭代器（界面侧：`for stream in listener.incoming().flatten()`）。
+        pub fn incoming(&self) -> LoopbackIncoming<'_> {
+            LoopbackIncoming(self.0.incoming())
+        }
+    }
+
+    /// [`LoopbackListener::incoming`] 的迭代器 —— 包一层是为了**不让 `std::net` 漏出去**
+    /// （漏出去的那一刻，判据 ① 的"只住一处"就不成立了）。
+    pub struct LoopbackIncoming<'a>(std::net::Incoming<'a>);
+
+    impl Iterator for LoopbackIncoming<'_> {
+        type Item = io::Result<LoopbackStream>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(|r| r.map(LoopbackStream))
+        }
+    }
+
+    impl LoopbackStream {
+        /// 连本机的某个端口。**只探一下**：连不上就是 `Err`，调用方照"没有界面"降级。
+        pub fn connect_local(port: u16, timeout: Duration) -> io::Result<Self> {
+            let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+            TcpStream::connect_timeout(&addr.into(), timeout).map(Self)
+        }
+
+        /// 读写分家（读线程持 clone，写端留在原对象上）。
+        pub fn try_clone(&self) -> io::Result<Self> {
+            self.0.try_clone().map(Self)
+        }
+
+        /// 设读超时（界面侧的收连接循环用它做"该退出了"的检查节拍）。
+        pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+            self.0.set_read_timeout(dur)
+        }
+
+        /// 设写超时（钩子侧：对端卡住就放弃这条通道，不让切片器跟着等）。
+        pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+            self.0.set_write_timeout(dur)
+        }
+
+        /// 掐掉这条连接（会话结束 / 取消时用）。
+        pub fn shutdown_both(&self) -> io::Result<()> {
+            self.0.shutdown(std::net::Shutdown::Both)
+        }
+    }
+
+    impl io::Read for LoopbackStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.0.read(buf)
+        }
+    }
+
+    impl io::Write for LoopbackStream {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.0.flush()
+        }
+    }
+}
+
 use super::catalog::CatalogFile;
 use super::delivery::Source;
 use super::resolver::{ResourceRef, SourceResolver};

@@ -293,6 +293,118 @@ impl Git {
         })
     }
 
+    /// **带认证**问一次远端：这个 tag 在不在、剥了皮指向哪一笔提交。
+    ///
+    /// ★ 推 tag 之前先问一句（「发布软件版本」⑥½ 用它做幂等：发布仓库上已有同名 tag
+    ///   时不该硬推，git 自己会拒，pre-push 闸③ 还会把它报成"非快进"）。
+    ///   与 [`Self::push_ref_to_authenticated`] 同一套凭据纪律：Gitee 走 URL 内嵌、
+    ///   其余走先发式 Basic 头，Token 不进错误 detail。
+    /// ★ **剥皮要在本地做**：`ls-remote` 的 `^{}` 那行是服务端给的，Gitee 不给
+    ///   （真机 2026-10-07：只回 tag 对象一行）—— 所以分三步：
+    ///   1. `ls-remote` 问存在（不在 → `None`）；
+    ///   2. 远端对象与本地 tag 对象**同一个** → 同一个 tag，本地直接剥皮（省一趟网络）；
+    ///   3. 对象不同就把远端那**一个** ref fetch 到 `FETCH_HEAD` —— 不落 `refs/`，
+    ///      与 `--tags` 会撞本地同名 tag 的 clobber 是两回事 —— 再本地剥皮。
+    ///
+    ///   远端没有这个 tag → `None`。
+    pub fn remote_tag_commit(
+        &self,
+        remote: &str,
+        tag: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Option<String>, AppError> {
+        let Some(remote_sha) =
+            self.ls_remote_ref(remote, &format!("refs/tags/{tag}"), username, token)?
+        else {
+            return Ok(None);
+        };
+        let local_ref = format!("refs/tags/{tag}");
+        if let Ok(local_obj) = self.rev_parse(&local_ref) {
+            if remote_sha == local_obj {
+                return Ok(Some(self.rev_parse(&format!("{local_ref}^{{commit}}"))?));
+            }
+        }
+        // 对象不同（或本地读不到）：把远端那一个 ref 取下来，本地剥皮。
+        // 只写 `FETCH_HEAD`，不落任何 refs/ —— 本地的同名 tag 动都不动。
+        let with_url_creds = gitee_url_with(remote, username, token);
+        let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
+        let refspec = format!("refs/tags/{tag}");
+        let mut args: Vec<&str> = vec!["-c", "credential.helper="];
+        let header;
+        if with_url_creds.is_none() {
+            let basic = base64_encode(format!("{username}:{token}").as_bytes());
+            header = format!("http.extraHeader=Authorization: Basic {basic}");
+            args.extend(["-c", &header]);
+        }
+        args.extend(["fetch", "--no-tags", &target, &refspec]);
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
+            return Err(AppError::io("git fetch 失败了").with_detail(format!(
+                "{}（退出码 {:?}）",
+                err.trim(),
+                out.status.code()
+            )));
+        }
+        Ok(Some(self.rev_parse("FETCH_HEAD^{commit}")?))
+    }
+
+    /// **带认证**问一次远端：某个 ref 在不在，在的话对象 sha 是多少（`git ls-remote`）。
+    ///
+    /// 只读、不落任何本地引用。远端没有这个 ref → `None`。
+    fn ls_remote_ref(
+        &self,
+        remote: &str,
+        refname: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Option<String>, AppError> {
+        let with_url_creds = gitee_url_with(remote, username, token);
+        let target = with_url_creds.clone().unwrap_or_else(|| remote.to_owned());
+        let ref_pattern = refname.to_owned();
+        let mut args: Vec<&str> = vec!["-c", "credential.helper="];
+        let header;
+        if with_url_creds.is_none() {
+            let basic = base64_encode(format!("{username}:{token}").as_bytes());
+            header = format!("http.extraHeader=Authorization: Basic {basic}");
+            args.extend(["-c", &header]);
+        }
+        args.extend(["ls-remote", &target, &ref_pattern]);
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
+            return Err(AppError::io("git ls-remote 失败了").with_detail(format!(
+                "{}（退出码 {:?}）",
+                err.trim(),
+                out.status.code()
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        // 严格认整行（`refs/tags/v0.0.6` 不能吃进 `refs/tags/v0.0.6^{}`
+        // 也别匹配到 `refs/tags/v0.0.6x`）—— 拿到的是 ref 指向的对象 sha
+        // （annotated tag 就是 tag 对象本身，剥皮交给调用方）。
+        for line in stdout.lines() {
+            let Some((sha, name)) = line.split_once('\t') else {
+                continue;
+            };
+            if name.trim() == refname {
+                return Ok(Some(sha.trim().to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
     /// 当前工作目录的 remote（`origin`）是不是**配置的那个仓库**（发布前的一致性校验）。
     ///
     /// 规范化后比较：https / ssh 两种形状等价、`…/o/r.git` 与 `…/o/r` 等价、
@@ -311,12 +423,24 @@ impl Git {
      * 以及"主线到底齐不齐"的判定。全部走同一个 `run`（显式参数数组），不另开一条路。
      */
 
-    /// 拉远端的最新引用（`git fetch <remote> --tags --prune`）。
+    /// 拉远端的最新引用：**分支那一 fetch 决定成败，tag 单独尽力取**。
     ///
     /// ★ **判定"主线齐不齐"之前必须先 fetch**：不 fetch 的 `origin/main` 是上次拉到的样子，
     /// 拿它当"远端现状"会得出一个过期的、偏乐观的结论。
+    ///
+    /// ★ 2026-10-07 真机踩到（发布回执里那条红）：原来是一条
+    /// `fetch <remote> --tags --prune` —— 只要本地有哪个 tag 与远端**同名不同提交**，
+    /// git 就拒更新它并以**退出码 1 结束整次 fetch**，于是 `origin/main` 明明拉到了、
+    /// 调用方却读到"拉取远端失败"，镜像同步整个不敢做（`would clobber existing tag`）。
+    /// 拆成两步之后，"要不要同步"这个判断**只跟分支有关**：
+    /// 1. 分支：`fetch --prune`，失败照旧如实报（这一步的失败才是真失败）；
+    /// 2. tag：单独一次、**尽力而为**，并且用 `--force` 让远端那份说了算 ——
+    ///    同名 tag 冲突时，远端是权威（本地那份要么旧、要么是别人机器上打的）。
     pub fn fetch(&self, remote: &str) -> Result<(), AppError> {
-        self.run(&["fetch", remote, "--tags", "--prune"])?;
+        self.run(&["fetch", remote, "--prune"])?;
+        // `+`（强制）不能省：`git fetch --tags` 遇到同名 tag **不会**更新它
+        //（不是快进与否的问题，是"已存在的 tag 一律不动"）；要让它归位只有显式 refspec
+        let _ = self.try_run(&["fetch", remote, "+refs/tags/*:refs/tags/*"]);
         Ok(())
     }
 
@@ -374,6 +498,16 @@ impl Git {
         Ok(())
     }
 
+    /// 本地有没有这条分支（`git rev-parse -q --verify refs/heads/<name>`）。
+    ///
+    /// ★ 用途（2026-10-07）：发布信息那条分支（`chore/release-vX.Y.Z`）**上一趟已经建过**
+    /// 时不该再 `switch -c`（会以"已存在"失败）—— 补平台 / 重跑都得先问一句。
+    pub fn branch_exists(&self, name: &str) -> Result<bool, AppError> {
+        Ok(self
+            .try_run(&["rev-parse", "-q", "--verify", &format!("refs/heads/{name}")])?
+            .is_some())
+    }
+
     /// 这个 tag 存不存在（`git rev-parse -q --verify refs/tags/<name>`）。
     pub fn tag_exists(&self, name: &str) -> Result<bool, AppError> {
         Ok(self
@@ -395,6 +529,12 @@ impl Git {
     /// "这一版发出去过"与"上一次事务的续跑"。
     pub fn rev_parse_short(&self, what: &str) -> Result<String, AppError> {
         Ok(self.run(&["rev-parse", "--short", what])?.trim().to_owned())
+    }
+
+    /// 解析一个引用的**完整** sha（`git rev-parse <what>`）—— 与远端报回来的 sha 对比用
+    /// （远端给的是全长，短 sha 对不上）。
+    pub fn rev_parse(&self, what: &str) -> Result<String, AppError> {
+        Ok(self.run(&["rev-parse", what])?.trim().to_owned())
     }
 
     /// 工作区干不干净（`git status --porcelain` 为空）。
@@ -764,6 +904,76 @@ mod tests {
         assert!(!g
             .remote_matches("https://gitee.com/MuCoreBenC/MKPSupportEase.git")
             .unwrap());
+    }
+
+    /// 判据（2026-10-07 真机踩到的那条红）：**本地 tag 与远端同名、而本地那份不在远端那份
+    /// 的历史里**时，`fetch` 照样成功 —— 分支拉到最新，tag 归远端那份。
+    ///
+    /// 老写法是一条 `fetch --tags`：tag 更新被拒（`would clobber existing tag`）会让**整次**
+    /// fetch 以退出码 1 结束，调用方把它读成"读不到 origin/main"，镜像同步整个不敢做。
+    #[test]
+    fn a_conflicting_tag_does_not_fail_the_fetch() {
+        let remote = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let run_in = |at: &std::path::Path, args: &[&str]| -> String {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(at)
+                .output()
+                .expect("起 git");
+            assert!(
+                out.status.success(),
+                "git {args:?} 失败：{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+
+        run_in(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
+        run_in(root, &["init", "-q", "-b", "main"]);
+        run_in(root, &["config", "user.email", "t@example.com"]);
+        run_in(root, &["config", "user.name", "t"]);
+        crate::fsx::atomic::atomic_write(&root.join("a.txt"), b"a\n").unwrap();
+        run_in(root, &["add", "a.txt"]);
+        run_in(root, &["commit", "-q", "-m", "A"]);
+        let sha_a = run_in(root, &["rev-parse", "HEAD"]);
+        run_in(
+            root,
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
+        run_in(root, &["push", "-q", "-u", "origin", "main"]);
+        run_in(root, &["tag", "-a", "v0.0.1", "-m", "v0.0.1"]);
+        run_in(root, &["push", "-q", "origin", "refs/tags/v0.0.1"]);
+        let tag_at_remote = run_in(remote.path(), &["rev-parse", "refs/tags/v0.0.1"]);
+
+        // 再走一笔，把**本地**那份 tag 移到新的提交上 —— 远端还在 A，于是同名不同提交
+        crate::fsx::atomic::atomic_write(&root.join("b.txt"), b"b\n").unwrap();
+        run_in(root, &["add", "b.txt"]);
+        run_in(root, &["commit", "-q", "-m", "B"]);
+        run_in(root, &["tag", "-f", "-a", "v0.0.1", "-m", "本地那份"]);
+        assert_ne!(
+            run_in(root, &["rev-parse", "refs/tags/v0.0.1"]),
+            tag_at_remote,
+            "前提：本地那份已经不是远端那一份了（sha_a={sha_a}）"
+        );
+
+        let g = Git::open(root);
+        g.fetch("origin").expect("tag 撞车不该把整次 fetch 带崩");
+
+        // 远端那份说了算（本地那份被强制 refspec 归位）
+        assert_eq!(
+            run_in(root, &["rev-parse", "refs/tags/v0.0.1"]),
+            tag_at_remote
+        );
+        // 分支照旧拉到最新（这一步才是调用方真正要的东西）
+        assert!(
+            g.try_run(&["rev-parse", "--verify", "refs/remotes/origin/main"])
+                .unwrap()
+                .is_some(),
+            "fetch 之后该有 origin/main"
+        );
     }
 
     /// 测试用：把 base64 解回原文（只覆盖 ASCII + 补齐，够验这几个向量）。

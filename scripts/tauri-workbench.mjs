@@ -38,16 +38,23 @@ if (action !== 'dev' && action !== 'build') {
   process.exit(2)
 }
 
-const child = spawn(
-  `tauri ${action} --config src-tauri/tauri.workbench.conf.json --features workbench`,
-  {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-    // Windows 上 `tauri` 是 node_modules/.bin 里的 .cmd 垫片，只有走 shell 才找得到
-    shell: true,
-    env: { ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
-  },
-)
+// dev 加 `--no-watch`：工作台是**发版事务的执行者**，而发版要推进版本号，改的
+// 4 个文件（Cargo.toml / tauri.conf.json / package.json / Cargo.lock）全在
+// tauri dev 的文件监视器清单里 —— 不关监视器，版本号一落盘 dev 就重建重启，
+// 发版事务被杀在半路（2026-10-06 真机踩的）。关掉监视器，工作台 dev 与发版
+// 互不干扰；代价只是改 Rust 代码要手动重启（前端 HMR 走 vite，不受影响）。
+// release_tx 那道 run-env 闸按祖先进程链实时探测监视器，就是读这一行命令行里的
+// `--no-watch` 来放行的。
+const isDev = action === 'dev'
+const cmd = `tauri ${action}${isDev ? ' --no-watch' : ''} --config src-tauri/tauri.workbench.conf.json --features workbench`
+
+const child = spawn(cmd, {
+  cwd: REPO_ROOT,
+  stdio: 'inherit',
+  // Windows 上 `tauri` 是 node_modules/.bin 里的 .cmd 垫片，只有走 shell 才找得到
+  shell: true,
+  env: { ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
+})
 
 /* Ctrl+C 由子进程（tauri → cargo / vite）自己处理；父进程先退会把它们留成孤儿 */
 process.on('SIGINT', () => {})

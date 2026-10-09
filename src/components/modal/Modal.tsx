@@ -42,10 +42,20 @@ export interface ModalProps {
   /** 底部一条。没有就不画那一条边 */
   footer?: ReactNode
   /**
-   * 框的宽度档。`sm` 看一眼就关的（详情）· `md` 要读的（确认 / 表单）· `lg` 向导。
-   * 不给自由数值 —— 三档已经够，给了数值各处就会长出十种宽度。
+   * 框的宽度档。`sm` 看一眼就关的（详情）· `md` 要读的（确认 / 表单）· `lg` 向导 ·
+   * `xl` **整块工作区**（参数编辑器那种"要占大半个窗口"的）·
+   * `full` **撑满宿主整块**（遮罩不留内衬、框满、不圆角）—— 参数模态框要在顶栏页签以下
+   * 整块内容区里铺开，就是这一档。
+   * 不给自由数值 —— 五档已经够，给了数值各处就会长出十种宽度。
    */
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  /**
+   * 框身**不滚**、也不加内衬：交给里面那个自己管滚动的整体（`xl` 档的参数编辑器就是）。
+   *
+   * 默认那种（`overflow-y:auto` + 内衬）适合"一段内容"，不适合"一个自成一体的工作区"——
+   * 后者有自己的头、可滚的中间、钉住的底栏，套进一个外层的滚动容器里会两头打架。
+   */
+  bodyFill?: boolean
   /**
    * 点遮罩关不关。**有未保存内容的框要传 false** ——
    * 手滑点一下就把人家改的东西丢了是不可接受的。
@@ -70,6 +80,7 @@ export default function Modal({
   subtitle,
   footer,
   size = 'md',
+  bodyFill = false,
   closeOnScrim = true,
   host = null,
   closeTitle,
@@ -137,6 +148,7 @@ export default function Modal({
   const scrim = (
     <div
       className={s.scrim}
+      data-size={size}
       role="presentation"
       onMouseDown={(e) => {
         /* 只认落在遮罩自己身上的那一下 —— 从框里开始拖到外面松手不算 */
@@ -163,7 +175,7 @@ export default function Modal({
           </button>
         </header>
 
-        <div className={s.body}>{children}</div>
+        <div className={bodyFill ? `${s.body} ${s.bodyFill}` : s.body}>{children}</div>
 
         {footer !== undefined && <footer className={s.foot}>{footer}</footer>}
       </div>
