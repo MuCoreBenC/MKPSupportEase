@@ -1,0 +1,280 @@
+{
+  "summary": {
+    "contractMethods": 65,
+    "ipcCommands": 62,
+    "nonCommands": 3,
+    "nonCommandNote": "pickImportFiles 走 plugin-dialog（不是 IPC command）；copyToSlicer / downloadFiles 在 bridge 里直接抛 NotImplemented（真机未接线）。",
+    "registrationNote": "Tauri 只允许调一次 invoke_handler，所以按 feature 给两份完整清单：lib.rs::with_commands::140（客户端）与 ::217（工作台）。",
+    "status": "契约 65 / Rust 命令 62 一一对齐，未发现「契约有后端没有」或「后端有契约没有」；但两份注册清单彼此**不一致**（见 X-01、X-08）。",
+    "testNote": "命令层只有 ipc/mod.rs(2) / ipc/presets.rs(6) / ipc/param_sync.rs(15) 有 #[test]；catalog.rs / mine.rs / import.rs / preset_params.rs / preset_baseline.rs / update.rs 命令层无测试。内核 runtime/*.rs 测试较足（delivery 32 / mine 46）。前端无 *.test.ts*。",
+    "evidence": ["src/api/contract.ts::1225", "src-tauri/src/lib.rs::139", "src-tauri/src/lib.rs::216"]
+  },
+  "commands": [
+    { "id": "C-01", "method": "getMachines", "rust": "get_machines", "rustFile": "src-tauri/src/ipc/presets.rs::301", "registered": "both", "callers": ["usePresetData.ts::594", "useParams.ts::690", "home/useCatalog.ts::67"], "mock": "impl", "io": "读 catalog", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-02", "method": "getVersionFiles", "rust": "get_version_files", "rustFile": "src-tauri/src/ipc/presets.rs::435", "registered": "both", "callers": ["usePreset.ts::100", "usePresetData.ts::609", "home/useBundleFiles.ts::85"], "mock": "impl", "io": "读 catalog", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-03", "method": "getPresetFiles", "rust": "get_preset_files", "rustFile": "src-tauri/src/ipc/presets.rs::524", "registered": "both", "callers": ["usePresetData.ts::489", "usePresetData.ts::593"], "mock": "impl", "io": "读 catalog", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-04", "method": "getMenu", "rust": "get_menu", "rustFile": "src-tauri/src/ipc/presets.rs::564", "registered": "both", "callers": ["usePresetData.ts::595"], "mock": "impl", "io": "读 catalog", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-05", "method": "getParamMeta", "rust": "get_param_meta", "rustFile": "src-tauri/src/ipc/presets.rs::645", "registered": "both", "callers": ["useParams.ts::691"], "mock": "impl", "io": "读 catalog.registry", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-06", "method": "getMachineParams", "rust": "get_machine_params", "rustFile": "src-tauri/src/ipc/presets.rs::721", "registered": "both", "callers": ["usePreset.ts::101", "usePresetData.ts::610"], "mock": "impl", "io": "读 catalog（三层取值，后端摊平）", "net": false, "sideEffects": [], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-07", "method": "getLocalFiles", "rust": "get_local_files", "rustFile": "src-tauri/src/ipc/presets.rs::812", "registered": "both", "callers": ["usePresetData.ts::596", "presetTree.ts::1236"], "mock": "impl", "io": "**桩：恒 Ok(vec![])**", "net": false, "sideEffects": ["返回成功但什么也没做"], "tested": "yes", "productPath": "yes", "notes": "预设页「本机」计数与 statusOf 的「本地有」凭它，恒假（见 X-05）", "level": "confirmed" },
+    { "id": "C-08", "method": "getSlicerCopied", "rust": "get_slicer_copied", "rustFile": "src-tauri/src/ipc/presets.rs::818", "registered": "both", "callers": ["usePresetData.ts::598", "usePresetData.ts::793"], "mock": "impl", "io": "**桩：恒 Ok(vec![])**", "net": false, "sideEffects": ["返回成功但什么也没做"], "tested": "yes", "productPath": "yes", "notes": "切片器行「已复制」恒假", "level": "confirmed" },
+    { "id": "C-09", "method": "getUserPresetFiles", "rust": "get_user_preset_files", "rustFile": "src-tauri/src/ipc/mine.rs::92", "registered": "both", "callers": ["usePresetData.ts::597", "useParams.ts::729"], "mock": "impl", "io": "扫盘 presets-mine", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-10", "method": "readUserPresetText", "rust": "read_user_preset_text", "rustFile": "src-tauri/src/ipc/mine.rs::801", "registered": "both", "callers": ["PagePresets.tsx::669"], "mock": "conditional-throw", "io": "读文件", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-11", "method": "getPresetRemarks", "rust": "get_preset_remarks", "rustFile": "src-tauri/src/ipc/mine.rs::724", "registered": "client-only", "callers": ["usePresetData.ts::599"], "mock": "impl", "io": "读备注账", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "notes": "工作台清单里缺这一条（X-08）", "level": "conflict" },
+    { "id": "C-12", "method": "setPresetRemark", "rust": "set_preset_remark", "rustFile": "src-tauri/src/ipc/mine.rs::736", "registered": "client-only", "callers": ["usePresetData.ts::912"], "mock": "impl", "io": "写备注账", "net": false, "sideEffects": ["写 user/preset-remarks.json"], "tested": "no", "productPath": "yes", "notes": "工作台清单里缺这一条（X-08）", "level": "conflict" },
+    { "id": "C-13", "method": "setUserPresetMachineVersion", "rust": "set_user_preset_machine_version", "rustFile": "src-tauri/src/ipc/mine.rs::755", "registered": "client-only", "callers": ["usePresetData.ts::923"], "mock": "impl", "io": "改文件头两行", "net": false, "sideEffects": ["改写 presets-mine 文件"], "tested": "no", "productPath": "yes", "notes": "工作台清单里缺这一条（X-08）", "level": "conflict" },
+    { "id": "C-14", "method": "beginPresetEdit", "rust": "begin_preset_edit", "rustFile": "src-tauri/src/ipc/mine.rs::247", "registered": "both", "callers": ["usePresetData.ts::842"], "mock": "conditional-throw", "io": "读盘 + 写草稿格", "net": false, "sideEffects": ["写 run/app-state.json#draft", "广播 app-state-changed"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-15", "method": "putPresetDraft", "rust": "put_preset_draft", "rustFile": "src-tauri/src/ipc/mine.rs::351", "registered": "both", "callers": ["usePresetData.ts::846"], "mock": "impl", "io": "写草稿格", "net": false, "sideEffects": ["写 state + 广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-16", "method": "patchPresetDraft", "rust": "patch_preset_draft", "rustFile": "src-tauri/src/ipc/mine.rs::374", "registered": "both", "callers": ["useParams.ts::665"], "mock": "impl", "io": "结构保真改草稿", "net": false, "sideEffects": ["写 state + 广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-17", "method": "discardPresetDraft", "rust": "discard_preset_draft", "rustFile": "src-tauri/src/ipc/mine.rs::402", "registered": "both", "callers": ["usePresetData.ts::848"], "mock": "impl", "io": "清草稿", "net": false, "sideEffects": ["写 state + 广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-18", "method": "commitPresetDraft", "rust": "commit_preset_draft", "rustFile": "src-tauri/src/ipc/mine.rs::422", "registered": "both", "callers": ["usePresetData.ts::851"], "mock": "conditional-throw", "io": "写用户根 + 清草稿", "net": false, "sideEffects": ["写 presets-mine", "写 state", "广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-19", "method": "renameUserPreset", "rust": "rename_user_preset", "rustFile": "src-tauri/src/ipc/mine.rs::487", "registered": "both", "callers": ["usePresetData.ts::863"], "mock": "impl", "io": "改名 + 迁移指针/草稿/出处", "net": false, "sideEffects": ["fs::rename", "写 state", "写 provenance", "广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-20", "method": "copyUserPreset", "rust": "copy_user_preset", "rustFile": "src-tauri/src/ipc/mine.rs::532", "registered": "both", "callers": ["usePresetData.ts::896"], "mock": "impl", "io": "字节复制", "net": false, "sideEffects": ["写 presets-mine", "写出处账"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-21", "method": "getUserCopyFor", "rust": "get_user_copy_for", "rustFile": "src-tauri/src/ipc/mine.rs::576", "registered": "both", "callers": ["usePreset.ts::103"], "mock": "impl", "io": "读盘 + 归属匹配", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-22", "method": "savePresetCalibration", "rust": "save_preset_calibration", "rustFile": "src-tauri/src/ipc/mine.rs::630", "registered": "both", "callers": ["useCalibration.ts::254"], "mock": "impl", "io": "结构保真写用户文件", "net": false, "sideEffects": ["写 presets-mine"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-23", "method": "deleteUserPreset", "rust": "delete_user_preset", "rustFile": "src-tauri/src/ipc/mine.rs::662", "registered": "both", "callers": ["usePresetData.ts::870"], "mock": "impl", "io": "真删 + 清状态", "net": false, "sideEffects": ["删文件", "撤指针/草稿", "删备注", "忘决策账（吞错 ::691）", "广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-24", "method": "revealInFolder", "rust": "reveal_in_folder", "rustFile": "src-tauri/src/ipc/mine.rs::708", "registered": "both", "callers": ["usePresetData.ts::903"], "mock": "impl", "io": "开系统文件管理器", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-25", "method": "stageImport", "rust": "stage_import", "rustFile": "src-tauri/src/ipc/import.rs::49", "registered": "both", "callers": ["FileImport.tsx::130"], "mock": "impl", "io": "只检查盘", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-26", "method": "commitImport", "rust": "commit_import", "rustFile": "src-tauri/src/ipc/import.rs::76", "registered": "both", "callers": ["FileImport.tsx::136", "FileImport.tsx::177"], "mock": "impl", "io": "字节复制 + 出处", "net": false, "sideEffects": ["写 presets-mine", "写出处账（吞错 ::94）"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-27", "method": "pickImportFiles", "rust": "（非命令）", "rustFile": "src/api/bridge.ts::173", "registered": "none", "callers": ["（无 UI 触发点）"], "mock": "impl", "io": "plugin-dialog open", "net": false, "sideEffects": [], "tested": "no", "productPath": "no", "notes": "能力在，但界面没有入口（导入按钮已退役）", "level": "confirmed" },
+    { "id": "C-28", "method": "getRuntimeCatalog", "rust": "get_runtime_catalog", "rustFile": "src-tauri/src/ipc/catalog.rs::31", "registered": "both", "callers": ["usePresetData.ts::489", "CompareModal.tsx::126", "useParams.ts::692", "useBbsDelivered.ts::61", "home/useCatalog.ts::67"], "mock": "impl", "io": "读 catalog.json", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-29", "method": "getDownloadedFiles", "rust": "get_downloaded_files", "rustFile": "src-tauri/src/ipc/catalog.rs::546", "registered": "both", "callers": ["usePresetData.ts::490", "PageHome.tsx::361", "useBbsDelivered.ts::62"], "mock": "impl", "io": "读下载区 + 事件账", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-30", "method": "getStaleFiles", "rust": "get_stale_files", "rustFile": "src-tauri/src/ipc/catalog.rs::565", "registered": "both", "callers": ["usePresetData.ts::491", "PageHome.tsx::362"], "mock": "impl", "io": "读盘 + 目录 SHA 比", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-31", "method": "getDeliveryTrust", "rust": "get_delivery_trust", "rustFile": "src-tauri/src/ipc/catalog.rs::603", "registered": "both", "callers": ["usePresetData.ts::492"], "mock": "impl", "io": "读盘 + 归档 / 旧目录链", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-32", "method": "getArchivedFiles", "rust": "get_archived_files", "rustFile": "src-tauri/src/ipc/catalog.rs::662", "registered": "both", "callers": ["usePresetData.ts::493"], "mock": "impl", "io": "读归档区", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-33", "method": "readArchivedText", "rust": "read_archived_text", "rustFile": "src-tauri/src/ipc/catalog.rs::715", "registered": "both", "callers": ["PagePresets.tsx::669"], "mock": "always-throw", "io": "读文件", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-34", "method": "readDownloadedText", "rust": "read_downloaded_text", "rustFile": "src-tauri/src/ipc/catalog.rs::212", "registered": "both", "callers": ["useBbsDelivered.ts::83"], "mock": "always-throw", "io": "读文件", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-35", "method": "downloadCatalogFile", "rust": "download_runtime_file", "rustFile": "src-tauri/src/ipc/catalog.rs::246", "registered": "both", "callers": ["usePresetData.ts::806"], "mock": "always-throw", "io": "网络 + 落盘 + 归档 + baseline + 事件", "net": true, "sideEffects": ["写交付件", "写 archive", "写 baseline", "写事件账", "Channel 进度"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-36", "method": "downloadCatalogFiles", "rust": "download_runtime_files", "rustFile": "src-tauri/src/ipc/catalog.rs::323", "registered": "both", "callers": ["usePresetData.ts::935", "PageHome.tsx::434"], "mock": "impl", "io": "并发网络 + 落盘", "net": true, "sideEffects": ["同 C-35（逐份）"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-37", "method": "deleteDeliveryFile", "rust": "delete_delivery_file", "rustFile": "src-tauri/src/ipc/catalog.rs::746", "registered": "both", "callers": ["usePresetData.ts::881"], "mock": "always-throw", "io": "删交付件 + 撤指针/草稿 + 删备注", "net": false, "sideEffects": ["删文件", "写 state", "删备注"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-38", "method": "deleteArchivedFile", "rust": "delete_archived_file", "rustFile": "src-tauri/src/ipc/catalog.rs::784", "registered": "both", "callers": ["usePresetData.ts::890"], "mock": "always-throw", "io": "真删归档字节", "net": false, "sideEffects": ["删文件"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-39", "method": "fetchOfficialPreset", "rust": "fetch_official_preset", "rustFile": "src-tauri/src/ipc/catalog.rs::434", "registered": "both", "callers": ["usePresetData.ts::826", "PageHome.tsx::460"], "mock": "conditional-throw", "io": "网络取回 + 落工作副本", "net": true, "sideEffects": ["写交付件", "写 presets-mine（缺才落）", "写 baseline/事件（经 deliver）"], "tested": "no", "productPath": "yes", "notes": "两个动作（下载/更新）同一条路；不改「当前使用」", "level": "confirmed" },
+    { "id": "C-40", "method": "getActivePreset", "rust": "get_active_preset", "rustFile": "src-tauri/src/ipc/catalog.rs::861", "registered": "both", "callers": ["appState.ts::42（全应用唯一入口）"], "mock": "impl", "io": "读 run/app-state.json", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-41", "method": "applyActivePreset", "rust": "apply_active_preset", "rustFile": "src-tauri/src/ipc/catalog.rs::889", "registered": "both", "callers": ["usePresetData.ts::780", "PageHome.tsx::461"], "mock": "conditional-throw", "io": "两条线各自校验 + 写指针", "net": false, "sideEffects": ["写 run/app-state.json#activePreset", "广播"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-42", "method": "clearActivePreset", "rust": "clear_active_preset", "rustFile": "src-tauri/src/ipc/catalog.rs::958", "registered": "both", "callers": ["usePresetData.ts::787"], "mock": "impl", "io": "清指针", "net": false, "sideEffects": ["写 state", "广播"], "tested": "no", "productPath": "no", "notes": "「撤销应用」2026-10-04 退役，界面无入口", "level": "confirmed" },
+    { "id": "C-43", "method": "getOfficialVersions", "rust": "get_official_versions", "rustFile": "src-tauri/src/ipc/preset_baseline.rs::55", "registered": "both", "callers": ["usePresetData.ts::496"], "mock": "impl", "io": "读目录 + 版本链 + baseline", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-44", "method": "readPresetParams", "rust": "read_preset_params", "rustFile": "src-tauri/src/ipc/preset_params.rs::57", "registered": "both", "callers": ["CompareModal.tsx::161", "CompareModal.tsx::246", "useParams.ts::1523"], "mock": "impl", "io": "读用户文件", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "notes": "读失败转 problem 字段、不抛", "level": "confirmed" },
+    { "id": "C-45", "method": "savePresetParams", "rust": "save_preset_params", "rustFile": "src-tauri/src/ipc/preset_params.rs::97", "registered": "both", "callers": ["CompareModal.tsx::237"], "mock": "impl", "io": "结构保真写", "net": false, "sideEffects": ["写 presets-mine（空改动 / 无变化则直接 Ok 不写盘）"], "tested": "no", "productPath": "yes", "notes": "「成功但未写盘」的一档（X-12）", "level": "confirmed" },
+    { "id": "C-46", "method": "getPresetParamSync", "rust": "get_preset_param_sync", "rustFile": "src-tauri/src/ipc/param_sync.rs::104", "registered": "both", "callers": ["useParams.ts::1551"], "mock": "impl", "io": "读三方账（可 fetchMissing 发一次网络）", "net": "optional", "sideEffects": ["读官方当前版时顺手补 baseline"], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-47", "method": "applyPresetParamDecisions", "rust": "apply_preset_param_decisions", "rustFile": "src-tauri/src/ipc/param_sync.rs::127", "registered": "both", "callers": ["useParams.ts::1578"], "mock": "impl", "io": "写用户文件 + 决策账", "net": false, "sideEffects": ["写 presets-mine", "写 state", "广播"], "tested": "yes", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-48", "method": "getPresetSource", "rust": "get_preset_source", "rustFile": "src-tauri/src/ipc/catalog.rs::117", "registered": "both", "callers": ["PageSettings.tsx::69", "usePresetData.ts::659", "usePresetData.ts::744"], "mock": "impl", "io": "读设置", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-49", "method": "setPresetSource", "rust": "set_preset_source", "rustFile": "src-tauri/src/ipc/catalog.rs::130", "registered": "both", "callers": ["PageSettings.tsx::145", "PageSettings.tsx::199"], "mock": "impl", "io": "先探一次网络再落盘", "net": true, "sideEffects": ["写 state", "广播（source/delivery）"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-50", "method": "clearPresetSource", "rust": "clear_preset_source", "rustFile": "src-tauri/src/ipc/catalog.rs::173", "registered": "both", "callers": [], "mock": "impl", "io": "删设置", "net": false, "sideEffects": ["写 state", "广播"], "tested": "no", "productPath": "no", "notes": "无任何前端调用者（已排除注册/事件/内部任务）；疑似遗留", "level": "confirmed" },
+    { "id": "C-51", "method": "checkRemoteUpdate", "rust": "check_remote_update", "rustFile": "src-tauri/src/ipc/catalog.rs::984", "registered": "both", "callers": ["usePresetData.ts::408"], "mock": "always-throw", "io": "取远端 catalog + 比 revision", "net": true, "sideEffects": [], "tested": "no", "productPath": "yes", "notes": "界面无按钮，只在进预设页后台跑一次", "level": "confirmed" },
+    { "id": "C-52", "method": "applyRemoteUpdate", "rust": "apply_remote_update", "rustFile": "src-tauri/src/ipc/catalog.rs::1012", "registered": "both", "callers": ["usePresetData.ts::415"], "mock": "always-throw", "io": "归档旧目录 + 落新目录", "net": true, "sideEffects": ["写 archive/catalogs", "写 archive/catalog.json", "写 catalog.json"], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-53", "method": "getAppVersion", "rust": "get_app_version", "rustFile": "src-tauri/src/ipc/catalog.rs::1049", "registered": "both", "callers": ["PageSettings.tsx::93", "PageSettings.tsx::101"], "mock": "impl", "io": "常量", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-54", "method": "checkSoftwareUpdate", "rust": "check_software_update", "rustFile": "src-tauri/src/ipc/catalog.rs::1061", "registered": "both", "callers": ["PageSettings.tsx::94"], "mock": "impl", "io": "取 release.json", "net": true, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "confirmed" },
+    { "id": "C-55", "method": "getCalibModels", "rust": "get_calib_models", "rustFile": "src-tauri/src/ipc/mod.rs::122", "registered": "both", "callers": [], "mock": "impl", "io": "内存静态表", "net": false, "sideEffects": [], "tested": "yes", "productPath": "no", "notes": "无任何前端调用者；疑似遗留", "level": "confirmed" },
+    { "id": "C-56", "method": "openModel", "rust": "open_model", "rustFile": "src-tauri/src/ipc/mod.rs::128", "registered": "both", "callers": ["PageCalib.tsx::400"], "mock": "impl（仅 console.info）", "io": "**仅打日志**", "net": false, "sideEffects": ["返回成功但什么也没做"], "tested": "no", "productPath": "yes", "notes": "首页那颗「从云端获取」连 api 都不调（X-04）", "level": "confirmed" },
+    { "id": "C-57", "method": "updateInfo", "rust": "update_info", "rustFile": "src-tauri/src/ipc/update.rs::70", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::88"], "mock": "impl", "io": "读 release.json + 上次结果", "net": true, "sideEffects": [], "tested": "no", "productPath": "yes", "notes": "客户端构建未注册（X-01）", "level": "conflict" },
+    { "id": "C-58", "method": "startUpdate", "rust": "start_update", "rustFile": "src-tauri/src/ipc/update.rs::92", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::206", "PageSettings.tsx::124"], "mock": "impl", "io": "spawn 后台下载", "net": true, "sideEffects": ["先 Ok 后完成", "事件 software-update-progress"], "tested": "no", "productPath": "yes", "notes": "客户端构建未注册（X-01）", "level": "conflict" },
+    { "id": "C-59", "method": "pauseUpdate", "rust": "pause_update", "rustFile": "src-tauri/src/ipc/update.rs::117", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::178"], "mock": "impl", "io": "开关", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "conflict" },
+    { "id": "C-60", "method": "resumeUpdate", "rust": "resume_update", "rustFile": "src-tauri/src/ipc/update.rs::122", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::188"], "mock": "impl", "io": "开关", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "conflict" },
+    { "id": "C-61", "method": "cancelUpdate", "rust": "cancel_update", "rustFile": "src-tauri/src/ipc/update.rs::127", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::181", "UpdateIndicator.tsx::191"], "mock": "impl", "io": "开关", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "level": "conflict" },
+    { "id": "C-62", "method": "installUpdate", "rust": "install_update", "rustFile": "src-tauri/src/ipc/update.rs::138", "registered": "workbench-only", "callers": ["UpdateIndicator.tsx::114"], "mock": "impl", "io": "spawn 安装脚本 + 退出", "net": false, "sideEffects": ["app.exit(0)", "结果下次启动读"], "tested": "no", "productPath": "yes", "level": "conflict" },
+    { "id": "C-63", "method": "openUrl", "rust": "open_url", "rustFile": "src-tauri/src/ipc/update.rs::172", "registered": "workbench-only", "callers": ["PageSettings.tsx::115"], "mock": "impl", "io": "系统浏览器（只收 http(s)）", "net": false, "sideEffects": [], "tested": "no", "productPath": "yes", "notes": "客户端构建未注册 → 设置页「查看更新」在正式产品里不可用", "level": "conflict" },
+    { "id": "C-64", "method": "copyToSlicer", "rust": "（非命令）", "rustFile": "src/api/bridge.ts::262", "registered": "none", "callers": ["usePresetData.ts::792"], "mock": "impl（只改内存）", "io": "—", "net": false, "sideEffects": ["真机恒抛 NotImplementedError"], "tested": "no", "productPath": "yes", "notes": "唯一「mock 有、真机没有」（X-02）", "level": "conflict" },
+    { "id": "C-65", "method": "downloadFiles", "rust": "（非命令）", "rustFile": "src/api/bridge.ts::263", "registered": "none", "callers": ["PagePresets.tsx::565"], "mock": "always-throw", "io": "—", "net": false, "sideEffects": ["两端都抛"], "tested": "no", "productPath": "yes", "notes": "官方仓库行残支（X-09）", "level": "confirmed" }
+  ],
+  "dtos": [
+    {
+      "id": "D-01", "name": "UserPresetFile", "ts": "src/api/contract.ts::491", "rust": "src-tauri/src/ipc/mine.rs::37", "persisted": "否（盘本身是底账）", "userVisible": "是",
+      "fields": [
+        { "name": "path", "type": "string", "required": true, "meaning": "相对用户根路径", "generatedBy": "扫盘", "persisted": false, "derived": false, "userVisible": false },
+        { "name": "fileName", "type": "string", "required": true, "meaning": "文件名", "generatedBy": "扫盘", "persisted": false, "derived": false, "userVisible": true },
+        { "name": "size", "type": "number", "required": true, "meaning": "字节数", "generatedBy": "stat", "persisted": false, "derived": false, "userVisible": true },
+        { "name": "modifiedUnix", "type": "number|null", "required": true, "meaning": "mtime（epoch 秒）", "generatedBy": "stat", "persisted": false, "derived": false, "userVisible": true },
+        { "name": "kind", "type": "'mkp_preset'|'bbs_profile'|'orca_profile'|null", "required": true, "meaning": "认得出的类别；.json 分不出 bbs/orca ⇒ null", "generatedBy": "按扩展名", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "state", "type": "'ok'|'unreadable'|null", "required": true, "meaning": "文件级可读性（UTF-8 + TOML 可解析），不判是否合法 Preset", "generatedBy": "读时判", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "stateDetail", "type": "string|null", "required": true, "meaning": "不可用的人话原因", "generatedBy": "读时判", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "basedOn", "type": "'current'|'outdated'|'unknown'", "required": true, "meaning": "血统 based_on_sha256 ↔ 目录当前 sha", "generatedBy": "mine.rs::based_on::179", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "basedOnLabel", "type": "string|null", "required": true, "meaning": "血统来源（catalog.path）", "generatedBy": "读文件头", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "basedOnRelease", "type": "string|null", "required": true, "meaning": "建副本那一刻来源版本号", "generatedBy": "读文件头", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "basedOnMachineId/basedOnVersionId", "type": "string|null", "required": true, "meaning": "来源那份现在对应哪台机型/版本", "generatedBy": "查目录", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "machineId/versionId", "type": "string|null", "required": true, "meaning": "这一份自己的归属（文件头两行归一化，缺失回落血统）", "generatedBy": "读文件头", "persisted": true, "derived": true, "userVisible": true },
+        { "name": "copiedFrom/copiedFromName", "type": "string|null", "required": true, "meaning": "出处账：从哪份用户文件复制来", "generatedBy": "provenance", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "provenance", "type": "'copy'|'import'|null", "required": true, "meaning": "出处种类", "generatedBy": "provenance", "persisted": true, "derived": false, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-02", "name": "PresetFileInfo", "ts": "src/api/contract.ts::393", "rust": "src-tauri/src/ipc/presets.rs::457", "persisted": "是（发布产物）", "userVisible": "是",
+      "fields": [
+        { "name": "id/fileName/path", "type": "string", "required": true, "meaning": "asset id / 文件名 / 相对仓库根路径", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "kind/category", "type": "FileKind/string", "required": true, "meaning": "类别（MKP/BBS/Orca）与子类", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "machineIds", "type": "string[]", "required": true, "meaning": "归属机型", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "nozzle/layerHeight", "type": "string?", "required": false, "meaning": "只有 bbs_profile 有", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "inBundles/usedByVersions", "type": "string[]/VersionRef[]", "required": true, "meaning": "被哪些套餐装着 / 被哪些机型:版本当 MKP 预设", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "delivery", "type": "'default'|'optional'", "required": true, "meaning": "交付身份（钦定默认集 / 可选）", "persisted": true, "derived": true, "userVisible": true },
+        { "name": "sizeText/modifiedText", "type": "string?", "required": false, "meaning": "已格式化的大小 / 时间", "persisted": true, "derived": true, "userVisible": true },
+        { "name": "statFrom", "type": "'file'|'demo'?", "required": false, "meaning": "上面两格来源（真值 / 演示推值）", "persisted": true, "derived": true, "userVisible": "tooltip" }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-03", "name": "RuntimeCatalog / RuntimeCatalogFile", "ts": "src/api/contract.ts::882 / ::677", "rust": "src-tauri/src/runtime/catalog.rs::56", "persisted": "是（catalog.json）", "userVisible": "间接",
+      "fields": [
+        { "name": "catalogSchema", "type": "number", "required": true, "meaning": "代次；加字段不升号", "persisted": true, "derived": false },
+        { "name": "revision", "type": "string", "required": true, "meaning": "目录指纹（16 hex）＝该不该同步的判据", "persisted": true, "derived": true },
+        { "name": "publishedAt", "type": "string?", "required": false, "meaning": "发布侧盖的戳；随包目录刻意不带", "persisted": true, "derived": false },
+        { "name": "brands/machines/assets/bundles/plates", "type": "数组", "required": true, "meaning": "产品定义集合（无独立落盘）", "persisted": true, "derived": false },
+        { "name": "registry", "type": "CatalogRegistry", "required": true, "meaning": "参数注册表 + 页签 + 摆放", "persisted": true, "derived": false },
+        { "name": "structureSignature/minClientVersion", "type": "string?", "required": false, "meaning": "能力判定输入（can_read 先签名后版本）", "persisted": true, "derived": false },
+        { "name": "files[].kind/fileName/path/machineId/versionId", "type": "string", "required": true, "meaning": "一份交付文件与它的落点", "persisted": true, "derived": false },
+        { "name": "files[].sha256/size", "type": "string/number", "required": false, "meaning": "发布侧对真字节算；随包侧为空（只验存在）", "persisted": true, "derived": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-04", "name": "ActivePreset", "ts": "src/api/contract.ts::935", "rust": "src-tauri/src/ipc/catalog.rs::796", "persisted": "是（run/app-state.json）", "userVisible": "是",
+      "fields": [
+        { "name": "origin", "type": "'official'|'mine'", "required": true, "meaning": "住哪条线（写指针时定）", "persisted": true, "derived": false, "userVisible": false },
+        { "name": "fileName", "type": "string", "required": true, "meaning": "官方线＝目录键；用户线＝显示名", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "path", "type": "string|null", "required": true, "meaning": "用户线相对用户根落点；官方线 null", "persisted": true, "derived": false, "userVisible": false },
+        { "name": "sha256", "type": "string", "required": true, "meaning": "应用时刻指纹", "persisted": true, "derived": false, "userVisible": false },
+        { "name": "machineId/versionId", "type": "string", "required": true, "meaning": "认不出是空串（不是 null）", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "intact", "type": "boolean", "required": true, "meaning": "盘上是否仍是应用时刻那份（派生）", "persisted": false, "derived": true, "userVisible": false }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-05", "name": "FetchOfficialResult", "ts": "src/api/contract.ts::958", "rust": "src-tauri/src/ipc/catalog.rs::402", "persisted": "否（一次性结果）", "userVisible": "是",
+      "fields": [
+        { "name": "fetched", "type": "boolean", "required": true, "meaning": "本次是否真从数据源取回了一份（false = 一次网络都没发）", "derived": true, "userVisible": true },
+        { "name": "created", "type": "boolean", "required": true, "meaning": "本次是否新落了一份我的工作副本（false = 我那份本来就在，一字节没动）", "derived": true, "userVisible": true },
+        { "name": "fileName/path", "type": "string", "required": true, "meaning": "我那一份的名字与相对用户根落点", "derived": false, "userVisible": "间接" }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-06", "name": "ArchivedFile", "ts": "src/api/contract.ts::711", "rust": "src-tauri/src/ipc/catalog.rs::634", "persisted": "是（盘 + 事件账）", "userVisible": "是",
+      "fields": [
+        { "name": "path/fileName/size/sha256", "type": "string|number", "required": true, "meaning": "归档落点与身份", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "publishedAt", "type": "string|null", "required": true, "meaning": "这一版在云端发布时刻；链建立之前 null（绝不拿换下时刻顶）", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "replacedUnix", "type": "number|null", "required": true, "meaning": "被换下时刻（事件账）", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "machineId/versionId/kind", "type": "string|null", "required": true, "meaning": "认得出是谁的旧版本就给；认不出 null（不猜）", "persisted": false, "derived": true, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-07", "name": "OnDiskFile", "ts": "src/api/contract.ts::773", "rust": "src-tauri/src/ipc/catalog.rs::537", "persisted": "来源是事件账", "userVisible": "是",
+      "fields": [
+        { "name": "fileName", "type": "string", "required": true, "meaning": "文件名（这套系统认的一直是它）", "derived": false, "userVisible": true },
+        { "name": "downloadedUnix/replacedUnix", "type": "number|null", "required": true, "meaning": "下载 / 替换事件时刻；两者至多一个有值", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "publishedAt", "type": "string|null", "required": true, "meaning": "这份字节属于哪一代目录、那一代在云端发布的时刻", "persisted": true, "derived": true, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-08", "name": "DeliveryTrust", "ts": "src/api/contract.ts::747", "rust": "src-tauri/src/ipc/catalog.rs::594", "persisted": "否（现算）", "userVisible": "是",
+      "fields": [
+        { "name": "fileName", "type": "string", "required": true, "meaning": "哪一份", "derived": false, "userVisible": true },
+        { "name": "verdict", "type": "'old'|'tampered'", "required": true, "meaning": "认得出是官方某一版旧版 / 查不出属于哪一版", "derived": true, "userVisible": true },
+        { "name": "archivedPath", "type": "string|null", "required": true, "meaning": "old 且归档里有它字节时给；否则 null", "derived": true, "userVisible": false }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-09", "name": "OfficialVersion", "ts": "src/api/contract.ts::1128", "rust": "src-tauri/src/ipc/preset_baseline.rs::37", "persisted": "否（派生）", "userVisible": "是",
+      "fields": [
+        { "name": "fileName/sha256", "type": "string", "required": true, "meaning": "归属与版本唯一身份（sha 界面不显示）", "derived": true, "userVisible": "fileName 是" },
+        { "name": "releaseTime", "type": "string|null", "required": true, "meaning": "官方发布日期真值（正文 # release_time）", "derived": true, "userVisible": true },
+        { "name": "publishedAt", "type": "string|null", "required": true, "meaning": "目录代时间（兜底）", "derived": true, "userVisible": true },
+        { "name": "downloaded", "type": "boolean", "required": true, "meaning": "**= baseline 里有没有这一版**（与磁盘口径冲突，见 CF-01）", "derived": true, "userVisible": true },
+        { "name": "current", "type": "boolean", "required": true, "meaning": "是不是当前目录登记的那一版（只有它下载真能成）", "derived": true, "userVisible": true }
+      ],
+      "level": "conflict"
+    },
+    {
+      "id": "D-10", "name": "PresetParamSync / ParamSyncEntry", "ts": "src/api/contract.ts::1196 / ::1175", "rust": "src-tauri/src/ipc/param_sync.rs::52", "persisted": "决定账是持久；同步结果是现算", "userVisible": "是",
+      "fields": [
+        { "name": "path/fileName", "type": "string", "required": true, "meaning": "哪一份我自己的预设", "derived": false, "userVisible": true },
+        { "name": "machineId/versionId", "type": "string|null", "required": true, "meaning": "这份预设自己的归属（认不出 null）", "derived": true, "userVisible": false },
+        { "name": "officialFileName", "type": "string|null", "required": true, "meaning": "官方那一份的名字；null ⇒ 比不出更新", "derived": true, "userVisible": "间接" },
+        { "name": "basedOnReleaseTime/currentReleaseTime", "type": "string|null", "required": true, "meaning": "我基于那版 / 官方当前版 的发布时间", "derived": true, "userVisible": true },
+        { "name": "officialReady", "type": "boolean", "required": true, "meaning": "官方当前版字节在本机可用（可用才逐项比）", "derived": true, "userVisible": true },
+        { "name": "versionAdvanced", "type": "boolean", "required": true, "meaning": "官方换版了", "derived": true, "userVisible": true },
+        { "name": "pendingCount", "type": "number", "required": true, "meaning": "待处理条数（= entries 里 pending 的条数；前端不重算）", "derived": true, "userVisible": true },
+        { "name": "entries[].key/mine/baselineOld/officialNew", "type": "string|null", "required": true, "meaning": "四方账的四个值；null = 文件里没有这一项（不是空串）", "derived": true, "userVisible": true },
+        { "name": "entries[].pending/decided", "type": "boolean|'adopt'|'hold'|null", "required": true, "meaning": "官方改过而我没处理 / 我对当前官方版处理过什么", "derived": true, "userVisible": true },
+        { "name": "（Rust 侧另有 currentSha256，契约未声明、界面不显示）", "type": "string?", "required": false, "meaning": "官方当前版摘要（内部）", "derived": true, "userVisible": false }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-11", "name": "PresetDraft / CommittedDraft / UserFileIdentity", "ts": "src/api/contract.ts::562 / ::578 / ::588", "rust": "src-tauri/src/ipc/mine.rs::181 / ::198 / ::214", "persisted": "草稿持久（run/app-state.json）", "userVisible": "是",
+      "fields": [
+        { "name": "PresetDraft.origin", "type": "ActiveOrigin", "required": true, "meaning": "哪条线（决定保存文案）", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "PresetDraft.sourceFileName/path", "type": "string|null", "required": true, "meaning": "从哪份改出来 / 用户线落点", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "PresetDraft.text/updatedUnix/reused", "type": "string|number|boolean", "required": true, "meaning": "正文 / 改动时刻 / 是否接着上次改", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "CommittedDraft.path/fileName/size/replaced", "type": "string|number|boolean", "required": true, "meaning": "落点与结果；replaced = 是否盖掉同名那份（用户线恒 true）", "persisted": false, "derived": true, "userVisible": true },
+        { "name": "UserFileIdentity.path/fileName", "type": "string", "required": true, "meaning": "改名 / 另存共用的返回形状", "persisted": false, "derived": false, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-12", "name": "PresetSource / BuiltinPresetSource", "ts": "src/api/contract.ts::1104 / ::1088", "rust": "src-tauri/src/ipc/catalog.rs::55 / ::43", "persisted": "是（app-state.json#presetSource）", "userVisible": "是（设置页）",
+      "fields": [
+        { "name": "mode", "type": "'github'|'gitee'|'custom'", "required": true, "meaning": "用户选的是哪个源（id 是契约）", "persisted": true, "derived": false, "userVisible": true },
+        { "name": "label/address", "type": "string", "required": true, "meaning": "显示名 / 当前生效入口地址（空串＝选了自定义还没填）", "persisted": "address 是", "derived": false, "userVisible": true },
+        { "name": "fromUser", "type": "boolean", "required": true, "meaning": "是不是用户自己填的", "persisted": true, "derived": false, "userVisible": false },
+        { "name": "builtin/defaultMode/builtinDefault", "type": "数组|string|null", "required": true, "meaning": "两个内置源、出厂默认是哪个、它地址", "persisted": false, "derived": true, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-13", "name": "RemoteUpdateCheck / SoftwareUpdate / UpdateInfo", "ts": "src/api/contract.ts::970 / ::992 / ::1044", "rust": "src-tauri/src/ipc/catalog.rs::972 / ::1086；update.rs::70", "persisted": "否 / release.json 是", "userVisible": "是",
+      "fields": [
+        { "name": "RemoteUpdateCheck.upToDate", "type": "boolean", "required": true, "meaning": "远端 revision 与本地是否相同", "derived": true, "userVisible": "间接" },
+        { "name": "RemoteUpdateCheck.readable", "type": "boolean", "required": true, "meaning": "本客户端读不读得懂这一代（能力判定，与 upToDate 是两件事）", "derived": true, "userVisible": true },
+        { "name": "RemoteUpdateCheck.localRevision/remoteRevision", "type": "string", "required": true, "meaning": "两侧指纹（可对账）", "derived": true, "userVisible": false },
+        { "name": "SoftwareUpdate.hasUpdate/currentVersion/latestVersion", "type": "boolean|string", "required": true, "meaning": "软件本体的版本三件（与预设数据链分开）", "derived": true, "userVisible": true },
+        { "name": "SoftwareUpdate.notes/url/asset", "type": "string?", "required": false, "meaning": "更新说明 / 下载页 / 可下载安装包（没有 asset ⇒ 退回打开下载页）", "derived": true, "userVisible": true },
+        { "name": "UpdateInfo.state", "type": "UpdateState（tag 判别）", "required": true, "meaning": "idle/downloading/paused/ready/failed/cancelled", "derived": true, "userVisible": true },
+        { "name": "UpdateInfo.lastResult", "type": "UpdateResult?", "required": false, "meaning": "上次安装结果（安装脚本写、下次启动读）", "persisted": true, "derived": false, "userVisible": true }
+      ],
+      "level": "confirmed"
+    },
+    {
+      "id": "D-14", "name": "DownloadTick / DownloadOutcome", "ts": "src/api/contract.ts::1065 / ::1076", "rust": "src-tauri/src/ipc/catalog.rs::191 / ::~210", "persisted": "否", "userVisible": "是",
+      "fields": [
+        { "name": "DownloadTick.stage", "type": "'connecting'|'transferring'|'done'|'failed'", "required": true, "meaning": "只有这四档（没有「校验中/落盘中」，那两个报出来就是编的）", "derived": false, "userVisible": true },
+        { "name": "DownloadTick.received/total", "type": "number|null", "required": true, "meaning": "已收字节；total 为 null 时界面只说已收多少，不给百分比", "derived": false, "userVisible": true },
+        { "name": "DownloadTick.message", "type": "string?", "required": false, "meaning": "失败原因（来自后端，前端不造句）", "derived": false, "userVisible": true },
+        { "name": "DownloadOutcome.fileName/ok/message", "type": "string|boolean", "required": true, "meaning": "逐份结局（一份失败不拖累别人）", "derived": false, "userVisible": true }
+      ],
+      "level": "confirmed"
+    }
+  ],
+  "boundaries": {
+    "rustSide": ["一切文件系统访问与防穿越（fsx/*）", "TOML 结构保真写值（presetdata::patch / toml_edit）", "名字门槛（不许分隔符/空/换后缀/不覆盖）", "血统与归属的读写与判定", "只读区不可变 + 两条线的前置校验", "并发（批量下载）与事件推送", "SHA/大小校验与重试"],
+    "frontSide": ["页面可见性、排序、空态", "时间/大小的人话化（但 sizeText 与模型 size 由后端给已格式化串）", "只读偏好（localStorage 7 键）", "行状态拼装（presetTree 的派生，见下）"],
+    "frontInference": [
+      { "what": "行状态四档 / 云端三态 / 「已应用·已下载」", "where": "presetTree.ts::427 / ::1511 / ::939 / ::2268", "backendHasField": false, "evidence": ["src/app/presets/presetTree.ts::2223"], "level": "confirmed" },
+      { "what": "更新进度的未知总量暗示", "where": "UpdateIndicator.tsx::120", "backendHasField": false, "level": "confirmed" },
+      { "what": "旧后端缺字段时的 catalog 兜底", "where": "useParams.ts::678", "backendHasField": false, "level": "partial" }
+    ],
+    "earlyReturn": [
+      { "case": "startUpdate", "detail": "spawn 后立即 Ok，下载仍在跑（进度靠事件）", "evidence": ["src-tauri/src/ipc/update.rs::103"], "level": "confirmed" },
+      { "case": "installUpdate", "detail": "spawn 脚本 + 200ms + app.exit(0)；结果下次启动读", "evidence": ["src-tauri/src/ipc/update.rs::152"], "level": "confirmed" },
+      { "case": "savePresetParams", "detail": "edits 为空或算出来与原文一致 ⇒ 直接 Ok 不写盘（不刷 mtime），DTO 不带「是否真落盘」", "evidence": ["src-tauri/src/ipc/preset_params.rs::102"], "level": "confirmed" }
+    ],
+    "swallowedErrors": [
+      { "case": "commitImport 的 provenance::record", "detail": "`let _ =` 吞掉 → 文件落了、出处账可能没记", "evidence": ["src-tauri/src/ipc/import.rs::94"], "level": "confirmed" },
+      { "case": "deleteUserPreset 的 forget_param_decisions", "detail": "吞掉 → 残留决策账", "evidence": ["src-tauri/src/ipc/mine.rs::691"], "level": "confirmed" },
+      { "case": "广播 emit", "detail": "`let _ =` 尽力而为（写成功后广播失败只是前端不自动刷新）", "evidence": ["src-tauri/src/ipc/mod.rs::51"], "level": "confirmed" },
+      { "case": "前端 catch 吞错 31 处", "detail": "正式路径关键几处：PageSettings.tsx::93/101（版本失败当空串）、PageHome.tsx::361/362（列表失败当空数组）、usePresetData 多处", "evidence": ["src/app/settings/PageSettings.tsx::93", "src/app/home/PageHome.tsx::361"], "level": "confirmed" }
+    ],
+    "errorModel": {
+      "structured": "AppError{code,message,traceId,detail?}；ErrorCode 10 档含 NOT_SUPPORTED；与 src-tauri/src/error.rs 逐字段对齐；traced() 给每条命令一个 traceId",
+      "fallback": "未过 IPC 的 reject 由 bridge.ts::43 兜底成 INTERNAL / NOT_IMPLEMENTED + traceId '-'",
+      "softFailures": "readPresetParams 返回空表 + problem；Import/Download 逐份 ok/message（一份失败不拖累别人）",
+      "evidence": ["src/api/contract.ts::1774", "src-tauri/src/error.rs", "src/api/bridge.ts::43"],
+      "level": "confirmed"
+    },
+    "suggestedRewriteBoundary": {
+      "note": "以下是建议（不是现状）：所有业务规则下沉到 Rust 单一领域层；前端只做呈现与本地偏好；后端为「用户会问的每一个状态」直接给出**单一字段**（不要前端从五个读拼）。",
+      "level": "todo"
+    }
+  }
+}

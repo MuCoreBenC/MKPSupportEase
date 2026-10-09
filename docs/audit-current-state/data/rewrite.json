@@ -1,0 +1,259 @@
+{
+  "problems": [
+    { "id": "X-01", "title": "客户端构建缺少 7 条「软件更新」命令，但界面把它们摆在正式路径上", "severity": "high", "category": "contract", "detail": "ipc::update::*（updateInfo/startUpdate/pauseUpdate/resumeUpdate/cancelUpdate/installUpdate/openUrl）只在 feature=workbench 那份 generate_handler 里；Cargo.toml default=[] ⇒ 给用户的二进制没有它们。而标题栏 UpdateIndicator 常驻、设置页「查看更新/在应用内下载」都在正式路径调用 → 一律落到 bridge 兜底 NOT_IMPLEMENTED。与 lib.rs 自己写的「两份清单一字不差」直接冲突。", "evidence": ["src-tauri/src/lib.rs::139", "src-tauri/src/lib.rs::396", "src-tauri/Cargo.toml::45", "src/app/components/UpdateIndicator.tsx::206", "src/app/settings/PageSettings.tsx::113"], "level": "conflict" },
+    { "id": "X-02", "title": "「复制到切片器」真机未接线，界面却给按钮", "severity": "high", "category": "contract", "detail": "copyToSlicer 在 bridge 里 notWired 恒抛；mock 有实现（只改内存，提示条自己写「刷新会还原」）。切片器行「已复制/未复制」读的 get_slicer_copied 又是恒空桩。", "evidence": ["src/api/bridge.ts::262", "src/api/mock.ts::1231", "src-tauri/src/ipc/presets.rs::818"], "level": "conflict" },
+    { "id": "X-03", "title": "右键「复制链接」没有契约（点了只说没有实现）", "severity": "low", "category": "dead-entry", "detail": "契约里连签名都没有，界面上却常驻这一项。", "evidence": ["src/app/presets/PagePresets.tsx::1227", "src/app/presets/presetTree.ts::900"], "level": "confirmed" },
+    { "id": "X-04", "title": "首页「打开模型」是空动作", "severity": "medium", "category": "dead-entry", "detail": "「从云端获取」只 setOpenModel(null)（没有任何 api 调用）；「从本地缓存打开」写死 disabled。校准页那条才真调 api.openModel（而 open_model 在 Rust 侧只打日志）。", "evidence": ["src/app/home/PageHome.tsx::988", "src/app/home/PageHome.tsx::995", "src/app/calib/PageCalib.tsx::396", "src-tauri/src/ipc/mod.rs::128"], "level": "confirmed" },
+    { "id": "X-05", "title": "两个「本机状态」读是恒空桩，界面据此显示假事实", "severity": "high", "category": "stub", "detail": "get_local_files 恒 Ok(vec![])（预设页「本机」计数、statusOf 的「本地有」凭它）、get_slicer_copied 恒空（切片器「已复制」凭它）。空集被界面读成「后端说没有」，而真值在下载区与切片器目录。", "evidence": ["src-tauri/src/ipc/presets.rs::812", "src-tauri/src/ipc/presets.rs::818", "src/app/presets/presetTree.ts::448"], "level": "confirmed" },
+    { "id": "X-06", "title": "「打开模型」命令只打日志", "severity": "medium", "category": "stub", "detail": "open_model 返回成功但什么也没做（不下载、不打开）。", "evidence": ["src-tauri/src/ipc/mod.rs::129"], "level": "confirmed" },
+    { "id": "X-07", "title": "「已下载」有两套口径：baseline vs 磁盘", "severity": "high", "category": "consistency", "detail": "OfficialVersion.downloaded = baseline_exists；delete_delivery_file 不删 baseline ⇒ 删了字节后云端表仍可能显示「已下载」，而 get_downloaded_files 走磁盘显示未下载。", "evidence": ["src-tauri/src/ipc/preset_baseline.rs::67", "src-tauri/src/ipc/catalog.rs::766", "src-tauri/src/runtime/delivery.rs::834"], "level": "conflict" },
+    { "id": "X-08", "title": "工作台构建的命令清单缺 3 条 mine 命令", "severity": "medium", "category": "contract", "detail": "get_preset_remarks / set_preset_remark / set_user_preset_machine_version 只在客户端清单里。同为「两份清单一字不差」的违例。", "evidence": ["src-tauri/src/lib.rs::156", "src-tauri/src/lib.rs::231"], "level": "conflict" },
+    { "id": "X-09", "title": "downloadFiles 两端都抛，界面上仍有「下载」残支", "severity": "low", "category": "dead-entry", "detail": "官方仓库行的下载支路必然失败（真机 notWired、mock 也抛）。", "evidence": ["src/api/bridge.ts::263", "src/api/mock.ts::1259", "src/app/presets/PagePresets.tsx::565"], "level": "confirmed" },
+    { "id": "X-10", "title": "MKP 云端三态判据混入了下载区四态（内部信号）", "severity": "medium", "category": "model", "detail": "设计意图是「只看血统来源」，但「更新」不改工作副本 ⇒ 血统永停旧版，row 会一直挂在「有新版」。2026-10-09 的修法是引入 state==='ok' 这个内部信号，于是判据既不是纯血统也不是纯字节，两个世界混在一处。", "evidence": ["src/app/presets/presetTree.ts::2268", "src-tauri/src/ipc/catalog.rs::434"], "level": "confirmed" },
+    { "id": "X-11", "title": "两条命令没有任何前端调用者（疑似遗留）", "severity": "low", "category": "legacy", "detail": "getCalibModels、clearPresetSource：已分别排除注册、事件、内部任务三种可能路径（无 Rust emit / 无内部 spawn 触发）后仍无消费者。", "evidence": ["src-tauri/src/ipc/mod.rs::122", "src-tauri/src/ipc/catalog.rs::173"], "level": "confirmed" },
+    { "id": "X-12", "title": "「成功」可能不等于「已落盘」，且有一步到位的多写序列", "severity": "medium", "category": "consistency", "detail": "save_preset_params 在空改动/无变化时直接 Ok 不写盘（DTO 不带「是否真落盘」）；fetch_official_preset 两步串行，第二步失败则整条报错（第一步已落盘、无回滚）；commit_preset_draft 写文件成功后清草稿失败会残留。", "evidence": ["src-tauri/src/ipc/preset_params.rs::102", "src-tauri/src/ipc/catalog.rs::450", "src-tauri/src/ipc/mine.rs::464"], "level": "partial" },
+    { "id": "X-13", "title": "前端大量 catch 吞错，无法区分「后端说没有」与「调用失败」", "severity": "medium", "category": "error-handling", "detail": "31 处 catch；正式路径关键：PageSettings 版本读取失败当空串、首页下载区/过时列表失败当空数组、usePresetData 多处。", "evidence": ["src/app/settings/PageSettings.tsx::93", "src/app/home/PageHome.tsx::361", "src/app/presets/usePresetData.ts::659"], "level": "confirmed" },
+    { "id": "X-14", "title": "BBS 页「可改动」模式改了值，但看不到落点", "severity": "medium", "category": "unverified", "detail": "行内控件写入 useBbsPreset 的本地状态，页面无任何 api 调用；「可改动」是否落盘、落到哪，静态代码无法确定。", "evidence": ["src/app/bbs/BbsControl.tsx::89", "src/app/bbs/PageBbs.tsx::311"], "level": "unverified" },
+    { "id": "X-15", "title": "「修改历史」抽屉其实是本会话 undo 栈", "severity": "low", "category": "naming", "detail": "名字暗示文件版本历史，实际只有会话内回退（代码自述「文件的历史版本要接后端才有，目前没有」）。", "evidence": ["src/app/params/HistoryDrawer.tsx::145"], "level": "confirmed" },
+    { "id": "X-16", "title": "「报告」是一个永久空的一级页签", "severity": "low", "category": "dead-entry", "detail": "PagePlaceholder，没有数据也没有动作。", "evidence": ["src/app/App.tsx::126"], "level": "confirmed" },
+    { "id": "X-17", "title": "写盘纪律的源码扫描不覆盖 src-tauri", "severity": "medium", "category": "process", "detail": "write_discipline_scan 只扫 crates/{preset,postprocess}/src；clippy.toml 不管 remove_file/rename/copy/remove_dir_all。src-tauri 的删除/改名/复制没有自动兜底。", "evidence": ["crates/preset/tests/write_discipline_scan.rs::162", "clippy.toml::39"], "level": "confirmed" },
+    { "id": "X-18", "title": "选一份预设就等于改「当前使用」，没有预览态", "severity": "medium", "category": "ux-model", "detail": "首页/参数页的预设抽屉「选中即应用」（appState::activateCombo）；用户想先看看另一份的参数会顺手改掉底账。", "evidence": ["src/app/home/PageHome.tsx::274", "src/app/state/appState.ts::116"], "level": "confirmed" }
+  ],
+  "complexity": [
+    { "id": "CX-01", "item": "同一事实有多套状态词：官方件四态（未下载/已下载/旧版本/内容异常）、更新三态（未下载/已下载/有更新）、MKP 云端三态（未获取/本地已有/有新版）、用户件三档（基于当前版/基于旧版/说不清）、可读性两档", "category": "state-words", "evidence": ["src/app/presets/presetTree.ts::467", "src/app/presets/presetTree.ts::515", "src/app/presets/presetTree.ts::568"], "verdict": "merge" },
+    { "id": "CX-02", "item": "同一份预设出现在多张表/多行：云端一条 + 本地一条（MKP）；官方副本 + 我的文件（切片器）；旧版另有名字躺在本地表", "category": "duplicate-rows", "evidence": ["src/app/presets/presetTree.ts::2009", "src/app/presets/presetTree.ts::2223"], "verdict": "keep" },
+    { "id": "CX-03", "item": "内部概念进界面：血统（based_on/based_on_sha256）、baseline、目录指纹 revision、归档、事件时间、下载区路径", "category": "leak", "evidence": ["src/app/presets/PresetTable.tsx::828", "src/app/presets/PresetTable.tsx::1001"], "verdict": "internalize" },
+    { "id": "CX-04", "item": "动作词语义交叠：使用 / 应用 / 下载 / 更新 / 复制 / 另存 —— 「使用」与「应用」是同一件事的两个入口；「下载」与「更新」是同一条命令", "category": "action-words", "evidence": ["src/app/presets/PagePresets.tsx::1046", "src/app/home/PageHome.tsx::461", "src-tauri/src/ipc/catalog.rs::434"], "verdict": "merge" },
+    { "id": "CX-05", "item": "行状态是前端从 5 个读拼出来的（catalog + downloaded + stale + trust + localFiles），后端没有单一字段回答「这一行现在怎么样」", "category": "derived-state", "evidence": ["src/app/presets/usePresetData.ts::480", "src/app/presets/presetTree.ts::448"], "verdict": "redo" },
+    { "id": "CX-06", "item": "右键菜单按 5 种来源 × 2 张表 分支，项数多、语义重叠（使用/打开参数/选择要跟随的更新/改这份/另存/改名/显示/置顶/详情/BBS/删除）", "category": "menu-branch", "evidence": ["src/app/presets/PagePresets.tsx::1192"], "verdict": "merge" },
+    { "id": "CX-07", "item": "重复入口：「应用/下载并应用」在首页与预设页各有一套，「使用」在预设页与首页抽屉各一套", "category": "duplicate-entry", "evidence": ["src/app/home/PageHome.tsx::425", "src/app/presets/PagePresets.tsx::1046"], "verdict": "merge" },
+    { "id": "CX-08", "item": "同一个 sha 在三处表达：baseline 文件名、事件账字段、目录链 files[].sha256；服务三个不同问题但都是「这一版官方」", "category": "duplicate-authority", "evidence": ["src-tauri/src/runtime/baseline.rs::52", "src-tauri/src/runtime/preset_events.rs::46", "src-tauri/src/runtime/release.rs::121"], "verdict": "merge" },
+    { "id": "CX-09", "item": "归档 + 版本链 + 事件账：三条只为「追溯过去」的持久化链，且都没有删除入口（版本链/事件账）", "category": "history-bloat", "evidence": ["src-tauri/src/runtime/delivery.rs::474", "src-tauri/src/runtime/release.rs::48", "src-tauri/src/runtime/preset_events.rs::104"], "verdict": "internalize" },
+    { "id": "CX-10", "item": "两份 generate_handler 清单 + feature 分叉：改一处要记得改两处，且实际已经漂移", "category": "build-duplication", "evidence": ["src-tauri/src/lib.rs::135"], "verdict": "redo" },
+    { "id": "CX-11", "item": "「预设数据源」是发布方/构建期的事，却做成设置页里用户可点的单选（含自定义地址）", "category": "role-confusion", "evidence": ["src/app/settings/PageSettings.tsx::296", "src-tauri/build.rs::28"], "verdict": "internalize" },
+    { "id": "CX-12", "item": "一份预设两条草稿链：正文编辑（putPresetDraft）与参数编辑（patchPresetDraft）共用一个 draft 格但两套入口与语义", "category": "dual-draft", "evidence": ["src-tauri/src/ipc/mine.rs::351", "src-tauri/src/ipc/mine.rs::374"], "verdict": "merge" },
+    { "id": "CX-13", "item": "备注覆盖账只服务于列表副标题，却是一个独立持久化账 + 一条命令 + 一个详情编辑格", "category": "minor-ledger", "evidence": ["src-tauri/src/runtime/remarks.rs::33", "src/app/presets/PresetTable.tsx::1099"], "verdict": "internalize" },
+    { "id": "CX-14", "item": "一级页签里有占位页（报告）；另有已退役页签（同步 / 参数）的历史残迹", "category": "page-bloat", "evidence": ["src/app/App.tsx::126", "src/app/constants/tabs.ts"], "verdict": "drop" },
+    { "id": "CX-15", "item": "大小/时间有三种来源（真值 file / 演示推值 demo / 事件账），同一列里混着，靠 statFrom 与 tooltip 分开", "category": "mixed-sources", "evidence": ["src/api/contract.ts::429", "src/app/presets/PresetTable.tsx::325"], "verdict": "merge" },
+    { "id": "CX-16", "item": "旧世界残留：三个 run/*.json 退役档、旧目录形状（mkp/presets/…）、旧 localStorage 的 cloud 格 —— 都还留着读侧兜底", "category": "legacy-compat", "evidence": ["src-tauri/src/runtime/app_state.rs::127", "src-tauri/src/runtime/mine.rs::202", "src/api/storageKeys.ts::12"], "verdict": "drop" },
+    { "id": "CX-17", "item": "两个「导入」含义完全不同：预设页=落盘进 presets-mine（两段式）；BBS 页=只在内存读入对照", "category": "same-word", "evidence": ["src-tauri/src/ipc/import.rs::76", "src/app/bbs/PageBbs.tsx::321"], "verdict": "merge" },
+    { "id": "CX-18", "item": "机型既是「筛选」又是「归属」又是「识别色」；用户还能改归属（写文件头两行），但机型目录来自 catalog（发布侧），两者语义不同却被同一个下拉表达", "category": "concept-overload", "evidence": ["src/app/presets/PresetTable.tsx::561", "src/app/presets/PresetTable.tsx::1176"], "verdict": "redo" }
+  ],
+  "decisions": [
+    {
+      "id": "RD-01", "problem": "命令注册面与构建面漂移（X-01 / X-08 / CX-10）", "currentBehavior": "两份 generate_handler 手写、按 feature 分叉，7 条 update 命令只在工作台、3 条 mine 命令只在客户端。",
+      "evidence": ["src-tauri/src/lib.rs::139", "src-tauri/src/lib.rs::396"], "businessValue": "软件自更新与备注/归属是真实功能，不能一半构建没有。",
+      "verdict": "redo", "newRule": "命令清单由一处定义、两个入口引用同一份列表；feature 只用于「编译进不进」，不用于「注册到哪」；启动时对「前端会调的命令」做一次自检（缺一条就报错，而不是落到兜底文案）。",
+      "affected": { "pages": ["P-shell", "P-settings"], "entities": [], "commands": ["updateInfo", "startUpdate", "pauseUpdate", "resumeUpdate", "cancelUpdate", "installUpdate", "openUrl", "getPresetRemarks", "setPresetRemark", "setUserPresetMachineVersion"], "files": ["src-tauri/src/lib.rs"] },
+      "acceptance": ["客户端构建下 7 条更新命令可调用（或界面不摆入口）", "有一条自动判据同时检查两份清单一致性"], "openQuestions": ["软件自更新是否要进客户端重构范围（当前只发 Gitee、只支持 macOS .app.zip）"]
+    },
+    {
+      "id": "RD-02", "problem": "「本机状态」由恒空桩与磁盘真值两套口径（X-05 / X-07 / CX-05）", "currentBehavior": "get_local_files / get_slicer_copied 恒空；官方件的真值在下载区；baseline 又算一份 downloaded。",
+      "evidence": ["src-tauri/src/ipc/presets.rs::812", "src-tauri/src/ipc/preset_baseline.rs::67"], "businessValue": "用户必须能相信「本机有没有这一份」。",
+      "verdict": "redo", "newRule": "本机状态只有一个权威：磁盘。后端为每个文件直接给一个状态字段（缺 / 有且与官方一致 / 有但不一致），前端不再从五个读拼，也不再读恒空桩。",
+      "affected": { "pages": ["P-presets", "P-home"], "entities": ["E-03", "E-09", "E-14"], "commands": ["getLocalFiles", "getSlicerCopied", "getDownloadedFiles", "getStaleFiles", "getDeliveryTrust", "getOfficialVersions"], "files": ["src/app/presets/presetTree.ts", "src/app/presets/usePresetData.ts", "src-tauri/src/ipc/presets.rs"] },
+      "acceptance": ["删掉本机文件后，所有显示「已下载/本机有」的地方在同一帧变「没有」", "不存在第二个回答「有没有」的读"], "openQuestions": ["切片器的『生效』（复制进切片器目录）是否还在重构范围内"]
+    },
+    {
+      "id": "RD-03", "problem": "多套状态词描述同一事实（CX-01 / CX-03）", "currentBehavior": "四态 + 三态 + 三档 + 两档并存，且都用内部概念命名（旧版本/内容异常/基于旧版/有新版）。",
+      "evidence": ["src/app/presets/presetTree.ts::467", "src/app/presets/presetTree.ts::568"], "businessValue": "状态必须让用户一眼知道「我能不能用、要不要动手」。",
+      "verdict": "merge", "newRule": "只保留**两轴两个词**：①我这边有没有（没有 / 有 / 有但落后）②官方那边有没有新的（没有 / 有）。内部概念（baseline/血统/目录指纹/归档/内容异常）只出现在「详情」的次要位置或根本不出现。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-06", "E-14"], "commands": [], "files": ["src/app/presets/presetTree.ts", "src/app/presets/PresetTable.tsx"] },
+      "acceptance": ["用户在第 2 步内能判断「这份能不能用、要不要更新」", "界面文本里不再出现 baseline / 血统 / 目录指纹 / 归档 这四个词"], "openQuestions": ["「内容异常」（字节被改过）要不要保留给用户看，还是只在下载时静默修复"]
+    },
+    {
+      "id": "RD-04", "problem": "动作词语义交叠：使用 / 应用 / 下载 / 更新 / 复制（CX-04 / CX-07）", "currentBehavior": "「使用」与「应用」都写同一个指针；「下载」与「更新」是同一条命令的两种文案；入口分散在首页、预设页、参数页。",
+      "evidence": ["src/app/presets/PagePresets.tsx::1046", "src/app/home/PageHome.tsx::461"], "businessValue": "一个动作一个词、一个词只指一件事。",
+      "verdict": "merge", "newRule": "统一为两个动词：**「取回」（把官方的取到本机，幂等，不动我的东西）**与**「启用」（把某一份设为当前使用，只写指针）**。删掉「应用/使用/下载/更新/复制」这一堆同义词。",
+      "affected": { "pages": ["P-presets", "P-home", "P-params"], "entities": ["E-08"], "commands": ["applyActivePreset", "fetchOfficialPreset", "downloadCatalogFile", "copyToSlicer"], "files": ["src/app/presets/PagePresets.tsx", "src/app/home/PageHome.tsx"] },
+      "acceptance": ["全局搜索『应用 / 使用它 / 下载并应用』不再出现", "每个动作词只对应一个命令"], "openQuestions": ["「启用」的入口放在哪一页（预设表 vs 首页）"]
+    },
+    {
+      "id": "RD-05", "problem": "内部概念泄漏到界面（CX-03 / CX-09）", "currentBehavior": "详情面板与归档抽屉暴露血统三行、目录指纹、事件时间、下载区路径、baseline 概念。",
+      "evidence": ["src/app/presets/PresetTable.tsx::1001", "src/app/presets/PagePresets.tsx::688"], "businessValue": "这些概念对「用预设」这件事不是必需的。",
+      "verdict": "internalize", "newRule": "血统/baseline/归档/事件账/目录指纹全部内部化：界面只回答「这份是哪来的（官方/我改的/导入的）」「什么时候变的」「要不要更新」。归档与旧版本的删除入口取消（用户不需要管理官方旧字节）。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-04", "E-05", "E-09", "E-13", "E-15"], "commands": ["getArchivedFiles", "deleteArchivedFile", "readArchivedText"], "files": ["src/app/presets/PagePresets.tsx", "src/app/presets/PresetTable.tsx"] },
+      "acceptance": ["预设页与详情里不再出现内部术语", "归档没有面向用户的删除入口"], "openQuestions": ["官方旧字节是否还需要保留（作为版本链证据）——建议保留但纯内部"]
+    },
+    {
+      "id": "RD-06", "problem": "行状态由前端拼装、后端无单一字段（CX-05）", "currentBehavior": "presetTree 从 5 个读拼出行状态与按钮判据。",
+      "evidence": ["src/app/presets/usePresetData.ts::480"], "businessValue": "状态判据应只有一处，否则改了后端忘了前端就会撒谎。",
+      "verdict": "redo", "newRule": "后端给「用户会问的每一个状态」单一字段与单一枚举；前端不组合、不推断。列表接口直接返回行模型（含状态与可用动作）。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-03", "E-06"], "commands": ["getDownloadedFiles", "getStaleFiles", "getDeliveryTrust", "getLocalFiles", "getUserPresetFiles"], "files": ["src/app/presets/presetTree.ts"] },
+      "acceptance": ["前端没有第二处状态判据", "新增一种状态只需改后端一处"], "openQuestions": ["列表接口是否要合并成一个（含分页）"]
+    },
+    {
+      "id": "RD-07", "problem": "「选一份预设」即改当前使用，没有预览态（X-18）", "currentBehavior": "抽屉里选中即 activateCombo → 写指针。",
+      "evidence": ["src/app/state/appState.ts::116"], "businessValue": "看一眼参数不该改底账。",
+      "verdict": "redo", "newRule": "「查看」与「启用」分离：点一份是**预览**（只改当前视图），要启用必须显式点「启用」。",
+      "affected": { "pages": ["P-home", "P-params", "P-calib"], "entities": ["E-08"], "commands": ["applyActivePreset"], "files": ["src/app/home/PageHome.tsx", "src/app/params/PageParams.tsx"] },
+      "acceptance": ["打开任何抽屉/列表浏览不会改变底账", "底账只在显式「启用」后变化"], "openQuestions": []
+    },
+    {
+      "id": "RD-08", "problem": "两份草稿链（正文编辑 vs 参数编辑）共用一格（CX-12）", "currentBehavior": "putPresetDraft（整份正文）与 patchPresetDraft（单字段）都写 run/app-state.json#draft。",
+      "evidence": ["src-tauri/src/ipc/mine.rs::351", "src-tauri/src/ipc/mine.rs::374"], "businessValue": "同一份文件的编辑应只有一条链、一种保存语义。",
+      "verdict": "merge", "newRule": "统一为「一份文件的未保存改动」：无论改的是整段文本还是某个字段，都是同一份 working copy 的 diff；保存只有一件事（写回这一份）。",
+      "affected": { "pages": ["P-presets", "P-params"], "entities": ["E-06", "E-07"], "commands": ["beginPresetEdit", "putPresetDraft", "patchPresetDraft", "commitPresetDraft", "discardPresetDraft", "savePresetParams"], "files": ["src-tauri/src/ipc/mine.rs", "src-tauri/src/ipc/preset_params.rs"] },
+      "acceptance": ["同一份文件在同一时刻只有一个未保存改动", "保存只写一个文件、无第二份产物"], "openQuestions": ["直接编辑 TOML 正文这一入口是否还需要（建议保留为高级入口）"]
+    },
+    {
+      "id": "RD-09", "problem": "「预设数据源」做成用户设置（CX-11）", "currentBehavior": "设置页有内置源单选 + 自定义地址，改完立即重读。",
+      "evidence": ["src/app/settings/PageSettings.tsx::296"], "businessValue": "源地址是发布方/运维的事；但内网/自建源确实存在需求。",
+      "verdict": "internalize", "newRule": "源来自构建期注入的清单；用户界面不出现「数据源」。保留一个隐藏的开发/排障入口（设置页最底部的高级项，默认折叠）。",
+      "affected": { "pages": ["P-settings"], "entities": ["E-01"], "commands": ["getPresetSource", "setPresetSource", "clearPresetSource"], "files": ["src/app/settings/PageSettings.tsx"] },
+      "acceptance": ["普通用户在设置页看不到数据源选项", "默认源由构建期决定"], "openQuestions": ["多源（境内/境外）要不要在首启时问一次"]
+    },
+    {
+      "id": "RD-10", "problem": "三套历史持久化（归档 / 版本链 / 事件账）都只为追溯（CX-09）", "currentBehavior": "归档可删、版本链与事件账只追加且无删除入口。",
+      "evidence": ["src-tauri/src/runtime/preset_events.rs::104", "src-tauri/src/runtime/release.rs::48"], "businessValue": "「这份字节是哪一版官方」与「什么时候变的」确实是判据（识别旧版、显示时间）。",
+      "verdict": "merge", "newRule": "只保留**一份**版本/事件记录（建议：一条按 sha 索引的「我见过哪些官方版 + 何时到达」记录），目录链与归档降为它的实现细节；不再有面向用户的归档管理。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-04", "E-05", "E-13"], "commands": ["getArchivedFiles", "deleteArchivedFile", "getOfficialVersions"], "files": ["src-tauri/src/runtime/delivery.rs", "src-tauri/src/runtime/release.rs", "src-tauri/src/runtime/preset_events.rs"] },
+      "acceptance": ["只有一个模块负责回答「这一版的来路与时刻」", "用户界面无归档管理"], "openQuestions": ["事件时间是否还要精确到时刻（还是只要「本次/上次」）"]
+    },
+    {
+      "id": "RD-11", "problem": "文件头承载血统与归属（E-15 / E-16）", "currentBehavior": "based_on 三行 + machine/variant 两行写在预设文件里。",
+      "evidence": ["src-tauri/src/runtime/lineage.rs::63"], "businessValue": "血统随文件走的优点是真的（拷到别的机器也说得清来源）。",
+      "verdict": "keep", "newRule": "保留「随文件走」这一属性，但压缩到**一行**（如 `# from: <官方文件名>@<sha 短>`），归属从文件头移到应用侧记录（用户改归属不该重写文件）。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-15", "E-16"], "commands": ["setUserPresetMachineVersion", "beginPresetEdit", "commitPresetDraft"], "files": ["src-tauri/src/runtime/lineage.rs"] },
+      "acceptance": ["改归属不重写预设文件", "换机器打开仍知道来源"], "openQuestions": ["归属到底属于「文件」还是「我的收藏库」"]
+    },
+    {
+      "id": "RD-12", "problem": "逐参数官方更新是一条重流程（E-09 / E-10 / A-43 / A-44）", "currentBehavior": "baseline + 决策账 + 三方对照 + 逐项 adopt/hold + 批量复核弹窗。",
+      "evidence": ["src-tauri/src/runtime/param_sync.rs::96"], "businessValue": "「官方改了几项、我要不要跟」是真实需求（用户手改过的项不能被顶掉）。",
+      "verdict": "keep", "newRule": "保留逐项能力，但把默认路径简化成**两句话**：①官方改过 N 项（一键「全部跟随」/「全部保持」）②逐项列表只在用户点「看看改了哪几项」时展开。决策记录从「水位摘要」改为「按项记下我的选择」，不再需要 baseline 才能算。",
+      "affected": { "pages": ["P-params"], "entities": ["E-09", "E-10"], "commands": ["getPresetParamSync", "applyPresetParamDecisions"], "files": ["src-tauri/src/runtime/param_sync.rs", "src/app/params/ParamSyncModal.tsx"] },
+      "acceptance": ["用户不打开逐项列表也能完成「跟随/保持」", "手改过的项在任何默认路径下不会被覆盖"], "openQuestions": ["『全部保持』是否要提供撤销"]
+    },
+    {
+      "id": "RD-13", "problem": "多页面/占位页/退役页签（CX-14）", "currentBehavior": "6 个页签里「报告」是占位；「参数」已于 2026-10-09 退场（改由右键进）；「同步」早已退役。",
+      "evidence": ["src/app/App.tsx::126", "src/app/constants/tabs.ts"], "businessValue": "页签是用户的心智地图，空格子会让人以为功能缺失。",
+      "verdict": "drop", "newRule": "重写时页签只保留**真的有事可做**的页；占位页不进导航（功能没做完就不上）。",
+      "affected": { "pages": ["P-report"], "entities": [], "commands": [], "files": ["src/app/constants/tabs.ts"] },
+      "acceptance": ["每个页签都有真实数据与动作"], "openQuestions": ["报告/后处理这一块要不要进新版本"]
+    },
+    {
+      "id": "RD-14", "problem": "删文件会连带撤指针、丢草稿、删备注（A-30）", "currentBehavior": "deleteUserPreset / deleteDeliveryFile 会一并清状态，确认框只用一句话交代。",
+      "evidence": ["src-tauri/src/ipc/mine.rs::662", "src-tauri/src/ipc/catalog.rs::746"], "businessValue": "不留悬空指针是对的，但「删一份文件」不该悄悄改变「当前在用什么」。",
+      "verdict": "redo", "newRule": "删正在使用的那一份要**显式**问「还要一并停用吗」；删其他份不影响指针。草稿属于哪一份，删除时明确告知会被丢弃。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-06", "E-07", "E-08"], "commands": ["deleteUserPreset", "deleteDeliveryFile"], "files": ["src/app/presets/PagePresets.tsx", "src-tauri/src/ipc/mine.rs"] },
+      "acceptance": ["删一份不在使用的文件不改底账", "删在使用的文件必须显式确认停用"], "openQuestions": []
+    },
+    {
+      "id": "RD-15", "problem": "错误被前端吞掉，界面无法区分「没有」与「失败」（X-13）", "currentBehavior": "31 处 catch，多处把失败降级成空值。",
+      "evidence": ["src/app/home/PageHome.tsx::361"], "businessValue": "用户需要知道是不是网络/后端出错。",
+      "verdict": "redo", "newRule": "三态显式（loading / error / ready）贯彻到每个读；「失败」与「空」永远长得不一样（这是仓库已有的纪律，只是有几处违反）。",
+      "affected": { "pages": ["P-shell", "P-home", "P-presets", "P-settings"], "entities": [], "commands": ["getPresetSource", "getAppVersion", "checkSoftwareUpdate", "getDownloadedFiles", "getStaleFiles"], "files": ["src/app/settings/PageSettings.tsx", "src/app/home/PageHome.tsx"] },
+      "acceptance": ["任何读失败都有可见提示，不会被渲染成空数据"], "openQuestions": []
+    },
+    {
+      "id": "RD-16", "problem": "写盘纪律不覆盖 src-tauri（X-17）", "currentBehavior": "扫描判据只扫两个 crate。",
+      "evidence": ["crates/preset/tests/write_discipline_scan.rs::162"], "businessValue": "删除/改名/复制是最危险的操作，需要自动兜底。",
+      "verdict": "redo", "newRule": "把 src-tauri 纳入同一条写盘扫描判据；新增写盘入口必须登记（删/改名/复制也算），未登记的写法直接判据失败。",
+      "affected": { "pages": [], "entities": [], "commands": [], "files": ["crates/preset/tests/write_discipline_scan.rs", "clippy.toml"] },
+      "acceptance": ["src-tauri 的每一条写/删/改名都在白名单里"], "openQuestions": []
+    },
+    {
+      "id": "RD-17", "problem": "「成功但没做事」的命令与空动作入口（X-02 / X-03 / X-04 / X-06 / X-09）", "currentBehavior": "open_model 只打日志；copyToSlicer/downloadFiles/复制链接 未接线；首页打开模型是空动作。",
+      "evidence": ["src-tauri/src/ipc/mod.rs::128", "src/api/bridge.ts::262"], "businessValue": "没做的事不要摆成入口 —— 这是仓库本来就写的纪律。",
+      "verdict": "drop", "newRule": "凡是「点了必然失败或什么都不做」的入口，重写时要么做实、要么不摆；命令层不做空实现（宁可不注册）。",
+      "affected": { "pages": ["P-home", "P-calib", "P-presets"], "entities": [], "commands": ["openModel", "copyToSlicer", "downloadFiles", "getCalibModels"], "files": ["src-tauri/src/ipc/mod.rs", "src/app/home/PageHome.tsx"] },
+      "acceptance": ["界面里不存在「点了没反应」的动作", "命令层没有只打日志的实现"], "openQuestions": ["校准模型下载要不要真的做"]
+    },
+    {
+      "id": "RD-18", "problem": "备注/副标题是一条独立账（CX-13）", "currentBehavior": "preset-remarks.json + 一条命令 + 详情编辑格 + 与工作台 remark 的回落链。",
+      "evidence": ["src-tauri/src/runtime/remarks.rs::33"], "businessValue": "用户想给一份预设写句自己的话，是合理的小需求。",
+      "verdict": "internalize", "newRule": "改备注 = 改「我的那一份」的属性（随我的记录走），不再单独一本账；官方行的备注只读、不提供编辑。",
+      "affected": { "pages": ["P-presets"], "entities": ["E-06", "E-11"], "commands": ["getPresetRemarks", "setPresetRemark"], "files": ["src-tauri/src/runtime/remarks.rs"] },
+      "acceptance": ["只有一本记录存「我自己给这份写的话」"], "openQuestions": []
+    },
+    {
+      "id": "RD-19", "problem": "首页/校准/预设三页共享同一批数据但各拉各的", "currentBehavior": "usePresetData、usePreset、useCatalog、useParams 各自读 catalog 与盘上状态。",
+      "evidence": ["src/app/presets/usePresetData.ts::435", "src/app/home/useCatalog.ts::67", "src/app/params/useParams.ts::690"], "businessValue": "同一事实不该有三份会漂移的快照。",
+      "verdict": "merge", "newRule": "重写成一层「应用数据层」（一个 store + 一个后端读），各页从它取；跨页一致由它保证。",
+      "affected": { "pages": ["P-home", "P-presets", "P-calib", "P-params"], "entities": ["E-02"], "commands": ["getRuntimeCatalog", "getMachines", "getVersionFiles", "getPresetFiles"], "files": ["src/app/state/appState.ts", "src/app/presets/usePresetData.ts"] },
+      "acceptance": ["同一事实在一个会话里只有一个快照"], "openQuestions": []
+    },
+    {
+      "id": "RD-20", "problem": "BBS 页与预设页是两套世界（数据源、导入、生效概念都不同）", "currentBehavior": "BBS 页走 public/dev 端点与内存状态；预设页走 src/api 与磁盘。",
+      "evidence": ["src/app/bbs/useBbsData.ts", "src/app/bbs/PageBbs.tsx::321"], "businessValue": "「看别人的 profile 长什么样」是查看器需求，与「管理我的预设」不同。",
+      "verdict": "internalize", "newRule": "把它定位成**只读参考查看器**（可载入、可对照、不落盘），去掉「可改动」这一档；数据统一走后端（不再走 dev 端点）。",
+      "affected": { "pages": ["P-bbs"], "entities": [], "commands": ["readDownloadedText", "getRuntimeCatalog"], "files": ["src/app/bbs/PageBbs.tsx", "src/app/bbs/useBbsPreset.ts"] },
+      "acceptance": ["这一页没有任何写动作", "数据来源与其它页一致（都走后端契约）"], "openQuestions": ["本地 BBS 目录扫描是否保留"]
+    }
+  ],
+  "targetModel": {
+    "note": "以下是**建议**（不是现状）。原则：用户概念尽量少；每个事实只有一个权威；用户可见状态由真实数据直接给出；不为内部追踪制造用户操作。",
+    "entities": [
+      { "name": "官方源（内置，构建期注入）", "verdict": "internalize", "minFields": ["id", "bootstrapUrl"], "note": "用户不可见、不可改" },
+      { "name": "目录（远端清单）", "verdict": "keep", "minFields": ["revision", "publishedAt", "files[{name, path, sha, size, machineId, versionId}]", "machines/versions", "registry"], "note": "从远端取；本地缓存一份，旧代不必长期留" },
+      { "name": "官方文件（下载缓存）", "verdict": "internalize", "minFields": ["fileName", "path", "sha", "size"], "note": "用户不可见；只作为「取回」的落点与校验锚" },
+      { "name": "我的预设（工作副本）", "verdict": "keep", "minFields": ["path", "fileName", "machineId", "versionId", "sourceLine（# from）", "content", "updatedAt"], "note": "用户唯一可见可改的一份" },
+      { "name": "未保存改动（草稿）", "verdict": "merge", "minFields": ["path", "content", "sourceSha"], "note": "合并正文与参数两条链" },
+      { "name": "当前启用", "verdict": "keep", "minFields": ["path | fileName", "origin(official|mine)", "enabledAt"], "note": "只切指针" },
+      { "name": "官方版本记录（含到达时刻）", "verdict": "merge", "minFields": ["fileName", "sha", "arrivedAt", "releaseTime"], "note": "合并 baseline 索引 + 事件账 + 目录链；正文快照按需存" },
+      { "name": "我的选择记录（逐项官方更新）", "verdict": "keep", "minFields": ["path", "paramKey", "choice(adopt|hold)", "officialSha"], "note": "不再依赖 baseline 才能算" },
+      { "name": "归档旧字节", "verdict": "drop", "minFields": [], "note": "取消面向用户与流程的归档概念" },
+      { "name": "备注覆盖账 / 出处账", "verdict": "internalize", "minFields": ["path", "remark | copiedFrom", "at"], "note": "并入「我的预设」记录" },
+      { "name": "机型 / 版本 / 套餐 / 配方 / 打印板", "verdict": "keep", "minFields": ["随目录下发"], "note": "定义集合，无用户状态" }
+    ],
+    "states": [
+      "我的预设：正常 / 读不出（两档）",
+      "我的预设相对官方：没有对应官方 / 与官方一致 / 官方有新版（三档，后端直接给）",
+      "我的预设相对官方参数：无待处理 / 有待处理 N 项（后端直接给）",
+      "当前启用：有 / 无（后端直接给）"
+    ],
+    "authority": [
+      { "fact": "我本机有哪些文件", "authority": "磁盘（唯一）", "note": "删掉即消失，不再有第二处记录" },
+      { "fact": "官方有哪些预设与当前版本", "authority": "远端目录（本地缓存一份）", "note": "缓存可丢可重建" },
+      { "fact": "我现在用哪一份", "authority": "本地一份状态文件", "note": "只写指针" },
+      { "fact": "官方改过哪几项、我选了哪些", "authority": "本地选择记录 + 官方当前版正文", "note": "不需要中间版快照" },
+      { "fact": "字节是什么时候到的", "authority": "我的文件 mtime 或到达记录（二选一，不必两者都有）", "note": "重写时选一个，别再造事件账" }
+    ],
+    "userPaths": [
+      { "task": "拿到并开始用一份官方预设", "shortestPath": ["打开预设页", "在列表里找到它", "点「取回」（若还没有我的一份）", "点「启用」"], "note": "两步，两个词" },
+      { "task": "改一份预设的参数", "shortestPath": ["打开预设页", "点这一行", "改值", "保存"], "note": "不经过「另存」这一步（取回时已经落了一份我的）" },
+      { "task": "跟进官方更新", "shortestPath": ["打开预设页", "看到「官方有新版」", "点「取回」", "（可选）看改了哪几项并逐项选择"], "note": "默认路径两步" },
+      { "task": "校准", "shortestPath": ["打开校准页", "点格 / 输读数", "保存"], "note": "若还没有我的一份，先提示「取回一份」而不是拦死" }
+    ]
+  },
+  "acceptance": [
+    { "id": "AC-01", "criterion": "打开应用，不看源码也能说出每个页签解决什么问题；每个页签都有真实数据与动作", "level": "todo" },
+    { "id": "AC-02", "criterion": "任意一个核心动作都能从界面一路追到命令、文件读写与最终状态，且这条链上没有「点了没反应」的分支", "level": "todo" },
+    { "id": "AC-03", "criterion": "「本机有没有这一份」只有一个回答者；删掉文件后所有界面在同一帧变成「没有」", "level": "todo" },
+    { "id": "AC-04", "criterion": "界面文本中不出现 baseline / 血统 / 目录指纹 / 归档 / 事件账 这些内部词", "level": "todo" },
+    { "id": "AC-05", "criterion": "动作词只有「取回」与「启用」两个（不含查看类）；不做「选一份＝改底账」", "level": "todo" },
+    { "id": "AC-06", "criterion": "任何读失败与「空」在界面上长得不一样（三态显式，无吞错）", "level": "todo" },
+    { "id": "AC-07", "criterion": "软件自更新要么在客户端构建完整可用，要么界面不摆入口（不允许落到兜底文案）", "level": "todo" },
+    { "id": "AC-08", "criterion": "命令清单由一处定义；有一条自动判据保证「前端会调的命令都注册了」", "level": "todo" },
+    { "id": "AC-09", "criterion": "写盘（含删除/改名/复制）有覆盖 src-tauri 的源码扫描判据", "level": "todo" },
+    { "id": "AC-10", "criterion": "启动零网络、进预设页后台检查目录、目录检查不下载文件 —— 三条规则有自动判据守住", "level": "todo" },
+    { "id": "AC-11", "criterion": "逐参数官方更新：不打开逐项列表也能完成「全部跟随/全部保持」，且手改过的项永不被默认路径覆盖", "level": "todo" },
+    { "id": "AC-12", "criterion": "删除正在使用的预设必须显式确认停用；删除其他预设不改底账", "level": "todo" }
+  ],
+  "roadmap": [
+    { "id": "RM-01", "phase": "0 产品规则定稿", "goal": "把本审计的 20 条裁断逐条拍板（保留/合并/砍掉/内部化/重做），产出唯一一份新规则书。", "prerequisites": ["本审计"], "scope": "只写规则，不写代码", "decisions": ["RD-01..RD-20"], "done": ["规则书里每条规则都有『验收怎么测』"], "tests": ["规则书与审计的裁断一一对应"], "deps": [], "notImplementing": ["任何旧实现细节"] },
+    { "id": "RM-02", "phase": "1 领域与状态定稿", "goal": "确定目标实体、字段、状态枚举与唯一权威（targetModel 落地成 schema）。", "prerequisites": ["RM-01"], "scope": "实体最小字段 + 四个状态枚举 + 一份权威表", "decisions": ["RD-02", "RD-03", "RD-06", "RD-10", "RD-11", "RD-12"], "done": ["schema 能表达四类用户任务的每个中间态"], "tests": ["四个用户任务的短路路径在 schema 上可走通"], "deps": ["RM-01"], "notImplementing": ["baseline 与逐参数水位这套中间层（改为按项选择记录）"] },
+    { "id": "RM-03", "phase": "2 文件布局与持久化契约", "goal": "定死目录结构与每份状态文件的位置、格式、原子性与重建性。", "prerequisites": ["RM-02"], "scope": "数据根 + 用户根 + 我的预设 + 未保存改动 + 启用指针 + 官方版本记录 + 我的选择记录", "decisions": ["RD-10", "RD-16", "RD-18"], "done": ["每份状态文件都标注了「能否从磁盘重建」"], "tests": ["写盘扫描判据覆盖全部写/删/改名入口"], "deps": ["RM-02"], "notImplementing": ["归档目录、目录链目录、事件账"] },
+    { "id": "RM-04", "phase": "3 后端领域层", "goal": "实现「取回 / 启用 / 改这份 / 保存 / 官方更新 / 删除」六个用例，一个用例一个入口。", "prerequisites": ["RM-03"], "scope": "领域层 + 单测（每个用例的正常/失败/幂等）", "decisions": ["RD-04", "RD-08", "RD-14"], "done": ["六个用例单测全绿；同字节重复调用为 no-op"], "tests": ["幂等测试 + 失败不半写测试"], "deps": ["RM-03"], "notImplementing": ["copyToSlicer / downloadFiles / openModel 的空实现"] },
+    { "id": "RM-05", "phase": "4 命令与契约边界", "goal": "命令清单由一处定义；每个「用户会问的状态」一个字段。", "prerequisites": ["RM-04"], "scope": "契约 + 桥 + 一条自动判据「前端调的命令都注册」", "decisions": ["RD-01", "RD-06"], "done": ["命令清单唯一；判据能拦住漂移"], "tests": ["判据脚本在 CI 跑"], "deps": ["RM-04"], "notImplementing": ["按 feature 分叉两份手写清单"] },
+    { "id": "RM-06", "phase": "5 主要用户流程", "goal": "四条用户任务走通（拿预设并启用 / 改参数 / 跟更新 / 校准）。", "prerequisites": ["RM-05"], "scope": "端到端流程 + 界面（先预设页与首页）", "decisions": ["RD-04", "RD-07", "RD-12", "RD-19"], "done": ["每条路径步数与规则书一致"], "tests": ["playwright 走查四条路径"], "deps": ["RM-05"], "notImplementing": ["多入口并存"] },
+    { "id": "RM-07", "phase": "6 其余界面与去冗余", "goal": "把剩余页签按新规则重做，砍掉占位页与空动作入口。", "prerequisites": ["RM-06"], "scope": "校准 / BBS 参考 / 设置 / 详情面板", "decisions": ["RD-05", "RD-13", "RD-17", "RD-20"], "done": ["每个页签都有真实数据与动作"], "tests": ["逐页走查表（对应本审计 product.json）"], "deps": ["RM-06"], "notImplementing": ["归档管理界面", "数据源用户设置", "报告占位页"] },
+    { "id": "RM-08", "phase": "7 官方源与下载链路", "goal": "接通目录检查、取回、校验、重试、能力判定。", "prerequisites": ["RM-05"], "scope": "源注入 + 目录 + 下载 + 校验 + NOT_SUPPORTED", "decisions": ["RD-09"], "done": ["三条产品规则有自动判据"], "tests": ["本地假云端（fixtures）端到端"], "deps": ["RM-05"], "notImplementing": ["用户可改数据源"] },
+    { "id": "RM-09", "phase": "8 旧数据处理", "goal": "明确「旧数据带不带过来」：带什么、怎么带、带不了的说清楚。", "prerequisites": ["RM-03"], "scope": "只处理**用户自己那份预设**（presets-mine）；应用状态（指针/草稿/选择记录）按新规则重建", "decisions": ["RD-10", "RD-11"], "done": ["一份明确的『会丢什么』清单，且在发布说明里写明"], "tests": ["用真实用户目录跑一遍导入"], "deps": ["RM-03"], "notImplementing": ["为兼容旧 run/*.json 写迁移代码"] },
+    { "id": "RM-10", "phase": "9 端到端验收", "goal": "按 AC-01..AC-12 逐条验收。", "prerequisites": ["RM-06", "RM-07", "RM-08", "RM-09"], "scope": "验收清单 + 自动化 + 人工走查", "decisions": ["全部"], "done": ["12 条验收逐条有证据"], "tests": ["CI 四条静态判据 + 走查脚本"], "deps": ["RM-06", "RM-07", "RM-08", "RM-09"], "notImplementing": [] }
+  ],
+  "unverified": [
+    { "id": "U-01", "item": "真机上「软件自更新」的实际表现", "reason": "客户端构建没注册命令，静态代码只能证明它会落到兜底 NOT_IMPLEMENTED；workbench 构建下未实跑。", "howToVerify": "用 npm run tauri:workbench:dev 起工作台构建，走一遍标题栏更新环；再用 npm run tauri dev 确认客户端里确实是兜底文案。" },
+    { "id": "U-02", "item": "首页「下载并应用」在真机的成功路径", "reason": "浏览器 mock 必失败；真机需要可用的数据源与正确 SHA。", "howToVerify": "起本地假云端（scripts/preset-test-server），注入 MKPSE_PRESET_SOURCE_URL，走一遍首页第 2 步。" },
+    { "id": "U-03", "item": "BBS 页「可改动」模式是否落盘、落到哪", "reason": "页面未调用任何 api，只写 useBbsPreset 的本地状态；无法从静态代码断定有无隐藏写盘路径。", "howToVerify": "在真机上改一个值 → 检查 presets-mine / 本机 BBS 目录 / 任何状态文件是否变化。" },
+    { "id": "U-04", "item": "Windows 上 atomic_write 的 rename 语义在同一卷下的实际行为", "reason": "未在 Windows 上跑原子写测试；tempfile 的 persist 在 Windows 走 MoveFileEx。", "howToVerify": "在 Windows 上跑 fsx::atomic 的测试，并实测「写失败不碰目标」。" },
+    { "id": "U-05", "item": "硬崩溃/断电后是否留下临时文件", "reason": "NamedTempFile 正常 drop 会删，崩溃时不会；无针对崩溃的测试。", "howToVerify": "写一个写盘中途杀进程的测试/脚本，检查目标目录残留。" },
+    { "id": "U-06", "item": "Gitee 平台适配的字段名与真机一致", "reason": "仓库文档自述未核对。", "howToVerify": "对 Gitee API 出一次真实发布/PR，核对字段。" },
+    { "id": "U-07", "item": "CI 三个 job（web / rust / rust-windows）当前是否绿灯", "reason": "本次审计没有跑 CI。", "howToVerify": "推一次分支或本地按 ci.yml 逐条跑 npm run lint / build / check:* 与 cargo test。" },
+    { "id": "U-08", "item": "check-zero-network 的间接联网盲区是否真的存在漏网", "reason": "脚本自述只抓直接符号；未做实际构造验证。", "howToVerify": "构造一个 A→B→联网 的间接调用，看判据是否漏过。" },
+    { "id": "U-09", "item": "「同一 sha 以不同 fileName 出现在目录里」会不会拼出多行", "reason": "official_versions 去重键是 (fileName, sha)，构造上未显式防 fileName 不同、sha 相同的情况；真实目录里是否可能出现未证。", "howToVerify": "在 fixtures 里造一份同 sha 不同名的 catalog，看云端表行数。" },
+    { "id": "U-10", "item": "前端 mock 与真机行为的差异清单是否完整", "reason": "本次只逐条核对了 MkpApi 的 mock 实现；页面分支里可能还有依赖 mock 特性（如固定本机文件集合）的隐藏假设。", "howToVerify": "把所有 11 个 playwright 探针在 Tauri 下各跑一遍，记录与浏览器下不一致的地方。" },
+    { "id": "U-11", "item": "crates/postprocess（G-code 后处理）在客户端是否有隐藏入口", "reason": "本次只到模块级；界面上没找到入口，但不能排除通过别的命令间接触发。", "howToVerify": "全仓搜 postprocess 的 crate 引用与二进制调用点。" },
+    { "id": "U-12", "item": "「删除交付件后 baseline 仍在」在真实使用中造成过什么可见后果", "reason": "静态上 confirmed（CF-01），但没有实际观察记录。", "howToVerify": "真机上：下载一份 → 删掉本机那份 → 看云端表「已下载/未下载」与本地表是否自相矛盾。" }
+  ]
+}
