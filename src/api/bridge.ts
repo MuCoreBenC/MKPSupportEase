@@ -240,8 +240,9 @@ export const bridgeApi: MkpApi = {
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
-  /* 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用 */
-  useOfficialPreset: (fileName) => call('useOfficialPreset', 'use_official_preset', { fileName }),
+  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
+  fetchOfficialPreset: (fileName) =>
+    call('fetchOfficialPreset', 'fetch_official_preset', { fileName }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),

@@ -6,8 +6,8 @@
 //!
 //! 写命令都在这一层（**都只写用户根**，官方原件与下载区一概不碰），分几路：
 //!
-//! - **使用官方预设**（`catalog::use_official_preset`，2026-10-09 改判）：按需取回官方原件，
-//!   再把它落成 `presets-mine/<原名>`（还没有的话）+ 使用那一份 —— **用户只面对一份**；
+//! - **取回官方预设**（`catalog::fetch_official_preset`，2026-10-09 改判）：按需取回官方原件，
+//!   再把它落成 `presets-mine/<原名>`（还没有的话）—— **用户只面对一份**；
 //! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
 //!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
 //! - 校准值也写进同一份工作副本（`save_preset_calibration`：按注册表定位改

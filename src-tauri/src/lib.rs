@@ -192,7 +192,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::use_official_preset,
+        ipc::catalog::fetch_official_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -266,7 +266,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::use_official_preset,
+        ipc::catalog::fetch_official_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）

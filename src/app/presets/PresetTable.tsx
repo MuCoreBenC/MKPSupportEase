@@ -6,7 +6,7 @@
  * 名称                 机型      版本      时间    操作
  * A1.toml              A1       标准版    09-14   已应用
  * 副标题（备注）
- * A1MF_260628.toml     A1       快拆版…   09-14   [应用]
+ * A1MF_260628.toml     A1       快拆版…   09-14   [使用]
  *
  * 切片器配置（6 列，没有版本）
  * 名称                 机型      喷嘴  层高  时间    操作
@@ -47,13 +47,15 @@
  * 多个版本共用一个文件时用 `·` 把版本名**全写出来**，宽度不够由 CSS 截断（`title` 里是全的）——
  * `标准版 +2` 那种写法没了，作者看不懂它就是它的问题（见 `versionsText`）。
  *
- * # 两种类型的「生效」是两件不同的事
+ * # 「生效」按类型 / 按表各是各的
  *
- *   MKP     状态 已应用 / 未应用   操作 [应用] → 唯一底账（run/active-preset.json）
- *   切片器   状态 已复制 / 未复制   操作 [复制] → `api.copyToSlicer()`
- *   云端     状态 已下载 / 未下载   操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
+ *   MKP 本地行   状态 已应用 / 未应用              操作 [使用] → 唯一底账（run/active-preset.json）
+ *   MKP 云端行   状态 未获取 / 本地已有 / 有新版    操作 [下载] / [更新] / 灰字（本地已有不给）
+ *                → `api.fetchOfficialPreset()`（取回官方 + 落一份你的工作副本，**不改当前使用**）
+ *   切片器本地行 状态 已复制 / 未复制              操作 [复制] → `api.copyToSlicer()`
+ *   切片器云端行 状态 已下载 / 未下载              操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
  *
- * 已生效 / 已下载那一行的操作列是**灰字，不是按钮**：已经在用的东西没有可点的动作。
+ * 已生效 / 已下载 / 本地已有那一行的操作列是**灰字，不是按钮**：没有可点的动作。
  * 也**不做「取消应用」** —— 总得有一套在生效。
  *
  * # 操作列常驻，但右键菜单一个都没少
@@ -97,6 +99,9 @@ import {
   BASED_ON_KEY,
   BASED_ON_WHY,
   basedOnCellText,
+  CLOUD_LOCAL_ACTION,
+  CLOUD_LOCAL_TEXT,
+  CLOUD_LOCAL_WHY,
   CLOUD_STATE_TEXT,
   CLOUD_STATE_WHY,
   DASH_,
@@ -133,12 +138,53 @@ import {
 } from './presetTree'
 import type {
   LocateTarget,
+  PresetCloudRow,
   PresetKindAxis,
   PresetLocalRow,
   PresetScopeAxis,
   PresetTableRow,
 } from './presetTree'
 import s from './PresetTable.module.css'
+
+/**
+ * MKP 云端行操作列那一格（2026-10-09）：三态两种动作，**状态与动作用词都从一处出**
+ * （[`CLOUD_LOCAL_TEXT`] / [`CLOUD_LOCAL_ACTION`] / [`CLOUD_LOCAL_WHY`]）。
+ *
+ * 「本地已有」那一档**不给按钮**：那颗按钮按下去没有意义（要改、要用都在本地表那一行上），
+ * 而摆一个看起来能点的东西比不摆糟得多 —— 画一枚灰字，`title` 里说清该去哪儿。
+ */
+function CloudLocalAction({
+  row,
+  busy,
+  onDownload,
+}: {
+  row: PresetCloudRow
+  busy: boolean
+  onDownload: (row: PresetTableRow) => void
+}) {
+  const state = row.localState
+  if (state === undefined) return null
+  const action = CLOUD_LOCAL_ACTION[state]
+  if (action === null) {
+    /* 「本地已有」：不给按钮（那件事在本地表那一行上做），画一个破折号 + 为什么 */
+    return (
+      <span className={s.actNone} title={CLOUD_LOCAL_WHY[state]}>
+        {DASH_}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className={s.actBtn}
+      disabled={busy}
+      title={CLOUD_LOCAL_WHY[state]}
+      onClick={() => onDownload(row)}
+    >
+      {action}
+    </button>
+  )
+}
 
 interface Props {
   scope: PresetScopeAxis
@@ -195,8 +241,9 @@ interface Props {
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /**
-   * **资源库那一行唯一的按钮：使用**（2026-10-08 资源库改判）。官方与我的同一个入口 ——
-   * 官方那一份本机没有字节时后端先按需取回，所以这里没有「下载 / 已下载」这一档。
+   * **MKP 本地行唯一的按钮：使用**（2026-10-09）。这一档只有 `presets-mine/` 里那几行
+   * （你自己那份工作副本）——「使用」= 把它设为当前生效。官方那一份的取用
+   * （下载 / 更新 = 取回 + 落一份）在云端表，不走这里。
    */
   onUse: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
@@ -256,9 +303,11 @@ export default function PresetTable({
   const emptyText = (): string => {
     if (failure !== null) return `加载失败：${failure}`
     if (total === 0) {
-      /* MKP 那一档是一张**资源库**：里面两种来源，空表就要把两句话都说出来 */
+      /* MKP 那一档是一对表（本地 / 云端），空表按表说 —— 本地是你自己那份，云端是官方 */
       if (mkp) {
-        return `资源库里还没有这一档的预设 —— 官方仓库里没有登记的，你自己放进预设目录的会出现在这里`
+        return scope === 'local'
+          ? '本地还没有这一档的预设 —— 你自己那份工作副本（presets-mine）会出现在这里；从云端「下载」一份就会有'
+          : '云端没有这一档的官方预设 —— 官方目录里没有登记的，就下不到'
       }
       return scope === 'local'
         ? `本机还没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 官方文件下载之后会出现在这里，你自己放进预设目录的也会`
@@ -342,17 +391,14 @@ export default function PresetTable({
                * 「时间」这一格的表头随表分语义：云端表是**云端更新**（发布侧盖的戳），
                * 本地表是**时间**（官方行是仓库记的更新时间、交付行是下载时间、我的是修改时间
                * —— 一列三种真来源，格上的 tooltip 说清各自是哪一个，见 `statWhyOf`）。
+               *
+               * ★ **MKP 档 2026-10-09 又把这一列接回来了**：位置那一轴回来之后，
+               * 云端表说的就是"官方这次发布是什么时候发的"（目录只盖了一个戳），
+               * 本地表说的是"我这份什么时候改的" —— 两句话又各有主语了。
                */}
-              {/*
-               * ★ **MKP 资源库那一档整个没有这一列**（2026-10-08）：行上只有
-               * 来源 + 机型 + 版本 + 操作；两个时间（来源那一版发布的、我这份改的）
-               * 都挪进展开详情 —— 用户在这一页问的是"我有哪些预设、在用哪个"。
-               */}
-              {mkp ? null : (
-                <th className={s.thTime} scope="col">
-                  {scope === 'cloud' ? '云端更新' : '时间'}
-                </th>
-              )}
+              <th className={s.thTime} scope="col">
+                {scope === 'cloud' ? '云端更新' : '时间'}
+              </th>
 
               {/*
                * 「来源」列撤了（2026-10-07 作者：「来源不用显示在右侧」）——
@@ -390,19 +436,19 @@ export default function PresetTable({
               const updateState =
                 row.releaseState !== undefined ? updateStateOf(row.releaseState) : undefined
               const needsUpdate = updateState === 'update'
-              /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档） */
-              const untrusted = row.releaseState === 'tampered'
+              /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档）——
+                 **MKP 档不出现**：那一档按 `localState` 说，不碰下载区四态（2026-10-09） */
+              const untrusted =
+                row.releaseState === 'tampered' &&
+                !(row.scope === 'cloud' && row.localState !== undefined)
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
                * **用户线那一份问都不问**：归档是官方版本生命周期的事，
                * 用户自己的文件不进归档，也不该因为同名就借到官方的旧版本。
-               * **MKP 资源库那一档整个不显示它**（2026-10-08：官方只有当前这一版）
+               * **MKP 档整个不显示它**（2026-10-09：官方原件与归档都是内部数据，不进用户世界）
                * —— 归档抽屉只留切片器档。
                */
-              const archiveCount =
-                row.origin === 'mine' || (mkp && row.scope === 'local')
-                  ? 0
-                  : archiveCountOf(row.fileName)
+              const archiveCount = row.origin === 'mine' || mkp ? 0 : archiveCountOf(row.fileName)
               /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
@@ -454,6 +500,20 @@ export default function PresetTable({
                           title={`这一机下过这个预设的 ${row.olderVersions} 代旧版 —— 它们在你自己的文件里（本地表，名字带日期），展开这一行还能看到归档里那几份`}
                         >
                           旧版 ×{row.olderVersions}
+                        </span>
+                      )}
+                      {/*
+                        **我这边怎么样**（MKP 云端行，2026-10-09）：未获取 / 本地已有 / 有新版。
+                        这一格回答的是用户点开"云端"时问的那件事 ——
+                        "官方有这些，那我手上有没有、要不要拿"。判据在 `cloudRows` 里。
+                      */}
+                      {row.scope === 'cloud' && row.localState !== undefined && (
+                        <span
+                          className={s.localState}
+                          data-state={row.localState}
+                          title={CLOUD_LOCAL_WHY[row.localState]}
+                        >
+                          {CLOUD_LOCAL_TEXT[row.localState]}
                         </span>
                       )}
                       {/*
@@ -525,20 +585,39 @@ export default function PresetTable({
                     </>
                   )}
 
-                  {mkp ? null : statCell(row)}
+                  {statCell(row)}
 
                   {/*
                    * 操作列常驻。三种画法，**已经生效 / 已经下载的那一种是灰字不是按钮**：
                    * 已经在用的东西没有可点的动作，给个按钮只会让人点一下看看会发生什么。
                    */}
                   <td className={s.act}>
-                    {row.scope === 'local' && mkp ? (
+                    {row.scope === 'cloud' && row.localState !== undefined ? (
                       /*
-                       * **资源库那一行唯一的动作：使用**（2026-10-08 资源库改判）。
-                       * 官方与我的同一套外观、同一个词：两档都走 `onUse` —— 官方那份
-                       * 本机没有字节时后端先按需取回，所以这里没有「下载 / 已下载」这一档。
-                       * 两处不给按钮（不给必报错的按钮）：认不出是 MKP 预设的（`.json`），
-                       * 以及第九层读不出来的（这两档只可能出在我的那一半）。
+                       * **MKP 云端行的三个状态、两个动作**（2026-10-09）。
+                       *
+                       * 判据在 `cloudRows` 里算好了（`localState`）：问我这边有没有一份
+                       * **基于它**的工作副本，以及官方换没换版 —— **不看下载区字节**。
+                       *
+                       *   未获取  → [下载]  取回官方 + 落一份你的（本地表立刻多一行）
+                       *   有新版  → [更新]  把官方新版取回来；**你那份一个字节都不动**
+                       *   本地已有 → 不给按钮，画一枚灰字（要改要用都在本地表那一行上）
+                       *
+                       * 三档的"为什么"都在 `title` 里（灰一个动作不说为什么，用户只会以为坏了）。
+                       */
+                      <CloudLocalAction
+                        row={row}
+                        busy={busy}
+                        onDownload={onDownload}
+                      />
+                    ) : row.scope === 'local' && mkp ? (
+                      /*
+                       * **MKP 本地行唯一的动作：使用**（2026-10-09）。
+                       *
+                       * 这一档只有 `presets-mine/` 里那几行（你自己那份工作副本）——
+                       * 官方原件不进这张表。使用 = 把它设为当前生效的那一份。
+                       * 两处不给按钮（不给点了必被拒的按钮）：认不出是 MKP 预设的（`.json`），
+                       * 以及第九层读不出来的。
                        */
                       row.live ? (
                         <span className={s.actLive} title={ASSET_USE_WHY.on}>
@@ -681,12 +760,12 @@ export default function PresetTable({
                 {expanded && (
                   <tr className={s.expandRow}>
                     {/*
-                     * colSpan 必须**跟着上面的表头列数走**：MKP 4 列（名称 / 机型 / 版本 / 操作
-                     * —— 2026-10-08 资源库改判之后「时间」那一列退场）、切片器 6 列。
+                     * colSpan 必须**跟着上面的表头列数走**：MKP 5 列（名称 / 机型 / 版本 / 时间 /
+                     * 操作）、切片器 6 列（名称 / 机型 / 喷嘴 / 层高 / 时间 / 操作）。
                      * 比表头多出的那一跨会撑出一个匿名列，吃掉表格右侧的全部余量 ——
                      * 改列数时这里要一起改。
                      */}
-                    <td colSpan={mkp ? 4 : 6}>
+                    <td colSpan={mkp ? 5 : 6}>
                       <dl className={s.facts}>
                         {/*
                          * 展开详情**只回答用户真正要问的事**：什么版本 / 从哪来 / 什么时候
@@ -800,31 +879,41 @@ export default function PresetTable({
                         )}
 
                         {/*
-                         * 状态：**release 行的主词按"云端 vs 盘上"三态说**（未下载 / 已下载 /
-                         * 有更新），"认不出是哪一版"不再顶在主词上 —— 那是信任维度的事，
-                         * 有它自己的一行注记（见下）。主词后面缀「正在用」；
-                         * 其余来源说"生效没生效"。
+                         * 状态，按**这一行到底是哪张表的哪一档**说：
+                         *
+                         *   MKP 云端行    按 `localState` 说"我这边怎么样"（未获取 / 本地已有 / 有新版）
+                         *                 —— 不摆下载区那四态，官方原件是内部数据
+                         *   切片器 / 交付行 按"云端 vs 盘上"三态说（未下载 / 已下载 / 有更新），
+                         *                 "认不出是哪一版"不顶在主词上（那是信任维度的事，
+                         *                 有它自己的一行注记，见下）
+                         *   本地行        说"生效没生效"
+                         *
+                         * 主词后面缀「正在用」。
                          */}
                         <dt className={s.factKey}>状态</dt>
                         <dd
                           className={s.factVal}
                           title={
-                            row.releaseState !== undefined
-                              ? RELEASE_STATE_WHY[row.releaseState]
-                              : mkp && row.scope === 'local'
-                                ? ASSET_USE_WHY[row.live ? 'on' : 'off']
-                                : undefined
+                            row.scope === 'cloud' && row.localState !== undefined
+                              ? CLOUD_LOCAL_WHY[row.localState]
+                              : row.releaseState !== undefined
+                                ? RELEASE_STATE_WHY[row.releaseState]
+                                : mkp && row.scope === 'local'
+                                  ? ASSET_USE_WHY[row.live ? 'on' : 'off']
+                                  : undefined
                           }
                         >
-                          {row.releaseState !== undefined
-                            ? UPDATE_STATE_TEXT[updateState ?? 'latest']
-                            : mkp && row.scope === 'local'
-                              ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
-                              : row.scope === 'local'
-                                ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
-                                : row.downloaded
-                                  ? CLOUD_STATE_TEXT.downloaded
-                                  : CLOUD_STATE_TEXT.pending}
+                          {row.scope === 'cloud' && row.localState !== undefined
+                            ? CLOUD_LOCAL_TEXT[row.localState]
+                            : row.releaseState !== undefined
+                              ? UPDATE_STATE_TEXT[updateState ?? 'latest']
+                              : mkp && row.scope === 'local'
+                                ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
+                                : row.scope === 'local'
+                                  ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
+                                  : row.downloaded
+                                    ? CLOUD_STATE_TEXT.downloaded
+                                    : CLOUD_STATE_TEXT.pending}
                           {row.applied && ' · 正在用'}
                         </dd>
 

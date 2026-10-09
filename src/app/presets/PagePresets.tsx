@@ -49,19 +49,21 @@
  * 搜索框里原来还有一枚「命中 N 条」，和「共 N 项」是同一个数，删掉了：同一个数字写两遍，
  * 哪天算法改了就会有一处忘记跟。
  *
- * 它右边那格台账：**「仓库」与「我的」两个数跟着当前类型档走**（MKP 档数 MKP 的、
- * 切片器档数切片器的；图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字
- * 混进某一档的语境里只会让人对不上（作者 2026-10-02 点名「仓库 9」）。
- * 「本机」仍是官方副本的总数（老契约 `getLocalFiles` 的读数，id 集合分不出类型）。
+ * 它右边那格台账：**两个数跟着当前类型档走**（MKP 档数 MKP 的、切片器档数切片器的；
+ * 图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字混进某一档的语境里
+ * 只会让人对不上（作者 2026-10-02 点名「仓库 9」）。MKP 档是「官方 · 我的」，
+ * 切片器档是「仓库 · 本机 · 我的」。
  *
- * # 本地 / 云端是**两张互不相干的表**
+ * # 本地 / 云端是**两张互不相干的表**（两种类型都有这一对，2026-10-09 恢复）
  *
- *   本地表  你这台机器上有什么。官方下载下来的副本（`getLocalFiles()`）+ **用户线**
- *           （`getUserPresetFiles()` 扫 `presets-mine/` —— **云端没有它们**）
- *   云端表  菜单上有什么官方文件（已分配 + 可选）。仅归档的一处都不出现
+ *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
+ *           MKP：只有你自己那份工作副本（`presets-mine/`）；切片器：官方副本 + 用户线
+ *   云端表  官方现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
+ *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
+ *           切片器：菜单上的官方文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
  *
- * 一个官方文件下载之后两张表里都有，那是对的：云端表说「仓库里有这个东西」，
- * 本地表说「你机器上有这个东西」。两张表各回答一个问题，不合流。
+ * 两张表各回答一个问题，不合流。MKP 档里一个官方条目同时出现在两张表上不是重复：
+ * 云端那一行说"官方有这个、我要不要拿"，本地那一行说"我手上这份能不能用"。
  *
  * # 两种类型的「生效」是两件不同的事
  *
@@ -92,10 +94,13 @@
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
  *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
+ *   **下载 / 更新**（MKP 云端行） `api.fetchOfficialPreset()`                真（取回官方当前版 + 落一份你的工作副本；
+ *                            两个词是同一条路，差别只在本地有没有 / 换没换版。**不改当前使用**）
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
- *   **批量**（云端表那一行）   `api.downloadCatalogFiles()`（多份）            真（同一套机制；**逐份结局**，
- *                            没成的各占提示条一行。范围 = 机型 + 类型，不受搜索词影响；已下载的不进来）
+ *   **批量**（云端表那一行）   MKP 逐份 `fetchOfficialPreset` / 切片器 `api.downloadCatalogFiles`（多份）
+ *                            真（**逐份结局**，没成的各占提示条一行。范围 = 机型 + 类型，
+ *                            不受搜索词影响；未获取 / 有新版才进来）
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
  *                            见 `ReleaseFileState`）
@@ -127,7 +132,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import type { ActiveOrigin, ArchivedFile, FileRef } from '../../api'
+import type { ActiveOrigin, ArchivedFile, DownloadOutcome, FileRef } from '../../api'
 import { longStatText } from '../store/package'
 /* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
 import Drawer from '../shared/Drawer'
@@ -152,6 +157,10 @@ import {
   ARCHIVE_WHY,
   ASSET_USE_TEXT,
   ASSET_USE_WHY,
+  /* MKP 云端行三态的按钮词与说明（与操作列那颗按钮同一条出处，2026-10-09） */
+  CLOUD_LOCAL_ACTION,
+  CLOUD_LOCAL_TEXT,
+  CLOUD_LOCAL_WHY,
   EDIT_TEXT,
   MINE_COPY,
   MINE_DRAWER,
@@ -487,15 +496,40 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 下载。两条路：
+   * 云端表那颗按钮。**三条路，都是"把官方的取到我机器上"**（2026-10-09）：
    *
-   *   目录登记的交付预设（`releaseUid` 在）  → `downloadRelease(fileName)`，**真的能下** ——
-   *     走新世界下载管道落进下载区 `mkp/`，本地表跟着多出一行
-   *   官方仓库的文件                        → 契约里有签名，所以**照调**。
+   *   MKP 云端行（`localState` 在）  → `fetchOfficial(fileName)`：
+   *       取回官方当前版字节（同一条下载管道，旧份进 archive）**+ 落一份我的工作副本**
+   *       （还没有的话）。**不动「当前使用」** —— 使用在本地表那一行上。
+   *       两颗按钮（下载 / 更新）走的是**同一条路**：差别只是本地有没有、换没换版。
+   *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`
+   *   官方仓库的文件                 → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
+    if (row.scope === 'cloud' && row.localState !== undefined) {
+      const verb = row.localState === 'stale' ? '更新' : '下载'
+      setBusyKey(row.rowKey)
+      setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
+      data.fetchOfficial(row.fileName).then(
+        (done) => {
+          setBusyKey(null)
+          setNote({
+            text: done.created
+              ? `已${verb} ${row.fileName} —— 官方这一版取到本机了，并且落成你的一份（本地表里现在有它）`
+              : `已${verb} ${row.fileName} —— 你那份本来就在，**一个字节没动**；官方新版已经取回来，改了哪几项去「打开参数」里看`,
+            bad: false,
+          })
+        },
+        (e: unknown) => {
+          setBusyKey(null)
+          /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
+          setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
+        },
+      )
+      return
+    }
     if (row.releaseUid !== undefined) {
       /*
        * 盘上那份不对劲的两档（旧版本 / 认不出）走的是**同一条下载管道**（再下一遍，
@@ -553,13 +587,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 批量：把「未下载 + 需更新」的那些**一次交给后端** —— 多份单文件操作的组合，
-   * 不是第二套机制（走同一个 `downloadCatalogFiles`，Rust 侧逐份跑同一个 `deliver`）。
+   * 批量：把「未获取 / 有新版」的那些**一次交给后端** —— 多份单文件操作的组合，
+   * 不是第二套机制。判据与单行那颗按钮同一条，只是把多份合成一次。
+   *
+   * **两种类型走两条现成的管道**：
+   *
+   *   MKP     逐份 `fetchOfficial` —— 取回官方 + 落一份我的工作副本（与「下载 / 更新」同一条）
+   *   切片器   一次交给 `downloadReleaseBatch`（Rust 侧逐份跑同一个 `deliver`，落下载区 `mkp/`）
    *
    * 结局**逐份**收：全成 / 有名有姓地列出没成的。**命令级失败是另一档**（比如没配数据源）：
    * 那时一份都没发出去，不能说成"全都失败了" —— 两句话不一样，用户要做的也不一样。
    */
-  const runBatch = () => {
+  const runBatch = async () => {
     const { fileNames } = page.pending
     if (fileNames.length === 0 || batchBusy) return
     const { label } = releaseBatchText(
@@ -569,32 +608,55 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     )
     setBatchBusy(true)
     setNote({ text: `正在${label}…`, bad: false })
-    data
-      .downloadReleaseBatch(fileNames, (t) =>
-        setNote({ text: tickText(t), bad: t.stage === 'failed' }),
+    /* 逐份结局收成一个口子：主句说总数、明细一行一份（两条管道共用同一句话） */
+    const report = (outcomes: DownloadOutcome[], doneText: string) => {
+      const bad = outcomes.filter((o) => !o.ok)
+      const done = outcomes.length - bad.length
+      setNote(
+        bad.length === 0
+          ? { text: `${label}完成：${done} 份${doneText}`, bad: false }
+          : {
+              text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
+              bad: true,
+              lines: bad.map(outcomeText),
+            },
       )
-      .then(
-        (outcomes) => {
-          const bad = outcomes.filter((o) => !o.ok)
-          const done = outcomes.length - bad.length
-          setNote(
-            bad.length === 0
-              ? { text: `${label}完成：${done} 份都落进下载区了`, bad: false }
-              : {
-                  text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
-                  bad: true,
-                  lines: bad.map(outcomeText),
-                },
-          )
-        },
-        (e: unknown) => {
-          setNote({
-            text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
-            bad: true,
-          })
-        },
-      )
-      .finally(() => setBatchBusy(false))
+    }
+    try {
+      if (page.kind === 'mkp') {
+        /*
+         * MKP 云端那一批：逐份「取回 + 落工作副本」—— 与单行那颗「下载 / 更新」同一条路
+         * （不是下载区那一条：这一档的用户世界里只有 `presets-mine/` 里那一份）。
+         * 一份失败不拖累别人：单独 catch 成一条 `ok: false`，照实列出来。
+         */
+        const outcomes: DownloadOutcome[] = []
+        for (const fileName of fileNames) {
+          try {
+            const done = await data.fetchOfficial(fileName)
+            outcomes.push({
+              fileName,
+              ok: true,
+              message: done.created ? '已落成你的一份' : '你那份本来就在，一个字节没动',
+            })
+          } catch (e: unknown) {
+            outcomes.push({ fileName, ok: false, message: errorText(e) })
+          }
+        }
+        report(outcomes, '都取到本机了（落成你的一份）')
+      } else {
+        const outcomes = await data.downloadReleaseBatch(fileNames, (t) =>
+          setNote({ text: tickText(t), bad: t.stage === 'failed' }),
+        )
+        report(outcomes, '都落进下载区了')
+      }
+    } catch (e: unknown) {
+      setNote({
+        text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
+        bad: true,
+      })
+    } finally {
+      setBatchBusy(false)
+    }
   }
 
   /**
@@ -650,8 +712,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   /**
    * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
    *
-   * 2026-10-08 资源库改判起，**编辑的对象只有「我的预设」**（`presets-mine/` 里那份）——
-   * 官方那一份是模板、只读，要改它先在资源库里「另存为我的预设」（所以这里固定走 mine 线）。
+   * **编辑的对象只有「我的预设」**（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
+   * 要改它先在云端「下载」一份自己的（所以这里固定走 mine 线）。
    * 前置条件全在后端拦（认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的
    * 话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
@@ -974,46 +1036,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **资源库那一行唯一的动作：使用**（2026-10-08 资源库改判）—— 官方与我的同一个词。
+   * **本地表那一行的动作：使用**（2026-10-09）—— 把这一份设为当前生效。
    *
-   *   官方那一份  没在本机（或盘上那份与目录对不上）时后端**先按需取回**，再写成当前使用；
-   *               本机已是当前版就直接使用（一次网络都不发）—— 所以这里不需要"下载"这一档
-   *   我的那一份  走原来那条用户线（认路径、不查 SHA），与「应用」同一个写口
-   *
-   * 提示条按**这次有没有真的取回来**说两种话：用户看得见"它去拿了"，而不是凭空生效。
+   * MKP 本地表里只有 `presets-mine/` 那几行（你自己那份工作副本），所以这一条就是
+   * 用户线那个写口（认路径、不查 SHA），与「应用」同一个底账。
+   * **不用发网络**：字节在你盘上（要拿官方新版是云端表「更新」那件事）。
+   * 上一版那条"官方行也能点使用、后端按需取回"的路已经退场 —— 官方原件不进这张表了。
    */
   const runUse = (row: PresetLocalRow) => {
     setBusyKey(row.rowKey)
-    if (row.origin === 'mine') {
-      data.apply(row.fileName, 'mine', row.path).then(
-        () => {
-          setBusyKey(null)
-          setNote({ text: `已使用 ${row.fileName}`, bad: false })
-        },
-        (e: unknown) => {
-          setBusyKey(null)
-          setNote({ text: `使用失败：${errorText(e)}`, bad: true })
-        },
-      )
-      return
-    }
-    data.useOfficial(row.fileName).then(
-      (done) => {
+    data.apply(row.fileName, 'mine', row.path).then(
+      () => {
         setBusyKey(null)
-        /*
-         * 提示条按**这一趟真做了什么**说（两件独立的事：官方字节取回来没有 / 我那份是新落的还是原来那份）。
-         * 用户看得见它去了哪、也看得见他改的那一份是哪来的。
-         */
-        setNote({
-          text: done.created
-            ? done.fetched
-              ? `已取回官方 ${row.fileName}，并落成你的一份 —— 现在用的是你自己那一份（改的就是它）`
-              : `已落成你的一份 ${row.fileName} —— 现在用的是你自己那一份（官方那一版本机本来就有）`
-            : done.fetched
-              ? `已取回官方的 ${row.fileName}，并使用你原来那一份 —— 你那份一个字节没动`
-              : `已使用 ${row.fileName} —— 用的是你自己那一份`,
-          bad: false,
-        })
+        setNote({ text: `已使用 ${row.fileName}`, bad: false })
       },
       (e: unknown) => {
         setBusyKey(null)
@@ -1158,7 +1193,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     if (row === null) return []
 
     /*
-     * 云端表：**只有下载** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
+     * 云端表：**只有"把官方的取到我机器上"** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
      *
      * ★ 作者 2026-10-08 把它定死了：「云端的不管它删除下载……这云端就是云端的，
      * 就是一个列表啊，你就把它想象成一份那个下载的列表啊，就像你去浏览器下东西一样，
@@ -1166,13 +1201,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
      * （同一天上午这里短暂挂过一颗「删除本机这份」—— 那是把"我这一侧"的事混进了
      * 云端表，作者当天就否了。要删自己那份副本，去**本地表**；要删下载区那份官方副本，
      * 那是本地表里切片器那一档的事。**云端表一味只读**。）
+     *
+     * 2026-10-09 起 MKP 档那一项按**三态**给词（下载 / 更新 / 本地已有不给动作），
+     * 判据与操作列那颗按钮同一条（`localState` / `CLOUD_LOCAL_ACTION`）——
+     * "为什么"在状态列与这一项的 title 里说。
      */
     if (row.scope === 'cloud') {
+      const localState = row.localState
+      const label =
+        localState !== undefined
+          ? (CLOUD_LOCAL_ACTION[localState] ?? CLOUD_LOCAL_TEXT[localState])
+          : UPDATE_ACTION_TEXT.missing
+      const whyNot =
+        localState !== undefined && CLOUD_LOCAL_ACTION[localState] === null
+          ? CLOUD_LOCAL_WHY[localState]
+          : undefined
       return [
         {
           id: 'download',
-          /* 一个动作一个词（作者 2026-10-08：「那颗按钮就叫下载吧」）；"为什么"是状态列那格的事 */
-          label: UPDATE_ACTION_TEXT.missing,
+          label,
+          disabled: whyNot,
           onSelect: () => download(row),
         },
         {
@@ -1186,12 +1234,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
-     * **资源库那一行**（MKP 档，2026-10-08 资源库改判）：官方与我的都是"一个预设"，
-     * 菜单第一项永远是「使用」—— 它与操作列那颗按钮是**同一个动作**，不是两套。
+     * **MKP 本地表那一行**（2026-10-09）：这一档只有你自己那份工作副本，菜单照旧围绕它 ——
      *
-     *   官方行  别人的东西（只读）：能做的只有「使用」与「另存为我的预设」
-     *           ——「要改就先存一份自己的」，下载 / 使用都不再自动产生副本
-     *   我的行  你自己的文件：改 / 另存 / 改名 / 显示 / 删除，原来那一套照旧
+     *   使用                             把它设为当前生效（与操作列那颗按钮是同一个动作）
+     *   打开参数 / 选择要跟随的官方更新   参数表那一屏（官方更新也在这里处理）
+     *   改这份 / 另存 / 改名 / 显示 / 删除  原「我的文件」那一套
+     *
+     * （官方那一行**不在这张表里** —— 官方原件是内部数据，它的取用在云端表「下载 / 更新」。）
      */
     if (row.scope === 'local' && page.kind === 'mkp') {
       /*
@@ -1218,19 +1267,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         label: '查看详情',
         onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)),
       }
-      if (row.origin === 'release') {
-        /*
-         * 官方那一行**只有「使用」**（2026-10-09 改判）：使用 = 按需取回 + 落成我的一份
-         * + 使用它。用户世界里只有一份，没有一个要他自己走的"另存"步骤。
-         */
-        return [
-          useEntry,
-          { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
-          detailEntry,
-          bbsEntry(row),
-        ]
-      }
-      const suspectMine = isSuspectRelease(row.releaseState)
       return [
         useEntry,
         /* 参数表那一屏（2026-10-09）：改的是参数本身，官方更新也在这里处理 */
@@ -1252,7 +1288,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         {
           id: 'copy',
           label: '另存为一份新的',
-          disabled: suspectMine ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
+          disabled: copyWhyNot(row),
           onSelect: () => openCopyAs(row),
         },
         {
@@ -1385,8 +1421,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 比切换器小」）。
    */
   const searchNode = (
-    /* MKP 档没有位置那一轴了（2026-10-08），搜索自己顶到右线 —— 与切片器那一排同一眼观感 */
-    <div className={page.kind === 'mkp' ? `${s.search} ${s.searchPush}` : s.search}>
+    /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
+    <div className={s.search}>
 
       <input
         className={s.input}
@@ -1423,22 +1459,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
 
   /*
-   * 「共 N 项」+ 仓库台账（G07-1 的 4 号：住页脚，与右键提示同行；
-   * compact / mini 的 MKP 档由工具栏渲染这一份，页脚那份不画 —— 见 .foot 的说明）。
+   * 「共 N 项」+ 台账（MKP 档恒住工具栏第二排；切片器档住页脚，与右键提示同行）。
    * **包成一个不拆分的整体** —— 窄窗折行时两样一起走，台账的竖线永远不会落单
    * （作者圈过那半截孤线）。
    *
-   * 台账那两个可数的数**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
-   * 全 catalog 数字不应该混在当前类型的业务语境里」）：仓库数的是这一档类型
-   * （MKP / 切片器）在全机型下的文件数、我的数的是这一档下用户文件的个数 ——
+   * 「共 N 项」= **当前这张表**（本地 / 云端）筛后的行数 —— 眼前只有一张表，
+   * 报另一张表的数只会让人去对一个看不见的东西。
+   *
+   * 台账是可数的全局事实，**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
+   * 全 catalog 数字不应该混在当前类型的业务语境里」）：
+   *
+   *   MKP     「官方（目录里登记的 MKP 预设，全机型）· 我的（你有几份工作副本）」
+   *           —— 官方的取用（下载 / 更新）在云端表、使用在本地表，这一格说的是
+   *           "一共多少"，与当前看哪张表无关
+   *   切片器   「仓库（这一档全机型的官方文件）· 本机（官方副本总数）· 我的」
+   *
    * 图标 / 模型不归这一页，哪个数里都不含它们。
-   * **MKP 档没有「本机」这一格**（2026-10-08）：官方基线不进用户世界，用户只有他那一份 ——
-   * 台账就是「仓库（云端有几个）· 我的（你有几个）」。切片器档照旧带「本机」
-   * （官方副本的总数，老契约 getLocalFiles 的读数）。
    */
   const mineCount = mineCountOfAxis(data.mine, page.kind)
   /*
-   * 资源库那一档台账里的「官方」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
+   * MKP 台账里的「官方」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
    * 与切片器那档的「仓库」是同一个口径（台账说全集，表格说这一档机型）。
    */
   const assetOfficialCount = data.release.presets.filter(
@@ -1448,11 +1488,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     <span className={s.meta}>
       <span
         className={s.counts}
-        title={
-          page.kind === 'mkp'
-            ? `资源库这一张表在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`
-            : `当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`
-        }
+        title={`当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`}
       >
         共 {table.rows.length} 项
       </span>
@@ -1460,8 +1496,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         className={s.ledger}
         title={
           page.kind === 'mkp'
-            ? `资源库：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己的文件里属于这一档的几个，扫 presets-mine）。` +
-              `官方那一份**只有一个当前版**，也没有"下过没有"这一档 —— 点「使用」时它按需取回并落成当前使用。`
+            ? `MKP 台账：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己那份工作副本，扫 presets-mine）。` +
+              `官方的取用在云端表那一行（下载 / 更新 = 取回 + 落一份你的），使用在本地表那一行 —— 两件事不在同一张表上。`
             : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）。${DOWNLOAD_WHY}`
         }
       >
@@ -1666,8 +1702,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             <>
               {/*
                * 批量那一行：只在**云端表**、且这一批非空时出现。
-               * 为什么在云端表：那里说的是"目录里有什么、你缺什么"，批量正是补这里；
-               * 本地表说的是"我机器上有什么"（需更新那几份已经各带一颗「更新」）。
+               * 为什么在云端表：那里说的是"官方有什么、我缺什么"，批量正是补这里 ——
+               * MKP 档逐份「取回 + 落工作副本」、切片器档逐份落下载区 `mkp/`。
+               * 本地表说的是"我机器上有什么"，那是另一件事。
                * 为什么敢占一行高度：它的数**与眼前这张表同口径**（当前机型 + 这一档类型），
                * 而且带着动作 —— 不是那种"别处还有个数字"的噪音（那种以前删过）。
                */}
@@ -1681,7 +1718,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                     className={s.batchBtn}
                     disabled={batchBusy}
                     title={batch.why}
-                    onClick={runBatch}
+                    onClick={() => void runBatch()}
                   >
                     {batchBusy ? '处理中…' : batch.label}
                   </button>
@@ -1760,7 +1797,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onOpenMine={openMine}
                 onEdit={openEdit}
                 onLive={runLive}
-                /* 资源库那一行唯一的按钮（2026-10-08）：官方与我的同一个入口 */
+                /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份工作副本 */
                 onUse={runUse}
                 onDownload={download}
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
@@ -1921,20 +1958,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           />
 
           {/*
-           * **那一份预设的参数**（2026-10-09）。里面就是参数页本身；
-           * 挂在 `.main` 里与上面那几个同一层 —— 遮罩只盖内容区。
-           */}
-          <PresetParamsModal
-            open={paramModal !== null}
-            density={density}
-            target={
-              paramModal?.target ?? { path: '', fileName: '', machineId: '', versionId: '' }
-            }
-            openSyncOnStart={paramModal?.syncFirst ?? false}
-            onClose={() => setParamModal(null)}
-          />
-
-          {/*
            * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
            * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
            *
@@ -2055,9 +2078,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         <div className={s.foot}>
           {!page.unsupported && (
             <span className={s.footHint}>
-              {/* 菜单里有什么，按档说 —— 资源库那一档没有"重命名 / 删除"这种只属于我的文件的话 */}
+              {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于我的文件的话 */}
               {page.kind === 'mkp'
-                ? '右键任意一行还有使用 / 打开参数 / 官方更新 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                ? page.scope === 'cloud'
+                  ? '右键任意一行还有下载 / 更新 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
+                  : '右键任意一行还有使用 / 打开参数 / 官方更新 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
                 : '右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'}
             </span>
           )}
@@ -2065,6 +2090,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         </div>
 
         <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />
+
+        {/*
+         * **那一份预设的参数**（2026-10-09）。里面就是参数页本身。
+         *
+         * ★ 挂在**这一页的 `.page` 那一层**（不是 `.main` 里）：`.page` 是定位祖先，
+         *   Modal 的遮罩是 `absolute inset: 0` —— 于是它正好铺满"顶栏页签以下整块"
+         *   （从工具条一直到底部页脚）。里面那套参数编辑器有自己的头 / 可滚的中间 /
+         *   钉住的底栏，一个字节不改（见 `PresetParamsModal`）。
+         *   宿主层只负责定位与层高（`s.paramsLayer`），遮罩本体仍是 Modal 的 `.scrim`。
+         */}
+        <div className={s.paramsLayer}>
+          <PresetParamsModal
+            open={paramModal !== null}
+            density={density}
+            target={
+              paramModal?.target ?? { path: '', fileName: '', machineId: '', versionId: '' }
+            }
+            openSyncOnStart={paramModal?.syncFirst ?? false}
+            onClose={() => setParamModal(null)}
+          />
+        </div>
       </FieldLayer>
 
       {/* 「定位」的闪烁层：盖在被定位那一行上的普通 div，位置尺寸由 locateApplied

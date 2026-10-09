@@ -5,17 +5,18 @@
  * ┌ MKP 配置 │ 切片器配置 ┐   ┌ 本地 │ 云端 ┐
  * ```
  *
- * # 两个轴各管什么（2026-10-08 资源库改判：位置那一轴只剩切片器档）
+ * # 两个轴各管什么（2026-10-09：位置那一轴两种类型都有了）
  *
  *   左（类型）  `PresetFileInfo.kind` —— MKP 的涂胶预设 toml，还是切片器的工艺 profile。
  *               **它还决定表头有几列**（MKP 没有喷嘴层高，切片器没有版本）
- *   右（位置）  **只有切片器档渲染它**：那是两张互不相干的表，不是同一批数据的筛选 ——
- *               本地的就是本地的、云端的就是云端的，各自回答一个问题。
- *               MKP 档只有一张表（资源库）：来源（官方 / 我的预设）只是行上的一枚小字，
- *               所以那一档整个不画它。
+ *   右（位置）  两张**互不相干的表**，不是同一批数据的筛选 —— 本地的就是本地的、
+ *               云端的就是云端的，各自回答一个问题（我有什么 / 官方提供什么）。
  *
- * 上一版把位置这个轴压成了行内的一个状态角标，被否了。它是分类，不是状态
- * （在资源库那张表上，它降级成"来源"，仍然不是状态 —— 见 `ASSET_SOURCE_TEXT`）。
+ * 位置那一轴 2026-10-08 曾在 MKP 档退场（那半天 MKP 只有一张合并的"资源库"表），
+ * 2026-10-09 作者改判回来：**桌面软件必须让人一眼看出"我手上有什么、断网能不能用"**，
+ * 合并成一张表恰恰把这一件事藏起来了 —— 两张表各答各的才是对的分法。
+ *
+ * 上一版还把位置这个轴压成过行内的一个状态角标，也被否了：它是**分类**，不是状态。
  *
  * # 去掉多余的那一层外包
  *
@@ -78,29 +79,32 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
       </span>
 
       {/*
-       * **位置那一轴只有切片器档有**（2026-10-08 资源库改判）。
+       * **位置那一轴两种类型都有**（2026-10-09 起；此前 MKP 档短暂不画它）。
        *
-       * MKP 档只有一张表（资源库）：官方与我的预设并排，来源只是行上的一枚小字 ——
-       * 「本地 / 云端」这两个维度在那一档整个退场（两张表变成一张，轴就没有主语了）。
-       * 切片器档照旧：它那两张表（本机真有的 / 云端菜单上的）是两件不同的事。
+       * 同一对词在两档里是两件事，说明那句跟着类型走（`SCOPE_AXIS_WHY[kind][scope]`）：
+       * MKP 的"本地"= 你自己那份工作副本；切片器的"本地"= 本机真有的文件。
+       * 所以这条控件**两边都画**，但都不解释自己 —— 解释交给悬停那句话。
        */}
-      {kind === 'slicer' && (
-        <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
-          {SCOPES.map((sc) => (
-            <label key={sc} className={s.opt} data-on={sc === scope} title={SCOPE_AXIS_WHY[sc]}>
-              <input
-                type="radio"
-                className={s.radio}
-                name="preset-scope"
-                value={sc}
-                checked={sc === scope}
-                onChange={() => onScope(sc)}
-              />
-              {SCOPE_AXIS_TEXT[sc]}
-            </label>
-          ))}
-        </span>
-      )}
+      <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
+        {SCOPES.map((sc) => (
+          <label
+            key={sc}
+            className={s.opt}
+            data-on={sc === scope}
+            title={SCOPE_AXIS_WHY[kind][sc]}
+          >
+            <input
+              type="radio"
+              className={s.radio}
+              name="preset-scope"
+              value={sc}
+              checked={sc === scope}
+              onChange={() => onScope(sc)}
+            />
+            {SCOPE_AXIS_TEXT[sc]}
+          </label>
+        ))}
+      </span>
     </>
   )
 }

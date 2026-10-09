@@ -440,18 +440,25 @@ export default function PageHome({ density }: PageHomeProps) {
         }
       }
       /*
-       * 用的是**官方那一份本尊**（2026-10-08 资源库改判）：官方是模板，用户要用的就是它 ——
-       * 「使用」在本机没有字节（或盘上那份与目录对不上）时**按需取回**，再写成当前使用
-       * （`use_official_preset` 内部走的就是那条下载管道）。
+       * **两步，各是各的**（2026-10-09 改判）：
        *
-       * 原来那条"先补一份工作副本、再应用副本"的路已经退场：副本只能由「另存为我的预设」
-       * 显式产生 —— 所以"用一下官方，本地就凭空多出一份"这回事不会再发生。
+       *   ① `fetchOfficialPreset` 把官方这一版取到本机（本机已有当前版就一个字节不下载），
+       *      并落一份**我的工作副本**（`presets-mine/<原名>.toml`，已经有了就一个字节不动）；
+       *   ② `applyActivePreset` 把**我那一份**设成当前使用。
+       *
+       * 为什么不合成一步：「取到本机」与「把哪一份设为生效」是两件事 —— 云端表那两颗
+       * （下载 / 更新）只做前一件，使用只发生在本地表那几行上。首页这一颗按钮的语义是
+       * 「让这一台机器用上这一版」，所以两步都走，顺序也是这个顺序。
+       *
+       * 于是"点一下使用就凭空多出一份"那回事仍然不会发生：副本要么本来就在（原样不动），
+       * 要么这一趟就该有（本机一份都没有）。
        *
        * 也**不必**再给"预判过期"留兜底：字节在不在这一层由后端自己解决，
        * 不存在"预判说齐了、其实没齐"那种错 —— 上面那次批量下载只负责套餐里**别的**文件
        * （切片器配置那一类）。
        */
-      await api.useOfficialPreset(presetFile)
+      const fetched = await api.fetchOfficialPreset(presetFile)
+      await api.applyActivePreset(fetched.fileName, 'mine', fetched.path)
       appStateMutated()
     } catch (e) {
       setApplyError(errorText(e))

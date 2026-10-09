@@ -45,6 +45,23 @@
   height: min(88vh, 100%);
 }
 
+/*
+ * **撑满宿主整块**（`full`）：遮罩不留内衬、框铺满、不圆角 —— 宿主是什么形状它就是什么形状。
+ * 参数模态框挂在这一页的 `.page`（顶栏页签以下整块）上，这一档正好铺满那一块；
+ * 里面那个自成一体的工作区（有自己的头 / 可滚的中间 / 钉住的底栏）照旧由 `bodyFill` 交给它自己管。
+ */
+.scrim[data-size='full'] {
+  padding: 0;
+}
+
+.box[data-size='full'] {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+
 
 .head {
   display: flex;

@@ -43,10 +43,12 @@ export interface ModalProps {
   footer?: ReactNode
   /**
    * 框的宽度档。`sm` 看一眼就关的（详情）· `md` 要读的（确认 / 表单）· `lg` 向导 ·
-   * `xl` **整块工作区**（参数编辑器那种"要占大半个窗口"的）。
-   * 不给自由数值 —— 四档已经够，给了数值各处就会长出十种宽度。
+   * `xl` **整块工作区**（参数编辑器那种"要占大半个窗口"的）·
+   * `full` **撑满宿主整块**（遮罩不留内衬、框满、不圆角）—— 参数模态框要在顶栏页签以下
+   * 整块内容区里铺开，就是这一档。
+   * 不给自由数值 —— 五档已经够，给了数值各处就会长出十种宽度。
    */
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
   /**
    * 框身**不滚**、也不加内衬：交给里面那个自己管滚动的整体（`xl` 档的参数编辑器就是）。
    *
@@ -146,6 +148,7 @@ export default function Modal({
   const scrim = (
     <div
       className={s.scrim}
+      data-size={size}
       role="presentation"
       onMouseDown={(e) => {
         /* 只认落在遮罩自己身上的那一下 —— 从框里开始拖到外面松手不算 */

@@ -945,19 +945,22 @@ export interface ActivePreset {
 }
 
 /**
- * 「使用官方预设」的结果（[`useOfficialPreset`]，2026-10-09 资源库改判）。
+ * 「取回官方预设」的结果（[`fetchOfficialPreset`]，2026-10-09 改判）。
  *
  * `fetched` 说这次**有没有真的取回来一份**官方原件（本机已经是当前版时是 `false`，
- * 一次网络都不发）；`created` 说这次**有没有新落一份我自己的**
+ * 一次网络都不发）；`created` 说这次**有没有新落一份我自己的工作副本**
  * （没有的话用的是已经在的那一份，那份一个字节都没动）。
  *
  * 两个都是"这次到底做了什么"的实情 —— 界面据此说清「取回来了没有」与
- * 「你之前那份还在不在」。
+ * 「你之前那份还在不在」。`path` / `fileName` 是我那一份的落点：调用方要接着
+ * 「使用」它（[`applyPreset`]）时就用这两个，不用自己拼路径。
  */
-export interface UseOfficialResult {
+export interface FetchOfficialResult {
   fetched: boolean
   created: boolean
-  active: ActivePreset
+  fileName: string
+  /** 我那一份的落点（相对用户根：`presets-mine/…`） */
+  path: string
 }
 
 /**
@@ -1600,22 +1603,20 @@ export interface MkpApi {
     ): Promise<ActivePreset>
 
   /**
-   * **使用一份官方预设**（2026-10-09 资源库改判）—— 官方那一行唯一的动作。
+   * **把官方这一份预设取到本机** —— 云端表那两个动作（「下载」/「更新」）共用的那一条。
    *
-   * 用户世界里**只有一份**（他从来不面对"官方原件 + 我的副本"两份）：
+   * 它做的两件事，都幂等：
    *
    * ```text
-   *   官方原件不在本机（或盘上那份与目录对不上） → 按需取回（同一条下载管道，一次网络）
-   *              ↓
-   *   presets-mine/<原名>.toml  还没有就落一份（官方原文 + 血统三行）
-   *              ↓
-   *   使用中指针指向**我那一份**
+   *   ① 官方当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+   *   ② 我的工作副本       presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统三行）
+   *                       已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
    * ```
    *
-   * 我那份已经在了就一个字节都不动（用户改过的东西不许被官方原件顶掉）。
-   * 于是「下载 / 已下载 / 未下载」从用户心智里退场，只剩「使用」。
+   * **不碰「当前使用」**：下载 / 更新是"把官方的取到我机器上"，使用是"把哪一份设为生效"——
+   * 后者由本地表那颗按钮走 {@link applyPreset}。官方原件留在下载区，是内部数据。
    */
-  useOfficialPreset(fileName: string): Promise<UseOfficialResult>
+  fetchOfficialPreset(fileName: string): Promise<FetchOfficialResult>
 
   /**
    * 撤销使用。幂等：本来就没在用也不报错。

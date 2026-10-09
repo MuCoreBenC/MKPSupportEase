@@ -69,7 +69,7 @@ import type {
   OfficialVersion,
   OnDiskFile,
   PresetDraft,
-  UseOfficialResult,
+  FetchOfficialResult,
   UserFileIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
@@ -79,7 +79,6 @@ import type { ReleasePresetSource } from './presetTree'
 import {
   applySlicerFilters,
   archivedIds,
-  assetRows,
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
@@ -221,15 +220,15 @@ export interface PresetData {
    */
   apply: (fileName: string, origin?: ActiveOrigin, path?: string) => Promise<void>
   /**
-   * **使用一份官方预设**（2026-10-08 资源库改判）—— 官方那一行唯一的动作。
+   * **把官方那一份取到本机**（2026-10-09 改判）—— 云端表那两个动作（下载 / 更新）共用它。
    *
-   * 本机没有（或盘上那份与目录对不上）时后端**先按需取回**，再写成当前使用；
-   * 本机已是当前版就直接使用（一次网络都不发）。所以界面上不再有"下载 / 已下载"
-   * 这一档：用户只管「使用」，回来重读底账（与 `apply` 同一条规矩）。
+   * 它做两件幂等的事：官方当前版字节不在本机（或对不上）就取回来；我的工作副本
+   * 不在就落一份（在了一个字节不动）。**它不改「当前使用」** —— 使用是本地表那颗按钮。
    *
-   * 返回值说这次**有没有真的取回来一份**（提示条据此说「已取回并使用」/「已使用」）。
+   * 回来**两条线一起重读**：投递面可能刚变（官方字节取回来了），用户线可能也多了一份。
+   * 返回值说清这次到底做成了什么（提示条照它说）。
    */
-  useOfficial: (fileName: string) => Promise<UseOfficialResult>
+  fetchOfficial: (fileName: string) => Promise<FetchOfficialResult>
   /**
    * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
    *
@@ -815,19 +814,22 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 资源库那一条路（2026-10-09 改判）：官方行的「使用」= 按需取回 + 落成我的一份 + 使用它。
+   * 云端表那条路（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本。
    *
    * 它**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
    * 成功之后**两条线一起重读**：官方字节可能刚被取回来（投递面变了），
    * 用户线可能也多了一份（`created`）—— 两个广播都要发。
+   * **不广播 app-state**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）。
    */
-  const useOfficial = useCallback(async (fileName: string): Promise<UseOfficialResult> => {
-    const done = await api.useOfficialPreset(fileName)
-    deliveryMutated()
-    setMine(await api.getUserPresetFiles())
-    appStateMutated()
-    return done
-  }, [])
+  const fetchOfficial = useCallback(
+    async (fileName: string): Promise<FetchOfficialResult> => {
+      const done = await api.fetchOfficialPreset(fileName)
+      deliveryMutated()
+      setMine(await api.getUserPresetFiles())
+      return done
+    },
+    [],
+  )
 
   /*
    * 临时编辑那条链：起手（复制官方正文进临时文件）、边改边存、放弃、另存成用户文件。
@@ -957,7 +959,7 @@ export function usePresetData(importRevision = 0): PresetData {
     pick,
     pickMachine,
     apply,
-    useOfficial,
+    fetchOfficial,
     clearApply,
     copy,
     release,
@@ -1041,28 +1043,27 @@ export interface PresetPage {
   kind: PresetKindAxis
   setKind: (next: PresetKindAxis) => void
   /**
-   * 右边那条分段控件：位置。**切片器档才有它** —— 那两张表互不相干、各答各的问题：
+   * 右边那条分段控件：位置。**两种类型都有它**（2026-10-09 起）—— 那两张表互不相干、
+   * 各答各的问题：
    *
-   *   本地  本机磁盘上有什么（官方副本 + 我的文件）
-   *   云端  菜单上有哪些官方文件，行尾标「已下载 / 未下载」
-   *
-   * ★ **MKP 档不画它**（2026-10-08 资源库改判）：那里只有一张表（[`assetRows`]），
-   * 来源（官方 / 我的预设）只是行上的一枚小字，`scope` 恒为 `'local'`。
+   *   本地  我这台机器上真有的东西（MKP 档 = 你自己那份工作副本；切片器档 = 本机真有的文件）
+   *   云端  官方现在提供什么（MKP 档三态：未获取 / 本地已有 / 有新版；切片器档标「已下载 / 未下载」）
    */
   scope: PresetScopeAxis
   setScope: (next: PresetScopeAxis) => void
 
   /**
-   * 「本地」这一张表。
+   * 「本地」这一张表 —— **我电脑里真有的东西**。
    *
-   * **MKP 档 = 资源库列表**（[`assetRows`]：官方那几行 + 我的预设那几行，
-   * 来源只是行上的一枚小字，没有"下过没有"这一档）；
-   * 切片器档 = 本机磁盘上有什么（官方副本 + 我的文件）。
+   * MKP 档 = 你自己那份工作副本（`presets-mine/`，只有它）；切片器档 = 本机磁盘上
+   * 真有的文件（官方副本 + 我的文件）。两种类型在这一档的分法见 [`localRows`]。
    */
   local: PresetTableData<PresetLocalRow>
   /**
-   * 云端表 —— 菜单上有什么官方文件。**只有切片器档用它**：
-   * MKP 档这一格与 `local` 是同一张（同一份引用），页面也不会读它。
+   * 「云端」这一张表 —— **官方现在提供什么**。
+   *
+   * MKP 档的行按 [`CloudLocalState`] 说"我这边怎么样"（未获取 / 本地已有 / 有新版）；
+   * 切片器档照旧按 `releaseState` 说"下过没有 / 要不要重下"。见 [`cloudRows`]。
    */
   cloud: PresetTableData<PresetCloudRow>
 
@@ -1134,13 +1135,7 @@ export function usePresetPage(data: PresetData): PresetPage {
    */
   const [query, setQuery] = useSessionState('presets.query', '')
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
-  const [scopeRaw, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
-  /*
-   * **MKP 档只有一张表**（2026-10-08 资源库改判）：位置那一轴在那一档整个退场 ——
-   * `scope` 恒为「本地」，页面也不画那条分段控件。切片器档照旧两轴。
-   */
-  const mkp = kind === 'mkp'
-  const scope: PresetScopeAxis = mkp ? 'local' : scopeRaw
+  const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
   const [nozzle, setNozzle] = useSessionState('presets.nozzle', '')
   const [layer, setLayer] = useSessionState('presets.layer', '')
@@ -1211,15 +1206,11 @@ export function usePresetPage(data: PresetData): PresetPage {
   )
 
   /*
-   * **MKP 档那一张表**：`assetRows`（资源库）—— 它顶掉「本地 / 云端」两张，
-   * 所以那一档的 `cloudBase` 恒为**空表**（页面也不会读 `page.cloud`：批量那一行、
-   * 云端表的列，全都不在 MKP 档出现）。切片器档照旧：两张表各算各的。
+   * **两张表，两种类型都算**（2026-10-09 起；MKP 档此前短暂合成过一张资源库表）。
+   * 各自的判据在 [`localRows`] / [`cloudRows`] 里，这一层只负责算出来。
    */
-  const localBase = useMemo(() => (mkp ? assetRows(input) : localRows(input)), [input, mkp])
-  const cloudBase: PresetTableData<PresetCloudRow> = useMemo(
-    () => (mkp ? { rows: [], total: 0 } : cloudRows(input)),
-    [input, mkp],
-  )
+  const localBase = useMemo(() => localRows(input), [input])
+  const cloudBase: PresetTableData<PresetCloudRow> = useMemo(() => cloudRows(input), [input])
 
   /*
    * 批量那一批。取**云端表筛前**的行，两个理由：
@@ -1227,15 +1218,26 @@ export function usePresetPage(data: PresetData): PresetPage {
    *      拿一边数就够了，合起来数会重复；
    *   ② **不受搜索词影响**：搜索是"我在找什么"，不该悄悄改变"按一下要动几份"。
    * 筛选（机型 / 类型）已经在 `cloudRows` 里做过了，所以这里只按状态挑。
+   *
+   * **两种类型两套状态词**（同一件事的两种口径，各自都是源上算好的）：
+   *
+   *   MKP     看 `localState`：未获取（要"下载"）/ 有新版（要"更新"）
+   *   切片器   看 `releaseState`：未下载 / 旧版本 / 内容异常（三档都是"要处理"）
    */
   const pending = useMemo(() => {
-    const rows = cloudBase.rows.filter(
-      (r) => r.origin === 'release' && r.releaseState !== undefined && r.releaseState !== 'ok',
+    const rows = cloudBase.rows.filter((r) =>
+      r.localState !== undefined
+        ? r.localState === 'none' || r.localState === 'stale'
+        : r.origin === 'release' && r.releaseState !== undefined && r.releaseState !== 'ok',
     )
     return {
       fileNames: rows.map((r) => r.fileName),
-      missing: rows.filter((r) => r.releaseState === 'missing').length,
-      stale: rows.filter((r) => r.releaseState === 'old').length,
+      missing: rows.filter((r) =>
+        r.localState !== undefined ? r.localState === 'none' : r.releaseState === 'missing',
+      ).length,
+      stale: rows.filter((r) =>
+        r.localState !== undefined ? r.localState === 'stale' : r.releaseState === 'old',
+      ).length,
       tampered: rows.filter((r) => r.releaseState === 'tampered').length,
       total: rows.length,
     }

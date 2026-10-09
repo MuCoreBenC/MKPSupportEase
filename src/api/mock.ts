@@ -1608,7 +1608,8 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 资源库那一条路（2026-10-09 改判）：官方预设的「使用」= 按需取回 + 落成我的一份 + 使用它。
+   * 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本。
+   * **不改「当前使用」** —— 使用是本地表那颗按钮的事。
    *
    * 浏览器里**没有下载区**，所以照实分两档：
    *   演示集合里已有（`MOCK_DOWNLOADED`）→ 当成"本机已有当前版"，
@@ -1617,13 +1618,13 @@ export const mockApi: MkpApi = {
    *
    * 与真机同一个形状：用户只面对 `presets-mine/` 里那一份，官方原件留在内部。
    */
-  async useOfficialPreset(fileName) {
+  async fetchOfficialPreset(fileName) {
     const hit = mockReleaseFile(fileName)
     if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
     if (!MOCK_DOWNLOADED.some((f) => f.fileName === fileName)) {
       throw new NotImplementedError(
-        'useOfficialPreset',
-        `浏览器预览里没有 ${fileName} 的字节，也没法从数据源取回来 —— 用桌面版点「使用」`,
+        'fetchOfficialPreset',
+        `浏览器预览里没有 ${fileName} 的字节，也没法从数据源取回来 —— 用桌面版点「下载」`,
       )
     }
     const path = `presets-mine/${fileName}`
@@ -1661,17 +1662,7 @@ export const mockApi: MkpApi = {
         provenance: 'copy' as const,
       })
     }
-    mockActive = {
-      origin: 'mine',
-      fileName,
-      path,
-      /* 指纹是使用那一刻的字节摘要；浏览器里没有真字节，用路径占位（形状不编） */
-      sha256: `mock:${path}`,
-      machineId: hit.machineId,
-      versionId: hit.versionId,
-      intact: true,
-    }
-    return { fetched: false, created, active: mockActive }
+    return { fetched: false, created, fileName, path }
   },
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */

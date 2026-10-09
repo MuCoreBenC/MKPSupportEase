@@ -280,6 +280,38 @@
  * 中性灰、实线细边：它既不是错误也不是待办，只是**来历**（旧版以用户自己的名字
  * 躺在本地表里，展开这一行能看到归档里那几份）。
  */
+/*
+ * 「我这边怎么样」那一枚（2026-10-09，MKP 云端行专用）：未获取 / 本地已有 / 有新版。
+ *
+ * 三档同一种形状、三种颜色 —— 它是**状态**（现在什么样），不是待办：
+ *
+ *   未获取    极淡灰（只是说"还没有"，不是错误）
+ *   本地已有  中性绿（跟得上官方当前版）
+ *   有新版    琥珀（官方那边动了 —— 这是这一页唯一真值得他动一下的一档）
+ */
+.localState {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.localState[data-state='has'] {
+  border-color: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.localState[data-state='stale'] {
+  border-color: var(--warn-soft);
+  color: var(--warn);
+}
+
 .olderVersions {
   flex-shrink: 0;
   display: inline-flex;

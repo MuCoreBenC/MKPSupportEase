@@ -396,46 +396,49 @@ pub async fn download_runtime_files(
         .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
 }
 
-/// 「使用官方预设」的结果：这次取回没有 / 落成我的一份没有 + 使用中的那一条
+/// 「取回官方预设」的结果：这次取回没有 / 落成我的一份没有 / 我那份在哪
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UseOfficialDto {
+pub struct FetchOfficialDto {
     /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，一次网络都没发）
     pub fetched: bool,
-    /// 这次是不是**新落了一份我自己的**（`false` = 我那份本来就在，直接用那一份）
+    /// 这次是不是**新落了一份我自己的**（`false` = 我那份本来就在，一个字节都没动）
     pub created: bool,
-    pub active: ActivePresetDto,
+    /// 我那一份的文件名（= 官方那个文件名，两份同名是设计：它就是这一份预设）
+    pub file_name: String,
+    /// 我那一份的落点（相对用户根：`presets-mine/…`）—— 调用方要拿它去「使用」
+    pub path: String,
 }
 
-/// 「使用这一份官方预设」—— 资源库那一条路（2026-10-08 起，2026-10-09 再改判）。
+/// **把官方这一份预设取到本机** —— 资源库云端表那两个动作（「下载」/「更新」）共用的那一条。
 ///
-/// # 用户世界里只有一份
-///
-/// 用户不需要知道这一份有没有在本机，也不需要知道"官方原件"这个中间物：
+/// # 它做的两件事（都幂等）
 ///
 /// ```text
-///   没有（或盘上那份与目录对不上）  先按需取回（同一条下载管道，一次网络）
-///             ↓
-///   presets-mine/<原名>.toml  还没有就落一份（= 官方原文 + 血统那三行）
-///             ↓
-///   使用中指针指向**我那一份**
+///   ① 官方当前版的字节  没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+///   ② 我的工作副本      presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统那三行）
+///                      已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
 /// ```
 ///
-/// 于是"下载下来是两份"这件事**在用户这一侧不存在**：他看到的、能改的从始至终是
-/// `presets-mine/` 里那一份。官方原件留在下载区（`<catalog.path>`），它是内部数据 ——
-/// 隐藏 baseline 的来源、也是"官方当前版"的唯一可信字节。
+/// # 它**不**做的事
 ///
-/// 取回走的是**同一条下载管道**（SHA 校验 / 旧份归档 / 原子落盘，没有第二条路）；
-/// 「我那份」已经在了就**一个字节都不动**（用户改过的东西不许被官方原件顶掉）。
+/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把官方的取到我机器上"，
+/// 使用是"把哪一份设为生效" —— 两件事分在两个表上：云端表只有下载 / 更新，
+/// 本地表那几行才有「使用」。偷偷替用户换掉正在用的那份，是这一轮要根治的毛病之一。
+///
+/// # 用户世界里的"一份"
+///
+/// 官方原件留在下载区（`<catalog.path>`），它是**内部数据** —— 隐藏 baseline 的来源、
+/// 也是"官方当前版"的唯一可信字节。用户看到的、能改的从始至终是 `presets-mine/` 里那一份。
 #[tauri::command]
-pub async fn use_official_preset(
+pub async fn fetch_official_preset(
     app: AppHandle,
     file_name: String,
-) -> Result<UseOfficialDto, AppError> {
+) -> Result<FetchOfficialDto, AppError> {
     /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
     let app_handle = app.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
-        traced("useOfficialPreset", |_| {
+        traced("fetchOfficialPreset", |_| {
             let root = internal_root(&app_handle)?;
             let user = crate::fsx::paths::user_root(&app_handle)?;
             let catalog = runtime::load_released_catalog(&root)?;
@@ -454,22 +457,22 @@ pub async fn use_official_preset(
                 let text = runtime::delivery::official_text(&root, file)?;
                 runtime::mine::save_official_as_new(&user, file, &text, &file.file_name)?;
             }
-            let bytes = std::fs::read(&target)
-                .map_err(|e| AppError::io(format!("读不到 {rel}")).with_detail(e.to_string()))?;
-            let sha = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
-            let state = runtime::app_state::set_active_mine(&root, &rel, &sha)?;
-            Ok(UseOfficialDto {
+            Ok(FetchOfficialDto {
                 fetched,
                 created,
-                active: active_dto(&root, &user, &catalog, state),
+                file_name: file.file_name.clone(),
+                path: rel,
             })
         })
     });
     let dto = task
         .await
-        .map_err(|e| AppError::internal("使用预设没跑到终局").with_detail(e.to_string()))??;
-    /* AppState 的写命令成功 → 广播（docs/APP-STATE.md §3.5），订阅者据此刷新 */
-    super::notify_app_state(&app);
+        .map_err(|e| AppError::internal("取回预设没跑到终局").with_detail(e.to_string()))??;
+    /*
+     * **一条广播都不发**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）——
+     * 变的只有盘上的字节。前端的「投递面」那一格由调用方在成功后自行广播
+     * （`deliveryState.ts::deliveryMutated()`，见 `usePresetData.fetchOfficial`）。
+     */
     Ok(dto)
 }
 

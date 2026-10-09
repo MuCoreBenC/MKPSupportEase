@@ -739,8 +739,8 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 ///
 /// 用户世界里**只有一份**：官方原件只是内部数据（隐藏 baseline 的来源），
 /// 他要改的、要用的永远是 `presets-mine/` 里那一份。所以这条路现在被
-/// [`crate::ipc::catalog::use_official_preset`] 直接用 —— 点「使用」时按需落一份，
-/// 用户不需要自己走一步"另存"（那个概念从产品里退场了）。
+/// [`crate::ipc::catalog::fetch_official_preset`] 直接用 —— 云端表「下载 / 更新」
+/// 取回官方时落一份工作副本（已经在了就一个字节都不碰）。
 ///
 /// - **名字**：传什么写什么，只过"是不是一个像样的名字"那道门槛
 ///   （[`check_new_name`]：不许空 / 不许带路径 / 后缀保持原样）；**撞名就拒** ——
