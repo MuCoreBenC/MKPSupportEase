@@ -3,7 +3,7 @@ import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { FieldLayer } from '../components/field'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
-import PagePlaceholder from './components/PagePlaceholder'
+import PageReport from './report/PageReport'
 import ResizeEdges from './components/ResizeEdges'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
@@ -122,7 +122,7 @@ export default function App() {
               <PageBbs density={density} pending={pendingBbs} />
             </PageSlot>
             <PageSlot hidden={tab !== 'report'}>
-              <PagePlaceholder title="报告" hint="后处理执行报告与历史" />
+              <PageReport />
             </PageSlot>
             <PageSlot hidden={tab !== 'settings'}>
               <PageSettings />

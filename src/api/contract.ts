@@ -44,6 +44,71 @@ export interface CalibModel {
   ready: boolean
 }
 
+/* ---------- 后处理执行报告（报告页） ---------- */
+
+/** 输入 / 输出文件的事实（大小、行数、SHA） */
+export interface ReportFileFact {
+  path?: string
+  sizeBytes?: number
+  sha256?: string
+  lines?: number
+}
+
+/** 打印时间估算（`detail.printTime`） */
+export interface ReportPrintTime {
+  totalSeconds?: number
+  toolMovementSeconds?: number
+  prepOverheadSeconds?: number
+  startupOverheadSeconds?: number
+  segments?: number
+  byType?: Record<string, { seconds?: number; count?: number; percent?: number }>
+}
+
+/** 管线一步的计时（`pipeline[]`） */
+export interface ReportPipelineStep {
+  id?: string
+  elapsedMs?: number
+  message?: string
+  status?: string
+}
+
+/** 一次执行的摘要（报告页列表行）。字段与 `_meta.json`（schema v2）一一对应 */
+export interface ReportSummary {
+  /** 记录 id = `_meta.json` 文件名去掉后缀，全树唯一 */
+  id: string
+  /** 哪一天的账（日期目录名） */
+  day: string
+  startedAt: string | null
+  finishedAt: string | null
+  elapsedMs: number | null
+  presetName: string | null
+  machineType: string | null
+  /** 输入 G-code 的文件名 */
+  gcodeName: string | null
+  /** `false` 有两种：跑失败（有 error）与记录本身坏了 —— 都进列表，不许藏 */
+  ok: boolean
+  error: string | null
+  warningCount: number
+}
+
+/** 一条执行记录的详情（展开那一屏） */
+export interface ReportDetail {
+  summary: ReportSummary
+  inputFile: ReportFileFact | null
+  outputFile: ReportFileFact | null
+  /** 刮出来的切片器头部事实（机型 / 工艺预设名、熨平开关、3mf 名） */
+  header: Record<string, unknown> | null
+  /** 16 项统计（塔高 / 涂胶层 / 层数……）—— 键与 `_meta.json` 的 `detail.stats` 同名 */
+  stats: Record<string, unknown> | null
+  printTime: ReportPrintTime | null
+  pipeline: ReportPipelineStep[]
+  warnings: string[]
+  /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
+  invocation: { exe?: string; args?: string[] } | null
+  presetPath: string | null
+  gcodePath: string | null
+}
+
 
 /**
  * 一个参数的值从哪来。
@@ -1470,6 +1535,16 @@ export interface MkpApi {
    * 没配数据源时照实报错，不拼一个猜的 URL。
    */
   getFileUrl(fileName: string): Promise<string>
+
+  /**
+   * **后处理执行报告与历史**（报告页）：`mkp-ssr` 钩子每跑一次落一份 `_meta.json`，
+   * 这里把它们读成摘要列表（新在前）。空列表 = 还没有执行记录（不是错误）；
+   * 读不出来的那几条**照进列表**（`ok=false` + 原因），不许消失。
+   */
+  getReportList(): Promise<ReportSummary[]>
+
+  /** 一条执行记录的详情（展开那一屏）。`id` 是 [`ReportSummary::id`] */
+  getReportDetail(id: string): Promise<ReportDetail>
 
   /**
    * 新数据世界的目录（第一圈骨架）。读运行时释放进数据根的那份 catalog.json，

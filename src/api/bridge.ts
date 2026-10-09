@@ -242,4 +242,8 @@ export const bridgeApi: MkpApi = {
   /* ——— 切片器目录（复制进去才生效）+ 复制官方链接（2026-10-09 接通）——— */
   copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
+
+  /* ——— 报告页：后处理执行报告与历史（gcode_history 的真账，只读）——— */
+  getReportList: () => call('getReportList', 'get_report_list'),
+  getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
 }

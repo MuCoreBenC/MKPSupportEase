@@ -195,6 +195,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_downloaded_text,
         // 「复制链接」：与下载管道同一个寻址出口算出来的官方 URL
         ipc::catalog::get_file_url,
+        // 报告页：后处理执行报告与历史（gcode_history 的真账，只读）
+        ipc::report::get_report_list,
+        ipc::report::get_report_detail,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
@@ -273,6 +276,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::read_downloaded_text,
         // 「复制链接」（与上面那份清单一字不差）
         ipc::catalog::get_file_url,
+        // 报告页（与上面那份清单一字不差）
+        ipc::report::get_report_list,
+        ipc::report::get_report_detail,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用

@@ -1283,6 +1283,21 @@ export const mockApi: MkpApi = {
   },
 
   /**
+   * 报告页的数据是 `mkp-ssr` 钩子落在本机的执行账 —— 浏览器里没有那棵树。
+   * **空列表就是"还没有执行记录"**（与真机同一个答案），不编演示记录充数。
+   */
+  async getReportList() {
+    return []
+  },
+
+  async getReportDetail() {
+    throw new NotImplementedError(
+      'getReportDetail',
+      '浏览器预览里没有执行记录 —— 后处理报告请用桌面版（SupportEase 应用）看',
+    )
+  },
+
+  /**
    * 新数据世界的浏览器演示。真机上 Rust 读的是释放进数据根的 catalog.json
    * （真数据、真 SHA、真 definition）；浏览器里没有数据根，给一份同形状的最小演示 ——
    * 数字是编的，形状不编：页面按什么结构读，真机上就读得到。
