@@ -99,6 +99,18 @@ pub struct Outcome {
     pub elapsed_ms: u128,
     /// 内核给的警告：**逐条给用户看**（不是日志）—— 比如"这一盘没有支撑"。
     pub warnings: Vec<String>,
+    /// 打印时间估算**交出去**了（这一趟没算）：交给常驻进程补全。
+    /// `None` = 这一趟已经自己算完（或压根不需要）。
+    pub deferred_print_time: Option<DeferredPrintTime>,
+}
+
+/// 一条"待补全的打印时间"。
+#[derive(Debug, Clone)]
+pub struct DeferredPrintTime {
+    /// 记录 id（= `_meta.json` 文件名去掉后缀，全树唯一）。
+    pub record_id: String,
+    /// 输出 G-code 的落点（估算要读它）。
+    pub output: PathBuf,
 }
 
 /// 问用户一件事（目前只有"机型不匹配怎么办"）。
@@ -123,11 +135,15 @@ pub enum MismatchPolicy<'a> {
 /// `sink` 是进度出口（界面推事件 / 无界面时 [`NoProgress`]）；
 /// `cancel` 是协作取消线（内核每个步骤入口都查它，长 pass 内也按固定间隔查）——
 /// 取消落在 write 步**之前**，所以原文件不会被写坏（这一条是内核的判据，不是这里的承诺）。
+///
+/// `defer_print_time`：**必须确认有界面接手才传 `true`** —— 打印时间是纯报告数据，
+/// 延后能省几百毫秒；但没人接手时传 `true` 会让那条记录永远停在"正在估算"。
 pub fn run(
     job: &HookJob,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
     mismatch: MismatchPolicy<'_>,
+    defer_print_time: bool,
 ) -> Result<Outcome, HookError> {
     let started = Instant::now();
 
@@ -229,15 +245,28 @@ pub fn run(
     }
 
     // 12 步管线。`output_path: None` = 原地覆盖（`.part` + rename，见内核 pipeline 文档）
-    let done = match pipeline::process_with_ir(
-        IrProcessRequest {
-            gcode_path: job.gcode.clone(),
-            ir,
-            output_path: None,
-        },
-        sink,
-        cancel,
-    ) {
+    let outcome = if defer_print_time {
+        pipeline::process_with_ir_deferred_print_time(
+            IrProcessRequest {
+                gcode_path: job.gcode.clone(),
+                ir,
+                output_path: None,
+            },
+            sink,
+            cancel,
+        )
+    } else {
+        pipeline::process_with_ir(
+            IrProcessRequest {
+                gcode_path: job.gcode.clone(),
+                ir,
+                output_path: None,
+            },
+            sink,
+            cancel,
+        )
+    };
+    let done = match outcome {
         Ok(done) => done,
         Err(err) => {
             let e = report_error(err);
@@ -272,11 +301,40 @@ pub fn run(
 
     let mut warnings = done.warnings;
     warnings.extend(archive_warnings);
+
+    // 延后的打印时间：把"该补谁"交给界面（记录 id + 输出路径，都很小）。
+    let deferred_print_time = if let Some(paths) = &archived {
+        (done.print_time.is_none()).then(|| DeferredPrintTime {
+            record_id: record_id_of(paths),
+            output: done.output_path.clone(),
+        })
+    } else {
+        None
+    };
+
     Ok(Outcome {
         output: done.output_path,
         elapsed_ms: started.elapsed().as_millis(),
         warnings,
+        deferred_print_time,
     })
+}
+
+/// 记录 id = 文件名去掉 **`_meta.json`**（与报告页读口的口径一致）。
+///
+/// ★ 不能图省事用 `file_stem()`：它剥的是最后一个点之后的部分，
+/// 对 `63288.1_20261009_234259_meta.json` 会给出 `…_meta`，于是
+/// `find_meta` 去找 `…_meta_meta.json` —— 永远找不到，记录就卡在"正在估算"。
+fn record_id_of(paths: &ArchivePaths) -> String {
+    paths
+        .meta
+        .file_name()
+        .and_then(|n| {
+            n.to_string_lossy()
+                .strip_suffix("_meta.json")
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
 }
 
 /// 归档第一笔：原件备份。返回 `None` = 这次没有归档（没有数据根 / 写失败），
@@ -361,6 +419,12 @@ fn archive_success(
                 .print_time
                 .as_ref()
                 .and_then(|pt| serde_json::to_value(pt).ok()),
+            // 打印时间是空的 ⇒ 这一趟把它延后了（交给常驻进程）⇒ 先标 `computing`。
+            print_time_status: if done.print_time.is_none() {
+                Some(crate::archive::PRINT_TIME_COMPUTING.to_string())
+            } else {
+                None
+            },
         },
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
@@ -403,6 +467,7 @@ fn archive_failure(
             output_file: None,
             stats: None,
             print_time: None,
+            print_time_status: None, // 失败/取消不算估算，不写状态
         },
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
@@ -576,7 +641,16 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         MismatchPolicy::Refuse
     };
 
-    let done = run(job, &mut sink, &cancel, mismatch);
+    // 打印时间**只在真的有界面接手时**才交出去 —— 没人接手就自己算完，记录才完整。
+    let done = run(job, &mut sink, &cancel, mismatch, client.connected());
+    if let Ok(done) = &done {
+        if let Some(d) = &done.deferred_print_time {
+            client.send(&crate::hook_ipc::FromHook::DeferPrintTime {
+                record_id: d.record_id.clone(),
+                output: d.output.display().to_string(),
+            });
+        }
+    }
     let payload = finished_payload(
         &done,
         started.elapsed().as_millis(),
@@ -593,7 +667,8 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
 pub fn run_and_report(job: &HookJob) -> ExitCode {
     let cancel = CancelToken::new();
     let mut sink = NoProgress;
-    let done = run(job, &mut sink, &cancel, MismatchPolicy::Refuse);
+    // 没有界面 ⇒ 打印时间必须自己算完（`defer = false`），否则记录永远停在"正在估算"
+    let done = run(job, &mut sink, &cancel, MismatchPolicy::Refuse, false);
     ExitCode::from(report(done))
 }
 
@@ -841,6 +916,7 @@ mod tests {
             &mut sink,
             &CancelToken::new(),
             MismatchPolicy::Refuse,
+            false, // 判据路径没有界面接手 ⇒ 打印时间必须自己算完
         )
     }
 
@@ -928,6 +1004,7 @@ mod tests {
             &mut sink,
             &CancelToken::new(),
             MismatchPolicy::Ask(&mut Yes),
+            false,
         )
         .expect("答了「继续」就该照跑（那一问只是拦一句，不改管线）");
         assert_eq!(out.output, gcode, "落点仍是输入那一份（原地覆盖）");
@@ -950,6 +1027,7 @@ mod tests {
             &mut sink,
             &cancel,
             MismatchPolicy::Refuse,
+            false,
         )
         .expect_err("取消必须报错");
         assert_eq!(err.exit_code(), EXIT_FAILED);
@@ -1090,6 +1168,7 @@ mod tests {
             &mut sink,
             &cancel,
             MismatchPolicy::Refuse,
+            false,
         );
         let took = started.elapsed();
         stopper.join().expect("停手那个线程不该炸");

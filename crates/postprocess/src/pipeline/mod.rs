@@ -113,6 +113,12 @@ struct Job {
     gcode_path: PathBuf,
     output_path: Option<PathBuf>,
     ir_source: IrSource,
+    /// 打印时间估算要不要在这趟里算。
+    ///
+    /// **只有"延后"这一条路会传 `false`**（[`process_with_ir_deferred_print_time`]）：
+    /// 打印时间是纯报告数据，内核零读取，所以可以让常驻进程接手，钩子先退。
+    /// 输出 G-code 与算了的那一版**逐字节相同** —— 延后的只是"填字段"。
+    compute_print_time: bool,
 }
 
 /// 处理产物（printtime 只填字段，不作为 transform）。
@@ -283,10 +289,38 @@ pub fn process_with_ir_and_cancel_interval(
             gcode_path: request.gcode_path,
             output_path: request.output_path,
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
+            compute_print_time: true,
         },
         sink,
         cancel,
         cancel_check_interval,
+    )
+}
+
+/// 同 [`process_with_ir`]，但**打印时间估算延后**（这一趟不算）。
+///
+/// 打印时间是**纯报告数据**（内核零读取，见 `printtime` 模块头），所以可以让常驻
+/// 进程接手：钩子写完盘就退，切片器少等几百毫秒；执行记录先落一条
+/// `printTimeStatus: "computing"`，估算完成后由那一侧补全。
+///
+/// **输出 G-code 与 [`process_with_ir`] 逐字节相同** —— 延后的只是填字段这件事，
+/// 没有跳过任何 transform。没有界面接手时（无头场景）必须走 [`process_with_ir`]，
+/// 否则记录会永远停在"正在估算"。
+pub fn process_with_ir_deferred_print_time(
+    request: IrProcessRequest,
+    sink: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<ProcessResult, PostprocError> {
+    run(
+        Job {
+            gcode_path: request.gcode_path,
+            output_path: request.output_path,
+            ir_source: IrSource::Prebuilt(Box::new(request.ir)),
+            compute_print_time: false,
+        },
+        sink,
+        cancel,
+        DEFAULT_CANCEL_CHECK_INTERVAL,
     )
 }
 
@@ -312,6 +346,7 @@ pub fn process_with_cancel_interval(
                 path: request.config_path,
                 overrides: request.overrides,
             },
+            compute_print_time: true,
         },
         sink,
         cancel,
@@ -332,6 +367,7 @@ fn run(
         gcode_path,
         output_path,
         ir_source,
+        compute_print_time,
     } = job;
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
     /// （原地模式的原文件因此保证不动）。
@@ -557,18 +593,26 @@ fn run(
     // 事件仍按编排顺序发（执行过的步骤必须发事件：来源这一步以前只 push 不 emit
     // ⇒ 最后一帧永远停在「写入文件」，完成后看起来像卡死）。写盘失败照旧返回错误
     // —— 代价只是这次估算白算了一遍（没有落盘副作用）。
-    timer.begin(Step::PrintTime, "打印时间估算...");
-    executed.push(Step::PrintTime);
-    let print_opts = crate::postproc::printtime::Options {
-        compute_delta: true,
-        startup_overhead_seconds: 240.0,
+    let print_time = if compute_print_time {
+        timer.begin(Step::PrintTime, "打印时间估算...");
+        executed.push(Step::PrintTime);
+        let print_opts = crate::postproc::printtime::Options {
+            compute_delta: true,
+            startup_overhead_seconds: 240.0,
+        };
+        let (write_result, estimated) = std::thread::scope(|s| {
+            let estimating = s.spawn(|| crate::postproc::printtime::estimate(&out_text, &print_opts));
+            let writing = write_text_atomic(&final_output_path, &out_text);
+            (writing, estimating.join().expect("printtime 不 panic"))
+        });
+        write_result?;
+        Some(estimated)
+    } else {
+        // 延后：这一趟只写盘（估算交给常驻进程）。**输出与上面那条分支逐字节相同**，
+        // 差别只是账本里没有 `PrintTime` 这一步。
+        write_text_atomic(&final_output_path, &out_text)?;
+        None
     };
-    let (write_result, print_time) = std::thread::scope(|s| {
-        let estimating = s.spawn(|| crate::postproc::printtime::estimate(&out_text, &print_opts));
-        let writing = write_text_atomic(&final_output_path, &out_text);
-        (writing, estimating.join().expect("printtime 不 panic"))
-    });
-    write_result?;
 
     let step_timings = timer.finish();
     Ok(ProcessResult {
@@ -577,7 +621,7 @@ fn run(
             pass1: merge_stats(pass1_stats, pass2_stats),
             tower_height,
         },
-        print_time: Some(print_time),
+        print_time,
         warnings: ir.warnings.clone(),
         executed_steps: executed,
         step_timings,

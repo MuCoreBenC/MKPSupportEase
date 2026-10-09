@@ -115,6 +115,13 @@ export interface ReportDetail {
   /** 16 项统计（塔高 / 涂胶层 / 层数……）—— 键与 `_meta.json` 的 `detail.stats` 同名 */
   stats: Record<string, unknown> | null
   printTime: ReportPrintTime | null
+  /**
+   * 打印时间估算的状态：`computing` / `ready` / `failed`。
+   *
+   * 打印时间是**延后**算的（钩子写完盘就退，交给常驻进程），所以刚生成的记录
+   * 可能还没有 `printTime` —— 这时看这个状态显示"正在估算…"，**不许拿 0 凑数**。
+   */
+  printTimeStatus: string | null
   pipeline: ReportPipelineStep[]
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */

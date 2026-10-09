@@ -59,6 +59,13 @@ function shaShort(sha: string | undefined): string {
   return sha === undefined ? '—' : sha.slice(0, 12)
 }
 
+/** 打印时间还没补上时的说法 —— 不许拿 0 凑数（延后估算的那几百毫秒里它是 null） */
+function printTimeStatusText(status: string | null | undefined): string {
+  if (status === 'computing') return '正在估算…'
+  if (status === 'failed') return '估算失败'
+  return '—'
+}
+
 export default function PageReport() {
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
@@ -194,7 +201,11 @@ function ReportDetailView({ detail }: { detail: ReportDetail }) {
         <dl className={s.cells}>
           <div className={s.cell}>
             <dt>预计打印时间</dt>
-            <dd>{printTimeText(detail.printTime?.totalSeconds)}</dd>
+            <dd>
+              {detail.printTime?.totalSeconds === undefined
+                ? printTimeStatusText(detail.printTimeStatus)
+                : printTimeText(detail.printTime?.totalSeconds)}
+            </dd>
           </div>
           {STAT_CELLS.map(([key, label]) => (
             <div className={s.cell} key={key}>

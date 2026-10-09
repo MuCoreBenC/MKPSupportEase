@@ -115,6 +115,11 @@ pub enum FromHook {
     Hello { preset_name: String, gcode_name: String },
     Progress(ProgressPayload),
     Question(QuestionPayload),
+    /// 打印时间估算**交给你了**：钩子写完盘就退，界面按 id 补全那条记录。
+    ///
+    /// 为什么钩子不能自己留后台任务：它必须**立刻退出**（切片器在等退出码）。
+    /// 界面本来就常驻，是唯一合适的承接方。
+    DeferPrintTime { record_id: String, output: String },
     /// 结论。之后钩子就退了（界面把它留在屏上，等下一次）
     Finished(Box<FinishedPayload>),
 }

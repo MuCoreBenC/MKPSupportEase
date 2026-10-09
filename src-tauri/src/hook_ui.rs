@@ -86,6 +86,49 @@ struct Shared {
     finished: Option<FinishedDto>,
 }
 
+/// 补一条执行记录的打印时间（**后台线程里跑**，不占钩子那条关键路径）。
+///
+/// 四种情形在这里收口：
+/// - 算出来 ⇒ `ready`（只动 `detail.printTime` 与 `printTimeStatus`，其余字段不动）；
+/// - 输出文件读不到 / 序列化失败 ⇒ `failed`；
+/// - 那条记录已经不在（被清掉了）⇒ 什么都不做；
+/// - 界面进程退出 ⇒ 线程随进程一起没，记录停在 `computing` —— 界面下次打开报告页
+///   会看到"正在估算"，**不假装有值**。
+pub(crate) fn estimate_print_time_for(user_root: &std::path::Path, record_id: &str, output: &str) {
+    let history = user_root.join(crate::fsx::paths::GCODE_HISTORY_DIR);
+    let Some(meta) = crate::archive::find_meta(&history, record_id) else {
+        tracing::warn!(record = %record_id, "找不到那条执行记录，放弃补全");
+        return;
+    };
+
+    let text = match std::fs::read_to_string(output) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "读不到输出文件，打印时间标失败");
+            let _ = crate::archive::mark_print_time_failed(&meta);
+            return;
+        }
+    };
+
+    // 与管线内那一遍**同一个口径**（compute_delta / startup 都是同一组值），
+    // 所以补出来的数字跟自己算的一模一样。
+    let opts = postprocess::postproc::printtime::Options {
+        compute_delta: true,
+        startup_overhead_seconds: 240.0,
+    };
+    let estimated = postprocess::postproc::printtime::estimate(&text, &opts);
+    match serde_json::to_value(&estimated) {
+        Ok(v) => {
+            let _ = crate::archive::complete_print_time(&meta, &v);
+            tracing::info!(record = %record_id, "打印时间补全完成");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "打印时间序列化失败，标失败");
+            let _ = crate::archive::mark_print_time_failed(&meta);
+        }
+    }
+}
+
 impl HookView {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -132,6 +175,17 @@ impl HookView {
             FromHook::Question(question) => {
                 self.shared.lock().expect("锁没坏").question = Some(question.clone());
                 let _ = app.emit(QUESTION_EVENT, question);
+            }
+            FromHook::DeferPrintTime { record_id, output } => {
+                /* 打印时间**交到这一侧**：钩子已经退了（切片器在等退出码，它不能留后台任务）。
+                这里是常驻进程，慢慢算不影响任何人；算完补全那条记录。 */
+                tracing::info!(record = %record_id, "接手这一趟的打印时间估算");
+                let root = crate::fsx::paths::user_root(app).ok();
+                std::thread::spawn(move || {
+                    if let Some(root) = root {
+                        estimate_print_time_for(&root, &record_id, &output);
+                    }
+                });
             }
             FromHook::Finished(finished) => {
                 tracing::info!(
@@ -200,6 +254,94 @@ impl HookView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 钩子把打印时间交出来之后：**这一侧**把它补上（`computing` → `ready`），
+    /// 且补出来的数字与管线自己算的口径一致（同一组 Options）。
+    ///
+    /// 这条是解耦链路的钉子：没有它，"延后"会退化成"永远显示正在估算"。
+    #[test]
+    fn deferred_print_time_is_completed_by_the_display_side() {
+        use time::macros::datetime;
+
+        let d = tempfile::tempdir().unwrap();
+        // 造一棵最小的 `{user_root}/gcode_history/<日期>/` 与一条 computing 记录
+        let history = d.path().join(crate::fsx::paths::GCODE_HISTORY_DIR);
+        let input = d.path().join("in.gcode");
+        std::fs::write(&input, "G1 X1\n").unwrap();
+        let paths =
+            crate::archive::begin(&history, &input, "G1 X1\n", datetime!(2026-10-10 2:00:00 +8))
+                .unwrap();
+        let record_id = paths
+            .meta
+            .file_name()
+            .and_then(|n| n.to_string_lossy().strip_suffix("_meta.json").map(str::to_string))
+            .unwrap();
+        let meta = serde_json::json!({
+            "startedAt": "2026-10-10 02:00:00",
+            "elapsedMs": 1234,
+            "detail": {"stats": {"glueLayerCount": 9}},
+            "printTimeStatus": crate::archive::PRINT_TIME_COMPUTING,
+        });
+        std::fs::write(&paths.meta, serde_json::to_string(&meta).unwrap()).unwrap();
+
+        // 输出文件：一段真 G-code（估算会扫它）
+        let output = d.path().join("out.gcode");
+        std::fs::write(&output, "G1 X10 Y10 F3000\nG1 X20 Y10 E0.5\n").unwrap();
+
+        estimate_print_time_for(d.path(), &record_id, &output.to_string_lossy());
+
+        let back: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
+        assert_eq!(
+            back["printTimeStatus"], crate::archive::PRINT_TIME_READY,
+            "补算之后必须是 ready"
+        );
+        assert!(
+            back["detail"]["printTime"]["segments"].is_number(),
+            "printTime 要有内容：{:?}",
+            back["detail"]["printTime"]
+        );
+        // 其余字段不动
+        assert_eq!(back["elapsedMs"], 1234);
+        assert_eq!(back["detail"]["stats"]["glueLayerCount"], 9);
+    }
+
+    /// 输出文件没了 ⇒ 必须标 `failed`，**不许留着 `computing`**。
+    #[test]
+    fn a_missing_output_marks_the_estimate_failed() {
+        use time::macros::datetime;
+
+        let d = tempfile::tempdir().unwrap();
+        let history = d.path().join(crate::fsx::paths::GCODE_HISTORY_DIR);
+        let input = d.path().join("in.gcode");
+        std::fs::write(&input, "G1 X1\n").unwrap();
+        let paths =
+            crate::archive::begin(&history, &input, "G1 X1\n", datetime!(2026-10-10 2:00:00 +8))
+                .unwrap();
+        let record_id = paths
+            .meta
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .strip_suffix("_meta.json")
+            .unwrap()
+            .to_string();
+        std::fs::write(
+            &paths.meta,
+            r#"{"elapsedMs":1,"printTimeStatus":"computing"}"#,
+        )
+        .unwrap();
+
+        let missing = d.path().join("nope.gcode");
+        estimate_print_time_for(d.path(), &record_id, &missing.to_string_lossy());
+
+        let back: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
+        assert_eq!(
+            back["printTimeStatus"], crate::archive::PRINT_TIME_FAILED,
+            "读不到输出就该标失败"
+        );
+    }
 
     /// 快照的三态：没来过 → `None`；来了进度 → 看得到；来了结论 → 问句被清掉、结论留下
     #[test]

@@ -72,6 +72,9 @@ pub struct ReportDetail {
     pub stats: Option<serde_json::Value>,
     /// 打印时间估算（`detail.printTime`，含 byType 分解）
     pub print_time: Option<serde_json::Value>,
+    /// 打印时间估算的状态（`computing` / `ready` / `failed`）—— 延后估算时才有，
+    /// 前端据此显示"正在估算…"/"估算失败"，而不是拿 0 凑数。
+    pub print_time_status: Option<String>,
     /// 管线各步计时（`pipeline`：id / elapsedMs / message / status）
     pub pipeline: Vec<serde_json::Value>,
     pub warnings: Vec<String>,
@@ -239,6 +242,10 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
         header: detail.and_then(|d| d.get("header")).cloned(),
         stats: detail.and_then(|d| d.get("stats")).cloned(),
         print_time: detail.and_then(|d| d.get("printTime")).cloned(),
+        print_time_status: meta
+            .get("printTimeStatus")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned()),
         pipeline: meta
             .get("pipeline")
             .and_then(|v| v.as_array())

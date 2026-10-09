@@ -200,6 +200,14 @@ impl PipelineStep {
     }
 }
 
+/// 打印时间估算的三种状态（写进记录的 `printTimeStatus`）。
+///
+/// 打印时间是**纯报告数据**（内核零读取），所以可以延后到常驻进程去算：
+/// 钩子先落一条 `computing` 就退出，算完再由那一侧补成 `ready`。
+pub const PRINT_TIME_COMPUTING: &str = "computing";
+pub const PRINT_TIME_READY: &str = "ready";
+pub const PRINT_TIME_FAILED: &str = "failed";
+
 /// 文件事实 + 统计 + 打印时间（报告页详情区的那几块）。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -212,9 +220,13 @@ pub struct Detail {
     /// `totalLayerNumber` / `maxZHeight` / `originalPrintTime` …）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<serde_json::Value>,
-    /// 打印时间估算（`printtime::Result` 原样序列化）。
+    /// 打印时间估算（`printtime::Result` 原样序列化）。延后时先为 `None`，
+    /// 由 [`complete_print_time`] 补全。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_time: Option<serde_json::Value>,
+    /// 打印时间估算的状态。**不延后时不写这个键**（老记录形态不变）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_time_status: Option<String>,
 }
 
 /// 一份执行记录（`_meta.json`）。
@@ -292,10 +304,123 @@ pub fn input_file_fact(
     }
 }
 
+/// 按记录 id 找 `<日期>/<id>_meta.json`（id 全树唯一，文件名即 id）。
+///
+/// 目录约定与报告页读口（`ipc::report`）同一套 —— 这一份也给"补全"那一侧用。
+pub fn find_meta(history_root: &Path, id: &str) -> Option<PathBuf> {
+    let days = std::fs::read_dir(history_root).ok()?;
+    for day in days.flatten() {
+        if !day.path().is_dir() {
+            continue;
+        }
+        let candidate = day.path().join(format!("{id}_meta.json"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 补全一条记录里的打印时间：**读-改-写，原子落盘**（走唯一的写盘出口）。
+///
+/// 只动 `detail.printTime` 与顶层 `printTimeStatus` 两个键 —— 其余字段原样保留
+/// （先读后写，不重建整份记录）。
+pub fn complete_print_time(
+    meta_path: &Path,
+    print_time: &serde_json::Value,
+) -> Result<(), AppError> {
+    let text = std::fs::read_to_string(meta_path).map_err(|e| {
+        AppError::io("这条记录读不出来（补全打印时间前）").with_detail(e.to_string())
+    })?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        AppError::corrupted("这条记录不是合法的 JSON（补全打印时间前）").with_detail(e.to_string())
+    })?;
+    {
+        let Some(obj) = meta.as_object_mut() else {
+            return Err(AppError::corrupted("这条记录不是 JSON 对象"));
+        };
+        let detail = obj.entry("detail").or_insert_with(|| serde_json::json!({}));
+        detail["printTime"] = print_time.clone();
+        obj.insert(
+            "printTimeStatus".to_string(),
+            serde_json::json!(PRINT_TIME_READY),
+        );
+    }
+    crate::fsx::atomic::atomic_write_json(meta_path, &meta)
+}
+
+/// 估算失败（或文件已经不在）时把状态标成 `failed` —— **不许留着 `computing`**，
+/// 否则报告页会一直显示"正在估算"。
+pub fn mark_print_time_failed(meta_path: &Path) -> Result<(), AppError> {
+    let text = std::fs::read_to_string(meta_path)
+        .map_err(|e| AppError::io("这条记录读不出来").with_detail(e.to_string()))?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| AppError::corrupted("这条记录不是合法的 JSON").with_detail(e.to_string()))?;
+    if let Some(obj) = meta.as_object_mut() {
+        obj.insert(
+            "printTimeStatus".to_string(),
+            serde_json::json!(PRINT_TIME_FAILED),
+        );
+    }
+    crate::fsx::atomic::atomic_write_json(meta_path, &meta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    /// 延后的打印时间：`computing` → 补全成 `ready`，且**其余字段一字不动**。
+    #[test]
+    fn deferred_print_time_is_completed_in_place() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("in.gcode");
+        std::fs::write(&input, "G1 X1\n").unwrap();
+        let paths = begin(d.path(), &input, "G1 X1\n", datetime!(2026-10-10 1:00:00 +8)).unwrap();
+
+        let meta = serde_json::json!({
+            "startedAt": "2026-10-10 01:00:00",
+            "elapsedMs": 1234,
+            "detail": {
+                "inputFile": {"path": "x", "sizeBytes": 6, "sha256": "s"},
+                "stats": {"glueLayerCount": 7},
+            },
+            "printTimeStatus": "computing",
+        });
+        std::fs::write(&paths.meta, serde_json::to_string(&meta).unwrap()).unwrap();
+
+        let pt = serde_json::json!({"totalSeconds": 17046.8, "segments": 708937});
+        complete_print_time(&paths.meta, &pt).expect("补全打印时间");
+
+        let back: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
+        assert_eq!(back["printTimeStatus"], "ready");
+        assert_eq!(back["detail"]["printTime"]["segments"], 708937);
+        // 其余字段必须原样保留（读-改-写，不重建整份记录）
+        assert_eq!(back["elapsedMs"], 1234);
+        assert_eq!(back["detail"]["stats"]["glueLayerCount"], 7);
+        assert_eq!(back["detail"]["inputFile"]["sizeBytes"], 6);
+    }
+
+    /// 估算失败**不许**留着 `computing` —— 否则报告页永远显示"正在估算"。
+    #[test]
+    fn failed_estimation_is_marked_not_left_computing() {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("in.gcode");
+        std::fs::write(&input, "G1 X1\n").unwrap();
+        let paths = begin(d.path(), &input, "G1 X1\n", datetime!(2026-10-10 1:00:00 +8)).unwrap();
+        std::fs::write(
+            &paths.meta,
+            r#"{"elapsedMs":1,"printTimeStatus":"computing"}"#,
+        )
+        .unwrap();
+
+        mark_print_time_failed(&paths.meta).expect("标失败");
+        let back: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
+        assert_eq!(back["printTimeStatus"], "failed");
+        assert_eq!(back["elapsedMs"], 1);
+    }
 
     /// 输入侧的大小必须来自调用方（原文），**不是**盘上的现文件。
     /// 回归：曾经因为原地覆盖，把输入大小记成了输出大小。
@@ -393,6 +518,7 @@ mod tests {
                 output_file: None,
                 stats: Some(serde_json::json!({ "glueLayerCount": 124 })),
                 print_time: None,
+                print_time_status: None,
             },
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -461,6 +587,7 @@ mod tests {
                 output_file: None,
                 stats: None,
                 print_time: None,
+                print_time_status: None,
             },
         };
         write_meta(&paths, &meta).expect("写记录");
