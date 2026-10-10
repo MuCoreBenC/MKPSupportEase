@@ -895,10 +895,15 @@ export function usePresetData(importRevision = 0): PresetData {
     deliveryMutated()
   }, [])
 
-  /* 另存为一份新的（第十一层）：只重读用户线 —— 新的一份要出现在表里；使用中指针不归它管 */
+  /*
+   * 另存为一份新的（第十一层）：重读用户线（新的一份要出现在表里；使用中指针不归它管），
+   * 再广播**本机文件面**变了 —— 首页「复制后处理脚本」的 `--Toml` 可能就该改指新这份
+   * （匹配口径在 `mine::user_copy_for`），不广播它就还拿着上一份的落点（2026-10-10）。
+   */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
     const done = await api.copyUserPreset(path, newName)
     setMine(await api.getUserPresetFiles())
+    deliveryMutated()
     return done
   }, [])
 
@@ -921,11 +926,16 @@ export function usePresetData(importRevision = 0): PresetData {
    * **改一份用户预设的归属**（机型 / 版本）：写完重读用户线 ——
    * 归属是文件头里那两行，重读之后列表的机型 / 版本两列以文件为准。
    * 机型必须目录里登记的；版本可自定义（不认识的照原文显示）。
+   *
+   * 归属一改，这份对**哪个 combo** 算「我那一份」就变了（匹配口径在
+   * `mine::user_copy_for`）—— 所以也要广播**本机文件面**：首页「复制后处理脚本」
+   * 的头一个候选跟着换（2026-10-10）。
    */
   const setMineMachineVersion = useCallback(
     async (path: string, machineId: string, versionId: string) => {
       await api.setUserPresetMachineVersion(path, machineId, versionId)
       setMine(await api.getUserPresetFiles())
+      deliveryMutated()
     },
     [],
   )

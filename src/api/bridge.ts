@@ -107,8 +107,9 @@ export const bridgeApi: MkpApi = {
     call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId) => call('openModel', 'open_model', { modelId }),
-  /* 「复制后处理脚本」里那段可执行物路径：壳的 current_exe()（就是本程序自己） */
-  getPostProcessExe: () => call('getPostProcessExe', 'get_post_process_exe'),
+  /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
+  getPostProcessCommand: (machineId, versionId) =>
+    call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),
   /* 钩子那一趟：切片器导出时本程序被带参数拉起来的那一次（快照 / 停 / 答一问） */
   getPostProcessRun: () => call('getPostProcessRun', 'get_post_process_run'),
   cancelPostProcess: () => call('cancelPostProcess', 'cancel_post_process'),

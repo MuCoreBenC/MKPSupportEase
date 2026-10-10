@@ -185,8 +185,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
-        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
-        ipc::get_post_process_exe,
+        // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
+        ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
@@ -286,8 +286,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
-        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
-        ipc::get_post_process_exe,
+        // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
+        ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,

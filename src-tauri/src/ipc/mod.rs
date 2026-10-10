@@ -4,10 +4,13 @@
 //! 于是界面上显示的 traceId 与日志里的 span 是同一个值，按 id 能把一次调用的全过程捞出来。
 //!
 //! **这一份只剩三条锚在"应用本身"上的命令**：校准板清单（[`get_calib_models`]）、
-//! 打开模型文件（[`open_model`]）与首页「复制后处理脚本」要的那段可执行物路径
-//! （[`get_post_process_exe`] —— **就是本程序自己**）。三件都读**真实的事实**：
+//! 打开模型文件（[`open_model`]）与首页「复制后处理脚本」的**整条命令**
+//! （[`get_post_process_command`]）。三件都读**真实的事实**：
 //! 模型是 catalog 登记的三个交付文件（`assets/models/*.3mf`），本机有没有以盘为准；
-//! 打开走系统默认程序（`.3mf` 关联的切片器）；自己的路径由 `current_exe()` 给。
+//! 打开走系统默认程序（`.3mf` 关联的切片器）；后处理那一条由两段真值现拼 ——
+//! 可执行物 = 本程序自己（`current_exe()`），预设 = 本机真实的绝对落点。
+//! 命令**两个平台同一形状、没有任何写死的路径**：macOS 用 macOS 的 exe 与落点，
+//! Windows 用 Windows 的（2026-10-10 作者裁定：按钮常驻、命令动态生成）。
 //! 旧实现里"只记日志"的空壳与恒 `ready` 的假状态都已删掉。
 //! 业务数据（预设 / 参数 / 下载区 / 使用中…）全在 [`presets`] / [`mine`] / [`catalog`]
 //! 那几个模块里，读的是 catalog 与数据根 —— 与 `src/api/contract.ts` 一一对应。
@@ -235,28 +238,145 @@ pub fn open_model(app: AppHandle, model_id: String) -> Result<(), AppError> {
     })
 }
 
-/// 「复制后处理脚本」里那段可执行文件路径 —— **就是本可执行物自己**。
+/* ---------- 「复制后处理脚本」那一整条命令（前端不拼路径） ---------- */
+
+/// 首页那颗「复制后处理脚本」现在能不能给、给了是什么（**那一条命令的唯一数据面**）。
 ///
-/// # 为什么是这个 exe，不是别人的
+/// # 两个概念分开（2026-10-10 作者裁定）
 ///
-/// 后处理不是别人的事：内核就在本仓库（`crates/postprocess`），这条命令将来由**本程序自己**
+/// - **按钮常驻**：界面规则 —— 前端**不拿** `ready` 决定摆不摆按钮，只拿它显示
+///   "现在能不能抄"（不能抄时把 `reason` 说出来，点了也不抄假的）；
+/// - **命令能不能给**：两条**真实事实**说了算 —— 本程序自己的路径（`current_exe()`）
+///   与预设真在本机。给不出来只报原因，**绝不编一条指不到东西的命令**。
+///
+/// # 为什么 exe 是本程序自己
+///
+/// 后处理不是别人的事：内核就在本仓库（`crates/postprocess`），这条命令由**本程序自己**
 /// 跑 —— 一个可执行物两种角色：**带 `--Toml/--Gcode` 时是切片器的后处理钩子，不带参数就是
-/// 界面**（旧世代 `mkp-ssr` 也是这个形状，它那个 exe 同时是界面与钩子）。
-///
-/// 所以这段路径没有第二种真值：开发态是 `target/debug/…`、装好了就是安装位置，只有
-/// `current_exe()` 知道。前端**不许再写死一串**：2026-10-09 之前首页写死的是**另一个仓库**
-/// 的 exe（`G:\project\mkp-ssr\…`），而那个 exe 读不了本仓库的预设 ——
-/// 它拿到 `offset_x` 会判「这份预设比本程序新（多了 `offset_x`），请升级程序」，
+/// 界面**（旧世代 `mkp-ssr` 也是这个形状）。这段路径没有第二种真值：开发态是
+/// `target/debug/…`、装好了就是安装位置，只有 `current_exe()` 知道。前端**不许再写死一串**：
+/// 2026-10-09 之前首页写死的是**另一个仓库**的 exe（`G:\project\mkp-ssr\…`），
 /// 照着复制出来的命令贴进切片器必然报 `Error code: 2`（实测）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostProcessCommandDto {
+    /// 两个事实都成立才有命令
+    pub ready: bool,
+    /// `ready` 时 = 整条命令（**当前平台、当前实例、真实落点**现拼）；否则没有
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// `ready` 时 = `--Toml` 指的那份预设的**本机绝对路径**（给人看 / 给判据）；否则没有
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toml: Option<String>,
+    /// 不能给时的一句人话（为什么 + 下一步做什么）；能给时没有
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// 一段路径包成命令行参数：双引号是**两个平台的公共分母**（`cmd` 与 sh 都认它），
+/// 空格 / 中文 / 括号在引号里原样活着。
 ///
-/// 拿不到自己是谁（`current_exe` 失败，极罕见）⇒ **报错，不编一个路径**：
-/// 界面据此不摆那颗按钮 —— 一条指不到东西的命令比没有按钮糟。
+/// 路径里的 `"` 本身要转义成 `\"` —— Windows 的文件名根本不许有它，
+/// 所以那一支只可能在 macOS / Linux 上遇到（按 sh 的写法转义即可）。
+fn quote_arg(raw: &str) -> String {
+    format!("\"{}\"", raw.replace('"', "\\\""))
+}
+
+/// 整条后处理命令：`"<exe>" --Toml "<toml>" --Gcode`。
+///
+/// 形状与钩子那一侧的约定对齐（[`crate::args`]）：`--Toml` 后面必须是**本机绝对路径**
+/// —— 切片器起钩子时的工作目录不是我们的数据根，相对落点在那里找不到文件。
+/// 两段都从入参来，**没有写死的路径、没有平台分支**：macOS 用得就是 macOS 上那个
+/// `current_exe()` 与 macOS 的落点，Windows 同理（同一份代码、各自的真值）。
+fn post_process_command(exe: &std::path::Path, toml: &std::path::Path) -> String {
+    format!(
+        "{} --Toml {} --Gcode",
+        quote_arg(&exe.display().to_string()),
+        quote_arg(&toml.display().to_string())
+    )
+}
+
+fn post_process_refused(reason: impl Into<String>) -> PostProcessCommandDto {
+    PostProcessCommandDto {
+        ready: false,
+        command: None,
+        toml: None,
+        reason: Some(reason.into()),
+    }
+}
+
+/// 组装那一条命令（**纯函数**：喂假 exe 与临时根就能判 —— 见下面的判据）。
+///
+/// 预设那一份的先后：**我那一份**（用户工作副本，匹配口径在
+/// [`mine::user_copy_for`]）> 官方交付那份，且**必须真在盘上**
+/// （相对落点 / 不存在的文件贴进切片器都是同一种事故）。
+fn post_process_dto(
+    exe: Option<&std::path::Path>,
+    catalog: &crate::runtime::Catalog,
+    internal_root: &std::path::Path,
+    user_root: &std::path::Path,
+    machine_id: &str,
+    version_id: &str,
+) -> Result<PostProcessCommandDto, AppError> {
+    let Some(exe) = exe else {
+        return Ok(post_process_refused(
+            "取不到本程序自己的路径（current_exe 失败），这一台上暂时拼不出命令",
+        ));
+    };
+
+    let at = match mine::user_copy_for(internal_root, user_root, catalog, machine_id, version_id)? {
+        /* 我那一份：扫出来时状态就已经是 Ok（能读 + TOML 语法过），绝对路径不是猜的 */
+        Some(f) => user_root.join(&f.path),
+        None => match catalog.file_of(machine_id, version_id) {
+            None => {
+                return Ok(post_process_refused(format!(
+                    "目录里没有 {machine_id} / {version_id} 的预设文件 —— 这条命令没有可指的预设"
+                )));
+            }
+            Some(f) => {
+                let at = internal_root.join(&f.path);
+                if !at.is_file() {
+                    return Ok(post_process_refused(format!(
+                        "「{}」还没下载到本机 —— 先点「下载并应用」，再复制这条命令",
+                        f.file_name
+                    )));
+                }
+                at
+            }
+        },
+    };
+
+    Ok(PostProcessCommandDto {
+        ready: true,
+        command: Some(post_process_command(exe, &at)),
+        toml: Some(at.display().to_string()),
+        reason: None,
+    })
+}
+
+/// 首页「复制后处理脚本」要的**那一整条命令**（当前平台现拼）。
+///
+/// 前端点一下要一次、状态一变再要一次（投递面 / AppState 广播）—— **不缓存路径**：
+/// 下载、应用、换份都可能把 `--Toml` 指的落点换掉。
 #[tauri::command]
-pub fn get_post_process_exe() -> Result<String, AppError> {
-    traced("getPostProcessExe", |_| {
-        std::env::current_exe()
-            .map(|p| p.display().to_string())
-            .map_err(|e| AppError::io("取不到本程序自己的路径").with_detail(e.to_string()))
+pub async fn get_post_process_command(
+    app: AppHandle,
+    machine_id: String,
+    version_id: String,
+) -> Result<PostProcessCommandDto, AppError> {
+    traced("getPostProcessCommand", |_| {
+        let internal = crate::fsx::paths::internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let catalog = crate::runtime::load_released_catalog(&internal)?;
+        let exe = std::env::current_exe().ok();
+        post_process_dto(
+            exe.as_deref(),
+            &catalog,
+            &internal,
+            &user_root,
+            &machine_id,
+            &version_id,
+        )
     })
 }
 
@@ -281,5 +401,187 @@ mod tests {
         assert_eq!(size_text(512), "512 B");
         assert_eq!(size_text(284 * 1024), "284 KB");
         assert_eq!(size_text(3_250_000), "3.1 MB");
+    }
+
+    /* ---------- 「复制后处理脚本」那一整条命令（2026-10-10） ---------- */
+
+    /// 真仓库的源 + 入库产物 → 真目录（与 `ipc::presets` 判据同一个输入）
+    fn catalog() -> crate::runtime::Catalog {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        crate::runtime::Catalog::build_from_repo(&repo).expect("真目录构建不出来")
+    }
+
+    /// **命令由两段真值现拼**：形状固定（钩子那一侧的约定），空格 / 中文都包在引号里。
+    ///
+    /// 这条判据在**两个平台的 CI 上跑同一份期望** —— 命令形状与平台无关，
+    /// 两段内容各来自当时的入参（macOS 给 macOS 的、Windows 给 Windows 的）。
+    #[test]
+    fn the_command_is_built_from_the_two_real_paths_and_survives_spaces() {
+        let exe = std::path::Path::new("程序 目录/SupportEase");
+        let toml = std::path::Path::new("我的 预设/A1 mini.toml");
+        let cmd = post_process_command(exe, toml);
+        assert_eq!(
+            cmd, "\"程序 目录/SupportEase\" --Toml \"我的 预设/A1 mini.toml\" --Gcode",
+            "两段都包双引号（空格 / 中文能扛），参数只有 --Toml / --Gcode"
+        );
+        assert_eq!(cmd.matches("--Toml").count(), 1, "只有一处 --Toml：{cmd}");
+        assert!(cmd.ends_with(" --Gcode"), "收尾固定：{cmd}");
+    }
+
+    /// 路径里真出现 `"` 时要**转义留着**，不能截断成半条命令
+    /// （Windows 的文件名不许有 `"`，这一支只可能在 macOS / Linux 上遇到）
+    #[test]
+    fn a_quote_inside_a_path_is_escaped() {
+        assert_eq!(quote_arg("a\"b"), "\"a\\\"b\"");
+    }
+
+    /// 拿不到本程序自己是 **reason**，不是一条编出来的命令
+    #[test]
+    fn without_an_exe_the_answer_is_a_reason_not_a_fake_command() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let dto = post_process_dto(
+            None,
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+        )
+        .unwrap();
+        assert!(!dto.ready);
+        assert!(dto.command.is_none() && dto.toml.is_none(), "不编路径");
+        assert!(
+            dto.reason.unwrap_or_default().contains("本程序自己"),
+            "原因要说清是 exe 拿不到"
+        );
+    }
+
+    /// **预设不在本机 ⇒ 只报原因**（把是哪一份带出来），还是不给命令 ——
+    /// 这正是"按钮常驻、命令不许假"的那一半
+    #[test]
+    fn a_preset_that_is_not_on_disk_gets_a_reason_not_a_command() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+        )
+        .unwrap();
+        assert!(!dto.ready, "新数据根里还没有这一份");
+        assert!(
+            dto.command.is_none() && dto.toml.is_none(),
+            "不给命令、不编路径"
+        );
+        let reason = dto.reason.expect("要有原因");
+        assert!(
+            reason.contains("A1_MINI-fastv3.3.toml"),
+            "原因要把是哪一份说出来：{reason}"
+        );
+    }
+
+    /// 官方那份**真在盘上** ⇒ 命令指它；`toml` 就是 catalog 落点的绝对路径
+    /// （内部根 + `path`，前端不拼任何一段）
+    #[test]
+    fn the_command_points_at_the_real_file_on_the_internal_root() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+
+        let f = catalog
+            .file_of("A1_MINI", "FASTV3.3")
+            .expect("目录里该有这一份");
+        let at = internal.path().join(&f.path);
+        crate::fsx::atomic::atomic_write(&at, b"# machine: A1_MINI\n[toolhead]\n").unwrap();
+
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+        )
+        .unwrap();
+        assert!(dto.ready);
+        assert!(dto.reason.is_none(), "能给了就不该有拒绝原因");
+        let toml = dto.toml.expect("ready 就该有 toml");
+        assert_eq!(toml, at.display().to_string());
+        let command = dto.command.expect("ready 就该有命令");
+        assert!(
+            command.contains(&toml),
+            "命令里的 --Toml 就是那一份：{command}"
+        );
+    }
+
+    /// **我那一份优先**：用户副本存在时命令指它 —— 与校准页读的是同一份
+    /// （匹配口径共用 `mine::user_copy_for`），官方那份在不在盘上都不换
+    #[test]
+    fn the_users_own_copy_wins_over_the_official_file() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+
+        /* 官方那份也在盘上：顺序不影响结果，用户操作的那份优先 */
+        let f = catalog
+            .file_of("A1_MINI", "FASTV3.3")
+            .expect("目录里该有这一份");
+        crate::fsx::atomic::atomic_write(&internal.path().join(&f.path), b"[toolhead]\n").unwrap();
+
+        let mine = "# machine: A1_MINI\n# variant: fastv3.3\n[toolhead]\noffset_x = -0.9\n";
+        let mine_at = user.path().join("presets-mine/A1_MINI-fastv3.3.toml");
+        crate::fsx::atomic::atomic_write(&mine_at, mine.as_bytes()).unwrap();
+
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+        )
+        .unwrap();
+        assert!(dto.ready);
+        assert_eq!(
+            dto.toml.expect("ready 就该有 toml"),
+            mine_at.display().to_string(),
+            "指我那一份（presets-mine/…），不是官方交付那份"
+        );
+    }
+
+    /// 目录里根本没有这个组合 ⇒ 原因说清"没有登记"，同样不给命令
+    #[test]
+    fn a_combo_the_catalog_does_not_know_says_so() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "NOPE",
+            "NOPE",
+        )
+        .unwrap();
+        assert!(!dto.ready);
+        assert!(dto.command.is_none());
+        assert!(
+            dto.reason.unwrap_or_default().contains("NOPE"),
+            "原因要把是哪个组合带出来"
+        );
     }
 }

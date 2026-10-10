@@ -1,8 +1,21 @@
 .wrap {
   margin-top: 18px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   align-self: flex-start;
+  gap: 7px;
+}
+
+/*
+ * "现在还不能抄"的原因（按钮照摆，原因在下面一行）——
+ * 不许拿隐藏按钮来盖住"预设还没就绪"：说清楚 + 下一步做什么。
+ */
+.hint {
+  max-width: 44ch;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .btn {

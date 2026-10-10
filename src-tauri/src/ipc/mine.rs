@@ -558,24 +558,53 @@ pub struct UserCopyCalibrationDto {
     pub file_name: String,
     /// 相对用户根的落点（`presets-mine/…`）—— 保存校准时把它交回来
     pub path: String,
-    /// 同一份在本机上的**绝对路径** —— 首页「复制后处理脚本」拼 `--Toml` 用它。
-    ///
-    /// 为什么不能拿 `path` 顶：切片器起钩子时的工作目录不是我们的数据根，相对落点
-    /// 在那里找不到文件（2026-10-09 实测：Bambu 弹 "Error code: 2"，正是 mkp-ssr 的
-    /// `EXIT_BAD_INPUT`「预设文件不存在：presets-mine/…」）。
-    pub abs_path: String,
     /// 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数）
     pub axes: Option<crate::ipc::Axes>,
     /// 涂胶速度限速；读不出来是 `null`
     pub speed: Option<f64>,
 }
 
-/// **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
+/// **这台机型 / 这个版本，「我那一份」在哪**（按归属匹配，盘当底账）。
 ///
 /// 找法（有先后）：**底账正用着的那一份**（origin=mine 且归属匹配）> 用户目录里
 /// 第一份匹配的。匹配按**归属**（`# machine:` / `# variant:` 归一化后回落血统，
-/// 与用户线列表同一套口径，见 [`owner_of`]）。
+/// 见 [`owner_of`]）；只有能读的 TOML 预设算数（读不出来的那份即便归属对得上也不能用）。
 ///
+/// 两个消费者**共用这一处口径**：校准页取初值 / 存回（[`get_user_copy_for`]）与
+/// 首页「复制后处理脚本」拼 `--Toml`（[`super::get_post_process_command`]）。
+/// 一份都没有 ⇒ `None`（**不是错误**：还没另存过自己的一份）。
+pub(crate) fn user_copy_for(
+    internal_root: &std::path::Path,
+    user_root: &std::path::Path,
+    catalog: &runtime::Catalog,
+    machine_id: &str,
+    version_id: &str,
+) -> Result<Option<runtime::mine::MineFile>, AppError> {
+    let files = runtime::mine::mine_files(user_root);
+    /* 候选 = 归属对得上 + 是能读的 TOML（读不出来的那份即便匹配也不能当基准） */
+    let matched: Vec<&runtime::mine::MineFile> = files
+        .iter()
+        .filter(|f| f.kind == Some(runtime::catalog::kind::PRESET))
+        .filter(|f| f.state == Some(runtime::mine::MineState::Ok))
+        .filter(|f| {
+            let owner = owner_of(catalog, f);
+            owner.0.as_deref() == Some(machine_id) && owner.1.as_deref() == Some(version_id)
+        })
+        .collect();
+
+    let active = runtime::app_state::active_preset(internal_root)?;
+    let pick = active
+        .as_ref()
+        .filter(|a| a.origin == runtime::state::ActiveOrigin::Mine)
+        .and_then(|a| a.path.as_deref())
+        .and_then(|p| matched.iter().find(|f| f.path == p).copied())
+        .or_else(|| matched.first().copied());
+    Ok(pick.cloned())
+}
+
+/// **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
+///
+/// 匹配口径在 [`user_copy_for`]（与首页后处理命令共用同一处）。
 /// 一份都没有 / 都读不出来 ⇒ `None`：校准页照旧显示官方默认值，**保存会被拦**
 /// （"先下载才有得存"—— 校准的对象是用户的工作副本，官方基线永远不可变）。
 #[tauri::command]
@@ -588,27 +617,7 @@ pub async fn get_user_copy_for(
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
-        let files = runtime::mine::mine_files(&user_root);
-        /* 候选 = 归属对得上 + 是能读的 TOML（读不出来的那份即便匹配也不能当基准） */
-        let matched: Vec<&runtime::mine::MineFile> = files
-            .iter()
-            .filter(|f| f.kind == Some(runtime::catalog::kind::PRESET))
-            .filter(|f| f.state == Some(runtime::mine::MineState::Ok))
-            .filter(|f| {
-                let owner = owner_of(&catalog, f);
-                owner.0.as_deref() == Some(machine_id.as_str())
-                    && owner.1.as_deref() == Some(version_id.as_str())
-            })
-            .collect();
-
-        let active = runtime::app_state::active_preset(&root)?;
-        let pick = active
-            .as_ref()
-            .filter(|a| a.origin == runtime::state::ActiveOrigin::Mine)
-            .and_then(|a| a.path.as_deref())
-            .and_then(|p| matched.iter().find(|f| f.path == p).copied())
-            .or_else(|| matched.first().copied());
-        let Some(f) = pick else {
+        let Some(f) = user_copy_for(&root, &user_root, &catalog, &machine_id, &version_id)? else {
             return Ok(None);
         };
 
@@ -617,8 +626,6 @@ pub async fn get_user_copy_for(
         Ok(Some(UserCopyCalibrationDto {
             file_name: f.file_name.clone(),
             path: f.path.clone(),
-            /* 正文刚读出来了 ⇒ 这份一定在盘上，绝对路径不是猜的 */
-            abs_path: user_root.join(&f.path).display().to_string(),
             axes: calib.axes().map(|(x, y, z)| crate::ipc::Axes { x, y, z }),
             speed: calib.speed,
         }))

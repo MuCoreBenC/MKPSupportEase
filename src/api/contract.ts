@@ -26,15 +26,6 @@ export interface Preset {
    * 界面上只当悬停提示与去重键用。
    */
   path: string
-  /**
-   * 同一份在**本机上的绝对路径**；`null` = 这一份不在盘上（官方那份还没「取回」）。
-   *
-   * 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
-   * 不是我们的仓库根，相对落点在那里找不到文件 —— 2026-10-09 实测，贴进去导出时
-   * Bambu 弹的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」）。拿不到就**不摆
-   * 那颗按钮**：一条贴进去必报错的命令比没有按钮更糟。
-   */
-  absPath: string | null
   axes: Axes
   speed: number
   /**
@@ -377,13 +368,6 @@ export interface FileRef {
    */
   path: string
   /**
-   * MKP 预设那一支：这一份在**本机上的绝对路径**（`内部根 + path`）。
-   * `undefined` = 盘上还没有它（还没「取回」）—— 界面据此不摆「复制后处理脚本」：
-   * 切片器起钩子时的工作目录不是我们的内部根，相对落点贴进去必报 "Error code: 2"。
-   * 切片器配置那一支不给（后台处理的 `--Toml` 不指它）。
-   */
-  absPath?: string
-  /**
    * `mkp_preset` 那一支带**真值**（运行时 catalog 的文件条目对交付产物真字节算的，
    * 下载校验拿它当期望值）；切片器那两支仍是 undefined —— 资产本体的登记与
    * 下载要等交付管道接管（总纲欠账 #3），没有就显示「未知」。
@@ -698,12 +682,6 @@ export interface UserCopyCalibration {
   fileName: string
   /** 落点（相对**用户根**，`presets-mine/…`）—— 保存校准时把它交回来 */
   path: string
-  /**
-   * 同一份在**本机上的绝对路径**（首页「复制后处理脚本」里 `--Toml` 用它）。
-   * 真后端上它恒有值（正文都读出来了，这份就在盘上）；浏览器预览里是 `null`
-   * —— 那一侧没有盘，也就不该编一个绝对路径出来。
-   */
-  absPath: string | null
   /** 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数） */
   axes: Axes | null
   /** 涂胶速度限速；读不出来是 `null` */
@@ -1390,6 +1368,30 @@ export interface PostProcessRun {
   finished: PostProcessFinished | null
 }
 
+/**
+ * 首页「复制后处理脚本」那**一整条命令**的现况（`getPostProcessCommand` 的答案）。
+ *
+ * # 两个概念分开（2026-10-10 作者裁定）
+ *
+ * - **按钮常驻**：界面规则 —— 不拿 `ready` 决定摆不摆按钮，只拿它显示"现在能不能抄"；
+ * - **命令能不能给**：`ready` 由两条**真实事实**决定（本程序自己 + 预设真在本机）。
+ *   `ready: false` 时**没有命令、没有路径**，只有一句 `reason`（可直接显示）。
+ *
+ * 前端不拼任何一段路径、也不长期缓存命令：点一下向后端现要一次，状态一变再要一次
+ * （下载 / 应用 / 换份都可能把指向换掉）。当前平台 / 当前实例 / 真实落点现拼 ——
+ * macOS 用 macOS 的可执行物与落点，Windows 用 Windows 的，两个平台同一份代码。
+ */
+export interface PostProcessCommand {
+  /** 两个事实都成立才有命令 */
+  ready: boolean
+  /** `ready` 时 = 整条命令（`"<exe>" --Toml "<toml>" --Gcode`）；否则没有 */
+  command?: string
+  /** `ready` 时 = `--Toml` 指的那份预设的**本机绝对路径**（给人看）；否则没有 */
+  toml?: string
+  /** 不能给时的一句人话（为什么 + 下一步做什么）；能给时没有 */
+  reason?: string
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -1411,18 +1413,18 @@ export interface MkpApi {
   openModel(modelId: string): Promise<void>
 
   /**
-   * 「复制后处理脚本」里那段可执行文件路径 —— **本应用自己的可执行物**（壳的 `current_exe()`：
-   * 开发态是 `target/debug/…`，装好了就是安装位置）。
+   * 首页「复制后处理脚本」要的**那一整条命令**（**当前平台、当前实例、真实落点**现拼）。
    *
-   * 后处理由**本程序自己**跑（一个可执行物两种角色：带 `--Toml/--Gcode` 是切片器的
-   * 后处理钩子，不带参数就是界面），所以这段路径只有壳知道，前端不许写死一串 ——
-   * 早先首页硬编码的是**另一个仓库**的 exe，那个 exe 读不了我们的预设
-   * （`offset_x` 会被它判成"这份预设比本程序新"），复制出去的命令必然跑不通。
+   * 两段真值都从这一侧来：可执行物 = 本程序自己（`current_exe()`：开发态是
+   * `target/debug/…`，装好了就是安装位置）；预设 = 那台机器上真实的绝对落点
+   * （我那一份优先，其次是官方那份——**必须真在盘上**）。前端不拼任何一段路径：
+   * 早先首页硬编码的是**另一个仓库**的 Windows exe，Mac 上复制出去的命令必然跑不通。
    *
-   * `null` = 这一侧没有本机可执行物（浏览器预览的假后端）。界面据此**不摆**那颗按钮
-   * —— 与"这份预设不在本机"同一个处置：一条指不到东西的命令比没有按钮糟。
+   * 给不出来（还没下载 / 目录里没有这个组合 / 拿不到自己的路径）时不抛错：
+   * `ready: false` + `reason` —— 界面照摆按钮、照说原因，**不抄一条假命令**
+   * （贴进切片器就是 `Error code: 2`）。
    */
-  getPostProcessExe(): Promise<string | null>
+  getPostProcessCommand(machineId: string, versionId: string): Promise<PostProcessCommand>
 
   /* ——— 后处理钩子那一趟：看它 / 停它 / 答它那一问（切在 `app/postprocess/`）——— */
 

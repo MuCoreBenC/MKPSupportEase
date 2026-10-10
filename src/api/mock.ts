@@ -773,13 +773,16 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 「复制后处理脚本」里那段可执行物路径 —— 浏览器里没有本机可执行物，如实答 `null`
-   * （真机那份是壳的 `current_exe()`：就是本程序自己）。不编一串假路径出来：
-   * 编出来的命令贴进切片器只会让人以为"复制成功了"，其实指不到东西。
-   * 界面拿到 `null` 就不摆那颗按钮 —— 与"这份预设不在本机"同一个处置。
+   * 「复制后处理脚本」那一整条命令 —— 浏览器里没有本机可执行物、也没有盘上真实落点，
+   * 如实答 `ready: false` + 原因（真机那份由壳现拼：`current_exe()` + 预设绝对落点）。
+   * **不编一条假命令**：编出来的东西贴进切片器只会让人以为"复制成功了"，其实指不到东西。
+   * 按钮照摆（那是界面规则）—— 点它就显示这一句原因。
    */
-  async getPostProcessExe() {
-    return null
+  async getPostProcessCommand() {
+    return {
+      ready: false,
+      reason: '浏览器预览里没有本机的可执行物与预设文件 —— 命令由桌面版按真实路径现拼',
+    }
   },
 
   /*
@@ -1130,18 +1133,15 @@ export const mockApi: MkpApi = {
         (f.versionId ?? f.basedOnVersionId) === versionId,
     )
     if (hit === undefined) return null
-    /* 浏览器里没有盘 ⇒ 没有绝对路径（真机那份是 `<appDataDir>/user/presets-mine/…`）。
-       首页「复制后处理脚本」按它决定摆不摆按钮 —— 那一侧不摆，与真机上"这份还没取回"
-       同一个答案：不许编一个本机路径出来。 */
-    const absPath = null
+    /* 浏览器里没有盘 —— 绝对路径那一件事不在这份数据里（真机上是
+       `<appDataDir>/user/presets-mine/…`，由 `getPostProcessCommand` 现拼）。 */
     const text = mockMineText.get(hit.path)
     if (text === undefined) {
-      return { fileName: hit.fileName, path: hit.path, absPath, axes: null, speed: null }
+      return { fileName: hit.fileName, path: hit.path, axes: null, speed: null }
     }
     return {
       fileName: hit.fileName,
       path: hit.path,
-      absPath,
       axes: readMockAxes(text),
       speed: readMockNumber(text, 'speed_limit'),
     }

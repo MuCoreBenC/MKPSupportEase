@@ -2223,3 +2223,34 @@ src-tauri/Cargo.toml [package].version   ← 唯一真值（人只改这一处�
 - 验证：`cargo fmt --check` / 双 feature `clippy --all-targets -D warnings` / `cargo test` +
   `--features workbench --lib` / `npx tsc -b` / `npm run lint`（只剩既有 2 条 react-refresh warning）/
   `npm run build` + 三道闸。
+
+## 增量之三十三 · 后处理命令按钮跨平台常驻 + 命令后端现拼（2026-10-10，分支 `fix/postprocess-command`）
+
+作者 2026-10-10 裁定（Mac 真机反馈：「复制后处理按钮没有了」——前情：换 identifier 换来一个空数据根，
+新家里预设还没取回，`absPath` 拿不到，按钮按当时口径不摆）：**按钮是固定功能入口，
+不许再拿"命令给不给得出来"决定摆不摆**；命令按**当前平台 / 当前实例 / 真实落点**现拼 ——
+Mac 用 Mac 的可执行物与落点，Windows 用 Windows 的，**不硬编码任何一侧、不编假命令**。
+
+- **后端**：`get_post_process_exe`（只给一段 exe 路径）退役，换成
+  `get_post_process_command(machineId, versionId) -> PostProcessCommandDto`（`ipc/mod.rs`，
+  `ready` / `command` / `toml` / `reason` 四格）。两段真值：exe = `current_exe()`（本程序自己，
+  一个可执行物两种角色）；预设 = **我那一份优先**（匹配口径提取成 `mine::user_copy_for`，
+  与校准页共用一处），没有才轮到官方交付那份且**必须真在盘上**。给不出来只报 `reason`
+  （还没下载 / 目录里没有这个组合 / 拿不到自己的路径），**绝不编一条指不到东西的命令**。
+  `quote_arg` 包双引号（两个平台的公共分母；路径里的 `"` 转义成 `\"`，Windows 上够不着这支）。
+- **前端**：`CopyAction` 改成「按钮常驻 + 点一下向后端现要一次」；现状随 combo /
+  `deliveryMutated` / AppState（`useActivePreset`）重读；不能抄时原因显示在按钮下面
+  （"先点「下载并应用」"），点了也**不抄假命令** —— 两个概念分开：按钮存在（UI 规则）
+  ≠ 命令可用（真实文件状态）。
+- **补两处漏广播**（`usePresetData`）：另存为 / 改归属写完 `deliveryMutated()` ——
+  `--Toml` 的头一个候选就是「我那一份」，写它的人在预设页。`deliveryState` 口径随之
+  放宽为**本机文件面**（交付文件 + 用户副本增删改），边界仍是一条代次、不存数据。
+- **absPath 面收口**：`FileRefDto.abs_path` / `UserCopyCalibrationDto.abs_path` /
+  `FileRef.absPath` / `Preset.absPath` 全撤（唯一消费者就是那颗旧按钮）——
+  `version_files_dto` 变成纯函数；「这份在不在盘上」只由命令与盘上状态两处回答。
+- 判据：`ipc::mod` 新增 7 条（命令形状 / 空格 / 引号转义 / 无 exe / 不在盘上报原因 /
+  在盘上指它 / **我那一份优先** / 目录里没有这个组合），两个平台的 CI 跑同一份期望。
+  `cargo test` **467** 全绿；workbench lib **820 全绿**（本机 1 条 git 判据
+  `a_conflicting_tag_does_not_fail_the_fetch` 因**全局 git template 钩子**拒绝临时仓库在
+  main 上提交而红 —— 与代码无关，CI 无该模板）。`npx tsc -b` / `npm run lint` /
+  `npm run build` + 三道闸全过。

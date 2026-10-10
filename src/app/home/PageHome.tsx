@@ -24,7 +24,7 @@ import {
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText } from '../../api'
-import type { CalibModel } from '../../api'
+import type { CalibModel, PostProcessCommand } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -142,30 +142,6 @@ export default function PageHome({ density }: PageHomeProps) {
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
-
-  /*
-   * 「复制后处理脚本」里那段可执行文件路径 —— **由壳给出：就是本应用自己**
-   * （壳那侧是 `current_exe()`）。这里不再写死路径：早先写死的是一串开发机路径，
-   * 而且指向**另一个仓库**的 exe，那个 exe 读不了我们的预设（它把 `offset_x` 判成
-   * "这份预设比本程序新"），复制出去的命令贴进切片器必然报 `Error code: 2`。
-   * 拿不到（浏览器预览那侧没有本机可执行物 / 极罕见的读取失败）→ 保持 `null`，
-   * 那颗按钮就不摆（见下面 `copyScript`）。
-   */
-  const [mkpExe, setMkpExe] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    void api
-      .getPostProcessExe()
-      .then((path) => {
-        if (alive) setMkpExe(path)
-      })
-      .catch((err: unknown) => {
-        console.error('[postprocess] 取不到本程序自己的路径', err)
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
 
   /*
    * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
@@ -574,22 +550,45 @@ export default function PageHome({ density }: PageHomeProps) {
       ? (activeForSel.path ?? presetInfo?.path ?? null)
       : (presetInfo?.path ?? null)
   /*
-   * 「复制后处理脚本」里那段 `--Toml` 要的是**绝对路径**（2026-10-09 实测：切片器起
-   * 钩子时的工作目录不是我们的仓库根，贴相对落点进去，导出时竹子弹 "Error code: 2"
-   * —— mkp-ssr 的「预设文件不存在」）。底账那一支不用另算：`usePreset` 取「我那一份」
-   * 时**优先底账正用着的那份**，所以底账命中时 `presetInfo.absPath` 指的就是它，
-   * 与 `displayPath` 说同一份文件。拿不到（官方那份还没取回 / 浏览器预览）就不摆按钮。
+   * 「复制后处理脚本」那一整条命令 —— **由后端现拼**（`getPostProcessCommand`）：
+   * 可执行物 = 本程序自己（壳那一侧的 `current_exe()`），预设 = 那台机器上真实的绝对
+   * 落点（我那一份优先，其次是官方那份——**必须真在盘上**）。前端**不拼任何一段路径**：
+   * 早先硬编码的是另一个仓库的 Windows exe，Mac 上复制出去的命令必然跑不通。
+   *
+   * ★ 按钮**常驻**（2026-10-10 作者裁定）：能不能给命令**不决定**摆不摆按钮 ——
+   *   不能给时把 `reason` 显示在按钮下面（"先下载并应用"那条路），点了也不会抄假命令。
+   * ★ 这份状态只用来显示"现在能不能抄"；**点的时候还会再要一次**（见 `loadCommand`）——
+   *   下载 / 应用 / 换份都可能把指向换掉，任何缓存的路径都不许长期带着。
+   * ★ 引发重读的三件事：combo 换台、投递面代次（下载 / 删除）、底账（应用 / 我那份）。
    */
-  const displayAbsPath = presetInfo?.absPath ?? null
-  /*
-   * 那一整行命令 —— **两个事实各归各的那一侧**：可执行物路径由壳给（本应用自己），
-   * 预设路径是我们这侧的绝对落点。**缺一个就不拼、不摆**：相对路径或指不到东西的
-   * 路径贴进切片器是同一种事故（`Error code: 2`），一条这样的命令比没有按钮糟。
-   */
-  const copyScript =
-    mkpExe !== null && displayAbsPath !== null
-      ? `"${mkpExe}" --Toml "${displayAbsPath}" --Gcode`
-      : null
+  const [copyCommand, setCopyCommand] = useState<PostProcessCommand | null>(null)
+  useEffect(() => {
+    if (sel.model === null || sel.variant === null) {
+      setCopyCommand(null)
+      return
+    }
+    let alive = true
+    void api.getPostProcessCommand(sel.model, sel.variant).then(
+      (cmd) => {
+        if (alive) setCopyCommand(cmd)
+      },
+      (err: unknown) => {
+        if (alive) setCopyCommand(null)
+        console.error('[postprocess] 取后处理命令失败', err)
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [sel.model, sel.variant, deliveryRevision, activeEntry])
+
+  /* 点按钮那一刻**现要一次**：后端按当前平台与真实落点现拼，前端不缓存命令 */
+  const loadCommand = useCallback(async (): Promise<PostProcessCommand> => {
+    if (sel.model === null || sel.variant === null) {
+      return { ready: false, reason: '先选齐机型与版本，才有可指的预设' }
+    }
+    return api.getPostProcessCommand(sel.model, sel.variant)
+  }, [sel.model, sel.variant])
   const inUseNote =
     activeForSel === null || !presetReady
       ? undefined
@@ -646,12 +645,14 @@ export default function PageHome({ density }: PageHomeProps) {
                     <p className={p.path} title={displayPath ?? undefined}>
                       {displayName ?? '—'}
                     </p>
-                    {/* 这一行**照着两处真事实拼**：可执行物 = 本应用自己（壳那一侧的
-                        `current_exe()`），预设 = 正在使用那份的绝对路径（A3：底账命中时
-                        是用户那份的文件）；两个缺一不摆 —— 见 `copyScript` */}
-                    {copyScript !== null && (
-                      <CopyAction text={copyScript} label="复制后处理脚本" />
-                    )}
+                    {/* 按钮**常驻**（2026-10-10）：这条命令能不能给由后端的两条真事实
+                        说（本程序自己 + 预设真在盘上），不能给时原因显示在按钮下面；
+                        点它才向后端现要命令 —— 详见上面 `copyCommand` 那一段 */}
+                    <CopyAction
+                      label="复制后处理脚本"
+                      load={loadCommand}
+                      state={copyCommand}
+                    />
                   </>
                 )}
               </div>
@@ -1016,7 +1017,7 @@ export default function PageHome({ density }: PageHomeProps) {
       canSave,
       clearAll,
       commitAll,
-      copyScript,
+      copyCommand,
       currentUid,
       density,
       dirty,
@@ -1028,6 +1029,7 @@ export default function PageHome({ density }: PageHomeProps) {
       fadeMs,
       inUseNote,
       layers,
+      loadCommand,
       modelName,
       modelOptions,
       pick,
