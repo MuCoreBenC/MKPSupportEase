@@ -18,7 +18,8 @@
  * 所以"用户关掉这一屏"得记一笔（`dismissed`），否则下一次读快照又把它顶回来。
  * 只有 `postprocess-started`（新一趟的开场）才把那一笔清掉。
  *
- * 事件名与 Rust 侧 `hook_ui` 那四个常量同名 —— 两边没有编译器，靠这条注释对齐。
+ * 事件名住 `./events`（与 Rust 侧 `hook_ui` 那四个常量同名的那一份）——
+ * **报告页也认 `finished` 那一条**（跑完自己重读一遍），所以字面量只许有那一处。
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -32,10 +33,12 @@ import type {
   PostProcessStarted,
 } from '../../api/contract'
 
-const STARTED_EVENT = 'postprocess-started'
-const PROGRESS_EVENT = 'postprocess-progress'
-const QUESTION_EVENT = 'postprocess-question'
-const FINISHED_EVENT = 'postprocess-finished'
+import {
+  POSTPROCESS_FINISHED as FINISHED_EVENT,
+  POSTPROCESS_PROGRESS as PROGRESS_EVENT,
+  POSTPROCESS_QUESTION as QUESTION_EVENT,
+  POSTPROCESS_STARTED as STARTED_EVENT,
+} from './events'
 
 export interface PostProcessRunView {
   /** 现在该显示的那一趟；`null` = 什么都不显示 */

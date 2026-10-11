@@ -27,7 +27,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter as _};
+use tauri::{AppHandle, Emitter as _, Manager as _};
 
 use crate::error::AppError;
 use crate::hook_ipc::{self, FinishedPayload, FromHook, ProgressPayload, QuestionPayload, ToHook};
@@ -215,7 +215,19 @@ impl HookView {
                     g.question = None;
                     g.finished = Some((*finished).clone());
                 }
+                /* 要不要喊这一下，得在 payload 被 `emit` 带走**之前**算出来 */
+                let shout = !finished.ok && !finished.cancelled;
                 let _ = app.emit(FINISHED_EVENT, *finished);
+                /* 落完之后**喊一下这扇窗**：切片器那边只弹一句 "Error code: N"，
+                用户很可能压根不知道自己这扇窗里有话要说（作者 2026-10-11）。
+                Windows 闪任务栏、macOS 跳 Dock —— 只"提醒"，**不抢焦点**
+                （焦点那一下是切片器的，抢过来只会打断用户）。失败才喊：成功不用惊动谁。 */
+                if shout {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ =
+                            win.request_user_attention(Some(tauri::UserAttentionType::Critical));
+                    }
+                }
             }
         }
     }

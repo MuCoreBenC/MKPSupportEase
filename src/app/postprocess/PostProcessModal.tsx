@@ -140,6 +140,16 @@ export default function PostProcessModal({ onOpenReport }: PostProcessModalProps
                   错误码 <code>{finished.code}</code> —— 报问题时带上它
                 </p>
               )}
+              {/*
+                退出码：**切片器那个报错框里显示的只有它**（"… failed. Error code: N"，
+                我们打的 stderr 那一整句它不显示）。把这一格摆出来，用户才能把两个框对上号
+                （作者 2026-10-11 的真实困惑：那边只说 code 1，这边才知道是超边界还是碰撞）。
+              */}
+              {finished.exitCode !== 0 && (
+                <p className={s.code}>
+                  退出码 <code>{finished.exitCode}</code> —— 切片器那个「Error code」就是它
+                </p>
+              )}
               {finished.warnings.map((w) => (
                 <p className={s.warn} key={w}>
                   警告：{w}

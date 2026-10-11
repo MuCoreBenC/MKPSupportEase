@@ -52,7 +52,8 @@
  *
  * # 动作只有三件
  *
- *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）
+ *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）—— **后处理一跑完会自己重读一次**
+ *          （订阅 `postprocess-finished`，见下面那条 effect），这颗按钮是手动补一刀
  *   导出   把选中的那一条的三件套复制到用户点名的目录（`ExportModal.tsx`）
  *   选一条 看这一条的详情（结论 / 打印 / 管线 / 文件）—— 左栏点一下就是选中
  *
@@ -83,7 +84,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { api, errorText } from '../../api'
+import { api, errorText, listen } from '../../api'
 import type {
   ReportDetail,
   ReportGlueFacts,
@@ -91,6 +92,7 @@ import type {
   ReportSummary,
   ReportTowerFacts,
 } from '../../api'
+import { POSTPROCESS_FINISHED } from '../postprocess/events'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
@@ -692,6 +694,31 @@ export default function PageReport() {
 
   useEffect(() => {
     read()
+  }, [read])
+
+  /*
+   * 后处理一跑完就**自己重读一遍**（作者 2026-10-11：「这个报告需要自己更新一下」）。
+   *
+   * 报告页读的就是那一趟落下的账（`gcode_history/…/_meta.json`），而钩子跑完时用户
+   * 多半还站在切片器那边 —— 等他切回来，这一条应当已经在列表里了，不用先按刷新。
+   * **成功与失败都重读**：失败也落一条记录，那一条更该立刻看得见。
+   *
+   * 事件名与那一屏模态框共用一处（`postprocess/events.ts`）—— 字面量只许有那一处。
+   */
+  useEffect(() => {
+    let alive = true
+    const offs: (() => void)[] = []
+    void listen(POSTPROCESS_FINISHED, () => {
+      if (alive) read()
+    }).then((off) => {
+      /* 订阅回执比卸载晚到时就地退订（否则监听器留在后端没人收） */
+      if (alive) offs.push(off)
+      else off()
+    })
+    return () => {
+      alive = false
+      for (const off of offs) off()
+    }
   }, [read])
 
   /* 展开一条：详情按需读（列表只带摘要，选中才读整份 meta） */
