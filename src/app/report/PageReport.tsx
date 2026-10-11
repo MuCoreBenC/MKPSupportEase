@@ -14,22 +14,48 @@
  *   现在    左窄列表常驻 + 右详情独占（master–detail），点下一条直接换右栏；
  *           详情按**分组**收成页签（默认「全部」：一组一条横线，从上往下铺）。
  *
- * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：整块常驻、只露出一截（状态点
- * 那一列 + 抓手），点一下整块滑过来盖在详情上，点遮罩或往左拖滑回去 —— 手机
+ * # 2026-10-11 再改版：左栏是一块能筛的悬浮面板（V13 定稿）
+ *
+ *   左栏从"贴窗口边的灰条"改成**白面板**（细边 + 柔影 + 大圆角），里面加了三件
+ *   工具（都是本页自己的 state，不问后端）：
+ *
+ *     搜索   文件名子串（大小写不敏感）。输入框是**受控的同一颗节点**（React 重渲染
+ *            不重挂），所以打字时焦点不丢、光标不跳。
+ *     筛选   全部 / 成功 / 失败 三颗胶囊带计数（计数看**全量**，不随搜索变 ——
+ *            它回答的是"这批记录里有多少条失败"，不是"我现在看得见几条"）。
+ *     折叠   日期组点一下就收起来（不记进任何地方，切页回来就是全展开）。
+ *
+ *   行是**两层**：第一层文件名 + 成功/失败（红绿由 `data-ok` 给），第二层
+ *   时间 · 预设 · 机型 + 耗时；长文件名走「尾段保真」（`.fHead` / `.fTail`），
+ *   `.gcode` 与末尾几个字永远看得见。
+ *
+ *   ★ 三条 V13 口径，与旧版刻意不同：
+ *     · **失败原因不进列表**（整句错误原文只在详情「结论 → 原因」那一行）——
+ *       列表里一行一句红字会把整栏顶得七零八落，而"有没有失败"这件事由红色
+ *       状态字 + 失败计数胶囊说得很清楚。
+ *     · **顶部没有大标题**：一行小灰字说明 + 刷新靠右，窄档也不收这行。
+ *     · **不摆「导出」**：V13 的抽卡里页头还有一颗「导出」（三件套 + 保存位置模态框），
+ *       它要的落盘命令（`demo2/HANDOFF-EXPORT-3MF-NAME.md` §B：给记录 id + 目标目录，
+ *       复制三件套并按「基名_切片时间」改名）后端还没有 —— 纪律是"没有实现不给入口"，
+ *       所以那颗按钮与模态框先不摆；后端接上再把它们一起加上（样式照 V13 那份）。
+ *
+ * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：整块常驻、只露出一截（行首那枚
+ * 文件图标 + 抓手），点一下整块滑过来盖在详情上，点遮罩或往左拖滑回去 —— 手机
  * 分屏那种手感。CSS 用容器查询（同一套 DOM 两档），JS 只管拖拽与"点了先滑开"。
  *
  * # 三态分得开
  *
  *   还没有记录   空列表 → 「还没有执行记录」+ 怎么才有记录的一句话
  *   读失败       命令抛错 → 整块错误态（带原因），**不装成空列表**
- *   记录本身坏了 照进列表（红标 + 原因）—— 藏起它就等于替钩子瞒了一次事故
+ *   记录本身坏了 照进列表（红标）—— 藏起失败就是替钩子瞒了一次事故；原因在
+ *               详情「结论 → 原因」那一行等着（V13：那句话不进列表）
  *
- * # 动作只有两件
+ * # 动作只有一件半
  *
  *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）
- *   展开   看这一条的详情（结论 / 打印 / 管线 / 文件）
+ *   选一条 看这一条的详情（结论 / 打印 / 管线 / 文件）—— 左栏点一下就是选中
  *
- * 「确认导出 / 清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
+ * 「导出 / 清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
  *
  * # 字段面（2026-10-11 补齐）
  *
@@ -38,9 +64,23 @@
  * 键名与旧版 `_meta.json` 一致（写侧在 `src-tauri/src/archive.rs`）；
  * 管线每步的多行事实铺在步骤名下面（`pipeline[].detail`）。**没给就不摆**：
  * 旧记录 / 失败记录没有这些键，对应整组消失，不编占位数字。
+ *
+ * # 视觉对齐（2026-10-11 作者口径）
+ *
+ *   一列字段、一列参数：`.kv` 是一张**两列表**（行盒 `display: contents` 下场，
+ *   见 `PageReport.module.css`），同组里的值从同一条竖线起排。
+ *   单位**跟着值走**（`6.46 mm` / `124 次`），不挂在字段名上（早先的「塔高 mm」）。
+ *   笔偏移拆成 X / Y / Z 三行 —— 逗号串在一格里，三个数谁是谁看不出来。
+ *
+ * # 这一屏的字都能拖选（2026-10-11 作者口径）
+ *
+ *   报告是给人抄的：详情正文（`.main`）整块 `user-select: text` —— 文件名 / 分组摘要 /
+ *   每个字段的值 / 管线每一步 / 错误原文都能拖选，且**各格分开**（从哪个值上按下就选哪个）。
+ *   全局那层 `user-select: none`（去除"网页感"）在 `PageReport.module.css` 里按块打开：
+ *   页签不收（控件），左边的执行记录列表也不收 —— 那是点击 / 滑盖的落点。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
 import type {
@@ -52,16 +92,18 @@ import type {
 } from '../../api'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
-import { Btn } from '../ui/Controls'
 import s from './PageReport.module.css'
 
-/** 统计里挑给用户看的几格（键与 `_meta.json` 的 `detail.stats` 同名） */
-const STAT_CELLS: [string, string][] = [
-  ['towerHeight', '塔高 mm'],
-  ['glueLayerCount', '涂胶层'],
-  ['totalLayerNumber', '总层数'],
-  ['maxZHeight', '最高 Z mm'],
-  ['originalPrintTime', '切片器预估'],
+/**
+ * 统计里挑给用户看的几格（键与 `_meta.json` 的 `detail.stats` 同名）。
+ * 第三格是**值的单位** —— 单位跟着值印（`0 mm`），不挂在字段名上。
+ */
+const STAT_CELLS: [string, string, string][] = [
+  ['towerHeight', '塔高', 'mm'],
+  ['glueLayerCount', '涂胶层', ''],
+  ['totalLayerNumber', '总层数', ''],
+  ['maxZHeight', '最高 Z', 'mm'],
+  ['originalPrintTime', '切片器预估', ''],
 ]
 
 /** 列表滑盖的临界宽度：与 CSS 里 `@container (width < 880px)` 同一个数 */
@@ -75,6 +117,131 @@ const SNAP = 40
 const READING_NOTE = '正在重读执行记录…'
 
 const TAB_ALL = 'all'
+
+/** 左栏状态筛选的三档（`all` 是「全部」，与详情页签那个 TAB_ALL 无关） */
+type StatusFilter = 'all' | 'ok' | 'bad'
+
+/** 三颗筛选胶囊（顺序就是摆放顺序）；计数按 id 从 `counts` 取 */
+const FILTERS: [StatusFilter, string][] = [
+  ['all', '全部'],
+  ['ok', '成功'],
+  ['bad', '失败'],
+]
+
+/** 文件名短于这个长度就整条铺开，不拆头尾 */
+const FILE_SHORT_MAX = 22
+/** 拆的时候尾段留几个字（`.gcode` 与它前面的几个字）—— 名字再长这两样也得看得见 */
+const FILE_TAIL_LEN = 12
+
+/**
+ * 管线 12 步的中文显示名。
+ *
+ * `pipeline[].id` 是**机器名**（`machine-detect` 这种），直接摆出来不好认。
+ * 名字取自管线自己那 12 条 `timer.begin` 的文案（`crates/postprocess/src/pipeline/mod.rs`），
+ * 去掉「正在…」与省略号 —— 内核那边写着「中文显示名仍只许住 UI 一处」，
+ * 这张表就是那一处。认不出来的 id 原样摆（新步骤忘了登记也不会显示成空白）。
+ */
+const STEP_NAMES: Record<string, string> = {
+  input: '读取文件',
+  config: '加载配置',
+  'machine-detect': '机型识别',
+  parse: '解析 G-code',
+  support: '支撑面检测',
+  collision: '碰撞检测',
+  'calib-check': '校准模型检测',
+  pass1: '第一遍扫描',
+  pass2: '第二遍扫描',
+  calibration: '校准 G-code 插入',
+  write: '写入文件',
+  printtime: '打印时间估算',
+}
+
+/**
+ * 组小图标（跟组名一排，扫一眼找得到组）—— 只留形状，壳由 `GrpIcon` 给。
+ * 24×24 网格、`currentColor` 描边，尺寸由调用方定。
+ */
+const GROUP_SHAPES: Record<string, ReactNode> = {
+  result: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 12.5l2.5 2.5 4.5-5" />
+    </>
+  ),
+  print: (
+    <>
+      <path d="M7 8.5V3.5h10v5" />
+      <rect x="3.5" y="8.5" width="17" height="8" rx="2" />
+      <path d="M7 13.5h10v7H7z" />
+    </>
+  ),
+  glue: <path d="M12 3.5c3.5 4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.5-6 6-10z" />,
+  tower: (
+    <>
+      <rect x="6.5" y="4" width="11" height="16" rx="1.5" />
+      <path d="M6.5 9.5h11M6.5 14.5h11" />
+    </>
+  ),
+  slicer: (
+    <>
+      <path d="M4 7.5h4M13 7.5h7M4 16.5h7M16 16.5h4" />
+      <circle cx="10.5" cy="7.5" r="2.2" />
+      <circle cx="13.5" cy="16.5" r="2.2" />
+    </>
+  ),
+  warnings: (
+    <>
+      <path d="M12 4l9 15.5H3z" />
+      <path d="M12 10v4.5M12 17v.5" />
+    </>
+  ),
+  pipeline: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  files: (
+    <>
+      <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
+      <path d="M13.5 3v5h5" />
+    </>
+  ),
+}
+
+/**
+ * 日期分组的标题词：今天 / 昨天 / N 天前（`day` 就是 `<日期>` 目录名）。
+ *
+ * 目录名不一定是日期（有人手动往 `gcode_history/` 里丢过一个文件夹就会这样），
+ * 那时 `diff` 是 `NaN` / 负数 —— 与其摆一句「NaN 天前」，不如原样把那串名字印出来。
+ */
+function dayLabel(day: string): string {
+  const d = new Date(`${day}T00:00:00`)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const diff = Math.round((today.getTime() - d.getTime()) / 86400000)
+  if (!Number.isFinite(diff) || diff < 0) return day
+  return diff === 0 ? '今天' : diff === 1 ? '昨天' : `${diff} 天前`
+}
+
+/**
+ * 列表行第二层的灰字：时间 · 预设 · 机型。
+ * 拿不到的那几段**不占位**（不摆空分隔符，也不会剩一串 ` · `）。
+ */
+function rowMeta(row: ReportSummary): string {
+  return [
+    (row.startedAt ?? '').slice(11, 16),
+    (row.presetName ?? '').replace(/\.toml$/i, ''),
+    row.machineType ?? '',
+  ]
+    .filter((x) => x !== '')
+    .join(' · ')
+}
+
+/** 管线一步的名字：认得出来的换中文，认不出来原样摆（没有 id 就按序号） */
+function stepName(id: string | undefined, i: number): string {
+  if (id === undefined || id === '') return `第 ${i + 1} 步`
+  return STEP_NAMES[id] ?? id
+}
 
 /** 详情里的一组（页签的一项） */
 interface Group {
@@ -133,6 +300,20 @@ function numCell(v: number | undefined, suffix = ''): string {
 }
 
 /**
+ * 统计格的值：数字**带着单位**印 —— `mm` 那一档交给 `mmText`（越 1000 换 m），
+ * 其余单位补一个空格（`124 次`）。`originalPrintTime` 是切片器原话（字符串），原样铺；
+ * 键没有 / 不是数字就给「—」（不拿 0 凑数）。
+ */
+function statCell(v: unknown, unit: string): string {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    if (unit === '') return fmtNum(v)
+    if (unit === 'mm') return mmText(v) ?? fmtNum(v)
+    return `${fmtNum(v)} ${unit}`
+  }
+  return typeof v === 'string' && v !== '' ? v : '—'
+}
+
+/**
  * 从切片器的原话里抠「total estimated time」的秒数
  * （`"3h 16m 52s; total estimated time: 3h 22m 55s"` → 12175）—— 对不上就是 `null`。
  */
@@ -152,14 +333,10 @@ function glueGroup(glue: ReportGlueFacts): Group | null {
     ['换笔', numCell(glue.gluePenSwitches, ' 次')],
     ['涂胶遍数', numCell(glue.gluePassCount, ' 遍')],
     ['涂胶速度', numCell(glue.glueSpeed, ' mm/s')],
-    [
-      '笔偏移 XYZ',
-      glue.penOffsetX === undefined && glue.penOffsetY === undefined && glue.penOffsetZ === undefined
-        ? '—'
-        : [glue.penOffsetX, glue.penOffsetY, glue.penOffsetZ]
-            .map((v) => (v === undefined ? '—' : fmtNum(v)))
-            .join(', '),
-    ],
+    /* 笔偏移拆 X / Y / Z 三行：逗号串在一格里，三个数谁是谁看不出来 */
+    ['笔偏移 X', mmText(glue.penOffsetX) ?? '—'],
+    ['笔偏移 Y', mmText(glue.penOffsetY) ?? '—'],
+    ['笔偏移 Z', mmText(glue.penOffsetZ) ?? '—'],
     [
       '抬笔高度',
       glue.glueZLiftHeight === undefined
@@ -288,7 +465,17 @@ function buildGroups(detail: ReportDetail): Group[] {
       '预设 · 机型',
       [st.presetName, st.machineType].filter((x): x is string => x !== null).join(' · ') || '—',
     ],
-    ['文件', st.gcodeName ?? '—'],
+    /*
+     * 文件行：3MF 模型名在前（拿得到的话），G-code 名跟在括号里 ——
+     * 模型名是钩子在切片器临时目录里取的，老记录 / 搬走的 G-code 都没有它，
+     * 那时退回只显示 G-code 名（`?? null` 是给"后端没这一格"兜底，不编名字）。
+     */
+    [
+      '文件',
+      st.modelName != null && st.gcodeName != null
+        ? `${st.modelName}（${st.gcodeName}）`
+        : (st.gcodeName ?? '—'),
+    ],
   ]
   if (st.error !== null) resultCells.push(['原因', st.error])
   groups.push({
@@ -306,9 +493,9 @@ function buildGroups(detail: ReportDetail): Group[] {
         ? printTimeStatusText(detail.printTimeStatus)
         : printTimeText(detail.printTime.totalSeconds),
     ],
-    ...STAT_CELLS.map(([key, label]): [string, string] => [
+    ...STAT_CELLS.map(([key, label, unit]): [string, string] => [
       label,
-      stats[key] === undefined ? '—' : String(stats[key]),
+      statCell(stats[key], unit),
     ]),
   ]
   if (detail.printTime?.segments !== undefined) {
@@ -410,6 +597,25 @@ function buildGroups(detail: ReportDetail): Group[] {
   return groups
 }
 
+/**
+ * 文件名：长名「尾段保真」—— 超过 22 字就拆两段，尾段（`.gcode` 与它前面那 11 个字）
+ * 钉住不缩，前段自己收省略号；短名整条原样。
+ *
+ * 为什么不直接一句 `text-overflow: ellipsis`：那样截出来的是"前 22 个字 + …"，
+ * 而用户认这份文件靠的恰恰是**尾巴**（`.gcode` 前面那截，`帕姆` / `deepfish` 那种），
+ * 全被省略号吃掉了。全名挂在调用方的 `title` 上。
+ */
+function FileName({ name }: { name: string | null }) {
+  const n = name ?? '（记录里没写文件名）'
+  if (n.length <= FILE_SHORT_MAX) return <>{n}</>
+  return (
+    <>
+      <span className={s.fHead}>{n.slice(0, n.length - FILE_TAIL_LEN)}</span>
+      <span className={s.fTail}>{n.slice(-FILE_TAIL_LEN)}</span>
+    </>
+  )
+}
+
 export default function PageReport() {
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
@@ -420,6 +626,13 @@ export default function PageReport() {
   const [detailErr, setDetailErr] = useState<string | null>(null)
   const [tab, setTab] = useState<string>(TAB_ALL)
   const [sideOpen, setSideOpen] = useState(false)
+  /*
+   * 左栏工具区（V13）：搜索词 / 状态筛选 / 折叠了的日期组。
+   * 三样都是**本页自己的**筛选态，不问后端、不落盘 —— 切走再回来就回到全展开。
+   */
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<StatusFilter>('all')
+  const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
   /** 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值 */
   const [, setNarrow] = useState(false)
 
@@ -578,6 +791,12 @@ export default function PageReport() {
      */
     suppressClick.current = false
     if (!isFloating()) return
+    /*
+     * 抽屉**开着**的时候，在搜索框里按下不算"抓抽屉"：那里横向拖是**选字**，
+     * 抓走指针就变成抽屉跟着手走、刚选中的一段也丢了。
+     * 收起态不在此列 —— 那 44px 里也压着搜索框的左缘，按下去该把抽屉拉出来。
+     */
+    if (sideOpen && e.target instanceof HTMLInputElement) return
     drag.current = { x: e.clientX, y: e.clientY, dx: 0, open: sideOpen, moved: false }
   }
   const onMove = (e: React.PointerEvent<HTMLElement>) => {
@@ -628,15 +847,51 @@ export default function PageReport() {
     else if (d.open && d.dx < -SNAP) setSideOpen(false)
   }
 
-  /* ---------- 列表：按日分组 ---------- */
+  /* ---------- 列表：搜索 + 筛选 + 按日分组 ---------- */
+
+  /**
+   * 当前搜索 + 筛选下看得见的记录（顺序照后端给的：最新在前）。
+   *
+   * 搜索只认**行上看得见的那两个字**（G-code 文件名）—— 拿 3MF 模型名去匹配
+   * 就会出现"打「帕姆」跳出一行 `.63288.1.gcode`"这种对不上的事。
+   * 大小写不敏感；筛选按成败两档。两样都空就是原样一张表。
+   */
+  const q = query.trim().toLowerCase()
+  const visible = (rows ?? []).filter((r) => {
+    if (filter === 'ok' && !r.ok) return false
+    if (filter === 'bad' && r.ok) return false
+    if (q === '') return true
+    return (r.gcodeName ?? '').toLowerCase().includes(q)
+  })
+
+  /*
+   * 三颗胶囊的计数看**全量**，不随搜索变：它回答的是"这批记录里有多少条失败"，
+   * 不是"我现在看得见几条"（后者会让"失败 3"在打字时一路缩，读起来像在丢记录）。
+   */
+  const counts = {
+    all: (rows ?? []).length,
+    ok: (rows ?? []).filter((r) => r.ok).length,
+    bad: (rows ?? []).filter((r) => !r.ok).length,
+  }
+
   const days: string[] = []
   const byDay = new Map<string, ReportSummary[]>()
-  ;(rows ?? []).forEach((r) => {
+  visible.forEach((r) => {
     if (!days.includes(r.day)) days.push(r.day)
     const list = byDay.get(r.day)
     if (list === undefined) byDay.set(r.day, [r])
     else list.push(r)
   })
+
+  /** 日期组：点一下收起来 / 再点展开 */
+  const toggleDay = (day: string) => {
+    setCollapsedDays((cur) => {
+      const next = new Set(cur)
+      if (next.has(day)) next.delete(day)
+      else next.add(day)
+      return next
+    })
+  }
 
   const groups = detail === null ? [] : buildGroups(detail)
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
@@ -656,55 +911,176 @@ export default function PageReport() {
         <span className={s.sideLb}>执行记录</span>
         <span className={s.sideCnt}>{(rows ?? []).length} 条</span>
       </div>
+
+      <div className={s.sideTools}>
+        <div className={s.searchBox}>
+          <svg
+            className={s.searchIcon}
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="M16 16l4.5 4.5" />
+          </svg>
+          <input
+            className={s.searchInput}
+            type="text"
+            placeholder="搜索文件名…"
+            aria-label="搜索文件名"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className={s.filterBar}>
+          {FILTERS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={s.filterPill}
+              data-on={filter === id}
+              aria-pressed={filter === id}
+              onClick={() => setFilter(id)}
+            >
+              {label} <b>{counts[id]}</b>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <ul className={s.sideList}>
-        {days.map((day) => (
-          <li key={day}>
-            <p className={s.dayRow}>
-              {day}
-              <span className={s.dayCnt}>· {byDay.get(day)?.length ?? 0} 条</span>
-            </p>
-            <ul className={s.dayList}>
-              {(byDay.get(day) ?? []).map((row) => (
-                <li key={row.id}>
-                  <button
-                    type="button"
-                    className={s.sideRow}
-                    data-ok={row.ok}
-                    data-on={row.id === selId}
-                    title={`${row.gcodeName ?? '（记录里没写文件名）'} · ${row.startedAt ?? row.day} · ${elapsedText(row.elapsedMs)}`}
-                    onClick={() => pick(row)}
-                  >
-                    <span className={s.dot} aria-hidden="true" />
-                    <span className={s.sideFile}>{row.gcodeName ?? '（记录里没写文件名）'}</span>
-                    <span className={s.sideDur}>{elapsedText(row.elapsedMs)}</span>
-                  </button>
-                  {!row.ok && row.error !== null && <p className={s.rowErr}>{row.error}</p>}
-                </li>
-              ))}
-            </ul>
+        {days.length === 0 && (
+          <li>
+            <p className={s.listEmpty}>没有匹配的记录</p>
           </li>
-        ))}
+        )}
+        {days.map((day) => {
+          const collapsed = collapsedDays.has(day)
+          return (
+            <li key={day}>
+              <button
+                type="button"
+                className={s.dayRow}
+                data-collapsed={collapsed}
+                aria-expanded={!collapsed}
+                onClick={() => toggleDay(day)}
+              >
+                <svg
+                  className={s.dayIcon}
+                  width={13}
+                  height={13}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                >
+                  <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+                  <path d="M8 3v4M16 3v4M3.5 10h17" />
+                </svg>
+                <span className={s.dayName}>
+                  {dayLabel(day)} · {day}
+                </span>
+                <svg
+                  className={s.dayChev}
+                  width={12}
+                  height={12}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <path d="M6 15l6-6 6 6" />
+                </svg>
+              </button>
+              {!collapsed && (
+                <ul className={s.dayList}>
+                  {(byDay.get(day) ?? []).map((row) => (
+                    <li key={row.id}>
+                      <button
+                        type="button"
+                        className={s.sideRow}
+                        data-ok={row.ok}
+                        data-on={row.id === selId}
+                        title={`${row.gcodeName ?? '（记录里没写文件名）'} · ${row.startedAt ?? row.day} · ${elapsedText(row.elapsedMs)}`}
+                        onClick={() => pick(row)}
+                      >
+                        <span className={s.rowIcon} aria-hidden="true">
+                          <svg
+                            width={15}
+                            height={15}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.7}
+                          >
+                            <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
+                            <path d="M13.5 3v5h5" />
+                          </svg>
+                        </span>
+                        <span className={s.rowMain}>
+                          <span className={s.rowTop}>
+                            <span className={s.sideFile}>
+                              <FileName name={row.gcodeName} />
+                            </span>
+                            <span className={s.rowStatus} data-ok={row.ok}>
+                              <span className={s.stDot} aria-hidden="true" />
+                              {row.ok ? '成功' : '失败'}
+                            </span>
+                          </span>
+                          <span className={s.rowSub}>
+                            <span className={s.rowMeta}>{rowMeta(row)}</span>
+                            <span className={s.sideDur}>{elapsedText(row.elapsedMs)}</span>
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
       </ul>
       <span className={s.grabber} aria-hidden="true" />
     </nav>
   )
 
   return (
-    <section className={s.page} ref={pageRef}>
+    <section className={s.page} ref={pageRef} aria-label="执行报告">
       <header className={s.head}>
-        <h2 className={s.title}>执行报告</h2>
         <p className={s.sub}>
           后处理每跑一次（切片器导出时按「复制后处理脚本」那条命令跑），这里多一条记录。
         </p>
         <div className={s.headActions}>
-          <Btn
+          <button
+            type="button"
+            className={s.btn}
             onClick={() => {
               read()
               setNote({ text: READING_NOTE, bad: false })
             }}
           >
+            <svg
+              width={13}
+              height={13}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+              <path d="M20 4.5V9h-4.5" />
+            </svg>
             刷新
-          </Btn>
+          </button>
         </div>
       </header>
 
@@ -712,78 +1088,93 @@ export default function PageReport() {
         <NoteBar note={note} onClose={() => setNote(null)} />
       </div>
 
-      {err !== null ? (
-        <p className={s.err} role="alert">
-          执行记录读不出来：{err}
-        </p>
-      ) : rows === null ? (
-        <p className={s.empty}>正在读执行记录…</p>
-      ) : rows.length === 0 ? (
-        <p className={s.empty}>
-          还没有执行记录 —— 把首页「复制后处理脚本」贴进切片器的后处理脚本栏，
-          导出打印文件时会自动生成第一条。
-        </p>
-      ) : (
-        <div className={s.pane}>
-          {listHtml}
-          <div
-            className={s.scrim}
-            onClick={() => setSideOpen(false)}
-            role="presentation"
-          />
+      <div className={s.content}>
+        {err !== null ? (
+          <p className={s.err} role="alert">
+            执行记录读不出来：{err}
+          </p>
+        ) : rows === null ? (
+          <p className={s.empty}>正在读执行记录…</p>
+        ) : rows.length === 0 ? (
+          <p className={s.empty}>
+            还没有执行记录 —— 把首页「复制后处理脚本」贴进切片器的后处理脚本栏，
+            导出打印文件时会自动生成第一条。
+          </p>
+        ) : (
+          <div className={s.pane}>
+            {listHtml}
+            <div className={s.scrim} onClick={() => setSideOpen(false)} role="presentation" />
 
-          <section className={s.main}>
-            {sel === null ? (
-              <p className={s.empty}>左边选一条记录看详情。</p>
-            ) : (
-              <>
-                <div className={s.mainHead}>
-                  <h3 className={s.mainFile}>{sel.gcodeName ?? '（记录里没写文件名）'}</h3>
-                  <span className={sel.ok ? s.chip : `${s.chip} ${s.chipBad}`}>
-                    {sel.ok ? '成功' : '失败'}
-                  </span>
-                  <span className={s.mainWhen}>
-                    {sel.startedAt ?? sel.day} · {elapsedText(sel.elapsedMs)}
-                  </span>
-                </div>
+            <section className={s.main}>
+              {sel === null ? (
+                <p className={s.empty}>左边选一条记录看详情。</p>
+              ) : (
+                <>
+                  <div className={s.mainHead}>
+                    <h3
+                      className={s.mainFile}
+                      title={sel.gcodeName ?? '（记录里没写文件名）'}
+                    >
+                      <FileName name={sel.gcodeName} />
+                    </h3>
+                    <span className={sel.ok ? s.chip : `${s.chip} ${s.chipBad}`}>
+                      {sel.ok ? '成功' : '失败'}
+                    </span>
+                    <span className={s.mainWhen}>
+                      {sel.startedAt ?? sel.day} · {elapsedText(sel.elapsedMs)}
+                    </span>
+                  </div>
 
-                {detail !== null && (
-                  <>
-                    <div className={s.tabs} role="tablist">
-                      <button
-                        type="button"
-                        role="tab"
-                        className={s.tab}
-                        data-on={activeTab === TAB_ALL}
-                        aria-selected={activeTab === TAB_ALL}
-                        onClick={() => setTab(TAB_ALL)}
-                      >
-                        全部
-                      </button>
-                      {groups.map((g) => (
+                  {detail !== null && (
+                    <>
+                      <div className={s.tabs} role="tablist">
                         <button
-                          key={g.id}
                           type="button"
                           role="tab"
                           className={s.tab}
-                          data-on={activeTab === g.id}
-                          aria-selected={activeTab === g.id}
-                          onClick={() => setTab(g.id)}
+                          data-on={activeTab === TAB_ALL}
+                          aria-selected={activeTab === TAB_ALL}
+                          onClick={() => setTab(TAB_ALL)}
                         >
-                          {g.title}
+                          全部
                         </button>
-                      ))}
-                    </div>
+                        {groups.map((g) => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            role="tab"
+                            className={s.tab}
+                            data-on={activeTab === g.id}
+                            aria-selected={activeTab === g.id}
+                            onClick={() => setTab(g.id)}
+                          >
+                            {g.title}
+                          </button>
+                        ))}
+                      </div>
 
-                    <div className={s.panels}>
-                      {groups.map((g) => (
-                        <div
-                          key={g.id}
-                          className={s.panel}
-                          data-on={activeTab === TAB_ALL || activeTab === g.id}
-                        >
-                          <div className={s.grp}>
+                      <div className={s.panels}>
+                        {groups.map((g) => (
+                          <div
+                            key={g.id}
+                            className={s.panel}
+                            data-on={activeTab === TAB_ALL || activeTab === g.id}
+                          >
                             <p className={s.grpBar}>
+                              <span className={s.grpIcon} aria-hidden="true">
+                                <svg
+                                  width={15}
+                                  height={15}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={1.8}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  {GROUP_SHAPES[g.id]}
+                                </svg>
+                              </span>
                               <b>{g.title}</b>
                               {g.sum !== '' && <span className={s.grpSum}>{g.sum}</span>}
                             </p>
@@ -792,7 +1183,7 @@ export default function PageReport() {
                                 {detail.pipeline.map((step, i) => (
                                   <li key={i} className={s.step}>
                                     <span className={s.stepHead}>
-                                      <b>{step.id ?? `第 ${i + 1} 步`}</b>
+                                      <b>{stepName(step.id, i)}</b>
                                       <span className={s.stepMs}>
                                         {elapsedText(step.elapsedMs ?? null)}
                                       </span>
@@ -817,25 +1208,25 @@ export default function PageReport() {
                               </dl>
                             )}
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                        ))}
+                      </div>
+                    </>
+                  )}
 
-                {detailErr !== null && (
-                  <p className={s.err} role="alert">
-                    详情读不出来：{detailErr}
-                  </p>
-                )}
-                {detail === null && detailErr === null && (
-                  <p className={s.empty}>正在读这一条的详情…</p>
-                )}
-              </>
-            )}
-          </section>
-        </div>
-      )}
+                  {detailErr !== null && (
+                    <p className={s.err} role="alert">
+                      详情读不出来：{detailErr}
+                    </p>
+                  )}
+                  {detail === null && detailErr === null && (
+                    <p className={s.empty}>正在读这一条的详情…</p>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
     </section>
   )
 }
