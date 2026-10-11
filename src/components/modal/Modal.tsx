@@ -70,6 +70,14 @@ export interface ModalProps {
    * 宿主走，与调用方写在哪一层无关。
    */
   host?: HTMLElement | null
+  /**
+   * **连标题栏那颗 × 都不摆**（2026-10-11 加，只有跑着那一屏用）。
+   *
+   * 与 `closeOnScrim={false}` 是配套的一对：那一刻"把这一屏收起来"只有一条明路
+   * （后处理那屏的「后台运行」）。摆一颗点了不动的 × 比没有更糟 —— 用户会以为
+   * 自己能关，点下去却什么都没发生。
+   */
+  hideClose?: boolean
   /** 页眉那枚「关闭」的悬停说明 —— 关闭不总是「放弃」，有草稿语义的稿要写清 */
   closeTitle?: string
   onClose: () => void
@@ -86,6 +94,7 @@ export default function Modal({
   closeOnScrim = true,
   host = null,
   closeTitle,
+  hideClose = false,
   onClose,
   children,
 }: ModalProps) {
@@ -180,15 +189,18 @@ export default function Modal({
           {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
           <span className={s.headActs}>
             <span ref={setHeadSlot} className={s.headSlot} />
-            <button
-              type="button"
-              className={s.close}
-              title={closeTitle ?? '关闭'}
-              aria-label="关闭"
-              onClick={onClose}
-            >
-              <Icon name="close" size={16} />
-            </button>
+            {/* `hideClose`：这一屏没有"关掉"这回事（要收起来走明路，见那个 prop） */}
+            {!hideClose && (
+              <button
+                type="button"
+                className={s.close}
+                title={closeTitle ?? '关闭'}
+                aria-label="关闭"
+                onClick={onClose}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            )}
           </span>
         </header>
 

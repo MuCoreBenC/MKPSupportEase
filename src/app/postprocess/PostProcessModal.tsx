@@ -26,13 +26,18 @@
 import { useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
+import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
 import { Progress } from '../ui/Progress'
 /* 模态框只有一套（2026-10-10）：稿内那套 `ui/Modal` + 它的 `.scrim/.modal` 退役 */
 import { Modal } from '../../components/modal'
+import { useTitlebarDrag } from '../useTitlebarDrag'
 import { percentOf, stepName } from './steps'
 import type { PostProcessRunView } from './usePostProcessRun'
 import s from './PostProcessModal.module.css'
+
+/* 顶栏那一条的高度按平台来（与 `TopTabs` 同一对 token）：拖窗带要正好铺在它上面 */
+const PLATFORM = detectPlatform()
 
 export interface PostProcessModalProps {
   /** 那一趟的现况（`usePostProcessRun` 给的那一份；App 拿着它，后台那条窄条也要） */
@@ -73,6 +78,8 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   const [err, setErr] = useState<string | null>(null)
   /* 「预计还需」每秒重算一次（这个表只在跑着的时候挂着） */
   const [, setTick] = useState(0)
+  /* 跑着的时候顶上那条拖窗带用它（与标题栏同一条动作，见文件头第 1 条下面那段） */
+  const drag = useTitlebarDrag()
 
   const finished = run?.finished ?? null
   const running = run !== null && finished === null
@@ -99,7 +106,11 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       .finally(() => setBusy(false))
   }
 
-  return (
+  /*
+   * 框本体先收进一格变量：跑着的那一态要在它**外面**再罩一层（`.layer`，见下），
+   * 那一层与框之间差一级缩进 —— 收成变量，两层各自都读得清。
+   */
+  const screen = (
     <Modal
       open
       size="md"
@@ -108,6 +119,8 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       subtitle={run.gcodeName}
       /* 跑着的时候点遮罩不关（见文件头第 1 条）；要收起来请按「后台运行」 */
       closeOnScrim={!running}
+      /* 同理：跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作 */
+      hideClose={running}
       onClose={dismiss}
       footer={
         running ? (
@@ -260,5 +273,36 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         )}
       </div>
     </Modal>
+  )
+
+  /*
+   * 跑着的那一态：**整扇窗都归这一屏**（连顶栏那三颗窗控键）。
+   *
+   * 那三颗被 TopTabs 自己抬到了 `z-index: 91`（它要盖住外壳顶部那条 1px 高光 ——
+   * 见 `TopTabs.module.css` 的 `.controls`），而通用模态框的遮罩是 `z-index: 40` ——
+   * 于是"模态框开着、右上角那颗关闭照样点得着"（作者 2026-10-11 点着的就是那一下）。
+   * 这一层跑着的时候抬到窗控键之上，整扇窗都归它。
+   *
+   * 但**标题栏那一条仍然要能拖窗**（作者：「但是要可以拖动」）：顶上再铺一条透明的
+   * 拖窗带 —— 它既吃掉那三颗窗控键上的点击（关闭 / 最小化 / 最大化都不触发），
+   * 又把拖窗与双击缩放接回真正的标题栏动作。拖窗是窗口的基本动作，不该被一个
+   * 正跑着的框锁死。
+   *
+   * 不跑的那一态（结论留在屏上）**退回普通模态框**：那时窗控键照旧点得着 ——
+   * 看完结果顺手关窗是正常动作，不该拦。
+   */
+  return (
+    <div className={s.layer} data-full={running}>
+      {screen}
+      {running && (
+        <div
+          className={s.dragShield}
+          data-platform={PLATFORM}
+          aria-hidden="true"
+          onMouseDown={drag.onMouseDown}
+          onDoubleClick={drag.onDoubleClick}
+        />
+      )}
+    </div>
   )
 }
