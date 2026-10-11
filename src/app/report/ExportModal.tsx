@@ -16,16 +16,19 @@
  *    不摆一行"缺"的空行、也不假装三件套都齐；
  * 2. **失败留在框里**：导出没成（不覆盖 / 目录建不出来 / 一份都不在盘上）→ 后端那句
  *    原话摆在框里、框不关 —— 用户就着这句话改位置或先把那一份挪走，不用从头来一遍；
- * 3. **成了也不关**（作者 2026-10-11）：导完最要紧的下一步是"去那个文件夹里看看"，
- *    框一关路径就没了 —— 所以成了之后框留着、改摆一句"已导出 N 个文件"，
- *    底下那颗路径胶囊还在，照着它去开文件夹（长按能选中整条）。
+ * 3. **成了也不关、也不长高**（作者 2026-10-11 两次点名）：
+ *    · 导完最要紧的下一步是"去那个文件夹里看看"，框一关路径就没了 ⇒ 框留着；
+ *    · 但**不许因此多出一条东西**：原来那句绿色横条把框顶高了、看着像闪了一下 ⇒
+ *      现在就着**已有的那几行**说成功 —— 每份文件的小图标收成一个绿勾、
+ *      保存位置那颗按钮从「更改位置」翻成「打开位置」、页脚左边多一句
+ *      「已导出 N 个文件」。一条新行都不加，框的大小一动不动。
  *
  * # 保存位置记着上一次（`STORAGE.clientReportExportDir`）
  *
  * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。目录不在了照样是
  * 后端说了算（会照实报"建不出保存位置"），所以记住一个失效的路径不会骗人。
  *
- * 胶囊**整条不改位置**：只有右边那颗「更改位置」弹系统框 —— 路径正文因此还能拖选，
+ * 胶囊**整条不改位置**：只有右边那颗按钮弹系统框 —— 路径正文因此还能拖选，
  * 误点一下也不会跳出一个系统目录框。
  */
 
@@ -76,6 +79,14 @@ const KIND_ICON: Record<ReportExportKind, ReactNode> = {
   ),
 }
 
+/** 写好了的那个勾（与报告页详情里「结论」那颗同形：圈里一个对号） */
+const CHECK_SHAPE = (
+  <>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M8.5 12.5l2.5 2.5 4.5-5" />
+  </>
+)
+
 /**
  * 路径胶囊里的那串字：`<父目录><分隔符><基名><分隔符>` 拆两段 ——
  * 前段自己收省略号、**尾两段钉住不缩**（"往哪个盘哪个文件夹里导"永远看得见）。
@@ -114,24 +125,19 @@ export interface ExportModalProps {
    */
   preload: { id: string; plan: ReportExportPlan } | null
   onClose: () => void
-  /** 成了：把落盘的路径与目标文件夹交出去（页面据此报一句"导到哪了"） */
-  onExported: (written: string[], folder: string) => void
 }
 
-export default function ExportModal({
-  open,
-  id,
-  preload,
-  onClose,
-  onExported,
-}: ExportModalProps) {
+export default function ExportModal({ open, id, preload, onClose }: ExportModalProps) {
   const [plan, setPlan] = useState<ReportExportPlan | null>(null)
   const [planErr, setPlanErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  /** 导出没成时后端那句原话（留在框里，不关框） */
-  const [fail, setFail] = useState<string | null>(null)
-  /** 成了：出了几份、落到哪个文件夹（框留着，见文件头第 3 条） */
-  const [done, setDone] = useState<{ count: number; folder: string } | null>(null)
+  /**
+   * 框里那句话：`what` 决定前缀（导出 / 打开各说各的），`text` 是后端原话。
+   * 两种都**留在框里、不关框**：用户就着这句话改位置 / 先把那份文件挪走，就地重来。
+   */
+  const [fail, setFail] = useState<{ what: 'export' | 'open'; text: string } | null>(null)
+  /** 成了：出了几份（框留着，见文件头第 3 条）。`null` = 还没导 */
+  const [done, setDone] = useState<number | null>(null)
   /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`） */
   const [picked, setPicked] = useStickyState<string>(STORAGE.clientReportExportDir, '')
 
@@ -174,7 +180,7 @@ export default function ExportModal({
           setDone(null)
         }
       },
-      (e: unknown) => setFail(errorText(e)),
+      (e: unknown) => setFail({ what: 'export', text: errorText(e) }),
     )
   }
 
@@ -185,16 +191,26 @@ export default function ExportModal({
     api.exportReportArchive(id, dir).then(
       (written) => {
         setBusy(false)
-        /* ★ 不关框：导完要照着这条路径去开文件夹（文件头第 3 条） */
-        setDone({ count: written.length, folder: path.folder })
-        onExported(written, path.folder)
+        /* ★ 不关框、也不加行：成了这件事由图标 / 按钮 / 页脚那一句说（文件头第 3 条） */
+        setDone(written.length)
       },
       (e: unknown) => {
         setBusy(false)
-        setFail(errorText(e))
+        setFail({ what: 'export', text: errorText(e) })
       },
     )
   }
+
+  /** 「打开位置」：打开系统文件管理器，停在那次导出的那个目录（路径由后端自己算） */
+  const openFolder = () => {
+    if (id === null || done === null) return
+    setFail(null)
+    api.revealReportExport(id, dir).catch((e: unknown) => {
+      setFail({ what: 'open', text: errorText(e) })
+    })
+  }
+
+  const exported = done !== null
 
   return (
     <Modal
@@ -203,10 +219,14 @@ export default function ExportModal({
       title="导出执行报告"
       onClose={onClose}
       footer={
-        done !== null ? (
-          <Btn variant="accent" onClick={onClose}>
-            完成
-          </Btn>
+        exported ? (
+          /* 成的那一屏只有一条出口：看完就去干活（页脚左边那句是这一态的主语） */
+          <>
+            <span className={s.footNote}>已导出 {done} 个文件</span>
+            <Btn variant="accent" onClick={onClose}>
+              完成
+            </Btn>
+          </>
         ) : (
           <>
             <Btn onClick={onClose}>取消</Btn>
@@ -226,17 +246,12 @@ export default function ExportModal({
         )}
         {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
 
-        {done !== null && (
-          <p className={s.done} role="status">
-            已导出 {done.count} 个文件 —— 就在下面这个位置（整条路径可以选中复制）。
-          </p>
-        )}
-
         {plan !== null && (
           <ul className={s.fileList}>
             {plan.files.map((f) => (
               <li key={f.kind} className={s.fileItem}>
-                <span className={s.fileIcon} aria-hidden="true">
+                {/* 写好了就地把纸换成勾：形状占同一格，框一行都不长 */}
+                <span className={s.fileIcon} data-done={exported} aria-hidden="true">
                   <svg
                     width={15}
                     height={15}
@@ -247,7 +262,7 @@ export default function ExportModal({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    {KIND_ICON[f.kind]}
+                    {exported ? CHECK_SHAPE : KIND_ICON[f.kind]}
                   </svg>
                 </span>
                 <span className={s.fileMeta}>
@@ -268,13 +283,14 @@ export default function ExportModal({
 
         {fail !== null && (
           <p className={s.bad} role="alert">
-            导出没成：{fail}
+            {fail.what === 'export' ? '导出没成：' : '打开没成：'}
+            {fail.text}
           </p>
         )}
 
         {path !== null && (
           /*
-           * 整条是**显示**不是按钮：只有右边那颗「更改位置」改位置（作者 2026-10-11）。
+           * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
            * 路径正文因此还能拖选、误点一下也不会弹系统框。
            */
           <div className={s.pathPill} title={path.full}>
@@ -294,8 +310,18 @@ export default function ExportModal({
               <span className={s.pathHead}>{path.head}</span>
               <span className={s.pathTail}>{path.tail}</span>
             </span>
-            <button type="button" className={s.pathEdit} onClick={changeDir}>
-              更改位置
+            {/*
+             * ★ 成了之后这一颗**就地翻成「打开位置」**（作者：都导出成功了，
+             *   位置已经定了，那一刻要的是"去那儿看看"）—— 同一格、同一尺寸，
+             *   框的宽窄一动不动。
+             */}
+            <button
+              type="button"
+              className={s.pathEdit}
+              data-open={exported}
+              onClick={exported ? openFolder : changeDir}
+            >
+              {exported ? '打开位置' : '更改位置'}
             </button>
           </div>
         )}

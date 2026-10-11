@@ -2,8 +2,13 @@
  * 「导出执行报告」那一框里的东西。
  *
  * **框本身不是这一份** —— 外壳用全站那唯一一套居中模态框（`components/modal`，
- * 标题栏 / × / 遮罩 / Esc / 焦点锁都在那儿）。这里只管框**里面**那三样：
- * 三行文件、一句"归档里缺哪几份"、一条保存位置胶囊。
+ * 标题栏 / × / 遮罩 / Esc / 焦点锁都在那儿）。这里只管框**里面**那几样：
+ * 三行文件、一句"归档里缺哪几份"、一条保存位置胶囊，以及成了之后那几处就地翻脸
+ * （勾 / 「打开位置」/ 页脚那句"已导出 N 个文件"）。
+ *
+ * ★ 一条贯穿全篇的尺寸纪律（作者 2026-10-11）：**导出前后框不许多出一条行**。
+ *   成功只许改**已有的**东西（图标形状、按钮文案与配色、页脚左边那句），
+ *   所以下面几处成对状态都是"同一格、同一高度"。
  */
 
 /*
@@ -17,15 +22,20 @@
   min-height: 196px;
 }
 
-/* 「已导出 N 个文件」——成了之后框不关，这句是那一屏的主语 */
-.done {
-  margin: 0 0 14px;
-  padding: 10px 14px;
-  border-radius: var(--r-md);
-  background: var(--accent-soft);
+/* ---- 成的那一屏：不加一条新行，就着已有的几格说成功（见文件头第 3 条） ---- */
+
+/*
+ * 页脚左边那句「已导出 N 个文件」。
+ *
+ * `margin-right: auto` 把它推到页脚的另一头（模态框的页脚是右对齐的一行按钮）——
+ * 它**不改变页脚高度**（高度由那几颗按钮撑着），所以框一点不动。
+ */
+.footNote {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
   color: var(--accent-deep);
   font-size: var(--fs-label);
-  line-height: 1.7;
 }
 
 /* ---- 三件套：一行一个（平铺行 + 发丝线，不做卡片气泡） ---- */
@@ -53,6 +63,11 @@
   display: grid;
   place-items: center;
   color: var(--text-3);
+}
+
+/* 写好了：那枚纸就地把换成一个绿勾（同一格、同一尺寸，一行都不长） */
+.fileIcon[data-done='true'] {
+  color: var(--accent);
 }
 
 .fileMeta {
@@ -162,7 +177,11 @@
   font-weight: 600;
 }
 
-/* 「更改位置」那一颗：**整条里唯一可点的地方**（字体从等宽换回正文） */
+/*
+ * 保存位置右边那一颗：**整条里唯一可点的地方**（字体从等宽换回正文）。
+ * 导出之前是「更改位置」；成了之后**就地翻成「打开位置」**（同一个元素、同一尺寸），
+ * 配色跟着换成强调色 —— 那一刻它是这一屏最该点的一颗。
+ */
 .pathEdit {
   flex-shrink: 0;
   padding: 4px 12px;
@@ -179,4 +198,11 @@
 
 .pathEdit:hover {
   border-color: var(--text-3);
+}
+
+.pathEdit[data-open='true'] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
 }

@@ -1455,6 +1455,16 @@ export const mockApi: MkpApi = {
   },
 
   /**
+   * 「打开位置」（导出成功之后那一颗）。与 [`revealInFolder`] 同一条：假后端没有
+   * 文件系统，**照实说它在真机上的样子**，不假装打开了（假装的话浏览器里看着像成了）。
+   */
+  async revealReportExport(_id, dir) {
+    throw new Error(
+      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，停在 ${dir}\\<基名>\\`,
+    )
+  },
+
+  /**
    * 「更改位置」那一格。浏览器里没有 `tauri-plugin-dialog` 那套系统选择器：
    * Chromium 有 File System Access API 就真弹一个，没有就退回一个"演示位置" ——
    * 与 [`pickImportFiles`] 同一路数（假后端不装文件系统，只把流程走通）。

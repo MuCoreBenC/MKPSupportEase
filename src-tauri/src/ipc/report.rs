@@ -587,6 +587,51 @@ pub fn export_report_archive(
     })
 }
 
+/// **打开这一次导出的那个文件夹**（导出框上那颗「打开位置」，2026-10-11 作者点的）。
+///
+/// 导出成功之后用户要做的事只有一件：去那个文件夹里看一眼、或把这几份交给别人 ——
+/// 所以那一刻「更改位置」换成「打开位置」（位置已经定了，没什么可改的）。
+///
+/// 闸门与 `mine::reveal_in_folder` / `wb_reveal_asset` 同一条（**路径由后端自己算**，
+/// 不给前端传任意路径的机会）：
+///
+/// - 落点是**后端算出来的基名**接在 `dir` 后面（`<dir>/<基名>`）—— 前端传的只当父目录；
+/// - 它必须**真的是一个目录**（见 [`export_target`]）：既挡住"这条记录根本没导出过"，
+///   也挡住把一个**文件**交给系统 —— `open_path` 拿到可执行文件是会**启动**它的，
+///   那就是另一回事了（`wb_open_external` 那条"白名单要窄"的纪律）；
+/// - **只读、只开系统文件管理器、一个应用状态都不碰**。
+#[tauri::command]
+pub async fn reveal_report_export(app: AppHandle, id: String, dir: String) -> Result<(), AppError> {
+    traced("revealReportExport", |_| {
+        check_id(&id)?;
+        let parent = PathBuf::from(&dir);
+        if dir.trim().is_empty() || !parent.is_absolute() {
+            return Err(AppError::invalid_argument("保存位置要给一个绝对路径"));
+        }
+        let root = history_root(&app)?;
+        let (_day_dir, meta_path) = record_paths(&root, &id)?;
+        let base = export_base(&id, model_name_of(&meta_path).as_deref());
+        let target = export_target(&parent, &base)?;
+        tauri_plugin_opener::OpenerExt::opener(&app)
+            .open_path(target.to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string()))
+    })
+}
+
+/// 这次导出的落点：`<父目录>/<基名>`，而且**必须真是一个目录**才给。
+///
+/// 不在就如实拒绝并附上期望路径（与 `wb_reveal_asset` 的 `reveal_target` 同一条：
+/// 不去猜、也不打开一个不存在的目录）。同名的是一个**文件**时同样拒绝 —— 交给系统的
+/// 路径是"打开它"，而一个文件会被**启动**（`.exe` 尤其），那不是用户点「打开位置」的意思。
+fn export_target(parent: &Path, base: &str) -> Result<PathBuf, AppError> {
+    let target = parent.join(base);
+    if !target.is_dir() {
+        return Err(AppError::not_found(format!("这个位置里还没有「{base}」"))
+            .with_detail(format!("期望路径：{}", target.display())));
+    }
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     // 判据要造真实归档文件 —— 生产代码的写盘走 `fsx::atomic` 那一个洞。
@@ -880,6 +925,26 @@ mod tests {
             std::fs::read_to_string(day.join(format!("{id}.gcode"))).unwrap(),
             "; 处理后"
         );
+    }
+
+    /// 「打开位置」只认**真在的那个导出目录**：还没导出过就如实拒绝（附期望路径），
+    /// 同名的是一个**文件**也拒绝 —— 交给系统的那条路径是"打开它"，
+    /// 而一个文件会被**启动**（`.exe` 尤其），那不是用户点「打开位置」的意思。
+    #[test]
+    fn reveal_only_opens_a_real_export_directory() {
+        let out = tempfile::tempdir().unwrap();
+        let base = "帕姆_20261011142431";
+
+        let err = export_target(out.path(), base).unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::NotFound);
+        assert!(err.message.contains(base), "{}", err.message);
+
+        let target = out.path().join(base);
+        std::fs::create_dir_all(&target).unwrap();
+        assert_eq!(export_target(out.path(), base).unwrap(), target);
+
+        std::fs::write(out.path().join("帕姆.exe"), "x").unwrap();
+        assert!(export_target(out.path(), "帕姆.exe").is_err(), "文件不给");
     }
 
     /// id 是拼路径的那一段：带分隔符 / 全是点的一律在门口拦掉。

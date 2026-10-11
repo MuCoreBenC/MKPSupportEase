@@ -1933,6 +1933,16 @@ export interface MkpApi {
   exportReportArchive(id: string, dir: string): Promise<string[]>
 
   /**
+   * **打开这次导出的那个文件夹**（导出框上那颗「打开位置」）。
+   *
+   * 导出成功之后用户要做的事只剩一件：去那个文件夹里看一眼 —— 所以那一刻
+   * 「更改位置」换成它。`dir` 与 [`MkpApi.exportReportArchive`] 收到的是**同一个**
+   * 父目录，基名由后端算；**只有那个目录真在**才开（还没导出过就如实报找不到），
+   * 也绝不把一个文件交给系统（那是"启动它"，不是"打开位置"）。
+   */
+  revealReportExport(id: string, dir: string): Promise<void>
+
+  /**
    * 选一个目录（导出框那颗「更改位置」）。走系统目录选择器，`current` 是打开时停在的
    * 那个目录。**取消给 `null`，不是错误**。
    */
