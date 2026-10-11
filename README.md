@@ -44,6 +44,7 @@ cd src-tauri && cargo test && cargo clippy -- -D warnings
 | [`docs/DATA-INVENTORY.md`](docs/DATA-INVENTORY.md) | 对账单：现有代码与文件按总纲逐件归位 + 收口进展日志 |
 | [`HANDOFF.md`](HANDOFF.md) | 交接：现在在哪、接下来去哪、纪律与判据清单 |
 | [`docs/GIT-WORKFLOW.md`](docs/GIT-WORKFLOW.md) | 八道本地闸 + 服务端 ruleset + 发版流程 |
+| [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md) | **全仓文档索引**：每份文档的状态 + 冲突 / 重复 / 待合并清单（整理件，不做合并） |
 
 另外两份是从试验场原样搬来的：[`docs/DESIGN-SPACING.md`](docs/DESIGN-SPACING.md)（间距与动画原则）、
 [`docs/3D-ASSET-CONTRACT.md`](docs/3D-ASSET-CONTRACT.md)（上游 3D 资产契约）。
