@@ -30,10 +30,14 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter as _, Manager as _};
 
 use crate::error::AppError;
-use crate::hook_ipc::{self, FinishedPayload, FromHook, ProgressPayload, QuestionPayload, ToHook};
+use crate::hook_ipc::{
+    self, FactsPayload, FinishedPayload, FromHook, ProgressPayload, QuestionPayload, ToHook,
+};
 
 /// 一条进度（推给界面，也存进快照）。
 pub const PROGRESS_EVENT: &str = "postprocess-progress";
+/// 开场那几个事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）—— 界面左栏那张表。
+pub const FACTS_EVENT: &str = "postprocess-facts";
 /// 要用户回答一个问题（目前只有"机型不匹配还跑不跑"）。
 pub const QUESTION_EVENT: &str = "postprocess-question";
 /// 跑完了（成功 / 失败 / 取消都走这一条），带上退出码。
@@ -43,6 +47,8 @@ pub const STARTED_EVENT: &str = "postprocess-started";
 
 /// 一条进度长什么样（与 Rust 侧 [`ProgressPayload`] 一一对应；前端只认字段名）。
 pub type ProgressDto = ProgressPayload;
+/// 开场那几个事实长什么样。
+pub type FactsDto = FactsPayload;
 /// 一个问题长什么样。
 pub type QuestionDto = QuestionPayload;
 /// 结论长什么样。
@@ -62,6 +68,9 @@ pub struct StartedDto {
 pub struct RunSnapshot {
     pub preset_name: String,
     pub gcode_name: String,
+    /// 开场那几个事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）—— 还没收到就是 `None`
+    /// （窗口开得比钩子早、或者那一趟在报事实之前就失败了）
+    pub facts: Option<FactsDto>,
     pub question: Option<QuestionDto>,
     pub progress: Option<ProgressDto>,
     pub finished: Option<FinishedDto>,
@@ -81,6 +90,7 @@ pub struct HookView {
 struct Shared {
     preset_name: Option<String>,
     gcode_name: Option<String>,
+    facts: Option<FactsDto>,
     question: Option<QuestionDto>,
     progress: Option<ProgressDto>,
     finished: Option<FinishedDto>,
@@ -183,6 +193,10 @@ impl HookView {
                     },
                 );
             }
+            FromHook::Facts(facts) => {
+                self.shared.lock().expect("锁没坏").facts = Some(facts.clone());
+                let _ = app.emit(FACTS_EVENT, facts);
+            }
             FromHook::Progress(progress) => {
                 self.shared.lock().expect("锁没坏").progress = Some(progress.clone());
                 let _ = app.emit(PROGRESS_EVENT, progress);
@@ -239,6 +253,7 @@ impl HookView {
         Some(RunSnapshot {
             preset_name,
             gcode_name: g.gcode_name.clone().unwrap_or_default(),
+            facts: g.facts.clone(),
             question: g.question.clone(),
             progress: g.progress.clone(),
             finished: g.finished.clone(),
@@ -413,6 +428,7 @@ mod tests {
             *g = Shared {
                 preset_name: Some("A1_MINI-fast.toml".to_owned()),
                 gcode_name: Some("45600.0.gcode".to_owned()),
+                facts: None,
                 progress: Some(ProgressPayload {
                     step: "pass1".to_owned(),
                     fraction_in_step: Some(0.5),

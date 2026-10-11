@@ -1474,9 +1474,31 @@ export interface ParamDecision {
 
 /* ——— 后处理钩子那一趟（切片器导出 G-code 时起的那个进程）———
  *
- * 三个形状与 Rust 侧 `hook_ui` 里的 `ProgressPayload` / `QuestionPayload` /
- * `FinishedPayload` / `RunSnapshot` 一一对应（两边没有编译器，靠这里的注释对齐）。
+ * 几个形状与 Rust 侧 `hook_ui` 里的 `FactsPayload` / `ProgressPayload` /
+ * `QuestionPayload` / `FinishedPayload` / `RunSnapshot` 一一对应
+ * （两边没有编译器，靠这里的注释对齐）。
  */
+
+/**
+ * 开场那几个事实（那一屏左栏那张表）。
+ *
+ * **只报开跑那一刻就确定的那几格**：总层数要 pass1 刮出来、擦料塔类型要 support 步的
+ * 判据定 —— 那两个不在这一条里（`Finished` 之前拿不到，编一个比空着糟）。
+ */
+export interface PostProcessFacts {
+  /** G-code 自报的机型（`; printer_model` 那一档） */
+  gcodeMachine: string
+  /** 预设那份的机型（维度与打印边界按它算） */
+  presetMachine: string
+  /** 耗材类型（`PLA` / `PETG` …） */
+  filamentType: string
+  /** 输入 G-code 的字节数 */
+  fileSizeBytes: number
+  /** 喷嘴直径（mm） */
+  nozzleDiameter: number
+  /** 层高（mm）—— 常规层高那一档 */
+  layerHeight: number
+}
 
 /** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
 export interface PostProcessProgress {
@@ -1533,6 +1555,8 @@ export interface PostProcessStarted {
 export interface PostProcessRun {
   presetName: string
   gcodeName: string
+  /** 开场那几个事实（左栏那张表）；那一趟在报事实之前就结束了 ⇒ `null` */
+  facts: PostProcessFacts | null
   question: PostProcessQuestion | null
   progress: PostProcessProgress | null
   finished: PostProcessFinished | null

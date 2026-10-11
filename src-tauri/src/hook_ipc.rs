@@ -88,6 +88,30 @@ pub struct QuestionPayload {
     pub text: String,
 }
 
+/// **开场那几个事实**（界面左栏那张表：这份 G-code 是哪台机、什么耗材、多大、喷嘴多粗）。
+///
+/// 只给界面看 —— 内核不知道有这张表，它是 [`crate::hook`] 从 IR 与输入正文里取的。
+/// 一开场就报一条：不然用户对着一个光秃秃的进度条等十几秒，连"它在处理哪一份"都看不出来。
+///
+/// ★ 只报**开跑那一刻就确定**的那几格。总层数（pass1 才刮出来）与擦料塔类型
+///   （support 步的判据才定）不在这一条里 —— 编一个出来比空着糟。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactsPayload {
+    /// G-code 自报的机型（`; printer_model` 那一档 —— 与预设那份比过的那一个）
+    pub gcode_machine: String,
+    /// 预设那份的机型（维度与打印边界都按它算）
+    pub preset_machine: String,
+    /// 耗材类型（`PLA` / `PETG` …）
+    pub filament_type: String,
+    /// 输入 G-code 的字节数
+    pub file_size_bytes: u64,
+    /// 喷嘴直径（mm）
+    pub nozzle_diameter: f64,
+    /// 层高（mm）—— 取常规层高那一档（旧世代那张表摆的就是「喷嘴直径 / 层高」）
+    pub layer_height: f64,
+}
+
 /// 那一趟的结论（成功 / 失败 / 取消都走这一条）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,6 +142,8 @@ pub enum FromHook {
         preset_name: String,
         gcode_name: String,
     },
+    /// 紧接着开场：那几个事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）—— 见 [`FactsPayload`]
+    Facts(FactsPayload),
     Progress(ProgressPayload),
     Question(QuestionPayload),
     /// 打印时间估算**交给你了**：钩子写完盘就退，界面按 id 补全那条记录。

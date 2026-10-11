@@ -16,8 +16,12 @@ import PageSettings from './settings/PageSettings'
    拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
 import { FileImportProvider, ImportBanner } from './import/FileImport'
 /* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
-   普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够 */
+   普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够。
+   ★ 那一趟的状态**在 App 这一层读一次**（`usePostProcessRun`），同时喂给两处：
+     那一屏模态框 + 后台那条窄条（「后台运行」收起来之后总得有个入口回得去）。 */
 import PostProcessModal from './postprocess/PostProcessModal'
+import PostProcessStrip from './postprocess/PostProcessStrip'
+import { usePostProcessRun } from './postprocess/usePostProcessRun'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -111,6 +115,9 @@ export default function App() {
    */
   const openReport = useCallback(() => setTab('report'), [])
 
+  /* 后处理那一趟：读一次，两处用（见 import 处那条注释） */
+  const postProcess = usePostProcessRun()
+
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
@@ -128,6 +135,9 @@ export default function App() {
 
           {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
           <ImportBanner />
+
+          {/* 后处理在后台跑那条窄条：只在「后台运行」收起来之后、那一趟还没跑完时出现 */}
+          <PostProcessStrip view={postProcess} />
 
           <main className={s.body}>
             <PageSlot hidden={tab !== 'machine'}>
@@ -149,7 +159,7 @@ export default function App() {
               <PageSettings />
             </PageSlot>
           </main>
-          <PostProcessModal onOpenReport={openReport} />
+          <PostProcessModal view={postProcess} onOpenReport={openReport} />
         </FieldLayer>
       </FileImportProvider>
 

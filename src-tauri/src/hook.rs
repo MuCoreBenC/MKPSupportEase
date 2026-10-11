@@ -130,6 +130,38 @@ pub enum MismatchPolicy<'a> {
     Refuse,
 }
 
+/// 「只给界面看」的那几条消息往哪儿去（与 [`MismatchPolicy`] 同一个形状：有没有界面在这儿分）。
+///
+/// 为什么不并进 `sink`：`sink` 是**内核的**进度出口（`ProgressSink`，回答"现在在做什么"），
+/// 而"这台机型 / 这种耗材 / 这份多大"是界面左栏那张表要摆的东西 —— 内核不该知道有那张表。
+pub enum UiLine<'a> {
+    /// 有界面：推过去（`run_with_channel` 给的就是它）
+    Send(&'a crate::hook_ipc::Client),
+    /// 没有界面：什么都不做（判据 / 极端情况那条路）
+    Silent,
+}
+
+impl UiLine<'_> {
+    fn send(&self, msg: crate::hook_ipc::FromHook) {
+        match self {
+            Self::Send(client) => client.send(&msg),
+            Self::Silent => {}
+        }
+    }
+}
+
+/// 开场那几个事实（界面左栏那张表）。**从 IR 与输入正文里取，不重新解析任何东西**。
+fn facts_from(ir: &postprocess::ir::Ir, file_size_bytes: u64) -> crate::hook_ipc::FactsPayload {
+    crate::hook_ipc::FactsPayload {
+        gcode_machine: ir.machine.gcode_machine_type.clone(),
+        preset_machine: ir.machine.machine_type.clone(),
+        filament_type: ir.filament.filament_type.clone(),
+        file_size_bytes,
+        nozzle_diameter: ir.machine.nozzle_diameter,
+        layer_height: ir.machine.typical_layer_height,
+    }
+}
+
 /// 跑一次：前置检查 → 预设 → IR → 机型核对 → 12 步管线（**原地覆盖**）。
 ///
 /// `sink` 是进度出口（界面推事件 / 无界面时 [`NoProgress`]）；
@@ -138,12 +170,15 @@ pub enum MismatchPolicy<'a> {
 ///
 /// `defer_print_time`：**必须确认有界面接手才传 `true`** —— 打印时间是纯报告数据，
 /// 延后能省几百毫秒；但没人接手时传 `true` 会让那条记录永远停在"正在估算"。
+///
+/// `ui`：只给界面看的那几条（目前只有开场的事实那一条），没有界面时传 [`UiLine::Silent`]。
 pub fn run(
     job: &HookJob,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
     mismatch: MismatchPolicy<'_>,
     defer_print_time: bool,
+    ui: UiLine<'_>,
 ) -> Result<Outcome, HookError> {
     let started = Instant::now();
 
@@ -193,6 +228,17 @@ pub fn run(
             return Err(HookError::BadInput(message));
         }
     };
+
+    /*
+     * 一开场先把左栏那张表要的事实报过去（机型 / 耗材 / 大小 / 喷嘴 / 层高）。
+     *
+     * ★ 位置就在**机型核对之前**：这一刻两个机型都在手上，而下面那一问正是拿它俩比 ——
+     *   用户看着表上那两行答"要不要继续"才答得明白（旧世代那屏也是这么摆的）。
+     */
+    ui.send(crate::hook_ipc::FromHook::Facts(facts_from(
+        &ir,
+        raw.len() as u64,
+    )));
 
     // 机型核对：预设说一台、切片器那份自报另一台 —— 维度与边界全按预设算，
     // 闷头跑出来的是垃圾（旧世代那次实测：A1 的图 + A1 mini 的预设，
@@ -674,7 +720,14 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
     };
 
     // 打印时间**只在真的有界面接手时**才交出去 —— 没人接手就自己算完，记录才完整。
-    let done = run(job, &mut sink, &cancel, mismatch, client.connected());
+    let done = run(
+        job,
+        &mut sink,
+        &cancel,
+        mismatch,
+        client.connected(),
+        UiLine::Send(&client),
+    );
     if let Ok(done) = &done {
         if let Some(d) = &done.deferred_print_time {
             client.send(&crate::hook_ipc::FromHook::DeferPrintTime {
@@ -700,7 +753,14 @@ pub fn run_and_report(job: &HookJob) -> ExitCode {
     let cancel = CancelToken::new();
     let mut sink = NoProgress;
     // 没有界面 ⇒ 打印时间必须自己算完（`defer = false`），否则记录永远停在"正在估算"
-    let done = run(job, &mut sink, &cancel, MismatchPolicy::Refuse, false);
+    let done = run(
+        job,
+        &mut sink,
+        &cancel,
+        MismatchPolicy::Refuse,
+        false,
+        UiLine::Silent,
+    );
     ExitCode::from(report(done))
 }
 
@@ -945,6 +1005,28 @@ mod tests {
         p.to_path_buf()
     }
 
+    /// 开场那条事实：从 IR 与输入字节数里取，**一格都不许错位**
+    /// （两个机型最容易反：`preset` 是维度与边界按它算的那一份，`gcode` 是切片器自报的）。
+    #[test]
+    fn the_opening_facts_come_straight_from_the_ir() {
+        let mut ir = postprocess::ir::Ir::default();
+        ir.machine.machine_type = "A1_MINI".to_owned();
+        ir.machine.gcode_machine_type = "A1".to_owned();
+        ir.filament.filament_type = "PETG".to_owned();
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.first_layer_height = 0.25;
+        ir.machine.typical_layer_height = 0.2;
+
+        let f = facts_from(&ir, 3_355_443);
+        assert_eq!(f.preset_machine, "A1_MINI");
+        assert_eq!(f.gcode_machine, "A1");
+        assert_eq!(f.filament_type, "PETG");
+        assert_eq!(f.nozzle_diameter, 0.4);
+        /* 层高取**常规**那一档（旧世代那张表摆的是 0.20，不是首层 0.25） */
+        assert_eq!(f.layer_height, 0.2);
+        assert_eq!(f.file_size_bytes, 3_355_443);
+    }
+
     /// 仓库里那份夹具预设（与内置产物同构）—— 机型 A1 / 变体 fast
     fn fixture_preset(dest: &std::path::Path) {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -960,6 +1042,7 @@ mod tests {
             &CancelToken::new(),
             MismatchPolicy::Refuse,
             false, // 判据路径没有界面接手 ⇒ 打印时间必须自己算完
+            UiLine::Silent,
         )
     }
 
@@ -1060,6 +1143,7 @@ mod tests {
             &CancelToken::new(),
             MismatchPolicy::Ask(&mut Yes),
             false,
+            UiLine::Silent,
         )
         .expect("答了「继续」就该照跑（那一问只是拦一句，不改管线）");
         assert_eq!(out.output, gcode, "落点仍是输入那一份（原地覆盖）");
@@ -1083,6 +1167,7 @@ mod tests {
             &cancel,
             MismatchPolicy::Refuse,
             false,
+            UiLine::Silent,
         )
         .expect_err("取消必须报错");
         assert_eq!(err.exit_code(), EXIT_FAILED);
@@ -1224,6 +1309,7 @@ mod tests {
             &cancel,
             MismatchPolicy::Refuse,
             false,
+            UiLine::Silent,
         );
         let took = started.elapsed();
         stopper.join().expect("停手那个线程不该炸");

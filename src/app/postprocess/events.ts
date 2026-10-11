@@ -11,6 +11,8 @@
 
 /** 新的一趟开始了（界面据此把上一趟的结论与"我关过了"一起清掉） */
 export const POSTPROCESS_STARTED = 'postprocess-started'
+/** 开场那几个事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）—— 左栏那张表 */
+export const POSTPROCESS_FACTS = 'postprocess-facts'
 /** 一条进度（进度条 + 那一行字） */
 export const POSTPROCESS_PROGRESS = 'postprocess-progress'
 /** 要用户回答一个问题（目前只有"机型不匹配还跑不跑"） */

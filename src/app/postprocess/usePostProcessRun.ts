@@ -26,6 +26,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api, listen } from '../../api'
 import type {
+  PostProcessFacts,
   PostProcessFinished,
   PostProcessProgress,
   PostProcessQuestion,
@@ -34,6 +35,7 @@ import type {
 } from '../../api/contract'
 
 import {
+  POSTPROCESS_FACTS as FACTS_EVENT,
   POSTPROCESS_FINISHED as FINISHED_EVENT,
   POSTPROCESS_PROGRESS as PROGRESS_EVENT,
   POSTPROCESS_QUESTION as QUESTION_EVENT,
@@ -41,15 +43,27 @@ import {
 } from './events'
 
 export interface PostProcessRunView {
-  /** 现在该显示的那一趟；`null` = 什么都不显示 */
+  /** 现在这一趟（**不看用户关没关** —— 后台那条窄条要它）；`null` = 这一趟还没来过 */
   run: PostProcessRun | null
-  /** 用户把那一屏收起来了（只影响这一屏；结论还在报告页里） */
+  /** 用户把那一屏收起来了没有（`true` = 后台跑着，界面上只剩一条窄条） */
+  dismissed: boolean
+  /**
+   * 这一趟开场那一刻（界面自己看见 `postprocess-started` 时记的毫秒）。
+   *
+   * 「预计还需多久」拿它算 —— 窗口开在**半路**时这一格是 `null`（起点没看见），
+   * 那一屏就不摆预计时间：编一个比空着糟。
+   */
+  sinceMs: number | null
+  /** 收起那一屏 —— 跑着的时候就是「后台运行」那颗按钮（只影响这一屏；结论还在报告页里） */
   dismiss: () => void
+  /** 把那一屏叫回来（点那条窄条） */
+  reopen: () => void
 }
 
 export function usePostProcessRun(): PostProcessRunView {
   const [run, setRun] = useState<PostProcessRun | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  const [sinceMs, setSinceMs] = useState<number | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -81,18 +95,24 @@ export function usePostProcessRun(): PostProcessRunView {
     bind<PostProcessStarted>(STARTED_EVENT, (_prev, started) => ({
       presetName: started.presetName,
       gcodeName: started.gcodeName,
+      facts: null,
       question: null,
       progress: null,
       finished: null,
     }))
-    // 收到开场就把"关过了"清掉（放在事件里而不是 setState 外面：订阅晚于开场时也不丢）
+    // 收到开场就把"关过了"清掉、并把这一趟的起点记下来（放在事件里而不是 setState 外面：
+    // 订阅晚于开场时也不丢）
     void listen<PostProcessStarted>(STARTED_EVENT, () => {
-      if (alive) setDismissed(false)
+      if (!alive) return
+      setDismissed(false)
+      setSinceMs(Date.now())
     }).then((off) => {
       if (alive) offs.push(off)
       else off()
     })
 
+    /* 事实那一条紧跟在开场后面（左栏那张表），收不到就空着 —— 不编 */
+    bind<PostProcessFacts>(FACTS_EVENT, (prev, facts) => ({ ...prev, facts }))
     bind<PostProcessProgress>(PROGRESS_EVENT, (prev, progress) => ({ ...prev, progress }))
     bind<PostProcessQuestion>(QUESTION_EVENT, (prev, question) => ({ ...prev, question }))
     bind<PostProcessFinished>(FINISHED_EVENT, (prev, finished) => ({
@@ -101,6 +121,18 @@ export function usePostProcessRun(): PostProcessRunView {
       // 结论已出：那一问不可能还有人在等，界面别再挂着它
       question: null,
     }))
+    /*
+     * 跑完把那一屏叫回来（如果用户正在后台跑）。
+     *
+     * 这是旧世代那条「**结论留在屏上**」：跑到一半点「后台运行」收起来的人，等的是结论 ——
+     * 让他自己去找入口才叫弄丢了。**不是通知**（窗口不抢焦点、也不弹系统横幅）。
+     */
+    void listen<PostProcessFinished>(FINISHED_EVENT, () => {
+      if (alive) setDismissed(false)
+    }).then((off) => {
+      if (alive) offs.push(off)
+      else off()
+    })
 
     return () => {
       alive = false
@@ -109,6 +141,7 @@ export function usePostProcessRun(): PostProcessRunView {
   }, [])
 
   const dismiss = useCallback(() => setDismissed(true), [])
+  const reopen = useCallback(() => setDismissed(false), [])
 
-  return { run: dismissed ? null : run, dismiss }
+  return { run, dismissed, sinceMs, dismiss, reopen }
 }

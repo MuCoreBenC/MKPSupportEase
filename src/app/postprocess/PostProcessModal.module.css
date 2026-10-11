@@ -10,13 +10,37 @@
   gap: 10px;
 }
 
-.files {
+/* ---- 顶上那张表：这一趟在处理什么（布局与报告页那张键值表同一套：字段一列、值一列） ---- */
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 行盒只剩分组的意思（dt/dd 得成对儿）：下场，格子由它俩当 —— 同报告页的 `.kvRow` */
+.factRow {
+  display: contents;
+}
+
+.factRow dt {
   font-size: var(--fs-label);
   color: var(--text-3);
-  max-width: 18em;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 值是**给人抄的**（机型 / 耗材那几串），所以可选中 */
+.factRow dd {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .line {
@@ -31,6 +55,12 @@
 .pct {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+/* 「预计还需 N 秒」跟在百分比前面，比它淡一档（外推值，别当承诺看） */
+.eta {
+  margin-right: 8px;
+  color: var(--text-3);
 }
 
 .msg {
