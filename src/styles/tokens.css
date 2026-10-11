@@ -77,10 +77,31 @@
    */
   --gap: clamp(10px, 4.5px + 1.02vw, 24px);
   --pad: clamp(11px, 7px + 0.78vw, 22px);
+  /*
+   * 框内横向内衬（模态框标题栏 / 框身 / 参数页那一条竖线）。
+   *
+   * ★ 2026-10-10：它原来是**按密度档整档切**的（20px，mini 档 10px）——
+   *   拖窗跨过 640 那一刻，整个框的内衬一起缩一半、框四角的留白也一起缩，
+   *   作者看到的就是"跳变"（两张截图 643 / 632 一对比就能看出来）。
+   *   这属于上面那条注释说的**「量」**，不该由密度档管：改成以窗口宽为自变量的
+   *   连续函数（640 处 10px、1280 处 20px，中间线性）。
+   */
+  --box-x: clamp(10px, 1.56vw, 20px);
   --fs-metric: clamp(19px, 15px + 0.78vw, 30px);
   --fs-label: clamp(10px, 9.5px + 0.16vw, 12.5px);
   --fs-body: clamp(12px, 11px + 0.16vw, 14px);
   --icon: clamp(16px, 14.5px + 0.23vw, 19px);
+  /*
+   * 纯文字按钮 / 胶囊的字族：第一支 `MKP Label` 把**驱动行盒的那支字族**换成
+   * 度量归一化过的一支（升 88% / 降 12%），flex 居中在 Windows / macOS 落在
+   * 同一像素（缘由、两个坑见 `global.css` 的 `MKP Label` 那段）。
+   *
+   * 只是**字族名单**，不是普通关键字，大小写要保原样。
+   */
+  /* stylelint-disable value-keyword-case -- 字体名要保原大小写 */
+  --font-label: 'MKP Label', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;
+  /* stylelint-enable value-keyword-case */
 
   /* 结构性的两样仍按档位给：导航宽（试验场在用）与卡片圆角 */
   --nav-w: 216px;

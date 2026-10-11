@@ -664,6 +664,57 @@ export interface CommittedDraft {
   replaced: boolean
 }
 
+/*
+ * **正文编辑器**（「编辑文件」）那条链的草稿 —— 与上面 `PresetDraft`（参数页那条链）
+ * **分开存**（2026-10-10 作者裁决）：两处同时改一份文件时互不干扰，也不互相作废。
+ *
+ * 唯一的例外：**参数页保存**（`commitPresetDraft`）会把**正文草稿作废**
+ * （盘上字节换了，那份草稿就成了孤儿）—— 契约里写死，且只有这一个方向。
+ */
+export interface PresetTextDraft {
+  /** 「改的是哪一份」的人话名（`A1-fast（已修改）.toml`） */
+  fileName: string
+  /**
+   * 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`）——
+   * 编辑器只服务「我的预设」，所以这里恒有值
+   */
+  path: string
+  /** 正文：用户改到哪算哪（**沿用所选用户线的路径**，与参数草稿共享同一个临时文件） */
+  text: string
+  /** 最后改动时刻（UTC epoch 秒） */
+  updatedUnix: number
+  /** 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的 */
+  reused: boolean
+}
+
+/*
+ * 参数草稿的**摘要** —— 预设列表行上的「未保存」标记、浮动提示、"要不要重开"三处erground。
+ * 只摘要不正文：`null` = 现在没有参数草稿（保存了 / 作废了 / 从没打开过）。
+ */
+export interface PresetDraftSummary {
+  /** 改的是哪一条线（官方交付文件 / 我自己那份） */
+  origin: ActiveOrigin
+  /** 从哪一份改出来的。官方线是下载区里的文件名；用户线是给人看的文件名 */
+  sourceFileName: string
+  /** **用户线**的落点（相对用户根）；官方线是 `null`（落点由目录给） */
+  path: string | null
+  /** 「真改过才算」：与来源现在的字节比（只差血统处置 / 换行的差异不算改动） */
+  dirty: boolean
+  /** 最后改动时刻（UTC epoch 秒） */
+  updatedUnix: number
+}
+
+/** 身份账本的一行：「我这边这一份」↔「云端那一版」 */
+export interface UserPresetIdentity {
+  /** 生成一次、永不变（界面上不显示，只用来对账） */
+  id: string
+  /** 现在落在哪（相对用户根，如 `presets-mine/A1-fast.toml`） */
+  path: string
+  fileName: string
+  /** 从云端哪个条目下来的（目录里的 `fileName`） */
+  cloudSource: string
+}
+
 /** 一份用户文件的新落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状） */
 export interface UserFileIdentity {
   /** 落点（相对**用户根**，`presets-mine/…`） */
@@ -1041,6 +1092,18 @@ export interface FetchOfficialResult {
   fileName: string
   /** 我那一份的落点（相对用户根：`presets-mine/…`） */
   path: string
+  /**
+   * **同名已经有一份了**（2026-10-10）：这次**没落新的一份** —— 界面该问用户
+   * "要不要导入（自动改名）"（不覆盖、也不静默丢掉）。
+   *
+   * 值是"占着这个名字的那一份的落点"。
+   */
+  takenBy?: string
+  /**
+   * 上面那一档里，用户同意导入之后**会自动改成什么名字**
+   * （`A1-fast-2.toml` 这种）—— 弹框里直接显示给用户看，不用他自己猜。
+   */
+  suggestedName?: string
 }
 
 /**
@@ -1263,6 +1326,12 @@ export interface ParamSyncEntry {
   officialNew: string | null
   /** 官方改过这一项、而我还没处理 */
   pending: boolean
+  /**
+   * **这一项是冲突**（2026-10-10）：官方新版改了它、**我也改过它**，
+   * 两边的值还不一样。更新时这类项**必须让用户选**（使用新版值 / 保留我的值）；
+   * 不是冲突的（官方改了、我没动）点「更新」就可以直接按新版采用。
+   */
+  conflict: boolean
   /** 我已经对**当前官方版**处理过这一项 */
   decided: ParamDecisionKind | null
 }
@@ -1554,6 +1623,46 @@ export interface MkpApi {
   commitPresetDraft(): Promise<CommittedDraft>
 
   /**
+   * **参数草稿的摘要**（预设列表行上的「未保存」标记、浮动提示、"要不要重开"三处共用）。
+   *
+   * **只摘要不正文**、**没有 null 之外的空值**：现在没有草稿就是 `null`。
+   * 改入口还是 [`putPresetDraft`] / [`patchPresetDraft`] / [`commitPresetDraft`] /
+   * [`discardPresetDraft`] 四条 —— 这条只是给"列表上要不要标一下"用的。
+   */
+  getPresetDraftSummary(): Promise<PresetDraftSummary | null>
+
+  /**
+   * **开始改一份用户预设的正文**（预设页「编辑文件」）。与上面参数页那条链（`beginPresetEdit`）
+   * 不是一回事 —— 这里返回的正文**带着这一份的血统三行**（只在这份文件上有效），
+   * 且要带着 **这份文件的 sha256**（保存时比一下有没有被别人抢先改）。
+   */
+  beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
+
+  /**
+   * 把改动写进临时文件（编辑框边改边存）。**只动正文**，[`beginTextEdit`] 那一刻的其它不变。
+   * 调用前必须有正在改的那一份正文（页面先调 [`beginTextEdit`]）。
+   */
+  putTextDraft(text: string): Promise<void>
+
+  /**
+   * **保存正文**：把正文草稿**原子地**写回它自己 —— 一次替换**整份文件**
+   * （先写临时文件、再换上去）。写完丢掉正文草稿，并把参数页那份草稿一并作废
+   * （它基于的旧字节已经不在）。
+   */
+  commitTextDraft(): Promise<CommittedDraft>
+
+  /** 放弃这次编辑：丢掉临时文件。**天然幂等**（有没有草稿都不会报错） */
+  discardTextDraft(): Promise<void>
+
+  /**
+   * **身份账本**：「我这边这一份」和「云端那一版」的对应关系。
+   *
+   * 预设页判「下载区里这一份我有没有一份」的唯一依据 —— 也是「更新」找**要更新的是哪一份**的依据。
+   * **只有云端的那一版活着的时候才进**（那一版已被移出版次的、**外来 / 自己写的**一律不进）。
+   */
+  getUserPresetIndex(): Promise<UserPresetIdentity[]>
+
+  /**
    * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
    * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-mine/` 那一格内）；
    * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
@@ -1840,7 +1949,16 @@ export interface MkpApi {
    * **不碰「当前使用」**：下载 / 更新是"把官方的取到我机器上"，使用是"把哪一份设为生效"——
    * 后者由本地表那颗按钮走 {@link applyPreset}。官方原件留在下载区，是内部数据。
    */
-  fetchOfficialPreset(fileName: string): Promise<FetchOfficialResult>
+  /**
+   * `renameIfTaken`（2026-10-10）：本机**已经有一份同名的**时怎么办 ——
+   * 默认（不传 / `false`）**不动它**，返回 `takenBy` + `suggestedName`，由界面问用户；
+   * 用户同意导入时传 `true`，这次**自动改一个没被占的名字**落一份新的
+   * （原来那份一个字节不动；新那份的身份记的来源仍是云端这个条目）。
+   */
+  fetchOfficialPreset(
+    fileName: string,
+    renameIfTaken?: boolean,
+  ): Promise<FetchOfficialResult>
 
   /**
    * 撤销使用。幂等：本来就没在用也不报错。

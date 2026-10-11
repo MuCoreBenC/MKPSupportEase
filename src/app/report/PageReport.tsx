@@ -7,6 +7,17 @@
  * 每跑一次落三件套：`<用户根>/gcode_history/<日期>/<名>_{_original.gcode, .gcode, _meta.json}`，
  * 本页读的就是那棵树（Rust 侧 `ipc/report.rs`，只读）。**页面自己不造一个字的数据**。
  *
+ * # 2026-10-11 改版：拆成「列表 + 详情」两块（抽卡定稿的那版）
+ *
+ *   之前    列表行内联展开 —— 内容一多就坏：展开一条 400~600px，把列表顶开、
+ *           行位置跳、要来回滚（作者在 HTML 抽卡里判的）。
+ *   现在    左窄列表常驻 + 右详情独占（master–detail），点下一条直接换右栏；
+ *           详情按**分组**收成页签（默认「全部」：一组一条横线，从上往下铺）。
+ *
+ * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：整块常驻、只露出一截（状态点
+ * 那一列 + 抓手），点一下整块滑过来盖在详情上，点遮罩或往左拖滑回去 —— 手机
+ * 分屏那种手感。CSS 用容器查询（同一套 DOM 两档），JS 只管拖拽与"点了先滑开"。
+ *
  * # 三态分得开
  *
  *   还没有记录   空列表 → 「还没有执行记录」+ 怎么才有记录的一句话
@@ -16,12 +27,20 @@
  * # 动作只有两件
  *
  *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）
- *   展开   看这一条的详情（统计 / 打印时间 / 管线计时 / 警告 / 调用现场）
+ *   展开   看这一条的详情（结论 / 打印 / 管线 / 文件）
  *
  * 「确认导出 / 清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
+ *
+ * # 一个待补：详情字段还差一大截
+ *
+ * 旧版 `_meta.json` 里有的涂胶（总长 / 换笔 / 速度 / 笔偏移）、擦料塔（挤出比 /
+ * 安全 Z）、切片工艺（切片器版本 / 工艺预设名）现在 schema v2 **没透出来**
+ * （`ReportDetail` 只有 stats 16 项 + printTime + pipeline）。HTML 里那几组
+ * （涂胶 / 擦料塔 / 切片工艺）画好了样式但**这里不编数据** —— 等后端把字段
+ * 带出来，往 `buildGroups` 里加一组即可，页面不用改。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, errorText } from '../../api'
 import type { ReportDetail, ReportSummary } from '../../api'
@@ -39,6 +58,24 @@ const STAT_CELLS: [string, string][] = [
   ['originalPrintTime', '切片器预估'],
 ]
 
+/** 列表滑盖的临界宽度：与 CSS 里 `@container (width < 880px)` 同一个数 */
+const NARROW_W = 880
+/** 收起时露出的那一截 */
+const PEEK = 44
+/** 拖动超过这个距离才吸边，否则回弹 */
+const SNAP = 40
+
+const TAB_ALL = 'all'
+
+/** 详情里的一组（页签的一项） */
+interface Group {
+  id: string
+  title: string
+  /** 组名后面那句摘要（横线上跟在标题后） */
+  sum: string
+  cells: [string, string][]
+}
+
 function elapsedText(ms: number | null): string {
   if (ms === null) return '—'
   if (ms < 1000) return `${ms} 毫秒`
@@ -55,10 +92,6 @@ function printTimeText(sec: number | undefined): string {
   return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`
 }
 
-function shaShort(sha: string | undefined): string {
-  return sha === undefined ? '—' : sha.slice(0, 12)
-}
-
 /** 打印时间还没补上时的说法 —— 不许拿 0 凑数（延后估算的那几百毫秒里它是 null） */
 function printTimeStatusText(status: string | null | undefined): string {
   if (status === 'computing') return '正在估算…'
@@ -66,20 +99,177 @@ function printTimeStatusText(status: string | null | undefined): string {
   return '—'
 }
 
+function shaShort(sha: string | undefined): string {
+  return sha === undefined ? '—' : sha.slice(0, 12)
+}
+
+function mb(bytes: number | undefined): string | null {
+  return bytes === undefined ? null : `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+/** 一组里所有格子的值都是「—」就别摆这一组（成功/失败两种情况字段不一样多） */
+function hasAnyValue(cells: [string, string][]): boolean {
+  return cells.some(([, v]) => v !== '—')
+}
+
+/** 把详情摊成几组（键与 `_meta.json` 同名，值一律按"有没有"说话） */
+function buildGroups(detail: ReportDetail): Group[] {
+  const st = detail.summary
+  const stats = detail.stats ?? {}
+  const groups: Group[] = []
+
+  /* 结论：一眼的答案 */
+  const resultCells: [string, string][] = [
+    ['结果', st.ok ? '成功' : '失败'],
+    ['耗时', elapsedText(st.elapsedMs)],
+    ['打印时间', printTimeText(detail.printTime?.totalSeconds)],
+    [
+      '预设 · 机型',
+      [st.presetName, st.machineType].filter((x): x is string => x !== null).join(' · ') || '—',
+    ],
+    ['文件', st.gcodeName ?? '—'],
+  ]
+  if (st.error !== null) resultCells.push(['原因', st.error])
+  groups.push({
+    id: 'result',
+    title: '结论',
+    sum: `${st.ok ? '成功' : '失败'} · ${elapsedText(st.elapsedMs)}`,
+    cells: resultCells,
+  })
+
+  /* 打印：切片器给的事实 + 本程序算出来的打印时间 */
+  const printCells: [string, string][] = [
+    [
+      '打印时间（估算）',
+      detail.printTime?.totalSeconds === undefined
+        ? printTimeStatusText(detail.printTimeStatus)
+        : printTimeText(detail.printTime.totalSeconds),
+    ],
+    ...STAT_CELLS.map(([key, label]): [string, string] => [
+      label,
+      stats[key] === undefined ? '—' : String(stats[key]),
+    ]),
+  ]
+  if (detail.printTime?.segments !== undefined) {
+    printCells.push(['耗时段数', String(detail.printTime.segments)])
+  }
+  if (hasAnyValue(printCells)) {
+    groups.push({
+      id: 'print',
+      title: '打印',
+      sum: printTimeText(detail.printTime?.totalSeconds),
+      cells: printCells,
+    })
+  }
+
+  /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
+  if (detail.warnings.length > 0) {
+    groups.push({
+      id: 'warnings',
+      title: '警告',
+      sum: `${detail.warnings.length} 条`,
+      cells: detail.warnings.map((w, i): [string, string] => [`第 ${i + 1} 条`, w]),
+    })
+  }
+
+  /* 管线计时：一步一行，步里的多行细节跟着 */
+  const pipeMs = detail.pipeline.reduce((a, p) => a + (p.elapsedMs ?? 0), 0)
+  groups.push({
+    id: 'pipeline',
+    title: '管线计时',
+    sum: `${detail.pipeline.length} 步 · ${pipeMs.toFixed(0)} 毫秒`,
+    cells: [],
+  })
+
+  /* 文件与校验：输入/输出两边的事实摆在一起，才看得出"改了多少" */
+  const inMb = mb(detail.inputFile?.sizeBytes)
+  const outMb = mb(detail.outputFile?.sizeBytes)
+  const diff =
+    detail.inputFile?.sizeBytes !== undefined && detail.outputFile?.sizeBytes !== undefined
+      ? `${((detail.outputFile.sizeBytes - detail.inputFile.sizeBytes) / 1024 / 1024).toFixed(2)} MB`
+      : null
+  const fileCells: [string, string][] = [
+    [
+      '输入',
+      [
+        detail.inputFile?.path ?? detail.gcodePath ?? '—',
+        inMb,
+        detail.inputFile?.lines === undefined ? null : `${detail.inputFile.lines} 行`,
+        `sha ${shaShort(detail.inputFile?.sha256)}`,
+      ]
+        .filter((x): x is string => x !== null)
+        .join(' · '),
+    ],
+    [
+      '输出',
+      [detail.outputFile?.path ?? '—', outMb, `sha ${shaShort(detail.outputFile?.sha256)}`]
+        .filter((x): x is string => x !== null)
+        .join(' · '),
+    ],
+    ['预设', detail.presetPath ?? st.presetName ?? '—'],
+  ]
+  if (detail.invocation?.exe !== undefined) {
+    fileCells.push([
+      '调用',
+      `${detail.invocation.exe}${
+        detail.invocation.args !== undefined ? ` ${detail.invocation.args.join(' ')}` : ''
+      }`,
+    ])
+  }
+  groups.push({
+    id: 'files',
+    title: '文件与校验',
+    sum: diff === null ? '' : `改了 ${diff}`,
+    cells: fileCells,
+  })
+
+  return groups
+}
+
 export default function PageReport() {
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [detailErr, setDetailErr] = useState<string | null>(null)
+  const [tab, setTab] = useState<string>(TAB_ALL)
+  const [sideOpen, setSideOpen] = useState(false)
+  /** 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值 */
+  const [, setNarrow] = useState(false)
+
+  const pageRef = useRef<HTMLDivElement>(null)
+  const sideRef = useRef<HTMLElement>(null)
+  /*
+   * 浮层判据 = **真的浮着**（`position:absolute`），不是窄档这个布尔值。
+   *
+   * ★ 二者必须分开判：窄档下 DOM 里是同一份 `.side`，但 CSS 的档位是**容器查询**算的，
+   *   与 JS 的窄档判断可能差一帧，也可能因为"页面被挤窄"这类布局反噬而不同步。
+   *   若只认 `narrow`，一个布尔值的误判就会把整份列表变成"怎么点都不响应"
+   *   （拖拽被当成滑盖、那次 click 又被压掉）。以实际生效的几何为准，才不会整页死。
+   */
+  const isFloating = () => {
+    const el = sideRef.current
+    return el !== null && getComputedStyle(el).position === 'absolute'
+  }
+
+  /** 拖拽中的现场；null = 没在拖 */
+  const drag = useRef<{ x: number; y: number; dx: number; open: boolean; moved: boolean } | null>(
+    null,
+  )
+  /** 拖动结束后的那次 click 不当点击（否则刚滑开又被"选行"关回去） */
+  const suppressClick = useRef(false)
 
   const read = useCallback(() => {
     setErr(null)
     setRows(null)
     api.getReportList().then(
-      (list) => setRows(list),
+      (list) => {
+        setRows(list)
+        /* 默认选中最新那条：进页面就有内容看，不用先点一下 */
+        setSelId((cur) => cur ?? list[0]?.id ?? null)
+      },
       (e: unknown) => {
         setRows([])
         setErr(errorText(e))
@@ -91,27 +281,198 @@ export default function PageReport() {
     read()
   }, [read])
 
-  /* 展开一条：详情按需读（列表只带摘要，展开才读整份 meta） */
-  const toggle = (row: ReportSummary) => {
-    if (openId === row.id) {
-      setOpenId(null)
+  /* 展开一条：详情按需读（列表只带摘要，选中才读整份 meta） */
+  useEffect(() => {
+    if (selId === null) {
       setDetail(null)
       setDetailErr(null)
       return
     }
-    setOpenId(row.id)
     setDetail(null)
     setDetailErr(null)
-    api.getReportDetail(row.id).then(
-      (got) => setDetail(got),
-      (e: unknown) => setDetailErr(errorText(e)),
+    let alive = true
+    api.getReportDetail(selId).then(
+      (got) => {
+        if (alive) setDetail(got)
+      },
+      (e: unknown) => {
+        if (alive) setDetailErr(errorText(e))
+      },
     )
+    return () => {
+      alive = false
+    }
+  }, [selId])
+
+  /*
+   * 窄档判断：CSS 里的容器查询管布局，JS 只要一个布尔值来决定"点了是滑开还是选中"。
+   *
+   * ★ 量的是**窗口**内宽，不是页面自己的 `clientWidth`：库里这条左栏是 `position:absolute`
+   *   浮层（窄档档位），页面一旦被挤到比窗口窄（Tauri 的窗口控制浮层展开时就会挤），
+   *   `page.clientWidth` 仍然报"宽"，于是 CSS 已经切成浮层盖住了列表、JS 这边却以为还是
+   *   常驻双栏 ⇒ 点列表只当"选行"，永远滑不开 —— 表现就是**列表点不动**。
+   *   窗口内宽是这条判据里唯一不会被自己布局反噬的量。
+   */
+  useEffect(() => {
+    const measure = () => {
+      const el = pageRef.current
+      if (el === null) {
+        setNarrow(window.innerWidth < NARROW_W)
+        return
+      }
+      const box = el.getBoundingClientRect()
+      /*
+       * 贴着窗口右缘（差值 ≤ 2px）时以页面宽为准（对得上 CSS 的容器查询）；
+       * 否则说明页面被挤窄了 —— 取两者小的那个，宁可早一点当窄档。
+       */
+      const flush = Math.abs(box.right - window.innerWidth) <= 2
+      setNarrow((flush ? Math.min(box.width, window.innerWidth) : box.width) < NARROW_W)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    const el = pageRef.current
+    if (el !== null) ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+
+  /*
+   * 选一条记录。
+   *
+   * ★ 常驻双栏档下**只有一条路**：选中它 —— 早先这里用 JS 的 `narrow` 当闸，
+   *   一旦这个布尔值与 CSS 的档位不同步（页面被挤窄 / 收窄到刚好过界），
+   *   点一下会被当成"该滑开"而吞掉 ⇒ **整份列表怎么点都不响应**。
+   *   现在收起/展开只认**真的是浮层**时的状态，常驻档永远落到"选中"。
+   */
+  const pick = (row: ReportSummary) => {
+    if (suppressClick.current) {
+      suppressClick.current = false
+      return
+    }
+    if (isFloating() && !sideOpen) {
+      setSideOpen(true)
+      return
+    }
+    setSelId(row.id)
+    if (isFloating()) setSideOpen(false)
   }
 
+  /* ---------- 滑盖拖拽（只在浮层档生效） ---------- */
+  const onDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (!isFloating()) return
+    drag.current = { x: e.clientX, y: e.clientY, dx: 0, open: sideOpen, moved: false }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onMove = (e: React.PointerEvent<HTMLElement>) => {
+    const d = drag.current
+    if (d === null || sideRef.current === null || !isFloating()) return
+    const dx = e.clientX - d.x
+    const dy = e.clientY - d.y
+    if (!d.moved && Math.abs(dx) < 8) return
+    /* 纵向意图交给列表自己滚 */
+    if (!d.moved && Math.abs(dx) <= Math.abs(dy)) {
+      drag.current = null
+      return
+    }
+    d.moved = true
+    d.dx = dx
+    const el = sideRef.current
+    el.style.transition = 'none'
+    const min = -(el.getBoundingClientRect().width - PEEK)
+    const base = d.open ? 0 : min
+    el.style.transform = `translateX(${Math.min(0, Math.max(min, base + dx))}px)`
+  }
+  const onUp = () => {
+    const d = drag.current
+    if (d === null) return
+    drag.current = null
+    const el = sideRef.current
+    if (el !== null) {
+      el.style.transition = ''
+      el.style.transform = ''
+    }
+    if (!d.moved) {
+      /*
+       * 没拖：收起态下点列表就是"滑过来"，随后那次 click 要压掉。
+       * ※ 收起态下用户还按不到列表（那一截只是把手），所以这里压掉的是把手上的 click；
+       *   展开态不压 —— 那才是真正的"选一条"。
+       */
+      if (!d.open && isFloating()) setSideOpen(true)
+      return
+    }
+    suppressClick.current = true
+    if (!d.open && d.dx > SNAP) setSideOpen(true)
+    else if (d.open && d.dx < -SNAP) setSideOpen(false)
+  }
+
+  /* ---------- 列表：按日分组 ---------- */
+  const days: string[] = []
+  const byDay = new Map<string, ReportSummary[]>()
+  ;(rows ?? []).forEach((r) => {
+    if (!days.includes(r.day)) days.push(r.day)
+    const list = byDay.get(r.day)
+    if (list === undefined) byDay.set(r.day, [r])
+    else list.push(r)
+  })
+
+  const groups = detail === null ? [] : buildGroups(detail)
+  const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
+  const sel = (rows ?? []).find((r) => r.id === selId) ?? null
+
+  const listHtml = (
+    <nav
+      className={s.side}
+      ref={sideRef}
+      data-open={sideOpen}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+    >
+      <div className={s.sideHead}>
+        <span className={s.sideLb}>执行记录</span>
+        <span className={s.sideCnt}>{(rows ?? []).length} 条</span>
+      </div>
+      <ul className={s.sideList}>
+        {days.map((day) => (
+          <li key={day}>
+            <p className={s.dayRow}>
+              {day}
+              <span className={s.dayCnt}>· {byDay.get(day)?.length ?? 0} 条</span>
+            </p>
+            <ul className={s.dayList}>
+              {(byDay.get(day) ?? []).map((row) => (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    className={s.sideRow}
+                    data-ok={row.ok}
+                    data-on={row.id === selId}
+                    title={`${row.gcodeName ?? '（记录里没写文件名）'} · ${row.startedAt ?? row.day} · ${elapsedText(row.elapsedMs)}`}
+                    onClick={() => pick(row)}
+                  >
+                    <span className={s.dot} aria-hidden="true" />
+                    <span className={s.sideFile}>{row.gcodeName ?? '（记录里没写文件名）'}</span>
+                    <span className={s.sideDur}>{elapsedText(row.elapsedMs)}</span>
+                  </button>
+                  {!row.ok && row.error !== null && <p className={s.rowErr}>{row.error}</p>}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+      <span className={s.grabber} aria-hidden="true" />
+    </nav>
+  )
+
   return (
-    <section className={s.page}>
+    <section className={s.page} ref={pageRef}>
       <header className={s.head}>
-        <h2 className={s.title}>后处理执行报告与历史</h2>
+        <h2 className={s.title}>执行报告</h2>
         <p className={s.sub}>
           后处理每跑一次（切片器导出时按「复制后处理脚本」那条命令跑），这里多一条记录。
         </p>
@@ -141,133 +502,115 @@ export default function PageReport() {
           导出打印文件时会自动生成第一条。
         </p>
       ) : (
-        <ul className={s.list}>
-          {rows.map((row) => (
-            <li key={row.id} className={s.row} data-open={openId === row.id}>
-              <button type="button" className={s.rowHead} onClick={() => toggle(row)}>
-                <span className={row.ok ? s.ok : s.bad}>{row.ok ? '✓ 成功' : '✗ 失败'}</span>
-                <span className={s.when}>{row.startedAt ?? row.day}</span>
-                <span className={s.file} title={row.gcodeName ?? ''}>
-                  {row.gcodeName ?? '（记录里没写文件名）'}
-                </span>
-                <span className={s.meta}>
-                  {[row.presetName, row.machineType, elapsedText(row.elapsedMs)]
-                    .filter((x): x is string => x !== null && x !== undefined)
-                    .join(' · ')}
-                  {row.warningCount > 0 ? ` · ⚠ ${row.warningCount}` : ''}
-                </span>
-              </button>
+        <div className={s.pane}>
+          {listHtml}
+          <div
+            className={s.scrim}
+            onClick={() => setSideOpen(false)}
+            role="presentation"
+          />
 
-              {!row.ok && row.error !== null && <p className={s.rowErr}>{row.error}</p>}
-
-              {openId === row.id && (
-                <div className={s.detail}>
-                  {detailErr !== null ? (
-                    <p className={s.err} role="alert">
-                      详情读不出来：{detailErr}
-                    </p>
-                  ) : detail === null ? (
-                    <p className={s.empty}>正在读这一条的详情…</p>
-                  ) : (
-                    <ReportDetailView detail={detail} />
-                  )}
+          <section className={s.main}>
+            {sel === null ? (
+              <p className={s.empty}>左边选一条记录看详情。</p>
+            ) : (
+              <>
+                <div className={s.mainHead}>
+                  <h3 className={s.mainFile}>{sel.gcodeName ?? '（记录里没写文件名）'}</h3>
+                  <span className={sel.ok ? s.chip : `${s.chip} ${s.chipBad}`}>
+                    {sel.ok ? '成功' : '失败'}
+                  </span>
+                  <span className={s.mainWhen}>
+                    {sel.startedAt ?? sel.day} · {elapsedText(sel.elapsedMs)}
+                  </span>
                 </div>
-              )}
-            </li>
-          ))}
-        </ul>
+
+                {detail !== null && (
+                  <>
+                    <div className={s.tabs} role="tablist">
+                      <button
+                        type="button"
+                        role="tab"
+                        className={s.tab}
+                        data-on={activeTab === TAB_ALL}
+                        aria-selected={activeTab === TAB_ALL}
+                        onClick={() => setTab(TAB_ALL)}
+                      >
+                        全部
+                      </button>
+                      {groups.map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          role="tab"
+                          className={s.tab}
+                          data-on={activeTab === g.id}
+                          aria-selected={activeTab === g.id}
+                          onClick={() => setTab(g.id)}
+                        >
+                          {g.title}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className={s.panels}>
+                      {groups.map((g) => (
+                        <div
+                          key={g.id}
+                          className={s.panel}
+                          data-on={activeTab === TAB_ALL || activeTab === g.id}
+                        >
+                          <div className={s.grp}>
+                            <p className={s.grpBar}>
+                              <b>{g.title}</b>
+                              {g.sum !== '' && <span className={s.grpSum}>{g.sum}</span>}
+                            </p>
+                            {g.id === 'pipeline' ? (
+                              <ol className={s.steps}>
+                                {detail.pipeline.map((step, i) => (
+                                  <li key={i} className={s.step}>
+                                    <span className={s.stepHead}>
+                                      <b>{step.id ?? `第 ${i + 1} 步`}</b>
+                                      <span className={s.stepMs}>
+                                        {elapsedText(step.elapsedMs ?? null)}
+                                      </span>
+                                    </span>
+                                    {step.message !== undefined && step.message !== '' && (
+                                      <span className={s.stepMsg}>{step.message}</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ol>
+                            ) : (
+                              <dl className={s.kv}>
+                                {g.cells.map(([k, v], i) => (
+                                  <div className={s.kvRow} key={`${k}-${i}`}>
+                                    <dt>{k}</dt>
+                                    <dd className={k === '调用' ? s.mono : undefined}>{v}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {detailErr !== null && (
+                  <p className={s.err} role="alert">
+                    详情读不出来：{detailErr}
+                  </p>
+                )}
+                {detail === null && detailErr === null && (
+                  <p className={s.empty}>正在读这一条的详情…</p>
+                )}
+              </>
+            )}
+          </section>
+        </div>
       )}
     </section>
-  )
-}
-
-function ReportDetailView({ detail }: { detail: ReportDetail }) {
-  const stats = detail.stats ?? {}
-  return (
-    <div className={s.detailBody}>
-      {detail.warnings.length > 0 && (
-        <div className={s.block}>
-          <h3 className={s.blockTitle}>警告（{detail.warnings.length}）</h3>
-          <ul className={s.warnList}>
-            {detail.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className={s.block}>
-        <h3 className={s.blockTitle}>统计</h3>
-        <dl className={s.cells}>
-          <div className={s.cell}>
-            <dt>预计打印时间</dt>
-            <dd>
-              {detail.printTime?.totalSeconds === undefined
-                ? printTimeStatusText(detail.printTimeStatus)
-                : printTimeText(detail.printTime?.totalSeconds)}
-            </dd>
-          </div>
-          {STAT_CELLS.map(([key, label]) => (
-            <div className={s.cell} key={key}>
-              <dt>{label}</dt>
-              <dd>{stats[key] === undefined ? '—' : String(stats[key])}</dd>
-            </div>
-          ))}
-          {detail.printTime?.segments !== undefined && (
-            <div className={s.cell}>
-              <dt>耗时段数</dt>
-              <dd>{detail.printTime.segments}</dd>
-            </div>
-          )}
-        </dl>
-      </div>
-
-      {detail.pipeline.length > 0 && (
-        <div className={s.block}>
-          <h3 className={s.blockTitle}>管线计时</h3>
-          <ol className={s.steps}>
-            {detail.pipeline.map((step, i) => (
-              <li key={i}>
-                <span className={s.stepName}>{step.id ?? `第 ${i + 1} 步`}</span>
-                <span className={s.stepMsg}>{step.message ?? ''}</span>
-                <span className={s.stepMs}>{elapsedText(step.elapsedMs ?? null)}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      <div className={s.block}>
-        <h3 className={s.blockTitle}>文件</h3>
-        <dl className={s.facts}>
-          <dt>输入</dt>
-          <dd>
-            {detail.inputFile?.path ?? detail.gcodePath ?? '—'}
-            {detail.inputFile?.sizeBytes !== undefined &&
-              ` · ${(detail.inputFile.sizeBytes / 1024 / 1024).toFixed(1)} MB`}
-            {detail.inputFile?.lines !== undefined && ` · ${detail.inputFile.lines} 行`}
-            {` · sha ${shaShort(detail.inputFile?.sha256)}`}
-          </dd>
-          <dt>输出</dt>
-          <dd>
-            {detail.outputFile?.path ?? '—'}
-            {detail.outputFile?.sizeBytes !== undefined &&
-              ` · ${(detail.outputFile.sizeBytes / 1024 / 1024).toFixed(1)} MB`}
-            {` · sha ${shaShort(detail.outputFile?.sha256)}`}
-          </dd>
-          <dt>预设</dt>
-          <dd>{detail.presetPath ?? detail.summary.presetName ?? '—'}</dd>
-          {detail.invocation?.exe !== undefined && (
-            <>
-              <dt>调用</dt>
-              <dd className={s.mono}>
-                {detail.invocation.exe}
-                {detail.invocation.args !== undefined ? ` ${detail.invocation.args.join(' ')}` : ''}
-              </dd>
-            </>
-          )}
-        </dl>
-      </div>
-    </div>
   )
 }

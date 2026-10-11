@@ -42,7 +42,8 @@
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-deep);
-  font-weight: 600;
+  /* 加粗改用描边：候选胶囊宽度不随选中变（见 global.css 的铁律） */
+  text-shadow: var(--state-bold);
 }
 
 .problem {

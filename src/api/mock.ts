@@ -30,6 +30,8 @@ import {
   menuEntries,
   mockCatalogFiles,
   paramMeta,
+  reportDetail,
+  reportSummaries,
   resolveParams,
   resolveVersionFiles,
   slicerCopied,
@@ -281,6 +283,25 @@ function mockBaseName(source: string): string {
   const parts = source.split(/[/\\]/)
   return parts[parts.length - 1] ?? source
 }
+
+/** 一个没被占的名字：`A1-fast.toml` → `A1-fast-2.toml` → `A1-fast-3.toml`…… */
+function mockUntakenName(wanted: string): string {
+  const dot = wanted.lastIndexOf('.')
+  const stem = dot > 0 ? wanted.slice(0, dot) : wanted
+  const ext = dot > 0 ? wanted.slice(dot) : ''
+  for (let n = 2; n <= 999; n++) {
+    const candidate = `${stem}-${n}${ext}`
+    if (!mockMine.some((f) => f.path === `presets-mine/${candidate}`)) return candidate
+  }
+  return wanted
+}
+/*
+ * 「编辑文件」那条链的草稿（2026-10-10：与上面 `mockDraft` **分开存**）——
+ * 两侧互相作废：任一侧保存都把另一侧丢掉（编辑器手上那份就成了孤儿）。
+ */
+let mockTextDraft: { fileName: string; path: string; text: string; updatedUnix: number } | null =
+  null
+
 /** 编辑中的那一份（真机上是 `run/draft-preset.json`）。`path` 只有用户线才有 */
 let mockDraft: {
   origin: ActiveOrigin
@@ -446,12 +467,21 @@ function mockSyncOf(path: string): PresetParamSync {
     const neu = currentValues?.[d.key]
     const pending = old !== undefined && neu !== undefined && old !== neu
     if (pending) pendingCount += 1
+    const mineValue = mine[d.key] ?? null
     entries.push({
       key: d.key,
-      mine: mine[d.key] ?? null,
+      mine: mineValue,
       baselineOld: old ?? null,
       officialNew: neu ?? null,
       pending,
+      /* 冲突：官方改过它、**我也改过它**，两边的值还不一样（与 Rust 同一式子） */
+      conflict:
+        mineValue !== null &&
+        old !== undefined &&
+        neu !== undefined &&
+        old !== neu &&
+        mineValue !== old &&
+        mineValue !== neu,
       decided:
         decision !== undefined && current !== undefined && decision.sha256 === current.sha256
           ? decision.kind
@@ -1042,7 +1072,83 @@ export const mockApi: MkpApi = {
     }
     mockMineText.set(path, text)
     mockDraft = null
+    /* 另一侧作废：盘上字节换了，「编辑文件」手上那份正文就成了孤儿 */
+    mockTextDraft = null
     return { path, fileName, size, replaced }
+  },
+
+  /* ---------- 「编辑文件」那条链（2026-10-10：与参数草稿分开存） ---------- */
+
+  /** 参数草稿的**摘要** —— 预设列表行上的「未保存」标记用。没有草稿就是 `null` */
+  async getPresetDraftSummary() {
+    if (mockDraft === null) return null
+    const base = mockDraft.origin === 'mine' ? mockMineText.get(mockDraft.path ?? '') : undefined
+    const clean = mockDraft.origin === 'official' ? mockDraft.text === MOCK_OFFICIAL_TEXT : base === mockDraft.text
+    return {
+      origin: mockDraft.origin,
+      sourceFileName: mockDraft.sourceFileName,
+      path: mockDraft.path,
+      /* 「真改过才算」：比不出来（演示里读不到这一份）时保守算脏 */
+      dirty: !clean,
+      updatedUnix: mockDraft.updatedUnix,
+    }
+  },
+
+  /** 开始改一份用户预设的正文。已经有同一份（同路径）的草稿就**接着改** */
+  async beginTextEdit(fileName, path) {
+    if (mockTextDraft !== null && mockTextDraft.path === path) {
+      return { ...mockTextDraft, reused: true }
+    }
+    const raw = mockMineText.get(path)
+    if (raw === undefined) {
+      throw new NotImplementedError(
+        'beginTextEdit',
+        `浏览器预览里读不到 ${path} 的正文 —— 用桌面版就能改（每一份都读得到）`,
+      )
+    }
+    /* 编辑器里这份**带着它自己的血统三行**（在这一份上有效，保存时照写回） */
+    mockTextDraft = { fileName, path, text: raw, updatedUnix: nowSec() }
+    return { ...mockTextDraft, reused: false }
+  },
+
+  async putTextDraft(text) {
+    if (mockTextDraft === null) throw new Error('现在没有正在改的那一份正文')
+    mockTextDraft = { ...mockTextDraft, text, updatedUnix: nowSec() }
+  },
+
+  /** 保存：正文原子写回同一份用户文件，然后丢草稿 + 作废另一侧 */
+  async commitTextDraft() {
+    if (mockTextDraft === null) throw new Error('现在没有正在改的那一份正文，没得存')
+    const rel = mockTextDraft.path
+    const at = mockMine.findIndex((f) => f.path === rel)
+    if (at < 0) throw new Error(`找不到 ${rel} —— 它可能已经被移走或删掉了`)
+    mockMineText.set(rel, mockTextDraft.text)
+    mockMine[at] = { ...mockMine[at], size: mockTextDraft.text.length, modifiedUnix: nowSec() }
+    const fileName = rel.slice(rel.lastIndexOf('/') + 1)
+    const size = mockTextDraft.text.length
+    mockTextDraft = null
+    mockDraft = null
+    return { path: rel, fileName, size, replaced: true }
+  },
+
+  async discardTextDraft() {
+    mockTextDraft = null
+  },
+
+  /**
+   * **身份账本**（派生视图）：只给**血统还指着目录里活着的那一版**的那几份 ——
+   * 与后端同一条口径（不用持久化账本，"盘就是底账"）。
+   */
+  async getUserPresetIndex() {
+    return mockMine
+      /* 只有**血统还指着目录里活着的那一版**的那几份才进账 */
+      .filter((f) => f.basedOn === 'current' || f.basedOn === 'outdated')
+      .map((f) => ({
+        id: f.path,
+        path: f.path,
+        fileName: f.fileName,
+        cloudSource: mockBaseName(f.basedOnLabel ?? f.fileName),
+      }))
   },
 
   /*
@@ -1322,17 +1428,15 @@ export const mockApi: MkpApi = {
 
   /**
    * 报告页的数据是 `mkp-ssr` 钩子落在本机的执行账 —— 浏览器里没有那棵树。
-   * **空列表就是"还没有执行记录"**（与真机同一个答案），不编演示记录充数。
+   * **照真机 2026-10-10 的记录原样做了一份静态夹具**（`mockServer/reports.ts`）——
+   * 报告页很少有人看，先原原本本搬进预览里，以后再改。
    */
   async getReportList() {
-    return []
+    return reportSummaries()
   },
 
-  async getReportDetail() {
-    throw new NotImplementedError(
-      'getReportDetail',
-      '浏览器预览里没有执行记录 —— 后处理报告请用桌面版（SupportEase 应用）看',
-    )
+  async getReportDetail(id) {
+    return reportDetail(id)
   },
 
   /**
@@ -1691,7 +1795,7 @@ export const mockApi: MkpApi = {
    *
    * 与真机同一个形状：用户只面对 `presets-mine/` 里那一份，官方原件留在内部。
    */
-  async fetchOfficialPreset(fileName) {
+  async fetchOfficialPreset(fileName, renameIfTaken = false) {
     const hit = mockReleaseFile(fileName)
     if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
     if (!MOCK_DOWNLOADED.some((f) => f.fileName === fileName)) {
@@ -1735,7 +1839,54 @@ export const mockApi: MkpApi = {
         provenance: 'copy' as const,
       })
     }
-    return { fetched: false, created, fileName, path }
+    /*
+     * 撞名（2026-10-10）：本机已经有一份同名的 ——
+     * 默认不动它（把"谁占了 + 会改成什么"交给界面问）；用户同意后的那次调用按
+     * 没被占的名字再落一份新的，原来那份一个字节不动。
+     */
+    if (created) return { fetched: false, created, fileName, path }
+    if (renameIfTaken) {
+      const name = mockUntakenName(fileName)
+      const newPath = `presets-mine/${name}`
+      const label = `dist/mkp/presets/${fileName}`
+      const text = [
+        `# machine: ${hit.machineId}`,
+        `# variant: ${hit.versionId.toLowerCase()}`,
+        `# based_on: ${label}`,
+        `# based_on_release_time: 2026-10-06 03:34:17`,
+        `# based_on_sha256: ${'0'.repeat(64)}`,
+        MOCK_OFFICIAL_TEXT,
+      ].join('\n')
+      mockMineText.set(newPath, text)
+      mockMine.push({
+        path: newPath,
+        fileName: name,
+        size: text.length,
+        modifiedUnix: nowSec(),
+        kind: 'mkp_preset',
+        state: 'ok',
+        stateDetail: null,
+        basedOn: 'current',
+        basedOnLabel: label,
+        basedOnRelease: '2026-10-06 03:34:17',
+        basedOnMachineId: hit.machineId,
+        basedOnVersionId: hit.versionId,
+        machineId: hit.machineId,
+        versionId: hit.versionId,
+        copiedFrom: label,
+        copiedFromName: fileName,
+        provenance: 'copy' as const,
+      })
+      return { fetched: false, created: true, fileName: name, path: newPath }
+    }
+    return {
+      fetched: false,
+      created,
+      fileName,
+      path,
+      takenBy: path,
+      suggestedName: mockUntakenName(fileName),
+    }
   },
 
   /* 浏览器里没有远端（真远端 = 工作台发布的 dist，或将来的云端）：如实说没有 */

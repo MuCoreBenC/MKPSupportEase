@@ -331,6 +331,46 @@ fn draft_subject(
     }
 }
 
+/// 「编辑文件」那条链的草稿给界面的形状（2026-10-10：与 [`PresetDraftDto`] 分开存）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetTextDraftDto {
+    /// 「改的是哪一份」的人话名
+    pub file_name: String,
+    /// 相对**用户根**的路径（保存就写回这里）
+    pub path: String,
+    /// 正文（**带着这一份自己的血统三行**）
+    pub text: String,
+    pub updated_unix: u64,
+    /// 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的
+    pub reused: bool,
+}
+
+/// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetDraftSummaryDto {
+    pub origin: String,
+    pub source_file_name: String,
+    pub path: Option<String>,
+    /// **真改过才算**：与来源现在的字节比（只差换行/血统处置的差异不算改动）
+    pub dirty: bool,
+    pub updated_unix: u64,
+}
+
+/// 身份账本的一行：「我这边这一份」↔「云端那一版」
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPresetIdentityDto {
+    /// 生成一次、永不变（界面上不显示，只用来对账）。派生视图里它是路径本身
+    pub id: String,
+    /// 现在落在哪（相对用户根）
+    pub path: String,
+    pub file_name: String,
+    /// 从云端哪个条目下来的（目录里的文件名）
+    pub cloud_source: String,
+}
+
 fn draft_dto(draft: runtime::state::PresetDraft, reused: bool) -> PresetDraftDto {
     PresetDraftDto {
         origin: match draft.origin {
@@ -391,6 +431,199 @@ pub async fn patch_preset_draft(
         runtime::app_state::set_draft(&root, &draft.subject(), &draft.source_sha256, &patched)?;
         super::notify_app_state(&app);
         Ok(())
+    })
+}
+
+/*
+ * ---------- 「编辑文件」那条链（2026-10-10：与参数页那条链分开存） ----------
+ *
+ * 两条链的钥匙不同：参数页那条认 `(origin, file_name, path)`（见
+ * [`begin_preset_edit`]），这一条只认**用户线的路径** —— 编辑器只改用户自己的文件。
+ */
+
+/// **开始改一份用户预设的正文**（预设页「编辑文件」）：把当前字节复制进 AppState 的
+/// `text_draft` 格，**盘上那份一动不动**。已经有同一份（同路径）的草稿就**接着改**。
+///
+/// 与 [`begin_preset_edit`] 的两处不同：**正文带着这一份自己的血统三行**（编辑这份时
+/// 它们就在文件里，保存时照写回），以及**入口只收用户线**（官方那份要先拷成自己的）。
+#[tauri::command]
+pub async fn begin_text_edit(
+    app: AppHandle,
+    file_name: String,
+    path: String,
+) -> Result<PresetTextDraftDto, AppError> {
+    traced("beginTextEdit", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        if runtime::mine::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
+            )));
+        }
+
+        /* 同一份（路径相同）已经有草稿 → 接着改，不覆盖用户已经敲进去的字 */
+        if let Some(draft) = runtime::app_state::text_draft(&root)? {
+            if draft.key() == path {
+                return Ok(PresetTextDraftDto {
+                    file_name: draft.file_name,
+                    path: draft.path,
+                    text: draft.text,
+                    updated_unix: draft.updated_unix,
+                    reused: true,
+                });
+            }
+        }
+
+        /* 第九层文件级检查在读的那一步里（读不出来就不许改） */
+        let raw = runtime::mine::read_preset_text(&user_root, &path)?;
+        let draft = runtime::app_state::set_text_draft(&root, &file_name, &path, &raw)?;
+        super::notify_app_state(&app);
+        Ok(PresetTextDraftDto {
+            file_name: draft.file_name,
+            path: draft.path,
+            text: draft.text,
+            updated_unix: draft.updated_unix,
+            reused: false,
+        })
+    })
+}
+
+/// 把改动写进临时文件（编辑框边改边存）。**只动正文**，[`begin_text_edit`] 那一刻的其它不变。
+#[tauri::command]
+pub async fn put_text_draft(app: AppHandle, text: String) -> Result<(), AppError> {
+    traced("putTextDraft", |_| {
+        let root = internal_root(&app)?;
+        let draft = runtime::app_state::text_draft(&root)?
+            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文"))?;
+        runtime::app_state::set_text_draft(&root, &draft.file_name, &draft.path, &text)?;
+        super::notify_app_state(&app);
+        Ok(())
+    })
+}
+
+/// **保存正文**（预设页「编辑文件」→「保存」）：把正文草稿**原子地**写回它自己 ——
+/// 一次替换**整份文件**（`atomic_write`：先写临时文件、再换上去）。
+///
+/// 写完丢草稿，并**把参数页那条链的草稿也作废**（同一份文件的另一份草稿已经过期）。
+#[tauri::command]
+pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppError> {
+    traced("commitTextDraft", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let draft = runtime::app_state::text_draft(&root)?
+            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文，没得存"))?;
+        runtime::mine::write_text(&user_root, &draft.path, &draft.text)?;
+        runtime::app_state::clear_text_draft(&root)?;
+        /* 另一侧作废：盘上字节换了，参数页手上那份就成了孤儿 */
+        runtime::app_state::clear_draft(&root)?;
+        super::notify_app_state(&app);
+        Ok(CommittedDraftDto {
+            path: draft.path.clone(),
+            file_name: draft.file_name,
+            size: draft.text.len() as u64,
+            /* 写回它自己：永远是"盖掉了原来那一版" */
+            replaced: true,
+        })
+    })
+}
+
+/// 放弃这次编辑：丢掉临时文件。**天然幂等**（没有草稿也不算错）
+#[tauri::command]
+pub async fn discard_text_draft(app: AppHandle) -> Result<(), AppError> {
+    traced("discardTextDraft", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::clear_text_draft(&root)?;
+        super::notify_app_state(&app);
+        Ok(())
+    })
+}
+
+/// **参数草稿的摘要**（预设列表行上的「未保存」标记、"要不要重开"两处用）。
+/// **只摘要不正文**；现在没有草稿就是 `null`。
+///
+/// `dirty` 是"与来源现在的字节比"算出来的，不是"有没有敲进去过" —— 打开之后一个字没改、
+/// 或改回原样，都不算脏。比不出来（目录里已经没有它了）时**保守说脏**：有草稿在就别瞒。
+#[tauri::command]
+pub async fn get_preset_draft_summary(
+    app: AppHandle,
+) -> Result<Option<PresetDraftSummaryDto>, AppError> {
+    traced("getPresetDraftSummary", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let Some(draft) = runtime::app_state::draft(&root)? else {
+            return Ok(None);
+        };
+
+        let origin = match draft.origin {
+            runtime::state::ActiveOrigin::Official => "official",
+            runtime::state::ActiveOrigin::Mine => "mine",
+        }
+        .to_owned();
+
+        let dirty = match draft.origin {
+            runtime::state::ActiveOrigin::Official => {
+                let catalog = runtime::load_released_catalog(&root)?;
+                match catalog
+                    .files
+                    .iter()
+                    .find(|f| f.file_name == draft.source_file_name)
+                {
+                    /* 比不出来 == 目录里已经没有它了：有草稿在就保守说"未保存" */
+                    None => true,
+                    Some(file) => match runtime::delivery::official_text(&root, file) {
+                        Ok(base) => draft.text != base,
+                        Err(_) => true,
+                    },
+                }
+            }
+            runtime::state::ActiveOrigin::Mine => {
+                let rel = draft.path.clone().unwrap_or_default();
+                match runtime::mine::read_preset_text(&user_root, &rel) {
+                    /* 打开那一刻给的是**去了血统**的正文（两侧同一副样子） */
+                    Ok(raw) => draft.text != runtime::lineage::strip_lineage_lines(&raw),
+                    Err(_) => true,
+                }
+            }
+        };
+
+        Ok(Some(PresetDraftSummaryDto {
+            origin,
+            source_file_name: draft.source_file_name,
+            path: draft.path,
+            dirty,
+            updated_unix: draft.updated_unix,
+        }))
+    })
+}
+
+/// **身份账本**：「我这边这一份」↔「云端那一版」的对应关系 —— 预设页判"下载区里这
+/// 一份我有没有"的唯一依据，也是"更新"找要更新的是哪一份的依据。
+///
+/// **派生视图，不设持久化账本**（有一条纪律：期望值只来自当前目录）。所以：
+/// 只有**现在目录里还活着**的那一版才进账 —— 那一版已被移出版次的（用户文件自己
+/// 还能用，只是"跟不上更新"了）不进；没有血统的（手工拷的 / 自己写的）也不进。
+#[tauri::command]
+pub async fn get_user_preset_index(app: AppHandle) -> Result<Vec<UserPresetIdentityDto>, AppError> {
+    traced("getUserPresetIndex", |_| {
+        let internal = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let catalog = runtime::load_released_catalog(&internal)?;
+        let files = runtime::mine::mine_files(&user_root);
+
+        Ok(files
+            .into_iter()
+            .filter_map(|f| {
+                let lineage = f.lineage.as_ref()?;
+                /* 那一版还在目录里才认这个关系（否则这笔关系已经无处对账） */
+                let source = runtime::mine::source_of(&catalog, Some(lineage))?;
+                Some(UserPresetIdentityDto {
+                    id: f.path.clone(),
+                    file_name: f.file_name.clone(),
+                    path: f.path,
+                    cloud_source: source.file_name.clone(),
+                })
+            })
+            .collect())
     })
 }
 
@@ -462,6 +695,11 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
         };
         /* 存完就该丢掉草稿：它会盖住下一次「改这份」的"接着上次改" */
         runtime::app_state::clear_draft(&root)?;
+        /*
+         * 另一侧作废：**「编辑文件」那份草稿也丢掉**（2026-10-10 契约写死）——
+         * 盘上字节已经换了，编辑器手上那份正文就成了孤儿，再改一个字就存不上。
+         */
+        runtime::app_state::clear_text_draft(&root)?;
         super::notify_app_state(&app);
 
         Ok(CommittedDraftDto {

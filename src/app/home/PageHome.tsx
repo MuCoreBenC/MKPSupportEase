@@ -40,7 +40,9 @@ import PlateZoom from '../calib/PlateZoom'
 import { HomeCardStack, StepRail } from './HomeGuide'
 import CopyAction from './CopyAction'
 import { Btn } from '../ui/Controls'
-import { Modal } from '../ui/Modal'
+/* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
+   稿内那套 `ui/Modal` 退场，一律用通用居中框 */
+import { Modal } from '../../components/modal'
 import type { Density } from '../../hooks/useDensity'
 import { useDevDefaults } from './devDefaults'
 import { pickArt } from './heroArt'
@@ -1087,12 +1089,14 @@ export default function PageHome({ density }: PageHomeProps) {
 
       {openModel && (
         <Modal
+          open
+          size="sm"
           title="打开模型"
           onClose={() => setOpenModel(null)}
-          foot={
+          footer={
             <>
               <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
-                从本地缓存打开
+                从缓存打开
               </Btn>
               <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
                 从云端获取
@@ -1116,9 +1120,11 @@ export default function PageHome({ density }: PageHomeProps) {
 
       {pending !== null && (
         <Modal
+          open
+          size="sm"
           title="有未保存的改动"
           onClose={() => setPending(null)}
-          foot={
+          footer={
             <>
               <Btn onClick={() => setPending(null)}>取消</Btn>
               <Btn
@@ -1127,7 +1133,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   leaveTo(pending.to)
                 }}
               >
-                放弃改动并离开
+                不保存并离开
               </Btn>
               {canSave && (
                 <Btn
@@ -1161,9 +1167,11 @@ export default function PageHome({ density }: PageHomeProps) {
 
       {presetAsk !== null && (
         <Modal
+          open
+          size="sm"
           title="有未保存的改动"
           onClose={() => setPresetAsk(null)}
-          foot={
+          footer={
             <>
               <Btn onClick={() => setPresetAsk(null)}>取消</Btn>
               <Btn
@@ -1174,7 +1182,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   setPresetAsk(null)
                 }}
               >
-                放弃改动并换预设
+                不保存并切换
               </Btn>
             </>
           }

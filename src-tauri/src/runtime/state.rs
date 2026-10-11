@@ -190,6 +190,36 @@ pub struct PresetDraft {
     pub updated_unix: u64,
 }
 
+/// 「编辑文件」那条链的草稿（**与上面 `PresetDraft` 分开存**，2026-10-10 作者裁决）。
+///
+/// 两条链可以同时存在：`PresetDraft` 是"参数页用控件在改"，这一份是"预设页编辑器逐字在改"。
+/// 分开存的理由：互不干扰，也不互相覆盖彼此的正文。
+///
+/// 两条链**互相作废**：任一侧保存都会让另一侧手上的正文过期（盘上字节换了），
+/// 所以保存一侧要顺手把另一侧丢掉（前端 `draftState.ts` 还为此发一次广播）。
+///
+/// 编辑器只服务**用户线**（`path` 恒有值）：官方那份要先拷成自己的才归用户改。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetTextDraft {
+    pub draft_schema: u32,
+    /// 「改的是哪一份」的人话名（`A1-fast（已修改）.toml`）
+    pub file_name: String,
+    /// 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`）
+    pub path: String,
+    /// 正文：**带这一份自己的血统三行**（编辑这份时它们就在文件里，保存时照写回）
+    pub text: String,
+    /// 最后改动时刻（UTC epoch 秒）
+    pub updated_unix: u64,
+}
+
+impl PresetTextDraft {
+    /// 这条链的钥匙只认路径（用户目录里两份同名很正常）
+    pub fn key(&self) -> &str {
+        &self.path
+    }
+}
+
 /// **这份草稿改的是哪一份**（两条线各自的钥匙）。
 ///
 /// 官方线认**文件名**（目录的键）；用户线认**路径** —— 用户目录里两份文件同名很正常

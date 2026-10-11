@@ -50,7 +50,7 @@ use crate::fsx::atomic::atomic_write_json;
 
 use super::catalog::{hex, CatalogFile};
 use super::source::PresetSource;
-use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft};
+use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft, PresetTextDraft};
 
 /// 一次「官方更新」的处理决定（逐参数）。
 ///
@@ -93,9 +93,12 @@ pub struct AppStateFile {
     /// 使用中指针：当前用的是哪一份预设
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_preset: Option<ActivePreset>,
-    /// 编辑中的那一份（临时文件账：改的是谁、正文到哪了）
+    /// 编辑中的那一份（临时文件账：改的是谁、正文到哪了）—— **参数页**那条链
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<PresetDraft>,
+    /// 「编辑文件」那条链的草稿（2026-10-10：与参数草稿**分开存**、互不覆盖）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_draft: Option<PresetTextDraft>,
     /// 数据源设置：当前用哪个远端
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset_source: Option<PresetSource>,
@@ -113,6 +116,7 @@ impl Default for AppStateFile {
             app_state_schema: APP_STATE_SCHEMA,
             active_preset: None,
             draft: None,
+            text_draft: None,
             preset_source: None,
             param_decisions: BTreeMap::new(),
         }
@@ -174,6 +178,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         app_state_schema: APP_STATE_SCHEMA,
         active_preset: super::state::read_active_file(root)?,
         draft: super::state::read_draft_file(root)?,
+        /* 正文草稿这一格是 2026-10-10 才有的：旧档里本来就没有它 */
+        text_draft: None,
         preset_source: super::source::read_source_file(root)?,
         /* 逐参数决定账是 2026-10-09 才有的格：旧档里本来就没有它 */
         param_decisions: BTreeMap::new(),
@@ -301,6 +307,41 @@ pub fn set_draft(
 pub fn clear_draft(root: &Path) -> Result<(), AppError> {
     with_state(root, |state| {
         state.draft = None;
+        Ok(())
+    })
+}
+
+/* ---------- text_draft：「编辑文件」那条链（2026-10-10） ---------- */
+
+/// 读正文草稿。没有 → `None`（编辑器没开就是这个状态）
+pub fn text_draft(root: &Path) -> Result<Option<PresetTextDraft>, AppError> {
+    Ok(load(root)?.text_draft)
+}
+
+/// 落一份正文草稿（整份替换 —— 同一时刻只改一份）
+pub fn set_text_draft(
+    root: &Path,
+    file_name: &str,
+    path: &str,
+    text: &str,
+) -> Result<PresetTextDraft, AppError> {
+    with_state(root, |state| {
+        let draft = PresetTextDraft {
+            draft_schema: super::state::DRAFT_SCHEMA,
+            file_name: file_name.to_owned(),
+            path: path.to_owned(),
+            text: text.to_owned(),
+            updated_unix: now_unix(),
+        };
+        state.text_draft = Some(draft.clone());
+        Ok(draft)
+    })
+}
+
+/// 丢掉正文草稿（放弃 / 保存完 / 被另一侧作废）。没有也不算错（幂等）
+pub fn clear_text_draft(root: &Path) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.text_draft = None;
         Ok(())
     })
 }

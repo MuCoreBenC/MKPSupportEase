@@ -142,6 +142,16 @@ export const bridgeApi: MkpApi = {
     call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
+  /* 「编辑文件」那条链（2026-10-10：与参数草稿分开存，两侧互相作废） */
+  getPresetDraftSummary: () =>
+    call('getPresetDraftSummary', 'get_preset_draft_summary'),
+  beginTextEdit: (fileName, path) =>
+    call('beginTextEdit', 'begin_text_edit', { fileName, path }),
+  putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
+  commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
+  discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
+  /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
+  getUserPresetIndex: () => call('getUserPresetIndex', 'get_user_preset_index'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
   renameUserPreset: (path, newName) =>
     call('renameUserPreset', 'rename_user_preset', { path, newName }),
@@ -230,8 +240,8 @@ export const bridgeApi: MkpApi = {
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
   /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
-  fetchOfficialPreset: (fileName) =>
-    call('fetchOfficialPreset', 'fetch_official_preset', { fileName }),
+  fetchOfficialPreset: (fileName, renameIfTaken) =>
+    call('fetchOfficialPreset', 'fetch_official_preset', { fileName, renameIfTaken }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),

@@ -435,6 +435,43 @@ pub struct FetchOfficialDto {
     pub file_name: String,
     /// 我那一份的落点（相对用户根：`presets-mine/…`）—— 调用方要拿它去「使用」
     pub path: String,
+    /* ------------------------------------------------------------------ *
+     * 撞名（2026-10-10）：本机已经有一份同名的 —— 默认**不动它**，把"谁占了
+     * 这个名字"与"同意导入会改成什么名字"交给界面问用户；用户同意后的那次调用
+     * 走 `rename_if_taken`，这两格重新变回 `null`。
+     * ------------------------------------------------------------------ */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
+}
+
+/// **一个没被占的名字**：`<原名>-2<后缀>`、`<原名>-3<后缀>`……（2026-10-10 撞名复试采用）。
+///
+/// 后缀保持原样（后缀决定它是哪一类文件）；名字空间是 `presets-mine/`
+/// 内一圈一圈往后找一个没人占的。上限之后照原名返回 —— 那时由写盘那一层的
+/// "落点已存在"闸去说话，不在这一层编故事。
+fn untaken_name(user_root: &Path, wanted: &str) -> String {
+    let path = std::path::Path::new(wanted);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| wanted.to_owned());
+    let with = |n: u32| match path.extension() {
+        Some(ext) => format!("{stem}-{n}.{}", ext.to_string_lossy()),
+        None => format!("{stem}-{n}"),
+    };
+    for n in 2..=999u32 {
+        let candidate = with(n);
+        let rel = format!("{}/{candidate}", crate::fsx::paths::MINE_DIR);
+        let taken = crate::fsx::paths::resolve_in(user_root, &rel)
+            .map(|p| p.exists())
+            .unwrap_or(true);
+        if !taken {
+            return candidate;
+        }
+    }
+    wanted.to_owned()
 }
 
 /// **把官方这一份预设取到本机** —— 资源库云端表那两个动作（「下载」/「更新」）共用的那一条。
@@ -461,6 +498,7 @@ pub struct FetchOfficialDto {
 pub async fn fetch_official_preset(
     app: AppHandle,
     file_name: String,
+    rename_if_taken: Option<bool>,
 ) -> Result<FetchOfficialDto, AppError> {
     /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
     let app_handle = app.clone();
@@ -480,15 +518,36 @@ pub async fn fetch_official_preset(
             let rel = format!("{}/{}", crate::fsx::paths::MINE_DIR, file.file_name);
             let target = crate::fsx::paths::resolve_in(&user, &rel)?;
             let created = !target.is_file();
-            if created {
+            let (file_name_here, path_here, taken_by, suggested_name) = if created {
                 let text = runtime::delivery::official_text(&root, file)?;
                 runtime::mine::save_official_as_new(&user, file, &text, &file.file_name)?;
-            }
+                (file.file_name.clone(), rel, None, None)
+            } else if rename_if_taken == Some(true) {
+                /*
+                 * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
+                 * 原来那份一个字节不动 —— 两份同名是不允许的，但两份内容并存是用户要的。
+                 */
+                let name = untaken_name(&user, &file.file_name);
+                let text = runtime::delivery::official_text(&root, file)?;
+                let dir = crate::fsx::paths::MINE_DIR;
+                runtime::mine::save_official_as_new(&user, file, &text, &name)?;
+                (name.clone(), format!("{dir}/{name}"), None, None)
+            } else {
+                /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */
+                (
+                    file.file_name.clone(),
+                    rel.clone(),
+                    Some(rel),
+                    Some(untaken_name(&user, &file.file_name)),
+                )
+            };
             Ok(FetchOfficialDto {
                 fetched,
                 created,
-                file_name: file.file_name.clone(),
-                path: rel,
+                file_name: file_name_here,
+                path: path_here,
+                taken_by,
+                suggested_name,
             })
         })
     });

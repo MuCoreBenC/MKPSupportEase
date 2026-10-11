@@ -14,8 +14,9 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 7px calc(var(--pad) + 6px);
-  border-radius: var(--r-sm);
+  padding: 9px 16px;
+  /* a02：提示条大圆角，对齐卡片语言 */
+  border-radius: var(--r-md);
   font-size: var(--fs-label);
   line-height: 1.6;
 }

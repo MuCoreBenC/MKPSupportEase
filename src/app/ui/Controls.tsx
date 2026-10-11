@@ -62,7 +62,7 @@ export function Compare({ from, to }: { from: string; to: string }) {
 
 export function Revert({ original, onClick }: { original: string; onClick: () => void }) {
   return (
-    <button type="button" className={s.revert} onClick={onClick} title="还原为原值">
+    <button type="button" className={s.revert} onClick={onClick}>
       <span aria-hidden="true">↰</span>
       {original}
     </button>
@@ -88,7 +88,7 @@ export function Field({
         <span className={s.fieldLabel}>
           {label}
           {help && (
-            <i className={s.help} title={help}>
+            <i className={s.help}>
               ?
             </i>
           )}
@@ -128,14 +128,11 @@ export function Btn({
   children,
   variant = 'default',
   disabled,
-  title,
   onClick,
 }: {
   children: ReactNode
   variant?: 'default' | 'accent' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
-  /** 灰着 / 需要说明时悬停能看到的一句话 —— 灰一个按钮不说为什么，用户只会以为坏了 */
-  title?: string
   onClick?: () => void
 }) {
   const cls = [
@@ -148,7 +145,7 @@ export function Btn({
     .filter(Boolean)
     .join(' ')
   return (
-    <button type="button" className={cls} disabled={disabled} title={title} onClick={onClick}>
+    <button type="button" className={cls} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   )

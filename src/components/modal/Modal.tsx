@@ -29,9 +29,11 @@
  * 判据是「关掉之后还要不要回来」，不是「内容多不多」。
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import Icon from '../Icon'
+import { ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
 export interface ModalProps {
@@ -88,6 +90,11 @@ export default function Modal({
   children,
 }: ModalProps) {
   const boxRef = useRef<HTMLDivElement>(null)
+  /*
+   * 标题栏那颗**动作槽**的落点（`<span>` 元素）。框里的内容可以 portal 到这儿 ——
+   * 见 `modalHeadSlot.ts`（「修改历史」就是这么搬到 × 旁边的）。
+   */
+  const [headSlot, setHeadSlot] = useState<HTMLSpanElement | null>(null)
   /* 关掉之后焦点要还回去，不然键盘用户会掉到文档开头 */
   const returnTo = useRef<HTMLElement | null>(null)
 
@@ -170,9 +177,19 @@ export default function Modal({
             <strong className={s.title}>{title}</strong>
             {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
           </span>
-          <button type="button" className={s.close} title={closeTitle} onClick={onClose}>
-            关闭
-          </button>
+          {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
+          <span className={s.headActs}>
+            <span ref={setHeadSlot} className={s.headSlot} />
+            <button
+              type="button"
+              className={s.close}
+              title={closeTitle ?? '关闭'}
+              aria-label="关闭"
+              onClick={onClose}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </span>
         </header>
 
         <div className={bodyFill ? `${s.body} ${s.bodyFill}` : s.body}>{children}</div>
@@ -182,5 +199,9 @@ export default function Modal({
     </div>
   )
 
-  return host !== null ? createPortal(scrim, host) : scrim
+  /* 动作槽的 context 要罩住**框里的内容**（`children` 就在 `scrim` 里），才找得到落点 */
+  const tree = (
+    <ModalHeadSlotContext.Provider value={headSlot}>{scrim}</ModalHeadSlotContext.Provider>
+  )
+  return host !== null ? createPortal(tree, host) : tree
 }

@@ -4,12 +4,13 @@
  * # 版面
  *
  * ```
- * ┌MKP 配置│切片器配置┐ ┌本地│云端┐ [搜索…] ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  ← MKP
- * 喷嘴 全部 0.2 0.4 0.6   层高 全部 0.08 0.10 … 更多                        ← 切片器
+ * ┌MKP 配置│切片器配置┐ ┌本地│云端┐ [搜索…]                            ← 第一排（两档一致）
+ * MKP   ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  共 4 项 │ 官方 9 · 我的 6    ← MKP 第二排
+ * 切片器 ┌▽ 喷嘴 0.2 · 层高 0.12 │ ▽ A1 ▾┐  共 27 项 │ 仓库 27 · 本机 9 + 我的 5  ← 切片器第二排
  * 名称            机型   版本    时间   来源   操作
  * A1.toml         A1    标准版  09-14  官方   已应用
  * ├────────────────────────────────────────────┤
- * 右键任意一行还有…        共 4 项 │ 仓库 20 · 本机 4 + 我的 3   ← 页脚
+ * 右键任意一行还有…                                              ← 页脚（只剩右键提示）
  * ```
  *
  * **融合 pill（G07-1 收编，A44 三轮定稿；2026-10-04 进产品）**：原来的「机型下拉
@@ -19,17 +20,34 @@
  * （作者第三轮）；右拍「▽ A1 ▾」是**机型筛选**（漏斗菜单，有「全部机型」一档）——
  * 机型是**筛选**，不是切换（作者第二轮纠正：「这个是个筛选的……不能再用抽屉了」）。
  * 三个事实（在生效的是谁 / 怎么找回它 / 看哪个机型）融进一颗件，机型信息从此只出现
- * 这一次 —— `PresetPicker` 下拉整个退场。切片器没有「已应用」，它的筛选以**独立漏斗**
- * 留在搜索左边（PresetStatusPill 的 named export），不硬凑成一颗。
+ * 这一次 —— `PresetPicker` 下拉整个退场。
  *
- * **「撤销应用」退役（作者 2026-10-04 裁决）**：不做取消应用 —— 总得有一套在生效。
- * 后端 `clear_active_preset` 命令与数据层的 `clearApply` 照旧在（能力不删），
- * 只是从此没有界面入口；pill 左拍上的「已应用」就是唯一的事实。
+ * 切片器没有「已应用」，早先因此没做成 pill（机型筛单独住筛选区第一行）。
+ * 作者 2026-10-10 裁决：「我希望做成 MKP 那样的」—— 切片器档也有了自己的那颗
+ * （`PresetSlicerPill`）：左拍「▽ 喷嘴 0.2 · 层高 0.12」（点开同时给两组）、
+ * 竖线、右拍机型筛选（同一个 `PresetMachineFilter`）。原先那三颗常驻下拉
+ * （机型 / 喷嘴 / 层高；作者：「它 3 个筛选感觉很讨厌，特别讨厌」）随之退役；
+ * 两档第二排从此同构：左一颗 pill、右边顶到右线的计数台账。
+ *
+ * **「撤销应用」恢复（作者 2026-10-10 裁决，推翻 2026-10-04 的那一条）**：正在使用的
+ * 那一行，右键菜单里那一格**不再是灰掉的「在用」，而是可点的「取消使用」** ——
+ * 作者：「它需要一个取消使用的按钮，而不是说这个灰色的在用」。走的还是照旧在的
+ * `clear_active_preset`（`data.clearApply`）：撤下的只是"哪一份在生效"这个指向，
+ * **磁盘上一个字节都不动**；撤完 pill 左拍回到「还没有使用任何预设」。
  *
  * **计数与台账的住处（2026-10-04 定稿）**：MKP 档恒住工具栏第二排（pill 右边，
  * 台账顶到右线）—— 工具栏恒两排：第一排 类型分段 / 位置分段(右) / 搜索，第二排
  * pill + 计数台账，不再随窗宽换摆法。页脚与右键提示同行；切片器的筛选排本来就满
  * （喷嘴 / 层高 chips），它的计数与台账任何档都住页脚。
+ *
+ * **「参数对比」的入口 = 右键两下（2026-10-10 作者规格）**：顶部那颗常驻按钮退役
+ * （作者：「参数对比几个字，我们去掉了……答案是右键选择一个，然后再选择另外一个，
+ * 就去对比」）—— 右键第一份点「参数对比」、再右键另一份点「与「X」对比」就开台，
+ * 那两份直接选中（台子本身照旧：打开后还能勾第三份）。工具栏第二排从此只剩
+ * pill + 台账两样，而且**这一排不折行**（`.tbRow`）：窄窗先收 pill 的左拍
+ * （文件名省略号吸收），台账永远与 pill 同一行、顶到右线。pill 的宽**不封死**：
+ * 随窗口宽窄变、也随文件名长短变（作者第三轮：「那个最大的长度宽度啊，它可以随着
+ * 这个软件窗口的变化而变化，反正这个不能换行就是了」）；**右拍筛选一寸不让**。
  *
  * **页面里没有「预设」这两个字** —— 顶栏已经把「预设」高亮了，页面里再写一遍是重复。
  *
@@ -57,7 +75,7 @@
  * # 本地 / 云端是**两张互不相干的表**（两种类型都有这一对，2026-10-09 恢复）
  *
  *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
- *           MKP：只有你自己那份工作副本（`presets-mine/`）；切片器：官方副本 + 用户线
+ *           MKP：只有你自己那份本地文件（`presets-mine/`）；切片器：官方副本 + 本地文件
  *   云端表  官方现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
  *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
  *           切片器：菜单上的官方文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
@@ -81,7 +99,7 @@
  *   套餐内 / 可单下          `PresetFileInfo.delivery`                   真（14 默认 / 6 可选）
  *   属于哪个机型版本         `api.getVersionFiles()` + `machineIds`      真（就是「版本」那一列）
  *   本机有哪些官方文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
- *   我自己的文件             `api.getUserPresetFiles()`                  真（**用户线**：扫 `presets-mine/`，盘当底账）
+ *   我自己的文件             `api.getUserPresetFiles()`                  真（**本地文件**：扫 `presets-mine/`，盘当底账）
  *   我那一份的正文           `api.readUserPresetText()`                  真（只读；抽屉里看，读不出来照实说）
  *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
  *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
@@ -93,25 +111,26 @@
  *   应用 / 复制              应用：唯一底账一个口（交付行合流，IPC 落 run/）
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
- *   查看详情                 上面那些字段的汇总                          **纯前端**，真的能用
- *   **下载 / 更新**（MKP 云端行） `api.fetchOfficialPreset()`                真（取回官方当前版 + 落一份你的工作副本；
+ *   展开详情（点行）          上面那些字段的汇总                          **纯前端**，真的能用
+ *   **下载 / 更新**（MKP 云端行） `api.fetchOfficialPreset()`                真（取回官方当前版 + 落一份你的本地文件；
  *                            两个词是同一条路，差别只在本地有没有 / 换没换版。**不改当前使用**）
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
- *   **批量**（云端表那一行）   MKP 逐份 `fetchOfficialPreset` / 切片器 `api.downloadCatalogFiles`（多份）
- *                            真（**逐份结局**，没成的各占提示条一行。范围 = 机型 + 类型，
- *                            不受搜索词影响；未获取 / 有新版才进来）
+ *   **批量**（云端表那一行）   **退役**（作者 2026-10-10：云端与本地一样，只逐份下载 / 更新）——
+ *                            能力照旧在数据层（`fetchOfficialPreset` / `downloadReleaseBatch`），没有界面入口
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
  *                            见 `ReleaseFileState`）
- *   **修改 / 保存**（我的文件） `api.beginPresetEdit()` + `commitPresetDraft()` 真（改的是**临时文件** `run/app-state.json`：
- *                            `putPresetDraft` 边改边存；保存 = **写回我那一份自己**（不产生第二份）。
- *                            **原文件与下载区全程没被碰过** —— 判据逐字节盯着）
+ *   **编辑文件**（我的文件）  `api.beginTextEdit()` + `commitTextDraft()`  真（初稿 = **盘上那份文件的字节**：
+ *                            `putTextDraft` 边改边存；保存 = **整份原子写回我那一份自己**（不产生第二份）。
+ *                            **盘上那份直到点保存才被碰** —— 判据逐字节盯着；
+ *                            参数页未保存的改动**不进来**（两条草稿分开存，2026-10-10））
  *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
- *   **另存为一份新的**（我的文件） `api.copyUserPreset()`                   真（第十一层：我的文件 → 我的文件，
- *                            按字节复制、血统原样带过去；不覆盖、不自动改名；不碰使用中指针与草稿）
+ *   **复制**（我的文件）      `api.copyUserPreset()`                        真（第十一层：我的文件 → 我的文件，
+ *                            按字节复制、血统原样带过去；名字由程序起 `<原名> copy.toml`
+ *                            （重名依次 `copy 2`…，见 `duplicateNameOf`）；不覆盖、不碰使用中指针与草稿）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
@@ -132,31 +151,38 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import type { ActiveOrigin, ArchivedFile, DownloadOutcome } from '../../api'
+import type { ArchivedFile, ParamDecision } from '../../api'
 import { longStatText } from '../store/package'
-/* 归档抽屉的外壳：与参数页那个抽屉同一个（absolute 定位、遮罩只盖内容区） */
-import Drawer from '../shared/Drawer'
+/*
+ * 这一页那几个框**统一用居中模态框**（作者 2026-10-10：「他全部都用这个右侧的抽屉，
+ * 这完全不对，改成模态框」）。挂载点不变 —— 仍挂在 `.main` 里，遮罩只盖内容区，
+ * 底栏与窗口右下角的 resize 手柄照旧点得着（Modal 自己那条约定）。
+ */
+import { Modal } from '../../components/modal'
 /* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
-import { FieldLayer, FieldPopover } from '../../components/field'
+/* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
+import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
+import { FieldLayer } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
-import { outcomeText, tickText } from '../shared/download'
+import { tickText } from '../shared/download'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
 import PresetScopeBar from './PresetScopeBar'
-import PresetStatusPill, { PresetMachineFilter } from './PresetStatusPill'
+import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
   ARCHIVE_TIME,
   ARCHIVE_WHY,
   ASSET_USE_TEXT,
-  ASSET_USE_WHY,
+  /* 撞名那一格的文案（a04：不覆盖、不静默，问用户要不要导入 + 自动改名） */
+  IMPORT_TAKEN_TEXT,
   /* MKP 云端行三态的按钮词与说明（与操作列那颗按钮同一条出处，2026-10-09） */
   CLOUD_LOCAL_ACTION,
   CLOUD_LOCAL_TEXT,
@@ -166,19 +192,19 @@ import {
   MINE_DRAWER,
   MINE_NOT_PRESET_WHY,
   MINE_RENAME,
+  duplicateNameOf,
   mineUnreadableWhy,
   mineCountOfAxis,
   treeCountOfAxis,
-  NO_ASSET_WHY,
   RELEASE_SUSPECT_WHY,
   STATUS_TEXT,
-  STATUS_WHY,
   UNSUPPORTED_TEXT,
   /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
   UPDATE_ACTION_TEXT,
   isSuspectRelease,
-  releaseBatchText,
   sizeTextOf,
+  /* 重命名框：主名与后缀拆开（后缀灰色贴在行尾、不可改） */
+  splitFileName,
 } from './presetTree'
 import type {
   LocateTarget,
@@ -188,6 +214,8 @@ import type {
   PresetTableRow,
 } from './presetTree'
 import { usePresetData, usePresetPage } from './usePresetData'
+/* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
+import { tomlTokens } from './tomlPaint'
 import s from './PagePresets.module.css'
 
 
@@ -219,17 +247,26 @@ const PLACEHOLDER: Record<Density, string> = {
 /*
  * 「在文件管理器里显示」在这一页的话术（第十三层）：作者写的是「在 Finder 中显示」，
  * Windows 上那是文件资源管理器 —— 标签按平台换，动作同一条。
+ *
+ * ★ 2026-10-10 作者嫌长（「文案太长了」）：Windows 上从「在文件资源管理器中显示」
+ *   压成「显示所在文件夹」（动作没变，只是不再把那台程序的全名印在按钮上），
+ *   macOS 跟着压成「在访达中显示」。
  */
 const REVEAL_LABEL =
-  detectPlatform() === 'windows' ? '在文件资源管理器中显示' : '在 Finder 中显示'
+  detectPlatform() === 'windows' ? '显示所在文件夹' : '在访达中显示'
 
-/*
- * 起名字抽屉的两套话：改名（我的 → 我的）/ 另存为一份新的（我的 → 我的）。
- * **外壳同一个**，说法各一套 —— 两件事都只传一个名字，别的全在后端。
+/**
+ * 着色 token → 类名。**一处映射**：词法在 `tomlPaint.ts`、颜色在这一页的 CSS，
+ * 中间就这一张表（加一种 token 只动这三个地方）。
  */
-const NAMING_TEXT = {
-  rename: MINE_RENAME,
-  copy: MINE_COPY,
+const TOKEN_CLASS = {
+  comment: s.tCmt,
+  table: s.tTable,
+  key: s.tKey,
+  string: s.tStr,
+  number: s.tNum,
+  bool: s.tBool,
+  punct: s.tPunct,
 } as const
 
 /**
@@ -265,23 +302,52 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     () => data.mine.filter((f) => f.kind === 'mkp_preset' && f.state !== 'unreadable'),
     [data.mine],
   )
-  const rootRef = useRef<HTMLDivElement>(null)
+  /* 可写：`mountPage` 这个 callback ref 要往回填（`useRef<T>(null)` 的 current 是只读的） */
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  /*
+   * **模态框的遮罩要盖住整页**（2026-10-10 作者：「遮罩覆盖了，除了最上面的标题、
+   * 就是有红绿灯的那个标题除外，其他所有地方遮罩」）。
+   *
+   * 框自己不知道该怎么盖 —— 它只有 `absolute inset: 0`，盖多大取决于挂在谁里面。
+   * 这一页的根（`.page`）正好就是"顶栏页签以下那一整块"（工具栏 + 内容 + 页脚），
+   * 所以把这一层的元素交给 `Modal` 的 `host`，遮罩 portal 过去就刚好铺满那一块，
+   * 而带红绿灯的标题栏在它上面、不被盖。
+   */
+  const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null)
+  const mountPage = (el: HTMLDivElement | null) => {
+    rootRef.current = el
+    setPageEl(el)
+  }
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
   const flashRef = useRef<HTMLDivElement>(null)
 
   /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
   const menu = useContextMenu<PresetTableRow>()
   /*
-   * 展开详情的那一行（rowKey）。行上点击与右键菜单的「查看详情」共享同一个状态，
-   * 同一时刻只开一行 —— 与参数页的 expandedKey 同构。
+   * 展开详情的那一行（rowKey）。**点行就是展开** —— 右键菜单里那个「查看详情」
+   * 2026-10-10 删掉了（作者：「既然我点击了它就是展开，那就没必要查看详情了呀，
+   * 这些功能重复了」）。同一时刻只开一行 —— 与参数页的 expandedKey 同构。
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
   /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"官方版本"或"更新"上，
    * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-mine/`）。
+   *
+   * ★ 2026-10-10：**入口从顶部那颗常驻按钮搬进右键菜单**（作者：「参数对比几个字，
+   *   我们去掉了……答案是右键选择一个，然后再选择另外一个，就去对比」）——
+   *   右键第一份点「参数对比」记下它（`comparePick`），再右键另一份点
+   *   「与「X」对比」就开台；这两份由 `comparePreselect` 直接选中。
+   *   （台子本身照旧：打开后还能自己勾，最多三份。）
    */
   const [compareOpen, setCompareOpen] = useState(false)
+  /** 打开对比台时要预选的两份（path）；`[]` = 台子按默认规则选前两份 */
+  const [comparePreselect, setComparePreselect] = useState<string[]>([])
+  /**
+   * **对比的第一份**：右键点了「参数对比」的那一行。`null` = 还没选。
+   * 记的是**路径**（改名不动它）；那份真被删了的话，开台前拿候选核一遍、忽略它。
+   */
+  const [comparePick, setComparePick] = useState<{ path: string; fileName: string } | null>(null)
   /*
    * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
    * 那一屏打开（用户点的是那条直路：他已经知道有官方更新等着处理）。
@@ -297,18 +363,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
   const [busyKey, setBusyKey] = useState<string | null>(null)
   /*
-   * 批量在进行中。它只锁那一颗批次按钮 —— 行级的动作**不跟着锁**：
-   * 一根水管里同时下两份不同的文件本来就是允许的（后端幂等、落点互不相同），
-   * 锁整张表只会让人以为页面卡了。
+   * 批量入口 2026-10-10 退役（作者：「这个可以去掉的……跟本地的一样就可以」）：
+   * 云端表的呈现与本地表一致，只在行上逐份下载 / 更新，不再有整批按钮。
+   * 能力照旧在数据层（`fetchOfficial` / `downloadReleaseBatch`），只是没有界面入口。
    */
-  const [batchBusy, setBatchBusy] = useState(false)
 
   /*
    * **只读正文抽屉**在看哪一份。`null` = 关着。
    *
-   * 两条线共用一个抽屉，因为它俩要的是同一件事：取出一份文本、只读地看。
-   *   `archive` 官方线的旧版本（先列出一份文件的那几个旧版本，再挑一份看）
-   *   `mine`    用户线的那一份（就一份，打开直接读）
+   * 两边共用一个抽屉，因为它俩要的是同一件事：取出一份文本、只读地看。
+   *   `archive` 云端那一侧的旧版本（先列出一份文件的那几个旧版本，再挑一份看）
+   *   `mine`    本地文件的那一份（就一份，打开直接读）
    *
    * 正文单独一个状态：读它要问后端（前端不碰文件系统），而且**会失败** ——
    * 失败要如实说，不许显示一段空正文假装它是空的。
@@ -331,48 +396,84 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   } | null>(null)
 
   /*
-   * **编辑器**（临时编辑那条链）。`null` = 没在改。
+   * **编辑器**（「编辑文件」那条链）。`null` = 没在改。
    *
-   * 正文是**临时文件里那份**（后端给的），不是官方原件的 —— 改谁也不动 `mkp/`。
+   * 初稿是**盘上那份文件的字节**（参数页未保存的改动不在里面 —— 两条草稿分开存，
+   * 见契约 `PresetTextDraft`）；编辑期间只动**正文草稿**，保存那一刻才整份写回。
    * `draftError` 是"草稿自动落盘失败了"那一行：它安静地待在抽屉里，不占提示条
    * （用户可能还在打字，提示条会闪）。
    */
   const [editing, setEditing] = useState<{
-    /** 改的是哪一条线 —— 保存按钮说什么、保存之后那句话说什么都由它决定 */
-    origin: ActiveOrigin
-    sourceFileName: string
-    /** 用户线的落点（`null` = 官方线，落点由目录给） */
-    path: string | null
+    /** 改的是哪一份（文件名）—— 副标题与提示读它 */
+    fileName: string
+    /** 盘上那份的落点（相对用户根）—— 保存提示里"写回哪去了"读它 */
+    path: string
     text: string
-    reused: boolean
     draftError: string | null
   } | null>(null)
   /** 上一次真正落到临时文件里的正文。用它判断"值不值得再存一次" */
   const savedTextRef = useRef<string>('')
 
   /*
-   * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：`null` = 关着。
-   * `kind` 决定说哪一套话、按哪颗按钮、成功怎么说 —— 形状一模一样。
-   * 改名预填现在这个名字；另存为**不预填**（作者：名字由用户明确指定，不做自动起名）。
-   * 名字的门槛（空 / 路径 / 后缀 / 不覆盖）全在后端，这里不重复判断；
-   * 失败原话留在抽屉里（不弹提示条，别把用户刚打的字顶掉）。
+   * **撞名那一格**（a04）：云端那份要落下来时，本机已经有一份同名的了 ——
+   * 不覆盖、也不静默丢掉，问用户"要不要导入"；同意就**自动改一个没被占的名字**
+   * 落一份新的（原来那份一个字节不动）。`null` = 没有在问。
    */
-  const [naming, setNaming] = useState<{
-    /**
-     * 两件"起个名字就完事"的事共用这一口抽屉：
-     *   `rename`  我的 → 我的（只改名字）
-     *   `copy`    我的 → 我的（按字节再存一份）
-     */
-    kind: 'rename' | 'copy'
+  const [takenAsk, setTakenAsk] = useState<{
+    fileName: string
+    existingPath: string
+    suggestedName: string
+    busy: boolean
+  } | null>(null)
+
+  /*
+   * ★ 2026-10-11（a04）：**「更新」不再弹确认层**。
+   *
+   *   点「更新」= 我没改过的项静默跟上新版；**我改过的项一个字节不动** ——
+   *   它们留给「修改参数」那条杠（官方改了 N 项 —— 你改过的不会被顶掉）逐项处理：
+   *   行内「用新值 / 保持我的」、或杠上的「逐项挑选」。
+   *
+   *   为什么不弹框问（作者在 lab 原型里定稿的口径，见 `lab/preset-identity-and-update-spec.md` §4）：
+   *   更新是"把云端的东西拿下来"这一件事，不该在点它的时候打断用户做决定；
+   *   而"我改过的那几项要不要动"是**改参数**的时候才该回答的问题 —— 所以那件事在参数页。
+   *   a03 的那一格（`PresetUpdateModal`）在 a04 已删。
+   */
+  /** 正文下面那一层**着色**（`<pre>`）：滚动时由 textarea 把它一起搬 */
+  const paintRef = useRef<HTMLPreElement>(null)
+  /*
+   * 正文的着色结果（行 → token）。只在正文变了才重算 —— 每敲一个字就重新分词，
+   * 对几十行的预设来说便宜得很，但没必要每帧都做。
+   */
+  const paintedLines = useMemo(
+    () => (editing === null ? [] : tomlTokens(editing.text)),
+    [editing],
+  )
+
+  /*
+   * **重命名那一口框**（第十层）。2026-10-10 起这里只剩它一件事 ——
+   * 「另存为一份新的」变成了右键菜单里的**「复制」**：名字由程序起
+   * （`duplicateNameOf`），点一下就得一份，不再弹框问名字。
+   *
+   * ★ 2026-10-10 又一轮（作者：「它不要显示这个后缀，后缀我不希望它能改……
+   *   把后缀灰色放到右侧，吸附在右边」）：输入框里**只装主名**（`name`），
+   *   后缀（`ext`，含点）单独拆出来、灰色贴在行尾 —— 提交时原样拼回去。
+   *   框里那两段说明也撤了（作者：「只改名字，这些文案不需要」「他正在使用，
+   *   也不需要」）—— 这一格只剩「打名字 + 确定」。
+   *
+   * 名字的门槛（空 / 路径 / 后缀 / 不覆盖）仍全在后端，这里不重复判断；
+   * 失败原话留在这口框里（不弹提示条，别把用户刚打的字顶掉）。
+   */
+  const [renaming, setRenaming] = useState<{
     row: PresetTableRow
+    /** **主名**（不含后缀）—— 那一枚后缀单独在 `ext` 里、不可改 */
     name: string
+    /** 后缀（含点，如 `.toml`；拆不出来就是空串）。提交时原样拼回去 */
+    ext: string
     busy: boolean
     error: string | null
   } | null>(null)
 
-  /* 「更多」层高的下拉锚点与开关 —— 层高值多，chips 一排放不下时收进这里 */
-  const [moreOpen, setMoreOpen] = useState(false)
-  const moreRef = useRef<HTMLButtonElement>(null)
+
 
   /*
    * 「定位」的闪光本体：把目标行滚到视口中央，然后盖上 overlay 亮一下再退光。
@@ -498,36 +599,155 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 云端表那颗按钮。**三条路，都是"把官方的取到我机器上"**（2026-10-09）：
+   * 云端行的「更新」：**把云端新版处理到本地这份上**（2026-10-10 作者规格）。
    *
-   *   MKP 云端行（`localState` 在）  → `fetchOfficial(fileName)`：
-   *       取回官方当前版字节（同一条下载管道，旧份进 archive）**+ 落一份我的工作副本**
-   *       （还没有的话）。**不动「当前使用」** —— 使用在本地表那一行上。
-   *       两颗按钮（下载 / 更新）走的是**同一条路**：差别只是本地有没有、换没换版。
-   *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`
+   * 三步，**不弹任何框**：
+   *   ① 取回云端当前版字节（本地那份一个字节不动 —— 只是取来比较）；
+   *   ② 读逐参数三方账（`presetSync`）：云端改了哪些、其中哪些**我也改过**（= 冲突）；
+   *   ③ **我没改过的项静默跟上**（一次性写进本地文件）；**我改过的项一个字节不动** ——
+   *      留给「修改参数」逐项处理（那边的杠与行内按钮就是为这件事做的）。
+   */
+  const runUpdate = (row: PresetTableRow) => {
+    if (row.scope !== 'cloud') return
+    const fileName = row.fileName
+    setBusyKey(row.rowKey)
+    setNote({ text: `正在更新 ${fileName}…`, bad: false })
+    void (async () => {
+      /*
+       * ① 更新的是**本地那一份**：血统指向这个云端条目、而且还没跟上当前版的
+       * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的）。
+       * **先读一遍本地列表**：更新对象要在动手之前定下来。
+       */
+      const [mine, index] = await Promise.all([api.getUserPresetFiles(), api.getUserPresetIndex()])
+      /*
+       * 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
+       * （`cloudSource` 对上它），而且还没跟上当前版（`basedOn !== 'current'`）。
+       * 同一云端条目下我可能有好几份（比如下载过两次、各改各的）—— 取列表里第一份落后的。
+       * **复制出来的副本不在账本里**，所以永远不会被当成"要更新的那一份"。
+       */
+      const indexByPath = new Map(index.map((e) => [e.path, e]))
+      const behind =
+        mine.find((f) => {
+          const entry = indexByPath.get(f.path)
+          return (
+            f.kind === 'mkp_preset' &&
+            entry !== undefined &&
+            entry.cloudSource === fileName &&
+            f.basedOn !== 'current'
+          )
+        }) ?? null
+      if (behind === null) {
+        setBusyKey(null)
+        setNote({ text: `云端 ${fileName} 这一版没有要处理的（你机器上那几份都跟得上）`, bad: false })
+        return
+      }
+      /*
+       * ② 读逐参数三方账。`fetchMissing: true` 允许后端**顺手把云端新版字节取回来**
+       * （内部基准，**不动本地这份文件**）—— 所以这里不需要先「下载」一遍。
+       */
+      const sync = await data.presetSync(behind.path, true)
+      setBusyKey(null)
+      if (!sync.officialReady) {
+        setNote({
+          text: `更新 ${fileName} 没成：云端新版的字节还没取回来（网络或数据源的问题）`,
+          bad: true,
+        })
+        return
+      }
+      const pending = sync.entries.filter((e) => e.pending)
+      const conflicts = pending.filter((e) => e.conflict)
+      const auto: ParamDecision[] = pending
+        .filter((e) => !e.conflict)
+        .map((e) => ({ paramKey: e.key, kind: 'adopt' }))
+      if (pending.length === 0) {
+        setNote({ text: `已更新 ${behind.fileName} —— 云端这一版没有要处理的参数差异`, bad: false })
+        return
+      }
+      /*
+       * ③ 写盘：**只写"我没改过"的那些项**（静默跟上新版）；我改过的一项都不写 ——
+       *    它们留给「修改参数」逐项处理（那边看得到"官方 X → Y"与「用新值 / 保持我的」）。
+       *    没有可跟的项时**一个字节都不动**（不必白写一遍）。
+       */
+      if (auto.length > 0) await data.applyParamDecisions(behind.path, auto)
+      const parts: string[] = []
+      if (auto.length > 0) parts.push(`${auto.length} 项跟上了新版`)
+      if (conflicts.length > 0) parts.push(`${conflicts.length} 项你改过 —— 去「修改参数」处理`)
+      setNote({ text: `已更新 ${behind.fileName} —— ${parts.join('；')}`, bad: false })
+    })().catch((e: unknown) => {
+      setBusyKey(null)
+      setNote({ text: `更新失败：${errorText(e)}`, bad: true })
+    })
+  }
+
+  /**
+   * 撞名那一格点「导入」：再来一次，这次允许**自动改名** ——
+   * 落一份新的（`A1-fast-2.toml`），原来那份一个字节不动，两份都留着。
+   */
+  const confirmTakenImport = () => {
+    if (takenAsk === null) return
+    const ask = takenAsk
+    setTakenAsk({ ...ask, busy: true })
+    data.fetchOfficial(ask.fileName, true).then(
+      (done) => {
+        setTakenAsk(null)
+        setNote({
+          text: `已导入 ${done.fileName} —— 原来那份没动，两份都留着（本地表里现在有它）`,
+          bad: false,
+        })
+      },
+      (e: unknown) => {
+        setTakenAsk((cur) => (cur === null ? cur : { ...cur, busy: false }))
+        setNote({ text: `导入没成：${errorText(e)}`, bad: true })
+      },
+    )
+  }
+
+  /**
+   * 云端表那颗按钮。**两条路，都是"把云端的东西落到我机器上"**（2026-10-10 按「本地 / 云端」改口径）：
+   *
+   *   MKP 云端行「下载」（本地还没有）  → `fetchOfficial`：取回云端当前版 + 落一份**本地文件**；
+   *   MKP 云端行「更新」（本地已有、云端有新版的）→ `runUpdate`：取回新版 + 逐项比较，
+   *       没冲突的按新版采用、冲突的让用户选，**确认后才一次性写回本地文件**；
+   *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`；
    *   官方仓库的文件                 → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
     if (row.scope === 'cloud' && row.localState !== undefined) {
-      const verb = row.localState === 'stale' ? '更新' : '下载'
+      /* 「更新」≠ 只把云端取回来：要把差异处理到本地这份上（见 runUpdate） */
+      if (row.localState === 'stale') {
+        runUpdate(row)
+        return
+      }
+      /* 「下载」：本地还没有这一份 —— 取回云端当前版并落一份本地的 */
       setBusyKey(row.rowKey)
-      setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
+      setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
       data.fetchOfficial(row.fileName).then(
         (done) => {
           setBusyKey(null)
+          /*
+           * ★ a04：**同名已经有一份了** —— 不覆盖、也不静默：问用户
+           * （同意就自动改一个没被占的名字落一份新的，原来那份一个字节不动）。
+           */
+          if (done.takenBy !== undefined) {
+            setTakenAsk({
+              fileName: row.fileName,
+              existingPath: done.takenBy,
+              suggestedName: done.suggestedName ?? row.fileName,
+              busy: false,
+            })
+            return
+          }
           setNote({
-            text: done.created
-              ? `已${verb} ${row.fileName} —— 官方这一版取到本机了，并且落成你的一份（本地表里现在有它）`
-              : `已${verb} ${row.fileName} —— 你那份本来就在，**一个字节没动**；官方新版已经取回来，改了哪几项去「打开参数」里看`,
+            text: `已下载 ${done.fileName} —— 云端这一版落到本地了（本地表里现在有它）`,
             bad: false,
           })
         },
         (e: unknown) => {
           setBusyKey(null)
           /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
-          setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
+          setNote({ text: `下载失败：${errorText(e)}`, bad: true })
         },
       )
       return
@@ -574,80 +794,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 批量：把「未获取 / 有新版」的那些**一次交给后端** —— 多份单文件操作的组合，
-   * 不是第二套机制。判据与单行那颗按钮同一条，只是把多份合成一次。
-   *
-   * **两种类型走两条现成的管道**：
-   *
-   *   MKP     逐份 `fetchOfficial` —— 取回官方 + 落一份我的工作副本（与「下载 / 更新」同一条）
-   *   切片器   一次交给 `downloadReleaseBatch`（Rust 侧逐份跑同一个 `deliver`，落下载区 `mkp/`）
-   *
-   * 结局**逐份**收：全成 / 有名有姓地列出没成的。**命令级失败是另一档**（比如没配数据源）：
-   * 那时一份都没发出去，不能说成"全都失败了" —— 两句话不一样，用户要做的也不一样。
-   */
-  const runBatch = async () => {
-    const { fileNames } = page.pending
-    if (fileNames.length === 0 || batchBusy) return
-    const { label } = releaseBatchText(
-      page.pending.missing,
-      page.pending.stale,
-      page.pending.tampered,
-    )
-    setBatchBusy(true)
-    setNote({ text: `正在${label}…`, bad: false })
-    /* 逐份结局收成一个口子：主句说总数、明细一行一份（两条管道共用同一句话） */
-    const report = (outcomes: DownloadOutcome[], doneText: string) => {
-      const bad = outcomes.filter((o) => !o.ok)
-      const done = outcomes.length - bad.length
-      setNote(
-        bad.length === 0
-          ? { text: `${label}完成：${done} 份${doneText}`, bad: false }
-          : {
-              text: `${label}：${outcomes.length} 份里 ${done} 份成了、${bad.length} 份没成 —— 没成的那几份在下面；本机那几份保持原样`,
-              bad: true,
-              lines: bad.map(outcomeText),
-            },
-      )
-    }
-    try {
-      if (page.kind === 'mkp') {
-        /*
-         * MKP 云端那一批：逐份「取回 + 落工作副本」—— 与单行那颗「下载 / 更新」同一条路
-         * （不是下载区那一条：这一档的用户世界里只有 `presets-mine/` 里那一份）。
-         * 一份失败不拖累别人：单独 catch 成一条 `ok: false`，照实列出来。
-         */
-        const outcomes: DownloadOutcome[] = []
-        for (const fileName of fileNames) {
-          try {
-            const done = await data.fetchOfficial(fileName)
-            outcomes.push({
-              fileName,
-              ok: true,
-              message: done.created ? '已落成你的一份' : '你那份本来就在，一个字节没动',
-            })
-          } catch (e: unknown) {
-            outcomes.push({ fileName, ok: false, message: errorText(e) })
-          }
-        }
-        report(outcomes, '都取到本机了（落成你的一份）')
-      } else {
-        const outcomes = await data.downloadReleaseBatch(fileNames, (t) =>
-          setNote({ text: tickText(t), bad: t.stage === 'failed' }),
-        )
-        report(outcomes, '都落进下载区了')
-      }
-    } catch (e: unknown) {
-      setNote({
-        text: `这一批没能发出去（一份都没下）：${errorText(e)}`,
-        bad: true,
-      })
-    } finally {
-      setBatchBusy(false)
-    }
-  }
-
-  /**
-   * 读一份正文（只读）。**两条线共用这一个口子**，只是问的命令不同：
+   * 读一份正文（只读）。**两边共用这一个口子**，只是问的命令不同：
    * 归档区那份走 `readArchivedText`，用户自己那份走 `readUserPresetText`。
    * 失败照实说（与下载 / 应用同一条规矩：不吞、不装）。
    */
@@ -685,7 +832,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * 打开用户线那一份的正文（「看正文」）。就一份文件，打开直接读 —— 没有列表这一层。
+   * 打开本地文件那一份的正文（「看正文」）。就一份文件，打开直接读 —— 没有列表这一层。
    *
    * **这一层只能看**：改它要先经过「改这份」那条链（那会另存出一份自己的）。
    */
@@ -697,25 +844,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **开始改这一份**：让后端把正文复制进临时文件，然后把编辑器打开。
+   * **开始改这一份**：让后端把**盘上那份文件的字节**读出来当初稿，然后把编辑器打开。
    *
    * **编辑的对象只有「我的预设」**（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
-   * 要改它先在云端「下载」一份自己的（所以这里固定走 mine 线）。
-   * 前置条件全在后端拦（认得出是 TOML + 读得出来），这里不重复判断。同一份的草稿还在的
+   * 要改它先在云端「下载」一份自己的。
+   *
+   * ★ 2026-10-10 起**参数页那份草稿不进来**（作者裁定）：这边看到的就是文件本身，
+   * 参数页改了几处没保存也不影响它 —— 两条草稿分开存（契约 `PresetTextDraft`）。
+   * 前置条件全在后端拦（读得出那份文件），这里不重复判断。同一份的**正文草稿**还在的
    * 话后端会返回它（`reused`），于是"改到一半关掉再回来"接着改。
    */
   const openEdit = (row: PresetTableRow) => {
     menu.close()
     setViewer(null)
-    data.beginEdit(row.fileName, 'mine', row.path).then(
+    data.beginTextEdit(row.fileName, row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
         setEditing({
-          origin: draft.origin,
-          sourceFileName: draft.sourceFileName,
+          fileName: draft.fileName,
           path: draft.path,
           text: draft.text,
-          reused: draft.reused,
           draftError: null,
         })
       },
@@ -730,14 +878,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
   /*
    * 边改边存：停下 700ms 才落一次（在打字的中间态里反复写盘没有意义）。
-   * 落盘的是**临时文件** —— 官方原件一动不动，这也是"改到一半关掉还在"的来源。
+   * 落盘的是**正文草稿** —— 盘上那份文件一动不动，这也是"改到一半关掉还在"的来源。
    * 失败写进抽屉里那一行（不弹提示条：用户还在打字，别拿一条会闪的条子打断他）。
    */
   useEffect(() => {
     if (editing === null || editing.text === savedTextRef.current) return
     const text = editing.text
     const timer = window.setTimeout(() => {
-      data.putDraft(text).then(
+      data.putTextDraft(text).then(
         () => {
           savedTextRef.current = text
         },
@@ -752,9 +900,36 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     return () => window.clearTimeout(timer)
   }, [data, editing])
 
-  /** 放弃这次编辑：丢草稿（原文件与下载区全程没被碰过，所以它天生安全） */
+  /*
+   * **这份刚在「修改参数」里保存过 —— 编辑区按盘上最新内容重开**（2026-10-10）。
+   *
+   * 参数页保存会把后端那份**正文草稿**作废（盘上字节换了，契约里写死的）。
+   * 编辑器如果还开着，手上的草稿就成了孤儿：再改一个字撞「没有正在改的那一份正文」，
+   * 点保存也存不上（作者实测到过）。收到这一声就把编辑区按**新的文件内容**重开 ——
+   * 这边没保存的改动就此作罢（提示条说明；与参数页那边"被别人保存后自己收拾"
+   * 是同一件事的两面）。
+   */
+  const textDropRev = useTextDraftDrop()
+  const seenTextDropRef = useRef(0)
+  useEffect(() => {
+    if (textDropRev === seenTextDropRef.current) return
+    seenTextDropRef.current = textDropRev
+    const dropped = lastTextDraftDroppedPath()
+    if (dropped === null) return
+    if (editing === null || editing.path !== dropped) return
+    void data.beginTextEdit(editing.fileName, dropped).then(
+      (draft) => {
+        savedTextRef.current = draft.text
+        setEditing((cur) => (cur === null ? cur : { ...cur, text: draft.text, draftError: null }))
+        setNote({ text: '这份刚在「修改参数」里保存过 —— 编辑区已按最新内容重开', bad: false })
+      },
+      (e: unknown) => setNote({ text: `重开不了：${errorText(e)}`, bad: true }),
+    )
+  }, [data, editing, textDropRev])
+
+  /** 放弃这次编辑：丢正文草稿（盘上那份文件全程没被碰过，所以它天生安全） */
   const discardEdit = () => {
-    data.discardDraft().then(
+    data.discardTextDraft().then(
       () => {
         setEditing(null)
         setNote({ text: '已放弃这次编辑 —— 你的那份从头到尾没有被改过', bad: false })
@@ -764,9 +939,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     )
   }
 
-  /** 保存：**写回它自己**（第八层：同一个文件，不会多出一份） */
+  /**
+   * 保存：**写回它自己**（第八层：同一个文件，不会多出一份）。
+   *
+   * 写的是**整份替换**（后端先写临时文件再换上去 —— 原子写入），
+   * 而且只有这一下才碰盘：没点保存时，改到哪都只在正文草稿里。
+   */
   const commitEdit = () => {
-    data.commitDraft().then(
+    data.commitTextDraft().then(
       (done) => {
         setEditing(null)
         setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
@@ -789,59 +969,76 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     menu.close()
     setViewer(null)
     setEditing(null)
-    setNaming({ kind: 'rename', row, name: row.fileName, busy: false, error: null })
+    /* 初值 = 现在的主名（后缀拆出去、贴在行尾 —— 它不可改，见 `renaming` 的注释） */
+    const { stem, ext } = splitFileName(row.fileName)
+    setRenaming({ row, name: stem, ext, busy: false, error: null })
   }
 
   /**
-   * **另存为一份新的**（第十一层）：我的文件 → 我的文件，按字节复制。
+   * **复制出一份新的**（第十一层，2026-10-10 改判）：我的文件 → 我的文件，按字节复制。
    *
-   * 名字**不预填** —— 作者定死：用户明确指定目标名字，目标存在就拒绝、让他自己换；
-   * 不做"复制后自动改名"这种智能行为。别的规矩（血统原样带过去 / 不覆盖 / 不碰状态）
-   * 都在后端。
+   * 名字**由程序起**（`duplicateNameOf`：`<原名> copy.toml`，重名依次 `copy 2`…）——
+   * 作者 2026-10-10：「主要是它的文案太长了……要不然就叫复制，就自动复制出一份」，
+   * 所以这一层**不再弹框问名字**（原来那口"起名字抽屉"的 copy 分支整个退场）。
+   * 别的规矩没变：血统原样带过去、不覆盖、不碰使用中指针与草稿。
    */
-  const openCopyAs = (row: PresetTableRow) => {
+  const runDuplicate = (row: PresetTableRow) => {
     menu.close()
-    setViewer(null)
-    setEditing(null)
-    setNaming({ kind: 'copy', row, name: '', busy: false, error: null })
+    const name = duplicateNameOf(
+      row.fileName,
+      data.mine.map((f) => f.fileName),
+    )
+    setNote({ text: `正在复制 ${row.fileName}…`, bad: false })
+    data.copyAsNew(row.path, name).then(
+      (done) =>
+        setNote({
+          text: `已复制出一份：${done.fileName} —— 原文件一个字节没动`,
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `没复制成：${errorText(e)}`, bad: true }),
+    )
   }
 
-  /** 起名字抽屉那一颗按钮（改名 / 另存为共用这一条提交路） */
-  const submitNaming = () => {
-    if (naming === null || naming.busy) return
-    const name = naming.name.trim()
-    if (name === '') {
-      setNaming({ ...naming, error: '新名字不能是空的' })
+  /**
+   * 重命名那一口框里那颗按钮。
+   *
+   * 提交的是**主名 + 拆出来那一枚后缀**（原样拼回去）—— 输入框里只有主名，
+   * 后缀从头到尾没得改。防一手"粘贴进来的名字自带同一个后缀"
+   * （`x.toml` 贴进输入框再拼一次会得到 `x.toml.toml`）：先剥掉再拼。
+   */
+  const submitRename = () => {
+    if (renaming === null || renaming.busy) return
+    let stem = renaming.name.trim()
+    if (stem === '') {
+      setRenaming({ ...renaming, error: '新名字不能是空的' })
       return
     }
-    setNaming({ ...naming, busy: true, error: null })
-    const kind = naming.kind
-    const ask =
-      kind === 'rename'
-        ? data.rename(naming.row.path, name)
-        : data.copyAsNew(naming.row.path, name)
-    ask.then(
+    if (renaming.ext !== '' && stem.toLowerCase().endsWith(renaming.ext.toLowerCase())) {
+      stem = stem.slice(0, stem.length - renaming.ext.length).trim()
+      if (stem === '') {
+        setRenaming({ ...renaming, error: '新名字不能是空的' })
+        return
+      }
+    }
+    const name = `${stem}${renaming.ext}`
+    setRenaming({ ...renaming, busy: true, error: null })
+    data.rename(renaming.row.path, name).then(
       (done) => {
-        setNaming(null)
+        setRenaming(null)
         setNote({
-          text:
-            kind === 'rename'
-              ? `已改名：${naming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`
-              : `已另存为一份新的：${done.fileName}（${done.path}）—— 原文件一个字节没动，血统原样带过去了`,
+          text: `已改名：${renaming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`,
           bad: false,
         })
       },
       (e: unknown) =>
-        setNaming((cur) =>
-          cur === null
-            ? cur
-            : { ...cur, busy: false, error: errorText(e) },
+        setRenaming((cur) =>
+          cur === null ? cur : { ...cur, busy: false, error: errorText(e) },
         ),
     )
   }
 
   /**
-   * **删除**（2026-10-06 一切皆可删）：我的文件走用户线（**真删除**）；
+   * **删除**（2026-10-06 一切皆可删）：我的文件走本地文件（**真删除**）；
    * 切片器交付行走交付线（删了回「未下载」，随时可从云端重下）。
    * 二次确认长在菜单里（`danger` + `confirm`）；正在使用 / 有草稿不再拦 ——
    * 后端把属于这一份的状态一并清掉（确认框讲清了）。
@@ -931,7 +1128,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
   /*
    * **改归属**（复制出来的那份标机型 / 版本）：写的是文件头那两行，
-   * 回来用户线已重读 —— 列表的机型 / 版本两列以文件为准。
+   * 回来本地文件已重读 —— 列表的机型 / 版本两列以文件为准。
    */
   const runSetAttribution = (row: PresetTableRow, machineId: string, versionId: string) => {
     const m = data.machines.find((x) => x.id === machineId)
@@ -983,58 +1180,43 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
-     * **用户自己那份也能应用**（第七层）：同一个写口、同一条底账 ——
-     * 只是落点由用户根给（用户目录里可以自己分文件夹，所以交的是**路径**）。
-     * 后端那一道闸是"在 presets-mine/ 那一格里 + 盘上真有 + 是 TOML 预设"。
+     * **本地文件也能被使用**：同一个写口、同一条底账 —— 身份是**路径**
+     * （用户目录里可以自己分文件夹）。后端那一道闸是"在 presets-mine/ 那一格里 +
+     * 盘上真有 + 是 TOML 预设"。
      */
     if (row.origin === 'mine') {
       setBusyKey(row.rowKey)
-      data.apply(row.fileName, 'mine', row.path).then(
+      data.apply(row.path).then(
         () => setBusyKey(null),
         (e: unknown) => {
           setBusyKey(null)
-          setNote({ text: `应用失败：${errorText(e)}`, bad: true })
+          setNote({ text: `使用失败：${errorText(e)}`, bad: true })
         },
       )
       return
     }
 
     /*
-     * 官方交付行：「应用」只有一个写 —— 唯一底账（新世界 `run/active-preset.json`）。
-     * 动作认 **fileName**（目录登记的文件名 = 使用中指针的口径 = 首页反填要读的那一条）。
-     * Rust 侧会校验"已下载且 SHA 与目录登记的当前版本对得上"，
-     * 没下载 / 字节漂了 / 是旧版本都应用不成，错误原样冒给提示条。
+     * 兜底（正常到不了）：MKP 档的本地表只列「我的文件」那几行 —— 交付行不会走到这里
+     * （切片器档在上面那条 `page.kind !== 'mkp'` 就分流去「复制」了）。
+     * 真走到了也只有一句人话：**云端的版本不能直接使用**，先下载到本地。
      */
-    if (row.releaseUid === undefined) {
-      /*
-       * 兜底（正常到不了）：A2 修缝后，没有交付身份的官方 MKP 行在表格那一层
-       * 就不给「应用」按钮了（`PresetTable` 的灰杠 + `NO_ASSET_WHY` 人话原因）。
-       * 这一格留着防行形状再变化时静默出错 —— 文案同样是人话（发生了什么 + 能干什么）。
-       */
-      setNote({ text: `${row.fileName}：${NO_ASSET_WHY}`, bad: true })
-      return
-    }
-    setBusyKey(row.rowKey)
-    data.apply(row.fileName).then(
-      () => setBusyKey(null),
-      (e: unknown) => {
-        setBusyKey(null)
-        setNote({ text: `应用失败：${errorText(e)}`, bad: true })
-      },
-    )
+    setNote({
+      text: `${row.fileName} 还在云端 —— 先在云端档把它下载到本地，再到本地表里点「使用」`,
+      bad: true,
+    })
   }
 
   /**
    * **本地表那一行的动作：使用**（2026-10-09）—— 把这一份设为当前生效。
    *
-   * MKP 本地表里只有 `presets-mine/` 那几行（你自己那份工作副本），所以这一条就是
-   * 用户线那个写口（认路径、不查 SHA），与「应用」同一个底账。
-   * **不用发网络**：字节在你盘上（要拿官方新版是云端表「更新」那件事）。
-   * 上一版那条"官方行也能点使用、后端按需取回"的路已经退场 —— 官方原件不进这张表了。
+   * MKP 本地表里只有 `presets-mine/` 那几行（本地的文件），所以这一条就是
+   * 认路径那个写口，与别处同一个底账。
+   * **不用发网络**：字节在你盘上（要拿云端新版是云端表「更新」那件事）。
    */
   const runUse = (row: PresetLocalRow) => {
     setBusyKey(row.rowKey)
-    data.apply(row.fileName, 'mine', row.path).then(
+    data.apply(row.path).then(
       () => {
         setBusyKey(null)
         setNote({ text: `已使用 ${row.fileName}`, bad: false })
@@ -1043,6 +1225,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         setBusyKey(null)
         setNote({ text: `使用失败：${errorText(e)}`, bad: true })
       },
+    )
+  }
+
+  /**
+   * **取消使用**（2026-10-10 作者裁决恢复的入口：「它需要一个取消使用的按钮，
+   * 而不是说这个灰色的在用」）。
+   *
+   * 撤下的只是"哪一份在生效"这个指向（`data.clearApply()` → 唯一底账
+   * `run/active-preset.json`）—— **磁盘上一个字节都不动**；撤完 pill 左拍回到
+   * 「还没有使用任何预设」。不做二次确认：点错了再点「使用」就回来了。
+   */
+  const runUnuse = () => {
+    data.clearApply().then(
+      () => setNote({ text: '已取消使用 —— 现在没有任何预设在使用中', bad: false }),
+      (e: unknown) => setNote({ text: `取消失败：${errorText(e)}`, bad: true }),
     )
   }
 
@@ -1068,7 +1265,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
   const bbsEntry = (row: PresetTableRow): ContextMenuEntry => ({
     id: 'bbs',
-    label: '在 BBS 预设查看器中打开',
+    /* 2026-10-10 压缩：「在 BBS 预设查看器中打开」（9 字）→「在 BBS 中查看」 */
+    label: '在 BBS 中查看',
     disabled: bbsWhyNot(row),
     onSelect: () => onOpenBbs?.(row.fileName),
   })
@@ -1083,7 +1281,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
       : '只有「我的文件」能改名（只动名字、字节一个不动）—— 官方那份不归你改名'
 
   /**
-   * 「另存为一份新的」为什么不能点（第十一层）：
+   * 「复制」为什么不能点（第十一层）：
    *
    * - **我的文件**：本来就开放（我的 → 我的，按字节复制、血统原样带过去）；
    * - 其余（切片器交付行 / 官方仓库文件）：不是"我的文件"，另行处置 ——
@@ -1092,7 +1290,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const copyWhyNot = (row: PresetTableRow): string | undefined =>
     row.origin === 'mine'
       ? undefined
-      : '只有「我的文件」能另存为一份新的 —— 官方那份不归你复制'
+      : '只有「我的文件」能复制出一份新的 —— 官方那份不归你复制'
 
   /**
    * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
@@ -1132,7 +1330,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   /**
-   * **「打开参数」为什么不给点**（2026-10-09）。
+   * **「修改参数」为什么不给点**（2026-10-09）。
    *
    * 参数表画哪些项、怎么分组，全由**这一份自己的归属**（文件头 `# machine:` /
    * `# variant:` 那两行）决定 —— 标不出机型 / 版本时就没有字段表可画。
@@ -1140,7 +1338,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    */
   const paramsWhyNot = (row: PresetTableRow): string | undefined => {
     if (row.origin !== 'mine') {
-      return '只有「我的」那一份能这样打开参数 —— 官方那一份是模板，先用「使用」取一份自己的'
+      return '只有「我的」那一份能改参数 —— 官方那一份是模板，先用「使用」取一份自己的'
     }
     if (row.kind !== 'mkp_preset') return MINE_NOT_PRESET_WHY
     if (row.mineState === 'unreadable') return mineUnreadableWhy(row.mineStateDetail)
@@ -1171,11 +1369,83 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     if (versionId === null || versionId === undefined) return
     setViewer(null)
     setEditing(null)
-    setNaming(null)
+    setRenaming(null)
     setParamModal({
       target: { path: row.path, fileName: row.fileName, machineId, versionId },
       syncFirst,
     })
+  }
+
+  /*
+   * **参数对比的右键两下**（2026-10-10 作者规格，见 `compareOpen` 那一段注释）：
+   *
+   *   第一下  右键某一份 → 「参数对比」→ 记下它（`comparePick`），页脚说一句
+   *   第二下  右键另一份 → 「与「X」对比」→ 开台，这两份直接选中
+   *
+   * 右键的还是**已选的那一份**时，那一格变成「取消对比选择」—— 选错了原地点回去。
+   */
+  const pickForCompare = (row: PresetTableRow) => {
+    menu.close()
+    setComparePick({ path: row.path, fileName: row.fileName })
+    setNote({
+      text: `已选中「${row.fileName}」作为对比的第一份 —— 再右键另一份，选「与…对比」`,
+      bad: false,
+    })
+  }
+
+  /**
+   * 开对比台（第二下那一步）。两份先拿 `compareFiles` 核一遍：第一份要是已经不在了
+   * （删了 / 换了），就当没有它 —— 台子退回默认的前两份，不让一次点击落到空处。
+   */
+  const openCompare = (row: PresetTableRow) => {
+    menu.close()
+    const want = [comparePick?.path, row.path].filter((p): p is string => p !== undefined)
+    const alive = want.filter((p) => compareFiles.some((f) => f.path === p))
+    setComparePick(null)
+    setComparePreselect(alive)
+    setCompareOpen(true)
+  }
+
+  /**
+   * 能不能进对比台：**我的文件、是 MKP 预设、读得出来** —— 与 `compareFiles`
+   * 同一套判据（台子只比参数，别的类型 / 读不懂的没有参数表可画）。
+   */
+  const canCompare = (row: PresetTableRow): boolean =>
+    row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+
+  /**
+   * 菜单项里那一小截名字（超长文件名会把菜单撑破；全名在页脚那句提示里）。
+   * 按**字符**截而不是 code unit —— 别把 emoji / 代理对从中劈开。
+   */
+  const clipName = (name: string): string => {
+    const chars = [...name]
+    return chars.length > 12 ? `${chars.slice(0, 12).join('')}…` : name
+  }
+
+  /**
+   * 「参数对比」那一项。**只在能进台子的行上出现**（`canCompare`）——
+   * 其余行整项不出现：那是"这台子只比我的预设"这条边界本身，
+   * 不是"哪一项坏了"（灰一项再加一句，反倒把它讲成故障）。
+   */
+  const compareEntry = (row: PresetTableRow): ContextMenuEntry => {
+    if (comparePick !== null && comparePick.path === row.path) {
+      return {
+        id: 'compare-cancel',
+        label: '取消对比选择',
+        onSelect: () => {
+          menu.close()
+          setComparePick(null)
+        },
+      }
+    }
+    if (comparePick !== null) {
+      return {
+        id: 'compare',
+        label: `与「${clipName(comparePick.fileName)}」对比`,
+        onSelect: () => openCompare(row),
+      }
+    }
+    return { id: 'compare', label: '参数对比', onSelect: () => pickForCompare(row) }
   }
 
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
@@ -1217,25 +1487,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           label: '复制链接',
           onSelect: () => copyLink(row),
         },
-        { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
         bbsEntry(row),
       ]
     }
 
     /*
-     * **MKP 本地表那一行**（2026-10-09）：这一档只有你自己那份工作副本，菜单照旧围绕它 ——
+     * **MKP 本地表那一行**（2026-10-09）：这一档只有你自己那份本地文件，菜单照旧围绕它 ——
      *
-     *   使用                             把它设为当前生效（与操作列那颗按钮是同一个动作）
-     *   打开参数 / 选择要跟随的官方更新   参数表那一屏（官方更新也在这里处理）
-     *   改这份 / 另存 / 改名 / 显示 / 删除  原「我的文件」那一套
+     *   使用 / 取消使用                   把它设为当前生效（与操作列那颗按钮是同一个动作）；
+     *                                     正在用的那一格是「取消使用」（2026-10-10 恢复的入口）
+     *   修改参数 / 编辑文件 / 复制 / 改名 / 显示 / 删除   原「我的文件」那一套
+     *   （「查看详情」2026-10-10 删掉：**点行就是展开**，那一项重复）
+     *   （「选择要跟随的官方更新」2026-10-10 从菜单里去掉 —— 参数表里照旧能处理更新）
      *
-     * （官方那一行**不在这张表里** —— 官方原件是内部数据，它的取用在云端表「下载 / 更新」。）
+     * （官方那一行**不在这张表里** —— 云端原件是内部数据，它的取用在云端表「下载 / 更新」。）
      */
     if (row.scope === 'local' && page.kind === 'mkp') {
       /*
        * 「使用」为什么不能点：与操作列**同一套判据**（认不出是 MKP 预设的 `.json`、
        * 第九层读不出来的）—— 菜单里给一个点了必报错的项，与按钮同罪。
-       * 已经在用的那一份也不给"再点一次"的空动作（它已经在用了）。
        */
       const useWhyNot =
         row.origin !== 'mine'
@@ -1245,40 +1515,46 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             : row.mineState === 'unreadable'
               ? mineUnreadableWhy(row.mineStateDetail)
               : undefined
-      const useEntry: ContextMenuEntry = {
-        id: 'use',
-        label: ASSET_USE_TEXT[row.live ? 'on' : 'off'],
-        disabled: row.live ? ASSET_USE_WHY.on : useWhyNot,
-        onSelect: () => runUse(row),
-      }
-      const detailEntry: ContextMenuEntry = {
-        id: 'detail',
-        label: '查看详情',
-        onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)),
-      }
+      /*
+       * **正在用的那一份，这一格是「取消使用」**（2026-10-10 作者：「它需要一个
+       * 取消使用的按钮，而不是说这个灰色的在用」）—— 从"灰掉的空动作"变成真能撤下的那一下。
+       * 其余行的原因照旧按 `useWhyNot` 给（不给必报错的项）。
+       */
+      const useEntry: ContextMenuEntry = row.live
+        ? { id: 'unuse', label: ASSET_USE_TEXT.cancel, onSelect: runUnuse }
+        : {
+            id: 'use',
+            label: ASSET_USE_TEXT.off,
+            disabled: useWhyNot,
+            onSelect: () => runUse(row),
+          }
       return [
         useEntry,
-        /* 参数表那一屏（2026-10-09）：改的是参数本身，官方更新也在这里处理 */
+        /*
+         * 参数表那一屏（2026-10-09）：改的是参数本身。
+         * ★ 「选择要跟随的官方更新」2026-10-10 按作者裁决**从菜单里去掉**了
+         *   （原入口是 `openParams(row, true)` 那条直路）—— 参数表里照旧能处理官方更新，
+         *   菜单只留一个「打开参数」。
+         */
         {
           id: 'params',
-          label: '打开参数',
+          /* 「修改参数」（2026-10-10 作者：原来那句「打开参数」不好听，况且它进来
+             就是那一张改参数的屏；旁边「编辑文件」改的是正文，两个词各归各位） */
+          label: '修改参数',
           disabled: paramsWhyNot(row),
           onSelect: () => openParams(row, false),
         },
-        {
-          id: 'paramsSync',
-          label: '选择要跟随的官方更新',
-          disabled: paramsWhyNot(row),
-          onSelect: () => openParams(row, true),
-        },
+        /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` */
+        ...(canCompare(row) ? [compareEntry(row)] : []),
         ...(row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
           ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
           : []),
         {
           id: 'copy',
-          label: '另存为一份新的',
+          /* 「复制」（2026-10-10 作者：文案太长 → 短词，点了就自动出一份） */
+          label: MINE_COPY.cell,
           disabled: copyWhyNot(row),
-          onSelect: () => openCopyAs(row),
+          onSelect: () => runDuplicate(row),
         },
         {
           id: 'rename',
@@ -1293,7 +1569,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           onSelect: () => runReveal(row),
         },
         { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
-        detailEntry,
         bbsEntry(row),
         { separator: true },
         {
@@ -1311,7 +1586,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     }
 
     /*
-     * 临时编辑的入口：**只有用户的工作副本**（本地表 MKP 档只列它；
+     * 临时编辑的入口：**只有用户的本地文件**（本地表 MKP 档只列它；
      * 认不出是哪一类的（`.json`）不给 —— 这一层只改 TOML 预设；
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
@@ -1326,16 +1601,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
 
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+      /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` ——
+         切片器档这一侧只有「我的文件」里读得出来的 MKP 预设才有这一项 */
+      ...(canCompare(row) ? [compareEntry(row)] : []),
       ...(canEdit
         ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
         : []),
       {
         id: 'copy',
-        label: '另存为一份新的',
+        label: MINE_COPY.cell,
         /* 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
-        onSelect: () => openCopyAs(row),
+        onSelect: () => runDuplicate(row),
       },
       {
         id: 'rename',
@@ -1351,7 +1629,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
         disabled: revealWhyNot(row),
         onSelect: () => runReveal(row),
       },
-      { id: 'detail', label: '查看详情', onSelect: () => setExpandedKey((k) => (k === row.rowKey ? null : row.rowKey)) },
       bbsEntry(row),
       { separator: true },
       {
@@ -1387,23 +1664,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   }
 
   const table = page.scope === 'local' ? page.local : page.cloud
-  /* 批量那一行的字：这一批里有什么，决定它是「下载」「更新」还是「下载并更新」 */
-  const batch = releaseBatchText(
-    page.pending.missing,
-    page.pending.stale,
-    page.pending.tampered,
-  )
   /* 这一份在归档里有几个旧版本。按文件名对（与下载 / 应用同一套口径） */
   const archiveCountOf = (fileName: string): number =>
     data.archived.filter((a) => a.fileName === fileName).length
 
-  /* 层高 chips 一排放不下的值收进「更多」（先摆 6 个） */
-  const layerMain = page.slicerFilters.layers.slice(0, 6)
-  const layerMore = page.slicerFilters.layers.slice(6)
-
   /*
-   * 搜索框。两种类型共用这一个节点，只是排位不同：MKP 在 pill 左边、切片器在漏斗右边
-   * （G07-1 定稿的排位）。宽度**固定 180**（mini 收 130，见 CSS）——「弹性 180–320」
+   * 搜索框。两种类型共用这一个节点，**排位也一样**（两档第一排都是 类型 / 位置(右) / 搜索）。
+   * 宽度**固定 180**（mini 收 130，见 CSS）——「弹性 180–320」
    * 那一版被作者否掉（2026-10-04：「不要搞这么宽」，小的感觉不在宽度）。
    * 真正的解在**高度**：36px，故意比 32px 的分段控件高 4px —— 分段是实心灰槽、
    * 边界对比强，搜索是白底细边框，标称同高视觉上仍矮一截（作者：「高度上看着
@@ -1458,7 +1725,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
    * 台账是可数的全局事实，**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
    * 全 catalog 数字不应该混在当前类型的业务语境里」）：
    *
-   *   MKP     「官方（目录里登记的 MKP 预设，全机型）· 我的（你有几份工作副本）」
+   *   MKP     「官方（目录里登记的 MKP 预设，全机型）· 我的（你有几份本地文件）」
    *           —— 官方的取用（下载 / 更新）在云端表、使用在本地表，这一格说的是
    *           "一共多少"，与当前看哪张表无关
    *   切片器   「仓库（这一档全机型的官方文件）· 本机（官方副本总数）· 我的」
@@ -1477,18 +1744,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     <span className={s.meta}>
       <span
         className={s.counts}
-        title={`当前这张表（${page.scope === 'local' ? '本地' : '云端'}）在这一档机型、类型与搜索词之下有几行。筛前 ${table.total} 项`}
+       
       >
         共 {table.rows.length} 项
       </span>
       <span
         className={s.ledger}
-        title={
-          page.kind === 'mkp'
-            ? `MKP 台账：官方（目录里登记的 MKP 预设，全机型）· 我的（你自己那份工作副本，扫 presets-mine）。` +
-              `官方的取用在云端表那一行（下载 / 更新 = 取回 + 落一份你的），使用在本地表那一行 —— 两件事不在同一张表上。`
-            : `仓库：这一档类型在全机型下一共几个官方文件（已剔掉仅归档的）· 本机：已有几个官方副本（getLocalFiles，演示集合）· 我的：你自己的文件里属于这一档的几个（getUserPresetFiles，扫 presets-mine；认不出类别的两档都算；云端没有它们）`
-        }
+       
       >
         {page.kind === 'mkp' ? (
           <>
@@ -1506,27 +1768,73 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
     </span>
   )
 
+  /*
+   * **页脚那一格是唯一的横幅位**（作者 2026-10-10）：需升级 / 操作结果
+   * 都显示在这里 —— 有横幅就**顶掉**页脚原本的内容（右键提示与切片器台账），
+   * 页面总高度从头到尾不动。它们原先住在表格上方，来一条就把列表往下推一截。
+   *
+   * 两条同时只显示一条，优先级：刚做完的 note（操作结果）> 需升级。
+   * **一律单行**：装不下就省略号（全文本在 title 里）—— 不换行、不出滚动条；
+   * 窄窗丢掉的细节靠悬停看全（作者：「显示不完整就显示不完整，无所谓」）。
+   */
+  const noteText =
+    note === null ? '' : [note.text, ...(note.lines ?? [])].join('；')
+  const footBanner =
+    note !== null ? (
+      <div className={note.bad ? s.bannerBad : s.banner} role="status" title={noteText}>
+        {/* 逐份结局并在主句后面一句：单行，超出省略（明细也躺在 title 里） */}
+        <span className={s.bannerText}>{noteText}</span>
+        <button
+          type="button"
+          className={s.noteClose}
+          aria-label="关闭这条提示"
+          onClick={() => setNote(null)}
+        >
+          ×
+        </button>
+      </div>
+    ) : data.needsNewerClient ? (
+      /*
+       * 「远端这一代读不懂」那一句（第三刀下半，作者定的产品规则 B）。
+       * ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给我的这份我读不了"。
+       *   **列表照常**（没有整表标红、没有逐行"不兼容"标签），只在这一格多一句。
+       *   按钮只有一个去处：设置页的软件更新块。
+       */
+      <div className={s.bannerBad} role="status">
+        <span className={s.bannerText}>
+          此预设需要更新版 SupportEase —— 当前客户端版本过旧，暂不支持此预设文件
+        </span>
+        {onOpenSettings !== undefined && (
+          <button type="button" className={s.noteAction} onClick={onOpenSettings}>
+            去更新
+          </button>
+        )}
+      </div>
+    ) : null
+
   return (
-    <div ref={rootRef} className={s.page} data-density={density}>
+    <div ref={mountPage} className={s.page} data-density={density}>
       <FieldLayer>
         {/*
-         * 工具栏区（G07-1 收编；2026-10-04 作者再裁决：**恒两排**）——
+         * 工具栏区（G07-1 收编）—— **两档同构**（2026-10-10）：
          *
-         *   MKP     第一排：类型分段 位置分段(右) 搜索
-         *           第二排：pill + 计数台账（台账顶到右线）—— 全档一样，不再随窗宽并排
-         *   切片器  第一排：类型分段 位置分段(右) 漏斗 搜索；第二排：喷嘴 chips；第三排：层高 chips
+         *   共用     第一排：类型分段 位置分段(右) 搜索
+         *   MKP     第二排：pill + 计数台账（台账顶到右线）
+         *   切片器   第二排：pill（喷嘴×层高 | 机型）+ 计数台账 —— 与 MKP 同一条骨架
          *
-         * pill = PresetStatusPill：左拍「● 已应用 …」点击 = 定位（清筛选 + 闪行），
-         * 右拍 = 机型筛选漏斗。切片器没有「已应用」，它的筛选是独立漏斗
-         * （PresetMachineFilter，就是 pill 的右拍单拎出来），排在搜索左边。
-         * 计数与台账：MKP 档**恒住 pill 右边**（作者 2026-10-04：以两排稿为准；
-         * 此前宽档住页脚、小窗回 pill 右边，一页两种摆法），页脚只留右键提示；
-         * 切片器的筛选排本来就满（喷嘴 / 层高 chips），它的计数与台账照旧住页脚。
+         * 两颗 pill 是同一个皮肤（`PresetStatusPill.module.css`），差别只在左拍：
+         *   MKP     「● 已应用 文件名 · 机型」 信息，点击 = 定位（清筛选 + 闪行）
+         *   切片器  「▽ 喷嘴 0.2 · 层高 0.12」  筛选，点击 = 展开两组（喷嘴 / 层高）的弹层
+         * 两档的**右拍都是同一个机型筛选**（`PresetMachineFilter`）—— 机型从此只住这一处。
+         *
+         * 切片器原先那三颗常驻下拉（机型 / 喷嘴 / 层高）2026-10-10 退役（作者：
+         * 「它 3 个筛选感觉很讨厌，特别讨厌」）—— 收进那颗 pill 的左拍里。
+         *
          * **一个控件都不藏进「更多」**：藏起来等于让人猜。
-         * 换行不靠窗宽碰运气：.tbBreak（flex-basis 100% 的零高断行）把 pill / chips
-         * 钉在各自的排上，窄窗只是让第一排自己折。
+         * 换行不靠窗宽碰运气：.tbBreak（flex-basis 100% 的零高断行）把每一排
+         * 钉在自己的排上，窄窗只是让第一排自己折。
          */}
-        <div className={s.toolbar} data-kind={page.kind}>
+        <div className={s.toolbar}>
           <PresetScopeBar
             kind={page.kind}
             scope={page.scope}
@@ -1538,120 +1846,63 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             <>
               {searchNode}
               <span className={s.tbBreak} aria-hidden />
-              <PresetStatusPill
-                applied={page.applied}
-                appliedFileName={page.appliedFileName}
-                appliedMachineText={page.appliedMachineText}
-                appliedIsMine={page.appliedIsMine}
-                onLocate={locateApplied}
-                machines={data.machines}
-                machineId={data.machineId}
-                onPick={pickMachine}
-              />
-              <button
-                type="button"
-                className={s.chip}
-                title="对比台：选 2~3 份「我的预设」，同一项并排看、可以直接改。只在你自己那几份之间比 —— 官方那份（隐藏基线）不进这张台子"
-                onClick={() => setCompareOpen(true)}
-              >
-                参数对比
-              </button>
-              {metaNode}
+              {/*
+               * 第二排（`.tbRow`：**不折行**的一行）—— 左 pill、右计数台账。
+               *
+               * 「参数对比」那颗常驻按钮 2026-10-10 退役（作者：「参数对比几个字，
+               * 我们去掉了……答案是右键选择一个，然后再选择另外一个，就去对比」）：
+               * 入口搬进右键菜单（`compareEntry`），这一排只剩 pill 与台账；
+               * 空间不够时先收 pill 的左拍（文件名省略号），台账永远在这一行。
+               */}
+              <span className={s.tbRow}>
+                <PresetStatusPill
+                  applied={page.applied}
+                  appliedFileName={page.appliedFileName}
+                  appliedMachineText={page.appliedMachineText}
+                  onLocate={locateApplied}
+                  machines={data.machines}
+                  machineId={data.machineId}
+                  onPick={pickMachine}
+                />
+                {metaNode}
+              </span>
             </>
           ) : (
             <>
-              <PresetMachineFilter
-                machines={data.machines}
-                machineId={data.machineId}
-                onPick={pickMachine}
-              />
               {searchNode}
               <span className={s.tbBreak} aria-hidden />
-              <div className={`${s.filterGroup} ${s.groupNozzle}`}>
-                <span className={s.filterLabel}>喷嘴</span>
-                <span className={s.chips}>
-                  <button
-                    type="button"
-                    className={s.chip}
-                    data-on={page.slicerFilters.nozzle === ''}
-                    onClick={() => page.slicerFilters.setNozzle('')}
-                  >
-                    全部
-                  </button>
-                  {page.slicerFilters.nozzles.map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      className={s.chip}
-                      data-on={page.slicerFilters.nozzle === v}
-                      onClick={() => page.slicerFilters.setNozzle(v)}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </span>
-              </div>
 
-              <span className={`${s.tbBreak} ${s.tbBreak2}`} aria-hidden />
-
-              <div className={`${s.filterGroup} ${s.groupLayer}`}>
-                <span className={s.filterLabel}>层高</span>
-                <span className={s.chips}>
-                  <button
-                    type="button"
-                    className={s.chip}
-                    data-on={page.slicerFilters.layer === ''}
-                    onClick={() => page.slicerFilters.setLayer('')}
-                  >
-                    全部
-                  </button>
-                  {layerMain.map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      className={s.chip}
-                      data-on={page.slicerFilters.layer === v}
-                      onClick={() => page.slicerFilters.setLayer(v)}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                  {layerMore.length > 0 && (
-                    <>
-                      <button
-                        ref={moreRef}
-                        type="button"
-                        className={s.chip}
-                        data-on={layerMore.includes(page.slicerFilters.layer)}
-                        onClick={() => setMoreOpen((v) => !v)}
-                      >
-                        更多 {moreOpen ? '⌃' : '⌄'}
-                      </button>
-                      {moreOpen && (
-                        <FieldPopover anchor={moreRef.current} onClose={() => setMoreOpen(false)}>
-                          <ul className={s.moreList}>
-                            {layerMore.map((v) => (
-                              <li key={v}>
-                                <button
-                                  type="button"
-                                  className={s.moreItem}
-                                  data-on={page.slicerFilters.layer === v}
-                                  onClick={() => {
-                                    page.slicerFilters.setLayer(v)
-                                    setMoreOpen(false)
-                                  }}
-                                >
-                                  {v}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        </FieldPopover>
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
+              {/*
+               * 切片器的筛选（2026-10-10 作者裁决：「我希望做成 MKP 那样的」）——
+               * **一颗 pill**，与 MKP 那颗同一套皮肤：左拍「喷嘴 × 层高」、一条竖线、
+               * 右拍机型筛选。
+               *
+               * 原先这一排是三颗常驻下拉（机型 / 喷嘴 / 层高；作者：「它 3 个筛选
+               * 感觉很讨厌，特别讨厌」）：常驻控件从三颗降到一颗，第二排的构图也就
+               * 跟 MKP 对齐了（左一颗胶囊、右边顶到右线的计数台账）。
+               *
+               * 左拍点开是**两组的弹层**（喷嘴一行、层高一行，值用胶囊平铺）——
+               * 作者要的「点开了之后它同时就显示喷嘴和层高」。
+               * ★ 层高那一行画的是**全集**（`allLayers`），当前喷嘴没有的档位
+               *   **灰着、点不动、不消失**（作者 2026-10-10：「别的变成那种灰色不让
+               *   点击的」）；谁能点由数据层的 `layerOptions` 说了算，这里只把
+               *   两份集合传进去。
+               */}
+              <span className={s.tbRow}>
+                <PresetSlicerPill
+                  machines={data.machines}
+                  machineId={data.machineId}
+                  onPickMachine={pickMachine}
+                  nozzles={page.slicerFilters.nozzles}
+                  nozzle={page.slicerFilters.nozzle}
+                  onPickNozzle={page.slicerFilters.setNozzle}
+                  layers={page.slicerFilters.allLayers}
+                  layerOptions={page.slicerFilters.layerOptions}
+                  layer={page.slicerFilters.layer}
+                  onPickLayer={page.slicerFilters.setLayer}
+                />
+                {metaNode}
+              </span>
             </>
           )}
 
@@ -1668,7 +1919,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             <div className={s.noneHold}>
               <div className={s.none}>
                 <p className={s.noneHead}>
-                  <span className={s.noneBadge} title={STATUS_WHY.unavailable}>
+                  <span className={s.noneBadge}>
                     ● {STATUS_TEXT.unavailable}
                   </span>
                   {UNSUPPORTED_TEXT}
@@ -1690,79 +1941,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
           ) : (
             <>
               {/*
-               * 批量那一行：只在**云端表**、且这一批非空时出现。
-               * 为什么在云端表：那里说的是"官方有什么、我缺什么"，批量正是补这里 ——
-               * MKP 档逐份「取回 + 落工作副本」、切片器档逐份落下载区 `mkp/`。
-               * 本地表说的是"我机器上有什么"，那是另一件事。
-               * 为什么敢占一行高度：它的数**与眼前这张表同口径**（当前机型 + 这一档类型），
-               * 而且带着动作 —— 不是那种"别处还有个数字"的噪音（那种以前删过）。
+               * 表格上方**什么都不放**（作者 2026-10-10）：批量行 / 需升级 / 操作结果
+               * 三条横幅全搬去页脚那一格（见 `footBanner`）—— 出现在这里会把列表
+               * 往下推，而列表的高度应当从头到尾不动。
                */}
-              {page.scope === 'cloud' && page.pending.total > 0 && (
-                <div className={s.batch}>
-                  <span className={s.batchText} title={batch.why}>
-                    {batch.count}
-                  </span>
-                  <button
-                    type="button"
-                    className={s.batchBtn}
-                    disabled={batchBusy}
-                    title={batch.why}
-                    onClick={() => void runBatch()}
-                  >
-                    {batchBusy ? '处理中…' : batch.label}
-                  </button>
-                </div>
-              )}
-
-              {/*
-                「远端这一代读不懂」那一句（第三刀下半，作者定的产品规则 B）。
-                ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给我的这份我读不了"。
-                  **列表照常**（没有整表标红、没有逐行"不兼容"标签），只在这一格多一句提示。
-                文案照抄作者原话，按钮只有一个去处：设置页的软件更新块。
-              */}
-              {data.needsNewerClient && (
-                <div className={s.noteBad} role="status">
-                  <p className={s.noteMain}>
-                    <span>
-                      <strong>此预设需要更新版 SupportEase</strong>
-                      <br />
-                      当前客户端版本过旧，暂不支持此预设文件。
-                    </span>
-                    {onOpenSettings !== undefined && (
-                      <button
-                        type="button"
-                        className={s.noteAction}
-                        onClick={onOpenSettings}
-                      >
-                        去更新
-                      </button>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {note !== null && (
-                <div className={note.bad ? s.noteBad : s.note} role="status">
-                  <p className={s.noteMain}>
-                    {note.text}
-                    <button
-                      type="button"
-                      className={s.noteClose}
-                      aria-label="关闭这条提示"
-                      onClick={() => setNote(null)}
-                    >
-                      ×
-                    </button>
-                  </p>
-                  {/* 一次动作里逐份的结局：一行一份（批量里"哪一份坏了"是唯一有用的信息） */}
-                  {(note.lines ?? []).map((line) => (
-                    <p key={line} className={s.noteItem}>
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              )}
-
               <PresetTable
                 scope={page.scope}
                 kind={page.kind}
@@ -1774,7 +1956,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 triggerProps={menu.triggerProps}
                 activeKey={menu.target?.rowKey ?? null}
                 expandedKey={expandedKey}
-                /* 点同一行收起、点别行换行 —— 与右键菜单「查看详情」和参数页同一条规则 */
+                /* 点同一行收起、点别行换行 —— 与参数页同一条规则 */
                 onToggleExpand={(rowKey) => setExpandedKey((k) => (k === rowKey ? null : rowKey))}
                 /*
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
@@ -1786,7 +1968,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 onOpenMine={openMine}
                 onEdit={openEdit}
                 onLive={runLive}
-                /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份工作副本 */
+                /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份本地文件 */
                 onUse={runUse}
                 onDownload={download}
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
@@ -1801,21 +1983,24 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
             </>
           )}
 
-          {/* 查看详情不再是模态框 —— 点行展开下方的内容 */}
+          {/* 详情不是模态框 —— 点行展开下方的内容（右键菜单里那个重复项 2026-10-10 已删） */}
 
           {/*
-           * **只读正文抽屉**：两条线共用这一个外壳。
+           * **只读正文抽屉**：两边共用这一个外壳。
            *
            * 挂在 `.main` 里（与参数页同一条规矩）：遮罩只盖内容区，底栏与窗口右下的
            * resize 手柄还点得到。
            *
-           *   官方线（`archive`）列出旧版本、挑一份看；**删除 / 恢复 / 用这份旧版本都没有**
-           *   用户线（`mine`）  就一份，打开直接读；**改它 / 另存 / 保存都没有**（下一层的事）
+           *   云端那一侧（`archive`）列出旧版本、挑一份看；**删除 / 恢复 / 用这份旧版本都没有**
+           *   本地文件（`mine`）  就一份，打开直接读；**改它 / 另存 / 保存都没有**（下一层的事）
            *
            * 两边的共同点：**只读**，读不出来照实说。
            */}
-          <Drawer
+          <Modal
             open={viewer !== null}
+            size="lg"
+            /* 遮罩铺满"标题栏以下整块"（见 `pageEl` 的注释）：挂到页面根那一层 */
+            host={pageEl}
             title={viewer?.kind === 'mine' ? MINE_DRAWER.title : ARCHIVE_DRAWER.title}
             subtitle={
               viewer === null
@@ -1837,7 +2022,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                         {viewer.rows.map((a) => (
                           <li key={a.path} className={s.archItem}>
                             <div className={s.archLine}>
-                              <span className={s.archName} title={a.path}>
+                              <span className={s.archName}>
                                 {a.fileName}
                               </span>
                               <span className={s.archMeta}>{sizeTextOf(a.size)}</span>
@@ -1862,7 +2047,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                                     ) ?? ARCHIVE_TIME.replacedUnknown)
                               }`}
                             </p>
-                            <p className={s.archWho} title={a.path}>
+                            <p className={s.archWho}>
                               {a.machineId === null || a.versionId === null
                                 ? ARCHIVE_DRAWER.unknown
                                 : `${a.machineId} · ${a.versionId}`}
@@ -1890,11 +2075,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                                     ? `${s.archBtn} ${s.archBtnDanger}`
                                     : s.archBtn
                                 }
-                                title={
-                                  confirmingArchive === a.path
-                                    ? '再点一下确认删除 —— 这一版删了就找不回（云端只有最新版）'
-                                    : '删除这份旧版本（删了就找不回，云端只有最新版）'
-                                }
+                               
                                 onClick={() =>
                                   confirmingArchive === a.path
                                     ? runRemoveArchived(a)
@@ -1932,150 +2113,253 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
                 </p>
               </div>
             )}
-          </Drawer>
+          </Modal>
 
           {/*
            * **参数对比台**（2026-10-08）：一个独立常驻工具，只在**用户自己的本地预设**
            * 之间比。挂在 `.main` 里（与抽屉同一条规矩）：遮罩只盖内容区。
            * **官方那份（隐藏 baseline）不进这张台子** —— 它是系统内部的东西，不是给用户比的。
+           *
+           * 入口是右键两下（见 `compareEntry`）：`preselect` 把选中的那两份带进来。
            */}
           <CompareModal
             open={compareOpen}
             files={compareFiles}
+            preselect={comparePreselect}
+            host={pageEl}
             onClose={() => setCompareOpen(false)}
             onSaved={(text) => setNote({ text, bad: false })}
           />
 
           {/*
-           * **编辑器抽屉**（临时编辑那条链）。改的是**临时文件**里的正文 ——
-           * 所以这里没有"保存到官方"这种动作：只有「放弃」与「保存（写回我这份）」。
+           * **编辑器抽屉**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
+           * 编辑期间只动正文草稿 —— 所以这里没有"保存到官方"这种动作：
+           * 只有「放弃」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
+           * （2026-10-10 作者：「没有点保存的时候千万不要保存进来」，两条草稿分开存）。
            *
            * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（官方那一份是模板），
            * 所以这里只有一套说法：保存 = 写回它自己。
            *
-           * 关掉（Esc / 点遮罩）= **只关，不丢**：草稿在盘上，回头点「改这份」接着改。
+           * 关掉（Esc / 点遮罩）= **只关，不丢**：正文草稿在盘上，回头点「改这份」接着改。
            * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
            */}
-          <Drawer
-            open={editing !== null}
-            title={EDIT_TEXT.title}
-            subtitle={editing === null ? undefined : (editing.path ?? editing.sourceFileName)}
-            footer={
-              <>
-                <button type="button" className={s.editGhost} onClick={discardEdit}>
-                  {EDIT_TEXT.discard}
-                </button>
-                <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                  {EDIT_TEXT.commit}
-                </button>
-              </>
-            }
-            onClose={() => setEditing(null)}
-          >
-            {editing !== null && (
-              <div className={s.edit}>
-                <p className={s.editNote}>{EDIT_TEXT.note}</p>
-                {editing.reused && <p className={s.editReused}>{EDIT_TEXT.reused}</p>}
-                <textarea
-                  className={s.editArea}
-                  value={editing.text}
-                  spellCheck={false}
-                  aria-label="预设正文"
-                  onChange={(e) =>
-                    setEditing((cur) => (cur === null ? cur : { ...cur, text: e.target.value }))
-                  }
-                />
-                {editing.draftError !== null && (
-                  <p className={s.editErr}>
-                    {EDIT_TEXT.draftFailed}
-                    {editing.draftError}
-                  </p>
-                )}
-              </div>
-            )}
-          </Drawer>
-
           {/*
-           * **起名字抽屉**（第十层改名 / 第十一层另存为一份新的，共用一个）：
-           * 两个动作都只传一个名字，字节与状态全在后端管 —— 这里没有"保存内容"这回事。
-           *
-           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖 / 不自动改名），
-           * 这里只把用户输入的字带过去；失败原话**留在抽屉里**（别把他刚打的字盖掉）。
-           * 改名预填现在这个名字（改名后使用中指针与草稿在后端跟着走）；
-           * 另存为**不预填**（名字由用户明确指定）。
+           * **撞名那一格**（a04）：云端那份要落下来、而本机已经有一份同名的了 ——
+           * 问用户"要不要导入"。同意就自动改名（`A1-fast-2.toml`），两份都留着；
+           * 原来那份一个字节不动。不覆盖、也不静默丢掉（与资源管理器"保留两者"同一条路子）。
            */}
-          <Drawer
-            open={naming !== null}
-            title={naming === null ? MINE_RENAME.title : NAMING_TEXT[naming.kind].title}
-            subtitle={naming?.row.path}
+          <Modal
+            open={takenAsk !== null}
+            size="sm"
+            host={pageEl}
+            title={IMPORT_TAKEN_TEXT.title}
+            subtitle={takenAsk?.fileName}
             footer={
               <>
-                <button type="button" className={s.editGhost} onClick={() => setNaming(null)}>
+                <button type="button" className={s.editGhost} onClick={() => setTakenAsk(null)}>
                   取消
                 </button>
                 <button
                   type="button"
                   className={s.editPrimary}
-                  disabled={naming?.busy === true}
-                  onClick={submitNaming}
+                  disabled={takenAsk?.busy === true}
+                  onClick={confirmTakenImport}
                 >
-                  {naming === null ? MINE_RENAME.commit : NAMING_TEXT[naming.kind].commit}
+                  {IMPORT_TAKEN_TEXT.commit}
                 </button>
               </>
             }
-            onClose={() => setNaming(null)}
+            onClose={() => setTakenAsk(null)}
           >
-            {naming !== null && (
+            {takenAsk !== null && (
               <div className={s.edit}>
-                <p className={s.editNote}>{NAMING_TEXT[naming.kind].note}</p>
-                {naming.kind === 'rename' && naming.row.scope === 'local' && naming.row.live && (
-                  <p className={s.editReused}>{MINE_RENAME.liveNote}</p>
-                )}
-                <input
-                  className={s.renameInput}
-                  value={naming.name}
-                  spellCheck={false}
-                  aria-label="新的文件名"
-                  placeholder={naming.kind === 'copy' ? '新文件名' : undefined}
-                  autoFocus
-                  onChange={(e) =>
-                    setNaming((cur) =>
-                      cur === null ? cur : { ...cur, name: e.target.value, error: null },
-                    )
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitNaming()
-                  }}
-                />
-                {naming.error !== null && (
-                  <p className={s.editErr}>
-                    {naming.kind === 'rename' ? '没改成：' : '没另存成：'}
-                    {naming.error}
-                  </p>
-                )}
+                <p className={s.editNote}>
+                  {IMPORT_TAKEN_TEXT.note(takenAsk.fileName, takenAsk.suggestedName)}
+                </p>
               </div>
             )}
-          </Drawer>
+          </Modal>
+
+          <Modal
+            open={editing !== null}
+            /* 整块工作区那一档：正文要撑满，正文区自己管滚（`bodyFill` 不套外层滚动容器） */
+            size="xl"
+            bodyFill
+            host={pageEl}
+            title={EDIT_TEXT.title}
+            /* 副标题只写**文件名**（2026-10-10 作者：「不要显示那个路径」）—— 与「修改参数」同一条 */
+            subtitle={editing === null ? undefined : editing.fileName}
+            /*
+             * 底栏：**右边两颗短按钮**，左边只在**出错**时说话。
+             *
+             * ★ 2026-10-10 第三轮（作者圈着那句「接着上次改 —— 草稿已经在盘上」问
+             *   「那这个文案是什么意思？去掉它」）：原来这里有三种状态 ——
+             *   草稿没存上（警示色）/ 接着上次改 / 默认那句「改动会自动存进草稿」。
+             *   后两种是**过程说明**，"草稿""盘上"都是内部的词，用户不知道指什么，
+             *   也不需要被通知（要保存，右边那颗就是）。
+             *   留下的只有**异常**：临时文件没写进去时必须看得见。
+             */
+            footer={
+              editing !== null && (
+                <div className={s.editorFoot}>
+                  {editing.draftError !== null && (
+                    <span className={s.editorStateBad}>
+                      {EDIT_TEXT.draftFailed}
+                      {editing.draftError}
+                    </span>
+                  )}
+                  <span className={s.editorActs}>
+                    <button type="button" className={s.editGhost} onClick={discardEdit}>
+                      {EDIT_TEXT.discard}
+                    </button>
+                    <button type="button" className={s.editPrimary} onClick={commitEdit}>
+                      {EDIT_TEXT.commit}
+                    </button>
+                  </span>
+                </div>
+              )
+            }
+            onClose={() => setEditing(null)}
+          >
+            {editing !== null && (
+              /*
+               * 正文区 = **着色的 <pre>（下）+ "文字透明"的 textarea（上）** ——
+               * 自己写的语法高亮（词法在 `tomlPaint.ts`）。两层同字体 / 同内衬 / 同行高，
+               * 逐像素对齐；滚动由 textarea 管，`onScroll` 搬给下面那层。
+               * 这一块**占满整屏**（`bodyFill`：框身不滚，四周留白交给 `.editWrap`）。
+               */
+              <div className={s.editWrap}>
+                <pre className={s.editPaint} ref={paintRef} aria-hidden>
+                  {paintedLines.map((line, i) => (
+                    <span key={i}>
+                      {line.map((t, j) =>
+                        t.kind === 'plain' ? (
+                          t.text
+                        ) : (
+                          <span key={j} className={TOKEN_CLASS[t.kind]}>
+                            {t.text}
+                          </span>
+                        ),
+                      )}
+                      {'\n'}
+                    </span>
+                  ))}
+                </pre>
+                <textarea
+                  className={s.editArea}
+                  value={editing.text}
+                  spellCheck={false}
+                  aria-label="预设正文"
+                  autoFocus
+                  onScroll={(e) => {
+                    const paint = paintRef.current
+                    if (paint === null) return
+                    paint.scrollTop = e.currentTarget.scrollTop
+                    paint.scrollLeft = e.currentTarget.scrollLeft
+                  }}
+                  onChange={(e) =>
+                    setEditing((cur) => (cur === null ? cur : { ...cur, text: e.target.value }))
+                  }
+                />
+              </div>
+            )}
+          </Modal>
+
+          {/*
+           * **重命名那一口框**（第十层）。2026-10-10 起这里只剩它一件事 ——
+           * 「另存为一份新的」变成了行菜单里的「复制」（名字由程序起，不再弹框问名字）。
+           *
+           * ★ 2026-10-10 又一轮（作者：框在小窗口里太挤 / 「只改名字，这些文案不需要」
+           *   「他正在使用，也不需要」）：框里只剩**一行名字**（前缀说明与「在用」
+           *   提示都撤了）；后缀拆出去做成行尾一枚灰字（`.renameExt`，不可改）——
+           *   输入框里从头到尾看不到、也碰不到 `.toml`。
+           *
+           * 名字的门槛全在后端（不许空 / 不许带路径 / 后缀保持原样 / 不覆盖 / 不自动改名），
+           * 这里只把用户输入的主名带上拆出来那枚后缀；失败原话**留在这口框里**
+           * （别把他刚打的字盖掉）。预填现在这个名字的主名。
+           */}
+          <Modal
+            open={renaming !== null}
+            size="sm"
+            host={pageEl}
+            title={MINE_RENAME.title}
+            /* 副标题只写文件名（原来是完整路径，2026-10-10 统一） */
+            subtitle={renaming?.row.fileName}
+            footer={
+              <>
+                <button type="button" className={s.editGhost} onClick={() => setRenaming(null)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={s.editPrimary}
+                  disabled={renaming?.busy === true}
+                  onClick={submitRename}
+                >
+                  {MINE_RENAME.commit}
+                </button>
+              </>
+            }
+            onClose={() => setRenaming(null)}
+          >
+            {renaming !== null && (
+              <div className={s.renameForm}>
+                {/* 一个壳 + 主名输入 + 行尾灰色后缀（聚焦态由壳的 focus-within 画） */}
+                <div className={s.renameField}>
+                  <input
+                    className={s.renameInput}
+                    value={renaming.name}
+                    spellCheck={false}
+                    aria-label="新的文件名（不含后缀）"
+                    autoFocus
+                    onChange={(e) =>
+                      setRenaming((cur) =>
+                        cur === null ? cur : { ...cur, name: e.target.value, error: null },
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitRename()
+                    }}
+                  />
+                  {renaming.ext !== '' && (
+                    <span className={s.renameExt} title="后缀保持原样，不能改">
+                      {renaming.ext}
+                    </span>
+                  )}
+                </div>
+                {renaming.error !== null && <p className={s.editErr}>没改成：{renaming.error}</p>}
+              </div>
+            )}
+          </Modal>
         </div>
 
         {/*
-         * 页脚（G07-1 的 4 号收编；2026-10-04 起 MKP 档的计数与台账恒住工具栏第二排，
-         * 见工具栏的说明）——页脚这一条：右键提示在左；**只有切片器**把
-         * 「共 N 项 │ 仓库…」放在这里（它的筛选排满，pill 也不在）。
+         * 页脚（G07-1 的 4 号收编）——这一条只剩**右键提示**：
+         * MKP 档的计数与台账从 2026-10-04 起住工具栏第二排；切片器档 2026-10-10
+         * 有了自己的 pill 之后也搬上去了（两档第二排从此同构：左 pill、右台账）。
          * 「暂不支持」时没有表可右键，提示不画（计数与台账照旧 —— 那是全局事实）。
+         *
+         * **2026-10-10：这一格同时是横幅位** —— 有 `footBanner`（批量行 / 需升级 /
+         * 操作结果）时**整格换成它**，原来的右键提示被顶掉。横幅高 28 + 内衬
+         * 10×2 = 48，页脚一像素都不长：列表高度从头到尾不动（作者要求的）。
          */}
         <div className={s.foot}>
-          {!page.unsupported && (
-            <span className={s.footHint}>
-              {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于我的文件的话 */}
-              {page.kind === 'mkp'
-                ? page.scope === 'cloud'
-                  ? '右键任意一行还有下载 / 更新 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
-                  : '右键任意一行还有使用 / 打开参数 / 官方更新 / 置顶 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'
-                : '右键任意一行还有置顶 / 重命名 / 删除 / 查看详情（没有鼠标就 Shift+F10 或菜单键）'}
-            </span>
+          {footBanner ?? (
+            <>
+              {!page.unsupported && (
+                <span className={s.footHint}>
+                  {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于我的文件的话。
+                      「参数对比」是右键两下那一条（选第一份 → 再选第二份）—— 入口只住菜单里，
+                      所以这句提示就是它的发现路径，不能省 */}
+                  {page.kind === 'mkp'
+                    ? page.scope === 'cloud'
+                      ? '右键任意一行还有下载 / 更新 / 复制链接（没有鼠标就 Shift+F10 或菜单键）'
+                      : '右键任意一行还有使用 / 修改参数 / 参数对比 / 编辑文件 / 复制 / 重命名 / 置顶（没有鼠标就 Shift+F10 或菜单键）'
+                    : '右键任意一行还有置顶 / 参数对比 / 复制 / 重命名 / 删除（没有鼠标就 Shift+F10 或菜单键）'}
+                </span>
+              )}
+            </>
           )}
-          {page.kind === 'slicer' && metaNode}
         </div>
 
         <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />

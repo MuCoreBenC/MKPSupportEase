@@ -55,9 +55,21 @@ const PLATFORM = detectPlatform()
  * （"回到本页对一次底账"那套 2026-10-06 随 AppState 退役 —— 页面订阅
  * `src/app/state/appState.ts`，底账一变所有页同帧换账，不再需要 active prop。）
  */
-function PageSlot({ hidden, children }: { hidden: boolean; children: ReactNode }) {
+function PageSlot({
+  hidden,
+  page,
+  children,
+}: {
+  hidden: boolean
+  /**
+   * a02：非首页槽带 `data-page` —— 共享 UI 原语（ui.module.css）的圆润化
+   * 只作用在带标记的槽里，首页槽（含它的弹窗）保持原样。
+   */
+  page?: string
+  children: ReactNode
+}) {
   return (
-    <div className={s.pageSlot} data-hidden={hidden || undefined}>
+    <div className={s.pageSlot} data-hidden={hidden || undefined} data-page={page}>
       {children}
     </div>
   )
@@ -121,19 +133,19 @@ export default function App() {
             <PageSlot hidden={tab !== 'machine'}>
               <PageHome density={density} />
             </PageSlot>
-            <PageSlot hidden={tab !== 'preset'}>
+            <PageSlot hidden={tab !== 'preset'} page="presets">
               <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
             </PageSlot>
-            <PageSlot hidden={tab !== 'calib'}>
+            <PageSlot hidden={tab !== 'calib'} page="calib">
               <PageCalib />
             </PageSlot>
-            <PageSlot hidden={tab !== 'bbs'}>
+            <PageSlot hidden={tab !== 'bbs'} page="bbs">
               <PageBbs density={density} pending={pendingBbs} />
             </PageSlot>
-            <PageSlot hidden={tab !== 'report'}>
+            <PageSlot hidden={tab !== 'report'} page="report">
               <PageReport />
             </PageSlot>
-            <PageSlot hidden={tab !== 'settings'}>
+            <PageSlot hidden={tab !== 'settings'} page="settings">
               <PageSettings />
             </PageSlot>
           </main>

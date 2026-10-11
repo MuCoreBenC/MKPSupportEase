@@ -5,6 +5,11 @@
  * 遮罩 `absolute inset: 0`，盖住的是宿主那一层（内容区），不是整页。
  */
 
+/*
+ * 遮罩：铺满宿主整块（作者 2026-10-10：「它是撑得很大的……是说它这个背景」），
+ * 框在里面居中，四周留出呼吸 —— **`full` 档也一样留**：那一档只是"最大的一档"，
+ * 不再是"贴边铺满"（贴边那版看着不像模态框，作者否掉了）。
+ */
 .scrim {
   position: absolute;
   inset: 0;
@@ -12,8 +17,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--pad);
-  background: rgba(16, 24, 32, 0.28);
+  /*
+   * ★ 2026-10-10：框四周的留白改成**以窗口宽为自变量的连续函数**。
+   *   原来是 `clamp(16px, 3vh, 40px)` + mini 档一刀切到 8px ——
+   *   拖窗跨过 640 那一刻，框忽然从"浮在灰底上的卡片"变成"几乎铺满"，
+   *   这就是作者说的跳变（两张截图 643 / 632 差的就是这一块）。
+   *   现在 640 处约 15px，越窄越小、到 8px 收底，全程连续。
+   */
+  padding: clamp(8px, 2.4vw, 40px);
+  background: rgb(16 24 32 / 42%);
 }
 
 .box {
@@ -21,22 +33,27 @@
   max-width: 100%; /* 窄窗口里框不许比可用区宽，三档一律让位给容器 */
   max-height: 100%;
   flex-direction: column;
-  border-radius: var(--r-md);
+  /* 圆角 + 裁住里面那层深色（不裁的话深色会从圆角处漏出去） */
+  overflow: hidden;
+  border-radius: 14px;
   background: var(--surface-solid);
-  box-shadow: var(--shadow-lift);
+  box-shadow:
+    0 24px 64px rgb(16 24 32 / 26%),
+    0 4px 16px rgb(16 24 32 / 14%);
   outline: none;
 }
 
+/* 五档宽度（2026-10-10 各加宽一档：作者的框「是要很大的」） */
 .box[data-size='sm'] {
-  width: 340px;
+  width: 360px;
 }
 
 .box[data-size='md'] {
-  width: 460px;
+  width: 480px;
 }
 
 .box[data-size='lg'] {
-  width: 640px;
+  width: 680px;
 }
 
 /* 整块工作区：宽到能摆下两列参数卡，高到能自己管滚动（见下面的 .bodyFill） */
@@ -46,41 +63,66 @@
 }
 
 /*
- * **撑满宿主整块**（`full`）：遮罩不留内衬、框铺满、不圆角 —— 宿主是什么形状它就是什么形状。
- * 参数模态框挂在这一页的 `.page`（顶栏页签以下整块）上，这一档正好铺满那一块；
- * 里面那个自成一体的工作区（有自己的头 / 可滚的中间 / 钉住的底栏）照旧由 `bodyFill` 交给它自己管。
+ * `full`：**最大那一档** —— 撑满遮罩留出的可用区（不是贴边铺满）。
+ * 参数模态框挂在这一页的 `.page`（顶栏页签以下整块）上，于是它就是那一块里
+ * 一张四周留白的大卡片；里面那个自成一体的工作区（自己的头 / 可滚的中间 /
+ * 钉住的底栏）照旧由 `bodyFill` 交给它自己管。
  */
-.scrim[data-size='full'] {
-  padding: 0;
-}
-
 .box[data-size='full'] {
   width: 100%;
   height: 100%;
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
 }
 
 
+/*
+ * 标题栏：**唯一保持浅色的那一条**（作者 2026-10-10：「它除了上面那个标题栏
+ * 不变色，其他的都变成那种深色」）—— 白底、深墨标题、灰副标题。
+ * 内衬 16/20（原来 12/14，作者：「那些文字居然都贴着模态框的边边了」）。
+ */
 .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  /*
+   * ★ `wrap`：标题栏右边那一簇**动作**可能长得比剩下的空间宽（参数页现在往上放了
+   *   撤销 / 重做 / 恢复默认值 / 修改历史 那一排）—— 窄窗里宁让它整簇掉到第二行，
+   *   也不要被 `overflow: hidden` 裁掉（裁掉就等于按钮没了，比多一行糟得多）。
+   */
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 16px var(--box-x) 14px;
   border-bottom: 1px solid var(--line);
+  background: var(--surface-solid);
 }
 
 .headText {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+}
+
+/*
+ * 标题栏右边那一簇：**动作槽**（框里 portal 进来的按钮）+ 关闭。
+ * `margin-left: auto` 让它在**换行之后**仍然贴着右缘（上面 `.head` 允许 wrap）。
+ */
+.headActs {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 动作槽：没人往里 portal 时它就是零宽 —— 不会在标题上凭空留一道缝 */
+.headSlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .title {
-  font-size: var(--fs-body);
+  font-size: calc(var(--fs-body) + 1px);
   font-weight: 600;
   color: var(--text-1);
 }
@@ -90,35 +132,46 @@
   color: var(--text-2);
 }
 
-/* 文字按钮而不是一个 × 图标 —— 动作按钮要用文字（项目约定） */
+/*
+ * 关闭：**一个 ×**（作者 2026-10-10：「那个关闭啊，不要那个按钮改成一个叉叉」）。
+ * 28×28 的点击区、无边框、悬停一层浅底、聚焦一圈内描边 —— 它长在浅色标题栏上。
+ */
 .close {
   flex-shrink: 0;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: var(--fs-label);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -1px -4px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-2);
   cursor: pointer;
 }
 
 .close:hover {
-  background: var(--card-face);
+  background: var(--surface-sunken);
   color: var(--text-1);
 }
 
-/* 聚焦只加深边框，不加光环（项目约定） */
 .close:focus-visible {
   outline: none;
-  border-color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--text-1);
 }
 
+/*
+ * ★ 2026-10-10 第二轮（作者纠正）：**框里跟现在的浅色主题** ——
+ *   「你怎么能把这个修改参数的改成这种黑色呢？我说的是这个**里面的字**啊……
+ *     它的**背景**还是跟随着现在的浅色背景」。
+ *
+ * 所以这一层不再翻 token（深色只留给"代码那类内容"自己去着墨：编辑文件里的
+ * TOML 高亮就是自己画的一层，见 `presets/tomlPaint`）。
+ */
 .body {
   min-height: 0;
-  padding: 12px 14px;
+  padding: 18px var(--box-x);
   overflow-y: auto;
   font-size: var(--fs-label);
   color: var(--text-1);
@@ -138,19 +191,20 @@
 
 .foot {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 14px var(--box-x);
   border-top: 1px solid var(--line);
 }
 
-[data-density='mini'] .scrim {
-  padding: 8px;
-}
-
-[data-density='mini'] .head,
-[data-density='mini'] .body,
-[data-density='mini'] .foot {
-  padding-left: 10px;
-  padding-right: 10px;
-}
+/*
+ * ★ 2026-10-10：这一档**不再一刀切**。
+ *
+ * 原来 mini 档把遮罩留白收到 8px、框内衬收到 10px —— 拖窗跨过 640 那一刻，
+ * 整个框缩一圈、四角留白也没了，就是作者说的跳变（643 与 632 两张截图一对就出来）。
+ * 这两样都是**「量」**（见 tokens.css 里那条"密度档只管结构性差别"的原则），
+ * 现在分别由 `--box-x` 与 `.scrim` 自己的 `clamp()` 连续给，这里不再管它们。
+ *
+ * 密度档在这一层**只剩结构性的事**：`size` 各档的宽高、`bodyFill` 那两条。
+ */

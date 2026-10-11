@@ -212,6 +212,14 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
+        ipc::mine::begin_text_edit,
+        ipc::mine::put_text_draft,
+        ipc::mine::commit_text_draft,
+        ipc::mine::discard_text_draft,
+        ipc::mine::get_preset_draft_summary,
+        // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
+        ipc::mine::get_user_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
         ipc::mine::rename_user_preset,
         ipc::mine::delete_user_preset,
@@ -314,6 +322,14 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::mine::put_preset_draft,
         ipc::mine::discard_preset_draft,
         ipc::mine::commit_preset_draft,
+        // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
+        ipc::mine::begin_text_edit,
+        ipc::mine::put_text_draft,
+        ipc::mine::commit_text_draft,
+        ipc::mine::discard_text_draft,
+        ipc::mine::get_preset_draft_summary,
+        // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
+        ipc::mine::get_user_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）
         ipc::mine::rename_user_preset,
         ipc::mine::delete_user_preset,

@@ -207,7 +207,7 @@ export function AxisBar({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-                title={revertible && saved ? `点一下还原成 ${saved[k].toFixed(2)}` : undefined}
+               
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
                 原 {saved ? saved[k].toFixed(2) : '0.00'}
@@ -236,7 +236,7 @@ export function AxisBar({
                     className={p.axisField}
                     htmlFor={id}
                     data-readonly={!canType}
-                    title={canType ? undefined : '先选一份预设再改'}
+                   
                   >
                     <input
                       id={id}
@@ -315,10 +315,8 @@ export function PresetLine({
   options: { uid: string; name: string }[]
   onPick: (uid: string) => void
 }) {
-  const path = state.status === 'ready' ? state.preset.path : undefined
-
   return (
-    <div className={p.presetLine} title={path}>
+    <div className={p.presetLine}>
       <span className={p.presetLineLabel}>预设文件</span>
       {state.status === 'waiting' ? (
         <Skeleton width="9em" label="正在取预设" />

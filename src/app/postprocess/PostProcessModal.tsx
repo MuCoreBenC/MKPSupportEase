@@ -17,8 +17,9 @@ import { useState } from 'react'
 
 import { api, errorText } from '../../api'
 import { Btn } from '../ui/Controls'
-import { Progress } from '../ui/Modal'
-import ui from '../ui/ui.module.css'
+import { Progress } from '../ui/Progress'
+/* 模态框只有一套（2026-10-10）：稿内那套 `ui/Modal` + 它的 `.scrim/.modal` 退役 */
+import { Modal } from '../../components/modal'
 import { percentOf, stepName } from './steps'
 import { usePostProcessRun } from './usePostProcessRun'
 import s from './PostProcessModal.module.css'
@@ -49,29 +50,39 @@ export default function PostProcessModal({ onOpenReport }: PostProcessModalProps
       .finally(() => setBusy(false))
   }
 
-  /* 跑着的时候点遮罩不关（见文件头第 1 条）；跑完才给关 */
-  const scrimClick = () => {
-    if (!running) dismiss()
-  }
-
   return (
-    <div className={ui.scrim} onClick={scrimClick}>
-      {/* 点框里不该关（冒泡到遮罩就关了）—— 与 `ui/Modal` 同一个做法 */}
-      <div
-        className={ui.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-label="后处理"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className={ui.modalHead}>
-          <h2 className={ui.modalTitle}>{running ? '后处理' : '后处理结果'}</h2>
-          <span className={s.files} title={`${run.gcodeName} ｜ 预设 ${run.presetName}`}>
-            {run.gcodeName}
-          </span>
-        </header>
-
-        <div className={s.body}>
+    <Modal
+      open
+      size="md"
+      title={running ? '后处理' : '后处理结果'}
+      /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它 */
+      subtitle={run.gcodeName}
+      /* 跑着的时候点遮罩不关（见文件头第 1 条）；× 与「关闭」照旧能把它收起来 */
+      closeOnScrim={!running}
+      onClose={dismiss}
+      footer={
+        running ? (
+          <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
+            停止
+          </Btn>
+        ) : (
+          <>
+            <Btn
+              onClick={() => {
+                dismiss()
+                onOpenReport()
+              }}
+            >
+              看报告
+            </Btn>
+            <Btn variant="accent" onClick={dismiss}>
+              关闭
+            </Btn>
+          </>
+        )
+      }
+    >
+      <div className={s.body}>
           {running ? (
             <>
               <Progress percent={percent} />
@@ -145,34 +156,7 @@ export default function PostProcessModal({ onOpenReport }: PostProcessModalProps
               {err}
             </p>
           )}
-        </div>
-
-        <footer className={ui.modalFoot}>
-          {running ? (
-            <Btn
-              disabled={busy}
-              title="停下这一趟；写盘之前的部分不会动，原文件不会被改坏"
-              onClick={() => act(() => api.cancelPostProcess())}
-            >
-              停止
-            </Btn>
-          ) : (
-            <>
-              <Btn
-                onClick={() => {
-                  dismiss()
-                  onOpenReport()
-                }}
-              >
-                看报告
-              </Btn>
-              <Btn variant="accent" onClick={dismiss}>
-                关闭
-              </Btn>
-            </>
-          )}
-        </footer>
       </div>
-    </div>
+    </Modal>
   )
 }

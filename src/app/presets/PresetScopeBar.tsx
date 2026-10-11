@@ -38,7 +38,6 @@
 import {
   KIND_AXIS_TEXT,
   SCOPE_AXIS_TEXT,
-  SCOPE_AXIS_WHY,
 } from './presetTree'
 import type { PresetKindAxis, PresetScopeAxis } from './presetTree'
 import s from './PresetScopeBar.module.css'
@@ -52,6 +51,23 @@ interface Props {
 
 const KINDS: PresetKindAxis[] = ['mkp', 'slicer']
 const SCOPES: PresetScopeAxis[] = ['local', 'cloud']
+
+/*
+ * 段的文字**恒宽**（作者 2026-10-10：「留一个最小的宽度，足够它变化的冗余」）：
+ * 选中态会加粗，粗字比细字宽一点 —— 直接换字重会让整条分段控件在点击的瞬间变宽，
+ * 把右边所有东西推着走。所以文字放**两层**：可见那份照常，上面盖一份隐形粗体副本，
+ * grid 同格取两者最大宽度 —— 点击前后盒子纹丝不动。
+ */
+function SegText({ text }: { text: string }) {
+  return (
+    <span className={s.optText}>
+      <span>{text}</span>
+      <span className={s.optGhost} aria-hidden>
+        {text}
+      </span>
+    </span>
+  )
+}
 
 export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) {
   return (
@@ -73,7 +89,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={k === kind}
               onChange={() => onKind(k)}
             />
-            {KIND_AXIS_TEXT[k]}
+            <SegText text={KIND_AXIS_TEXT[k]} />
           </label>
         ))}
       </span>
@@ -82,8 +98,12 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * **位置那一轴两种类型都有**（2026-10-09 起；此前 MKP 档短暂不画它）。
        *
        * 同一对词在两档里是两件事，说明那句跟着类型走（`SCOPE_AXIS_WHY[kind][scope]`）：
-       * MKP 的"本地"= 你自己那份工作副本；切片器的"本地"= 本机真有的文件。
+       * MKP 的"本地"= 你自己那份本地文件；切片器的"本地"= 本机真有的文件。
        * 所以这条控件**两边都画**，但都不解释自己 —— 解释交给悬停那句话。
+       *
+       * auto 边距（`.segPush`）把它推进右簇：右簇 = 位置分段 → 搜索。
+       * 2026-10-10：切片器的机型筛选**搬去筛选区**（不再夹在这两条分段中间）——
+       * 第一排从此两档一致（类型 / 位置(右) / 搜索），窄窗不再把搜索挤出第一排。
        */}
       <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
         {SCOPES.map((sc) => (
@@ -91,7 +111,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
             key={sc}
             className={s.opt}
             data-on={sc === scope}
-            title={SCOPE_AXIS_WHY[kind][sc]}
+           
           >
             <input
               type="radio"
@@ -101,7 +121,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={sc === scope}
               onChange={() => onScope(sc)}
             />
-            {SCOPE_AXIS_TEXT[sc]}
+            <SegText text={SCOPE_AXIS_TEXT[sc]} />
           </label>
         ))}
       </span>

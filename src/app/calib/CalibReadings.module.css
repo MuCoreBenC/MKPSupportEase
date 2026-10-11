@@ -102,35 +102,32 @@
 
 /*
  * 读数框（②）：数字与 mm 住在**同一颗可点**里（label 包住 input 与单位，
- * 轴名 htmlFor 也能聚焦）。**平时无边框无底色** —— 就是原版那种大字 + mm 的轻
- * 的样子（第一版画成常驻实心框，作者：「xyz的不好看」）；hover / 聚焦才显出一颗
- * 宽松的框，框罩住数字和 mm 整体，不再是从前那个贴着数字的小方框。
- * 反馈与全应用的输入框同一套：hover 加深边框、聚焦转绿、只读不亮。
+ * 轴名 htmlFor 也能聚焦）。**平时无边框无底色** —— 就是大字 + mm 的轻样子。
+ *
+ * 2026-10-10 第十轮起用**下划线**（不再冒出一整圈框）：悬停一条灰线、聚焦一条绿线。
+ * 2026-10-11 第十一轮（作者）：撤掉「双击才编辑」与单击「闪两下」的动画 —— 单击即
+ * 聚焦转绿线（见 TSX 文件头）。内衬与负 margin 照旧（数字仍落在轴名的左缘）。
  */
 .field {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 3px 10px;
-  /* 负 margin 把内衬撑到框外：数字仍落在轴名的左缘（原版位置），聚焦框才有多余量 */
+  /* 负 margin 把内衬撑到框外：数字仍落在轴名的左缘（原版位置） */
   margin: 0 -10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
   background: transparent;
   cursor: text;
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
+  transition: border-color 0.16s ease;
 }
 
 .field:not([data-readonly='true']):hover {
-  border-color: var(--line-strong);
-  background: var(--surface-solid);
+  border-bottom-color: var(--line-strong);
 }
 
 .field:not([data-readonly='true']):focus-within {
-  border-color: var(--accent);
-  background: rgb(255 255 255 / 70%);
+  border-bottom-color: var(--accent);
 }
 
 .field[data-readonly='true'] {

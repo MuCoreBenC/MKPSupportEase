@@ -22,9 +22,15 @@
  *
  * 某一列读不出来（不是 TOML / 编码不对）时，那一列如实说一句人话，不给会报错的控件 ——
  * 其余几列照常能比能改。
+ *
+ * # 入口（2026-10-10）
+ *
+ * 顶部那颗常驻「参数对比」按钮退役 —— 入口搬进**列表的右键菜单**：
+ * 右键第一份点「参数对比」、再右键另一份点「与「X」对比」，那两份由 `preselect`
+ * 带进来、开台即选中；台子打开后照旧能自己勾（最多三份，见 `MAX_PICKED`）。
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, UserPresetFile } from '../../api'
 import { FieldControl } from '../../components/field'
@@ -100,13 +106,29 @@ interface Props {
   open: boolean
   /** 可比较的候选：**用户自己的预设**（读得出来的 MKP 预设） */
   files: UserPresetFile[]
+  /**
+   * **这一次打开要直接选中的两份**（path）—— 2026-10-10 起入口是右键两下选
+   * （见 PagePresets 的 `compareEntry`）：右键第一份点「参数对比」、右键第二份
+   * 点「与「X」对比」，那两份就从这里进来、开台即选中。
+   *
+   * 只在**打开那一下**生效 —— 之后用户自己在台子里勾勾选选，不被它顶掉；
+   * 不在候选里的（那份被删了 / 改名了）自动忽略，不足两份退回原来的默认（前两份）。
+   */
+  preselect?: string[]
   host?: HTMLElement | null
   onClose: () => void
   /** 保存成功后给页面一句话（走页面那条提示条） */
   onSaved: (note: string) => void
 }
 
-export default function CompareModal({ open, files, host = null, onClose, onSaved }: Props) {
+export default function CompareModal({
+  open,
+  files,
+  preselect,
+  host = null,
+  onClose,
+  onSaved,
+}: Props) {
   const [picked, setPicked] = useState<string[]>([])
   const [loaded, setLoaded] = useState<Record<string, PresetParamValues>>({})
   const [draft, setDraft] = useState<Record<string, Record<string, string>>>({})
@@ -136,17 +158,33 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
     }
   }, [open])
 
-  /* 每次打开：默认选前两份（用户什么都不点也能直接看到一张对照表） */
+  /*
+   * 每次打开：**优先用右键带进来的那两份**（`preselect`），没有就默认选前两份
+   * （用户什么都不点也能直接看到一张对照表）。
+   *
+   * `justOpened` 认「打开的那一下」：preselect 只在那一刻生效 —— 台子开着的时候
+   * 候选列表重读过（`files` 换引用）也不会把用户自己勾的选择重新摆一遍。
+   */
+  const justOpened = useRef(false)
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      justOpened.current = false
+      return
+    }
+    const first = !justOpened.current
+    justOpened.current = true
     setProblem(null)
-    setDraft({})
+    if (first) setDraft({})
     setPicked((cur) => {
+      if (first) {
+        const want = (preselect ?? []).filter((p) => files.some((f) => f.path === p))
+        if (want.length >= 2) return want.slice(0, MAX_PICKED)
+      }
       const alive = cur.filter((p) => files.some((f) => f.path === p))
       if (alive.length >= 2) return alive
       return files.slice(0, Math.min(2, MAX_PICKED)).map((f) => f.path)
     })
-  }, [open, files])
+  }, [open, files, preselect])
 
   const rows = useMemo(() => (registry === null ? [] : rowsOf(registry)), [registry])
 
@@ -291,7 +329,7 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
         className={s.primary}
         onClick={save}
         disabled={busy || dirtyTotal === 0}
-        title="把改动写回各自那份「我的预设」（同一路径，不产生第二份；注释与键序一个字节不动）"
+       
       >
         {busy ? '保存中…' : '保存修改'}
       </button>
@@ -302,7 +340,8 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
     <Modal
       open={open}
       title="参数对比"
-      subtitle="选 2~3 份「我的预设」，同一项并排看；值可以直接改，「采用此值」把它复制到本行其它几份"
+      /* 副标题一句话说完（2026-10-10 统一：模态框副标题不写长篇解释） */
+      subtitle="并排看 2~3 份，值可以直接改"
       size="lg"
       host={host}
       closeOnScrim={dirtyTotal === 0}
@@ -325,7 +364,7 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
               type="button"
               className={on ? `${s.pickItem} ${s.pickOn}` : s.pickItem}
               disabled={full}
-              title={full ? `最多同时比 ${MAX_PICKED} 份` : f.path}
+             
               onClick={() => togglePick(f.path)}
             >
               {f.fileName}
@@ -385,11 +424,11 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
                           return (
                             <td key={path} className={s.cell}>
                               {value === undefined ? (
-                                <span className={s.absent} title="这一份里没有这个参数（不是空值）">
+                                <span className={s.absent}>
                                   —
                                 </span>
                               ) : row.field.control === 'gcode' ? (
-                                <span className={s.gcode} title={value}>
+                                <span className={s.gcode}>
                                   {value.split('\n')[0] || '（空）'}
                                   {value.includes('\n') && <span className={s.more}>…</span>}
                                 </span>
@@ -405,7 +444,7 @@ export default function CompareModal({ open, files, host = null, onClose, onSave
                                 <button
                                   type="button"
                                   className={s.adopt}
-                                  title={`把这一格的值复制到：${targets.map(nameOf).join('、')}`}
+                                 
                                   onClick={() => adopt(row.key, path, value)}
                                 >
                                   采用此值

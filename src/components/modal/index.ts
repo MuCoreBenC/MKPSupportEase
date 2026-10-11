@@ -19,3 +19,5 @@
 
 export { default as Modal } from './Modal'
 export type { ModalProps } from './Modal'
+/* 标题栏的动作槽：框里的内容想把按钮放到标题栏，用 `createPortal(node, useModalHeadSlot())` */
+export { useModalHeadSlot } from './modalHeadSlot'

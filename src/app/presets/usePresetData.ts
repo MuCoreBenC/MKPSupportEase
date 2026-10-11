@@ -15,7 +15,7 @@
  *   机型与版本          api.getMachines()                         → 6 机型 / 10 版本
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
- *   用户自己的文件      api.getUserPresetFiles()                  → **用户线**（扫 presets-mine/），空是合法状态
+ *   用户自己的文件      api.getUserPresetFiles()                  → **本地文件**（扫 presets-mine/），空是合法状态
  *   当前使用的那一条    AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
@@ -58,8 +58,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision, useSourceRevision } from '../state/deliveryState'
+import { draftMutated, useDraftRevision } from '../state/draftState'
 import type {
-  ActiveOrigin,
   ActivePreset,
   ArchivedFile,
   CommittedDraft,
@@ -68,9 +68,12 @@ import type {
   Machine,
   OfficialVersion,
   OnDiskFile,
-  PresetDraft,
+  ParamDecision,
+  PresetParamSync,
+  PresetTextDraft,
   FetchOfficialResult,
   UserFileIdentity,
+  UserPresetIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
@@ -163,12 +166,23 @@ export interface PresetData {
    */
   localIds: string[]
   /**
-   * **用户线**：用户自己放的那一份（`presets-mine/` 里扫出来的）。
+   * **本地文件**：用户自己放的那一份（`presets-mine/` 里扫出来的）。
    *
    * **云端没有它们**，所以它们只出现在本地表里、没有交付身份、也不参与套餐与菜单。
    * 认不出类别的那几份（`.json`）也在里面 —— 界面上任何类型档下都列，不藏。
    */
   mine: UserPresetFile[]
+  /**
+   * **身份账本**（a04）：哪几份本地文件跟云端有关系 —— 云端行三态与「更新」
+   * 找要更新的是哪一份，都只看它（复制出来的副本不在里面）。
+   */
+  mineIndex: UserPresetIdentity[]
+  /**
+   * **有未保存参数改动的那一份**（相对用户根的路径；`null` = 现在没有）——
+   * 预设列表行上那枚「未保存」小圆点的判据（参数页改过值、还没点保存）。
+   * 来源是 `api.getPresetDraftSummary()`；参数页那边一动值就广播（`draftState`）。
+   */
+  draftPath: string | null
   /**
    * **备注覆盖账**（`api.getPresetRemarks()`，键 = 文件身份）：用户改过的副标题。
    * **只有本地表读它**（云端表只读工作台那句 —— 本地改动不许影响云端显示）：
@@ -183,7 +197,7 @@ export interface PresetData {
   setRemark: (key: string, remark: string | null) => Promise<void>
   /**
    * **改一份用户预设的归属**（机型 / 版本）：文件头那两行换成新值，
-   * 回来重读用户线。机型必须目录里登记的；**版本可自定义**（后端校验机型）。
+   * 回来重读本地文件。机型必须目录里登记的；**版本可自定义**（后端校验机型）。
    */
   setMineMachineVersion: (path: string, machineId: string, versionId: string) => Promise<void>
   /**
@@ -209,26 +223,25 @@ export interface PresetData {
    */
   pickMachine: (machineId: string) => void
   /**
-   * 把某一份设为**当前使用的那一条**。**两条线共用这一个入口**（第七层）：
+   * 把某一份**本地文件**设为**当前使用的那一条**（身份 = 相对用户根的路径）。
+   * 云端的版本不能直接用 —— 要先用 `fetchOfficial` 把它下载到本地。
    *
-   *   官方交付文件  `apply(fileName)`
-   *   用户自己那份  `apply(fileName, 'mine', path)`（用户目录里可以分文件夹，所以认路径）
-   *
-   * 走新世界的应用命令（`api.applyActivePreset`，Rust 侧按各自的闸校验后写
-   * `run/active-preset.json`）**然后重读底账** —— 界面看到的永远是底账答的，
-   * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
+   * 走应用命令（`api.applyActivePreset`，后端按闸校验后写 `run/active-preset.json`）
+   * **然后重读底账** —— 界面看到的永远是底账答的，与 `copy` 同一条规矩。
+   * 失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    */
-  apply: (fileName: string, origin?: ActiveOrigin, path?: string) => Promise<void>
+  apply: (path: string) => Promise<void>
   /**
    * **把官方那一份取到本机**（2026-10-09 改判）—— 云端表那两个动作（下载 / 更新）共用它。
    *
-   * 它做两件幂等的事：官方当前版字节不在本机（或对不上）就取回来；我的工作副本
+   * 它做两件幂等的事：官方当前版字节不在本机（或对不上）就取回来；我的本地文件
    * 不在就落一份（在了一个字节不动）。**它不改「当前使用」** —— 使用是本地表那颗按钮。
    *
-   * 回来**两条线一起重读**：投递面可能刚变（官方字节取回来了），用户线可能也多了一份。
+   * 回来**两边一起重读**：投递面可能刚变（官方字节取回来了），本地文件可能也多了一份。
    * 返回值说清这次到底做成了什么（提示条照它说）。
    */
-  fetchOfficial: (fileName: string) => Promise<FetchOfficialResult>
+  /** `renameIfTaken`（a04）：撞名时用户点过「导入」再传 `true` —— 自动改名落一份新的 */
+  fetchOfficial: (fileName: string, renameIfTaken?: boolean) => Promise<FetchOfficialResult>
   /**
    * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
    *
@@ -268,49 +281,61 @@ export interface PresetData {
   ) => Promise<DownloadOutcome[]>
 
   /**
-   * **开始改一份**预设：把正文复制进临时文件（原件一动不动）。
-   * 两条线一个入口：官方线交文件名，用户线还要交路径（用户目录里可以自己分文件夹）。
+   * **打开正文编辑器（「编辑文件」）**：初稿 = 盘上那份文件**本身的字节** ——
+   * 参数页未保存的改动一个字都不带进来（两条草稿分开存，见契约 `PresetTextDraft`）。
    * `reused` = 接着上次那半截改。
    */
-  beginEdit: (
-    fileName: string,
-    origin?: ActiveOrigin,
-    path?: string,
-  ) => Promise<PresetDraft>
-  /** 把改动写进临时文件（界面边改边存 —— 改到一半关掉也还在） */
-  putDraft: (text: string) => Promise<void>
-  /** 放弃这次编辑（丢草稿；原件与下载区全程没被碰过，所以它天生安全） */
-  discardDraft: () => Promise<void>
+  beginTextEdit: (fileName: string, path: string) => Promise<PresetTextDraft>
+  /** 正文的改动写进正文草稿（边改边存 —— 改到一半关掉也还在；盘上那份文件不碰） */
+  putTextDraft: (text: string) => Promise<void>
+  /** 放弃这次正文编辑（丢正文草稿；盘上那份文件全程没被碰过，所以它天生安全） */
+  discardTextDraft: () => Promise<void>
   /**
-   * 存进用户根：官方线**另存**成一份新的、用户线**写回它自己**（第八层）。
-   * 存完**重读用户线** —— 官方线那一份要跟着出现在本地表里，用户线要跟着变时刻与大小。
+   * 保存正文：**写回它自己**（第八层，整份原子替换），然后丢掉正文草稿。
+   * 写完**重读本地文件**（大小与时刻跟着变）—— 参数页那份草稿此时已被后端作废，
+   * 所以还要广播一声草稿代次（列表上的「未保存」标记跟着收）。
    */
-  commitDraft: () => Promise<CommittedDraft>
+  commitTextDraft: () => Promise<CommittedDraft>
+
   /**
-   * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读用户线**
+   * **一份本地文件现在的「云端更新」账**（逐参数三方：我的值 / 云端旧值 / 云端新值）。
+   * 点「更新」时给 `fetchMissing: true` —— 允许为拿到云端当前版字节发一次请求。
+   * 判定（哪几项待处理、哪几项是冲突）都在后端，前端只读这份账。
+   */
+  presetSync: (path: string, fetchMissing?: boolean) => Promise<PresetParamSync>
+  /**
+   * **把逐参数的处理结果一次性写进本地文件**：`adopt` = 用云端新版值、`hold` = 保持我的值。
+   * 结构保真地改那几项，写完**重读本地文件**。
+   *
+   * ★ 这是「更新」唯一的写入口：**没点确认之前一个字节都不写** ——
+   * 无冲突的项自动 adopt、冲突的项按用户选择，全部决定凑齐了才调它一次。
+   */
+  applyParamDecisions: (path: string, decisions: ParamDecision[]) => Promise<void>
+  /**
+   * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读本地文件**
    * （列表立刻以磁盘为准），顺手重读使用中指针（它正指着这一份时会跟着改）。
    */
   rename: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份按字节复制成同一格里另一份新的用户文件。
-   * 回来**重读用户线**（新文件要出现在表里）；**不重读使用中指针** —— 这一层不碰它
+   * 回来**重读本地文件**（新文件要出现在表里）；**不重读使用中指针** —— 这一层不碰它
    * （原文件一个字节不动，复制出来的那份也不会自称"使用中"）。
    */
   copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
   /**
-   * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读用户线。
+   * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读本地文件。
    * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
    * 一并清掉；代价由页面的确认框讲清。
    */
   remove: (path: string) => Promise<void>
   /**
    * **删除本机那份官方交付文件**（2026-10-06 一切皆可删）：删了回「未下载」，
-   * 随时可从云端重下。回来**重读官方线**（那一行 + 归档清单一起刷新）。
+   * 随时可从云端重下。回来**重读云端那一侧**（那一行 + 归档清单一起刷新）。
    */
   removeRelease: (fileName: string) => Promise<void>
   /**
    * **删除归档区一份旧版本**（2026-10-06 允许删，代价讲清：删了找不回）。
-   * 回来重读官方线（归档清单以盘为准）。
+   * 回来重读云端那一侧（归档清单以盘为准）。
    */
   removeArchived: (path: string) => Promise<void>
   /**
@@ -430,7 +455,7 @@ async function checkBootstrapOnce(): Promise<BootstrapResult> {
 /**
  * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
  * 导入落进 `presets-mine/` 之后，「我的文件」那张表要立刻以磁盘为准，不靠切页刷新。
- * 首页（`PageHome`）不给这个参数：它不看用户线那张表。
+ * 首页（`PageHome`）不给这个参数：它不看本地文件那张表。
  */
 export function usePresetData(importRevision = 0): PresetData {
   const [machines, setMachines] = useState<Machine[]>([])
@@ -441,7 +466,7 @@ export function usePresetData(importRevision = 0): PresetData {
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 远端这一代读不懂（NOT_SUPPORTED）：独立于 `error`，不挡列表、只开一句提示 */
   const [needsNewerClient, setNeedsNewerClient] = useState(false)
-  /* 用户线：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
+  /* 本地文件：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
   const [mine, setMine] = useState<UserPresetFile[]>([])
   /* 使用中指针：AppState 唯一客户端订阅 —— 本页是写方之一，但快照同样只从客户端来 */
   const active = useActivePreset()
@@ -465,6 +490,25 @@ export function usePresetData(importRevision = 0): PresetData {
    * 写后重读整本 —— 与 release / mine 同一条「界面读底账」的规矩。
    */
   const [remarks, setRemarks] = useState<Record<string, string>>({})
+  /*
+   * **有未保存参数改动的那一份**（路径）：预设列表行上那枚「未保存」圆点读它。
+   * 首屏读一次 + 参数页那边一动值就广播重读（`draftState`）—— 页签常驻，
+   * 不做这件事的话，用户在参数页改完切回来，标记还停在旧样子上。
+   */
+  const [draftPath, setDraftPath] = useState<string | null>(null)
+  /*
+   * **身份账本**（a04）：哪几份本地文件跟云端有关系（只有"从云端下载"建条目）。
+   * 云端行那三态（未获取 / 本地已有 / 有新版）与「更新」找要更新的是哪一份，
+   * 都只看它 —— 复制出来的副本、拖回来的、导入的都不在里面（它们不跟云端）。
+   */
+  const [mineIndex, setMineIndex] = useState<UserPresetIdentity[]>([])
+  /** 重读本地文件 + 身份账本（两个得一起读：判据是"账本里那一份文件"） */
+  const readMine = useCallback(async () => {
+    const [files, index] = await Promise.all([api.getUserPresetFiles(), api.getUserPresetIndex()])
+    setMine(files)
+    setMineIndex(index)
+    return files
+  }, [])
 
   /**
    * 把官方交付这一路的现况读一遍。
@@ -588,18 +632,22 @@ export function usePresetData(importRevision = 0): PresetData {
     let alive = true
 
     const load = async () => {
-      /* 用户线那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
-      const [repo, list, menu, local, mine, copied, marks] = await Promise.all([
+      /* 本地文件那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
+      const [repo, list, menu, local, mine, index, copied, marks, draft] = await Promise.all([
         api.getPresetFiles(),
         api.getMachines(),
         api.getMenu(),
         api.getLocalFiles(),
         api.getUserPresetFiles(),
+        api.getUserPresetIndex(),
         api.getSlicerCopied(),
         api.getPresetRemarks(),
+        api.getPresetDraftSummary(),
       ])
       setMine(mine)
+      setMineIndex(index)
       setRemarks(marks)
+      setDraftPath(draft?.path ?? null)
 
       /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
       const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
@@ -710,17 +758,30 @@ export function usePresetData(importRevision = 0): PresetData {
       /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
     })
     /*
-     * **用户线也要重读**：投递面变了 = 官方那一份的字节可能刚被取回来（「使用」按需取回、
+     * **本地文件也要重读**：投递面变了 = 官方那一份的字节可能刚被取回来（「使用」按需取回、
      * 「另存为我的预设」也会先取一份），而 `presets-mine/` own 目录里也可能刚多出一份
-     * —— 资源库要跟着出现那一行（只重读官方线的话，用户会看不到自己刚存的那一份）。
+     * —— 资源库要跟着出现那一行（只重读云端那一侧的话，用户会看不到自己刚存的那一份）。
      */
+    void readMine().catch(() => {
+      /* 读不到就保持旧列表 —— 与上面同一条纪律 */
+    })
+  }, [deliveryRevision, ready, readReleaseInto, readMine])
+
+  /*
+   * **草稿代次也听**（`draftState`）：参数页改了值 / 保存了 / 取消了（含预设页上
+   * 那个「修改参数」模态框）、或正文编辑保存作废了参数草稿 —— 列表行上那枚
+   * 「未保存」小圆点当场跟着亮 / 灭。只读一眼轻摘要，不重读别的。
+   */
+  const draftRevision = useDraftRevision()
+  useEffect(() => {
+    if (!ready) return
     void api
-      .getUserPresetFiles()
-      .then(setMine)
+      .getPresetDraftSummary()
+      .then((d) => setDraftPath(d?.path ?? null))
       .catch(() => {
-        /* 读不到就保持旧列表 —— 与上面同一条纪律 */
+        /* 读不到就保持上一眼看到的 —— 一个标记不值得把列表带崩 */
       })
-  }, [deliveryRevision, ready, readReleaseInto])
+  }, [draftRevision, ready])
 
   /*
    * **换了数据源 —— 立刻按新地址重来一遍**（2026-10-08 作者要求）。
@@ -775,13 +836,10 @@ export function usePresetData(importRevision = 0): PresetData {
    * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
    * 就是从这里冒上去的）。
    */
-  const apply = useCallback(
-    async (fileName: string, origin: ActiveOrigin = 'official', path?: string) => {
-      await api.applyActivePreset(fileName, origin, path)
-      appStateMutated()
-    },
-    [],
-  )
+  const apply = useCallback(async (path: string) => {
+    await api.applyActivePreset(path)
+    appStateMutated()
+  }, [])
 
   const clearApply = useCallback(async () => {
     await api.clearActivePreset()
@@ -818,44 +876,65 @@ export function usePresetData(importRevision = 0): PresetData {
   )
 
   /*
-   * 云端表那条路（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本。
+   * 云端表那条路（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的本地文件。
    *
    * 它**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
-   * 成功之后**两条线一起重读**：官方字节可能刚被取回来（投递面变了），
-   * 用户线可能也多了一份（`created`）—— 两个广播都要发。
+   * 成功之后**两边一起重读**：官方字节可能刚被取回来（投递面变了），
+   * 本地文件可能也多了一份（`created`）—— 两个广播都要发。
    * **不广播 app-state**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）。
    */
   const fetchOfficial = useCallback(
-    async (fileName: string): Promise<FetchOfficialResult> => {
-      const done = await api.fetchOfficialPreset(fileName)
+    async (fileName: string, renameIfTaken = false): Promise<FetchOfficialResult> => {
+      const done = await api.fetchOfficialPreset(fileName, renameIfTaken)
       deliveryMutated()
-      setMine(await api.getUserPresetFiles())
+      await readMine()
       return done
     },
-    [],
+    [readMine],
   )
 
   /*
-   * 临时编辑那条链：起手（复制官方正文进临时文件）、边改边存、放弃、另存成用户文件。
+   * **「编辑文件」那条链**：起手（读盘上那份文件的字节）、边改边存、放弃、写回它自己。
    *
-   * 全是薄薄一层转发 —— 判定不在前端（哪一份能改、草稿在哪、存成什么名字，都由后端答）。
-   * 只有**另存之后**多做一件事：重读用户线（本地表里那一半「我的文件」要跟着变）。
+   * 全是薄薄一层转发 —— 判定不在前端（哪一份能改、初稿是什么、草稿在哪，都由后端答）。
+   * 只有两处多做一件事：
+   *   · **写回之后**重读本地文件（本地表那一行的大小与时刻跟着变）；
+   *   · 写回会把**参数页那份草稿作废**（盘上字节换了）→ 广播一声草稿代次，
+   *     列表行上的「未保存」标记跟着收。
    */
-  const beginEdit = useCallback(
-    (fileName: string, origin: ActiveOrigin = 'official', path?: string) =>
-      api.beginPresetEdit(fileName, origin, path),
+  const beginTextEdit = useCallback(
+    (fileName: string, path: string) => api.beginTextEdit(fileName, path),
     [],
   )
 
-  const putDraft = useCallback((text: string) => api.putPresetDraft(text), [])
+  const putTextDraft = useCallback((text: string) => api.putTextDraft(text), [])
 
-  const discardDraft = useCallback(() => api.discardPresetDraft(), [])
+  const discardTextDraft = useCallback(() => api.discardTextDraft(), [])
 
-  const commitDraft = useCallback(async () => {
-    const done = await api.commitPresetDraft()
-    setMine(await api.getUserPresetFiles())
+  const commitTextDraft = useCallback(async () => {
+    const done = await api.commitTextDraft()
+    await readMine()
+    draftMutated()
     return done
-  }, [])
+  }, [readMine])
+
+  /*
+   * **「云端更新」那条链**（2026-10-10）：读差异账 + 把用户的处理结果**一次性**写进本地文件。
+   *
+   * 两件薄转发 —— 判定（哪几项待处理、哪几项是冲突）与写入（结构保真地改那几项）都在后端。
+   * 前端不拼 TOML、不猜冲突；「更新」那个流程（无冲突自动采用、冲突让用户选）见 `PagePresets`。
+   */
+  const presetSync = useCallback(
+    (path: string, fetchMissing = false) => api.getPresetParamSync(path, fetchMissing),
+    [],
+  )
+
+  const applyParamDecisions = useCallback(async (path: string, decisions: ParamDecision[]) => {
+    await api.applyPresetParamDecisions(path, decisions)
+    await readMine()
+    /* 盘上那份刚被改过（大小与时刻变了）—— 列表标记顺手对一眼 */
+    draftMutated()
+  }, [readMine])
 
   /*
    * 第十层：用户文件管理。同一条路子 —— 写完 AppState 客户端重读广播：
@@ -865,19 +944,19 @@ export function usePresetData(importRevision = 0): PresetData {
    */
   const rename = useCallback(async (path: string, newName: string) => {
     const done = await api.renameUserPreset(path, newName)
-    setMine(await api.getUserPresetFiles())
+    await readMine()
     appStateMutated()
     return done
-  }, [])
+  }, [readMine])
 
   const remove = useCallback(async (path: string) => {
     await api.deleteUserPreset(path)
-    setMine(await api.getUserPresetFiles())
+    await readMine()
     appStateMutated()
-  }, [])
+  }, [readMine])
 
   /*
-   * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读官方线 ——
+   * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读云端那一侧 ——
    * 那一行回「未下载」，归档清单跟着刷新（`readRelease` 连归档一起读）。
    * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
    */
@@ -895,17 +974,12 @@ export function usePresetData(importRevision = 0): PresetData {
     deliveryMutated()
   }, [])
 
-  /*
-   * 另存为一份新的（第十一层）：重读用户线（新的一份要出现在表里；使用中指针不归它管），
-   * 再广播**本机文件面**变了 —— 首页「复制后处理脚本」的 `--Toml` 可能就该改指新这份
-   * （匹配口径在 `mine::user_copy_for`），不广播它就还拿着上一份的落点（2026-10-10）。
-   */
+  /* 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管 */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
     const done = await api.copyUserPreset(path, newName)
-    setMine(await api.getUserPresetFiles())
-    deliveryMutated()
+    await readMine()
     return done
-  }, [])
+  }, [readMine])
 
   /* 在文件管理器里显示（第十三层）：纯外部动作 —— 不重读、不改任何状态 */
   const reveal = useCallback(async (path: string) => {
@@ -923,21 +997,16 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * **改一份用户预设的归属**（机型 / 版本）：写完重读用户线 ——
+   * **改一份用户预设的归属**（机型 / 版本）：写完重读本地文件 ——
    * 归属是文件头里那两行，重读之后列表的机型 / 版本两列以文件为准。
    * 机型必须目录里登记的；版本可自定义（不认识的照原文显示）。
-   *
-   * 归属一改，这份对**哪个 combo** 算「我那一份」就变了（匹配口径在
-   * `mine::user_copy_for`）—— 所以也要广播**本机文件面**：首页「复制后处理脚本」
-   * 的头一个候选跟着换（2026-10-10）。
    */
   const setMineMachineVersion = useCallback(
     async (path: string, machineId: string, versionId: string) => {
       await api.setUserPresetMachineVersion(path, machineId, versionId)
-      setMine(await api.getUserPresetFiles())
-      deliveryMutated()
+      await readMine()
     },
-    [],
+    [readMine],
   )
 
   /*
@@ -968,6 +1037,8 @@ export function usePresetData(importRevision = 0): PresetData {
     tree,
     localIds,
     mine,
+    mineIndex,
+    draftPath,
     active,
     slicerCopied,
     pick,
@@ -981,10 +1052,12 @@ export function usePresetData(importRevision = 0): PresetData {
     officialVersions,
     downloadRelease,
     downloadReleaseBatch,
-    beginEdit,
-    putDraft,
-    discardDraft,
-    commitDraft,
+    beginTextEdit,
+    putTextDraft,
+    discardTextDraft,
+    commitTextDraft,
+    presetSync,
+    applyParamDecisions,
     rename,
     remove,
     removeRelease,
@@ -1060,7 +1133,7 @@ export interface PresetPage {
    * 右边那条分段控件：位置。**两种类型都有它**（2026-10-09 起）—— 那两张表互不相干、
    * 各答各的问题：
    *
-   *   本地  我这台机器上真有的东西（MKP 档 = 你自己那份工作副本；切片器档 = 本机真有的文件）
+   *   本地  我这台机器上真有的东西（MKP 档 = 你自己那份本地文件；切片器档 = 本机真有的文件）
    *   云端  官方现在提供什么（MKP 档三态：未获取 / 本地已有 / 有新版；切片器档标「已下载 / 未下载」）
    */
   scope: PresetScopeAxis
@@ -1069,7 +1142,7 @@ export interface PresetPage {
   /**
    * 「本地」这一张表 —— **我电脑里真有的东西**。
    *
-   * MKP 档 = 你自己那份工作副本（`presets-mine/`，只有它）；切片器档 = 本机磁盘上
+   * MKP 档 = 你自己那份本地文件（`presets-mine/`，只有它）；切片器档 = 本机磁盘上
    * 真有的文件（官方副本 + 我的文件）。两种类型在这一档的分法见 [`localRows`]。
    */
   local: PresetTableData<PresetLocalRow>
@@ -1116,7 +1189,7 @@ export interface PresetPage {
   /**
    * 正在使用的这一份**是用户自己的那份**（不是官方交付的）。
    *
-   * 状态条据此多写一小句说明 —— 两条线都能成为使用中的那一份（第七层），
+   * 状态条据此多写一小句说明 —— 两边都能成为使用中的那一份（第七层），
    * 用户得看得出"现在跑的是我改的那一份"。
    */
   appliedIsMine: boolean
@@ -1132,7 +1205,22 @@ export interface PresetPage {
   slicerFilters: {
     /** 可选值：从**没筛过**的当前表里取（筛过的行会让选项一个个消失），数值升序 */
     nozzles: string[]
-    layers: string[]
+    /**
+     * 层高**全集**（所有喷嘴的并集，数值升序）。
+     *
+     * ★ 2026-10-10 作者改判：选了喷嘴之后，层高那一组**不是把别的收走**，
+     *   而是**全都在、不支持的那些灰着点不动**（「我希望我选了它，筛选出来的不是
+     *   把别的消失……别的变成那种灰色不让点击的」）。所以面板画的是这一份全集，
+     *   能不能点看 `layerOptions`。
+     */
+    allLayers: string[]
+    /**
+     * 层高**可用集** —— 跟着喷嘴收敛（选了 0.2 就只有 0.06–0.14）。
+     *
+     * 它管两件事：面板里哪些胶囊可点（其余灰掉），以及当前选中的层高在新喷嘴下
+     * 还成不成立（不成则自动回「全部」，见 `layerValue`）。页面不重算，只管画。
+     */
+    layerOptions: string[]
     /** 当前生效的值。空串 = 「全部」；选中的值不在可选集里（换了机型 / 表）时自动视为全部 */
     nozzle: string
     layer: string
@@ -1183,6 +1271,8 @@ export function usePresetPage(data: PresetData): PresetPage {
       machines,
       machineId: data.machineId,
       mine: data.mine,
+      mineIndex: data.mineIndex,
+      draftPath: data.draftPath,
       localIds: localSet,
       slicerCopiedIds: copiedSet,
       active: data.active,
@@ -1198,25 +1288,8 @@ export function usePresetPage(data: PresetData): PresetPage {
       sourceLabel: data.sourceLabel,
       remarks: data.remarks,
     }),
-    [
-      data.active,
-      data.machineId,
-      data.officialVersions,
-      data.release.publishedAt,
-      data.release.localReleases,
-      data.release.presets,
-      data.release.stale,
-      data.release.version,
-      data.sourceLabel,
-      data.remarks,
-      data.mine,
-      copiedSet,
-      kind,
-      localSet,
-      machines,
-      pinned,
-      query,
-    ],
+    /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
+    [data, copiedSet, kind, localSet, machines, pinned, query],
   )
 
   /*
@@ -1270,7 +1343,16 @@ export function usePresetPage(data: PresetData): PresetPage {
     [kind, scope, localBase, cloudBase],
   )
   const nozzleValue = kind === 'slicer' && slicerValues.nozzles.includes(nozzle) ? nozzle : ''
-  const layerValue = kind === 'slicer' && slicerValues.layers.includes(layer) ? layer : ''
+  /*
+   * 层高的可选值**跟着喷嘴走**（2026-10-10）：选了喷嘴就只列这个喷嘴的层高；
+   * 喷嘴那一档是「全部」时列所有喷嘴的并集。切喷嘴时当前层高不在新集合里就自动
+   * 回「全部」—— 不这么做的话，0.2 喷嘴下留着 0.30 会筛出一张永远空着的表。
+   */
+  const layerOptions =
+    nozzleValue === ''
+      ? slicerValues.layers
+      : (slicerValues.layersByNozzle[nozzleValue] ?? [])
+  const layerValue = kind === 'slicer' && layerOptions.includes(layer) ? layer : ''
 
   const local = useMemo(
     () => ({ ...localBase, rows: applySlicerFilters(localBase.rows, nozzleValue, layerValue) }),
@@ -1315,13 +1397,15 @@ export function usePresetPage(data: PresetData): PresetPage {
     applied: data.active,
     appliedMachineText: appliedMachine?.display ?? data.active?.machineId ?? '',
     appliedFileName,
-    appliedIsMine: data.active?.origin === 'mine',
+    /* 使用中的永远是**本地文件**（即「我的文件」）—— 有底账就是它 */
+    appliedIsMine: data.active !== null,
     query,
     setQuery,
     searching: query.trim() !== '',
     slicerFilters: {
       nozzles: slicerValues.nozzles,
-      layers: slicerValues.layers,
+      allLayers: slicerValues.layers,
+      layerOptions,
       nozzle: nozzleValue,
       layer: layerValue,
       setNozzle,

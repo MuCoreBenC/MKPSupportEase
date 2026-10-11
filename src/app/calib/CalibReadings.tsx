@@ -10,6 +10,17 @@
  * 留下的：打字缓冲（打到一半不被 toFixed 改写）、真相变了丢原文、Esc 还原、
  * Enter 失焦、改动绿点与「原 x.xx」chip、当前轴绿标 —— 一条不少。
  * 位置由调用方摆（HUD 台面 = 左下角；向导卡 = 横排）。
+ *
+ * 2026-10-11 第十一轮（作者：「这些很容易出问题……那个闪烁的效果不好看，还有，
+ * 我没有进入编辑态就可以用滚轮或者箭头改变数值，很不好，我决定去掉双击编辑的」）：
+ *
+ *   双击编辑**整个撤掉** —— 回到**单击直进**：点数字（或轴名 / mm / 内衬）即聚焦进
+ *   编辑态，下划线转**绿**（:focus-within），键盘 Tab 照旧。单击不再「闪两下」，
+ *   `hintAt` / `unlocked` 两处状态一并删掉（形态仍是下划线：悬停灰线、聚焦绿线）。
+ *
+ *   滚轮 / 方向键**只在编辑态（聚焦）生效**：滚轮监听里补一道 `activeElement` 判断，
+ *   没聚焦就放行走页面滚动、不 preventDefault、更不改数字 —— 手滑一下不会把已保存的
+ *   值改掉（这正是作者要修的）。聚焦后滚轮仍按 0.05 步进、方向键走 step="0.01"。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -64,6 +75,9 @@ export default function CalibReadings({
    * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
    * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
    * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   *
+   * **只在这一格聚焦（编辑态）时才动手**：没聚焦就直接 return，让滚轮照常滚页面 ——
+   * 否则鼠标划过就把已保存的值改了（作者第十一轮要修的正是这个）。
    */
   useEffect(() => {
     const root = rootRef.current
@@ -71,6 +85,7 @@ export default function CalibReadings({
     const onWheel = (e: WheelEvent) => {
       const input = e.target instanceof HTMLInputElement ? e.target : null
       if (!input || input.readOnly || input.type !== 'number') return
+      if (document.activeElement !== input) return
       const k = input.dataset.axis
       if (k !== 'x' && k !== 'y' && k !== 'z') return
       e.preventDefault()
@@ -107,7 +122,7 @@ export default function CalibReadings({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-                title={revertible && saved ? `点一下还原成 ${saved[k].toFixed(2)}` : undefined}
+               
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
                 原 {saved ? saved[k].toFixed(2) : '0.00'}
@@ -115,7 +130,7 @@ export default function CalibReadings({
             </dt>
             <dd className={s.axisValue}>
               {view === 'value' && draft ? (
-                <label className={s.field} data-readonly={!canType} title={canType ? undefined : '先选一份预设再改'}>
+                <label className={s.field} data-readonly={!canType}>
                   <input
                     id={id}
                     className={s.fieldInput}

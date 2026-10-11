@@ -51,7 +51,7 @@
  *
  *   MKP 本地行   状态 已应用 / 未应用              操作 [使用] → 唯一底账（run/active-preset.json）
  *   MKP 云端行   状态 未获取 / 本地已有 / 有新版    操作 [下载] / [更新] / 灰字（本地已有不给）
- *                → `api.fetchOfficialPreset()`（取回官方 + 落一份你的工作副本，**不改当前使用**）
+ *                → `api.fetchOfficialPreset()`（取回官方 + 落一份你的本地文件，**不改当前使用**）
  *   切片器本地行 状态 已复制 / 未复制              操作 [复制] → `api.copyToSlicer()`
  *   切片器云端行 状态 已下载 / 未下载              操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
  *
@@ -78,58 +78,69 @@
  * **前端一行都不编**：拿不到就写「未知」并在 title 里说清为什么。
  * （用户自己那份的大小与时间**是真值**：后端扫盘拿的，`statFrom: 'file'` 那一档。）
  * 时间显示两种形态：行上只写 `MM-DD`、展开面板带年份 —— 见 `shortStatText` / `longStatText`。
+ *
+ * # 展开详情（2026-10-10 第八轮：抽卡页「两条独立」落地）
+ *
+ * ```
+ * ┌ [icon] 我的 A1 mini 涂胶…toml  在用 · 2.0 KB · 修改于 …   [收起] ┐  ← 卡头
+ * ├ 基本信息                    │ 快捷操作                       ┤
+ * │ 版本 / 来源 / 基于           │ [看正文] [编辑]                  │
+ * │ 备注 空着 = 副标题留空                              [编辑]     │
+ * │ 归属 机型 A1_MINI · 预设类型 FAST                   [编辑]     │
+ * ├──────────────────────────────────────────────────────────────┤  ← 编辑带（点「编辑」折出）
+ * │ 备注 […………………………]        [恢复默认] [取消] [保存]             │
+ * └──────────────────────────────────────────────────────────────┘
+ * ```
+ *
+ * 第五轮压高度、第六轮「文件详情」卡头、第七轮「名字回卡上」——都过了。第八轮照作者
+ * 在 `lab/preset-edit-gallery.html` 第 11 条挑定的方案（原话：「现在你这个换的结构
+ * 是没问题的，这次终于可以了」）把编辑这一块重排：
+ *
+ *   1. **展示行住进信息区**：「备注 / 归属」是两行（label 56px —— 与版本 / 来源 / 基于
+ *      同一条刻度）+ 右端小胶囊「编辑」；不再是一块独立的「并排两格」（`.dEdits` 退役）。
+ *   2. **编辑带折在卡底**：点「编辑」→ 卡底折开一条（高度 `grid-template-rows` 0↔1
+ *      + 内容从上落下），备注一条、归属一条，**两条独立、可同开**；再点同一颗「编辑」
+ *      收回。卡片自己 `overflow: hidden` 裁圆角（抽卡页 #11 那个关键改动 —— 条不再
+ *      自己管圆角、不用任何负 margin）。
+ *   3. **备注输入换成自增高 textarea**（原来是单行 input）：内容或**宽度**变了都重算
+ *      高度（ResizeObserver 盯宽度 —— 抽卡页上「窗口拉窄高度不跟、打一个字才跳、
+ *      拉回来不缩」那个坑，作者点名修过）。
+ *   4. **保存成功自动回展示态**：靠「打开时的行数据指纹」—— 页面重读后指纹不匹配，
+ *      带在渲染时自然合上（还是收起的动画）；失败指纹不变，留在带里把输入还给用户。
+ *   5. 悬浮感照旧靠层次（无边框、轻影子）；卡头加一颗安静的「收起」（与点行同一件事）。
  */
 
 
-import { Fragment, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ContextMenuApi } from '../../components/menu'
+/* a03：归属控件用 FieldPopover 做可输入 + 可选的自定义组合框（替代原生 select/datalist） */
+import { FieldPopover } from '../../components/field'
+/* 展开详情卡头那一枚文件图标（2026-10-10，参考稿的绿色文档图标 —— 本项目走描边风格） */
+import Icon from '../../components/Icon'
 import type { Machine } from '../../api'
-/* 机型识别色：一色一机型（`A1` 与 `A1 mini` 光靠读字分不开 —— 见那个模块的头） */
-import { machineToneKeyOf, machineToneOf } from '../ui/machineTone'
+/* a03：机型列不再上彩色识别色（色彩收敛）；模块保留，data-machine 仍按机型落值 */
+import { machineToneKeyOf } from '../ui/machineTone'
 import { longStatText, shortStatText } from '../store/package'
+/* a03：所有 WHY（悬停用）导入已随「去悬停提示」移除 */
 import {
   ACTION_TEXT,
-  ARCHIVE_KEY,
-  ARCHIVE_WHY,
   archiveOpenText,
   ASSET_STATE_TEXT,
-
   ASSET_USE_TEXT,
-  ASSET_USE_WHY,
   BASED_ON_KEY,
-  BASED_ON_WHY,
   basedOnCellText,
   CLOUD_LOCAL_ACTION,
   CLOUD_LOCAL_TEXT,
-  CLOUD_LOCAL_WHY,
   CLOUD_STATE_TEXT,
-  CLOUD_STATE_WHY,
   DASH_,
-  DEMO_STAT_WHY,
   EDIT_TEXT,
-  EDIT_WHY,
-  FILE_SIZE_WHY,
-  MINE_APPLY_WHY,
-  MINE_BODY_WHY,
   MINE_DRAWER,
-  MINE_NOT_PRESET_WHY,
   MINE_UNREADABLE_TEXT,
-  mineUnreadableWhy,
-  REPO_FILE_WHY,
-  RELEASE_DOWNLOAD_WHY,
-  RELEASE_REPAIR_WHY,
-  RELEASE_SIZE_WHY,
-  RELEASE_STATE_WHY,
-  RELEASE_TIME_WHY,
   RELEASE_UNTRUSTED_NOTE,
-  RELEASE_UPDATE_WHY,
   UPDATE_ACTION_TEXT,
   UPDATE_STATE_TEXT,
   KIND_AXIS_TEXT,
   LIVE_TEXT,
-  LIVE_WHY,
-  NO_ASSET_WHY,
-  NO_STAT_WHY,
   originCellOf,
   updateStateOf,
   UNKNOWN,
@@ -167,7 +178,7 @@ function CloudLocalAction({
   if (action === null) {
     /* 「本地已有」：不给按钮（那件事在本地表那一行上做），画一个破折号 + 为什么 */
     return (
-      <span className={s.actNone} title={CLOUD_LOCAL_WHY[state]}>
+      <span className={s.actNone}>
         {DASH_}
       </span>
     )
@@ -177,7 +188,7 @@ function CloudLocalAction({
       type="button"
       className={s.actBtn}
       disabled={busy}
-      title={CLOUD_LOCAL_WHY[state]}
+     
       onClick={() => onDownload(row)}
     >
       {action}
@@ -230,10 +241,10 @@ interface Props {
   archiveCountOf: (fileName: string) => number
   /** 打开「旧版本」抽屉（归档的可视化在页面层的抽屉里，表这边只给入口） */
   onOpenArchive: (row: PresetTableRow) => void
-  /** 打开「我自己的这一份」抽屉（用户线的正文：**只读**） */
+  /** 打开「我自己的这一份」抽屉（本地文件的正文：**只读**） */
   onOpenMine: (row: PresetTableRow) => void
   /**
-   * 开始改这一份（临时编辑那条链）。两条线共一个入口：
+   * 开始改这一份（临时编辑那条链）。两边共一个入口：
    * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
    */
   onEdit: (row: PresetTableRow) => void
@@ -241,7 +252,7 @@ interface Props {
   onLive: (row: PresetLocalRow) => void
   /**
    * **MKP 本地行唯一的按钮：使用**（2026-10-09）。这一档只有 `presets-mine/` 里那几行
-   * （你自己那份工作副本）——「使用」= 把它设为当前生效。官方那一份的取用
+   * （你自己那份本地文件）——「使用」= 把它设为当前生效。官方那一份的取用
    * （下载 / 更新 = 取回 + 落一份）在云端表，不走这里。
    */
   onUse: (row: PresetLocalRow) => void
@@ -298,6 +309,70 @@ export default function PresetTable({
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
 
+  /*
+   * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
+   * 存的是**打开那一刻的行数据指纹**（见下面每行的 `remarkBand / attrBand`）：
+   * 页面重读后（保存成功 / 恢复默认）指纹对不上，渲染时自然回到展示态 ——
+   * 与原来「key 重挂载」同一件事，但现在带是常驻 DOM（收起动画要靠它），
+   * 所以由指纹来判。失败时指纹不变，带留在原地把输入还给用户。
+   * 同一时刻只有一行展开，所以一份状态就够；换行 / 收起行由下面的 effect 清掉。
+   */
+  const [bands, setBands] = useState<{ remark: string | null; attr: string | null }>({
+    remark: null,
+    attr: null,
+  })
+  useEffect(() => {
+    setBands({ remark: null, attr: null })
+  }, [expandedKey])
+
+  /*
+   * **收起动画 + 点击排队**（2026-10-10 第九/十轮，第十一轮修关键时序）——
+   *
+   * 收起的动画靠「这一行先留在 DOM 里、把高度收成 0，动画走完再卸载」（CSS `.dFold`），
+   * 「哪些行正在收」就是 `closing`。**关键：记账必须和 `onToggleExpand` 在同一次
+   * 事件里发生**（同一个批处理、同一帧提交）—— 放在 `useEffect` 里晚一帧，那一帧
+   * 旧行就已经被卸载了，收起动画根本没机会播（作者：「收起一点动画都没有，它直接
+   * 就消失了」）。做成数组：连着点几行时，没收完的互不打断。
+   *
+   * 排队规则（作者：「我收起来的时候，我打断了它，我又点了一下展开它好像就卡住了……
+   * 动画不要被打断，要执行完。你可以加速把它收起，然后再展开」）：
+   *   · 点一个**正在收**的行 → 这一下不掐断收起：记进 `queuedRef`，把当前收起**加速**
+   *     （`rush` → CSS 里 240ms 变 140ms），收完（`finishClose`）立刻接着展开；
+   *   · 「展开中再点收」不排队：收起直接接过去（过渡从当前高度反向，不跳）。
+   */
+  const [closing, setClosing] = useState<string[]>([])
+  const [rush, setRush] = useState(false)
+  const queuedRef = useRef<string | null>(null)
+  /** 一次收起的收尾：卸载那一行、撤掉加速，并兑现排着的那次「展开」（如果就是它） */
+  const finishClose = (key: string) => {
+    setClosing((c) => c.filter((k) => k !== key))
+    setRush(false)
+    if (queuedRef.current === key) {
+      queuedRef.current = null
+      onToggleExpand(key)
+    }
+  }
+  /** 让一行开始收：记账（与下面的 `onToggleExpand` 同帧）+ 排好收尾（300ms ≈ 240ms 过渡 + 余量） */
+  const startClose = (key: string) => {
+    setClosing((c) => (c.includes(key) ? c : [...c, key]))
+    window.setTimeout(() => finishClose(key), 300)
+  }
+  /** 行上那一下点击、卡头那颗「收起」—— 都从这里进（见上面那段说明） */
+  const requestToggle = (rowKey: string) => {
+    /* 正在收的这一行又被点开：加速收尾 + 排队（收完再展开，不互相掐） */
+    if (closing.includes(rowKey)) {
+      setRush(true)
+      queuedRef.current = rowKey
+      window.setTimeout(() => finishClose(rowKey), 160)
+      return
+    }
+    /* 换行：旧行从这一刻开始收（紧跟的 onToggleExpand 会展开新行，同帧提交） */
+    if (expandedKey !== null && expandedKey !== rowKey) startClose(expandedKey)
+    /* 收起这一行：它自己开始收 */
+    if (expandedKey === rowKey) startClose(rowKey)
+    onToggleExpand(rowKey)
+  }
+
   /** 空表三种话，说的是三件不同的事 —— 混成一句「没有数据」就查不出是哪一件 */
   const emptyText = (): string => {
     if (failure !== null) return `加载失败：${failure}`
@@ -305,7 +380,7 @@ export default function PresetTable({
       /* MKP 那一档是一对表（本地 / 云端），空表按表说 —— 本地是你自己那份，云端是官方 */
       if (mkp) {
         return scope === 'local'
-          ? '本地还没有这一档的预设 —— 你自己那份工作副本（presets-mine）会出现在这里；从云端「下载」一份就会有'
+          ? '本地还没有这一档的预设 —— 你自己那份本地文件（presets-mine）会出现在这里；从云端「下载」一份就会有'
           : '云端没有这一档的官方预设 —— 官方目录里没有登记的，就下不到'
       }
       return scope === 'local'
@@ -315,44 +390,17 @@ export default function PresetTable({
     return `这一档的 ${total} 条都被搜索词「${query.trim()}」筛掉了`
   }
 
-  /**
-   * 时间那一格的 title。**有值就给具体时间 + 一个词说清它是哪个时间**，
-   * 不解释实现机制（`catalog.publishedAt` 这种内部名字不出现在界面上）：
-   *
-   *   发布行     云端 = 「云端更新时间：…」；本地 = 「下载时间 / 替换时间：…」
-   *              —— 标签跟着**事件**走（`arrivalBy`），不是 UI 自己挑的
-   *   我的文件   「修改于：…」—— 用户自己那份的最后一次保存，这一格叫修改时间才对
-   *   真值（bbs） 「文件时间：…」—— 上游记录的内容更新时间
-   *   演示推值   照实说它是演示值（唯一还得解释的那一档：它的值不是真的）
-   *   拿不到     各自有一句"为什么"（目录没盖戳 / 没有事件 / 本来就没有）
-   */
-  const statWhyOf = (row: PresetTableRow): string => {
-    const when = longStatText(row.modifiedText)
-    if (row.origin === 'release') {
-      if (row.scope === 'cloud') {
-        /* 云端表的时间 = **这一次发布的时刻**（目录盖的戳）；目录没带就说未知，不编 */
-        return when === undefined ? RELEASE_TIME_WHY.cloudMissing : `云端更新时间：${when}`
-      }
-      if (when === undefined) return RELEASE_TIME_WHY.localMissing
-      return row.arrivalBy === 'replaced'
-        ? `替换时间：${when}（上一次「更新」把它换上去的时刻）`
-        : `下载时间：${when}`
-    }
-    if (row.scope === 'local' && row.origin === 'mine') {
-      return when === undefined ? NO_STAT_WHY : `修改于：${when}（你自己这份最后一次保存的时刻）`
-    }
-    if (row.statFrom === 'file') {
-      return when === undefined ? NO_STAT_WHY : `文件时间：${when}（上游记录的那份文件的更新时间）`
-    }
-    return row.modifiedText === undefined ? NO_STAT_WHY : DEMO_STAT_WHY
-  }
+  /* a03：statWhyOf（时间格悬停 title）已随「去悬停提示」移除。 */
 
-  /** 行上那一格：只写月-日 —— `shortStatText` 统一三种来源的写法 */
-  const statCell = (row: PresetTableRow) => (
-    <td className={s.stat} title={statWhyOf(row)}>
-      {shortStatText(row.modifiedText) ?? UNKNOWN}
-    </td>
-  )
+  /** 行上那一格：只写月-日 —— `shortStatText` 统一三种来源的写法；没有不渲染「未知」 */
+  const statCell = (row: PresetTableRow) => {
+    const text = shortStatText(row.modifiedText)
+    return (
+      <td className={s.stat}>
+        {text !== undefined && <span>{text}</span>}
+      </td>
+    )
+  }
 
   return (
     <div className={s.hold}>
@@ -418,7 +466,6 @@ export default function PresetTable({
                * 「我的文件」按**文件自己标的归属**上色（`machineToneKeyOf` 收的规矩）。
                */
               const machineToneKey = machineToneKeyOf(row)
-              const machineTone = machineToneOf(machineToneKey)
               /*
                * 行左边那道绿竖线只标**「正在生效的那一份」**：本地表是 live（MKP 已应用 /
                * 切片器已复制），云端表是 applied（仓库里那一份就是你在用的那一份）。
@@ -442,9 +489,9 @@ export default function PresetTable({
                 !(row.scope === 'cloud' && row.localState !== undefined)
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
-               * **用户线那一份问都不问**：归档是官方版本生命周期的事，
+               * **本地文件那一份问都不问**：归档是官方版本生命周期的事，
                * 用户自己的文件不进归档，也不该因为同名就借到官方的旧版本。
-               * **MKP 档整个不显示它**（2026-10-09：官方原件与归档都是内部数据，不进用户世界）
+               * **MKP 档整个不显示它**（2026-10-09：云端原件与归档都是内部数据，不进用户世界）
                * —— 归档抽屉只留切片器档。
                */
               const archiveCount = row.origin === 'mine' || mkp ? 0 : archiveCountOf(row.fileName)
@@ -461,11 +508,37 @@ export default function PresetTable({
               const locateTarget = origin.locate ?? null
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
+              /*
+               * 「这一行还热着」= 展开着，或者正播**收起动画**（在 `closing` 里）——
+               * 行白底在这期间保持、卡片留在 DOM 里收高度；两样都读它
+               * （见上面 `closing` 那段）。
+               */
+              const rowHot = expanded || closing.includes(row.rowKey)
+              /*
+               * 备注 / 归属这两块的身份（第八轮）：
+               * `mineAttr` = 这一行有没有归属可改（我自己那份、认得出的 MKP 预设，
+               * 原来在 JSX 里判两次，现在提一个量）；`ownMachineId / ownVersionId`
+               * 是那两个值，显式收窄落成局部量（TS 不认布尔常量的收窄，而展示行与
+               * 编辑带都要用它们）；两个 `*Band` 是编辑带的**打开指纹** —— 打开时
+               * 记下、渲染时对表，数据重读后对不上就自动合上（见上面 `bands` 那段）。
+               */
+              const mineAttr =
+                row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+              const ownMachineId =
+                row.origin === 'mine' && row.kind === 'mkp_preset' ? (row.ownMachineId ?? null) : null
+              const ownVersionId =
+                row.origin === 'mine' && row.kind === 'mkp_preset' ? (row.ownVersionId ?? null) : null
+              const remarkBand = row.remarkKey === null ? null : `${row.rowKey}:${row.subtitle}`
+              const attrBand = mineAttr
+                ? `${row.rowKey}:${ownMachineId ?? ''}:${ownVersionId ?? ''}`
+                : null
               return (
                 <Fragment key={row.rowKey}>
                 <tr
-                  className={expanded ? `${s.row} ${s.rowOpen}` : s.row}
+                  className={rowHot ? `${s.row} ${s.rowOpen}` : s.row}
                   data-live={inUse}
+                  /* 置顶只有一层**很浅的底**（2026-10-10：不要字、不要图钉，见 CSS 那一段） */
+                  data-pinned={row.pinned}
                   data-active={row.rowKey === activeKey}
                   /* 定位滚动/闪光用（「复制自 X」点过来要滚到这一行）——选择器认它 */
                   data-rowkey={row.rowKey}
@@ -473,20 +546,32 @@ export default function PresetTable({
                   onClick={(e) => {
                     /* 点在按钮上不算「展开这一行」—— 按钮有自己的动作 */
                     if ((e.target as HTMLElement).closest('button') !== null) return
-                    onToggleExpand(row.rowKey)
+                    requestToggle(row.rowKey)
                   }}
                 >
                   <td className={s.name}>
+                    {/*
+                     * 行里的文件名**常显**（第十轮撤回了第七轮那条「展开时隐去」——
+                     * 作者：「我希望那个列表的那个文字不要消失」）。卡片头上那一份
+                     * 照旧（他要卡片显示名字）：两边都读得到，不再隐来隐去。
+                     */}
                     <span className={s.nameLine}>
-                      {/* 置顶是纯前端排序，所以标记也只是一枚小字，不改任何状态 */}
-                      {row.pinned && (
-                        <span className={s.pin} title="已置顶：只影响这张表的顺序，不是「设为当前」">
-                          置顶
-                        </span>
-                      )}
-                      <span className={s.nameText} title={row.fileName}>
+                      <span className={s.nameText}>
                         {row.fileName}
                       </span>
+                      {/*
+                        **参数改了还没保存**（2026-10-10）：一枚小圆点，不是徽章 ——
+                        作者：「不想用徽章……徽章太多、太占位置」。全文在 `title` 里。
+                        置顶是另一回事：它没有标记，只有一层很浅的行底（见 CSS）。
+                      */}
+                      {row.unsaved && (
+                        <span
+                          className={s.unsavedDot}
+                          role="img"
+                          aria-label="有未保存的参数改动"
+                          title="有未保存的参数改动 —— 打开「修改参数」接着改"
+                        />
+                      )}
                       {/*
                         云端表：**下过几代旧版**（2026-10-08）。
                         这一行现在只代表"云上这一个条目"（一个目录条目一行 —— 见
@@ -496,7 +581,7 @@ export default function PresetTable({
                       {row.scope === 'cloud' && (row.olderVersions ?? 0) > 0 && (
                         <span
                           className={s.olderVersions}
-                          title={`这一机下过这个预设的 ${row.olderVersions} 代旧版 —— 它们在你自己的文件里（本地表，名字带日期），展开这一行还能看到归档里那几份`}
+                         
                         >
                           旧版 ×{row.olderVersions}
                         </span>
@@ -510,25 +595,23 @@ export default function PresetTable({
                         <span
                           className={s.localState}
                           data-state={row.localState}
-                          title={CLOUD_LOCAL_WHY[row.localState]}
+                         
                         >
                           {CLOUD_LOCAL_TEXT[row.localState]}
                         </span>
                       )}
                       {/*
                         「官方模板已更新」那枚小字**退役了**（2026-10-09）：官方改过的项
-                        现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持我的」，
-                        或者「选择要跟随的官方更新」一屏看全），不再在列表上留一句
+                       现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持我的」），
+                       不再在列表上留一句
                         "官方那边有新的了"让人自己去猜是哪几项。
                       */}
-                      {row.scope === 'local' && row.untagged && (
-                        <span
-                          className={s.untagged}
-                          title="你没给这个文件标适用机型 —— 不替你猜一个，所以它在每台机型下都列出来"
-                        >
-                          未标机型
-                        </span>
-                      )}
+                      {/*
+                       * ★ **「未标机型」那枚角标退役了**（2026-10-10 作者：「这个未标机型
+                       * 也没必要显示出来呀，就是说没必要显示这几个字占位置」）。
+                       * 数据口径照旧（`untagged` 仍在：机型那格写 `—`、任何机型档下列出来、
+                       * 展开详情里的「归属」还能改），只是名称列不再挂那四个字。
+                       */}
                       {/*
                        * ★ **"基于旧版官方"那枚徽章退役了**（2026-10-08 作者裁决）：
                        * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；
@@ -543,7 +626,7 @@ export default function PresetTable({
                       {row.scope === 'local' && row.mineState === 'unreadable' && (
                         <span
                           className={s.unreadable}
-                          title={mineUnreadableWhy(row.mineStateDetail)}
+                         
                         >
                           {MINE_UNREADABLE_TEXT}
                         </span>
@@ -551,36 +634,40 @@ export default function PresetTable({
                     </span>
                     {/* 第二行等宽小字：**备注** —— 没有就空着、**不占位**：
                         没备注时文件名自己垂直居中；有备注时两行整块居中
-                        （名字上移、备注在下面）。磁盘位置在 title 里，不丢 */}
-                    <span className={s.path} title={row.path}>
+                        （名字上移、备注在下面）。磁盘位置在 title 里，不丢。
+                        第十轮起展开时也常显（同上一格，撤回「隐去」）。 */}
+                    <span className={s.path}>
                       {row.subtitle}
                     </span>
                   </td>
 
                   {/*
-                    机型这一格是**带识别色的小标签**，不是一串灰字（2026-10-08）：
-                    光靠读字分不开 `A1` 与 `A1 mini`，颜色能先于文字被认出来。
-                    `data-machine` 留着给探针按机型取值（不是装饰）。
+                    a03：机型格是**安静的中性小标签**，不再上彩色识别色；
+                    没有机型（「—」）时**整枚不渲染**。`data-machine` 留着给探针取值。
                   */}
-                  <td className={s.machine} title={row.machineText}>
-                    <span
-                      className={s.machineChip}
-                      data-machine={machineToneKey}
-                      style={{ color: machineTone.ink, background: machineTone.bg }}
-                    >
-                      {row.machineText}
-                    </span>
+                  <td className={s.machine}>
+                    {row.machineText !== DASH_ && (
+                      <span
+                        className={s.machineChip}
+                        data-machine={machineToneKey}
+                       
+                      >
+                        {row.machineText}
+                      </span>
+                    )}
                   </td>
 
                   {mkp ? (
-                    /* 版本：只读的一列。不可点、不排序、不分组（见文件头） */
-                    <td className={s.version} title={version.why}>
-                      {version.text}
+                    /* a03：版本列空着不渲染「—」 */
+                    <td className={s.version}>
+                      {row.versions.length > 0 && (
+                        <span>{version.text}</span>
+                      )}
                     </td>
                   ) : (
                     <>
-                      <td className={s.num}>{row.nozzle ?? DASH_}</td>
-                      <td className={s.num}>{row.layerHeight ?? DASH_}</td>
+                      <td className={s.num}>{row.nozzle ?? ''}</td>
+                      <td className={s.num}>{row.layerHeight ?? ''}</td>
                     </>
                   )}
 
@@ -589,14 +676,18 @@ export default function PresetTable({
                   {/*
                    * 操作列常驻。三种画法，**已经生效 / 已经下载的那一种是灰字不是按钮**：
                    * 已经在用的东西没有可点的动作，给个按钮只会让人点一下看看会发生什么。
+                   *
+                   * 2026-10-10：这一格**自己吃掉点击**（`stopPropagation`）—— 操作列是
+                   * 动作的地盘，点到格子里任何地方（按钮边上、按钮下面）都不该展开行。
+                   * 作者的抱怨就是"很容易点击了就导致它展开"：按钮热区小、点偏一格就展开。
                    */}
-                  <td className={s.act}>
+                  <td className={s.act} onClick={(e) => e.stopPropagation()}>
                     {row.scope === 'cloud' && row.localState !== undefined ? (
                       /*
                        * **MKP 云端行的三个状态、两个动作**（2026-10-09）。
                        *
                        * 判据在 `cloudRows` 里算好了（`localState`）：问我这边有没有一份
-                       * **基于它**的工作副本，以及官方换没换版 —— **不看下载区字节**。
+                       * **基于它**的本地文件，以及官方换没换版 —— **不看下载区字节**。
                        *
                        *   未获取  → [下载]  取回官方 + 落一份你的（本地表立刻多一行）
                        *   有新版  → [更新]  把官方新版取回来；**你那份一个字节都不动**
@@ -613,29 +704,41 @@ export default function PresetTable({
                       /*
                        * **MKP 本地行唯一的动作：使用**（2026-10-09）。
                        *
-                       * 这一档只有 `presets-mine/` 里那几行（你自己那份工作副本）——
-                       * 官方原件不进这张表。使用 = 把它设为当前生效的那一份。
+                       * 这一档只有 `presets-mine/` 里那几行（你自己那份本地文件）——
+                       * 云端原件不进这张表。使用 = 把它设为当前生效的那一份。
                        * 两处不给按钮（不给点了必被拒的按钮）：认不出是 MKP 预设的（`.json`），
                        * 以及第九层读不出来的。
                        */
                       row.live ? (
-                        <span className={s.actLive} title={ASSET_USE_WHY.on}>
-                          ✓ {ASSET_USE_TEXT.on}
-                        </span>
+                        /*
+                         * 正在使用（2026-10-10 第二轮）：**disabled 的同一颗按钮**。
+                         *
+                         * 以前这里是一个 `<span>「使用中」`——它落在行点击里，点它会把行展开
+                         * （作者：「我点击它不要有任何反应，不要说点击了就展开」）。现在：
+                         *   · 它是 button → 行点击那一关（`closest('button')`）直接放过；
+                         *   · `disabled` → 点它什么也不发生；
+                         *   · 与「使用」是**同一颗元素的两个状态** → 切换由 CSS transition
+                         *     过渡过去（背景 / 字色 / 阴影），不再是两个节点硬切。
+                         * 样式：外阴影=凸起（使用）/ 内阴影=凹下（使用中）—— 见 `.useBtn`。
+                         */
+                        <button type="button" className={s.useBtn} data-live="true" disabled>
+                          {ASSET_USE_TEXT.on}
+                        </button>
                       ) : row.origin === 'mine' && row.kind !== 'mkp_preset' ? (
-                        <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
+                        <span className={s.actNone}>
                           {DASH_}
                         </span>
                       ) : row.origin === 'mine' && row.mineState === 'unreadable' ? (
-                        <span className={s.actNone} title={mineUnreadableWhy(row.mineStateDetail)}>
+                        <span className={s.actNone}>
                           {DASH_}
                         </span>
                       ) : (
+                        /* 使用：定宽深色胶囊，用回中文（2026-10-10 作者：不要光秃秃的勾） */
                         <button
                           type="button"
-                          className={s.actBtn}
+                          className={s.useBtn}
                           disabled={busy}
-                          title={ASSET_USE_WHY.off}
+                         
                           onClick={() => onUse(row)}
                         >
                           {ASSET_USE_TEXT.off}
@@ -656,13 +759,13 @@ export default function PresetTable({
                           type="button"
                           className={s.actBtn}
                           disabled={busy}
-                          title={untrusted ? RELEASE_REPAIR_WHY : RELEASE_UPDATE_WHY}
+                         
                           onClick={() => onDownload(row)}
                         >
                           {UPDATE_ACTION_TEXT.update}
                         </button>
                       ) : row.live ? (
-                        <span className={s.actDone} title={LIVE_WHY[kind].on}>
+                        <span className={s.actDone}>
                           {LIVE_TEXT[kind].on}
                         </span>
                       ) : row.origin === 'mine' ? (
@@ -673,22 +776,23 @@ export default function PresetTable({
                          * 以及**第九层读不出来的**（后端 `read_preset_text` 的第一关就会拒）。
                          */
                         row.kind !== 'mkp_preset' ? (
-                          <span className={s.actNone} title={MINE_NOT_PRESET_WHY}>
+                          <span className={s.actNone}>
                             {DASH_}
                           </span>
                         ) : row.mineState === 'unreadable' ? (
-                          <span className={s.actNone} title={mineUnreadableWhy(row.mineStateDetail)}>
+                          <span className={s.actNone}>
                             {DASH_}
                           </span>
                         ) : (
+                          /* 同一颗定宽胶囊：这一档的动作按类型叫（复制 / 应用） */
                           <button
                             type="button"
-                            className={s.actBtn}
+                            className={s.useBtn}
                             disabled={busy}
-                            title={MINE_APPLY_WHY}
+                           
                             onClick={() => onLive(row)}
                           >
-                            {ACTION_TEXT.mkp}
+                            {ACTION_TEXT[kind]}
                           </button>
                         )
                       ) : row.releaseUid !== undefined && row.kind !== 'mkp_preset' ? (
@@ -702,7 +806,7 @@ export default function PresetTable({
                           type="button"
                           className={s.actBtn}
                           disabled={busy}
-                          title={LIVE_WHY[kind].off}
+                         
                           onClick={() => onLive(row)}
                         >
                           {ACTION_TEXT[kind]}
@@ -715,12 +819,12 @@ export default function PresetTable({
                          * 原来这里放行到「应用」按钮、点了再被守卫拦下，报一串
                          * asset id / 契约的术语 —— 现在按钮根本不给，原因用人话说。
                          */
-                        <span className={s.actNone} title={NO_ASSET_WHY}>
+                        <span className={s.actNone}>
                           {DASH_}
                         </span>
                       ) : row.assetId === undefined && row.releaseUid === undefined ? (
                         /* 什么身份都没有的行：复制 / 应用都无从谈起（不给点了没反应的按钮） */
-                        <span className={s.actNone} title={NO_ASSET_WHY}>
+                        <span className={s.actNone}>
                           {DASH_}
                         </span>
                       ) : (
@@ -728,14 +832,14 @@ export default function PresetTable({
                           type="button"
                           className={s.actBtn}
                           disabled={busy}
-                          title={LIVE_WHY[kind].off}
+                         
                           onClick={() => onLive(row)}
                         >
                           {ACTION_TEXT[kind]}
                         </button>
                       )
                     ) : gotIt ? (
-                      <span className={s.actDone} title={CLOUD_STATE_WHY.downloaded}>
+                      <span className={s.actDone}>
                         {CLOUD_STATE_TEXT.downloaded}
                       </span>
                     ) : row.releaseUid !== undefined ? (
@@ -743,13 +847,7 @@ export default function PresetTable({
                         type="button"
                         className={s.actBtn}
                         disabled={busy}
-                        title={
-                          needsUpdate
-                            ? untrusted
-                              ? RELEASE_REPAIR_WHY
-                              : RELEASE_UPDATE_WHY
-                            : RELEASE_DOWNLOAD_WHY
-                        }
+                       
                         onClick={() => onDownload(row)}
                       >
                         {needsUpdate ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing}
@@ -759,15 +857,20 @@ export default function PresetTable({
                        * **官方仓库文件不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
                        * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载。
                        */
-                      <span className={s.actNone} title={REPO_FILE_WHY}>
+                      <span className={s.actNone}>
                         {DASH_}
                       </span>
                     )}
                   </td>
                 </tr>
 
-                {expanded && (
-                  <tr className={s.expandRow}>
+                {rowHot && (
+                  <tr
+                    className={s.expandRow}
+                    data-open={expanded}
+                    /* 加速（第十轮）：收起动画中这一行又被点了「展开」—— 这条收起快放完 */
+                    data-rush={rush && closing.includes(row.rowKey)}
+                  >
                     {/*
                      * colSpan 必须**跟着上面的表头列数走**：MKP 5 列（名称 / 机型 / 版本 / 时间 /
                      * 操作）、切片器 6 列（名称 / 机型 / 喷嘴 / 层高 / 时间 / 操作）。
@@ -775,330 +878,324 @@ export default function PresetTable({
                      * 改列数时这里要一起改。
                      */}
                     <td colSpan={mkp ? 5 : 6}>
-                      <dl className={s.facts}>
+                      {/*
+                       * —— 展开 / 收起的小动画（2026-10-10 第九轮，抽卡页那套）——
+                       * 表格里没法给 `<tr>` 直接做高度过渡（高度由内容撑），所以把
+                       * 折动画放在 td 里这一层 `.dFold` 上（`grid-template-rows`
+                       * 0fr ↔ 1fr），tr 高度跟着它逐帧走。
+                       * 入场：挂载即播（条件渲染没有「上一帧」，用 CSS animation）；
+                       * 退场：收起时这一行先留在 DOM 里（`closing`）把高度收回 0，
+                       * 动画走完再卸载（见上面 `closing` 那段）。
+                       * 三段内衬：`.dFold`（折）→ `.dFoldCut`（裁）→ `.dFoldIn`
+                       * （内容落下 + 内边距 —— 卡片影子要的余地也在这里，
+                       * 贴着裁剪边影子会被切）。
+                       */}
+                      <div className={s.dFold}>
+                        <div className={s.dFoldCut}>
+                          <div className={s.dFoldIn}>
+                      {/*
+                       * a03：详情是一张**浮起的白卡**（白底 + 圆角 + 投影），
+                       * 不再是全宽染色块；colSpan 仍跟表头：MKP 5、切片器 6。
+                       */}
+                      <div className={s.detailCard}>
                         {/*
-                         * 展开详情**只回答用户真正要问的事**：什么版本 / 从哪来 / 什么时候
-                         * 下的 / 云端有没有更新 / 我改过没有 / 现在能做什么。
-                         * 曾经机械地摊内部字段：「类型」（分段控件已经选定了类型）与
-                         * 「置顶」（纯前端排序的偏好）在这里各占一行 —— 都是用户没问的。
+                         * 内衬（第八轮）：卡自己只管外形（圆角 / 裁切 / 影子），
+                         * 四周内边距落这一层 —— 卡底两条编辑带要**横向通铺**到卡的边，
+                         * 不能被卡的 padding 挤进来（抽卡页 #11 的 `.p1` / `.p1-main` 做法）。
                          */}
-
-                        {mkp && (
-                          <>
-                            <dt className={s.factKey}>版本</dt>
-                            <dd className={s.factVal} title={version.why}>
-                              {version.text}
-                            </dd>
-                          </>
-                        )}
-                        {!mkp && (
-                          <>
-                            <dt className={s.factKey}>喷嘴</dt>
-                            <dd className={s.factVal}>{row.nozzle ?? DASH_}</dd>
-                            <dt className={s.factKey}>层高</dt>
-                            <dd className={s.factVal}>{row.layerHeight ?? DASH_}</dd>
-                          </>
-                        )}
+                        <div className={s.dMain}>
+                        {/*
+                         * —— 卡头（2026-10-10 第七轮：名字回到卡上；第八轮加「收起」）——
+                         * 作者看过第六轮后改判：「这个卡片，它显示名字，然后上面的名字
+                         * 不显示」—— 卡头写回文件名（上面那一行的名称列在展开时隐去，
+                         * 见 `.nameLine` / `.path` 的 `data-hidden`），右侧小事实照旧；
+                         * 最右一颗安静的「收起」（与点这一行同一件事 —— 抽卡页 #11 有）。
+                         */}
+                        <div className={s.dHead}>
+                          <Icon name="doc" size={15} className={s.dHeadIcon} />
+                          <span className={s.dHeadName}>{row.fileName}</span>
+                          <span className={s.dHeadMeta}>
+                            <span>
+                              {row.scope === 'cloud' && row.localState !== undefined
+                                ? CLOUD_LOCAL_TEXT[row.localState]
+                                : row.releaseState !== undefined
+                                  ? UPDATE_STATE_TEXT[updateState ?? 'latest']
+                                  : mkp && row.scope === 'local'
+                                    ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
+                                    : row.scope === 'local'
+                                      ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
+                                      : row.downloaded
+                                        ? CLOUD_STATE_TEXT.downloaded
+                                        : CLOUD_STATE_TEXT.pending}
+                              {/*
+                               * 「正在用」只在状态主词没说这件事时补 —— 主词已经写着
+                               * 「在用 / 已复制」的（本地行 live 那一档）不再追加，
+                               * 否则就是「在用 · 正在用 · 2.0 KB」这种同一句话说两遍
+                               * （作者截图点名）；云端行的主词说的是"我这边取到没有"，
+                               * 与「正在用」是两件事，照旧都要说。
+                               */}
+                              {row.applied && row.scope !== 'local' && ' · 正在用'}
+                            </span>
+                            <i className={s.dDot} aria-hidden>·</i>
+                            <span>{row.sizeText ?? UNKNOWN}</span>
+                            <i className={s.dDot} aria-hidden>·</i>
+                            <span>
+                              {row.origin === 'release'
+                                ? row.scope === 'cloud'
+                                  ? '云端更新 '
+                                  : row.arrivalBy === 'replaced' ? '替换于 ' : '下载于 '
+                                : '修改于 '}
+                              {longStatText(row.modifiedText) ?? UNKNOWN}
+                            </span>
+                          </span>
+                          {/*
+                            收起：与点这一行（再点一次）同一件事 —— 安静的小按钮，
+                            不抢摘要；也走 `requestToggle`（收起动画中点它 = 排队再开）
+                          */}
+                          <button
+                            type="button"
+                            className={s.dHeadFold}
+                            title="收起详情（与点这一行同一件事）"
+                            onClick={() => requestToggle(row.rowKey)}
+                          >
+                            收起
+                          </button>
+                        </div>
 
                         {/*
-                         * **备注**（副标题的正文）：这一行有 remarkKey（官方交付行 / 用户线）
-                         * 才有这一格 —— 在这里改的是**覆盖账**：改过的以后更新不覆盖，
-                         * 「清除」回到工作台写的那句（删了文件重新下载是另一条同效的路）。
+                         * —— 主体两栏（参考稿那三栏里，「文件信息」并进了卡头）——
+                         * 左栏「基本信息」；右栏「快捷操作」在下面（由 `</div>` 收口）。
+                         * 窄卡两栏自己折成上下（flex-wrap 在 CSS）—— 第六轮那个"窄卡把
+                         * 快捷操作顶到上方"的 container 规则，作者看过效果说乱，第七轮撤了。
                          */}
-                        {row.remarkKey !== null && (
-                          <RemarkField
-                            /* key 带上显示值：保存/恢复之后行上的 subtitle 变了，
-                               输入框要以新值为初始重开一个（useState 只认首帧） */
-                            key={`${row.rowKey}:${row.subtitle}`}
-                            rowKey={row.rowKey}
-                            busy={row.rowKey === busyKey}
-                            current={row.subtitle}
-                            hasOverride={remarks[row.remarkKey] !== undefined}
-                            onSave={(remark) => onSetRemark(row.remarkKey ?? '', remark)}
-                          />
-                        )}
+                        <div className={s.dGrid}>
+                          <div className={s.dCol}>
+                            <span className={s.dColLabel}>基本信息</span>
+                            <div className={s.dGroup}>
+                              {mkp ? (
+                                row.versions.length > 0 && (
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>版本</span>
+                                    <span className={s.dVal}>{version.text}</span>
+                                  </div>
+                                )
+                              ) : (
+                                <>
+                                  {row.nozzle != null && (
+                                    <div className={s.dRow}>
+                                      <span className={s.dKey}>喷嘴</span>
+                                      <span className={s.dVal}>{row.nozzle}</span>
+                                    </div>
+                                  )}
+                                  {row.layerHeight != null && (
+                                    <div className={s.dRow}>
+                                      <span className={s.dKey}>层高</span>
+                                      <span className={s.dVal}>{row.layerHeight}</span>
+                                    </div>
+                                  )}
+                                </>
+                              )}
 
-                        <dt className={s.factKey}>来源</dt>
-                        <dd className={s.factVal}>
-                          {locateTarget !== null ? (
-                            <button
-                              type="button"
-                              className={s.factLink}
-                              title={origin.title}
-                              onClick={() => onLocate(locateTarget)}
-                            >
-                              {origin.text}
-                            </button>
-                          ) : (
-                            <span title={origin.title}>{origin.text}</span>
+                              <div className={s.dRow}>
+                                <span className={s.dKey}>来源</span>
+                                <span className={s.dVal}>
+                                  {locateTarget !== null ? (
+                                    <button
+                                      type="button"
+                                      className={s.dLink}
+                                      onClick={() => onLocate(locateTarget)}
+                                    >
+                                      {origin.text}
+                                    </button>
+                                  ) : (
+                                    <span>{origin.text}</span>
+                                  )}
+                                </span>
+                              </div>
+
+                              {/* 血统：我那份从哪一版改出来的 */}
+                              {row.origin === 'mine' && (
+                                <div className={s.dRow}>
+                                  <span className={s.dKey}>{BASED_ON_KEY}</span>
+                                  <span className={s.dVal}>{basedOnCellText(row)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 右栏：快捷操作 —— 原「卡底」那三颗按钮搬上来（2026-10-10） */}
+                          {(row.origin === 'mine' || archiveCount > 0) && (
+                            <div className={s.dCol}>
+                              <span className={s.dColLabel}>快捷操作</span>
+                              <div className={s.dActs}>
+                                {archiveCount > 0 && (
+                                  <button
+                                    type="button"
+                                    className={s.ghostBtn}
+                                    onClick={() => onOpenArchive(row)}
+                                  >
+                                    {archiveOpenText(archiveCount)}
+                                  </button>
+                                )}
+                                {row.origin === 'mine' && (
+                                  <button
+                                    type="button"
+                                    className={s.ghostBtn}
+                                    onClick={() => onOpenMine(row)}
+                                  >
+                                    {MINE_DRAWER.open}
+                                  </button>
+                                )}
+                                {row.origin === 'mine' &&
+                                  row.kind === 'mkp_preset' &&
+                                  row.mineState !== 'unreadable' && (
+                                    <button
+                                      type="button"
+                                      className={s.ghostBtn}
+                                      onClick={() => onEdit(row)}
+                                    >
+                                      {EDIT_TEXT.open}
+                                    </button>
+                                  )}
+                              </div>
+                            </div>
                           )}
-                        </dd>
+                        </div>
 
-                        {/*
-                         * 我那份是从哪一份官方、哪一版改出来的（血统写在文件头，跟着文件走）。
-                         * 「官方已换新版」这一档不是错误 —— 它只说"你这份是旧版派生"，
-                         * 那份文件照常能用能改（要不要把改动挪到新版上，是另一件事）。
-                         */}
-                        {row.origin === 'mine' && (
-                          <>
-                            <dt className={s.factKey}>{BASED_ON_KEY}</dt>
-                            <dd
-                              className={s.factVal}
-                              title={BASED_ON_WHY[row.basedOn ?? 'unknown']}
-                            >
-                              {basedOnCellText(row)}
-                            </dd>
-                          </>
-                        )}
-
-                        {/*
-                         * 第九层：读不出来那一份，把"为什么"写在原地（原因来自后端）。
-                         * 它只是读不出来 —— 文件还是用户自己的，程序不动它。
-                         */}
-                        {row.origin === 'mine' && row.mineState === 'unreadable' && (
-                          <>
-                            <dt className={s.factKey}>文件</dt>
-                            <dd
-                              className={s.factVal}
-                              title={mineUnreadableWhy(row.mineStateDetail)}
-                            >
-                              {MINE_UNREADABLE_TEXT}
-                            </dd>
-                          </>
-                        )}
-
-                        {/*
-                         * **改归属**（2026-10-07 作者要的：复制出来的那份可以改机型 / 版本）：
-                         * 写的是文件头 `# machine:` / `# variant:` 两行（正文一个字节不动），
-                         * 机型 / 版本必须是目录里真有的（后端校验）。能应用的 MKP 预设才给 ——
-                         * 读不出来的、认不出类别的改了也用不上。
-                         */}
-                        {row.origin === 'mine' &&
-                          row.kind === 'mkp_preset' &&
-                          row.mineState !== 'unreadable' && (
-                          <AttributionField
-                            key={`${row.rowKey}:${row.ownMachineId ?? ''}:${row.ownVersionId ?? ''}`}
-                            rowKey={row.rowKey}
-                            busy={row.rowKey === busyKey}
-                            machines={machines}
-                            machineId={row.ownMachineId ?? null}
-                            versionId={row.ownVersionId ?? null}
-                            onSave={(m, v) => onSetAttribution(row, m, v)}
-                          />
-                        )}
-
-                        {/*
-                         * 状态，按**这一行到底是哪张表的哪一档**说：
-                         *
-                         *   MKP 云端行    按 `localState` 说"我这边怎么样"（未获取 / 本地已有 / 有新版）
-                         *                 —— 不摆下载区那四态，官方原件是内部数据
-                         *   切片器 / 交付行 按"云端 vs 盘上"三态说（未下载 / 已下载 / 有更新），
-                         *                 "认不出是哪一版"不顶在主词上（那是信任维度的事，
-                         *                 有它自己的一行注记，见下）
-                         *   本地行        说"生效没生效"
-                         *
-                         * 主词后面缀「正在用」。
-                         */}
-                        <dt className={s.factKey}>状态</dt>
-                        <dd
-                          className={s.factVal}
-                          title={
-                            row.scope === 'cloud' && row.localState !== undefined
-                              ? CLOUD_LOCAL_WHY[row.localState]
-                              : row.releaseState !== undefined
-                                ? RELEASE_STATE_WHY[row.releaseState]
-                                : mkp && row.scope === 'local'
-                                  ? ASSET_USE_WHY[row.live ? 'on' : 'off']
-                                  : undefined
-                          }
-                        >
-                          {row.scope === 'cloud' && row.localState !== undefined
-                            ? CLOUD_LOCAL_TEXT[row.localState]
-                            : row.releaseState !== undefined
-                              ? UPDATE_STATE_TEXT[updateState ?? 'latest']
-                              : mkp && row.scope === 'local'
-                                ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
-                                : row.scope === 'local'
-                                  ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
-                                  : row.downloaded
-                                    ? CLOUD_STATE_TEXT.downloaded
-                                    : CLOUD_STATE_TEXT.pending}
-                          {row.applied && ' · 正在用'}
-                        </dd>
-
-                        {untrusted && (
-                          <>
-                            {/*
-                             * 「本机版本」：只认不出那一档才有的注记行。它不是把异常藏起来 ——
-                             * 恰恰是把"认不出"的实情（可能是旧版、可能被改过、更新即可换掉）
-                             * 从吓人的主词位置挪到讲道理的位置。
-                             */}
-                            <dt className={s.factKey}>本机版本</dt>
-                            <dd className={`${s.factVal} ${s.factNote}`} title={RELEASE_STATE_WHY.tampered}>
-                              {RELEASE_UNTRUSTED_NOTE}
-                            </dd>
-                          </>
-                        )}
-
-                        <dt className={s.factKey}>大小</dt>
-                        <dd
-                          className={s.factVal}
-                          title={
-                            row.origin === 'release'
-                              ? RELEASE_SIZE_WHY
-                              : row.statFrom === 'file'
-                                ? FILE_SIZE_WHY
-                                : row.sizeText === undefined
-                                  ? NO_STAT_WHY
-                                  : DEMO_STAT_WHY
-                          }
-                        >
-                          {row.sizeText ?? UNKNOWN}
-                        </dd>
-
-                        {/*
-                         * 时间：**名字跟着事件走**（2026-10-06 事件时间模型）—— 本地交付行
-                         * 按 `arrivalBy` 给「下载时间」（DeliveryDownloaded）或「替换时间」
-                         * （DeliveryReplaced，上一次「更新」换上去的）、云端是「云端更新」
-                         * （这次发布的时刻）、我自己的文件才叫「修改时间」（最后一次保存）。
-                         * 同一个 `modifiedText` 不再一个「修改时间」包打天下。
-                         */}
-                        <dt className={s.factKey}>
-                          {row.origin === 'release'
-                            ? row.scope === 'cloud'
-                              ? '云端更新'
-                              : row.arrivalBy === 'replaced'
-                                ? '替换时间'
-                                : '下载时间'
-                            : '修改时间'}
-                        </dt>
-                        <dd className={s.factVal} title={statWhyOf(row)}>
-                          {longStatText(row.modifiedText) ?? UNKNOWN}
-                        </dd>
-
+                        {/* release 行的版本指纹（云端最新版本/发布时间），第二行 muted meta */}
                         {row.origin === 'release' && (
-                          <>
+                          <div className={s.dMeta}>
                             {row.scope === 'local' &&
                               row.ownPublishedAt != null &&
                               row.ownPublishedAt !== row.publishedAt && (
-                              <>
-                                {/*
-                                 * **本机这份**属于哪一代、那一代什么时候发布的 —— 它跟着
-                                 * 这份字节走，云端以后怎么换代都不变（用户要的"记录它当时的"）。
-                                 * 只有认得出出身、且与云端最新版**不是同一代**时才显示
-                                 * （同一代时它与下面那格是同一个时间，不重复占位）。
-                                 */}
-                                <dt className={s.factKey}>本机这份发布于</dt>
-                                <dd
-                                  className={s.factVal}
-                                  title="这一版字节在云端发布时的时刻 —— 跟着这一版走，云端以后怎么换都不变"
-                                >
-                                  {longStatText(row.ownPublishedAt) ?? UNKNOWN}
-                                </dd>
-                              </>
-                            )}
+                                <>
+                                  <span>
+                                    本机这份发布于 {longStatText(row.ownPublishedAt) ?? UNKNOWN}
+                                  </span>
+                                  <i className={s.dDot} aria-hidden>·</i>
+                                </>
+                              )}
                             {row.scope === 'local' && (
                               <>
-                                {/*
-                                 * 本地交付行的「云端最新版发布于」：与上面的到位时间是**两个版本
-                                 * 各自的时间**（你这份什么时候到的 / 云端现在这版什么时候发的）
-                                 * —— 名字里带「最新」，它就不再被读成"你这份的云端更新"。
-                                 */}
-                                <dt className={s.factKey}>云端最新版发布于</dt>
-                                <dd
-                                  className={s.factVal}
-                                  title={
-                                    row.publishedAt
-                                      ? undefined
-                                      : RELEASE_TIME_WHY.cloudMissing
-                                  }
-                                >
+                                <span>
+                                  云端最新版发布于{' '}
                                   {longStatText(row.publishedAt ?? undefined) ?? UNKNOWN}
-                                </dd>
+                                </span>
+                                <i className={s.dDot} aria-hidden>·</i>
                               </>
                             )}
-                            {/*
-                             * 「云端最新版本」：目录指纹是**版本的身份证**（新世界目录没有版本名，
-                             * 这是唯一权威标识）。它在这里有意义、在「来源」列里没有 ——
-                             * 来源答的是"从哪来"，不是"哪一版"。
-                             */}
-                            <dt className={s.factKey}>云端最新版本</dt>
-                            <dd
-                              className={s.factVal}
-                              title="目录指纹（catalog revision）—— 新世界目录没有版本名，它就是这一版的身份证"
-                            >
-                              {row.releaseVersion ?? UNKNOWN}
-                            </dd>
-                          </>
+                            <span>
+                              云端最新版本 {row.releaseVersion ?? UNKNOWN}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* 认不出的注记：不顶在主词上，放成讲道理的一行 */}
+                        {untrusted && (
+                          <p className={s.dNote}>
+                            {RELEASE_UNTRUSTED_NOTE}
+                          </p>
                         )}
 
                         {/*
-                         * 归档：官方旧版本留档。**没有旧版本就不显示这一格** ——
-                         * "没有"不是"未知"，不必占一个「—」。
-                         * 它和上面的「状态」说的是两件事：状态说盘上这一份对不对，
-                         * 这里说"以前那几份还在不在"。
+                         * —— 备注 / 归属（2026-10-10 第八轮：展示行 + 卡底编辑带）——
+                         * 展示行就在这里：label 与「版本 / 来源 / 基于」同一条 56px 刻度、
+                         * 右端一颗小胶囊「编辑」；点它折出的是**卡底那条带**（本块 DOM
+                         * 之后的 `.dBand`，备注一条、归属一条、两条独立可同开）。
+                         * 两块都没有（云端行 / release 行）时整块不渲染。
                          */}
-                        {archiveCount > 0 && (
-                          <>
-                            <dt className={s.factKey}>{ARCHIVE_KEY}</dt>
-                            <dd className={s.factVal}>
-                              <button
-                                type="button"
-                                className={s.factLink}
-                                title={ARCHIVE_WHY}
-                                onClick={() => onOpenArchive(row)}
-                              >
-                                {archiveOpenText(archiveCount)}
-                              </button>
-                            </dd>
-                          </>
+                        {(row.remarkKey !== null || mineAttr) && (
+                          <div className={s.editrows}>
+                            {row.remarkKey !== null && (
+                              <div className={s.dRow}>
+                                <span className={s.dKey}>备注</span>
+                                <span
+                                  className={s.editValue}
+                                  data-empty={row.subtitle.trim() === ''}
+                                >
+                                  {row.subtitle.trim() === ''
+                                    ? '空着 = 副标题留空'
+                                    : row.subtitle}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={s.editTrigger}
+                                  title="编辑备注 —— 列表里文件名下面那行小字"
+                                  onClick={() =>
+                                    setBands((b) => ({
+                                      ...b,
+                                      remark: b.remark === remarkBand ? null : remarkBand,
+                                    }))
+                                  }
+                                >
+                                  编辑
+                                </button>
+                              </div>
+                            )}
+
+                            {mineAttr && (
+                              <div className={s.dRow}>
+                                <span className={s.dKey}>归属</span>
+                                <span className={s.editValue}>
+                                  <span className={s.editKey}>机型</span>
+                                  <span>{ownMachineId ?? DASH_}</span>
+                                  <span className={s.editKey}>预设类型</span>
+                                  <span>{ownVersionId ?? DASH_}</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  className={s.editTrigger}
+                                  title="编辑归属 —— 写进文件头的 # machine: / # variant: 两行"
+                                  onClick={() =>
+                                    setBands((b) => ({
+                                      ...b,
+                                      attr: b.attr === attrBand ? null : attrBand,
+                                    }))
+                                  }
+                                >
+                                  编辑
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
 
+                        </div>
+
                         {/*
-                         * 用户线那一份：**看正文** + **改这份**（第八层）。
-                         * 两条都是它自己的入口：改的是临时文件，保存时**写回它自己**
-                         * （不另存一份新的、也不碰官方那一份）。
-                         * 认不出是哪一类的那份（`.json`）不给「改」—— 这一层只改 TOML 预设；
-                         * **第九层读不出来的**也不给（改的入口同样过文件级检查）。
-                         * 看正文照旧给：用户要能看着它去修（读它不算"用"）。
-                         *
-                         * 2026-10-08 资源库改判起「改这份」只有这一条入口：编辑的对象是
-                         * 「我的预设」（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
-                         * 要改它先在资源库里「另存为我的预设」。
+                         * —— 卡底两条编辑带（第八轮）：备注 / 归属各一条、独立开合 ——
+                         * 常驻 DOM（收起时高度归零，折动画见 CSS `.dBand`）；
+                         * `open` = 「指纹对得上」—— 保存成功、页面重读后指纹变了，
+                         * 这里自然合上（原来「key 重挂载回展示态」那件事的等价物）。
                          */}
-                        {row.origin === 'mine' && (
-                          <>
-                            <dt className={s.factKey}>{MINE_DRAWER.cell}</dt>
-                            <dd className={s.factVal}>
-                              <button
-                                type="button"
-                                className={s.factLink}
-                                title={MINE_BODY_WHY}
-                                onClick={() => onOpenMine(row)}
-                              >
-                                {MINE_DRAWER.open}
-                              </button>
-                            </dd>
-                          </>
+                        {remarkBand !== null && (
+                          <RemarkBand
+                            open={bands.remark === remarkBand}
+                            current={row.subtitle}
+                            hasOverride={
+                              row.remarkKey !== null && remarks[row.remarkKey] !== undefined
+                            }
+                            busy={row.rowKey === busyKey}
+                            onSave={(remark) => onSetRemark(row.remarkKey ?? '', remark)}
+                            onClose={() => setBands((b) => ({ ...b, remark: null }))}
+                          />
                         )}
-                        {row.origin === 'mine' &&
-                          row.kind === 'mkp_preset' &&
-                          row.mineState !== 'unreadable' && (
-                          <>
-                            <dt className={s.factKey}>{EDIT_TEXT.cell}</dt>
-                            <dd className={s.factVal}>
-                              <button
-                                type="button"
-                                className={s.factLink}
-                                title={EDIT_WHY}
-                                onClick={() => onEdit(row)}
-                              >
-                                {EDIT_TEXT.open}
-                              </button>
-                            </dd>
-                          </>
+                        {attrBand !== null && (
+                          <AttrBand
+                            open={bands.attr === attrBand}
+                            busy={row.rowKey === busyKey}
+                            machines={machines}
+                            machineId={ownMachineId}
+                            versionId={ownVersionId}
+                            onSave={(m, v) => onSetAttribution(row, m, v)}
+                            onClose={() => setBands((b) => ({ ...b, attr: null }))}
+                          />
                         )}
-                      </dl>
+
+                      </div>
+                          </div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -1116,31 +1213,88 @@ export default function PresetTable({
 }
 
 /* ——————————————————————————————————————————————————————————————
- * 展开详情里的两个小编辑格（备注 / 归属）。状态都在自己的小盒子里 ——
- * 表这边不替它们留全局状态；保存交回页面层（错误由页面说出来）。
+ * 卡底的两条编辑带（备注 / 归属）—— 2026-10-10 第八轮，抽卡页 #11 落地。
+ * 两条独立、可同开；常驻 DOM（收起时高度归零），折动画见 CSS `.dBand`。
+ * 输入状态都在自己的小盒子里，保存交回页面层（错误由页面说出来）——
+ * 「保存成功自动回展示态」由外层的**打开指纹**负责（数据重读 → 指纹不匹配 → 合上）。
  * —————————————————————————————————————————————————————————————— */
 
 /**
- * **备注**（副标题覆盖账）的编辑格。**只有本地表的行有它** ——
- * 云端行只读工作台那句（`remarkKey === null` 时整个不渲染）。
- *
- * `current` 是账上有覆盖时的那句（没有覆盖时是回落链的显示值），输入框初始就是它。
+ * **备注带**。`current` = 账上有覆盖时的那句（没有覆盖时是回落链的显示值）。
  * **用户写什么就是什么 —— 包括空串**（2026-10-07 作者改口：「可以空着，不要回退」：
  * 存空副标题就空着，不偷偷退回工作台那句）；「恢复默认」才是把覆盖拿掉、
  * 退回落入「工作台写的 → 空着」。恢复默认只在**真有覆盖**时出现。
+ *
+ * 第八轮三件事：输入从单行 `<input>` 换成**自增高 `<textarea>`**（备注可以很长）；
+ * 高度在**内容或宽度**变化时都重算（抽卡页上「窗口拉窄折行变多、高度不跟，打一个字
+ * 才跳高、拉回来不缩」那个坑，作者点名修 —— ResizeObserver 盯宽度，宽度没变就跳过，
+ * 因为自己改高度也会触发回调、不跳过就打转）；打开时光标进输入框（原来靠 `autoFocus`，
+ * 现在是常驻 DOM，`autoFocus` 只会在页面初次挂载时响、还可能把焦点抢到收着的带上）。
+ *
+ * Enter 保存、Shift+Enter 换行（备注可以是多行的）、Esc 取消 —— 与按钮同一件事。
  */
-function RemarkField(props: {
-  rowKey: string
+function RemarkBand(props: {
+  open: boolean
   busy: boolean
   /** 当前显示值（有覆盖 = 用户的；没有 = 回落链的那句） */
   current: string
   hasOverride: boolean
   onSave: (remark: string | null) => Promise<void>
+  /** 合上这条带（取消 / 再点同一颗「编辑」） */
+  onClose: () => void
 }) {
   const [text, setText] = useState(props.current)
   const [saving, setSaving] = useState(false)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  /*
+   * 下面两件事（复位 / 自增高）的依赖都用局部量：`props.open` / `props.current`
+   * 直接进依赖数组会被 react-hooks 的 lint 当成「可变成员」告警。
+   */
+  const open = props.open
+  const current = props.current
   /* 动过输入框才算有要存的 —— 初始值就是现在显示的那一句；存空也是存（空也是覆盖） */
-  const dirty = text !== props.current
+  const dirty = text !== current
+  /* 打开时从当前显示值重来（首开、重开、数据重读之后都算）——不带上次没存完的草稿 */
+  useEffect(() => {
+    if (!open) return
+    setText(current)
+    /*
+     * 光标进输入框，但**不许它带滚动**（`preventScroll`）——默认的 focus 会把
+     * 元素滚进视口，折动画刚起步就滚一下，看着像「停了一下」（第九轮）。
+     */
+    taRef.current?.focus({ preventScroll: true })
+  }, [open, current])
+  /** 高度贴内容：先归 auto 再量 scrollHeight（textarea 的常规玩法） */
+  const fit = useCallback(() => {
+    const el = taRef.current
+    if (el === null) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+  /*
+   * 内容变了就重算 —— **「打开」这件事不算**（第九轮）：打开瞬间重算高度会让
+   * 折动画的目标高度中途变一下（transition 得重算一次），看着就是「停一下」。
+   * 收着的时候宽度和内容一样有效，高度平时就是对的（宽度由下面那个 RO 盯）。
+   */
+  useEffect(() => {
+    fit()
+  }, [text, fit])
+  /*
+   * 宽度变了（窗口拉宽拉窄 → 折行数变）也重算：ResizeObserver 盯**宽度**，
+   * 宽度没变就跳过 —— 自己改高度也会触发回调，不跳过会打转。
+   */
+  useEffect(() => {
+    const el = taRef.current
+    if (el === null) return
+    let w = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === w) return
+      w = el.clientWidth
+      fit()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fit])
   const save = async (remark: string | null) => {
     setSaving(true)
     try {
@@ -1150,127 +1304,267 @@ function RemarkField(props: {
     }
   }
   return (
-    <>
-      <dt className={s.factKey}>备注</dt>
-      <dd className={s.factVal}>
-        <span className={s.remarkRow}>
-          <input
-            className={s.remarkInput}
-            type="text"
-            value={text}
-            placeholder="空着 = 副标题留空"
-            title="这一句就是列表里名称下面的副标题。写什么显示什么（空就空着，不回退）；官方更新不会覆盖它。「恢复默认」才回到工作台写的那句"
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !saving && !props.busy && dirty) void save(text.trim())
-            }}
-          />
-          <button
-            type="button"
-            className={s.factLink}
-            disabled={saving || props.busy || !dirty}
-            title={dirty ? '保存备注（空 = 副标题留空）' : '没有要保存的改动'}
-            onClick={() => void save(text.trim())}
-          >
-            保存
-          </button>
-          {props.hasOverride && (
-            <button
-              type="button"
-              className={s.factLink}
-              disabled={saving || props.busy}
-              title="去掉你改过的这一句，回到默认（工作台写的那句；没写就空着）"
-              onClick={() => void save(null)}
-            >
-              恢复默认
-            </button>
-          )}
-        </span>
-      </dd>
-    </>
+    <div className={s.dBand} data-open={open}>
+      <div className={s.dBandCut}>
+        <div className={s.dBandIn}>
+          <div className={s.dBandPane}>
+            {/*
+             * 一行式（与抽卡页 #11 同形）：label 在左、自增高 textarea 居中、
+             * 按钮贴右端 —— 按钮一律 `flex-shrink: 0`，窄了也先挤输入框（CSS）。
+             */}
+            <div className={s.bandHead}>
+              <span className={s.dKey}>备注</span>
+              <textarea
+                ref={taRef}
+                className={s.remarkArea}
+                rows={1}
+                value={text}
+                placeholder="空着 = 副标题留空"
+                disabled={props.busy}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  /* Enter 保存、Shift+Enter 换行；Esc = 取消（与按钮同一件事） */
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    if (!saving && !props.busy && dirty) void save(text.trim())
+                  }
+                  if (e.key === 'Escape') props.onClose()
+                }}
+              />
+              {props.hasOverride && (
+                <button
+                  type="button"
+                  className={s.bandQuiet}
+                  disabled={saving || props.busy}
+                  title="拿掉覆盖，退回工作台写的那句（没有就空着）"
+                  onClick={() => void save(null)}
+                >
+                  恢复默认
+                </button>
+              )}
+              <button
+                type="button"
+                className={s.ghostBtn}
+                disabled={saving || props.busy}
+                onClick={props.onClose}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className={s.saveBtn}
+                disabled={saving || props.busy || !dirty}
+                onClick={() => void save(text.trim())}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ——————————————————————————————————————————————————————————————
+ * 组合框（可输入 + 可选）。a03：机型与版本统一用这一件，
+ * 替代原生 select 与黑色原生 datalist 弹层；候选浮层走 FieldPopover。
+ * —————————————————————————————————————————————————————————————— */
+
+/** 一条候选：`value` = 选中后填入（写进文件头的值） */
+interface ComboOption {
+  value: string
+  /** 主行 */
+  title: string
+  /** 主行右侧小字 */
+  right?: string
+  /** 第二行描述 */
+  sub?: string
+}
+
+function ComboField(props: {
+  value: string
+  onValue: (next: string) => void
+  options: ComboOption[]
+  placeholder?: string
+}) {
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  const cur = props.value.trim()
+  const pick = (v: string) => {
+    props.onValue(v)
+    setOpen(false)
+  }
+  return (
+    <span className={s.comboHold} ref={wrapRef}>
+      <input
+        className={s.comboInput}
+        value={props.value}
+        placeholder={props.placeholder}
+       
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          props.onValue(e.target.value)
+          setOpen(true)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') setOpen(false)
+        }}
+      />
+      {/* 展开候选的小箭头：在锚点（wrap）内部，点击不会被浮层当成外部点击关掉 */}
+      <button
+        type="button"
+        className={s.comboCaret}
+        tabIndex={-1}
+        aria-label="展开候选"
+       
+        onClick={() => {
+          setOpen((v) => !v)
+          wrapRef.current?.querySelector('input')?.focus()
+        }}
+      >
+        ▾
+      </button>
+      {open && (
+        <FieldPopover
+          anchor={wrapRef.current}
+          matchWidth
+          onClose={() => setOpen(false)}
+        >
+          <div className={s.comboMenu}>
+            {props.options.length === 0 && (
+              <p className={s.comboEmpty}>没有候选，可以直接输入</p>
+            )}
+            {props.options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                className={s.comboItem}
+                data-on={o.value === cur}
+               
+                onClick={() => pick(o.value)}
+              >
+                <span className={s.comboCheck} aria-hidden>
+                  ✓
+                </span>
+                <span className={s.comboText}>
+                  <span className={s.comboTitle}>{o.title}</span>
+                  {o.sub !== undefined && <span className={s.comboSub}>{o.sub}</span>}
+                </span>
+                {o.right !== undefined && (
+                  <span className={s.comboRight}>{o.right}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </FieldPopover>
+      )}
+    </span>
   )
 }
 
 /**
- * **归属**（机型 / 版本）的编辑格：机型下拉 + **版本可自定义**（2026-10-07 作者：
- * 「版本也不一定是选择，加一个自定义」—— 输入框带目录里那几版做候选，
- * 也可以自己填一个；写进文件头的 variant 行，界面遇到不认识的照原文显示）。
- * 没有归属（`null`）时初始为空，保存按钮不给点，直到两边都填了。
+ * **归属带**（机型 / 预设类型）：两个**组合框**（都能自己输入、也能选候选）。
+ * 写进文件头 `# machine:` / `# variant:` 两行（正文一字节不动）；
+ * 两边都填上、且有改动时「保存」才可点。内部字段照旧叫 machineId / versionId。
+ *
+ * 第八轮与备注带同一条规矩：折在卡底、独立开合、常驻 DOM；label 与展示行
+ * 同一条 56px 刻度，名字明标「机型 / 预设类型」（作者：「归属区域明确标出
+ * 机型和预设类型」）；换机型清掉预设类型（候选跟着机型换）。
+ * 「成功自动回展示态」同样靠外层的打开指纹（数据重读 → 指纹不匹配 → 合上）。
  */
-function AttributionField(props: {
-  rowKey: string
+function AttrBand(props: {
+  open: boolean
   busy: boolean
   machines: Machine[]
   machineId: string | null
   versionId: string | null
   onSave: (machineId: string, versionId: string) => Promise<void>
+  /** 合上这条带（取消 / 再点同一颗「编辑」） */
+  onClose: () => void
 }) {
   const [machineId, setMachineId] = useState(props.machineId ?? '')
   const [versionId, setVersionId] = useState(props.versionId ?? '')
   const [saving, setSaving] = useState(false)
-  const versions = props.machines.find((m) => m.id === machineId)?.versions ?? []
+  /* 打开时从当前值重来（首开、重开、数据重读之后都算）——不带上次没存完的草稿 */
+  useEffect(() => {
+    if (!props.open) return
+    setMachineId(props.machineId ?? '')
+    setVersionId(props.versionId ?? '')
+  }, [props.open, props.machineId, props.versionId])
+  const versions = props.machines.find((m) => m.id === machineId.trim())?.versions ?? []
   const dirty = machineId !== (props.machineId ?? '') || versionId !== (props.versionId ?? '')
-  const ready = machineId !== '' && versionId.trim() !== ''
+  const ready = machineId.trim() !== '' && versionId.trim() !== ''
+
+  const machineOptions: ComboOption[] = props.machines.map((m) => ({
+    value: m.id,
+    title: m.display,
+    right: m.id !== m.display ? m.id : undefined,
+  }))
+  const versionOptions: ComboOption[] = versions.map((v) => ({
+    value: v.id,
+    title: v.id,
+    sub: v.name,
+  }))
+
   return (
-    <>
-      <dt className={s.factKey}>归属</dt>
-      <dd className={s.factVal}>
-        <span className={s.remarkRow}>
-          <select
-            className={s.remarkInput}
-            value={machineId}
-            title="这一份属于哪台机型（写进文件头的 machine 行）"
-            onChange={(e) => {
-              setMachineId(e.target.value)
-              setVersionId('')
-            }}
-          >
-            <option value="">请选择机型</option>
-            {props.machines.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display}
-              </option>
-            ))}
-          </select>
-          <input
-            className={s.remarkInput}
-            list={`attribution-versions-${props.rowKey}`}
-            value={versionId}
-            placeholder="选择一版或自己填"
-            title="这一份属于哪一版（写进文件头的 variant 行）。可以从列表里选，也可以自己填一个 —— 显示时照原文"
-            onChange={(e) => setVersionId(e.target.value)}
-          />
-          <datalist id={`attribution-versions-${props.rowKey}`}>
-            {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </datalist>
-          <button
-            type="button"
-            className={s.factLink}
-            disabled={saving || props.busy || !ready || !dirty}
-            title={
-              !ready
-                ? '机型与版本都填上才能保存'
-                : dirty
-                  ? '把文件头的 machine / variant 两行换成这个（正文一个字节不动）'
-                  : '没有要保存的改动'
-            }
-            onClick={() => void (async () => {
-              setSaving(true)
-              try {
-                await props.onSave(machineId, versionId.trim())
-              } finally {
-                setSaving(false)
-              }
-            })()}
-          >
-            保存
-          </button>
-        </span>
-      </dd>
-    </>
+    <div className={s.dBand} data-open={props.open}>
+      <div className={s.dBandCut}>
+        <div className={s.dBandIn}>
+          <div className={s.dBandPane}>
+            {/* 一列两行：label 56px + 框占满剩余（与展示行、上面信息行同刻度） */}
+            <div className={s.bandRow}>
+              <span className={s.dKey}>机型</span>
+              <ComboField
+                value={machineId}
+                onValue={(v) => {
+                  setMachineId(v)
+                  /* 换机型：版本候选跟着换，已填版本清空 */
+                  setVersionId('')
+                }}
+                options={machineOptions}
+                placeholder="选择或自己填"
+              />
+            </div>
+            <div className={s.bandRow}>
+              <span className={s.dKey}>预设类型</span>
+              <ComboField
+                value={versionId}
+                onValue={setVersionId}
+                options={versionOptions}
+                placeholder="选择或自己填"
+              />
+            </div>
+            <div className={s.bandFoot}>
+              <button
+                type="button"
+                className={s.ghostBtn}
+                disabled={saving || props.busy}
+                onClick={props.onClose}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className={s.saveBtn}
+                disabled={saving || props.busy || !ready || !dirty}
+                onClick={() =>
+                  void (async () => {
+                    setSaving(true)
+                    try {
+                      await props.onSave(machineId.trim(), versionId.trim())
+                    } finally {
+                      setSaving(false)
+                    }
+                  })()
+                }
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -37,3 +37,4 @@ export {
   localFileIds,
   slicerCopied,
 } from './localFiles'
+export { reportDetail, reportSummaries } from './reports'

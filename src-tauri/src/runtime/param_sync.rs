@@ -57,6 +57,24 @@ pub struct ParamSyncEntry {
     pub decided: Option<ParamDecisionKind>,
 }
 
+impl ParamSyncEntry {
+    /// **这一项是冲突**（2026-10-10）：官方新版改了它、**我也改过它**，两边的值还不一样。
+    ///
+    /// 不是冲突的（官方改了、我没动）点「更新」就可以直接按新版采用；
+    /// 冲突的**必须让用户选**（使用新版值 / 保留我的值）——
+    /// 三条都必须比出来（任一侧缺值就"说不清"，不猜），说不清就不是冲突。
+    pub fn is_conflict(&self) -> bool {
+        let (Some(old), Some(new), Some(mine)) = (
+            self.official_old.as_deref(),
+            self.official_new.as_deref(),
+            self.mine.as_deref(),
+        ) else {
+            return false;
+        };
+        old != new && mine != old && mine != new
+    }
+}
+
 /// 一次比对要的全部输入。字段各自独立，摆判据时只填用得上那几个。
 pub struct SyncInput<'a> {
     /// 参数定义（顺序就是结果里的顺序 —— 页面按注册表顺序列）

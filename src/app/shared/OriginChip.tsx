@@ -11,7 +11,7 @@
  */
 
 import type { PresetFileInfo } from '../../api'
-import { DELIVERY_TEXT, DELIVERY_WHY } from '../presets/presetTree'
+import { DELIVERY_TEXT } from '../presets/presetTree'
 import s from './OriginChip.module.css'
 
 interface Props {
@@ -22,7 +22,7 @@ export default function OriginChip({ delivery }: Props) {
   return (
     <span
       className={delivery === 'default' ? s.chipDefault : s.chipOptional}
-      title={DELIVERY_WHY[delivery]}
+     
     >
       {DELIVERY_TEXT[delivery]}
     </span>

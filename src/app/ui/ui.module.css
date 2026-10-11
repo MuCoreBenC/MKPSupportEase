@@ -25,7 +25,8 @@
 .segBtn[data-on='true'] {
   background: #fff;
   color: var(--text-1);
-  font-weight: 600;
+  /* 「变粗」改用描边：选中时这一段的宽度一个像素都不变（见 global.css 的铁律） */
+  text-shadow: var(--state-bold);
 }
 
 .field {
@@ -249,53 +250,13 @@
   color: var(--text-3);
 }
 
-.scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 80;
-  background: rgb(16 24 32 / 26%);
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-.modal {
-  width: min(460px, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.modalWide {
-  width: min(620px, 100%);
-}
-
-.modalHead {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.modalTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  flex: 1;
-  min-width: 0;
-}
-
-.modalFoot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-}
+/*
+ * ★ 2026-10-10：稿内那套模态框的皮（原来的 `.scrim / .modal / .modalWide /
+ * `.modalHead / .modalTitle / .modalFoot`）**整段退役** ——
+ * 作者：「为什么会有两个模态框不行？我们要统一只能用一种，强制去统一只能用一种」。
+ * 全站只剩 `src/components/modal` 那一套（首页 / 校准页的确认弹窗、后处理那一屏
+ * 都搬过去了，`ui/Modal.tsx` 已删）。进度条留下来了，见 `ui/Progress.tsx`。
+ */
 
 .btn {
   padding: 7px 14px;
@@ -379,7 +340,8 @@
 
 .step[data-on='true'] {
   color: var(--text-1);
-  font-weight: 600;
+  /* 同上：加粗用描边，步骤条不因为选中而变宽 */
+  text-shadow: var(--state-bold);
 }
 
 .step[data-on='true'] .stepIndex {
@@ -421,7 +383,8 @@
 .tick[data-on='true'] {
   background: var(--accent);
   color: #fff;
-  font-weight: 600;
+  /* 同上：加粗用描边，刻度块是 flex 等分的，宽度也不该被文字带走 */
+  text-shadow: var(--state-bold);
 }
 
 .grid {
@@ -447,4 +410,61 @@
 
 .cell[data-axis='true'] {
   background: rgb(32 178 90 / 16%);
+}
+
+/* ============================================================
+ * a02 · 非首页槽（[data-page]）内的共享件圆润化
+ *
+ * 首页槽没有 data-page，以下规则一条都不碰首页（含首页的弹窗）。
+ * 语言对齐首页：胶囊按钮、大圆角弹窗、柔和分段、宽松留白。
+ * ============================================================ */
+
+/* 分段控件：凹槽 → 圆润胶囊轨道 */
+[data-page] .seg {
+  gap: 3px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+[data-page] .segBtn {
+  padding: 6px 16px;
+  border-radius: 999px;
+}
+
+[data-page] .segBtn[data-on='true'] {
+  box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
+}
+
+/* 按钮统一胶囊（与首页「现在开始」同一语言） */
+[data-page] .btn {
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+
+/* 弹窗：大圆角 + 柔影 */
+[data-page] .modal {
+  border-radius: var(--r-lg);
+  border-color: transparent;
+  box-shadow: var(--shadow-lift);
+  padding: 22px;
+}
+
+/* 数字输入框 / 表格行小动作 / 刻度块：直角 → 圆角 */
+[data-page] .numInput {
+  border-radius: var(--r-sm);
+}
+
+[data-page] .rowAction {
+  border-radius: 999px;
+  padding: 4px 14px;
+}
+
+[data-page] .tick {
+  border-radius: var(--r-sm);
+}
+
+[data-page] .cell {
+  border-radius: var(--r-sm);
 }

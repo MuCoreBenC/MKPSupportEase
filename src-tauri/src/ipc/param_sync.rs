@@ -59,6 +59,8 @@ pub struct ParamSyncEntryDto {
     pub official_new: Option<String>,
     /// 官方改过这一项、而我还没处理
     pub pending: bool,
+    /// 官方改了它、**我也改过它**，两边的值还不一样 —— 更新时必须让用户选
+    pub conflict: bool,
     /// 我已经对当前官方版处理过这一项：`adopt` / `hold`
     pub decided: Option<&'static str>,
 }
@@ -236,13 +238,18 @@ fn sync_at(
         pending_count,
         entries: entries
             .into_iter()
-            .map(|e| ParamSyncEntryDto {
-                key: e.key,
-                mine: e.mine,
-                baseline_old: e.official_old,
-                official_new: e.official_new,
-                pending: e.pending,
-                decided: e.decided.map(kind_text),
+            .map(|e| {
+                /* 冲突也是这一项的四方账算出来的 —— 先比完再挪值（同源、同一处口径） */
+                let conflict = e.is_conflict();
+                ParamSyncEntryDto {
+                    key: e.key,
+                    mine: e.mine,
+                    baseline_old: e.official_old,
+                    official_new: e.official_new,
+                    pending: e.pending,
+                    conflict,
+                    decided: e.decided.map(kind_text),
+                }
             })
             .collect(),
     })
