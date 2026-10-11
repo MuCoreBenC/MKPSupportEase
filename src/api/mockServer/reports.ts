@@ -12,7 +12,13 @@
  *    （真机那一刻的记录里还没有这几组，形状照 `docs/REPORT-DETAIL-FIELDS.md`）；
  * 3. 其余记录给同形状的详情（按本行字段合成），展开任何一行都不是空的。
  */
-import type { ReportDetail, ReportPipelineStep, ReportSummary } from '../contract'
+import type {
+  ReportDetail,
+  ReportExportKind,
+  ReportExportPlan,
+  ReportPipelineStep,
+  ReportSummary,
+} from '../contract'
 
 /** 真机上的用户数据根（路径也照真机写，排查时才像真的） */
 const USER_ROOT = '/Users/wzy/Library/Application Support/SupportEase/user'
@@ -34,12 +40,20 @@ interface FixtureRow {
   ok: boolean
   /** 顺序号（真机 temp 目录里的 #456 那种），用来拼假路径 */
   seq: number
+  /**
+   * 3MF 模型名（`_meta.json` 顶层 `modelName`；钩子在切片器临时目录里从
+   * `origin.txt` / 同名 zip / `_temp_1.config` 三级兜底取的）。
+   *
+   * 缺省 = 这一行**取不到**（老记录，或 G-code 已被搬出临时目录）——
+   * 页面那时只显示 G-code 名，不编名字。夹具里两态都留着，预览里能一眼看出区别。
+   */
+  modelName?: string
 }
 
 const rows: FixtureRow[] = [
-  { startedAt: '11:17:11', gcode: '.42952.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 19000, ok: true, seq: 456 },
-  { startedAt: '11:04:48', gcode: '.42952.0.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 238, ok: true, seq: 448 },
-  { startedAt: '11:02:33', gcode: '.26212.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 524, ok: true, seq: 441 },
+  { startedAt: '11:17:11', gcode: '.42952.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 19000, ok: true, seq: 456, modelName: '帕姆' },
+  { startedAt: '11:04:48', gcode: '.42952.0.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 238, ok: true, seq: 448, modelName: '帕姆' },
+  { startedAt: '11:02:33', gcode: '.26212.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 524, ok: true, seq: 441, modelName: 'deepfish' },
   { startedAt: '11:02:12', gcode: '.26212.0.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 244, ok: true, seq: 439 },
   { startedAt: '10:51:19', gcode: 'ref.gcode', preset: 'A1_MINI-fast.toml', machine: 'A1_MINI', elapsedMs: 891, ok: true, seq: 423 },
   { startedAt: '10:51:19', gcode: 'a.gcode', preset: 'A1-fast.toml', machine: 'A1', elapsedMs: 63, ok: false, seq: 421 },
@@ -84,6 +98,7 @@ function toSummary(r: FixtureRow): ReportSummary {
     presetName: r.preset,
     machineType: r.machine,
     gcodeName: r.gcode,
+    modelName: r.modelName ?? null,
     ok: r.ok,
     error: r.ok ? null : CANCEL_ERROR,
     warningCount: 0,
@@ -92,6 +107,51 @@ function toSummary(r: FixtureRow): ReportSummary {
 
 export function reportSummaries(): ReportSummary[] {
   return rows.map(toSummary)
+}
+
+/* ---------- 导出（真机上是 Rust 侧的活，见 `src-tauri/src/ipc/report.rs`） ---------- */
+
+/**
+ * 三件套的后缀 + 机器名。**与 Rust 侧 `EXPORT_PARTS` 同一份口径**（那边是权威，
+ * 这里只是让预览里的文件名长得一样）。
+ */
+const EXPORT_SUFFIX: Record<ReportExportKind, string> = {
+  original: '_original.gcode',
+  processed: '.gcode',
+  meta: '_meta.json',
+}
+const EXPORT_KINDS: ReportExportKind[] = ['original', 'processed', 'meta']
+
+/** `<原名>_<YYYYMMDD>_<HHMMSS>` 尾巴上那 14 位时刻 */
+function stampOf(r: FixtureRow): string {
+  return idOf(r)
+    .slice(-16)
+    .replace(/_/g, '')
+}
+
+/**
+ * 「导出执行报告」的计划。口径照 Rust 侧那条：
+ * 有模型名 ⇒ `<模型名>_<时刻>`，没有 ⇒ 归档自己那串；**失败的那一次没有「处理后的文件」**
+ * （真机上 `<id>.gcode` 根本没落盘），照实报缺，不假装齐。
+ */
+export function reportExportPlan(id: string): ReportExportPlan {
+  const idx = rows.findIndex((r) => idOf(r) === id)
+  const r = rows[Math.max(idx, 0)]
+  const base = r.modelName === undefined ? idOf(r) : `${r.modelName}_${stampOf(r)}`
+  const kinds = EXPORT_KINDS.filter((k) => r.ok || k !== 'processed')
+  return {
+    base,
+    /* 默认落点：用户根下的 `exports/`（真机上由 `fsx::paths::EXPORTS_DIR` 给） */
+    defaultDir: `${USER_ROOT}/exports`,
+    files: kinds.map((kind) => ({ kind, name: `${base}${EXPORT_SUFFIX[kind]}` })),
+    missing: r.ok ? [] : ['processed'],
+  }
+}
+
+/** 演示导出：假后端没有文件系统 —— 只把"会落到哪几个路径"算出来（真机上那步是真复制） */
+export function reportExportPaths(id: string, dir: string): string[] {
+  const plan = reportExportPlan(id)
+  return plan.files.map((f) => `${dir}/${plan.base}/${f.name}`)
 }
 
 /* ---------- 详情 ---------- */

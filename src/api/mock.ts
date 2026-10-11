@@ -31,6 +31,8 @@ import {
   mockCatalogFiles,
   paramMeta,
   reportDetail,
+  reportExportPaths,
+  reportExportPlan,
   reportSummaries,
   resolveParams,
   resolveVersionFiles,
@@ -1437,6 +1439,38 @@ export const mockApi: MkpApi = {
 
   async getReportDetail(id) {
     return reportDetail(id)
+  },
+
+  async getReportExportPlan(id) {
+    return reportExportPlan(id)
+  },
+
+  /**
+   * 演示导出：假后端没有文件系统 —— 把"会落到哪几个路径"原样报回来（页面据此说一句
+   * 「已导出」）。真机上这一步是 [`crate::ipc::report::export_report_archive`] 的真复制，
+   * 拒绝规则（不覆盖 / 不许指到归档自己）也都在那一侧。
+   */
+  async exportReportArchive(id, dir) {
+    return reportExportPaths(id, dir)
+  },
+
+  /**
+   * 「更改位置」那一格。浏览器里没有 `tauri-plugin-dialog` 那套系统选择器：
+   * Chromium 有 File System Access API 就真弹一个，没有就退回一个"演示位置" ——
+   * 与 [`pickImportFiles`] 同一路数（假后端不装文件系统，只把流程走通）。
+   */
+  async pickExportDir(current) {
+    const pick = (
+      window as Window & { showDirectoryPicker?: () => Promise<{ name: string }> }
+    ).showDirectoryPicker
+    if (pick === undefined) return `${current}/换过的位置`
+    try {
+      const handle = await pick()
+      return `${current.replace(/[\\/]+$/, '')}/${handle.name}`
+    } catch {
+      /* 用户在系统框里取消：保持原来那个位置（不是错误） */
+      return null
+    }
   },
 
   /**

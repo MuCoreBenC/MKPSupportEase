@@ -136,6 +136,15 @@ export interface ReportSummary {
   machineType: string | null
   /** 输入 G-code 的文件名 */
   gcodeName: string | null
+  /**
+   * **3MF 模型名**（`帕姆.3mf` → `帕姆`）—— 钩子在 G-code 还在切片器临时目录里时，
+   * 从旁边的 `origin.txt` / 同名 zip / `_temp_1.config` 三级兜底取的（`_meta.json`
+   * 顶层 `modelName`）。三级都没拿到、或老记录没有这一格 ⇒ `null`。
+   *
+   * 页面拿它拼「结论 → 文件」那一行：`帕姆（.63288.2.gcode）`；
+   * `null` 时就只显示 G-code 名 —— **不编名字**。
+   */
+  modelName: string | null
   /** `false` 有两种：跑失败（有 error）与记录本身坏了 —— 都进列表，不许藏 */
   ok: boolean
   error: string | null
@@ -176,6 +185,41 @@ export interface ReportDetail {
   invocation: { exe?: string; args?: string[] } | null
   presetPath: string | null
   gcodePath: string | null
+}
+
+/**
+ * 导出三件套里一份的**机器名**。
+ *
+ * 中文说明（「原始文件（改动前的备份）」那三句）住界面这一侧 —— 后端不写界面的话，
+ * 与 `ErrorCode` 那条纪律同一条。
+ */
+export type ReportExportKind = 'original' | 'processed' | 'meta'
+
+/** 导出计划里的一份文件（要落到用户目录里的那一份） */
+export interface ReportExportFile {
+  kind: ReportExportKind
+  /** 落地时的文件名（`<基名>_original.gcode` 这种，**完整不省略** —— 框里要照实显示） */
+  name: string
+}
+
+/**
+ * 「导出执行报告」的计划：三件套叫什么、默认落到哪、哪几份归档里没有。
+ *
+ * 界面拿它画那个导出框（逐行文件名 + 路径胶囊），确认时才真写盘
+ * （[`MkpApi.exportReportArchive`]）—— 两侧的基名由 Rust 侧同一个纯函数算，不会漂。
+ */
+export interface ReportExportPlan {
+  /** 基名：`<模型名 或 归档自己的名字>_<切片时刻>`（`帕姆_20261011142431`） */
+  base: string
+  /**
+   * 默认落点的**父目录**（`<用户根>/exports`）。界面显示时自己拼上 `<基名>/`，
+   * 导出时交回去的也是这个父目录 —— 两处口径一致。
+   */
+  defaultDir: string
+  /** 真在盘上、会跟着导出的那几份（顺序固定：原始 / 处理后 / 元数据） */
+  files: ReportExportFile[]
+  /** 归档里没有的那几份 —— 失败的那一次**不会有**「处理后的文件」，照实说，不假装齐 */
+  missing: ReportExportKind[]
 }
 
 
@@ -1846,6 +1890,29 @@ export interface MkpApi {
 
   /** 一条执行记录的详情（展开那一屏）。`id` 是 [`ReportSummary::id`] */
   getReportDetail(id: string): Promise<ReportDetail>
+
+  /**
+   * 「导出执行报告」的计划（三件套的文件名 + 默认落点 + 缺哪几份）。
+   * 点开导出框时读一次；`id` 不认识 ⇒ `NOT_FOUND`。
+   */
+  getReportExportPlan(id: string): Promise<ReportExportPlan>
+
+  /**
+   * **把这一条的三件套导出去**（报告页唯一的写口）：复制到 `dir/<基名>/` 下，一字不改。
+   *
+   * `dir` 是**父目录**（默认值来自 [`MkpApi.getReportExportPlan`]），必须是绝对路径 ——
+   * 相对路径会落到进程的当前目录，那不是用户点过的任何一个地方。
+   * 返回真正落盘的路径。三种拒绝都是照实抛，不吞：
+   * 目标里已经有同名的那一份（**整批不落**，不覆盖）、保存位置就是归档自己的目录、
+   * 这条记录一份文件都不在盘上。
+   */
+  exportReportArchive(id: string, dir: string): Promise<string[]>
+
+  /**
+   * 选一个目录（导出框那颗「更改位置」）。走系统目录选择器，`current` 是打开时停在的
+   * 那个目录。**取消给 `null`，不是错误**。
+   */
+  pickExportDir(current: string): Promise<string | null>
 
   /**
    * 新数据世界的目录（第一圈骨架）。读运行时释放进数据根的那份 catalog.json，

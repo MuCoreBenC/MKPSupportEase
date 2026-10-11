@@ -40,6 +40,15 @@ export const STORAGE = {
   clientBbsTheme: 'mkp.A40.bbs.light',
   clientBbsDrawerMode: 'mkp.A40.bbs.drawerMode',
   clientBbsDrawerW: 'mkp.A40.bbs.drawerW',
+
+  /**
+   * 报告页导出框里那个「保存位置」（**上一次选过的父目录**）。
+   *
+   * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。真正往哪儿写由
+   * 后端说了算（目录不在了会照实报"建不出保存位置"），所以记住一个失效的路径不会骗人。
+   * 空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`，见 `fsx::paths::EXPORTS_DIR`）。
+   */
+  clientReportExportDir: 'mkp.A40.report.exportDir',
 } as const
 
 export type StorageKey = (typeof STORAGE)[keyof typeof STORAGE]

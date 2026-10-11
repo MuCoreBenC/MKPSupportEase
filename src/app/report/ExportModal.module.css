@@ -1,0 +1,155 @@
+/*
+ * 「导出执行报告」那一框里的东西。
+ *
+ * **框本身不是这一份** —— 外壳用全站那唯一一套居中模态框（`components/modal`，
+ * 标题栏 / × / 遮罩 / Esc / 焦点锁都在那儿）。这里只管框**里面**那三样：
+ * 三行文件、一句"归档里缺哪几份"、一条保存位置胶囊。
+ */
+
+/* ---- 三件套：一行一个（平铺行 + 发丝线，不做卡片气泡） ---- */
+
+.fileList {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.fileItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+.fileMeta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/*
+ * 文件名：**完整铺开**，长了换行，不打省略号 —— 框里这一行是给人核对"要导哪几份"的，
+ * 省掉中间几个字就核对不成了（报告是给人抄的，所以这里也能拖选）。
+ */
+.fileName {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.fileKind {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 归档里缺的那几份：一句话说清（不占一行文件行） */
+.notFull {
+  margin: 0 0 14px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.7;
+}
+
+/* 导出没成时后端那句原话（留在框里，改完位置就地重试） */
+.bad {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+/* 还没读到计划时的一句话 */
+.filling {
+  margin: 0 0 14px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---- 保存位置：胶囊路径（1B）—— 整颗可点（= 更改位置） ---- */
+
+.pathPill {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: left;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.pathPill:hover {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.pathIcon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+/*
+ * 路径文本：前段自己收省略号、**尾两段钉住不缩**（"往哪个文件夹里导"永远看得见）。
+ * 整条路径挂在 `title` 上 —— 悬停能看全。
+ */
+.pathText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.pathHead {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pathTail {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* 「更改位置」那一颗：从等宽里换回正文字体 */
+.pathEdit {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  font-family: Inter, sans-serif;
+  color: var(--text-1);
+}

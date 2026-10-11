@@ -40,7 +40,8 @@ pub mod preset_baseline;
 /// **只在用户自己的预设之间对比** —— 官方基线不进对比台。
 pub mod preset_params;
 pub mod presets;
-/// **报告页的读口**：后处理执行报告与历史（`gcode_history/*_meta.json`，只读）
+/// **报告页**：后处理执行报告与历史（读 `gcode_history/*_meta.json`）+
+/// 「导出执行报告」那个**唯一的写口**（复制三件套到用户点名的目录）
 pub mod report;
 /// **应用内更新 + 打开外链**（2026-10-05 第五刀）。`open_url` 是修「查看更新点了没反应」
 /// 那个 bug 的：webview 没 opener 权限，外链一律过命令

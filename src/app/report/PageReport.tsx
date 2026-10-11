@@ -34,10 +34,10 @@
  *       列表里一行一句红字会把整栏顶得七零八落，而"有没有失败"这件事由红色
  *       状态字 + 失败计数胶囊说得很清楚。
  *     · **顶部没有大标题**：一行小灰字说明 + 刷新靠右，窄档也不收这行。
- *     · **不摆「导出」**：V13 的抽卡里页头还有一颗「导出」（三件套 + 保存位置模态框），
- *       它要的落盘命令（`demo2/HANDOFF-EXPORT-3MF-NAME.md` §B：给记录 id + 目标目录，
- *       复制三件套并按「基名_切片时间」改名）后端还没有 —— 纪律是"没有实现不给入口"，
- *       所以那颗按钮与模态框先不摆；后端接上再把它们一起加上（样式照 V13 那份）。
+ *     · **「导出」在页头**（2026-10-11 接上）：三件套一起导（原始 / 处理后 / 元数据），
+ *       落点默认 `<用户根>/exports/<基名>/`，可以改成任何地方（记着上一次）。框住
+ *       `ExportModal.tsx` —— **文件名与默认落点都是后端算的**（命名规则只许一处），
+ *       界面照单显示；缺哪几份也照实说（见那一份的文件头）。
  *
  * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：整块常驻、只露出一截（行首那枚
  * 文件图标 + 抓手），点一下整块滑过来盖在详情上，点遮罩或往左拖滑回去 —— 手机
@@ -50,12 +50,13 @@
  *   记录本身坏了 照进列表（红标）—— 藏起失败就是替钩子瞒了一次事故；原因在
  *               详情「结论 → 原因」那一行等着（V13：那句话不进列表）
  *
- * # 动作只有一件半
+ * # 动作只有三件
  *
  *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）
+ *   导出   把选中的那一条的三件套复制到用户点名的目录（`ExportModal.tsx`）
  *   选一条 看这一条的详情（结论 / 打印 / 管线 / 文件）—— 左栏点一下就是选中
  *
- * 「导出 / 清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
+ * 「清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
  *
  * # 字段面（2026-10-11 补齐）
  *
@@ -92,6 +93,8 @@ import type {
 } from '../../api'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
+import { Btn } from '../ui/Controls'
+import ExportModal from './ExportModal'
 import s from './PageReport.module.css'
 
 /**
@@ -633,6 +636,8 @@ export default function PageReport() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
+  /** 导出框开着没有（它的内务全在 `ExportModal` 里，页面只管这一格开关） */
+  const [exportOpen, setExportOpen] = useState(false)
   /** 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值 */
   const [, setNarrow] = useState(false)
 
@@ -1058,29 +1063,22 @@ export default function PageReport() {
           后处理每跑一次（切片器导出时按「复制后处理脚本」那条命令跑），这里多一条记录。
         </p>
         <div className={s.headActions}>
-          <button
-            type="button"
-            className={s.btn}
+          {/*
+            两颗都是产品那套 `.btn`（`ui/Controls`）—— 槽上的 `[data-page] .btn`
+            已经给了胶囊圆角。**不另开一套按钮皮**：全站按钮只许一套（同"模态框只许
+            一套"那条），而且动作按钮一律文字、不带图标（见 `shell/icons.tsx` 那条）。
+          */}
+          <Btn disabled={selId === null} onClick={() => setExportOpen(true)}>
+            导出
+          </Btn>
+          <Btn
             onClick={() => {
               read()
               setNote({ text: READING_NOTE, bad: false })
             }}
           >
-            <svg
-              width={13}
-              height={13}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M20 12a8 8 0 1 1-2.34-5.66" />
-              <path d="M20 4.5V9h-4.5" />
-            </svg>
             刷新
-          </button>
+          </Btn>
         </div>
       </header>
 
@@ -1227,6 +1225,20 @@ export default function PageReport() {
           </div>
         )}
       </div>
+
+      {/*
+        导出框挂在 `.page` 上（不是整页）：遮罩盖住这一页的内容区，
+        窗口标题栏那几颗窗口键照样点得着 —— 全站模态框的约定（见 `components/modal`）。
+      */}
+      <ExportModal
+        open={exportOpen}
+        id={selId}
+        onClose={() => setExportOpen(false)}
+        onExported={(written, folder) =>
+          /* 成了才给这条提示；位置写全 —— 框这会儿已经关掉了，用户还得知道东西去哪了 */
+          setNote({ text: `已导出 ${written.length} 个文件到 ${folder}`, bad: false })
+        }
+      />
     </section>
   )
 }

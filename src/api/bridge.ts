@@ -261,7 +261,23 @@ export const bridgeApi: MkpApi = {
   copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 
-  /* ——— 报告页：后处理执行报告与历史（gcode_history 的真账，只读）——— */
+  /* ——— 报告页：后处理执行报告与历史（读 gcode_history 的真账 + 一处导出写）——— */
   getReportList: () => call('getReportList', 'get_report_list'),
   getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
+  getReportExportPlan: (id) => call('getReportExportPlan', 'get_report_export_plan', { id }),
+  exportReportArchive: (id, dir) =>
+    call('exportReportArchive', 'export_report_archive', { id, dir }),
+  /*
+   * 导出框那颗「更改位置」：与 `pickImportFiles` 同一半权限（`dialog:allow-open` ——
+   * 选目录与选文件在插件里是同一个 `open`，这里只是多个 `directory`）。
+   * 取消 = `null`（不是错误），界面据此保持原来那个位置。
+   */
+  pickExportDir: async (current) => {
+    const picked = await open({
+      directory: true,
+      title: '选择保存位置',
+      defaultPath: current,
+    })
+    return typeof picked === 'string' ? picked : null
+  },
 }

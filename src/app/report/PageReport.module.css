@@ -63,39 +63,13 @@
 }
 
 /*
- * 刷新：白底胶囊 + 小图标。
+ * 页头那两颗（导出 / 刷新）用**产品那一套** `.btn`（`ui/Controls`，槽上的
+ * `[data-page] .btn` 已经给了胶囊圆角与内衬）—— 这里一条样式都不写。
  *
- * 不复用 `ui/Controls` 的 `Btn`：CSS Modules **一个文件一份作用域**，本模块里
- * 写不出 `ui.module.css` 那个 `.btn`；而槽里的 `[data-page] .btn` 已经把它钉成
- * 「8/18 内衬 + 文字色 text-1」，V13 这颗要的是「7/16 内衬 + text-2 + 半透明白底」，
- * 在这一层压不过去（`[data-page] .btn` 是 (0,2,0)）。所以本页自己给一颗，见下。
+ * V13 抽卡里给它们另配过一张皮（`rgb(255 255 255 / 60%)` 底 + `text-2` 字），
+ * **没有搬**：全站按钮只许一套（同"模态框只许一套"那条），而这一页再开一套的话，
+ * 下一个页面就会再开一套。要改圆角 / 深浅，改 `ui.module.css` 的 `[data-page] .btn`。
  */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 60%);
-  color: var(--text-2);
-  font-family: var(--font-label);
-  line-height: 1;
-  transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
-}
-
-.btn:hover {
-  background: #fff;
-  border-color: var(--text-3);
-  color: var(--text-1);
-}
-
-.btn svg {
-  flex-shrink: 0;
-}
 
 /*
  * 提示条自己是一条通栏，得由外面这格给它头部的左右留白 ——

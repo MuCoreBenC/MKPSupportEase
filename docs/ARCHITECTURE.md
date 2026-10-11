@@ -72,10 +72,16 @@ src-tauri/                Rust 侧
 | 根 | 位置 | 放什么 | 子目录 |
 | --- | --- | --- | --- |
 | Internal | `appDataDir()` | 程序管理的：说明书（catalog）、下载原件、归档、索引、日志、运行状态 | `catalog.json · mkp/ archive/ index/ logs/ run/` |
-| User | `documentDir()/SupportEase` | 用户自己要看要拷的：预设副本、导出、报告 | `presets-mine/ exports/ reports/` |
+| User | `<appDataDir>/user`（2026-10-05 由 `documentDir()/SupportEase` 搬来，见 `fsx::paths` 模块头） | 用户自己要看要拷的：预设副本、导出、报告 | `presets-mine/ exports/ reports/` |
 
 **两棵树的每一格归属与流动是总纲的事**（`docs/DATA-ARCHITECTURE.md` §1③ 是白名单）——
 给第③层新增任何子目录，**先改那份文档**，再写代码。
+
+（`exports/` 里的形状：**导出一次 = 一个 `<基名>/`**，里面是三件套
+`<基名>_original.gcode` / `<基名>.gcode` / `<基名>_meta.json`（`<基名>` =
+`<模型名 或 归档名>_<切片时刻>`）。2026-10-11 报告页「导出执行报告」落地，
+口径与三道闸写在 `src-tauri/src/ipc/report.rs` 模块头 —— 那一处也是**全仓唯一
+往数据根以外写盘**的地方（"交到用户手里"这件事只能写用户当场点名的绝对路径）。）
 
 **为什么不都放 Documents**：macOS 开了「桌面与文档」iCloud 同步后，Documents 里的文件会被驱逐成
 占位 stub —— 读出来内容不对，会把 Preset 的 SHA 失效判定变成误报。程序管理的数据不能放在

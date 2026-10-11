@@ -41,8 +41,15 @@ pub const MINE_DIR: &str = "presets-mine";
 /// （`crate::ipc::report`）都要认它，字面量只许有这一处。
 pub const GCODE_HISTORY_DIR: &str = "gcode_history";
 
+/// **导出**的落点：`<用户根>/exports`。
+///
+/// 报告页的「导出执行报告」默认写到这儿（`<用户根>/exports/<基名>/三件套`）——
+/// 它是"用户自己要看要拷的东西"，所以住用户根（见模块头那条分层的理由）。
+/// `pub`：报告页那个写口（`crate::ipc::report`）要认它，字面量只许有这一处。
+pub const EXPORTS_DIR: &str = "exports";
+
 /// 用户根下首次启动就建齐的子目录
-const USER_DIRS: [&str; 4] = ["exports", "reports", MINE_DIR, GCODE_HISTORY_DIR];
+const USER_DIRS: [&str; 4] = [EXPORTS_DIR, "reports", MINE_DIR, GCODE_HISTORY_DIR];
 
 /// 用户根在**应用数据目录**下的那一个子目录（`<appDataDir>/user`）。
 ///
