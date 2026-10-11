@@ -166,9 +166,14 @@
   /* App.module.css 的 .shell::after 在 z-index 60 上画了一条
      `inset 0 1px 0 rgb(255 255 255 / 90%)` 的顶部高光，它会盖在窗口键上 ——
      表现就是关闭键悬停变红时顶边露出一条 1px 白缝。抬到 60 之上让按钮盖住它，
-     红色才真的贴到窗口最顶一行像素 */
+     红色才真的贴到窗口最顶一行像素。
+
+     94 还多压过一样东西：窗口内侧那圈 resize 命中条（93）—— 正常状态下这三颗键
+     优先于命中条（贴窗口最上沿那一块是"点关闭"而不是"改大小"）。
+     跑着的时候后处理那一屏会铺一条 95 的拖窗带把整条标题栏盖掉，这三颗键
+     自然也就点不着了（见 `postprocess/PostProcessModal.module.css`） */
   position: relative;
-  z-index: 91;
+  z-index: 94;
 
   /* 下边同理：.bar 的 1px border-bottom 吃掉了内容盒最后一行，
      stretch 只能填到 37px。负外边距把 margin box 撑回 38px，

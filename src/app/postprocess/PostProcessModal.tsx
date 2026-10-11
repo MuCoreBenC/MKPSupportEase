@@ -121,6 +121,8 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       closeOnScrim={!running}
       /* 同理：跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作 */
       hideClose={running}
+      /* Esc 也一样收进那条口径：跑着的时候"收起来"只有「后台运行」这一条明路 */
+      closeOnEsc={!running}
       onClose={dismiss}
       footer={
         running ? (
@@ -278,22 +280,30 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   /*
    * 跑着的那一态：**整扇窗都归这一屏**（连顶栏那三颗窗控键）。
    *
-   * 那三颗被 TopTabs 自己抬到了 `z-index: 91`（它要盖住外壳顶部那条 1px 高光 ——
-   * 见 `TopTabs.module.css` 的 `.controls`），而通用模态框的遮罩是 `z-index: 40` ——
-   * 于是"模态框开着、右上角那颗关闭照样点得着"（作者 2026-10-11 点着的就是那一下）。
-   * 这一层跑着的时候抬到窗控键之上，整扇窗都归它。
+   * 那三颗被 TopTabs 自己抬到了 `z-index: 94`（它要盖住外壳顶部那条 1px 高光，
+   * 也要压过窗口内侧那圈 resize 命中条 —— 见 `TopTabs.module.css` 的 `.controls`），
+   * 而通用模态框的遮罩是 `z-index: 40` —— 于是"模态框开着、右上角那颗关闭照样点得着"
+   * （作者 2026-10-11 点着的就是那一下）。这一层跑着的时候抬到 92（窗控键之上、
+   * 拖窗带之下），整扇窗的**内容**都归它。
    *
-   * 但**标题栏那一条仍然要能拖窗**（作者：「但是要可以拖动」）：顶上再铺一条透明的
-   * 拖窗带 —— 它既吃掉那三颗窗控键上的点击（关闭 / 最小化 / 最大化都不触发），
-   * 又把拖窗与双击缩放接回真正的标题栏动作。拖窗是窗口的基本动作，不该被一个
-   * 正跑着的框锁死。
+   * 顶上那条拖窗带是这一层的**兄弟**（不在里面）：它要压在所有东西之上 ——
+   * 包括那三颗窗控键（94）与窗口内侧那圈 resize 命中条（93）里落在标题栏上的那几条。
+   * 于是跑着的时候，整条标题栏就是窗口的把手：拖窗、双击最大化照旧，那三颗键点不着。
+   * 拖窗是窗口的基本动作，不该被一个正跑着的框锁死。
+   *
+   * **窗口大小仍然改得动**（作者 2026-10-11 明确要的）：左右两条边（标题栏以下）、
+   * 下边一条与下面两个角那几块命中条（93）都在拖窗带之外，跑着的时候照旧能拖 ——
+   * 让给拖窗带的只有**标题栏那一格里的几块**（北边一条、上面两个角，以及左右两条边
+   * 顶上那 38px）：拖窗带必须整条盖住窗控键才管用，而那几块本来就在标题栏上。
    *
    * 不跑的那一态（结论留在屏上）**退回普通模态框**：那时窗控键照旧点得着 ——
    * 看完结果顺手关窗是正常动作，不该拦。
    */
   return (
-    <div className={s.layer} data-full={running}>
-      {screen}
+    <>
+      <div className={s.layer} data-full={running}>
+        {screen}
+      </div>
       {running && (
         <div
           className={s.dragShield}
@@ -303,6 +313,6 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
           onDoubleClick={drag.onDoubleClick}
         />
       )}
-    </div>
+    </>
   )
 }

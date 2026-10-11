@@ -78,6 +78,13 @@ export interface ModalProps {
    * 自己能关，点下去却什么都没发生。
    */
   hideClose?: boolean
+  /**
+   * **Esc 关不关**（默认关）。
+   *
+   * 与 `closeOnScrim` 同一类：有草稿语义 / 正在跑的框要传 `false` ——
+   * 那种场合"收起来"必须是一条明说的动作（按钮），不能是一记顺手的 Esc。
+   */
+  closeOnEsc?: boolean
   /** 页眉那枚「关闭」的悬停说明 —— 关闭不总是「放弃」，有草稿语义的稿要写清 */
   closeTitle?: string
   onClose: () => void
@@ -95,6 +102,7 @@ export default function Modal({
   host = null,
   closeTitle,
   hideClose = false,
+  closeOnEsc = true,
   onClose,
   children,
 }: ModalProps) {
@@ -125,13 +133,13 @@ export default function Modal({
   }, [open])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !closeOnEsc) return
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') closeRef.current()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, closeOnEsc])
 
   if (!open) return null
 
