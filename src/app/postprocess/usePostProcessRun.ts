@@ -91,19 +91,30 @@ export function usePostProcessRun(): PostProcessRunView {
       })
     }
 
-    /* 新一趟开场：把上一趟的结论留着的显示清掉，并把我"关过了"那一笔也清掉 */
-    bind<PostProcessStarted>(STARTED_EVENT, (_prev, started) => ({
-      presetName: started.presetName,
-      gcodeName: started.gcodeName,
-      facts: null,
-      question: null,
-      progress: null,
-      finished: null,
-    }))
-    // 收到开场就把"关过了"清掉、并把这一趟的起点记下来（放在事件里而不是 setState 外面：
-    // 订阅晚于开场时也不丢）
-    void listen<PostProcessStarted>(STARTED_EVENT, () => {
+    /*
+     * 新一趟开场：把上一趟的结论留着的显示清掉、把"我关过了"那一笔清掉、记下起点。
+     *
+     * ★★ 这一条**是唯一能从"什么都没有"直接建出这一趟**的事件（其余几条见 `bind`）。
+     *   为什么必须这样：**「界面一直开着、钩子后来才来」是最常见的一路** —— 首帧快照
+     *   那时候还没有这一趟（`None`），而 `bind` 那几条一律 `prev === null ? prev : …`
+     *   （它们手里没有机型 / 文件名，建不出场）。只认"这一趟已经开了"的话，后面每一条
+     *   都被丢掉，那一屏永远不会出现。
+     *
+     *   作者 2026-10-11 实测到的就是这一条：窗口 20:54 起的、钩子 20:58 才来 ——
+     *   服务端日志里"钩子来了 / 那一趟结束"一行不少，界面上却什么都没有。
+     *
+     *   起点也在这里记（不是 setState 外面）：订阅晚于开场时也不丢。
+     */
+    void listen<PostProcessStarted>(STARTED_EVENT, (started: PostProcessStarted) => {
       if (!alive) return
+      setRun({
+        presetName: started.presetName,
+        gcodeName: started.gcodeName,
+        facts: null,
+        question: null,
+        progress: null,
+        finished: null,
+      })
       setDismissed(false)
       setSinceMs(Date.now())
     }).then((off) => {
