@@ -21,6 +21,9 @@
  *
  * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。目录不在了照样是
  * 后端说了算（会照实报"建不出保存位置"），所以记住一个失效的路径不会骗人。
+ *
+ * 胶囊**整条不改位置**：只有右边那颗「更改位置」弹系统框（作者 2026-10-11）——
+ * 路径正文因此还能拖选，误点一下也不会跳出一个系统目录框。
  */
 
 import { useEffect, useState } from 'react'
@@ -41,21 +44,31 @@ const KIND_LABEL: Record<ReportExportKind, string> = {
   meta: 'JSON 元数据',
 }
 
-/** 每份前面的小图标（形状与报告页详情里那套同一网格：24×24、currentColor） */
-const GCODE_SHAPE = (
+/** 折角的那张纸（形状与报告页详情里那套同一网格：24×24、currentColor） */
+const PAPER_SHAPE = (
   <>
     <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
     <path d="M13.5 3v5h5" />
   </>
 )
+
+/**
+ * 每份前面的小图标。**三行是同一族的三种文件**：两份 G-code 都是那张纸，
+ * 元数据那张纸里多一对花括号（`{ }`）。
+ *
+ * ★ 2026-10-11 改：原来那枚是"一对大括号 + 中间一根竖线"（v13 抽卡里照搬的），
+ *   15px 下读起来像 `(()` —— 作者指着它说改一下。现在三行共用同一个纸张轮廓，
+ *   只有元数据多一对小括号：同族、但一眼分得出。
+ */
 const KIND_ICON: Record<ReportExportKind, ReactNode> = {
-  original: GCODE_SHAPE,
-  processed: GCODE_SHAPE,
+  original: PAPER_SHAPE,
+  processed: PAPER_SHAPE,
   meta: (
     <>
-      <path d="M9 4.5C6.5 4.5 7 9 4.5 9c2.5 0 2 4.5 4.5 4.5" />
-      <path d="M15 4.5c2.5 0 2 4.5 4.5 4.5-2.5 0-2 4.5-4.5 4.5" />
-      <path d="M12 3v18" />
+      {PAPER_SHAPE}
+      {/* 花括号（lucide `file-json` 那一对，左右对称落在纸的中间偏下） */}
+      <path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1" />
+      <path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1" />
     </>
   ),
 }
@@ -213,7 +226,11 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
       )}
 
       {path !== null && (
-        <button type="button" className={s.pathPill} title={path.full} onClick={changeDir}>
+        /*
+         * 整条是**显示**不是按钮：只有右边那颗「更改位置」改位置（作者 2026-10-11）。
+         * 路径正文因此还能拖选、误点一下也不会弹系统框。
+         */
+        <div className={s.pathPill} title={path.full}>
           <svg
             className={s.pathIcon}
             width={15}
@@ -230,8 +247,10 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
             <span className={s.pathHead}>{path.head}</span>
             <span className={s.pathTail}>{path.tail}</span>
           </span>
-          <span className={s.pathEdit}>更改位置</span>
-        </button>
+          <button type="button" className={s.pathEdit} onClick={changeDir}>
+            更改位置
+          </button>
+        </div>
       )}
     </Modal>
   )

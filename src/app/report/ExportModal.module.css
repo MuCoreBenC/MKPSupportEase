@@ -85,8 +85,13 @@
   color: var(--text-3);
 }
 
-/* ---- 保存位置：胶囊路径（1B）—— 整颗可点（= 更改位置） ---- */
+/* ---- 保存位置：胶囊路径（1B） ---- */
 
+/*
+ * ★ 2026-10-11 作者：**只有右边那颗「更改位置」改位置** —— 整条原来是 `<button>`
+ *   （点哪儿都弹系统框），现在这一层只是**显示**：没有 hover、不是按钮、路径正文
+ *   还能拖选（误点一下不会再弹框）。
+ */
 .pathPill {
   width: 100%;
   display: flex;
@@ -101,14 +106,6 @@
   font-size: var(--fs-label);
   color: var(--text-2);
   text-align: left;
-  transition:
-    background 0.14s ease,
-    border-color 0.14s ease;
-}
-
-.pathPill:hover {
-  border-color: var(--line-strong);
-  background: #fff;
 }
 
 .pathIcon {
@@ -143,7 +140,7 @@
   font-weight: 600;
 }
 
-/* 「更改位置」那一颗：从等宽里换回正文字体 */
+/* 「更改位置」那一颗：**整条里唯一可点的地方**（字体从等宽换回正文） */
 .pathEdit {
   flex-shrink: 0;
   padding: 4px 12px;
@@ -152,4 +149,12 @@
   background: #fff;
   font-family: Inter, sans-serif;
   color: var(--text-1);
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.pathEdit:hover {
+  border-color: var(--text-3);
 }
