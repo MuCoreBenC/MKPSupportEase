@@ -494,6 +494,9 @@ fn archive_success(
         machine_type: machine.to_string(),
         preset_path: job.toml.display().to_string(),
         gcode_path: job.gcode.display().to_string(),
+        // 3MF 模型名：内核在 parse 步取的那一格（G-code 还在临时目录里时读的）。
+        // 失败了也有 —— 见 `archive_failure`。
+        model_name: done.header_facts.model_name.clone(),
         invocation: crate::archive::invocation(),
         warnings: done.warnings.clone(),
         error: None,
@@ -531,6 +534,9 @@ fn archive_failure(
         machine_type: machine.to_string(),
         preset_path: job.toml.display().to_string(),
         gcode_path: job.gcode.display().to_string(),
+        // 失败 / 取消没有 IR 终态（没有 `HeaderFacts`），模型名**单独取一次** ——
+        // G-code 还在切片器临时目录里，这一格照样拿得到（列表里那条失败记录也该有它）。
+        model_name: postprocess::gcode::model_name(&job.gcode),
         invocation: crate::archive::invocation(),
         warnings: Vec::new(),
         error: Some(error.to_string()),

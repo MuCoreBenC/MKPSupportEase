@@ -316,6 +316,13 @@ pub struct Meta {
     pub machine_type: String,
     pub preset_path: String,
     pub gcode_path: String,
+    /// **3MF 模型名**（`帕姆.3mf` → `帕姆`）—— 钩子在 G-code 还在切片器临时目录里时
+    /// 从旁边的 `origin.txt` / 同名 zip / `_temp_1.config` 取（三级兜底，见
+    /// `postprocess::gcode::model_name`），过了那一刻就永远拿不到了。
+    ///
+    /// 与 `error` 同一档：**落 `null` 而不是缺键** —— 这一格是报告页的契约（列表行与
+    /// 「结论 → 文件」都读它），"没有名字"与"老记录里没有这个键"是两件事。
+    pub model_name: Option<String>,
     pub invocation: Invocation,
     pub warnings: Vec<String>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
@@ -348,7 +355,7 @@ pub struct ReportFacts<'a> {
     pub stats: &'a postprocess::postproc::pass1::ProcessStats,
     /// pass2 口径的塔高（内核 `Stats.tower_height`）。
     pub tower_height: f64,
-    /// 输入头部刮出来的 4 个事实（内核 `HeaderFacts`）。
+    /// 输入头部刮出来的 5 个事实（内核 `HeaderFacts`）。
     pub header: &'a postprocess::pipeline::HeaderFacts,
     /// 校准模式串（非校准模式是空串）。
     pub calibration_mode: &'a str,
@@ -902,6 +909,7 @@ mod tests {
                 process_preset_name: "0.20mm Standard @BBL A1M".into(),
                 slicer_ironing_enabled: false,
                 three_mf_file_name: ".65112.2_.gcode.3mf".into(),
+                model_name: Some("帕姆".into()),
             },
             preset_name: "A1MF.toml".into(),
             sha: "dea417626c060af54c11e3613468153148046c81a57f358ea86d63805aacd771".into(),
@@ -1025,6 +1033,7 @@ mod tests {
             machine_type: "A1".into(),
             preset_path: "/p/A1-fastv3.3.toml".into(),
             gcode_path: "/tmp/.63288.1.gcode".into(),
+            model_name: Some("帕姆".into()),
             invocation: Invocation {
                 exe: "SupportEase.exe".into(),
                 args: vec!["--Gcode".into()],
@@ -1066,6 +1075,7 @@ mod tests {
             "machineType",
             "presetPath",
             "gcodePath",
+            "modelName",
             "invocation",
             "warnings",
             "error",
@@ -1080,6 +1090,7 @@ mod tests {
         assert_eq!(v["pipeline"][0]["status"], "complete");
         assert_eq!(v["pipeline"][0]["detail"], "读取 909465 行");
         assert!(v["error"].is_null(), "成功记录落 null，不是缺键");
+        assert_eq!(v["modelName"], "帕姆", "3MF 模型名要进顶层（报告页读它）");
         assert_eq!(v["detail"]["inputFile"]["lines"], 909_465);
         assert_eq!(v["detail"]["inputFile"]["sizeBytes"], 23_758_782);
         assert_eq!(v["detail"]["estimatedPrintSeconds"], 2530.5);
@@ -1115,6 +1126,8 @@ mod tests {
             machine_type: String::new(),
             preset_path: String::new(),
             gcode_path: "/tmp/x.gcode".into(),
+            // 三级兜底都没拿到 ⇒ 落 null（**不是缺键**：报告页读口按同一把尺子取它）
+            model_name: None,
             invocation: invocation(),
             warnings: Vec::new(),
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
@@ -1142,6 +1155,10 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(back["elapsedMs"], 1);
         assert_eq!(back["error"], "E_GCODE_BOUNDARY_001: 越界");
+        assert!(
+            back["modelName"].is_null(),
+            "没拿到模型名 ⇒ 落 null（不是缺键），报告页那一格退回只显示 gcode 名"
+        );
         assert!(
             back["detail"].get("outputFile").is_none(),
             "失败记录没有输出件"

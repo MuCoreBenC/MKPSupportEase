@@ -40,6 +40,8 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 sha2.workspace = true
+# 只给 `gcode/model_name.rs` 用：`.gcode.3mf` 里那个 deflate 条目（理由见根 Cargo.toml）。
+flate2.workspace = true
 clap.workspace = true
 # Ctrl-C → CancelToken（成熟件不自造信号处理）
 ctrlc.workspace = true

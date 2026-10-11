@@ -295,6 +295,12 @@ fn dump_ir_with_gcode_adds_header_facts() {
     assert_eq!(facts["ProcessPresetName"], "0.20mm Standard @BBL A1M");
     assert_eq!(facts["SlicerIroningEnabled"], true);
     assert_eq!(facts["ThreeMfFileName"], "42274.2_.gcode.3mf");
+    // 3MF 模型名要三级兜底（旁边没有 origin.txt / 同名 zip / _temp_1.config）⇒ null：
+    // **键在、值没有**，正是"不编名字"的形状（键不在的话读侧分不清"没这个功能"与"没取到"）。
+    assert!(
+        facts["ModelName"].is_null(),
+        "golden 输入不在切片器临时目录里，模型名应当是 null：{facts}"
+    );
     // 这份输入是 A1 mini 切出来的，而配置写的是 A1 ⇒ 两个字段**本来就该不一样**
     assert_eq!(v["Machine"]["GcodeMachineType"], "A1_MINI");
     assert_eq!(v["Machine"]["MachineType"], "A1");

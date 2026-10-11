@@ -323,6 +323,10 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
                     "ProcessPresetName": facts.process_preset_name,
                     "SlicerIroningEnabled": facts.slicer_ironing_enabled,
                     "ThreeMfFileName": facts.three_mf_file_name,
+                    // 3MF 模型名（三级兜底链；三级都没有就是 null —— 不编名字）。
+                    // 它要读 G-code 旁边的切片器临时文件 ⇒ 只有 `--gcode` 指着
+                    // 临时目录里那一份时才有值。
+                    "ModelName": facts.model_name,
                 }),
             );
         }

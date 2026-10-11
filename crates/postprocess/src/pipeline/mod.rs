@@ -134,7 +134,8 @@ pub struct ProcessResult {
     pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
     pub detail_facts: DetailFacts,
-    /// 输入 G-code 头部刮出来的 4 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名）。
+    /// 输入 G-code 头部刮出来的 5 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名 /
+    /// 3MF 模型名）。
     ///
     /// 管线自己不消费它（见 [`HeaderFacts`]），但**执行记录要**：`_meta.json` 的
     /// `detail.slicer` 里那几个键就住在这里 —— 搭车出门，调用方不用为它再扫一遍输入。
@@ -167,7 +168,7 @@ pub struct DetailFacts {
     pub calibration_mode: String,
 }
 
-/// 输入 G-code 头部刮取出来的 4 个事实。
+/// 输入 G-code 头部刮取出来的 5 个事实（后 1 个要读盘，见 [`header_facts`]）。
 ///
 /// 这些**只读输入、不碰 IR**，所以从管线里提出来单独成函数：`dump-ir --gcode <in>`
 /// 复用它；管线在 parse 步取一次、搭 [`ProcessResult`] 出门（执行记录要），
@@ -178,15 +179,26 @@ pub struct HeaderFacts {
     pub process_preset_name: String,
     pub slicer_ironing_enabled: bool,
     pub three_mf_file_name: String,
+    /// **3MF 模型名**（`帕姆.3mf` → `帕姆`）—— `origin.txt` → `slice_info.config` →
+    /// `_temp_1.config` 三级兜底，三级都没有 ⇒ `None`（执行记录里落 `null`，
+    /// 报告页就只显示 G-code 名）。链路与形态见 [`crate::gcode::model_name`]。
+    pub model_name: Option<String>,
 }
 
-/// 头部刮取。`path` 只用于 `; filename_format` 推 3MF 名时的兜底。
+/// 头部刮取。`path` 有两处用途：`; filename_format` 推 3MF 名时的兜底，以及
+/// [`crate::gcode::model_name`] 的三级兜底链。
+///
+/// ★ 这是本组里**唯一读盘的一格**（其余四格只读 `content`）：模型名躺在 G-code 旁边的
+/// 三处旁证里，而它们只存在于切片器的临时目录 —— **必须在 G-code 还在那儿时取一次**，
+/// 搬走之后就永远拿不到了（那时它是 `None`，不编名字）。判据里的 golden 输入不在
+/// 临时目录里，所以那几条上这一格恒为 `None` —— 真实值由 `model_name.rs` 自己的判据咬。
 pub fn header_facts(content: &[String], path: &str) -> HeaderFacts {
     HeaderFacts {
         machine_preset_name: crate::gcode::machine_preset_name(content),
         process_preset_name: crate::gcode::process_preset_name(content),
         slicer_ironing_enabled: crate::gcode::slicer_ironing_enabled(content),
         three_mf_file_name: crate::gcode::three_mf_file_name(content, path),
+        model_name: crate::gcode::model_name(std::path::Path::new(path)),
     }
 }
 
@@ -434,8 +446,8 @@ fn run(
     timer.begin(Step::Parse, "解析 G-code...");
     executed.push(Step::Parse);
 
-    // 头部 4 个事实：只读输入、不碰 IR。登记完这一步就取，搭产物出门写进执行记录
-    // （`detail.slicer` 的 machinePresetName / processPresetName / slicerIroningEnabled）。
+    // 头部 5 个事实：只读输入（其中模型名读 G-code 旁边的临时文件）、不碰 IR。登记完
+    // 这一步就取，搭产物出门写进执行记录（`detail.slicer` 的三个键与顶层的 `modelName`）。
     let header = header_facts(&content, &gcode_path.display().to_string());
 
     // ---- step 4 ∥ step 5 的只读半段 —— 两个全文件扫描并行 ----
