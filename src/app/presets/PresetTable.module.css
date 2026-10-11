@@ -4,7 +4,7 @@
  * a03 在 a02 基础上重做（**规则就地改，不另起覆写段** —— stylelint 禁重复选择器）：
  *
  * 1. **展开详情：全宽绿块 → 浮起的白色详情卡**（.detailCard：圆角 + 投影）。
- * 2. **色彩收敛**：绿色仅表「正在生效」（live 文件名 / actLive）；
+ * 2. **色彩收敛**：绿色仅表「正在生效」（live 文件名 / 「在用」胶囊）；
  *    行上小徽章全部安静化（去框、去底、去字重）；「文件无法读取」是唯一保留的实心徽章。
  * 3. **主操作立体**：actBtn / saveBtn 深色实心 + 底部暗边与柔影；空占位（—）不渲染。
  *
@@ -520,27 +520,6 @@
 .actDone {
   font-size: var(--fs-label);
   color: var(--text-3);
-  white-space: nowrap;
-}
-
-/* 当前在用：绿色字 + 极淡绿底 —— 与 live 文件名同为"生效"语义 */
-/*
- * ★ 2026-10-10（作者：「行尾操作列那几颗按钮的形态统一」）：**尺码与同列的按钮同档** ——
- * 26px 高、左右 14px 内衬，和「使用 / 复制 / 下载 / 更新」排成一条线。
- * 它自己没有高度时只有 ~19px，一行里就这一颗矮一截（截图里一眼看得出来）。
- */
-.actLive {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  /* 与「使用」同一套：上下内衬对称 + 归一化度量的字族（见 `.useBtn` 那段） */
-  padding: 0 14px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  font-family: var(--font-label);
-  font-size: var(--fs-label);
-  line-height: 1;
-  color: var(--accent-deep);
   white-space: nowrap;
 }
 

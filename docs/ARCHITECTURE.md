@@ -227,7 +227,7 @@ Chromium 的连击计数被打断，双击最大化要点得极快才触发。
 
 ## 10. 版本身份与文件命名规范
 
-来源：`.comate/specs/b05-content-pipeline-charter/doc.md` §6。这一节是**唯一权威**，
+来源：旧 spec `.comate/specs/b05-content-pipeline-charter/doc.md` §6（2026-10-11 已删，git 历史可查）。这一节是**唯一权威**，
 工作台、构建器、发布器、消费端四方共用。
 
 ### 10.1 身份与文件名是两件事
@@ -281,8 +281,8 @@ A 与 C 形状相同但曾是两份独立实现，B 与 C 对不上——**后�
 本规范取 A/C 的形状作为唯一标准：现在只有 `preset::preset_file_name` 一处实现
 （`src-tauri` 侧转调它），对照基线与入库产物**同名**，配对按名字直配、不再读文件头。
 
-B 只作为一次性迁移输入：旧名到新身份的映射表在
-`.comate/specs/b05-content-pipeline-charter/migration-map.md`，**迁移完成后即失效**，
+B 只作为一次性迁移输入：旧名到新身份的映射表在旧 spec 的 `migration-map.md`
+（`.comate/specs/b05-content-pipeline-charter/`，2026-10-11 已删，git 历史可查），**迁移完成后即失效**，
 不进入任何长期代码路径。B 套名字怎么读（`M`=mini、`F`=快拆、`_260628`=开源版日期）
 也记在那份映射表里，那是历史解释，不是规则。
 

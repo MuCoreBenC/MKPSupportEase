@@ -4,37 +4,39 @@
 > ＋ 各目录盘点。本文**不做裁决、不做合并** —— 哪份并入哪份、以谁为准，由作者自己裁决；
 > 没有标注可引用、由盘点判断的，行内都标了**（推断）**。
 >
-> **这份索引就是为了让合并有清单可勾**：冲突 / 重叠 / 重复全在 §6，合并完回来划掉一行即可。
+> **2026-10-11 同日做过第一轮清理**（历史交接件 / 上一代工具 spec / 死代码 / 分支），处置记录见 **§6 C8**。
+> 冲突 / 重叠 / 重复仍在 §6 逐簇列着 —— 合并完回来划掉一行即可。
 
 ## 0. 文档地图（一页看完）
 
 | 群 | 位置 | 数量 | 性质 |
 | --- | --- | --- | --- |
 | 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md) | 约 12 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
-| 记录与计划 | `docs/` 顶层（带日期的那些） | 约 22 份 | 裁决记录 / 台账 / 施工计划 / 测试协议 |
+| 记录与计划 | `docs/` 顶层（带日期的那些） | 约 19 份 | 裁决记录 / 台账 / 施工计划 / 测试协议 |
 | 审计基线 | `docs/audit-current-state/` | 9 md + data/map | 重写前的只读审计（"建议，不是现状"） |
-| 历史交接 | 根目录 6 份 + `docs/` 里自标历史的 | — | 早期"刀/圈"时代的交接与快照 |
-| 旧工具 spec 存档 | [`.comate/specs/`](../.comate/specs/)（**入库**，49 个文件 / 13 个包） | 13 包 | 上一代工具时代的 spec（B03 / B04 / B05 / 开局地基） |
-| 计划文件 | `.codebuddy/plans/`（**本机、不入库**，见 `.gitignore`） | 9 份 | 现役工具的计划（含重复与未完成） |
-| 工作台本机状态 | `workbench/.draft/` `.sandbox/` `.snapshots/` `.trash/`（**本机、不入库**） | — | `.sandbox/` 里有一份仓库影子副本（见 §6 C6） |
+| 移植方案 | 根 [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) / [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 2 份 | 被 `src/workbench` 现行代码引用（方案 / 待裁决清单），保留 |
+| 历史交接 | **已清（2026-10-11）** | — | KNIFE3/4、HANDOFF-5、ASSET-CHAIN、TWO-REPO、DELIVERY-CONTRACT、SupportEase 旧规则件已删（§6 C8） |
+| 旧工具 spec | **已整包删除（2026-10-11）** | — | `.comate/specs/`（原 49 件），git 历史可查（§6 C8） |
+| 计划文件 | `.codebuddy/plans/`（**本机、不入库**，见 `.gitignore`） | 9 份 | 现役工具的计划（含重复与未完成，未动） |
+| 工作台本机状态 | `workbench/.draft/` `.sandbox/` `.snapshots/` `.trash/`（**本机、不入库**） | — | 审计工作树 `wt` 已移除（§6 C8） |
 
 ## 1. 现行规则（先读这一组）
 
 | 文档 | 管什么 | 状态 |
 | --- | --- | --- |
-| [`README.md`](../README.md) | 入口：项目一句话 / 跑法 / 文档地图 | 现行（首段"报告页还是空态"**已过期**，见 §6 C3） |
+| [`README.md`](../README.md) | 入口：项目一句话 / 跑法 / 文档地图 | 现行（首段的"报告页"口径已于 2026-10-11 修正） |
 | [`docs/DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) | **根规则**：四层世界 + 四铁律 + 十问 + 准入问句 | 现行 |
 | [`docs/PRESET-PRODUCT-RULES.md`](PRESET-PRODUCT-RULES.md) | 产品规则：本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 | 现行（正文已就地吸收 2026-10-08 三次改判，含三条 ⚠️ 注记） |
 | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) | 工程约束：目录、两层数据根、IPC、trace、原子写、权限 | 现行 |
 | [`docs/GIT-WORKFLOW.md`](GIT-WORKFLOW.md) | git 纪律：本地八道闸 + 服务端 ruleset + 发版 | 现行（其中的合并动作由作者执行，AI 只提交+推送） |
-| [`docs/PUBLISH-ARCHITECTURE.md`](PUBLISH-ARCHITECTURE.md) | **发布链根规则**：唯一源 → 发布根 → 客户端消费 | 现行（自标：替代 `PRESET-DELIVERY-CONTRACT` 的旧裁决） |
+| [`docs/PUBLISH-ARCHITECTURE.md`](PUBLISH-ARCHITECTURE.md) | **发布链根规则**：唯一源 → 发布根 → 客户端消费 | 现行（其替代的旧件 `PRESET-DELIVERY-CONTRACT` 已于 2026-10-11 删除） |
 | [`docs/RELEASE-TRANSACTIONS.md`](RELEASE-TRANSACTIONS.md) | 发布事务合同：发布预设 ≠ 发布软件版本 | 现行（自标：改它要作者点头） |
 | [`docs/APP-STATE.md`](APP-STATE.md) | 持久化状态地基：一个应用一个 AppState | 现行（10-08 盘点定案已并回本文 §5 / §10） |
 | [`docs/DESIGN-SPACING.md`](DESIGN-SPACING.md) | 间距与动画原则（试验场搬来） | 现行 |
 | [`docs/3D-ASSET-CONTRACT.md`](3D-ASSET-CONTRACT.md) | 上游 3D 资产契约 v3（对外） | 现行（自标：contract v3 取代 v2） |
-| [`HANDOFF.md`](../HANDOFF.md) | **进度台账**：现在在哪、接下来去哪 | 现行·持续追加（最新到"增量之三十四"，随本分支提交；头部两条 ⚠️ 注记说明早期章节已过时） |
+| [`HANDOFF.md`](../HANDOFF.md) | **进度台账**：现在在哪、接下来去哪 | 现行·持续追加（最新到"增量之三十四"；头部三条 ⚠️ 注记：两条旧口径 + 一条 2026-10-11 清理） |
 | [`docs/RESOURCE-ADDRESSING-ROADMAP.md`](RESOURCE-ADDRESSING-ROADMAP.md) | 寻址改造总纲（长期大纲） | 半现行：自标"大纲已批准 2026-10-05，施工进度以 §8 台账为准" |
-| [`docs/PROJECT-AUDIT.md`](PROJECT-AUDIT.md) | 项目总盘点：已定义但未落地（四类） | 参考：2026-10-02 的对账，时效以日期计（README 曾写"接手前先读"） |
+| [`docs/PROJECT-AUDIT.md`](PROJECT-AUDIT.md) | 项目总盘点：已定义但未落地（四类） | 参考：2026-10-02 的对账，时效以日期计 |
 | [`docs/DATA-INVENTORY.md`](DATA-INVENTORY.md) | 总纲的对账单（43 件归位 + 收口日志） | 对账单：基准 2026-10-01 `58f4295`，收口一条勾一条（是否勾完没终检） |
 
 ## 2. 记录与计划（docs/ 顶层带日期的那些）
@@ -59,9 +61,6 @@
 | [`UX-FIX-PLAN-2026-10-06.md`](UX-FIX-PLAN-2026-10-06.md) | 2026-10-06 | 修复清单（只修三个 A 级） | 已完结（文内三轮记录 A1/A2/A3 全 ✅） |
 | [`APPSTATE-INVENTORY-2026-10-08.md`](APPSTATE-INVENTORY-2026-10-08.md) | 2026-10-08 | 全仓持久化落点盘点（AppState 收编清单） | 记录（自标：定案已并回 `APP-STATE.md`；本轮零收编） |
 | [`HANDOFF-FRONTEND-CLEANUP-2026-10-09.md`](HANDOFF-FRONTEND-CLEANUP-2026-10-09.md) | 2026-10-09 | 前端清理执行清单（用户故事口径） | 执行清单：后续"前端照搬 a05 四页 + 皮肤整份替换"与其口径是否冲突，**待你判**（推断） |
-| [`TWO-REPO-ALIGNMENT.md`](TWO-REPO-ALIGNMENT.md) | 2026-10-02 | 双仓对齐报告（本仓 vs 试验场） | ⚠️ 历史快照（自标，2026-10-05 加注） |
-| [`PRESET-DELIVERY-CONTRACT.md`](PRESET-DELIVERY-CONTRACT.md) | — | 预设交付契约（问题档案） | ⚠️ **部分已被取代**（自标：正式规则搬进 `PUBLISH-ARCHITECTURE.md`） |
-| [`SupportEase-%E9%A2%84%E8%AE%BE%E5%AE%98%E6%96%B9%E6%9B%B4%E6%96%B0%E4%B8%8E%E7%94%A8%E6%88%B7%E8%87%AA%E5%AE%9A%E4%B9%89%E8%A7%84%E5%88%99.md`](SupportEase-%E9%A2%84%E8%AE%BE%E5%AE%98%E6%96%B9%E6%9B%B4%E6%96%B0%E4%B8%8E%E7%94%A8%E6%88%B7%E8%87%AA%E5%AE%9A%E4%B9%89%E8%A7%84%E5%88%99.md) | — | HTML Demo 时代的"官方更新与自定义规则"整理 | 历史（自标：根据当前 HTML Demo 的实际代码整理）——文件名还是 URL 编码的，一并由你处置 |
 | [`supportease-preset-v3.html`](supportease-preset-v3.html) | — | 预设 v3 原型页（HTML） | 素材（原型） |
 
 ## 3. 审计与重写基线（`docs/audit-current-state/`）
@@ -81,16 +80,16 @@
 | [`rewrite-roadmap.md`](audit-current-state/rewrite-roadmap.md) | 交付物 E：重写路线图（AC-01 ~ AC-12） |
 | `data/*.json`、`map/`、`index.html` | 证据数据与审计浏览页 |
 
-## 4. 历史交接（根目录的"刀 / 圈"时代文档）
+## 4. 移植方案（保留：被现行代码引用）
 
-| 文档 | 日期 | 一句话 | 状态（自标优先） |
-| --- | --- | --- | --- |
-| [`PUBLISH-KNIFE3-HANDOFF.md`](../PUBLISH-KNIFE3-HANDOFF.md) | — | 第三刀交接（发布链：结构代次 / 软件更新 / 不兼容提示） | ⚠️ 历史快照（自标） |
-| [`PUBLISH-KNIFE4-HANDOFF.md`](../PUBLISH-KNIFE4-HANDOFF.md) | — | 第四刀交接（发布软件版本：版本号 / tag / 安装包 / Release） | ⚠️ 历史快照（自标） |
-| [`HANDOFF-5-APP-UPDATE.md`](../HANDOFF-5-APP-UPDATE.md) | 2026-10-05 | 第五刀交接（应用内更新：标题栏图标 + 环形进度 + 重启安装） | 交接（未标历史；时效以现状为准） |
-| [`ASSET-CHAIN-HANDOFF.md`](../ASSET-CHAIN-HANDOFF.md) | 2026-10-03 | 资产交付链与图位分层交接 | 交接（其成果后来以"增量之八~十一"落进 `HANDOFF.md`） |
-| [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) | — | 工作台 C14 → 产品仓移植方案 | 计划（状态见文内；与 `C15-A40-PORT-PLAN.md` 同一线） |
-| [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | — | 客户端 A21→A40 补齐 · 工作台 C14→C15 增量方案 | 计划（同上） |
+| 文档 | 一句话 | 为什么留 |
+| --- | --- | --- |
+| [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) | 工作台 C14 → 产品仓移植方案 | `src/workbench/views/*` 多处引用它的 §4「待裁决清单」（那几个"没接"的动作还挂在那里） |
+| [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 客户端 A21→A40 补齐 · 工作台 C14→C15 增量方案 | `vite.config.ts` 引用它的 §6-2（bbsFs 不打包预设的由来） |
+
+> 早期"刀 / 圈"时代的交接件（`PUBLISH-KNIFE3/4-HANDOFF.md`、`HANDOFF-5-APP-UPDATE.md`、
+> `ASSET-CHAIN-HANDOFF.md`）与 `docs/` 里的历史快照件（`TWO-REPO-ALIGNMENT.md`、
+> `PRESET-DELIVERY-CONTRACT.md`、`SupportEase-…规则.md`）已于 2026-10-11 删除 —— 见 §6 C8。
 
 ## 5. 代码旁注小文档（跟着代码走，不参与合并）
 
@@ -115,40 +114,29 @@
 | `PRESET-LIST-UX-ISSUES-2026-10-08.md` | 已闭环，正文大多过时，靠文首一句指向资产库 |
 | `PRESET-COPY-LINEAGE.md` / `REMARK-SUBTITLE-2026-10-07.md` | 归属/身世主题的两份；10-08 改判后各有一部分退役，台账价值仍在 |
 | `PRESET-TIME-SEMANTICS.md` → `PRESET-EVENT-TIME-MODEL.md` | 前后两篇同一主题，后者是落地版；前者留着当梳理稿 |
-| `SupportEase-…规则.md`（URL 编码文件名） | HTML Demo 时代的旧口径，与现行产品规则**冲突**（旧文档早于真后端） |
 
 > 合并锚点（供参考，不代你决定）：这一簇看起来以 `PRESET-PRODUCT-RULES.md`（现行）+ `PRESET-ASSET-LIBRARY.md`（最后一次裁决）为轴，其余按"过程记录"处理。
+> （原表里那份 HTML Demo 时代的 `SupportEase-…规则.md` 已随 2026-10-11 清理删除。）
 
-### C2 · 发布 / 寻址
+### C2 · 发布 / 寻址 —— **已清（2026-10-11）**
 
-`PUBLISH-KNIFE3/4-HANDOFF.md`（⚠️ 快照）+ `docs/PRESET-DELIVERY-CONTRACT.md`（⚠️ 部分被取代）+ `docs/TWO-REPO-ALIGNMENT.md`（⚠️ 快照）+ `docs/RESOURCE-ADDRESSING-ROADMAP.md`（半现行）vs 现行 `docs/PUBLISH-ARCHITECTURE.md` + `docs/RELEASE-TRANSACTIONS.md`。**前一组里凡提 `presets/dist/`、`baseUrl` 同目录推导的段落都已过时**（各文首自标）。
+历史件（`PUBLISH-KNIFE3/4-HANDOFF.md`、`PRESET-DELIVERY-CONTRACT.md`、`TWO-REPO-ALIGNMENT.md`）已删除。
+本簇现在只剩现行两份（`PUBLISH-ARCHITECTURE.md` + `RELEASE-TRANSACTIONS.md`）与半现行的
+`RESOURCE-ADDRESSING-ROADMAP.md` —— 它们是"根规则 / 合同 / 大纲"三司其职，**不再有冲突，无需合并**。
 
 ### C3 · 总账口径（谁在说"现在到哪了"）
 
-- `README.md` 首段（"报告页还是空态"）**已过期** —— 报告页早已落地（#57 + 本分支"字段面补齐"）。
+- `README.md` 首段的"报告页还是空态"已于 2026-10-11 修正为现状。
 - `HANDOFF.md` 是最新台账（增量之三十四），`PROJECT-AUDIT.md`（10-02）/ `DATA-INVENTORY.md`（10-01）/ `audit-current-state/`（重写前）都是**更早的快照**。
 - 合并时把"现状话术"统一到一处（大概率是 README + HANDOFF），其余为历史。
 
-### C4 · `.comate/specs/`（**入库**，49 个文件 / 13 个包，上一代工具的 spec 存档）
+### C4 · `.comate/specs/` —— **已整包删除（2026-10-11）**
 
-| 包 | 一句话 | 备注 |
-| --- | --- | --- |
-| `b03-backstage-workbench` | 工作台第三版（**自标：这一版推翻了前两版**） | 含参考实现分析 |
-| `b03-matrix-usability` | 参数矩阵可用性修复 | 九条缺陷 |
-| `b03-param-desk` | 配方台默认视角改版 | — |
-| `b04-panel-successor` | 工作台接管 mkppanel（包内 12 个文件） | 最大的一个包 |
-| `b04-m4-preset-unify` | 预设解析迁入 + 注册表合一 | — |
-| `b04-preset-write-guard` | crates 写盘纪律 | — |
-| `b05-content-pipeline-charter` | 新工作台流程与数据契约章程 | 含资产域设计/清单 |
-| `c15-a40-client-port` | 客户端移植 spec（只有 tasks.md） | 与根 `C15-A40-PORT-PLAN.md` 同一线 |
-| `supportease-groundwork` | 本仓开局 spec（Tauri 壳 + v023 移植 + git 双层拦截） | 与下面那份是一对 |
-| `un-tauri-groundwork` | **另一个项目（MKPSupportUN）** 的开局 spec | 误留在本仓？由你定（推断） |
-| `asset-slimdown` | 资产瘦身（自标：**Task 6 提交 + 重写历史没动**） | — |
-| `win-chrome-interactions` / `windows-caption-bar` | Windows 窗口三修 / 标题栏窗口键 | 已落（标题栏在代码里） |
+原 13 个包 / 49 个文件（B03 / B04 / B05 / 开局地基 / `asset-slimdown` / `win-*`）已删（git 历史可查）。
+4 处引用已改写为"已删注记"：`src-tauri/src/lib.rs`、`src-tauri/src/presetdata/mod.rs`、
+`src/app/shell/icons.tsx`、`docs/ARCHITECTURE.md`（§10）。**无需合并。**
 
-> 这一群是否收进 `docs/`（做历史归档）还是原地不动，**由你定**；目前它们没有被任何现行文档引用。
-
-### C5 · `.codebuddy/plans/`（**本机、不入库**，9 份计划）
+### C5 · `.codebuddy/plans/`（**本机、不入库**，9 份计划，未动）
 
 - `preset-multi-version-snapshots-and-compare` **三份重复**（`1840bc96` 与两份"(未完成)"），且与 `docs/PRESET-MULTI-VERSION.md` 同一主题 —— 计划与成果件各一份。
 - 其余未完成：`preset-param-baseline-update`、`preset-view-update-and-create-variant`、`后处理性能优化与执行归档`；已完成/据实：`APPSTATE-INVENTORY`（对应 docs 交付物）、`preset-asset-library-refactor`（对应 docs 记录）、`后处理算法级性能审计`。
@@ -156,15 +144,29 @@
 
 ### C6 · `workbench/` 本机目录（**不入库**）
 
-`.sandbox/`（含 `audit/wt/` —— 仓库某时刻的**整份影子副本**：`HANDOFF.md`、`README.md`、`PUBLISH-KNIFE3/4-HANDOFF.md`、`pr-body.md` 全各有一份旧版，**与现行文档同名不同版**）、`.draft/`、`.snapshots/`、`.trash/`。`.gitignore` 自证"本机状态，删掉安全"。处置由你定。
+- `audit/wt`（仓库影子副本，含审计插桩）已于 2026-10-11 移除；
+- 剩 `.sandbox/`（presets 副本 + 台账）、`.draft/`、`.snapshots/`、`.trash/`；
+- `.gitignore` 自证"本机状态，删掉安全"——要不要再清一层由你定。
 
 ### C7 · 小账（顺手核一眼）
 
-- `docs/REPORT-DETAIL-FIELDS.md` 里写"spec 五组字段本仓后端尚未透传"——**本分支已补齐**（报告页字段面），口径可能已过期（推断）。
 - `docs/HANDOFF-FRONTEND-CLEANUP-2026-10-09.md` 的"不重写"口径 vs 后续"前端照搬 a05 四页 + 皮肤整份替换"——两者关系待你判（推断）。
 
-## 7. 维护约定（建议，等你点头）
+### C8 · 已处置记录（2026-10-11）
 
-1. **新文档落点**：现行规则 → `docs/` 顶层；裁决/计划/台账 → `docs/`（带日期或主题）；代码旁注 → 跟着代码；agent 产物 → `.comate/` / `.codebuddy/`（后者不入库）。
+| 项 | 处置 |
+| --- | --- |
+| 历史交接件（6 份） | 删除：`PUBLISH-KNIFE3/4-HANDOFF.md`、`HANDOFF-5-APP-UPDATE.md`、`ASSET-CHAIN-HANDOFF.md`、`docs/TWO-REPO-ALIGNMENT.md`、`docs/PRESET-DELIVERY-CONTRACT.md`、`docs/SupportEase-…规则.md`；`HANDOFF.md` 头部加了清理注记 |
+| `.comate/specs/`（49 件） | 整包删除；4 处引用改写为"已删注记" |
+| 死代码 | `PresetTable.module.css` 的 `.actLive`（全仓无组件使用）删除 |
+| 审计工作树 | `workbench/.sandbox/audit/wt`（审计插桩，按当时计划"不提交"）已移除 |
+| tmp 残留 | `tmp-port/` 清空（保留两份 pr-body 草稿 + 分支备份 bundle）、`tmp-shots/` 清空（仅剩一个被安全删除拒绝回收的 `wv2-cdp-profile` 调试目录，可手动删） |
+| README | 首段"报告页还是空态"更新为"已接真数据" |
+| 分支 | 本地 + 远端只留 `main` 与 `fix/postprocess-command`；其余 5 条删除。删前核实：`refactor/preset-first` 已随 PR #57 合并、`feat/build-delivery-files` 已随 PR #56 合并、`chore/identifier-rename` 的改名内容已在 main（`tauri.conf.json` identifier = `SupportEase`）；两条无 PR 记录的旧线（`feat/preset-multi-version-compare`、`feat/preset-param-official-update`）已打包成 `tmp-port/branches-backup-2026-10-11.bundle`（`git bundle verify` 通过） |
+
+## 7. 维护约定
+
+1. **新文档落点**：现行规则 → `docs/` 顶层；裁决/计划/台账 → `docs/`（带日期或主题）；代码旁注 → 跟着代码；agent 产物 → `.codebuddy/`（不入库；`.comate/` 已于 2026-10-11 删除）。
 2. **合并时**：合成一份后回到 §6 **划掉一行**，并顺手更新本文 §1/§2 的状态列。
-3. **本文只做索引**：任何"以谁为准"的判断都不写进这里 —— 那是作者的事。
+3. **清理 / 处置记录**进 §6（C8 的样式），别散落。
+4. **本文只做索引**：任何"以谁为准"的判断都不写进这里 —— 那是作者的事。

@@ -3,7 +3,7 @@
 //! # 这一层为什么存在
 //!
 //! 它**取代**旧的 `upstream/`（那一层读 `mkpse-presets/content/*.json`，也就是别人的构建产物）。
-//! 前提变了两次，记在 `.comate/specs/b04-panel-successor/doc.md`：
+//! 前提变了两次，记在旧 spec（`.comate/specs/b04-panel-successor/doc.md`，2026-10-11 删，git 历史可查）：
 //!
 //! 1. `content/*.json` 是产物，源是 `source/*.toml` —— 实测 `source/machines/A1.toml`
 //!    与 `content/machine_catalog.json` 逐字段对应。

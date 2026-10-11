@@ -243,4 +243,4 @@
 | 云端右键菜单（含始终可用的「下载」项） | `src/app/presets/PagePresets.tsx` `entriesOf` 的 `scope === 'cloud'` 分支（L1045-1061）＋ `download()`（L470+，不检查状态） |
 | 批量那一批的构成（不含已下载） | `usePresetData.ts` `usePresetPage` 的 `pending`（`releaseState !== 'ok'`）；文案 `presetTree.ts` `releaseBatchText` |
 | 三条删除路径 | `PagePresets.tsx` `runRemove`（mine 真删 / 切片器交付行删 delivery）、`runRemoveArchived`（删归档） |
-| 产品规则出处 | `docs/PRESET-PRODUCT-RULES.md`、`docs/PRESET-WORKING-COPY-2026-10-08.md`、`docs/PRESET-MULTI-VERSION.md`、`docs/PRESET-DELIVERY-CONTRACT.md` |
+| 产品规则出处 | `docs/PRESET-PRODUCT-RULES.md`、`docs/PRESET-WORKING-COPY-2026-10-08.md`、`docs/PRESET-MULTI-VERSION.md`（后两份里的改判以现行产品规则为准） |

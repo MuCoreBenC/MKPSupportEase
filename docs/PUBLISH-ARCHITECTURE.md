@@ -4,7 +4,7 @@
 > 与 `docs/DATA-ARCHITECTURE.md`（四层 / 四铁律，管**归属**）配套：
 > 那份管"谁拥有什么"，这份管"发布时这些怎么变成客户端能消费的东西"。
 >
-> **它替代**：`docs/PRESET-DELIVERY-CONTRACT.md` 里 §3 的 A/B 裁决（已废，见 §1.4）、
+> **它替代**：`PRESET-DELIVERY-CONTRACT.md`（2026-10-11 已删，git 历史可查）里 §3 的 A/B 裁决（已废，见 §1.4）、
 > §5 的旧发布闸设计（已按本文 §5 重写）。
 
 ---
@@ -665,6 +665,6 @@ git -c credential.helper= \
 | `DATA-ARCHITECTURE.md` | 四层 / 四铁律 / 归属 | **上游**。本文是它在"发布链"上的展开 |
 | `PUBLISH-ARCHITECTURE.md`（本文） | 发布链 / 路径语义 / 发布闸 / minVersion / PR | **本主题的根规则** |
 | `RELEASE-TRANSACTIONS.md` | **两层事务的语义与边界**（发布预设 vs 发布软件版本） | **互补**：本文管"发布链怎么实现"，它管"两层事务分别是什么、变更怎么分类" |
-| `PRESET-DELIVERY-CONTRACT.md` | 路径三层 / 幽灵行 / 404 定位 | **降级为"问题档案"**：§3 的 A/B 已废、§5 已被本文 §5 取代；保留 §1/§2 的定位过程 |
+| `PRESET-DELIVERY-CONTRACT.md` | 路径三层 / 幽灵行 / 404 定位 | **2026-10-11 已删除**（§3 A/B 早废、§5 已由本文 §5 取代；定位过程见 git 历史） |
 | `PRESET-PRODUCT-RULES.md` | 三状态 / SHA / 归档 / 状态流转 | **互补**：管客户端侧行为，本文管发布侧 |
 | `HANDOFF.md` | 进度与台账 | 只记"做到哪了"，规则一律指向本文 |

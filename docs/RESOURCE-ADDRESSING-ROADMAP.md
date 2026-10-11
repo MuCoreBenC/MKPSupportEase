@@ -160,7 +160,7 @@ presets/                          ← Publish Root（catalog.files[].path 的锚
 ### M5 · 清算（长期收尾，允许拖）
 - `scripts/publish-presets.mjs` 退役或改调 wb_publish 内核（它现在是**第二个生成出口**，12 处 dist 引用）。
 - `src/workbench/dev/mockBackend.ts`、`api.ts`、`SettingsPage`/`BuildPage`/`PageSettings` 文案、`tools/assets/sync.mjs`、`scripts/probes/*` 与新地址对齐。
-- HANDOFF / PUBLISH-KNIFE3/4 / ASSET-CHAIN 等流水账文档加"历史快照"头注（不重写）。
+- HANDOFF / PUBLISH-KNIFE3/4 / ASSET-CHAIN 等流水账文档加"历史快照"头注（不重写）——2026-10-11：PUBLISH-KNIFE3/4 / ASSET-CHAIN 已删除（git 历史可查），只剩 HANDOFF 一处，已由清理注记代行。
 - 相邻项处置评估：`release.json.asset.url` 绝对 GitHub Releases 地址（Gitee 用户更新流量走 GitHub）——已升格为 **M6**（§5），独立一刀。
 
 ### M6 · Gitee Release 发布链路（下一刀，独立做；**不与寻址改造混 PR**）

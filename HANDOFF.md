@@ -6,6 +6,11 @@
 > 用户世界里只有一份；校准值写进工作副本 TOML，`index/offsets.json` 退役）。
 > 下文凡提"官方原件 / 用户另存 / 两条写路"的段落，按
 > [`docs/PRESET-WORKING-COPY-2026-10-08.md`](docs/PRESET-WORKING-COPY-2026-10-08.md) 读。
+>
+> ⚠️ **2026-10-11 清理**：`PUBLISH-KNIFE3/4-HANDOFF.md`、`HANDOFF-5-APP-UPDATE.md`、
+> `ASSET-CHAIN-HANDOFF.md`、`docs/TWO-REPO-ALIGNMENT.md`、`docs/PRESET-DELIVERY-CONTRACT.md`、
+> `docs/SupportEase-预设官方更新与用户自定义规则.md` 与 `.comate/specs/` 已删除（git 历史可查）；
+> 下文提到这些文件名处按「当时产物」读。全仓文档索引见 [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md)。
 
 # 交接：数据架构重做 —— 第一圈完成，第二圈进行中
 

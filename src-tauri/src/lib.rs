@@ -50,7 +50,7 @@ pub mod runtime;
 
 // 工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
 // 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
-// 见 .comate/specs/b03-backstage-workbench/doc.md §4
+// 设计来源见 git 历史（旧 spec：.comate/specs/b03-backstage-workbench/doc.md §4，2026-10-11 删）
 //
 // （这里刻意用行注释：块注释在 Rust 里是可嵌套的，正文里出现 `/` 加 `*` 会开一个新注释，
 // 而路径通配写法很容易写出那两个字符。）
