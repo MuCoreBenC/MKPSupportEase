@@ -65,6 +65,9 @@ const PEEK = 44
 /** 拖动超过这个距离才吸边，否则回弹 */
 const SNAP = 40
 
+/** 「正在重读…」那条提示的原文；读完（成或败）按原文收掉，不误伤别的提示 */
+const READING_NOTE = '正在重读执行记录…'
+
 const TAB_ALL = 'all'
 
 /** 详情里的一组（页签的一项） */
@@ -258,7 +261,11 @@ export default function PageReport() {
   const drag = useRef<{ x: number; y: number; dx: number; open: boolean; moved: boolean } | null>(
     null,
   )
-  /** 拖动结束后的那次 click 不当点击（否则刚滑开又被"选行"关回去） */
+  /**
+   * 下一次落到行按钮上的 click 不当"选行"：① 收起态点开抽屉那一下（露出的
+   * 44px 下面就是行按钮）；② 真拖拽收尾的那一下。新一次 pointerdown 会清残留，
+   * 挂不住（见 `onDown`）。
+   */
   const suppressClick = useRef(false)
 
   const read = useCallback(() => {
@@ -269,10 +276,17 @@ export default function PageReport() {
         setRows(list)
         /* 默认选中最新那条：进页面就有内容看，不用先点一下 */
         setSelId((cur) => cur ?? list[0]?.id ?? null)
+        /*
+         * 读到了就收掉那条「正在重读…」——不收回就是挂着的谎：
+         * 页面早就不在读了，提示还赖在那儿，用户只会当它坏了（提示条本来
+         * 就"手动关、不自动消失"，那**读完了**这件事就必须由代码自己说）。
+         */
+        setNote((cur) => (cur?.text === READING_NOTE ? null : cur))
       },
       (e: unknown) => {
         setRows([])
         setErr(errorText(e))
+        setNote((cur) => (cur?.text === READING_NOTE ? null : cur))
       },
     )
   }, [])
@@ -348,12 +362,13 @@ export default function PageReport() {
    *   现在收起/展开只认**真的是浮层**时的状态，常驻档永远落到"选中"。
    */
   const pick = (row: ReportSummary) => {
+    /*
+     * 收起态那一下点的是**把手**那 44px（整块列表在屏幕左缘之外，命中测试是空的），
+     * 所以这一下既要滑开、也要**顺手选上** —— 只滑开不选，用户得点两下才看见内容，
+     * 手感就是「点了没反应」。展开态才是纯粹的"换一条"，选完收回。
+     */
     if (suppressClick.current) {
       suppressClick.current = false
-      return
-    }
-    if (isFloating() && !sideOpen) {
-      setSideOpen(true)
       return
     }
     setSelId(row.id)
@@ -361,10 +376,28 @@ export default function PageReport() {
   }
 
   /* ---------- 滑盖拖拽（只在浮层档生效） ---------- */
+  /*
+   * ★★ 别在 pointerdown 当场 setPointerCapture。
+   *
+   * 已在 WebKit（Tauri macOS 的 WKWebView）与 Chromium 双内核实测：祖先（nav）
+   * 在按下的那一刻把指针 capture 走，这次按压随后产生的 click 会被重定向到祖先，
+   * 列表里每行 <button> 自己的 onClick 压根不触发 —— 表现就是窄窗浮层态下
+   * **整块执行记录怎么点都不切换**（宽窗口双栏档只是因为 `isFloating()` 早退、
+   * 没 capture 才一直是好的，所以平时试不出来）。
+   *
+   * 做法：按下只记账；等真的横过 8px 阈值（onMove）确认是拖拽，再 capture。
+   * 普通点击不 capture，click 老老实实落在行按钮上。
+   */
   const onDown = (e: React.PointerEvent<HTMLElement>) => {
+    /*
+     * 新一次按下绝不继承上一轮残留的 suppressClick：真拖拽后那次 click 会被
+     * capture 导向 nav（到不了行按钮），标记没人消费就挂住了；不在这儿清，
+     * 下一次点行会被白白吞掉。拖拽自己的那下 click 由**同一次**按压产生，
+     * 前面不会再有 pointerdown，所以这里清不掉"该压的那一下"。
+     */
+    suppressClick.current = false
     if (!isFloating()) return
     drag.current = { x: e.clientX, y: e.clientY, dx: 0, open: sideOpen, moved: false }
-    e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onMove = (e: React.PointerEvent<HTMLElement>) => {
     const d = drag.current
@@ -379,6 +412,8 @@ export default function PageReport() {
     }
     d.moved = true
     d.dx = dx
+    /* 确认是拖拽的这一刻才抓指针 —— 抓早了会把行按钮的 click 吃掉（见 onDown） */
+    e.currentTarget.setPointerCapture(e.pointerId)
     const el = sideRef.current
     el.style.transition = 'none'
     const min = -(el.getBoundingClientRect().width - PEEK)
@@ -396,11 +431,15 @@ export default function PageReport() {
     }
     if (!d.moved) {
       /*
-       * 没拖：收起态下点列表就是"滑过来"，随后那次 click 要压掉。
-       * ※ 收起态下用户还按不到列表（那一截只是把手），所以这里压掉的是把手上的 click；
-       *   展开态不压 —— 那才是真正的"选一条"。
+       * 没拖：收起态下点把手就是"滑过来"，随后那次 click 要压掉。
+       * ※ 现在 pointerdown 不再 capture（见 onDown），露出那 44px 下面压着的就是
+       *   一行行按钮 —— 不压就会变成「刚展开、又被这一行选中并关回去」，看起来
+       *   跟没反应一样。展开态不压 —— 那才是真正的"选一条"。
        */
-      if (!d.open && isFloating()) setSideOpen(true)
+      if (!d.open && isFloating()) {
+        setSideOpen(true)
+        suppressClick.current = true
+      }
       return
     }
     suppressClick.current = true
@@ -480,7 +519,7 @@ export default function PageReport() {
           <Btn
             onClick={() => {
               read()
-              setNote({ text: '正在重读执行记录…', bad: false })
+              setNote({ text: READING_NOTE, bad: false })
             }}
           >
             刷新
@@ -488,7 +527,9 @@ export default function PageReport() {
         </div>
       </header>
 
-      <NoteBar note={note} onClose={() => setNote(null)} />
+      <div className={s.noteSlot}>
+        <NoteBar note={note} onClose={() => setNote(null)} />
+      </div>
 
       {err !== null ? (
         <p className={s.err} role="alert">

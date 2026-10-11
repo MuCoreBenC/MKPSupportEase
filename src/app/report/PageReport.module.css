@@ -13,6 +13,7 @@
 .page {
   position: relative;
   container-type: inline-size;
+  container-name: report;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -47,6 +48,20 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+}
+
+/*
+ * 提示条自己是一条通栏，得由外面这格给它头部的左右留白 ——
+ * NoteBar 件本身不带 margin（它被设置页那套布局吃在中间），直接摆在 `.head`
+ * 后面就会贴着窗口边与页头左缘对不上（原文：看着像被裁掉了一半）。
+ */
+.noteSlot {
+  flex-shrink: 0;
+  padding: 0 clamp(16px, 2vw, 26px) 4px;
+}
+
+.noteSlot:empty {
+  padding: 0;
 }
 
 /* ============ 左：执行记录列表 ============ */
@@ -438,7 +453,12 @@
 
 /* ============ 窄档：列表滑盖化（手机分屏那种） ============ */
 
-@container (width < 880px) {
+/*
+ * ★ 容器查询要指名道姓（`container-name: report`）：WebView 里跨槽位的匿名
+ * `@container (width < …)` 实测不生效（浏览器里同一份 CSS 却是对的），
+ * 而**具名**查询两处都稳 —— 这条档位切不过来，用户看到的就是「浮层盖着、点了不切换」。
+ */
+@container report (width < 880px) {
   .pane {
     /* 收起时露出 44px，主区整体让开这一条 */
     grid-template-columns: 1fr;
