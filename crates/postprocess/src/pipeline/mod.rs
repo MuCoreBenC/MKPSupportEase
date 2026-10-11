@@ -485,9 +485,9 @@ fn run(
     if crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
         if collision.has_collision {
-            return Err(PostprocError::Collision {
-                message: "E_GCODE_COLLISION_001: 模型与擦料塔位置冲突".to_string(),
-            });
+            /* 无字段：码是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码
+            拼进正文，用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`） */
+            return Err(PostprocError::Collision);
         }
     }
 

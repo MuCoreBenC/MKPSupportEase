@@ -726,18 +726,18 @@ fn check_model_size(
         && (actual_height - expected_width).abs() < 0.5
         && expected_width != expected_height
     {
+        // 正文只给**机器判据**（`{diagnostics}`）：「检测到…请勿旋转」那句在表里，
+        // 且切片器那一面把它去掉（用户要看的是"别转我的模型"，不是这串数值）
         return Err(PostprocError::CalibrationMismatch {
             code: "E_CAL_MISMATCH_001",
-            message: format!("检测到校准模型可能被旋转。请勿旋转校准模型。（{context}）"),
+            message: context,
         });
     }
     if (actual_width - expected_width).abs() > 0.5 || (actual_height - expected_height).abs() > 0.5
     {
         return Err(PostprocError::CalibrationMismatch {
             code: "E_CAL_MISMATCH_002",
-            message: format!(
-                "检测到校准模型尺寸已变化。请勿缩放校准模型，仅允许移动位置。（{context}）"
-            ),
+            message: context,
         });
     }
     Ok(())
@@ -1165,12 +1165,10 @@ fn check_rotation_by_centroid(
         centroid.centroid_x, centroid.centroid_y, bbox.x_min, bbox.x_max, bbox.y_min, bbox.y_max,
     );
 
+    // 正文 = 机器判据（那两句"请勿旋转"的话在表里，切片器那一面还会再精简一次）
     let diag_180 = |rotation_type: &str| PostprocError::CalibrationMismatch {
         code: "E_CAL_MISMATCH_001",
-        message: format!(
-            "检测到校准模型可能被旋转 180 度。请勿旋转校准模型。\
-             （{context} rotation_type={rotation_type}）"
-        ),
+        message: format!("{context} rotation_type={rotation_type}"),
     };
 
     if dx_reversed && dy_reversed && dx_large_enough && dy_large_enough {
@@ -1205,10 +1203,7 @@ fn check_rotation_by_centroid(
         if magnitude_ok {
             return Err(PostprocError::CalibrationMismatch {
                 code: "E_CAL_MISMATCH_001",
-                message: format!(
-                    "检测到校准模型可能被旋转。请勿旋转校准模型。\
-                     （{context} is_square_model=true rotation_type=90_degree）"
-                ),
+                message: format!("{context} is_square_model=true rotation_type=90_degree"),
             });
         }
     }

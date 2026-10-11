@@ -28,7 +28,14 @@ const DAY = '2026-10-10'
 /** DAY 去掉分隔符的形式（记录 id 与输出文件名里用它） */
 const DAY_COMPACT = DAY.replace(/-/g, '')
 
-const CANCEL_ERROR = '已取消 [E_SYS_CANCELLED_001]：原文件没有被改动'
+/**
+ * 失败 / 取消那一行的话（`_meta.json` 的 `error` 字段）。
+ *
+ * ★ 2026-10-11 起：这句话由 Rust 侧的文案表（`crates/postprocess/messages.toml`）渲染后
+ * 写进记录，前端**不再自己拼**。形态是「结论：原因」——
+ * 「已取消」这一档**不带错误码**（用户自己按的停止不是错误，看门狗那种系统叫停才带）。
+ */
+const CANCEL_ERROR = '已取消：这一盘没有做后处理，原文件没有被改动'
 
 /** 一行记录的输入（顺序就是列表顺序：最新在前） */
 interface FixtureRow {

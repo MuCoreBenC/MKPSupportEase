@@ -129,12 +129,14 @@ pub fn insert_calibration_gcode(
         // `E_CAL_FAILED_001` 吃掉 —— 前者告诉用户「把校准模型转回来」，
         // 后者只能让人去翻日志。
         PostprocError::CalibrationMismatch { .. } => e,
+        // 这里只留**诊断细节**：「校准代码没有生成出来」那句与码都在表里
+        // （`messages.toml` 的 E_CAL_FAILED_001），正文里再写一遍码就是自我引用。
         other => PostprocError::Calibration {
-            message: format!("E_CAL_FAILED_001: 校准代码未生成（mode={mode_str}）: {other}"),
+            message: format!("mode={mode_str}：{other}"),
         },
     })?
     .ok_or_else(|| PostprocError::Calibration {
-        message: format!("E_CAL_FAILED_001: 校准代码未生成：无输出, mode={mode_str}"),
+        message: format!("无输出，mode={mode_str}"),
     })?;
 
     let is_direct_calibrate =

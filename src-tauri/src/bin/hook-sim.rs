@@ -31,6 +31,7 @@
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+use mkp_support_ease_lib::hook;
 use mkp_support_ease_lib::hook_ipc::{
     Client, FactsPayload, FinishedPayload, FromHook, ProgressPayload,
 };
@@ -247,41 +248,41 @@ fn main() -> ExitCode {
 
 /// 收场：把结论写进通道（三档与真钩子同一个形状）。
 ///
-/// 那几句话抄的是真跑时会出现的那几句（失败那句就是作者 2026-10-11 实测到的
-/// "模型超出打印边界"），所以那一屏的排版与真的一模一样。
+/// ★ 那几句话**不再手抄**（2026-10-11 改）：失败那句直接用**真的内核错误 + 真的文案表**
+/// 渲出来（[`hook::HookError::from`] + [`hook::conclusion_line`]），成功与取消那两句
+/// 走的是钩子自己那两个构造函数。抄一份的代价以前就摆在这儿 —— 演示屏上的字会与真跑
+/// 慢慢漂开，而演示屏的用处正是"看起来跟真的一样"。
 fn finish(client: &Client, mode: Mode, cancelled: bool, elapsed_ms: u64) -> ExitCode {
     const OUT: &str = "C:\\Users\\wzy\\AppData\\Local\\Temp\\（假钩子）演示.gcode";
     let payload = if cancelled {
-        FinishedPayload {
-            ok: false,
-            cancelled: true,
-            message: "已取消 [E_SYS_CANCELLED_001]：原文件没有被改动".to_owned(),
-            code: Some("E_SYS_CANCELLED_001".to_owned()),
-            stage: Some("pass2".to_owned()),
-            exit_code: 1,
-            elapsed_ms,
-            output: None,
-            warnings: Vec::new(),
-        }
+        /* 用户按的停止：**不给码**（同真钩子） */
+        let err = hook::HookError::user_cancelled();
+        finished_payload(&err, "pass2", elapsed_ms)
     } else if mode == Mode::Fail {
-        FinishedPayload {
-            ok: false,
-            cancelled: false,
-            message: "配置无效: E_GCODE_BOUNDARY_001: 模型超出打印边界，当前 Y: 181.4mm，\
-                      允许范围: ≤180.0mm"
-                .to_owned(),
-            code: Some("E_CFG_INVALID_001".to_owned()),
-            stage: Some("pass1".to_owned()),
-            exit_code: 1,
-            elapsed_ms,
-            output: None,
-            warnings: Vec::new(),
-        }
+        /* 作者 2026-10-11 实测到的那一条：模型超出打印边界（Y 181.4 > 180.0） */
+        let err = hook::HookError::from(postprocess::diag::PostprocError::Boundary {
+            code: "E_GCODE_BOUNDARY_001",
+            sides: postprocess::diag::messages::text(
+                "boundary.clause",
+                &[
+                    ("axis", "Y"),
+                    ("current", "181.4"),
+                    (
+                        "limit",
+                        &postprocess::diag::messages::text(
+                            "boundary.limit.max",
+                            &[("value", "180.0")],
+                        ),
+                    ),
+                ],
+            ),
+        });
+        finished_payload(&err, "pass1", elapsed_ms)
     } else {
         FinishedPayload {
             ok: true,
             cancelled: false,
-            message: format!("处理完成：{OUT}（{elapsed_ms} ms）"),
+            message: hook::success_line(std::path::Path::new(OUT), elapsed_ms as u128),
             code: None,
             stage: Some("printtime".to_owned()),
             exit_code: 0,
@@ -294,4 +295,20 @@ fn finish(client: &Client, mode: Mode, cancelled: bool, elapsed_ms: u64) -> Exit
     client.send(&FromHook::Finished(Box::new(payload)));
     eprintln!("（假钩子）演完了：{mode:?}（不落任何记录，报告页不会多一条）");
     ExitCode::SUCCESS
+}
+
+/// 失败/取消那两档的 payload：**照真钩子那条路**从错误里取原因与码（见 `hook::describe`）。
+fn finished_payload(err: &hook::HookError, stage: &str, elapsed_ms: u64) -> FinishedPayload {
+    let (message, code) = err.describe();
+    FinishedPayload {
+        ok: false,
+        cancelled: err.cancelled(),
+        message,
+        code,
+        stage: Some(stage.to_owned()),
+        exit_code: err.exit_code(),
+        elapsed_ms,
+        output: None,
+        warnings: Vec::new(),
+    }
 }

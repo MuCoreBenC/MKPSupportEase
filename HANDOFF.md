@@ -2296,3 +2296,67 @@ Mac 用 Mac 的可执行物与落点，Windows 用 Windows 的，**不硬编码�
   全绿（src-tauri lib **469** + 内核 lib **146** + 20 个集成测试文件全过）/
   `cargo test -p mkp-support-ease --features workbench`（**822**）/ `npx tsc -b` /
   `npm run lint`（只剩既有 2 条 react-refresh warning）/ `npm run build` + 四道闸全过。
+
+## 增量之三十五 · 切片器那一框能显示什么 + 文案收进一张表 + 后处理单开一条日志（2026-10-11，分支 `feat/postprocess-progress-modal`）
+
+起因是作者的一句话：「我在 macOS 上是可以做到的，能显示这些的……那我们完全可控，可以让
+BBS 显示什么不显示什么」。之前那一轮的结论（"切片器不吃脚本输出、传给它的唯一通道是退出码"）
+**只对 Windows 成立**。这一刀先把事实查清，再按事实重构。
+
+**§1 事实：去查了切片器的源码**（`libslic3r/GCode/PostProcessor.cpp`，本机副本
+`G:\code_study\260412\BambuStudio_source`）：
+
+- 那句 `Post-processing script … failed. Error code: N` 的 `Output:` 段
+  **当且仅当 `std_err` 非空**时才拼（§315-321 的三元表达式）；
+- **macOS**（§156-186）：`process::child(shell, "-c", command, process::std_err > istd_err)`
+  —— 我们的 stderr 被接走并原样显示 ⇒ **我们写什么用户就看到什么**；
+- **Windows**（§63-99）：`CreateProcessW(..., bInheritHandles=false, …)`，`run_script` 那个
+  `std_err` 形参**从头到尾没用过** ⇒ 框里只有命令 + `Error code: N`，**没有任何通道**。
+- 结论：能控的一半（macOS）真的能控，不能控的一半（Windows）只能靠我们自己的模态框与报告页
+  回答"到底哪儿不对"。逐条写在 `docs/HOOK-ERRORS-AND-MESSAGES.md` §1。
+
+**§2 文案收进一张表**（`crates/postprocess/messages.toml` + `src/diag/messages.rs`）：
+
+- 表是**编译进去的**（`include_str!`）不是运行时配置：没有"文件被删/改坏"这些状态，
+  改文案 = 改表 + 重编；缺键渲染成 `［未登记的文案 <键>］`（一眼看得见，不返回空串）。
+- **三个面各有字段**：`text`（界面 + 执行记录）、`slicer`（切片器那一行，缺省 = `text`）、
+  `code`（对外码；用户自己按的停止不写码，看门狗那两条写）。例：`E_CAL_MISMATCH_001` 的
+  `text` 带机器判据、`slicer` 不带 —— "该给谁看哪一句"终于是一处数据。
+- 内核 `PostprocError` **拆掉 `#[error("…")]`**（连 `thiserror` 依赖一起退）：变体只带码与
+  参数，句子在渲染那一刻取（手写 `Display` + `Error::source`）。打印边界那两条升成结构化码
+  `E_GCODE_BOUNDARY_001/002`（以前是"拿中文标题字符串比出码"），碰撞那条去掉正文里的码。
+  **旧毛病就此构造不出来**：`处理失败 [外层码]：配置无效: 里层码: 真因` 那种两层码。
+- 钩子层：`HookError` 从三个 `String` 变体改成「档位 + `Reason`（键 + 参数）」，
+  `split_code`（扫全文猜码那 50 行）**整个删掉**；`describe()` = 渲染 + 问表要码。
+  结论行/界面结论/记录三处共用 `conclusion_line()`，框子四个键住表里。
+- 判据：内核 `every_variant_has_a_message_entry`（每个码都要有条目）、
+  `the_rendered_sentence_never_carries_a_code`、`params_fill_the_template`；
+  表自检 `the_table_parses` / `placeholders_and_declared_params_agree` /
+  `every_entry_renders_clean` / `unknown_key_is_loud`；钩子侧
+  `every_key_the_hook_uses_exists_in_the_table`（`keys` + `ALL_KEYS`）、
+  `each_surface_says_its_own_thing_without_gluing_codes_into_the_sentence`、
+  `the_conclusion_line_frames_the_three_kinds`、`a_failure_points_at_the_hook_log`。
+
+**§3 后处理自己一条日志**（`src-tauri/src/obs/hook_log.rs`）：
+
+- `<内部根>/logs/hook.log.<日期>`（按天滚动，与应用那条 `supportease.log.<日期>` 分家）；
+  **只有文件层、刻意不叠 stderr**（stderr 是对外契约，见模块头）。
+- 顺带补了一个真空：钩子进程以前**没装过 subscriber**，内核那几句 `tracing::warn!`
+  （机型维度缺失、收笔 G-code 未定义、熨烫走回退路径…）**哪儿都没去**。现在它们有落点。
+- 记：开工（输入 / 预设）、看门狗叫停（带码，**当场**记 —— 结论要等管线收手）、
+  结论 + 退出码（失败 `error!` / 取消 `warn!`，码是独立字段，可检索）。
+- 失败/取消时 stderr 多一行 `完整日志：<路径>`（`hook.log_path`；装不上日志就不摆这一行）。
+
+**§4 连带**
+
+- 假钩子（`bin/hook-sim.rs`）不再手抄文案：失败那档直接用真的 `PostprocError::Boundary` +
+  真表渲染，取消/成功走 `HookError::user_cancelled()` / `hook::success_line()`。
+- 前端：mock 夹具那句 `已取消 [E_SYS_CANCELLED_001]：…` 换成新形态；后处理模态框里
+  "切片器不显示我们的 stderr"那条注释按 §1 的事实改写（`src/app/postprocess/PostProcessModal.tsx`）。
+- 文档：新增 `docs/HOOK-ERRORS-AND-MESSAGES.md`（事实 + 表 + 两条日志流的契约），
+  并入 `docs/DOC-INDEX.md` 第 1 组。
+
+- 验证：`cargo fmt --all` / 双 feature `clippy --all-targets -D warnings` / `cargo test`
+  全绿（src-tauri lib **483** + 内核 lib **165** + 集成测试全过）/
+  `cargo test -p mkp-support-ease --features workbench`（**836**）/ `npx tsc -b` /
+  `npm run lint` / `npm run build` + 四道闸全过。

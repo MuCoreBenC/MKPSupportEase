@@ -405,7 +405,9 @@ mod tests {
     fn toml_syntax_error_keeps_position_info() {
         let err = load_str("Tower = [[[", "<bad>", &[]).expect_err("语法错必须报错");
         let msg = err.to_string();
-        assert!(msg.contains("TOML 解析失败"), "实际: {msg}");
+        // 那句人话现在住 `messages.toml`（E_TOML_PARSE_001）；这里钉的是"报错里还认得出来
+        // 这是预设的 TOML 出了问题"，不是那句话的逐字形态
+        assert!(msg.contains("预设解析失败"), "实际: {msg}");
         assert!(
             msg.contains("line") || msg.contains('1'),
             "必须保留位置信息，实际: {msg}"

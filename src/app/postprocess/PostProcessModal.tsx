@@ -230,8 +230,10 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                 </p>
               )}
               {/*
-                退出码：**切片器那个报错框里显示的只有它**（"… failed. Error code: N"，
-                我们打的 stderr 那一整句它不显示）。把这一格摆出来，用户才能把两个框对上号
+                退出码：切片器那个报错框里**一定有**它（"… failed. Error code: N"）。
+                而我们在 stderr 上写的那一整句：**macOS 上它摆在同一个框的 `Output:` 段里，
+                Windows 上那个框根本不接脚本输出**（BBS 源码里那一支连管道都没建 ——
+                见 `docs/HOOK-ERRORS-AND-MESSAGES.md`）。把这一格摆出来，两个框才对得上号
                 （作者 2026-10-11 的真实困惑：那边只说 code 1，这边才知道是超边界还是碰撞）。
               */}
               {finished.exitCode !== 0 && (

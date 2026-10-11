@@ -9,6 +9,7 @@
 
 pub mod cancel;
 pub mod error;
+pub mod messages;
 
 pub use cancel::CancelToken;
 pub use error::PostprocError;

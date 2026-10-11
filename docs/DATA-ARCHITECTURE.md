@@ -86,7 +86,9 @@
 │                  **预设的那份就是官方基线**（2026-10-08 起这么叫）：程序管、用户不可见，
 │                  只用于与云端比对有没有新版
 ├── archive/       更新后旧版本的归档（不删）
-├── logs/          按天滚动日志
+├── logs/          按天滚动日志（**两条流**：`supportease.log.<日期>` = 界面那个常驻进程；
+│                 `hook.log.<日期>` = 后处理那一趟，2026-10-11 起。见
+│                 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4）
 └── run/           运行状态：`app-state.json`（使用中指针 activePreset / 编辑中的那一份 draft /
                    数据源地址 presetSource —— 见 `docs/APP-STATE.md`）。
                    编辑中的那份是**临时文件**：内容从用户工作副本复制出来，点保存才写回用户根

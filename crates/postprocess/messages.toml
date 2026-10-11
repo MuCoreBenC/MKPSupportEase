@@ -1,0 +1,234 @@
+# 「用户读到的那一句话」全住在这里 —— 业务代码里不许再写死文案。
+#
+# # 为什么是一张表
+#
+# 同一条错误，四个读者要的东西不一样：切片器那一框（它只该看到人话，见下）、本程序的
+# 模态框、执行记录（`_meta.json`）、日志。它们以前各拼各的 —— 于是同一件事在四处长得
+# 不一样，改动一次要 grep 五处，还出过「两层错误码糊在一句里」那种噪音
+# （`处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: …`）。
+#
+# 这张表把**码、人话、给谁看**摆在一起：改文案 / 改可见性只动这一处。
+#
+# # 它是编译进去的
+#
+# `include_str!`（见 `src/diag/messages.rs`）—— 不是运行时读的配置文件：没有「用户把表
+# 删了 / 改坏了 / 放了个半截」这种状态，也就没有兜底分支要写。改表 = 重新编译一次。
+#
+# # 字段
+#
+# - 键           —— 条目的名字。**与错误码同名的那几条是内核错误**（`PostprocError` 的每个
+#                  码都必须有一条，判据钉着，见 `diag/error.rs` 的测试）；`hook.*` 那几条是
+#                  **钩子层**（`src-tauri/src/hook.rs`）自己的说法。
+# - code         —— 对外稳定错误码。**键本身就是码时可省**（`E_*` 开头的键按码算）；
+#                  `hook.*` 那几条要给码才写。同一个码允许在两层各有一条（说法不同是常态：
+#                  内核那句给排查，钩子那句给用户）。
+# - text         —— 本程序里给用户看的那一句（界面模态框、执行记录、日志）。`{名字}` 是占位符。
+# - slicer       —— 给**切片器**那一行的口径，缺省 = 与 `text` 同一句。
+#                  ★ 「让切片器少看 / 别看 / 换个说法」就写在这个字段上。
+#                  （切片器那一框的实际行为、为什么只有 macOS 会显示，见
+#                  `docs/HOOK-ERRORS-AND-MESSAGES.md`。）
+# - params       —— 本条用到的占位符名字。**不是给运行时看的**（渲染时找不到就原样留
+#                  `{名字}`，一眼看得见），是给判据看的：每个占位符都要在这里登记，
+#                  这里登记的每个名字都要真被用到 —— 缺登记与多余登记都算红的。
+# - note         —— 给改表的人看的说明，运行时零消费。
+#
+# 占位符里几个固定名字的含义（内核那几条统一用它们）：
+#   {detail}      —— 内核就地拼出来的**诊断细节**（解析器的报错、参数名与量程…）。
+#                    这一档刻意留白：它们是数据不是文案，形态各异，硬套模板只会失真。
+#   {op}          —— 内核里那个操作名（`read_preset` / `read_gcode` / `write_output`）。
+#                    给排查用，不是给用户读的漂亮话。
+#   {diagnostics} —— 校准形变的机器判据（expected=… actual=…）。**切片器那一面把它去掉**：
+#                    用户要看的是"别转我的校准模型"，不是那串数值。
+
+# ---------------------------------------------------------------- 内核错误（码 = 键）
+
+["E_FILE_READ_001"]
+text = "文件读写失败（{target}）：{detail}"
+slicer = "这份文件读不出来 —— 检查它还在不在、是不是被别的程序占着"
+params = ["target", "detail"]
+note = "旧码复用：旧侧 filesystem 模块也拿它表示读写失败（见 diag/error.rs 的码对照）。{target} 两种来源：读侧是操作名（read_gcode…），写侧是落点路径"
+
+["E_FS_NOT_FOUND_001"]
+text = "找不到文件（{target}）：{detail}"
+slicer = "找不到这次要处理的那份文件（预设或 G-code）—— 检查路径还在不在"
+params = ["target", "detail"]
+
+["E_TOML_PARSE_001"]
+text = "预设解析失败（TOML 语法）：{path} —— {detail}"
+slicer = "这份预设本程序读不出来（多半是用别的版本导出的）—— 换一份，或把这份发给我们"
+params = ["path", "detail"]
+
+["E_CFG_PARSE_001"]
+text = "这份预设的机型不认识：换一份对应机型的预设（{path}）"
+params = ["path"]
+note = "刻意与旧侧不同：那边写「预设文件缺少 # machine: 声明」，而本项目的机型名是配置里的普通字段"
+
+["E_CFG_INVALID_001"]
+text = "配置无效：{detail}"
+params = ["detail"]
+note = "**兜底码**：参数级校验失败都走它。更具体的错走自己的码（如 E_GCODE_BOUNDARY_001）"
+
+["E_GCODE_COLLISION_001"]
+text = "模型与擦料塔的位置冲突：挪开模型或换一个擦料塔位置再切片"
+slicer = "模型与擦料塔的位置冲突 —— 回切片器挪开模型再切一次"
+
+["E_CAL_FAILED_001"]
+text = "校准代码没有生成出来：{detail}"
+slicer = "校准代码没有生成出来 —— 详见日志，把日志里那一段发给我们"
+params = ["detail"]
+
+["E_CAL_MISMATCH_001"]
+text = "检测到校准模型可能被旋转。请勿旋转校准模型。（{diagnostics}）"
+slicer = "检测到校准模型可能被旋转 —— 请勿旋转校准模型，只移动位置（详情见日志）"
+params = ["diagnostics"]
+
+["E_CAL_MISMATCH_002"]
+text = "检测到校准模型尺寸已变化。请勿缩放校准模型，仅允许移动位置。（{diagnostics}）"
+slicer = "检测到校准模型尺寸已变化 —— 请勿缩放校准模型，只移动位置（详情见日志）"
+params = ["diagnostics"]
+
+["E_GCODE_FAILED_001"]
+text = "处理失败：{detail}"
+params = ["detail"]
+
+["E_SYS_CANCELLED_001"]
+text = "已取消：{detail}"
+params = ["detail"]
+note = "内核那一路（Ctrl-C）。用户在界面上按的停止由钩子层的 hook.cancelled 说"
+
+["E_GCODE_BOUNDARY_001"]
+text = "模型超出打印边界，{sides}"
+slicer = "模型超出打印边界，{sides} —— 回切片器挪一下模型再切"
+params = ["sides"]
+
+["E_GCODE_BOUNDARY_002"]
+text = "模型超出涂胶范围，{sides}"
+slicer = "模型超出涂胶范围，{sides} —— 回切片器挪一下模型再切"
+params = ["sides"]
+
+# 边界那一句的几个零件（合起来才是上面 `{sides}`）—— 它们同样是文案，所以也住这里
+["boundary.clause"]
+text = "当前{axis}：{current}mm，允许范围：{limit}"
+params = ["axis", "current", "limit"]
+
+["boundary.limit.max"]
+text = "≤{value}mm"
+params = ["value"]
+
+["boundary.limit.min"]
+text = "≥{value}mm"
+params = ["value"]
+
+["boundary.separator"]
+text = "，"
+
+# ---------------------------------------------------------------- 钩子层（切片器 + 界面）
+
+# 前置检查：三句都在「还没碰过用户的文件」阶段，原文件一字未动
+["hook.preset_missing"]
+code = "E_FS_NOT_FOUND_001"
+text = "预设文件不存在：{path}"
+slicer = "找不到预设文件：{path} —— 检查切片器「后处理脚本」框里那条命令"
+params = ["path"]
+
+["hook.gcode_missing"]
+code = "E_FS_NOT_FOUND_001"
+text = "输入 G-code 不存在：{path}"
+slicer = "切片器给的 G-code 不在：{path}"
+params = ["path"]
+
+["hook.gcode_unreadable"]
+code = "E_FILE_READ_001"
+text = "读不到输入 G-code：{path}（{detail}）"
+slicer = "读不到切片器给的那份 G-code：{path}"
+params = ["path", "detail"]
+
+["hook.mismatch_question"]
+text = "这份 G-code 是 {gcode} 切出来的，而选中的预设是 {preset} 的 —— 维度与打印边界会按预设算，跑出来的可能是错的。还继续吗？"
+params = ["gcode", "preset"]
+
+["hook.mismatch_stopped"]
+text = "已停下（机型不匹配：G-code 是 {gcode}，预设是 {preset}）—— 原文件没有被改动"
+slicer = "机型不匹配，按你的选择停下：G-code 是 {gcode}，预设是 {preset}；原文件没有被改动"
+params = ["gcode", "preset"]
+
+["hook.mismatch_refuse"]
+code = "E_CFG_MISMATCH_001"
+text = "机型不匹配：G-code 是 {gcode}，预设是 {preset} —— 换一份对应机型的预设再跑"
+slicer = "机型不匹配：这份 G-code 是 {gcode} 切的，而注册的预设是 {preset} 的 —— 换一份对应机型的预设再跑"
+params = ["gcode", "preset"]
+note = "E_CFG_MISMATCH_001 是**新造码**（旧词汇表里没有）：这一档以前无码，报告与日志里搜不到"
+
+["hook.cancelled"]
+text = "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）"
+slicer = "这一盘没有做后处理，原文件没有被改动"
+
+["hook.stalled"]
+code = "E_SYS_STALLED_001"
+text = "超时停止：{minutes} 分钟没有任何进展（多半是卡住了）—— 原文件没有被改动"
+params = ["minutes"]
+note = "看门狗叫停。与用户自己按的停止分开给码：这一种是**系统替用户停的**，日志与报告里要能搜到"
+
+["hook.overrun"]
+code = "E_SYS_TIMEOUT_001"
+text = "超时停止：这一趟超过 {minutes} 分钟 —— 原文件没有被改动"
+params = ["minutes"]
+
+["hook.ok"]
+text = "处理完成：{output}（{ms} ms）"
+params = ["output", "ms"]
+
+["hook.warning"]
+text = "警告：{text}"
+params = ["text"]
+
+# 归档那一路的降级警告（产物优先：这些句子的意思都是"记录没落成，但 G-code 是好的"）
+["hook.archive_unavailable"]
+text = "归档不可用：找不到应用数据目录（这一次不落执行记录）"
+
+["hook.archive_backup_failed"]
+text = "原件备份失败（这一次不落执行记录）：{detail}"
+params = ["detail"]
+
+["hook.archive_output_failed"]
+text = "输出归档失败：{detail}"
+params = ["detail"]
+
+["hook.archive_fact_failed"]
+text = "输出文件事实读不出来：{detail}"
+params = ["detail"]
+
+["hook.archive_sha_failed"]
+text = "输出文件摘要算不出来：{detail}"
+params = ["detail"]
+
+["hook.archive_meta_failed"]
+text = "执行记录写入失败：{detail}"
+params = ["detail"]
+
+# ---------------------------------------------------------------- 结论行的框子
+
+# 切片器那一行（stderr）与界面那一屏共用同一个「原因」，但**框子**分开写：
+# 切片器只看到一句结论，界面上有自己的表头，不需要"处理失败："那层皮。
+["hook.line.failed"]
+text = "处理失败：{reason}［{code}］"
+params = ["reason", "code"]
+
+# 失败但没有码：理论分支（现在每一条失败都有码，留着是为了"哪天有人加了一条无码的
+# 失败"时，那一行仍然是一句人话，而不是一个空框）
+["hook.line.failed_nocode"]
+text = "处理失败：{reason}"
+params = ["reason"]
+
+["hook.line.stopped"]
+text = "已停止：{reason}［{code}］"
+params = ["reason", "code"]
+
+["hook.line.cancelled"]
+text = "已取消：{reason}"
+params = ["reason"]
+
+["hook.log_path"]
+text = "完整日志：{path}"
+params = ["path"]
+note = "失败/取消时追加在结论后面那一行 —— 用户报问题时把日志整段给我们"

@@ -37,13 +37,31 @@
 //! 切片器只看得见**退出码**与 **stderr**：成功 `0`、处理失败或用户取消 `1`、
 //! 输入/预设错 `2`。stderr **只写结论**：切片器把整段塞进它的错误对话框，
 //! 多写一行就是把唯一有用的那行往下推（旧世代实测过 30 行 INFO 埋掉真正原因）。
+//!
+//! ★ **切片器那一框到底吃什么**（2026-10-11 查了它的源码，见
+//! `docs/HOOK-ERRORS-AND-MESSAGES.md`）：macOS 上它把钩子的 **stderr 整段**摆在
+//! `Output:` 那一段里（所以"少写一行"是真的看得见的差别）；**Windows 上它根本不接管道**
+//! （`bInheritHandles=false`，那个 `std_err` 形参压根没用），只显示命令 + `Error code: N`。
+//! 于是"让切片器多显示 / 少显示"这件事，在 macOS 上靠我们写什么、在 Windows 上**做不到**。
+//!
+//! # 文案住哪
+//!
+//! **不在这里**。所有用户可见的句子都在 `postprocess/messages.toml`
+//! （[`Reason`] + [`keys`]），这一层只决定"给谁看哪一面"：
+//! 切片器看 `slicer` 那一面、界面与执行记录看 `text` 那一面。
+//!
+//! # 日志
+//!
+//! 这一趟的日志**单开一条流**：`<内部根>/logs/hook.log.<日期>`
+//! （[`crate::obs::hook_log`]）——与界面那条 `supportease.log.<日期>` 分家，
+//! 理由见那个模块头。失败时的结论行后面会跟一行**日志路径**（表里 `hook.log_path`）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use postprocess::diag::{CancelToken, PostprocError};
+use postprocess::diag::{messages, CancelToken, PostprocError};
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressSink};
 
 use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
@@ -56,36 +74,235 @@ pub const EXIT_FAILED: u8 = 1;
 /// 输入或预设本身不可用（文件不在、预设读不出来、机型不匹配而没人回答）。
 pub const EXIT_BAD_INPUT: u8 = 2;
 
-/// 一次钩子作业为什么没成。
-#[derive(Debug)]
-pub enum HookError {
+/// 本层用到的**文案键**。句子本体住 `postprocess/messages.toml`，这里只引用名字。
+///
+/// ★ 为什么不就地写字符串常量：判据要把它们挨个拿去表里问"这条在不在"
+/// （见 [`ALL_KEYS`]）。敲错一个键的表现是**用户眼前的框里**出现
+/// `［未登记的文案 hook.xxx］`，那种错不该靠眼睛在 2000 行里找。
+mod keys {
+    pub const PRESET_MISSING: &str = "hook.preset_missing";
+    pub const GCODE_MISSING: &str = "hook.gcode_missing";
+    pub const GCODE_UNREADABLE: &str = "hook.gcode_unreadable";
+    pub const MISMATCH_QUESTION: &str = "hook.mismatch_question";
+    pub const MISMATCH_STOPPED: &str = "hook.mismatch_stopped";
+    pub const MISMATCH_REFUSE: &str = "hook.mismatch_refuse";
+    pub const CANCELLED: &str = "hook.cancelled";
+    pub const STALLED: &str = "hook.stalled";
+    pub const OVERRUN: &str = "hook.overrun";
+    pub const OK: &str = "hook.ok";
+    pub const WARNING: &str = "hook.warning";
+    pub const ARCHIVE_UNAVAILABLE: &str = "hook.archive_unavailable";
+    pub const ARCHIVE_BACKUP_FAILED: &str = "hook.archive_backup_failed";
+    pub const ARCHIVE_OUTPUT_FAILED: &str = "hook.archive_output_failed";
+    pub const ARCHIVE_FACT_FAILED: &str = "hook.archive_fact_failed";
+    pub const ARCHIVE_SHA_FAILED: &str = "hook.archive_sha_failed";
+    pub const ARCHIVE_META_FAILED: &str = "hook.archive_meta_failed";
+    pub const LINE_FAILED: &str = "hook.line.failed";
+    pub const LINE_FAILED_NOCODE: &str = "hook.line.failed_nocode";
+    pub const LINE_STOPPED: &str = "hook.line.stopped";
+    pub const LINE_CANCELLED: &str = "hook.line.cancelled";
+    pub const LOG_PATH: &str = "hook.log_path";
+}
+
+/// 本层用到的**全部**键（判据遍历它）。
+///
+/// 加新键时**这里也要加** —— 这是本文件唯一一处"两处都改"的地方，判据
+/// `every_key_the_hook_uses_exists_in_the_table` 负责咬住"表里有没有这条"，
+/// 而"这个数组有没有漏"由 reviewer 看 diff（漏了只是那条键少一层保护，不会撒谎）。
+#[cfg(test)]
+const ALL_KEYS: &[&str] = &[
+    keys::PRESET_MISSING,
+    keys::GCODE_MISSING,
+    keys::GCODE_UNREADABLE,
+    keys::MISMATCH_QUESTION,
+    keys::MISMATCH_STOPPED,
+    keys::MISMATCH_REFUSE,
+    keys::CANCELLED,
+    keys::STALLED,
+    keys::OVERRUN,
+    keys::OK,
+    keys::WARNING,
+    keys::ARCHIVE_UNAVAILABLE,
+    keys::ARCHIVE_BACKUP_FAILED,
+    keys::ARCHIVE_OUTPUT_FAILED,
+    keys::ARCHIVE_FACT_FAILED,
+    keys::ARCHIVE_SHA_FAILED,
+    keys::ARCHIVE_META_FAILED,
+    keys::LINE_FAILED,
+    keys::LINE_FAILED_NOCODE,
+    keys::LINE_STOPPED,
+    keys::LINE_CANCELLED,
+    keys::LOG_PATH,
+];
+
+/// 一条「原因」：**文案键 + 具名参数**，句子按面现场渲染（界面 / 切片器 / 记录 / 日志）。
+///
+/// # 为什么不是一个拼好的 `String`（旧形态）
+///
+/// 同一条错误要在几个面上说不同的话（表里的 `text` 与 `slicer`）。拼成字符串之后就只剩
+/// **反着拆**这一条路 —— 旧版 `split_code` 就是干这个的：扫全文取"最后一个像 `E_*_NNN`
+/// 的 token"当码、再裁掉前缀当原因。它是 2026-10-09 那个 bug（界面只显示错误码、不显示
+/// 原因）的补丁，而它自己又带来了新噪音（两层码糊在一句里，`处理失败 [E_CFG_INVALID_001]：
+/// 配置无效: E_GCODE_BOUNDARY_001: …` —— 外层是变体名、里层才是真因，用户两边都读不懂）。
+///
+/// 现在：**码与参数一路是结构化的**，句子只在要给人看的那一刻从表里渲出来。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reason {
+    key: &'static str,
+    params: Vec<(&'static str, String)>,
+}
+
+impl Reason {
+    pub fn new(key: &'static str) -> Self {
+        Self {
+            key,
+            params: Vec::new(),
+        }
+    }
+
+    /// 带上一个占位符的值（表里 `{名字}`）。
+    pub fn with(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.params.push((name, value.into()));
+        self
+    }
+
+    pub fn key(&self) -> &'static str {
+        self.key
+    }
+
+    /// 对外稳定错误码 —— **由表里那条自己说了算**：条目写了 `code` 就用它，
+    /// 键本身就是码（`E_*`）就按键算，零件条目（`boundary.*`）没有码。
+    ///
+    /// ★ 于是"这一档给不给码"是**数据**，不是散在各处的 if：
+    /// 用户自己按的停止（`hook.cancelled`）没写 `code` ⇒ 界面不摆码；
+    /// 看门狗那两条写了 ⇒ 摆（那种停不是用户按的，报问题要能对上号）。
+    pub fn code(&self) -> Option<String> {
+        messages::code_of(self.key)
+    }
+
+    /// 本程序里给用户看的那一句（界面模态框、执行记录、日志）。
+    pub fn text(&self) -> String {
+        messages::text(self.key, &self.as_refs())
+    }
+
+    /// 给**切片器**那一行的口径（表里的 `slicer`，缺省 = [`Self::text`]）。
+    pub fn slicer(&self) -> String {
+        messages::slicer(self.key, &self.as_refs())
+    }
+
+    fn as_refs(&self) -> Vec<(&str, &str)> {
+        self.params.iter().map(|(k, v)| (*k, v.as_str())).collect()
+    }
+}
+
+/// 三档：谁的责任（退出码与界面说法都按它分，见模块头）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HookErrorKind {
     /// 输入/预设不可用 —— 还没碰过用户的文件，原文件一字未动。
-    BadInput(String),
+    BadInput,
     /// 处理失败 —— 内核的 `.part` 已经丢掉，原文件没被覆盖（write 步之前就返回了）。
-    Failed(String),
-    /// 用户（或 Ctrl-C）在半路叫停 —— 同上，原文件没被覆盖。
-    Cancelled(String),
+    Failed,
+    /// 用户（或 Ctrl-C / 看门狗）在半路叫停 —— 同上，原文件没被覆盖。
+    Cancelled,
+}
+
+/// 一次钩子作业为什么没成。**文案不属于这里** —— 它只带 [`Reason`]（键 + 参数）。
+#[derive(Debug, Clone)]
+pub struct HookError {
+    kind: HookErrorKind,
+    reason: Reason,
 }
 
 impl HookError {
+    pub fn bad_input(reason: Reason) -> Self {
+        Self {
+            kind: HookErrorKind::BadInput,
+            reason,
+        }
+    }
+
+    pub fn failed(reason: Reason) -> Self {
+        Self {
+            kind: HookErrorKind::Failed,
+            reason,
+        }
+    }
+
+    /// 「停下」这一档：用户按的停止 / Ctrl-C / 看门狗叫停 —— 界面说「已停止」，
+    /// 不是「失败」（名字不叫 `cancelled` 是因为它和下面的判定 [`Self::cancelled`]
+    /// 会撞名：Rust 的同名方法不允许两个签名）。
+    pub fn stopped(reason: Reason) -> Self {
+        Self {
+            kind: HookErrorKind::Cancelled,
+            reason,
+        }
+    }
+
     pub fn exit_code(&self) -> u8 {
-        match self {
-            Self::BadInput(_) => EXIT_BAD_INPUT,
-            Self::Failed(_) | Self::Cancelled(_) => EXIT_FAILED,
+        match self.kind {
+            HookErrorKind::BadInput => EXIT_BAD_INPUT,
+            HookErrorKind::Failed | HookErrorKind::Cancelled => EXIT_FAILED,
         }
     }
 
     /// 界面据此决定那一屏说什么：取消不是"失败"。
     pub fn cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled(_))
+        self.kind == HookErrorKind::Cancelled
+    }
+
+    pub fn reason(&self) -> &Reason {
+        &self.reason
+    }
+
+    /// 「用户自己按的停止」那一条：Ctrl-C 与界面上的停止按钮都归它（**无码** ——
+    /// 那是他的选择，不是错误；见 [`Reason::code`]）。
+    pub fn user_cancelled() -> Self {
+        Self::stopped(Reason::new(keys::CANCELLED))
+    }
+
+    /// 把"哪一档"改成**输入/预设错**（退出码 2）。
+    ///
+    /// 为什么需要它：同一个内核错误会出现在两个位置 —— 预设加载那一步失败是
+    /// **输入不可用**（`E_TOML_PARSE_001` / `E_CFG_PARSE_001` 都从那儿出），
+    /// 而管线里跑出来的失败是**处理失败**。退出码按**发生的位置**分、不按错误类型分
+    /// （与内核 `main.rs` 模块头同一条口径：按变体分会把"模型超出打印边界"报成"配置错"）。
+    pub fn as_bad_input(mut self) -> Self {
+        self.kind = HookErrorKind::BadInput;
+        self
+    }
+
+    /// 界面那一屏要的两件：**原因**（人话）与**稳定错误码**。
+    ///
+    /// 旧版在这里做字符串拆解（[`Reason`] 的文档里登记了那段历史）。现在两件都是现成的：
+    /// 原因按面渲一遍，码问表要 —— 于是"人话里夹着码"这种形态**构造不出来**。
+    pub fn describe(&self) -> (String, Option<String>) {
+        (self.reason.text(), self.reason.code())
+    }
+}
+
+/// 内核错误 → 钩子错误：**码与参数原样搭过来**（换面重渲时用的是同一份事实）。
+///
+/// 内核那个 `Cancelled` 例外：它只说"有人叫停了"，而这一层知道那是用户按的还是 Ctrl-C ——
+/// 统一说 [`keys::CANCELLED`] 那句（两边本来就是同一件事：这一盘没做，文件没动）。
+impl From<PostprocError> for HookError {
+    fn from(e: PostprocError) -> Self {
+        match e {
+            PostprocError::Cancelled { .. } => HookError::user_cancelled(),
+            other => {
+                let key = other.code();
+                let reason = other
+                    .params()
+                    .into_iter()
+                    .fold(Reason::new(key), |r, (name, value)| r.with(name, value));
+                HookError::failed(reason)
+            }
+        }
     }
 }
 
 impl std::fmt::Display for HookError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadInput(why) | Self::Failed(why) | Self::Cancelled(why) => f.write_str(why),
-        }
+        f.write_str(&self.reason.text())
     }
 }
 
@@ -184,21 +401,23 @@ pub fn run(
 
     // 前置检查（廉价）先做，且要说人话：这两句会出现在切片器的错误对话框里
     if !job.toml.is_file() {
-        return Err(HookError::BadInput(format!(
-            "预设文件不存在：{}",
-            job.toml.display()
-        )));
+        return Err(HookError::bad_input(
+            Reason::new(keys::PRESET_MISSING).with("path", job.toml.display().to_string()),
+        ));
     }
     if !job.gcode.is_file() {
-        return Err(HookError::BadInput(format!(
-            "输入 G-code 不存在：{}",
-            job.gcode.display()
-        )));
+        return Err(HookError::bad_input(
+            Reason::new(keys::GCODE_MISSING).with("path", job.gcode.display().to_string()),
+        ));
     }
 
     // 输入正文要读进内存：预设 → IR 的最后一步（机型 + 禁区）要拿它比 G-code 自报的机型
     let raw = std::fs::read_to_string(&job.gcode).map_err(|e| {
-        HookError::BadInput(format!("读不到输入 G-code：{}（{e}）", job.gcode.display()))
+        HookError::bad_input(
+            Reason::new(keys::GCODE_UNREADABLE)
+                .with("path", job.gcode.display().to_string())
+                .with("detail", e.to_string()),
+        )
     })?;
 
     // 记账起点（本地时刻）：归档记录里的 `startedAt`。读文件之后、干活之前 ——
@@ -214,18 +433,21 @@ pub fn run(
     let ir = match preset::load_ir(&job.toml, Some(&raw)) {
         Ok(ir) => ir,
         Err(e) => {
-            let message = format!("预设不可用 [{}]：{e}", e.code());
+            /* 码与参数**原样搭过来**（`From<PostprocError>`）：句子由表渲染，
+            这一层不再有 `预设不可用 [码]：…` 那种自己拼的前缀（那正是两层码的来路）。
+            档位改成"输入不可用"：这一步失败原文件一字未动，退出码该是 2 */
+            let err = HookError::from(e).as_bad_input();
             archive_failure(
                 &archived,
                 job,
                 "",
-                &message,
+                &conclusion_line(&err),
                 false,
                 raw.len() as u64,
                 started_at,
                 started,
             );
-            return Err(HookError::BadInput(message));
+            return Err(err);
         }
     };
 
@@ -246,46 +468,43 @@ pub fn run(
     let preset_machine = ir.machine.machine_type.clone();
     let gcode_machine = ir.machine.gcode_machine_type.clone();
     if is_machine_mismatch(&preset_machine, &gcode_machine) {
-        let question = format!(
-            "这份 G-code 是 {gcode_machine} 切出来的，而选中的预设是 {preset_machine} 的 —— \
-             维度与打印边界会按预设算，跑出来的可能是错的。还继续吗？"
-        );
+        /* 三句（问句 / 停下 / 拒绝）共用同一份事实：两个机型名 */
+        let with_machines = |key: &'static str| {
+            Reason::new(key)
+                .with("gcode", gcode_machine.clone())
+                .with("preset", preset_machine.clone())
+        };
+        let question = with_machines(keys::MISMATCH_QUESTION).text();
         match mismatch {
             MismatchPolicy::Ask(asker) => {
                 if !asker.confirm(&question) {
-                    let message = format!(
-                        "已停下（机型不匹配：G-code 是 {gcode_machine}，预设是 {preset_machine}）—— \
-                         原文件没有被改动"
-                    );
+                    let err = HookError::stopped(with_machines(keys::MISMATCH_STOPPED));
                     archive_failure(
                         &archived,
                         job,
                         &preset_machine,
-                        &message,
+                        &conclusion_line(&err),
                         true,
                         raw.len() as u64,
                         started_at,
                         started,
                     );
-                    return Err(HookError::Cancelled(message));
+                    return Err(err);
                 }
             }
             MismatchPolicy::Refuse => {
-                let message = format!(
-                    "机型不匹配：G-code 是 {gcode_machine}，预设是 {preset_machine} —— \
-                     换一份对应机型的预设再跑"
-                );
+                let err = HookError::bad_input(with_machines(keys::MISMATCH_REFUSE));
                 archive_failure(
                     &archived,
                     job,
                     &preset_machine,
-                    &message,
+                    &conclusion_line(&err),
                     false,
                     raw.len() as u64,
                     started_at,
                     started,
                 );
-                return Err(HookError::BadInput(message));
+                return Err(err);
             }
         }
     }
@@ -315,12 +534,12 @@ pub fn run(
     let done = match outcome {
         Ok(done) => done,
         Err(err) => {
-            let e = report_error(err);
+            let e = HookError::from(err);
             archive_failure(
                 &archived,
                 job,
                 &preset_machine,
-                &e.to_string(),
+                &conclusion_line(&e),
                 e.cancelled(),
                 raw.len() as u64,
                 started_at,
@@ -391,13 +610,16 @@ fn archive_begin(
     warnings: &mut Vec<String>,
 ) -> Option<ArchivePaths> {
     let Some(root) = crate::archive::history_root() else {
-        warnings.push("归档不可用：找不到应用数据目录（这一次不落执行记录）".to_string());
+        warnings.push(messages::text(keys::ARCHIVE_UNAVAILABLE, &[]));
         return None;
     };
     match crate::archive::begin(&root, gcode, raw, crate::archive::now_local()) {
         Ok(paths) => Some(paths),
         Err(e) => {
-            warnings.push(format!("原件备份失败（这一次不落执行记录）：{e}"));
+            warnings.push(messages::text(
+                keys::ARCHIVE_BACKUP_FAILED,
+                &[("detail", &e.to_string())],
+            ));
             None
         }
     }
@@ -422,18 +644,27 @@ fn archive_success(
         None
     } else {
         if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
-            warnings.push(format!("输出归档失败：{e}"));
+            warnings.push(messages::text(
+                keys::ARCHIVE_OUTPUT_FAILED,
+                &[("detail", &e.to_string())],
+            ));
         }
         match crate::archive::sha256_of(&done.output_path) {
             Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
                 Ok(fact) => Some(fact),
                 Err(e) => {
-                    warnings.push(format!("输出文件事实读不出来：{e}"));
+                    warnings.push(messages::text(
+                        keys::ARCHIVE_FACT_FAILED,
+                        &[("detail", &e.to_string())],
+                    ));
                     None
                 }
             },
             Err(e) => {
-                warnings.push(format!("输出文件摘要算不出来：{e}"));
+                warnings.push(messages::text(
+                    keys::ARCHIVE_SHA_FAILED,
+                    &[("detail", &e.to_string())],
+                ));
                 None
             }
         }
@@ -505,7 +736,10 @@ fn archive_success(
         detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
-        warnings.push(format!("执行记录写入失败：{e}"));
+        warnings.push(messages::text(
+            keys::ARCHIVE_META_FAILED,
+            &[("detail", &e.to_string())],
+        ));
     }
 }
 
@@ -590,96 +824,71 @@ pub fn is_machine_mismatch(preset_machine: &str, gcode_machine: &str) -> bool {
     !p.is_empty() && !g.is_empty() && p != g
 }
 
-/// 内核错误 → 钩子错误。整句原样留下（界面那一屏再拆成「原因 + 码」，见 [`describe`]）。
-fn report_error(e: PostprocError) -> HookError {
-    match e {
-        PostprocError::Cancelled { .. } => {
-            HookError::Cancelled(format!("已取消 [{}]：原文件没有被改动", e.code()))
-        }
-        other => HookError::Failed(format!("处理失败 [{}]：{other}", other.code())),
-    }
-}
-
-/// 界面那一屏要的三件：**原因**（人话）、**稳定错误码**、是不是用户取消。
+/// **结论那一行**：切片器的 stderr、执行记录的 `error` 字段共用这一处。
 ///
-/// # 为什么要拆
+/// 三档分得开：失败且**有码** ⇒ `处理失败：<原因>［<码>］`；失败但没码（理论分支，表里
+/// 也留了一条）⇒ `处理失败：<原因>`；取消/看门狗 ⇒ `已取消：…` / `已停止：…［码］`。
 ///
-/// 内核那句话里经常**嵌两层码**，实测形态：
-///
-/// ```text
-/// 处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: 模型超出打印边界，当前X：185.9mm…
-///            ^^^^^^^^^^^^^^^^ 外层（变体名）  ^^^^^^^^^^^^^^^^^^^^ 里层（真正的原因）
-/// ```
-///
-/// 直接整句摆给用户，他看到的是一串码，读不到"到底哪儿不对"（2026-10-09 作者原话：
-/// 「停只显示了个什么错误码而已，根本就没显示正确的错误原因」）。
-/// 所以：**里层码**（更具体那个）留下给排查用，**正文**只留码后面那截人话。
-/// 外层那句"配置无效"一并丢掉 —— 它常常是**变体名在说假话**（边界检查复用的就是
-/// `InvalidConfig` 这个变体，见内核 `diag/error.rs` 的登记）。
-pub fn describe(err: &HookError) -> (String, Option<String>) {
-    match err {
-        /* 取消不是"错误"：不摆码，也不摆那串 `E_SYS_CANCELLED_001` —— 用户自己按的，
-        他要看的是"现在是什么状态" */
-        HookError::Cancelled(_) => (
-            "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）".to_owned(),
-            None,
-        ),
-        HookError::BadInput(text) | HookError::Failed(text) => {
-            let (body, code) = split_code(text);
-            (body, code)
-        }
-    }
-}
-
-/// 从内核那句话里剥出**最具体**的稳定错误码（`E_*_NNN`），并返回码后面的人话。
-///
-/// 取值规则（简单到能一眼验）：扫全文，取**最后一个**像码的 token —— 越靠里越具体；
-/// 找不到就整句当人话（前置检查那几句本来就没有码）。
-fn split_code(text: &str) -> (String, Option<String>) {
-    /// 看着像不像一个错误码：`E_` 开头，后面全是大写字母 / 数字 / 下划线，且至少两段。
-    fn code_len_at(bytes: &[u8], at: usize) -> Option<usize> {
-        if bytes[at] != b'E' || bytes.get(at + 1) != Some(&b'_') {
-            return None;
-        }
-        let mut j = at + 2;
-        while j < bytes.len() {
-            let c = bytes[j];
-            if c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_' {
-                j += 1;
-            } else {
-                break;
-            }
-        }
-        let token = &bytes[at..j];
-        (token.len() > 4 && token.iter().filter(|c| **c == b'_').count() >= 2).then_some(j - at)
-    }
-
-    let bytes = text.as_bytes();
-    let mut found: Option<(usize, usize)> = None; // (码的起点, 码的终点)
-    let mut i = 0;
-    while i < bytes.len() {
-        if let Some(len) = code_len_at(bytes, i) {
-            found = Some((i, i + len));
-            i += len;
-            continue;
-        }
-        i += 1;
-    }
-
-    let Some((start, end)) = found else {
-        return (text.to_owned(), None);
+/// ★ 这里**一个字都不写死**：四个框子都在 `messages.toml`（`hook.line.*`）。
+/// 曾经这一行是 `处理失败 [外层码]：外层变体名: 里层码: 真原因` ——
+/// 用户在一句话里读到两个码，谁也看不出哪个才是原因（2026-10-09 作者点名的那条）。
+pub fn conclusion_line(err: &HookError) -> String {
+    let reason = err.reason();
+    let params = |reason_text: &str, code: &str| {
+        vec![
+            ("reason", reason_text.to_string()),
+            ("code", code.to_string()),
+        ]
     };
-    let code = text[start..end].to_owned();
-    /* 正文取码**之后**那截（码前面是外层包装：`处理失败 [外层码]：配置无效: ` 之类）——
-    它们对用户没有信息量，留着只会把真正的原因往后推。 */
-    let mut tail = text[end..]
-        .trim_start_matches([']', ':', '：', ' ', '，', '。'])
-        .trim();
-    if tail.is_empty() {
-        /* 码后面什么都没有（整句就是个码）：那就整句当人话，别给一屏空白 */
-        tail = text;
+    match (err.cancelled(), reason.code()) {
+        (false, Some(code)) => {
+            let p = params(&reason.slicer(), &code);
+            messages::text(keys::LINE_FAILED, &refs(&p))
+        }
+        (false, None) => {
+            let p = params(&reason.slicer(), "");
+            messages::text(keys::LINE_FAILED_NOCODE, &refs(&p))
+        }
+        (true, Some(code)) => {
+            let p = params(&reason.slicer(), &code);
+            messages::text(keys::LINE_STOPPED, &refs(&p))
+        }
+        (true, None) => {
+            let p = params(&reason.slicer(), "");
+            messages::text(keys::LINE_CANCELLED, &refs(&p))
+        }
     }
-    (tail.to_owned(), Some(code))
+}
+
+/// 成功那一行（界面结论与 stderr 同一句）。**公开**是给假钩子
+/// （`bin/hook-sim.rs`）用的：演示屏上的字因此与真跑一次一模一样，不再是手抄一份。
+pub fn success_line(output: &Path, elapsed_ms: u128) -> String {
+    messages::text(
+        keys::OK,
+        &[
+            ("output", &output.display().to_string()),
+            ("ms", &elapsed_ms.to_string()),
+        ],
+    )
+}
+
+/// 失败/取消时往 stderr 写的**那几行**（**纯函数**，判据咬得住"日志路径那一行在不在"）。
+///
+/// 第一行是结论（切片器框里就它）；第二行（可选）是这一趟的日志落点。
+pub fn failure_lines(err: &HookError, log: Option<&Path>) -> Vec<String> {
+    let mut lines = vec![conclusion_line(err)];
+    if let Some(path) = log {
+        lines.push(messages::text(
+            keys::LOG_PATH,
+            &[("path", &path.display().to_string())],
+        ));
+    }
+    lines
+}
+
+/// `Vec<(&str, String)>` → 渲染要的 `&[(&str, &str)]`（两条渲染路径都过这里，不各写一遍）。
+fn refs<'a>(params: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)> {
+    params.iter().map(|(k, v)| (*k, v.as_str())).collect()
 }
 
 /// **钩子进程的入口**：接上通道 → 干活 → 把结论写进通道 → 立刻退。
@@ -697,10 +906,20 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         eprintln!("Ctrl-C 处理器装配失败（{e}），继续但不支持协作取消");
     }
 
-    /* 端点文件在内部根下（钩子这侧没有 AppHandle，靠标识符自己算）。
-    算不出来 / 连不上 / 起不来 ⇒ 一条"没有界面"的线：照旧干活 */
-    let client = match crate::fsx::paths::internal_root_headless() {
-        Some(root) => crate::hook_ipc::Client::connect_or_spawn(&root, &cancel),
+    /* 内部根（钩子这侧没有 AppHandle，靠标识符自己算）：两处要用 —— 端点文件与日志目录。
+    算不出来 ⇒ 一条"没有界面、也没有日志"的线：照旧干活（见 `obs::hook_log` 模块头） */
+    let root = crate::fsx::paths::internal_root_headless();
+    let log = root
+        .as_ref()
+        .and_then(|root| crate::obs::hook_log::init(&root.join("logs")));
+    tracing::info!(
+        input = %job.gcode.display(),
+        preset = %job.toml.display(),
+        "后处理开始"
+    );
+
+    let client = match &root {
+        Some(root) => crate::hook_ipc::Client::connect_or_spawn(root, &cancel),
         None => crate::hook_ipc::Client::headless(&cancel),
     };
     client.send(&crate::hook_ipc::FromHook::Hello {
@@ -750,14 +969,23 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
     );
     client.send(&crate::hook_ipc::FromHook::Finished(Box::new(payload)));
 
-    /* stderr 那一行（切片器会把 stderr 给用户看）与退出码走同一条路 —— 两处口径不许各写一份 */
-    ExitCode::from(report(done))
+    /* stderr 那一行（切片器会把 stderr 给用户看）与退出码走同一条路 —— 两处口径不许各写一份。
+    日志路径只在**真有那份日志**时给（装不上就别指一个不存在的地方） */
+    ExitCode::from(report(done, log.as_deref()))
 }
 
 /// 没有通道的那条路（判据 / 极端情况）：跑一次，结论只写 stderr。
 pub fn run_and_report(job: &HookJob) -> ExitCode {
     let cancel = CancelToken::new();
     let mut sink = NoProgress;
+    /* 这条路同样单开一条日志流（判据走它，也能顺手验"日志装得上"） */
+    let log = crate::fsx::paths::internal_root_headless()
+        .and_then(|root| crate::obs::hook_log::init(&root.join("logs")));
+    tracing::info!(
+        input = %job.gcode.display(),
+        preset = %job.toml.display(),
+        "后处理开始（无界面那条路）"
+    );
     // 没有界面 ⇒ 打印时间必须自己算完（`defer = false`），否则记录永远停在"正在估算"
     let done = run(
         job,
@@ -767,7 +995,7 @@ pub fn run_and_report(job: &HookJob) -> ExitCode {
         false,
         UiLine::Silent,
     );
-    ExitCode::from(report(done))
+    ExitCode::from(report(done, log.as_deref()))
 }
 
 fn file_name_of(p: &std::path::Path) -> String {
@@ -851,7 +1079,8 @@ pub fn watchdog_verdict(
 /// 这一趟"还在动吗"的那点状态（进度出口报平安，看门狗读它）。
 pub struct Watch {
     last: Mutex<Instant>,
-    reason: Mutex<Option<String>>,
+    /// 看门狗叫停的理由（**键 + 参数**，与作业失败共用那张表）。
+    reason: Mutex<Option<Reason>>,
 }
 
 impl Watch {
@@ -870,11 +1099,11 @@ impl Watch {
         *self.last.lock().expect("锁没坏")
     }
 
-    fn reason(&self) -> Option<String> {
+    fn reason(&self) -> Option<Reason> {
         self.reason.lock().expect("锁没坏").clone()
     }
 
-    fn stop_with(&self, why: String) {
+    fn stop_with(&self, why: Reason) {
         let mut g = self.reason.lock().expect("锁没坏");
         if g.is_none() {
             *g = Some(why);
@@ -883,6 +1112,11 @@ impl Watch {
 }
 
 /// 看门狗那一圈：到点就**请求取消**并留下理由（界面据此说清是哪一种停）。
+///
+/// 两种叫停各自**有自己的码**（`E_SYS_STALLED_001` / `E_SYS_TIMEOUT_001`）：
+/// 与用户自己按的停止分开 —— 那一种没码（用户的选择不用报错码），
+/// 这一种是**系统替用户停的**，日志与报告里要能搜到（作者 2026-10-11 点名要的
+/// "处理过程中的中断"）。
 fn spawn_watchdog(watch: Arc<Watch>, cancel: CancelToken) {
     std::thread::spawn(move || {
         let started = Instant::now();
@@ -891,31 +1125,30 @@ fn spawn_watchdog(watch: Arc<Watch>, cancel: CancelToken) {
             if cancel.is_cancelled() {
                 return; // 已经有人叫停了（用户按的 / Ctrl-C），不用再看
             }
-            match watchdog_verdict(
+            let verdict = watchdog_verdict(
                 Instant::now(),
                 started,
                 watch.last(),
                 WATCHDOG_IDLE,
                 WATCHDOG_TOTAL,
-            ) {
-                WatchdogVerdict::Fine => {}
-                WatchdogVerdict::Idle => {
-                    watch.stop_with(format!(
-                        "超时停止：{} 分钟没有任何进展（多半是卡住了）—— 原文件没有被改动",
-                        WATCHDOG_IDLE.as_secs() / 60
-                    ));
-                    cancel.cancel();
-                    return;
-                }
-                WatchdogVerdict::Overrun => {
-                    watch.stop_with(format!(
-                        "超时停止：这一趟超过 {} 分钟 —— 原文件没有被改动",
-                        WATCHDOG_TOTAL.as_secs() / 60
-                    ));
-                    cancel.cancel();
-                    return;
-                }
-            }
+            );
+            let reason = match verdict {
+                WatchdogVerdict::Fine => continue,
+                WatchdogVerdict::Idle => Reason::new(keys::STALLED)
+                    .with("minutes", (WATCHDOG_IDLE.as_secs() / 60).to_string()),
+                WatchdogVerdict::Overrun => Reason::new(keys::OVERRUN)
+                    .with("minutes", (WATCHDOG_TOTAL.as_secs() / 60).to_string()),
+            };
+            /* 日志那一面：叫停这件事**当场**记下来（结论行要等管线收手才出来，
+            中间隔着内核的检查间隔；卡死那一档尤其要看得出"是看门狗先动的"） */
+            tracing::warn!(
+                code = reason.code().unwrap_or_default(),
+                "{}",
+                reason.text()
+            );
+            watch.stop_with(reason);
+            cancel.cancel();
+            return;
         }
     });
 }
@@ -925,17 +1158,13 @@ fn finished_payload(
     done: &Result<Outcome, HookError>,
     elapsed_ms: u128,
     stage: Option<String>,
-    stop_reason: Option<String>,
+    stop_reason: Option<Reason>,
 ) -> crate::hook_ipc::FinishedPayload {
     match done {
         Ok(out) => crate::hook_ipc::FinishedPayload {
             ok: true,
             cancelled: false,
-            message: format!(
-                "处理完成：{}（{} ms）",
-                out.output.display(),
-                out.elapsed_ms
-            ),
+            message: success_line(&out.output, out.elapsed_ms),
             code: None,
             stage,
             exit_code: EXIT_OK,
@@ -944,20 +1173,19 @@ fn finished_payload(
             warnings: out.warnings.clone(),
         },
         Err(err) => {
-            /* 原因与码分家：界面把原因摆正中、码摆小字（见 [`describe`]）。
+            /* 原因与码分家：界面把原因摆正中、码摆小字。
             取消那一档优先用**停止的理由**（用户按的？看门狗收的？）——
-            只说"已停止"会把"为什么停"藏起来 */
-            let (message, code) = describe(err);
-            let message = if err.cancelled() {
-                stop_reason.unwrap_or(message)
-            } else {
-                message
+            只说"已停止"会把"为什么停"藏起来。
+            ★ 码由表决定（看门狗那两条有码，用户自己按的没有），不是这里 if 出来的 */
+            let reason = match (err.cancelled(), stop_reason) {
+                (true, Some(stop)) => stop,
+                _ => err.reason().clone(),
             };
             crate::hook_ipc::FinishedPayload {
                 ok: false,
                 cancelled: err.cancelled(),
-                message,
-                code,
+                message: reason.text(),
+                code: reason.code(),
                 stage,
                 exit_code: err.exit_code(),
                 elapsed_ms: elapsed_ms as u64,
@@ -968,25 +1196,40 @@ fn finished_payload(
     }
 }
 
-/// 结论 → stderr 那一行 + 退出码。**有界面与没界面两条路共用这一处**：
+/// 结论 → **stderr 那一行** + 退出码。**有界面与没界面两条路共用这一处**：
 /// 两处各写一份的话，迟早有一处少一行（旧世代就是这么丢过失败原因的）。
-pub fn report(done: Result<Outcome, HookError>) -> u8 {
+///
+/// `log`：这一趟的后处理日志落点（装不上时是 `None`）。失败/取消时在结论后面补一行
+/// 「完整日志：<路径>」—— 用户报问题时把那一段发给我们，比复述症状有用得多。
+/// **成功不补**：那一行会挤掉产物路径，而成功时切片器根本不弹框。
+pub fn report(done: Result<Outcome, HookError>, log: Option<&Path>) -> u8 {
     match done {
         Ok(out) => {
-            eprintln!(
-                "处理完成：{} （{} ms）",
-                out.output.display(),
-                out.elapsed_ms
-            );
+            let line = success_line(&out.output, out.elapsed_ms);
+            tracing::info!(output = %out.output.display(), ms = out.elapsed_ms, "{line}");
+            eprintln!("{line}");
             // 警告各占一行：那是**用户要看的东西**，不是日志
             for w in &out.warnings {
-                eprintln!("警告：{w}");
+                let line = messages::text(keys::WARNING, &[("text", w)]);
+                tracing::warn!("{line}");
+                eprintln!("{line}");
             }
             EXIT_OK
         }
         Err(err) => {
+            let lines = failure_lines(&err, log);
+            /* 日志那一面：码单独成字段（能按码检索），停/失败用不同级别 ——
+            "中断"与"失败"在翻日志时是第一眼要分开的 */
+            let code = err.reason().code().unwrap_or_default();
+            if err.cancelled() {
+                tracing::warn!(code, exit_code = err.exit_code(), "{}", lines[0]);
+            } else {
+                tracing::error!(code, exit_code = err.exit_code(), "{}", lines[0]);
+            }
             // 失败原因**一定**要出去：切片器只会把 stderr 的文字给用户看
-            eprintln!("{err}");
+            for line in &lines {
+                eprintln!("{line}");
+            }
             err.exit_code()
         }
     }
@@ -1092,10 +1335,15 @@ mod tests {
         std::fs::write(&gcode, "G28\n").expect("写输入");
         let err = run_headless(&toml, &gcode).expect_err("坏预设必须报错");
         assert_eq!(err.exit_code(), EXIT_BAD_INPUT);
+        /* 码是**结构化的**（`Reason::code`），不再靠正文里夹一串 `[E_XXX_001]` ——
+        所以这条判据改成问 `describe()` 要码，顺带钉住"人话里没有码" */
+        let (reason, code) = err.describe();
+        assert_eq!(code.as_deref(), Some("E_TOML_PARSE_001"), "{reason}");
         assert!(
-            err.to_string().contains("预设不可用 [E_"),
-            "带上稳定错误码：{err}"
+            !reason.contains("E_TOML_PARSE_001"),
+            "人话里不许夹码：{reason}"
         );
+        assert!(reason.contains("预设解析失败"), "{reason}");
     }
 
     /// **机型不匹配**：预设是 A1、G-code 自报 A1 mini ⇒ 没界面时**不猜**，
@@ -1226,46 +1474,114 @@ mod tests {
         assert!(leftovers.is_empty(), "中间文件残留：{leftovers:?}");
     }
 
-    /// 界面那句话的拆法：**里层码**与**原因**分家。
-    ///
-    /// 这条钉的是 2026-10-09 作者点名的那个 bug：「停只显示了个什么错误码而已，
-    /// 根本就没显示正确的错误原因」。
+    /// 本层用到的每个文案键都**真在表里**（敲错键的表现是用户那边的框里出现
+    /// `［未登记的文案 hook.xxx］`）。
     #[test]
-    fn the_display_sentence_splits_the_code_from_the_reason() {
-        // 内核那句的实测形态（两层码：外层是变体名，里层才是真因）
-        let err = HookError::Failed(
-            "处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: \
-             模型超出打印边界，当前X：185.9mm，允许范围：≤180.0mm"
-                .to_owned(),
-        );
-        let (why, code) = describe(&err);
+    fn every_key_the_hook_uses_exists_in_the_table() {
+        for key in ALL_KEYS {
+            assert!(
+                messages::has(key),
+                "{key} 在 messages.toml 里没有条目 —— 新增说法必须同时补表"
+            );
+        }
+    }
+
+    /// **人话里不许夹码**，且每个面说自己的那份（这条钉的是 2026-10-09 作者点名的那个
+    /// bug：「停只显示了个什么错误码而已，根本就没显示正确的错误原因」）。
+    ///
+    /// ★ 形态变了：以前这条判据喂一个**字符串**给 `HookError`，再验"拆得对不对"；
+    /// 现在没有"拆"这一步（码与原因本来就是结构化进来的），所以改成喂**真的内核错误**，
+    /// 验三面各自长什么样。
+    #[test]
+    fn each_surface_says_its_own_thing_without_gluing_codes_into_the_sentence() {
+        // 内核那条边界错误：旧形态是 `InvalidConfig` 里塞一句带码的正文（于是两层码）
+        let err = HookError::from(PostprocError::Boundary {
+            code: "E_GCODE_BOUNDARY_001",
+            sides: "当前X：185.9mm，允许范围：≤180.0mm".to_owned(),
+        });
+
+        let (reason, code) = err.describe();
         assert_eq!(
             code.as_deref(),
             Some("E_GCODE_BOUNDARY_001"),
-            "要留**里层**那个更具体的码"
+            "码要跟最具体的那个走"
         );
-        assert_eq!(why, "模型超出打印边界，当前X：185.9mm，允许范围：≤180.0mm");
-        assert!(!why.contains("E_"), "人话里不许再夹码：{why}");
-
-        // 像码的那一截**不在开头**也要认得出来（预设不可用那句前面还有自己的前缀）
-        let err = HookError::BadInput(
-            "预设不可用 [E_CFG_PARSE_001]：TOML 解析失败 : 这份预设比本程序新".to_owned(),
+        assert!(reason.starts_with("模型超出打印边界"), "{reason}");
+        assert!(!reason.contains("E_"), "人话里不许夹码：{reason}");
+        assert!(
+            !reason.contains("配置无效"),
+            "外层那句假话（变体名）不许露头：{reason}"
         );
-        let (why, code) = describe(&err);
-        assert_eq!(code.as_deref(), Some("E_CFG_PARSE_001"));
-        assert!(why.starts_with("TOML 解析失败"), "{why}");
 
-        // 没有码的那几句：原样给人话
-        let err = HookError::BadInput("预设文件不存在：C:\\x\\A1.toml".to_owned());
-        let (why, code) = describe(&err);
-        assert!(code.is_none());
-        assert!(why.contains("预设文件不存在"), "{why}");
+        // 切片器那一面 = 结论框子 + 人话 + 码
+        let line = conclusion_line(&err);
+        assert!(line.starts_with("处理失败："), "{line}");
+        assert!(line.contains(&reason), "{line} 里该有原因");
+        assert!(line.contains("［E_GCODE_BOUNDARY_001］"), "{line}");
+        assert!(
+            !line.contains("E_CFG_INVALID_001"),
+            "外层码不该出现：{line}"
+        );
 
-        // 取消：**不给码**，只给状态（用户自己按的停止不是"错误"）
-        let err = HookError::Cancelled("已取消 [E_SYS_CANCELLED_001]：原文件没有被改动".to_owned());
-        let (why, code) = describe(&err);
-        assert!(code.is_none(), "用户按的停止不该摆错误码");
-        assert!(why.contains("原文件没有被改动"), "{why}");
+        /* 表里给切片器**单独写了说法**的那一条：两面必须不一样 ——
+        校准形变那串机器判据留给界面/记录/日志，切片器只看"别转我的模型" */
+        let rotated = HookError::from(PostprocError::CalibrationMismatch {
+            code: "E_CAL_MISMATCH_001",
+            message: "expected=1x2 actual=2x1".to_owned(),
+        });
+        let (ui, _) = rotated.describe();
+        let slicer_line = conclusion_line(&rotated);
+        assert!(ui.contains("expected=1x2"), "记录/界面那一面留着判据：{ui}");
+        assert!(
+            !slicer_line.contains("expected=1x2"),
+            "切片器那一面不该看机器判据：{slicer_line}"
+        );
+        assert!(slicer_line.contains("请勿旋转校准模型"), "{slicer_line}");
+    }
+
+    /// 结论行分三档：**失败**（有码）、**取消/用户按的**（无码）、**停止/系统收的**（有码）。
+    ///
+    /// 「用户自己按的停不给码」是刻意的（那是他的选择，不是错误）；而看门狗那两种是
+    /// **系统替用户停的** —— 报问题时得能对上号，所以表里给它们写了码。
+    #[test]
+    fn the_conclusion_line_frames_the_three_kinds() {
+        let failed =
+            HookError::failed(Reason::new(keys::PRESET_MISSING).with("path", "C:\\x\\A1.toml"));
+        let line = conclusion_line(&failed);
+        assert!(line.starts_with("处理失败："), "{line}");
+        assert!(line.contains("C:\\x\\A1.toml"), "{line}");
+        assert!(line.contains("［E_FS_NOT_FOUND_001］"), "{line}");
+
+        let by_user = HookError::stopped(Reason::new(keys::CANCELLED));
+        let line = conclusion_line(&by_user);
+        assert!(line.starts_with("已取消："), "{line}");
+        assert!(!line.contains("E_"), "用户按的停不该摆码：{line}");
+        assert!(line.contains("原文件没有被改动"), "{line}");
+
+        let by_watchdog = HookError::stopped(
+            Reason::new(keys::STALLED).with("minutes", (WATCHDOG_IDLE.as_secs() / 60).to_string()),
+        );
+        let line = conclusion_line(&by_watchdog);
+        assert!(line.starts_with("已停止："), "{line}");
+        assert!(line.contains("［E_SYS_STALLED_001］"), "{line}");
+    }
+
+    /// 失败时**多给一行日志落点**（用户报问题时把它整段发给我们）；
+    /// 装不上日志（`None`）时那一行不出现 —— 不指一个不存在的文件。
+    #[test]
+    fn a_failure_points_at_the_hook_log() {
+        let err =
+            HookError::failed(Reason::new(keys::PRESET_MISSING).with("path", "C:\\x\\A1.toml"));
+        let with = failure_lines(
+            &err,
+            Some(std::path::Path::new("C:\\data\\logs\\hook.log.2026-10-11")),
+        );
+        assert_eq!(with.len(), 2, "{with:?}");
+        assert!(with[1].starts_with("完整日志："), "{:?}", with[1]);
+        assert!(with[1].contains("hook.log.2026-10-11"), "{:?}", with[1]);
+
+        let without = failure_lines(&err, None);
+        assert_eq!(without.len(), 1, "没有日志就不摆那一行：{without:?}");
     }
 
     /// **「点了停止就该立刻停」**：跑到一半置位取消，管线必须马上收手。

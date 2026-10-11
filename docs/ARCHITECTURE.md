@@ -164,6 +164,10 @@ Rust 侧的字段名与 TS 那份靠 `error.rs` 里的单元测试钉住 —— 
 日志：`tracing` + `tracing-appender` 按天滚动，写进 `internal_root/logs/`；dev 下同时输出 stderr。
 日志目录不可用时退到只写 stderr，**不阻断启动**。用 `SUPPORTEASE_LOG` 环境变量调级别。
 
+**两条流**（2026-10-11 起）：界面那个常驻进程写 `supportease.log.<日期>`；**后处理**（切片器
+拉起的那一次进程）写 `hook.log.<日期>` —— 读者与量级都不同（而且钩子的 stderr 是对外契约，
+不许叠日志层）。为什么分家、各记什么见 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4。
+
 ## 7.5 窗口外观（macOS）：三个坑
 
 原生圆角与原生红绿灯都不是 CSS 能做的，`src-tauri/src/chrome.rs` 里那两个函数各对应一个坑。

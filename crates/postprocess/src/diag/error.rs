@@ -14,33 +14,47 @@
 //! - `E_CAL_MISMATCH_001` —— `internal/disk/generator_new.go:54`（宽高互换）、`:245`、
 //!   `:432`（质心判 180°）、`:503`（质心判 90°），校准模型被旋转
 //! - `E_CAL_MISMATCH_002` —— `internal/disk/generator_new.go:69`、`:260`，校准模型被缩放
+//! - `E_GCODE_BOUNDARY_001` / `_002` —— `calibrationfmt` 那两条边界（打印边界 / 涂胶范围）。
+//!   ★ 它们以前**只活在字符串里**（`offset.rs` 把码拼进 message，外面套 `InvalidConfig`），
+//!   2026-10-11 起升成结构化码（[`PostprocError::Boundary`]）—— 那正是「外层码在说假话」
+//!   （把"模型超出打印边界"报成"配置错"）的来路。
 //!
 //! 一个诚实偏差，登记在此处而非隐瞒：`Cancelled` 在旧侧**没有**错误码
 //! （`StepCancelled` 是特殊分支、非 Diagnostic 路径），Rust 侧为类型统一给出
 //! `E_SYS_CANCELLED_001`，格式遵循旧词汇表但**是新造的**，不是复刻。
 //!
-//! 另一个同类的新造码不在这个枚举里：`E_CAL_EXEC_NO_ANSWER_001`
-//! （「需要选择校准执行方式，但没等到答复」）属于**钩子层**，定义在
-//! `src-tauri/src/hook.rs` 的 `E_CAL_EXEC_NO_ANSWER`。内核压根不知道有界面 ——
-//! 给它在这里加一个变体等于把 GUI 的事塞进后处理内核。
+//! 另外三个同类的新造码**刻意不住这个枚举里**（它们属于钩子层，内核压根不知道有界面）：
+//! `E_CFG_MISMATCH_001`（预设与 G-code 机型不一致）、`E_SYS_STALLED_001`（无进展叫停）、
+//! `E_SYS_TIMEOUT_001`（整趟超时）—— 定义与文案都在 `messages.toml` 的 `hook.*` 那几条。
+//!
+//! # 文案住哪
+//!
+//! **不在这里**。`#[error("…")]` 那种把句子钉在变体上的写法 2026-10-11 全部拆掉，
+//! 改成「变体只带**结构化事实**（码 + 参数），句子由 `messages.toml` 那张表渲染」——
+//! 理由与形态见 [`crate::diag::messages`]。于是：
+//! - 改成 A 句还是 B 句 = 改表，不动代码；
+//! - 同一个码可以给切片器一个说法、给界面另一个说法（表里的 `slicer` 字段）；
+//! - 上层（钩子）能按同一个码 + 同一份参数**换一种说法再渲一遍**（[`PostprocError::params`]）。
 
 use std::io;
 
+use crate::diag::messages;
+
 /// 后处理错误。每个变体都必须能给出 `E_*_NNN` 形式的稳定错误码。
-#[derive(Debug, thiserror::Error)]
+///
+/// **变体字段是"事实"，不是"句子"**：`message` / `path` 这些是渲染参数（表里的
+/// `{detail}` / `{path}` / `{diagnostics}`），拼接发生在 [`std::fmt::Display`]。
+#[derive(Debug)]
 pub enum PostprocError {
     /// 文件 IO。错误码按 io::ErrorKind 分流：NotFound → `E_FS_NOT_FOUND_001`
     /// （旧侧用于预设文件缺失），其余 → `E_FILE_READ_001`（旧侧 read_gcode 用）。
-    #[error("{op}: {source}")]
     Io {
         /// 操作名（如 `read_gcode` / `read_preset`），进诊断的 operation 字段。
         op: &'static str,
-        #[source]
         source: io::Error,
     },
 
     /// TOML 解析失败（CRLF 归一重试后仍失败），`E_TOML_PARSE_001`。
-    #[error("TOML 解析失败 {path}: {message}")]
     TomlParse {
         path: String,
         /// 底层解析器消息（旧侧把 cause 存进 Diagnostic.Cause）。
@@ -53,19 +67,17 @@ pub enum PostprocError {
     /// （`process.go:242` 的对位），而本项目没有预设文件、也没有头部注释 ——
     /// 机型名是配置里的一个普通字段。照抄那句话会让用户去找一个不存在的东西。
     /// 错误码保持 `E_CFG_PARSE_001` 不变（对外契约）。
-    #[error("机型不可用: {path}")]
     MissingMachine { path: String },
 
     /// 配置内容非法（校验/回退拒绝），`E_CFG_INVALID_001`。
-    #[error("配置无效: {message}")]
     InvalidConfig { message: String },
 
     /// 碰撞检测命中（`disk.DetectTowerCollision`），`E_GCODE_COLLISION_001`。
-    #[error("碰撞检测命中: {message}")]
-    Collision { message: String },
+    ///
+    /// **无字段**：这条从句子里唯一能拿到的东西是"命中了"，其余全是文案（表里那条）。
+    Collision,
 
     /// 校准生成/插入失败，`E_CAL_FAILED_001`。
-    #[error("校准失败: {message}")]
     Calibration { message: String },
 
     /// 校准模型形变检测命中（New 变体专属），码由 `code` 字段携带：
@@ -75,7 +87,9 @@ pub enum PostprocError {
     /// **为什么不复用 `Calibration`**：那个码是「校准代码没生成出来」，
     /// 而这两个是「你的校准模型摆得不对」—— 一个让人去看日志，
     /// 一个让人回切片器把模型转回来。混成一个码等于把可操作的提示变成故障。
-    #[error("校准模型不匹配: {message}")]
+    ///
+    /// `message` 是**机器判据**（expected/actual/bbox…），进表里的 `{diagnostics}`：
+    /// 界面那一面留着（排查用），切片器那一面**去掉**（用户要看的是"别转我的模型"）。
     CalibrationMismatch {
         /// `E_CAL_MISMATCH_001` 或 `E_CAL_MISMATCH_002`，直接作为对外码返回。
         code: &'static str,
@@ -83,20 +97,26 @@ pub enum PostprocError {
     },
 
     /// pass1/pass2 等扫描处理失败，`E_GCODE_FAILED_001`。
-    #[error("处理失败: {message}")]
     Processing { message: String },
 
     /// 输出写入失败（`.part` 写入/rename），旧侧复用 `E_FILE_READ_001`。
-    #[error("写入 {path} 失败: {source}")]
-    Write {
-        path: String,
-        #[source]
-        source: io::Error,
-    },
+    Write { path: String, source: io::Error },
 
     /// 用户取消。旧侧无码（见模块文档），`E_SYS_CANCELLED_001` 为新造。
-    #[error("已取消: {message}")]
     Cancelled { message: String },
+
+    /// 模型越界：`E_GCODE_BOUNDARY_001`（打印边界）/ `E_GCODE_BOUNDARY_002`（涂胶范围）。
+    ///
+    /// `sides` 是那几个"当前X：…，允许范围：…"从句**渲染好拼起来**的结果 ——
+    /// 从句自己的模板也在表里（`boundary.clause` / `boundary.limit.min|max`），
+    /// 所以这里不出现任何一个字。为什么拼在这里而不是表里：一条越界可能**两个轴同时**
+    /// 超（X 与 Y 各一段），模板语言里没有循环，只能由懂几何的这一层展开。
+    Boundary {
+        /// 两个边界码之一。
+        code: &'static str,
+        /// 已拼好的从句串（表里 `["E_GCODE_BOUNDARY_00x"]` 的 `{sides}`）。
+        sides: String,
+    },
 }
 
 impl PostprocError {
@@ -117,12 +137,68 @@ impl PostprocError {
             Self::TomlParse { .. } => "E_TOML_PARSE_001",
             Self::MissingMachine { .. } => "E_CFG_PARSE_001",
             Self::InvalidConfig { .. } => "E_CFG_INVALID_001",
-            Self::Collision { .. } => "E_GCODE_COLLISION_001",
+            Self::Collision => "E_GCODE_COLLISION_001",
             Self::Calibration { .. } => "E_CAL_FAILED_001",
             Self::CalibrationMismatch { code, .. } => code,
             Self::Processing { .. } => "E_GCODE_FAILED_001",
             Self::Write { .. } => "E_FILE_READ_001",
             Self::Cancelled { .. } => "E_SYS_CANCELLED_001",
+            Self::Boundary { code, .. } => code,
+        }
+    }
+
+    /// 渲染参数：表里的 `{名字}` 取什么值。
+    ///
+    /// **为什么要交出来**（而不是只留一个 [`std::fmt::Display`]）：上层要拿同一个码换一种
+    /// 说法再渲一遍 —— 切片器那一面用表里的 `slicer` 字段（比如把校准形变那串机器判据去掉）。
+    /// 不给参数的话，上层就只能把渲染好的句子**反着拆**（旧版 `hook.rs::split_code`
+    /// 干的就是这个，也正是"两层码糊在一句里"的来路）。
+    pub fn params(&self) -> Vec<(&'static str, String)> {
+        match self {
+            /* `target` 一个槽位两种来源：读侧（Io）是操作名，写侧（Write）是落点路径 ——
+            表里的模板只需要"是谁"这一格，两个变体共用同一个码（旧侧就这么复用的）。 */
+            Self::Io { op, source } => {
+                vec![("target", (*op).to_owned()), ("detail", source.to_string())]
+            }
+            Self::TomlParse { path, message } => {
+                vec![("path", path.clone()), ("detail", message.clone())]
+            }
+            Self::MissingMachine { path } => vec![("path", path.clone())],
+            Self::InvalidConfig { message } => vec![("detail", message.clone())],
+            Self::Collision => Vec::new(),
+            Self::Calibration { message } => vec![("detail", message.clone())],
+            Self::CalibrationMismatch { message, .. } => vec![("diagnostics", message.clone())],
+            Self::Processing { message } => vec![("detail", message.clone())],
+            Self::Write { path, source } => {
+                vec![("target", path.clone()), ("detail", source.to_string())]
+            }
+            Self::Cancelled { message } => vec![("detail", message.clone())],
+            Self::Boundary { sides, .. } => vec![("sides", sides.clone())],
+        }
+    }
+
+    /// 表渲染的正文（本程序里给用户看的那一句）。等价于 `self.to_string()`，
+    /// 起个名字是给调用点读的：`err.body()` 比 `err.to_string()` 更容易看出
+    /// "这句话是从表里来的"。
+    pub fn body(&self) -> String {
+        self.to_string()
+    }
+}
+
+/// **句子从表里来**：本 impl 只负责把变体字段翻成参数名（见 [`PostprocError::params`]）。
+impl std::fmt::Display for PostprocError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params = self.params();
+        let refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        f.write_str(&messages::text(self.code(), &refs))
+    }
+}
+
+impl std::error::Error for PostprocError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } | Self::Write { source, .. } => Some(source),
+            _ => None,
         }
     }
 }
@@ -155,9 +231,7 @@ mod tests {
             PostprocError::InvalidConfig {
                 message: "bad".into(),
             },
-            PostprocError::Collision {
-                message: "hit".into(),
-            },
+            PostprocError::Collision,
             PostprocError::Calibration {
                 message: "cal".into(),
             },
@@ -178,6 +252,14 @@ mod tests {
             },
             PostprocError::Cancelled {
                 message: "ctrl-c".into(),
+            },
+            PostprocError::Boundary {
+                code: "E_GCODE_BOUNDARY_001",
+                sides: "当前Y：181.4mm，允许范围：≤180.0mm".into(),
+            },
+            PostprocError::Boundary {
+                code: "E_GCODE_BOUNDARY_002",
+                sides: "当前X：10.0mm，允许范围：≥20.0mm".into(),
             },
         ]
     }
@@ -211,6 +293,35 @@ mod tests {
         }
     }
 
+    /// **每个码在文案表里都要有一条**（键就是码）。
+    ///
+    /// 这条是「把文案从代码里赶出去」之后的接力棒：以前加变体只要跟着写一行 `#[error]`，
+    /// 现在不写表就没有句子 —— 而那种缺法在运行时的表现是用户看到
+    /// `［未登记的文案 E_XXX_001］`。判据在这里，构建期就红。
+    #[test]
+    fn every_variant_has_a_message_entry() {
+        for err in all_variants() {
+            let code = err.code();
+            assert!(
+                messages::has(code),
+                "{code} 在 messages.toml 里没有条目 —— 新增码必须同时补表"
+            );
+        }
+    }
+
+    /// 渲染出来的正文**不含错误码**：码是单独的字段（`code()`），句子给人读。
+    ///
+    /// 这条防的是旧毛病复发 —— 曾经 message 里带着 `E_XXX_001: ` 的自我引用，
+    /// 用户在一句话里读到两个码，谁也不知道哪个才是原因。
+    #[test]
+    fn the_rendered_sentence_never_carries_a_code() {
+        for err in all_variants() {
+            let body = err.body();
+            assert!(!body.contains(err.code()), "{body} 里又出现了码");
+            assert!(!body.contains("未登记的文案"), "{body} 来自表里的兜底分支");
+        }
+    }
+
     /// 三个对外契约码逐字保持（tasks.md 2.3 点名的三个）。
     #[test]
     fn contract_codes_are_byte_identical() {
@@ -230,13 +341,7 @@ mod tests {
             .code(),
             "E_FS_NOT_FOUND_001"
         );
-        assert_eq!(
-            PostprocError::Collision {
-                message: String::new()
-            }
-            .code(),
-            "E_GCODE_COLLISION_001"
-        );
+        assert_eq!(PostprocError::Collision.code(), "E_GCODE_COLLISION_001");
     }
 
     /// NotFound 分流：同一个 Io 变体按 io::ErrorKind 给出不同码。
@@ -277,5 +382,36 @@ mod tests {
             .code(),
             "形变检测的码被 E_CAL_FAILED_001 吃掉了"
         );
+    }
+
+    /// 越界那两条：**码自己说话**，句子由表渲染。
+    ///
+    /// 旧形态是「`InvalidConfig` 里塞了一句带着 `E_GCODE_BOUNDARY_001:` 的正文」——
+    /// 于是外层码（E_CFG_INVALID_001 = "配置无效"）在说假话。
+    #[test]
+    fn the_boundary_carries_its_own_code_and_no_prefix_lie() {
+        let boundary = PostprocError::Boundary {
+            code: "E_GCODE_BOUNDARY_001",
+            sides: "当前X：185.9mm，允许范围：≤180.0mm".into(),
+        };
+        assert_eq!(boundary.code(), "E_GCODE_BOUNDARY_001");
+        let body = boundary.body();
+        assert_eq!(body, "模型超出打印边界，当前X：185.9mm，允许范围：≤180.0mm");
+        assert!(!body.contains("配置无效"), "外层那句假话又回来了：{body}");
+    }
+
+    /// `params()` 的名字与表的模板**对齐**：把参数塞回去渲染，句子里的占位符必须被填满。
+    ///
+    /// 这条咬的是"改名忘改表"：`params()` 交出去的名字是上层换面重渲的契约，
+    /// 名字漂了的表现是用户那边多出一截 `{detail}`。
+    #[test]
+    fn params_fill_the_template() {
+        for err in all_variants() {
+            let params = err.params();
+            let refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            let rendered = messages::text(err.code(), &refs);
+            assert!(!rendered.contains('{'), "{rendered} 还有没填上的占位符");
+            assert_eq!(rendered, err.body(), "两条渲染路径给了不一样的话");
+        }
     }
 }
