@@ -134,6 +134,11 @@ pub struct ProcessResult {
     pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
     pub detail_facts: DetailFacts,
+    /// 输入 G-code 头部刮出来的 4 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名）。
+    ///
+    /// 管线自己不消费它（见 [`HeaderFacts`]），但**执行记录要**：`_meta.json` 的
+    /// `detail.slicer` 里那几个键就住在这里 —— 搭车出门，调用方不用为它再扫一遍输入。
+    pub header_facts: HeaderFacts,
 }
 
 /// 出口事实集 —— **只搬运，不新算**。
@@ -165,7 +170,9 @@ pub struct DetailFacts {
 /// 输入 G-code 头部刮取出来的 4 个事实。
 ///
 /// 这些**只读输入、不碰 IR**，所以从管线里提出来单独成函数：`dump-ir --gcode <in>`
-/// 复用它，管线本身不再需要它们（来源仓库把它们塞进 `DetailFacts` 是因为 GUI 要）。
+/// 复用它；管线在 parse 步取一次、搭 [`ProcessResult`] 出门（执行记录要），
+/// 但不进 IR、不参与任何变换（来源仓库把它们塞进 `DetailFacts` 是因为 GUI 要）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct HeaderFacts {
     pub machine_preset_name: String,
     pub process_preset_name: String,
@@ -427,6 +434,10 @@ fn run(
     timer.begin(Step::Parse, "解析 G-code...");
     executed.push(Step::Parse);
 
+    // 头部 4 个事实：只读输入、不碰 IR。登记完这一步就取，搭产物出门写进执行记录
+    // （`detail.slicer` 的 machinePresetName / processPresetName / slicerIroningEnabled）。
+    let header = header_facts(&content, &gcode_path.display().to_string());
+
     // ---- step 4 ∥ step 5 的只读半段 —— 两个全文件扫描并行 ----
     // `detect_mode`（parse 步）与 `decide_wiping`（support 步的只读半段）都是全文件
     // 扫描、互不写状态，串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
@@ -633,6 +644,7 @@ fn run(
             fallback_objects: wiping_applied.fallback_objects,
             calibration_mode: calibration_mode.to_string(),
         },
+        header_facts: header,
     })
 }
 

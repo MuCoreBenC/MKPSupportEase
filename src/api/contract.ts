@@ -75,6 +75,52 @@ export interface ReportPipelineStep {
   elapsedMs?: number
   message?: string
   status?: string
+  /** 这一步自报的多行事实（`\n` 分行）—— 步骤名下面铺小字，排查时最值钱的一段 */
+  detail?: string
+}
+
+/** 涂胶组（`detail.glue`）—— 键名与旧版 `_meta.json` 的 `detail` 同名 */
+export interface ReportGlueFacts {
+  glueTotalLength?: number
+  /** 换笔次数（旧版的叫法；内核里是 GlueCutterChanges） */
+  gluePenSwitches?: number
+  gluePassCount?: number
+  /** mm/s */
+  glueSpeed?: number
+  penOffsetX?: number
+  penOffsetY?: number
+  penOffsetZ?: number
+  glueZLiftHeight?: number
+  glueZLiftHeightFirstLayers?: number
+  glueInterModelLiftHeight?: number
+  glueZOffset?: number
+  primeTriggerLayers?: number
+  primeTotalLength?: number
+}
+
+/** 擦料塔组（`detail.tower`） */
+export interface ReportTowerFacts {
+  towerLayers?: number
+  towerHeight?: number
+  towerExtrudeRatio?: number
+  towerZLift?: number
+  towerSafeZOffset?: number
+  towerTravelSpeed?: number
+  fastTowerMode?: string
+}
+
+/** 切片工艺组（`detail.slicer`） */
+export interface ReportSlicerFacts {
+  slicerVersion?: string
+  machinePresetName?: string
+  processPresetName?: string
+  filamentType?: string
+  nozzleDiameter?: number
+  slicerIroningEnabled?: boolean
+  ironingMode?: string
+  ironingThreshold?: number
+  treeSupport?: boolean
+  useDiskWipe?: boolean
 }
 
 /** 一次执行的摘要（报告页列表行）。字段与 `_meta.json`（schema v2）一一对应 */
@@ -113,6 +159,17 @@ export interface ReportDetail {
    * 可能还没有 `printTime` —— 这时看这个状态显示"正在估算…"，**不许拿 0 凑数**。
    */
   printTimeStatus: string | null
+  /**
+   * 估算出的打印秒数（`detail.estimatedPrintSeconds`）—— 「比切片器预估多多久」
+   * 拿它与 `stats.originalPrintTime` 里解析出的秒数比。旧记录没有这一格。
+   */
+  estimatedPrintSeconds?: number | null
+  /** 涂胶组（旧记录 / 失败记录没有 ⇒ `null`，整组不摆） */
+  glue?: ReportGlueFacts | null
+  /** 擦料塔组 */
+  tower?: ReportTowerFacts | null
+  /** 切片工艺组 */
+  slicer?: ReportSlicerFacts | null
   pipeline: ReportPipelineStep[]
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */

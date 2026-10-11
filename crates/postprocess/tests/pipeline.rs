@@ -118,6 +118,16 @@ fn full_pipeline_runs_and_orders_steps() {
     // sha256 是 64 位十六进制
     assert_eq!(result.input_sha256.len(), 64);
     assert!(result.input_sha256.chars().all(|c| c.is_ascii_hexdigit()));
+    // 头部 4 个事实搭产物出门（执行记录 `detail.slicer` 吃它）——期望值就是 golden
+    // 输入自己头部注释里写的（42274.2.gcode 的 printer_settings_id / default_print_profile）
+    assert_eq!(
+        result.header_facts.machine_preset_name,
+        "Bambu Lab A1 mini 0.4 nozzle"
+    );
+    assert_eq!(
+        result.header_facts.process_preset_name,
+        "0.20mm Standard @BBL A1M"
+    );
     // 输出文件已写入，且两个 hooks 的痕迹都在
     let out_text = std::fs::read_to_string(&out_path).expect("输出文件应存在");
     assert!(out_text.contains(";Pre-glue preparation"));

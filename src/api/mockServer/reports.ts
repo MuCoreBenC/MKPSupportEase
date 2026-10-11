@@ -8,6 +8,8 @@
  * 三条规矩：
  * 1. 记录顺序、文件名、时间、耗时、成功/失败文案逐字照截图，不自己编一套；
  * 2. 首条（`.42952.1.gcode`）的详情逐字段照真机（统计 / 打印时间 / 管线计时 / 文件）；
+ *    涂胶 / 擦料塔 / 切片工艺三组与 `estimatedPrintSeconds` 是一套自洽样本
+ *    （真机那一刻的记录里还没有这几组，形状照 `docs/REPORT-DETAIL-FIELDS.md`）；
  * 3. 其余记录给同形状的详情（按本行字段合成），展开任何一行都不是空的。
  */
 import type { ReportDetail, ReportPipelineStep, ReportSummary } from '../contract'
@@ -106,13 +108,48 @@ const PIPELINE_META: { id: string; msg: string; frac: number }[] = [
   { id: 'write', msg: '正在写入文件…', frac: 0.049 },
 ]
 
+/** 各步的多行事实（与首条同形状；数字随本行变，展开任何一条都不空） */
+function stepDetailOf(
+  id: string,
+  r: FixtureRow,
+  lines: number,
+  inputMb: number,
+): string | undefined {
+  const towerLayers = (r.seq % 3) * 20
+  switch (id) {
+    case 'input':
+      return `读取 ${lines} 行\n文件大小: ${inputMb.toFixed(2)} MB\nSHA256: ${fakeSha(r.seq, r.gcode).slice(0, 8)}`
+    case 'config':
+      return `预设: ${r.preset}`
+    case 'machine-detect':
+      return `G-code 机型: ${r.machine}\n预设机型: ${r.machine}\n机型维度: 180×180mm\n禁区数量: 0`
+    case 'parse':
+      return `机型: ${r.machine}\n耗材类型: PETG\n切片软件: BambuStudio`
+    case 'support':
+      return '支撑类型: 普通支撑\n熨烫模式: 自动\n熨烫覆盖率阈值: 20.0%'
+    case 'collision':
+      return '无碰撞，擦料塔位置安全\n模型坐标均在打印范围内\n擦料塔类型: 圆盘擦拭\n擦料塔位置: (20.0, 20.0)'
+    case 'pass1':
+      return `收集 ${30 + ((r.seq * 13) % 600)} 层高索引\n涂胶遍数: 1\n润笔: 否`
+    case 'pass2':
+      return `擦料塔层数: ${towerLayers}\n擦料塔高度: ${(r.seq % 3).toFixed(2)}mm\n擦料塔类型: 圆盘擦拭\n从擦料塔到模型的抬笔高度: 0.6mm\n斜肋外墙: 否\n圆盘擦拭: 是\n写入完成`
+    case 'write':
+      return `原地覆盖完成\n输出 ${(inputMb * 1.02).toFixed(2)} MB`
+    default:
+      return undefined
+  }
+}
+
 /** 按本行耗时按比例合成管线计时（config / support 真机上就是 0） */
 function pipelineFor(r: FixtureRow): ReportPipelineStep[] {
+  const inputMb = 0.5 + ((r.seq % 9) * 3.4)
+  const lines = 1200 + ((r.seq * 137) % 26000)
   return PIPELINE_META.map((p) => ({
     id: p.id,
     message: p.msg,
     status: 'ok',
     elapsedMs: Math.round(r.elapsedMs * p.frac),
+    detail: stepDetailOf(p.id, r, lines, inputMb),
   }))
 }
 
@@ -142,29 +179,121 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
       preset: r.preset,
     },
     stats: {
-      towerHeight: 0,
+      towerHeight: 6.46,
       glueLayerCount: 109,
       totalLayerNumber: 633,
       maxZHeight: 67,
       originalPrintTime: '3h 16m 52s; total estimated time: 3h 22m 55s',
     },
-    /* 页面显示「3 小时 39 分」= 13140 秒 */
+    /* 页面显示「3 小时 39 分」= 13140 秒；比切片器预估（3h 22m 55s）多 8% */
     printTime: {
       totalSeconds: 13140,
       segments: 893809,
     },
     printTimeStatus: 'ready',
+    estimatedPrintSeconds: 13140,
     pipeline: [
-      { id: 'input', message: '正在读取文件…', status: 'ok', elapsedMs: 1800 },
-      { id: 'config', message: '配置已就绪（IR 由调用方给出）', status: 'ok', elapsedMs: 0 },
-      { id: 'machine-detect', message: '识别机型…', status: 'ok', elapsedMs: 255 },
-      { id: 'parse', message: '解析 G-code…', status: 'ok', elapsedMs: 1300 },
-      { id: 'support', message: '支撑面检测…', status: 'ok', elapsedMs: 0 },
-      { id: 'collision', message: '碰撞检测…', status: 'ok', elapsedMs: 1300 },
-      { id: 'pass1', message: '第一遍扫描: 99%', status: 'ok', elapsedMs: 5200 },
-      { id: 'pass2', message: '第二遍扫描: 99%', status: 'ok', elapsedMs: 7800 },
-      { id: 'write', message: '正在写入文件…', status: 'ok', elapsedMs: 933 },
+      {
+        id: 'input',
+        message: '正在读取文件…',
+        status: 'ok',
+        elapsedMs: 1800,
+        detail: '读取 1241690 行\n文件大小: 27.30 MB\nSHA256: 6a2398db',
+      },
+      {
+        id: 'config',
+        message: '配置已就绪（IR 由调用方给出）',
+        status: 'ok',
+        elapsedMs: 0,
+        detail: '预设: A1_MINI-fastv3.3.toml',
+      },
+      {
+        id: 'machine-detect',
+        message: '识别机型…',
+        status: 'ok',
+        elapsedMs: 255,
+        detail: 'G-code 机型: A1_MINI\n预设机型: A1_MINI\n机型维度: 180×180mm\n禁区数量: 0',
+      },
+      {
+        id: 'parse',
+        message: '解析 G-code…',
+        status: 'ok',
+        elapsedMs: 1300,
+        detail: '机型: A1_MINI\n耗材类型: PETG\n切片软件: BambuStudio',
+      },
+      {
+        id: 'support',
+        message: '支撑面检测…',
+        status: 'ok',
+        elapsedMs: 0,
+        detail: '支撑类型: 普通支撑\n熨烫模式: 自动\n熨烫覆盖率阈值: 20.0%',
+      },
+      {
+        id: 'collision',
+        message: '碰撞检测…',
+        status: 'ok',
+        elapsedMs: 1300,
+        detail: '无碰撞，擦料塔位置安全\n模型坐标均在打印范围内\n擦料塔类型: 圆盘擦拭\n擦料塔位置: (20.0, 20.0)',
+      },
+      {
+        id: 'pass1',
+        message: '第一遍扫描: 99%',
+        status: 'ok',
+        elapsedMs: 5200,
+        detail: '收集 633 层高索引\n涂胶遍数: 1\n润笔: 否',
+      },
+      {
+        id: 'pass2',
+        message: '第二遍扫描: 99%',
+        status: 'ok',
+        elapsedMs: 7800,
+        detail:
+          '擦料塔层数: 38\n擦料塔高度: 6.46mm\n擦料塔类型: 圆盘擦拭\n从擦料塔到模型的抬笔高度: 0.7mm\n斜肋外墙: 否\n圆盘擦拭: 是\n写入完成',
+      },
+      {
+        id: 'write',
+        message: '正在写入文件…',
+        status: 'ok',
+        elapsedMs: 933,
+        detail: '原地覆盖完成\n输出 27.90 MB',
+      },
     ],
+    glue: {
+      glueTotalLength: 9350.845588078173,
+      gluePenSwitches: 30,
+      gluePassCount: 1,
+      glueSpeed: 70,
+      penOffsetX: -0.9,
+      penOffsetY: 23,
+      penOffsetZ: 4,
+      glueZLiftHeight: 5,
+      glueZLiftHeightFirstLayers: 6,
+      glueInterModelLiftHeight: 2,
+      glueZOffset: -0.05,
+      primeTriggerLayers: 30,
+      primeTotalLength: 102.4131416821871,
+    },
+    tower: {
+      towerLayers: 38,
+      towerHeight: 6.46,
+      towerExtrudeRatio: 1.4,
+      towerZLift: 0.7,
+      towerSafeZOffset: 0.7,
+      towerTravelSpeed: 200,
+      fastTowerMode: 'fast',
+    },
+    slicer: {
+      slicerVersion: 'BambuStudio 02.08.02.60',
+      machinePresetName: 'Bambu Lab A1 mini 0.4 nozzle',
+      processPresetName: '0.20mm Standard @BBL A1M',
+      filamentType: 'PETG',
+      nozzleDiameter: 0.4,
+      slicerIroningEnabled: true,
+      ironingMode: 'auto',
+      ironingThreshold: 7.9,
+      treeSupport: false,
+      useDiskWipe: false,
+    },
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',
@@ -187,6 +316,8 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
   /* 文件大小/行数随序号变化，纯粹为了让每行不一样 */
   const inputMb = 0.5 + ((r.seq % 9) * 3.4)
   const lines = 1200 + ((r.seq * 137) % 26000)
+  /* 估算秒数（与 printTime.totalSeconds 同值 —— 现实里就是同一个数） */
+  const estSeconds = 120 + ((r.seq * 211) % 12000)
 
   return {
     summary,
@@ -215,10 +346,54 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
       : {},
     /* 成功记录给一个估算；取消的记录没有（页面显示「—」） */
     printTime: r.ok
-      ? { totalSeconds: 120 + ((r.seq * 211) % 12000), segments: 1000 + ((r.seq * 977) % 80000) }
+      ? { totalSeconds: estSeconds, segments: 1000 + ((r.seq * 977) % 80000) }
       : null,
     printTimeStatus: r.ok ? 'ready' : null,
+    estimatedPrintSeconds: r.ok ? estSeconds : null,
     pipeline: pipelineFor(r),
+    glue: r.ok
+      ? {
+          glueTotalLength: 300 + ((r.seq * 137) % 9000),
+          gluePenSwitches: r.seq % 12,
+          gluePassCount: 1 + (r.seq % 3),
+          glueSpeed: 70 + (r.seq % 30),
+          penOffsetX: -0.9,
+          penOffsetY: 23,
+          penOffsetZ: 4,
+          glueZLiftHeight: 5,
+          glueZLiftHeightFirstLayers: 6,
+          glueInterModelLiftHeight: 2,
+          glueZOffset: -0.05,
+          primeTriggerLayers: 30,
+          primeTotalLength: 40 + ((r.seq * 31) % 300),
+        }
+      : null,
+    tower: r.ok
+      ? {
+          towerLayers: (r.seq % 3) * 20,
+          towerHeight: r.seq % 3,
+          towerExtrudeRatio: 1.4,
+          towerZLift: 0.6,
+          towerSafeZOffset: 0.6,
+          towerTravelSpeed: 200,
+          fastTowerMode: 'fast',
+        }
+      : null,
+    slicer: r.ok
+      ? {
+          slicerVersion: 'BambuStudio 02.08.02.60',
+          machinePresetName:
+            r.machine === 'A1' ? 'Bambu Lab A1 0.4 nozzle' : 'Bambu Lab A1 mini 0.4 nozzle',
+          processPresetName: '0.20mm Standard @BBL A1M',
+          filamentType: 'PETG',
+          nozzleDiameter: 0.4,
+          slicerIroningEnabled: false,
+          ironingMode: 'auto',
+          ironingThreshold: 7.9,
+          treeSupport: false,
+          useDiskWipe: false,
+        }
+      : null,
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',

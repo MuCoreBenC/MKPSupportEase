@@ -75,6 +75,15 @@ pub struct ReportDetail {
     /// 打印时间估算的状态（`computing` / `ready` / `failed`）—— 延后估算时才有，
     /// 前端据此显示"正在估算…"/"估算失败"，而不是拿 0 凑数。
     pub print_time_status: Option<String>,
+    /// 估算出的打印秒数（`detail.estimatedPrintSeconds`）—— 报告页拿它与切片器
+    /// 原话比「多了多久」。
+    pub estimated_print_seconds: Option<f64>,
+    /// 涂胶组（`detail.glue`，键与旧版 `_meta.json` 同名）。
+    pub glue: Option<serde_json::Value>,
+    /// 擦料塔组（`detail.tower`）。
+    pub tower: Option<serde_json::Value>,
+    /// 切片工艺组（`detail.slicer`）。
+    pub slicer: Option<serde_json::Value>,
     /// 管线各步计时（`pipeline`：id / elapsedMs / message / status）
     pub pipeline: Vec<serde_json::Value>,
     pub warnings: Vec<String>,
@@ -250,6 +259,12 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
             .get("printTimeStatus")
             .and_then(|v| v.as_str())
             .map(|s| s.to_owned()),
+        estimated_print_seconds: detail
+            .and_then(|d| d.get("estimatedPrintSeconds"))
+            .and_then(|v| v.as_f64()),
+        glue: detail.and_then(|d| d.get("glue")).cloned(),
+        tower: detail.and_then(|d| d.get("tower")).cloned(),
+        slicer: detail.and_then(|d| d.get("slicer")).cloned(),
         pipeline: meta
             .get("pipeline")
             .and_then(|v| v.as_array())
@@ -351,5 +366,46 @@ mod tests {
     fn no_tree_means_no_rows() {
         let dir = tempfile::tempdir().unwrap();
         assert!(collect(&dir.path().join("nothing-here")).is_empty());
+    }
+
+    /// 三组分包与新数字透传：`detail.glue/tower/slicer` 原样带出、
+    /// `estimatedPrintSeconds` 取成数字 —— 报告页拿的就是这些键。
+    #[test]
+    fn detail_carries_the_new_report_groups() {
+        let summary = ReportSummary {
+            id: "x_20261011_100000".into(),
+            day: "2026-10-11".into(),
+            started_at: Some("2026-10-11 10:00:00".into()),
+            finished_at: None,
+            elapsed_ms: None,
+            preset_name: None,
+            machine_type: None,
+            gcode_name: None,
+            ok: true,
+            error: None,
+            warning_count: 0,
+        };
+        let meta = serde_json::json!({
+            "detail": {
+                "estimatedPrintSeconds": 2952.9109519850203,
+                "glue": {"glueTotalLength": 9350.845588078173},
+                "tower": {"towerLayers": 536},
+                "slicer": {"machinePresetName": "Bambu Lab A1 mini 0.4 nozzle"}
+            }
+        });
+        let d = detail_of(summary.clone(), &meta);
+        assert_eq!(d.estimated_print_seconds, Some(2952.9109519850203));
+        assert_eq!(d.glue.unwrap()["glueTotalLength"], 9350.845588078173);
+        assert_eq!(d.tower.unwrap()["towerLayers"], 536);
+        assert_eq!(
+            d.slicer.unwrap()["machinePresetName"],
+            "Bambu Lab A1 mini 0.4 nozzle"
+        );
+
+        // 旧记录（没有这些键）：全是 None，不 panic —— 报告页整组不摆
+        let old = serde_json::json!({"detail": {"stats": {}}});
+        let d = detail_of(summary, &old);
+        assert!(d.glue.is_none() && d.tower.is_none() && d.slicer.is_none());
+        assert!(d.estimated_print_seconds.is_none());
     }
 }

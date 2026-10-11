@@ -30,6 +30,7 @@
 
 use std::path::{Path, PathBuf};
 
+use postprocess::pipeline::Step;
 use sha2::Digest;
 use time::OffsetDateTime;
 
@@ -177,6 +178,10 @@ pub struct PipelineStep {
     pub message: String,
     pub elapsed_ms: u64,
     pub status: PipelineStatus,
+    /// 这一步自报的多行事实（照旧版 `pipeline[].detail` 的形状：`\n` 分行，
+    /// 报告页在步骤名下铺小字）。没有素材的步不写这个键。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// 步骤状态：成功跑完 / 在这一步失败 / 在这一步被取消。
@@ -190,12 +195,17 @@ pub enum PipelineStatus {
 
 impl PipelineStep {
     /// 由内核的逐步耗时（[`postprocess::pipeline::StepTiming`]）构账。
-    pub fn from_timing(t: &postprocess::pipeline::StepTiming, status: PipelineStatus) -> Self {
+    pub fn from_timing(
+        t: &postprocess::pipeline::StepTiming,
+        status: PipelineStatus,
+        detail: Option<String>,
+    ) -> Self {
         Self {
             id: t.step.id(),
             message: t.message.clone(),
             elapsed_ms: t.elapsed_ms,
             status,
+            detail,
         }
     }
 }
@@ -207,6 +217,56 @@ impl PipelineStep {
 pub const PRINT_TIME_COMPUTING: &str = "computing";
 pub const PRINT_TIME_READY: &str = "ready";
 pub const PRINT_TIME_FAILED: &str = "failed";
+
+/// 涂胶组（`detail.glue`）—— 键名照旧版 `_meta.json` 的 `detail` 同名搬
+/// （`glueTotalLength` / `penOffsetX` …），报告页按这些键取值。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlueFacts {
+    pub glue_total_length: f64,
+    pub glue_pen_switches: i64,
+    pub glue_pass_count: i64,
+    /// mm/s（= 内核 `toolhead.max_speed` ÷ 60，全仓唯一的逆换算点）。
+    pub glue_speed: f64,
+    pub pen_offset_x: f64,
+    pub pen_offset_y: f64,
+    pub pen_offset_z: f64,
+    pub glue_z_lift_height: f64,
+    pub glue_z_lift_height_first_layers: f64,
+    pub glue_inter_model_lift_height: f64,
+    pub glue_z_offset: f64,
+    pub prime_trigger_layers: i64,
+    pub prime_total_length: f64,
+}
+
+/// 擦料塔组（`detail.tower`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TowerFacts {
+    pub tower_layers: i64,
+    pub tower_height: f64,
+    pub tower_extrude_ratio: f64,
+    pub tower_z_lift: f64,
+    pub tower_safe_z_offset: f64,
+    pub tower_travel_speed: f64,
+    pub fast_tower_mode: String,
+}
+
+/// 切片工艺组（`detail.slicer`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerFacts {
+    pub slicer_version: String,
+    pub machine_preset_name: String,
+    pub process_preset_name: String,
+    pub filament_type: String,
+    pub nozzle_diameter: f64,
+    pub slicer_ironing_enabled: bool,
+    pub ironing_mode: String,
+    pub ironing_threshold: f64,
+    pub tree_support: bool,
+    pub use_disk_wipe: bool,
+}
 
 /// 文件事实 + 统计 + 打印时间（报告页详情区的那几块）。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -221,12 +281,26 @@ pub struct Detail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<serde_json::Value>,
     /// 打印时间估算（`printtime::Result` 原样序列化）。延后时先为 `None`，
-    /// 由 [`complete_print_time`] 补全。
+    /// 由 [`complete_meta`] 补全。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_time: Option<serde_json::Value>,
     /// 打印时间估算的状态。**不延后时不写这个键**（老记录形态不变）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_time_status: Option<String>,
+    /// 估算出的打印秒数（与旧版 `_meta.json` 的 `detail.estimatedPrintSeconds` 同名）——
+    /// 报告页拿它与切片器原话比「多了多久」。延后估算时先缺键，[`complete_meta`] 补。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_print_seconds: Option<f64>,
+    /// 涂胶组（`detail.glue`）。失败 / 取消没有 IR 终态 ⇒ 不写这一格
+    /// （页面口径：后端没给就不摆，不编占位值）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glue: Option<GlueFacts>,
+    /// 擦料塔组（`detail.tower`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tower: Option<TowerFacts>,
+    /// 切片工艺组（`detail.slicer`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slicer: Option<SlicerFacts>,
 }
 
 /// 一份执行记录（`_meta.json`）。
@@ -253,6 +327,246 @@ pub struct Meta {
 
 impl Meta {
     pub const SCHEMA_VERSION: u32 = 2;
+}
+
+/// 组装「三组分包（glue / tower / slicer）+ 每步细节」要的全部素材 ——
+/// **都是这条链上已经在手的事实**（内核搬出来的 IR 终态 / 统计 / 头部事实，
+/// 加上调用方手上的行数与路径）。这里只做搬运与文案，不新算任何值。
+pub struct ReportFacts<'a> {
+    /// 预设文件名（`job.toml` 的最后一段；拿不到就是空串）。
+    pub preset_name: &'a str,
+    pub input_lines: u64,
+    pub input_bytes: u64,
+    pub input_sha256: &'a str,
+    /// 输出文件大小（盘上 stat 一次；stat 不到就是 `None` —— 文案少一行，不编数）。
+    pub output_bytes: Option<u64>,
+    /// 是不是原地覆盖（输出写回输入那一份）。
+    pub in_place: bool,
+    /// IR 终态（内核 `DetailFacts.ir`）。
+    pub ir: &'a postprocess::ir::Ir,
+    /// pass1 统计（`ProcessStats`）。
+    pub stats: &'a postprocess::postproc::pass1::ProcessStats,
+    /// pass2 口径的塔高（内核 `Stats.tower_height`）。
+    pub tower_height: f64,
+    /// 输入头部刮出来的 4 个事实（内核 `HeaderFacts`）。
+    pub header: &'a postprocess::pipeline::HeaderFacts,
+    /// 校准模式串（非校准模式是空串）。
+    pub calibration_mode: &'a str,
+}
+
+impl ReportFacts<'_> {
+    /// 涂胶组。
+    pub fn glue(&self) -> GlueFacts {
+        let ir = self.ir;
+        GlueFacts {
+            glue_total_length: self.stats.glue_total_length,
+            // 旧版 `gluePenSwitches` ← `GlueCutterChanges`（换笔 = 切刀次数）。
+            glue_pen_switches: self.stats.glue_cutter_changes,
+            glue_pass_count: ir.glue.pass_count,
+            // 内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
+            // 旧版 `glueSpeed` 是 mm/s —— 除回来，不新造数。
+            glue_speed: ir.toolhead.max_speed / 60.0,
+            pen_offset_x: ir.toolhead.x_offset,
+            pen_offset_y: ir.toolhead.y_offset,
+            pen_offset_z: ir.toolhead.z_offset,
+            glue_z_lift_height: ir.glue.z_lift_height,
+            glue_z_lift_height_first_layers: ir.glue.z_lift_height_first_layers,
+            glue_inter_model_lift_height: ir.glue.inter_model_lift_height,
+            glue_z_offset: ir.glue.z_offset,
+            prime_trigger_layers: ir.prime.trigger_layers,
+            prime_total_length: self.stats.prime_total_length,
+        }
+    }
+
+    /// 擦料塔组。
+    pub fn tower(&self) -> TowerFacts {
+        let ir = self.ir;
+        TowerFacts {
+            // 塔层数只认 IR 终态：pass2 每写一层塔 +1（`ir.tower.layer_count`），
+            // 与旧版 `detail.towerLayers ← irData.Tower.LayerCount` 同一个来源。
+            tower_layers: ir.tower.layer_count,
+            tower_height: self.tower_height,
+            tower_extrude_ratio: ir.tower.extrude_ratio,
+            tower_z_lift: ir.tower.safe_z_offset,
+            tower_safe_z_offset: ir.tower.safe_z_offset,
+            tower_travel_speed: ir.tower.travel_speed,
+            fast_tower_mode: ir.tower.fast_mode.clone(),
+        }
+    }
+
+    /// 切片工艺组。
+    pub fn slicer(&self) -> SlicerFacts {
+        let ir = self.ir;
+        SlicerFacts {
+            slicer_version: self.stats.slicer_version.clone(),
+            machine_preset_name: self.header.machine_preset_name.clone(),
+            process_preset_name: self.header.process_preset_name.clone(),
+            filament_type: ir.filament.filament_type.clone(),
+            nozzle_diameter: ir.machine.nozzle_diameter,
+            slicer_ironing_enabled: self.header.slicer_ironing_enabled,
+            ironing_mode: ir.ironing.mode.clone(),
+            ironing_threshold: ir.ironing.e_sum_threshold,
+            tree_support: ir.machine.tree_support,
+            use_disk_wipe: self.use_disk_wipe(),
+        }
+    }
+
+    /// 这一盘是不是圆盘擦拭（旧版 `detail.useDiskWipe` 的判据）。
+    fn use_disk_wipe(&self) -> bool {
+        self.ir.wiping.mode == postprocess::ir::WIPING_MODE_DISK
+    }
+
+    /// 擦料塔类型（旧版三档：无 / 普通擦料塔 / 圆盘擦拭）。
+    fn tower_type(&self) -> &'static str {
+        if self.use_disk_wipe() {
+            "圆盘擦拭"
+        } else if self.ir.tower.use_towers {
+            "普通擦料塔"
+        } else {
+            "无"
+        }
+    }
+
+    /// 一条步骤的多行事实（`pipeline[].detail`，照旧版 `\n` 分行的形状）。
+    ///
+    /// 没有素材的步返回 `None`（键直接不写）：
+    /// - `calib-check`：包围盒 / 质心是管线局部量、没出过门，不编；
+    /// - `printtime`：只有一段耗时，报告页的「打印」组已经摆了它的结果。
+    pub fn step_detail(&self, step: Step) -> Option<String> {
+        match step {
+            Step::Input => Some(format!(
+                "读取 {} 行\n文件大小: {:.2} MB\nSHA256: {}",
+                self.input_lines,
+                mib(self.input_bytes),
+                self.input_sha256.chars().take(8).collect::<String>(),
+            )),
+            Step::Config => {
+                (!self.preset_name.is_empty()).then(|| format!("预设: {}", self.preset_name))
+            }
+            Step::MachineDetect => Some(format!(
+                "G-code 机型: {}\n预设机型: {}\n机型维度: {:.0}×{:.0}mm\n禁区数量: {}",
+                non_empty(&self.ir.machine.gcode_machine_type),
+                self.ir.machine.machine_type,
+                self.ir.machine.max_x - self.ir.machine.min_x,
+                self.ir.machine.max_y - self.ir.machine.min_y,
+                self.ir.machine.forbidden_zones.len(),
+            )),
+            Step::Parse => Some(format!(
+                "机型: {}\n耗材类型: {}\n切片软件: {}",
+                non_empty(&self.ir.machine.gcode_machine_type),
+                self.ir.filament.filament_type,
+                self.ir.filament.slicer,
+            )),
+            Step::Support => Some(format!(
+                "支撑类型: {}\n熨烫模式: {}\n熨烫覆盖率阈值: {:.1}%",
+                if self.ir.machine.tree_support {
+                    "树状支撑"
+                } else {
+                    "普通支撑"
+                },
+                ironing_mode_cn(&self.ir.ironing.mode),
+                self.ir.ironing.coverage_threshold,
+            )),
+            Step::Collision => {
+                let mut lines: Vec<String> = Vec::new();
+                // 只有非校准模式这一步真跑碰撞检测（`need_collision_check`）；
+                // 过到这儿就是没碰撞 —— 校准模式没跑过，不许写这句结论。
+                if self.calibration_mode.is_empty() {
+                    lines.push("无碰撞，擦料塔位置安全".to_string());
+                    lines.push("模型坐标均在打印范围内".to_string());
+                }
+                lines.push(format!("擦料塔类型: {}", self.tower_type()));
+                lines.push(format!(
+                    "擦料塔位置: ({:.1}, {:.1})",
+                    self.ir.wiping.wiper_x, self.ir.wiping.wiper_y
+                ));
+                Some(lines.join("\n"))
+            }
+            Step::CalibCheck => None,
+            Step::Pass1 => Some(format!(
+                "收集 {} 层高索引\n涂胶遍数: {}\n润笔: {}",
+                self.stats.total_layer_number,
+                self.ir.glue.pass_count,
+                if self.ir.toolhead.first_pen_revitalization_flag {
+                    format!(
+                        "是（每模型: {}, 每层: {}）",
+                        yes_no(self.ir.prime.per_model),
+                        yes_no(self.ir.prime.every_layer),
+                    )
+                } else {
+                    "否".to_string()
+                },
+            )),
+            Step::Pass2 => Some(format!(
+                "擦料塔层数: {}\n擦料塔高度: {:.2}mm\n擦料塔类型: {}\n\
+                 从擦料塔到模型的抬笔高度: {:.1}mm\n斜肋外墙: {}\n圆盘擦拭: {}\n写入完成",
+                self.ir.tower.layer_count,
+                self.tower_height,
+                self.tower_type(),
+                self.ir.tower.safe_z_offset,
+                yes_no(self.ir.wiping.outer_structure == "rib"),
+                yes_no(self.use_disk_wipe()),
+            )),
+            Step::Calibration => {
+                let mut text = format!("校准模式: {}", self.calibration_mode);
+                match self.ir.safety.calibration_execution_mode.as_str() {
+                    "direct_calibrate" => text.push_str("\n执行方式: 直接校准（跳过模型打印）"),
+                    "print_then_calibrate" => text.push_str("\n执行方式: 打印后校准"),
+                    _ => {}
+                }
+                text.push_str("\n校准 G-code 已插入");
+                Some(text)
+            }
+            Step::Write => Some(match self.output_bytes {
+                Some(bytes) => format!("{}\n输出 {:.2} MB", self.write_result_text(), mib(bytes)),
+                // 大小还没量到（stat 不到）就不写那行 —— 不编 0.00 MB。
+                None => self.write_result_text().to_string(),
+            }),
+            Step::PrintTime => None,
+        }
+    }
+
+    /// 写入那一步的结论句（旧版两个说法）。
+    fn write_result_text(&self) -> &'static str {
+        if self.in_place {
+            "原地覆盖完成"
+        } else {
+            "写入独立文件完成"
+        }
+    }
+}
+
+/// 字节 → MB（÷ 1024²，与前端 `mb()` 同一个数）。
+fn mib(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0
+}
+
+/// 是 / 否（旧版 `BoolToCN`）。
+fn yes_no(v: bool) -> &'static str {
+    if v {
+        "是"
+    } else {
+        "否"
+    }
+}
+
+/// 空串兜底：机型认不出时内核写 `UNKNOWN`，但空串也要有个说法 —— 文案不留空。
+fn non_empty(s: &str) -> &str {
+    if s.is_empty() {
+        "UNKNOWN"
+    } else {
+        s
+    }
+}
+
+/// 熨烫模式的中文（照旧版 `_meta.json` 的说法：off=关 / auto=自动 / on=开）。
+fn ironing_mode_cn(mode: &str) -> &str {
+    match mode {
+        "off" => "关",
+        "auto" => "自动",
+        "on" => "开",
+        other => other,
+    }
 }
 
 /// 读一份文件的 sha256（输入 / 输出的事实）。
@@ -348,6 +662,11 @@ pub fn complete_meta(
                 .map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
         }
         if let Some(pt) = print_time {
+            // 估算秒数与 printTime 同批落：`detail.estimatedPrintSeconds` 是旧版同名的
+            // 单列数字（报告页拿它算「比切片器预估多了多久」）。
+            if let Some(total) = pt.get("totalSeconds").and_then(|v| v.as_f64()) {
+                detail["estimatedPrintSeconds"] = serde_json::json!(total);
+            }
             detail["printTime"] = pt;
         }
         obj.insert(
@@ -415,6 +734,8 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(back["printTimeStatus"], "ready");
         assert_eq!(back["detail"]["printTime"]["segments"], 708937);
+        // 估算秒数与 printTime 同批补上（旧版同名的单列数字，报告页拿它比对）
+        assert_eq!(back["detail"]["estimatedPrintSeconds"], 17046.8);
         // 其余字段必须原样保留（读-改-写，不重建整份记录）
         assert_eq!(back["elapsedMs"], 1234);
         assert_eq!(back["detail"]["stats"]["glueLayerCount"], 7);
@@ -509,10 +830,192 @@ mod tests {
         );
     }
 
+    /// 造一份「成功记录」的报告素材（判据共用）：IR 只填被读到的那些字段。
+    struct Sample {
+        ir: postprocess::ir::Ir,
+        stats: postprocess::postproc::pass1::ProcessStats,
+        header: postprocess::pipeline::HeaderFacts,
+        preset_name: String,
+        sha: String,
+    }
+
+    impl Sample {
+        fn facts(&self) -> ReportFacts<'_> {
+            ReportFacts {
+                preset_name: &self.preset_name,
+                input_lines: 909_465,
+                input_bytes: 23_758_782,
+                input_sha256: &self.sha,
+                output_bytes: Some(24_000_000),
+                in_place: true,
+                ir: &self.ir,
+                stats: &self.stats,
+                tower_height: 6.46,
+                header: &self.header,
+                calibration_mode: "",
+            }
+        }
+    }
+
+    fn sample() -> Sample {
+        let mut ir = postprocess::ir::Ir::default();
+        ir.toolhead.max_speed = 5400.0; // = 90 mm/s × 60
+        ir.glue.pass_count = 1;
+        ir.glue.z_lift_height = 5.0;
+        ir.glue.z_lift_height_first_layers = 6.0;
+        ir.glue.inter_model_lift_height = 2.0;
+        ir.glue.z_offset = -0.05;
+        ir.prime.trigger_layers = 30;
+        ir.tower.layer_count = 536;
+        ir.tower.extrude_ratio = 1.0;
+        ir.tower.safe_z_offset = 0.6;
+        ir.tower.travel_speed = 200.0;
+        ir.tower.fast_mode = "fast".into();
+        ir.wiping.mode = postprocess::ir::WIPING_MODE_DISK.into();
+        ir.wiping.wiper_x = 20.0;
+        ir.wiping.wiper_y = 20.0;
+        ir.ironing.mode = "auto".into();
+        ir.ironing.e_sum_threshold = 7.9;
+        ir.ironing.coverage_threshold = 20.0;
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.gcode_machine_type = "A1Mini".into();
+        ir.machine.machine_type = "A1_MINI".into();
+        ir.machine.max_x = 180.0;
+        ir.machine.max_y = 180.0;
+        ir.filament.filament_type = "PETG".into();
+        ir.filament.slicer = "BambuStudio".into();
+
+        let stats = postprocess::postproc::pass1::ProcessStats {
+            glue_total_length: 344.836_999_999_999_76,
+            glue_cutter_changes: 1,
+            prime_total_length: 35.449,
+            slicer_version: "BambuStudio 02.06.01.55".into(),
+            total_layer_number: 539,
+            ..Default::default()
+        };
+
+        Sample {
+            ir,
+            stats,
+            header: postprocess::pipeline::HeaderFacts {
+                machine_preset_name: "Bambu Lab A1 mini 0.4 nozzle".into(),
+                process_preset_name: "0.20mm Standard @BBL A1M".into(),
+                slicer_ironing_enabled: false,
+                three_mf_file_name: ".65112.2_.gcode.3mf".into(),
+            },
+            preset_name: "A1MF.toml".into(),
+            sha: "dea417626c060af54c11e3613468153148046c81a57f358ea86d63805aacd771".into(),
+        }
+    }
+
+    /// 三组分包（`detail.glue/tower/slicer`）的键名照旧版 `_meta.json` **逐字搬** ——
+    /// 报告页按这些键取值，改一个键等于撕一处契约。
+    #[test]
+    fn glue_tower_slicer_keys_match_the_old_meta() {
+        let s = sample();
+        let facts = s.facts();
+
+        let glue = serde_json::to_value(facts.glue()).unwrap();
+        for key in [
+            "glueTotalLength",
+            "gluePenSwitches",
+            "gluePassCount",
+            "glueSpeed",
+            "penOffsetX",
+            "penOffsetY",
+            "penOffsetZ",
+            "glueZLiftHeight",
+            "glueZLiftHeightFirstLayers",
+            "glueInterModelLiftHeight",
+            "glueZOffset",
+            "primeTriggerLayers",
+            "primeTotalLength",
+        ] {
+            assert!(glue.get(key).is_some(), "涂胶组缺键：{key}");
+        }
+        assert_eq!(glue["glueSpeed"], 90.0, "mm/min ÷ 60 回旧版的 mm/s");
+        assert_eq!(glue["glueZOffset"], -0.05);
+        assert_eq!(glue["gluePenSwitches"], 1, "换笔 ← GlueCutterChanges");
+
+        let tower = serde_json::to_value(facts.tower()).unwrap();
+        for key in [
+            "towerLayers",
+            "towerHeight",
+            "towerExtrudeRatio",
+            "towerZLift",
+            "towerSafeZOffset",
+            "towerTravelSpeed",
+            "fastTowerMode",
+        ] {
+            assert!(tower.get(key).is_some(), "擦料塔组缺键：{key}");
+        }
+        assert_eq!(tower["towerLayers"], 536, "塔层数认 IR 终态");
+        assert_eq!(tower["towerHeight"], 6.46);
+
+        let slicer = serde_json::to_value(facts.slicer()).unwrap();
+        for key in [
+            "slicerVersion",
+            "machinePresetName",
+            "processPresetName",
+            "filamentType",
+            "nozzleDiameter",
+            "slicerIroningEnabled",
+            "ironingMode",
+            "ironingThreshold",
+            "treeSupport",
+            "useDiskWipe",
+        ] {
+            assert!(slicer.get(key).is_some(), "切片工艺组缺键：{key}");
+        }
+        assert_eq!(slicer["machinePresetName"], "Bambu Lab A1 mini 0.4 nozzle");
+        assert_eq!(slicer["useDiskWipe"], true);
+    }
+
+    /// 每步细节：有素材的步写多行事实；没有素材的（calib-check / printtime）不写键。
+    #[test]
+    fn step_details_carry_the_facts_the_report_shows() {
+        let s = sample();
+        let facts = s.facts();
+
+        let input = facts.step_detail(Step::Input).unwrap();
+        assert!(input.starts_with("读取 909465 行\n"), "实际：{input}");
+        assert!(input.contains("SHA256: dea41762"), "sha 取前 8 位");
+
+        let collision = facts.step_detail(Step::Collision).unwrap();
+        assert!(collision.contains("无碰撞，擦料塔位置安全"));
+        assert!(collision.contains("擦料塔位置: (20.0, 20.0)"));
+
+        let pass2 = facts.step_detail(Step::Pass2).unwrap();
+        assert!(pass2.contains("擦料塔层数: 536"));
+        assert!(pass2.contains("斜肋外墙: 否"));
+
+        let write = facts.step_detail(Step::Write).unwrap();
+        assert!(write.contains("原地覆盖完成"));
+        assert!(write.contains("输出 22.89 MB"), "实际：{write}");
+
+        // 没有素材的步：键直接不写（页面口径：没给就不摆）
+        assert!(facts.step_detail(Step::CalibCheck).is_none());
+        assert!(facts.step_detail(Step::PrintTime).is_none());
+    }
+
+    /// 校准模式没跑过碰撞检测（`need_collision_check`）—— 细节**不许**写"无碰撞"，
+    /// 那是编的结论；类型与位置两行照写。
+    #[test]
+    fn calibration_mode_collision_detail_does_not_claim_a_check() {
+        let s = sample();
+        let mut facts = s.facts();
+        facts.calibration_mode = "ZOffset";
+        let collision = facts.step_detail(Step::Collision).unwrap();
+        assert!(!collision.contains("无碰撞"), "实际：{collision}");
+        assert!(collision.contains("擦料塔类型: 圆盘擦拭"));
+    }
+
     /// `_meta.json` 的键**咬住**报告页读口与前端消费面（camelCase）。
     /// 改键名等于撕契约 —— 这条判据就是拦这个的。
     #[test]
     fn meta_json_keeps_the_keys_the_report_page_reads() {
+        let s = sample();
+        let facts = s.facts();
         let meta = Meta {
             schema_version: Meta::SCHEMA_VERSION,
             started_at: "2026-10-09 22:08:51".into(),
@@ -534,6 +1037,7 @@ mod tests {
                 message: "正在读取文件...".into(),
                 elapsed_ms: 96,
                 status: PipelineStatus::Complete,
+                detail: Some("读取 909465 行".into()),
             }],
             detail: Detail {
                 input_file: FileFact {
@@ -546,6 +1050,10 @@ mod tests {
                 stats: Some(serde_json::json!({ "glueLayerCount": 124 })),
                 print_time: None,
                 print_time_status: None,
+                estimated_print_seconds: Some(2530.5),
+                glue: Some(facts.glue()),
+                tower: Some(facts.tower()),
+                slicer: Some(facts.slicer()),
             },
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -570,9 +1078,17 @@ mod tests {
         assert_eq!(v["pipeline"][0]["id"], "input");
         assert_eq!(v["pipeline"][0]["elapsedMs"], 96);
         assert_eq!(v["pipeline"][0]["status"], "complete");
+        assert_eq!(v["pipeline"][0]["detail"], "读取 909465 行");
         assert!(v["error"].is_null(), "成功记录落 null，不是缺键");
         assert_eq!(v["detail"]["inputFile"]["lines"], 909_465);
         assert_eq!(v["detail"]["inputFile"]["sizeBytes"], 23_758_782);
+        assert_eq!(v["detail"]["estimatedPrintSeconds"], 2530.5);
+        assert!(
+            v["detail"]["glue"]["glueTotalLength"].is_number(),
+            "三组分包落进 detail"
+        );
+        assert!(v["detail"]["tower"]["towerLayers"].is_number());
+        assert!(v["detail"]["slicer"]["nozzleDiameter"].is_number());
     }
 
     /// 时刻格式化：三个口径（日期目录 / 文件名 / 人看）互不串味。
@@ -615,6 +1131,10 @@ mod tests {
                 stats: None,
                 print_time: None,
                 print_time_status: None,
+                estimated_print_seconds: None,
+                glue: None,
+                tower: None,
+                slicer: None,
             },
         };
         write_meta(&paths, &meta).expect("写记录");
@@ -626,5 +1146,9 @@ mod tests {
             back["detail"].get("outputFile").is_none(),
             "失败记录没有输出件"
         );
+        // 失败记录连三组分包一起缺键（没有 IR 终态 ⇒ 整组不摆，不是摆一排空）
+        assert!(back["detail"].get("glue").is_none());
+        assert!(back["detail"].get("tower").is_none());
+        assert!(back["detail"].get("slicer").is_none());
     }
 }

@@ -425,6 +425,15 @@
   overflow-wrap: anywhere;
 }
 
+/* 每步自报的多行事实（`\n` 分行，`pre-line` 原样铺）—— 比 message 深一档 */
+.stepDetail {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .mono {
   font-family: ui-monospace, Consolas, monospace;
 }

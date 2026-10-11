@@ -31,19 +31,25 @@
  *
  * 「确认导出 / 清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
  *
- * # 一个待补：详情字段还差一大截
+ * # 字段面（2026-10-11 补齐）
  *
- * 旧版 `_meta.json` 里有的涂胶（总长 / 换笔 / 速度 / 笔偏移）、擦料塔（挤出比 /
- * 安全 Z）、切片工艺（切片器版本 / 工艺预设名）现在 schema v2 **没透出来**
- * （`ReportDetail` 只有 stats 16 项 + printTime + pipeline）。HTML 里那几组
- * （涂胶 / 擦料塔 / 切片工艺）画好了样式但**这里不编数据** —— 等后端把字段
- * 带出来，往 `buildGroups` 里加一组即可，页面不用改。
+ * 涂胶（总长 / 换笔 / 速度 / 笔偏移）、擦料塔（层数 / 挤出比 / 安全 Z）、切片工艺
+ * （切片器版本 / 预设名 / 熨平）读 `detail.glue / tower / slicer` 三个分包，
+ * 键名与旧版 `_meta.json` 一致（写侧在 `src-tauri/src/archive.rs`）；
+ * 管线每步的多行事实铺在步骤名下面（`pipeline[].detail`）。**没给就不摆**：
+ * 旧记录 / 失败记录没有这些键，对应整组消失，不编占位数字。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, errorText } from '../../api'
-import type { ReportDetail, ReportSummary } from '../../api'
+import type {
+  ReportDetail,
+  ReportGlueFacts,
+  ReportSlicerFacts,
+  ReportSummary,
+  ReportTowerFacts,
+} from '../../api'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
@@ -110,6 +116,158 @@ function mb(bytes: number | undefined): string | null {
   return bytes === undefined ? null : `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
+/** 数字尽量不留尾零：整数原样，小数最多两位（`-0.05` / `1.4` / `23`）。 */
+function fmtNum(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2)))
+}
+
+/** 毫米：绝对值过 1000 换米（两位小数），例：`9.35 m` / `0.6 mm` / `5 mm`。 */
+function mmText(v: number | undefined): string | null {
+  if (v === undefined || !Number.isFinite(v)) return null
+  return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(2)} m` : `${fmtNum(v)} mm`
+}
+
+/** 格子值：数字按 `fmtNum` 加后缀，缺了给「—」。 */
+function numCell(v: number | undefined, suffix = ''): string {
+  return v === undefined ? '—' : `${fmtNum(v)}${suffix}`
+}
+
+/**
+ * 从切片器的原话里抠「total estimated time」的秒数
+ * （`"3h 16m 52s; total estimated time: 3h 22m 55s"` → 12175）—— 对不上就是 `null`。
+ */
+function slicerEstimateSeconds(original: string | undefined): number | null {
+  if (original === undefined) return null
+  const m = /total estimated time:\s*(?:(\d+)\s*h\s*)?(?:(\d+)\s*m\s*)?(?:(\d+)\s*s)?/.exec(
+    original,
+  )
+  if (m === null || (m[1] === undefined && m[2] === undefined && m[3] === undefined)) return null
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0)
+}
+
+/** 涂胶组（键与 `detail.glue` 同名；全格都空就整组不摆） */
+function glueGroup(glue: ReportGlueFacts): Group | null {
+  const cells: [string, string][] = [
+    ['涂胶总长', mmText(glue.glueTotalLength) ?? '—'],
+    ['换笔', numCell(glue.gluePenSwitches, ' 次')],
+    ['涂胶遍数', numCell(glue.gluePassCount, ' 遍')],
+    ['涂胶速度', numCell(glue.glueSpeed, ' mm/s')],
+    [
+      '笔偏移 XYZ',
+      glue.penOffsetX === undefined && glue.penOffsetY === undefined && glue.penOffsetZ === undefined
+        ? '—'
+        : [glue.penOffsetX, glue.penOffsetY, glue.penOffsetZ]
+            .map((v) => (v === undefined ? '—' : fmtNum(v)))
+            .join(', '),
+    ],
+    [
+      '抬笔高度',
+      glue.glueZLiftHeight === undefined
+        ? '—'
+        : `${fmtNum(glue.glueZLiftHeight)} mm${
+            glue.glueZLiftHeightFirstLayers === undefined
+              ? ''
+              : `（首层 ${fmtNum(glue.glueZLiftHeightFirstLayers)}）`
+          }`,
+    ],
+    ['模型间抬笔', mmText(glue.glueInterModelLiftHeight) ?? '—'],
+    ['Z 偏移', glue.glueZOffset === undefined ? '—' : `${fmtNum(glue.glueZOffset)} mm`],
+    [
+      '润笔',
+      glue.primeTriggerLayers === undefined && glue.primeTotalLength === undefined
+        ? '—'
+        : `${numCell(glue.primeTriggerLayers, ' 层')} · ${
+            glue.primeTotalLength === undefined ? '—' : `${glue.primeTotalLength.toFixed(1)} mm`
+          }`,
+    ],
+  ]
+  if (!hasAnyValue(cells)) return null
+  const sum = [
+    glue.primeTriggerLayers === undefined ? null : `${fmtNum(glue.primeTriggerLayers)} 层`,
+    mmText(glue.glueTotalLength),
+    glue.gluePenSwitches === undefined ? null : `换笔 ${fmtNum(glue.gluePenSwitches)} 次`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' · ')
+  return { id: 'glue', title: '涂胶', sum, cells }
+}
+
+/** 擦料塔组（键与 `detail.tower` 同名） */
+function towerGroup(tower: ReportTowerFacts): Group | null {
+  const cells: [string, string][] = [
+    [
+      '层数 / 高度',
+      tower.towerLayers === undefined && tower.towerHeight === undefined
+        ? '—'
+        : `${numCell(tower.towerLayers, ' 层')} · ${
+            tower.towerHeight === undefined ? '—' : `${fmtNum(tower.towerHeight)} mm`
+          }`,
+    ],
+    ['挤出比', tower.towerExtrudeRatio === undefined ? '—' : fmtNum(tower.towerExtrudeRatio)],
+    [
+      '抬笔 / 安全 Z',
+      tower.towerZLift === undefined && tower.towerSafeZOffset === undefined
+        ? '—'
+        : `${tower.towerZLift === undefined ? '—' : fmtNum(tower.towerZLift)} / ${
+            tower.towerSafeZOffset === undefined ? '—' : fmtNum(tower.towerSafeZOffset)
+          } mm`,
+    ],
+    [
+      '移动速度 / 模式',
+      tower.towerTravelSpeed === undefined && tower.fastTowerMode === undefined
+        ? '—'
+        : `${numCell(tower.towerTravelSpeed, ' mm/s')} · ${tower.fastTowerMode ?? '—'}`,
+    ],
+  ]
+  if (!hasAnyValue(cells)) return null
+  const sum = [
+    tower.towerLayers === undefined ? null : `${fmtNum(tower.towerLayers)} 层`,
+    tower.towerHeight === undefined ? null : `${fmtNum(tower.towerHeight)} mm`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' · ')
+  return { id: 'tower', title: '擦料塔', sum, cells }
+}
+
+/** 切片工艺组（键与 `detail.slicer` 同名） */
+function slicerGroup(slicer: ReportSlicerFacts): Group | null {
+  const cells: [string, string][] = [
+    ['切片软件', slicer.slicerVersion ?? '—'],
+    ['机型预设', slicer.machinePresetName ?? '—'],
+    ['工艺预设', slicer.processPresetName ?? '—'],
+    [
+      '耗材 / 喷嘴',
+      slicer.filamentType === undefined && slicer.nozzleDiameter === undefined
+        ? '—'
+        : `${slicer.filamentType ?? '—'} · ${
+            slicer.nozzleDiameter === undefined ? '—' : `${fmtNum(slicer.nozzleDiameter)} mm`
+          }`,
+    ],
+    [
+      '熨平',
+      slicer.slicerIroningEnabled === undefined &&
+      slicer.ironingMode === undefined &&
+      slicer.ironingThreshold === undefined
+        ? '—'
+        : `${
+            slicer.slicerIroningEnabled === undefined ? '—' : slicer.slicerIroningEnabled ? '开' : '关'
+          } · ${slicer.ironingMode ?? '—'} · 阈值 ${
+            slicer.ironingThreshold === undefined ? '—' : fmtNum(slicer.ironingThreshold)
+          }`,
+    ],
+    [
+      '支撑',
+      slicer.treeSupport === undefined && slicer.useDiskWipe === undefined
+        ? '—'
+        : `树状 ${slicer.treeSupport === undefined ? '—' : slicer.treeSupport ? '开' : '关'} · 圆盘擦拭 ${
+            slicer.useDiskWipe === undefined ? '—' : slicer.useDiskWipe ? '开' : '关'
+          }`,
+    ],
+  ]
+  if (!hasAnyValue(cells)) return null
+  return { id: 'slicer', title: '切片工艺', sum: slicer.slicerVersion ?? '', cells }
+}
+
 /** 一组里所有格子的值都是「—」就别摆这一组（成功/失败两种情况字段不一样多） */
 function hasAnyValue(cells: [string, string][]): boolean {
   return cells.some(([, v]) => v !== '—')
@@ -156,6 +314,15 @@ function buildGroups(detail: ReportDetail): Group[] {
   if (detail.printTime?.segments !== undefined) {
     printCells.push(['耗时段数', String(detail.printTime.segments)])
   }
+  /* 本程序估算 vs 切片器原话：两个数都真有才摆（这一段最值钱的信息） */
+  const slicerSec = slicerEstimateSeconds(
+    typeof stats.originalPrintTime === 'string' ? stats.originalPrintTime : undefined,
+  )
+  const mine = detail.estimatedPrintSeconds ?? detail.printTime?.totalSeconds
+  if (slicerSec !== null && slicerSec > 0 && mine !== undefined) {
+    const pct = Math.round(((mine - slicerSec) / slicerSec) * 100)
+    printCells.push(['比切片器预估', `${pct >= 0 ? '+' : ''}${pct}%`])
+  }
   if (hasAnyValue(printCells)) {
     groups.push({
       id: 'print',
@@ -163,6 +330,20 @@ function buildGroups(detail: ReportDetail): Group[] {
       sum: printTimeText(detail.printTime?.totalSeconds),
       cells: printCells,
     })
+  }
+
+  /* 涂胶 / 擦料塔 / 切片工艺：旧记录没有这些分包 ⇒ 整组不摆（不编占位值） */
+  if (detail.glue !== undefined && detail.glue !== null) {
+    const g = glueGroup(detail.glue)
+    if (g !== null) groups.push(g)
+  }
+  if (detail.tower !== undefined && detail.tower !== null) {
+    const g = towerGroup(detail.tower)
+    if (g !== null) groups.push(g)
+  }
+  if (detail.slicer !== undefined && detail.slicer !== null) {
+    const g = slicerGroup(detail.slicer)
+    if (g !== null) groups.push(g)
   }
 
   /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
@@ -618,6 +799,9 @@ export default function PageReport() {
                                     </span>
                                     {step.message !== undefined && step.message !== '' && (
                                       <span className={s.stepMsg}>{step.message}</span>
+                                    )}
+                                    {step.detail !== undefined && step.detail !== '' && (
+                                      <span className={s.stepDetail}>{step.detail}</span>
                                     )}
                                   </li>
                                 ))}

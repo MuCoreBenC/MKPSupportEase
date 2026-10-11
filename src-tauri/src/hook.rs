@@ -393,12 +393,58 @@ fn archive_success(
         }
     };
 
+    // 报告字段面（`detail.glue/tower/slicer` + `pipeline[].detail`）的素材 ——
+    // 全部是已经在手的事实，报告组装只做搬运（见 `archive::ReportFacts`）。
+    let preset_name = file_name_of(&job.toml);
+    let output_bytes = std::fs::metadata(&done.output_path).map(|m| m.len()).ok();
+    let facts = crate::archive::ReportFacts {
+        preset_name: &preset_name,
+        input_lines,
+        input_bytes: input_size_bytes,
+        input_sha256: &done.input_sha256,
+        output_bytes,
+        in_place: done.output_path == job.gcode,
+        ir: &done.detail_facts.ir,
+        stats: &done.stats.pass1,
+        tower_height: done.stats.tower_height,
+        header: &done.header_facts,
+        calibration_mode: &done.detail_facts.calibration_mode,
+    };
+    let pipeline: Vec<PipelineStep> = done
+        .step_timings
+        .iter()
+        .map(|t| PipelineStep::from_timing(t, PipelineStatus::Complete, facts.step_detail(t.step)))
+        .collect();
+    let detail = Detail {
+        input_file: input_fact(
+            &job.gcode,
+            input_size_bytes,
+            Some(input_lines),
+            &done.input_sha256,
+        ),
+        output_file,
+        stats: serde_json::to_value(&done.stats.pass1).ok(),
+        print_time: done
+            .print_time
+            .as_ref()
+            .and_then(|pt| serde_json::to_value(pt).ok()),
+        // 打印时间是空的 ⇒ 这一趟把它延后了（交给常驻进程）⇒ 先标 `computing`。
+        print_time_status: if done.print_time.is_none() {
+            Some(crate::archive::PRINT_TIME_COMPUTING.to_string())
+        } else {
+            None
+        },
+        estimated_print_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
+        glue: Some(facts.glue()),
+        tower: Some(facts.tower()),
+        slicer: Some(facts.slicer()),
+    };
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
         started_at: crate::archive::display_stamp(started_at),
         finished_at: crate::archive::display_stamp(crate::archive::now_local()),
         elapsed_ms: started.elapsed().as_millis() as u64,
-        preset_name: file_name_of(&job.toml),
+        preset_name,
         machine_type: machine.to_string(),
         preset_path: job.toml.display().to_string(),
         gcode_path: job.gcode.display().to_string(),
@@ -406,31 +452,8 @@ fn archive_success(
         warnings: done.warnings.clone(),
         error: None,
         cancelled: false,
-        pipeline: done
-            .step_timings
-            .iter()
-            .map(|t| PipelineStep::from_timing(t, PipelineStatus::Complete))
-            .collect(),
-        detail: Detail {
-            input_file: input_fact(
-                &job.gcode,
-                input_size_bytes,
-                Some(input_lines),
-                &done.input_sha256,
-            ),
-            output_file,
-            stats: serde_json::to_value(&done.stats.pass1).ok(),
-            print_time: done
-                .print_time
-                .as_ref()
-                .and_then(|pt| serde_json::to_value(pt).ok()),
-            // 打印时间是空的 ⇒ 这一趟把它延后了（交给常驻进程）⇒ 先标 `computing`。
-            print_time_status: if done.print_time.is_none() {
-                Some(crate::archive::PRINT_TIME_COMPUTING.to_string())
-            } else {
-                None
-            },
-        },
+        pipeline,
+        detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
         warnings.push(format!("执行记录写入失败：{e}"));
@@ -473,6 +496,11 @@ fn archive_failure(
             stats: None,
             print_time: None,
             print_time_status: None, // 失败/取消不算估算，不写状态
+            estimated_print_seconds: None,
+            // 失败 / 取消没有 IR 终态 ⇒ 三组分包整组不写（页面口径：没给就不摆）
+            glue: None,
+            tower: None,
+            slicer: None,
         },
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {

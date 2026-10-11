@@ -11,6 +11,12 @@
 2. **本仓后续后处理产出的 `_meta.json` 要与旧 Go 程序那份 JSON 同形**
    （作者 2026-10-11 口径；样本：`/Users/wzy/Desktop/MKPSE_log/后处理执行报告导出/27351.0_.gcode_2026-08-19_11-28-46/27351.0_20260819_112718_meta.json`）。
    同形是硬要求：报告页的分组、键名、统计格全部按那份 JSON 的字段名取值。
+3. **§2 的五组已落地（2026-10-11，分支 `fix/postprocess-command`）**：写侧 `archive.rs`
+   （`ReportFacts`，素材只认内核搬出来的 IR 终态 / 统计 / 头部事实）按 §3 的 v3 提案产出
+   `detail.estimatedPrintSeconds` + `glue` / `tower` / `slicer` 三个分包（键名照旧版同名搬）
+   + `pipeline[].detail`；读侧 `ipc/report.rs` 透传；页面 `buildGroups()` 三组
+   + 打印组「比切片器预估 +N%」。第 1 条的「没给就不摆」照旧执行：失败 / 取消记录
+   三组整组缺键；§4「明确不要的」逐条遵守。
 
 ---
 

@@ -2254,3 +2254,40 @@ Mac 用 Mac 的可执行物与落点，Windows 用 Windows 的，**不硬编码�
   `a_conflicting_tag_does_not_fail_the_fetch` 因**全局 git template 钩子**拒绝临时仓库在
   main 上提交而红 —— 与代码无关，CI 无该模板）。`npx tsc -b` / `npm run lint` /
   `npm run build` + 三道闸全过。
+
+## 增量之三十四 · 报告页字段面补齐：三组分包 + estimatedPrintSeconds + 管线每步 detail（2026-10-11，分支 `fix/postprocess-command`）
+
+规格 = `docs/REPORT-DETAIL-FIELDS.md`（照搬试验场的字段清单，文首三条本仓口径见该文件）。
+报告页照搬 a05 后「详情有一半是空的」—— 不是前端没画，是 `_meta.json` 没透出那些键。
+这一刀把写侧（`archive.rs`）/ 内核（`ProcessResult.header_facts`）/ 读侧（`ipc/report.rs`）/
+前端（contract + buildGroups）一条链补齐。
+
+- **写侧**（`archive.rs`）：`Detail` 新增 `estimatedPrintSeconds`（与 `printTime` 同批落，
+  延后估算时由 `complete_meta` 补）+ 三个分包 `glue` / `tower` / `slicer`
+  （强类型 `GlueFacts` / `TowerFacts` / `SlicerFacts`，**键名照旧版 `_meta.json` 逐字搬**）。
+  组装收在 `ReportFacts`（唯一素材源 = 内核搬出来的 IR 终态 / 统计 / 头部事实，只搬运不新算）：
+  `glueSpeed` = `toolhead.max_speed ÷ 60`（全仓唯一逆换算点）；塔层数认 `ir.tower.layer_count`
+  （pass2 每层 +1，与旧版 `irData.Tower.LayerCount` 同源）；`useDiskWipe` = `wiping.mode == "disk"`。
+  `pipeline[]` 每步新增 `detail` 多行事实（照旧版 `\n` 分行；`calib-check` / `printtime`
+  没素材就不写键；**校准模式没跑过碰撞检测 ⇒ 不写"无碰撞"**，那是编结论）。
+  失败 / 取消记录三组整组缺键（没有 IR 终态），照「没给就不摆」。
+- **内核**（`crates/postprocess`）：`ProcessResult` 新增 `header_facts`（parse 步取一次）——
+  `detail.slicer` 的 `machinePresetName` / `processPresetName` / `slicerIroningEnabled`
+  就是它；管线自身不消费（`HeaderFacts` 注释按新用途改写）。
+- **接线**（`hook.rs`）：成功路径组装 `ReportFacts` → 三组 + 每步 detail；输出大小从
+  `done.output_path` stat 一次（stat 不到就不写"输出 X MB"那行，不编 0.00）。
+- **读侧**（`ipc/report.rs`）：`ReportDetail` 透传 `estimatedPrintSeconds` / `glue` /
+  `tower` / `slicer`（旧记录缺键 ⇒ `None`，不 panic）。
+- **前端**：`contract.ts` 三个 facts 接口 + `ReportPipelineStep.detail`；`PageReport.tsx`
+  `buildGroups()` 加「涂胶 / 擦料塔 / 切片工艺」三组（照 spec 的标签与单位：mm 过 1000 换 m、
+  格值全空整组不摆）+ 打印组「比切片器预估 +N%」（解析 `originalPrintTime` 里的
+  `total estimated time:`）；管线步骤名下铺 `detail` 小字（`.stepDetail`，`white-space: pre-line`）。
+  mock 夹具同步（首条三组自洽样本 + 每步 detail；文件头规矩 2 已注明差异）。
+- 判据：`archive` 新增 3 条（三组键名逐字 / 每步文案 / 校准模式不吹"无碰撞"）+ 2 条既有扩展
+  （`meta_json` 咬新键、`complete_meta` 补 `estimatedPrintSeconds`）；`ipc::report` 新增 1 条
+  （透传 + 旧记录不 panic）；`pipeline.rs` 在既有全链判据里钉 `header_facts` 两个真值
+  （golden 输入头部注释）。
+- 验证：`cargo fmt --all` / 双 feature `clippy --all-targets -D warnings` / `cargo test`
+  全绿（src-tauri lib **469** + 内核 lib **146** + 20 个集成测试文件全过）/
+  `cargo test -p mkp-support-ease --features workbench`（**822**）/ `npx tsc -b` /
+  `npm run lint`（只剩既有 2 条 react-refresh warning）/ `npm run build` + 四道闸全过。
