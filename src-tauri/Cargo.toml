@@ -27,6 +27,15 @@ name = "release"
 path = "src/bin/release.rs"
 required-features = ["workbench"]
 
+# 「假钩子」：把开场 / 进度 / 那一问 / 结论演给已经开着的那扇窗看（第二次截图改样式用）。
+#
+# ★ 与 `release` 同一条闸：它**不是产品的一部分** —— 不读 G-code、不跑管线、不落记录，
+#   只是照真钩子那条线把消息按节奏发一遍。给用户的二进制里编不到这一份。
+[[bin]]
+name = "hook-sim"
+path = "src/bin/hook-sim.rs"
+required-features = ["workbench"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 # build.rs 要读工作台配置（`workbench/bootstrap.json`）把官方源注入二进制 ——

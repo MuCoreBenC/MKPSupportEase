@@ -87,6 +87,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, errorText, listen } from '../../api'
 import type {
   ReportDetail,
+  ReportExportPlan,
   ReportGlueFacts,
   ReportSlicerFacts,
   ReportSummary,
@@ -640,6 +641,8 @@ export default function PageReport() {
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
   /** 导出框开着没有（它的内务全在 `ExportModal` 里，页面只管这一格开关） */
   const [exportOpen, setExportOpen] = useState(false)
+  /** 选中那条的导出计划（**预取**：开框就是终态高度，见 `ExportModal` 的 `preload`） */
+  const [exportPlan, setExportPlan] = useState<{ id: string; plan: ReportExportPlan } | null>(null)
   /** 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值 */
   const [, setNarrow] = useState(false)
 
@@ -653,10 +656,10 @@ export default function PageReport() {
    *   若只认 `narrow`，一个布尔值的误判就会把整份列表变成"怎么点都不响应"
    *   （拖拽被当成滑盖、那次 click 又被压掉）。以实际生效的几何为准，才不会整页死。
    */
-  const isFloating = () => {
+  const isFloating = useCallback(() => {
     const el = sideRef.current
     return el !== null && getComputedStyle(el).position === 'absolute'
-  }
+  }, [])
 
   /** 拖拽中的现场；null = 没在拖 */
   const drag = useRef<{ x: number; y: number; dx: number; open: boolean; moved: boolean } | null>(
@@ -720,6 +723,33 @@ export default function PageReport() {
       for (const off of offs) off()
     }
   }, [read])
+
+  /*
+   * 导出计划**在选中那一条时就读**（不是等按了「导出」才读）。
+   *
+   * 那一条命令只是"读一份 meta + 看看三个文件在不在"，比列表本身还轻；换来的是点
+   * 「导出」时框**打开就是终态高度** —— 现场读的话会先摆一行"正在读…"、再长高跳一下，
+   * 看着就像整页闪了一下（作者 2026-10-11 点的）。
+   * 预取失败**不在这儿报**：真按了「导出」时框会自己再读一次，并把后端那句话摆出来。
+   */
+  useEffect(() => {
+    if (selId === null) {
+      setExportPlan(null)
+      return
+    }
+    let alive = true
+    api.getReportExportPlan(selId).then(
+      (plan) => {
+        if (alive) setExportPlan({ id: selId, plan })
+      },
+      () => {
+        /* 预取失败 = 什么都不留（框那边自己去读、自己报错） */
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [selId])
 
   /* 展开一条：详情按需读（列表只带摘要，选中才读整份 meta） */
   useEffect(() => {
@@ -830,6 +860,17 @@ export default function PageReport() {
      */
     if (sideOpen && e.target instanceof HTMLInputElement) return
     drag.current = { x: e.clientX, y: e.clientY, dx: 0, open: sideOpen, moved: false }
+    /*
+     * ★ 收尾线挂在 **window** 上，不是只靠 nav 自己那两颗 onPointerUp。
+     *
+     * 按下之后如果还没到 8px 阈值（也就还没 capture），指针就在 nav 外面松开了 ——
+     * nav 收不到那一下 pointerup，`drag.current` 与那一行内联 `transform` **一起留下**：
+     * 手感就是"手早就松了、面板还跟着鼠标走"，而且面板会永远卡在拖到一半的位置
+     * （作者 2026-10-11 实测：左栏被推得只剩一窄条，怎么点都回不来）。
+     * 挂在 window 上就一定收得到；重复触发无害（`onUp` 自己认 `drag.current` 是否已清）。
+     */
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
   const onMove = (e: React.PointerEvent<HTMLElement>) => {
     const d = drag.current
@@ -852,7 +893,15 @@ export default function PageReport() {
     const base = d.open ? 0 : min
     el.style.transform = `translateX(${Math.min(0, Math.max(min, base + dx))}px)`
   }
-  const onUp = () => {
+  /**
+   * 收尾（拖拽 / 点把手两件事都从这儿出）。
+   *
+   * ★ 身份必须**稳定**（`useCallback` 空依赖）：`onDown` 把它挂到 `window` 上，
+   *   每次渲染换个新函数的话 `removeEventListener` 摘掉的是别人，收尾线会越挂越多。
+   */
+  const onUp = useCallback(() => {
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
     const d = drag.current
     if (d === null) return
     drag.current = null
@@ -877,7 +926,7 @@ export default function PageReport() {
     suppressClick.current = true
     if (!d.open && d.dx > SNAP) setSideOpen(true)
     else if (d.open && d.dx < -SNAP) setSideOpen(false)
-  }
+  }, [isFloating])
 
   /* ---------- 列表：搜索 + 筛选 + 按日分组 ---------- */
 
@@ -1260,6 +1309,7 @@ export default function PageReport() {
       <ExportModal
         open={exportOpen}
         id={selId}
+        preload={exportPlan}
         onClose={() => setExportOpen(false)}
         onExported={(written, folder) =>
           /* 成了才给这条提示；位置写全 —— 框这会儿已经关掉了，用户还得知道东西去哪了 */

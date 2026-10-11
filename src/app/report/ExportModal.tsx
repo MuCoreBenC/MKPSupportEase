@@ -10,20 +10,23 @@
  * （`ipc/report.rs` 那个纯函数），界面照单显示。否则"框里写着一个名、盘上落另一个名"
  * 这种错没有任何东西咬得住。
  *
- * # 两条纪律
+ * # 三条纪律
  *
  * 1. **不在框里造词**：归档里缺的那几份照实说（失败的那一次不会有"处理后的文件"），
  *    不摆一行"缺"的空行、也不假装三件套都齐；
  * 2. **失败留在框里**：导出没成（不覆盖 / 目录建不出来 / 一份都不在盘上）→ 后端那句
- *    原话摆在框里、框不关 —— 用户就着这句话改位置或先把那一份挪走，不用从头来一遍。
+ *    原话摆在框里、框不关 —— 用户就着这句话改位置或先把那一份挪走，不用从头来一遍；
+ * 3. **成了也不关**（作者 2026-10-11）：导完最要紧的下一步是"去那个文件夹里看看"，
+ *    框一关路径就没了 —— 所以成了之后框留着、改摆一句"已导出 N 个文件"，
+ *    底下那颗路径胶囊还在，照着它去开文件夹（长按能选中整条）。
  *
  * # 保存位置记着上一次（`STORAGE.clientReportExportDir`）
  *
  * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。目录不在了照样是
  * 后端说了算（会照实报"建不出保存位置"），所以记住一个失效的路径不会骗人。
  *
- * 胶囊**整条不改位置**：只有右边那颗「更改位置」弹系统框（作者 2026-10-11）——
- * 路径正文因此还能拖选，误点一下也不会跳出一个系统目录框。
+ * 胶囊**整条不改位置**：只有右边那颗「更改位置」弹系统框 —— 路径正文因此还能拖选，
+ * 误点一下也不会跳出一个系统目录框。
  */
 
 import { useEffect, useState } from 'react'
@@ -80,7 +83,10 @@ const KIND_ICON: Record<ReportExportKind, ReactNode> = {
  * 分隔符按父目录里用的那个认（Windows 收到的是 `\`，macOS 是 `/`）；
  * 段数少到没有"尾两段"可言时整条当前段，不分。
  */
-function pathPill(dir: string, base: string): { folder: string; full: string; head: string; tail: string } {
+function pathPill(
+  dir: string,
+  base: string,
+): { folder: string; full: string; head: string; tail: string } {
   const sep = dir.includes('\\') ? '\\' : '/'
   const folder = `${dir.replace(/[\\/]+$/, '')}${sep}${base}`
   const full = `${folder}${sep}`
@@ -99,26 +105,48 @@ export interface ExportModalProps {
   open: boolean
   /** 要导出的那一条记录（`null` = 列表里还没有选中的，那时光标根本打不开） */
   id: string | null
+  /**
+   * 页面替它**预先读好的**计划（切记录时就读了）。
+   *
+   * 有它开框就是终态高度：现场去读的话，框会先摆一行"正在读导出清单…"、等计划
+   * 回来再长高 —— 那一下的跳动看着就像整页闪了一下（作者 2026-10-11 点的）。
+   * `id` 对不上就不用（那一份是上一条记录的）。
+   */
+  preload: { id: string; plan: ReportExportPlan } | null
   onClose: () => void
   /** 成了：把落盘的路径与目标文件夹交出去（页面据此报一句"导到哪了"） */
   onExported: (written: string[], folder: string) => void
 }
 
-export default function ExportModal({ open, id, onClose, onExported }: ExportModalProps) {
+export default function ExportModal({
+  open,
+  id,
+  preload,
+  onClose,
+  onExported,
+}: ExportModalProps) {
   const [plan, setPlan] = useState<ReportExportPlan | null>(null)
   const [planErr, setPlanErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   /** 导出没成时后端那句原话（留在框里，不关框） */
   const [fail, setFail] = useState<string | null>(null)
+  /** 成了：出了几份、落到哪个文件夹（框留着，见文件头第 3 条） */
+  const [done, setDone] = useState<{ count: number; folder: string } | null>(null)
   /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`） */
   const [picked, setPicked] = useStickyState<string>(STORAGE.clientReportExportDir, '')
 
-  /* 开框读一次计划：文件名 / 默认落点 / 缺哪几份都是后端算的 */
+  /* 开框读一次计划：文件名 / 默认落点 / 缺哪几份都是后端算的（页面预取过就直接用） */
   useEffect(() => {
     if (!open || id === null) return
-    setPlan(null)
     setPlanErr(null)
     setFail(null)
+    setDone(null)
+
+    if (preload !== null && preload.id === id) {
+      setPlan(preload.plan)
+      return
+    }
+    setPlan(null)
     let alive = true
     api.getReportExportPlan(id).then(
       (got) => {
@@ -131,7 +159,7 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
     return () => {
       alive = false
     }
-  }, [open, id])
+  }, [open, id, preload])
 
   const dir = picked === '' ? (plan?.defaultDir ?? '') : picked
   const path = plan === null || dir === '' ? null : pathPill(dir, plan.base)
@@ -140,7 +168,11 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
   const changeDir = () => {
     void api.pickExportDir(dir).then(
       (next) => {
-        if (next !== null) setPicked(next)
+        if (next !== null) {
+          setPicked(next)
+          /* 换了个位置就是"再导一份"这件事重新开始：上一次那句"已导出"不再成立 */
+          setDone(null)
+        }
       },
       (e: unknown) => setFail(errorText(e)),
     )
@@ -153,8 +185,9 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
     api.exportReportArchive(id, dir).then(
       (written) => {
         setBusy(false)
+        /* ★ 不关框：导完要照着这条路径去开文件夹（文件头第 3 条） */
+        setDone({ count: written.length, folder: path.folder })
         onExported(written, path.folder)
-        onClose()
       },
       (e: unknown) => {
         setBusy(false)
@@ -170,88 +203,103 @@ export default function ExportModal({ open, id, onClose, onExported }: ExportMod
       title="导出执行报告"
       onClose={onClose}
       footer={
-        <>
-          <Btn onClick={onClose}>取消</Btn>
-          <Btn variant="accent" disabled={busy || plan === null} onClick={confirm}>
-            确认导出
+        done !== null ? (
+          <Btn variant="accent" onClick={onClose}>
+            完成
           </Btn>
-        </>
+        ) : (
+          <>
+            <Btn onClick={onClose}>取消</Btn>
+            <Btn variant="accent" disabled={busy || plan === null} onClick={confirm}>
+              确认导出
+            </Btn>
+          </>
+        )
       }
     >
-      {planErr !== null && (
-        <p className={s.bad} role="alert">
-          导出清单读不出来：{planErr}
-        </p>
-      )}
-      {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
+      {/* `.body` 那条最小高度是"读计划"与"计划到手"两态一样高 —— 不长高就不会跳 */}
+      <div className={s.body}>
+        {planErr !== null && (
+          <p className={s.bad} role="alert">
+            导出清单读不出来：{planErr}
+          </p>
+        )}
+        {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
 
-      {plan !== null && (
-        <ul className={s.fileList}>
-          {plan.files.map((f) => (
-            <li key={f.kind} className={s.fileItem}>
-              <span className={s.fileIcon} aria-hidden="true">
-                <svg
-                  width={15}
-                  height={15}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.7}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {KIND_ICON[f.kind]}
-                </svg>
-              </span>
-              <span className={s.fileMeta}>
-                <span className={s.fileName}>{f.name}</span>
-                <span className={s.fileKind}>{KIND_LABEL[f.kind]}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+        {done !== null && (
+          <p className={s.done} role="status">
+            已导出 {done.count} 个文件 —— 就在下面这个位置（整条路径可以选中复制）。
+          </p>
+        )}
 
-      {plan !== null && plan.missing.length > 0 && (
-        <p className={s.notFull}>
-          归档里没有{plan.missing.map((k) => `「${KIND_LABEL[k]}」`).join('、')} ——
-          它不会出现在导出清单里。
-        </p>
-      )}
+        {plan !== null && (
+          <ul className={s.fileList}>
+            {plan.files.map((f) => (
+              <li key={f.kind} className={s.fileItem}>
+                <span className={s.fileIcon} aria-hidden="true">
+                  <svg
+                    width={15}
+                    height={15}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.7}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    {KIND_ICON[f.kind]}
+                  </svg>
+                </span>
+                <span className={s.fileMeta}>
+                  <span className={s.fileName}>{f.name}</span>
+                  <span className={s.fileKind}>{KIND_LABEL[f.kind]}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {fail !== null && (
-        <p className={s.bad} role="alert">
-          导出没成：{fail}
-        </p>
-      )}
+        {plan !== null && plan.missing.length > 0 && (
+          <p className={s.notFull}>
+            归档里没有{plan.missing.map((k) => `「${KIND_LABEL[k]}」`).join('、')} ——
+            它不会出现在导出清单里。
+          </p>
+        )}
 
-      {path !== null && (
-        /*
-         * 整条是**显示**不是按钮：只有右边那颗「更改位置」改位置（作者 2026-10-11）。
-         * 路径正文因此还能拖选、误点一下也不会弹系统框。
-         */
-        <div className={s.pathPill} title={path.full}>
-          <svg
-            className={s.pathIcon}
-            width={15}
-            height={15}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.7}
-            aria-hidden="true"
-          >
-            <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-          </svg>
-          <span className={s.pathText}>
-            <span className={s.pathHead}>{path.head}</span>
-            <span className={s.pathTail}>{path.tail}</span>
-          </span>
-          <button type="button" className={s.pathEdit} onClick={changeDir}>
-            更改位置
-          </button>
-        </div>
-      )}
+        {fail !== null && (
+          <p className={s.bad} role="alert">
+            导出没成：{fail}
+          </p>
+        )}
+
+        {path !== null && (
+          /*
+           * 整条是**显示**不是按钮：只有右边那颗「更改位置」改位置（作者 2026-10-11）。
+           * 路径正文因此还能拖选、误点一下也不会弹系统框。
+           */
+          <div className={s.pathPill} title={path.full}>
+            <svg
+              className={s.pathIcon}
+              width={15}
+              height={15}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.7}
+              aria-hidden="true"
+            >
+              <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+            </svg>
+            <span className={s.pathText}>
+              <span className={s.pathHead}>{path.head}</span>
+              <span className={s.pathTail}>{path.tail}</span>
+            </span>
+            <button type="button" className={s.pathEdit} onClick={changeDir}>
+              更改位置
+            </button>
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

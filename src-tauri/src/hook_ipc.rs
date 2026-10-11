@@ -207,6 +207,18 @@ impl Client {
         }
     }
 
+    /// 连界面，**连不上就算了**（一个进程也不拉起）。
+    ///
+    /// 给开发用的假钩子（`src/bin/hook-sim.rs`）走的这一条：它要的只是"把消息发给**已经在跑**
+    /// 的那扇窗"，**不能**走 [`Self::connect_or_spawn`] —— 那个拉起的是 `current_exe()`，
+    /// 对假钩子来说就是它自己（一跑就套娃）。
+    pub fn connect_or_headless(internal_root: &Path, cancel: &CancelToken) -> Self {
+        match connect(internal_root) {
+            Some(conn) => Self::with_conn(conn, cancel),
+            None => Self::headless(cancel),
+        }
+    }
+
     /// 一条没有界面的线（无头场景 / 判据用）。
     pub fn headless(cancel: &CancelToken) -> Self {
         Self {
