@@ -1381,7 +1381,7 @@
   align-items: baseline;
   gap: 16px;
   padding: 7px 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   min-width: 0;
 }
 .label {
@@ -1421,3 +1421,8 @@
 
 
 
+/* 深色：`.cta`（首页唯一那颗强按钮）是同一条"墨底白字"配方 —— 深色里换中性亮面 */
+[data-theme='dark'] .cta {
+  background: var(--surface-solid);
+  color: var(--text-1);
+}

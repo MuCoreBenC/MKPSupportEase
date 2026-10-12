@@ -121,12 +121,12 @@
 /* ---------- 行 ---------- */
 
 .row {
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   cursor: default;
 }
 
 .row:hover {
-  background: rgb(16 24 32 / 3%);
+  background: var(--surface-sunken);
 }
 
 /*
@@ -142,7 +142,7 @@
 }
 
 .row[data-pinned='true']:hover {
-  background: rgb(16 24 32 / 6%);
+  background: var(--hairline);
 }
 
 /*
@@ -157,7 +157,7 @@
 
 /* 菜单正开在这一行上：中性淡底，不染绿 */
 .row[data-active='true'] {
-  background: rgb(16 24 32 / 5%);
+  background: var(--hairline);
 }
 
 /* 聚焦不另画圈：行开合看内容就够了 */
@@ -447,7 +447,7 @@
 }
 
 .useBtn:disabled {
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
 }
@@ -511,7 +511,7 @@
 }
 
 .actBtn:disabled {
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
 }
@@ -1076,7 +1076,7 @@
 }
 
 .saveBtn:disabled {
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
   color: var(--text-3);
   box-shadow: none;
   cursor: default;

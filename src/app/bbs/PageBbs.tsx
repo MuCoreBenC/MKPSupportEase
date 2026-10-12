@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { STORAGE } from '../../api/storageKeys'
 import { useStickyState } from '../../hooks/useStickyState'
+import { useIsDark } from '../state/appState'
 import type { Density } from '../../hooks/useDensity'
 import BbsGroup from './BbsGroup'
 import BbsPresetDrawer from './BbsPresetDrawer'
@@ -61,19 +62,19 @@ export default function PageBbs({ density, pending }: Props) {
   /* 交付面（`assets/bbs/…`）：第三圈起，这一页的产品配置从下载区来，不再是随包副本 */
   const delivered = useBbsDelivered()
 
-  /* 落 localStorage 的偏好：档位与主题。键名全收在 `src/api/storageKeys.ts` */
+  /* 落 localStorage 的偏好：只看档位（主题那一格 2026-10-12 退役，见下）。键名收在 `src/api/storageKeys.ts` */
   const [viewMode, setViewMode] = useStickyState<BbsViewMode>(STORAGE.clientBbsView, 'all')
-  const [themeLight, setThemeLight] = useStickyState<boolean>(STORAGE.clientBbsTheme, false)
   /*
-   * 地址参数 `?theme=light|dark` 照上游留着（截图对照时不想动记忆里的选择就用它）。
-   * 优先级：地址参数 > 上次选择 > 深色，且**只作用于本次**，不覆盖 localStorage ——
-   * 所以这里用一个独立的覆盖值，不去 setThemeLight。
+   * ★ 2026-10-12（深色模式那一刀）：**这一页的深浅跟着应用主题走**。
+   *
+   * 以前它自带一颗「深色 / 明亮」开关（落 `clientBbsTheme`）＋ 地址参数 `?theme=`，
+   * 于是同一屏上可能出现两套深浅（应用浅色、这页深色）。现在真值只有一个：
+   * `useIsDark()` —— 用户选的那一档加上系统深浅（见 `app/state/appState.ts`）。
+   *
+   * 皮还是 BBS 自己那两套（照上游抄的 `--bbs-*`，见 `PageBbs.module.css` 模块头）——
+   * 那是"复刻 BBS 界面"这一页该有的样子；改的只是**由谁来决定用哪一套**。
    */
-  const themeParam = useMemo(() => {
-    const q = new URLSearchParams(window.location.search).get('theme')
-    return q === 'light' ? true : q === 'dark' ? false : null
-  }, [])
-  const light = themeParam ?? themeLight
+  const light = !useIsDark()
   /* 只记「这次会话看到哪」的：筛选档位、搜索词、当前页、抽屉开合 */
   const [target, setTarget] = useSessionState('bbs.target', MODEL_ALL)
   const [query, setQuery] = useSessionState('bbs.query', '')
@@ -367,14 +368,8 @@ export default function PageBbs({ density, pending }: Props) {
           </span>
         )}
 
-        <button
-          type="button"
-          className={s.btn}
-          title={light ? '切回 BBS 的深色皮肤' : '切到 BBS 的明亮皮肤。也可以用地址参数 ?theme=light'}
-          onClick={() => setThemeLight(!light)}
-        >
-          {light ? '深色' : '明亮'}
-        </button>
+        {/* 2026-10-12：这一页那颗「深色 / 明亮」开关**退役** —— 深浅跟应用主题走
+            （真值在 `useIsDark()`，见上面那条注释；设置页里那三档才是唯一的入口）。 */}
       </div>
 
       <div className={s.body}>

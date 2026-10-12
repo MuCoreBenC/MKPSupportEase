@@ -60,7 +60,7 @@
   height: 2px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
 }
 
 .progress::after {
@@ -86,7 +86,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 4px 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   min-width: 0;
 }
 

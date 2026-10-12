@@ -32,12 +32,15 @@ export const STORAGE = {
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 
   /**
-   * BBS 预设页的四格偏好：看全部还是跟 BBS 一样、皮肤深浅、抽屉是并排还是浮层、
-   * 抽屉宽度。**全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），
-   * 所以四格都不承载底账。
+   * BBS 预设页的偏好：看全部还是跟 BBS 一样、抽屉是并排还是浮层、抽屉宽度。
+   * **全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），
+   * 所以都不承载底账。
+   *
+   * ★ `clientBbsTheme`（`mkp.A40.bbs.light`）**2026-10-12 退役**：那一页的深浅改成
+   * 跟随应用主题（`useIsDark()`），不再自己记一格。用户盘上可能还留着那个旧值 ——
+   * 留着不用即可（这是"换落点当成全新应用"那条口径，不写迁移逻辑）。
    */
   clientBbsView: 'mkp.A40.bbs.view',
-  clientBbsTheme: 'mkp.A40.bbs.light',
   clientBbsDrawerMode: 'mkp.A40.bbs.drawerMode',
   clientBbsDrawerW: 'mkp.A40.bbs.drawerW',
 

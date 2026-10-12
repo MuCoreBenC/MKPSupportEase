@@ -5,7 +5,7 @@
   align-items: center;
   gap: 18px;
   padding: 0 12px 0 16px;
-  border-bottom: 1px solid rgb(16 24 32 / 7%);
+  border-bottom: 1px solid var(--hover-1);
   box-shadow: 0 1px 0 rgb(255 255 255 / 80%);
   min-width: 0;
 
@@ -201,12 +201,12 @@
 }
 
 .ctrl:hover {
-  background: rgb(16 24 32 / 6%);
+  background: var(--hairline);
   color: var(--text-1);
 }
 
 .ctrl:active {
-  background: rgb(16 24 32 / 11%);
+  background: var(--hover-2);
 }
 
 .close:hover {
@@ -220,23 +220,14 @@
 }
 
 /*
- * 深色（2026-10-12）：标题栏那两笔与窗口键的悬停底色。
+ * 深色（2026-10-12）：标题栏这儿只剩**下面那道白高光**要处理。
  *
- * 浅色那两笔是"一道墨线 + 线下一道白高光"（.bar 的 border-bottom + box-shadow）——
- * 深底上照搬会得到一条扎眼的白线（照试验场第 31 轮那条教训：硬线的量要按底色重配）。
- * 现在的配法：缝压更深（黑 50%）、白光只留发丝（6%）；
- * 窗口键的悬停/按下从"墨压一层"换成"白提一层"（深底上压墨看不见）。
+ * 浅色是"一道墨线 + 线下一道白高光"（`.bar` 的 border-bottom 与 box-shadow）——
+ * 深色里前者吃 `--hover-1`（已经是"白 8%"的一道发丝）；后者是给浅底配的 80% 白光，
+ * 深底上留着会是一条扎眼的白线（试验场第 31 轮那条：硬线的量要按底色重配），撤掉。
+ * 窗口键的悬停 / 按下不用再写：`.ctrl:hover` / `.ctrl:active` 已经走变量。
  * 关闭键那颗红两套共用（macOS / Windows 的关闭键都是红的），不动。
  */
 [data-theme='dark'] .bar {
-  border-bottom-color: rgb(0 0 0 / 50%);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 6%);
-}
-
-[data-theme='dark'] .ctrl:hover {
-  background: rgb(255 255 255 / 10%);
-}
-
-[data-theme='dark'] .ctrl:active {
-  background: rgb(255 255 255 / 16%);
+  box-shadow: none;
 }

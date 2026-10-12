@@ -116,7 +116,7 @@
 
 .presetSeg:hover {
   color: var(--text-1);
-  background: rgb(16 24 32 / 4%);
+  background: var(--surface-sunken);
 }
 
 .presetSeg:focus-visible {
@@ -493,10 +493,10 @@
    * 缺了"玻璃那一圈边"，看着就是一块雾。换成极细暗边，形状才立得住。
    * （blur 最后也跟它一样取 1px —— 见上面那段，作者实测定稿。）
    */
-  border: 0.5px solid rgb(16 24 32 / 8%);
+  border: 0.5px solid var(--hover-1);
   box-shadow:
     /* 极细暗环：比 border 更精致的一圈（trae 那版的 `0 0 0 0.5px`） */
-    0 0 0 0.5px rgb(16 24 32 / 4%),
+    0 0 0 0.5px var(--surface-sunken),
     /* 顶光：柔光一道（trae 的 `inset 0 0.5px 1px`，比硬 1px 更像玻璃反光） */
     inset 0 0.5px 1px rgb(255 255 255 / 50%),
     0 10px 30px rgb(20 32 45 / 14%),
@@ -546,7 +546,7 @@
 .changeAxis + .changeAxis {
   margin-left: 9px;
   padding-left: 9px;
-  border-left: 1px solid rgb(16 24 32 / 12%);
+  border-left: 1px solid var(--hover-2);
 }
 
 /* 轴名（X / Y / Z）退一档，值才是主角 */
@@ -638,12 +638,12 @@
 }
 
 .changeGhost {
-  background: rgb(16 24 32 / 7%);
+  background: var(--hover-1);
   color: var(--text-2);
 }
 
 .changeGhost:hover {
-  background: rgb(16 24 32 / 13%);
+  background: var(--hover-2);
   color: var(--text-1);
 }
 
@@ -678,4 +678,13 @@
 
 .state[data-on='true'] {
   visibility: visible;
+}
+/* 深色：浮动条上那颗「保存」与前两处同一条配方（浅底白字）—— 深色里换中性亮面 */
+[data-theme='dark'] .changeSave {
+  background: var(--surface-solid);
+  color: var(--text-1);
+}
+
+[data-theme='dark'] .changeSave:hover:not(:disabled) {
+  background: var(--hover-2);
 }

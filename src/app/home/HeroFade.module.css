@@ -14,7 +14,7 @@
 
 /* 网格层：1px 线按 --cell 平铺，默认隐藏，拖动时淡入 */
 .grid {
-  --g-line: rgb(16 24 32 / 8%);
+  --g-line: var(--hover-1);
   --g-axis: rgb(16 24 32 / 16%);
 
   position: absolute;

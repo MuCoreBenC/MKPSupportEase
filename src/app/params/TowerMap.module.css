@@ -68,7 +68,7 @@
 /* 板缘 → 可打印区之间的那圈余量。色调与边缘留白带一致（0.05）—— 两片要融成同一条
  * 连续的灰。白缝的真正来路是留白带 viewBox 被 preserveAspectRatio 缩放让出的空档 */
 .ring {
-  fill: rgba(16, 24, 32, 0.05);
+  fill: var(--hairline);
   stroke: none;
 }
 
@@ -100,7 +100,7 @@
   z-index: 0;
   width: 100%;
   height: 100%;
-  fill: rgba(16, 24, 32, 0.05);
+  fill: var(--hairline);
   pointer-events: none;
 }
 

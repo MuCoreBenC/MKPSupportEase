@@ -319,7 +319,7 @@
   gap: 11px;
   padding: 10px 18px;
   border: 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   border-radius: 0;
   background: transparent;
   font: inherit;
@@ -328,7 +328,7 @@
 }
 
 .sideRow:hover {
-  background: rgb(16 24 32 / 3%);
+  background: var(--surface-sunken);
 }
 
 .sideRow[data-on='true'] {
@@ -345,7 +345,7 @@
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: rgb(16 24 32 / 4%);
+  background: var(--surface-sunken);
   color: var(--text-3);
 }
 
@@ -822,7 +822,7 @@
     right: 0;
     bottom: 0;
     width: 6px;
-    background: linear-gradient(90deg, rgb(16 24 32 / 0%), rgb(16 24 32 / 6%));
+    background: linear-gradient(90deg, rgb(16 24 32 / 0%), var(--hairline));
     cursor: ew-resize;
     border-radius: 0 var(--r-lg) var(--r-lg) 0;
   }

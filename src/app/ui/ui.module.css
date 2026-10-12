@@ -5,7 +5,9 @@
   gap: 2px;
   padding: 2px;
   border-radius: 7px;
-  background: rgb(16 24 32 / 4%);
+  /* 轨道底：走 --surface-sunken（浅色 = 墨 3.5%，深色 = 白 3.5%）——
+     写死墨色的话深色里整条轨道会消失（这一批统一改掉的写法） */
+  background: var(--surface-sunken);
   min-width: 0;
 }
 
@@ -35,7 +37,7 @@
   align-items: center;
   gap: 12px;
   padding: 9px 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   min-width: 0;
 }
 
@@ -159,7 +161,7 @@
 }
 
 .badge[data-tone='muted'] {
-  background: rgb(16 24 32 / 6%);
+  background: var(--hairline);
   color: var(--text-2);
 }
 
@@ -186,7 +188,7 @@
 
 .table td {
   padding: 9px 10px;
-  border-bottom: 1px solid rgb(16 24 32 / 4%);
+  border-bottom: 1px solid var(--surface-sunken);
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -234,7 +236,7 @@
   flex: 1;
   height: 3px;
   border-radius: 3px;
-  background: rgb(16 24 32 / 7%);
+  background: var(--hover-1);
   overflow: hidden;
   min-width: 40px;
 }
@@ -370,7 +372,7 @@
   min-width: 0;
   padding: 12px 0 7px;
   border-radius: 5px;
-  background: rgb(16 24 32 / 4%);
+  background: var(--surface-sunken);
   font-size: 10.5px;
   color: var(--text-3);
   text-align: center;
@@ -379,7 +381,7 @@
 }
 
 .tick:hover {
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
 }
 
 .tick[data-on='true'] {
@@ -398,12 +400,12 @@
 .cell {
   aspect-ratio: 1;
   border-radius: 4px;
-  background: rgb(16 24 32 / 4%);
+  background: var(--surface-sunken);
   transition: background 0.12s ease;
 }
 
 .cell:hover {
-  background: rgb(16 24 32 / 9%);
+  background: var(--hover-1);
 }
 
 .cell[data-on='true'] {
@@ -469,4 +471,15 @@
 
 [data-page] .cell {
   border-radius: var(--r-sm);
+}
+/*
+ * 深色（2026-10-12 机制批）：「拿文字色当填充 + 写死白字」这条配方在深色里会翻车 ——
+ * 浅色下 `--text-1` 是墨（墨底白字成立），深色下它变成浅灰 ⇒ **浅底白字 ≈ 1.2:1**。
+ * 这里先按"深色里换成中性亮面 + 主文字色"收住（真正的按钮语言在下一批定稿，
+ * 到时候这条覆盖会被语言那一条替掉）。
+ */
+[data-theme='dark'] .btnPrimary {
+  border-color: var(--surface-solid);
+  background: var(--surface-solid);
+  color: var(--text-1);
 }

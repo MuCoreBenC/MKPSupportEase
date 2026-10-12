@@ -187,7 +187,7 @@
   height: 8px;
   margin-top: 6px;
   border-radius: 3px;
-  background: rgb(16 24 32 / 8%);
+  background: var(--hover-1);
 }
 
 .slot[data-slot='1'] .cardBlank {
