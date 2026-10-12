@@ -649,12 +649,12 @@
 
 .changeSave {
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
   font-weight: 600;
 }
 
 .changeSave:hover:not(:disabled) {
-  background: #2b353d;
+  background: var(--text-2);
 }
 
 .changeSave:disabled {
@@ -679,12 +679,6 @@
 .state[data-on='true'] {
   visibility: visible;
 }
-/* 深色：浮动条上那颗「保存」与前两处同一条配方（浅底白字）—— 深色里换中性亮面 */
-[data-theme='dark'] .changeSave {
-  background: var(--surface-solid);
-  color: var(--text-1);
-}
-
-[data-theme='dark'] .changeSave:hover:not(:disabled) {
-  background: var(--hover-2);
-}
+/* （浮动条上那颗「保存」原来也有一条"深色里换中性亮面"的补丁 —— 已删：
+   `.changeSave` 现在是**反色配对**（`--text-1` 底 + `--bg-1` 字），hover 走 `--text-2`，
+   深浅一条规则全成立。作者截图："深色的时候一些按钮的重点就没了"。） */

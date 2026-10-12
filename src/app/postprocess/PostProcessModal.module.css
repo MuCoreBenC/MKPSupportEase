@@ -1,10 +1,21 @@
 /*
- * 那一屏自己的东西（问句 / 结论 / 进度那几行）。
+ * 那一屏自己的东西（跑着的 hero / 问句那一张红卡 / 结果那几扇 / 后台那条窄条在隔壁文件）。
  * 外壳（遮罩 + 白框 + 页头页脚）用的是 `../../components/modal` 那一套 ——
  * 与首页、校准页那些确认框是同一个外壳，这里再管：
  *
  *   `.layer` / `.dragShield`  —— **跑着的那一态**要铺满整扇窗、但标题栏还得能拖窗；
- *   其余（问句 / 结论 / 进度那几行）是这一屏独有的排版。
+ *   其余（hero / facts / 结果）是这一屏独有的排版。
+ *
+ * # 这一份的来历（2026-10-12）
+ *
+ * 六扇窗的样子是作者在试验场 `frontend-lab/lab/mkp-postprocess/`（双击就能开的原型页）
+ * 里逐像素定稿的，见那份 `HANDOVER.md`；这里就是**定稿的落地** ——
+ * 结构、几何、配色照搬，数值一个像素没改（原型里的 `cd-*` / `sm-*` 类名在这里
+ * 换成了本地的语义类名）。要再调样子，请先回原型页定稿，再改这里。
+ *
+ * 深色那一档挂在 `[data-theme='dark']` 上（与 `styles/tokens.css` 同一处口径：
+ * 属性挂在 `<html>` 上由 `state/appState.ts` 的 `applyTheme` 写）——
+ * 所以这一屏的深浅**跟着应用主题走**，不另开开关。
  */
 
 /* ---- 跑着的那一态：整扇窗都归它（但标题栏仍然能拖） ---- */
@@ -13,7 +24,7 @@
  * 外面这一层：默认什么都不做（不占层高、不吃点击）—— 遮罩在里面的行为与
  * 通用模态框一字不差；只有跑着的那一态把它抬到窗控键之上。
  *
- * 为什么要抬：顶栏那三颗窗控键被 `TopTabs` 自己抬到了 `z-index: 91`
+ * 为什么要抬：顶栏那三颗窗控键被 `TopTabs` 自己抬到了 `z-index: 94`
  * （它要盖住外壳顶部那条 1px 高光），而通用模态框的遮罩是 40 —— 压不住，
  * 于是"框开着、右上角那颗关闭照样点得着"（作者 2026-10-11 点的就是那一下）。
  */
@@ -35,13 +46,6 @@
 /*
  * 跑着的时候顶上那一条**拖窗带**：透明、铺在所有东西之上，只认拖窗与双击缩放。
  *
- * 作者 2026-10-11：「这个模态框要覆盖完整的，就是说右上角那个关闭的不能触发……
- * 但是要可以拖动」。于是这一条同时干两件事：
- *   1. 挡住窗控键那三下点击（那三颗是 94，被这条 95 整条盖住）；
- *   2. 拖着窗口走（`useTitlebarDrag` 那套：移动过阈值才真的 startDragging，
- *      所以它也不会把点击序列弄断）。
- * 落在它上面的点击不是"点了没反应"，是"这一条现在就是窗口的把手"。
- *
  * 它**不在 `.layer` 里面**（是兄弟）：层里面的话 z-index 会被层自己的层高罩住，
  * 压不过那三颗窗控键。整条标题栏宽高铺满 —— 要盖就得盖全，露一截等于留一个
  * 点得着的关闭键。
@@ -62,106 +66,585 @@
   height: var(--titlebar-h-win);
 }
 
+/* ---- 整屏的竖向节奏（一条尺子：gap 12px 通到底 —— 原型第 34 轮压实的那一档） ---- */
+
 .body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-/* ---- 顶上那张表：这一趟在处理什么（布局与报告页那张键值表同一套：字段一列、值一列） ---- */
+/*
+ * （这一屏**不再有自己的按钮皮肤**。）
+ *
+ * 原来这里有一条 `.pill`：照 `ui.module.css` 的 `[data-page] .btn` 抄的一份 ——
+ * 因为这一屏挂在 `<main>` **外面**（窗口级），祖先里没有 `data-page`，拿不到胶囊皮。
+ *
+ * 2026-10-12 作者截了两张图（这一屏 vs 报告页导出框）说"两个按钮和别的还不一样，
+ * 帮我做成和别的一样的，就是复用，不要各自写各自的" ⇒ 胶囊形状收进了 `.btn` 默认
+ * （见 `ui.module.css`），这一份删掉。页脚那几颗 `Btn` 现在就是全站那一套，
+ * 不加任何 className、也不在深色里另换一副面。
+ */
 
-.facts {
+/* ============================================================
+ * ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽进度条嵌底）
+ * ② 问句：红警告 hero（同一口尺寸：min-height 104 + 同内衬同圆角）
+ * ③ 成功：四格指标条（同高）
+ * ④⑤ 结果 hero（同高）—— 四样都是同一口 104px 的框，切状态时不跳
+ * ============================================================ */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 104px;
+  justify-content: center;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+
+  /* 绿的方向是作者定死的：**左上角浅、右下角深**，落差不大（一道很平的斜光） */
+  background: linear-gradient(135deg, #2fcd71, #26b863);
+  box-shadow: 0 10px 24px rgb(21 138 70 / 22%);
+}
+
+/*
+ * side：meta（步骤 + 倒计时）挪到右边，大数占左。
+ * ★ 内嵌条要**独占下一行**：横向 flex 里它是一个没有内容的子项，不给宽就会塌成 0（看不见）。
+ */
+.heroSide {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.heroNum {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -1px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.heroSide .heroMeta {
+  margin-left: auto;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.heroMeta {
+  display: flex;
+  flex-direction: column;
+
+  /* 右侧那两行（步骤 / 倒计时）行距 6 —— 压到 2 会挤在一起（第 35 轮实测） */
+  gap: 6px;
+}
+
+.heroStep {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: #fff;
+}
+
+.heroEta {
+  font-size: var(--fs-label);
+  color: rgb(255 255 255 / 78%);
+  font-variant-numeric: tabular-nums;
+}
+
+.heroSide .heroBar {
+  flex: 1 0 100%;
+  margin-top: 4px;
+}
+
+/* 进度条定稿皮（pb1「凹槽条」：绿底上凿出来的一道槽）—— 不是普通白条 */
+.heroBar {
+  position: relative;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 24%);
+  overflow: hidden;
+}
+
+.heroBarGroove {
+  background: rgb(0 0 0 / 12%);
+  box-shadow:
+    inset 0 2px 3px rgb(0 0 0 / 32%),
+    inset 0 -1px 0 rgb(255 255 255 / 22%);
+}
+
+.heroBarFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 88%);
+  transition: width 0.45s linear;
+}
+
+/* ---- ② 机型不匹配：红警告 hero ---- */
+
+.warnHero {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  min-height: 104px;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+}
+
+.warnSoft {
+  background: var(--danger-soft);
+  border: 1px solid rgb(200 69 60 / 35%);
+  color: var(--danger);
+}
+
+.warnGlyph {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 红圈白叹号：40px 空心圈、2px currentColor 描边、24px 粗体文字「!」 */
+.warnBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 18%);
+  border: 2px solid currentcolor;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.warnSoft .warnBadge {
+  background: var(--danger-soft);
+}
+
+.warnCopy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+}
+
+.warnTitle {
+  margin-bottom: 3px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+
+.warnLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  opacity: 0.85;
+}
+
+/* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
+
+/*
+ * ★ **指标条 · 定稿皮**（原型第 24~33 轮抽出来的那一条合成了这套）：
+ *   外板 = 上/左一道暖白硬线 + 下沿一道硬线（没有模糊内影）+ 落影 + 外圈 1px 描边；
+ *   内窗 = `::before` 收进去 6px 的一块（四条边各有交代，窗底 3%）。
+ * 深色里换成"凸"那一套（见文件末尾的深色段）——浅色这份一个字都别动。
+ */
+.strip {
+  display: flex;
+  align-items: center;
+  min-height: 104px;
+  padding: 14px 8px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+
+.stripFinal {
+  /* 内窗那一层就住在这个元素上（原型的 `.cd-stripDeco` 那两条并了进来） */
+  position: relative;
+  overflow: hidden;
+
+  background: rgb(16 24 32 / 3%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 252 246 / 95%),
+    inset 1px 0 0 rgb(255 252 246 / 55%),
+    inset 0 -1px 0 rgb(16 24 32 / 9%),
+    0 3px 5px rgb(16 24 32 / 14%),
+    0 0 0 1px rgb(16 24 32 / 5%);
+}
+
+/* 内窗：上暗下亮、左暗右亮，下沿那道白线（第 30 轮定的"线要看得见"那条） */
+.stripFinal::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 9px;
+  background: rgb(16 24 32 / 3%);
+  box-shadow:
+    inset 0 1px 0 rgb(16 24 32 / 9%),
+    inset 0 3px 5px rgb(16 24 32 / 11%),
+    inset 1px 0 0 rgb(16 24 32 / 6%),
+    inset -1px 0 0 rgb(255 252 246 / 45%),
+    inset 0 -1px 0 rgb(255 252 246 / 85%);
+  pointer-events: none;
+}
+
+/* 读数抬到内窗那一层之上 */
+.stripFinal > * {
+  position: relative;
+}
+
+.stripCell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-left: 1px solid var(--line);
+}
+
+.stripCell:first-child {
+  border-left: none;
+}
+
+.stripLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.stripValue {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.stripHot {
+  color: var(--accent-deep);
+}
+
+/* ============================================================
+ * ④⑤ 结果 hero（已停止 / 失败）—— 与 ①② 同一套骨架：图标 + 文案，
+ * 同一口 104px 的框（内衬四周一律 6px、内板 92px 写死，与 ③ 的内窗逐像素重合）
+ * ============================================================ */
+
+.resHero {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-height: 104px;
+  padding: 6px;
+  /* 不许被 flex 压小 —— 内容多时框跟内容一起长，不出现"内板比框还高" */
+  flex: none;
+  border-radius: var(--r-md);
+}
+
+.resGlyph {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/*
+ * 内板：图标进板之后是 [空心圈 + 文案列] 的一行。
+ * **高 92px 写死** —— 文案超出就在 `.resText` 里滚，框永远 104。
+ */
+.resCopy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  height: 92px;
+  padding: 7px 12px;
+  border-radius: 9px;
+}
+
+/* 滚动条由全局的「幽灵滚动条」管（不占位、不画出来），这里不重写 */
+.resText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* gap 0（不是 1px）：标题 + 三行正好落进 78px 的可用高，加 3px 会让正常四行也"以为要滚" */
+  gap: 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.resTitle {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
+}
+
+.resLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  word-break: break-word;
+}
+
+/* 空心圈：照 `.warnBadge` 的构造（2px currentColor 描边 + 浅底 + 居中符号） */
+.resBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 60%);
+  border: 2px solid currentcolor;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 圈里那个记号是**画出来的 SVG** —— 文字符号在圈里对不齐，SVG 几何居中 */
+.resBadge svg {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+
+/* 已停止：中性墨（取消不是失败，也不用警示色吓人） */
+.resStop {
+  background: linear-gradient(135deg, #5b6772, #3c4650);
+  box-shadow: 0 10px 24px rgb(60 70 80 / 24%);
+  color: #fff;
+}
+
+.resStop .resLine {
+  color: rgb(255 255 255 / 85%);
+}
+
+/* ============================================================
+ * ④ 已停止 · 定稿皮 = sm4「柔和内影」（原型第 55 轮定下来的）：
+ * **同一张气泡卡**，只换面 / 线 / 影，全部走 token ⇒ 浅色深色都成立。
+ * 现代那一路的做法：面用半透明、界用发丝、影用柔影，硬线一律不出现。
+ * ============================================================ */
+
+.smBase {
+  border: 0;
+}
+
+.smBase .resGlyph {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.smBase .resBadge {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 22px;
+}
+
+.smBase .resTitle {
+  color: var(--text-1);
+}
+
+.smBase .resLine {
+  color: var(--text-2);
+}
+
+.smBase .resCopy {
+  background: transparent;
+  box-shadow: none;
+}
+
+.smSunk {
+  border-radius: 14px;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 2px 8px rgb(16 24 32 / 10%);
+}
+
+/* ============================================================
+ * ⑤ 失败 · 定稿皮 = `.failWarn`：照「机型不匹配」那一张红卡
+ * （用户原话："算了算了，失败的也用这一种吧"）——
+ * 同一件底（--danger-soft + 一圈 35% 描边）、同一个红圈叹号、
+ * **图标在板外**、文案直接落在红卡上（没有白板）。
+ * 盒子逐条照 `.warnSoft`：内衬 14/18 + 1px 描边、圈盒 40×40、板高 74（= 104 − 2 − 28）。
+ * ============================================================ */
+
+.failWarn {
+  border: 1px solid rgb(200 69 60 / 35%);
+  padding: 14px 18px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  box-shadow: none;
+}
+
+.failWarn .resGlyph {
+  width: 40px;
+  height: 40px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 板：左对齐、无内衬、无底；高 74，超出在里面滚（这一屏尺寸锁死，不让它变长） */
+.failWarn .resCopy {
+  flex-direction: column;
+  /* ⚠ 必须是 flex-start：`.resHero` 那条 `align-items: center` 在竖列板上会变成
+     **横向居中** ⇒ 文案整段居中（原型第 46 轮踩过） */
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  height: 74px;
+  padding: 0;
+  overflow-y: auto;
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 标题 / 正文：字级与行距照 `.warnTitle` / `.warnLine` */
+.failWarn .resTitle {
+  margin-bottom: 3px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+  color: var(--danger);
+}
+
+.failWarn .resLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  color: var(--danger);
+  opacity: 0.85;
+}
+
+/* 红圈：逐条照 `.warnBadge` —— 圈里是 24px 粗体的**文字**「!」 */
+.failWarn .resBadge {
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ============================================================
+ * 两组带题 facts（定稿的读数区）：题名行 = 色点 + 题 + 发丝线，下面一张精装表
+ * ============================================================ */
+
+.groups {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 16px;
-  row-gap: 4px;
-  margin: 0;
-  padding-bottom: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 24px;
+}
+
+@media (width <= 560px) {
+  .groups {
+    grid-template-columns: 1fr;
+  }
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 6px;
+  margin-bottom: 3px;
   border-bottom: 1px solid var(--line);
 }
 
-/* 行盒只剩分组的意思（dt/dd 得成对儿）：下场，格子由它俩当 —— 同报告页的 `.kvRow` */
-.factRow {
-  display: contents;
+.groupDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
-.factRow dt {
+.groupTitle {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.2px;
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: center;
+  min-width: 0;
+}
+
+.factRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.factRow:last-child {
+  border-bottom: 0;
+}
+
+.factLabel {
   font-size: var(--fs-label);
   color: var(--text-3);
   white-space: nowrap;
 }
 
-/* 值是**给人抄的**（机型 / 耗材那几串），所以可选中 */
-.factRow dd {
-  margin: 0;
+.factValue {
   font-size: var(--fs-label);
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
+  text-align: right;
   overflow-wrap: anywhere;
-  user-select: text;
 }
 
-.line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 0;
-  font-size: var(--fs-body);
-}
-
-.pct {
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 「预计还需 N 秒」跟在百分比前面，比它淡一档（外推值，别当承诺看） */
-.eta {
-  margin-right: 8px;
+/* 灰字行（切片软件这类「看一眼就行」的读数） */
+.factGrey .factValue {
   color: var(--text-3);
+  font-weight: 400;
 }
 
-.msg {
+/* ---- 警告行 / 命令失败那一行 ---- */
+
+.warn {
   margin: 0;
-  font-size: var(--fs-body);
-  color: var(--text-2);
-  word-break: break-word;
-}
-
-/* 机型不匹配那一问：底色按「要你看一眼」那一档给，正文用默认色（它是主角） */
-.ask {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--r-sm);
-  background: var(--warn-soft);
-  border: 1px solid var(--line-strong);
-}
-
-.askText {
-  margin: 0;
-  font-size: var(--fs-body);
-}
-
-.askBtns {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.ok {
-  margin: 0;
-  font-size: var(--fs-body);
-  font-weight: 600;
-  color: var(--accent-deep);
-}
-
-.cancelled {
-  margin: 0;
-  font-size: var(--fs-body);
-  font-weight: 600;
-  color: var(--text-2);
+  font-size: var(--fs-label);
+  color: var(--warn);
 }
 
 .bad {
@@ -170,27 +653,101 @@
   color: var(--danger);
 }
 
-.warn {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--warn);
+/* ============================================================
+ * 深色那一档（跟着应用主题：`<html data-theme="dark">`）
+ *
+ * 取值照 macOS 深色那一路（原型第 48~58 轮逐张调过的），三类：
+ *   ① 硬编码的渐变 / 槽（绿 hero、进度条槽）换成"压暗一档"的那一支；
+ *   ② 定稿皮的"往浅处压暗"那两条在深底上太抢眼 ⇒ 换成"只留一层淡淡的面"；
+ *   ③ 两张红卡（② 机型不匹配 / ⑤ 失败）：底压深、标题与圈回到产品原本的红、
+ *      **正文换浅字**（"红字压红底"就是区分度不高的根子），且不许纯白（在深底上晃眼）。
+ * ============================================================ */
+
+/* ① 绿 hero + 凹槽进度条 */
+[data-theme='dark'] .hero {
+  background: linear-gradient(135deg, #2f9e5b, #227544);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 34%);
 }
 
-/* 错误码：小字、等宽、可选中（用户要把它复制去查/报问题） */
-.code {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
-  user-select: text;
+[data-theme='dark'] .heroBarGroove {
+  background: rgb(0 0 0 / 26%);
+  box-shadow:
+    inset 0 2px 3px rgb(0 0 0 / 42%),
+    inset 0 -1px 0 rgb(255 255 255 / 10%);
 }
 
-.code code {
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  color: var(--text-2);
+/* ③ 指标条：深色里是"凸"那一套（外板提亮 + 上/左亮线 + 下沿暗线 + 一层落影，内窗反过来凹） */
+[data-theme='dark'] .stripFinal {
+  background: rgb(255 255 255 / 7%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 9%),
+    inset 1px 0 0 rgb(255 255 255 / 5%),
+    inset 0 -1px 0 rgb(0 0 0 / 30%),
+    0 8px 18px rgb(0 0 0 / 34%);
 }
 
-.hint {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
+[data-theme='dark'] .stripFinal::before {
+  background: rgb(0 0 0 / 16%);
+  box-shadow:
+    inset 0 1px 0 rgb(0 0 0 / 34%),
+    inset 0 -1px 0 rgb(255 255 255 / 7%);
 }
+
+/* ④ 已停止（sm4 深色）：浅色那道内影在深底上几乎看不见 ⇒ 更黑更大才读得出"凹" */
+[data-theme='dark'] .smSunk {
+  background: rgb(255 255 255 / 4%);
+  box-shadow: inset 0 2px 10px rgb(0 0 0 / 48%);
+}
+
+/* 面沉下去之后，圈也得跟着暗一档，不然圈会浮在面上 */
+[data-theme='dark'] .smBase .resGlyph {
+  background: rgb(255 255 255 / 6%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+/* ② 机型不匹配（深色）：同一张浅红卡，底压深、标题与圈留产品的红 */
+[data-theme='dark'] .warnSoft {
+  border-color: rgb(200 69 60 / 42%);
+  background: rgb(120 32 27 / 34%);
+  color: #c8453c;
+}
+
+[data-theme='dark'] .warnSoft .warnTitle {
+  color: #c8453c;
+}
+
+[data-theme='dark'] .warnSoft .warnLine {
+  color: rgb(255 255 255 / 78%);
+  opacity: 1;
+}
+
+[data-theme='dark'] .warnSoft .warnBadge {
+  border-color: #c8453c;
+  background: rgb(200 69 60 / 12%);
+  color: #c8453c;
+}
+
+/* ⑤ 失败（深色）：同一套 */
+[data-theme='dark'] .failWarn {
+  border-color: rgb(200 69 60 / 42%);
+  background: rgb(120 32 27 / 34%);
+  color: #c8453c;
+}
+
+[data-theme='dark'] .failWarn .resTitle {
+  color: #c8453c;
+}
+
+[data-theme='dark'] .failWarn .resLine {
+  color: rgb(255 255 255 / 78%);
+  opacity: 1;
+}
+
+[data-theme='dark'] .failWarn .resBadge {
+  border-color: #c8453c;
+  background: rgb(200 69 60 / 12%);
+  color: #c8453c;
+}
+
+/* （深色里也不给这一屏的按钮另换一副面：按钮皮肤是全站那一套，深浅由 token 管 ——
+   见文件上半段那条"不再有自己的按钮皮肤"。） */

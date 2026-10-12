@@ -1018,7 +1018,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -1421,8 +1421,5 @@
 
 
 
-/* 深色：`.cta`（首页唯一那颗强按钮）是同一条"墨底白字"配方 —— 深色里换中性亮面 */
-[data-theme='dark'] .cta {
-  background: var(--surface-solid);
-  color: var(--text-1);
-}
+/* （`.cta`（首页唯一那颗强按钮）原来也有一条"深色里换中性亮面"的补丁 —— 已删：
+   它现在自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），深浅一条规则全成立。） */

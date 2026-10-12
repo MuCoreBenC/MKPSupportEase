@@ -1,5 +1,5 @@
 /*
- * 后处理那一趟的四个事件名 —— **与 Rust 侧 `hook_ui` 那四个常量同名的那一份**
+ * 后处理那一趟的六个事件名 —— **与 Rust 侧 `hook_ui` 那几个常量同名的那一份**
  * （两边没有编译器，靠这一处对齐）。
  *
  * # 为什么单独一格
@@ -19,3 +19,10 @@ export const POSTPROCESS_PROGRESS = 'postprocess-progress'
 export const POSTPROCESS_QUESTION = 'postprocess-question'
 /** 跑完了（成功 / 失败 / 取消都走这一条），带上退出码 */
 export const POSTPROCESS_FINISHED = 'postprocess-finished'
+/**
+ * 延后的打印时间**补算完了**（`hook_ui::PRINT_TIME_EVENT`）。
+ *
+ * 有界面时打印时间是**延后**算的（钩子必须立刻退出，切片器在等退出码）——
+ * 所以成功那条结论里的「预估打印时间」先空着，这一条到了再补上那一格。
+ */
+export const POSTPROCESS_PRINT_TIME = 'postprocess-print-time'

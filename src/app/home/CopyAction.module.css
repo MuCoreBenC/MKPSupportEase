@@ -31,7 +31,7 @@
 
 .btn:hover {
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
 }
 
 /* 反馈期不吃 hover 反色：「已复制」和勾是 accent-deep，要立在浅底上 */
@@ -94,8 +94,5 @@
     stroke-dashoffset: 0;
   }
 }
-/* 深色：这颗的悬停是"变墨底白字"——深色里换成"白提一层 + 主文字色" */
-[data-theme='dark'] .btn:hover {
-  background: var(--hover-2);
-  color: var(--text-1);
-}
+/* （这颗的悬停是"反色成墨底白字" —— 深色里原来有一条补丁把它拉回"白提一层"，
+   已删：悬停的字色跟着基础规则走 `--bg-1`，深浅一条规则全成立。） */

@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use mkp_support_ease_lib::hook;
 use mkp_support_ease_lib::hook_ipc::{
-    Client, FactsPayload, FinishedPayload, FromHook, ProgressPayload,
+    Client, FactsPayload, FinishedPayload, FromHook, ProgressPayload, ResultFacts,
 };
 use postprocess::diag::CancelToken;
 
@@ -194,6 +194,11 @@ fn main() -> ExitCode {
         file_size_bytes: 3_355_443,
         nozzle_diameter: 0.4,
         layer_height: 0.2,
+        /* 这三格是"跑着那一扇"右栏要摆的（涂胶速度 / 切片软件 / 切片器自报的预估时长）——
+        真钩子分别从 IR 与输入头里取，这里给一份与归档演示同一批的值 */
+        glue_speed: Some(70.0),
+        slicer: Some("BambuStudio".to_owned()),
+        slicer_print_time_seconds: Some(12_175.0), // 3h 22m 55s
     }));
 
     /* 「那一问」在真钩子里排在管线的**前面**（机型核对先做）—— 这里同一个位置 */
@@ -290,6 +295,17 @@ fn finish(client: &Client, mode: Mode, cancelled: bool, elapsed_ms: u64) -> Exit
             output: Some(OUT.to_owned()),
             /* 警告那一行也演一条：它是"要你看一眼"的东西，排版得试到 */
             warnings: vec!["这一盘没有支撑，支撑相关的那几步按空跑".to_owned()],
+            /* 结果读数那一包也演一份（指标条 + 擦料与胶水消耗那几格）——
+            值照归档演示那一批给，好把那几格的样子一次试全 */
+            result: Some(ResultFacts {
+                pen_x: -0.9,
+                pen_y: 23.0,
+                pen_z: 4.0,
+                glue_speed: 70.0,
+                print_time_seconds: Some(13140.0),
+                glue_length_mm: 9350.85,
+                slicer: "BambuStudio 02.08.02.60".to_owned(),
+            }),
         }
     };
     client.send(&FromHook::Finished(Box::new(payload)));
@@ -310,5 +326,7 @@ fn finished_payload(err: &hook::HookError, stage: &str, elapsed_ms: u64) -> Fini
         elapsed_ms,
         output: None,
         warnings: Vec::new(),
+        /* 失败 / 取消没有读数 —— 与真钩子同一个形状 */
+        result: None,
     }
 }

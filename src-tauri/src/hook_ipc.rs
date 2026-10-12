@@ -110,6 +110,23 @@ pub struct FactsPayload {
     pub nozzle_diameter: f64,
     /// 层高（mm）—— 取常规层高那一档（旧世代那张表摆的就是「喷嘴直径 / 层高」）
     pub layer_height: f64,
+    /// 涂胶速度（mm/s）——「切片与预估」那一格（跑着的时候就摆）。
+    ///
+    /// 换算（`toolhead.max_speed` 是 mm/min）与归档 `glueSpeed` 同一条：
+    /// [`crate::archive::glue_speed_of`]。旧版钩子没报这一格 ⇒ `None`（界面不摆）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glue_speed: Option<f64>,
+    /// 切片软件（预设里那个名字，如 `"BambuStudio"`）——
+    /// **带版本号的完整串**要等跑完（`stats.slicer_version`，见 [`ResultFacts::slicer`]）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slicer: Option<String>,
+    /// **切片器自报的预估总时长**（秒）—— G-code 头 `; total estimated time: 3h 22m 55s`
+    /// 那一行（`postprocess::postproc::printtime::slicer_estimated_seconds`）。
+    ///
+    /// 「切片与预估」栏的「预估打印时间」用它（跑着的时候就摆）；跑完之后那一格换成
+    /// 内核自己重算的（[`ResultFacts::print_time_seconds`]，含后增设）—— 两个数不一样正常。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slicer_print_time_seconds: Option<f64>,
 }
 
 /// 那一趟的结论（成功 / 失败 / 取消都走这一条）。
@@ -131,6 +148,36 @@ pub struct FinishedPayload {
     /// 产物落点（成功时就是输入那一份 —— 原地覆盖）
     pub output: Option<String>,
     pub warnings: Vec<String>,
+    /// **结果读数**（界面上「结果」几扇要摆的那几格：指标条 + 擦料与胶水消耗）。
+    ///
+    /// 只有 `ok: true` 那一趟才带：失败 / 取消时内核还没把这几格算出来
+    /// （它们住在 `ProcessResult` 里，见 `hook::result_facts`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ResultFacts>,
+}
+
+/// **结果读数** —— 成功那一趟的几格读数（界面「结果 · 成功」要摆的）。
+///
+/// 值与报告页那份同源：`_meta.json` 的 `detail.glue` / `detail.slicer` 就住在这里
+/// （IR 终态 + pass1 统计 + 打印时间）。**这里只搬，不新算** ——
+/// 唯一的变换是涂胶速度那次 mm/min → mm/s（[`crate::archive::glue_speed_of`]）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultFacts {
+    /// 笔偏移 X / Y / Z（mm）—— 预设里那一组（`ir.toolhead.x_offset` …）
+    pub pen_x: f64,
+    pub pen_y: f64,
+    pub pen_z: f64,
+    /// 涂胶速度（mm/s）
+    pub glue_speed: f64,
+    /// 预估打印秒数。**延后估算那一趟这里是 `None`** —— 补算完由界面那条事件
+    /// （`hook_ui::PRINT_TIME_EVENT`）再补回来，钩子不等它（切片器在等退出码）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_time_seconds: Option<f64>,
+    /// 涂胶总长（mm）—— 报告页「涂胶」那一组的头一格（同一口径，不换算成体积）
+    pub glue_length_mm: f64,
+    /// 切片软件（`"BambuStudio 02.06.01.55"` —— pass1 从输入头行刮到的完整串）
+    pub slicer: String,
 }
 
 /// 钩子 → 界面。
@@ -516,6 +563,8 @@ mod tests {
             elapsed_ms: 123,
             output: None,
             warnings: Vec::new(),
+            /* 线上那条只验"载得动"：读数那一包不是这一条测的东西 */
+            result: None,
         })));
 
         assert!(

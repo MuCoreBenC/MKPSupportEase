@@ -167,7 +167,8 @@
 
 .badge[data-tone='danger'] {
   background: rgb(229 72 77 / 12%);
-  color: #c2373c;
+  /* 字色走 token（同 `.btnDanger`）：写死的那支暗红在深色底上读不出来 */
+  color: var(--danger);
 }
 
 .table {
@@ -202,6 +203,11 @@
 
 .table tbody tr:hover {
   background: rgb(16 24 32 / 2.5%);
+}
+
+/* 深色：那格"墨压一层"等于没画（悬停行与普通行完全同色），换成白压一层 */
+[data-theme='dark'] .table tbody tr:hover {
+  background: rgb(255 255 255 / 4%);
 }
 
 .rowAction {
@@ -262,9 +268,28 @@
  * 都搬过去了，`ui/Modal.tsx` 已删）。进度条留下来了，见 `ui/Progress.tsx`。
  */
 
+/*
+ * 胶囊形状**收进默认**（2026-10-12）。
+ *
+ * 原来只有 `[data-page]` 页面槽里的按钮才是胶囊，而模态框挂在 `<main>`
+ * **外面**（窗口级：后处理那一屏、首页那几颗确认框）拿不到那层皮 ——
+ * 于是同一个程序里两种按钮长得不一样。作者截了两张图点出来的就是它：
+ * "后处理模态框两个按钮和别的还不一样，帮我把它做成和别的一样的，就是复用，
+ * 不要各自写各自的"。
+ *
+ * 现在胶囊是 `.btn` 自己的形状：**页面槽里的、窗口级弹窗里的，同一套**。
+ * 谁都不许再补一份（`postprocess/PostProcessModal.module.css` 里那条 `.pill` 已删）。
+ *
+ * ★★ **按钮只有这一档尺寸**（`8px 18px` / `999px` / `12.5px`）—— 这一条是被
+ *   "后处理那两个按钮比正常的大了一点"教出来的：`.pill` 抄走的时候把竖向内衬
+ *   抄成了 11px（那一屏看着就比别处胖一档）。
+ *   谁都不许在自己的 `module.css` 里另写一份 padding / 圆角；要新尺寸先改这里，
+ *   **全站一起变**。窄条那颗「看进度」、表格行里的「小动作」是**另一类件**
+ *   （紧凑行内按钮），各有自己的归宿，不要拿它们当基准、也不要把标准档塞给它们。
+ */
 .btn {
-  padding: 7px 14px;
-  border-radius: 5px;
+  padding: 8px 18px;
+  border-radius: 999px;
   border: 1px solid var(--line-strong);
   font-size: 12.5px;
   color: var(--text-1);
@@ -274,10 +299,21 @@
   border-color: var(--text-3);
 }
 
+/*
+ * 主按钮（primary）：**反色配对** —— `--text-1` 当底、`--bg-1` 当字。
+ *
+ * 浅色下就是原来那副（墨底近白字）；深色下**自动**翻成"亮底近黑字"——
+ * 深色主题里"最重的那一颗"本来就该是亮的（macOS 那一路）。
+ *
+ * 原来写的是"底 `--text-1` + 字 `#fff`"：浅色成立，深色下 `--text-1` 变成浅灰 ⇒
+ * 浅底白字 ≈ 1.2:1（作者截图："深色的时候一些按钮的重点就没了"）。
+ * 换成这一对之后**一条规则两套主题都成立**，文件后面那条
+ * `[data-theme='dark'] .btnPrimary` 覆盖也就删了（不再需要补丁）。
+ */
 .btnPrimary {
   border-color: var(--text-1);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
 }
 
 /*
@@ -298,14 +334,33 @@
   color: var(--accent-deep);
 }
 
+/*
+ * ★ 深色里的强调按钮 = **实心绿 + 白字**（作者第 49 轮就定过：
+ *   "按钮绿色里面的还是用白色字体吧，你去看一下 macOS 人家的设计风格"）。
+ * 浅色那套（`--accent-soft` 底 + `--accent-deep` 字）在深底上要翻车 ——
+ * 半透明绿压一支压暗的绿字，看着像"没点亮"（作者截图："重点就没了"）。
+ */
+[data-theme='dark'] .btnAccent {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+[data-theme='dark'] .btnAccent:hover {
+  background: var(--accent-deep);
+  color: #fff;
+}
+
 .btnGhost {
   border-color: transparent;
   color: var(--text-2);
 }
 
+/* 危险（危险动作是描边 + 红字，不是红底 —— 红底满屏太吓人）。
+   字色走 token：原来写死 `#c2373c`，深色下那支暗红躺在深底上几乎看不见。 */
 .btnDanger {
   border-color: rgb(229 72 77 / 45%);
-  color: #c2373c;
+  color: var(--danger);
 }
 
 .btn:disabled {
@@ -440,12 +495,8 @@
   box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
 }
 
-/* 按钮统一胶囊（与首页「现在开始」同一语言） */
-[data-page] .btn {
-  padding: 8px 18px;
-  border-radius: 999px;
-  font-size: 12.5px;
-}
+/* （按钮那条已经上移成 `.btn` 自己的形状 —— 见上面 `.btn` 的注释：胶囊是全站默认，
+   不再靠 `[data-page]` 前缀开关，窗口级弹窗与页面槽里长得一模一样。） */
 
 /* 弹窗：大圆角 + 柔影 */
 [data-page] .modal {
@@ -472,14 +523,11 @@
 [data-page] .cell {
   border-radius: var(--r-sm);
 }
-/*
- * 深色（2026-10-12 机制批）：「拿文字色当填充 + 写死白字」这条配方在深色里会翻车 ——
- * 浅色下 `--text-1` 是墨（墨底白字成立），深色下它变成浅灰 ⇒ **浅底白字 ≈ 1.2:1**。
- * 这里先按"深色里换成中性亮面 + 主文字色"收住（真正的按钮语言在下一批定稿，
- * 到时候这条覆盖会被语言那一条替掉）。
- */
-[data-theme='dark'] .btnPrimary {
-  border-color: var(--surface-solid);
-  background: var(--surface-solid);
-  color: var(--text-1);
+/* （原来这里有一条 `[data-theme='dark'] .btnPrimary` 覆盖 —— 机制批给"浅底白字"
+   打的临补丁。2026-10-12 按钮语言重写之后不再需要：`.btnPrimary` 自己就是反色配对
+   （`--text-1` 底 / `--bg-1` 字），深浅两套主题一条规则全成立。见上面那条。） */
+
+/* 分段控件选中块那道轻影：浅色影在深底上看不见 —— "选中块浮在轨道上"那点层次会丢 */
+[data-theme='dark'] [data-page] .segBtn[data-on='true'] {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }

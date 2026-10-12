@@ -18,7 +18,7 @@
  * 所以"用户关掉这一屏"得记一笔（`dismissed`），否则下一次读快照又把它顶回来。
  * 只有 `postprocess-started`（新一趟的开场）才把那一笔清掉。
  *
- * 事件名住 `./events`（与 Rust 侧 `hook_ui` 那四个常量同名的那一份）——
+ * 事件名住 `./events`（与 Rust 侧 `hook_ui` 那几个常量同名的那一份）——
  * **报告页也认 `finished` 那一条**（跑完自己重读一遍），所以字面量只许有那一处。
  */
 
@@ -28,6 +28,7 @@ import { api, listen } from '../../api'
 import type {
   PostProcessFacts,
   PostProcessFinished,
+  PostProcessPrintTime,
   PostProcessProgress,
   PostProcessQuestion,
   PostProcessRun,
@@ -37,6 +38,7 @@ import type {
 import {
   POSTPROCESS_FACTS as FACTS_EVENT,
   POSTPROCESS_FINISHED as FINISHED_EVENT,
+  POSTPROCESS_PRINT_TIME as PRINT_TIME_EVENT,
   POSTPROCESS_PROGRESS as PROGRESS_EVENT,
   POSTPROCESS_QUESTION as QUESTION_EVENT,
   POSTPROCESS_STARTED as STARTED_EVENT,
@@ -132,6 +134,23 @@ export function usePostProcessRun(): PostProcessRunView {
       // 结论已出：那一问不可能还有人在等，界面别再挂着它
       question: null,
     }))
+    /*
+     * 打印时间补算完（延后那一趟）：补进**已经在屏上的那条结论**里。
+     *
+     * 有界面时钩子不等打印时间（切片器在等退出码）⇒ 结论里那一格先是空的；
+     * 常驻进程算完推这一条，那一行就亮起来 —— 用户不用跑去报告页找那个数。
+     * 补算失败不发这条（那一格继续空着，不许拿 0 凑数）。
+     */
+    bind<PostProcessPrintTime>(PRINT_TIME_EVENT, (prev, payload) => {
+      if (prev.finished === null) return prev
+      return {
+        ...prev,
+        finished: {
+          ...prev.finished,
+          result: { ...(prev.finished.result ?? {}), printTimeSeconds: payload.totalSeconds },
+        },
+      }
+    })
     /*
      * 跑完把那一屏叫回来（如果用户正在后台跑）。
      *

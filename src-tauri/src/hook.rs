@@ -319,6 +319,8 @@ pub struct Outcome {
     /// 打印时间估算**交出去**了（这一趟没算）：交给常驻进程补全。
     /// `None` = 这一趟已经自己算完（或压根不需要）。
     pub deferred_print_time: Option<DeferredPrintTime>,
+    /// 结果读数（界面「结果 · 成功」那几格）—— 见 [`result_facts`]。
+    pub result: crate::hook_ipc::ResultFacts,
 }
 
 /// 一条"待补全的打印时间"。
@@ -368,7 +370,11 @@ impl UiLine<'_> {
 }
 
 /// 开场那几个事实（界面左栏那张表）。**从 IR 与输入正文里取，不重新解析任何东西**。
-fn facts_from(ir: &postprocess::ir::Ir, file_size_bytes: u64) -> crate::hook_ipc::FactsPayload {
+fn facts_from(
+    ir: &postprocess::ir::Ir,
+    raw: &str,
+    file_size_bytes: u64,
+) -> crate::hook_ipc::FactsPayload {
     crate::hook_ipc::FactsPayload {
         gcode_machine: ir.machine.gcode_machine_type.clone(),
         preset_machine: ir.machine.machine_type.clone(),
@@ -376,6 +382,34 @@ fn facts_from(ir: &postprocess::ir::Ir, file_size_bytes: u64) -> crate::hook_ipc
         file_size_bytes,
         nozzle_diameter: ir.machine.nozzle_diameter,
         layer_height: ir.machine.typical_layer_height,
+        /* 这两格给「切片与预估」那一栏（跑着的时候就摆）：都来自预设这份 IR ——
+         * 涂胶速度的换算与归档同一条（`archive::glue_speed_of`） */
+        glue_speed: Some(crate::archive::glue_speed_of(ir)),
+        /* 预设里那个名字（如 `"BambuStudio"`）。带版本号的完整串要等 pass1 从输入头行刮到，
+         * 那是跑完的 `result.slicer` —— 这一刻手上没有，不编 */
+        slicer: Some(ir.filament.slicer.clone()),
+        /* 切片器自报的预估总时长（输入头里 `; total estimated time` 那一行）：
+         * 跑着的时候那一格摆它；跑完换成内核重算的（`result.printTimeSeconds`） */
+        slicer_print_time_seconds: postprocess::postproc::printtime::slicer_estimated_seconds(raw),
+    }
+}
+
+/// 结果读数（界面「结果 · 成功」那几格）—— **从内核的产物里搬，不新算**：
+/// IR 终态（笔偏移 / 涂胶速度）+ pass1 统计（涂胶总长 / 切片软件）+ 打印时间。
+///
+/// 打印时间只有"这一趟自己算完"时才有值；**延后那一趟是 `None`**
+/// （钩子必须立刻退出，切片器在等退出码）—— 界面等 `hook_ui` 那条
+/// `postprocess-print-time` 事件把它补回来。
+fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc::ResultFacts {
+    let ir = &done.detail_facts.ir;
+    crate::hook_ipc::ResultFacts {
+        pen_x: ir.toolhead.x_offset,
+        pen_y: ir.toolhead.y_offset,
+        pen_z: ir.toolhead.z_offset,
+        glue_speed: crate::archive::glue_speed_of(ir),
+        print_time_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
+        glue_length_mm: done.stats.pass1.glue_total_length,
+        slicer: done.stats.pass1.slicer_version.clone(),
     }
 }
 
@@ -459,6 +493,7 @@ pub fn run(
      */
     ui.send(crate::hook_ipc::FromHook::Facts(facts_from(
         &ir,
+        &raw,
         raw.len() as u64,
     )));
 
@@ -564,6 +599,10 @@ pub fn run(
         );
     }
 
+    /* 结果读数先摘下来（下面 `done` 被逐格搬走：warnings / output_path 都是 move）——
+     * 它就是界面「结果 · 成功」那几格，值全取自内核产物，见 `result_facts` */
+    let result = result_facts(&done);
+
     let mut warnings = done.warnings;
     warnings.extend(archive_warnings);
 
@@ -582,6 +621,7 @@ pub fn run(
         elapsed_ms: started.elapsed().as_millis(),
         warnings,
         deferred_print_time,
+        result,
     })
 }
 
@@ -1171,6 +1211,8 @@ fn finished_payload(
             elapsed_ms: out.elapsed_ms as u64,
             output: Some(out.output.display().to_string()),
             warnings: out.warnings.clone(),
+            /* 结果读数：成功才有（失败 / 取消时内核没把这几个数算出来 —— 空着） */
+            result: Some(out.result.clone()),
         },
         Err(err) => {
             /* 原因与码分家：界面把原因摆正中、码摆小字。
@@ -1191,6 +1233,7 @@ fn finished_payload(
                 elapsed_ms: elapsed_ms as u64,
                 output: None,
                 warnings: Vec::new(),
+                result: None,
             }
         }
     }
@@ -1265,8 +1308,14 @@ mod tests {
         ir.machine.nozzle_diameter = 0.4;
         ir.machine.first_layer_height = 0.25;
         ir.machine.typical_layer_height = 0.2;
+        ir.toolhead.max_speed = 4_200.0; // 70 mm/s × 60（内核这一格是 mm/min）
+        ir.filament.slicer = "BambuStudio".to_owned();
 
-        let f = facts_from(&ir, 3_355_443);
+        /* 输入头里那一行（切片器自报的预估总时长）：`3h 22m 55s` ⇒ 12175 秒 */
+        let raw = "; BambuStudio 02.06.01.55\n\
+                   ; model printing time: 3h 16m 52s; total estimated time: 3h 22m 55s\n\
+                   G1 X1\n";
+        let f = facts_from(&ir, raw, 3_355_443);
         assert_eq!(f.preset_machine, "A1_MINI");
         assert_eq!(f.gcode_machine, "A1");
         assert_eq!(f.filament_type, "PETG");
@@ -1274,6 +1323,26 @@ mod tests {
         /* 层高取**常规**那一档（旧世代那张表摆的是 0.20，不是首层 0.25） */
         assert_eq!(f.layer_height, 0.2);
         assert_eq!(f.file_size_bytes, 3_355_443);
+        /* 「切片与预估」那一栏的三格（跑着的时候就摆）：
+        涂胶速度 = mm/min ÷ 60（与归档 `glueSpeed` 同一处换算）；切片软件取 IR 那个名字；
+        预估打印时间 = **切片器自报的**那一行 */
+        assert_eq!(
+            f.glue_speed,
+            Some(70.0),
+            "换算必须与归档同一处：{:?}",
+            f.glue_speed
+        );
+        assert_eq!(f.slicer.as_deref(), Some("BambuStudio"));
+        assert_eq!(
+            f.slicer_print_time_seconds,
+            Some(12_175.0),
+            "3h 22m 55s 该被读成 12175 秒"
+        );
+        /* 头里没有那一行 ⇒ 不摆（`None`，不是 0） */
+        assert_eq!(
+            facts_from(&ir, "G1 X1\n", 1).slicer_print_time_seconds,
+            None
+        );
     }
 
     /// 仓库里那份夹具预设（与内置产物同构）—— 机型 A1 / 变体 fast
@@ -1457,6 +1526,29 @@ mod tests {
 
         let out = run_headless(&toml, &gcode).expect("整链参考物必须跑通");
         assert_eq!(out.output, gcode, "原地覆盖：落点就是输入那一份");
+        /* 结果读数那一包必须搭车到 `Outcome` 上（界面「结果 · 成功」的指标条 +
+        擦料与胶水消耗那几格）—— 值对不对归内核那几条判据管，这里钉的是
+        **它们真的从 `ProcessResult` 搬到了这一层**（搬丢一格界面就少一格） */
+        assert!(
+            out.result.glue_speed > 0.0,
+            "涂胶速度该从预设里来：{:?}",
+            out.result
+        );
+        assert!(
+            out.result.glue_length_mm > 0.0,
+            "涂胶总长该从 pass1 统计里来：{:?}",
+            out.result
+        );
+        assert!(
+            !out.result.slicer.is_empty(),
+            "切片软件那串该从输入头行刮到：{:?}",
+            out.result
+        );
+        assert!(
+            out.result.print_time_seconds.is_some(),
+            "这一条没延后（headless），打印时间该在车上：{:?}",
+            out.result
+        );
         let after = std::fs::read(&gcode).expect("读产物");
         assert_ne!(before, after, "跑完之后那份字节必须变了");
         assert!(

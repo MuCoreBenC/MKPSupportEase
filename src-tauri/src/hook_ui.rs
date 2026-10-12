@@ -44,6 +44,10 @@ pub const QUESTION_EVENT: &str = "postprocess-question";
 pub const FINISHED_EVENT: &str = "postprocess-finished";
 /// 新的一趟开始了（界面据此把上一趟的结论与"我关过了"一起清掉）。
 pub const STARTED_EVENT: &str = "postprocess-started";
+/// 延后的打印时间**补算完了** —— 结论那一格里空着的「预估打印时间」由它补上。
+///
+/// 只在算出来时发（算不出来就不发：界面那一格继续空着，不许拿 0 凑数）。
+pub const PRINT_TIME_EVENT: &str = "postprocess-print-time";
 
 /// 一条进度长什么样（与 Rust 侧 [`ProgressPayload`] 一一对应；前端只认字段名）。
 pub type ProgressDto = ProgressPayload;
@@ -60,6 +64,14 @@ pub type FinishedDto = FinishedPayload;
 pub struct StartedDto {
     pub preset_name: String,
     pub gcode_name: String,
+}
+
+/// 延后的打印时间补算完（[`PRINT_TIME_EVENT`]）—— 结论里那一格由它补上。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintTimeDto {
+    /// 预估打印秒数（与管线内同一口径：同一个 `printtime::estimate` + 同一组 Options）
+    pub total_seconds: f64,
 }
 
 /// 窗口起来时读的那份**全量快照**（进度 / 待答的问句 / 结论都在里面）。
@@ -104,11 +116,18 @@ struct Shared {
 /// - 那条记录已经不在（被清掉了）⇒ 什么都不做；
 /// - 界面进程退出 ⇒ 线程随进程一起没，记录停在 `computing` —— 界面下次打开报告页
 ///   会看到"正在估算"，**不假装有值**。
-pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, output: &str) {
+///
+/// 返回值 = 算出来的预估秒数（**算出来了才有**）—— 调用方拿它推 [`PRINT_TIME_EVENT`]，
+/// 界面上那一格由它亮起来；算不出来（标了 `failed` / 记录不在了）就是 `None`，不推。
+pub(crate) fn complete_archive(
+    user_root: &std::path::Path,
+    record_id: &str,
+    output: &str,
+) -> Option<f64> {
     let history = user_root.join(crate::fsx::paths::GCODE_HISTORY_DIR);
     let Some(meta_path) = crate::archive::find_meta(&history, record_id) else {
         tracing::warn!(record = %record_id, "找不到那条执行记录，放弃补全");
-        return;
+        return None;
     };
 
     // ① 输出副本：与 `_meta.json` 同目录、名字就是 `<record_id>.gcode`
@@ -116,7 +135,7 @@ pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, out
     if let Err(e) = std::fs::copy(output, &output_copy) {
         tracing::warn!(error = %e, "输出归档复制失败，标失败");
         let _ = crate::archive::mark_print_time_failed(&meta_path);
-        return;
+        return None;
     }
 
     // ② 输出文件的事实（大小 + sha）
@@ -125,7 +144,7 @@ pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, out
         Err(e) => {
             tracing::warn!(error = %e, "输出摘要算不出来，标失败");
             let _ = crate::archive::mark_print_time_failed(&meta_path);
-            return;
+            return None;
         }
     };
 
@@ -135,7 +154,7 @@ pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, out
         Err(e) => {
             tracing::warn!(error = %e, "读不到输出文件，打印时间标失败");
             let _ = crate::archive::mark_print_time_failed(&meta_path);
-            return;
+            return None;
         }
     };
     let opts = postprocess::postproc::printtime::Options {
@@ -149,9 +168,11 @@ pub(crate) fn complete_archive(user_root: &std::path::Path, record_id: &str, out
     if let Err(e) = crate::archive::complete_meta(&meta_path, output_file, print_time) {
         tracing::warn!(error = %e, "补全记录失败");
         let _ = crate::archive::mark_print_time_failed(&meta_path);
-        return;
+        return None;
     }
     tracing::info!(record = %record_id, "输出归档与打印时间补全完成");
+    /* 算出来了 ⇒ 把秒数交回调用方（它推一条 [`PRINT_TIME_EVENT`]，那一格就亮起来） */
+    Some(estimated.total_seconds)
 }
 
 impl HookView {
@@ -207,12 +228,16 @@ impl HookView {
             }
             FromHook::DeferPrintTime { record_id, output } => {
                 /* 打印时间**交到这一侧**：钩子已经退了（切片器在等退出码，它不能留后台任务）。
-                这里是常驻进程，慢慢算不影响任何人；算完补全那条记录。 */
+                这里是常驻进程，慢慢算不影响任何人；算完补全那条记录，
+                **再把秒数推给界面**（结论窗里那一格空着 —— 补上它，用户不用跑去报告页找）。 */
                 tracing::info!(record = %record_id, "接手这一趟的打印时间估算");
                 let root = crate::fsx::paths::user_root(app).ok();
+                let app = app.clone();
                 std::thread::spawn(move || {
                     if let Some(root) = root {
-                        complete_archive(&root, &record_id, &output);
+                        if let Some(total_seconds) = complete_archive(&root, &record_id, &output) {
+                            let _ = app.emit(PRINT_TIME_EVENT, PrintTimeDto { total_seconds });
+                        }
                     }
                 });
             }
@@ -341,7 +366,10 @@ mod tests {
         let output = d.path().join("out.gcode");
         std::fs::write(&output, "G1 X10 Y10 F3000\nG1 X20 Y10 E0.5\n").unwrap();
 
-        complete_archive(d.path(), &record_id, &output.to_string_lossy());
+        /* 返回值就是界面那一格要的那个数（补算完由 `PRINT_TIME_EVENT` 推过去） */
+        let seconds = complete_archive(d.path(), &record_id, &output.to_string_lossy())
+            .expect("补算成功要把秒数交出来");
+        assert!(seconds > 0.0, "预估秒数该是个正数：{seconds}");
 
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
@@ -403,7 +431,10 @@ mod tests {
         .unwrap();
 
         let missing = d.path().join("nope.gcode");
-        complete_archive(d.path(), &record_id, &missing.to_string_lossy());
+        assert!(
+            complete_archive(d.path(), &record_id, &missing.to_string_lossy()).is_none(),
+            "标了失败就没有秒数可返回（界面那一格继续空着，不许拿 0 凑数）"
+        );
 
         let back: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
@@ -458,6 +489,8 @@ mod tests {
             elapsed_ms: 42,
             output: None,
             warnings: Vec::new(),
+            /* 失败没有读数（与真钩子同一个形状） */
+            result: None,
         });
         let snap = view.snapshot().expect("结论也在快照里");
         assert!(snap.question.is_none());

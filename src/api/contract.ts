@@ -1509,6 +1509,21 @@ export interface PostProcessFacts {
   nozzleDiameter: number
   /** 层高（mm）—— 常规层高那一档 */
   layerHeight: number
+  /** 涂胶速度（mm/s）——「切片与预估」那一格（跑着的时候就摆）；旧版钩子不报就不摆 */
+  glueSpeed?: number
+  /**
+   * 切片软件 —— 跑着的时候只有预设里那个**名字**（如 `"BambuStudio"`）；
+   * 带版本号的完整串要等 pass1 扫输入头行，那是跑完的 `result.slicer`。
+   */
+  slicer?: string
+  /**
+   * **切片器自报的预估总时长**（秒）—— 输入头 `; total estimated time: 3h 22m 55s` 那一行。
+   *
+   * 「切片与预估」栏的「预估打印时间」用它（跑着的时候就摆）；跑完之后那一格换成内核
+   * 重算的（`result.printTimeSeconds`）—— 两个数不一样是正常的：**这是切片器说的、
+   * 那是内核说的**（报告页也是两个都摆）。头里没有这一行就不摆。
+   */
+  slicerPrintTimeSeconds?: number
 }
 
 /** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
@@ -1545,6 +1560,52 @@ export interface PostProcessFinished {
   /** 产物落点（成功时就是输入那一份 —— 原地覆盖） */
   output: string | null
   warnings: string[]
+  /**
+   * **结果读数**（那一屏「结果」几扇要摆的读数：指标条 + 擦料与胶水消耗那几格）。
+   *
+   * 内核在成功那一条里报上来（Rust 侧 `hook::result_facts`，值就是归档那份事实：
+   * `detail.glue` / `detail.slicer` / `printTime`）；失败 / 取消没有这一段
+   * （内核还没把那几个数算出来）。界面按"有哪几格摆哪几格"渲染。
+   */
+  result?: PostProcessResult
+}
+
+/**
+ * 结果读数（`PostProcessFinished.result`）—— 字段全是可选的：
+ * 内核报到哪几格，界面就摆哪几格（没到的不摆，不编）。
+ *
+ * **口径：全是原始数值**（mm / mm·s⁻¹ / 秒）—— 文案是界面的事，与报告页同一个规矩
+ * （那边读归档也是拿数值自己格式化）。换算只在 Rust 侧做过一次：涂胶速度的
+ * mm/min → mm/s（`archive::glue_speed_of`，全仓唯一换算点）。
+ */
+export interface PostProcessResult {
+  /** 笔偏移 X / Y / Z（mm）—— 预设里那一组（`detail.glue.penOffsetX` …） */
+  penX?: number
+  penY?: number
+  penZ?: number
+  /** 涂胶速度（mm/s，装出来是 `"70.00 mm/s"`） */
+  glueSpeed?: number
+  /**
+   * 预估打印秒数。**有界面时它是后补的**：钩子必须立刻退出（切片器在等退出码），
+   * 打印时间交给常驻进程算 —— 算完由 `postprocess-print-time` 那条事件补上这一格
+   * （见 `usePostProcessRun`）。所以成功那一刻它常常先是 `undefined`。
+   */
+  printTimeSeconds?: number
+  /** 涂胶总长（mm）—— 报告页「涂胶」那一组的头一格（同一口径，不换算成体积） */
+  glueLengthMm?: number
+  /** 切片软件（`"BambuStudio 02.08.02.60"` —— pass1 从输入头行刮到的完整串） */
+  slicer?: string
+}
+
+/**
+ * 延后的打印时间**补算完了**（事件 `postprocess-print-time`）。
+ *
+ * 只补那一格：值落进 `PostProcessFinished.result.printTimeSeconds`，
+ * 界面上「预估打印时间」那一行由它亮起来（补算失败就不发这条 —— 那一格继续空着）。
+ */
+export interface PostProcessPrintTime {
+  /** 预估打印秒数（与管线内同一口径：同一个 `printtime::estimate` + 同一组 Options） */
+  totalSeconds: number
 }
 
 /**

@@ -415,7 +415,7 @@
   font-weight: 500;
   /* 行高收 1：行盒即 1em，与归一化后的度量框同高，flex 居中就是墨迹居中 */
   line-height: 1;
-  color: #fff;
+  color: var(--bg-1);
   white-space: nowrap;
   cursor: pointer;
   /* 只过渡 paint —— **不列 transform**：这颗按钮永远不位移、不缩放 */
@@ -437,13 +437,13 @@
 
 /* 悬停：底色提亮一档（平面：不浮、不凹，几何与阴影都不动） */
 .useBtn:hover:not(:disabled) {
-  background: #2b333c;
-  color: #fff;
+  background: var(--text-2);
+  color: var(--bg-1);
 }
 
 /* 按下：底色再深一档（原来是内阴影"沉下去" —— 作者看着说凹，撤了） */
 .useBtn:active:not(:disabled) {
-  background: #232a32;
+  background: var(--text-2);
 }
 
 .useBtn:disabled {
@@ -485,7 +485,7 @@
   font-weight: 500;
   /* 与「使用」同一条：行高收 1 修 CJK 的视觉重心（见 `.useBtn` 那段） */
   line-height: 1;
-  color: #fff;
+  color: var(--bg-1);
   white-space: nowrap;
   cursor: pointer;
   /*
@@ -498,12 +498,12 @@
 }
 
 .actBtn:hover {
-  background: #2b333c;
-  color: #fff;
+  background: var(--text-2);
+  color: var(--bg-1);
 }
 
 .actBtn:active {
-  background: #232a32;
+  background: var(--text-2);
 }
 
 .actBtn:focus-visible {
@@ -1066,13 +1066,13 @@
   font: inherit;
   font-size: var(--fs-label);
   font-weight: 500;
-  color: #fff;
+  color: var(--bg-1);
   cursor: pointer;
   box-shadow: 0 1px 2px rgb(20 32 45 / 16%);
 }
 
 .saveBtn:hover:not(:disabled) {
-  background: #2b333c;
+  background: var(--text-2);
 }
 
 .saveBtn:disabled {

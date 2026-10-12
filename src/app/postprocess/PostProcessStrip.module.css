@@ -37,10 +37,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 「看进度」：把那一屏叫回来 */
+/*
+ * 「看进度」：把那一屏叫回来。
+ *
+ * 竖向内衬 2 → 5（2026-10-12，作者对着截图两次提"这个看进度的按钮感觉还是没变高呀"）：
+ * 实测它原来只有 17px，比页脚那两颗（37px）矮一大截 —— 这一档抬到 ~25px。
+ */
 .open {
   flex-shrink: 0;
-  padding: 2px 10px;
+  padding: 5px 13px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--surface-solid);

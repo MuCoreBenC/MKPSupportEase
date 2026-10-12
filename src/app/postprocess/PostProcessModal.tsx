@@ -13,23 +13,34 @@
  *   4. **跑完说清哪一档**：成功 / 已取消 / 失败长得不一样 —— 取消不是失败，
  *      把用户自己按的停止说成"处理失败"是一种冤枉。
  *
- * # 2026-10-11：左栏那张表（照旧世代那一屏）
+ * # 2026-10-12：这一屏换新版（`lab/mkp-postprocess` 58 轮定稿搬进来）
  *
- * 顶上先摆**这一趟在处理什么**：G-code 机型 / 预设机型 / 耗材 / 文件大小 / 喷嘴 · 层高 ——
- * 事实由钩子一开场报一条（`hook_ipc::FactsPayload`）。**只摆开跑那一刻就确定的那几格**：
- * 总层数要 pass1 才刮出来、擦料塔类型要 support 步的判据才定，这一版先不摆（不编、也不空占一行）。
+ * 作者在试验场里把六扇窗逐像素定了稿（见 `lab/mkp-postprocess/HANDOVER.md`），
+ * 这一段就是那份定稿的落地：**结构、配色、几何全照搬，一个像素不改**。
  *
- * 旧世代那一屏右边还有一块路径预览，我们这一版**没有**：内核不存塔 / 涂胶的路径点集
- * （要画得先从 G-code 抠，或者让内核把几何交出来），那是下一步的事。
+ *   ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽进度条嵌底）+ 两组带题 facts，
+ *      页脚「停止 / 后台运行」；
+ *   ② 机型不匹配：红警告 hero（空心圈 + 标题 + 后端那一句问话）+ 两组带题 facts，
+ *      页脚「强制继续 / 终止」—— 强调位给「终止」（第 9~11 轮定的）；
+ *   ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度）+ 两组带题 facts，
+ *      页脚「关闭 / → 查看详情」；
+ *   ④ 已停止：柔和内影那一版（`.smBase .smSunk`，浅色深色同一张卡），圈里画圆角方块；
+ *   ⑤ 失败：照「机型不匹配」那一张红卡（`.failWarn`）—— 图标在板外、文案直接落在红卡上；
+ *   ⑥ 结果那几扇也**没有 ×**（收窗走页脚「关闭」，与抽卡页签一致）。
+ *
+ * 数据口径：**真机给什么就摆什么，没给的不摆**（不编）——
+ * 读数由内核在成功那一条里报上来（`PostProcessResult`，Rust 侧 `hook::result_facts`）；
+ * 「预估打印时间」是**后补的**（有界面时那一步延后算，`postprocess-print-time` 到了才亮），
+ * 所以成功那一刻它常常先空着；跑着 / 问句那两扇只有开场事实里有的那几格。
  */
 
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
+import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
-import { Progress } from '../ui/Progress'
-/* 模态框只有一套（2026-10-10）：稿内那套 `ui/Modal` + 它的 `.scrim/.modal` 退役 */
 import { Modal } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { percentOf, stepName } from './steps'
@@ -42,9 +53,11 @@ const PLATFORM = detectPlatform()
 export interface PostProcessModalProps {
   /** 那一趟的现况（`usePostProcessRun` 给的那一份；App 拿着它，后台那条窄条也要） */
   view: PostProcessRunView
-  /** 「看报告」：跨页跳转的出口由外壳给（页面 / 浮层不该伸手改页签） */
+  /** 「查看详情」：跨页跳转的出口由外壳给（页面 / 浮层不该伸手改页签） */
   onOpenReport: () => void
 }
+
+/* ---- 小工具 ---- */
 
 /** 文件大小：MB 两位小数（与报告页那份口径一致） */
 function sizeText(bytes: number): string {
@@ -54,6 +67,27 @@ function sizeText(bytes: number): string {
 /** 毫米这两位：内核里 0 = 预设没写这一格 ⇒ 摆 `—`，不摆 `0.00` */
 function mmText(v: number): string {
   return v > 0 ? v.toFixed(2) : '—'
+}
+
+/** 毫米（两位小数）：笔偏移 / 涂胶总长那几格 */
+function mm2(v: number): string {
+  return `${v.toFixed(2)} mm`
+}
+
+/** 涂胶速度（mm/s 两位小数）—— 换算在 Rust 侧做过一次（`archive::glue_speed_of`） */
+function speedText(v: number): string {
+  return `${v.toFixed(2)} mm/s`
+}
+
+/**
+ * 预估打印时间 —— **与报告页同一个讲法**（`PageReport` 的 `printTimeText`）：
+ * 同一个数在这两处不许出现两种说法（那边读归档里的秒数，这边读事件里的秒数）。
+ */
+function printTimeText(sec: number): string {
+  if (!Number.isFinite(sec)) return '—'
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`
 }
 
 /**
@@ -71,6 +105,247 @@ function etaText(sinceMs: number | null, percent: number): string | null {
   const m = Math.floor(sec / 60)
   return `预计还需 ${m} 分 ${sec - m * 60} 秒`
 }
+
+/* ---- 两组带题 facts（定稿的读数区：题名行 = 色点 + 题 + 发丝线） ---- */
+
+interface FactRow {
+  label: string
+  value: string
+  /** 灰字行（切片软件这类「看一眼就行」的读数） */
+  grey?: boolean
+}
+
+interface FactGroup {
+  title: string
+  rows: FactRow[]
+}
+
+/** 左栏「机型与切片基础」—— 六态共用（这一栏几格真机全有） */
+function baseGroup(facts: PostProcessFacts | null): FactGroup {
+  return {
+    title: '机型与切片基础',
+    rows: [
+      { label: 'G-code 机型', value: facts?.gcodeMachine ?? '—' },
+      { label: '预设机型', value: facts?.presetMachine ?? '—' },
+      {
+        label: '耗材 / 喷嘴',
+        value: `${facts?.filamentType ?? '—'} · ${mmText(facts?.nozzleDiameter ?? 0)} mm`,
+      },
+      { label: '层高', value: `${mmText(facts?.layerHeight ?? 0)} mm` },
+    ],
+  }
+}
+
+/**
+ * 跑着 / 问句：右栏是「切片与预估」。
+ *
+ * 「预估打印时间」这一刻给的是**切片器自报的**（输入头 `; total estimated time` 那一行）——
+ * 内核重算的那个要跑完才有（而且有界面时还延后）；涂胶速度 / 切片软件开跑就确定。
+ * 缺哪格不摆哪格。
+ */
+function runGroup(facts: PostProcessFacts | null): FactGroup {
+  const rows: FactRow[] = []
+  if (facts?.slicerPrintTimeSeconds !== undefined) {
+    rows.push({ label: '预估打印时间', value: printTimeText(facts.slicerPrintTimeSeconds) })
+  }
+  rows.push({ label: '文件大小', value: facts === null ? '—' : sizeText(facts.fileSizeBytes) })
+  if (facts?.glueSpeed !== undefined) {
+    rows.push({ label: '涂胶速度', value: speedText(facts.glueSpeed) })
+  }
+  if (facts?.slicer !== undefined) rows.push({ label: '切片软件', value: facts.slicer, grey: true })
+  return { title: '切片与预估', rows }
+}
+
+/** 跑完：右栏是「擦料与胶水消耗」——结果读数有哪几格就摆哪几格 */
+function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null): FactGroup {
+  const res = finished.result
+  const rows: FactRow[] = []
+  /* 打印时间**常常是后到的**（有界面时延后算）：先空着，`postprocess-print-time` 到了再补；
+   * 失败 / 取消时退回开场那一格（切片器自报的）—— 有就摆，比空着强 */
+  const printSec = res?.printTimeSeconds ?? facts?.slicerPrintTimeSeconds
+  if (printSec !== undefined) {
+    rows.push({ label: '预估打印时间', value: printTimeText(printSec) })
+  }
+  if (res?.glueLengthMm !== undefined) {
+    rows.push({ label: '涂胶总长', value: mm2(res.glueLengthMm) })
+  }
+  /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
+  rows.push({
+    label: '处理耗时 / 大小',
+    value: `${(finished.elapsedMs / 1000).toFixed(2)} 秒 / ${
+      facts === null ? '—' : sizeText(facts.fileSizeBytes)
+    }`,
+  })
+  /* 切片软件：跑完给带版本的完整串；失败 / 取消时退回开场那个名字（总比空着强） */
+  const slicer = res?.slicer ?? facts?.slicer
+  if (slicer !== undefined) rows.push({ label: '切片软件', value: slicer, grey: true })
+  return { title: '擦料与胶水消耗', rows }
+}
+
+function FactsGroups({ groups }: { groups: FactGroup[] }) {
+  return (
+    <div className={s.groups}>
+      {groups.map((g) => (
+        <div className={s.group} key={g.title}>
+          <div className={s.groupHead}>
+            <span className={s.groupDot} aria-hidden="true" />
+            <span className={s.groupTitle}>{g.title}</span>
+          </div>
+          <div className={s.facts}>
+            {g.rows.map((r) => (
+              <div className={r.grey === true ? `${s.factRow} ${s.factGrey}` : s.factRow} key={r.label}>
+                <span className={s.factLabel}>{r.label}</span>
+                <span className={s.factValue}>{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ---- ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽条嵌底） ---- */
+
+function ProgressHero({ percent, step, eta }: { percent: number; step: string; eta: string | null }) {
+  return (
+    /* 不给 role="status"：这一块每秒都在动（百分比 / 倒计时），朗读器会被念个不停 */
+    <div className={`${s.hero} ${s.heroSide}`}>
+      <span className={s.heroNum}>{Math.round(percent)}%</span>
+      <div className={s.heroMeta}>
+        <span className={s.heroStep}>{step}</span>
+        <span className={s.heroEta}>{eta ?? '正在估算…'}</span>
+      </div>
+      {/* 进度条是定稿皮（pb1「凹槽条」：绿底上凿出来的一道槽），不是普通白条 */}
+      <div className={`${s.heroBar} ${s.heroBarGroove}`}>
+        <span className={s.heroBarFill} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/* ---- ② 机型不匹配：红警告 hero（空心圈 + 标题 + 后端那一句问话） ---- */
+
+function WarnHero({ text }: { text: string }) {
+  return (
+    <div className={`${s.warnHero} ${s.warnSoft}`} role="status">
+      <span className={s.warnGlyph} aria-hidden="true">
+        <span className={s.warnBadge}>!</span>
+      </span>
+      <div className={s.warnCopy}>
+        <span className={s.warnTitle}>预设与机型不匹配</span>
+        {/* 正文就是后端那一句问话（`question.text`）—— 不另编文案 */}
+        <span className={s.warnLine}>{text}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
+
+/** 四格齐（三轴偏移 + 涂胶速度）才摆 —— 缺格的时候这条空着比缺一角好 */
+function metricsReady(
+  res: PostProcessResult | undefined,
+): res is Required<Pick<PostProcessResult, 'penX' | 'penY' | 'penZ' | 'glueSpeed'>> {
+  return (
+    res !== undefined &&
+    typeof res.penX === 'number' &&
+    typeof res.penY === 'number' &&
+    typeof res.penZ === 'number' &&
+    typeof res.glueSpeed === 'number'
+  )
+}
+
+function MetricsStrip({
+  res,
+}: {
+  res: Required<Pick<PostProcessResult, 'penX' | 'penY' | 'penZ' | 'glueSpeed'>>
+}) {
+  const cells: Array<[string, string, boolean?]> = [
+    ['笔偏移 X', mm2(res.penX)],
+    ['笔偏移 Y', mm2(res.penY)],
+    ['笔偏移 Z', mm2(res.penZ)],
+    ['涂胶速度', speedText(res.glueSpeed), true],
+  ]
+  return (
+    <div className={`${s.strip} ${s.stripFinal}`} role="status">
+      {cells.map(([label, value, hot]) => (
+        <span className={s.stripCell} key={label}>
+          <span className={s.stripLabel}>{label}</span>
+          <span className={hot === true ? `${s.stripValue} ${s.stripHot}` : s.stripValue}>{value}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/* ---- ④⑤ 结果 hero（已停止 / 失败 —— 与 ①② 同一套骨架：图标 + 文案） ---- */
+
+/** 圈里那个记号：已停止 = 圆角方块（**画成 SVG** —— 文字符号在圈里对不齐） */
+function SquareMark() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="5.6" y="5.6" width="8.8" height="8.8" rx="1.8" fill="currentcolor" />
+    </svg>
+  )
+}
+
+/**
+ * 已停止（§4 定稿 = sm4「柔和内影」）：**同一张气泡卡**，只换面 / 线 / 影，
+ * 图标**进板**（板是 [圈 + 文案列] 的一行）。
+ *
+ * 失败（§5 定稿 = `.failWarn`）：照「机型不匹配」那一张红卡 —— 图标在板外、
+ * 文案直接落在红卡上；那枚叹号是 24px 粗体**文字**（与机型不匹配那一枚逐字一样）。
+ */
+function ResultHero({
+  cancelled,
+  title,
+  lines,
+}: {
+  cancelled: boolean
+  title: string
+  lines: string[]
+}) {
+  const text = (
+    <div className={s.resText}>
+      <span className={s.resTitle}>{title}</span>
+      {lines.map((l) => (
+        <span className={s.resLine} key={l}>
+          {l}
+        </span>
+      ))}
+    </div>
+  )
+  const badge = cancelled ? (
+    <span className={s.resBadge} aria-hidden="true">
+      <SquareMark />
+    </span>
+  ) : (
+    <span className={s.resBadge} aria-hidden="true">
+      !
+    </span>
+  )
+
+  if (cancelled) {
+    /* 图标进板：板里是 [圈 + 文案列] 一行 */
+    return (
+      <div className={`${s.resHero} ${s.resStop} ${s.smBase} ${s.smSunk}`} role="status">
+        <div className={s.resCopy}>
+          <span className={s.resGlyph}>{badge}</span>
+          {text}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className={`${s.resHero} ${s.resBad} ${s.failWarn}`} role="status">
+      <span className={s.resGlyph}>{badge}</span>
+      <div className={s.resCopy}>{text}</div>
+    </div>
+  )
+}
+
+/* ---- 主件 ---- */
 
 export default function PostProcessModal({ view, onOpenReport }: PostProcessModalProps) {
   const { run, dismiss } = view
@@ -94,6 +369,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
 
   const percent =
     run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
+  const asking = running && run.question !== null
   const eta = running ? etaText(view.sinceMs, percent) : null
   const facts = run.facts
 
@@ -107,9 +383,44 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   }
 
   /*
-   * 框本体先收进一格变量：跑着的那一态要在它**外面**再罩一层（`.layer`，见下），
-   * 那一层与框之间差一级缩进 —— 收成变量，两层各自都读得清。
+   * 顶部那一块（跑着 hero / 问句警告 / 结果 hero）——四种长相收成一个变量，
+   * 下面那句 facts 与警告行是它们**共用**的尾巴。
    */
+  let lead: ReactNode = null
+  if (asking && run.question !== null) {
+    lead = <WarnHero text={run.question.text} />
+  } else if (running) {
+    lead = (
+      <ProgressHero
+        percent={percent}
+        step={run.progress === null ? '准备中' : stepName(run.progress.step)}
+        eta={eta}
+      />
+    )
+  } else if (finished !== null) {
+    if (finished.ok) {
+      lead = metricsReady(finished.result) ? <MetricsStrip res={finished.result} /> : null
+    } else {
+      const lines = [
+        /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」 */
+        finished.message.replace(/^已停止 —— /, ''),
+      ]
+      const codes: string[] = []
+      if (finished.code !== null) codes.push(`错误码 ${finished.code}`)
+      if (finished.exitCode !== 0) codes.push(`退出码 ${finished.exitCode}`)
+      /* 第 46 轮定的口径：失败**不说"停在哪一步"** —— 只说"失败了"等于让人从头猜，
+       * 但那一行用户点名不要；错误码与退出码并成一行，跟切片器那个框对得上号 */
+      if (codes.length > 0) lines.push(codes.join(' · '))
+      lead = (
+        <ResultHero
+          cancelled={finished.cancelled}
+          title={finished.cancelled ? '已停止' : '处理失败'}
+          lines={lines}
+        />
+      )
+    }
+  }
+
   const screen = (
     <Modal
       open
@@ -119,13 +430,30 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       subtitle={run.gcodeName}
       /* 跑着的时候点遮罩不关（见文件头第 1 条）；要收起来请按「后台运行」 */
       closeOnScrim={!running}
-      /* 同理：跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作 */
-      hideClose={running}
+      /* 跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作。
+         结果那几扇也不摆（第 16~17 轮定的）：收窗走页脚「关闭」那一条明路 */
+      hideClose
       /* Esc 也一样收进那条口径：跑着的时候"收起来"只有「后台运行」这一条明路 */
       closeOnEsc={!running}
       onClose={dismiss}
       footer={
-        running ? (
+        asking ? (
+          /* 那一问的两颗按钮：**强制继续不强调、终止占强调位**（第 9~11 轮定的）——
+             「终止」就是回答"不跑"那一条（与「停止」同一个落点，见契约里那条注释）。
+             按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className */
+          <>
+            <Btn disabled={busy} onClick={() => act(() => api.answerPostProcessMismatch(true))}>
+              强制继续
+            </Btn>
+            <Btn
+              variant="accent"
+              disabled={busy}
+              onClick={() => act(() => api.answerPostProcessMismatch(false))}
+            >
+              终止
+            </Btn>
+          </>
+        ) : running ? (
           <>
             <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
               停止
@@ -136,138 +464,37 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
           </>
         ) : (
           <>
+            <Btn onClick={dismiss}>关闭</Btn>
             <Btn
+              variant="accent"
               onClick={() => {
                 dismiss()
                 onOpenReport()
               }}
             >
-              看报告
-            </Btn>
-            <Btn variant="accent" onClick={dismiss}>
-              关闭
+              → 查看详情
             </Btn>
           </>
         )
       }
     >
       <div className={s.body}>
-        {/*
-          这一趟在处理什么（左栏那张表）。**一格都没报过就整块不摆**（老记录 / 极早失败），
-          不做成一张空表。
-        */}
+        {lead}
         {facts !== null && (
-          <dl className={s.facts}>
-            <div className={s.factRow}>
-              <dt>G-code 机型</dt>
-              <dd>{facts.gcodeMachine}</dd>
-            </div>
-            <div className={s.factRow}>
-              <dt>预设机型</dt>
-              <dd>{facts.presetMachine}</dd>
-            </div>
-            <div className={s.factRow}>
-              <dt>耗材类型</dt>
-              <dd>{facts.filamentType}</dd>
-            </div>
-            <div className={s.factRow}>
-              <dt>文件大小</dt>
-              <dd>{sizeText(facts.fileSizeBytes)}</dd>
-            </div>
-            <div className={s.factRow}>
-              <dt>喷嘴 / 层高</dt>
-              <dd>
-                {mmText(facts.nozzleDiameter)} / {mmText(facts.layerHeight)} mm
-              </dd>
-            </div>
-          </dl>
+          <FactsGroups
+            groups={
+              asking || running
+                ? [baseGroup(facts), runGroup(facts)]
+                : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
+            }
+          />
         )}
-
-        {running ? (
-          <>
-            <Progress percent={percent} />
-            <p className={s.line}>
-              {/* 有问句还挂着时别说"准备中"：那一刻**在等人**，进度条不动是应该的，
-                  不说明白会像卡住 */}
-              <span>
-                {run.question !== null
-                  ? '等你决定'
-                  : run.progress === null
-                    ? '准备中'
-                    : stepName(run.progress.step)}
-              </span>
-              <span className={s.pct}>
-                {eta !== null && <span className={s.eta}>{eta}</span>}
-                {Math.round(percent)}%
-              </span>
+        {finished !== null &&
+          finished.warnings.map((w) => (
+            <p className={s.warn} key={w}>
+              警告：{w}
             </p>
-            <p className={s.msg}>{run.progress?.message ?? '正在把这盘 G-code 交给后处理…'}</p>
-
-            {run.question !== null && (
-              <div className={s.ask}>
-                <p className={s.askText}>{run.question.text}</p>
-                <div className={s.askBtns}>
-                  <Btn
-                    variant="danger"
-                    disabled={busy}
-                    onClick={() => act(() => api.answerPostProcessMismatch(false))}
-                  >
-                    停下（不跑）
-                  </Btn>
-                  <Btn
-                    variant="accent"
-                    disabled={busy}
-                    onClick={() => act(() => api.answerPostProcessMismatch(true))}
-                  >
-                    继续跑
-                  </Btn>
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          finished !== null && (
-            <>
-              <p
-                className={finished.ok ? s.ok : finished.cancelled ? s.cancelled : s.bad}
-                role="status"
-              >
-                {finished.ok ? '✓ 处理完成' : finished.cancelled ? '已停止' : '✗ 处理失败'}
-              </p>
-              <p className={s.msg}>{finished.message}</p>
-              {/* 失败时把**停在哪一步**说出来：只说"失败了"等于让人从头猜 */}
-              {!finished.ok && !finished.cancelled && finished.stage !== null && (
-                <p className={s.hint}>停在：{stepName(finished.stage)}</p>
-              )}
-              {finished.code !== null && (
-                <p className={s.code}>
-                  错误码 <code>{finished.code}</code> —— 报问题时带上它
-                </p>
-              )}
-              {/*
-                退出码：切片器那个报错框里**一定有**它（"… failed. Error code: N"）。
-                而我们在 stderr 上写的那一整句：**macOS 上它摆在同一个框的 `Output:` 段里，
-                Windows 上那个框根本不接脚本输出**（BBS 源码里那一支连管道都没建 ——
-                见 `docs/HOOK-ERRORS-AND-MESSAGES.md`）。把这一格摆出来，两个框才对得上号
-                （作者 2026-10-11 的真实困惑：那边只说 code 1，这边才知道是超边界还是碰撞）。
-              */}
-              {finished.exitCode !== 0 && (
-                <p className={s.code}>
-                  退出码 <code>{finished.exitCode}</code> —— 切片器那个「Error code」就是它
-                </p>
-              )}
-              {finished.warnings.map((w) => (
-                <p className={s.warn} key={w}>
-                  警告：{w}
-                </p>
-              ))}
-              <p className={s.hint}>
-                窗口留着，下次切片接着用；这一屏收起来也不影响记录 —— 报告页里有那一条。
-              </p>
-            </>
-          )
-        )}
-
+          ))}
         {err !== null && (
           <p className={s.bad} role="alert">
             {err}

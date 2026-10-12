@@ -361,6 +361,15 @@ pub struct ReportFacts<'a> {
     pub calibration_mode: &'a str,
 }
 
+/// 涂胶速度（mm/s）：内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
+/// 旧版 `glueSpeed` 是 mm/s —— 除回来，不新造数。
+///
+/// ★ **全仓唯一的换算点**：归档这份（[`ReportFacts::glue`]）与钩子一开场报的
+/// `FactsPayload.glue_speed` 都走这里（两处各写一遍迟早会对不上）。
+pub fn glue_speed_of(ir: &postprocess::ir::Ir) -> f64 {
+    ir.toolhead.max_speed / 60.0
+}
+
 impl ReportFacts<'_> {
     /// 涂胶组。
     pub fn glue(&self) -> GlueFacts {
@@ -370,9 +379,7 @@ impl ReportFacts<'_> {
             // 旧版 `gluePenSwitches` ← `GlueCutterChanges`（换笔 = 切刀次数）。
             glue_pen_switches: self.stats.glue_cutter_changes,
             glue_pass_count: ir.glue.pass_count,
-            // 内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
-            // 旧版 `glueSpeed` 是 mm/s —— 除回来，不新造数。
-            glue_speed: ir.toolhead.max_speed / 60.0,
+            glue_speed: glue_speed_of(ir),
             pen_offset_x: ir.toolhead.x_offset,
             pen_offset_y: ir.toolhead.y_offset,
             pen_offset_z: ir.toolhead.z_offset,
