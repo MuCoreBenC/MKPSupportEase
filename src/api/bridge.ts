@@ -217,6 +217,9 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
+  /* 界面偏好（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 theme 格 */
+  getTheme: () => call('getTheme', 'get_theme'),
+  setTheme: (theme) => call('setTheme', 'set_theme', { theme }),
   /* ——— 官方版本账 + 对比台（2026-10-08）———
      官方版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
      baseline 是隐藏内部存储，前端拿不到它的路径。 */

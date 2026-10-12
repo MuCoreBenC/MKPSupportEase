@@ -23,7 +23,8 @@
 }
 
 .segBtn[data-on='true'] {
-  background: #fff;
+  /* 选中段的底：走 token（浅色就是 #fff，深色自动变 --surface-solid 那一档） */
+  background: var(--surface-solid);
   color: var(--text-1);
   /* 「变粗」改用描边：选中时这一段的宽度一个像素都不变（见 global.css 的铁律） */
   text-shadow: var(--state-bold);
@@ -101,7 +102,8 @@
   padding: 5px 7px;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
-  background: #fff;
+  /* 同 .segBtn：实的白走 token（浅色 = #fff，深色 = --surface-solid） */
+  background: var(--surface-solid);
   font: inherit;
   font-size: 12.5px;
   text-align: right;

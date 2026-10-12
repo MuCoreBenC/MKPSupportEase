@@ -15,6 +15,7 @@ import type {
   PresetParamValues,
   PresetSource,
   SoftwareUpdate,
+  ThemePref,
   UserPresetFile,
   UpdateInfo,
   UpdateResult,
@@ -104,6 +105,12 @@ let mockActive: ActivePreset | null = null
 
 /** 浏览器演示用的数据源覆盖（内存态，刷新即还原；真数据在 Rust 侧 run/preset-source.json） */
 let mockSource: PresetSource | null = null
+
+/*
+ * 浏览器演示用的主题档（**内存态，刷新即还原**；真数据在 Rust 侧 run/app-state.json）。
+ * `null` = 还没选过 ⇒ 界面按"跟随系统"——与真机同一个口径，别在这里另立一套默认。
+ */
+let mockTheme: ThemePref | null = null
 
 /*
  * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
@@ -1655,6 +1662,22 @@ export const mockApi: MkpApi = {
   async clearPresetSource() {
     mockSource = null
     return null
+  },
+
+  /*
+   * 主题（设置页「外观」那一格）：与数据源同一套口径 —— 内存镜像。
+   * 认得出三个字面量才收（消息照抄真机那两条命令的说法），别的如实拒绝。
+   */
+  async getTheme() {
+    return mockTheme
+  },
+
+  async setTheme(theme) {
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'system') {
+      throw new Error(`认不出的主题：${theme}（只能是 light / dark / system）`)
+    }
+    mockTheme = theme
+    return mockTheme
   },
 
   /* —— baseline + 对比台（2026-10-08）：固定演示版本账 + 从演示正文里读写参数 ——

@@ -1361,6 +1361,17 @@ export interface PresetSource {
   builtinDefault: string | null
 }
 
+/* ---------- 界面偏好（2026-10-12） ---------- */
+
+/**
+ * 界面主题档位 —— **id 是契约**（与 Rust `runtime::app_state::ThemePref` 一一对应，
+ * 盘上 / 界面 / 前端都认这三个字面量）。
+ *
+ * `system` = 跟随系统深浅：程序不猜操作系统此刻是深是浅，界面读
+ * `prefers-color-scheme` 解析（webview 里那个才是真值）。
+ */
+export type ThemePref = 'light' | 'dark' | 'system'
+
 /* ---------- baseline + 对比台（2026-10-08） ---------- */
 
 /**
@@ -2008,6 +2019,20 @@ export interface MkpApi {
    * 返回撤完之后生效的值（有内置给内置，没有就是 `null`），界面直接换账。
    */
   clearPresetSource(): Promise<PresetSource | null>
+
+  /**
+   * 当前主题偏好。`null` = **还没选过**（界面按"跟随系统"）。
+   *
+   * 与 `'system'` 意思不同：那是用户明确点了跟随系统 —— 界面上两者长得一样
+   * （都跟随系统），但盘上分得开，将来改出厂默认档时还能重新解释。
+   */
+  getTheme(): Promise<ThemePref | null>
+
+  /**
+   * 换主题档位：**立即生效并落盘**（写 `run/app-state.json` 的 `theme` 格）。
+   * 写完后端广播一次 AppState 变更 —— 界面不用"切完手动刷新"。
+   */
+  setTheme(theme: ThemePref): Promise<ThemePref>
 
   /**
    * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。

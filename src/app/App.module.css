@@ -29,6 +29,32 @@
     inset 0 0 24px rgb(20 32 45 / 2%);
 }
 
+/*
+ * 深色（2026-10-12）：**窗底那三层渐变**是写死的（产品里只有这一处画窗底，
+ * Tauri 侧 `transparent: true`、没有 backgroundColor），所以深色也在这儿给一套 ——
+ * 三档中性灰：左上一点点提亮当"光"、右下压深、底线性收住。
+ * 上沿那道白高光（::after 的第一条）在深色里从 90% 降到 6%：深底上它只是一道发丝，
+ * 给 90% 会变成一条刺眼的白线。
+ */
+[data-theme='dark'] .shell {
+  background:
+    radial-gradient(120% 90% at 18% 0%, #232327 0%, transparent 55%),
+    radial-gradient(90% 80% at 92% 100%, #191a1c 0%, transparent 60%),
+    linear-gradient(135deg, #1c1c1e 0%, #151517 100%);
+}
+
+[data-theme='dark'] .shell::after {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    inset 0 0 60px rgb(0 0 0 / 26%);
+}
+
+[data-theme='dark'] .shell[data-density='mini']::after {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    inset 0 0 24px rgb(0 0 0 / 16%);
+}
+
 .body {
   position: relative;
   flex: 1;

@@ -218,3 +218,25 @@
   background: #cf3c41;
   color: #fff;
 }
+
+/*
+ * 深色（2026-10-12）：标题栏那两笔与窗口键的悬停底色。
+ *
+ * 浅色那两笔是"一道墨线 + 线下一道白高光"（.bar 的 border-bottom + box-shadow）——
+ * 深底上照搬会得到一条扎眼的白线（照试验场第 31 轮那条教训：硬线的量要按底色重配）。
+ * 现在的配法：缝压更深（黑 50%）、白光只留发丝（6%）；
+ * 窗口键的悬停/按下从"墨压一层"换成"白提一层"（深底上压墨看不见）。
+ * 关闭键那颗红两套共用（macOS / Windows 的关闭键都是红的），不动。
+ */
+[data-theme='dark'] .bar {
+  border-bottom-color: rgb(0 0 0 / 50%);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 6%);
+}
+
+[data-theme='dark'] .ctrl:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+[data-theme='dark'] .ctrl:active {
+  background: rgb(255 255 255 / 16%);
+}

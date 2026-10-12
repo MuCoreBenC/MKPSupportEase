@@ -79,6 +79,43 @@ pub struct ParamDecision {
     pub kind: ParamDecisionKind,
 }
 
+/// **界面主题档位**（2026-10-12 整套客户端做深色模式那一刀）。
+///
+/// 三档，与前端 `src/api/contract.ts` 的 `ThemePref` 一一对应 —— **id 是契约**
+/// （盘上 / 界面 / 前端都认它，换名字要三处一起改）：
+///
+/// - `light` / `dark`：用户点名的那一档，界面照它切；
+/// - `system`：跟随系统深浅 —— 程序**不猜**操作系统此刻是深是浅，那是界面的事
+///   （webview 的 `prefers-color-scheme` 才是真值，这里只记"用户选了跟随"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePref {
+    Light,
+    Dark,
+    System,
+}
+
+impl ThemePref {
+    /// 线上字符串 → 枚举；认不出给 `None`（调用方如实报错，**不静默回落到浅色**）
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            "system" => Some(Self::System),
+            _ => None,
+        }
+    }
+
+    /// 枚举 → 线上字符串。只写这一处（盘上 / DTO / 前端共用同一个字面量）
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::System => "system",
+        }
+    }
+}
+
 /// 应用状态格式的代次。加 section / 加字段不升号，改语义才升（与 catalog 同一条）。
 pub const APP_STATE_SCHEMA: u32 = 1;
 
@@ -108,6 +145,13 @@ pub struct AppStateFile {
     /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_mine`]）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_decisions: BTreeMap<String, BTreeMap<String, ParamDecision>>,
+    /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
+    ///
+    /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
+    /// [`super::lineage`] 那条界住在这里；前端也不另存副本（读口只有
+    /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<ThemePref>,
 }
 
 impl Default for AppStateFile {
@@ -119,6 +163,7 @@ impl Default for AppStateFile {
             text_draft: None,
             preset_source: None,
             param_decisions: BTreeMap::new(),
+            theme: None,
         }
     }
 }
@@ -183,6 +228,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         preset_source: super::source::read_source_file(root)?,
         /* 逐参数决定账是 2026-10-09 才有的格：旧档里本来就没有它 */
         param_decisions: BTreeMap::new(),
+        /* 主题这一格是 2026-10-12 才有的：旧档里本来就没有它（没选过 = None） */
+        theme: None,
     })
 }
 
@@ -447,6 +494,21 @@ pub fn clear_preset_source(root: &Path) -> Result<(), AppError> {
     with_state(root, |state| {
         state.preset_source = None;
         Ok(())
+    })
+}
+
+/* ---------- theme：界面主题偏好 ---------- */
+
+/// 读主题偏好。`None` = **还没选过**（与"选了跟随系统"两码事，见 [`ThemePref`] 的模块注释）。
+pub fn theme(root: &Path) -> Result<Option<ThemePref>, AppError> {
+    Ok(load(root)?.theme)
+}
+
+/// 记下主题偏好（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_theme(root: &Path, pref: ThemePref) -> Result<ThemePref, AppError> {
+    with_state(root, |state| {
+        state.theme = Some(pref);
+        Ok(pref)
     })
 }
 
@@ -786,6 +848,37 @@ mod tests {
         clear_preset_source(d.path()).unwrap();
         assert_eq!(preset_source(d.path()).unwrap(), None);
         clear_preset_source(d.path()).unwrap(); // 幂等
+    }
+
+    /* ---------- theme ---------- */
+
+    /// 存得下、读得回、覆盖得住；**没选过 = None**（不是"浅色"）——
+    /// 界面据此区分"跟随系统"与"用户没碰过"（`ipc::prefs` 那两条命令的口径）
+    #[test]
+    fn theme_roundtrips_and_starts_as_none() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(theme(d.path()).unwrap(), None, "没选过就是 None");
+
+        assert_eq!(
+            set_theme(d.path(), ThemePref::Dark).unwrap(),
+            ThemePref::Dark
+        );
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::Dark));
+
+        set_theme(d.path(), ThemePref::System).unwrap();
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
+    }
+
+    /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），
+    /// 别的给 None —— 调用方据此如实拒绝，不静默回落到浅色
+    #[test]
+    fn theme_wire_ids_are_the_contract() {
+        assert_eq!(ThemePref::parse("dark"), Some(ThemePref::Dark));
+        assert_eq!(ThemePref::parse(" light "), Some(ThemePref::Light));
+        assert_eq!(ThemePref::parse("system"), Some(ThemePref::System));
+        assert_eq!(ThemePref::Dark.wire(), "dark");
+        assert!(ThemePref::parse("黑").is_none());
+        assert!(ThemePref::parse("").is_none());
     }
 
     /* ---------- 迁移（一次性、惰性） ---------- */

@@ -64,12 +64,16 @@ import { usePreset } from '../calib/usePreset'
 import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 
+import { useIsDark } from '../state/appState'
 import p from './PageHome.module.css'
 
 const EMPTY: Selection = { brand: null, model: null, variant: null }
 
-/** 板子的配色跟应用的模式对齐；等应用做了深色模式，这里换成跟随主题的那个值 */
-const PLATE_THEME = '浅色'
+/*
+ * 板子的配色**跟着应用主题走**（2026-10-12 深色模式那一刀落地）——
+ * 同校准页：那块 SVG 的配色是生成器里写死的两套，读不到 CSS 变量，要真值。
+ */
+const PLATE_THEME_OF = { dark: '深色', light: '浅色' } as { dark: string; light: string }
 
 /** 第五步要打开的那份测试模型（后端 `getCalibModels` 认的 id） */
 const TEST_MODEL_ID = 'test-models'
@@ -107,6 +111,9 @@ interface PageHomeProps {
 }
 
 export default function PageHome({ density }: PageHomeProps) {
+  /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
+  const isDark = useIsDark()
+  const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
   const deckRef = useRef<DeckHandle>(null)
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
   const { fadeMs } = useDevDefaults()
@@ -855,7 +862,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 <PlateZoom resetKey="z" title="">
                   <CalibPlate
                     model="zoffset"
-                    theme={PLATE_THEME}
+                    theme={plateTheme}
                     label="Z 偏移校准板"
                     onPick={pickZ}
                     picked={zSelected}
@@ -952,7 +959,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 <PlateZoom resetKey="xy" title="">
                   <CalibPlate
                     model="precise"
-                    theme={PLATE_THEME}
+                    theme={plateTheme}
                     label="XY 偏移校准板"
                     onPick={pickXY}
                     picked={xySelected}
@@ -1038,6 +1045,7 @@ export default function PageHome({ density }: PageHomeProps) {
       pickPreset,
       pickXY,
       pickZ,
+      plateTheme,
       preset,
       presetInfo,
       presetName,

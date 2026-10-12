@@ -13,20 +13,33 @@
  * 桌面端事件与它都只会触发一次重读，`inflight` 去重）。换来的 invariant：
  * 任何一条改状态的路径走完，所有订阅页面看到的是同一份快照。
  *
- * 本轮接入的格是 **activePreset**（唯一被多个页面共享的一格）；draft / presetSource
+ * 本轮接入的格：**activePreset**（唯一被多个页面共享的一格）与 **theme**
+ * （2026-10-12 深色模式那一刀加的 —— 外壳级偏好，与"哪些页面读它"无关：
+ * 设置页读它显示当前档，`<html data-theme>` 由这里落地）。draft / presetSource
  * 等被多页共享时按同一模式扩到这里，不为单页的状态另开读取口。
  */
 
 import { useSyncExternalStore } from 'react'
 
 import { api, listen } from '../../api'
-import type { ActivePreset } from '../../api/contract'
+import type { ActivePreset, ThemePref } from '../../api/contract'
 import { inTauri } from '../window'
 
 /** 与 Rust 侧 `ipc::APP_STATE_EVENT` 同名（两边没有编译器，靠这里对齐） */
 const APP_STATE_EVENT = 'app-state-changed'
 
-let snapshot: ActivePreset | null = null
+/**
+ * 快照：**这一份就是"应用现在的状态"在界面这一侧的影子** —— 两格一起读、
+ * 一起广播（同一个事件），页面各订阅各的那一格。
+ */
+interface AppStateSnapshot {
+  /** 使用中指针（null = 还没用任何一份） */
+  active: ActivePreset | null
+  /** 主题档位（null = 还没选过 ⇒ 按"跟随系统"） */
+  theme: ThemePref | null
+}
+
+let snapshot: AppStateSnapshot = { active: null, theme: null }
 let loaded = false
 let inflight: Promise<void> | null = null
 const listeners = new Set<() => void>()
@@ -35,16 +48,40 @@ function notify(): void {
   for (const listener of listeners) listener()
 }
 
+/*
+ * **主题落到 `<html data-theme>`**（2026-10-12）：不走某个组件的 className，
+ * 因为 ① 它得盖住挂到 body 上的东西（遮罩 / 浮层）；② `body` 自己的底色在
+ * `styles/global.css` 里就吃 token，属性挂在 <html> 上才能一起翻。
+ *
+ * "跟随系统"由 `prefers-color-scheme` 解析 —— **那是 webview 的真值**，
+ * 程序不猜操作系统此刻是深是浅（`theme = 'system'` 只记"用户选了跟随"）。
+ */
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
+
+function applyTheme(pref: ThemePref | null): void {
+  const dark = pref === 'dark' || (pref !== 'light' && prefersDark.matches)
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+}
+
+/* 跟随系统那一档：系统深浅变了要跟着翻 —— 用户点了浅 / 深则不理会（真值在他那一档里） */
+prefersDark.addEventListener('change', () => {
+  if (snapshot.theme === null || snapshot.theme === 'system') applyTheme(snapshot.theme)
+})
+
 /** 重读 AppState（唯一的那次 IPC 读），落地后广播给订阅者 */
 export function appStateMutated(): void {
   if (inflight !== null) return
-  inflight = api
-    .getActivePreset()
-    .then((entry) => {
-      snapshot = entry
-    })
-    .catch(() => {
-      snapshot = null
+  inflight = Promise.all([
+    /*
+     * 两格各读各的：一格失败**不把另一格打成"没有"**（读不到主题不该让
+     * 「使用中」也显示空）。失败就照上面那一句的旧口径 —— 那一格当"没有"。
+     */
+    api.getActivePreset().catch(() => null),
+    api.getTheme().catch(() => null),
+  ])
+    .then(([active, theme]) => {
+      snapshot = { active, theme }
+      applyTheme(theme)
     })
     .finally(() => {
       loaded = true
@@ -69,7 +106,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 function getSnapshot(): ActivePreset | null {
-  return snapshot
+  return snapshot.active
 }
 
 /**
@@ -81,6 +118,46 @@ function getSnapshot(): ActivePreset | null {
  */
 export function useActivePreset(): ActivePreset | null {
   return useSyncExternalStore(subscribe, getSnapshot)
+}
+
+/**
+ * 主题档位（AppState 的 theme 格）。`null` = **还没选过** ⇒ 按"跟随系统"。
+ *
+ * 读者是设置页（「外观」那一块显示当前档）—— `<html data-theme>` 不用页面操心：
+ * 每次快照落地由 `applyTheme` 写一次（含"跟随系统"时系统深浅的变化）。
+ */
+export function useThemePref(): ThemePref | null {
+  return useSyncExternalStore(subscribe, getThemePref)
+}
+
+function getThemePref(): ThemePref | null {
+  return snapshot.theme
+}
+
+/* 系统深浅那一档的订阅（`prefers-color-scheme`）。只有"要拿真值去画"的读者需要它 ——
+   CSS 那侧不用：`<html data-theme>` 已经在 applyTheme 里落过地了 */
+function subscribeSystemDark(listener: () => void): () => void {
+  prefersDark.addEventListener('change', listener)
+  return () => prefersDark.removeEventListener('change', listener)
+}
+
+function getSystemDark(): boolean {
+  return prefersDark.matches
+}
+
+/**
+ * 现在到底是不是深色 —— **把 `theme` 那一档与系统深浅解析完的真值**。
+ *
+ * 给"不能只靠 CSS 变量、必须拿真值去画"的地方用：校准板那两块 SVG 就是
+ * （配色在生成器里写死成两套 `THEMES['浅色' | '深色']`，读不到 CSS 变量）。
+ * 普通界面不用它 —— 那些走 `<html data-theme>` 换一套变量就够。
+ */
+export function useIsDark(): boolean {
+  const pref = useThemePref()
+  const systemDark = useSyncExternalStore(subscribeSystemDark, getSystemDark)
+  if (pref === 'dark') return true
+  if (pref === 'light') return false
+  return systemDark
 }
 
 /**
@@ -97,9 +174,9 @@ function getReady(): boolean {
 
 /** 一次性拿当前快照（首读落地即返回）。挂载时"默认落在正在使用那一份"的页面用 */
 export function activePresetSnapshot(): Promise<ActivePreset | null> {
-  if (loaded) return Promise.resolve(snapshot)
+  if (loaded) return Promise.resolve(snapshot.active)
   if (inflight === null) appStateMutated()
-  return (inflight ?? Promise.resolve()).then(() => snapshot)
+  return (inflight ?? Promise.resolve()).then(() => snapshot.active)
 }
 
 /**

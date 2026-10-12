@@ -33,6 +33,8 @@ pub mod param_sync;
 /// **钩子模式那三条命令**（2026-10-09）：看那一趟 / 停那一趟 / 答那一问 ——
 /// 那一趟本身住 [`crate::hook_ui`]（切片器导出 G-code 时起的那一次）。
 pub mod postprocess;
+/// **界面偏好**（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 `theme` 格
+pub mod prefs;
 /// **baseline 的两条命令**（2026-10-08）：云端版本列表（已下载 / 新版本，**不是过时判定**）
 /// 与「恢复默认」的基准值。baseline 是隐藏内部存储，用户看不见它。
 pub mod preset_baseline;

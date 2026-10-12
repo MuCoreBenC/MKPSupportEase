@@ -279,6 +279,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
+        // 界面偏好（2026-10-12 深色模式那一刀）：主题（浅 / 深 / 跟随系统）——
+        // 落 AppState 的 theme 格，读一次写一次，不联网
+        ipc::prefs::get_theme,
+        ipc::prefs::set_theme,
         // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
         // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
         // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
@@ -392,6 +396,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
+        // 界面偏好（2026-10-12）：主题 —— 与客户端那份清单一字不差
+        ipc::prefs::get_theme,
+        ipc::prefs::set_theme,
         // 工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
         // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。

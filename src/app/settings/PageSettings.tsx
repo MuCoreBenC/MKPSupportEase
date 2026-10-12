@@ -33,9 +33,11 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
-import type { PresetSource, SoftwareUpdate } from '../../api/contract'
+import type { PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated } from '../state/deliveryState'
+/* AppState 客户端：主题这一格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
+import { appStateMutated, useThemePref } from '../state/appState'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -44,6 +46,16 @@ import s from './PageSettings.module.css'
  * **id 是契约**。作者 2026-05 拍：两个官方源 + 收起的自定义。
  */
 type Mode = 'github' | 'gitee' | 'custom'
+
+/**
+ * 主题三档（`light` / `dark` / `system`）—— 与后端 `ThemePref` 一一对应，**id 是契约**。
+ * 顺序就是摆出来的顺序：「跟随系统」在最前（没选过时生效的就是它）。
+ */
+const THEME_CHOICES: { id: ThemePref; label: string; hint: string }[] = [
+  { id: 'system', label: '跟随系统', hint: '系统切深色时就跟着深色（没选过时就是这个）' },
+  { id: 'light', label: '浅色', hint: '一直用浅色' },
+  { id: 'dark', label: '深色', hint: '一直用深色' },
+]
 
 export default function PageSettings() {
   const [source, setSource] = useState<PresetSource | null>(null)
@@ -65,6 +77,15 @@ export default function PageSettings() {
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
+
+  /*
+   * 主题（「外观」那一块）：当前档从 AppState 客户端读（`<html data-theme>` 也由它落地，
+   * 这一页只管发一次写命令）；`themeBusy` 防连点，失败**不乐观改单选**——
+   * 界面上显示的水远是盘上那一档（与换数据源同一条守则）。
+   */
+  const theme = useThemePref()
+  const [themeBusy, setThemeBusy] = useState(false)
+  const [themeErr, setThemeErr] = useState<string | null>(null)
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -172,6 +193,25 @@ export default function PageSettings() {
     }
   }
 
+  /*
+   * 换主题：**立即生效**（与换数据源同一条口径 —— 单选本身就是明确意图，不再要一颗确认键）。
+   * 写完 `appStateMutated()` 兜底刷一次快照：桌面端后端也会广播一次，两边都只触发一次重读。
+   * 失败**不改单选**：界面显示的必须是盘上真账，把原因说出来就够。
+   */
+  const pickTheme = async (next: ThemePref) => {
+    if (themeBusy) return
+    setThemeBusy(true)
+    setThemeErr(null)
+    try {
+      await api.setTheme(next)
+      appStateMutated()
+    } catch (e) {
+      setThemeErr(errorText(e))
+    } finally {
+      setThemeBusy(false)
+    }
+  }
+
   /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
   const currentText =
     loadErr !== null
@@ -183,6 +223,9 @@ export default function PageSettings() {
           : `${source.label}：${source.address}`
 
   const canSet = draft.trim() !== ''
+
+  /* 单选显示的永远是**盘上真账**：还没选过（null）时按"跟随系统"那一档显示 */
+  const currentTheme: ThemePref = theme ?? 'system'
 
   /**
    * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
@@ -223,6 +266,38 @@ export default function PageSettings() {
         <h1 className={s.title}>设置</h1>
         <p className={s.sub}>软件更新与应用设置。</p>
       </header>
+
+      {/*
+       * 外观（2026-10-12 深色模式那一刀）：三档单选 —— 跟随系统 / 浅色 / 深色。
+       * 选上**立即生效**（与下面的数据源同一条口径）；真正落地的是 `<html data-theme>`
+       * （`state/appState.ts` 的 applyTheme），这一页只把"用户选了哪一档"写进 AppState。
+       */}
+      <section className={s.section} aria-label="外观">
+        <h2 className={s.secTitle}>外观</h2>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>主题</div>
+          <p className={s.fieldNote}>换完立刻生效，记在应用状态里 —— 下次打开还是这一档。</p>
+
+          {THEME_CHOICES.map((t) => (
+            <div key={t.id} className={s.opt}>
+              <label className={s.radio}>
+                <input
+                  type="radio"
+                  name="theme"
+                  checked={currentTheme === t.id}
+                  onChange={() => void pickTheme(t.id)}
+                  disabled={themeBusy}
+                />
+                <span>{t.label}</span>
+              </label>
+              <p className={s.hint}>{t.hint}</p>
+            </div>
+          ))}
+        </div>
+
+        {themeErr !== null && <p className={`${s.note} ${s.noteBad}`}>没换成：{themeErr}</p>}
+      </section>
 
       {/*
        * 更新卡：**状态在左、动作在右**，顶对齐一行。不再摆「软件更新」小标题
@@ -302,7 +377,7 @@ export default function PageSettings() {
           {/* ★ 两个固定单选 = 防错第一道：用户没有输错地址的机会。选上**立即生效**。
               地址提示跟在**各自**那一档下面（原来两条 URL 挤在一处，看不出归属） */}
           {(source?.builtin ?? []).map((b) => (
-            <div key={b.id} className={s.sourceOpt}>
+            <div key={b.id} className={s.opt}>
               <label className={s.radio}>
                 <input
                   type="radio"
