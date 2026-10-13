@@ -102,7 +102,16 @@ export interface BbsPresetDoc {
   [key: string]: unknown
 }
 
-export type BbsScope = 'user' | 'system' | 'imported'
+/**
+ * 这一项从哪儿来。
+ *
+ *   `user` / `system`  本机 BBS 目录里的两份（`/api/bbs/presets` 读的）
+ *   `imported`         手工拖进来/导入的那几份，内容直接带在身上
+ *   `mkp`              **我们自己的**：预设页「切片器配置」下载到本机的那几份
+ *                      `MKPProcess …json`（2026-10-13 加）—— 它不在 BBS 目录里，
+ *                      是交付面给的东西，所以自成一档（抽屉那个「MKP」入口就是它）
+ */
+export type BbsScope = 'user' | 'system' | 'imported' | 'mkp'
 
 /** 清单里一项的原始形态（本机目录端点与「导入的」都归一成这个） */
 export interface BbsListEntry {
@@ -149,7 +158,7 @@ export interface BbsPresetItem {
   isAbstract: boolean
   selectable: boolean
   reason: string | null
-  /** 导入进来的那一份，内容直接带在身上（不用再 fetch） */
+  /** 内容直接带在身上的那一份（导入的 / 我们自己的切片器配置）—— 不用再 fetch */
   doc?: BbsPresetDoc
 }
 

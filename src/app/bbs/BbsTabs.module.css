@@ -1,4 +1,6 @@
-/* 参数分页的页签条。选中态是下面那条绿线 —— BBS 就是这样。
+/* 参数分页的页签条。选中态 = 下面那条 accent 线 + text-shadow 加粗
+   （2026-10-13 视觉对齐：线色跟全站 --accent 走；加粗不再用 font-weight ——
+   全站铁律是状态不许改变盒子宽度，报告页的页签也是这么做的）。
    边框与底色由外面那层 `.tabsRow` 画（搜索框跟在同一行，边框必须连成一条） */
 
 .tabs {
@@ -30,9 +32,9 @@
 }
 
 .tab[data-on='true'] {
-  border-bottom-color: var(--bbs-green);
+  border-bottom-color: var(--accent);
   color: var(--bbs-text);
-  font-weight: 600;
+  text-shadow: var(--state-bold);
 }
 
 /* 搜索中、这一页没命中：压暗。「哪几页有货」要一眼看出来 */
@@ -44,6 +46,12 @@
   outline: 1px solid var(--bbs-focus);
   outline-offset: -1px;
 }
+
+/*
+ * 这里原来还有一档 `[data-in-bar]`（页签搬进工具条时"撑满工具条高度"，
+ * 那条下划线才贴着底边）—— 2026-10-13 顶条定为默认两行，页签永远在自己这一行里，
+ * 那一档跟着删了。页签的高度就是它自己的 `8px 16px` 内衬，下划线落在这一行的底边上。
+ */
 
 /* 命中数角标。**不用橙色** —— 橙在这一页是「改动」的意思，两个概念不能撞色 */
 .badge {
@@ -59,6 +67,6 @@
 }
 
 .tab[data-on='true'] .badge {
-  background: var(--bbs-green);
+  background: var(--accent);
   color: #fff;
 }

@@ -1,0 +1,263 @@
+/*
+ * 右侧「详情」栏（原来是贴在窗口下缘那条状态条）。
+ *
+ * 变量全部走这一页根上的 `--bbs-*`（定义在 PageBbs.module.css，两套主题各一份），
+ * 所以它跟左边抽屉、参数区是同一套皮 —— 除了新加的两条：
+ *   · `--bbs-rail-bg`：这栏的底。**不能再用 `--bbs-page-bg`** —— 深色下那就是 #141414，
+ *     作者 2026-10-13：「口径不应该用黑色背景，浅色模式下是灰色背景，其实可以接受」；
+ *   · `--bbs-rail-w`：宽度，由 `useBbsRail`（共用那套拖宽手感）下发。
+ *
+ * 滚动条**一个字都不用写**：`global.css` 的 `* { scrollbar-width: none }`
+ * 已经是全局零占位（滚轮 / 触控板 / 键盘照常可用）。
+ */
+
+.rail {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  width: var(--bbs-rail-w, 292px);
+  /* 拖宽的上限：不许把参数区挤没（`useBbsRail` 里 max 560 是同一件事的另一道闸） */
+  max-width: 60%;
+  padding: 12px 14px 14px;
+  /*
+   * ★ 这一层**不能**写 `overflow: auto` —— 贴左缘那条热区挂在 `left: -3px`，
+   *   一 auto 就被裁掉一半，还会凭空多一条横向可滚区。滚动交给里面 `.body`
+   *   （与左抽屉同一个坑，见 BbsPresetDrawer.module.css 的 `.drawer`）。
+   */
+  overflow: visible;
+  border-left: 1px solid var(--bbs-line);
+  background: var(--bbs-rail-bg);
+}
+
+/*
+ * 这一栏**没有浮层态**（2026-10-13 作者：「右侧的那个详情呀，我不想让它悬浮起来，
+ * 还是不要悬浮起来了」）—— 与左抽屉不同，它在任何宽度下都并排占一条竖栏。
+ * 原来这里那条 `[data-mode='float']` 整段删了；要恢复就是加回
+ * `position: absolute; top/bottom: 0; right: 0; z-index: 20; box-shadow: -6px 0 18px`
+ * 再加页面按宽度传下来的 mode（左抽屉那套照抄）。
+ */
+
+/* 宽度可拖：贴左缘一条 6px 透明热区，唯一的视觉变化是 cursor（划过 / 拖动时才现一条细线） */
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 25;
+  width: 6px;
+  cursor: col-resize;
+  /* 触屏上按住拖动不要被解释成滚动手势 */
+  touch-action: none;
+}
+
+.grip:focus-visible {
+  outline: none;
+}
+
+.grip:focus-visible::after,
+.rail[data-dragging='true'] .grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--bbs-focus);
+}
+
+/*
+ * 「收起」那颗叉（2026-10-13 第三轮加）：贴这一栏**右上角**。
+ *
+ * 为什么用绝对定位而不是跟 `.title` 排成一行：排一行等于把一个 28px 的按钮塞进
+ * 那道 10.5px 小字的标题行，整栏第一格会被顶高一截；而右上角本来就有空位
+ * （标题只有「详情」两个字，宽的一栏里右边全是白的）。绝对定位还白送一件事：
+ * **它不跟 `.body` 一起滚** —— 内容滚到底也够得着它（靠 z-index 压在内容之上）。
+ *
+ * ★ 它要**与页签行右端那颗详情图标落在同一个位置**（作者 2026-10-13：「这个叉叉的位置
+ *   和这个详情的图标的位置，几乎在同一个位置，现在我发现它是有点左右变动，甚至有点上下的
+ *   变动」）。两处三个数逐一对上，缺一个就跳：
+ *     · 尺寸 28×28、图标 16px —— 与 `.iconBtn` 同一档（原来这里是 22px 的叉，比图标小一圈）；
+ *     · `right: 10px` —— 与 `.tabsRow` 的 `padding-right` 同值。栏收起来时 `.main`
+ *       一直铺到窗口右缘，图标就落在那里往左 10px；栏展开时这一栏接在窗口右缘，
+ *       同一个 10px 落在这一栏里；
+ *     · 中线 —— 图标垂直居中于页签行（高 `--bbs-row-h`），所以这里的 `top` 拿同一个数算。
+ *       行一开一收，那颗件都落在同一条横线上。
+ *
+ * 形状与工具条那两枚图标按钮同一档：平时透明地"消失"在栏面上，悬停才现底与描边。
+ * 它是个动作、不是开关，所以没有 `data-on` 那一套。
+ */
+.close {
+  position: absolute;
+  /* 与页签行那颗 28px 图标同一条中线：(34 - 28) / 2 */
+  top: calc((var(--bbs-row-h, 34px) - 28px) / 2);
+  right: 10px;
+  z-index: 26;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--bbs-dim);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+/* 焦点态只加深边框，不发光（与这一页其余控件同一条） */
+.close:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+/* 里面这层才是滚的那个 */
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.title {
+  color: var(--bbs-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+}
+
+/* 键值两列：左列（键）自适应，右列（值）吃掉剩下的宽度 */
+.kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.kv dt {
+  color: var(--bbs-dim);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--bbs-text);
+}
+
+/* 预设名可能很长（BBS 里那一串），占了这一格就自己省略，别把整栏撑宽 */
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search {
+  color: var(--bbs-focus);
+}
+
+/* 「显示：跟 BBS 一样 / 全部参数」那两颗小胶囊（2026-10-13 从工具条搬进来的）。
+   选中语言与工具条、抽屉一致：accent 淡底 + accent 描边 + accent 深字。 */
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  padding: 1px 8px;
+  border: 1px solid var(--bbs-field-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bbs-dim);
+  font: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+.chip[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  text-shadow: var(--state-bold);
+}
+
+.chip:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+.sub {
+  margin-top: 4px;
+  color: var(--bbs-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+}
+
+/* 继承链那一小句（链缺了 / 变体对不上的兜底），一行以内，不省略 */
+.chain {
+  color: var(--bbs-dim-2);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 继承链：**一行一节**（2026-10-13）。
+ * 原来是 `A → B → C` 一整串 + `word-break: break-all`，在这一栏里折成三行、
+ * 还断在词中间（`single_com` / `mo` / `n`）—— 作者：「你看它会把它换行，换到下一行」。
+ * 竖排之后每节自己一行；`overflow-wrap: anywhere` 兜住名字特别长的那一档
+ * （`fdm_process_single_common` 25 个字在这一栏里放得下，不会断）。
+ */
+.chainList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--bbs-text);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.chainList li {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.arrow {
+  flex-shrink: 0;
+  color: var(--bbs-dim);
+}
+
+.chainName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 提示不是错误：缺数据、退快照、变体对不上都走这一条，用橙不用红 */
+.note {
+  color: var(--bbs-orange);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.6;
+}

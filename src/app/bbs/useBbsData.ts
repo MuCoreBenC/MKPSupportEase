@@ -30,15 +30,24 @@
  * 放 state 里会让每拉到一份就整页重渲染一次。所以缓存住在 ref（Map），
  * 拉完一批之后 bump 一次 `docsVersion` —— 一条链一次重算，不是四次。
  *
- * 缓存键是 `${来源}:${重扫次数}:${预设名}` 而**不是**光一个预设名，换来源时也**不清缓存**。
+ * 缓存键是 `${来源}:${预设名}` 而**不是**光一个预设名，换来源时也**不清缓存**。
  * 原因是踩过的一个坑：原来的写法是「换来源就 docs.clear()」，而 StrictMode 下取数的
  * effect 会跑两遍 —— 第二遍的 clear 落在「链已经拉完」之后，于是刚拿到的文档被清掉，
  * 页面报「读某某失败」。键上带来源之后，旧来源的条目自然读不到，不需要谁去清它，
  * 也就不存在这个时序。几百份小 json 留在内存里无所谓。
+ *
+ * ★ 键里**不再带重扫次数**（2026-10-13）。原来带，于是点一次「重扫本机」整条继承链的
+ *   缓存全部作废 → 右侧参数区那几格（基准 705 项 / 改动 25 项 / 行数）先掉成空、再拉回来，
+ *   数字当着人的面跳一下。作者：「他是把那些数字变了一下……他这个刷新不是重扫本机吗？
+ *   那它为什么会动右侧的参数呢？它不应该刷新左侧的列表的感觉才对吗？」
+ *   他说得对：重扫要的是**左侧那份清单**重新读一遍（刚在 BBS 里新建的预设出现在列表里），
+ *   已经展开的这份预设和它的基准并没有变 —— 键上少一个重扫次数，右侧就一动不动。
+ *   代价：改了**已经选中那一份**的内容之后重扫，右侧不会跟着变（换一份再换回来会）。
+ *   这与这一页是"查看器"的口径一致（整页只读、值不落盘）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { normalizeList } from './bbsSource'
+import { PRINTER_BY_MACHINE_ID, normalizeList } from './bbsSource'
 import type {
   BbsDefaultsFile,
   BbsIconsFile,
@@ -56,6 +65,16 @@ import type {
 
 /** 静态资源的前缀。元数据就住在 `public/bbs/` 下 */
 const BBS = '/bbs'
+
+/**
+ * 手点一次「重扫本机」之后，那颗 ↻ 至少转这么久（毫秒）。
+ *
+ * 本机目录是同步读的，端点几十毫秒就回来了 —— 一转就停，人根本看不见，
+ * 于是"点了一下没反应"。给一个最短时长，让那一下有落点。
+ * 只对手点的重扫生效：首次进页面读清单不等，那时列表是空的，已经有
+ * 「正在读清单…」顶着（再拖半秒只是让首屏慢）。
+ */
+const RESCAN_MIN_MS = 700
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { cache: 'no-store' })
@@ -82,6 +101,67 @@ function presetUrl(item: BbsPresetItem): string {
   return `/api/bbs/preset?${q}`
 }
 
+/**
+ * 一份"我们自己的切片器配置"进清单时要带的东西。
+ *
+ * `machineId` 与 `path` 来自**交付面的登记**（catalog 的 `files[]`），机型与喷嘴照它们认 ——
+ * 不看 doc 里的继承链。作者 2026-10-13：「不用管它那个继承链，我那个工作台里面已经把它
+ * 分好了，注册表里面就记录好了……根据那个 catalog 里面的登记去给它分类」。
+ */
+export interface BbsSlicerRow {
+  fileName: string
+  machineId: string
+  /** 目录里的落点：`assets/bbs/Process/<喷嘴>mm/…`，喷嘴从这一段取 */
+  path: string
+  doc: BbsPresetDoc
+}
+
+/**
+ * 我们自己的切片器配置（`MKPProcess …json`）→ 清单里的一项。
+ *
+ * `model / printer / nozzle / target / isAbstract` 由 `normalizeList` 里的 `resolveTarget`
+ * 现算（与 `addImported` 同一套：这里填的是占位，进 `normalizeList` 之后会被覆盖）——
+ * 但**认机型用的 `compatible_printers` 在这里就补上了**，见下面那段。
+ */
+function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPresetItem {
+  const name = String(doc.name || fileName.replace(/\.json$/i, ''))
+  /*
+   * 按目录登记拼出 BBS 自己会写的那种 `compatible_printers`（`Bambu Lab A1 mini 0.4 nozzle`）：
+   * `machineId` 给机型、落点里的 `Process/<喷嘴>mm/` 给喷嘴。
+   *
+   * 有了它，`resolveTarget` 就不必顺 `inherits` 跳父档 —— 那几份原本不带这个字段，
+   * 于是"本机装没装那台机的系统预设"决定它认不认得出来（症状：下拉里出现 `unknown`）。
+   *
+   * 认不出（目录里没登记这一台、或路径形状不对）就退回 doc 自己的 / null：
+   * 那时走回继承链那条老路，认不出照实显示 `unknown`，不硬编一个机型。
+   */
+  const printer = PRINTER_BY_MACHINE_ID[machineId]
+  const nozzle = /\/Process\/([\d.]+)mm\//.exec(path)?.[1]
+  const compatible = printer !== undefined && nozzle !== undefined
+    ? `${printer} ${nozzle} nozzle`
+    : (doc.compatible_printers ?? null)
+  return {
+    key: `mkp::${fileName}::${name}`,
+    name,
+    scope: 'mkp',
+    uid: null,
+    file: fileName,
+    inherits: typeof doc.inherits === 'string' ? doc.inherits : null,
+    instantiation: doc.instantiation ?? null,
+    compatible_printers: compatible,
+    broken: null,
+    mtime: 0,
+    model: 'unknown',
+    printer: 'unknown',
+    nozzle: '?',
+    target: 'unknown|?',
+    isAbstract: false,
+    selectable: true,
+    reason: null,
+    doc,
+  }
+}
+
 export interface BbsData {
   loading: boolean
   /** 元数据都没拿到（`public/bbs/*.json` 缺了）—— 这是空态，不是崩溃 */
@@ -101,13 +181,24 @@ export interface BbsData {
 
   /** 缓存里的文档。没拉过返回 undefined，拉过但失败返回 null */
   getDoc: (name: string) => BbsPresetDoc | null | undefined
-  /** 并行拉一批（按名字），拉完只 bump 一次 */
-  loadDocs: (names: string[]) => Promise<void>
+  /**
+   * 并行拉一批（按名字），拉完只 bump 一次。
+   * `force` = 连已经在缓存里的也重新读一遍（「重扫本机」用）。
+   */
+  loadDocs: (names: string[], force?: boolean) => Promise<void>
   /** 缓存版本号，用来做 useMemo 的依赖 */
   docsVersion: number
 
   /** 导入一份 json：进清单顶部「导入的」那一组，返回它的 key */
   addImported: (fileName: string, doc: BbsPresetDoc) => string
+  /**
+   * 把我们自己的切片器配置（预设页下载到本机的那几份）**整批**摆进清单，
+   * `scope = 'mkp'`。传空数组 = 一份都没有（盘上被删了也跟着消失）。
+   *
+   * 为什么是整批而不是一份一份 `add`：调用方给的 `downloaded` 本来就是
+   * "盘上现在有哪几份"的完整底账（契约里的 `getDownloadedFiles` 同一口径）。
+   */
+  setSlicerPresets: (rows: BbsSlicerRow[]) => void
   /** 重扫本机 BBS（只有 live 才有意义） */
   rescan: () => void
 }
@@ -127,6 +218,11 @@ export function useBbsData(): BbsData {
   const [sourceRoot, setSourceRoot] = useState('')
   const [sourceNote, setSourceNote] = useState('')
   const [imported, setImported] = useState<BbsPresetItem[]>([])
+  /*
+   * 我们自己的切片器配置（2026-10-13）。与 `imported` 同属"内容带在身上"的那一类，
+   * 区别只在来源与那一档入口：由页面把盘上已下载的那几份读出来整批灌进来（见 `setSlicerPresets`）。
+   */
+  const [slicer, setSlicer] = useState<BbsPresetItem[]>([])
   const [scanNonce, setScanNonce] = useState(0)
 
   const docs = useRef(new Map<string, BbsPresetDoc | null>())
@@ -168,9 +264,17 @@ export function useBbsData(): BbsData {
     let alive = true
     void (async () => {
       setLoading(true)
+      const started = performance.now()
       let live: BbsListRaw | null = null
       try { live = await getJSON<BbsListRaw>('/api/bbs/presets') } catch { /* 没起服务器就是这条路 */ }
       if (!alive) return
+
+      /* 手点的那一次重扫：把那只 ↻ 补到最短时长（理由见 RESCAN_MIN_MS） */
+      if (scanNonce > 0) {
+        const left = RESCAN_MIN_MS - (performance.now() - started)
+        if (left > 0) await new Promise((r) => setTimeout(r, left))
+        if (!alive) return
+      }
 
       if (live?.available) {
         setRaw({ user: live.user ?? [], system: live.system ?? [] })
@@ -184,14 +288,21 @@ export function useBbsData(): BbsData {
         setSourceRoot('')
         setSourceNote(live?.reason || '没起 dev / preview 服务器，`/api/bbs/presets` 取不到')
       }
-      /* 换来源之后单份预设的 URL 也变了 —— 靠缓存键上的来源前缀区分，不清缓存（见文件头） */
+      /* 换来源之后单份预设的 URL 也变了 —— 靠缓存键上的来源前缀区分，不清缓存（见文件头）。
+         重扫时这一句照样执行，但文档缓存没失效（键里没有重扫次数了），重算出来的数一模一样，
+         右侧参数区不会动 —— 这正是「重扫只刷左侧列表」要的。 */
       setDocsVersion((n) => n + 1)
       setLoading(false)
     })()
     return () => { alive = false }
   }, [scanNonce])
 
-  const presets = useMemo(() => normalizeList(raw, imported), [raw, imported])
+  /* 三路合一：本机目录（raw）+ 我们自己的切片器配置 + 手工导入的那几份。
+     后面两路都排在本机那批之前 —— 清单顺序与抽屉里分组顺序是两回事（分组在 bbsSource） */
+  const presets = useMemo(
+    () => normalizeList(raw, [...slicer, ...imported]),
+    [raw, slicer, imported],
+  )
 
   /* 链解析按名字查：同名时系统预设优先（inherits 指向的就该是系统那一层） */
   const presetByName = useMemo(() => {
@@ -201,25 +312,38 @@ export function useBbsData(): BbsData {
     return m
   }, [presets])
 
-  /** 缓存键带来源与重扫次数：换来源不用清缓存，也就没有「清晚了」的时序 */
+  /**
+   * 缓存键只带**来源**（不带重扫次数 —— 理由见文件头那段：带了会让重扫去动右侧的数字）。
+   * 换来源不用清缓存，也就没有「清晚了」的时序。
+   */
   const keyOf = useCallback(
-    (name: string) => `${sourceMode}:${scanNonce}:${name}`,
-    [sourceMode, scanNonce],
+    (name: string) => `${sourceMode}:${name}`,
+    [sourceMode],
   )
 
   const getDoc = useCallback((name: string) => docs.current.get(keyOf(name)), [keyOf])
 
-  const loadDocs = useCallback(async (names: string[]) => {
-    const todo = names.filter((n) => !docs.current.has(keyOf(n)))
+  const loadDocs = useCallback(async (names: string[], force = false) => {
+    /*
+     * `force` = 不管缓存里有没有，都重新读一遍（「重扫本机」用：你刚在 BBS 里改完保存的
+     * 那一份要能读到新值）。
+     *
+     * 关键在**怎么更新缓存**：新读到的先攒在临时 Map 里，全部到位之后才一次写进去、
+     * 一次 bump —— 于是右侧那几格数字不会经过"基准 0 项"那种中间态。作者要的是
+     * "数字滚一下落到真值"，不是"先变成另一个数再变回来"。
+     */
+    const todo = force ? names : names.filter((n) => !docs.current.has(keyOf(n)))
     if (!todo.length) return
+    const fresh = new Map<string, BbsPresetDoc | null>()
     await Promise.all(todo.map(async (name) => {
       const item = presetByName.get(name)
       if (!item) return
       /* 导入进来的那几份内容就在身上，不用发请求 */
-      if (item.doc) { docs.current.set(keyOf(name), item.doc); return }
-      try { docs.current.set(keyOf(name), await getJSON<BbsPresetDoc>(presetUrl(item))) }
-      catch { docs.current.set(keyOf(name), null) }
+      if (item.doc) { fresh.set(keyOf(name), item.doc); return }
+      try { fresh.set(keyOf(name), await getJSON<BbsPresetDoc>(presetUrl(item))) }
+      catch { fresh.set(keyOf(name), null) }
     }))
+    for (const [key, doc] of fresh) docs.current.set(key, doc)
     setDocsVersion((n) => n + 1)
   }, [presetByName, keyOf])
 
@@ -253,6 +377,23 @@ export function useBbsData(): BbsData {
     return key
   }, [keyOf])
 
+  /**
+   * 整批换掉"我们自己的切片器配置"。
+   *
+   * 调用方（`PageBbs` 里读盘那一段）读的是盘上**现在**有哪几份，所以是整批换而不是
+   * 一份份往里加：删掉一份之后它得跟着消失。
+   */
+  const setSlicerPresets = useCallback((rows: BbsSlicerRow[]) => {
+    setSlicer(rows.map((row) => slicerItem(row)))
+  }, [])
+
+  /**
+   * 重扫本机：**只重新读左侧那份清单**。
+   *
+   * 它不会让右侧参数区动一下 —— 已经加载的文档缓存不受影响（键里没有重扫次数，见 `keyOf`），
+   * 所以基准 / 改动 / 行数在重扫前后是同一个数。那只 ↻ 至少转 `RESCAN_MIN_MS`，
+   * 那一下才有落点。
+   */
   const rescan = useCallback(() => setScanNonce((n) => n + 1), [])
 
   return {
@@ -272,6 +413,7 @@ export function useBbsData(): BbsData {
     loadDocs,
     docsVersion,
     addImported,
+    setSlicerPresets,
     rescan,
   }
 }

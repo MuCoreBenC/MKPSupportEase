@@ -32,7 +32,8 @@ export const STORAGE = {
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 
   /**
-   * BBS 预设页的偏好：看全部还是跟 BBS 一样、抽屉是并排还是浮层、抽屉宽度。
+   * BBS 预设页的偏好：看全部还是跟 BBS 一样、抽屉宽度。
+   * （「并排还是浮层」2026-10-13 改成按窗口宽度自动决定，不再落盘。）
    * **全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），
    * 所以都不承载底账。
    *
@@ -41,8 +42,15 @@ export const STORAGE = {
    * 留着不用即可（这是"换落点当成全新应用"那条口径，不写迁移逻辑）。
    */
   clientBbsView: 'mkp.A40.bbs.view',
-  clientBbsDrawerMode: 'mkp.A40.bbs.drawerMode',
   clientBbsDrawerW: 'mkp.A40.bbs.drawerW',
+  /**
+   * 右侧「详情」栏的宽度（px，JSON 数字）。2026-10-13 加：底条整条退场、
+   * 那一栏搬到了右边，宽度与左抽屉走**同一套**拖宽手感（`shared/useDrawerWidth`：
+   * 拖宽 + 三态吸附 + 键盘 + 记住宽度）。同样是纯前端偏好。
+   */
+  clientBbsRailW: 'mkp.A40.bbs.railW',
+  /* ★ `clientBbsDrawerMode`（`mkp.A40.bbs.drawerMode`）2026-10-13 退役：并排 / 浮层
+     改成按窗口宽度自动决定（与报告页同一个判据），旧值留着不用即可（同上口径）。 */
 
   /**
    * 报告页导出框里那个「保存位置」（**上一次选过的父目录**）。

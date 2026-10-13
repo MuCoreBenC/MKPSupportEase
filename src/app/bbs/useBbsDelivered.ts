@@ -28,6 +28,14 @@ export interface BbsDeliveredItem {
   fileName: string
   /** 归属机型。**空串 = 这份不属于某台机器**（目录里的资产可以是公共的） */
   machineId: string
+  /**
+   * 目录里登记的落点（`assets/bbs/Process/0.4mm/…`）。
+   *
+   * 2026-10-13 起这一格有人用了：BBS 页按**目录登记**认机型与喷嘴（`machineId` 给机型、
+   * 这一段里的 `Process/<喷嘴>mm/` 给喷嘴），不再顺继承链去猜 ——
+   * 于是"这台机器上装没装那台机的系统预设"与识别结果无关。
+   */
+  path: string
   size: number
 }
 
@@ -64,7 +72,12 @@ export function useBbsDelivered(): BbsDelivered {
         if (!alive) return
         const all = catalog.files
           .filter((f) => f.kind === KIND_BBS)
-          .map((f) => ({ fileName: f.fileName, machineId: f.machineId, size: f.size }));
+          .map((f) => ({
+            fileName: f.fileName,
+            machineId: f.machineId,
+            path: f.path,
+            size: f.size,
+          }));
         const have = new Set(files.map((f) => f.fileName))
         setListed(all)
         setDownloaded(all.filter((f) => have.has(f.fileName)))

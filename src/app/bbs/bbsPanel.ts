@@ -30,6 +30,13 @@ export interface PanelRow {
   greyed: boolean
   /** 搜索命中在哪一栏；没在搜或没命中就是 null */
   hit: BbsHit | null
+  /**
+   * 骨架行（`skeleton` 那一档）：行是真的、**值是空的**。
+   * 见 `buildBbsPanel` 的 `skeleton` 形参与 PageBbs.tsx 里那段注释 ——
+   * 作者 2026-10-13：「如果没选择的时候，我希望这些字段参数都是在的，只不过它不显示参数……
+   * 那个才叫骨架屏，因为它这个骨架是定好的，这些字段顺序都是固定好摆在这的」。
+   */
+  empty?: boolean
 }
 
 export interface PanelGroup {
@@ -83,6 +90,15 @@ export function buildBbsPanel(
   /** 搜索词（原样传进来，这里自己归一）。空串 = 没在搜，整段匹配跳过 */
   rawQuery = '',
   variantIdx = 0,
+  /**
+   * 骨架档（2026-10-13）：**还没选中预设**时用。只认版面 —— 字段按 layout 的原顺序全铺出来，
+   * 值一律空着（`BbsControl` 拿到 `undefined` 会画成空框 / 未勾的复选框 / 空下拉）。
+   *
+   * 与"有值才出行"那条不冲突：那是**有预设**时的规矩（BBS 也不画空行），
+   * 而骨架档要的正是"字段在、值空着"，所以两条按位跳过：
+   * 空值不跳、显隐规则不套（规则判的是值，值都空着判出来没意义）。
+   */
+  skeleton = false,
 ): PanelResult {
   const bbsMode = viewMode === 'bbs'
   const q = normalizeQuery(rawQuery)
@@ -105,6 +121,14 @@ export function buildBbsPanel(
         const meta = registry[key]
         /* BBS 自己也有这种不一致：Tab.cpp 还在引用的 key，参数定义早被注释掉了 */
         if (!meta) { stats.noMeta.push(key); continue }
+        /* 骨架档：值不参与判断（见形参那段注释），这一行照版面原样铺出来 */
+        if (skeleton) {
+          const hit = hitOf(key, meta)
+          if (hit) stats.hits++
+          rows.push({ key, meta, greyed: false, hit, empty: true })
+          stats.rows++
+          continue
+        }
         const value = values[key]
         /* 有值才出行 */
         if (value === undefined || value === null || value === '') { stats.skippedEmpty++; continue }

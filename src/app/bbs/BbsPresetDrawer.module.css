@@ -70,30 +70,193 @@
   background: var(--bbs-focus);
 }
 
+/*
+ * 左右内衬 10px：与工具条的 `padding: 6px 10px`、下面那些项（`.item` / `.group` 也是 10px）
+ * **同一条竖线**。原来是 8px —— 抽屉头那两颗（机型下拉 + 搜索框）因此比上面那颗
+ * 「预设列表」按钮往左凸出 2px，作者 2026-10-13 点名的「左上角没有视觉对齐，都突出来了」。
+ */
 .head {
+  /* `relative` + `hidden` 是给底下那条扫动细线的：线用 translateX 扫出右缘，得有个裁剪框 */
+  position: relative;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   gap: 6px;
-  padding: 8px;
+  overflow: hidden;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--bbs-line);
 }
 
-/* 机型 / 喷嘴筛选的下拉。搜索框在 BbsSearchBox 里（两个框共用一套样式） */
-.pick {
-  width: 100%;
-  padding: 4px 6px;
-  border: 1px solid var(--bbs-field-border);
-  border-radius: 3px;
-  background: var(--bbs-field);
-  color: var(--bbs-text);
-  font: inherit;
-  font-size: 11.5px;
+/*
+ * 两档来源（2026-10-13 作者定）：我们自己的 ↔ 本机 BBS 里的。
+ *
+ * 形态：两枚胶囊**平分一行**。它是个二选一，用不着下拉（下拉要多一次点击才看得到有哪些档）；
+ * 选中语言与这一页其余控件一致：accent 淡底 + accent 描边 + accent 深字 + text-shadow 加粗
+ * —— 全站铁律，状态不许改变盒子宽度，所以选中态只换色、不加内衬。
+ */
+.sourceTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--bbs-line);
+  border-radius: 4px;
+  background: var(--bbs-panel);
 }
 
-.pick:focus-visible {
+.sourceTab {
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--bbs-dim);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sourceTab:hover {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+.sourceTab[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  text-shadow: var(--state-bold);
+}
+
+.sourceTab:focus-visible {
   border-color: var(--bbs-focus);
   outline: none;
+}
+
+/* 机型 / 喷嘴筛选那一行：下拉 + 「重扫本机」那枚图标（2026-10-13 从工具条搬进来） */
+.headRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/*
+ * 下拉外面那一层（2026-10-13）：把共用件 `SelectField` 放进抽屉，并**在这里把它那两档
+ * 尺寸钩子拨到这一页的档位**（`SelectField` 的 CSS 全是 `var(--x, 全站值)`，不设就沿用全站值 ——
+ * 那是它留给各稿的口子，A39 的参数页也是这么用的）。
+ *
+ *   --sel-h   触发器高度。全站 34px；抽屉里这几颗小控件（搜索框算下来 ~24px）之间放不下
+ *             那么高的东西，收到 26px。
+ *   --r-sm    `SelectField` 借它画触发器圆角（全站 8px）。这一页的方角是 3px
+ *             （搜索框、参数输入框都是），跟着它才与同一列那颗搜索框对齐。
+ *
+ * 底色与字色**没有在这里改**：`SelectField` 用的是全站那套 token（`--surface-solid` /
+ * `--line-strong` / `--text-*`），深浅由 `<html data-theme>` 给，与这一页的深浅同步。
+ *
+ * `display: grid` 让它撑满一整格（里面那个 `.wrap` 是 inline-flex，自己不会伸）。
+ */
+.pickWrap {
+  display: grid;
+  min-width: 0;
+  --sel-h: 26px;
+  --r-sm: 3px;
+}
+
+/*
+ * 触发器上那个值**不加粗**。`SelectField` 全站把值设成 600（它替的是"当前值"那一格，
+ * 醒一点是它在那边的职责），但抽屉里这一列小控件没有一个是粗体 ——
+ * 作者 2026-10-13：「这个载入随包配置为什么要加粗？不要加粗，不要加粗。」
+ * 那唯一的粗体读起来像"这一格出了什么事"。
+ *
+ * 只能写结构选择器：共用件的类名带哈希，没法按名字覆盖（`button > span` 命中的就是
+ * 触发器里那个值，浮层里的列表不在这一层，够不着）。
+ */
+.pickWrap button > span {
+  font-weight: 400;
+}
+
+/* 与「重扫本机」同一行时吃掉剩下的宽度；随包配置那一格在列里，stretch 就够 */
+.headRow .pickWrap {
+  flex: 1;
+}
+
+/*
+ * 「重扫本机」那枚图标按钮（2026-10-13 从工具条搬进来）。
+ * 作者：「重扫本机的话，我觉得没必要放在这，应该放在预设列表里，跟BBS一样」——
+ * 它刷新的确实是这个列表。抽屉里只有 280 宽，四条字不如一枚图标 + title。
+ * 与工具条上那两枚（☰ / 详情）同一套形状与状态语言。
+ */
+.iconBtn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--bbs-label);
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+.iconBtn:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: none;
+}
+
+/* 「随包配置 N 份，还没下载」那句：是**状态**不是错误 —— 弱一档的字色，窄栏里允许换行 */
+.note {
+  color: var(--bbs-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/*
+ * 读清单时的"在忙"（2026-10-13 第二轮）。
+ *
+ * 原来让那只 ↻ **转起来** —— 作者打回来了：「不要转一下，很丑啊……它有时候还转不完整，
+ * 一转就立马就停了」。转之所以难看一半在图标（原来是单弧折箭，已换成双环箭头）、
+ * 一半在时长（本机目录读得飞快，圈只扫过一点点就停）。
+ *
+ * 现在照**首页"下载中"那一套语言**来（`home/PresetStack.module.css` 的 `.progress`）：
+ * 一条 2px 的 accent 细线在头部下沿扫过。图标固定不动，只把颜色提成 accent。
+ */
+.iconBtn[data-loading='true'] {
+  color: var(--accent);
+}
+
+.head[data-loading='true']::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  /* 0.65s 一轮：比 `RESCAN_MIN_MS`（700ms）略短，于是那一下**至少扫完整整一轮**才停 ——
+     与"转不完整"是同一个毛病的两种犯法，别再来一次 */
+  animation: bbs-sweep 0.65s ease-in-out infinite;
+}
+
+@keyframes bbs-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* 系统里选了"减少动态效果"的人：不扫，整条铺满 —— 仍然看得出"在忙" */
+@media (prefers-reduced-motion: reduce) {
+  .head[data-loading='true']::after {
+    width: 100%;
+    animation: none;
+  }
 }
 
 .list {
@@ -104,6 +267,52 @@
   overflow-y: auto;
 }
 
+/*
+ * 「重扫本机」的那一下：让**这个列表自己**重铺一遍（2026-10-13 第三轮）。
+ *
+ * 作者：「这个刷新没感觉啊，刷新是刷新左侧的列表里面的内容，它必须有点刷新的样子。
+ * 刷新的假的动画也可以，不是说转那个图标。」—— 本机目录读得再慢也就一两百毫秒，
+ * 那只 ↻ 转完根本没人看见；列表项在这儿重新淡入一次（带一点点从上往下的错位），
+ * 眼睛才接得住"这个列表刚被重新读了一遍"。
+ *
+ * 挂在 `.list[data-refreshing]` 上：属性一消失动画自然收干净，不留任何残留状态；
+ * 下一次重扫属性从无到有，动画自然重播（不用 key，也不用计数器）。
+ * 空列表那一档（第一次进页面）没有可动画的项 —— 那时有「正在读清单…」顶着。
+ */
+.list[data-refreshing='true'] .group,
+.list[data-refreshing='true'] .item {
+  animation: bbs-refill 360ms ease-out both;
+}
+
+/* 一点错位：从上往下依次铺出来，不是整块一起闪 */
+.list[data-refreshing='true'] .item:nth-child(3n) { animation-delay: 45ms }
+.list[data-refreshing='true'] .item:nth-child(3n + 2) { animation-delay: 90ms }
+
+@keyframes bbs-refill {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 系统里选了"减少动态效果"的人：不位移，只压暗一下再回来 —— 照样看得出"刷过了" */
+@media (prefers-reduced-motion: reduce) {
+  .list[data-refreshing='true'] .group,
+  .list[data-refreshing='true'] .item {
+    animation: bbs-refill-quiet 360ms ease-out both;
+  }
+
+  @keyframes bbs-refill-quiet {
+    from { opacity: 0.5; }
+    to { opacity: 1; }
+  }
+}
+
 .group {
   margin-top: 2px;
   padding: 5px 10px 3px;
@@ -112,17 +321,32 @@
   font-size: 11px;
 }
 
+/*
+ * ★ `min-height` + `line-height` 是 2026-10-13 补的，治的是「选中那一项会变高」。
+ *
+ * 作者：「我点击的时候，我感觉这个选中状态和那个没选中状态，它们高度是不一致的，
+ * 我点击这个选中状态，它好像就会变高。」
+ *
+ * 真因就出在勾上：`.tick` 里选中时多了一个 `✓` 字形，而**行没有定高** ——
+ * 行盒高度取的是 content 里最高的那个 inline box，`✓` 从回退字体里来、
+ * 它的正常行高比旁边那行中文高一点，于是整行高出一两个像素。
+ * 未选中时那个 `<span>` 是空的、一个字都不占，所以只有选中那一行会高。
+ *
+ * 定高之后这一行与它的状态彻底无关了（全站那条铁律：状态不许改变盒子）。
+ */
 .item {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
+  min-height: 27px;
   padding: 5px 10px;
   border: 0;
   background: transparent;
   color: var(--bbs-text);
   font: inherit;
   font-size: 12px;
+  line-height: 1.5;
   text-align: left;
   cursor: pointer;
 }
@@ -150,10 +374,12 @@
   outline-offset: -1px;
 }
 
+/* `line-height: 1`：那个 `✓` 的字形行高不许参与行盒计算（见 `.item` 那段注释） */
 .tick {
   flex-shrink: 0;
   width: 10px;
   color: var(--bbs-green);
+  line-height: 1;
 }
 
 /* BBS 里改过的预设名前面有个 * */

@@ -20,6 +20,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { mergeChain, norm, resolvePreset, variantIndex } from './bbsMerge'
 import type { VariantPick } from './bbsMerge'
+import { inPickSource } from './bbsSource'
+import type { BbsPickSource } from './bbsSource'
 import { illegalSupportStyle, styleFixNote } from './bbsSupportStyle'
 import { evalToggles, printerModelOf } from './bbsToggleRules'
 import type { BbsData } from './useBbsData'
@@ -33,14 +35,21 @@ import type {
 } from './bbsTypes'
 
 /** 开页先选哪一份：优先那份 A1M 测试（试验场那份样例用户预设，本机用户目录里也有同名一份），
-    否则第一份用户预设，再否则第一份系统预设 */
+   否则第一份「我们自己的或你自己的」（`mkp` / `imported` / `user`），再否则第一份系统预设 */
 const SAMPLE_NAME = '0.20mm Standard @BBL A1M 测试'
 
-function pickInitial(presets: BbsPresetItem[]): string | null {
-  const own = presets.filter((p) => (p.scope === 'imported' || p.scope === 'user') && p.selectable)
+/**
+ * 在**这一档的池子**里挑默认那一份。
+ *
+ * 传进来的必须是过滤过的池子（不是全量清单）：挑出来的那份若不在当前列表里，
+ * 列表里就没有任何一项是高亮的 —— 人会以为自己看的是另一份预设。
+ * `scope !== 'system'` 一并把 `mkp` 与 `imported` 算作"第一优先"。
+ */
+function pickInitial(pool: BbsPresetItem[]): string | null {
+  const own = pool.filter((p) => p.scope !== 'system' && p.selectable)
   const hit = own.find((p) => p.name === SAMPLE_NAME) || own[0]
   if (hit) return hit.key
-  const sys = presets.find((p) => p.scope === 'system' && p.selectable)
+  const sys = pool.find((p) => p.scope === 'system' && p.selectable)
   return sys ? sys.key : null
 }
 
@@ -107,12 +116,25 @@ export interface BbsPreset {
   setValue: (key: string, value: BbsValue) => void
   resetKey: (key: string) => void
   revertAll: () => void
+  /**
+   * 正在重读这一份的那条链（「重扫本机」按下之后的那一小段）。
+   * 详情栏那几格数字据此滚起来 —— 见 BbsRail 的 `refreshing`。
+   */
+  refreshing: boolean
+  /**
+   * 重扫本机时"右侧那半"：把**当前这一份**的那条链重新读一遍。
+   *
+   * 作者 2026-10-13：「我那边改了工艺预设保存了之后，我们这边是实时就出现了吗？」
+   * —— 清单那一路由 `data.rescan` 管（新预设出现在列表里），这一路管"这一份的内容"。
+   * 只在当前这条链上重读、且拉完才换（见 `loadDocs` 的 `force`），所以右侧不会先空一下。
+   */
+  refreshCurrent: () => Promise<void>
   /** 导入一份：进清单 +（如果能选）选中它 */
   importDoc: (fileName: string, doc: BbsPresetDoc) => void
   importError: string
 }
 
-export function useBbsPreset(data: BbsData): BbsPreset {
+export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
   const { presets, presetByName, registry, defaults, getDoc, loadDocs, docsVersion } = data
 
   const [currentKey, setCurrentKey] = useState<string | null>(null)
@@ -131,14 +153,18 @@ export function useBbsPreset(data: BbsData): BbsPreset {
   )
 
   /*
-   * 清单来了、或者当前那一项没了（换来源 / 重扫）→ 落到默认那一份。
+   * 清单来了、或者当前那一项没了（换来源 / 重扫 / 换档）→ 落到**这一档**的默认那一份。
    *
-   * 清单**空了**（重扫之后没读到本机目录）要落到 null，并且把上一次那份连同它的文档一起放下：
-   * 不这么做的话，参数区会一边写着「没读到本机 BBS 预设目录」一边照旧画着上一份的行 ——
+   * 池子**空了**要落到 null，并且把上一次那份连同它的文档一起放下：
+   * 不这么做的话，参数区会一边写着「一份都没有」一边照旧画着上一份的行 ——
    * 自相矛盾，而且那些行来路不正（表现上像「这一份还在」，实际是出厂默认摊出来的）。
+   *
+   * `source` 是池子的第一道闸（见 `inPickSource`）：切档之后原来选中的那一份不在新池子里，
+   * 就会落到新档的默认那一份上 —— 而不是继续显示"列表里找不到的那一份"。
    */
   useEffect(() => {
-    if (!presets.length) {
+    const pool = presets.filter((p) => inPickSource(p, source))
+    if (!pool.length) {
       setCurrentKey(null)
       setUserDoc(null)
       setBaseDoc(null)
@@ -146,9 +172,9 @@ export function useBbsPreset(data: BbsData): BbsPreset {
       setError('')
       return
     }
-    if (currentKey && presets.some((p) => p.key === currentKey)) return
-    setCurrentKey(pickInitial(presets))
-  }, [presets, currentKey])
+    if (currentKey && pool.some((p) => p.key === currentKey)) return
+    setCurrentKey(pickInitial(pool))
+  }, [presets, currentKey, source])
 
   /* 选中项变了：拉它自己 + 整条链，然后把 userDoc/baseDoc 换成新的 */
   useEffect(() => {
@@ -312,7 +338,41 @@ export function useBbsPreset(data: BbsData): BbsPreset {
     setEditedKeys(new Set())
   }, [baseDoc])
 
-  /* 外部数据的边界：整份要么收下、要么拒掉，不做「部分收下」那种半吊子状态。 */
+  const [refreshing, setRefreshing] = useState(false)
+
+  /*
+   * 重读当前这一份的那条链（「重扫本机」的右侧那半）。
+   *
+   * 与"选中项换了"那个 effect 的区别：那条路只在**换预设**时走、而且它会先清掉
+   * `userDoc/baseDoc`；这一条是"同一份，重新读一遍"，所以读到的正文要跟着换到
+   * `baseDoc/userDoc` 上（否则参数区还画着旧的那份）。
+   */
+  const refreshCurrent = useCallback(async () => {
+    if (!current) return
+    const start = current.scope === 'system' ? current.name : (current.inherits ?? null)
+    const { names } = chainNamesOf(start, presetByName)
+    setRefreshing(true)
+    try {
+      await loadDocs(Array.from(new Set([current.name, ...names])), true)
+      const doc = getDoc(current.name)
+      if (!doc) return
+      setError('')
+      setBaseDoc(structuredClone(doc))
+      setUserDoc(structuredClone(doc))
+      setEditedKeys(new Set())
+    } finally {
+      setRefreshing(false)
+    }
+  }, [current, presetByName, loadDocs, getDoc])
+
+  /*
+   * 外部数据的边界：整份要么收下、要么拒掉，不做「部分收下」那种半吊子状态。
+   *
+   * ★ 2026-10-13：这颗入口**目前没有 UI 在调**了 —— 抽屉里那颗「载入随包配置」退役，
+   *   我们自己的切片器配置改由页面整批读进来（走 `useBbsData` 的 `setSlicerPresets`），
+   *   不再一份份手动载入。留着的理由有两条：它是「external 数据要么整份收下、要么拒掉」
+   *   这条口径唯一的实现处；将来拖拽导入落地时入口还是这儿（`importError` 同理）。
+   */
   const importDoc = useCallback((fileName: string, doc: BbsPresetDoc) => {
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
       setImportError(`${fileName}：顶层不是一个 JSON 对象，整份拒绝`)
@@ -355,6 +415,8 @@ export function useBbsPreset(data: BbsData): BbsPreset {
     setValue,
     resetKey,
     revertAll,
+    refreshing,
+    refreshCurrent,
     importDoc,
     importError,
   }

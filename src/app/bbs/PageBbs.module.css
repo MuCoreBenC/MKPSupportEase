@@ -32,7 +32,15 @@
   --bbs-orange: #e5a33d;
   --bbs-focus: #6a9fff;
   --bbs-menu-hover: #3a3a3a;
-  --bbs-menu-selected: #2a4a8a;
+  /*
+   * 选中那一项的底：**不再是上游那支深蓝**（`#2a4a8a`）。
+   *
+   * 作者 2026-10-13：「还有这个深色模式下的选中是蓝色，我不是很喜欢。」
+   * BBS 深色下的选中本来就是蓝的（浅色下却是淡绿 `#edfaf2`，上游自己两套不一样）——
+   * 这一页的选中语言早就换成全站的 accent 了（工具条那两枚图标、详情栏那两颗胶囊），
+   * 列表这一处跟着走：直接用 `--accent-soft`，深色浅色同一族。
+   */
+  --bbs-menu-selected: var(--accent-soft);
   --bbs-btn-hover: #454545;
   --bbs-chk-border: #6f6f6f;
   --bbs-chev: #a9a9a9;
@@ -41,6 +49,13 @@
   --bbs-shadow-menu: rgba(0, 0, 0, 0.4);
   /* 搜索命中那一行的底色。淡得刚好看出「这一片有东西」，不抢橙色（改动）的戏 */
   --bbs-hit: rgb(255 255 255 / 6%);
+  /*
+   * 右侧「详情」栏的底色（2026-10-13 加）。
+   * **不能再用 `--bbs-page-bg`** —— 深色下那就是 #141414，一栏竖着的黑条，
+   * 作者原话：「口径不应该用黑色背景，浅色模式下是灰色背景，其实可以接受」。
+   * 所以深色给它抽屉那一档的面（#2b2b2b，两条侧栏同一个说法），浅色维持那支灰。
+   */
+  --bbs-rail-bg: #2b2b2b;
 
   /* 图标源色 → 暗色替换值（BitmapCache.cpp:349-361） */
   --ico-262e30: #efeff0;
@@ -51,6 +66,16 @@
 
   /* 参数值左对齐的竖线位置。行左边有 33px 缩进（给组图标那一格） */
   --bbs-label-w: 236px;
+
+  /*
+   * 页签行的高度（2026-10-13 加）。两处共用同一个数，为的是**那颗叉与那颗详情图标
+   * 落在同一个位置**：页签行右端的详情图标（`.iconBtn`，28px）垂直居中于这一行，
+   * 而详情栏右上角那颗叉要替它站在同一个角落 —— 栏一开一收之间那儿不能跳。
+   *
+   * 用 `min-height` 而不是 `height`：页签自己的内衬（`8px 16px` + 2px 下划线）说了算，
+   * 这个值只兜住"不低于"，不会把页签压扁。
+   */
+  --bbs-row-h: 34px;
 
   display: flex;
   flex-direction: column;
@@ -64,7 +89,15 @@
 /* ===== 明亮 =====
    只覆盖变量，不新增任何规则 —— 尺寸、间距、圆角在两套主题里必须完全一样 */
 .page[data-theme='light'] {
-  --bbs-page-bg: #f1f1f1;
+  /*
+   * ★ 2026-10-13：上游那个 `#f1f1f1` 换成 `#fbfcfd`。
+   * 作者：「这一行的颜色，还有右侧这个详情的颜色，我不喜欢这种好像那种**老式机箱的黄色**，
+   * 灰黄灰黄的感觉」。`#f1f1f1` 是上游 BBS 明亮模式的页底（这一页本来照抄它），
+   * 但它压在白参数区（`--bbs-panel: #fff`）旁边就显得发暖 —— 换成全站那一档冷白
+   * （`--card-face` 的取值 #fbfcfd）：只差一点，观感干净了，页签/工具栏那条分界仍在。
+   * 深色那支**不动**（`#141414` 是这一页"复刻上游"的那半边，作者这次说的是浅色）。
+   */
+  --bbs-page-bg: #fbfcfd;
   --bbs-panel: #fff;
   --bbs-panel-2: #fff;
   --bbs-field: #fff;
@@ -88,6 +121,13 @@
   --bbs-pm-disabled: #a6a9aa;
   --bbs-shadow-menu: rgba(0, 0, 0, 0.12);
   --bbs-hit: rgb(0 0 0 / 5%);
+  /*
+   * 浅色下这一栏用**纯白**（`--bbs-panel` 那一档），不再跟着页底走。
+   * 作者：「右侧这个详情的颜色……灰黄灰黄的感觉，我不喜欢」—— 页底那支 `#f1f1f1`
+   * 是与上游一起抄来的，但这一栏是新东西（不是复刻谁），没理由跟着发暖。
+   * 与参数区同白、靠左边那道 `--bbs-line` 分界，跟报告页的左栏一样站得住。
+   */
+  --bbs-rail-bg: #fff;
 
   /* 浅色模式就是 BBS 原件本身的颜色，一处都不换 */
   --ico-262e30: #262e30;
@@ -97,24 +137,32 @@
   --ico-cecece: #cecece;
 }
 
-/* 窄档收窄标签列，否则值列会被挤出右边缘 */
-.page[data-density='compact'] {
-  --bbs-label-w: 180px;
-}
+/*
+ * 标签列的宽度**不在这儿按密度档切了**（2026-10-13）。
+ *
+ * 原来这里是 `compact: 180px` / `mini: 44%` —— 于是窗口拖过密度档那道线
+ * （Compact / Wide 大约在 1080）时，标签列从 236 一步跳到 180，**整列值跟着左移一下**。
+ * 作者：「我变化尺寸的时候，它这个参数还会移动，一瞬间的，好像在 1080 的时候跳了。」——
+ * 与 tokens.css 里那条口径同一条：**"量"要连续，只有"结构"才按档**（那一条是
+ * 2026-10-05 为字号/内衬定的）。
+ *
+ * 现在由 `PageBbs.tsx` 按页面宽算一个连续值，写成行内 `--bbs-label-w` 下发；
+ * 上面 `.page` 里那个 236px 只是**第一帧还没量到宽度时**的兜底。
+ */
 
-.page[data-density='mini'] {
-  --bbs-label-w: 44%;
-}
+/* 拖拽导入已退役（2026-10-13）：「导入 JSON」与整页接文件的下放边框一起删了 */
 
-/* 拖拽态：整页接文件，边框亮起来告诉你松手就收 */
-.page[data-dropping='true'] {
-  outline: 2px dashed var(--bbs-green);
-  outline-offset: -2px;
-}
-
-/* ===== 工具条 =====
-   这一条是「我们的壳」，BBS 里没有，所以刻意用更深的底色区分。
-   按钮一律用文字标签，不用图标 */
+/*
+ * ===== 工具条（第一行） =====
+ *
+ * 底色 2026-10-13 改成与**第二行同一块面**（`--bbs-panel`，浅色下就是那个白）。
+ *
+ * 作者：「它这里下面这个白色还挺正常，上面那个它跟那个标题有一点类似的那个颜色不是很喜欢，
+ * 主要是它又像又不像的。」—— 这里原来用页底那支（深色 `#141414` / 浅色 `#fbfcfd`），
+ * 压在壳层标题栏（`--bg-1`）与下面那行白之间，**两头都差一点**，就成了"又像又不像"。
+ * 现在整页顶上一块面：工具条 + 页签行 + 参数区同底色，靠两条 `--bbs-line` 分界；
+ * 「我们的壳」与 BBS 页面的分别改由**字色与那两枚图标**来说（不再是"底色略深"这种半吊子）。
+ */
 .bar {
   display: flex;
   flex-shrink: 0;
@@ -123,38 +171,82 @@
   gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--bbs-line);
-  background: var(--bbs-page-bg);
+  background: var(--bbs-panel);
 }
 
-.btn {
-  padding: 4px 9px;
-  border: 1px solid var(--bbs-field-border);
-  border-radius: 4px;
-  background: var(--bbs-field);
-  color: var(--bbs-text);
-  font: inherit;
-  font-size: 11.5px;
-  white-space: nowrap;
+/*
+ * 这里原来还有"合一行"那一档（`data-rows='one'` / `[data-rows='two']` 两条）——
+ * 2026-10-13 作者定了**默认就两行**，那个分支连同它的样式一起删了：
+ * 「它一行的话总是变成两行……我就觉得不太舒服。默认就两行吧。」
+ *
+ * 两行各装什么，同日第三轮定稿：这一行是 **☰ · 名字 · 搜参数**，
+ * 页签行是 **页签 · 详情图标** —— 搜参数与详情图标换了位（理由写在 PageBbs.tsx
+ * 工具条那段注释里）。两行都是一直在的，不分档、不随宽度合上去。
+ */
+
+/*
+ * 工具条上的图标按钮（2026-10-13 第二轮）：☰ 预设列表 / 📄 详情。
+ *
+ * 作者看完落地那一版：「预设列表干嘛占这么大空间？用三条横杠不就可以了吗？」
+ * 「详情不一定要用小气泡，用一些图标」—— 于是四颗文字胶囊（预设列表 / 全部参数 /
+ * 重扫本机 / 详情）收成两枚图标，另外两颗搬到它们该在的地方（见 PageBbs.tsx 的注释）。
+ *
+ * 形状：28×28 的方角按钮（圆角走 `--r-sm`），**只在悬停/选中时才现出底与描边** ——
+ * 平时它就"消失"在工具条上，眼睛只落在名字与页签上。
+ * 选中语言与别处一致：accent 淡底 + accent 描边 + accent 深字（+ text-shadow 加粗，
+ * 全站铁律：状态不许改变盒子宽度）。
+ */
+.iconBtn {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--bbs-label);
   cursor: pointer;
 }
 
-.btn:hover:not(:disabled) {
+.iconBtn:hover:not(:disabled) {
   background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
 }
 
-.btn[data-on='true'] {
-  border-color: var(--bbs-green);
+/*
+ * 选中：**只换图标的颜色**。
+ *
+ * 作者 2026-10-13：「我不喜欢被选中后又被框选的感觉，这两个图标变颜色就算了，
+ * 不要拿描边去圈起来」—— 上一版给了 accent 描边 + accent 淡底，等于给一枚 16px 的图标
+ * 套了个圆角框（截图里那两圈绿边）。图标本来就没有"盒子"的语言，选中用颜色说就够。
+ */
+.iconBtn[data-on='true'] {
+  color: var(--accent);
 }
 
 /* 焦点态只加深边框，不发光 */
-.btn:focus-visible {
+.iconBtn:focus-visible {
   border-color: var(--bbs-focus);
   outline: none;
 }
 
-.btn:disabled {
-  color: var(--bbs-disabled);
-  cursor: default;
+/*
+ * 「详情」那颗图标上的红点（绝对定位到右上角 —— 图标只有 16px，内联一个点会把图形挤歪）。
+ * 那颗图标 2026-10-13 第三轮从工具条搬到**页签行右端**，并且只在详情栏收着的时候才画 ——
+ * 红点要说的正是"栏收起来了，可里面有一条失败没地方说"（抽卡里定过的一条：错误不上锁）。
+ */
+.iconDot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--danger);
 }
 
 /* 当前预设名占中间那一段，长了省略 */
@@ -167,28 +259,21 @@
   text-overflow: ellipsis;
 }
 
-.file {
-  display: none;
+/* 合一行那一档：名字让位（页签与搜索挤进来之后它不能再吃 flex），长了照样省略；
+   名字本来在左抽屉里也找得到 */
+.bar[data-rows='one'] .name {
+  flex: 0 1 auto;
+  max-width: 220px;
+  min-width: 60px;
 }
 
-/* 产品资源区的下拉：与旁边的按钮同高，窄的时候让文案自己省略 */
-.pick {
-  max-width: 200px;
-  padding: 4px 6px;
-  border: 1px solid var(--bbs-field-border);
-  border-radius: 4px;
-  background: var(--bbs-field);
-  color: var(--bbs-text);
-  font: inherit;
-  font-size: 11.5px;
-}
-
-/* 「还没下载」那句：是**状态**不是错误 —— 用弱一档的字色，不抢错误提示的注意力 */
-.pickNote {
-  color: var(--bbs-dim);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
+/*
+ * 原来这一带还有三样，2026-10-13 第二轮搬走了（所以这里不再有它们的规则）：
+ *   · `.dot`      ——「详情」那颗文字胶囊上的红点 → 跟着胶囊一起变成图标版的 `.iconDot`；
+ *   · `.pick`     ——「载入产品配置」那颗下拉 → 进左抽屉（`.pick` 在 BbsPresetDrawer 里）；
+ *   · `.pickNote` ——「产品配置 N 份，还没下载」那句 → 同上，进左抽屉变成 `.note`。
+ * 搬家的理由写在 PageBbs.tsx 的工具条那段注释里（作者："我不知道哪些需要"）。
+ */
 
 /* ===== 主体 =====
  *
@@ -228,24 +313,44 @@
  * 它也顺手替掉了原来挂在 `.main` 上的 mousedown：有遮罩就点不到底下的控件，
  * 不会出现「关抽屉顺便改了一个参数」。
  */
+/*
+ * 「遮罩」：**透明的，只用来接一下点击** —— 视觉上什么都不加。
+ *
+ * 它的来历：这个元素原本是浮层态那层压暗（`rgb(0 0 0 / 28%)` → 12%），
+ * 作者 2026-10-13 一针见血：「我知道了，可能是你把它的背景置灰了导致的 ——
+ * 你看这样子（宽的那一档）虽然右侧的是悬浮的，但**完全没有悬浮感**；
+ * 我稍微缩一下，你看他加了一个灰色背景，就**完全有悬浮感**。是这个灰色背景导致的。」
+ *
+ * 对：两侧栏并排时与内容同底色、只差一道竖线，看着就是"页面上的一栏"；
+ * 一层灰压上去，它立刻变成"盖在页面上的东西" —— 灰才是那句"这是浮层"的台词。
+ * 所以灰去掉，行为留下：点内容区仍然收起（`PageBbs.tsx` 里那张透明按钮）。
+ */
 .scrim {
   position: absolute;
   inset: 0;
   z-index: 15;
   border: 0;
-  background: rgb(0 0 0 / 28%);
+  background: transparent;
   cursor: default;
 }
 
+/* 右侧栏不再浮（作者 2026-10-13：「我不想让它悬浮起来」），所以它那道遮罩的层级也删了 ——
+   现在只有左抽屉一处用遮罩 */
+
 /* ===== 参数分页那一行 =====
-   页签在左、**搜参数的框在右端**（组件是 BbsSearchBox，样式在它自己那份 css 里）。
-   为什么不放顶部工具条：抽屉里已经有一个搜预设名的框，两个都堆左上角分不清谁管谁；
-   放在这一行，位置本身就说明作用域是「下面这些参数」。 */
+   页签在左、**详情图标在右端**（2026-10-13 第三轮两枚件换了位 —— 详情管的是"右边那一栏
+   开不开"，与页签一样属于"下面这块参数区"，摆同一行最近；`padding-right` 正好给图标留位）。
+
+   搜参数的框原来在这一行，理由是"别跟抽屉里搜预设名那个框都堆在左上角"；
+   它现在在工具条上、挨着预设名，作用域照旧是下面这些参数（靠 placeholder 说清）。 */
 .tabsRow {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   gap: 8px;
+  /* 高度由 `--bbs-row-h` 兜底（页签自己更高的话听页签的）——
+     详情栏那颗叉要靠这个数才能与右端那颗详情图标对在同一条中线上 */
+  min-height: var(--bbs-row-h);
   padding-right: 10px;
   border-bottom: 1px solid var(--bbs-line);
   background: var(--bbs-panel);
@@ -292,6 +397,55 @@
   padding: 4px 0 24px;
   overflow-y: auto;
 }
+
+/*
+ * 重扫那一下：参数区**整块重铺一遍**（2026-10-13）。
+ *
+ * 只做整块的淡入 + 6px 上移，**不逐行错位** —— 这一区可能有几百行（"全部参数"模式下
+ * 689 行），逐行延迟既看不出层次、又白烧一帧；左侧抽屉那个列表短，才用逐项错位。
+ *
+ * 挂在 `[data-refreshing]` 上：属性一消失动画自然收干净，下一次重扫从无到有再播一遍
+ * （不用 key，也不用计数器）。
+ */
+.content[data-refreshing='true'] {
+  animation: bbs-params-refill 360ms ease-out both;
+}
+
+@keyframes bbs-params-refill {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 系统里选了"减少动态效果"的人：不位移，只压暗一下再回来 —— 照样看得出"刷过了" */
+@media (prefers-reduced-motion: reduce) {
+  .content[data-refreshing='true'] {
+    animation: bbs-params-refill-quiet 360ms ease-out both;
+  }
+
+  @keyframes bbs-params-refill-quiet {
+    from { opacity: 0.5; }
+    to { opacity: 1; }
+  }
+}
+
+/*
+ * 这里原来有一段"读清单时的骨架"（`.skeleton` / `.skGroup` / `.skBar` / `.skNote`…）——
+ * 2026-10-13 删了。它是我自己画的一具**假**骨架（灰条 + 灰方块），
+ * 作者要看的是真骨架：「如果没选择的时候，我希望这些字段参数都是在的，只不过它不显示参数……
+ * 那个才叫骨架屏，因为它这个骨架是定好的，不是说你那种虚拟的，你自己做了个假的骨架，
+ * 因为它这个骨架，它这些字段顺序啊，都是固定好摆在这的，不会变化的。」
+ *
+ * 现在的骨架就是**这一页本身少了值**：`buildBbsPanel` 的 `skeleton` 档照 `layout` 铺出
+ * 组与字段，控件由 BbsControl 画成空框 / 未勾的复选框 / 空下拉（见 bbsPanel.ts 的形参注释）。
+ * 读清单那件事的表态搬到了左抽屉（那只 ↻ 转起来，见 BbsPresetDrawer）。
+ */
 
 .blank {
   padding: 24px 16px;
