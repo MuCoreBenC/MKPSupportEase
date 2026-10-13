@@ -225,6 +225,9 @@ pub fn get_calib_models(app: AppHandle) -> Result<Vec<CalibModel>, AppError> {
 ///   行为一字不差，旧调用一个都不用改；
 /// - `"bambu"` / `"orca"`：**指定的那个应用**（见 [`slicer::launch`]）。用户明确点了
 ///   哪一档才走这里，所以"没装那个应用"照实报 `NOT_FOUND`，**不静默回落**成系统关联；
+/// - `"custom"`（2026-10-13 第二刀）：**用户从磁盘指定的那个** —— 路径随 `slicer_app`
+///   一起给（壳读不到 webview 的 localStorage）。没给路径 / 路径不在盘上 = `NOT_FOUND`
+///   照实报（让人回设置页重挑），**不静默回落**成系统关联；
 /// - 本机还没有这份文件 → `NOT_FOUND`，原话告诉用户先「取回」—— **不静默、不假装打开**；
 /// - 系统打不开（没有关联程序那种）→ `IO` 原样冒上来，界面照实显示。
 ///
@@ -234,6 +237,7 @@ pub fn open_model(
     app: AppHandle,
     model_id: String,
     slicer: Option<String>,
+    slicer_app: Option<String>,
 ) -> Result<(), AppError> {
     traced("openModel", |_| {
         let id = model_id.trim();
@@ -253,6 +257,21 @@ pub fn open_model(
             app.opener()
                 .open_path(path.to_string_lossy().into_owned(), None::<&str>)
                 .map_err(|e| AppError::io("系统打不开这个模型文件").with_detail(e.to_string()))?;
+        } else if kind == slicer::SlicerKind::Custom {
+            /* 「从磁盘指定的那个」：路径由前端给，盘上没有就照实说（不静默回落） */
+            let raw = slicer_app.as_deref().map(str::trim).unwrap_or_default();
+            if raw.is_empty() {
+                return Err(AppError::not_found(
+                    "没拿到你指定的那个应用 —— 回设置页的「切片」重新挑一次",
+                ));
+            }
+            let target = std::path::Path::new(raw);
+            if !target.exists() {
+                return Err(AppError::not_found(format!(
+                    "你指定的那个应用不在了（{raw}）—— 回设置页的「切片」重新挑一次"
+                )));
+            }
+            slicer::launch_with(target, kind.label(), &path)?;
         } else {
             slicer::launch(kind, &path)?;
         }

@@ -49,8 +49,6 @@ import { pickArt } from './heroArt'
 import { useArtLayers } from './useArtLayers'
 import {
   AXIS_ROWS,
-  NEED_COPY,
-  NEED_PRESET,
   Z_LEGEND,
   Z_TIP,
   axisText,
@@ -65,7 +63,7 @@ import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 
 import { useIsDark } from '../state/appState'
-import { settleSlicerPick, useSlicerPick, useSlicerPref } from '../shared/slicer'
+import { slicerArgsOf, useSlicerAppPref, useSlicerPick, useSlicerPref } from '../shared/slicer'
 import { SlicerPickView } from '../shared/SlicerPickView'
 import p from './PageHome.module.css'
 
@@ -117,6 +115,7 @@ export default function PageHome({ density }: PageHomeProps) {
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
   const deckRef = useRef<DeckHandle>(null)
+
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
   const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
@@ -128,6 +127,8 @@ export default function PageHome({ density }: PageHomeProps) {
   const [modelErr, setModelErr] = useState<string | null>(null)
   /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
   const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
+  /* 设置页「其他应用…」指定的那个 —— 选着它时随 openModel 把路径带给壳（见 slicerArgsOf） */
+  const [slicerApp] = useSlicerAppPref()
   const slicerPick = useSlicerPick(defaultSlicer, openModel !== null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
   /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
@@ -227,8 +228,7 @@ export default function PageHome({ density }: PageHomeProps) {
   const openCachedModel = () => {
     if (openModel === null) return
     setModelBusy(true)
-    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
-    api.openModel(openModel.id, { slicer }).then(
+    api.openModel(openModel.id, slicerArgsOf(slicerPick, setDefaultSlicer, slicerApp)).then(
       () => {
         setModelBusy(false)
         setOpenModel(null)
@@ -245,11 +245,12 @@ export default function PageHome({ density }: PageHomeProps) {
     if (openModel === null || modelInfo === null) return
     setModelBusy(true)
     setModelErr(null)
-    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
+    /* 参数在点击这一刻就定下（含"写回默认"那一步）—— 与下面下载那一步的成败无关 */
+    const slicerArgs = slicerArgsOf(slicerPick, setDefaultSlicer, slicerApp)
     void (async () => {
       try {
         await api.downloadCatalogFile(modelInfo.fileName)
-        await api.openModel(openModel.id, { slicer })
+        await api.openModel(openModel.id, slicerArgs)
         setModelBusy(false)
         setOpenModel(null)
       } catch (e) {
@@ -502,6 +503,24 @@ export default function PageHome({ density }: PageHomeProps) {
     setApplyError(null)
     /* 预判：这一批里缺的与漂的（已去重）。空 = 全齐全新 —— 直接应用，一个字节都不重下 */
     const todo = bundleState.todo
+    /*
+     * ★ 2026-10-13：这一趟**先浮一句再动手**（作者：「点这个下载并应用的时候，也可以出现
+     * 刚才说的那个透明的气泡呀……如果还没有下载的时候，那个提示是和那个已经下载过、
+     * 只应用的那个气泡里面显示的内容还不太一样，就区分一下」）。
+     *
+     * 三档分的正是"这一趟到底要做什么"，用词按作者定的口径（不出现"官方 / 我的一份"）：
+     *   · 本机全齐（ready）→ 只应用；· 缺（missing）→ 先下载；· 漂（drift）→ 重新下载
+     *
+     * 吃的是页面底部那颗 `.scriptToast`（与「复制脚本」共用一颗）——**不占任何布局位置**，
+     * 说完自己走（5s，见上面那个 effect）。
+     */
+    const pendingNote =
+      bundleState.kind === 'ready'
+        ? '这几份本机都有了 —— 直接设成正在使用的那一份'
+        : bundleState.kind === 'drift'
+          ? '本机这份和云端对不上 —— 重新下载，再设成正在使用的那一份'
+          : '这份本机还没有 —— 先下载，再设成正在使用的那一份'
+    setScriptNote(pendingNote)
     try {
       if (todo.length > 0) {
         /* 逐份看结局：**任何一份没成就停下、不应用** —— 套餐缺一份就是没齐（不编成功） */
@@ -532,10 +551,22 @@ export default function PageHome({ density }: PageHomeProps) {
        * （切片器配置那一类）。
        */
       const fetched = await api.fetchOfficialPreset(presetFile)
+      /* 本仓的术语是 `official / mine`（试验场那边的 `cloud / local` 已改名，见契约） */
       await api.applyActivePreset(fetched.fileName, 'mine', fetched.path)
       appStateMutated()
+      /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
+      setScriptNote(
+        bundleState.kind === 'ready'
+          ? '已应用：这份现在就是正在使用的那一份'
+          : bundleState.kind === 'drift'
+            ? '已更新并应用：这份现在就是正在使用的那一份'
+            : '已下载并应用：这份现在就是正在使用的那一份',
+      )
     } catch (e) {
-      setApplyError(errorText(e))
+      const msg = errorText(e)
+      /* 失败留痕两条路：列里那行红字（带 traceId、常驻）+ 底部气泡浮一句（点击必须有回声） */
+      setApplyError(msg)
+      setScriptNote(msg)
     } finally {
       setApplying(false)
       /* 投递面广播：本页重读那两份单子（订阅在上面），**别的页**（预设页本地表 /
@@ -560,6 +591,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 覆盖只在目录那份就绪后发生：waiting / failed 的三态动画不动。
    */
   const presetReady = preset.status === 'ready'
+
   const displayName = activeForSel !== null && presetReady ? activeForSel.fileName : presetName
   const displayPath =
     activeForSel !== null && presetReady
@@ -572,31 +604,13 @@ export default function PageHome({ density }: PageHomeProps) {
    * 早先硬编码的是另一个仓库的 Windows exe，Mac 上复制出去的命令必然跑不通。
    *
    * ★ 按钮**常驻**（2026-10-10 作者裁定）：能不能给命令**不决定**摆不摆按钮 ——
-   *   不能给时把 `reason` 显示在按钮下面（"先下载并应用"那条路），点了也不会抄假命令。
-   * ★ 这份状态只用来显示"现在能不能抄"；**点的时候还会再要一次**（见 `loadCommand`）——
-   *   下载 / 应用 / 换份都可能把指向换掉，任何缓存的路径都不许长期带着。
-   * ★ 引发重读的三件事：combo 换台、投递面代次（下载 / 删除）、底账（应用 / 我那份）。
+   *   不能给时点它就是"抄不了"，原因照样说给人听。
+   *
+   * ★ 2026-10-13：进页面**不再预读一次命令**（原来那份 `copyCommand` 现况只喂给
+   *   `CopyAction`，用来决定按钮下面那行小字说什么）。现在原因不再常驻在按钮下面 ——
+   *   点了之后由页面底部那颗不占位的 `.scriptToast` 说（作者：「干嘛要放在这？都被
+   *   截断了」），于是这份"缓存现况"整个退役：**点的时候现要一次**就够，前端不留旧路径。
    */
-  const [copyCommand, setCopyCommand] = useState<PostProcessCommand | null>(null)
-  useEffect(() => {
-    if (sel.model === null || sel.variant === null) {
-      setCopyCommand(null)
-      return
-    }
-    let alive = true
-    void api.getPostProcessCommand(sel.model, sel.variant).then(
-      (cmd) => {
-        if (alive) setCopyCommand(cmd)
-      },
-      (err: unknown) => {
-        if (alive) setCopyCommand(null)
-        console.error('[postprocess] 取后处理命令失败', err)
-      },
-    )
-    return () => {
-      alive = false
-    }
-  }, [sel.model, sel.variant, deliveryRevision, activeEntry])
 
   /* 点按钮那一刻**现要一次**：后端按当前平台与真实落点现拼，前端不缓存命令 */
   const loadCommand = useCallback(async (): Promise<PostProcessCommand> => {
@@ -605,12 +619,97 @@ export default function PageHome({ density }: PageHomeProps) {
     }
     return api.getPostProcessCommand(sel.model, sel.variant)
   }, [sel.model, sel.variant])
-  const inUseNote =
-    activeForSel === null || !presetReady
-      ? undefined
-      : activeForSel.origin === 'mine'
-        ? '正在使用 · 我的文件'
-        : '正在使用'
+
+  /*
+   * ★ 2026-10-13（作者：「可以加一下那个复制的……他要复制的是那个后处理脚本呀，就跟首页的
+   * 是一样的呀……你改成复制脚本吧，反正位置足够」）：四个步骤的底部各摆一颗「复制脚本」——
+   * 与第一页那颗（内容里的 `CopyAction`）是同一个东西：点一下向后端**现要**一条命令，
+   * 拿到就进剪贴板（就地变「已复制」1.5s）；抄不了就把原因浮出来 ——
+   * 用**不占位的悬浮气泡**（`.scriptToast`），不挤压任何东西。
+   *
+   * 门槛（作者给的两句话）：「选定了、有预设的时候才可以复制」+「没有应用的时候就不能复制」——
+   * 显形要"选齐三级 + 这一份预设取得到"，未应用就灰着（title 说差哪一步）。
+   */
+  const [scriptCopied, setScriptCopied] = useState(false)
+  const [scriptNote, setScriptNote] = useState<string | null>(null)
+  const scriptTimer = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (scriptTimer.current !== null) window.clearTimeout(scriptTimer.current)
+    },
+    [],
+  )
+
+  /*
+   * 气泡自己走（5s）。
+   *
+   * ★ 2026-10-13：原来这里还有"鼠标停在上面时先不走"（当时图的是"文字能拖选，
+   * 拖到一半消失等于没给这个能力"）。作者试过之后判掉了拖选本身
+   * （「它的拖选好像是失败的……算了，不要了」）—— 现在气泡 `pointer-events: none`
+   * 不吃指针，悬停判断也就永远触发不了，一并删掉。
+   */
+  useEffect(() => {
+    if (scriptNote === null) return
+    const t = window.setTimeout(() => setScriptNote(null), 5000)
+    return () => window.clearTimeout(t)
+  }, [scriptNote])
+
+  const copyScript = useCallback(() => {
+    void loadCommand().then(
+      (cmd) => {
+        if (!cmd.ready || cmd.command === undefined) {
+          setScriptCopied(false)
+          setScriptNote(cmd.reason ?? '这条命令现在还抄不了')
+          return
+        }
+        void navigator.clipboard.writeText(cmd.command).then(
+          () => {
+            setScriptNote(null)
+            setScriptCopied(true)
+            if (scriptTimer.current !== null) window.clearTimeout(scriptTimer.current)
+            scriptTimer.current = window.setTimeout(() => setScriptCopied(false), 1500)
+          },
+          (e: unknown) => {
+            setScriptCopied(false)
+            setScriptNote(errorText(e))
+          },
+        )
+      },
+      (e: unknown) => {
+        setScriptCopied(false)
+        setScriptNote(errorText(e))
+      },
+    )
+  }, [loadCommand])
+
+  /**
+   * 四步共用那颗「复制脚本」（住 navs 左侧那一组 —— 作者：「它应该放到左侧吧」）。
+   *
+   * ★ 显形条件：**选齐三级 + 有预设 + 这一份已应用**。
+   * 2026-10-13 作者：「这个灰色都没有灰色的感觉……用户根本不知道是禁用，他只觉得点不了。
+   * 那没有的话，就干脆直接隐藏起来了，可用的时候才出现」——
+   * 所以这里**不再有灰态**：差一步就整颗不出现，出现就是能点的。
+   *
+   * 点了之后后端说"这条命令现在给不了"（没落盘 / 预览里没有可执行物）不再靠灰按钮 + 小字，
+   * 而是**浮一颗不占位的气泡**说原因（见 `copyScript` 与页脚那颗 `.scriptToast`）。
+   */
+  const scriptAction = useMemo(
+    () => ({
+      label: scriptCopied ? '已复制' : '复制脚本',
+      on: ready && presetReady && comboApplied,
+      title: '把这一份的后处理脚本复制到剪贴板',
+      onClick: copyScript,
+    }),
+    [comboApplied, copyScript, presetReady, ready, scriptCopied],
+  )
+
+  /*
+   * 2026-10-13：「正在使用 · 我的文件」那个来源后缀去掉 —— 作者：「我的一份、官方一份
+   * 这些相关的都去掉，那是以前的旧版才那么设计的」。命中底账就说「正在使用」，
+   * 不再分来源（官方底稿 / 自己那份），这句只回答"是不是正在用的那一份"。
+   */
+  const inUseNote = activeForSel === null || !presetReady ? undefined : '正在使用'
   /* picker sheet 那块卡：名字 / 路径换成底账那份，其余（三轴数值等）保持原样。
      useMemo 包一层：sheets 那张 useMemo 拿它当依赖，引用得稳 */
   const presetView = useMemo(
@@ -662,13 +761,10 @@ export default function PageHome({ density }: PageHomeProps) {
                       {displayName ?? '—'}
                     </p>
                     {/* 按钮**常驻**（2026-10-10）：这条命令能不能给由后端的两条真事实
-                        说（本程序自己 + 预设真在盘上），不能给时原因显示在按钮下面；
-                        点它才向后端现要命令 —— 详见上面 `copyCommand` 那一段 */}
-                    <CopyAction
-                      label="复制后处理脚本"
-                      load={loadCommand}
-                      state={copyCommand}
-                    />
+                        说（本程序自己 + 预设真在盘上），点它才向后端现要命令。
+                        抄不了时的原因由**页面底部那颗气泡**说 —— 不给 `onNote` 的话，
+                        气泡就永远出不来（`CopyAction` 自己不再渲染任何提示，2026-10-13） */}
+                    <CopyAction label="复制后处理脚本" load={loadCommand} onNote={setScriptNote} />
                   </>
                 )}
               </div>
@@ -735,10 +831,18 @@ export default function PageHome({ density }: PageHomeProps) {
           <CardFrame
             style={{ '--fade-ms': `${fadeMs}ms` } as CSSProperties}
             peekSafe
-            navs={[{ label: '回主页', onClick: () => deckRef.current?.jumpTo(0) }]}
+            navs={[
+              { label: '回主页', onClick: () => deckRef.current?.jumpTo(0) },
+              /* 复制脚本住左侧那一组（作者：「它应该放到左侧吧」） */
+              scriptAction,
+            ]}
             actions={[
-              /* 「应用 / 下载并应用 / 已应用」：宽度固定（文字换态不变），在「下一步」旁边。
-                 浏览三级选择不算应用 —— 应用只发生在这颗按钮与各处抽屉的明确动作上 */
+              /* 「应用 / 下载并应用 / 已应用」：宽度固定（文字换态不变）。
+                 浏览三级选择不算应用 —— 应用只发生在这颗按钮与各处抽屉的明确动作上。
+                 ★ 2026-10-13（作者：「换了打印件版本、还没应用的情况下，我就不希望出现
+                 『下一步』这个图标，否则它就容易没点下载应用就下一步了，导致没有参数」）：
+                 没应用时右组**只剩这一颗** —— 它是唯一的主行动（绿底），「下一步」不出现在
+                 用户眼前；应用完成之后「下一步」才亮起来。 */
               ...(ready
                 ? [
                     {
@@ -754,10 +858,13 @@ export default function PageHome({ density }: PageHomeProps) {
                   ]
                 : []),
               {
+                /* `on` 里带 `comboApplied`：这一份真的应用了才亮。
+                   用 on: false 而不是把这一项从数组里删掉 —— 胶囊照旧占位、只隐去，
+                   于是它出现时一个像素都不推动前面那颗应用按钮（CardFrame 的老规矩）。 */
                 label: '下一步',
                 arrow: true,
                 primary: true,
-                on: ready,
+                on: ready && comboApplied,
                 onClick: () => deckRef.current?.jumpTo(CALIB_Z_INDEX),
               },
             ]}
@@ -774,10 +881,11 @@ export default function PageHome({ density }: PageHomeProps) {
               {/* 预设文件那一块只在真的有一份预设可谈时才出现（选齐三级）。
                   原来是常驻的横杠占位，宽窗里就成了"左上角选了一行、中间凭空一块空占位"，
                   视觉锚点全落在没内容的地方。宁可出现时把列往下长一截。
-                  三轴只在"没有右侧露出卡"（density mini）时一起摆出来 */}
+                  （2026-10-13：小窗档那块三轴竖排退役 —— 作者「现在我觉得没必要了，
+                  它不要出现这个偏移值」，见 PresetStack 文件头。） */}
               {preset.status !== 'idle' && (
                 <div className={p.pickerPreset}>
-                  <PresetStack state={presetView} inUse={inUseNote} axes={density === 'mini' ? saved : undefined} />
+                  <PresetStack state={presetView} inUse={inUseNote} />
                 </div>
               )}
 
@@ -819,16 +927,19 @@ export default function PageHome({ density }: PageHomeProps) {
                 <span className={p.presetSwitch}>切换</span>
               </button>
             }
-            navs={[{ label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) }]}
+            navs={[
+              { label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) },
+              scriptAction,
+            ]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
               {
                 label: '保存',
                 on: dirty,
                 primary: true,
-                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                /* 存不动时就灰着 —— 不再挂「我的一份 / 另存为我的预设」那套旧版提示
+                   （2026-10-13 作者：这些字都去掉） */
                 disabled: !canSave,
-                title: canSave ? undefined : NEED_COPY,
                 onClick: commitAll,
               },
               {
@@ -838,13 +949,13 @@ export default function PageHome({ density }: PageHomeProps) {
               },
             ]}
           >
-            {/* data-hint 与下面那行提示同源：板框里多一行，板子就得为它让出高度
-                （没有它的话列会溢出、提示文字压在底部胶囊上） */}
-            <div
-              className={`${p.info} ${p.calib}`}
-              data-hint={saved ? undefined : 'true'}
-              data-scroll
-            >
+            {/*
+             * 2026-10-13（作者：「你把这一行字去掉，没必要提示给用户……就算没有预设
+             * 空的时候，你也要把它位置调整好了，不要让它上下移动」）：
+             * 板下那行「先回『选择机型』…」提示与它带来的 `data-hint` 让位一起退役 ——
+             * 有预设 / 没预设从此同一副版面，板子不再因为提示出现与消失而变大小、挪位置。
+             */}
+            <div className={`${p.info} ${p.calib}`} data-scroll>
               {/* 预设入口已挪到卡片右上角（corner），内容列只留三轴读数 */}
               <CalibHead
                 saved={saved}
@@ -879,11 +990,6 @@ export default function PageHome({ density }: PageHomeProps) {
                 {/* G06-8 攒下的两行文案，与「校准」tab 同一句原话（作者 10-03：首页也缺这个） */}
                 <p className={p.legend}>{Z_LEGEND}</p>
                 <p className={p.tip}>{Z_TIP}</p>
-                {/* 没取到预设时点板子不产生读数，这一行是唯一的解释，必须留。
-                    其余说明去掉了：点了哪一格、改成多少，上面三轴读数里的「旧 → 新」已经说完 */}
-                {!saved && <p className={p.note}>{NEED_PRESET}</p>}
-                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
-                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -920,6 +1026,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 back: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_Z_INDEX),
               },
+              scriptAction,
             ]}
             actions={[
               { label: '放弃改动', on: dirty, onClick: clearAll },
@@ -927,9 +1034,9 @@ export default function PageHome({ density }: PageHomeProps) {
                 label: '保存',
                 on: dirty,
                 primary: true,
-                /* 没有「我的一份」（还没下载这份预设）时存不了：灰着并说清为什么 */
+                /* 存不动时就灰着 —— 不再挂「我的一份 / 另存为我的预设」那套旧版提示
+                   （2026-10-13 作者：这些字都去掉） */
                 disabled: !canSave,
-                title: canSave ? undefined : NEED_COPY,
                 onClick: commitAll,
               },
               {
@@ -939,12 +1046,7 @@ export default function PageHome({ density }: PageHomeProps) {
               },
             ]}
           >
-            <div
-              className={`${p.info} ${p.calib}`}
-              data-plate="xy"
-              data-hint={saved ? undefined : 'true'}
-              data-scroll
-            >
+            <div className={`${p.info} ${p.calib}`} data-plate="xy" data-scroll>
               <CalibHead
                 saved={saved}
                 draft={draft}
@@ -973,9 +1075,6 @@ export default function PageHome({ density }: PageHomeProps) {
                     hitLabel={xyHitLabel}
                   />
                 </PlateZoom>
-                {!saved && <p className={p.note}>{NEED_PRESET}</p>}
-                {/* 有基准、但还没有「我的一份」：读数能用，改动却存不进任何地方 */}
-                {saved && !canSave && <p className={p.note}>{NEED_COPY}</p>}
               </section>
             </div>
           </CardFrame>
@@ -993,6 +1092,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 back: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_XY_INDEX),
               },
+              scriptAction,
             ]}
             actions={[
               {
@@ -1032,10 +1132,9 @@ export default function PageHome({ density }: PageHomeProps) {
       canPick,
       canSave,
       clearAll,
+      comboApplied,
       commitAll,
-      copyCommand,
       currentUid,
-      density,
       dirty,
       displayName,
       displayPath,
@@ -1063,6 +1162,7 @@ export default function PageHome({ density }: PageHomeProps) {
       revertAxis,
       saved,
       savedNote,
+      scriptAction,
       sel,
       actionDisabled,
       actionLabel,
@@ -1081,6 +1181,23 @@ export default function PageHome({ density }: PageHomeProps) {
   return (
     <div className={p.page} data-density={density}>
       <SlideDeck ref={deckRef} sheets={sheets} density={density} canLeave={canLeave} />
+
+      {/*
+       * 「抄不了」的原因气泡 —— **绝对定位、不占任何布局位置，全页只有这一颗**：
+       *   · 页脚那颗「复制脚本」（见 copyScript）点了给不了时；
+       *   · 卡片里那颗「复制后处理脚本」（见上面的 `CopyAction`）点了给不了时 ——
+       *     它自己不再渲染提示（挂在按钮下面会压住读数表、还被卡片裁，2026-10-13 作者退回）。
+       *
+       * 作者 2026-10-13：「你去用这个校准页面的这种提示啊，这种悬浮气泡不占任何位置的提示」
+       * （上一版把它做成卡里的一行字，把板子和按钮都往上挤了）。说完自己走（5s，
+       * 见上面那个 effect）；`pointer-events: none`（在 CSS 里）—— 不吃指针、不挡底下的按钮。
+       */}
+      {scriptNote !== null && (
+        <div className={p.scriptToast} role="status">
+          <i className={p.scriptToastDot} aria-hidden />
+          <span>{scriptNote}</span>
+        </div>
+      )}
 
       {/* 预设抽屉：从左缘出（右边常驻露出卡，没地方）。换预设的确认（有草稿先问一句）
           走 pickPreset，与下拉时代同一条路；抽屉挂在 .page（container 的布局包含块）上 */}
@@ -1180,9 +1297,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   .map(([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`)
                   .join('，')
               : ''}
-            {canSave
-              ? '。离开前要保存吗？'
-              : '。这份还没有「你的一份」—— 先在预设页另存为我的预设才能存，现在只能放弃。'}
+            {canSave ? '。离开前要保存吗？' : '。现在离开这些改动会丢掉。'}
           </p>
         </Modal>
       )}

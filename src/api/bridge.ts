@@ -53,6 +53,17 @@ function normalizeError(err: unknown, method: MkpApiMethod): AppError {
   }
 }
 
+/**
+ * 从"挑中的那个路径"取显示名：去掉目录，再去掉 `.app` / `.exe` 那层壳
+ * （`/Applications/PrusaSlicer.app` → `PrusaSlicer`）。
+ *
+ * 为什么在挑的时候就取好：界面直接拿它当下拉里那一条的名字，不用再解析路径。
+ */
+function appNameOf(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path
+  return base.replace(/\.(app|exe)$/i, '')
+}
+
 function safeStringify(v: unknown): string {
   try {
     return JSON.stringify(v) ?? String(v)
@@ -107,7 +118,35 @@ export const bridgeApi: MkpApi = {
     call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
   openModel: (modelId, opts) =>
-    call('openModel', 'open_model', { modelId, slicer: opts?.slicer ?? null }),
+    call('openModel', 'open_model', {
+      modelId,
+      slicer: opts?.slicer ?? null,
+      /* 「从磁盘指定的那个」：只在这一档给路径（壳读不到 webview 的 localStorage） */
+      slicerApp: opts?.slicerApp ?? null,
+    }),
+  /*
+   * 「其他应用…」—— 从磁盘挑一个切片软件（2026-10-13 第二刀）。
+   *
+   * 与 `pickExportDir` 同一个插件、同一半权限（`dialog:allow-open`），**不新增 Rust 命令**：
+   * 挑一个文件本来就是界面上的事，落点只是"记下这个名字与路径"（纯前端偏好，
+   * `STORAGE.clientSlicerApp`）。
+   *
+   * 两边成熟的那一套不一样：macOS 的切片软件是 `.app` 包（**是个目录**）⇒ 停在
+   * `/Applications` 让人挑包；Windows 挑 `.exe`。**取消 = `null`，不是错误**。
+   */
+  pickSlicerApp: async () => {
+    const mac = /Mac/i.test(navigator.userAgent)
+    const picked = await open({
+      /* macOS 挑的是 `.app` 包（目录本身）；Windows 挑可执行文件 */
+      directory: mac,
+      multiple: false,
+      title: '选择用来打开模型的切片软件',
+      defaultPath: mac ? '/Applications' : undefined,
+      filters: mac ? undefined : [{ name: '程序', extensions: ['exe'] }],
+    })
+    if (picked === null || Array.isArray(picked)) return null
+    return { name: appNameOf(picked), path: picked }
+  },
   /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
   getPostProcessCommand: (machineId, versionId) =>
     call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),

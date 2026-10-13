@@ -22,8 +22,17 @@ interface CopyActionProps {
   label: string
   /** 现取现抄：点一下向后端要一次（后端按当前平台与真实落点现拼） */
   load: () => Promise<PostProcessCommand>
-  /** 后端刚答的现况：不能抄时这里带着原因（按钮照摆，原因在下面那行） */
-  state: PostProcessCommand | null
+  /**
+   * 「这条命令现在还抄不了」的原因 —— **交给页面去说**。
+   *
+   * ★ 2026-10-13（作者：「不是啊，首页的那一个也是一样的，它是下面显示。你干嘛要放在这？
+   * 都被截断了」）：原来这颗气泡挂在**按钮下面**。可按钮住在卡片的 `.info` 列里，
+   * 而卡片 `.frame`（overflow: hidden）与 `.info`（overflow: hidden auto）两层都裁 ——
+   * 气泡往下走就压住读数表，还要被切掉一截。
+   * 现在这里只把话说出去，由**页面底部那颗不占位的 `.scriptToast`** 统一渲染
+   * （与页脚那颗「复制脚本」同一颗、同一落位，见 PageHome 的 `scriptNote`）。
+   */
+  onNote: (note: string) => void
 }
 
 /**
@@ -33,11 +42,9 @@ interface CopyActionProps {
  * 点击 → 向后端现要命令 → 拿到就进剪贴板 + 「✓ 已复制」1.5s；
  * 后端说还不能给（或读取失败）→ **不复制**，把原因显示在按钮下面。
  */
-export default function CopyAction({ label, load, state }: CopyActionProps) {
+export default function CopyAction({ label, load, onNote }: CopyActionProps) {
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
-  /* 点下去那一刻后端给的"还不给"——比 `state` 新；下一份现况回来就让它让位 */
-  const [refused, setRefused] = useState<string | null>(null)
   const timer = useRef<number | null>(null)
 
   useEffect(
@@ -47,11 +54,6 @@ export default function CopyAction({ label, load, state }: CopyActionProps) {
     [],
   )
 
-  /* 现况换了一份：旧的"还不给"说完了就让位（该说的由新的 `state.reason` 说） */
-  useEffect(() => {
-    setRefused(null)
-  }, [state])
-
   const copy = async () => {
     if (busy) return
     setBusy(true)
@@ -59,25 +61,22 @@ export default function CopyAction({ label, load, state }: CopyActionProps) {
       const cmd = await load()
       if (!cmd.ready || cmd.command === undefined) {
         setCopied(false)
-        setRefused(cmd.reason ?? '这条命令现在还抄不了')
+        /* 抄不了：原因交给页面底部那颗气泡说（这里不摆任何常驻文案、也不占位） */
+        onNote(cmd.reason ?? '这条命令现在还抄不了')
         return
       }
       await navigator.clipboard.writeText(cmd.command)
-      setRefused(null)
       setCopied(true)
       if (timer.current !== null) window.clearTimeout(timer.current)
       timer.current = window.setTimeout(() => setCopied(false), 1500)
     } catch (err: unknown) {
       /* 读取失败也得说人话（`errorText` 是错误唯一入口），不许静默"什么都没发生" */
       setCopied(false)
-      setRefused(errorText(err))
+      onNote(errorText(err))
     } finally {
       setBusy(false)
     }
   }
-
-  /* 提示 = 点下去后端刚说的那条 > 现况里带着的原因；能抄时两边都没有 */
-  const hint = refused ?? (state !== null && !state.ready ? (state.reason ?? null) : null)
 
   return (
     <div className={s.wrap}>
@@ -90,7 +89,6 @@ export default function CopyAction({ label, load, state }: CopyActionProps) {
           已复制
         </span>
       </button>
-      {hint !== null && <p className={s.hint}>{hint}</p>}
     </div>
   )
 }

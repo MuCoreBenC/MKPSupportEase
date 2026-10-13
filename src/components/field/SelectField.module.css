@@ -53,12 +53,17 @@
   padding: 0 6px 0 8px;
 }
 
-.text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
+/*
+ * 触发器里那个值。**不加粗**（2026-10-13 晚）：原来是 600（注释说它"替的是当前值
+ * 那一格，醒一点是职责"），作者先在 BBS 抽屉里点名「这个载入随包配置为什么要加粗？
+ * 不要加粗，不要加粗」，晚些又让把这支共用件一起去掉：「那就把共用的那个加粗去掉呀」。
+ * 值从此走正文粗细 —— 全站所有下拉的触发器一起生效，各页不用再自己压。
+ */
+ .text {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
 
 .caret,
 .caretUp {

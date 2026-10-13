@@ -34,36 +34,45 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 import { api, errorText } from '../../api'
 import type { ImportItem, ImportOutcome, StagedImport } from '../../api'
+import { Modal } from '../../components/modal'
 import Drawer from '../shared/Drawer'
 import { inTauri } from '../window'
 import { ImportContext } from './useFileImport'
 import type { ImportBannerState, ImportEntry } from './useFileImport'
 import s from './FileImport.module.css'
 
-/** 结果条。App 把它渲染在标签栏与内容之间（in-flow —— 不遮内容，也不是会消失的提示） */
+/**
+ * 导入的结果 —— 2026-10-13 起是一格**模态框**（作者：「上面这个什么横幅也是改成模态框」
+ * —— 原来它挂在标签栏下面当一条 in-flow 的横幅，把内容整体压低一截；现在居中弹出，
+ * 一个像素的布局都不占，「知道了」关掉）。
+ */
 export function ImportBanner() {
   const entry = useContext(ImportContext)
   if (entry === null || entry.banner === null) return null
   const { text, bad, lines } = entry.banner
   return (
-    <div className={bad ? `${s.banner} ${s.bannerBad}` : s.banner} role="status">
-      <p className={s.bannerText}>
-        <span>{text}</span>
-        <button
-          type="button"
-          className={s.bannerClose}
-          aria-label="知道了"
-          onClick={entry.closeBanner}
-        >
+    <Modal
+      open
+      size="sm"
+      title={bad ? '导入：有几份没成' : '导入完成'}
+      subtitle={text}
+      onClose={entry.closeBanner}
+      footer={
+        <button type="button" className={s.primary} onClick={entry.closeBanner}>
           知道了
         </button>
-      </p>
-      {lines.map((line, i) => (
-        <p key={`${i}-${line}`} className={s.bannerLine}>
-          {line}
-        </p>
-      ))}
-    </div>
+      }
+    >
+      {lines.length > 0 && (
+        <ul className={s.bannerLines}>
+          {lines.map((line, i) => (
+            <li key={`${i}-${line}`} className={s.bannerLine}>
+              {line}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   )
 }
 

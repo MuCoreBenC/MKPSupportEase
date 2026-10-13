@@ -106,16 +106,17 @@ export default function ParamSyncModal({
       open={open}
       title="选择要跟随的更新"
       subtitle={
+        /* 2026-10-13 口径：只有「本地 / 云端」（作者：「没有我的、没有官方这种说法」） */
         sync === null
-          ? '正在读这一份的官方更新账…'
-          : `官方最新版${
+          ? '正在读这一份的云端更新账…'
+          : `云端最新版${
               sync.currentReleaseTime === null ? '' : ` ${sync.currentReleaseTime}`
-            } · 有 ${all} 项官方改过了。勾选 = 用官方的新值，不勾 = 保持你现在用的值。`
+            } · 有 ${all} 项云端改过了。勾选 = 用云端的新值，不勾 = 保持你现在用的值。`
       }
       size="lg"
       host={host}
       closeOnScrim={false}
-      closeTitle="关掉（一项都还没处理，官方更新仍然等着）"
+      closeTitle="关掉（一项都还没处理，云端更新仍然等着）"
       onClose={onClose}
       footer={
         <>
@@ -135,7 +136,7 @@ export default function ParamSyncModal({
     >
       {all === 0 ? (
         <p className={s.empty}>
-          这一份没有待处理的官方更新 —— 官方改过的都已经处理过了，或者官方这一版还没动过任何一项。
+          这一份没有待处理的云端更新 —— 云端改过的都已经处理过了，或者云端这一版还没动过任何一项。
         </p>
       ) : (
         <>
@@ -166,7 +167,7 @@ export default function ParamSyncModal({
               const diff =
                 e.baselineOld !== null && e.officialNew !== null
                   ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.officialNew)}`
-                  : '官方这一项的值还没拿到'
+                  : '云端这一项的值还没拿到'
               return (
                 <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
                   <label className={s.check}>
@@ -185,11 +186,11 @@ export default function ParamSyncModal({
                     <div className={s.vals}>
                       {mineText !== null && e.mine !== e.baselineOld && (
                         <>
-                          我 <span className={s.mine}>{mineText}</span>
+                          本地 <span className={s.mine}>{mineText}</span>
                           {' · '}
                         </>
                       )}
-                      官方 {diff}
+                      云端 {diff}
                     </div>
                   </div>
                   <div className={s.after}>

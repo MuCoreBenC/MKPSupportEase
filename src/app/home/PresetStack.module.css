@@ -38,21 +38,6 @@
   color: var(--text-3);
 }
 
-.retry {
-  padding: 2px 9px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 10.5px;
-  transition: color 0.14s ease, border-color 0.14s ease;
-}
-
-.retry:hover {
-  color: var(--text-1);
-  border-color: var(--text-3);
-}
-
 /* 下载中：一条不报百分比的细线。几十 KB 的文件报进度是假精确 */
 .progress {
   position: relative;
@@ -71,37 +56,6 @@
   border-radius: inherit;
   background: var(--accent);
   animation: sweep 0.9s ease-in-out infinite;
-}
-
-.axes {
-  width: 100%;
-  margin: 5px 0 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--hairline);
-  min-width: 0;
-}
-
-.label {
-  font-size: 10.5px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.value {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--text-1);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 @keyframes sweep {

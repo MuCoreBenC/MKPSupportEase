@@ -48,7 +48,7 @@ export default function PresetParamsModal({
     <Modal
       open={open}
       title={target.fileName}
-      subtitle="这一份就是你的预设 —— 改的是它自己；官方那一版只用来标明默认值与有没有更新"
+      subtitle="改的是本地这一份；云端那一版只用来标明默认值与有没有更新"
       size="full"
       bodyFill
       host={host}

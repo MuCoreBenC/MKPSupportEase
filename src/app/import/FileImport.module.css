@@ -25,47 +25,25 @@
   font-size: var(--fs-body);
 }
 
-/* ---------- 结果条（标签栏与内容之间，in-flow：不遮内容、也不自己消失） ---------- */
+/* ---------- 导入结果（模态框里的明细列表） ---------- */
 
-.banner {
-  flex-shrink: 0;
-  padding: 8px var(--page-x);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-sunken);
-}
-
-.bannerBad {
-  /* 琥珀块的面收进 token（2026-10-12 深色第二遍）——同 NoteBar.noteBad */
-  background: var(--warn-surface);
-}
-
-.bannerText {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/*
+ * 2026-10-13：结果从"标签栏下面那条 in-flow 横幅"搬进**模态框**（作者：「上面这个什么
+ * 横幅也是改成模态框」）——横幅原来把内容整体压低一截；现在只占一层浮层，
+ * 关闭即还。标题与主句走 Modal 的 title / subtitle，这里只剩逐份明细。
+ */
+.bannerLines {
   margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-}
-
-.bannerClose {
-  margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: var(--fs-label);
-  color: var(--text-3);
-  cursor: pointer;
-}
-
-.bannerClose:hover {
-  color: var(--text-1);
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .bannerLine {
-  margin: 4px 0 0;
   font-size: var(--fs-label);
   color: var(--text-3);
+  line-height: 1.55;
 }
 
 /* ---------- 重名改名那一格 ---------- */

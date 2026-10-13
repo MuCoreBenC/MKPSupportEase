@@ -922,9 +922,9 @@ export default function PageParams({
             {u.pendingCount > 0 && (
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
-                  官方更新待选择 <b>{u.pendingCount}</b> 项
+                  云端更新待选择 <b>{u.pendingCount}</b> 项
                   {u.sync?.currentReleaseTime !== null && u.sync?.currentReleaseTime !== undefined
-                    ? `（官方 ${u.sync.currentReleaseTime}）`
+                    ? `（云端 ${u.sync.currentReleaseTime}）`
                     : ''}
                   <span className={s.syncBarHint}>
                     —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
@@ -941,11 +941,11 @@ export default function PageParams({
             */}
             {u.pendingCount === 0 && u.syncNeedsFetch && (
               <p className={s.warn}>
-                官方发了新版，但这一版的正文还没取回来 —— 取回之后这里会列出它改了哪几项
+                云端发了新版，但这一版的正文还没取回来 —— 取回之后这里会列出它改了哪几项
                 {u.sync?.basedOnReleaseTime != null ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）` : ''}
               </p>
             )}
-            {u.syncError !== null && <p className={s.warn}>官方更新这一条读不出来：{u.syncError}</p>}
+            {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
 
             {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
             {/*
@@ -1165,12 +1165,12 @@ export default function PageParams({
                   <>
                     以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
                     presets-mine/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
-                    （官方原件一个字不动）：
+                    （云端原件一个字不动）：
                   </>
                 ) : (
                   <>
                     以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
-                    （presets-mine/，官方原件一个字不动）：
+                    （presets-mine/，云端原件一个字不动）：
                   </>
                 )}
               </p>

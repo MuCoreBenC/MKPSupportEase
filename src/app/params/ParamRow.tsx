@@ -158,7 +158,7 @@ export default function ParamRow({
   const syncDecided = sync?.decided ?? null
   const diffText =
     sync !== undefined && sync.baselineOld !== null && sync.officialNew !== null
-      ? `官方 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.officialNew)}`
+      ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.officialNew)}`
       : null
 
   return (
@@ -202,13 +202,13 @@ export default function ParamRow({
              */}
             {syncPending && (
               <span className={s.syncNote}>
-                <span className={s.syncBadge}>官方已更新</span>
+                <span className={s.syncBadge}>云端已更新</span>
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
             {!syncPending && syncDecided !== null && (
               <span className={s.syncDecided}>
-                {syncDecided === 'adopt' ? '已采用官方新值' : '保持了我的值'}
+                {syncDecided === 'adopt' ? '已采用云端新值' : '保持原样'}
               </span>
             )}
           </span>
@@ -232,8 +232,8 @@ export default function ParamRow({
               disabled={syncBusy || sync?.officialNew === null}
               title={
                 sync?.officialNew === null
-                  ? '官方当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
-                  : `采用官方新值：把这一项写成 ${diffText ?? '官方当前值'}（写进我这份文件）`
+                  ? '云端当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
+                  : `采用云端新值：把这一项写成 ${diffText ?? '云端当前值'}（写进本地这份文件）`
               }
               onClick={() => onAdoptSync(def.key)}
             >
@@ -245,10 +245,10 @@ export default function ParamRow({
               type="button"
               className={s.syncBtnGhost}
               disabled={syncBusy}
-              title={`保持我的值：这一项写着的 ${savedText} 一个字不动（官方以后再改它还能再问你一次）`}
+              title={`保持原样：这一项写着的 ${savedText} 一个字不动（云端以后再改它还能再问你一次）`}
               onClick={() => onHoldSync(def.key)}
             >
-              保持我的
+              保持原样
             </button>
           )}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值） */}

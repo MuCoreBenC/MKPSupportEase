@@ -1717,6 +1717,31 @@ export interface CopyToSlicerOutcome {
   replaced: boolean
 }
 
+/* ---------- 切片软件（2026-10-13 第二刀：「其他应用…」从磁盘指定） ---------- */
+
+/**
+ * 打开模型用哪个切片软件（`app/shared/slicer.ts` 里那份 `SlicerId` 与它**逐字对齐**）。
+ *
+ * - `'system'` = 跟随系统关联（不指定应用，没选过时就是它）
+ * - `'bambu'` / `'orca'` = 内置的两家
+ * - `'custom'` = 用户**从磁盘指定**的那个 —— 路径随 `slicerApp` 一起给
+ *   （见 [`MkpApi.openModel`]）
+ */
+export type SlicerId = 'system' | 'bambu' | 'orca' | 'custom'
+
+/**
+ * 用户从磁盘挑的那个切片软件（[`MkpApi.pickSlicerApp`] 的返回值）。
+ *
+ * `path` 是**可执行物**（macOS 是 `.app` 包、Windows 是 `.exe`）。挑的时候就把
+ * `name` 一起取好 —— 界面直接拿来显示（下拉里那一条），壳不用再解析路径。
+ */
+export interface SlicerApp {
+  /** 显示名（如 `PrusaSlicer`） */
+  name: string
+  /** 可执行物绝对路径 */
+  path: string
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -1738,8 +1763,25 @@ export interface MkpApi {
    * `opts.slicer`（2026-10-13）：**用哪个切片软件打开**（`'system'` = 跟随系统关联，
    * 不指定应用）。不传 = 跟随系统 —— 旧调用一个都不用改；设置页「切片」那格是
    * 默认值，模态框里「仅这一次」覆盖的那一次由前端随调用带给壳。
+   *
+   * ★ `opts.slicerApp`（2026-10-13 第二刀）：`'custom'` 时**必须**带上 —— 那是用户
+   *   从磁盘指定的那个应用的可执行物路径（`SlicerApp.path`）。壳读不到 webview 的
+   *   localStorage，这个值只能由前端随调用递过去；不带就回落跟随系统。
    */
-  openModel(modelId: string, opts?: { slicer?: 'system' | 'bambu' | 'orca' }): Promise<void>
+  openModel(modelId: string, opts?: { slicer?: SlicerId; slicerApp?: string }): Promise<void>
+
+  /**
+   * **从磁盘挑一个切片软件**（设置页「切片」那格选「其他应用…」时走它，2026-10-13 第二刀）。
+   *
+   * 作者原话：「也可以打开软件去指定呀…就像比如说 macOS 打开那个文件管理器的时候，
+   * 就在 application」。做法按平台各自成熟的那一套：macOS 停在 `/Applications`
+   * （扫 `/Applications/*.app` 太脆 —— 扫出来的东西跟着系统版本漂），Windows 用标准
+   * 文件对话框挑 `.exe`。**走的是前端的对话框插件**（与 `pickExportDir` 同一条），
+   * 不新增 Rust 命令 —— 挑一个文件是界面上的事，产品里它不进后端账本。
+   *
+   * **取消给 `null`，不是错误**（与 `pickExportDir` 同一条口径）—— 什么都不写。
+   */
+  pickSlicerApp(): Promise<SlicerApp | null>
 
   /**
    * 首页「复制后处理脚本」要的**那一整条命令**（**当前平台、当前实例、真实落点**现拼）。

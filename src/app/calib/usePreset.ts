@@ -142,7 +142,8 @@ export function usePreset(sel: Selection): PresetState {
           path: copy?.path ?? file.path,
           axes,
           speed,
-          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存） */
+          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存）
+             ★ 本仓术语是 `mine`（试验场的 `local` 已改名，见 contract 的 ActiveOrigin） */
           mine: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
         presetCache.set(`${machine}/${version}`, preset)

@@ -277,9 +277,26 @@ export function AxisBar({
                   </label>
                 </>
               ) : view === 'loading' ? (
-                <Skeleton label="正在取预设" />
+                /*
+                 * 2026-10-13（作者：「它根本就不是最终的显示……当我选择了一个，它出现了
+                 * 之后，它会变大」）：值 / 正在取 / 还没有**三态同壳同尺寸** ——
+                 * 空态与取数中也住进读数壳（`axisField`），mm 留位不露脸（data-ghost），
+                 * 占位条宽度与输入框同（3.6em）。于是选预设那一刻：读数不再变宽、
+                 * 不再变高，下面的板子不会被顶开，X / Y 两列也不会挪位。
+                 */
+                <span className={p.axisField} data-readonly="true">
+                  <Skeleton width="3.6em" label="正在取预设" />
+                  <span className={p.axisUnit} data-ghost="true">
+                    mm
+                  </span>
+                </span>
               ) : (
-                <span className={p.axisBlank}>—</span>
+                <span className={p.axisField} data-readonly="true">
+                  <span className={p.axisBlank}>—</span>
+                  <span className={p.axisUnit} data-ghost="true">
+                    mm
+                  </span>
+                </span>
               )}
             </dd>
           </div>

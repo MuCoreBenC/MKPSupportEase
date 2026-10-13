@@ -46,7 +46,7 @@ import CalibReadings from './CalibReadings'
 import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 import { useIsDark } from '../state/appState'
-import { settleSlicerPick, useSlicerPick, useSlicerPref } from '../shared/slicer'
+import { slicerArgsOf, useSlicerAppPref, useSlicerPick, useSlicerPref } from '../shared/slicer'
 import { SlicerPickView } from '../shared/SlicerPickView'
 import s from './PageCalib.module.css'
 
@@ -215,11 +215,19 @@ function islandWidth(el: HTMLElement, from: number, to: number): Animation {
   return el.animate(frames, { duration: total * 1000, fill: 'forwards' })
 }
 
-export default function PageCalib() {
+interface PageCalibProps {
+  /**
+   * ★ 实验场专用（产品里没有这个口子）：平铺画廊要"三步各摆一格" —— 给一个起始步骤
+   * （见 `gallery/cells.tsx`；搬回产品时删掉）。
+   */
+  initialStep?: Step
+}
+
+export default function PageCalib({ initialStep }: PageCalibProps) {
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
-  const [step, setStep] = useState<Step>('z')
+  const [step, setStep] = useState<Step>(initialStep ?? 'z')
   const [sel, setSel] = useState<Selection>(EMPTY)
   /* 「先回『选择机型』……」只在没有基准**成为事实**之后才许出现 ——
      挂载初期选择还在路上（目录/底账没回来），这时候那句提示是错的建议，
@@ -315,6 +323,8 @@ export default function PageCalib() {
   const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
   /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
   const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
+  /* 设置页「其他应用…」指定的那个 —— 选着它时随 openModel 把路径带给壳（见 slicerArgsOf） */
+  const [slicerApp] = useSlicerAppPref()
   const slicerPick = useSlicerPick(defaultSlicer, opening !== null)
   const [pending, setPending] = useState<Step | null>(null)
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
@@ -358,8 +368,7 @@ export default function PageCalib() {
   const openCachedModel = () => {
     if (opening === null) return
     setModelBusy(true)
-    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
-    api.openModel(opening.id, { slicer }).then(
+    api.openModel(opening.id, slicerArgsOf(slicerPick, setDefaultSlicer, slicerApp)).then(
       () => {
         setModelBusy(false)
         setOpening(null)
@@ -376,11 +385,12 @@ export default function PageCalib() {
     if (opening === null || modelInfo === null) return
     setModelBusy(true)
     setModelErr(null)
-    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
+    /* 参数在点击这一刻就定下（含"写回默认"那一步）—— 与下面下载那一步的成败无关 */
+    const slicerArgs = slicerArgsOf(slicerPick, setDefaultSlicer, slicerApp)
     void (async () => {
       try {
         await api.downloadCatalogFile(modelInfo.fileName)
-        await api.openModel(opening.id, { slicer })
+        await api.openModel(opening.id, slicerArgs)
         setModelBusy(false)
         setOpening(null)
       } catch (e) {
@@ -508,7 +518,9 @@ export default function PageCalib() {
           <>
             <span>已保存</span>
             <span className={s.changeDot}>·</span>
-            <span className={s.changeList}>改动已写进「我的预设」</span>
+            {/* 2026-10-13：原来是「改动已写进『我的预设』」—— 「我的预设」那套说法
+                整条退役（作者：「我的一份、官方一份这些相关的都去掉」），只说结果 */}
+            <span className={s.changeList}>改动已经写进预设文件</span>
           </>
         )}
       </div>

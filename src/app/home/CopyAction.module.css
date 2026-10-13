@@ -4,26 +4,28 @@
   flex-direction: column;
   align-items: flex-start;
   align-self: flex-start;
-  gap: 7px;
 }
 
 /*
- * "现在还不能抄"的原因（按钮照摆，原因在下面一行）——
- * 不许拿隐藏按钮来盖住"预设还没就绪"：说清楚 + 下一步做什么。
+ * 2026-10-13：「抄不了」那颗气泡**从这里搬走了**（原来叫 `.toast`，绝对定位挂在
+ * 按钮下方）。
+ *
+ * 原因（作者：「不是啊，首页的那一个也是一样的，它是下面显示。你干嘛要放在这？
+ * 都被截断了」）：这颗按钮住在卡片的 `.info` 列里，而卡片 `.frame` 与 `.info`
+ * 两层都是 overflow: hidden —— 气泡挂在按钮正下方，一头压住读数表、一头被卡片裁掉。
+ *
+ * 现在原因由**页面底部那颗不占位的 `.scriptToast`** 说（与页脚「复制脚本」共用一颗，
+ * 见 PageHome 的 `scriptNote` 与 `.scriptToast`）：落位固定、不挤任何内容、不被子层裁。
+ * 于是这里不再需要 `position: relative` 的定位父级，也不再留 `gap`。
  */
-.hint {
-  max-width: 44ch;
-  color: var(--text-3);
-  font-size: 12px;
-  line-height: 1.55;
-}
 
 .btn {
   position: relative;
   flex-shrink: 0;
   padding: 9px 17px;
   border: 1px solid var(--text-1);
-  border-radius: 2px;
+  /* 2026-10-13：与全站按钮统一成**胶囊**（原来这里是 2px 方角，卡里唯一一颗方的） */
+  border-radius: 999px;
   color: var(--text-1);
   font-size: 12.5px;
   transition: background 0.14s ease, color 0.14s ease;

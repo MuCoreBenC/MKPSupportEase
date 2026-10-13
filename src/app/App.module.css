@@ -35,12 +35,16 @@
  * 三档中性灰：左上一点点提亮当"光"、右下压深、底线性收住。
  * 上沿那道白高光（::after 的第一条）在深色里从 90% 降到 6%：深底上它只是一道发丝，
  * 给 90% 会变成一条刺眼的白线。
+ *
+ * ★ 2026-10-13 晚：跟着 tokens 面族**一起去蓝**（`#232327→#232323`、`#1c1c1e→#1c1c1c`、
+ *   `#151517→#151515`）——窗底和页面是相邻的画布，一个中性、一个带蓝偏，摆在一起就又
+ *   成了"差几阶又差色相"。理由都记在 tokens.css 那条"面族去蓝"里。
  */
 [data-theme='dark'] .shell {
   background:
-    radial-gradient(120% 90% at 18% 0%, #232327 0%, transparent 55%),
-    radial-gradient(90% 80% at 92% 100%, #191a1c 0%, transparent 60%),
-    linear-gradient(135deg, #1c1c1e 0%, #151517 100%);
+    radial-gradient(120% 90% at 18% 0%, #232323 0%, transparent 55%),
+    radial-gradient(90% 80% at 92% 100%, #191919 0%, transparent 60%),
+    linear-gradient(135deg, #1c1c1c 0%, #151515 100%);
 }
 
 [data-theme='dark'] .shell::after {

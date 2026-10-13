@@ -136,7 +136,10 @@ button.usingNote:hover {
  * 预设 pill：绿色文件名 chip + 「切换」小字，点开抽屉。
  * 更早那两个下拉（`.picker`）已经去掉 —— 顶部只留这一件东西。
  * 颜色用项目既有的 token：淡绿底 --accent-soft、绿字 --accent（**没有** --brand 这套）。
- * 28px 高（与页内所有控件一条线）、圆角随页面 token 收到 4px。
+ * 28px 高（与页内所有控件一条线）。
+ *
+ * ★ 2026-10-13：圆角从 4px（--r-sm）改成**胶囊** —— 与首页校准卡右上角那颗是同一个
+ * 控件（作者：「这个按钮风格不对，要改成胶囊的……后面的也是一样」），全站同族同形状。
  */
 .presetPill {
   display: inline-flex;
@@ -145,9 +148,9 @@ button.usingNote:hover {
   min-width: 0;
   max-width: 340px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--accent-soft);
   color: var(--text-1);
   font: inherit;

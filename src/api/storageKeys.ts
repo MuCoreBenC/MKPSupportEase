@@ -52,8 +52,18 @@ export const STORAGE = {
   /* ★ `clientBbsDrawerMode`（`mkp.A40.bbs.drawerMode`）2026-10-13 退役：并排 / 浮层
      改成按窗口宽度自动决定（与报告页同一个判据），旧值留着不用即可（同上口径）。 */
 
-  /** 默认用哪个切片软件打开模型（`system` / `bambu` / `orca`，见 shared/slicer）。纯前端偏好 */
+  /**
+   * 默认用哪个切片软件打开模型（`system` / `bambu` / `orca` / `custom`，见 shared/slicer）。
+   * 纯前端偏好。`custom` 时配套的那个应用见 `clientSlicerApp`。
+   */
   clientSlicer: 'mkp.A40.slicer',
+
+  /**
+   * 从磁盘指定的那个切片软件（`{ name, path }`，见 `SlicerApp`）—— 设置页下拉
+   * 「其他应用…」挑出来的。切回内置档**不删它**（下次想切回来不用重挑）。
+   * 同样是纯前端偏好。
+   */
+  clientSlicerApp: 'mkp.A40.slicer.app',
 
   /**
    * 报告页导出框里那个「保存位置」（**上一次选过的父目录**）。

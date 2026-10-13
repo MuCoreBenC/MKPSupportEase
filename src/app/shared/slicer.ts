@@ -16,10 +16,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import type { SlicerApp } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
 
-/** 三档，**id 是给壳的契约**（跟随系统 = 交给系统关联程序，不指定具体应用） */
-export type SlicerId = 'system' | 'bambu' | 'orca'
+/** 四档，**id 是给壳的契约**（跟随系统 = 交给系统关联程序，不指定具体应用） */
+export type SlicerId = 'system' | 'bambu' | 'orca' | 'custom'
 
 export const SLICER_CHOICES: { id: SlicerId; label: string; hint: string }[] = [
   { id: 'system', label: '跟随系统默认', hint: '用 .3mf 关联的程序打开（没选过时就是这个）' },
@@ -27,13 +28,53 @@ export const SLICER_CHOICES: { id: SlicerId; label: string; hint: string }[] = [
   { id: 'orca', label: 'OrcaSlicer', hint: '总是交给 OrcaSlicer' },
 ]
 
+/**
+ * 设置页下拉里那条**动作项**（不是真的档位）：选中它 = 去磁盘挑一个（走
+ * `api.pickSlicerApp`）。与任何 `SlicerId` 都不同名，调用点就能一眼认出
+ * "这是动作、不是值" —— 动作不写盘，挑中才落（`PageSettings` 的 `pickSlicer`）。
+ */
+export const SLICER_CHOOSE = '__choose'
+
+/**
+ * 下拉里列出来的档：内置几档 +（按路径指定过就多一条）自定义应用。
+ *
+ * 形状 = 共用件 `SelectField` 的 `FieldOption`（`{ value, label, note }`，
+ * `note` 是弹层选项右边那列小字）。**设置页与「打开模型」框共用同一份** ——
+ * 两处列的东西必须一模一样，不然模态框的下拉认不出"当前默认就是自定义应用"。
+ *
+ * 自定义那条 label 只写应用名（"（你指定的）"由 note 承担）；完整路径太长，
+ * 不进弹层，摆在下拉下面那行（见 `PageSettings`）。
+ */
+export function slicerOptionsOf(
+  app: SlicerApp | null,
+): { value: SlicerId; label: string; note: string }[] {
+  const base = SLICER_CHOICES.map((c) => ({ value: c.id, label: c.label, note: c.hint }))
+  if (app === null) return base
+  return [...base, { value: 'custom', label: app.name, note: '你指定的' }]
+}
+
 /** 默认那一份（设置页写，打开模型读）。值不合法时回落到跟随系统 */
 export function useSlicerPref() {
   return useSyncedStickyState<SlicerId>(STORAGE.clientSlicer, 'system', isSlicerId)
 }
 
+/**
+ * 从磁盘指定的那个应用（`{ name, path }`）。切回内置档**不删它** ——
+ * 下次想切回来不用重挑（与"记住上一次"的偏好同一条口径）。
+ */
+export function useSlicerAppPref() {
+  return useSyncedStickyState<SlicerApp | null>(STORAGE.clientSlicerApp, null, isSlicerApp)
+}
+
 function isSlicerId(v: unknown): v is SlicerId {
-  return v === 'system' || v === 'bambu' || v === 'orca'
+  return v === 'system' || v === 'bambu' || v === 'orca' || v === 'custom'
+}
+
+function isSlicerApp(v: unknown): v is SlicerApp | null {
+  if (v === null) return true
+  if (typeof v !== 'object') return false
+  const o = v as { name?: unknown; path?: unknown }
+  return typeof o.name === 'string' && typeof o.path === 'string'
 }
 
 /**
@@ -42,7 +83,7 @@ function isSlicerId(v: unknown): v is SlicerId {
  * 不会重新挂载，纯 useStickyState 会显示旧值。写的时候顺手广播一个自定义事件，
  * storage 事件兜底跨标签页的场景。
  */
-function useSyncedStickyState<T extends string>(
+function useSyncedStickyState<T>(
   key: string,
   initial: T,
   is: (v: unknown) => v is T,
@@ -116,4 +157,21 @@ export function settleSlicerPick(
 ): SlicerId {
   if (!pick.once) setDefault(pick.value)
   return pick.value
+}
+
+/**
+ * 递给壳的那份「用哪个打开」（`api.openModel` 的 opts）—— 四个调用点都走这里：
+ * 1. `settleSlicerPick` 照旧（不勾「仅这一次」就把选择写回默认）；
+ * 2. 定的是 `'custom'` 时把**路径**一起带上（壳读不到 webview 的 localStorage）；
+ *    记录不在（清过缓存）就回落跟随系统 —— 不递一个壳解析不了的值。
+ */
+export function slicerArgsOf(
+  pick: { value: SlicerId; once: boolean },
+  setDefault: (id: SlicerId) => void,
+  app: SlicerApp | null,
+): { slicer: SlicerId; slicerApp?: string } {
+  const picked = settleSlicerPick(pick, setDefault)
+  if (picked !== 'custom') return { slicer: picked }
+  if (app === null) return { slicer: 'system' }
+  return { slicer: 'custom', slicerApp: app.path }
 }

@@ -818,7 +818,26 @@ export const mockApi: MkpApi = {
 
   async openModel(modelId, opts) {
     /* 浏览器里没有壳、真开不了 —— 把「用哪个打开」照实说出来，真开由桌面版接 */
-    console.info('[mock] openModel', modelId, 'slicer =', opts?.slicer ?? 'system')
+    console.info(
+      '[mock] openModel',
+      modelId,
+      'slicer =',
+      opts?.slicer ?? 'system',
+      'slicerApp =',
+      opts?.slicerApp ?? '',
+    )
+  },
+
+  /*
+   * 「其他应用…」—— 浏览器里没有系统选择器，给一份"从选择器来的"演示应用
+   * （与 `pickImportFiles` 同一路数：只把流程走通，不装文件系统）。
+   * 真机上由 Rust `pick_slicer_app` 给真路径（macOS 是 `.app`、Windows 是 `.exe`）。
+   */
+  async pickSlicerApp() {
+    const mac = /Mac/i.test(navigator.userAgent)
+    return mac
+      ? { name: 'PrusaSlicer', path: '/Applications/PrusaSlicer.app' }
+      : { name: 'PrusaSlicer', path: 'C:\\Program Files\\Prusa3D\\PrusaSlicer\\prusa-slicer.exe' }
   },
 
   /*

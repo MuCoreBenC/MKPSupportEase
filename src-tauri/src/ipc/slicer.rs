@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 
-/// 前端那一格的三个 id。**与 `src/app/shared/slicer.ts` 的 `SlicerId` 一一对应**
+/// 前端那一格的四个 id。**与 `src/app/shared/slicer.ts` 的 `SlicerId` 一一对应**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlicerKind {
     /// 跟随系统关联程序（默认；不传参数时也是这一档）
@@ -34,6 +34,9 @@ pub enum SlicerKind {
     Bambu,
     /// OrcaSlicer
     Orca,
+    /// 用户**从磁盘指定**的那个（2026-10-13 第二刀）。本机没有固定落脚 ——
+    /// 可执行物路径由前端随 `open_model` 一起递过来（壳读不到 webview 的 localStorage）。
+    Custom,
 }
 
 impl SlicerKind {
@@ -43,8 +46,9 @@ impl SlicerKind {
             None | Some("") | Some("system") => Ok(Self::System),
             Some("bambu") => Ok(Self::Bambu),
             Some("orca") => Ok(Self::Orca),
+            Some("custom") => Ok(Self::Custom),
             Some(other) => Err(AppError::invalid_argument(format!(
-                "不认识的切片软件：{other}（只有 system / bambu / orca 三档）"
+                "不认识的切片软件：{other}（只有 system / bambu / orca / custom 四档）"
             ))),
         }
     }
@@ -55,6 +59,7 @@ impl SlicerKind {
             Self::System => "system",
             Self::Bambu => "bambu",
             Self::Orca => "orca",
+            Self::Custom => "custom",
         }
     }
 
@@ -64,6 +69,7 @@ impl SlicerKind {
             Self::System => "系统默认程序",
             Self::Bambu => "Bambu Studio",
             Self::Orca => "OrcaSlicer",
+            Self::Custom => "你指定的应用",
         }
     }
 }
@@ -77,7 +83,8 @@ fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
     let bundle = match kind {
         SlicerKind::Bambu => "BambuStudio.app",
         SlicerKind::Orca => "OrcaSlicer.app",
-        SlicerKind::System => return Vec::new(),
+        /* 指定的那个没有落脚：路径由前端递过来（`launch_with`） */
+        SlicerKind::System | SlicerKind::Custom => return Vec::new(),
     };
     let mut out = vec![PathBuf::from("/Applications").join(bundle)];
     if let Some(home) = std::env::var_os("HOME") {
@@ -91,7 +98,8 @@ fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
     let (dir, exe) = match kind {
         SlicerKind::Bambu => ("Bambu Studio", "bambu-studio.exe"),
         SlicerKind::Orca => ("OrcaSlicer", "orca-slicer.exe"),
-        SlicerKind::System => return Vec::new(),
+        /* 同上：指定的那个没有落脚 */
+        SlicerKind::System | SlicerKind::Custom => return Vec::new(),
     };
     let mut out = Vec::new();
     for var in ["ProgramFiles", "ProgramFiles(x86)"] {
@@ -126,21 +134,27 @@ pub fn launch(kind: SlicerKind, file: &Path) -> Result<(), AppError> {
             kind.label()
         )));
     };
+    launch_with(&target, kind.label(), file)
+}
 
+/// 把一份模型交给**一个明说了在哪**的应用打开（2026-10-13 第二刀的 `custom` 档走这里）。
+///
+/// 路径是前端从系统对话框挑的（macOS 是 `.app` 包、Windows 是 `.exe`），这一侧**不猜、
+/// 不补后缀**：不在盘上就是不在，照实报 `NOT_FOUND`（让人回设置页重挑）。
+pub fn launch_with(target: &Path, label: &str, file: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "macos")]
     let spawned = std::process::Command::new("/usr/bin/open")
         .arg("-a")
-        .arg(&target)
+        .arg(target)
         .arg(file)
         .spawn();
 
     #[cfg(not(target_os = "macos"))]
-    let spawned = std::process::Command::new(&target).arg(file).spawn();
+    let spawned = std::process::Command::new(target).arg(file).spawn();
 
     spawned.map(|_| ()).map_err(|e| {
         AppError::io(format!(
-            "{} 没打开这个文件（应用在 {}）",
-            kind.label(),
+            "{label} 没打开这个文件（应用在 {}）",
             target.display()
         ))
         .with_detail(e.to_string())
@@ -162,6 +176,12 @@ mod tests {
         );
         assert_eq!(SlicerKind::parse(Some("bambu")).unwrap(), SlicerKind::Bambu);
         assert_eq!(SlicerKind::parse(Some("orca")).unwrap(), SlicerKind::Orca);
+        /* 「从磁盘指定的那个」：认得，但它没有落脚 —— 路径由前端递过来 */
+        assert_eq!(
+            SlicerKind::parse(Some("custom")).unwrap(),
+            SlicerKind::Custom
+        );
+        assert!(locate(SlicerKind::Custom).is_none());
         /* 认不出来就整次拒绝：不静默换成 system —— 那等于把用户点的当没听见 */
         for bad in ["prusa", "Bambu", "bamboo", "orcaslicer"] {
             assert!(SlicerKind::parse(Some(bad)).is_err(), "{bad} 该被拒");
