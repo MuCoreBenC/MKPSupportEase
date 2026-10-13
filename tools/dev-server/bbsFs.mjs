@@ -1,7 +1,25 @@
 /**
  * 本机 BBS 工艺预设的**只读**端点（只在 serve 期生效：dev 与 preview 都挂）。
- * 搬自试验场 `tools/dev-server/bbsFs.mjs`（它又搬自 machine-motion/vite.config.js 的
- * `mm-bbs-presets`），安全边界一条没删。
+ *
+ * 来历：machine-motion 的 `mm-bbs-presets` → 试验场 `tools/dev-server/bbsFs.mjs` →
+ * 这里。安全边界一条没删。
+ *
+ * ★ 2026-10-13：**这一份从"只认 Windows"改成三平台**（搬试验场那份，作者在 mac 上
+ *   验过）。旧版只读 `%APPDATA%\BambuStudio\system\BBL\process`，于是 mac 上这一页
+ *   一直是空态 —— 而 mac 的**系统预设根本不在数据根下，在 app 包里**：
+ *
+ *     系统预设（出厂，278 份那一档）
+ *       macOS   /Applications/BambuStudio.app/Contents/Resources/profiles/BBL/process
+ *               ↑ 在 app 包里，不在 ~/Library 下
+ *       Windows %APPDATA%\BambuStudio\system\BBL\process
+ *       Linux   ~/.config/BambuStudio/system/BBL/process
+ *     用户预设（自己另存的，按账号分目录）
+ *       macOS   ~/Library/Application Support/BambuStudio/user/<uid>/process
+ *       Windows %APPDATA%\BambuStudio\user/<uid>/process
+ *       Linux   ~/.config/BambuStudio/user/<uid>/process
+ *
+ *   两层**分别判存在**：有一层就算有（只装了、没跑过就没有用户层，那半页照常能看）。
+ *   mac 上 app 包先看 `~/Applications`，再看 `/Applications`；正式版优先、找不到才退 Beta。
  *
  * # 为什么读本机目录
  *
@@ -11,6 +29,13 @@
  * 页面另外要的四份元数据（registry / layout / defaults / icons）不在此列 —— 那是提取器
  * 的产物，随本仓分发，见 `public/bbs/PROVENANCE.md`。
  *
+ * # 打包版那边怎么读同一件事
+ *
+ * 这个端点**只活在 serve 期**（`apply: 'serve'`，`vite build` 的产物里没有它），
+ * 而打包后的桌面版既没有 dev server 也没有 preview server ⇒ 那一边要读本机目录得
+ * **走 IPC**（Rust 命令）。返回的 JSON 形状与此处逐字段一致
+ * （`available / app / root / user[] / system[]`），所以前端取数层不用为两边写两套解析。
+ *
  * # 为什么 preview 也要挂
  *
  * `npm run dev` 在本机会被 `target/` 那两棵构建树（5.8 万文件）拖死文件监听，HTTP 全超时；
@@ -18,7 +43,7 @@
  * 那台服务器上根本不存在，探针就验不了「278 份那一档」。两个钩子共用同一段 handler。
  *
  * 两个端点：
- *   GET /api/bbs/presets              → { available, root, user[], system[] }
+ *   GET /api/bbs/presets              → { available, app, root, user[], system[] }
  *   GET /api/bbs/preset?scope&uid&file → 那一份 json 的**原文透传**
  *
  * 安全边界（这是个**无鉴权**端点，下面每条都别删）：
@@ -40,6 +65,7 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
+import { homedir, platform } from 'node:os'
 
 const BBS_APPDIRS = ['BambuStudio', 'BambuStudioBeta']   // 正式版优先，找不到才退 Beta
 const MAX_PRESET_BYTES = 1024 * 1024
@@ -51,33 +77,54 @@ const json = (res, code, body) => {
   res.end(JSON.stringify(body))
 }
 
-function bbsLayout() {
-  const appdata = process.env.APPDATA
-  if (!appdata) {
-    return { available: false, reason: '环境变量 APPDATA 不存在（这端点只认 Windows 上的 BBS）' }
+/** 系统层：macOS 在 app 包里，Win/Linux 在数据根下的 system/BBL/process */
+function systemDirs(app) {
+  if (platform() === 'darwin') {
+    return [
+      join(homedir(), 'Applications', `${app}.app`, 'Contents', 'Resources', 'profiles', 'BBL', 'process'),
+      join('/Applications', `${app}.app`, 'Contents', 'Resources', 'profiles', 'BBL', 'process'),
+    ]
   }
+  const base = appDataBase()
+  return base ? [join(base, app, 'system', 'BBL', 'process')] : []
+}
+
+/** 用户层：macOS ~/Library/Application Support，Win %APPDATA%，Linux ~/.config */
+function userBaseDirs(app) {
+  if (platform() === 'darwin') return [join(homedir(), 'Library', 'Application Support', app, 'user')]
+  const base = appDataBase()
+  return base ? [join(base, app, 'user')] : []
+}
+
+function appDataBase() {
+  if (platform() === 'win32') return process.env.APPDATA || null
+  return homedir() ? join(homedir(), '.config') : null
+}
+
+/**
+ * 找第一棵真有预设的树。两层都可能缺（装了没跑过就没有用户层），有一层就算有。
+ */
+function bbsLayout() {
   for (const app of BBS_APPDIRS) {
-    const root = join(appdata, app)
-    const system = join(root, 'system', 'BBL', 'process')
-    if (!existsSync(system)) continue
-    /* user 下按账号分目录（数字 uid，另有 BBL / default 这种），只认里面真有 process/ 的 */
-    const userBase = join(root, 'user')
-    const uids = existsSync(userBase)
+    const system = systemDirs(app).find((d) => existsSync(d)) ?? ''
+    const userBase = userBaseDirs(app).find((d) => existsSync(d)) ?? ''
+    const uids = userBase
       ? readdirSync(userBase, { withFileTypes: true })
         .filter((e) => e.isDirectory() && existsSync(join(userBase, e.name, 'process')))
         .map((e) => e.name)
       : []
-    return { available: true, app, root, system, userBase, uids }
+    if (system === '' && uids.length === 0) continue
+    return { available: true, app, system, userBase, uids, root: system || userBase }
   }
-  return {
-    available: false,
-    reason: `%APPDATA% 下没找到 ${BBS_APPDIRS.join(' / ')}\\system\\BBL\\process`,
-  }
+  const where = platform() === 'darwin'
+    ? '/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/process'
+    : '%APPDATA%\\BambuStudio\\system\\BBL\\process'
+  return { available: false, reason: `本机没找到 ${BBS_APPDIRS.join(' / ')} 的工艺预设目录（这一档找的是 ${where}）` }
 }
 
 function scanDir(dir, scope, uid) {
   const out = []
-  if (!existsSync(dir)) return out
+  if (!dir || !existsSync(dir)) return out
   for (const f of readdirSync(dir)) {
     if (!f.toLowerCase().endsWith('.json')) continue
     const full = join(dir, f)
@@ -85,6 +132,7 @@ function scanDir(dir, scope, uid) {
     let doc = null
     let broken = null
     try { st = statSync(full) } catch { continue }
+    if (!st.isFile()) continue
     try { doc = JSON.parse(readFileSync(full, 'utf8')) }
     catch (e) { broken = e.message }      // 坏文件也要列出来，让前端标灰而不是悄悄少一项
     out.push({
@@ -143,6 +191,9 @@ function install(server) {
           return json(res, 400, { error: 'uid 不在已扫到的账号目录里' })
         }
         dir = join(lay.userBase, uid, 'process')
+      }
+      if (!dir || !existsSync(dir)) {
+        return json(res, 404, { error: `本机没有 ${scope} 层的工艺预设目录` })
       }
       const full = resolve(dir, file)
       /* join 完再确认一次：resolve 之后仍必须在白名单目录之下 */

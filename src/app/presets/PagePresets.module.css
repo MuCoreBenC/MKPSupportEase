@@ -482,7 +482,9 @@
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--fs-label);
-  color: var(--text);
+  /* 这一格是**文件名**（主文字），走 --text-1。原来写的是 `var(--text)` ——
+     全仓没有这个变量、也没有兜底，于是颜色一直是继承来的（2026-10-13 修）。 */
+  color: var(--text-1);
 }
 
 .archMeta {
@@ -780,7 +782,8 @@
   background: transparent;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--fs-label);
-  color: var(--text);
+  /* 改名框里敲的就是新文件名（主文字）—— 同 .archName，原 `var(--text)` 是不存在的变量 */
+  color: var(--text-1);
 }
 
 .renameInput:focus-visible {
