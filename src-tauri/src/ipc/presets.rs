@@ -952,16 +952,34 @@ pub fn get_slicer_copied(app: AppHandle) -> Result<Vec<String>, AppError> {
     })
 }
 
+/// 「复制进切片器」这一次干了什么：`replaced` = 目标那儿**原来已经有一份同名的**，
+/// 这一手把它换成了我们这份（false = 新建）。
+///
+/// 提示条按它说话 —— 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
+/// 不合并成一句"已复制"。
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyOutcome {
+    pub replaced: bool,
+}
+
 /// 把一份切片器配置复制进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
 /// （MKP 预设的生效是「启用」，两回事）。
 ///
-/// 三种真实的失败照实抛，不吞：
+/// 两条真实的失败照实抛，不吞：
 /// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型复制过去没有意义）；
 /// - 本机还没有这份文件的字节（先「下载」）；
-/// - 目标位置已经有同名文件（**不覆盖** —— 那份可能被用户在切片器里改过，静默盖掉
-///   等于删用户数据。要换新，先在切片器里删掉旧的）。
+/// - 找不到切片器的用户配置目录（没装那个应用 / 没打开过）。
+///
+/// ★ **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
+///   原来是拒的，理由是"那份可能被用户在切片器里改过"。作者口径优先：这一手就是
+///   「把切片器里那份换成我们这份」，不再要求先自己去切片器里删。
+///
+///   覆盖走**原子替换**（[`crate::fsx::atomic::atomic_write`]：同目录临时文件 → rename），
+///   切片器正开着也不会读到半个文件；盘上那份与源**一个字节不差**时连动都不动
+///   （mtime 也不变）。
 #[tauri::command]
-pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError> {
+pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, AppError> {
     traced("copyToSlicer", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
@@ -992,16 +1010,18 @@ pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError>
             )
         })?;
         let target = dir.join(&file.file_name);
-        if target.exists() {
-            return Err(AppError::io(format!(
-                "切片器目录里已经有 {file_name} 了 —— 要换新先在切片器里删掉旧的那份"
-            ))
-            .with_detail(target.display().to_string()));
-        }
-        std::fs::copy(&source, &target)
-            .map_err(|e| AppError::io("复制进切片器目录失败").with_detail(e.to_string()))?;
-        tracing::info!(file = %file_name, target = %target.display(), "已复制进切片器目录");
-        Ok(())
+        let replaced = target.is_file();
+        let bytes = std::fs::read(&source)
+            .map_err(|e| AppError::io("读不出这一份的字节").with_detail(e.to_string()))?;
+        /* 原子替换：同目录临时文件 → rename（切片器正开着也不会读到半个） */
+        crate::fsx::atomic::atomic_write(&target, &bytes)?;
+        tracing::info!(
+            file = %file_name,
+            target = %target.display(),
+            replaced,
+            "已复制进切片器目录"
+        );
+        Ok(CopyOutcome { replaced })
     })
 }
 

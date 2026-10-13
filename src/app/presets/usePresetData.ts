@@ -61,6 +61,7 @@ import { deliveryMutated, useDeliveryRevision, useSourceRevision } from '../stat
 import { draftMutated, useDraftRevision } from '../state/draftState'
 import type {
   ActivePreset,
+  CopyToSlicerOutcome,
   ArchivedFile,
   CommittedDraft,
   DownloadOutcome,
@@ -255,8 +256,13 @@ export interface PresetData {
    * 撤掉的是"哪一份在生效"这个指向，磁盘上的预设一个字节不动。
    */
   clearApply: () => Promise<void>
-  /** 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上 */
-  copy: (assetId: string) => Promise<void>
+  /**
+   * 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上。
+   *
+   * 回来给一句结果（`replaced`）：**那格同名就换掉**（2026-10-13 作者改判）——
+   * 提示条按它说清这次是新放了一份，还是把原来那份替换了。
+   */
+  copy: (assetId: string) => Promise<CopyToSlicerOutcome>
   /**
    * 「下载」目录里登记的那一份：走新世界下载管道（`api.downloadCatalogFile(fileName)`），
    * 落进下载区 `mkp/`。盘上那一份对不上目录时（需更新）走的是**同一条路** ——
@@ -862,10 +868,14 @@ export function usePresetData(importRevision = 0): PresetData {
   /*
    * 切片器的「生效」= 复制进切片器自己的用户配置目录。**键是文件名**
    * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径），真机落盘、假后端改内存。
+   *
+   * **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
+   * 后端原子替换，回来的 `replaced` 说这次是新放还是替换，提示条按它说话。
    */
   const copy = useCallback(async (fileName: string) => {
-    await api.copyToSlicer(fileName)
+    const outcome = await api.copyToSlicer(fileName)
     setSlicerCopied(await api.getSlicerCopied())
+    return outcome
   }, [])
 
   /*

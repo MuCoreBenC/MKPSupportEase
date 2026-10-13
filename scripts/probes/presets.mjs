@@ -175,35 +175,40 @@ if (mkpTable.heads.includes('时间')) {
   problems.push('资源库那一档不该有「时间」列（行上只有来源 / 机型 / 版本 / 操作）')
 }
 
-/* ---------- 2′. 「使用」那一手（2026-10-13 修过一处漏参，钉住它别再退化） ----------
+/* ---------- 2″. 「复制进切片器」那一手：成功 + 提示条只说人话 ----------
  *
- * 那天真机上点「使用」报的是「目录里没有 presets-mine/A1_MINI-fast.toml」：
- * 前端把**路径**当文件名传了下去、`origin` 又缺省成 `official`，后端于是拿带前缀的
- * 那串去**交付目录**里找。假后端对这件事的判据是 `origin === 'mine'` + `path` 命中，
- * 所以"只传一个参数"在浏览器里也会失败 —— 这一节就是那一下。
+ * 两条口径在这一节上量：
+ *   ① 复制成功，行上从「复制」翻成「已复制」（生效状态以盘/内存为准）；
+ *   ② 提示条**不印落点路径**这类技术细节（2026-10-13 作者：「这些技术细节不需要
+ *      让用户知道」）—— 文件在哪儿，行上右键那两条「显示…文件夹」负责。
+ *
+ * ★ 「同名就覆盖」（同一天作者改判）在这一节验不到：**一份复制完，行上那颗按钮就变成
+ *   灰字「已复制」**，同一个 UI 点不了第二遍，而"第二遍"才是替换。那半句在真机上由
+ *   Rust `copy_to_slicer` 的 `replaced` 负责（假后端的 `copyToSlicerIn` 同一个语义）。
  */
-await rad('preset-kind', 'mkp').click({ force: true })
-await page.waitForTimeout(300)
-const useRow = page.locator('main tbody tr[data-rowkey^="mine:"]', {
-  has: page.getByRole('button', { name: '使用', exact: true }),
-})
-const useCount = await useRow.count()
-if (useCount === 0) {
-  problems.push('资源库里没有能点「使用」的我的文件行 —— 这一节等于没验')
+await rad('preset-kind', 'slicer').click({ force: true })
+await page.waitForTimeout(250)
+await scope('local')
+const copyRow = page
+  .locator('main tbody tr', { has: page.getByRole('button', { name: '复制', exact: true }) })
+  .first()
+if ((await copyRow.count()) === 0) {
+  problems.push('切片器本地表里没有可点「复制」的行 —— 这一节等于没验')
 } else {
-  const name = await useRow.first().locator('td').first().innerText().catch(() => '')
-  await useRow.first().getByRole('button', { name: '使用', exact: true }).click()
-  await page.waitForFunction(
-    () => /已使用|使用失败/.test(document.body.innerText),
-    { timeout: 5000 },
-  )
-  const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '))
-  const okLine = /已使用[^。]*/.exec(body)?.[0] ?? ''
-  const badLine = /使用失败[^。]*/.exec(body)?.[0] ?? ''
-  if (badLine !== '' || okLine === '') {
-    problems.push(`「使用」这一手失败了：${badLine || '(没有任何回话)'}`)
+  const copyName = (await copyRow.locator('td').first().innerText().catch(() => ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+  await copyRow.getByRole('button', { name: '复制', exact: true }).click()
+  await page.waitForFunction(() => /已复制|复制失败/.test(document.body.innerText), { timeout: 5000 })
+  await page.waitForTimeout(300)
+  const copyBody = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '))
+  const copyLine =
+    /已复制[^。]*/.exec(copyBody)?.[0] ?? /复制失败[^。]*/.exec(copyBody)?.[0] ?? '(没有回话)'
+  if (/复制失败/.test(copyBody)) problems.push(`「复制」这一手失败了：${copyLine}`)
+  if (/assets|user\/<|presets-mine|Bambu Studio/.test(copyLine)) {
+    problems.push(`「复制」的提示条里不该出现落点路径这类技术细节：${copyLine}`)
   }
-  console.log(`\n[使用] ${name.replace(/\s+/g, ' ').trim().slice(0, 40)} → ${badLine || okLine}`)
+  console.log(`\n[复制] ${copyName.slice(0, 40)} → ${copyLine}`)
 }
 
 /** 展开详情里每一格的值（dt 文案 → dd 文案）—— 好几节都要读它 */
@@ -419,9 +424,19 @@ if ((await useBtn.count()) === 0) {
       document.querySelector('main [role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
   )
   console.log(`[资源库] 点「使用」之后提示条：${useNote || '(没有提示条)'}`)
+  /*
+   * ★ **成功**才是判据（2026-10-13 改严）——本地表那颗「使用」原本**一份都点不动**：
+   *   前端把路径当文件名传下去、来源又缺省成 `official`，后端于是拿
+   *   `presets-mine/A1_MINI-fast.toml` 这串**带前缀的路径**去交付目录里找，回一句
+   *   「目录里没有 presets-mine/…」。
+   *
+   *   这条原来写成"已使用 / 已取回 / 失败都给一句人话算过"，于是**那个失败也算通过** ——
+   *   探针红着也没人看得出来（它还崩在更后面，problems 列表根本没打印）。
+   *   这一手在浏览器里也走得通（假后端认 `origin === 'mine'` + `path`），所以判据就是成功。
+   */
   if (useNote === '') problems.push('点「使用」之后没有提示条')
-  else if (!/已使用|已取回|失败/.test(useNote)) {
-    problems.push(`点「使用」该给一句人话（已使用 / 已取回并使用 / 失败），实测「${useNote}」`)
+  else if (!/已使用|已取回/.test(useNote)) {
+    problems.push(`点「使用」该成功（后端按闸校验后写底账），实测「${useNote}」`)
   }
 }
 await page.screenshot({ path: `${shotDir}/presets-assets.png` })

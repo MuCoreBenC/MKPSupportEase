@@ -1424,8 +1424,9 @@ export const mockApi: MkpApi = {
   },
 
   async copyToSlicer(fileName) {
-    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多 */
-    copyToSlicerIn(fileName)
+    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多。
+       同一份复制第二遍就是「替换」（真机上切片器目录里那份被换成我们这份） */
+    return { replaced: copyToSlicerIn(fileName) }
   },
 
   /*
