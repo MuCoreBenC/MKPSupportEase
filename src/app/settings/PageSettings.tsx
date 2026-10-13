@@ -10,6 +10,16 @@
  * 信息源 = 仓库根的 `release.json`（`presets/` 之外，不是预设数据）：这是下半新开的一口，
  * 与 catalog 无关。检查**只在打开这一页时**发生（铁律 2：云端不参与首屏）。
  *
+ * # 执行记录（2026-10-13 作者口径）
+ *
+ * 后处理每跑一次都在盘上留三件套（原件备份 / 输出 / 执行记录），攒久了很占地方
+ * （作者当时已经 400MB）。这一块只有一个开关：**自动清理旧记录**，默认开着。
+ *
+ * 它**不是"存几天就删"**：纯按日历天数清会犯一个具体的错 —— 用户停用一个月再回来，
+ * 最后一次的那条记录也被带走了。所以清理按「条数 + 空间」双限、**最新那条永远留着**，
+ * 且全程**静默**（不提示、不打扰，记录页里直接少几条）。动手的是 Rust 侧
+ * （`retention`，触发点是启动与每次后处理跑完），这一页只管把这一档写下来。
+ *
  * # 高级设置（第二块）
  *
  * 为什么数据源住这里（作者裁决，「同步」页退役那一刀）：
@@ -89,6 +99,15 @@ export default function PageSettings() {
   const [themeErr, setThemeErr] = useState<string | null>(null)
 
   /*
+   * 执行记录的自动清理（「执行记录」那一块）：`null` = 还没读到（开关先禁用，
+   * **不拿一个猜出来的默认值顶上去**）。读得回来才让点 —— 点一下立即落盘，
+   * 失败**不改开关**、只把原因摆出来（界面上显示的永远是盘上真账，与主题同一口径）。
+   */
+  const [autoClean, setAutoClean] = useState<boolean | null>(null)
+  const [autoCleanBusy, setAutoCleanBusy] = useState(false)
+  const [autoCleanErr, setAutoCleanErr] = useState<string | null>(null)
+
+  /*
    * 切片（「切片」那一块）：默认用哪个切片软件打开模型。纯前端偏好 ——
    * 落 localStorage（`shared/slicer`），不走 AppState：壳将来打开模型时由前端
    * 把这个值随 `openModel` 调用带给它。选上**立即生效**（与主题同一条口径）。
@@ -143,6 +162,25 @@ export default function PageSettings() {
   useEffect(() => {
     void checkUpdate()
   }, [checkUpdate])
+
+  /*
+   * 自动清理那一格：**只在打开这一页时读一次**（它不参与首屏，也不联网）。
+   * 读不出来就留在 `null`（开关禁用 + 把原因摆出来）—— 这一格**不许猜**：
+   * 猜出来的默认值迟早与真正在跑清理的那一侧漂开。
+   */
+  const readAutoClean = useCallback(async () => {
+    try {
+      setAutoClean(await api.getAutoCleanHistory())
+      setAutoCleanErr(null)
+    } catch (e) {
+      setAutoClean(null)
+      setAutoCleanErr(`读不出来：${errorText(e)}`)
+    }
+  }, [])
+
+  useEffect(() => {
+    void readAutoClean()
+  }, [readAutoClean])
 
   /** 在系统浏览器里打开 Release 页（**走命令**，不走 `<a>`） */
   const openReleasePage = async (url: string) => {
@@ -217,6 +255,23 @@ export default function PageSettings() {
       setThemeErr(errorText(e))
     } finally {
       setThemeBusy(false)
+    }
+  }
+
+  /*
+   * 开关自动清理：**立即生效**（与主题同一条口径 —— 开关本身就是明确的意图）。
+   * 写完拿回传值校准这一格；失败**不动开关**，只把原因讲成人话（见上面）
+   */
+  const pickAutoClean = async (next: boolean) => {
+    if (autoCleanBusy) return
+    setAutoCleanBusy(true)
+    setAutoCleanErr(null)
+    try {
+      setAutoClean(await api.setAutoCleanHistory(next))
+    } catch (e) {
+      setAutoCleanErr(`没改成：${errorText(e)}`)
+    } finally {
+      setAutoCleanBusy(false)
     }
   }
 
@@ -333,6 +388,47 @@ export default function PageSettings() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/*
+       * 执行记录（2026-10-13 作者口径）：后处理每跑一次都在盘上留三件套（原件 / 输出 /
+       * 执行记录），攒久了很占地方（作者当时已 400MB）—— 这一格管"要不要自动清"。
+       *
+       * ★ 措辞刻意**只说"最近 20 条"**，不写"存几天"：清理不按日历天数走
+       *（那会让"停用一个月再回来"的用户连最后一次的记录一起丢），这个口径说不出来。
+       * 也不写"清了多少"——清理是静默的，界面不报账。
+       */}
+      <section className={s.section} aria-label="执行记录">
+        <h2 className={s.secTitle}>执行记录</h2>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>自动清理执行记录</div>
+          <p className={s.fieldNote}>
+            每跑一次后处理都会存下原件、输出与执行记录，攒久了很占地方。开着时只保留最近
+            20 条，更旧的会被自动清掉 —— 清理不打扰你（执行记录页里直接少几条）；
+            最新那条永远留着，停用多久回来都还在。
+          </p>
+
+          <label className={s.switch}>
+            <input
+              type="checkbox"
+              checked={autoClean ?? false}
+              onChange={(e) => void pickAutoClean(e.target.checked)}
+              disabled={autoClean === null || autoCleanBusy}
+            />
+            <span>
+              {autoClean === null
+                ? '自动清理（还没读到这一档）'
+                : autoClean
+                  ? '自动清理：开 —— 只保留最近 20 条，更旧的静默清掉'
+                  : '自动清理：关 —— 记录一直留着'}
+            </span>
+          </label>
+        </div>
+
+        {autoCleanErr !== null && (
+          <p className={`${s.note} ${s.noteBad}`}>{autoCleanErr}</p>
+        )}
       </section>
 
       {/*

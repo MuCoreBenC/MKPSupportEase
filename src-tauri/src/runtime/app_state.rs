@@ -152,6 +152,13 @@ pub struct AppStateFile {
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,
+    /// **后处理记录自动清理**（2026-10-13）：开着时按「条数 + 空间」双限静默清掉最旧的
+    /// 执行记录（见 [`crate::retention`]）。
+    ///
+    /// `None` = **还没选过 ⇒ 开着**（出厂默认）。与主题那一格同一个读法（"没选过"
+    /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clean_history: Option<bool>,
 }
 
 impl Default for AppStateFile {
@@ -164,6 +171,7 @@ impl Default for AppStateFile {
             preset_source: None,
             param_decisions: BTreeMap::new(),
             theme: None,
+            auto_clean_history: None,
         }
     }
 }
@@ -230,6 +238,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         param_decisions: BTreeMap::new(),
         /* 主题这一格是 2026-10-12 才有的：旧档里本来就没有它（没选过 = None） */
         theme: None,
+        /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
+        auto_clean_history: None,
     })
 }
 
@@ -509,6 +519,24 @@ pub fn set_theme(root: &Path, pref: ThemePref) -> Result<ThemePref, AppError> {
     with_state(root, |state| {
         state.theme = Some(pref);
         Ok(pref)
+    })
+}
+
+/* ---------- autoCleanHistory：执行记录的自动清理开关 ---------- */
+
+/// 自动清理开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+///
+/// 读者是清理那两条入口（[`crate::retention`]）—— 界面不直接读它，
+/// 设置页那一格走 `ipc::prefs` 的命令。
+pub fn auto_clean_history(root: &Path) -> Result<bool, AppError> {
+    Ok(load(root)?.auto_clean_history.unwrap_or(true))
+}
+
+/// 记下自动清理开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        state.auto_clean_history = Some(enabled);
+        Ok(enabled)
     })
 }
 
@@ -867,6 +895,24 @@ mod tests {
 
         set_theme(d.path(), ThemePref::System).unwrap();
         assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
+    }
+
+    /* ---------- autoCleanHistory ---------- */
+
+    /// **没选过 = 开着**（出厂默认 —— 与主题那一格刻意相反：盘空间才是稀缺的那一侧）；
+    /// 关掉能记住、能再打开，别的格一个不动
+    #[test]
+    fn auto_clean_starts_on_and_roundtrips() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(auto_clean_history(d.path()).unwrap(), "没选过就该是开着");
+
+        assert!(!set_auto_clean_history(d.path(), false).unwrap());
+        assert!(!auto_clean_history(d.path()).unwrap());
+
+        assert!(set_auto_clean_history(d.path(), true).unwrap());
+        assert!(auto_clean_history(d.path()).unwrap());
+        /* 与主题那格互不踩：关掉自动清理不该动主题 */
+        assert_eq!(theme(d.path()).unwrap(), None);
     }
 
     /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），

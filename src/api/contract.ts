@@ -2201,6 +2201,23 @@ export interface MkpApi {
   setTheme(theme: ThemePref): Promise<ThemePref>
 
   /**
+   * 后处理记录的**自动清理**开着吗（2026-10-13）。
+   *
+   * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`（真机上等于开着），
+   * 而"没选过怎么解释"是后端的事 —— 界面不自己拿 null 去猜默认值
+   * （猜出来的那一档迟早与真正执行清理的那一侧漂开）。
+   */
+  getAutoCleanHistory(): Promise<boolean>
+
+  /**
+   * 开关自动清理：**立即生效并落盘**（写 `run/app-state.json` 的 `autoCleanHistory` 格）。
+   *
+   * 打开 = 下一次检查（启动 / 后处理跑完）就按双限瘦身；关掉 = 旧记录从此不再被清
+   * （**已经清掉的不会回来**）。清理全程静默，界面上不会有任何提示。
+   */
+  setAutoCleanHistory(enabled: boolean): Promise<boolean>
+
+  /**
    * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。
    *
    * 时间三格全部来自**事件**（见 [`OnDiskFile`]）：`downloadedUnix`（下载事件）、

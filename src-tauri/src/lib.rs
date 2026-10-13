@@ -42,6 +42,10 @@ pub mod obs;
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
 pub mod presetdata;
+/// **执行记录的自动清理**：设置页那个开关打开时，按「条数 + 空间」双限静默清掉
+/// `gcode_history` 里最旧的记录（**最新那条永远不删** —— 不按日历天数清，
+/// 停用多久都不会把用户最后一次的记录带走）。见 [`retention`] 模块头。
+pub mod retention;
 /// **新数据世界**：随包 catalog 的释放口 + 说明书 / 交付文件的落点规则
 /// （落点 = `catalog.path`，见 [`runtime::paths`]）。
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
@@ -164,6 +168,22 @@ pub fn run() {
                 },
                 Err(e) => tracing::warn!("后处理通道没摆起来（这一侧不显示进度）：{e}"),
             }
+
+            /*
+             * 执行记录的自动清理（2026-10-13「设置里加一个自动清理开关」那一刀）：
+             * 这一趟只**起个头** —— 走后台线程，不与首屏抢那一下盘（走一遍目录 + 数
+             * 几个文件大小是毫秒级的事，但"启动该快的绝对不慢"这条不给例外）。
+             * 开关读不出来 / 清理失败都只写日志，用户侧完全静默（见 `crate::retention`）。
+             *
+             * ★ 摆在整个 setup 的**末尾**（而不是"用户根就位"那一处）：上面这些步骤里
+             * 有会动**数据根 / 模式**的动作（工作台那个沙箱开关就在上面），清理要按
+             * **最终的**那一棵树去算 —— 摆早了，哪天有人真把根接上，这里就会清错树。
+             *
+             * 每次后处理跑完那一趟不在这一侧：切片器拉起的钩子进程自己清
+             * （`hook::run_with_channel` 里那个调用点）—— 界面可能开在别的页面、甚至没开。
+             */
+            let clean_handle = handle.clone();
+            std::thread::spawn(move || crate::retention::prune_if_enabled_app(&clean_handle));
 
             Ok(())
         })
@@ -291,6 +311,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 theme 格，读一次写一次，不联网
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        // 界面偏好第二格（2026-10-13）：执行记录的自动清理开关 ——
+        // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
+        ipc::prefs::get_auto_clean_history,
+        ipc::prefs::set_auto_clean_history,
         // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
         // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
         // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
@@ -413,6 +437,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好（2026-10-12）：主题 —— 与客户端那份清单一字不差
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
+        ipc::prefs::get_auto_clean_history,
+        ipc::prefs::set_auto_clean_history,
         // 工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
         // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。

@@ -96,6 +96,29 @@ fn with_suffix(base: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// 三件套的文件名后缀 —— 字面量**只许有这一处**（[`begin`] 拼它，
+/// 自动清理 [`crate::retention`] 按它把散文件归回同一条记录）。
+pub const ORIGINAL_SUFFIX: &str = "_original.gcode";
+/// 见 [`ORIGINAL_SUFFIX`]。判据顺序有讲究：`_original.gcode` 也以 `.gcode` 结尾，
+/// 所以要**先长的后短的**（[`record_base`]）。
+pub const OUTPUT_SUFFIX: &str = ".gcode";
+/// 见 [`ORIGINAL_SUFFIX`]。
+pub const META_SUFFIX: &str = "_meta.json";
+
+/// 三件套里任意一个文件名 → 这条记录的公共前缀（基名）。不是三件套的名字 ⇒ `None`。
+///
+/// 自动清理拿它把同一条记录的几个文件**归回一组**（删就整条删）——
+/// 与 [`base_path`] 拼出来的是同一份后缀，不是第二处自拼的字符串。
+pub fn record_base(file_name: &str) -> Option<&str> {
+    if let Some(base) = file_name.strip_suffix(ORIGINAL_SUFFIX) {
+        return Some(base);
+    }
+    if let Some(base) = file_name.strip_suffix(META_SUFFIX) {
+        return Some(base);
+    }
+    file_name.strip_suffix(OUTPUT_SUFFIX)
+}
+
 /// 处理前：建齐目录并把**原件**写进归档。
 ///
 /// 吃调用方已经读进内存的原文，不再读一次盘 —— 钩子读输入文件是管线第 1 步，
@@ -108,9 +131,9 @@ pub fn begin(
 ) -> Result<ArchivePaths, AppError> {
     let base = base_path(history_root, input, now);
     let paths = ArchivePaths {
-        original: with_suffix(&base, "_original.gcode"),
-        output: with_suffix(&base, ".gcode"),
-        meta: with_suffix(&base, "_meta.json"),
+        original: with_suffix(&base, ORIGINAL_SUFFIX),
+        output: with_suffix(&base, OUTPUT_SUFFIX),
+        meta: with_suffix(&base, META_SUFFIX),
     };
     if let Some(dir) = paths.original.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
@@ -842,6 +865,29 @@ mod tests {
             "G1 X1\n",
             "原件内容 = 交给它的原文，一个字节不差"
         );
+    }
+
+    /// **归组口径**：三件套里任意一个文件名都能还原到同一条记录的基名
+    /// （自动清理按它把散文件归回一组，删就整条删）；不是三件套的东西不认。
+    #[test]
+    fn record_base_groups_the_trio_and_rejects_outsiders() {
+        let base = "63288.1_20261009_220851";
+        for name in [
+            format!("{base}_original.gcode"),
+            format!("{base}.gcode"),
+            format!("{base}_meta.json"),
+        ] {
+            assert_eq!(record_base(&name), Some(base), "{name} 归不回同一条记录");
+        }
+        /* 名前缀自己带 `_original` 的原件：剥的必须是**最后那个后缀**，前缀原样留着 */
+        assert_eq!(
+            record_base("x_original_20261009_220851_original.gcode"),
+            Some("x_original_20261009_220851")
+        );
+        /* 不是三件套的东西（临时文件 / 用户塞进来的）不认 —— 清理一个都不碰 */
+        assert_eq!(record_base("notes.txt"), None);
+        assert_eq!(record_base("readme"), None);
+        assert_eq!(record_base(""), None);
     }
 
     /// 造一份「成功记录」的报告素材（判据共用）：IR 只填被读到的那些字段。

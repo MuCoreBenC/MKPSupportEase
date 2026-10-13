@@ -1,8 +1,13 @@
 //! **界面偏好**（2026-10-12「整套客户端做深色模式」那一刀开的）：外壳级、跨重启记着的
 //! 用户选择。头一格就是[主题]。
 //!
-//! 主题落在 `run/app-state.json` 的 `theme` 格 —— [`crate::runtime::app_state`] 是它
-//! 唯一的读写入口，这一层只管"字符串 ↔ 枚举"的翻译与写成功之后的那次广播。
+//! 2026-10-13 添了第二格：**执行记录的自动清理开关**（[`get_auto_clean_history`] /
+//! [`set_auto_clean_history`]）—— 它同样是"用户点出来的一档偏好"，不是一份业务数据；
+//! 真正动手清理的是 [`crate::retention`]，这一层只管把这一档写下来 / 读回去。
+//!
+//! 两格都落在 `run/app-state.json`（`theme` / `autoCleanHistory`）——
+//! [`crate::runtime::app_state`] 是它唯一的读写入口，这一层只管"线上形状 ↔ 盘上形状"
+//! 的翻译与写成功之后的那次广播。
 //!
 //! 为什么单开一个模块、不塞进 [`super::catalog`]：那一位管的是**数据从哪儿来**
 //! （源地址 / 目录 / 下载），主题跟数据无关。混在一起会让"这条命令要不要联网"这种
@@ -49,5 +54,30 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
         runtime::app_state::set_theme(&root, pref)?;
         notify_app_state(&app);
         Ok(pref.wire().to_owned())
+    })
+}
+
+/// 后处理记录的**自动清理**开着吗（2026-10-13）。
+///
+/// ★ 回的是**解析后的 `bool`**：盘上那一格"没选过"是 `None`（= 开着），
+/// 而"没选过"该怎么解释是**后端的事** —— 界面不自己拿 `null` 去猜默认值
+/// （猜出来的默认值迟早与 [`crate::retention`] 实际执行的那一档漂开）。
+#[tauri::command]
+pub async fn get_auto_clean_history(app: AppHandle) -> Result<bool, AppError> {
+    traced("getAutoCleanHistory", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::auto_clean_history(&root)
+    })
+}
+
+/// 开关自动清理。**点了就是点了**（与主题同一条口径：单选不用再要一颗确认键），
+/// 落盘成功后广播一声 —— 前端那一格显示的永远是盘上真账。
+#[tauri::command]
+pub async fn set_auto_clean_history(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    traced("setAutoCleanHistory", |_| {
+        let root = internal_root(&app)?;
+        let got = runtime::app_state::set_auto_clean_history(&root, enabled)?;
+        notify_app_state(&app);
+        Ok(got)
     })
 }

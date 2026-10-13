@@ -116,6 +116,12 @@ let mockSource: PresetSource | null = null
 let mockTheme: ThemePref | null = null
 
 /*
+ * 浏览器演示用的自动清理开关（**内存态，刷新即还原**；真数据在 Rust 侧 run/app-state.json）。
+ * 演示里给"开着"——与真机同一个出厂默认（没选过 = 开），别在这里另立一套。
+ */
+let mockAutoClean = true
+
+/*
  * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
  *
  * 为什么让它在内存里真的能走通：编辑那条链（改 → 临时文件 → 另存）是这一层最需要被看见的
@@ -1726,6 +1732,19 @@ export const mockApi: MkpApi = {
     }
     mockTheme = theme
     return mockTheme
+  },
+
+  /*
+   * 自动清理（2026-10-13）：与主题同一套口径 —— 内存镜像、回解析后的 boolean。
+   * 演示后端不真清盘（浏览器里没有那棵 `gcode_history`），只把这一档记下来。
+   */
+  async getAutoCleanHistory() {
+    return mockAutoClean
+  },
+
+  async setAutoCleanHistory(enabled) {
+    mockAutoClean = enabled
+    return mockAutoClean
   },
 
   /* —— baseline + 对比台（2026-10-08）：固定演示版本账 + 从演示正文里读写参数 ——

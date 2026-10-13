@@ -1009,6 +1009,16 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
     );
     client.send(&crate::hook_ipc::FromHook::Finished(Box::new(payload)));
 
+    /*
+     * 归档之后顺手清一遍旧记录（2026-10-13「自动清理」那一刀）：开关开着才动，
+     * **全程静默** —— 不进结论、不改退出码、失败只写日志（见 [`crate::retention`] 模块头）。
+     *
+     * 摆在**结论已经送出去之后**：界面先拿到结果，清理这几十毫秒不该让用户多等。
+     * 也不指望界面进程来做这件事 —— 切片器拉起的这一趟**就是**"跑完了"那一刻，
+     * 而界面可能开在别的页面、甚至根本没开。
+     */
+    crate::retention::prune_if_enabled_headless();
+
     /* stderr 那一行（切片器会把 stderr 给用户看）与退出码走同一条路 —— 两处口径不许各写一份。
     日志路径只在**真有那份日志**时给（装不上就别指一个不存在的地方） */
     ExitCode::from(report(done, log.as_deref()))
