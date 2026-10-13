@@ -7,7 +7,8 @@
 //! 打开模型文件（[`open_model`]）与首页「复制后处理脚本」的**整条命令**
 //! （[`get_post_process_command`]）。三件都读**真实的事实**：
 //! 模型是 catalog 登记的三个交付文件（`assets/models/*.3mf`），本机有没有以盘为准；
-//! 打开走系统默认程序（`.3mf` 关联的切片器）；后处理那一条由两段真值现拼 ——
+//! 打开走**系统默认程序**（`.3mf` 关联的切片器），也可以点名交给 Bambu Studio /
+//! OrcaSlicer（2026-10-13 加的那一档，见 [`slicer`]）；后处理那一条由两段真值现拼 ——
 //! 可执行物 = 本程序自己（`current_exe()`），预设 = 本机真实的绝对落点。
 //! 命令**两个平台同一形状、没有任何写死的路径**：macOS 用 macOS 的 exe 与落点，
 //! Windows 用 Windows 的（2026-10-10 作者裁定：按钮常驻、命令动态生成）。
@@ -45,6 +46,9 @@ pub mod presets;
 /// **报告页**：后处理执行报告与历史（读 `gcode_history/*_meta.json`）+
 /// 「导出执行报告」那个**唯一的写口**（复制三件套到用户点名的目录）
 pub mod report;
+/// **「用哪个切片软件打开模型」那一格的落地**（2026-10-13）：三档 id（`system` /
+/// `bambu` / `orca`）的解析，与那两个应用在本机的落脚。
+pub mod slicer;
 /// **应用内更新 + 打开外链**（2026-10-05 第五刀）。`open_url` 是修「查看更新点了没反应」
 /// 那个 bug 的：webview 没 opener 权限，外链一律过命令
 pub mod update;
@@ -212,14 +216,22 @@ pub fn get_calib_models(app: AppHandle) -> Result<Vec<CalibModel>, AppError> {
     })
 }
 
-/// 打开一份模型文件：用**系统默认程序**（`.3mf` 关联的切片器）打开盘上那份。
+/// 打开一份模型文件：**交给哪个切片软件由 `slicer` 说了算**（2026-10-13 起）。
 ///
+/// - 不传 / `"system"`：**系统默认程序**（`.3mf` 关联的那个）—— 与这一条命令原来的
+///   行为一字不差，旧调用一个都不用改；
+/// - `"bambu"` / `"orca"`：**指定的那个应用**（见 [`slicer::launch`]）。用户明确点了
+///   哪一档才走这里，所以"没装那个应用"照实报 `NOT_FOUND`，**不静默回落**成系统关联；
 /// - 本机还没有这份文件 → `NOT_FOUND`，原话告诉用户先「取回」—— **不静默、不假装打开**；
 /// - 系统打不开（没有关联程序那种）→ `IO` 原样冒上来，界面照实显示。
 ///
 /// （下载是另一件事：「取回」走 `download_catalog_file`，一个动作一个命令。）
 #[tauri::command]
-pub fn open_model(app: AppHandle, model_id: String) -> Result<(), AppError> {
+pub fn open_model(
+    app: AppHandle,
+    model_id: String,
+    slicer: Option<String>,
+) -> Result<(), AppError> {
     traced("openModel", |_| {
         let id = model_id.trim();
         let Some((_, _, _, file_name)) = MODEL_DEFS.iter().find(|(mid, ..)| *mid == id) else {
@@ -232,11 +244,21 @@ pub fn open_model(app: AppHandle, model_id: String) -> Result<(), AppError> {
                 "本机还没有 {file_name} —— 先在界面上「取回」，再打开"
             )));
         };
-        use tauri_plugin_opener::OpenerExt as _;
-        app.opener()
-            .open_path(path.to_string_lossy().into_owned(), None::<&str>)
-            .map_err(|e| AppError::io("系统打不开这个模型文件").with_detail(e.to_string()))?;
-        tracing::info!(model_id = id, path = %path.display(), "模型已交给系统打开");
+        let kind = slicer::SlicerKind::parse(slicer.as_deref())?;
+        if kind == slicer::SlicerKind::System {
+            use tauri_plugin_opener::OpenerExt as _;
+            app.opener()
+                .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+                .map_err(|e| AppError::io("系统打不开这个模型文件").with_detail(e.to_string()))?;
+        } else {
+            slicer::launch(kind, &path)?;
+        }
+        tracing::info!(
+            model_id = id,
+            path = %path.display(),
+            slicer = kind.id(),
+            "模型已交出去打开"
+        );
         Ok(())
     })
 }

@@ -85,7 +85,7 @@
 [data-dep] .label {
   color: var(--text-3);
   text-decoration: line-through;
-  text-decoration-color: #b1716a;
+  text-decoration-color: var(--danger-ink);
   text-decoration-thickness: 1.5px;
 }
 
@@ -104,8 +104,9 @@
   height: 20px;
   padding: 0 7px;
   border-radius: var(--r-sm);
-  background: #f7e7e5;
-  color: #b1716a;
+  /* 淡红面 / 墨走 token（2026-10-12 深色第二遍）：写死的浅粉底在深色里是一块发亮的粉斑 */
+  background: var(--danger-surface);
+  color: var(--danger-ink);
   font-size: var(--fs-label);
   font-weight: 500;
   white-space: nowrap;
@@ -115,14 +116,15 @@
 /* 展开详情里的「状态」那一格：与弃用徽章同色系，一眼串起来 */
 .ddDep {
   margin: 0;
-  color: #b1716a;
+  color: var(--danger-ink);
   line-height: 1.6;
 }
 
 /* 改不动的原因：写清是哪个条件参数控制的 */
 .note {
   font-size: calc(var(--fs-label) - 0.5px);
-  color: #a86416;
+  /* 琥珀墨走 token：写死的棕字在深底上几乎读不出 */
+  color: var(--warn-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -150,15 +152,16 @@
   height: 17px;
   padding: 0 6px;
   border-radius: var(--r-sm);
-  background: #fdf3e2;
-  color: #a86416;
+  /* 琥珀面 / 墨走 token（2026-10-12 深色第二遍） */
+  background: var(--warn-surface);
+  color: var(--warn-ink);
   font-weight: 500;
 }
 
 .syncDiff {
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #a86416;
+  color: var(--warn-ink);
 }
 
 /* 处理过的那一项：一枚极淡的章，说明官方这一版已经不是"待处理"了 */
@@ -176,18 +179,20 @@
   align-items: center;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid #e3c58f;
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fffaf1;
+  background: var(--warn-surface);
   font: inherit;
   font-size: var(--fs-label);
-  color: #8a6212;
+  color: var(--warn-ink);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .syncBtn:hover:not(:disabled) {
-  background: #fdf3e2;
+  /* 反馈走边框加深（原来靠"再亮一档的米色底"，token 化后没有那一档；
+     加深边框在深浅两套里都成立） */
+  border-color: var(--warn-ink);
 }
 
 .syncBtn:disabled {
@@ -199,8 +204,8 @@
 
 .syncBtn:focus-visible {
   outline: none;
-  border-color: #8a6212;
-  box-shadow: inset 0 0 0 1px #8a6212;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
 /* 「保持我的」：不写任何东西的那一个，按次色调画（它比「用新值」轻） */
@@ -286,24 +291,25 @@
   gap: 4px;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid #f0c48a;
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fff8ee;
+  background: var(--warn-surface);
   font: inherit;
   font-size: var(--fs-label);
-  color: #a86416;
+  color: var(--warn-ink);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .restore:hover {
-  background: #fdefda;
+  /* 同 .syncBtn：反馈走边框加深（token 化后没有"再亮一档"的米色） */
+  border-color: var(--warn-ink);
 }
 
 .restore:focus-visible {
   outline: none;
-  border-color: #a86416;
-  box-shadow: inset 0 0 0 1px #a86416;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
 /* ---------- 展开的详情 ---------- */

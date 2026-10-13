@@ -77,6 +77,15 @@
   box-shadow: var(--seg-on-shadow, inset 0 0 0 1px var(--accent));
 }
 
+/* 深色（2026-10-12 第二遍）：滑块那道浅影在深底上看不见 —— "滑块浮在轨道上"的层次会丢 */
+[data-theme='dark'] .pill {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+[data-theme='dark'] .pill[data-on='true'] {
+  box-shadow: var(--seg-on-shadow, inset 0 0 0 1px var(--accent));
+}
+
 .seg,
 .segOn {
   position: relative;

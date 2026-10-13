@@ -32,7 +32,7 @@ export const STORAGE = {
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 
   /**
-   * BBS 预设页的偏好：看全部还是跟 BBS 一样、抽屉宽度。
+   * 工艺页（BBS 预设查看器）的偏好：看全部还是跟 BBS 一样、抽屉宽度。
    * （「并排还是浮层」2026-10-13 改成按窗口宽度自动决定，不再落盘。）
    * **全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），
    * 所以都不承载底账。
@@ -51,6 +51,9 @@ export const STORAGE = {
   clientBbsRailW: 'mkp.A40.bbs.railW',
   /* ★ `clientBbsDrawerMode`（`mkp.A40.bbs.drawerMode`）2026-10-13 退役：并排 / 浮层
      改成按窗口宽度自动决定（与报告页同一个判据），旧值留着不用即可（同上口径）。 */
+
+  /** 默认用哪个切片软件打开模型（`system` / `bambu` / `orca`，见 shared/slicer）。纯前端偏好 */
+  clientSlicer: 'mkp.A40.slicer',
 
   /**
    * 报告页导出框里那个「保存位置」（**上一次选过的父目录**）。

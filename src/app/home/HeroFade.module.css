@@ -30,6 +30,12 @@
   background-position: center;
 }
 
+/* 深色（2026-10-12 第二遍）：上面那道墨色轴线是"墨压墨"——深色里等于没画
+   （拖动时中心十字整个消失），换白发丝。与 --g-line 同一条口径 */
+[data-theme='dark'] .grid {
+  --g-axis: rgb(255 255 255 / 22%);
+}
+
 /* 中心十字：nudge = 0 的原点参照 */
 .grid::before {
   content: '';

@@ -38,6 +38,7 @@ import type { PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract
 import { deliveryMutated, sourceMutated } from '../state/deliveryState'
 /* AppState 客户端：主题这一格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
 import { appStateMutated, useThemePref } from '../state/appState'
+import { SLICER_CHOICES, useSlicerPref } from '../shared/slicer'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -86,6 +87,13 @@ export default function PageSettings() {
   const theme = useThemePref()
   const [themeBusy, setThemeBusy] = useState(false)
   const [themeErr, setThemeErr] = useState<string | null>(null)
+
+  /*
+   * 切片（「切片」那一块）：默认用哪个切片软件打开模型。纯前端偏好 ——
+   * 落 localStorage（`shared/slicer`），不走 AppState：壳将来打开模型时由前端
+   * 把这个值随 `openModel` 调用带给它。选上**立即生效**（与主题同一条口径）。
+   */
+  const [slicer, setSlicer] = useSlicerPref()
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -297,6 +305,34 @@ export default function PageSettings() {
         </div>
 
         {themeErr !== null && <p className={`${s.note} ${s.noteBad}`}>没换成：{themeErr}</p>}
+      </section>
+
+      {/*
+       * 切片（2026-10-13 作者口径）：「打开模型」默认交给哪个切片软件。
+       * 三档单选，「打开模型」模态框里还能「仅这一次」临时换（不写回这里）。
+       */}
+      <section className={s.section} aria-label="切片">
+        <h2 className={s.secTitle}>切片</h2>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>默认用哪个切片软件打开模型</div>
+          <p className={s.fieldNote}>立刻生效。「打开模型」的框里还可以只对那一次换一个，不动这里的默认。</p>
+
+          {SLICER_CHOICES.map((c) => (
+            <div key={c.id} className={s.opt}>
+              <label className={s.radio}>
+                <input
+                  type="radio"
+                  name="slicer"
+                  checked={slicer === c.id}
+                  onChange={() => setSlicer(c.id)}
+                />
+                <span>{c.label}</span>
+              </label>
+              <p className={s.hint}>{c.hint}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       {/*

@@ -1675,8 +1675,12 @@ export interface MkpApi {
   /**
    * 让壳去打开一个模型文件（本地有缓存就直接开，没有就先下载）。
    * 前端不碰文件系统，也不关心它是下载还是命中缓存 —— 那是壳的事。
+   *
+   * `opts.slicer`（2026-10-13）：**用哪个切片软件打开**（`'system'` = 跟随系统关联，
+   * 不指定应用）。不传 = 跟随系统 —— 旧调用一个都不用改；设置页「切片」那格是
+   * 默认值，模态框里「仅这一次」覆盖的那一次由前端随调用带给壳。
    */
-  openModel(modelId: string): Promise<void>
+  openModel(modelId: string, opts?: { slicer?: 'system' | 'bambu' | 'orca' }): Promise<void>
 
   /**
    * 首页「复制后处理脚本」要的**那一整条命令**（**当前平台、当前实例、真实落点**现拼）。

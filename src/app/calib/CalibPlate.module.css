@@ -39,7 +39,7 @@
 
 /* ---------- 可点热区 ---------- */
 
-/* 命中层：产物里那层放大过的透明矩形，点击与悬停都落在它上面 */
+/* 命中层：产物里那层放大过的透明矩形，点击都落在它上面 */
 .hit {
   fill: transparent;
   stroke: none;
@@ -64,19 +64,67 @@
   cursor: pointer;
 }
 
-/* 选中：走配色里的 --calib-sel-*（顺序在悬停之前，与导出 SVG 一致） */
+/*
+ * 两档状态 —— 层级：静止 → 选中。
+ * （原来的第三条"悬停"2026-10-13 整条删掉，见下面 ② 那段与 TSX 文件头。）
+ *
+ * ★★ **不要用「按顺序覆盖」来分层**（原来那版就是这么写的，踩了两次）。
+ *   用 `:not(.pad)` 之类的排除会把特异性抬上去，反而盖过后一条 —— 于是换色
+ *   **永远不生效**，而"看起来"又像是顺序写错了，很难查。
+ *
+ *   现在改成**互斥选择器**：每条只在自己那一档成立时才匹配，
+ *   谁都不用去盖谁，特异性也不变。
+ *
+ * ★ 两块板共用这一份 CSS：XY 板用 `.mark`（22 条线）、Z 板用 `.pad`（11 个格子），
+ *   所以都写成 `path[data-*]` 这一档，不带 role 类。
+ */
+
+/* ① 静止：未选中的线 / 格子 */
+.plateSvg path[data-on='false'] {
+  fill: var(--calib-mark-fill);
+}
+
+/*
+ * Z 板的格子不走 `--calib-mark-fill`（那块板根本没定义 mark）——
+ * 它有自己的 `.pad` 那条（在文件上方），这里把格子摘出去。
+ * 用 `:not(.pad)` 会抬特异性，所以反过来写：下面第二条只对 `.pad` 生效。
+ */
+.plateSvg path.pad[data-on='false'] {
+  fill: var(--calib-pad-fill);
+}
+
+/*
+ * ② 悬停：**2026-10-13 第三轮整条删掉**（作者：「我知道了，我们直接去掉悬停算了」）。
+ *
+ *   原来这里是 `path[data-hover='true']` + `path[role='button']:hover` 两条，
+ *   吃 `--calib-hover-*` 三个变量；现在那三个变量、`data-hover` 属性、
+ *   组件里指针进出的两个监听一起删了。指针划过仍有反馈：`.hit` 是 `cursor: pointer`。
+ *
+ *   删掉的两条原因（别再捡回来）：① 浅色下悬停是**一整块近黑** `#48484a`，
+ *   比"选中"还重 —— 层级是反的；② 中性灰的选中色**正是** `#48484a`，
+ *   两个状态撞成同一个值，分不开。详见 `CalibPlate.tsx` 文件头。
+ */
+
+/* ③ 选中：走配色里的 --calib-sel-*（"已确认"） */
 .plateSvg path[data-on='true'] {
+  /*
+   * 纯色，就一个值（2026-10-13 第四轮：那条渐变去掉了 ——
+   * 作者：「那这个就不用渐变色了吧，还要渐变吗？这个选中的就不要渐变色了吧」）。
+   */
   fill: var(--calib-sel-fill);
   stroke: var(--calib-sel-stroke);
   stroke-width: var(--calib-sel-width);
 }
 
-/* 悬停只换描边，填充保持原样 —— 两套配色的 hoverKeepFill 都是开着的。
-   data-hover 由组件根据命中矩形的指针进出给到下面这条可见 path 上 */
-.plateSvg path[data-hover='true'],
-.plateSvg path[role='button']:hover {
-  stroke: var(--calib-hover-stroke);
-  stroke-width: var(--calib-hover-width);
-}
+/* ---------- 已删掉的两段（2026-10-13，都别再捡回来） ----------
+
+   ① 选中格上那层"水"（作者：「都不好呀，算了，去掉吧，去掉这些乱七八糟的效果了，
+      就用最纯粹的」）：`.water / .waterBody / .waterShade / .waterRim / .waterHole`
+      与 `.waterTop / .waterMid / .waterBottom / .waterGlossStop`，连同 TSX 里那套几何、
+      `--calib-water-*` 整组变量一起删了。
+   ② 选中格那条三档渐变（作者：「那这个就不用渐变色了吧，还要渐变吗？
+      这个选中的就不要渐变色了吧」）：`.selTop / .selMid / .selBottom` 三个色标、
+      `--calib-sel-paint`、`--calib-sel-top / -bottom`、TSX 里那条 `<linearGradient>`
+      一起删了 —— 现在就 `--calib-sel-fill` 一个值（见上面 ③）。 */
 
 

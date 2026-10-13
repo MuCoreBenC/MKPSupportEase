@@ -104,6 +104,11 @@
   font-weight: 500;
 }
 
+/* 深色（2026-10-12 第二遍）：深绿字压深底几乎读不出，换深色档的亮绿（同 --accent 族） */
+[data-theme='dark'] .mine {
+  color: var(--accent);
+}
+
 .after {
   font-size: var(--fs-label);
   color: var(--text-3);
@@ -152,3 +157,6 @@
   color: var(--text-3);
   cursor: default;
 }
+
+/* （底栏那颗 `.primary` 原来也有一条"深色里换中性亮面"的补丁 —— 已删：
+   它现在自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），深浅一条规则全成立。） */

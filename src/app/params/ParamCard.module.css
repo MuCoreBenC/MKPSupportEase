@@ -52,6 +52,12 @@
   background: rgb(225 243 233);
 }
 
+/* 深色（2026-10-12 第二遍）：上面那格是**实色的薄荷绿**（不是半透明）——
+   深色里是一整片发亮的绿。换成 accent-soft：与浅色那格同一个"绿意"的语义 */
+[data-theme='dark'] .tree[data-seam='true'] {
+  background: var(--accent-soft);
+}
+
 /* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管 */
 .tree[data-seam='true'] > .branch {
   margin-left: 4px;
@@ -95,6 +101,11 @@
 .grpOff {
   border-style: dashed;
   background: rgba(16, 24, 32, 0.018);
+}
+
+/* 深色：那格"墨压一层"等于没画（收拢态与展开态完全同色），换成白压一层 */
+[data-theme='dark'] .grpOff {
+  background: rgb(255 255 255 / 2.4%);
 }
 
 /*

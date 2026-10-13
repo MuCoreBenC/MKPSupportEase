@@ -187,7 +187,8 @@
   padding: 4px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #fff;
+  /* 实的白走 --surface-solid（浅色 = #fff，深色 = 面板那一档；2026-10-12 深色第二遍） */
+  background: var(--surface-solid);
   font-family: Inter, sans-serif;
   color: var(--text-1);
   transition:

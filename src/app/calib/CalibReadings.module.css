@@ -8,6 +8,27 @@
   display: flex;
   align-items: flex-end;
   gap: clamp(14px, 2vw, 40px);
+  /*
+   * 数字那一档的字号（就是那颗可编辑的 input 的字号）。
+   *
+   * 提出来当一个变量是为了**下面 `.axisValue` 的算式能跟它对上**：数字行的高度
+   * 必须由字号推出来，值 / 占位条 / 横杠三态才占同一格（作者 2026-10-13：
+   * 「没选择的时候，下面的气泡高度应该和选择的一样高」）。
+   * 调用方要收紧这一档，改这一个值即可。
+   */
+  --field-fs: clamp(14px, 1.6vw, 17px);
+  /*
+   * 小字那一档（轴名 / 「原 x.xx」/ mm / 横杠）。**四处共用这一个字号** ——
+   * 2026-10-13（作者：「字体有大有小」）：原来它们各写各的（12 / 11.5 / 12，
+   * HUD 里又只把轴名按容器宽收到 10~11），同一行里几个小字三个大小。
+   * 收成一个变量之后谁也不再跟谁差半号；调用方要收紧也只改这一个（见
+   * PageCalib.module.css 的 `.hudBottom`）。
+   *
+   * 值取 11.5：不好往小里收 —— 「原 x.xx」当初就是因为"太小太浅"从 10.5 提到
+   * 11.5 的（见下面 `.axisFrom`），再压回去等于把那一条推翻；11.5 落在这三档
+   * 的中间偏上，收进来谁都不会显得小。
+   */
+  --read-fs: 11.5px;
 }
 
 .axis {
@@ -22,7 +43,9 @@
 /* 轴名行：当前轴转绿（与原版同一条规则：三个数一样大，只拿颜色分当前页） */
 .axisLabel {
   margin: 0;
-  font-size: 11px;
+  /* 2026-10-12 第三遍：轴名 11 → 12（与首页卡那一档的 --axis-label 对齐）
+     ★ 2026-10-13：这一档提到 --read-fs —— 与「原 x.xx」/ mm 同一个字号 */
+  font-size: var(--read-fs);
   letter-spacing: 0.06em;
   color: var(--text-3);
   display: flex;
@@ -42,9 +65,24 @@
 /*
  * 值行贴着轴名的左缘（第三轮「字没对齐」的根因）：`<dd>` 有浏览器默认的
  * margin-inline-start: 40px，三个数各自往右缩一截 —— 归零。
+ *
+ * ★ 2026-10-13（作者：「没选择的时候，下面的气泡高度应该和选择的一样高」）——
+ * **三态同高**。数字行有三种长相：值（那颗 input）/ 正在取（占位条）/ 还没有（横杠），
+ * 只有值那一态天生够高（17px 的字 + 内衬 + 下划线），另外两态只有十来像素 ——
+ * 于是"还没选预设"时整条气泡矮一截，两个状态来回切会跳。
+ *
+ * 这里给这一格一个**由字号算出来的最小高度**（按值态那颗 input 的盒子推：
+ * 行高 1.35 + 上下内衬与那条下划线 6px；HUD 里 `dd label` 把内衬收到 2px，
+ * 那 6px 就是这来的一半多）。算式落在值态实测高度**略上方**（浏览器给 number
+ * input 的行盒比 1.35 小一点），于是三态一律停在同一个数上 —— 实测两种状态
+ * 都是 28.94px，气泡高度一分不差。`align-items: center` 顺手把横杠 / 占位条
+ * 在格里居中 —— 空态那条横杠不再贴在格子上沿（作者：「点也没有竖直居中」那一类手感）。
  */
 .axisValue {
   margin: 0;
+  min-height: calc(var(--field-fs) * 1.35 + 6px);
+  display: flex;
+  align-items: center;
 }
 
 .dot {
@@ -54,6 +92,13 @@
   border-radius: 999px;
   background: var(--accent);
   visibility: hidden;
+  /*
+   * 2026-10-13（作者：「点也没有竖直居中」）—— 轴名那行是**基线对齐**的，
+   * 而一颗空心的圆点没有文字基线，浏览器就拿它的**下边缘**当基线 ⇒ 它整颗
+   * 落到文字基线上、比字面中线低 2px 左右。这里把它提回中线（em 跟着轴名字号走，
+   * 换字号不用重调）。用 transform 而不是改对齐方式：轴名折行时它仍留在自己那一行。
+   */
+  transform: translateY(-0.18em);
 }
 
 .dot[data-on='true'] {
@@ -72,7 +117,9 @@
   background: none;
   font-family: inherit;
   letter-spacing: inherit;
-  font-size: 10.5px;
+  /* 2026-10-12 第三遍：「原 x.xx」太小太浅 —— 10.5 → 11.5
+     ★ 2026-10-13：改走 --read-fs（与轴名 / mm 同一个字号），值是它当初提上来的 11.5 */
+  font-size: var(--read-fs);
   font-weight: 400;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -142,7 +189,13 @@
   background: none;
   color: var(--text-1);
   font: inherit;
-  font-size: clamp(14px, 1.6vw, 17px);
+  font-size: var(--field-fs);
+  /*
+   * 行高**写死**（不再走 normal）：单行 input 的高度就是这一条，写上它 `.field`
+   * 的盒子高度才是个可算的数 —— 上面 `.axisValue` 的 min-height 正是按它推的
+   * （normal 会随字体平台飘，算式就对不上了）。
+   */
+  line-height: 1.35;
   /* 左对齐（与原版读数一致）：数字贴着轴名左缘，位数变化不挪窝 */
   text-align: left;
   font-variant-numeric: tabular-nums;
@@ -165,7 +218,8 @@
 }
 
 .unit {
-  font-size: 12px;
+  /* 2026-10-13：12 → --read-fs（原来它比轴名 / 「原 x.xx」大一号，"字体有大有小"里的一处） */
+  font-size: var(--read-fs);
   color: var(--text-3);
 }
 
@@ -173,5 +227,7 @@
 .axisBlank {
   display: inline-block;
   min-width: 6em;
+  /* 同上：也归到那一个小字档（它原来跟着 --fs-label 走，是第四个数） */
+  font-size: var(--read-fs);
   color: var(--text-3);
 }

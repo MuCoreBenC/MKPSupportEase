@@ -106,7 +106,8 @@ export const bridgeApi: MkpApi = {
   savePresetCalibration: (path, axes) =>
     call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
-  openModel: (modelId) => call('openModel', 'open_model', { modelId }),
+  openModel: (modelId, opts) =>
+    call('openModel', 'open_model', { modelId, slicer: opts?.slicer ?? null }),
   /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
   getPostProcessCommand: (machineId, versionId) =>
     call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),

@@ -46,6 +46,8 @@ import CalibReadings from './CalibReadings'
 import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 import { useIsDark } from '../state/appState'
+import { settleSlicerPick, useSlicerPick, useSlicerPref } from '../shared/slicer'
+import { SlicerPickView } from '../shared/SlicerPickView'
 import s from './PageCalib.module.css'
 
 /*
@@ -311,6 +313,9 @@ export default function PageCalib() {
   const pillFileName = activeForSel?.fileName ?? currentFileName
 
   const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
+  /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
+  const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
+  const slicerPick = useSlicerPick(defaultSlicer, opening !== null)
   const [pending, setPending] = useState<Step | null>(null)
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
 
@@ -353,7 +358,8 @@ export default function PageCalib() {
   const openCachedModel = () => {
     if (opening === null) return
     setModelBusy(true)
-    api.openModel(opening.id).then(
+    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
+    api.openModel(opening.id, { slicer }).then(
       () => {
         setModelBusy(false)
         setOpening(null)
@@ -370,10 +376,11 @@ export default function PageCalib() {
     if (opening === null || modelInfo === null) return
     setModelBusy(true)
     setModelErr(null)
+    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
     void (async () => {
       try {
         await api.downloadCatalogFile(modelInfo.fileName)
-        await api.openModel(opening.id)
+        await api.openModel(opening.id, { slicer })
         setModelBusy(false)
         setOpening(null)
       } catch (e) {
@@ -831,6 +838,13 @@ export default function PageCalib() {
             </>
           }
         >
+          {/* 用哪个打开（默认在设置页「切片」那格；勾「仅这一次」就不写回） */}
+          <SlicerPickView
+            value={slicerPick.value}
+            once={slicerPick.once}
+            onChange={slicerPick.setValue}
+            onOnceChange={slicerPick.setOnce}
+          />
           <p className={s.note}>
             {modelErr !== null
               ? modelErr

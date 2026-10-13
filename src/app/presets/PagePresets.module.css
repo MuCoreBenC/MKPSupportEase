@@ -375,8 +375,8 @@
 }
 
 .bannerBad {
-  background: #fff3e2;
-  color: #a86416;
+  background: var(--warn-surface);
+  color: var(--warn-ink);
 }
 
 /* 单行截断的那一句（明细在 title 里看全） */
@@ -582,8 +582,8 @@
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--r-sm);
-  background: #fff3e2;
-  color: #a86416;
+  background: var(--warn-surface);
+  color: var(--warn-ink);
   font-size: var(--fs-label);
 }
 
@@ -801,8 +801,8 @@
   margin: 0;
   padding: 6px 10px;
   border-radius: var(--r-sm);
-  background: #fff3e2;
-  color: #a86416;
+  background: var(--warn-surface);
+  color: var(--warn-ink);
   font-size: var(--fs-label);
 }
 

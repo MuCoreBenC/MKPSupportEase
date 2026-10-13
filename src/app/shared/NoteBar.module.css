@@ -27,8 +27,10 @@
 }
 
 .noteBad {
-  background: #fff3e2;
-  color: #a86416;
+  /* 琥珀块的面 / 墨收进 token（2026-10-12 深色第二遍）：原来这两笔写死，
+     深色里是一整条发亮的浅米色横带 */
+  background: var(--warn-surface);
+  color: var(--warn-ink);
 }
 
 .noteClose {

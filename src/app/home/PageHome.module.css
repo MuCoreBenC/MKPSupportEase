@@ -179,7 +179,9 @@
    * 为什么不是 250 —— 细扫到 1400×540 那一档会溢出 16px：宽窗里板子是被框内宽截住的
    * （板宽 976 时高度就有 244），高度这一头的余量比窄窗小得多，扣除量得按最紧的那一档定。
    */
-  --plate-w: clamp(240px, calc((100vh - var(--plate-fixed-vh, 270px)) * 4), 1400px);
+  /* fallback 270 → 275：板下那两行文案 2026-10-12 放大了一档（见 .legend / .tip），
+     这一档扣减跟着让 5px（宁可贵一点，也不要扁窗里溢出） */
+  --plate-w: clamp(240px, calc((100vh - var(--plate-fixed-vh, 275px)) * 4), 1400px);
   --plate-scale: calc(var(--plate-w) / 136.219);
 
   /* 这一列自己的行间距 */
@@ -321,13 +323,14 @@
    * 富余大就居中，富余归零时两条一起收到 0、整组自动回到 --chrome-x 那条左基线，
    * 中间没有任何阈值（连续，符合"绝不按断点跳"这条）。
    *
-   * 左列上限还带一条 `100% - 190px`：先把读数块要的位置留出来再给板子。190 = 读数块在最大
-   * 字号档的实测需求 146px + 间隙 40px 再取整。窄窗里下限 340 仍然优先（minmax 的规矩），
+   * 左列上限还带一条 `100% - 230px`：先把读数块要的位置留出来再给板子。230 = 读数块在最大
+   * 字号档的实测需求 146px + 读数气泡的内衬 36px + 间隙 40px 再取整（气泡那 36px 是
+   * 2026-10-12 加读数气泡时补进来的）。窄窗里下限 340 仍然优先（minmax 的规矩），
    * 所以这一条只在"列宽不足、板子又想吃满"的中间地带生效。
    */
   grid-template-columns:
     minmax(0, 1fr)
-    minmax(min(100%, 340px), min(calc(var(--xy-plate) + 28px), calc(100% - 190px)))
+    minmax(min(100%, 340px), min(calc(var(--xy-plate) + 28px), calc(100% - 230px)))
     var(--xy-col-gap)
     max-content
     minmax(0, 1fr);
@@ -355,8 +358,10 @@
  * 其余窗口这一改看不出来（函数值远大于框内宽，板宽仍由框内宽说话）。
  */
 .calib[data-hint='true']:not([data-plate='xy']) {
-  --plate-fixed: 313px;
-  --plate-fixed-vh: 351px;
+  /* 313/351 → 318/356：2026-10-12 板下那两行文案放大一档（见 .legend / .tip），
+     这一档按字号增幅再让 5px（未重扫，取的是"宁可少给板子 5px"那一侧） */
+  --plate-fixed: 318px;
+  --plate-fixed-vh: 356px;
 }
 
 /*
@@ -367,9 +372,11 @@
  * 这一路点板子不产生读数（没有基准），板小一点不影响可用性。
  */
 .calib[data-plate='xy'][data-hint='true'] {
+  /* 129/167 → 133/171：那行提示 `.note` 2026-10-12 从 11.5px 抬到 12.5px，
+     这一档按行高增幅再让 4px（未重扫，取保守那一侧） */
   --xy-floor: 100px;
-  --xy-fixed: 129px;
-  --xy-fixed-vh: 167px;
+  --xy-fixed: 133px;
+  --xy-fixed-vh: 171px;
 }
 
 /*
@@ -402,10 +409,15 @@
 }
 
 /*
- * 第四页的主读数放大一档。
+ * 第四页的主读数放大一档 + **收进一块读数气泡**（2026-10-12）。
  *
- * 原来跟着第三页横排走：实测值字号只有 14px（只有 1400×900 撞到 17px 的上限），
- * 而右边还空着几百像素 —— 没有理由把这一页唯一的读数压这么小。
+ * 放大这一档的理由照旧（下面那段原文）：实测值字号只有 14px（只有 1400×900 撞到 17px
+ * 的上限），而右边还空着几百像素 —— 没有理由把这一页唯一的读数压这么小。
+ *
+ * ★ 2026-10-12 加的"气泡"：三行数原来直接摊在卡面上（右侧一片空地上孤零零三行字，
+ * 作者：「我其实不是很满意，这是我以前将就的时候做的」）。现在给它们**一个容器** ——
+ * 与校准页下缘 `.hudBottom` 同一副语言（--surface-solid 面 + 大圆角 + 柔影），
+ * 右侧从此是"一块读数卡"，与左边那块板子成对。
  *
  * 只作用在"当前页竖排"这一档：
  *   · 第三页横排不动（三个数并排，放大会把最右那个「mm」挤出卡片）
@@ -414,7 +426,14 @@
  */
 .calib[data-plate='xy'] > .axes:not([data-orient='col']) {
   --axis-value: clamp(18px, 2.4cqw, 26px);
-  --axis-label: 12.5px;
+  /* 2026-10-12 第三遍：轴名跟着默认档一起上抬（12.5 → 13.5） */
+  --axis-label: 13.5px;
+
+  /* 读数气泡：内衬 14/18、--r-lg 圆角（36px 横向内衬已算进左列上限那条 100% - 230px） */
+  padding: 14px 18px;
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
 }
 
 /* 露出卡那条缝里的竖排：一列、靠左（不跟着上面那条居中走）。切到 row 的那一下由 AxisBar 的 FLIP 补间，
@@ -482,7 +501,8 @@
   padding: 7px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: rgb(255 255 255 / 70%);
+  /* 玻璃面走 --glass（2026-10-12 深色第二遍）：写死的白在深色里是一条发亮的输入框 */
+  background: var(--glass);
   color: var(--text-1);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
@@ -490,7 +510,7 @@
 }
 .presetSelect:hover {
   border-color: var(--text-3);
-  background: #fff;
+  background: var(--glass-hover);
 }
 
 /*
@@ -573,7 +593,8 @@
   background: none;
   font-family: inherit;
   letter-spacing: inherit;
-  font-size: 10.5px;
+  /* 2026-10-12 第三遍：「原 x.xx」太小太浅 —— 10.5 → 11.5（与校准页那一档对齐） */
+  font-size: 11.5px;
   font-weight: 400;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -658,7 +679,8 @@
 
 .axisField:not([data-readonly='true']):focus-within {
   border-color: var(--accent);
-  background: rgb(255 255 255 / 70%);
+  /* 同 .presetSelect：聚焦底也走 --glass（深色里换磨砂黑玻璃，不再是一块白） */
+  background: var(--glass);
 }
 
 .axisField[data-readonly='true'] {
@@ -692,8 +714,9 @@
 
 .axisLabel {
   /* 字号走变量：第四页竖排那一档单独放大（见 .calib[data-plate='xy'] > .axes），
-     横排与缝里竖排用这里的默认值 */
-  font-size: var(--axis-label, 11px);
+     横排与缝里竖排用这里的默认值。2026-10-12 第三遍：默认 11 → 12
+     （与校准页 CalibReadings 那一档对齐） */
+  font-size: var(--axis-label, 12px);
   letter-spacing: 0.06em;
   color: var(--text-3);
   /* 标签行带 .axisFrom 之后要允许折行（缝里那 20% 宽的一列） */
@@ -814,7 +837,8 @@
 .note {
   margin: 0;
   max-width: 46ch;
-  font-size: 11.5px;
+  /* 2026-10-12 第三遍：与板下那两行一起上抬一档（11.5 → 12.5） */
+  font-size: 12.5px;
   line-height: 1.7;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -833,11 +857,16 @@
  * Z 步板下的两行文案（10-03 作者：「首页也缺那个文案」—— 与「校准」tab 同一句原话，
  * 字挂在 calibAxesA44 里共用）。居中贴板下；不参与板宽公式的话列会溢出，
  * 扣减量在 .calib 的 --plate-fixed(-vh) 里跟着让（见那条的注释）。
+ *
+ * ★ 2026-10-12 第三遍（作者：「这些字是我们自己做出来的，可以适当去放大」）：
+ *   字号上抬一档（11.5 / 12.5 → 13 / 13.5），与校准页那两行同档。
+ *   两行合计高约 +4px —— `.calib[data-hint='true']:not([data-plate='xy'])` 的
+ *   扣减量跟着从 313 抬到 318（那一档本来就是按实测收着给的）。
  */
 .legend {
   margin: 0;
   text-align: center;
-  font-size: 11.5px;
+  font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
@@ -845,7 +874,7 @@
 .tip {
   margin: 0;
   text-align: center;
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.5;
   color: var(--text-2);
 }
@@ -874,7 +903,8 @@
   }
 
   .calib {
-    --plate-w: clamp(240px, calc((100cqh - var(--plate-fixed, 270px)) * 4), 1400px);
+    /* fallback 270 → 275：同上面那条（板下两行文案放大了一档） */
+    --plate-w: clamp(240px, calc((100cqh - var(--plate-fixed, 275px)) * 4), 1400px);
     --calib-gap: clamp(10px, 1.8cqh, 16px);
 
     /* width 要一起写：否则会被同特异度、在前面的 .info 那条 34cqw 盖回去 */
@@ -1188,7 +1218,7 @@
   /* 字号回到横排那一套：26px 三个数并排在 340 的列里必切 */
   .calib[data-plate='xy'] > .axes:not([data-orient='col']) {
     --axis-value: clamp(14px, 1.6cqw, 17px);
-    --axis-label: 11px;
+    --axis-label: 12px;
   }
 
   /* 单列里板块框吃满列宽（两列档那条 minmax 不再生效），板子仍由高度定尺寸 */

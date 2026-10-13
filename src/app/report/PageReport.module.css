@@ -172,7 +172,9 @@
 
 .searchBox:focus-within {
   border-color: var(--accent);
-  background: #fff;
+  /* 聚焦底走 --glass（浅色 = 白玻璃，深色 = 磨砂黑玻璃）——
+     原先写死的 #fff 在深色里是"点进去整条发白"（2026-10-12 深色第二遍） */
+  background: var(--glass);
 }
 
 .searchIcon {
@@ -212,7 +214,9 @@
   padding: 5px 13px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  /* 实的白走 --surface-solid（2026-10-12 深色第二遍）：原先写死 #fff，
+     深色里三颗筛选胶囊是白底 + 浅灰字，既刺眼又读不清 */
+  background: var(--surface-solid);
   font-size: var(--fs-label);
   color: var(--text-2);
   white-space: nowrap;
@@ -592,31 +596,64 @@
   margin-bottom: 0;
 }
 
-/* 组分隔：**横线**（组名 + 摘要坐在一条线上）—— 不是气泡 */
+/*
+ * 组分隔：**横线**（组名 + 摘要坐在一条线上）—— 不是气泡。
+ *
+ * ★ 对齐口径（2026-10-12 作者：「这些图标没有对齐」）：整条**居中**，不用 `baseline`。
+ *   图标是**替换元素**，它的基线就是 svg 盒子底边；文字基线在字墨里偏下，
+ *   两者 `baseline` 一对齐，图标必然相对文字上浮 —— 这就是截图里三个图标
+ *   各自高低不一的那种歪。而且 svg 默认 `inline` 会按行盒算高度，
+ *   图标盒与文字行盒还差一层 leading，`baseline` 下这段差也各算各的。
+ *   改成 `align-items: center` + 图标盒定高（同 `global.css` 里
+ *   「按钮/胶囊字重心」那条思路：几何对齐归几何，别交给基线）：
+ *   图标盒 `--grp-ico` 与图标自身等高，居中后图标中线 = 组名行盒中线，三组一条线。
+ */
 .grpBar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin: 0 0 10px;
   padding: 2px 0;
+
+  /*
+   * 量尺挂在**这一层**：组名 `b`、摘要、图标盒都读同一条 var。
+   * ★ 定义在 `.grpIcon` 上行不通 —— 那是 `b` 的**兄弟**，自定义属性只沿 DOM 往下走，
+   *   兄弟拿不到 ⇒ `var(--grp-ico)` 落在 `b` 上是未解析的，`line-height` 静默回落。
+   */
+  --grp-ico: 15px;
 }
 
 .grpBar b {
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-1);
+  /* 组名行盒高度写死成图标盒高：居中才有确定的"中"，不随字体度量漂 */
+  line-height: var(--grp-ico);
 }
 
 /* 组小图标：跟组名一排，扫一眼找得到组 */
 .grpIcon {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--grp-ico);
+  height: var(--grp-ico);
   margin-right: -2px;
   color: var(--text-2);
 }
 
+/* 图标按盒子给尺寸，`inline` 的行盒额外高度不参与布局 */
+.grpIcon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .grpSum {
+  /* 摘要是小一号的字，行盒高度也锚到图标盒高：居中时与组名同一条中线 */
+  line-height: var(--grp-ico);
   font-size: var(--fs-label);
   color: var(--text-3);
 }

@@ -65,6 +65,8 @@ import heroPile from '../assets/hero/hero_pile.webp'
 import heroPile2x from '../assets/hero/hero_pile@2x.webp'
 
 import { useIsDark } from '../state/appState'
+import { settleSlicerPick, useSlicerPick, useSlicerPref } from '../shared/slicer'
+import { SlicerPickView } from '../shared/SlicerPickView'
 import p from './PageHome.module.css'
 
 const EMPTY: Selection = { brand: null, model: null, variant: null }
@@ -124,6 +126,9 @@ export default function PageHome({ density }: PageHomeProps) {
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
   const [modelErr, setModelErr] = useState<string | null>(null)
+  /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
+  const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
+  const slicerPick = useSlicerPick(defaultSlicer, openModel !== null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
   /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
@@ -222,7 +227,8 @@ export default function PageHome({ density }: PageHomeProps) {
   const openCachedModel = () => {
     if (openModel === null) return
     setModelBusy(true)
-    api.openModel(openModel.id).then(
+    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
+    api.openModel(openModel.id, { slicer }).then(
       () => {
         setModelBusy(false)
         setOpenModel(null)
@@ -239,10 +245,11 @@ export default function PageHome({ density }: PageHomeProps) {
     if (openModel === null || modelInfo === null) return
     setModelBusy(true)
     setModelErr(null)
+    const slicer = settleSlicerPick(slicerPick, setDefaultSlicer)
     void (async () => {
       try {
         await api.downloadCatalogFile(modelInfo.fileName)
-        await api.openModel(openModel.id)
+        await api.openModel(openModel.id, { slicer })
         setModelBusy(false)
         setOpenModel(null)
       } catch (e) {
@@ -1112,6 +1119,13 @@ export default function PageHome({ density }: PageHomeProps) {
             </>
           }
         >
+          {/* 用哪个打开（默认在设置页「切片」那格；勾「仅这一次」就不写回） */}
+          <SlicerPickView
+            value={slicerPick.value}
+            once={slicerPick.once}
+            onChange={slicerPick.setValue}
+            onOnceChange={slicerPick.setOnce}
+          />
           <p className={p.note}>
             {modelErr !== null
               ? modelErr

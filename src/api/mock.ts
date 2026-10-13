@@ -807,8 +807,9 @@ export const mockApi: MkpApi = {
     return calibModels
   },
 
-  async openModel(modelId) {
-    console.info('[mock] openModel', modelId)
+  async openModel(modelId, opts) {
+    /* 浏览器里没有壳、真开不了 —— 把「用哪个打开」照实说出来，真开由桌面版接 */
+    console.info('[mock] openModel', modelId, 'slicer =', opts?.slicer ?? 'system')
   },
 
   /*

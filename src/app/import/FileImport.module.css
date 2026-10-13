@@ -35,7 +35,8 @@
 }
 
 .bannerBad {
-  background: #fff3e2;
+  /* 琥珀块的面收进 token（2026-10-12 深色第二遍）——同 NoteBar.noteBad */
+  background: var(--warn-surface);
 }
 
 .bannerText {
@@ -115,8 +116,9 @@
   margin: 0;
   padding: 6px 10px;
   border-radius: var(--r-sm);
-  background: #fff3e2;
-  color: #a86416;
+  /* 同 .bannerBad：琥珀面 / 墨走 token */
+  background: var(--warn-surface);
+  color: var(--warn-ink);
   font-size: var(--fs-label);
 }
 

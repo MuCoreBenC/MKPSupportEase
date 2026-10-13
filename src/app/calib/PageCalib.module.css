@@ -88,6 +88,11 @@
   box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
 }
 
+/* 深色（2026-10-12 第二遍）：浅色影在深底上看不见 —— 选中段浮起的那点层次会丢 */
+[data-theme='dark'] .tab[data-on='true'] {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
 /*
  * 预设（2026-10-11 搬出轨道，作者：「没对齐」）：从「融进轨道的第四段」改成
  * **钉在上缘右端的一颗** —— 上缘从此左端一条步骤条、右端一颗预设，两端对齐，
@@ -213,11 +218,19 @@
   min-height: 0;
 }
 
+/*
+ * Z 步板下那两行（与首页第三张卡是同一句、同一副文案 —— 见 `calibAxes.ts`）。
+ *
+ * ★ 2026-10-12 第三遍（作者：「这些字是我们自己做出来的，可以适当去放大」）：
+ *   字号整体上抬一档（老值 9~12 / 9.5~13 上下限各 +2 / +1.5）。这两行是我们
+ *   自己排的字，放大不牵动板子（板内刻字是 SVG 轮廓，改不了、也不跟着变）。
+ *   颜色另由 token 提亮（`--text-2/3` 那一刀）。
+ */
 .legend {
   margin: 0;
   text-align: center;
-  /* 跟板宽等比（cqw of .hudBoard）：正常 ~11px，窄窗缩到 9px —— 与板内刻字同档 */
-  font-size: clamp(9px, 0.92cqw, 12px);
+  /* 跟板宽等比（cqw of .hudBoard）：正常 ~13px，窄窗收到 11px */
+  font-size: clamp(11px, 1.05cqw, 14px);
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
@@ -226,14 +239,16 @@
   margin: 0;
   text-align: center;
   /* 同上；窄窗一行放得下，不再折行盖过板子 */
-  font-size: clamp(9.5px, 1cqw, 13px);
+  font-size: clamp(12px, 1.12cqw, 14.5px);
   line-height: 1.5;
   color: var(--text-2);
 }
 
 .note {
   margin: 0;
-  font-size: var(--fs-label);
+  /* 2026-10-12 第三遍：板框里那行提示（「先回『选择机型』…」）抬一档 —— 
+     --fs-label 在常见宽度下只有 ~11.7px，作者圈过说看不清 */
+  font-size: calc(var(--fs-label) + 1px);
   line-height: 1.5;
   color: var(--text-3);
 }
@@ -320,23 +335,39 @@
   container-type: inline-size;
 }
 
+/* 深色（2026-10-12 第二遍）：上面那道浅影在深底上看不见 —— 读数气泡的"浮起"会丢，换黑影 */
+[data-theme='dark'] .hudBottom {
+  box-shadow:
+    0 8px 24px rgb(0 0 0 / 42%),
+    0 1px 3px rgb(0 0 0 / 30%);
+}
+
 /*
  * 下缘的字号 / 内衬 / 框高**连续**跟容器宽走（cqw，容器 = .hudBottom 实测宽）。
  *
  * 原来按 ≤880 / ≤660 两档整档收紧（轴名 11→10、mm 12→10、按钮 24→22…），
  * 拖窗跨线那一刻整个下缘"压一下"—— 轻，但也是跳变（作者 2026-10-05）。
  * 现在连续取值，锚点落在旧档位的值上；`dd input` 那两条档位覆盖整个撤掉，
- * 读数件自己的 `clamp(14px, 1.6vw, 17px)`（本来就是连续的）直接站出来。
+ * 读数件自己的那一档（现在叫 `--field-fs`，本来就是连续的）直接站出来。
  *
  * 顺带清一条死规则：`dt > span`（旧 660 档里 display:none 的那只）——
  * 「原 x.xx」从 span 改成 button 后它就匹配不到任何东西了，撤掉。
+ *
+ * 小字那一档（轴名 / 「原 x.xx」/ mm / 横杠）—— 2026-10-13 收成**一个变量**，
+ * 交给读数件自己用（见 CalibReadings.module.css 的 `--read-fs`）。
+ *
+ * 原来只有轴名按容器宽收紧（10~11），旁边那三个小字各写各的（11.5 / 12 / 跟着
+ * `--fs-label` 走）—— 同一行里几个小字三个大小，作者说的「字体有大有小」正是它。
+ * 现在四个共用这一条：收紧一起收，谁也不再跟谁差半号。
+ *
+ * 曲线整体比原来上移 0.5px（下限 10 → 10.5、常数 6.4 → 6.9、上限 11 → 11.5）：
+ * 「原 x.xx」当初就是因为"太小太浅"从 10.5 提到 11.5 的（见 `.axisFrom` 那条注释），
+ * 统一下压等于把那条推翻，所以取中间偏上那一档 —— 谁都不会显得小；窄窗也仍是一行
+ * （读数那几段字加起来离折行还差得远）。
  */
 .hudBottom dl {
   gap: clamp(8px, 2.1px + 0.9cqw, 14px) clamp(14px, 5.3px + 1.67cqw, 40px);
-}
-
-.hudBottom dt label {
-  font-size: clamp(10px, 6.4px + 0.45cqw, 11px);
+  --read-fs: clamp(10.5px, 6.9px + 0.45cqw, 11.5px);
 }
 
 .hudBottom dd label {
@@ -682,3 +713,31 @@
 /* （浮动条上那颗「保存」原来也有一条"深色里换中性亮面"的补丁 —— 已删：
    `.changeSave` 现在是**反色配对**（`--text-1` 底 + `--bg-1` 字），hover 走 `--text-2`，
    深浅一条规则全成立。作者截图："深色的时候一些按钮的重点就没了"。） */
+
+/*
+ * 深色（2026-10-12 第二遍）：**整条药丸换成"黑玻璃"**。
+ *
+ * 上面那条 135° 白渐变（45% / 22%）是给白卡面调的 —— 深色里它就是一整条发亮的
+ * 浅色横带（截图 4 红框那条「先选一份预设…」）。液态玻璃的配方不动
+ * （1px blur + saturate 还是那套），只换"玻璃本身的色"：白 12% → 5% 的斜渐变
+ * = 深底上"提亮一档"的磨砂面；外阴影的墨色换成黑影（浅影在深底上等于没画）；
+ * 顶光降到 14%（深底上 50% 会成一条白线）。
+ */
+[data-theme='dark'] .changeBar {
+  background: linear-gradient(135deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 5%));
+  box-shadow:
+    0 0 0 0.5px var(--surface-sunken),
+    inset 0 0.5px 1px rgb(255 255 255 / 14%),
+    0 10px 30px rgb(0 0 0 / 42%),
+    0 1px 3px rgb(0 0 0 / 30%);
+}
+
+/* 「提示」档那条基础色（浅色是白 52%）同一条换法：深色 = 白 12% 平铺 */
+[data-theme='dark'] .changeBar[data-tone='hint'] {
+  background: rgb(255 255 255 / 12%);
+}
+
+/* 「保存成功」回执：底色还是淡绿，但字要用深色档的亮绿（accent-deep 在深底上发闷） */
+[data-theme='dark'] .changeBar[data-saved='true'] {
+  color: var(--accent);
+}

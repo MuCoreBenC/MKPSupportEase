@@ -63,6 +63,7 @@
   min-width: 0;
 }
 
+/* 底走 --glass（2026-10-12 深色第二遍）：写死的白在深色里是一颗颗发亮的胶囊 */
 .option {
   display: flex;
   align-items: center;
@@ -70,7 +71,7 @@
   padding: 7px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgb(255 255 255 / 60%);
+  background: var(--glass);
   color: var(--text-2);
   font-size: 12.5px;
   white-space: nowrap;
@@ -80,7 +81,7 @@
 .option:hover {
   color: var(--text-1);
   border-color: var(--line-strong);
-  background: #fff;
+  background: var(--glass-hover);
 }
 
 .option[data-on='true'] {

@@ -122,9 +122,10 @@
   height: 16px;
   padding: 0 6px;
   border-radius: 2px;
-  background: #fff3e2;
+  /* 琥珀面 / 墨走 token（2026-10-12 深色第二遍）——同 NoteBar.noteBad */
+  background: var(--warn-surface);
   font-size: calc(var(--fs-label) - 1px);
-  color: #a86416;
+  color: var(--warn-ink);
 }
 
 .badgeSaved {

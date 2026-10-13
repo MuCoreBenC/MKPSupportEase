@@ -138,7 +138,9 @@
  * 排序仍由 `presetTree.sortRows` 管（置顶的排最前），这一层只管样子。
  */
 .row[data-pinned='true'] {
-  background: rgb(16 24 32 / 3.5%);
+  /* 原值就是 --surface-sunken 的浅色值（墨 3.5%）——走 token（2026-10-12 深色第二遍）：
+     写死的墨色在深色里等于没画，置顶行与普通行会完全同色 */
+  background: var(--surface-sunken);
 }
 
 .row[data-pinned='true']:hover {
@@ -1260,3 +1262,37 @@
  * —— 2026-10-10 第七轮：作者看过实际效果（「这放的很乱」「还没有改之前的好看」），
  * 回摆到两栏自然折行；`.detailCard` 上的 `container-type` 随之一起撤了。）
  */
+
+/* ============ 深色（2026-10-12 第二遍） ============ */
+
+/*
+ * （这一组"换中性亮面 + 主文字色"的补丁**已删** —— 那套配方让 `.useBtn / .actBtn /
+ *  .saveBtn` 在深色里与卡片底同色，作者截图点过"一些按钮的重点就没了"。
+ *  现在基础规则自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），hover / active
+ *  走 `--text-2`，一条规则两套主题全成立。见 `.useBtn` 那一段。）
+ */
+
+/* 「在用」那颗的凹面：内阴影的墨色在深底上等于没画，换成黑影 + 深色档的绿圈 */
+[data-theme='dark'] .useBtn[data-live='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  box-shadow:
+    inset 0 1px 3px rgb(0 0 0 / 30%),
+    inset 0 0 0 1px rgb(47 158 91 / 26%);
+}
+
+/* 详情白卡的浮影 / 保存键的轻影：浅色影在深底上看不见，换黑影 */
+[data-theme='dark'] .detailCard {
+  box-shadow:
+    0 8px 24px rgb(0 0 0 / 42%),
+    0 1px 3px rgb(0 0 0 / 30%);
+}
+
+[data-theme='dark'] .saveBtn {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 34%);
+}
+
+/* meta 行里那颗间隔点：墨色 20% 在深色里直接消失，换白发丝 */
+[data-theme='dark'] .dDot {
+  color: rgb(255 255 255 / 22%);
+}

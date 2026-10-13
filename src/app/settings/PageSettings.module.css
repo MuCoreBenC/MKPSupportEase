@@ -200,3 +200,18 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
 }
+
+/* ============ 深色（2026-10-12 第二遍） ============ */
+
+/*
+ * 官方更新那两行"好消息绿"与 noteBad 的棕字原来是**深色墨**（#2f6f3e / #8a5a20）——
+ * 压深底上几乎读不出。换成各族的深色档（绿走 --accent、警示走 --warn-ink）。
+ */
+[data-theme='dark'] .updateFresh,
+[data-theme='dark'] .updateLatest {
+  color: var(--accent);
+}
+
+[data-theme='dark'] .noteBad {
+  color: var(--warn-ink);
+}
