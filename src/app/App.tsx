@@ -102,6 +102,22 @@ export default function App() {
   }, [])
 
   /*
+   * 反方向那一条（2026-10-13，工艺页 → 预设页）：工艺页「MKP 工艺」档里那几份
+   * **还没下载**的，点一下就跳过来把那一份取回去 —— 去的是预设页的
+   * 「切片器配置 → 云端」那一栏（下载在那儿）。
+   *
+   * 与 `openBbs` 同一个形状：**跨页跳转的出口由外壳给**，页面只把"我要去"交出去；
+   * `nonce` 同样是"再点一次也要重新触发"。带的那点意图（切到切片器那一栏）
+   * 由预设页自己认（见 `PagePresets` 的 `pending`）。
+   */
+  const [pendingPresets, setPendingPresets] = useState<{ nonce: number } | null>(null)
+
+  const openPresetsForSlicer = useCallback(() => {
+    setPendingPresets((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
+    setTab('preset')
+  }, [])
+
+  /*
    * 预设页那句「此预设需要更新版 SupportEase」的「去更新」出口：切到设置页。
    *
    * ★ 它与 `openBbs` 同类 —— **跨页跳转的出口由外壳给**，页面只负责把"我要去"交出去。
@@ -144,13 +160,22 @@ export default function App() {
               <PageHome density={density} />
             </PageSlot>
             <PageSlot hidden={tab !== 'preset'} page="presets">
-              <PagePresets density={density} onOpenBbs={openBbs} onOpenSettings={openSettings} />
+              <PagePresets
+                density={density}
+                onOpenBbs={openBbs}
+                onOpenSettings={openSettings}
+                pending={pendingPresets}
+              />
             </PageSlot>
             <PageSlot hidden={tab !== 'calib'} page="calib">
               <PageCalib />
             </PageSlot>
             <PageSlot hidden={tab !== 'bbs'} page="bbs">
-              <PageBbs density={density} pending={pendingBbs} />
+              <PageBbs
+                density={density}
+                pending={pendingBbs}
+                onNeedDownload={openPresetsForSlicer}
+              />
             </PageSlot>
             <PageSlot hidden={tab !== 'report'} page="report">
               <PageReport />

@@ -52,6 +52,19 @@ interface Props {
   onQuery: (next: string) => void
   onPick: (key: string) => void
   /**
+   * 点了**还没下载**的那一份该去哪儿（2026-10-13）：页面给的动作（跳去预设页把它取回来）。
+   * `null` = 这一档没有这个动作 —— 那时点了不做事，title 里仍写着该去哪一栏。
+   */
+  onNeedDownload: (() => void) | null
+  /**
+   * 已经复制进切片器目录的**我们那几份**（文件名）。
+   *
+   * 本机目录里出现同名的那一份时，行尾标一颗「我们发的」—— `copy_to_slicer` 之后两边
+   * 各有一份内容相同的（作者 §7：「把"来自我们那几份"标出来」），不标出来会以为
+   * 本机目录里那份是用户自己另存的。
+   */
+  copied: ReadonlySet<string>
+  /**
    * 重扫本机（2026-10-13 从工具条搬进来的）：它是"刷新这个列表"，
    * 与机型筛选是同一层的事。`null` = 这一档没有这个动作（比如读不到本机目录时）。
    */
@@ -95,6 +108,8 @@ export default function BbsPresetDrawer({
   onTarget,
   onQuery,
   onPick,
+  onNeedDownload,
+  copied,
   rescan,
   loading,
   slicer,
@@ -291,13 +306,25 @@ export default function BbsPresetDrawer({
                 className={s.item}
                 data-on={it.current}
                 data-off-model={it.offModel ? 'true' : undefined}
+                data-need-download={it.notDownloaded ? 'true' : undefined}
                 disabled={it.disabled}
-                title={it.disabled ? (it.reason ?? '') : `${it.printer} · ${it.nozzle} nozzle · ${it.file}`}
-                onClick={() => onPick(it.key)}
+                title={
+                  it.disabled
+                    ? (it.reason ?? '')
+                    : it.notDownloaded
+                      ? `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
+                        + ' —— 还没下载，点了去「预设」页 → 切片器配置 → 云端 取回来'
+                      : `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
+                }
+                /* 还没下载的那一份：点了不是切预设，是去把它取回来（见 Props.onNeedDownload） */
+                onClick={() => (it.notDownloaded ? onNeedDownload?.() : onPick(it.key))}
               >
                 <span className={s.tick}>{it.current ? '✓' : ''}</span>
                 {it.star && <span className={s.star}>*</span>}
                 <span className={s.name}>{it.label}</span>
+                {/* 行尾那两颗小标签：都是"这一份是什么来路"，不参与选中 */}
+                {it.notDownloaded && <span className={s.tag}>还没下载</span>}
+                {source === 'bbs' && copied.has(it.file) && <span className={s.tag}>我们发的</span>}
               </button>
             ))}
           </div>

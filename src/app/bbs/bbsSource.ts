@@ -206,8 +206,16 @@ export function normalizeList(
     it.target = `${t.printer}|${t.nozzle}`  // 筛选用的键
     /* instantiation:"false" 的是继承链中间层（fdm_process_*），BBS 下拉里也不列它们 */
     it.isAbstract = String(it.instantiation) === 'false'
-    it.selectable = !it.broken && !it.isAbstract
-    it.reason = it.broken ? `文件解析失败：${it.broken}` : (it.isAbstract ? '继承链中间层' : null)
+    /*
+     * ★ **还没下载的那几份由 `slicerItem` 标好，这里不许拿通用算式盖掉它**（2026-10-13）：
+     *   它的正文不在手上，选了也画不出参数 —— 那一档的默认选中必须跳过它
+     *   （`pickInitial` 认的就是这个 `selectable`）。原来这一步是无条件重算的，
+     *   于是灰着的那几份照样会被默认选中，右侧只剩出厂默认值。
+     */
+    it.selectable = it.notDownloaded ? false : (!it.broken && !it.isAbstract)
+    it.reason = it.notDownloaded
+      ? '还没下载'
+      : it.broken ? `文件解析失败：${it.broken}` : (it.isAbstract ? '继承链中间层' : null)
   }
   return raw
 }
@@ -321,18 +329,27 @@ export function groupsFor(
     current: it.key === currentKey,
     /* BBS 里改动未保存的预设，名字前面带 * */
     star: it.key === currentKey && dirty,
-    /* 坏文件才真的点不动；只是「不属于当前档位」的仍可点（点了就切过去），
-       但要显示得弱一点 —— 不然你会以为它坏了。 */
-    disabled: !it.selectable,
+    /*
+     * 坏文件才真的点不动；只是「不属于当前档位」的仍可点（点了就切过去），
+     * 但要显示得弱一点 —— 不然你会以为它坏了。
+     * ★ 2026-10-13：**还没下载的那几份不进 disabled** —— 它们可点，
+     *   点了是另一种动作（去预设页取回来，见 `notDownloaded`）。
+     */
+    disabled: !it.selectable && !it.notDownloaded,
     offModel: it.selectable && !wanted(it),
     reason: it.reason || (wanted(it) ? null : `属于 ${it.printer} · ${it.nozzle}`),
+    notDownloaded: Boolean(it.notDownloaded),
   })
 
   /* 池子先按这一档收一次：两侧不会同时出现在列表里（那是两个入口） */
   const pool = live.filter(hitQuery).filter((it) => inPickSource(it, source))
   /* 我们自己的那几份（2026-10-13）：筛法与用户预设同一套 —— 当前机型的排在组里，
-     别的机型的落进「其他机型」组弱化但可点（那是你会想看见的，不该直接消失） */
-  const mkpItems = pool.filter((it) => it.scope === 'mkp' && it.selectable && wanted(it)).map(wrap).sort(byName)
+     别的机型的落进「其他机型」组弱化但可点（那是你会想看见的，不该直接消失）。
+     ★ **还没下载的那几份也排在这一组里**（灰着、点了去预设页取）：列出来才知道我们发过它 */
+  const mkpItems = pool
+    .filter((it) => it.scope === 'mkp' && (it.selectable || it.notDownloaded) && wanted(it))
+    .map(wrap)
+    .sort(byName)
   /* 导入的那几份不参与机型筛选：你刚拖进来的文件，无论属于哪台机都得看得见 */
   const importedItems = pool.filter((it) => it.scope === 'imported').map(wrap).sort(byName)
   const userItems = pool.filter((it) => it.scope === 'user' && it.selectable && wanted(it)).map(wrap).sort(byName)
@@ -340,8 +357,10 @@ export function groupsFor(
   /* 「其他 / 不支持」只收三种：坏文件、**你自己的**别的机型的预设、以及我们自己的别的机型的
      切片器配置（后两类你会想看见）。别的机型的系统预设直接不列 —— BBS 里也只加载当前机型
      那一批，全塞进来会是两百多条噪音。 */
+  /* 已经在上面那两组里排过的不再进来（一组一份）—— 还没下载的我们那几份正落在这一条上 */
+  const placed = new Set([...mkpItems, ...importedItems, ...userItems, ...systemItems].map((it) => it.key))
   const restItems = pool
-    .filter((it) => it.scope !== 'imported'
+    .filter((it) => it.scope !== 'imported' && !placed.has(it.key)
       && (!it.selectable || ((it.scope === 'user' || it.scope === 'mkp') && !wanted(it))))
     .map(wrap)
     .sort(byName)

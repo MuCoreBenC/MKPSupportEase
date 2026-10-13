@@ -282,7 +282,7 @@ SHA 校验
 | --- | --- |
 | Gitee 镜像的**真实边界**：手动同步后 Gitee 只是**内容源镜像**（source/catalog/assets 随仓库走），**不是完整的更新分发镜像** —— `release.json` 的 `asset.url` 仍指向 GitHub Releases，Gitee 模式用户的应用内更新流量走 GitHub | 已认清并登记为 **M6**（§5）：切到 Gitee Release 是独立一刀，不与寻址改造混做 |
 | `crates/preset/assets/presets/` | 构建期嵌入用的 9 份 TOML 副本（文件名不含路径前缀，改名基本无感）；`gen-catalog` 输入口径在 M3 顺带核对 |
-| `tools/dev-server` | 开发用 `/presets` 路由（BBS 代理），与交付面无关；M5 顺带确认 |
+| `tools/dev-server` | 开发用 `/presets` 路由（BBS 代理），与交付面无关；M5 顺带确认。**2026-10-13：整个目录删掉了** —— 那条线改走 IPC（`ipc/bbs.rs`），见 `docs/DATA-INVENTORY.md` C8 |
 | `tmp-shots/`、`workbench/.snapshots` | 历史截图/快照含旧目录名，纯史料，不改 |
 
 ## 8. 进度台账（完成一项填日期；新发现的面往 §6 加行）

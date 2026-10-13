@@ -119,10 +119,29 @@ const SYSTEM: Record<string, Doc> = {
 }
 
 /*
- * 用户层那份：自己另存、改了几处。**机型不写在自己身上**（真机上的用户档与
- * MKPProcess 那批一样常常没这一串）—— 顺 inherits 到系统那一层去认。
+ * 用户层那两份。**机型都不写在自己身上**（真机上的用户档与 MKPProcess 那批一样
+ * 常常没这一串）—— 顺 inherits 到系统那一层去认。
+ *
+ * 第二份是**我们那份复制进来的**（`copy_to_slicer` 之后的样子）：文件名叫
+ * `MKPProcess A1 0.4 0.20.json`，与 `localFiles.ts` 的"已复制"集合对得上 ——
+ * 工艺页据此在「本机工艺」档里给它标一颗「我们发的」（作者 §7）。不标的话，
+ * 用户会以为本机目录里这一份是自己另存的。
  */
 const USER: Record<string, Doc> = {
+  'MKPProcess A1 0.4 0.20.json': {
+    type: 'process',
+    name: 'MKPProcess A1 0.4',
+    inherits: '0.20mm Standard @BBL A1',
+    from: 'User',
+    instantiation: 'true',
+    version: '2.0.0.83',
+    print_settings_id: 'MKPProcess A1 0.4',
+    layer_height: '0.2',
+    initial_layer_print_height: '0.2',
+    wall_loops: '3',
+    sparse_infill_density: '25%',
+    outer_wall_speed: '120',
+  },
   '0.20mm High Flow MKP.json': {
     type: 'process',
     name: '0.20mm High Flow MKP',

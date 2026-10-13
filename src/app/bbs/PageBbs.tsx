@@ -56,6 +56,13 @@ interface Props {
   density: Density
   /** 预设页右键带过来的目标文件名；null = 直接从顶栏点进来的 */
   pending: { name: string; nonce: number } | null
+  /**
+   * 「MKP 工艺」档里那几份**还没下载**的，点一下该去哪儿（2026-10-13 作者 §7）：
+   * 外壳给的动作 = 跳去预设页的「切片器配置 → 云端」把那一份取回来。
+   *
+   * `null` = 不留这个动作（那时列表里那几份照样灰着列，只是点了不做事）。
+   */
+  onNeedDownload: (() => void) | null
 }
 
 const RULES = coverage()
@@ -96,7 +103,7 @@ const labelWidth = (pageW: number) => Math.round(
 const RULES_NOTE = `条件显隐规则 ${RULES.rules} 条、覆盖 ${RULES.keys} 个参数`
   + '（译自 ConfigManipulation.cpp 的 toggle_print_fff_options）'
 
-export default function PageBbs({ density, pending }: Props) {
+export default function PageBbs({ density, pending, onNeedDownload }: Props) {
   const data = useBbsData()
   /*
    * 看哪一边（2026-10-13）：`mkp` = 我们自己的切片器配置，`bbs` = 本机 BBS 目录里的。
@@ -115,24 +122,28 @@ export default function PageBbs({ density, pending }: Props) {
    * 演示正文，见 `mockServer/slicerPreset.ts`）。整批交给清单（`scope = 'mkp'`），
    * 左抽屉那个「MKP」档就是它们 —— 于是继承链、基准、改动判定全走与 BBS 预设同一条路。
    *
-   * 一份读不出来就跳过这一份：**一份读不到不该拦着别的几份**（预览里 MKP 的 toml 就是抛的）。
-   * 整批都读不出来时 MKP 档是空的，那儿有空态照实说。
+   * ★ 同一天第二轮：**目录里登记着、盘上还没有的那几份也进清单**（`listed` 里减掉
+   *   `downloaded`）—— 它们没有正文，灰着列在 MKP 组里，点了去预设页取回来
+   *   （作者 §7：「把未下载的 MKP 工艺也列出来（灰着、点了去预设页下载）」）。
+   *   一份读不出来就跳过这一份：**一份读不到不该拦着别的几份**（预览里 MKP 的 toml 就是抛的）。
    */
   const setSlicerPresets = data.setSlicerPresets
   /* 先解构再进依赖：整个 `delivered` 每帧都是新对象，把它放进依赖会让这一段每渲染
      都重读一遍盘（一次读九份，不能这么花） */
+  const mkpListed = delivered.listed
   const mkpFiles = delivered.downloaded
   const readMkp = delivered.read
   useEffect(() => {
-    if (!mkpFiles.length) {
-      /* 盘上一份都没有：清单里也不该留着上一次那几份 */
-      setSlicerPresets([])
-      return
-    }
     let alive = true
     void (async () => {
+      const have = new Set(mkpFiles.map((f) => f.fileName))
       const rows: BbsSlicerRow[] = []
-      for (const f of mkpFiles) {
+      for (const f of mkpListed) {
+        if (!have.has(f.fileName)) {
+          /* 还没下载：只带目录登记（机型与喷嘴），没有正文 */
+          rows.push({ fileName: f.fileName, machineId: f.machineId, path: f.path })
+          continue
+        }
         try {
           const doc = await readMkp(f.fileName)
           if (!alive) return
@@ -145,7 +156,12 @@ export default function PageBbs({ density, pending }: Props) {
       if (alive) setSlicerPresets(rows)
     })()
     return () => { alive = false }
-  }, [mkpFiles, readMkp, setSlicerPresets])
+  }, [mkpFiles, mkpListed, readMkp, setSlicerPresets])
+
+  /* 已经复制进切片器目录的那几份（文件名）：本机工艺档里出现同名的那一份要标出来 ——
+     `copy_to_slicer` 之后两边各有一份内容相同的（作者 §7） */
+  const copiedFiles = delivered.copied
+  const fromUs = useMemo(() => new Set(copiedFiles), [copiedFiles])
 
   /* 落 localStorage 的偏好：只看档位（主题那一格 2026-10-12 退役，见下）。键名收在 `src/api/storageKeys.ts` */
   const [viewMode, setViewMode] = useStickyState<BbsViewMode>(STORAGE.clientBbsView, 'all')
@@ -510,6 +526,10 @@ export default function PageBbs({ density, pending }: Props) {
           rescan={data.sourceMode === 'live' ? rescanAll : null}
           /* 我们自己的切片器配置：目录里几份、本机下到几份 —— 只用来给 MKP 档的空态说话 */
           slicer={{ listed: delivered.listed.length, ready: delivered.downloaded.length }}
+          /* 已经复制进切片器的那几份：本机目录里同名的标「我们发的」 */
+          copied={fromUs}
+          /* 还没下载的那几份点一下去哪儿（外壳给的动作，见 Props） */
+          onNeedDownload={onNeedDownload}
         />
 
         {/* 浮层态的遮罩：点一下收起抽屉。它在抽屉之下、参数之上（z-index 15 vs 20） */}

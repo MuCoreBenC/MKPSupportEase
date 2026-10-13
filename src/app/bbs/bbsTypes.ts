@@ -151,6 +151,14 @@ export interface BbsPresetItem {
   isAbstract: boolean
   selectable: boolean
   reason: string | null
+  /**
+   * **我们自己的那一份还没下载**（2026-10-13）：目录里登记着、盘上还没有。
+   *
+   * 它照样进清单（灰着列在 MKP 组里，机型与喷嘴按目录登记认），但**不可选** ——
+   * 点了不是切预设，是去预设页把它取回来。原来这几份一份都不列，
+   * 于是"我们其实发过它"这件事在界面上完全看不见。
+   */
+  notDownloaded?: boolean
   /** 内容直接带在身上的那一份（导入的 / 我们自己的切片器配置）—— 不用再 fetch */
   doc?: BbsPresetDoc
 }
@@ -172,6 +180,11 @@ export interface BbsMenuItem {
   disabled: boolean
   offModel: boolean
   reason: string | null
+  /**
+   * 还没下载的我们那几份：**可点，但点了是"去预设页取"**（不是切预设）——
+   * 所以它不走 `disabled`（那是"真点不动"），由抽屉另给一个动作。
+   */
+  notDownloaded: boolean
 }
 
 export interface BbsMenuGroup {

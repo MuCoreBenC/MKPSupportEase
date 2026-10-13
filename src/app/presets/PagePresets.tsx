@@ -234,6 +234,14 @@ interface Props {
    *   这里只把用户送过去，不替设置页说话。
    */
   onOpenSettings?: () => void
+  /**
+   * 从工艺页跳过来（2026-10-13）：那一档里"还没下载"的几份点一下就落到这儿 ——
+   * **带上一点意图**：切到「切片器配置 → 云端」那一栏（下载在那儿），
+   * 不然用户落在一张跟下载无关的表上还得自己找。
+   *
+   * 与 `PageBbs` 那一侧的 `pending`（预设页 → 工艺页）同一个形状：`nonce` 管"再点一次也要重新触发"。
+   */
+  pending?: { nonce: number } | null
 }
 
 /* 四档同一句（与参数页搜索框同一条规矩）：跨任何分界，框里的字都不换 */
@@ -282,7 +290,7 @@ interface Note {
   lines?: string[]
 }
 
-export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Props) {
+export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
   /*
    * 通用导入入口（第十二层）停在 App 层；这一页拿 `revision`
    * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
@@ -293,6 +301,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings }: Prop
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
+
+  /*
+   * 工艺页跳过来那一下（见 `Props.pending`）：落到「切片器配置 → 云端」——
+   * 那是"还没下载"的那几份被取回来的地方。顺手清掉机型筛选与搜索词，
+   * 与 `locateRow` 同一个理由：**目标行被筛没就等于没把人送到位**。
+   * 依赖用 `pending?.nonce`（与 BBS 页那一侧同一条口径）：同一个意图再点一次也要重新触发。
+   */
+  const presetsIntent = pending?.nonce ?? null
+  /*
+   * 依赖**只认那个 nonce**：`page` 那几个 setter 每帧都是新对象，把它们放进依赖就会
+   * 变成"每次渲染都把档位按回切片器那一栏"—— 用户切回去的手会被按回来。
+   */
+  useEffect(() => {
+    if (presetsIntent === null) return
+    page.setKind('slicer')
+    page.setScope('cloud')
+    page.setQuery('')
+    data.pickMachine('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetsIntent])
   /*
    * **对比台的候选**：读得出来的「我的预设」（MKP 预设）。
    * 读不出来的那份不给 —— 比一份读不懂的文件只会得到一行"读不出来"；

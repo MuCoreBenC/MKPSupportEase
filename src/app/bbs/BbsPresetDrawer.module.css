@@ -393,6 +393,32 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * 行尾那颗小标签（2026-10-13）：「还没下载」/「我们发的」。
+ *
+ * 只补一句状态：不加图标、不折行、不参与行盒高度（这一行定高的老账见 `.item` 那段）——
+ * 所以字号比行小一档、`line-height: 15px` 写死，`margin-left: auto` 把它顶到右缘。
+ */
+.tag {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--bbs-line);
+  border-radius: 999px;
+  color: var(--bbs-dim);
+  font-size: 10.5px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+/*
+ * 还没下载的那几份：压暗（同"别的机型"那一档的语气），但**不禁用** ——
+ * 它可点，点了是去预设页取回来。悬停给一层底，让人知道这一点。
+ */
+.item[data-need-download='true'] {
+  color: var(--bbs-dim);
+}
+
 .empty {
   padding: 8px 10px;
   color: var(--bbs-dim);

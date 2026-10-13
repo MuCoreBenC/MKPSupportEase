@@ -87,7 +87,7 @@
 | 文档 | 一句话 | 为什么留 |
 | --- | --- | --- |
 | [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) | 工作台 C14 → 产品仓移植方案 | `src/workbench/views/*` 多处引用它的 §4「待裁决清单」（那几个"没接"的动作还挂在那里） |
-| [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 客户端 A21→A40 补齐 · 工作台 C14→C15 增量方案 | `vite.config.ts` 引用它的 §6-2（bbsFs 不打包预设的由来） |
+| [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 客户端 A21→A40 补齐 · 工作台 C14→C15 增量方案 | `src/api/contract.ts` 与 `src-tauri/src/ipc/bbs.rs` 引用它的 §6-2（不打包预设快照那条裁决的由来；`vite.config.ts` 那段引用 2026-10-13 随 bbsFs 退役摘掉） |
 
 > 早期"刀 / 圈"时代的交接件（`PUBLISH-KNIFE3/4-HANDOFF.md`、`HANDOFF-5-APP-UPDATE.md`、
 > `ASSET-CHAIN-HANDOFF.md`）与 `docs/` 里的历史快照件（`TWO-REPO-ALIGNMENT.md`、

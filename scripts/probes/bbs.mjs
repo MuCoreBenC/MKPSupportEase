@@ -20,14 +20,16 @@
  * 走一遍真实的路（两档尺寸：Ultra 1760×900 / Compact 900×640）：
  *   ① 顶栏「工艺」→ 页面装配起来（不是白屏、不是空屏）
  *   ② 左抽屉最上面是两枚来源胶囊，默认停在 «MKP 工艺»
- *   ③ MKP 档（默认档）：列出我们发的那几份（预览里读得出一份的正文）
- *      + 参数区真画出行 + 详情栏「改动」是算出来的数
+ *   ③ MKP 档（默认档）：默认选中盘上那一份 + 参数区真画出行 + 详情栏「改动」是算出来的数
+ *   ③′ 换成「全部」：登记的 9 份都列出来 —— 其中 8 份灰着、带一颗「还没下载」
  *   ④ 详情栏那颗叉与页签行右端的图标**同一个位置换面孔**：开着没有图标
  *      → 收起后图标出现 → 点它还能开回来
  *   ⑤ 切到 «本机工艺»：列出演示集合（用户配置 / 系统配置），机型下拉第一项是「全部（N）」
+ *      ⑤′ 复制进来的那一份标着「我们发的」
  *   ⑥ 本机工艺档里点一份用户预设：参数区有行、详情栏「改动」是 `N / M 项`、继承链 ≥ 2 节
  *   ⑦ 点一份系统预设：它自己就是基准 ⇒ 「改动」是「—（系统预设就是基准）」
  *   ⑧ 按「重扫本机」：清单还在、没有报错
+ *   ⑨ 点一份"还没下载"的：落到**预设页**，且已经切到「切片器配置 → 云端」
  *
  * 判定只做「看得见」的那几条 + 0 console error / 0 个 >=400。
  */
@@ -42,9 +44,17 @@ const SIZES = [
   { tag: 'compact', width: 900, height: 640 },
 ]
 
-/** 演示集合（`mockServer/bbsLocal.ts`）里的份数：可选的 3 份系统 + 1 份用户 */
+/*
+ * 预览里那两份演示数据的份数（`src/api/mockServer/`）：
+ *   - 目录登记（`catalogFiles.ts`）：**9 份**切片器配置（照真机那份抄的），
+ *     其中 `READY` 份在演示里算"已下载" ⇒ 另外 8 份是"还没下载"（灰着列出来那一批）；
+ *   - 本机目录（`bbsLocal.ts`）：系统 5 份（3 份可选 + 2 份抽象中间层）、用户 2 份
+ *     （其中一份是"我们那份复制进来的"，用来验「我们发的」那颗标）。
+ */
+const LISTED = 9
+const READY = 1
 const DEMO_SYSTEM = 3
-const DEMO_USER = 1
+const DEMO_USER = 2
 
 const shotDir = 'tmp-shots'
 await mkdir(shotDir, { recursive: true })
@@ -89,6 +99,12 @@ const facts = (page) =>
         ? [...list.querySelectorAll('div')].map((d) => flat(d.textContent)).filter((t) => /（\d+）$/.test(t))
         : [],
       empty: flat(list?.querySelector('p')?.textContent),
+      /* 还没下载的那几份（灰着列出来、点了去预设页取）*/
+      needDownload: list ? list.querySelectorAll('button[data-need-download="true"]').length : 0,
+      /* 标着「我们发的」的那几行（复制进本机目录之后与本机同名的那一份） */
+      fromUs: list
+        ? [...list.querySelectorAll('button')].filter((b) => (b.textContent ?? '').includes('我们发的')).length
+        : 0,
       sourceTab: flat(tabs?.querySelector('[role="tab"][aria-selected="true"]')?.textContent),
       sourceTabs: tabs ? tabs.querySelectorAll('[role="tab"]').length : 0,
       hasRail: rail !== null,
@@ -172,12 +188,12 @@ for (const size of SIZES) {
   check(tag, '② 抽屉最上面是两枚来源胶囊', f.sourceTabs === 2, `数到 ${f.sourceTabs} 枚`)
   check(tag, '② 默认停在 «MKP 工艺»', f.sourceTab === 'MKP 工艺', `当前「${f.sourceTab}」`)
 
-  /* ---------- ③ MKP 档：列出我们发的那几份 ---------- */
+  /* ---------- ③ MKP 档：默认选中"盘上那一份"，参数区真有东西 ---------- */
   check(
     tag,
-    '③ MKP 档列出了我们发的那几份',
-    f.groups.some((g) => g === `MKP 工艺（${f.items}）`) && f.items >= 1,
-    `列表 ${f.groups.join(' | ')}（${f.items} 项）`,
+    '③ 默认选中的是**盘上那一份**（不是灰着的那几份）',
+    f.groups.some((g) => g === `MKP 工艺（${READY}）`) && f.railText.includes('MKPProcess A1 0.4'),
+    `列表 ${f.groups.join(' | ')} / ${f.railText.replace(/\s+/g, ' ').slice(0, 60)}`,
   )
   check(
     tag,
@@ -192,6 +208,25 @@ for (const size of SIZES) {
     f.railText.replace(/\s+/g, ' ').slice(0, 90),
   )
   await page.screenshot({ path: `${shotDir}/bbs-${tag}.png` })
+
+  /*
+   * ③′ **还没下载的那几份也要列出来**（2026-10-13 作者 §7）：目录里登记着 9 份、
+   * 演示里只有 1 份算"已下载" —— 换成「全部」之后另外 8 份该灰着排在 MKP 组里。
+   */
+  await chooseTargetOption(page, '全部（')
+  f = await facts(page)
+  check(
+    tag,
+    '③′ MKP 档把登记的 9 份都列了出来',
+    f.groups.some((g) => g === `MKP 工艺（${LISTED}）`),
+    f.groups.join(' | '),
+  )
+  check(
+    tag,
+    '③′ 还没下载的那 8 份灰着、带「还没下载」',
+    f.needDownload === LISTED - READY,
+    `灰着 ${f.needDownload} 项（期望 ${LISTED - READY}）`,
+  )
 
   /* ---------- ④ 详情栏那颗叉 ↔ 页签行右端那颗图标 ---------- */
   check(tag, '④ 详情栏开着时，工具栏那颗「详情」图标不画', f.hasRailIcon === false)
@@ -231,6 +266,16 @@ for (const size of SIZES) {
     '⑤ 切到「全部」之后，系统那组三台机的档都在',
     f.groups.some((g) => g === `系统配置（${DEMO_SYSTEM}）`),
     f.groups.join(' | '),
+  )
+  /*
+   * ⑤′ 复制进来的那一份要标出来（2026-10-13 作者 §7）：`copy_to_slicer` 之后
+   * 本机目录里会有一份与我们那份**同名同内容**的 —— 不标出来，人会以为是自己另存的。
+   */
+  check(
+    tag,
+    '⑤′ 本机目录里"我们那份复制进来的"标着「我们发的」',
+    f.fromUs === 1,
+    `标着 ${f.fromUs} 行`,
   )
   await page.screenshot({ path: `${shotDir}/bbs-${tag}-local.png` })
 
@@ -281,6 +326,33 @@ for (const size of SIZES) {
     after.items === before && after.items > 0,
     `重扫前 ${before} / 重扫后 ${after.items}`,
   )
+
+  /* ---------- ⑨ 点一份"还没下载"的 → 落到预设页的「切片器配置 → 云端」 ---------- */
+  await page.locator('[role="tablist"][aria-label="预设来源"] [role="tab"]', { hasText: 'MKP 工艺' }).click()
+  await page.waitForTimeout(400)
+  const grey = page.locator('[data-role="preset-list"] button[data-need-download="true"]').first()
+  if ((await grey.count()) > 0) {
+    await grey.click()
+    await page.waitForSelector('main input[name="preset-kind"][value="slicer"]', { timeout: 10000 })
+    await page.waitForTimeout(400)
+    const landed = await page.evaluate(() => {
+      const on = (name) => document.querySelector(`main input[name="${name}"]:checked`)?.getAttribute('value') ?? ''
+      return {
+        tab: document.querySelector('header nav [aria-current="page"]')?.textContent?.trim() ?? '',
+        kind: on('preset-kind'),
+        scope: on('preset-scope'),
+      }
+    })
+    check(tag, '⑨ 点了"还没下载"的那一份，落到了预设页', landed.tab === '预设', `落在「${landed.tab}」`)
+    check(
+      tag,
+      '⑨ 并且已经切到「切片器配置 → 云端」（下载就在那一栏）',
+      landed.kind === 'slicer' && landed.scope === 'cloud',
+      `类型「${landed.kind}」/ 位置「${landed.scope}」`,
+    )
+  } else {
+    problems.push(`${tag} MKP 档里一份"还没下载"的都没有（演示登记 ${LISTED} 份 / 已下载 ${READY} 份）`)
+  }
 
   console.log(
     `${tag.padEnd(8)} 来源「${f.sourceTab}」 抽屉项 ${String(f.items).padEnd(3)} 参数行 ${String(f.rows).padEnd(4)}`

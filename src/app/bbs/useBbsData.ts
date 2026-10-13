@@ -122,7 +122,13 @@ export interface BbsSlicerRow {
   machineId: string
   /** 目录里的落点：`assets/bbs/Process/<喷嘴>mm/…`，喷嘴从这一段取 */
   path: string
-  doc: BbsPresetDoc
+  /**
+   * 正文。**没有 = 这一份还没下载**（2026-10-13）。
+   *
+   * 没下载的那几份照样进清单：目录里登记着，机型与喷嘴也认得出（按登记拼），
+   * 只是点不开 —— 它们灰着列在「MKP 工艺」组里，点了去预设页把它取回来。
+   */
+  doc?: BbsPresetDoc
 }
 
 /**
@@ -133,7 +139,8 @@ export interface BbsSlicerRow {
  * 但**认机型用的 `compatible_printers` 在这里就补上了**，见下面那段。
  */
 function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPresetItem {
-  const name = String(doc.name || fileName.replace(/\.json$/i, ''))
+  /* 没下载的那几份没有正文：名字退回文件名（那一份的档名与文件名本来就同族） */
+  const name = String(doc?.name || fileName.replace(/\.json$/i, ''))
   /*
    * 按目录登记拼出 BBS 自己会写的那种 `compatible_printers`（`Bambu Lab A1 mini 0.4 nozzle`）：
    * `machineId` 给机型、落点里的 `Process/<喷嘴>mm/` 给喷嘴。
@@ -148,15 +155,18 @@ function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPreset
   const nozzle = /\/Process\/([\d.]+)mm\//.exec(path)?.[1]
   const compatible = printer !== undefined && nozzle !== undefined
     ? `${printer} ${nozzle} nozzle`
-    : (doc.compatible_printers ?? null)
+    : (doc?.compatible_printers ?? null)
+  /* 正文不在手上 = 还没下载。这一份**照样进清单**（见 BbsSlicerRow 那段），
+     只是不可选：点了是"去预设页取回来" */
+  const missing = doc === undefined
   return {
     key: `mkp::${fileName}::${name}`,
     name,
     scope: 'mkp',
     uid: null,
     file: fileName,
-    inherits: typeof doc.inherits === 'string' ? doc.inherits : null,
-    instantiation: doc.instantiation ?? null,
+    inherits: typeof doc?.inherits === 'string' ? doc.inherits : null,
+    instantiation: doc?.instantiation ?? null,
     compatible_printers: compatible,
     broken: null,
     mtime: 0,
@@ -165,8 +175,9 @@ function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPreset
     nozzle: '?',
     target: 'unknown|?',
     isAbstract: false,
-    selectable: true,
-    reason: null,
+    selectable: !missing,
+    reason: missing ? '还没下载' : null,
+    notDownloaded: missing,
     doc,
   }
 }
