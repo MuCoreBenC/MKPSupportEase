@@ -46,6 +46,7 @@
 | [`HOOK-ERRORS-AND-MESSAGES.md`](HOOK-ERRORS-AND-MESSAGES.md) | 2026-10-11 | 后处理的错误：切片器那一框吃什么（BBS 源码证据）+ 文案表 + 两条日志流 | 现行（本分支新增，随"切片器能显示什么"那一刀） |
 | [`A05-PORT-LEDGER.md`](A05-PORT-LEDGER.md) | 2026-10-11 | a05 前端整份搬运台账（源 = frontend-lab） | 现行（本分支新增，对应"前端照搬 a05"提交） |
 | [`A06-PORT-LEDGER.md`](A06-PORT-LEDGER.md) | 2026-10-12 | a06 后处理那一屏搬运台账 + 读数那一刀（源 = frontend-lab a06 + lab/mkp-postprocess 定稿） | 现行（本分支新增，两刀都已完成） |
+| [`A07-PORT-LEDGER.md`](A07-PORT-LEDGER.md) | 2026-10-14 | a07 全量搬运台账 + **术语改造（官方/我的 → 云端/本地）施工单**（源 = frontend-lab a07 + lab/term-rename-local-cloud.md） | 第一笔已落地（`b7ebafb`）；**术语那一刀未做**，施工单与验收都在这份里 |
 | [`REPORT-DETAIL-FIELDS.md`](REPORT-DETAIL-FIELDS.md) | 2026-10-11 | 报告页字段清单（照搬 frontend-lab spec + 本仓口径两条） | 现行（本分支新增） |
 | [`PRESET-ASSET-LIBRARY.md`](PRESET-ASSET-LIBRARY.md) | 2026-10-08 | 预设资产库（一张表 · 来源降为轻标记） | 10-08 第三次改判（同日三次里的最后一次） |
 | [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md) | 2026-10-08 | 下载即得工作副本 | **已被同日第三次改判退役**（"下载不再自动产生副本"，见 `PRESET-PRODUCT-RULES.md` ⚠️ 三条） |
