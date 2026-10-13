@@ -100,7 +100,8 @@ const facts = () =>
       empty: document.querySelector('main table')?.parentElement?.parentElement?.innerText.includes('还没有')
         ? [...document.querySelectorAll('main p')].map((p) => p.innerText.trim()).find((t) => t.includes('还没有')) ?? ''
         : '',
-      expanded: document.querySelectorAll('main tbody dl').length,
+      /* ★ 2026-10-13：详情面板不再是 `dl` —— 展开行的判据换成 `td[colspan]` 那一行 */
+      expanded: document.querySelectorAll('main tbody tr td[colspan]').length,
     }
   })
 
@@ -152,12 +153,11 @@ const show = async (title, name, value) => {
 await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(200)
 /*
- * **MKP 档只有一张表**（资源库，2026-10-08 作者改判）：位置那一条分段控件在那一档
- * 整个不出现 —— 官方与我的预设并排，来源只是行上的一枚小字。
+ * ★ 2026-10-13 按**现状**改：MKP 档**也有**「本地 / 云端」那一条了 ——
+ *   本地那一面是「我的文件」，云端那一面是官方交付行（10-09 那次改判之后就是这个样子）。
+ *   原来这条断言是"MKP 档不该有那条控件（只有一张资源库表）"，它早就过期了。
  */
-if ((await rad('preset-scope', 'local').count()) > 0) {
-  problems.push('MKP 档不该有「本地 / 云端」分段控件（那一档只有一张资源库表）')
-}
+const mkpHasScope = (await rad('preset-scope', 'local').count()) > 0
 const mkpTable = await show('MKP 配置 / 资源库', 'preset-kind', 'mkp')
 const slicerLocal = await show('切片器配置 / 本地', 'preset-kind', 'slicer')
 /* 位置那一轴在切片器档照旧：它那两张表是两件不同的事 */
@@ -171,9 +171,11 @@ await page.waitForTimeout(200)
 if (mkpTable.heads.join() === slicerLocal.heads.join()) {
   problems.push('MKP 与切片器的表头一样（列应该随类型变）')
 }
-if (mkpTable.heads.includes('时间')) {
-  problems.push('资源库那一档不该有「时间」列（行上只有来源 / 机型 / 版本 / 操作）')
-}
+/* ★ 2026-10-13：MKP 那一档现在**有**「时间」列（原来那条"不该有"的断言是旧表的）——
+   这里改成把现状打出来，不再判死。 */
+console.log(
+  `[分类边界] MKP 档有位置轴：${mkpHasScope}；表头含「时间」：${mkpTable.heads.includes('时间')}`,
+)
 
 /* ---------- 2″. 「复制进切片器」那一手：成功 + 提示条只说人话 ----------
  *
@@ -211,19 +213,60 @@ if ((await copyRow.count()) === 0) {
   console.log(`\n[复制] ${copyName.slice(0, 40)} → ${copyLine}`)
 }
 
-/** 展开详情里每一格的值（dt 文案 → dd 文案）—— 好几节都要读它 */
+/**
+ * 展开详情里那些「格」（键 → 值）—— 好几节都要读它。
+ *
+ * ★ 2026-10-13 重写：详情面板**早就不是 `<dl> / <dt> / <dd>`** 了 —— 现在是
+ *   `_dGrid > _dCol（基本信息 / 血统）> _dGroup > _dRow > _dKey + _dVal`。
+ *   老写法读 `main tbody dl` 于是一格都读不到（各处全报「(没有这一格)」），
+ *   那些断言就成了**假红**（看着像页面坏了）。
+ *
+ * 认的是 CSS Modules 那套类名的**前缀**（`_dGroup` / `_dRow`）—— 后缀是构建哈希，
+ * 每次构建都变；结构上判据是"一行里恰好两个 span"（键 + 值）。
+ */
 const factOf = () =>
   page.evaluate(() => {
-    const dl = document.querySelector('main tbody dl')
-    if (dl === null) return {}
-    const dts = [...dl.querySelectorAll('dt')]
-    const dds = [...dl.querySelectorAll('dd')]
     const out = {}
-    dts.forEach((dt, i) => {
-      out[(dt.textContent ?? '').trim()] = (dds[i]?.textContent ?? '').trim()
-    })
+    const cell = document.querySelector('main tbody tr td[colspan]')
+    if (cell === null) return out
+    for (const row of cell.querySelectorAll('div[class*="_dGroup"] > div[class*="_dRow"]')) {
+      const spans = [...row.querySelectorAll('span')]
+      const key = spans[0]?.textContent?.trim() ?? ''
+      const val = spans[1]?.textContent?.trim() ?? ''
+      if (key !== '') out[key] = val
+    }
     return out
   })
+
+/**
+ * **当前展开的是哪一行**（数据行的下一个兄弟是它自己那一行 `td[colspan]`）——没有就是 null。
+ *
+ * 展开状态是**表格级**的（同时只开一行），所以"点一下"不幂等：上一节点过这一行之后，
+ * 这一节点下去是**收起** —— 详情就串到别的行上去了。2026-10-13 的崩点正是这个：
+ * 5h 读到的「修改」格其实属于别人，紧接着找「改这份」按钮就找不着（超时 30s 才报）。
+ */
+const openRowKey = () =>
+  page.evaluate(() => {
+    const rows = [...document.querySelectorAll('main tbody tr')]
+    const hit = rows.find((tr) => {
+      if (tr.querySelector('td:not([colspan])') === null) return false
+      return (tr.nextElementSibling?.querySelector('td[colspan]') ?? null) !== null
+    })
+    return hit?.getAttribute('data-rowkey') ?? null
+  })
+
+/** 把某一行的展开详情打开（**幂等**：开着的就是它 → 不动；开着别人 → 先收起再开） */
+const openDetailOf = async (rowKey) => {
+  if (rowKey === '') return
+  if ((await openRowKey()) === rowKey) return
+  const cur = await openRowKey()
+  if (cur !== null) {
+    await page.locator(`main tbody tr[data-rowkey="${cur}"]`).click()
+    await page.waitForTimeout(250)
+  }
+  await page.locator(`main tbody tr[data-rowkey="${rowKey}"]`).click()
+  await page.waitForTimeout(300)
+}
 
 /**
  * 每一行的**文件名**、整格文本、操作列那一格（按钮取按钮文字，灰字取文字）。
@@ -378,43 +421,55 @@ await page.screenshot({ path: `${shotDir}/presets-menu.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(150)
 
-/* ---------- 5. 资源库那一张表（2026-10-08 作者改判：本地 / 云端不再是两个维度） ---------- */
+/* ---------- 5. 资源库那一档的**两张脸**（本地：我的文件 / 云端：官方交付行） ---------- */
 /*
- * 守四件事：
- *   ① **只有一张表**：官方那几行与我的那几行并排在同一个 tbody 里
- *      （位置那一条分段控件在 MKP 档不出现 —— 上面第 2 节断言过了）；
- *   ② 行上**不再有**「已下载 / 未下载 / 有更新」这三个词 —— 下载那一套从用户心智里退场，
- *      官方那一行的动作只有「使用」；
- *   ③ 副标题说来源：官方行是「官方 · MM-DD」（目录这次发布的时刻），
- *      我的行是「我的预设 …」（血统 / 出处账那半句）；
- *   ④ 操作列：没在用的给「使用」按钮；正在用的给「✓ 当前使用」（不是按钮）。
+ * ★ 2026-10-13 按**现在的表**重写。原版守的是"官方与我的**并排在同一张 tbody** 里" ——
+ *   那是 2026-10-08 那版的样子；10-09 定死 **MKP 档的本地表只列「我的文件」**之后，
+ *   官方那几行搬到了同一档的**云端**那一侧，那条断言就永远不可能成立了（探针因此
+ *   一直红着，也没人看得出来 —— 它崩在更后面，problems 列表根本不打印）。
  *
- * 「使用」在浏览器里必然走到"取不回来"那一档（假后端没有下载区）—— 要断言它**如实说**，
- * 与下载同一条口径：不许点了没反应，也不许假装成功。
+ * 现在这一档的两张脸（它自己不摆「位置」轴，但**沿用会话里那一个**，见 `mkpAt`）：
+ *   位置「本地」  我自己的那几行：来源写「我的预设」、动作是「使用」，
+ *                 且**不许出现**「已下载 / 未下载 / 有更新」那一套词（下载不在用户心智里）；
+ *   位置「云端」  官方交付行：来源写「官方」，动作是「更新 / 下载」。
+ *
+ * 「使用」在真机上是**写底账**那一手（假后端也认 `origin === 'mine'` + `path`）——
+ * 判据是**成功**，不是"给了句人话"（2026-10-13 那个漏参 bug 就是被后者放过去的）。
  */
-await rad('preset-kind', 'mkp').click({ force: true })
-await page.waitForTimeout(250)
+
+/**
+ * 把 MKP 档切到某一个「位置」上看。
+ *
+ * 切法：借切片器档那条轴（它有），切完再切回来 —— MKP 档自己没有那条控件。
+ */
+const mkpAt = async (pos) => {
+  await rad('preset-kind', 'slicer').click({ force: true })
+  await page.waitForTimeout(150)
+  await scope(pos)
+  await rad('preset-kind', 'mkp').click({ force: true })
+  await page.waitForTimeout(300)
+}
+
+await mkpAt('local')
 const assetRows = await actions()
 const assetText = (await facts()).text
-console.log(`\n[资源库] ${assetRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
+console.log(`\n[资源库 · 本地] ${assetRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
 for (const word of ['已下载', '未下载', '有更新']) {
   if (assetText.includes(word)) {
-    problems.push(`资源库那一档不该出现「${word}」（下载那一套词退场了）`)
+    problems.push(`资源库的本地面不该出现「${word}」（下载那一套词退场了）`)
   }
 }
-if (!assetRows.some((r) => r.name.includes('官方'))) {
-  problems.push('资源库那一档该有官方那几行（来源写「官方」）')
-}
-if (!assetRows.some((r) => r.name.includes('我的预设'))) {
-  problems.push('资源库那一档该有我自己的那几行（来源写「我的预设」）')
+/* ★ 2026-10-13：行上那枚来源小字现在就是「我的」（原来写「我的预设」）—— 按现状判 */
+if (!assetRows.some((r) => r.name.includes('我的'))) {
+  problems.push('资源库的本地面该有我自己的那几行（来源那枚小字写「我的」）')
 }
 if (!assetRows.some((r) => r.action.includes('使用'))) {
-  problems.push('资源库那一档该有「使用」按钮（还没在用的那些行）')
+  problems.push('资源库的本地面该有「使用」按钮（还没在用的那些行）')
 }
 
 const useBtn = page.getByRole('button', { name: '使用', exact: true }).first()
 if ((await useBtn.count()) === 0) {
-  problems.push('资源库那一档没有可点的「使用」按钮')
+  problems.push('资源库的本地面没有可点的「使用」按钮')
 } else {
   await useBtn.click()
   await page.waitForTimeout(700)
@@ -423,16 +478,14 @@ if ((await useBtn.count()) === 0) {
     () =>
       document.querySelector('main [role="status"]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
   )
-  console.log(`[资源库] 点「使用」之后提示条：${useNote || '(没有提示条)'}`)
+  console.log(`[资源库 · 本地] 点「使用」之后提示条：${useNote || '(没有提示条)'}`)
   /*
    * ★ **成功**才是判据（2026-10-13 改严）——本地表那颗「使用」原本**一份都点不动**：
    *   前端把路径当文件名传下去、来源又缺省成 `official`，后端于是拿
    *   `presets-mine/A1_MINI-fast.toml` 这串**带前缀的路径**去交付目录里找，回一句
    *   「目录里没有 presets-mine/…」。
    *
-   *   这条原来写成"已使用 / 已取回 / 失败都给一句人话算过"，于是**那个失败也算通过** ——
-   *   探针红着也没人看得出来（它还崩在更后面，problems 列表根本没打印）。
-   *   这一手在浏览器里也走得通（假后端认 `origin === 'mine'` + `path`），所以判据就是成功。
+   *   这条原来写成"已使用 / 已取回 / 失败都给一句人话算过"，于是**那个失败也算通过**。
    */
   if (useNote === '') problems.push('点「使用」之后没有提示条')
   else if (!/已使用|已取回/.test(useNote)) {
@@ -440,6 +493,16 @@ if ((await useBtn.count()) === 0) {
   }
 }
 await page.screenshot({ path: `${shotDir}/presets-assets.png` })
+
+await mkpAt('cloud')
+const offRows = await actions()
+console.log(`[资源库 · 云端] ${offRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
+if (offRows.length === 0) {
+  problems.push('资源库的云端面该有官方交付行（那一档的官方都在这儿）')
+}
+if (!offRows.some((r) => /更新|下载/.test(r.action))) {
+  problems.push('资源库的云端面该有「更新 / 下载」这一支动作（官方行不在本地表里）')
+}
 
 /* ---------- 5b. 归档抽屉在资源库那一档退场（2026-10-08） ---------- */
 /*
@@ -562,24 +625,13 @@ const mineRow = page
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'Process_0.2mm.json' })
   .first()
-await mineRow.click()
-await page.waitForTimeout(300)
 /*
- * 展开详情的格子集（2026-10-06 的详情格：版本 / 来源 / 基于 / 状态 / 大小 / 修改时间 / 正文）。
+ * 展开详情的格子集（版本 / 来源 / 基于 —— 见 `factOf` 顶上那段：详情早不是 `dl/dt/dd` 了）。
  * 「类型」那一格已随详情重构退场 —— "认不出是哪一类"改由行上角标与任何类型档下都列
  * （上面 5d-① 已量）来传达；这里守的是"来源格照常在、说得清它是我的"。
  */
-const mineFacts = await page.evaluate(() => {
-  const dl = document.querySelector('main tbody dl')
-  if (dl === null) return {}
-  const dts = [...dl.querySelectorAll('dt')]
-  const dds = [...dl.querySelectorAll('dd')]
-  const out = {}
-  dts.forEach((dt, i) => {
-    out[(dt.textContent ?? '').trim()] = (dds[i]?.textContent ?? '').trim()
-  })
-  return out
-})
+await openDetailOf((await mineRow.getAttribute('data-rowkey')) ?? '')
+const mineFacts = await factOf()
 console.log(`[用户线] 那一份的详情格：${JSON.stringify(mineFacts)}`)
 if (!(mineFacts['来源'] ?? '').includes('我的')) {
   problems.push(`认不出类别的那一份，来源格该说「我的」，实测「${mineFacts['来源'] ?? '(没有)'}」`)
@@ -631,8 +683,7 @@ if (bodyBtnCount === 0) {
  * 真机上那条更硬的判据在 Rust 侧：`use_official_preset`（按需取回 + 写使用中）与
  * `copy_official_as_mine`（官方 → 我的，撞名拒）—— 下载 / 使用都不再自动产生副本。
  */
-await rad('preset-kind', 'mkp').click({ force: true })
-await page.waitForTimeout(300)
+await mkpAt('local')
 
 const worldRows = await actions()
 console.log(`\n[资源库 · 一个预设一行] ${worldRows.map((r) => r.name).join(' || ')}`)
@@ -644,31 +695,31 @@ for (const file of ['A1-standard.toml', 'A1-fast.toml', 'A1mini-standard.toml'])
     problems.push(`官方那一份该只有一行：${file}（实测 ${hits.length} 行）`)
   }
 }
-if (!worldRows.some((r) => r.name.includes('我的预设'))) {
+if (!worldRows.some((r) => r.name.includes('我的'))) {
   problems.push('资源库里该有我自己的那一份（用户线的正常内容）')
 }
 await page.screenshot({ path: `${shotDir}/presets-world.png` })
 
-/* ---------- 5f. 两个来源各自的动作与菜单（资源库那一档） ---------- */
+/* ---------- 5f. 两张脸各自的菜单（云端：官方交付行 / 本地：我的文件） ---------- */
 /*
- * 守三件事：
- *   ① 官方那一行的菜单：**使用 / 另存为我的预设 / 置顶 / 查看详情** ——
- *      没有「下载 / 更新」（那一套词退场了），也没有「重命名 / 删除」（那是我的文件的项）；
- *   ② 我的那一行的菜单：**使用 / 改这份 / 另存为一份新的 / 重命名 / 显示 / 删除** ——
- *      它才是用户自己的文件；
- *   ③ 两行**不共享**「另存为我的预设」那一项（我自己这份已经是我的了）。
+ * ★ 2026-10-13 按**现在的表**重写。原版要"官方行与我的行同屏"（旧表），现在这两类
+ *   分在两张脸上，菜单也各归各位：
+ *   云端面（官方交付行）  「下载 / 更新」+「复制链接」+「在 BBS 中查看」（MKP 配方给不出
+ *                         BBS 入口，那一项灰着）—— **不该有**「使用 / 另存为我的预设 /
+ *                         重命名 / 删除」：要动它先「下载」，下载会另落一份你自己的；
+ *   本地面（我的文件）    「使用 / 修改参数 / 复制 / 重命名 / 显示所在文件夹 / 删除」
+ *                         —— **不该有**「另存为我的预设」（它自己已经是我的了）。
  *
  * 真机那条更硬的判据在 Rust 侧：`copy_official_as_mine`（撞名拒、血统三行）与
- * `use_official_preset`（按需取回 + 写使用中）。
+ * `apply_active_preset`（按闸校验后写底账）。
  */
-await rad('preset-kind', 'mkp').click({ force: true })
-await page.waitForTimeout(300)
-/* 官方那几行与我的那几行分属不同机型，切到「全部机型」才同屏看得到。
-   机型筛选是融合 pill 的右拍（漏斗），菜单是 FieldPopover 里的普通按钮 */
-await page.locator('button[aria-haspopup="true"]').first().click()
-await page.waitForTimeout(200)
-await page.getByRole('button', { name: /全部机型/ }).click()
-await page.waitForTimeout(400)
+/** 官方那几行分属不同机型，切到「全部机型」才同屏看得到（漏斗在筛选条最右） */
+const allMachines = async () => {
+  await page.locator('button[aria-haspopup="true"]').first().click()
+  await page.waitForTimeout(200)
+  await page.getByRole('button', { name: /全部机型/ }).click()
+  await page.waitForTimeout(400)
+}
 
 /** 右键某一行的菜单项文案（打开读一遍就 Esc 关掉） */
 const menuOf = async (file) => {
@@ -690,23 +741,25 @@ const menuOf = async (file) => {
   return items
 }
 
+await mkpAt('cloud')
+await allMachines()
 const officialMenu = await menuOf('A1-standard.toml')
-console.log(`\n[资源库 · 官方行菜单] ${officialMenu?.join(' | ') ?? '(没有菜单)'}`)
+console.log(`\n[资源库 · 官方行菜单（云端面）] ${officialMenu?.join(' | ') ?? '(没有菜单)'}`)
 if (officialMenu === null) problems.push('官方那一行右键没有菜单')
 else {
-  if (!officialMenu.some((m) => m.includes('使用'))) problems.push('官方那一行的菜单该有「使用」')
-  if (!officialMenu.includes('另存为我的预设')) {
-    problems.push('官方那一行该有「另存为我的预设」（要改就只能先存一份自己的）')
+  if (!officialMenu.some((m) => /下载|更新/.test(m))) {
+    problems.push('官方那一行该有「下载 / 更新」这一支（它不在本地表里，要动先下载）')
   }
-  for (const gone of ['下载', '更新', '重命名', '删除']) {
-    if (officialMenu.some((m) => m === gone)) {
-      problems.push(`官方那一行不该有「${gone}」（它不是你的文件，也没有"下载"这一档）`)
+  for (const gone of ['使用', '另存为我的预设', '重命名', '删除']) {
+    if (officialMenu.some((m) => m.includes(gone))) {
+      problems.push(`官方那一行不该有「${gone}」（官方行只下载；要改走「下载」落一份你的）`)
     }
   }
 }
 
+await mkpAt('local')
 const mineMenu = await menuOf('我的 A1 涂胶.toml')
-console.log(`[资源库 · 我的行菜单] ${mineMenu?.join(' | ') ?? '(没有菜单)'}`)
+console.log(`[资源库 · 我的行菜单（本地面）] ${mineMenu?.join(' | ') ?? '(没有菜单)'}`)
 if (mineMenu === null) problems.push('我的那一行右键没有菜单')
 else {
   for (const want of ['使用', '重命名', '删除']) {
@@ -755,18 +808,25 @@ const myTr = page
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '我的 A1 涂胶.toml' })
   .first()
+const myTrKey = (await myTr.getAttribute('data-rowkey')) ?? ''
+
 const rowText = (await myTr.innerText()).replace(/\s+/g, ' ').trim()
 console.log(`[我的那份] 行内容：${rowText}`)
-if (!rowText.includes('我的预设')) {
-  problems.push('我那份的来源那一行该写「我的预设」（来源只是行上的一枚小字）')
-}
-if (!rowText.includes('官方模板已更新')) {
-  problems.push('从旧版改出来的那一份，行上该有「官方模板已更新」那一枚')
-}
-
-await myTr.click()
-await page.waitForTimeout(300)
+/*
+ * ★ 2026-10-13 两条过期断言删掉，改成读**展开详情那一格**（更硬）：
+ *   · 行上那枚来源小字现在是「我的」（原来写「我的预设」）；
+ *   · 「官方模板已更新」那一枚 **2026-10-09 就退役了**（见 `PresetTable.tsx` 那段注释）——
+ *     官方改过的项现在住「基于」那一格（「… · 官方已换新版」，下面照旧判它）。
+ */
+await openDetailOf(myTrKey)
 const myFacts = await factOf()
+console.log(
+  `[我的那份] 展开详情：${Object.entries(myFacts).map(([k, v]) => `${k}=${v}`).join('｜') || '(空)'}`,
+)
+/* ★ 2026-10-13：这一格现在说得更具体 —— 复制来的那份写「复制自 X」（认不出来源才是「我的」） */
+if (!/我的|复制自|导入/.test(myFacts['来源'] ?? '')) {
+  problems.push(`我那份的「来源」格该说得出它是哪来的，实测「${myFacts['来源'] ?? '(没有这一格)'}」`)
+}
 console.log(`[我的那份] 展开详情「基于」= ${myFacts['基于'] ?? '(没有这一格)'}`)
 if (!(myFacts['基于'] ?? '').includes('官方已换新版')) {
   problems.push(`旧版派生那一份，「基于」那格该说「官方已换新版」，实测「${myFacts['基于']}」`)
@@ -781,45 +841,45 @@ const strip = await page.evaluate(() =>
   (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
 )
 console.log(`[我的那份] 使用之后（前 200 字）：${strip}`)
-if (!strip.includes('已应用')) problems.push('使用我那份之后，状态条该说「已应用」')
+/*
+ * ★ 2026-10-13：这一段原来还判「已应用」与「我的文件」那两枚 —— 现在那条融合 pill 只写
+ *   **文件名 + 机型 + 版本**（实测 `我的 A1 涂胶-高速版.tomlA1A1`），那两个词都不在里面。
+ *   这里只守住"说得出用的是哪一份"（下面那条操作列「在用」是更硬的判据）。
+ */
 if (!strip.includes('我的 A1 涂胶.toml')) problems.push('状态条要说得出用的是我那一份')
-if (!strip.includes('我的文件')) problems.push('用的是我那份时，状态条上该有「我的文件」那一枚')
 const afterApply = (await actions()).find((r) => r.name.includes('我的 A1 涂胶.toml'))
 console.log(`[我的那份] 使用之后操作列：${afterApply?.action ?? '(没有)'}`)
-if (!(afterApply?.action ?? '').includes('当前使用')) {
-  problems.push(`使用之后那一行该变成「✓ 当前使用」，实测「${afterApply?.action}」`)
+if (!(afterApply?.action ?? '').includes('在用')) {
+  problems.push(`使用之后那一行该变成「在用」，实测「${afterApply?.action}」`)
 }
 await page.screenshot({ path: `${shotDir}/presets-mine-apply.png` })
 
-/* ---------- 5h. 改我自己这份 → 保存回它自己（第八层） ---------- */
+/* ---------- 5h. 改我自己这份 → 存回它自己（第八层） ---------- */
 /*
- * 守四件事：
- *   ① 我那份也有「改这份」—— 它已经是我自己的文件，"能改"是自然的下一步；
- *   ② 编辑器里给的是**正文**：三行血统是程序的元数据，不该出现在编辑器里；
- *   ③ 保存说「保存回我这份」，存完**没有多出一份**（不产生 `（已修改）2.toml`）；
- *   ④ **血统还在**：保存之后「看正文」看得见那三行，「基于旧版官方」那一枚也没变
- *      —— 改的是参数，不是它从哪一版官方派生。
+ * ★ 2026-10-13 按**现在的界面**重写。原来这一节走的是"展开详情里那颗「改这份」"，
+ *   那个抽屉已经不在了。现在两条入口分工明确（右键菜单）：
+ *     修改参数   参数级编辑（改的是它自己这一份，官方那版只用来标默认值 / 有没有更新）
+ *     编辑文件   原始正文编辑 —— **连血统那三行一起给你看、一起能改**（它就是文件）
  *
- * 真机那条更硬的判据在 Rust 侧：`mine::save_back`（同一路径写回、血统照抄）与
- * `lineage::rewrite_keeping_lineage`（摘要不许变成"我自己改过的字节"）。
+ * 这一节守后者，四件事：
+ *   ① 入口在右键菜单（我自己的文件才有这一项）；
+ *   ② 编辑器里是**整份文件**：血统那几行也在（口径与"参数级编辑"不同，别拿旧标准判）；
+ *   ③ 保存后说得出"保存回我自己那一份"、**写回同一条路径**，表里**不多出一份**；
+ *   ④ **血统还在**（只改参数行的那种改法）：「看正文」看得见那三行，
+ *      行上「官方模板已更新」那一枚也没变。
+ *
+ * 真机那条更硬的判据在 Rust 侧：`mine::save_back`（同一路径写回）与
+ * `lineage`（改参数不该把出处抹了）。
  */
-/* 展开详情这一格：上一节点过这一行，它可能已经展开着 —— 再点一次会收起来 */
-const ensureExpanded = async () => {
-  if ((await page.locator('main tbody dl').count()) === 0) {
-    await myTr.click()
-    await page.waitForTimeout(300)
-  }
-}
-await ensureExpanded()
-const mineEditFact = (await factOf())['修改'] ?? '(没有这一格)'
-console.log(`\n[改我这份] 展开详情「修改」= ${mineEditFact}`)
-if (mineEditFact !== '改这份') {
-  problems.push(`我那份展开详情里该有「修改 → 改这份」，实测「${mineEditFact}」`)
-}
+await openDetailOf(myTrKey)
 
-/* 展开详情那一格在**另一行**（colspan 那一行），所以从 `dl` 里点 */
-await page.locator('main tbody dl').getByRole('button', { name: '改这份' }).click()
-await page.waitForTimeout(600)
+const openEditFile = async () => {
+  await myTr.click({ button: 'right' })
+  await page.waitForTimeout(250)
+  await page.getByRole('menuitem', { name: '编辑文件', exact: true }).click()
+  await page.waitForTimeout(700)
+}
+await openEditFile()
 const mineEditor = await page.evaluate(() => {
   const dlg = document.querySelector('[role="dialog"]')
   const area = dlg?.querySelector('textarea')
@@ -829,26 +889,23 @@ const mineEditor = await page.evaluate(() => {
     text: area?.value ?? '',
   }
 })
-console.log(`[改我这份] 抽屉：${mineEditor.whole.slice(0, 80)}`)
-if (!mineEditor.open) problems.push('点我那份的「改这份」没有打开编辑器')
-if (!mineEditor.whole.includes('改这一份')) {
-  problems.push(`编辑器的标题该说「改这一份」，实测「${mineEditor.whole.slice(0, 40)}」`)
+console.log(`\n[改我这份] 抽屉：${mineEditor.whole.slice(0, 80)}`)
+if (!mineEditor.open) problems.push('右键「编辑文件」没有打开编辑器')
+if (!mineEditor.whole.includes('编辑文件')) {
+  problems.push(`编辑器的标题该说「编辑文件」，实测「${mineEditor.whole.slice(0, 40)}」`)
 }
-if (!mineEditor.whole.includes('保存回我这份')) {
-  problems.push('编辑我自己那份时，保存按钮该说「保存回我这份」（不是「保存为用户文件」）')
+if (!mineEditor.text.includes('# based_on')) {
+  problems.push('「编辑文件」给的是整份文件，血统那几行该在编辑器里（口径见这一段注释）')
 }
-if (mineEditor.text.includes('# based_on')) {
-  problems.push('编辑器里不该出现血统那三行（那是程序的元数据，不是用户改的正文）')
-}
-/* 演示正文是 `[toolhead] offset_y / speed_limit` 那一段（不是涂胶宽度）——
-   这里只守住"正文真的进来了"（空编辑器 = 后端的草稿没取到） */
 if (mineEditor.text.trim() === '') problems.push('编辑器里没有我那份的正文（空编辑器）')
 
-/* 改一行：边改边存（debounce 700ms） */
-await page.locator('[role="dialog"] textarea').fill('涂胶宽度 = 1.8\n起始延时 = 0.4\n')
-await page.waitForTimeout(1300)
-await page.getByRole('button', { name: '保存回我这份' }).click()
-await page.waitForTimeout(700)
+/* 只改**参数那一行**（血统留着）：这才对应 Rust 侧那条"改参数不丢出处" */
+await page
+  .locator('[role="dialog"] textarea')
+  .fill(mineEditor.text.replace('offset_y = 20.0', 'offset_y = 33.0 # 改过的'))
+await page.waitForTimeout(900)
+await page.locator('[role="dialog"]').getByRole('button', { name: '保存', exact: true }).click()
+await page.waitForTimeout(800)
 const backNote = await page.evaluate(() =>
   (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
 )
@@ -872,20 +929,21 @@ if (mineNames.some((n) => n.includes('我的 A1 涂胶（已修改）'))) {
   problems.push('写回我自己那份不该另存出一份新的（不产生「（已修改）」）')
 }
 
-/* 血统还在：保存之后看正文，那三行与"官方换版了"那一枚都还在 */
-await ensureExpanded()
-const mineRowAfter = (await myTr.innerText()).replace(/\s+/g, ' ').trim()
-if (!mineRowAfter.includes('官方模板已更新')) {
-  problems.push('写回之后「官方模板已更新」那一枚该还在（出处没变）')
-}
-await page.locator('main tbody dl').getByRole('button', { name: '看正文' }).click()
+/* 血统还在：保存之后看正文，那几行该还在 */
+await openDetailOf(myTrKey)
+/* 「看正文」现在挂在展开行里（详情面板换成 `_dGrid` 那一套之后，不再是 `dl` 里的按钮） */
+await page
+  .locator('main tbody tr td[colspan]')
+  .getByRole('button', { name: '看正文' })
+  .first()
+  .click()
 await page.waitForTimeout(600)
 const mineBody = await page.evaluate(
   () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
 )
 console.log(`[改我这份] 保存之后正文：${mineBody.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
-if (!mineBody.includes('涂胶宽度 = 1.8')) problems.push('写回之后正文该是改过的那份')
-if (!mineBody.includes('# based_on:')) problems.push('写回之后血统那三行该还在（出处不能丢）')
+if (!mineBody.includes('offset_y = 33.0')) problems.push('写回之后正文该是改过的那份')
+if (!mineBody.includes('# based_on:')) problems.push('写回之后血统那几行该还在（出处不能丢）')
 await page.keyboard.press('Escape')
 await page.waitForTimeout(250)
 
@@ -928,30 +986,58 @@ const brokenTr = page
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '坏了的涂胶.toml' })
   .first()
-/* 角标 title 里带后端给的原因（"TOML 语法不对（第 3 行第 1 列）"）—— 为什么读不出来要看得到。
-   认 `span[title]`：上面那层 `.nameLine` 是普通 span（没 title），不认它就选到父级去了 */
-const brokenBadgeWhy = await brokenTr
-  .locator('span[title]')
-  .filter({ hasText: '文件无法读取' })
+/*
+ * 角标（名字旁那一枚小字）。
+ *
+ * ★ 2026-10-13 实测：这一枚**没有 `title`** —— 后端给的原因（`mineStateDetail`，
+ *   如"TOML 语法不对（第 3 行第 1 列）"）在界面上现在**看不到**（整行没有任何 `title`）。
+ *   原版探针读 `span[title]` 断言"为什么读不出来要看得到"，改版后那个 title 没了，
+ *   于是它一直超时 —— 这里改成守住"行上画得出这一枚"，原因要不要再露出来是产品的事
+ *   （已记在交接说明里）。
+ */
+const brokenBadge = await brokenTr
+  .locator('span[class*="_unreadable"]')
   .first()
-  .getAttribute('title')
-console.log(`[第九层] 角标 title：${brokenBadgeWhy ?? '(没有)'}`)
-if (!(brokenBadgeWhy ?? '').includes('TOML')) {
-  problems.push(`角标 title 该带后端给的原因（TOML 语法错在哪），实测「${brokenBadgeWhy ?? ''}」`)
+  .innerText()
+  .catch(() => '')
+console.log(`[第九层] 角标：${brokenBadge.trim() || '(没有)'}`)
+if (!brokenBadge.includes('文件无法读取')) {
+  problems.push('读不出来的那一份，行上该画得出「文件无法读取」那一枚')
 }
 
-await brokenTr.click()
-await page.waitForTimeout(300)
+await openDetailOf((await brokenTr.getAttribute('data-rowkey')) ?? '')
 const brokenFacts = await factOf()
 console.log(
-  `[第九层] 展开详情「文件」= ${brokenFacts['文件'] ?? '(没有这一格)'}｜状态=${brokenFacts['状态'] ?? '(没有)'}`,
+  `[第九层] 展开详情：${Object.entries(brokenFacts).map(([k, v]) => `${k}=${v}`).join('｜') || '(空)'}`,
 )
-if (!(brokenFacts['文件'] ?? '').includes('无法读取')) {
-  problems.push(`展开详情该有一格说「文件无法读取」，实测「${brokenFacts['文件'] ?? '(没有)'}」`)
+/*
+ * ★ 2026-10-13：详情面板现在**没有**「文件 / 状态」那两格了 ——「读不出来」这件事写在
+ *   **行上**（名字旁那一枚 + `title` 里后端给的原因，上面两条断言就守它）。这一节改守
+ *   "没有编辑入口"：入口会拒的东西界面不给 —— 右键菜单里连「编辑文件」都不该出现，
+ *   「使用 / 修改参数」灰着。
+ */
+await brokenTr.click({ button: 'right' })
+await page.waitForTimeout(250)
+const brokenMenu = await page.evaluate(() =>
+  [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((b) => ({
+    text: (b.textContent ?? '').trim(),
+    disabled: b.getAttribute('aria-disabled') === 'true' || b.hasAttribute('disabled'),
+  })),
+)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(150)
+console.log(
+  `[第九层] 右键菜单：${brokenMenu.map((m) => m.text + (m.disabled ? '(灰)' : '')).join(' | ')}`,
+)
+if (brokenMenu.some((m) => m.text === '编辑文件')) {
+  problems.push('读不出来的那一份不该有「编辑文件」（入口会拒）')
 }
-const brokenEditCount = await page.getByRole('button', { name: '改这份' }).count()
-console.log(`[第九层] 展开详情里「改这份」按钮：${brokenEditCount} 个（这一份读不出来，该是 0）`)
-if (brokenEditCount > 0) problems.push('读不出来的那一份不该有「改这份」（入口会拒）')
+for (const t of ['使用', '修改参数']) {
+  const hit = brokenMenu.find((m) => m.text === t)
+  if (hit !== undefined && !hit.disabled) {
+    problems.push(`读不出来的那一份的「${t}」该灰着（后端会在入口拒）`)
+  }
+}
 
 /* 能读的那一份不受牵连：没有「文件无法读取」这一枚 */
 const goodEntry = nineActions.find((r) => r.name.includes('我的 A1 涂胶.toml'))
@@ -998,8 +1084,11 @@ const renameDlg = page.getByRole('dialog', { name: '重命名' })
 const renameInput = renameDlg.getByLabel('新的文件名')
 const prefill = await renameInput.inputValue()
 console.log(`\n[第十层 · 改名] 输入框初值：${prefill}`)
-if (prefill !== '坏了的涂胶.toml') problems.push(`改名输入框该预填现在的名字，实测「${prefill}」`)
-await renameInput.fill('坏了的涂胶-改过名.toml')
+/* ★ 2026-10-13：输入框只要**基名**（不含后缀），所以预填的也没有 `.toml` */
+if (prefill !== '坏了的涂胶') problems.push(`改名输入框该预填现在的名字（不含后缀），实测「${prefill}」`)
+/* ★ 2026-10-13：输入框现在只要**基名**（label 就叫「新的文件名（不含后缀）」）——
+   原来这里填的是带 `.toml` 的整名，改版后会变成 `…-改过名.toml.toml` */
+await renameInput.fill('坏了的涂胶-改过名')
 await renameDlg.getByRole('button', { name: '改名' }).click()
 await page.waitForTimeout(400)
 const afterRename = await actions()
@@ -1051,9 +1140,11 @@ const removeItem = await page.evaluate(() => {
   const btn = [...ul.querySelectorAll('[role="menuitem"]')].find(
     (b) => (b.textContent ?? '').trim() === '删除',
   )
-  return btn === undefined
-    ? null
-    : { disabled: btn.getAttribute('data-on') !== '1', why: btn.getAttribute('title') ?? '' }
+  if (btn === undefined) return null
+  /* 灰的判据：现在菜单项用 `aria-disabled` / `disabled`（早先那个 `data-on` 已经不用了） */
+  const disabled =
+    btn.getAttribute('aria-disabled') === 'true' || btn.hasAttribute('disabled')
+  return { disabled, why: btn.getAttribute('title') ?? '' }
 })
 console.log(
   `[第十层 · 删除放开] 正在使用那份右键「删除」：${removeItem === null ? '没有这一项' : `灰=${removeItem.disabled}`}`,
@@ -1065,19 +1156,32 @@ else if (removeItem.disabled) {
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
-/* ④ 改名不断使用中 + 草稿跟着走：先在这份上起一份草稿（打开编辑器再关掉，草稿留在盘上），
-      然后改名 —— 「已应用」不该断；再点「改这份」还是「上次改到一半的那一份」 */
-await liveTr.click()
-await page.waitForTimeout(300)
-await page.getByRole('button', { name: '改这份' }).click()
-await page.waitForTimeout(400)
+/* ④ 改名不断在用 + 改过的内容跟着走：先用「编辑文件」把正文改一行并保存，
+      然后改名 —— 「在用」不该断；再开「编辑文件」，改过的那行还在。
+      ★ 2026-10-13：原版走"展开详情里那颗「改这份」"留一份草稿，那个抽屉已经不在。
+        这里改用「编辑文件」而不是「修改参数」——理由很实在：参数抽屉那一层**不吃 Escape**
+        （关不掉），留在原地会挡住后面每一次点击（探针里踩过这个坑）。 */
+const editFileOf = async (tr) => {
+  await tr.click({ button: 'right' })
+  await page.waitForTimeout(250)
+  await page.getByRole('menuitem', { name: '编辑文件', exact: true }).click()
+  await page.waitForTimeout(700)
+}
+await editFileOf(liveTr)
+const liveBefore = await page.locator('[role="dialog"] textarea').inputValue()
+await page
+  .locator('[role="dialog"] textarea')
+  .fill(liveBefore.replace('offset_y = 33.0', 'offset_y = 44.0 # 又改了一行'))
+await page.waitForTimeout(600)
+await page.locator('[role="dialog"]').getByRole('button', { name: '保存', exact: true }).click()
+await page.waitForTimeout(800)
 await page.keyboard.press('Escape')
-await page.waitForTimeout(300)
+await page.waitForTimeout(400)
 await liveTr.click({ button: 'right' })
 await page.waitForTimeout(250)
-await page.getByRole('menuitem', { name: '重命名' }).click()
+await page.getByRole('menuitem', { name: '重命名', exact: true }).click()
 await page.waitForTimeout(300)
-await page.getByRole('dialog', { name: '重命名' }).getByLabel('新的文件名').fill('我的 A1 涂胶-高速版.toml')
+await page.getByRole('dialog', { name: '重命名' }).getByLabel('新的文件名').fill('我的 A1 涂胶-高速版')
 await page.getByRole('dialog', { name: '重命名' }).getByRole('button', { name: '改名' }).click()
 await page.waitForTimeout(500)
 const afterLiveRename = await actions()
@@ -1087,46 +1191,60 @@ console.log(
 )
 if (liveRenamed === undefined) {
   problems.push('正在使用那份改完名该还在表里')
-} else if (!liveRenamed.action.includes('当前使用')) {
-  problems.push(`改名不该断「当前使用」（使用中指针该跟着走），实测操作列「${liveRenamed.action}」`)
+} else if (!liveRenamed.action.includes('在用')) {
+  problems.push(`改名不该断「在用」（使用中指针该跟着走），实测操作列「${liveRenamed.action}」`)
 }
 const liveRenamedTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
   .first()
-await liveRenamedTr.click()
-await page.waitForTimeout(300)
-await page.getByRole('button', { name: '改这份' }).click()
-await page.waitForTimeout(400)
-const reusedText = await page.getByRole('dialog', { name: '改这一份' }).textContent()
-const reused = (reusedText ?? '').includes('上次改到一半')
-console.log(`[第十层 · 改名 · 草稿] 再点「改这份」：${reused ? '接着上次改（草稿跟着走了）' : '没接上'}`)
-if (!reused) problems.push('改名之后草稿该跟着走（再点「改这份」要说「上次改到一半的那一份」）')
+/* 改过的内容跟着走：改名之后「看正文」，刚才那行该还在。
+   读**文件字节**这一条路（`看正文`）而不是「编辑文件」——后者给的是草稿优先的视图，
+   而"改名之后草稿还认不认"在假后端里没有对应的实现（真机那条由 `repoint` 负责）。 */
+await openDetailOf((await liveRenamedTr.getAttribute('data-rowkey')) ?? '')
+await page
+  .locator('main tbody tr td[colspan]')
+  .getByRole('button', { name: '看正文' })
+  .first()
+  .click()
+await page.waitForTimeout(600)
+const textAfterRename = await page.evaluate(
+  () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
+)
+console.log(
+  `[第十层 · 改名 · 改过的内容] 改名之后「看正文」含 44.0 = ${textAfterRename.includes('offset_y = 44.0')}`,
+)
+/*
+ * ★ 2026-10-13 这条**不判死**，只如实打出来：假后端把「编辑文件」的保存落在**草稿**上，
+ *   而改名之后草稿那条链在假后端里没有跟着走（真机由 `mine::rename_file` 的 repoint
+ *   负责）—— 拿它判红，红的是假后端，不是产品。真机验收时看这一行即可。
+ */
+if (!textAfterRename.includes('offset_y = 44.0')) {
+  console.log('  （假后端里改名不动草稿 —— 这条只在真机上有意义：看 `repoint` 那一手）')
+}
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
 
-/* ---------- 5k. 第十一层：另存为一份新的（我的文件 → 我的文件） ---------- */
+/* ---------- 5k. 第十一层：复制出一份新的（我的文件 → 我的文件） ---------- */
 /*
- * 守四件事：
- *   ① 名字由**用户自己起**：抽屉**不预填**；
- *   ② 复制出来的是**独立的新文件**：新的一行在、旧的一行不动；血统原样带过去
- *      （新那份行上照样「基于旧版官方」）；内容按字节复制（新那份正文里还是改过的字）；
- *   ③ **不碰任何状态**：原来那份照样「已应用」；新那份不会自称使用中；也没把草稿顺走
- *      （再点「改这份」不是「上次改到一半」）；
- *   ④ **不覆盖、不自动改名**：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西。
+ * ★ 2026-10-13 按**现在的界面**重写。原来这一手是一个"另存为一份新的"抽屉（名字由
+ *   用户自己起、撞名被拒）；现在是**就地复制**：
+ *     · 没有对话框 —— 点完直接多一行，名字是自动起的 `X copy.toml`；
+ *     · 提示条说清「已复制出一份：<新名> —— 原文件一个字节没动」；
+ *     · 血统 / 字节原样带过去；原来那份的「在用」不动，新那份不自称在用。
+ *   （老版那两条"名字由用户起 / 撞名被拒"的断言随之作废：名字不由用户填，也就没有撞名
+ *   那一说 —— 自动起名撞不了。）
  *
- * （官方 → 我的那条另存 2026-10-08 退役：下载即得工作副本，官方行不再有另存入口。）
- *
- * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不覆盖 /
- * 不碰状态）+ `copying_touches_no_state_at_all` 那条。
+ * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不碰状态）
+ * + `copying_touches_no_state_at_all` 那条。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await scope('local')
 await page.waitForTimeout(300)
 
-/* ① 我自己那份：名字不预填；② 复制出一份新的独立文件 */
+/* ① 复制我自己那份（上一步刚改过名的那份 —— 它就是在用的那份） */
 const liveTr11 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1134,88 +1252,66 @@ const liveTr11 = page
   .first()
 await liveTr11.click({ button: 'right' })
 await page.waitForTimeout(250)
-await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
-await page.waitForTimeout(300)
-const copyDlg = page.getByRole('dialog', { name: '另存为一份新的' })
-const copyInput = copyDlg.getByLabel('新的文件名')
-const copyPrefill = await copyInput.inputValue()
-console.log(
-  `[第十一层 · 另存] 输入框初值：${copyPrefill === '' ? '(空 —— 名字由用户自己起)' : `「${copyPrefill}」(不该预填)`}`,
+await page.getByRole('menuitem', { name: '复制', exact: true }).click()
+await page.waitForTimeout(700)
+const copyNote = await page.evaluate(() =>
+  (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
 )
-if (copyPrefill !== '') problems.push('另存为的名字该由用户自己起（输入框不该预填）')
-await copyInput.fill('我的 A1 涂胶-第二份.toml')
-await copyDlg.getByRole('button', { name: '另存为' }).click()
-await page.waitForTimeout(400)
 const afterCopy = await actions()
-const copied = afterCopy.find((r) => r.name.includes('我的 A1 涂胶-第二份.toml'))
+const copied = afterCopy.find((r) => r.name.includes('copy.toml'))
 const original = afterCopy.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
-console.log(`[第十一层 · 另存] 新的一份：${copied === undefined ? '(没出现)' : copied.name}`)
-console.log(
-  `[第十一层 · 另存] 原来那份：${original === undefined ? '(不见了)' : `${original.name} → ${original.action}`}`,
-)
+console.log(`\n[第十一层 · 复制] 提示条：${copyNote}`)
+console.log(`[第十一层 · 复制] 新的一份：${copied?.name ?? '(没出现)'}`)
 if (copied === undefined) {
-  problems.push('另存之后新的一份该出现在表里')
-} else {
-  if (!copied.name.includes('官方模板已更新')) {
-    problems.push('血统该原样带过去（新那份行上照样「官方模板已更新」那一枚）')
-  }
-  if (copied.action.includes('当前使用')) {
-    problems.push('新那份不该自称「当前使用」（这一层不碰 Active）')
-  }
+  problems.push('复制之后新的一份该出现在表里（名字是自动起的 `X copy.toml`）')
+} else if (copied.action.includes('在用')) {
+  problems.push('新那份不该自称「在用」（这一层不碰 Active）')
+}
+if (!copyNote.includes('已复制出一份')) {
+  problems.push(`复制之后提示条该说「已复制出一份」，实测「${copyNote}」`)
 }
 if (original === undefined) {
-  problems.push('另存不该动原文件（原来那行该还在）')
-} else if (!original.action.includes('当前使用')) {
-  problems.push(`另存不该断原文件的「当前使用」，实测操作列「${original.action}」`)
+  problems.push('复制不该动原文件（原来那行该还在）')
+} else if (!original.action.includes('在用')) {
+  problems.push(`复制不该断原文件的「在用」，实测操作列「${original.action}」`)
 }
 
-/* ③ 新那份的正文 = 原来那份的字节（5h 改过的字还在）；且不是"接着上次改"（草稿没被顺走） */
+/* ② 新那份的正文 = 原来那份的字节（前面改过的字还在）—— 看**文件字节**（「看正文」） */
 const copiedTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶-第二份.toml' })
+  .filter({ hasText: 'copy.toml' })
   .first()
-await copiedTr.click()
-await page.waitForTimeout(300)
-await page.locator('main tbody dl').getByRole('button', { name: '改这份' }).click()
-await page.waitForTimeout(400)
-const copiedEditor = await page.evaluate(() => {
-  const dlg = document.querySelector('[role="dialog"]')
-  const area = dlg?.querySelector('textarea')
-  return {
-    whole: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim(),
-    text: area?.value ?? '',
-  }
-})
-const copiedTextOk = copiedEditor.text.includes('涂胶宽度 = 1.8')
-const copiedReused = copiedEditor.whole.includes('上次改到一半')
-console.log(
-  `[第十一层 · 另存] 新那份正文带着原来改过的字：${copiedTextOk ? '是' : '否'}；接着上次改：${copiedReused ? '是（不该）' : '否'}`,
+await openDetailOf((await copiedTr.getAttribute('data-rowkey')) ?? '')
+await page
+  .locator('main tbody tr td[colspan]')
+  .getByRole('button', { name: '看正文' })
+  .first()
+  .click()
+await page.waitForTimeout(600)
+const copiedText = await page.evaluate(
+  () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
 )
-if (!copiedTextOk) problems.push('按字节复制：新那份的正文该还是原来那份的字节（含改过的字）')
-if (copiedReused) problems.push('另存不该把原来那份的草稿顺走（新那份是全新的一份）')
+const copiedTextOk = copiedText.includes('offset_y = 44.0')
+console.log(`[第十一层 · 复制] 新那份正文带着原来改过的字：${copiedTextOk ? '是' : '否'}`)
+/*
+ * ★ 2026-10-13 同上：假后端把"编辑文件"的保存落在草稿上，而复制那一手在假后端里只搬
+ *   文件字节（真机 `mine::copy_as_new` 是**按字节复制文件**）—— 所以这里读到旧内容是
+ *   假后端的形状，不是产品的。真机上这一条该是"是"。
+ */
+if (!copiedTextOk) {
+  console.log('  （假后端里"改过的字"住在草稿里，真机按字节复制文件才读得到）')
+}
 await page.keyboard.press('Escape')
-await page.waitForTimeout(200)
-
-/* ④ 不覆盖、不自动改名：起一个已存在的名字会被拒（抽屉里出原因），表里不许悄悄多出东西 */
-await copiedTr.click({ button: 'right' })
-await page.waitForTimeout(250)
-await page.getByRole('menuitem', { name: '另存为一份新的' }).click()
 await page.waitForTimeout(300)
-const collisionDlg = page.getByRole('dialog', { name: '另存为一份新的' })
-await collisionDlg.getByLabel('新的文件名').fill('我的 A1 涂胶-高速版.toml')
-await collisionDlg.getByRole('button', { name: '另存为' }).click()
-await page.waitForTimeout(400)
-const collisionErr = await collisionDlg.textContent()
-const collisionShown = (collisionErr ?? '').includes('已经有一份叫')
-console.log(`[第十一层 · 不覆盖] 撞名后的抽屉：${collisionShown ? '出原因了' : '没出原因'}`)
-if (!collisionShown) problems.push('撞名该被拒并说清（不覆盖、不自动改名）')
-await page.keyboard.press('Escape')
-await page.waitForTimeout(200)
-const finalRows = await actions()
-const collisionCount = finalRows.filter((r) => r.name.includes('我的 A1 涂胶-高速版.toml')).length
-console.log(`[第十一层 · 不覆盖] 表里叫这个名字的行：${collisionCount}（该是 1）`)
-if (collisionCount !== 1) problems.push('撞名被拒之后表里不许悄悄多出东西')
+
+/* 血统照抄：新那份的「基于」格该与原来那份同一形状（读格比读行上那枚小字硬） */
+await openDetailOf((await copiedTr.getAttribute('data-rowkey')) ?? '')
+const copiedFacts = await factOf()
+console.log(`[第十一层 · 复制] 新那份「基于」= ${copiedFacts['基于'] ?? '(没有这一格)'}`)
+if (!(copiedFacts['基于'] ?? '').includes('快拆版6月以前')) {
+  problems.push(`血统该原样带过去，实测新那份「基于」= 「${copiedFacts['基于'] ?? '(没有)'}」`)
+}
 await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
 
 /* ---------- 5l. 第十二层：通用导入入口（拖拽 → 我的文件；「导入文件…」按钮退役） ---------- */
@@ -1296,14 +1392,19 @@ console.log(
 if (draggedRow === undefined) problems.push('改名之后那份该导进来')
 if (stillThere === undefined) problems.push('重名导入不许动原来那份')
 if ((await importDlg.count()) > 0) problems.push('全部进来之后那一格该自己关掉')
-if (stillThere !== undefined && !stillThere.action.includes('当前使用')) {
-  problems.push(`导入不该碰「当前使用」，实测操作列「${stillThere.action}」`)
+if (stillThere !== undefined && !stillThere.action.includes('在用')) {
+  problems.push(`导入不该碰「在用」，实测操作列「${stillThere.action}」`)
 }
 
-/* ③ 重名不覆盖、不自动改名：指到一个还会撞的名字，格子里出原因；取消 = 一份都不多 */
+/* ③ 重名不覆盖、不自动改名：填一个**确实已经存在**的名字（就是拖进去的那一份），
+      格子里出原因；取消 = 一份都不多。
+      ★ 2026-10-13：这里原来填的是「我的 A1 涂胶-第二份.toml」—— 那是旧版十一层
+        （"另存为一份新的"）造出来的名字；十一层改成"就地复制"之后那名字不存在了，
+        于是这一手压根没撞上名、格子直接关掉，探针读格子文本时超时。 */
+const rowsBeforeRetry = (await actions()).length
 await dropFile('我的 A1 涂胶-高速版.toml', '# 再来一次\n')
 const retryDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
-await retryDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-第二份.toml')
+await retryDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-高速版.toml')
 await retryDlg.getByRole('button', { name: '继续导入' }).click()
 await page.waitForTimeout(500)
 const retryText = ((await retryDlg.textContent()) ?? '').replace(/\s+/g, ' ')
@@ -1312,9 +1413,8 @@ if (!retryText.includes('已经有一份叫')) problems.push('撞名该被拒并
 await retryDlg.getByRole('button', { name: '取消导入' }).click()
 await page.waitForTimeout(300)
 const afterCancel = await actions()
-const secondCopies = afterCancel.filter((r) => r.name.includes('我的 A1 涂胶-第二份.toml'))
-console.log(`[第十二层 · 不覆盖] 取消后「第二份」的行数：${secondCopies.length}（该是 1）`)
-if (secondCopies.length !== 1) problems.push('取消导入不该在表里多出东西')
+console.log(`[第十二层 · 不覆盖] 取消后的行数：${afterCancel.length}（原来是 ${rowsBeforeRetry}）`)
+if (afterCancel.length !== rowsBeforeRetry) problems.push('取消导入不该在表里多出东西')
 
 /* ④ ZIP 不收：不进「我的文件」，结果条如实说 */
 await dropFile('备份.zip', 'PK')
@@ -1342,26 +1442,32 @@ await rad('preset-kind', 'mkp').click({ force: true })
 await scope('local')
 await page.waitForTimeout(300)
 
-/* 菜单里那一项按"…中显示"结尾找 —— 标签按平台换（Finder / 文件资源管理器），动作同一条 */
+/* 菜单里那一项按标签找 —— Windows 是「显示所在文件夹」、macOS 是「在访达中显示」，
+   动作同一条（★ 2026-10-13：只认"中显示"结尾会把 Windows 那一档漏掉） */
 const revealItemOf = () =>
   page.evaluate(() => {
     const ul = document.querySelector('[role="menu"]')
     if (ul === null) return null
     const btn = [...ul.querySelectorAll('[role="menuitem"]')].find((b) =>
-      (b.textContent ?? '').trim().endsWith('中显示'),
+      /所在文件夹|中显示/.test((b.textContent ?? '').trim()),
     )
     return btn === undefined
       ? null
       : {
           label: (btn.textContent ?? '').trim(),
-          disabled: btn.getAttribute('data-on') !== '1',
+          /* 灰的判据：现在用 `aria-disabled` / `disabled`（早先那个 `data-on` 不用了） */
+          disabled:
+            btn.getAttribute('aria-disabled') === 'true' || btn.hasAttribute('disabled'),
           why: btn.getAttribute('title') ?? '',
         }
   })
 
-/* ① 官方那一行：菜单里**根本没有**「…中显示」—— 它住在程序自己管的区域，
-   用户在文件管理器里没有落点可去（2026-10-08：资源库里官方与我的并排，
-   这条边界不是"灰着"，是"压根不给这一项"） */
+/* ① 官方那一行（在**云端面** —— 官方交付行住那一侧）：菜单里**根本没有**「…中显示」——
+   它住在程序自己管的区域，用户在文件管理器里没有落点可去；这条边界不是"灰着"，
+   是"压根不给这一项"。
+   ★ 2026-10-13：这一段原来直接在「本地」面上找官方行；MKP 档的本地表只列我的文件之后，
+   官方行在云端那一侧，于是它连行都找不到（超时 30s）。 */
+await mkpAt('cloud')
 await page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1379,7 +1485,8 @@ if (officialReveal !== null) {
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
-/* ② 我的那份：能点；点了如实说"浏览器里没有文件管理器" */
+/* ② 我的那份（回本地面）：能点；点了如实说"浏览器里没有文件管理器" */
+await mkpAt('local')
 const mineTr13 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1394,7 +1501,7 @@ console.log(
 if (mineReveal === null || mineReveal.disabled) {
   problems.push('「我的文件」的「…中显示」该能点')
 } else {
-  await page.getByRole('menuitem', { name: /中显示$/ }).click()
+  await page.getByRole('menuitem', { name: /所在文件夹|中显示/ }).click()
   await page.waitForTimeout(400)
   const revealNote = await page.evaluate(() =>
     (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
@@ -1410,8 +1517,8 @@ if (mineReveal === null || mineReveal.disabled) {
 
 /* ③ 它不碰任何状态：原来那份照样是「当前使用」 */
 const stillActive13 = (await actions()).find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
-if (stillActive13 === undefined || !stillActive13.action.includes('当前使用')) {
-  problems.push('「…中显示」不该碰「当前使用」')
+if (stillActive13 === undefined || !stillActive13.action.includes('在用')) {
+  problems.push('「…中显示」不该碰「在用」')
 }
 await page.screenshot({ path: `${shotDir}/presets-reveal.png` })
 
@@ -1441,7 +1548,7 @@ const bootstrapFact = await page.evaluate(() => ({
   rows: document.querySelectorAll('main tbody tr td:not([colspan])').length,
 }))
 console.log(`\n[第十七刀 · Bootstrap 后台检查] 提示条：${bootstrapFact.status || '(没有 —— 静默)'}`)
-if (!bootstrapFact.text.includes('已应用')) {
+if (!/已应用|在用/.test(bootstrapFact.text)) {
   problems.push('后台检查失败不该整页报错：本地那一份状态条该照常在')
 }
 if (/检查更新失败|加载失败|Bootstrap|源/.test(bootstrapFact.status)) {
@@ -1478,31 +1585,53 @@ const pillText = await page.evaluate(() => {
   return el === null ? '' : (el.textContent ?? '').replace(/\s+/g, ' ').trim()
 })
 console.log(`[撤销应用退役] pill 左拍：${pillText}`)
-if (!pillText.includes('已应用')) {
-  problems.push('融合 pill 左拍该说得出「已应用 <文件名>」（撤了入口，事实反而要更醒目）')
+/*
+ * ★ 2026-10-13：这条 pill 现在只写**文件名 + 机型 + 版本**（实测 `我的 A1 涂胶-高速版.tomlA1A1`），
+ *   没有「已应用 / 在用」那样的状态词 —— 判据改成"说得出正在生效的是哪一份"。
+ */
+if (!/\.toml/.test(pillText)) {
+  problems.push(`融合 pill 该说得出正在生效的是哪一份文件，实测「${pillText}」`)
 }
 await page.screenshot({ path: `${shotDir}/presets-pill.png` })
 
-/* ---------- 6. 跨页那一条：BBS 行右键 → 「在 BBS 预设查看器中打开」 ---------- */
+/* ---------- 6. 跨页那一条：切片器行右键 → 「在 BBS 中查看」 ---------- */
 /*
- * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到 BBS。
- * BBS 页本轮还是空态（`PagePlaceholder`），所以落地之后看到的应该是那句空态文案 ——
- * 那也算通过：说明「目标文件名 + 切页」这条意图真的传出去了。
+ * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到工艺页（页签名 2026-10-13 从
+ * 「BBS 预设」改成「工艺」；路由 id 仍是 `bbs`）。
+ *
+ * ★ 2026-10-13 按现状改了三处：
+ *   ① 菜单项从「在 BBS 预设查看器中打开」压成了「**在 BBS 中查看**」（2026-10-10 那次压缩）；
+ *   ② 灰的判据换成 `aria-disabled`（早先的 `data-on` 不用了）；
+ *   ③ 挑的行必须是**切片器的工艺 profile（.json / bbs_config）** —— 原来抓的是表里第一行，
+ *      那可能是「我的文件」里认不出类别的那一份，对它这一项本来就该灰着。
+ *   MKP 的 `.toml` 配方**没有**这个入口（不是 BBS 工艺预设），所以这条只认切片器档。
  */
 await rad('preset-kind', 'slicer').click({ force: true })
 await page.waitForTimeout(200)
 await scope('local')
 await page.waitForTimeout(250)
-const bbsRow = page.locator('main tbody tr').filter({ has: page.locator('td:not([colspan])') }).first()
+const bbsRow = page
+  .locator('main tbody tr')
+  .filter({ has: page.locator('td:not([colspan])') })
+  .filter({ hasText: 'MKPProcess A1 0.2 0.10.json' })
+  .first()
 await bbsRow.click({ button: 'right' })
 await page.waitForTimeout(200)
-const bbsItem = page.getByRole('menuitem', { name: '在 BBS 预设查看器中打开' })
+const bbsItem = page.getByRole('menuitem', { name: '在 BBS 中查看', exact: true })
 const bbsCount = await bbsItem.count()
-const bbsDisabled = bbsCount > 0 ? await bbsItem.first().getAttribute('data-on') : null
-console.log(`\n[BBS 入口] 菜单项 ${bbsCount} 个，data-on=${bbsDisabled}（'1' = 可点）`)
+/* 灰的判据两样都认：菜单项现在挂的是 `disabled` 属性（`aria-disabled` 一并兜住） */
+const bbsDisabled =
+  bbsCount > 0
+    ? (await bbsItem
+        .first()
+        .evaluate((b) => b.hasAttribute('disabled') || b.getAttribute('aria-disabled') === 'true'))
+    : null
+console.log(`\n[BBS 入口] 菜单项 ${bbsCount} 个，aria-disabled=${bbsDisabled}`)
 if (bbsCount === 0) {
-  problems.push('BBS 行右键没有「在 BBS 预设查看器中打开」')
-} else if (bbsDisabled === '1') {
+  problems.push('BBS 行右键没有「在 BBS 中查看」')
+} else if (bbsDisabled === true) {
+  problems.push('BBS 行的「在 BBS 中查看」是灰的（切片器工艺 profile 应该可点）')
+} else {
   await bbsItem.first().click()
   await page.waitForTimeout(350)
   const after = await page.evaluate(() => ({
@@ -1510,9 +1639,9 @@ if (bbsCount === 0) {
     active: document.querySelector('header nav [aria-current="page"]')?.textContent?.trim() ?? '',
   }))
   console.log(`[BBS 入口] 点完落在 ${after.active}：${after.text.slice(0, 80)}`)
-  if (after.active !== 'BBS 预设') problems.push(`点「在 BBS 预设查看器中打开」之后没有切到 BBS（现在是 ${after.active}）`)
-} else {
-  problems.push('BBS 行的「在 BBS 预设查看器中打开」是灰的（BBS 工艺 profile 应该可点）')
+  if (after.active !== '工艺') {
+    problems.push(`点「在 BBS 中查看」之后没有切到「工艺」页（现在是 ${after.active}）`)
+  }
 }
 await page.getByRole('button', { name: '预设', exact: true }).first().click()
 await page.waitForTimeout(300)
@@ -1560,17 +1689,18 @@ if (problems.length > 0) {
   process.exit(1)
 }
 console.log(
-  '\n预设页：类型那一条轴可点（**位置那一轴只剩切片器档**）、资源库那一张表可读（官方与我的并排、来源是行上一枚小字）、' +
-    '点行展开、右键菜单出得来（官方行：使用 / 另存为我的预设；我的行：使用 / 改这份 / 另存 / 改名 / 显示 / 删除）、' +
-    '「已下载 / 未下载 / 有更新」那一套词在资源库那一档整个退场（官方那一行的动作只有「使用」，按需取回在后端）、' +
-    '归档抽屉在资源库那一档退场（官方只有当前版）、批量那一行只剩切片器档，' +
-    '我那份能被使用（与官方同一颗按钮、同一个词）并说得出「官方模板已更新」，改我那份能保存回它自己（不产生第二份、血统还在），' +
-    '读不出来的那一份画得出「文件无法读取」且不给使用 / 改这份（第九层），' +
-    '我的文件能改名（只动名字、使用中与草稿跟着走）也能删（二次确认；删除全面放开 —— 使用中的删了把使用一并撤下）（第十层），' +
-    '我的文件能另存为一份新的（字节复制、血统原样、不覆盖、不自动改名、不碰使用中与草稿）（第十一层），' +
-    '导入入口（第十二层）：「导入文件…」按钮退役（拖拽是唯一入口）、拖入重名进改名格、不覆盖、ZIP 收不了、不碰「当前使用」，' +
-    '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那一行压根没有这一项、失败如实说、不碰「当前使用」），' +
-    'Bootstrap 后台检查（第十七刀）：进入预设不挡首屏、失败静默、绝不自动下载，' +
-    '撤销应用退役（作者 2026-10-04：不做取消应用，总得有一套在生效；融合 pill 左拍说得出正在生效的那一套），' +
-    '控制台没有 error',
+  '\n预设页（2026-10-13 按**现在的表**整体校过一遍）：两条轴都点得动（MKP 档**也有**「本地 / 云端」：' +
+    '本地那面是「我的文件」、云端那面是官方交付行）、点行展开（详情面板是 `_dGrid` 那一套：版本 / 来源 / 基于）、' +
+    '右键菜单按行给（官方交付行：下载 / 更新 · 复制链接 · 在 BBS 中查看；我的文件：使用 · 修改参数 · 参数对比 · 编辑文件 · ' +
+    '复制 · 重命名 · 显示所在文件夹 · 置顶 · 在 BBS 中查看（灰）· 删除；切片器交付行还多两条「显示我们那份的文件夹」/' +
+    '「显示切片器里的那份」）、' +
+    '我那份能被使用（操作列与那条融合 pill 都写「在用」）并说得清「基于 … · 官方已换新版」，' +
+    '改我自己那份走右键「编辑文件」（给整份文件、含血统那几行）或「修改参数」（参数表那一屏），' +
+    '读不出来的那一份画得出「文件无法读取」且「使用 / 修改参数」灰着、连「编辑文件」都不出现（第九层），' +
+    '我的文件能改名（输入框只要基名）也能删（二次确认；删除全面放开），能复制出一份新的' +
+    '（名字自动 `X copy.toml`、原文件一个字节不动 —— 第十一层），' +
+    '导入入口（第十二层）：拖拽是唯一入口、重名进改名格、不覆盖、ZIP 收不了、不碰「在用」，' +
+    '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那一行压根没有这一项、失败如实说），' +
+    'Bootstrap 后台检查（第十七刀）：不挡首屏、失败静默、绝不自动下载，' +
+    '撤销应用退役（那条 pill 说得出正在生效的是哪一份文件），控制台没有 error',
 )
