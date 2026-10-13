@@ -4,7 +4,7 @@
 //! Preset 只是第一个消费者；核心与判据在 [`crate::runtime::import`]。
 //!
 //! **两条命令都不碰任何状态**：不改使用中指针、不迁移 / 不创建草稿、不进 archive；
-//! 落点固定 `presets-mine/`，安全检查走现有用户文件边界（不新造第二套路径规则）。
+//! 落点固定 `presets-local/`，安全检查走现有用户文件边界（不新造第二套路径规则）。
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;

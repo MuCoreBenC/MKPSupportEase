@@ -1061,26 +1061,26 @@ impl<'a> Book<'a> {
             self.version_layers(&v.uid)
                 .is_some_and(|l| l.has_own(Level::Version, key))
         };
-        let mine: Vec<&VersionIdentity> = self
+        let local: Vec<&VersionIdentity> = self
             .versions
             .iter()
             .filter(|v| v.machine_id == machine_id)
             .collect();
         match uid {
             Some(u) => DeskImpact {
-                targets: mine
+                targets: local
                     .iter()
                     .filter(|v| v.uid == u)
                     .map(|v| label(v))
                     .collect(),
-                followers: mine
+                followers: local
                     .iter()
                     .filter(|v| v.uid != u && !pins(v))
                     .map(|v| label(v))
                     .collect(),
             },
             None => {
-                let followers: Vec<&&VersionIdentity> = mine.iter().filter(|v| !pins(v)).collect();
+                let followers: Vec<&&VersionIdentity> = local.iter().filter(|v| !pins(v)).collect();
                 DeskImpact {
                     targets: followers.iter().map(|v| label(v)).collect(),
                     followers: Vec::new(),
@@ -1254,7 +1254,7 @@ pub struct BookView {
     pub build_rows: Vec<BuildRow>,
     /// 加载与草稿清理时发现的问题。**由 `app` 层填** ——
     /// 这一层看不到文件，而"仓库里有一份上游已经不存在的配方"只有读文件时才发现。
-    /// 不交出来的话，那一份在树上会整个消失，用户只看到"我的改动去哪了"
+    /// 不交出来的话，那一份在树上会整个消失，用户只看到"本地改动去哪了"
     pub notices: Vec<String>,
     /// 崩溃快照跟上了没有。**与 `save` / `dirty_count` 是两件事** ——
     /// 「未保存」说仓库文件，「待落盘」说快照。由 `app` 层填

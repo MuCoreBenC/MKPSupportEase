@@ -185,8 +185,8 @@ export function activePresetSnapshot(): Promise<ActivePreset | null> {
  * 参数页换组合，都要真切换，四个页面同账）。
  *
  * 两条守则：
- * - **底账已经指着这个 combo 时不动** —— 正在用的可能是「我的文件」，
- *   随手浏览回来不该把它顶成官方底稿；
+ * - **底账已经指着这个 combo 时不动** —— 正在用的可能是「本地文件」，
+ *   随手浏览回来不该把它顶成云端底稿；
  * - **应用不了（还没下载 / 内容与目录漂了）就保持原账**：页面选择仍成立，
  *   「未下载 / 内容异常」的三态如实显示 —— 不弹错误打断浏览，也不编一句"切换成功"。
  */
@@ -199,7 +199,7 @@ export function activateCombo(
   if (model === null || variant === null || model === '' || variant === '') return
   if (active !== null && active.machineId === model && active.versionId === variant) return
   /*
-   * 浏览器预览（mock）里没有交付字节 —— 官方线的应用在那里**如实拒**
+   * 浏览器预览（mock）里没有交付字节 —— 云端线的应用在那里**如实拒**
    * （NotImplementedError 的技术形式进控制台，那是给显式按钮的提示通道）。
    * 浏览行为不去触发它：选择仍然成立、底账保持原样，与"应用不了"同一条守则。
    */
@@ -207,7 +207,7 @@ export function activateCombo(
   const fileName = fileOf(model, variant)
   if (fileName === null) return
   void api
-    .applyActivePreset(fileName, 'official')
+    .applyActivePreset(fileName, 'cloud')
     .then(() => appStateMutated())
     .catch(() => {
       console.debug(`[appState] ${fileName} 这一步应用不了（多半还没下载）—— 底账保持原样`)

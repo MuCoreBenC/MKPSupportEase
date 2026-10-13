@@ -2,7 +2,7 @@
 //!
 //! # 它解决的那件事
 //!
-//! 客户端要验「官方发了新版本 → 检查更新 → 下载 → 对比 → 恢复默认」这一整条链，
+//! 客户端要验「云端发了新版本 → 检查更新 → 下载 → 对比 → 恢复默认」这一整条链，
 //! 得先去终端敲 `npm run preset-source:dev`。可工作台自己就是**从仓库里跑起来**的，
 //! 人在工作台里干活时不该再切到终端 —— 这一颗按钮就是那条命令。
 //!
@@ -59,7 +59,7 @@ use crate::error::AppError;
 const NPM_SCRIPT: &str = "preset-source:dev";
 
 /// 夹具根（v1 / v2）：**服务端出去的就是这一份**。两代只差两处（发布日 + 一个参数值），
-/// 够演示"官方发新版了 → 检查更新看得见"。路径只在 `scripts/preset-test-server/`
+/// 够演示"云端发新版了 → 检查更新看得见"。路径只在 `scripts/preset-test-server/`
 /// 那一处约定，这里照同一个相对位置认。
 const FIXTURE_REL_V1: &str = "scripts/preset-test-server/fixtures/v1";
 const FIXTURE_REL_V2: &str = "scripts/preset-test-server/fixtures/v2";
@@ -94,16 +94,16 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 
 /// 测试源端哪一份。
 ///
-/// 前两项是**夹具**（`make-fixtures.mjs` 从真交付根派生的两代，够演"官方发新版了"）。
+/// 前两项是**夹具**（`make-fixtures.mjs` 从真交付根派生的两代，够演"云端发新版了"）。
 /// 第三项是 2026-10-08 作者要的那一环：**当前交付** —— 端你（在沙箱里）生成出来的
-/// 那一份，于是「改参数 → 生成 → 客户端检查更新 → 看到我的新版」这条闭环在本地
+/// 那一份，于是「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地
 /// 整条走得通，而且**永远不碰正式**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
-    /// 夹具 v1：模拟「官方源，还没有新版本」
+    /// 夹具 v1：模拟「云端源，还没有新版本」
     #[serde(rename = "v1")]
     V1,
-    /// 夹具 v2：模拟「官方发了新版」（revision 变了 → 「检查更新」看得见）
+    /// 夹具 v2：模拟「云端发了新版」（revision 变了 → 「检查更新」看得见）
     #[serde(rename = "v2")]
     V2,
     /// **当前交付**：测试模式开着 = 沙箱那份，正式 = 仓库那份
@@ -506,11 +506,11 @@ fn sources_of(repo: &Path) -> Vec<SourceOption> {
             let (label, note) = match kind {
                 SourceKind::V1 => (
                     "夹具 v1",
-                    "模拟「官方源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」",
+                    "模拟「云端源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」",
                 ),
                 SourceKind::V2 => (
                     "夹具 v2",
-                    "模拟「官方发了新版」—— 同一份预设的下一版（revision 变了）",
+                    "模拟「云端发了新版」—— 同一份预设的下一版（revision 变了）",
                 ),
                 SourceKind::Delivery => (
                     "当前交付",

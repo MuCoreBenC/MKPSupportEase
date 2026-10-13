@@ -66,7 +66,7 @@ interface Props {
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
   /**
-   * **官方更新账**（逐项）。不给就是"这一段没有官方更新这回事"（官方线 / 认不出是哪一版官方）——
+   * **云端更新账**（逐项）。不给就是"这一段没有云端更新这回事"（云端线 / 认不出是哪一版云端）——
    * 行上一律不画，页面的长相与以前完全一样。
    */
   syncOf?: (key: string) => ParamSyncEntry | undefined

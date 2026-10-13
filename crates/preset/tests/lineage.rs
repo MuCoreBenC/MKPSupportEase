@@ -159,8 +159,8 @@ fn ko3_five_states_and_three_numbers() {
             "nozzle_cooling_flag = false",
         ],
     );
-    // 我的副本：改了 MKP_retract / wiper_y / wipetower_speed
-    let mine = preset(
+    // 本地副本：改了 MKP_retract / wiper_y / wipetower_speed
+    let local = preset(
         &["speed_limit = 70", "MKP_retract = 5"],
         &[
             "wiper_y = 30",
@@ -168,39 +168,39 @@ fn ko3_five_states_and_three_numbers() {
             "nozzle_cooling_flag = false",
         ],
     );
-    // 官方现在：改了 speed_limit / wiper_y / wipetower_speed，
+    // 云端现在：改了 speed_limit / wiper_y / wipetower_speed，
     // 加了 user_dry_time，删了 nozzle_cooling_flag
-    let official = preset(
+    let cloud = preset(
         &["speed_limit = 65", "MKP_retract = 0"],
         &["wiper_y = 40", "wipetower_speed = 25", "user_dry_time = 5"],
     );
 
-    let diffs = diff(&mine, Some(&base), &official).expect("比差异");
+    let diffs = diff(&local, Some(&base), &cloud).expect("比差异");
 
-    // ① 只有官方变了 —— 可以放心采纳
+    // ① 只有云端变了 —— 可以放心采纳
     let d = find(&diffs, "toolhead.speed_limit");
-    assert_eq!(d.state, DiffState::OfficialOnly);
+    assert_eq!(d.state, DiffState::CloudOnly);
     assert_eq!(
-        (d.mine.clone(), d.base.clone(), d.official.clone()),
+        (d.local.clone(), d.base.clone(), d.cloud.clone()),
         (
             Some(EditValue::Int(70)),
             Some(EditValue::Int(70)),
             Some(EditValue::Int(65))
         ),
-        "K-O3 红：三个值要各就各位（我的 / 基线 / 官方）"
+        "K-O3 红：三个值要各就各位（本地 / 基线 / 云端）"
     );
 
     // ② 只有我改了 —— 保持
     let d = find(&diffs, "toolhead.MKP_retract");
-    assert_eq!(d.state, DiffState::MineOnly);
-    assert_eq!(d.mine, Some(EditValue::Int(5)));
-    assert_eq!(d.official, Some(EditValue::Int(0)));
+    assert_eq!(d.state, DiffState::LocalOnly);
+    assert_eq!(d.local, Some(EditValue::Int(5)));
+    assert_eq!(d.cloud, Some(EditValue::Int(0)));
 
     // ③ 两边都变了 —— 真冲突，只能人来选
     let d = find(&diffs, "wiping.wiper_y");
     assert_eq!(d.state, DiffState::BothChanged);
     assert_eq!(
-        (d.mine.clone(), d.base.clone(), d.official.clone()),
+        (d.local.clone(), d.base.clone(), d.cloud.clone()),
         (
             Some(EditValue::Int(30)),
             Some(EditValue::Int(20)),
@@ -208,17 +208,17 @@ fn ko3_five_states_and_three_numbers() {
         )
     );
 
-    // ④ 官方新增
+    // ④ 云端新增
     let d = find(&diffs, "wiping.user_dry_time");
-    assert_eq!(d.state, DiffState::OfficialAdded);
-    assert_eq!(d.mine, None, "我的副本里没有这一项");
-    assert_eq!(d.official, Some(EditValue::Int(5)));
+    assert_eq!(d.state, DiffState::CloudAdded);
+    assert_eq!(d.local, None, "本地副本里没有这一项");
+    assert_eq!(d.cloud, Some(EditValue::Int(5)));
 
-    // ⑤ 官方移除
+    // ⑤ 云端移除
     let d = find(&diffs, "wiping.nozzle_cooling_flag");
-    assert_eq!(d.state, DiffState::OfficialRemoved);
-    assert_eq!(d.mine, Some(EditValue::Bool(false)));
-    assert_eq!(d.official, None);
+    assert_eq!(d.state, DiffState::CloudRemoved);
+    assert_eq!(d.local, Some(EditValue::Bool(false)));
+    assert_eq!(d.cloud, None);
 
     // 「两边都改成了同一个值」不是差异 —— 没什么要决定的
     assert!(
@@ -241,10 +241,10 @@ fn ko3_five_states_and_three_numbers() {
 /// K-O3b：基线不可用时**保守**当真冲突；`diff` 是纯函数（同输入两遍同结果）。
 #[test]
 fn ko3b_without_a_baseline_everything_is_a_conflict() {
-    let mine = preset(&["speed_limit = 70"], &["wiper_y = 30"]);
-    let official = preset(&["speed_limit = 65"], &["wiper_y = 30"]);
+    let local = preset(&["speed_limit = 70"], &["wiper_y = 30"]);
+    let cloud = preset(&["speed_limit = 65"], &["wiper_y = 30"]);
 
-    let diffs = diff(&mine, None, &official).expect("比差异");
+    let diffs = diff(&local, None, &cloud).expect("比差异");
     assert_eq!(diffs.len(), 1, "只有 speed_limit 不同：{:?}", paths(&diffs));
     assert_eq!(diffs[0].path, "toolhead.speed_limit");
     assert_eq!(
@@ -254,6 +254,6 @@ fn ko3b_without_a_baseline_everything_is_a_conflict() {
     );
     assert_eq!(diffs[0].base, None, "不知道就是 None，不许拿默认值假装知道");
 
-    assert_eq!(diffs, diff(&mine, None, &official).expect("再比一遍"));
+    assert_eq!(diffs, diff(&local, None, &cloud).expect("再比一遍"));
     println!("K-O3b 绿：无基线 ⇒ BothChanged 且 base 为 None；同输入两遍结果相同");
 }

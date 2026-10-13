@@ -2462,7 +2462,7 @@ mod tests {
         let cases = [
             "标准版",        // 中文，能用单引号
             "A1 fast",       // 带空格
-            "it's mine",     // **含单引号 → 必须退回双引号**
+            "it's local",    // **含单引号 → 必须退回双引号**
             "line1\nline2",  // 含换行 → 退回双引号
             "tab\there",     // 控制字符
             "quote\"inside", // 含双引号，但能用单引号
@@ -2740,7 +2740,7 @@ mod tests {
 
         c.machine_mut("A1")
             .unwrap()
-            .add_version("TEST_NEW", "我的新版本")
+            .add_version("TEST_NEW", "本地新版本")
             .expect("加得上");
         c.write_machine("A1").expect("写回");
 
@@ -2750,7 +2750,7 @@ mod tests {
         assert_eq!(m.versions.len(), before_ids.len() + 1);
         let v = m.versions.last().unwrap();
         assert_eq!(v.id, "TEST_NEW");
-        assert_eq!(v.name, "我的新版本");
+        assert_eq!(v.name, "本地新版本");
         // 三个可选字段**留空不写**，不是写成空串
         assert!(v.recommended_bundle.is_none() && v.tag.is_none() && v.description.is_none());
 
@@ -2772,7 +2772,7 @@ mod tests {
             inserted.contains("TEST_NEW"),
             "插入段不含新 id：{inserted:?}"
         );
-        assert!(inserted.contains("我的新版本"));
+        assert!(inserted.contains("本地新版本"));
     }
 
     /// 四条拒绝路径。**每一条都要有自己的话**，不能都回一句「参数不对」

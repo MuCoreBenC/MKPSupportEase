@@ -35,7 +35,7 @@
 //! # 与内容的关系
 //!
 //! AppState 只存**指针与状态**，不存内容：`activePreset` 说的是"用哪一份"，
-//! 预设正文仍在交付区 / `presets-mine/`。事件账、出处账、下载文件、图片模型
+//! 预设正文仍在交付区 / `presets-local/`。事件账、出处账、下载文件、图片模型
 //! 都不进这里（它们是业务数据 / 历史记录，各有各的落点）。
 
 use std::collections::BTreeMap;
@@ -52,18 +52,18 @@ use super::catalog::{hex, CatalogFile};
 use super::source::PresetSource;
 use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft, PresetTextDraft};
 
-/// 一次「官方更新」的处理决定（逐参数）。
+/// 一次「云端更新」的处理决定（逐参数）。
 ///
-/// 用户世界里只有一份自己的预设；官方那一版默认值住在**隐藏 baseline** 里
+/// 用户世界里只有一份自己的预设；云端那一版默认值住在**隐藏 baseline** 里
 /// （[`super::baseline`]，按摘要寻址）。于是"这一项我处理过了"这件事盘上不存在，
 /// 只能记在这里 —— 它回答的是**程序当前怎么管理这一份**（不是"这个预设文件是什么"），
 /// 所以照 [`super::lineage`] 定的那条界，它属于 `run/`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamDecisionKind {
-    /// 采用了官方的新值（文件里那一项已经写成官方新值）
+    /// 采用了云端的新值（文件里那一项已经写成云端新值）
     Adopt,
-    /// 明确保持我的值（文件里那一项一个字没动）
+    /// 明确保持本地值（文件里那一项一个字没动）
     Hold,
 }
 
@@ -71,10 +71,10 @@ pub enum ParamDecisionKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParamDecision {
-    /// 做决定那一刻的官方版本（正文全文 sha256）。
+    /// 做决定那一刻的云端版本（正文全文 sha256）。
     ///
-    /// 它同时是**这一项"处理到哪一版了"的水位**：下次官方再改，官方当前版的摘要与它不同，
-    /// 这一项就会重新进入待处理 —— 官方连着发几版也不需要在本地存历史。
+    /// 它同时是**这一项"处理到哪一版了"的水位**：下次云端再改，云端当前版的摘要与它不同，
+    /// 这一项就会重新进入待处理 —— 云端连着发几版也不需要在本地存历史。
     pub sha256: String,
     pub kind: ParamDecisionKind,
 }
@@ -139,10 +139,10 @@ pub struct AppStateFile {
     /// 数据源设置：当前用哪个远端
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset_source: Option<PresetSource>,
-    /// **逐参数「官方更新」处理账**：`presets-mine/…` 相对路径 → `参数 key → 决定`。
+    /// **逐参数「云端更新」处理账**：`presets-local/…` 相对路径 → `参数 key → 决定`。
     ///
-    /// 空的格不写进文件（`skip_serializing_if`）—— 没处理过官方更新的应用，状态文件与以前一样。
-    /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_mine`]）。
+    /// 空的格不写进文件（`skip_serializing_if`）—— 没处理过云端更新的应用，状态文件与以前一样。
+    /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_local`]）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_decisions: BTreeMap<String, BTreeMap<String, ParamDecision>>,
     /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
@@ -278,9 +278,9 @@ pub fn active_preset(root: &Path) -> Result<Option<ActivePreset>, AppError> {
     Ok(load(root)?.active_preset)
 }
 
-/// 记下"用这一份官方的"。`file` 来自 catalog；
+/// 记下"用这一份云端的"。`file` 来自 catalog；
 /// 指纹优先用目录登记的期望值，没登记就对盘上真字节算一次（算不出 = 文件不在，报错）。
-pub fn set_active_official(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
+pub fn set_active_cloud(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
     let sha256 = match file.expected_sha() {
         Some(want) => want.to_owned(),
         None => {
@@ -293,7 +293,7 @@ pub fn set_active_official(root: &Path, file: &CatalogFile) -> Result<ActivePres
     with_state(root, |state| {
         let active = ActivePreset {
             active_schema: super::state::ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Official,
+            origin: ActiveOrigin::Cloud,
             file_name: file.file_name.clone(),
             sha256,
             path: None,
@@ -303,9 +303,9 @@ pub fn set_active_official(root: &Path, file: &CatalogFile) -> Result<ActivePres
     })
 }
 
-/// 记下"用我自己那一份"（`presets-mine/…`）。`rel` 是相对用户根的路径，
+/// 记下"用我自己那一份"（`presets-local/…`）。`rel` 是相对用户根的路径，
 /// `sha256` 是应用那一刻它的字节摘要（用户后来自己改它就是"漂了"—— 对用户线是正常事）。
-pub fn set_active_mine(root: &Path, rel: &str, sha256: &str) -> Result<ActivePreset, AppError> {
+pub fn set_active_local(root: &Path, rel: &str, sha256: &str) -> Result<ActivePreset, AppError> {
     let file_name = Path::new(rel)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -313,7 +313,7 @@ pub fn set_active_mine(root: &Path, rel: &str, sha256: &str) -> Result<ActivePre
     with_state(root, |state| {
         let active = ActivePreset {
             active_schema: super::state::ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Mine,
+            origin: ActiveOrigin::Local,
             file_name,
             sha256: sha256.to_owned(),
             path: Some(rel.to_owned()),
@@ -407,7 +407,7 @@ pub fn clear_text_draft(root: &Path) -> Result<(), AppError> {
 /// 以前是两个文件各写各的，现在合并成一次原子替换）。只动"正指着这一份 / 改的是这一份"
 /// 的**用户线**条目：路径与文件名换成新的，指纹与正文原样（文件一个字节没动）。
 /// 返回 `(指针跟了, 草稿跟了)`。
-pub fn repoint_mine(
+pub fn repoint_local(
     root: &Path,
     old_rel: &str,
     new_rel: &str,
@@ -416,7 +416,7 @@ pub fn repoint_mine(
     with_state(root, |state| {
         let mut active_followed = false;
         if let Some(active) = state.active_preset.as_mut() {
-            if active.origin == ActiveOrigin::Mine && active.path.as_deref() == Some(old_rel) {
+            if active.origin == ActiveOrigin::Local && active.path.as_deref() == Some(old_rel) {
                 active.file_name = new_file_name.to_owned();
                 active.path = Some(new_rel.to_owned());
                 active_followed = true;
@@ -424,7 +424,7 @@ pub fn repoint_mine(
         }
         let mut draft_followed = false;
         if let Some(draft) = state.draft.as_mut() {
-            if draft.origin == ActiveOrigin::Mine && draft.path.as_deref() == Some(old_rel) {
+            if draft.origin == ActiveOrigin::Local && draft.path.as_deref() == Some(old_rel) {
                 draft.source_file_name = new_file_name.to_owned();
                 draft.path = Some(new_rel.to_owned());
                 draft_followed = true;
@@ -432,7 +432,7 @@ pub fn repoint_mine(
         }
         /*
          * 逐参数决定账按**路径**认这一份（与草稿同一条钥匙）：改名之后它得跟到新路径上，
-         * 否则"这项官方更新我已经处理过了"会凭空消失，官方下一次发布又把它们全翻出来。
+         * 否则"这项云端更新我已经处理过了"会凭空消失，云端下一次发布又把它们全翻出来。
          */
         if let Some(book) = state.param_decisions.remove(old_rel) {
             state.param_decisions.insert(new_rel.to_owned(), book);
@@ -441,7 +441,7 @@ pub fn repoint_mine(
     })
 }
 
-/* ---------- paramDecisions：逐参数「官方更新」处理账 ---------- */
+/* ---------- paramDecisions：逐参数「云端更新」处理账 ---------- */
 
 /// 这一份用户预设上，**我做过的那些决定**（参数 key → 决定）。没有处理过就是空表。
 pub fn param_decisions(
@@ -607,10 +607,10 @@ mod tests {
     #[test]
     fn sections_do_not_interfere() {
         let d = tempfile::tempdir().unwrap();
-        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         set_draft(
             d.path(),
-            &DraftSubject::official("A1-fast.toml"),
+            &DraftSubject::cloud("A1-fast.toml"),
             "x",
             "涂胶 = 2",
         )
@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn save_then_load_roundtrips() {
         let d = tempfile::tempdir().unwrap();
-        let saved = set_active_official(d.path(), &entry("A1-standard.toml", b"content")).unwrap();
+        let saved = set_active_cloud(d.path(), &entry("A1-standard.toml", b"content")).unwrap();
         let loaded = active_preset(d.path()).unwrap().expect("该读回来");
 
         assert_eq!(saved.file_name, loaded.file_name);
@@ -647,8 +647,8 @@ mod tests {
     #[test]
     fn applying_another_replaces_the_first() {
         let d = tempfile::tempdir().unwrap();
-        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        set_active_official(d.path(), &entry("A1-fast.toml", b"b")).unwrap();
+        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_cloud(d.path(), &entry("A1-fast.toml", b"b")).unwrap();
         assert_eq!(
             active_preset(d.path()).unwrap().unwrap().file_name,
             "A1-fast.toml",
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn clear_is_idempotent() {
         let d = tempfile::tempdir().unwrap();
-        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         clear_active_preset(d.path()).unwrap();
         assert!(active_preset(d.path()).unwrap().is_none());
         clear_active_preset(d.path()).unwrap(); // 再撤一次也不报错
@@ -671,7 +671,7 @@ mod tests {
     #[test]
     fn draft_roundtrips_and_clears() {
         let d = tempfile::tempdir().unwrap();
-        let subject = DraftSubject::official("A1-fast.toml");
+        let subject = DraftSubject::cloud("A1-fast.toml");
         let saved = set_draft(d.path(), &subject, "abc", "涂胶 = 1.2").unwrap();
         let loaded = draft(d.path()).unwrap().expect("该读回来");
 
@@ -690,47 +690,41 @@ mod tests {
     #[test]
     fn a_draft_knows_which_line_it_belongs_to() {
         let d = tempfile::tempdir().unwrap();
-        set_draft(
-            d.path(),
-            &DraftSubject::official("A1-fast.toml"),
-            "a",
-            "官方",
-        )
-        .unwrap();
-        let mine = DraftSubject::mine("A1-fast.toml", "presets-mine/我的/A1-fast.toml");
-        set_draft(d.path(), &mine, "b", "我的").unwrap();
+        set_draft(d.path(), &DraftSubject::cloud("A1-fast.toml"), "a", "云端").unwrap();
+        let local = DraftSubject::local("A1-fast.toml", "presets-local/本地/A1-fast.toml");
+        set_draft(d.path(), &local, "b", "本地").unwrap();
 
         let loaded = draft(d.path()).unwrap().expect("该读回来");
-        assert_eq!(loaded.text, "我的");
-        assert_eq!(loaded.subject(), mine, "改的是我自己那份");
+        assert_eq!(loaded.text, "本地");
+        assert_eq!(loaded.subject(), local, "改的是我自己那份");
         assert!(
             !loaded
                 .subject()
-                .matches(&DraftSubject::official("A1-fast.toml")),
+                .matches(&DraftSubject::cloud("A1-fast.toml")),
             "同名不同线 ≠ 同一份：「接着改」不许接错"
         );
     }
 
     /// 改名跟随：指针与草稿**都只跟"正指着这一份 / 改的是这一份"**，
-    /// 别的条目（官方线、指着别人那份的）一概不动；一次写里两格一起跟
+    /// 别的条目（云端线、指着别人那份的）一概不动；一次写里两格一起跟
     #[test]
-    fn repoint_mine_follows_only_the_matching_entries() {
+    fn repoint_local_follows_only_the_matching_entries() {
         let d = tempfile::tempdir().unwrap();
-        set_active_mine(d.path(), "presets-mine/A1.toml", "sha").unwrap();
-        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap(); // 这一下把指针换成官方了
-        set_active_mine(d.path(), "presets-mine/A1.toml", "sha").unwrap(); // 换回我的
+        set_active_local(d.path(), "presets-local/A1.toml", "sha").unwrap();
+        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap(); // 这一下把指针换成云端了
+        set_active_local(d.path(), "presets-local/A1.toml", "sha").unwrap(); // 换回本地
         set_draft(
             d.path(),
-            &DraftSubject::mine("A1.toml", "presets-mine/A1.toml"),
+            &DraftSubject::local("A1.toml", "presets-local/A1.toml"),
             "sha",
             "改到一半",
         )
         .unwrap();
 
-        let (active, draft_followed) = repoint_mine(
+        let (active, draft_followed) = repoint_local(
             d.path(),
-            "presets-mine/A1.toml",
-            "presets-mine/A2.toml",
+            "presets-local/A1.toml",
+            "presets-local/A2.toml",
             "A2.toml",
         )
         .unwrap();
@@ -738,7 +732,7 @@ mod tests {
 
         let active = active_preset(d.path()).unwrap().unwrap();
         assert_eq!(active.file_name, "A2.toml");
-        assert_eq!(active.path.as_deref(), Some("presets-mine/A2.toml"));
+        assert_eq!(active.path.as_deref(), Some("presets-local/A2.toml"));
         assert_eq!(active.sha256, "sha", "文件一个字节没动，指纹原样");
         let draft = draft(d.path()).unwrap().unwrap();
         assert_eq!(draft.source_file_name, "A2.toml");
@@ -758,7 +752,7 @@ mod tests {
     #[test]
     fn param_decisions_roundtrip_and_merge() {
         let d = tempfile::tempdir().unwrap();
-        let rel = "presets-mine/A1-fast.toml";
+        let rel = "presets-local/A1-fast.toml";
         assert!(
             param_decisions(d.path(), rel).unwrap().is_empty(),
             "没处理过 = 空表"
@@ -804,10 +798,10 @@ mod tests {
     #[test]
     fn param_decisions_do_not_touch_other_sections() {
         let d = tempfile::tempdir().unwrap();
-        set_active_official(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         record_param_decisions(
             d.path(),
-            "presets-mine/A1.toml",
+            "presets-local/A1.toml",
             &[("toolhead.offset.x".to_owned(), adopt("aa"))],
         )
         .unwrap();
@@ -822,7 +816,7 @@ mod tests {
     #[test]
     fn forgetting_a_book_is_idempotent() {
         let d = tempfile::tempdir().unwrap();
-        let rel = "presets-mine/A1.toml";
+        let rel = "presets-local/A1.toml";
         record_param_decisions(
             d.path(),
             rel,
@@ -834,12 +828,12 @@ mod tests {
         forget_param_decisions(d.path(), rel).unwrap(); // 再忘一次也不报错
     }
 
-    /// 改名之后决定账**跟到新路径**：不跟的话官方下一次发布会把处理过的项全翻出来
+    /// 改名之后决定账**跟到新路径**：不跟的话云端下一次发布会把处理过的项全翻出来
     #[test]
     fn renaming_moves_the_book_to_the_new_path() {
         let d = tempfile::tempdir().unwrap();
-        let old = "presets-mine/A1.toml";
-        let new = "presets-mine/A2.toml";
+        let old = "presets-local/A1.toml";
+        let new = "presets-local/A2.toml";
         record_param_decisions(
             d.path(),
             old,
@@ -847,7 +841,7 @@ mod tests {
         )
         .unwrap();
 
-        repoint_mine(d.path(), old, new, "A2.toml").unwrap();
+        repoint_local(d.path(), old, new, "A2.toml").unwrap();
 
         assert!(
             param_decisions(d.path(), old).unwrap().is_empty(),
@@ -936,8 +930,8 @@ mod tests {
         std::fs::create_dir_all(d.path().join("run")).unwrap();
         atomic_write(
             &d.path().join(state::ACTIVE_FILE),
-            r#"{ "activeSchema": 1, "origin": "mine", "fileName": "我的 A1.toml",
-                  "sha256": "abc", "path": "presets-mine/我的 A1.toml" }"#
+            r#"{ "activeSchema": 1, "origin": "local", "fileName": "本地 A1.toml",
+                  "sha256": "abc", "path": "presets-local/本地 A1.toml" }"#
                 .as_bytes(),
         )
         .unwrap();
@@ -950,7 +944,7 @@ mod tests {
         let state = load(d.path()).unwrap();
         assert_eq!(
             state.active_preset.unwrap().file_name,
-            "我的 A1.toml",
+            "本地 A1.toml",
             "使用中指针从旧文件读到"
         );
         assert!(state.draft.is_none(), "没有的格就是 None");
@@ -1030,10 +1024,10 @@ mod tests {
         )
         .unwrap();
 
-        // 官方应用在目录**没登记期望值**时要读盘上真字节；文件不在就失败 —— 状态一格不动
+        // 云端应用在目录**没登记期望值**时要读盘上真字节；文件不在就失败 —— 状态一格不动
         let mut unregistered = entry("A1-fast.toml", b"b");
         unregistered.sha256 = None;
-        let e = set_active_official(d.path(), &unregistered).unwrap_err();
+        let e = set_active_cloud(d.path(), &unregistered).unwrap_err();
         assert_eq!(e.code, ErrorCode::NotFound);
         assert!(!state_file(d.path()).exists(), "失败不落新档");
         assert!(d.path().join(state::ACTIVE_FILE).exists(), "失败也不删旧档");

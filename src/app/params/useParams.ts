@@ -69,7 +69,7 @@ import type { FieldSchema } from '../../components/field'
  * - **不带 `target`**：整页参数台 —— 按「机型 · 版本」挑编辑目标（catalog 里那张
  *   `editTargetByCombo` 表说这个组合编辑谁），用户能在预设抽屉里换。
  * - **带 `target`**：右键某一份预设打开的那一个 —— **钉死这一份**
- *   （`presets-mine/…` 里的那一个路径），机型 / 版本只用来决定字段表与分组，
+ *   （`presets-local/…` 里的那一个路径），机型 / 版本只用来决定字段表与分组，
  *   用户换不了目标。两次打开同一份预设得到的是同一件事，与「当前应用」无关。
  *
  * 两者**共用同一个 hook 与同一套组件**：外壳不同、编辑的对象来源不同，别的全一样。
@@ -203,10 +203,10 @@ interface Catalog {
    * 每个组合对应的**可编辑文件身份**（参数页底座 ③）。
    *
    * 参数页要改一份文件就得知道三件事：文件名、哪条线、用户线的落点 ——
-   * `beginPresetEdit` 正是要这三个。官方线落点恒 `null`（由目录给），用户线给 `path`。
+   * `beginPresetEdit` 正是要这三个。云端线落点恒 `null`（由目录给），用户线给 `path`。
    *
-   * 官方那一半从 catalog 的 files 摊（`kind === 'mkp_preset'`）；用户那一半从
-   * `getUserPresetFiles` 来（我那份认的是 `path`，机型/版本从文件名反推）。
+   * 云端那一半从 catalog 的 files 摊（`kind === 'mkp_preset'`）；用户那一半从
+   * `getLocalPresetFiles` 来（我那份认的是 `path`，机型/版本从文件名反推）。
    */
   editTargetByCombo: Map<string, { fileName: string; origin: ActiveOrigin; path: string | null }>
 }
@@ -460,7 +460,7 @@ export interface Params {
   editingPreset: { fileName: string; origin: ActiveOrigin; path: string | null } | null
   /** 草稿没落盘时的原因（一行话）；正常是 `null` */
   draftError: string | null
-  /** 保存后那份用户文件的路径（`presets-mine/…`），用来在页面提示"存到哪了" */
+  /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   saveResult: string | null
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
@@ -500,25 +500,25 @@ export interface Params {
   /* ---------- 官方更新（2026-10-09） ---------- */
 
   /**
-   * 这一份的**官方更新账**（我 / 官方旧值 / 官方新值）。
+   * 这一份的**云端更新账**（我 / 云端旧值 / 云端新值）。
    *
-   * `null` = 现在还比不了（编辑目标不是「我的预设」、官方那一版认不出、或读坏了）——
+   * `null` = 现在还比不了（编辑目标不是「本地预设」、云端那一版认不出、或读坏了）——
    * 界面照实说，不编一个"零项待处理"出来。
    */
   sync: PresetParamSync | null
-  /** 读 / 落这次官方更新账时的问题（一句人话）。正常是 `null` */
+  /** 读 / 落这次云端更新账时的问题（一句人话）。正常是 `null` */
   syncError: string | null
-  /** 官方当前版的字节还没到本机 —— 只能看到"有新版本"，看不到逐项差异 */
+  /** 云端当前版的字节还没到本机 —— 只能看到"有新版本"，看不到逐项差异 */
   syncNeedsFetch: boolean
   /** 正在落决定（采用 / 保持）—— 那一行的两颗按钮据此禁用 */
   syncBusy: boolean
-  /** 某一项上的官方更新账（没有这一项就是 `undefined`） */
+  /** 某一项上的云端更新账（没有这一项就是 `undefined`） */
   syncOf: (key: string) => ParamSyncEntry | undefined
   /** 待处理条数（`sync === null` 时是 0） */
   pendingCount: number
   /**
-   * **落一批决定**：`adopt` = 采用官方新值（写进我那份文件），
-   * `hold` = 保持我的值（文件一个字不动）。两者都把水位推到官方当前版。
+   * **落一批决定**：`adopt` = 采用云端新值（写进我那份文件），
+   * `hold` = 保持本地值（文件一个字不动）。两者都把水位推到云端当前版。
    */
   decideSync: (keys: string[], kind: ParamDecisionKind) => void
 }
@@ -571,7 +571,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 用户切机型 / 版本只换**编辑目标**，**不等于应用它**；改 `P1S` 不会动 `active-preset`。
    * 没有应用任何预设、目录里也没有对应文件时它是 `null` —— 那时没有默认目标（页面照实说）。
    *
-   * `origin` 决定改的是官方线还是用户线：官方线保存会**另存**成"我那份"，用户线**写回它自己**。
+   * `origin` 决定改的是云端线还是用户线：云端线保存会**另存**成"我那份"，用户线**写回它自己**。
    */
   const [editingPreset, setEditingPreset] = useState<{
     fileName: string
@@ -580,7 +580,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   } | null>(null)
   /** 编辑目标的草稿有没有真的落到盘上（后端 `run/draft-preset.json`） */
   const [draftError, setDraftError] = useState<string | null>(null)
-  /** 保存后那份用户文件的路径（`presets-mine/…`），用来在页面提示"存到哪了" */
+  /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   const [saveResult, setSaveResult] = useState<string | null>(null)
   /**
    * 写值闸拦下一次改动时那句人话（2026-10-02）。`null` = 没在提示。
@@ -590,18 +590,18 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [gateNote, setGateNote] = useState<string | null>(null)
 
   /*
-   * **我那份文件里真实写着的参数值**（`presets-mine/…` 的字节，`readPresetParams` 读的）。
+   * **我那份文件里真实写着的参数值**（`presets-local/…` 的字节，`readPresetParams` 读的）。
    *
    * 为什么需要这一层：`getMachineParams` 给的是**目录里的配方**（机型·版本的有效值），
-   * 而"我的值"是**我那份文件里写着什么** —— 两者在用户改过之后就分岔了。
-   * 编辑对象是「我的预设」时，已保存那一层以文件为准；官方线 / 认不出那份才退回配方。
+   * 而"本地值"是**我那份文件里写着什么** —— 两者在用户改过之后就分岔了。
+   * 编辑对象是「本地预设」时，已保存那一层以文件为准；云端线 / 认不出那份才退回配方。
    * 文件里没有这一项就**不进表**（下一层回落），所以"这份没写它"与"它等于 0"分得开。
    */
   const [fileValues, setFileValues] = useState<Map<string, string>>(() => new Map())
-  /** 重读那一层的计数器（采用官方新值之后文件变了，要再读一次） */
+  /** 重读那一层的计数器（采用云端新值之后文件变了，要再读一次） */
   const [fileReload, setFileReload] = useState(0)
 
-  /* ---------- 官方更新（三方账） ---------- */
+  /* ---------- 云端更新（三方账） ---------- */
   const [sync, setSync] = useState<PresetParamSync | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
@@ -609,7 +609,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   /**
    * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
    *
-   * 那一版是"退回这份预设当初那版官方的默认值"（藏在内部 baseline 里）。
+   * 那一版是"退回这份预设当初那版云端的默认值"（藏在内部 baseline 里）。
    * 现在整个功能不要了：**有问题就让用户删掉、重新取一份** —— 参数表上的「恢复默认值」
    * 退回**出厂值**（目录里那份 `baseValue`），不再去问任何历史快照。
    *
@@ -618,7 +618,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    */
 
   /**
-   * **保存**：把草稿提交成"我的预设"（官方线另存 / 用户线写回）。
+   * **保存**：把草稿提交成"本地预设"（云端线另存 / 用户线写回）。
    *
    * 真值落在用户根（后端 `commit_preset_draft`），本地那一层只是"这一屏看得到的改动"。
    * 没有编辑目标时如实说，不假装保存了。
@@ -635,7 +635,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         (done) => {
           setDraftError(null)
           setSavedNote(
-            cur.origin === 'mine'
+            cur.origin === 'local'
               ? `已写回 ${done.fileName}`
               : done.replaced
                 ? `已保存成 ${done.fileName}（覆盖了上一份）`
@@ -709,8 +709,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         if (f.kind === 'mkp_preset') fileByCombo.set(`${f.machineId}:${f.versionId}`, f.fileName)
       }
       /*
-       * 可编辑的文件身份（参数页底座 ③）：官方线从目录的 files 摊；用户线从
-       * `getUserPresetFiles` 来 —— **同一个 combo 用户线优先**（用户自己那份就是他实际在用的）。
+       * 可编辑的文件身份（参数页底座 ③）：云端线从目录的 files 摊；用户线从
+       * `getLocalPresetFiles` 来 —— **同一个 combo 用户线优先**（用户自己那份就是他实际在用的）。
        * 用户文件没有机型/版本元数据，靠 `sourceOf` 的血统 / 文件名反推（与预设页同一套）。
        */
       const editTargetByCombo = new Map<
@@ -721,23 +721,23 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         if (f.kind === 'mkp_preset') {
           editTargetByCombo.set(`${f.machineId}:${f.versionId}`, {
             fileName: f.fileName,
-            origin: 'official',
+            origin: 'cloud',
             path: null,
           })
         }
       }
-      const mine = await api.getUserPresetFiles().catch(() => [])
+      const localPresets = await api.getLocalPresetFiles().catch(() => [])
       if (!alive) return
-      for (const f of mine) {
+      for (const f of localPresets) {
         /*
-         * 我那份的机型/版本从**血统**认（`basedOn*` 指向官方来源那一版）；认不出就跳过 ——
+         * 我那份的机型/版本从**血统**认（`basedOn*` 指向云端来源那一版）；认不出就跳过 ——
          * 认不出的那份在预设页照常列，只是不对应任何 combo，所以不进这张表（别硬塞一格）。
          */
         const { basedOnMachineId: mid, basedOnVersionId: vid } = f
         if (mid !== null && vid !== null && f.kind === 'mkp_preset') {
           editTargetByCombo.set(`${mid}:${vid}`, {
             fileName: f.fileName,
-            origin: 'mine',
+            origin: 'local',
             path: f.path,
           })
         }
@@ -806,9 +806,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
                 tabs: catalog.tabs,
                 params,
                 /*
-                 * A3：标签跟着**编辑目标**走（同一张表，同 combo 我的文件优先）——
-                 * 编辑的是「我的文件」时，pill / 确认框 / 历史标题都说我的文件名，
-                 * 不再说目录里那份官方底稿（那是 fileByCombo 的答案，两件事）。
+                 * A3：标签跟着**编辑目标**走（同一张表，同 combo 本地文件优先）——
+                 * 编辑的是「本地文件」时，pill / 确认框 / 历史标题都说本地文件名，
+                 * 不再说目录里那份云端底稿（那是 fileByCombo 的答案，两件事）。
                  */
                 fileLabel:
                   catalog.editTargetByCombo.get(`${machineId}:${versionId}`)?.fileName ??
@@ -978,32 +978,32 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    */
   const editingTarget = useMemo(() => {
     if (pinnedPath !== null && pinnedFileName !== null) {
-      return { fileName: pinnedFileName, origin: 'mine' as ActiveOrigin, path: pinnedPath }
+      return { fileName: pinnedFileName, origin: 'local' as ActiveOrigin, path: pinnedPath }
     }
     if (catalog === null || machineId === '' || versionId === '') return null
     return catalog.editTargetByCombo.get(`${machineId}:${versionId}`) ?? null
   }, [catalog, machineId, pinnedFileName, pinnedPath, versionId])
 
-  /** 这一轮编辑的对象是**我的那一份**（有路径）—— 官方线 / 认不出则不是 */
-  const editingMine = editingTarget !== null && editingTarget.origin === 'mine'
-  const minePath = editingMine ? (editingTarget?.path ?? null) : null
+  /** 这一轮编辑的对象是**本地那份**（有路径）—— 云端线 / 认不出则不是 */
+  const editingLocal = editingTarget !== null && editingTarget.origin === 'local'
+  const localPath = editingLocal ? (editingTarget?.path ?? null) : null
 
   /**
    * 已保存那一层的取值顺序：
    *   ① 这一屏保存过的（`saved`，按「机型:版本:字段」记）
-   *   ② **我那份文件里真实写着的**（编辑对象是「我的预设」时才有这一档）
-   *   ③ 目录里的配方值（`getMachineParams`）—— 官方线 / 文件里没写这一项时的底
+   *   ② **我那份文件里真实写着的**（编辑对象是「本地预设」时才有这一档）
+   *   ③ 目录里的配方值（`getMachineParams`）—— 云端线 / 文件里没写这一项时的底
    *
-   * ② 不能省：用户改过之后，配方给的就不再是"我的值"了 —— 少了它，
-   * 参数行会把官方默认显示成"我已保存的"，而「我的修改」那个徽章也就没了依据。
+   * ② 不能省：用户改过之后，配方给的就不再是"本地值"了 —— 少了它，
+   * 参数行会把云端默认显示成"我已保存的"，而「本地修改」那个徽章也就没了依据。
    */
   const savedValueOf = useCallback(
     (key: string) =>
       saved.get(cellKey(machineId, versionId, key)) ??
-      (editingMine ? fileValues.get(key) : undefined) ??
+      (editingLocal ? fileValues.get(key) : undefined) ??
       combo?.baseByKey.get(key) ??
       '',
-    [combo, editingMine, fileValues, machineId, saved, versionId],
+    [combo, editingLocal, fileValues, machineId, saved, versionId],
   )
 
   const valueOf = useCallback(
@@ -1263,7 +1263,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const save = useCallback(() => {
     if (combo === null) return
     /*
-     * **先落盘**：把草稿提交成"我的预设"（官方线另存 / 用户线写回，后端 `commit_preset_draft`）。
+     * **先落盘**：把草稿提交成"本地预设"（云端线另存 / 用户线写回，后端 `commit_preset_draft`）。
      * 本地这一层只是"这一屏看得到的已保存值"，真值在用户根 —— 两句状态由 `commitDraft` 写。
      */
     commitDraft()
@@ -1314,7 +1314,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * follow 再把 combo 拉向新底账，两个 effect 互相拉扯，1 秒内打出十几次 apply，
    * 底账在两份预设之间来回震荡。**纪律由此钉死：effect 一律只读；写底账只能发生在
    * 显式动作的处理器里**（首页按钮 / 各处抽屉的选择回调同理）。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「本地文件」）、应用不了保持原账。
    */
   const switchTo = useCallback(
     (next: { machineId: string; versionId: string }) => {
@@ -1508,19 +1508,19 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   }, [editingTarget])
 
   /*
-   * **我那份文件里真实写着的参数值**（只在编辑对象是「我的预设」时读）。
+   * **我那份文件里真实写着的参数值**（只在编辑对象是「本地预设」时读）。
    *
    * 读不出来**不报错**：那是"这一屏退回配方值显示"（下一层兜底），不是整页失败 ——
    * 用户看的是参数，不该为一次读盘失败丢掉整张表。
-   * 采用官方新值之后这里要重读一次（值已经落进文件了，见 `decideSync`）。
+   * 采用云端新值之后这里要重读一次（值已经落进文件了，见 `decideSync`）。
    */
   useEffect(() => {
-    if (minePath === null) {
+    if (localPath === null) {
       setFileValues(new Map())
       return
     }
     let alive = true
-    void api.readPresetParams(minePath).then(
+    void api.readPresetParams(localPath).then(
       (v) => {
         if (alive) setFileValues(new Map(Object.entries(v.values)))
       },
@@ -1531,24 +1531,24 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [minePath, fileReload])
+  }, [localPath, fileReload])
 
   /*
-   * **官方更新账**（三方：我 / 官方旧值 / 官方新值）。
+   * **云端更新账**（三方：我 / 云端旧值 / 云端新值）。
    *
-   * `fetchMissing: true` —— 打开这一份（或这一页）时允许为拿到官方当前版的字节发一次
-   * 请求；取不回来不算失败（后端照实给 `officialReady: false`），界面说清"有新版本、
+   * `fetchMissing: true` —— 打开这一份（或这一页）时允许为拿到云端当前版的字节发一次
+   * 请求；取不回来不算失败（后端照实给 `cloudReady: false`），界面说清"有新版本、
    * 还没取回来"，逐项差异等取回来再看。
    */
   useEffect(() => {
-    if (minePath === null) {
+    if (localPath === null) {
       setSync(null)
       setSyncError(null)
       return
     }
     let alive = true
     setSyncError(null)
-    void api.getPresetParamSync(minePath, true).then(
+    void api.getPresetParamSync(localPath, true).then(
       (v) => {
         if (alive) setSync(v)
       },
@@ -1562,21 +1562,21 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [minePath])
+  }, [localPath])
 
   /**
    * 落一批决定（采用 / 保持）。
    *
    * 采用会把文件里那几项结构保真地改掉 —— 于是**草稿那一层也要跟着改**
-   * （`patchDraft`），否则用户在这之后点「保存修改」会把刚采用的官方新值覆盖回旧值。
+   * （`patchDraft`），否则用户在这之后点「保存修改」会把刚采用的云端新值覆盖回旧值。
    */
   const decideSync = useCallback(
     (keys: string[], kind: ParamDecisionKind) => {
-      if (minePath === null || keys.length === 0) return
+      if (localPath === null || keys.length === 0) return
       setSyncBusy(true)
       setSyncError(null)
       void api.applyPresetParamDecisions(
-        minePath,
+        localPath,
         keys.map((paramKey) => ({ paramKey, kind })),
       ).then(
         (v) => {
@@ -1584,7 +1584,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           setSync(v)
           if (kind === 'adopt') {
             for (const key of keys) {
-              const next = v.entries.find((e) => e.key === key)?.mine
+              const next = v.entries.find((e) => e.key === key)?.local
               if (next !== null && next !== undefined) patchDraft(key, next)
             }
           }
@@ -1596,7 +1596,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         },
       )
     },
-    [minePath, patchDraft],
+    [localPath, patchDraft],
   )
 
   /** 逐项的账，按 key 索引（行上直接取；没有这一项就是 `undefined`） */
@@ -1662,7 +1662,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     sync,
     syncError,
     syncNeedsFetch:
-      sync !== null && sync.versionAdvanced && sync.officialFileName !== null && !sync.officialReady,
+      sync !== null && sync.versionAdvanced && sync.cloudFileName !== null && !sync.cloudReady,
     syncBusy,
     syncOf,
     pendingCount: sync?.pendingCount ?? 0,

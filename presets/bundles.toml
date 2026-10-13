@@ -32,28 +32,28 @@
 #
 # - `id`：机型文件引用着它（`defaultBundle` 五处 + 每个版本的 `recommendedBundle`
 #   一处）。**机型默认套餐 = 该机型的 STANDARD 版那份**（生成侧回退的口径）。
-# - `display`：给人看的名字，沿用「官方推荐」。
+# - `display`：给人看的名字，沿用「推荐」。
 # - `assetRefs`：**我们的资产 id**（MKP 预设类 + 切片器类混一份清单，前端按类型分组）。
 
 # ---------------- A1：三个版本各一份 ----------------
 
 [[bundles]]
 id = 'A1_STANDARD'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1'
 assetRefs = ['a1-standard', 'a1-bbs-04-020']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'A1_FAST'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1'
 assetRefs = ['a1-fast', 'a1-bbs-04-020']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'A1_FASTV3.3'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1'
 assetRefs = ['a1-fastv3.3', 'a1-bbs-04-020']
 updatedAt = '2026-10-03'
@@ -62,21 +62,21 @@ updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'A1_MINI_STANDARD'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-standard', 'a1_mini-bbs-04-020']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'A1_MINI_FAST'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fast', 'a1_mini-bbs-04-020']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'A1_MINI_FASTV3.3'
-display = '官方推荐'
+display = '推荐'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fastv3.3', 'a1_mini-bbs-04-020']
 updatedAt = '2026-10-03'
@@ -85,21 +85,21 @@ updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'P1S_default'
-display = '官方推荐'
+display = '推荐'
 machineId = 'P1S'
 assetRefs = ['p1s-lite', 'p1s-bbs-04-024']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'P2S_default'
-display = '官方推荐'
+display = '推荐'
 machineId = 'P2S'
 assetRefs = ['p2s-standard', 'p2s-bbs-04-024']
 updatedAt = '2026-10-03'
 
 [[bundles]]
 id = 'X1C_default'
-display = '官方推荐'
+display = '推荐'
 machineId = 'X1C'
 assetRefs = ['x1c-lite', 'x1c-bbs-04-024']
 updatedAt = '2026-10-03'

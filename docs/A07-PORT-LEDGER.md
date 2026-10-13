@@ -12,7 +12,13 @@
 | --- | --- |
 | 试验场 `frontend-lab` | ✅ 已提交 `ca8133c`：更新演示开关搬到预览外壳工具条 + 工作区那批改动一并提交 |
 | 产品仓（本仓）`feat/dark-mode` | ✅ 已提交并推送 `b7ebafb`（a07 界面同步**第一笔**，tsc / lint / build / 四个 check / cargo 全绿） |
-| 剩余 | ⏳ **术语改造全量**（见 §3，开工过一半、已回滚）+ 预设页三份的改名族（§2） + 本台账登记进 `DOC-INDEX.md` |
+| 剩余 | ✅ 术语改造全量（§3）+ 预设页三份的改名族（§2）都已落地（见 §3 顶注那一笔）；**只剩作者自己走一遍验收**（§5） |
+
+> **2026-10-14 术语那一刀已做完**：照 §3.1 替换表全量重跑 —— 前端文案 / 代码标识 / 契约
+> （`User* → Local*`）/ Rust（`ipc/mine.rs` + `runtime/mine.rs` → `local.rs`、`ActiveOrigin`
+> 与 `DraftSubject` 的 `official/mine` → `cloud/local`、`presets-mine/` → `presets-local/`）
+> 一起改完，**没有写任何迁移**。范围含 `src/workbench/**` 与 `crates/preset/**`
+> （`crates/postprocess` 的测试夹具与 golden 是字节级证据，不动）。
 
 ## 1. 已完成（b7ebafb）
 
@@ -33,20 +39,20 @@
 **挑选应用走的是前端对话框插件**（与 `pickExportDir` 同一条路，`dialog:allow-open`）——
 **没有新增 Rust 命令**（`.app` 是目录：macOS 停在 `/Applications`；Windows 挑 `.exe`）。
 
-## 2. 剩余清单（按顺序做）
+## 2. 剩余清单（2026-10-14 全做完）
 
-1. **术语改造全量**（§3）—— 这是唯一的大件，先把 `contract.ts` 与 Rust 一起改，再改页面。
-2. 术语落地后，把 `presets/` 那三份的改名族带上：
-   - `presets/presetTree.ts`：改名族 **＋ 真修半**（`applyActivePreset(fileName, origin, path)`
-     三参漏传的修：原来只传 path，落进 fileName、被判成云端那份 —— 本地表那颗「使用」永远失败）
-     ＋ 「MKP 档本地表只列 `presets-local/` 那几行」的分组口径。
-   - `presets/PagePresets.tsx` / `PresetTable.tsx`：改名族；**产品仓独有那段必须留**
-     （工艺页跳过来的 `pending`、`revealDelivered`/`revealSlicer`、`outcome.replaced` 文案）。
-   - `presets/CompareModal.tsx`：文案「还没有『我的预设』可以对比」→「还没有本地预设可以对比」。
-   - ⚠ `presets/usePresetData.ts` **不许整文件覆盖**：产品仓那半是探针校订 +
-     `revealDelivered` / `revealSlicer` / `copyToSlicer(CopyToSlicerOutcome)` 真机落点。
-3. 把本台账登记进 [`DOC-INDEX.md`](DOC-INDEX.md)。
-4. 验收与推送（§5、§6）。
+1. ✅ **术语改造全量**（§3）—— 契约与 Rust 先改、再改页面，一次改完。
+2. ✅ 预设页那三份的改名族（随术语同一笔做完）：
+   - `presets/presetTree.ts`：改名族；「MKP 档本地表只列 `presets-local/` 那几行」的分组口径
+     本来就在（`localOnly`）。
+     ⚠ **「三参漏传」那条真修查了一遍：已经是好的** —— `PageHome` 与 `usePresetData`
+     两处调用在 `b7ebafb` 上就已经是 `applyActivePreset(fileName, origin, path)` 三参
+     （原先记的"只传 path"没能复现，这一条先记着，等真机上点一次再定）。
+   - `presets/PagePresets.tsx` / `PresetTable.tsx`：改名族；产品仓独有那段原样留着。
+   - `presets/CompareModal.tsx`：「还没有『我的预设』可以对比」→「还没有「本地预设」可以对比」。
+   - `presets/usePresetData.ts`：**没有整文件覆盖**，只做改名。
+3. ✅ 本台账与 `A43-PARAMS-PORT-LEDGER.md` 都已登记进 [`DOC-INDEX.md`](DOC-INDEX.md)。
+4. ⏳ 验收（§5）：**作者自己走一遍**。
 
 ## 3. 术语改造施工单（官方/我的 → 云端/本地）
 
@@ -54,9 +60,14 @@
 试验场 `src/versions/a07` 已按它改完，**可以当对照实现抄**；清单在
 `frontend-lab/lab/term-rename-local-cloud.md`。
 
-**开工到哪**（2026-10-14，已回滚，仓库保持 green）：机械替换跑过一遍（53 文件，
-含 `mine.rs → local.rs` 的 `git mv`），编译器还差 ~13 处 Rust ＋ ~20 处 TS 没修完，
-临时脚本已删、`git reset --hard` 回滚到 `b7ebafb`。**再开工请照下面这张表重跑一遍**。
+**已落地**（2026-10-14）：按下面这张表跑完 —— 76 个文件机械替换 + 逐处修完编译器剩下的
+（Rust 侧 `Official`/`Mine` 枚举变体与 `DraftSubject` 构造器、TS 侧那几处裸 `mine`/`official`
+变量），`tsc -b` / `cargo clippy`（default + workbench）/ `cargo test`（503 / 856）全绿，
+临时脚本已删。下面这张表**留着当记录**（下回再有同类改判可以照抄）。
+
+**已知后果（按作者"不写迁移"的口径）**：盘上旧的 `active-preset.json` / `draft-preset.json`
+里 `origin` 记的是 `official` / `mine`，新程序认不出来 → 照实报「状态读不出来」（不静默、
+不猜）；旧 `presets-mine/` 目录用户自己删。
 
 ### 3.1 替换表（长名优先，防前缀误伤）
 

@@ -55,17 +55,17 @@ interface Props {
   factoryValue: string
   dirty: boolean
   /**
-   * 这一项上的**官方更新账**（我 / 官方旧值 / 官方新值）。
+   * 这一项上的**云端更新账**（我 / 云端旧值 / 云端新值）。
    *
-   * `undefined` = 这一段没有"官方更新"这回事（官方线那一份 / 认不出是哪一版官方）——
+   * `undefined` = 这一段没有"云端更新"这回事（云端线那一份 / 认不出是哪一版云端）——
    * 那时行上什么都不画，与以前长得一模一样。
    */
   sync?: ParamSyncEntry
   /** 这一项「用新值」；不传就画不出那两颗按钮（比如只读视图） */
   onAdoptSync?: (key: string) => void
-  /** 这一项「保持我的值」 */
+  /** 这一项「保持本地值」 */
   onHoldSync?: (key: string) => void
-  /** 官方当前版的字节还没取回来 —— 那时只画"官方已更新"，不画差异 */
+  /** 云端当前版的字节还没取回来 —— 那时只画"云端已更新"，不画差异 */
   syncBusy?: boolean
   /** 被条件参数关掉：看得见、改不动 */
   blockedBy?: BlockedBy | null
@@ -149,16 +149,16 @@ export default function ParamRow({
   const factoryText = valueText(def, factoryValue)
 
   /*
-   * 官方更新：三方都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
+   * 云端更新：三方都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
    *
-   *   待处理   官方 18.6 → 19.0   [用新值] [保持我的]
-   *   处理过了 已采用官方新值 / 保持了我的值（一枚淡徽章，说明官方这一版已经处理过）
+   *   待处理   云端 18.6 → 19.0   [用新值] [保持本地]
+   *   处理过了 已采用云端新值 / 保持了本地值（一枚淡徽章，说明云端这一版已经处理过）
    */
   const syncPending = sync?.pending === true
   const syncDecided = sync?.decided ?? null
   const diffText =
-    sync !== undefined && sync.baselineOld !== null && sync.officialNew !== null
-      ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.officialNew)}`
+    sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
+      ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.cloudNew)}`
       : null
 
   return (
@@ -197,7 +197,7 @@ export default function ParamRow({
               </span>
             )}
             {/*
-             * 官方更新那两行**只放文字**：这一段整个包在一个 `<button>` 里
+             * 云端更新那两行**只放文字**：这一段整个包在一个 `<button>` 里
              * （点它展开行详情），里面再嵌按钮就是非法结构 —— 两个动作住右边那一格。
              */}
             {syncPending && (
@@ -219,19 +219,19 @@ export default function ParamRow({
 
         <span className={s.right}>
           {/*
-           * 官方更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
+           * 云端更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
            * （在上面名字那一格），不再给按钮：已经处理完的事不该留着可点的入口。
            *
-           * 「用新值」在官方当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
+           * 「用新值」在云端当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
            * 只会得到一个错），原因写在 title 里 —— 灰一颗按钮不说为什么，用户只会以为坏了。
            */}
           {syncPending && onAdoptSync !== undefined && (
             <button
               type="button"
               className={s.syncBtn}
-              disabled={syncBusy || sync?.officialNew === null}
+              disabled={syncBusy || sync?.cloudNew === null}
               title={
-                sync?.officialNew === null
+                sync?.cloudNew === null
                   ? '云端当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
                   : `采用云端新值：把这一项写成 ${diffText ?? '云端当前值'}（写进本地这份文件）`
               }

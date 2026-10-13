@@ -2,16 +2,16 @@
 //!
 //! # 为什么要有这本账（而不是写在文件里）
 //!
-//! 血统（`# based_on*` 三行）记的是**官方来源**，写在文件头里、跟着文件走 —— 那条线
+//! 血统（`# based_on*` 三行）记的是**云端来源**，写在文件头里、跟着文件走 —— 那条线
 //! 已经有了。但「我这份是从**我自己另一份**复制出来的」这件事**没有地方可写**：
 //! 第十一层「另存为一份新的」是**按字节**复制（血统原样带过去），往文件头里再加一行
 //! 就得重写字节 —— 那违背它"原文件一个字节不动、副本按字节复制"的约定。
-//! 导入同理：外部文件进 `presets-mine/` 前后的字节是用户自己的，客户端不往里写东西。
+//! 导入同理：外部文件进 `presets-local/` 前后的字节是用户自己的，客户端不往里写东西。
 //!
 //! 所以出处记在**用户根的账本**里（`provenance.json`）：`to`（副本路径）→
 //! `from`（来源路径，导入没有）+ `kind`（copy / import）。它只回答界面上那一格
 //! 「来源：复制自 X / 导入」—— **不是权限、不是身份**：账本丢了或没记上，
-//! 那一份照常能用能改能删，界面上退回「我的」，什么都不坏。
+//! 那一份照常能用能改能删，界面上退回「本地」，什么都不坏。
 //!
 //! # 盘当底账的例外
 //!
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
 
-/// 出处的两种来路。落账本/契约的就是这两个词（跨 IPC 的稳定词，与 `MineState` 同一规矩）
+/// 出处的两种来路。落账本/契约的就是这两个词（跨 IPC 的稳定词，与 `LocalState` 同一规矩）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvenanceKind {
     /// 从用户自己的另一份复制出来的（第十一层「另存为一份新的」）
@@ -64,7 +64,7 @@ struct Ledger {
     entries: Vec<Entry>,
 }
 
-/// 账本落点：用户根下的 `provenance.json`（与 `presets-mine/` 同一层 ——
+/// 账本落点：用户根下的 `provenance.json`（与 `presets-local/` 同一层 ——
 /// 它说的是用户那份的事，跟用户的数据住一起）
 fn ledger_path(user_root: &Path) -> std::path::PathBuf {
     user_root.join("provenance.json")
@@ -143,15 +143,15 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].to, "presets-mine/B.toml");
-        assert_eq!(all[0].from.as_deref(), Some("presets-mine/A.toml"));
+        assert_eq!(all[0].to, "presets-local/B.toml");
+        assert_eq!(all[0].from.as_deref(), Some("presets-local/A.toml"));
         assert_eq!(all[0].kind, "copy");
     }
 
@@ -161,21 +161,21 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/C.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/C.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].from.as_deref(), Some("presets-mine/C.toml"));
+        assert_eq!(all[0].from.as_deref(), Some("presets-local/C.toml"));
     }
 
     /// 改名：副本改名 `to` 跟走；来源改名 `from` 跟走 —— 两个方向都要
@@ -184,19 +184,19 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
 
-        repath(d.path(), "presets-mine/B.toml", "presets-mine/B2.toml").unwrap();
-        assert_eq!(load(d.path())[0].to, "presets-mine/B2.toml");
+        repath(d.path(), "presets-local/B.toml", "presets-local/B2.toml").unwrap();
+        assert_eq!(load(d.path())[0].to, "presets-local/B2.toml");
 
-        repath(d.path(), "presets-mine/A.toml", "presets-mine/A2.toml").unwrap();
+        repath(d.path(), "presets-local/A.toml", "presets-local/A2.toml").unwrap();
         let e = &load(d.path())[0];
-        assert_eq!(e.to, "presets-mine/B2.toml");
-        assert_eq!(e.from.as_deref(), Some("presets-mine/A2.toml"));
+        assert_eq!(e.to, "presets-local/B2.toml");
+        assert_eq!(e.from.as_deref(), Some("presets-local/A2.toml"));
     }
 
     /// 坏档 ⇒ 空表：出处缺了不许让用户线的任何读失败
@@ -213,7 +213,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/外来的.toml",
+            "presets-local/外来的.toml",
             None,
             ProvenanceKind::Import,
         )

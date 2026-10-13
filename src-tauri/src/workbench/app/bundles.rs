@@ -418,7 +418,7 @@ mod tests {
             .iter()
             .find(|b| b.id == "A1_STANDARD")
             .expect("A1_STANDARD 必须在");
-        assert_eq!(a1.display, "官方推荐");
+        assert_eq!(a1.display, "推荐");
         assert_eq!(a1.machine_id, "A1");
         assert_eq!(a1.updated_at.as_deref(), Some("2026-10-03"));
         assert_eq!(

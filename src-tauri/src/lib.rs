@@ -222,39 +222,39 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
-        ipc::mine::get_user_preset_files,
-        ipc::mine::read_user_preset_text,
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-local）
+        ipc::local::get_local_preset_files,
+        ipc::local::read_local_preset_text,
         // 备注覆盖账 + 改归属（客户端副标题 / 复制出来的那份标机型版本）
-        ipc::mine::get_preset_remarks,
-        ipc::mine::set_preset_remark,
-        ipc::mine::set_user_preset_machine_version,
-        // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
-        ipc::mine::begin_preset_edit,
-        ipc::mine::patch_preset_draft,
-        ipc::mine::put_preset_draft,
-        ipc::mine::discard_preset_draft,
-        ipc::mine::commit_preset_draft,
+        ipc::local::get_preset_remarks,
+        ipc::local::set_preset_remark,
+        ipc::local::set_local_preset_machine_version,
+        // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
+        ipc::local::begin_preset_edit,
+        ipc::local::patch_preset_draft,
+        ipc::local::put_preset_draft,
+        ipc::local::discard_preset_draft,
+        ipc::local::commit_preset_draft,
         // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
-        ipc::mine::begin_text_edit,
-        ipc::mine::put_text_draft,
-        ipc::mine::commit_text_draft,
-        ipc::mine::discard_text_draft,
-        ipc::mine::get_preset_draft_summary,
+        ipc::local::begin_text_edit,
+        ipc::local::put_text_draft,
+        ipc::local::commit_text_draft,
+        ipc::local::discard_text_draft,
+        ipc::local::get_preset_draft_summary,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
-        ipc::mine::get_user_preset_index,
+        ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
-        ipc::mine::rename_user_preset,
-        ipc::mine::delete_user_preset,
+        ipc::local::rename_local_preset,
+        ipc::local::delete_local_preset,
         // 第十三层：文件外部管理（在 Finder / 资源管理器里选中这一份）
-        ipc::mine::reveal_in_folder,
-        // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
-        ipc::mine::copy_user_preset,
+        ipc::local::reveal_in_folder,
+        // 第十一层：另存为一份新的（本地文件 → 本地文件，字节复制）
+        ipc::local::copy_local_preset,
         // 找「我那一份」+ 把校准值写进它（2026-10-08 资源库改判）
-        ipc::mine::get_user_copy_for,
-        ipc::mine::save_preset_calibration,
+        ipc::local::get_local_copy_for,
+        ipc::local::save_preset_calibration,
         // 对比台 + 官方版本账（2026-10-08）：只在**用户自己的预设**之间对比
-        ipc::preset_baseline::get_official_versions,
+        ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
         // 逐参数「官方更新」（2026-10-09）：读三方账 / 落采用·保持的决定
@@ -277,7 +277,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::download_runtime_file,
         ipc::catalog::download_runtime_files,
         ipc::catalog::read_downloaded_text,
-        // 「复制链接」：与下载管道同一个寻址出口算出来的官方 URL
+        // 「复制链接」：与下载管道同一个寻址出口算出来的云端 URL
         ipc::catalog::get_file_url,
         // 报告页：后处理执行报告与历史（读 gcode_history 的真账 + 一处导出写）
         ipc::report::get_report_list,
@@ -289,7 +289,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::fetch_official_preset,
+        ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -351,43 +351,43 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
-        ipc::mine::get_user_preset_files,
-        ipc::mine::read_user_preset_text,
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-local）
+        ipc::local::get_local_preset_files,
+        ipc::local::read_local_preset_text,
         // 备注覆盖账 + 改归属（与上面那份清单一字不差 —— 2026-10-09 对齐：这三条
         // 原来只在客户端那份里，工作台构建里发它们会落到 NOT_IMPLEMENTED）
-        ipc::mine::get_preset_remarks,
-        ipc::mine::set_preset_remark,
-        ipc::mine::set_user_preset_machine_version,
-        // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
-        ipc::mine::begin_preset_edit,
-        ipc::mine::patch_preset_draft,
-        ipc::mine::put_preset_draft,
-        ipc::mine::discard_preset_draft,
-        ipc::mine::commit_preset_draft,
+        ipc::local::get_preset_remarks,
+        ipc::local::set_preset_remark,
+        ipc::local::set_local_preset_machine_version,
+        // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
+        ipc::local::begin_preset_edit,
+        ipc::local::patch_preset_draft,
+        ipc::local::put_preset_draft,
+        ipc::local::discard_preset_draft,
+        ipc::local::commit_preset_draft,
         // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
-        ipc::mine::begin_text_edit,
-        ipc::mine::put_text_draft,
-        ipc::mine::commit_text_draft,
-        ipc::mine::discard_text_draft,
-        ipc::mine::get_preset_draft_summary,
+        ipc::local::begin_text_edit,
+        ipc::local::put_text_draft,
+        ipc::local::commit_text_draft,
+        ipc::local::discard_text_draft,
+        ipc::local::get_preset_draft_summary,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
-        ipc::mine::get_user_preset_index,
+        ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）
-        ipc::mine::rename_user_preset,
-        ipc::mine::delete_user_preset,
+        ipc::local::rename_local_preset,
+        ipc::local::delete_local_preset,
         // 第十三层：文件外部管理（与上面那份清单一字不差）
-        ipc::mine::reveal_in_folder,
+        ipc::local::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
-        ipc::mine::copy_user_preset,
-        // 找「我那一份」+ 把校准值写进它（与上面那份清单一字不差）
-        ipc::mine::get_user_copy_for,
-        ipc::mine::save_preset_calibration,
-        // 对比台 + 官方版本账（与上面那份清单一字不差）
-        ipc::preset_baseline::get_official_versions,
+        ipc::local::copy_local_preset,
+        // 找「本地那份」+ 把校准值写进它（与上面那份清单一字不差）
+        ipc::local::get_local_copy_for,
+        ipc::local::save_preset_calibration,
+        // 对比台 + 云端版本账（与上面那份清单一字不差）
+        ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
-        // 逐参数「官方更新」（与上面那份清单一字不差）
+        // 逐参数「云端更新」（与上面那份清单一字不差）
         ipc::param_sync::get_preset_param_sync,
         ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
@@ -416,7 +416,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::fetch_official_preset,
+        ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -594,7 +594,7 @@ mod command_list_parity {
     //!
     //! - `ipc::update::*` 七条只在工作台那份里 ⇒ 正式客户端的「检查更新 / 下载安装」
     //!   全落到 `NOT_IMPLEMENTED`（审计 X-01，2026-10-09 修）；
-    //! - `ipc::mine::set_user_preset_machine_version` 等三条只在客户端那份里
+    //! - `ipc::local::set_local_preset_machine_version` 等三条只在客户端那份里
     //!   （审计 X-08 的同一个病）。
     //!
     //! 所以这里扫**本文件源码**（与 `fsx::paths` 那条"用户根不碰 Documents"同一路数）：

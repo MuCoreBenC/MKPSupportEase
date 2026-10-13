@@ -20,7 +20,7 @@ import {
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
  * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制官方链接）
- * 也接上了真 command；`downloadFiles`（官方仓库文件的「下载」残支）按用户裁断
+ * 也接上了真 command；`downloadFiles`（云端仓库文件的「下载」残支）按用户裁断
  * **连入口一起撤了**，契约里不再留它。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
@@ -161,20 +161,20 @@ export const bridgeApi: MkpApi = {
   getVersionFiles: (machineId, versionId) =>
     call('getVersionFiles', 'get_version_files', { machineId, versionId }),
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
-  /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-mine） */
-  getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
+  /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-local） */
+  getLocalPresetFiles: () => call('getLocalPresetFiles', 'get_local_preset_files'),
   /* 备注覆盖账（副标题）+ 改归属（文件头 # machine/# variant 两行） */
   getPresetRemarks: () => call('getPresetRemarks', 'get_preset_remarks'),
   setPresetRemark: (key, remark) =>
     call('setPresetRemark', 'set_preset_remark', { key, remark }),
-  setUserPresetMachineVersion: (path, machineId, versionId) =>
-    call('setUserPresetMachineVersion', 'set_user_preset_machine_version', {
+  setLocalPresetMachineVersion: (path, machineId, versionId) =>
+    call('setLocalPresetMachineVersion', 'set_local_preset_machine_version', {
       path,
       machineId,
       versionId,
     }),
-  readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
-  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */
+  readLocalPresetText: (path) => call('readLocalPresetText', 'read_local_preset_text', { path }),
+  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：云端另存 / 本地写回） */
   beginPresetEdit: (fileName, origin, path) =>
     call('beginPresetEdit', 'begin_preset_edit', { fileName, origin, path }),
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
@@ -191,18 +191,18 @@ export const bridgeApi: MkpApi = {
   commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
   discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
   /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
-  getUserPresetIndex: () => call('getUserPresetIndex', 'get_user_preset_index'),
+  getLocalPresetIndex: () => call('getLocalPresetIndex', 'get_local_preset_index'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
-  renameUserPreset: (path, newName) =>
-    call('renameUserPreset', 'rename_user_preset', { path, newName }),
-  deleteUserPreset: (path) => call('deleteUserPreset', 'delete_user_preset', { path }),
-  /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
-  copyUserPreset: (path, newName) =>
-    call('copyUserPreset', 'copy_user_preset', { path, newName }),
-  /* 另存为我的预设：官方那一份 → 我的一份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+  renameLocalPreset: (path, newName) =>
+    call('renameLocalPreset', 'rename_local_preset', { path, newName }),
+  deleteLocalPreset: (path) => call('deleteLocalPreset', 'delete_local_preset', { path }),
+  /* 第十一层：本地文件 → 本地文件（字节复制；不覆盖、不碰任何状态） */
+  copyLocalPreset: (path, newName) =>
+    call('copyLocalPreset', 'copy_local_preset', { path, newName }),
+  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
 
-  getUserCopyFor: (machineId, versionId) =>
-    call('getUserCopyFor', 'get_user_copy_for', { machineId, versionId }),
+  getLocalCopyFor: (machineId, versionId) =>
+    call('getLocalCopyFor', 'get_local_copy_for', { machineId, versionId }),
   /*
    * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
    * 这里管的是"选择器 + 两段式导入"：
@@ -222,7 +222,7 @@ export const bridgeApi: MkpApi = {
   },
   stageImport: (sources) => call('stageImport', 'stage_import', { sources }),
   commitImport: (items) => call('commitImport', 'commit_import', { items }),
-  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「我的文件」上做） */
+  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「本地文件」上做） */
   revealInFolder: (path) => call('revealInFolder', 'reveal_in_folder', { path }),
   /* 两个落点各自的「打开所在文件夹」（2026-10-13）：我们那份（下载区）与切片器里那份 */
   revealDeliveredFile: (fileName) =>
@@ -246,7 +246,7 @@ export const bridgeApi: MkpApi = {
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   deleteArchivedFile: (path) =>
     call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
-  /* 删除本机那份官方交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
+  /* 删除本机那份云端交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
   downloadCatalogFile: (fileName, onTick) =>
@@ -269,16 +269,16 @@ export const bridgeApi: MkpApi = {
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
   /* ——— 官方版本账 + 对比台（2026-10-08）———
-     官方版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
+     云端版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
      baseline 是隐藏内部存储，前端拿不到它的路径。 */
-  getOfficialVersions: (fileName) =>
-    call('getOfficialVersions', 'get_official_versions', { fileName: fileName ?? null }),
+  getCloudVersions: (fileName) =>
+    call('getCloudVersions', 'get_cloud_versions', { fileName: fileName ?? null }),
   readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
   savePresetParams: (path, edits) =>
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
   /* ——— 逐参数「官方更新」（2026-10-09）———
-     读三方账（我 / 官方旧值 / 官方新值）+ 落采用·保持的决定。
-     `fetchMissing` 只在打开某一份预设时给 true（允许为取官方新版发一次网络）。 */
+     读三方账（我 / 云端旧值 / 云端新值）+ 落采用·保持的决定。
+     `fetchMissing` 只在打开某一份预设时给 true（允许为取云端新版发一次网络）。 */
   getPresetParamSync: (path, fetchMissing) =>
     call('getPresetParamSync', 'get_preset_param_sync', {
       path,
@@ -291,8 +291,8 @@ export const bridgeApi: MkpApi = {
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
   /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
-  fetchOfficialPreset: (fileName, renameIfTaken) =>
-    call('fetchOfficialPreset', 'fetch_official_preset', { fileName, renameIfTaken }),
+  fetchCloudPreset: (fileName, renameIfTaken) =>
+    call('fetchCloudPreset', 'fetch_cloud_preset', { fileName, renameIfTaken }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),

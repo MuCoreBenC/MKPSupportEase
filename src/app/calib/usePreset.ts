@@ -1,15 +1,15 @@
 /*
  * 取预设：选齐「机型 + 版本」后，组装那一份。
  *
- *   文件名 / 落点   有「我那一份」→ 它（`presets-mine/…`，校准保存写它）；
- *                   没有 → 官方那份（`api.getVersionFiles` 里 `kind === 'mkp_preset'` 的条目）
- *   三轴 / 速度     有「我那一份」→ 读它的（`api.getUserCopyFor`，用户自己校准出来的值）；
- *                   没有 → `api.getMachineParams` 的官方默认
+ *   文件名 / 落点   有「本地那份」→ 它（`presets-local/…`，校准保存写它）；
+ *                   没有 → 云端那份（`api.getVersionFiles` 里 `kind === 'mkp_preset'` 的条目）
+ *   三轴 / 速度     有「本地那份」→ 读它的（`api.getLocalCopyFor`，用户自己校准出来的值）；
+ *                   没有 → `api.getMachineParams` 的云端默认
  *                   （`toolhead.offset.x / y / z` + `toolhead.speed_limit`）
  *
  * **校准写在「我的预设」上**（2026-10-08 资源库改判）：官方那一份是模板、只读 ——
- * 要校准它就得先在资源库里「另存为我的预设」，之后读与写都落在那一份 TOML 上。
- * 「没有我的一份」不是错误：校准页照旧显示官方默认值，只是**保存会被拦**
+ * 要校准它就得先在资源库里「另存为本地预设」，之后读与写都落在那一份 TOML 上。
+ * 「没有本地这份」不是错误：校准页照旧显示云端默认值，只是**保存会被拦**
  * （先存一份自己的才有得存）。
  *
  * 为什么走文件体系（作者的原话：「首页也应该是消费那个文件，而不是用硬编码」）：
@@ -100,7 +100,7 @@ export function usePreset(sel: Selection): PresetState {
       api.getVersionFiles(machine, version),
       api.getMachineParams(machine, version),
       /* 「我那一份」在不在（在就用它的校准值 —— 2026-10-08：校准写在「我的预设」上） */
-      api.getUserCopyFor(machine, version),
+      api.getLocalCopyFor(machine, version),
     ]).then(
       ([files, params, copy]) => {
         if (!alive) return
@@ -119,17 +119,17 @@ export function usePreset(sel: Selection): PresetState {
           const n = Number(row.value)
           return Number.isFinite(n) ? n : null
         }
-        /* 官方默认那一套：你那份里读不出来的那几格回落到它 */
+        /* 云端默认那一套：你那份里读不出来的那几格回落到它 */
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
         const z = valueOf(OFFSET_KEYS.z)
-        const official: Axes | null =
+        const cloud: Axes | null =
           x !== null && y !== null && z !== null ? { x, y, z } : null
-        const officialSpeed = valueOf(SPEED_KEY)
+        const cloudSpeed = valueOf(SPEED_KEY)
 
-        /* 我那一份优先：它的三轴是**用户自己校准出来的**（官方那套只是出厂默认） */
-        const axes = copy?.axes ?? official
-        const speed = copy?.speed ?? officialSpeed
+        /* 本地那份优先：它的三轴是**用户自己校准出来的**（云端那套只是出厂默认） */
+        const axes = copy?.axes ?? cloud
+        const speed = copy?.speed ?? cloudSpeed
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
         if (axes === null || speed === null) {
@@ -142,9 +142,9 @@ export function usePreset(sel: Selection): PresetState {
           path: copy?.path ?? file.path,
           axes,
           speed,
-          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存）
-             ★ 本仓术语是 `mine`（试验场的 `local` 已改名，见 contract 的 ActiveOrigin） */
-          mine: copy === null ? null : { path: copy.path, fileName: copy.fileName },
+          /* 保存校准写它；null = 还没有本地这份（先另存为本地预设才有得存）
+             ★ 本仓术语是 `cloud / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */
+          local: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
         presetCache.set(`${machine}/${version}`, preset)
         setState({ status: 'ready', preset })

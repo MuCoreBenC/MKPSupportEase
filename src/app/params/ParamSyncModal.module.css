@@ -98,14 +98,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 「我」那个值：与行上「我的修改」同一套绿，一眼知道这是他自己的 */
-.mine {
+/* 「我」那个值：与行上「本地修改」同一套绿，一眼知道这是他自己的 */
+.local {
   color: #2f7d59;
   font-weight: 500;
 }
 
 /* 深色（2026-10-12 第二遍）：深绿字压深底几乎读不出，换深色档的亮绿（同 --accent 族） */
-[data-theme='dark'] .mine {
+[data-theme='dark'] .local {
   color: var(--accent);
 }
 

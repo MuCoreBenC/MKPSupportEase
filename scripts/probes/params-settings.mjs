@@ -275,7 +275,7 @@ for (const size of SIZES) {
   check(tag, '非法地址如实拒（只认 http(s)）', rejected, '')
 
   /* 恢复内置默认：撤掉覆盖 → 回到「没配」（假后端没有内置源） */
-  await page.getByRole('radio', { name: /使用内置官方源/ }).check()
+  await page.getByRole('radio', { name: /使用内置云端源/ }).check()
   await page.getByRole('button', { name: '恢复内置默认', exact: true }).click()
   const cleared = await until(async () => (await mainText(page)).includes('已撤掉你填的地址'), 5000)
   const setText3 = await mainText(page)

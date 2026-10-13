@@ -59,7 +59,7 @@ pub fn read_preset_from_bytes(raw: String) -> Result<PresetFile, PostprocError> 
 /// `deny_unknown_fields` 的原话是 `unknown field \`future_knob\`, expected one of …`，
 /// 后面跟着 77 个键名 —— 用户看到的是一屏英文清单，得不出「该怎么办」。
 /// 而这条错误在现实里最可能的原因只有一个：**这份预设比本程序新**
-/// （官方给参数改了名/加了键，而这个版本的程序还不认识它）。所以在原话前面加一句人话，
+/// （云端给参数改了名/加了键，而这个版本的程序还不认识它）。所以在原话前面加一句人话，
 /// 并点名那个键。
 ///
 /// **不放宽 `deny_unknown_fields`**：读不回来仍然是读不回来（多一个键的预设写回去会丢键，
@@ -252,7 +252,7 @@ glue_z_compensation_enabled = false
 
     /// K-O4：未知键的错误要说人话，并点名那个键。
     ///
-    /// **这条错误在现实里最可能的原因只有一个**：预设比程序新（官方加了键/改了名）。
+    /// **这条错误在现实里最可能的原因只有一个**：预设比程序新（云端加了键/改了名）。
     /// serde 的原话是 `unknown field ... expected one of` 加 77 个键名 ——
     /// 一屏英文清单，得不出「该怎么办」。
     #[test]

@@ -1,9 +1,9 @@
-//! **官方版本清单**：这台机器上"见过"的官方预设版本有哪些。
+//! **云端版本清单**：这台机器上"见过"的云端预设版本有哪些。
 //!
 //! # 见过的 = 历次目录里登记过的
 //!
 //! 客户端不记账本（盘与目录就是底账，与 [`super::delivery`] 同一条纪律）。它见过
-//! 的每一个官方版本都在**目录**里登记着：
+//! 的每一个云端版本都在**目录**里登记着：
 //!
 //! ```text
 //! 当前目录 <appDataDir>/catalog.json           ← 现在生效的这一代
@@ -15,7 +15,7 @@
 //!
 //! # 「已下载」不在这里判
 //!
-//! 这一层只回答"官方登记过哪些版本"。**这一版我这台机器下过没有**由
+//! 这一层只回答"云端登记过哪些版本"。**这一版我这台机器下过没有**由
 //! [`super::baseline`] 回答（按摘要寻址，下过就有一份基准）。两件事分开，
 //! 于是"云端有新版本"与"我下过这一版"各自有唯一、可验证的判据。
 //!
@@ -29,10 +29,10 @@ use std::path::Path;
 
 use super::Catalog;
 
-/// 目录里登记过的一个官方预设版本。
+/// 目录里登记过的一个云端预设版本。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OfficialVersion {
-    /// 归属的官方预设（`catalog` 里的 `fileName`，如 `A1-fast.toml`）
+pub struct CloudVersion {
+    /// 归属的云端预设（`catalog` 里的 `fileName`，如 `A1-fast.toml`）
     pub file_name: String,
     /// 内容摘要 —— 版本的**唯一身份**（跨目录代不变，界面不显示）
     pub sha256: String,
@@ -47,14 +47,14 @@ pub struct OfficialVersion {
     pub current: bool,
 }
 
-/// 见过的官方版本（同一 `(file_name, sha)` 只出现一次；按目录代时间升序）。
+/// 见过的云端版本（同一 `(file_name, sha)` 只出现一次；按目录代时间升序）。
 ///
 /// 只认**登记了摘要**的条目：随包 bootstrap 目录故意不填 SHA（见 [`CatalogFile`]），
 /// 没有摘要就没有"版本身份"，拿它当一版只会造出一个认不出来的行。
 ///
 /// [`CatalogFile`]: super::catalog::CatalogFile
-pub fn official_versions(root: &Path) -> Vec<OfficialVersion> {
-    let mut out: Vec<OfficialVersion> = Vec::new();
+pub fn cloud_versions(root: &Path) -> Vec<CloudVersion> {
+    let mut out: Vec<CloudVersion> = Vec::new();
 
     /* 版本链（历次被换下的旧目录）在前、当前目录在后 —— 同一版两处都有时，
     后面那一条（current = true）要赢 */
@@ -96,12 +96,12 @@ pub fn official_versions(root: &Path) -> Vec<OfficialVersion> {
     out
 }
 
-fn collect(catalog: &Catalog, out: &mut Vec<OfficialVersion>, current: bool) {
+fn collect(catalog: &Catalog, out: &mut Vec<CloudVersion>, current: bool) {
     for f in &catalog.files {
         let Some(sha) = f.expected_sha() else {
             continue;
         };
-        out.push(OfficialVersion {
+        out.push(CloudVersion {
             file_name: f.file_name.clone(),
             sha256: sha.to_ascii_lowercase(),
             published_at: catalog.published_at.clone(),
@@ -160,7 +160,7 @@ mod tests {
         )
         .unwrap();
 
-        let got = official_versions(d.path());
+        let got = cloud_versions(d.path());
         assert_eq!(got.len(), 2, "两代各一版：{got:?}");
         assert_eq!(
             got[0].published_at.as_deref(),
@@ -208,7 +208,7 @@ mod tests {
         )
         .unwrap();
 
-        let got = official_versions(d.path());
+        let got = cloud_versions(d.path());
         assert_eq!(got.len(), 1, "字节没变 = 还是同一版：{got:?}");
         assert!(got[0].current, "链与当前目录都有它时，这一版仍算当前版");
     }
@@ -225,6 +225,6 @@ mod tests {
             json.as_bytes(),
         )
         .unwrap();
-        assert!(official_versions(d.path()).is_empty());
+        assert!(cloud_versions(d.path()).is_empty());
     }
 }

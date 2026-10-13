@@ -5,10 +5,10 @@
  *
  * ```
  * ┌MKP 配置│切片器配置┐ ┌本地│云端┐ [搜索…]                            ← 第一排（两档一致）
- * MKP   ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  共 4 项 │ 官方 9 · 我的 6    ← MKP 第二排
- * 切片器 ┌▽ 喷嘴 0.2 · 层高 0.12 │ ▽ A1 ▾┐  共 27 项 │ 仓库 27 · 本机 9 + 我的 5  ← 切片器第二排
+ * MKP   ┌● 已应用 A1.toml · A1 │ ▽ A1 ▾┐  共 4 项 │ 云端 9 · 本地 6    ← MKP 第二排
+ * 切片器 ┌▽ 喷嘴 0.2 · 层高 0.12 │ ▽ A1 ▾┐  共 27 项 │ 仓库 27 · 本机 9 + 本地 5  ← 切片器第二排
  * 名称            机型   版本    时间   来源   操作
- * A1.toml         A1    标准版  09-14  官方   已应用
+ * A1.toml         A1    标准版  09-14  云端   已应用
  * ├────────────────────────────────────────────┤
  * 右键任意一行还有…                                              ← 页脚（只剩右键提示）
  * ```
@@ -70,18 +70,18 @@
  * 它右边那格台账：**两个数跟着当前类型档走**（MKP 档数 MKP 的、切片器档数切片器的；
  * 图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字混进某一档的语境里
  * 只会让人对不上（作者 2026-10-02 点名「仓库 9」）。MKP 档是「官方 · 我的」，
- * 切片器档是「仓库 · 本机 · 我的」。
+ * 切片器档是「仓库 · 本机 · 本地」。
  *
  * # 本地 / 云端是**两张互不相干的表**（两种类型都有这一对，2026-10-09 恢复）
  *
  *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
- *           MKP：只有你自己那份本地文件（`presets-mine/`）；切片器：官方副本 + 本地文件
- *   云端表  官方现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
+ *           MKP：只有你自己那份本地文件（`presets-local/`）；切片器：云端副本 + 本地文件
+ *   云端表  云端现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
  *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
- *           切片器：菜单上的官方文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
+ *           切片器：菜单上的云端文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
  *
- * 两张表各回答一个问题，不合流。MKP 档里一个官方条目同时出现在两张表上不是重复：
- * 云端那一行说"官方有这个、我要不要拿"，本地那一行说"我手上这份能不能用"。
+ * 两张表各回答一个问题，不合流。MKP 档里一个云端条目同时出现在两张表上不是重复：
+ * 云端那一行说"云端有这个、我要不要拿"，本地那一行说"我手上这份能不能用"。
  *
  * # 两种类型的「生效」是两件不同的事
  *
@@ -98,9 +98,9 @@
  *   文件清单 / 路径 / 类型   `api.getPresetFiles()`                      真（20 个）
  *   套餐内 / 可单下          `PresetFileInfo.delivery`                   真（14 默认 / 6 可选）
  *   属于哪个机型版本         `api.getVersionFiles()` + `machineIds`      真（就是「版本」那一列）
- *   本机有哪些官方文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
- *   我自己的文件             `api.getUserPresetFiles()`                  真（**本地文件**：扫 `presets-mine/`，盘当底账）
- *   我那一份的正文           `api.readUserPresetText()`                  真（只读；抽屉里看，读不出来照实说）
+ *   本机有哪些云端文件       `api.getLocalFiles()`                       **演示集合**（假后端没有文件系统）
+ *   我自己的文件             `api.getLocalPresetFiles()`                  真（**本地文件**：扫 `presets-local/`，盘当底账）
+ *   本地那份的正文           `api.readLocalPresetText()`                  真（只读；抽屉里看，读不出来照实说）
  *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
  *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
@@ -112,30 +112,30 @@
  *                            复制：`api.copyToSlicer()`，改假后端内存、刷新还原
  *   置顶                     localStorage `STORAGE.clientPresetsPinned`  **纯前端**，真的能用
  *   展开详情（点行）          上面那些字段的汇总                          **纯前端**，真的能用
- *   **下载 / 更新**（MKP 云端行） `api.fetchOfficialPreset()`                真（取回官方当前版 + 落一份你的本地文件；
+ *   **下载 / 更新**（MKP 云端行） `api.fetchCloudPreset()`                真（取回云端当前版 + 落一份你的本地文件；
  *                            两个词是同一条路，差别只在本地有没有 / 换没换版。**不改当前使用**）
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
  *   **批量**（云端表那一行）   **退役**（作者 2026-10-10：云端与本地一样，只逐份下载 / 更新）——
- *                            能力照旧在数据层（`fetchOfficialPreset` / `downloadReleaseBatch`），没有界面入口
+ *                            能力照旧在数据层（`fetchCloudPreset` / `downloadReleaseBatch`），没有界面入口
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
  *                            见 `ReleaseFileState`）
- *   **编辑文件**（我的文件）  `api.beginTextEdit()` + `commitTextDraft()`  真（初稿 = **盘上那份文件的字节**：
- *                            `putTextDraft` 边改边存；保存 = **整份原子写回我那一份自己**（不产生第二份）。
+ *   **编辑文件**（本地文件）  `api.beginTextEdit()` + `commitTextDraft()`  真（初稿 = **盘上那份文件的字节**：
+ *                            `putTextDraft` 边改边存；保存 = **整份原子写回本地那份自己**（不产生第二份）。
  *                            **盘上那份直到点保存才被碰** —— 判据逐字节盯着；
  *                            参数页未保存的改动**不进来**（两条草稿分开存，2026-10-10））
- *   **重命名 / 删除**（我的文件） `api.renameUserPreset()` / `deleteUserPreset()` 真（第十层：只动名字，
+ *   **重命名 / 删除**（本地文件） `api.renameLocalPreset()` / `deleteLocalPreset()` 真（第十层：只动名字，
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
- *   **复制**（我的文件）      `api.copyUserPreset()`                        真（第十一层：我的文件 → 我的文件，
+ *   **复制**（本地文件）      `api.copyLocalPreset()`                        真（第十一层：本地文件 → 本地文件，
  *                            按字节复制、血统原样带过去；名字由程序起 `<原名> copy.toml`
  *                            （重名依次 `copy 2`…，见 `duplicateNameOf`）；不覆盖、不碰使用中指针与草稿）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
  *                            按钮已退役（作者 2026-10-04：几乎不需要导入），选择器能力照旧在 App 层）
- *   **下载**（官方行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
- *   **在 Finder 中显示**（我的文件） `api.revealInFolder()`                  真（第十三层：打开系统文件管理器**并选中**；
+ *   **下载**（云端行）        `api.downloadFiles()`                       抛未实现，界面照实说（不编假进度条）
+ *   **在 Finder 中显示**（本地文件） `api.revealInFolder()`                  真（第十三层：打开系统文件管理器**并选中**；
  *                            平台话术在 Windows 上是「在文件资源管理器中显示」。之后复制 / 压缩 / 发人随用户）
  *   **复制链接**
  *                            ——                                         **契约里连签名都没有**，就地说缺什么
@@ -188,13 +188,13 @@ import {
   CLOUD_LOCAL_TEXT,
   CLOUD_LOCAL_WHY,
   EDIT_TEXT,
-  MINE_COPY,
-  MINE_DRAWER,
-  MINE_NOT_PRESET_WHY,
-  MINE_RENAME,
+  LOCAL_COPY,
+  LOCAL_DRAWER,
+  LOCAL_NOT_PRESET_WHY,
+  LOCAL_RENAME,
   duplicateNameOf,
-  mineUnreadableWhy,
-  mineCountOfAxis,
+  localUnreadableWhy,
+  localCountOfAxis,
   treeCountOfAxis,
   RELEASE_SUSPECT_WHY,
   STATUS_TEXT,
@@ -293,7 +293,7 @@ interface Note {
 export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
   /*
    * 通用导入入口（第十二层）停在 App 层；这一页拿 `revision`
-   * （导入落进 `presets-mine/` 之后整屏重读，「我的文件」立刻以磁盘为准）。
+   * （导入落进 `presets-local/` 之后整屏重读，「本地文件」立刻以磁盘为准）。
    * 导入的入口是**拖拽**（把文件拖进窗口，App 层接）—— 工具栏上的「导入文件…」
    * 按钮已退役（作者 2026-10-04：几乎不需要导入）；选择器能力（pickFiles）
    * 照旧住在 App 层，只是这里不再有触发它的界面。
@@ -322,13 +322,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetsIntent])
   /*
-   * **对比台的候选**：读得出来的「我的预设」（MKP 预设）。
+   * **对比台的候选**：读得出来的「本地预设」（MKP 预设）。
    * 读不出来的那份不给 —— 比一份读不懂的文件只会得到一行"读不出来"；
    * 别的类型（`.json`）也不给：这一台子比的是参数。`useMemo` 是必需的（对比台按它重置选择）。
    */
   const compareFiles = useMemo(
-    () => data.mine.filter((f) => f.kind === 'mkp_preset' && f.state !== 'unreadable'),
-    [data.mine],
+    () => data.local.filter((f) => f.kind === 'mkp_preset' && f.state !== 'unreadable'),
+    [data.local],
   )
   /* 可写：`mountPage` 这个 callback ref 要往回填（`useRef<T>(null)` 的 current 是只读的） */
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -360,7 +360,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const [note, setNote] = useState<Note | null>(null)
   /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"官方版本"或"更新"上，
-   * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-mine/`）。
+   * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-local/`）。
    *
    * ★ 2026-10-10：**入口从顶部那颗常驻按钮搬进右键菜单**（作者：「参数对比几个字，
    *   我们去掉了……答案是右键选择一个，然后再选择另外一个，就去对比」）——
@@ -378,7 +378,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const [comparePick, setComparePick] = useState<{ path: string; fileName: string } | null>(null)
   /*
    * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
-   * 那一屏打开（用户点的是那条直路：他已经知道有官方更新等着处理）。
+   * 那一屏打开（用户点的是那条直路：他已经知道有云端更新等着处理）。
    */
   const [paramModal, setParamModal] = useState<{
     target: { path: string; fileName: string; machineId: string; versionId: string }
@@ -393,7 +393,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /*
    * 批量入口 2026-10-10 退役（作者：「这个可以去掉的……跟本地的一样就可以」）：
    * 云端表的呈现与本地表一致，只在行上逐份下载 / 更新，不再有整批按钮。
-   * 能力照旧在数据层（`fetchOfficial` / `downloadReleaseBatch`），只是没有界面入口。
+   * 能力照旧在数据层（`fetchCloud` / `downloadReleaseBatch`），只是没有界面入口。
    */
 
   /*
@@ -401,14 +401,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *
    * 两边共用一个抽屉，因为它俩要的是同一件事：取出一份文本、只读地看。
    *   `archive` 云端那一侧的旧版本（先列出一份文件的那几个旧版本，再挑一份看）
-   *   `mine`    本地文件的那一份（就一份，打开直接读）
+   *   `local`    本地文件的那一份（就一份，打开直接读）
    *
    * 正文单独一个状态：读它要问后端（前端不碰文件系统），而且**会失败** ——
    * 失败要如实说，不许显示一段空正文假装它是空的。
    */
   const [viewer, setViewer] = useState<
     | { kind: 'archive'; fileName: string; rows: ArchivedFile[] }
-    | { kind: 'mine'; fileName: string; path: string }
+    | { kind: 'local'; fileName: string; path: string }
     | null
   >(null)
   /*
@@ -458,8 +458,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * ★ 2026-10-11（a04）：**「更新」不再弹确认层**。
    *
    *   点「更新」= 我没改过的项静默跟上新版；**我改过的项一个字节不动** ——
-   *   它们留给「修改参数」那条杠（官方改了 N 项 —— 你改过的不会被顶掉）逐项处理：
-   *   行内「用新值 / 保持我的」、或杠上的「逐项挑选」。
+   *   它们留给「修改参数」那条杠（云端改了 N 项 —— 你改过的不会被顶掉）逐项处理：
+   *   行内「用新值 / 保持本地」、或杠上的「逐项挑选」。
    *
    *   为什么不弹框问（作者在 lab 原型里定稿的口径，见 `lab/preset-identity-and-update-spec.md` §4）：
    *   更新是"把云端的东西拿下来"这一件事，不该在点它的时候打断用户做决定；
@@ -566,7 +566,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、展开那一行、
    * 滚过去亮一下 —— 用户要的是"看见我从哪复制来的"，缺一步都到不了那个效果。
    *
-   * 行键按「全部机型」那一档算（mine 行的键里带机型筛选，见 `originCellOf`）；
+   * 行键按「全部机型」那一档算（local 行的键里带机型筛选，见 `originCellOf`）；
    * 类型轴只在目标说得出类型时才切（认不出类别的那份两张表里都有，不动当前档）。
    * 60ms 与 `locateApplied` 同一个数：等 React 把换轴 + 清筛选的重画落完盘再找行。
    */
@@ -646,7 +646,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的）。
        * **先读一遍本地列表**：更新对象要在动手之前定下来。
        */
-      const [mine, index] = await Promise.all([api.getUserPresetFiles(), api.getUserPresetIndex()])
+      const [localPresets, index] = await Promise.all([
+        api.getLocalPresetFiles(),
+        api.getLocalPresetIndex(),
+      ])
       /*
        * 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
        * （`cloudSource` 对上它），而且还没跟上当前版（`basedOn !== 'current'`）。
@@ -655,7 +658,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        */
       const indexByPath = new Map(index.map((e) => [e.path, e]))
       const behind =
-        mine.find((f) => {
+        localPresets.find((f) => {
           const entry = indexByPath.get(f.path)
           return (
             f.kind === 'mkp_preset' &&
@@ -675,7 +678,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        */
       const sync = await data.presetSync(behind.path, true)
       setBusyKey(null)
-      if (!sync.officialReady) {
+      if (!sync.cloudReady) {
         setNote({
           text: `更新 ${fileName} 没成：云端新版的字节还没取回来（网络或数据源的问题）`,
           bad: true,
@@ -693,7 +696,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       }
       /*
        * ③ 写盘：**只写"我没改过"的那些项**（静默跟上新版）；我改过的一项都不写 ——
-       *    它们留给「修改参数」逐项处理（那边看得到"官方 X → Y"与「用新值 / 保持我的」）。
+       *    它们留给「修改参数」逐项处理（那边看得到"云端 X → Y"与「用新值 / 保持本地」）。
        *    没有可跟的项时**一个字节都不动**（不必白写一遍）。
        */
       if (auto.length > 0) await data.applyParamDecisions(behind.path, auto)
@@ -715,7 +718,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (takenAsk === null) return
     const ask = takenAsk
     setTakenAsk({ ...ask, busy: true })
-    data.fetchOfficial(ask.fileName, true).then(
+    data.fetchCloud(ask.fileName, true).then(
       (done) => {
         setTakenAsk(null)
         setNote({
@@ -733,11 +736,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * 云端表那颗按钮。**两条路，都是"把云端的东西落到我机器上"**（2026-10-10 按「本地 / 云端」改口径）：
    *
-   *   MKP 云端行「下载」（本地还没有）  → `fetchOfficial`：取回云端当前版 + 落一份**本地文件**；
+   *   MKP 云端行「下载」（本地还没有）  → `fetchCloud`：取回云端当前版 + 落一份**本地文件**；
    *   MKP 云端行「更新」（本地已有、云端有新版的）→ `runUpdate`：取回新版 + 逐项比较，
    *       没冲突的按新版采用、冲突的让用户选，**确认后才一次性写回本地文件**；
    *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`；
-   *   官方仓库的文件                 → 契约里有签名，所以**照调**。
+   *   云端仓库的文件                 → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
@@ -751,7 +754,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       /* 「下载」：本地还没有这一份 —— 取回云端当前版并落一份本地的 */
       setBusyKey(row.rowKey)
       setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
-      data.fetchOfficial(row.fileName).then(
+      data.fetchCloud(row.fileName).then(
         (done) => {
           setBusyKey(null)
           /*
@@ -769,7 +772,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           }
           setNote({
             /* 一句大白话就够（2026-10-13 作者：**技术细节不必让用户知道**）——
-               "官方字节进了下载区、另落一份你自己那份"是我们内部的两件事，
+               "云端字节进了下载区、另落一份你自己那份"是我们内部的两件事，
                用户要的是"这下我能用它了" */
             text: `已下载 ${done.fileName} —— 本地表里现在有它了`,
             bad: false,
@@ -822,7 +825,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       return
     }
     /*
-     * 到这里只剩「官方仓库文件」那一类（没有 MKP 的 `localState`、也没有交付身份）。
+     * 到这里只剩「云端仓库文件」那一类（没有 MKP 的 `localState`、也没有交付身份）。
      * 它的「下载」残支 2026-10-09 按用户裁断**连入口一起撤了**（`downloadFiles`
      * 从契约里删掉）—— 界面上这类行不再给下载按钮，走到这里说明按钮闸漏了。
      */
@@ -831,12 +834,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
   /**
    * 读一份正文（只读）。**两边共用这一个口子**，只是问的命令不同：
-   * 归档区那份走 `readArchivedText`，用户自己那份走 `readUserPresetText`。
+   * 归档区那份走 `readArchivedText`，用户自己那份走 `readLocalPresetText`。
    * 失败照实说（与下载 / 应用同一条规矩：不吞、不装）。
    */
   const readBody = (path: string, which: 'archive' | 'user') => {
     setBody({ path, text: null, error: null, loading: true })
-    const ask = which === 'user' ? api.readUserPresetText(path) : api.readArchivedText(path)
+    const ask = which === 'user' ? api.readLocalPresetText(path) : api.readArchivedText(path)
     ask.then(
       (text) => setBody({ path, text, error: null, loading: false }),
       (e: unknown) =>
@@ -872,17 +875,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *
    * **这一层只能看**：改它要先经过「改这份」那条链（那会另存出一份自己的）。
    */
-  const openMine = (row: PresetTableRow) => {
+  const openLocal = (row: PresetTableRow) => {
     menu.close()
     setEditing(null)
-    setViewer({ kind: 'mine', fileName: row.fileName, path: row.path })
+    setViewer({ kind: 'local', fileName: row.fileName, path: row.path })
     readBody(row.path, 'user')
   }
 
   /**
    * **开始改这一份**：让后端把**盘上那份文件的字节**读出来当初稿，然后把编辑器打开。
    *
-   * **编辑的对象只有「我的预设」**（`presets-mine/` 里那份）—— 官方那一份是模板、只读，
+   * **编辑的对象只有「本地预设」**（`presets-local/` 里那份）—— 云端那一份是模板、只读，
    * 要改它先在云端「下载」一份自己的。
    *
    * ★ 2026-10-10 起**参数页那份草稿不进来**（作者裁定）：这边看到的就是文件本身，
@@ -1022,7 +1025,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     menu.close()
     const name = duplicateNameOf(
       row.fileName,
-      data.mine.map((f) => f.fileName),
+      data.local.map((f) => f.fileName),
     )
     setNote({ text: `正在复制 ${row.fileName}…`, bad: false })
     data.copyAsNew(row.path, name).then(
@@ -1193,7 +1196,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runSetAttribution = (row: PresetTableRow, machineId: string, versionId: string) => {
     const m = data.machines.find((x) => x.id === machineId)
     const v = m?.versions.find((x) => x.id === versionId)
-    return data.setMineMachineVersion(row.path, machineId, versionId).then(
+    return data.setLocalMachineVersion(row.path, machineId, versionId).then(
       () =>
         setNote({
           text: `已把 ${row.fileName} 归到 ${m?.display ?? machineId} · ${v?.name ?? versionId}`,
@@ -1253,12 +1256,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
     /*
      * **本地文件也能被使用**：同一个写口、同一条底账 —— 身份是**路径**
-     * （用户目录里可以自己分文件夹）。后端那一道闸是"在 presets-mine/ 那一格里 +
+     * （用户目录里可以自己分文件夹）。后端那一道闸是"在 presets-local/ 那一格里 +
      * 盘上真有 + 是 TOML 预设"。
      */
-    if (row.origin === 'mine') {
+    if (row.origin === 'local') {
       setBusyKey(row.rowKey)
-      /* 文件名与路径**分开传**（后端认 origin=mine + path 那道闸）—— 见 `data.apply` 那段 */
+      /* 文件名与路径**分开传**（后端认 origin=local + path 那道闸）—— 见 `data.apply` 那段 */
       data.apply(row.fileName, row.path).then(
         () => setBusyKey(null),
         (e: unknown) => {
@@ -1270,7 +1273,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     }
 
     /*
-     * 兜底（正常到不了）：MKP 档的本地表只列「我的文件」那几行 —— 交付行不会走到这里
+     * 兜底（正常到不了）：MKP 档的本地表只列「本地文件」那几行 —— 交付行不会走到这里
      * （切片器档在上面那条 `page.kind !== 'mkp'` 就分流去「复制」了）。
      * 真走到了也只有一句人话：**云端的版本不能直接使用**，先下载到本地。
      */
@@ -1283,7 +1286,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **本地表那一行的动作：使用**（2026-10-09）—— 把这一份设为当前生效。
    *
-   * MKP 本地表里只有 `presets-mine/` 那几行（本地的文件），所以这一条就是
+   * MKP 本地表里只有 `presets-local/` 那几行（本地的文件），所以这一条就是
    * 认路径那个写口，与别处同一个底账。
    * **不用发网络**：字节在你盘上（要拿云端新版是云端表「更新」那件事）。
    */
@@ -1345,48 +1348,48 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   })
 
   /**
-   * 「重命名」为什么不能点（第十层）。只有**我的文件**能改 ——
+   * 「重命名」为什么不能点（第十层）。只有**本地文件**能改 ——
    * 灰一个项不说为什么，用户只会以为坏了。
    */
   const renameWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'mine'
+    row.origin === 'local'
       ? undefined
-      : '只有「我的文件」能改名（只动名字、字节一个不动）—— 官方那份不归你改名'
+      : '只有「本地文件」能改名（只动名字、字节一个不动）—— 云端那份不归你改名'
 
   /**
    * 「复制」为什么不能点（第十一层）：
    *
-   * - **我的文件**：本来就开放（我的 → 我的，按字节复制、血统原样带过去）；
-   * - 其余（切片器交付行 / 官方仓库文件）：不是"我的文件"，另行处置 ——
+   * - **本地文件**：本来就开放（本地 → 本地，按字节复制、血统原样带过去）；
+   * - 其余（切片器交付行 / 云端仓库文件）：不是"本地文件"，另行处置 ——
    *   切片器自有「复制到切片器目录」那条路。
    */
   const copyWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'mine'
+    row.origin === 'local'
       ? undefined
-      : '只有「我的文件」能复制出一份新的 —— 官方那份不归你复制'
+      : '只有「本地文件」能复制出一份新的 —— 云端那份不归你复制'
 
   /**
-   * 「在 Finder 中显示」为什么不能点（第十三层）：只有**我的文件**在本机有个"家"——
-   * 官方那份住在程序自己管的区域，或者根本还没下载（仓库表）。
+   * 「在 Finder 中显示」为什么不能点（第十三层）：只有**本地文件**在本机有个"家"——
+   * 云端那份住在程序自己管的区域，或者根本还没下载（仓库表）。
    */
   const revealWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'mine'
+    row.origin === 'local'
       ? undefined
-      : '住在程序自己管理的区域 —— 能这样打开的是「我的文件」（你自己的目录里的那份）'
+      : '住在程序自己管理的区域 —— 能这样打开的是「本地文件」（你自己的目录里的那份）'
 
   /**
    * 「删除」对哪几行给。**一切皆可删**（作者裁决 2026-10-06，此前拦得太死）：
    *
-   * - 我的文件：真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
+   * - 本地文件：真删；**正在使用的那份也给删** —— 后端把使用中指针一并撤下
    *   （悬空的「使用中」比「没在用」糟），有草稿的连草稿一起丢，确认框讲清；
    * - 切片器交付行：删了回到「未下载」，随时可从云端重新下载；
-   * - 官方仓库文件（切片器仓库行）的本地副本不给删（它们走资源那一套命令）；
+   * - 云端仓库文件（切片器仓库行）的本地副本不给删（它们走资源那一套命令）；
    * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   const removeWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'official'
-      ? '官方仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
+    row.origin === 'cloud'
+      ? '云端仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
@@ -1410,11 +1413,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 读不出来的那份同理（先修好它）。灰一个项不说为什么，用户只会以为坏了。
    */
   const paramsWhyNot = (row: PresetTableRow): string | undefined => {
-    if (row.origin !== 'mine') {
-      return '只有「我的」那一份能改参数 —— 官方那一份是模板，先用「使用」取一份自己的'
+    if (row.origin !== 'local') {
+      return '只有「本地」那一份能改参数 —— 云端那一份是模板，先用「使用」取一份自己的'
     }
-    if (row.kind !== 'mkp_preset') return MINE_NOT_PRESET_WHY
-    if (row.mineState === 'unreadable') return mineUnreadableWhy(row.mineStateDetail)
+    if (row.kind !== 'mkp_preset') return LOCAL_NOT_PRESET_WHY
+    if (row.localState === 'unreadable') return localUnreadableWhy(row.localStateDetail)
     if (row.scope !== 'local') return '这一行不在本机'
     if (row.ownMachineId === null || row.ownMachineId === undefined) {
       return '这一份没标机型 —— 先在详情里「改归属」，参数表才知道该画哪些项'
@@ -1480,11 +1483,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * 能不能进对比台：**我的文件、是 MKP 预设、读得出来** —— 与 `compareFiles`
+   * 能不能进对比台：**本地文件、是 MKP 预设、读得出来** —— 与 `compareFiles`
    * 同一套判据（台子只比参数，别的类型 / 读不懂的没有参数表可画）。
    */
   const canCompare = (row: PresetTableRow): boolean =>
-    row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+    row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
 
   /**
    * 菜单项里那一小截名字（超长文件名会把菜单撑破；全名在页脚那句提示里）。
@@ -1497,7 +1500,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
   /**
    * 「参数对比」那一项。**只在能进台子的行上出现**（`canCompare`）——
-   * 其余行整项不出现：那是"这台子只比我的预设"这条边界本身，
+   * 其余行整项不出现：那是"这台子只比本地预设"这条边界本身，
    * 不是"哪一项坏了"（灰一项再加一句，反倒把它讲成故障）。
    */
   const compareEntry = (row: PresetTableRow): ContextMenuEntry => {
@@ -1525,13 +1528,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (row === null) return []
 
     /*
-     * 云端表：**只有"把官方的取到我机器上"** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
+     * 云端表：**只有"把云端的取到我机器上"** —— 这是"别人的东西"，这一侧能做的只有取一份下来。
      *
      * ★ 作者 2026-10-08 把它定死了：「云端的不管它删除下载……这云端就是云端的，
      * 就是一个列表啊，你就把它想象成一份那个下载的列表啊，就像你去浏览器下东西一样，
      * 别人只是让你下载，你都不能修改人家的东西好不好」。
      * （同一天上午这里短暂挂过一颗「删除本机这份」—— 那是把"我这一侧"的事混进了
-     * 云端表，作者当天就否了。要删自己那份副本，去**本地表**；要删下载区那份官方副本，
+     * 云端表，作者当天就否了。要删自己那份副本，去**本地表**；要删下载区那份云端副本，
      * 那是本地表里切片器那一档的事。**云端表一味只读**。）
      *
      * 2026-10-09 起 MKP 档那一项按**三态**给词（下载 / 更新 / 本地已有不给动作），
@@ -1569,11 +1572,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      *
      *   使用 / 取消使用                   把它设为当前生效（与操作列那颗按钮是同一个动作）；
      *                                     正在用的那一格是「取消使用」（2026-10-10 恢复的入口）
-     *   修改参数 / 编辑文件 / 复制 / 改名 / 显示 / 删除   原「我的文件」那一套
+     *   修改参数 / 编辑文件 / 复制 / 改名 / 显示 / 删除   原「本地文件」那一套
      *   （「查看详情」2026-10-10 删掉：**点行就是展开**，那一项重复）
      *   （「选择要跟随的官方更新」2026-10-10 从菜单里去掉 —— 参数表里照旧能处理更新）
      *
-     * （官方那一行**不在这张表里** —— 云端原件是内部数据，它的取用在云端表「下载 / 更新」。）
+     * （云端那一行**不在这张表里** —— 云端原件是内部数据，它的取用在云端表「下载 / 更新」。）
      */
     if (row.scope === 'local' && page.kind === 'mkp') {
       /*
@@ -1581,12 +1584,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 第九层读不出来的）—— 菜单里给一个点了必报错的项，与按钮同罪。
        */
       const useWhyNot =
-        row.origin !== 'mine'
+        row.origin !== 'local'
           ? undefined
           : row.kind !== 'mkp_preset'
-            ? MINE_NOT_PRESET_WHY
-            : row.mineState === 'unreadable'
-              ? mineUnreadableWhy(row.mineStateDetail)
+            ? LOCAL_NOT_PRESET_WHY
+            : row.localState === 'unreadable'
+              ? localUnreadableWhy(row.localStateDetail)
               : undefined
       /*
        * **正在用的那一份，这一格是「取消使用」**（2026-10-10 作者：「它需要一个
@@ -1606,7 +1609,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         /*
          * 参数表那一屏（2026-10-09）：改的是参数本身。
          * ★ 「选择要跟随的官方更新」2026-10-10 按作者裁决**从菜单里去掉**了
-         *   （原入口是 `openParams(row, true)` 那条直路）—— 参数表里照旧能处理官方更新，
+         *   （原入口是 `openParams(row, true)` 那条直路）—— 参数表里照旧能处理云端更新，
          *   菜单只留一个「打开参数」。
          */
         {
@@ -1619,13 +1622,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         },
         /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` */
         ...(canCompare(row) ? [compareEntry(row)] : []),
-        ...(row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+        ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
           ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
           : []),
         {
           id: 'copy',
           /* 「复制」（2026-10-10 作者：文案太长 → 短词，点了就自动出一份） */
-          label: MINE_COPY.cell,
+          label: LOCAL_COPY.cell,
           disabled: copyWhyNot(row),
           onSelect: () => runDuplicate(row),
         },
@@ -1664,7 +1667,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * **第九层读不出来的**也不给（改的入口同样过文件级检查，不给必被拒的项）。
      */
     const canEdit =
-      row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+      row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
     /*
      * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
@@ -1675,15 +1678,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
       /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` ——
-         切片器档这一侧只有「我的文件」里读得出来的 MKP 预设才有这一项 */
+         切片器档这一侧只有「本地文件」里读得出来的 MKP 预设才有这一项 */
       ...(canCompare(row) ? [compareEntry(row)] : []),
       ...(canEdit
         ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
         : []),
       {
         id: 'copy',
-        label: MINE_COPY.cell,
-        /* 我的文件 → 我的文件（第十一层，按字节复制、血统原样带过去）；
+        label: LOCAL_COPY.cell,
+        /* 本地文件 → 本地文件（第十一层，按字节复制、血统原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => runDuplicate(row),
@@ -1691,7 +1694,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       {
         id: 'rename',
         label: '重命名',
-        /* 第十层：只有「我的文件」能改名（只动名字、字节一个不动） */
+        /* 第十层：只有「本地文件」能改名（只动名字、字节一个不动） */
         disabled: renameWhyNot(row),
         onSelect: () => openRename(row),
       },
@@ -1721,7 +1724,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         id: 'remove',
         label: '删除',
         danger: true,
-        /* 我的文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
+        /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
            —— 代价在确认框里说清 */
         disabled: removeWhyNot(row),
         confirm: {
@@ -1811,19 +1814,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 台账是可数的全局事实，**跟着当前类型档走**（作者 2026-10-02：「'仓库 9' 这种
    * 全 catalog 数字不应该混在当前类型的业务语境里」）：
    *
-   *   MKP     「官方（目录里登记的 MKP 预设，全机型）· 我的（你有几份本地文件）」
-   *           —— 官方的取用（下载 / 更新）在云端表、使用在本地表，这一格说的是
+   *   MKP     「云端（目录里登记的 MKP 预设，全机型）· 本地（你有几份本地文件）」
+   *           —— 云端的取用（下载 / 更新）在云端表、使用在本地表，这一格说的是
    *           "一共多少"，与当前看哪张表无关
-   *   切片器   「仓库（这一档全机型的官方文件）· 本机（官方副本总数）· 我的」
+   *   切片器   「仓库（这一档全机型的云端文件）· 本机（云端副本总数）· 本地」
    *
    * 图标 / 模型不归这一页，哪个数里都不含它们。
    */
-  const mineCount = mineCountOfAxis(data.mine, page.kind)
+  const localCount = localCountOfAxis(data.local, page.kind)
   /*
-   * MKP 台账里的「官方」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
+   * MKP 台账里的「云端」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
    * 与切片器那档的「仓库」是同一个口径（台账说全集，表格说这一档机型）。
    */
-  const assetOfficialCount = data.release.presets.filter(
+  const assetCloudCount = data.release.presets.filter(
     (p) => p.kind === 'mkp_preset',
   ).length
   const metaNode = (
@@ -1840,13 +1843,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       >
         {page.kind === 'mkp' ? (
           <>
-            官方 {assetOfficialCount} · 我的 {mineCount}
+            云端 {assetCloudCount} · 本地 {localCount}
           </>
         ) : (
           <>
             仓库 {treeCountOfAxis(data.tree, page.kind)} ·{' '}
             <>
-              本机 {data.localIds.length} + 我的 {mineCount}
+              本机 {data.localIds.length} + 本地 {localCount}
             </>
           </>
         )}
@@ -1882,7 +1885,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     ) : data.needsNewerClient ? (
       /*
        * 「远端这一代读不懂」那一句（第三刀下半，作者定的产品规则 B）。
-       * ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给我的这份我读不了"。
+       * ★ 与 `note` 分开：`note` 是"刚做的事怎么样了"，这一条是"你想给本地这份我读不了"。
        *   **列表照常**（没有整表标红、没有逐行"不兼容"标签），只在这一格多一句。
        *   按钮只有一个去处：设置页的软件更新块。
        */
@@ -2051,13 +2054,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 busyKey={busyKey}
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
-                onOpenMine={openMine}
+                onOpenLocal={openLocal}
                 onEdit={openEdit}
                 onLive={runLive}
                 /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份本地文件 */
                 onUse={runUse}
                 onDownload={download}
-                /* 来源格「复制自 X」的定位落点；sourceLabel 决定官方交付行来源列显示 GitHub / Gitee */
+                /* 来源格「复制自 X」的定位落点；sourceLabel 决定云端交付行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
                 sourceLabel={data.sourceLabel}
                 /* 备注（副标题覆盖账）与归属（复制出来的那份标机型 / 版本） */
@@ -2078,7 +2081,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            * resize 手柄还点得到。
            *
            *   云端那一侧（`archive`）列出旧版本、挑一份看；**删除 / 恢复 / 用这份旧版本都没有**
-           *   本地文件（`mine`）  就一份，打开直接读；**改它 / 另存 / 保存都没有**（下一层的事）
+           *   本地文件（`local`）  就一份，打开直接读；**改它 / 另存 / 保存都没有**（下一层的事）
            *
            * 两边的共同点：**只读**，读不出来照实说。
            */}
@@ -2087,11 +2090,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             size="lg"
             /* 遮罩铺满"标题栏以下整块"（见 `pageEl` 的注释）：挂到页面根那一层 */
             host={pageEl}
-            title={viewer?.kind === 'mine' ? MINE_DRAWER.title : ARCHIVE_DRAWER.title}
+            title={viewer?.kind === 'local' ? LOCAL_DRAWER.title : ARCHIVE_DRAWER.title}
             subtitle={
               viewer === null
                 ? undefined
-                : viewer.kind === 'mine'
+                : viewer.kind === 'local'
                   ? `${viewer.fileName} · 你自己的文件`
                   : `${viewer.fileName} · 归档 ${viewer.rows.length} 份`
             }
@@ -2183,7 +2186,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     </p>
                     {body.loading ? (
                       <p className={s.archNote}>
-                        {viewer.kind === 'mine' ? MINE_DRAWER.reading : ARCHIVE_DRAWER.reading}
+                        {viewer.kind === 'local' ? LOCAL_DRAWER.reading : ARCHIVE_DRAWER.reading}
                       </p>
                     ) : body.error !== null ? (
                       /* 读不出来就照实说：不许显示一段空正文假装它是空的 */
@@ -2195,7 +2198,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 )}
 
                 <p className={s.archNote}>
-                  {viewer.kind === 'mine' ? MINE_DRAWER.note : ARCHIVE_WHY}
+                  {viewer.kind === 'local' ? LOCAL_DRAWER.note : ARCHIVE_WHY}
                 </p>
               </div>
             )}
@@ -2204,7 +2207,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           {/*
            * **参数对比台**（2026-10-08）：一个独立常驻工具，只在**用户自己的本地预设**
            * 之间比。挂在 `.main` 里（与抽屉同一条规矩）：遮罩只盖内容区。
-           * **官方那份（隐藏 baseline）不进这张台子** —— 它是系统内部的东西，不是给用户比的。
+           * **云端那份（隐藏 baseline）不进这张台子** —— 它是系统内部的东西，不是给用户比的。
            *
            * 入口是右键两下（见 `compareEntry`）：`preselect` 把选中的那两份带进来。
            */}
@@ -2219,7 +2222,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
           {/*
            * **编辑器抽屉**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
-           * 编辑期间只动正文草稿 —— 所以这里没有"保存到官方"这种动作：
+           * 编辑期间只动正文草稿 —— 所以这里没有"保存到云端"这种动作：
            * 只有「放弃」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
            * （2026-10-10 作者：「没有点保存的时候千万不要保存进来」，两条草稿分开存）。
            *
@@ -2368,7 +2371,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             open={renaming !== null}
             size="sm"
             host={pageEl}
-            title={MINE_RENAME.title}
+            title={LOCAL_RENAME.title}
             /* 副标题只写文件名（原来是完整路径，2026-10-10 统一） */
             subtitle={renaming?.row.fileName}
             footer={
@@ -2382,7 +2385,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   disabled={renaming?.busy === true}
                   onClick={submitRename}
                 >
-                  {MINE_RENAME.commit}
+                  {LOCAL_RENAME.commit}
                 </button>
               </>
             }
@@ -2434,7 +2437,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             <>
               {!page.unsupported && (
                 <span className={s.footHint}>
-                  {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于我的文件的话。
+                  {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于本地文件的话。
                       「参数对比」是右键两下那一条（选第一份 → 再选第二份）—— 入口只住菜单里，
                       所以这句提示就是它的发现路径，不能省 */}
                   {page.kind === 'mkp'

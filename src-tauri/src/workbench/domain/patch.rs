@@ -123,7 +123,7 @@ pub enum Patch {
 /// 整本草稿：**只存"改了什么"，不存整本**（doc §4.3）。
 ///
 /// 存整本的话，上游数据一变（比如上游改了某个参数的出厂默认），
-/// 草稿会把旧值糊回去 —— 而那看起来就像"我的改动莫名其妙回来了"
+/// 草稿会把旧值糊回去 —— 而那看起来就像"本地改动莫名其妙回来了"
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Draft {

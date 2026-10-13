@@ -10,7 +10,7 @@
  *            ↓
  *        导入核心（`api.stageImport` / `api.commitImport` → `runtime::import`）
  *            ↓
- *        当前认领它的导入器（现在只有 Preset：`.toml` → `presets-mine/`）
+ *        当前认领它的导入器（现在只有 Preset：`.toml` → `presets-local/`）
  *
  * # 为什么在 App 层
  *
@@ -117,7 +117,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       }
       note(
         miss === 0
-          ? { text: `导入了 ${done.length} 份文件到「我的文件」`, bad: false, lines }
+          ? { text: `导入了 ${done.length} 份文件`, bad: false, lines }
           : { text: `导入：${done.length} 份成了、${miss} 份没成`, bad: true, lines },
       )
     },
@@ -300,7 +300,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       {/* 拖到这里松开就导入。遮罩不吃事件（pointer-events: none）—— drop 要落到窗口上 */}
       {dragging && modal === null && (
         <div className={s.veil} role="presentation">
-          <p className={s.veilText}>松开：把文件导入「我的文件」（现在收 .toml 预设）</p>
+          <p className={s.veilText}>松开：把文件导进来（现在收 .toml 预设）</p>
         </div>
       )}
 

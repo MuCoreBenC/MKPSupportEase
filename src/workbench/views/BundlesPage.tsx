@@ -200,7 +200,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
   const create = () => {
     if (!newId.trim() || !newMachine) return
     void run(
-      () => wb.addBundle(newId.trim(), newMachine, newDisplay.trim() || '官方推荐', newRefs),
+      () => wb.addBundle(newId.trim(), newMachine, newDisplay.trim() || '推荐', newRefs),
       `已新建套餐 ${newId.trim()}（${newRefs.length} 份文件）`,
     )
     setCreating(false)
@@ -775,7 +775,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
           <input
             className={s.filter}
             value={newDisplay}
-            placeholder="显示名（默认：官方推荐）"
+            placeholder="显示名（默认：推荐）"
             aria-label="新套餐显示名"
             onChange={(e) => setNewDisplay(e.target.value)}
           />
@@ -1066,7 +1066,7 @@ function syntheticBundle(
 ): BundleView {
   return {
     id: id.trim() || '(新套餐)',
-    display: display.trim() || '官方推荐',
+    display: display.trim() || '推荐',
     machineId,
     assetRefs: refs.map((r) => {
       /* 勾选态只要 id —— 其余字段是详情卡用的，给中性值 */

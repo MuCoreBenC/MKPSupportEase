@@ -28,9 +28,9 @@ use crate::error::AppError;
 /// 只写不读）—— 校准值改随**用户工作副本**走之后这个目录没有消费者了。
 /// 盘上遗留的空目录不清理（用户自己删）。
 const INTERNAL_DIRS: [&str; 4] = ["cloud", "archive", "logs", "run"];
-/// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::mine`）要认它，
+/// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::local`）要认它，
 /// 字面量只许有这一处
-pub const MINE_DIR: &str = "presets-mine";
+pub const LOCAL_DIR: &str = "presets-local";
 
 /// 后处理执行归档的那棵树：`<用户根>/gcode_history`。
 ///
@@ -49,7 +49,7 @@ pub const GCODE_HISTORY_DIR: &str = "gcode_history";
 pub const EXPORTS_DIR: &str = "exports";
 
 /// 用户根下首次启动就建齐的子目录
-const USER_DIRS: [&str; 4] = [EXPORTS_DIR, "reports", MINE_DIR, GCODE_HISTORY_DIR];
+const USER_DIRS: [&str; 4] = [EXPORTS_DIR, "reports", LOCAL_DIR, GCODE_HISTORY_DIR];
 
 /// 用户根在**应用数据目录**下的那一个子目录（`<appDataDir>/user`）。
 ///

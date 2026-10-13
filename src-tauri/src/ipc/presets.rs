@@ -19,8 +19,8 @@
 //! | `get_slicer_copied` | 切片器用户配置目录里**真有**的那几份（盘就是底账） |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
-//! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-mine/`，
-//! 由 [`crate::ipc::mine::get_user_preset_files`] / `read_user_preset_text` 那两条读回答。
+//! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-local/`，
+//! 由 [`crate::ipc::local::get_local_preset_files`] / `read_local_preset_text` 那两条读回答。
 //! 旧命令恒空、且旧 DTO 里的「用户自己标的适用机型」在新世界里没有来源（没人能标），
 //! 留着就是两套口径。
 //!
@@ -545,7 +545,7 @@ pub struct MenuEntryDto {
     pub visibility: &'static str,
 }
 
-/// 菜单：哪些官方文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
+/// 菜单：哪些云端文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
 /// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的。
 ///
 /// **`bundled` 交付档的资产不进这个菜单**（作者 2026-10-03）：那是「随包不下载」的那一档
@@ -813,7 +813,7 @@ fn machine_params_dto(
 
 /* ---------- 本机状态 ---------- */
 
-/// 本机已经有的官方文件（asset id）。
+/// 本机已经有的云端文件（asset id）。
 ///
 /// **恒为 `[]`**：切片器资产的载荷不落内部根（内置的随安装包走、前端按 URL 取；
 /// 下载的 MKP 预设走 `get_downloaded_files` 那条新世界管道）。空集是"还没下载"，
@@ -827,8 +827,8 @@ pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
 
 /// 打开**我们自己的落点**（交付区 `assets/bbs/…` 里那一份）所在的文件夹，并选中它。
 ///
-/// 与「我的文件」那条（`ipc::mine::reveal_in_folder`）分得很清楚：那一条认
-/// `presets-mine/`，这一条认**目录登记**（`catalog.files[].path`）——
+/// 与「本地文件」那条（`ipc::local::reveal_in_folder`）分得很清楚：那一条认
+/// `presets-local/`，这一条认**目录登记**（`catalog.files[].path`）——
 /// 两条都不接受前端拼路径，只给文件名。
 ///
 /// 盘上还没有这份 → `NOT_FOUND` 原话（先「下载」），**不打开一个空文件夹**。

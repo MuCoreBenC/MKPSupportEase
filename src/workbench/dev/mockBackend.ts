@@ -435,9 +435,9 @@ const ASSETS: FixtureRef[] = [
 /** 套餐域夹具。真源关系是**一版一套**：A1 两版各指一份（A1_default / A1_FAST）。
  *  `presets` = 套餐挂的 MKP 预设（**版本 uid 直引，文件可不存在** —— 作者 2026-10-03） */
 const BUNDLES: { id: string; display: string; machineId: string; assetRefs: string[]; updatedAt: string | null }[] = [
-  { id: 'A1_default', display: '官方推荐', machineId: 'A1', assetRefs: ['a1-standard', 'a1-bbs-04-020'], updatedAt: '2026-07-12' },
+  { id: 'A1_default', display: '推荐', machineId: 'A1', assetRefs: ['a1-standard', 'a1-bbs-04-020'], updatedAt: '2026-07-12' },
   { id: 'A1_FAST', display: '高速版工艺', machineId: 'A1', assetRefs: ['a1-fast', 'a1-bbs-02-010', 'a1-orca-02-010'], updatedAt: '2026-07-12' },
-  { id: 'P1S_default', display: '官方推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
+  { id: 'P1S_default', display: '推荐', machineId: 'P1S', assetRefs: ['p1s-bbs-04-024'], updatedAt: '2026-07-12' },
 ]
 
 /** 可见性（含草稿态）：fileId → 'archiveOnly'。写路径与 save 都落这里 */
@@ -578,7 +578,7 @@ function bundleListOf(query: string | null) {
   }
 }
 
-/** 官方源（Bootstrap）：`wb_set_bootstrap` 写它（浏览器里存内存）。真机写 workbench/bootstrap.json */
+/** 云端源（Bootstrap）：`wb_set_bootstrap` 写它（浏览器里存内存）。真机写 workbench/bootstrap.json */
 let mockBootstrap: string | null = null
 let mockGiteeBootstrap: string | null = null
 
@@ -823,14 +823,14 @@ function atRestOf(level: 'machine' | 'version', owner: string, key: string): unk
 function impactOf(machineId: string, uid: string | null, key: string): Json {
   const label = (v: { name: string }) => `${machineId} / ${v.name}`
   const pins = (v: { uid: string }) => atRest.over[v.uid]?.[key] !== undefined
-  const mine = MACHINES[0]!.versions
+  const versions = MACHINES[0]!.versions
   if (uid !== null) {
     return {
-      targets: mine.filter((v) => v.uid === uid).map((v) => label(v)),
-      followers: mine.filter((v) => v.uid !== uid && !pins(v)).map((v) => label(v)),
+      targets: versions.filter((v) => v.uid === uid).map((v) => label(v)),
+      followers: versions.filter((v) => v.uid !== uid && !pins(v)).map((v) => label(v)),
     }
   }
-  return { targets: mine.filter((v) => !pins(v)).map((v) => label(v)), followers: [] }
+  return { targets: versions.filter((v) => !pins(v)).map((v) => label(v)), followers: [] }
 }
 
 function rowOf(machineId: string, uid: string | null, pdef: FixtureParam): Json {
@@ -1250,7 +1250,7 @@ export function installMockBackend() {
         if (!ids.some((x) => ASSETS.find((a) => a.id === x)?.kind === 'slicerProfile')) {
           return Promise.reject({ code: 'INVALID', message: '套餐的 assetRefs 里没有一条 BBS 预设', traceId: 'mock' })
         }
-        BUNDLES.push({ id, display: display || '官方推荐', machineId, assetRefs: ids, updatedAt: '今天（演示）' })
+        BUNDLES.push({ id, display: display || '推荐', machineId, assetRefs: ids, updatedAt: '今天（演示）' })
         return Promise.resolve(bundleListOf(null))
       }
       case 'wb_rename_bundle': {
@@ -1891,7 +1891,7 @@ export function installMockBackend() {
             {
               kind: 'v1',
               label: '夹具 v1',
-              note: '模拟「官方源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」',
+              note: '模拟「云端源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」',
               root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v1',
               url: 'http://127.0.0.1:8787',
               ready: true,
@@ -1900,7 +1900,7 @@ export function installMockBackend() {
             {
               kind: 'v2',
               label: '夹具 v2',
-              note: '模拟「官方发了新版」—— 同一份预设的下一版（revision 变了）',
+              note: '模拟「云端发了新版」—— 同一份预设的下一版（revision 变了）',
               root: 'C:\\dev\\MKPSupportEase\\scripts\\preset-test-server\\fixtures\\v2',
               url: 'http://127.0.0.1:8787',
               ready: true,

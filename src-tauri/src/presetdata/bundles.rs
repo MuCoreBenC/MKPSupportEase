@@ -53,7 +53,7 @@ pub const BUNDLES_FILE: &str = "bundles.toml";
 pub struct Bundle {
     /// 主键。机型文件与版本定义引用它（`defaultBundle` / `recommendedBundle`）
     pub id: String,
-    /// 给人看的名字（旧数据里五份都是 `官方推荐`）
+    /// 给人看的名字（旧数据里五份都是 `推荐`）
     pub display: String,
     /// 归属机型。**必填**（套餐是按机型配的：实测五份一对一）
     pub machine_id: String,
@@ -501,7 +501,7 @@ mod tests {
 
     fn one(id: &str, refs: &str) -> String {
         format!(
-            "[[bundles]]\nid = '{id}'\ndisplay = '官方推荐'\nmachineId = 'A1'\n\
+            "[[bundles]]\nid = '{id}'\ndisplay = '推荐'\nmachineId = 'A1'\n\
              assetRefs = [{refs}]\nupdatedAt = '2026-07-12'\n"
         )
     }
@@ -538,7 +538,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("临时目录");
         put(
             dir.path(),
-            "[[bundles]]\nid = 'x'\ndisplay = '官方推荐'\nassetRefs = ['a']\n",
+            "[[bundles]]\nid = 'x'\ndisplay = '推荐'\nassetRefs = ['a']\n",
         );
         assert!(
             Bundles::load_from(dir.path()).is_err(),
@@ -590,7 +590,7 @@ mod tests {
 
         b.add(Bundle {
             id: "P1S_default".to_owned(),
-            display: "官方推荐".to_owned(),
+            display: "推荐".to_owned(),
             machine_id: "P1S".to_owned(),
             asset_refs: vec!["p1s-bbs-04-024".to_owned()],
             updated_at: Some("2026-07-12".to_owned()),
@@ -603,7 +603,7 @@ mod tests {
 
         b.add(Bundle {
             id: "A1_DEFAULT".to_owned(),
-            display: "官方推荐".to_owned(),
+            display: "推荐".to_owned(),
             machine_id: "A1".to_owned(),
             asset_refs: vec!["a1-bbs-04-020".to_owned()],
             updated_at: None,
@@ -611,7 +611,7 @@ mod tests {
         .expect_err("同 id 再插一条必须被拦");
         b.add(Bundle {
             id: "empty".to_owned(),
-            display: "官方推荐".to_owned(),
+            display: "推荐".to_owned(),
             machine_id: "A1".to_owned(),
             asset_refs: Vec::new(),
             updated_at: None,

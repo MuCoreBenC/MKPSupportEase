@@ -28,7 +28,7 @@ import PageParams from './PageParams'
 interface Props {
   open: boolean
   density: Density
-  /** 改哪一份（`path` 是相对用户根的 `presets-mine/…`） */
+  /** 改哪一份（`path` 是相对用户根的 `presets-local/…`） */
   target: { path: string; fileName: string; machineId: string; versionId: string }
   /** 一进来就把「选择要跟随的更新」那一屏打开（右键菜单那条直路用） */
   openSyncOnStart?: boolean
@@ -59,7 +59,7 @@ export default function PresetParamsModal({
     >
       {/*
        * `key` 钉住这一份：换一份（或关掉再打开另一份）就整块重挂 ——
-       * 草稿链、官方更新账、分类胶囊与搜索全部从这一份重新开始，不留上一条的残留。
+       * 草稿链、云端更新账、分类胶囊与搜索全部从这一份重新开始，不留上一条的残留。
        */}
       <PageParams
         key={target.path}

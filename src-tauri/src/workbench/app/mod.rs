@@ -388,11 +388,11 @@ pub struct Boot {
     pub detail: Option<String>,
     /// 工作台子目录的职责（14.7）
     pub store_dirs: Vec<StoreDirRole>,
-    /// 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+    /// 云端源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
     /// `None` = 还没配 —— 客户端构建时就不会注入默认源（`build.rs` 读同一份文件）。
     /// **它只对应"工作台配置"这一份**：改了要重新构建客户端才生效（编译期注入）
     pub bootstrap_url: Option<String>,
-    /// 第二官方源（Gitee 镜像，国内直连）。`None` = 没配 —— 客户端构建不注入那一档，
+    /// 第二云端源（Gitee 镜像，国内直连）。`None` = 没配 —— 客户端构建不注入那一档，
     /// 客户端界面也不出现它。与 `bootstrap_url` **各读各的**
     pub gitee_bootstrap_url: Option<String>,
 }
@@ -414,7 +414,7 @@ pub struct BootstrapConfig {
     pub gitee_bootstrap_url: Option<String>,
 }
 
-/// 读工作台配置里的**双官方源**。**读不出 / 坏档 = 全 `None` + 日志一条**：
+/// 读工作台配置里的**双云端源**。**读不出 / 坏档 = 全 `None` + 日志一条**：
 /// 它是可选配置，挡不住开场（修法：在工作台里再保存一次覆盖它，或手动删掉整个文件）。
 /// 与"坏档不静默"不冲突 —— 不静默的那一位是日志
 fn read_bootstrap_config() -> (Option<String>, Option<String>) {
@@ -422,14 +422,14 @@ fn read_bootstrap_config() -> (Option<String>, Option<String>) {
     let Some(store) = Store::open().ok() else {
         return (None, None);
     };
-    match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "官方源配置") {
+    match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "云端源配置") {
         Ok(Some(cfg)) => (
             clean(Some(cfg.bootstrap_url)),
             clean(cfg.gitee_bootstrap_url),
         ),
         Ok(None) => (None, None),
         Err(e) => {
-            tracing::warn!(error = %e.message, "官方源配置读不出来，按「还没配」处理");
+            tracing::warn!(error = %e.message, "云端源配置读不出来，按「还没配」处理");
             (None, None)
         }
     }
@@ -492,7 +492,7 @@ pub fn wb_app_version() -> Result<String, AppError> {
     })
 }
 
-/// 记下官方源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
+/// 记下云端源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
 /// `workbench/bootstrap.json`）。GitHub 是主源；`gitee_url` 传 `None` / 空白 = 清除
 /// Gitee 镜像档（界面那格空着就是清除，如实写盘，不留 null 键）。
 ///
@@ -560,7 +560,7 @@ fn boot_inner() -> Result<Boot, AppError> {
     })() {
         Ok(boot) => Ok(boot),
         Err(e) => {
-            /* 官方源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
+            /* 云端源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
             let (bootstrap_url, gitee_bootstrap_url) = read_bootstrap_config();
             Ok(Boot {
                 roots: Roots {
@@ -1809,7 +1809,7 @@ mod tests {
     ///
     /// # 为什么这条必须有机器拦着
     ///
-    /// Tauri 官方文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
+    /// Tauri 云端文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
     /// `#[tauri::command(async)]`**。而主线程就是 webview 渲染那个线程 ——
     /// 同步命令算多久，**整个界面就冻结多久**：骨架屏画不出来、导航点不动，
     /// 用户看到的就是"像被冻住了，过了好一会才有反应"（作者原话）。
@@ -1977,7 +1977,7 @@ mod tests {
         );
 
         let back: BootstrapConfig = store
-            .read_doc(Store::BOOTSTRAP_REL, "官方源配置")
+            .read_doc(Store::BOOTSTRAP_REL, "云端源配置")
             .expect("读回")
             .expect("刚写的该在");
         assert_eq!(back.bootstrap_url, cfg.bootstrap_url);

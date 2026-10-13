@@ -344,7 +344,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 抽屉里点一份 = 明确要用这份（与「改预设先问一句」同一入口）：落到 sel 之外，
    * 真写底账 —— 四个页面同账。首页三级的**浏览选择不算应用**（作者 2026-10-06：
    * 「不是说点了它就是应用」，应用走下面那颗明确的按钮）。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「本地文件」）、应用不了保持原账。
    */
   const applyPreset = useCallback(
     (uid: string) => {
@@ -508,7 +508,7 @@ export default function PageHome({ density }: PageHomeProps) {
      * 刚才说的那个透明的气泡呀……如果还没有下载的时候，那个提示是和那个已经下载过、
      * 只应用的那个气泡里面显示的内容还不太一样，就区分一下」）。
      *
-     * 三档分的正是"这一趟到底要做什么"，用词按作者定的口径（不出现"官方 / 我的一份"）：
+     * 三档分的正是"这一趟到底要做什么"，用词按作者定的口径（不出现"云端 / 本地这份"）：
      *   · 本机全齐（ready）→ 只应用；· 缺（missing）→ 先下载；· 漂（drift）→ 重新下载
      *
      * 吃的是页面底部那颗 `.scriptToast`（与「复制脚本」共用一颗）——**不占任何布局位置**，
@@ -535,9 +535,9 @@ export default function PageHome({ density }: PageHomeProps) {
       /*
        * **两步，各是各的**（2026-10-09 改判）：
        *
-       *   ① `fetchOfficialPreset` 把官方这一版取到本机（本机已有当前版就一个字节不下载），
-       *      并落一份**我的工作副本**（`presets-mine/<原名>.toml`，已经有了就一个字节不动）；
-       *   ② `applyActivePreset` 把**我那一份**设成当前使用。
+       *   ① `fetchCloudPreset` 把云端这一版取到本机（本机已有当前版就一个字节不下载），
+       *      并落一份**本地工作副本**（`presets-local/<原名>.toml`，已经有了就一个字节不动）；
+       *   ② `applyActivePreset` 把**本地那份**设成当前使用。
        *
        * 为什么不合成一步：「取到本机」与「把哪一份设为生效」是两件事 —— 云端表那两颗
        * （下载 / 更新）只做前一件，使用只发生在本地表那几行上。首页这一颗按钮的语义是
@@ -550,9 +550,9 @@ export default function PageHome({ density }: PageHomeProps) {
        * 不存在"预判说齐了、其实没齐"那种错 —— 上面那次批量下载只负责套餐里**别的**文件
        * （切片器配置那一类）。
        */
-      const fetched = await api.fetchOfficialPreset(presetFile)
-      /* 本仓的术语是 `official / mine`（试验场那边的 `cloud / local` 已改名，见契约） */
-      await api.applyActivePreset(fetched.fileName, 'mine', fetched.path)
+      const fetched = await api.fetchCloudPreset(presetFile)
+      /* 本仓术语就是 `cloud / local`（来源只有这两条线，见契约 ActiveOrigin） */
+      await api.applyActivePreset(fetched.fileName, 'local', fetched.path)
       appStateMutated()
       /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
       setScriptNote(
@@ -587,7 +587,7 @@ export default function PageHome({ density }: PageHomeProps) {
 
   /*
    * A3：正在使用的那份（底账）命中当前 combo 时，名字 / 路径**用底账的** ——
-   * 应用了「我的文件」，这里就说我的文件（与预设页横幅同源）；没命中维持目录那份。
+   * 应用了「本地文件」，这里就说本地文件（与预设页横幅同源）；没命中维持目录那份。
    * 覆盖只在目录那份就绪后发生：waiting / failed 的三态动画不动。
    */
   const presetReady = preset.status === 'ready'
@@ -600,7 +600,7 @@ export default function PageHome({ density }: PageHomeProps) {
   /*
    * 「复制后处理脚本」那一整条命令 —— **由后端现拼**（`getPostProcessCommand`）：
    * 可执行物 = 本程序自己（壳那一侧的 `current_exe()`），预设 = 那台机器上真实的绝对
-   * 落点（我那一份优先，其次是官方那份——**必须真在盘上**）。前端**不拼任何一段路径**：
+   * 落点（本地那份优先，其次是云端那份——**必须真在盘上**）。前端**不拼任何一段路径**：
    * 早先硬编码的是另一个仓库的 Windows exe，Mac 上复制出去的命令必然跑不通。
    *
    * ★ 按钮**常驻**（2026-10-10 作者裁定）：能不能给命令**不决定**摆不摆按钮 ——
@@ -707,7 +707,7 @@ export default function PageHome({ density }: PageHomeProps) {
   /*
    * 2026-10-13：「正在使用 · 我的文件」那个来源后缀去掉 —— 作者：「我的一份、官方一份
    * 这些相关的都去掉，那是以前的旧版才那么设计的」。命中底账就说「正在使用」，
-   * 不再分来源（官方底稿 / 自己那份），这句只回答"是不是正在用的那一份"。
+   * 不再分来源（云端底稿 / 自己那份），这句只回答"是不是正在用的那一份"。
    */
   const inUseNote = activeForSel === null || !presetReady ? undefined : '正在使用'
   /* picker sheet 那块卡：名字 / 路径换成底账那份，其余（三轴数值等）保持原样。
@@ -937,7 +937,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 label: '保存',
                 on: dirty,
                 primary: true,
-                /* 存不动时就灰着 —— 不再挂「我的一份 / 另存为我的预设」那套旧版提示
+                /* 存不动时就灰着 —— 不再挂「本地这份 / 另存为本地预设」那套旧版提示
                    （2026-10-13 作者：这些字都去掉） */
                 disabled: !canSave,
                 onClick: commitAll,
@@ -1034,7 +1034,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 label: '保存',
                 on: dirty,
                 primary: true,
-                /* 存不动时就灰着 —— 不再挂「我的一份 / 另存为我的预设」那套旧版提示
+                /* 存不动时就灰着 —— 不再挂「本地这份 / 另存为本地预设」那套旧版提示
                    （2026-10-13 作者：这些字都去掉） */
                 disabled: !canSave,
                 onClick: commitAll,

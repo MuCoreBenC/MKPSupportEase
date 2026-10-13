@@ -75,7 +75,7 @@ export function machineToneOf(machineId: string | null | undefined): MachineTone
 /**
  * 一行该按哪台机型上色。
  *
- * ★ **「我的文件」那一行要按文件自己标的归属**（`ownMachineId`，来自文件头
+ * ★ **「本地文件」那一行要按文件自己标的归属**（`ownMachineId`，来自文件头
  * `# machine:` 那两行），不是按当前筛选档（行上的 `machineId` 在"全部机型"那一档下
  * 是空的）。用筛选档上色会出现"筛 A1 时 mini 那份也染成蓝的"—— 那是更大的错。
  */

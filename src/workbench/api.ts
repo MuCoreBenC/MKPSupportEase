@@ -91,13 +91,13 @@ export interface Boot {
   /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
   storeDirs: { name: string; role: string }[]
   /**
-   * 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+   * 云端源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
    * null = 还没配 —— 客户端构建时就不会注入默认源（见 `src-tauri/build.rs`）。
    * 改了要**重新构建客户端**才生效（编译期注入）；`wb_set_bootstrap` 写它
    */
   bootstrapUrl: string | null
   /**
-   * 第二官方源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
+   * 第二云端源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
    * null = 没配 —— 客户端构建不注入这一档，客户端界面也不出现它。各读各的，互不兜底
    */
   giteeBootstrapUrl: string | null
@@ -789,11 +789,11 @@ export interface FileChange {
   after: string | null
 }
 
-/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个官方源」那一步的结论 */
+/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个云端源」那一步的结论 */
 export type MirrorStatus = 'pushed' | 'upToDate' | 'skipped' | 'failed'
 
 /**
- * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个官方源**的结果。
+ * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个云端源**的结果。
  *
  * ★ 它回答的是「**客户端读的那个源**跟上了没有」—— 与平台上的 PR 状态是两件事。
  * 一次发布只开一条 PR（代码主线仍只走 GitHub），合完由这一步把数据面铺到另一个源上。
@@ -870,7 +870,7 @@ export interface PublishRecord {
   auditFailed: number
   summary: string
   /**
-   * 合并之后「把主线同步到第二个官方源」的结论。
+   * 合并之后「把主线同步到第二个云端源」的结论。
    *
    * `null` = 这一条写下来的时候还没走到合并那一步。★ 它**不由刷新改写** ——
    * 刷新拿到的是平台上的 PR 状态，与"镜像跟没跟上"是两件事。
@@ -1549,7 +1549,7 @@ export const wb = {
   /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
   appVersion: () => invoke<string>('wb_app_version'),
   /**
-   * 写官方源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
+   * 写云端源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
    * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。
    * 两格一笔写全 —— 这一笔就是配置的全部真值
    */
@@ -1855,7 +1855,7 @@ export const wb = {
    * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
    *
    * ★ 端哪一份：`v1` / `v2` 是两代夹具，`delivery` 是**当前交付** ——
-   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到我的
+   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到本地
    * 新版」这条闭环在本地整条走得通，而且正式那份从头到尾不参与。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),

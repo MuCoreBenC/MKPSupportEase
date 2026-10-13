@@ -7,10 +7,10 @@
 //! 之后，以后更新不覆盖；除非他把文件删了重新下载** —— 覆盖与否这件事盘上不存在
 //! （文件字节、目录登记都说不出"用户改过备注"），所以记在用户根的这本账里。
 //!
-//! - 键 = 文件的稳定身份：官方交付行是 **`catalog.path`**（换版本时 `fileName`
+//! - 键 = 文件的稳定身份：云端交付行是 **`catalog.path`**（换版本时 `fileName`
 //!   可能同名、但目录里那份落点不变；删除后再下载 = 账上的键被清掉，回到工作台那句）；
-//! - 用户线（`presets-mine/`）是**相对用户根的路径**（与出处账同一把钥匙）。
-//!   两个键空间不重叠（`delivery/…` vs `presets-mine/…`），合在一本账里没问题。
+//! - 用户线（`presets-local/`）是**相对用户根的路径**（与出处账同一把钥匙）。
+//!   两个键空间不重叠（`delivery/…` vs `presets-local/…`），合在一本账里没问题。
 //!
 //! 账上有的 = 用户改过 ⇒ 界面用它；没有 ⇒ 回落 catalog 里那一版的 `remark`；
 //! 连版本都没有 ⇒ 回落路径文本。**账本丢了什么都不坏**（退回工作台的备注）。
@@ -105,12 +105,12 @@ mod tests {
         set(
             d.path(),
             "delivery/mkp/presets/A1-standard.toml",
-            Some("我的常用配置"),
+            Some("本地常用配置"),
         )
         .unwrap();
         assert_eq!(
             get(d.path(), "delivery/mkp/presets/A1-standard.toml").as_deref(),
-            Some("我的常用配置"),
+            Some("本地常用配置"),
         );
     }
 
@@ -119,11 +119,11 @@ mod tests {
     #[test]
     fn an_empty_remark_is_a_valid_override_not_a_removal() {
         let d = tempfile::tempdir().unwrap();
-        set(d.path(), "presets-mine/A.toml", Some("x")).unwrap();
-        set(d.path(), "presets-mine/A.toml", Some("  ")).unwrap();
-        assert_eq!(get(d.path(), "presets-mine/A.toml").as_deref(), Some(""));
-        set(d.path(), "presets-mine/A.toml", None).unwrap();
-        assert_eq!(get(d.path(), "presets-mine/A.toml"), None);
+        set(d.path(), "presets-local/A.toml", Some("x")).unwrap();
+        set(d.path(), "presets-local/A.toml", Some("  ")).unwrap();
+        assert_eq!(get(d.path(), "presets-local/A.toml").as_deref(), Some(""));
+        set(d.path(), "presets-local/A.toml", None).unwrap();
+        assert_eq!(get(d.path(), "presets-local/A.toml"), None);
     }
 
     /// 删除文件时清键：「删了重新下载就恢复工作台的备注」的判据落在这里；
@@ -134,7 +134,7 @@ mod tests {
         set(d.path(), "delivery/mkp/presets/A1-fast.toml", Some("改过")).unwrap();
         remove(d.path(), "delivery/mkp/presets/A1-fast.toml").unwrap();
         assert_eq!(get(d.path(), "delivery/mkp/presets/A1-fast.toml"), None);
-        remove(d.path(), "presets-mine/没有.toml").unwrap();
+        remove(d.path(), "presets-local/没有.toml").unwrap();
         atomic_write(&d.path().join("preset-remarks.json"), b"{not json").unwrap();
         assert!(load(d.path()).is_empty());
     }

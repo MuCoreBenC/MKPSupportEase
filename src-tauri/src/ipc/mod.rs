@@ -13,7 +13,7 @@
 //! 命令**两个平台同一形状、没有任何写死的路径**：macOS 用 macOS 的 exe 与落点，
 //! Windows 用 Windows 的（2026-10-10 作者裁定：按钮常驻、命令动态生成）。
 //! 旧实现里"只记日志"的空壳与恒 `ready` 的假状态都已删掉。
-//! 业务数据（预设 / 参数 / 下载区 / 使用中…）全在 [`presets`] / [`mine`] / [`catalog`]
+//! 业务数据（预设 / 参数 / 下载区 / 使用中…）全在 [`presets`] / [`local`] / [`catalog`]
 //! 那几个模块里，读的是 catalog 与数据根 —— 与 `src/api/contract.ts` 一一对应。
 //!
 //! **2026-10-02 清扫**：首圈的 `get_preset`（一张 v023 时代的硬编码表，`preset_of`）删除 ——
@@ -21,7 +21,7 @@
 //! 它只剩测试与注册清单在引用，是"平行真相"的残留。
 //!
 //! **2026-10-08 校准改判**：`save_offsets`（三轴落 `index/offsets.json`，只写不读的孤岛）
-//! 退役 —— 校准值随**用户工作副本**走（`ipc::mine::save_preset_calibration` 写进那份
+//! 退役 —— 校准值随**用户工作副本**走（`ipc::local::save_preset_calibration` 写进那份
 //! TOML 的 `offset_x/y/z`），落点与读写口都在用户线那一族里。
 
 /// **本机 BBS 工艺预设**（2026-10-13）：工艺页「本机工艺」那一档的清单与单份正文
@@ -30,9 +30,9 @@ pub mod bbs;
 pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
-pub mod mine;
+pub mod local;
 /// **逐参数「官方更新」的两条命令**（2026-10-09）：读三方账（我 / 官方旧值 / 官方新值）
-/// 与落采用·保持的决定。官方那一版默认值住在隐藏 baseline 里，用户看不见它。
+/// 与落采用·保持的决定。云端那一版默认值住在隐藏 baseline 里，用户看不见它。
 pub mod param_sync;
 /// **钩子模式那三条命令**（2026-10-09）：看那一趟 / 停那一趟 / 答那一问 ——
 /// 那一趟本身住 [`crate::hook_ui`]（切片器导出 G-code 时起的那一次）。
@@ -43,7 +43,7 @@ pub mod prefs;
 /// 与「恢复默认」的基准值。baseline 是隐藏内部存储，用户看不见它。
 pub mod preset_baseline;
 /// **对比台的两条命令**（2026-10-08）：读一份用户预设的参数 / 把改过的几项写回它自己。
-/// **只在用户自己的预设之间对比** —— 官方基线不进对比台。
+/// **只在用户自己的预设之间对比** —— 云端基线不进对比台。
 pub mod preset_params;
 pub mod presets;
 /// **报告页**：后处理执行报告与历史（读 `gcode_history/*_meta.json`）+
@@ -354,8 +354,8 @@ fn post_process_refused(reason: impl Into<String>) -> PostProcessCommandDto {
 
 /// 组装那一条命令（**纯函数**：喂假 exe 与临时根就能判 —— 见下面的判据）。
 ///
-/// 预设那一份的先后：**我那一份**（用户工作副本，匹配口径在
-/// [`mine::user_copy_for`]）> 官方交付那份，且**必须真在盘上**
+/// 预设那一份的先后：**本地那份**（用户工作副本，匹配口径在
+/// [`local::local_copy_for`]）> 云端交付那份，且**必须真在盘上**
 /// （相对落点 / 不存在的文件贴进切片器都是同一种事故）。
 fn post_process_dto(
     exe: Option<&std::path::Path>,
@@ -371,8 +371,9 @@ fn post_process_dto(
         ));
     };
 
-    let at = match mine::user_copy_for(internal_root, user_root, catalog, machine_id, version_id)? {
-        /* 我那一份：扫出来时状态就已经是 Ok（能读 + TOML 语法过），绝对路径不是猜的 */
+    let at = match local::local_copy_for(internal_root, user_root, catalog, machine_id, version_id)?
+    {
+        /* 本地那份：扫出来时状态就已经是 Ok（能读 + TOML 语法过），绝对路径不是猜的 */
         Some(f) => user_root.join(&f.path),
         None => match catalog.file_of(machine_id, version_id) {
             None => {
@@ -468,10 +469,10 @@ mod tests {
     #[test]
     fn the_command_is_built_from_the_two_real_paths_and_survives_spaces() {
         let exe = std::path::Path::new("程序 目录/SupportEase");
-        let toml = std::path::Path::new("我的 预设/A1 mini.toml");
+        let toml = std::path::Path::new("本地 预设/A1 mini.toml");
         let cmd = post_process_command(exe, toml);
         assert_eq!(
-            cmd, "\"程序 目录/SupportEase\" --Toml \"我的 预设/A1 mini.toml\" --Gcode",
+            cmd, "\"程序 目录/SupportEase\" --Toml \"本地 预设/A1 mini.toml\" --Gcode",
             "两段都包双引号（空格 / 中文能扛），参数只有 --Toml / --Gcode"
         );
         assert_eq!(cmd.matches("--Toml").count(), 1, "只有一处 --Toml：{cmd}");
@@ -537,7 +538,7 @@ mod tests {
         );
     }
 
-    /// 官方那份**真在盘上** ⇒ 命令指它；`toml` 就是 catalog 落点的绝对路径
+    /// 云端那份**真在盘上** ⇒ 命令指它；`toml` 就是 catalog 落点的绝对路径
     /// （内部根 + `path`，前端不拼任何一段）
     #[test]
     fn the_command_points_at_the_real_file_on_the_internal_root() {
@@ -572,8 +573,8 @@ mod tests {
         );
     }
 
-    /// **我那一份优先**：用户副本存在时命令指它 —— 与校准页读的是同一份
-    /// （匹配口径共用 `mine::user_copy_for`），官方那份在不在盘上都不换
+    /// **本地那份优先**：用户副本存在时命令指它 —— 与校准页读的是同一份
+    /// （匹配口径共用 `local::local_copy_for`），云端那份在不在盘上都不换
     #[test]
     fn the_users_own_copy_wins_over_the_official_file() {
         let catalog = catalog();
@@ -581,15 +582,15 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let exe = std::path::Path::new("dev/mkp-support-ease");
 
-        /* 官方那份也在盘上：顺序不影响结果，用户操作的那份优先 */
+        /* 云端那份也在盘上：顺序不影响结果，用户操作的那份优先 */
         let f = catalog
             .file_of("A1_MINI", "FASTV3.3")
             .expect("目录里该有这一份");
         crate::fsx::atomic::atomic_write(&internal.path().join(&f.path), b"[toolhead]\n").unwrap();
 
-        let mine = "# machine: A1_MINI\n# variant: fastv3.3\n[toolhead]\noffset_x = -0.9\n";
-        let mine_at = user.path().join("presets-mine/A1_MINI-fastv3.3.toml");
-        crate::fsx::atomic::atomic_write(&mine_at, mine.as_bytes()).unwrap();
+        let local = "# machine: A1_MINI\n# variant: fastv3.3\n[toolhead]\noffset_x = -0.9\n";
+        let local_at = user.path().join("presets-local/A1_MINI-fastv3.3.toml");
+        crate::fsx::atomic::atomic_write(&local_at, local.as_bytes()).unwrap();
 
         let dto = post_process_dto(
             Some(exe),
@@ -603,8 +604,8 @@ mod tests {
         assert!(dto.ready);
         assert_eq!(
             dto.toml.expect("ready 就该有 toml"),
-            mine_at.display().to_string(),
-            "指我那一份（presets-mine/…），不是官方交付那份"
+            local_at.display().to_string(),
+            "指本地那份（presets-local/…），不是云端交付那份"
         );
     }
 

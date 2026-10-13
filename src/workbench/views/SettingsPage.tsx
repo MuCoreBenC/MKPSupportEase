@@ -1,5 +1,5 @@
 /**
- * 「设置」页 —— 数据根只读 + **一块可编辑的配置**（官方源）。
+ * 「设置」页 —— 数据根只读 + **一块可编辑的配置**（云端源）。
  *
  * 数据根（presets / workbench / dist）**不可配**：本仓的预设真相源固定是
  * `<repo>/presets`（没有第二候选、不 fallback），所以这一页把它们摆开，让人一眼看清
@@ -32,7 +32,7 @@
  *
  * 上面那一格是**发布到哪**（构建期注入）。这一格是**起一份本地假云端** ——
  * 一颗按钮替你敲 `npm run preset-source:dev`，把 `scripts/preset-test-server`
- * 起在 `127.0.0.1:8787` 上，于是不用为了验"官方发了新版本"真去发一版。
+ * 起在 `127.0.0.1:8787` 上，于是不用为了验"云端发了新版本"真去发一版。
  *
  * ★ **它只起服务，不碰客户端**（作者 2026-10-08 裁决）。先前那一版连客户端
  * `tauri dev` 一起起（`npm run dev:test-update` + `MKPSE_PRESET_SOURCE_URL`）——
@@ -74,7 +74,7 @@ interface Props {
 }
 
 export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
-  /* 官方源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
+  /* 云端源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
      下次 wb_boot 会带回同一份）。GitHub 是主源；Gitee 是镜像（空 = 没配/清除） */
   const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
   const [saved, setSaved] = useState<string | null>(boot.bootstrapUrl)
@@ -773,7 +773,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
 
       <div className={s.card}>
         <div className={s.cardHead}>
-          <b>官方源（Bootstrap）</b>
+          <b>云端源（Bootstrap）</b>
           <span className={s.cardNote}>发布产物发到哪 —— 工作台唯一一处；客户端构建时编进去</span>
         </div>
         <div className={s.cardBody}>
@@ -800,7 +800,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 /* 中性示例（`<owner>/<repo>`），**不是"默认值"** ——
                    空着就是"还没配"，别让占位符看起来像已经填好了 */
                 placeholder="https://github.com/<owner>/<repo>（主源）"
-                aria-label="官方源（GitHub 主源）地址"
+                aria-label="云端源（GitHub 主源）地址"
               />
             </div>
             <div className={s.vrow}>
@@ -813,7 +813,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 value={giteeBootstrap}
                 onChange={(e) => setGiteeBootstrap(e.target.value)}
                 placeholder="https://gitee.com/<owner>/<repo>（镜像，空 = 不提供）"
-                aria-label="官方源（Gitee 镜像）地址"
+                aria-label="云端源（Gitee 镜像）地址"
               />
             </div>
             <div className={s.vrow}>
@@ -978,7 +978,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             <p className={s.vhelp}>
               ★ 客户端那边的节奏：进「预设」页时它<b>自己查一次</b>远端目录（比 revision，
               本次运行只查一次），查到就把本地那份目录换掉 —— 但<b>绝不自动下载预设文件</b>，
-              云端表里那几行要点「下载」才落进「我的预设」。所以"生成完看不到更新"通常只有两种原因：
+              云端表里那几行要点「下载」才落进「本地预设」。所以"生成完看不到更新"通常只有两种原因：
               地址填的不是上面这一串，或者这次运行已经查过了（重进页面 / 重启客户端再查一次）。
             </p>
 

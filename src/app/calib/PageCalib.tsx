@@ -314,7 +314,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
 
   /*
    * A3：底账正指着当前选中 combo 时，pill 说**底账那份**的名字 ——
-   * 应用了「我的文件」就显示我的文件（与预设页横幅、首页同源），不再显示目录底稿。
+   * 应用了「本地文件」就显示本地文件（与预设页横幅、首页同源），不再显示目录底稿。
    * （activeEntry 来自上面的 AppState 订阅。）
    */
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
@@ -427,7 +427,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
   /*
    * 抽屉里点一份 = 明确要用这份：落到 sel 之外真写底账（与首页 / 参数页抽屉同一语义；
    * 首页三级浏览不算应用，那边走的是明确的「应用」按钮）。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「我的文件」）、应用不了保持原账。
+   * 守则见 activateCombo：底账已命中不动（不顶掉「本地文件」）、应用不了保持原账。
    */
   const applyPreset = useCallback(
     (uid: string) => {
@@ -518,8 +518,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           <>
             <span>已保存</span>
             <span className={s.changeDot}>·</span>
-            {/* 2026-10-13：原来是「改动已写进『我的预设』」—— 「我的预设」那套说法
-                整条退役（作者：「我的一份、官方一份这些相关的都去掉」），只说结果 */}
+            {/* 2026-10-13：原来是「改动已写进『本地预设』」—— 「本地预设」那套说法
+                整条退役（作者：「本地这份、云端一份这些相关的都去掉」），只说结果 */}
             <span className={s.changeList}>改动已经写进预设文件</span>
           </>
         )}

@@ -353,7 +353,7 @@ export default function PageParams({
   const [attachBody, bodyWidth] = useWidth()
   /**
    * 「选择要跟随的更新」那一屏的开合。`openSyncOnStart` 是右键菜单那条直路
-   * （用户点「选择要跟随的官方更新」＝他已经知道有更新等着处理）。
+   * （用户点「选择要跟随的云端更新」＝他已经知道有更新等着处理）。
    */
   const [syncOpen, setSyncOpen] = useState(openSyncOnStart)
   /** 预设抽屉的开合 + pill 的 ref（关抽屉后焦点要还回去） */
@@ -546,7 +546,7 @@ export default function PageParams({
   const fileLabel = u.fileLabel ?? `${u.machineId} · ${u.versionId}`
   /*
    * pill 说的是「**正在用哪份**」：底账命中当前 combo → 底账那份（作者 2026-10-06：
-   * 应用的是官方件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
+   * 应用的是云端件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
    * 没命中（正在编辑另一份）→ 退回编辑目标。确认框 / 历史标题仍用 fileLabel
    * —— 它们回答的是「写回哪份 / 改的哪份」，与 pill 是两个问题。
    */
@@ -573,14 +573,14 @@ export default function PageParams({
   }
 
   /*
-   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是官方底稿，
-   * 保存 = 另存成你自己的一份（`presets-mine/…（已修改）.toml`，原件不动）——
+   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是云端底稿，
+   * 保存 = 另存成你自己的一份（`presets-local/…（已修改）.toml`，原件不动）——
    * 原来那句"保存后会覆盖 A1.toml"与实际落盘相反，是测试报告里"用户不敢赌"的根源；
-   * 编辑的是我的文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
+   * 编辑的是本地文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
    * 加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
    * 完整的落点说明在保存确认弹层里，这里挂了 title，悬停看全。
    */
-  const savingToMine = u.editingPreset?.origin === 'mine'
+  const savingToLocal = u.editingPreset?.origin === 'local'
   const stateText =
     u.dirtyCount === 0
       ? density === 'mini'
@@ -588,7 +588,7 @@ export default function PageParams({
         : '没有未保存的改动'
       : density === 'mini'
         ? `${u.dirtyCount} 处未保存`
-        : savingToMine
+        : savingToLocal
           ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
           : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
 
@@ -622,7 +622,7 @@ export default function PageParams({
         onRevertToSaved={u.revertToSaved}
         /*
          * 官方更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
-         * 认不出是哪一版官方）时不传 —— 行上一律不画，与以前长得一模一样。
+         * 认不出是哪一版云端）时不传 —— 行上一律不画，与以前长得一模一样。
          */
         syncOf={u.sync === null ? undefined : u.syncOf}
         onAdoptSync={(key) => u.decideSync([key], 'adopt')}
@@ -665,7 +665,7 @@ export default function PageParams({
    *     「只把框里的字退回去」。）
    *   · `e.altKey` 时不认：`Ctrl+Alt+Z` 在部分键盘布局上是 AltGr+Z（欧洲键盘打 @ 那种）。
    *   · **弹层（保存确认 / 恢复默认值 / 切机型确认）开着时，认得的这几个键一律吃掉**
-   *     （`preventDefault` + 什么都不做）。不能只是「不办我的事」：那样按键会落到浏览器
+   *     （`preventDefault` + 什么都不做）。不能只是「不办本地事」：那样按键会落到浏览器
    *     手里，焦点要是在某个输入框上，它会去改那个框里的字 ——
    *     弹层背后悄悄变一个值，比什么都不发生更糟。关掉弹层再动手，账才干净。
    *   · `Ctrl+S` 不直落保存：那是鼠标走的路（先看清楚要写哪几处，再按「确认保存」），
@@ -915,7 +915,7 @@ export default function PageParams({
             </div>
 
             {/*
-              官方更新（2026-10-09）：官方改过的项**不直接顶掉我的值**，
+              云端更新（2026-10-09）：云端改过的项**不直接顶掉本地值**，
               它们先在这里等着 —— 一屏一条，动作只有一个去处（那一个弹层）。
               行上也能逐项处理（见 ParamRow 的两个按钮），这条路是"一次看完"的那条。
             */}
@@ -936,8 +936,8 @@ export default function PageParams({
               </div>
             )}
             {/*
-              「官方换版了，但新版正文还没取回来」：一条陈**述**，不是错误 ——
-              拿不到官方那一版的字节就逐项比不出来（不编一个差异出来）。
+              「云端换版了，但新版正文还没取回来」：一条陈**述**，不是错误 ——
+              拿不到云端那一版的字节就逐项比不出来（不编一个差异出来）。
             */}
             {u.pendingCount === 0 && u.syncNeedsFetch && (
               <p className={s.warn}>
@@ -1115,7 +1115,7 @@ export default function PageParams({
               <p className={s.sheetText}>
                 {/*
                  * 退回的是**目录里的出厂值**（2026-10-08 资源库改判）：那套"退到这份预设
-                 * 当初那版官方的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
+                 * 当初那版云端的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
                  * 都要按「保存修改」才落地。
                  */}
                 会把全部参数改回出厂设置。
@@ -1151,12 +1151,12 @@ export default function PageParams({
               <h3 className={s.sheetTitle}>确认保存？</h3>
               {/*
                 落点按**编辑目标**说（A1 统一口径，与 Rust 侧 `commit_preset_draft` 的两条
-                落点一一对应）：官方底稿 → 另存成你自己的一份（原件一个字不动）；
-                我的文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是官方原件，
-                实际却落 presets-mine/ —— 测试报告里"我不敢赌"的那句话就是它。
+                落点一一对应）：云端底稿 → 另存成你自己的一份（原件一个字不动）；
+                本地文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是云端原件，
+                实际却落 presets-local/ —— 测试报告里"我不敢赌"的那句话就是它。
               */}
               <p className={s.sheetText}>
-                {u.editingPreset?.origin === 'mine' ? (
+                {u.editingPreset?.origin === 'local' ? (
                   <>
                     以下 <b>{changedEntries.length}</b> 处改动会写回你自己那一份{' '}
                     <b>{fileLabel}</b>：
@@ -1164,13 +1164,13 @@ export default function PageParams({
                 ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
                   <>
                     以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
-                    presets-mine/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
+                    presets-local/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
                     （云端原件一个字不动）：
                   </>
                 ) : (
                   <>
                     以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
-                    （presets-mine/，云端原件一个字不动）：
+                    （presets-local/，云端原件一个字不动）：
                   </>
                 )}
               </p>

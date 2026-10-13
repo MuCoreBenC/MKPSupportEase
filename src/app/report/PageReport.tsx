@@ -513,9 +513,9 @@ function buildGroups(detail: ReportDetail): Group[] {
   const slicerSec = slicerEstimateSeconds(
     typeof stats.originalPrintTime === 'string' ? stats.originalPrintTime : undefined,
   )
-  const mine = detail.estimatedPrintSeconds ?? detail.printTime?.totalSeconds
-  if (slicerSec !== null && slicerSec > 0 && mine !== undefined) {
-    const pct = Math.round(((mine - slicerSec) / slicerSec) * 100)
+  const ours = detail.estimatedPrintSeconds ?? detail.printTime?.totalSeconds
+  if (slicerSec !== null && slicerSec > 0 && ours !== undefined) {
+    const pct = Math.round(((ours - slicerSec) / slicerSec) * 100)
     printCells.push(['比切片器预估', `${pct >= 0 ? '+' : ''}${pct}%`])
   }
   if (hasAnyValue(printCells)) {

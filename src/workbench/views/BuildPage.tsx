@@ -156,7 +156,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    * 非 null ⇒ 直接进**发布回执**视图，不重跑十五项 —— 那是过去那一刻的快照。
    */
   const [gateReport, setGateReport] = useState<PublishTxReport | null>(null)
-  /** 上一次合并之后「把主线同步到第二个官方源」的结论（重新打开回执时还要用） */
+  /** 上一次合并之后「把主线同步到第二个云端源」的结论（重新打开回执时还要用） */
   const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)

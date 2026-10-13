@@ -102,7 +102,7 @@ pub const MANIFEST_FILE: &str = "manifest.json";
 /// —— **与 [`crate::runtime::source::CATALOG_FILE`] 同一个值**（直接引用它：
 /// 同一份名字写在两处，迟早有一处改了另一处没改）
 pub const NEW_CATALOG_FILE: &str = crate::runtime::source::CATALOG_FILE;
-/// 官方源入口文件（Source Manifest）的固定名。客户端拿它解析寻址规则
+/// 云端源入口文件（Source Manifest）的固定名。客户端拿它解析寻址规则
 /// （见 `runtime::source` / `runtime::resolver`）——第十七刀起它是发布产物的一部分
 pub const SOURCE_FILE: &str = "source.json";
 
@@ -124,7 +124,7 @@ pub fn bootstrap_json() -> serde_json::Value {
     })
 }
 
-/// 官方源（Bootstrap）默认分支与**默认交付路径**：仓库地址补成 `main/<这里>`
+/// 云端源（Bootstrap）默认分支与**默认交付路径**：仓库地址补成 `main/<这里>`
 /// （`source.json` 在交付根里，见模块头）。
 ///
 /// 这是**产品契约的一半**："我有一个仓库" → 系统自己去 `main` 的交付目录找 Bootstrap。
@@ -134,7 +134,7 @@ const DEFAULT_REF: &str = "main";
 /// 交付根相对仓库根的路径（`presets/delivery`），与 `paths::delivery_root()` 同一处布局
 const DELIVERY_REL_PATH: &str = "presets/delivery";
 
-/// 官方源（Bootstrap）地址的**规范化** —— 工作台输入侧的唯一一处。
+/// 云端源（Bootstrap）地址的**规范化** —— 工作台输入侧的唯一一处。
 ///
 /// 产品契约（作者 2026-10-02 定死）——**用户只表达"我有一个仓库"，其余是系统的事**：
 ///
@@ -1002,7 +1002,7 @@ pub fn publish_into(
      * 云端表的「时间」列（`catalog.publishedAt` → 这次发布的时刻）。
      */
     write_catalog_json(delivery_root, book, &meta.stamp)?;
-    /* Bootstrap：客户端"官方内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
+    /* Bootstrap：客户端"云端内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
     crate::fsx::atomic::atomic_write_json(&delivery_root.join(SOURCE_FILE), &bootstrap_json())?;
 
     Ok(PublishOutcome {

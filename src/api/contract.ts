@@ -20,7 +20,7 @@ export interface Preset {
   /** 文件名，界面上直接显示 */
   name: string
   /**
-   * **落点**（用户线是相对用户根的 `presets-mine/…`，官方线是相对内部根的
+   * **落点**（用户线是相对用户根的 `presets-local/…`，云端线是相对内部根的
    * `delivery/mkp/presets/…`）—— 读正文、保存校准都把它交回后端，所以它**不是**
    * 本机绝对路径：后端只收相对落点（绝对路径一律被那道防穿越的闸拒掉）。
    * 界面上只当悬停提示与去重键用。
@@ -30,10 +30,10 @@ export interface Preset {
   speed: number
   /**
    * **「我那一份」的落点** —— 校准保存写它（2026-10-08 资源库改判：偏移随「我的预设」走）。
-   * `null` = 这个机型 / 版本还没有你的一份：校准页照旧显示官方默认值，**保存被拦**
-   * （先另存一份自己的才有得存 —— 官方那一份是模板，永远不可变）。
+   * `null` = 这个机型 / 版本还没有你的一份：校准页照旧显示云端默认值，**保存被拦**
+   * （先另存一份自己的才有得存 —— 云端那一份是模板，永远不可变）。
    */
-  mine: { path: string; fileName: string } | null
+  local: { path: string; fileName: string } | null
 }
 
 /** 校准板模型（Z 板 / XY 板 / 支撑测试件） */
@@ -632,30 +632,30 @@ export interface PresetFileInfo {
 /**
  * **用户自己的一份文件**（用户线）。
  *
- * 与 `PresetFileInfo`（官方文件）是两种东西，不要混 —— 这是总纲 §1③「预设 TOML 的一生」
+ * 与 `PresetFileInfo`（云端文件）是两种东西，不要混 —— 这是总纲 §1③「预设 TOML 的一生」
  * 在类型上的体现：
  *
  * ```text
- * 官方线                               用户线
- *   云端 → mkp/ → archive/              presets-mine/（另存出来的那一份）
+ * 云端线                               用户线
+ *   云端 → mkp/ → archive/              presets-local/（另存出来的那一份）
  *   有 SHA、属于版本、不可变            云端没有它：没有 SHA、不属于任何版本、不参与套餐
  * ```
  *
- * 用户那份**从官方另存出来之后与云端脱钩**，可以自由改，**永远不回写官方原件**；
- * 反过来官方换版本也不会动它。
+ * 用户那份**从云端另存出来之后与云端脱钩**，可以自由改，**永远不回写云端原件**；
+ * 反过来云端换版本也不会动它。
  *
  * **形状就是盘上的事实**：路径 / 文件名 / 大小 / 改动时刻 / 认得出的类别。
  * 没有「用户自己标的适用机型」这种字段 —— 今天没有任何地方能让用户去标它，
  * 留一个永远空的字段就是在编形状（需要它的那一步再加）。
  */
 /**
- * 用户自己那份**基于的官方那一版**现在怎么样了（第七层）。
+ * 用户自己那份**基于的云端那一版**现在怎么样了（第七层）。
  *
  * 三档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是不是同一份** ——
  * 不回答"这份用户文件好不好"（用户自己那份从来不是坏文件）。
  *
  * 判定用的是文件头血统里记的 `based_on_sha256`（建副本那一刻来源全文的摘要），
- * **不拿用户文件自己的字节去比**：用户改过的东西必然与官方不同，那样只会得出
+ * **不拿用户文件自己的字节去比**：用户改过的东西必然与云端不同，那样只会得出
  * "永远不一样"这种废话。
  */
 export type BasedOn = 'current' | 'outdated' | 'unknown'
@@ -667,10 +667,10 @@ export type BasedOn = 'current' | 'outdated' | 'unknown'
  * **它不回答"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对 —— 那是 Preset 语义，
  * 客户端不复制那份 schema）；外部修改过但仍是能读的 TOML ⇒ 照常 `ok`，**不因 SHA 报警**。
  */
-export type MineState = 'ok' | 'unreadable'
+export type LocalState = 'ok' | 'unreadable'
 
-export interface UserPresetFile {
-  /** 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
+export interface LocalPresetFile {
+  /** 相对**用户根**的路径（`presets-local/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
   path: string
   fileName: string
   size: number
@@ -684,16 +684,16 @@ export interface UserPresetFile {
    */
   kind: FileKind | null
   /**
-   * 第九层的**文件级**状态（见 [`MineState`]）。`unreadable` 的界面上说"文件无法读取"，
+   * 第九层的**文件级**状态（见 [`LocalState`]）。`unreadable` 的界面上说"文件无法读取"，
    * **不许应用 / 编辑**；不是预设候选（认不出是哪一类）时是 `null`
    */
-  state: MineState | null
+  state: LocalState | null
   /**
    * 用不了时后端给的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
    * 能用 / 不适用是 `null`
    */
   stateDetail: string | null
-  /** 它基于的官方那一版在不在（见 [`BasedOn`]）。`outdated` 就是"官方换版了，你这份基于旧版" */
+  /** 它基于的云端那一版在不在（见 [`BasedOn`]）。`outdated` 就是"云端换版了，你这份基于旧版" */
   basedOn: BasedOn
   /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
   basedOnLabel: string | null
@@ -707,7 +707,7 @@ export interface UserPresetFile {
    * 大小写无关归一化到版本 id）。头里没有 / 认不出 ⇒ 回落到来源那份
    * （`basedOnMachineId` / `basedOnVersionId`）。列表的机型 / 版本两列读它。
    *
-   * 「改归属」（`setUserPresetMachineVersion`）改的就是文件头那两行 ——
+   * 「改归属」（`setLocalPresetMachineVersion`）改的就是文件头那两行 ——
    * 归属是**文件自己的属性**，随文件走。
    */
   machineId: string | null
@@ -718,7 +718,7 @@ export interface UserPresetFile {
    *
    * 为什么在账本里而不是文件头：另存是**按字节**复制（血统原样带过去），往文件头里
    * 加一行就得重写字节；导入的外部文件更不能动。账本只服务界面上「来源：复制自 X」
-   * 一格，丢了就退回「我的」，什么都不坏。
+   * 一格，丢了就退回「本地」，什么都不坏。
    */
   copiedFrom: string | null
   /** 上面那条路径里的**文件名**（界面直接显示用）。没有同上 */
@@ -733,19 +733,19 @@ export interface UserPresetFile {
  * 它是"临时编辑"这条链的第一步（总纲 §1③）。**两条线**的第一步：
  *
  * ```text
- * 官方线   dist/mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-mine/A1-fast（已修改）.toml
- * 用户线   presets-mine/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
+ * 云端线   dist/mkp/presets/A1-fast.toml ──改这份──▶ 临时文件 ──保存──▶ presets-local/A1-fast（已修改）.toml
+ * 用户线   presets-local/A1-fast（已修改）.toml ──改这份──▶ 临时文件 ──保存──▶ 写回它自己（第八层）
  * ```
  *
  * 改的永远是**临时文件**（`run/draft-preset.json`，改到一半关掉也还在）；
- * 原件全程一动不动，官方那份只有"云端换版本"能替换它。
+ * 原件全程一动不动，云端那份只有"云端换版本"能替换它。
  */
 export interface PresetDraft {
-  /** 改的是哪一条线（官方交付文件 / 我自己那份）—— 保存按钮说什么由它决定 */
+  /** 改的是哪一条线（云端交付文件 / 我自己那份）—— 保存按钮说什么由它决定 */
   origin: ActiveOrigin
-  /** 从哪一份改出来的。官方线是 `mkp/` 里的文件名；用户线是给人看的文件名（落点看 `path`） */
+  /** 从哪一份改出来的。云端线是 `mkp/` 里的文件名；用户线是给人看的文件名（落点看 `path`） */
   sourceFileName: string
-  /** **用户线**的落点（相对用户根）：保存时写回这里。官方线是 `null`（落点由目录给） */
+  /** **用户线**的落点（相对用户根）：保存时写回这里。云端线是 `null`（落点由目录给） */
   path: string | null
   /** 正文：用户改到哪算哪 */
   text: string
@@ -757,7 +757,7 @@ export interface PresetDraft {
 
 /** 另存完成的结果：用户文件落在哪、多大、是不是盖掉了上一次那份 */
 export interface CommittedDraft {
-  /** 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`） */
+  /** 相对**用户根**的路径（`presets-local/A1-fast（已修改）.toml`） */
   path: string
   fileName: string
   size: number
@@ -776,8 +776,8 @@ export interface PresetTextDraft {
   /** 「改的是哪一份」的人话名（`A1-fast（已修改）.toml`） */
   fileName: string
   /**
-   * 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`）——
-   * 编辑器只服务「我的预设」，所以这里恒有值
+   * 相对**用户根**的路径（`presets-local/A1-fast（已修改）.toml`）——
+   * 编辑器只服务「本地预设」，所以这里恒有值
    */
   path: string
   /** 正文：用户改到哪算哪（**沿用所选用户线的路径**，与参数草稿共享同一个临时文件） */
@@ -793,11 +793,11 @@ export interface PresetTextDraft {
  * 只摘要不正文：`null` = 现在没有参数草稿（保存了 / 作废了 / 从没打开过）。
  */
 export interface PresetDraftSummary {
-  /** 改的是哪一条线（官方交付文件 / 我自己那份） */
+  /** 改的是哪一条线（云端交付文件 / 我自己那份） */
   origin: ActiveOrigin
-  /** 从哪一份改出来的。官方线是下载区里的文件名；用户线是给人看的文件名 */
+  /** 从哪一份改出来的。云端线是下载区里的文件名；用户线是给人看的文件名 */
   sourceFileName: string
-  /** **用户线**的落点（相对用户根）；官方线是 `null`（落点由目录给） */
+  /** **用户线**的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
   /** 「真改过才算」：与来源现在的字节比（只差血统处置 / 换行的差异不算改动） */
   dirty: boolean
@@ -806,10 +806,10 @@ export interface PresetDraftSummary {
 }
 
 /** 身份账本的一行：「我这边这一份」↔「云端那一版」 */
-export interface UserPresetIdentity {
+export interface LocalPresetIdentity {
   /** 生成一次、永不变（界面上不显示，只用来对账） */
   id: string
-  /** 现在落在哪（相对用户根，如 `presets-mine/A1-fast.toml`） */
+  /** 现在落在哪（相对用户根，如 `presets-local/A1-fast.toml`） */
   path: string
   fileName: string
   /** 从云端哪个条目下来的（目录里的 `fileName`） */
@@ -817,22 +817,22 @@ export interface UserPresetIdentity {
 }
 
 /** 一份用户文件的新落点与名字（第十层改名 / 第十一层另存为一份新的，两处共用这一个形状） */
-export interface UserFileIdentity {
-  /** 落点（相对**用户根**，`presets-mine/…`） */
+export interface LocalFileIdentity {
+  /** 落点（相对**用户根**，`presets-local/…`） */
   path: string
   fileName: string
 }
 
 /**
- * 一台机型 / 一个版本对应的「我那一份」+ 它带的校准值（校准页的初值与保存落点）。
+ * 一台机型 / 一个版本对应的「本地那份」+ 它带的校准值（校准页的初值与保存落点）。
  *
  * **整个对象缺席**（`null`）= 这个机型 / 版本还没有你的一份 —— 校准页照旧显示
- * 官方默认值，**保存被拦**（先另存一份自己的才有得存：校准的对象是「我的预设」，
- * 官方那一份是模板、永远不可变）。
+ * 云端默认值，**保存被拦**（先另存一份自己的才有得存：校准的对象是「本地预设」，
+ * 云端那一份是模板、永远不可变）。
  */
-export interface UserCopyCalibration {
+export interface LocalCopyCalibration {
   fileName: string
-  /** 落点（相对**用户根**，`presets-mine/…`）—— 保存校准时把它交回来 */
+  /** 落点（相对**用户根**，`presets-local/…`）—— 保存校准时把它交回来 */
   path: string
   /** 三轴偏移；缺一个轴就是 `null`（不拿半个基准充数） */
   axes: Axes | null
@@ -864,7 +864,7 @@ export interface ImportItem {
 export interface ImportOutcome {
   source: string
   ok: boolean
-  /** 落进用户根之后的相对路径（`presets-mine/…`）；失败是空串 */
+  /** 落进用户根之后的相对路径（`presets-local/…`）；失败是空串 */
   path: string
   fileName: string
   /** 失败原因（可直接显示）；成功是空串 */
@@ -934,11 +934,11 @@ export interface RuntimeCatalogMachine {
 }
 
 /**
- * 归档区里的一份**官方旧版本**（cloud 换版本时被换下来的那一份）。
+ * 归档区里的一份**云端旧版本**（cloud 换版本时被换下来的那一份）。
  *
- * 归档是**官方版本生命周期**的一部分，**不是用户修改历史**：换版本时旧份进
+ * 归档是**云端版本生命周期**的一部分，**不是用户修改历史**：换版本时旧份进
  * `archive/`（保留最早一份，不覆盖、不删）；用户改出来的东西是另一条线
- * （另存成另一份文件），永远不回写官方原件。
+ * （另存成另一份文件），永远不回写云端原件。
  */
 export interface ArchivedFile {
   /** 相对内部根的路径（`archive/dist/mkp/presets/A1-fast.toml`）—— 读正文时把它交回来 */
@@ -967,9 +967,9 @@ export interface ArchivedFile {
 }
 
 /**
- * 盘上这一份**认得出是哪一版吗**（第三圈第 6 层：官方文件的 SHA 报警）。
+ * 盘上这一份**认得出是哪一版吗**（第三圈第 6 层：云端文件的 SHA 报警）。
  *
- * **只答"本机这份是不是我们认可的官方内容"**，不掺"云端有没有更新"（后者是
+ * **只答"本机这份是不是我们认可的云端内容"**，不掺"云端有没有更新"（后者是
  * [`checkRemoteUpdate`]，比的是目录指纹，与本机这一份的字节无关）。混成一句「需更新」，
  * 用户既不知道自己的文件是不是被改过，也不知道该不该等更新 —— 所以它是单独一条读。
  *
@@ -979,7 +979,7 @@ export interface ArchivedFile {
 export interface DeliveryTrust {
   fileName: string
   /**
-   * `old`      认得出它是官方的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
+   * `old`      认得出它是云端的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
    * `tampered` 目录、归档、旧目录都对不上 —— 这台机器上查不出它属于哪一版
    */
   verdict: 'old' | 'tampered'
@@ -1149,25 +1149,25 @@ export interface RuntimeCatalog {
  * 使用中那一份**住在哪条线上**（第七层起）。
  *
  * ```text
- * official  官方线：目录（catalog）登记的交付文件（`mkp/…`）—— 只读，只有云端换版本能替换它
- * mine      用户线：用户自己那份（`presets-mine/…`）—— 用户可改，不属任何官方版本
+ * cloud  云端线：目录（catalog）登记的交付文件（`mkp/…`）—— 只读，只有云端换版本能替换它
+ * local      用户线：用户自己那份（`presets-local/…`）—— 用户可改，不属任何云端版本
  * ```
  *
  * **"只读"是文件归属的属性，不是"能不能被使用"的属性** —— 两条线都能成为使用中的那一份。
  */
-export type ActiveOrigin = 'official' | 'mine'
+export type ActiveOrigin = 'cloud' | 'local'
 
 /**
  * 使用中指针（新数据世界的第一个用户状态，全局唯一）。
  *
  * `intact` 是"盘上那份还是应用时刻的那份"。**两条线上它的意思不一样**：
- * 官方线正常恒 true（`mkp/` 是只读区）；用户线在用户自己又改了那份时是 false ——
+ * 云端线正常恒 true（`mkp/` 是只读区）；用户线在用户自己又改了那份时是 false ——
  * 那是正常事（那份是他的），不是"这份配置坏了"。
  */
 export interface ActivePreset {
   origin: ActiveOrigin
   fileName: string
-  /** 用户线的落点（相对用户根）；官方线是 `null`（落点由目录给） */
+  /** 用户线的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
   sha256: string
   /** 认不出是哪台机型哪一版时是空串（用户那份没有血统、或目录里已经没有来源那份） */
@@ -1177,21 +1177,21 @@ export interface ActivePreset {
 }
 
 /**
- * 「取回官方预设」的结果（[`fetchOfficialPreset`]，2026-10-09 改判）。
+ * 「取回官方预设」的结果（[`fetchCloudPreset`]，2026-10-09 改判）。
  *
- * `fetched` 说这次**有没有真的取回来一份**官方原件（本机已经是当前版时是 `false`，
+ * `fetched` 说这次**有没有真的取回来一份**云端原件（本机已经是当前版时是 `false`，
  * 一次网络都不发）；`created` 说这次**有没有新落一份我自己的工作副本**
  * （没有的话用的是已经在的那一份，那份一个字节都没动）。
  *
  * 两个都是"这次到底做了什么"的实情 —— 界面据此说清「取回来了没有」与
- * 「你之前那份还在不在」。`path` / `fileName` 是我那一份的落点：调用方要接着
+ * 「你之前那份还在不在」。`path` / `fileName` 是本地那份的落点：调用方要接着
  * 「使用」它（[`applyPreset`]）时就用这两个，不用自己拼路径。
  */
-export interface FetchOfficialResult {
+export interface FetchCloudResult {
   fetched: boolean
   created: boolean
   fileName: string
-  /** 我那一份的落点（相对用户根：`presets-mine/…`） */
+  /** 本地那份的落点（相对用户根：`presets-local/…`） */
   path: string
   /**
    * **同名已经有一份了**（2026-10-10）：这次**没落新的一份** —— 界面该问用户
@@ -1375,17 +1375,17 @@ export type ThemePref = 'light' | 'dark' | 'system'
 /* ---------- baseline + 对比台（2026-10-08） ---------- */
 
 /**
- * 官方预设的一个版本（云端表按预设归组之后，组内的每一行）。
+ * 云端预设的一个版本（云端表按预设归组之后，组内的每一行）。
  *
  * ★ **这不是"过时判定"**：它说的是"云端登记过这一版、我这一版下过没有"，
  * 不是"你那份该更新了"。用户自己那份是完整、可继续使用的一份，系统不替他更新。
  */
-export interface OfficialVersion {
-  /** 归属的官方预设文件名（`A1-fast.toml`）—— 界面按它归组 */
+export interface CloudVersion {
+  /** 归属的云端预设文件名（`A1-fast.toml`）—— 界面按它归组 */
   fileName: string
   /** 内容摘要（版本的唯一身份）。**界面不显示** —— 用户没必要看见哈希 */
   sha256: string
-  /** 官方**发布日期真值**（该版正文文件头的 `# release_time`）。`null` = 还没下载，拿不到 */
+  /** 云端**发布日期真值**（该版正文文件头的 `# release_time`）。`null` = 还没下载，拿不到 */
   releaseTime: string | null
   /** 目录代时间（`catalog.publishedAt`）—— 兜底，界面上标明是"目录发布时间" */
   publishedAt: string | null
@@ -1406,7 +1406,7 @@ export interface ParamEdit {
 
 /** 一份用户预设的参数值（对比台里的一列） */
 export interface PresetParamValues {
-  /** 相对用户根的路径（`presets-mine/A1-fast-2026-10-15.toml`） */
+  /** 相对用户根的路径（`presets-local/A1-fast-2026-10-15.toml`） */
   path: string
   fileName: string
   /** 参数 key → 控件看得懂的值（`-1.5` / `true` / `standard` / 多行 G-code） */
@@ -1420,9 +1420,9 @@ export interface PresetParamValues {
 /**
  * 一个参数上"我做过的那次决定"。
  *
- * `adopt` = 采用官方新值（文件里那一项已经写成官方新值）；
- * `hold` = 明确保持我的值（文件里那一项一个字没动）。
- * 两者都把这一项的水位推到当时的官方版 —— 于是同一版不会再挂着，官方再改才会重新进待处理。
+ * `adopt` = 采用云端新值（文件里那一项已经写成云端新值）；
+ * `hold` = 明确保持本地值（文件里那一项一个字没动）。
+ * 两者都把这一项的水位推到当时的云端版 —— 于是同一版不会再挂着，云端再改才会重新进待处理。
  */
 export type ParamDecisionKind = 'adopt' | 'hold'
 
@@ -1431,45 +1431,45 @@ export interface ParamSyncEntry {
   /** 参数 key（注册表的键，与 `RecipeParam.key` 同一套） */
   key: string
   /** 我这份文件里现在写着的值 */
-  mine: string | null
-  /** 官方**旧值**：我上次处理到的那一版官方里这一项是什么 */
+  local: string | null
+  /** 云端**旧值**：我上次处理到的那一版云端里这一项是什么 */
   baselineOld: string | null
-  /** 官方**当前最新值**。官方当前版字节不在本机 ⇒ `null`（界面照实说"还没取回来"） */
-  officialNew: string | null
-  /** 官方改过这一项、而我还没处理 */
+  /** 云端**当前最新值**。云端当前版字节不在本机 ⇒ `null`（界面照实说"还没取回来"） */
+  cloudNew: string | null
+  /** 云端改过这一项、而我还没处理 */
   pending: boolean
   /**
    * **这一项是冲突**（2026-10-10）：官方新版改了它、**我也改过它**，
-   * 两边的值还不一样。更新时这类项**必须让用户选**（使用新版值 / 保留我的值）；
-   * 不是冲突的（官方改了、我没动）点「更新」就可以直接按新版采用。
+   * 两边的值还不一样。更新时这类项**必须让用户选**（使用新版值 / 保留本地值）；
+   * 不是冲突的（云端改了、我没动）点「更新」就可以直接按新版采用。
    */
   conflict: boolean
-  /** 我已经对**当前官方版**处理过这一项 */
+  /** 我已经对**当前云端版**处理过这一项 */
   decided: ParamDecisionKind | null
 }
 
 /**
- * 一份用户预设的「官方更新」总账。
+ * 一份用户预设的「云端更新」总账。
  *
- * 三方 = **我这份文件 / 官方旧值（我上次处理到的那一版） / 官方当前最新版**。
- * 用户看不见"旧值是哪一版"这种话 —— 界面上只说"官方旧值 → 官方新值"。
+ * 三方 = **我这份文件 / 云端旧值（我上次处理到的那一版） / 云端当前最新版**。
+ * 用户看不见"旧值是哪一版"这种话 —— 界面上只说"云端旧值 → 云端新值"。
  */
 export interface PresetParamSync {
-  /** 相对用户根的路径（`presets-mine/A1-fast.toml`） */
+  /** 相对用户根的路径（`presets-local/A1-fast.toml`） */
   path: string
   fileName: string
   /** 这份预设自己的归属（文件头两行归一化后的）。认不出是 `null` */
   machineId: string | null
   versionId: string | null
-  /** 官方那一份的文件名（`A1-fast.toml`）。认不出是 `null` —— 那就比不出官方更新 */
-  officialFileName: string | null
-  /** 我这份当初基于的那一版官方的发布时间（给人看的） */
+  /** 云端那一份的文件名（`A1-fast.toml`）。认不出是 `null` —— 那就比不出云端更新 */
+  cloudFileName: string | null
+  /** 我这份当初基于的那一版云端的发布时间（给人看的） */
   basedOnReleaseTime: string | null
-  /** 官方当前版的发布时间（给人看的）。拿不到是 `null` */
+  /** 云端当前版的发布时间（给人看的）。拿不到是 `null` */
   currentReleaseTime: string | null
-  /** 官方当前版的字节**在本机可用**（可用就能逐项比） */
-  officialReady: boolean
-  /** 官方换版了：当前版与我这份当初那一版不是同一份 */
+  /** 云端当前版的字节**在本机可用**（可用就能逐项比） */
+  cloudReady: boolean
+  /** 云端换版了：当前版与我这份当初那一版不是同一份 */
   versionAdvanced: boolean
   /** 待处理条数（= `entries` 里 `pending` 的条数） */
   pendingCount: number
@@ -1746,10 +1746,10 @@ export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
    *
-   * `path` 来自 [`getUserCopyFor`]（或用户线列表）—— 必须是 `presets-mine/…` 里
+   * `path` 来自 [`getLocalCopyFor`]（或用户线列表）—— 必须是 `presets-local/…` 里
    * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
    * （注释、键序、血统三行一个字节不动）。
-   * 官方那一份是模板、永远不可变：还没有你的一份就先「另存为我的预设」。
+   * 云端那一份是模板、永远不可变：还没有你的一份就先「另存为本地预设」。
    */
   savePresetCalibration(path: string, axes: Axes): Promise<void>
 
@@ -1788,7 +1788,7 @@ export interface MkpApi {
    *
    * 两段真值都从这一侧来：可执行物 = 本程序自己（`current_exe()`：开发态是
    * `target/debug/…`，装好了就是安装位置）；预设 = 那台机器上真实的绝对落点
-   * （我那一份优先，其次是官方那份——**必须真在盘上**）。前端不拼任何一段路径：
+   * （本地那份优先，其次是云端那份——**必须真在盘上**）。前端不拼任何一段路径：
    * 早先首页硬编码的是**另一个仓库**的 Windows exe，Mac 上复制出去的命令必然跑不通。
    *
    * 给不出来（还没下载 / 目录里没有这个组合 / 拿不到自己的路径）时不抛错：
@@ -1827,24 +1827,24 @@ export interface MkpApi {
    */
   getVersionFiles(machineId: string, versionId: string): Promise<VersionFiles | null>
 
-  /** 本机预设目录里**已经有的**文件名（官方那一批，固定演示集合） */
+  /** 本机预设目录里**已经有的**文件名（云端那一批，固定演示集合） */
   getLocalFiles(): Promise<string[]>
 
   /**
-   * **用户自己的预设文件**（用户线，`<appDataDir>/user/presets-mine/`）。
+   * **用户自己的预设文件**（用户线，`<appDataDir>/user/presets-local/`）。
    *
    * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
    * 一份都没有 = 空数组，**不是错误**。
    *
    * 每一份都带上**血统**（如果它带着 `# based_on*` 三行）与它对应的判定
-   * （[`BasedOn`]）—— 那是"官方换版了、你这份还是基于旧版"这件事的判据。
+   * （[`BasedOn`]）—— 那是"云端换版了、你这份还是基于旧版"这件事的判据。
    */
-  getUserPresetFiles(): Promise<UserPresetFile[]>
+  getLocalPresetFiles(): Promise<LocalPresetFile[]>
 
   /**
    * **用户改过的备注**整本（副标题覆盖账）。**只有本地表的副标题读它** ——
    * 云端表只读工作台写的那句（本地改动不许影响云端显示，2026-10-07 作者定）。
-   * 键 = 文件身份（官方交付行是 `catalog.path`，用户线是相对用户根的路径）；
+   * 键 = 文件身份（云端交付行是 `catalog.path`，用户线是相对用户根的路径）；
    * 有 ⇒ 本地副标题用它，没有 ⇒ 用那一版工作台写的 `remark`（都没写就空着）。
    * 「更新不覆盖；删了重新下载才回到工作台那句」——删除文件时后端把键一起清掉。
    */
@@ -1864,25 +1864,25 @@ export interface MkpApi {
    * （2026-10-07 作者：「版本也不一定是选择，加一个自定义」—— 界面遇到不认识的
    * 版本就照原文显示）。
    */
-  setUserPresetMachineVersion(
+  setLocalPresetMachineVersion(
     path: string,
     machineId: string,
     versionId: string,
   ): Promise<void>
 
   /**
-   * 读用户自己那份的正文。**只认 `presets-mine/`**（入参是 [`getUserPresetFiles`] 给的路径），
+   * 读用户自己那份的正文。**只认 `presets-local/`**（入参是 [`getLocalPresetFiles`] 给的路径），
    * 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来。
    */
-  readUserPresetText(path: string): Promise<string>
+  readLocalPresetText(path: string): Promise<string>
 
   /**
    * **开始改一份预设**：把正文复制进临时文件，**原件一动不动**。
    *
-   * 两条线走同一个入口（`origin` 缺省 `official`，与 [`applyActivePreset`] 同一形状）：
-   * 官方线认**文件名**（目录的键），用户线认**路径**（用户目录里可以自己分文件夹）。
+   * 两条线走同一个入口（`origin` 缺省 `cloud`，与 [`applyActivePreset`] 同一形状）：
+   * 云端线认**文件名**（目录的键），用户线认**路径**（用户目录里可以自己分文件夹）。
    *
-   * 前置都在后端拦：只改 MKP 预设（TOML）；官方线还要求盘上这份与目录逐字节一致
+   * 前置都在后端拦：只改 MKP 预设（TOML）；云端线还要求盘上这份与目录逐字节一致
    * （第六层：旧版本 / 被改过的不许改）；用户线只要求盘上真有 —— **它不查 SHA**，
    * 用户那份本来就是允许改的。
    *
@@ -1898,28 +1898,28 @@ export interface MkpApi {
    *
    * 与 [`putPresetDraft`] 的分工：那条是"把界面上那一整份正文写进去"（编辑器逐字改的场景）；
    * 这条是"我只改这一个字段"（参数页用控件改值的场景）—— 后者**不碰**注释、键序、
-   * 别的行，只把那一处换掉。两条都只动草稿正文，官方原件与下载区全程不碰。
+   * 别的行，只把那一处换掉。两条都只动草稿正文，云端原件与下载区全程不碰。
    *
    * `paramKey` 是**注册表主键**（如 `toolhead.offset.x`），不是 TOML 字段名 ——
    * 定位与取值形态（数字 / 布尔 / 字符串）归后端按字段定义决定，前端不拼 TOML 字面量。
    */
   patchPresetDraft(paramKey: string, value: string): Promise<void>
 
-  /** 放弃这次编辑：丢掉临时文件（幂等；官方原件与下载区全程没被碰过，所以它天生安全） */
+  /** 放弃这次编辑：丢掉临时文件（幂等；云端原件与下载区全程没被碰过，所以它天生安全） */
   discardPresetDraft(): Promise<void>
 
   /**
    * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
-   * 官方线**另存**成 `presets-mine/<原名>（已修改）<后缀>`（原件全程不动）；
+   * 云端线**另存**成 `presets-local/<原名>（已修改）<后缀>`（原件全程不动）；
    * 用户线**写回它自己** —— 同一个路径、同一份文件，不产生第二份（第八层）。
    *
-   * 官方线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
+   * 云端线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
    * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
    * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）；
    * 用户线写回时那三行**照抄原来那三行**（出处没变）。
    *
-   * 不碰官方原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
-   * 官方线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
+   * 不碰云端原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
+   * 云端线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
    * 用户线写的就是原来那一份所在的位置（`replaced` 恒为 true）。
    */
   commitPresetDraft(): Promise<CommittedDraft>
@@ -1962,41 +1962,41 @@ export interface MkpApi {
    * 预设页判「下载区里这一份我有没有一份」的唯一依据 —— 也是「更新」找**要更新的是哪一份**的依据。
    * **只有云端的那一版活着的时候才进**（那一版已被移出版次的、**外来 / 自己写的**一律不进）。
    */
-  getUserPresetIndex(): Promise<UserPresetIdentity[]>
+  getLocalPresetIndex(): Promise<LocalPresetIdentity[]>
 
   /**
    * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
-   * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-mine/` 那一格内）；
+   * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-local/` 那一格内）；
    * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
    * 落点已经有东西就拒绝（**不覆盖**）。
    *
    * 后端还会把两本状态账跟着改：**正指着它的使用中指针**（路径与文件名换成新的，指纹原样）
    * 与**这一份的草稿**（用户线认路径，「接着上次改」不接丢）。失败原话冒上来。
    */
-  renameUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+  renameLocalPreset(path: string, newName: string): Promise<LocalFileIdentity>
 
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
    *
-   * **我的文件 → 我的文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
-   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版官方派生"说错）。
+   * **本地文件 → 本地文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
+   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版云端派生"说错）。
    * 新名字过同一套门槛、落点已有东西就拒绝（**不覆盖、也不自动改名** —— 名字由用户自己换）。
    *
    * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
    * 新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
    */
-  copyUserPreset(path: string, newName: string): Promise<UserFileIdentity>
+  copyLocalPreset(path: string, newName: string): Promise<LocalFileIdentity>
 
   /**
-   * **这台机型 / 这个版本，我那一份在哪**（校准页：初值从它读、保存写它）。
+   * **这台机型 / 这个版本，本地那份在哪**（校准页：初值从它读、保存写它）。
    *
-   * 找法（有先后）：底账正用着的那一份（origin=mine 且归属匹配）> 用户目录里
+   * 找法（有先后）：底账正用着的那一份（origin=local 且归属匹配）> 用户目录里
    * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落血统
    * （与用户线列表同一套口径）。
    *
-   * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示官方默认值，保存被拦。
+   * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示云端默认值，保存被拦。
    */
-  getUserCopyFor(machineId: string, versionId: string): Promise<UserCopyCalibration | null>
+  getLocalCopyFor(machineId: string, versionId: string): Promise<LocalCopyCalibration | null>
 
   /* ---------- 第十二层：通用文件导入入口（Preset 只是第一个消费者）---------- */
 
@@ -2008,7 +2008,7 @@ export interface MkpApi {
   stageImport(sources: string[]): Promise<StagedImport[]>
 
   /**
-   * **导入第二段：真的复制进 `presets-mine/`**。逐份独立（一份出错不拖累别人）：
+   * **导入第二段：真的复制进 `presets-local/`**。逐份独立（一份出错不拖累别人）：
    * 源文件只读；**不覆盖**（`newName` 走改名那套名字门槛）；**内容按字节复制、不校验 TOML**
    * （能不能当 Preset 用是后面 Preset 语义入口的事 —— 导入不是"安装 Preset"；
    * 有血统三行原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
@@ -2029,7 +2029,7 @@ export interface MkpApi {
    * 用户文件 —— 之后复制 / 压缩 / 发给别人 / 备份都随用户，**不经过 SupportEase 的业务逻辑**
    * （"文件外部管理"的含义就这一句；不另造一套"分享 / 导出"）。
    *
-   * 只认「我的文件」（照旧过用户根那两道闸）；**读不出来的那份也能显示**
+   * 只认「本地文件」（照旧过用户根那两道闸）；**读不出来的那份也能显示**
    * （文件管理同族：它只是一份文件，打开文件夹不吃内容）；**不改任何状态**
    * （使用中指针 / 草稿 / archive 一个都不碰）。文件被外面删了会如实报找不到。
    */
@@ -2038,7 +2038,7 @@ export interface MkpApi {
   /**
    * 打开**我们自己的落点**（下载区 `assets/bbs/…` 里那一份）所在的文件夹，并选中它。
    *
-   * 与 [`revealInFolder`] 是**两个地方**，别混：那一条只认 `presets-mine/`（你的文件），
+   * 与 [`revealInFolder`] 是**两个地方**，别混：那一条只认 `presets-local/`（你的文件），
    * 这一条认**目录登记**（交付区里我们发的那一份）。只收文件名，路径不由前端拼；
    * 盘上还没有这份 → 照实报告"先下载"（不打开空文件夹）。
    */
@@ -2055,12 +2055,12 @@ export interface MkpApi {
 
   /**
    * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档
-   * （`archive/` 是官方版本生命周期的一部分；用户自己删自己的文件就结束）。
+   * （`archive/` 是云端版本生命周期的一部分；用户自己删自己的文件就结束）。
    *
    * 两道硬闸在后端：**正在使用的不许删**（删了「使用中」就指向一份不存在的文件）、
    * **还有没保存的草稿的不许删**（删了草稿就永远存不回去）。失败原话冒上来。
    */
-  deleteUserPreset(path: string): Promise<void>
+  deleteLocalPreset(path: string): Promise<void>
 
   /**
    * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
@@ -2117,7 +2117,7 @@ export interface MkpApi {
   getMachineParams(machineId: string, versionId: string | null): Promise<RecipeParam[]>
 
   /**
-   * 一份目录文件的**官方下载链接**（「复制链接」复制的就是它）。
+   * 一份目录文件的**云端下载链接**（「复制链接」复制的就是它）。
    *
    * 寻址与下载管道同一个出口算 —— 复制到的链接就是下载时取的那个地址。
    * 没配数据源时照实报错，不拼一个猜的 URL。
@@ -2207,7 +2207,7 @@ export interface MkpApi {
    * 这时下载与检查更新都会拒绝执行并说明去哪儿配。
    *
    * 读者是**设置页**（「高级设置 → 预设数据源」）—— 普通用户不需要来这里：
-   * 官方地址由构建方注入（Bootstrap 那一刀），这一格留的是开发 / 排查的后门。
+   * 云端地址由构建方注入（Bootstrap 那一刀），这一格留的是开发 / 排查的后门。
    */
   getPresetSource(): Promise<PresetSource | null>
 
@@ -2288,7 +2288,7 @@ export interface MkpApi {
   getDeliveryTrust(): Promise<DeliveryTrust[]>
 
   /**
-   * 归档区里有什么：官方文件换版本时**被换下来的那些旧版本**。
+   * 归档区里有什么：云端文件换版本时**被换下来的那些旧版本**。
    *
    * 目录里已经没有的那几份，`machineId / versionId / kind` 如实给 `null`。
    * 删除见 [`deleteArchivedFile`]（作者裁决 2026-10-06：允许删）。
@@ -2325,16 +2325,16 @@ export interface MkpApi {
   getActivePreset(): Promise<ActivePreset | null>
 
   /**
-   * 「使用这一份」。**两条线共用这一个入口**（第七层）：官方交付文件与用户自己那份
+   * 「使用这一份」。**两条线共用这一个入口**（第七层）：云端交付文件与用户自己那份
    * 都是真的 Preset —— "只读"是文件归属的属性，不是"能不能被使用"的属性。
    *
    * ```text
-   * official  目录里有这一份 + 盘上字节与目录登记的当前版本逐字节一致
+   * cloud  目录里有这一份 + 盘上字节与目录登记的当前版本逐字节一致
    *           （没下载 / 被改过 / 是旧版本 —— 都 reject，不会应用半份）
-   * mine      落点必须在 presets-mine/ 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
+   * local      落点必须在 presets-local/ 那一格里 + 盘上真有这一份 + 是一份 TOML 预设
    * ```
    *
-   * `origin` 缺省是 `official`（老调用点不用改）；`path` 只有用户线要给
+   * `origin` 缺省是 `cloud`（老调用点不用改）；`path` 只有用户线要给
    * （用户目录里可以自己分文件夹，所以认的是路径，不是文件名）。
    */
     applyActivePreset(
@@ -2344,18 +2344,18 @@ export interface MkpApi {
     ): Promise<ActivePreset>
 
   /**
-   * **把官方这一份预设取到本机** —— 云端表那两个动作（「下载」/「更新」）共用的那一条。
+   * **把云端这一份预设取到本机** —— 云端表那两个动作（「下载」/「更新」）共用的那一条。
    *
    * 它做的两件事，都幂等：
    *
    * ```text
-   *   ① 官方当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
-   *   ② 我的工作副本       presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统三行）
-   *                       已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
+   *   ① 云端当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+   *   ② 本地工作副本       presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 血统三行）
+   *                       已经在了 → **一个字节都不动**（我改过的东西不许被云端原件顶掉）
    * ```
    *
-   * **不碰「当前使用」**：下载 / 更新是"把官方的取到我机器上"，使用是"把哪一份设为生效"——
-   * 后者由本地表那颗按钮走 {@link applyPreset}。官方原件留在下载区，是内部数据。
+   * **不碰「当前使用」**：下载 / 更新是"把云端的取到我机器上"，使用是"把哪一份设为生效"——
+   * 后者由本地表那颗按钮走 {@link applyPreset}。云端原件留在下载区，是内部数据。
    */
   /**
    * `renameIfTaken`（2026-10-10）：本机**已经有一份同名的**时怎么办 ——
@@ -2363,10 +2363,10 @@ export interface MkpApi {
    * 用户同意导入时传 `true`，这次**自动改一个没被占的名字**落一份新的
    * （原来那份一个字节不动；新那份的身份记的来源仍是云端这个条目）。
    */
-  fetchOfficialPreset(
+  fetchCloudPreset(
     fileName: string,
     renameIfTaken?: boolean,
-  ): Promise<FetchOfficialResult>
+  ): Promise<FetchCloudResult>
 
   /**
    * 撤销使用。幂等：本来就没在用也不报错。
@@ -2434,18 +2434,18 @@ export interface MkpApi {
   /* ---------- baseline + 对比台（2026-10-08） ---------- */
 
   /**
-   * **官方版本列表**：这个官方预设官方登记过哪几版、哪几版这一机已经下过。
+   * **云端版本列表**：这个云端预设云端登记过哪几版、哪几版这一机已经下过。
    *
-   * 两条判据：官方登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
+   * 两条判据：云端登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
    * 下过没有 = 隐藏 baseline 里有没有那一版的摘要。
    *
    * ★ **它不是"过时判定"**：不读用户预设的字节、不看血统，也**不会**说"你那份该更新了"。
    * `fileName` 给了就只返回那一个预设的版本。
    */
-  getOfficialVersions(fileName?: string | null): Promise<OfficialVersion[]>
+  getCloudVersions(fileName?: string | null): Promise<CloudVersion[]>
 
   /**
-   * **读一份用户预设的参数**（对比台里的一列）。**只认 `presets-mine/`**。
+   * **读一份用户预设的参数**（对比台里的一列）。**只认 `presets-local/`**。
    *
    * 读不出来**不抛错**：返回空表 + `problem` 一句人话 —— 那一列如实说"这份读不出来"，
    * 而不是把整个对话框打掉。
@@ -2457,22 +2457,22 @@ export interface MkpApi {
    *
    * 结构保真：逐项只换那个值（注释 / 键序 / inline table / 多行字面量 / 行尾一个字节不动），
    * 任何一项失败**整批不落**；空改动 / 算出来与原文一样**不写盘**。
-   * baseline 与官方当前版永远不被写。
+   * baseline 与云端当前版永远不被写。
    */
   savePresetParams(path: string, edits: ParamEdit[]): Promise<void>
 
   /* ---------- 逐参数「官方更新」（2026-10-09） ---------- */
 
   /**
-   * **这一份预设的官方更新账**：逐项给出「我 / 官方旧值 / 官方新值」与待处理标记。
+   * **这一份预设的云端更新账**：逐项给出「我 / 云端旧值 / 云端新值」与待处理标记。
    *
-   * 官方那一版默认值住在**隐藏 baseline** 里（用户看不见）；"我上次处理到哪一版"
-   * 记在逐参数决定账里 —— 所以官方连着发几版也能一次算清（比对的是
+   * 云端那一版默认值住在**隐藏 baseline** 里（用户看不见）；"我上次处理到哪一版"
+   * 记在逐参数决定账里 —— 所以云端连着发几版也能一次算清（比对的是
    * 「我处理到的那一版 → 当前版」，不需要云端提供中间版本）。
    *
-   * `fetchMissing` = 允许为了拿到**官方当前版**的正文发一次网络请求。
+   * `fetchMissing` = 允许为了拿到**云端当前版**的正文发一次网络请求。
    * 打开某一份预设时可以给 `true`；列表那种一屏几十行的读一律 `false`（启动零网络）。
-   * 拿不到官方当前版正文时**不报错**：`officialReady: false`，逐项新值给 `null`。
+   * 拿不到云端当前版正文时**不报错**：`cloudReady: false`，逐项新值给 `null`。
    */
   getPresetParamSync(path: string, fetchMissing?: boolean): Promise<PresetParamSync>
 
@@ -2480,8 +2480,8 @@ export interface MkpApi {
    * **落一批决定**（采用 / 保持），回来的是落完之后的那一份总账。
    *
    * 采用会**结构保真地**改文件里那几项（注释 / 键序 / 行尾一个字节不动），
-   * 保持一个字节不动；两者都把这一项的水位推到官方当前版。
-   * 官方当前版正文不在本机时，采用会如实报错（不许"记了水位、值却没写"）。
+   * 保持一个字节不动；两者都把这一项的水位推到云端当前版。
+   * 云端当前版正文不在本机时，采用会如实报错（不许"记了水位、值却没写"）。
    */
   applyPresetParamDecisions(
     path: string,

@@ -59,7 +59,7 @@ id = 'STANDARD'
 name = '标准版'
 recommendedBundle = 'A1_MINI_STANDARD'
 tag = '推荐'
-description = '官方标准配置'
+description = '标准配置'
 
 [[versions]]
 id = 'FAST'

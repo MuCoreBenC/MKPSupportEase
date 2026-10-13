@@ -6,7 +6,7 @@
  * **不是文本 diff，不是三方合并，不是"更新机制"** —— 它是一个**独立的常驻工具**：
  * 把 2~3 份**用户自己的本地预设**的参数并排摆出来，用参数页同款控件直接看、直接改。
  *
- *   · 数据源只有「我的预设」（`presets-mine/`）—— **永不出现 baseline**：
+ *   · 数据源只有「本地预设」（`presets-local/`）—— **永不出现 baseline**：
  *     隐藏基准是系统内部的东西，它不进这张台子（作者 2026-10-08 裁决）；
  *   · 选中的所有列**都可编辑**（都是用户自己的文件），保存各写各的、互不覆盖；
  *   · 差异只在**底层比较**（TOML 原文值），展示在参数 UI 层 —— 用户看到的是
@@ -32,7 +32,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import type { CatalogRegistry, ParamEdit, PresetParamValues, UserPresetFile } from '../../api'
+import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
 import { FieldControl } from '../../components/field'
 import type { FieldSchema } from '../../components/field'
 import { Modal } from '../../components/modal'
@@ -105,7 +105,7 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
 interface Props {
   open: boolean
   /** 可比较的候选：**用户自己的预设**（读得出来的 MKP 预设） */
-  files: UserPresetFile[]
+  files: LocalPresetFile[]
   /**
    * **这一次打开要直接选中的两份**（path）—— 2026-10-10 起入口是右键两下选
    * （见 PagePresets 的 `compareEntry`）：右键第一份点「参数对比」、右键第二份
@@ -352,7 +352,7 @@ export default function CompareModal({
       <div className={s.pick}>
         {files.length === 0 && (
           <span className={s.note}>
-            还没有「我的预设」可以对比 —— 先在资源库里另存一份自己的（官方那一份是模板，不进这张台子）。
+            还没有「本地预设」可以对比 —— 先在资源库里另存一份自己的（云端那一份是模板，不进这张台子）。
           </span>
         )}
         {files.map((f) => {

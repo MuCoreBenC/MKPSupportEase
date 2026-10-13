@@ -15,7 +15,7 @@
  *   机型与版本          api.getMachines()                         → 6 机型 / 10 版本
  *   菜单三态            api.getMenu()                             → 14 已分配 / 6 可选 / 0 仅归档
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
- *   用户自己的文件      api.getUserPresetFiles()                  → **本地文件**（扫 presets-mine/），空是合法状态
+ *   用户自己的文件      api.getLocalPresetFiles()                  → **本地文件**（扫 presets-local/），空是合法状态
  *   当前使用的那一条    AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）→ **全局唯一**，null = 一套都还没应用
  *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
@@ -67,14 +67,14 @@ import type {
   DownloadOutcome,
   DownloadTick,
   Machine,
-  OfficialVersion,
+  CloudVersion,
   OnDiskFile,
   ParamDecision,
   PresetParamSync,
   PresetTextDraft,
-  FetchOfficialResult,
-  UserFileIdentity,
-  UserPresetIdentity,
+  FetchCloudResult,
+  LocalFileIdentity,
+  LocalPresetIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
@@ -100,7 +100,7 @@ import type {
   PresetTableData,
   PresetTree,
   ReleaseFileState,
-  UserPresetFile,
+  LocalPresetFile,
   PresetVersionInput,
 } from './presetTree'
 
@@ -115,7 +115,7 @@ export interface PresetData {
    * ★ 它与 `error` **不是一回事**，页面也不许把它当整页错误：
    *   - `error` = 本机那份底账读坏了（该修的在这里）；
    *   - 这一条 = **远端发布了新结构，当前客户端还不具备读它的能力** ——
-   *     本机什么都没坏、也没有任何东西失败，只是"你想给我的这份我读不了"。
+   *     本机什么都没坏、也没有任何东西失败，只是"你想给本地这份我读不了"。
    *
    * 用户要做的**唯一一件事**是去设置页更新客户端（不是"重试"、不是"再下一遍"）。
    * 因此它**不改目录、不落页级错误**（作者定的产品规则 B：列表照常，只在预设页出现一句提示）。
@@ -123,7 +123,7 @@ export interface PresetData {
   needsNewerClient: boolean
 
   /**
-   * 官方交付：目录（catalog）登记的交付预设全量 + 下载区（`mkp/`）现况。
+   * 云端交付：目录（catalog）登记的交付预设全量 + 下载区（`mkp/`）现况。
    *
    * 两份底账都住 Internal 根：清单在 `catalog.json` 的 files 域（发布方写），
    * 「已下载」在 `mkp/`（盘就是底账）。这一层只读不写；写走下面的 `downloadRelease` / `apply`。
@@ -131,22 +131,22 @@ export interface PresetData {
   release: ReleaseState
 
   /**
-   * 归档区里躺着的**官方旧版本**（换版本时被换下来的那一份）。
+   * 归档区里躺着的**云端旧版本**（换版本时被换下来的那一份）。
    *
    * 与交付那一路同源：跟 `release` 一起读、同样**不挡首屏**，每次下载 / 更新之后跟着重读
    * （刚更新过的那一份会出现在这里）。**只读** —— 界面不删、不恢复、也不拿它当"用户修改历史"：
-   * 归档是官方版本生命周期的一部分（见 `ArchivedFile` 的注释）。
+   * 归档是云端版本生命周期的一部分（见 `ArchivedFile` 的注释）。
    */
   archived: ArchivedFile[]
 
   /**
-   * **官方版本账**（`api.getOfficialVersions()`，2026-10-08）：官方登记过哪几版、
+   * **官方版本账**（`api.getCloudVersions()`，2026-10-08）：官方登记过哪几版、
    * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**
    * （「已下载 / 新版本」）。
    *
    * ★ 它**不是"过时判定"**：不读用户预设的字节、不看血统，也不在任何一行上说"该更新了"。
    */
-  officialVersions: OfficialVersion[]
+  cloudVersions: CloudVersion[]
 
   machines: Machine[]
   /** 当前机型。**空串 = 「全部机型」那一档**（预设页才用得到，首页永远是一台具体的） */
@@ -156,7 +156,7 @@ export interface PresetData {
   /**
    * **当前数据源**（`getPresetSource()` 的 mode：`gitee` / `github` / `custom`）——
    * release 行「来源」列显示 GitHub / Gitee / 自定义源的依据。null = 没配源 / 读取失败
-   * （来源那一格照实退「官方」，不让整页因为这一格失败）。
+   * （来源那一格照实退「云端」，不让整页因为这一格失败）。
    */
   sourceLabel: string | null
   /** 未过滤的整棵树（仅归档的文件建树时就剔掉了）。计数用它 */
@@ -167,17 +167,17 @@ export interface PresetData {
    */
   localIds: string[]
   /**
-   * **本地文件**：用户自己放的那一份（`presets-mine/` 里扫出来的）。
+   * **本地文件**：用户自己放的那一份（`presets-local/` 里扫出来的）。
    *
    * **云端没有它们**，所以它们只出现在本地表里、没有交付身份、也不参与套餐与菜单。
    * 认不出类别的那几份（`.json`）也在里面 —— 界面上任何类型档下都列，不藏。
    */
-  mine: UserPresetFile[]
+  local: LocalPresetFile[]
   /**
    * **身份账本**（a04）：哪几份本地文件跟云端有关系 —— 云端行三态与「更新」
    * 找要更新的是哪一份，都只看它（复制出来的副本不在里面）。
    */
-  mineIndex: UserPresetIdentity[]
+  localIndex: LocalPresetIdentity[]
   /**
    * **有未保存参数改动的那一份**（相对用户根的路径；`null` = 现在没有）——
    * 预设列表行上那枚「未保存」小圆点的判据（参数页改过值、还没点保存）。
@@ -200,12 +200,12 @@ export interface PresetData {
    * **改一份用户预设的归属**（机型 / 版本）：文件头那两行换成新值，
    * 回来重读本地文件。机型必须目录里登记的；**版本可自定义**（后端校验机型）。
    */
-  setMineMachineVersion: (path: string, machineId: string, versionId: string) => Promise<void>
+  setLocalMachineVersion: (path: string, machineId: string, versionId: string) => Promise<void>
   /**
    * 正在使用的**唯一那一条**：从底账（`run/active-preset.json`）读出来的，
    * **全表最多一份**，`null` = 一套都还没应用（**不是错误**）。
    *
-   * 官方交付行应用后写着的都是它 —— 这是「使用中」的唯一来源
+   * 云端交付行应用后写着的都是它 —— 这是「使用中」的唯一来源
    * （旧契约 `getAppliedPreset` 与假后端那份演示值 2026-10-02 清扫时已删）。
    */
   active: ActivePreset | null
@@ -225,29 +225,29 @@ export interface PresetData {
   pickMachine: (machineId: string) => void
   /**
    * 把某一份**本地文件**设为**当前使用的那一条**（身份 = **文件名 + 相对用户根的路径**）。
-   * 云端的版本不能直接用 —— 要先用 `fetchOfficial` 把它下载到本地。
+   * 云端的版本不能直接用 —— 要先用 `fetchCloud` 把它下载到本地。
    *
-   * 走应用命令（`api.applyActivePreset(fileName, 'mine', path)`，后端按闸校验后写
+   * 走应用命令（`api.applyActivePreset(fileName, 'local', path)`，后端按闸校验后写
    * `run/active-preset.json`）**然后重读底账** —— 界面看到的永远是底账答的，
    * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
    *
    * ★ 2026-10-13 修一个真 bug：这里原来只把 `path` 当唯一实参传下去，于是
-   *   `fileName` 收成了 `presets-mine/A1_MINI-fast.toml`、`origin` 缺省成 `official` ——
-   *   后端拿这串带前缀的名字去**交付目录**里找，报「目录里没有 presets-mine/…」，
+   *   `fileName` 收成了 `presets-local/A1_MINI-fast.toml`、`origin` 缺省成 `cloud` ——
+   *   后端拿这串带前缀的名字去**交付目录**里找，报「目录里没有 presets-local/…」，
    *   本地表那颗「使用」**一份都点不动**。文件名与路径是两个参数，这里必须分开传。
    */
   apply: (fileName: string, path: string) => Promise<void>
   /**
    * **把官方那一份取到本机**（2026-10-09 改判）—— 云端表那两个动作（下载 / 更新）共用它。
    *
-   * 它做两件幂等的事：官方当前版字节不在本机（或对不上）就取回来；我的本地文件
+   * 它做两件幂等的事：云端当前版字节不在本机（或对不上）就取回来；本地本地文件
    * 不在就落一份（在了一个字节不动）。**它不改「当前使用」** —— 使用是本地表那颗按钮。
    *
-   * 回来**两边一起重读**：投递面可能刚变（官方字节取回来了），本地文件可能也多了一份。
+   * 回来**两边一起重读**：投递面可能刚变（云端字节取回来了），本地文件可能也多了一份。
    * 返回值说清这次到底做成了什么（提示条照它说）。
    */
   /** `renameIfTaken`（a04）：撞名时用户点过「导入」再传 `true` —— 自动改名落一份新的 */
-  fetchOfficial: (fileName: string, renameIfTaken?: boolean) => Promise<FetchOfficialResult>
+  fetchCloud: (fileName: string, renameIfTaken?: boolean) => Promise<FetchCloudResult>
   /**
    * **撤销应用** —— 把"当前使用的那一条"撤掉（`api.clearActivePreset()`），然后重读底账。
    *
@@ -271,7 +271,7 @@ export interface PresetData {
    * `onTick` 给了就把过程说出来（一次调用一路水位，后端在下载过程中推）；不给就是
    * 原来那个"点了等结果"。**下载快慢由网络决定，界面上说真的字节数，不编进度条。**
    *
-   * 与官方文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
+   * 与云端文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
    * 这一条**真的能下**。失败照抛给页面说出来。
    */
   downloadRelease: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<void>
@@ -309,13 +309,13 @@ export interface PresetData {
   commitTextDraft: () => Promise<CommittedDraft>
 
   /**
-   * **一份本地文件现在的「云端更新」账**（逐参数三方：我的值 / 云端旧值 / 云端新值）。
+   * **一份本地文件现在的「云端更新」账**（逐参数三方：本地值 / 云端旧值 / 云端新值）。
    * 点「更新」时给 `fetchMissing: true` —— 允许为拿到云端当前版字节发一次请求。
    * 判定（哪几项待处理、哪几项是冲突）都在后端，前端只读这份账。
    */
   presetSync: (path: string, fetchMissing?: boolean) => Promise<PresetParamSync>
   /**
-   * **把逐参数的处理结果一次性写进本地文件**：`adopt` = 用云端新版值、`hold` = 保持我的值。
+   * **把逐参数的处理结果一次性写进本地文件**：`adopt` = 用云端新版值、`hold` = 保持本地值。
    * 结构保真地改那几项，写完**重读本地文件**。
    *
    * ★ 这是「更新」唯一的写入口：**没点确认之前一个字节都不写** ——
@@ -326,13 +326,13 @@ export interface PresetData {
    * **重命名一份用户文件**（第十层）：只改名字，字节一个不动。回来**重读本地文件**
    * （列表立刻以磁盘为准），顺手重读使用中指针（它正指着这一份时会跟着改）。
    */
-  rename: (path: string, newName: string) => Promise<UserFileIdentity>
+  rename: (path: string, newName: string) => Promise<LocalFileIdentity>
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份按字节复制成同一格里另一份新的用户文件。
    * 回来**重读本地文件**（新文件要出现在表里）；**不重读使用中指针** —— 这一层不碰它
    * （原文件一个字节不动，复制出来的那份也不会自称"使用中"）。
    */
-  copyAsNew: (path: string, newName: string) => Promise<UserFileIdentity>
+  copyAsNew: (path: string, newName: string) => Promise<LocalFileIdentity>
   /**
    * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读本地文件。
    * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
@@ -392,7 +392,7 @@ export interface ReleaseState {
    * `getStaleFiles()` 才答"盘上有一份但不能用"。少了这一个读，「旧版本 / 内容异常」就会
    * 被显示成「未下载」—— 用户点"下载"以为是第一次下，实际是在修一份坏档。
    *
-   * 不一致的那几份**是哪一档**由第三个读（`getDeliveryTrust`）定：认得出是官方某一版旧版的
+   * 不一致的那几份**是哪一档**由第三个读（`getDeliveryTrust`）定：认得出是云端某一版旧版的
    * 是 `old`，哪儿都查不出的是 `tampered`（第三圈第 6 层）。
    */
   stale: ReleasePresetSource[]
@@ -472,7 +472,7 @@ async function checkBootstrapOnce(): Promise<BootstrapResult> {
 
 /**
  * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
- * 导入落进 `presets-mine/` 之后，「我的文件」那张表要立刻以磁盘为准，不靠切页刷新。
+ * 导入落进 `presets-local/` 之后，「本地文件」那张表要立刻以磁盘为准，不靠切页刷新。
  * 首页（`PageHome`）不给这个参数：它不看本地文件那张表。
  */
 export function usePresetData(importRevision = 0): PresetData {
@@ -484,8 +484,8 @@ export function usePresetData(importRevision = 0): PresetData {
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 远端这一代读不懂（NOT_SUPPORTED）：独立于 `error`，不挡列表、只开一句提示 */
   const [needsNewerClient, setNeedsNewerClient] = useState(false)
-  /* 本地文件：用户自己的预设（`presets-mine/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
-  const [mine, setMine] = useState<UserPresetFile[]>([])
+  /* 本地文件：用户自己的预设（`presets-local/`）。盘当底账 —— 首屏读一次；产生它的动作在下一层 */
+  const [localPresets, setLocalPresets] = useState<LocalPresetFile[]>([])
   /* 使用中指针：AppState 唯一客户端订阅 —— 本页是写方之一，但快照同样只从客户端来 */
   const active = useActivePreset()
   const [slicerCopied, setSlicerCopied] = useState<string[]>([])
@@ -493,19 +493,19 @@ export function usePresetData(importRevision = 0): PresetData {
   const [error, setError] = useState<string | null>(null)
   const [at, setAt] = useState<{ machineId: string; versionId: string } | null>(null)
   const [release, setRelease] = useState<ReleaseState>(EMPTY_RELEASE)
-  /* 归档区（官方旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
+  /* 归档区（云端旧版本留档）。与 release 一起读、一起刷新（见 `readRelease`） */
   const [archived, setArchived] = useState<ArchivedFile[]>([])
   /*
    * **官方版本账**（2026-10-08）：官方登记过哪几版、哪几版这一机已下过。
    * 与 release 一路读（它俩本来就同源：都是"云端登记了什么"），空数组 = 读不到 = 退回
    * "一个预设一行"的老画法。
    */
-  const [officialVersions, setOfficialVersions] = useState<OfficialVersion[]>([])
+  const [cloudVersions, setCloudVersions] = useState<CloudVersion[]>([])
   /* 当前数据源（release 行「来源」列的字）。读失败照实 null，不挡任何表 */
   const [sourceLabel, setSourceLabel] = useState<string | null>(null)
   /*
    * **备注覆盖账**（副标题）：用户改过的备注（键 = 文件身份）。只读一次 +
-   * 写后重读整本 —— 与 release / mine 同一条「界面读底账」的规矩。
+   * 写后重读整本 —— 与 release / local 同一条「界面读底账」的规矩。
    */
   const [remarks, setRemarks] = useState<Record<string, string>>({})
   /*
@@ -519,17 +519,17 @@ export function usePresetData(importRevision = 0): PresetData {
    * 云端行那三态（未获取 / 本地已有 / 有新版）与「更新」找要更新的是哪一份，
    * 都只看它 —— 复制出来的副本、拖回来的、导入的都不在里面（它们不跟云端）。
    */
-  const [mineIndex, setMineIndex] = useState<UserPresetIdentity[]>([])
+  const [localIndex, setLocalIndex] = useState<LocalPresetIdentity[]>([])
   /** 重读本地文件 + 身份账本（两个得一起读：判据是"账本里那一份文件"） */
-  const readMine = useCallback(async () => {
-    const [files, index] = await Promise.all([api.getUserPresetFiles(), api.getUserPresetIndex()])
-    setMine(files)
-    setMineIndex(index)
+  const readLocalPresets = useCallback(async () => {
+    const [files, index] = await Promise.all([api.getLocalPresetFiles(), api.getLocalPresetIndex()])
+    setLocalPresets(files)
+    setLocalIndex(index)
     return files
   }, [])
 
   /**
-   * 把官方交付这一路的现况读一遍。
+   * 把云端交付这一路的现况读一遍。
    *
    * 全部来自新世界的底账：清单读 `api.getRuntimeCatalog()` 的 files 域，
    * 「盘上有没有、对不对」读 `api.getDownloadedFiles()` / `api.getStaleFiles()`
@@ -547,7 +547,7 @@ export function usePresetData(importRevision = 0): PresetData {
      * `ReleasePresetSource.nozzle`）。中间三个合起来才是四档（见 `ReleaseFileState`）；
      * 归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读。
      */
-    const [catalog, mine, drifted, trust, keep, repo, versions] = await Promise.all([
+    const [catalog, local, drifted, trust, keep, repo, versions] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
@@ -555,18 +555,18 @@ export function usePresetData(importRevision = 0): PresetData {
       api.getArchivedFiles(),
       api.getPresetFiles(),
       /* 官方版本账（2026-10-08）：云端表 MKP 档按它把每个预设摊成多行版本 */
-      api.getOfficialVersions(),
+      api.getCloudVersions(),
     ])
     setArchived(keep)
-    setOfficialVersions(versions)
-    const downloaded = new Set(mine.map((f) => f.fileName))
+    setCloudVersions(versions)
+    const downloaded = new Set(local.map((f) => f.fileName))
     const driftedSet = new Set(drifted.map((f) => f.fileName))
     /*
      * 盘上那几份的**事件时间**（2026-10-06 预设事件时间模型）：下载 / 替换两个事件
      * + 这份字节属于哪一代目录（`publishedAt`，版本出身反查）。已下载与有更新的是
      * 两批不相交的文件，合成一张表查；没有的事件是 `null` —— 界面照实说「未知」，不编。
      */
-    const onDisk = new Map<string, OnDiskFile>([...mine, ...drifted].map((f) => [f.fileName, f]))
+    const onDisk = new Map<string, OnDiskFile>([...local, ...drifted].map((f) => [f.fileName, f]))
     /* 判词按**文件名**查 —— 与下载 / 应用 / 读正文同一套口径（这套系统认的一直是 fileName） */
     const verdicts = new Map(trust.map((t) => [t.fileName, t.verdict]))
     /*
@@ -651,19 +651,19 @@ export function usePresetData(importRevision = 0): PresetData {
 
     const load = async () => {
       /* 本地文件那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
-      const [repo, list, menu, local, mine, index, copied, marks, draft] = await Promise.all([
+      const [repo, list, menu, local, localPresets, index, copied, marks, draft] = await Promise.all([
         api.getPresetFiles(),
         api.getMachines(),
         api.getMenu(),
         api.getLocalFiles(),
-        api.getUserPresetFiles(),
-        api.getUserPresetIndex(),
+        api.getLocalPresetFiles(),
+        api.getLocalPresetIndex(),
         api.getSlicerCopied(),
         api.getPresetRemarks(),
         api.getPresetDraftSummary(),
       ])
-      setMine(mine)
-      setMineIndex(index)
+      setLocalPresets(localPresets)
+      setLocalIndex(index)
       setRemarks(marks)
       setDraftPath(draft?.path ?? null)
 
@@ -709,7 +709,7 @@ export function usePresetData(importRevision = 0): PresetData {
       setReady(true)
 
       /*
-       * 官方交付那一路**不挡首屏**。
+       * 云端交付那一路**不挡首屏**。
        *
        * 它是两条独立的读（catalog 清单 + 下载区），失败时 release 落成空态、页面照常渲染；
        * 这一页要先看的「本机那份注册表」答出来的表，没有理由让整页等它。
@@ -739,7 +739,7 @@ export function usePresetData(importRevision = 0): PresetData {
           }
         })
         .catch(() => {
-          /* 官方交付那一路读不到（目录/下载区任一失败）就落空态，不挡首屏 —— 与三态纪律一致：
+          /* 云端交付那一路读不到（目录/下载区任一失败）就落空态，不挡首屏 —— 与三态纪律一致：
              页面主体（注册表那几张表）已 ready，这里不升格成整页错误 */
         })
     }
@@ -776,14 +776,14 @@ export function usePresetData(importRevision = 0): PresetData {
       /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
     })
     /*
-     * **本地文件也要重读**：投递面变了 = 官方那一份的字节可能刚被取回来（「使用」按需取回、
-     * 「另存为我的预设」也会先取一份），而 `presets-mine/` own 目录里也可能刚多出一份
+     * **本地文件也要重读**：投递面变了 = 云端那一份的字节可能刚被取回来（「使用」按需取回、
+     * 「另存为本地预设」也会先取一份），而 `presets-local/` own 目录里也可能刚多出一份
      * —— 资源库要跟着出现那一行（只重读云端那一侧的话，用户会看不到自己刚存的那一份）。
      */
-    void readMine().catch(() => {
+    void readLocalPresets().catch(() => {
       /* 读不到就保持旧列表 —— 与上面同一条纪律 */
     })
-  }, [deliveryRevision, ready, readReleaseInto, readMine])
+  }, [deliveryRevision, ready, readReleaseInto, readLocalPresets])
 
   /*
    * **草稿代次也听**（`draftState`）：参数页改了值 / 保存了 / 取消了（含预设页上
@@ -855,8 +855,8 @@ export function usePresetData(importRevision = 0): PresetData {
    * 就是从这里冒上去的）。
    */
   const apply = useCallback(async (fileName: string, path: string) => {
-    /* 用户线：**文件名与路径分开传**（后端认 origin=mine + path 那道闸，见接口注释） */
-    await api.applyActivePreset(fileName, 'mine', path)
+    /* 用户线：**文件名与路径分开传**（后端认 origin=local + path 那道闸，见接口注释） */
+    await api.applyActivePreset(fileName, 'local', path)
     appStateMutated()
   }, [])
 
@@ -879,7 +879,7 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * 官方交付那一路的「下载」：走新世界下载管道，落进下载区 `mkp/`。
+   * 云端交付那一路的「下载」：走新世界下载管道，落进下载区 `mkp/`。
    * 不 catch：失败传给页面说出来，与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个。）
    *
    * 写完**只广播**（`deliveryMutated()`）：本页与别的页都从订阅里重读那一路 ——
@@ -902,18 +902,18 @@ export function usePresetData(importRevision = 0): PresetData {
    * 云端表那条路（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的本地文件。
    *
    * 它**不 catch**（失败传给页面说出来，与 `apply` / `copy` 同一条规矩）；
-   * 成功之后**两边一起重读**：官方字节可能刚被取回来（投递面变了），
+   * 成功之后**两边一起重读**：云端字节可能刚被取回来（投递面变了），
    * 本地文件可能也多了一份（`created`）—— 两个广播都要发。
    * **不广播 app-state**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）。
    */
-  const fetchOfficial = useCallback(
-    async (fileName: string, renameIfTaken = false): Promise<FetchOfficialResult> => {
-      const done = await api.fetchOfficialPreset(fileName, renameIfTaken)
+  const fetchCloud = useCallback(
+    async (fileName: string, renameIfTaken = false): Promise<FetchCloudResult> => {
+      const done = await api.fetchCloudPreset(fileName, renameIfTaken)
       deliveryMutated()
-      await readMine()
+      await readLocalPresets()
       return done
     },
-    [readMine],
+    [readLocalPresets],
   )
 
   /*
@@ -936,10 +936,10 @@ export function usePresetData(importRevision = 0): PresetData {
 
   const commitTextDraft = useCallback(async () => {
     const done = await api.commitTextDraft()
-    await readMine()
+    await readLocalPresets()
     draftMutated()
     return done
-  }, [readMine])
+  }, [readLocalPresets])
 
   /*
    * **「云端更新」那条链**（2026-10-10）：读差异账 + 把用户的处理结果**一次性**写进本地文件。
@@ -954,29 +954,29 @@ export function usePresetData(importRevision = 0): PresetData {
 
   const applyParamDecisions = useCallback(async (path: string, decisions: ParamDecision[]) => {
     await api.applyPresetParamDecisions(path, decisions)
-    await readMine()
+    await readLocalPresets()
     /* 盘上那份刚被改过（大小与时刻变了）—— 列表标记顺手对一眼 */
     draftMutated()
-  }, [readMine])
+  }, [readLocalPresets])
 
   /*
    * 第十层：用户文件管理。同一条路子 —— 写完 AppState 客户端重读广播：
-   * 改名之后使用中指针可能跟着改了名（`repoint_mine`），删的若是使用中那份，
+   * 改名之后使用中指针可能跟着改了名（`repoint_local`），删的若是使用中那份，
    * 后端会把指针一并撤下 —— 都靠重读对表（曾在这里漏过的两个"删除后横幅
    * 还说正在使用"的滞留 bug，就是靠这一句消灭的）。
    */
   const rename = useCallback(async (path: string, newName: string) => {
-    const done = await api.renameUserPreset(path, newName)
-    await readMine()
+    const done = await api.renameLocalPreset(path, newName)
+    await readLocalPresets()
     appStateMutated()
     return done
-  }, [readMine])
+  }, [readLocalPresets])
 
   const remove = useCallback(async (path: string) => {
-    await api.deleteUserPreset(path)
-    await readMine()
+    await api.deleteLocalPreset(path)
+    await readLocalPresets()
     appStateMutated()
-  }, [readMine])
+  }, [readLocalPresets])
 
   /*
    * 删除本机那份官方交付文件（2026-10-06 一切皆可删）：重读云端那一侧 ——
@@ -999,10 +999,10 @@ export function usePresetData(importRevision = 0): PresetData {
 
   /* 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管 */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
-    const done = await api.copyUserPreset(path, newName)
-    await readMine()
+    const done = await api.copyLocalPreset(path, newName)
+    await readLocalPresets()
     return done
-  }, [readMine])
+  }, [readLocalPresets])
 
   /* 在文件管理器里显示（第十三层）：纯外部动作 —— 不重读、不改任何状态 */
   const reveal = useCallback(async (path: string) => {
@@ -1033,12 +1033,12 @@ export function usePresetData(importRevision = 0): PresetData {
    * 归属是文件头里那两行，重读之后列表的机型 / 版本两列以文件为准。
    * 机型必须目录里登记的；版本可自定义（不认识的照原文显示）。
    */
-  const setMineMachineVersion = useCallback(
+  const setLocalMachineVersion = useCallback(
     async (path: string, machineId: string, versionId: string) => {
-      await api.setUserPresetMachineVersion(path, machineId, versionId)
-      await readMine()
+      await api.setLocalPresetMachineVersion(path, machineId, versionId)
+      await readLocalPresets()
     },
-    [readMine],
+    [readLocalPresets],
   )
 
   /*
@@ -1068,20 +1068,20 @@ export function usePresetData(importRevision = 0): PresetData {
     sourceLabel,
     tree,
     localIds,
-    mine,
-    mineIndex,
+    local: localPresets,
+    localIndex,
     draftPath,
     active,
     slicerCopied,
     pick,
     pickMachine,
     apply,
-    fetchOfficial,
+    fetchCloud,
     clearApply,
     copy,
     release,
     archived,
-    officialVersions,
+    cloudVersions,
     downloadRelease,
     downloadReleaseBatch,
     beginTextEdit,
@@ -1098,10 +1098,10 @@ export function usePresetData(importRevision = 0): PresetData {
     reveal,
     revealDelivered,
     revealSlicer,
-    /** 备注覆盖账（副标题）与它的写入口；归属的写入口见 `setMineMachineVersion` */
+    /** 备注覆盖账（副标题）与它的写入口；归属的写入口见 `setLocalMachineVersion` */
     remarks,
     setRemark,
-    setMineMachineVersion,
+    setLocalMachineVersion,
   }
 }
 
@@ -1168,7 +1168,7 @@ export interface PresetPage {
    * 各答各的问题：
    *
    *   本地  我这台机器上真有的东西（MKP 档 = 你自己那份本地文件；切片器档 = 本机真有的文件）
-   *   云端  官方现在提供什么（MKP 档三态：未获取 / 本地已有 / 有新版；切片器档标「已下载 / 未下载」）
+   *   云端  云端现在提供什么（MKP 档三态：未获取 / 本地已有 / 有新版；切片器档标「已下载 / 未下载」）
    */
   scope: PresetScopeAxis
   setScope: (next: PresetScopeAxis) => void
@@ -1176,12 +1176,12 @@ export interface PresetPage {
   /**
    * 「本地」这一张表 —— **我电脑里真有的东西**。
    *
-   * MKP 档 = 你自己那份本地文件（`presets-mine/`，只有它）；切片器档 = 本机磁盘上
-   * 真有的文件（官方副本 + 我的文件）。两种类型在这一档的分法见 [`localRows`]。
+   * MKP 档 = 你自己那份本地文件（`presets-local/`，只有它）；切片器档 = 本机磁盘上
+   * 真有的文件（云端副本 + 本地文件）。两种类型在这一档的分法见 [`localRows`]。
    */
   local: PresetTableData<PresetLocalRow>
   /**
-   * 「云端」这一张表 —— **官方现在提供什么**。
+   * 「云端」这一张表 —— **云端现在提供什么**。
    *
    * MKP 档的行按 [`CloudLocalState`] 说"我这边怎么样"（未获取 / 本地已有 / 有新版）；
    * 切片器档照旧按 `releaseState` 说"下过没有 / 要不要重下"。见 [`cloudRows`]。
@@ -1193,13 +1193,13 @@ export interface PresetPage {
    *
    * 判定就是云端表行上那个 `releaseState`（唯一判据），这一层没长第二套状态判断；
    * 范围取**筛选前**的云端行 —— 按机型与类型（表的口径），**不受搜索词影响**。
-   * 三档分开数：前两档是"补上官方那份"，第三档是"盘上那份我们不认"，用户要做的事不一样。
+   * 三档分开数：前两档是"补上云端那份"，第三档是"盘上那份我们不认"，用户要做的事不一样。
    */
   pending: {
     fileNames: string[]
     /** 其中「未下载」几份 */
     missing: number
-    /** 其中「旧版本」几份（认得出是官方某一版旧版） */
+    /** 其中「旧版本」几份（认得出是云端某一版旧版） */
     stale: number
     /** 其中「内容异常」几份（这台机器上查不出它属于哪一版） */
     tampered: number
@@ -1218,15 +1218,15 @@ export interface PresetPage {
   applied: ActivePreset | null
   /** 已应用那台机型的显示名。查不到就退回 id，不留空 */
   appliedMachineText: string
-  /** 已应用那个文件的文件名（官方行查树、release 行查发布清单）。都查不到退回 ref */
+  /** 已应用那个文件的文件名（云端行查树、release 行查发布清单）。都查不到退回 ref */
   appliedFileName: string
   /**
-   * 正在使用的这一份**是用户自己的那份**（不是官方交付的）。
+   * 正在使用的这一份**是用户自己的那份**（不是云端交付的）。
    *
    * 状态条据此多写一小句说明 —— 两边都能成为使用中的那一份（第七层），
    * 用户得看得出"现在跑的是我改的那一份"。
    */
-  appliedIsMine: boolean
+  appliedIsLocal: boolean
 
   query: string
   setQuery: (next: string) => void
@@ -1304,8 +1304,8 @@ export function usePresetPage(data: PresetData): PresetPage {
     (): PresetRowsInput => ({
       machines,
       machineId: data.machineId,
-      mine: data.mine,
-      mineIndex: data.mineIndex,
+      local: data.local,
+      localIndex: data.localIndex,
       draftPath: data.draftPath,
       localIds: localSet,
       slicerCopiedIds: copiedSet,
@@ -1314,7 +1314,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       query,
       pinned,
       releasePresets: data.release.presets,
-      officialVersions: data.officialVersions,
+      cloudVersions: data.cloudVersions,
       localReleases: data.release.localReleases,
       staleReleases: data.release.stale,
       releaseVersion: data.release.version,
@@ -1405,13 +1405,13 @@ export function usePresetPage(data: PresetData): PresetPage {
 
   /*
    * 顶部状态条那句话全按**正在使用的那一条**取，不按当前筛的机型。
-   * 文件名两个来源分别查：release 行在发布清单里、官方行在树里 —— 都查不到退回 ref 本身。
+   * 文件名两个来源分别查：release 行在发布清单里、云端行在树里 —— 都查不到退回 ref 本身。
    */
   const appliedMachine = data.machines.find((m) => m.id === data.active?.machineId)
   const appliedFileName = useMemo((): string => {
     const entry = data.active
     if (entry === null) return ''
-    /* 底账给的就是文件名；本地表 / 云端表都按它对（官方交付行与目录登记同名） */
+    /* 底账给的就是文件名；本地表 / 云端表都按它对（云端交付行与目录登记同名） */
     const hit = data.release.presets.find((p) => p.fileName === entry.fileName)
     return hit?.fileName ?? entry.fileName
   }, [data.active, data.release.presets])
@@ -1431,8 +1431,8 @@ export function usePresetPage(data: PresetData): PresetPage {
     applied: data.active,
     appliedMachineText: appliedMachine?.display ?? data.active?.machineId ?? '',
     appliedFileName,
-    /* 使用中的永远是**本地文件**（即「我的文件」）—— 有底账就是它 */
-    appliedIsMine: data.active !== null,
+    /* 使用中的永远是**本地文件**（即「本地文件」）—— 有底账就是它 */
+    appliedIsLocal: data.active !== null,
     query,
     setQuery,
     searching: query.trim() !== '',

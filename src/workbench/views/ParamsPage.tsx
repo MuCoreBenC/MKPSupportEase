@@ -633,9 +633,9 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   /** 左树一行。单版本 = radio（选谁改谁）；对照 = checkbox（勾选比较列）。
       选中判断必须带机型 —— A2L 和 A1 都有叫 STANDARD 的版本（作者实测） */
   const railRow = (m: { id: string; display: string }, uid: string, name: string, id: string, note?: string) => {
-    const mine = m.id === machineId
+    const isCurrent = m.id === machineId
     const cid = colId(m.id, uid)
-    const on = mode === 'single' ? mine && uid === target : compareSet.has(cid)
+    const on = mode === 'single' ? isCurrent && uid === target : compareSet.has(cid)
     const kind = uid === BASE ? 'base' : 'version'
     const title =
       uid === BASE ? `${m.display} 的基底 —— 改它这一台所有版本都跟着动` : note
@@ -659,7 +659,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
            * 去掉选择状态，不是非要选择一个」）。没选是合法状态：正文回空态，
            * 不会兜一台假机型。机型 id 留着不撤 —— 从头再来时省一次点击。
            */
-          if (mine && uid === target) {
+          if (isCurrent && uid === target) {
             switchTarget(null)
             return
           }
@@ -690,7 +690,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           <span className={s.pVname}>{name}</span>
           {id && <span className={s.pVid}>{id}</span>}
         </span>
-        {mode === 'compare' && mine && uid === target && (
+        {mode === 'compare' && isCurrent && uid === target && (
           <span className={s.pTagOff}>当前</span>
         )}
       </button>

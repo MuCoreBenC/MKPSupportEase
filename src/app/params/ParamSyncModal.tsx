@@ -1,25 +1,25 @@
 /*
- * 「选择要跟随的更新」—— 官方改过的参数**一次看完、一次决定**。
+ * 「选择要跟随的更新」—— 云端改过的参数**一次看完、一次决定**。
  *
  * # 它回答什么
  *
- * 官方持续发布新默认值，但它**不许直接顶掉我的参数**。于是每一版发布之后，
- * 官方改过的那几项先是**待处理**：我这里列出来，用户勾选（采用官方新值）
+ * 云端持续发布新默认值，但它**不许直接顶掉本地参数**。于是每一版发布之后，
+ * 云端改过的那几项先是**待处理**：我这里列出来，用户勾选（采用云端新值）
  * 或者不勾（保持我现在用的值），一次落下去。
  *
- * 与行上那两个动作（「用新值」/「保持我的」）是**同一件事的两条路**：
+ * 与行上那两个动作（「用新值」/「保持本地」）是**同一件事的两条路**：
  * 一屏能全看完时走这里，只想改一行时就地在那一行上改。两条路落的是同一个写口。
  *
  * # 默认勾选：我改过的默认不勾
  *
- * 判据是**这一项我动过没有** —— `mine`（我那份文件里写着的）与 `baselineOld`
- * （官方旧值）一样 = 我没动过 → 默认勾上（本来就该跟官方走）；不一样 = 我改过
+ * 判据是**这一项我动过没有** —— `local`（我那份文件里写着的）与 `baselineOld`
+ * （云端旧值）一样 = 我没动过 → 默认勾上（本来就该跟云端走）；不一样 = 我改过
  * → 默认不勾（不替用户放弃他自己的值）。
  *
  * # 三方怎么显示
  *
- *   我改过的项   我 20.0 · 官方 18.6 → 19.0     右边：「确认后：19.0 / 20.0」
- *   没改过的项   官方 18.6 → 19.0
+ *   我改过的项   我 20.0 · 云端 18.6 → 19.0     右边：「确认后：19.0 / 20.0」
+ *   没改过的项   云端 18.6 → 19.0
  *
  * 「右边那一格」是这一屏独有的东西：勾 / 不勾会**当场**改变确认后的值，
  * 不必让人自己在脑子里推一遍。
@@ -34,7 +34,7 @@ import s from './ParamSyncModal.module.css'
 
 interface Props {
   open: boolean
-  /** 这一份的官方更新账（`null` = 还没读到） */
+  /** 这一份的云端更新账（`null` = 还没读到） */
   sync: PresetParamSync | null
   /** 正在落决定 —— 两颗底栏按钮据此禁用 */
   busy: boolean
@@ -47,9 +47,9 @@ interface Props {
   onClose: () => void
 }
 
-/** 这一项"我动过没有"：我那份文件里写着的与官方旧值一样就是没动过 */
+/** 这一项"我动过没有"：我那份文件里写着的与云端旧值一样就是没动过 */
 function untouched(entry: ParamSyncEntry): boolean {
-  return entry.mine === null || entry.mine === entry.baselineOld
+  return entry.local === null || entry.local === entry.baselineOld
 }
 
 export default function ParamSyncModal({
@@ -80,9 +80,9 @@ export default function ParamSyncModal({
   const text = (key: string, raw: string): string => valueText(defOf(key), raw)
   const afterOf = (e: ParamSyncEntry): string => {
     if (checked[e.key] === true) {
-      return e.officialNew === null ? '—' : text(e.key, e.officialNew)
+      return e.cloudNew === null ? '—' : text(e.key, e.cloudNew)
     }
-    return e.mine === null ? '—' : text(e.key, e.mine)
+    return e.local === null ? '—' : text(e.key, e.local)
   }
 
   const toggleAll = () => {
@@ -163,10 +163,10 @@ export default function ParamSyncModal({
             {pending.map((e) => {
               const def = defOf(e.key)
               const on = checked[e.key] === true
-              const mineText = e.mine === null ? null : text(e.key, e.mine)
+              const localText = e.local === null ? null : text(e.key, e.local)
               const diff =
-                e.baselineOld !== null && e.officialNew !== null
-                  ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.officialNew)}`
+                e.baselineOld !== null && e.cloudNew !== null
+                  ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.cloudNew)}`
                   : '云端这一项的值还没拿到'
               return (
                 <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
@@ -184,9 +184,9 @@ export default function ParamSyncModal({
                       {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
                     </div>
                     <div className={s.vals}>
-                      {mineText !== null && e.mine !== e.baselineOld && (
+                      {localText !== null && e.local !== e.baselineOld && (
                         <>
-                          本地 <span className={s.mine}>{mineText}</span>
+                          本地 <span className={s.local}>{localText}</span>
                           {' · '}
                         </>
                       )}

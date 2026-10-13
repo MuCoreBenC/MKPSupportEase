@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "0bfc4ad3a9eac3b0",
+  "revision": "535f40744de78851",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -69,7 +69,7 @@
           "name": "标准版",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置，适合大多数用户",
+          "description": "标准配置，适合大多数用户",
           "image": null
         },
         {
@@ -154,7 +154,7 @@
           "name": "标准版",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置",
+          "description": "标准配置",
           "image": null
         },
         {
@@ -786,7 +786,7 @@
   "bundles": [
     {
       "id": "A1_STANDARD",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1",
       "assetRefs": [
         "a1-standard",
@@ -796,7 +796,7 @@
     },
     {
       "id": "A1_FAST",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1",
       "assetRefs": [
         "a1-fast",
@@ -806,7 +806,7 @@
     },
     {
       "id": "A1_FASTV3.3",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1",
       "assetRefs": [
         "a1-fastv3.3",
@@ -816,7 +816,7 @@
     },
     {
       "id": "A1_MINI_STANDARD",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-standard",
@@ -826,7 +826,7 @@
     },
     {
       "id": "A1_MINI_FAST",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fast",
@@ -836,7 +836,7 @@
     },
     {
       "id": "A1_MINI_FASTV3.3",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fastv3.3",
@@ -846,7 +846,7 @@
     },
     {
       "id": "P1S_default",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "P1S",
       "assetRefs": [
         "p1s-lite",
@@ -856,7 +856,7 @@
     },
     {
       "id": "P2S_default",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "P2S",
       "assetRefs": [
         "p2s-standard",
@@ -866,7 +866,7 @@
     },
     {
       "id": "X1C_default",
-      "display": "官方推荐",
+      "display": "推荐",
       "machineId": "X1C",
       "assetRefs": [
         "x1c-lite",

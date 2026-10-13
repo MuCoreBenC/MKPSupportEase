@@ -7,7 +7,7 @@
  * AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）。存储全部回到程序管理的
  * Internal 根（`atomic_write` 纪律），WebView 的 localStorage 不再承载任何底账。
  *
- * 留下来的只有**时间那一格的格式化**：表格 / 展开面板上"官方行 / 发布行 / 老的本机值"
+ * 留下来的只有**时间那一格的格式化**：表格 / 展开面板上"云端行 / 发布行 / 老的本机值"
  * 三种来源的写法都在这里认。
  */
 
@@ -50,7 +50,7 @@ function parseStatDate(raw: string): StatDate | null {
   return null
 }
 
-/** 行上那一列：只写月-日，全表统一 `MM-DD`（补零、横杠）——不管官方 / 我的 / 发布 */
+/** 行上那一列：只写月-日，全表统一 `MM-DD`（补零、横杠）——不管云端 / 本地 / 发布 */
 export function shortStatText(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined
   const t = parseStatDate(raw)

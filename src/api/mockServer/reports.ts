@@ -226,7 +226,7 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
     `${TEMP_ROOT}/Sat_Oct_10/11_05_12#42952#456/Metadata/${r.gcode}`
   const outputPath =
     `${USER_ROOT}/gcode_history/${DAY}/42952.1_${DAY_COMPACT}_111711.gcode`
-  const presetPath = `${USER_ROOT}/presets-mine/${r.preset}`
+  const presetPath = `${USER_ROOT}/presets-local/${r.preset}`
 
   return {
     summary,
@@ -378,7 +378,7 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
     `${TEMP_ROOT}/Sat_Oct_10/${r.startedAt.replace(/:/g, '_')}#${r.seq}/Metadata/${r.gcode}`
   const outputPath =
     `${USER_ROOT}/gcode_history/${DAY}/${baseName(r.gcode)}_${DAY_COMPACT}_${stamp}.gcode`
-  const presetPath = `${USER_ROOT}/presets-mine/${r.preset}`
+  const presetPath = `${USER_ROOT}/presets-local/${r.preset}`
 
   /* 文件大小/行数随序号变化，纯粹为了让每行不一样 */
   const inputMb = 0.5 + ((r.seq % 9) * 3.4)

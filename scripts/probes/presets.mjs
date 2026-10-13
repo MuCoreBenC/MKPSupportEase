@@ -35,7 +35,7 @@ const BENIGN = [
   /\/favicon\.ico$/,
   /未实现的接口: downloadCatalogFile/,
   /未实现的接口: readArchivedText/,
-  /未实现的接口: readUserPresetText/,
+  /未实现的接口: readLocalPresetText/,
   /* 第十七刀：进入预设会后台检查一次远端目录（Bootstrap）。浏览器里没有远端（假后端必抛），
      这一条是**设计成要发生的** —— 页面把它静默吞掉（第 5n 节正是断言"静默"） */
   /未实现的接口: checkRemoteUpdate/,
@@ -154,7 +154,7 @@ await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(200)
 /*
  * ★ 2026-10-13 按**现状**改：MKP 档**也有**「本地 / 云端」那一条了 ——
- *   本地那一面是「我的文件」，云端那一面是官方交付行（10-09 那次改判之后就是这个样子）。
+ *   本地那一面是「本地文件」，云端那一面是云端交付行（10-09 那次改判之后就是这个样子）。
  *   原来这条断言是"MKP 档不该有那条控件（只有一张资源库表）"，它早就过期了。
  */
 const mkpHasScope = (await rad('preset-scope', 'local').count()) > 0
@@ -207,7 +207,7 @@ if ((await copyRow.count()) === 0) {
   const copyLine =
     /已复制[^。]*/.exec(copyBody)?.[0] ?? /复制失败[^。]*/.exec(copyBody)?.[0] ?? '(没有回话)'
   if (/复制失败/.test(copyBody)) problems.push(`「复制」这一手失败了：${copyLine}`)
-  if (/assets|user\/<|presets-mine|Bambu Studio/.test(copyLine)) {
+  if (/assets|user\/<|presets-local|Bambu Studio/.test(copyLine)) {
     problems.push(`「复制」的提示条里不该出现落点路径这类技术细节：${copyLine}`)
   }
   console.log(`\n[复制] ${copyName.slice(0, 40)} → ${copyLine}`)
@@ -271,11 +271,11 @@ const openDetailOf = async (rowKey) => {
 /**
  * 每一行的**文件名**、整格文本、操作列那一格（按钮取按钮文字，灰字取文字）。
  *
- * 文件名从 `tr[data-rowkey]` 上取 —— 名称格里的文本带着副标题与角标（`我的 A1 涂胶.toml
- * 官方模板已更新 我的预设 · 源自官方 A1-fast.toml`），而且**本名里可能带空格**，
- * 按文本切第一个词会切成「我的」。rowKey 是这套系统里明写的钥匙（行上就挂着它）：
- *   release:<文件名>           官方那一行
- *   mine:<机型>:presets-mine/<文件名>   我那一行
+ * 文件名从 `tr[data-rowkey]` 上取 —— 名称格里的文本带着副标题与角标（`A1 涂胶.toml
+ * 云端模板已更新 本地预设 · 源自云端 A1-fast.toml`），而且**本名里可能带空格**，
+ * 按文本切第一个词会切成「本地」。rowKey 是这套系统里明写的钥匙（行上就挂着它）：
+ *   release:<文件名>           云端那一行
+ *   local:<机型>:presets-local/<文件名>   我那一行
  */
 const actions = () =>
   page.evaluate(() => {
@@ -304,8 +304,8 @@ const actions = () =>
  *   ① MKP 档（资源库那一张表）只认 `mkp_preset`：catalog 里登记的切片器配置（`.json`）
  *      与图标（`.svg`）一行都不许出现（2026-10-02 作者截图抓到的混排）；
  *   ② 切片器档也不含图标，而且 **catalog 登记的切片器交付行**要出现、动作是「下载」
- *      （它是真能下的那一支 —— 官方资产行那颗是死按钮）；
- *   ③ 台账跟着当前档说自己的数：资源库是「官方 N · 我的 N」，切片器是「仓库 / 本机 / 我的」。
+ *      （它是真能下的那一支 —— 云端资产行那颗是死按钮）；
+ *   ③ 台账跟着当前档说自己的数：资源库是「云端 N · 本地 N」，切片器是「仓库 / 本机 / 本地」。
  *
  * 真机上这一刀的现场：MKP 档 → 目录登记的 9 份 `.toml`；切片器档 → 9 份 `bbs_config`；
  * `a1.svg`（icon）与 `*.3mf`（model）哪一档都不出现 —— 它们不归预设页。
@@ -375,15 +375,15 @@ const slicerLedger = (await facts()).counts
 
 /*
  * 台账：两档各说自己的数（2026-10-08 资源库改判之后它们形状就不一样了）。
- *   资源库  「官方 N · 我的 N」—— 官方那一份只有一个当前版，没有「本机」这一格
- *   切片器  「仓库 N · 本机 N + 我的 N」—— 照旧
+ *   资源库  「云端 N · 本地 N」—— 云端那一份只有一个当前版，没有「本机」这一格
+ *   切片器  「仓库 N · 本机 N + 本地 N」—— 照旧
  */
 const ledgerNum = (t) => /仓库 (\d+)/.exec(t)?.[1] ?? ''
 console.log(
   `[分类边界 · 台账] 资源库「${mkpLedger || '(没读到)'}」 切片器「仓库 ${ledgerNum(slicerLedger)}」`,
 )
-if (!/官方 \d+ · 我的 \d+/.test(mkpLedger)) {
-  problems.push(`资源库那一档的台账该是「官方 N · 我的 N」，实测「${mkpLedger}」`)
+if (!/云端 \d+ · 本地 \d+/.test(mkpLedger)) {
+  problems.push(`资源库那一档的台账该是「云端 N · 本地 N」，实测「${mkpLedger}」`)
 }
 if (ledgerNum(slicerLedger) === '') {
   problems.push('切片器档的台账该照旧带「仓库 N」')
@@ -421,19 +421,19 @@ await page.screenshot({ path: `${shotDir}/presets-menu.png` })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(150)
 
-/* ---------- 5. 资源库那一档的**两张脸**（本地：我的文件 / 云端：官方交付行） ---------- */
+/* ---------- 5. 资源库那一档的**两张脸**（本地：本地文件 / 云端：云端交付行） ---------- */
 /*
  * ★ 2026-10-13 按**现在的表**重写。原版守的是"官方与我的**并排在同一张 tbody** 里" ——
  *   那是 2026-10-08 那版的样子；10-09 定死 **MKP 档的本地表只列「我的文件」**之后，
- *   官方那几行搬到了同一档的**云端**那一侧，那条断言就永远不可能成立了（探针因此
+ *   云端那几行搬到了同一档的**云端**那一侧，那条断言就永远不可能成立了（探针因此
  *   一直红着，也没人看得出来 —— 它崩在更后面，problems 列表根本不打印）。
  *
  * 现在这一档的两张脸（它自己不摆「位置」轴，但**沿用会话里那一个**，见 `mkpAt`）：
- *   位置「本地」  我自己的那几行：来源写「我的预设」、动作是「使用」，
+ *   位置「本地」  我自己的那几行：来源写「本地预设」、动作是「使用」，
  *                 且**不许出现**「已下载 / 未下载 / 有更新」那一套词（下载不在用户心智里）；
- *   位置「云端」  官方交付行：来源写「官方」，动作是「更新 / 下载」。
+ *   位置「云端」  云端交付行：来源写「云端」，动作是「更新 / 下载」。
  *
- * 「使用」在真机上是**写底账**那一手（假后端也认 `origin === 'mine'` + `path`）——
+ * 「使用」在真机上是**写底账**那一手（假后端也认 `origin === 'local'` + `path`）——
  * 判据是**成功**，不是"给了句人话"（2026-10-13 那个漏参 bug 就是被后者放过去的）。
  */
 
@@ -460,8 +460,8 @@ for (const word of ['已下载', '未下载', '有更新']) {
   }
 }
 /* ★ 2026-10-13：行上那枚来源小字现在就是「我的」（原来写「我的预设」）—— 按现状判 */
-if (!assetRows.some((r) => r.name.includes('我的'))) {
-  problems.push('资源库的本地面该有我自己的那几行（来源那枚小字写「我的」）')
+if (!assetRows.some((r) => r.name.includes('本地'))) {
+  problems.push('资源库的本地面该有我自己的那几行（来源那枚小字写「本地」）')
 }
 if (!assetRows.some((r) => r.action.includes('使用'))) {
   problems.push('资源库的本地面该有「使用」按钮（还没在用的那些行）')
@@ -481,9 +481,9 @@ if ((await useBtn.count()) === 0) {
   console.log(`[资源库 · 本地] 点「使用」之后提示条：${useNote || '(没有提示条)'}`)
   /*
    * ★ **成功**才是判据（2026-10-13 改严）——本地表那颗「使用」原本**一份都点不动**：
-   *   前端把路径当文件名传下去、来源又缺省成 `official`，后端于是拿
-   *   `presets-mine/A1_MINI-fast.toml` 这串**带前缀的路径**去交付目录里找，回一句
-   *   「目录里没有 presets-mine/…」。
+   *   前端把路径当文件名传下去、来源又缺省成 `cloud`，后端于是拿
+   *   `presets-local/A1_MINI-fast.toml` 这串**带前缀的路径**去交付目录里找，回一句
+   *   「目录里没有 presets-local/…」。
    *
    *   这条原来写成"已使用 / 已取回 / 失败都给一句人话算过"，于是**那个失败也算通过**。
    */
@@ -498,15 +498,15 @@ await mkpAt('cloud')
 const offRows = await actions()
 console.log(`[资源库 · 云端] ${offRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
 if (offRows.length === 0) {
-  problems.push('资源库的云端面该有官方交付行（那一档的官方都在这儿）')
+  problems.push('资源库的云端面该有云端交付行（那一档的云端都在这儿）')
 }
 if (!offRows.some((r) => /更新|下载/.test(r.action))) {
-  problems.push('资源库的云端面该有「更新 / 下载」这一支动作（官方行不在本地表里）')
+  problems.push('资源库的云端面该有「更新 / 下载」这一支动作（云端行不在本地表里）')
 }
 
 /* ---------- 5b. 归档抽屉在资源库那一档退场（2026-10-08） ---------- */
 /*
- * 官方**只有一个当前版**：资源库那些行的展开详情里不该再有「旧版本 N 份」那一格，
+ * 云端**只有一个当前版**：资源库那些行的展开详情里不该再有「旧版本 N 份」那一格，
  * 也就没有归档抽屉可点（那条链只留在切片器档的代码路径里，本期不动）。
  * 守的是"不给用户一个他没法理解的入口"。
  */
@@ -519,7 +519,7 @@ await page.waitForTimeout(300)
 const archiveCells = await page.getByRole('button', { name: /^\d+ 份（点开看）$/ }).count()
 console.log(`\n[归档] 资源库展开详情里的「旧版本」那一格：${archiveCells} 个（该是 0）`)
 if (archiveCells > 0) {
-  problems.push('资源库那一档不该有「旧版本 N 份」那一格（官方只有当前版）')
+  problems.push('资源库那一档不该有「旧版本 N 份」那一格（云端只有当前版）')
 }
 
 /* ---------- 5c. 批量：多份一起处理（逐份给结局）—— 只有切片器那一档有 ---------- */
@@ -597,10 +597,10 @@ await page.waitForTimeout(200)
 await rad('preset-kind', 'mkp').click({ force: true })
 await scope('local')
 await page.waitForTimeout(250)
-const mineRows = await actions()
-console.log(`\n[用户线 · 本地表] ${mineRows.map((r) => r.name).join(' || ')}`)
-for (const name of ['我的 A1 涂胶.toml', 'Process_0.2mm.json']) {
-  if (!mineRows.some((r) => r.name.includes(name))) {
+const localRows = await actions()
+console.log(`\n[用户线 · 本地表] ${localRows.map((r) => r.name).join(' || ')}`)
+for (const name of ['A1 涂胶.toml', 'Process_0.2mm.json']) {
+  if (!localRows.some((r) => r.name.includes(name))) {
     problems.push(`本地表里没有我自己的那一份：${name}`)
   }
 }
@@ -613,14 +613,14 @@ console.log(`[用户线 · 切片器档] ${slicerRows.map((r) => r.name).join(' 
 if (!slicerRows.some((r) => r.name.includes('Process_0.2mm.json'))) {
   problems.push('认不出类别的那一份在切片器档下也该列出来（认不出就不藏）')
 }
-if (slicerRows.some((r) => r.name.includes('我的 A1 涂胶.toml'))) {
+if (slicerRows.some((r) => r.name.includes('A1 涂胶.toml'))) {
   problems.push('认得出是 MKP 预设的那一份不该出现在切片器档下')
 }
 await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(350)
 
 /* ③ 展开那一份 → 「正文 / 看正文」 */
-const mineRow = page
+const localRow = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'Process_0.2mm.json' })
@@ -628,13 +628,13 @@ const mineRow = page
 /*
  * 展开详情的格子集（版本 / 来源 / 基于 —— 见 `factOf` 顶上那段：详情早不是 `dl/dt/dd` 了）。
  * 「类型」那一格已随详情重构退场 —— "认不出是哪一类"改由行上角标与任何类型档下都列
- * （上面 5d-① 已量）来传达；这里守的是"来源格照常在、说得清它是我的"。
+ * （上面 5d-① 已量）来传达；这里守的是"来源格照常在、说得清它是本地"。
  */
-await openDetailOf((await mineRow.getAttribute('data-rowkey')) ?? '')
-const mineFacts = await factOf()
-console.log(`[用户线] 那一份的详情格：${JSON.stringify(mineFacts)}`)
-if (!(mineFacts['来源'] ?? '').includes('我的')) {
-  problems.push(`认不出类别的那一份，来源格该说「我的」，实测「${mineFacts['来源'] ?? '(没有)'}」`)
+await openDetailOf((await localRow.getAttribute('data-rowkey')) ?? '')
+const localFacts = await factOf()
+console.log(`[用户线] 那一份的详情格：${JSON.stringify(localFacts)}`)
+if (!(localFacts['来源'] ?? '').includes('本地')) {
+  problems.push(`认不出类别的那一份，来源格该说「本地」，实测「${localFacts['来源'] ?? '(没有)'}」`)
 }
 
 const bodyBtn = page.getByRole('button', { name: '看正文' })
@@ -645,7 +645,7 @@ if (bodyBtnCount === 0) {
 } else {
   await bodyBtn.last().click()
   await page.waitForTimeout(500)
-  const mineDrawer = await page.evaluate(() => {
+  const localDrawer = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]')
     return {
       text: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 220),
@@ -654,20 +654,20 @@ if (bodyBtnCount === 0) {
       ),
     }
   })
-  console.log(`[用户线] 抽屉：${mineDrawer.text}`)
-  if (!mineDrawer.text.includes('Process_0.2mm.json')) {
+  console.log(`[用户线] 抽屉：${localDrawer.text}`)
+  if (!localDrawer.text.includes('Process_0.2mm.json')) {
     problems.push('抽屉里要认出看的是哪一份')
   }
-  if (!/读不出来/.test(mineDrawer.text)) {
+  if (!/读不出来/.test(localDrawer.text)) {
     problems.push('浏览器里没有用户目录，读正文该如实说读不出来')
   }
   /* 这一层只能看：写入动作连按钮都不该有 */
   for (const forbidden of ['保存', '另存', '删除', '改名']) {
-    if (mineDrawer.buttons.some((b) => b.includes(forbidden))) {
+    if (localDrawer.buttons.some((b) => b.includes(forbidden))) {
       problems.push(`这一层只能看，抽屉里不该有「${forbidden}」`)
     }
   }
-  await page.screenshot({ path: `${shotDir}/presets-mine.png` })
+  await page.screenshot({ path: `${shotDir}/presets-local.png` })
   await page.keyboard.press('Escape')
   await page.waitForTimeout(250)
 }
@@ -675,13 +675,13 @@ if (bodyBtnCount === 0) {
 /* ---------- 5e. 一个预设一行：官方与我的各是各的（2026-10-08 资源库改判） ---------- */
 /*
  * 守三件事：
- *   ① 官方那一份在资源库里**只有一行**（名字 = 目录原名，没有日期后缀）——
- *      官方只有一个当前版，不再有"下载下来又铺一份副本"那种两行；
- *   ② 我的预设也在这一张表里（使用 / 改 / 改名 / 删除全走它），名字是用户自己起的；
- *   ③ 官方行与我的行**同一个形状**：只有来源那一行小字不同，动作都是「使用」。
+ *   ① 云端那一份在资源库里**只有一行**（名字 = 目录原名，没有日期后缀）——
+ *      云端只有一个当前版，不再有"下载下来又铺一份副本"那种两行；
+ *   ② 本地预设也在这一张表里（使用 / 改 / 改名 / 删除全走它），名字是用户自己起的；
+ *   ③ 云端行与本地行**同一个形状**：只有来源那一行小字不同，动作都是「使用」。
  *
  * 真机上那条更硬的判据在 Rust 侧：`use_official_preset`（按需取回 + 写使用中）与
- * `copy_official_as_mine`（官方 → 我的，撞名拒）—— 下载 / 使用都不再自动产生副本。
+ * `copy_official_as_mine`（云端 → 本地，撞名拒）—— 下载 / 使用都不再自动产生副本。
  */
 await mkpAt('local')
 
@@ -689,31 +689,31 @@ const worldRows = await actions()
 console.log(`\n[资源库 · 一个预设一行] ${worldRows.map((r) => r.name).join(' || ')}`)
 for (const file of ['A1-standard.toml', 'A1-fast.toml', 'A1mini-standard.toml']) {
   /* 比的是**行的文件名**（`data-rowkey` 上取下来的），不是整格文本 ——
-     副标题里也写着「源自官方 A1-fast.toml」，按子串数会把我的那几行也算进来 */
+     副标题里也写着「源自云端 A1-fast.toml」，按子串数会把本地那几行也算进来 */
   const hits = worldRows.filter((r) => r.file === file)
   if (hits.length > 1) {
-    problems.push(`官方那一份该只有一行：${file}（实测 ${hits.length} 行）`)
+    problems.push(`云端那一份该只有一行：${file}（实测 ${hits.length} 行）`)
   }
 }
-if (!worldRows.some((r) => r.name.includes('我的'))) {
+if (!worldRows.some((r) => r.name.includes('本地'))) {
   problems.push('资源库里该有我自己的那一份（用户线的正常内容）')
 }
 await page.screenshot({ path: `${shotDir}/presets-world.png` })
 
-/* ---------- 5f. 两张脸各自的菜单（云端：官方交付行 / 本地：我的文件） ---------- */
+/* ---------- 5f. 两张脸各自的菜单（云端：云端交付行 / 本地：本地文件） ---------- */
 /*
  * ★ 2026-10-13 按**现在的表**重写。原版要"官方行与我的行同屏"（旧表），现在这两类
  *   分在两张脸上，菜单也各归各位：
- *   云端面（官方交付行）  「下载 / 更新」+「复制链接」+「在 BBS 中查看」（MKP 配方给不出
- *                         BBS 入口，那一项灰着）—— **不该有**「使用 / 另存为我的预设 /
+ *   云端面（云端交付行）  「下载 / 更新」+「复制链接」+「在 BBS 中查看」（MKP 配方给不出
+ *                         BBS 入口，那一项灰着）—— **不该有**「使用 / 另存为本地预设 /
  *                         重命名 / 删除」：要动它先「下载」，下载会另落一份你自己的；
- *   本地面（我的文件）    「使用 / 修改参数 / 复制 / 重命名 / 显示所在文件夹 / 删除」
- *                         —— **不该有**「另存为我的预设」（它自己已经是我的了）。
+ *   本地面（本地文件）    「使用 / 修改参数 / 复制 / 重命名 / 显示所在文件夹 / 删除」
+ *                         —— **不该有**「另存为本地预设」（它自己已经是本地了）。
  *
  * 真机那条更硬的判据在 Rust 侧：`copy_official_as_mine`（撞名拒、血统三行）与
  * `apply_active_preset`（按闸校验后写底账）。
  */
-/** 官方那几行分属不同机型，切到「全部机型」才同屏看得到（漏斗在筛选条最右） */
+/** 云端那几行分属不同机型，切到「全部机型」才同屏看得到（漏斗在筛选条最右） */
 const allMachines = async () => {
   await page.locator('button[aria-haspopup="true"]').first().click()
   await page.waitForTimeout(200)
@@ -743,30 +743,30 @@ const menuOf = async (file) => {
 
 await mkpAt('cloud')
 await allMachines()
-const officialMenu = await menuOf('A1-standard.toml')
-console.log(`\n[资源库 · 官方行菜单（云端面）] ${officialMenu?.join(' | ') ?? '(没有菜单)'}`)
-if (officialMenu === null) problems.push('官方那一行右键没有菜单')
+const cloudMenu = await menuOf('A1-standard.toml')
+console.log(`\n[资源库 · 云端行菜单（云端面）] ${cloudMenu?.join(' | ') ?? '(没有菜单)'}`)
+if (cloudMenu === null) problems.push('云端那一行右键没有菜单')
 else {
-  if (!officialMenu.some((m) => /下载|更新/.test(m))) {
-    problems.push('官方那一行该有「下载 / 更新」这一支（它不在本地表里，要动先下载）')
+  if (!cloudMenu.some((m) => /下载|更新/.test(m))) {
+    problems.push('云端那一行该有「下载 / 更新」这一支（它不在本地表里，要动先下载）')
   }
-  for (const gone of ['使用', '另存为我的预设', '重命名', '删除']) {
-    if (officialMenu.some((m) => m.includes(gone))) {
-      problems.push(`官方那一行不该有「${gone}」（官方行只下载；要改走「下载」落一份你的）`)
+  for (const gone of ['使用', '另存为本地预设', '重命名', '删除']) {
+    if (cloudMenu.some((m) => m.includes(gone))) {
+      problems.push(`云端那一行不该有「${gone}」（云端行只下载；要改走「下载」落一份你的）`)
     }
   }
 }
 
 await mkpAt('local')
-const mineMenu = await menuOf('我的 A1 涂胶.toml')
-console.log(`[资源库 · 我的行菜单（本地面）] ${mineMenu?.join(' | ') ?? '(没有菜单)'}`)
-if (mineMenu === null) problems.push('我的那一行右键没有菜单')
+const localMenu = await menuOf('A1 涂胶.toml')
+console.log(`[资源库 · 本地行菜单（本地面）] ${localMenu?.join(' | ') ?? '(没有菜单)'}`)
+if (localMenu === null) problems.push('本地那一行右键没有菜单')
 else {
   for (const want of ['使用', '重命名', '删除']) {
-    if (!mineMenu.some((m) => m.includes(want))) problems.push(`我的那一行该有「${want}」`)
+    if (!localMenu.some((m) => m.includes(want))) problems.push(`本地那一行该有「${want}」`)
   }
-  if (mineMenu.includes('另存为我的预设')) {
-    problems.push('「另存为我的预设」只给官方那一行（我自己这份已经是我的了）')
+  if (localMenu.includes('另存为本地预设')) {
+    problems.push('「另存为本地预设」只给云端那一行（我自己这份已经是本地了）')
   }
 }
 await page.screenshot({ path: `${shotDir}/presets-menus.png` })
@@ -777,59 +777,59 @@ await page.waitForTimeout(200)
 await page.getByRole('button', { name: /^A1 A1$/ }).click()
 await page.waitForTimeout(350)
 
-/* ---------- 5g. 我那份能被使用，而且说得清基于哪一版官方（第七层） ---------- */
+/* ---------- 5g. 我那份能被使用，而且说得清基于哪一版云端（第七层） ---------- */
 /*
  * 守四件事：
- *   ① 我那份**有「使用」**（与官方那一行同一颗按钮、同一个词）——
+ *   ① 我那份**有「使用」**（与云端那一行同一颗按钮、同一个词）——
  *      "只读"是文件归属的属性，不是"能不能被使用"的属性；
- *   ② 点它 → 状态条说得出「已应用 我那份」，而且**多一枚「我的文件」**
- *      （用户得看得出现在跑的不是官方那份）；
- *   ③ 它当初基于的那版官方换了新版时，行上挂一枚极淡的「官方模板已更新」
+ *   ② 点它 → 状态条说得出「已应用 我那份」，而且**多一枚「本地文件」**
+ *      （用户得看得出现在跑的不是云端那份）；
+ *   ③ 它当初基于的那版云端换了新版时，行上挂一枚极淡的「云端模板已更新」
  *      （2026-10-08：那枚「基于旧版官方」退役了 —— 这不是"你该更新"）；
- *   ④ 展开详情那一格说得清：来源 + 官方已换新版。
+ *   ④ 展开详情那一格说得清：来源 + 云端已换新版。
  *
- * 真机那条更硬的判据在 Rust 侧：`state::save_active_mine` / `active_target`（两条线的落点）
- * 与 `mine::based_on`（旧的 / 当前的 / 说不清）。
+ * 真机那条更硬的判据在 Rust 侧：`state::save_active_local` / `active_target`（两条线的落点）
+ * 与 `local::based_on`（旧的 / 当前的 / 说不清）。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(300)
 
 const myActions = await actions()
-const myEntry = myActions.find((r) => r.name.includes('我的 A1 涂胶.toml'))
-console.log(`\n[我的那份] ${myEntry?.name ?? '(没这一行)'} → ${myEntry?.action ?? '(没有)'}`)
+const myEntry = myActions.find((r) => r.name.includes('A1 涂胶.toml'))
+console.log(`\n[本地那份] ${myEntry?.name ?? '(没这一行)'} → ${myEntry?.action ?? '(没有)'}`)
 if (myEntry === undefined) {
   problems.push('资源库里没有我自己的那一份')
 } else if (!myEntry.action.includes('使用')) {
-  problems.push(`我那份该有「使用」（与官方那一行同一个词），实测「${myEntry.action}」`)
+  problems.push(`我那份该有「使用」（与云端那一行同一个词），实测「${myEntry.action}」`)
 }
 
 const myTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶.toml' })
+  .filter({ hasText: 'A1 涂胶.toml' })
   .first()
 const myTrKey = (await myTr.getAttribute('data-rowkey')) ?? ''
 
 const rowText = (await myTr.innerText()).replace(/\s+/g, ' ').trim()
-console.log(`[我的那份] 行内容：${rowText}`)
+console.log(`[本地那份] 行内容：${rowText}`)
 /*
  * ★ 2026-10-13 两条过期断言删掉，改成读**展开详情那一格**（更硬）：
- *   · 行上那枚来源小字现在是「我的」（原来写「我的预设」）；
+ *   · 行上那枚来源小字现在是「本地」（原来写「本地预设」）；
  *   · 「官方模板已更新」那一枚 **2026-10-09 就退役了**（见 `PresetTable.tsx` 那段注释）——
- *     官方改过的项现在住「基于」那一格（「… · 官方已换新版」，下面照旧判它）。
+ *     云端改过的项现在住「基于」那一格（「… · 云端已换新版」，下面照旧判它）。
  */
 await openDetailOf(myTrKey)
 const myFacts = await factOf()
 console.log(
-  `[我的那份] 展开详情：${Object.entries(myFacts).map(([k, v]) => `${k}=${v}`).join('｜') || '(空)'}`,
+  `[本地那份] 展开详情：${Object.entries(myFacts).map(([k, v]) => `${k}=${v}`).join('｜') || '(空)'}`,
 )
 /* ★ 2026-10-13：这一格现在说得更具体 —— 复制来的那份写「复制自 X」（认不出来源才是「我的」） */
-if (!/我的|复制自|导入/.test(myFacts['来源'] ?? '')) {
+if (!/本地|复制自|导入/.test(myFacts['来源'] ?? '')) {
   problems.push(`我那份的「来源」格该说得出它是哪来的，实测「${myFacts['来源'] ?? '(没有这一格)'}」`)
 }
-console.log(`[我的那份] 展开详情「基于」= ${myFacts['基于'] ?? '(没有这一格)'}`)
-if (!(myFacts['基于'] ?? '').includes('官方已换新版')) {
-  problems.push(`旧版派生那一份，「基于」那格该说「官方已换新版」，实测「${myFacts['基于']}」`)
+console.log(`[本地那份] 展开详情「基于」= ${myFacts['基于'] ?? '(没有这一格)'}`)
+if (!(myFacts['基于'] ?? '').includes('云端已换新版')) {
+  problems.push(`旧版派生那一份，「基于」那格该说「云端已换新版」，实测「${myFacts['基于']}」`)
 }
 if (!(myFacts['基于'] ?? '').includes('快拆版6月以前')) {
   problems.push('「基于」那格要说得出来源是哪台机型的哪一版（A1 · 快拆版6月以前）')
@@ -840,25 +840,25 @@ await page.waitForTimeout(600)
 const strip = await page.evaluate(() =>
   (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
 )
-console.log(`[我的那份] 使用之后（前 200 字）：${strip}`)
+console.log(`[本地那份] 使用之后（前 200 字）：${strip}`)
 /*
  * ★ 2026-10-13：这一段原来还判「已应用」与「我的文件」那两枚 —— 现在那条融合 pill 只写
- *   **文件名 + 机型 + 版本**（实测 `我的 A1 涂胶-高速版.tomlA1A1`），那两个词都不在里面。
+ *   **文件名 + 机型 + 版本**（实测 `A1 涂胶-高速版.tomlA1A1`），那两个词都不在里面。
  *   这里只守住"说得出用的是哪一份"（下面那条操作列「在用」是更硬的判据）。
  */
-if (!strip.includes('我的 A1 涂胶.toml')) problems.push('状态条要说得出用的是我那一份')
-const afterApply = (await actions()).find((r) => r.name.includes('我的 A1 涂胶.toml'))
-console.log(`[我的那份] 使用之后操作列：${afterApply?.action ?? '(没有)'}`)
+if (!strip.includes('A1 涂胶.toml')) problems.push('状态条要说得出用的是本地那份')
+const afterApply = (await actions()).find((r) => r.name.includes('A1 涂胶.toml'))
+console.log(`[本地那份] 使用之后操作列：${afterApply?.action ?? '(没有)'}`)
 if (!(afterApply?.action ?? '').includes('在用')) {
   problems.push(`使用之后那一行该变成「在用」，实测「${afterApply?.action}」`)
 }
-await page.screenshot({ path: `${shotDir}/presets-mine-apply.png` })
+await page.screenshot({ path: `${shotDir}/presets-local-apply.png` })
 
 /* ---------- 5h. 改我自己这份 → 存回它自己（第八层） ---------- */
 /*
  * ★ 2026-10-13 按**现在的界面**重写。原来这一节走的是"展开详情里那颗「改这份」"，
  *   那个抽屉已经不在了。现在两条入口分工明确（右键菜单）：
- *     修改参数   参数级编辑（改的是它自己这一份，官方那版只用来标默认值 / 有没有更新）
+ *     修改参数   参数级编辑（改的是它自己这一份，云端那版只用来标默认值 / 有没有更新）
  *     编辑文件   原始正文编辑 —— **连血统那三行一起给你看、一起能改**（它就是文件）
  *
  * 这一节守后者，四件事：
@@ -866,9 +866,9 @@ await page.screenshot({ path: `${shotDir}/presets-mine-apply.png` })
  *   ② 编辑器里是**整份文件**：血统那几行也在（口径与"参数级编辑"不同，别拿旧标准判）；
  *   ③ 保存后说得出"保存回我自己那一份"、**写回同一条路径**，表里**不多出一份**；
  *   ④ **血统还在**（只改参数行的那种改法）：「看正文」看得见那三行，
- *      行上「官方模板已更新」那一枚也没变。
+ *      行上「云端模板已更新」那一枚也没变。
  *
- * 真机那条更硬的判据在 Rust 侧：`mine::save_back`（同一路径写回）与
+ * 真机那条更硬的判据在 Rust 侧：`local::save_back`（同一路径写回）与
  * `lineage`（改参数不该把出处抹了）。
  */
 await openDetailOf(myTrKey)
@@ -880,7 +880,7 @@ const openEditFile = async () => {
   await page.waitForTimeout(700)
 }
 await openEditFile()
-const mineEditor = await page.evaluate(() => {
+const localEditor = await page.evaluate(() => {
   const dlg = document.querySelector('[role="dialog"]')
   const area = dlg?.querySelector('textarea')
   return {
@@ -889,20 +889,20 @@ const mineEditor = await page.evaluate(() => {
     text: area?.value ?? '',
   }
 })
-console.log(`\n[改我这份] 抽屉：${mineEditor.whole.slice(0, 80)}`)
-if (!mineEditor.open) problems.push('右键「编辑文件」没有打开编辑器')
-if (!mineEditor.whole.includes('编辑文件')) {
-  problems.push(`编辑器的标题该说「编辑文件」，实测「${mineEditor.whole.slice(0, 40)}」`)
+console.log(`\n[改我这份] 抽屉：${localEditor.whole.slice(0, 80)}`)
+if (!localEditor.open) problems.push('右键「编辑文件」没有打开编辑器')
+if (!localEditor.whole.includes('编辑文件')) {
+  problems.push(`编辑器的标题该说「编辑文件」，实测「${localEditor.whole.slice(0, 40)}」`)
 }
-if (!mineEditor.text.includes('# based_on')) {
+if (!localEditor.text.includes('# based_on')) {
   problems.push('「编辑文件」给的是整份文件，血统那几行该在编辑器里（口径见这一段注释）')
 }
-if (mineEditor.text.trim() === '') problems.push('编辑器里没有我那份的正文（空编辑器）')
+if (localEditor.text.trim() === '') problems.push('编辑器里没有我那份的正文（空编辑器）')
 
 /* 只改**参数那一行**（血统留着）：这才对应 Rust 侧那条"改参数不丢出处" */
 await page
   .locator('[role="dialog"] textarea')
-  .fill(mineEditor.text.replace('offset_y = 20.0', 'offset_y = 33.0 # 改过的'))
+  .fill(localEditor.text.replace('offset_y = 20.0', 'offset_y = 33.0 # 改过的'))
 await page.waitForTimeout(900)
 await page.locator('[role="dialog"]').getByRole('button', { name: '保存', exact: true }).click()
 await page.waitForTimeout(800)
@@ -913,19 +913,19 @@ console.log(`[改我这份] 保存之后提示条：${backNote}`)
 if (!backNote.includes('已保存回我自己那一份')) {
   problems.push(`写回之后该说「已保存回我自己那一份」，实测「${backNote}」`)
 }
-if (!backNote.includes('presets-mine/我的 A1 涂胶.toml')) {
+if (!backNote.includes('presets-local/A1 涂胶.toml')) {
   problems.push(`写回之后要说得出写回哪去了（同一条路径），实测「${backNote}」`)
 }
-await page.screenshot({ path: `${shotDir}/presets-mine-edit.png` })
+await page.screenshot({ path: `${shotDir}/presets-local-edit.png` })
 
 /* 没有多出一份：写回的是它自己 */
-const mineRowsNow = await actions()
-const mineNames = mineRowsNow.map((r) => r.name)
+const localRowsNow = await actions()
+const localNames = localRowsNow.map((r) => r.name)
 /* 只数**正好叫这个名字**的那一行（演示里本来就另有一份 `…-2026-10-15` 的，别把那行算进来） */
-const mineCount = mineRowsNow.filter((r) => r.file === '我的 A1 涂胶.toml').length
-console.log(`[改我这份] 表里「我的 A1 涂胶.toml」${mineCount} 行：${mineNames.join(' | ')}`)
-if (mineCount !== 1) problems.push(`写回不该多出一份（实测 ${mineCount} 行叫「我的 A1 涂胶.toml」）`)
-if (mineNames.some((n) => n.includes('我的 A1 涂胶（已修改）'))) {
+const localCount = localRowsNow.filter((r) => r.file === 'A1 涂胶.toml').length
+console.log(`[改我这份] 表里「A1 涂胶.toml」${localCount} 行：${localNames.join(' | ')}`)
+if (localCount !== 1) problems.push(`写回不该多出一份（实测 ${localCount} 行叫「A1 涂胶.toml」）`)
+if (localNames.some((n) => n.includes('A1 涂胶（已修改）'))) {
   problems.push('写回我自己那份不该另存出一份新的（不产生「（已修改）」）')
 }
 
@@ -938,12 +938,12 @@ await page
   .first()
   .click()
 await page.waitForTimeout(600)
-const mineBody = await page.evaluate(
+const localBody = await page.evaluate(
   () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
 )
-console.log(`[改我这份] 保存之后正文：${mineBody.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
-if (!mineBody.includes('offset_y = 33.0')) problems.push('写回之后正文该是改过的那份')
-if (!mineBody.includes('# based_on:')) problems.push('写回之后血统那几行该还在（出处不能丢）')
+console.log(`[改我这份] 保存之后正文：${localBody.replace(/\s+/g, ' ').trim().slice(0, 120)}`)
+if (!localBody.includes('offset_y = 33.0')) problems.push('写回之后正文该是改过的那份')
+if (!localBody.includes('# based_on:')) problems.push('写回之后血统那几行该还在（出处不能丢）')
 await page.keyboard.press('Escape')
 await page.waitForTimeout(250)
 
@@ -956,7 +956,7 @@ await page.waitForTimeout(250)
  *   ③ 能读的那一份不受牵连：不因此多出任何角标。
  *
  * 这一层看的是"还能不能读"（能读 + UTF-8 + TOML 语法），**不是 SHA** —— 外部修改过
- * 但仍是能读的 TOML 照常能用，不报警。真机上更硬的判据在 Rust 侧（`runtime::mine` 的
+ * 但仍是能读的 TOML 照常能用，不报警。真机上更硬的判据在 Rust 侧（`runtime::local` 的
  * 文件级检查 + 应用 / 编辑两个入口的闸）。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
@@ -989,7 +989,7 @@ const brokenTr = page
 /*
  * 角标（名字旁那一枚小字）。
  *
- * ★ 2026-10-13 实测：这一枚**没有 `title`** —— 后端给的原因（`mineStateDetail`，
+ * ★ 2026-10-13 实测：这一枚**没有 `title`** —— 后端给的原因（`localStateDetail`，
  *   如"TOML 语法不对（第 3 行第 1 列）"）在界面上现在**看不到**（整行没有任何 `title`）。
  *   原版探针读 `span[title]` 断言"为什么读不出来要看得到"，改版后那个 title 没了，
  *   于是它一直超时 —— 这里改成守住"行上画得出这一枚"，原因要不要再露出来是产品的事
@@ -1040,13 +1040,13 @@ for (const t of ['使用', '修改参数']) {
 }
 
 /* 能读的那一份不受牵连：没有「文件无法读取」这一枚 */
-const goodEntry = nineActions.find((r) => r.name.includes('我的 A1 涂胶.toml'))
+const goodEntry = nineActions.find((r) => r.name.includes('A1 涂胶.toml'))
 if (goodEntry === undefined) {
   problems.push('能读的那一份该照常在表里')
 } else if (goodEntry.name.includes('文件无法读取')) {
   problems.push(`能读的那一份不该被画成读不出来，实测行内容「${goodEntry.name}」`)
 }
-await page.screenshot({ path: `${shotDir}/presets-mine-unreadable.png` })
+await page.screenshot({ path: `${shotDir}/presets-local-unreadable.png` })
 
 /* ---------- 5j. 第十层：用户文件管理（重命名 / 删除） ---------- */
 /*
@@ -1058,8 +1058,8 @@ await page.screenshot({ path: `${shotDir}/presets-mine-unreadable.png` })
  *   ④ 改名**不断使用中**：正在使用那份改完名，行上照样「已应用」（指针跟着走）；
  *      改到一半关掉的那份草稿也跟着走 —— 再点「改这份」还是「上次改到一半的那一份」。
  *
- * 真机上更硬的判据在 Rust 侧：`mine::rename_file`（字节一个不动 / 不覆盖 / 不改后缀）、
- * `mine::delete_file`（两道闸：正在使用的 / 还有草稿的）、`state` 两条 repoint。
+ * 真机上更硬的判据在 Rust 侧：`local::rename_file`（字节一个不动 / 不覆盖 / 不改后缀）、
+ * `local::delete_file`（两道闸：正在使用的 / 还有草稿的）、`state` 两条 repoint。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
 await scope('local')
@@ -1130,7 +1130,7 @@ if (afterDelete.some((r) => r.name.includes('坏了的涂胶'))) {
 const liveTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶.toml' })
+  .filter({ hasText: 'A1 涂胶.toml' })
   .first()
 await liveTr.click({ button: 'right' })
 await page.waitForTimeout(250)
@@ -1181,11 +1181,11 @@ await liveTr.click({ button: 'right' })
 await page.waitForTimeout(250)
 await page.getByRole('menuitem', { name: '重命名', exact: true }).click()
 await page.waitForTimeout(300)
-await page.getByRole('dialog', { name: '重命名' }).getByLabel('新的文件名').fill('我的 A1 涂胶-高速版')
+await page.getByRole('dialog', { name: '重命名' }).getByLabel('新的文件名').fill('A1 涂胶-高速版')
 await page.getByRole('dialog', { name: '重命名' }).getByRole('button', { name: '改名' }).click()
 await page.waitForTimeout(500)
 const afterLiveRename = await actions()
-const liveRenamed = afterLiveRename.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+const liveRenamed = afterLiveRename.find((r) => r.name.includes('A1 涂胶-高速版.toml'))
 console.log(
   `[第十层 · 改名 · 使用中] ${liveRenamed === undefined ? '(新名字没出现)' : liveRenamed.name} → ${liveRenamed?.action ?? ''}`,
 )
@@ -1197,7 +1197,7 @@ if (liveRenamed === undefined) {
 const liveRenamedTr = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
 /* 改过的内容跟着走：改名之后「看正文」，刚才那行该还在。
    读**文件字节**这一条路（`看正文`）而不是「编辑文件」——后者给的是草稿优先的视图，
@@ -1217,7 +1217,7 @@ console.log(
 )
 /*
  * ★ 2026-10-13 这条**不判死**，只如实打出来：假后端把「编辑文件」的保存落在**草稿**上，
- *   而改名之后草稿那条链在假后端里没有跟着走（真机由 `mine::rename_file` 的 repoint
+ *   而改名之后草稿那条链在假后端里没有跟着走（真机由 `local::rename_file` 的 repoint
  *   负责）—— 拿它判红，红的是假后端，不是产品。真机验收时看这一行即可。
  */
 if (!textAfterRename.includes('offset_y = 44.0')) {
@@ -1225,9 +1225,9 @@ if (!textAfterRename.includes('offset_y = 44.0')) {
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
-await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
+await page.screenshot({ path: `${shotDir}/presets-local-manage.png` })
 
-/* ---------- 5k. 第十一层：复制出一份新的（我的文件 → 我的文件） ---------- */
+/* ---------- 5k. 第十一层：复制出一份新的（本地文件 → 本地文件） ---------- */
 /*
  * ★ 2026-10-13 按**现在的界面**重写。原来这一手是一个"另存为一份新的"抽屉（名字由
  *   用户自己起、撞名被拒）；现在是**就地复制**：
@@ -1237,7 +1237,7 @@ await page.screenshot({ path: `${shotDir}/presets-mine-manage.png` })
  *   （老版那两条"名字由用户起 / 撞名被拒"的断言随之作废：名字不由用户填，也就没有撞名
  *   那一说 —— 自动起名撞不了。）
  *
- * 真机上更硬的判据在 Rust 侧：`mine::copy_as_new`（字节复制 / 血统不重算 / 不碰状态）
+ * 真机上更硬的判据在 Rust 侧：`local::copy_as_new`（字节复制 / 血统不重算 / 不碰状态）
  * + `copying_touches_no_state_at_all` 那条。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
@@ -1248,7 +1248,7 @@ await page.waitForTimeout(300)
 const liveTr11 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
 await liveTr11.click({ button: 'right' })
 await page.waitForTimeout(250)
@@ -1259,7 +1259,7 @@ const copyNote = await page.evaluate(() =>
 )
 const afterCopy = await actions()
 const copied = afterCopy.find((r) => r.name.includes('copy.toml'))
-const original = afterCopy.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+const original = afterCopy.find((r) => r.name.includes('A1 涂胶-高速版.toml'))
 console.log(`\n[第十一层 · 复制] 提示条：${copyNote}`)
 console.log(`[第十一层 · 复制] 新的一份：${copied?.name ?? '(没出现)'}`)
 if (copied === undefined) {
@@ -1296,7 +1296,7 @@ const copiedTextOk = copiedText.includes('offset_y = 44.0')
 console.log(`[第十一层 · 复制] 新那份正文带着原来改过的字：${copiedTextOk ? '是' : '否'}`)
 /*
  * ★ 2026-10-13 同上：假后端把"编辑文件"的保存落在草稿上，而复制那一手在假后端里只搬
- *   文件字节（真机 `mine::copy_as_new` 是**按字节复制文件**）—— 所以这里读到旧内容是
+ *   文件字节（真机 `local::copy_as_new` 是**按字节复制文件**）—— 所以这里读到旧内容是
  *   假后端的形状，不是产品的。真机上这一条该是"是"。
  */
 if (!copiedTextOk) {
@@ -1312,9 +1312,9 @@ console.log(`[第十一层 · 复制] 新那份「基于」= ${copiedFacts['基�
 if (!(copiedFacts['基于'] ?? '').includes('快拆版6月以前')) {
   problems.push(`血统该原样带过去，实测新那份「基于」= 「${copiedFacts['基于'] ?? '(没有)'}」`)
 }
-await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
+await page.screenshot({ path: `${shotDir}/presets-local-copy.png` })
 
-/* ---------- 5l. 第十二层：通用导入入口（拖拽 → 我的文件；「导入文件…」按钮退役） ---------- */
+/* ---------- 5l. 第十二层：通用导入入口（拖拽 → 本地文件；「导入文件…」按钮退役） ---------- */
 /*
  * 作者 2026-10-04 裁决：几乎不需要导入，工具栏不给「导入文件…」常驻的位子 ——
  * 界面上的入口只剩**拖拽**（把文件拖进窗口，任何页面都收）；选择器能力
@@ -1323,7 +1323,7 @@ await page.screenshot({ path: `${shotDir}/presets-mine-copy.png` })
  *   ② 拖进窗口（探针里造一个 File）：重名的那份进**改名那一格**，输入框预填原来那个名字；
  *      改成可用的名字 →「继续导入」→ 进来；原来那份一个字节不动；
  *   ③ 重名不覆盖、不自动改名：指到一个还会撞的名字 → 格子里出原因，表里不许悄悄多出东西；
- *   ④ ZIP 不收：`.zip` 不许被当成预设复制进「我的文件」，结果条如实说"收不了"；
+ *   ④ ZIP 不收：`.zip` 不许被当成预设复制进「本地文件」，结果条如实说"收不了"；
  *   ⑤ 导入不是"安装 Preset"：它不碰「已应用」（原来那份照样是它）。
  *
  * 真机上更硬的判据在 Rust 侧：`runtime::import` 那 8 条（字节复制 / 源文件只读 /
@@ -1347,7 +1347,7 @@ if (importBtnCount !== 0) {
   )
 }
 
-/* ② 拖入一份与「我的 A1 涂胶-高速版.toml」同名的：进改名那一格 */
+/* ② 拖入一份与「A1 涂胶-高速版.toml」同名的：进改名那一格 */
 const dropFile = async (name, content) => {
   const dt = await page.evaluateHandle(
     ([n, c]) => {
@@ -1364,7 +1364,7 @@ const dropFile = async (name, content) => {
   await page.waitForTimeout(500)
   return veilShown
 }
-const veilShown = await dropFile('我的 A1 涂胶-高速版.toml', '# 拖进来的一份\n"涂胶宽度" = 9.9\n')
+const veilShown = await dropFile('A1 涂胶-高速版.toml', '# 拖进来的一份\n"涂胶宽度" = 9.9\n')
 console.log(`[第十二层 · 拖入] 拖到窗口上时的提示遮罩：${veilShown ? '出来了' : '没有'}`)
 if (!veilShown) problems.push('拖到窗口上该给一句"松开：把文件导入"的提示')
 const importDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
@@ -1374,18 +1374,18 @@ if (dlgCount === 0) {
   problems.push('拖入重名的那份该开「导入：有同名文件」那一格')
 }
 const importPrefill = await importDlg
-  .getByLabel('新的文件名：我的 A1 涂胶-高速版.toml')
+  .getByLabel('新的文件名：A1 涂胶-高速版.toml')
   .inputValue()
 console.log(`[第十二层 · 拖入 · 重名] 输入框初值：${importPrefill}`)
-if (importPrefill !== '我的 A1 涂胶-高速版.toml') {
+if (importPrefill !== 'A1 涂胶-高速版.toml') {
   problems.push(`重名格子的输入框该预填原来那个名字，实测「${importPrefill}」`)
 }
-await importDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-拖进来的.toml')
+await importDlg.getByLabel('新的文件名：A1 涂胶-高速版.toml').fill('A1 涂胶-拖进来的.toml')
 await importDlg.getByRole('button', { name: '继续导入' }).click()
 await page.waitForTimeout(500)
 const afterDrag = await actions()
-const draggedRow = afterDrag.find((r) => r.name.includes('我的 A1 涂胶-拖进来的.toml'))
-const stillThere = afterDrag.find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+const draggedRow = afterDrag.find((r) => r.name.includes('A1 涂胶-拖进来的.toml'))
+const stillThere = afterDrag.find((r) => r.name.includes('A1 涂胶-高速版.toml'))
 console.log(
   `[第十二层 · 拖入 · 改名后] ${draggedRow === undefined ? '(没进来)' : draggedRow.name}；原来那份：${stillThere === undefined ? '(不见了！)' : '还在'}`,
 )
@@ -1398,13 +1398,13 @@ if (stillThere !== undefined && !stillThere.action.includes('在用')) {
 
 /* ③ 重名不覆盖、不自动改名：填一个**确实已经存在**的名字（就是拖进去的那一份），
       格子里出原因；取消 = 一份都不多。
-      ★ 2026-10-13：这里原来填的是「我的 A1 涂胶-第二份.toml」—— 那是旧版十一层
+      ★ 2026-10-13：这里原来填的是「A1 涂胶-第二份.toml」—— 那是旧版十一层
         （"另存为一份新的"）造出来的名字；十一层改成"就地复制"之后那名字不存在了，
         于是这一手压根没撞上名、格子直接关掉，探针读格子文本时超时。 */
 const rowsBeforeRetry = (await actions()).length
-await dropFile('我的 A1 涂胶-高速版.toml', '# 再来一次\n')
+await dropFile('A1 涂胶-高速版.toml', '# 再来一次\n')
 const retryDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
-await retryDlg.getByLabel('新的文件名：我的 A1 涂胶-高速版.toml').fill('我的 A1 涂胶-高速版.toml')
+await retryDlg.getByLabel('新的文件名：A1 涂胶-高速版.toml').fill('A1 涂胶-高速版.toml')
 await retryDlg.getByRole('button', { name: '继续导入' }).click()
 await page.waitForTimeout(500)
 const retryText = ((await retryDlg.textContent()) ?? '').replace(/\s+/g, ' ')
@@ -1416,13 +1416,13 @@ const afterCancel = await actions()
 console.log(`[第十二层 · 不覆盖] 取消后的行数：${afterCancel.length}（原来是 ${rowsBeforeRetry}）`)
 if (afterCancel.length !== rowsBeforeRetry) problems.push('取消导入不该在表里多出东西')
 
-/* ④ ZIP 不收：不进「我的文件」，结果条如实说 */
+/* ④ ZIP 不收：不进「本地文件」，结果条如实说 */
 await dropFile('备份.zip', 'PK')
 const zipBanner = await bannerText()
 console.log(`[第十二层 · ZIP] 结果条：${zipBanner}`)
 if (!zipBanner.includes('收不了')) problems.push('ZIP 该被如实拒收（还没有认领它的导入器）')
 if ((await actions()).some((r) => r.name.includes('备份.zip'))) {
-  problems.push('ZIP 不许被当成预设复制进「我的文件」')
+  problems.push('ZIP 不许被当成预设复制进「本地文件」')
 }
 await page.screenshot({ path: `${shotDir}/presets-import.png` })
 
@@ -1435,7 +1435,7 @@ await page.screenshot({ path: `${shotDir}/presets-import.png` })
  *      一条，所以假后端如实说这一步在真机上的样子（不假装打开了）；
  *   ③ 它不碰任何状态：点完原来那份照样「已应用」。
  *
- * 真机上更硬的判据在 Rust 侧：`mine::reveal_target`（两道闸 / 读不出来的也能显示 /
+ * 真机上更硬的判据在 Rust 侧：`local::reveal_target`（两道闸 / 读不出来的也能显示 /
  * 外面删了就说找不到）那三条。
  */
 await rad('preset-kind', 'mkp').click({ force: true })
@@ -1462,11 +1462,11 @@ const revealItemOf = () =>
         }
   })
 
-/* ① 官方那一行（在**云端面** —— 官方交付行住那一侧）：菜单里**根本没有**「…中显示」——
+/* ① 云端那一行（在**云端面** —— 云端交付行住那一侧）：菜单里**根本没有**「…中显示」——
    它住在程序自己管的区域，用户在文件管理器里没有落点可去；这条边界不是"灰着"，
    是"压根不给这一项"。
-   ★ 2026-10-13：这一段原来直接在「本地」面上找官方行；MKP 档的本地表只列我的文件之后，
-   官方行在云端那一侧，于是它连行都找不到（超时 30s）。 */
+   ★ 2026-10-13：这一段原来直接在「本地」面上找云端行；MKP 档的本地表只列本地文件之后，
+   云端行在云端那一侧，于是它连行都找不到（超时 30s）。 */
 await mkpAt('cloud')
 await page
   .locator('main tbody tr')
@@ -1475,38 +1475,38 @@ await page
   .first()
   .click({ button: 'right' })
 await page.waitForTimeout(250)
-const officialReveal = await revealItemOf()
+const cloudReveal = await revealItemOf()
 console.log(
-  `[第十三层] 官方那一行的「…中显示」：${officialReveal === null ? '(没有这一项)' : officialReveal.label}`,
+  `[第十三层] 云端那一行的「…中显示」：${cloudReveal === null ? '(没有这一项)' : cloudReveal.label}`,
 )
-if (officialReveal !== null) {
-  problems.push('官方那一行不该有「…中显示」（只有「我的文件」有落点可显示）')
+if (cloudReveal !== null) {
+  problems.push('云端那一行不该有「…中显示」（只有「本地文件」有落点可显示）')
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
-/* ② 我的那份（回本地面）：能点；点了如实说"浏览器里没有文件管理器" */
+/* ② 本地那份（回本地面）：能点；点了如实说"浏览器里没有文件管理器" */
 await mkpAt('local')
 const mineTr13 = page
   .locator('main tbody tr')
   .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: '我的 A1 涂胶-高速版.toml' })
+  .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
 await mineTr13.click({ button: 'right' })
 await page.waitForTimeout(250)
-const mineReveal = await revealItemOf()
+const localReveal = await revealItemOf()
 console.log(
-  `[第十三层 · 我的文件] 「${mineReveal?.label ?? '?'}」：${mineReveal === null ? '没有这一项' : `灰=${mineReveal.disabled}`}`,
+  `[第十三层 · 本地文件] 「${localReveal?.label ?? '?'}」：${localReveal === null ? '没有这一项' : `灰=${localReveal.disabled}`}`,
 )
-if (mineReveal === null || mineReveal.disabled) {
-  problems.push('「我的文件」的「…中显示」该能点')
+if (localReveal === null || localReveal.disabled) {
+  problems.push('「本地文件」的「…中显示」该能点')
 } else {
   await page.getByRole('menuitem', { name: /所在文件夹|中显示/ }).click()
   await page.waitForTimeout(400)
   const revealNote = await page.evaluate(() =>
     (document.querySelector('main [role="status"]')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
   )
-  console.log(`[第十三层 · 我的文件] 点完提示条：${revealNote}`)
+  console.log(`[第十三层 · 本地文件] 点完提示条：${revealNote}`)
   if (!revealNote.includes('没打开')) {
     problems.push(`浏览器里没有文件管理器，该如实说「没打开」，实测提示条「${revealNote}」`)
   }
@@ -1516,7 +1516,7 @@ if (mineReveal === null || mineReveal.disabled) {
 }
 
 /* ③ 它不碰任何状态：原来那份照样是「当前使用」 */
-const stillActive13 = (await actions()).find((r) => r.name.includes('我的 A1 涂胶-高速版.toml'))
+const stillActive13 = (await actions()).find((r) => r.name.includes('A1 涂胶-高速版.toml'))
 if (stillActive13 === undefined || !stillActive13.action.includes('在用')) {
   problems.push('「…中显示」不该碰「在用」')
 }
@@ -1586,7 +1586,7 @@ const pillText = await page.evaluate(() => {
 })
 console.log(`[撤销应用退役] pill 左拍：${pillText}`)
 /*
- * ★ 2026-10-13：这条 pill 现在只写**文件名 + 机型 + 版本**（实测 `我的 A1 涂胶-高速版.tomlA1A1`），
+ * ★ 2026-10-13：这条 pill 现在只写**文件名 + 机型 + 版本**（实测 `A1 涂胶-高速版.tomlA1A1`），
  *   没有「已应用 / 在用」那样的状态词 —— 判据改成"说得出正在生效的是哪一份"。
  */
 if (!/\.toml/.test(pillText)) {
@@ -1603,7 +1603,7 @@ await page.screenshot({ path: `${shotDir}/presets-pill.png` })
  *   ① 菜单项从「在 BBS 预设查看器中打开」压成了「**在 BBS 中查看**」（2026-10-10 那次压缩）；
  *   ② 灰的判据换成 `aria-disabled`（早先的 `data-on` 不用了）；
  *   ③ 挑的行必须是**切片器的工艺 profile（.json / bbs_config）** —— 原来抓的是表里第一行，
- *      那可能是「我的文件」里认不出类别的那一份，对它这一项本来就该灰着。
+ *      那可能是「本地文件」里认不出类别的那一份，对它这一项本来就该灰着。
  *   MKP 的 `.toml` 配方**没有**这个入口（不是 BBS 工艺预设），所以这条只认切片器档。
  */
 await rad('preset-kind', 'slicer').click({ force: true })
@@ -1690,17 +1690,17 @@ if (problems.length > 0) {
 }
 console.log(
   '\n预设页（2026-10-13 按**现在的表**整体校过一遍）：两条轴都点得动（MKP 档**也有**「本地 / 云端」：' +
-    '本地那面是「我的文件」、云端那面是官方交付行）、点行展开（详情面板是 `_dGrid` 那一套：版本 / 来源 / 基于）、' +
-    '右键菜单按行给（官方交付行：下载 / 更新 · 复制链接 · 在 BBS 中查看；我的文件：使用 · 修改参数 · 参数对比 · 编辑文件 · ' +
+    '本地那面是「本地文件」、云端那面是云端交付行）、点行展开（详情面板是 `_dGrid` 那一套：版本 / 来源 / 基于）、' +
+    '右键菜单按行给（云端交付行：下载 / 更新 · 复制链接 · 在 BBS 中查看；本地文件：使用 · 修改参数 · 参数对比 · 编辑文件 · ' +
     '复制 · 重命名 · 显示所在文件夹 · 置顶 · 在 BBS 中查看（灰）· 删除；切片器交付行还多两条「显示我们那份的文件夹」/' +
     '「显示切片器里的那份」）、' +
-    '我那份能被使用（操作列与那条融合 pill 都写「在用」）并说得清「基于 … · 官方已换新版」，' +
+    '我那份能被使用（操作列与那条融合 pill 都写「在用」）并说得清「基于 … · 云端已换新版」，' +
     '改我自己那份走右键「编辑文件」（给整份文件、含血统那几行）或「修改参数」（参数表那一屏），' +
     '读不出来的那一份画得出「文件无法读取」且「使用 / 修改参数」灰着、连「编辑文件」都不出现（第九层），' +
-    '我的文件能改名（输入框只要基名）也能删（二次确认；删除全面放开），能复制出一份新的' +
+    '本地文件能改名（输入框只要基名）也能删（二次确认；删除全面放开），能复制出一份新的' +
     '（名字自动 `X copy.toml`、原文件一个字节不动 —— 第十一层），' +
     '导入入口（第十二层）：拖拽是唯一入口、重名进改名格、不覆盖、ZIP 收不了、不碰「在用」，' +
-    '外部管理（第十三层）：右键能在文件管理器里显示「我的文件」（官方那一行压根没有这一项、失败如实说），' +
+    '外部管理（第十三层）：右键能在文件管理器里显示「本地文件」（云端那一行压根没有这一项、失败如实说），' +
     'Bootstrap 后台检查（第十七刀）：不挡首屏、失败静默、绝不自动下载，' +
     '撤销应用退役（那条 pill 说得出正在生效的是哪一份文件），控制台没有 error',
 )

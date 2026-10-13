@@ -23,7 +23,7 @@
  *   v1  `# release_time: 2026-10-08`，`A1-fast.toml` 的 `offset_y = 26.3`
  *   v2  `# release_time: 2026-10-15`，`offset_y = 26.8`（**同一份预设的下一版**）
  *
- * 于是「本地下了 v1 → 云端有 v2 → 再下一份新的我的预设」这条链在本地就能整条走通。
+ * 于是「本地下了 v1 → 云端有 v2 → 再下一份新的本地预设」这条链在本地就能整条走通。
  * 真正要换第三版时：改 `fixtures/vX` 里的 TOML，再 `npm run preset-source:sync`。
  *
  * 生成物**不进版本库**（`fixtures/.gitignore` 把它们挡住）：它们是派生产物，

@@ -1,18 +1,18 @@
-//! **用户线**：用户自己的预设文件（`<appDataDir>/user/presets-mine/`）。
+//! **用户线**：用户自己的预设文件（`<appDataDir>/user/presets-local/`）。
 //!
 //! ```text
 //! 内部（程序管，住内部根）                       用户线（用户自己要看要拷，住用户根）
-//!   <catalog.path>  官方模板的本机落点             presets-mine/ 我的预设（可编辑 / 可删）
-//!   archive/        换下来的官方旧版本
+//!   <catalog.path>  云端模板的本机落点             presets-local/ 本地预设（可编辑 / 可删）
+//!   archive/        换下来的云端旧版本
 //!   baseline/<sha>  隐藏基准快照（切片器档的版本账在用）
 //! ```
 //!
 //! 两界**不许混**（总纲 §1③「预设 TOML 的一生」；2026-10-08 资源库改判）：
 //!
-//! - **官方是模板**：它落在内部区（`<catalog.path>`），列表里只是一行「官方」——
-//!   「使用」直接用它，**不产生副本**；官方永远只有当前这一版，没有第二份、没有旧版账；
-//! - **我的预设**是用户自己的文件，只有两条路产生：「另存为我的预设」
-//!   （[`save_official_as_new`]，官方 → 我的）与用户自己放进这一格；**下载不再自动产生副本**；
+//! - **云端是模板**：它落在内部区（`<catalog.path>`），列表里只是一行「云端」——
+//!   「使用」直接用它，**不产生副本**；云端永远只有当前这一版，没有第二份、没有旧版账；
+//! - **本地预设**是用户自己的文件，只有两条路产生：「另存为本地预设」
+//!   （[`save_cloud_as_new`]，云端 → 本地）与用户自己放进这一格；**下载不再自动产生副本**；
 //! - 用户什么都没改 = 什么都没发生（浏览 / 使用 / 关开不产生文件）。
 //!
 //! # 用户根在哪（**不碰 `~/Documents`**）
@@ -21,18 +21,18 @@
 //! （理由见 [`crate::fsx::paths`] 的模块头 —— 一碰 Documents，macOS 就要弹「访问你的
 //! 文稿文件夹」的授权框，而这个文件本来就不是用户摆进文稿里的）。
 //!
-//! # 用户那份与官方的关系：**血统写在文件里**
+//! # 用户那份与云端的关系：**血统写在文件里**
 //!
-//! 它从哪一份官方、哪一版拷出来的（`# based_on*` 三行）随文件走，见 [`super::lineage`]。
-//! 于是"官方换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
+//! 它从哪一份云端、哪一版拷出来的（`# based_on*` 三行）随文件走，见 [`super::lineage`]。
+//! 于是"云端换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
 //! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
 //!
 //! # 第九层：文件级的"能不能用"（**不复制 Preset schema**）
 //!
 //! 用户文件与官方文件的可信规则**本来就不同**（作者 2026-10-02 定的口径）：
 //!
-//! - 官方线要 **SHA**：盘上那份与目录登记逐字节一致才可信（见 [`super::delivery`]）；
-//! - 用户线**只看文件级**：路径在 `presets-mine/` 里 + 能读 + 是 UTF-8 + **TOML 语法能解析**。
+//! - 云端线要 **SHA**：盘上那份与目录登记逐字节一致才可信（见 [`super::delivery`]）；
+//! - 用户线**只看文件级**：路径在 `presets-local/` 里 + 能读 + 是 UTF-8 + **TOML 语法能解析**。
 //!   外部修改是**正常事**（他拿 VS Code 改一行不是异常），**不因 SHA 变化报警**。
 //!
 //! 这里**不判"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对）—— 那是 Preset 语义，
@@ -46,12 +46,12 @@
 //! 对应三件**不同**的事，不许合并成一个"存一下"：
 //!
 //! ```text
-//! save_official_as_new 另存：官方模板 → presets-mine/<你起的名字>（带血统三行，撞名就拒）
-//! commit_draft         另存：官方那份改出来的 → presets-mine/<原名>（已修改）.toml（第 5 层）
+//! save_cloud_as_new 另存：云端模板 → presets-local/<你起的名字>（带血统三行，撞名就拒）
+//! commit_draft         另存：云端那份改出来的 → presets-local/<原名>（已修改）.toml（第 5 层）
 //! save_back            写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
 //! ```
 //!
-//! 三条共用一句话：**官方基线（按 `catalog.path` 落盘的那一份）一概不碰**。
+//! 三条共用一句话：**云端基线（按 `catalog.path` 落盘的那一份）一概不碰**。
 //! 区别只在"落点是谁"与"那三行血统从哪来"：下载收尾与另存都是新的一份、血统从
 //! **来源**算；写回还是同一份、血统
 //! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
@@ -60,7 +60,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
-use crate::fsx::paths::MINE_DIR;
+use crate::fsx::paths::LOCAL_DIR;
 
 use super::catalog::kind::PRESET;
 use super::catalog::{Catalog, CatalogFile};
@@ -75,8 +75,8 @@ pub const LINEAGE_READ_LIMIT: u64 = 8 * 1024;
 /// 用户自己的一份文件。**盘就是底账**（与下载区、归档区同一套规矩）：扫盘得到，不记账本 ——
 /// 账本一定会和盘漂移，而这一份的主人就是用户，他随时可能在 Finder 里动它。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MineFile {
-    /// 相对**用户根**的路径（`presets-mine/A1-fast.toml`）—— 读正文时把它交回来
+pub struct LocalFile {
+    /// 相对**用户根**的路径（`presets-local/A1-fast.toml`）—— 读正文时把它交回来
     pub path: String,
     /// 文件名。用户自己的文件**没有"交付身份"**：云端没有它，所以没有 SHA、不属于任何版本
     pub file_name: String,
@@ -85,33 +85,33 @@ pub struct MineFile {
     pub modified_unix: Option<u64>,
     /// 认得出是哪一类就给（见 [`kind_of`]）；**认不出是 `None`**，不猜
     pub kind: Option<&'static str>,
-    /// 它从哪一份官方、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
+    /// 它从哪一份云端、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
     /// （手工拷的、或别的程序写出来的）—— **不是错误**
     pub lineage: Option<Lineage>,
     /// 文件头的 `# machine:` 行（原样，不归一化）。没有就是 `None`
     ///
-    /// 副本按字节拷自官方产物，头里本来就带着这两行 —— **它自己就说得出它属于哪台机型
+    /// 副本按字节拷自云端产物，头里本来就带着这两行 —— **它自己就说得出它属于哪台机型
     /// 哪一版**（作者定：文件本身的信息随文件走）。「改归属」改的就是这两行。
     pub machine: Option<String>,
     /// 文件头的 `# variant:` 行（B 类产物写的是版本 id 的小写）。没有就是 `None`
     pub variant: Option<String>,
-    /// 第九层的**文件级**状态（见 [`MineState`]）。`None` = 不是预设候选
+    /// 第九层的**文件级**状态（见 [`LocalState`]）。`None` = 不是预设候选
     /// （[`kind_of`] 认不出是哪一类），它没有"能不能当预设用"这一档
-    pub state: Option<MineState>,
+    pub state: Option<LocalState>,
     /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
     /// 能用 / 不适用时是 `None`
     pub state_detail: Option<String>,
 }
 
-/// 这份用户文件**基于的官方版本**现在怎么样了。
+/// 这份用户文件**基于的云端版本**现在怎么样了。
 ///
 /// 三档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是不是同一份** ——
 /// 不回答"这份用户文件好不好"（它是用户自己的文件，从来不是"坏文件"）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasedOn {
-    /// 基于目录里**当前**那一版（官方没换版）
+    /// 基于目录里**当前**那一版（云端没换版）
     Current,
-    /// 基于官方的**旧版**：官方已经换新版了。**这份用户文件照常能用、能改** ——
+    /// 基于云端的**旧版**：云端已经换新版了。**这份用户文件照常能用、能改** ——
     /// 它只是"从旧版派生"的
     Outdated,
     /// 说不清：没有血统，或血统指的那一份已经不在目录里（换源 / 下线 / 改过名）
@@ -123,7 +123,7 @@ pub enum BasedOn {
 /// 三档里只有两档 —— 别在这里加"是不是一份合法 MKP Preset"那一档：语义不在客户端判
 /// （见模块头；判据见 [`toml_syntax_reason`] 与 [`read_preset_text`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MineState {
+pub enum LocalState {
     /// 存在 + 路径在用户根里 + 能读 + 是 UTF-8 + TOML 语法能解析
     Ok,
     /// 读不出来：读盘失败 / 不是 UTF-8 / TOML 语法不对 / 指向用户根之外。
@@ -131,12 +131,12 @@ pub enum MineState {
     Unreadable,
 }
 
-impl MineState {
+impl LocalState {
     /// 跨 IPC 的稳定词（serde 到界面就是这两个；前端契约里同名）
     pub fn as_str(self) -> &'static str {
         match self {
-            MineState::Ok => "ok",
-            MineState::Unreadable => "unreadable",
+            LocalState::Ok => "ok",
+            LocalState::Unreadable => "unreadable",
         }
     }
 }
@@ -164,17 +164,17 @@ fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// **这份用户文件是从哪一份官方派生的、那一版现在还在不在**。
+/// **这份用户文件是从哪一份云端派生的、那一版现在还在不在**。
 ///
 /// 血统里存的是 `based_on`（**`catalog.path`**，形如 `delivery/mkp/presets/A1-standard.toml`；
 /// 2026-10-04 前是 `mkp/presets/…`，那种老形状**认不出就是 Unknown**，不回填）
-/// 与 `based_on_sha256`（那时候官方那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
+/// 与 `based_on_sha256`（那时候云端那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
 ///
-/// - 摘一样 ⇒ [`BasedOn::Current`]（官方没换版）
-/// - 摘不一样 ⇒ [`BasedOn::Outdated`]（官方换版了）—— **这就是第七层要说的那件事**
+/// - 摘一样 ⇒ [`BasedOn::Current`]（云端没换版）
+/// - 摘不一样 ⇒ [`BasedOn::Outdated`]（云端换版了）—— **这就是第七层要说的那件事**
 /// - 目录里已经没有它 ⇒ [`BasedOn::Unknown`]（说不出新旧）
 ///
-/// 只看血统里记的那一份，**不看用户文件自己的字节**：用户改过的东西必然与官方不同，
+/// 只看血统里记的那一份，**不看用户文件自己的字节**：用户改过的东西必然与云端不同，
 /// 拿它去比只会得出"永远不一样"这种废话。
 pub fn based_on(catalog: &Catalog, lineage: Option<&Lineage>) -> BasedOn {
     let Some(lineage) = lineage else {
@@ -203,7 +203,7 @@ pub fn based_on(catalog: &Catalog, lineage: Option<&Lineage>) -> BasedOn {
     }
 }
 
-/// 血统指的那一份官方，现在**对应哪台机型的哪个版本**（界面要说人话用）。
+/// 血统指的那一份云端，现在**对应哪台机型的哪个版本**（界面要说人话用）。
 /// 说不清就 `None` —— 不猜。
 pub fn source_of<'a>(
     catalog: &'a Catalog,
@@ -252,22 +252,22 @@ pub fn toml_syntax_reason(text: &str) -> Option<String> {
 
 /// 一份认得出的预设候选（`.toml`）的文件级判定：能读 + UTF-8 + TOML 语法。
 /// 读不出来给一句人话原因（**读盘都失败**和**语法不对**分开说）。
-fn preset_file_state(path: &Path) -> (Option<MineState>, Option<String>) {
+fn preset_file_state(path: &Path) -> (Option<LocalState>, Option<String>) {
     let Ok(bytes) = std::fs::read(path) else {
         return (
-            Some(MineState::Unreadable),
+            Some(LocalState::Unreadable),
             Some("读不出来（文件不在了 / 读不动）".to_owned()),
         );
     };
     let Ok(text) = String::from_utf8(bytes) else {
         return (
-            Some(MineState::Unreadable),
+            Some(LocalState::Unreadable),
             Some("不是 UTF-8 文本，读不出来".to_owned()),
         );
     };
     match toml_syntax_reason(&text) {
-        None => (Some(MineState::Ok), None),
-        Some(reason) => (Some(MineState::Unreadable), Some(reason)),
+        None => (Some(LocalState::Ok), None),
+        Some(reason) => (Some(LocalState::Unreadable), Some(reason)),
     }
 }
 
@@ -275,9 +275,9 @@ fn preset_file_state(path: &Path) -> (Option<MineState>, Option<String>) {
 /// 界面要一个每次刷新都一样的表）。
 ///
 /// 子目录也扫（用户可能自己分文件夹放）。目录不存在 = 一份都还没有：空表。
-pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
+pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
     let mut out = Vec::new();
-    let mut stack = vec![user_root.join(MINE_DIR)];
+    let mut stack = vec![user_root.join(LOCAL_DIR)];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue; // 目录不存在 / 读不动：当作"这一支没有东西"，不让整条读失败
@@ -310,9 +310,9 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
             let (head, state, state_detail) = match crate::fsx::paths::resolve_in(user_root, &rel) {
                 Err(_) => (
                     None,
-                    (kind == Some(PRESET)).then_some(MineState::Unreadable),
+                    (kind == Some(PRESET)).then_some(LocalState::Unreadable),
                     (kind == Some(PRESET)).then(|| {
-                        "它指向 presets-mine/ 外面 —— 程序不读用户根外面的东西".to_owned()
+                        "它指向 presets-local/ 外面 —— 程序不读用户根外面的东西".to_owned()
                     }),
                 ),
                 Ok(real) => {
@@ -335,7 +335,7 @@ pub fn mine_files(user_root: &Path) -> Vec<MineFile> {
             let variant = head
                 .as_deref()
                 .and_then(lineage::parse_variant_from_content);
-            out.push(MineFile {
+            out.push(LocalFile {
                 path: rel,
                 kind,
                 lineage,
@@ -378,7 +378,7 @@ pub fn edited_name(source_file_name: &str) -> String {
 /// 另存完成的结果
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Committed {
-    /// 相对**用户根**的路径（`presets-mine/A1-fast（已修改）.toml`）
+    /// 相对**用户根**的路径（`presets-local/A1-fast（已修改）.toml`）
     pub path: String,
     pub file_name: String,
     pub size: u64,
@@ -386,16 +386,16 @@ pub struct Committed {
     pub replaced: bool,
 }
 
-/// **临时编辑的收尾：把草稿另存成用户自己的文件**（`presets-mine/<原名>（已修改）<后缀>`）。
+/// **临时编辑的收尾：把草稿另存成用户自己的文件**（`presets-local/<原名>（已修改）<后缀>`）。
 ///
 /// 这一刀全层的核心不变式就在这个函数里：它**只写用户根**——
-/// 官方原件（按 `catalog.path` 落盘的那一份）**一概不碰**（只有云端换版本能替换它）。
+/// 云端原件（按 `catalog.path` 落盘的那一份）**一概不碰**（只有云端换版本能替换它）。
 /// 再存一次就是**覆盖它自己**：用户改的是"我那份"，不该越存越多。
 ///
 /// 写下去的是**副本的形状**：`text` + 头注释块里三行血统（[`super::lineage::make_copy`]）——
 /// `based_on` = 来源那份的 **`catalog.path`**（`delivery/mkp/presets/A1-standard.toml`，
 /// 与工作台建副本的"哪一版"同一形状）。于是这份文件拷到哪台电脑上都说得清
-/// 自己从哪来、基于哪一版（第七层：「官方换版了、你这份还是基于旧版」就靠它判）。
+/// 自己从哪来、基于哪一版（第七层：「云端换版了、你这份还是基于旧版」就靠它判）。
 pub fn commit_draft(
     user_root: &Path,
     source_file_name: &str,
@@ -403,7 +403,7 @@ pub fn commit_draft(
     text: &str,
 ) -> Result<Committed, AppError> {
     let file_name = edited_name(source_file_name);
-    let rel = format!("{MINE_DIR}/{file_name}");
+    let rel = format!("{LOCAL_DIR}/{file_name}");
     /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     let replaced = target.exists();
@@ -425,13 +425,13 @@ pub fn commit_draft(
 ///   所以不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
 /// - **三行血统照抄文件里原来那三行**（出处没变，见
 ///   [`super::lineage::rewrite_keeping_lineage`]）—— 保存之后它仍然说得清
-///   "我从哪一版官方派生"，也不会因为重算摘要变成"基于我自己改过的字节"。
+///   "我从哪一版云端派生"，也不会因为重算摘要变成"基于我自己改过的字节"。
 ///   这份本来就没有血统（手工拷的 / 别的程序写出来的）⇒ 照实不写，**不编一个出处**。
 ///
 /// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**：不去别处新建一份（那不是用户点的
 /// 那个"保存"），也不假装存成了。
 pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
@@ -466,7 +466,7 @@ pub fn set_machine_variant(
     machine_id: &str,
     version_id: &str,
 ) -> Result<(), AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
@@ -478,11 +478,11 @@ pub fn set_machine_variant(
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())
 }
 
-/// 读用户自己那份的正文（**只认 `presets-mine/`**，见 [`check_mine_prefix`]）。
+/// 读用户自己那份的正文（**只认 `presets-local/`**，见 [`check_local_prefix`]）。
 ///
 /// 不是 UTF-8 就如实报错 —— 用户自己的文件也一样，读不出来就说读不出来，不装成空正文。
 pub fn read_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     let bytes = std::fs::read(&target)
         .map_err(|_| AppError::not_found(format!("找不到 {rel} —— 它可能已经被移走或删掉了")))?;
@@ -517,7 +517,7 @@ pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError>
 /// 是它的读侧）用它，血统三行原样留在 `text` 里。门槛与读侧同一条（前缀 + 防穿越），
 /// 文件被移走 / 删掉了照实拒绝，不去别处新建一份。
 pub fn write_text(user_root: &Path, rel: &str, text: &str) -> Result<(), AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
@@ -545,7 +545,7 @@ impl Calibration {
     }
 }
 
-/// 从一份预设 TOML 的正文里读校准值（校准页初值 / 官方换版判定都用它）。
+/// 从一份预设 TOML 的正文里读校准值（校准页初值 / 云端换版判定都用它）。
 ///
 /// 定位一律从**参数注册表**派生（`param_key` → `(section, toml_key)`，与
 /// [`crate::presetdata::patch`] 同一张表、同一条纪律）—— 这一层不硬编码 `offset_x`
@@ -569,15 +569,15 @@ pub fn calibration_of(catalog: &Catalog, text: &str) -> Calibration {
     }
 }
 
-/// 只认 `presets-mine/` 里的东西：读正文的入参必须是 [`mine_files`] 给的那条路径起头。
+/// 只认 `presets-local/` 里的东西：读正文的入参必须是 [`local_files`] 给的那条路径起头。
 ///
 /// 两道闸（第三道在 [`crate::fsx::paths::resolve_in`] 里，比真实路径挡符号链接）：
 /// 1. **前缀**：别越到用户根下别的目录去（`exports/` `reports/` 那些不是这一层的事）；
 /// 2. **相对路径的基本形状**（[`crate::fsx::paths::check_relative`]）：绝对路径、`..` 一概拒。
 ///
 /// 两道都放在读文件**之前**：不合形状的路径不该先碰到盘。
-pub fn check_mine_prefix(rel: &str) -> Result<(), AppError> {
-    let prefix = format!("{MINE_DIR}/");
+pub fn check_local_prefix(rel: &str) -> Result<(), AppError> {
+    let prefix = format!("{LOCAL_DIR}/");
     if !rel.starts_with(&prefix) {
         return Err(AppError::invalid_argument(format!(
             "只读用户自己的预设（要 {prefix}… 开头，给的是 {rel}）"
@@ -649,7 +649,7 @@ fn same_file(_a: &Path, _b: &Path) -> bool {
 /// 使用中指针与草稿的跟改名不在这里做（那是 [`super::state`] 那两条 repoint 的事）——
 /// 这一层只碰用户根里的文件。
 pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
         return Err(AppError::not_found(format!(
@@ -658,10 +658,10 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     }
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
     let new_name = check_new_name(old_name, new_name)?;
-    /* 只换名字，不换目录：`presets-mine/我的/x.toml` 改完还在 `我的/` 里 */
-    let dir = rel.strip_suffix(old_name).unwrap_or("presets-mine/");
+    /* 只换名字，不换目录：`presets-local/本地/x.toml` 改完还在 `本地/` 里 */
+    let dir = rel.strip_suffix(old_name).unwrap_or("presets-local/");
     let new_rel = format!("{dir}{new_name}");
-    check_mine_prefix(&new_rel)?;
+    check_local_prefix(&new_rel)?;
     if new_rel == rel {
         return Ok(FileIdentity {
             path: new_rel,
@@ -688,11 +688,11 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 
 /// **另存为一份新的**（第十一层）：把 `rel` 那一份**按字节**复制成同一格里另一份新的用户文件。
 ///
-/// 与第八层"官方 → 我的文件"那条另存分开（那条改的是内容、要重写血统）—— 这一层是
-/// **我的文件 → 我的文件**，而且**不做任何"智能"**：
+/// 与第八层"云端 → 本地文件"那条另存分开（那条改的是内容、要重写血统）—— 这一层是
+/// **本地文件 → 本地文件**，而且**不做任何"智能"**：
 ///
 /// - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算
-///   （来源已经是用户文件，重算会把"从哪一版官方派生"说错）；原文件一个字节不动；
+///   （来源已经是用户文件，重算会把"从哪一版云端派生"说错）；原文件一个字节不动；
 /// - 新名字过[同一套门槛](check_new_name)（不许空 / 不许带路径 / 后缀保持原样）；
 ///   落点已有东西就**拒绝**（不覆盖、也**不自动改名** —— 名字由用户自己换）；
 /// - **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
@@ -701,7 +701,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 /// 它不读内容、不查状态（"纯文件操作"，与改名 / 删除同族）：连读不出来的那份也能复制，
 /// 复制出来还是读不出来的（状态照实）。
 pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
         return Err(AppError::not_found(format!(
@@ -711,9 +711,9 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
     let new_name = check_new_name(old_name, new_name)?;
     /* 只换名字，不换目录：新的一份落在原来那一格（与改名同一条规矩） */
-    let dir = rel.strip_suffix(old_name).unwrap_or("presets-mine/");
+    let dir = rel.strip_suffix(old_name).unwrap_or("presets-local/");
     let new_rel = format!("{dir}{new_name}");
-    check_mine_prefix(&new_rel)?;
+    check_local_prefix(&new_rel)?;
     if new_rel == rel {
         return Err(AppError::invalid_argument(
             "新名字和原来一样 —— 复制要起个不同的名字",
@@ -737,26 +737,26 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 
 /// **把官方原件落成我的一份**（官方 → 我的；2026-10-08 定，2026-10-09 改判用途）。
 ///
-/// 用户世界里**只有一份**：官方原件只是内部数据（隐藏 baseline 的来源），
-/// 他要改的、要用的永远是 `presets-mine/` 里那一份。所以这条路现在被
-/// [`crate::ipc::catalog::fetch_official_preset`] 直接用 —— 云端表「下载 / 更新」
-/// 取回官方时落一份工作副本（已经在了就一个字节都不碰）。
+/// 用户世界里**只有一份**：云端原件只是内部数据（隐藏 baseline 的来源），
+/// 他要改的、要用的永远是 `presets-local/` 里那一份。所以这条路现在被
+/// [`crate::ipc::catalog::fetch_cloud_preset`] 直接用 —— 云端表「下载 / 更新」
+/// 取回云端时落一份工作副本（已经在了就一个字节都不碰）。
 ///
 /// - **名字**：传什么写什么，只过"是不是一个像样的名字"那道门槛
 ///   （[`check_new_name`]：不许空 / 不许带路径 / 后缀保持原样）；**撞名就拒** ——
 ///   不覆盖、也不自动改名（调用方先看盘上有没有，有就一个字节都不碰）；
-/// - 写下去的是**副本的形状**：官方原文 + 头注释块里三行血统
+/// - 写下去的是**副本的形状**：云端原文 + 头注释块里三行血统
 ///   （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`，
-///   `based_on_sha256` 就是这一版官方的唯一身份 —— 逐参数官方更新那一套
+///   `based_on_sha256` 就是这一版云端的唯一身份 —— 逐参数云端更新那一套
 ///   就是拿它当"我上次处理到哪一版"的起点）；
 /// - **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive。
 ///
-/// `file` 必须是一份 MKP 预设，`official_text` 的字节可信由调用方
-/// （[`super::delivery::official_text`] 的 SHA 闸）保证。
-pub fn save_official_as_new(
+/// `file` 必须是一份 MKP 预设，`cloud_text` 的字节可信由调用方
+/// （[`super::delivery::cloud_text`] 的 SHA 闸）保证。
+pub fn save_cloud_as_new(
     user_root: &Path,
     file: &CatalogFile,
-    official_text: &str,
+    cloud_text: &str,
     new_name: &str,
 ) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
@@ -766,14 +766,14 @@ pub fn save_official_as_new(
         )));
     }
     let name = check_new_name(&file.file_name, new_name)?;
-    let rel = format!("{MINE_DIR}/{name}");
+    let rel = format!("{LOCAL_DIR}/{name}");
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
         return Err(AppError::invalid_argument(format!(
             "已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"
         )));
     }
-    let body = super::lineage::make_copy(official_text, &file.path);
+    let body = super::lineage::make_copy(cloud_text, &file.path);
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
     Ok(FileIdentity {
         path: rel,
@@ -789,7 +789,7 @@ pub fn save_official_as_new(
 /// 由调用方（ipc）在删之前把使用中指针撤下、草稿一并丢弃，确认框讲清这一步。
 /// 文件层只管文件：前缀 + 防穿越两道闸，删完列表以磁盘为准（界面回来重读用户线）。
 pub fn delete_file(user_root: &Path, rel: &str) -> Result<(), AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
@@ -802,16 +802,16 @@ pub fn delete_file(user_root: &Path, rel: &str) -> Result<(), AppError> {
 }
 
 /// **在文件管理器里显示**要用的落点（第十三层 · 文件外部管理的第一半）：
-/// 把一份用户文件解析成盘上的绝对路径 —— 打开窗口是系统的事（`ipc::mine::reveal_in_folder`
+/// 把一份用户文件解析成盘上的绝对路径 —— 打开窗口是系统的事（`ipc::local::reveal_in_folder`
 /// 交给 `tauri-plugin-opener`），这一层只管"解析得对、门槛不破"。
 ///
 /// 与改名 / 删除**同族**（纯文件操作）：
-/// - 只认「我的文件」那一格（`presets-mine/` 前缀 + [`crate::fsx::paths::resolve_in`]
+/// - 只认「本地文件」那一格（`presets-local/` 前缀 + [`crate::fsx::paths::resolve_in`]
 ///   两道闸，含符号链接逃逸）；
 /// - **读不出来的那份也能显示** —— 它只是一份文件，打开文件夹不吃内容；
 /// - 文件不在了（外面删的）就说找不到（列表以磁盘为准，不去猜）。
 pub fn reveal_target(user_root: &Path, rel: &str) -> Result<PathBuf, AppError> {
-    check_mine_prefix(rel)?;
+    check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
         return Err(AppError::not_found(format!(
@@ -834,7 +834,7 @@ mod tests {
     /// **不看 Preset 结构** —— 结构 / 参数是语义，客户端不判（模块头那一段）。
     const VALID_TOML: &str = "[toolhead]\noffset_x = 1.0\n";
 
-    /// 造一份目录登记（SHA/大小都对得上），用来试「基于的官方那一版现在是什么样」
+    /// 造一份目录登记（SHA/大小都对得上），用来试「基于的云端那一版现在是什么样」
     fn entry_bytes(name: &str, content: &str) -> super::super::catalog::CatalogFile {
         super::super::catalog::CatalogFile {
             kind: "mkp_preset".to_owned(),
@@ -859,38 +859,38 @@ mod tests {
 
     /// 一份都没有 = 空表，不是错误（今天真机上就是这个状态：产生用户文件的是下一层）
     #[test]
-    fn mine_files_is_empty_when_the_user_has_nothing() {
+    fn local_files_is_empty_when_the_user_has_nothing() {
         let root = tempfile::tempdir().unwrap();
-        assert!(mine_files(root.path()).is_empty());
+        assert!(local_files(root.path()).is_empty());
     }
 
-    /// 盘当底账：用户放进去了什么就列什么。路径**相对用户根**（`presets-mine/…`），
+    /// 盘当底账：用户放进去了什么就列什么。路径**相对用户根**（`presets-local/…`），
     /// 大小与时刻是真值；子目录里的也算。**第九层**：`.toml` 带上文件级状态，
     /// 认不出的 `.json` 没有这一档（`None`，它本来就不是预设候选）
     #[test]
-    fn mine_files_lists_what_the_user_put_there() {
+    fn local_files_lists_what_the_user_put_there() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1-fast.toml", VALID_TOML);
-        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
-        write(root.path(), "presets-mine/切片器.json", "{}");
+        write(root.path(), "presets-local/A1-fast.toml", VALID_TOML);
+        write(root.path(), "presets-local/另存.toml", VALID_TOML);
+        write(root.path(), "presets-local/切片器.json", "{}");
         write(root.path(), "exports/不该看见.json", "{}");
 
-        let got = mine_files(root.path());
+        let got = local_files(root.path());
         let paths: Vec<&str> = got.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
             vec![
-                "presets-mine/A1-fast.toml",
-                "presets-mine/切片器.json",
-                "presets-mine/我的/另存.toml",
+                "presets-local/A1-fast.toml",
+                "presets-local/切片器.json",
+                "presets-local/另存.toml",
             ],
-            "按路径升序、只出 presets-mine 里的、子目录也出"
+            "按路径升序、只出 presets-local 里的、子目录也出"
         );
         assert_eq!(got[0].file_name, "A1-fast.toml");
         assert_eq!(got[0].size, VALID_TOML.len() as u64);
         assert!(got[0].modified_unix.is_some(), "时刻要带上");
         assert_eq!(got[0].kind, Some("mkp_preset"), ".toml 认得出来是 MKP 预设");
-        assert_eq!(got[0].state, Some(MineState::Ok), "能读 + TOML 语法过");
+        assert_eq!(got[0].state, Some(LocalState::Ok), "能读 + TOML 语法过");
         assert_eq!(got[0].state_detail, None);
         assert_eq!(got[1].kind, None, ".json 认不出是哪一类");
         assert_eq!(got[1].state, None, "认不出的没有\"能不能当预设用\"这一档");
@@ -914,10 +914,7 @@ mod tests {
     #[test]
     fn edited_name_keeps_the_stem_and_marks_it() {
         assert_eq!(edited_name("A1-fast.toml"), "A1-fast（已修改）.toml");
-        assert_eq!(
-            edited_name("我的 A1 涂胶.toml"),
-            "我的 A1 涂胶（已修改）.toml"
-        );
+        assert_eq!(edited_name("A1 涂胶.toml"), "A1 涂胶（已修改）.toml");
         assert_eq!(edited_name("没有后缀"), "没有后缀（已修改）");
         assert_eq!(
             edited_name("a.b.toml"),
@@ -926,28 +923,28 @@ mod tests {
         );
     }
 
-    /// **这一层的核心不变式**：另存只写用户根 —— 官方原件（`mkp/`）字节不变、
+    /// **这一层的核心不变式**：另存只写用户根 —— 云端原件（`mkp/`）字节不变、
     /// 下载区里不会多出文件（临时文件不住那儿）。再存一次是覆盖它自己。
     ///
     /// 写下去的是**副本的形状**：正文 + 头注释里三行血统（剪掉三行必须与正文逐字节相同）。
     #[test]
     fn commit_writes_the_edited_copy_and_leaves_the_official_alone() {
         let user = tempfile::tempdir().unwrap();
-        let official = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(official.path().join("mkp/presets")).unwrap();
+        let cloud = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(cloud.path().join("mkp/presets")).unwrap();
         crate::fsx::atomic::atomic_write(
-            &official.path().join("mkp/presets/A1-fast.toml"),
+            &cloud.path().join("mkp/presets/A1-fast.toml"),
             "涂胶宽度 = 1.0".as_bytes(),
         )
         .unwrap();
-        let before = std::fs::read(official.path().join("mkp/presets/A1-fast.toml")).unwrap();
-        let files_before = std::fs::read_dir(official.path().join("mkp/presets"))
+        let before = std::fs::read(cloud.path().join("mkp/presets/A1-fast.toml")).unwrap();
+        let files_before = std::fs::read_dir(cloud.path().join("mkp/presets"))
             .unwrap()
             .count();
 
         let label = "mkp/presets/A1-fast.toml";
         let done = commit_draft(user.path(), "A1-fast.toml", label, "涂胶宽度 = 1.4").unwrap();
-        assert_eq!(done.path, "presets-mine/A1-fast（已修改）.toml");
+        assert_eq!(done.path, "presets-local/A1-fast（已修改）.toml");
         assert!(!done.replaced, "第一次另存没有盖掉谁");
         let saved = std::fs::read_to_string(user.path().join(&done.path)).unwrap();
         assert_eq!(
@@ -959,12 +956,12 @@ mod tests {
         assert_eq!(got.based_on.as_deref(), Some(label), "说得出是从哪一份拷的");
 
         assert_eq!(
-            std::fs::read(official.path().join("mkp/presets/A1-fast.toml")).unwrap(),
+            std::fs::read(cloud.path().join("mkp/presets/A1-fast.toml")).unwrap(),
             before,
-            "官方原件一个字节都没动"
+            "云端原件一个字节都没动"
         );
         assert_eq!(
-            std::fs::read_dir(official.path().join("mkp/presets"))
+            std::fs::read_dir(cloud.path().join("mkp/presets"))
                 .unwrap()
                 .count(),
             files_before,
@@ -974,7 +971,7 @@ mod tests {
         /* 再存一次：还是同一个名字，盖掉它自己（血统也还是三行，不叠加） */
         let again = commit_draft(user.path(), "A1-fast.toml", label, "涂胶宽度 = 1.5").unwrap();
         assert!(again.replaced, "第二次是覆盖");
-        assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+        assert_eq!(local_files(user.path()).len(), 1, "不会越存越多");
         let saved = std::fs::read_to_string(user.path().join(&again.path)).unwrap();
         assert_eq!(
             crate::runtime::lineage::strip_lineage_for_compare(&saved),
@@ -985,24 +982,18 @@ mod tests {
 
     /// 另存出来的那份，接着就能被用户线列出来、血统也读得回来（一条链的收尾连上了）
     #[test]
-    fn the_committed_copy_shows_up_in_mine_files() {
+    fn the_committed_copy_shows_up_in_local_files() {
         let user = tempfile::tempdir().unwrap();
         let label = "delivery/mkp/presets/A1-standard.toml";
-        let done = commit_draft(
-            user.path(),
-            "我的 A1 涂胶.toml",
-            label,
-            VALID_TOML.trim_end(),
-        )
-        .unwrap();
+        let done = commit_draft(user.path(), "A1 涂胶.toml", label, VALID_TOML.trim_end()).unwrap();
 
-        let listed = mine_files(user.path());
+        let listed = local_files(user.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].path, done.path);
         assert_eq!(listed[0].kind, Some("mkp_preset"), ".toml 认得出");
         assert_eq!(
             listed[0].state,
-            Some(MineState::Ok),
+            Some(LocalState::Ok),
             "另存出来的那份：第九层的文件级检查过（能读 + TOML 语法）"
         );
         assert_eq!(
@@ -1013,7 +1004,7 @@ mod tests {
             Some(label),
             "列出来的时候就把血统读出来了"
         );
-        assert!(check_mine_prefix(&done.path).is_ok(), "落点在那一格里");
+        assert!(check_local_prefix(&done.path).is_ok(), "落点在那一格里");
     }
 
     /* ---------- 写回自己（第八层：改我那份 → 保存） ---------- */
@@ -1033,7 +1024,7 @@ mod tests {
         assert_eq!(back.path, done.path, "还是同一条路径，没有第二份");
         assert_eq!(back.file_name, done.file_name);
         assert!(back.replaced, "写的就是原来那一份所在的位置");
-        assert_eq!(mine_files(user.path()).len(), 1, "不会越存越多");
+        assert_eq!(local_files(user.path()).len(), 1, "不会越存越多");
 
         let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
         assert_eq!(
@@ -1075,9 +1066,9 @@ mod tests {
     #[test]
     fn saving_back_a_file_without_lineage_invents_none() {
         let user = tempfile::tempdir().unwrap();
-        write(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.0");
+        write(user.path(), "presets-local/本地.toml", "涂胶宽度 = 1.0");
 
-        let back = save_back(user.path(), "presets-mine/我的.toml", "涂胶宽度 = 1.2").unwrap();
+        let back = save_back(user.path(), "presets-local/本地.toml", "涂胶宽度 = 1.2").unwrap();
 
         let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
         assert_eq!(after, "涂胶宽度 = 1.2", "没有血统就不写血统");
@@ -1088,10 +1079,10 @@ mod tests {
     #[test]
     fn saving_back_refuses_when_the_file_is_gone() {
         let user = tempfile::tempdir().unwrap();
-        let e = save_back(user.path(), "presets-mine/已经不在了.toml", "涂胶 = 1").unwrap_err();
+        let e = save_back(user.path(), "presets-local/已经不在了.toml", "涂胶 = 1").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::NotFound);
         assert!(
-            !user.path().join("presets-mine/已经不在了.toml").exists(),
+            !user.path().join("presets-local/已经不在了.toml").exists(),
             "没有顺手建一份出来"
         );
     }
@@ -1104,17 +1095,17 @@ mod tests {
         assert!(save_back(user.path(), "../x.toml", "涂胶 = 1").is_err());
     }
 
-    /* ---------- 基于官方哪一版（第七层：官方换版了没有） ---------- */
+    /* ---------- 基于云端哪一版（第七层：云端换版了没有） ---------- */
 
-    /// 目录里登记着来源那一份，摘要一样 ⇒ 基于当前版；官方换了版 ⇒ 旧版
+    /// 目录里登记着来源那一份，摘要一样 ⇒ 基于当前版；云端换了版 ⇒ 旧版
     #[test]
     fn the_official_update_shows_up_as_based_on_an_old_version() {
-        let v1 = entry_bytes("A1-standard.toml", "官方第一版");
-        let mut v2 = entry_bytes("A1-standard.toml", "官方第二版");
+        let v1 = entry_bytes("A1-standard.toml", "云端第一版");
+        let mut v2 = entry_bytes("A1-standard.toml", "云端第二版");
         let based_on_v1 = Lineage {
             based_on: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
             based_on_release_time: None,
-            based_on_sha256: Some(lineage::sha256_hex("官方第一版")),
+            based_on_sha256: Some(lineage::sha256_hex("云端第一版")),
         };
 
         /* 目录里还是 v1：基于当前版 */
@@ -1123,12 +1114,12 @@ mod tests {
             BasedOn::Current
         );
 
-        /* 官方换到 v2：同一份用户文件变成「基于旧版」—— 而它不是坏文件 */
+        /* 云端换到 v2：同一份用户文件变成「基于旧版」—— 而它不是坏文件 */
         v2.path = v1.path.clone();
         assert_eq!(
             based_on(&catalog_with(vec![v2.clone()]), Some(&based_on_v1)),
             BasedOn::Outdated,
-            "官方换版了，用户那份还是基于旧版"
+            "云端换版了，用户那份还是基于旧版"
         );
         assert_eq!(
             source_of(&catalog_with(vec![v2]), Some(&based_on_v1)).map(|f| f.machine_id.as_str()),
@@ -1140,7 +1131,7 @@ mod tests {
     /// 说不清那几档：没有血统 / 血统里没摘要 / 来源已经不在目录里（换源、下线）
     #[test]
     fn unknown_when_the_source_cannot_be_resolved() {
-        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "官方")]);
+        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端")]);
         assert_eq!(based_on(&catalog, None), BasedOn::Unknown, "没有血统");
 
         let no_sha = Lineage {
@@ -1157,7 +1148,7 @@ mod tests {
         let gone = Lineage {
             based_on: Some("delivery/mkp/presets/A1-gone.toml".to_owned()),
             based_on_release_time: None,
-            based_on_sha256: Some(lineage::sha256_hex("官方")),
+            based_on_sha256: Some(lineage::sha256_hex("云端")),
         };
         assert_eq!(
             based_on(&catalog, Some(&gone)),
@@ -1172,20 +1163,20 @@ mod tests {
     /// 两次改名（2026-10-04 发布根基准：`mkp/…` → `dist/…`；2026-10-05 寻址改造：
     /// `dist/…` → `delivery/…`）都不改写老血统。老用户文件里那三行记的仍是旧值 ——
     /// **不为它写改写规则**（不按文件名回填、不做前缀映射）：认不出就落 `Unknown`
-    /// （"说不出新旧"），绝不能猜出一份官方然后声称它是最新版或过期版。
+    /// （"说不出新旧"），绝不能猜出一份云端然后声称它是最新版或过期版。
     ///
     /// 老文件一个字节都不动，照旧能读、能改、能应用 —— 掉的只是「基于哪一版」那句判断。
     /// 这条判据钉的就是"不伪造"：下面这份血统的摘要**与新目录里那一份完全相同**，
     /// 只因路径形状是旧的，答案也必须是 `Unknown`。
     #[test]
     fn an_old_shaped_based_on_is_unknown_and_never_guessed() {
-        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "官方")]);
+        let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端")]);
         let old = Lineage {
             based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
             based_on_release_time: None,
             // 摘要与目录里那一份**逐字节相同** —— 所以唯一能让答案变 Unknown 的
             // 就是"路径形状对不上"，而不是"字节变了"
-            based_on_sha256: Some(lineage::sha256_hex("官方")),
+            based_on_sha256: Some(lineage::sha256_hex("云端")),
         };
         assert_eq!(
             based_on(&catalog, Some(&old)),
@@ -1204,7 +1195,7 @@ mod tests {
         );
         assert!(
             source_of(&catalog, Some(&old)).is_none(),
-            "认不出就是认不出 —— 不回填一份官方给它"
+            "认不出就是认不出 —— 不回填一份云端给它"
         );
     }
 
@@ -1233,14 +1224,14 @@ mod tests {
     /// 读正文只认用户自己那一格：别的地方（`exports/`、`../`）一概不碰
     #[test]
     fn only_the_mine_subdir_is_readable() {
-        assert!(check_mine_prefix("presets-mine/A1.toml").is_ok());
-        assert!(check_mine_prefix("exports/report.md").is_err());
+        assert!(check_local_prefix("presets-local/A1.toml").is_ok());
+        assert!(check_local_prefix("exports/report.md").is_err());
         assert!(
-            check_mine_prefix("presets-mine").is_err(),
+            check_local_prefix("presets-local").is_err(),
             "目录本身不是一份文件"
         );
-        assert!(check_mine_prefix("../secret.toml").is_err());
-        assert!(check_mine_prefix("presets-mine/../../secret.toml").is_err());
+        assert!(check_local_prefix("../secret.toml").is_err());
+        assert!(check_local_prefix("presets-local/../../secret.toml").is_err());
     }
 
     /* ---------- 第九层：文件级检查（能读 + UTF-8 + TOML 语法；语义不在这里判） ---------- */
@@ -1250,18 +1241,18 @@ mod tests {
     #[test]
     fn a_broken_toml_shows_up_as_unreadable() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+        write(root.path(), "presets-local/好的.toml", VALID_TOML);
         write(
             root.path(),
-            "presets-mine/坏的.toml",
+            "presets-local/坏的.toml",
             "[toolhead]\noffset_x = (1",
         );
 
-        let got = mine_files(root.path());
+        let got = local_files(root.path());
         let good = got.iter().find(|f| f.file_name == "好的.toml").unwrap();
-        assert_eq!(good.state, Some(MineState::Ok));
+        assert_eq!(good.state, Some(LocalState::Ok));
         let broken = got.iter().find(|f| f.file_name == "坏的.toml").unwrap();
-        assert_eq!(broken.state, Some(MineState::Unreadable));
+        assert_eq!(broken.state, Some(LocalState::Unreadable));
         let why = broken.state_detail.as_deref().unwrap_or_default();
         assert!(why.contains("第 2 行"), "原因要说得出在哪一行：{why}");
     }
@@ -1271,13 +1262,13 @@ mod tests {
     fn a_non_utf8_file_is_unreadable_too() {
         let root = tempfile::tempdir().unwrap();
         crate::fsx::atomic::atomic_write(
-            &root.path().join("presets-mine/二进制的.toml"),
+            &root.path().join("presets-local/二进制的.toml"),
             &[0xff, 0xfe, 0x00, 0x01],
         )
         .unwrap();
 
-        let got = mine_files(root.path());
-        assert_eq!(got[0].state, Some(MineState::Unreadable));
+        let got = local_files(root.path());
+        assert_eq!(got[0].state, Some(LocalState::Unreadable));
         assert!(got[0]
             .state_detail
             .as_deref()
@@ -1297,22 +1288,22 @@ mod tests {
             "别人的.toml",
             "# based_on: delivery/mkp/presets/别人的.toml\n[toolhead]\noffset_x = 1.0\n",
         );
-        std::fs::create_dir_all(root.path().join("presets-mine")).unwrap();
+        std::fs::create_dir_all(root.path().join("presets-local")).unwrap();
         std::os::unix::fs::symlink(
             outside.path().join("别人的.toml"),
-            root.path().join("presets-mine/跑出去.toml"),
+            root.path().join("presets-local/跑出去.toml"),
         )
         .unwrap();
-        write(root.path(), "presets-mine/真的在的.toml", VALID_TOML);
+        write(root.path(), "presets-local/真的在的.toml", VALID_TOML);
         std::os::unix::fs::symlink(
-            root.path().join("presets-mine/真的在的.toml"),
-            root.path().join("presets-mine/指回自己.toml"),
+            root.path().join("presets-local/真的在的.toml"),
+            root.path().join("presets-local/指回自己.toml"),
         )
         .unwrap();
 
-        let got = mine_files(root.path());
+        let got = local_files(root.path());
         let escaping = got.iter().find(|f| f.file_name == "跑出去.toml").unwrap();
-        assert_eq!(escaping.state, Some(MineState::Unreadable));
+        assert_eq!(escaping.state, Some(LocalState::Unreadable));
         assert!(
             escaping
                 .state_detail
@@ -1327,7 +1318,7 @@ mod tests {
         );
 
         let inside = got.iter().find(|f| f.file_name == "指回自己.toml").unwrap();
-        assert_eq!(inside.state, Some(MineState::Ok), "根内链接照常能用");
+        assert_eq!(inside.state, Some(LocalState::Ok), "根内链接照常能用");
         assert_eq!(inside.lineage, None, "那份没有血统，链接也变不出血统来");
     }
 
@@ -1338,15 +1329,15 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         write(
             root.path(),
-            "presets-mine/坏的.toml",
+            "presets-local/坏的.toml",
             "[toolhead]\noffset_x = (1",
         );
-        write(root.path(), "presets-mine/好的.toml", VALID_TOML);
+        write(root.path(), "presets-local/好的.toml", VALID_TOML);
 
-        let ok = read_preset_text(root.path(), "presets-mine/好的.toml").unwrap();
+        let ok = read_preset_text(root.path(), "presets-local/好的.toml").unwrap();
         assert_eq!(ok, VALID_TOML);
 
-        let err = read_preset_text(root.path(), "presets-mine/坏的.toml").unwrap_err();
+        let err = read_preset_text(root.path(), "presets-local/坏的.toml").unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::Corrupted);
         assert!(err.message.contains("读不出来"), "{}", err.message);
         assert!(
@@ -1356,7 +1347,7 @@ mod tests {
         );
 
         assert_eq!(
-            read_text(root.path(), "presets-mine/坏的.toml").unwrap(),
+            read_text(root.path(), "presets-local/坏的.toml").unwrap(),
             "[toolhead]\noffset_x = (1",
             "看正文不是\"用\"：坏文件也要读得出来，用户才能看着它去修"
         );
@@ -1367,17 +1358,17 @@ mod tests {
     #[test]
     fn an_external_edit_that_still_parses_is_fine() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/我的.toml", VALID_TOML);
+        write(root.path(), "presets-local/本地.toml", VALID_TOML);
         /* 拿别处的编辑器改过：改内容、写回（字节与上一行完全不同） */
         write(
             root.path(),
-            "presets-mine/我的.toml",
+            "presets-local/本地.toml",
             "[wiping]\nspeed = 80\n",
         );
 
-        let got = mine_files(root.path());
-        assert_eq!(got[0].state, Some(MineState::Ok));
-        assert!(read_preset_text(root.path(), "presets-mine/我的.toml").is_ok());
+        let got = local_files(root.path());
+        assert_eq!(got[0].state, Some(LocalState::Ok));
+        assert!(read_preset_text(root.path(), "presets-local/本地.toml").is_ok());
     }
 
     /* ---------- 第十层：改名 / 删除（只动名字或删掉，不动字节） ---------- */
@@ -1388,20 +1379,21 @@ mod tests {
     fn renaming_keeps_the_bytes_and_the_lineage() {
         let root = tempfile::tempdir().unwrap();
         let with_lineage = "# based_on: mkp/presets/A1-standard.toml\n[toolhead]\noffset_x = 1.0\n";
-        write(root.path(), "presets-mine/我的 A1.toml", with_lineage);
+        write(root.path(), "presets-local/本地 A1.toml", with_lineage);
         let before = format!(
             "{:?}",
-            lineage_of_file(&root.path().join("presets-mine/我的 A1.toml"))
+            lineage_of_file(&root.path().join("presets-local/本地 A1.toml"))
         );
 
-        let done = rename_file(root.path(), "presets-mine/我的 A1.toml", "A1-高速版.toml").unwrap();
-        assert_eq!(done.path, "presets-mine/A1-高速版.toml");
+        let done =
+            rename_file(root.path(), "presets-local/本地 A1.toml", "A1-高速版.toml").unwrap();
+        assert_eq!(done.path, "presets-local/A1-高速版.toml");
         assert_eq!(done.file_name, "A1-高速版.toml");
         assert!(
-            !root.path().join("presets-mine/我的 A1.toml").exists(),
+            !root.path().join("presets-local/本地 A1.toml").exists(),
             "旧名字那边不该还在"
         );
-        let new_path = root.path().join("presets-mine/A1-高速版.toml");
+        let new_path = root.path().join("presets-local/A1-高速版.toml");
         assert_eq!(
             std::fs::read(&new_path).unwrap(),
             with_lineage.as_bytes(),
@@ -1414,29 +1406,29 @@ mod tests {
         );
 
         /* 子目录里的那份：改完还在同一个子目录 */
-        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
-        let done = rename_file(root.path(), "presets-mine/我的/另存.toml", "另存-2.toml").unwrap();
-        assert_eq!(done.path, "presets-mine/我的/另存-2.toml");
+        write(root.path(), "presets-local/另存.toml", VALID_TOML);
+        let done = rename_file(root.path(), "presets-local/另存.toml", "另存-2.toml").unwrap();
+        assert_eq!(done.path, "presets-local/另存-2.toml");
     }
 
     /// 改名不改类别：换后缀被拒；带路径分隔符 / `.` / `..` / 空名字被拒；拒了之后原文件原地不动
     #[test]
     fn renaming_refuses_a_name_that_changes_the_kind_or_has_a_path() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
 
         for bad in ["A1.json", "A1", "A1.TOMLX"] {
-            let e = rename_file(root.path(), "presets-mine/A1.toml", bad).unwrap_err();
+            let e = rename_file(root.path(), "presets-local/A1.toml", bad).unwrap_err();
             assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument, "{bad}");
         }
         for bad in ["子目录/A1.toml", "..", "  ", "A1\\x.toml"] {
             assert!(
-                rename_file(root.path(), "presets-mine/A1.toml", bad).is_err(),
+                rename_file(root.path(), "presets-local/A1.toml", bad).is_err(),
                 "{bad} 这种名字该被拒"
             );
         }
         assert!(
-            root.path().join("presets-mine/A1.toml").exists(),
+            root.path().join("presets-local/A1.toml").exists(),
             "拒了之后原文件必须还在原地"
         );
     }
@@ -1445,33 +1437,33 @@ mod tests {
     #[test]
     fn renaming_never_overwrites() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
         write(
             root.path(),
-            "presets-mine/B1.toml",
+            "presets-local/B1.toml",
             "[wiping]\nspeed = 80\n",
         );
 
-        let e = rename_file(root.path(), "presets-mine/A1.toml", "B1.toml").unwrap_err();
+        let e = rename_file(root.path(), "presets-local/A1.toml", "B1.toml").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(e.message.contains("不覆盖"), "{}", e.message);
         assert_eq!(
-            std::fs::read(root.path().join("presets-mine/B1.toml")).unwrap(),
+            std::fs::read(root.path().join("presets-local/B1.toml")).unwrap(),
             "[wiping]\nspeed = 80\n".as_bytes(),
             "被撞的那份一个字节没动"
         );
-        assert!(root.path().join("presets-mine/A1.toml").exists());
+        assert!(root.path().join("presets-local/A1.toml").exists());
     }
 
     /// 改成同一个名字（前后空白去掉之后一样）：原地不动，不报错
     #[test]
     fn renaming_to_the_same_name_is_a_no_op() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        let done = rename_file(root.path(), "presets-mine/A1.toml", " A1.toml ").unwrap();
-        assert_eq!(done.path, "presets-mine/A1.toml");
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
+        let done = rename_file(root.path(), "presets-local/A1.toml", " A1.toml ").unwrap();
+        assert_eq!(done.path, "presets-local/A1.toml");
         assert_eq!(
-            std::fs::read(root.path().join("presets-mine/A1.toml")).unwrap(),
+            std::fs::read(root.path().join("presets-local/A1.toml")).unwrap(),
             VALID_TOML.as_bytes()
         );
     }
@@ -1480,11 +1472,11 @@ mod tests {
     #[test]
     fn deleting_really_deletes() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
 
-        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
-        assert!(!root.path().join("presets-mine/A1.toml").exists());
-        let left: Vec<String> = std::fs::read_dir(root.path().join("presets-mine"))
+        delete_file(root.path(), "presets-local/A1.toml").unwrap();
+        assert!(!root.path().join("presets-local/A1.toml").exists());
+        let left: Vec<String> = std::fs::read_dir(root.path().join("presets-local"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
@@ -1496,32 +1488,32 @@ mod tests {
     #[test]
     fn deleting_works_even_while_it_is_the_active_one() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
+        crate::runtime::app_state::set_active_local(root.path(), "presets-local/A1.toml", "sha")
             .unwrap();
 
-        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
-        assert!(!root.path().join("presets-mine/A1.toml").exists());
+        delete_file(root.path(), "presets-local/A1.toml").unwrap();
+        assert!(!root.path().join("presets-local/A1.toml").exists());
     }
 
     /// **有草稿也照删** —— 草稿的丢弃同样是调用方（ipc）的事，文件层只管文件
     #[test]
     fn deleting_works_even_while_a_draft_is_open() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
         crate::runtime::app_state::set_draft(
             root.path(),
-            &crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml"),
+            &crate::runtime::state::DraftSubject::local("A1.toml", "presets-local/A1.toml"),
             "sha",
             "正文",
         )
         .unwrap();
 
-        delete_file(root.path(), "presets-mine/A1.toml").unwrap();
-        assert!(!root.path().join("presets-mine/A1.toml").exists());
+        delete_file(root.path(), "presets-local/A1.toml").unwrap();
+        assert!(!root.path().join("presets-local/A1.toml").exists());
     }
 
-    /// 删除和改名一样只在 `presets-mine/` 那一格里：越界路径一概拒
+    /// 删除和改名一样只在 `presets-local/` 那一格里：越界路径一概拒
     #[test]
     fn deleting_stays_in_the_mine_dir() {
         let root = tempfile::tempdir().unwrap();
@@ -1531,7 +1523,7 @@ mod tests {
         assert!(root.path().join("exports/别动我.txt").exists());
     }
 
-    /* ---------- 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制） ---------- */
+    /* ---------- 第十一层：另存为一份新的（本地文件 → 本地文件，字节复制） ---------- */
 
     /// 复制是**字节复制**：新文件与原来那份逐字节相同（内容与血统原样带过去）、
     /// 原文件不动；子目录里的那份复制出来还在同一个子目录
@@ -1539,24 +1531,24 @@ mod tests {
     fn copying_keeps_the_bytes_and_the_lineage() {
         let root = tempfile::tempdir().unwrap();
         let with_lineage = "# based_on: mkp/presets/A1-standard.toml\n[toolhead]\noffset_x = 1.0\n";
-        write(root.path(), "presets-mine/我的 A1.toml", with_lineage);
+        write(root.path(), "presets-local/本地 A1.toml", with_lineage);
 
         let done = copy_as_new(
             root.path(),
-            "presets-mine/我的 A1.toml",
-            "我的 A1-第二份.toml",
+            "presets-local/本地 A1.toml",
+            "本地 A1-第二份.toml",
         )
         .unwrap();
-        assert_eq!(done.path, "presets-mine/我的 A1-第二份.toml");
-        assert_eq!(done.file_name, "我的 A1-第二份.toml");
-        let new_path = root.path().join("presets-mine/我的 A1-第二份.toml");
+        assert_eq!(done.path, "presets-local/本地 A1-第二份.toml");
+        assert_eq!(done.file_name, "本地 A1-第二份.toml");
+        let new_path = root.path().join("presets-local/本地 A1-第二份.toml");
         assert_eq!(
             std::fs::read(&new_path).unwrap(),
             with_lineage.as_bytes(),
             "字节复制：内容与血统一个字节不差"
         );
         assert_eq!(
-            std::fs::read(root.path().join("presets-mine/我的 A1.toml")).unwrap(),
+            std::fs::read(root.path().join("presets-local/本地 A1.toml")).unwrap(),
             with_lineage.as_bytes(),
             "原文件一个字节不动"
         );
@@ -1564,26 +1556,25 @@ mod tests {
             format!("{:?}", lineage_of_file(&new_path)),
             format!(
                 "{:?}",
-                lineage_of_file(&root.path().join("presets-mine/我的 A1.toml"))
+                lineage_of_file(&root.path().join("presets-local/本地 A1.toml"))
             ),
             "血统原样带过去（不重算）"
         );
 
         /* 子目录里的那份：复制出来还在同一个子目录 */
-        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
-        let done =
-            copy_as_new(root.path(), "presets-mine/我的/另存.toml", "另存-副本.toml").unwrap();
-        assert_eq!(done.path, "presets-mine/我的/另存-副本.toml");
+        write(root.path(), "presets-local/另存.toml", VALID_TOML);
+        let done = copy_as_new(root.path(), "presets-local/另存.toml", "另存-副本.toml").unwrap();
+        assert_eq!(done.path, "presets-local/另存-副本.toml");
     }
 
     /// 复制与改名同一套名字门槛：换后缀 / 带路径 / `.` / `..` / 空全拒
     #[test]
     fn copying_uses_the_same_name_gate() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
         for bad in ["A1.json", "子目录/A1.toml", "..", "  "] {
             assert!(
-                copy_as_new(root.path(), "presets-mine/A1.toml", bad).is_err(),
+                copy_as_new(root.path(), "presets-local/A1.toml", bad).is_err(),
                 "{bad} 这种名字该被拒"
             );
         }
@@ -1594,27 +1585,27 @@ mod tests {
     #[test]
     fn copying_never_overwrites_and_never_renames_itself() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
         write(
             root.path(),
-            "presets-mine/B1.toml",
+            "presets-local/B1.toml",
             "[wiping]\nspeed = 80\n",
         );
 
-        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "B1.toml").unwrap_err();
+        let e = copy_as_new(root.path(), "presets-local/A1.toml", "B1.toml").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(e.message.contains("不覆盖"), "{}", e.message);
         assert_eq!(
-            std::fs::read(root.path().join("presets-mine/B1.toml")).unwrap(),
+            std::fs::read(root.path().join("presets-local/B1.toml")).unwrap(),
             "[wiping]\nspeed = 80\n".as_bytes(),
             "被撞的那份一个字节没动"
         );
         assert_eq!(
-            std::fs::read(root.path().join("presets-mine/A1.toml")).unwrap(),
+            std::fs::read(root.path().join("presets-local/A1.toml")).unwrap(),
             VALID_TOML.as_bytes()
         );
 
-        let e = copy_as_new(root.path(), "presets-mine/A1.toml", "A1.toml").unwrap_err();
+        let e = copy_as_new(root.path(), "presets-local/A1.toml", "A1.toml").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
         assert!(e.message.contains("不同的名字"), "{}", e.message);
     }
@@ -1624,21 +1615,25 @@ mod tests {
     #[test]
     fn copying_touches_no_state_at_all() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
-        let active =
-            crate::runtime::app_state::set_active_mine(root.path(), "presets-mine/A1.toml", "sha")
-                .unwrap();
-        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        write(root.path(), "presets-local/A1.toml", VALID_TOML);
+        let active = crate::runtime::app_state::set_active_local(
+            root.path(),
+            "presets-local/A1.toml",
+            "sha",
+        )
+        .unwrap();
+        let subject =
+            crate::runtime::state::DraftSubject::local("A1.toml", "presets-local/A1.toml");
         crate::runtime::app_state::set_draft(root.path(), &subject, "sha", "改到一半").unwrap();
 
-        copy_as_new(root.path(), "presets-mine/A1.toml", "A1-第二份.toml").unwrap();
+        copy_as_new(root.path(), "presets-local/A1.toml", "A1-第二份.toml").unwrap();
 
         let after_active = crate::runtime::app_state::active_preset(root.path())
             .unwrap()
             .unwrap();
         assert_eq!(
             after_active.path.as_deref(),
-            Some("presets-mine/A1.toml"),
+            Some("presets-local/A1.toml"),
             "使用中没动"
         );
         assert_eq!(after_active.file_name, active.file_name);
@@ -1647,7 +1642,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             after_draft.path.as_deref(),
-            Some("presets-mine/A1.toml"),
+            Some("presets-local/A1.toml"),
             "草稿没被迁移"
         );
         assert_eq!(after_draft.text, "改到一半");
@@ -1659,14 +1654,14 @@ mod tests {
     fn copying_does_not_require_readable_text() {
         let root = tempfile::tempdir().unwrap();
         crate::fsx::atomic::atomic_write(
-            &root.path().join("presets-mine/二进制的.toml"),
+            &root.path().join("presets-local/二进制的.toml"),
             &[0xff, 0xfe, 0x00, 0x01],
         )
         .unwrap();
 
         let done = copy_as_new(
             root.path(),
-            "presets-mine/二进制的.toml",
+            "presets-local/二进制的.toml",
             "二进制的-副本.toml",
         )
         .unwrap();
@@ -1676,7 +1671,7 @@ mod tests {
         );
     }
 
-    /// 复制和改名一样只在 `presets-mine/` 那一格里：越界路径一概拒
+    /// 复制和改名一样只在 `presets-local/` 那一格里：越界路径一概拒
     #[test]
     fn copying_stays_in_the_mine_dir() {
         let root = tempfile::tempdir().unwrap();
@@ -1685,23 +1680,23 @@ mod tests {
         assert!(copy_as_new(root.path(), "../外面.txt", "副本.txt").is_err());
     }
 
-    /* ---------- 另存为我的预设：save_official_as_new（2026-10-08 资源库改判） ---------- */
+    /* ---------- 另存为我的预设：save_cloud_as_new（2026-10-08 资源库改判） ---------- */
 
-    /// 正路：官方那一份另存成我的一份 —— 官方原文 + 血统三行（`based_on` 指向来源
+    /// 正路：云端那一份另存成本地这份 —— 云端原文 + 血统三行（`based_on` 指向来源
     /// 交付文件）；落点用**用户起的名字**（不自动加日期、也不自动编号）
     #[test]
     fn saving_official_as_new_writes_a_copy_with_lineage() {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let done = save_official_as_new(
+        let done = save_cloud_as_new(
             user.path(),
             &file,
             "涂胶宽度 = 1.0\n",
-            "我的 A1 标准版.toml",
+            "本地 A1 标准版.toml",
         )
         .unwrap();
-        assert_eq!(done.path, "presets-mine/我的 A1 标准版.toml");
+        assert_eq!(done.path, "presets-local/本地 A1 标准版.toml");
 
         let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
         assert!(
@@ -1714,7 +1709,7 @@ mod tests {
         );
         assert!(
             text.contains("涂胶宽度 = 1.0"),
-            "官方原文要原样在副本里：{text}"
+            "云端原文要原样在副本里：{text}"
         );
     }
 
@@ -1722,15 +1717,15 @@ mod tests {
     #[test]
     fn saving_official_as_new_refuses_an_existing_name() {
         let user = tempfile::tempdir().unwrap();
-        write(user.path(), "presets-mine/已经在了.toml", "别动我\n");
+        write(user.path(), "presets-local/已经在了.toml", "别动我\n");
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
-        let e = save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "已经在了.toml")
-            .unwrap_err();
+        let e =
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "已经在了.toml").unwrap_err();
         assert!(e.message.contains("换个名字"), "{}", e.message);
         assert_eq!(
             String::from_utf8(
-                std::fs::read(user.path().join("presets-mine/已经在了.toml")).unwrap()
+                std::fs::read(user.path().join("presets-local/已经在了.toml")).unwrap()
             )
             .unwrap(),
             "别动我\n",
@@ -1743,18 +1738,18 @@ mod tests {
     fn saving_official_as_new_checks_the_new_name() {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
-        assert!(save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ").is_err());
+        assert!(save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ").is_err());
         assert!(
-            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt").is_err(),
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt").is_err(),
             "后缀不许换"
         );
         assert!(
-            save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml").is_err(),
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml").is_err(),
             "不许带路径"
         );
     }
 
-    /// 只有 MKP 预设能另存成我的一份：切片器 profile（json）那类拒
+    /// 只有 MKP 预设能另存成本地这份：切片器 profile（json）那类拒
     #[test]
     fn saving_official_as_new_refuses_non_presets() {
         let user = tempfile::tempdir().unwrap();
@@ -1762,7 +1757,7 @@ mod tests {
             kind: "bbs_profile".to_owned(),
             ..entry_bytes("MKPProcess.json", "{}")
         };
-        let e = save_official_as_new(user.path(), &file, "{}", "我的.json").unwrap_err();
+        let e = save_cloud_as_new(user.path(), &file, "{}", "本地.json").unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
     }
 
@@ -1770,21 +1765,22 @@ mod tests {
     #[test]
     fn saving_official_as_new_touches_no_state_at_all() {
         let user = tempfile::tempdir().unwrap();
-        write(user.path(), "presets-mine/A1.toml", VALID_TOML);
-        crate::runtime::app_state::set_active_mine(user.path(), "presets-mine/A1.toml", "sha")
+        write(user.path(), "presets-local/A1.toml", VALID_TOML);
+        crate::runtime::app_state::set_active_local(user.path(), "presets-local/A1.toml", "sha")
             .unwrap();
-        let subject = crate::runtime::state::DraftSubject::mine("A1.toml", "presets-mine/A1.toml");
+        let subject =
+            crate::runtime::state::DraftSubject::local("A1.toml", "presets-local/A1.toml");
         crate::runtime::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
 
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
-        save_official_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "新的一份.toml").unwrap();
+        save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "新的一份.toml").unwrap();
 
         let after_active = crate::runtime::app_state::active_preset(user.path())
             .unwrap()
             .unwrap();
         assert_eq!(
             after_active.path.as_deref(),
-            Some("presets-mine/A1.toml"),
+            Some("presets-local/A1.toml"),
             "使用中没动"
         );
         let after_draft = crate::runtime::app_state::draft(user.path())
@@ -1792,7 +1788,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             after_draft.path.as_deref(),
-            Some("presets-mine/A1.toml"),
+            Some("presets-local/A1.toml"),
             "草稿没被动过"
         );
         assert_eq!(after_draft.text, "改到一半");
@@ -1837,26 +1833,26 @@ mod tests {
     #[test]
     fn revealing_resolves_the_file_inside_the_user_root() {
         let root = tempfile::tempdir().unwrap();
-        write(root.path(), "presets-mine/能读的.toml", VALID_TOML);
+        write(root.path(), "presets-local/能读的.toml", VALID_TOML);
         write(
             root.path(),
-            "presets-mine/读不出的.toml",
+            "presets-local/读不出的.toml",
             "[toolhead]\noffset_x = (1",
         );
 
-        let target = reveal_target(root.path(), "presets-mine/能读的.toml").unwrap();
+        let target = reveal_target(root.path(), "presets-local/能读的.toml").unwrap();
         assert!(target.is_absolute(), "给系统的是绝对路径");
-        assert!(target.ends_with("presets-mine/能读的.toml"));
+        assert!(target.ends_with("presets-local/能读的.toml"));
         /* 坏的那份照样显示 —— 打开文件夹不吃内容 */
-        assert!(reveal_target(root.path(), "presets-mine/读不出的.toml").is_ok());
+        assert!(reveal_target(root.path(), "presets-local/读不出的.toml").is_ok());
 
         /* 子目录里的那份也认（用户可能自己分文件夹放） */
-        write(root.path(), "presets-mine/我的/另存.toml", VALID_TOML);
-        let nested = reveal_target(root.path(), "presets-mine/我的/另存.toml").unwrap();
-        assert!(nested.ends_with("presets-mine/我的/另存.toml"));
+        write(root.path(), "presets-local/另存.toml", VALID_TOML);
+        let nested = reveal_target(root.path(), "presets-local/另存.toml").unwrap();
+        assert!(nested.ends_with("presets-local/另存.toml"));
     }
 
-    /// 只认「我的文件」那一格：`exports/`、`../` 一概拒（与改名 / 删除同一道闸）
+    /// 只认「本地文件」那一格：`exports/`、`../` 一概拒（与改名 / 删除同一道闸）
     #[test]
     fn revealing_stays_in_the_mine_dir() {
         let root = tempfile::tempdir().unwrap();
@@ -1869,7 +1865,7 @@ mod tests {
     #[test]
     fn revealing_a_missing_file_says_so() {
         let root = tempfile::tempdir().unwrap();
-        let e = reveal_target(root.path(), "presets-mine/不存在.toml").unwrap_err();
+        let e = reveal_target(root.path(), "presets-local/不存在.toml").unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::NotFound);
         assert!(e.message.contains("找不到"), "{}", e.message);
     }

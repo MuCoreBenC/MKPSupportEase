@@ -7,7 +7,7 @@
  *   node scripts/probes/preset-compare.mjs [url]
  *
  * 为什么单开一份而不是并进 `presets.mjs`：那一份是老世界（十三层）的验收清单，
- * 里面几个行名（`我的 A1 涂胶-高速版.toml`）与今天的假后端已经不匹配了；在它上面
+ * 里面几个行名（`A1 涂胶-高速版.toml`）与今天的假后端已经不匹配了；在它上面
  * 叠新节只会让"到底是哪一节红了"更难查。这一份从零起，只守本轮新增的四件事。
  *
  * 守的：
@@ -19,8 +19,8 @@
  *   ④ 整页跑完没有多出来的 console error / pageerror / >=400 响应。
  *
  * 真机那侧更硬的判据在 Rust：`runtime::baseline`（幂等 / 名字对不上不当基准）、
- * `runtime::versions`（两代都在 / 同字节只算一版）、`runtime::mine::ensure_working_copy`
- * （按官方发布日命名 / 同日补 -01 / 改名后仍幂等）、`presetdata::params`（保真抽取与批量写回）。
+ * `runtime::versions`（两代都在 / 同字节只算一版）、`runtime::local::ensure_working_copy`
+ * （按云端发布日命名 / 同日补 -01 / 改名后仍幂等）、`presetdata::params`（保真抽取与批量写回）。
  */
 import { mkdir } from 'node:fs/promises'
 
@@ -135,7 +135,7 @@ if (detail?.状态 !== '新版本') {
   problems.push(`待下载那一版的展开详情该说「新版本」，实测「${detail?.状态 ?? '（没展开）'}」`)
 }
 if (JSON.stringify(detail ?? {}).includes('过时') || JSON.stringify(detail ?? {}).includes('需更新')) {
-  problems.push('不该出现"过时 / 需更新"这种话 —— 官方更新不改用户的预设')
+  problems.push('不该出现"过时 / 需更新"这种话 —— 云端更新不改用户的预设')
 }
 await page.screenshot({ path: `${shotDir}/cloud-versions.png` })
 

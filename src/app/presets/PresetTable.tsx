@@ -51,7 +51,7 @@
  *
  *   MKP 本地行   状态 已应用 / 未应用              操作 [使用] → 唯一底账（run/active-preset.json）
  *   MKP 云端行   状态 未获取 / 本地已有 / 有新版    操作 [下载] / [更新] / 灰字（本地已有不给）
- *                → `api.fetchOfficialPreset()`（取回官方 + 落一份你的本地文件，**不改当前使用**）
+ *                → `api.fetchCloudPreset()`（取回云端 + 落一份你的本地文件，**不改当前使用**）
  *   切片器本地行 状态 已复制 / 未复制              操作 [复制] → `api.copyToSlicer()`
  *   切片器云端行 状态 已下载 / 未下载              操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
  *
@@ -71,8 +71,8 @@
  *
  * # 时间 / 大小：三种来源，title 分三句话
  *
- *   切片器官方行 `statFrom: 'file'` —— 真仓那份文件的字节数 + 上游 manifest 记的更新时间
- *   其余官方行   `PresetFileInfo.sizeText` / `.modifiedText` —— 按 path 的 FNV 哈希稳定推的演示值
+ *   切片器云端行 `statFrom: 'file'` —— 真仓那份文件的字节数 + 上游 manifest 记的更新时间
+ *   其余云端行   `PresetFileInfo.sizeText` / `.modifiedText` —— 按 path 的 FNV 哈希稳定推的演示值
  *   发布行       时间 = 发布 / 下载时刻（ISO）、大小 = TOML 字节数 —— 都不是编的
  *
  * **前端一行都不编**：拿不到就写「未知」并在 title 里说清为什么。
@@ -82,7 +82,7 @@
  * # 展开详情（2026-10-10 第八轮：抽卡页「两条独立」落地）
  *
  * ```
- * ┌ [icon] 我的 A1 mini 涂胶…toml  在用 · 2.0 KB · 修改于 …   [收起] ┐  ← 卡头
+ * ┌ [icon] 本地 A1 mini 涂胶…toml  在用 · 2.0 KB · 修改于 …   [收起] ┐  ← 卡头
  * ├ 基本信息                    │ 快捷操作                       ┤
  * │ 版本 / 来源 / 基于           │ [看正文] [编辑]                  │
  * │ 备注 空着 = 副标题留空                              [编辑]     │
@@ -134,8 +134,8 @@ import {
   CLOUD_STATE_TEXT,
   DASH_,
   EDIT_TEXT,
-  MINE_DRAWER,
-  MINE_UNREADABLE_TEXT,
+  LOCAL_DRAWER,
+  LOCAL_UNREADABLE_TEXT,
   RELEASE_UNTRUSTED_NOTE,
   UPDATE_ACTION_TEXT,
   UPDATE_STATE_TEXT,
@@ -231,7 +231,7 @@ interface Props {
   onLocate: (target: LocateTarget) => void
   /**
    * 当前数据源（`gitee` / `github` / `custom`）—— release 行「来源」列显示
-   * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「官方」。
+   * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「云端」。
    */
   sourceLabel: string | null
   /**
@@ -241,8 +241,8 @@ interface Props {
   archiveCountOf: (fileName: string) => number
   /** 打开「旧版本」抽屉（归档的可视化在页面层的抽屉里，表这边只给入口） */
   onOpenArchive: (row: PresetTableRow) => void
-  /** 打开「我自己的这一份」抽屉（本地文件的正文：**只读**） */
-  onOpenMine: (row: PresetTableRow) => void
+  /** 打开「本地这一份」抽屉（本地文件的正文：**只读**） */
+  onOpenLocal: (row: PresetTableRow) => void
   /**
    * 开始改这一份（临时编辑那条链）。两边共一个入口：
    * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
@@ -251,8 +251,8 @@ interface Props {
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /**
-   * **MKP 本地行唯一的按钮：使用**（2026-10-09）。这一档只有 `presets-mine/` 里那几行
-   * （你自己那份本地文件）——「使用」= 把它设为当前生效。官方那一份的取用
+   * **MKP 本地行唯一的按钮：使用**（2026-10-09）。这一档只有 `presets-local/` 里那几行
+   * （你自己那份本地文件）——「使用」= 把它设为当前生效。云端那一份的取用
    * （下载 / 更新 = 取回 + 落一份）在云端表，不走这里。
    */
   onUse: (row: PresetLocalRow) => void
@@ -296,7 +296,7 @@ export default function PresetTable({
   sourceLabel,
   archiveCountOf,
   onOpenArchive,
-  onOpenMine,
+  onOpenLocal,
   onEdit,
   onLive,
   onUse,
@@ -377,14 +377,14 @@ export default function PresetTable({
   const emptyText = (): string => {
     if (failure !== null) return `加载失败：${failure}`
     if (total === 0) {
-      /* MKP 那一档是一对表（本地 / 云端），空表按表说 —— 本地是你自己那份，云端是官方 */
+      /* MKP 那一档是一对表（本地 / 云端），空表按表说 —— 本地是你自己那份，云端是云端 */
       if (mkp) {
         return scope === 'local'
-          ? '本地还没有这一档的预设 —— 你自己那份本地文件（presets-mine）会出现在这里；从云端「下载」一份就会有'
-          : '云端没有这一档的官方预设 —— 官方目录里没有登记的，就下不到'
+          ? '本地还没有这一档的预设 —— 你自己那份本地文件（presets-local）会出现在这里；从云端「下载」一份就会有'
+          : '云端没有这一档的云端预设 —— 云端目录里没有登记的，就下不到'
       }
       return scope === 'local'
-        ? `本机还没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 官方文件下载之后会出现在这里，你自己放进预设目录的也会`
+        ? `本机还没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 云端文件下载之后会出现在这里，你自己放进预设目录的也会`
         : `云端没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 菜单上没有，就下不到`
     }
     return `这一档的 ${total} 条都被搜索词「${query.trim()}」筛掉了`
@@ -436,11 +436,11 @@ export default function PresetTable({
 
               {/*
                * 「时间」这一格的表头随表分语义：云端表是**云端更新**（发布侧盖的戳），
-               * 本地表是**时间**（官方行是仓库记的更新时间、交付行是下载时间、我的是修改时间
+               * 本地表是**时间**（云端行是仓库记的更新时间、交付行是下载时间、本地是修改时间
                * —— 一列三种真来源，格上的 tooltip 说清各自是哪一个，见 `statWhyOf`）。
                *
                * ★ **MKP 档 2026-10-09 又把这一列接回来了**：位置那一轴回来之后，
-               * 云端表说的就是"官方这次发布是什么时候发的"（目录只盖了一个戳），
+               * 云端表说的就是"云端这次发布是什么时候发的"（目录只盖了一个戳），
                * 本地表说的是"我这份什么时候改的" —— 两句话又各有主语了。
                */}
               <th className={s.thTime} scope="col">
@@ -463,7 +463,7 @@ export default function PresetTable({
               /*
                * 机型识别色（2026-10-08）：`A1` 与 `A1 mini` 只差四个字母，作者在真机上
                * 把 A1 那行看成了 A1 mini、点了下载才发现。一色一机型，见 `ui/machineTone.ts`。
-               * 「我的文件」按**文件自己标的归属**上色（`machineToneKeyOf` 收的规矩）。
+               * 「本地文件」按**文件自己标的归属**上色（`machineToneKeyOf` 收的规矩）。
                */
               const machineToneKey = machineToneKeyOf(row)
               /*
@@ -489,13 +489,13 @@ export default function PresetTable({
                 !(row.scope === 'cloud' && row.localState !== undefined)
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
-               * **本地文件那一份问都不问**：归档是官方版本生命周期的事，
-               * 用户自己的文件不进归档，也不该因为同名就借到官方的旧版本。
+               * **本地文件那一份问都不问**：归档是云端版本生命周期的事，
+               * 用户自己的文件不进归档，也不该因为同名就借到云端的旧版本。
                * **MKP 档整个不显示它**（2026-10-09：云端原件与归档都是内部数据，不进用户世界）
                * —— 归档抽屉只留切片器档。
                */
-              const archiveCount = row.origin === 'mine' || mkp ? 0 : archiveCountOf(row.fileName)
-              /** 云端那一格：与目录一致的那一份在本机（切片器官方行看 `downloaded`，交付行看三态） */
+              const archiveCount = row.origin === 'local' || mkp ? 0 : archiveCountOf(row.fileName)
+              /** 云端那一格：与目录一致的那一份在本机（切片器云端行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
                 (row.releaseState === undefined ? row.downloaded : row.releaseState === 'ok')
@@ -516,20 +516,20 @@ export default function PresetTable({
               const rowHot = expanded || closing.includes(row.rowKey)
               /*
                * 备注 / 归属这两块的身份（第八轮）：
-               * `mineAttr` = 这一行有没有归属可改（我自己那份、认得出的 MKP 预设，
+               * `localAttr` = 这一行有没有归属可改（我自己那份、认得出的 MKP 预设，
                * 原来在 JSX 里判两次，现在提一个量）；`ownMachineId / ownVersionId`
                * 是那两个值，显式收窄落成局部量（TS 不认布尔常量的收窄，而展示行与
                * 编辑带都要用它们）；两个 `*Band` 是编辑带的**打开指纹** —— 打开时
                * 记下、渲染时对表，数据重读后对不上就自动合上（见上面 `bands` 那段）。
                */
-              const mineAttr =
-                row.origin === 'mine' && row.kind === 'mkp_preset' && row.mineState !== 'unreadable'
+              const localAttr =
+                row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
               const ownMachineId =
-                row.origin === 'mine' && row.kind === 'mkp_preset' ? (row.ownMachineId ?? null) : null
+                row.origin === 'local' && row.kind === 'mkp_preset' ? (row.ownMachineId ?? null) : null
               const ownVersionId =
-                row.origin === 'mine' && row.kind === 'mkp_preset' ? (row.ownVersionId ?? null) : null
+                row.origin === 'local' && row.kind === 'mkp_preset' ? (row.ownVersionId ?? null) : null
               const remarkBand = row.remarkKey === null ? null : `${row.rowKey}:${row.subtitle}`
-              const attrBand = mineAttr
+              const attrBand = localAttr
                 ? `${row.rowKey}:${ownMachineId ?? ''}:${ownVersionId ?? ''}`
                 : null
               return (
@@ -589,7 +589,7 @@ export default function PresetTable({
                       {/*
                         **我这边怎么样**（MKP 云端行，2026-10-09）：未获取 / 本地已有 / 有新版。
                         这一格回答的是用户点开"云端"时问的那件事 ——
-                        "官方有这些，那我手上有没有、要不要拿"。判据在 `cloudRows` 里。
+                        "云端有这些，那我手上有没有、要不要拿"。判据在 `cloudRows` 里。
                       */}
                       {row.scope === 'cloud' && row.localState !== undefined && (
                         <span
@@ -601,10 +601,10 @@ export default function PresetTable({
                         </span>
                       )}
                       {/*
-                        「官方模板已更新」那枚小字**退役了**（2026-10-09）：官方改过的项
-                       现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持我的」），
+                        「云端模板已更新」那枚小字**退役了**（2026-10-09）：云端改过的项
+                       现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持本地」），
                        不再在列表上留一句
-                        "官方那边有新的了"让人自己去猜是哪几项。
+                        "云端那边有新的了"让人自己去猜是哪几项。
                       */}
                       {/*
                        * ★ **「未标机型」那枚角标退役了**（2026-10-10 作者：「这个未标机型
@@ -623,12 +623,12 @@ export default function PresetTable({
                        * 第九层：读不出来的那一份（编码 / TOML 语法 / 指向用户根之外）——
                        * 一眼看得见；为什么读不出来在 title 里。**照常列出来**，不藏。
                        */}
-                      {row.scope === 'local' && row.mineState === 'unreadable' && (
+                      {row.scope === 'local' && row.localState === 'unreadable' && (
                         <span
                           className={s.unreadable}
                          
                         >
-                          {MINE_UNREADABLE_TEXT}
+                          {LOCAL_UNREADABLE_TEXT}
                         </span>
                       )}
                     </span>
@@ -687,10 +687,10 @@ export default function PresetTable({
                        * **MKP 云端行的三个状态、两个动作**（2026-10-09）。
                        *
                        * 判据在 `cloudRows` 里算好了（`localState`）：问我这边有没有一份
-                       * **基于它**的本地文件，以及官方换没换版 —— **不看下载区字节**。
+                       * **基于它**的本地文件，以及云端换没换版 —— **不看下载区字节**。
                        *
-                       *   未获取  → [下载]  取回官方 + 落一份你的（本地表立刻多一行）
-                       *   有新版  → [更新]  把官方新版取回来；**你那份一个字节都不动**
+                       *   未获取  → [下载]  取回云端 + 落一份你的（本地表立刻多一行）
+                       *   有新版  → [更新]  把云端新版取回来；**你那份一个字节都不动**
                        *   本地已有 → 不给按钮，画一枚灰字（要改要用都在本地表那一行上）
                        *
                        * 三档的"为什么"都在 `title` 里（灰一个动作不说为什么，用户只会以为坏了）。
@@ -704,7 +704,7 @@ export default function PresetTable({
                       /*
                        * **MKP 本地行唯一的动作：使用**（2026-10-09）。
                        *
-                       * 这一档只有 `presets-mine/` 里那几行（你自己那份本地文件）——
+                       * 这一档只有 `presets-local/` 里那几行（你自己那份本地文件）——
                        * 云端原件不进这张表。使用 = 把它设为当前生效的那一份。
                        * 两处不给按钮（不给点了必被拒的按钮）：认不出是 MKP 预设的（`.json`），
                        * 以及第九层读不出来的。
@@ -724,11 +724,11 @@ export default function PresetTable({
                         <button type="button" className={s.useBtn} data-live="true" disabled>
                           {ASSET_USE_TEXT.on}
                         </button>
-                      ) : row.origin === 'mine' && row.kind !== 'mkp_preset' ? (
+                      ) : row.origin === 'local' && row.kind !== 'mkp_preset' ? (
                         <span className={s.actNone}>
                           {DASH_}
                         </span>
-                      ) : row.origin === 'mine' && row.mineState === 'unreadable' ? (
+                      ) : row.origin === 'local' && row.localState === 'unreadable' ? (
                         <span className={s.actNone}>
                           {DASH_}
                         </span>
@@ -768,9 +768,9 @@ export default function PresetTable({
                         <span className={s.actDone}>
                           {LIVE_TEXT[kind].on}
                         </span>
-                      ) : row.origin === 'mine' ? (
+                      ) : row.origin === 'local' ? (
                         /*
-                         * **用户自己那份也能被应用**（第七层）：与官方那份同一个入口、
+                         * **用户自己那份也能被应用**（第七层）：与云端那份同一个入口、
                          * 同一条底账 —— "只读"是文件归属的属性，不是"能不能被使用"的属性。
                          * 两档不给按钮（不给必报错的按钮）：认不出是 MKP 预设的（`.json`），
                          * 以及**第九层读不出来的**（后端 `read_preset_text` 的第一关就会拒）。
@@ -779,7 +779,7 @@ export default function PresetTable({
                           <span className={s.actNone}>
                             {DASH_}
                           </span>
-                        ) : row.mineState === 'unreadable' ? (
+                        ) : row.localState === 'unreadable' ? (
                           <span className={s.actNone}>
                             {DASH_}
                           </span>
@@ -813,7 +813,7 @@ export default function PresetTable({
                         </button>
                       ) : row.releaseUid === undefined && row.kind === 'mkp_preset' ? (
                         /*
-                         * **官方 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
+                         * **云端 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
                          * 应用只认目录登记的那一份。两种真实状态共用：用户自己放进
                          * `mkp/` 的来路不明文件；以及旧资产库形状的行（演示数据里有）。
                          * 原来这里放行到「应用」按钮、点了再被守卫拦下，报一串
@@ -1014,7 +1014,7 @@ export default function PresetTable({
                               </div>
 
                               {/* 血统：我那份从哪一版改出来的 */}
-                              {row.origin === 'mine' && (
+                              {row.origin === 'local' && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>{BASED_ON_KEY}</span>
                                   <span className={s.dVal}>{basedOnCellText(row)}</span>
@@ -1024,7 +1024,7 @@ export default function PresetTable({
                           </div>
 
                           {/* 右栏：快捷操作 —— 原「卡底」那三颗按钮搬上来（2026-10-10） */}
-                          {(row.origin === 'mine' || archiveCount > 0) && (
+                          {(row.origin === 'local' || archiveCount > 0) && (
                             <div className={s.dCol}>
                               <span className={s.dColLabel}>快捷操作</span>
                               <div className={s.dActs}>
@@ -1037,18 +1037,18 @@ export default function PresetTable({
                                     {archiveOpenText(archiveCount)}
                                   </button>
                                 )}
-                                {row.origin === 'mine' && (
+                                {row.origin === 'local' && (
                                   <button
                                     type="button"
                                     className={s.ghostBtn}
-                                    onClick={() => onOpenMine(row)}
+                                    onClick={() => onOpenLocal(row)}
                                   >
-                                    {MINE_DRAWER.open}
+                                    {LOCAL_DRAWER.open}
                                   </button>
                                 )}
-                                {row.origin === 'mine' &&
+                                {row.origin === 'local' &&
                                   row.kind === 'mkp_preset' &&
-                                  row.mineState !== 'unreadable' && (
+                                  row.localState !== 'unreadable' && (
                                     <button
                                       type="button"
                                       className={s.ghostBtn}
@@ -1104,7 +1104,7 @@ export default function PresetTable({
                          * 之后的 `.dBand`，备注一条、归属一条、两条独立可同开）。
                          * 两块都没有（云端行 / release 行）时整块不渲染。
                          */}
-                        {(row.remarkKey !== null || mineAttr) && (
+                        {(row.remarkKey !== null || localAttr) && (
                           <div className={s.editrows}>
                             {row.remarkKey !== null && (
                               <div className={s.dRow}>
@@ -1133,7 +1133,7 @@ export default function PresetTable({
                               </div>
                             )}
 
-                            {mineAttr && (
+                            {localAttr && (
                               <div className={s.dRow}>
                                 <span className={s.dKey}>归属</span>
                                 <span className={s.editValue}>

@@ -1626,7 +1626,7 @@ mod tests {
         );
 
         /* 表里给切片器**单独写了说法**的那一条：两面必须不一样 ——
-        校准形变那串机器判据留给界面/记录/日志，切片器只看"别转我的模型" */
+        校准形变那串机器判据留给界面/记录/日志，切片器只看"别转本地模型" */
         let rotated = HookError::from(PostprocError::CalibrationMismatch {
             code: "E_CAL_MISMATCH_001",
             message: "expected=1x2 actual=2x1".to_owned(),

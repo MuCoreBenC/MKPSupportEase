@@ -1,12 +1,12 @@
 /*
- * 构建脚本 —— **把两个官方源（Bootstrap）地址注入二进制**。
+ * 构建脚本 —— **把两个云端源（Bootstrap）地址注入二进制**。
  *
  * # 值的来源与优先级（2026-10-02 第十七刀）
  *
  *   ① 环境变量 `MKPSE_PRESET_SOURCE` / `MKPSE_PRESET_SOURCE_GITEE`：构建方显式覆盖
  *      （CI 打测试包用的就是它，也有权覆盖一切）——**在就不动它**；
  *   ② 工作台配置 `<repo>/workbench/bootstrap.json`（`wb_set_bootstrap` 写的，入库）：
- *      `npm run tauri dev` 与正式构建都从这里自动拿到官方源；
+ *      `npm run tauri dev` 与正式构建都从这里自动拿到云端源；
  *   ③ 都没有 → 二进制里没有那个默认地址，联网命令诚实回答「还没配置」，
  *      **不编一个 URL 出来假装能下**。
  *

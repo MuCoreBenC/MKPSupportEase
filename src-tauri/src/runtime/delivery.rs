@@ -33,7 +33,7 @@
 //!
 //! # 这一份我们认得出吗（第三圈第 6 层）
 //!
-//! 盘上有字节 ≠ 那字节是官方内容。`stale` 只说"与目录不一致"，而那可能是两种完全不同的事：
+//! 盘上有字节 ≠ 那字节是云端内容。`stale` 只说"与目录不一致"，而那可能是两种完全不同的事：
 //!
 //! ```text
 //! 盘上这一份 vs 目录登记的当前版本
@@ -42,7 +42,7 @@
 //!   └─ 哪儿都对不上    → [`FileTrust::Unknown`]   这台机器上查不出它属于哪一版
 //! ```
 //!
-//! **`stale` 与"云端有没有更新"是两件事**：前者问"本机这份是不是我们认可的官方内容"，
+//! **`stale` 与"云端有没有更新"是两件事**：前者问"本机这份是不是我们认可的云端内容"，
 //! 后者是 [`super::update::check`] 的事（比目录指纹）。混成一句"需更新"，用户既不知道
 //! 自己的文件是不是被改过，也不知道该不该等更新 —— 所以这一段单独给 [`trust_entries`]。
 
@@ -445,9 +445,9 @@ fn bootstrap_events(internal_root: &Path, catalog: &super::Catalog) {
 
 /// 归档区里的一份旧版本。**盘就是底账**（与下载区同一套规矩）：扫盘得到，不记账本。
 ///
-/// 归档是**官方版本生命周期**的一部分（换版本时旧份进 `archive/`，不删），
+/// 归档是**云端版本生命周期**的一部分（换版本时旧份进 `archive/`，不删），
 /// **不是用户修改历史** —— 用户改出来的东西是另一条线（另存成另一份文件），
-/// 永远不回写官方原件。所以这里只有"官方旧版本"，没有"谁在什么时候改了什么"。
+/// 永远不回写云端原件。所以这里只有"云端旧版本"，没有"谁在什么时候改了什么"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedFile {
     /// 相对内部根的路径（`archive/delivery/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
@@ -526,7 +526,7 @@ pub fn archived_files(internal_root: &Path) -> Vec<ArchivedFile> {
 
 /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
 
-/// 删除本机下载区里的一份官方交付文件。
+/// 删除本机下载区里的一份云端交付文件。
 ///
 /// 为什么可以删：删了它回到「未下载」，随时可以从云端重新下载 —— 字节有目录 SHA
 /// 锚定，**零数据损失**。此前的「不在这里删」是把"对不上目录时该修"错当成了"不许动"。
@@ -579,7 +579,7 @@ fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
 
 /* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
 ///
-/// 四个答案，**只回答"本机这份是不是我们认可的官方内容"**——不掺"云端有没有更新"
+/// 四个答案，**只回答"本机这份是不是我们认可的云端内容"**——不掺"云端有没有更新"
 /// （那是 [`super::update::check`] 的问题，比的是目录指纹，与本机的字节无关）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileTrust {
@@ -587,7 +587,7 @@ pub enum FileTrust {
     Absent,
     /// 字节与目录登记一致 —— 就是当前这一版
     Current,
-    /// 字节与我们认得的某一版**旧**官方一致 —— 认得出它是哪一版
+    /// 字节与我们认得的某一版**旧**云端一致 —— 认得出它是哪一版
     OldVersion,
     /// 与目录、归档、被归档的旧目录都对不上 —— 这台机器上查不出它属于哪一版
     Unknown,
@@ -612,7 +612,7 @@ pub struct KnownVersion {
 /// 2. 被归档的旧目录（`archive/catalog.json`）里登记的同一份文件 ——
 ///    它记着更早那些版本的字节指纹，所以归档槽被后来的版本占了也还能认出更早那一版；
 /// 3. **目录版本链**（`archive/catalogs/`，2026-10-06）—— 每一次换代归档的那份旧目录。
-///    曾经只有来源 1+2：单槽保留最早一份，官方连发两版中间那版的指纹就永久丢了，
+///    曾经只有来源 1+2：单槽保留最早一份，云端连发两版中间那版的指纹就永久丢了，
 ///    用户盘上正规的旧版本会被误判成「内容异常」（2026-10-06 实测 7 份假警报）。
 ///    链是**追加**的（[`super::release::release_bytes`] 每次换代都进一份），
 ///    所以"这台机器见过的每一版目录"都在这里。
@@ -729,12 +729,12 @@ pub fn trust_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<File
         .collect()
 }
 
-/// 取出**可以当依据**的官方正文：只有盘上这一份与目录登记逐字节一致时才给。
+/// 取出**可以当依据**的云端正文：只有盘上这一份与目录登记逐字节一致时才给。
 ///
-/// 「临时编辑」那条链的第一步就在于此：改的来源必须是当前这一版官方原件。
+/// 「临时编辑」那条链的第一步就在于此：改的来源必须是当前这一版云端原件。
 /// 被改过（SHA 对不上）的那些不给 —— 它的字节存疑，修复它的动作是**重新下载**，
 /// 不许拿它当原文去改（改完另存成用户文件，等于把可疑内容洗成"我改过的那一份"）。
-pub fn official_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
+pub fn cloud_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
     let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
         AppError::not_found(format!("{} 还没下载到本机 —— 先下载，再改", file.file_name))
     })?;
@@ -742,7 +742,7 @@ pub fn official_text(internal_root: &Path, file: &CatalogFile) -> Result<String,
     if let Some(want) = file.expected_sha() {
         if hex(&Sha256::digest(&bytes)) != want {
             return Err(AppError::sha_mismatch(format!(
-                "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的官方版，再改",
+                "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的云端版，再改",
                 file.file_name
             )));
         }
@@ -1653,8 +1653,8 @@ mod tests {
     #[test]
     fn a_clean_copy_is_current_and_not_reported() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
-        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
+        put_file(root.path(), "mkp/A1-standard.toml", "云端当前版本");
 
         let catalog = catalog_with(vec![file.clone()]);
         assert_eq!(trust_of(root.path(), &file), FileTrust::Current);
@@ -1668,7 +1668,7 @@ mod tests {
     #[test]
     fn tampered_bytes_are_not_recognized() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
         put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
 
         assert_eq!(trust_of(root.path(), &file), FileTrust::Unknown);
@@ -1741,7 +1741,7 @@ mod tests {
 
     /// **版本链修的那个 bug 的钉子**（2026-10-06，实测 7 份假「内容异常」）：
     ///
-    /// 官方连发三代（v1 → v2 → v3），用户在 v2 那一代下载了文件，随后目录一路换到 v3。
+    /// 云端连发三代（v1 → v2 → v3），用户在 v2 那一代下载了文件，随后目录一路换到 v3。
     /// 单槽归档（保留最早）会把 v2 那代目录永久丢掉 —— 单槽里只有 v1 代的目录、
     /// 归档槽里只有 v1 的字节，盘上**正规的 v2** 谁都认不出，被误判成 `Unknown`
     /// （「内容异常」）。版本链（`archive/catalogs/`）把每一代被换下的目录都留下来之后，
@@ -1812,21 +1812,21 @@ mod tests {
 
     /// 「改这份」的入口：**SHA 对不上的字节不许当原文用**（修它的动作是重新下载）
     #[test]
-    fn official_text_refuses_bytes_that_drifted() {
+    fn cloud_text_refuses_bytes_that_drifted() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
 
-        let missing = official_text(root.path(), &file).unwrap_err();
+        let missing = cloud_text(root.path(), &file).unwrap_err();
         assert_eq!(missing.code, crate::error::ErrorCode::NotFound);
 
         put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
-        let drifted = official_text(root.path(), &file).unwrap_err();
+        let drifted = cloud_text(root.path(), &file).unwrap_err();
         assert_eq!(drifted.code, crate::error::ErrorCode::ShaMismatch);
 
-        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+        put_file(root.path(), "mkp/A1-standard.toml", "云端当前版本");
         assert_eq!(
-            official_text(root.path(), &file).unwrap(),
-            "官方当前版本",
+            cloud_text(root.path(), &file).unwrap(),
+            "云端当前版本",
             "与目录一致的那一份才是可以改的原文"
         );
     }

@@ -53,15 +53,15 @@ fn label_of(name: &str) -> String {
 fn both_sides_make_the_byte_identical_copy() {
     for (name, src) in fixtures() {
         let label = label_of(&name);
-        let mine = app::make_copy(&src, &label);
+        let local = app::make_copy(&src, &label);
         let theirs = wb::make_copy(&src, &label);
         assert_eq!(
-            mine, theirs,
+            local, theirs,
             "客户端与工作台建出来的副本不一样（{name}）—— 血统三行的形状漂了"
         );
         /* 顺带钉住"副本 = 来源 + 三行"这条共有的不变式（两边各有一份自己的判据） */
         assert_eq!(
-            app::strip_lineage_for_compare(&mine),
+            app::strip_lineage_for_compare(&local),
             src,
             "客户端剪掉三行之后与来源不同（{name}）"
         );
@@ -74,7 +74,7 @@ fn both_sides_read_the_same_lineage() {
     for (name, src) in fixtures() {
         let copy = wb::make_copy(&src, &label_of(&name));
 
-        let mine = app::parse_lineage_from_content(&copy).expect("三行都在，客户端该读得到");
+        let local = app::parse_lineage_from_content(&copy).expect("三行都在，客户端该读得到");
         let theirs =
             preset::read::parse_lineage_from_content(&copy).expect("三行都在，工作台该读得到");
         let theirs = (
@@ -82,14 +82,14 @@ fn both_sides_read_the_same_lineage() {
             theirs.based_on_release_time.clone(),
             theirs.based_on_sha256.clone(),
         );
-        let mine = (
-            mine.based_on.clone(),
-            mine.based_on_release_time.clone(),
-            mine.based_on_sha256.clone(),
+        let local = (
+            local.based_on.clone(),
+            local.based_on_release_time.clone(),
+            local.based_on_sha256.clone(),
         );
-        assert_eq!(mine, theirs, "两边读出来的血统不一样（{name}）");
+        assert_eq!(local, theirs, "两边读出来的血统不一样（{name}）");
 
-        /* 官方原件本身没有血统：两边都必须给 None（不是三项全空的空壳） */
+        /* 云端原件本身没有血统：两边都必须给 None（不是三项全空的空壳） */
         assert_eq!(app::parse_lineage_from_content(&src), None);
         assert_eq!(preset::read::parse_lineage_from_content(&src), None);
     }
@@ -102,7 +102,7 @@ fn both_sides_agree_on_the_digest() {
         assert_eq!(
             app::sha256_hex(&src),
             wb::sha256_hex(&src),
-            "全文摘要算法不一致（{name}）—— 「官方变了没有」就会两边各说一套"
+            "全文摘要算法不一致（{name}）—— 「云端变了没有」就会两边各说一套"
         );
     }
 }

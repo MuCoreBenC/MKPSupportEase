@@ -16,7 +16,7 @@
 //! source.json（Source Manifest）说：寻址规则 —— catalog / manifest / release / content
 //!                                    / filesRoot 各从哪个锚点找（全相对引用）
 //! catalog 说：有一个文件叫 A1-standard.toml，它在交付集合里的位置是 delivery/mkp/presets/…
-//! 这份设置说：当前的数据源是哪一份 source.json（官方 GitHub / 官方 Gitee / 自建）
+//! 这份设置说：当前的数据源是哪一份 source.json（云端 GitHub / 云端 Gitee / 自建）
 //! 下载地址 = SourceResolver（唯一寻址出口）算，业务层不拼
 //! ```
 //!
@@ -52,7 +52,7 @@
 //!
 //! **如实说还没配置，不编一个 URL 出来假装能下。** 默认地址由构建方注入：
 //! 环境变量 `MKPSE_PRESET_SOURCE` > 工作台配置（`workbench/bootstrap.json`，
-//! 见 `src-tauri/build.rs`）—— 注入了才有默认值。正常构建内置的是**官方 Bootstrap**；
+//! 见 `src-tauri/build.rs`）—— 注入了才有默认值。正常构建内置的是**云端 Bootstrap**；
 //! "没配"只该发生在开发构建（既没注入也没手动指定）。
 
 use std::path::{Path, PathBuf};
@@ -91,7 +91,7 @@ const DEFAULT_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE");
 /// **第二个内置源**（Gitee）的 Bootstrap 地址（`MKPSE_PRESET_SOURCE_GITEE`）。
 ///
 /// ★ 为什么是两个而不是"一个地址 + 用户自己改"（作者 2026-10-05）：国内直连 Gitee、
-///   直连 GitHub 要靠代理 —— **两个都是官方源，用户只管选**。
+///   直连 GitHub 要靠代理 —— **两个都是云端源，用户只管选**。
 ///   没注入就不出现在界面里（不硬编一个地址进来：那会把"部署在哪"这件事写死在客户端）。
 const GITEE_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE_GITEE");
 
@@ -102,7 +102,7 @@ const GITEE_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE_GITEE");
 /// Bootstrap       https://host/presets/delivery/source.json  寻址规则声明
 /// ```
 ///
-/// ★ **同一个"官方地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）。
+/// ★ **同一个"云端地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）。
 /// 自 Source Manifest v2 起**两种形状殊途同归**：最终都读 `{交付目录}/source.json`
 /// （寻址规则只住这一份文件，"直接读 catalog.json"的第三种读法已废 —— 没有 Manifest
 /// 就没有 `filesRoot`，客户端只能靠猜，那正是要消灭的）。形状的区别只剩
@@ -200,7 +200,7 @@ pub struct PresetSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceEntry {
     /// 手动指定：**用户填的那份地址** + 它是哪种形状。
-    /// 开发 / 排查通道（本地 http.server、自建镜像、另一个官方源…）。
+    /// 开发 / 排查通道（本地 http.server、自建镜像、另一个云端源…）。
     ///
     /// ★ `shape` 是探出来的那一种（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）：
     /// **同一个地址两种读法**（目录 / `source.json`）都能认，见 [`probe_custom_shape`]。
@@ -420,8 +420,8 @@ pub fn current_mode(root: &Path) -> Result<SourceMode, AppError> {
 /// 返回 `None` 的那一路要被界面原样说出来——那是唯一诚实的答案。
 /// **开发期的源覆盖**（2026-10-08）：`MKPSE_PRESET_SOURCE_URL` 设了就强制用它。
 ///
-/// 它只服务一件事：**本地官方源测试服务**（`scripts/preset-test-server`）——
-/// 开发时把官方源临时指向 `http://127.0.0.1:8787`，客户端逻辑**一套不变**、
+/// 它只服务一件事：**本地云端源测试服务**（`scripts/preset-test-server`）——
+/// 开发时把云端源临时指向 `http://127.0.0.1:8787`，客户端逻辑**一套不变**、
 /// 也不感知这是测试源（仍走 catalog / manifest / SHA 校验 / 下载管道）。
 ///
 /// ★ **只在 debug 构建里编**：release 里这段代码整个不存在，`check-release-source.mjs`
@@ -470,7 +470,7 @@ pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
 ///
 /// - 自定义（[`SourceEntry::Custom`]）：**按记下来的形状**读；形状还没探过（老档）
 ///   就**自适应**：先当 `source.json` 文件地址，读不到再当交付目录补文件名
-///   —— 这正是 0.0.2 那个"填官方地址反而不通"的修法；
+///   —— 这正是 0.0.2 那个"填云端地址反而不通"的修法；
 /// - 内置（[`SourceEntry::Bootstrap`]）：**读 `source.json`**（一次很小的网络请求），
 ///   按它声明的寻址规则算 —— 部署位置变了只改它，客户端不用重发。
 pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
@@ -503,7 +503,7 @@ pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
 pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
     let entry = current_entry(root)?.ok_or_else(|| {
         AppError::not_implemented(
-            "这个构建没有内置官方源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
+            "这个构建没有内置云端源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
         )
     })?;
     let resolved = resolve_entry(entry)?;
@@ -518,7 +518,7 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
 /// 在 `source.json` 里说的那个 catalog 地址。
 pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
     let entry = current_entry(root)?.ok_or_else(|| {
-        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个官方源，或填一个地址")
+        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个云端源，或填一个地址")
     })?;
     let resolved = resolve_entry(entry)?;
     let catalog_url = resolved.catalog_url()?;
@@ -611,8 +611,8 @@ impl ResolvedSource {
 mod two_source_tests {
     //! **双源 + 自适应形状**的判据（2026-10-05）。
     //!
-    //! 重点是最后那条：0.0.2 真机里用户把**官方 `source.json` 地址**填进「手动指定」
-    //! 反而不能用（手动那条只认"数据源根"），而内置官方源同一个地址是通的 ——
+    //! 重点是最后那条：0.0.2 真机里用户把**云端 `source.json` 地址**填进「手动指定」
+    //! 反而不能用（手动那条只认"数据源根"），而内置云端源同一个地址是通的 ——
     //! 那不是用户错，是我们把"一个地址有两种读法"当成了两种东西。
 
     use super::*;
@@ -691,7 +691,7 @@ mod two_source_tests {
     /// - 填**目录** → 探成 `Root`（补文件名读）；
     /// - 填 **`source.json` 地址** → 原样读，探成 `Bootstrap`。
     ///
-    /// 两条都通 —— 用户填哪一种都能用，这正是"填官方地址反而不通"的修法。
+    /// 两条都通 —— 用户填哪一种都能用，这正是"填云端地址反而不通"的修法。
     #[test]
     fn a_custom_url_is_read_as_a_root_or_as_a_source_json() {
         // 假取字节：目录里有 source.json（v2），别的 404。
