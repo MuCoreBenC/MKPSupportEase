@@ -768,7 +768,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             return
           }
           setNote({
-            text: `已下载 ${done.fileName} —— 云端这一版落到本地了（本地表里现在有它）`,
+            /* 「落到本地」说清是哪儿：MKP 这条下载把官方字节放进下载区，另落一份
+               你自己的文件（`presets-mine/`）—— 本地表里出现的是**后者** */
+            text: `已下载 ${done.fileName} —— 云端这一版取回来了，你自己那份也落好了`
+              + '（本地表里现在有它）',
             bad: false,
           })
         },
@@ -802,7 +805,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 ? row.releaseState === 'tampered'
                   ? `已更新 ${row.fileName} —— 盘上那份认不出的，现在换成了目录登记的当前版本`
                   : `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
-                : `已下载 ${row.fileName} 到本机预设目录 —— 本地表里现在有它了`,
+                /*
+                 * 这句话要**说清落到哪儿**（2026-10-13 作者截图里问过"他有没有覆盖"）：
+                 * 下载只写**我们自己的下载区**（`assets/bbs/Process/…`），一个字节都不碰
+                 * 切片器目录里那份 —— 要进切片器是行上那颗「复制」的事。
+                 */
+                : `已下载 ${row.fileName} 到我们自己的目录（assets/bbs/Process）`
+                  + ' —— 本地表里现在有它了；要进切片器再点「复制」',
               bad: false,
             })
           },
@@ -1123,6 +1132,30 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     )
   }
 
+  /*
+   * 「打开所在文件夹」另两个落点（2026-10-13 作者）：切片器配置在磁盘上是**两个地方** ——
+   *
+   *   ① 我们自己的下载区（`assets/bbs/Process/…`）：**下载**落的那一份，行上写「已下载」；
+   *   ② 切片器目录（`Bambu Studio/user/<账号>/process/…`）：**复制**过去的那一份，
+   *      切片器的「生效」就是它，你在 BBS 里改的也是它。
+   *
+   * 两处只给**文件名**（路径由后端按目录登记拼）；两处都可能"还没到"——
+   * 后端照实报一句人话（先下载 / 先复制），界面不自己编路径。
+   */
+  const runRevealOurs = (row: PresetTableRow) => {
+    data.revealDelivered(row.fileName).then(
+      () => undefined,
+      (e: unknown) => setNote({ text: `没打开：${errorText(e)}`, bad: true }),
+    )
+  }
+
+  const runRevealSlicer = (row: PresetTableRow) => {
+    data.revealSlicer(row.fileName).then(
+      () => undefined,
+      (e: unknown) => setNote({ text: `没打开：${errorText(e)}`, bad: true }),
+    )
+  }
+
   /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
   const togglePin = (row: PresetTableRow) => {
     page.togglePin(row.pinKey)
@@ -1195,7 +1228,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         () => {
           setBusyKey(null)
           setNote({
-            text: `已复制 ${row.fileName} 到切片器目录 —— 切片器里现在能选到它了`,
+            text: `已复制 ${row.fileName} 到切片器目录（Bambu Studio 的 user/<账号>/process）`
+              + ' —— 切片器里现在能选到它了。这一手**不覆盖**：那儿已经有同名的会被拒绝',
             bad: false,
           })
         },
@@ -1214,7 +1248,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     if (row.origin === 'mine') {
       setBusyKey(row.rowKey)
-      data.apply(row.path).then(
+      /* 文件名与路径**分开传**（后端认 origin=mine + path 那道闸）—— 见 `data.apply` 那段 */
+      data.apply(row.fileName, row.path).then(
         () => setBusyKey(null),
         (e: unknown) => {
           setBusyKey(null)
@@ -1244,7 +1279,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runUse = (row: PresetLocalRow) => {
     setBusyKey(row.rowKey)
-    data.apply(row.path).then(
+    data.apply(row.fileName, row.path).then(
       () => {
         setBusyKey(null)
         setNote({ text: `已使用 ${row.fileName}`, bad: false })
@@ -1650,12 +1685,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         disabled: renameWhyNot(row),
         onSelect: () => openRename(row),
       },
+      /*
+       * 「打开所在文件夹」在这张表里是**两条**（2026-10-13 作者）：切片器配置在磁盘上
+       * 有两个落点，用户要能分别打开 —— 在我们这儿的原件（下载区）与切片器里那份
+       * （复制过去的，他在 BBS 里改的就是那一份）。两处都不是"程序自己管得摸不着"的
+       * 地方（旧版把这一栏整条禁了，理由是"住在程序自己管理的区域"）。
+       *
+       * 这张表里列的都是**盘上真有**的那些（未下载的不进本地表）⇒ 第一条恒可点；
+       * 第二条看「已复制」那一格（`live`）。
+       */
       {
-        id: 'reveal',
-        label: REVEAL_LABEL,
-        /* 第十三层：只有「我的文件」能这样打开（打开的是系统文件管理器，不是我们的界面） */
-        disabled: revealWhyNot(row),
-        onSelect: () => runReveal(row),
+        id: 'revealOurs',
+        label: '显示我们那份的文件夹',
+        onSelect: () => runRevealOurs(row),
+      },
+      {
+        id: 'revealSlicer',
+        label: '显示切片器里的那份',
+        disabled: row.live ? undefined : '还没复制进切片器 —— 先在行上点「复制」',
+        onSelect: () => runRevealSlicer(row),
       },
       bbsEntry(row),
       { separator: true },

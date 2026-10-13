@@ -175,6 +175,37 @@ if (mkpTable.heads.includes('时间')) {
   problems.push('资源库那一档不该有「时间」列（行上只有来源 / 机型 / 版本 / 操作）')
 }
 
+/* ---------- 2′. 「使用」那一手（2026-10-13 修过一处漏参，钉住它别再退化） ----------
+ *
+ * 那天真机上点「使用」报的是「目录里没有 presets-mine/A1_MINI-fast.toml」：
+ * 前端把**路径**当文件名传了下去、`origin` 又缺省成 `official`，后端于是拿带前缀的
+ * 那串去**交付目录**里找。假后端对这件事的判据是 `origin === 'mine'` + `path` 命中，
+ * 所以"只传一个参数"在浏览器里也会失败 —— 这一节就是那一下。
+ */
+await rad('preset-kind', 'mkp').click({ force: true })
+await page.waitForTimeout(300)
+const useRow = page.locator('main tbody tr[data-rowkey^="mine:"]', {
+  has: page.getByRole('button', { name: '使用', exact: true }),
+})
+const useCount = await useRow.count()
+if (useCount === 0) {
+  problems.push('资源库里没有能点「使用」的我的文件行 —— 这一节等于没验')
+} else {
+  const name = await useRow.first().locator('td').first().innerText().catch(() => '')
+  await useRow.first().getByRole('button', { name: '使用', exact: true }).click()
+  await page.waitForFunction(
+    () => /已使用|使用失败/.test(document.body.innerText),
+    { timeout: 5000 },
+  )
+  const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '))
+  const okLine = /已使用[^。]*/.exec(body)?.[0] ?? ''
+  const badLine = /使用失败[^。]*/.exec(body)?.[0] ?? ''
+  if (badLine !== '' || okLine === '') {
+    problems.push(`「使用」这一手失败了：${badLine || '(没有任何回话)'}`)
+  }
+  console.log(`\n[使用] ${name.replace(/\s+/g, ' ').trim().slice(0, 40)} → ${badLine || okLine}`)
+}
+
 /** 展开详情里每一格的值（dt 文案 → dd 文案）—— 好几节都要读它 */
 const factOf = () =>
   page.evaluate(() => {

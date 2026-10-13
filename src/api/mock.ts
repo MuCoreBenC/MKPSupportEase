@@ -1374,6 +1374,23 @@ export const mockApi: MkpApi = {
    * 也只是内存里一条记录 —— 前三步（只认我的文件 / 找得到 / 文件在不在）照真机走，
    * 最后一步如实说它在真机上的样子（不假装打开了）。
    */
+  /*
+   * 两个落点各自的「打开所在文件夹」（2026-10-13）：假后端没有文件系统，**照实说
+   * 它在真机上的样子**，不假装打开了（假装的话浏览器里看着像成了）—— 与 `revealInFolder`
+   * / `revealReportExport` 同一条口径。
+   */
+  async revealDeliveredFile(fileName) {
+    throw new Error(
+      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，选中我们自己的那份「${fileName}」`,
+    )
+  },
+
+  async revealSlicerFile(fileName) {
+    throw new Error(
+      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，选中切片器目录里的「${fileName}」`,
+    )
+  },
+
   async revealInFolder(path) {
     if (!path.startsWith('presets-mine/')) {
       throw new Error('只给「我的文件」显示 —— 官方那两份住程序自己管的目录')

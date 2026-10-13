@@ -1983,6 +1983,24 @@ export interface MkpApi {
   revealInFolder(path: string): Promise<void>
 
   /**
+   * 打开**我们自己的落点**（下载区 `assets/bbs/…` 里那一份）所在的文件夹，并选中它。
+   *
+   * 与 [`revealInFolder`] 是**两个地方**，别混：那一条只认 `presets-mine/`（你的文件），
+   * 这一条认**目录登记**（交付区里我们发的那一份）。只收文件名，路径不由前端拼；
+   * 盘上还没有这份 → 照实报告"先下载"（不打开空文件夹）。
+   */
+  revealDeliveredFile(fileName: string): Promise<void>
+
+  /**
+   * 打开**切片器目录里那份**（`user/<账号>/process/…`）所在的文件夹，并选中它。
+   *
+   * 那是「复制」过去的落点（切片器的生效就是那一手），与我们自己的下载区**不是一处** ——
+   * 用户在 BBS 里改的也是那一份，所以「去文件夹里看看」得能分别打开两处。
+   * 还没复制过去 → 照实报告"先复制"。
+   */
+  revealSlicerFile(fileName: string): Promise<void>
+
+  /**
    * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档
    * （`archive/` 是官方版本生命周期的一部分；用户自己删自己的文件就结束）。
    *

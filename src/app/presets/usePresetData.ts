@@ -223,14 +223,19 @@ export interface PresetData {
    */
   pickMachine: (machineId: string) => void
   /**
-   * 把某一份**本地文件**设为**当前使用的那一条**（身份 = 相对用户根的路径）。
+   * 把某一份**本地文件**设为**当前使用的那一条**（身份 = **文件名 + 相对用户根的路径**）。
    * 云端的版本不能直接用 —— 要先用 `fetchOfficial` 把它下载到本地。
    *
-   * 走应用命令（`api.applyActivePreset`，后端按闸校验后写 `run/active-preset.json`）
-   * **然后重读底账** —— 界面看到的永远是底账答的，与 `copy` 同一条规矩。
-   * 失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
+   * 走应用命令（`api.applyActivePreset(fileName, 'mine', path)`，后端按闸校验后写
+   * `run/active-preset.json`）**然后重读底账** —— 界面看到的永远是底账答的，
+   * 与 `copy` 同一条规矩。失败照抛给调用方（页面用提示条说出来），**不在这里吞**。
+   *
+   * ★ 2026-10-13 修一个真 bug：这里原来只把 `path` 当唯一实参传下去，于是
+   *   `fileName` 收成了 `presets-mine/A1_MINI-fast.toml`、`origin` 缺省成 `official` ——
+   *   后端拿这串带前缀的名字去**交付目录**里找，报「目录里没有 presets-mine/…」，
+   *   本地表那颗「使用」**一份都点不动**。文件名与路径是两个参数，这里必须分开传。
    */
-  apply: (path: string) => Promise<void>
+  apply: (fileName: string, path: string) => Promise<void>
   /**
    * **把官方那一份取到本机**（2026-10-09 改判）—— 云端表那两个动作（下载 / 更新）共用它。
    *
@@ -343,6 +348,13 @@ export interface PresetData {
    * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
    */
   reveal: (path: string) => Promise<void>
+  /**
+   * 同上，另两个落点（2026-10-13）：**我们自己的下载区**（`assets/bbs/…`）与
+   * **切片器目录里那份**（`user/<账号>/process/…`）。两个地方，两条命令，
+   * 只给文件名 —— 路径由后端按目录登记拼。
+   */
+  revealDelivered: (fileName: string) => Promise<void>
+  revealSlicer: (fileName: string) => Promise<void>
 }
 
   /**
@@ -836,8 +848,9 @@ export function usePresetData(importRevision = 0): PresetData {
    * 不 catch：失败要传到页面上说出来（没下载就应用、SHA 对不上这两种失败
    * 就是从这里冒上去的）。
    */
-  const apply = useCallback(async (path: string) => {
-    await api.applyActivePreset(path)
+  const apply = useCallback(async (fileName: string, path: string) => {
+    /* 用户线：**文件名与路径分开传**（后端认 origin=mine + path 那道闸，见接口注释） */
+    await api.applyActivePreset(fileName, 'mine', path)
     appStateMutated()
   }, [])
 
@@ -986,6 +999,15 @@ export function usePresetData(importRevision = 0): PresetData {
     await api.revealInFolder(path)
   }, [])
 
+  /* 同上，另两个落点（2026-10-13）：我们自己的下载区、切片器目录里那份 */
+  const revealDelivered = useCallback(async (fileName: string) => {
+    await api.revealDeliveredFile(fileName)
+  }, [])
+
+  const revealSlicer = useCallback(async (fileName: string) => {
+    await api.revealSlicerFile(fileName)
+  }, [])
+
   /*
    * **改一份预设的备注**（2026-10-07 副标题覆盖账；只有本地表读它）：写完重读整本账 ——
    * 副标题是账答的，不是前端改自己那份拷贝。写什么就是什么（空也存）；
@@ -1064,6 +1086,8 @@ export function usePresetData(importRevision = 0): PresetData {
     removeArchived,
     copyAsNew,
     reveal,
+    revealDelivered,
+    revealSlicer,
     /** 备注覆盖账（副标题）与它的写入口；归属的写入口见 `setMineMachineVersion` */
     remarks,
     setRemark,

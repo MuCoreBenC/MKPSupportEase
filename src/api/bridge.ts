@@ -185,6 +185,10 @@ export const bridgeApi: MkpApi = {
   commitImport: (items) => call('commitImport', 'commit_import', { items }),
   /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「我的文件」上做） */
   revealInFolder: (path) => call('revealInFolder', 'reveal_in_folder', { path }),
+  /* 两个落点各自的「打开所在文件夹」（2026-10-13）：我们那份（下载区）与切片器里那份 */
+  revealDeliveredFile: (fileName) =>
+    call('revealDeliveredFile', 'reveal_delivered_file', { fileName }),
+  revealSlicerFile: (fileName) => call('revealSlicerFile', 'reveal_slicer_file', { fileName }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),

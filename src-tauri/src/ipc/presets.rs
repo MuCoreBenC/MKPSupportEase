@@ -823,6 +823,79 @@ pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| Ok(Vec::new()))
 }
 
+/* ---------- 打开两个落点所在的文件夹（2026-10-13） ---------- */
+
+/// 打开**我们自己的落点**（交付区 `assets/bbs/…` 里那一份）所在的文件夹，并选中它。
+///
+/// 与「我的文件」那条（`ipc::mine::reveal_in_folder`）分得很清楚：那一条认
+/// `presets-mine/`，这一条认**目录登记**（`catalog.files[].path`）——
+/// 两条都不接受前端拼路径，只给文件名。
+///
+/// 盘上还没有这份 → `NOT_FOUND` 原话（先「下载」），**不打开一个空文件夹**。
+#[tauri::command]
+pub fn reveal_delivered_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("revealDeliveredFile", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(format!(
+                "目录里没有这份文件：{file_name}"
+            )));
+        };
+        let internal = internal_root(&app)?;
+        let target = crate::fsx::paths::resolve_in(&internal, &file.path)?;
+        if !target.is_file() {
+            return Err(AppError::not_found(format!(
+                "本机还没有 {file_name} —— 先「下载」，再来显示它"
+            )));
+        }
+        reveal_in_explorer(&app, &target)
+    })
+}
+
+/// 打开**切片器目录里那份**所在的文件夹，并选中它（`copy_to_slicer` 过去的那一份，
+/// 落点 `user/<账号>/process/…`）。
+///
+/// 只认目录里登记过的**切片器配置**（`bbs_config`）文件名 —— 前端照旧拼不出路径来。
+/// 还没复制过去、或这台机器上没有那个应用 → `NOT_FOUND` 原话（先去行上点「复制」）。
+#[tauri::command]
+pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("revealSlicerFile", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(format!(
+                "目录里没有这份文件：{file_name}"
+            )));
+        };
+        if file.kind != "bbs_config" {
+            return Err(AppError::invalid_argument(format!(
+                "{file_name} 不是切片器配置 —— 它没有「切片器目录里那一份」"
+            )));
+        }
+        let dir = slicer_process_dir().ok_or_else(|| {
+            AppError::not_found(
+                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
+            )
+        })?;
+        let target = dir.join(&file.file_name);
+        if !target.is_file() {
+            return Err(AppError::not_found(format!(
+                "{file_name} 还没复制进切片器目录 —— 先在行上点「复制」"
+            )));
+        }
+        reveal_in_explorer(&app, &target)
+    })
+}
+
+/// 打开系统文件管理器并选中这一份（两条 reveal 共用）。
+///
+/// 打开的是**系统**的文件管理器，不是我们的界面 —— 之后复制 / 压缩 / 发人随用户。
+fn reveal_in_explorer(app: &AppHandle, target: &std::path::Path) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt as _;
+    app.opener()
+        .reveal_item_in_dir(target)
+        .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
+}
+
 /* ---------- 切片器目录（复制进去才生效） ---------- */
 
 /// Bambu Studio 的**用户工艺配置目录**（`…/user/<账号>/process`）。
