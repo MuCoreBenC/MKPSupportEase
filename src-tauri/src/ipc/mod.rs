@@ -24,6 +24,9 @@
 //! 退役 —— 校准值随**用户工作副本**走（`ipc::mine::save_preset_calibration` 写进那份
 //! TOML 的 `offset_x/y/z`），落点与读写口都在用户线那一族里。
 
+/// **本机 BBS 工艺预设**（2026-10-13）：工艺页「本机工艺」那一档的清单与单份正文
+/// —— 试验场那个 dev 端点在桌面版里的等价物。
+pub mod bbs;
 pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;

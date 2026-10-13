@@ -72,46 +72,43 @@ impl SlicerKind {
 ///
 /// macOS 给的是 **.app 包**（启动时交给 `/usr/bin/open -a`，让 LaunchServices 处理
 /// "已经在跑就复用那一个实例"）；Windows 给的是 **exe**（直接起进程）。
+#[cfg(target_os = "macos")]
 fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let bundle = match kind {
-            SlicerKind::Bambu => "BambuStudio.app",
-            SlicerKind::Orca => "OrcaSlicer.app",
-            SlicerKind::System => return Vec::new(),
-        };
-        let mut out = vec![PathBuf::from("/Applications").join(bundle)];
-        if let Some(home) = std::env::var_os("HOME") {
-            out.push(PathBuf::from(home).join("Applications").join(bundle));
-        }
-        out
+    let bundle = match kind {
+        SlicerKind::Bambu => "BambuStudio.app",
+        SlicerKind::Orca => "OrcaSlicer.app",
+        SlicerKind::System => return Vec::new(),
+    };
+    let mut out = vec![PathBuf::from("/Applications").join(bundle)];
+    if let Some(home) = std::env::var_os("HOME") {
+        out.push(PathBuf::from(home).join("Applications").join(bundle));
     }
+    out
+}
 
-    #[cfg(target_os = "windows")]
-    {
-        let (dir, exe) = match kind {
-            SlicerKind::Bambu => ("Bambu Studio", "bambu-studio.exe"),
-            SlicerKind::Orca => ("OrcaSlicer", "orca-slicer.exe"),
-            SlicerKind::System => return Vec::new(),
-        };
-        let mut out = Vec::new();
-        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
-            if let Some(root) = std::env::var_os(var) {
-                out.push(PathBuf::from(root).join(dir).join(exe));
-            }
+#[cfg(target_os = "windows")]
+fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
+    let (dir, exe) = match kind {
+        SlicerKind::Bambu => ("Bambu Studio", "bambu-studio.exe"),
+        SlicerKind::Orca => ("OrcaSlicer", "orca-slicer.exe"),
+        SlicerKind::System => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(var) {
+            out.push(PathBuf::from(root).join(dir).join(exe));
         }
-        /* 用户级安装位（不需要管理员权限的那种安装器默认落这） */
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            out.push(PathBuf::from(local).join("Programs").join(dir).join(exe));
-        }
-        out
     }
+    /* 用户级安装位（不需要管理员权限的那种安装器默认落这） */
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        out.push(PathBuf::from(local).join("Programs").join(dir).join(exe));
+    }
+    out
+}
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = kind;
-        Vec::new()
-    }
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn slicer_candidates(_kind: SlicerKind) -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// 那个应用在这台机器上的确切位置（找不到 = `None`，**不猜**）

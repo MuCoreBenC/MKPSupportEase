@@ -1658,6 +1658,54 @@ export interface PostProcessCommand {
   reason?: string
 }
 
+/* ---------- 本机 BBS 目录（工艺页「本机工艺」那一档，2026-10-13） ---------- */
+
+/**
+ * 本机 BBS（Bambu Studio / OrcaSlicer…）工艺预设目录里的一项。
+ *
+ * 字段名与那批 json / 试验场那个只读端点**逐字一致**（`snake_case` 照旧）——
+ * 页面那边已经按这套名字解析（`app/bbs/bbsSource.ts`），在生产契约里再翻译一次
+ * 只会多一处能漂的东西。
+ */
+export interface BbsLocalEntry {
+  /** `user`（自己另存的）/ `system`（出厂那批） */
+  scope: 'user' | 'system'
+  /** 账号目录名；系统层那一档是 `null` */
+  uid: string | null
+  file: string
+  /** 文件名里写的那个名字（读不出来就是去掉 `.json` 的文件名） */
+  name: string
+  /** 父预设名（BBS 的继承链靠它） */
+  inherits: string | null
+  /** BBS 自己就有两种写法（字符串 `"false"` 与布尔 `false` 都出现过）—— 照抄，不归一 */
+  instantiation: string | boolean | null
+  compatible_printers: string[] | null
+  from: string | null
+  /** 修改时间（毫秒） */
+  mtime: number
+  size: number
+  /** 这份 json 坏了（解析失败的原话）—— 也要列出来，让界面标灰，而不是悄悄少一项 */
+  broken: string | null
+}
+
+/**
+ * 「本机有没有 BBS、有哪几份」。
+ *
+ * **读不到不是错误**：`available: false` + 一句人话（`reason`）说的是事实 ——
+ * 这台机器上没装、或者装完还没跑过一次。界面照实说，不静默退到一份陈旧快照
+ * （那正是这一页不打包那 285 份预设快照的理由）。
+ */
+export interface BbsLocalTree {
+  available: boolean
+  /** 命中的是哪个应用（`BambuStudio` / `BambuStudioBeta`） */
+  app: string | null
+  /** 这次读的是哪棵树（系统层在就用它，否则用户层） */
+  root: string | null
+  user: BbsLocalEntry[]
+  system: BbsLocalEntry[]
+  reason: string | null
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -1957,6 +2005,27 @@ export interface MkpApi {
    * （先「下载」）/ 目标已有同名文件（不覆盖 —— 那份可能被用户在切片器里改过）。
    */
   copyToSlicer(fileName: string): Promise<void>
+
+  /**
+   * 本机 BBS 目录里现在有哪几份工艺预设（用户层 + 系统层，一次读全）—— 工艺页左边
+   * 那个「本机工艺」档的清单。
+   *
+   * 为什么只能现读：那份清单住在**用户的切片器里**（他刚在 BBS 里另存一份，回来
+   * 重扫就该看见），而本仓不打包那 285 份预设快照（作者裁决 §6-2）。
+   *
+   * 读不到不是错误：`available: false` + `reason` 是**事实**（没装 / 没跑过），
+   * 界面照实说 —— 那与"读失败"是两件事。
+   */
+  getBbsPresets(): Promise<BbsLocalTree>
+
+  /**
+   * 读其中一份的**原文**（JSON 文本）。解析交给前端：坏文件要由前端照实报错，
+   * 不在这里被吞掉。
+   *
+   * 路径不由前端拼：只能给 `scope` + `uid` + `file` —— `file` 必须是**单个 `.json`
+   * 文件名**（不接受任何路径），`uid` 必须在扫到的账号目录里。
+   */
+  readBbsPreset(scope: 'user' | 'system', uid: string | null, file: string): Promise<string>
 
   /** 预设仓库的清单（含交付身份 / 大小 / 修改时间） */
   getPresetFiles(): Promise<PresetFileInfo[]>

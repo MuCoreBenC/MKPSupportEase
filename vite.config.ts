@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { bbsFs } from './tools/dev-server/bbsFs.mjs'
 import { mkpAssets } from './tools/assets/plugin.mjs'
 
 /*
@@ -16,11 +15,13 @@ import { mkpAssets } from './tools/assets/plugin.mjs'
  */
 
 /*
- * 三个插件：react()、bbsFs() 与随包资产流水线 mkpAssets()。
+ * 两个插件：react() 与随包资产流水线 mkpAssets()。
  *
- * `bbsFs()` 是 BBS 预设页的数据源 —— `GET /api/bbs/presets` 实时读本机 BBS 目录
- * （本仓不打包那 285 个预设快照，见 C15-A40-PORT-PLAN §6-2）。它**只读**、只在 serve 期
- * 存在（dev 与 preview 都挂，验收走的是 preview），`vite build` 的产物里没有它。
+ * ★ 2026-10-13：原来这里还挂着 `bbsFs()`（`/api/bbs/presets` + `/api/bbs/preset`，
+ *   只在 serve 期实时读本机 BBS 目录）。**它退役了** —— 工艺页那个「本机工艺」档改走
+ *   IPC（`src-tauri/src/ipc/bbs.rs`：打包后的桌面版没有 dev server，只有 IPC 一条路），
+ *   浏览器预览那一边由 mock 给一份演示集合（`src/api/mockServer/bbsLocal.ts`）。
+ *   试验场那份还留着 —— 那边的预览壳没有 IPC 可走，它仍然是那边唯一的数据源。
  *
  * 试验场那份还挂着 calibFs() 与 curvesFs() 两个 dev-server 插件 —— 它们提供
  * `/__calib/write`、`/__curves/write` 两个**无鉴权的写盘端点**，是标定工作台与
@@ -65,7 +66,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), bbsFs(), mkpAssets({ workbench: withWorkbench })],
+    plugins: [react(), mkpAssets({ workbench: withWorkbench })],
 
     build: {
       rollupOptions: { input },

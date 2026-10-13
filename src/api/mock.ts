@@ -25,6 +25,8 @@ import {
   allMachines,
   allPlates,
   allPresetFiles,
+  bbsLocalTree,
+  bbsPresetText,
   catalogRegistry,
   copyToSlicerIn,
   localFileIds,
@@ -38,6 +40,7 @@ import {
   resolveParams,
   resolveVersionFiles,
   slicerCopied,
+  slicerPresetText,
 } from './mockServer'
 
 /**
@@ -1408,6 +1411,23 @@ export const mockApi: MkpApi = {
     copyToSlicerIn(fileName)
   },
 
+  /*
+   * 本机 BBS 目录（工艺页「本机工艺」那一档）：浏览器里没有盘，给一份**演示集合**
+   * （6 份：链根 + 两个抽象中间层 + 三台机的标准档 + 一份用户档）。
+   * 清单与正文都从同一份数据推出来 —— 不会出现"列了却读不出来"。见 `mockServer/bbsLocal.ts`。
+   */
+  async getBbsPresets() {
+    return bbsLocalTree
+  },
+
+  async readBbsPreset(scope, uid, file) {
+    const text = bbsPresetText(scope, uid, file)
+    if (text === null) {
+      throw new Error(`演示集合里没有这一份：${scope} / ${uid ?? '（无账号）'} / ${file}`)
+    }
+    return text
+  },
+
   async getPresetFiles() {
     return allPresetFiles()
   },
@@ -1614,8 +1634,17 @@ export const mockApi: MkpApi = {
     }))
   },
 
-  /** 浏览器里没有下载区，也就没有"已经下载的文件"可读：如实拒，不返回空串充数 */
-  async readDownloadedText() {
+  /**
+   * 浏览器里没有下载区，也就没有"已经下载的文件"可读 —— **一件一件照实说**：
+   *
+   * - **切片器配置那几份**（`bbs_config`）：有演示正文（`mockServer/slicerPreset.ts`）——
+   *   工艺页左侧默认停在「MKP 工艺」那一档，那一档不给正文就是个空壳；
+   * - 别的（MKP 的 toml 那些）：如实拒，不返回空串充数 —— 那是"官方原件"，
+   *   造一份等于编造"官方发过这份字节"。
+   */
+  async readDownloadedText(fileName) {
+    const demo = slicerPresetText(fileName)
+    if (demo !== null) return demo
     throw new NotImplementedError(
       'readDownloadedText',
       '浏览器预览里没有下载区，读不到这份的正文 —— 用桌面版就能看',

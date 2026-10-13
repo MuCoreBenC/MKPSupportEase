@@ -265,6 +265,11 @@ export const bridgeApi: MkpApi = {
   copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 
+  /* ——— 本机 BBS 目录（2026-10-13）：工艺页「本机工艺」那一档 ——— */
+  getBbsPresets: () => call('getBbsPresets', 'get_bbs_presets'),
+  readBbsPreset: (scope, uid, file) =>
+    call('readBbsPreset', 'read_bbs_preset', { scope, uid, file }),
+
   /* ——— 报告页：后处理执行报告与历史（读 gcode_history 的真账 + 一处导出写）——— */
   getReportList: () => call('getReportList', 'get_report_list'),
   getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),

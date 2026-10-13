@@ -37,4 +37,6 @@ export {
   localFileIds,
   slicerCopied,
 } from './localFiles'
+export { bbsLocalTree, bbsPresetText } from './bbsLocal'
+export { slicerPresetText } from './slicerPreset'
 export { reportDetail, reportExportPaths, reportExportPlan, reportSummaries } from './reports'

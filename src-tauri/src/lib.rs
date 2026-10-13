@@ -191,6 +191,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
         ipc::postprocess::answer_post_process_mismatch,
+        // 工艺页「本机工艺」那一档：读本机 BBS 目录（只读；见 `ipc/bbs.rs`）
+        ipc::bbs::get_bbs_presets,
+        ipc::bbs::read_bbs_preset,
         // 预设页（A41）的真后端。读客户端自己的数据根（`appDataDir/presets`）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,
@@ -308,6 +311,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
         ipc::postprocess::answer_post_process_mismatch,
+        // 工艺页「本机工艺」那一档：读本机 BBS 目录（与上面那份清单一字不差）
+        ipc::bbs::get_bbs_presets,
+        ipc::bbs::read_bbs_preset,
         // 客户端命令：**两份清单一字不差**（漏一份就是「原生机能用、工作台构建不能用」）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,

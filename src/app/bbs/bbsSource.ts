@@ -163,7 +163,7 @@ export function resolveTarget(
  * key 是这一项的稳定标识（同名预设可能出现在多个账号目录下，所以带 uid 与文件名）。
  * `extra` 是导入进来的那几份：它们不在任何目录里，内容直接带在身上。 */
 export function normalizeList(
-  { user = [], system = [] }: BbsListRaw = {},
+  { user = [], system = [] }: Partial<BbsListRaw> = {},
   extra: BbsPresetItem[] = [],
 ): BbsPresetItem[] {
   const seed = [

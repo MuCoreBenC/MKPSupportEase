@@ -113,25 +113,18 @@ export interface BbsPresetDoc {
  */
 export type BbsScope = 'user' | 'system' | 'imported' | 'mkp'
 
-/** 清单里一项的原始形态（本机目录端点与「导入的」都归一成这个） */
-export interface BbsListEntry {
-  name?: string
-  file: string
-  uid?: string | null
-  inherits?: string | null
-  instantiation?: string | boolean | null
-  compatible_printers?: BbsValue | null
-  broken?: string | null
-  mtime?: number
-}
-
-export interface BbsListRaw {
-  user?: BbsListEntry[]
-  system?: BbsListEntry[]
-  available?: boolean
-  reason?: string
-  root?: string
-}
+/*
+ * 清单里一项 / 一份清单的原始形态 —— **定义在 `src/api/contract.ts`**
+ * （那两条 IPC 的返回形状：`BbsLocalEntry` / `BbsLocalTree`）。
+ *
+ * 这里只把名字转出去给页面用：名字照旧（`BbsListEntry` / `BbsListRaw`），
+ * 于是 `bbsSource` 那些解析代码一行都不用改；而"形状只有一处"这件事也守住了 ——
+ * 契约改了这里跟着改，不会出现两份能各自漂的定义。
+ */
+export type {
+  BbsLocalEntry as BbsListEntry,
+  BbsLocalTree as BbsListRaw,
+} from '../../api/contract'
 
 /** normalizeList 的产物：清单里一项，带认出来的机型与可选性 */
 export interface BbsPresetItem {

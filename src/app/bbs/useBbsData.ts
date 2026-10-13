@@ -9,20 +9,23 @@
  *     **不 import，运行时 fetch**：registry 一份 327 KB，进 bundle 不划算。
  *
  *   预设清单与内容
- *     只有一处：serve 期端点 `/api/bbs/presets`（读本机 BBS 目录，实时；见
- *     `tools/dev-server/bbsFs.mjs`，dev 与 preview 都挂）。
+ *     走 **IPC**：`api.getBbsPresets()`（本机有哪几份）+ `api.readBbsPreset(scope, uid, file)`
+ *     （单份正文，按继承链**按需取**）。真机上那两条由 `src-tauri/src/ipc/bbs.rs` 现读
+ *     本机 BBS 目录（用户层 + 系统层）；浏览器预览里由 mock 给一份演示集合
+ *     （`api/mockServer/bbsLocal.ts`）。
  *     本仓不打包那 285 个预设快照（作者裁决 §6-2），所以**没有退档**：读不到就是
  *     `sourceMode: 'none'` 加一句理由，页面照实说，不拿一份陈旧快照充数。
  *
- *     随之拿掉的是「按静态路径取单份预设」那条路 —— 那条路上踩过 `encodeURIComponent`
- *     把 `@BBL` 编成 `%40` 的坑（sirv 按规范不解 reserved 字符）。现在单份预设一律走
- *     `/api/bbs/preset?scope=&uid=&file=`，参数交给 URLSearchParams 编，这类坑不复存在。
+ * # 为什么**现在**走 src/api 了（2026-10-13 改的口径）
  *
- * # 为什么不走 src/api
+ * 原来这一层直连试验场那个 dev 端点（`tools/dev-server/bbsFs.mjs` 的
+ * `/api/bbs/presets` + `/api/bbs/preset`）。那一版**只在 serve 期存在**，于是打包后的
+ * 桌面版里「本机工艺」这一档永远是空的 —— 它没有 dev server。那一档要真能用只有 IPC
+ * 一条路；而契约里那两条命令的返回形状与端点**逐字段一致**，所以这里换的只是"从哪儿取"，
+ * 下面的解析与缓存一行没动。端点随之从产品仓退役（试验场那份留着给自己用）。
  *
- * 那一层是「MKP 自己的业务数据」的契约。BBS 这批是**另一个仓库的提取产物**，
- * 形状由 Bambu Studio 决定、我们只读不写，且 278 份系统预设要按继承链**按需取**。
- * 把它塞进契约只会让契约多出一堆永远不会有后端实现的方法。
+ * 「按静态路径取单份预设」那条路早就拿掉了 —— 它踩过 `encodeURIComponent` 把 `@BBL`
+ * 编成 `%40` 的坑（sirv 按规范不解 reserved 字符）。现在单份正文的参数由 IPC 那层收。
  *
  * # 文档缓存为什么用 ref + 计数器，而且键上带来源
  *
@@ -47,6 +50,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api, errorText } from '../../api'
 import { PRINTER_BY_MACHINE_ID, normalizeList } from './bbsSource'
 import type {
   BbsDefaultsFile,
@@ -92,13 +96,18 @@ async function getJSON<T>(path: string): Promise<T> {
 }
 
 /**
- * 单份预设的 URL。只有本机目录这一路：查询参数由端点用 URLSearchParams 解，
- * 文件名里的 `@BBL` / 空格 / 中文都交给它编，这里不自己拼路径。
+ * 单份预设的**正文**（原文读回来，解析在这儿）。
+ *
+ * 路径不在前端拼：`scope` / `uid` / `file` 三个字段就是 IPC 那层的边界，文件名里的
+ * `@BBL` / 空格 / 中文都不必在这里转义（老路子上踩过 `%40` 的坑）。
+ *
+ * 只有本机目录那两档要现读 —— 导入的与我们自己的那几份内容就在身上，调用点先一步收下了。
  */
-function presetUrl(item: BbsPresetItem): string {
-  const q = new URLSearchParams({ scope: item.scope, file: item.file })
-  if (item.uid) q.set('uid', item.uid)
-  return `/api/bbs/preset?${q}`
+async function fetchDoc(item: BbsPresetItem): Promise<BbsPresetDoc> {
+  if (item.scope !== 'user' && item.scope !== 'system') {
+    throw new Error(`这一份不带正文：${item.scope} / ${item.file}`)
+  }
+  return JSON.parse(await api.readBbsPreset(item.scope, item.uid, item.file)) as BbsPresetDoc
 }
 
 /**
@@ -213,7 +222,9 @@ export function useBbsData(): BbsData {
   const [icons, setIcons] = useState<Record<string, string>>({})
   const [sync, setSync] = useState<BbsSyncInfo | null>(null)
 
-  const [raw, setRaw] = useState<BbsListRaw>({})
+  /* 只留那两批（本机目录的两层）—— 契约那份是**整棵树的报告**（含 available / reason），
+     读到的树才有值，读不到就是一个空壳，所以这一格按 Partial 收 */
+  const [raw, setRaw] = useState<Partial<BbsListRaw>>({})
   const [sourceMode, setSourceMode] = useState<BbsSourceMode>('none')
   const [sourceRoot, setSourceRoot] = useState('')
   const [sourceNote, setSourceNote] = useState('')
@@ -259,14 +270,20 @@ export function useBbsData(): BbsData {
     return () => { alive = false }
   }, [])
 
-  /* 清单只有一处来源：serve 期的本机目录端点。scanNonce 变了就重来一遍（「重扫本机」） */
+  /* 清单只有一处来源：本机 BBS 目录（IPC 现读）。scanNonce 变了就重来一遍（「重扫本机」） */
   useEffect(() => {
     let alive = true
     void (async () => {
       setLoading(true)
       const started = performance.now()
       let live: BbsListRaw | null = null
-      try { live = await getJSON<BbsListRaw>('/api/bbs/presets') } catch { /* 没起服务器就是这条路 */ }
+      let why = ''
+      try {
+        live = await api.getBbsPresets()
+      } catch (err) {
+        /* 这一条真出错时（没装 BBS 不是错误，那种情况走 available:false）照实说 */
+        why = `读本机 BBS 目录失败：${errorText(err)}`
+      }
       if (!alive) return
 
       /* 手点的那一次重扫：把那只 ↻ 补到最短时长（理由见 RESCAN_MIN_MS） */
@@ -282,11 +299,11 @@ export function useBbsData(): BbsData {
         setSourceRoot(live.root ?? '')
         setSourceNote('')
       } else {
-        /* 端点说得出理由就用它的（「没装 BBS」时最有用）；说不了就是没起服务器 */
+        /* 命令说得出理由就用它的（「没装 BBS」时最有用）；说不出来就是这一次真读失败了 */
         setRaw({})
         setSourceMode('none')
         setSourceRoot('')
-        setSourceNote(live?.reason || '没起 dev / preview 服务器，`/api/bbs/presets` 取不到')
+        setSourceNote(live?.reason || why || '读不到本机 BBS 目录')
       }
       /* 换来源之后单份预设的 URL 也变了 —— 靠缓存键上的来源前缀区分，不清缓存（见文件头）。
          重扫时这一句照样执行，但文档缓存没失效（键里没有重扫次数了），重算出来的数一模一样，
@@ -338,9 +355,9 @@ export function useBbsData(): BbsData {
     await Promise.all(todo.map(async (name) => {
       const item = presetByName.get(name)
       if (!item) return
-      /* 导入进来的那几份内容就在身上，不用发请求 */
+      /* 导入进来的那几份内容就在身上，不用现读 */
       if (item.doc) { fresh.set(keyOf(name), item.doc); return }
-      try { fresh.set(keyOf(name), await getJSON<BbsPresetDoc>(presetUrl(item))) }
+      try { fresh.set(keyOf(name), await fetchDoc(item)) }
       catch { fresh.set(keyOf(name), null) }
     }))
     for (const [key, doc] of fresh) docs.current.set(key, doc)
