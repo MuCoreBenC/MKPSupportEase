@@ -103,7 +103,19 @@ const calibModels: CalibModel[] = [
   },
 ]
 
-/** 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里） */
+/** 真机用户根里那一格的相对前缀（后端 `runtime::local` 的 `LOCAL_DIR` 同一个值） */
+const LOCAL_PREFIX = 'presets-local/'
+
+/**
+ * 浏览器演示用的使用中指针（内存态，刷新即还原；真数据在 Rust 侧 run/ 状态文件里）。
+ *
+ * ★★ 2026-10-14（作者）：**初值必须是 `null`** —— 它只能由真实的「使用 / 应用」动作改。
+ *
+ * 原来这里写死指向某一份，后果有两条，都是"演示不像真机"：
+ *   ① 用户点别的份之前，"在用"已经在某一份上了 —— 而真机首次打开是**没有**在用的；
+ *   ② 探针复现路径不稳定（上一轮探针反复翻车就是这个：`mockActive` 被前面的动作改过，
+ *      下一次跑就落在别的状态上）。**初值 null ⇒ 每次启动都是同一个起点**。
+ */
 let mockActive: ActivePreset | null = null
 
 /** 浏览器演示用的数据源覆盖（内存态，刷新即还原；真数据在 Rust 侧 run/preset-source.json） */
@@ -1958,8 +1970,36 @@ export const mockApi: MkpApi = {
         `浏览器预览里没有 ${fileName} 的字节，应用云端预设要用桌面版（先在桌面版里下载一份）`,
       )
     }
+    /*
+     * ★★ 2026-10-14：按**真实后端的三条闸**校验（`ipc/catalog.rs::apply_active_preset`
+     * 的 `ActiveOrigin::Local` 那一支），不能再"存下来就完事" —— 假后端里能过、
+     * 真机被拒，就会把"路不对"误判成"界面点不动"（作者 2026-10-14 那次正是如此）。
+     *
+     *   ① 必须给路径（后端 `path.ok_or_else`：用自己那份要给出它在用户根里的路径）
+     *   ② 只认用户根那一格（后端 `check_local_prefix`：`presets-local/` 开头 + 不许穿越）
+     *   ③ 必须是一份 MKP 预设（后端 `kind_of`：`.toml`）
+     * 加上原来的"文件得在、内容得读得出来"。
+     */
+    if (path === undefined || path === '') {
+      throw new Error('用自己那份要给出它在用户根里的路径（presets-local/…）')
+    }
+    /* ② 前缀闸：与后端同一句话的形状（`只读用户自己的预设（要 … 开头，给的是 …）`） */
+    if (!path.startsWith(LOCAL_PREFIX)) {
+      throw new Error(
+        `只读用户自己的预设（要 ${LOCAL_PREFIX}… 开头，给的是 ${path}）`,
+      )
+    }
+    if (path.slice(LOCAL_PREFIX.length).split('/').includes('..')) {
+      throw new Error(`路径里不许有 .. —— 给的路径是 ${path}`)
+    }
+    /* ③ 类型闸（后端 `kind_of`：只认 `.toml`；大小写不敏感，但用户文件里只认预设） */
+    if (!fileName.toLowerCase().endsWith('.toml')) {
+      throw new Error(
+        `${fileName} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用`,
+      )
+    }
     const hit = mockLocal.find((f) => f.path === path)
-    if (hit === undefined) throw new Error(`用户目录里没有 ${path ?? '(没给路径)'}`)
+    if (hit === undefined) throw new Error(`用户目录里没有 ${path}`)
     /* 第九层：读不出来的那份**不许应用**（真机入口闸会拒；消息形状对齐后端） */
     if (hit.state === 'unreadable') {
       throw new Error(

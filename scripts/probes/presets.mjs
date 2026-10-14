@@ -944,12 +944,14 @@ if (!(myFacts['基于'] ?? '').includes('快拆版6月以前')) {
  * 早先取到的 `myTr` 句柄已经失效（点它会超时）。
  */
 /*
- * ★★ 2026-10-14：**先切到另一份**（`A1-fast.toml`），再点这一份的「使用」。
+ * ★★ 2026-10-14：**先切到另一份**（`A1-fast.toml` 与这一份**同 combo**：都是 A1/FAST），
+ * 再点这一份的「使用」—— 这一步同时是"同 combo 换一份"的判据：
  *
- * 原来直接点 `A1 涂胶.toml` 的「使用」—— 而它在这一步**已经是"在用"**（同一份 mock
- * 带血统之后，前面那几手已经把它设成了使用中），在用态的操作列是一枚灰字 **不是按钮**
- * ⇒ 那句点击永远等不到。这一节的立意是"点使用 → 那一行变成在用"，所以**得先让它不是
- * 在用**，才谈得上"点一下变成在用"。
+ *   · 两条腿都走 `activateFile`（按文件）：若哪条还按 combo 判等，
+ *     `A1 涂胶.toml` 那次点击会被直接退货，下面「在用」那条判据就红；
+ *   · 也顺带证了"在用只能有一份"（灰字只出现在最后点的那一行）。
+ *
+ * 假后端的在用指针**初值是空**（`mockActive = null`），所以起点是确定的。
  */
 await page
   .locator('main tbody tr[data-rowkey]')
@@ -979,6 +981,25 @@ const afterApply = (await actions()).find((r) => r.name.includes('A1 涂胶.toml
 console.log(`[本地那份] 使用之后操作列：${afterApply?.action ?? '(没有)'}`)
 if (!(afterApply?.action ?? '').includes('在用')) {
   problems.push(`使用之后那一行该变成「在用」，实测「${afterApply?.action}」`)
+}
+/*
+ * ★★ 2026-10-14 新增：**同 combo 换一份**（作者报的那个 bug 的判据）。
+ *
+ * `A1-fast.toml` 与 `A1 涂胶.toml` 同属 `A1 / FAST`。上面连着点了两次「使用」：
+ * 先 `A1-fast.toml`、再 `A1 涂胶.toml`。若"使用"那条路还按 **combo** 判等，
+ * 第二次会被直接退货 ⇒ 在用仍停在 `A1-fast.toml`、而 `A1 涂胶.toml` 那边没有「在用」。
+ *
+ * 两条判据一起看："在用"必须**恰好一行**，且是**最后点的那一份**。
+ */
+const allActions = await actions()
+const inUse = allActions.filter((r) => r.action.includes('在用'))
+console.log(`[同 combo 换一份] 标「在用」的行：${inUse.map((r) => r.name).join(' | ') || '(没有)'}`)
+if (inUse.length !== 1) {
+  problems.push(`「在用」该恰好一行，实测 ${inUse.length} 行：${inUse.map((r) => r.name).join(' | ')}`)
+} else if (!inUse[0].name.includes('A1 涂胶.toml')) {
+  problems.push(
+    `同 combo 换一份要真的换过去（点在用那份该是最后点的 A1 涂胶.toml），实测「${inUse[0].name}」`,
+  )
 }
 await page.screenshot({ path: `${shotDir}/presets-local-apply.png` })
 
@@ -1298,6 +1319,111 @@ else if (removeItem.disabled) {
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
+/*
+ * ★★ 2026-10-14 新增两条（作者点名）：
+ *
+ * ① **点行本身不会切换** —— 只有点「使用」才切。
+ *    在预设页本地表里：先看清在用是哪一份，然后**点另一行的行体**（不是按钮），
+ *    再用**底账**（那枚「在用」灰字）复核：一点没变。
+ *    为什么这条重要：表格与抽屉是两套交互，抽屉那边点行已改成"什么都不做"
+ *    （`PresetPickerDrawer` 三条规则），表格这边若还"点哪行就切"，两处就不一致了。
+ *
+ * ② **点了不给用的那份，在用必须保持原样** —— 失败（读不出来 / 不是预设 / 路径不合法）
+ *    不许把在用改成它。这里用**读不出来的那一份**（`坏了的涂胶.toml`：TOML 语法坏，
+ *    真机与假后端都拒）：它有「使用」可点吗？没有（第九层不给按钮）——
+ *    所以这条用"它那一行没有可点的使用"来表达，与后端"拒"是同一个结果。
+ */
+{
+  const before = (await actions()).filter((r) => r.action.includes('在用'))
+  await page
+    .locator('main tbody tr[data-rowkey]')
+    .filter({ hasText: 'A1-standard.toml' })
+    .first()
+    .click()
+  await page.waitForTimeout(600)
+  const after = (await actions()).filter((r) => r.action.includes('在用'))
+  const key = (rs) => rs.map((r) => r.name).join('|')
+  console.log(`[点行不切] 点前/点后在用：${key(before) || '(无)'} → ${key(after) || '(无)'}`)
+  if (key(before) !== key(after)) {
+    problems.push('点行不该切换预设 —— 只有「使用」才切（表格与抽屉要同一个口径）')
+  }
+
+  const unreadable = (await actions()).find((r) => r.name.includes('坏了的涂胶'))
+  console.log(`[拒用] 读不出来的那一份操作列：${unreadable?.action ?? '(没有这一行)'}`)
+  if ((unreadable?.action ?? '').includes('使用')) {
+    problems.push('读不出来的那份不该给「使用」（后端会拒，界面就不该摆一颗能点的）')
+  }
+}
+
+/*
+ * ★★ 2026-10-14 新增（作者点名的第三点）：**应用失败时，在用必须保持不变**。
+ *
+ * 上面那条「拒用」判的是**界面层**（坏文件不给按钮）—— 那是"用户点不到"，
+ * *不等于*"点了也不会改底账"。这一条守的是**行为层**：直接对假后端发那几个
+ * 必然失败的调用（真机同一条闸：路径前缀 / 类型 / 文件在不在），
+ * 再看底账（页面那枚「在用」）有没有动。
+ *
+ * 用的闸与后端 `apply_active_preset` 逐条对齐（见 mock 里那段注释）：
+ *   ① 路径不合法（不在 `presets-local/` 下）
+ *   ② 不是 .toml
+ *   ③ 文件不存在
+ * 三条都必须**如实失败**，而且**底账一行不变**。
+ */
+{
+  const keyOf = async () => {
+    const rs = (await actions()).filter((r) => r.action.includes('在用'))
+    return rs.map((r) => r.name).join('|')
+  }
+  const beforeFail = await keyOf()
+  const results = await page.evaluate(async () => {
+    /*
+     * 直接 import 假后端那个模块（Vite 的 dev/preview 都认这个路径）。
+     * ★ 不为探针往生产代码加 `window.__xxx` 钩子 —— 那是给探针开的门，
+     *   长期会成为"只有探针用"的接口。
+     */
+    let api = null
+    try {
+      const mod = await import('/src/api/mock.ts')
+      api = mod.mockApi
+    } catch {
+      return null
+    }
+    if (api === undefined || api === null) return null
+    const attempt = async (label, fn) => {
+      try {
+        await fn()
+        return { label, ok: true }
+      } catch (e) {
+        return { label, ok: false, msg: String(e?.message ?? e) }
+      }
+    }
+    return [
+      await attempt('路径不合法', () =>
+        api.applyActivePreset('A1-fast.toml', 'local', 'delivery/mkp/presets/A1-fast.toml'),
+      ),
+      await attempt('不是 TOML', () =>
+        api.applyActivePreset('Process_0.2mm.json', 'local', 'presets-local/Process_0.2mm.json'),
+      ),
+      await attempt('文件不存在', () =>
+        api.applyActivePreset('不存在.toml', 'local', 'presets-local/不存在.toml'),
+      ),
+    ]
+  })
+  if (results === null) {
+    console.log('[失败保持] 假后端没暴露给探针，这一条跳过（不影响其它判据）')
+  } else {
+    for (const r of results) {
+      console.log(`[失败保持] ${r.label}：${r.ok ? '**却成功了**' : '如实拒 —— ' + (r.msg ?? '').slice(0, 60)}`)
+      if (r.ok) problems.push(`应用失败这条（${r.label}）该如实拒，实测成功了`)
+    }
+    const afterFail = await keyOf()
+    console.log(`[失败保持] 三次失败前后，在用：${beforeFail || '(无)'} → ${afterFail || '(无)'}`)
+    if (beforeFail !== afterFail) {
+      problems.push('应用失败时在用必须保持原样（三次失败调用把底账改掉了）')
+    }
+  }
+}
+
 /* ④ 改名不断在用 + 改过的内容跟着走：先用「编辑文件」把正文改一行并保存，
       然后改名 —— 「在用」不该断；再开「编辑文件」，改过的那行还在。
       ★ 2026-10-13：原版走"展开详情里那颗「改这份」"留一份草稿，那个抽屉已经不在。
@@ -1404,6 +1530,19 @@ const copied = afterCopy.find((r) => r.name.includes('copy.toml'))
 const original = afterCopy.find((r) => r.name.includes('A1 涂胶-高速版.toml'))
 console.log(`\n[第十一层 · 复制] 提示条：${copyNote}`)
 console.log(`[第十一层 · 复制] 新的一份：${copied?.name ?? '(没出现)'}`)
+/*
+ * ★★ 2026-10-14 新增：**复制不该动"在用"**（真机 `copy_as_new` 明文写着"一个状态都不碰"）。
+ * 复制的语义是"多出一份独立文件"，不是"换去用它"—— 底账变了就是错的。
+ */
+{
+  const stillInUse = (await actions()).filter((r) => r.action.includes('在用'))
+  console.log(
+    `[第十一层 · 复制] 复制后在用：${stillInUse.map((r) => r.name).join(' | ') || '(没有)'}`,
+  )
+  if (stillInUse.length > 1) {
+    problems.push(`复制之后「在用」不该多出来（实测 ${stillInUse.length} 行）`)
+  }
+}
 if (copied === undefined) {
   problems.push('复制之后新的一份该出现在表里（名字是自动起的 `X copy.toml`）')
 } else if (copied.action.includes('在用')) {
