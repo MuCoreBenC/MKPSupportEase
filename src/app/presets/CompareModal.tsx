@@ -344,7 +344,7 @@ export default function CompareModal({
       subtitle="并排看 2~3 份，值可以直接改"
       size="lg"
       host={host}
-      closeOnScrim={dirtyTotal === 0}
+      /* 点遮罩一律不关（2026-10-15 作者定的全站口径）—— 关走 Esc 或页眉那颗 */
       closeTitle={dirtyTotal === 0 ? '关掉对比台' : '有未保存的改动 —— 先保存或放弃'}
       onClose={onClose}
       footer={footer}

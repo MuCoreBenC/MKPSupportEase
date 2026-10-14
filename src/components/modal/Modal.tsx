@@ -59,8 +59,9 @@ export interface ModalProps {
    */
   bodyFill?: boolean
   /**
-   * 点遮罩关不关。**有未保存内容的框要传 false** ——
-   * 手滑点一下就把人家改的东西丢了是不可接受的。
+   * 点遮罩关不关。**默认不关**（作者 2026-10-15：「所有页面的模态框都不应该点击背景就关掉，
+   * 可以用 esc」）—— 遮罩是背景，不是取消键：手滑点一下就把框收了（有草稿的那种更糟）。
+   * 关有两条明路：**Esc** 与页眉/页脚那颗关闭。传 `true` 才恢复"点背景关"。
    */
   closeOnScrim?: boolean
   /**
@@ -98,7 +99,7 @@ export default function Modal({
   footer,
   size = 'md',
   bodyFill = false,
-  closeOnScrim = true,
+  closeOnScrim = false,
   host = null,
   closeTitle,
   hideClose = false,

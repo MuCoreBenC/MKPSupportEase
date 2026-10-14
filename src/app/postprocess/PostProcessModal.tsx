@@ -34,8 +34,8 @@
  * 所以成功那一刻它常常先空着；跑着 / 问句那两扇只有开场事实里有的那几格。
  */
 
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
 import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
@@ -51,6 +51,25 @@ import s from './PostProcessModal.module.css'
 /* 顶栏那一条的高度按平台来（与 `TopTabs` 同一对 token）：拖窗带要正好铺在它上面 */
 const PLATFORM = detectPlatform()
 
+/**
+ * 这一屏"整段演示"的最短时长（ms）—— **从窗口打开算**（`view.sinceMs`）。
+ * 作者 2026-10-14 先要「起码 3 秒」，随即收回：「不用限制 3 秒，限制 2 秒或者 1.5，
+ * 反正是要动画自然均匀」——**均匀比总时长重要**，这一条只是个下限兜底，
+ * 不必为了凑时长把快跑拖成慢跑。1.5 秒 ≈ 观感上"看清了它走过去"。
+ */
+const MIN_SHOW_MS = 1500
+/** 等条子走完的兜底（ms）：条子万一没报上来（`onSettled` 丢了），到点也得切，不许卡住 */
+const SETTLE_MAX_MS = 8000
+
+/**
+ * 收尾那一下的"渐隐"时长（ms）—— 主件那个 WAAPI effect 用它（`el.animate(..., { duration: LEAD_FADE_MS })`）。
+ *
+ * 作者 2026-10-14：「感觉 100% 的时候消失得太突然了，没有渐隐渐现」——
+ * 收尾窗口到点不再"啪"地换：hero 先淡出（这么久），淡完才真换结果态；
+ * 结果块自己的淡入由 `.leadIn`（220ms）负责。
+ */
+const LEAD_FADE_MS = 160
+
 export interface PostProcessModalProps {
   /** 那一趟的现况（`usePostProcessRun` 给的那一份；App 拿着它，后台那条窄条也要） */
   view: PostProcessRunView
@@ -59,6 +78,118 @@ export interface PostProcessModalProps {
 }
 
 /* ---- 小工具 ---- */
+
+/**
+ * 双击的判定门槛。**不用系统的 `dblclick` 事件** —— 那个跟系统设置的"双击速度"走，
+ * 有人调得慢一点，连击就被吞掉（作者 2026-10-15：「有时候连击感觉切换不了，会吞掉双击的」）。
+ * 这里自己判：两次 `pointerup` 间隔 < `DOUBLE_TAP_MS`、且落点相距 < `DOUBLE_TAP_SLOP` 就算一次双击。
+ */
+const DOUBLE_TAP_MS = 600
+const DOUBLE_TAP_SLOP = 24
+
+/**
+ * "弹上来"那套关键帧（先陷下去 → 弹过头一点 → 落位）—— 作者 2026-10-15：
+ * 「我双击切换的时候，那个新的应该也弹上来的感觉」→「没有被按压下去跳动上来的」。
+ * 与 `usePressFlash` 一个路子：**JS 驱动**（`element.animate()`），不走 CSS 级联。
+ */
+const POP_KEYS: Keyframe[] = [
+  { transform: 'translateY(16px) scale(0.94)' },
+  { transform: 'translateY(-3px) scale(1.018)', offset: 0.55 },
+  { transform: 'translateY(0) scale(1)' },
+]
+/** 收尾切换的淡入（作者要的"渐隐渐现"） */
+const FADE_KEYS: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
+
+/**
+ * 按一下的交互（作者三轮说到位：「点击或者连击也有按压效果」+「按下不松手不抬起的都需要」
+ * +「连击……会吞掉双击的」）。
+ *
+ * ★★ **全部用 JS 驱动（Web Animations API），不走 CSS `animation`/`transition`。**
+ *
+ * 为什么（2026-10-15 血的教训）：这一套先用 CSS 实现，作者真机（Tauri 的 WKWebView）上
+ * **一个都看不见** —— 拆视频帧用像素差量过，切换是"一帧内跳变"（无任何渐变）；
+ * 而同日排查确认：dev server 上的代码是新的、生产构建的 CSS 里 `@keyframes` 与
+ * `animation:...!important` 都在、`tauri dev` 也重启过。诊断指向"这台机器上
+ * CSS 动画这条管线就是不播"（`global.css` 里那条 `prefers-reduced-motion` 全站降级是头号嫌疑，
+ * 哪怕系统开关看着是关的，WKWebView 自己读到的未必一样）。
+ * 换 `element.animate()`：它是 JS 调用，**不过 CSS 级联**，那条降级规则管不到它。
+ *
+ * 三件事：
+ *   ① **按住中**：`pointerdown` 起一个 130ms 的 WAAPI 动画压到 scale 0.972 + 暗 0.97，
+ *      `fill: 'forwards'` 保持住；松手（`pointerup` / `cancel` / 离开）再起一个回到原状的。
+ *   ② **弹一下**：`onClick` 起一个三段动画（1 → 0.975 → 1）。连击每次都重放（先 cancel 旧的）。
+ *   ③ **双击**：自己数（`DOUBLE_TAP_MS` / `DOUBLE_TAP_SLOP`），`pointerup` 里判。
+ *
+ * 纯观感：不碰任何状态、不拦点击。
+ */
+function usePressFlash<T extends HTMLElement>(onDoubleTap?: () => void) {
+  const ref = useRef<T>(null)
+  /* 回调用 ref 承接：事件处理器本身随渲染更新，但"上一次落点"要跨渲染留着 */
+  const doubleTapRef = useRef(onDoubleTap)
+  doubleTapRef.current = onDoubleTap
+  const lastUpRef = useRef({ at: 0, x: 0, y: 0 })
+  /** 进行中的"按住"动画（松手时要把它 cancel 掉，否则 forwards 会一直压着） */
+  const holdRef = useRef<Animation | null>(null)
+
+  const animate = (keyframes: Keyframe[], options: KeyframeAnimationOptions): Animation | null => {
+    const el = ref.current
+    /* 老引擎没有 WAAPI 就什么都不做（宁可没动效，也不能抛错挡了点击） */
+    if (el === null || typeof el.animate !== 'function') return null
+    return el.animate(keyframes, options)
+  }
+
+  const onPointerDown = () => {
+    holdRef.current?.cancel()
+    holdRef.current = animate(
+      [
+        { transform: 'scale(1)', filter: 'none' },
+        { transform: 'scale(0.972)', filter: 'brightness(0.97)' },
+      ],
+      { duration: 130, easing: 'ease-out', fill: 'forwards' },
+    )
+  }
+  /** 结束"按住中"（松手 / 取消 / 指针跑出去）—— 三个事件共用 */
+  const endPress = () => {
+    if (holdRef.current === null) return
+    holdRef.current.cancel()
+    holdRef.current = null
+    animate(
+      [
+        { transform: 'scale(0.972)', filter: 'brightness(0.97)' },
+        { transform: 'scale(1)', filter: 'none' },
+      ],
+      { duration: 110, easing: 'ease-out' },
+    )
+  }
+  const onPointerUp = (e: ReactPointerEvent<HTMLElement>) => {
+    endPress()
+    if (doubleTapRef.current === undefined) return
+    const now = performance.now()
+    const last = lastUpRef.current
+    const near = Math.hypot(e.clientX - last.x, e.clientY - last.y) < DOUBLE_TAP_SLOP
+    if (now - last.at < DOUBLE_TAP_MS && near) {
+      /* 用掉这一次：三击不会再触发第二次双击 */
+      lastUpRef.current = { at: 0, x: 0, y: 0 }
+      doubleTapRef.current()
+      return
+    }
+    lastUpRef.current = { at: now, x: e.clientX, y: e.clientY }
+  }
+  const onPointerCancel = endPress
+  const onPointerLeave = endPress
+  /** 弹一下：挂在 `onClick` 上（不是 pointerdown —— 那样按着不放会先弹一次，重复） */
+  const onClick = () => {
+    animate(
+      [
+        { transform: 'scale(1)', filter: 'none' },
+        { transform: 'scale(0.975)', filter: 'brightness(0.97)', offset: 0.35 },
+        { transform: 'scale(1)', filter: 'none' },
+      ],
+      { duration: 190, easing: 'ease' },
+    )
+  }
+  return { ref, onPointerDown, onPointerUp, onPointerCancel, onPointerLeave, onClick }
+}
 
 /** 文件大小：MB 两位小数（与报告页那份口径一致） */
 function sizeText(bytes: number): string {
@@ -221,15 +352,28 @@ function FactsGroups({ groups }: { groups: FactGroup[] }) {
 function ProgressHero({
   percent,
   step,
+  stepId,
+  sizeBytes,
   eta,
   done,
+  onSettled,
+  onDoubleClick,
 }: {
   /** 事件给的**真实**百分比（不是显示值） */
   percent: number
+  /** 给人看的中文步骤名 */
   step: string
+  /** 稳定步骤 id（跨步衔接用：上一步的整步节奏是下一步的先验，见 hook 头注释） */
+  stepId: string | null
+  /** G-code 字节数 —— 跨运行学习按 MB 归一要用（见 hook 头注释） */
+  sizeBytes: number | null
   eta: string | null
   /** 跑完没有 —— 置位后条子把最后几个点走完再交给结果态（见 `SETTLE_MS`） */
   done: boolean
+  /** 条子真的走到 100 了（收尾窗口据此切结果态，不再用固定时长去猜） */
+  onSettled: () => void
+  /** 双击这一块（只有"翻过来看 100%"那一态才接 —— 用来翻回结果态） */
+  onDoubleClick?: () => void
 }) {
   /*
    * ★ 显示值由 rAF **命令式**直写 DOM（不经过 React）：
@@ -238,10 +382,28 @@ function ProgressHero({
    * JSX 里**故意**留空内容与 0 宽：React 重渲（倒计时每秒 tick）后由 hook 的
    * 无依赖 effect 把当前值补写回去。
    */
-  const { numRef, fillRef } = useSmoothPercent(percent, done)
+  const { numRef, fillRef } = useSmoothPercent(percent, done, stepId, sizeBytes, onSettled)
+  /*
+   * 按一下弹一下（等待时解压用）+ 双击翻回结果 —— 见 `usePressFlash`。
+   * **双击是自己判的**（不用系统 `dblclick`：那个跟系统"双击速度"走，连击会被吞）。
+   */
+  const press = usePressFlash<HTMLDivElement>(onDoubleClick)
   return (
-    /* 不给 role="status"：这一块每秒都在动（百分比 / 倒计时），朗读器会被念个不停 */
-    <div className={`${s.hero} ${s.heroSide}`}>
+    /*
+     * 不给 role="status"：这一块每秒都在动（百分比 / 倒计时），朗读器会被念个不停。
+     * 交互（2026-10-14 作者）：**单击 / 连击回弹**（解压用，纯观感）；
+     * **双击**只在"翻过来看 100%"那一态接（用来翻回结果态），跑着时不接。
+     */
+    <div
+      ref={press.ref}
+      className={`${s.hero} ${s.heroSide}`}
+      onPointerDown={press.onPointerDown}
+      onPointerUp={press.onPointerUp}
+      onPointerCancel={press.onPointerCancel}
+      onPointerLeave={press.onPointerLeave}
+      onClick={press.onClick}
+      title={onDoubleClick === undefined ? undefined : '双击：回到结果'}
+    >
       <span className={s.heroNum} ref={numRef} />
       <div className={s.heroMeta}>
         <span className={s.heroStep}>{step}</span>
@@ -289,8 +451,11 @@ function metricsReady(
 
 function MetricsStrip({
   res,
+  onDoubleTap,
 }: {
   res: Required<Pick<PostProcessResult, 'penX' | 'penY' | 'penZ' | 'glueSpeed'>>
+  /** 双击这一条：翻回 100% 那个 hero（"看一眼刚才走过去的那根条"） */
+  onDoubleTap: () => void
 }) {
   const cells: Array<[string, string, boolean?]> = [
     ['笔偏移 X', mm2(res.penX)],
@@ -298,8 +463,25 @@ function MetricsStrip({
     ['笔偏移 Z', mm2(res.penZ)],
     ['涂胶速度', speedText(res.glueSpeed), true],
   ]
+  /* 按一下弹一下（等结果时也能解压）+ 双击翻回 hero —— 见 `usePressFlash` */
+  const press = usePressFlash<HTMLDivElement>(onDoubleTap)
   return (
-    <div className={`${s.strip} ${s.stripFinal}`} role="status">
+    /*
+     * ⚠️ 这里**只有按压这一个 animation**：淡入（`.leadIn`）/弹上来（`.popIn`）由调用处外面包的那一层负责 ——
+     * 同一个元素上挂两个 `animation` 会互相覆盖（`animation` 是同一个属性），
+     * 四格当初就是这么"点了没效果"的（见 CSS 里 `.press` 那条说明）。
+     */
+    <div
+      ref={press.ref}
+      className={`${s.strip} ${s.stripFinal}`}
+      role="status"
+      onPointerDown={press.onPointerDown}
+      onPointerUp={press.onPointerUp}
+      onPointerCancel={press.onPointerCancel}
+      onPointerLeave={press.onPointerLeave}
+      onClick={press.onClick}
+      title="双击：回到刚才的进度"
+    >
       {cells.map(([label, value, hot]) => (
         <span className={s.stripCell} key={label}>
           <span className={s.stripLabel}>{label}</span>
@@ -392,19 +574,178 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   /*
    * 收尾窗口：跑完那一刻**先让条子把最后几个点走完**（95% → 100%），再切结果态。
    * 作者 2026-10-14：「最后 95% 的时候就直接结束消失了，出现了结果页面」—— 太突兀。
-   * `SETTLE_MS`（420ms）与 `useSmoothPercent` 的逼近速度配套（95 → 100 约 0.3s）。
+   * 同日晚又定了一条：「我希望他处理快，但是动画慢，起码要 3 秒」——
+   * **处理（内核）多快就多快，这一屏的演示不许一闪而过**。落地成四条：
+   *   ① 条子由 `useSmoothPercent` 自己报告"我走到 100 了"（`onSettled`）——
+   *      不再用固定 420ms 去猜（小文件里条子可能还差半条街，猜出来就是"突然完成"）；
+   *   ② 从**窗口打开**算起，整段至少 `MIN_SHOW_MS`；
+   *   ③ 到 100 之后再停留 `SETTLE_MS` —— 让人看清那个 100%；
+   *   ④ 失败 / 停止**不适用**（那种时候该尽快把结果给人看，别拿动画拖人）；
+   *   ⑤ 兜底 `SETTLE_MAX_MS`：条子万一没报上来，到点也得切（不许卡在这一屏）。
    */
+  const [barDone, setBarDone] = useState(false)
+  /** 收尾窗口到点（条子走完 + 展示下限满足）⇒ **开始淡出**（见下面那条 effect） */
   const [settled, setSettled] = useState(false)
+  /** 淡出完 ⇒ **真换**结果态（作者「没有渐隐渐现」那一条：不再"啪"地一下换） */
+  const [swapped, setSwapped] = useState(false)
+  /** 结果态里双击四格 ⇒ 翻回 100% 的 hero（"看一眼刚才那根条"）；hero 上双击再翻回来 */
+  const [peek, setPeek] = useState(false)
+  /**
+   * 刚从"翻过来看 100%"翻回结果 —— 那一下的结果块要**弹上来**（作者：
+   * 「我双击切换的时候，那个新的应该也弹上来的感觉」）。收尾那一路仍是纯淡入（`.leadIn`）。
+   */
+  const [flipBack, setFlipBack] = useState(false)
   useEffect(() => {
     if (finished === null) {
+      setBarDone(false)
       setSettled(false)
+      setSwapped(false)
+      setPeek(false)
+      setFlipBack(false)
       return
     }
-    const id = window.setTimeout(() => setSettled(true), SETTLE_MS)
+    if (!finished.ok) {
+      const id = window.setTimeout(() => setSettled(true), SETTLE_MS)
+      return () => window.clearTimeout(id)
+    }
+    if (!barDone) {
+      const id = window.setTimeout(() => setSettled(true), SETTLE_MAX_MS)
+      return () => window.clearTimeout(id)
+    }
+    /* `sinceMs` 缺省（老记录）时按"刚打开"算 —— 最坏也只是把下限走满，不会一闪而过 */
+    const elapsed = Date.now() - (view.sinceMs ?? Date.now())
+    const wait = Math.max(MIN_SHOW_MS - elapsed, 0) + SETTLE_MS
+    const id = window.setTimeout(() => setSettled(true), wait)
     return () => window.clearTimeout(id)
-  }, [finished])
-  /** 顶上那一块现在该按"跑着"画（含收尾窗口）：进度 hero 一直挂到条子走完 */
-  const showProgress = running || !settled
+  }, [finished, barDone, view.sinceMs])
+
+  /*
+   * 渐隐渐现（作者：「感觉 100% 的时候消失得太突然了，没有渐隐渐现」）：
+   * hero 先淡出 `LEAD_FADE_MS`（WAAPI，见下面那个 effect），走完才真换（结果块自己淡入）。
+   * **失败 / 取消不走这套** —— 那种时候该尽快把结果给人看（作者："失败那些停止那些不用做"）。
+   */
+  useEffect(() => {
+    if (!settled) {
+      setSwapped(false)
+      return
+    }
+    if (finished?.ok !== true) {
+      setSwapped(true)
+      return
+    }
+    const id = window.setTimeout(() => setSwapped(true), LEAD_FADE_MS)
+    return () => window.clearTimeout(id)
+  }, [settled, finished?.ok])
+  /**
+   * 顶上那一块现在该按"跑着"画：跑着 / 收尾窗口（含淡出中）/ "翻回来看 100%" 都要它，
+   * 换完（`swapped`）且没翻过来才交给结果态。
+   */
+  const showProgress = running || peek || !swapped
+
+  /*
+   * 出场动画 —— **JS 驱动**（`element.animate()`），与 `usePressFlash` 同一个理由：
+   * 作者真机上这套 CSS `animation` 一个都不播（拆帧量过：切换是"一帧内跳变"），
+   * 而 `element.animate()` 是 JS 调用、不过 CSS 级联，那条全站降级规则管不到它。
+   *   · hero：从"翻过来看 100%"翻上来时**弹上来**；收尾时**淡出**（然后 `swapped` 换成结果）。
+   *   · 结果块：收尾切过来**淡入**；从"翻过来看"翻回来时**弹上来**。
+   */
+  const heroBoxRef = useRef<HTMLDivElement>(null)
+  const leadBoxRef = useRef<HTMLDivElement>(null)
+  /** 收尾成功那一瞬：hero 正在渐隐（失败 / 取消不渐隐 —— 那种时候该尽快把结果给人看） */
+  const fadingOut = settled && !swapped && finished?.ok === true
+  useEffect(() => {
+    const el = heroBoxRef.current
+    if (el === null || typeof el.animate !== 'function') return
+    /*
+     * ★ 先把上一轮留下的动画清掉 —— 尤其"收尾淡出"那个 `fill: 'forwards'`：
+     * 它把这一层按在 opacity 0 上，翻面回来复用时就成了"这一块是空的"
+     * （作者 2026-10-15 的截图）。清掉 = 回到元素自身样式，再按本轮状态重新起。
+     */
+    el.getAnimations().forEach((a) => a.cancel())
+    if (!showProgress) return
+    if (fadingOut) {
+      el.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: LEAD_FADE_MS,
+        easing: 'ease',
+        fill: 'forwards',
+      })
+      return
+    }
+    if (peek) el.animate(POP_KEYS, { duration: 240, easing: 'ease-out' })
+  }, [showProgress, fadingOut, peek])
+  useEffect(() => {
+    const el = leadBoxRef.current
+    if (el === null || typeof el.animate !== 'function') return
+    el.getAnimations().forEach((a) => a.cancel())
+    if (flipBack) {
+      el.animate(POP_KEYS, { duration: 240, easing: 'ease-out' })
+      return
+    }
+    const fade = el.animate(FADE_KEYS, { duration: 220, easing: 'ease' })
+    /* 安全阀：万一这动画没跑完（真机上见过"停在起始帧"那类），到点强制回到自身样式（= 可见） */
+    window.setTimeout(() => {
+      if (fade.playState !== 'finished') fade.cancel()
+    }, 400)
+  }, [showProgress, flipBack, finished])
+
+  /**
+   * 翻面（**轮播感**）——作者 2026-10-15：「切换的时候上一个往上消失，下一个从下弹出来；
+   * 现在感觉消失的没有只有出现的」。所以旧的**先往上滑出去**（WAAPI 200ms），滑完才真翻；
+   * 新块由上面那两个 effect 从下弹进来。**不许"先切再弹"**——那样旧的就是瞬间消失。
+   * 快速连击：`cancel()` 会打断上一轮滑出，直接翻（干净利落，不排队）。
+   */
+  /**
+   * 翻面（**轮播感**，作者 2026-10-15：「上一个往上消失，下一个从下弹出来」+
+   * 同日第二轮：「速度有点慢，我点击快的时候他也要快，要很流畅的翻页的感觉」）：
+   *   · **旧块先往上滑出去**（WAAPI 130ms），滑完才真翻；新块由上面那两个 effect 从下弹进来。
+   *   · **快速连击**：上一轮还在滑出就直接翻（不等那 130ms）—— 点得快它也要快，不许排队。
+   *   · `gen`（轮次号）：被打断的旧轮次回来后一律忽略，免得"旧轮次的收尾"把新一轮顶掉。
+   */
+  const flipGenRef = useRef(0)
+  const flipBusyRef = useRef(false)
+  const startFlip = (to: 'hero' | 'result') => {
+    const gen = flipGenRef.current + 1
+    flipGenRef.current = gen
+    const apply = () => {
+      if (flipGenRef.current !== gen) return /* 过期轮次：忽略 */
+      flipBusyRef.current = false
+      if (to === 'hero') {
+        setPeek(true)
+      } else {
+        setPeek(false)
+        setFlipBack(true)
+      }
+    }
+    /* 旧块：翻到 hero 时它是结果块；翻回结果时它是 hero 那一层 */
+    const el = to === 'hero' ? leadBoxRef.current : heroBoxRef.current
+    /* 快连击（上一轮还在滑出）或没有可动的元素 ⇒ **立刻翻**，不等 */
+    if (flipBusyRef.current || el === null || typeof el.animate !== 'function') {
+      if (el !== null && typeof el.animate === 'function') {
+        el.getAnimations().forEach((a) => a.cancel())
+      }
+      apply()
+      return
+    }
+    flipBusyRef.current = true
+    el.getAnimations().forEach((a) => a.cancel())
+    const out = el.animate(
+      [
+        { transform: 'translateY(0)', opacity: 1 },
+        { transform: 'translateY(-20px)', opacity: 0 },
+      ],
+      /* fill: forwards —— 滑完**停在**"透明+上移"上，等 `apply` 把这一整块卸掉；
+         不加的话动画一结束元素会瞬间回闪到原样（那一下就是"乱"的一半） */
+      { duration: 130, easing: 'ease-in', fill: 'forwards' },
+    )
+    const done = () => {
+      flipBusyRef.current = false
+      apply()
+    }
+    out.finished.then(done).catch(done)
+    /* 安全阀：动画万一没跑完也照翻，不许卡在旧块上 */
+    window.setTimeout(done, 260)
+  }
+
   /**
    * 这一屏是**开发台演出来的**（不是真钩子跑出来的）。
    *
@@ -446,17 +787,38 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     lead = <WarnHero text={run.question.text} />
   } else if (showProgress) {
     lead = (
-      <ProgressHero
-        /* 收尾窗口里目标直接给 100：让条子走完那最后几个点，而不是停在 95% 被切走 */
-        percent={running ? percent : 100}
-        step={run.progress === null ? '准备中' : stepName(run.progress.step)}
-        eta={eta}
-        done={!running}
-      />
+      /*
+       * ⚠️ `key` 是必须的（2026-10-15 作者："上一个还没消失，下一个就进来了 / 乱了"）：
+       * 这一层与结果块那一层在 JSX 里是**同一个位置的条件渲染**，不给 key 时 React 会
+       * **复用同一个 div** —— 于是"旧块滑出"与"新块弹入"作用在**同一个元素**上互相打断
+       * （滑一半突然换内容）。key 不同 ⇒ React 强制"卸载旧的、新建新的"，各演各的。
+       */
+      <div ref={heroBoxRef} key="heroBox">
+        <ProgressHero
+          /* 收尾窗口里目标直接给 100：让条子走完那最后几个点，而不是停在 95% 被切走 */
+          percent={running ? percent : 100}
+          step={run.progress === null ? '准备中' : stepName(run.progress.step)}
+          stepId={run.progress?.step ?? null}
+          sizeBytes={run.facts?.fileSizeBytes ?? null}
+          eta={eta}
+          done={!running}
+          /* 条子真的走到 100 了 —— 收尾窗口据此决定何时切结果态（见 above 那段注释） */
+          onSettled={() => setBarDone(true)}
+          /* 双击：只在"翻过来看 100%"那一态接（翻回结果态）；跑着的时候不接 */
+          onDoubleClick={peek ? () => startFlip('result') : undefined}
+        />
+      </div>
     )
   } else if (finished !== null) {
     if (finished.ok) {
-      lead = metricsReady(finished.result) ? <MetricsStrip res={finished.result} /> : null
+      /* 双击四格 ⇒ 翻回 100% 的 hero（作者：「双击之后显示 100% 那个 hero」） */
+      lead = metricsReady(finished.result) ? (
+        /* 出场（淡入 / 弹上来）由主件那个 effect 用 WAAPI 驱动 —— 同上；
+           `key` 与 hero 那一层必须不同（见那边注释） */
+        <div ref={leadBoxRef} key="leadBox">
+          <MetricsStrip res={finished.result} onDoubleTap={() => startFlip('hero')} />
+        </div>
+      ) : null
     } else {
       const lines = [
         /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」 */
@@ -486,8 +848,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它。
       预览里前面加「预览 ·」—— 一眼看出这不是真跑（页脚那枚小字之外的第二处） */
       subtitle={preview ? `预览 · ${run.gcodeName}` : run.gcodeName}
-      /* 跑着的时候点遮罩不关（见文件头第 1 条）；要收起来请按「后台运行」 */
-      closeOnScrim={!running}
+      /* 点遮罩不关（全站口径 2026-10-15；跑着的时候更是如此）—— 收起来请按 Esc 或「后台运行」 */
       /* 跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作。
          结果那几扇也不摆（第 16~17 轮定的）：收窗走页脚「关闭」那一条明路 */
       hideClose

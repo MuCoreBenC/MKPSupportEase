@@ -81,5 +81,17 @@ export const STORAGE = {
    * 空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`，见 `fsx::paths::EXPORTS_DIR`）。
    */
   clientReportExportDir: 'mkp.A40.report.exportDir',
+
+  /**
+   * 后处理进度的**每步节奏**缓存（`{ [stepId]: msPerMB }`，JSON）——
+   * `useSmoothPercent` 拿它当"这一步通常多久"的先验（跨运行学习，2026-10-14 作者批）。
+   *
+   * 逐行扫的那几步（`parse` / `pass1` / `pass2` / `write`）耗时**∝ 文件大小**，
+   * 所以存的是**每 MB 多少毫秒**：换文件大小（大切片 / 小切片）也能直接用。
+   * 第一次跑没有它 —— 退化为"运行内的实测速率"，跑完一步就学会了。
+   *
+   * **这是缓存、不是底账**：丢了只是下次重新学，不影响任何数据。
+   */
+  clientPostProcessPace: 'mkp.A40.postprocess.pace',
 } as const
 

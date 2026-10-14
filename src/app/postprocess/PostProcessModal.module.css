@@ -213,6 +213,15 @@
   transition: width 0.1s linear;
 }
 
+/* ---- 交互动效：**已全部改由 JS（Web Animations API）驱动** ----
+
+   2026-10-15：作者真机上这套 CSS 动画一个都不播（拆帧像素差量过：切换是一帧内跳变），
+   而排查确认代码/构建/重启都没问题 ⇒ 整条 CSS 动画管线在那台机器上就是不灵。
+   现在按住 / 回弹 / 淡出 / 弹入全部走 `element.animate()`（见 `PostProcessModal.tsx` 的
+   `usePressFlash` 与主件那两个 effect）—— 原来这里的 `.pressable` / `.pressing` / `.press` /
+   `.leadOut` / `.leadIn` / `.popIn` 与三个 `@keyframes` 一并删除，别再往这里加 CSS 动画：
+   加了也播不出来，只会让人以为"实现过了"。 */
+
 /* ---- ② 机型不匹配：红警告 hero ---- */
 
 .warnHero {
