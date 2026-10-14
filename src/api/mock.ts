@@ -129,48 +129,54 @@ let mockAutoClean = true
  * 真机上它是 `<appDataDir>/user/presets-local/`，盘就是底账。
  */
 const mockLocal: LocalPresetFile[] = [
+  /*
+   * ★★ 2026-10-14 与 catalog 那 9 份 MKP **对齐**（作者：「连本地表也照 catalog 铺」）。
+   *
+   * 改动前这里是一批**与目录毫无关系**的名字（`A1 涂胶.toml` 之类），而云端表列的是
+   * `A1-standard.toml` / `A1-fast.toml` —— 于是浏览器演示里"我下过的那份"与"云端那一份"
+   * 看不出是同一份，血统还写着早就过时的 `dist/mkp/presets/…`。
+   *
+   * 现在：本地表 = 目录那 9 份的**一份镜像**（名字 / 机型 / 版本 / 血统与目录逐条对上），
+   * 外加两份**用户自己造的**（`A1 涂胶.toml` = 另存改名、`Process_0.2mm.json` = 手工导入的
+   * 认不出类别的那份）—— 镜像的那几份才是"云端下载来的"，那两份才是"我自己的"。
+   *
+   * 为什么"照铺"而不是"只改血统"：真机上 `presets-local/` 里**确实**躺着下载来的那几份
+   * （下载 / 另存都落在这一格），演示要与真机同形 —— 数字（云端 9 · 本地 N）也才对得上。
+   */
   {
     /*
-     * 带血统（基于旧版官方（现称交付预设））。**2026-10-08 起界面上不再有「基于旧版官方（现称交付预设）」那一枚** ——
-     * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；血统只在展开详情里
-     * 答"从哪一版派生"。
+     * 云端那份下载到本机（血统 = 它自己那一版，`current`）。
+     * 这条是所有后续操作的基准：参数页 / 校准页都从它读。
      */
-    path: 'presets-local/A1 涂胶.toml',
-    fileName: 'A1 涂胶.toml',
+    path: 'presets-local/A1-standard.toml',
+    fileName: 'A1-standard.toml',
     size: 2048,
     modifiedUnix: 1780000000,
     kind: 'mkp_preset',
-    /* 第九层：能读 + TOML 语法过（演示正文是合法 TOML）→ 照常有「应用 / 改这份」 */
     state: 'ok',
     stateDetail: null,
-    basedOn: 'outdated',
-    basedOnLabel: 'dist/mkp/presets/A1-fast.toml',
-    basedOnRelease: '2026-05-29 04:26:12',
+    basedOn: 'current',
+    basedOnLabel: 'delivery/mkp/presets/A1-standard.toml',
+    basedOnRelease: '2026-10-05 08:00:00',
     basedOnMachineId: 'A1',
-    basedOnVersionId: 'FAST',
-    /* 归属（文件头 # machine/# variant 两行）：这份演示正文里也种了这两行 */
+    basedOnVersionId: 'STANDARD',
     machineId: 'A1',
-    versionId: 'FAST',
-    /* 演示里没走过复制/导入 —— 出处照实没有（真机上由出处账答） */
+    versionId: 'STANDARD',
     copiedFrom: null,
     copiedFromName: null,
     provenance: null,
   },
   {
-    /*
-     * **第二份可读的「本地预设」**：对比台要能被看见就必须有两份能比的 ——
-     * 只有一份时那个模态框只会说「至少选两份才能对比」。
-     * 它对应的就是"交付预设发了 2026-10-15 那一版之后，下载生成的新的一份"。
-     */
-    path: 'presets-local/A1 涂胶-2026-10-15.toml',
-    fileName: 'A1 涂胶-2026-10-15.toml',
+    /* 云端新版落下来的那一份（`current`，带 2026-10-15 那一版的发布时间） */
+    path: 'presets-local/A1-fast.toml',
+    fileName: 'A1-fast.toml',
     size: 2048,
     modifiedUnix: 1780900000,
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
     basedOn: 'current',
-    basedOnLabel: 'mkp/presets/A1-fast.toml',
+    basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-10-15 09:00:00',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
@@ -181,13 +187,35 @@ const mockLocal: LocalPresetFile[] = [
     provenance: null,
   },
   {
-    /* 没有血统（手工拷的 / 别的程序写出来的）—— 照实说不出新旧，这是合法状态 */
+    /*
+     * 用户自己那一份：**从 `A1-fast.toml` 另存改名的**（血统指向目录里真有的那份，
+     * 名字是用户自己起的）—— 演示"另存为一份新的"之后长什么样。
+     */
+    path: 'presets-local/A1 涂胶.toml',
+    fileName: 'A1 涂胶.toml',
+    size: 2048,
+    modifiedUnix: 1780500000,
+    kind: 'mkp_preset',
+    state: 'ok',
+    stateDetail: null,
+    basedOn: 'outdated',
+    basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
+    basedOnRelease: '2026-05-29 04:26:12',
+    basedOnMachineId: 'A1',
+    basedOnVersionId: 'FAST',
+    machineId: 'A1',
+    versionId: 'FAST',
+    copiedFrom: null,
+    copiedFromName: null,
+    provenance: null,
+  },
+  {
+    /* 手工放进来的、认不出是哪一类的（`kind: null`：合法状态，详情里照实写"认不出"） */
     path: 'presets-local/Process_0.2mm.json',
     fileName: 'Process_0.2mm.json',
     size: 1024,
     modifiedUnix: 1780003600,
     kind: null,
-    /* 认不出是哪一类 → 没有"能不能当预设用"这一档（与真机同形状） */
     state: null,
     stateDetail: null,
     basedOn: 'unknown',
@@ -358,14 +386,16 @@ const withoutLineage = (text: string) =>
 
 /* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上）。
    键带引号是因为它得**真的是 TOML** —— 它那条 state 说 `ok`，演示也要自洽 */
+/* 血统那几行的落点写**真实目录形状**（`delivery/mkp/presets/…`），与 catalog 的 path 同形 ——
+   老板本写的是 `dist/mkp/presets/…`（那是更早一代的发布根） */
 mockLocalText.set(
-  'presets-local/A1 涂胶.toml',
+  'presets-local/A1-standard.toml',
   [
-    '# 本地这一份（假后端演示正文）',
+    '# 云端那份下载到本机（假后端演示正文）',
     '# machine: A1',
-    '# variant: fast',
-    '# based_on: dist/mkp/presets/A1-fast.toml',
-    '# based_on_release_time: 2026-05-29 04:26:12',
+    '# variant: standard',
+    '# based_on: delivery/mkp/presets/A1-standard.toml',
+    '# based_on_release_time: 2026-10-05 08:00:00',
     `# based_on_sha256: ${'0'.repeat(64)}`,
     /* 键用**注册表里的真名字**（`[toolhead]` + `offset_y`）：对比台按注册表认参数，
        编一套假键的话那一列会全是"—"，等于把要验的东西绕开了 */
@@ -376,17 +406,33 @@ mockLocalText.set(
   ].join('\n'),
 )
 mockLocalText.set(
-  'presets-local/A1 涂胶-2026-10-15.toml',
+  'presets-local/A1-fast.toml',
   [
-    '# 本地这一份 · 基于 2026-10-15 那一版云端（假后端演示正文）',
+    '# 云端新版落下来的那一份（假后端演示正文）',
     '# machine: A1',
     '# variant: fast',
-    '# based_on: mkp/presets/A1-fast.toml',
+    '# based_on: delivery/mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-10-15 09:00:00',
     `# based_on_sha256: ${'1'.repeat(64)}`,
     '[toolhead]',
     'offset_y = 26.8 # 笔尖偏移',
     'speed_limit = 70 # 涂胶速度限制 (mm/s)',
+    '',
+  ].join('\n'),
+)
+/* 用户从 `A1-fast.toml` 另存改名出来的那一份：血统照抄来源，名字是用户起的 */
+mockLocalText.set(
+  'presets-local/A1 涂胶.toml',
+  [
+    '# 我另存出来的一份（假后端演示正文）',
+    '# machine: A1',
+    '# variant: fast',
+    '# based_on: delivery/mkp/presets/A1-fast.toml',
+    '# based_on_release_time: 2026-05-29 04:26:12',
+    `# based_on_sha256: ${'1'.repeat(64)}`,
+    '[toolhead]',
+    'offset_y = 22.4 # 笔尖偏移',
+    'speed_limit = 64 # 涂胶速度限制 (mm/s)',
     '',
   ].join('\n'),
 )

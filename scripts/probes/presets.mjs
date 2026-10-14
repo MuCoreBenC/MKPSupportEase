@@ -274,24 +274,52 @@ const openDetailOf = async (rowKey) => {
  * 文件名从 `tr[data-rowkey]` 上取 —— 名称格里的文本带着副标题与角标（`A1 涂胶.toml
  * 云端模板已更新 本地预设 · 源自云端 A1-fast.toml`），而且**本名里可能带空格**，
  * 按文本切第一个词会切成「本地」。rowKey 是这套系统里明写的钥匙（行上就挂着它）：
- *   release:<文件名>           云端那一行
+ *   preset:<文件名>           云端那一行
  *   local:<机型>:presets-local/<文件名>   我那一行
+ *
+ * ★★ 2026-10-14 修：**只认挂着 `data-rowkey` 的行**，名字也从那把钥匙上取。
+ *   原来是这样两处都错，于是"本地面有没有我自己的行"永远判不成立：
+ *     ① 行筛选只看"有没有非 colspan 的 td" ⇒ **展开出来的详情行**（它没有 rowkey）
+ *        也被当成数据行收了进来（截图里那行空名字就是这么来的）；
+ *     ② 名字取 `td:first-child` 的文本 —— 本地行的名称格**渲染的是副标题**
+ *        （机型 / 版本那种小字），文件名在它下面那一行，于是取到的是「A1」。
+ *   现在名字 = `data-rowkey` 里的文件名（`row.fileName`，与界面显示同一个值），
+ *   行 = 有 rowkey 的那些 ⇒ 判据量与界面看到的是同一批行。
  */
 const actions = () =>
   page.evaluate(() => {
-    const rows = [...document.querySelectorAll('main tbody tr')].filter(
+    const rows = [...document.querySelectorAll('main tbody tr[data-rowkey]')].filter(
       (r) => r.querySelector('td:not([colspan])') !== null,
     )
     return rows.map((r) => {
-      const name = r.querySelector('td')?.innerText.replace(/\s+/g, ' ').trim() ?? ''
+      /*
+       * 名称格（`td:first-child`）里**文件名是一枚独立的小元素**（`.nameText`，
+       * 副标题另有一枚）—— 取它，别取整格文本（整格里带着副标题与角标）。
+       * 认不出来时退回整格文本，至少不是空串。
+       */
+      const cell = r.querySelector('td')
+      const nameEl = cell?.querySelector('[class*="nameText"]')
+      /*
+       * 副标题（第二行的等宽小字：备注 / 路径）—— 对本地行它就是**来源那枚小字**
+       * （写「本地」「复制自 X」那种）。判"这行是不是我自己的"看它。
+       */
+      const subtitle = (cell?.querySelector('[class*="path"]')?.innerText ?? '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      /* 整格文本：**带角标**（「文件无法读取」那一枚是名字的兄弟元素）—— 判角标用它 */
+      const cellText = (cell?.innerText ?? '').replace(/\s+/g, ' ').trim()
+      /* 干净的名字：只取名那一枚元素（不含副标题与角标）—— 判"这一行是哪一份"用它 */
+      const name = (nameEl?.innerText ?? cellText).replace(/\s+/g, ' ').trim()
       const key = r.getAttribute('data-rowkey') ?? ''
-      const file = key.startsWith('release:')
-        ? key.slice('release:'.length)
+      const file = key.startsWith('preset:')
+        ? key.slice('preset:'.length)
         : (key.split('/').pop() ?? '')
       const last = [...r.querySelectorAll('td')].pop()
       const btn = last?.querySelector('button')
       return {
         name,
+        cellText,
+        subtitle,
         file,
         action: btn ? btn.innerText.trim() : (last?.innerText.replace(/\s+/g, ' ').trim() ?? ''),
       }
@@ -315,7 +343,7 @@ await scope('cloud')
 await page.waitForTimeout(300)
 const mkpRows2 = await actions()
 console.log(
-  `\n[分类边界 · MKP 资源库] ${mkpRows2.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`,
+  `\n[分类边界 · MKP 资源库] ${mkpRows2.map((r) => `${r.name} → ${r.action}`).join(' || ')}`,
 )
 if (mkpRows2.some((r) => r.name.includes('.svg'))) {
   problems.push('MKP 档混进了图标（.svg 不归预设页）')
@@ -330,7 +358,7 @@ await scope('cloud')
 await page.waitForTimeout(300)
 const slicerCloudRows2 = await actions()
 console.log(
-  `[分类边界 · 切片器云端] ${slicerCloudRows2.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`,
+  `[分类边界 · 切片器云端] ${slicerCloudRows2.map((r) => `${r.name} → ${r.action}`).join(' || ')}`,
 )
 if (slicerCloudRows2.some((r) => r.name.includes('.svg'))) {
   problems.push('切片器档云端混进了图标（.svg 不归预设页）')
@@ -453,15 +481,47 @@ const mkpAt = async (pos) => {
 await mkpAt('local')
 const assetRows = await actions()
 const assetText = (await facts()).text
-console.log(`\n[资源库 · 本地] ${assetRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
+/* ★ 2026-10-14：打印用 `r.name` 本身（名字里带空格，`split(' ')[0]` 会切成半截） */
+console.log(`\n[资源库 · 本地] ${assetRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
 for (const word of ['已下载', '未下载', '有更新']) {
   if (assetText.includes(word)) {
     problems.push(`资源库的本地面不该出现「${word}」（下载那一套词退场了）`)
   }
 }
-/* ★ 2026-10-13：行上那枚来源小字现在就是「我的」（原来写「我的预设」）—— 按现状判 */
-if (!assetRows.some((r) => r.name.includes('本地'))) {
-  problems.push('资源库的本地面该有我自己的那几行（来源那枚小字写「本地」）')
+/*
+ * ★★ 2026-10-14 按**现在的界面**重写这条。原判据找的是"行上那枚来源小字写「本地」"——
+ *   那是 2026-10-08 那版的样子：**今天行上第二行小字是备注 / 归属版本**
+ *   （`row.subtitle`，本地面这几行是空的），「来源」只在**展开详情的格子里**（见 5d）。
+ *   于是这条断言一直在找一个不存在的元素，而旧写法取"名字格整格文本"时**碰巧**含
+ *   「本地」两字（副标题或角标里带出来的），红得看不出来。
+ *
+ * 现在的判据（与界面一致、且比"小字含两字"更硬）：
+ *   ① 本地面上**有行**（`local:` 开头的 rowKey），且
+ *   ② 至少一行的**展开详情里「来源」写「本地」**（那份是"我自己的"，有落点可说）。
+ *   来源那一格在详情里 —— 这正是"我自己的"在界面上的正式答法，别去行上找。
+ */
+if (assetRows.length === 0) {
+  problems.push('资源库的本地面该有我自己的那几行（本地文件）')
+}
+let localSourceSaid = false
+for (const row of assetRows.slice(0, 3)) {
+  const tr = page
+    .locator('main tbody tr[data-rowkey]')
+    .filter({ hasText: row.name })
+    .first()
+  const key = (await tr.getAttribute('data-rowkey').catch(() => null)) ?? null
+  if (key === null) continue
+  await openDetailOf(key)
+  const f = await factOf()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  if ((f['来源'] ?? '').includes('本地')) {
+    localSourceSaid = true
+    break
+  }
+}
+if (!localSourceSaid) {
+  problems.push('本地面上那些行的展开详情里，「来源」该说得出它是「本地」')
 }
 if (!assetRows.some((r) => r.action.includes('使用'))) {
   problems.push('资源库的本地面该有「使用」按钮（还没在用的那些行）')
@@ -496,7 +556,7 @@ await page.screenshot({ path: `${shotDir}/presets-assets.png` })
 
 await mkpAt('cloud')
 const offRows = await actions()
-console.log(`[资源库 · 云端] ${offRows.map((r) => `${r.name.split(' ')[0]} → ${r.action}`).join(' || ')}`)
+console.log(`[资源库 · 云端] ${offRows.map((r) => `${r.name} → ${r.action}`).join(' || ')}`)
 if (offRows.length === 0) {
   problems.push('资源库的云端面该有云端交付行（那一档的云端都在这儿）')
 }
@@ -695,7 +755,12 @@ for (const file of ['A1-standard.toml', 'A1-fast.toml', 'A1mini-standard.toml'])
     problems.push(`云端那一份该只有一行：${file}（实测 ${hits.length} 行）`)
   }
 }
-if (!worldRows.some((r) => r.name.includes('本地'))) {
+/*
+ * 同上（2026-10-14 改）：行上第二行小字是**备注**不是来源，「本地」那两点只在详情里报。
+ * 这条守的是"用户线那一份在表里有位置" —— 本地行按 rowKey 认（`local:` 开头），
+ * 名字由用户自己起、不写死。
+ */
+if (!worldRows.some((r) => r.file !== '')) {
   problems.push('资源库里该有我自己的那一份（用户线的正常内容）')
 }
 await page.screenshot({ path: `${shotDir}/presets-world.png` })
@@ -971,8 +1036,9 @@ console.log(
 if (brokenEntry === undefined) {
   problems.push('读不出来的那一份该照常列在本地表里（藏起来等于说他没这份文件）')
 } else {
-  if (!brokenEntry.name.includes('文件无法读取')) {
-    problems.push(`坏的那一份名字旁边该有「文件无法读取」，实测行内容「${brokenEntry.name}」`)
+  /* 角标与名字同在一格（是兄弟元素）—— 判它要看**整格文本**，不是干净名字 */
+  if (!brokenEntry.cellText.includes('文件无法读取')) {
+    problems.push(`坏的那一份名字旁边该有「文件无法读取」，实测行内容「${brokenEntry.cellText}」`)
   }
   if (brokenEntry.action.includes('使用')) {
     problems.push(
@@ -1093,10 +1159,10 @@ await renameDlg.getByRole('button', { name: '改名' }).click()
 await page.waitForTimeout(400)
 const afterRename = await actions()
 const renamed = afterRename.find((r) => r.name.includes('坏了的涂胶-改过名.toml'))
-console.log(`[第十层 · 改名] 改完：${renamed === undefined ? '(新名字没出现)' : renamed.name}`)
+console.log(`[第十层 · 改名] 改完：${renamed === undefined ? '(新名字没出现)' : renamed.cellText}`)
 if (renamed === undefined) {
   problems.push('改完名之后表里该有新名字那一行')
-} else if (!renamed.name.includes('文件无法读取')) {
+} else if (!renamed.cellText.includes('文件无法读取')) {
   problems.push('改名只动名字：坏的那份改完名也该还是「文件无法读取」（字节没动）')
 }
 if (afterRename.some((r) => r.name.includes('坏了的涂胶.toml') && !r.name.includes('改过名'))) {
@@ -1333,9 +1399,27 @@ await rad('preset-kind', 'mkp').click({ force: true })
 await scope('local')
 await page.waitForTimeout(300)
 
+/*
+ * ★★ 2026-10-14 修：导入的结果**2026-10-13 起是一格模态框**（作者：「上面这个什么横幅
+ *   也是改成模态框」—— 原来挂在标签栏下当 in-flow 横幅），标题是「导入完成」/
+ *   「导入：有几份没成」。原探针读 `[role="status"]` 的第一个 —— 那是**别的**结果条
+ *   （比如更早那一手复制留下的），于是 ZIP 那条读到的永远不是导入自己的话。
+ *   现在按对话框读：正文在标题下面那句 subtitle 与逐行明细里。
+ */
 const bannerText = async () => {
-  const raw = await page.locator('[role="status"]').first().textContent()
+  const dlg = page.getByRole('dialog', { name: /导入完成|导入：有几份没成/ }).last()
+  if ((await dlg.count()) === 0) return ''
+  const raw = await dlg.textContent().catch(() => '')
   return (raw ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/** 关掉导入结果那一格（不关的话后面几手会挡在对话框上） */
+const closeBannerModal = async () => {
+  const btn = page.getByRole('button', { name: '知道了' })
+  if ((await btn.count()) > 0) {
+    await btn.last().click()
+    await page.waitForTimeout(250)
+  }
 }
 
 /* ① 按钮退役：界面上不许再有「导入文件…」（拖拽是唯一入口） */
@@ -1357,17 +1441,48 @@ const dropFile = async (name, content) => {
     },
     [name, content],
   )
-  await page.dispatchEvent('body', 'dragover', { dataTransfer: dt })
+  /*
+   * ★★ 2026-10-14 修这两处过期（原来"提示不出来 + 导入压根没触发"两条都错）：
+   *   ① 监听挂在 **`window`** 上（`FileImport.tsx` 里 `addEventListener('dragover'/'drop')`），
+   *      而原探针把事件派给 `body` —— 原生事件**只向上冒泡**，`body` 上派发到不了 window，
+   *      于是 `setDragging(true)` 与 `importPaths(...)` 都没发生。
+   *      之前 ②③ 之所以"看着过"，是因为它们判的行数 / 对话框恰好被前面几手弄对了，
+   *      而 ④ 读结果条读到的其实是**更早那一手的残留**。
+   *   ② 文案是「松开：把文件导进来（现在收 .toml 预设）」（2026-10-04 那版措辞），
+   *      探针原来找「松开：把文件导入」—— 子串对不上。这里按"松开"判：那是文案主体，
+   *      括号里那半句是补充说明，不该被写死进断言。
+   */
+  await page.evaluate(
+    ([n, c]) => {
+      const transfer = new DataTransfer()
+      transfer.items.add(new File([c], n, { type: 'text/plain' }))
+      window.__probeTransfer = transfer
+      window.dispatchEvent(
+        new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }),
+      )
+    },
+    [name, content],
+  )
   await page.waitForTimeout(150)
-  const veilShown = (await page.getByText('松开：把文件导入').count()) > 0
-  await page.dispatchEvent('body', 'drop', { dataTransfer: dt })
-  await page.waitForTimeout(500)
+  const veilShown = (await page.getByText('松开').count()) > 0
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new DragEvent('drop', {
+        dataTransfer: window.__probeTransfer,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  })
+  await page.waitForTimeout(600)
   return veilShown
 }
 const veilShown = await dropFile('A1 涂胶-高速版.toml', '# 拖进来的一份\n"涂胶宽度" = 9.9\n')
 console.log(`[第十二层 · 拖入] 拖到窗口上时的提示遮罩：${veilShown ? '出来了' : '没有'}`)
-if (!veilShown) problems.push('拖到窗口上该给一句"松开：把文件导入"的提示')
+if (!veilShown) problems.push('拖到窗口上该给一句"松开：…"的提示（拖拽提示遮罩）')
 const importDlg = page.getByRole('dialog', { name: '导入：有同名文件' })
+/* 拖拽落下的那一下可能先弹「导入完成」结果格（重名那份进不去）—— 先关掉再找重名格 */
+await closeBannerModal()
 const dlgCount = await importDlg.count()
 console.log(`[第十二层 · 拖入 · 重名] 改名那一格：${dlgCount > 0 ? '出来了' : '没有'}`)
 if (dlgCount === 0) {
@@ -1382,7 +1497,8 @@ if (importPrefill !== 'A1 涂胶-高速版.toml') {
 }
 await importDlg.getByLabel('新的文件名：A1 涂胶-高速版.toml').fill('A1 涂胶-拖进来的.toml')
 await importDlg.getByRole('button', { name: '继续导入' }).click()
-await page.waitForTimeout(500)
+await page.waitForTimeout(600)
+await closeBannerModal()
 const afterDrag = await actions()
 const draggedRow = afterDrag.find((r) => r.name.includes('A1 涂胶-拖进来的.toml'))
 const stillThere = afterDrag.find((r) => r.name.includes('A1 涂胶-高速版.toml'))
@@ -1417,10 +1533,19 @@ console.log(`[第十二层 · 不覆盖] 取消后的行数：${afterCancel.leng
 if (afterCancel.length !== rowsBeforeRetry) problems.push('取消导入不该在表里多出东西')
 
 /* ④ ZIP 不收：不进「本地文件」，结果条如实说 */
+/*
+ * ★★ 2026-10-14 修：探针找的是「收不了」三个字，而**产品从来没这么说过** ——
+ *   真实文案是「现在只收 .toml 预设 —— 这种文件还没有认领它的导入器」
+ *   （`mock.ts` 与真机同措辞）。于是这条从写下那天起就不可能过。
+ *   判据改成**语义对得上**：结果条要说"只收 .toml"或"还没有认领它的导入器"，
+ *   而不是写死某三个字（写死也拦不住产品改措辞，那是另一件事）。
+ */
 await dropFile('备份.zip', 'PK')
 const zipBanner = await bannerText()
 console.log(`[第十二层 · ZIP] 结果条：${zipBanner}`)
-if (!zipBanner.includes('收不了')) problems.push('ZIP 该被如实拒收（还没有认领它的导入器）')
+if (!/只收 ?\.toml|没有认领它的导入器/.test(zipBanner)) {
+  problems.push(`ZIP 该被如实拒收（结果是「只收 .toml / 还没有认领它的导入器」），实测「${zipBanner}」`)
+}
 if ((await actions()).some((r) => r.name.includes('备份.zip'))) {
   problems.push('ZIP 不许被当成预设复制进「本地文件」')
 }

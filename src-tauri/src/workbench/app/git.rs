@@ -933,6 +933,30 @@ mod tests {
 
         run_in(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
         run_in(root, &["init", "-q", "-b", "main"]);
+        /*
+         * ★★ 把**这个测试仓库**的钩子关掉（`core.hooksPath` 指到一个空目录）。
+         *
+         * 本机（作者那台）有一条全局 `init.templateDir`，它给**每个新仓库**装上
+         * 「拒绝在 main 上直接提交」的 pre-commit —— 而这条判据要在临时仓库的 main 上
+         * 提交两次（第二次是"本地 tag 移到新提交"的前提），于是它必然红，
+         * 红在环境而不是代码上（2026-10-14 实测：报的是那条钩子的中文提示）。
+         *
+         * 为什么不用 `audit.rs` 那个「切任务分支」的办法：这条判据**要的就是 main**
+         * （构造本地 tag 与远端 tag 冲突时，分支名不该影响结论）；换成任务分支
+         * 等于把被测条件改掉了。所以这里只关这份仓库的钩子：
+         *   · 不动全局配置（`git config --global` 一行都不写）；
+         *   · 不动仓库的 `.git/hooks`（模板只往新建仓库里拷一次，指开就行）；
+         *   · 只影响这个临时仓库，进程退出即随 tempdir 消失。
+         */
+        let hooks_off = tempfile::tempdir().unwrap();
+        run_in(
+            root,
+            &[
+                "config",
+                "core.hooksPath",
+                hooks_off.path().to_str().unwrap(),
+            ],
+        );
         run_in(root, &["config", "user.email", "t@example.com"]);
         run_in(root, &["config", "user.name", "t"]);
         crate::fsx::atomic::atomic_write(&root.join("a.txt"), b"a\n").unwrap();

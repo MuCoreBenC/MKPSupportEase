@@ -282,12 +282,8 @@ fn migrate_state(value: &mut serde_json::Value) -> Result<(), AppError> {
 /// 只动**确实在旧前缀下**的那些路径、以及**确实写着旧枚举值**的那种字段，其余原样。
 fn migrate_v1_to_v2(value: &mut serde_json::Value) {
     let prefix = format!("{LEGACY_LOCAL_DIR}/");
-    let to_new = |rel: &str| -> String {
-        match rel.strip_prefix(&prefix) {
-            Some(rest) => format!("{}/{rest}", crate::fsx::paths::LOCAL_DIR),
-            None => rel.to_owned(),
-        }
-    };
+    /* 前缀改指与旧三文件那条路**共用同一处实现**（同一事实一套规则） */
+    let to_new = |rel: &str| -> String { repoint_legacy_prefix(rel) };
 
     /* 指针与草稿：枚举值（"mine" → "local"）+ 落点前缀（正文草稿只认路径，没有枚举） */
     for key in ["activePreset", "draft", "textDraft"] {
@@ -329,7 +325,7 @@ fn migrate_v1_to_v2(value: &mut serde_json::Value) {
 /// 迁移的读半边：`app-state.json` 还不在时，按格读三个旧文件拼出快照。
 /// 旧文件缺席 = `None`（合法）；坏档照旧 `CORRUPTED` —— 迁移不降低"坏档不静默"。
 fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
-    Ok(AppStateFile {
+    let mut snapshot = AppStateFile {
         app_state_schema: APP_STATE_SCHEMA,
         active_preset: super::state::read_active_file(root)?,
         draft: super::state::read_draft_file(root)?,
@@ -342,7 +338,50 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         theme: None,
         /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_clean_history: None,
-    })
+    };
+    retire_legacy_paths(&mut snapshot);
+    Ok(snapshot)
+}
+
+/* ---------- 旧目录前缀的读写半边（**只服务迁移**，别在别处再用这个字面量） ---------- */
+
+/// 把 `presets-mine/…` 改成 `presets-local/…`；不在旧前缀下就原样返回。
+///
+/// 两处调用：`1 → 2`（读老 `app-state.json`）与 [`retire_legacy_paths`]（旧三文件那条路）。
+/// 抽成一处是因为这两条路上的判据必须**一字不差地一样** —— 同一事实两处实现，
+/// 早晚有一天只有一处被改（这个仓库在别处已经踩过）。
+fn repoint_legacy_prefix(rel: &str) -> String {
+    let prefix = format!("{LEGACY_LOCAL_DIR}/");
+    match rel.strip_prefix(&prefix) {
+        Some(rest) => format!("{}/{rest}", crate::fsx::paths::LOCAL_DIR),
+        None => rel.to_owned(),
+    }
+}
+
+/// 旧三文件那条路（[`legacy_snapshot`]）的**补正**：把路径从旧目录前缀换成新前缀。
+///
+/// 为什么需要它：那三个文件（`run/active-preset.json` / `run/draft-preset.json`）
+/// 是 **1 代之前**的"一种状态一个文件"时代的产物，里面写的路径是**当时的**目录名
+/// `presets-mine/…`；而今天 [`super::local::check_local_prefix`] 只认 `presets-local/…`
+/// ⇒ 不换的话，那份"我自己的预设"在界面上是**隐形的**（列表里没有它，指针也解析不到）。
+///
+/// 与 `1 → 2` 是同一个语义、同一套规则，只是入口不同（那条在读 `app-state.json`，
+/// 这条在读老三文件），所以共用 [`repoint_legacy_prefix`]。
+fn retire_legacy_paths(state: &mut AppStateFile) {
+    if let Some(active) = state.active_preset.as_mut() {
+        if active.origin == super::state::ActiveOrigin::Local {
+            if let Some(rel) = active.path.as_deref() {
+                active.path = Some(repoint_legacy_prefix(rel));
+            }
+        }
+    }
+    if let Some(draft) = state.draft.as_mut() {
+        if draft.origin == super::state::ActiveOrigin::Local {
+            if let Some(rel) = draft.path.as_deref() {
+                draft.path = Some(repoint_legacy_prefix(rel));
+            }
+        }
+    }
 }
 
 /// AppState 的**唯一写入口**：读出整份 → 改这一格 → 整份原子写回。
@@ -775,6 +814,85 @@ mod tests {
             std::fs::read(state_file(d.path())).unwrap(),
             broken,
             "报错不写盘、不重置"
+        );
+    }
+
+    /// **旧三文件那条路也要改前缀**：`run/active-preset.json` 是 1 代之前写下的，
+    /// 里面那条路径是**当时的目录名** `presets-mine/…` —— 不改的话
+    /// `check_local_prefix` 认不出来，那份"我自己的预设"在界面上永远是隐形的。
+    #[test]
+    fn the_legacy_three_files_path_also_gets_repointed() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        /* 只造"使用中"那一个旧文件（另外两个缺席 = None，合法） */
+        let active_schema = state::ACTIVE_SCHEMA;
+        let json = format!(
+            "{{ \"activeSchema\": {active_schema}, \"origin\": \"local\", \
+             \"fileName\": \"A1_MINE.toml\", \"sha256\": \"abc\", \
+             \"path\": \"presets-mine/A1_MINE.toml\" }}"
+        );
+        atomic_write(
+            &d.path().join(super::super::state::ACTIVE_FILE),
+            json.as_bytes(),
+        )
+        .unwrap();
+
+        let state = load(d.path()).unwrap();
+        assert_eq!(
+            state.active_preset.unwrap().path.as_deref(),
+            Some("presets-local/A1_MINE.toml")
+        );
+        /* 读旧三文件这条路也**不落盘**：老三文件还在原处、没有 app-state.json */
+        assert!(d.path().join(super::super::state::ACTIVE_FILE).exists());
+        assert!(!state_file(d.path()).exists());
+    }
+
+    /// 云端线**不存路径**：那条路上没有东西要改，别把 `None` 变成空串。
+    #[test]
+    fn repointing_leaves_the_cloud_line_alone() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let active_schema = state::ACTIVE_SCHEMA;
+        let json = format!(
+            "{{ \"activeSchema\": {active_schema}, \"origin\": \"cloud\", \
+             \"fileName\": \"A1_MINE.toml\", \"sha256\": \"abc\" }}"
+        );
+        atomic_write(
+            &d.path().join(super::super::state::ACTIVE_FILE),
+            json.as_bytes(),
+        )
+        .unwrap();
+
+        assert!(load(d.path())
+            .unwrap()
+            .active_preset
+            .unwrap()
+            .path
+            .is_none());
+    }
+
+    /// 前置换代的**判据本身**：只认那一个旧前缀，别的一字不改（含已经在新时代的路径、
+    /// 以及"名字里恰好含 presets-mine 但不在开头"的那种）。
+    #[test]
+    fn the_legacy_prefix_rewrite_is_exact() {
+        assert_eq!(
+            repoint_legacy_prefix("presets-mine/A1.toml"),
+            "presets-local/A1.toml"
+        );
+        assert_eq!(
+            repoint_legacy_prefix("presets-mine/子目录/A1.toml"),
+            "presets-local/子目录/A1.toml",
+            "用户自己分的文件夹结构要保住"
+        );
+        assert_eq!(
+            repoint_legacy_prefix("presets-local/A1.toml"),
+            "presets-local/A1.toml",
+            "已经在新前缀下的不动"
+        );
+        assert_eq!(
+            repoint_legacy_prefix("exports/presets-mine/A1.toml"),
+            "exports/presets-mine/A1.toml",
+            "只有开头的那个前缀算数"
         );
     }
 
