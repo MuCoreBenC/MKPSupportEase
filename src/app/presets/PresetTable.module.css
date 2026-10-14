@@ -647,6 +647,64 @@
     0 8px 24px rgb(20 32 45 / 7%),
     0 1px 3px rgb(20 32 45 / 5%);
   overflow: hidden;
+
+  /*
+   * ★★ **选区边界**（2026-10-14，按真机 WKWebView 取证后的口径定的 —— 见文件末尾
+   * "选区边界"那一段的完整说明）。一句话：
+   *
+   *   容器一律**不可选**，只有"值"与文件名这两类文本亮出来（`.dVal` / `.dHeadName` /
+   *   `.dHeadMeta`）。于是拖选只落在值上，蓝**不再顺着行铺到右边去**。
+   *
+   * ⚠️ 别再对整卡开 `user-select: text` —— 那正是"一圈透明的被选了"的来路：
+   *   WebKit 的高亮沿**元素边界**铺，跨元素拖选时中间那些盒子会被整条涂上。
+   */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * ---------- 选区边界（2026-10-14，真机 WKWebView 取证后定） ----------
+ *
+ * # 真因（不是布局，是引擎）
+ *
+ * 作者两次报"拖选有一圈透明的被选了"。Chromium（浏览器预览）里一切正常 —— 因为
+ * **WebKit 的选区高亮是沿"元素边界"铺的**：只要选区跨过两个元素（比如从卡头拖到左列，
+ * 或从"版本"的值拖到"基于"的值），WebKit 就把中间那些盒子**整条**涂上，看起来就是
+ * 一个横贯的大矩形。实测（Playwright 的 WebKit 26.5，与真机同引擎）：
+ *
+ * - `Range.getClientRects()` 会给出"行盒级"的矩形（h=19，而文本块是 h=15）；
+ * - **实际绘制比 rects 更宽** —— 整行铺满、一直到卡右缘（截图比对最清楚）。
+ *
+ * # 试过且无效的路（别再走）
+ *
+ * 1. 把行/列改成行内级（`display: inline-flex` / `block` + 伪元素换行）—— WebKit 照样给元素盒；
+ * 2. 给容器 `user-select: none` 但**不动文本层**（文本仍从别处继承 text）—— 照样；
+ * 3. 收窄行盒（`width: fit-content` / `align-items: flex-start`）—— rects 变窄了，
+ *    **高亮绘制没变**（已撤掉，见 git 记录）。
+ *
+ * # 真正有效的（本段）
+ *
+ * **收窄选择边界**：容器一律不可选，只有"值 / 文件名 / 卡头那行 meta"三类文本亮出来。
+ * 于是拖选只会落在这些值上，蓝不再顺着行铺到右边、也不跨到"快捷操作"那栏去。
+ * **代价如实登记**：标签（版本 / 来源 / 基于 / 基本信息 / 快捷操作）与右列那些字不可选 ——
+ * 它们不是给人抄的（值是）；跨这几段值拖出来的仍是连续文本，能整段复制。
+ * 前缀与标准成对写，理由见 `global.css` 的"拖选（selection）的划分"。
+ */
+.detailCard .dRow,
+.detailCard .dGroup,
+.detailCard .dCol,
+.detailCard .dGrid,
+.detailCard .dMain,
+.detailCard .dHead {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.detailCard .dVal,
+.detailCard .dHeadName,
+.detailCard .dHeadMeta {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 卡的内衬：四周内边距（原来挂在 .detailCard 上） */

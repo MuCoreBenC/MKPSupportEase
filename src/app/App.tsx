@@ -15,6 +15,8 @@ import PageSettings from './settings/PageSettings'
 /* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
    拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
 import { FileImportProvider, ImportBanner } from './import/FileImport'
+import { DevPreviewProvider } from './dev/preview'
+import { DevPreviewTabs } from './dev/DevPreviewTabs'
 /* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
    普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够。
    ★ 那一趟的状态**在 App 这一层读一次**（`usePostProcessRun`），同时喂给两处：
@@ -136,6 +138,11 @@ export default function App() {
 
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>
+      {/* 开发台（`dev-preview` 事件的接收口）：只在开发构建里收得到事件，真机上是恒"没有"
+          （见 `app/dev/preview.tsx`）—— 放最外层，各页的模态框都能认领自己的那一格 */}
+      <DevPreviewProvider>
+      {/* 开发台：把那一格所在的页签切到前台（认领方在别的页签上时，光开框看不见） */}
+      <DevPreviewTabs onTab={setTab} />
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
       <FileImportProvider>
         {/* 浮层层要在最外面：它给所有弹出物提供挂载点与坐标基准 */}
@@ -187,6 +194,7 @@ export default function App() {
           <PostProcessModal view={postProcess} onOpenReport={openReport} />
         </FieldLayer>
       </FileImportProvider>
+      </DevPreviewProvider>
 
       {/* Windows 的 decorations: false 之后系统 resize 边框在可见窗口之外，
           补一圈内侧命中区让抓取带跨在边界上。macOS 不需要——系统管 resize */}

@@ -83,4 +83,3 @@ export const STORAGE = {
   clientReportExportDir: 'mkp.A40.report.exportDir',
 } as const
 
-export type StorageKey = (typeof STORAGE)[keyof typeof STORAGE]

@@ -195,6 +195,7 @@
 
   /* 全局 body 那层 user-select: none 是去"网页感"的，输入框是例外 */
   user-select: text;
+  -webkit-user-select: text;
 }
 
 .searchInput::placeholder {
@@ -482,7 +483,7 @@
   flex-direction: column;
   overflow: hidden;
   user-select: text;
-  cursor: text;
+  -webkit-user-select: text;  cursor: text;
 }
 
 .mainHead {
@@ -554,7 +555,7 @@
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   user-select: none;
-  cursor: default;
+  -webkit-user-select: none;  cursor: default;
 }
 
 .tab {

@@ -184,13 +184,21 @@ pub struct ResultFacts {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FromHook {
-    /// 开场：告诉界面这一趟在处理哪两份文件（界面拿它写标题）
+    /// 开场：告诉界面这一趟在处理哪两份文件（界面拿它写标题）—— **连左栏那张表的事实一起**
+    /// （机型 / 耗材 / 大小 / 喷嘴 / 层高，见 [`FactsPayload`]）。
+    ///
+    /// ★ 2026-10-14 作者：「需要一起带过来」。原来事实是**紧跟着的单独一条**
+    /// （`Hello` → `Facts`，差几十毫秒）：界面上就是"框先开成一条、数字再一个个蹦出来"——
+    /// 作者说的"闪一下"。并成一条之后，框**一出现就是完整形态**，一个数都不会在眼前换。
+    ///
+    /// `facts: None` 只有一种情况：**还没走到读数那一步就失败了**（预设不在 / G-code 不在 /
+    /// 读不动 / 载不动）—— 界面照旧要开窗（它得把失败那句话摆出来），只是表里全是 `—`。
     Hello {
         preset_name: String,
         gcode_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        facts: Option<FactsPayload>,
     },
-    /// 紧接着开场：那几个事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）—— 见 [`FactsPayload`]
-    Facts(FactsPayload),
     Progress(ProgressPayload),
     Question(QuestionPayload),
     /// 打印时间估算**交给你了**：钩子写完盘就退，界面按 id 补全那条记录。
@@ -203,6 +211,18 @@ pub enum FromHook {
     },
     /// 结论。之后钩子就退了（界面把它留在屏上，等下一次）
     Finished(Box<FinishedPayload>),
+    /// **开发台的演出指令**：让界面把某一屏"演"出来（进度 / 成功 / 失败 / 那一问…）。
+    ///
+    /// 它**不是钩子发的** —— 是工作台「开发台」发来的（跨进程，走同一条 loopback 口）。
+    /// 收消息那一侧（`hook_ui`）会把 `scene` 交给 `devsim` 演一遍，演出走的是与真钩子
+    /// **同一个落点**（`HookView::apply`），但会置一个 `preview` 标记 —— 界面据此把
+    /// 那几颗真业务按钮禁掉、标上「预览模式」（作者 2026-10-14 裁定）。
+    ///
+    /// `scene` = `devsim::Mode::id()`（`success` / `fail` / `cancel` / `question`）
+    /// 之外的稳定串；认不出的串**什么都不做**（如实，不编一屏出来）。
+    DevScene {
+        scene: String,
+    },
 }
 
 /// 界面 → 钩子。
@@ -547,6 +567,8 @@ mod tests {
         client.send(&FromHook::Hello {
             preset_name: "A1_MINI-fast.toml".to_owned(),
             gcode_name: "45600.0.gcode".to_owned(),
+            /* 线上那条只验"载得动"：事实那一包并进开场了，给 None 就够 */
+            facts: None,
         });
         client.send(&FromHook::Progress(ProgressPayload {
             step: "pass1".to_owned(),
@@ -606,6 +628,36 @@ mod tests {
         );
     }
 
+    /// 开发台那条演出指令也走这条线：`dev-scene` 一行 JSON 载得动、认得回。
+    #[test]
+    fn the_wire_carries_a_dev_scene() {
+        let d = tempfile::tempdir().expect("临时根");
+        let listener = bind_for_display(d.path()).expect("第一个界面进程该能当显示");
+        let got = Arc::new(Mutex::new(Vec::<FromHook>::new()));
+        let seen = got.clone();
+        let _handle = listener.serve(move |msg| seen.lock().expect("锁没坏").push(msg));
+
+        let cancel = CancelToken::new();
+        let client = Client::connect_or_headless(d.path(), &cancel);
+        assert!(client.connected(), "端点文件刚写出来，该连得上");
+        /* 工作台发的那一条：只带一个稳定场景串（`devsim::Mode::id()`） */
+        client.send(&FromHook::DevScene {
+            scene: "fail".to_owned(),
+        });
+
+        assert!(
+            wait_until(|| !got.lock().expect("锁没坏").is_empty()),
+            "这一条该到"
+        );
+        let messages = got.lock().expect("锁没坏").clone();
+        assert_eq!(
+            messages[0],
+            FromHook::DevScene {
+                scene: "fail".to_owned()
+            }
+        );
+    }
+
     /// **没有界面也照旧干活**：连不上 = 一条无头线，`send` / `ask` 都不炸，`ask` 给"不跑"。
     #[test]
     fn without_a_display_the_hook_still_works() {
@@ -616,6 +668,7 @@ mod tests {
         client.send(&FromHook::Hello {
             preset_name: "a.toml".to_owned(),
             gcode_name: "b.gcode".to_owned(),
+            facts: None,
         });
         assert!(!client.ask("继续吗？"), "没有界面看的时候不许替你决定");
     }

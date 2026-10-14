@@ -323,6 +323,13 @@
    没用 auto-fit：它在某些宽度会多排一条塌成 0 的轨道，那条轨道的 gap 还占着，整条会偏左几像素。 */
 .axes {
   /*
+   * 不参与任何弹性分配：列贴顶之后这一行的 y 只由
+   * 「卡片上内边距 + 自己前面那一行」决定 —— 板块框变高变矮、甚至列开始滚动，
+   * 它都钉在那个位置上。（原来还有「预设文件」那一行陪着它钉 —— 那一整块 2026-10-14 删了，
+   * 见 `.presetPill` 那段；`flex: 0 0 auto` 就是从那条共用规则里挪过来的。）
+   */
+  flex: 0 0 auto;
+  /*
    * 三个并列的数：按内容宽排、整行在列里居中。
    * 原来是 width: 100% + 三等分铺满 + 左对齐 —— 这一页 X / Y 根本不会变，
    * 把它们摊到最左、还把当前轴挤到卡片右缘切掉「mm」，是本末倒置。
@@ -596,66 +603,12 @@
 .axes[data-orient='col'] .axis {
   gap: 2px;
 }
-/* 校准页上方那一行「这是哪一份预设」。缝里不显形，所以这里按当前页的宽度排 */
-.calibPreset {
-  width: 100%;
-  min-width: 0;
-}
-
-/*
- * 头两行（预设 + 三轴读数）不参与任何弹性分配：列贴顶之后它们的 y 只由
- * 「卡片上内边距 + 自己前面那一行」决定 —— 板块框变高变矮、甚至列开始滚动，
- * 这两行都钉在预设行那个位置上。
- */
-.calibPreset,
-.axes {
-  flex: 0 0 auto;
-}
-
-.presetLine {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  margin: 0;
-  min-width: 0;
-}
-
-.presetLineLabel {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  color: var(--text-3);
-}
-
-/*
- * 预设文件下拉：吃满这一行剩下的宽度，看起来就是一条输入框那样的"可改的位置"。
- * 用原生 select —— 键盘、滚轮、长列表全是系统行为，自造弹层在扁窗里反而更难点。
- * 字号不跟窗口缩：文件名本来就长，再缩就读不清。
- */
-.presetSelect {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  /* 玻璃面走 --glass（2026-10-12 深色第二遍）：写死的白在深色里是一条发亮的输入框 */
-  background: var(--glass);
-  color: var(--text-1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  cursor: pointer;
-}
-.presetSelect:hover {
-  border-color: var(--text-3);
-  background: var(--glass-hover);
-}
 
 /*
  * 预设 pill（挂在卡片右上角，CardFrame 的 corner）：文件名 + 切换。
  * 10-03 作者裁决：切换预设不用这么显眼，绿底让给「打开模型」—— 那才是这一步的主入口。
- * 上面的原生下拉不再由首页渲染（PresetLineA44 还在，g06-7 抽卡稿挂着它），样式留着不删。
+ * （原来挂在内容列里的「预设文件」行 + 那个原生下拉 2026-10-14 整块删了 —— 死代码，
+ * 来路见 `CalibHead.tsx` 里那段说明。）
  *
  * ★ 2026-10-13（作者：「这个按钮风格不对，要改成胶囊的……为什么我这个是气泡，
  * 但 Z 偏移校准的不是气泡」）：原来 4px 方角 —— 有名字的那一态（「本地文件.toml」）
@@ -677,6 +630,11 @@
   font: inherit;
   font-size: 12.5px;
   cursor: pointer;
+
+  /* ★ 名字可拖选（2026-10-14 作者：「我希望这一些可以选」）—— 这颗就是"当前是哪一份"，
+     点它是切换（按钮行为），名字本身是给人抄的。 */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .presetPill:hover {
@@ -832,7 +790,7 @@
 
 .axisField:not([data-readonly='true']):focus-within {
   border-color: var(--accent);
-  /* 同 .presetSelect：聚焦底也走 --glass（深色里换磨砂黑玻璃，不再是一块白） */
+  /* 聚焦底走 --glass（深色里换磨砂黑玻璃，不再是一块白）：与输入框那族同一个口径 */
   background: var(--glass);
 }
 

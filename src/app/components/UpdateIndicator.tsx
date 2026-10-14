@@ -57,15 +57,32 @@ export function isVisible(state: UpdateState): boolean {
 interface Props {
   /** 装好了（退出后重启的账变了） */
   onInstalled: (version: string) => void
+  /**
+   * 开发台：**不用真事件也摆出某一态**（作者 2026-10-14）。
+   *
+   * 平时这一格的状态全是事件 / 云端推来的（`software-update-progress` + `updateInfo`），
+   * 演示时没办法即兴造一场"正在下载 62%"出来 —— 所以留这一个口子：给了它就用它，
+   * 面板默认展开。**正式代码不传它 ⇒ 行为一字不变**。
+   *
+   * 只影响"摆哪一态"，那几颗按钮（暂停 / 取消 / 重试）照旧调真 api ——
+   * 演示时不点它们（点了也只是如实报"现在没有下载"）。
+   */
+  devPreview?: UpdateState
 }
 
-export default function UpdateIndicator({ onInstalled }: Props) {
+export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
   const [state, setState] = useState<UpdateState>({ state: 'idle' })
   /** 有新版吗 + 那个安装包（`null` = 还没问 / 问不到） */
   const [info, setInfo] = useState<UpdateInfo | null>(null)
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  /* 演示态：面板默认摊开，一眼看到那一屏 */
+  const demo = devPreview !== undefined
+  useEffect(() => {
+    if (demo) setOpen(true)
+  }, [demo])
 
   /* 进度事件：后端每 120ms 推一次同一个 `UpdateState` 形状 */
   useEffect(() => {
@@ -93,7 +110,8 @@ export default function UpdateIndicator({ onInstalled }: Props) {
   }, [])
 
   const idle: UpdateState = { state: 'idle' }
-  const shown = state.state === 'idle' ? idle : state
+  /* 演示态优先（给了它就用它，不看真事件） */
+  const shown = devPreview ?? (state.state === 'idle' ? idle : state)
 
   const act = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true)

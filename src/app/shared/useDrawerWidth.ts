@@ -112,16 +112,20 @@ export function useDrawerWidth(opts: Options): DrawerWidth {
     [storageKey],
   )
 
-  /* 拖动期间锁掉选中与光标：不然拖过参数区会把标签文字刷成一片蓝 */
+  /* 拖动期间锁掉选中与光标：不然拖过参数区会把标签文字刷成一片蓝。
+     ★ 前缀与标准成对写 —— WKWebView 上这两套账（见 `global.css` 的"拖选（selection）的划分"） */
   useEffect(() => {
     if (!dragging) return
     const { body } = document
     const prevSelect = body.style.userSelect
+    const prevWebkitSelect = body.style.getPropertyValue('-webkit-user-select')
     const prevCursor = body.style.cursor
     body.style.userSelect = 'none'
+    body.style.setProperty('-webkit-user-select', 'none')
     body.style.cursor = 'col-resize'
     return () => {
       body.style.userSelect = prevSelect
+      body.style.setProperty('-webkit-user-select', prevWebkitSelect)
       body.style.cursor = prevCursor
     }
   }, [dragging])

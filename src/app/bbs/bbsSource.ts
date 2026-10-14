@@ -236,17 +236,6 @@ export function labelOf(item: BbsPresetItem, items: BbsPresetItem[]): string {
   return parts.length ? `${item.name}（${parts.join(' · ')}）` : item.name
 }
 
-export function modelsOf(items: BbsPresetItem[]): { model: string; count: number }[] {
-  const count = new Map<string, number>()
-  for (const it of items) {
-    if (it.isAbstract) continue
-    count.set(it.model, (count.get(it.model) || 0) + 1)
-  }
-  return [...count.entries()]
-    .map(([model, n]) => ({ model, count: n }))
-    .sort((a, b) => (b.count - a.count) || a.model.localeCompare(b.model))
-}
-
 /* 筛选档位：三层。`all` / `打印机|*`（该机型全部喷嘴）/ `打印机|0.4`（某个喷嘴）
  * 之所以要分喷嘴：BBS 的下拉只列当前喷嘴那一档（A1 mini 的 29 份系统预设里 0.4 只有 10 份），
  * 不分的话你会在列表里看到一堆装不上的预设。 */

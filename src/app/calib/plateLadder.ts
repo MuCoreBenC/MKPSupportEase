@@ -68,4 +68,3 @@ const built = build()
 
 /** 热区 id → 这一格代表哪个轴、加多少 */
 export const LADDER = built.pick
-export const LADDER_META = built.meta

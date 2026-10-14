@@ -103,7 +103,9 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
     let win =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
             .title(window_title())
-            .inner_size(1360.0, 900.0)
+            /* 默认尺寸（作者 2026-10-14「工作台默认窗口不要那么大」）：1360×900 太大 ——
+            改 1080×720（常见的紧凑工作区尺寸）。最小尺寸不变，用户照旧能拉到更大 */
+            .inner_size(1080.0, 720.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)
             /*

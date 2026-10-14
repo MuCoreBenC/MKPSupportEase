@@ -375,19 +375,30 @@ fn facts_from(
     raw: &str,
     file_size_bytes: u64,
 ) -> crate::hook_ipc::FactsPayload {
+    /* 输入头里那几格**读文件那一刻就认**（2026-10-14 作者：「它怎么就不显示那一个喷嘴层高…
+    肯定获取得到」）—— 喷嘴 / 层高 / 切片软件版本都写在头的 `;` 注释里，不必等 pass1。
+    原来它们只在 pass1 的逐行循环里认，而这张表**开场就推给界面**（pass1 还没跑），
+    于是真机上一直是 `—`，跑完也不补。
+    取值口径（谁优先）：**这份文件自报的**（头行）> IR（预设里的；真预设的 `[toolhead]`
+    段本来就不含这两项，所以通常是 0）> `0`（界面摆 `—`，见 `baseGroup`）。 */
+    let head = postprocess::postproc::head_facts::read_head_facts(raw);
     crate::hook_ipc::FactsPayload {
         gcode_machine: ir.machine.gcode_machine_type.clone(),
         preset_machine: ir.machine.machine_type.clone(),
         filament_type: ir.filament.filament_type.clone(),
         file_size_bytes,
-        nozzle_diameter: ir.machine.nozzle_diameter,
-        layer_height: ir.machine.typical_layer_height,
+        nozzle_diameter: head.nozzle_diameter.unwrap_or(ir.machine.nozzle_diameter),
+        layer_height: head.layer_height.unwrap_or(ir.machine.typical_layer_height),
         /* 这两格给「切片与预估」那一栏（跑着的时候就摆）：都来自预设这份 IR ——
          * 涂胶速度的换算与归档同一条（`archive::glue_speed_of`） */
         glue_speed: Some(crate::archive::glue_speed_of(ir)),
-        /* 预设里那个名字（如 `"BambuStudio"`）。带版本号的完整串要等 pass1 从输入头行刮到，
-         * 那是跑完的 `result.slicer` —— 这一刻手上没有，不编 */
-        slicer: Some(ir.filament.slicer.clone()),
+        /* 切片软件：**带版本号的完整串**头里就有（`; BambuStudio 02.08.02.60`）——
+        跑着的时候那格就摆它，与跑完 `result.slicer` 同形同源（作者 2026-10-14 问的那句）。
+        头里没有（别的切片器 / 被裁过）⇒ 退回预设里那个名字，比空着强 */
+        slicer: Some(
+            head.slicer_version
+                .unwrap_or_else(|| ir.filament.slicer.clone()),
+        ),
         /* 切片器自报的预估总时长（输入头里 `; total estimated time` 那一行）：
          * 跑着的时候那一格摆它；跑完换成内核重算的（`result.printTimeSeconds`） */
         slicer_print_time_seconds: postprocess::postproc::printtime::slicer_estimated_seconds(raw),
@@ -422,7 +433,7 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
 /// `defer_print_time`：**必须确认有界面接手才传 `true`** —— 打印时间是纯报告数据，
 /// 延后能省几百毫秒；但没人接手时传 `true` 会让那条记录永远停在"正在估算"。
 ///
-/// `ui`：只给界面看的那几条（目前只有开场的事实那一条），没有界面时传 [`UiLine::Silent`]。
+/// `ui`：只给界面看的那一条（开场那条 `Hello`，事实跟着它一起走），没有界面时传 [`UiLine::Silent`]。
 pub fn run(
     job: &HookJob,
     sink: &mut dyn ProgressSink,
@@ -433,26 +444,53 @@ pub fn run(
 ) -> Result<Outcome, HookError> {
     let started = Instant::now();
 
+    /* ★ **开场那一条 `Hello` 连事实一起发**（作者 2026-10-14：「需要一起带过来」）——
+    所以它不能像原来那样在 [`run_with_channel`] 一进门就发（那时还没读文件、没有事实），
+    而是搬到这里：在"事实算得出来 / 算不出来"的**第一个分岔点**上发**唯一一条**
+    （`hello_sent` 兜底：几个早期出口谁先到谁发，后面的不再重复）。
+
+    四个早期出口（预设不在 / G-code 不在 / 读不动 / 载不动）**都要喊一声** ——
+    不然界面根本不开窗，用户只能对着切片器那句退出码发呆。
+    那一刻表里全是 `—`（`facts: None`），但"这一趟失败了"那句人话摆得出来。 */
+    let mut hello_sent = false;
+    let mut say_hello = |facts: Option<crate::hook_ipc::FactsPayload>| {
+        if hello_sent {
+            return;
+        }
+        hello_sent = true;
+        ui.send(crate::hook_ipc::FromHook::Hello {
+            preset_name: file_name_of(&job.toml),
+            gcode_name: file_name_of(&job.gcode),
+            facts,
+        });
+    };
+
     // 前置检查（廉价）先做，且要说人话：这两句会出现在切片器的错误对话框里
     if !job.toml.is_file() {
+        say_hello(None);
         return Err(HookError::bad_input(
             Reason::new(keys::PRESET_MISSING).with("path", job.toml.display().to_string()),
         ));
     }
     if !job.gcode.is_file() {
+        say_hello(None);
         return Err(HookError::bad_input(
             Reason::new(keys::GCODE_MISSING).with("path", job.gcode.display().to_string()),
         ));
     }
 
     // 输入正文要读进内存：预设 → IR 的最后一步（机型 + 禁区）要拿它比 G-code 自报的机型
-    let raw = std::fs::read_to_string(&job.gcode).map_err(|e| {
-        HookError::bad_input(
-            Reason::new(keys::GCODE_UNREADABLE)
-                .with("path", job.gcode.display().to_string())
-                .with("detail", e.to_string()),
-        )
-    })?;
+    let raw = match std::fs::read_to_string(&job.gcode) {
+        Ok(raw) => raw,
+        Err(e) => {
+            say_hello(None);
+            return Err(HookError::bad_input(
+                Reason::new(keys::GCODE_UNREADABLE)
+                    .with("path", job.gcode.display().to_string())
+                    .with("detail", e.to_string()),
+            ));
+        }
+    };
 
     // 记账起点（本地时刻）：归档记录里的 `startedAt`。读文件之后、干活之前 ——
     // 口径是「这一趟从哪一刻开始」，不是进程启动时刻。
@@ -467,6 +505,8 @@ pub fn run(
     let ir = match preset::load_ir(&job.toml, Some(&raw)) {
         Ok(ir) => ir,
         Err(e) => {
+            /* 界面得开窗把这次失败摆出来（真实原因多半就在下面那句话里）—— 表里全是 `—` */
+            say_hello(None);
             /* 码与参数**原样搭过来**（`From<PostprocError>`）：句子由表渲染，
             这一层不再有 `预设不可用 [码]：…` 那种自己拼的前缀（那正是两层码的来路）。
             档位改成"输入不可用"：这一步失败原文件一字未动，退出码该是 2 */
@@ -486,16 +526,13 @@ pub fn run(
     };
 
     /*
-     * 一开场先把左栏那张表要的事实报过去（机型 / 耗材 / 大小 / 喷嘴 / 层高）。
+     * 一开场把左栏那张表要的事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）**连开场那一条一起**报过去
+     * （2026-10-14 起并成一条：界面上框一出现就是完整形态，值不会在眼前换一轮）。
      *
      * ★ 位置就在**机型核对之前**：这一刻两个机型都在手上，而下面那一问正是拿它俩比 ——
      *   用户看着表上那两行答"要不要继续"才答得明白（旧世代那屏也是这么摆的）。
      */
-    ui.send(crate::hook_ipc::FromHook::Facts(facts_from(
-        &ir,
-        &raw,
-        raw.len() as u64,
-    )));
+    say_hello(Some(facts_from(&ir, &raw, raw.len() as u64)));
 
     // 机型核对：预设说一台、切片器那份自报另一台 —— 维度与边界全按预设算，
     // 闷头跑出来的是垃圾（旧世代那次实测：A1 的图 + A1 mini 的预设，
@@ -962,10 +999,9 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         Some(root) => crate::hook_ipc::Client::connect_or_spawn(root, &cancel),
         None => crate::hook_ipc::Client::headless(&cancel),
     };
-    client.send(&crate::hook_ipc::FromHook::Hello {
-        preset_name: file_name_of(&job.toml),
-        gcode_name: file_name_of(&job.gcode),
-    });
+    /* ★ 开场那一条 `Hello` **不在这里发**（2026-10-14）：它现在**连事实一起**走一条，
+    而事实要等输入读进来、预设载完才算得出来 —— 发点搬进了 [`run`]，见那儿
+    "开场那一条"那段注释。 */
 
     /* 看门狗：偶尔抬头看一次"还在动吗"，到点就**请求取消**并把理由写进结论 */
     let watch = Watch::new();
@@ -1307,10 +1343,11 @@ mod tests {
         p.to_path_buf()
     }
 
-    /// 开场那条事实：从 IR 与输入字节数里取，**一格都不许错位**
-    /// （两个机型最容易反：`preset` 是维度与边界按它算的那一份，`gcode` 是切片器自报的）。
+    /// 开场那条事实：机型 / 耗材 / 大小取 IR，**「这份文件自报的」那几格优先于 IR**，
+    /// 一格都不许错位（两个机型最容易反：`preset` 是维度与边界按它算的那一份，
+    /// `gcode` 是切片器自报的）。
     #[test]
-    fn the_opening_facts_come_straight_from_the_ir() {
+    fn the_opening_facts_prefer_this_file_over_the_ir() {
         let mut ir = postprocess::ir::Ir::default();
         ir.machine.machine_type = "A1_MINI".to_owned();
         ir.machine.gcode_machine_type = "A1".to_owned();
@@ -1321,38 +1358,44 @@ mod tests {
         ir.toolhead.max_speed = 4_200.0; // 70 mm/s × 60（内核这一格是 mm/min）
         ir.filament.slicer = "BambuStudio".to_owned();
 
-        /* 输入头里那一行（切片器自报的预估总时长）：`3h 22m 55s` ⇒ 12175 秒 */
+        /* 输入头（真 G-code 的样子）：版本串 + 自报的预估总时长 + 喷嘴 / 层高 */
         let raw = "; BambuStudio 02.06.01.55\n\
                    ; model printing time: 3h 16m 52s; total estimated time: 3h 22m 55s\n\
+                   ; nozzle_diameter = 0.6\n\
+                   ; layer_height = 0.12\n\
                    G1 X1\n";
         let f = facts_from(&ir, raw, 3_355_443);
         assert_eq!(f.preset_machine, "A1_MINI");
         assert_eq!(f.gcode_machine, "A1");
         assert_eq!(f.filament_type, "PETG");
-        assert_eq!(f.nozzle_diameter, 0.4);
-        /* 层高取**常规**那一档（旧世代那张表摆的是 0.20，不是首层 0.25） */
-        assert_eq!(f.layer_height, 0.2);
         assert_eq!(f.file_size_bytes, 3_355_443);
+        /* ★ 喷嘴 / 层高 / 切片软件：**这份文件自报的优先**（2026-10-14）——
+        头里的 0.6 / 0.12 / 完整版本串盖过 IR 里的 0.4 / 0.2 / 名字。
+        那张表**开场就要摆**（等 pass1 来不及：真机上一直是 `—`）。
+        层高认的是**常规**那一档（`; layer_height`），不是首层那条 */
+        assert_eq!(f.nozzle_diameter, 0.6, "头行自报的喷嘴优先于 IR");
+        assert_eq!(f.layer_height, 0.12, "头行自报的层高优先于 IR");
         /* 「切片与预估」那一栏的三格（跑着的时候就摆）：
-        涂胶速度 = mm/min ÷ 60（与归档 `glueSpeed` 同一处换算）；切片软件取 IR 那个名字；
-        预估打印时间 = **切片器自报的**那一行 */
+        涂胶速度 = mm/min ÷ 60（与归档 `glueSpeed` 同一处换算）；
+        切片软件 = 头里的完整串；预估打印时间 = **切片器自报的**那一行 */
         assert_eq!(
             f.glue_speed,
             Some(70.0),
             "换算必须与归档同一处：{:?}",
             f.glue_speed
         );
-        assert_eq!(f.slicer.as_deref(), Some("BambuStudio"));
+        assert_eq!(f.slicer.as_deref(), Some("BambuStudio 02.06.01.55"));
         assert_eq!(
             f.slicer_print_time_seconds,
             Some(12_175.0),
             "3h 22m 55s 该被读成 12175 秒"
         );
-        /* 头里没有那一行 ⇒ 不摆（`None`，不是 0） */
-        assert_eq!(
-            facts_from(&ir, "G1 X1\n", 1).slicer_print_time_seconds,
-            None
-        );
+        /* 头里那几行缺席（别的切片器 / 被裁过）⇒ 退回 IR；预估时长那格不摆（`None`，不是 0） */
+        let bare = facts_from(&ir, "G1 X1\n", 1);
+        assert_eq!(bare.nozzle_diameter, 0.4, "头行缺席 ⇒ 退回 IR");
+        assert_eq!(bare.layer_height, 0.2);
+        assert_eq!(bare.slicer.as_deref(), Some("BambuStudio"));
+        assert_eq!(bare.slicer_print_time_seconds, None);
     }
 
     /// 仓库里那份夹具预设（与内置产物同构）—— 机型 A1 / 变体 fast

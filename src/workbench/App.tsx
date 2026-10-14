@@ -59,6 +59,7 @@ import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
 import BuildPage from './views/BuildPage'
 import SettingsPage from './views/SettingsPage'
+import DevPage from './views/DevPage'
 import s from './c14.module.css'
 
 /**
@@ -142,6 +143,17 @@ const NAV: NavItem[] = [
       <>
         <circle cx="12" cy="12" r="3" />
         <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
+      </>
+    ),
+  },
+  /* 扳手 = 开发台（把看不见的那几屏做成按钮；只在 workbench 构建里存在） */
+  {
+    id: 'dev',
+    label: '开发台',
+    icon: (
+      <>
+        <path d="M14.7 6.3a3.5 3.5 0 0 0 4.6 4.6l-1.9-1.9 1.4-1.4 1.9 1.9a3.5 3.5 0 0 1-4.6-4.6z" />
+        <path d="M14.7 6.3 4.5 16.5a1.5 1.5 0 0 0 2.1 2.1L17 8.4" />
       </>
     ),
   },
@@ -531,6 +543,8 @@ export function WorkbenchApp() {
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
       case 'settings':
         return '只读 —— 数据根与工作台子目录的职责'
+      case 'dev':
+        return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
   }, [page, book, report])
 
@@ -559,10 +573,15 @@ export function WorkbenchApp() {
         return <PageSkeleton layout="cols" cards={2} rows={6} label="资产库正在加载" />
       case 'settings':
         return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
+      case 'dev':
+        return <PageSkeleton layout="flow" cards={2} rows={5} label="开发台正在加载" />
     }
   }
 
   const renderPage = (id: NavId): ReactNode => {
+    /* 开发台不依赖整本 / 词表（它读的是后处理状态与场景清单）—— 先于数据闸渲染，
+       不必跟着"整本还没到"一起给骨架 */
+    if (id === 'dev') return <DevPage />
     /* 数据没到先给骨架（不再黑屏）—— 见 skeletonFor 的注 */
     if (!book || !words) return skeletonFor(id)
     switch (id) {

@@ -116,6 +116,8 @@ export function usePostProcessRun(): PostProcessRunView {
         question: null,
         progress: null,
         finished: null,
+        /* 开发台演出来的那一趟带 `preview: true` —— 界面据此禁掉真业务按钮 */
+        preview: started.preview,
       })
       setDismissed(false)
       setSinceMs(Date.now())

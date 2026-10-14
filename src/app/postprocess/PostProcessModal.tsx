@@ -44,6 +44,7 @@ import { Btn } from '../ui/Controls'
 import { Modal } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { percentOf, stepName } from './steps'
+import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
 import s from './PostProcessModal.module.css'
 
@@ -128,10 +129,18 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
       { label: 'G-code 机型', value: facts?.gcodeMachine ?? '—' },
       { label: '预设机型', value: facts?.presetMachine ?? '—' },
       {
+        /* 喷嘴那一格：`0` 是"没有值"的哨兵（内核缺值一律 0）—— 别把它当 0.00 mm 摆出去
+           （作者 2026-10-14：「它怎么就不显示那一个喷嘴层高」）。真值现在由内核
+           从输入头 `; nozzle_diameter = ` 认（`pass1::adopt_nozzle_and_layer_height`）。 */
         label: '耗材 / 喷嘴',
-        value: `${facts?.filamentType ?? '—'} · ${mmText(facts?.nozzleDiameter ?? 0)} mm`,
+        value:
+          facts === null
+            ? '—'
+            : `${facts.filamentType} · ${
+                facts.nozzleDiameter > 0 ? `${mmText(facts.nozzleDiameter)} mm` : '—'
+              }`,
       },
-      { label: '层高', value: `${mmText(facts?.layerHeight ?? 0)} mm` },
+      { label: '层高', value: facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—' },
     ],
   }
 }
@@ -144,15 +153,15 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
  * 缺哪格不摆哪格。
  */
 function runGroup(facts: PostProcessFacts | null): FactGroup {
-  const rows: FactRow[] = []
-  if (facts?.slicerPrintTimeSeconds !== undefined) {
-    rows.push({ label: '预估打印时间', value: printTimeText(facts.slicerPrintTimeSeconds) })
-  }
-  rows.push({ label: '文件大小', value: facts === null ? '—' : sizeText(facts.fileSizeBytes) })
-  if (facts?.glueSpeed !== undefined) {
-    rows.push({ label: '涂胶速度', value: speedText(facts.glueSpeed) })
-  }
-  if (facts?.slicer !== undefined) rows.push({ label: '切片软件', value: facts.slicer, grey: true })
+  const rows: FactRow[] = [
+    {
+      label: '预估打印时间',
+      value: facts?.slicerPrintTimeSeconds === undefined ? '—' : printTimeText(facts.slicerPrintTimeSeconds),
+    },
+    { label: '文件大小', value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
+    { label: '涂胶速度', value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
+    { label: '切片软件', value: facts?.slicer ?? '—', grey: true },
+  ]
   return { title: '切片与预估', rows }
 }
 
@@ -163,12 +172,14 @@ function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null
   /* 打印时间**常常是后到的**（有界面时延后算）：先空着，`postprocess-print-time` 到了再补；
    * 失败 / 取消时退回开场那一格（切片器自报的）—— 有就摆，比空着强 */
   const printSec = res?.printTimeSeconds ?? facts?.slicerPrintTimeSeconds
-  if (printSec !== undefined) {
-    rows.push({ label: '预估打印时间', value: printTimeText(printSec) })
-  }
-  if (res?.glueLengthMm !== undefined) {
-    rows.push({ label: '涂胶总长', value: mm2(res.glueLengthMm) })
-  }
+  rows.push({
+    label: '预估打印时间',
+    value: printSec === undefined ? '—' : printTimeText(printSec),
+  })
+  rows.push({
+    label: '涂胶总长',
+    value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
+  })
   /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
   rows.push({
     label: '处理耗时 / 大小',
@@ -178,7 +189,7 @@ function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null
   })
   /* 切片软件：跑完给带版本的完整串；失败 / 取消时退回开场那个名字（总比空着强） */
   const slicer = res?.slicer ?? facts?.slicer
-  if (slicer !== undefined) rows.push({ label: '切片软件', value: slicer, grey: true })
+  rows.push({ label: '切片软件', value: slicer ?? '—', grey: true })
   return { title: '擦料与胶水消耗', rows }
 }
 
@@ -207,18 +218,38 @@ function FactsGroups({ groups }: { groups: FactGroup[] }) {
 
 /* ---- ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽条嵌底） ---- */
 
-function ProgressHero({ percent, step, eta }: { percent: number; step: string; eta: string | null }) {
+function ProgressHero({
+  percent,
+  step,
+  eta,
+  done,
+}: {
+  /** 事件给的**真实**百分比（不是显示值） */
+  percent: number
+  step: string
+  eta: string | null
+  /** 跑完没有 —— 置位后条子把最后几个点走完再交给结果态（见 `SETTLE_MS`） */
+  done: boolean
+}) {
+  /*
+   * ★ 显示值由 rAF **命令式**直写 DOM（不经过 React）：
+   *   - 每帧 setState 会被 React 调度器合并/延后 ⇒ 真机上数字与条子一跳一跳（作者录屏）；
+   *   - 这里只在 rAF 里改 textContent 与 style.width 两个属性，零 diff、零重渲。
+   * JSX 里**故意**留空内容与 0 宽：React 重渲（倒计时每秒 tick）后由 hook 的
+   * 无依赖 effect 把当前值补写回去。
+   */
+  const { numRef, fillRef } = useSmoothPercent(percent, done)
   return (
     /* 不给 role="status"：这一块每秒都在动（百分比 / 倒计时），朗读器会被念个不停 */
     <div className={`${s.hero} ${s.heroSide}`}>
-      <span className={s.heroNum}>{Math.round(percent)}%</span>
+      <span className={s.heroNum} ref={numRef} />
       <div className={s.heroMeta}>
         <span className={s.heroStep}>{step}</span>
-        <span className={s.heroEta}>{eta ?? '正在估算…'}</span>
+        <span className={s.heroEta}>{done ? '正在收尾…' : (eta ?? '正在估算…')}</span>
       </div>
       {/* 进度条是定稿皮（pb1「凹槽条」：绿底上凿出来的一道槽），不是普通白条 */}
       <div className={`${s.heroBar} ${s.heroBarGroove}`}>
-        <span className={s.heroBarFill} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+        <span className={s.heroBarFill} ref={fillRef} style={{ width: '0%' }} />
       </div>
     </div>
   )
@@ -358,6 +389,30 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
 
   const finished = run?.finished ?? null
   const running = run !== null && finished === null
+  /*
+   * 收尾窗口：跑完那一刻**先让条子把最后几个点走完**（95% → 100%），再切结果态。
+   * 作者 2026-10-14：「最后 95% 的时候就直接结束消失了，出现了结果页面」—— 太突兀。
+   * `SETTLE_MS`（420ms）与 `useSmoothPercent` 的逼近速度配套（95 → 100 约 0.3s）。
+   */
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    if (finished === null) {
+      setSettled(false)
+      return
+    }
+    const id = window.setTimeout(() => setSettled(true), SETTLE_MS)
+    return () => window.clearTimeout(id)
+  }, [finished])
+  /** 顶上那一块现在该按"跑着"画（含收尾窗口）：进度 hero 一直挂到条子走完 */
+  const showProgress = running || !settled
+  /**
+   * 这一屏是**开发台演出来的**（不是真钩子跑出来的）。
+   *
+   * 那几颗真业务按钮（停止 / 后台运行 / 强制继续 / 终止）走的是真钩子回写线，
+   * 预览里没有那条线 —— 点了只会如实报"现在没有在跑后处理"（作者 2026-10-14：
+   * 预览就明确是预览，不许点出真业务）。所以预览里把它们**禁掉**，并标一句「预览模式」。
+   */
+  const preview = run?.preview === true
 
   useEffect(() => {
     if (!running) return
@@ -389,12 +444,14 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   let lead: ReactNode = null
   if (asking && run.question !== null) {
     lead = <WarnHero text={run.question.text} />
-  } else if (running) {
+  } else if (showProgress) {
     lead = (
       <ProgressHero
-        percent={percent}
+        /* 收尾窗口里目标直接给 100：让条子走完那最后几个点，而不是停在 95% 被切走 */
+        percent={running ? percent : 100}
         step={run.progress === null ? '准备中' : stepName(run.progress.step)}
         eta={eta}
+        done={!running}
       />
     )
   } else if (finished !== null) {
@@ -425,9 +482,10 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     <Modal
       open
       size="md"
-      title={running ? '后处理进度' : '后处理结果'}
-      /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它 */
-      subtitle={run.gcodeName}
+      title={showProgress ? '后处理进度' : '后处理结果'}
+      /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它。
+      预览里前面加「预览 ·」—— 一眼看出这不是真跑（页脚那枚小字之外的第二处） */
+      subtitle={preview ? `预览 · ${run.gcodeName}` : run.gcodeName}
       /* 跑着的时候点遮罩不关（见文件头第 1 条）；要收起来请按「后台运行」 */
       closeOnScrim={!running}
       /* 跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作。
@@ -437,7 +495,16 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       closeOnEsc={!running}
       onClose={dismiss}
       footer={
-        asking ? (
+        preview ? (
+          /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
+             只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
+          <>
+            <span className={s.previewTag}>预览模式 · 不接真实后处理</span>
+            <Btn variant="accent" onClick={dismiss}>
+              关闭预览
+            </Btn>
+          </>
+        ) : asking ? (
           /* 那一问的两颗按钮：**强制继续不强调、终止占强调位**（第 9~11 轮定的）——
              「终止」就是回答"不跑"那一条（与「停止」同一个落点，见契约里那条注释）。
              按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className */
@@ -480,15 +547,23 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     >
       <div className={s.body}>
         {lead}
-        {facts !== null && (
-          <FactsGroups
-            groups={
-              asking || running
-                ? [baseGroup(facts), runGroup(facts)]
-                : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
-            }
-          />
-        )}
+        {/*
+         * 事实表**从开场就在**（2026-10-14 作者截图：「下面的内容那些字段它可以显示出来呀，
+         * 只是参数你留空或者用 -」）。
+         *
+         * 原来是 `facts !== null && …`：开场那一瞬钩子的 `Hello` 先到、`facts` 还没到，
+         * 整块两栏事实都不渲染 ⇒ 框里一条孤零零的 hero，等事实到齐才"啪"地长开 ——
+         * 那一下就是作者说的闪（框身已经定高，但框内空一块更难看）。
+         * 口径反过来：**框一打开就是完整的**，没到手的值一律 `—`（两组里每一格都有固定标签，
+         * 所以不会"少一格"，只会有"暂时是 —"），值到了原地换掉。
+         */}
+        <FactsGroups
+          groups={
+            asking || running
+              ? [baseGroup(facts), runGroup(facts)]
+              : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
+          }
+        />
         {finished !== null &&
           finished.warnings.map((w) => (
             <p className={s.warn} key={w}>

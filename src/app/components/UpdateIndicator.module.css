@@ -64,7 +64,14 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 40;
+  /*
+   * ★ 层级：它挂在**标题栏**里（`TopTabs` 自带 z-index 94），是"顶部那一层"的东西 ——
+   *   理应盖过**所有内容区的模态框**（模态框是 40，且只盖内容区）。
+   *   这里给 91：压过内容区一切（FieldLayer 90 / 模态框 40），但**低于**标题栏自己
+   *   承载的那一档、也低于后处理跑着那一屏（95）—— 作者 2026-10-14 定的顺序：
+   *   后处理 > 更新面板 > 模态框。
+   */
+  z-index: 91;
   display: flex;
   flex-direction: column;
   gap: 8px;

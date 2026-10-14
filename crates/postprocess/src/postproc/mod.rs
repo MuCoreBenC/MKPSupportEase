@@ -17,6 +17,7 @@ pub mod calibration;
 pub mod cancel;
 pub mod disk;
 pub mod geom;
+pub mod head_facts;
 pub mod machine_dims;
 pub mod marks;
 pub mod offset;

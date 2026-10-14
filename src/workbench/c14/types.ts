@@ -20,5 +20,15 @@ export interface GotoFocus {
  *
  * `settings` 排在末尾：它不是一个业务页 —— 预设根固定是 `<repo>/presets`，
  * 这一页只读地摆开数据根与子目录职责，供排查「读错了目录」用。
+ *
+ * `dev`（开发台）排在 `settings` 之后：同样不是业务页 —— 把"平时看不见的那几屏"
+ * 做成按钮（作者 2026-10-14）。只在 workbench 构建里存在（正式包编不到这一页）。
  */
-export type PageId = 'machines' | 'params' | 'bundles' | 'build' | 'assets' | 'settings'
+export type PageId =
+  | 'machines'
+  | 'params'
+  | 'bundles'
+  | 'build'
+  | 'assets'
+  | 'settings'
+  | 'dev'

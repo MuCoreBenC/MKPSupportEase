@@ -230,6 +230,7 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .gutter {
@@ -238,6 +239,7 @@
   color: var(--w-text-3);
   text-align: center;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .lineAdd .gutter {

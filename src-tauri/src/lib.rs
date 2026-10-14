@@ -16,6 +16,12 @@ pub mod archive;
 /// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
 pub mod args;
 pub mod chrome;
+/// **开发台的演出脚本**（`hook-sim` 假钩子与开发台共用一份）。
+///
+/// ★ 2026-10-14 起**不再门在 workbench 档**：演出发生在**客户端进程**
+/// （工作台那档没有客户端窗口，只能发一条 `dev-scene` 让客户端演，见模块头）。
+/// 它**不是产品行为**：客户端侧唯一入口是那条通道消息（真钩子从不发它）。
+pub mod devsim;
 pub mod error;
 pub mod fsx;
 /// **后处理钩子**：切片器导出 G-code 时调的那一次 —— 预设 → IR → 12 步管线（原地覆盖），
@@ -160,7 +166,16 @@ pub fn run() {
                     Some(listener) => {
                         let view = for_setup.clone();
                         let to_ui = handle.clone();
-                        let writer = listener.serve(move |msg| view.apply(&to_ui, msg));
+                        let writer = listener.serve(move |msg| {
+                            /* 开发台的演出指令（工作台发的）与真钩子的消息**分流**：
+                            它要在后台线程里按节奏演，不能堵住收消息这一段 */
+                            match msg {
+                                hook_ipc::FromHook::DevScene { scene } => {
+                                    view.run_preview(&to_ui, &scene);
+                                }
+                                other => view.apply(&to_ui, other),
+                            }
+                        });
                         for_setup.attach_writer(writer);
                         tracing::info!(root = %root.display(), "后处理通道已就位");
                     }
@@ -582,6 +597,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::sandbox::wb_sandbox_set,
         app::sandbox::wb_sandbox_refill,
         app::sandbox::wb_sandbox_wipe,
+        // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
+        // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
+        // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。
+        app::devsim::wb_dev_devsim_scenes,
+        app::devsim::wb_dev_trigger,
     ])
 }
 

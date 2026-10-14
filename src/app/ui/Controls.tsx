@@ -1,39 +1,18 @@
 /*
  * 首页与校准页到处在用 Btn 与 Badge，所以连着搬。
- * 用不到的那几个（Compare / Revert / Field / NumberField / Segmented）也照原样留着 ——
- * 搬迁，不做裁剪。
+ *
+ * ★ 2026-10-14：`Compare` / `Revert` / `Field` / `NumberField` / `Segmented` 五个导出**删了**
+ * （它们从搬进来那天起就没人 import —— 注释原来写着"搬迁不做裁剪"，但那是**没人用的代码**，
+ * 留着只会让人以为界面上还有这些件）。
+ * 连带删掉的是 `ui.module.css` 里只服务它们的那些类（`.seg` / `.field*` / `.num*` /
+ * `.compare*` / `.revert` / `.help` / `.table` / `.rowAction` / `.inlineProgress` /
+ * `.bar*` / `.empty` / `.stepRail` / `.step*` / `.scaleBar` / `.tick` / `.grid` / `.cell` / `.modal`）。
+ *
+ * 同时删掉的还有 `Progress.tsx`（整文件，没人 import）与 `shared/OriginChip.tsx`（整文件 + 它的 css）。
  */
 
 import type { ReactNode } from 'react'
 import s from './ui.module.css'
-
-export function Segmented({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[]
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <div className={s.seg} role="tablist">
-      {options.map((o) => (
-        <button
-          key={o}
-          type="button"
-          role="tab"
-          aria-selected={o === value}
-          className={s.segBtn}
-          data-on={o === value}
-          onClick={() => onChange(o)}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 export function Badge({
   children,

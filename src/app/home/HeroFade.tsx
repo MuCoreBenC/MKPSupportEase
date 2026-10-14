@@ -22,8 +22,9 @@
  * 就是那份基线）；产品里 `useHeroCurves` 直接吃写死的那份，要调就改那个文件。
  * 横轴是「应用窗口的逻辑宽高」：自己量 —— 往上找最外层带 data-density 的节点。
  *
- * CSS Module 是逐字搬过来的，所以里面 `.grid` / `.readout` 两组规则现在没人用了，
- * 没有删 —— 保持与试验场那份一致。
+ * CSS Module 是逐字搬过来的。★ 2026-10-14：里面 `.grid` / `.readout` 两组规则（两组都
+ * 没人用，组件也从不设 `data-drag` / `data-always` / `data-snap`）**删掉了** ——
+ * 当时"保持与试验场一致"的理由已经过期：本仓是产品本体，试验场是另一棵树。
  */
 
 import type { CSSProperties } from 'react'

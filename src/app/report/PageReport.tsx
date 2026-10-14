@@ -100,6 +100,7 @@ import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
 import ExportModal from './ExportModal'
+import { useDevPreview } from '../dev/useDevPreview'
 import s from './PageReport.module.css'
 
 /**
@@ -629,6 +630,16 @@ export default function PageReport() {
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
+  /* 开发台：点「浮出的条」时摆一条提示条（in-flow、要手动关，不自己消失） */
+  const devNote = useDevPreview('float-toast')
+  useEffect(() => {
+    if (devNote.on) {
+      setNote({
+        text: '已确认导出：3 份文件写到 /Users/wzy/Library/Application Support/SupportEase/exports/',
+        bad: false,
+      })
+    }
+  }, [devNote.on])
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [detailErr, setDetailErr] = useState<string | null>(null)
@@ -643,9 +654,20 @@ export default function PageReport() {
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
   /** 导出框开着没有（它的内务全在 `ExportModal` 里，页面只管这一格开关） */
   const [exportOpen, setExportOpen] = useState(false)
+  /* 开发台：（只在开发构建里收得到事件）—— 有选中记录才开那一框（没记录时那框本来是灰的） */
+  const devExport = useDevPreview('export')
+  useEffect(() => {
+    if (devExport.on && selId !== null) setExportOpen(true)
+  }, [devExport.on, selId])
   /** 选中那条的导出计划（**预取**：开框就是终态高度，见 `ExportModal` 的 `preload`） */
   const [exportPlan, setExportPlan] = useState<{ id: string; plan: ReportExportPlan } | null>(null)
-  /** 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值 */
+  /*
+   * 只用来告诉 CSS「走浮层档」；交互一律看 `isFloating()` 的实际几何，不认这个布尔值。
+   *
+   * ★ 活口（2026-10-14 标记）：**这个 state 的值没人读**（解构里就空着一位），
+   * 它只借 `setNarrow` 触发一次重渲染 —— 下面那两处 `setNarrow(...)` 是真在用的调用。
+   * 别当"死 state"删了：删掉之后窄档切换时页面不重渲，浮层判据会晚一帧。
+   */
   const [, setNarrow] = useState(false)
 
   const pageRef = useRef<HTMLDivElement>(null)
@@ -1316,7 +1338,10 @@ export default function PageReport() {
         open={exportOpen}
         id={selId}
         preload={exportPlan}
-        onClose={() => setExportOpen(false)}
+        onClose={() => {
+          if (devExport.on) devExport.close()
+          setExportOpen(false)
+        }}
       />
     </section>
   )

@@ -38,12 +38,22 @@ interface Props {
   at: ContextMenuPoint | null
   entries: ContextMenuEntry[]
   onClose: () => void
+  /**
+   * 开发台：一开就停在某一项的**二次确认层**上（作者 2026-10-14）。
+   *
+   * 删除确认那个框**不是一个独立组件** —— 它是菜单的一个内部态（`confirming`）。
+   * 要单独把它摆出来看，就得能一开菜单就进那一态。给的是那一项的 `id`
+   * （`'remove'` 之类），匹配不上就照常显示列表（不编一个确认层出来）。
+   *
+   * 正式代码不传它 ⇒ 行为一字不变。
+   */
+  startConfirming?: string
 }
 
 /** 贴边的安全边距。和 FieldPopover 用同一个数 */
 const EDGE = 6
 
-export default function ContextMenu({ at, entries, onClose }: Props) {
+export default function ContextMenu({ at, entries, onClose, startConfirming }: Props) {
   const layer = useFieldLayer()
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ left: number; top: number } | null>(null)
@@ -63,6 +73,16 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
     if (!open) return
     return layer.open(() => closeRef.current())
   }, [layer, open])
+
+  useEffect(() => {
+    /* 开发台：一开就停在某一项的确认层（见 `Props.startConfirming`）。
+       只在"那一项真有 confirm"时才进 —— 没有就照常显示列表（不编一屏确认出来） */
+    if (!open || startConfirming === undefined) return
+    const item = entries.find(
+      (e) => !isSeparator(e) && e.id === startConfirming && e.confirm !== undefined,
+    )
+    if (item !== undefined && !isSeparator(item)) setConfirming(item)
+  }, [open, startConfirming, entries])
 
   useEffect(() => {
     if (!open) {

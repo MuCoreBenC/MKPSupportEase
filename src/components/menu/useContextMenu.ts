@@ -31,6 +31,14 @@ export interface ContextMenuApi<T> {
   /** 打开的位置（视口坐标）。null = 菜单没开 */
   at: ContextMenuPoint | null
   close: () => void
+  /**
+   * **直接开**在某一行上（不靠右键事件）。
+   *
+   * 目前唯一的调用方是**开发台**（作者 2026-10-14）：删除确认那个框长在菜单里，
+   * 要单独把它摆出来，就得能在给定坐标上把菜单（以及它的确认层）打开。
+   * 正式交互一律走 `triggerProps`（右键 / 长按 / Shift+F10），这里不参与。
+   */
+  open: (target: T, at: ContextMenuPoint) => void
   /** 摊在行元素上的属性 */
   triggerProps: (target: T) => {
     tabIndex: number
@@ -73,10 +81,13 @@ export function useContextMenu<T>(): ContextMenuApi<T> {
     [],
   )
 
+  const open = useCallback((target: T, at: ContextMenuPoint) => setState({ target, at }), [])
+
   return {
     target: state?.target ?? null,
     at: state?.at ?? null,
     close,
+    open,
     triggerProps,
   }
 }

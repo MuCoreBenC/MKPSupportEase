@@ -36,6 +36,7 @@ import { api, errorText } from '../../api'
 import type { ImportItem, ImportOutcome, StagedImport } from '../../api'
 import { Modal } from '../../components/modal'
 import Drawer from '../shared/Drawer'
+import { useDevPreview } from '../dev/useDevPreview'
 import { inTauri } from '../window'
 import { ImportContext } from './useFileImport'
 import type { ImportBannerState, ImportEntry } from './useFileImport'
@@ -48,17 +49,24 @@ import s from './FileImport.module.css'
  */
 export function ImportBanner() {
   const entry = useContext(ImportContext)
+  /* 开发台那一格（`import-result`）：预览时 `entry.banner` 是 Provider 摆出来的样本，
+   * 关掉它要同时告诉 Provider 收工（见 `FileImportProvider` 里那两条 effect） */
+  const devResult = useDevPreview('import-result')
   if (entry === null || entry.banner === null) return null
   const { text, bad, lines } = entry.banner
+  const close = () => {
+    if (devResult.on) devResult.close()
+    entry.closeBanner()
+  }
   return (
     <Modal
       open
       size="sm"
       title={bad ? '导入：有几份没成' : '导入完成'}
       subtitle={text}
-      onClose={entry.closeBanner}
+      onClose={close}
       footer={
-        <button type="button" className={s.primary} onClick={entry.closeBanner}>
+        <button type="button" className={s.primary} onClick={close}>
           知道了
         </button>
       }
@@ -96,6 +104,38 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
 
   const note = useCallback((next: ImportBannerState) => setBanner(next), [])
   const closeBanner = useCallback(() => setBanner(null), [])
+
+  /* ---------------- 开发台（只在开发构建里收得到事件；见 `../dev/preview`） ----------------
+   * 认领两格：改名那一格 + 结果那一格。**只摆出来给看**，不动任何真业务
+   * （下面的输入框 / 按钮照旧只走原来的 handler）。 */
+  const devCollision = useDevPreview('import-collision')
+  const devResult = useDevPreview('import-result')
+  useEffect(() => {
+    if (!devCollision.on) return
+    setModal({
+      rows: [
+        {
+          source: '/（开发台）A1_MINI-fast.toml',
+          fileName: 'A1_MINI-fast.toml',
+          name: 'A1_MINI-fast.toml',
+          error: null,
+        },
+      ],
+    })
+    return () => setModal(null)
+  }, [devCollision.on])
+  useEffect(() => {
+    if (!devResult.on) return
+    setBanner({
+      text: '导入了 2 份文件',
+      bad: false,
+      lines: [
+        '已导入 A1_MINI-fast.toml → presets-local/A1_MINI-fast.toml',
+        '已导入 A1_涂胶.toml → presets-local/A1_涂胶.toml',
+      ],
+    })
+    return () => setBanner(null)
+  }, [devResult.on])
 
   /** 把一批结局（+ 没收的 rejected）写进结果条 */
   const report = useCallback(
@@ -172,6 +212,12 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
 
   /** 「继续导入」：把重名的那些（名字已改）提交；没成的留在格子里让继续改 */
   const submitModal = useCallback(async () => {
+    /* 开发台预览：这一格不是真的导入 —— 「继续导入」只把它关掉，不碰盘 */
+    if (devCollision.on) {
+      devCollision.close()
+      setModal(null)
+      return
+    }
     if (modal === null || busyRef.current) return
     const rows = modal.rows.map((r) => ({ ...r, name: r.name.trim() }))
     if (rows.some((r) => r.name === '')) {
@@ -221,10 +267,17 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       busyRef.current = false
       setBusy(false)
     }
-  }, [modal, note])
+  }, [modal, note, devCollision])
 
   /** 取消 = 这些重名的没进来（别的该进的早进了 —— 一份错不拖累别人） */
   const cancelModal = useCallback(() => {
+    /* 开发台预览：这一格是"摆出来看"的，取消就只是把它关掉（不写那句"已取消"——
+    那不是真的发生过） */
+    if (devCollision.on) {
+      devCollision.close()
+      setModal(null)
+      return
+    }
     if (modal === null) return
     const names = modal.rows.map((r) => r.fileName)
     setModal(null)
@@ -233,7 +286,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       bad: false,
       lines: names,
     })
-  }, [modal, note])
+  }, [modal, note, devCollision])
 
   const pickFiles = useCallback(() => {
     void api.pickImportFiles().then(

@@ -134,7 +134,9 @@ export default function PageHome({ density }: PageHomeProps) {
   const [slicerApp] = useSlicerAppPref()
   const slicerPick = useSlicerPick(defaultSlicer, openModel !== null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
-  /* 校准页的预设下拉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认 */
+  /* 预设抽屉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认。
+     （入口是抽屉的 `onUse` 里那个 `if (dirty)` —— 2026-10-14 之前还有"校准卡里的
+     预设下拉"那一条，那条随 `PresetLine` 一起删了。） */
   const [presetAsk, setPresetAsk] = useState<string | null>(null)
   /* 预设抽屉（与「校准」tab 同一颗）：pill 点开，从左缘出 */
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -328,9 +330,6 @@ export default function PageHome({ density }: PageHomeProps) {
     [catalog.presets],
   )
 
-  /* 当前那份文件的 id（`机型/版本`）—— 预设下拉的选中值，也是「换没换」的比较基准 */
-  const currentUid =
-    sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
 
   /*
    * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
@@ -377,20 +376,14 @@ export default function PageHome({ density }: PageHomeProps) {
     [catalog.machines, fileOf, activeEntry],
   )
 
-  /* 换预设会把本页草稿作废（草稿是相对上一份预设点出来的增量），所以先问一次。
-     只给「取消 / 放弃改动并换」两条路：换了预设 saved 会被新预设的值覆盖，
-     这时候提供「保存并换」是骗人的 —— 存下去的数立刻就被顶掉了 */
-  const pickPreset = useCallback(
-    (uid: string) => {
-      if (!uid || uid === currentUid) return
-      if (dirty) {
-        setPresetAsk(uid)
-        return
-      }
-      applyPreset(uid)
-    },
-    [applyPreset, currentUid, dirty],
-  )
+  /*
+   * ★ 这里原来有一个 `pickPreset` ——"在校准卡里换预设、先把草稿问一次"，2026-10-14
+   * 与 `PresetLine`（那个已删的预设下拉）一起删了：它的**唯一调用点**是 `CalibHead`
+   * 的 `onPickPreset`，下拉撤掉之后再没人调它。
+   *
+   * ⚠️ 那个 `presetAsk` 确认框**留着** —— 它不是同一条链上的：抽屉换预设
+   * （`onUse` 里 `if (dirty)` 那一支）还在用它。
+   */
 
   const brandName = sel.brand
   const modelNode = catalog.machines.find((m) => m.id === sel.model)
@@ -979,14 +972,9 @@ export default function PageHome({ density }: PageHomeProps) {
               <CalibHead
                 saved={saved}
                 draft={draft}
-                preset={preset}
                 view={axisView}
                 activeAxis="z"
-                presetUid={currentUid}
-                presetOptions={presetOptions}
-                onPickPreset={pickPreset}
                 canEdit={canPick}
-                showPreset={false}
                 onType={typeAxis}
                 onRevert={revertAxis}
                 onReset={resetAxis}
@@ -1069,14 +1057,9 @@ export default function PageHome({ density }: PageHomeProps) {
               <CalibHead
                 saved={saved}
                 draft={draft}
-                preset={preset}
                 view={axisView}
                 activeAxis="xy"
-                presetUid={currentUid}
-                presetOptions={presetOptions}
-                onPickPreset={pickPreset}
                 canEdit={canPick}
-                showPreset={false}
                 onType={typeAxis}
                 onRevert={revertAxis}
                 onReset={resetAxis}
@@ -1153,7 +1136,6 @@ export default function PageHome({ density }: PageHomeProps) {
       clearAll,
       comboApplied,
       commitAll,
-      currentUid,
       dirty,
       displayName,
       displayPath,
@@ -1167,14 +1149,12 @@ export default function PageHome({ density }: PageHomeProps) {
       modelName,
       modelOptions,
       pick,
-      pickPreset,
       pickXY,
       pickZ,
       plateTheme,
       preset,
       presetInfo,
       presetName,
-      presetOptions,
       presetView,
       ready,
       resetAxis,
@@ -1218,8 +1198,8 @@ export default function PageHome({ density }: PageHomeProps) {
         </div>
       )}
 
-      {/* 预设抽屉：从左缘出（右边常驻露出卡，没地方）。换预设的确认（有草稿先问一句）
-          走 pickPreset，与下拉时代同一条路；抽屉挂在 .page（container 的布局包含块）上 */}
+      {/* 预设抽屉：从左缘出（右边常驻露出卡，没地方）。有草稿时先问一句（`presetAsk` 那个确认框），
+          确认后才换；抽屉挂在 .page（container 的布局包含块）上 */}
       <PresetPickerDrawer
         side="left"
         open={pickerOpen}
@@ -1375,6 +1355,7 @@ export default function PageHome({ density }: PageHomeProps) {
           </p>
         </Modal>
       )}
+
     </div>
   )
 }

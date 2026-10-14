@@ -1072,6 +1072,30 @@ export interface SandboxStatus {
 }
 
 /**
+ * `devsim::DevScene` —— **开发台**上一个可点的场景。
+ *
+ * 清单**由后端给**（`wb_dev_devsim_scenes`）：界面照着它分类摆按钮，不自己维护一份
+ * —— 加一档只改 Rust 那一处。后处理那一组现在就能点；后面几组（导入 / 文件冲突 /
+ * 校验更新 / 浮出的条）先摆出来标 `ready: false`，点了给一句"还没做"。
+ */
+export interface DevScene {
+  /** 稳定 id（`postprocess-success` 之类） */
+  id: string
+  /** 分组键（`postprocess` / `import` / `file` / `trust` / `float`） */
+  group: string
+  /** 组名（人话） */
+  groupLabel: string
+  /** 行上的名字 */
+  label: string
+  /** 一句话说清它会演什么 / 什么时候真出现 */
+  note: string
+  /** 能点吗。`false` = 这一档还没做（不是坏了） */
+  ready: boolean
+  /** 层类（人话）：`后处理` / `标题栏` / `菜单` / `模态框` / `提示条` —— 同类只留最后点的 */
+  slotLabel: string
+}
+
+/**
  * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
  *
  * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
@@ -1884,6 +1908,18 @@ export const wb = {
   sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
   sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
   sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
+
+  /**
+   * **开发台**（`app::devsim`）—— 客户端界面触发器。
+   *
+   * `devSimScenes` 列清单（界面照它分类摆按钮），`devTrigger` 把「显示哪一格」发给
+   * **客户端进程**（走 hook 那条 loopback）—— **真正的客户端窗口**显示那一格并置顶。
+   * 不读 G-code、不跑管线、**不落任何记录**；客户端没开时如实报错（不拉进程）。
+   *
+   * 只在 workbench 构建里存在（正式包编不到）。
+   */
+  devSimScenes: () => invoke<DevScene[]>('wb_dev_devsim_scenes'),
+  devTrigger: (scene: string) => invoke<void>('wb_dev_trigger', { scene }),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

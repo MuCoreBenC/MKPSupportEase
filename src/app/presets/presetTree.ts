@@ -112,60 +112,10 @@ export type { LocalPresetFile }
 export const UNKNOWN = '未知'
 
 /** 大小那一栏的 title。为什么是「未知」得说清，否则看的人只会觉得界面没做完 */
-export const SIZE_WHY =
-  '上游资产清单里 size 与 sha256 全是空值，真实大小要到发布打 manifest 时才算得出来。不显示 0 —— 那会让「不知道」长得像「空文件」'
-
-/**
- * 「时间」那一格的 title（写成人话）。
- *
- * 原来那段是给开发者看的（假后端 / PresetFileInfo / FNV 哈希堆在一句里）——
- * 作者悬停时看到的就是它：「不知道是什么乱七八糟的信息」。
- * 事实不变：值是按 path 稳定推的演示数据，同一个文件每次刷新都一样；前端一行不编。
- */
-export const DEMO_STAT_WHY =
-  '演示数据：这个时间是按文件路径推算的固定值，不是文件的真实时间；同一个文件每次刷新显示的都是它'
 
 /** 没有这个值的那一种：用户自己放进预设目录的文件。**不替它编一个** */
-export const NO_STAT_WHY =
-  '这个文件是你自己放进预设目录的，仓库里没有它的记录 —— 没有时间可显示，也不编一个'
-
-/*
- * **真值**那两格的 title —— 切片器（bbs）这一档现在读的是仓库里那份真文件。
- *
- * 事实链：`scripts/sync-bbs-presets.mjs` 从上游 `mkpse-presets` 仓把 9 个 json **逐字节**
- * 拷进 `public/presets/bbs/…` 时，把磁盘上的字节数与上游 `manifest.json` 记的
- * `sha256 / size / updatedAt` 核了一遍；页面这两格读的就是那份快照
- * （`src/api/mockServer/data/bbs_files.json` 那份快照）。**不写「实时」** —— 它是快照，上游改了要重出快照。
- *
- * 为什么大小与时间要分开两句话：这两格各自都可能「有值但不是真的」，混着一句话说不清。
- */
-export const FILE_SIZE_WHY =
-  '真值：这是仓库里那份真文件的字节数（假后端的静态快照按上游清单核过，副本在 public/assets/bbs/ 下）'
-
-export const FILE_TIME_WHY =
-  '真值：这是上游 manifest 记的那份文件的内容更新时间 —— 不是本机 checkout 出来的时间'
 
 /** 类型角标。MKP = 涂胶预设 toml，BBS = 切片器工艺 profile */
-export const KIND_LABEL: Record<FileKind, string> = {
-  mkp_preset: 'MKP',
-  bbs_profile: 'BBS',
-  orca_profile: 'ORCA',
-}
-
-export const KIND_NAME: Record<FileKind, string> = {
-  mkp_preset: 'MKP 预设',
-  bbs_profile: 'BBS 工艺',
-  orca_profile: 'Orca 工艺',
-}
-
-/**
- * **认不出是哪一类**时的说法（行上的 `kind === null`）。
- *
- * 什么时候会认不出：用户自己放的文件（本地文件）。后端只按扩展名认 —— `.toml` 是 MKP 预设；
- * 切片器那两类都是 `.json`，**光看扩展名分不出是 bbs 还是 orca**，所以照实认不出。
- * 这一档在任何类型档下都列（不藏），认不出来也不编一个类别给它。
- */
-export const KIND_UNKNOWN = '认不出是哪一类'
 
 /**
  * 两条分段控件的词表。
@@ -188,24 +138,6 @@ export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, string> = {
 }
 
 /**
- * 位置那一轴的说明。**两种类型各说各的**（2026-10-09）——
- * 同一对词在 MKP 与切片器两档里是两件事：
- *
- *   MKP     本地 = 你自己那份本地文件（云端原件是内部数据，不在这里出现）
- *   切片器   本地 = 本机真有的文件（云端副本 + 你自己的）
- */
-export const SCOPE_AXIS_WHY: Record<PresetKindAxis, Record<PresetScopeAxis, string>> = {
-  mkp: {
-    local: '本地：你自己那一份（`presets-local/`）—— 改的是它、用的是它，没有网也看得见改得动',
-    cloud: '云端：云端当前提供的预设。这里只说"我这边有没有、要不要拿"，动作是下载 / 更新',
-  },
-  slicer: {
-    local: '本地：你这台机器上真有的文件 —— 云端下载下来的副本，加上你自己放进预设目录的（云端没有它们）',
-    cloud: '云端：菜单上的云端文件（已分配 + 可选）。仅归档的一个都不出现 —— 不在菜单上 = 客户端看不到也下不了',
-  },
-}
-
-/**
  * 本地表「状态」那一列的词。**两种类型两套词，因为「生效」是两件不同的事**：
  *
  *   MKP     生效 = 设为当前配置（`applyPreset`）      在用 / 未使用
@@ -225,35 +157,11 @@ export const LIVE_TEXT: Record<PresetKindAxis, { on: string; off: string }> = {
   slicer: { on: '已复制', off: '未复制' },
 }
 
-export const LIVE_WHY: Record<PresetKindAxis, { on: string; off: string }> = {
-  mkp: {
-    on: '在用：唯一底账（使用中指针，run/active-preset.json）说正在使用的就是它。**全局唯一** —— 换机型也不会变出第二个',
-    off: '未使用：文件在本机，但当前生效的是别的那一套。点「使用」把它设成当前的',
-  },
-  slicer: {
-    on: '已复制：getSlicerCopied() 说它已经躺在切片器的 profile 目录里了 —— 这才是切片器文件「生效」的方式',
-    off: '未复制：文件在本机，但还没进切片器的 profile 目录，切片器看不见它。点「复制」把它送过去',
-  },
-}
-
 /** 操作列上那个按钮的字。动作用**文字**不用图标 */
 export const ACTION_TEXT: Record<PresetKindAxis, string> = {
   mkp: '使用',
   slicer: '复制',
 }
-
-/**
- * 交付目录里没有记录的云端行为什么没有操作按钮（A2 人话化：发生了什么 + 能干什么）。
- *
- * 两种真实状态共用这一句：用户自己放进 `mkp/` 的来路不明文件；以及演示数据里
- * 旧资产库的行（新交付链里没有它的身份）。共同的事实是**目录里没有它** ——
- * 所以不再断言"是你自己放的"（对登记在案的文件那是假话），也不再说
- * asset id / 契约 / "点了必报错"那种开发者话。
- */
-export const NO_ASSET_WHY =
-  '这份文件不在 SupportEase 的交付目录里（不是从软件里下载的那一份），' +
-  '所以不能直接使用，也不能直接另存。想用它：把它拖进窗口导入成「本地文件」，' +
-  '或从云端重新下载云端版本'
 
 /**
  * 交付身份的两种说法。**只有两种，没有第三种**（见契约 `PresetFileInfo.delivery`）：
@@ -264,38 +172,6 @@ export const DELIVERY_TEXT: Record<PresetFileInfo['delivery'], string> = {
   default: '默认交付',
   optional: '可选',
 }
-
-export const DELIVERY_WHY: Record<PresetFileInfo['delivery'], string> = {
-  default: '默认交付：这个版本钦定的最终资源，点下载后台自动下好',
-  optional: '可选：仓库里有、没进默认集，需要手动下载。不是错误，也不是孤儿',
-}
-
-/**
- * **云端仓库文件为什么不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
- * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载（`downloadCatalogFile`）。
- */
-export const REPO_FILE_WHY =
-  '这一份不在交付下载那条路里 —— 能「下载」的是目录登记过的交付文件'
-
-/**
- * 发布行的「下载」：这一条**是真的能下的**（`downloadCatalogFile` 落进下载区 `mkp/`）——
- * 原来所有云端行共用云端那条「不假装下载成功」的说明，文案与行为不符，按行分流。
- */
-export const PRESET_DOWNLOAD_WHY =
-  '从目录登记的交付清单里下载这一份到下载区 mkp/ —— 下载 ≠ 使用，生效要到本地表里点「使用」'
-
-/**
- * 「时间」拿不到时的那两句（**有值的时候 tooltip 直接给具体时间**，不解释实现 ——
- * `catalog.publishedAt` 这种内部名字不许出现在界面上；曾经过的弯路：tooltip 写成
- * 「这次发布的时刻 —— 发布侧落盘时写进目录的……」，用户悬停半天拿到的是一段实现说明）。
- *
- * 时间**两种来源分归两张表**（2026-10-06）：云端表是**云端更新时间**（发布侧盖进目录的戳）、
- * 本地表是**下载时间**（盘上那份的 mtime）；显示一律**按本机时区**（`parseStatDate`）。
- */
-export const PRESET_TIME_WHY = {
-  cloudMissing: '云端没有记这次发布的时间 —— 随包目录不带时间，旧版发布的目录也没有',
-  localMissing: '说不出这份字节是什么时候到的 —— 它认不出属于哪一版，这种字节不记时间，照实「未知」',
-} as const
 
 /**
  * 旧版本抽屉里那两个时间的标签与「未知」的写法。**两个时间各是各，永不互相顶替**：
@@ -310,8 +186,6 @@ export const ARCHIVE_TIME = {
   publishedUnknown: '未知（早于版本记忆）',
   replacedUnknown: '未知',
 } as const
-
-export const PRESET_SIZE_WHY = '按这一份 TOML 的字节数算的'
 
 /**
  * 来源：这个文件是云端的、用户自己的，还是**目录登记的交付预设**。
@@ -461,11 +335,6 @@ export const CLOUD_STATE_TEXT = {
   pending: '未下载',
 }
 
-export const CLOUD_STATE_WHY = {
-  downloaded: '已下载：getLocalFiles() 说本机已经有这个文件了（假后端给的是固定演示集合）—— 它同时出现在本地表里，那是对的',
-  pending: '未下载：仓库里有，你机器上还没有',
-}
-
 /*
  * ★ `VERSION_NEW_TEXT` / `VERSION_NEW_WHY` / `VERSION_TIME_WHY` 三条词随
  * 「逐版各占一行」一起退役了（2026-10-08 当天下午）：它们只服务**版本行**
@@ -500,17 +369,6 @@ export const PRESET_STATE_TEXT: Record<PresetFileState, string> = {
   ok: '已下载',
   old: '旧版本',
   tampered: '内容异常',
-}
-
-export const PRESET_STATE_WHY: Record<PresetFileState, string> = {
-  missing: '未下载：目录里登记了它，你机器上还没有',
-  ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「使用」',
-  old:
-    '旧版本：盘上这一份的字节与归档里那一版**逐字节相同** —— 它是我们发过的某一版旧版（云端已经换了新的）。' +
-    '正文认得出来，可以点开旧版本那一格对照；装到机器上的动作请用「下载」换一份当前版本回来',
-  tampered:
-    '内容异常：盘上这一份的字节既不是目录登记的当前版本，也不是我们发过的任何一版 —— ' +
-    '这台机器上查不出它属于哪一版（被改过 / 来路不明）。不许使用、不许改、不许复制，先「下载」换一份干净的',
 }
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
@@ -633,19 +491,6 @@ export const PRESET_SUSPECT_WHY =
   '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许使用、不许改、不许复制。先「下载」换一份干净的回来'
 
 /** 「下载」那颗按钮在**盘上那份已经旧了**那一档的说明：它不是"删除重下"，旧份进归档，删除永远不是这件事的一部分 */
-export const PRESET_UPDATE_WHY =
-  '下载：对盘上这一份再跑一遍下载管道（状态那格的「有更新」说的就是为什么）—— 旧份先归档（archive/）再换新，删除永远不是它的一部分'
-
-/**
- * 「下载」那颗按钮在**认不出**那一档的说明。
- *
- * 它不是第二套机制：与别处的「下载」是**同一条管道**（再下一遍，落点还是目录说的那一个）。
- * 按钮统一叫「下载」（状态词才是"为什么"，那是状态列的事），这里要讲清的是"盘上那份我们不认"——
- * 用户多半不知道文件被谁动过，也不知道换一份会不会把他改的东西冲掉。
- */
-export const PRESET_REPAIR_WHY =
-  '下载：盘上这一份我们认不出是云端哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
-  '再下一份干净的换上，落点与校验与普通的「下载」是同一条管道；旧份进归档，不删'
 
 /**
  * **「编辑文件」**那条链的话（行菜单 / 展开详情 → 编辑器抽屉）。
@@ -695,8 +540,6 @@ export const EDIT_TEXT = {
 } as const
 
 /** 「编辑」那颗按钮的说明 */
-export const EDIT_WHY =
-  '编辑文件：打开的就是这份文件本身的正文（参数页没保存的改动不在里面）—— 保存时整份写回同一个文件（不会多出一份）'
 
 /**
  * **撞名那一格**（a04）：云端那份要落下来时，本机**已经有一份同名的**了。
@@ -787,19 +630,6 @@ export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
 }
 
-/**
- * 归档那一格（展开详情里的「旧版本」）。
- *
- * `archive/` 是**云端版本生命周期**的一部分：云端换版本时，旧的那一份被换下来放进归档
- * （保留最早一份，不覆盖）。它**不是用户修改历史** —— 用户改出来的东西是另一条线
- * （另存成另一份文件），永远不回写云端原件。
- *
- * 这一层做**看得见 / 认得出 / 看得了 / 删得掉**（2026-10-06 起允许删，代价讲清：
- * 云端只有最新版，删了找不回）；仍然不提供"恢复"与"用这份旧版本"
- * （归档管理不在这一层，见 HANDOFF §3.5 的七步顺序）。
- */
-export const ARCHIVE_KEY = '旧版本'
-
 export const ARCHIVE_WHY =
   '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖）。' +
   '它属于云端文件的生命周期，不是你的修改历史 —— 你改出来的东西是另一份文件（另存），永远不回写云端原件。' +
@@ -831,30 +661,6 @@ export const LOCAL_DRAWER = {
 } as const
 
 /** 「看正文」那颗按钮的说明（展开详情里的 title） */
-export const LOCAL_BODY_WHY = `读这一份的正文：它就在你自己的目录里，读它不需要校验（它本来就没有云端 SHA）。`
-
-/**
- * 用户那份**基于云端哪一版**（第七层）。三档说的是**同一件事**：
- * 它当初基于的那一版，和目录里现在这一版是不是同一份 ——
- * **不判这份文件好不好**（用户自己那份从来不是坏文件）。
- *
- * `outdated` 就是「云端：v2，本地：基于 v1」那件事在界面上的落点。
- */
-export const BASED_ON_TEXT: Record<BasedOn, string> = {
-  current: '基于当前版',
-  outdated: '基于旧版云端',
-  unknown: '来源说不清',
-}
-
-export const BASED_ON_WHY: Record<BasedOn, string> = {
-  current: '这份文件头里记着它是从目录里**现在**这一版云端拷出来改的（血统摘要与目录登记的一致）—— 云端没换过版',
-  outdated:
-    '云端已经换新版了，而这份还是从**旧版**云端派生出来的。**它照常能用、能改**，' +
-    '只是不会跟着云端更新 —— 它从来不是云端那一份（要不要把改动挪到新版上，是另一件事）',
-  unknown:
-    '说不清从哪一版改的：要么这份文件没有血统（手工拷的 / 别的程序写出来的），' +
-    '要么它记的来源已经不在目录里了（换源或下线）。**这不影响它是一份正常的用户预设**',
-}
 
 /** 展开详情里那一格的名字 */
 export const BASED_ON_KEY = '基于'
@@ -881,17 +687,6 @@ export function basedOnCellText(row: {
         : `${source}（目录里已经没有它了）`
   }
 }
-
-/**
- * 「使用」用户自己那份的说明。
- *
- * 与云端那份**同一个入口、同一条底账**（`run/active-preset.json`）——
- * 「只读」是文件归属的属性，不是"能不能被使用"的属性（第七层作者定）。
- * 区别只有闸不一样：云端那份要 SHA 与目录对得上；用户那份要落在 `presets-local/` 那一格里。
- */
-export const LOCAL_APPLY_WHY =
-  '使用：把这一份设成正在使用的配置（与云端那份同一条底账 run/active-preset.json）。' +
-  '改它不会影响云端那份；云端换版本也不会动你的这份'
 
 /**
  * 用户那份**不能被应用**时的说明：认不出它是 MKP 预设。
@@ -967,18 +762,6 @@ export function presetBatchText(
       '已下载的那几份不在这一批里（不重复下）。' +
       '范围是**当前机型 + 这一档类型**，不受搜索词影响（搜索是"我在找什么"，不该改变"按一下要动几份"）。',
   }
-}
-
-/**
- * 交付身份在云端表上的说法。
- *
- * 和 `DELIVERY_TEXT`（默认交付 / 可选）是同一个字段的两种措辞：那一套是仓库视角的身份，
- * 这一套是用户视角的「要不要我自己动手」。词不同是有意的 —— 用户端的表上说「套餐内」
- * 比说「默认交付」好懂，而工作台那边必须继续说「默认交付」（它编的就是那个集合）。
- */
-export const DELIVERY_SCOPE_TEXT: Record<PresetFileInfo['delivery'], string> = {
-  default: '套餐内',
-  optional: '可单下',
 }
 
 // ——————————————————————————————————————————————————————————————
@@ -1299,7 +1082,6 @@ export function machinesInScope(tree: PresetTree, machineId: string): PresetMach
   return hit === undefined ? [] : [hit]
 }
 
-
 // ——————————————————————————————————————————————————————————————
 // 状态与搜索
 // ——————————————————————————————————————————————————————————————
@@ -1328,7 +1110,6 @@ export function statusOf(
   }
   return 'ready'
 }
-
 
 /**
  * 搜索：按文件名 / 路径。空串 = 不筛。
@@ -1504,7 +1285,6 @@ export interface PresetRowBase {
    */
   ownPublishedAt?: string | null
 }
-
 
 export interface PresetLocalRow extends PresetRowBase {
   scope: 'local'
@@ -1836,7 +1616,6 @@ function machineFiles(machines: PresetMachineNode[]): MachineFile[] {
 
   return out
 }
-
 
 /** 左边那条分段控件。MKP 以外的（bbs / orca）都算「切片器配置」 */
 function matchesKind(axis: PresetKindAxis, kind: FileKind): boolean {
@@ -2584,10 +2363,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
   }
 }
 
-
 /** 版本标签（推荐 / 热门 / 最新）。没有就不显示，不补一个「无」 */
 export const tagOf = (version: MachineVersion): string | null => version.tag ?? null
-
 
 // ——————————————————————————————————————————————————————————————
 // 切片器的喷嘴 / 层高筛选

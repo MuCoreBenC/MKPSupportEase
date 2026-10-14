@@ -63,6 +63,7 @@
 /* 拖动中禁掉文字选中（不然拖一次会把整页文字刷蓝） */
 .drawer[data-dragging='true'] {
   user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 左开（首页用）：右边常驻露出卡，抽屉没地方 —— 挂左缘，缝换到右边 */

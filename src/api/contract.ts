@@ -1624,6 +1624,8 @@ export interface PostProcessPrintTime {
 export interface PostProcessStarted {
   presetName: string
   gcodeName: string
+  /** 这一趟是开发台演出来的 ⇒ 界面把真业务按钮禁掉、标「预览模式」（见 `PostProcessRun.preview`） */
+  preview: boolean
 }
 
 /**
@@ -1639,6 +1641,14 @@ export interface PostProcessRun {
   question: PostProcessQuestion | null
   progress: PostProcessProgress | null
   finished: PostProcessFinished | null
+  /**
+   * 这一屏是**开发台演出来的**（不是真钩子跑出来的）。
+   *
+   * `true` 时那一屏把真业务按钮（停止 / 后台运行 / 强制继续 / 终止）**禁掉**
+   * 并标上「预览模式」—— 那些按钮走的是真钩子回写线，预览里点了只会如实报
+   * "现在没有在跑后处理"（作者 2026-10-14：预览就明确是预览，不许点出真业务）。
+   */
+  preview: boolean
 }
 
 /**

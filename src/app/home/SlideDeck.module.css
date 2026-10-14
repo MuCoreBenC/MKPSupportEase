@@ -364,6 +364,7 @@
   background: none;
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 
@@ -378,6 +379,7 @@
   background: none;
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 
@@ -412,6 +414,7 @@
   display: grid;
   place-items: center;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .rail {

@@ -29,6 +29,15 @@
   overflow: visible;
   border-left: 1px solid var(--bbs-line);
   background: var(--bbs-rail-bg);
+
+  /*
+   * ★ 这一栏**整栏可拖选**（2026-10-14 作者截图圈的就是它：「我希望这一些可以选」）——
+   * 版本 / 改动 / 基准 / 行数 / 来源 / 元数据 / 继承链这几行是给人抄的
+   * （对规格、贴给别人看"这份参数是从哪来的"）。里面的按钮不受影响：
+   * 全局 `button { user-select: none }` 直接命中。前缀与标准成对写，理由见 `global.css`。
+   */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /*

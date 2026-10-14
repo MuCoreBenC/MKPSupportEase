@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 
 import Icon from '../../components/Icon'
 import UpdateIndicator from './UpdateIndicator'
+import { useDevPreview } from '../dev/useDevPreview'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { winClose, winMinimize, winToggleMaximize } from '../window'
@@ -53,6 +54,8 @@ export default function TopTabs({
   const isMac = platform === 'macos'
   const maximized = useWindowMaximized()
   const drag = useTitlebarDrag()
+  /* 开发台：点「软件更新提示」时把下载指示器摆成"正在下载"那一态（正式构建里恒 false） */
+  const { on: devUpdate } = useDevPreview('update-prompt')
 
   /*
    * 滑动下划线（2026-10-05）：原来 active 页签的 ::after 直接出现/消失，快速换
@@ -154,7 +157,11 @@ export default function TopTabs({
         它**自己取数据**（不靠 props 层层传）：`idle` 时**什么都不渲染**，
         所以首屏不因为它多等一毫秒（铁律 2：云端不参与首屏）。
       */}
-      <UpdateIndicator onInstalled={() => window.location.reload()} />
+      <UpdateIndicator
+        onInstalled={() => window.location.reload()}
+        /* 开发台：点「软件更新提示」时摆出"正在下载"那一态（正式构建里恒 undefined） */
+        devPreview={devUpdate ? { state: 'downloading', received: 41_943_040, total: 67_108_864 } : undefined}
+      />
 
       {/* Windows 侧的窗口键：撑满标题栏全高、贴到右上角、彼此无缝。
           按钮是 <button>，useTitlebarDrag 里 closest('button') 会跳过它们，

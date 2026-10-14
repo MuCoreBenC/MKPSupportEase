@@ -118,8 +118,12 @@ import { FieldPopover } from '../../components/field'
 /* 展开详情卡头那一枚文件图标（2026-10-10，参考稿的绿色文档图标 —— 本项目走描边风格） */
 import Icon from '../../components/Icon'
 import type { Machine } from '../../api'
-/* a03：机型列不再上彩色识别色（色彩收敛）；模块保留，data-machine 仍按机型落值 */
-import { machineToneKeyOf } from '../ui/machineTone'
+/*
+ * ★ 2026-10-14：原来这里 `import { machineToneKeyOf } from '../ui/machineTone'`，
+ * 给机型胶囊落一个 `data-machine` 属性 —— a03「色彩收敛」之后**那个属性已经没有任何消费者**
+ * （CSS 里没有 `[data-machine]` 选择器、探针也没读它），整条链（导入 + 变量 + 属性 +
+ * `ui/machineTone.ts` 整个模块）一起删了。
+ */
 import { longStatText, shortStatText } from '../store/package'
 /* a03：所有 WHY（悬停用）导入已随「去悬停提示」移除 */
 import {
@@ -461,11 +465,11 @@ export default function PresetTable({
             {rows.map((row) => {
               const version = versionsText(row.versions)
               /*
-               * 机型识别色（2026-10-08）：`A1` 与 `A1 mini` 只差四个字母，作者在真机上
-               * 把 A1 那行看成了 A1 mini、点了下载才发现。一色一机型，见 `ui/machineTone.ts`。
-               * 「本地文件」按**文件自己标的归属**上色（`machineToneKeyOf` 收的规矩）。
+               * 机型识别色（2026-10-08 起、a03「色彩收敛」收掉）：`A1` 与 `A1 mini` 只差
+               * 四个字母，作者曾在真机上把 A1 那行看成 A1 mini、点了下载才发现 —— 那一版
+               * 给每个机型配了色、按 `data-machine` 上色。**色彩收敛后那套色表整链已删**
+               * （CSS 无 `[data-machine]` 选择器、探针也不读），机型列现在只当文字看。
                */
-              const machineToneKey = machineToneKeyOf(row)
               /*
                * 行左边那道绿竖线只标**「正在生效的那一份」**：本地表是 live（MKP 已应用 /
                * 切片器已复制），云端表是 applied（仓库里那一份就是你在用的那一份）。
@@ -647,13 +651,7 @@ export default function PresetTable({
                   */}
                   <td className={s.machine}>
                     {row.machineText !== DASH_ && (
-                      <span
-                        className={s.machineChip}
-                        data-machine={machineToneKey}
-                       
-                      >
-                        {row.machineText}
-                      </span>
+                      <span className={s.machineChip}>{row.machineText}</span>
                     )}
                   </td>
 

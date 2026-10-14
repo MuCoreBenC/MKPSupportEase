@@ -161,6 +161,7 @@ import { longStatText } from '../store/package'
 import { Modal } from '../../components/modal'
 /* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
+import { useDevPreview } from '../dev/useDevPreview'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
@@ -376,6 +377,47 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 记的是**路径**（改名不动它）；那份真被删了的话，开台前拿候选核一遍、忽略它。
    */
   const [comparePick, setComparePick] = useState<{ path: string; fileName: string } | null>(null)
+
+  /* ---------------- 开发台（只在开发构建里收得到事件；见 `../dev/useDevPreview`） ----------------
+   * 认领「重命名」与「参数对比台」两格。只摆出来给看，不动真业务
+   * （框里的输入 / 按钮照旧走原来的 handler）。 */
+  const devRename = useDevPreview('rename')
+  useEffect(() => {
+    if (!devRename.on) return
+    /* 用一份**本机真有的**本地行（有就用真名，没有才摆一个只够画框的假 row）——
+       真行的话"取消 / 确定"照旧能走真路，假 row 那一条被下面的守卫挡住 */
+    const real = data.local[0]
+    const row = (real ?? {
+      kind: 'local',
+      scope: 'local',
+      origin: 'local',
+      fileName: 'A1_MINI-fast.toml',
+      path: 'presets-local/A1_MINI-fast.toml',
+    }) as unknown as PresetTableRow
+    setRenaming({
+      row,
+      name: splitFileName(row.fileName).stem,
+      ext: splitFileName(row.fileName).ext,
+      busy: false,
+      error: null,
+    })
+    return () => setRenaming(null)
+  }, [devRename.on, data.local])
+  const devCompare = useDevPreview('compare')
+  useEffect(() => {
+    if (devCompare.on) setCompareOpen(true)
+  }, [devCompare.on])
+  /* 删除确认的认领：把右键菜单开在一条**能删的行**上、并一开就停到「删除」那一项的确认层
+     （见 `ContextMenu` 的 `startConfirming`）。挑不到能删的行就什么都不做。
+     ★ 拿 `page.local.rows`（= 下面的 `table`）—— 它在上面的 early return 之前就有了。 */
+  const devDelete = useDevPreview('delete-confirm')
+  useEffect(() => {
+    if (!devDelete.on) return
+    const row = page.local.rows.find((r) => removeWhyNot(r) === undefined)
+    if (row === undefined) return
+    menu.open(row, { x: 420, y: 260 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devDelete.on, page.local.rows])
   /*
    * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
    * 那一屏打开（用户点的是那条直路：他已经知道有云端更新等着处理）。
@@ -1046,6 +1088,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * （`x.toml` 贴进输入框再拼一次会得到 `x.toml.toml`）：先剥掉再拼。
    */
   const submitRename = () => {
+    /* 开发台预览：这一格也不是真的在改名字 —— 「确定」只把它关掉 */
+    if (devRename.on) {
+      devRename.close()
+      setRenaming(null)
+      return
+    }
     if (renaming === null || renaming.busy) return
     let stem = renaming.name.trim()
     if (stem === '') {
@@ -1224,63 +1272,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 切片器：复制进切片器自己的用户配置目录（真机落盘）。**键是文件名** ——
      * 下载 / 应用 / 读正文同一个取用口径。成功要发提示条（行上的「已复制」只说状态、
      * 不说去了哪）；失败照抛出来说（不是切片器配置 / 本机没那份字节）。
+     *
+     * ★ 2026-10-14：这里原来还裹着一层 `if (page.kind !== 'mkp') { … }`，后面跟着
+     * "MKP 档本地行也能使用"那半段（`row.origin === 'local'` 的应用路径）与一条
+     * "正常到不了"的兜底 —— **整段删了**：`onLive` 只喂给非 MKP 档的本地行
+     * （`PresetTable` 里 MKP 本地行走的是 `onUse`），那个 `if` 恒真，后半段一行都执行不到
+     * （兜底那句注释自己都写着"正常到不了"）。
      */
-    if (page.kind !== 'mkp') {
-      setBusyKey(row.rowKey)
-      data.copy(row.fileName).then(
-        (outcome) => {
-          setBusyKey(null)
-          /*
-           * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
-           * 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
-           * 不合并成一句"已复制"。
-           */
-          /* 落点路径不印在提示条上（技术细节，2026-10-13 作者口径）——
-             文件在哪，行上右键有「显示切片器里的那份」 */
-          const where = '到切片器目录'
-          setNote({
-            text: outcome.replaced
-              ? `已复制 ${row.fileName} ${where}`
-                + ' —— 那儿原来那份已经换成这一份了，切片器里现在能选到它'
-              : `已复制 ${row.fileName} ${where} —— 切片器里现在能选到它了`,
-            bad: false,
-          })
-        },
-        (e: unknown) => {
-          setBusyKey(null)
-          setNote({ text: `复制失败：${errorText(e)}`, bad: true })
-        },
-      )
-      return
-    }
-
-    /*
-     * **本地文件也能被使用**：同一个写口、同一条底账 —— 身份是**路径**
-     * （用户目录里可以自己分文件夹）。后端那一道闸是"在 presets-local/ 那一格里 +
-     * 盘上真有 + 是 TOML 预设"。
-     */
-    if (row.origin === 'local') {
-      setBusyKey(row.rowKey)
-      /* 文件名与路径**分开传**（后端认 origin=local + path 那道闸）—— 见 `data.apply` 那段 */
-      data.apply(row.fileName, row.path).then(
-        () => setBusyKey(null),
-        (e: unknown) => {
-          setBusyKey(null)
-          setNote({ text: `使用失败：${errorText(e)}`, bad: true })
-        },
-      )
-      return
-    }
-
-    /*
-     * 兜底（正常到不了）：MKP 档的本地表只列「本地文件」那几行 —— 交付行不会走到这里
-     * （切片器档在上面那条 `page.kind !== 'mkp'` 就分流去「复制」了）。
-     * 真走到了也只有一句人话：**云端的版本不能直接使用**，先下载到本地。
-     */
-    setNote({
-      text: `${row.fileName} 还在云端 —— 先在云端档把它下载到本地，再到本地表里点「使用」`,
-      bad: true,
-    })
+    setBusyKey(row.rowKey)
+    data.copy(row.fileName).then(
+      (outcome) => {
+        setBusyKey(null)
+        /*
+         * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
+         * 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
+         * 不合并成一句"已复制"。
+         */
+        /* 落点路径不印在提示条上（技术细节，2026-10-13 作者口径）——
+           文件在哪，行上右键有「显示切片器里的那份」 */
+        const where = '到切片器目录'
+        setNote({
+          text: outcome.replaced
+            ? `已复制 ${row.fileName} ${where}`
+              + ' —— 那儿原来那份已经换成这一份了，切片器里现在能选到它'
+            : `已复制 ${row.fileName} ${where} —— 切片器里现在能选到它了`,
+          bad: false,
+        })
+      },
+      (e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `复制失败：${errorText(e)}`, bad: true })
+      },
+    )
   }
 
   /**
@@ -2216,7 +2239,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             files={compareFiles}
             preselect={comparePreselect}
             host={pageEl}
-            onClose={() => setCompareOpen(false)}
+            onClose={() => {
+              if (devCompare.on) devCompare.close()
+              setCompareOpen(false)
+            }}
             onSaved={(text) => setNote({ text, bad: false })}
           />
 
@@ -2376,7 +2402,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             subtitle={renaming?.row.fileName}
             footer={
               <>
-                <button type="button" className={s.editGhost} onClick={() => setRenaming(null)}>
+                <button
+                  type="button"
+                  className={s.editGhost}
+                  onClick={() => {
+                    if (devRename.on) devRename.close()
+                    setRenaming(null)
+                  }}
+                >
                   取消
                 </button>
                 <button
@@ -2389,7 +2422,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 </button>
               </>
             }
-            onClose={() => setRenaming(null)}
+            onClose={() => {
+              if (devRename.on) devRename.close()
+              setRenaming(null)
+            }}
           >
             {renaming !== null && (
               <div className={s.renameForm}>
@@ -2451,7 +2487,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           )}
         </div>
 
-        <ContextMenu at={menu.at} entries={entriesOf(menu.target)} onClose={menu.close} />
+        <ContextMenu
+          at={menu.at}
+          entries={entriesOf(menu.target)}
+          startConfirming={devDelete.on ? 'remove' : undefined}
+          onClose={() => {
+            if (devDelete.on) devDelete.close()
+            menu.close()
+          }}
+        />
 
         {/*
          * **那一份预设的参数**（2026-10-09）。里面就是参数页本身。

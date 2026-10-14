@@ -113,7 +113,7 @@
   border-right: 1px solid var(--line);
   text-align: right;
   user-select: none;
-  font-variant-numeric: tabular-nums;
+  -webkit-user-select: none;  font-variant-numeric: tabular-nums;
 }
 
 /* 三层共同的那把尺子 —— 改这里就是三层一起改，只改一层就会错位 */

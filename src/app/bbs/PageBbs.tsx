@@ -280,6 +280,12 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
    * **整页只读**（2026-10-09 用户裁断）：这一页是「看 BBS 里是什么值」的查看器。
    * 原来那个「可改动」档砍掉了 —— 改了不落盘、看不到落点，是个假模式（审计 A-52 / X-14）。
    */
+  /*
+   * ★ 活口（2026-10-14 标记）：恒真常量，**看着像死代码，其实是"产品档位"的开关位**。
+   * 唯一消费点是下面传给 `BbsControl` 的 `readOnly` —— 那一支对应的是"可编辑"那半套
+   * （已按 2026-10-09 的裁决砍掉：改了不落盘、看不到落点，是个假模式）。
+   * 留着它是为了"哪天真要恢复可编辑"时有一个明确的位置，而不是散落的注释。
+   */
   const readOnly = true
   const [localNote, setLocalNote] = useState('')
 

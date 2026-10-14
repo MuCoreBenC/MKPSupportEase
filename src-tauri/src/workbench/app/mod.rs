@@ -56,6 +56,10 @@ pub mod delivery;
 /// （起本地假云端 + 以 `MKPSE_PRESET_SOURCE_URL` 起客户端 dev）。
 /// **它不碰任何配置** —— 源地址是环境变量注入的，只在 debug 构建里认
 pub mod dev_source;
+/// **开发台**：把"平时看不见的那几屏"做成工作台里一排按钮（先接后处理那一组）。
+/// 它是假钩子 `hook-sim` 的**界面版** —— 进程内直接喂 [`crate::hook_ui::HookView`]，
+/// 与真钩子来的那条线同一个落点（见模块头：工作台与客户端是同一个进程）。
+pub mod devsim;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;

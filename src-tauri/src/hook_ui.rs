@@ -49,6 +49,16 @@ pub const STARTED_EVENT: &str = "postprocess-started";
 /// 只在算出来时发（算不出来就不发：界面那一格继续空着，不许拿 0 凑数）。
 pub const PRINT_TIME_EVENT: &str = "postprocess-print-time";
 
+/// **开发台**：让客户端把某一格界面显示出来（作者 2026-10-14）。
+///
+/// 与上面那几条**完全不同的一类** —— 那几条是"后处理那一趟"的事件流；这一条是
+/// **一条指令**："把 `<scene>` 那一格界面打开"。前端一个 Provider
+/// （`src/app/dev/preview.tsx`）收下它，各模态框的持有者按自己的 `scene` 认领。
+///
+/// 它是**纯界面触发**：不跑后处理、不读 G-code、不落记录。后处理那一组不走这一条
+/// （它有自己的演出，见 [`HookView::run_preview`]）。
+pub const DEV_PREVIEW_EVENT: &str = "dev-preview";
+
 /// 一条进度长什么样（与 Rust 侧 [`ProgressPayload`] 一一对应；前端只认字段名）。
 pub type ProgressDto = ProgressPayload;
 /// 开场那几个事实长什么样。
@@ -64,6 +74,8 @@ pub type FinishedDto = FinishedPayload;
 pub struct StartedDto {
     pub preset_name: String,
     pub gcode_name: String,
+    /// 这一趟是**开发台演出来的**（不是真钩子）—— 界面据此把真业务按钮禁掉、标「预览模式」
+    pub preview: bool,
 }
 
 /// 延后的打印时间补算完（[`PRINT_TIME_EVENT`]）—— 结论里那一格由它补上。
@@ -72,6 +84,15 @@ pub struct StartedDto {
 pub struct PrintTimeDto {
     /// 预估打印秒数（与管线内同一口径：同一个 `printtime::estimate` + 同一组 Options）
     pub total_seconds: f64,
+}
+
+/// 开发台的一条**界面指令**（[`DEV_PREVIEW_EVENT`]）：把哪一格界面显示出来。
+///
+/// `scene` 是稳定串（`import-collision` / `rename` / … —— 前端 `DevScene` 那套 id 的下半截）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevPreviewDto {
+    pub scene: String,
 }
 
 /// 窗口起来时读的那份**全量快照**（进度 / 待答的问句 / 结论都在里面）。
@@ -86,6 +107,12 @@ pub struct RunSnapshot {
     pub question: Option<QuestionDto>,
     pub progress: Option<ProgressDto>,
     pub finished: Option<FinishedDto>,
+    /// **这一屏是开发台演出来的**（不是真钩子跑出来的）。
+    ///
+    /// `true` 时界面把那几颗真业务按钮（停止 / 后台运行 / 强制继续 / 终止）**禁掉**
+    /// 并标上「预览模式」—— 那些按钮走的是真钩子回写线，预览里点了只会如实报
+    /// "现在没有在跑后处理"（作者 2026-10-14 裁定：预览就明确是预览，不许点出真业务）。
+    pub preview: bool,
 }
 
 /// Tauri `manage` 那一格里放的东西（命令从它那三条读 / 写）。
@@ -96,6 +123,13 @@ pub struct HookView {
     shared: Mutex<Shared>,
     /// 回写线（取消 / 答复）：界面一起来就装上，之后一直用同一条
     writer: Mutex<Option<hook_ipc::Handle>>,
+    /// **开发台预览的代次**：每来一条新的演出指令 +1。
+    ///
+    /// 用处只有一个 —— 「那一问」那一档：预览里没有真答复线（`ask` 无人可答），
+    /// 那一屏要**停在问句上给用户看**（而不是立刻收场）。演出线程拿自己那一代次
+    /// 在这儿等：**下一趟预览来了**（代次变了）或**演出被取消**时才放它走。
+    /// 真钩子那条线不看它。
+    preview_gen: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -106,6 +140,8 @@ struct Shared {
     question: Option<QuestionDto>,
     progress: Option<ProgressDto>,
     finished: Option<FinishedDto>,
+    /// 这一屏是**开发台演出来的**（不是真钩子）—— 见 [`RunSnapshot::preview`]
+    preview: bool,
 }
 
 /// 补一条执行记录的打印时间（**后台线程里跑**，不占钩子那条关键路径）。
@@ -175,11 +211,34 @@ pub(crate) fn complete_archive(
     Some(estimated.total_seconds)
 }
 
+/// 把客户端主窗口抬到最前 —— **新任务开工**（[`FromHook::Hello`]）与**开发台演示开演**
+/// （[`HookView::run_preview`]）两处共用同一下。
+///
+/// 旧世代 `mkp-ssr::progress_window` 的原话：这是"新任务抬窗那条路（unminimize + show + set_focus）"。
+/// 三条约定照搬：
+///
+/// - **一条连接只抬一次**（调用点各自保证：真钩子住开场那一条，演示住开演那一下）——
+///   `progress` 一趟上千条，每条都抬等于处理期间反复抢焦点，用户没法做别的事；
+/// - **刻意不用 `always_on_top`**：常驻置顶会一直挡着切片器的界面，而这个窗口空闲时没有内容
+///   —— 要的是"开工时它出现在你面前"，不是"永远压在别人上面"；
+/// - 全是 `let _ =`：窗口可能已经被用户关掉（关掉不是错误，别 panic）。
+///
+/// 代价如实登记：`set_focus` 是**请求**，macOS 给不给焦点取决于当时的前台应用与专注模式
+/// 等系统设置 —— 给不了也不重试、不循环。
+fn raise_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 impl HookView {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             shared: Mutex::new(Shared::default()),
             writer: Mutex::new(None),
+            preview_gen: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -194,15 +253,26 @@ impl HookView {
             FromHook::Hello {
                 preset_name,
                 gcode_name,
+                facts,
             } => {
                 /* 开场与收场各一条 INFO：出问题时"这一趟到底有没有被界面收到"是第一个要问的 */
                 tracing::info!(gcode = %gcode_name, preset = %preset_name, "钩子来了：这一趟开始");
+                /* ★ **新任务抬窗**（作者 2026-10-14 拍板；旧世代 `mkp-ssr::progress_window`
+                同一条：**第一条消息到达时抬一次**）—— 用户刚在切片器点了「导出」，正等着看
+                进度，这一扇就该出现在他面前；不抬的话，他能看到的只有切片器那句退出码。
+                只在这一条（新一趟的开场）里抬：`progress` 一趟发上千条，**绝不每条都抬**
+                —— 那等于处理期间反复抢焦点，用户什么都干不了。
+                跑完不再抢（见下面 `Finished` 那一条里那句"不抢焦点"）。 */
+                raise_main_window(app);
                 {
                     let mut g = self.shared.lock().expect("锁没坏");
-                    /* 新一趟：上一趟的结论与问句一起清掉（旧世代：结果态留到下一次顶掉它） */
+                    /* 新一趟：上一趟的结论与问句一起清掉（旧世代：结果态留到下一次顶掉它）——
+                    事实**跟着开场这一条一起落**（2026-10-14：原来它是紧跟着的单独一条，
+                    界面上就是"框先开成一条、数字再一个个蹦出来"那一下闪）。 */
                     *g = Shared {
                         preset_name: Some(preset_name.clone()),
                         gcode_name: Some(gcode_name.clone()),
+                        facts: facts.clone(),
                         ..Shared::default()
                     };
                 }
@@ -211,12 +281,13 @@ impl HookView {
                     StartedDto {
                         preset_name,
                         gcode_name,
+                        preview: false,
                     },
                 );
-            }
-            FromHook::Facts(facts) => {
-                self.shared.lock().expect("锁没坏").facts = Some(facts.clone());
-                let _ = app.emit(FACTS_EVENT, facts);
+                /* 事实照旧单独推一条事件：前端那格表的"值"走它（快照里也有，两条路同源） */
+                if let Some(facts) = facts {
+                    let _ = app.emit(FACTS_EVENT, facts);
+                }
             }
             FromHook::Progress(progress) => {
                 self.shared.lock().expect("锁没坏").progress = Some(progress.clone());
@@ -260,7 +331,8 @@ impl HookView {
                 /* 落完之后**喊一下这扇窗**：切片器那边只弹一句 "Error code: N"，
                 用户很可能压根不知道自己这扇窗里有话要说（作者 2026-10-11）。
                 Windows 闪任务栏、macOS 跳 Dock —— 只"提醒"，**不抢焦点**
-                （焦点那一下是切片器的，抢过来只会打断用户）。失败才喊：成功不用惊动谁。 */
+                （开工那一下已经抬过窗了，见 `raise_main_window`；跑完再抢只会打断用户）。
+                失败才喊：成功不用惊动谁。 */
                 if shout {
                     if let Some(win) = app.get_webview_window("main") {
                         let _ =
@@ -268,6 +340,146 @@ impl HookView {
                     }
                 }
             }
+            /* 开发台的演出指令**不在这里演** —— 演出要"睡在步骤之间"，不能在通道的
+            收消息线程里阻塞。真正的处理在监听器那一处（`lib.rs`：手里有 `Arc<HookView>`
+            与 `AppHandle`，能放到后台线程里跑 `devsim::drive`）。走到这里说明有人直接
+            调了 `apply`——记一条日志，什么都不做（如实，不编一屏出来）。 */
+            FromHook::DevScene { scene } => {
+                tracing::debug!(scene = %scene, "开发台演出指令到了 apply（该由监听器直接处理）");
+            }
+        }
+    }
+
+    /// **开发台那一屏**：把 `scene` 演给这一扇窗看（作者 2026-10-14）。
+    ///
+    /// 两类场景，走两条路：
+    ///
+    /// - **后处理那一组**（`success` / `fail` / `cancel` / `question`）：走与真钩子**同一个落点**
+    ///   （[`Self::apply`]）—— 开演前把 `preview` 置上（界面据此换页脚、禁真业务按钮）。
+    /// - **其余界面格**（导入 / 重命名 / 冲突 …）：**不演出**，只发一条
+    ///   [`DEV_PREVIEW_EVENT`]，由前端那格界面的持有者自己认领（见 `src/app/dev/preview.tsx`）。
+    ///
+    /// 两条都先把客户端窗口**置顶**（作者：「我点那个演示的时候，就把那个客户端窗口置顶，
+    /// 然后演示」）—— 唤起 + 聚焦，让用户正眼看那一屏。
+    ///
+    /// **不读 G-code、不跑管线、不落记录**（演出本体见 [`crate::devsim`]）。
+    /// 立刻返回：演出在后台线程里按节奏走，命令 / 通道那一侧都不等它。
+    pub fn run_preview(self: &Arc<Self>, app: &AppHandle, scene: &str) {
+        /* 用户主动点的演示：先把窗抬到最前（与真钩子「新任务抬窗」同一下，见
+        [`raise_main_window`]），再演 */
+        raise_main_window(app);
+
+        /* 后处理那一组的 slug 带前缀（`postprocess-success`）—— 剥掉再认。
+        认不出来 ⇒ 它是**界面指令**：推给前端 Provider，由持有那一格界面的组件自己认领。
+        这一类**不演出、不占后处理那套状态**。 */
+        let tail = scene.strip_prefix("postprocess-");
+        /* ★「处理中（停住不动）」：走 success 的演出，但在第二遍扫描**停住**（见下 `hold_at`） */
+        let hold_at = (tail == Some("running")).then(|| "pass2".to_owned());
+        let mode = match tail {
+            Some("running") => Some(crate::devsim::Mode::Success),
+            other => other.and_then(crate::devsim::Mode::parse),
+        };
+        let Some(mode) = mode else {
+            tracing::info!(scene = %scene, "开发台：把这一格界面推给客户端");
+            let _ = app.emit(
+                DEV_PREVIEW_EVENT,
+                DevPreviewDto {
+                    scene: scene.to_owned(),
+                },
+            );
+            return;
+        };
+
+        /* 开一趟新的预览：代次 +1（上一趟若正卡在"那一问"上，会因此放行） */
+        let generation = self
+            .preview_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+
+        let me = self.clone();
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            me.begin_preview(&handle, mode);
+            /* 演出：每条消息都喂回 `apply` —— 与真钩子来的那条线同一个落点 */
+            let sink = PreviewSink {
+                view: me.clone(),
+                app: handle.clone(),
+                generation,
+            };
+            crate::devsim::drive(
+                &sink,
+                &crate::devsim::Options {
+                    mode,
+                    delay: std::time::Duration::from_millis(700),
+                    hold_at,
+                },
+                &postprocess::diag::CancelToken::new(),
+            );
+            tracing::info!(scene = %mode.id(), "开发台：客户端这一屏演完了");
+        });
+    }
+
+    /// 开演前的一下：置 `preview`、清上一趟、发一条"新一趟开场"。
+    ///
+    /// 与真钩子那条 [`FromHook::Hello`] 的分工一样（界面据此把上一趟的结论与"我关过了"
+    /// 一起清掉）—— 唯一差别是这一趟带着 `preview: true`。
+    fn begin_preview(&self, app: &AppHandle, mode: crate::devsim::Mode) {
+        let preset_name = "（开发台预览）A1_MINI-fast.toml".to_owned();
+        let gcode_name = format!("（开发台预览）{}.gcode", mode.id());
+        {
+            let mut g = self.shared.lock().expect("锁没坏");
+            *g = Shared {
+                preset_name: Some(preset_name.clone()),
+                gcode_name: Some(gcode_name.clone()),
+                preview: true,
+                ..Shared::default()
+            };
+        }
+        let _ = app.emit(
+            STARTED_EVENT,
+            StartedDto {
+                preset_name,
+                gcode_name,
+                preview: true,
+            },
+        );
+    }
+
+    /// **预览演出**往这一份里送一条消息 —— 与 [`Self::apply`] 同一条落点，
+    /// 但**接手开场那一条**（见 [`PreviewSink::send`]）。
+    ///
+    /// 与 `apply` 的唯一差别：[`FromHook::Hello`] **不落进 `apply` 那支 Hello 分支**
+    /// —— 那一支会把 `preview` 一起清成 `false`（它是真钩子"新一趟"的语义）。
+    /// 开场那一下由 `begin_preview` 做过了（带着播放标记），所以这里把 Hello 换成
+    /// **只刷新文件名的预览开场**。
+    fn apply_preview(&self, app: &AppHandle, msg: FromHook) {
+        match msg {
+            FromHook::Hello {
+                preset_name,
+                gcode_name,
+                facts,
+            } => {
+                {
+                    let mut g = self.shared.lock().expect("锁没坏");
+                    g.preset_name = Some(preset_name.clone());
+                    g.gcode_name = Some(gcode_name.clone());
+                    g.preview = true;
+                    /* 事实与开场同一条落到（与真钩子那条 [`Self::apply`] 同一口径） */
+                    g.facts = facts.clone();
+                }
+                let _ = app.emit(
+                    STARTED_EVENT,
+                    StartedDto {
+                        preset_name,
+                        gcode_name,
+                        preview: true,
+                    },
+                );
+                if let Some(facts) = facts {
+                    let _ = app.emit(FACTS_EVENT, facts);
+                }
+            }
+            other => self.apply(app, other),
         }
     }
 
@@ -282,6 +494,7 @@ impl HookView {
             question: g.question.clone(),
             progress: g.progress.clone(),
             finished: g.finished.clone(),
+            preview: g.preview,
         })
     }
 
@@ -315,6 +528,68 @@ impl HookView {
             handle.send(msg);
         }
         Ok(())
+    }
+}
+
+/// 开发台演出的出口（[`HookView::run_preview`] 用）：每条消息喂回**同一份**
+/// [`HookView`] 的 [`HookView::apply`] —— 与真钩子来的那条线同一个落点。
+struct PreviewSink {
+    view: Arc<HookView>,
+    app: AppHandle,
+    /// 这一趟演出属于哪一代（见 [`HookView::preview_gen`]）
+    generation: u64,
+}
+
+impl crate::devsim::Sink for PreviewSink {
+    fn send(&self, msg: &FromHook) {
+        /* ★ 这一趟若已被顶掉（用户又点了别的场景 ⇒ 代次变了），**这一条不再写屏**：
+        否则旧趟"放行收场"那一条（已停止 / 失败）会盖住新趟刚建立的那一屏
+        —— 表现就是"点了成功、屏幕上却是上一条的已停止" */
+        if self
+            .view
+            .preview_gen
+            .load(std::sync::atomic::Ordering::SeqCst)
+            != self.generation
+        {
+            return;
+        }
+        /* 开场那条**换掉文件名**（`devsim` 给的是"假钩子"那套，那是 CLI 的措辞）——
+        这里是开发台预览，界面标题该写"开发台预览" */
+        let msg = match msg {
+            FromHook::Hello { facts, .. } => FromHook::Hello {
+                preset_name: "（开发台预览）A1_MINI-fast.toml".to_owned(),
+                gcode_name: "（开发台预览）演示.gcode".to_owned(),
+                facts: facts.clone(),
+            },
+            other => other.clone(),
+        };
+        self.view.apply_preview(&self.app, msg);
+    }
+
+    /// 预览里的「那一问」：**先把问句推上屏，再停在那一屏给用户看**。
+    ///
+    /// `devsim::Sink::ask` 的契约是"问一句并等答复"，**发问句是这一侧的责任**
+    /// （真钩子那条线的 [`crate::hook_ipc::Client::ask`] 就是自己先 `send(Question)`
+    /// 再等回写）—— 所以这里也要自己发，不然界面收不到问句那一屏。
+    ///
+    /// 发完就**一直等**，直到**下一趟预览来了**（代次变了）才放行 —— 那一刻这一趟收场、
+    /// 把屏让给新的那一趟（与"再点另一个场景"同一条路）。作者 2026-10-14：点一下就要
+    /// 看到那一屏，不能演一下就没了。
+    fn ask(&self, question: &str) -> bool {
+        self.send(&FromHook::Question(crate::hook_ipc::QuestionPayload {
+            kind: "machine-mismatch".to_owned(),
+            text: question.to_owned(),
+        }));
+        while self
+            .view
+            .preview_gen
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == self.generation
+        {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        /* 被下一趟顶掉 ⇒ 不继续（收场），把屏让给新的那一趟 */
+        false
     }
 }
 
@@ -470,11 +745,13 @@ mod tests {
                     text: "还继续吗？".to_owned(),
                 }),
                 finished: None,
+                preview: false,
             };
         }
         let snap = view.snapshot().expect("来过就该有快照");
         assert_eq!(snap.preset_name, "A1_MINI-fast.toml");
         assert!(snap.question.is_some());
+        assert!(!snap.preview, "真钩子那一趟不是预览");
         assert_eq!(snap.progress.expect("有进度").step, "pass1");
 
         /* 结论一来：问句清掉、结论留下（界面不该还挂着一条已经不可能有人答的问题） */
@@ -495,6 +772,28 @@ mod tests {
         let snap = view.snapshot().expect("结论也在快照里");
         assert!(snap.question.is_none());
         assert_eq!(snap.finished.expect("有结论").exit_code, 1);
+    }
+
+    /// 开发台演出来的那一趟：快照带 `preview = true`（界面据此禁掉真业务按钮）
+    #[test]
+    fn a_preview_run_is_marked_in_the_snapshot() {
+        let view = HookView::new();
+        {
+            let mut g = view.shared.lock().expect("锁没坏");
+            *g = Shared {
+                preset_name: Some("（开发台预览）A1_MINI-fast.toml".to_owned()),
+                gcode_name: Some("（开发台预览）success.gcode".to_owned()),
+                progress: Some(ProgressPayload {
+                    step: "pass1".to_owned(),
+                    fraction_in_step: Some(0.4),
+                    message: "第一遍扫描: 35%".to_owned(),
+                }),
+                preview: true,
+                ..Shared::default()
+            };
+        }
+        let snap = view.snapshot().expect("演出来也该有快照");
+        assert!(snap.preview, "预览那一趟必须打上 preview 标记");
     }
 
     /// 没有钩子连着时，那两条命令**报错**（不静默什么都不做）

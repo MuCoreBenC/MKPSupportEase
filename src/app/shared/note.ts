@@ -12,10 +12,11 @@ export interface Note {
   bad: boolean
 }
 
-/**
- * 缺某个契约方法时统一的话术。**方法名要原样写出来** ——
- * 它是往后要加进契约的那个东西的名字，说成「暂不可用」等于把这条线索丢掉。
+/*
+ * ★ 2026-10-14：这里原来有一个 `missingMethodText(method)` ——"缺某个契约方法时的统一话术"。
+ * 删了：**没有任何调用点**（客户端侧再没有 `[API] 未实现的接口` 那种兜底 —— 那类兜底
+ * 现在只在 `api/mock.ts` 里抛错，不再往界面上拼话术）。
+ *
+ * 这个文件现在只导出 `Note` 这一个类型，而它还是**该活着**：
+ * `shared/NoteBar.tsx` 与 `report/PageReport.tsx` 都 `import type { Note }`。
  */
-export function missingMethodText(method: string): string {
-  return `契约里还没有这个方法：${method}`
-}
