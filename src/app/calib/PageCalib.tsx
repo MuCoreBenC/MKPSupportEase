@@ -20,6 +20,8 @@ import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generat
 import PlateZoom from './PlateZoom'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
+import { useDrawerWidth } from '../shared/useDrawerWidth'
+import { STORAGE } from '../../api/storageKeys'
 import { Btn } from '../ui/Controls'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
@@ -304,6 +306,16 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
    * ★ 与页面上的 `catalog`（目录）**不是同一份数据**，别互相替换。
    */
   const pickerRows = useLocalPickerRows(useLocalPresetFiles(), catalog.machines)
+
+  /* 预设抽屉的宽度：拖内缘改宽 + 三态吸附（与参数页历史抽屉同一套，见 `shared/useDrawerWidth`） */
+  const pickerDrag = useDrawerWidth({
+    storageKey: STORAGE.clientPresetPickerW,
+    side: 'right',
+    snap: 320,
+    min: 240,
+    max: 560,
+    label: '预设列表',
+  })
 
   const fileOf = useCallback(
     (machineId: string, versionId: string) => {
@@ -827,12 +839,21 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         open={pickerOpen}
         /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
         rows={pickerRows}
-        currentKey={sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null}
+        /*
+         * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
+         * 校准页拿的是这一页取到的那一份预设（`preset.preset.name` 就是它的文件名）。
+         */
+        currentKey={
+          sel.model !== null && sel.variant !== null && preset.status === 'ready'
+            ? `${sel.model}/${sel.variant}/${preset.preset.name}`
+            : null
+        }
         onUse={(row) => {
           setPickerOpen(false)
           pickPreset(`${row.machineId}/${row.versionId}`)
         }}
         onClose={() => setPickerOpen(false)}
+        drag={pickerDrag}
       />
 
       {opening !== null && (

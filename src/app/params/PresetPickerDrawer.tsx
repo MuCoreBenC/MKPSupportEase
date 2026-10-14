@@ -28,6 +28,7 @@
  */
 
 import { useEffect, useRef } from 'react'
+import type { DrawerWidth } from '../shared/useDrawerWidth'
 import s from './PresetPickerDrawer.module.css'
 
 /** 抽屉里的一行 = **本机真有的一份预设文件** */
@@ -36,12 +37,20 @@ export interface PresetPickerRow {
   machineId: string
   /** 机型显示名（分组标题） */
   machineDisplay: string
-  /** 归属版本（`机型 + 版本` 是这三页共用的组合键） */
+  /** 归属版本（与机型一起说明"这一份属于哪一版"） */
   versionId: string
-  /** 版本显示名（行上的主文字） */
+  /** 版本显示名 —— 只用于悬停说明，**不再是行上的主文字**（2026-10-14 起行上是文件名） */
   versionName: string
-  /** 这一份在盘上的文件名（行上的小字）—— 它才是"本机真有"的那一份 */
+  /** 这一份在盘上的文件名 —— **它就是行上的主文字**（2026-10-14 起） */
   fileName: string
+  /**
+   * 行键：`机型/版本/文件名`。
+   *
+   * 抽屉拿它与调用方给的"在用那一份"对比打勾。**必须含文件名**：
+   * 一个组合下可能有好几份（下载来的一份 + 你复制出来的一份），
+   * 只按 `机型/版本` 比会把两行一起打上（2026-10-14 作者截图那个 bug）。
+   */
+  key: string
   /**
    * 这一行的**动作身份**：用户线给路径、云端线给文件名 —— 与调用方 `onUse` 的入参同形。
    * （本机实有既有下载来的云端那份、也有用户自己那份，两者动作不同：一个「使用」、
@@ -56,10 +65,17 @@ interface Props {
   open: boolean
   /** 本机真有的预设（按机型 → 版本摊平；没本机文件的机型不进来） */
   rows: PresetPickerRow[]
-  /** 当前选中那一行的键：`机型/版本`（没有选中给 null） */
+  /**
+   * 当前**在用**那一份的行键 —— 与 `PresetPickerRow.key` 同源（`机型/版本/文件名`）。
+   *
+   * ★★ 2026-10-14 修：原来是 `机型/版本`。一个组合里可以有好几份文件
+   *   （下载来的一份 + 你复制出来的一份），按组合判 ⇒ **两行一起打勾**
+   *   （作者截图：两份都显示 ✓ / 「使用」），而"当前用的是哪一份"在界面上
+   *   本该唯一。改用行键（含文件名），一行也对不上第二行。
+   */
   currentKey: string | null
   /**
-   * 点「使用」—— 正式切换到这一份。**只有它会切换**（点行不切，见文件头三条规则）。
+   * 点「使用」—— 正式切换到这一份。**只有它会切**（点行不切，见文件头三条规则）。
    * 调用方接自己那条现成的路（参数页 `requestCombo`、校准页 `pickPreset`、首页 `pickPreset`）。
    */
   onUse: (row: PresetPickerRow) => void
@@ -69,6 +85,8 @@ interface Props {
    * 挂左缘、缝换到右边（与试验台同款）。
    */
   side?: 'left' | 'right'
+  /** 拖宽那套（`shared/useDrawerWidth` 的返回值）—— 全仓抽屉同一套手感，见文件尾注释 */
+  drag: DrawerWidth
 }
 
 export default function PresetPickerDrawer({
@@ -78,6 +96,7 @@ export default function PresetPickerDrawer({
   onUse,
   onClose,
   side = 'right',
+  drag,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -112,7 +131,18 @@ export default function PresetPickerDrawer({
       {/* 遮罩：点一下关掉。它在抽屉之下（z-index 见 css） */}
       <button type="button" className={s.scrim} aria-label="关闭预设列表" onClick={onClose} />
 
-      <div className={s.drawer} data-side={side} ref={panelRef} role="dialog" aria-label="选择预设">
+      <div
+        className={s.drawer}
+        data-side={side}
+        data-dragging={drag.dragging}
+        ref={panelRef}
+        role="dialog"
+        aria-label="选择预设"
+        style={{ width: `${drag.width}px` }}
+      >
+        {/* 拖宽热区：贴边一条透明带（全仓抽屉同一套，见 `shared/useDrawerWidth`） */}
+        <div className={s.grip} data-side={side} {...drag.gripProps} />
+
         <div className={s.head}>
           <span className={s.title}>选择预设</span>
           <button type="button" className={s.close} onClick={onClose}>关闭</button>
@@ -137,21 +167,34 @@ export default function PresetPickerDrawer({
               <div className={s.groupHead}>{g.display}</div>
 
               {g.items.map((row) => {
-                const current = currentKey !== null && `${row.machineId}/${row.versionId}` === currentKey
+                const current = currentKey !== null && row.key === currentKey
+                /*
+                 * ★★ 2026-10-14（作者）：**行上主文字就是文件名**。
+                 *
+                 * 原来主文字写版本显示名（「快拆版260628」）、右边一枚等宽小字写文件名 ——
+                 * 于是同一个版本下有几份文件时，几行**主文字一模一样**（作者：「他们两个
+                 * 显示的那个名字都一样，我不是很喜欢」），得去读右边那截小字才分得清，
+                 * 而那一截窄得装不下（「那个宽度不够」）。
+                 *
+                 * 现在：**文件名当主文字**（它本来就是"哪一份"的唯一答案，也是用户自己在
+                 * 盘上看见的那个名字），版本名不再另占一格。两个问题一起消掉：
+                 *   ① 名字不再重样（文件名在盘上就不允许重名）；
+                 *   ② 窄的时候先保住的是最关键的那个名字。
+                 * 用户自己导入的 / 没血统的那份也一样 —— 它照旧只有文件名，不需要额外兜底。
+                 */
                 return (
                   <div
-                    key={`${row.machineId}/${row.versionId}/${row.ref}`}
+                    key={row.key}
                     className={s.item}
                     data-current={current}
                     /*
                      * ★ 点整行**什么都不做**（规则①）：这里不是 button，也没有 onClick ——
                      *   选中态只由调用方给的 `currentKey` 决定。要切就走右边那颗「使用」。
                      */
-                    title={row.fileName}
+                    title={`${row.fileName}（${row.machineDisplay} · ${row.versionName}）`}
                   >
                     <span className={s.tick}>{current ? '✓' : ''}</span>
-                    <span className={s.name}>{row.versionName}</span>
-                    <span className={s.note}>{row.fileName}</span>
+                    <span className={s.name}>{row.fileName}</span>
                     <button
                       type="button"
                       className={s.use}

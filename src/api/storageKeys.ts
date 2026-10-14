@@ -32,6 +32,14 @@ export const STORAGE = {
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 
   /**
+   * 「选择预设」抽屉的宽度（px，JSON 数字）。纯前端偏好。
+   *
+   * 三页共用同一格（首页 / 参数页 / 校准页）—— 它们是同一颗抽屉，宽度也该是同一个，
+   * 免得"在参数页拖宽了、到校准页又变窄"这种别扭。见 `shared/useDrawerWidth`。
+   */
+  clientPresetPickerW: 'mkp.A40.presets.pickerW',
+
+  /**
    * 工艺页（BBS 预设查看器）的偏好：看全部还是跟 BBS 一样、抽屉宽度。
    * （「并排还是浮层」2026-10-13 改成按窗口宽度自动决定，不再落盘。）
    * **全是纯前端的显示偏好** —— 这一页不写盘（本机目录那个端点是只读的），

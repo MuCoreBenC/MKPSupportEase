@@ -23,12 +23,46 @@
   z-index: 31;
   display: flex;
   flex-direction: column;
+  /* 宽度由 `shared/useDrawerWidth` 给（拖左缘改宽 + 三态吸附，全仓同一套手感）——
+     这里只兜一个下限，别写死宽度 */
   width: 320px;
   /* 窗口窄的时候别把参数区挤没 */
   max-width: 60%;
   border-left: 1px solid var(--line);
   background: var(--surface-solid);
   box-shadow: var(--shadow-lift);
+}
+
+/*
+ * 拖宽热区：贴**内缘**一条 6px 透明带（外观上什么都不加，只有 `col-resize` 光标，
+ * 与文件管理器一样"看不出来、悬停就能拖"）。键盘聚焦时才显一条细线。
+ * 左开抽屉的热区在**右缘**，右开（默认）的在**左缘**。
+ */
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.grip[data-side='right'] {
+  left: 0;
+}
+
+.grip[data-side='left'] {
+  right: 0;
+}
+
+.grip:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+/* 拖动中禁掉文字选中（不然拖一次会把整页文字刷蓝） */
+.drawer[data-dragging='true'] {
+  user-select: none;
 }
 
 /* 左开（首页用）：右边常驻露出卡，抽屉没地方 —— 挂左缘，缝换到右边 */
@@ -127,23 +161,21 @@
   color: var(--accent-deep);
 }
 
+/* 行上的主文字 = 文件名（2026-10-14 起）：占满剩下的一格，装不下就省略号 */
 .name {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 /* 版本名右边那截：**这一份自己的**文件名（本机实有，就是盘上那个名字） */
-.note {
-  flex: 1;
-  overflow: hidden;
-  color: var(--text-3);
-  font-family: "SF Mono", Consolas, monospace;
-  font-size: 10.5px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+/*
+ * ★★ 2026-10-14：`.note`（原来写文件名的那枚等宽小字）**退役了** ——
+ * 文件名升成主文字（`.name`），版本名不再另占一格。样式留着给将来可能回来的一列用，
+ * 但现在没有消费者：真要再加一列，先想清楚"窄的时候先牺牲谁"。
+ */
 
 /* 「使用」——**只有它会切预设**（小档按钮，与 `.close` 同尺寸） */
 .use {

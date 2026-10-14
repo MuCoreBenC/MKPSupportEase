@@ -375,6 +375,16 @@ export default function PageParams({
    */
   const pickerRows = useLocalPickerRows(u.localPresets, u.machines)
 
+  /* 预设抽屉的宽度：拖内缘改宽 + 三态吸附（`shared/useDrawerWidth`，与参数页历史抽屉同一套） */
+  const pickerDrag = useDrawerWidth({
+    storageKey: STORAGE.clientPresetPickerW,
+    side: 'right',
+    snap: 320,
+    min: 240,
+    max: 560,
+    label: '预设列表',
+  })
+
   /**
    * 「最近搜索」（作者：「我点击搜索的时候没有展开搜索历史呀」）。
    * 放在页面这一层而不是搜索框里：那个框窄窗时会从分类条那一行搬进标题行，
@@ -1229,13 +1239,22 @@ export default function PageParams({
           open={pickerOpen}
           /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
           rows={pickerRows}
-          currentKey={`${u.machineId}/${u.versionId}`}
+          /*
+           * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
+           * 参数页的"当前那一份"= 这一页正在编辑的那份（`fileLabel` 就是它的文件名）。
+           */
+          currentKey={
+            u.fileLabel !== null && u.machineId !== ''
+              ? `${u.machineId}/${u.versionId}/${u.fileLabel}`
+              : null
+          }
           onUse={(row) => {
             /* 切 combo 走现成的那条路：未保存改动的确认弹层在 requestCombo 里 */
             u.requestCombo(row.machineId, row.versionId)
             closePicker()
           }}
           onClose={closePicker}
+          drag={pickerDrag}
         />
       </FieldLayer>
 

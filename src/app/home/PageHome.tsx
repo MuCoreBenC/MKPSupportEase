@@ -34,6 +34,8 @@ import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
+import { useDrawerWidth } from '../shared/useDrawerWidth'
+import { STORAGE } from '../../api/storageKeys'
 import HeroFade from './HeroFade'
 import CardFrame from './CardFrame'
 import CalibHead from '../calib/CalibHead'
@@ -335,6 +337,16 @@ export default function PageHome({ density }: PageHomeProps) {
    * ★ 与页面上的 `catalog`（目录）**不是同一份数据**，别互相替换。
    */
   const pickerRows = useLocalPickerRows(useLocalPresetFiles(), catalog.machines)
+
+  /* 预设抽屉的宽度：拖内缘改宽 + 三态吸附（与参数页历史抽屉同一套，见 `shared/useDrawerWidth`） */
+  const pickerDrag = useDrawerWidth({
+    storageKey: STORAGE.clientPresetPickerW,
+    side: 'left',
+    snap: 320,
+    min: 240,
+    max: 560,
+    label: '预设列表',
+  })
 
   /* 抽屉每一项自己的文件名（T11）—— 与「校准」tab 同一颗查询 */
   const fileOf = useCallback(
@@ -1213,12 +1225,21 @@ export default function PageHome({ density }: PageHomeProps) {
         open={pickerOpen}
         /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
         rows={pickerRows}
-        currentKey={sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null}
+        /*
+         * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
+         * 首页拿的是这一页取到的那一份预设（`presetInfo.name` 就是它的文件名）。
+         */
+        currentKey={
+          sel.model !== null && sel.variant !== null && presetInfo !== null
+            ? `${sel.model}/${sel.variant}/${presetInfo.name}`
+            : null
+        }
         onUse={(row) => {
           setPickerOpen(false)
           pickPreset(`${row.machineId}/${row.versionId}`)
         }}
         onClose={() => setPickerOpen(false)}
+        drag={pickerDrag}
       />
 
       {openModel && (

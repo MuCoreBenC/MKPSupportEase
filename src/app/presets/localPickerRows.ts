@@ -61,6 +61,12 @@ export function localPickerRows(files: LocalPresetFile[], machines: Machine[]): 
       versionId,
       versionName: versionName.get(`${machineId}/${versionId}`) ?? versionId,
       fileName: f.fileName,
+      /*
+       * 行键**含文件名**：抽屉拿它与"在用那一份"对比打勾，一个组合下可能有好几份
+       * （同版本下载来一份 + 复制出来一份），只按 `机型/版本` 比会把两行一起打上。
+       * 与预设页那一套行键（`local:<机型>:<路径>`）同一个精神，只是这里不需要路径。
+       */
+      key: `${machineId}/${versionId}/${f.fileName}`,
       /* 用户线的动作身份是**路径**（它与预设页那颗「使用」同形） */
       ref: f.path,
       isLocal: true,
