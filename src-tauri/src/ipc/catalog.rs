@@ -37,7 +37,7 @@ pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, App
 
 /* ---------- 数据源的设置（重装 / 换 Gitee / 换自建 CDN 的入口） ---------- */
 
-/// 给界面的一个**内置源**选项（作者 2026-10-05 拍"两个官方源 + 收起的自定义"）。
+/// 给界面的一个**内置源**选项（作者 2026-10-05 拍"两个云端源 + 收起的自定义"）。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltinSourceDto {
@@ -486,7 +486,7 @@ fn untaken_name(user_root: &Path, wanted: &str) -> String {
 ///
 /// # 它**不**做的事
 ///
-/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把官方的取到我机器上"，
+/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把交付预设取到我机器上"，
 /// 使用是"把哪一份设为生效" —— 两件事分在两个表上：云端表只有下载 / 更新，
 /// 本地表那几行才有「使用」。偷偷替用户换掉正在用的那份，是这一轮要根治的毛病之一。
 ///
@@ -823,7 +823,7 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
 
 /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
 
-/// **删除本机那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+/// **删除本机那份交付预设文件**（作者裁决 2026-10-06：一切皆可删）。
 ///
 /// 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
 /// 删之前把属于这一份的**状态**一并清掉：使用中指针（云端线认文件名）撤下、
@@ -837,14 +837,14 @@ pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(
         let draft = runtime::app_state::draft(&root)?;
         let mut state_cleared = false;
         if active.as_ref().is_some_and(|a| {
-            a.origin == runtime::state::ActiveOrigin::Cloud && a.file_name == file_name
+            a.origin == runtime::state::ActiveOrigin::Preset && a.file_name == file_name
         }) {
             runtime::app_state::clear_active_preset(&root)?;
             state_cleared = true;
         }
         if draft
             .as_ref()
-            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::cloud(&file_name))
+            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::preset(&file_name))
         {
             runtime::app_state::clear_draft(&root)?;
             state_cleared = true;
@@ -904,7 +904,7 @@ fn active_dto(
 ) -> ActivePresetDto {
     use runtime::state::ActiveOrigin;
     let (machine_id, version_id) = match state.origin {
-        ActiveOrigin::Cloud => {
+        ActiveOrigin::Preset => {
             let listed = catalog
                 .files
                 .iter()
@@ -957,7 +957,7 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
 }
 
 /// 「使用这一份」。**两条线共用这一个入口**（作者 2026-10-02 定的第七层）：
-/// 云端交付文件与用户自己那份都是真的 Preset，**"只读"是文件归属的属性，
+/// 交付预设文件与用户自己那份都是真的 Preset，**"只读"是文件归属的属性，
 /// 不是"能不能被使用"的属性** —— 所以这里只有"按来源定位 + 各自的可信度判定"，
 /// 没有两套 Preset 模型、也没有第二个写指针的口。
 ///
@@ -985,7 +985,7 @@ pub async fn apply_active_preset(
         let catalog = runtime::load_released_catalog(&root)?;
 
         let state = match origin.unwrap_or_default() {
-            ActiveOrigin::Cloud => {
+            ActiveOrigin::Preset => {
                 let file = catalog
                     .files
                     .iter()
@@ -1007,7 +1007,7 @@ pub async fn apply_active_preset(
                         )));
                     }
                 }
-                runtime::app_state::set_active_cloud(&root, file)?
+                runtime::app_state::set_active_preset(&root, file)?
             }
             ActiveOrigin::Local => {
                 let rel = path.ok_or_else(|| {

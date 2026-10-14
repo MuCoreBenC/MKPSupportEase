@@ -786,7 +786,7 @@ mod tests {
         // 2026-10-01 第三刀的剥离）。这条判据守的就是那条边界：
         //   - 台账里**要**有它（工作台要看得见、选得着 —— 硬编码进客户端源码是错的，
         //     不会编程的用户改不了图）；
-        //   - catalog 的 `files[]` 里**要没有**它（不进云端交付，客户端不下载）。
+        //   - catalog 的 `files[]` 里**要没有**它（不进交付预设那一档，客户端不下载）。
         // 拦的地方是 `dest_of_asset`（**按交付档位拦**，不是按类型拦）。
         let images = source
             .assets
@@ -802,7 +802,7 @@ mod tests {
             images
                 .iter()
                 .all(|a| a.delivery == crate::presetdata::assets::Delivery::Bundled),
-            "整机图一律 bundled 档：台账登记、工作台可管，但不进云端交付"
+            "整机图一律 bundled 档：台账登记、工作台可管，但不进交付预设那一档"
         );
         assert!(
             !catalog

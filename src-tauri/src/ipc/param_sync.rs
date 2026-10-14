@@ -565,7 +565,7 @@ offset_x = -1
         let defs = defs();
         let cloud =
             std::fs::read_to_string(repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"))
-                .expect("读云端交付件");
+                .expect("读交付预设文件");
 
         let mut new_values = param_alg::read_param_values(&cloud, &defs).unwrap();
         let key = "toolhead.offset.x";
@@ -645,7 +645,7 @@ offset_x = -1
             let current_text = std::fs::read_to_string(
                 repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"),
             )
-            .expect("读云端交付件");
+            .expect("读交付预设文件");
             runtime::baseline::ensure_baseline(&root, &current_sha, current_text.as_bytes())
                 .unwrap();
 

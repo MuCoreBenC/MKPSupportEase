@@ -162,12 +162,12 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const [historyOpen, setHistoryOpen] = useState(false)
   /*
    * **发布软件版本**的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
-   * 「发布预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
+   * 「交付预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
    */
   const [releaseGateOpen, setReleaseGateOpen] = useState(false)
   /*
    * 软件版本的发布历史（2026-10-07 从发布框里挪到这 —— 作者：历史放在外面，不塞模态框）。
-   * 本地回执日志（`release-history.json`），最新在前；与上面「发布预设」那本账
+   * 本地回执日志（`release-history.json`），最新在前；与上面「交付预设」那本账
    * （`publish-history.json`）是**两本账**。进页取一次 + 关掉发布框取一次，不轮询。
    */
   const [releaseHistory, setReleaseHistory] = useState<ReleaseHistory | null>(null)
@@ -568,10 +568,10 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           </div>
         </div>
 
-        {/* —— ② 发布预设 —— */}
+        {/* —— ② 交付预设 —— */}
         <div className={s.card}>
           <div className={s.cardHead}>
-            <h2>② 发布预设</h2>
+            <h2>② 交付预设</h2>
             <span className={s.cardNote}>
               把本次预设与数据变更提交到远端仓库；合并后，客户端即可获取这些更新
             </span>
@@ -712,7 +712,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
         {/*
           —— 软件版本（只读）——
-          ★ 与上面的「发布预设」是**两回事**（见 `docs/RELEASE-TRANSACTIONS.md`）：
+          ★ 与上面的「交付预设」是**两回事**（见 `docs/RELEASE-TRANSACTIONS.md`）：
             上面把预设/数据提交进仓库、合并后客户端就能取到；
             这一块说的是"发布一个新的 SupportEase 安装包"——**另一套事务，本轮不实现**。
           所以这里**只读展示**，不摆按钮（摆一个点不动的按钮比不摆更糟）。
@@ -738,14 +738,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               </button>
             </div>
             <p className={s.note}>
-              预设更新**不需要**新的安装包 —— 走上面的「发布预设」即可。只有改动程序本身
+              预设更新**不需要**新的安装包 —— 走上面的「交付预设」即可。只有改动程序本身
               （Rust / React / 数据读取能力 / 客户端功能）才需要发布一个软件版本。
               发完还要**合并 release.json 那个 PR** —— 客户端才看得到新版本。
             </p>
 
             {/*
               发布历史（2026-10-07 从发布框里挪到这）：本地回执日志，最新在前。
-              ★ 这是「发布软件版本」那本账 —— 上面「发布预设」的回执在另一本里
+              ★ 这是「发布软件版本」那本账 —— 上面「交付预设」的回执在另一本里
                 （②卡顶上那枚「本次发布落下…」chip），两本账不混。
             */}
             <div className={s.bar}>
@@ -956,7 +956,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
       {/*
         发布软件版本的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
-        「发布预设」的闸（`gateOpen`）是**两道闸**，各有各的账。
+        「交付预设」的闸（`gateOpen`）是**两道闸**，各有各的账。
         ★ 关框时重取发布历史：发完的那一趟已经记进 `release-history.json`，
           页面这块要跟上（历史摆在这张卡上，不再塞在框里）。
       */}

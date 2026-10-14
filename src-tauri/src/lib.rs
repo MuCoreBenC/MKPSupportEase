@@ -253,11 +253,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 找「我那一份」+ 把校准值写进它（2026-10-08 资源库改判）
         ipc::local::get_local_copy_for,
         ipc::local::save_preset_calibration,
-        // 对比台 + 官方版本账（2026-10-08）：只在**用户自己的预设**之间对比
+        // 对比台 + 云端版本账（2026-10-08）：只在**用户自己的预设**之间对比
         ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
-        // 逐参数「官方更新」（2026-10-09）：读三方账 / 落采用·保持的决定
+        // 逐参数「云端更新」（2026-10-09）：读三方账 / 落采用·保持的决定
         ipc::param_sync::get_preset_param_sync,
         ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
@@ -288,7 +288,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::reveal_report_export,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
-        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
+        // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
         ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
@@ -415,7 +415,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::reveal_report_export,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
-        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
+        // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
         ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
@@ -496,7 +496,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
-        // 交付文件清单（2026-10-07）：「发布预设」卡看这次都会写出哪些文件 + 看某一份的原文
+        // 交付文件清单（2026-10-07）：「交付预设」卡看这次都会写出哪些文件 + 看某一份的原文
         app::build::wb_delivery_files,
         app::build::wb_delivery_file,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入

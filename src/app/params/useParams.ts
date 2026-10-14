@@ -497,7 +497,7 @@ export interface Params {
    */
   pinned: boolean
 
-  /* ---------- 官方更新（2026-10-09） ---------- */
+  /* ---------- 云端更新（2026-10-09） ---------- */
 
   /**
    * 这一份的**云端更新账**（我 / 云端旧值 / 云端新值）。
@@ -721,7 +721,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         if (f.kind === 'mkp_preset') {
           editTargetByCombo.set(`${f.machineId}:${f.versionId}`, {
             fileName: f.fileName,
-            origin: 'cloud',
+            origin: 'preset',
             path: null,
           })
         }
@@ -1197,7 +1197,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   /**
    * 整份恢复默认值：一次动作，撤销一下就全回来。
    *
-   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版官方的
+   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版交付预设的
    * 默认值"整个退场了 —— 有问题就让用户删掉、重新取一份，参数页不再养一份历史快照，
    * 也就没有"基准里缺哪一项"那一串回落。
    */

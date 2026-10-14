@@ -117,7 +117,22 @@ impl ThemePref {
 }
 
 /// 应用状态格式的代次。加 section / 加字段不升号，改语义才升（与 catalog 同一条）。
-pub const APP_STATE_SCHEMA: u32 = 1;
+///
+/// 代次史：
+/// - `1` —— 最初的整份状态（使用中指针 / 草稿 / 正文草稿 / 数据源 / 逐参数账 / 主题 / 自动清理）。
+///   那一代里 `activePreset.origin` 写作 `"cloud"`（更早还写过 `"mine"`），
+///   本地文件落点在 `presets-mine/…`。
+/// - `2`（2026-10-14）—— 两条线的名字定成 `"preset"` / `"local"`，本地文件落点
+///   `presets-local/…`。**盘上那份 1 代状态必须原地升上来**：读的时候按
+///   [`migrate_state`] 转（指针与草稿里的旧枚举值、旧落点前缀），随后第一次写落盘
+///   就是 2 代。不升号、只靠 serde 别名的话，指针里那个 `presets-mine/…` 路径会一直
+///   留在盘上，而 [`super::local::check_local_prefix`] 只认新前缀 ⇒ 那份本地预设
+///   在界面上从此不可见（作者 2026-10-14 实测到的那个状态）。
+pub const APP_STATE_SCHEMA: u32 = 2;
+
+/// 迁移前的旧本地预设目录前缀。**只有迁移读它**（`presets-mine/…` → `presets-local/…`）；
+/// 业务代码一律走 [`super::paths::LOCAL_DIR`]，别在别处再写这个字面量。
+const LEGACY_LOCAL_DIR: &str = "presets-mine";
 
 const STATE_FILE: &str = "run/app-state.json";
 
@@ -213,15 +228,102 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
         }
         Err(e) => return Err(AppError::io("读不到应用状态").with_detail(e.to_string())),
     };
-    let state: AppStateFile = serde_json::from_slice(&bytes)
+    /*
+     * **先探代次、低代次先迁、迁完再解析**：`1` 代文件里可能有**已经退役的枚举值**
+     * （`"origin":"mine"`），直接 `from_slice` 会先失败 ⇒ 迁移就没机会跑。
+     * 探不出代次的（坏 JSON / 没有 `appStateSchema`）交给下面如实报错。
+     */
+    let mut value = serde_json::from_slice::<serde_json::Value>(&bytes)
         .map_err(|e| AppError::corrupted("应用状态读不出来").with_detail(e.to_string()))?;
-    if state.app_state_schema != APP_STATE_SCHEMA {
+    migrate_state(&mut value)?;
+    serde_json::from_value(value)
+        .map_err(|e| AppError::corrupted("应用状态读不出来").with_detail(e.to_string()))
+}
+
+/// **已知代次 → 当前代次**的升级（就地改 JSON 树，只在内存里转，不落盘）。
+///
+/// 三条判据（缺一条都会变成"要么静默丢数据、要么把新数据当旧数据改"）：
+/// - **当前代次**：原样返回；
+/// - **低代次（已知）**：按明确路径逐代升。到 2026-10-14 只有一条 `1 → 2`：
+///   指针与草稿里的旧枚举值改成现名、本地线落点从 `presets-mine/…` 改成
+///   `presets-local/…`（**纯重命名**：文件本体在盘上的位置不动，动的是记在哪）；
+/// - **未来代次**：**拒绝**，如实报错。降级程序按旧结构去读新文件，越读越糟；
+///   代次认不了就不动手，原文件一个字节不改。
+fn migrate_state(value: &mut serde_json::Value) -> Result<(), AppError> {
+    let Some(schema) = value
+        .get("appStateSchema")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return Err(AppError::corrupted(
+            "应用状态里没有格式代次（appStateSchema）",
+        ));
+    };
+    if schema > u64::from(APP_STATE_SCHEMA) {
         return Err(AppError::corrupted(format!(
-            "应用状态的格式代次认不了：文件是 {}，程序认 {}",
-            state.app_state_schema, APP_STATE_SCHEMA
+            "应用状态的格式代次比程序新（文件是 {schema}，程序认到 {APP_STATE_SCHEMA}）—— \
+             这一版程序读不了，换新版再打开"
         )));
     }
-    Ok(state)
+    if schema < 2 {
+        migrate_v1_to_v2(value);
+    }
+    value["appStateSchema"] = serde_json::Value::from(APP_STATE_SCHEMA);
+    Ok(())
+}
+
+/// `1 → 2`：本地线落点换代（`presets-mine/` → `presets-local/`），
+/// **外加**把那一代里已经退役的枚举值（`"mine"`）改写成现名。
+///
+/// 为什么在 `serde_json::Value` 上做、而不是在结构体上做：`"mine"` 那条别名已经退役
+/// （见 [`super::state::ActiveOrigin`]），**硬解析会先失败** ⇒ 结构体那条路根本走不到。
+/// 先按 JSON 树把两件事做完（旧枚举值改现名 + 路径换前缀），再交给 serde 判定一次：
+/// 改完还解析不了，那就是真坏档，照旧 `CORRUPTED`。
+///
+/// 只动**确实在旧前缀下**的那些路径、以及**确实写着旧枚举值**的那种字段，其余原样。
+fn migrate_v1_to_v2(value: &mut serde_json::Value) {
+    let prefix = format!("{LEGACY_LOCAL_DIR}/");
+    let to_new = |rel: &str| -> String {
+        match rel.strip_prefix(&prefix) {
+            Some(rest) => format!("{}/{rest}", crate::fsx::paths::LOCAL_DIR),
+            None => rel.to_owned(),
+        }
+    };
+
+    /* 指针与草稿：枚举值（"mine" → "local"）+ 落点前缀（正文草稿只认路径，没有枚举） */
+    for key in ["activePreset", "draft", "textDraft"] {
+        let Some(section) = value
+            .get_mut(key)
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        if section.get("origin").and_then(serde_json::Value::as_str) == Some("mine") {
+            section.insert("origin".into(), serde_json::Value::from("local"));
+        }
+        if let Some(rel) = section.get("path").and_then(serde_json::Value::as_str) {
+            let moved = to_new(rel);
+            section.insert("path".into(), serde_json::Value::from(moved));
+        }
+    }
+
+    /*
+     * 逐参数「云端更新」处理账的键是**本地线路径**（与草稿同一把钥匙，见 [`repoint_local`]）：
+     * 不跟着改的话，"这一项我已经处理过了"会凭空消失，云端下一次发布又全翻出来。
+     */
+    if let Some(books) = value
+        .get_mut("paramDecisions")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let moved: Vec<(String, String, serde_json::Value)> = books
+            .iter()
+            .filter(|(k, _)| k.starts_with(&prefix))
+            .map(|(k, v)| (k.clone(), to_new(k), v.clone()))
+            .collect();
+        for (old_key, new_key, book) in moved {
+            books.remove(&old_key);
+            books.insert(new_key, book);
+        }
+    }
 }
 
 /// 迁移的读半边：`app-state.json` 还不在时，按格读三个旧文件拼出快照。
@@ -280,7 +382,7 @@ pub fn active_preset(root: &Path) -> Result<Option<ActivePreset>, AppError> {
 
 /// 记下"用这一份云端的"。`file` 来自 catalog；
 /// 指纹优先用目录登记的期望值，没登记就对盘上真字节算一次（算不出 = 文件不在，报错）。
-pub fn set_active_cloud(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
+pub fn set_active_preset(root: &Path, file: &CatalogFile) -> Result<ActivePreset, AppError> {
     let sha256 = match file.expected_sha() {
         Some(want) => want.to_owned(),
         None => {
@@ -293,7 +395,7 @@ pub fn set_active_cloud(root: &Path, file: &CatalogFile) -> Result<ActivePreset,
     with_state(root, |state| {
         let active = ActivePreset {
             active_schema: super::state::ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Cloud,
+            origin: ActiveOrigin::Preset,
             file_name: file.file_name.clone(),
             sha256,
             path: None,
@@ -590,6 +692,92 @@ mod tests {
         assert_eq!(load(d.path()).unwrap_err().code, ErrorCode::Corrupted);
     }
 
+    /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**，
+    /// 而且**读不落盘** —— 升出来的结果要等第一次真写入才落盘（与"读不落盘"同一条）。
+    #[test]
+    fn schema_one_is_migrated_in_memory_and_paths_are_repointed() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = r#"{ "appStateSchema": 1,
+               "activePreset": { "activeSchema": 1, "origin": "mine",
+                 "fileName": "A1-fast.toml", "sha256": "abc",
+                 "path": "presets-mine/A1-fast.toml" },
+               "draft": { "draftSchema": 1, "origin": "mine",
+                 "sourceFileName": "A1-fast.toml", "path": "presets-mine/A1-fast.toml",
+                 "sourceSha256": "abc",
+                 "text": "涂胶 = 1", "updatedUnix": 1 },
+               "textDraft": { "draftSchema": 1, "fileName": "A1-fast.toml",
+                 "path": "presets-mine/A1-fast.toml", "text": "涂胶 = 1",
+                 "updatedUnix": 1 },
+               "paramDecisions": { "presets-mine/A1-fast.toml": { "a":
+                 { "sha256": "abc", "kind": "adopt" } } } }"#;
+        atomic_write(&state_file(d.path()), json.as_bytes()).unwrap();
+
+        let state = load(d.path()).unwrap();
+        assert_eq!(state.app_state_schema, APP_STATE_SCHEMA);
+        let active = state.active_preset.expect("指针该读得进");
+        assert_eq!(
+            active.path.as_deref(),
+            Some("presets-local/A1-fast.toml"),
+            "本地线落点该换成新目录"
+        );
+        let draft = state.draft.expect("草稿该读得进");
+        assert_eq!(draft.path.as_deref(), Some("presets-local/A1-fast.toml"));
+        assert!(
+            state
+                .param_decisions
+                .contains_key("presets-local/A1-fast.toml"),
+            "逐参数账按同一把路径钥匙存，也得跟着走"
+        );
+        assert!(!state
+            .param_decisions
+            .contains_key("presets-mine/A1-fast.toml"));
+        assert!(
+            std::fs::read_to_string(state_file(d.path()))
+                .unwrap()
+                .contains("\"appStateSchema\": 1"),
+            "读不该把它写成 2：升代次的结果等第一次真写入落盘"
+        );
+    }
+
+    /// 2 代再读一次：**不重复动手**（幂等），值原样。
+    #[test]
+    fn migrating_twice_is_a_no_op() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = r#"{ "appStateSchema": 2,
+               "activePreset": { "activeSchema": 1, "origin": "local",
+                 "fileName": "A1-fast.toml", "sha256": "abc",
+                 "path": "presets-local/A1-fast.toml" } }"#;
+        atomic_write(&state_file(d.path()), json.as_bytes()).unwrap();
+
+        for _ in 0..2 {
+            let state = load(d.path()).unwrap();
+            assert_eq!(state.app_state_schema, 2);
+            assert_eq!(
+                state.active_preset.unwrap().path.as_deref(),
+                Some("presets-local/A1-fast.toml"),
+                "已经在新目录里的路径不该被再改一次"
+            );
+        }
+    }
+
+    /// 迁移**不改盘**：失败路径（这里是坏 JSON）要如实报错，原文件一个字节不动。
+    #[test]
+    fn a_failed_parse_leaves_the_original_file_alone() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let broken = "{ \"appStateSchema\": 1, \"activePreset\": { 不是 JSON }".as_bytes();
+        atomic_write(&state_file(d.path()), broken).unwrap();
+
+        assert_eq!(load(d.path()).unwrap_err().code, ErrorCode::Corrupted);
+        assert_eq!(
+            std::fs::read(state_file(d.path())).unwrap(),
+            broken,
+            "报错不写盘、不重置"
+        );
+    }
+
     /// 代次认不出同样是坏档
     #[test]
     fn future_schema_is_rejected() {
@@ -607,10 +795,10 @@ mod tests {
     #[test]
     fn sections_do_not_interfere() {
         let d = tempfile::tempdir().unwrap();
-        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_preset(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         set_draft(
             d.path(),
-            &DraftSubject::cloud("A1-fast.toml"),
+            &DraftSubject::preset("A1-fast.toml"),
             "x",
             "涂胶 = 2",
         )
@@ -635,7 +823,7 @@ mod tests {
     #[test]
     fn save_then_load_roundtrips() {
         let d = tempfile::tempdir().unwrap();
-        let saved = set_active_cloud(d.path(), &entry("A1-standard.toml", b"content")).unwrap();
+        let saved = set_active_preset(d.path(), &entry("A1-standard.toml", b"content")).unwrap();
         let loaded = active_preset(d.path()).unwrap().expect("该读回来");
 
         assert_eq!(saved.file_name, loaded.file_name);
@@ -647,8 +835,8 @@ mod tests {
     #[test]
     fn applying_another_replaces_the_first() {
         let d = tempfile::tempdir().unwrap();
-        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
-        set_active_cloud(d.path(), &entry("A1-fast.toml", b"b")).unwrap();
+        set_active_preset(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_preset(d.path(), &entry("A1-fast.toml", b"b")).unwrap();
         assert_eq!(
             active_preset(d.path()).unwrap().unwrap().file_name,
             "A1-fast.toml",
@@ -659,7 +847,7 @@ mod tests {
     #[test]
     fn clear_is_idempotent() {
         let d = tempfile::tempdir().unwrap();
-        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_preset(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         clear_active_preset(d.path()).unwrap();
         assert!(active_preset(d.path()).unwrap().is_none());
         clear_active_preset(d.path()).unwrap(); // 再撤一次也不报错
@@ -671,7 +859,7 @@ mod tests {
     #[test]
     fn draft_roundtrips_and_clears() {
         let d = tempfile::tempdir().unwrap();
-        let subject = DraftSubject::cloud("A1-fast.toml");
+        let subject = DraftSubject::preset("A1-fast.toml");
         let saved = set_draft(d.path(), &subject, "abc", "涂胶 = 1.2").unwrap();
         let loaded = draft(d.path()).unwrap().expect("该读回来");
 
@@ -690,7 +878,7 @@ mod tests {
     #[test]
     fn a_draft_knows_which_line_it_belongs_to() {
         let d = tempfile::tempdir().unwrap();
-        set_draft(d.path(), &DraftSubject::cloud("A1-fast.toml"), "a", "云端").unwrap();
+        set_draft(d.path(), &DraftSubject::preset("A1-fast.toml"), "a", "云端").unwrap();
         let local = DraftSubject::local("A1-fast.toml", "presets-local/本地/A1-fast.toml");
         set_draft(d.path(), &local, "b", "本地").unwrap();
 
@@ -700,7 +888,7 @@ mod tests {
         assert!(
             !loaded
                 .subject()
-                .matches(&DraftSubject::cloud("A1-fast.toml")),
+                .matches(&DraftSubject::preset("A1-fast.toml")),
             "同名不同线 ≠ 同一份：「接着改」不许接错"
         );
     }
@@ -711,7 +899,7 @@ mod tests {
     fn repoint_local_follows_only_the_matching_entries() {
         let d = tempfile::tempdir().unwrap();
         set_active_local(d.path(), "presets-local/A1.toml", "sha").unwrap();
-        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap(); // 这一下把指针换成云端了
+        set_active_preset(d.path(), &entry("A1-standard.toml", b"a")).unwrap(); // 这一下把指针换成云端了
         set_active_local(d.path(), "presets-local/A1.toml", "sha").unwrap(); // 换回本地
         set_draft(
             d.path(),
@@ -798,7 +986,7 @@ mod tests {
     #[test]
     fn param_decisions_do_not_touch_other_sections() {
         let d = tempfile::tempdir().unwrap();
-        set_active_cloud(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
+        set_active_preset(d.path(), &entry("A1-standard.toml", b"a")).unwrap();
         record_param_decisions(
             d.path(),
             "presets-local/A1.toml",
@@ -1027,7 +1215,7 @@ mod tests {
         // 云端应用在目录**没登记期望值**时要读盘上真字节；文件不在就失败 —— 状态一格不动
         let mut unregistered = entry("A1-fast.toml", b"b");
         unregistered.sha256 = None;
-        let e = set_active_cloud(d.path(), &unregistered).unwrap_err();
+        let e = set_active_preset(d.path(), &unregistered).unwrap_err();
         assert_eq!(e.code, ErrorCode::NotFound);
         assert!(!state_file(d.path()).exists(), "失败不落新档");
         assert!(d.path().join(state::ACTIVE_FILE).exists(), "失败也不删旧档");

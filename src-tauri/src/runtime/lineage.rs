@@ -15,7 +15,7 @@
 //! # machine: A1
 //! # variant: standard
 //! # based_on: mkp/presets/A1-standard.toml      ← 从哪一份云端拷的（角色目录 + 文件名）
-//! # based_on_release_time: 2026-08-19 01:38:13  ← 那时候官方那一版的版本号（有才写）
+//! # based_on_release_time: 2026-08-19 01:38:13  ← 那时候交付预设那一版的版本号（有才写）
 //! # based_on_sha256: 3f2a…                      ← 那时候云端那一版**全文**的摘要
 //! [toolhead]
 //! …

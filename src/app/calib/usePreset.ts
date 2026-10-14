@@ -7,7 +7,7 @@
  *                   没有 → `api.getMachineParams` 的云端默认
  *                   （`toolhead.offset.x / y / z` + `toolhead.speed_limit`）
  *
- * **校准写在「我的预设」上**（2026-10-08 资源库改判）：官方那一份是模板、只读 ——
+ * **校准写在「我的预设」上**（2026-10-08 资源库改判）：交付预设那一份是模板、只读 ——
  * 要校准它就得先在资源库里「另存为本地预设」，之后读与写都落在那一份 TOML 上。
  * 「没有本地这份」不是错误：校准页照旧显示云端默认值，只是**保存会被拦**
  * （先存一份自己的才有得存）。
@@ -123,12 +123,12 @@ export function usePreset(sel: Selection): PresetState {
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
         const z = valueOf(OFFSET_KEYS.z)
-        const cloud: Axes | null =
+        const presetAxes: Axes | null =
           x !== null && y !== null && z !== null ? { x, y, z } : null
         const cloudSpeed = valueOf(SPEED_KEY)
 
         /* 本地那份优先：它的三轴是**用户自己校准出来的**（云端那套只是出厂默认） */
-        const axes = copy?.axes ?? cloud
+        const axes = copy?.axes ?? presetAxes
         const speed = copy?.speed ?? cloudSpeed
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
@@ -143,7 +143,7 @@ export function usePreset(sel: Selection): PresetState {
           axes,
           speed,
           /* 保存校准写它；null = 还没有本地这份（先另存为本地预设才有得存）
-             ★ 本仓术语是 `cloud / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */
+             ★ 本仓术语是 `preset / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */
           local: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
         presetCache.set(`${machine}/${version}`, preset)

@@ -19,7 +19,7 @@ import {
  * 2026-10-02 清扫时删除：首圈的硬编码表，页面早已改走文件体系）。
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
- * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制官方链接）
+ * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制云端链接）
  * 也接上了真 command；`downloadFiles`（云端仓库文件的「下载」残支）按用户裁断
  * **连入口一起撤了**，契约里不再留它。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
@@ -241,12 +241,12 @@ export const bridgeApi: MkpApi = {
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
   /* 第 6 层：盘上这几份认得出是哪一版吗（旧版本 / 查不出它是哪一版）—— 只列有事的 */
   getDeliveryTrust: () => call('getDeliveryTrust', 'get_delivery_trust'),
-  /* 归档区（官方旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
+  /* 归档区（交付预设旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
   getArchivedFiles: () => call('getArchivedFiles', 'get_archived_files'),
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   deleteArchivedFile: (path) =>
     call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
-  /* 删除本机那份云端交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
+  /* 删除本机那份交付预设文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
   downloadCatalogFile: (fileName, onTick) =>
@@ -268,7 +268,7 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
-  /* ——— 官方版本账 + 对比台（2026-10-08）———
+  /* ——— 云端版本账 + 对比台（2026-10-08）———
      云端版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
      baseline 是隐藏内部存储，前端拿不到它的路径。 */
   getCloudVersions: (fileName) =>
@@ -276,7 +276,7 @@ export const bridgeApi: MkpApi = {
   readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
   savePresetParams: (path, edits) =>
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
-  /* ——— 逐参数「官方更新」（2026-10-09）———
+  /* ——— 逐参数「云端更新」（2026-10-09）———
      读三方账（我 / 云端旧值 / 云端新值）+ 落采用·保持的决定。
      `fetchMissing` 只在打开某一份预设时给 true（允许为取云端新版发一次网络）。 */
   getPresetParamSync: (path, fetchMissing) =>
@@ -290,7 +290,7 @@ export const bridgeApi: MkpApi = {
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
-  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
+  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回交付预设 + 落一份我的工作副本（都不改当前使用） */
   fetchCloudPreset: (fileName, renameIfTaken) =>
     call('fetchCloudPreset', 'fetch_cloud_preset', { fileName, renameIfTaken }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
@@ -308,7 +308,7 @@ export const bridgeApi: MkpApi = {
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
 
-  /* ——— 切片器目录（复制进去才生效）+ 复制官方链接（2026-10-09 接通）——— */
+  /* ——— 切片器目录（复制进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
   copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 

@@ -207,7 +207,7 @@ export function activateCombo(
   const fileName = fileOf(model, variant)
   if (fileName === null) return
   void api
-    .applyActivePreset(fileName, 'cloud')
+    .applyActivePreset(fileName, 'preset')
     .then(() => appStateMutated())
     .catch(() => {
       console.debug(`[appState] ${fileName} 这一步应用不了（多半还没下载）—— 底账保持原样`)

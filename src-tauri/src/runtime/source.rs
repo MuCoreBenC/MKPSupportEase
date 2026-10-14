@@ -66,7 +66,7 @@ use super::resolver::{ResourceRef, SourceResolver};
 
 /// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）。
 ///
-/// ★ **2**（2026-10-05，作者拍"两个官方源 + 收起的自定义"）：从"一个地址"改成
+/// ★ **2**（2026-10-05，作者拍"两个云端源 + 收起的自定义"）：从"一个地址"改成
 /// **"选哪一个源"** —— 语义变了，所以升号。
 /// **读 1 代老档不是兼容层**：1 代那个 `baseUrl` 就是"用户手填的地址"，
 /// 它的含义在新模型里**正好是 `custom`**（`customUrl`）。不猜、不迁移、不回填。
@@ -350,7 +350,7 @@ fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
 ///
 /// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
 ///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
-///   （2026-10-05 真机：手动指定"官方地址"反而不通，就是这一处）。
+///   （2026-10-05 真机：手动指定"云端地址"反而不通，就是这一处）。
 /// 所以：**原样先试**，不成再在目录上补文件名。返回值带上"命中它该记哪个形状"。
 fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
     let trimmed = url.trim().trim_end_matches('/');

@@ -107,7 +107,7 @@ mod tests {
         {
             let d = tempfile::tempdir().unwrap();
             let file = d.path().join("not-a-dir");
-            std::fs::write(&file, b"x").unwrap();
+            crate::fsx::atomic::atomic_write(&file, b"x").unwrap();
             assert!(init(&file.join("logs")).is_none());
         }
         /* Windows 上"路径被文件占着"给的是另一种错误码，行为一样（`create_dir_all` 失败）；

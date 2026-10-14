@@ -131,7 +131,7 @@ let mockAutoClean = true
 const mockLocal: LocalPresetFile[] = [
   {
     /*
-     * 带血统（基于旧版官方）。**2026-10-08 起界面上不再有「基于旧版官方」那一枚** ——
+     * 带血统（基于旧版官方（现称交付预设））。**2026-10-08 起界面上不再有「基于旧版官方（现称交付预设）」那一枚** ——
      * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；血统只在展开详情里
      * 答"从哪一版派生"。
      */
@@ -160,7 +160,7 @@ const mockLocal: LocalPresetFile[] = [
     /*
      * **第二份可读的「本地预设」**：对比台要能被看见就必须有两份能比的 ——
      * 只有一份时那个模态框只会说「至少选两份才能对比」。
-     * 它对应的就是"官方发了 2026-10-15 那一版之后，下载生成的新的一份"。
+     * 它对应的就是"交付预设发了 2026-10-15 那一版之后，下载生成的新的一份"。
      */
     path: 'presets-local/A1 涂胶-2026-10-15.toml',
     fileName: 'A1 涂胶-2026-10-15.toml',
@@ -330,7 +330,7 @@ let mockDraft: {
 } | null = null
 
 /** 演示正文。真机上它是云端原件（`mkp/…`）的字节 —— 假后端没有文件系统，只能给一段 */
-const MOCK_OFFICIAL_TEXT =
+const MOCK_PRESET_TEXT =
   [
     '# 假后端的演示正文 —— 真机上这里是云端原件（mkp/…）的字节',
     '[toolhead]',
@@ -397,7 +397,7 @@ mockLocalText.set(
   ['# 坏了的演示（假后端演示正文）', '[toolhead]', 'offset_x = (1', ''].join('\n'),
 )
 
-/* ---------- 逐参数「官方更新」（2026-10-09）----------
+/* ---------- 逐参数「云端更新」（2026-10-09）----------
  *
  * 真机上这件事由三份东西凑出来：
  *
@@ -419,8 +419,8 @@ mockLocalText.set(
 const SHA_BASED_OLD = '0'.repeat(64)
 const SHA_BASED_NEW = '1'.repeat(64)
 
-/** 云端**当前版**的演示正文（与 `MOCK_OFFICIAL_TEXT` 差两项） */
-const MOCK_OFFICIAL_NEXT = [
+/** 云端**当前版**的演示正文（与 `MOCK_PRESET_TEXT` 差两项） */
+const MOCK_PRESET_NEXT = [
   '# 假后端的演示正文 —— 云端当前版（比基准那版改了两个值）',
   '# release_time: 2026-10-15 09:00:00',
   '[toolhead]',
@@ -435,13 +435,13 @@ const MOCK_OFFICIAL_NEXT = [
 ].join('\n')
 
 const mockParamBaseline = new Map<string, string>([
-  [SHA_BASED_OLD, MOCK_OFFICIAL_TEXT],
-  [SHA_BASED_NEW, MOCK_OFFICIAL_NEXT],
+  [SHA_BASED_OLD, MOCK_PRESET_TEXT],
+  [SHA_BASED_NEW, MOCK_PRESET_NEXT],
 ])
 
 const mockParamCurrent = new Map<string, { sha256: string; text: string }>([
-  /* sha 与 `MOCK_OFFICIAL_VERSIONS` 里 A1-fast 的「当前版」那一条是同一个值 */
-  ['A1-fast.toml', { sha256: 'f2'.padEnd(64, '0'), text: MOCK_OFFICIAL_NEXT }],
+  /* sha 与 `MOCK_PRESET_VERSIONS` 里 A1-fast 的「当前版」那一条是同一个值 */
+  ['A1-fast.toml', { sha256: 'f2'.padEnd(64, '0'), text: MOCK_PRESET_NEXT }],
 ])
 
 const mockParamDecisions = new Map<
@@ -525,7 +525,7 @@ function mockSyncOf(path: string): PresetParamSync {
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 /**
- * 演示口径的云端交付集合与它们的可信档（与 `getDownloadedFiles` / `getDeliveryTrust` /
+ * 演示口径的交付预设集合与它们的可信档（与 `getDownloadedFiles` / `getDeliveryTrust` /
  * `getStaleFiles` 同一套演示账）。下载即得工作副本那条链要按它判"这份能不能到你手里"。
  */
 const MOCK_RELEASE_FILES = [
@@ -539,7 +539,7 @@ const MOCK_RELEASE_FILES = [
   },
 ] as const
 
-const mockReleaseFile = (fileName: string) =>
+const mockPresetFile = (fileName: string) =>
   MOCK_RELEASE_FILES.find((f) => f.fileName === fileName)
 
 /**
@@ -581,7 +581,7 @@ const readMockAxes = (text: string): Axes | null => {
  *
  * 它**不是"过时判定"**：这里不读用户预设的字节、也不给任何一行挂"该更新了"。
  */
-const MOCK_OFFICIAL_VERSIONS: CloudVersion[] = [
+const MOCK_PRESET_VERSIONS: CloudVersion[] = [
   {
     fileName: 'A1-standard.toml',
     sha256: 'a1'.padEnd(64, '0'),
@@ -957,10 +957,10 @@ export const mockApi: MkpApi = {
    * 临时编辑那条链：内存里真的走一遍（改的是临时文件，云端原件一动不动）。
    * 与真机同一个形状 —— 直道里的分岔只有一条：正文来自演示常量而不是 `mkp/` 里的字节。
    */
-  async beginPresetEdit(fileName, origin = 'cloud', path) {
+  async beginPresetEdit(fileName, origin = 'preset', path) {
     /* 两条线的钥匙：云端线认文件名，用户线认路径（用户目录里同名很正常） */
     if (mockDraft !== null && mockDraft.origin === origin && mockDraft.sourceFileName === fileName) {
-      if (origin === 'cloud' || mockDraft.path === (path ?? null)) {
+      if (origin === 'preset' || mockDraft.path === (path ?? null)) {
         return { ...mockDraft, reused: true }
       }
     }
@@ -994,7 +994,7 @@ export const mockApi: MkpApi = {
       origin,
       sourceFileName: fileName,
       path: null,
-      text: MOCK_OFFICIAL_TEXT,
+      text: MOCK_PRESET_TEXT,
       updatedUnix: nowSec(),
     }
     return { ...mockDraft, reused: false }
@@ -1121,7 +1121,7 @@ export const mockApi: MkpApi = {
   async getPresetDraftSummary() {
     if (mockDraft === null) return null
     const base = mockDraft.origin === 'local' ? mockLocalText.get(mockDraft.path ?? '') : undefined
-    const clean = mockDraft.origin === 'cloud' ? mockDraft.text === MOCK_OFFICIAL_TEXT : base === mockDraft.text
+    const clean = mockDraft.origin === 'preset' ? mockDraft.text === MOCK_PRESET_TEXT : base === mockDraft.text
     return {
       origin: mockDraft.origin,
       sourceFileName: mockDraft.sourceFileName,
@@ -1656,7 +1656,7 @@ export const mockApi: MkpApi = {
   async deleteDeliveryFile() {
     throw new NotImplementedError(
       'deleteDeliveryFile',
-      '浏览器预览里没有下载区，删不了云端交付文件 —— 用桌面版再删',
+      '浏览器预览里没有下载区，删不了交付预设文件 —— 用桌面版再删',
     )
   },
 
@@ -1770,7 +1770,7 @@ export const mockApi: MkpApi = {
      真机上第一条读目录 + 版本链、第二条读隐藏 baseline、后两条读写用户那份文件本身。 */
   async getCloudVersions(fileName?: string | null) {
     const want = fileName?.trim()
-    return MOCK_OFFICIAL_VERSIONS.filter((v) => !want || v.fileName === want).map((v) => ({ ...v }))
+    return MOCK_PRESET_VERSIONS.filter((v) => !want || v.fileName === want).map((v) => ({ ...v }))
   },
 
   async readPresetParams(path: string): Promise<PresetParamValues> {
@@ -1797,7 +1797,7 @@ export const mockApi: MkpApi = {
     if (at >= 0) mockLocal[at] = { ...mockLocal[at]!, size: next.length, modifiedUnix: nowSec() }
   },
 
-  /* —— 逐参数「官方更新」（2026-10-09）：内存夹具里的三方账 + 采用·保持 ——
+  /* —— 逐参数「云端更新」（2026-10-09）：内存夹具里的三方账 + 采用·保持 ——
      真机上第一条读我那份文件 + 隐藏 baseline + 目录里那一版；第二条结构保真地写那几项。
      `fetchMissing` 在假后端里没有对应的动作（没有网络），形状照留。 */
   async getPresetParamSync(path: string, fetchMissing?: boolean) {
@@ -1938,7 +1938,7 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本。
+   * 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回交付预设 + 落一份我的工作副本。
    * **不改「当前使用」** —— 使用是本地表那颗按钮的事。
    *
    * 浏览器里**没有下载区**，所以照实分两档：
@@ -1949,7 +1949,7 @@ export const mockApi: MkpApi = {
    * 与真机同一个形状：用户只面对 `presets-local/` 里那一份，云端原件留在内部。
    */
   async fetchCloudPreset(fileName, renameIfTaken = false) {
-    const hit = mockReleaseFile(fileName)
+    const hit = mockPresetFile(fileName)
     if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
     if (!MOCK_DOWNLOADED.some((f) => f.fileName === fileName)) {
       throw new NotImplementedError(
@@ -1968,7 +1968,7 @@ export const mockApi: MkpApi = {
         `# based_on: ${label}`,
         `# based_on_release_time: 2026-10-06 03:34:17`,
         `# based_on_sha256: ${'0'.repeat(64)}`,
-        MOCK_OFFICIAL_TEXT,
+        MOCK_PRESET_TEXT,
       ].join('\n')
       mockLocalText.set(path, text)
       mockLocal.push({
@@ -2008,7 +2008,7 @@ export const mockApi: MkpApi = {
         `# based_on: ${label}`,
         `# based_on_release_time: 2026-10-06 03:34:17`,
         `# based_on_sha256: ${'0'.repeat(64)}`,
-        MOCK_OFFICIAL_TEXT,
+        MOCK_PRESET_TEXT,
       ].join('\n')
       mockLocalText.set(newPath, text)
       mockLocal.push({

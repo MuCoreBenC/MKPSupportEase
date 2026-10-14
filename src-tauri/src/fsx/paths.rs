@@ -17,6 +17,7 @@
 //! 结果仍在根内（符号链接能绕过前两条，所以第三条是必须的）。
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use tauri::{AppHandle, Manager};
 
@@ -118,7 +119,43 @@ pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
 pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let root = internal_root(app)?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS)?;
+    adopt_legacy_local_dir(&root);
     Ok(root)
+}
+
+/// 冷启时把**上一代本地预设目录**里用户真有的文件接回来（`presets-mine/` → `presets-local/`）。
+///
+/// - 放在这里是因为**它保证新目录已经建好**（上面那行 `ensure_dirs`），而且它是
+///   用户根的唯一入口 —— 任何用到用户文件的命令都得先过这儿（[`user_root_headless`]
+///   那条路也走同一个函数）。
+/// - **幂等**：跑完源文件就不在了，第二遍什么也不做；没有"迁移完成"标记这类第二处状态。
+/// - **一次进程只跑一遍**（`OnceLock`）：同一进程里反复调 `user_root` 不该反复扫盘；
+///   应用重启后再扫一遍是安全的（那时扫的是空目录）。
+/// - **失败不拦路**：搬不动 / 撞名都只记日志 —— 用户根照样可用，界面照旧能开。
+fn adopt_legacy_local_dir(root: &Path) {
+    static DONE: OnceLock<()> = OnceLock::new();
+    DONE.get_or_init(|| {
+        for one in crate::runtime::local::adopt_legacy_dir(root) {
+            match one.outcome {
+                crate::runtime::local::LegacyOutcome::Moved => tracing::info!(
+                    file = %one.file_name,
+                    to = %one.path,
+                    "旧目录里的本地预设接回来了（presets-mine → presets-local）"
+                ),
+                crate::runtime::local::LegacyOutcome::Conflict => tracing::warn!(
+                    file = %one.file_name,
+                    at = %one.path,
+                    "新目录里已经有同名的一份，旧目录那份没动（不覆盖）"
+                ),
+                crate::runtime::local::LegacyOutcome::Failed(detail) => tracing::warn!(
+                    file = %one.file_name,
+                    at = %one.path,
+                    detail = %detail,
+                    "旧目录里的本地预设没搬成，原文件留着"
+                ),
+            }
+        }
+    });
 }
 
 /// 用户根（**钩子进程**那条路：没有 `AppHandle`，只有平台规则 + 环境变量覆盖）。
@@ -129,6 +166,7 @@ pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
 pub fn user_root_headless() -> Option<PathBuf> {
     let root = internal_root_headless()?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS).ok()?;
+    adopt_legacy_local_dir(&root);
     Some(root)
 }
 

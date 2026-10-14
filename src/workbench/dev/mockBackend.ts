@@ -1725,7 +1725,7 @@ export function installMockBackend() {
       }
       /*
        * 交付文件清单 / 读一份（2026-10-07）。真机名单 = Rust 的 `delivery_expected_set`
-       * （与发布闸判残留同一份）；桩里照它的形状造一份，好让「发布预设」卡在浏览器里
+       * （与发布闸判残留同一份）；桩里照它的形状造一份，好让「交付预设」卡在浏览器里
        * 能验收。产物按 `builtRecords` 判在不在，附属文件按下表。
        */
       case 'wb_delivery_files': {

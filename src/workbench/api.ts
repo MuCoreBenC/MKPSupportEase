@@ -884,7 +884,7 @@ export interface PublishHistory {
   records: PublishRecord[]
 }
 
-/* ---------- 第四刀：发布**软件版本**（与「发布预设」两条链，各有各的类型） ---------- */
+/* ---------- 第四刀：发布**软件版本**（与「交付预设」两条链，各有各的类型） ---------- */
 
 /** `release_tx::ReleaseStage` 的线上名（camelCase，与后端 `wire_name()` 逐字一致） */
 export type ReleaseStage =
@@ -1352,7 +1352,7 @@ export interface MachineList {
  * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
  *
  * `image`（整机图）2026-10-03 回到台账（第三刀的剥离已作废）：它用
- * `delivery = 'bundled'` 表达「不进云端交付、但工作台可管可换图」。
+ * `delivery = 'bundled'` 表达「不进交付预设那一档、但工作台可管可换图」。
  */
 export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
 
@@ -1522,7 +1522,7 @@ export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 /** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
 export type DeliveryStage = 'generate' | 'publish' | 'software'
 
-/** `delivery::DeliveryFile` —— 交付集合里的一份（「发布预设」卡展出用） */
+/** `delivery::DeliveryFile` —— 交付集合里的一份（「交付预设」卡展出用） */
 export interface DeliveryFile {
   /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
   rel: string
@@ -1797,7 +1797,7 @@ export const wb = {
    */
   mergeReview: (number: number, platform?: string | null) =>
     invoke<MergeOutcome>('wb_merge_review', { number, platform: platform ?? null }),
-  /** 发布历史（只读）：最近若干次「发布预设」事务的回执，**最新在前** */
+  /** 发布历史（只读）：最近若干次「交付预设」事务的回执，**最新在前** */
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
@@ -1805,7 +1805,7 @@ export const wb = {
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
    *
-   * ★ 它与「发布预设」的闸（`publishAudit`）是**两道不同的闸**：这道看的是
+   * ★ 它与「交付预设」的闸（`publishAudit`）是**两道不同的闸**：这道看的是
    * 分支 / 工作区 / 版本号一致 / tag 有没有被占 / 平台支不支持软件 Release。
    */
   releasePreflight: (version?: string | null) =>

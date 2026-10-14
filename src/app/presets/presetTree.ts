@@ -271,7 +271,7 @@ export const DELIVERY_WHY: Record<PresetFileInfo['delivery'], string> = {
 }
 
 /**
- * **官方仓库文件为什么不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
+ * **云端仓库文件为什么不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
  * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载（`downloadCatalogFile`）。
  */
 export const REPO_FILE_WHY =
@@ -281,7 +281,7 @@ export const REPO_FILE_WHY =
  * 发布行的「下载」：这一条**是真的能下的**（`downloadCatalogFile` 落进下载区 `mkp/`）——
  * 原来所有云端行共用云端那条「不假装下载成功」的说明，文案与行为不符，按行分流。
  */
-export const RELEASE_DOWNLOAD_WHY =
+export const PRESET_DOWNLOAD_WHY =
   '从目录登记的交付清单里下载这一份到下载区 mkp/ —— 下载 ≠ 使用，生效要到本地表里点「使用」'
 
 /**
@@ -292,7 +292,7 @@ export const RELEASE_DOWNLOAD_WHY =
  * 时间**两种来源分归两张表**（2026-10-06）：云端表是**云端更新时间**（发布侧盖进目录的戳）、
  * 本地表是**下载时间**（盘上那份的 mtime）；显示一律**按本机时区**（`parseStatDate`）。
  */
-export const RELEASE_TIME_WHY = {
+export const PRESET_TIME_WHY = {
   cloudMissing: '云端没有记这次发布的时间 —— 随包目录不带时间，旧版发布的目录也没有',
   localMissing: '说不出这份字节是什么时候到的 —— 它认不出属于哪一版，这种字节不记时间，照实「未知」',
 } as const
@@ -311,34 +311,57 @@ export const ARCHIVE_TIME = {
   replacedUnknown: '未知',
 } as const
 
-export const RELEASE_SIZE_WHY = '按这一份 TOML 的字节数算的'
+export const PRESET_SIZE_WHY = '按这一份 TOML 的字节数算的'
 
 /**
  * 来源：这个文件是云端的、用户自己的，还是**目录登记的交付预设**。
  *
  * 权限也挂在这一列上：云端副本不能改名（复制一份再改），用户自己的文件删了没有任何地方能找回来。
  */
-export type PresetOrigin = 'cloud' | 'local' | 'release'
+export type PresetOrigin = 'asset' | 'local' | 'preset'
 
 export const ORIGIN_TEXT: Record<PresetOrigin, string> = {
-  cloud: '云端',
+  asset: '云端',
   local: '本地',
-  release: '云端交付',
+  /*
+   * ★ `preset` 在界面上**也叫「云端」**（2026-10-14 定的）—— 别再给它造词。
+   *
+   * 走过一段弯路：那一刀（术语改造）把 `official` 机械替换成 `cloud`，于是原本的
+   * 「官方交付」变成「云端交付」，跟 `asset` 那一档的「云端」撞在一起 —— 作者当天就问
+   * 「云端交付是什么」。当时的处置是改名「发布预设」，但作者看着真界面又说对了：
+   * **「现在的发布预设和云端其实区别不大」**。
+   *
+   * 想清楚的那一层是：这两类**在界面上从不并排** —— `preset` 是「MKP 配置」（toml，
+   * 目录登记的交付预设）、`asset` 是「切片器配置」（json，云端仓库里的文件副本），
+   * 分属两个类型档，同一张表里只会出现其中一类。既然不并排，就没有"两个词挨着分不清"
+   * 这回事，硬造「发布预设」只是让用户多学一个他看不出差别的新概念。
+   *
+   * 用户问"这份从哪来"，本来就有更准的一处答：来源列显示**数据源名**
+   *（`Gitee` / `GitHub` / `自定义源`，见 [`sourceTextOf`]）。而这两类真正不同的地方
+   *（受不受目录登记、有没有版本指纹与换代）是**程序内部怎么管**，写在悬停说明里就够了。
+   *
+   * ★ 名字为什么是这两个词（2026-10-14 作者定）：分类值只回答**这是哪一类业务对象**，
+   * 不回答"从哪来"（三类都从云端来）—— `preset` = 云端发布的 MKP 预设 TOML、
+   * `asset` = 云端提供的资源文件（切片器配置 / BBS JSON / 图标 / 模型）。
+   */
+  preset: '云端',
 }
 
 export const ORIGIN_WHY: Record<PresetOrigin, string> = {
-  cloud: '云端：仓库里那份文件下载到本机的副本。不能改名（复制一份再改），删了可以从云端重新下载',
+  asset: '云端：仓库里那份文件下载到本机的副本。不能改名（复制一份再改），删了可以从云端重新下载',
   local: '本地：你自己放进预设目录的文件，云端没有它。可以改名，但删了没有任何地方能找回来',
-  release: '云端交付：目录（catalog）里登记的交付预设，发布方写、客户端从下载区拿。云端表只管下载，生效用本地那颗「使用」',
+  preset: '云端：发布方写进目录（catalog）、随发布换代的那一版，客户端从下载区取。不能改名（复制一份再改），删了可以从云端重新下载',
 }
 
 /**
- * 数据源（设置页那一个）→ 来源列上「云端交付」行显示的字。
+ * 数据源（设置页那一个）→ 来源列上**交付预设**那一行显示的字。
  *
  * 用户问的是「这文件从哪来」—— 答案是 **Gitee / GitHub / 自定义源**，不是一串目录指纹
- * （那串曾经过出现在来源 chip 上：`云端交付 · 08e55a3f…`，作者原话「我觉得这个没有意义」。
+ * （那串曾经过出现在来源 chip 上：`云端 · 08e55a3f…`，作者原话「我觉得这个没有意义」。
  * 指纹唯一还有意义的位置是展开详情里的「云端版本」—— 那是版本的身份证，不是来源）。
- * 没配源（离线 / 随包）就退回「云端」—— 照实说不出是哪一个源，不编。
+ *
+ * 没配源（离线 / 随包）就退回「云端」—— 说不出是从哪一个源下的，
+ * 但"它是从云端来的"这件事照样说得准。
  */
 export function sourceTextOf(sourceLabel: string | null): string {
   switch (sourceLabel) {
@@ -349,7 +372,7 @@ export function sourceTextOf(sourceLabel: string | null): string {
     case 'custom':
       return '自定义源'
     default:
-      return ORIGIN_TEXT.cloud
+      return ORIGIN_TEXT.preset
   }
 }
 
@@ -358,7 +381,7 @@ export function sourceTextOf(sourceLabel: string | null): string {
  *
  * 三种来源三种说法：
  *   云端      云端副本（仓库文件下到本机的那份）
- *   release   云端交付：从**当前数据源**的目录下载的（`GitHub` / `Gitee` / `自定义源`）
+ *   preset    交付预设：从**当前数据源**的目录下载的（`GitHub` / `Gitee` / `自定义源`）
  *   local      本地：再分三档 ——
  *             `复制自 <文件名>`（出处账记的用户文件复制，**可点击定位**到那一份）
  *             `复制自 <文件名>`（云端另存出来的，血统说的；定位到云端那一份云端）
@@ -383,7 +406,7 @@ export function originCellOf(
 ): { text: string; title: string; locate?: LocateTarget } {
   /*
    * **正向判别 `=== 'local'`**，不是两个反向 `!==`：PresetCloudRow 的 origin 本身是
-   * 联合（'cloud' | 'release'），TS 的反向排除对"判别值是联合的成员"不彻底
+   * 联合（'asset' | 'preset'），TS 的反向排除对"判别值是联合的成员"不彻底
    * （成员删不掉，后面的字段访问照样报错）。正向判别一次到位 —— 剩下的必是 local 行。
    */
   if (row.origin === 'local') {
@@ -415,21 +438,21 @@ export function originCellOf(
         locate: {
           scope: 'cloud',
           kind: 'mkp',
-          rowKey: `release-cloud:${sourceName}`,
+          rowKey: `preset-cloud:${sourceName}`,
           fileName: sourceName,
         },
       }
     }
     return { text: ORIGIN_TEXT.local, title: ORIGIN_WHY.local }
   }
-  if (row.origin === 'release') {
+  if (row.origin === 'preset') {
     const source = sourceTextOf(sourceLabel)
     return {
       text: source,
-      title: `云端交付：发布方写进目录、从 ${source} 的预设数据源下载（目录指纹 ${row.releaseVersion ?? '未知'}）`,
+      title: `云端：发布方写进目录、从 ${source} 的预设数据源下载（目录指纹 ${row.presetVersion ?? '未知'}）`,
     }
   }
-  return { text: ORIGIN_TEXT.cloud, title: ORIGIN_WHY.cloud }
+  return { text: ORIGIN_TEXT.asset, title: ORIGIN_WHY.asset }
 }
 
 /** 云端表那一列：这个云端文件在不在本机。判据与本地表是同一个 `getLocalFiles()` */
@@ -448,7 +471,7 @@ export const CLOUD_STATE_WHY = {
  * 「逐版各占一行」一起退役了（2026-10-08 当天下午）：它们只服务**版本行**
  * （那枚「新版本」胶囊、以及"这一版自己的发布日 vs 目录代时间"的分别）。
  * 云端表回到「一个目录条目一行」之后，一行的状态只有那四档
- * （`UPDATE_STATE_TEXT` + `RELEASE_STATE_WHY`），时间只有目录盖的戳 ——
+ * （`UPDATE_STATE_TEXT` + `PRESET_STATE_WHY`），时间只有目录盖的戳 ——
  * 这三条词就没有一行会用到了。留着它们就是留一条没人走的路。
  */
 
@@ -468,18 +491,18 @@ export const CLOUD_STATE_WHY = {
  * 和"云端有没有新版"混成一句：用户既不知道自己的文件是不是被改过，也不知道该不该等更新。
  *
  * 三档不一致的（old / tampered）**共有一条边界**：不许使用、不许改、不许复制，
- * 只能重新下载一份干净的 —— 见 [`isSuspectRelease`]。
+ * 只能重新下载一份干净的 —— 见 [`isSuspectPreset`]。
  */
-export type ReleaseFileState = 'missing' | 'ok' | 'old' | 'tampered'
+export type PresetFileState = 'missing' | 'ok' | 'old' | 'tampered'
 
-export const RELEASE_STATE_TEXT: Record<ReleaseFileState, string> = {
+export const PRESET_STATE_TEXT: Record<PresetFileState, string> = {
   missing: '未下载',
   ok: '已下载',
   old: '旧版本',
   tampered: '内容异常',
 }
 
-export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
+export const PRESET_STATE_WHY: Record<PresetFileState, string> = {
   missing: '未下载：目录里登记了它，你机器上还没有',
   ok: '已下载：下载区 mkp/ 里有它，字节与目录登记的一致。下载 ≠ 使用，生效要到本地表里点「使用」',
   old:
@@ -491,14 +514,14 @@ export const RELEASE_STATE_WHY: Record<ReleaseFileState, string> = {
 }
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
-export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
+export function isSuspectPreset(state: PresetFileState | undefined): boolean {
   return state === 'old' || state === 'tampered'
 }
 
 /**
- * **云端 vs 盘上**的三态 —— release 行「状态」与操作列的主词都从它出。
+ * **云端 vs 盘上**的三态 —— preset 行「状态」与操作列的主词都从它出。
  *
- * 三个概念**不是** `ReleaseFileState`：那是"盘上那份认不认得出"（信任），
+ * 三个概念**不是** `PresetFileState`：那是"盘上那份认不认得出"（信任），
  * 这一个是"云端有没有比盘上新的货"（更新）。**云端有更新时主词就是「有更新」** ——
  * 不管盘上那份是认得出的旧版还是认不出的字节，用户要做的事是同一件：
  * 点「下载」换一份当前版回来（同一条下载管道）。
@@ -507,9 +530,9 @@ export function isSuspectRelease(state: ReleaseFileState | undefined): boolean {
  *   `latest`   已下载：盘上字节与目录一致
  *   `update`   有更新：盘上有字节、但与目录登记的当前版不一致（旧版或认不出的都算）
  */
-export type ReleaseUpdateState = 'missing' | 'latest' | 'update'
+export type PresetUpdateState = 'missing' | 'latest' | 'update'
 
-export function updateStateOf(state: ReleaseFileState): ReleaseUpdateState {
+export function updateStateOf(state: PresetFileState): PresetUpdateState {
   switch (state) {
     case 'missing':
       return 'missing'
@@ -520,7 +543,7 @@ export function updateStateOf(state: ReleaseFileState): ReleaseUpdateState {
   }
 }
 
-export const UPDATE_STATE_TEXT: Record<ReleaseUpdateState, string> = {
+export const UPDATE_STATE_TEXT: Record<PresetUpdateState, string> = {
   missing: '未下载',
   latest: '已下载',
   update: '有更新',
@@ -534,19 +557,19 @@ export const UPDATE_STATE_TEXT: Record<ReleaseUpdateState, string> = {
  * 状态主词上是**吓唬人**（实测 7 份全部是正规旧版）。主词改说「有更新」，
  * 这句话作为第二行把实情讲全，动作给「下载」—— 对"旧版"和"真被动过"都是正解。
  */
-export const RELEASE_UNTRUSTED_NOTE =
+export const PRESET_UNTRUSTED_NOTE =
   '本机这份认不出是云端哪一版 —— 云端连发几版时，更早的版本指纹在客户端留不全，' +
   '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「下载」换一份当前版即可'
 
 /**
- * release 行操作列那颗按钮：三态各一个字。
+ * preset 行操作列那颗按钮：三态各一个字。
  *
  * ★ **「有更新」那一档的按钮也叫「下载」**（2026-10-08 作者：「那颗按钮就叫下载吧」）。
  * 动作本来就只有一个 —— 从云端取一份落下来；`安装 / 更新 / 重新下载` 都是**同一个管道**
  * （见 `runtime/delivery.rs`：旧份自动归档，没有第二条路）。**状态词才是"为什么"**
  * （状态列那句「有更新」照旧说），按钮只该说"点它会发生什么"。
  */
-export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
+export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, string> = {
   missing: '下载',
   latest: '已下载',
   update: '下载',
@@ -572,7 +595,7 @@ export const UPDATE_ACTION_TEXT: Record<ReleaseUpdateState, string> = {
  * 的 `runUpdate`：没冲突的按新版采用、冲突的让用户选，确认后才写本地文件）。
  * 旧口径看的是"下载区字节取回来没有"，那会让用户根本点不到「更新」。
  *
- * 切片器档照旧用 `releaseState`（那边的「本机」是真事实：profile 得躺在
+ * 切片器档照旧用 `presetState`（那边的「本机」是真事实：profile 得躺在
  * 切片器自己的目录里才算数）。
  */
 export type CloudLocalState = 'none' | 'has' | 'stale'
@@ -606,11 +629,11 @@ export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, string | null> = {
 }
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
-export const RELEASE_SUSPECT_WHY =
+export const PRESET_SUSPECT_WHY =
   '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许使用、不许改、不许复制。先「下载」换一份干净的回来'
 
 /** 「下载」那颗按钮在**盘上那份已经旧了**那一档的说明：它不是"删除重下"，旧份进归档，删除永远不是这件事的一部分 */
-export const RELEASE_UPDATE_WHY =
+export const PRESET_UPDATE_WHY =
   '下载：对盘上这一份再跑一遍下载管道（状态那格的「有更新」说的就是为什么）—— 旧份先归档（archive/）再换新，删除永远不是它的一部分'
 
 /**
@@ -620,7 +643,7 @@ export const RELEASE_UPDATE_WHY =
  * 按钮统一叫「下载」（状态词才是"为什么"，那是状态列的事），这里要讲清的是"盘上那份我们不认"——
  * 用户多半不知道文件被谁动过，也不知道换一份会不会把他改的东西冲掉。
  */
-export const RELEASE_REPAIR_WHY =
+export const PRESET_REPAIR_WHY =
   '下载：盘上这一份我们认不出是云端哪一版（不是目录登记的当前版本，已知的旧版本指纹也都对不上）—— ' +
   '再下一份干净的换上，落点与校验与普通的「下载」是同一条管道；旧份进归档，不删'
 
@@ -838,7 +861,7 @@ export const BASED_ON_KEY = '基于'
 
 /**
  * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
- * 与 `versionsText` / `releaseBatchText` 同一条规矩：一句话只有一个出处。
+ * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
  */
 export function basedOnCellText(row: {
   basedOn?: BasedOn
@@ -883,7 +906,7 @@ export const LOCAL_NOT_PRESET_WHY =
 /**
  * **第九层**：读不出来的那一份（行上那一枚角标）。
  *
- * 与云端交付文件的「内容存疑」是**两回事**：那一档要 SHA（与目录登记逐字节一致才可信），
+ * 与交付预设文件的「内容存疑」是**两回事**：那一档要 SHA（与目录登记逐字节一致才可信），
  * 本地文件只看**文件级**（能读 + UTF-8 + TOML 语法）—— 外部改过一轮但仍是能读的 TOML
  * 照常能用，**不因 SHA 报警**。"是不是一份合法 MKP Preset"（结构 / 参数）不在客户端判：
  * 那要真正的 Preset 解析能力，留给"应用 / 编辑"这类真正要解析的入口。
@@ -913,12 +936,12 @@ export const ARCHIVE_DRAWER = {
 /**
  * 批量那一行的字：**这一批里有什么，决定它是"下载"还是"更新"**。
  *
- * 计数由调用方从行上的 `releaseState` 数出来，这里只负责措辞 —— 批量不自己判状态，
+ * 计数由调用方从行上的 `presetState` 数出来，这里只负责措辞 —— 批量不自己判状态，
  * 它是"多份单文件操作的组合"，判据还是那一个。三档分开说（未下载 / 需更新 / 内容异常），
  * 因为用户要做的事不一样：前两种是补上云端那份，后一种是**盘上那份我们不认**。
  * `已下载的不进这一批`：这一层只解决"多份一起处理"，不解决"再下一遍已经对了的东西"。
  */
-export function releaseBatchText(
+export function presetBatchText(
   missing: number,
   stale: number,
   tampered: number,
@@ -1371,7 +1394,7 @@ export interface PresetRowBase {
    * 预设仓库里的 asset id。用户自己的文件与仓库里查不到的文件**没有**这个字段。
    *
    * 云端行不再是「使用」的对象（使用中指针只认 MKP 交付文件）—— 字段留给右键菜单与筛选用，
-   * 所以它必须在行上（release 行走 uid，见 `releaseUid`）。
+   * 所以它必须在行上（preset 行走 uid，见 `presetUid`）。
    */
   assetId?: string
   /**
@@ -1437,7 +1460,7 @@ export interface PresetRowBase {
    */
   sizeText?: string
   modifiedText?: string
-  /** 上面那两格是哪来的。`undefined` = 这个来源没有这两格（自己的文件、release 行走别的口径） */
+  /** 上面那两格是哪来的。`undefined` = 这个来源没有这两格（自己的文件、preset 行走别的口径） */
   statFrom?: 'file' | 'demo'
   /** 唯一底账（使用中指针）说正在使用的就是这一份。**全页最多一行** */
   applied: boolean
@@ -1451,17 +1474,17 @@ export interface PresetRowBase {
    * 目录登记的交付预设。uid 形如 `A1/STANDARD`（行键沿用）；「下载」与「使用」
    * 两个动作认 **fileName**（目录登记的文件名 = 使用中指针的口径），
    */
-  releaseUid?: string
+  presetUid?: string
   /** 它属于哪一次发布（包版本）。来源列那枚 chip 的动态那一截读它 */
-  releaseVersion?: string | null
+  presetVersion?: string | null
   /**
-   * 交付预设在**本机**的三态（见 `ReleaseFileState`）。**只有 release 行有它** ——
+   * 交付预设在**本机**的三态（见 `PresetFileState`）。**只有 preset 行有它** ——
    * 其余来源没有"从目录下载"这一回事。`undefined` = 这一行不是交付预设。
    */
-  releaseState?: ReleaseFileState
+  presetState?: PresetFileState
   /**
    * **这次发布的时刻**（catalog.publishedAt，ISO/UTC → 显示按本机时区）。
-   * release 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
+   * preset 行展开详情里「云端最新版发布于」一格的数据 —— **本地行也要有**：
    * "我盘上这份什么时候到的"（`modifiedText` + `arrivalBy`）与"云端最新版什么时候发的"
    * 是两个版本各自的时间，展开详情要同时给（云端表的 `modifiedText` 就是它，列上已经显示）。
    * null = 目录没盖戳（随包 / 旧版发布），照实「未知」。
@@ -1471,7 +1494,7 @@ export interface PresetRowBase {
    * 这份字节是怎么**到位**的（2026-10-06 事件时间模型）：`downloaded` = 下载进来
    * （`DeliveryDownloaded`）、`replaced` = 替换上去（`DeliveryReplaced`）、null = 没有事件
    * （认不出出身的字节）。详情面板「下载时间 / 替换时间」的标签跟着它走 ——
-   * **标签是事件的名字，不是 UI 自己挑的**。只有本地 release 行有它。
+   * **标签是事件的名字，不是 UI 自己挑的**。只有本地 preset 行有它。
    */
   arrivalBy?: 'downloaded' | 'replaced' | null
   /**
@@ -1492,7 +1515,7 @@ export interface PresetLocalRow extends PresetRowBase {
    * 用到这个文件的版本 **id**（与 `versions` 显示名并排）。
    *
    * 「使用」这一步要把它写进底账（首页反填要的就是机型 id + 版本 id）——
-   * 只有云端行有它：release 行走 uid、用户自己的文件不属于任何版本。
+   * 只有云端行有它：preset 行走 uid、用户自己的文件不属于任何版本。
    */
   versionIds?: string[]
   /**
@@ -1562,9 +1585,9 @@ export interface PresetCloudRow extends PresetRowBase {
    * 云端表上的东西：云端仓库的文件（切片器档），或者**目录登记的交付预设**（MKP 档）。
    * 用户自己的文件云端根本没有。
    */
-  origin: 'cloud' | 'release'
+  origin: 'asset' | 'preset'
   delivery: PresetFileInfo['delivery']
-  /** 在不在本机。云端文件看 `getLocalFiles()`，release 行看下载区（`mkp/`，盘就是底账）—— 两套底账，行上不说谎 */
+  /** 在不在本机。云端文件看 `getLocalFiles()`，preset 行看下载区（`mkp/`，盘就是底账）—— 两套底账，行上不说谎 */
   downloaded: boolean
   /**
    * **下过的旧版有几代**（版本账里 `downloaded && !current` 的条数）。
@@ -1579,7 +1602,7 @@ export interface PresetCloudRow extends PresetRowBase {
   olderVersions?: number
   /**
    * 「我这边怎么样」—— **只有 MKP 档有它**（见 [`CloudLocalState`]）。
-   * 切片器档不出这个字段：那一档照旧按 `releaseState` 四态说话。
+   * 切片器档不出这个字段：那一档照旧按 `presetState` 四态说话。
    */
   localState?: CloudLocalState
 }
@@ -1641,46 +1664,46 @@ export interface PresetRowsInput {
   pinned: Set<string>
   /**
    * **目录（catalog）里登记的交付文件**（预设页认的那两类：MKP + 切片器）——
-   * 旧世界"云端最新一次 Release"的新世界对应物：发布方写进目录，消费方从这里看全量。
+   * 旧世界"云端最新一次发布"的新世界对应物：发布方写进目录，消费方从这里看全量。
    * `usePresetData` 从 `api.getRuntimeCatalog()` 取，**已在源头按 kind 分好类别**
    * （图标 / 模型不进这个数组）；空数组 = 目录里没有登记预设页的文件。
    */
-  releasePresets: ReleasePresetSource[]
+  deliveryPresets: DeliveryPresetSource[]
   /**
-   * **官方版本账**（`api.getCloudVersions()`，2026-10-08）：官方登记过哪几版、
+   * **云端版本账**（`api.getCloudVersions()`，2026-10-08）：交付预设登记过哪几版、
    * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**。
    *
    * 空数组 = 版本账读不到（假后端没这一路 / 随包目录）—— 退回"一个预设一行"的老画法，
    * 行为不退化。
    */
   cloudVersions: CloudVersion[]
-  /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`ReleaseFileState = ok`） */
-  localReleases: ReleasePresetSource[]
+  /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`PresetFileState = ok`） */
+  localPresets: DeliveryPresetSource[]
   /**
-   * 下载区里有、**但与目录登记不一致**的那些（`ReleaseFileState = stale`）。
+   * 下载区里有、**但与目录登记不一致**的那些（`PresetFileState = stale`）。
    *
-   * 和 `localReleases` 分开传：本地表要按"盘上有没有"画（两者都画），
+   * 和 `localPresets` 分开传：本地表要按"盘上有没有"画（两者都画），
    * 云端表要按三态标（一个 ok 一个需更新）。合成一个数组的话，两处都要再拆一次。
    */
-  staleReleases: ReleasePresetSource[]
+  stalePresets: DeliveryPresetSource[]
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
-  releaseVersion: string | null
+  presetVersion: string | null
   /**
    * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。**只有本地表读它** ——
    * 云端表只读工作台写的那句（2026-10-07 作者定：本地的改动不许影响云端显示）。
-   * 键 = 文件身份（云端交付行 `catalog.path` / 本地文件相对用户根路径）；
+   * 键 = 文件身份（交付预设行 `catalog.path` / 本地文件相对用户根路径）；
    * 有 ⇒ 本地副标题用它，没有 ⇒ 用那一版工作台写的 `remark`。
    */
   remarks: Record<string, string>
   /**
-   * **这次发布的时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表 release 行
+   * **这次发布的时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表 preset 行
    * 「时间」列的来源，显示时前端转本机时区。null = 目录没带（随包 / 旧版发布），
    * 那一列照实「未知」。
    */
   releaseAt: string | null
   /**
    * **当前数据源**（设置页那一个的 mode：`gitee` / `github` / `custom`）——
-   * release 行「来源」列显示 GitHub / Gitee / 自定义源 的依据。null = 没配源
+   * preset 行「来源」列显示 GitHub / Gitee / 自定义源 的依据。null = 没配源
    * （离线 / 随包），来源照旧退「云端」。
    */
   sourceLabel: string | null
@@ -1701,17 +1724,17 @@ export interface PresetRowsInput {
 /**
  * 交付行第二行那串小字：把人引到盘上的落点，**顺带把"盘上那份不对劲"这件事写在原地**。
  *
- * 三种话对应 [`ReleaseFileState`] 的三种"盘上有东西"：一致 / 旧版本 / 内容异常。
+ * 三种话对应 [`PresetFileState`] 的三种"盘上有东西"：一致 / 旧版本 / 内容异常。
  * 它不改任何判定（判定全在 `state` 上）—— 只是让用户在这一行上就能看出该不该信它。
  */
-function releasePathText(p: ReleasePresetSource): string {
+function presetPathText(p: DeliveryPresetSource): string {
   const at = `下载区 mkp · ${p.uid}`
   const note =
     p.state === 'old' ? '（旧版本）' : p.state === 'tampered' ? '（内容异常）' : ''
   return `${at}${note}`
 }
 
-export interface ReleasePresetSource {
+export interface DeliveryPresetSource {
   /** `A1/STANDARD` 这种。行键沿用；下载 / 应用两个动作认 `fileName` */
   uid: string
   machineId: string
@@ -1732,15 +1755,15 @@ export interface ReleasePresetSource {
    *
    * 目录（catalog）里**没有**这两格，它们由 `getPresetFiles()` 对**同一份文件**
    * （按 `fileName` 对上）算好给出来 —— 算法只有后端一处（`ipc/presets.rs::slicer_axes`），
-   * 前端只搬，**不在 TS 里从路径重算**（2026-10-07：release 行从前不带这两格，
+   * 前端只搬，**不在 TS 里从路径重算**（2026-10-07：preset 行从前不带这两格，
    * 切片器档的喷嘴 / 层高整列都是「—」）。
    */
   nozzle?: string
   layerHeight?: string
   /** 目录登记的字节数（真值） */
   size: number
-  /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「云端交付」） */
-  releaseVersion: string | null
+  /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「云端」） */
+  presetVersion: string | null
   /**
    * **事件时间**（2026-10-06 预设事件时间模型），三格各是各、互不顶替：
    *
@@ -1757,13 +1780,13 @@ export interface ReleasePresetSource {
   replacedUnix: number | null
   deliveryPublishedAt: string | null
   /**
-   * 盘上那一份现在是什么（见 [`ReleaseFileState`]）。
+   * 盘上那一份现在是什么（见 [`PresetFileState`]）。
    *
-   * **算它的地方只有一处**：`usePresetData.readRelease` 把三个读（目录清单 / 下载区 /
+   * **算它的地方只有一处**：`usePresetData.readPresetFeed` 把三个读（目录清单 / 下载区 /
    * 认得出是哪一版吗）合成这一个字段。两张表都读它，**不许自己再判一次** ——
    * 两处各判一次，迟早有一处忘了跟（"需更新"以前就是那样把坏档说成"未下载"的）。
    */
-  state: ReleaseFileState
+  state: PresetFileState
 }
 
 /** 一台机型下的一个文件：代表那一份 + 用到它的版本名与 id */
@@ -1837,7 +1860,7 @@ function matchesKind(axis: PresetKindAxis, kind: FileKind): boolean {
  * （`FileKind | null` 里的 `null`，两处含义不同，别混）。
  *
  * 这就是 2026-10-02 那张截图的修法：`a1.svg`（icon）与 `MKPProcess ….json`
- * （bbs_config）混进"MKP 配置 → 云端"表里 —— 因为 release 行当年默认
+ * （bbs_config）混进"MKP 配置 → 云端"表里 —— 因为 preset 行当年默认
  * "catalog 里登记的只有预设"，一个 kind 都没看。
  */
 export function catalogKindToFileKind(kind: string): FileKind | null {
@@ -1900,9 +1923,9 @@ function machineNames(machines: PresetMachineNode[]): Map<string, string> {
 }
 
 /**
- * 版本 id → 显示名（release 行的「版本」列）。
+ * 版本 id → 显示名（preset 行的「版本」列）。
  *
- * release 里存的只有 versionId（`STANDARD`），表格那一列要的是人话（「标准版」）——
+ * delivery 里存的只有 versionId（`STANDARD`），表格那一列要的是人话（「标准版」）——
  * 名字只认当前这一档机型目录里有的；查不到（机型被筛掉了之类）退回 id，不留空。
  */
 function versionNameLookup(
@@ -2113,9 +2136,9 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
     kind,
     query,
     pinned,
-    localReleases,
-    staleReleases,
-    releaseVersion,
+    localPresets,
+    stalePresets,
+    presetVersion,
     releaseAt,
     remarks,
   } = input
@@ -2141,7 +2164,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
    */
   const localOnly = kind === 'mkp'
 
-  const cloud = (localOnly ? [] : machineFiles(machines))
+  const assetRows = (localOnly ? [] : machineFiles(machines))
     .filter((e) => matchesKind(kind, e.file.kind))
     /* 四档里的 missing 不属于本地表 —— 判据只有 statusOf 这一条 */
     .map((e) => ({ e, status: statusOf(e.file, localIds, active) }))
@@ -2174,7 +2197,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         /* 云端行不是「本地文件」—— 参数页那份未保存草稿不会有它的份 */
         unsaved: false,
         scope: 'local',
-        origin: 'cloud',
+        origin: 'asset',
         delivery: f.delivery,
         untagged: false,
         /* MKP 的生效是「被应用」，切片器的生效是「被复制进切片器目录」—— 两回事 */
@@ -2192,9 +2215,9 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
    * MKP 档**不列**（那一档只列 `presets-local/` 那几行，见上面 `localOnly`）；
    * 「生效」认唯一底账（`run/app-state.json` 的 activePreset）里那一条（合流，不分两套）。
    */
-  const onDisk = localOnly ? [] : [...localReleases, ...staleReleases]
+  const onDisk = localOnly ? [] : [...localPresets, ...stalePresets]
 
-  const release = onDisk
+  const presetRows = onDisk
     .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .map((p): PresetLocalRow => {
@@ -2217,20 +2240,20 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
          * 云端那一行会漏进本地表。而 `fileName` 是这套系统里**明写的**取用口径 ——
          * 下载 / 应用 / 读正文全认它（`download_runtime_file` 就是按名字在目录里找）。
          */
-        rowKey: `release:${machineId}:${p.fileName}`,
+        rowKey: `preset:${machineId}:${p.fileName}`,
         /* 仓库里没有它，没有 assetId —— 「使用」认 fileName（页面里分流） */
-        pinKey: `release:${p.fileName}`,
+        pinKey: `preset:${p.fileName}`,
         fileName: p.fileName,
         /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
            副标题 = 备注覆盖账里的 → 那一版工作台写的 → 空着；
            盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
-        path: releasePathText(p),
+        path: presetPathText(p),
         subtitle:
           /* 盘上那份不对劲（旧版本 / 内容异常）时那件事**必须**写在副标题原地 ——
              状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 空着」回落 */
           p.state === 'ok'
             ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? '')
-            : releasePathText(p),
+            : presetPathText(p),
         remarkKey: p.path,
         kind: p.kind,
         machineId: p.machineId,
@@ -2242,7 +2265,7 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         sizeText: sizeTextOf(p.size),
         /*
          * 到位时刻：这份字节是「下载」进来的还是「替换」上去的（两个事件至多一个有值，
-         * 见 `ReleasePresetSource`）—— 标签跟着事件走，UI 不自己挑。epoch 秒 → ISO
+         * 见 `DeliveryPresetSource`）—— 标签跟着事件走，UI 不自己挑。epoch 秒 → ISO
          * 交 `parseStatDate` 按本机时区显示。没有事件（认不出出身的字节）就是
          * undefined（「未知」）—— 不拿 mtime 顶（硬规则③）。
          */
@@ -2258,22 +2281,22 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
               : null,
         ownPublishedAt: p.deliveryPublishedAt,
         applied: live,
-        pinned: pinned.has(`release:${p.fileName}`),
+        pinned: pinned.has(`preset:${p.fileName}`),
         /* 交付行也不是「本地文件」—— 未保存的那份草稿只会落在 `presets-local/` */
         unsaved: false,
         scope: 'local',
-        origin: 'release',
+        origin: 'preset',
         untagged: false,
-        releaseUid: p.uid,
-        releaseVersion,
-        releaseState: state,
+        presetUid: p.uid,
+        presetVersion,
+        presetState: state,
         /* 发布时刻：展开详情「云端更新」一格（本地行的下载时间在 `modifiedText` 上） */
         publishedAt: releaseAt,
         live,
       }
     })
 
-  const all = [...cloud, ...local, ...release]
+  const all = [...assetRows, ...local, ...presetRows]
   return {
     rows: sortRows(all.filter((r) => fileMatchesQuery(r, query))),
     total: all.length,
@@ -2344,9 +2367,9 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     kind,
     query,
     pinned,
-    releasePresets,
+    deliveryPresets,
     cloudVersions,
-    releaseVersion,
+    presetVersion,
     releaseAt,
   } = input
   const names = machineNames(machines)
@@ -2399,7 +2422,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
     }
   }
   /**
-   * 云端那一行「我这边怎么样」。切片器档没有这一档（它照旧按 `releaseState` 说）。
+   * 云端那一行「我这边怎么样」。切片器档没有这一档（它照旧按 `presetState` 说）。
    *
    * 判据只有一条（2026-10-10）：**我那份的认领里有没有"跟不上云端当前版"的**。
    *
@@ -2432,10 +2455,10 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
    * 没有发布（列表为空）时云端行照列，行为不退化。
    * 本地表不动 —— 那里「云端」说的是"你机器上的云端副本"，是本机事实。
    */
-  const releasedNames = new Set(releasePresets.map((p) => p.fileName))
-  const cloud = machineFiles(machines)
+  const deliveredNames = new Set(deliveryPresets.map((p) => p.fileName))
+  const assetRows = machineFiles(machines)
     .filter((e) => matchesKind(kind, e.file.kind))
-    .filter((e) => !releasedNames.has(e.file.fileName))
+    .filter((e) => !deliveredNames.has(e.file.fileName))
     .map((e): PresetCloudRow => {
       const f = e.file
       const pinKey = f.id ?? f.path
@@ -2463,7 +2486,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         /* 未保存的草稿只服务本地表的「本地文件」行，云端行恒 false */
         unsaved: false,
         scope: 'cloud',
-        origin: 'cloud',
+        origin: 'asset',
         delivery: f.delivery,
         downloaded: f.id !== undefined && localIds.has(f.id),
       }
@@ -2476,12 +2499,12 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
    * MKP 档只列 MKP 预设、切片器档只列 BBS / Orca 的配置 —— 不靠扩展名猜；
    * 图标 / 模型在数据层就被 `catalogKindToFileKind` 挡掉了（不归这一页）。
    */
-  const release = releasePresets
+  const presetRows = deliveryPresets
     .filter((p) => matchesKind(kind, p.kind))
     .filter((p) => machineId === '' || p.machineId === machineId)
     .flatMap((p): PresetCloudRow[] => {
       const live = p.kind === 'mkp_preset' && active !== null && active.fileName === p.fileName
-      /* 四档全在源上算好了（见 `ReleasePresetSource.state`）—— 这里只搬，不判 */
+      /* 四档全在源上算好了（见 `DeliveryPresetSource.state`）—— 这里只搬，不判 */
       const state = p.state
       /*
        * **一个目录条目一行**（2026-10-08 作者改判）。
@@ -2493,7 +2516,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
        * 「他为什么不沿用本地的名字呢……真正值得下载的才显示云端的名字」。
        *
        * 于是回到一行：这一行答的还是那三件事（云上有没有我这份 / 我该不该下 /
-       * 我这份对不对），状态与动作全部由 `p.releaseState` 出（四档在源上算好）。
+       * 我这份对不对），状态与动作全部由 `p.presetState` 出（四档在源上算好）。
        *
        * **下过的旧版去哪了**：它们本来就是**用户的东西**，以用户自己的名字躺在本地表里
        * （`A1_MINI-fast-2026-10-06.toml` 这种，`presets-local/`），展开这一行还能看到
@@ -2508,15 +2531,15 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
             ).length
       const row = {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
-        rowKey: `release-cloud:${p.fileName}`,
-        pinKey: `release:${p.fileName}`,
+        rowKey: `preset-cloud:${p.fileName}`,
+        pinKey: `preset:${p.fileName}`,
         fileName: p.fileName,
-        path: `云端交付 / ${p.machineId} / ${p.versionId}`,
+        path: `云端 / ${p.machineId} / ${p.versionId}`,
         /*
          * 副标题 = **只读工作台写的那句**（这一版发布时带进目录的 `remark`）。
          * 云端表不读本地覆盖账（2026-10-07 作者三轮：本地的改动不许影响云端显示）——
          * 要写自己的备注，下载后在本地表里改。工作台没写就**空着**
-         * （不回落「云端交付 / …」那种位置文案；落点仍在 `title` 里）。
+         * （不回落「云端 / …」那种位置文案；落点仍在 `title` 里）。
          */
         subtitle: versionRemark(p.machineId, p.versionId) ?? '',
         remarkKey: null,
@@ -2531,30 +2554,30 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         /*
          * 云端表的时间 = **这次发布的时刻**（`releaseAt`，发布侧盖进目录的戳）——
          * 同一次发布的每一行是同一个值；目录没带（随包 / 旧版发布）就是 undefined
-         * （「未知」+ `RELEASE_TIME_WHY.cloudMissing` 那句话）。
+         * （「未知」+ `PRESET_TIME_WHY.cloudMissing` 那句话）。
          */
         modifiedText: releaseAt ?? undefined,
         applied: live,
-        pinned: pinned.has(`release:${p.fileName}`),
+        pinned: pinned.has(`preset:${p.fileName}`),
         /* 同上一处：云端行没有「未保存」这一档 */
         unsaved: false,
         scope: 'cloud',
-        origin: 'release',
-        releaseUid: p.uid,
-        releaseVersion,
+        origin: 'preset',
+        presetUid: p.uid,
+        presetVersion,
         delivery: 'default',
         /* `downloaded` 仍问"与目录一致的那一份在不在本机"（切片器那一档也用它） */
         downloaded: state === 'ok',
-        releaseState: state,
+        presetState: state,
         publishedAt: releaseAt,
         olderVersions,
-        /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `releaseState`） */
+        /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */
         localState: localStateOf(p.fileName),
       } satisfies PresetCloudRow
       return [row]
     })
 
-  const all = [...cloud, ...release]
+  const all = [...assetRows, ...presetRows]
   return {
     rows: sortRows(all.filter((r) => fileMatchesQuery(r, query))),
     total: all.length,

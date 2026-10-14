@@ -32,14 +32,38 @@ pub(super) const ACTIVE_FILE: &str = "run/active-preset.json";
 
 /// 使用中那一份**来自哪条线**。
 ///
-/// 缺省是 [`ActiveOrigin::Cloud`] —— 第七层之前写下的指针文件里没有这个字段，
-/// 读出来就是它（那些文件记的确实都是云端交付文件，**语义没变，所以不升 schema**）。
+/// 缺省是 [`ActiveOrigin::Preset`] —— 第七层之前写下的指针文件里没有这个字段，
+/// 读出来就是它（那些文件记的确实都是云端预设文件，**语义没变，所以不升 schema**）。
+///
+/// ★★ **这里的 `Preset` 与列表那一套不是同一套**（2026-10-14 定名）。
+/// 前端 `src/app/presets/presetTree.ts` 的 `PresetOrigin` 是**列表行**的分类，三值
+/// `asset` / `preset` / `local`；这里两值，说的是**这两类里能成为"使用中"的那些** ——
+/// 云端发布的 MKP 预设（列表的 `preset`）+ 用户自己那份（列表的 `local`）。
+/// 资源文件（列表的 `asset`：切片器配置 json / 图标 / 模型）**从来没有"使用中"这回事**，
+/// 所以它在这个枚举里没有对应物，别把两个枚举合成一个。
+/// 界面上两者都显示「云端」/「本地」，所以**别靠名字猜它们是不是一回事**。
+///
+/// # 一个只读别名
+///
+/// `alias = "cloud"` **不是兼容层**（语义一个字没变，只是名字换了），而是"读得懂自己
+/// 写下的旧值"：2026-10-14 把 `Cloud` 定名为 `Preset`，而在此之前写下的盘上值就是
+/// `"cloud"`（更早那一刀把 `Official` 改名成 `Cloud`）。没有它，老 `app-state.json`
+/// 整份解析失败，**所有读 AppState 的界面一起报「应用状态读不出来」**。
+///
+/// 它只管**读**：写回一律新名（`"preset"`），老盘那份在第一次写时自然归一。
+/// 但**代次不能靠别名升**：`presets-mine/…` 那种旧落点要靠
+/// [`crate::runtime::app_state`] 的 `1 → 2` 迁移改过来，别名管不了路径。
+///
+/// ★ `mine` 那条别名（`Mine` → `Local` 那一刀留下的）**已经退役**：它服务的是
+/// 未发布阶段的测试盘，按作者 2026-10-14 的裁定不保留（`presets-mine/` 里的用户文件
+/// 由 [`crate::runtime::local::adopt_legacy_dir`] 搬运，不靠这个别名读）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActiveOrigin {
-    /// 云端线：目录（catalog）登记的交付文件（落点 = `catalog.path`）
+    /// 云端预设线：目录（catalog）登记的 MKP 预设（落点 = `catalog.path`）
     #[default]
-    Cloud,
+    #[serde(alias = "cloud")]
+    Preset,
     /// 用户线：用户自己那份（`presets-local/…`）
     Local,
 }
@@ -100,7 +124,7 @@ pub fn active_target(
     state: &ActivePreset,
 ) -> Option<PathBuf> {
     match state.origin {
-        ActiveOrigin::Cloud => {
+        ActiveOrigin::Preset => {
             let file = catalog
                 .files
                 .iter()
@@ -232,10 +256,10 @@ pub struct DraftSubject {
 }
 
 impl DraftSubject {
-    /// 云端线：目录里那一份（认文件名）
-    pub fn cloud(file_name: &str) -> Self {
+    /// 云端预设线：目录里那一份（认文件名）
+    pub fn preset(file_name: &str) -> Self {
         Self {
-            origin: ActiveOrigin::Cloud,
+            origin: ActiveOrigin::Preset,
             file_name: file_name.to_owned(),
             path: None,
         }
@@ -330,7 +354,7 @@ mod tests {
 
     /// 旧档（还没写 `origin` 的那批草稿）**就是云端线** —— 语义没变，所以不升 schema
     #[test]
-    fn an_older_draft_file_is_still_the_official_line() {
+    fn an_older_draft_file_is_still_the_cloud_line() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("run")).unwrap();
         let json = format!(
@@ -340,8 +364,77 @@ mod tests {
         atomic_write(&d.path().join(DRAFT_FILE), json.as_bytes()).unwrap();
 
         let loaded = read_draft_file(d.path()).unwrap().expect("该读回来");
-        assert_eq!(loaded.origin, ActiveOrigin::Cloud);
+        assert_eq!(loaded.origin, ActiveOrigin::Preset);
         assert_eq!(loaded.path, None, "云端线不存路径 —— 落点由目录给");
+    }
+
+    /// `mine` 那条别名**已经退役**（作者 2026-10-14 裁定）：写 `"mine"` 的老指针
+    /// 按坏档如实报错，**不静默重置**（旧值属于未发布阶段的测试盘；
+    /// `presets-mine/` 里真有的用户文件由 [`crate::runtime::local::adopt_legacy_dir`] 搬，
+    /// 不靠这个别名读）。
+    #[test]
+    fn a_retired_mine_origin_is_a_corrupted_file_not_a_silent_reset() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = format!(
+            "{{ \"activeSchema\": {ACTIVE_SCHEMA}, \"origin\": \"mine\", \
+             \"fileName\": \"A1-fast.toml\", \"sha256\": \"abc\" }}"
+        );
+        atomic_write(&d.path().join(ACTIVE_FILE), json.as_bytes()).unwrap();
+
+        let err = read_active_file(d.path()).unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Corrupted);
+        /* 原文件一个字节没动 —— 报错不改盘 */
+        let still = std::fs::read_to_string(d.path().join(ACTIVE_FILE)).unwrap();
+        assert!(still.contains("\"mine\""), "原文件该原样留着：{still}");
+    }
+
+    /// C 阶段（2026-10-14）把 `Cloud` 定名成 `Preset`（serde 名 `cloud` → `preset`）——
+    /// **盘上更早写下的值还是 `"cloud"`，必须读得进**：那是当时真写下去的值，
+    /// 没有这条别名就是又一轮"应用状态读不出来"（整份解析失败，读 AppState 的界面全报错）。
+    #[test]
+    fn an_older_cloud_origin_still_reads_as_preset() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = format!(
+            "{{ \"activeSchema\": {ACTIVE_SCHEMA}, \"origin\": \"cloud\", \
+             \"fileName\": \"A1-standard.toml\", \"sha256\": \"abc\" }}"
+        );
+        atomic_write(&d.path().join(ACTIVE_FILE), json.as_bytes()).unwrap();
+
+        let loaded = read_active_file(d.path()).unwrap().expect("老档该读得进");
+        assert_eq!(loaded.origin, ActiveOrigin::Preset);
+        /* 别名只管读：写回一律新名 ⇒ 盘上那份下次真写入时自然归一 */
+        let back = serde_json::to_string(&loaded).unwrap();
+        assert!(
+            back.contains("\"origin\":\"preset\""),
+            "写出去要是新名：{back}"
+        );
+    }
+
+    /// 只认**现在的名字 + 那条只读别名**，别的一律不认 ——
+    /// 别把"读得懂自己写下的旧值"做成"什么字符串都收"。
+    #[test]
+    fn only_current_name_and_the_cloud_alias_are_accepted() {
+        let parse = |s: &str| serde_json::from_str::<ActiveOrigin>(s);
+        assert_eq!(parse("\"preset\"").unwrap(), ActiveOrigin::Preset);
+        assert_eq!(parse("\"cloud\"").unwrap(), ActiveOrigin::Preset);
+        assert_eq!(parse("\"local\"").unwrap(), ActiveOrigin::Local);
+        assert!(
+            parse("\"mine\"").is_err(),
+            "`mine` 那条别名已退役（F 阶段删除；旧目录由 adopt_legacy_dir 搬）"
+        );
+        assert!(parse("\"official\"").is_err(), "旧得没边的名字不认");
+        assert!(parse("\"asset\"").is_err(), "列表那一套的分类值不认");
+        /* 写出去恒是新名（别名只参与读） */
+        assert_eq!(
+            serde_json::to_string(&ActiveOrigin::Preset).unwrap(),
+            "\"preset\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ActiveOrigin::Local).unwrap(),
+            "\"local\""
+        );
     }
 
     #[test]
@@ -357,7 +450,7 @@ mod tests {
         .unwrap();
         let state = ActivePreset {
             active_schema: ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Cloud,
+            origin: ActiveOrigin::Preset,
             file_name: file.file_name.clone(),
             sha256: file.sha256.clone().unwrap(),
             path: None,
@@ -380,7 +473,7 @@ mod tests {
     /// **落点由目录给**：云端线按 catalog 的 `path` 解析（`mkp/presets/…` 真布局），
     /// 不按文件名拼路径 —— 一份字节与目录一致的云端文件，在真布局下 intact 必须是 true
     #[test]
-    fn the_official_pointer_resolves_through_the_catalog() {
+    fn a_preset_pointer_resolves_through_the_catalog() {
         let d = tempfile::tempdir().unwrap();
         let user = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("mkp/presets")).unwrap();
@@ -392,13 +485,13 @@ mod tests {
         .unwrap();
         let state = ActivePreset {
             active_schema: ACTIVE_SCHEMA,
-            origin: ActiveOrigin::Cloud,
+            origin: ActiveOrigin::Preset,
             file_name: file.file_name.clone(),
             sha256: file.sha256.clone().unwrap(),
             path: None,
         };
 
-        assert_eq!(state.origin, ActiveOrigin::Cloud);
+        assert_eq!(state.origin, ActiveOrigin::Preset);
         assert!(state.path.is_none(), "云端线不存路径：那是目录的职责");
         let catalog = catalog_with(vec![file]);
         assert!(

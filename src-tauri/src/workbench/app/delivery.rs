@@ -147,7 +147,7 @@ const DELIVERY_REL_PATH: &str = "presets/delivery";
 /// | GitHub `tree/…` 目录页 | ❌ 拒（无法表达"要哪个发布入口"） |
 /// | 空 / 非 http(s) | ❌ 拒 |
 ///
-/// **Gitee 是同一座桥**（2026-10-05 双官方源）：仓库地址 / `.git` / blob 页的契约与
+/// **Gitee 是同一座桥**（2026-10-05 双云端源）：仓库地址 / `.git` / blob 页的契约与
 /// GitHub 完全对称，只有 raw 的落点不同 —— Gitee 的 raw 与网页**同域**
 /// （`gitee.com/<o>/<r>/raw/<ref>/<path>`），所以比 GitHub 多认一种"已经是 raw"的形状
 /// （GitHub 的 raw 住在别的域名上，天然落进"自建源原样"那一行）。
@@ -601,7 +601,7 @@ pub enum DeliveryStage {
     Software,
 }
 
-/// 「发布预设」卡里的一份交付文件。
+/// 「交付预设」卡里的一份交付文件。
 ///
 /// 名单就是 [`delivery_expected_set`]（= 发布闸判残留用的**同一份集合**）——
 /// 界面不另拼一份"大概有这些"，免得又一处两说。
@@ -631,7 +631,7 @@ fn stage_of(rel: &str) -> DeliveryStage {
 
 /// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
 ///
-/// 供「发布预设」卡展出 —— 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，
+/// 供「交付预设」卡展出 —— 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，
 /// 我不知道这些其他的……还有什么文件需要生成的，我也想看到」。
 pub fn delivery_files(delivery_root: &Path, book: &Book<'_>) -> Vec<DeliveryFile> {
     delivery_expected_set(book)

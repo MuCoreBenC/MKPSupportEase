@@ -243,7 +243,13 @@
 .choice {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  /*
+   * ★ `align-items` **不能是 `flex-start`**：方框（16px）与第一行文字
+   * 在顶边对齐，而 CJK 字形坐在行盒的中下部 ⇒ 方框看着偏高、勾看着没落在框中间。
+   * `center` = **按内容盒的中线对齐**，两边的几何中心自己就重合了
+   *（2026-10-12 报告页 `.grpBar` 那条"让中线重合"的同一条口径）。
+   */
+  align-items: center;
   gap: 8px;
   /* 左右各让出 6px、再用负 margin 拉回来：让悬停那块高亮比文字宽一点，
      又不把行文挤歪（老稿里说明行顶格的样式不变） */
@@ -279,8 +285,15 @@
   box-sizing: border-box;
   width: 16px;
   height: 16px;
-  /* 与第一行文字对齐：正文行高比 16px 高，往下推一点 */
-  margin-top: 2px;
+  /*
+   * 与第一行文字**中线对齐**（外层 `.choice` 是 `align-items: center`，这里是框自己的
+   * 内容盒中线）。框的 16px 盒高里内容盒只有 13px（1.5px 上下边框），而 `top` 定位的
+   * 原点在**内边距盒**顶边 ⇒ 3px 的「视觉中心」要落在 1.5px + 6.5px 处。
+   *
+   * ★ 这里**不许再改成 `margin-top`**：那会把外边距加进"行内元素的内容盒"，
+   * `align-items: center` 跟着把整框往下推，勾就又悬出线框外去了。
+   */
+  margin-top: 0;
   border: 1.5px solid var(--line-strong);
   background: transparent;
   transition: border-color 0.12s ease, background-color 0.12s ease;
@@ -315,12 +328,25 @@
   background: var(--text-1);
 }
 
+/*
+ * 对勾（撇 + 2px 描边）在方框里**几何居中**。
+ *
+ * ★ 这里**不手算 `left/top`**（踩过两次）：`::after` 的包含块是标记的**内边距盒**，
+ * 而它的边框盒是 `4.5 + 2×2 = 8.5` × `8 + 2×2 = 12`（`::after` 默认 content-box），
+ * 转 45° 之后的外接盒比 13px 的内盒还大 —— 按"外接尺寸减一半"算出来的值必然是偏的。
+ * `inset: 0` + `margin: auto` 交给浏览器做居中（按**边框盒**算，与旋转无关），
+ * 一行搞定且不会随描边宽度漂。
+ *
+ * ★ `transform-origin` 保持默认的 `50% 50%`（元素中心）：旋转**绕中心**，中心不动，
+ * 居中就不受影响。2026-10-12 首页那颗对勾用的是 `bottom left` 的"大头针"画法，
+ * 两处定位口径不同 —— 别互相抄。
+ */
 .choiceInput:checked + .markCheck::after {
   content: '';
   position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 4px;
+  inset: 0;
+  margin: auto;
+  width: 4.5px;
   height: 8px;
   border: 2px solid var(--surface-solid);
   border-top: 0;
@@ -342,6 +368,10 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
+  /* ★ 别删：外层 `align-items: center` 会让 flex 子项被**拉伸到内容高度**，
+     文字盒的中线于是比方框的中线低一点点（视觉上"文字偏高"就是这一处造成的）。
+     写死行高 = 文字盒几何 = 字形盒几何，中线才真的重合。 */
+  line-height: 1;
 }
 
 .choiceLabel {

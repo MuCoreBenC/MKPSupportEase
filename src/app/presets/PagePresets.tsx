@@ -69,7 +69,7 @@
  *
  * 它右边那格台账：**两个数跟着当前类型档走**（MKP 档数 MKP 的、切片器档数切片器的；
  * 图标 / 模型不归这一页，哪个数里都没有它们）—— 全 catalog 的数字混进某一档的语境里
- * 只会让人对不上（作者 2026-10-02 点名「仓库 9」）。MKP 档是「官方 · 我的」，
+ * 只会让人对不上（作者 2026-10-02 点名「仓库 9」）。MKP 档是「交付预设 · 我的」，
  * 切片器档是「仓库 · 本机 · 本地」。
  *
  * # 本地 / 云端是**两张互不相干的表**（两种类型都有这一对，2026-10-09 恢复）
@@ -117,10 +117,10 @@
  *   **下载 / 更新**（交付行） `api.downloadCatalogFile()` → 下载管道          真（落 `mkp/`；**过程水位**照说，
  *                            需更新时走**同一条管道** —— 旧份自动归档，没有第二个命令）
  *   **批量**（云端表那一行）   **退役**（作者 2026-10-10：云端与本地一样，只逐份下载 / 更新）——
- *                            能力照旧在数据层（`fetchCloudPreset` / `downloadReleaseBatch`），没有界面入口
+ *                            能力照旧在数据层（`fetchCloudPreset` / `downloadPresetBatch`），没有界面入口
  *   交付行的状态              `getDownloadedFiles` + `getStaleFiles`        真（三个读合起来才够四态：
  *                            + `getDeliveryTrust` —— 未下载 / 已下载 / 旧版本 / 内容异常，
- *                            见 `ReleaseFileState`）
+ *                            见 `PresetFileState`）
  *   **编辑文件**（本地文件）  `api.beginTextEdit()` + `commitTextDraft()`  真（初稿 = **盘上那份文件的字节**：
  *                            `putTextDraft` 边改边存；保存 = **整份原子写回本地那份自己**（不产生第二份）。
  *                            **盘上那份直到点保存才被碰** —— 判据逐字节盯着；
@@ -196,12 +196,12 @@ import {
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
-  RELEASE_SUSPECT_WHY,
+  PRESET_SUSPECT_WHY,
   STATUS_TEXT,
   UNSUPPORTED_TEXT,
   /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
   UPDATE_ACTION_TEXT,
-  isSuspectRelease,
+  isSuspectPreset,
   sizeTextOf,
   /* 重命名框：主名与后缀拆开（后缀灰色贴在行尾、不可改） */
   splitFileName,
@@ -359,7 +359,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [note, setNote] = useState<Note | null>(null)
   /*
-   * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"官方版本"或"更新"上，
+   * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"云端版本"或"更新"上，
    * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-local/`）。
    *
    * ★ 2026-10-10：**入口从顶部那颗常驻按钮搬进右键菜单**（作者：「参数对比几个字，
@@ -393,7 +393,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /*
    * 批量入口 2026-10-10 退役（作者：「这个可以去掉的……跟本地的一样就可以」）：
    * 云端表的呈现与本地表一致，只在行上逐份下载 / 更新，不再有整批按钮。
-   * 能力照旧在数据层（`fetchCloud` / `downloadReleaseBatch`），只是没有界面入口。
+   * 能力照旧在数据层（`fetchCloud` / `downloadPresetBatch`），只是没有界面入口。
    */
 
   /*
@@ -610,7 +610,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   // ——————————————————————————————————————————————————————————
 
   /**
-   * **复制链接**（2026-10-09 接通）：官方下载链接由后端按**当前数据源**算 ——
+   * **复制链接**（2026-10-09 接通）：交付预设下载链接由后端按**当前数据源**算 ——
    * 与下载管道同一个寻址出口，复制到的链接就是下载时取的那个地址。
    * 拿到就进剪贴板；没配数据源 / 算不出来照实说，不编一个假 URL。
    */
@@ -739,7 +739,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   MKP 云端行「下载」（本地还没有）  → `fetchCloud`：取回云端当前版 + 落一份**本地文件**；
    *   MKP 云端行「更新」（本地已有、云端有新版的）→ `runUpdate`：取回新版 + 逐项比较，
    *       没冲突的按新版采用、冲突的让用户选，**确认后才一次性写回本地文件**；
-   *   切片器 / 交付预设（`releaseUid` 在） → `downloadRelease(fileName)`：落下载区 `mkp/`；
+   *   切片器 / 交付预设（`presetUid` 在） → `downloadPreset(fileName)`：落下载区 `mkp/`；
    *   云端仓库的文件                 → 契约里有签名，所以**照调**。
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
@@ -786,26 +786,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       )
       return
     }
-    if (row.releaseUid !== undefined) {
+    if (row.presetUid !== undefined) {
       /*
        * 盘上那份不对劲的两档（旧版本 / 认不出）走的是**同一条下载管道**（再下一遍，
        * 旧份自动归档）—— 动词统一叫「更新」（与按钮一致：云端有更新就该说更新，
        * 「重新下载」那种吓唬人的说法不再出现在动作上）；认不出的实情在结果那句话里说。
        * 别在这里分支去找"另一个命令"：没有那个命令。
        */
-      const updating = row.releaseState === 'tampered' || row.releaseState === 'old'
+      const updating = row.presetState === 'tampered' || row.presetState === 'old'
       const verb = updating ? '更新' : '下载'
       setBusyKey(row.rowKey)
       setNote({ text: `正在${verb} ${row.fileName}…`, bad: false })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
       data
-        .downloadRelease(row.fileName, (t) => setNote({ text: tickText(t), bad: t.stage === 'failed' }))
+        .downloadPreset(row.fileName, (t) => setNote({ text: tickText(t), bad: t.stage === 'failed' }))
         .then(
           () => {
             setBusyKey(null)
             setNote({
               text: updating
-                ? row.releaseState === 'tampered'
+                ? row.presetState === 'tampered'
                   ? `已更新 ${row.fileName} —— 盘上那份认不出的，现在换成了目录登记的当前版本`
                   : `已更新 ${row.fileName} —— 旧的那一份进了归档（archive/），没有删`
                 /*
@@ -1085,12 +1085,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
     const done =
-      row.origin === 'release' ? data.removeRelease(row.fileName) : data.remove(row.path)
+      row.origin === 'preset' ? data.removePreset(row.fileName) : data.remove(row.path)
     done.then(
       () =>
         setNote({
           text:
-            row.origin === 'release'
+            row.origin === 'preset'
               ? `已删除 ${row.fileName} —— 它回到「未下载」，随时可以从云端重新下载`
               : `已删除 ${row.fileName} —— 真删除，没有留档（${row.path} 已经不在了）`,
           bad: false,
@@ -1388,13 +1388,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   const removeWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'cloud'
+    row.origin === 'asset'
       ? '云端仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件'
       : undefined
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
   const removeConfirmDetail = (row: PresetTableRow): string => {
-    if (row.origin === 'release') {
+    if (row.origin === 'preset') {
       return '它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，不会丢什么）。' +
         '它正在被使用的话，使用中会一并撤下。'
     }
@@ -1574,7 +1574,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      *                                     正在用的那一格是「取消使用」（2026-10-10 恢复的入口）
      *   修改参数 / 编辑文件 / 复制 / 改名 / 显示 / 删除   原「本地文件」那一套
      *   （「查看详情」2026-10-10 删掉：**点行就是展开**，那一项重复）
-     *   （「选择要跟随的官方更新」2026-10-10 从菜单里去掉 —— 参数表里照旧能处理更新）
+     *   （「选择要跟随的云端更新」2026-10-10 从菜单里去掉 —— 参数表里照旧能处理更新）
      *
      * （云端那一行**不在这张表里** —— 云端原件是内部数据，它的取用在云端表「下载 / 更新」。）
      */
@@ -1608,7 +1608,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         useEntry,
         /*
          * 参数表那一屏（2026-10-09）：改的是参数本身。
-         * ★ 「选择要跟随的官方更新」2026-10-10 按作者裁决**从菜单里去掉**了
+         * ★ 「选择要跟随的云端更新」2026-10-10 按作者裁决**从菜单里去掉**了
          *   （原入口是 `openParams(row, true)` 那条直路）—— 参数表里照旧能处理云端更新，
          *   菜单只留一个「打开参数」。
          */
@@ -1673,7 +1673,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
      * 不能让它换个名字继续活着。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了。
      */
-    const suspect = isSuspectRelease(row.releaseState)
+    const suspect = isSuspectPreset(row.presetState)
 
     return [
       { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
@@ -1688,7 +1688,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         label: LOCAL_COPY.cell,
         /* 本地文件 → 本地文件（第十一层，按字节复制、血统原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
-        disabled: suspect ? RELEASE_SUSPECT_WHY : copyWhyNot(row),
+        disabled: suspect ? PRESET_SUSPECT_WHY : copyWhyNot(row),
         onSelect: () => runDuplicate(row),
       },
       {
@@ -1826,7 +1826,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * MKP 台账里的「云端」：目录（catalog）登记的 MKP 预设**全机型**个数 ——
    * 与切片器那档的「仓库」是同一个口径（台账说全集，表格说这一档机型）。
    */
-  const assetCloudCount = data.release.presets.filter(
+  const assetCloudCount = data.delivery.presets.filter(
     (p) => p.kind === 'mkp_preset',
   ).length
   const metaNode = (
@@ -2060,7 +2060,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份本地文件 */
                 onUse={runUse}
                 onDownload={download}
-                /* 来源格「复制自 X」的定位落点；sourceLabel 决定云端交付行来源列显示 GitHub / Gitee */
+                /* 来源格「复制自 X」的定位落点；sourceLabel 决定交付预设行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
                 sourceLabel={data.sourceLabel}
                 /* 备注（副标题覆盖账）与归属（复制出来的那份标机型 / 版本） */
@@ -2226,7 +2226,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            * 只有「放弃」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
            * （2026-10-10 作者：「没有点保存的时候千万不要保存进来」，两条草稿分开存）。
            *
-           * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（官方那一份是模板），
+           * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（交付预设那一份是模板），
            * 所以这里只有一套说法：保存 = 写回它自己。
            *
            * 关掉（Esc / 点遮罩）= **只关，不丢**：正文草稿在盘上，回头点「改这份」接着改。

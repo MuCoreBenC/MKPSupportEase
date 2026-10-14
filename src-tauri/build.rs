@@ -15,7 +15,7 @@
  * 这两个值都是 **Bootstrap 地址**（指向发布产物里的 `source.json`），不是"直接根" ——
  * 客户端读它拿到 catalog 与文件下载根的地址（见 `runtime::source::resolve_source`）。
  *
- * ★ **两个都是官方源**（2026-10-05，作者拍"国内走 Gitee"）：`bootstrapUrl` = GitHub
+ * ★ **两个都是云端源**（2026-10-05，作者拍"国内走 Gitee"）：`bootstrapUrl` = GitHub
  *   （默认），`giteeBootstrapUrl` = Gitee。**各自独立注入**：Gitee 那边没配就少一个
  *   选项（界面不出现它），不影响 GitHub 那个。
  *

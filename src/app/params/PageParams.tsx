@@ -621,7 +621,7 @@ export default function PageParams({
         onEdit={u.edit}
         onRevertToSaved={u.revertToSaved}
         /*
-         * 官方更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
+         * 云端更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
          * 认不出是哪一版云端）时不传 —— 行上一律不画，与以前长得一模一样。
          */
         syncOf={u.sync === null ? undefined : u.syncOf}

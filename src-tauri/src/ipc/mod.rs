@@ -31,7 +31,7 @@ pub mod catalog;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
 pub mod local;
-/// **逐参数「官方更新」的两条命令**（2026-10-09）：读三方账（我 / 官方旧值 / 官方新值）
+/// **逐参数「云端更新」的两条命令**（2026-10-09）：读三方账（我 / 云端旧值 / 云端新值）
 /// 与落采用·保持的决定。云端那一版默认值住在隐藏 baseline 里，用户看不见它。
 pub mod param_sync;
 /// **钩子模式那三条命令**（2026-10-09）：看那一趟 / 停那一趟 / 答那一问 ——
@@ -355,7 +355,7 @@ fn post_process_refused(reason: impl Into<String>) -> PostProcessCommandDto {
 /// 组装那一条命令（**纯函数**：喂假 exe 与临时根就能判 —— 见下面的判据）。
 ///
 /// 预设那一份的先后：**本地那份**（用户工作副本，匹配口径在
-/// [`local::local_copy_for`]）> 云端交付那份，且**必须真在盘上**
+/// [`local::local_copy_for`]）> 交付预设那份，且**必须真在盘上**
 /// （相对落点 / 不存在的文件贴进切片器都是同一种事故）。
 fn post_process_dto(
     exe: Option<&std::path::Path>,
@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(
             dto.toml.expect("ready 就该有 toml"),
             local_at.display().to_string(),
-            "指本地那份（presets-local/…），不是云端交付那份"
+            "指本地那份（presets-local/…），不是交付预设那份"
         );
     }
 

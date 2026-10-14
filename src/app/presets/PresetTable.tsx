@@ -136,7 +136,7 @@ import {
   EDIT_TEXT,
   LOCAL_DRAWER,
   LOCAL_UNREADABLE_TEXT,
-  RELEASE_UNTRUSTED_NOTE,
+  PRESET_UNTRUSTED_NOTE,
   UPDATE_ACTION_TEXT,
   UPDATE_STATE_TEXT,
   KIND_AXIS_TEXT,
@@ -230,7 +230,7 @@ interface Props {
    */
   onLocate: (target: LocateTarget) => void
   /**
-   * 当前数据源（`gitee` / `github` / `custom`）—— release 行「来源」列显示
+   * 当前数据源（`gitee` / `github` / `custom`）—— preset 行「来源」列显示
    * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「云端」。
    */
   sourceLabel: string | null
@@ -474,18 +474,18 @@ export default function PresetTable({
               const inUse = row.scope === 'local' ? row.live : row.applied
               const busy = row.rowKey === busyKey
               /*
-               * release 行的**云端 vs 盘上**三态（未下载 / 已下载 / 有更新）——
+               * preset 行的**云端 vs 盘上**三态（未下载 / 已下载 / 有更新）——
                * 状态主词与按钮都从它出（见 `updateStateOf`）。以前"盘上字节认不出"那一档
                * 把「内容异常」顶在最前面、按钮叫「重新下载」：用户被吓着，而云端明明只是
                * 有更新。现在主词说「有更新」，认不出的实情在展开详情里有一行注记说全。
                */
               const updateState =
-                row.releaseState !== undefined ? updateStateOf(row.releaseState) : undefined
+                row.presetState !== undefined ? updateStateOf(row.presetState) : undefined
               const needsUpdate = updateState === 'update'
               /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档）——
                  **MKP 档不出现**：那一档按 `localState` 说，不碰下载区四态（2026-10-09） */
               const untrusted =
-                row.releaseState === 'tampered' &&
+                row.presetState === 'tampered' &&
                 !(row.scope === 'cloud' && row.localState !== undefined)
               /*
                * 这一份在归档里有几个旧版本（换版本时被换下来的）。0 = 没有。
@@ -498,7 +498,7 @@ export default function PresetTable({
               /** 云端那一格：与目录一致的那一份在本机（切片器云端行看 `downloaded`，交付行看三态） */
               const gotIt =
                 row.scope === 'cloud' &&
-                (row.releaseState === undefined ? row.downloaded : row.releaseState === 'ok')
+                (row.presetState === undefined ? row.downloaded : row.presetState === 'ok')
               /* 来源那一格（列 + 展开详情共用）：三种来源三种说法，可定位的带 `locate` */
               const origin = originCellOf(row, sourceLabel)
               /*
@@ -613,7 +613,7 @@ export default function PresetTable({
                        * 展开详情里的「归属」还能改），只是名称列不再挂那四个字。
                        */}
                       {/*
-                       * ★ **"基于旧版官方"那枚徽章退役了**（2026-10-08 作者裁决）：
+                       * ★ **"基于旧版官方"（现称交付预设）那枚徽章退役了**（2026-10-08 作者裁决）：
                        * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；
                        * 系统既不自动更新它，也不在列表上暗示"你落后了"。
                        * 血统照旧写在文件头（展开详情「基于」那一格还答"从哪一版派生"），
@@ -795,7 +795,7 @@ export default function PresetTable({
                             {ACTION_TEXT[kind]}
                           </button>
                         )
-                      ) : row.releaseUid !== undefined && row.kind !== 'mkp_preset' ? (
+                      ) : row.presetUid !== undefined && row.kind !== 'mkp_preset' ? (
                         /*
                          * 切片器那一类的交付行（catalog 登记、字节在盘上）：动作是**「复制」** ——
                          * 复制进切片器自己的用户配置目录它才生效（MKP 的「启用」是另一回事）。
@@ -811,9 +811,9 @@ export default function PresetTable({
                         >
                           {ACTION_TEXT[kind]}
                         </button>
-                      ) : row.releaseUid === undefined && row.kind === 'mkp_preset' ? (
+                      ) : row.presetUid === undefined && row.kind === 'mkp_preset' ? (
                         /*
-                         * **云端 MKP 行没有交付身份（releaseUid）就没有「应用」**（A2 修缝）——
+                         * **云端 MKP 行没有交付身份（presetUid）就没有「应用」**（A2 修缝）——
                          * 应用只认目录登记的那一份。两种真实状态共用：用户自己放进
                          * `mkp/` 的来路不明文件；以及旧资产库形状的行（演示数据里有）。
                          * 原来这里放行到「应用」按钮、点了再被守卫拦下，报一串
@@ -822,7 +822,7 @@ export default function PresetTable({
                         <span className={s.actNone}>
                           {DASH_}
                         </span>
-                      ) : row.assetId === undefined && row.releaseUid === undefined ? (
+                      ) : row.assetId === undefined && row.presetUid === undefined ? (
                         /* 什么身份都没有的行：复制 / 应用都无从谈起（不给点了没反应的按钮） */
                         <span className={s.actNone}>
                           {DASH_}
@@ -842,7 +842,7 @@ export default function PresetTable({
                       <span className={s.actDone}>
                         {CLOUD_STATE_TEXT.downloaded}
                       </span>
-                    ) : row.releaseUid !== undefined ? (
+                    ) : row.presetUid !== undefined ? (
                       <button
                         type="button"
                         className={s.actBtn}
@@ -854,7 +854,7 @@ export default function PresetTable({
                       </button>
                     ) : (
                       /*
-                       * **官方仓库文件不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
+                       * **云端仓库文件不给「下载」**（2026-10-09 用户裁断：残支连入口一起撤）——
                        * 下载只走两条真管道：MKP 的「取回」与登记过的交付下载。
                        */
                       <span className={s.actNone}>
@@ -918,7 +918,7 @@ export default function PresetTable({
                             <span>
                               {row.scope === 'cloud' && row.localState !== undefined
                                 ? CLOUD_LOCAL_TEXT[row.localState]
-                                : row.releaseState !== undefined
+                                : row.presetState !== undefined
                                   ? UPDATE_STATE_TEXT[updateState ?? 'latest']
                                   : mkp && row.scope === 'local'
                                     ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
@@ -940,7 +940,7 @@ export default function PresetTable({
                             <span>{row.sizeText ?? UNKNOWN}</span>
                             <i className={s.dDot} aria-hidden>·</i>
                             <span>
-                              {row.origin === 'release'
+                              {row.origin === 'preset'
                                 ? row.scope === 'cloud'
                                   ? '云端更新 '
                                   : row.arrivalBy === 'replaced' ? '替换于 ' : '下载于 '
@@ -1062,8 +1062,8 @@ export default function PresetTable({
                           )}
                         </div>
 
-                        {/* release 行的版本指纹（云端最新版本/发布时间），第二行 muted meta */}
-                        {row.origin === 'release' && (
+                        {/* preset 行的版本指纹（云端最新版本/发布时间），第二行 muted meta */}
+                        {row.origin === 'preset' && (
                           <div className={s.dMeta}>
                             {row.scope === 'local' &&
                               row.ownPublishedAt != null &&
@@ -1085,7 +1085,7 @@ export default function PresetTable({
                               </>
                             )}
                             <span>
-                              云端最新版本 {row.releaseVersion ?? UNKNOWN}
+                              云端最新版本 {row.presetVersion ?? UNKNOWN}
                             </span>
                           </div>
                         )}
@@ -1093,7 +1093,7 @@ export default function PresetTable({
                         {/* 认不出的注记：不顶在主词上，放成讲道理的一行 */}
                         {untrusted && (
                           <p className={s.dNote}>
-                            {RELEASE_UNTRUSTED_NOTE}
+                            {PRESET_UNTRUSTED_NOTE}
                           </p>
                         )}
 
@@ -1102,7 +1102,7 @@ export default function PresetTable({
                          * 展示行就在这里：label 与「版本 / 来源 / 基于」同一条 56px 刻度、
                          * 右端一颗小胶囊「编辑」；点它折出的是**卡底那条带**（本块 DOM
                          * 之后的 `.dBand`，备注一条、归属一条、两条独立可同开）。
-                         * 两块都没有（云端行 / release 行）时整块不渲染。
+                         * 两块都没有（云端行 / preset 行）时整块不渲染。
                          */}
                         {(row.remarkKey !== null || localAttr) && (
                           <div className={s.editrows}>

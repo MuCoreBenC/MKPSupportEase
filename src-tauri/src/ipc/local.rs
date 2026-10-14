@@ -6,7 +6,7 @@
 //!
 //! 写命令都在这一层（**都只写用户根**，云端原件与下载区一概不碰），分几路：
 //!
-//! - **取回官方预设**（`catalog::fetch_cloud_preset`，2026-10-09 改判）：按需取回官方原件，
+//! - **取回交付预设**（`catalog::fetch_cloud_preset`，2026-10-09 改判）：按需取回交付预设原件，
 //!   再把它落成 `presets-local/<原名>`（还没有的话）—— **用户只面对一份**；
 //! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
 //!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
@@ -179,9 +179,13 @@ fn owner_of(
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetDraftDto {
-    /// 改的是**哪条线**上那一份：`cloud`（交付文件）/ `local`（我自己的那份）。
+    /// 改的是**哪条线**上那一份：`preset`（云端预设线）/ `local`（我自己的那份）。
     /// 界面靠它决定那一颗保存按钮说什么（另存 / 写回我这份）
-    pub origin: String,
+    ///
+    /// ★ 直接持枚举、由 serde 出字符串（与「使用中指针」那一个 DTO 同一套）：
+    /// 2026-10-14 C 阶段收敛 —— 以前这里与 `get_preset_draft_summary` 各手写一段
+    /// `match` 转字符串，同一条事实三处写法，改个名字要记得改三处。
+    pub origin: runtime::state::ActiveOrigin,
     /// 从哪一份改出来的。云端线是 `mkp/` 里的**文件名**；用户线是给人看的文件名
     /// （落点看 `path`）
     pub source_file_name: String,
@@ -223,7 +227,7 @@ pub struct LocalFileIdentityDto {
 /// 用户改的永远是临时文件，点保存才落到用户根 ——
 /// 云端那份**另存**成 `（已修改）`、我那份**写回它自己**（第八层）。
 ///
-/// 两条线走**同一个入口**（`origin` 缺省 `cloud`，老的调用点不用改），
+/// 两条线走**同一个入口**（`origin` 缺省 = 云端预设线，老的调用点不用改），
 /// 与「应用」那个入口同一形状（[`crate::ipc::catalog::apply_active_preset`]）：
 /// 云端线认**文件名**（目录的键），用户线认**路径**（用户目录里可以自己分文件夹）。
 /// 「接着上次改」也按同一把钥匙认 —— 两条线同名很正常，只比文件名会把 A 的草稿接到 B 上。
@@ -247,13 +251,13 @@ pub struct LocalFileIdentityDto {
 pub async fn begin_preset_edit(
     app: AppHandle,
     file_name: String,
-    origin: Option<String>,
+    origin: Option<runtime::state::ActiveOrigin>,
     path: Option<String>,
 ) -> Result<PresetDraftDto, AppError> {
     traced("beginPresetEdit", |_| {
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
-        let subject = draft_subject(&file_name, origin.as_deref(), path.as_deref())?;
+        let subject = draft_subject(&file_name, origin, path.as_deref())?;
 
         if let Some(draft) = runtime::app_state::draft(&root)? {
             if draft.subject().matches(&subject) {
@@ -263,7 +267,7 @@ pub async fn begin_preset_edit(
 
         let (text, source_sha256) = match subject.origin {
             /* 云端线：正文来自下载区（第六层的闸在里面） */
-            runtime::state::ActiveOrigin::Cloud => {
+            runtime::state::ActiveOrigin::Preset => {
                 let catalog = runtime::load_released_catalog(&root)?;
                 let file = catalog
                     .files
@@ -312,22 +316,24 @@ pub async fn begin_preset_edit(
     })
 }
 
-/// 这份草稿改的是哪一条线上的哪一份（两条线各自的钥匙，见 [`begin_preset_edit`]）
+/// 这份草稿改的是哪一条线上的哪一份（两条线各自的钥匙，见 [`begin_preset_edit`]）。
+///
+/// ★ `origin` 收的是**枚举**，不是字符串（2026-10-14 C 阶段收敛）：以前这里手写一套
+/// `"cloud" / "local"` 的 match，与 serde 那一套（别名、非法值的报错文案）不一致 ——
+/// 同一条事实两套规则，换一次名字就要记得改两处。现在只有一处规则：
+/// **枚举怎么反序列化，这里就怎么认**；缺省值与 [`runtime::state::ActiveOrigin::default`] 一致。
 fn draft_subject(
     file_name: &str,
-    origin: Option<&str>,
+    origin: Option<runtime::state::ActiveOrigin>,
     path: Option<&str>,
 ) -> Result<runtime::state::DraftSubject, AppError> {
-    match origin.unwrap_or("cloud") {
-        "cloud" => Ok(runtime::state::DraftSubject::cloud(file_name)),
-        "local" => {
+    match origin.unwrap_or_default() {
+        runtime::state::ActiveOrigin::Preset => Ok(runtime::state::DraftSubject::preset(file_name)),
+        runtime::state::ActiveOrigin::Local => {
             let rel = path
                 .ok_or_else(|| AppError::invalid_argument("改我自己那份要说是哪一份（缺 path）"))?;
             Ok(runtime::state::DraftSubject::local(file_name, rel))
         }
-        other => Err(AppError::invalid_argument(format!(
-            "不认得 {other} 这条线（只有 cloud / local）"
-        ))),
     }
 }
 
@@ -350,7 +356,8 @@ pub struct PresetTextDraftDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetDraftSummaryDto {
-    pub origin: String,
+    /// 同 [`PresetDraftDto::origin`]：枚举直接出，不再手写转换
+    pub origin: runtime::state::ActiveOrigin,
     pub source_file_name: String,
     pub path: Option<String>,
     /// **真改过才算**：与来源现在的字节比（只差换行/血统处置的差异不算改动）
@@ -373,11 +380,7 @@ pub struct LocalPresetIdentityDto {
 
 fn draft_dto(draft: runtime::state::PresetDraft, reused: bool) -> PresetDraftDto {
     PresetDraftDto {
-        origin: match draft.origin {
-            runtime::state::ActiveOrigin::Cloud => "cloud",
-            runtime::state::ActiveOrigin::Local => "local",
-        }
-        .to_owned(),
+        origin: draft.origin,
         source_file_name: draft.source_file_name,
         path: draft.path,
         text: draft.text,
@@ -554,14 +557,8 @@ pub async fn get_preset_draft_summary(
             return Ok(None);
         };
 
-        let origin = match draft.origin {
-            runtime::state::ActiveOrigin::Cloud => "cloud",
-            runtime::state::ActiveOrigin::Local => "local",
-        }
-        .to_owned();
-
         let dirty = match draft.origin {
-            runtime::state::ActiveOrigin::Cloud => {
+            runtime::state::ActiveOrigin::Preset => {
                 let catalog = runtime::load_released_catalog(&root)?;
                 match catalog
                     .files
@@ -587,7 +584,7 @@ pub async fn get_preset_draft_summary(
         };
 
         Ok(Some(PresetDraftSummaryDto {
-            origin,
+            origin: draft.origin,
             source_file_name: draft.source_file_name,
             path: draft.path,
             dirty,
@@ -662,7 +659,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，没得存"))?;
 
         let done = match draft.origin {
-            runtime::state::ActiveOrigin::Cloud => {
+            runtime::state::ActiveOrigin::Preset => {
                 /*
                  * 血统要写进那份用户文件里：来源 = 目录里那一份的 **`catalog.path`**
                  * （`delivery/mkp/presets/A1-standard.toml`，与工作台建副本的"哪一版"同一形状）。

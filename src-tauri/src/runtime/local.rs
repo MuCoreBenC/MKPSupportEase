@@ -29,7 +29,7 @@
 //!
 //! # 第九层：文件级的"能不能用"（**不复制 Preset schema**）
 //!
-//! 用户文件与官方文件的可信规则**本来就不同**（作者 2026-10-02 定的口径）：
+//! 用户文件与交付预设文件的可信规则**本来就不同**（作者 2026-10-02 定的口径）：
 //!
 //! - 云端线要 **SHA**：盘上那份与目录登记逐字节一致才可信（见 [`super::delivery`]）；
 //! - 用户线**只看文件级**：路径在 `presets-local/` 里 + 能读 + 是 UTF-8 + **TOML 语法能解析**。
@@ -643,6 +643,106 @@ fn same_file(_a: &Path, _b: &Path) -> bool {
     false
 }
 
+/// `presets-mine/` → `presets-local/`：把**上一代目录**里用户真有的文件搬进新目录。
+///
+/// 一代目录名换过一次（`presets-mine` → `presets-local`），旧代码只认新前缀 ⇒ 老盘上
+/// 那份"我自己的预设"从此在界面里看不见。这一趟把它接回来，规则是**只搬、不动字节**：
+///
+/// - **只搬文件**（子目录递归，保结构）；空目录就地留着（用户自己删）；
+/// - 落点已有同名文件 ⇒ **跳过并记一条 `conflict`**，绝不覆盖（那是用户的两份东西，
+///   谁顶谁不是程序能定的）；指针照旧指向新目录里那一份 —— 用户能看到"有两份同名的"；
+/// - 任何一步失败（建目录 / 改名）⇒ **源文件原地不动**，记一条 `failed`，其余照搬；
+/// - 不建"迁移完成"标记：跑第二遍时旧文件已经不在 ⇒ 自然什么也不做（幂等），
+///   判断依据永远是"盘上还有没有"，不引入第二处状态。
+///
+/// 返回每一条的结果，调用方（[`crate::fsx::paths::user_root`] 那条冷启路径）只用来记日志。
+pub fn adopt_legacy_dir(user_root: &Path) -> Vec<LegacyAdoption> {
+    let legacy = user_root.join(LEGACY_MINE_DIR);
+    if !legacy.is_dir() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![legacy.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let from = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => {
+                    stack.push(from);
+                    continue;
+                }
+                Ok(_) => {}
+                Err(_) => continue,
+            }
+            let rel = from
+                .strip_prefix(user_root)
+                .unwrap_or(&from)
+                .to_string_lossy()
+                .replace('\\', "/");
+            /* 相对路径的第二段起是新目录下的同一位置（保留用户自己分的文件夹） */
+            let tail = match rel.strip_prefix(&format!("{LEGACY_MINE_DIR}/")) {
+                Some(tail) => tail,
+                None => continue,
+            };
+            let to = user_root.join(LOCAL_DIR).join(Path::new(tail));
+            let file_name = from
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if to.exists() {
+                out.push(LegacyAdoption {
+                    file_name,
+                    path: rel,
+                    outcome: LegacyOutcome::Conflict,
+                });
+                continue;
+            }
+            let moved = to
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::rename(&from, &to));
+            match moved {
+                Ok(()) => out.push(LegacyAdoption {
+                    file_name,
+                    path: format!("{LOCAL_DIR}/{tail}"),
+                    outcome: LegacyOutcome::Moved,
+                }),
+                Err(e) => out.push(LegacyAdoption {
+                    file_name,
+                    path: rel,
+                    outcome: LegacyOutcome::Failed(e.to_string()),
+                }),
+            }
+        }
+    }
+    out
+}
+
+/// 旧一代本地预设目录的名字。**只有迁移读它**（业务代码一律走 [`LOCAL_DIR`]）。
+const LEGACY_MINE_DIR: &str = "presets-mine";
+
+/// 一条旧目录文件的处置结果（只用来记日志，不进任何状态）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyAdoption {
+    pub file_name: String,
+    /// 旧路径（搬成功时给的是新路径）
+    pub path: String,
+    pub outcome: LegacyOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegacyOutcome {
+    /// 搬过去了（源已经不在）
+    Moved,
+    /// 新目录里已经有同名的 —— 没动它，也没动源
+    Conflict,
+    /// 没搬成，源原地不动
+    Failed(String),
+}
+
 /// **重命名**一份用户文件（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
 /// TOML 都不重写（判据逐字节盯着）。改完还是同一份 Preset、还是同一类。
 ///
@@ -735,7 +835,7 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     })
 }
 
-/// **把官方原件落成我的一份**（官方 → 我的；2026-10-08 定，2026-10-09 改判用途）。
+/// **把交付预设原件落成我的一份**（交付预设 → 我的；2026-10-08 定，2026-10-09 改判用途）。
 ///
 /// 用户世界里**只有一份**：云端原件只是内部数据（隐藏 baseline 的来源），
 /// 他要改的、要用的永远是 `presets-local/` 里那一份。所以这条路现在被
@@ -782,7 +882,7 @@ pub fn save_cloud_as_new(
 }
 
 /// **删除**一份用户文件（第十层）：**真删除** —— 没有垃圾桶，也没有归档
-/// （作者 2026-10-02 定死：`archive/` 是官方版本生命周期的一部分，用户自己删自己的文件
+/// （作者 2026-10-02 定死：`archive/` 是云端版本生命周期的一部分，用户自己删自己的文件
 /// 不搞第二套"用户历史"）。
 ///
 /// 作者裁决（2026-10-06）：**正在使用 / 有草稿不再拦** —— 那两样是**状态**，不是文件；
@@ -855,6 +955,65 @@ mod tests {
             files,
             ..Catalog::default()
         }
+    }
+
+    /* ---------- 旧目录接管（presets-mine → presets-local） ---------- */
+
+    /// 旧目录里的文件搬进新目录，**字节一个不动**，而且**跑第二遍什么也不做**（幂等）。
+    #[test]
+    fn adopting_the_legacy_dir_moves_the_bytes_and_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", VALID_TOML);
+        write(root.path(), "presets-mine/子目录/B2.toml", VALID_TOML);
+
+        let done = adopt_legacy_dir(root.path());
+        assert_eq!(done.len(), 2);
+        assert!(done.iter().all(|o| o.outcome == LegacyOutcome::Moved));
+        assert_eq!(
+            std::fs::read(root.path().join("presets-local/A1.toml")).unwrap(),
+            VALID_TOML.as_bytes(),
+            "字节照搬"
+        );
+        assert!(
+            root.path().join("presets-local/子目录/B2.toml").is_file(),
+            "子目录结构保住"
+        );
+        assert!(
+            !root.path().join("presets-mine/A1.toml").exists(),
+            "源已经不在"
+        );
+
+        /* 第二遍：旧目录里已经没文件了 ⇒ 什么都不做（没有"迁移完成"标记这类第二处状态） */
+        assert!(adopt_legacy_dir(root.path()).is_empty());
+    }
+
+    /// 新目录里已经有同名的那份 ⇒ **两份都留着**，只记一条 `Conflict`，绝不覆盖。
+    #[test]
+    fn adopting_never_overwrites_an_existing_file() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "presets-mine/A1.toml", "-旧-");
+        write(root.path(), "presets-local/A1.toml", "-新-");
+
+        let done = adopt_legacy_dir(root.path());
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].outcome, LegacyOutcome::Conflict);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("presets-local/A1.toml")).unwrap(),
+            "-新-",
+            "新目录那份不许被动"
+        );
+        assert!(
+            root.path().join("presets-mine/A1.toml").is_file(),
+            "旧的两份都留着，等用户自己处理"
+        );
+    }
+
+    /// 旧目录本来就不在 ⇒ 什么也不做（不报错、不建目录）
+    #[test]
+    fn adopting_a_missing_legacy_dir_does_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(adopt_legacy_dir(root.path()).is_empty());
+        assert!(!root.path().join("presets-mine").exists());
     }
 
     /// 一份都没有 = 空表，不是错误（今天真机上就是这个状态：产生用户文件的是下一层）

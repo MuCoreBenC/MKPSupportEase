@@ -551,7 +551,7 @@ export default function PageHome({ density }: PageHomeProps) {
        * （切片器配置那一类）。
        */
       const fetched = await api.fetchCloudPreset(presetFile)
-      /* 本仓术语就是 `cloud / local`（来源只有这两条线，见契约 ActiveOrigin） */
+      /* 本仓术语就是 `preset / local`（来源只有这两条线，见契约 ActiveOrigin） */
       await api.applyActivePreset(fetched.fileName, 'local', fetched.path)
       appStateMutated()
       /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
@@ -705,7 +705,7 @@ export default function PageHome({ density }: PageHomeProps) {
   )
 
   /*
-   * 2026-10-13：「正在使用 · 我的文件」那个来源后缀去掉 —— 作者：「我的一份、官方一份
+   * 2026-10-13：「正在使用 · 我的文件」那个来源后缀去掉 —— 作者：「我的一份、官方一份」（现称交付预设）
    * 这些相关的都去掉，那是以前的旧版才那么设计的」。命中底账就说「正在使用」，
    * 不再分来源（云端底稿 / 自己那份），这句只回答"是不是正在用的那一份"。
    */

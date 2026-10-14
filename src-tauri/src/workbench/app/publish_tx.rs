@@ -960,7 +960,7 @@ pub fn wb_merge_review(
                 other => Err(AppError::invalid_argument(format!("不认识的平台：{other}"))),
             }?;
 
-        /* ★ 合并成功之后**把主线同步到第二个官方源**（2026-10-06 加）。
+        /* ★ 合并成功之后**把主线同步到第二个云端源**（2026-10-06 加）。
          *
          * 为什么必须在这里：客户端的数据源读的是**仓库里的 `presets/delivery/`**，
          * 而"合进 GitHub 的 main"与"客户端读的那个源上的 main 也有这一版"是两件事。
