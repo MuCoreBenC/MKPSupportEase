@@ -1241,11 +1241,15 @@ export default function PageParams({
           rows={pickerRows}
           /*
            * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
-           * 参数页的"当前那一份"= 这一页正在编辑的那份（`fileLabel` 就是它的文件名）。
+           *
+           * ★★ 2026-10-14 修：这里原来写 `u.fileLabel` —— 那是「**正在编辑**哪份」，
+           *   而这一格问的是「**正在用**哪份」（两个问题，`useParams` 的注释里写着）。
+           *   一个 combo 下有好几份时，编辑目标可能是别的一份 ⇒ 勾错行。
+           *   改用 `u.activeFileName`（**AppState 底账答的**，与三页同一个源）。
            */
           currentKey={
-            u.fileLabel !== null && u.machineId !== ''
-              ? `${u.machineId}/${u.versionId}/${u.fileLabel}`
+            u.activeFileName !== null && u.machineId !== ''
+              ? `${u.machineId}/${u.versionId}/${u.activeFileName}`
               : null
           }
           onUse={(row) => {

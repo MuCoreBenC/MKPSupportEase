@@ -193,16 +193,25 @@ export default function PresetPickerDrawer({
                      */
                     title={`${row.fileName}（${row.machineDisplay} · ${row.versionName}）`}
                   >
-                    <span className={s.tick}>{current ? '✓' : ''}</span>
+                    {/*
+                     * ★★ 2026-10-14（作者）：在用的那一份**不摆按钮**，与预设页本地表同形 ——
+                     *   那一行写灰字「在用」（不是可点的「使用」）。
+                     *   原来这一档也摆一颗「使用」，含义重复（它已经在用了，再点一下没意义），
+                     *   而且与预设页两颗的样子不一致。
+                     */}
                     <span className={s.name}>{row.fileName}</span>
-                    <button
-                      type="button"
-                      className={s.use}
-                      /* 规则②：只有它会切 */
-                      onClick={() => onUse(row)}
-                    >
-                      使用
-                    </button>
+                    {current ? (
+                      <span className={s.inUse}>在用</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={s.use}
+                        /* 规则②：只有它会切 */
+                        onClick={() => onUse(row)}
+                      >
+                        使用
+                      </button>
+                    )}
                   </div>
                 )
               })}

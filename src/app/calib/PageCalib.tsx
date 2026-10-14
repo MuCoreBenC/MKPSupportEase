@@ -840,12 +840,19 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
         rows={pickerRows}
         /*
-         * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
-         * 校准页拿的是这一页取到的那一份预设（`preset.preset.name` 就是它的文件名）。
+         * 在用那一份的**行键**（含文件名）。
+         *
+         * ★★ 2026-10-14 修（作者截图：抽屉勾在 `…copy.toml`，顶部 pill 却写
+         *   `A1_MINI-fastv3.3.toml`）：这里原来写 `preset.preset.name` —— 而 `preset`
+         *   来自 `usePreset(sel)`，它读的是**目录那份 + 本机副本**，**不是底账**。
+         *   于是同一屏上"当前是哪一份"出现了**两个不同源的判据**（pill 读底账、
+         *   抽屉读 usePreset），两个源一对不上就打架 —— 正是"同一件事别用两个
+         *   不同源的判据"那条铁律（2026-10-11 报告页列表点不动的同一个根）。
+         *   现在两处都取**底账**（`activeForSel.fileName`，与上面 pill 同源）。
          */
         currentKey={
-          sel.model !== null && sel.variant !== null && preset.status === 'ready'
-            ? `${sel.model}/${sel.variant}/${preset.preset.name}`
+          sel.model !== null && sel.variant !== null && activeForSel !== null
+            ? `${sel.model}/${sel.variant}/${activeForSel.fileName}`
             : null
         }
         onUse={(row) => {

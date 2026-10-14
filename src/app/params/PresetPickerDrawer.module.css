@@ -155,10 +155,17 @@
   font-weight: 600;
 }
 
-.tick {
+/*
+ * ★★ 2026-10-14：`.tick`（那颗勾）**退役了** —— 在用的那一份不再打勾，
+ * 改成像预设页本地表那样写灰字「在用」（见 `.inUse`）。两处同一个词、同一个样子。
+ */
+.inUse {
   flex-shrink: 0;
-  width: 10px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
   color: var(--accent-deep);
+  font-size: 11.5px;
 }
 
 /* 行上的主文字 = 文件名（2026-10-14 起）：占满剩下的一格，装不下就省略号 */

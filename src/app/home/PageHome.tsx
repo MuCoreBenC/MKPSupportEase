@@ -1226,12 +1226,16 @@ export default function PageHome({ density }: PageHomeProps) {
         /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
         rows={pickerRows}
         /*
-         * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
-         * 首页拿的是这一页取到的那一份预设（`presetInfo.name` 就是它的文件名）。
+         * 在用那一份的**行键**（含文件名）。
+         *
+         * ★★ 2026-10-14 修：这里原来写 `presetInfo.name` —— 而 `presetInfo` 来自
+         *   `usePreset`（读**目录那份 + 本机副本**），**不是底账**；同一屏上另外两处
+         *   用的却是底账（`activeForSel` 显示名、1010 行那颗绿点）⇒ 两个源打架时
+         *   抽屉勾的那一行跟顶上的名字对不上。**统一取底账**（与 `displayName` 同源）。
          */
         currentKey={
-          sel.model !== null && sel.variant !== null && presetInfo !== null
-            ? `${sel.model}/${sel.variant}/${presetInfo.name}`
+          sel.model !== null && sel.variant !== null && activeForSel !== null
+            ? `${sel.model}/${sel.variant}/${activeForSel.fileName}`
             : null
         }
         onUse={(row) => {
