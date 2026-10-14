@@ -88,19 +88,11 @@
   margin-top: 4px;
 }
 
+/* 分组标题：只写机型显示名（内部 ID 2026-10-14 撤掉了，见抽屉里那段注释） */
 .groupHead {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
   padding: 8px 14px 4px;
   color: var(--text-3);
   font-size: 11px;
-}
-
-.groupId {
-  font-family: "SF Mono", Consolas, monospace;
-  font-size: 10.5px;
-  opacity: 0.75;
 }
 
 /*

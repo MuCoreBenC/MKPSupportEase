@@ -129,10 +129,12 @@ export default function PresetPickerDrawer({
 
           {groups.map((g) => (
             <div key={g.id} className={s.group}>
-              <div className={s.groupHead}>
-                {g.display}
-                <span className={s.groupId}>{g.id}</span>
-              </div>
+              {/*
+               * ★★ 2026-10-14（作者）：分组标题**只写给人看的那个名字**，不写内部 ID。
+               *   原来右边还跟一枚等宽小字（`A1_MINI`）—— 那是我们的标识，用户认不出、
+               *   也不需要认（作者原话：「那种我们给他定义的那个ID呀，还是什么就不用显示了」）。
+               */}
+              <div className={s.groupHead}>{g.display}</div>
 
               {g.items.map((row) => {
                 const current = currentKey !== null && `${row.machineId}/${row.versionId}` === currentKey

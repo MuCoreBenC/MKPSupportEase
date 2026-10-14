@@ -1006,10 +1006,19 @@ export function usePresetData(importRevision = 0): PresetData {
     deliveryMutated()
   }, [])
 
-  /* 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管 */
+  /*
+   * 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管。
+   *
+   * ★★ 2026-10-14 补 `deliveryMutated()`：**盘上多了一份**，这就是"本机文件面变了"。
+   *   原来只 `readLocalPresets()`（本页自己重读）⇒ 别的页收不到信号：
+   *   校准页 / 首页的预设抽屉还列着复制之前的那几行（作者 2026-10-14 实测：
+   *   「我复制出了一个新的结果，我在列表里面没看到」——预设页表里有、抽屉里没有）。
+   *   与 `rename` / `remove` 同一个漏，上次只修了那两个，漏了这个。
+   */
   const copyAsNew = useCallback(async (path: string, newName: string) => {
     const done = await api.copyLocalPreset(path, newName)
     await readLocalPresets()
+    deliveryMutated()
     return done
   }, [readLocalPresets])
 
@@ -1031,21 +1040,30 @@ export function usePresetData(importRevision = 0): PresetData {
    * **改一份预设的备注**（2026-10-07 副标题覆盖账；只有本地表读它）：写完重读整本账 ——
    * 副标题是账答的，不是前端改自己那份拷贝。写什么就是什么（空也存）；
    * `null` = 恢复默认（删掉覆盖，退回落入「工作台写的 → 空着」）。
+   *
+   * ★ 2026-10-14 补 `deliveryMutated()`：**副标题就是本地表那一列**，
+   *   别的页（BBS 交付面读同一本账）也该跟着刷。
    */
   const setRemark = useCallback(async (key: string, remark: string | null) => {
     await api.setPresetRemark(key, remark)
     setRemarks(await api.getPresetRemarks())
+    deliveryMutated()
   }, [])
 
   /*
    * **改一份用户预设的归属**（机型 / 版本）：写完重读本地文件 ——
    * 归属是文件头里那两行，重读之后列表的机型 / 版本两列以文件为准。
    * 机型必须目录里登记的；版本可自定义（不认识的照原文显示）。
+   *
+   * ★★ 2026-10-14 补 `deliveryMutated()`：改的是**文件头那两行**（真写盘），
+   *   而归属正是预设抽屉**分组的依据**（`localPickerRows` 按 `basedOn*`/`machineId` 摊组）
+   *   ⇒ 不发这条，改完归属切到校准页，抽屉里那份还挂在旧的机型组下。
    */
   const setLocalMachineVersion = useCallback(
     async (path: string, machineId: string, versionId: string) => {
       await api.setLocalPresetMachineVersion(path, machineId, versionId)
       await readLocalPresets()
+      deliveryMutated()
     },
     [readLocalPresets],
   )
