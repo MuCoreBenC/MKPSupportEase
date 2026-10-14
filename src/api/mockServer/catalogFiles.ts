@@ -47,7 +47,7 @@ export function mockCatalogFiles(): RuntimeCatalogFile[] {
     {
       kind: 'mkp_preset',
       fileName: 'A1-standard.toml',
-      path: 'dist/mkp/presets/A1-standard.toml',
+      path: 'delivery/mkp/presets/A1-standard.toml',
       machineId: 'A1',
       versionId: 'STANDARD',
       sha256: '0'.repeat(64),
@@ -56,7 +56,7 @@ export function mockCatalogFiles(): RuntimeCatalogFile[] {
     {
       kind: 'mkp_preset',
       fileName: 'A1-fast.toml',
-      path: 'dist/mkp/presets/A1-fast.toml',
+      path: 'delivery/mkp/presets/A1-fast.toml',
       machineId: 'A1',
       versionId: 'FAST',
       sha256: '1'.repeat(64),
@@ -66,10 +66,26 @@ export function mockCatalogFiles(): RuntimeCatalogFile[] {
       /* 「内容异常」那一档的演示：盘上有它、但与目录对不上，而且哪儿都查不出它是哪一版 */
       kind: 'mkp_preset',
       fileName: 'A1mini-standard.toml',
-      path: 'dist/mkp/presets/A1mini-standard.toml',
+      path: 'delivery/mkp/presets/A1mini-standard.toml',
       machineId: 'A1_MINI',
       versionId: 'STANDARD',
       sha256: '2'.repeat(64),
+      size: 2048,
+    },
+    {
+      /*
+       * ★★ 2026-10-14：**「未获取 → 下载」主路径的演示份**（本机没有它 ⇒ 三态是
+       * 「未获取」⇒ 操作列是可点的「下载」）。原三份把 已下载 / 旧版本 / 内容异常
+       * 三档都占了，云端表里**没有一行是普通的"未获取"** —— 最常见的那条路
+       * （点了下载 → 水位走完 → 变「本地已有」）在演示里反而走不到。
+       * 机型 / 版本照真机 catalog 补（A1 mini 也有 fast 版）。
+       */
+      kind: 'mkp_preset',
+      fileName: 'A1mini-fast.toml',
+      path: 'delivery/mkp/presets/A1mini-fast.toml',
+      machineId: 'A1_MINI',
+      versionId: 'FAST',
+      sha256: '3'.repeat(64),
       size: 2048,
     },
     /*

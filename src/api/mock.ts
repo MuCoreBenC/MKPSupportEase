@@ -2,10 +2,13 @@ import { NotImplementedError } from './errors'
 import type {
   ActiveOrigin,
   ActivePreset,
+  ArchivedFile,
   Axes,
   CalibModel,
   MkpApi,
   CloudVersion,
+  DownloadOutcome,
+  DownloadTick,
   OnDiskFile,
   ParamDecision,
   ParamDecisionKind,
@@ -146,7 +149,7 @@ const mockLocal: LocalPresetFile[] = [
    *
    * 改动前这里是一批**与目录毫无关系**的名字（`A1 涂胶.toml` 之类），而云端表列的是
    * `A1-standard.toml` / `A1-fast.toml` —— 于是浏览器演示里"我下过的那份"与"云端那一份"
-   * 看不出是同一份，血统还写着早就过时的 `dist/mkp/presets/…`。
+   * 看不出是同一份，血统还写着早就过时的 `delivery/mkp/presets/…`。
    *
    * 现在：本地表 = 目录那 9 份的**一份镜像**（名字 / 机型 / 版本 / 血统与目录逐条对上），
    * 外加两份**用户自己造的**（`A1 涂胶.toml` = 另存改名、`Process_0.2mm.json` = 手工导入的
@@ -399,7 +402,7 @@ const withoutLineage = (text: string) =>
 /* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上）。
    键带引号是因为它得**真的是 TOML** —— 它那条 state 说 `ok`，演示也要自洽 */
 /* 血统那几行的落点写**真实目录形状**（`delivery/mkp/presets/…`），与 catalog 的 path 同形 ——
-   老板本写的是 `dist/mkp/presets/…`（那是更早一代的发布根） */
+   老板本写的是 `delivery/mkp/presets/…`（那是更早一代的发布根） */
 mockLocalText.set(
   'presets-local/A1-standard.toml',
   [
@@ -585,17 +588,28 @@ const nowSec = () => Math.floor(Date.now() / 1000)
 /**
  * 演示口径的交付预设集合与它们的可信档（与 `getDownloadedFiles` / `getDeliveryTrust` /
  * `getStaleFiles` 同一套演示账）。下载即得工作副本那条链要按它判"这份能不能到你手里"。
+ *
+ * ★★ 2026-10-14：**从 `mockCatalogFiles()` 派生**，不再手抄一份。
+ *   原来这里手写三条（standard/fast/mini-standard），而目录（`mockCatalogFiles`）后来
+ *   加了 `A1mini-fast.toml` —— **同一份"目录"两本账**：预设页判"这份在不在目录里"用
+ *   这张表（⇒ 新份被判"目录里没有"），下载那条用目录（⇒ 能下）—— 撕裂了。
+ *   可信档（trust）是**演示**性质，单独一张小表挂上去；名单本身以目录为唯一出处。
  */
-const MOCK_RELEASE_FILES = [
-  { fileName: 'A1-standard.toml', machineId: 'A1', versionId: 'STANDARD', trust: 'ok' },
-  { fileName: 'A1-fast.toml', machineId: 'A1', versionId: 'FAST', trust: 'old' },
-  {
-    fileName: 'A1mini-standard.toml',
-    machineId: 'A1_MINI',
-    versionId: 'STANDARD',
-    trust: 'tampered',
-  },
-] as const
+const MOCK_TRUST: Record<string, 'ok' | 'old' | 'tampered'> = {
+  'A1-standard.toml': 'ok',
+  'A1-fast.toml': 'old',
+  'A1mini-standard.toml': 'tampered',
+}
+
+const MOCK_RELEASE_FILES = mockCatalogFiles()
+  .filter((f) => f.kind === 'mkp_preset')
+  .map((f) => ({
+    fileName: f.fileName,
+    machineId: f.machineId,
+    versionId: f.versionId,
+    /* 没挂演示档的那几份照实算 ok（新加的份默认"与目录一致"） */
+    trust: MOCK_TRUST[f.fileName] ?? ('ok' as const),
+  }))
 
 const mockPresetFile = (fileName: string) =>
   MOCK_RELEASE_FILES.find((f) => f.fileName === fileName)
@@ -828,7 +842,15 @@ function literalFor(raw: string, valueType: string): string {
  * 版本身份反查）：形状不编（`number | null` / `string | null`），数字编 ——
  * 界面按它们把「下载时间 / 替换时间 / 本机这份发布于」画出来。
  */
-const MOCK_DOWNLOADED: OnDiskFile[] = [
+/*
+ * ★★ 2026-10-14：下载区从**固定演示集合**改成**可变内存态** —— 数据可以是假的，
+ * 但**逻辑必须是真的**（作者：「它数据是假，但是它那个逻辑那些要真的呀」）。
+ *
+ * 「下载 / 更新 / 删除」在浏览器里现在走的是与真机**同一条状态机**：
+ * 下载会把一份加进来（还带水位事件）、删除会把一份拿走、重新下载会把 `stale` 洗成 `ok`。
+ * 上一版这些都是写死的数组 ⇒ 界面上"下载成功了"，底账永远不变 —— 那不是演示，是撒谎。
+ */
+let mockDownloaded: OnDiskFile[] = [
   {
     fileName: 'A1-standard.toml',
     downloadedUnix: 1780000000,
@@ -843,7 +865,7 @@ const MOCK_DOWNLOADED: OnDiskFile[] = [
     publishedAt: '2026-10-06T05:46:00Z',
   },
 ]
-const MOCK_STALE: OnDiskFile[] = [
+let mockStale: OnDiskFile[] = [
   { fileName: 'A1-fast.toml', downloadedUnix: 1777000000, replacedUnix: null, publishedAt: null },
   {
     fileName: 'A1mini-standard.toml',
@@ -852,6 +874,82 @@ const MOCK_STALE: OnDiskFile[] = [
     publishedAt: null,
   },
 ]
+
+/** 下载区里 MKP toml 的**演示正文**（下载时种下，`readDownloadedText` 读它） */
+const mockDeliveredText = new Map<string, string>()
+
+/** 归档区（内存态）：`deleteArchivedFile` 真的会从这里拿走一条 */
+let mockArchived: ArchivedFile[] = [
+  {
+    path: 'archive/delivery/mkp/presets/A1-fast.toml',
+    fileName: 'A1-fast.toml',
+    size: 2048,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000',
+    publishedAt: '2026-10-06T05:46:00Z',
+    replacedUnix: 1780000000,
+    machineId: 'A1',
+    versionId: 'FAST',
+    kind: 'mkp_preset',
+  },
+]
+
+/** 模拟网络节奏的一拍（真机的水位由下载进度推，这里按时间推 —— 形状一致） */
+const tickWait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * **把一份交付文件"下载"进内存下载区**（浏览器版 `runtime::delivery::deliver`）。
+ *
+ * 与真机同一条状态机：
+ *   connecting → transferring（有总长度就报百分比）→ done；
+ *   落盘 = 加进 `mockDownloaded`、把 `mockStale` 里同一份洗掉（重新下载 = 换成干净的）、
+ *   MKP toml 顺手种一份演示正文（`readDownloadedText` 读它）。
+ * `onTick` 不给就不发（与真机 Channel 可选同一个口径）。
+ */
+async function mockDeliver(
+  fileName: string,
+  onTick?: (tick: DownloadTick) => void,
+): Promise<void> {
+  const file = mockPresetFile(fileName)
+  if (file === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
+  /* 总长度从目录拿（真机是 Content-Length / 目录登记的 expected_size） */
+  const total = mockCatalogFiles().find((f) => f.fileName === fileName)?.size ?? 4096
+  const send = (stage: DownloadTick['stage'], received: number) =>
+    onTick?.({ fileName, stage, received, total })
+
+  send('connecting', 0)
+  await tickWait(180)
+  const steps = 3
+  for (let i = 1; i <= steps; i++) {
+    send('transferring', Math.round((total * i) / steps))
+    await tickWait(160)
+  }
+  send('done', total)
+
+  mockStale = mockStale.filter((f) => f.fileName !== fileName)
+  mockDownloaded = [
+    ...mockDownloaded.filter((f) => f.fileName !== fileName),
+    {
+      fileName,
+      downloadedUnix: Math.floor(Date.now() / 1000),
+      replacedUnix: null,
+      publishedAt: '2026-10-06T05:46:00Z',
+    },
+  ]
+  /* MKP toml 种一份演示正文（与 `fetchCloudPreset` 落本地那份同源）；别的类型没有正文可种 */
+  if (fileName.toLowerCase().endsWith('.toml') && !mockDeliveredText.has(fileName)) {
+    mockDeliveredText.set(
+      fileName,
+      [
+        `# ${fileName}（假后端演示正文 —— 下载区那份云端原件）`,
+        `# machine: ${file.machineId}`,
+        `# variant: ${file.versionId.toLowerCase()}`,
+        `[toolhead]`,
+        `offset_y = 20.0`,
+        '',
+      ].join('\n'),
+    )
+  }
+}
 
 export const mockApi: MkpApi = {
   /*
@@ -1134,7 +1232,7 @@ export const mockApi: MkpApi = {
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-local/${fileName}`
     /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */
-    const label = `dist/mkp/presets/${mockDraft.sourceFileName}`
+    const label = `delivery/mkp/presets/${mockDraft.sourceFileName}`
     const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${mockDraft.text}`
     const size = text.length
     const replaced = mockLocal.some((f) => f.path === path)
@@ -1702,37 +1800,46 @@ export const mockApi: MkpApi = {
     }
   },
 
-  /** 浏览器里没有下载区也没有源：与 downloadFiles 同一条口径，不假装下载成功 */
-  async downloadCatalogFile() {
-    throw new NotImplementedError(
-      'downloadCatalogFile',
-      '浏览器预览里没有下载区 —— 下载 / 更新要用桌面版（SupportEase 应用）',
-    )
+  /*
+   * ★★ 2026-10-14：下载不再是"如实拒" —— **逻辑要真**（作者：「数据假的，
+   * 但是它那个逻辑那些要真的呀」）。浏览器里走**同一套状态机**的内存版：
+   * `mockDeliver` 发水位、落下载区、洗掉 stale；删除把那份拿走。
+   * 界面上「下载 / 更新 / 删除」从此在浏览器里也是**真的会变**的。
+   */
+  async downloadCatalogFile(fileName, onTick) {
+    await mockDeliver(fileName, onTick)
   },
 
-  /** 浏览器里没有下载区：没有那份文件可删 —— 与 downloadCatalogFile 同一条口径 */
-  async deleteDeliveryFile() {
-    throw new NotImplementedError(
-      'deleteDeliveryFile',
-      '浏览器预览里没有下载区，删不了交付预设文件 —— 用桌面版再删',
-    )
+  async deleteDeliveryFile(fileName) {
+    const before = mockDownloaded.length
+    mockDownloaded = mockDownloaded.filter((f) => f.fileName !== fileName)
+    if (mockDownloaded.length === before) {
+      throw new Error(`下载区里没有 ${fileName} —— 它可能已经被删掉了`)
+    }
+    mockDeliveredText.delete(fileName)
   },
 
-  /** 浏览器里没有归档区：与 readArchivedText 同一条口径 */
-  async deleteArchivedFile() {
-    throw new NotImplementedError(
-      'deleteArchivedFile',
-      '浏览器预览里没有归档区，删不了这份旧版本 —— 用桌面版再删',
-    )
+  /** 归档区同样是内存态（`mockArchived`，见 `getArchivedFiles`）：删掉对应那条 */
+  async deleteArchivedFile(path) {
+    const before = mockArchived.length
+    mockArchived = mockArchived.filter((a) => a.path !== path)
+    if (mockArchived.length === before) {
+      throw new Error(`归档区里没有 ${path} —— 它可能已经被删掉了`)
+    }
   },
 
-  async downloadCatalogFiles(fileNames) {
-    /* 一份都没成就直说，不返回"假装成功"的空结局表 */
-    return fileNames.map((fileName) => ({
-      fileName,
-      ok: false,
-      message: '浏览器里没有下载区，也没有数据源地址',
-    }))
+  async downloadCatalogFiles(fileNames, onTick) {
+    /* 逐份走同一条 `mockDeliver`；**一份失败不拖累别人**（与真机同口径），按份给结局 */
+    const outcomes: DownloadOutcome[] = []
+    for (const fileName of fileNames) {
+      try {
+        await mockDeliver(fileName, onTick)
+        outcomes.push({ fileName, ok: true, message: '' })
+      } catch (e) {
+        outcomes.push({ fileName, ok: false, message: String((e as Error)?.message ?? e) })
+      }
+    }
+    return outcomes
   },
 
   /**
@@ -1896,14 +2003,14 @@ export const mockApi: MkpApi = {
     return mockSyncOf(path)
   },
 
-  /* 盘就是底账 —— 浏览器没有盘，这里给的是**固定演示集合**（见 `MOCK_DOWNLOADED`）：
+  /* 盘就是底账 —— 浏览器没有盘，这里给的是**内存下载区**（可变，见 `mockDownloaded`）：
      两份对得上目录、一份对不上。三个读合起来才够预设页画三态，这是其中两个 */
   async getDownloadedFiles() {
-    return [...MOCK_DOWNLOADED]
+    return [...mockDownloaded]
   },
 
   async getStaleFiles() {
-    return [...MOCK_STALE]
+    return [...mockStale]
   },
 
   /*
@@ -1915,7 +2022,7 @@ export const mockApi: MkpApi = {
    */
   async getDeliveryTrust() {
     return [
-      { fileName: 'A1-fast.toml', verdict: 'old' as const, archivedPath: 'archive/dist/mkp/presets/A1-fast.toml' },
+      { fileName: 'A1-fast.toml', verdict: 'old' as const, archivedPath: 'archive/delivery/mkp/presets/A1-fast.toml' },
       { fileName: 'A1mini-standard.toml', verdict: 'tampered' as const, archivedPath: null },
     ]
   },
@@ -1927,19 +2034,7 @@ export const mockApi: MkpApi = {
    * 两个时间各是各：`publishedAt` 是这一版云端发布时刻、`replacedUnix` 是被换下的时刻。
    */
   async getArchivedFiles() {
-    return [
-      {
-        path: 'archive/dist/mkp/presets/A1-fast.toml',
-        fileName: 'A1-fast.toml',
-        size: 2048,
-        sha256: 'demo0000000000000000000000000000000000000000000000000000000000',
-        publishedAt: '2026-10-06T05:46:00Z',
-        replacedUnix: 1780000000,
-        machineId: 'A1',
-        versionId: 'FAST',
-        kind: 'mkp_preset',
-      },
-    ]
+    return [...mockArchived]
   },
 
   /** 读归档里的正文要真的盘（浏览器里没有）：与 downloadCatalogFile 同一条口径，不假装 */
@@ -2037,17 +2132,17 @@ export const mockApi: MkpApi = {
   async fetchCloudPreset(fileName, renameIfTaken = false) {
     const hit = mockPresetFile(fileName)
     if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
-    if (!MOCK_DOWNLOADED.some((f) => f.fileName === fileName)) {
-      throw new NotImplementedError(
-        'fetchCloudPreset',
-        `浏览器预览里没有 ${fileName} 的字节，也没法从数据源取回来 —— 用桌面版点「下载」`,
-      )
-    }
+    /*
+     * ★★ 2026-10-14：原来这里有个闸 —— 演示集合里没有的那份**直接拒**。
+     * 现在**逻辑要真**：目录里登记的任何一份都能取回（内存里模拟一次交付，
+     * 与 `downloadCatalogFile` 同一条 `mockDeliver`，只是不给水位 —— 真机这条路也没水位）。
+     */
+    await mockDeliver(fileName)
     const path = `presets-local/${fileName}`
     const existing = mockLocal.find((f) => f.path === path)
     const created = existing === undefined
     if (created) {
-      const label = `dist/mkp/presets/${fileName}`
+      const label = `delivery/mkp/presets/${fileName}`
       const text = [
         `# machine: ${hit.machineId}`,
         `# variant: ${hit.versionId.toLowerCase()}`,
@@ -2087,7 +2182,7 @@ export const mockApi: MkpApi = {
     if (renameIfTaken) {
       const name = mockUntakenName(fileName)
       const newPath = `presets-local/${name}`
-      const label = `dist/mkp/presets/${fileName}`
+      const label = `delivery/mkp/presets/${fileName}`
       const text = [
         `# machine: ${hit.machineId}`,
         `# variant: ${hit.versionId.toLowerCase()}`,
