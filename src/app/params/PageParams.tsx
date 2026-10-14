@@ -1121,6 +1121,35 @@ export default function PageParams({
           </div>
         )}
 
+        {/*
+         * 换一份预设的确认（按文件那条路，2026-10-14）。
+         * 与上面"切机型"那格分开：那个按 combo 说，这个说得清是**哪一份文件**
+         *（同一 combo 下有几份时，只有这一格答得出用户点的是哪份）。
+         */}
+        {u.pendingFile !== null && (
+          <div className={s.scrim} role="presentation" onClick={u.cancelPending}>
+            <div
+              className={s.sheet}
+              role="dialog"
+              aria-label="丢弃改动"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className={s.sheetTitle}>切换到 {u.pendingFile.fileName}？</h3>
+              <p className={s.sheetText}>
+                当前有 <b>{u.dirtyCount} 处未保存的改动</b>，切过去就丢了（修改历史也会清空）。
+              </p>
+              <div className={s.sheetFoot}>
+                <button type="button" className={s.ghost} onClick={u.cancelPending}>
+                  取消
+                </button>
+                <button type="button" className={s.danger} onClick={u.confirmPendingFile}>
+                  丢弃并切换
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {askRestore && (
           <div className={s.scrim} role="presentation" onClick={() => setAskRestore(false)}>
             <div
@@ -1253,8 +1282,18 @@ export default function PageParams({
               : null
           }
           onUse={(row) => {
-            /* 切 combo 走现成的那条路：未保存改动的确认弹层在 requestCombo 里 */
-            u.requestCombo(row.machineId, row.versionId)
+            /*
+             * ★★ 2026-10-14：走**按文件**那条路 —— 抽屉列的是本机文件，同一 combo
+             * 下可能有好几份，`requestCombo` 那种按 combo 的走法表达不了"要哪一份"
+             * （它开头就按 combo 退货 ⇒ 点另一份没反应）。
+             * 未保存改动的确认弹层在 `requestFile` 里（`pendingFile`）。
+             */
+            u.requestFile({
+              machineId: row.machineId,
+              versionId: row.versionId,
+              fileName: row.fileName,
+              path: row.ref,
+            })
             closePicker()
           }}
           onClose={closePicker}

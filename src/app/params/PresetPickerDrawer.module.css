@@ -159,9 +159,17 @@
  * ★★ 2026-10-14：`.tick`（那颗勾）**退役了** —— 在用的那一份不再打勾，
  * 改成像预设页本地表那样写灰字「在用」（见 `.inUse`）。两处同一个词、同一个样子。
  */
+/*
+ * 「在用」——尺寸与「使用」那颗按钮**完全一致**（作者 2026-10-14：按钮大小要对齐），
+ * 只是不可点（它已经在用了，没有可做的动作）。同一套 padding / 高 / 字号。
+ */
 .inUse {
   flex-shrink: 0;
-  padding: 3px 8px;
+  height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
   background: var(--accent-soft);
   color: var(--accent-deep);

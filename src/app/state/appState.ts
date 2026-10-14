@@ -22,7 +22,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { api, listen } from '../../api'
-import type { ActivePreset, ThemePref } from '../../api/contract'
+import type { ActiveOrigin, ActivePreset, ThemePref } from '../../api/contract'
 import { inTauri } from '../window'
 
 /** 与 Rust 侧 `ipc::APP_STATE_EVENT` 同名（两边没有编译器，靠这里对齐） */
@@ -180,6 +180,41 @@ export function activePresetSnapshot(): Promise<ActivePreset | null> {
 }
 
 /**
+ * **把「本机真有的某一份」变成正在使用的那一份**（2026-10-14）。
+ *
+ * 与 [`activateCombo`] 的区别是**判据的粒度**：
+ *
+ *   activateCombo    按 **combo**（机型 + 版本）告诉底账"我用这一版"，
+ *                    文件名由它自己从目录里查（`fileOf`）—— 一个 combo 只能对应一份；
+ *   本函数            按**具体那一份文件**（`fileName` + 可选 `path`）——
+ *                    同一个 combo 下有几份时（下载来的一份 + 你复制出来的一份），
+ *                    只有这条路说得清"我要的是**这一份**"。
+ *
+ * 为什么必须单开一条：预设抽屉现在列的是**本机文件**，同一个 combo 下可能有好几行。
+ * 用 `activateCombo` 那条路，`pickPreset` 的 `uid === currentUid` 与
+ * `activateCombo` 的"combo 相同就不动"**两层都会直接退货** ⇒ 用户点另一份没反应
+ * （作者 2026-10-14 实测：「copy出来的点不了，再用无论怎么切换都是这一个」）。
+ *
+ * 守则与 `activateCombo` 一致：**应用不了就保持原账**（页面选择仍成立，不弹错误打断）。
+ * 但**不保留**"combo 相同就不动"那一条 —— 这条路的全部意义就是"同 combo 也要换一份"。
+ */
+export function activateFile(fileName: string, path: string | null): void {
+  if (fileName === '') return
+  /*
+   * 浏览器预览（mock）里没有交付字节 —— 与 `activateCombo` 同一条守则：如实拒、
+   * 选择仍成立、底账保持原样（那是给显式按钮的提示通道，浏览行为不触发它）。
+   */
+  if (!inTauri) return
+  const origin: ActiveOrigin = path === null ? 'preset' : 'local'
+  void api
+    .applyActivePreset(fileName, origin, path ?? undefined)
+    .then(() => appStateMutated())
+    .catch(() => {
+      console.debug(`[appState] ${fileName} 这一步应用不了 —— 底账保持原样`)
+    })
+}
+
+/**
  * 切换到某台机型的某个版本 = 把它变成「正在使用」（作者 2026-10-06 真机反馈：
  * 不能只有预设页点「应用」才算切换 —— 首页三级选齐一台、抽屉里点一份、
  * 参数页换组合，都要真切换，四个页面同账）。
@@ -189,6 +224,9 @@ export function activePresetSnapshot(): Promise<ActivePreset | null> {
  *   随手浏览回来不该把它顶成云端底稿；
  * - **应用不了（还没下载 / 内容与目录漂了）就保持原账**：页面选择仍成立，
  *   「未下载 / 内容异常」的三态如实显示 —— 不弹错误打断浏览，也不编一句"切换成功"。
+ *
+ * ★ 2026-10-14：抽屉那一路**不再走这里**（同一个 combo 下有几份时它表达不了"哪一份"），
+ *   改用 [`activateFile`]；这条仍服务"首页三级选齐 / 参数页换组合"那种**按版本浏览**的动作。
  */
 export function activateCombo(
   model: string | null,

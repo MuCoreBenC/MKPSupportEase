@@ -45,7 +45,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import { activateCombo, activePresetSnapshot, useActivePreset } from '../state/appState'
+import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
 import { useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
@@ -501,9 +501,29 @@ export interface Params {
 
   /** 切机型 / 切版本。有未保存改动时先问一句，不静默丢 */
   requestCombo: (machineId: string, versionId: string) => void
+  /**
+   * **换到抽屉里点的那一份**（按文件，不是按 combo）。
+   *
+   * 同一 combo 下有几份文件时，`requestCombo` 表达不了"要哪一份"（它开头就按 combo 退货）——
+   * 这条把"哪一份文件"整条带下去。见 `requestFile` 的注释。
+   */
+  requestFile: (next: {
+    machineId: string
+    versionId: string
+    fileName: string
+    path: string
+  }) => void
   /** 非 null = 正在等用户确认这次切换 */
   pendingCombo: { machineId: string; versionId: string } | null
+  /** 同上，但那次切换是**按文件**的（含文件名与路径） */
+  pendingFile: {
+    machineId: string
+    versionId: string
+    fileName: string
+    path: string
+  } | null
   confirmPending: () => void
+  confirmPendingFile: () => void
   cancelPending: () => void
 
   /**
@@ -571,6 +591,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [pendingCombo, setPendingCombo] = useState<{ machineId: string; versionId: string } | null>(
     null,
   )
+  /* 等确认的那次"按文件切换"（与 pendingCombo 分开：那个只有 combo，这个带文件名） */
+  const [pendingFile, setPendingFile] = useState<{
+    machineId: string
+    versionId: string
+    fileName: string
+    path: string
+  } | null>(null)
 
   /** 已保存的那一层。键是 `机型:版本:字段`，所以切回去还看得见上次存的 */
   const [saved, setSaved] = useState<Map<string, string>>(() => new Map())
@@ -1398,13 +1425,53 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     [dirtyKeys.length, machineId, pinned, switchTo, versionId],
   )
 
+  /**
+   * **从抽屉里点「使用」换到某一份**（2026-10-14）。
+   *
+   * 与 `requestCombo` 的区别：那个按 **combo** 换，而抽屉列的是**本机文件** ——
+   * 同一 combo 下可能有好几份（下载来一份 + 你复制出来一份），按 combo 那条路
+   * 开头就 `nextMachine === machineId && nextVersion === versionId` 退货 ⇒
+   * 点另一份没反应（作者 2026-10-14 实测）。
+   *
+   * 这里做两件事，缺一不可：
+   *   ① **换编辑目标**（与 `switchTo` 同一套：清草稿、重置历史 —— 换了基准那些增量没意义），
+   *      同一 combo 时**也要**做（这正是"换一份"与"换一版"的差别）；
+   *   ② 把它变成「正在使用」（`activateFile`，**按文件**，不再让后端去查目录）。
+   *
+   * 未保存改动仍然先问一句（`pendingFile` 那条弹层）。
+   */
+  const requestFile = useCallback(
+    (next: { machineId: string; versionId: string; fileName: string; path: string }) => {
+      /* 钉住模式（右键某一份预设）：编辑的是那一份，换目标这件事整个不存在 */
+      if (pinned) return
+      if (dirtyKeys.length > 0) {
+        setPendingFile(next)
+        return
+      }
+      switchTo({ machineId: next.machineId, versionId: next.versionId })
+      activateFile(next.fileName, next.path)
+    },
+    [dirtyKeys.length, pinned, switchTo],
+  )
+
   const confirmPending = useCallback(() => {
     if (pendingCombo === null) return
     switchTo(pendingCombo)
     setPendingCombo(null)
   }, [pendingCombo, switchTo])
 
-  const cancelPending = useCallback(() => setPendingCombo(null), [])
+  const confirmPendingFile = useCallback(() => {
+    if (pendingFile === null) return
+    const next = pendingFile
+    setPendingFile(null)
+    switchTo({ machineId: next.machineId, versionId: next.versionId })
+    activateFile(next.fileName, next.path)
+  }, [pendingFile, switchTo])
+
+  const cancelPending = useCallback(() => {
+    setPendingCombo(null)
+    setPendingFile(null)
+  }, [])
 
   const dirtyTabs = useMemo(() => {
     const set = new Set<string>()
@@ -1704,8 +1771,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     savedBatches,
     revertEntry,
     requestCombo,
+    requestFile,
     pendingCombo,
+    pendingFile,
     confirmPending,
+    confirmPendingFile,
     cancelPending,
     pinned,
     sync,

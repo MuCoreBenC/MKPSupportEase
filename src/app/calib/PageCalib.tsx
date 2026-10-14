@@ -13,12 +13,13 @@
  * （PresetPickerDrawer，与参数页同颗）。壳最小窗 600×500（App.tsx），
  * 下缘在任何宽度一行（容器查询两档收紧）。其余（弹窗 / 状态机）沿用 v029 那套。
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import CalibPlate from './CalibPlate'
 import { VIEW_BOX as Z_VIEW_BOX } from '../../calib/zoffset-calibration.generated'
 import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generated'
 import PlateZoom from './PlateZoom'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
+import type { PresetPickerRow } from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import { STORAGE } from '../../api/storageKeys'
@@ -29,8 +30,8 @@ import { Modal } from '../../components/modal'
 import { api, errorText } from '../../api'
 import type { CalibModel } from '../../api'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
-import { activateCombo, useActivePreset, useActivePresetReady } from '../state/appState'
-import { uidOfFile, useCatalog } from '../home/useCatalog'
+import { activateFile, useActivePreset, useActivePresetReady } from '../state/appState'
+import { useCatalog } from '../home/useCatalog'
 import {
   AXIS_ROWS,
   NEED_PRESET_HOW,
@@ -266,14 +267,6 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     }
   }, [sel])
 
-  const presetOptions = useMemo(
-    () =>
-      catalog.presets.flatMap((f) => {
-        const uid = uidOfFile(f)
-        return uid === null ? [] : [{ uid, name: f.fileName }]
-      }),
-    [catalog.presets],
-  )
   const currentUid =
     sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
 
@@ -346,7 +339,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
   const [slicerApp] = useSlicerAppPref()
   const slicerPick = useSlicerPick(defaultSlicer, opening !== null)
   const [pending, setPending] = useState<Step | null>(null)
-  const [presetAsk, setPresetAsk] = useState<string | null>(null)
+  /** 待确认"要不要丢掉草稿再换"的那一行（null = 没在问） */
+  const [presetAsk, setPresetAsk] = useState<PresetPickerRow | null>(null)
 
   /* 药丸宽度弹簧用的三样东西（见下面那段 `useLayoutEffect`） */
   const barRef = useRef<HTMLDivElement | null>(null)
@@ -448,29 +442,33 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
    * 首页三级浏览不算应用，那边走的是明确的「应用」按钮）。
    * 守则见 activateCombo：底账已命中不动（不顶掉「本地文件」）、应用不了保持原账。
    */
-  const applyPreset = useCallback(
-    (uid: string) => {
-      const [machineId, versionId] = uid.split('/')
-      const machine = catalog.machines.find((m) => m.id === machineId)
-      const version = machine?.versions.find((v) => v.id === versionId)
-      if (machine === undefined || version === undefined) return
-      setSel({ brand: machine.brand, model: machine.id, variant: version.id })
-      /* 只有这个 combo 有**本地文件**才应用它；没有就保持原账（云端那份不能直接使用） */
-      activateCombo(machine.id, version.id, fileOf, activeEntry)
-    },
-    [catalog.machines, fileOf, activeEntry],
-  )
+  /* 占位：applyPreset 已并入 applyRow（按文件那条路），这里不再单独留一份 */
 
-  const pickPreset = useCallback(
-    (uid: string) => {
-      if (!uid || uid === currentUid) return
+  /**
+   * **换到抽屉里的那一份**（按文件，不是按 combo）。
+   *
+   * ★★ 2026-10-14：原先是 `pickPreset(uid)`，开头 `uid === currentUid` 就退货 ——
+   *   而同一 combo 下的另一份（复制出来的那份）uid 完全相同 ⇒ 点了没反应。
+   *   现在整条按"哪一份文件"走：`row.fileName` + `row.ref`。
+   *   有未保存改动仍然先问一句（草稿是相对上一份的增量，换了基准就没意义）。
+   */
+  const applyRow = useCallback(
+    (row: PresetPickerRow) => {
       if (dirty) {
-        setPresetAsk(uid)
+        setPresetAsk(row)
         return
       }
-      applyPreset(uid)
+      /* 换了机型 / 版本要先把浏览位置挪过去（与旧路径同一个动作） */
+      if (row.machineId !== sel.model || row.versionId !== sel.variant) {
+        const machine = catalog.machines.find((m) => m.id === row.machineId)
+        const version = machine?.versions.find((v) => v.id === row.versionId)
+        if (machine !== undefined && version !== undefined) {
+          setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+        }
+      }
+      activateFile(row.fileName, row.ref)
     },
-    [applyPreset, currentUid, dirty],
+    [catalog.machines, dirty, sel.model, sel.variant],
   )
 
   const plate = step === 'models' ? null : PLATE[step]
@@ -857,7 +855,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         }
         onUse={(row) => {
           setPickerOpen(false)
-          pickPreset(`${row.machineId}/${row.versionId}`)
+          /* ★ 走 applyRow（按文件那条路）—— 见它的注释 */
+          applyRow(row)
         }}
         onClose={() => setPickerOpen(false)}
         drag={pickerDrag}
@@ -957,7 +956,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                 variant="primary"
                 onClick={() => {
                   clearAll()
-                  applyPreset(presetAsk)
+                  /* ★ 与抽屉那颗「使用」走**同一条**路（按文件，不是按 combo） */
+                  applyRow(presetAsk)
                   setPresetAsk(null)
                 }}
               >
@@ -967,9 +967,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           }
         >
           <p className={s.note}>
-            换成 {presetOptions.find((o) => o.uid === presetAsk)?.name ?? '另一份预设'} 之后，
-            点出来的偏移草稿会作废 —— 草稿是相对上一份预设点出来的增量，
-            换了基准就没有意义了。
+            换成 {presetAsk.fileName} 之后，点出来的偏移草稿会作废 ——
+            草稿是相对上一份预设点出来的增量，换了基准就没有意义了。
           </p>
         </Modal>
       )}

@@ -26,7 +26,7 @@ import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText } from '../../api'
 import type { CalibModel, PostProcessCommand } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
-import { activateCombo, appStateMutated, useActivePreset } from '../state/appState'
+import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { uidOfFile, useCatalog } from './useCatalog'
 import { useBundleFiles } from './useBundleFiles'
@@ -1240,7 +1240,24 @@ export default function PageHome({ density }: PageHomeProps) {
         }
         onUse={(row) => {
           setPickerOpen(false)
-          pickPreset(`${row.machineId}/${row.versionId}`)
+          /*
+           * ★★ 2026-10-14：走**按文件**那条路（`activateFile`），不是按 combo。
+           * 原来把 `机型/版本` 交给 `pickPreset` —— 它开头"uid 与当前相同就退货"，
+           * 而同一 combo 下的另一份 uid 完全相同 ⇒ 点了没反应。见 `activateFile` 的注释。
+           * 有未保存改动时仍先问一句（原有那条分支）。
+           */
+          if (dirty) {
+            setPresetAsk(`${row.machineId}/${row.versionId}`)
+            return
+          }
+          if (row.machineId !== sel.model || row.versionId !== sel.variant) {
+            const machine = catalog.machines.find((m) => m.id === row.machineId)
+            const version = machine?.versions.find((v) => v.id === row.versionId)
+            if (machine !== undefined && version !== undefined) {
+              setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+            }
+          }
+          activateFile(row.fileName, row.ref)
         }}
         onClose={() => setPickerOpen(false)}
         drag={pickerDrag}
