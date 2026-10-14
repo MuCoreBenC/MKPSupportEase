@@ -46,6 +46,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activateCombo, activePresetSnapshot, useActivePreset } from '../state/appState'
+import { useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
   CatalogParamDef,
@@ -182,14 +183,6 @@ interface EditStep {
 
 interface Catalog {
   machines: Machine[]
-  /**
-   * 本机真有的 MKP 预设（`presets-local/` 扫描结果原样）—— **预设抽屉要的就是它**。
-   *
-   * 与 `editTargetByCombo` 的区别：那张表是"每个 combo 现在编辑哪一份"（用户线优先，
-   * 同一个 combo 只会留一份）；这里是"盘上真有哪些份"（同 combo 有两份就两条都列）。
-   * 抽屉要的是后者 —— 用户得看得见自己那份。
-   */
-  localPresets: LocalPresetFile[]
   metaByKey: Map<string, ParamMeta>
   /**
    * 打印板，按 id 索引（2026-10-02，③）。塔地图按机型的 `defaultPlateId` 从这里查板；
@@ -404,6 +397,14 @@ export interface Params {
    * —— 预设抽屉要的就是它，与预设页「本地」那一面同源。
    */
   localPresets: LocalPresetFile[]
+  /**
+   * 本机文件面变了就重读 `localPresets`（别处下载 / 删除 / 另存之后的跨页刷新）。
+   *
+   * ★★ 2026-10-14 补：`localPresets` 原来只在装载 effect 里拉一次 ⇒ 在预设页下载完
+   * 一份，切回参数页打开抽屉还是旧清单。**代次本身由本 hook 内部订阅**，
+   * 这个字段只是把它回传给调用方（页面可以拿它当自己那一路重读的依赖）。
+   */
+  deliveryRevision: number
   machineId: string
   versionId: string
   machine: Machine | undefined
@@ -554,6 +555,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const pinnedAtMount = useRef(pinned).current
 
   const [catalog, setCatalog] = useState<Catalog | null>(null)
+  /*
+   * 本机真有的预设（抽屉要的那一份）。
+   *
+   * ★ 单独一格、**跟着投递面代次重读**（而不是塞进 `catalog`）：`catalog` 那一份是目录，
+   *   一变就得重算全部 combo / defs / 网络请求；而"我盘上多了份文件"只影响抽屉那一列。
+   *   两件事分开重读，代价小得多（参数页是这一仓最重的一页）。
+   */
+  const [localPresets, setLocalPresets] = useState<LocalPresetFile[]>([])
+  const deliveryRevision = useDeliveryRevision()
   const [combo, setCombo] = useState<ComboData | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** 当前选的组合。catalog 到了才知道选谁，所以初值是 null */
@@ -697,6 +707,27 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *
    * 读不到目录就**不编一份假的**，直说数据源在哪。
    */
+  /*
+   * 本机预设那一格**跟着投递面代次重读**（2026-10-14 补）。
+   *
+   * 为什么不并进上面那个装载 effect：那一份重跑要重算 combo / defs / 拉网络；
+   * 而"我盘上多了份文件"只该重读这一列。两个 effect、各自一条依赖，各读各的。
+   */
+  useEffect(() => {
+    let alive = true
+    void api.getLocalPresetFiles().then(
+      (list) => {
+        if (alive) setLocalPresets(list)
+      },
+      () => {
+        /* 拉不到就空着（抽屉说"本机还没有"）—— 不编，也不挡页面 */
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [deliveryRevision])
+
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -742,6 +773,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       }
       const localPresets = await api.getLocalPresetFiles().catch(() => [])
       if (!alive) return
+      setLocalPresets(localPresets)
       for (const f of localPresets) {
         /*
          * 我那份的机型/版本从**血统**认（`basedOn*` 指向云端来源那一版）；认不出就跳过 ——
@@ -758,7 +790,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       }
       setCatalog({
         machines: list,
-        localPresets,
         metaByKey,
         registryParams,
         platesById,
@@ -1626,7 +1657,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     error,
     machines: catalog?.machines ?? [],
     /* 本机真有的（抽屉列的）；`machines` 那份目录数据仍然来自 catalog */
-    localPresets: catalog?.localPresets ?? [],
+    localPresets,
+    deliveryRevision,
     machineId,
     versionId,
     machine,

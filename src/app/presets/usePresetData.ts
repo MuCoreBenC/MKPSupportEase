@@ -964,10 +964,18 @@ export function usePresetData(importRevision = 0): PresetData {
    * 改名之后使用中指针可能跟着改了名（`repoint_local`），删的若是使用中那份，
    * 后端会把指针一并撤下 —— 都靠重读对表（曾在这里漏过的两个"删除后横幅
    * 还说正在使用"的滞留 bug，就是靠这一句消灭的）。
+   *
+   * ★★ 2026-10-14 补 `deliveryMutated()`：这两条**同时**是"本机文件面变了"
+   * （改名换的是落点、删除直接少一份），只发 `appStateMutated()` 不够 —— 读文件面
+   * 的地方（预设抽屉 `localPickerRows`、首页 / 校准页的 `usePreset`、BBS 交付面）
+   * 收不到信号 ⇒ 抽屉还列着已经删掉的那一份。作者 2026-10-14 实测到这一条
+   *（「很多事件都没有广播，导致那一边没有及时的实时的变化」）。
+   * 同族的 `removePreset` / `removeArchived` 本来就发了，是这两条漏了。
    */
   const rename = useCallback(async (path: string, newName: string) => {
     const done = await api.renameLocalPreset(path, newName)
     await readLocalPresets()
+    deliveryMutated()
     appStateMutated()
     return done
   }, [readLocalPresets])
@@ -975,6 +983,7 @@ export function usePresetData(importRevision = 0): PresetData {
   const remove = useCallback(async (path: string) => {
     await api.deleteLocalPreset(path)
     await readLocalPresets()
+    deliveryMutated()
     appStateMutated()
   }, [readLocalPresets])
 

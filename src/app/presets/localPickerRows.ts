@@ -30,6 +30,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type { LocalPresetFile, Machine } from '../../api/contract'
 import type { PresetPickerRow } from '../params/PresetPickerDrawer'
+import { useDeliveryRevision } from '../state/deliveryState'
 
 /** 本机实有预设 → 抽屉行（按机型显示名 → 版本显示名排好；同一个组合本地那份优先） */
 export function localPickerRows(files: LocalPresetFile[], machines: Machine[]): PresetPickerRow[] {
@@ -83,17 +84,24 @@ export function useLocalPickerRows(files: LocalPresetFile[], machines: Machine[]
 }
 
 /**
- * 三页共用的抽屉数据：**拉一次本机扫描 + 摊成行**。
+ * 三页共用的抽屉数据：**拉一次本机扫描 + 摊成行**，并**跟着投递面代次重读**。
  *
  * 为什么要有它：抽屉的"只显示本机真有的"这条判据只该有**一个实现**，
  * 而三页各自拉一次 `getLocalPresetFiles()` 会让"多久刷新"这件事分三处（总有一处忘）。
- * 这里挂载时拉一次、卸载留着结果（跨页回来先吃上一份再重拉，与 `useCatalog` 同一条口径）。
+ *
+ * ★★ 2026-10-14 补：**订阅 `useDeliveryRevision`**。
+ * 原来只在挂载时拉一次 ⇒ 在**预设页**下载完一份，切回校准页 / 首页打开抽屉，
+ * 还是上一份旧清单（作者 2026-10-14 实测：「下载呀，还是什么，很多事件都没有广播，
+ * 导致那一边没有及时的实时的变化」）。投递面代次就是为这件事存在的
+ *（`../state/deliveryState.ts` 文件头：写完投递面就广播，读的页面自己重读）——
+ * 这里属于**读的页面**，必须进依赖，否则那条广播对抽屉等于没发。
  *
  * 注意：这是**抽屉打开时看的那一份**，不是"使用中"的底账 —— 底账在
  * `../state/appState.ts`（唯一），两件事别混。
  */
 export function useLocalPresetFiles(): LocalPresetFile[] {
   const [files, setFiles] = useState<LocalPresetFile[]>([])
+  const deliveryRevision = useDeliveryRevision()
   useEffect(() => {
     let alive = true
     void api.getLocalPresetFiles().then(
@@ -107,6 +115,7 @@ export function useLocalPresetFiles(): LocalPresetFile[] {
     return () => {
       alive = false
     }
-  }, [])
+    /* ★ 代次进依赖：别处下载 / 删除 / 另存之后，这一格跟着重读 */
+  }, [deliveryRevision])
   return files
 }

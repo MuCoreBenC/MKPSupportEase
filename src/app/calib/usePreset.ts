@@ -26,6 +26,7 @@ import { api } from '../../api'
 import { isAppError } from '../../api/contract'
 import type { AppError, Axes, Preset } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
+import { useDeliveryRevision } from '../state/deliveryState'
 
 export type { Preset }
 
@@ -76,6 +77,9 @@ export function usePreset(sel: Selection): PresetState {
   const machine = sel.model
   const version = sel.variant
   const complete = Boolean(sel.brand && machine && version)
+
+  /* 本机文件面代次：别处下载 / 另存 / 删除之后，这一支要重读（见 effect 尾部注释） */
+  const deliveryRevision = useDeliveryRevision()
 
   const [state, setState] = useState<PresetState>(() => {
     const hit =
@@ -164,7 +168,14 @@ export function usePreset(sel: Selection): PresetState {
     return () => {
       alive = false
     }
-  }, [complete, machine, version])
+    /*
+     * ★★ 2026-10-14 补代次依赖（原来是 `[complete, machine, version]`）：
+     * 这一支读了 `getLocalCopyFor`（"我那份在不在"）—— 而那份文件由**别的页**写
+     * （预设页下载 / 另存 / 改归属）。不跟着投递面代次重读的话，首页与校准页会拿
+     * 一个陈旧的 `local`（比如你刚在预设页另存了一份，这里还以为"还没有本地这份"，
+     * 校准就没地方写）。同一条口径见 `../state/deliveryState.ts` 文件头。
+     */
+  }, [complete, machine, version, deliveryRevision])
 
   /* 直接把 state 交出去。
      身份必须稳定：useCalibration 的「预设换了就作废草稿」那条 effect 依赖的是这个对象本身，

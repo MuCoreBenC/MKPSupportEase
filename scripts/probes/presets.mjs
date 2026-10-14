@@ -425,7 +425,7 @@ await page.waitForTimeout(200)
 await scope('local')
 await page.waitForTimeout(250)
 const before = await facts()
-const row = page.locator('main tbody tr').filter({ has: page.locator('td') }).first()
+const row = page.locator('main tbody tr[data-rowkey]').filter({ has: page.locator('td') }).first()
 await row.click()
 await page.waitForTimeout(250)
 const afterClick = await facts()
@@ -571,7 +571,7 @@ if (!offRows.some((r) => /更新|下载/.test(r.action))) {
  * 守的是"不给用户一个他没法理解的入口"。
  */
 const firstRow = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .first()
 await firstRow.click()
@@ -679,11 +679,16 @@ if (slicerRows.some((r) => r.name.includes('A1 涂胶.toml'))) {
 await rad('preset-kind', 'mkp').click({ force: true })
 await page.waitForTimeout(350)
 
-/* ③ 展开那一份 → 「正文 / 看正文」 */
+/* ③ 展开那一份（**认得出类别、有按钮的那一份**）→ 「看正文」 */
+/*
+ * ★★ 2026-10-14 修：这段原来展开的是 `Process_0.2mm.json`（认不出类别的那一份），
+ * 却指望它里面有「看正文」—— 那行产品**不给任何按钮**（认不出是哪一类 ⇒ 没有
+ * "能不能当预设用"这一档）。改用真 TOML（`A1 涂胶.toml`），并且**只展开一次**
+ * （`openDetailOf` 是 toggle，展开两次等于又关上了）。
+ */
 const localRow = page
-  .locator('main tbody tr')
-  .filter({ has: page.locator('td:not([colspan])') })
-  .filter({ hasText: 'Process_0.2mm.json' })
+  .locator('main tbody tr[data-rowkey]')
+  .filter({ hasText: 'A1 涂胶.toml' })
   .first()
 /*
  * 展开详情的格子集（版本 / 来源 / 基于 —— 见 `factOf` 顶上那段：详情早不是 `dl/dt/dd` 了）。
@@ -693,10 +698,21 @@ const localRow = page
 await openDetailOf((await localRow.getAttribute('data-rowkey')) ?? '')
 const localFacts = await factOf()
 console.log(`[用户线] 那一份的详情格：${JSON.stringify(localFacts)}`)
-if (!(localFacts['来源'] ?? '').includes('本地')) {
-  problems.push(`认不出类别的那一份，来源格该说「本地」，实测「${localFacts['来源'] ?? '(没有)'}」`)
+/*
+ * ★★ 2026-10-14：判据从「必须是『本地』」放宽成「说得清它是哪来的」。
+ *   mock 与 catalog 对齐之后，这一份（`A1 涂胶.toml`）带上了血统 ⇒ 来源格写
+ *   **「复制自 A1-fast.toml」**（认不出来源才是「本地」）。两者都对，
+ *   本条守的是**"这一格照常在、且说得出所以然"**，不是固定某一个词
+ *   （与下面 [本地那份] 那段同一个正则，别再收窄回去）。
+ */
+if (!/本地|复制自|导入/.test(localFacts['来源'] ?? '')) {
+  problems.push(`那一份的来源格该说得出它是哪来的，实测「${localFacts['来源'] ?? '(没有)'}」`)
 }
 
+/*
+ * ★ 2026-10-14：一段里**只展开一次**（上面 ③ 已经展开了这一份）。原来这里又展开
+ * 一遍（`openDetailOf` 是 toggle）⇒ 等于把它关掉，后面那颗「看正文」自然找不到。
+ */
 const bodyBtn = page.getByRole('button', { name: '看正文' })
 const bodyBtnCount = await bodyBtn.count()
 console.log(`[用户线] 「看正文」按钮 ${bodyBtnCount} 个`)
@@ -715,11 +731,17 @@ if (bodyBtnCount === 0) {
     }
   })
   console.log(`[用户线] 抽屉：${localDrawer.text}`)
-  if (!localDrawer.text.includes('Process_0.2mm.json')) {
+  if (!localDrawer.text.includes('A1 涂胶.toml')) {
     problems.push('抽屉里要认出看的是哪一份')
   }
-  if (!/读不出来/.test(localDrawer.text)) {
-    problems.push('浏览器里没有用户目录，读正文该如实说读不出来')
+  /*
+   * ★★ 2026-10-14 反过来了：假后端**现在给得出正文**（`mockLocalText` 里种了这几份的
+   * 字节，与真机上"用户自己的文件当然读得出来"一致）。原来判的「读不出来」是更早那版
+   * mock（没有正文）的产物。现在判**读得出来**：抽屉里要出现正文头几行里的东西
+   *（血统那两行 —— 它们是为这一份种下去的）。
+   */
+  if (!/based_on/.test(localDrawer.text)) {
+    problems.push('我自己的那一份在浏览器里读得出来正文（该看见血统那几行）')
   }
   /* 这一层只能看：写入动作连按钮都不该有 */
   for (const forbidden of ['保存', '另存', '删除', '改名']) {
@@ -789,7 +811,7 @@ const allMachines = async () => {
 /** 右键某一行的菜单项文案（打开读一遍就 Esc 关掉） */
 const menuOf = async (file) => {
   await page
-    .locator('main tbody tr')
+    .locator('main tbody tr[data-rowkey]')
     .filter({ has: page.locator('td:not([colspan])') })
     .filter({ hasText: file })
     .first()
@@ -808,7 +830,13 @@ const menuOf = async (file) => {
 
 await mkpAt('cloud')
 await allMachines()
-const cloudMenu = await menuOf('A1-standard.toml')
+/*
+ * ★★ 2026-10-14：样本换成**本地仍然没有**的那一份（`A1mini-standard.toml`）。
+ *   原来用 `A1-standard.toml` —— mock 与 catalog 对齐之后它已经下载到本地了
+ *   （本地表里就有一份），云端那一行于是**没有「下载」可点**（本地已有），
+ *   这一条断言永远红。假后端里本地没有的只剩这一份，用它。
+ */
+const cloudMenu = await menuOf('A1mini-standard.toml')
 console.log(`\n[资源库 · 云端行菜单（云端面）] ${cloudMenu?.join(' | ') ?? '(没有菜单)'}`)
 if (cloudMenu === null) problems.push('云端那一行右键没有菜单')
 else {
@@ -862,15 +890,26 @@ await page.waitForTimeout(300)
 const myActions = await actions()
 const myEntry = myActions.find((r) => r.name.includes('A1 涂胶.toml'))
 console.log(`\n[本地那份] ${myEntry?.name ?? '(没这一行)'} → ${myEntry?.action ?? '(没有)'}`)
+/*
+ * ★★ 2026-10-14 判据修：本地那一行的操作列有两态 —— **「使用」（还没在用）**
+ *   与 **「在用」（就是它，灰色 pill、不是按钮）**，两态**都对**。
+ *   原来只认「使用」⇒ 假后端初始就把这一份设成了使用中（`mockActive` 指着它），
+ *   于是这一条从写下来那天起在这份数据上必红。
+ *   与云端行"同一个词"这条原意由**下一节**（点「使用」→ 变「在用」）真正守住。
+ */
 if (myEntry === undefined) {
   problems.push('资源库里没有我自己的那一份')
-} else if (!myEntry.action.includes('使用')) {
-  problems.push(`我那份该有「使用」（与云端那一行同一个词），实测「${myEntry.action}」`)
+} else if (!/使用|在用/.test(myEntry.action)) {
+  problems.push(`我那份该有「使用」（还没在用）/「在用」（就是它），实测「${myEntry.action}」`)
 }
 
+/*
+ * ★ 2026-10-14：必须带 `[data-rowkey]` —— 展开详情行没有 rowkey，而它里面
+ * 也印着同一个文件名（`hasText` 会把它一起匹配进来），`.first()` 取到那一行时
+ * 后面 `.getByRole('button', {name:'使用'})` 永远等不到（详情行没有那颗按钮）。
+ */
 const myTr = page
-  .locator('main tbody tr')
-  .filter({ has: page.locator('td:not([colspan])') })
+  .locator('main tbody tr[data-rowkey]')
   .filter({ hasText: 'A1 涂胶.toml' })
   .first()
 const myTrKey = (await myTr.getAttribute('data-rowkey')) ?? ''
@@ -900,7 +939,31 @@ if (!(myFacts['基于'] ?? '').includes('快拆版6月以前')) {
   problems.push('「基于」那格要说得出来源是哪台机型的哪一版（A1 · 快拆版6月以前）')
 }
 
-await myTr.getByRole('button', { name: '使用' }).click()
+/*
+ * ★ 2026-10-14：**重新取一次那一行** —— 上面又展开 / 收起了详情（DOM 换过），
+ * 早先取到的 `myTr` 句柄已经失效（点它会超时）。
+ */
+/*
+ * ★★ 2026-10-14：**先切到另一份**（`A1-fast.toml`），再点这一份的「使用」。
+ *
+ * 原来直接点 `A1 涂胶.toml` 的「使用」—— 而它在这一步**已经是"在用"**（同一份 mock
+ * 带血统之后，前面那几手已经把它设成了使用中），在用态的操作列是一枚灰字 **不是按钮**
+ * ⇒ 那句点击永远等不到。这一节的立意是"点使用 → 那一行变成在用"，所以**得先让它不是
+ * 在用**，才谈得上"点一下变成在用"。
+ */
+await page
+  .locator('main tbody tr[data-rowkey]')
+  .filter({ hasText: 'A1-fast.toml' })
+  .first()
+  .getByRole('button', { name: '使用' })
+  .click()
+await page.waitForTimeout(700)
+await page
+  .locator('main tbody tr[data-rowkey]')
+  .filter({ hasText: 'A1 涂胶.toml' })
+  .first()
+  .getByRole('button', { name: '使用' })
+  .click()
 await page.waitForTimeout(600)
 const strip = await page.evaluate(() =>
   (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
@@ -964,10 +1027,23 @@ if (!localEditor.text.includes('# based_on')) {
 }
 if (localEditor.text.trim() === '') problems.push('编辑器里没有我那份的正文（空编辑器）')
 
-/* 只改**参数那一行**（血统留着）：这才对应 Rust 侧那条"改参数不丢出处" */
-await page
-  .locator('[role="dialog"] textarea')
-  .fill(localEditor.text.replace('offset_y = 20.0', 'offset_y = 33.0 # 改过的'))
+/*
+ * 只改**参数那一行**（血统留着）：这才对应 Rust 侧那条"改参数不丢出处"。
+ *
+ * ★★ 2026-10-14：**先在正文里找到那一行再替换**，找不到就当场报错。
+ *   原写死了 `offset_y = 20.0` → `33.0`；而 mock 与 catalog 对齐之后这一份的正文是
+ *   `offset_y = 22.4`（`mockLocalText` 里那个值）⇒ 替换对不上，**静默没改**，
+ *   后面"写回之后正文该是改过的那份"必然红，却看不出是补丁没打上。
+ *   现在用正则抓 `offset_y = <数字>` 那一行，抓不到就报一条明确的问题。
+ */
+const editedText = localEditor.text.replace(
+  /offset_y = [\d.]+/,
+  'offset_y = 33.0 # 改过的',
+)
+if (editedText === localEditor.text) {
+  problems.push('正文里没找到 `offset_y = …` 那一行，这一节的"改参数"没法验（mock 正文变了？）')
+}
+await page.locator('[role="dialog"] textarea').fill(editedText)
 await page.waitForTimeout(900)
 await page.locator('[role="dialog"]').getByRole('button', { name: '保存', exact: true }).click()
 await page.waitForTimeout(800)
@@ -1048,7 +1124,7 @@ if (brokenEntry === undefined) {
 }
 
 const brokenTr = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '坏了的涂胶.toml' })
   .first()
@@ -1138,7 +1214,7 @@ if (rows10.find((r) => r.name.includes('坏了的涂胶.toml')) === undefined) {
 
 /* ① 重命名：把坏的那份改个名字 —— 名字变了、状态不变（还是「文件无法读取」） */
 const brokenTr10 = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '坏了的涂胶.toml' })
   .first()
@@ -1171,7 +1247,7 @@ if (afterRename.some((r) => r.name.includes('坏了的涂胶.toml') && !r.name.i
 
 /* ② 删除：先二次确认，再删掉这一行（它没人用、没草稿 —— 真的删得掉） */
 const renamedTr = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: '坏了的涂胶-改过名.toml' })
   .first()
@@ -1194,7 +1270,7 @@ if (afterDelete.some((r) => r.name.includes('坏了的涂胶'))) {
 /* ③ 正在使用的那一份**也给删**（2026-10-06 删除全面放开）——
       确认框的代价句要说清"使用中会一并撤下"（见 removeConfirmDetail 的 live 分支） */
 const liveTr = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1 涂胶.toml' })
   .first()
@@ -1261,7 +1337,7 @@ if (liveRenamed === undefined) {
   problems.push(`改名不该断「在用」（使用中指针该跟着走），实测操作列「${liveRenamed.action}」`)
 }
 const liveRenamedTr = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
@@ -1312,7 +1388,7 @@ await page.waitForTimeout(300)
 
 /* ① 复制我自己那份（上一步刚改过名的那份 —— 它就是在用的那份） */
 const liveTr11 = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
@@ -1344,7 +1420,7 @@ if (original === undefined) {
 
 /* ② 新那份的正文 = 原来那份的字节（前面改过的字还在）—— 看**文件字节**（「看正文」） */
 const copiedTr = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'copy.toml' })
   .first()
@@ -1594,7 +1670,7 @@ const revealItemOf = () =>
    云端行在云端那一侧，于是它连行都找不到（超时 30s）。 */
 await mkpAt('cloud')
 await page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1-standard.toml' })
   .first()
@@ -1613,7 +1689,7 @@ await page.waitForTimeout(200)
 /* ② 本地那份（回本地面）：能点；点了如实说"浏览器里没有文件管理器" */
 await mkpAt('local')
 const mineTr13 = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
@@ -1736,7 +1812,7 @@ await page.waitForTimeout(200)
 await scope('local')
 await page.waitForTimeout(250)
 const bbsRow = page
-  .locator('main tbody tr')
+  .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'MKPProcess A1 0.2 0.10.json' })
   .first()
