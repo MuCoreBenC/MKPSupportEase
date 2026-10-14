@@ -36,6 +36,7 @@ import ParamCard from './ParamCard'
 import type { TowerSlot } from './ParamCard'
 import ParamSyncModal from './ParamSyncModal'
 import PresetPickerDrawer from './PresetPickerDrawer'
+import { useLocalPickerRows } from '../presets/localPickerRows'
 import SearchField from './SearchField'
 import Icon from '../shell/icons'
 import TowerMap from './TowerMap'
@@ -366,6 +367,13 @@ export default function PageParams({
     setPickerOpen(false)
     pillRef.current?.focus()
   }, [])
+
+  /*
+   * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
+   * ★ 与页面上的 `u.machines`（目录）**不是同一份数据**，别互相替换：
+   *   目录那一套是"云端提供什么"（供的是说明书），抽屉要的是"我盘上有什么"。
+   */
+  const pickerRows = useLocalPickerRows(u.localPresets, u.machines)
 
   /**
    * 「最近搜索」（作者：「我点击搜索的时候没有展开搜索历史呀」）。
@@ -1219,13 +1227,12 @@ export default function PageParams({
         */}
         <PresetPickerDrawer
           open={pickerOpen}
-          machines={u.machines}
-          machineId={u.machineId}
-          versionId={u.versionId}
-          fileOf={u.fileOf}
-          onPick={(m, v) => {
+          /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
+          rows={pickerRows}
+          currentKey={`${u.machineId}/${u.versionId}`}
+          onUse={(row) => {
             /* 切 combo 走现成的那条路：未保存改动的确认弹层在 requestCombo 里 */
-            u.requestCombo(m, v)
+            u.requestCombo(row.machineId, row.versionId)
             closePicker()
           }}
           onClose={closePicker}

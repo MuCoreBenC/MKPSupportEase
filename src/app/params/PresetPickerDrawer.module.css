@@ -103,19 +103,18 @@
   opacity: 0.75;
 }
 
+/*
+ * ★★ 2026-10-14：整行**不再是按钮**（点行什么都不做，见抽屉文件头三条规则）——
+ * 它是个普通容器，只有右边那颗「使用」是真的按钮。
+ */
 .item {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 14px;
-  border: 0;
-  background: transparent;
+  padding: 6px 14px;
   color: var(--text-1);
-  font: inherit;
   font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .item:hover {
@@ -124,12 +123,10 @@
 
 .item[data-current='true'] {
   background: var(--accent-soft);
-  font-weight: 600;
 }
 
-/* 聚焦不再另画一圈：当前项有 accent-soft 底 + 加粗兜着 */
-.item:focus-visible {
-  outline: none;
+.item[data-current='true'] .name {
+  font-weight: 600;
 }
 
 .tick {
@@ -139,20 +136,57 @@
 }
 
 .name {
-  flex: 1;
+  flex-shrink: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* 版本名右边那截：**这一项自己的** MKP 文件名（包里没配就退成 tag / id） */
+/* 版本名右边那截：**这一份自己的**文件名（本机实有，就是盘上那个名字） */
 .note {
-  flex-shrink: 0;
-  max-width: 44%;
+  flex: 1;
   overflow: hidden;
   color: var(--text-3);
   font-family: "SF Mono", Consolas, monospace;
   font-size: 10.5px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* 「使用」——**只有它会切预设**（小档按钮，与 `.close` 同尺寸） */
+.use {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.use:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.use:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 本机一份都没有时那一句（说去哪儿弄一份，不摆假选项） */
+.empty {
+  margin: 0;
+  padding: 14px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.empty code {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 11px;
 }

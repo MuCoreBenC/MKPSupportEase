@@ -19,6 +19,7 @@ import { VIEW_BOX as Z_VIEW_BOX } from '../../calib/zoffset-calibration.generate
 import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generated'
 import PlateZoom from './PlateZoom'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
+import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import { Btn } from '../ui/Controls'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
@@ -297,6 +298,12 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
 
   /* 预设抽屉（与 G06-8 同一颗） */
   const [pickerOpen, setPickerOpen] = useState(false)
+
+  /*
+   * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
+   * ★ 与页面上的 `catalog`（目录）**不是同一份数据**，别互相替换。
+   */
+  const pickerRows = useLocalPickerRows(useLocalPresetFiles(), catalog.machines)
 
   const fileOf = useCallback(
     (machineId: string, versionId: string) => {
@@ -818,17 +825,12 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
        */}
       <PresetPickerDrawer
         open={pickerOpen}
-        machines={catalog.machines.map((m) => ({
-          id: m.id,
-          display: m.display,
-          versions: m.versions.map((v) => ({ id: v.id, name: v.name, tag: v.tag ?? null })),
-        }))}
-        machineId={sel.model ?? ''}
-        versionId={sel.variant ?? ''}
-        fileOf={fileOf}
-        onPick={(m, v) => {
+        /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
+        rows={pickerRows}
+        currentKey={sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null}
+        onUse={(row) => {
           setPickerOpen(false)
-          pickPreset(`${m}/${v}`)
+          pickPreset(`${row.machineId}/${row.versionId}`)
         }}
         onClose={() => setPickerOpen(false)}
       />

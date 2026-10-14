@@ -1,5 +1,5 @@
 /*
- * 预设抽屉：按机型分组列出「版本」，一行 = 一个 `机型 + 版本` 组合。
+ * 预设抽屉：按机型分组列出**本机真有**的预设，一行 = 一份文件。
  *
  * 为什么是抽屉而不是两个下拉：作者的原话是「现在那个下拉菜单，我不喜欢。我喜欢改成抽屉的」。
  * 用户端早先那一版顶部就是「文件名 pill + 切换」，点了开一个文件抽屉 —— 这里回到那个形态。
@@ -7,38 +7,62 @@
  * 两条实现上的硬约束：
  *   - `position: absolute` 挂在参数页的定位父级上，**不用 fixed**：
  *     外壳上的一层 transform 就是 fixed 的包含块（那两个点不开的浮层就栽在这上面）。
- *   - 切预设一律走调用方给的 `onPick` → `u.requestCombo`，它自带「有未保存改动先问一句」。
+ *   - 切预设一律走调用方给的 `onUse` → `u.requestCombo`，它自带「有未保存改动先问一句」。
  *     抽屉自己**不判断脏数据**，免得两处各写一套确认。
  *
- * 每一项的小字显示**它自己的文件名**（`A1.toml` / `P1.toml` …）——
- * 说明书里每个版本的 files 清单都在（`fileOf` 现查），抽屉这才配叫「选择文件」。
- * 上一版的"诚实的取舍"（只有当前项显示得出文件名）来自一个错误前提：
- * 以为文件清单只有当前 combo 拿得到。
+ * # ★★ 2026-10-14 改口径：这里**只列本机真有的**（作者裁定，三条规则）
+ *
+ * 改之前它列的是**目录（云端）**那一套：`machines` 来自 `catalog.machines`、
+ * 文件名来自 `catalog.files[]` —— 于是本机只有一份 `A1_MINI-fastv3.3.toml`，
+ * 抽屉里却把 A1 / A1 mini / P1S / P2S / X1C 的 12 个组合全列了出来，
+ * 点任何一个都换不过去（校准要写回本机那份 TOML，压根没有）。
+ *
+ * 现在是三条规则：
+ *   ① **点行什么都不做** —— 不切换、不动参数、不改正在编辑的文件（只把「选中」挪过去）；
+ *   ② **点「使用」才真的切**（走调用方的 `onUse`，它复用预设页那颗「使用」的语义）；
+ *   ③ **本机没有的机型 / 版本整组不出现**（`rows` 由调用方从本机扫描结果摊出来）。
+ *
+ * 为什么"点行不做"要占一条：这个抽屉在三页共用，而三页各有各的"当前"（参数页是编辑目标、
+ * 校准页是基准组合、首页是浏览选择）—— 点行就切会让"看一眼"变成"动别人的状态"。
+ * 选中与使用分开之后，三页的 onUse 各自接自己那条现成的路，抽屉不掺和。
  */
 
 import { useEffect, useRef } from 'react'
 import s from './PresetPickerDrawer.module.css'
 
-interface VersionOption {
-  id: string
-  name: string
-  tag?: string | null
-}
-
-interface MachineOption {
-  id: string
-  display: string
-  versions: VersionOption[]
+/** 抽屉里的一行 = **本机真有的一份预设文件** */
+export interface PresetPickerRow {
+  /** 归属机型（分组用） */
+  machineId: string
+  /** 机型显示名（分组标题） */
+  machineDisplay: string
+  /** 归属版本（`机型 + 版本` 是这三页共用的组合键） */
+  versionId: string
+  /** 版本显示名（行上的主文字） */
+  versionName: string
+  /** 这一份在盘上的文件名（行上的小字）—— 它才是"本机真有"的那一份 */
+  fileName: string
+  /**
+   * 这一行的**动作身份**：用户线给路径、云端线给文件名 —— 与调用方 `onUse` 的入参同形。
+   * （本机实有既有下载来的云端那份、也有用户自己那份，两者动作不同：一个「使用」、
+   * 一个「使用」+ 可能带路径。）
+   */
+  ref: string
+  /** 这一行是不是用户自己那份（用户线） */
+  isLocal: boolean
 }
 
 interface Props {
   open: boolean
-  machines: MachineOption[]
-  machineId: string
-  versionId: string
-  /** 任一组合的 MKP 文件名（来自说明书里的版本 files）—— 每一项查自己的 */
-  fileOf: (machineId: string, versionId: string) => string | null
-  onPick: (machineId: string, versionId: string) => void
+  /** 本机真有的预设（按机型 → 版本摊平；没本机文件的机型不进来） */
+  rows: PresetPickerRow[]
+  /** 当前选中那一行的键：`机型/版本`（没有选中给 null） */
+  currentKey: string | null
+  /**
+   * 点「使用」—— 正式切换到这一份。**只有它会切换**（点行不切，见文件头三条规则）。
+   * 调用方接自己那条现成的路（参数页 `requestCombo`、校准页 `pickPreset`、首页 `pickPreset`）。
+   */
+  onUse: (row: PresetPickerRow) => void
   onClose: () => void
   /**
    * 从哪一缘出。默认右（参数页）；首页传 'left' —— 右边常驻露出卡，抽屉没地方，
@@ -49,11 +73,9 @@ interface Props {
 
 export default function PresetPickerDrawer({
   open,
-  machines,
-  machineId,
-  versionId,
-  fileOf,
-  onPick,
+  rows,
+  currentKey,
+  onUse,
   onClose,
   side = 'right',
 }: Props) {
@@ -77,6 +99,14 @@ export default function PresetPickerDrawer({
 
   if (!open) return null
 
+  /* 按机型分组（保持 rows 给的顺序 —— 调用方已按机型显示名 + 版本排好） */
+  const groups: { id: string; display: string; items: PresetPickerRow[] }[] = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (last !== undefined && last.id === row.machineId) last.items.push(row)
+    else groups.push({ id: row.machineId, display: row.machineDisplay, items: [row] })
+  }
+
   return (
     <>
       {/* 遮罩：点一下关掉。它在抽屉之下（z-index 见 css） */}
@@ -89,34 +119,46 @@ export default function PresetPickerDrawer({
         </div>
 
         <div className={s.list}>
-          {machines.map((m) => (
-            <div key={m.id} className={s.group}>
+          {groups.length === 0 && (
+            /* 本机一份都没有：说清楚"去哪儿弄一份"，不摆假选项 */
+            <p className={s.empty}>
+              这台机器上还没有预设文件 —— 去「预设」页下载一份，或把自己那份放进
+              <code>presets-local/</code>。
+            </p>
+          )}
+
+          {groups.map((g) => (
+            <div key={g.id} className={s.group}>
               <div className={s.groupHead}>
-                {m.display}
-                <span className={s.groupId}>{m.id}</span>
+                {g.display}
+                <span className={s.groupId}>{g.id}</span>
               </div>
 
-              {m.versions.map((v) => {
-                const current = m.id === machineId && v.id === versionId
-                /* 这个组合的 MKP 文件名。没配文件的版本没有它，退成 tag / id */
-                const file = fileOf(m.id, v.id)
+              {g.items.map((row) => {
+                const current = currentKey !== null && `${row.machineId}/${row.versionId}` === currentKey
                 return (
-                  <button
-                    key={`${m.id}/${v.id}`}
-                    type="button"
+                  <div
+                    key={`${row.machineId}/${row.versionId}/${row.ref}`}
                     className={s.item}
                     data-current={current}
-                    title={file ?? `${m.display} · ${v.name}`}
-                    onClick={() => {
-                      /* 当前项再点一次只关抽屉 —— 不触发 requestCombo，免得白问一句「要切吗」 */
-                      if (current) { onClose(); return }
-                      onPick(m.id, v.id)
-                    }}
+                    /*
+                     * ★ 点整行**什么都不做**（规则①）：这里不是 button，也没有 onClick ——
+                     *   选中态只由调用方给的 `currentKey` 决定。要切就走右边那颗「使用」。
+                     */
+                    title={row.fileName}
                   >
                     <span className={s.tick}>{current ? '✓' : ''}</span>
-                    <span className={s.name}>{v.name}</span>
-                    <span className={s.note}>{file ?? v.tag ?? v.id}</span>
-                  </button>
+                    <span className={s.name}>{row.versionName}</span>
+                    <span className={s.note}>{row.fileName}</span>
+                    <button
+                      type="button"
+                      className={s.use}
+                      /* 规则②：只有它会切 */
+                      onClick={() => onUse(row)}
+                    >
+                      使用
+                    </button>
+                  </div>
                 )
               })}
             </div>

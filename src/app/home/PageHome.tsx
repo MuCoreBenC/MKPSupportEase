@@ -33,6 +33,7 @@ import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
+import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import HeroFade from './HeroFade'
 import CardFrame from './CardFrame'
 import CalibHead from '../calib/CalibHead'
@@ -328,6 +329,12 @@ export default function PageHome({ density }: PageHomeProps) {
   /* 当前那份文件的 id（`机型/版本`）—— 预设下拉的选中值，也是「换没换」的比较基准 */
   const currentUid =
     sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
+
+  /*
+   * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
+   * ★ 与页面上的 `catalog`（目录）**不是同一份数据**，别互相替换。
+   */
+  const pickerRows = useLocalPickerRows(useLocalPresetFiles(), catalog.machines)
 
   /* 抽屉每一项自己的文件名（T11）—— 与「校准」tab 同一颗查询 */
   const fileOf = useCallback(
@@ -1204,17 +1211,12 @@ export default function PageHome({ density }: PageHomeProps) {
       <PresetPickerDrawer
         side="left"
         open={pickerOpen}
-        machines={catalog.machines.map((m) => ({
-          id: m.id,
-          display: m.display,
-          versions: m.versions.map((v) => ({ id: v.id, name: v.name, tag: v.tag ?? null })),
-        }))}
-        machineId={sel.model ?? ''}
-        versionId={sel.variant ?? ''}
-        fileOf={fileOf}
-        onPick={(m, v) => {
+        /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
+        rows={pickerRows}
+        currentKey={sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null}
+        onUse={(row) => {
           setPickerOpen(false)
-          pickPreset(`${m}/${v}`)
+          pickPreset(`${row.machineId}/${row.versionId}`)
         }}
         onClose={() => setPickerOpen(false)}
       />

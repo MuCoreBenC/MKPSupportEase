@@ -59,6 +59,7 @@ import type {
   Plate,
   PresetParamSync,
   RecipeParam,
+  LocalPresetFile,
   RuntimeCatalog,
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
@@ -181,6 +182,14 @@ interface EditStep {
 
 interface Catalog {
   machines: Machine[]
+  /**
+   * 本机真有的 MKP 预设（`presets-local/` 扫描结果原样）—— **预设抽屉要的就是它**。
+   *
+   * 与 `editTargetByCombo` 的区别：那张表是"每个 combo 现在编辑哪一份"（用户线优先，
+   * 同一个 combo 只会留一份）；这里是"盘上真有哪些份"（同 combo 有两份就两条都列）。
+   * 抽屉要的是后者 —— 用户得看得见自己那份。
+   */
+  localPresets: LocalPresetFile[]
   metaByKey: Map<string, ParamMeta>
   /**
    * 打印板，按 id 索引（2026-10-02，③）。塔地图按机型的 `defaultPlateId` 从这里查板；
@@ -390,6 +399,11 @@ export interface Params {
   error: string | null
 
   machines: Machine[]
+  /**
+   * 本机真有的 MKP 预设（`presets-local/` 扫描结果，**已按 combo 归属过**）
+   * —— 预设抽屉要的就是它，与预设页「本地」那一面同源。
+   */
+  localPresets: LocalPresetFile[]
   machineId: string
   versionId: string
   machine: Machine | undefined
@@ -744,6 +758,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       }
       setCatalog({
         machines: list,
+        localPresets,
         metaByKey,
         registryParams,
         platesById,
@@ -1610,6 +1625,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     loading: error === null && (catalog === null || combo === null),
     error,
     machines: catalog?.machines ?? [],
+    /* 本机真有的（抽屉列的）；`machines` 那份目录数据仍然来自 catalog */
+    localPresets: catalog?.localPresets ?? [],
     machineId,
     versionId,
     machine,
