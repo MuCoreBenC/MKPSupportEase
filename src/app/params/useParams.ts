@@ -477,6 +477,16 @@ export interface Params {
   draftError: string | null
   /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   saveResult: string | null
+  /**
+   * **保存成功之后要不要问一句"回切片器重切"**（2026-10-15）。
+   *
+   * 切片器那一份参数里根本没有 MKP 这些字段（见 `docs/INVESTIGATION-BBS-INVALIDATE.md`
+   * §4），它不会知道我们改了什么 —— 于是它仍认为"这一盘是切好的"，不给重切。
+   * 保存成功就问一次，用户自己决定要不要看引导；关掉就不再问（下一次保存再问）。
+   */
+  resliceAsk: boolean
+  /** 关掉那一句提问 */
+  dismissReslice: () => void
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
   /**
@@ -633,6 +643,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [draftError, setDraftError] = useState<string | null>(null)
   /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   const [saveResult, setSaveResult] = useState<string | null>(null)
+  /** 保存成功 ⇒ 问一句"要不要回切片器重切"（理由见返回类型那一格） */
+  const [resliceAsk, setResliceAsk] = useState(false)
   /**
    * 写值闸拦下一次改动时那句人话（2026-10-02）。`null` = 没在提示。
    *
@@ -693,6 +705,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
                 : `已另存为 ${done.fileName}`,
           )
           setSaveResult(done.path)
+          /* 存下了 ⇒ 问一次"要不要回切片器重切" —— 切片器自己不会知道参数变了 */
+          setResliceAsk(true)
         },
         (e: unknown) => setSavedNote(`保存失败：${errorText(e)}`),
       )
@@ -1757,6 +1771,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     editingPreset,
     draftError,
     saveResult,
+    resliceAsk,
+    /* `useCallback` 包一下：这个数组会被页面塞进依赖，每次渲染都新建会白重渲 */
+    dismissReslice: useCallback(() => setResliceAsk(false), []),
     revertToSaved,
     restoreDefaults,
     save,

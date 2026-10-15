@@ -268,6 +268,10 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 屏幕引导（2026-10-15）：改了参数之后指给用户看那一步 —— 只读坐标，不替用户点 */
+  locateBedTypeControl: () => call('locateBedTypeControl', 'locate_bed_type_control'),
+  guideShow: () => call('guideShow', 'guide_show'),
+  guideClose: () => call<void>('guideClose', 'guide_close'),
   /* ——— 云端版本账 + 对比台（2026-10-08）———
      云端版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
      baseline 是隐藏内部存储，前端拿不到它的路径。 */

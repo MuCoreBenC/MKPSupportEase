@@ -18,6 +18,7 @@ import CalibPlate from './CalibPlate'
 import { VIEW_BOX as Z_VIEW_BOX } from '../../calib/zoffset-calibration.generated'
 import { VIEW_BOX as XY_VIEW_BOX } from '../../calib/precise-calibration.generated'
 import PlateZoom from './PlateZoom'
+import ResliceNotice from '../guide/ResliceNotice'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import type { PresetPickerRow } from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
@@ -295,6 +296,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     resetAxis,
     clearAll,
     commitAll,
+    resliceAsk,
+    dismissReslice,
   } = useCalibration(preset)
 
   /* 预设抽屉（与 G06-8 同一颗） */
@@ -978,6 +981,10 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           </p>
         </Modal>
       )}
+
+      {/* 保存成功之后那一句提问（2026-10-15）：切片器不会自己知道 XYZ 变了 ——
+          要不要把"回它那边换一下板子类型"指给用户看。 */}
+      {resliceAsk && <ResliceNotice open onClose={dismissReslice} />}
     </div>
   )
 }

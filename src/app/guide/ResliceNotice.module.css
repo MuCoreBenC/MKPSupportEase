@@ -1,0 +1,57 @@
+/* 保存之后那一句提问。按钮样式与项目里其它模态框的底栏同一套观感。 */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.text b {
+  font-weight: 600;
+}
+
+.err {
+  margin: 0;
+  font-size: 12px;
+}
+
+/*
+ * 引导摆出去之后的**回执**（不是错误、也不是正文）：告诉用户"看切片器那边"，
+ * 免得他以为点了没反应 —— 卡片不在我们这扇窗里，在这儿是看不见的。
+ */
+.done {
+  margin: 0;
+  color: #0a84ff;
+  font-size: 12px;
+}
+
+.primary,
+.ghost {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--accent, #0a84ff);
+  color: #fff;
+}
+
+.ghost {
+  background: var(--fill-2, rgb(0 0 0 / 6%));
+  color: var(--text-1, #3c3c43);
+}
+
+.primary:disabled,
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

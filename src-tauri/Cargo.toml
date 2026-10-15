@@ -164,6 +164,11 @@ ctrlc.workspace = true
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
+# **屏幕引导的取数口**（src/ax.rs）：读切片器窗口与控件坐标走 macOS 的 Accessibility
+# C API，而它要拿 CF 类型（CFString / CFArray）去问。这一份本来就在依赖图里
+# （objc2 那一族传下来的，锁里是 0.10.1），这里直写一行只是让它能被 `use` 到 ——
+# 不新增任何依赖树。
+core-foundation = "0.10"
 objc2 = "0.6"
 # objc2-quartz-core：CALayer 的 cornerCurve —— 圆角曲率要从普通圆弧换成系统原生的连续曲率（见 chrome.rs）
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "objc2-quartz-core"] }

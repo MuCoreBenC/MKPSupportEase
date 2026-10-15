@@ -15,6 +15,18 @@ pub mod archive;
 /// **参数分流**：切片器（BambuStudio）带 `--Toml/--Gcode` 调我们时走钩子，否则开界面
 /// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
 pub mod args;
+/// **屏幕引导的取数口**（macOS）：读切片器窗口与「板子类型」控件的屏幕坐标。
+/// **只读** —— 箭头怎么画是界面的事，这里只回答"在哪"。
+/// 为什么用 Accessibility 而不是固定偏移、以及那条实测判据，都写在模块头里。
+pub mod ax;
+/// **切片器窗口的跟随信号**（macOS）：注册 AX 通知（移动 / 缩放 / 最小化 /
+/// 还原 / 换最前窗），切片器自己 push 过来 —— **不起定时器**。
+/// 卡片该不该露脸、该挪到哪，由 [`ipc::guide::sync`] 收到通知后重算。
+///
+/// ★ 只有 macOS 有这一份（`#![cfg(target_os = "macos")]`）；别的平台编译期就
+/// 没有这个模块，调用点因此要用 `cfg` 挡一下（见 `ipc::guide`）。
+#[cfg(target_os = "macos")]
+pub mod ax_watch;
 pub mod chrome;
 /// **开发台的演出脚本**（`hook-sim` 假钩子与开发台共用一份）。
 ///
@@ -330,6 +342,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
+        // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
+        ipc::guide::locate_bed_type_control,
+        ipc::guide::guide_show,
+        ipc::guide::guide_close,
         // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
         // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
         // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
@@ -455,6 +472,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
+        // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
+        ipc::guide::locate_bed_type_control,
+        ipc::guide::guide_show,
+        ipc::guide::guide_close,
         // 工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
         // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。

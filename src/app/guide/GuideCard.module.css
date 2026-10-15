@@ -1,0 +1,185 @@
+/*
+ * 引导卡片。**窗口是透明的**，所以背景、描边、阴影都得由这一层自己画 ——
+ * 它浮在别人的窗口上，没画背景就是一块什么都没有的地方。
+ *
+ * # 窗口和卡片不是一样大
+ *
+ * ★ 窗口 = **卡片 + 四周的留白**，卡片自己让在里头：
+ *   - 一侧留一条 **ARROW_PAD（18px）** 给箭头 —— **透明窗口画不出边界之外的东西**，
+ *     箭头只能待窗口里面，靠"卡片往旁边让一让"让它在视觉上仍然是从卡片伸出去的；
+ *   - 四周留一圈 **SHADOW_PAD（14px）** 给阴影 —— 立体感是 CSS 的
+ *     `filter: drop-shadow` 画的，**贴着窗口边就会被窗口切掉**（作者圈过这几处）。
+ *   四个数（CARD_W / CARD_H / SHADOW_PAD / ARROW_PAD）与 `ipc/guide.rs` 对齐，
+ *   改一处要同时改另一处。
+ *
+ * ★★ **箭头得压得住白底**（作者："箭头没有 / 效果还是不太行"）：切片器左栏本来就是
+ *   **白**的，纯白三角摆上去等于没画 ⇒ 改成"**白方块转 45°**"：跟卡片共用同一块背景 +
+ *   同一圈发丝描边 ⇒ 箭头**无论背后是什么颜色**都看得见，接缝还是连的（转出来的那半块
+ *   压在卡片上，正好把卡片那一段描边盖掉）。
+ *
+ * ★★ **阴影挂在 `.root` 上**（不是卡片上，卡片自己 `box-shadow: none`）：
+ *   `filter: drop-shadow` 跟着"**卡片 ∪ 箭头**"的轮廓走；挂在卡片上的话，那圈影子会摊到
+ *   箭头那一竖条上，看着像"不够透明、灰灰的"。
+ *
+ * # 尺寸（与 Rust 那几个常量一一对应）
+ *
+ * 窗口 376×230（= 20 + 340 + 16 ／ 16 + 198 + 16），卡片本体 340×198，落在窗口里：
+ * 右档 `20 / 16`（左 20 给箭头）、左档 `16 / 20`（右 20 给箭头），上下都是 16。
+ */
+
+.root {
+  position: fixed;
+  inset: 0;
+  /*
+   * 半径 6 + 下移 2 ⇒ 影子往外最多 ~11px，**够不到两个 PAD 之前就淡完**
+   * （探针会量最外一圈的 alpha，必须为 0 —— 否则就是被窗口切了）。
+   */
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 18%));
+}
+
+.card {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: 12px;
+  background: #fff;
+  color: #1c1c1e;
+  font-size: 13px;
+}
+
+/* 卡片在目标**右侧** ⇒ 左边那条竖条让给箭头（箭头指左） */
+.right .card {
+  left: 20px;
+  right: 16px;
+}
+
+/* 卡片被翻到目标**左侧** ⇒ 右边那条竖条让给箭头（箭头指右） */
+.left .card {
+  left: 16px;
+  right: 20px;
+}
+
+/*
+ * 箭头 = 白方块转 45°，中心落在卡片那条边上 ⇒ 一半探出去、一半压在卡片上。
+ *
+ * - 左右：卡片那条边离窗口 20px，方块边长 12 ⇒ 中心对准 20 就是 `left/right: 14px`；
+ * - 上下：卡片顶边（窗口顶下 16）与目标顶边齐平、目标是 50×50 ⇒ 目标中心在
+ *   **窗口**顶下 16 + 25 = 41px，方块中心跟它对齐 ⇒ `top: 35px`；
+ * - 描边：转 45° 之后，原来的 `border-left` 是**左上那条斜边**、`border-bottom`
+ *   是**左下那条斜边** —— 正是朝外那两条。另两条（`border-top`/`border-right`）
+ *   压在卡片上，留着就是两道不该有的线 ⇒ 按侧别去掉。
+ *   ★ 去掉用 `border-*-width: 0`，**不要用 `border-top: 0` 那个简写** ——
+ *   简写会把颜色重置成 `currentcolor`（探针里量出来就成了深灰）。
+ * - `z-index`: 压过卡片，好让那半块盖掉卡片这一段描边（接缝才是连的）。
+ */
+.arrow {
+  position: absolute;
+  z-index: 1;
+  top: 35px;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(0 0 0 / 10%);
+  background: #fff;
+  transform: rotate(45deg);
+}
+
+/* 卡片在右 ⇒ 箭头在最左、尖朝左：留 left + bottom 两条边 */
+.right .arrow {
+  left: 14px;
+  border-top-width: 0;
+  border-right-width: 0;
+}
+
+/* 卡片在左 ⇒ 箭头在最右、尖朝右：留 top + right 两条边 */
+.left .arrow {
+  right: 14px;
+  border-bottom-width: 0;
+  border-left-width: 0;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+/*
+ * ★★ 主次与"文案作者那版"**反过来**（2026-10-15 作者原话：
+ * 「应该把下面那些作为重点，因为那些是操作步骤，上面的反而是解释应该作为副标题」）：
+ *
+ * - `.lead` = **副标题**：小字、灰字，只说"发生了什么"；
+ * - `.text` = **正文**：正常大小、正常颜色 —— 它写的是**操作步骤**，那才是重点。
+ *
+ * ★ 副标题上挂着「专业口径」的 tooltip（`PartPlate::m_slice_result_valid`）。
+ */
+.lead {
+  margin: 0;
+  color: #8a8a8e;
+  font-size: 11px;
+  line-height: 1.45;
+  cursor: help;
+}
+
+.text {
+  margin: 0;
+  color: #1c1c1e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.err {
+  margin: 0;
+  color: #d70015;
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.primary {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-color-scheme: dark) {
+  .card {
+    border-color: rgb(255 255 255 / 14%);
+    background: #2c2c2e;
+    color: #f2f2f7;
+  }
+
+  .arrow {
+    border-color: rgb(255 255 255 / 14%);
+    background: #2c2c2e;
+  }
+
+  .lead {
+    color: #98989f;
+  }
+
+  .text {
+    color: #f2f2f7;
+  }
+}

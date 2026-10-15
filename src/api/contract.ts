@@ -1379,6 +1379,34 @@ export interface PresetSource {
  */
 export type ThemePref = 'light' | 'dark' | 'system'
 
+/* ---------- 屏幕引导（2026-10-15） ---------- */
+
+/** 屏幕坐标下的一个矩形（左上角 + 宽高，单位是**点**，与 Rust `ax::RectDto` 同形）。 */
+export interface ScreenRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * 「板子类型」控件此刻在屏幕上的哪一块（与 Rust `ax::GuideTargetDto` 同形）。
+ *
+ * 形状沿用「能不给就不给、不给就说话」那一套（与 `PostProcessCommandDto` 同一条规矩）：
+ * `ready` 决定能不能指，`ready: false` 时一定带一句人话 **reason**，
+ * **绝不编一组坐标** —— 箭头指错位置比不指更糟。
+ */
+export interface GuideTarget {
+  /** 两个条件都成立才为真：拿到切片器窗口、且窗口里找到了那个控件 */
+  ready: boolean
+  /** 切片器窗口的屏幕矩形（引导层拿它判"窗口动没动"） */
+  window?: ScreenRect
+  /** 「板子类型」控件的屏幕矩形 —— 箭头指它 */
+  target?: ScreenRect
+  /** 指不了时的一句人话（为什么 + 下一步做什么） */
+  reason?: string
+}
+
 /* ---------- baseline + 对比台（2026-10-08） ---------- */
 
 /**
@@ -2275,6 +2303,39 @@ export interface MkpApi {
    * （**已经清掉的不会回来**）。清理全程静默，界面上不会有任何提示。
    */
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
+
+  /**
+   * 「板子类型」控件此刻在屏幕上的哪一块（**只读**，2026-10-15）。
+   *
+   * 改了参数（XYZ 偏移、涂胶…）之后，切片器**不会**认为要重切 —— 它那份参数里
+   * 根本没有这些字段（见 `docs/INVESTIGATION-BBS-INVALIDATE.md`）。我们也没有
+   * 外部入口去让它重算（那份文档 §5/§7）。能做的是**把那一步指给用户看**：
+   * 在他自己的切片器窗口上画个箭头，让他换一下板子类型、再换回来。
+   *
+   * 这一条只回答"在哪"，**不模拟点击、不改切片器任何参数**。
+   * `ready: false` 时一定带 `reason`（没权限 / 切片器没在跑 / 界面换了），
+   * **不给一组假的坐标** —— 指错位置比不指更糟。
+   */
+  locateBedTypeControl(): Promise<GuideTarget>
+
+  /**
+   * 把引导卡片摆出去（贴着切片器里「板子类型」那个控件）。
+   *
+   * **只有一步**（2026-10-15 作者定）：卡片上把"换成另一个、再换回原来那个"整件事
+   * 一次说清就够 —— 起作用的是"换成不同值"那一次（切片器源码里那个 `if (old != new)`），
+   * 换回来只是把用户的板型还原。原来那个「下一步」要**关掉窗口重建**，中间那一瞬
+   * 卡片没了，比不引导还差。
+   *
+   * 卡片只占一小块、贴着目标放 —— 它活着的时候用户照样能去点切片器。
+   * 指不了时与 [`locateBedTypeControl`] 同一条规矩：`ready: false` + `reason`。
+   */
+  guideShow(): Promise<GuideTarget>
+
+  /**
+   * 收起引导卡片。**没开着也算成功** —— 这是一句"我现在不需要它了"，
+   * 不是"去关一个一定存在的窗口"。
+   */
+  guideClose(): Promise<void>
 
   /**
    * 已经下载到下载区的文件。盘就是底账：文件在且 SHA 对得上才算数，不查缓存。

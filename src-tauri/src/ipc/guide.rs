@@ -1,0 +1,541 @@
+//! **屏幕引导的那几条命令**（2026-10-15）：保存了参数之后，把"回切片器重切一次"那一步
+//! **指给用户看**。
+//!
+//! # 为什么要有它
+//!
+//! 改了 MKP 参数（XYZ 偏移、涂胶…）之后，切片器**不知道**：它那一份参数里根本没有
+//! 这些字段（见 `docs/INVESTIGATION-BBS-INVALIDATE.md` §4）。于是它仍认为"这一盘是
+//! 切好的"，切片按钮不给点 —— 用户只能自己改点什么（现在最常做的是改一下板子类型）
+//! 才切得动。
+//!
+//! 那条链我们**改不了切片器**：没有外部入口（那份文档 §5/§7），运行时注入又被
+//! entitlement 封死（§6）。能做的是什么都不替用户做、只**把那一步指给他看**：
+//! 在他自己的切片器窗口旁边放一张小卡片。动手的是他自己。
+//!
+//! # 卡片的三条活法（2026-10-15 作者定）
+//!
+//! | 什么时候 | 卡片 |
+//! | --- | --- |
+//! | 切片器在最前 | 露脸，贴着「板子类型」控件 |
+//! | 切片器被别的软件压住 / 最小化 | **收起来**（用户这会儿看不到那个控件，留着就是指着空气） |
+//! | 用户拖动了切片器窗口 | **跟过去**（重读坐标、挪卡片） |
+//!
+//! 这三件事靠 macOS 的 **AX 通知**驱动（[`crate::ax_watch`]），**不是定时器** ——
+//! 作者原话"不要频繁的轮询"。通知只负责说"变了"，收到之后这里重读一次坐标。
+//!
+//! # 边界（这一层自己守着）
+//!
+//! - **只读**：只问坐标，没有任何 AX 写动作、不模拟点击、不碰别的进程的内存；
+//! - **不改切片器任何参数**；
+//! - **不给假坐标**：指不了就 `reason` 一句话，界面因此只显示原因、不画箭头；
+//! - 卡片只占一小块（**不铺满屏幕**）：它活着的时候，用户照样能去点切片器。
+//!
+//! # 坐标系
+//!
+//! 实测：AX 给的 `AXPosition` 与 Tauri 的窗口位置是**同一套**屏幕坐标（原点左上）。
+//! 判据是窗口右上角那个下拉箭头 —— 它报的坐标落在窗口顶部那一带，而不是屏幕底部。
+//! 所以这里**不做上下翻转**，直接把 AX 的读数交给窗口定位。
+
+use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindowBuilder};
+
+use crate::ax::{self, GuideTargetDto, RectDto, SlicerVisibility};
+use crate::error::AppError;
+
+use super::traced;
+
+/// 引导窗口的标签（与客户端 `main` 分开，`get_webview_window` 拿的是各自那一个）
+const GUIDE_LABEL: &str = "guide";
+
+/* ---------- 窗口几何：卡片 + 一条箭头竖条 + 四周给阴影的空 ---------- */
+
+/// 引导卡片的尺寸（逻辑点）。**刻意做小**：它只该盖住自己那一块，
+/// 用户这会儿正要回头去点切片器，铺满屏幕等于把人挡在外面。
+///
+/// ★ **`CARD_H` 要比"文案排版出来需要的高度"多留一点**：
+///
+/// - 卡片是 `top/bottom: SHADOW_PAD`，跟着窗口长 ⇒ 多出来的高度是**卡片里的空白**
+///   （按钮被 `flex:1` 顶到最下边），不是一块透明的"死区"，看着不难看；
+/// - 但**透明窗不是点击穿透的**，多高一寸就多挡一寸别人的点击 ⇒ 也别乱给。
+///
+/// 实测（Chromium，340 宽）：文案排出来 **179**（副标题 16 + 两段正文 39 + 59 +
+/// 段间距 12 + 内边距 28 + 按钮 28 + 卡片竖排间距 10）；真机是 WKWebView，
+/// 断行可能差一行 ⇒ 再留一行（≈19）⇒ **198**。★ 改文案要回头复核这个数。
+const CARD_W: f64 = 340.0;
+const CARD_H: f64 = 198.0;
+
+/// 卡片与目标控件之间留的空。
+///
+/// ★★ 为什么它必须 **≥ [`ARROW_PAD`]**：窗口左边 = 控件右边（= `target + GAP`）
+/// 再往左让一条箭头竖条。`CARD_GAP < ARROW_PAD` 时窗口就会**压到控件身上** ——
+/// 那一块是透明的、但**照样吃点击**，用户点不到他要点的那个控件。
+/// 现在 22 vs 20 ⇒ 窗口左边界落在控件右边**之外** 2px，谁也不挡。
+const CARD_GAP: f64 = 22.0;
+
+/// **卡片四周留给阴影的空**（逻辑点）。
+///
+/// ★★ 为什么要有它：立体感是 CSS 画的（`.root` 的 `filter: drop-shadow`），而
+/// **窗口边界会把它切掉** —— 卡片贴着窗口边时那圈影子正好少一半，作者截图里
+/// 圈出来的就是这几处（"阴影被窗口截断了"）。
+/// 阴影是 `0 2px 6px`，往外约 9px ⇒ 给到 16 才能在窗口内淡完。
+const SHADOW_PAD: f64 = 16.0;
+
+/// **箭头那一条的宽**（窗口内、卡片外侧的那一竖条）。
+///
+/// ★ 为什么窗口要比卡片宽这么多：箭头**必须画在窗口里面** —— 透明窗口**画不出
+/// 边界之外的东西**（第一版把三角摆在 `left: -12px`，结果整条箭头直接消失）。
+/// 于是给它留一竖条，再把窗口整体朝目标挪这么多：视觉上箭头仍是"从卡片伸出去"，
+/// 实际上它老老实实待在窗口内。
+///
+/// 20 = 半个方块（12×12 转 45° 的半对角线 ≈ 8.5）+ 箭尖外那圈阴影（往外 ≈ 9）+ 余量。
+const ARROW_PAD: f64 = 20.0;
+
+/// 窗口尺寸 = 卡片 + 两侧那条竖条 + 四周的阴影空（与 `GuideCard.module.css` 对齐）。
+///
+/// ★ 左边一律按 [`ARROW_PAD`] 算、右边一律按 [`SHADOW_PAD`] 算 —— 两档 `side`
+/// 只是**卡片在窗口里的左/右不同**，窗口本身**同样大**（不必随 side 变尺寸）。
+const WINDOW_W: f64 = ARROW_PAD + CARD_W + SHADOW_PAD;
+const WINDOW_H: f64 = SHADOW_PAD * 2.0 + CARD_H;
+
+/* ---------- 命令 ---------- */
+
+/// 「板子类型」控件此刻在屏幕上的哪一块（**只读**）。
+///
+/// 前端只在用户点了「查看引导」之后调它 —— 不轮询、不在后台偷偷读别人的窗口。
+#[tauri::command]
+pub async fn locate_bed_type_control() -> Result<GuideTargetDto, AppError> {
+    traced("locateBedTypeControl", |_| Ok(ax::locate_bed_type()))
+}
+
+/// 把引导卡片摆出去（贴着「板子类型」那个控件），顺带把坐标回给前端。
+///
+/// **只有一步**（2026-10-15 作者定）：卡片上一次说完"换成另一个、再换回原来那个"
+/// 那件事就够。原来那个"下一步"是多余的 —— 起作用的是"换成不同值"那一次
+/// （源码里那个 `if (old != new)`），换回来只是还原，**那件事用户自己记得住**；
+/// 而换步要关掉窗口重建，中间那一瞬什么都没了，比不引导还差。
+///
+/// 已经开着就**先强制收掉再重建**（落点可能变了）。★ 见 [`destroy_guide`]：
+/// 收旧的必须用 `destroy()`，而且**建新的也必须排在它后面**（同一个坑的另一半）。
+#[tauri::command]
+pub async fn guide_show(app: AppHandle) -> Result<GuideTargetDto, AppError> {
+    traced("guideShow", |_| {
+        let target = ax::locate_bed_type();
+        let Some(t) = target.target.filter(|_| target.ready) else {
+            /* 指不了：原样把 reason 递上去，界面显示原因、不画箭头 */
+            return Ok(target);
+        };
+
+        /*
+         * ★★ **抬切片器这件事必须发生在"建卡片"之后**（2026-10-15 作者报的
+         * "我的软件会覆盖，完全挡住了"）：建一扇新窗会把**我们这个 App 激活**，
+         * 于是我们的主窗压到切片器前面去了。所以顺序是
+         * **先建卡片 → 再把切片器抬回最前**（卡片自己是 `always_on_top`，
+         * 抬完仍浮在切片器上面）。
+         */
+        let (x, y, side) = place_card(&t, screen_width(&app));
+        show_at(&app, x, y, side);
+        mount_watcher(&app);
+
+        tracing::info!(card_x = x, card_y = y, side, "引导卡片已摆好");
+        Ok(target)
+    })
+}
+
+/// 收起引导卡片。**没开着也是成功** —— 这是一句"我现在不需要它了"，不是"去关一个
+/// 一定存在的窗口"。
+#[tauri::command]
+pub async fn guide_close(app: AppHandle) -> Result<(), AppError> {
+    traced("guideClose", |_| {
+        /* 卡片没了就不用再听切片器的窗口动静 */
+        unmount_watcher(&app);
+        destroy_guide(&app);
+        Ok(())
+    })
+}
+
+/* ---------- 跟随（AX 通知的落点） ---------- */
+
+/// 通知来了之后重算一次：该露脸就摆到新坐标，不该露脸就收起来。
+///
+/// ★ 这是 [`crate::ax_watch`] 的 `OnChange` 落点，**在主线程上**被叫起来 ——
+/// 所以里面可以直接碰窗口、也可以放心读 AX 与起进程。
+///
+/// ★★ **可见性只在这里读一处**（从 AX 通知的载荷里读不到它，而"读"要动对方进程、
+/// 还要 `pgrep`，那不该发生在 AX 回调那个线程上）。
+///
+/// - `Behind` / `Gone`：收掉卡片（切片器被压住、最小化、或者退了）；
+/// - `Front`：**没开着就开**（用户把切片器切回最前了，卡片该回来）、
+///   开着就重读坐标挪过去（拖动了 / 拉大了）；坐标读不到也收起来。
+pub fn sync(app: &AppHandle) {
+    /* pid 直接问 watcher 要（它装着的时候就记着）—— 别在这儿起 `pgrep` */
+    let Some(pid) = watched_pid() else {
+        return;
+    };
+    let state = ax::slicer_state(pid);
+    /*
+     * ★★★ **便宜的闸门**（2026-10-15 作者："拖动了它没有跟随"）。
+     *
+     * 这条既由 AX 通知驱动、又由 [`crate::ax_watch`] 的细定时回读兜底（切片器是 Qt
+     * 应用，拖动过程中**不发** `AXWindowMoved`）。既然会被叫得很勤，第一件事就是
+     * **花一两次属性读确认"真的变了没有"** —— 没变就一丁点多余的活都不干
+     * （重扫控件树是几十次 AX 调用，那才是"频繁的轮询"）。
+     *
+     * 一次比较罩住三类变化：**窗口矩形**（拖动 / 缩放）、**最前是不是它**（被压住）、
+     * **最小化了没有**。三者都是 [`ax::SlicerState`] 里的字段。
+     */
+    if !changed(state) && app.get_webview_window(GUIDE_LABEL).is_some() {
+        return;
+    }
+
+    let visibility = state.visibility;
+    if visibility == SlicerVisibility::Behind && just_shown() {
+        /*
+         * ★★★ **刚摆出去的这一小段里，"切片器不在最前"多半不是用户干的，是我们的回声**：
+         * 建卡片那一下会把我们这个 App 激活 ⇒ 切片器（暂时）退到后面 ⇒ 我们自己的
+         * 通知回过来判"该收起来" ⇒ **刚建出来的新卡片当场被收掉**。
+         * 作者看到的就是"根本没出现新的"（而且旧的那张也被我们收掉了，两条一起没）。
+         *
+         * 所以这段时间**先不动它**：等 [`SETTLE`] 落定后那条**一次性回读**再判。
+         * ★ 只挡 `Behind`，`Gone`（切片器退了）照收不误。
+         */
+        return;
+    }
+    if visibility != SlicerVisibility::Front {
+        /*
+         * ★★★ **卡片收起来，但监听要留着**（2026-10-15 作者报"BBS 最小化了、不置顶了
+         * 也没变化"——而且是"再也没有变化"）。
+         *
+         * 上一版这里顺手 `unmount_watcher()` 了，于是：最小化 ⇒ 收卡片 + 卸监听 ⇒
+         * **还原时没人通知**（监听正被我们发现"用户看不见了"而卸掉的）⇒ 卡片永远
+         * 回不来，之后拖动也不再跟随 —— 一次最小化就把整条跟随线掐死了。
+         *
+         * 监听的本钱只是一个 run loop source，留着它才收得到
+         * `AXWindowDeminiaturized` / `AXFocusedWindowChanged`。真正该卸的是
+         * **卡片被关掉**那两条路（`guide_close` 与切片器退了 ⇒ `Gone`）。
+         */
+        if visibility == SlicerVisibility::Gone {
+            /* 切片器整个没了：再留着监听也没意义（pid 都失效了） */
+            unmount_watcher(app);
+        }
+        destroy_guide(app);
+        return;
+    }
+
+    let target = ax::locate_bed_type();
+    let Some(t) = target.target.filter(|_| target.ready) else {
+        /*
+         * 在最前、但指不了（界面换了 / 还没读到）—— **不摆一个指错地方的箭头**。
+         * ★ 这里同样**不卸监听**：读不到多半是切片器正在启动 / 换版，
+         * 它自己会再发通知过来，留着才有下一次机会。
+         */
+        destroy_guide(app);
+        return;
+    };
+
+    /* 通知没挂满 / 挂的还是上一扇窗 ⇒ 趁它现在看得见，重挂一次（幂等） */
+    ensure_watcher(app);
+
+    let (x, y, side) = place_card(&t, screen_width(app));
+    match app.get_webview_window(GUIDE_LABEL) {
+        /*
+         * 已经开着 ⇒ **只挪窗口**（`set_position`），不重建。
+         * 拖动是一串密集的通知，重建的话每一帧都在闪 —— 作者要的是"跟过去"，
+         * 不是"关掉再冒出来"（那正是他说的"他还是只是消失了没出现新的"那种观感）。
+         */
+        Some(win) => {
+            let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+            /*
+             * 左右翻边（拖到屏幕另一头去了）要重画箭头：前端从 URL 的 `side` 读它，
+             * 而窗口已经建好了 —— 所以这里**推一条事件**过去，别重建窗口。
+             */
+            use tauri::Emitter as _;
+            let _ = win.emit(GUIDE_SIDE_EVENT, side);
+        }
+        None => show_at(app, x, y, side),
+    }
+}
+
+/// 通知没挂满就重挂一次（幂等）。
+///
+/// ★★ **别在这儿比"窗口身份"**（我上一版比的是 AX 元素指针，那是错的方向）：
+/// AXUIElement 是**每次读都新给一个对象**，同一个窗口两次读到的指针**不保证相等**
+/// ⇒ 一比就判"换了窗"，于是**每来一条通知/每一跳回读都重挂一次监听**（churn），
+/// 而重挂期间正好收不到通知。删掉它。
+///
+/// ★ 那"切片器换了一扇窗、旧窗那四条再也不响"怎么办？——**不怕**：
+/// 位置跟随现在由 [`crate::ax_watch`] 的细定时回读兜底（它不看窗口身份，每跳都重新
+/// 读坐标）；最小化/被压住由 `ax::slicer_state` 每次现读 `AXMinimized` 与"最前是谁"
+/// 判 —— 都不依赖"当初挂在哪扇窗上"。
+fn ensure_watcher(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        if !crate::ax_watch::is_complete() {
+            tracing::info!("AX 通知没挂满 —— 重挂一次");
+            crate::ax_watch::start(app, sync);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
+}
+
+/// 左右翻边时推给卡片的那条事件（载荷 = `"left"` / `"right"`）。
+///
+/// ★ 为什么不重建窗口：拖动是一串密集通知，重建会一闪一闪。挪窗口 + 推事件
+/// 才是"跟过去"该有的观感。
+pub const GUIDE_SIDE_EVENT: &str = "guide-side";
+
+/// 把卡片摆到 `(x, y)`（窗口坐标），`side` 决定箭头指哪边。
+///
+/// ★★ **建窗要排在 Destroy 后面** —— 这是"消失了没出现新的、要再点一次"的另一半：
+/// `destroy()` 只是把一条 Destroy **排进主线程队列**，而 `WebviewWindowBuilder::build()`
+/// 在**当前线程同步建**。两者不同步 ⇒ build 执行时旧窗还在管理器里 ⇒ 直接失败
+/// （“a webview with label `guide` already exists”），界面上就是"旧卡没了、新卡没来"。
+///
+/// 所以收与建**都要排进同一条队列**：`destroy_guide` 之后用
+/// `app.run_on_main_thread(|| build)` —— Destroy 先、Create 后，先进先出。
+fn show_at(app: &AppHandle, x: f64, y: f64, side: &'static str) {
+    destroy_guide(app);
+    mark_shown();
+    let build = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        /* 排到这儿时前面的 Destroy 已经执行完了，label 空着 */
+        if let Err(e) = build_card(&build, x, y, side) {
+            tracing::warn!(detail = %e.message, "引导卡片没建出来");
+        }
+        /*
+         * ★★ **建完再把切片器抬回最前**（顺序不能颠倒，理由见 `guide_show`）：
+         * 建窗那一下把我们 App 激活了，切片器被压到后面 —— 这里把它抬回来。
+         * ★ 抬**两次**：`build()` 返回时那次激活可能还没落定（它是异步的），
+         * 隔一个事件循环再补一次。两次都是**一次性**的，不是定时器。
+         */
+        raise_slicer_window();
+        let _ = build.clone().run_on_main_thread(raise_slicer_window);
+    });
+
+    /*
+     * **落定之后回读一次**（一次性，不是轮询）：这时"建窗激活我们"的回声已经过去，
+     * 真被别的软件压住就收掉；一切正常就留着。
+     */
+    let settle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(SETTLE);
+        let inner = settle.clone();
+        let _ = settle.run_on_main_thread(move || sync(&inner));
+    });
+}
+
+/// 建窗之后"等一下再判"的那段时间（见 [`just_shown`]）。
+///
+/// ★ 这是**防抖**，不是轮询：只在卡片刚摆出去时用一次。
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// 上一次见到的切片器状态（"变没变"就比它）。
+///
+/// ★ 记的是**读到的那一刻**，不是"我们摆到哪" —— 摆的动作可能失败、也可能被系统调过。
+static LAST_STATE: std::sync::Mutex<Option<ax::SlicerState>> = std::sync::Mutex::new(None);
+
+/// 这次读到的状态跟上一次**不一样**吗？（一样 = 无事可做）
+///
+/// 不一样就顺手把它记下来 —— 所以这是**有副作用的比较**，名字取成 `changed`
+/// 而不是 `is_same`，好让人一眼看出它会写状态。
+fn changed(now: ax::SlicerState) -> bool {
+    let Ok(mut g) = LAST_STATE.lock() else {
+        /* 锁坏了：当作"变了"，宁可多做一次也别卡住 */
+        return true;
+    };
+    if g.as_ref() == Some(&now) {
+        return false;
+    }
+    *g = Some(now);
+    true
+}
+
+/// 卡片是**什么时候**摆出去的（`None` = 从没摆过）。
+static SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// 记下"刚摆出去"这一刻。
+fn mark_shown() {
+    if let Ok(mut g) = SHOWN_AT.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+}
+
+/// 是不是**刚摆出去**（还在落定窗口里）。
+fn just_shown() -> bool {
+    let Ok(g) = SHOWN_AT.lock() else {
+        return false;
+    };
+    g.is_some_and(|t| t.elapsed() < SETTLE)
+}
+
+/// 真正建那扇窗。**只该由 [`show_at`] 调**（要先保证同 label 的旧窗已经销毁）。
+fn build_card(app: &AppHandle, x: f64, y: f64, side: &str) -> Result<(), AppError> {
+    let url = format!("index.html?guide=1&side={side}");
+    let win = WebviewWindowBuilder::new(app, GUIDE_LABEL, WebviewUrl::App(url.into()))
+        .title("SupportEase 引导")
+        /* 卡片 + 一条箭头竖条 + 四周那圈给阴影的空（见 [`WINDOW_W`] / [`WINDOW_H`]） */
+        .inner_size(WINDOW_W, WINDOW_H)
+        .position(x, y)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        /*
+         * ★★ **关掉原生窗口阴影**（2026-10-15）。透明无边框窗口留着系统阴影时，
+         * 那圈灰是**按窗口矩形**画的 ⇒ 在卡片之外的透明区域能看到一块**灰底**
+         * （作者原话："不够透明，看到灰灰的"）。
+         * 立体感交给 CSS —— 阴影挂在 `GuideCard.module.css` 的 `.root` 上，
+         * 跟着"卡片 ∪ 箭头"的轮廓走，比原生那圈干净。
+         */
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .build()
+        .map_err(|e| AppError::internal("建不出引导窗口").with_detail(e.to_string()))?;
+    let _ = win.show();
+    Ok(())
+}
+
+/// **强制**收掉引导窗口（没开着就什么都不做，也是成功）。
+///
+/// ★★★ 为什么不能用 `close()` —— 那是**请求**关闭，不是关掉了：
+///
+/// - `close()` 往主线程排一条 **Close** 消息，主线程收到后才走"关窗处理器 → 销毁"
+///   再排一条 **Destroy** 消息；
+/// - 而我们紧接着要拿**同一个 label** 再建一扇窗，那条 Create 排在 Close 后面、
+///   **排在 Destroy 前面**；
+/// - 于是 Create 执行时旧窗还在管理器里 ⇒ 直接报 "a webview with label `guide`
+///   already exists" ⇒ 界面上就是作者看到的那句 **「建不出引导窗口」**。
+///
+/// `destroy()` 是**直接**排 Destroy ⇒ 它先于后面那条 Create 执行（见 [`show_at`]）。
+fn destroy_guide(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(GUIDE_LABEL) {
+        let _ = win.destroy();
+    }
+}
+
+/// 装上"切片器窗口动了/被压住了"的监听（**AX 推送，不是定时器**）。
+///
+/// ★ 这一层只有 macOS 有（`ax_watch` 整个模块都 cfg 掉了）—— 别处 `locate` 本来就
+/// 回"这一台上指不了"，卡片根本不会露脸，也就没有"跟随"可言。
+fn mount_watcher(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        /* 成败不在这里看：`start` 自己会派回主线程（CFRunLoop 的线程亲和性），
+        真结果走日志与 `is_complete()` —— 见 `ax_watch` 模块头 */
+        crate::ax_watch::start(app, sync);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
+}
+
+/// 卸掉监听（卡片关了 / 切片器不在了）。别处是 no-op，理由同上。
+fn unmount_watcher(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    crate::ax_watch::stop(app);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
+}
+
+/// 正在盯着哪个切片器进程（给 [`sync`] 用）。
+///
+/// ★ 别处恒 `None`：没有 AX 这一层就没有"跟随"可言，`sync` 会直接返回。
+fn watched_pid() -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::ax_watch::watched_pid()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/* ---------- 摆放与平台小工具 ---------- */
+
+/// 卡片放哪：**贴着目标的右侧**，右边放不下就翻到左侧。
+///
+/// y 取 `target.y - SHADOW_PAD` —— 窗口顶边在上，卡片本体（`top: SHADOW_PAD`）
+/// 正好落在 `target.y` 上，与它指向的那个控件齐平，眼睛不用上下找。
+///
+/// 第三个返回值是**卡片在目标的哪一侧**（`right` / `left`）—— 前端拿它决定箭头
+/// 指左还是指右，不用去猜自己被摆在哪。
+///
+/// 返回的 x 是**窗口**的左边（不是卡片的）—— 卡片那一侧要往窗口里让出
+/// [`SHADOW_PAD`]（或 [`ARROW_PAD`]），窗口整体再相应朝外挪，卡片本体才正好落在
+/// `target ± GAP` 上。
+fn place_card(target: &RectDto, screen_w: f64) -> (f64, f64, &'static str) {
+    let top = sane(target.y - SHADOW_PAD, 0.0);
+    /* 卡片在右：窗口左边 = 卡片左边再往左让一条箭头竖条 */
+    let right = sane(target.x + target.width + CARD_GAP - ARROW_PAD, 0.0);
+    let screen_w = sane(screen_w, 1920.0);
+    if right + WINDOW_W <= screen_w {
+        (right, top, "right")
+    } else {
+        /* 卡片在左：窗口左边再往左让出卡片与右侧那圈阴影空 */
+        (
+            sane(target.x - CARD_GAP - CARD_W - SHADOW_PAD, 0.0),
+            top,
+            "left",
+        )
+    }
+}
+
+/// 把非有限数（NaN / ±Inf）换成兜底值。
+///
+/// ★★ 为什么必须挡一下：AX 报的坐标来自**别的进程**，多屏 + 缩放混搭时可能给出
+/// 非有限数，而把 NaN 交给窗口定位会**直接掀掉进程**（不是画歪，是崩）。
+/// 宁可摆到 0 那个角上（用户看得见、也知道不对），也不要闪退。
+fn sane(v: f64, fallback: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        fallback
+    }
+}
+
+/// 把切片器**那一扇窗**抬到最前 —— 他要看着 BBS 里那个板型控件做操作。
+///
+/// ★★★ **不要用 `open -a BambuStudio`**（2026-10-15 作者报的"有时候会把 MKP 置顶了"）：
+/// `open -a` 是"**激活整个应用**"，在 macOS 上会把那个应用**所有**窗口一起带到前面。
+/// 于是我们自己的 `main`（SupportEase）与工作台窗口也跟着冒到切片器上面 ——
+/// 用户点了「查看引导」，看到的反而是我们这一屏，正是这条引导要避免的事。
+///
+/// 正解是 AX 的 **`kAXRaiseAction`**：它只抬**这一扇窗**，不动别的。
+/// 抬不动（没授权 / 控件树里找不到）就**静静过去** —— 卡片照样摆出去，
+/// 用户自己切一下窗口即可，这一件事不值得让整条引导失败。
+fn raise_slicer_window() {
+    #[cfg(target_os = "macos")]
+    {
+        /*
+         * 两下一起上，缺一不可：
+         * - `AXRaise`：把**那一扇窗**抬到它自己 App 的层序顶部（并成为 key window）；
+         * - `AXFrontmost`：把**整个切片器 App** 激活 —— 建窗那一下激活的是**我们**，
+         *   不把切片器整体拉回来，我们的主窗就压在它前面（作者截图里那一片遮挡）。
+         */
+        let raised = crate::ax::raise_slicer();
+        let activated = crate::ax::activate_slicer();
+        if !raised && !activated {
+            tracing::warn!(
+                "抬不动切片器（没辅助功能权限？）—— 卡片仍会摆出去，但可能被我们自己的窗口压住"
+            );
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    { /* 别处本来就没有 AX 这一层（`locate` 会回"指不了"），无从抬 */ }
+}
+
+/// 屏幕有多宽（逻辑点）。拿不到时给一个常见值 —— 这只用来决定卡片往左还是往右放，
+/// 差一点不影响"指得准不准"。
+fn screen_width(app: &AppHandle) -> f64 {
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.size().width as f64 / m.scale_factor())
+        .unwrap_or(1920.0)
+}

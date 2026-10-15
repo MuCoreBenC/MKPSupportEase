@@ -38,6 +38,15 @@ export interface Calibration {
   dirtyAxes: Axis[]
   /** 刚保存过（2.2 秒后自己消） */
   savedNote: boolean
+  /**
+   * **保存成功之后要不要问一句"回切片器重切"**（2026-10-15）。
+   *
+   * 与参数页那一格同一条理由：切片器那份参数里没有 MKP 这些字段，它不会知道
+   * XYZ 变了 —— 于是「切片」不给点。保存成功就问一次，关掉只是这一次的决定。
+   */
+  resliceAsk: boolean
+  /** 关掉那一句提问 */
+  dismissReslice: () => void
   /** 有基准才点得动板子 */
   canPick: boolean
   /**
@@ -82,6 +91,8 @@ export function useCalibration(preset: PresetState): Calibration {
    */
   const [typed, setTyped] = useState<Partial<Record<Axis, number>>>({})
   const [savedNote, setSavedNote] = useState(false)
+  /** 保存成功 ⇒ 问一句"要不要回切片器重切"（与参数页同一条理由） */
+  const [resliceAsk, setResliceAsk] = useState(false)
 
   /* 预设就位即新的真相：偏移换成它带来的那一份，草稿一并作废
      —— 草稿是"相对上一份预设点出来的增量"，换了预设就没有意义了。
@@ -251,7 +262,15 @@ export function useCalibration(preset: PresetState): Calibration {
     setXyPick({ x: null, y: null })
     setTyped({})
     setSavedNote(true)
-    void api.savePresetCalibration(copy.path, draft)
+    void api.savePresetCalibration(copy.path, draft).then(
+      /* 存下了 ⇒ 问一句"要不要回切片器重切"（切片器不会自己知道 XYZ 变了），
+         理由与参数页那一处同一条，见 `app/guide/ResliceNotice.tsx` 模块头 */
+      () => setResliceAsk(true),
+      () => {
+        /* 保存失败什么都不做：`savedNote` 那条绿字与控制台已经说过了，
+           这里不叠第二句，更不该在这种时候还问重切 */
+      },
+    )
   }, [draft, preset])
 
   useEffect(() => {
@@ -267,6 +286,8 @@ export function useCalibration(preset: PresetState): Calibration {
     dirty,
     dirtyAxes,
     savedNote,
+    resliceAsk,
+    dismissReslice: () => setResliceAsk(false),
     canPick,
     canSave,
     zSelected,

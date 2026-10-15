@@ -34,6 +34,7 @@ import type { DrawerMode, HistoryView } from './HistoryDrawer'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import ParamCard from './ParamCard'
 import type { TowerSlot } from './ParamCard'
+import ResliceNotice from '../guide/ResliceNotice'
 import ParamSyncModal from './ParamSyncModal'
 import PresetPickerDrawer from './PresetPickerDrawer'
 import { useLocalPickerRows } from '../presets/localPickerRows'
@@ -1331,6 +1332,10 @@ export default function PageParams({
           onRevert={u.revertEntry}
         />
       )}
+
+      {/* 保存成功之后那一句提问（2026-10-15）：切片器不会自己知道参数变了，
+          要不要把"回它那边换一下板子类型"指给用户看。关掉只是这一次的决定。 */}
+      {u.resliceAsk && <ResliceNotice open onClose={u.dismissReslice} />}
     </div>
   )
 }

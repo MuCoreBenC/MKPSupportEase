@@ -28,6 +28,9 @@
 /// —— 试验场那个 dev 端点在桌面版里的等价物。
 pub mod bbs;
 pub mod catalog;
+/// **屏幕引导**（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
+/// **指给用户看**（只读坐标 + 引导窗口）。不替用户点、不改切片器任何参数。
+pub mod guide;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
 pub mod local;

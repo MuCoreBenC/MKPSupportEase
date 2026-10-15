@@ -9,6 +9,7 @@ import type {
   CloudVersion,
   DownloadOutcome,
   DownloadTick,
+  GuideTarget,
   OnDiskFile,
   ParamDecision,
   ParamDecisionKind,
@@ -2245,6 +2246,28 @@ export const mockApi: MkpApi = {
    */
   async getAppVersion() {
     return MOCK_APP_VERSION
+  },
+
+  /*
+   * 屏幕引导（2026-10-15）：**浏览器里没有这一档** —— 它要读切片器窗口的坐标，
+   * 那是 macOS Accessibility 的活，浏览器里既没有切片器也没有那个 API。
+   * 照实回"指不了" + 一句人话（界面因此显示原因，而不是画一个指错地方的箭头）。
+   * 形状与真后端同形（`ready` + `reason`），值不编。
+   */
+  async locateBedTypeControl(): Promise<GuideTarget> {
+    return {
+      ready: false,
+      reason: '开发台里没有屏幕引导：它要读切片器窗口的坐标（真机上才有）',
+    }
+  },
+
+  /* 同上：浏览器里没有切片器窗口可指，照实回"指不了"，界面因此只显示原因 */
+  async guideShow(): Promise<GuideTarget> {
+    return this.locateBedTypeControl()
+  },
+
+  async guideClose() {
+    /* 没开过也是成功 */
   },
 
   async checkSoftwareUpdate(): Promise<SoftwareUpdate> {
