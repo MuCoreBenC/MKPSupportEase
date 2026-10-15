@@ -24,6 +24,11 @@ import { useSyncExternalStore } from 'react'
 import { api, listen } from '../../api'
 import type { ActiveOrigin, ActivePreset, ThemePref } from '../../api/contract'
 import { inTauri } from '../window'
+/*
+ * 主题那一句（档位 + 系统深浅 ⇒ 是不是深色 ⇒ 落 `<html data-theme>`）住在
+ * `./theme`：**引导窗口也要用同一句**，而它跑不起这一整个模块（见那个文件头）。
+ */
+import { applyTheme, prefersDark } from './theme'
 
 /** 与 Rust 侧 `ipc::APP_STATE_EVENT` 同名（两边没有编译器，靠这里对齐） */
 const APP_STATE_EVENT = 'app-state-changed'
@@ -46,21 +51,6 @@ const listeners = new Set<() => void>()
 
 function notify(): void {
   for (const listener of listeners) listener()
-}
-
-/*
- * **主题落到 `<html data-theme>`**（2026-10-12）：不走某个组件的 className，
- * 因为 ① 它得盖住挂到 body 上的东西（遮罩 / 浮层）；② `body` 自己的底色在
- * `styles/global.css` 里就吃 token，属性挂在 <html> 上才能一起翻。
- *
- * "跟随系统"由 `prefers-color-scheme` 解析 —— **那是 webview 的真值**，
- * 程序不猜操作系统此刻是深是浅（`theme = 'system'` 只记"用户选了跟随"）。
- */
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
-
-function applyTheme(pref: ThemePref | null): void {
-  const dark = pref === 'dark' || (pref !== 'light' && prefersDark.matches)
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
 }
 
 /* 跟随系统那一档：系统深浅变了要跟着翻 —— 用户点了浅 / 深则不理会（真值在他那一档里） */

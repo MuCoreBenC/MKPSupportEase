@@ -163,7 +163,16 @@
   cursor: default;
 }
 
-@media (prefers-color-scheme: dark) {
+/*
+ * ★★ 深色判据跟**全站同一个**：`[data-theme='dark']`（挂在 `<html>` 上），
+ * 而不是 `@media (prefers-color-scheme: dark)`。
+ *
+ * 原来写的是 `@media` —— 那等于"只认系统深浅"，与用户在设置里选的那一档**没关系**：
+ * 他选「深色」而 macOS 是浅色时，卡片会是白的。而引导窗**不跑 appState**、
+ * `<html data-theme>` 没人落 ⇒ 这个属性在引导窗里得由 `main.tsx` 自己补
+ * （那儿用 `state/theme` 里唯一那一份解析）。
+ */
+[data-theme='dark'] {
   .card {
     border-color: rgb(255 255 255 / 14%);
     background: #2c2c2e;
@@ -181,5 +190,13 @@
 
   .text {
     color: #f2f2f7;
+  }
+
+  /*
+   * 报错那行：浅色那支 `#d70015` 压在深底上几乎读不出（暗红压深灰）。
+   * 换成 iOS 深色里那一档红，与卡片自己那套配色同源。
+   */
+  .err {
+    color: #ff453a;
   }
 }

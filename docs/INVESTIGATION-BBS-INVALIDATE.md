@@ -445,6 +445,46 @@ if (m_post_initialized && !single_instance) {
 必须 ≤ 3**（8bit 最后一级；上一版卡片贴边时这里是几百 ⇒ 一眼看出"被切"）；
 ③ 箭头那一竖条在卡片以外只剩阴影尾巴；④ 每段 `textContent` 里中文标点后面没有空格。
 
+### 8.5.4 ★★★ 深色模式：卡片跟**用户那一档**，不跟系统（2026-10-15）
+
+**症状**（作者："接下来把它做一个深色模式"）：这张卡片**没有深色** —— 更准确地说，
+它只认**系统**深浅，与设置里「外观 → 主题」选的那一档**无关**：选「深色」而
+macOS 还是浅色时，卡片是白的。
+
+**根因（一条链，缺的那一环在窗口上）**：
+- 卡片的深色原来写的是 `@media (prefers-color-scheme: dark)` —— 那是它当时**唯一
+  拿得到的信号**，不是它想那样写；
+- 因为**引导窗口不跑 `appState`**（`main.tsx` 里它只挂 `GuideCard`，为的是"慢一拍
+  就指不到东西"）⇒ 主窗口那条"读 AppState 的 theme 格 → 落 `<html data-theme>`"
+  在那扇窗里**根本不会发生** ⇒ `[data-theme='dark']` 那套 token 它一次也没吃到。
+
+**改法（三处，判据只有一份）**：
+1. 新增 `src/app/state/theme.ts` = **主题解析的唯一出处**（`prefersDark` /
+   `resolveDark` / `applyTheme`），`appState.ts` 改成从它 import（原来那句解析私有的
+   在这个模块里，引导窗口拖不起它）；
+2. `main.tsx` 引导分支：`await api.getTheme()` → `applyTheme(pref)`（读不到就 `null`
+   = 跟随系统）→ **再**挂卡片；
+3. `GuideCard.module.css`：`@media (prefers-color-scheme: dark)` → **`[data-theme='dark']`**
+   （与全站同一个判据），并补 `.err` 深色（浅色那支 `#d70015` 压深底几乎读不出）。
+
+★ **别再用 `@media (prefers-color-scheme: dark)` 当深色判据**：它答的是"系统此刻
+是什么"，不是"用户选的是哪一档"。全站判据只有一个 —— `<html data-theme>`。
+
+**验收**（临时探针，跑完即删）：**故意让两者相反**，量卡片**实际渲染的像素**：
+
+| 系统 | 档位 | `<html data-theme>` | 卡片背景 |
+|---|---|---|---|
+| 浅 | `dark` | dark | `rgb(44,44,46)` ← 原来这里是白 |
+| 深 | `light` | light | `rgb(255,255,255)` |
+| 深 / 浅 | `system` / `null` | 跟系统 | 跟系统 |
+
+八组全绿；两档截图落 `tmp-shots/guide-dark-*.png`。
+
+★ 顺带把事实核了一遍（别再重做）：**客户端主窗口的深色早就做完了**（`tokens.css`
+两套值 + `applyTheme` + Rust 的 `theme` 格与单测 + `bridge.ts` + 设置页「外观」那一档，
+A06/A07 两刀还收过各页覆盖）。**唯一没有深色的是工作台**（`src/workbench/`：独立入口
++ 自己两份只有浅色的 token）。
+
 ## 9. 待办 / 未查证
 
 - `Plater::update(flags)` 带 `FORCE_BACKGROUND_PROCESSING_UPDATE` 的触发源未逐一排查

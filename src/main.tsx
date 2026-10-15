@@ -32,6 +32,22 @@ if (isGuide) document.documentElement.dataset.guide = '1'
 
 void (async () => {
   if (isGuide) {
+    /*
+     * ★★ **引导窗口得自己落一次 `data-theme`**（2026-10-15）：这一扇窗**不跑 appState**
+     * （下面那行注释说了为什么），所以主窗口那条"读 AppState 的 theme 格 → 落
+     * `<html data-theme>`"在这儿**根本不会发生**。结果是那张卡片只认**系统**深浅：
+     * 用户在设置里选了「深色」而 macOS 还是浅色时，卡片是白的（与主窗口对不上）。
+     *
+     * ★ 解析那一句不在这儿重写一遍 —— 取 `state/theme` 里那唯一一份（同一句判据
+     * 两个窗口共用；各写一遍就是两个不同源的判据，迟早对不上）。
+     */
+    const [{ api }, { applyTheme }] = await Promise.all([
+      import('./api'),
+      import('./app/state/theme'),
+    ])
+    /* 读不到（mock / 首次）就按「跟随系统」—— `null` 正是那一档 */
+    applyTheme(await api.getTheme().catch(() => null))
+
     const { default: GuideCard } = await import('./app/guide/GuideCard')
     createRoot(host).render(<GuideCard />)
     return
