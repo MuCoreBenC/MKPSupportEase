@@ -168,10 +168,10 @@ Rust 侧的字段名与 TS 那份靠 `error.rs` 里的单元测试钉住 —— 
 拉起的那一次进程）写 `hook.log.<日期>` —— 读者与量级都不同（而且钩子的 stderr 是对外契约，
 不许叠日志层）。为什么分家、各记什么见 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4。
 
-## 7.5 窗口外观（macOS）：三个坑
+## 7.5 窗口外观（macOS）：四个坑
 
-原生圆角与原生红绿灯都不是 CSS 能做的，`src-tauri/src/chrome.rs` 里那两个函数各对应一个坑。
-做法参考 `neteasemusicc`（同机另一个项目，这两点上是对的）。
+原生圆角与原生红绿灯都不是 CSS 能做的，`src-tauri/src/chrome.rs` 里那几件事各对应一个坑。
+做法参考 `neteasemusicc`（同机另一个项目，这几条上是对的）。
 
 **① `trafficLightPosition` 在 `titleBarStyle: "Overlay"` 下不生效。**
 Overlay 只给窗口加了 `fullSizeContentView`，**没有**真正的 `NSToolbar`。AppKit 摆灯有两档：
@@ -188,14 +188,91 @@ resize / 进出全屏 / 切外观时 AppKit 都会重摆，手动补摆每次都
 
 **② 圆角是 tauri#14165。** 窗口的原生边框是圆的，但 WKWebView 没被裁 ——
 它把内容画到圆角外面，看上去就是直角。`windowEffects.radius` 只圆了底下那层
-NSVisualEffectView。解法是 `window-vibrancy` 的 `apply_liquid_glass(...).content_view(webview)`：
-把 webview 摘下来挂进玻璃视图，**圆角由 AppKit 裁**。必须 `opaque(true)`（系统菜单与
-系统窗口都是"不透明底 + 一层玻璃"，传 false 会让背后窗口的内容读进来）+ 窗口
-`transparent: true` + `macOSPrivateApi: true`。低于 macOS 26 时 crate 返回
-`UnsupportedPlatformVersion`，那时只打日志、**不退回毛玻璃**（毛玻璃会让界面变半透明，
-比直角更糟）。
+NSVisualEffectView。
 
-**③ 标题栏拖动与改大小由前端自己接管，不用 `data-tauri-drag-region`。**
+**现在的解法是自己裁**（2026-10-15 第六版）：给 `window.contentView` 挂 `CALayer`
+圆角 + **连续曲率**（CALayer 默认是普通圆弧，贴在一起看得出"不是 mac 那种圆"）
++ `masksToBounds` —— **只裁，不铺色**。窗口是**不透明**的
+（`transparent: false`；只有引导卡片那扇小窗才需要透明），界面底由 CSS 画满整扇窗
+（`App.module.css` 的 `.shell` 渐变 + `global.css` 的 `body` 渐变），
+原生侧一个颜色都不画。`macOSPrivateApi: true` 仍要留（红绿灯那套要用）。
+
+**② 标题栏高度与红绿灯（2026-10-16）**
+
+- **高度 52 → 38**（`--titlebar-h`），与 Windows 同高。作者：「它这个高度应该就可以和
+  Windows 的一样高」。52 那档的来历是"迁就 AppKit"（装了统一工具栏之后它把灯心摆在 y=26），
+  现在**灯由我们自己摆** ⇒ 那条约束作废。
+- **红绿灯改为绝对定位**（`chrome.rs::reposition_traffic_lights`）：
+  `LIGHTS_CENTER = 19`（灯心距左 = 距上；38/2 = 19 正好也是竖直居中，两个要求同一个数）、
+  `LIGHTS_PITCH = 23`、`LIGHTS_DIAMETER = 14`（都量出来的）。
+  ★ 原来写的是"AppKit 默认位置 + 偏移 `(-8,-7)`" —— 换成绝对值是因为作者要的是
+  **"左 = 上"这个关系**，而相对偏移得先知道基准（基准随工具栏档位变）。
+- ★★ **坐标系**：`standardWindowButton(...).frame()` 是 **NSView 坐标（原点在左下）**，
+  要翻成"距窗口上边"得用**按钮自己的 superview** 高度 —— 用窗口高度算出的是
+  "灯心距上 607"这种一眼假的值。
+- `MAC_LIGHTS_INSET` 78 → **66**（作者：「这个字再往左靠一点，靠近那个红绿灯」）。
+
+**③ 应用图标（squircle）**
+
+- 母版 = `src-tauri/icons/source/icon-source.svg`（**作者提供**，1024 方角满幅）。
+- `scripts/gen-icons.py` 套 **squircle 超椭圆蒙版**（`|x/a|^n + |y/a|^n ≤ 1`，n=5）
+  —— Tauri 默认给的普通圆角在「直边 → 圆弧」处有转折点，macOS Big Sur 起要求连续曲率。
+  作者：「圆角好像不自然，没有平滑过渡」。
+- ★★★ **两个平台要的不是同一张图**（作者：「Windows 上那个图标小了一圈」）：
+  macOS 会被 AppKit 再裁成 squircle ⇒ 图形留白多（**60%**）；Windows 方角满幅 ⇒
+  图形顶满（**73%**）。所以 `gen-icons.py` 出**两个母版**，`npm run icons` 跑两次
+  `tauri icon` 再**按文件名回填**（★ `tauri icon` 每次都写**全量**两个平台的产物，
+  后跑的那次会把先跑的整个盖掉 —— 第一版脚本假设"各写各的"是错的）。
+
+★★★ **半径必须等于窗口自己的圆角：`MAIN_RADIUS = 13`。** 这是本条的**唯一要点** ——
+两个人都在裁，而且**窗口那个我们改不了**：
+
+```text
+  窗口本身（AppKit 的 NSThemeFrame）  → 圆角 13 逻辑点（量出来的）
+  我们的 contentView.layer           → 圆角 MAIN_RADIUS
+```
+
+`NSThemeFrame` 的 layer `cornerRadius = 0` 但 `masksToBounds = true` ——
+它的圆角**不在 layer 上**，是 AppKit 自己画的窗口形状，**没有公开常量可读**。
+⇒ 两个半径不一致时，中间那圈夹缝会露出 `NSThemeFrame` 的底色（按**系统外观**渲染）：
+「档位深色 + 系统浅色」时，深色界面的四角就是一整圈白。作者历轮报的
+「边边角角有东西」「好像有两层」「本来就自身有一个圆角，然后我们又画了一个圆角」
+都是这一件事；他最后那句**说得完全对**。
+
+**③ 那圈白是怎么一步步被剥掉的**（四版，一层比一层深）：
+
+| 版本 | 做了什么 | 为什么还不够 |
+| --- | --- | --- |
+| 三版 | 借 `window-vibrancy` 的 liquid glass 裁角 | 玻璃按**系统外观**渲染成白 |
+| 四版 | "自己裁 + 自己铺色"（`window.backgroundColor` + `contentView.layer.backgroundColor` + 兄弟层三处刷界面底） | 白盖住了，但**同一块色铺两层**、两层颜色源不同（窗口外观 vs 用户档位）⇒ 切主题露"两层" |
+| 五版 | 只裁不铺色 | **半径 20 ≠ 窗口的 13** ⇒ 夹缝照旧露白（作者第三次报，就是这么来的） |
+| ★ 六版 | **半径对齐 13 + 只裁不铺色** | ✅ 深色角区 max 从 255 掉到 96（96 只是弧线抗锯齿） |
+
+★ 中途试过 `titlebarAppearsTransparent = true`（猜"AppKit 不画 chrome 就好"）：**更糟** ——
+AppKit 不再画深色底 ⇒ **整窗露白**；而且量过它**动不了那条外弧**（改前改后外弧逐行像素一模一样）。
+
+★ 三条配套的账：
+- **换了档仍要重跑一遍圆角那一步**（幂等、廉价）：`set_theme` 命令里 + 档位是"跟随系统"时
+  听 `WindowEvent::ThemeChanged`。它**不再换色**，只是防 AppKit 切外观时把圆角弄丢。
+- **别给 webview 套 `NSAppearance`**：那会把 CSS 的 `prefers-color-scheme` 一起改掉 ——
+  "跟随系统"那一档就不再跟系统了（第一版这么干过，已删）。
+- **别铺任何底色**：配色只有 CSS 一个数据源。
+
+★★★ **验收怎么量**（这类"一闪而过"的 bug，肉眼截图抓不住）：
+
+1. **抓单个窗口**：`CGWindowListCopyWindowInfo` 取「`ownerPID` == 本进程 && `layer` == 0」的
+   `kCGWindowNumber`，再 `screencapture -x -o -l <id>`（`-o` 去掉窗口阴影，否则量到阴影）
+   ⇒ 图里 `(0,0)` 就是窗口左上角，2x。
+2. **判据 = 左上角沿"外弧"的像素**：从透明（`0`）往里走，若有一整片**纯白 255**
+   （宽 2~3 逻辑点）就是那道夹缝；正常应该只有「桌面色 → 弧线抗锯齿（渐降）→ 界面底」。
+   量到的实况：外弧 `y=0 → x=26`（2x）⇒ 逻辑半径 13。
+3. **切主题要连拍**：`CGEvent` 驱动设置页那三个 radio（★ `System Events` 的 `click at`
+   **点不中 webview**，必须 `<CGEventCreateMouseEvent>` + `CGEventPost`，且先点一下窗口内部
+   激活它），同时 ~45ms 一帧连拍，逐帧读角区 `min/max`。
+   修复后：深色 `min=26 max=96` / 浅色 `min=239 max=255`，且**一帧内完成**（无过渡帧）。
+   修复前深色那档 `max=255`。
+
+**④ 标题栏拖动与改大小由前端自己接管，不用 `data-tauri-drag-region`。**
 Tauri 注入的 `drag.js` 在 Windows 上第一次 `mousedown`（`detail === 1`）就立刻发
 `start_dragging`，系统随即进入模态拖窗循环，WebView2 收不到那次的 `mouseup`——
 Chromium 的连击计数被打断，双击最大化要点得极快才触发。

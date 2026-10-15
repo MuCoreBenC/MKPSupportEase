@@ -97,6 +97,8 @@ import type {
   PresetLocalRow,
   PresetRowsInput,
   PresetScopeAxis,
+  PresetSort,
+  PresetSortKey,
   PresetTableData,
   PresetTree,
   PresetFileState,
@@ -1144,29 +1146,41 @@ export function usePresetData(importRevision = 0): PresetData {
  * 存的是一串 `pinKey`（asset id，用户自己的文件是它的本机 id），**JSON 编码** ——
  * 这个仓库里所有落 localStorage 的值都走 `JSON.stringify`，一处写裸字符串，
  * 以后想把它读成结构化数据就得先猜编码。
+ *
+ * # ★★ 是一个**有序数组**，不是一个集合（2026-10-16 作者：「后面点的置顶的应该置顶，
+ *   多个置顶的按照先后顺序，后点击的置顶」）
+ *
+ * 顺序的含义 = **置顶的先后**：`[0]` 是**最早**置顶的那份，末尾是**最近**一次点的。
+ * 排序时按这个下标**倒过来**读 ⇒ 最近置顶的排最前（见 `presetTree.sortRows`）。
+ *
+ * ★ 为什么存"先→后"、显示时倒过来，而不是存"后→前"：
+ *   这一键从第一版起就存的是一串 pinKey，那时是个 `Set`，**迭代顺序 = 插入顺序**
+ *   （先点的在前）。语义改成"后点的在前"之后，**存法不变、只是读的时候倒过来**，
+ *   老用户盘上那份数据一步就对，不需要迁移、不需要给存储加版本号。
+ *   （反过来做 —— 存的时候 unshift —— 会让老数据的顺序整个反过来。）
  */
 const PINNED_KEY = STORAGE.clientPresetsPinned
 
 /**
  * 置顶是**纯前端的排序**，所以它刷新之后保留是对的：它记的是「我常用哪几个文件」，
- * 不是一份未保存的改动。读坏了就退化成空集合 —— 一个排序偏好不值得让页面起不来。
+ * 不是一份未保存的改动。读坏了就退化成空 —— 一个排序偏好不值得让页面起不来。
  */
-function readPinned(): Set<string> {
+function readPinned(): string[] {
   try {
     const raw = window.localStorage.getItem(PINNED_KEY)
-    if (raw === null) return new Set()
+    if (raw === null) return []
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Set()
-    return new Set(parsed.filter((v): v is string => typeof v === 'string'))
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((v): v is string => typeof v === 'string')
   } catch {
     /* 隐私模式会抛，手改坏了 JSON 也会抛。两种都退化成「这次没有置顶」 */
-    return new Set()
+    return []
   }
 }
 
-function writePinned(next: Set<string>): void {
+function writePinned(next: string[]): void {
   try {
-    window.localStorage.setItem(PINNED_KEY, JSON.stringify([...next]))
+    window.localStorage.setItem(PINNED_KEY, JSON.stringify(next))
   } catch {
     /* 写不进去就只在这次会话里有效，不影响别的功能 */
   }
@@ -1233,9 +1247,23 @@ export interface PresetPage {
     total: number
   }
 
-  /** 置顶集合（`pinKey`）。落 localStorage，纯前端排序 */
-  pinned: Set<string>
+  /**
+   * 置顶的**先后顺序**（一串 `pinKey`，`[0]` 是最早置顶的、末尾是最近一次点的）。
+   * 落 localStorage，纯前端排序。★ 不是集合 —— 顺序是有意义的，见 `PINNED_KEY` 那段。
+   */
+  pinned: string[]
   togglePin: (pinKey: string) => void
+
+  /**
+   * 表头那一列怎么排（2026-10-16 作者：每列都能点）。落会话 —— 与搜索词同一条理由
+   * （切页对一眼回来不该复位）。★ 置顶**不归它管**：置顶永远压在最上面。
+   */
+  sort: PresetSort
+  /**
+   * 点表头：同一列在升 / 降之间换，换列则**从升序重新起**
+   * （★ 时间那一列除外 —— 先看最新的更符合直觉，所以换到时间列时默认**降序**）。
+   */
+  toggleSort: (key: PresetSortKey) => void
 
   /**
    * 正在使用的**唯一那一条**（新世界底账 `run/active-preset.json`）。`null` = 一套都还没应用（**不是错误**）。
@@ -1303,14 +1331,37 @@ export function usePresetPage(data: PresetData): PresetPage {
   const [nozzle, setNozzle] = useSessionState('presets.nozzle', '')
   const [layer, setLayer] = useSessionState('presets.layer', '')
 
-  const [pinned, setPinned] = useState<Set<string>>(readPinned)
+  const [pinned, setPinned] = useState<string[]>(readPinned)
+
+  /*
+   * 表头排序（2026-10-16）。默认按名称升序 —— 与加排序之前一模一样，不是新行为。
+   * ★ 换到「时间」那一列时默认**降序**（最新的在最上），其余从升序起 ——
+   *   按时间asc 看到的是"最老的在前"，没人是要这个。
+   */
+  const [sort, setSort] = useSessionState<PresetSort>('presets.sort', {
+    key: 'name',
+    dir: 'asc',
+  })
+  /* ★ `useSessionState` 的 setter 只收值（不收 updater），所以这里读当前 `sort` 现算 */
+  const toggleSort = useCallback(
+    (key: PresetSortKey) => {
+      setSort(
+        sort.key === key
+          ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+          : { key, dir: key === 'time' ? 'desc' : 'asc' },
+      )
+    },
+    [sort, setSort],
+  )
 
   const togglePin = useCallback((pinKey: string) => {
     setPinned((now) => {
-      /* 新建一个 Set 而不是改原来那个：React 靠引用变化才重画这张表 */
-      const next = new Set(now)
-      if (next.has(pinKey)) next.delete(pinKey)
-      else next.add(pinKey)
+      /* 新建一个数组而不是改原来那个：React 靠引用变化才重画这张表 */
+      const next = now.includes(pinKey)
+        ? /* 取消置顶：删掉它，其余的相对顺序不动 */
+          now.filter((k) => k !== pinKey)
+        : /* 置顶：**追加到末尾** —— 末尾 = 最近一次点的（显示时倒过来读，它就在最前） */
+          [...now, pinKey]
       writePinned(next)
       return next
     })
@@ -1340,6 +1391,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       kind,
       query,
       pinned,
+      sort,
       deliveryPresets: data.delivery.presets,
       cloudVersions: data.cloudVersions,
       localPresets: data.delivery.localPresets,
@@ -1350,7 +1402,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       remarks: data.remarks,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, query],
+    [data, copiedSet, kind, localSet, machines, pinned, query, sort],
   )
 
   /*
@@ -1455,6 +1507,8 @@ export function usePresetPage(data: PresetData): PresetPage {
     pending,
     pinned,
     togglePin,
+    sort,
+    toggleSort,
     applied: data.active,
     appliedMachineText: appliedMachine?.display ?? data.active?.machineId ?? '',
     appliedFileName,

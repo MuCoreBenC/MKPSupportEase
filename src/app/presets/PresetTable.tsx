@@ -156,6 +156,8 @@ import type {
   PresetKindAxis,
   PresetLocalRow,
   PresetScopeAxis,
+  PresetSort,
+  PresetSortKey,
   PresetTableRow,
 } from './presetTree'
 import s from './PresetTable.module.css'
@@ -200,6 +202,61 @@ function CloudLocalAction({
   )
 }
 
+/**
+ * **一枚能点着排序的表头**（2026-10-16 作者：「表头加上排序吧……只用很小的图标，不占位置的」）。
+ *
+ * # "不占位置"是怎么做到的
+ *
+ * `table-layout: fixed`，列宽由那几条 `clamp()` 定死、内容不参与算宽 ⇒
+ * 箭头内联跟在文字后面也**不撑宽任何一列**，点一下排序不会让列变宽或变窄。
+ *
+ * # 什么时候显示
+ *
+ * - **正在排的那一列**：箭头常驻、颜色是 `--text-2`（看得见"现在是按它排的"）；
+ * - **其余列**：默认不画，鼠标移到这一格才淡淡地露出来（提示"这列也能排"）。
+ *   ⇒ 六列同时挂箭头会很吵，也把"当前按哪列排"这件事讲没了。
+ *
+ * ★ 箭头**内联跟在文字后面**（2026-10-16 作者：「紧跟着文字」）。`table-layout: fixed`
+ *   下列宽由 th 的 clamp() 定死，内容不参与算宽 ⇒ 进流也不撑列，"不占位置"仍成立。
+ *   布局走普通流 + text-align（不走 flex —— th 的 justify-content 是 normal，
+ *   flex 会把居中列的表头顶到左边）。降序时 CSS 把箭头转 180°，
+ *   不为"下"再造一枚图标：它是同一颗箭头换个向，不是两个相反的语义
+ *   （`pin` / `pinOff` 那种才需要两枚）。
+ */
+function SortTh({
+  label,
+  colKey,
+  cls,
+  sort,
+  onSort,
+}: {
+  label: string
+  colKey: PresetSortKey
+  cls: string
+  sort: PresetSort
+  onSort: (key: PresetSortKey) => void
+}) {
+  const on = sort.key === colKey
+  return (
+    <th className={cls} scope="col" aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button"
+        className={s.sortBtn}
+        data-on={on ? '1' : '0'}
+        /* 降序时 CSS 把那颗箭头转 180° */
+        data-dir={on ? sort.dir : undefined}
+        onClick={() => onSort(colKey)}
+        /* 名字带上方向 —— 读屏与 hover 提示都要说清"点了会变成什么" */
+        title={on ? `按${label}${sort.dir === 'asc' ? '降序' : '升序'}排` : `按${label}排`}
+      >
+        <span className={s.sortText}>{label}</span>
+        {/* 常驻渲染、由 CSS 管显隐 —— 非当前列 hover 才淡淡露出（见上面那段） */}
+        <Icon name="caret" className={s.caret} />
+      </button>
+    </th>
+  )
+}
+
 interface Props {
   scope: PresetScopeAxis
   kind: PresetKindAxis
@@ -238,6 +295,10 @@ interface Props {
    * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「云端」。
    */
   sourceLabel: string | null
+  /** 表头那一列怎么排（页面层持有；落会话，切页回来不复位） */
+  sort: PresetSort
+  /** 点表头。同一列升 / 降互换，换列从升序起（时间列除外，见 `usePresetData`） */
+  onSort: (key: PresetSortKey) => void
   /**
    * 这一份在归档区里有几个**旧版本**（按文件名对）。
    * `0` = 没有 → 展开详情里那一格**不显示**（没有 ≠ 未知，不必占一个"—"）
@@ -298,6 +359,8 @@ export default function PresetTable({
   onToggleExpand,
   onLocate,
   sourceLabel,
+  sort,
+  onSort,
   archiveCountOf,
   onOpenArchive,
   onOpenLocal,
@@ -332,7 +395,8 @@ export default function PresetTable({
   /*
    * **收起动画 + 点击排队**（2026-10-10 第九/十轮，第十一轮修关键时序）——
    *
-   * 收起的动画靠「这一行先留在 DOM 里、把高度收成 0，动画走完再卸载」（CSS `.dFold`），
+   * 收起的动画靠「这一行先留在 DOM 里、把内容收走，动画走完再卸载」
+   * （CSS `.dFoldIn`；2026-10-16 第四轮起**行高不再动**，见 CSS 里那段），
    * 「哪些行正在收」就是 `closing`。**关键：记账必须和 `onToggleExpand` 在同一次
    * 事件里发生**（同一个批处理、同一帧提交）—— 放在 `useEffect` 里晚一帧，那一帧
    * 旧行就已经被卸载了，收起动画根本没机会播（作者：「收起一点动画都没有，它直接
@@ -341,8 +405,8 @@ export default function PresetTable({
    * 排队规则（作者：「我收起来的时候，我打断了它，我又点了一下展开它好像就卡住了……
    * 动画不要被打断，要执行完。你可以加速把它收起，然后再展开」）：
    *   · 点一个**正在收**的行 → 这一下不掐断收起：记进 `queuedRef`，把当前收起**加速**
-   *     （`rush` → CSS 里 240ms 变 140ms），收完（`finishClose`）立刻接着展开；
-   *   · 「展开中再点收」不排队：收起直接接过去（过渡从当前高度反向，不跳）。
+   *     （`rush` → CSS 里那段 240ms 变 130ms），收完（`finishClose`）立刻接着展开；
+   *   · 「展开中再点收」不排队：收起直接接过去（过渡从当前值反向，不跳）。
    */
   const [closing, setClosing] = useState<string[]>([])
   const [rush, setRush] = useState(false)
@@ -356,10 +420,15 @@ export default function PresetTable({
       onToggleExpand(key)
     }
   }
-  /** 让一行开始收：记账（与下面的 `onToggleExpand` 同帧）+ 排好收尾（300ms ≈ 240ms 过渡 + 余量） */
+  /**
+   * 让一行开始收：记账（与下面的 `onToggleExpand` 同帧）+ 排好收尾。
+   * ★ 270ms ≈ CSS 那段 240ms 收起动画 + 余量（2026-10-16 第五轮：收起与展开
+   *   对称到 240ms；行高不再动，动画只剩内容层的 opacity/transform）。
+   *   ⚠️ 这个数必须**略大于 CSS 时长**：小了动画会被腰斩，大了行会在原地多停一拍。
+   */
   const startClose = (key: string) => {
     setClosing((c) => (c.includes(key) ? c : [...c, key]))
-    window.setTimeout(() => finishClose(key), 300)
+    window.setTimeout(() => finishClose(key), 270)
   }
   /** 行上那一下点击、卡头那颗「收起」—— 都从这里进（见上面那段说明） */
   const requestToggle = (rowKey: string) => {
@@ -367,6 +436,7 @@ export default function PresetTable({
     if (closing.includes(rowKey)) {
       setRush(true)
       queuedRef.current = rowKey
+      /* 加速那一档 130ms（见 CSS 的 `[data-rush='true']`），这里给 160ms 收尾 */
       window.setTimeout(() => finishClose(rowKey), 160)
       return
     }
@@ -412,29 +482,27 @@ export default function PresetTable({
         <table className={s.table}>
           <thead className={s.head}>
             <tr>
-              <th className={s.thName} scope="col">
-                名称
-              </th>
-              <th className={s.thMachine} scope="col">
-                机型
-              </th>
+              {/*
+               * **每一列都能点着排序**（2026-10-16 作者：「表头加上排序吧……名称排序，
+               * 机型排序，所有的都排序，时间也排序」）。
+               *
+               * ★「操作」那一列**不排** —— 它不是数据列，排它没有意义。
+               * ★ 置顶**不参与**：置顶的那几份永远压在最上面（那是另一件事的判据），
+               *   列排序只决定"同一堆里谁在前"。
+               */}
+              <SortTh label="名称" colKey="name" cls={s.thName} sort={sort} onSort={onSort} />
+              <SortTh label="机型" colKey="machine" cls={s.thMachine} sort={sort} onSort={onSort} />
 
               {/*
                * 这里就是「列数真的跟着换」那一下：MKP 只有版本，切片器只有喷嘴 + 层高。
                * 另一种类型的那几列**整个不渲染**，不是渲染成空的 —— 空格子照样占宽度。
                */}
               {mkp ? (
-                <th className={s.thVersion} scope="col">
-                  版本
-                </th>
+                <SortTh label="版本" colKey="version" cls={s.thVersion} sort={sort} onSort={onSort} />
               ) : (
                 <>
-                  <th className={s.thNum} scope="col">
-                    喷嘴
-                  </th>
-                  <th className={s.thNum} scope="col">
-                    层高
-                  </th>
+                  <SortTh label="喷嘴" colKey="nozzle" cls={s.thNum} sort={sort} onSort={onSort} />
+                  <SortTh label="层高" colKey="layer" cls={s.thNum} sort={sort} onSort={onSort} />
                 </>
               )}
 
@@ -447,9 +515,13 @@ export default function PresetTable({
                * 云端表说的就是"云端这次发布是什么时候发的"（目录只盖了一个戳），
                * 本地表说的是"我这份什么时候改的" —— 两句话又各有主语了。
                */}
-              <th className={s.thTime} scope="col">
-                {scope === 'cloud' ? '云端更新' : '时间'}
-              </th>
+              <SortTh
+                label={scope === 'cloud' ? '云端更新' : '时间'}
+                colKey="time"
+                cls={s.thTime}
+                sort={sort}
+                onSort={onSort}
+              />
 
               {/*
                * 「来源」列撤了（2026-10-07 作者：「来源不用显示在右侧」）——
@@ -877,16 +949,14 @@ export default function PresetTable({
                      */}
                     <td colSpan={mkp ? 5 : 6}>
                       {/*
-                       * —— 展开 / 收起的小动画（2026-10-10 第九轮，抽卡页那套）——
-                       * 表格里没法给 `<tr>` 直接做高度过渡（高度由内容撑），所以把
-                       * 折动画放在 td 里这一层 `.dFold` 上（`grid-template-rows`
-                       * 0fr ↔ 1fr），tr 高度跟着它逐帧走。
-                       * 入场：挂载即播（条件渲染没有「上一帧」，用 CSS animation）；
-                       * 退场：收起时这一行先留在 DOM 里（`closing`）把高度收回 0，
-                       * 动画走完再卸载（见上面 `closing` 那段）。
-                       * 三段内衬：`.dFold`（折）→ `.dFoldCut`（裁）→ `.dFoldIn`
-                       * （内容落下 + 内边距 —— 卡片影子要的余地也在这里，
+                       * —— 展开 / 收起的小动画（2026-10-16 第四轮：行高不再动）——
+                       * 三段内衬：`.dFold`（撑开格子）→ `.dFoldCut`（裁）→ `.dFoldIn`
+                       * （内容落下 + 渐显 + 内边距 —— 卡片影子要的余地也在这里，
                        * 贴着裁剪边影子会被切）。
+                       * 动画只跑在 `.dFoldIn` 上（opacity / transform，走合成器）：
+                       * 在 `<table>` 里动行高 = 每帧整表重排，那是不顺的根源。
+                       * 退场：收起时这一行先留在 DOM 里（`closing`）把内容收走，
+                       * 动画走完再卸载（见上面 `closing` 那段）。
                        */}
                       <div className={s.dFold}>
                         <div className={s.dFoldCut}>

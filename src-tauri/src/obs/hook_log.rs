@@ -68,10 +68,17 @@ pub fn init(log_dir: &Path) -> Option<PathBuf> {
     Some(log_dir.join(format!("{PREFIX}.{}", today_suffix()?)))
 }
 
-/// 今天（本地时区）的 `YYYY-MM-DD` —— 与 `tracing_appender` 的按天后缀同一个格式，
+/// 今天的 `YYYY-MM-DD` —— 与 `tracing_appender` 的按天后缀同一个格式，
 /// 拼出来的路径就是它此刻正在写的那一份。
+///
+/// ★★ **必须取 UTC**（2026-10-16）：`rolling::daily` 是按 **UTC** 换文件的，
+/// 日期源只能有这一个 —— 取本地时区的话，本地日期与 UTC 差一天那几小时
+/// （本机 UTC+8 的 00:00–08:00）拼出来的是一个**不存在的文件名**，
+/// 结论行里打印给用户的 `hook.log_path` 就指空了（测试
+/// `init_reports_the_daily_file` 正是在那个时段撞出来的）。
+/// 一句话：文件名由 appender 定 ⇒ 路径也得从 appender 那个源取。
 fn today_suffix() -> Option<String> {
-    let now = time::OffsetDateTime::now_local().ok()?;
+    let now = time::OffsetDateTime::now_utc();
     let fmt = time::macros::format_description!("[year]-[month]-[day]");
     now.format(&fmt).ok()
 }

@@ -171,6 +171,8 @@ import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
+/* 「复制后处理脚本」全站那一份（与标题栏 MKP 字标、首页那颗同一个出口）—— 见那个文件的文件头 */
+import { copyPostProcessScript } from '../postprocess/copyScript'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
@@ -624,6 +626,52 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         `tr[data-rowkey="${CSS.escape(target.rowKey)}"]`,
       ) as HTMLElement | null
       if (row !== null) flashRow(row)
+    }, 60)
+  }
+
+  /**
+   * 云端那份 MKP 条目在**本地表**里那一行的行键（还没下载 ⇒ `null`）。
+   *
+   * 云端行的键认 `fileName`、本地文件行的键认**路径**，中间那道转换只有 `localIndex`
+   * 给得出（`cloudSource` 就是"从云端哪条下来的"）—— 这正是云端行那三态认亲的同一本账。
+   * 行键按「全部机型」那一档算，因为 `goLocal` 会把机型筛选清掉。
+   */
+  const localFileRowKey = (fileName: string): string | null => {
+    const hit = data.localIndex.find((e) => e.cloudSource === fileName)
+    return hit === undefined ? null : `local::${hit.path}`
+  }
+
+  /*
+   * **云端行 → 本地表**（2026-10-16 作者：「云端的右键菜单需要一个切换到本地的，
+   * 懒得点那个本地的切换」）。
+   *
+   * ★ **只是切过去，不展开详情**（作者当天补的第二句：「还有切换到本地的，
+   *   不要展开详细」）—— 上一版顺手 `setExpandedKey`，结果切过去那一行是炸开的，
+   *   一屏里多出一大块他没要看的详情。所以下面**没有** `setExpandedKey`，
+   *   只滚过去 + 闪一下：那一下闪光已经足够回答"是这一行"。
+   *
+   * 另两件事，与上面「来源定位」同一套手势：
+   *   ① 切到本地表；
+   *   ② 清掉机型筛选与搜索词 —— 不清的话目标行可能正好被筛掉，切过去看见一张空表，
+   *      那比不切更让人糊涂。
+   *
+   * 滚过去那一行要先认出它，账本与云端行那三态是**同一本**（`localIndex`）：
+   * MKP 档的本机副本是「本地文件」行，键形如 `local::<路径>`（`localFileRowKey`）；
+   * 切片器档那一行在本地表里与云端**同形**（都是 `<机型>:<路径>`），原样带过去。
+   * **认不出就不滚**（还没下载、正好不在列表里）—— 列表照常在那儿，不猜一个行键。
+   */
+  const goLocal = (row: PresetTableRow) => {
+    menu.close()
+    page.setScope('local')
+    data.pickMachine('')
+    page.setQuery('')
+    const rowKey = page.kind === 'mkp' ? localFileRowKey(row.fileName) : `${row.machineId}:${row.path}`
+    if (rowKey === null) return
+    window.setTimeout(() => {
+      const hit = rootRef.current?.querySelector(
+        `tr[data-rowkey="${CSS.escape(rowKey)}"]`,
+      ) as HTMLElement | null
+      if (hit !== null) flashRow(hit)
     }, 60)
   }
 
@@ -1206,13 +1254,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     )
   }
 
-  /** 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在 */
+  /**
+   * 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在。
+   *
+   * ★ 置顶**可不是"排到最前"就算了**（2026-10-16 作者：「后面点的置顶的应该置顶，
+   *   多个置顶的按照先后顺序，后点击的置顶」）：多个置顶之间按**点击先后**倒着排，
+   *   最近一次点的那份在最上面。所以置顶第二份时它**顶到第一份前面**，
+   *   那一句提示也得跟着说清（"排到最前"而不是"已置顶"）。
+   */
   const togglePin = (row: PresetTableRow) => {
     page.togglePin(row.pinKey)
     setNote({
       text: row.pinned
         ? `已取消置顶 ${row.fileName}（只影响这张表的顺序）`
-        : `已置顶 ${row.fileName}（只影响这张表的顺序，不是「设为当前」）`,
+        : `已把 ${row.fileName} 排到最前（只影响这张表的顺序，不是「设为当前」）`,
       bad: false,
     })
   }
@@ -1362,13 +1417,29 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     return undefined
   }
 
-  const bbsEntry = (row: PresetTableRow): ContextMenuEntry => ({
-    id: 'bbs',
-    /* 2026-10-10 压缩：「在 BBS 预设查看器中打开」（9 字）→「在 BBS 中查看」 */
-    label: '在 BBS 中查看',
-    disabled: bbsWhyNot(row),
-    onSelect: () => onOpenBbs?.(row.fileName),
-  })
+  /*
+   * **「查看工艺预设」**：跳去 BBS 预设查看器看这一份。
+   *
+   * # 灰着的就不出现（2026-10-16 作者：「mkp 的是灰色的就不显示」）
+   *
+   * 全站那条铁律是「禁用一定带原因」（见 `components/menu/types.ts`）—— 但那条针对的是
+   * **用户本来就该能做、这会儿被挡住**的动作（改名 / 复制 / 删除），灰着并说清为什么
+   * 是有用的。这一项不属于那一类：它只有 BBS 工艺预设（`.json`）走得了，
+   * 而 MKP 档整档都是 MKP 配方（toml）—— `bbsWhyNot` **恒**有话说 ⇒ 那一档上它永远灰着。
+   * 一个在任何行上都点不动、只为解释自己为什么点不动而存在的项，是纯噪声 ⇒ 干脆不列。
+   *
+   * # 词（2026-10-16 作者：「在 BBS 中查看这个文案改成查看工艺预设」）
+   *
+   * 沿革：「在 BBS 预设查看器中打开」→「在 BBS 中查看」→ **「查看工艺预设」**。
+   * 中间那版说的是"去哪儿看"，作者要的是"看的是什么东西"（工艺预设）。
+   * 不挂图标：它只在工艺预设上才出现，是这几张菜单里最冷的一档。
+   */
+  const bbsEntries = (row: PresetTableRow): ContextMenuEntry[] => {
+    if (bbsWhyNot(row) !== undefined) return []
+    return [
+      { id: 'bbs', label: '查看工艺预设', onSelect: () => onOpenBbs?.(row.fileName) },
+    ]
+  }
 
   /**
    * 「重命名」为什么不能点（第十层）。只有**本地文件**能改 ——
@@ -1525,6 +1596,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 「参数对比」那一项。**只在能进台子的行上出现**（`canCompare`）——
    * 其余行整项不出现：那是"这台子只比本地预设"这条边界本身，
    * 不是"哪一项坏了"（灰一项再加一句，反倒把它讲成故障）。
+   *
+   * 三个分支都**不挂图标**（2026-10-16 作者）。它这一族（含「取消对比选择」/
+   * 「与「X」对比」）本身就是一项的三种说法，挂了反而把"同一个动作"讲成三件事。
    */
   const compareEntry = (row: PresetTableRow): ContextMenuEntry => {
     if (comparePick !== null && comparePick.path === row.path) {
@@ -1577,16 +1651,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       return [
         {
           id: 'download',
+          icon: 'download',
           label,
           disabled: whyNot,
           onSelect: () => download(row),
         },
+        /* 见 `goLocal`。云端表一味只读 —— "我这一份怎么样"永远在**本地表**那一侧，
+           所以这里给一条过去的路，省得先抬头去点顶上那个「本地/云端」分段。 */
+        { id: 'goLocal', icon: 'swap', label: '切换到本地', onSelect: () => goLocal(row) },
         {
           id: 'link',
+          icon: 'link',
           label: '复制链接',
           onSelect: () => copyLink(row),
         },
-        bbsEntry(row),
+        ...bbsEntries(row),
       ]
     }
 
@@ -1620,15 +1699,92 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 其余行的原因照旧按 `useWhyNot` 给（不给必报错的项）。
        */
       const useEntry: ContextMenuEntry = row.live
-        ? { id: 'unuse', label: ASSET_USE_TEXT.cancel, onSelect: runUnuse }
+        ? { id: 'unuse', icon: 'close', label: ASSET_USE_TEXT.cancel, onSelect: runUnuse }
         : {
             id: 'use',
+            icon: 'check',
             label: ASSET_USE_TEXT.off,
             disabled: useWhyNot,
             onSelect: () => runUse(row),
           }
+      /*
+       * # 这一档的**顺序**是给"图标交替"排的（2026-10-16 作者：「置顶的还是加上图标吧，
+       *   重新排一下顺序」；同一天又定：「复制脚本的也需要图标，复制文件的不需要图标」）
+       *
+       * 挂图标的六项：复制后处理脚本 · 使用 · 修改参数 · 在访达中显示 · 置顶 · 删除；
+       * 空着的四项：编辑文件 · 参数对比 · 复制 · 重命名。
+       *
+       * ★★ 六比四 ⇒ 光"给常用的挂"排不出交替，必须**让空着的四项插进挂的六项之间** ——
+       *   所以下面这张表的顺序就是"一个挂、一个不挂"这么串起来的：
+       *
+       *     复制后处理脚本● 编辑文件○ 使用● 参数对比○ 修改参数●
+       *     复制○ 在访达中显示● 重命名○ 置顶● ── 删除●
+       *
+       *   唯一一处相邻是「置顶 / 删除」，而**分隔线**把它俩隔开了 ⇒ 视觉上没有二连。
+       *
+       * ★ 「编辑文件」与「参数对比」的条件**完全相同**（本地 + MKP 预设 + 读得出），
+       *   所以它们**同进同出**，排布只有两种模样 —— 上面的排法两种都不出三连
+       *   （两者都不在时：脚本● 使用● 参数对比不在 修改参数● 复制○ 显示● 重命名○ 置顶● ── 删除●）。
+       *
+       * ★ 两件都叫"复制"，**挂图标的是"复制脚本"那一项**（作者点名的），
+       *   「复制」（复制出一份文件）**空着** —— 不要因为名字像就把图标安回文件那一项。
+       */
+      /*
+       * **「复制后处理脚本」排第一**（2026-10-16 作者：「本地的 mkp 的还要加一个复制
+       * 后处理脚本，需要排在第一」）。
+       *
+       * 为什么是第一：它是这一行上**唯一一个"把你这份拿去用"**的动作 ——
+       * 其余九项都是"改我这一份 / 整理这张表"。作者从右键进来多半就是为了抄这条命令。
+       *
+       * # 判据：这一份**自己的归属**（文件头 `# machine:` / `# variant:`）
+       *
+       * 命令按 (机型, 版本) 寻址（`getPostProcessCommand`），所以要有归属才抄得了；
+       * 导入的裸文件没有那两行 ⇒ `ownMachineId / ownVersionId` 是 null ⇒ **灰着并说原因**
+       * （灰一项不说为什么，用户只会以为坏了）。
+       * ★ 注意与行上那个 `machineId` 分开：那是**筛选档**（这一行挂在哪个机型分栏下），
+       *   归属是**文件自己的**（`presetTree` 里那两个字段就是为这件事存在的）。
+       *
+       * # 不挂图标
+       *
+       * 排第一且**不挂**正好把整张菜单的交替排出来（●使用 ○编辑文件 ●修改参数 …）；
+       * 挂了就是开头两个图标连排。
+       */
+      const scriptWhyNot =
+        row.ownMachineId === null || row.ownMachineId === undefined
+          ? '这一份没标归属（文件头没有 # machine: / # variant:），指不到要给哪台机型的脚本'
+          : row.ownVersionId === null || row.ownVersionId === undefined
+            ? '这一份没标版本（文件头没有 # variant:），指不到要给哪一版的脚本'
+            : undefined
+      const scriptEntry: ContextMenuEntry = {
+        id: 'script',
+        /* 挂图标（作者：「复制脚本的也需要图标」）—— 用 `copy`（两份纸）：
+           它本来就是为"复制"做的，现在归这一项；下面「复制」（复制文件）那一项空着 */
+        icon: 'copy',
+        label: '复制后处理脚本',
+        disabled: scriptWhyNot,
+        onSelect: () =>
+          void copyPostProcessScript({
+            machineId: row.ownMachineId ?? '',
+            versionId: row.ownVersionId ?? '',
+            fileName: row.fileName,
+          }),
+      }
+
       return [
+        scriptEntry,
+        /*
+         * 「编辑文件」在第二位：它不挂图标，正好隔开首项「复制后处理脚本」与「使用」。
+         * 改的是**正文**。
+         * `satisfies` 不能省：条件表达式的两个分支拿不到外层的上下文类型，
+         * `icon: 'doc'` 会被推成 `string`，整个数组就配不上 `ContextMenuEntry`。
+         */
+        ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
+          ? ([{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
+          : []),
         useEntry,
+        /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry`。
+           不挂图标 —— 它在这里的作用就是隔开「使用」与「修改参数」那两个图标 */
+        ...(canCompare(row) ? [compareEntry(row)] : []),
         /*
          * 参数表那一屏（2026-10-09）：改的是参数本身。
          * ★ 「选择要跟随的云端更新」2026-10-10 按作者裁决**从菜单里去掉**了
@@ -1637,41 +1793,68 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
          */
         {
           id: 'params',
-          /* 「修改参数」（2026-10-10 作者：原来那句「打开参数」不好听，况且它进来
-             就是那一张改参数的屏；旁边「编辑文件」改的是正文，两个词各归各位） */
+          icon: 'params',
+          /*
+           * **「修改参数」**（2026-10-10 作者定词；2026-10-16 别再动它）。
+           *
+           * 沿革：「打开参数」→ **「修改参数」**。
+           * ★ 2026-10-16 我一度改成「查看工艺参数」—— **改错了那一处**：
+           *   作者那天要改的词是**「在 BBS 中查看」→「查看工艺预设」**（同一句里下达的两件事，
+           *   我把它归到了这一项上）。业务词没变：「修改参数」是**全站用语**（参数页标题、
+           *   页脚那句提示、行上那枚「未保存」的 tooltip 全叫它），改这一处等于造一个只有
+           *   菜单里才有的说法。
+           * 与旁边「编辑文件」的分工照旧：这条进**参数表**、那条改**正文**。
+           */
           label: '修改参数',
           disabled: paramsWhyNot(row),
           onSelect: () => openParams(row, false),
         },
-        /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` */
-        ...(canCompare(row) ? [compareEntry(row)] : []),
-        ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
-          ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
-          : []),
         {
           id: 'copy',
-          /* 「复制」（2026-10-10 作者：文案太长 → 短词，点了就自动出一份） */
+          /* 「复制」（2026-10-10 作者：文案太长 → 短词，点了就自动出一份）。
+             ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）——
+             上面「复制后处理脚本」那一项挂着 `copy`，这一项空着，两边各归各位 */
           label: LOCAL_COPY.cell,
           disabled: copyWhyNot(row),
           onSelect: () => runDuplicate(row),
         },
+        {
+          id: 'reveal',
+          icon: 'folder',
+          label: REVEAL_LABEL,
+          disabled: revealWhyNot(row),
+          onSelect: () => runReveal(row),
+        },
+        /* 不挂图标 —— 隔开「在访达中显示」与「置顶」 */
         {
           id: 'rename',
           label: '重命名',
           disabled: renameWhyNot(row),
           onSelect: () => openRename(row),
         },
+        /*
+         * **「置顶」的图标加回来了**（2026-10-16 作者：「置顶的还是加上图标吧」）——
+         * 上一轮为了跟「在访达中显示」「删除」错开把它摘了，作者要回来。
+         * 代价是与上面「在访达中显示」相邻两个图标；可接受：它俩同属"位置与整理"，
+         * 且再下面就是分隔线，不会连成三排。
+         *
+         * ★ **两态两枚图标**（同一天作者：「置顶，取消置顶的图标要有变化」）：
+         *   已置顶 ⇒ `pinOff`（图钉带斜杠）、未置顶 ⇒ `pin`。
+         *   文字已经写了「取消置顶 / 置顶」，但**图标跟着变**才扫得出来 ——
+         *   菜单里那一列字长得差不多，靠文字找"我现在是钉着还是没钉"要读一遍。
+         */
         {
-          id: 'reveal',
-          label: REVEAL_LABEL,
-          disabled: revealWhyNot(row),
-          onSelect: () => runReveal(row),
+          id: 'pin',
+          icon: row.pinned ? 'pinOff' : 'pin',
+          label: row.pinned ? '取消置顶' : '置顶',
+          onSelect: () => togglePin(row),
         },
-        { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
-        bbsEntry(row),
+        /* MKP 档这一项恒为空（`bbsWhyNot` 对 MKP 配方恒有话说）—— 见 `bbsEntries` */
+        ...bbsEntries(row),
         { separator: true },
         {
           id: 'remove',
+          icon: 'trash',
           label: '删除',
           danger: true,
           disabled: removeWhyNot(row),
@@ -1699,15 +1882,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const suspect = isSuspectPreset(row.presetState)
 
     return [
-      { id: 'pin', label: row.pinned ? '取消置顶' : '置顶', onSelect: () => togglePin(row) },
+      /* 两态两枚图标（`pinOff` / `pin`）—— 与上面 MKP 档那一项同一条，理由见那里 */
+      {
+        id: 'pin',
+        icon: row.pinned ? 'pinOff' : 'pin',
+        label: row.pinned ? '取消置顶' : '置顶',
+        onSelect: () => togglePin(row),
+      },
       /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` ——
          切片器档这一侧只有「本地文件」里读得出来的 MKP 预设才有这一项 */
       ...(canCompare(row) ? [compareEntry(row)] : []),
+      /* 同上：`satisfies` 是给条件表达式补上下文类型用的，不是装饰 */
       ...(canEdit
-        ? [{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }]
+        ? ([{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
         : []),
       {
         id: 'copy',
+        /* ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）—— 与 MKP 档那一项同一条 */
         label: LOCAL_COPY.cell,
         /* 本地文件 → 本地文件（第十一层，按字节复制、血统原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
@@ -1729,6 +1920,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        *
        * 这张表里列的都是**盘上真有**的那些（未下载的不进本地表）⇒ 第一条恒可点；
        * 第二条看「已复制」那一格（`live`）。
+       *
+       * 两条也**都不挂图标**：它们是同一件事的两个落点，空着正好把彼此认成一伙。
        */
       {
         id: 'revealOurs',
@@ -1741,10 +1934,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         disabled: row.live ? undefined : '还没复制进切片器 —— 先在行上点「复制」',
         onSelect: () => runRevealSlicer(row),
       },
-      bbsEntry(row),
+      ...bbsEntries(row),
       { separator: true },
       {
         id: 'remove',
+        icon: 'trash',
         label: '删除',
         danger: true,
         /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
@@ -2075,6 +2269,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
                  */
                 busyKey={busyKey}
+                /* 表头排序（2026-10-16）：状态在 `page` 里（落会话），表这边只把点击交出去 */
+                sort={page.sort}
+                onSort={page.toggleSort}
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}

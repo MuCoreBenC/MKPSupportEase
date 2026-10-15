@@ -15,9 +15,10 @@
  * 只在**有任务时**订阅事件 + 显示；`updateInfo` 由设置页问过一次顺手带回来
  * （`PageSettings` 把 `hasUpdate` 写进 store），这里读那份。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, errorText, listen } from '../../api'
+import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateInfo, UpdateState } from '../../api/contract'
 import s from './UpdateIndicator.module.css'
 
@@ -68,6 +69,71 @@ interface Props {
    * 演示时不点它们（点了也只是如实报"现在没有下载"）。
    */
   devPreview?: UpdateState
+}
+
+/** `buildActions` 要的那几件事（避免在调用处写一大坨内联函数） */
+interface ActionDeps {
+  pause: () => void
+  resume: () => void
+  cancel: () => void
+  install: () => void
+  retry: () => void
+  /** `null` = 现在没有可下的一版（`release.json` 没给 asset） */
+  download: (() => void) | null
+  latestVersion: string
+  assetSize: number
+}
+
+/**
+ * 按当前状态拼出**该露哪几颗按钮**。
+ *
+ * ★ 2026-10-16：从原来那段 JSX 里原样搬过来（四态 → 按钮的对应关系一个字没改），
+ * 只是产出从 `<button>` 变成 `NotifyAction[]`。
+ * ★ `disabled` 只给"正在忙"那一档 —— 原来那几颗的禁用条件也是这个。
+ */
+function buildActions(
+  shown: UpdateState,
+  busy: boolean,
+  d: ActionDeps,
+): NotifyAction[] | undefined {
+  switch (shown.state) {
+    case 'downloading':
+      return [
+        { label: '暂停', onClick: d.pause, disabled: busy },
+        { label: '取消', onClick: d.cancel, disabled: busy },
+      ]
+    case 'paused':
+      return [
+        { label: '继续', onClick: d.resume, disabled: busy },
+        { label: '取消', onClick: d.cancel, disabled: busy },
+      ]
+    case 'ready':
+      return [{ label: '重启并安装', onClick: d.install, disabled: busy, primary: true }]
+    case 'failed':
+      return [{ label: '重试', onClick: d.retry, disabled: busy }]
+    case 'cancelled':
+      /* 取消之后还能重来一遍（要真有可下的那一版） */
+      return d.download !== null
+        ? [
+            {
+              label: `下载 ${d.latestVersion}（${mb(d.assetSize)}）`,
+              onClick: d.download,
+              disabled: busy,
+            },
+          ]
+        : undefined
+    default:
+      /* idle：什么也不露（"有没有新版"那件事由指示器那颗图标自己说） */
+      return d.download !== null
+        ? [
+            {
+              label: `下载 ${d.latestVersion}（${mb(d.assetSize)}）`,
+              onClick: d.download,
+              disabled: busy,
+            },
+          ]
+        : undefined
+  }
 }
 
 export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
@@ -133,7 +199,90 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
       onInstalled(latest)
     })
 
+  /*
+   * ★★★ 2026-10-16：面板从"自绘"改成**推给全站通知系统**（作者定的统一方案）。
+   *
+   * 三条纪律：
+   *  - `sticky`：**不自动消失**（`ttl: 0`）。它有"暂停 / 取消"这种必须点得到的按钮，
+   *    飘走了用户就操作不了。要收掉只能点 ×（或状态自己走到终态）。
+   *  - **同一条通知就地改名/改进度**（`update`），不每次新开一条 ——
+   *    进度事件每 120ms 推一次，新开一条会瞬间糊满右上角。
+   *  - 卸载 / 收起时 `dismiss` 收回，不留残影。
+   *
+   * ★ 进度用 `progress`（0~1）而不是把百分比写进 `text`：通知卡片自己画进度条，
+   *   两条通知（更新 + 复制）的形态才真正是同一种。
+   */
+  const noticeId = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!isVisible(shown) || !open) {
+      /* 收起：把这条收回（面板关了就不该继续挂在那儿） */
+      if (noticeId.current !== null) {
+        dismiss(noticeId.current)
+        noticeId.current = null
+      }
+      return
+    }
+
+    const pct =
+      (shown.state === 'downloading' || shown.state === 'paused') && shown.total > 0
+        ? shown.received / shown.total
+        : undefined
+
+    const body: Omit<Notice, 'id'> = {
+      kind: error !== null ? 'bad' : shown.state === 'failed' ? 'bad' : shown.state === 'ready' ? 'ok' : 'info',
+      title: '软件更新',
+      /* ★ 操作失败（`error`，如点"暂停"时后端报错）**优先于**状态文案 ——
+         原来它显示在面板底部，现在并入正文，不许静默吞掉。 */
+      text:
+        error !== null
+          ? error
+          : shown.state === 'downloading'
+            ? `正在下载 ${mb(shown.received)}${shown.total > 0 ? ` / ${mb(shown.total)}` : ''}`
+            : shown.state === 'paused'
+              ? `已暂停（${mb(shown.received)}）`
+              : shown.state === 'ready'
+                ? '下载完成，可以重启安装。'
+                : shown.state === 'failed'
+                  ? `下载失败：${shown.reason}`
+                  : shown.state === 'cancelled'
+                    ? '已取消。'
+                    : '',
+      progress: pct,
+      /* 不自动走（有按钮）。用户点 × 收掉 */
+      ttl: 0,
+      actions: buildActions(shown, busy, {
+        pause: () => void act(() => api.pauseUpdate()),
+        resume: () => void act(() => api.resumeUpdate()),
+        cancel: () => void act(() => api.cancelUpdate()),
+        install: () => void install(),
+        retry: () => void act(() => api.startUpdate()),
+        download:
+          info?.hasUpdate === true && info.asset !== undefined
+            ? () => void act(() => api.startUpdate())
+            : null,
+        latestVersion: info?.latestVersion ?? '',
+        assetSize: info?.asset?.size ?? 0,
+      }),
+    }
+
+    if (noticeId.current === null) {
+      noticeId.current = notify(body)
+    } else {
+      update(noticeId.current, body)
+    }
+  }, [shown, open, busy, info, error, act]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* 卸载：把这条收回（切窗口 / 换页时不留孤儿通知） */
+  useEffect(
+    () => () => {
+      if (noticeId.current !== null) dismiss(noticeId.current)
+    },
+    [],
+  )
+
   if (!isVisible(shown)) return null
+
 
   const ring =
     shown.state === 'downloading' || shown.state === 'paused'
@@ -168,85 +317,6 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
         <span className={s.label}>{progressLabel(shown)}</span>
       </button>
 
-      {open && (
-        <div className={s.panel} role="dialog" aria-label="软件更新">
-          <div className={s.head}>
-            <b>软件更新</b>
-            <button type="button" className={s.close} onClick={() => setOpen(false)} aria-label="关闭">
-              ×
-            </button>
-          </div>
-
-          {shown.state === 'downloading' && (
-            <p className={s.line}>
-              正在下载 {mb(shown.received)}
-              {shown.total > 0 ? ` / ${mb(shown.total)}` : ''}
-            </p>
-          )}
-          {shown.state === 'paused' && (
-            <p className={s.line}>已暂停（{mb(shown.received)}）</p>
-          )}
-          {shown.state === 'ready' && <p className={s.line}>下载完成，可以重启安装。</p>}
-          {shown.state === 'failed' && <p className={`${s.line} ${s.bad}`}>下载失败：{shown.reason}</p>}
-          {shown.state === 'cancelled' && <p className={s.line}>已取消。</p>}
-
-          <div className={s.actions}>
-            {shown.state === 'downloading' && (
-              <>
-                <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api.pauseUpdate())}>
-                  暂停
-                </button>
-                <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api.cancelUpdate())}>
-                  取消
-                </button>
-              </>
-            )}
-            {shown.state === 'paused' && (
-              <>
-                <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api.resumeUpdate())}>
-                  继续
-                </button>
-                <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api.cancelUpdate())}>
-                  取消
-                </button>
-              </>
-            )}
-            {shown.state === 'ready' && (
-              <button type="button" className={`${s.btn} ${s.btnPrimary}`} disabled={busy} onClick={() => void install()}>
-                重启并安装
-              </button>
-            )}
-            {shown.state === 'failed' && (
-              <button
-                type="button"
-                className={s.btn}
-                disabled={busy}
-                onClick={() => void act(() => api.startUpdate())}
-              >
-                重试
-              </button>
-            )}
-          </div>
-
-          {/* 「下载这一版」：只有 release.json 给了 asset 才有得下 */}
-          {info?.hasUpdate === true && info.asset !== undefined && shown.state !== 'ready' && (
-            <button
-              type="button"
-              className={`${s.btn} ${s.btnWide}`}
-              disabled={busy || shown.state === 'downloading' || shown.state === 'paused'}
-              onClick={() => void act(() => api.startUpdate())}
-            >
-              下载 {info.latestVersion}（{mb(info.asset.size)}）
-            </button>
-          )}
-
-          {error !== null && (
-            <p className={s.bad} role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-      )}
     </div>
   )
 }

@@ -148,7 +148,34 @@ pub fn run() {
             #[cfg(not(feature = "workbench"))]
             if let Some(win) = app.get_webview_window("main") {
                 chrome::install_unified_toolbar(&win);
-                chrome::apply_native_corners(&win);
+                /* 圆角、以及**圆角外面那一圈的填色**。填色的深浅要按"用户选的那一档"算
+                （`resolved_dark`：档位是"跟随系统"时才问原生外观）—— 直接读 webview 的
+                `effectiveAppearance` 只会得到系统深浅，作者那台是"档位深色 + 系统浅色"，
+                那样读会画错。 */
+                let dark = ipc::prefs::resolved_dark(ipc::prefs::theme_pref(app.handle()), &win);
+                chrome::apply_native_corners(&win, dark);
+                /* 红绿灯：装了统一工具栏之后 AppKit 摆的是 (26,26) 那组默认坐标，
+                我们按作者的要求再往左上挪一点；★ 它会在 resize / 进出全屏 / 切外观时
+                被 AppKit 摆回去 ⇒ 下面那两个事件里都要**再摆一次**（函数是幂等的） */
+                chrome::reposition_traffic_lights(&win);
+                /* 两条原生的"重摆"时机：① 档位是"跟随系统"时系统深浅变了（CSS 那侧由
+                `prefers-color-scheme` 自己跟上，原生这侧没人管就会留旧色）；
+                ② 尺寸变了（拉窗 / 进出全屏）—— 灯的位置要补一次 */
+                let watcher = win.clone();
+                win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::ThemeChanged(_) => {
+                        let pref = ipc::prefs::theme_pref(watcher.app_handle());
+                        chrome::repaint_corner_fill(
+                            &watcher,
+                            ipc::prefs::resolved_dark(pref, &watcher),
+                        );
+                        chrome::reposition_traffic_lights(&watcher);
+                    }
+                    tauri::WindowEvent::Resized(_) => {
+                        chrome::reposition_traffic_lights(&watcher);
+                    }
+                    _ => {}
+                });
             } else {
                 eprintln!("[setup] 找不到 main 窗口，跳过窗口外观");
             }

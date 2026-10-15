@@ -47,9 +47,8 @@ import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
 import CalibReadings from './CalibReadings'
 /* 测试模型那一屏的合影：**界面自带素材**（不进 Catalog / Delivery）。
-   与首页第五步用的是同一张，从 `src/app/assets/hero/` import */
-import heroPile from '../assets/hero/hero_pile.webp'
-import heroPile2x from '../assets/hero/hero_pile@2x.webp'
+   与首页第五步用的是同一张，取图那一步（浅 / 深两张）收在 `heroPileSource` 里 */
+import { heroPileSource } from '../assets/hero/heroPile'
 import { useIsDark } from '../state/appState'
 import { slicerArgsOf, useSlicerAppPref, useSlicerPick, useSlicerPref } from '../shared/slicer'
 import { SlicerPickView } from '../shared/SlicerPickView'
@@ -238,6 +237,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
+  /* 测试模型那张合影：白件在深底上要暗一档，所以深浅各一张位图（见 heroPile.ts） */
+  const pile = heroPileSource(isDark)
   const [step, setStep] = useState<Step>(initialStep ?? 'z')
   const [sel, setSel] = useState<Selection>(EMPTY)
   /* 「先回『选择机型』……」只在没有基准**成为事实**之后才许出现 ——
@@ -791,8 +792,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
              */}
             <img
               className={s.modelsImg}
-              src={heroPile}
-              srcSet={`${heroPile} 1x, ${heroPile2x} 2x`}
+              src={pile.src}
+              srcSet={pile.srcSet}
               alt="测试模型"
               draggable={false}
             />

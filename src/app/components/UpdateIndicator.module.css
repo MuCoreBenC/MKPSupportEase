@@ -60,102 +60,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-.panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  /*
-   * ★ 层级：它挂在**标题栏**里（`TopTabs` 自带 z-index 94），是"顶部那一层"的东西 ——
-   *   理应盖过**所有内容区的模态框**（模态框是 40，且只盖内容区）。
-   *   这里给 91：压过内容区一切（FieldLayer 90 / 模态框 40），但**低于**标题栏自己
-   *   承载的那一档、也低于后处理跑着那一屏（95）—— 作者 2026-10-14 定的顺序：
-   *   后处理 > 更新面板 > 模态框。
-   */
-  z-index: 91;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 264px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-raised, var(--surface-solid));
-  box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-}
-
-.close {
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.close:hover {
-  /* `--surface-hover` 从来不存在（浅深两套都失效的旧笔误）——换成"悬停一层"的 --hover-1 */
-  background: var(--hover-1);
-}
-
-.line {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-
-.bad {
-  margin: 0;
-  font-size: 12px;
-  color: var(--danger);
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-solid);
-  color: var(--text-1);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.btn:hover:not(:disabled) {
-  /* `--surface-hover` 从来不存在（浅深两套都失效的旧笔误）——换成"悬停一层"的 --hover-1 */
-  background: var(--hover-1);
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.btnPrimary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
-.btnPrimary:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.btnWide {
-  width: 100%;
-}
+/*
+ * ★★★ 2026-10-16：`.panel` 及它那一整族（head / close / line / bad / actions /
+ *   btn / btnPrimary / btnWide）**全部删除** —— 面板不再自绘，改推给**全站通知系统**
+ *   （`src/app/notify/`）。理由见 `notify.ts` 头注释：两套材质各写一遍，
+ *   深色适配就漏了一处（作者报的"深色下发白"）。
+ *
+ * ★ 留着 `.wrap` / `.icon` / `.ring` / `.track` / `.bar` / `.label`：
+ *   那颗**进度环入口**还在标题栏上（它自己不是面板，是面板的开关）。
+ */

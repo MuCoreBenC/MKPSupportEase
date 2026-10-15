@@ -23,11 +23,25 @@
  * 不另开一个对话框：确认层就在菜单的位置上，替换掉列表。理由是删除这件事发生在**某一行**上，
  * 把问句抬到屏幕正中会丢掉「问的是哪一行」这个上下文。
  * 确认层上**点外面不关** —— 不可逆的事必须显式选一个。
+ *
+ * # 图标悬停放大（2026-10-16 作者：「要那种悬停缩放 103% 的那种」→ 之后「放大一点」）
+ *
+ * ① 用 **WAAPI**（`el.animate`）而不是 CSS `transition` —— 这台机器的 WKWebView 上
+ *    CSS 动画/过渡那条管线就是不播（MEMORY 有案，`transition` 会一帧内跳变）；
+ * ② 放大的**只有图标**，不是整行（整行动会让 8 项一起晃，读起来像列表在抖）；
+ * ③ 只动 `transform`，**绝不动 `opacity`**（`fill: 'forwards'` 会把元素永久按在末态）；
+ * ④ 从哪放大就从哪缩回：起始值取自 `dataset.scale`，否则 `cancel()` 一撤，
+ *    元素瞬间回 1，再补一段 1→1 的空动画（看着像"缩不回去"）。
+ *
+ * ★ 倍数与会话档：103%（第一版，作者看完说"大一点"）→ **118%**（现行）。
+ *   这个数要跟 `ICON_MS` 一起看：幅度大了，时长就得跟着长一点，否则是"啪"地一跳
+ *   而不是"涨"一下。**再往上就会顶到相邻行的字**（行高 30、图标 16），到头了。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import Icon from '../Icon'
 import { useFieldLayer } from '../field'
 import { isSeparator } from './types'
 import type { ContextMenuEntry, ContextMenuItem, ContextMenuPoint } from './types'
@@ -52,6 +66,31 @@ interface Props {
 
 /** 贴边的安全边距。和 FieldPopover 用同一个数 */
 const EDGE = 6
+
+/** 图标悬停的放大倍数与时长（见文件头 ★ 那条：103% 是初版，作者要更大 ⇒ 118%） */
+const ICON_HOVER = 1.18
+const ICON_MS = 160
+
+/**
+ * 把某一行里的图标缩到 `to`（见文件头「图标悬停放大」）。
+ *
+ * 之所以要 `dataset.scale` 记账：动画是 `fill: 'forwards'` 挂在元素上的，
+ * 下一次进来先把上一段 `cancel()` 掉 —— 若不记账，起始值就只能读到样式表里的 1，
+ * 于是"缩回去"永远是一段 1→1 的空转（图标啪地跳回原位）。
+ */
+function scaleIcon(row: HTMLElement | null, to: number): void {
+  const el = row?.querySelector<HTMLElement>('[data-ico]')
+  if (el === null || el === undefined) return
+  const from = el.dataset.scale ?? '1'
+  if (from === String(to)) return
+  el.dataset.scale = String(to)
+  el.getAnimations().forEach((a) => a.cancel())
+  el.animate([{ transform: `scale(${from})` }, { transform: `scale(${to})` }], {
+    duration: ICON_MS,
+    easing: 'ease-out',
+    fill: 'forwards',
+  })
+}
 
 export default function ContextMenu({ at, entries, onClose, startConfirming }: Props) {
   const layer = useFieldLayer()
@@ -198,8 +237,20 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
                 title={entry.disabled}
                 tabIndex={-1}
                 onClick={() => pick(entry)}
+                /* 悬停/键盘聚焦都放大 —— 键盘走到哪一项，那一项的图标也"亮"到 103% */
+                onMouseEnter={(e) => scaleIcon(e.currentTarget, ICON_HOVER)}
+                onMouseLeave={(e) => scaleIcon(e.currentTarget, 1)}
+                onFocus={(e) => scaleIcon(e.currentTarget, ICON_HOVER)}
+                onBlur={(e) => scaleIcon(e.currentTarget, 1)}
               >
-                {entry.label}
+                {/*
+                  图标槽**无差别占位**：没挂图标的项也留同样宽的一条，
+                  否则"挂了图标"与"没挂"的行左缘会参差（作者要求只给高频项挂 ⇒ 混排是常态）。
+                */}
+                <span className={s.ico} data-ico={entry.icon === undefined ? undefined : '1'}>
+                  {entry.icon !== undefined && <Icon name={entry.icon} />}
+                </span>
+                <span className={s.label}>{entry.label}</span>
               </button>
             </li>
           ),

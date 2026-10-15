@@ -16,7 +16,7 @@
 //! 写成功走 [`super::notify_app_state`] 广播 —— 前端不用"切完手动刷新"，
 //! 与 AppState 其它格是同一条通道（`docs/APP-STATE.md` §7）。
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::fsx::paths::internal_root;
@@ -42,6 +42,10 @@ pub async fn get_theme(app: AppHandle) -> Result<Option<String>, AppError> {
 
 /// 换主题档位：`light` / `dark` / `system`。**先认字符串再落盘** ——
 /// 认不出就整次拒绝（不静默写成浅色：那会让界面显示的和盘上的不是一回事）。
+///
+/// ★ 落盘之后要顺手把**原生那一层**也换掉（`chrome::repaint_corner_fill`）：
+/// 圆角窗外那一圈填色是 AppKit 画的，CSS 碰不到它（见 `chrome.rs` 里那段注释）。
+/// 不重画的话，用户在设置里换档之后，那一圈会留着上一次的颜色 —— 深色界面上就是一条白光。
 #[tauri::command]
 pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError> {
     traced("setTheme", |_| {
@@ -53,8 +57,38 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
         })?;
         runtime::app_state::set_theme(&root, pref)?;
         notify_app_state(&app);
+        if let Some(win) = app.get_webview_window("main") {
+            crate::chrome::repaint_corner_fill(&win, resolved_dark(Some(pref), &win));
+        }
         Ok(pref.wire().to_owned())
     })
+}
+
+/// **现在到底是不是深色** —— 原生那一层与 CSS 用的是同一条规则：
+/// 先看**用户选的那一档**，只有 `system`（或"还没选过"）才去问**原生外观**。
+///
+/// 「跟随系统」这一档问原生外观是**同源**而不是第二个判据：CSS 那侧的 `prefers-color-scheme`
+/// 在 macOS 上读的正是窗口的外观（见 `src/app/state/theme.ts` 的 `resolveDark`）。
+///
+/// ★★ 为什么不能直接读 `webview.effectiveAppearance()`：那玩意儿**只跟系统外观走** ——
+/// 用户选"深色"而系统是浅色时，它会答"浅色"（作者那台就是这种组合，2026-10-15 提交前补的洞）。
+pub fn resolved_dark<R: tauri::Runtime>(
+    pref: Option<ThemePref>,
+    win: &tauri::WebviewWindow<R>,
+) -> bool {
+    match pref {
+        Some(ThemePref::Dark) => true,
+        Some(ThemePref::Light) => false,
+        _ => matches!(win.theme(), Ok(tauri::Theme::Dark)),
+    }
+}
+
+/// 读盘上那一档（给启动时算原生外观用；`None` = 还没选过 ⇒ 跟随系统）。
+pub fn theme_pref(app: &AppHandle) -> Option<ThemePref> {
+    internal_root(app)
+        .ok()
+        .and_then(|root| runtime::app_state::theme(&root).ok())
+        .flatten()
 }
 
 /// 后处理记录的**自动清理**开着吗（2026-10-13）。

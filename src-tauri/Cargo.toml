@@ -171,10 +171,12 @@ ctrlc.workspace = true
 core-foundation = "0.10"
 objc2 = "0.6"
 # objc2-quartz-core：CALayer 的 cornerCurve —— 圆角曲率要从普通圆弧换成系统原生的连续曲率（见 chrome.rs）
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "objc2-quartz-core"] }
+# + `NSColor` 与 `objc2-core-graphics`：圆角窗外那圈填色要算成 CGColor 铺到 CALayer 上
+# （见 chrome.rs 的 `paint_corner_fill`）；`objc2-core-graphics` 是它取 `CGColor` 的开关。
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "NSColor", "NSBox", "NSAppearance", "objc2-quartz-core", "objc2-core-graphics"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer"] }
-window-vibrancy = "0.8"
+# + `objc2-core-graphics`：CALayer 的 `setBackgroundColor`（铺圆角窗外那圈填色）在这个 feature 后面
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }
 
 [dev-dependencies]
 # 测试里用它把夹具的 JSON 转成 TOML（`testkit` / `presets::registry`），

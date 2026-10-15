@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 
 import { FieldLayer } from '../components/field'
+import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import PageReport from './report/PageReport'
@@ -199,6 +200,10 @@ export default function App() {
       {/* Windows 的 decorations: false 之后系统 resize 边框在可见窗口之外，
           补一圈内侧命中区让抓取带跨在边界上。macOS 不需要——系统管 resize */}
       {inTauri && PLATFORM === 'windows' && <ResizeEdges />}
+
+      {/* 通知停泊区（右上角）。**挂在根部一次**就够 —— 它自己 portal 到 body，
+          与这里的 DOM 层级无关（见 `notify/NotifyHost.tsx` 头注释） */}
+      <NotifyHost />
     </div>
   )
 }

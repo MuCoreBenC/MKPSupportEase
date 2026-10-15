@@ -1,7 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import Icon from '../../components/Icon'
 import UpdateIndicator from './UpdateIndicator'
+import { useActivePreset } from '../state/appState'
+/* 「复制后处理脚本」走全站那一份（不再自己调 api / 自己写通知）—— 见那个文件的文件头 */
+import { copyPostProcessScript } from '../postprocess/copyScript'
 import { useDevPreview } from '../dev/useDevPreview'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
 import { useTitlebarDrag } from '../useTitlebarDrag'
@@ -28,11 +31,34 @@ interface TopTabsProps {
 }
 
 
-/* macOS 上交通灯由系统画在我们这条标题栏上（titleBarStyle: "Overlay"），
-   这里只留出它占的那块地，别让 MKP 字样压在下面。
-   77 是 AppKit 量出来的：装了统一工具栏之后红绿灯整组右缘 79、第一个 toolbar item 左缘 97，
-   减掉标题栏自己的左内衬 16 与 gap 之后剩这么宽。60 / 72 都偏窄。 */
-const MAC_LIGHTS_INSET = 77
+/*
+ * macOS 上交通灯由**系统/我们自己摆在窗口图层上**（不在 DOM 里，见 `chrome.rs` 的
+ * `reposition_traffic_lights`），这里只留出它占的那块地，别让 MKP 字样压在下面。
+ *
+ * ★★★ 2026-10-15 第七版：**78**（标题栏 52 → 38 之后重量的）。
+ *
+ * 这句话现在的语义是「**从灯组右缘到 MKP 字样左缘**要留多宽」—— 直接量出来的：
+ * ```text
+ *   绿灯右缘 70.5  ·  MKP 文字左缘 108   ⇒  差 37.5
+ * ```
+ * 但 `.lightsInset` 是个**参与 flex 的占位块**，它的宽度要先被 `.bar` 的左内衬
+ * （macOS 档 14）与 `gap`（16）吃掉一部分，所以：
+ * ```text
+ *   14（padding-left） + INSET + 16（gap） = 108（MKP 左缘）  ⇒  INSET = 78
+ * ```
+ * ★ 写成"差 37.5"而不是 78 是不行的 —— 那 37.5 是**视觉缝隙**，而这里要的是
+ * **占位块宽**；两者差一个左内衬 + 一个 gap。作者说过"左右不一致时先量清在比哪两个数"，
+ * 这里同理：**先分清"视觉缝隙"与"参与布局的宽度"**。
+ *
+ * ★ 老的 77 是 52 档下按另一组几何凑的（当时绿灯右缘 79、MKP 左缘按 toolbar 的
+ * 第一个 item 算到 97）。那组数随标题栏高度一起变了，所以必须重新量。
+ *
+ * ★★★ 2026-10-16：**78 → 66**。作者：「这个字再往左靠一点，靠近那个红绿灯」。
+ * ⇒ 视觉缝隙从 37.5 收到 **25.5**（绿灯右缘 70.5 + 25.5 = 96 = 新 MKP 左缘）。
+ * 别收到 20 以下 —— 红绿灯与字之间要有"看得出来的呼吸"，挨太近会被读成
+ * "字压在灯上"（尤其绿灯和小写字母混在一起时）。
+ */
+const MAC_LIGHTS_INSET = 66
 
 /*
  * **mini 档不再收图标**（作者 2026-10-04：600 宽下七个文字页签放得下，「不用变成
@@ -56,6 +82,43 @@ export default function TopTabs({
   const drag = useTitlebarDrag()
   /* 开发台：点「软件更新提示」时把下载指示器摆成"正在下载"那一态（正式构建里恒 false） */
   const { on: devUpdate } = useDevPreview('update-prompt')
+
+  /*
+   * `MKP` 字标 = 「复制后处理脚本」的**快捷入口**（2026-10-16 作者）。
+   *
+   * 作者：「到时候我知道这个图标啊，到时候可以点击点击了就是复制那个脚本」+「让用户自己
+   * 摸索到就算了」⇒ 不做引导层、不加常驻说明，只给**可按压的观感**（悬停微亮、按下微沉，
+   * 见 CSS）+ 点完在右上角发一条通知。
+   *
+   * 复制的对象是**当前已应用的那一份**（`useActivePreset`）—— 与首页页脚那颗
+   * 「复制脚本」判据一致（那份才"真在盘上"）。没应用任何一份时**不装死**：
+   * 发一条说明原因的通知（不是灰掉 —— 作者否过灰态：「用户根本不知道是禁用」）。
+   *
+   * ★ 2026-10-16：从"自己管一颗 toast"改成调**全站通知系统**（`notify`）。
+   *   原来那套（`TitlebarToast` + 本地 state）**已删** —— 它和更新面板各写了一套材质，
+   *   深色适配就漏了一处（作者报的"深色下发白"）。现在**只有一套**，改主题只改一处。
+   */
+  const activePreset = useActivePreset()
+
+  const copyScript = useCallback(() => {
+    const ap = activePreset
+    if (ap === null) {
+      /* 这一段话归 `copyPostProcessScript` 里那句（传空串就走那一支），这里只负责"没有" */
+      void copyPostProcessScript({ machineId: '', versionId: '' })
+      return
+    }
+    /*
+     * ★ 走**全站那一份**（`copyPostProcessScript`）—— 与预设页右键那一项、与首页那颗
+     *   同一个出口、同一句话（作者 2026-10-16：「左上角的 mkp 点击也是，显示一样的」）。
+     *   原来这里自己调 `api.getPostProcessCommand` + `clipboard` + 自己写通知，
+     *   与右键那一项就是两套话术 —— 那种"同一件事写两遍"正是深色下漏改的源头。
+     */
+    void copyPostProcessScript({
+      machineId: ap.machineId,
+      versionId: ap.versionId,
+      fileName: ap.fileName,
+    })
+  }, [activePreset])
 
   /*
    * 滑动下划线（2026-10-05）：原来 active 页签的 ::after 直接出现/消失，快速换
@@ -148,7 +211,21 @@ export default function TopTabs({
           aria-hidden="true"
         />}
 
-      <span className={s.logo}>MKP</span>
+      {/*
+        `MKP` 字标：既是品牌标记，也是「复制后处理脚本」的快捷入口（见 `copyScript`）。
+        ★ 用 `<button>` 而不是给它挂 onClick 的 `<span>`：键盘可达、语义正确，
+        且 `user-select: none`（全站那层）本来就不让选它，不冲突。
+        ★ 悬停/按压的观感全在 CSS（`data-clickable`），这里不管。
+      */}
+      <button
+        type="button"
+        className={s.logo}
+        data-clickable="true"
+        title="把这一份的后处理脚本复制到剪贴板"
+        onClick={copyScript}
+      >
+        MKP
+      </button>
 
       {tabStrip}
 
@@ -184,6 +261,7 @@ export default function TopTabs({
           </button>
         </div>
       )}
+
     </header>
   )
 }

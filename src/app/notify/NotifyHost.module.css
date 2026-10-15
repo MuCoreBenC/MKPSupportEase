@@ -1,0 +1,183 @@
+/*
+ * 通知停泊区 + 通知卡片。
+ *
+ * # 形态口径（作者 2026-10-16 定的，见 `notify.ts` 头注释）
+ *
+ * - **实心**，不做透明、不做毛玻璃。苹果通知中心就是实心的。
+ * - 实心底走 `--surface-solid`（浅 `#FFFFFF` / 深 `#303030`）—— 两套主题**自动就对**，
+ *   这是它相对"白叠加玻璃"最大的好处：**主题适配只剩一个地方要改**。
+ * - 停在窗口右上角、标题栏下方，新的在上面。
+ *
+ * ★★★ 为什么停泊区走 `position: fixed` 且挂在 `body`（portal）：
+ * 标题栏 `.bar` 上有 `mask-image`（画那条渐隐分隔线用），**mask 会裁掉一切后代**。
+ * 详见 `TopTabs.module.css` 里 `.bar` 那段的长注释。
+ * 这里从根上避开：宿主挂在 `body`，跟标题栏没有父子关系。
+ */
+
+.host {
+  position: fixed;
+  /* 标题栏 38 + 16 的呼吸（作者 2026-10-16：「他这个上边的边距有点小了」——原来是 8） */
+  top: 54px;
+  right: 12px;
+  z-index: 96; /* 见 TopTabs.module.css 的那张全站层级账 */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+
+  /* 整块停泊区不吃指针，只有卡片自己要吃（卡片里有按钮） */
+  pointer-events: none;
+}
+
+.card {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+
+  /* ★ 实心底：浅白 / 深灰，跟着主题走。**没有透明度、没有 backdrop-filter** */
+  background: var(--surface-solid);
+  border: 0.5px solid var(--line);
+  border-radius: 12px;
+  /* 苹果通知那种"浮在内容之上"的影子：一层近的定形 + 一层远的散开 */
+  box-shadow:
+    0 0 0 0.5px var(--hairline),
+    0 8px 24px rgb(0 0 0 / 12%),
+    0 2px 6px rgb(0 0 0 / 6%);
+  color: var(--text-1);
+
+  animation: notice-in 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/*
+ * 入场：从上往下轻轻落进来。
+ * ★ 只是锦上添花 —— 这块在真机 WKWebView 上有过"CSS animation 不播"的记录，
+ * 不播就是"直接出现"，功能不受影响（见 MEMORY 里那条）。
+ */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 语气点：与标题同高的一条竖线，比圆点更"通知中心"（苹果左上是应用图标） */
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+
+.card[data-kind='ok'] .dot {
+  background: var(--accent);
+}
+
+.card[data-kind='warn'] .dot {
+  background: var(--warn);
+}
+
+.card[data-kind='bad'] .dot {
+  background: var(--danger);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.text {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* 进度条（更新的下载态）。★★ 走 `transform: scaleX()` 而不是 `width`：
+   宽度变化每帧都要重排；scale 只走合成。 */
+.progressTrack {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.2s ease-out;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.btn {
+  appearance: none;
+  padding: 5px 12px;
+  border: 0.5px solid var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: default;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--hover-1);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btnPrimary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--accent-deep);
+}
+
+.close {
+  flex: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: default;
+}
+
+.close:hover {
+  background: var(--hover-1);
+  color: var(--text-1);
+}

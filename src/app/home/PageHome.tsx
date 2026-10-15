@@ -42,6 +42,8 @@ import CalibHead from '../calib/CalibHead'
 import PlateZoom from '../calib/PlateZoom'
 import { HomeCardStack, StepRail } from './HomeGuide'
 import CopyAction from './CopyAction'
+/* 取后处理命令走全站那一个出口（见 `loadCommand` 那段注释：只是反馈方式仍用页面底部气泡） */
+import { postProcessCommand } from '../postprocess/copyScript'
 import { Btn } from '../ui/Controls'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
@@ -60,10 +62,9 @@ import {
 } from '../calib/calibAxes'
 import { useCalibration } from '../calib/useCalibration'
 import { usePreset } from '../calib/usePreset'
-/* 第五步那张合影：**界面自带素材**（不进 Catalog / Delivery），
-   从 `src/app/assets/hero/` 走 vite 资源管线（import 回来带内容哈希） */
-import heroPile from '../assets/hero/hero_pile.webp'
-import heroPile2x from '../assets/hero/hero_pile@2x.webp'
+/* 第五步那张合影：**界面自带素材**（不进 Catalog / Delivery）——
+   取图那一步（浅 / 深两张位图）收在 `heroPileSource` 里，见它的文件头 */
+import { heroPileSource } from '../assets/hero/heroPile'
 
 import { useIsDark } from '../state/appState'
 import { slicerArgsOf, useSlicerAppPref, useSlicerPick, useSlicerPref } from '../shared/slicer'
@@ -117,6 +118,9 @@ export default function PageHome({ density }: PageHomeProps) {
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
+  /* 第五步那张合影（深浅各一张位图，见 heroPile.ts）：记忆化是为了 `sheets` 那个
+     useMemo 的依赖稳定 —— 直接调的话每渲染一个新对象，卡片面就会跟着重算 */
+  const pile = useMemo(() => heroPileSource(isDark), [isDark])
   const deckRef = useRef<DeckHandle>(null)
 
   /* 分级揭示的淡入时长：面板里调（产品仓里是常量 FADE_MS） */
@@ -624,12 +628,20 @@ export default function PageHome({ density }: PageHomeProps) {
    *   截断了」），于是这份"缓存现况"整个退役：**点的时候现要一次**就够，前端不留旧路径。
    */
 
-  /* 点按钮那一刻**现要一次**：后端按当前平台与真实落点现拼，前端不缓存命令 */
+  /*
+   * 点按钮那一刻**现要一次**：后端按当前平台与真实落点现拼，前端不缓存命令。
+   *
+   * ★ 2026-10-16：取命令走**全站那一个出口**（`postProcessCommand`）——
+   *   与标题栏 `MKP` 字标、与预设页右键那一项同一个函数，只是**反馈方式不同**：
+   *   ★ 首页这颗**不走通知系统**，仍用页面底部那颗不占位的气泡 —— 那是作者
+   *     2026-10-13 的裁决（气泡挂在按钮下面会被卡片两层 overflow 裁掉一截：
+   *     「干嘛要放在这？都被截断了」）。换位置是另一件事，本轮不动。
+   */
   const loadCommand = useCallback(async (): Promise<PostProcessCommand> => {
     if (sel.model === null || sel.variant === null) {
       return { ready: false, reason: '先选齐机型与版本，才有可指的预设' }
     }
-    return api.getPostProcessCommand(sel.model, sel.variant)
+    return postProcessCommand(sel.model, sel.variant)
   }, [sel.model, sel.variant])
 
   /*
@@ -1111,10 +1123,11 @@ export default function PageHome({ density }: PageHomeProps) {
                   这一行只说"接下来做什么"，不重复页名 */}
               <p className={p.modelsLead}>打印这套模型，检查校准结果。</p>
               <div className={p.modelsHero}>
+                {/* 深浅各一张（白件在深底上要暗一档）：取图见 heroPileSource */}
                 <img
                   className={p.modelsHeroImg}
-                  src={heroPile}
-                  srcSet={`${heroPile} 1x, ${heroPile2x} 2x`}
+                  src={pile.src}
+                  srcSet={pile.srcSet}
                   alt="测试模型"
                   draggable={false}
                 />
@@ -1151,6 +1164,7 @@ export default function PageHome({ density }: PageHomeProps) {
       pick,
       pickXY,
       pickZ,
+      pile,
       plateTheme,
       preset,
       presetInfo,

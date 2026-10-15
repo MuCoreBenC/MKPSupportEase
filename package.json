@@ -16,6 +16,7 @@
     "lint": "eslint . && stylelint \"src/**/*.css\"",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
     "tauri": "tauri",
+    "icons": "node scripts/gen-icons.mjs",
     "preset-source:make": "node scripts/preset-test-server/make-fixtures.mjs",
     "preset-source:sync": "node scripts/preset-test-server/sync-fixture.mjs",
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
