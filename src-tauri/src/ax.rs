@@ -649,11 +649,17 @@ mod mac {
         let minimized = attr(win, "AXMinimized")
             .and_then(|v| as_bool(&v))
             .unwrap_or(false);
+        /*
+         * ★ 矩形**取整**再拿去当"变没变"的键：AX 报的是浮点，同一扇窗两次读到的值
+         * 可能差一丝（子点抖动），不取整就会**每一跳回读都判成"变了"** ⇒ 每 350ms
+         * 重扫一次控件树 —— 那才是真能把主线程和切片器都拖慢的那种"轮询"。
+         * 取整后的精度对"卡片摆哪"完全够（差半点的位置没人看得出来）。
+         */
         let rect = position_of(win).zip(size_of(win)).map(|(p, s)| RectDto {
-            x: p.x,
-            y: p.y,
-            width: s.width,
-            height: s.height,
+            x: p.x.round(),
+            y: p.y.round(),
+            width: s.width.round(),
+            height: s.height.round(),
         });
         let visibility = if !front || minimized {
             SlicerVisibility::Behind

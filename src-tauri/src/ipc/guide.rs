@@ -166,27 +166,84 @@ pub async fn guide_close(app: AppHandle) -> Result<(), AppError> {
 /// - `Front`：**没开着就开**（用户把切片器切回最前了，卡片该回来）、
 ///   开着就重读坐标挪过去（拖动了 / 拉大了）；坐标读不到也收起来。
 pub fn sync(app: &AppHandle) {
-    /* pid 直接问 watcher 要（它装着的时候就记着）—— 别在这儿起 `pgrep` */
-    let Some(pid) = watched_pid() else {
+    let Some(action) = decide(app) else {
         return;
     };
-    let state = ax::slicer_state(pid);
+    /* 只有这一段要求主线程（见 `apply`） */
+    let inner = app.clone();
+    let _ = app.run_on_main_thread(move || apply(&inner, action));
+}
+
+/// 「该干什么」——`decide` 的产物，交给主线程去执行（见 [`apply`]）。
+enum Action {
+    /// 收起来；`gone` = 切片器已经退了（顺手卸监听）
+    Hide { gone: bool },
+    /// 摆出去（旧的先收掉）
+    Show { x: f64, y: f64, side: &'static str },
+    /// 已经在开着，只是挪个位置（拖动 / 缩放跟随）
+    Move { x: f64, y: f64, side: &'static str },
+}
+
+/// **第一段：读 AX、拿主意。**
+///
+/// ★★★ **绝不许在主线程上调**（2026-10-15 作者报"一直转圈、鼠标不变手"）：
+/// 这里每一次 AX 调用都是**同步 IPC 打到切片器那个进程**去（读窗口矩形、扫控件树
+/// 几十次）。切片器一忙（正在切片 / 自绘重绘），这些调用会**卡住好几秒**
+/// （AX 的默认消息超时）—— 落在主线程上就是**整屏转圈 + 光标不更新 + 悬停提示出不来**。
+///
+/// AX 读**不要求**主线程，而"动窗口"才要求；所以两段分开，这一段谁来叫就在谁的线程上跑。
+fn decide(app: &AppHandle) -> Option<Action> {
+    /* pid 直接问 watcher 要（它装着的时候就记着）—— 别在这儿起 `pgrep` */
+    let pid = watched_pid()?;
+    let z = crate::zorder::slicer_window(pid);
+    /*
+     * ★★ **CG 答得上来就不去问切片器**（作者："怎么样节省就怎么样做吧"）。
+     * AX 的每一次读都是**同步 IPC 打到切片器进程**（它一忙就卡好几秒），
+     * 而 CG 那次**全在本地**、顺带把矩形也给了。所以：
+     * `st` 只在 **CG 问不到**（系统不给窗口列表）时才读，用来兜底 + 当键。
+     */
+    let st = match z {
+        Some(_) => None,
+        None => Some(ax::slicer_state(pid)),
+    };
+    /*
+     * ★★★ **"被谁盖住了"问系统的层序，不问 AX 的焦点**（2026-10-15 作者：
+     * "其他软件盖住了 BBS，它还是这个还是一样的显示"）。
+     *
+     * AX 的 `AXFocusedApplication` 答的是**焦点**：一个窗口压上来、焦点没变时它
+     * 一点反应都没有。而 [`crate::zorder`] 问的是 CoreGraphics 的窗口列表
+     * ——**按层序从前往后排**，那才是"谁盖住谁"。
+     * ★ 而且它**全在本地**（窗口服务器），不打给切片器进程；顺带把"最小化 / 隐藏"
+     * 也一起答了，还把窗口矩形带出来（当"变没变"的键用）。
+     */
     /*
      * ★★★ **便宜的闸门**（2026-10-15 作者："拖动了它没有跟随"）。
      *
      * 这条既由 AX 通知驱动、又由 [`crate::ax_watch`] 的细定时回读兜底（切片器是 Qt
      * 应用，拖动过程中**不发** `AXWindowMoved`）。既然会被叫得很勤，第一件事就是
-     * **花一两次属性读确认"真的变了没有"** —— 没变就一丁点多余的活都不干
-     * （重扫控件树是几十次 AX 调用，那才是"频繁的轮询"）。
+     * 比键：**没变就一丁点多余的活都不干**（重扫控件树是几十次 AX 调用）。
      *
-     * 一次比较罩住三类变化：**窗口矩形**（拖动 / 缩放）、**最前是不是它**（被压住）、
-     * **最小化了没有**。三者都是 [`ax::SlicerState`] 里的字段。
+     * 一次比较罩住这几类变化：**窗口矩形**（拖动 / 缩放）、**被盖住 / 最小化**
+     * （层序）、**最前是谁**（CG 问不到时那份 AX 兜底）。
      */
-    if !changed(state) && app.get_webview_window(GUIDE_LABEL).is_some() {
-        return;
+    if !changed(z, st) && app.get_webview_window(GUIDE_LABEL).is_some() {
+        return None;
     }
 
-    let visibility = state.visibility;
+    let visibility = match z {
+        /* 屏上没有它 = 最小化 / 隐藏 → 收 */
+        Some(z) if !z.on_screen => SlicerVisibility::Behind,
+        /* 被别的 App 的普通窗盖住了 → 收（[`COVERED_ENOUGH`] 以下的小浮窗不算） */
+        Some(z) if z.covered >= COVERED_ENOUGH => SlicerVisibility::Behind,
+        /* 问到层序且它清白在最前 → 露脸 */
+        Some(_) => SlicerVisibility::Front,
+        /*
+         * 问不到窗口列表（系统不给）→ 退回 AX 那套"最前是谁"的口径。
+         * ★ 那边也是问不到时**当作露脸**（fail-open）：这是一张"指路"的卡，
+         * 判断不了就别让它凭空消失。
+         */
+        None => st.map_or(SlicerVisibility::Front, |s| s.visibility),
+    };
     if visibility == SlicerVisibility::Behind && just_shown() {
         /*
          * ★★★ **刚摆出去的这一小段里，"切片器不在最前"多半不是用户干的，是我们的回声**：
@@ -197,7 +254,7 @@ pub fn sync(app: &AppHandle) {
          * 所以这段时间**先不动它**：等 [`SETTLE`] 落定后那条**一次性回读**再判。
          * ★ 只挡 `Behind`，`Gone`（切片器退了）照收不误。
          */
-        return;
+        return None;
     }
     if visibility != SlicerVisibility::Front {
         /*
@@ -212,46 +269,112 @@ pub fn sync(app: &AppHandle) {
          * `AXWindowDeminiaturized` / `AXFocusedWindowChanged`。真正该卸的是
          * **卡片被关掉**那两条路（`guide_close` 与切片器退了 ⇒ `Gone`）。
          */
-        if visibility == SlicerVisibility::Gone {
-            /* 切片器整个没了：再留着监听也没意义（pid 都失效了） */
-            unmount_watcher(app);
-        }
-        destroy_guide(app);
-        return;
+        return Some(Action::Hide {
+            gone: visibility == SlicerVisibility::Gone,
+        });
     }
 
-    let target = ax::locate_bed_type();
-    let Some(t) = target.target.filter(|_| target.ready) else {
+    let Some(t) = target_rect(z.and_then(|z| z.rect)) else {
         /*
          * 在最前、但指不了（界面换了 / 还没读到）—— **不摆一个指错地方的箭头**。
          * ★ 这里同样**不卸监听**：读不到多半是切片器正在启动 / 换版，
          * 它自己会再发通知过来，留着才有下一次机会。
          */
-        destroy_guide(app);
-        return;
+        return Some(Action::Hide { gone: false });
     };
 
-    /* 通知没挂满 / 挂的还是上一扇窗 ⇒ 趁它现在看得见，重挂一次（幂等） */
+    /* 通知没挂满 ⇒ 趁它现在看得见，重挂一次（幂等，且带节流） */
     ensure_watcher(app);
 
     let (x, y, side) = place_card(&t, screen_width(app));
-    match app.get_webview_window(GUIDE_LABEL) {
-        /*
-         * 已经开着 ⇒ **只挪窗口**（`set_position`），不重建。
-         * 拖动是一串密集的通知，重建的话每一帧都在闪 —— 作者要的是"跟过去"，
-         * 不是"关掉再冒出来"（那正是他说的"他还是只是消失了没出现新的"那种观感）。
-         */
-        Some(win) => {
-            let _ = win.set_position(tauri::LogicalPosition::new(x, y));
-            /*
-             * 左右翻边（拖到屏幕另一头去了）要重画箭头：前端从 URL 的 `side` 读它，
-             * 而窗口已经建好了 —— 所以这里**推一条事件**过去，别重建窗口。
-             */
-            use tauri::Emitter as _;
-            let _ = win.emit(GUIDE_SIDE_EVENT, side);
-        }
-        None => show_at(app, x, y, side),
+    if app.get_webview_window(GUIDE_LABEL).is_some() {
+        Some(Action::Move { x, y, side })
+    } else {
+        Some(Action::Show { x, y, side })
     }
+}
+
+/// 上一次定位成功时那一对：**（切片器窗口矩形，目标控件矩形）**。
+///
+/// ★★ 拿它**直接算**拖动后的新坐标（见 [`target_rect`]）—— 这就是"再省一点"的那一刀。
+static LAST_LOCATE: std::sync::Mutex<Option<(ax::RectDto, ax::RectDto)>> =
+    std::sync::Mutex::new(None);
+
+/// 目标控件这会儿在哪。
+///
+/// ★★★ **窗口只平移时，一个 AX 调用都不发**（作者："怎么样节省就怎么样做吧，
+/// 再节约一点都可以"）：控件在切片器窗口里的**相对位置是固定的**，窗口挪多少它就
+/// 跟着挪多少 —— 所以"上次那一对"加上窗口的位移就是新位置，纯算术。
+///
+/// ★ 什么时候才去读 AX（并把这一对重新记下）：
+/// - 还没有缓存（这一趟第一次）；
+/// - **窗口尺寸变了**（拉大缩小 / 换布局）：相对位置可能跟着变，不能外推。
+///
+/// ★ 这条依赖"相对位置稳定"，而它正是 [`ax::locate_bed_type`] 挑控件的判据
+/// （按**相对窗口**的 y 落区间挑），所以两边是同一个假设，不会打架。
+fn target_rect(win_now: Option<ax::RectDto>) -> Option<ax::RectDto> {
+    if let (Some(now), Some((old_win, old_target))) = (win_now, *lock_locate()) {
+        if now.width == old_win.width && now.height == old_win.height {
+            return Some(ax::RectDto {
+                x: old_target.x + (now.x - old_win.x),
+                y: old_target.y + (now.y - old_win.y),
+                width: old_target.width,
+                height: old_target.height,
+            });
+        }
+    }
+
+    /* 老实读一次 AX，并把这一对记下来（下次平移就能免了） */
+    let found = ax::locate_bed_type();
+    let target = found.target.filter(|_| found.ready)?;
+    if let Some(win) = win_now.or(found.window) {
+        if let Ok(mut g) = LAST_LOCATE.lock() {
+            *g = Some((win, target));
+        }
+    }
+    Some(target)
+}
+
+/// 读缓存（锁坏了就当作没有 —— 那只是多读一次 AX，不影响对不对）。
+fn lock_locate() -> std::sync::MutexGuard<'static, Option<(ax::RectDto, ax::RectDto)>> {
+    match LAST_LOCATE.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    }
+}
+
+/// **第二段：动窗口。** 只该在主线程上执行 —— 这几句是唯一要求主线程的部分。
+///
+/// ★ 这里**不做任何 AX 读**（那会卡住主线程，见 [`decide`]）。
+fn apply(app: &AppHandle, action: Action) {
+    match action {
+        Action::Hide { gone } => {
+            if gone {
+                /* 切片器整个没了：再留着监听也没意义（pid 都失效了） */
+                unmount_watcher(app);
+            }
+            destroy_guide(app);
+        }
+        Action::Show { x, y, side } => show_at(app, x, y, side),
+        Action::Move { x, y, side } => move_card(app, x, y, side),
+    }
+}
+
+/// 已经开着 ⇒ **只挪窗口**，不重建。
+///
+/// 拖动是一串密集的回读，重建的话每一帧都在闪 —— 作者要的是"跟过去"，
+/// 不是"关掉再冒出来"（那正是他说过的"只是消失了没出现新的"那种观感）。
+fn move_card(app: &AppHandle, x: f64, y: f64, side: &'static str) {
+    let Some(win) = app.get_webview_window(GUIDE_LABEL) else {
+        return;
+    };
+    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    /*
+     * 左右翻边（拖到屏幕另一头去了）要重画箭头：前端从 URL 的 `side` 读它，
+     * 而窗口已经建好了 —— 所以这里**推一条事件**过去，别重建窗口。
+     */
+    use tauri::Emitter as _;
+    let _ = win.emit(GUIDE_SIDE_EVENT, side);
 }
 
 /// 通知没挂满就重挂一次（幂等）。
@@ -268,15 +391,40 @@ pub fn sync(app: &AppHandle) {
 fn ensure_watcher(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
-        if !crate::ax_watch::is_complete() {
-            tracing::info!("AX 通知没挂满 —— 重挂一次");
-            crate::ax_watch::start(app, sync);
+        /*
+         * ★★ **带节流**：重挂要主线程去 `AXObserverCreate` / `AddNotification`，
+         * 而后者也是"打给切片器进程"的同步 IPC。要是某一趟没挂满（比如切片器还没开
+         * 工程窗口），那 `is_complete()` 会一直是 false ⇒ 每一跳回读（350ms）都重挂一次，
+         * 主线程被这些 IPC 反复按住。所以这里**最多每 [`REMOUNT_FLOOR`] 试一次**。
+         */
+        if crate::ax_watch::is_complete() || !remount_due() {
+            return;
         }
+        tracing::info!("AX 通知没挂满 —— 重挂一次");
+        crate::ax_watch::start(app, sync);
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
     }
+}
+
+/// 两次重挂之间**至少**隔这么久（见 [`ensure_watcher`] 的注释）。
+const REMOUNT_FLOOR: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 上一次尝试重挂是什么时候。
+static LAST_REMOUNT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// 现在允许重挂吗（顺手记下这一次的时间）。
+fn remount_due() -> bool {
+    let Ok(mut g) = LAST_REMOUNT.lock() else {
+        return false;
+    };
+    if g.is_some_and(|t| t.elapsed() < REMOUNT_FLOOR) {
+        return false;
+    }
+    *g = Some(std::time::Instant::now());
+    true
 }
 
 /// 左右翻边时推给卡片的那条事件（载荷 = `"left"` / `"right"`）。
@@ -333,13 +481,23 @@ const SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
 /// 上一次见到的切片器状态（"变没变"就比它）。
 ///
 /// ★ 记的是**读到的那一刻**，不是"我们摆到哪" —— 摆的动作可能失败、也可能被系统调过。
-static LAST_STATE: std::sync::Mutex<Option<ax::SlicerState>> = std::sync::Mutex::new(None);
+static LAST_STATE: std::sync::Mutex<Option<WatchKey>> = std::sync::Mutex::new(None);
 
-/// 这次读到的状态跟上一次**不一样**吗？（一样 = 无事可做）
+/// 一次读到的**全部**判据（这就是那个"变没变"的键）。
+#[derive(PartialEq)]
+struct WatchKey {
+    /// 层序处境（`None` = 问不到窗口列表）
+    z: Option<crate::zorder::SlicerWindow>,
+    /// CG 问不到时才读的那份 AX 兜底（`None` = 用不上）
+    ax: Option<ax::SlicerState>,
+}
+
+/// 拿到的判据跟上一次**不一样**吗？（一样 = 无事可做）
 ///
 /// 不一样就顺手把它记下来 —— 所以这是**有副作用的比较**，名字取成 `changed`
 /// 而不是 `is_same`，好让人一眼看出它会写状态。
-fn changed(now: ax::SlicerState) -> bool {
+fn changed(z: Option<crate::zorder::SlicerWindow>, ax: Option<ax::SlicerState>) -> bool {
+    let now = WatchKey { z, ax };
     let Ok(mut g) = LAST_STATE.lock() else {
         /* 锁坏了：当作"变了"，宁可多做一次也别卡住 */
         return true;
@@ -350,6 +508,12 @@ fn changed(now: ax::SlicerState) -> bool {
     *g = Some(now);
     true
 }
+
+/// 被别的 App 盖住多少才算"看不见了"（见 [`crate::zorder`]）。
+///
+/// ★ 为什么不是"压到一点就算"：一个小浮窗、一条通知压到角上，那块板型控件照样看得见
+/// —— 那种时候把卡片收掉反而莫名其妙。两成是个保守的界。
+const COVERED_ENOUGH: f64 = 0.2;
 
 /// 卡片是**什么时候**摆出去的（`None` = 从没摆过）。
 static SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);

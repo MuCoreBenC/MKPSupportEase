@@ -125,16 +125,17 @@ const WINDOW_NOTIFICATIONS: [&str; 4] = [
     "AXWindowDeminiaturized",
 ];
 
-/// AX 回调：**在 AX 自己的线程上**。
+/// AX 回调：**在主线程上**（observer 的 source 挂在主 run loop 上）。
 ///
-/// ★★★ 这个身子**只做一件事**：把"变了，去看看"排进主线程队列。**别的什么都不碰** ——
+/// ★★★ 这个身子**只做一件事**：把"变了，去看看"**甩给一条短命线程**。别的什么都不碰 ——
 ///
-/// - 不读 AX（那是调用对方进程，可能阻塞）；
-/// - 不 `pgrep`（[`crate::ax::slicer_visibility`] 里会起子进程，一路拖动就是几十次）；
+/// - 不读 AX（那是同步 IPC 打到切片器进程，它一忙会卡好几秒 ⇒ **主线程被按住** =
+///   整屏转圈 + 光标不更新 + 悬停提示出不来，2026-10-15 作者报的就是这个）；
+/// - 不 `pgrep`；
 /// - 不碰任何窗口。
 ///
-/// 之前是在这儿读一次可见性再传下去，代价是"在 AX 的线程上跑了一整套 AX 读 + 起进程"。
-/// 现在可见性由 [`crate::ipc::guide::sync`]**在主线程上读一次**（单一读点）。
+/// 判断则交给 [`crate::ipc::guide::sync`]，它自己分成"AX 段（别的线程）+ 动窗口段
+/// （回主线程）"两节。
 ///
 /// ★★ 整个身子**包在 `catch_unwind` 里**：这是 `extern "C"` 的回调，panic 一旦往外
 /// 展开就是**跨 FFI 边界** —— 那是 UB，实际表现就是**整个进程被抬走**。
@@ -146,7 +147,9 @@ extern "C" fn on_event(_: AXObserverRef, _: AXUIElementRef, _: CFStringRef, _: *
     let inner = app.clone();
     let hook = *hook;
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = app.run_on_main_thread(move || hook(&inner));
+        let _ = std::thread::Builder::new()
+            .name("guide-ax-sync".into())
+            .spawn(move || hook(&inner));
     }));
     if outcome.is_err() {
         tracing::warn!("处理 AX 通知时 panic 了（已吞掉，不让它跨 FFI 边界掀掉进程）");
@@ -259,15 +262,20 @@ const FULL_SET: usize = APP_NOTIFICATIONS.len() + WINDOW_NOTIFICATIONS.len();
 /// 真正重扫只在"确实变了"时发生，也就是用户真的动了窗口。
 ///
 /// ★ 只在卡片可能露脸的那段时间跑（watcher 活着的期间），点完「知道了」就停。
-const TICK: Duration = Duration::from_millis(350);
+/// ★★ 作者："那个卡片多等一会再跟上也没关系，怎么样节省就怎么样做吧" ⇒ 调到 700ms：
+/// 每跳只发一次**本地**的窗口列表查询（不打给切片器），跟随慢半拍但几乎不花电。
+const TICK: Duration = Duration::from_millis(700);
 
 /// 回读线程该活着吗（`stop_now` 关掉它）。
 static TICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 起那条细定时回读（幂等：已经跑着就不重复起）。
 ///
-/// 线程里只做两件事：睡 [`TICK`]、把 `hook` 排到主线程去跑。判断"要不要干活"
-/// 全交给 `hook` 自己（它第一步就是比那个很便宜的状态键，见 [`TICK`] 的注释）。
+/// ★ 线程里**就地**跑 `hook`（就在这条线程上，**不上主线程**）：`hook` 的第一段是
+/// AX 读（同步 IPC，可能卡几秒）—— 那正是不能放在主线程上的东西。
+/// 真正动窗口那几句由 `hook` 自己再派回主线程。
+///
+/// ★ 睡 + 跑是**串行**的：跑得慢就自然降频，不会堆起一串待办。
 fn start_tick(app: &AppHandle, hook: OnChange) {
     if TICKING.swap(true, std::sync::atomic::Ordering::Relaxed) {
         /* 已经跑着一条了（`stop_now` 只置标志，线程可能还没睡醒退出） */
@@ -280,9 +288,7 @@ fn start_tick(app: &AppHandle, hook: OnChange) {
             if !TICKING.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
             }
-            let inner = app.clone();
-            /* 判断在主线程做（AX 读 + 窗口动作都在那边，见 `ipc::guide::sync`） */
-            let _ = app.run_on_main_thread(move || hook(&inner));
+            hook(&app);
         }
     });
 }
