@@ -123,6 +123,8 @@ pub async fn guide_show(app: AppHandle) -> Result<GuideTargetDto, AppError> {
             /* 指不了：原样把 reason 递上去，界面显示原因、不画箭头 */
             return Ok(target);
         };
+        /* 这一趟刚读到的坐标顺手种进缓存：紧接着那一跳就能免 AX（见 [`LOCATE_TTL`]） */
+        seed_locate(&target);
 
         /*
          * ★★ **抬切片器这件事必须发生在"建卡片"之后**（2026-10-15 作者报的
@@ -225,8 +227,26 @@ fn decide(app: &AppHandle) -> Option<Action> {
      *
      * 一次比较罩住这几类变化：**窗口矩形**（拖动 / 缩放）、**被盖住 / 最小化**
      * （层序）、**最前是谁**（CG 问不到时那份 AX 兜底）。
+     *
+     * ★★ 但**只有这个键还不够**：卡片指的控件会在"窗口一动不动"时消失（用户切页）
+     * —— 那时上面这几项**一样都不变**。所以闸门里还挂了一条 [`locate_is_fresh`]：
+     * 定位缓存过期就**不许早退**，必须真去看一眼（见 [`LOCATE_TTL`]）。
      */
-    if !changed(z, st) && app.get_webview_window(GUIDE_LABEL).is_some() {
+    /*
+     * ★★★ **什么时候"必须去看一眼"**：
+     *
+     * - 卡片**开着**：要跟位置、也要确认它还该在（切页了就收）；
+     * - ★ 或者**上一个控件找不到了**（[`TARGET_LOST`]）—— 那是在等它**回来**；
+     *   ★★ 这一条不能省（我第一版省掉了，于是作者报"切换回来它就没出现"）：
+     *   "控件没了"是**唯一没有信号**的隐藏理由 —— 被压住 / 最小化 / 拖动都会让上面
+     *   那个键变，唯独"窗口内部的界面变了"什么信号都没有，只能靠定期回看。
+     *
+     * 两种情况都**还要**"刚刚没看过"（[`attempt_is_fresh`]）才真的去看，
+     * 免得一跳一次地重扫控件树。
+     */
+    let card_open = app.get_webview_window(GUIDE_LABEL).is_some();
+    let must_look = (card_open || target_lost()) && !attempt_is_fresh();
+    if !changed(z, st) && !must_look {
         return None;
     }
 
@@ -269,6 +289,9 @@ fn decide(app: &AppHandle) -> Option<Action> {
          * `AXWindowDeminiaturized` / `AXFocusedWindowChanged`。真正该卸的是
          * **卡片被关掉**那两条路（`guide_close` 与切片器退了 ⇒ `Gone`）。
          */
+        /* 收起来是因为"看不见它"（被压住 / 最小化 / 退了）—— 这类理由**都有信号**，
+        键一变就会再来一次，所以这里把"控件找不到"那个标记清掉，省下定期回看 */
+        mark_target_lost(false);
         return Some(Action::Hide {
             gone: visibility == SlicerVisibility::Gone,
         });
@@ -279,9 +302,14 @@ fn decide(app: &AppHandle) -> Option<Action> {
          * 在最前、但指不了（界面换了 / 还没读到）—— **不摆一个指错地方的箭头**。
          * ★ 这里同样**不卸监听**：读不到多半是切片器正在启动 / 换版，
          * 它自己会再发通知过来，留着才有下一次机会。
+         * ★★ 但要**记下"控件没了"**（[`TARGET_LOST`]）：这是唯一没有信号的隐藏理由，
+         * 不记就再也没人把它接回来（作者："切换回来，它就没出现"）。
          */
+        mark_target_lost(true);
         return Some(Action::Hide { gone: false });
     };
+    /* 又指得上了 —— 标记清掉 */
+    mark_target_lost(false);
 
     /* 通知没挂满 ⇒ 趁它现在看得见，重挂一次（幂等，且带节流） */
     ensure_watcher(app);
@@ -294,27 +322,45 @@ fn decide(app: &AppHandle) -> Option<Action> {
     }
 }
 
-/// 上一次定位成功时那一对：**（切片器窗口矩形，目标控件矩形）**。
+/// 上一次定位成功时那一对：**（切片器窗口矩形，目标控件矩形，读到的时刻）**。
 ///
 /// ★★ 拿它**直接算**拖动后的新坐标（见 [`target_rect`]）—— 这就是"再省一点"的那一刀。
-static LAST_LOCATE: std::sync::Mutex<Option<(ax::RectDto, ax::RectDto)>> =
+static LAST_LOCATE: std::sync::Mutex<Option<(ax::RectDto, ax::RectDto, std::time::Instant)>> =
     std::sync::Mutex::new(None);
+
+/// 缓存那一对定位结果的**寿命**。
+///
+/// ★★★ 为什么必须有它（2026-10-15 作者报的那一串现象）：
+///
+/// **卡片指的那个控件会在"窗口一动不动"的情况下消失** —— 用户把切片器切到「设备」页，
+/// 窗口没挪、没缩、焦点没变、也没最小化 ⇒ **我们一条信号都收不到**。
+/// 而"窗口只平移就免 AX"那条缓存要是无限期有效，就**连"重新看一眼"的机会都没有**，
+/// 于是卡片一直指着空气。
+///
+/// 作者观察到的正是这个的指纹：**改一下窗口尺寸就不显示了**（尺寸变了 ⇒ 绕开缓存 ⇒
+/// 真读一次 AX ⇒ 发现控件不在 ⇒ 收起来），**尺寸改回去就又显示**（又命中缓存 ⇒ 老坐标）。
+///
+/// ⇒ 缓存只在这段时间内有效：拖动那几跳照样免 AX（**省**），过期就真读一次（**准**）。
+/// 作者："那个卡片多等一会再跟上也没关系" —— 所以这里可以放心给到 2 秒。
+const LOCATE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 目标控件这会儿在哪。
 ///
-/// ★★★ **窗口只平移时，一个 AX 调用都不发**（作者："怎么样节省就怎么样做吧，
+/// ★★★ **窗口只在平移时，一个 AX 调用都不发**（作者："怎么样节省就怎么样做吧，
 /// 再节约一点都可以"）：控件在切片器窗口里的**相对位置是固定的**，窗口挪多少它就
-/// 跟着挪多少 —— 所以"上次那一对"加上窗口的位移就是新位置，纯算术。
+/// 跟着挪多少 —— 所以"上次那一对"加上窗口位移就是新位置，纯算术。
 ///
 /// ★ 什么时候才去读 AX（并把这一对重新记下）：
 /// - 还没有缓存（这一趟第一次）；
+/// - 缓存**过期**了（[`LOCATE_TTL`]）—— 这一条是"切页了"唯一的发现途径；
 /// - **窗口尺寸变了**（拉大缩小 / 换布局）：相对位置可能跟着变，不能外推。
 ///
 /// ★ 这条依赖"相对位置稳定"，而它正是 [`ax::locate_bed_type`] 挑控件的判据
 /// （按**相对窗口**的 y 落区间挑），所以两边是同一个假设，不会打架。
 fn target_rect(win_now: Option<ax::RectDto>) -> Option<ax::RectDto> {
-    if let (Some(now), Some((old_win, old_target))) = (win_now, *lock_locate()) {
-        if now.width == old_win.width && now.height == old_win.height {
+    if let (Some(now), Some((old_win, old_target, at))) = (win_now, *lock_locate()) {
+        let same_size = now.width == old_win.width && now.height == old_win.height;
+        if same_size && at.elapsed() < LOCATE_TTL {
             return Some(ax::RectDto {
                 x: old_target.x + (now.x - old_win.x),
                 y: old_target.y + (now.y - old_win.y),
@@ -325,18 +371,87 @@ fn target_rect(win_now: Option<ax::RectDto>) -> Option<ax::RectDto> {
     }
 
     /* 老实读一次 AX，并把这一对记下来（下次平移就能免了） */
+    stamp_attempt();
     let found = ax::locate_bed_type();
     let target = found.target.filter(|_| found.ready)?;
     if let Some(win) = win_now.or(found.window) {
         if let Ok(mut g) = LAST_LOCATE.lock() {
-            *g = Some((win, target));
+            *g = Some((win, target, std::time::Instant::now()));
         }
     }
     Some(target)
 }
 
+/// 把**刚读到**的那一对记进缓存（`guide_show` 那次定位也顺手种上，
+/// 于是紧接着那一跳就能免 AX）。
+fn seed_locate(found: &ax::GuideTargetDto) {
+    let (Some(win), Some(target)) = (found.window, found.target) else {
+        return;
+    };
+    if let Ok(mut g) = LAST_LOCATE.lock() {
+        *g = Some((win, target, std::time::Instant::now()));
+    }
+    stamp_attempt();
+}
+
+/// **指的那个控件找不到了**（用户切到别的页 / 切片器界面换过）。
+///
+/// ★★★ 为什么单独记这一个状态（2026-10-15 作者："切换到别的页面，它确实消失了；
+/// 但我**切换回来，它就没出现**"）：
+///
+/// 隐藏卡片有好几个理由，**只有这一个是"没有信号"的** ——
+///
+/// | 为什么收起来 | 怎么知道它该回来了 |
+/// | --- | --- |
+/// | 被别的 App 盖住 | 层序变了 ⇒ **键变** ⇒ 立刻重算 |
+/// | 最小化 / 隐藏 | 窗口从屏上消失 ⇒ **键变** ⇒ 同上 |
+/// | 切片器退了 | pid 没了 ⇒ **键变** ⇒ 同上 |
+/// | ★ **控件没了（切页）** | **什么都不会变** —— 窗口没挪没缩、焦点没变 |
+///
+/// 所以这一档必须留个标记，靠 [`decide`] 里那条"定期去看一眼"把它接回来；
+/// 不记就永远接不回来（第一版把它连同定期校验一起省掉了，就是这个后果）。
+static TARGET_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 记下 / 清掉"控件找不到"。
+fn mark_target_lost(lost: bool) {
+    TARGET_LOST.store(lost, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 上一条见 [`TARGET_LOST`]。
+fn target_lost() -> bool {
+    TARGET_LOST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 上一次**尝试**定位是哪一刻（**成没成都算**）。
+///
+/// ★★ 为什么要跟"读到了"分开记：控件找不到时（用户切到别的页）我们会把卡片收掉，
+/// 而那个状态下缓存**永远是过期的**（只有成功才写）⇒ 闸门每 700ms 放一次行、
+/// 每 700ms 重扫一遍控件树 —— 那正是"频繁的轮询"。
+/// 记下"刚才试过了"，**失败也等一个 [`LOCATE_TTL`] 再试**。
+static LAST_ATTEMPT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// 记下"刚刚尝试过定位"。
+fn stamp_attempt() {
+    if let Ok(mut g) = LAST_ATTEMPT.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+}
+
+/// 刚刚看过一眼了吗（**成没成都算**）—— 见 [`LAST_ATTEMPT`]。
+///
+/// ★ 它是闸门的一部分：见 [`decide`] —— 还没看过就**不许**早退，否则"切页了"
+/// 永远等不到那次真实读取。
+fn attempt_is_fresh() -> bool {
+    let fresh = |g: &Option<std::time::Instant>| g.is_some_and(|t| t.elapsed() < LOCATE_TTL);
+    match LAST_ATTEMPT.lock() {
+        Ok(g) => fresh(&g),
+        Err(e) => fresh(&e.into_inner()),
+    }
+}
+
 /// 读缓存（锁坏了就当作没有 —— 那只是多读一次 AX，不影响对不对）。
-fn lock_locate() -> std::sync::MutexGuard<'static, Option<(ax::RectDto, ax::RectDto)>> {
+fn lock_locate(
+) -> std::sync::MutexGuard<'static, Option<(ax::RectDto, ax::RectDto, std::time::Instant)>> {
     match LAST_LOCATE.lock() {
         Ok(g) => g,
         Err(e) => e.into_inner(),
